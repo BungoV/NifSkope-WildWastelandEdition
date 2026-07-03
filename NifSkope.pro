@@ -209,6 +209,7 @@ HEADERS += \
 	src/ui/widgets/nifeditors.h \
 	src/ui/widgets/nifview.h \
 	src/ui/widgets/refrbrowser.h \
+	src/ui/widgets/timeline.h \
 	src/ui/widgets/uvedit.h \
 	src/ui/widgets/valueedit.h \
 	src/ui/widgets/xmlcheck.h \
@@ -315,6 +316,7 @@ SOURCES += \
 	src/ui/widgets/nifeditors.cpp \
 	src/ui/widgets/nifview.cpp \
 	src/ui/widgets/refrbrowser.cpp \
+	src/ui/widgets/timeline.cpp \
 	src/ui/widgets/uvedit.cpp \
 	src/ui/widgets/valueedit.cpp \
 	src/ui/widgets/xmlcheck.cpp \

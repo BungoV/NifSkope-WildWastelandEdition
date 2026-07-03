@@ -67,6 +67,7 @@ class NifTreeView;
 class ReferenceBrowser;
 class SettingsDialog;
 class SpellBook;
+class TimelineWidget;
 class BA2File;
 class BSAModel;
 class BSAProxyModel;
@@ -380,6 +381,9 @@ private:
 	//! Transform inspect view
 	InspectView * inspect;
 
+	//! Animation timeline
+	TimelineWidget * timeline = nullptr;
+
 	//! The main window
 	GLView * ogl;
 	QWidget * graphicsView;
@@ -399,6 +403,7 @@ private:
 	QDockWidget * dRefr;
 	QDockWidget * dInsp;
 	QDockWidget * dBrowser;
+	QDockWidget * dTimeline;
 
 	QToolBar * tool;
 

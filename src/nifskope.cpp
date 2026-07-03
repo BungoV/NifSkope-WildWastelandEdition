@@ -45,6 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/nifview.h"
 #include "ui/widgets/refrbrowser.h"
 #include "ui/widgets/inspect.h"
+#include "ui/widgets/timeline.h"
 #include "ui/about_dialog.h"
 #include "ui/settingsdialog.h"
 #include "qt5compat.hpp"
@@ -478,6 +479,9 @@ void NifSkope::select( const QModelIndex & index )
 	if ( sender() != ogl ) {
 		ogl->setCurrentIndex( idx );
 	}
+
+	if ( timeline && sender() != timeline )
+		timeline->setCurrentIndex( idx );
 
 	if ( sender() == ogl ) {
 		if ( dList->isVisible() )

@@ -49,6 +49,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/nifview.h"
 #include "ui/widgets/refrbrowser.h"
 #include "ui/widgets/inspect.h"
+#include "ui/widgets/timeline.h"
 #include "ui/widgets/xmlcheck.h"
 #include "ui/about_dialog.h"
 #include "ui/settingsdialog.h"
@@ -379,6 +380,19 @@ void NifSkope::initDockWidgets()
 	dKfm = ui->KfmDock;
 	dBrowser = ui->BrowserDock;
 
+	// Animation timeline
+	dTimeline = new QDockWidget( tr( "Timeline" ), this );
+	dTimeline->setObjectName( "TimelineDock" );
+	timeline = new TimelineWidget( dTimeline );
+	timeline->setNif( nif );
+	dTimeline->setWidget( timeline );
+	addDockWidget( Qt::BottomDockWidgetArea, dTimeline );
+
+	connect( timeline, &TimelineWidget::indexSelected, this, &NifSkope::select );
+	connect( timeline, &TimelineWidget::timeChanged, ogl, &GLView::setSceneTime );
+	connect( ogl, &GLView::sceneTimeChanged, timeline, &TimelineWidget::setTime );
+	connect( this, &NifSkope::completeLoading, timeline, &TimelineWidget::refreshLater );
+
 	// Tabify List and Header
 	tabifyDockWidget( dList, dHeader );
 	tabifyDockWidget( dHeader, dBrowser );
@@ -402,6 +416,7 @@ void NifSkope::initDockWidgets()
 	ui->menuShow->addAction(dInsp->toggleViewAction());
 	ui->menuShow->addAction(dKfm->toggleViewAction());
 	ui->menuShow->addAction(dRefr->toggleViewAction());
+	ui->menuShow->addAction(dTimeline->toggleViewAction());
 
 	ui->tView->addAction(dList->toggleViewAction());
 	ui->tView->addAction(dTree->toggleViewAction());
@@ -410,6 +425,7 @@ void NifSkope::initDockWidgets()
 	ui->tView->addAction(dInsp->toggleViewAction());
 	ui->tView->addAction(dKfm->toggleViewAction());
 	ui->tView->addAction(dRefr->toggleViewAction());
+	ui->tView->addAction(dTimeline->toggleViewAction());
 
 	// Set Inspect widget
 	dInsp->setWidget( inspect );
