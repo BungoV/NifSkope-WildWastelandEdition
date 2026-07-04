@@ -411,6 +411,15 @@ Node * Node::findChild( const QString & str ) const
 
 bool Node::isHidden() const
 {
+	// Solo preview mode: only the solo node and its subtree are visible,
+	// regardless of hide flags, so obstructing geometry gets out of the way
+	if ( scene->soloNode >= 0 ) {
+		const Node * n = this;
+		while ( n && n->nodeId != scene->soloNode )
+			n = n->parent;
+		return !n;
+	}
+
 	if ( scene->hasOption(Scene::ShowHidden) )
 		return false;
 	if ( flags.node.hidden )

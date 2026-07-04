@@ -210,6 +210,7 @@ HEADERS += \
 	src/ui/widgets/nifview.h \
 	src/ui/widgets/refrbrowser.h \
 	src/ui/widgets/timeline.h \
+	src/ui/widgets/timeline_p.h \
 	src/ui/widgets/uvedit.h \
 	src/ui/widgets/valueedit.h \
 	src/ui/widgets/xmlcheck.h \
@@ -224,6 +225,7 @@ HEADERS += \
 	src/glview.h \
 	src/message.h \
 	src/nifskope.h \
+	src/nifsnapshot.h \
 	src/qt5compat.hpp \
 	src/spellbook.h \
 	src/version.h \
@@ -276,6 +278,7 @@ SOURCES += \
 	src/model/nifproxymodel.cpp \
 	src/model/undocommands.cpp \
 	src/spells/animation.cpp \
+	src/spells/animationsetup.cpp \
 	src/spells/blocks.cpp \
 	src/spells/bounds.cpp \
 	src/spells/color.cpp \
@@ -317,6 +320,8 @@ SOURCES += \
 	src/ui/widgets/nifview.cpp \
 	src/ui/widgets/refrbrowser.cpp \
 	src/ui/widgets/timeline.cpp \
+	src/ui/widgets/timelineviews.cpp \
+	src/ui/widgets/timelineedit.cpp \
 	src/ui/widgets/uvedit.cpp \
 	src/ui/widgets/valueedit.cpp \
 	src/ui/widgets/xmlcheck.cpp \

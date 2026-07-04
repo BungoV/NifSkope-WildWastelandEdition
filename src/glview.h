@@ -150,6 +150,8 @@ public slots:
 	void setCurrentIndex( const QModelIndex & );
 	void setSceneTime( float );
 	void setSceneSequence( const QString & );
+	//! Render only the currently selected node's subtree (follows the selection)
+	void setSoloMode( bool );
 	void saveUserView();
 	void loadUserView();
 	void setBrightness( int );
@@ -219,6 +221,9 @@ private:
 	DebugMode debugMode;
 	bool perspectiveMode;
 	bool contextMenuShiftModifier;
+	bool soloMode = false;
+
+	void updateSoloNode();
 
 	AnimationState animState;
 

@@ -1,0 +1,71 @@
+NifSkope Timeline - keyboard and mouse reference
+=================================================
+(The timeline dock must have focus for keyboard shortcuts; click it first.)
+
+PLAYBACK
+  Space               Play / pause (animation must be enabled in the toolbar)
+  Home                Frame all (zoom to fit every key)
+  F  /  Numpad .      Frame selected keys (or current lane)
+  End                 Jump playhead to the end
+  ,  /  .             Step playhead to previous / next key of the selected lane
+  Ctrl+,  /  Ctrl+.   Jump to previous / next text key marker
+
+VIEW
+  Ctrl+Mouse wheel    Zoom the time axis around the cursor (lanes pane)
+  Mouse wheel         Scroll lanes (lanes pane) / zoom (graph pane)
+  Drag the label/time divider   Resize the name column
+  Toolbar [sec]/[fps] Toggle seconds/frames ruler (right-click it to pick fps)
+  Toolbar magnet      Toggle snapping; the two spinboxes are time and value steps
+
+SELECTION
+  Click key           Select key (shows it in Block Details and the inspector)
+  Shift+Click key     Add/remove key from the selection
+  Drag on empty lane area        Rubber-band select keys across lanes
+  Shift+Drag in graph            Rubber-band select in the graph
+  Click summary row   Select all keys at that time column across lanes
+  Escape              Clear key selection
+
+EDITING
+  Drag key            Move in time (lanes) / time + value (graph); snapping applies
+  Drag tangent handle Adjust quadratic tangents of the primary selected key (graph)
+  Double-click lane/graph        Insert a key at that time (value sampled from curve)
+  I                   Insert key at the playhead on the selected lane
+  Delete / Backspace  Delete selected keys
+  Shift+D             Duplicate selected keys (offset by one snap step)
+  Ctrl+C / Ctrl+V     Copy selected keys / paste at the playhead
+  S                   Scale selected key times around the playhead (prompts for factor)
+  Arrow Left/Right    Nudge selected keys in time by one snap step
+  Arrow Up/Down       Nudge selected key values by one value step (scalar channels)
+  Ctrl+Z / Ctrl+Y     Undo / redo (all timeline edits are undoable)
+
+RULER
+  Drag                Scrub the playhead
+  Shift+Drag          Set the preview/loop range (playback loops inside it)
+  Right-click         Add text key marker here / clear preview range
+
+LANES
+  Click lane          Select lane + its block in the tree; curves appear in the graph
+  Click speaker icon  Mute/unmute (toggles the controller's Active flag)
+  Right-click lane    Context menu: insert/delete/clear keys, easing presets,
+                      interpolation type, channel copy/paste, CSV export/import,
+                      lane display mode (diamonds/sparkline/strip), lock, mute
+  Key marker shapes   Diamond = linear, Circle = quadratic, Square = constant
+
+VIEWPORT
+  Alt+Q               Solo mode: render only the selected node's subtree
+                      (also in Render menu; follows the selection while enabled)
+
+BLOCK LIST (right-click a node/shader/property)
+  Animation > Setup Controllers...      Attach controllers, wire into a sequence,
+                                        palette + multi-target handled automatically
+  Animation > Remove From Animation...  Delete a node's animation wiring selectively
+  Animation > Duplicate Sequence...     Deep-copy a NiControllerSequence
+  Animation > Scale Sequence Times...   Stretch/compress a whole sequence
+  Animation > Bake B-Spline To Keys...  Convert a B-spline interpolator to keyframes
+
+TIMELINE TOOLBAR
+  Checkmark button    Animation lint: finds broken node names, missing palette
+                      entries, out-of-range keys, missing start/end text keys etc.
+                      Double-click a finding to jump to it; name mismatches offer a fix.
+  Target button       Filter lanes to the selected geometry node
+  Sidebar button      Show/hide the inspector panel

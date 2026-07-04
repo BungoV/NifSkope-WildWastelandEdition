@@ -483,6 +483,16 @@ void NifSkope::select( const QModelIndex & index )
 	if ( timeline && sender() != timeline )
 		timeline->setCurrentIndex( idx );
 
+	// Selecting a key on the timeline unfolds it in Block Details
+	if ( sender() == timeline && idx.isValid() && idx.parent().isValid() ) {
+		QModelIndex p = idx.parent();
+		while ( p.isValid() ) {
+			tree->expand( p );
+			p = p.parent();
+		}
+		tree->scrollTo( idx );
+	}
+
 	if ( sender() == ogl ) {
 		if ( dList->isVisible() )
 			dList->raise();

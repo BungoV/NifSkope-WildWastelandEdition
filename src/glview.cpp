@@ -1208,7 +1208,39 @@ void GLView::setCurrentIndex( const QModelIndex & index )
 	scene->currentBlock = model->getBlockIndex( index );
 	scene->currentIndex = index.sibling( index.row(), 0 );
 
+	if ( soloMode )
+		updateSoloNode();
+
 	update();
+}
+
+void GLView::updateSoloNode()
+{
+	int solo = -1;
+
+	if ( soloMode && model && scene->currentBlock.isValid() ) {
+		// walk up to the nearest NiAVObject so properties/shaders resolve to their owner
+		int b = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+		while ( b >= 0 && !model->blockInherits( model->getBlockIndex( b ), "NiAVObject" ) )
+			b = model->getParent( b );
+		solo = b;
+	}
+
+	if ( scene->soloNode != solo ) {
+		scene->soloNode = solo;
+		update();
+	}
+}
+
+void GLView::setSoloMode( bool enable )
+{
+	soloMode = enable;
+	updateSoloNode();
+
+	if ( !enable && scene->soloNode >= 0 ) {
+		scene->soloNode = -1;
+		update();
+	}
 }
 
 QModelIndex parent( QModelIndex ix, QModelIndex xi )

@@ -393,6 +393,24 @@ void NifSkope::initDockWidgets()
 	connect( ogl, &GLView::sceneTimeChanged, timeline, &TimelineWidget::setTime );
 	connect( this, &NifSkope::completeLoading, timeline, &TimelineWidget::refreshLater );
 
+	// Two way sequence sync with the animation toolbar / scene
+	connect( timeline, &TimelineWidget::sequenceActivated, ogl, &GLView::setSceneSequence );
+	connect( ogl, &GLView::sequenceChanged, timeline, &TimelineWidget::setSequenceByName );
+
+	connect( timeline, &TimelineWidget::playPauseRequested, [this]() {
+		if ( ui->aAnimate->isChecked() )
+			ui->aAnimPlay->trigger();
+	} );
+
+	// Solo / preview-only rendering of the selected node
+	QAction * aSolo = new QAction( tr( "Solo Selected" ), this );
+	aSolo->setCheckable( true );
+	aSolo->setShortcut( QKeySequence( Qt::ALT | Qt::Key_Q ) );
+	aSolo->setToolTip( tr( "Render only the selected node's subtree, hiding all other geometry (Alt+Q)" ) );
+	connect( aSolo, &QAction::toggled, ogl, &GLView::setSoloMode );
+	ui->tRender->addAction( aSolo );
+	ui->mRender->addAction( aSolo );
+
 	// Tabify List and Header
 	tabifyDockWidget( dList, dHeader );
 	tabifyDockWidget( dHeader, dBrowser );

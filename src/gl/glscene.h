@@ -235,6 +235,9 @@ public:
 	QStringList animGroups;
 	QMap<QString, QMap<QString, float> > animTags;
 
+	//! Block number of the node to render exclusively (-1 = off); see GLView::setSoloMode
+	int soloNode = -1;
+
 	TexCache * textures;
 
 	QPersistentModelIndex currentBlock;
