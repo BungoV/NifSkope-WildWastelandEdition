@@ -779,6 +779,392 @@ void ParticleController::colorParticle( Particle & p, Color4 & color )
 }
 
 
+/*
+ *  PSysSimController - preview simulation of modern NiPSys particle systems
+ */
+
+static Color4 tlLerpColor( const Color4 & a, const Color4 & b, float t )
+{
+	return Color4( a[0] + ( b[0] - a[0] ) * t, a[1] + ( b[1] - a[1] ) * t,
+	               a[2] + ( b[2] - a[2] ) * t, a[3] + ( b[3] - a[3] ) * t );
+}
+
+PSysSimController::PSysSimController( Particles * particles, const QModelIndex & index )
+	: Controller( index ), target( particles )
+{
+}
+
+bool PSysSimController::update( const NifModel * nif, const QModelIndex & index )
+{
+	if ( !target )
+		return false;
+
+	if ( !( Controller::update( nif, index ) || ( index.isValid() && iExtras.contains( index ) ) ) )
+		return false;
+
+	iExtras.clear();
+	emitters.clear();
+	hasGravity = false;
+	gravityStrength = 0;
+	dragPct = 0;
+	hasColorMod = false;
+	scaleKeys.clear();
+
+	QModelIndex iPSys = nif->getBlockIndex( nif->getLink( iBlock, "Target" ) );
+	if ( !iPSys.isValid() )
+		return true;
+	iExtras.append( iPSys );
+
+	maxParticles = nif->get<int>( iPSys, "Num Vertices" );
+	if ( maxParticles < 1 )
+		maxParticles = 512;
+	maxParticles = std::min( maxParticles, 4096 );
+
+	// gather BSPositionData spawn points from a block's extra data list
+	auto posDataPoints = [nif, this]( const QModelIndex & iObj, const Transform & wt ) {
+		QVector<Vector3> pts;
+		QModelIndex iExtraList = nif->getIndex( iObj, "Extra Data List" );
+		for ( int r = 0; r < nif->rowCount( iExtraList ); r++ ) {
+			QModelIndex iED = nif->getBlockIndex( nif->getLink( nif->getIndex( iExtraList, r ) ) );
+			if ( !nif->blockInherits( iED, "BSPositionData" ) )
+				continue;
+			iExtras.append( iED );
+			QVector<float> raw = nif->getArray<float>( nif->getIndex( iED, "Data" ) );
+			for ( int i = 0; i + 2 < raw.size(); i += 3 )
+				pts.append( wt * Vector3( raw[i], raw[i + 1], raw[i + 2] ) );
+			break;
+		}
+		return pts;
+	};
+
+	// modifiers
+	QModelIndex iMods = nif->getIndex( iPSys, "Modifiers" );
+	for ( int r = 0; r < nif->rowCount( iMods ); r++ ) {
+		QModelIndex iMod = nif->getBlockIndex( nif->getLink( nif->getIndex( iMods, r ) ) );
+		if ( !iMod.isValid() )
+			continue;
+		iExtras.append( iMod );
+		QString mtype = nif->itemName( iMod );
+
+		if ( nif->blockInherits( iMod, "NiPSysEmitter" ) ) {
+			Emitter e;
+			e.iBlock = iMod;
+			e.name = nif->resolveString( iMod, "Name" );
+			e.speed = nif->get<float>( iMod, "Speed" );
+			e.speedVar = nif->get<float>( iMod, "Speed Variation" );
+			e.declination = nif->get<float>( iMod, "Declination" );
+			e.declinationVar = nif->get<float>( iMod, "Declination Variation" );
+			e.planar = nif->get<float>( iMod, "Planar Angle" );
+			e.planarVar = nif->get<float>( iMod, "Planar Angle Variation" );
+			e.color = nif->get<Color4>( iMod, "Initial Color" );
+			e.radius = nif->get<float>( iMod, "Initial Radius" );
+			e.radiusVar = nif->get<float>( iMod, "Radius Variation" );
+			e.lifeSpan = nif->get<float>( iMod, "Life Span" );
+			e.lifeSpanVar = nif->get<float>( iMod, "Life Span Variation" );
+
+			QModelIndex iObj = nif->getBlockIndex( nif->getLink( iMod, "Emitter Object" ) );
+			if ( iObj.isValid() )
+				e.emitNode = target->scene->getNode( nif, iObj );
+
+			if ( mtype == QLatin1String( "NiPSysBoxEmitter" ) ) {
+				e.shape = 1;
+				e.dims[0] = nif->get<float>( iMod, "Width" );
+				e.dims[1] = nif->get<float>( iMod, "Height" );
+				e.dims[2] = nif->get<float>( iMod, "Depth" );
+			} else if ( mtype == QLatin1String( "NiPSysCylinderEmitter" ) ) {
+				e.shape = 2;
+				e.dims[0] = nif->get<float>( iMod, "Radius" );
+				e.dims[1] = nif->get<float>( iMod, "Height" );
+			} else if ( mtype == QLatin1String( "NiPSysSphereEmitter" ) ) {
+				e.shape = 3;
+				e.dims[0] = nif->get<float>( iMod, "Radius" );
+			} else if ( mtype == QLatin1String( "BSPSysArrayEmitter" ) ) {
+				e.shape = 4;
+				// spawn points come from BSPositionData on the emitter object
+				// (falling back to the particle system itself)
+				if ( iObj.isValid() ) {
+					Node * n = target->scene->getNode( nif, iObj );
+					e.points = posDataPoints( iObj, n ? n->worldTrans() : Transform() );
+				}
+				if ( e.points.isEmpty() )
+					e.points = posDataPoints( iPSys, target->worldTrans() );
+			} else if ( mtype == QLatin1String( "NiPSysMeshEmitter" ) ) {
+				e.shape = 4;
+				QModelIndex iMeshes = nif->getIndex( iMod, "Emitter Meshes" );
+				for ( int m = 0; m < nif->rowCount( iMeshes ); m++ ) {
+					QModelIndex iMesh = nif->getBlockIndex( nif->getLink( nif->getIndex( iMeshes, m ) ) );
+					if ( !iMesh.isValid() )
+						continue;
+					Node * n = target->scene->getNode( nif, iMesh );
+					Transform wt = n ? n->worldTrans() : Transform();
+					if ( !e.emitNode )
+						e.emitNode = n;
+					QModelIndex iVD = nif->getIndex( iMesh, "Vertex Data" );
+					if ( iVD.isValid() ) {
+						for ( int v = 0; v < nif->rowCount( iVD ) && e.points.size() < 4096; v++ )
+							e.points.append( wt * nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) );
+					} else {
+						QModelIndex iVerts = nif->getIndex(
+							nif->getBlockIndex( nif->getLink( iMesh, "Data" ) ), "Vertices" );
+						QVector<Vector3> vv = nif->getArray<Vector3>( iVerts );
+						for ( const Vector3 & v : vv ) {
+							if ( e.points.size() >= 4096 )
+								break;
+							e.points.append( wt * v );
+						}
+					}
+				}
+			}
+
+			emitters.append( e );
+		} else if ( mtype == QLatin1String( "NiPSysGravityModifier" ) ) {
+			hasGravity = true;
+			gravityDir = nif->get<Vector3>( iMod, "Gravity Axis" );
+			gravityDir.normalize();
+			gravityStrength = nif->get<float>( iMod, "Strength" );
+			QModelIndex iGObj = nif->getBlockIndex( nif->getLink( iMod, "Gravity Object" ) );
+			if ( iGObj.isValid() ) {
+				Node * n = target->scene->getNode( nif, iGObj );
+				if ( n )
+					gravityDir = n->worldTrans().rotation * gravityDir;
+			}
+		} else if ( mtype == QLatin1String( "NiPSysDragModifier" ) ) {
+			dragPct = nif->get<float>( iMod, "Percentage" );
+		} else if ( mtype == QLatin1String( "BSPSysSimpleColorModifier" ) ) {
+			hasColorMod = true;
+			fadeIn = nif->get<float>( iMod, "Fade In Percent" );
+			fadeOut = nif->get<float>( iMod, "Fade Out Percent" );
+			c1End = nif->get<float>( iMod, "Color 1 End Percent" );
+			c2Start = nif->get<float>( iMod, "Color 1 Start Percent" );
+			c2End = nif->get<float>( iMod, "Color 2 End Percent" );
+			c3Start = nif->get<float>( iMod, "Color 2 Start Percent" );
+			QModelIndex iCols = nif->getIndex( iMod, "Colors" );
+			for ( int c = 0; c < 3 && c < nif->rowCount( iCols ); c++ )
+				modColors[c] = nif->get<Color4>( nif->getIndex( iCols, c ) );
+		} else if ( mtype == QLatin1String( "BSPSysScaleModifier" ) ) {
+			scaleKeys = nif->getArray<float>( nif->getIndex( iMod, "Scales" ) );
+		}
+	}
+
+	// emitter controllers on the particle system's controller chain
+	QModelIndex iCtlr = nif->getBlockIndex( nif->getLink( iPSys, "Controller" ) );
+	int guard = 0;
+	while ( iCtlr.isValid() && guard++ < 64 ) {
+		iExtras.append( iCtlr );
+		if ( nif->itemName( iCtlr ) == QLatin1String( "NiPSysEmitterCtlr" ) ) {
+			QString modName = nif->resolveString( iCtlr, "Modifier Name" );
+			for ( Emitter & e : emitters ) {
+				if ( e.name != modName )
+					continue;
+				QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iCtlr, "Interpolator" ) );
+				if ( iInterp.isValid() ) {
+					iExtras.append( iInterp );
+					e.birthRate = nif->get<float>( iInterp, "Value" );
+					QModelIndex iFD = nif->getBlockIndex( nif->getLink( iInterp, "Data" ) );
+					if ( iFD.isValid() ) {
+						iExtras.append( iFD );
+						e.iBirthKeys = nif->getIndex( iFD, "Data" );
+					}
+				}
+				QModelIndex iVis = nif->getBlockIndex( nif->getLink( iCtlr, "Visibility Interpolator" ) );
+				if ( iVis.isValid() ) {
+					iExtras.append( iVis );
+					QModelIndex iBD = nif->getBlockIndex( nif->getLink( iVis, "Data" ) );
+					if ( iBD.isValid() ) {
+						iExtras.append( iBD );
+						e.iVisKeys = nif->getIndex( iBD, "Data" );
+					}
+				}
+			}
+		}
+		iCtlr = nif->getBlockIndex( nif->getLink( iCtlr, "Next Controller" ) );
+	}
+
+	parts.clear();
+	lastTime = -1.0e30f;
+
+	return true;
+}
+
+Color4 PSysSimController::particleColor( const Emitter & e, float u ) const
+{
+	Color4 c = e.color;
+	if ( hasColorMod ) {
+		if ( u < c1End || c2Start <= c1End )
+			c = modColors[0];
+		else if ( u < c2Start )
+			c = tlLerpColor( modColors[0], modColors[1], ( u - c1End ) / ( c2Start - c1End ) );
+		else if ( u < c2End || c3Start <= c2End )
+			c = modColors[1];
+		else if ( u < c3Start )
+			c = tlLerpColor( modColors[1], modColors[2], ( u - c2End ) / ( c3Start - c2End ) );
+		else
+			c = modColors[2];
+	}
+	float a = c[3];
+	if ( fadeIn > 0.0f && u < fadeIn )
+		a *= u / fadeIn;
+	if ( fadeOut < 1.0f && u > fadeOut )
+		a *= ( 1.0f - u ) / ( 1.0f - fadeOut );
+	return Color4( c[0], c[1], c[2], std::max( a, 0.0f ) );
+}
+
+float PSysSimController::particleScale( float u ) const
+{
+	if ( scaleKeys.size() < 2 )
+		return scaleKeys.isEmpty() ? 1.0f : scaleKeys.first();
+	float f = u * float( scaleKeys.size() - 1 );
+	int i = std::min( int( f ), int( scaleKeys.size() ) - 2 );
+	float t = f - float( i );
+	return scaleKeys[i] + ( scaleKeys[i + 1] - scaleKeys[i] ) * t;
+}
+
+void PSysSimController::emitParticle( Emitter & e )
+{
+	SimParticle p;
+
+	Vector3 local;
+	bool worldPos = false;
+	switch ( e.shape ) {
+	case 1:
+		local = Vector3( random( e.dims[0] ) - e.dims[0] * 0.5f,
+		                 random( e.dims[1] ) - e.dims[1] * 0.5f,
+		                 random( e.dims[2] ) - e.dims[2] * 0.5f );
+		break;
+	case 2:
+		{
+			float ang = random( 2.0f * float( M_PI ) );
+			float rr = e.dims[0] * std::sqrt( random( 1.0f ) );
+			local = Vector3( rr * std::cos( ang ), rr * std::sin( ang ), random( e.dims[1] ) - e.dims[1] * 0.5f );
+		}
+		break;
+	case 3:
+		{
+			float ang = random( 2.0f * float( M_PI ) );
+			float z = random( 2.0f ) - 1.0f;
+			float rxy = std::sqrt( std::max( 1.0f - z * z, 0.0f ) );
+			float rr = e.dims[0] * std::cbrt( std::max( random( 1.0f ), 1.0e-6f ) );
+			local = Vector3( rxy * std::cos( ang ), rxy * std::sin( ang ), z ) * rr;
+		}
+		break;
+	case 4:
+		if ( !e.points.isEmpty() ) {
+			local = e.points.at( std::rand() % e.points.size() );
+			worldPos = true;	// stored pre-transformed to world space
+		}
+		break;
+	default:
+		break;
+	}
+
+	Transform pw = target->worldTrans();
+	float psc = ( pw.scale != 0.0f ) ? pw.scale : 1.0f;
+	auto worldToPSys = [&pw, psc]( const Vector3 & w ) {
+		return pw.rotation.inverted() * ( ( w - pw.translation ) * ( 1.0f / psc ) );
+	};
+
+	if ( worldPos ) {
+		p.pos = worldToPSys( local );
+	} else if ( e.emitNode ) {
+		p.pos = worldToPSys( e.emitNode->worldTrans() * local );
+	} else {
+		p.pos = local;
+	}
+
+	// direction from declination (from +Z) and planar angle
+	float di = e.declination + random( e.declinationVar ) - e.declinationVar * 0.5f;
+	float pa = e.planar + random( e.planarVar ) - e.planarVar * 0.5f;
+	Vector3 dir( std::sin( di ) * std::cos( pa ), std::sin( di ) * std::sin( pa ), std::cos( di ) );
+	if ( e.emitNode )
+		dir = pw.rotation.inverted() * ( e.emitNode->worldTrans().rotation * dir );
+	p.vel = dir * ( e.speed + random( e.speedVar ) );
+
+	p.age = 0;
+	p.lifespan = std::max( e.lifeSpan + random( e.lifeSpanVar ), 0.05f );
+	p.radius = std::max( e.radius + random( e.radiusVar ), 0.01f );
+	p.color = particleColor( e, 0.0f );
+
+	parts.append( p );
+}
+
+void PSysSimController::updateTime( float time )
+{
+	if ( !( target && active ) )
+		return;
+
+	float dt = time - lastTime;
+	if ( dt < 0.0f ) {
+		// scrubbed backwards or the sequence looped: restart the simulation
+		parts.clear();
+		for ( Emitter & e : emitters )
+			e.accum = 0;
+		lastTime = time;
+		return;
+	}
+	lastTime = time;
+	if ( dt <= 0.0f )
+		return;
+	dt = std::min( dt, 0.25f );
+
+	// advance
+	Transform pw = target->worldTrans();
+	Vector3 gLocal = hasGravity ? pw.rotation.inverted() * gravityDir : Vector3();
+	float dragMul = ( dragPct > 0.0f ) ? std::exp( -dragPct * 30.0f * dt ) : 1.0f;
+
+	int n = 0;
+	while ( n < parts.size() ) {
+		SimParticle & p = parts[n];
+		p.age += dt;
+		if ( p.age >= p.lifespan ) {
+			parts.remove( n );
+			continue;
+		}
+		if ( hasGravity )
+			p.vel += gLocal * ( gravityStrength * dt );
+		if ( dragPct > 0.0f )
+			p.vel *= dragMul;
+		p.pos += p.vel * dt;
+		n++;
+	}
+
+	// emit
+	for ( Emitter & e : emitters ) {
+		float rate = e.birthRate;
+		if ( e.iBirthKeys.isValid() )
+			interpolate( rate, e.iBirthKeys, time, e.birthIdx );
+		bool vis = true;
+		if ( e.iVisKeys.isValid() )
+			interpolate( vis, e.iVisKeys, time, e.visIdx );
+		if ( !vis || rate <= 0.0f )
+			continue;
+
+		e.accum += rate * dt;
+		int num = int( e.accum );
+		if ( num > 0 ) {
+			e.accum -= float( num );
+			while ( num-- > 0 && parts.size() < maxParticles )
+				emitParticle( e );
+		}
+	}
+
+	// hand the state to the renderer
+	int count = parts.size();
+	target->verts.resize( count );
+	target->colors.resize( count );
+	target->sizes.resize( count );
+	for ( int i = 0; i < count; i++ ) {
+		const SimParticle & p = parts.at( i );
+		float u = p.age / p.lifespan;
+		target->verts[i] = p.pos;
+		Emitter dummy;
+		target->colors[i] = hasColorMod ? particleColor( dummy, u ) : p.color;
+		target->sizes[i] = p.radius * particleScale( u );
+	}
+	target->active = count;
+	target->size = 1.0f;
+}
+
+
 // `BSNiAlphaPropertyTestRefController`
 
 AlphaController::AlphaController( AlphaProperty * prop, const QModelIndex & index )

@@ -80,6 +80,13 @@ void Particles::setController( const NifModel * nif, const QModelIndex & index )
 	if ( contrName == "NiParticleSystemController" || contrName == "NiBSPArrayController" ) {
 		Controller * ctrl = new ParticleController( this, index );
 		registerController(nif, ctrl);
+	} else if ( contrName == "NiPSysUpdateCtlr" ) {
+		// modern (FO4 era) particle systems store no vertices in the file;
+		// the update controller drives a preview-grade CPU simulation instead
+		Controller * ctrl = new PSysSimController( this, index );
+		registerController(nif, ctrl);
+	} else if ( contrName.startsWith( QLatin1String( "NiPSys" ) ) || contrName.startsWith( QLatin1String( "BSPSys" ) ) ) {
+		// emitter/modifier controllers are read by the simulator directly
 	} else {
 		Node::setController( nif, index );
 	}

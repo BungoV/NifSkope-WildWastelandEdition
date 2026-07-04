@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 class Particles : public Node
 {
 	friend class ParticleController;
+	friend class PSysSimController;
 
 public:
 	Particles( Scene * s, const QModelIndex & b ) : Node( s, b ) {}

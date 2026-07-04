@@ -245,6 +245,75 @@ public:
 };
 
 
+//! Preview-grade CPU simulator for modern NiPSys particle systems (FO4 era),
+//! attached via NiPSysUpdateCtlr. The files store no particles: everything is
+//! generated at runtime from the emitter/modifier stack.
+class PSysSimController final : public Controller
+{
+	struct SimParticle
+	{
+		Vector3 pos;
+		Vector3 vel;
+		float age = 0;
+		float lifespan = 1;
+		float radius = 1;
+		Color4 color;
+	};
+
+	struct Emitter
+	{
+		QPersistentModelIndex iBlock;
+		QString name;
+		int shape = 0;                     // 0 point, 1 box, 2 cylinder, 3 sphere, 4 points (mesh/array)
+		float dims[3] = { 0, 0, 0 };
+		QPointer<Node> emitNode;
+		QVector<Vector3> points;           // mesh / BSPositionData spawn points (emitter space)
+		float speed = 0, speedVar = 0;
+		float declination = 0, declinationVar = 0;
+		float planar = 0, planarVar = 0;
+		float lifeSpan = 1, lifeSpanVar = 0;
+		float radius = 1, radiusVar = 0;
+		Color4 color;
+		float birthRate = 0;               // constant fallback
+		QPersistentModelIndex iBirthKeys;  // NiFloatData key group of the BirthRate interpolator
+		QPersistentModelIndex iVisKeys;    // NiBoolData key group of the EmitterActive interpolator
+		float accum = 0;
+		int birthIdx = 0, visIdx = 0;
+	};
+
+	QPointer<Particles> target;
+	QVector<Emitter> emitters;
+	QVector<SimParticle> parts;
+	int maxParticles = 512;
+	float lastTime = -1.0e30f;
+
+	// modifiers
+	bool hasGravity = false;
+	Vector3 gravityDir;
+	float gravityStrength = 0;
+	float dragPct = 0;
+	bool hasColorMod = false;
+	float fadeIn = 0.1f, fadeOut = 0.9f;
+	float c1End = 0, c2Start = 0, c2End = 1, c3Start = 1;
+	Color4 modColors[3];
+	QVector<float> scaleKeys;
+
+	QList<QPersistentModelIndex> iExtras;
+
+public:
+	PSysSimController( Particles * particles, const QModelIndex & index );
+
+	bool update( const NifModel * nif, const QModelIndex & index ) override final;
+
+	void updateTime( float time ) override final;
+
+protected:
+	void emitParticle( Emitter & e );
+	Color4 particleColor( const Emitter & e, float u ) const;
+	float particleScale( float u ) const;
+};
+
+
 class AlphaProperty;
 class MaterialProperty;
 class TexturingProperty;
