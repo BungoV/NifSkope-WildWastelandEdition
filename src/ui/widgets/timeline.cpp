@@ -249,11 +249,18 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	auto leftWidget = new QWidget( this );
 	leftWidget->setLayout( leftLayout );
 
+	auto hSplit = new QSplitter( Qt::Horizontal, this );
+	hSplit->addWidget( leftWidget );
+	hSplit->addWidget( inspector );
+	hSplit->setStretchFactor( 0, 1 );
+	hSplit->setStretchFactor( 1, 0 );
+	hSplit->setCollapsible( 0, false );
+	hSplit->setSizes( { 900, TL_INSP_W } );
+
 	auto mainLayout = new QHBoxLayout( this );
 	mainLayout->setContentsMargins( 0, 0, 0, 0 );
 	mainLayout->setSpacing( 0 );
-	mainLayout->addWidget( leftWidget, 1 );
-	mainLayout->addWidget( inspector );
+	mainLayout->addWidget( hSplit );
 
 	refreshTimer = new QTimer( this );
 	refreshTimer->setSingleShot( true );

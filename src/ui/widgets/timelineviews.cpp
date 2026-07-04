@@ -1569,22 +1569,22 @@ void TimelineGraphView::wheelEvent( QWheelEvent * ev )
 
 TimelineInspector::TimelineInspector( TimelineWidget * parent ) : QWidget( parent ), tl( parent )
 {
-	setFixedWidth( TL_INSP_W );
+	setMinimumWidth( 180 );
 
 	auto outer = new QVBoxLayout( this );
 	outer->setContentsMargins( 0, 0, 0, 0 );
 
-	auto scroll = new QScrollArea( this );
-	scroll->setWidgetResizable( true );
-	scroll->setFrameShape( QFrame::NoFrame );
-	scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
-	outer->addWidget( scroll );
+	scrollArea = new QScrollArea( this );
+	scrollArea->setWidgetResizable( true );
+	scrollArea->setFrameShape( QFrame::NoFrame );
+	scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	outer->addWidget( scrollArea );
 
 	content = new QWidget;
 	mainLay = new QVBoxLayout( content );
 	mainLay->setContentsMargins( 6, 4, 6, 4 );
 	mainLay->setSpacing( 4 );
-	scroll->setWidget( content );
+	scrollArea->setWidget( content );
 }
 
 void TimelineInspector::addSection( QVBoxLayout * lay, const QString & title )
@@ -1641,13 +1641,18 @@ void TimelineInspector::rebuild()
 
 	rebuilding = true;
 
-	// wipe
-	QLayoutItem * item;
-	while ( ( item = mainLay->takeAt( 0 ) ) ) {
-		if ( item->widget() )
-			item->widget()->deleteLater();
-		delete item;
+	// Recreate the content widget wholesale: removing nested layouts item by
+	// item leaves their child widgets orphaned on the old parent, which kept
+	// painting on top of the new ones.
+	if ( content ) {
+		scrollArea->takeWidget();
+		content->deleteLater();
 	}
+	content = new QWidget;
+	mainLay = new QVBoxLayout( content );
+	mainLay->setContentsMargins( 6, 4, 6, 4 );
+	mainLay->setSpacing( 4 );
+	scrollArea->setWidget( content );
 
 	NifModel * nif = tl->nif;
 

@@ -54,6 +54,7 @@ class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QMenu;
+class QScrollArea;
 class QScrollBar;
 class QSplitter;
 class QTimer;
@@ -448,7 +449,8 @@ protected:
 	                      const QModelIndex & fieldIdx, int comp = -1 );
 
 	TimelineWidget * tl;
-	QVBoxLayout * mainLay;
+	QScrollArea * scrollArea = nullptr;
+	QVBoxLayout * mainLay = nullptr;
 	QWidget * content = nullptr;
 	bool rebuilding = false;
 };
