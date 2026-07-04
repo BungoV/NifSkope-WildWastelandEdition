@@ -281,6 +281,7 @@ SOURCES += \
 	src/spells/animationsetup.cpp \
 	src/spells/blocks.cpp \
 	src/spells/bounds.cpp \
+	src/spells/meshtools.cpp \
 	src/spells/color.cpp \
 	src/spells/fileextract.cpp \
 	src/spells/filerename.cpp \
