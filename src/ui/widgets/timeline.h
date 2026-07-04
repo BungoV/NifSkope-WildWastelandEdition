@@ -47,8 +47,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 class NifModel;
 
+class QAction;
 class QCheckBox;
 class QComboBox;
+class QHBoxLayout;
 class QDoubleSpinBox;
 class QFormLayout;
 class QLabel;
@@ -163,6 +165,9 @@ public:
 	~TimelineWidget();
 
 	void setNif( NifModel * nif );
+
+	//! Mirror the render toolbar's loop / switch-animation actions on the timeline toolbar
+	void addAnimActions( QAction * loop, QAction * sw );
 
 	QSize sizeHint() const override;
 
@@ -328,9 +333,12 @@ protected:
 	QComboBox * seqBox;
 	QLineEdit * filterBox;
 	QToolButton * btnToStart;
+	QToolButton * btnPrevKey;
 	QToolButton * btnPlayBack;
 	QToolButton * btnPlay;
+	QToolButton * btnNextKey;
 	QToolButton * btnToEnd;
+	QHBoxLayout * topLay = nullptr;
 	QLineEdit * timeField;
 	QToolButton * btnFrames;
 	QToolButton * btnSnap;

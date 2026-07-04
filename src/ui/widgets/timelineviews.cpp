@@ -1256,7 +1256,9 @@ void TimelineGraphView::paintEvent( QPaintEvent * )
 			p.drawLine( QPointF( tl->labelW, y ), QPointF( w, y ) );
 			p.setPen( pal.color( QPalette::Text ) );
 			QString label = QString::number( v, 'g', 4 );
-			p.drawText( QRectF( 4, y - fm.height() * 0.5, tl->labelW - 10, fm.height() ),
+			// keep the first/last label fully inside the pane instead of clipping it
+			qreal ly = qBound( qreal( 0 ), qreal( y - fm.height() * 0.5 ), qreal( h - fm.height() ) );
+			p.drawText( QRectF( 4, ly, tl->labelW - 10, fm.height() ),
 				Qt::AlignRight | Qt::AlignVCenter, label );
 		}
 	}

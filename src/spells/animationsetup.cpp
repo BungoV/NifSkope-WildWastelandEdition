@@ -25,6 +25,7 @@ BSD License - see nifskope.h
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cmath>
 
 /*! \file animationsetup.cpp
@@ -1322,16 +1323,18 @@ class spSwapReferences final : public Spell
 			if ( !iChild.isValid() )
 				continue;
 
-			if ( nif->getLink( iChild ) == oldNum )
-				nif->setLink( iChild, newNum );
-			else if ( nif->rowCount( iChild ) > 0 )
+			if ( nif->isLink( iChild ) ) {
+				if ( nif->getLink( iChild ) == oldNum )
+					nif->setLink( iChild, newNum );
+			} else if ( nif->rowCount( iChild ) > 0 ) {
 				rewriteLinks( nif, iChild, oldNum, newNum, depth + 1 );
+			}
 		}
 	}
 
 public:
 	QString name() const override final { return Spell::tr( "Replace References With..." ); }
-	QString page() const override final { return Spell::tr( "Blocks" ); }
+	QString page() const override final { return Spell::tr( "Block" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
@@ -1356,34 +1359,103 @@ public:
 			}
 		}
 
-		QStringList names;
-		QVector<int> nums;
+		struct Candidate
+		{
+			int num;
+			QString type;
+			QString name;
+			QString label;
+		};
+		QVector<Candidate> cands;
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			if ( b == oldNum )
 				continue;
 			QModelIndex i = nif->getBlockIndex( b );
 			if ( !baseType.isEmpty() && !nif->blockInherits( i, baseType ) )
 				continue;
-			QString nm = nif->resolveString( i, "Name" );
-			QString entry = QString( "%1  %2" ).arg( b ).arg( nif->itemName( i ) );
-			if ( !nm.isEmpty() )
-				entry += QStringLiteral( "  \"" ) + nm + QStringLiteral( "\"" );
-			names << entry;
-			nums.append( b );
+			Candidate c;
+			c.num = b;
+			c.type = nif->itemName( i );
+			c.name = nif->resolveString( i, "Name" );
+			c.label = QString( "%1  %2" ).arg( b ).arg( c.type );
+			if ( !c.name.isEmpty() )
+				c.label += QStringLiteral( "  \"" ) + c.name + QStringLiteral( "\"" );
+			cands.append( c );
 		}
 
-		if ( names.isEmpty() ) {
+		if ( cands.isEmpty() ) {
 			QMessageBox::information( nullptr, name(), Spell::tr( "No compatible blocks found." ) );
 			return index;
 		}
 
-		bool ok = false;
-		QString pick = QInputDialog::getItem( nullptr, name(),
-			Spell::tr( "Every reference to block %1 will instead point to:" ).arg( oldNum ), names, 0, false, &ok );
-		if ( !ok )
+		QDialog dlg;
+		dlg.setWindowTitle( name() );
+		QVBoxLayout * lay = new QVBoxLayout( &dlg );
+		lay->addWidget( new QLabel( Spell::tr( "Every reference to block %1 will instead point to:" ).arg( oldNum ) ) );
+
+		QHBoxLayout * top = new QHBoxLayout;
+		QLineEdit * edFilter = new QLineEdit;
+		edFilter->setPlaceholderText( Spell::tr( "Filter by name/type, or type a block number" ) );
+		QComboBox * cbSort = new QComboBox;
+		cbSort->addItems( { Spell::tr( "Sort: Index" ), Spell::tr( "Sort: Name" ), Spell::tr( "Sort: Type" ) } );
+		top->addWidget( edFilter, 1 );
+		top->addWidget( cbSort );
+		lay->addLayout( top );
+
+		QListWidget * list = new QListWidget;
+		lay->addWidget( list, 1 );
+
+		QDialogButtonBox * bb = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
+		lay->addWidget( bb );
+		QObject::connect( bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );
+		QObject::connect( bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
+		QObject::connect( list, &QListWidget::itemDoubleClicked, &dlg, &QDialog::accept );
+
+		auto repopulate = [&]() {
+			QVector<Candidate> sorted = cands;
+			int mode = cbSort->currentIndex();
+			std::stable_sort( sorted.begin(), sorted.end(), [mode]( const Candidate & a, const Candidate & b ) {
+				if ( mode == 1 )
+					return a.name.compare( b.name, Qt::CaseInsensitive ) < 0;
+				if ( mode == 2 )
+					return a.type.compare( b.type, Qt::CaseInsensitive ) < 0;
+				return a.num < b.num;
+			} );
+			QString f = edFilter->text().trimmed();
+			list->clear();
+			for ( const Candidate & c : sorted ) {
+				if ( !f.isEmpty() && !c.label.contains( f, Qt::CaseInsensitive ) )
+					continue;
+				QListWidgetItem * it = new QListWidgetItem( c.label, list );
+				it->setData( Qt::UserRole, c.num );
+			}
+			if ( list->count() > 0 )
+				list->setCurrentRow( 0 );
+		};
+		QObject::connect( edFilter, &QLineEdit::textChanged, repopulate );
+		QObject::connect( cbSort, QOverload<int>::of( &QComboBox::currentIndexChanged ), repopulate );
+		QObject::connect( edFilter, &QLineEdit::returnPressed, &dlg, &QDialog::accept );
+		repopulate();
+		dlg.resize( 460, 420 );
+		edFilter->setFocus();
+
+		if ( dlg.exec() != QDialog::Accepted )
 			return index;
 
-		int newNum = nums.value( names.indexOf( pick ), -1 );
+		int newNum = -1;
+		// a typed bare number wins, if it names a compatible block
+		bool isNum = false;
+		int typedNum = edFilter->text().trimmed().toInt( &isNum );
+		if ( isNum ) {
+			for ( const Candidate & c : cands ) {
+				if ( c.num == typedNum ) {
+					newNum = typedNum;
+					break;
+				}
+			}
+		}
+		if ( newNum < 0 && list->currentItem() )
+			newNum = list->currentItem()->data( Qt::UserRole ).toInt();
 		if ( newNum < 0 )
 			return index;
 

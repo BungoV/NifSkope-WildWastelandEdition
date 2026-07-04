@@ -487,8 +487,19 @@ void NifSkope::select( const QModelIndex & index )
 	if ( sender() == timeline && idx.isValid() && idx.parent().isValid() ) {
 		QModelIndex p = idx.parent();
 		while ( p.isValid() ) {
-			tree->expand( p );
+			tree->expand( p.sibling( p.row(), 0 ) );
 			p = p.parent();
+		}
+		// Unroll the key itself, and only that one: fold its sibling keys
+		QModelIndex keyRow = idx.sibling( idx.row(), 0 );
+		QModelIndex iKeys = idx.parent();
+		if ( nif->rowCount( keyRow ) > 0 ) {
+			for ( int r = 0; r < nif->rowCount( iKeys ); r++ ) {
+				QModelIndex sib = nif->getIndex( iKeys, r );
+				if ( sib.isValid() && sib.row() != keyRow.row() )
+					tree->collapse( sib.sibling( sib.row(), 0 ) );
+			}
+			tree->expand( keyRow );
 		}
 		tree->scrollTo( idx );
 	}

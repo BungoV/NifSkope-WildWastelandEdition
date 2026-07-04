@@ -400,9 +400,14 @@ void NifSkope::initDockWidgets()
 
 	connect( timeline, &TimelineWidget::isolateBlock, ogl, &GLView::setSoloBlock );
 
+	// Loop / switch-animation toggles mirrored from the render toolbar
+	timeline->addAnimActions( ui->aAnimLoop, ui->aAnimSwitch );
+
 	// Re-dock at the bottom when reopened from the menu: a floating dock that
-	// was closed can come back with its title bar off screen and become unmovable
-	connect( dTimeline->toggleViewAction(), &QAction::toggled, [this]( bool on ) {
+	// was closed can come back with its title bar off screen and become unmovable.
+	// Only on the menu action's triggered — toggled also fires during the
+	// drag-to-float transition and would make the dock impossible to detach.
+	connect( dTimeline->toggleViewAction(), &QAction::triggered, [this]( bool on ) {
 		if ( on && dTimeline->isFloating() ) {
 			dTimeline->setFloating( false );
 			addDockWidget( Qt::BottomDockWidgetArea, dTimeline );

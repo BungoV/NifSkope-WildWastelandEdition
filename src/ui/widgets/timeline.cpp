@@ -41,10 +41,13 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPainter>
+#include <QPixmap>
 #include <QScrollBar>
 #include <QSplitter>
 #include <QTimer>
@@ -85,13 +88,122 @@ float tlNiceStep( float raw )
  *  TimelineWidget - construction
  */
 
+//! Crisp Blender-style toolbar icons; unicode glyphs render badly in the Windows UI font
+QIcon tlMakeIcon( const QString & id, const QColor & col )
+{
+	const int S = 64;
+	QPixmap pm( S, S );
+	pm.fill( Qt::transparent );
+	QPainter p( &pm );
+	p.setRenderHint( QPainter::Antialiasing );
+	QPen pen( col, 5.0 );
+	pen.setCapStyle( Qt::RoundCap );
+	pen.setJoinStyle( Qt::RoundJoin );
+	p.setPen( pen );
+	p.setBrush( col );
+
+	auto tri = [&p]( bool right, float xFlat, float xTip, float yMid = 32, float h = 19 ) {
+		QPolygonF t;
+		t << QPointF( xFlat, yMid - h ) << QPointF( xTip, yMid ) << QPointF( xFlat, yMid + h );
+		Q_UNUSED( right );
+		p.drawPolygon( t );
+	};
+	auto diamond = [&p]( QPointF c, float r ) {
+		QPolygonF d;
+		d << c + QPointF( 0, -r ) << c + QPointF( r, 0 ) << c + QPointF( 0, r ) << c + QPointF( -r, 0 );
+		p.drawPolygon( d );
+	};
+
+	if ( id == QLatin1String( "play" ) ) {
+		tri( true, 20, 50 );
+	} else if ( id == QLatin1String( "playback" ) ) {
+		tri( false, 44, 14 );
+	} else if ( id == QLatin1String( "pause" ) ) {
+		p.drawRoundedRect( QRectF( 18, 14, 9, 36 ), 2, 2 );
+		p.drawRoundedRect( QRectF( 37, 14, 9, 36 ), 2, 2 );
+	} else if ( id == QLatin1String( "tostart" ) ) {
+		p.drawRoundedRect( QRectF( 14, 13, 7, 38 ), 2, 2 );
+		tri( false, 52, 26 );
+	} else if ( id == QLatin1String( "toend" ) ) {
+		tri( true, 12, 38 );
+		p.drawRoundedRect( QRectF( 43, 13, 7, 38 ), 2, 2 );
+	} else if ( id == QLatin1String( "prevkey" ) ) {
+		diamond( QPointF( 18, 32 ), 10 );
+		tri( false, 52, 34, 32, 14 );
+	} else if ( id == QLatin1String( "nextkey" ) ) {
+		tri( true, 12, 30, 32, 14 );
+		diamond( QPointF( 46, 32 ), 10 );
+	} else if ( id == QLatin1String( "magnet" ) ) {
+		p.setBrush( Qt::NoBrush );
+		QPen mp( col, 10 );
+		p.setPen( mp );
+		p.drawArc( QRectF( 15, 12, 34, 34 ), 0, 180 * 16 );
+		p.drawLine( QPointF( 20, 29 ), QPointF( 20, 48 ) );
+		p.drawLine( QPointF( 44, 29 ), QPointF( 44, 48 ) );
+	} else if ( id == QLatin1String( "target" ) ) {
+		p.setBrush( Qt::NoBrush );
+		p.drawEllipse( QPointF( 32, 32 ), 16, 16 );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 32, 32 ), 6, 6 );
+		p.drawLine( QPointF( 32, 8 ), QPointF( 32, 16 ) );
+		p.drawLine( QPointF( 32, 48 ), QPointF( 32, 56 ) );
+		p.drawLine( QPointF( 8, 32 ), QPointF( 16, 32 ) );
+		p.drawLine( QPointF( 48, 32 ), QPointF( 56, 32 ) );
+	} else if ( id == QLatin1String( "normalize" ) ) {
+		p.drawLine( QPointF( 32, 18 ), QPointF( 32, 46 ) );
+		QPolygonF up;
+		up << QPointF( 24, 20 ) << QPointF( 32, 8 ) << QPointF( 40, 20 );
+		p.drawPolygon( up );
+		QPolygonF dn;
+		dn << QPointF( 24, 44 ) << QPointF( 32, 56 ) << QPointF( 40, 44 );
+		p.drawPolygon( dn );
+	} else if ( id == QLatin1String( "follow" ) ) {
+		// playhead marker with a trailing arrow
+		QPolygonF ph;
+		ph << QPointF( 10, 10 ) << QPointF( 26, 10 ) << QPointF( 18, 24 );
+		p.drawPolygon( ph );
+		p.drawLine( QPointF( 18, 24 ), QPointF( 18, 54 ) );
+		p.drawLine( QPointF( 28, 40 ), QPointF( 50, 40 ) );
+		QPolygonF ar;
+		ar << QPointF( 44, 32 ) << QPointF( 56, 40 ) << QPointF( 44, 48 );
+		p.drawPolygon( ar );
+	} else if ( id == QLatin1String( "check" ) ) {
+		p.setBrush( Qt::NoBrush );
+		QPen cp( col, 9 );
+		cp.setCapStyle( Qt::RoundCap );
+		cp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( cp );
+		QPolygonF ck;
+		ck << QPointF( 13, 34 ) << QPointF( 26, 48 ) << QPointF( 51, 16 );
+		p.drawPolyline( ck );
+	} else if ( id == QLatin1String( "panel" ) ) {
+		p.setBrush( Qt::NoBrush );
+		p.drawRoundedRect( QRectF( 10, 15, 44, 34 ), 4, 4 );
+		p.setBrush( col );
+		p.drawRect( QRectF( 39, 15, 15, 34 ) );
+	}
+
+	return QIcon( pm );
+}
+
 TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 {
 	setFocusPolicy( Qt::StrongFocus );
 
+	const QColor icoCol = palette().color( QPalette::ButtonText );
+
 	auto mkBtn = [this]( const QString & text, const QString & tip, bool checkable ) {
 		auto b = new QToolButton( this );
 		b->setText( text );
+		b->setToolTip( tip );
+		b->setCheckable( checkable );
+		b->setAutoRaise( true );
+		return b;
+	};
+
+	auto mkIconBtn = [this, &icoCol]( const QString & icon, const QString & tip, bool checkable ) {
+		auto b = new QToolButton( this );
+		b->setIcon( tlMakeIcon( icon, icoCol ) );
 		b->setToolTip( tip );
 		b->setCheckable( checkable );
 		b->setAutoRaise( true );
@@ -110,7 +222,7 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	filterBox->setMaximumWidth( 130 );
 	connect( filterBox, &QLineEdit::textChanged, this, &TimelineWidget::filterEdited );
 
-	btnToStart = mkBtn( QStringLiteral( "⏮" ), tr( "Jump to start" ), false );
+	btnToStart = mkIconBtn( QStringLiteral( "tostart" ), tr( "Jump to start" ), false );
 	connect( btnToStart, &QToolButton::clicked, [this]() {
 		transportStop();
 		curTime = prevRangeOn ? prevStart : tMin;
@@ -119,13 +231,19 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 		updateViews();
 	} );
 
-	btnPlayBack = mkBtn( QStringLiteral( "◀" ), tr( "Play backward (Shift+Space)" ), true );
+	btnPrevKey = mkIconBtn( QStringLiteral( "prevkey" ), tr( "Jump to previous key of the selected lane (,)" ), false );
+	connect( btnPrevKey, &QToolButton::clicked, [this]() { stepToKey( -1 ); } );
+
+	btnPlayBack = mkIconBtn( QStringLiteral( "playback" ), tr( "Play backward (Shift+Space)" ), true );
 	connect( btnPlayBack, &QToolButton::clicked, [this]() { transportToggle( -1 ); } );
 
-	btnPlay = mkBtn( QStringLiteral( "▶" ), tr( "Play/pause (Space)" ), true );
+	btnPlay = mkIconBtn( QStringLiteral( "play" ), tr( "Play/pause (Space)" ), true );
 	connect( btnPlay, &QToolButton::clicked, [this]() { transportToggle( 1 ); } );
 
-	btnToEnd = mkBtn( QStringLiteral( "⏭" ), tr( "Jump to end" ), false );
+	btnNextKey = mkIconBtn( QStringLiteral( "nextkey" ), tr( "Jump to next key of the selected lane (.)" ), false );
+	connect( btnNextKey, &QToolButton::clicked, [this]() { stepToKey( 1 ); } );
+
+	btnToEnd = mkIconBtn( QStringLiteral( "toend" ), tr( "Jump to end" ), false );
 	connect( btnToEnd, &QToolButton::clicked, [this]() {
 		transportStop();
 		curTime = prevRangeOn ? prevEnd : tMax;
@@ -188,7 +306,7 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 		m.exec( QCursor::pos() );
 	} );
 
-	btnSnap = mkBtn( QStringLiteral( "⦷" ), tr( "Snap dragging to steps" ), true );
+	btnSnap = mkIconBtn( QStringLiteral( "magnet" ), tr( "Snap dragging to steps" ), true );
 	connect( btnSnap, &QToolButton::toggled, [this]( bool on ) { snapOn = on; } );
 
 	snapTimeBox = new QDoubleSpinBox( this );
@@ -209,17 +327,17 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	snapValueBox->setMaximumWidth( 80 );
 	connect( snapValueBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), [this]( double v ) { snapValueStep = (float)v; } );
 
-	btnNormalize = mkBtn( QStringLiteral( "↕" ), tr( "Normalize curves (each scaled to its own range)" ), true );
+	btnNormalize = mkIconBtn( QStringLiteral( "normalize" ), tr( "Normalize curves (each scaled to its own range)" ), true );
 	connect( btnNormalize, &QToolButton::toggled, [this]( bool on ) {
 		normalized = on;
 		graphView->invalidateCurves();
 	} );
 
-	btnFollow = mkBtn( QStringLiteral( "↦" ), tr( "Follow playhead during playback" ), true );
+	btnFollow = mkIconBtn( QStringLiteral( "follow" ), tr( "Follow playhead during playback" ), true );
 	btnFollow->setChecked( followPlayhead );
 	connect( btnFollow, &QToolButton::toggled, [this]( bool on ) { followPlayhead = on; } );
 
-	btnIsolate = mkBtn( QStringLiteral( "◉" ), tr( "Show only lanes of the selected node" ), true );
+	btnIsolate = mkIconBtn( QStringLiteral( "target" ), tr( "Show only lanes of the selected node" ), true );
 	connect( btnIsolate, &QToolButton::toggled, [this]( bool on ) {
 		autoIsolate = on;
 		if ( !on )
@@ -228,10 +346,10 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 		updateViews();
 	} );
 
-	btnLint = mkBtn( QStringLiteral( "✔" ), tr( "Check animation for common problems" ), false );
+	btnLint = mkIconBtn( QStringLiteral( "check" ), tr( "Check animation for common problems" ), false );
 	connect( btnLint, &QToolButton::clicked, this, &TimelineWidget::runLint );
 
-	btnInspector = mkBtn( QStringLiteral( "◨" ), tr( "Show/hide the inspector panel" ), true );
+	btnInspector = mkIconBtn( QStringLiteral( "panel" ), tr( "Show/hide the inspector panel" ), true );
 	btnInspector->setChecked( true );
 
 	infoLabel = new QLabel( this );
@@ -261,6 +379,7 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	split->setCollapsible( 0, false );
 
 	auto topLayout = new QHBoxLayout;
+	topLay = topLayout;
 	topLayout->setContentsMargins( 4, 2, 4, 2 );
 	topLayout->setSpacing( 4 );
 	topLayout->addWidget( seqBox );
@@ -268,8 +387,10 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	topLayout->addWidget( btnIsolate );
 	topLayout->addSpacing( 6 );
 	topLayout->addWidget( btnToStart );
+	topLayout->addWidget( btnPrevKey );
 	topLayout->addWidget( btnPlayBack );
 	topLayout->addWidget( btnPlay );
+	topLayout->addWidget( btnNextKey );
 	topLayout->addWidget( btnToEnd );
 	topLayout->addWidget( timeField );
 	topLayout->addWidget( btnFrames );
@@ -361,8 +482,9 @@ void TimelineWidget::transportToggle( int dir )
 	playDir = dir;
 	btnPlay->setChecked( dir == 1 );
 	btnPlayBack->setChecked( dir == -1 );
-	btnPlay->setText( dir == 1 ? QStringLiteral( "⏸" ) : QStringLiteral( "▶" ) );
-	btnPlayBack->setText( dir == -1 ? QStringLiteral( "⏸" ) : QStringLiteral( "◀" ) );
+	const QColor c = palette().color( QPalette::ButtonText );
+	btnPlay->setIcon( tlMakeIcon( dir == 1 ? QStringLiteral( "pause" ) : QStringLiteral( "play" ), c ) );
+	btnPlayBack->setIcon( tlMakeIcon( dir == -1 ? QStringLiteral( "pause" ) : QStringLiteral( "playback" ), c ) );
 	playTimer->start();
 }
 
@@ -372,8 +494,24 @@ void TimelineWidget::transportStop()
 	playTimer->stop();
 	btnPlay->setChecked( false );
 	btnPlayBack->setChecked( false );
-	btnPlay->setText( QStringLiteral( "▶" ) );
-	btnPlayBack->setText( QStringLiteral( "◀" ) );
+	const QColor c = palette().color( QPalette::ButtonText );
+	btnPlay->setIcon( tlMakeIcon( QStringLiteral( "play" ), c ) );
+	btnPlayBack->setIcon( tlMakeIcon( QStringLiteral( "playback" ), c ) );
+}
+
+void TimelineWidget::addAnimActions( QAction * loop, QAction * sw )
+{
+	if ( !topLay )
+		return;
+	int at = topLay->indexOf( timeField );
+	for ( QAction * a : { sw, loop } ) {
+		if ( !a )
+			continue;
+		auto b = new QToolButton( this );
+		b->setDefaultAction( a );
+		b->setAutoRaise( true );
+		topLay->insertWidget( at, b );
+	}
 }
 
 void TimelineWidget::updateViews()
@@ -461,8 +599,8 @@ void TimelineWidget::scanModel()
 	sequences.clear();
 	avObjectsByName.clear();
 	seqBox->clear();
-	seqBox->addItem( tr( "All controllers" ) );
-	seqBox->addItem( tr( "Loose interpolators" ) );
+	seqBox->addItem( tr( "All animations" ) );
+	seqBox->addItem( tr( "Loose animations" ) );
 
 	if ( !nif )
 		return;
@@ -570,6 +708,15 @@ void TimelineWidget::setSequenceByName( const QString & name )
 
 void TimelineWidget::buildLanes()
 {
+	// Keep the key selection alive across rebuilds triggered by value edits
+	// (e.g. dragging a key): the persistent indexes stay valid, only the lane
+	// number has to be re-resolved after the lanes are rebuilt.
+	QVector<QPersistentModelIndex> keepSel = selKeys;
+	QPersistentModelIndex keepPrimary = primaryKey;
+	QPersistentModelIndex keepLaneSel;
+	if ( currentLane >= 0 && currentLane < lanes.size() )
+		keepLaneSel = lanes[currentLane].iSelect;
+
 	lanes.clear();
 	currentLane = -1;
 	selKeys.clear();
@@ -657,7 +804,7 @@ void TimelineWidget::buildLanes()
 				TimelineLane header;
 				header.isHeader = true;
 				header.groupSeq = -2;
-				header.label = tr( "Loose interpolators" );
+				header.label = tr( "Loose animations" );
 				lanes.append( header );
 				looseHeader = lanes.count() - 1;
 			}
@@ -679,6 +826,24 @@ void TimelineWidget::buildLanes()
 		numKeys += lane.keys.count();
 
 	infoLabel->setText( tr( "%1 lanes, %2 keys" ).arg( lanes.count() ).arg( numKeys ) );
+
+	// Restore the selection that survived the rebuild
+	for ( const auto & p : keepSel ) {
+		if ( p.isValid() )
+			selKeys.append( p );
+	}
+	if ( keepPrimary.isValid() )
+		primaryKey = keepPrimary;
+	else if ( !selKeys.isEmpty() )
+		primaryKey = selKeys.first();
+	if ( keepLaneSel.isValid() ) {
+		for ( int i = 0; i < lanes.size(); i++ ) {
+			if ( lanes[i].iSelect == keepLaneSel ) {
+				currentLane = i;
+				break;
+			}
+		}
+	}
 }
 
 void TimelineWidget::addControllerLanes( const QModelIndex & iController )
