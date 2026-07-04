@@ -38,6 +38,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glscene.h"
 #include "model/nifmodel.h"
 
+#include <cmath>
+
 // `NiControllerManager` blocks
 
 ControllerManager::ControllerManager( Node * node, const QModelIndex & index )
@@ -956,10 +958,14 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			for ( Emitter & e : emitters ) {
 				if ( e.name != modName )
 					continue;
+				e.ctlrBlock = nif->getBlockNumber( iCtlr );
 				QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iCtlr, "Interpolator" ) );
 				if ( iInterp.isValid() ) {
 					iExtras.append( iInterp );
-					e.birthRate = nif->get<float>( iInterp, "Value" );
+					float v = nif->get<float>( iInterp, "Value" );
+					// blend interpolators carry a -FLT_MAX pose sentinel
+					if ( std::isfinite( v ) && std::fabs( v ) < 1.0e8f )
+						e.birthRate = v;
 					QModelIndex iFD = nif->getBlockIndex( nif->getLink( iInterp, "Data" ) );
 					if ( iFD.isValid() ) {
 						iExtras.append( iFD );
@@ -978,6 +984,43 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			}
 		}
 		iCtlr = nif->getBlockIndex( nif->getLink( iCtlr, "Next Controller" ) );
+	}
+
+	// manager rigs: the sequences own the real BirthRate / EmitterActive keys
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex iSeq = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( iSeq, "NiControllerSequence" ) )
+			continue;
+		QString seqName = nif->resolveString( iSeq, "Name" );
+		QModelIndex iCB = nif->getIndex( iSeq, "Controlled Blocks" );
+		for ( int r = 0; r < nif->rowCount( iCB ); r++ ) {
+			QModelIndex iRow = nif->getIndex( iCB, r );
+			qint32 rowCtlr = nif->getLink( iRow, "Controller" );
+			for ( Emitter & e : emitters ) {
+				if ( e.ctlrBlock < 0 || rowCtlr != e.ctlrBlock )
+					continue;
+				QString interpId = nif->resolveString( iRow, "Interpolator ID" );
+				QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iRow, "Interpolator" ) );
+				if ( !iInterp.isValid() )
+					continue;
+				iExtras.append( iSeq );
+				iExtras.append( iInterp );
+				QModelIndex iData = nif->getBlockIndex( nif->getLink( iInterp, "Data" ) );
+				if ( iData.isValid() )
+					iExtras.append( iData );
+				Emitter::SeqKeys sk;
+				sk.seq = seqName;
+				if ( iData.isValid() )
+					sk.keys = nif->getIndex( iData, "Data" );
+				float v = nif->get<float>( iInterp, "Value" );
+				if ( std::isfinite( v ) && std::fabs( v ) < 1.0e8f )
+					sk.constVal = v;
+				if ( interpId == QLatin1String( "EmitterActive" ) )
+					e.seqVis.append( sk );
+				else
+					e.seqBirth.append( sk );
+			}
+		}
 	}
 
 	parts.clear();
@@ -1128,13 +1171,42 @@ void PSysSimController::updateTime( float time )
 	}
 
 	// emit
+	const QString & curSeq = target->scene->animGroup;
 	for ( Emitter & e : emitters ) {
 		float rate = e.birthRate;
-		if ( e.iBirthKeys.isValid() )
+		if ( e.iBirthKeys.isValid() ) {
 			interpolate( rate, e.iBirthKeys, time, e.birthIdx );
+		} else if ( !e.seqBirth.isEmpty() ) {
+			// manager rig: use the active sequence's keys (else the first set)
+			Emitter::SeqKeys * sk = &e.seqBirth[0];
+			for ( auto & c : e.seqBirth ) {
+				if ( c.seq == curSeq ) {
+					sk = &c;
+					break;
+				}
+			}
+			rate = sk->constVal;
+			if ( sk->keys.isValid() )
+				interpolate( rate, sk->keys, time, sk->idx );
+		}
+
 		bool vis = true;
-		if ( e.iVisKeys.isValid() )
+		if ( e.iVisKeys.isValid() ) {
 			interpolate( vis, e.iVisKeys, time, e.visIdx );
+		} else if ( !e.seqVis.isEmpty() ) {
+			Emitter::SeqKeys * sk = &e.seqVis[0];
+			for ( auto & c : e.seqVis ) {
+				if ( c.seq == curSeq ) {
+					sk = &c;
+					break;
+				}
+			}
+			if ( sk->keys.isValid() )
+				interpolate( vis, sk->keys, time, sk->idx );
+		}
+
+		if ( !( std::isfinite( rate ) && std::fabs( rate ) < 1.0e8f ) )
+			rate = 0.0f;
 		if ( !vis || rate <= 0.0f )
 			continue;
 

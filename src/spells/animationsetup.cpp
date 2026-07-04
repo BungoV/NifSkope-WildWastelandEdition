@@ -1259,27 +1259,78 @@ public:
 	{
 		QModelIndex iBlock = nif->getBlockIndex( index );
 
-		// gather vertex positions (BSTriShape style or legacy NiGeometryData)
+		// gather vertex positions + normals + triangles (BSTriShape style or legacy)
+		// Vanilla layout (verified against edison_pa_vfx.nif): positions
+		// (numVerts*3), then normals (numVerts*3), then numTris*3 + 2 zeroed
+		// values. The engine reads all three regions; writing positions only
+		// makes it read out of bounds and reject the whole model.
 		QVector<Vector3> verts;
+		QVector<Vector3> norms;
+		int numTris = 0;
 
 		QModelIndex iVData = nif->getIndex( iBlock, "Vertex Data" );
 		if ( iVData.isValid() ) {
 			for ( int r = 0; r < nif->rowCount( iVData ); r++ ) {
-				QModelIndex iV = nif->getIndex( nif->getIndex( iVData, r ), "Vertex" );
+				QModelIndex iRow = nif->getIndex( iVData, r );
+				QModelIndex iV = nif->getIndex( iRow, "Vertex" );
 				if ( iV.isValid() )
 					verts.append( nif->get<Vector3>( iV ) );
+				QModelIndex iN = nif->getIndex( iRow, "Normal" );
+				if ( iN.isValid() )
+					norms.append( nif->get<Vector3>( iN ) );
 			}
+			numTris = nif->get<int>( iBlock, "Num Triangles" );
 		} else {
 			QModelIndex iData = nif->getBlockIndex( nif->getLink( iBlock, "Data" ), "NiGeometryData" );
 			QModelIndex iVerts = nif->getIndex( iData, "Vertices" );
 			for ( int r = 0; r < nif->rowCount( iVerts ); r++ )
 				verts.append( nif->get<Vector3>( nif->getIndex( iVerts, r ) ) );
+			QModelIndex iNorms = nif->getIndex( iData, "Normals" );
+			for ( int r = 0; r < nif->rowCount( iNorms ); r++ )
+				norms.append( nif->get<Vector3>( nif->getIndex( iNorms, r ) ) );
+			numTris = nif->get<int>( iData, "Num Triangles" );
 		}
 
 		if ( verts.isEmpty() ) {
 			QMessageBox::information( nullptr, name(), Spell::tr( "No vertex positions found on this block." ) );
 			return index;
 		}
+
+		// missing/degenerate normals: compute face-averaged ones from the triangles
+		bool haveNorms = ( norms.size() == verts.size() );
+		if ( haveNorms ) {
+			bool allZero = true;
+			for ( const Vector3 & n : norms ) {
+				if ( n.squaredLength() > 1.0e-6f ) {
+					allZero = false;
+					break;
+				}
+			}
+			haveNorms = !allZero;
+		}
+		if ( !haveNorms ) {
+			norms.fill( Vector3(), verts.size() );
+			QModelIndex iTris = nif->getIndex( iBlock, "Triangles" );
+			if ( !iTris.isValid() )
+				iTris = nif->getIndex( nif->getBlockIndex( nif->getLink( iBlock, "Data" ) ), "Triangles" );
+			for ( int r = 0; r < nif->rowCount( iTris ); r++ ) {
+				Triangle t = nif->get<Triangle>( nif->getIndex( iTris, r ) );
+				if ( t[0] >= verts.size() || t[1] >= verts.size() || t[2] >= verts.size() )
+					continue;
+				Vector3 fn = Vector3::crossproduct( verts[t[1]] - verts[t[0]], verts[t[2]] - verts[t[0]] );
+				norms[t[0]] += fn;
+				norms[t[1]] += fn;
+				norms[t[2]] += fn;
+			}
+			for ( Vector3 & n : norms ) {
+				if ( n.squaredLength() > 1.0e-12f )
+					n.normalize();
+				else
+					n = Vector3( 0, 0, 1 );
+			}
+		}
+
+		int numData = verts.count() * 6 + numTris * 3 + 2;
 
 		QModelIndex result;
 		QPersistentModelIndex pBlock( iBlock );
@@ -1288,15 +1339,18 @@ public:
 			QModelIndex iPos = nif->insertNiBlock( "BSPositionData" );
 			nif->assignString( iPos, QStringLiteral( "Name" ), QStringLiteral( "POS" ), false );
 
-			nif->set<int>( iPos, "Num Data", verts.count() * 3 );
+			nif->set<int>( iPos, "Num Data", numData );
 			QModelIndex iArr = nif->getIndex( iPos, "Data" );
 			nif->updateArraySize( iArr );
 
-			for ( int v = 0; v < verts.count(); v++ ) {
-				nif->set<float>( nif->getIndex( iArr, v * 3 ), verts[v][0] );
-				nif->set<float>( nif->getIndex( iArr, v * 3 + 1 ), verts[v][1] );
-				nif->set<float>( nif->getIndex( iArr, v * 3 + 2 ), verts[v][2] );
+			int nv = verts.count();
+			for ( int v = 0; v < nv; v++ ) {
+				for ( int c = 0; c < 3; c++ ) {
+					nif->set<float>( nif->getIndex( iArr, v * 3 + c ), verts[v][c] );
+					nif->set<float>( nif->getIndex( iArr, nv * 3 + v * 3 + c ), norms[v][c] );
+				}
 			}
+			// remaining numTris*3 + 2 values stay zero, matching vanilla assets
 
 			addLink( nif, QModelIndex( pBlock ), "Extra Data List", nif->getBlockNumber( iPos ) );
 			result = iPos;

@@ -283,6 +283,7 @@ private:
 
 public:
 	static float gizmoSnapStep;
+	static float gizmoSizeMul;          // user scale for gizmo handles + 3D cursor
 	bool gizmoAutoKey = false;
 	bool gizmoHandlesOn = true;         // draw + pick the draggable handles
 	int gizmoOrient = 0;                // 0 Global, 1 Local, 2 Parent, 3 View
@@ -340,6 +341,7 @@ public:
 	// ---- snapping ----
 	int snapTargetMode = 0;             // 0 grid step, 1 vertex, 2 edge, 3 face
 	bool snapAlignRot = false;          // orient +Z to the target face normal
+	bool snapDefaultOn = false;         // magnet: snap without holding Ctrl (Ctrl inverts)
 	static float gizmoRotSnapDeg;       // rotation snap increment
 
 private:

@@ -546,6 +546,24 @@ void NifSkope::initDockWidgets()
 		connect( this, &NifSkope::completeLoading, rp, &QWidget::hide );
 	}
 
+	{
+		QSettings gset;
+		GLView::gizmoSizeMul = gset.value( "GLView/Gizmo Size", 1.75 ).toFloat();
+	}
+	QAction * aGizmoSize = new QAction( tr( "Gizmo && Cursor Size..." ), this );
+	connect( aGizmoSize, &QAction::triggered, [this]() {
+		bool ok = false;
+		double v = QInputDialog::getDouble( this, tr( "Gizmo size" ),
+			tr( "Scale factor for the transform gizmo and 3D cursor:" ), GLView::gizmoSizeMul, 0.1, 10.0, 2, &ok );
+		if ( ok ) {
+			GLView::gizmoSizeMul = (float)v;
+			QSettings gset;
+			gset.setValue( "GLView/Gizmo Size", v );
+			ogl->update();
+		}
+	} );
+	ui->mRender->addAction( aGizmoSize );
+
 	QAction * aGizmoHandles = new QAction( tr( "Show Transform Gizmo" ), this );
 	aGizmoHandles->setCheckable( true );
 	aGizmoHandles->setChecked( true );

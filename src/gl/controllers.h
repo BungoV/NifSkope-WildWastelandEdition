@@ -279,6 +279,19 @@ class PSysSimController final : public Controller
 		QPersistentModelIndex iVisKeys;    // NiBoolData key group of the EmitterActive interpolator
 		float accum = 0;
 		int birthIdx = 0, visIdx = 0;
+		int ctlrBlock = -1;                // NiPSysEmitterCtlr block number
+
+		// manager-driven rigs: the emitter controller only holds blend
+		// interpolators; the real keys live in the controller sequences
+		struct SeqKeys
+		{
+			QString seq;
+			QPersistentModelIndex keys;
+			float constVal = 0;
+			int idx = 0;
+		};
+		QVector<SeqKeys> seqBirth;
+		QVector<SeqKeys> seqVis;
 	};
 
 	QPointer<Particles> target;

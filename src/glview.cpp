@@ -655,7 +655,7 @@ void GLView::paintGL()
 			nt.rotation = basis;
 			nt.translation = pivot;
 			nt.scale = 1.0f;
-			float gs = std::max( float(Dist) / 10.0f, 0.05f );
+			float gs = std::max( float(Dist) / 10.0f, 0.05f ) * gizmoSizeMul;
 
 			scene->setGLLineWidth( Settings::lineWidthAxes * ( gizmoMode ? 1.6f : 1.0f ) );
 			scene->loadModelViewMatrix( viewTrans * nt );
@@ -716,7 +716,7 @@ void GLView::paintGL()
 		glDisable( GL_DEPTH_TEST );
 		glDepthMask( GL_FALSE );
 		scene->loadModelViewMatrix( viewTrans );
-		float ms = std::max( float( Dist ) / 100.0f, 0.005f );
+		float ms = std::max( float( Dist ) / 100.0f, 0.005f ) * gizmoSizeMul;
 
 		for ( const auto & pe : pickedElems ) {
 			if ( pe.type == 1 ) {
@@ -1379,6 +1379,7 @@ void GLView::setSoloBlock( int blockNumber )
 
 float GLView::gizmoSnapStep = 1.0f;
 float GLView::gizmoRotSnapDeg = 5.0f;
+float GLView::gizmoSizeMul = 1.75f;
 
 Transform GLView::viewTransform() const
 {
@@ -1454,7 +1455,7 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 
 	Matrix basis = gizmoBasis( iGb );
 	Vector3 P = gizmoPivotPoint( iGb );
-	float gs = std::max( float( Dist ) / 10.0f, 0.05f );
+	float gs = std::max( float( Dist ) / 10.0f, 0.05f ) * gizmoSizeMul;
 
 	QPointF sp;
 	if ( !worldToScreen( P, sp ) )
@@ -1635,7 +1636,8 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 	float dx = pos.x() - gizmoStartPos.x();
 	float dy = pos.y() - gizmoStartPos.y();
 	const bool numeric = gizmoNumActive();
-	bool snap = ( mods & Qt::ControlModifier ) && !numeric;
+	// magnet toggle makes snapping the default; Ctrl inverts it (Blender)
+	bool snap = ( ( ( mods & Qt::ControlModifier ) != 0 ) != snapDefaultOn ) && !numeric;
 	float precision = ( mods & Qt::ShiftModifier ) ? 0.2f : 1.0f;
 
 	// camera orientation in world space
@@ -2963,6 +2965,16 @@ void GLView::keyPressEvent( QKeyEvent * event )
 {
 	// modal transform gizmo
 	if ( gizmoMode ) {
+		// Blender: G/R/S during a gesture switches the transform mode,
+		// resetting to the original values first
+		if ( event->key() == Qt::Key_G || event->key() == Qt::Key_R || event->key() == Qt::Key_S ) {
+			int nm = ( event->key() == Qt::Key_G ) ? 1 : ( event->key() == Qt::Key_R ? 2 : 3 );
+			if ( nm != gizmoMode ) {
+				gizmoEnd( false );
+				gizmoBegin( nm );
+			}
+			return;
+		}
 		switch ( event->key() ) {
 		case Qt::Key_X:
 			gizmoAxis = 1;
