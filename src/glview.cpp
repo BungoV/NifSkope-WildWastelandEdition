@@ -2928,21 +2928,29 @@ int GLView::convertKeyCode( int n ) const
 	case Qt::Key_PageDown:
 		return Key_ZoomOut;
 	case Qt::Key_A:
-		return Key_MoveLeft;
 	case Qt::Key_D:
-		return Key_MoveRight;
 	case Qt::Key_W:
-		return Key_MoveForward;
 	case Qt::Key_S:
-		return Key_MoveBack;
-#if 0
-	case Qt::Key_F:
-		return Key_FrontView;
-#endif
 	case Qt::Key_Q:
-		return Key_MoveDown;
 	case Qt::Key_E:
-		return Key_MoveUp;
+		// keyboard camera movement only in free camera / walk mode, so the
+		// letters stay free for the Blender-style transform shortcuts
+		if ( !( freeCamera || view == ViewWalk ) )
+			return -1;
+		switch ( n ) {
+		case Qt::Key_A:
+			return Key_MoveLeft;
+		case Qt::Key_D:
+			return Key_MoveRight;
+		case Qt::Key_W:
+			return Key_MoveForward;
+		case Qt::Key_S:
+			return Key_MoveBack;
+		case Qt::Key_Q:
+			return Key_MoveDown;
+		default:
+			return Key_MoveUp;
+		}
 	case Qt::Key_M:
 		return Key_Update;
 	case Qt::Key_Space:
@@ -3076,6 +3084,17 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			update();
 			return;
 		}
+	}
+
+	// Blender-like free camera toggle (frontal light moved to Ctrl+Shift+F)
+	if ( event->key() == Qt::Key_F && ( event->modifiers() & Qt::ShiftModifier )
+		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		freeCamera = !freeCamera;
+		kbdState = 0;
+		emit gizmoStatus( freeCamera
+			? tr( "Free camera ON: WASD move, Q/E down/up, arrow keys rotate, PgUp/PgDn zoom (Shift+F to exit)" )
+			: tr( "Free camera off" ) );
+		return;
 	}
 
 	int	k = convertKeyCode( event->key() );

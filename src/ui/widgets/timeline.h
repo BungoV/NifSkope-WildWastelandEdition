@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QWidget> // Inherited
 #include <QHash>
+#include <QIcon>
 #include <QImage>
 #include <QPersistentModelIndex>
 #include <QSet>
@@ -44,6 +45,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 
 //! @file timeline.h TimelineWidget, TimelineLanesView, TimelineGraphView, TimelineInspector
+
+//! Draw a crisp Blender-style toolbar icon (also used by the main-window toolbar)
+QIcon tlMakeIcon( const QString & id, const QColor & col );
 
 class NifModel;
 

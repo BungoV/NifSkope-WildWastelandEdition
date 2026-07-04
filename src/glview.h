@@ -338,6 +338,9 @@ public:
 	//! Move all picked vertices to the cursor (edits mesh data, undoable snapshot)
 	void movePickedVertsToCursor();
 
+	// Blender-like free camera: keyboard movement only while enabled (Shift+F)
+	bool freeCamera = false;
+
 	// ---- snapping ----
 	int snapTargetMode = 0;             // 0 grid step, 1 vertex, 2 edge, 3 face
 	bool snapAlignRot = false;          // orient +Z to the target face normal

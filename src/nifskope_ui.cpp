@@ -715,14 +715,131 @@ void NifSkope::initDockWidgets()
 	ui->menuShow->addAction(dRefr->toggleViewAction());
 	ui->menuShow->addAction(dTimeline->toggleViewAction());
 
-	ui->tView->addAction(dList->toggleViewAction());
-	ui->tView->addAction(dTree->toggleViewAction());
-	ui->tView->addAction(dHeader->toggleViewAction());
-	ui->tView->addAction(dBrowser->toggleViewAction());
-	ui->tView->addAction(dInsp->toggleViewAction());
-	ui->tView->addAction(dKfm->toggleViewAction());
-	ui->tView->addAction(dRefr->toggleViewAction());
-	ui->tView->addAction(dTimeline->toggleViewAction());
+	// ---- main toolbar overhaul: smaller icons, merged dropdowns, transform header ----
+
+	// smaller icons everywhere (~75%)
+	for ( QToolBar * tb : { ui->tFile, ui->tRender, ui->tAnim, ui->tView, ui->tLOD } ) {
+		QSize is = tb->iconSize();
+		tb->setIconSize( QSize( is.width() * 3 / 4, is.height() * 3 / 4 ) );
+	}
+
+	// open/save already live in the File menu; drop them from the toolbar
+	ui->tFile->removeAction( ui->aOpenMenu );
+	ui->tFile->removeAction( ui->aSaveMenu );
+
+	// view directions collapse into one dropdown button
+	{
+		QToolButton * btn = new QToolButton( this );
+		btn->setPopupMode( QToolButton::InstantPopup );
+		btn->setToolTip( tr( "Viewpoint" ) );
+		btn->setIcon( ui->aViewPerspective->icon() );
+		QMenu * m = new QMenu( btn );
+		const QList<QAction *> vs = { ui->aViewTop, ui->aViewFront, ui->aViewLeft, ui->aViewFlip,
+			ui->aViewPerspective, ui->aViewWalk, ui->aViewUser, ui->aViewUserSave };
+		for ( QAction * a : vs )
+			m->addAction( a );
+		btn->setMenu( m );
+		ui->tRender->insertWidget( ui->aViewTop, btn );
+		for ( QAction * a : vs )
+			ui->tRender->removeAction( a );
+	}
+
+	// display toggles collapse into one dropdown button
+	{
+		QToolButton * btn = new QToolButton( this );
+		btn->setPopupMode( QToolButton::InstantPopup );
+		btn->setToolTip( tr( "Display options" ) );
+		btn->setIcon( ui->aShowNodes->icon() );
+		QMenu * m = new QMenu( btn );
+		const QList<QAction *> ds = { ui->aShowCollision, ui->aShowAxes, ui->aShowNodes, ui->aDoSkinning,
+			ui->aShowConstraints, ui->aShowMarkers, ui->aShowHidden };
+		for ( QAction * a : ds )
+			m->addAction( a );
+		m->addSeparator();
+		m->addAction( aSolo );
+		btn->setMenu( m );
+		ui->tRender->insertWidget( ui->aShowCollision, btn );
+		for ( QAction * a : ds )
+			ui->tRender->removeAction( a );
+		ui->tRender->removeAction( aSolo );
+	}
+
+	// Blender-style transform header on the freed toolbar space
+	{
+		auto syncCombo = []( QComboBox * cb, QActionGroup * grp ) {
+			QObject::connect( cb, qOverload<int>( &QComboBox::activated ), [grp]( int i ) {
+				auto acts = grp->actions();
+				if ( i >= 0 && i < acts.size() )
+					acts.at( i )->trigger();
+			} );
+			auto acts = grp->actions();
+			for ( int i = 0; i < acts.size(); i++ ) {
+				QObject::connect( acts.at( i ), &QAction::triggered, [cb, i]() {
+					QSignalBlocker sb( cb );
+					cb->setCurrentIndex( i );
+				} );
+			}
+		};
+
+		ui->tRender->addSeparator();
+
+		QComboBox * cbOrient = new QComboBox( this );
+		cbOrient->addItems( { tr( "Global" ), tr( "Local" ), tr( "Parent" ), tr( "View" ) } );
+		cbOrient->setToolTip( tr( "Transform orientation" ) );
+		syncCombo( cbOrient, grpOrient );
+		ui->tRender->addWidget( cbOrient );
+
+		QComboBox * cbPivot = new QComboBox( this );
+		cbPivot->addItems( { tr( "Origin" ), tr( "Bounds" ), tr( "Median" ), tr( "Cursor" ) } );
+		cbPivot->setToolTip( tr( "Transform pivot point" ) );
+		syncCombo( cbPivot, grpPivot );
+		ui->tRender->addWidget( cbPivot );
+
+		QToolButton * btnMagnet = new QToolButton( this );
+		btnMagnet->setCheckable( true );
+		btnMagnet->setAutoRaise( true );
+		btnMagnet->setIcon( tlMakeIcon( QStringLiteral( "magnet" ), QColor( 228, 228, 232 ) ) );
+		btnMagnet->setToolTip( tr( "Snap during transforms without holding Ctrl (Ctrl inverts)" ) );
+		connect( btnMagnet, &QToolButton::toggled, [this]( bool on ) { ogl->snapDefaultOn = on; } );
+		ui->tRender->addWidget( btnMagnet );
+
+		QComboBox * cbSnap = new QComboBox( this );
+		cbSnap->addItems( { tr( "Grid" ), tr( "Vertex" ), tr( "Edge" ), tr( "Face" ) } );
+		cbSnap->setToolTip( tr( "Snap target" ) );
+		syncCombo( cbSnap, grpSnapTgt );
+		ui->tRender->addWidget( cbSnap );
+
+		QComboBox * cbPick = new QComboBox( this );
+		cbPick->addItems( { tr( "Select: Node" ), tr( "Select: Vertex" ), tr( "Select: Edge" ), tr( "Select: Face" ) } );
+		cbPick->setToolTip( tr( "Element select mode (1/2/3 in the viewport)" ) );
+		syncCombo( cbPick, grpPick );
+		ui->tRender->addWidget( cbPick );
+
+		aGizmoHandles->setIconText( tr( "Gizmo" ) );
+		ui->tRender->addAction( aGizmoHandles );
+
+		QToolButton * btnCursor = new QToolButton( this );
+		btnCursor->setPopupMode( QToolButton::InstantPopup );
+		btnCursor->setText( tr( "Cursor" ) );
+		btnCursor->setToolTip( tr( "3D cursor and element utilities" ) );
+		btnCursor->setMenu( mCursor );
+		ui->tRender->addWidget( btnCursor );
+	}
+
+	// dock toggles collapse into one dropdown on the View toolbar
+	{
+		QToolButton * btn = new QToolButton( this );
+		btn->setPopupMode( QToolButton::InstantPopup );
+		btn->setText( tr( "Panels" ) );
+		btn->setToolTip( tr( "Show/hide panels" ) );
+		QMenu * m = new QMenu( btn );
+		for ( QDockWidget * dw : { dList, dTree, dHeader, dBrowser, dInsp, dKfm, dRefr, dTimeline } ) {
+			m->addAction( dw->toggleViewAction() );
+			ui->tView->removeAction( dw->toggleViewAction() );
+		}
+		btn->setMenu( m );
+		ui->tView->addWidget( btn );
+	}
 
 	// Set Inspect widget
 	dInsp->setWidget( inspect );
