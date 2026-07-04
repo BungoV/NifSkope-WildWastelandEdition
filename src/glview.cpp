@@ -498,25 +498,8 @@ void GLView::paintGL()
 
 	NifSkopeOpenGLContext *	cx = scene->renderer;
 
-	// Transform the scene
-	Transform	viewTrans;
-	viewTrans.rotation.fromEuler( deg2rad(Rot[0]), deg2rad(Rot[1]), deg2rad(Rot[2]) );
-	viewTrans.translation = viewTrans.rotation * Pos;
-	if ( cfg.upAxis != ZAxis ) {
-		float *	r = &( viewTrans.rotation( 0, 0 ) );
-		if ( cfg.upAxis == XAxis ) {			// YZX -> XYZ
-			FloatVector4::convertVector3( r ).shuffleValues( 0xD2 ).convertToVector3( r );
-			FloatVector4::convertVector3( r + 3 ).shuffleValues( 0xD2 ).convertToVector3( r + 3 );
-			FloatVector4::convertVector3( r + 6 ).shuffleValues( 0xD2 ).convertToVector3( r + 6 );
-		} else if ( cfg.upAxis == YAxis ) {		// ZXY -> XYZ
-			FloatVector4::convertVector3( r ).shuffleValues( 0xC9 ).convertToVector3( r );
-			FloatVector4::convertVector3( r + 3 ).shuffleValues( 0xC9 ).convertToVector3( r + 3 );
-			FloatVector4::convertVector3( r + 6 ).shuffleValues( 0xC9 ).convertToVector3( r + 6 );
-		}
-	}
-
-	if ( view != ViewWalk )
-		viewTrans.translation[2] -= Dist * 2;
+	// Transform the scene (viewTransform() must stay identical to this)
+	Transform	viewTrans = viewTransform();
 
 	scene->transform( viewTrans, time );
 
@@ -673,7 +656,41 @@ void GLView::paintGL()
 
 			scene->setGLLineWidth( Settings::lineWidthAxes * ( gizmoMode ? 1.6f : 1.0f ) );
 			scene->loadModelViewMatrix( viewTrans * nt );
-			scene->drawAxes( Vector3(), gs, true );
+
+			if ( gizmoMode || !gizmoHandlesOn ) {
+				scene->drawAxes( Vector3(), gs, true );
+			} else {
+				// Blender-style draggable handles: arrows (move), rings (rotate),
+				// boxes (scale), center dot (view-plane move); modelview is
+				// already the gizmo basis at the pivot
+				const float L = gs;
+				for ( int i = 0; i < 3; i++ ) {
+					Vector3 u;
+					u[i] = 1.0f;
+					auto axisColor = [this, i]( bool hov ) {
+						if ( hov )
+							scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
+						else
+							scene->setGLColor( i == 0 ? 0.9f : 0.15f, i == 1 ? 0.85f : 0.15f,
+							                   i == 2 ? 0.95f : 0.2f, 0.95f );
+					};
+					// move arrow
+					axisColor( gizmoHover == 1 + i );
+					scene->drawLine( u * ( L * 0.25f ), u * ( L * 1.05f ) );
+					scene->drawSphereSimple( u * ( L * 1.12f ), L * 0.035f, 24, 2 );
+					// scale box
+					axisColor( gizmoHover == 8 + i );
+					Vector3 bc = u * ( L * 0.55f );
+					Vector3 be( L * 0.04f, L * 0.04f, L * 0.04f );
+					scene->drawBox( bc - be, bc + be );
+					// rotation ring
+					axisColor( gizmoHover == 5 + i );
+					scene->drawCircle( Vector3(), u, L * 0.8f, 48 );
+				}
+				// center: view-plane move
+				scene->setGLColor( 1.0f, 1.0f, 1.0f, gizmoHover == 4 ? 1.0f : 0.55f );
+				scene->drawSphereSimple( Vector3(), L * 0.05f, 24, 2 );
+			}
 
 			if ( gizmoMode && gizmoAxis > 0 ) {
 				// constraint line in the active orientation through the pivot
@@ -1300,6 +1317,142 @@ void GLView::setSoloBlock( int blockNumber )
 
 float GLView::gizmoSnapStep = 1.0f;
 
+Transform GLView::viewTransform() const
+{
+	Transform vt;
+	vt.rotation.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	vt.translation = vt.rotation * Pos;
+	if ( cfg.upAxis != ZAxis ) {
+		float * r = &( vt.rotation( 0, 0 ) );
+		if ( cfg.upAxis == XAxis ) {			// YZX -> XYZ
+			FloatVector4::convertVector3( r ).shuffleValues( 0xD2 ).convertToVector3( r );
+			FloatVector4::convertVector3( r + 3 ).shuffleValues( 0xD2 ).convertToVector3( r + 3 );
+			FloatVector4::convertVector3( r + 6 ).shuffleValues( 0xD2 ).convertToVector3( r + 6 );
+		} else if ( cfg.upAxis == YAxis ) {		// ZXY -> XYZ
+			FloatVector4::convertVector3( r ).shuffleValues( 0xC9 ).convertToVector3( r );
+			FloatVector4::convertVector3( r + 3 ).shuffleValues( 0xC9 ).convertToVector3( r + 3 );
+			FloatVector4::convertVector3( r + 6 ).shuffleValues( 0xC9 ).convertToVector3( r + 6 );
+		}
+	}
+	if ( view != ViewWalk )
+		vt.translation[2] -= Dist * 2;
+	return vt;
+}
+
+bool GLView::worldToScreen( const Vector3 & w, QPointF & out ) const
+{
+	float ww = (float)width(), hh = (float)height();
+	if ( ww < 1.0f || hh < 1.0f )
+		return false;
+
+	Vector3 c = viewTransform() * w;
+
+	if ( perspectiveMode || view == ViewWalk ) {
+		if ( c[2] >= -1.0e-4f )
+			return false;	// behind the camera
+		float tanF = float( std::tan( ( cfg.fov / Zoom ) / 360.0 * M_PI ) );
+		out = QPointF( ww * 0.5 * ( 1.0 + c[0] / ( -c[2] * tanF * aspect ) ),
+		               hh * 0.5 * ( 1.0 - c[1] / ( -c[2] * tanF ) ) );
+	} else {
+		float h2 = float( Dist / Zoom );
+		float w2 = h2 * float( aspect );
+		out = QPointF( ww * 0.5 * ( 1.0 + c[0] / w2 ), hh * 0.5 * ( 1.0 - c[1] / h2 ) );
+	}
+	return true;
+}
+
+//! Distance from a point to a screen-space segment
+static float tlPtSegDist( const QPointF & p, const QPointF & a, const QPointF & b )
+{
+	QPointF d = b - a;
+	float len2 = float( d.x() * d.x() + d.y() * d.y() );
+	float t = 0.0f;
+	if ( len2 > 1.0e-6f ) {
+		t = float( ( ( p.x() - a.x() ) * d.x() + ( p.y() - a.y() ) * d.y() ) / len2 );
+		t = std::min( std::max( t, 0.0f ), 1.0f );
+	}
+	QPointF q = a + d * t;
+	return float( std::hypot( p.x() - q.x(), p.y() - q.y() ) );
+}
+
+int GLView::gizmoHandleHitTest( const QPointF & pos ) const
+{
+	if ( !model || !scene || !scene->currentBlock.isValid() || view == ViewWalk )
+		return 0;
+
+	int gb = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+	while ( gb >= 0 && !model->blockInherits( model->getBlockIndex( gb ), "NiAVObject" ) )
+		gb = model->getParent( gb );
+	if ( gb < 0 )
+		return 0;
+	QModelIndex iGb = model->getBlockIndex( gb );
+	if ( !model->getIndex( iGb, "Translation" ).isValid() )
+		return 0;
+
+	Matrix basis = gizmoBasis( iGb );
+	Vector3 P = gizmoPivotPoint( iGb );
+	float gs = std::max( float( Dist ) / 10.0f, 0.05f );
+
+	QPointF sp;
+	if ( !worldToScreen( P, sp ) )
+		return 0;
+
+	// center: view-plane move
+	if ( std::hypot( pos.x() - sp.x(), pos.y() - sp.y() ) < 10.0 )
+		return 4;
+
+	Vector3 ax[3];
+	for ( int i = 0; i < 3; i++ ) {
+		Vector3 u;
+		u[i] = 1.0f;
+		ax[i] = basis * u;
+	}
+
+	// scale boxes first: they sit on the arrow shafts
+	for ( int i = 0; i < 3; i++ ) {
+		QPointF bp;
+		if ( worldToScreen( P + ax[i] * ( gs * 0.55f ), bp )
+			&& std::hypot( pos.x() - bp.x(), pos.y() - bp.y() ) < 8.0 )
+			return 8 + i;
+	}
+
+	// move arrows
+	for ( int i = 0; i < 3; i++ ) {
+		QPointF a, b;
+		if ( worldToScreen( P + ax[i] * ( gs * 0.25f ), a )
+			&& worldToScreen( P + ax[i] * ( gs * 1.15f ), b )
+			&& tlPtSegDist( pos, a, b ) < 7.0f )
+			return 1 + i;
+	}
+
+	// rotation rings
+	for ( int i = 0; i < 3; i++ ) {
+		Vector3 u = Vector3::crossproduct( ax[i], ax[( i + 1 ) % 3] );
+		u.normalize();
+		Vector3 v = Vector3::crossproduct( ax[i], u );
+		float r = gs * 0.8f;
+		QPointF prev;
+		bool prevOk = false;
+		float best = 1.0e9f;
+		for ( int s = 0; s <= 48; s++ ) {
+			float ang = float( s ) * float( M_PI * 2.0 / 48.0 );
+			QPointF q;
+			if ( !worldToScreen( P + ( u * std::cos( ang ) + v * std::sin( ang ) ) * r, q ) ) {
+				prevOk = false;
+				continue;
+			}
+			if ( prevOk )
+				best = std::min( best, tlPtSegDist( pos, prev, q ) );
+			prev = q;
+			prevOk = true;
+		}
+		if ( best < 6.0f )
+			return 5 + i;
+	}
+
+	return 0;
+}
+
 Matrix GLView::gizmoBasis( const QModelIndex & iBlock ) const
 {
 	if ( gizmoOrient == 1 || gizmoOrient == 2 ) {
@@ -1535,6 +1688,8 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 
 void GLView::gizmoEnd( bool commit )
 {
+	gizmoHandleDrag = false;
+
 	if ( !gizmoMode )
 		return;
 
@@ -2405,6 +2560,15 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 		return;
 	}
 
+	// hover highlighting of the gizmo handles
+	if ( gizmoHandlesOn && !mouseButtonState && model ) {
+		int h = gizmoHandleHitTest( getQMouseEventPosition( event ) );
+		if ( h != gizmoHover ) {
+			gizmoHover = h;
+			update();
+		}
+	}
+
 	auto	newPos = getQMouseEventPosition( event );
 	float	dx = newPos.x() - lastPos.x();
 	float	dy = newPos.y() - lastPos.y();
@@ -2443,6 +2607,24 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		return;
 	}
 
+	// grabbing a gizmo handle starts a constrained drag; releasing commits
+	if ( gizmoHandlesOn && event->button() == Qt::LeftButton && view != ViewWalk
+		&& !kbdState && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		auto p = getQMouseEventPosition( event );
+		int h = gizmoHandleHitTest( p );
+		if ( h ) {
+			int mode = ( h >= 8 ) ? 3 : ( h >= 5 ? 2 : 1 );
+			if ( gizmoBegin( mode ) ) {
+				gizmoAxis = ( h == 4 ) ? 0 : ( h >= 8 ? h - 7 : ( h >= 5 ? h - 4 : h ) );
+				gizmoStartPos = QPoint( int( p.x() ), int( p.y() ) );
+				gizmoHandleDrag = true;
+				mouseButtonState |= std::uint32_t( event->button() );
+				gizmoUpdate( gizmoStartPos, event->modifiers() );
+				return;
+			}
+		}
+	}
+
 	mouseButtonState |= std::uint32_t( event->button() );
 	if ( event->button() == Qt::ForwardButton || event->button() == Qt::BackButton ) {
 		event->ignore();
@@ -2456,6 +2638,13 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 void GLView::mouseReleaseEvent( QMouseEvent * event )
 {
+	if ( gizmoHandleDrag ) {
+		gizmoHandleDrag = false;
+		mouseButtonState &= ~( std::uint32_t( event->button() ) );
+		gizmoEnd( true );
+		return;
+	}
+
 	if ( gizmoSwallowClick ) {
 		gizmoSwallowClick = false;
 		mouseButtonState &= ~( std::uint32_t( event->button() ) );

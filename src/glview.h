@@ -255,9 +255,21 @@ private:
 	//! World-space pivot point for the current gizmoPivot setting
 	Vector3 gizmoPivotPoint( const QModelIndex & iBlock ) const;
 
+	// draggable handles (arrows / rings / boxes drawn at the pivot)
+	bool gizmoHandleDrag = false;       // LMB held on a handle; release commits
+	int gizmoHover = 0;                 // handle under the mouse (highlight)
+	//! Camera transform identical to the one paintGL uses
+	Transform viewTransform() const;
+	//! Project a world point to logical widget coordinates
+	bool worldToScreen( const Vector3 & w, QPointF & out ) const;
+	//! Which handle is under this position: 0 none, 1-3 move XYZ, 4 view-plane move,
+	//! 5-7 rotate rings, 8-10 scale boxes
+	int gizmoHandleHitTest( const QPointF & pos ) const;
+
 public:
 	static float gizmoSnapStep;
 	bool gizmoAutoKey = false;
+	bool gizmoHandlesOn = true;         // draw + pick the draggable handles
 	int gizmoOrient = 0;                // 0 Global, 1 Local, 2 Parent, 3 View
 	int gizmoPivot = 0;                 // 0 node origin, 1 bounding center
 

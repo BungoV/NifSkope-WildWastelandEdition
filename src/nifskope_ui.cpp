@@ -452,6 +452,16 @@ void NifSkope::initDockWidgets()
 	} );
 	ui->mRender->addAction( aGizmoSnap );
 
+	QAction * aGizmoHandles = new QAction( tr( "Show Transform Gizmo" ), this );
+	aGizmoHandles->setCheckable( true );
+	aGizmoHandles->setChecked( true );
+	aGizmoHandles->setToolTip( tr( "Draw draggable move/rotate/scale handles on the selected node" ) );
+	connect( aGizmoHandles, &QAction::toggled, [this]( bool on ) {
+		ogl->gizmoHandlesOn = on;
+		ogl->update();
+	} );
+	ui->mRender->addAction( aGizmoHandles );
+
 	// Blender-style transform orientation / pivot point selectors
 	QMenu * mOrient = new QMenu( tr( "Transform Orientation" ), this );
 	QActionGroup * grpOrient = new QActionGroup( this );
