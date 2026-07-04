@@ -1616,6 +1616,7 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 				nt[c] = std::round( nt[c] / gizmoSnapStep ) * gizmoSnapStep;
 		}
 
+		gizmoLastParam = gizmoBasisM.inverted() * deltaWorld;
 		model->set<Vector3>( iBlock, "Translation", nt );
 		status = tr( "Move: %1, %2, %3" ).arg( nt[0], 0, 'f', 3 ).arg( nt[1], 0, 'f', 3 ).arg( nt[2], 0, 'f', 3 );
 	} else if ( gizmoMode == 2 ) {
@@ -1637,6 +1638,9 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 		Matrix dr;
 		dr.fromQuat( q );
 
+		gizmoLastParam = Vector3( angle, 0, 0 );
+		gizmoLastRotAxis = axis;
+
 		// world delta rotation expressed in the parent frame, so it is correct
 		// under rotated parents too
 		model->set<Matrix>( iBlock, "Rotation", gizmoParentRot.inverted() * dr * gizmoParentRot * gizmoOrigRot );
@@ -1652,6 +1656,7 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 		if ( snap )
 			factor = std::max( std::round( factor * 10.0f ) / 10.0f, 0.1f );
 
+		gizmoLastParam = Vector3( factor, 0, 0 );
 		model->set<float>( iBlock, "Scale", gizmoOrigScale * factor );
 
 		if ( gizmoPivot != 0 ) {
@@ -1726,7 +1731,6 @@ void GLView::gizmoEnd( bool commit )
 				model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, nv, model->itemName( iField ), model ) );
 		};
 
-		Q_UNUSED( mode );
 		// pivot-relative rotate/scale moves Translation too, so commit whatever changed
 		if ( !( newTrans == gizmoOrigTrans ) )
 			pushTyped( "Translation", newTrans );
@@ -1737,9 +1741,97 @@ void GLView::gizmoEnd( bool commit )
 
 		if ( gizmoAutoKey )
 			emit transformCommitted( model->getBlockNumber( iBlock ) );
+
+		// freeze the gesture frame for the redo panel
+		lastGizmoMode = mode;
+		lastGizmoAxis = gizmoAxis;
+		lastGizmoBlock = iBlock;
+		lastBasis = gizmoBasisM;
+		lastPivot = gizmoPivotWorld;
+		lastParentRot = gizmoParentRot;
+		lastParentPos = gizmoParentPos;
+		lastParentScale = gizmoParentScale;
+		lastOrigWorldPos = gizmoOrigWorldPos;
+		lastOrigTrans = gizmoOrigTrans;
+		lastOrigRot = gizmoOrigRot;
+		lastOrigScale = gizmoOrigScale;
+		lastUndoIndex = model->undoStack ? model->undoStack->index() : -1;
+		emit transformGesture( mode, gizmoAxis, gizmoLastParam );
 	}
 
 	update();
+}
+
+bool GLView::gizmoReapply( const Vector3 & param )
+{
+	if ( !model || !model->undoStack || !lastGizmoMode || !lastGizmoBlock.isValid() )
+		return false;
+	// the gesture is stale once anything else touches the undo stack
+	if ( model->undoStack->index() != lastUndoIndex )
+		return false;
+
+	QModelIndex iBlock( lastGizmoBlock );
+
+	// revert the previous commit (one merged transaction), then re-apply
+	model->undoStack->undo();
+
+	auto worldToLocal = [this]( const Vector3 & w ) {
+		return lastParentRot.inverted() * ( ( w - lastParentPos ) * ( 1.0f / lastParentScale ) );
+	};
+
+	Vector3 newTrans = lastOrigTrans;
+	Matrix newRot = lastOrigRot;
+	float newScale = lastOrigScale;
+
+	if ( lastGizmoMode == 1 ) {
+		newTrans = worldToLocal( lastOrigWorldPos + lastBasis * param );
+		gizmoLastParam = param;
+	} else if ( lastGizmoMode == 2 ) {
+		Quat q;
+		q.fromAxisAngle( gizmoLastRotAxis, deg2rad( param[0] ) );
+		Matrix dr;
+		dr.fromQuat( q );
+		newRot = lastParentRot.inverted() * dr * lastParentRot * lastOrigRot;
+		Vector3 newWorld = lastPivot + dr * ( lastOrigWorldPos - lastPivot );
+		newTrans = worldToLocal( newWorld );
+		gizmoLastParam = Vector3( param[0], 0, 0 );
+	} else if ( lastGizmoMode == 3 ) {
+		float factor = std::max( param[0], 0.001f );
+		newScale = lastOrigScale * factor;
+		Vector3 newWorld = lastPivot + ( lastOrigWorldPos - lastPivot ) * factor;
+		newTrans = worldToLocal( newWorld );
+		gizmoLastParam = Vector3( factor, 0, 0 );
+	}
+
+	ChangeValueCommand::createTransaction();
+	auto pushTyped = [this, &iBlock]( const char * fieldName, auto newVal ) {
+		QModelIndex iField = model->getIndex( iBlock, fieldName );
+		if ( !iField.isValid() )
+			return;
+		QModelIndex vIdx = iField.sibling( iField.row(), NifModel::ValueCol );
+		const NifItem * item = static_cast<const NifItem *>( vIdx.internalPointer() );
+		if ( !item )
+			return;
+		NifValue oldVal = item->value();
+		NifValue nv = oldVal;
+		if ( nv.set( newVal, model, item ) )
+			model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, nv, model->itemName( iField ), model ) );
+	};
+
+	if ( !( newTrans == lastOrigTrans ) )
+		pushTyped( "Translation", newTrans );
+	if ( !( newRot == lastOrigRot ) )
+		pushTyped( "Rotation", newRot );
+	if ( newScale != lastOrigScale )
+		pushTyped( "Scale", newScale );
+
+	lastUndoIndex = model->undoStack->index();
+
+	if ( gizmoAutoKey )
+		emit transformCommitted( model->getBlockNumber( iBlock ) );
+
+	update();
+	return true;
 }
 
 QModelIndex parent( QModelIndex ix, QModelIndex xi )

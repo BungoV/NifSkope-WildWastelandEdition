@@ -178,6 +178,9 @@ signals:
 	void sceneTimeChanged( float t, float mn, float mx );
 	//! Modal transform gizmo status line (empty = clear)
 	void gizmoStatus( const QString & );
+	//! A transform gesture was committed: mode (1 move / 2 rotate / 3 scale), axis,
+	//! parameter (move: basis-space offsets; rotate: angle in [0]; scale: factor in [0])
+	void transformGesture( int mode, int axis, const Vector3 & param );
 	//! A gizmo transform was committed on this block (for auto-keying)
 	void transformCommitted( int blockNumber );
 	void viewpointChanged();
@@ -258,6 +261,18 @@ private:
 	// draggable handles (arrows / rings / boxes drawn at the pivot)
 	bool gizmoHandleDrag = false;       // LMB held on a handle; release commits
 	int gizmoHover = 0;                 // handle under the mouse (highlight)
+
+	// last committed gesture, frozen for the redo panel
+	Vector3 gizmoLastParam;             // updated live during the gesture
+	Vector3 gizmoLastRotAxis;           // world axis of the last rotation
+	int lastGizmoMode = 0;
+	int lastGizmoAxis = 0;
+	QPersistentModelIndex lastGizmoBlock;
+	Matrix lastBasis, lastParentRot, lastOrigRot;
+	Vector3 lastPivot, lastParentPos, lastOrigWorldPos, lastOrigTrans;
+	float lastParentScale = 1.0f;
+	float lastOrigScale = 1.0f;
+	int lastUndoIndex = -1;
 	//! Camera transform identical to the one paintGL uses
 	Transform viewTransform() const;
 	//! Project a world point to logical widget coordinates
@@ -272,6 +287,10 @@ public:
 	bool gizmoHandlesOn = true;         // draw + pick the draggable handles
 	int gizmoOrient = 0;                // 0 Global, 1 Local, 2 Parent, 3 View
 	int gizmoPivot = 0;                 // 0 node origin, 1 bounding center
+
+	//! Re-apply the last committed gesture with new parameters (redo panel).
+	//! Returns false if the gesture went stale (undo stack moved on).
+	bool gizmoReapply( const Vector3 & param );
 
 private:
 	bool gizmoBegin( int mode );

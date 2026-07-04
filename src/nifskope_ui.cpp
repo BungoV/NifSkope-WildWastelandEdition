@@ -62,10 +62,14 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QComboBox>
 #include <QDebug>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFontDialog>
+#include <QFrame>
+#include <QGridLayout>
 #include <QInputDialog>
 #include <QGroupBox>
+#include <QLabel>
 #include <QHeaderView>
 #include <QMenu>
 #include <QMenuBar>
@@ -451,6 +455,96 @@ void NifSkope::initDockWidgets()
 			GLView::gizmoSnapStep = (float)v;
 	} );
 	ui->mRender->addAction( aGizmoSnap );
+
+	// Blender-style redo panel: tweak the parameters of the last transform
+	{
+		QFrame * rp = new QFrame( graphicsView );
+		rp->setObjectName( QStringLiteral( "GizmoRedoPanel" ) );
+		rp->setFrameShape( QFrame::StyledPanel );
+		rp->setAutoFillBackground( true );
+		rp->hide();
+
+		QGridLayout * rpl = new QGridLayout( rp );
+		rpl->setContentsMargins( 8, 6, 8, 6 );
+		rpl->setHorizontalSpacing( 6 );
+
+		QLabel * rpTitle = new QLabel( rp );
+		QFont tf = rpTitle->font();
+		tf.setBold( true );
+		rpTitle->setFont( tf );
+		QToolButton * rpClose = new QToolButton( rp );
+		rpClose->setText( QStringLiteral( "✕" ) );
+		rpClose->setAutoRaise( true );
+		rpl->addWidget( rpTitle, 0, 0, 1, 5 );
+		rpl->addWidget( rpClose, 0, 5 );
+		connect( rpClose, &QToolButton::clicked, rp, &QWidget::hide );
+
+		QLabel * rpLbl0 = new QLabel( rp ), * rpLbl1 = new QLabel( rp ), * rpLbl2 = new QLabel( rp );
+		QDoubleSpinBox * rpVal0 = new QDoubleSpinBox( rp ), * rpVal1 = new QDoubleSpinBox( rp ), * rpVal2 = new QDoubleSpinBox( rp );
+		QLabel * rpLbls[3] = { rpLbl0, rpLbl1, rpLbl2 };
+		QDoubleSpinBox * rpVals[3] = { rpVal0, rpVal1, rpVal2 };
+		for ( int i = 0; i < 3; i++ ) {
+			rpVals[i]->setRange( -1.0e6, 1.0e6 );
+			rpVals[i]->setDecimals( 4 );
+			rpVals[i]->setKeyboardTracking( false );
+			rpl->addWidget( rpLbls[i], 1, i * 2 );
+			rpl->addWidget( rpVals[i], 1, i * 2 + 1 );
+		}
+
+		auto applyEdit = [this, rp, rpVal0, rpVal1, rpVal2]() {
+			if ( !rp->isVisible() )
+				return;
+			if ( !ogl->gizmoReapply( Vector3( (float)rpVal0->value(), (float)rpVal1->value(), (float)rpVal2->value() ) ) )
+				rp->hide();
+		};
+		for ( auto sb : { rpVal0, rpVal1, rpVal2 } )
+			connect( sb, qOverload<double>( &QDoubleSpinBox::valueChanged ), applyEdit );
+
+		connect( ogl, &GLView::transformGesture,
+			[this, rp, rpTitle, rpLbl0, rpLbl1, rpLbl2, rpVal0, rpVal1, rpVal2]( int mode, int axis, const Vector3 & p ) {
+			static const char * axisNames[4] = { "View", "X", "Y", "Z" };
+			static const char * orientNames[4] = { "Global", "Local", "Parent", "View" };
+			QLabel * lbls[3] = { rpLbl0, rpLbl1, rpLbl2 };
+			QDoubleSpinBox * vals[3] = { rpVal0, rpVal1, rpVal2 };
+
+			for ( auto sb : vals )
+				sb->blockSignals( true );
+
+			bool three = ( mode == 1 );
+			if ( mode == 1 ) {
+				rpTitle->setText( tr( "Move  (%1%2)" ).arg( QLatin1String( orientNames[ogl->gizmoOrient] ),
+					axis > 0 ? QStringLiteral( " " ) + QLatin1String( axisNames[axis] ) : QString() ) );
+				const char * comps[3] = { "X", "Y", "Z" };
+				for ( int i = 0; i < 3; i++ ) {
+					lbls[i]->setText( QLatin1String( comps[i] ) );
+					vals[i]->setValue( p[i] );
+				}
+			} else if ( mode == 2 ) {
+				rpTitle->setText( tr( "Rotate around %1 (%2)" ).arg( QLatin1String( axisNames[axis] ),
+					QLatin1String( orientNames[ogl->gizmoOrient] ) ) );
+				lbls[0]->setText( tr( "Angle°" ) );
+				vals[0]->setValue( p[0] );
+			} else {
+				rpTitle->setText( tr( "Scale (uniform)" ) );
+				lbls[0]->setText( tr( "Factor" ) );
+				vals[0]->setValue( p[0] );
+			}
+
+			for ( int i = 1; i < 3; i++ ) {
+				lbls[i]->setVisible( three );
+				vals[i]->setVisible( three );
+			}
+			for ( auto sb : vals )
+				sb->blockSignals( false );
+
+			rp->adjustSize();
+			rp->move( 10, graphicsView->height() - rp->height() - 10 );
+			rp->show();
+			rp->raise();
+		} );
+
+		connect( this, &NifSkope::completeLoading, rp, &QWidget::hide );
+	}
 
 	QAction * aGizmoHandles = new QAction( tr( "Show Transform Gizmo" ), this );
 	aGizmoHandles->setCheckable( true );
