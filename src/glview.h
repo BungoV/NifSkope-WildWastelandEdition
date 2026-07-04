@@ -152,6 +152,8 @@ public slots:
 	void setSceneSequence( const QString & );
 	//! Render only the currently selected node's subtree (follows the selection)
 	void setSoloMode( bool );
+	//! Render only the given block's subtree (-1 clears; independent of solo mode)
+	void setSoloBlock( int blockNumber );
 	void saveUserView();
 	void loadUserView();
 	void setBrightness( int );

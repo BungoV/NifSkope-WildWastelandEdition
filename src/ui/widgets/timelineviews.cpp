@@ -403,6 +403,36 @@ void TimelineLanesView::paintEvent( QPaintEvent * )
 		const TimelineLane & lane = tl->lanes[laneIdx];
 		QRect laneRect( 0, y, w, TL_LANE_H );
 
+		// Sequence group header: full-width bar with a collapse arrow
+		if ( lane.isHeader ) {
+			p.fillRect( laneRect, pal.window() );
+			bool collapsed = tl->collapsedSeqs.contains( lane.groupSeq );
+			p.setPen( pal.color( QPalette::Text ) );
+			p.drawText( QRect( 4, y, 12, TL_LANE_H ), Qt::AlignCenter, collapsed ? QStringLiteral( "▸" ) : QStringLiteral( "▾" ) );
+			QFont bf = p.font();
+			bf.setBold( true );
+			p.save();
+			p.setFont( bf );
+			p.drawText( QRect( 18, y, w - 22, TL_LANE_H ), Qt::AlignVCenter | Qt::AlignLeft,
+				fm.elidedText( lane.label, Qt::ElideRight, w - 22 ) );
+			p.restore();
+
+			// sequence start/stop range on the header row
+			if ( lane.hasCtrlRange ) {
+				float x0 = tl->timeToX( lane.start, w );
+				float x1 = tl->timeToX( lane.stop, w );
+				QColor barCol = pal.color( QPalette::Highlight );
+				barCol.setAlpha( 60 );
+				p.setPen( Qt::NoPen );
+				p.setBrush( barCol );
+				p.drawRect( QRectF( std::min( x0, x1 ), y + TL_LANE_H - 4, std::abs( x1 - x0 ), 3 ) );
+			}
+
+			p.setPen( gridCol );
+			p.drawLine( 0, y + TL_LANE_H - 1, w, y + TL_LANE_H - 1 );
+			continue;
+		}
+
 		if ( laneIdx == tl->currentLane ) {
 			QColor hl = pal.color( QPalette::Highlight );
 			hl.setAlpha( 70 );
@@ -411,11 +441,11 @@ void TimelineLanesView::paintEvent( QPaintEvent * )
 			p.fillRect( laneRect, pal.alternateBase() );
 		}
 
-		// Gutter icons: mute + lock
+		// Gutter icons: mute + lock (diamond = keyframe motif; hollow = inactive)
 		int textX = 4;
 		if ( lane.iController.isValid() ) {
 			p.setPen( lane.muted ? QColor( 0xe2, 0x4b, 0x4a ) : gridCol );
-			p.drawText( QRect( 2, y, 14, TL_LANE_H ), Qt::AlignCenter, lane.muted ? QStringLiteral( "M" ) : QStringLiteral( "♪" ) );
+			p.drawText( QRect( 2, y, 14, TL_LANE_H ), Qt::AlignCenter, lane.muted ? QStringLiteral( "◇" ) : QStringLiteral( "◆" ) );
 			textX = 16;
 		}
 		if ( lane.locked ) {
@@ -508,24 +538,25 @@ void TimelineLanesView::paintEvent( QPaintEvent * )
 		p.drawText( QPointF( x + 2, TL_RULER_H - 6 ), tl->formatTime( t, step ) );
 	}
 
-	// Text key markers across the ruler
+	// Text key markers across the ruler (global; text keys have no lane)
 	p.save();
 	p.setClipRect( QRect( tl->labelW, 0, w - tl->labelW, h ) );
-	for ( const auto & lane : tl->lanes ) {
-		for ( const auto & ch : lane.channels ) {
-			if ( ch.type != TimelineChannel::TextVal )
+	{
+		QFontMetrics mfm( p.font() );
+		for ( const auto & key : tl->markers ) {
+			float x = tl->timeToX( key.time, w );
+			if ( x < tl->labelW - 6 || x > w + 6 )
 				continue;
-			for ( const auto & key : ch.keys ) {
-				float x = tl->timeToX( key.time, w );
-				QColor mc( 0xd8, 0xa0, 0x30 );
-				p.setPen( QPen( mc, 1, Qt::DashLine ) );
-				p.drawLine( QPointF( x, TL_RULER_H ), QPointF( x, h ) );
-				p.setPen( mc );
-				p.setBrush( mc );
-				QPolygonF marker;
-				marker << QPointF( x - 4, 1 ) << QPointF( x + 4, 1 ) << QPointF( x, 8 );
-				p.drawPolygon( marker );
-			}
+			QColor mc( 0xd8, 0xa0, 0x30 );
+			p.setPen( QPen( mc, 1, Qt::DashLine ) );
+			p.drawLine( QPointF( x, TL_RULER_H ), QPointF( x, h ) );
+			p.setPen( mc );
+			p.setBrush( mc );
+			QPolygonF marker;
+			marker << QPointF( x - 4, 1 ) << QPointF( x + 4, 1 ) << QPointF( x, 8 );
+			p.drawPolygon( marker );
+			if ( !key.text.isEmpty() )
+				p.drawText( QPointF( x + 5, 1 + mfm.ascent() ), key.text );
 		}
 	}
 	p.restore();
@@ -559,6 +590,14 @@ void TimelineLanesView::mousePressEvent( QMouseEvent * ev )
 {
 	setFocus( Qt::MouseFocusReason );
 
+	if ( ev->button() == Qt::MiddleButton ) {
+		dragMode = DragPan;
+		dragStart = ev->pos();
+		dragStartTime = tl->viewT0;
+		setCursor( Qt::ClosedHandCursor );
+		return;
+	}
+
 	if ( ev->button() != Qt::LeftButton )
 		return;
 
@@ -577,6 +616,15 @@ void TimelineLanesView::mousePressEvent( QMouseEvent * ev )
 	if ( pos.y() < TL_RULER_H ) {
 		if ( pos.x() < tl->labelW )
 			return;
+
+		// marker triangle click: select the text key in the tree
+		for ( const auto & key : tl->markers ) {
+			if ( pos.y() <= 9 && std::abs( tl->timeToX( key.time, width() ) - pos.x() ) <= 5 && key.idx.isValid() ) {
+				emit tl->indexSelected( QModelIndex( key.idx ) );
+				return;
+			}
+		}
+
 		if ( ev->modifiers() & Qt::ShiftModifier ) {
 			dragMode = DragPrevRange;
 			tl->prevRangeOn = true;
@@ -630,6 +678,14 @@ void TimelineLanesView::mousePressEvent( QMouseEvent * ev )
 		return;
 
 	TimelineLane & lane = tl->lanes[laneIdx];
+
+	// Sequence header: toggle collapse, select the sequence block
+	if ( lane.isHeader ) {
+		if ( lane.iSelect.isValid() )
+			emit tl->indexSelected( QModelIndex( lane.iSelect ) );
+		tl->toggleSeqCollapse( lane.groupSeq );
+		return;
+	}
 
 	// Gutter icon clicks
 	if ( pos.x() < tl->labelW ) {
@@ -712,6 +768,17 @@ void TimelineLanesView::mouseMoveEvent( QMouseEvent * ev )
 			setCursor( Qt::SplitHCursor );
 		else
 			unsetCursor();
+	}
+
+	if ( dragMode == DragPan && ( ev->buttons() & Qt::MiddleButton ) ) {
+		float span = tl->viewT1 - tl->viewT0;
+		float dt = -( pos.x() - dragStart.x() ) * span / std::max( width() - tl->labelW - 8, 1 );
+		tl->viewT0 = dragStartTime + dt;
+		tl->viewT1 = tl->viewT0 + span;
+		invalidateStrips();
+		tl->graphView->invalidateCurves();
+		tl->updateViews();
+		return;
 	}
 
 	if ( !( ev->buttons() & Qt::LeftButton ) )
@@ -816,6 +883,7 @@ void TimelineLanesView::mouseReleaseEvent( QMouseEvent * ev )
 
 	dragMode = DragNone;
 	dragLane = -1;
+	unsetCursor();
 	update();
 }
 
@@ -1348,6 +1416,14 @@ void TimelineGraphView::mousePressEvent( QMouseEvent * ev )
 {
 	setFocus( Qt::MouseFocusReason );
 
+	if ( ev->button() == Qt::MiddleButton ) {
+		dragMode = DragPan;
+		dragStart = ev->pos();
+		dragStartTime = tl->viewT0;
+		setCursor( Qt::ClosedHandCursor );
+		return;
+	}
+
 	if ( ev->button() != Qt::LeftButton )
 		return;
 
@@ -1419,6 +1495,17 @@ void TimelineGraphView::mousePressEvent( QMouseEvent * ev )
 void TimelineGraphView::mouseMoveEvent( QMouseEvent * ev )
 {
 	QPoint pos = ev->pos();
+
+	if ( dragMode == DragPan && ( ev->buttons() & Qt::MiddleButton ) ) {
+		float span = tl->viewT1 - tl->viewT0;
+		float dt = -( pos.x() - dragStart.x() ) * span / std::max( width() - tl->labelW - 8, 1 );
+		tl->viewT0 = dragStartTime + dt;
+		tl->viewT1 = tl->viewT0 + span;
+		invalidateCurves();
+		tl->lanesView->invalidateStrips();
+		tl->updateViews();
+		return;
+	}
 
 	if ( !( ev->buttons() & Qt::LeftButton ) )
 		return;
@@ -1541,6 +1628,7 @@ void TimelineGraphView::mouseReleaseEvent( QMouseEvent * ev )
 	}
 
 	dragMode = DragNone;
+	unsetCursor();
 	update();
 }
 

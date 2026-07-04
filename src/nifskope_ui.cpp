@@ -397,6 +397,17 @@ void NifSkope::initDockWidgets()
 	connect( timeline, &TimelineWidget::sequenceActivated, ogl, &GLView::setSceneSequence );
 	connect( ogl, &GLView::sequenceChanged, timeline, &TimelineWidget::setSequenceByName );
 
+	connect( timeline, &TimelineWidget::isolateBlock, ogl, &GLView::setSoloBlock );
+
+	// Re-dock at the bottom when reopened from the menu: a floating dock that
+	// was closed can come back with its title bar off screen and become unmovable
+	connect( dTimeline->toggleViewAction(), &QAction::toggled, [this]( bool on ) {
+		if ( on && dTimeline->isFloating() ) {
+			dTimeline->setFloating( false );
+			addDockWidget( Qt::BottomDockWidgetArea, dTimeline );
+		}
+	} );
+
 	connect( timeline, &TimelineWidget::playPauseRequested, [this]() {
 		if ( ui->aAnimate->isChecked() )
 			ui->aAnimPlay->trigger();

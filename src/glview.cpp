@@ -1243,6 +1243,12 @@ void GLView::setSoloMode( bool enable )
 	}
 }
 
+void GLView::setSoloBlock( int blockNumber )
+{
+	scene->soloNode = blockNumber;
+	update();
+}
+
 QModelIndex parent( QModelIndex ix, QModelIndex xi )
 {
 	ix = ix.sibling( ix.row(), 0 );

@@ -1010,19 +1010,7 @@ void TimelineWidget::addTextKeyMarker( float time )
 	if ( !nif )
 		return;
 
-	// find the text key channel: prefer current sequence's, else the first text lane
-	int textLane = -1, textCh = -1;
-	for ( int l = 0; l < lanes.count() && textLane < 0; l++ ) {
-		for ( int c = 0; c < lanes[l].channels.count(); c++ ) {
-			if ( lanes[l].channels[c].type == TimelineChannel::TextVal ) {
-				textLane = l;
-				textCh = c;
-				break;
-			}
-		}
-	}
-
-	if ( textLane < 0 ) {
+	if ( !markerChannel.iKeysArray.isValid() ) {
 		QMessageBox::information( this, tr( "Add text key" ),
 			tr( "No NiTextKeyExtraData block in the current view. Add one to a sequence first." ) );
 		return;
@@ -1034,8 +1022,7 @@ void TimelineWidget::addTextKeyMarker( float time )
 	if ( !ok || text.isEmpty() )
 		return;
 
-	const TimelineChannel & ch = lanes[textLane].channels[textCh];
-	auto keys = readChannelKeys( ch );
+	auto keys = readChannelKeys( markerChannel );
 
 	TimelineKeyData kd;
 	kd.time = time;
@@ -1046,8 +1033,8 @@ void TimelineWidget::addTextKeyMarker( float time )
 		at++;
 	keys.insert( at, kd );
 
-	snapshotOp( tr( "Add text key \"%1\"" ).arg( text ), [this, textLane, textCh, &keys]() {
-		writeChannelKeys( lanes[textLane].channels[textCh], keys );
+	snapshotOp( tr( "Add text key \"%1\"" ).arg( text ), [this, &keys]() {
+		writeChannelKeys( markerChannel, keys );
 	} );
 }
 

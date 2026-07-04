@@ -110,8 +110,49 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	filterBox->setMaximumWidth( 130 );
 	connect( filterBox, &QLineEdit::textChanged, this, &TimelineWidget::filterEdited );
 
-	btnPlay = mkBtn( QStringLiteral( "▶" ), tr( "Play/pause animation (Space)" ), false );
-	connect( btnPlay, &QToolButton::clicked, this, &TimelineWidget::playPauseRequested );
+	btnToStart = mkBtn( QStringLiteral( "⏮" ), tr( "Jump to start" ), false );
+	connect( btnToStart, &QToolButton::clicked, [this]() {
+		transportStop();
+		curTime = prevRangeOn ? prevStart : tMin;
+		emit timeChanged( curTime );
+		ensurePlayheadVisible();
+		updateViews();
+	} );
+
+	btnPlayBack = mkBtn( QStringLiteral( "◀" ), tr( "Play backward (Shift+Space)" ), true );
+	connect( btnPlayBack, &QToolButton::clicked, [this]() { transportToggle( -1 ); } );
+
+	btnPlay = mkBtn( QStringLiteral( "▶" ), tr( "Play/pause (Space)" ), true );
+	connect( btnPlay, &QToolButton::clicked, [this]() { transportToggle( 1 ); } );
+
+	btnToEnd = mkBtn( QStringLiteral( "⏭" ), tr( "Jump to end" ), false );
+	connect( btnToEnd, &QToolButton::clicked, [this]() {
+		transportStop();
+		curTime = prevRangeOn ? prevEnd : tMax;
+		emit timeChanged( curTime );
+		ensurePlayheadVisible();
+		updateViews();
+	} );
+
+	playTimer = new QTimer( this );
+	playTimer->setInterval( 16 );
+	connect( playTimer, &QTimer::timeout, [this]() {
+		float lo = prevRangeOn ? prevStart : tMin;
+		float hi = prevRangeOn ? prevEnd : tMax;
+		if ( hi <= lo ) {
+			transportStop();
+			return;
+		}
+		curTime += playDir * 0.016f;
+		if ( curTime > hi )
+			curTime = lo + ( curTime - hi );
+		else if ( curTime < lo )
+			curTime = hi - ( lo - curTime );
+		emit timeChanged( curTime );
+		if ( followPlayhead )
+			ensurePlayheadVisible();
+		updateViews();
+	} );
 
 	timeField = new QLineEdit( this );
 	timeField->setMaximumWidth( 70 );
@@ -226,7 +267,10 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	topLayout->addWidget( filterBox );
 	topLayout->addWidget( btnIsolate );
 	topLayout->addSpacing( 6 );
+	topLayout->addWidget( btnToStart );
+	topLayout->addWidget( btnPlayBack );
 	topLayout->addWidget( btnPlay );
+	topLayout->addWidget( btnToEnd );
 	topLayout->addWidget( timeField );
 	topLayout->addWidget( btnFrames );
 	topLayout->addSpacing( 6 );
@@ -307,6 +351,31 @@ void TimelineWidget::refreshLater()
 	refreshTimer->start();
 }
 
+void TimelineWidget::transportToggle( int dir )
+{
+	if ( playDir == dir ) {
+		transportStop();
+		return;
+	}
+
+	playDir = dir;
+	btnPlay->setChecked( dir == 1 );
+	btnPlayBack->setChecked( dir == -1 );
+	btnPlay->setText( dir == 1 ? QStringLiteral( "⏸" ) : QStringLiteral( "▶" ) );
+	btnPlayBack->setText( dir == -1 ? QStringLiteral( "⏸" ) : QStringLiteral( "◀" ) );
+	playTimer->start();
+}
+
+void TimelineWidget::transportStop()
+{
+	playDir = 0;
+	playTimer->stop();
+	btnPlay->setChecked( false );
+	btnPlayBack->setChecked( false );
+	btnPlay->setText( QStringLiteral( "▶" ) );
+	btnPlayBack->setText( QStringLiteral( "◀" ) );
+}
+
 void TimelineWidget::updateViews()
 {
 	if ( framesMode )
@@ -332,19 +401,20 @@ void TimelineWidget::refresh()
 
 	qint32 prevSeqBlock = -1;
 	int prevSeq = seqBox->currentIndex();
-	if ( prevSeq > 0 && prevSeq - 1 < sequences.count() && nif )
-		prevSeqBlock = nif->getBlockNumber( QModelIndex( sequences[prevSeq - 1] ) );
+	bool prevLoose = ( prevSeq == 1 );
+	if ( prevSeq >= 2 && prevSeq - 2 < sequences.count() && nif )
+		prevSeqBlock = nif->getBlockNumber( QModelIndex( sequences[prevSeq - 2] ) );
 
 	int prevLaneBlock = ( currentLane >= 0 && currentLane < lanes.count() && nif )
 	                    ? nif->getBlockNumber( QModelIndex( lanes[currentLane].iSelect ) ) : -1;
 
 	scanModel();
 
-	int comboRow = 0;
+	int comboRow = prevLoose ? 1 : 0;
 	if ( prevSeqBlock >= 0 ) {
 		for ( int i = 0; i < sequences.count(); i++ ) {
 			if ( nif->getBlockNumber( QModelIndex( sequences[i] ) ) == prevSeqBlock ) {
-				comboRow = i + 1;
+				comboRow = i + 2;
 				break;
 			}
 		}
@@ -392,6 +462,7 @@ void TimelineWidget::scanModel()
 	avObjectsByName.clear();
 	seqBox->clear();
 	seqBox->addItem( tr( "All controllers" ) );
+	seqBox->addItem( tr( "Loose interpolators" ) );
 
 	if ( !nif )
 		return;
@@ -466,8 +537,8 @@ QString TimelineWidget::controllerLabel( const QModelIndex & iController ) const
 
 void TimelineWidget::sequenceChosen( int comboRow )
 {
-	if ( comboRow > 0 && comboRow - 1 < sequences.count() && sequences[comboRow - 1].isValid() ) {
-		emit indexSelected( QModelIndex( sequences[comboRow - 1] ) );
+	if ( comboRow >= 2 && comboRow - 2 < sequences.count() && sequences[comboRow - 2].isValid() ) {
+		emit indexSelected( QModelIndex( sequences[comboRow - 2] ) );
 		if ( !syncingSequence )
 			emit sequenceActivated( seqBox->itemText( comboRow ) );
 	}
@@ -484,7 +555,7 @@ void TimelineWidget::sequenceChosen( int comboRow )
 
 void TimelineWidget::setSequenceByName( const QString & name )
 {
-	for ( int i = 1; i < seqBox->count(); i++ ) {
+	for ( int i = 2; i < seqBox->count(); i++ ) {
 		if ( seqBox->itemText( i ) == name ) {
 			if ( seqBox->currentIndex() != i ) {
 				seqBox->setCurrentIndex( i );
@@ -509,100 +580,97 @@ void TimelineWidget::buildLanes()
 		return;
 	}
 
-	int seq = seqBox->currentIndex();
+	markers.clear();
+	markerChannel = TimelineChannel();
 
-	if ( seq > 0 && seq - 1 < sequences.count() ) {
-		QModelIndex iSeq( sequences[seq - 1] );
+	// Combo rows: 0 = all controllers, 1 = loose interpolators, 2+ = sequences
+	int view = seqBox->currentIndex();
 
-		QModelIndex iCtrl = nif->getIndex( iSeq, "Controlled Blocks" );
+	// interpolators referenced by sequences / attached to controllers
+	QSet<int> seqInterps;
+	for ( const auto & s : sequences ) {
+		QModelIndex iCtrl = nif->getIndex( QModelIndex( s ), "Controlled Blocks" );
 		for ( int r = 0; r < nif->rowCount( iCtrl ); r++ ) {
-			QModelIndex iRow = nif->getIndex( iCtrl, r );
+			qint32 l = nif->getLink( nif->getIndex( iCtrl, r ), "Interpolator" );
+			if ( l >= 0 )
+				seqInterps.insert( l );
+		}
+	}
 
-			QString nodeName = nif->resolveString( iRow, "Node Name" );
-			QString ctype = nif->resolveString( iRow, "Controller Type" );
-			QString label = nodeName;
-			if ( !ctype.isEmpty() )
-				label = ( label.isEmpty() ? QString() : label + QStringLiteral( " · " ) ) + shortTypeName( ctype );
-			if ( label.isEmpty() )
-				label = tr( "Controlled Block %1" ).arg( r );
-
-			QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iRow, "Interpolator" ), "NiInterpolator" );
-			QModelIndex iCtlr = nif->getBlockIndex( nif->getLink( iRow, "Controller" ) );
-			if ( iInterp.isValid() ) {
-				addInterpolatorLane( iInterp, label, iCtlr );
-				TimelineLane & lane = lanes.last();
-				lane.targetBlock = findAVObjectByName( nodeName );
-				lane.searchText += QLatin1Char( ' ' ) + nodeName.toLower();
+	QSet<int> attachedInterps;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex iBlock = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( iBlock, "NiTimeController" ) )
+			continue;
+		for ( const char * ln : { "Interpolator", "Visibility Interpolator" } ) {
+			qint32 l = nif->getLink( iBlock, ln );
+			if ( l >= 0 ) {
+				attachedInterps.insert( l );
+				qint32 d = nif->getLink( nif->getBlockIndex( l ), "Data" );
+				if ( d >= 0 )
+					attachedInterps.insert( d );
 			}
 		}
-
-		QModelIndex iText = nif->getBlockIndex( nif->getLink( iSeq, "Text Keys" ), "NiTextKeyExtraData" );
-		if ( iText.isValid() )
-			addTextKeyLane( iText, tr( "Text Keys" ) );
-
-		if ( nif->getIndex( iSeq, "Start Time" ).isValid() ) {
-			// widen range display to the sequence bounds
+		QModelIndex iW = nif->getIndex( iBlock, "Interpolator Weights" );
+		for ( int r = 0; r < nif->rowCount( iW ); r++ ) {
+			qint32 l = nif->getLink( nif->getIndex( iW, r ), "Interpolator" );
+			if ( l >= 0 )
+				attachedInterps.insert( l );
 		}
+	}
+
+	if ( view >= 2 && view - 2 < sequences.count() ) {
+		QModelIndex iSeq( sequences[view - 2] );
+		addSequenceLanes( iSeq, false );
+		collectMarkers( nif->getBlockIndex( nif->getLink( iSeq, "Text Keys" ), "NiTextKeyExtraData" ) );
 	} else {
-		QSet<int> seen;
+		if ( view == 0 ) {
+			// standalone controllers first (manager/multi-target are wiring, not lanes)
+			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+				QModelIndex iBlock = nif->getBlockIndex( b );
+				if ( nif->blockInherits( iBlock, "NiTimeController" )
+				     && !nif->blockInherits( iBlock, "NiControllerManager" )
+				     && !nif->blockInherits( iBlock, "NiMultiTargetTransformController" ) )
+					addControllerLanes( iBlock );
+			}
 
+			// then each sequence as a collapsible group
+			for ( const auto & s : sequences )
+				addSequenceLanes( QModelIndex( s ), true );
+		}
+
+		// loose interpolators: reachable neither from a controller nor a sequence
+		QSet<int> known = seqInterps;
+		known.unite( attachedInterps );
+		for ( const auto & lane : lanes )
+			known.unite( lane.blockNums );
+
+		int looseHeader = -1;
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			if ( known.contains( b ) )
+				continue;
 			QModelIndex iBlock = nif->getBlockIndex( b );
-
-			if ( nif->blockInherits( iBlock, "NiTimeController" ) ) {
-				int before = lanes.count();
-				addControllerLanes( iBlock );
-				for ( int i = before; i < lanes.count(); i++ )
-					seen.unite( lanes[i].blockNums );
-			} else if ( nif->blockInherits( iBlock, "NiTextKeyExtraData" ) ) {
-				addTextKeyLane( iBlock, nif->itemName( iBlock ) );
-				seen.insert( b );
-			}
-		}
-
-		QMap<int, QString> seqInterps;
-		QMap<int, QString> seqNodeNames;
-		for ( const auto & s : sequences ) {
-			QModelIndex iSeq( s );
-			QString seqName = nif->resolveString( iSeq, "Name" );
-			QModelIndex iCtrl = nif->getIndex( iSeq, "Controlled Blocks" );
-			for ( int r = 0; r < nif->rowCount( iCtrl ); r++ ) {
-				QModelIndex iRow = nif->getIndex( iCtrl, r );
-				qint32 l = nif->getLink( iRow, "Interpolator" );
-				if ( l >= 0 && !seqInterps.contains( l ) ) {
-					QString nodeName = nif->resolveString( iRow, "Node Name" );
-					QString ctype = nif->resolveString( iRow, "Controller Type" );
-					QString label = seqName + QStringLiteral( " / " ) + nodeName;
-					if ( !ctype.isEmpty() )
-						label += QStringLiteral( " · " ) + shortTypeName( ctype );
-					seqInterps[l] = label;
-					seqNodeNames[l] = nodeName;
-				}
-			}
-		}
-
-		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
-			if ( seen.contains( b ) )
+			if ( !nif->blockInherits( iBlock, "NiInterpolator" ) )
 				continue;
 
-			QModelIndex iBlock = nif->getBlockIndex( b );
-			if ( nif->blockInherits( iBlock, "NiInterpolator" ) ) {
-				bool referenced = false;
-				for ( const auto & lane : lanes ) {
-					if ( lane.blockNums.contains( b ) ) {
-						referenced = true;
-						break;
-					}
-				}
-				if ( !referenced ) {
-					addInterpolatorLane( iBlock, seqInterps.value( b, tr( "(unreferenced)" ) ) );
-					if ( seqNodeNames.contains( b ) ) {
-						TimelineLane & lane = lanes.last();
-						lane.targetBlock = findAVObjectByName( seqNodeNames[b] );
-						lane.searchText += QLatin1Char( ' ' ) + seqNodeNames[b].toLower();
-					}
-				}
+			if ( view == 0 && looseHeader < 0 ) {
+				TimelineLane header;
+				header.isHeader = true;
+				header.groupSeq = -2;
+				header.label = tr( "Loose interpolators" );
+				lanes.append( header );
+				looseHeader = lanes.count() - 1;
 			}
+
+			addInterpolatorLane( iBlock, tr( "(loose)" ) );
+			lanes.last().groupSeq = ( view == 0 ) ? -2 : -1;
+		}
+
+		// global text key markers
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex iBlock = nif->getBlockIndex( b );
+			if ( nif->blockInherits( iBlock, "NiTextKeyExtraData" ) )
+				collectMarkers( iBlock );
 		}
 	}
 
@@ -737,16 +805,98 @@ void TimelineWidget::addInterpolatorLane( const QModelIndex & iInterp, const QSt
 	lanes.append( lane );
 }
 
-void TimelineWidget::addTextKeyLane( const QModelIndex & iTextKeys, const QString & label )
+void TimelineWidget::addSequenceLanes( const QModelIndex & iSeq, bool withHeader, QSet<int> * seen )
 {
-	TimelineLane lane;
-	lane.label = label;
-	lane.tooltip = label + QStringLiteral( "  · " ) + nif->itemName( iTextKeys );
-	lane.iSelect = iTextKeys;
-	lane.blockNums.insert( nif->getBlockNumber( iTextKeys ) );
-	collectChannels( iTextKeys, lane );
-	finalizeLane( lane );
-	lanes.append( lane );
+	int seqBlock = nif->getBlockNumber( iSeq );
+
+	if ( withHeader ) {
+		TimelineLane header;
+		header.isHeader = true;
+		header.groupSeq = seqBlock;
+		header.iSelect = iSeq;
+		QModelIndex iCtrl0 = nif->getIndex( iSeq, "Controlled Blocks" );
+		header.label = QString( "%1  (%2)" ).arg( nif->resolveString( iSeq, "Name" ) ).arg( nif->rowCount( iCtrl0 ) );
+		header.start = nif->get<float>( iSeq, "Start Time" );
+		header.stop = nif->get<float>( iSeq, "Stop Time" );
+		header.hasCtrlRange = tlSaneTime( header.start ) && tlSaneTime( header.stop ) && header.stop >= header.start;
+		lanes.append( header );
+	}
+
+	QModelIndex iCtrl = nif->getIndex( iSeq, "Controlled Blocks" );
+	for ( int r = 0; r < nif->rowCount( iCtrl ); r++ ) {
+		QModelIndex iRow = nif->getIndex( iCtrl, r );
+
+		QString nodeName = nif->resolveString( iRow, "Node Name" );
+		QModelIndex iCtlr = nif->getBlockIndex( nif->getLink( iRow, "Controller" ) );
+
+		// Prefer the real controller block for the label so shader
+		// controllers show their controlled variable
+		QString ctype;
+		if ( iCtlr.isValid() && !nif->blockInherits( iCtlr, "NiMultiTargetTransformController" ) )
+			ctype = controllerLabel( iCtlr );
+		else if ( iCtlr.isValid() )
+			ctype = tr( "Transform" );
+		else
+			ctype = shortTypeName( nif->resolveString( iRow, "Controller Type" ) );
+
+		QString label = nodeName;
+		if ( !ctype.isEmpty() )
+			label = ( label.isEmpty() ? QString() : label + QStringLiteral( " · " ) ) + ctype;
+		if ( label.isEmpty() )
+			label = tr( "Controlled Block %1" ).arg( r );
+
+		QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iRow, "Interpolator" ), "NiInterpolator" );
+		if ( iInterp.isValid() ) {
+			addInterpolatorLane( iInterp, label, iCtlr );
+			TimelineLane & lane = lanes.last();
+			lane.groupSeq = withHeader ? seqBlock : -1;
+			lane.targetBlock = findAVObjectByName( nodeName );
+			lane.searchText += QLatin1Char( ' ' ) + nodeName.toLower();
+			if ( seen )
+				seen->unite( lane.blockNums );
+		}
+	}
+}
+
+void TimelineWidget::collectMarkers( const QModelIndex & iTextKeys )
+{
+	if ( !iTextKeys.isValid() )
+		return;
+
+	QModelIndex iKeys = nif->getIndex( iTextKeys, "Text Keys" );
+	if ( !iKeys.isValid() )
+		return;
+
+	bool first = !markerChannel.iKeysArray.isValid();
+	if ( first ) {
+		markerChannel.name = tr( "Text" );
+		markerChannel.iKeysArray = iKeys;
+		markerChannel.type = TimelineChannel::TextVal;
+		markerChannel.numComponents = 0;
+		markerChannel.interpolation = 5;
+	}
+
+	for ( int k = 0; k < nif->rowCount( iKeys ); k++ ) {
+		QModelIndex iKey = nif->getIndex( iKeys, k );
+		TimelineKey key;
+		key.time = nif->get<float>( iKey, "Time" );
+		key.idx = iKey;
+		key.text = nif->resolveString( iKey, "Value" );
+		markers.append( key );
+		if ( first )
+			markerChannel.keys.append( key );
+	}
+}
+
+void TimelineWidget::toggleSeqCollapse( int seqBlock )
+{
+	if ( collapsedSeqs.contains( seqBlock ) )
+		collapsedSeqs.remove( seqBlock );
+	else
+		collapsedSeqs.insert( seqBlock );
+
+	applyFilter();
+	lanesView->update();
 }
 
 void TimelineWidget::addKeyGroupChannel( const QModelIndex & iKeyGroup, TimelineLane & lane, const QString & name )
@@ -905,10 +1055,12 @@ void TimelineWidget::computeRange()
 	}
 
 	int seq = seqBox->currentIndex();
-	if ( seq > 0 && seq - 1 < sequences.count() && nif ) {
-		expand( nif->get<float>( QModelIndex( sequences[seq - 1] ), "Start Time" ) );
-		expand( nif->get<float>( QModelIndex( sequences[seq - 1] ), "Stop Time" ) );
+	if ( seq >= 2 && seq - 2 < sequences.count() && nif ) {
+		expand( nif->get<float>( QModelIndex( sequences[seq - 2] ), "Start Time" ) );
+		expand( nif->get<float>( QModelIndex( sequences[seq - 2] ), "Stop Time" ) );
 	}
+	for ( const auto & m : markers )
+		expand( m.time );
 
 	if ( !any ) {
 		mn = 0;
@@ -931,6 +1083,15 @@ void TimelineWidget::applyFilter()
 	QString needle = filterText.toLower().trimmed();
 
 	for ( int i = 0; i < lanes.count(); i++ ) {
+		if ( lanes[i].isHeader ) {
+			if ( needle.isEmpty() && !( autoIsolate && filterTargetBlock >= 0 ) )
+				visibleLanes.append( i );
+			continue;
+		}
+
+		if ( lanes[i].groupSeq != -1 && collapsedSeqs.contains( lanes[i].groupSeq ) )
+			continue;
+
 		if ( !needle.isEmpty() && !lanes[i].searchText.contains( needle ) )
 			continue;
 
@@ -1198,19 +1359,13 @@ void TimelineWidget::jumpToMarker( int dir )
 	float best = 0;
 	bool found = false;
 
-	for ( const auto & lane : lanes ) {
-		for ( const auto & ch : lane.channels ) {
-			if ( ch.type != TimelineChannel::TextVal )
-				continue;
-			for ( const auto & k : ch.keys ) {
-				if ( dir > 0 && k.time > curTime + 1.0e-4f && ( !found || k.time < best ) ) {
-					best = k.time;
-					found = true;
-				} else if ( dir < 0 && k.time < curTime - 1.0e-4f && ( !found || k.time > best ) ) {
-					best = k.time;
-					found = true;
-				}
-			}
+	for ( const auto & k : markers ) {
+		if ( dir > 0 && k.time > curTime + 1.0e-4f && ( !found || k.time < best ) ) {
+			best = k.time;
+			found = true;
+		} else if ( dir < 0 && k.time < curTime - 1.0e-4f && ( !found || k.time > best ) ) {
+			best = k.time;
+			found = true;
 		}
 	}
 
@@ -1319,7 +1474,7 @@ void TimelineWidget::keyPressEvent( QKeyEvent * event )
 
 	switch ( event->key() ) {
 	case Qt::Key_Space:
-		emit playPauseRequested();
+		transportToggle( shift ? -1 : 1 );
 		return;
 	case Qt::Key_Home:
 		frameAll();
@@ -1462,9 +1617,16 @@ void TimelineWidget::showLaneContextMenu( int lane, const QPoint & globalPos )
 
 	if ( l.iController.isValid() ) {
 		menu.addSeparator();
-		QAction * mute = menu.addAction( l.muted ? tr( "Unmute (set controller active)" ) : tr( "Mute (set controller inactive)" ),
+		QAction * mute = menu.addAction( l.muted ? tr( "Enable (set controller active)" ) : tr( "Disable (set controller inactive)" ),
 			[this, lane]() { toggleLaneMute( lane ); } );
 		Q_UNUSED( mute );
+	}
+
+	if ( l.targetBlock >= 0 ) {
+		menu.addAction( tr( "Isolate target mesh in viewport" ), [this, lane]() {
+			emit isolateBlock( lanes[lane].targetBlock );
+		} );
+		menu.addAction( tr( "Clear viewport isolation" ), [this]() { emit isolateBlock( -1 ); } );
 	}
 
 	QAction * lock = menu.addAction( l.locked ? tr( "Unlock lane" ) : tr( "Lock lane (block edits)" ), [this, lane]() {

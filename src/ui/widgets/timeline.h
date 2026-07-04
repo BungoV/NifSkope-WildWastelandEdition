@@ -116,6 +116,8 @@ struct TimelineLane
 	Viz viz = VizAuto;
 	bool muted = false;                //!< Controller Active flag off
 	bool locked = false;               //!< UI-only edit lock
+	bool isHeader = false;             //!< Collapsible sequence group header row
+	int groupSeq = -1;                 //!< Block number of the owning sequence (-1 = standalone)
 };
 
 //! In-memory copy of one key, used for editing, clipboard and CSV round trips
@@ -173,6 +175,8 @@ signals:
 	void sequenceActivated( const QString & );
 	//! Request animation play/pause toggle
 	void playPauseRequested();
+	//! Request viewport isolation of a block (-1 clears it)
+	void isolateBlock( int blockNumber );
 
 public slots:
 	//! Rescan the model and rebuild all lanes
@@ -197,7 +201,9 @@ protected:
 	void buildLanes();
 	void addControllerLanes( const QModelIndex & iController );
 	void addInterpolatorLane( const QModelIndex & iInterp, const QString & label, const QModelIndex & iController = QModelIndex() );
-	void addTextKeyLane( const QModelIndex & iTextKeys, const QString & label );
+	void addSequenceLanes( const QModelIndex & iSeq, bool withHeader, QSet<int> * seen = nullptr );
+	void collectMarkers( const QModelIndex & iTextKeys );
+	void toggleSeqCollapse( int seqBlock );
 	void collectChannels( const QModelIndex & iParent, TimelineLane & lane, int depth = 0 );
 	void addKeyGroupChannel( const QModelIndex & iKeyGroup, TimelineLane & lane, const QString & name );
 	void finalizeLane( TimelineLane & lane );
@@ -275,6 +281,11 @@ protected:
 	QVector<int> visibleLanes;
 	QHash<QString, int> avObjectsByName;
 
+	// Text keys shown as global ruler markers (not lanes)
+	QVector<TimelineKey> markers;
+	TimelineChannel markerChannel;     //!< Writable text channel for adding markers
+	QSet<int> collapsedSeqs;
+
 	int currentLane = -1;
 	QVector<QPersistentModelIndex> selKeys;   //!< All selected keys, primary first
 	QPersistentModelIndex primaryKey;
@@ -305,10 +316,19 @@ protected:
 	QVector<TimelineClipChannel> keyClipboard;
 	float keyClipboardRefTime = 0;
 
+	// local transport (drives scene time directly; independent of the anim toolbar)
+	void transportToggle( int dir );
+	void transportStop();
+	QTimer * playTimer = nullptr;
+	int playDir = 0;
+
 	// widgets
 	QComboBox * seqBox;
 	QLineEdit * filterBox;
+	QToolButton * btnToStart;
+	QToolButton * btnPlayBack;
 	QToolButton * btnPlay;
+	QToolButton * btnToEnd;
 	QLineEdit * timeField;
 	QToolButton * btnFrames;
 	QToolButton * btnSnap;
@@ -364,7 +384,7 @@ protected:
 
 	enum DragMode
 	{
-		DragNone, DragScrub, DragKeys, DragRubber, DragGutter, DragPrevRange, DragCtrlRange
+		DragNone, DragScrub, DragKeys, DragRubber, DragGutter, DragPrevRange, DragCtrlRange, DragPan
 	};
 	DragMode dragMode = DragNone;
 	QPoint dragStart;
@@ -418,7 +438,7 @@ protected:
 
 	enum DragMode
 	{
-		DragNone, DragScrub, DragKeys, DragRubber, DragTangent
+		DragNone, DragScrub, DragKeys, DragRubber, DragTangent, DragPan
 	};
 	DragMode dragMode = DragNone;
 	QPoint dragStart;
