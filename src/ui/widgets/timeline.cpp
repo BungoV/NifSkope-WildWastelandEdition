@@ -672,9 +672,11 @@ void TimelineWidget::addControllerLanes( const QModelIndex & iController )
 		if ( !tname.isEmpty() )
 			lanes[i].searchText += QLatin1Char( ' ' ) + tname.toLower();
 		// controller range + active flag
-		lanes[i].hasCtrlRange = nif->getIndex( iController, "Start Time" ).isValid();
 		lanes[i].start = nif->get<float>( iController, "Start Time" );
 		lanes[i].stop = nif->get<float>( iController, "Stop Time" );
+		lanes[i].hasCtrlRange = nif->getIndex( iController, "Start Time" ).isValid()
+			&& tlSaneTime( lanes[i].start ) && tlSaneTime( lanes[i].stop )
+			&& lanes[i].stop >= lanes[i].start;
 		quint16 flags = (quint16)nif->get<int>( iController, "Flags" );
 		lanes[i].muted = !( flags & 0x0008 );
 	}
@@ -690,9 +692,10 @@ void TimelineWidget::addInterpolatorLane( const QModelIndex & iInterp, const QSt
 	lane.blockNums.insert( nif->getBlockNumber( iInterp ) );
 
 	if ( iController.isValid() ) {
-		lane.hasCtrlRange = nif->getIndex( iController, "Start Time" ).isValid();
 		lane.start = nif->get<float>( iController, "Start Time" );
 		lane.stop = nif->get<float>( iController, "Stop Time" );
+		lane.hasCtrlRange = nif->getIndex( iController, "Start Time" ).isValid()
+			&& tlSaneTime( lane.start ) && tlSaneTime( lane.stop ) && lane.stop >= lane.start;
 		quint16 flags = (quint16)nif->get<int>( iController, "Flags" );
 		lane.muted = !( flags & 0x0008 );
 	}
@@ -701,6 +704,10 @@ void TimelineWidget::addInterpolatorLane( const QModelIndex & iInterp, const QSt
 		lane.rangeOnly = true;
 		lane.start = nif->get<float>( iInterp, "Start Time" );
 		lane.stop = nif->get<float>( iInterp, "Stop Time" );
+		if ( !tlSaneTime( lane.start ) || !tlSaneTime( lane.stop ) || lane.stop < lane.start ) {
+			lane.start = 0;
+			lane.stop = 0;
+		}
 	} else {
 		for ( const char * linkName : { "Data", "Path Data", "Percent Data" } ) {
 			QModelIndex iData = nif->getBlockIndex( nif->getLink( iInterp, linkName ) );
@@ -861,6 +868,8 @@ void TimelineWidget::computeRange()
 	float mn = 0, mx = 1;
 
 	auto expand = [&]( float t ) {
+		if ( !tlSaneTime( t ) )
+			return;
 		if ( !any ) {
 			mn = mx = t;
 			any = true;

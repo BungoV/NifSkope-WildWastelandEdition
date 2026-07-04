@@ -224,7 +224,7 @@ void TimelineLanesView::paintLaneContent( QPainter & p, const TimelineLane & lan
 	float cy = r.center().y() + 0.5f;
 
 	// Controller range shading + draggable edges
-	if ( lane.hasCtrlRange || lane.rangeOnly ) {
+	if ( ( lane.hasCtrlRange || lane.rangeOnly ) && tlSaneTime( lane.start ) && tlSaneTime( lane.stop ) ) {
 		float x0 = tl->timeToX( lane.start, w );
 		float x1 = tl->timeToX( lane.stop, w );
 		QColor barCol = pal.color( QPalette::Highlight );

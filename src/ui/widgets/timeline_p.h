@@ -39,6 +39,13 @@ inline const QColor & tlCompColor( int comp )
 QString tlKeyTypeName( int t );
 float tlNiceStep( float raw );
 
+// FO4 controllers often carry FLT_MAX sentinel start/stop times which the
+// engine ignores; treat anything absurd as "no range information"
+inline bool tlSaneTime( float t )
+{
+	return std::isfinite( t ) && std::abs( t ) < 1.0e8f;
+}
+
 inline QPolygonF tlDiamond( const QPointF & c, float r )
 {
 	QPolygonF p;
