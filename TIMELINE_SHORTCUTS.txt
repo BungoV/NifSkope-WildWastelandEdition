@@ -93,4 +93,46 @@ NEW SPELLS
   Animation > Sort By Node Name        on Controlled Blocks of a sequence
   Animation > Sort By Name             on Objs of an object palette
   Animation > Generate BSPositionData  on FO4 geometry (particle spawn positions)
-  Blocks > Replace References With...  repoint every reference to another block
+  Block > Replace References With...   repoint every reference to another block
+                                       (type an index or name to filter, sortable)
+
+ADDED IN THE 2026-07-05 UPDATE
+  Timeline toolbar   New buttons: prev/next keyframe, loop + switch animation
+                     (mirrored from the render toolbar); all icons redrawn
+  Combo renames      "All animations" / "Loose animations"
+  Key click          Unrolls that key (and only that key) in Block Details
+
+TRANSFORM GIZMO 2.0 (viewport)
+  Draggable handles  Arrows = move, rings = rotate, boxes = scale,
+                     center dot = view-plane move; hover highlights,
+                     drag commits one undo step
+                     (Render > Show Transform Gizmo toggles them)
+  Numeric input      During G/R/S just type: R Y 45 [Enter] = rotate 45 deg
+                     around Y; G X 12.5 = move 12.5 units; S 2 = double size
+                     Tab cycles X/Y/Z parts on unconstrained moves,
+                     minus toggles sign, Backspace edits
+  Redo panel         After a transform, a small panel appears bottom-left:
+                     edit the offsets/angle/factor numerically, same undo step
+  Render menu        Transform Orientation: Global / Local / Parent / View
+                     Transform Pivot Point: Node Origin / Bounding Center /
+                     Picked Elements Median / 3D Cursor
+                     Snap Target (Ctrl): Grid Step / Vertex / Edge / Face,
+                     Align Rotation to Target, Rotation Snap Angle...
+
+ELEMENT SELECT + 3D CURSOR (viewport)
+  1 / 2 / 3          Toggle vertex / edge / face pick mode (Blender style)
+  Click              Pick the element under the mouse (highlighted)
+  Shift+Click        Add/remove from the multi-selection (median shown)
+  Esc                Clear picked elements
+  C                  Place the 3D cursor on the surface under the mouse
+  Shift+C            Snap the cursor to the picked elements' median
+  Render > 3D Cursor & Elements   Snap cursor to picked/origin,
+                     snap node to cursor, move picked vertices to cursor
+                     (vertex editing, undoable), show/hide cursor
+
+PARTICLE PREVIEW
+  FO4 NiParticleSystem blocks now simulate and render in the viewport
+  (preview-grade): box/cylinder/sphere/mesh/array emitters incl.
+  BSPositionData spawn points, birth rate + emitter-active controllers,
+  gravity, drag, 3-color ramp, scale curve. Play or scrub the animation
+  to drive it; scrubbing backwards restarts the simulation.
