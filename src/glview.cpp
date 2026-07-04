@@ -73,6 +73,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QToolBar>
 #include <QWindow>
 
+#include <QBuffer>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QOpenGLFramebufferObject>
@@ -650,6 +651,8 @@ void GLView::paintGL()
 			// during a modal gesture keep the frozen frame; otherwise follow the settings
 			Matrix basis = gizmoMode ? gizmoBasisM : gizmoBasis( iGb );
 			Vector3 pivot = gizmoMode ? gizmoPivotWorld : gizmoPivotPoint( iGb );
+			if ( elemTransform )
+				pivot = elemPivot;	// element transforms orbit the element median / cursor
 
 			Transform nt;
 			nt.rotation = basis;
@@ -1629,6 +1632,11 @@ bool GLView::gizmoNumActive() const
 
 void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 {
+	if ( elemTransform ) {
+		gizmoUpdateElement( pos, mods );
+		return;
+	}
+
 	if ( !gizmoMode || !model || !gizmoBlock.isValid() )
 		return;
 
@@ -1823,6 +1831,11 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 void GLView::gizmoEnd( bool commit )
 {
 	gizmoHandleDrag = false;
+
+	if ( elemTransform ) {
+		gizmoEndElement( commit );
+		return;
+	}
 
 	if ( !gizmoMode )
 		return;
@@ -2232,11 +2245,8 @@ void GLView::snapNodeToCursor()
 	update();
 }
 
-void GLView::movePickedVertsToCursor()
+QHash<int, QSet<int>> GLView::pickedVertexRefs() const
 {
-	if ( !model || pickedElems.isEmpty() )
-		return;
-
 	// collect target vertices per shape (faces/edges contribute their corners)
 	QHash<int, QSet<int>> byShape;
 	for ( const auto & pe : pickedElems ) {
@@ -2258,6 +2268,15 @@ void GLView::movePickedVertsToCursor()
 			}
 		}
 	}
+	return byShape;
+}
+
+void GLView::movePickedVertsToCursor()
+{
+	if ( !model || pickedElems.isEmpty() )
+		return;
+
+	QHash<int, QSet<int>> byShape = pickedVertexRefs();
 	if ( byShape.isEmpty() )
 		return;
 
@@ -2290,6 +2309,320 @@ void GLView::movePickedVertsToCursor()
 
 	pickedElems.clear();
 	modelChanged();	// rebuild the shape display lists
+}
+
+//! Read one vertex's stored (local) position from a shape block
+static bool tlGetVertexLocal( NifModel * model, const QModelIndex & iShape, int vi, Vector3 & out )
+{
+	QModelIndex iVData = model->getIndex( iShape, "Vertex Data" );
+	if ( iVData.isValid() && vi >= 0 && vi < model->rowCount( iVData ) ) {
+		QModelIndex iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
+		if ( iv.isValid() ) {
+			out = model->get<Vector3>( iv );
+			return true;
+		}
+	}
+	QModelIndex iVerts = model->getIndex( model->getBlockIndex( model->getLink( iShape, "Data" ) ), "Vertices" );
+	if ( !iVerts.isValid() )
+		iVerts = model->getIndex( iShape, "Vertices" );
+	if ( iVerts.isValid() && vi >= 0 && vi < model->rowCount( iVerts ) ) {
+		out = model->get<Vector3>( model->getIndex( iVerts, vi ) );
+		return true;
+	}
+	return false;
+}
+
+//! Write one vertex's stored (local) position to a shape block
+static void tlSetVertexLocal( NifModel * model, const QModelIndex & iShape, int vi, const Vector3 & local )
+{
+	QModelIndex iVData = model->getIndex( iShape, "Vertex Data" );
+	if ( iVData.isValid() && vi >= 0 && vi < model->rowCount( iVData ) ) {
+		QModelIndex iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
+		if ( iv.isValid() )
+			model->set<Vector3>( iv, local );
+		return;
+	}
+	QModelIndex iVerts = model->getIndex( model->getBlockIndex( model->getLink( iShape, "Data" ) ), "Vertices" );
+	if ( !iVerts.isValid() )
+		iVerts = model->getIndex( iShape, "Vertices" );
+	if ( iVerts.isValid() && vi >= 0 && vi < model->rowCount( iVerts ) )
+		model->set<Vector3>( model->getIndex( iVerts, vi ), local );
+}
+
+bool GLView::gizmoBeginElement( int mode )
+{
+	if ( !model || pickedElems.isEmpty() )
+		return false;
+
+	QHash<int, QSet<int>> byShape = pickedVertexRefs();
+	if ( byShape.isEmpty() )
+		return false;
+
+	elemVerts.clear();
+	for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
+		QModelIndex iShape = model->getBlockIndex( it.key() );
+		Node * n = scene->getNode( model, iShape );
+		if ( !n )
+			continue;
+		Transform wt = n->worldTrans();
+		for ( int vi : it.value() ) {
+			Vector3 local;
+			if ( !tlGetVertexLocal( model, iShape, vi, local ) )
+				continue;
+			ElemVert ev;
+			ev.shape = it.key();
+			ev.idx = vi;
+			ev.origLocal = local;
+			ev.origWorld = wt * local;
+			elemVerts.append( ev );
+		}
+	}
+	if ( elemVerts.isEmpty() )
+		return false;
+
+	// pivot: 3D cursor if selected, otherwise the median of the picked verts
+	if ( gizmoPivot == 3 ) {
+		elemPivot = cursorPos;
+	} else {
+		Vector3 m;
+		for ( const auto & ev : elemVerts )
+			m += ev.origWorld;
+		elemPivot = m / float( elemVerts.size() );
+	}
+
+	// snapshot the whole model for a single undo step
+	elemBefore.clear();
+	{
+		QBuffer buf( &elemBefore );
+		buf.open( QIODevice::WriteOnly );
+		model->save( buf );
+	}
+
+	gizmoMode = mode;
+	gizmoAxis = 0;
+	gizmoNum = QStringList() << QString() << QString() << QString();
+	gizmoNumCur = 0;
+	gizmoStartPos = mapFromGlobal( QCursor::pos() );
+	gizmoBasisM = Matrix();	// element transforms use the global frame
+	elemTransform = true;
+
+	static const char * modeNames[4] = { "", "Move", "Rotate", "Scale" };
+	emit gizmoStatus( tr( "%1 %2 element(s):  move mouse or type a value, X/Y/Z = axis, Ctrl = snap, LMB/Enter = commit, Esc = cancel" )
+		.arg( QLatin1String( modeNames[mode] ) ).arg( elemVerts.size() ) );
+
+	update();
+	return true;
+}
+
+void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods )
+{
+	if ( !elemTransform || !model )
+		return;
+
+	float dx = pos.x() - gizmoStartPos.x();
+	float dy = pos.y() - gizmoStartPos.y();
+	const bool numeric = gizmoNumActive();
+	bool snap = ( ( ( mods & Qt::ControlModifier ) != 0 ) != snapDefaultOn ) && !numeric;
+	float precision = ( mods & Qt::ShiftModifier ) ? 0.2f : 1.0f;
+
+	Matrix vm;
+	vm.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	Vector3 camRight( vm( 0, 0 ), vm( 0, 1 ), vm( 0, 2 ) );
+	Vector3 camUp( vm( 1, 0 ), vm( 1, 1 ), vm( 1, 2 ) );
+	Vector3 camFwd( vm( 2, 0 ), vm( 2, 1 ), vm( 2, 2 ) );
+
+	// cache each shape's world transform to convert new world positions back to local
+	QHash<int, Transform> xf;
+	auto toLocal = [&]( int shape, const Vector3 & w ) {
+		if ( !xf.contains( shape ) ) {
+			Node * n = scene->getNode( model, model->getBlockIndex( shape ) );
+			xf.insert( shape, n ? n->worldTrans() : Transform() );
+		}
+		Transform wt = xf.value( shape );
+		float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+		return wt.rotation.inverted() * ( ( w - wt.translation ) * ( 1.0f / sc ) );
+	};
+
+	QString status;
+
+	if ( gizmoMode == 1 ) {
+		float wpp = std::max( (float)Dist, 0.01f ) * 2.0f / std::max( height(), 1 ) * precision;
+		Vector3 deltaWorld;
+		if ( numeric ) {
+			if ( gizmoAxis == 0 )
+				deltaWorld = Vector3( gizmoPartVal( gizmoNum, 0 ), gizmoPartVal( gizmoNum, 1 ), gizmoPartVal( gizmoNum, 2 ) );
+			else {
+				Vector3 u;
+				u[gizmoAxis - 1] = 1.0f;
+				deltaWorld = u * gizmoPartVal( gizmoNum, 0 );
+			}
+		} else if ( gizmoAxis == 0 ) {
+			deltaWorld = camRight * ( dx * wpp ) + camUp * ( -dy * wpp );
+		} else {
+			Vector3 u;
+			u[gizmoAxis - 1] = 1.0f;
+			float amount = ( dx * wpp ) * ( Vector3::dotproduct( camRight, u ) >= 0 ? 1.0f : -1.0f )
+			             + ( -dy * wpp ) * ( Vector3::dotproduct( camUp, u ) >= 0 ? 1.0f : -1.0f );
+			deltaWorld = u * amount;
+		}
+		if ( snap && gizmoSnapStep > 0 ) {
+			for ( int c = 0; c < 3; c++ )
+				deltaWorld[c] = std::round( deltaWorld[c] / gizmoSnapStep ) * gizmoSnapStep;
+		}
+		for ( const auto & ev : elemVerts )
+			tlSetVertexLocal( model, model->getBlockIndex( ev.shape ), ev.idx, toLocal( ev.shape, ev.origWorld + deltaWorld ) );
+		status = tr( "Move: %1, %2, %3" ).arg( deltaWorld[0], 0, 'f', 3 ).arg( deltaWorld[1], 0, 'f', 3 ).arg( deltaWorld[2], 0, 'f', 3 );
+	} else if ( gizmoMode == 2 ) {
+		float angle = numeric ? gizmoPartVal( gizmoNum, 0 ) : dx * 0.5f * precision;
+		if ( snap && gizmoRotSnapDeg > 0.0f )
+			angle = std::round( angle / gizmoRotSnapDeg ) * gizmoRotSnapDeg;
+		Vector3 axis;
+		if ( gizmoAxis == 0 )
+			axis = camFwd;
+		else
+			axis[gizmoAxis - 1] = 1.0f;
+		Quat q;
+		q.fromAxisAngle( axis, deg2rad( angle ) );
+		Matrix dr;
+		dr.fromQuat( q );
+		for ( const auto & ev : elemVerts ) {
+			Vector3 w = elemPivot + dr * ( ev.origWorld - elemPivot );
+			tlSetVertexLocal( model, model->getBlockIndex( ev.shape ), ev.idx, toLocal( ev.shape, w ) );
+		}
+		status = tr( "Rotate: %1°" ).arg( angle, 0, 'f', 1 );
+	} else if ( gizmoMode == 3 ) {
+		float factor = numeric ? gizmoPartVal( gizmoNum, 0 ) : 1.0f + dx * 0.01f * precision;
+		if ( snap )
+			factor = std::round( factor * 10.0f ) / 10.0f;
+		for ( const auto & ev : elemVerts ) {
+			Vector3 w = elemPivot + ( ev.origWorld - elemPivot ) * factor;
+			tlSetVertexLocal( model, model->getBlockIndex( ev.shape ), ev.idx, toLocal( ev.shape, w ) );
+		}
+		status = tr( "Scale: ×%1" ).arg( factor, 0, 'f', 3 );
+	}
+
+	static const char * axisNames[4] = { "view", "X", "Y", "Z" };
+	emit gizmoStatus( status + tr( "   [axis: %1]" ).arg( QLatin1String( axisNames[gizmoAxis] ) ) );
+	update();
+}
+
+void GLView::gizmoEndElement( bool commit )
+{
+	if ( !elemTransform )
+		return;
+	elemTransform = false;
+	gizmoMode = 0;
+	emit gizmoStatus( QString() );
+
+	if ( model ) {
+		if ( commit ) {
+			QByteArray after;
+			{
+				QBuffer buf( &after );
+				buf.open( QIODevice::WriteOnly );
+				model->save( buf );
+			}
+			if ( model->undoStack )
+				model->undoStack->push( new NifSnapshotCommand( model, elemBefore, after, tr( "Transform elements" ) ) );
+		} else {
+			QBuffer buf;
+			buf.setData( elemBefore );
+			if ( buf.open( QIODevice::ReadOnly ) )
+				model->load( buf );
+		}
+	}
+
+	elemVerts.clear();
+	elemBefore.clear();
+	modelChanged();
+	update();
+}
+
+void GLView::deletePickedElements()
+{
+	if ( !model || pickedElems.isEmpty() )
+		return;
+
+	// vertices to delete (verts, edge endpoints, face corners)
+	QHash<int, QSet<int>> vertsByShape = pickedVertexRefs();
+	// explicitly face-selected triangles
+	QHash<int, QSet<int>> faceTris;
+	for ( const auto & pe : pickedElems ) {
+		if ( pe.type == 3 && pe.shapeBlock >= 0 )
+			faceTris[pe.shapeBlock].insert( pe.e0 );
+	}
+
+	QSet<int> shapes;
+	for ( int k : vertsByShape.keys() )
+		shapes.insert( k );
+	for ( int k : faceTris.keys() )
+		shapes.insert( k );
+	if ( shapes.isEmpty() )
+		return;
+
+	int removed = 0;
+	nifSnapshotOp( model, tr( "Delete mesh elements" ), [&]() {
+		for ( int sb : shapes ) {
+			QModelIndex iShape = model->getBlockIndex( sb );
+			const QSet<int> & delVerts = vertsByShape.value( sb );
+			const QSet<int> & delFaces = faceTris.value( sb );
+
+			auto keepTri = [&]( const Triangle & tri, int t ) {
+				if ( delFaces.contains( t ) )
+					return false;
+				if ( !delVerts.isEmpty() && ( delVerts.contains( tri[0] ) || delVerts.contains( tri[1] ) || delVerts.contains( tri[2] ) ) )
+					return false;
+				return true;
+			};
+
+			// BSTriShape: triangles + Num Triangles + Data Size live on the block
+			QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+			if ( iTris.isValid() && model->getIndex( iShape, "Num Triangles" ).isValid() ) {
+				int numTris = model->get<int>( iShape, "Num Triangles" );
+				int numVerts = model->get<int>( iShape, "Num Vertices" );
+				int dataSize = model->get<int>( iShape, "Data Size" );
+				int stride = ( numVerts > 0 ) ? ( dataSize - numTris * 6 ) / numVerts : 0;
+				QVector<Triangle> keep;
+				for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
+					Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+					if ( keepTri( tri, t ) )
+						keep.append( tri );
+				}
+				removed += numTris - keep.size();
+				model->set<int>( iShape, "Num Triangles", keep.size() );
+				model->updateArraySize( iTris );
+				for ( int t = 0; t < keep.size(); t++ )
+					model->set<Triangle>( model->getIndex( iTris, t ), keep[t] );
+				if ( stride > 0 )
+					model->set<int>( iShape, "Data Size", numVerts * stride + keep.size() * 6 );
+				continue;
+			}
+
+			// legacy NiTriShapeData
+			QModelIndex iData = model->getBlockIndex( model->getLink( iShape, "Data" ) );
+			QModelIndex iTris2 = model->getIndex( iData, "Triangles" );
+			if ( iTris2.isValid() ) {
+				int numTris = model->get<int>( iData, "Num Triangles" );
+				QVector<Triangle> keep;
+				for ( int t = 0; t < numTris && t < model->rowCount( iTris2 ); t++ ) {
+					Triangle tri = model->get<Triangle>( model->getIndex( iTris2, t ) );
+					if ( keepTri( tri, t ) )
+						keep.append( tri );
+				}
+				removed += numTris - keep.size();
+				model->set<int>( iData, "Num Triangles", keep.size() );
+				if ( model->getIndex( iData, "Num Triangle Points" ).isValid() )
+					model->set<int>( iData, "Num Triangle Points", keep.size() * 3 );
+				model->updateArraySize( iTris2 );
+				for ( int t = 0; t < keep.size(); t++ )
+					model->set<Triangle>( model->getIndex( iTris2, t ), keep[t] );
+			}
+		}
+	} );
+
+	emit gizmoStatus( tr( "Deleted %1 triangle(s)" ).arg( removed ) );
+	pickedElems.clear();
+	modelChanged();
 }
 
 QModelIndex parent( QModelIndex ix, QModelIndex xi )
@@ -2978,8 +3311,12 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		if ( event->key() == Qt::Key_G || event->key() == Qt::Key_R || event->key() == Qt::Key_S ) {
 			int nm = ( event->key() == Qt::Key_G ) ? 1 : ( event->key() == Qt::Key_R ? 2 : 3 );
 			if ( nm != gizmoMode ) {
+				bool wasElem = elemTransform;
 				gizmoEnd( false );
-				gizmoBegin( nm );
+				if ( wasElem )
+					gizmoBeginElement( nm );
+				else
+					gizmoBegin( nm );
 			}
 			return;
 		}
@@ -3050,8 +3387,19 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		else if ( event->key() == Qt::Key_S )
 			m = 3;
 
-		if ( m && gizmoBegin( m ) )
+		if ( m ) {
+			// with picked elements, G/R/S transforms them; otherwise the node
+			if ( !pickedElems.isEmpty() && gizmoBeginElement( m ) )
+				return;
+			if ( gizmoBegin( m ) )
+				return;
+		}
+
+		// delete picked vertices / edges / faces
+		if ( ( event->key() == Qt::Key_Delete || event->key() == Qt::Key_X ) && !pickedElems.isEmpty() ) {
+			deletePickedElements();
 			return;
+		}
 
 		// element pick modes (Blender: 1/2/3) and the 3D cursor
 		int pm = 0;

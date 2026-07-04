@@ -37,7 +37,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 
 #include <QOpenGLWindow> // Inherited
+#include <QByteArray>
+#include <QHash>
 #include <QPersistentModelIndex>
+#include <QSet>
 #include <chrono>
 
 
@@ -337,6 +340,20 @@ public:
 	void snapNodeToCursor();
 	//! Move all picked vertices to the cursor (edits mesh data, undoable snapshot)
 	void movePickedVertsToCursor();
+	//! Delete picked vertices/edges/faces (and dependent triangles) from the mesh
+	void deletePickedElements();
+
+	// ---- element modal transform (G/R/S on picked verts/edges/faces) ----
+	bool elemTransform = false;
+	struct ElemVert { int shape; int idx; Vector3 origLocal; Vector3 origWorld; };
+	QVector<ElemVert> elemVerts;
+	Vector3 elemPivot;                  // world-space pivot (median or 3D cursor)
+	QByteArray elemBefore;              // model snapshot at gesture start (undo)
+	//! Vertices affected by the current picked-element selection, grouped per shape
+	QHash<int, QSet<int>> pickedVertexRefs() const;
+	bool gizmoBeginElement( int mode );
+	void gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods );
+	void gizmoEndElement( bool commit );
 
 	// Blender-like free camera: keyboard movement only while enabled (Shift+F)
 	bool freeCamera = false;
