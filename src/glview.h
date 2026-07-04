@@ -292,6 +292,56 @@ public:
 	//! Returns false if the gesture went stale (undo stack moved on).
 	bool gizmoReapply( const Vector3 & param );
 
+	// ---- element reference picking (vertex / edge / face) ----
+
+	int pickMode = 0;                   // 0 off, 1 vertex, 2 edge, 3 face
+
+	struct PickedElement
+	{
+		int shapeBlock = -1;            // block number of the shape
+		int type = 0;                   // 1 vertex, 2 edge, 3 face
+		int e0 = -1, e1 = -1;           // vertex indices (vertex: e0; edge: e0-e1; face: triangle index in e0)
+		Vector3 worldPos;               // reference point (vertex / edge midpoint / face center)
+		Vector3 worldNormal;            // face normal for face picks
+		Vector3 wA, wB, wC;             // world corners for drawing
+		bool operator==( const PickedElement & o ) const
+		{
+			return shapeBlock == o.shapeBlock && type == o.type && e0 == o.e0 && e1 == o.e1;
+		}
+	};
+	QVector<PickedElement> pickedElems;
+
+	Vector3 pickedMedian() const;
+	//! Pick the element under pos into the selection; additive toggles membership
+	bool pickElementAt( const QPointF & pos, bool additive );
+	//! Mouse ray in world space
+	void mouseRayWorld( const QPointF & pos, Vector3 & origin, Vector3 & dir ) const;
+
+	struct SceneRayHit
+	{
+		class Shape * shape = nullptr;
+		int tri = -1;
+		float dist = 1.0e30f;           // world-space distance along the ray
+		Vector3 hitLocal;
+	};
+	//! Closest triangle hit under pos; excludeBlock (and its subtree) is skipped
+	SceneRayHit raycastScene( const QPointF & pos, int excludeBlock = -1 ) const;
+
+	// ---- 3D cursor ----
+	Vector3 cursorPos;                  // world space
+	bool showCursor = true;
+	//! Place the cursor on the surface under pos (or on the view plane at Dist)
+	void placeCursor( const QPointF & pos );
+	//! Move the selected node so its origin lands on the cursor (undoable)
+	void snapNodeToCursor();
+	//! Move all picked vertices to the cursor (edits mesh data, undoable snapshot)
+	void movePickedVertsToCursor();
+
+	// ---- snapping ----
+	int snapTargetMode = 0;             // 0 grid step, 1 vertex, 2 edge, 3 face
+	bool snapAlignRot = false;          // orient +Z to the target face normal
+	static float gizmoRotSnapDeg;       // rotation snap increment
+
 private:
 	bool gizmoBegin( int mode );
 	void gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods );

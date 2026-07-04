@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "model/undocommands.h"
 #include "data/nifitem.h"
+#include "nifsnapshot.h"
 #include "ui/settingsdialog.h"
 #include "ui/widgets/fileselect.h"
 #include "fp32vec4.hpp"
@@ -52,6 +53,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDebug>
+#include <QHash>
+#include <QSet>
 #include <QDialog>
 #include <QDir>
 #include <QGroupBox>
@@ -708,6 +711,65 @@ void GLView::paintGL()
 		}
 	}
 
+	// picked reference elements + 3D cursor
+	if ( model && ( !pickedElems.isEmpty() || showCursor || pickMode ) ) {
+		glDisable( GL_DEPTH_TEST );
+		glDepthMask( GL_FALSE );
+		scene->loadModelViewMatrix( viewTrans );
+		float ms = std::max( float( Dist ) / 100.0f, 0.005f );
+
+		for ( const auto & pe : pickedElems ) {
+			if ( pe.type == 1 ) {
+				scene->setGLColor( 0.2f, 1.0f, 0.4f, 1.0f );
+				scene->drawSphereSimple( pe.worldPos, ms * 0.5f, 16, 2 );
+			} else if ( pe.type == 2 ) {
+				scene->setGLColor( 1.0f, 0.7f, 0.1f, 1.0f );
+				scene->setGLLineWidth( Settings::lineWidthAxes * 1.6f );
+				scene->drawLine( pe.wA, pe.wB );
+				scene->drawSphereSimple( pe.worldPos, ms * 0.35f, 12, 2 );
+			} else if ( pe.type == 3 ) {
+				scene->setGLColor( 0.3f, 0.6f, 1.0f, 1.0f );
+				scene->setGLLineWidth( Settings::lineWidthAxes * 1.6f );
+				scene->drawLine( pe.wA, pe.wB );
+				scene->drawLine( pe.wB, pe.wC );
+				scene->drawLine( pe.wC, pe.wA );
+				scene->drawLine( pe.worldPos, pe.worldPos + pe.worldNormal * ( ms * 4.0f ) );
+			}
+		}
+
+		if ( pickedElems.size() > 1 ) {
+			// median marker
+			Vector3 m = pickedMedian();
+			scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
+			scene->setGLLineWidth( Settings::lineWidthAxes );
+			for ( int c = 0; c < 3; c++ ) {
+				Vector3 d;
+				d[c] = ms * 1.5f;
+				scene->drawLine( m - d, m + d );
+			}
+		}
+
+		if ( showCursor ) {
+			// Blender-style 3D cursor: red/white circle facing the camera + cross
+			const auto & vtr = viewTrans.rotation;
+			Vector3 fwd( vtr( 2, 0 ), vtr( 2, 1 ), vtr( 2, 2 ) );
+			Vector3 right( vtr( 0, 0 ), vtr( 0, 1 ), vtr( 0, 2 ) );
+			Vector3 up( vtr( 1, 0 ), vtr( 1, 1 ), vtr( 1, 2 ) );
+			float cs = ms * 1.6f;
+			scene->setGLLineWidth( Settings::lineWidthAxes * 1.2f );
+			scene->setGLColor( 0.9f, 0.15f, 0.15f, 1.0f );
+			scene->drawCircle( cursorPos, fwd, cs * 0.75f, 24 );
+			scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
+			scene->drawLine( cursorPos - right * cs * 1.4f, cursorPos - right * cs * 0.5f );
+			scene->drawLine( cursorPos + right * cs * 0.5f, cursorPos + right * cs * 1.4f );
+			scene->drawLine( cursorPos - up * cs * 1.4f, cursorPos - up * cs * 0.5f );
+			scene->drawLine( cursorPos + up * cs * 0.5f, cursorPos + up * cs * 1.4f );
+		}
+
+		glDepthMask( GL_TRUE );
+		glEnable( GL_DEPTH_TEST );
+	}
+
 	if ( scene->hasOption(Scene::ShowAxes) ) {
 		// Resize viewport to small corner of screen
 		int axesSize = int( std::min< double >( 0.1 * pixelWidth, 125.0 * devicePixelRatioF() ) + 0.5 );
@@ -1316,6 +1378,7 @@ void GLView::setSoloBlock( int blockNumber )
  */
 
 float GLView::gizmoSnapStep = 1.0f;
+float GLView::gizmoRotSnapDeg = 5.0f;
 
 Transform GLView::viewTransform() const
 {
@@ -1478,6 +1541,11 @@ Matrix GLView::gizmoBasis( const QModelIndex & iBlock ) const
 
 Vector3 GLView::gizmoPivotPoint( const QModelIndex & iBlock ) const
 {
+	if ( gizmoPivot == 2 && !pickedElems.isEmpty() )
+		return pickedMedian();
+	if ( gizmoPivot == 3 )
+		return cursorPos;
+
 	Node * n = scene->getNode( model, iBlock );
 	if ( !n )
 		return Vector3();
@@ -1610,8 +1678,67 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 			deltaWorld = axis * amount;
 		}
 
+		// element snapping: Ctrl + a vertex/edge/face snap target drops the node
+		// onto the geometry under the mouse (the moved subtree is excluded)
+		bool elemSnapped = false;
+		if ( snap && snapTargetMode > 0 ) {
+			SceneRayHit sh = raycastScene( QPointF( pos ), model->getBlockNumber( iBlock ) );
+			if ( sh.shape ) {
+				Transform swt = sh.shape->worldTrans();
+				Vector3 target = swt * sh.hitLocal;
+				const Triangle & tri = sh.shape->triangles.at( sh.tri );
+				Vector3 va = sh.shape->verts.at( tri[0] );
+				Vector3 vb = sh.shape->verts.at( tri[1] );
+				Vector3 vc = sh.shape->verts.at( tri[2] );
+
+				if ( snapTargetMode == 1 ) {
+					float d0 = ( va - sh.hitLocal ).squaredLength();
+					float d1 = ( vb - sh.hitLocal ).squaredLength();
+					float d2 = ( vc - sh.hitLocal ).squaredLength();
+					target = swt * ( d0 <= d1 && d0 <= d2 ? va : ( d1 <= d2 ? vb : vc ) );
+				} else if ( snapTargetMode == 2 ) {
+					auto closest = [&sh]( const Vector3 & a, const Vector3 & b ) {
+						Vector3 d = b - a;
+						float len2 = d.squaredLength();
+						float t = ( len2 > 1.0e-12f )
+						          ? std::min( std::max( Vector3::dotproduct( sh.hitLocal - a, d ) / len2, 0.0f ), 1.0f ) : 0.0f;
+						return a + d * t;
+					};
+					Vector3 p01 = closest( va, vb ), p12 = closest( vb, vc ), p20 = closest( vc, va );
+					float d01 = ( p01 - sh.hitLocal ).squaredLength();
+					float d12 = ( p12 - sh.hitLocal ).squaredLength();
+					float d20 = ( p20 - sh.hitLocal ).squaredLength();
+					target = swt * ( d01 <= d12 && d01 <= d20 ? p01 : ( d12 <= d20 ? p12 : p20 ) );
+				}
+
+				deltaWorld = target - gizmoOrigWorldPos;
+				elemSnapped = true;
+
+				if ( snapAlignRot ) {
+					// orient the node's +Z to the target face normal
+					Vector3 n = Vector3::crossproduct( swt.rotation * ( vb - va ), swt.rotation * ( vc - va ) );
+					n.normalize();
+					Vector3 z( 0, 0, 1 );
+					Vector3 axc = Vector3::crossproduct( z, n );
+					float dz = std::min( std::max( Vector3::dotproduct( z, n ), -1.0f ), 1.0f );
+					Matrix ar;
+					if ( axc.length() > 1.0e-5f ) {
+						axc.normalize();
+						Quat qa;
+						qa.fromAxisAngle( axc, std::acos( dz ) );
+						ar.fromQuat( qa );
+					} else if ( dz < 0.0f ) {
+						Quat qa;
+						qa.fromAxisAngle( Vector3( 1, 0, 0 ), float( M_PI ) );
+						ar.fromQuat( qa );
+					}
+					model->set<Matrix>( iBlock, "Rotation", gizmoParentRot.inverted() * ar );
+				}
+			}
+		}
+
 		Vector3 nt = worldToLocalTrans( gizmoOrigWorldPos + deltaWorld );
-		if ( snap && gizmoSnapStep > 0 ) {
+		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
 			for ( int c = 0; c < 3; c++ )
 				nt[c] = std::round( nt[c] / gizmoSnapStep ) * gizmoSnapStep;
 		}
@@ -1621,8 +1748,8 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 		status = tr( "Move: %1, %2, %3" ).arg( nt[0], 0, 'f', 3 ).arg( nt[1], 0, 'f', 3 ).arg( nt[2], 0, 'f', 3 );
 	} else if ( gizmoMode == 2 ) {
 		float angle = numeric ? gizmoPartVal( gizmoNum, 0 ) : dx * 0.5f * precision;
-		if ( snap )
-			angle = std::round( angle / 5.0f ) * 5.0f;
+		if ( snap && gizmoRotSnapDeg > 0.0f )
+			angle = std::round( angle / gizmoRotSnapDeg ) * gizmoRotSnapDeg;
 
 		Vector3 axis;
 		if ( gizmoAxis == 0 ) {
@@ -1832,6 +1959,335 @@ bool GLView::gizmoReapply( const Vector3 & param )
 
 	update();
 	return true;
+}
+
+/*
+ *  Element reference picking, 3D cursor, snapping
+ */
+
+//! Möller-Trumbore ray/triangle intersection
+static bool tlRayTri( const Vector3 & ro, const Vector3 & rd,
+	const Vector3 & a, const Vector3 & b, const Vector3 & c, float & tOut )
+{
+	Vector3 e1 = b - a;
+	Vector3 e2 = c - a;
+	Vector3 p = Vector3::crossproduct( rd, e2 );
+	float det = Vector3::dotproduct( e1, p );
+	if ( std::fabs( det ) < 1.0e-9f )
+		return false;
+	float inv = 1.0f / det;
+	Vector3 s = ro - a;
+	float u = Vector3::dotproduct( s, p ) * inv;
+	if ( u < -1.0e-4f || u > 1.0001f )
+		return false;
+	Vector3 q = Vector3::crossproduct( s, e1 );
+	float v = Vector3::dotproduct( rd, q ) * inv;
+	if ( v < -1.0e-4f || u + v > 1.0001f )
+		return false;
+	float t = Vector3::dotproduct( e2, q ) * inv;
+	if ( t <= 1.0e-5f )
+		return false;
+	tOut = t;
+	return true;
+}
+
+void GLView::mouseRayWorld( const QPointF & pos, Vector3 & origin, Vector3 & dir ) const
+{
+	Transform vt = viewTransform();
+	Matrix ri = vt.rotation.inverted();
+	float ww = std::max( (float)width(), 1.0f ), hh = std::max( (float)height(), 1.0f );
+
+	if ( perspectiveMode || view == ViewWalk ) {
+		float tanF = float( std::tan( ( cfg.fov / Zoom ) / 360.0 * M_PI ) );
+		Vector3 dc( ( 2.0f * float( pos.x() ) / ww - 1.0f ) * tanF * float( aspect ),
+		            ( 1.0f - 2.0f * float( pos.y() ) / hh ) * tanF, -1.0f );
+		origin = ri * ( Vector3() - vt.translation );
+		dir = ri * dc;
+	} else {
+		float h2 = float( Dist / Zoom );
+		float w2 = h2 * float( aspect );
+		Vector3 pc( ( 2.0f * float( pos.x() ) / ww - 1.0f ) * w2,
+		            ( 1.0f - 2.0f * float( pos.y() ) / hh ) * h2, 0.0f );
+		origin = ri * ( pc - vt.translation );
+		dir = ri * Vector3( 0, 0, -1 );
+	}
+	dir.normalize();
+}
+
+GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock ) const
+{
+	SceneRayHit hit;
+	if ( !model || !scene )
+		return hit;
+
+	Vector3 ro, rd;
+	mouseRayWorld( pos, ro, rd );
+
+	for ( Shape * s : scene->shapes ) {
+		if ( !s || s->isHidden() || s->verts.isEmpty() || s->triangles.isEmpty() )
+			continue;
+
+		if ( excludeBlock >= 0 ) {
+			// skip the transformed node and its subtree
+			int b = s->id();
+			while ( b >= 0 && b != excludeBlock )
+				b = model->getParent( b );
+			if ( b == excludeBlock )
+				continue;
+		}
+
+		Transform wt = s->worldTrans();
+		float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+		Matrix ri = wt.rotation.inverted();
+		Vector3 lo = ri * ( ( ro - wt.translation ) * ( 1.0f / sc ) );
+		Vector3 ld = ri * rd;
+		ld.normalize();
+
+		for ( int i = 0; i < s->triangles.size(); i++ ) {
+			const Triangle & tri = s->triangles.at( i );
+			if ( tri[0] >= s->verts.size() || tri[1] >= s->verts.size() || tri[2] >= s->verts.size() )
+				continue;
+			float t = 0;
+			if ( tlRayTri( lo, ld, s->verts.at( tri[0] ), s->verts.at( tri[1] ), s->verts.at( tri[2] ), t ) ) {
+				float worldT = t * sc;
+				if ( worldT < hit.dist ) {
+					hit.dist = worldT;
+					hit.shape = s;
+					hit.tri = i;
+					hit.hitLocal = lo + ld * t;
+				}
+			}
+		}
+	}
+	return hit;
+}
+
+Vector3 GLView::pickedMedian() const
+{
+	Vector3 m;
+	if ( pickedElems.isEmpty() )
+		return m;
+	for ( const auto & pe : pickedElems )
+		m += pe.worldPos;
+	return m / float( pickedElems.size() );
+}
+
+bool GLView::pickElementAt( const QPointF & pos, bool additive )
+{
+	SceneRayHit hit = raycastScene( pos );
+	PickedElement pe;
+
+	if ( hit.shape ) {
+		Shape * s = hit.shape;
+		Transform wt = s->worldTrans();
+		const Triangle & tri = s->triangles.at( hit.tri );
+		Vector3 va = s->verts.at( tri[0] ), vb = s->verts.at( tri[1] ), vc = s->verts.at( tri[2] );
+
+		pe.shapeBlock = s->id();
+		pe.type = pickMode;
+		pe.wA = wt * va;
+		pe.wB = wt * vb;
+		pe.wC = wt * vc;
+
+		if ( pickMode == 1 ) {
+			// nearest corner of the hit triangle
+			float d0 = ( va - hit.hitLocal ).squaredLength();
+			float d1 = ( vb - hit.hitLocal ).squaredLength();
+			float d2 = ( vc - hit.hitLocal ).squaredLength();
+			int corner = ( d0 <= d1 && d0 <= d2 ) ? 0 : ( d1 <= d2 ? 1 : 2 );
+			pe.e0 = tri[corner];
+			pe.worldPos = wt * s->verts.at( pe.e0 );
+			pe.wA = pe.wB = pe.wC = pe.worldPos;
+		} else if ( pickMode == 2 ) {
+			// nearest edge of the hit triangle
+			auto edgeDist = [&hit]( const Vector3 & a, const Vector3 & b ) {
+				Vector3 d = b - a;
+				float len2 = d.squaredLength();
+				float t = ( len2 > 1.0e-12f )
+				          ? std::min( std::max( Vector3::dotproduct( hit.hitLocal - a, d ) / len2, 0.0f ), 1.0f ) : 0.0f;
+				return ( a + d * t - hit.hitLocal ).squaredLength();
+			};
+			float d01 = edgeDist( va, vb ), d12 = edgeDist( vb, vc ), d20 = edgeDist( vc, va );
+			int ea, eb;
+			if ( d01 <= d12 && d01 <= d20 ) {
+				ea = tri[0]; eb = tri[1];
+			} else if ( d12 <= d20 ) {
+				ea = tri[1]; eb = tri[2];
+			} else {
+				ea = tri[2]; eb = tri[0];
+			}
+			pe.e0 = std::min( ea, eb );
+			pe.e1 = std::max( ea, eb );
+			pe.wA = wt * s->verts.at( pe.e0 );
+			pe.wB = wt * s->verts.at( pe.e1 );
+			pe.wC = pe.wA;
+			pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
+		} else {
+			pe.e0 = hit.tri;
+			pe.worldPos = ( pe.wA + pe.wB + pe.wC ) / 3.0f;
+			Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
+			n.normalize();
+			pe.worldNormal = n;
+		}
+	} else if ( pickMode == 1 ) {
+		// off-surface: nearest vertex by screen distance
+		float best = 12.0f;
+		for ( Shape * s : scene->shapes ) {
+			if ( !s || s->isHidden() )
+				continue;
+			Transform wt = s->worldTrans();
+			for ( int i = 0; i < s->verts.size(); i++ ) {
+				QPointF sp;
+				Vector3 wv = wt * s->verts.at( i );
+				if ( !worldToScreen( wv, sp ) )
+					continue;
+				float d = float( std::hypot( sp.x() - pos.x(), sp.y() - pos.y() ) );
+				if ( d < best ) {
+					best = d;
+					pe.shapeBlock = s->id();
+					pe.type = 1;
+					pe.e0 = i;
+					pe.e1 = -1;
+					pe.worldPos = wv;
+					pe.wA = pe.wB = pe.wC = wv;
+				}
+			}
+		}
+		if ( pe.shapeBlock < 0 )
+			return false;
+	} else {
+		return false;
+	}
+
+	if ( additive ) {
+		int at = pickedElems.indexOf( pe );
+		if ( at >= 0 )
+			pickedElems.remove( at );
+		else
+			pickedElems.append( pe );
+	} else {
+		pickedElems.clear();
+		pickedElems.append( pe );
+	}
+
+	update();
+	return true;
+}
+
+void GLView::placeCursor( const QPointF & pos )
+{
+	SceneRayHit hit = raycastScene( pos );
+	if ( hit.shape ) {
+		Transform wt = hit.shape->worldTrans();
+		cursorPos = wt * hit.hitLocal;
+	} else {
+		Vector3 ro, rd;
+		mouseRayWorld( pos, ro, rd );
+		cursorPos = ro + rd * float( Dist * 2 );
+	}
+	update();
+}
+
+void GLView::snapNodeToCursor()
+{
+	if ( !model || !scene->currentBlock.isValid() )
+		return;
+
+	int b = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+	while ( b >= 0 && !model->blockInherits( model->getBlockIndex( b ), "NiAVObject" ) )
+		b = model->getParent( b );
+	if ( b < 0 )
+		return;
+	QModelIndex iBlock = model->getBlockIndex( b );
+	QModelIndex iField = model->getIndex( iBlock, "Translation" );
+	if ( !iField.isValid() )
+		return;
+
+	// cursor world position -> local translation under the parent
+	Matrix pr;
+	Vector3 pp;
+	float ps = 1.0f;
+	int parentNum = model->getParent( b );
+	Node * pn = ( parentNum >= 0 ) ? scene->getNode( model, model->getBlockIndex( parentNum ) ) : nullptr;
+	if ( pn ) {
+		Transform pt = pn->worldTrans();
+		pr = pt.rotation;
+		pp = pt.translation;
+		ps = ( pt.scale != 0.0f ) ? pt.scale : 1.0f;
+	}
+	Vector3 nt = pr.inverted() * ( ( cursorPos - pp ) * ( 1.0f / ps ) );
+
+	QModelIndex vIdx = iField.sibling( iField.row(), NifModel::ValueCol );
+	const NifItem * item = static_cast<const NifItem *>( vIdx.internalPointer() );
+	if ( !item )
+		return;
+	NifValue oldVal = item->value();
+	NifValue nv = oldVal;
+	if ( nv.set( nt, model, item ) ) {
+		ChangeValueCommand::createTransaction();
+		model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, nv, model->itemName( iField ), model ) );
+	}
+	update();
+}
+
+void GLView::movePickedVertsToCursor()
+{
+	if ( !model || pickedElems.isEmpty() )
+		return;
+
+	// collect target vertices per shape (faces/edges contribute their corners)
+	QHash<int, QSet<int>> byShape;
+	for ( const auto & pe : pickedElems ) {
+		if ( pe.shapeBlock < 0 )
+			continue;
+		if ( pe.type == 1 ) {
+			byShape[pe.shapeBlock].insert( pe.e0 );
+		} else if ( pe.type == 2 ) {
+			byShape[pe.shapeBlock].insert( pe.e0 );
+			byShape[pe.shapeBlock].insert( pe.e1 );
+		} else if ( pe.type == 3 ) {
+			Node * n = scene->getNode( model, model->getBlockIndex( pe.shapeBlock ) );
+			Shape * s = static_cast<Shape *>( n );
+			if ( s && pe.e0 >= 0 && pe.e0 < s->triangles.size() ) {
+				const Triangle & tri = s->triangles.at( pe.e0 );
+				byShape[pe.shapeBlock].insert( tri[0] );
+				byShape[pe.shapeBlock].insert( tri[1] );
+				byShape[pe.shapeBlock].insert( tri[2] );
+			}
+		}
+	}
+	if ( byShape.isEmpty() )
+		return;
+
+	nifSnapshotOp( model, tr( "Move vertices to 3D cursor" ), [&]() {
+		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
+			QModelIndex iShape = model->getBlockIndex( it.key() );
+			Node * n = scene->getNode( model, iShape );
+			if ( !n )
+				continue;
+			Transform wt = n->worldTrans();
+			float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+			Vector3 local = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / sc ) );
+
+			QModelIndex iVData = model->getIndex( iShape, "Vertex Data" );
+			QModelIndex iVerts = model->getIndex( model->getBlockIndex( model->getLink( iShape, "Data" ) ), "Vertices" );
+			if ( !iVData.isValid() && !iVerts.isValid() )
+				iVerts = model->getIndex( iShape, "Vertices" );
+
+			for ( int vi : it.value() ) {
+				if ( iVData.isValid() && vi < model->rowCount( iVData ) ) {
+					QModelIndex iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
+					if ( iv.isValid() )
+						model->set<Vector3>( iv, local );
+				} else if ( iVerts.isValid() && vi < model->rowCount( iVerts ) ) {
+					model->set<Vector3>( model->getIndex( iVerts, vi ), local );
+				}
+			}
+		}
+	} );
+
+	pickedElems.clear();
+	modelChanged();	// rebuild the shape display lists
 }
 
 QModelIndex parent( QModelIndex ix, QModelIndex xi )
@@ -2576,6 +3032,38 @@ void GLView::keyPressEvent( QKeyEvent * event )
 
 		if ( m && gizmoBegin( m ) )
 			return;
+
+		// element pick modes (Blender: 1/2/3) and the 3D cursor
+		int pm = 0;
+		if ( event->key() == Qt::Key_1 )
+			pm = 1;
+		else if ( event->key() == Qt::Key_2 )
+			pm = 2;
+		else if ( event->key() == Qt::Key_3 )
+			pm = 3;
+		if ( pm ) {
+			pickMode = ( pickMode == pm ) ? 0 : pm;
+			static const char * pmNames[4] = { "", "vertex", "edge", "face" };
+			emit gizmoStatus( pickMode
+				? tr( "Element select: %1  (click = pick, Shift+click = add/remove, Esc = clear, C = cursor to mouse, Shift+C = cursor to picked)" )
+					.arg( QLatin1String( pmNames[pickMode] ) )
+				: QString() );
+			update();
+			return;
+		}
+		if ( event->key() == Qt::Key_C ) {
+			if ( event->modifiers() & Qt::ShiftModifier )
+				cursorPos = pickedElems.isEmpty() ? Vector3() : pickedMedian();
+			else
+				placeCursor( mapFromGlobal( QCursor::pos() ) );
+			update();
+			return;
+		}
+		if ( event->key() == Qt::Key_Escape && !pickedElems.isEmpty() ) {
+			pickedElems.clear();
+			update();
+			return;
+		}
 	}
 
 	int	k = convertKeyCode( event->key() );
@@ -2697,6 +3185,17 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		gizmoEnd( event->button() == Qt::LeftButton );
 		gizmoSwallowClick = true;
 		return;
+	}
+
+	// element reference picking swallows plain clicks while a pick mode is active
+	if ( pickMode && event->button() == Qt::LeftButton
+		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		auto p = getQMouseEventPosition( event );
+		if ( pickElementAt( p, bool( event->modifiers() & Qt::ShiftModifier ) ) ) {
+			gizmoSwallowClick = true;
+			mouseButtonState |= std::uint32_t( event->button() );
+			return;
+		}
 	}
 
 	// grabbing a gizmo handle starts a constrained drag; releasing commits

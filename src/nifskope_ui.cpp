@@ -576,8 +576,11 @@ void NifSkope::initDockWidgets()
 
 	QMenu * mPivot = new QMenu( tr( "Transform Pivot Point" ), this );
 	QActionGroup * grpPivot = new QActionGroup( this );
-	const char * pivotNames[2] = { QT_TR_NOOP( "Node Origin" ), QT_TR_NOOP( "Bounding Center" ) };
-	for ( int i = 0; i < 2; i++ ) {
+	const char * pivotNames[4] = {
+		QT_TR_NOOP( "Node Origin" ), QT_TR_NOOP( "Bounding Center" ),
+		QT_TR_NOOP( "Picked Elements Median" ), QT_TR_NOOP( "3D Cursor" )
+	};
+	for ( int i = 0; i < 4; i++ ) {
 		QAction * a = mPivot->addAction( tr( pivotNames[i] ) );
 		a->setCheckable( true );
 		a->setChecked( i == 0 );
@@ -588,6 +591,74 @@ void NifSkope::initDockWidgets()
 		} );
 	}
 	ui->mRender->addMenu( mPivot );
+
+	// Snapping (Blender-style snap target for Ctrl-dragging)
+	QMenu * mSnapTgt = new QMenu( tr( "Snap Target (Ctrl)" ), this );
+	QActionGroup * grpSnapTgt = new QActionGroup( this );
+	const char * snapNames[4] = {
+		QT_TR_NOOP( "Grid Step" ), QT_TR_NOOP( "Vertex" ), QT_TR_NOOP( "Edge" ), QT_TR_NOOP( "Face" )
+	};
+	for ( int i = 0; i < 4; i++ ) {
+		QAction * a = mSnapTgt->addAction( tr( snapNames[i] ) );
+		a->setCheckable( true );
+		a->setChecked( i == 0 );
+		grpSnapTgt->addAction( a );
+		connect( a, &QAction::triggered, [this, i]() { ogl->snapTargetMode = i; } );
+	}
+	mSnapTgt->addSeparator();
+	QAction * aAlignRot = mSnapTgt->addAction( tr( "Align Rotation to Target" ) );
+	aAlignRot->setCheckable( true );
+	aAlignRot->setToolTip( tr( "When face snapping, orient the node's +Z to the surface normal" ) );
+	connect( aAlignRot, &QAction::toggled, [this]( bool on ) { ogl->snapAlignRot = on; } );
+	QAction * aRotSnap = mSnapTgt->addAction( tr( "Rotation Snap Angle..." ) );
+	connect( aRotSnap, &QAction::triggered, [this]() {
+		bool ok = false;
+		double v = QInputDialog::getDouble( this, tr( "Rotation snap" ),
+			tr( "Snap increment for Ctrl-rotating (degrees):" ), GLView::gizmoRotSnapDeg, 0.1, 180.0, 1, &ok );
+		if ( ok )
+			GLView::gizmoRotSnapDeg = (float)v;
+	} );
+	ui->mRender->addMenu( mSnapTgt );
+
+	// 3D cursor + element utilities
+	QMenu * mCursor = new QMenu( tr( "3D Cursor && Elements" ), this );
+	QAction * aShowCursor = mCursor->addAction( tr( "Show 3D Cursor" ) );
+	aShowCursor->setCheckable( true );
+	aShowCursor->setChecked( true );
+	connect( aShowCursor, &QAction::toggled, [this]( bool on ) {
+		ogl->showCursor = on;
+		ogl->update();
+	} );
+	mCursor->addSeparator();
+	mCursor->addAction( tr( "Snap Cursor to Picked" ), [this]() {
+		if ( !ogl->pickedElems.isEmpty() ) {
+			ogl->cursorPos = ogl->pickedMedian();
+			ogl->update();
+		}
+	} );
+	mCursor->addAction( tr( "Snap Cursor to World Origin" ), [this]() {
+		ogl->cursorPos = Vector3();
+		ogl->update();
+	} );
+	mCursor->addAction( tr( "Snap Node to Cursor" ), [this]() { ogl->snapNodeToCursor(); } );
+	mCursor->addAction( tr( "Move Picked Vertices to Cursor" ), [this]() { ogl->movePickedVertsToCursor(); } );
+	mCursor->addSeparator();
+	QActionGroup * grpPick = new QActionGroup( this );
+	const char * pickNames[4] = {
+		QT_TR_NOOP( "Element Select: Off" ), QT_TR_NOOP( "Element Select: Vertex (1)" ),
+		QT_TR_NOOP( "Element Select: Edge (2)" ), QT_TR_NOOP( "Element Select: Face (3)" )
+	};
+	for ( int i = 0; i < 4; i++ ) {
+		QAction * a = mCursor->addAction( tr( pickNames[i] ) );
+		a->setCheckable( true );
+		a->setChecked( i == 0 );
+		grpPick->addAction( a );
+		connect( a, &QAction::triggered, [this, i]() {
+			ogl->pickMode = i;
+			ogl->update();
+		} );
+	}
+	ui->mRender->addMenu( mCursor );
 
 	connect( ogl, &GLView::transformCommitted, timeline, &TimelineWidget::keyNodeTransform );
 
