@@ -648,6 +648,42 @@ void GLView::paintGL()
 	glDisable( GL_BLEND );
 	scene->draw();
 
+	// Pivot gizmo: RGB axes at the selected node's origin (oriented to the node),
+	// plus the active constraint axis while a modal G/R/S transform is running
+	if ( model && scene->currentBlock.isValid() ) {
+		int gb = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+		while ( gb >= 0 && !model->blockInherits( model->getBlockIndex( gb ), "NiAVObject" ) )
+			gb = model->getParent( gb );
+		Node * gizmoNode = ( gb >= 0 ) ? scene->getNode( model, model->getBlockIndex( gb ) ) : nullptr;
+
+		if ( gizmoNode ) {
+			glDisable( GL_DEPTH_TEST );
+			glDepthMask( GL_FALSE );
+
+			Transform nt = gizmoNode->worldTrans();
+			nt.scale = 1.0f;
+			float gs = std::max( float(Dist) / 10.0f, 0.05f );
+
+			scene->setGLLineWidth( Settings::lineWidthAxes * ( gizmoMode ? 1.6f : 1.0f ) );
+			scene->loadModelViewMatrix( viewTrans * nt );
+			scene->drawAxes( Vector3(), gs, true );
+
+			if ( gizmoMode && gizmoAxis > 0 ) {
+				// constraint line in world orientation through the node
+				Vector3 a;
+				a[gizmoAxis - 1] = 1.0f;
+				Vector3 c = gizmoNode->worldTrans().translation;
+				scene->loadModelViewMatrix( viewTrans );
+				scene->setGLColor( gizmoAxis == 1 ? 1.0f : 0.15f, gizmoAxis == 2 ? 1.0f : 0.15f,
+				                   gizmoAxis == 3 ? 1.0f : 0.15f, 0.9f );
+				scene->drawDashLine( c - a * ( gs * 40.0f ), c + a * ( gs * 40.0f ), 160 );
+			}
+
+			glDepthMask( GL_TRUE );
+			glEnable( GL_DEPTH_TEST );
+		}
+	}
+
 	if ( scene->hasOption(Scene::ShowAxes) ) {
 		// Resize viewport to small corner of screen
 		int axesSize = int( std::min< double >( 0.1 * pixelWidth, 125.0 * devicePixelRatioF() ) + 0.5 );
