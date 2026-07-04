@@ -320,6 +320,14 @@ void TimelineWidget::updateViews()
 
 void TimelineWidget::refresh()
 {
+	// Never scan while the model is loading/saving/processing: the refresh
+	// timer can fire from processEvents() inside NifModel::load() and would
+	// read a half-built model. Re-arm and try again once the model settles.
+	if ( nif && nif->getState() != BaseModel::Default ) {
+		refreshTimer->start();
+		return;
+	}
+
 	scanning = true;
 
 	qint32 prevSeqBlock = -1;
@@ -1239,6 +1247,8 @@ void TimelineWidget::setTime( float t, float mn, float mx )
 void TimelineWidget::setCurrentIndex( const QModelIndex & index )
 {
 	if ( scanning || !nif || !index.isValid() || index.model() != nif )
+		return;
+	if ( nif->getState() != BaseModel::Default )
 		return;
 
 	int blockNum = nif->getBlockNumber( index );
