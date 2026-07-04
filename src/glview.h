@@ -234,20 +234,38 @@ private:
 	// Blender style modal transform gizmo (G/R/S, X/Y/Z constraint, LMB commit, Esc cancel)
 	int gizmoMode = 0;                  // 0 none, 1 move, 2 rotate, 3 scale
 	int gizmoAxis = 0;                  // 0 view plane / all, 1 X, 2 Y, 3 Z
+	QStringList gizmoNum;               // typed numeric entry (Blender style); all parts empty = mouse drive
+	int gizmoNumCur = 0;                // part being typed (Tab cycles on unconstrained move)
 	QPoint gizmoStartPos;
 	Vector3 gizmoOrigTrans;
 	Matrix gizmoOrigRot;
 	float gizmoOrigScale = 1;
 	QPersistentModelIndex gizmoBlock;
 
+	// captured at gizmoBegin so the frame of reference stays fixed during the drag
+	Matrix gizmoBasisM;                 // orientation basis (world <- constraint space)
+	Vector3 gizmoPivotWorld;            // pivot point in world space
+	Vector3 gizmoOrigWorldPos;          // node origin in world space at begin
+	Matrix gizmoParentRot;              // parent world rotation
+	Vector3 gizmoParentPos;             // parent world translation
+	float gizmoParentScale = 1;
+
+	//! Orientation basis for the current gizmoOrient setting (world <- basis)
+	Matrix gizmoBasis( const QModelIndex & iBlock ) const;
+	//! World-space pivot point for the current gizmoPivot setting
+	Vector3 gizmoPivotPoint( const QModelIndex & iBlock ) const;
+
 public:
 	static float gizmoSnapStep;
 	bool gizmoAutoKey = false;
+	int gizmoOrient = 0;                // 0 Global, 1 Local, 2 Parent, 3 View
+	int gizmoPivot = 0;                 // 0 node origin, 1 bounding center
 
 private:
 	bool gizmoBegin( int mode );
 	void gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods );
 	void gizmoEnd( bool commit );
+	bool gizmoNumActive() const;
 	bool gizmoSwallowClick = false;
 
 	AnimationState animState;

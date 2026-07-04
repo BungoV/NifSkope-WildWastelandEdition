@@ -660,7 +660,14 @@ void GLView::paintGL()
 			glDisable( GL_DEPTH_TEST );
 			glDepthMask( GL_FALSE );
 
-			Transform nt = gizmoNode->worldTrans();
+			QModelIndex iGb = model->getBlockIndex( gb );
+			// during a modal gesture keep the frozen frame; otherwise follow the settings
+			Matrix basis = gizmoMode ? gizmoBasisM : gizmoBasis( iGb );
+			Vector3 pivot = gizmoMode ? gizmoPivotWorld : gizmoPivotPoint( iGb );
+
+			Transform nt;
+			nt.rotation = basis;
+			nt.translation = pivot;
 			nt.scale = 1.0f;
 			float gs = std::max( float(Dist) / 10.0f, 0.05f );
 
@@ -669,14 +676,14 @@ void GLView::paintGL()
 			scene->drawAxes( Vector3(), gs, true );
 
 			if ( gizmoMode && gizmoAxis > 0 ) {
-				// constraint line in world orientation through the node
-				Vector3 a;
-				a[gizmoAxis - 1] = 1.0f;
-				Vector3 c = gizmoNode->worldTrans().translation;
+				// constraint line in the active orientation through the pivot
+				Vector3 unit;
+				unit[gizmoAxis - 1] = 1.0f;
+				Vector3 a = basis * unit;
 				scene->loadModelViewMatrix( viewTrans );
 				scene->setGLColor( gizmoAxis == 1 ? 1.0f : 0.15f, gizmoAxis == 2 ? 1.0f : 0.15f,
 				                   gizmoAxis == 3 ? 1.0f : 0.15f, 0.9f );
-				scene->drawDashLine( c - a * ( gs * 40.0f ), c + a * ( gs * 40.0f ), 160 );
+				scene->drawDashLine( pivot - a * ( gs * 40.0f ), pivot + a * ( gs * 40.0f ), 160 );
 			}
 
 			glDepthMask( GL_TRUE );
@@ -1293,6 +1300,41 @@ void GLView::setSoloBlock( int blockNumber )
 
 float GLView::gizmoSnapStep = 1.0f;
 
+Matrix GLView::gizmoBasis( const QModelIndex & iBlock ) const
+{
+	if ( gizmoOrient == 1 || gizmoOrient == 2 ) {
+		int b = model->getBlockNumber( iBlock );
+		if ( gizmoOrient == 2 )
+			b = model->getParent( b );
+		Node * n = ( b >= 0 ) ? scene->getNode( model, model->getBlockIndex( b ) ) : nullptr;
+		if ( n )
+			return n->worldTrans().rotation;
+	} else if ( gizmoOrient == 3 ) {
+		Matrix vm;
+		vm.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+		// camera rows become world basis columns (transpose)
+		Matrix b;
+		for ( int r = 0; r < 3; r++ ) {
+			for ( int c = 0; c < 3; c++ )
+				b( r, c ) = vm( c, r );
+		}
+		return b;
+	}
+	return Matrix();
+}
+
+Vector3 GLView::gizmoPivotPoint( const QModelIndex & iBlock ) const
+{
+	Node * n = scene->getNode( model, iBlock );
+	if ( !n )
+		return Vector3();
+	if ( gizmoPivot == 1 ) {
+		BoundSphere bs = n->bounds();
+		return bs.center;
+	}
+	return n->worldTrans().translation;
+}
+
 bool GLView::gizmoBegin( int mode )
 {
 	if ( !model || !scene->currentBlock.isValid() )
@@ -1313,16 +1355,54 @@ bool GLView::gizmoBegin( int mode )
 	gizmoBlock = iBlock;
 	gizmoMode = mode;
 	gizmoAxis = 0;
+	gizmoNum = QStringList() << QString() << QString() << QString();
+	gizmoNumCur = 0;
 	gizmoStartPos = mapFromGlobal( QCursor::pos() );
 	gizmoOrigTrans = model->get<Vector3>( iBlock, "Translation" );
 	gizmoOrigRot = model->get<Matrix>( iBlock, "Rotation" );
 	gizmoOrigScale = model->get<float>( iBlock, "Scale" );
 
+	// freeze the frame of reference for the whole gesture
+	gizmoBasisM = gizmoBasis( iBlock );
+	gizmoPivotWorld = gizmoPivotPoint( iBlock );
+	int parentNum = model->getParent( b );
+	Node * pn = ( parentNum >= 0 ) ? scene->getNode( model, model->getBlockIndex( parentNum ) ) : nullptr;
+	if ( pn ) {
+		Transform pt = pn->worldTrans();
+		gizmoParentRot = pt.rotation;
+		gizmoParentPos = pt.translation;
+		gizmoParentScale = ( pt.scale != 0.0f ) ? pt.scale : 1.0f;
+	} else {
+		gizmoParentRot = Matrix();
+		gizmoParentPos = Vector3();
+		gizmoParentScale = 1.0f;
+	}
+	gizmoOrigWorldPos = gizmoParentPos + gizmoParentRot * gizmoOrigTrans * gizmoParentScale;
+
 	static const char * modeNames[4] = { "", "Move", "Rotate", "Scale" };
-	emit gizmoStatus( tr( "%1 [%2]:  move mouse, X/Y/Z = axis, Ctrl = snap (%3), LMB/Enter = commit, Esc = cancel" )
+	emit gizmoStatus( tr( "%1 [%2]:  move mouse or type a value, X/Y/Z = axis, Ctrl = snap (%3), LMB/Enter = commit, Esc = cancel" )
 		.arg( QLatin1String( modeNames[mode] ), model->resolveString( iBlock, "Name" ) ).arg( gizmoSnapStep ) );
 
 	return true;
+}
+
+//! Value of one typed part ("-" or "." alone parse as 0)
+static float gizmoPartVal( const QStringList & parts, int i )
+{
+	if ( i < 0 || i >= parts.size() )
+		return 0.0f;
+	bool ok = false;
+	float v = parts.at( i ).toFloat( &ok );
+	return ok ? v : 0.0f;
+}
+
+bool GLView::gizmoNumActive() const
+{
+	for ( const QString & s : gizmoNum ) {
+		if ( !s.isEmpty() )
+			return true;
+	}
+	return false;
 }
 
 void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
@@ -1333,7 +1413,8 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 	QModelIndex iBlock( gizmoBlock );
 	float dx = pos.x() - gizmoStartPos.x();
 	float dy = pos.y() - gizmoStartPos.y();
-	bool snap = mods & Qt::ControlModifier;
+	const bool numeric = gizmoNumActive();
+	bool snap = ( mods & Qt::ControlModifier ) && !numeric;
 	float precision = ( mods & Qt::ShiftModifier ) ? 0.2f : 1.0f;
 
 	// camera orientation in world space
@@ -1345,32 +1426,38 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 
 	QString status;
 
+	// world-space position -> local translation relative to the (frozen) parent frame
+	auto worldToLocalTrans = [this]( const Vector3 & w ) {
+		return gizmoParentRot.inverted() * ( ( w - gizmoParentPos ) * ( 1.0f / gizmoParentScale ) );
+	};
+
 	if ( gizmoMode == 1 ) {
 		float wpp = std::max( (float)Dist, 0.01f ) * 2.0f / std::max( height(), 1 ) * precision;
 		Vector3 deltaWorld;
 
-		if ( gizmoAxis == 0 ) {
+		if ( numeric ) {
+			// typed offset: along the constraint axis, or X/Y/Z parts of the
+			// active orientation (Tab cycles)
+			if ( gizmoAxis == 0 ) {
+				deltaWorld = gizmoBasisM * Vector3( gizmoPartVal( gizmoNum, 0 ),
+					gizmoPartVal( gizmoNum, 1 ), gizmoPartVal( gizmoNum, 2 ) );
+			} else {
+				Vector3 unit;
+				unit[gizmoAxis - 1] = 1.0f;
+				deltaWorld = ( gizmoBasisM * unit ) * gizmoPartVal( gizmoNum, 0 );
+			}
+		} else if ( gizmoAxis == 0 ) {
 			deltaWorld = camRight * ( dx * wpp ) + camUp * ( -dy * wpp );
 		} else {
-			Vector3 axis;
-			axis[gizmoAxis - 1] = 1.0f;
+			Vector3 unit;
+			unit[gizmoAxis - 1] = 1.0f;
+			Vector3 axis = gizmoBasisM * unit;
 			float amount = ( dx * wpp ) * ( Vector3::dotproduct( camRight, axis ) >= 0 ? 1.0f : -1.0f )
 			             + ( -dy * wpp ) * ( Vector3::dotproduct( camUp, axis ) >= 0 ? 1.0f : -1.0f );
 			deltaWorld = axis * amount;
 		}
 
-		// world delta -> parent space
-		Vector3 deltaLocal = deltaWorld;
-		int parentNum = model->getParent( model->getBlockNumber( iBlock ) );
-		Node * parentNode = ( parentNum >= 0 ) ? scene->getNode( model, model->getBlockIndex( parentNum ) ) : nullptr;
-		if ( parentNode ) {
-			Transform pt = parentNode->worldTrans();
-			deltaLocal = pt.rotation.inverted() * deltaWorld;
-			if ( pt.scale != 0 )
-				deltaLocal /= pt.scale;
-		}
-
-		Vector3 nt = gizmoOrigTrans + deltaLocal;
+		Vector3 nt = worldToLocalTrans( gizmoOrigWorldPos + deltaWorld );
 		if ( snap && gizmoSnapStep > 0 ) {
 			for ( int c = 0; c < 3; c++ )
 				nt[c] = std::round( nt[c] / gizmoSnapStep ) * gizmoSnapStep;
@@ -1379,35 +1466,69 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 		model->set<Vector3>( iBlock, "Translation", nt );
 		status = tr( "Move: %1, %2, %3" ).arg( nt[0], 0, 'f', 3 ).arg( nt[1], 0, 'f', 3 ).arg( nt[2], 0, 'f', 3 );
 	} else if ( gizmoMode == 2 ) {
-		float angle = dx * 0.5f * precision;
+		float angle = numeric ? gizmoPartVal( gizmoNum, 0 ) : dx * 0.5f * precision;
 		if ( snap )
 			angle = std::round( angle / 5.0f ) * 5.0f;
 
 		Vector3 axis;
-		if ( gizmoAxis == 0 )
+		if ( gizmoAxis == 0 ) {
 			axis = camFwd;
-		else
-			axis[gizmoAxis - 1] = 1.0f;
+		} else {
+			Vector3 unit;
+			unit[gizmoAxis - 1] = 1.0f;
+			axis = gizmoBasisM * unit;
+		}
 
 		Quat q;
 		q.fromAxisAngle( axis, deg2rad( angle ) );
 		Matrix dr;
 		dr.fromQuat( q );
 
-		model->set<Matrix>( iBlock, "Rotation", dr * gizmoOrigRot );
+		// world delta rotation expressed in the parent frame, so it is correct
+		// under rotated parents too
+		model->set<Matrix>( iBlock, "Rotation", gizmoParentRot.inverted() * dr * gizmoParentRot * gizmoOrigRot );
+
+		if ( gizmoPivot != 0 ) {
+			Vector3 newWorld = gizmoPivotWorld + dr * ( gizmoOrigWorldPos - gizmoPivotWorld );
+			model->set<Vector3>( iBlock, "Translation", worldToLocalTrans( newWorld ) );
+		}
 		status = tr( "Rotate: %1°" ).arg( angle, 0, 'f', 1 );
 	} else if ( gizmoMode == 3 ) {
-		float factor = 1.0f + dx * 0.01f * precision;
+		float factor = numeric ? gizmoPartVal( gizmoNum, 0 ) : 1.0f + dx * 0.01f * precision;
 		factor = std::max( factor, 0.001f );
 		if ( snap )
 			factor = std::max( std::round( factor * 10.0f ) / 10.0f, 0.1f );
 
 		model->set<float>( iBlock, "Scale", gizmoOrigScale * factor );
+
+		if ( gizmoPivot != 0 ) {
+			Vector3 newWorld = gizmoPivotWorld + ( gizmoOrigWorldPos - gizmoPivotWorld ) * factor;
+			model->set<Vector3>( iBlock, "Translation", worldToLocalTrans( newWorld ) );
+		}
 		status = tr( "Scale: ×%1 (uniform; NIF scale is a single value)" ).arg( factor, 0, 'f', 2 );
 	}
 
 	static const char * axisNames[4] = { "view", "X", "Y", "Z" };
-	emit gizmoStatus( status + tr( "   [axis: %1]" ).arg( QLatin1String( axisNames[gizmoAxis] ) ) );
+	status += tr( "   [axis: %1]" ).arg( QLatin1String( axisNames[gizmoAxis] ) );
+
+	if ( numeric ) {
+		if ( gizmoMode == 1 && gizmoAxis == 0 ) {
+			QStringList shown;
+			for ( int i = 0; i < 3; i++ ) {
+				QString s = gizmoNum.value( i );
+				if ( s.isEmpty() )
+					s = QStringLiteral( "0" );
+				if ( i == gizmoNumCur )
+					s = QStringLiteral( "[" ) + s + QStringLiteral( "]" );
+				shown << s;
+			}
+			status += tr( "   typed: %1  (Tab = next component)" ).arg( shown.join( QLatin1String( ", " ) ) );
+		} else {
+			status += tr( "   typed: %1" ).arg( gizmoNum.value( 0 ) );
+		}
+	}
+
+	emit gizmoStatus( status );
 
 	update();
 }
@@ -1450,11 +1571,13 @@ void GLView::gizmoEnd( bool commit )
 				model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, nv, model->itemName( iField ), model ) );
 		};
 
-		if ( mode == 1 )
+		Q_UNUSED( mode );
+		// pivot-relative rotate/scale moves Translation too, so commit whatever changed
+		if ( !( newTrans == gizmoOrigTrans ) )
 			pushTyped( "Translation", newTrans );
-		else if ( mode == 2 )
+		if ( !( newRot == gizmoOrigRot ) )
 			pushTyped( "Rotation", newRot );
-		else if ( mode == 3 )
+		if ( newScale != gizmoOrigScale )
 			pushTyped( "Scale", newScale );
 
 		if ( gizmoAutoKey )
@@ -2157,7 +2280,40 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		case Qt::Key_Enter:
 			gizmoEnd( true );
 			return;
+		case Qt::Key_Tab:
+			// next component for unconstrained moves (Blender: G 10 Tab 5 Tab 0)
+			if ( gizmoMode == 1 && gizmoAxis == 0 ) {
+				gizmoNumCur = ( gizmoNumCur + 1 ) % 3;
+				gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
+			}
+			return;
+		case Qt::Key_Backspace:
+			if ( gizmoNumCur < gizmoNum.size() && !gizmoNum[gizmoNumCur].isEmpty() )
+				gizmoNum[gizmoNumCur].chop( 1 );
+			gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
+			return;
+		case Qt::Key_Minus:
+			// Blender behavior: minus toggles the sign of the current entry
+			if ( gizmoNumCur < gizmoNum.size() ) {
+				QString & s = gizmoNum[gizmoNumCur];
+				if ( s.startsWith( QLatin1Char( '-' ) ) )
+					s.remove( 0, 1 );
+				else
+					s.prepend( QLatin1Char( '-' ) );
+				gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
+			}
+			return;
 		default:
+			if ( ( event->key() >= Qt::Key_0 && event->key() <= Qt::Key_9 )
+				|| event->key() == Qt::Key_Period || event->key() == Qt::Key_Comma ) {
+				if ( gizmoNumCur < gizmoNum.size() ) {
+					QChar c = ( event->key() == Qt::Key_Comma ) ? QLatin1Char( '.' )
+					          : QChar( (ushort)( event->key() == Qt::Key_Period ? '.' : '0' + ( event->key() - Qt::Key_0 ) ) );
+					if ( c != QLatin1Char( '.' ) || !gizmoNum[gizmoNumCur].contains( QLatin1Char( '.' ) ) )
+						gizmoNum[gizmoNumCur].append( c );
+					gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
+				}
+			}
 			return;
 		}
 	}

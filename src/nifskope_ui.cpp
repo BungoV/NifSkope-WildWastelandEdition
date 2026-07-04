@@ -452,6 +452,39 @@ void NifSkope::initDockWidgets()
 	} );
 	ui->mRender->addAction( aGizmoSnap );
 
+	// Blender-style transform orientation / pivot point selectors
+	QMenu * mOrient = new QMenu( tr( "Transform Orientation" ), this );
+	QActionGroup * grpOrient = new QActionGroup( this );
+	const char * orientNames[4] = {
+		QT_TR_NOOP( "Global" ), QT_TR_NOOP( "Local" ), QT_TR_NOOP( "Parent" ), QT_TR_NOOP( "View" )
+	};
+	for ( int i = 0; i < 4; i++ ) {
+		QAction * a = mOrient->addAction( tr( orientNames[i] ) );
+		a->setCheckable( true );
+		a->setChecked( i == 0 );
+		grpOrient->addAction( a );
+		connect( a, &QAction::triggered, [this, i]() {
+			ogl->gizmoOrient = i;
+			ogl->update();
+		} );
+	}
+	ui->mRender->addMenu( mOrient );
+
+	QMenu * mPivot = new QMenu( tr( "Transform Pivot Point" ), this );
+	QActionGroup * grpPivot = new QActionGroup( this );
+	const char * pivotNames[2] = { QT_TR_NOOP( "Node Origin" ), QT_TR_NOOP( "Bounding Center" ) };
+	for ( int i = 0; i < 2; i++ ) {
+		QAction * a = mPivot->addAction( tr( pivotNames[i] ) );
+		a->setCheckable( true );
+		a->setChecked( i == 0 );
+		grpPivot->addAction( a );
+		connect( a, &QAction::triggered, [this, i]() {
+			ogl->gizmoPivot = i;
+			ogl->update();
+		} );
+	}
+	ui->mRender->addMenu( mPivot );
+
 	connect( ogl, &GLView::transformCommitted, timeline, &TimelineWidget::keyNodeTransform );
 
 	// Space in the viewport toggles animation playback
