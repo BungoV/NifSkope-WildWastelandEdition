@@ -189,6 +189,8 @@ public slots:
 	void setCurrentIndex( const QModelIndex & );
 	//! Follow a sequence change made elsewhere (anim toolbar)
 	void setSequenceByName( const QString & name );
+	//! Insert/replace transform keys at the playhead from the node's current transform (auto-key)
+	void keyNodeTransform( int nodeBlock );
 
 protected slots:
 	void sequenceChosen( int comboRow );

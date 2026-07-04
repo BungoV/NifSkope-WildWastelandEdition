@@ -1128,3 +1128,275 @@ public:
 };
 
 REGISTER_SPELL( spBakeBSpline )
+
+
+//! Sort a sequence's controlled blocks alphabetically by node name
+class spSortControlledBlocks final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Sort By Node Name" ); }
+	QString page() const override final { return Spell::tr( "Animation" ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return nif && index.isValid() && nif->itemName( index ) == QLatin1String( "Controlled Blocks" )
+		       && nif->blockInherits( nif->getBlockIndex( index ), "NiControllerSequence" );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		struct Row
+		{
+			qint32 interp, ctlr;
+			int priority;
+			QString strings[5];
+		};
+		static const char * strFields[5] = { "Node Name", "Property Type", "Controller Type", "Controller ID", "Interpolator ID" };
+
+		QVector<Row> rows;
+		int n = nif->rowCount( index );
+		for ( int r = 0; r < n; r++ ) {
+			QModelIndex iRow = nif->getIndex( index, r );
+			Row row;
+			row.interp = nif->getLink( iRow, "Interpolator" );
+			row.ctlr = nif->getLink( iRow, "Controller" );
+			row.priority = nif->get<int>( iRow, "Priority" );
+			for ( int s = 0; s < 5; s++ )
+				row.strings[s] = nif->resolveString( iRow, strFields[s] );
+			rows.append( row );
+		}
+
+		std::stable_sort( rows.begin(), rows.end(), []( const Row & a, const Row & b ) {
+			return QString::compare( a.strings[0], b.strings[0], Qt::CaseInsensitive ) < 0;
+		} );
+
+		QPersistentModelIndex pArr( index );
+		nifSnapshotOp( nif, Spell::tr( "Sort controlled blocks" ), [&]() {
+			QModelIndex iArr( pArr );
+			for ( int r = 0; r < rows.count(); r++ ) {
+				QModelIndex iRow = nif->getIndex( iArr, r );
+				nif->setLink( iRow, "Interpolator", rows[r].interp );
+				nif->setLink( iRow, "Controller", rows[r].ctlr );
+				if ( nif->getIndex( iRow, "Priority" ).isValid() )
+					nif->set<int>( iRow, "Priority", rows[r].priority );
+				for ( int s = 0; s < 5; s++ ) {
+					if ( nif->getIndex( iRow, strFields[s] ).isValid() )
+						nif->assignString( iRow, QString::fromLatin1( strFields[s] ), rows[r].strings[s], false );
+				}
+			}
+		} );
+
+		return index;
+	}
+};
+
+REGISTER_SPELL( spSortControlledBlocks )
+
+
+//! Sort an object palette alphabetically by name
+class spSortPaletteObjs final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Sort By Name" ); }
+	QString page() const override final { return Spell::tr( "Animation" ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return nif && index.isValid() && nif->itemName( index ) == QLatin1String( "Objs" )
+		       && nif->blockInherits( nif->getBlockIndex( index ), "NiDefaultAVObjectPalette" );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QVector<QPair<QString, qint32>> rows;
+		int n = nif->rowCount( index );
+		for ( int r = 0; r < n; r++ ) {
+			QModelIndex iRow = nif->getIndex( index, r );
+			rows.append( { nif->resolveString( iRow, "Name" ), nif->getLink( iRow, "AV Object" ) } );
+		}
+
+		std::stable_sort( rows.begin(), rows.end(), []( const QPair<QString, qint32> & a, const QPair<QString, qint32> & b ) {
+			return QString::compare( a.first, b.first, Qt::CaseInsensitive ) < 0;
+		} );
+
+		QPersistentModelIndex pArr( index );
+		nifSnapshotOp( nif, Spell::tr( "Sort palette objects" ), [&]() {
+			QModelIndex iArr( pArr );
+			for ( int r = 0; r < rows.count(); r++ ) {
+				QModelIndex iRow = nif->getIndex( iArr, r );
+				nif->assignString( iRow, QStringLiteral( "Name" ), rows[r].first, false );
+				nif->setLink( iRow, "AV Object", rows[r].second );
+			}
+		} );
+
+		return index;
+	}
+};
+
+REGISTER_SPELL( spSortPaletteObjs )
+
+
+//! Generate a BSPositionData extra data block from a geometry's vertex positions
+class spGeneratePositionData final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Generate BSPositionData" ); }
+	QString page() const override final { return Spell::tr( "Animation" ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		if ( !nif || nif->getBSVersion() < 130 )
+			return false;
+		QModelIndex iBlock = nif->getBlockIndex( index );
+		if ( !nif->blockInherits( iBlock, "NiAVObject" ) )
+			return false;
+		return nif->getIndex( iBlock, "Vertex Data" ).isValid()
+		       || nif->getBlockIndex( nif->getLink( iBlock, "Data" ), "NiGeometryData" ).isValid();
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex iBlock = nif->getBlockIndex( index );
+
+		// gather vertex positions (BSTriShape style or legacy NiGeometryData)
+		QVector<Vector3> verts;
+
+		QModelIndex iVData = nif->getIndex( iBlock, "Vertex Data" );
+		if ( iVData.isValid() ) {
+			for ( int r = 0; r < nif->rowCount( iVData ); r++ ) {
+				QModelIndex iV = nif->getIndex( nif->getIndex( iVData, r ), "Vertex" );
+				if ( iV.isValid() )
+					verts.append( nif->get<Vector3>( iV ) );
+			}
+		} else {
+			QModelIndex iData = nif->getBlockIndex( nif->getLink( iBlock, "Data" ), "NiGeometryData" );
+			QModelIndex iVerts = nif->getIndex( iData, "Vertices" );
+			for ( int r = 0; r < nif->rowCount( iVerts ); r++ )
+				verts.append( nif->get<Vector3>( nif->getIndex( iVerts, r ) ) );
+		}
+
+		if ( verts.isEmpty() ) {
+			QMessageBox::information( nullptr, name(), Spell::tr( "No vertex positions found on this block." ) );
+			return index;
+		}
+
+		QModelIndex result;
+		QPersistentModelIndex pBlock( iBlock );
+
+		nifSnapshotOp( nif, Spell::tr( "Generate BSPositionData (%1 vertices)" ).arg( verts.count() ), [&]() {
+			QModelIndex iPos = nif->insertNiBlock( "BSPositionData" );
+			nif->assignString( iPos, QStringLiteral( "Name" ), QStringLiteral( "POS" ), false );
+
+			nif->set<int>( iPos, "Num Data", verts.count() * 3 );
+			QModelIndex iArr = nif->getIndex( iPos, "Data" );
+			nif->updateArraySize( iArr );
+
+			for ( int v = 0; v < verts.count(); v++ ) {
+				nif->set<float>( nif->getIndex( iArr, v * 3 ), verts[v][0] );
+				nif->set<float>( nif->getIndex( iArr, v * 3 + 1 ), verts[v][1] );
+				nif->set<float>( nif->getIndex( iArr, v * 3 + 2 ), verts[v][2] );
+			}
+
+			addLink( nif, QModelIndex( pBlock ), "Extra Data List", nif->getBlockNumber( iPos ) );
+			result = iPos;
+		} );
+
+		return result.isValid() ? result : index;
+	}
+};
+
+REGISTER_SPELL( spGeneratePositionData )
+
+
+//! Replace every reference to this block with a reference to another compatible block
+class spSwapReferences final : public Spell
+{
+	//! Recursively rewrite links equal to oldNum with newNum
+	static void rewriteLinks( NifModel * nif, const QModelIndex & iParent, qint32 oldNum, qint32 newNum, int depth = 0 )
+	{
+		if ( depth > 8 )
+			return;
+
+		for ( int r = 0; r < nif->rowCount( iParent ); r++ ) {
+			QModelIndex iChild = nif->getIndex( iParent, r );
+			if ( !iChild.isValid() )
+				continue;
+
+			if ( nif->getLink( iChild ) == oldNum )
+				nif->setLink( iChild, newNum );
+			else if ( nif->rowCount( iChild ) > 0 )
+				rewriteLinks( nif, iChild, oldNum, newNum, depth + 1 );
+		}
+	}
+
+public:
+	QString name() const override final { return Spell::tr( "Replace References With..." ); }
+	QString page() const override final { return Spell::tr( "Blocks" ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return nif && index.isValid() && nif->isNiBlock( nif->getBlockIndex( index ) );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex iBlock = nif->getBlockIndex( index );
+		int oldNum = nif->getBlockNumber( iBlock );
+
+		// base category compatibility filter
+		static const char * bases[] = {
+			"NiAVObject", "NiProperty", "NiInterpolator", "NiTimeController",
+			"NiExtraData", "NiPSysModifier", "BSShaderTextureSet", "NiObject"
+		};
+		QString baseType;
+		for ( const char * b : bases ) {
+			if ( nif->blockInherits( iBlock, b ) ) {
+				baseType = QString::fromLatin1( b );
+				break;
+			}
+		}
+
+		QStringList names;
+		QVector<int> nums;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			if ( b == oldNum )
+				continue;
+			QModelIndex i = nif->getBlockIndex( b );
+			if ( !baseType.isEmpty() && !nif->blockInherits( i, baseType ) )
+				continue;
+			QString nm = nif->resolveString( i, "Name" );
+			QString entry = QString( "%1  %2" ).arg( b ).arg( nif->itemName( i ) );
+			if ( !nm.isEmpty() )
+				entry += QStringLiteral( "  \"" ) + nm + QStringLiteral( "\"" );
+			names << entry;
+			nums.append( b );
+		}
+
+		if ( names.isEmpty() ) {
+			QMessageBox::information( nullptr, name(), Spell::tr( "No compatible blocks found." ) );
+			return index;
+		}
+
+		bool ok = false;
+		QString pick = QInputDialog::getItem( nullptr, name(),
+			Spell::tr( "Every reference to block %1 will instead point to:" ).arg( oldNum ), names, 0, false, &ok );
+		if ( !ok )
+			return index;
+
+		int newNum = nums.value( names.indexOf( pick ), -1 );
+		if ( newNum < 0 )
+			return index;
+
+		nifSnapshotOp( nif, Spell::tr( "Replace references %1 -> %2" ).arg( oldNum ).arg( newNum ), [&]() {
+			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+				if ( b == oldNum )
+					continue;
+				rewriteLinks( nif, nif->getBlockIndex( b ), oldNum, newNum );
+			}
+		} );
+
+		return nif->getBlockIndex( newNum );
+	}
+};
+
+REGISTER_SPELL( spSwapReferences )

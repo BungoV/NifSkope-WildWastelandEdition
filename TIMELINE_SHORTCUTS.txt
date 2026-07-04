@@ -69,3 +69,28 @@ TIMELINE TOOLBAR
                       Double-click a finding to jump to it; name mismatches offer a fix.
   Target button       Filter lanes to the selected geometry node
   Sidebar button      Show/hide the inspector panel
+
+ADDED IN THE 2026-07-04 UPDATE
+  Timeline toolbar   ⏮ ◀ ▶ ⏭ = jump to start / play backward / play / jump to end
+                     (local clock; loops inside the preview range if one is set)
+  Shift+Space        Play backward (timeline focused)
+  Middle-drag        Pan the time axis (lanes and graph panes)
+  Sequence headers   All-controllers view groups each sequence; click header to fold
+  Ruler marker click Select the text key in the tree
+  Lane context menu  Disable controller / Isolate target mesh in viewport
+
+VIEWPORT TRANSFORM GIZMO (Blender style, viewport focused, node selected)
+  G / R / S          Start move / rotate / scale (modal)
+  X / Y / Z          Constrain to axis (rotate default: view axis; scale is uniform)
+  Mouse move         Apply transform live      Shift = precision
+  Ctrl               Snap: grid step (Render > Gizmo Snap Distance...), 5 deg, 0.1x
+  LMB / Enter        Commit (single undo step)
+  RMB / Esc          Cancel
+  Space              Play/pause animation (viewport focused)
+  Render menu        Auto-Key Transforms: keys each committed transform at the playhead
+
+NEW SPELLS
+  Animation > Sort By Node Name        on Controlled Blocks of a sequence
+  Animation > Sort By Name             on Objs of an object palette
+  Animation > Generate BSPositionData  on FO4 geometry (particle spawn positions)
+  Blocks > Replace References With...  repoint every reference to another block

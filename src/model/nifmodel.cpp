@@ -1744,6 +1744,17 @@ QModelIndex NifModel::buddy( const QModelIndex & index ) const
 
 			return buddy;
 		}
+
+		// Object palette entries show their name when collapsed
+		if ( item->hasStrType("AVObject") ) {
+			QModelIndex buddy = getIndex( index, "Name" );
+
+			if ( buddy.isValid() )
+				buddy = buddy.sibling( buddy.row(), ValueCol );
+
+			if ( buddy.isValid() )
+				return buddy;
+		}
 	}
 
 	return index;

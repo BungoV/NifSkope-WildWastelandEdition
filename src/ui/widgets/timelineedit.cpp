@@ -1038,6 +1038,100 @@ void TimelineWidget::addTextKeyMarker( float time )
 	} );
 }
 
+void TimelineWidget::keyNodeTransform( int nodeBlock )
+{
+	if ( !nif || nodeBlock < 0 )
+		return;
+
+	QModelIndex iNode = nif->getBlockIndex( nodeBlock );
+	if ( !iNode.isValid() )
+		return;
+
+	// find the transform lane targeting this node
+	int lane = -1;
+	for ( int i = 0; i < lanes.count(); i++ ) {
+		if ( lanes[i].isHeader || lanes[i].targetBlock != nodeBlock )
+			continue;
+		for ( const auto & ch : lanes[i].channels ) {
+			if ( ch.name == QLatin1String( "Translations" ) || ch.name == QLatin1String( "Scales" )
+			     || ch.type == TimelineChannel::QuatVal || ch.name.startsWith( QLatin1String( "Rot " ) ) ) {
+				lane = i;
+				break;
+			}
+		}
+		if ( lane >= 0 )
+			break;
+	}
+
+	if ( lane < 0 ) {
+		infoLabel->setText( tr( "Auto-key: no transform lane for this node in the current view" ) );
+		return;
+	}
+
+	float time = snapTime( curTime );
+	Vector3 trans = nif->get<Vector3>( iNode, "Translation" );
+	Matrix rot = nif->get<Matrix>( iNode, "Rotation" );
+	float scale = nif->get<float>( iNode, "Scale" );
+	Quat q = rot.toQuat();
+	float ex = 0, ey = 0, ez = 0;
+	rot.toEuler( ex, ey, ez );
+
+	QVector<QPair<int, QVector<TimelineKeyData>>> newData;
+
+	for ( int c = 0; c < lanes[lane].channels.count(); c++ ) {
+		const TimelineChannel & ch = lanes[lane].channels[c];
+
+		QVector<float> comps;
+		if ( ch.name == QLatin1String( "Translations" ) && ch.type == TimelineChannel::Vector3Val )
+			comps = { trans[0], trans[1], trans[2] };
+		else if ( ch.name == QLatin1String( "Scales" ) && ch.type == TimelineChannel::Float )
+			comps = { scale };
+		else if ( ch.type == TimelineChannel::QuatVal )
+			comps = { q[0], q[1], q[2], q[3] };
+		else if ( ch.name == QLatin1String( "Rot X" ) )
+			comps = { ex };
+		else if ( ch.name == QLatin1String( "Rot Y" ) )
+			comps = { ey };
+		else if ( ch.name == QLatin1String( "Rot Z" ) )
+			comps = { ez };
+		else
+			continue;
+
+		auto keys = readChannelKeys( ch );
+
+		TimelineKeyData kd;
+		kd.time = time;
+		kd.comps = comps;
+		if ( ch.interpolation == 2 ) {
+			for ( int i = 0; i < comps.count(); i++ ) {
+				kd.fwd.append( 0 );
+				kd.bwd.append( 0 );
+			}
+		}
+
+		for ( int i = keys.count() - 1; i >= 0; i-- ) {
+			if ( std::abs( keys[i].time - time ) < 1.0e-4f )
+				keys.removeAt( i );
+		}
+		int at = 0;
+		while ( at < keys.count() && keys[at].time < time )
+			at++;
+		keys.insert( at, kd );
+
+		newData.append( { c, keys } );
+	}
+
+	if ( newData.isEmpty() )
+		return;
+
+	snapshotOp( tr( "Auto-key transform at %1" ).arg( time ), [this, lane, &newData]() {
+		for ( const auto & pair : newData )
+			writeChannelKeys( lanes[lane].channels[pair.first], pair.second );
+	} );
+
+	infoLabel->setText( tr( "Keyed transform at %1" ).arg( time ) );
+}
+
 /*
  *  CSV
  */

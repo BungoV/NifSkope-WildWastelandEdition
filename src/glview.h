@@ -176,6 +176,10 @@ signals:
 	void clicked( const QModelIndex & );
 	void paintUpdate();
 	void sceneTimeChanged( float t, float mn, float mx );
+	//! Modal transform gizmo status line (empty = clear)
+	void gizmoStatus( const QString & );
+	//! A gizmo transform was committed on this block (for auto-keying)
+	void transformCommitted( int blockNumber );
 	void viewpointChanged();
 	void frontalLightChanged( bool isFrontal );
 
@@ -226,6 +230,25 @@ private:
 	bool soloMode = false;
 
 	void updateSoloNode();
+
+	// Blender style modal transform gizmo (G/R/S, X/Y/Z constraint, LMB commit, Esc cancel)
+	int gizmoMode = 0;                  // 0 none, 1 move, 2 rotate, 3 scale
+	int gizmoAxis = 0;                  // 0 view plane / all, 1 X, 2 Y, 3 Z
+	QPoint gizmoStartPos;
+	Vector3 gizmoOrigTrans;
+	Matrix gizmoOrigRot;
+	float gizmoOrigScale = 1;
+	QPersistentModelIndex gizmoBlock;
+
+public:
+	static float gizmoSnapStep;
+	bool gizmoAutoKey = false;
+
+private:
+	bool gizmoBegin( int mode );
+	void gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods );
+	void gizmoEnd( bool commit );
+	bool gizmoSwallowClick = false;
 
 	AnimationState animState;
 

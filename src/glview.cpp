@@ -38,6 +38,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glshape.h"
 #include "gl/gltex.h"
 #include "model/nifmodel.h"
+#include "model/undocommands.h"
+#include "data/nifitem.h"
 #include "ui/settingsdialog.h"
 #include "ui/widgets/fileselect.h"
 #include "fp32vec4.hpp"
@@ -1249,6 +1251,183 @@ void GLView::setSoloBlock( int blockNumber )
 	update();
 }
 
+/*
+ *  Modal transform gizmo (Blender style: G/R/S, X/Y/Z, LMB commit, Esc cancel)
+ */
+
+float GLView::gizmoSnapStep = 1.0f;
+
+bool GLView::gizmoBegin( int mode )
+{
+	if ( !model || !scene->currentBlock.isValid() )
+		return false;
+
+	QModelIndex iBlock = model->getBlockIndex( QModelIndex( scene->currentBlock ) );
+	// walk up to the nearest transformable object
+	int b = model->getBlockNumber( iBlock );
+	while ( b >= 0 && !model->blockInherits( model->getBlockIndex( b ), "NiAVObject" ) )
+		b = model->getParent( b );
+	if ( b < 0 )
+		return false;
+
+	iBlock = model->getBlockIndex( b );
+	if ( !model->getIndex( iBlock, "Translation" ).isValid() )
+		return false;
+
+	gizmoBlock = iBlock;
+	gizmoMode = mode;
+	gizmoAxis = 0;
+	gizmoStartPos = mapFromGlobal( QCursor::pos() );
+	gizmoOrigTrans = model->get<Vector3>( iBlock, "Translation" );
+	gizmoOrigRot = model->get<Matrix>( iBlock, "Rotation" );
+	gizmoOrigScale = model->get<float>( iBlock, "Scale" );
+
+	static const char * modeNames[4] = { "", "Move", "Rotate", "Scale" };
+	emit gizmoStatus( tr( "%1 [%2]:  move mouse, X/Y/Z = axis, Ctrl = snap (%3), LMB/Enter = commit, Esc = cancel" )
+		.arg( QLatin1String( modeNames[mode] ), model->resolveString( iBlock, "Name" ) ).arg( gizmoSnapStep ) );
+
+	return true;
+}
+
+void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
+{
+	if ( !gizmoMode || !model || !gizmoBlock.isValid() )
+		return;
+
+	QModelIndex iBlock( gizmoBlock );
+	float dx = pos.x() - gizmoStartPos.x();
+	float dy = pos.y() - gizmoStartPos.y();
+	bool snap = mods & Qt::ControlModifier;
+	float precision = ( mods & Qt::ShiftModifier ) ? 0.2f : 1.0f;
+
+	// camera orientation in world space
+	Matrix vm;
+	vm.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	Vector3 camRight( vm( 0, 0 ), vm( 0, 1 ), vm( 0, 2 ) );
+	Vector3 camUp( vm( 1, 0 ), vm( 1, 1 ), vm( 1, 2 ) );
+	Vector3 camFwd( vm( 2, 0 ), vm( 2, 1 ), vm( 2, 2 ) );
+
+	QString status;
+
+	if ( gizmoMode == 1 ) {
+		float wpp = std::max( (float)Dist, 0.01f ) * 2.0f / std::max( height(), 1 ) * precision;
+		Vector3 deltaWorld;
+
+		if ( gizmoAxis == 0 ) {
+			deltaWorld = camRight * ( dx * wpp ) + camUp * ( -dy * wpp );
+		} else {
+			Vector3 axis;
+			axis[gizmoAxis - 1] = 1.0f;
+			float amount = ( dx * wpp ) * ( Vector3::dotproduct( camRight, axis ) >= 0 ? 1.0f : -1.0f )
+			             + ( -dy * wpp ) * ( Vector3::dotproduct( camUp, axis ) >= 0 ? 1.0f : -1.0f );
+			deltaWorld = axis * amount;
+		}
+
+		// world delta -> parent space
+		Vector3 deltaLocal = deltaWorld;
+		int parentNum = model->getParent( model->getBlockNumber( iBlock ) );
+		Node * parentNode = ( parentNum >= 0 ) ? scene->getNode( model, model->getBlockIndex( parentNum ) ) : nullptr;
+		if ( parentNode ) {
+			Transform pt = parentNode->worldTrans();
+			deltaLocal = pt.rotation.inverted() * deltaWorld;
+			if ( pt.scale != 0 )
+				deltaLocal /= pt.scale;
+		}
+
+		Vector3 nt = gizmoOrigTrans + deltaLocal;
+		if ( snap && gizmoSnapStep > 0 ) {
+			for ( int c = 0; c < 3; c++ )
+				nt[c] = std::round( nt[c] / gizmoSnapStep ) * gizmoSnapStep;
+		}
+
+		model->set<Vector3>( iBlock, "Translation", nt );
+		status = tr( "Move: %1, %2, %3" ).arg( nt[0], 0, 'f', 3 ).arg( nt[1], 0, 'f', 3 ).arg( nt[2], 0, 'f', 3 );
+	} else if ( gizmoMode == 2 ) {
+		float angle = dx * 0.5f * precision;
+		if ( snap )
+			angle = std::round( angle / 5.0f ) * 5.0f;
+
+		Vector3 axis;
+		if ( gizmoAxis == 0 )
+			axis = camFwd;
+		else
+			axis[gizmoAxis - 1] = 1.0f;
+
+		Quat q;
+		q.fromAxisAngle( axis, deg2rad( angle ) );
+		Matrix dr;
+		dr.fromQuat( q );
+
+		model->set<Matrix>( iBlock, "Rotation", dr * gizmoOrigRot );
+		status = tr( "Rotate: %1°" ).arg( angle, 0, 'f', 1 );
+	} else if ( gizmoMode == 3 ) {
+		float factor = 1.0f + dx * 0.01f * precision;
+		factor = std::max( factor, 0.001f );
+		if ( snap )
+			factor = std::max( std::round( factor * 10.0f ) / 10.0f, 0.1f );
+
+		model->set<float>( iBlock, "Scale", gizmoOrigScale * factor );
+		status = tr( "Scale: ×%1 (uniform; NIF scale is a single value)" ).arg( factor, 0, 'f', 2 );
+	}
+
+	static const char * axisNames[4] = { "view", "X", "Y", "Z" };
+	emit gizmoStatus( status + tr( "   [axis: %1]" ).arg( QLatin1String( axisNames[gizmoAxis] ) ) );
+
+	update();
+}
+
+void GLView::gizmoEnd( bool commit )
+{
+	if ( !gizmoMode )
+		return;
+
+	QModelIndex iBlock( gizmoBlock );
+	int mode = gizmoMode;
+	gizmoMode = 0;
+	emit gizmoStatus( QString() );
+
+	if ( !model || !iBlock.isValid() )
+		return;
+
+	// capture the dragged values, restore originals, then re-apply through the undo stack
+	Vector3 newTrans = model->get<Vector3>( iBlock, "Translation" );
+	Matrix newRot = model->get<Matrix>( iBlock, "Rotation" );
+	float newScale = model->get<float>( iBlock, "Scale" );
+
+	model->set<Vector3>( iBlock, "Translation", gizmoOrigTrans );
+	model->set<Matrix>( iBlock, "Rotation", gizmoOrigRot );
+	model->set<float>( iBlock, "Scale", gizmoOrigScale );
+
+	if ( commit ) {
+		ChangeValueCommand::createTransaction();
+		auto pushTyped = [this, &iBlock]( const char * fieldName, auto newVal ) {
+			QModelIndex iField = model->getIndex( iBlock, fieldName );
+			if ( !iField.isValid() )
+				return;
+			QModelIndex vIdx = iField.sibling( iField.row(), NifModel::ValueCol );
+			const NifItem * item = static_cast<const NifItem *>( vIdx.internalPointer() );
+			if ( !item )
+				return;
+			NifValue oldVal = item->value();
+			NifValue nv = oldVal;
+			if ( nv.set( newVal, model, item ) )
+				model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, nv, model->itemName( iField ), model ) );
+		};
+
+		if ( mode == 1 )
+			pushTyped( "Translation", newTrans );
+		else if ( mode == 2 )
+			pushTyped( "Rotation", newRot );
+		else if ( mode == 3 )
+			pushTyped( "Scale", newScale );
+
+		if ( gizmoAutoKey )
+			emit transformCommitted( model->getBlockNumber( iBlock ) );
+	}
+
+	update();
+}
+
 QModelIndex parent( QModelIndex ix, QModelIndex xi )
 {
 	ix = ix.sibling( ix.row(), 0 );
@@ -1920,6 +2099,46 @@ int GLView::convertKeyCode( int n ) const
 
 void GLView::keyPressEvent( QKeyEvent * event )
 {
+	// modal transform gizmo
+	if ( gizmoMode ) {
+		switch ( event->key() ) {
+		case Qt::Key_X:
+			gizmoAxis = 1;
+			gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
+			return;
+		case Qt::Key_Y:
+			gizmoAxis = 2;
+			gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
+			return;
+		case Qt::Key_Z:
+			gizmoAxis = 3;
+			gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
+			return;
+		case Qt::Key_Escape:
+			gizmoEnd( false );
+			return;
+		case Qt::Key_Return:
+		case Qt::Key_Enter:
+			gizmoEnd( true );
+			return;
+		default:
+			return;
+		}
+	}
+
+	if ( view != ViewWalk && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		int m = 0;
+		if ( event->key() == Qt::Key_G )
+			m = 1;
+		else if ( event->key() == Qt::Key_R )
+			m = 2;
+		else if ( event->key() == Qt::Key_S )
+			m = 3;
+
+		if ( m && gizmoBegin( m ) )
+			return;
+	}
+
 	int	k = convertKeyCode( event->key() );
 	if ( k >= 0 ) {
 		kbdState = kbdState | ( 1ULL << k );
@@ -1988,6 +2207,12 @@ void GLView::mouseDoubleClickEvent( QMouseEvent * )
 
 void GLView::mouseMoveEvent( QMouseEvent * event )
 {
+	if ( gizmoMode ) {
+		auto gp = getQMouseEventPosition( event );
+		gizmoUpdate( QPoint( (int)gp.x(), (int)gp.y() ), event->modifiers() );
+		return;
+	}
+
 	auto	newPos = getQMouseEventPosition( event );
 	float	dx = newPos.x() - lastPos.x();
 	float	dy = newPos.y() - lastPos.y();
@@ -2020,6 +2245,12 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 
 void GLView::mousePressEvent( QMouseEvent * event )
 {
+	if ( gizmoMode ) {
+		gizmoEnd( event->button() == Qt::LeftButton );
+		gizmoSwallowClick = true;
+		return;
+	}
+
 	mouseButtonState |= std::uint32_t( event->button() );
 	if ( event->button() == Qt::ForwardButton || event->button() == Qt::BackButton ) {
 		event->ignore();
@@ -2033,6 +2264,12 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 void GLView::mouseReleaseEvent( QMouseEvent * event )
 {
+	if ( gizmoSwallowClick ) {
+		gizmoSwallowClick = false;
+		mouseButtonState &= ~( std::uint32_t( event->button() ) );
+		return;
+	}
+
 	mouseButtonState &= ~( std::uint32_t( event->button() ) );
 
 	auto	evtPos = getQMouseEventPosition( event );

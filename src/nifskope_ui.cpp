@@ -64,6 +64,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFontDialog>
+#include <QInputDialog>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QMenu>
@@ -421,6 +422,42 @@ void NifSkope::initDockWidgets()
 	connect( aSolo, &QAction::toggled, ogl, &GLView::setSoloMode );
 	ui->tRender->addAction( aSolo );
 	ui->mRender->addAction( aSolo );
+
+	// Transform gizmo companions
+	connect( ogl, &GLView::gizmoStatus, [this]( const QString & s ) {
+		if ( s.isEmpty() )
+			ui->statusbar->clearMessage();
+		else
+			ui->statusbar->showMessage( s );
+	} );
+
+	QAction * aAutoKey = new QAction( tr( "Auto-Key Transforms" ), this );
+	aAutoKey->setCheckable( true );
+	aAutoKey->setToolTip( tr( "After a gizmo transform (G/R/S in the viewport), key it on the timeline's transform lane at the playhead" ) );
+	connect( aAutoKey, &QAction::toggled, [this]( bool on ) { ogl->gizmoAutoKey = on; } );
+	ui->mRender->addAction( aAutoKey );
+
+	QAction * aGizmoSnap = new QAction( tr( "Gizmo Snap Distance..." ), this );
+	connect( aGizmoSnap, &QAction::triggered, [this]() {
+		bool ok = false;
+		double v = QInputDialog::getDouble( this, tr( "Gizmo snap" ),
+			tr( "Grid snap step for Ctrl-dragging the transform gizmo:" ), GLView::gizmoSnapStep, 0.001, 4096.0, 3, &ok );
+		if ( ok )
+			GLView::gizmoSnapStep = (float)v;
+	} );
+	ui->mRender->addAction( aGizmoSnap );
+
+	connect( ogl, &GLView::transformCommitted, timeline, &TimelineWidget::keyNodeTransform );
+
+	// Space in the viewport toggles animation playback
+	QAction * aPlaySpace = new QAction( this );
+	aPlaySpace->setShortcut( QKeySequence( Qt::Key_Space ) );
+	aPlaySpace->setShortcutContext( Qt::WidgetWithChildrenShortcut );
+	graphicsView->addAction( aPlaySpace );
+	connect( aPlaySpace, &QAction::triggered, [this]() {
+		if ( ui->aAnimate->isChecked() )
+			ui->aAnimPlay->trigger();
+	} );
 
 	// Tabify List and Header
 	tabifyDockWidget( dList, dHeader );

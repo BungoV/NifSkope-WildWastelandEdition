@@ -493,6 +493,25 @@ void NifSkope::select( const QModelIndex & index )
 		tree->scrollTo( idx );
 	}
 
+	// Sequences and object palettes open with their main array unfolded
+	if ( idx.isValid() && !idx.parent().isValid() ) {
+		const char * arrayName = nullptr;
+		if ( nif->blockInherits( idx, "NiControllerSequence" ) )
+			arrayName = "Controlled Blocks";
+		else if ( nif->blockInherits( idx, "NiDefaultAVObjectPalette" ) )
+			arrayName = "Objs";
+
+		if ( arrayName ) {
+			QModelIndex iArr = nif->getIndex( idx, arrayName );
+			if ( iArr.isValid() ) {
+				tree->expand( idx.sibling( idx.row(), 0 ) );
+				tree->expand( iArr.sibling( iArr.row(), 0 ) );
+				for ( int r = 0; r < nif->rowCount( iArr ); r++ )
+					tree->expand( nif->getIndex( iArr, r ) );
+			}
+		}
+	}
+
 	if ( sender() == ogl ) {
 		if ( dList->isVisible() )
 			dList->raise();
