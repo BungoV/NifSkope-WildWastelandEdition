@@ -2177,9 +2177,35 @@ Vector3 GLView::pickedMedian() const
 	Vector3 m;
 	if ( pickedElems.isEmpty() )
 		return m;
-	for ( const auto & pe : pickedElems )
-		m += pe.worldPos;
-	return m / float( pickedElems.size() );
+	int n = 0;
+	for ( const auto & pe : pickedElems ) {
+		// recompute from live vertex data so the pivot tracks billboards /
+		// animation as the camera moves, instead of the cached pick position
+		Shape * s = shapeForBlock( pe.shapeBlock );
+		if ( s ) {
+			Transform wt = shapeRenderTrans( s );
+			int nv = s->verts.size();
+			if ( pe.type == 1 && pe.e0 < nv ) {
+				m += wt * s->verts[pe.e0];
+				n++;
+				continue;
+			} else if ( pe.type == 2 && pe.e0 < nv && pe.e1 < nv ) {
+				m += wt * ( ( s->verts[pe.e0] + s->verts[pe.e1] ) * 0.5f );
+				n++;
+				continue;
+			} else if ( pe.type == 3 && pe.e0 >= 0 && pe.e0 < s->triangles.size() ) {
+				const Triangle & t = s->triangles.at( pe.e0 );
+				if ( t[0] < nv && t[1] < nv && t[2] < nv ) {
+					m += wt * ( ( s->verts[t[0]] + s->verts[t[1]] + s->verts[t[2]] ) / 3.0f );
+					n++;
+					continue;
+				}
+			}
+		}
+		m += pe.worldPos;	// fallback to cached
+		n++;
+	}
+	return ( n > 0 ) ? ( m / float( n ) ) : m;
 }
 
 bool GLView::pickElementAt( const QPointF & pos, bool additive )
