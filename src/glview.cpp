@@ -766,7 +766,7 @@ void GLView::paintGL()
 	}
 
 	// object-mode selection: draw the selected meshes as a coloured wireframe.
-	// Active (last-selected) = #FFA040, secondary selected = #FF602A.
+	// Active (last-selected) = #FF9D00, secondary selected = #FF7200.
 	if ( model && !editMode && !objSelection.isEmpty() ) {
 		for ( Shape * s : scene->shapes ) {
 			if ( !s || s->isHidden() || !objSelection.contains( s->id() ) )
@@ -776,9 +776,9 @@ void GLView::paintGL()
 
 			bool active = ( s->id() == objActive );
 			if ( active )
-				scene->setGLColor( 1.0f, 160.0f / 255.0f, 64.0f / 255.0f, 1.0f );		// #FFA040
+				scene->setGLColor( 1.0f, 157.0f / 255.0f, 0.0f, 1.0f );		// #FF9D00
 			else
-				scene->setGLColor( 1.0f, 96.0f / 255.0f, 42.0f / 255.0f, 1.0f );		// #FF602A
+				scene->setGLColor( 1.0f, 114.0f / 255.0f, 0.0f, 1.0f );		// #FF7200
 			int nv = s->verts.size();
 
 			scene->loadModelViewMatrix( s->viewTrans() );

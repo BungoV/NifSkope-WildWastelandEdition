@@ -1235,8 +1235,8 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 				if ( role == Qt::BackgroundRole )
 					return active ? QColor::fromRgb(  74, 122, 176 )   // primary light blue
 					              : QColor::fromRgb(  43,  66,  95 );  // secondary dark blue
-				return active ? QColor::fromRgb( 255, 160, 64 )        // primary text #FFA040
-				              : QColor::fromRgb( 255,  96, 42 );       // secondary text #FF602A
+				return active ? QColor::fromRgb( 255, 157, 0 )         // primary text #FF9D00
+				              : QColor::fromRgb( 255, 114, 0 );        // secondary text #FF7200
 			}
 		}
 	}
