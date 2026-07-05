@@ -119,16 +119,49 @@ TRANSFORM GIZMO 2.0 (viewport)
                      Snap Target (Ctrl): Grid Step / Vertex / Edge / Face,
                      Align Rotation to Target, Rotation Snap Angle...
 
-ELEMENT SELECT + 3D CURSOR (viewport)
+ELEMENT SELECT, EDIT + 3D CURSOR (viewport)
   1 / 2 / 3          Toggle vertex / edge / face pick mode (Blender style)
   Click              Pick the element under the mouse (highlighted)
   Shift+Click        Add/remove from the multi-selection (median shown)
+  G / R / S          Move / rotate / scale the picked elements (same modal
+                     rules as node transforms: X/Y/Z, numeric, Ctrl snap,
+                     LMB commit, Esc/RMB cancel) around their median or cursor
+  Delete / X         Delete picked vertices/edges/faces from the mesh
   Esc                Clear picked elements
   C                  Place the 3D cursor on the surface under the mouse
   Shift+C            Snap the cursor to the picked elements' median
   Render > 3D Cursor & Elements   Snap cursor to picked/origin,
                      snap node to cursor, move picked vertices to cursor
                      (vertex editing, undoable), show/hide cursor
+
+TOOLBAR + CAMERA
+  Icons              Main toolbar icons scaled down; view directions, display
+                     toggles and dock panels each merged into one dropdown;
+                     a Blender-style transform header (orientation, pivot,
+                     magnet, snap target, element select, gizmo, cursor)
+  Shift+F            Toggle free camera: WASD/Q/E/arrows/PgUp-Dn move the
+                     camera only while enabled (so the letters stay free for
+                     transforms); outside it, orbit/pan with the mouse
+  Gizmo & Cursor Size   Render menu; also Show Transform Gizmo toggle
+
+SPELLS (top bar)
+  Spells > Textures > Material / Texture Manager...   list + edit every
+                     material and texture path, with find & replace
+  Right-click node > Rename (sync animation)...   rename and keep the palette
+                     and controller sequences in sync
+  Spells > Animation > Enforce Node Name Authority   resync every palette and
+                     sequence name to its node
+
+PARTICLE PREVIEW
+  FO4 NiParticleSystem blocks now simulate and render in the viewport
+  (preview-grade): box/cylinder/sphere/mesh/array emitters incl.
+  BSPositionData spawn points, birth rate + emitter-active controllers,
+  gravity, drag, 3-color ramp, scale curve. Play or scrub the animation
+  to drive it; scrubbing backwards restarts the simulation.
+
+NOTE: Generate BSPositionData now writes the full vanilla layout
+  (positions + normals + zeroed triangle block) so the result loads in-game
+  instead of making the mesh invisible.
 
 PARTICLE PREVIEW
   FO4 NiParticleSystem blocks now simulate and render in the viewport

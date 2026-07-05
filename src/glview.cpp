@@ -1694,7 +1694,7 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 		if ( snap && snapTargetMode > 0 ) {
 			SceneRayHit sh = raycastScene( QPointF( pos ), model->getBlockNumber( iBlock ) );
 			if ( sh.shape ) {
-				Transform swt = sh.shape->worldTrans();
+				Transform swt = shapeRenderTrans( sh.shape );
 				Vector3 target = swt * sh.hitLocal;
 				const Triangle & tri = sh.shape->triangles.at( sh.tri );
 				Vector3 va = sh.shape->verts.at( tri[0] );
@@ -2029,6 +2029,13 @@ void GLView::mouseRayWorld( const QPointF & pos, Vector3 & origin, Vector3 & dir
 	dir.normalize();
 }
 
+Transform GLView::shapeRenderTrans( Node * n ) const
+{
+	// viewTrans() = scene->view * (billboard-adjusted world); undo the camera
+	// to recover the world transform actually used to draw the mesh
+	return scene->view.inverted() * n->viewTrans();
+}
+
 GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock ) const
 {
 	SceneRayHit hit;
@@ -2051,7 +2058,7 @@ GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock 
 				continue;
 		}
 
-		Transform wt = s->worldTrans();
+		Transform wt = shapeRenderTrans( s );
 		float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
 		Matrix ri = wt.rotation.inverted();
 		Vector3 lo = ri * ( ( ro - wt.translation ) * ( 1.0f / sc ) );
@@ -2094,7 +2101,7 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 
 	if ( hit.shape ) {
 		Shape * s = hit.shape;
-		Transform wt = s->worldTrans();
+		Transform wt = shapeRenderTrans( s );
 		const Triangle & tri = s->triangles.at( hit.tri );
 		Vector3 va = s->verts.at( tri[0] ), vb = s->verts.at( tri[1] ), vc = s->verts.at( tri[2] );
 
@@ -2150,7 +2157,7 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 		for ( Shape * s : scene->shapes ) {
 			if ( !s || s->isHidden() )
 				continue;
-			Transform wt = s->worldTrans();
+			Transform wt = shapeRenderTrans( s );
 			for ( int i = 0; i < s->verts.size(); i++ ) {
 				QPointF sp;
 				Vector3 wv = wt * s->verts.at( i );
@@ -2193,7 +2200,7 @@ void GLView::placeCursor( const QPointF & pos )
 {
 	SceneRayHit hit = raycastScene( pos );
 	if ( hit.shape ) {
-		Transform wt = hit.shape->worldTrans();
+		Transform wt = shapeRenderTrans( hit.shape );
 		cursorPos = wt * hit.hitLocal;
 	} else {
 		Vector3 ro, rd;
@@ -2286,7 +2293,7 @@ void GLView::movePickedVertsToCursor()
 			Node * n = scene->getNode( model, iShape );
 			if ( !n )
 				continue;
-			Transform wt = n->worldTrans();
+			Transform wt = shapeRenderTrans( n );
 			float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
 			Vector3 local = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / sc ) );
 
@@ -2364,7 +2371,7 @@ bool GLView::gizmoBeginElement( int mode )
 		Node * n = scene->getNode( model, iShape );
 		if ( !n )
 			continue;
-		Transform wt = n->worldTrans();
+		Transform wt = shapeRenderTrans( n );
 		for ( int vi : it.value() ) {
 			Vector3 local;
 			if ( !tlGetVertexLocal( model, iShape, vi, local ) )
@@ -2436,7 +2443,7 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 	auto toLocal = [&]( int shape, const Vector3 & w ) {
 		if ( !xf.contains( shape ) ) {
 			Node * n = scene->getNode( model, model->getBlockIndex( shape ) );
-			xf.insert( shape, n ? n->worldTrans() : Transform() );
+			xf.insert( shape, n ? shapeRenderTrans( n ) : Transform() );
 		}
 		Transform wt = xf.value( shape );
 		float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;

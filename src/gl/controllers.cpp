@@ -962,10 +962,14 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 				QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iCtlr, "Interpolator" ) );
 				if ( iInterp.isValid() ) {
 					iExtras.append( iInterp );
-					float v = nif->get<float>( iInterp, "Value" );
-					// blend interpolators carry a -FLT_MAX pose sentinel
-					if ( std::isfinite( v ) && std::fabs( v ) < 1.0e8f )
-						e.birthRate = v;
+					// only float interpolators carry a numeric birth-rate Value
+					if ( nif->blockInherits( iInterp, "NiFloatInterpolator" )
+						|| nif->blockInherits( iInterp, "NiBlendFloatInterpolator" ) ) {
+						float v = nif->get<float>( iInterp, "Value" );
+						// blend interpolators carry a -FLT_MAX pose sentinel
+						if ( std::isfinite( v ) && std::fabs( v ) < 1.0e8f )
+							e.birthRate = v;
+					}
 					QModelIndex iFD = nif->getBlockIndex( nif->getLink( iInterp, "Data" ) );
 					if ( iFD.isValid() ) {
 						iExtras.append( iFD );
@@ -1012,13 +1016,19 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 				sk.seq = seqName;
 				if ( iData.isValid() )
 					sk.keys = nif->getIndex( iData, "Data" );
-				float v = nif->get<float>( iInterp, "Value" );
-				if ( std::isfinite( v ) && std::fabs( v ) < 1.0e8f )
-					sk.constVal = v;
-				if ( interpId == QLatin1String( "EmitterActive" ) )
+				if ( interpId == QLatin1String( "EmitterActive" ) ) {
+					// bool interpolator: no float constant to read
 					e.seqVis.append( sk );
-				else
+				} else {
+					// float interpolator: read the constant birth rate (guard sentinels)
+					if ( nif->blockInherits( iInterp, "NiFloatInterpolator" )
+						|| nif->blockInherits( iInterp, "NiBlendFloatInterpolator" ) ) {
+						float v = nif->get<float>( iInterp, "Value" );
+						if ( std::isfinite( v ) && std::fabs( v ) < 1.0e8f )
+							sk.constVal = v;
+					}
 					e.seqBirth.append( sk );
+				}
 			}
 		}
 	}

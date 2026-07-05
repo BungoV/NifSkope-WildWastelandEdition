@@ -330,6 +330,9 @@ public:
 	};
 	//! Closest triangle hit under pos; excludeBlock (and its subtree) is skipped
 	SceneRayHit raycastScene( const QPointF & pos, int excludeBlock = -1 ) const;
+	//! Render-accurate local->world transform of a node (honours billboard facing,
+	//! unlike worldTrans()), so picking and highlights line up with what is drawn
+	Transform shapeRenderTrans( class Node * n ) const;
 
 	// ---- 3D cursor ----
 	Vector3 cursorPos;                  // world space
