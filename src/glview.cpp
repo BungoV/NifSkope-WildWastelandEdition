@@ -2772,6 +2772,30 @@ void GLView::setEditMode( bool on )
 	update();
 }
 
+void GLView::hideSelected()
+{
+	if ( !model || !scene->currentBlock.isValid() )
+		return;
+	// hide the nearest NiAVObject of the current selection
+	int b = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+	while ( b >= 0 && !model->blockInherits( model->getBlockIndex( b ), "NiAVObject" ) )
+		b = model->getParent( b );
+	if ( b < 0 )
+		return;
+	scene->hiddenNodes.insert( b );
+	emit gizmoStatus( tr( "Hid node %1 (Alt+H to reveal all)" ).arg( b ) );
+	update();
+}
+
+void GLView::unhideAll()
+{
+	if ( scene->hiddenNodes.isEmpty() )
+		return;
+	scene->hiddenNodes.clear();
+	emit gizmoStatus( tr( "Revealed all hidden nodes" ) );
+	update();
+}
+
 Shape * GLView::shapeForBlock( int b ) const
 {
 	for ( Shape * s : scene->shapes ) {
@@ -3798,6 +3822,18 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		if ( event->key() == Qt::Key_F && ( mods & Qt::ControlModifier )
 			&& ( mods & Qt::AltModifier ) && ( mods & Qt::ShiftModifier ) ) {
 			selectLinked( true );
+			return;
+		}
+	}
+
+	// H hides the selected node, Alt+H reveals everything (object mode)
+	if ( event->key() == Qt::Key_H ) {
+		if ( event->modifiers() & Qt::AltModifier ) {
+			unhideAll();
+			return;
+		}
+		if ( !( event->modifiers() & ( Qt::ControlModifier | Qt::ShiftModifier ) ) && !editMode ) {
+			hideSelected();
 			return;
 		}
 	}

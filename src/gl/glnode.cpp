@@ -420,6 +420,16 @@ bool Node::isHidden() const
 		return !n;
 	}
 
+	// temporary viewport hide (H / Alt+H); walks the parent chain like the flag
+	if ( !scene->hiddenNodes.isEmpty() ) {
+		const Node * n = this;
+		while ( n ) {
+			if ( scene->hiddenNodes.contains( n->nodeId ) )
+				return true;
+			n = n->parent;
+		}
+	}
+
 	if ( scene->hasOption(Scene::ShowHidden) )
 		return false;
 	if ( flags.node.hidden )

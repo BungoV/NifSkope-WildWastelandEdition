@@ -378,6 +378,10 @@ public:
 	//! Select all geometry connected to the current selection (Ctrl+L).
 	//! flatOnly limits growth to coplanar faces (Shift+Ctrl+Alt+F).
 	void selectLinked( bool flatOnly );
+	//! Hide the selected node in the viewport (H); Alt+H via unhideAll
+	void hideSelected();
+	//! Reveal everything hidden with H
+	void unhideAll();
 	//! The rendered Shape for a block number, or nullptr
 	class Shape * shapeForBlock( int b ) const;
 	//! Blender Shift+S snap pie: cursor/selection snapping

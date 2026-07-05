@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QFlags>
 #include <QObject>
 #include <QHash>
+#include <QSet>
 #include <QMap>
 #include <QPersistentModelIndex>
 #include <QStringList>
@@ -240,6 +241,9 @@ public:
 
 	//! When false, NiBillboardNodes render in place instead of facing the camera
 	bool billboardFacing = true;
+
+	//! Block numbers temporarily hidden in the viewport (H / Alt+H)
+	QSet<int> hiddenNodes;
 
 	TexCache * textures;
 
