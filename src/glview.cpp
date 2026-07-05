@@ -653,6 +653,8 @@ void GLView::paintGL()
 			Vector3 pivot = gizmoMode ? gizmoPivotWorld : gizmoPivotPoint( iGb );
 			if ( elemTransform )
 				pivot = elemPivot;	// element transforms orbit the element median / cursor
+			else if ( editMode && !pickedElems.isEmpty() )
+				pivot = ( gizmoPivot == 3 ) ? cursorPos : pickedMedian();	// edit-mode gizmo sits on the selection
 
 			Transform nt;
 			nt.rotation = basis;
@@ -1545,6 +1547,9 @@ Matrix GLView::gizmoBasis( const QModelIndex & iBlock ) const
 
 Vector3 GLView::gizmoPivotPoint( const QModelIndex & iBlock ) const
 {
+	// in edit mode the gizmo sits on the picked elements
+	if ( editMode && !pickedElems.isEmpty() && gizmoPivot != 3 )
+		return pickedMedian();
 	if ( gizmoPivot == 2 && !pickedElems.isEmpty() )
 		return pickedMedian();
 	if ( gizmoPivot == 3 )
@@ -3754,6 +3759,26 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		return;
 	}
 
+	// grabbing a gizmo handle starts a constrained drag; releasing commits.
+	// checked before element picking so the handles stay usable in edit mode.
+	if ( gizmoHandlesOn && event->button() == Qt::LeftButton && view != ViewWalk
+		&& !kbdState && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		auto p = getQMouseEventPosition( event );
+		int h = gizmoHandleHitTest( p );
+		if ( h ) {
+			int mode = ( h >= 8 ) ? 3 : ( h >= 5 ? 2 : 1 );
+			bool started = ( editMode && !pickedElems.isEmpty() ) ? gizmoBeginElement( mode ) : gizmoBegin( mode );
+			if ( started ) {
+				gizmoAxis = ( h == 4 ) ? 0 : ( h >= 8 ? h - 7 : ( h >= 5 ? h - 4 : h ) );
+				gizmoStartPos = QPoint( int( p.x() ), int( p.y() ) );
+				gizmoHandleDrag = true;
+				mouseButtonState |= std::uint32_t( event->button() );
+				gizmoUpdate( gizmoStartPos, event->modifiers() );
+				return;
+			}
+		}
+	}
+
 	// element reference picking swallows plain clicks while a pick mode is active
 	if ( pickMode && event->button() == Qt::LeftButton
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
@@ -3762,24 +3787,6 @@ void GLView::mousePressEvent( QMouseEvent * event )
 			gizmoSwallowClick = true;
 			mouseButtonState |= std::uint32_t( event->button() );
 			return;
-		}
-	}
-
-	// grabbing a gizmo handle starts a constrained drag; releasing commits
-	if ( gizmoHandlesOn && event->button() == Qt::LeftButton && view != ViewWalk
-		&& !kbdState && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
-		auto p = getQMouseEventPosition( event );
-		int h = gizmoHandleHitTest( p );
-		if ( h ) {
-			int mode = ( h >= 8 ) ? 3 : ( h >= 5 ? 2 : 1 );
-			if ( gizmoBegin( mode ) ) {
-				gizmoAxis = ( h == 4 ) ? 0 : ( h >= 8 ? h - 7 : ( h >= 5 ? h - 4 : h ) );
-				gizmoStartPos = QPoint( int( p.x() ), int( p.y() ) );
-				gizmoHandleDrag = true;
-				mouseButtonState |= std::uint32_t( event->button() );
-				gizmoUpdate( gizmoStartPos, event->modifiers() );
-				return;
-			}
 		}
 	}
 

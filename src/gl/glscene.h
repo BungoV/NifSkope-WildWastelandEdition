@@ -238,6 +238,9 @@ public:
 	//! Block number of the node to render exclusively (-1 = off); see GLView::setSoloMode
 	int soloNode = -1;
 
+	//! When false, NiBillboardNodes render in place instead of facing the camera
+	bool billboardFacing = true;
+
 	TexCache * textures;
 
 	QPersistentModelIndex currentBlock;

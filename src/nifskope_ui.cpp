@@ -774,6 +774,18 @@ void NifSkope::initDockWidgets()
 			m->addAction( a );
 		m->addSeparator();
 		m->addAction( aSolo );
+
+		// toggle NiBillboardNode camera-facing (show geometry in place)
+		QAction * aBillboard = new QAction( tr( "Billboards Face Camera" ), this );
+		aBillboard->setCheckable( true );
+		aBillboard->setChecked( true );
+		aBillboard->setToolTip( tr( "When off, NiBillboardNode geometry renders at its authored orientation instead of turning to face the camera" ) );
+		connect( aBillboard, &QAction::toggled, [this]( bool on ) {
+			ogl->getScene()->billboardFacing = on;
+			ogl->update();
+		} );
+		m->addAction( aBillboard );
+
 		btn->setMenu( m );
 		ui->tRender->insertWidget( ui->aShowCollision, btn );
 		for ( QAction * a : ds )

@@ -1854,7 +1854,9 @@ const Transform & BillboardNode::viewTrans() const
 	else
 		t = scene->view * local;
 
-	t.rotation = Matrix();
+	// facing the camera can be disabled to inspect the geometry in place
+	if ( scene->billboardFacing )
+		t.rotation = Matrix();
 
 	*p = t;
 	return *p;
