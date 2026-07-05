@@ -197,9 +197,13 @@ public:
 		// Color the field background if the value type is a color
 		//	Otherwise normal behavior
 		QVariant color = index.data( Qt::BackgroundRole );
-		if ( color.canConvert<QColor>() )
+		if ( color.canConvert<QColor>() ) {
 			painter->fillRect( option.rect, color.value<QColor>() );
-		else if ( option.state & QStyle::State_Selected )
+			// We painted our own background; drop the selected state so the base
+			// drawDisplay() below doesn't repaint the text rect with the grey
+			// highlight brush (which was hiding the multi-selection colour).
+			opt.state &= ~QStyle::State_Selected;
+		} else if ( option.state & QStyle::State_Selected )
 			painter->fillRect( option.rect, option.palette.brush( cg, QPalette::Highlight ) );
 
 		painter->save();
