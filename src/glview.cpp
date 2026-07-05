@@ -4225,6 +4225,7 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		unsetCursor();
 		emit gizmoStatus( QString() );
 		lastPos = getQMouseEventPosition( event );
+		update();	// repaint so the centre crosshair clears
 		return;
 	}
 
