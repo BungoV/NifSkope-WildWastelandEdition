@@ -1227,13 +1227,17 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 	// object-mode multi-selection highlight for the block list. Must be handled
 	// on the original index, before buddy() redirects the Value column to the
 	// block's Name child (which is not a top item and would lose the highlight).
-	if ( role == Qt::BackgroundRole && !selHighlight.isEmpty() ) {
+	if ( ( role == Qt::BackgroundRole || role == Qt::ForegroundRole ) && !selHighlight.isEmpty() ) {
 		if ( const NifItem * it = getItem( index ); it && isTopItem( it ) ) {
 			int bn = getBlockNumber( it );
-			if ( bn >= 0 && selHighlight.contains( bn ) )
-				return ( bn == selHighlightActive )
-					? QColor::fromRgb( 255, 160, 64 )    // active #FFA040
-					: QColor::fromRgb( 255, 96, 42 );    // secondary #FF602A
+			if ( bn >= 0 && selHighlight.contains( bn ) ) {
+				bool active = ( bn == selHighlightActive );
+				if ( role == Qt::BackgroundRole )
+					return active ? QColor::fromRgb(  74, 122, 176 )   // primary light blue
+					              : QColor::fromRgb(  43,  66,  95 );  // secondary dark blue
+				return active ? QColor::fromRgb( 255, 160, 64 )        // primary text #FFA040
+				              : QColor::fromRgb( 255,  96, 42 );       // secondary text #FF602A
+			}
 		}
 	}
 

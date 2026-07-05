@@ -207,7 +207,18 @@ public:
 			painter->fillRect( option.rect, option.palette.brush( cg, QPalette::Highlight ) );
 
 		painter->save();
-		painter->setPen( opt.palette.color( cg, opt.state & QStyle::State_Selected ? QPalette::HighlightedText : QPalette::Text ) );
+		// Honour a custom text colour (e.g. the object-mode selection highlight).
+		// Set it on the palette too, since the base drawDisplay() picks the text
+		// colour from opt.palette rather than the painter's pen.
+		QVariant fg = index.data( Qt::ForegroundRole );
+		if ( fg.canConvert<QColor>() ) {
+			QColor fgc = fg.value<QColor>();
+			painter->setPen( fgc );
+			opt.palette.setColor( QPalette::Text, fgc );
+			opt.palette.setColor( QPalette::HighlightedText, fgc );
+		} else {
+			painter->setPen( opt.palette.color( cg, opt.state & QStyle::State_Selected ? QPalette::HighlightedText : QPalette::Text ) );
+		}
 		painter->setFont( opt.font );
 
 		if ( !icon.isNull() )
