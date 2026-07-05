@@ -3589,6 +3589,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
 		freeCamera = true;
 		kbdState = 0;
+		lastPos = mapFromGlobal( QCursor::pos() );	// avoid a look jump on the first move
 		emit gizmoStatus( tr( "Free camera: move the mouse to look, WASD to fly, Q/E down/up, hold Shift to speed up (Shift+F or Esc to exit)" ) );
 		return;
 	}
