@@ -2609,6 +2609,25 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 	update();
 }
 
+// value-column index of a vertex position field (BSTriShape or legacy)
+static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi )
+{
+	QModelIndex iv;
+	QModelIndex iVData = model->getIndex( iShape, "Vertex Data" );
+	if ( iVData.isValid() && vi >= 0 && vi < model->rowCount( iVData ) )
+		iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
+	if ( !iv.isValid() ) {
+		QModelIndex iVerts = model->getIndex( model->getBlockIndex( model->getLink( iShape, "Data" ) ), "Vertices" );
+		if ( !iVerts.isValid() )
+			iVerts = model->getIndex( iShape, "Vertices" );
+		if ( iVerts.isValid() && vi >= 0 && vi < model->rowCount( iVerts ) )
+			iv = model->getIndex( iVerts, vi );
+	}
+	if ( iv.isValid() )
+		return iv.sibling( iv.row(), NifModel::ValueCol );
+	return QModelIndex();
+}
+
 void GLView::gizmoEndElement( bool commit )
 {
 	if ( !elemTransform )
@@ -2619,19 +2638,32 @@ void GLView::gizmoEndElement( bool commit )
 
 	if ( model ) {
 		if ( commit ) {
-			QByteArray after;
-			{
-				QBuffer buf( &after );
-				buf.open( QIODevice::WriteOnly );
-				model->save( buf );
+			// Undo via per-vertex value commands rather than a whole-model
+			// snapshot: serialising the entire FO4 model on every edit is slow
+			// and was corrupting some files. Each vertex already holds its new
+			// value from the live drag; restore the original, then push a
+			// ChangeValueCommand that re-applies the new one.
+			ChangeValueCommand::createTransaction();
+			for ( const ElemVert & ev : elemVerts ) {
+				QModelIndex iShape = model->getBlockIndex( ev.shape );
+				QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx );
+				const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
+				if ( !item )
+					continue;
+				NifValue newVal = item->value();		// current (dragged) value
+				NifValue oldVal = newVal;
+				bool half = item->hasValueType( NifValue::tHalfVector3 );
+				if ( half )
+					oldVal.set<HalfVector3>( HalfVector3( ev.origLocal ), model, item );
+				else
+					oldVal.set<Vector3>( ev.origLocal, model, item );
+				if ( !( oldVal == newVal ) )
+					model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, newVal, tr( "Vertex" ), model ) );
 			}
-			if ( model->undoStack )
-				model->undoStack->push( new NifSnapshotCommand( model, elemBefore, after, tr( "Transform elements" ) ) );
 		} else {
-			QBuffer buf;
-			buf.setData( elemBefore );
-			if ( buf.open( QIODevice::ReadOnly ) )
-				model->load( buf );
+			// cancel: restore original vertex positions in place
+			for ( const ElemVert & ev : elemVerts )
+				tlSetVertexLocal( model, model->getBlockIndex( ev.shape ), ev.idx, ev.origLocal );
 		}
 	}
 

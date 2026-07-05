@@ -309,7 +309,7 @@
    </widget>
    <widget class="QMenu" name="mHelp">
     <property name="title">
-     <string>Help</string>
+     <string>Hel&amp;p</string>
     </property>
     <addaction name="aToggleHelp"/>
     <addaction name="separator"/>
