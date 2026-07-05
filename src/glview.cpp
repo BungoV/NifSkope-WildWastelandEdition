@@ -2944,8 +2944,9 @@ Shape * GLView::shapeForBlock( int b ) const
 	return nullptr;
 }
 
-void GLView::selectLinked( bool flatOnly )
+void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 {
+	const float cosThresh = std::cos( deg2rad( std::max( maxAngleDeg, 0.0f ) ) );
 	if ( !editMode || pickedElems.isEmpty() )
 		return;
 
@@ -3013,8 +3014,8 @@ void GLView::selectLinked( bool flatOnly )
 				for ( int nb : vtris.value( t[c] ) ) {
 					if ( comp.contains( nb ) )
 						continue;
-					if ( flatOnly && Vector3::dotproduct( triNormal( nb ), nt ) < 0.9997f )
-						continue;	// ~1.4 degrees
+					if ( flatOnly && Vector3::dotproduct( triNormal( nb ), nt ) < cosThresh )
+						continue;	// only grow across faces within maxAngleDeg
 					comp.insert( nb );
 					stack.append( nb );
 				}

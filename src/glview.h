@@ -381,8 +381,9 @@ public:
 	//! Set the element pick mode (1 vertex, 2 edge, 3 face) and notify the toolbar
 	void setPickMode( int m );
 	//! Select all geometry connected to the current selection (Ctrl+L).
-	//! flatOnly limits growth to coplanar faces (Shift+Ctrl+Alt+F).
-	void selectLinked( bool flatOnly );
+	//! flatOnly limits growth to faces within maxAngleDeg of each other
+	//! (Shift+Ctrl+Alt+F uses ~1 deg; "by angle" prompts for a larger value).
+	void selectLinked( bool flatOnly, float maxAngleDeg = 1.5f );
 	//! Hide the selected node in the viewport (H); Alt+H via unhideAll
 	void hideSelected();
 	//! Reveal everything hidden with H

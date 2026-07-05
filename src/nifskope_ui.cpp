@@ -591,7 +591,7 @@ void NifSkope::initDockWidgets()
 			ogl->update();
 		} );
 	}
-	ui->mRender->addMenu( mOrient );
+	// (orientation lives on the toolbar; not duplicated in the Render menu)
 
 	QMenu * mPivot = new QMenu( tr( "Transform Pivot Point" ), this );
 	QActionGroup * grpPivot = new QActionGroup( this );
@@ -609,7 +609,7 @@ void NifSkope::initDockWidgets()
 			ogl->update();
 		} );
 	}
-	ui->mRender->addMenu( mPivot );
+	// (pivot lives on the toolbar)
 
 	// Snapping (Blender-style snap target for Ctrl-dragging)
 	QMenu * mSnapTgt = new QMenu( tr( "Snap Target (Ctrl)" ), this );
@@ -637,7 +637,7 @@ void NifSkope::initDockWidgets()
 		if ( ok )
 			GLView::gizmoRotSnapDeg = (float)v;
 	} );
-	ui->mRender->addMenu( mSnapTgt );
+	// (snap target lives on the toolbar)
 
 	// 3D cursor + element utilities
 	QMenu * mCursor = new QMenu( tr( "3D Cursor && Elements" ), this );
@@ -662,22 +662,16 @@ void NifSkope::initDockWidgets()
 	mCursor->addAction( tr( "Snap Node to Cursor" ), [this]() { ogl->snapNodeToCursor(); } );
 	mCursor->addAction( tr( "Move Picked Vertices to Cursor" ), [this]() { ogl->movePickedVertsToCursor(); } );
 	mCursor->addSeparator();
-	QActionGroup * grpPick = new QActionGroup( this );
-	const char * pickNames[4] = {
-		QT_TR_NOOP( "Element Select: Off" ), QT_TR_NOOP( "Element Select: Vertex (1)" ),
-		QT_TR_NOOP( "Element Select: Edge (2)" ), QT_TR_NOOP( "Element Select: Face (3)" )
-	};
-	for ( int i = 0; i < 4; i++ ) {
-		QAction * a = mCursor->addAction( tr( pickNames[i] ) );
-		a->setCheckable( true );
-		a->setChecked( i == 0 );
-		grpPick->addAction( a );
-		connect( a, &QAction::triggered, [this, i]() {
-			ogl->pickMode = i;
-			ogl->update();
-		} );
-	}
-	ui->mRender->addMenu( mCursor );
+	mCursor->addAction( tr( "Select Linked (Ctrl+L)" ), [this]() { ogl->selectLinked( false ); } );
+	mCursor->addAction( tr( "Select Linked Flat Faces" ), [this]() { ogl->selectLinked( true ); } );
+	mCursor->addAction( tr( "Select Linked by Angle..." ), [this]() {
+		bool ok = false;
+		double a = QInputDialog::getDouble( this, tr( "Select Linked by Angle" ),
+			tr( "Grow across faces meeting within this angle (degrees):" ), 30.0, 0.0, 180.0, 1, &ok );
+		if ( ok )
+			ogl->selectLinked( true, (float)a );
+	} );
+	// (3D cursor menu is on the toolbar Cursor button)
 
 	connect( ogl, &GLView::transformCommitted, timeline, &TimelineWidget::keyNodeTransform );
 
