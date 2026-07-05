@@ -371,6 +371,34 @@ void NifSkope::initActions()
 		nif->selHighlightActive = ogl->objActive;
 		list->viewport()->update();
 		tree->viewport()->update();
+
+		// Mirror the object selection into the block list so the coloured rows
+		// are actually visible (and the list tracks viewport clicks the way
+		// Blender's outliner tracks the 3D view). Guard against the list's own
+		// selectionChanged echoing straight back into the viewport selection.
+		if ( ogl->editMode || syncingObjToList )
+			return;
+		syncingObjToList = true;
+		QItemSelection selRows;
+		QModelIndex activeProxy;
+		for ( int b : ogl->objSelection ) {
+			QModelIndex src = nif->getBlockIndex( b );
+			if ( !src.isValid() )
+				continue;
+			QModelIndex p = proxy->mapFrom( src, QModelIndex() );
+			if ( !p.isValid() )
+				continue;
+			selRows.select( p, p );
+			if ( b == ogl->objActive )
+				activeProxy = p;
+		}
+		QItemSelectionModel * sm = list->selectionModel();
+		sm->select( selRows, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows );
+		if ( activeProxy.isValid() ) {
+			sm->setCurrentIndex( activeProxy, QItemSelectionModel::NoUpdate );
+			list->scrollTo( activeProxy );
+		}
+		syncingObjToList = false;
 	} );
 	connect( ogl, &GLView::sceneTimeChanged, inspect, &InspectView::updateTime );
 	connect( ogl, &GLView::paintUpdate, inspect, &InspectView::refresh );

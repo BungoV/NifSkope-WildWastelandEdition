@@ -412,7 +412,7 @@ void NifSkope::wireBlockListSelection()
 	// which silently drops this connection.
 	connect( list->selectionModel(), &QItemSelectionModel::selectionChanged, this,
 		[this]( const QItemSelection &, const QItemSelection & ) {
-		if ( !nif || !ogl || ogl->editMode )
+		if ( !nif || !ogl || ogl->editMode || syncingObjToList )
 			return;
 		auto toAV = [this]( QModelIndex idx ) {
 			if ( idx.model() == proxy )

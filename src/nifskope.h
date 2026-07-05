@@ -362,6 +362,10 @@ private:
 	NifProxyModel * proxyEmpty;
 	KfmModel * kfmEmpty;
 
+	//! Guard: true while we are pushing the viewport object selection into the
+	//! block list, so the list's selectionChanged handler doesn't echo back.
+	bool syncingObjToList = false;
+
 	//! This view shows the block list.
 	NifTreeView * list;
 	//! This view shows the block details.
