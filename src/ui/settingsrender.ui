@@ -639,6 +639,134 @@
             </layout>
            </widget>
           </item>
+          <item row="2" column="1">
+           <widget class="QGroupBox" name="grpViewportDisplay">
+            <property name="title">
+             <string>Viewport Display</string>
+            </property>
+            <property name="flat">
+             <bool>true</bool>
+            </property>
+            <layout class="QFormLayout" name="formLayoutViewportDisplay">
+             <item row="0" column="0">
+              <widget class="QLabel" name="lblGizmoCursorSize">
+               <property name="text">
+                <string>Gizmo &amp; Cursor Size</string>
+               </property>
+               <property name="buddy">
+                <cstring>gizmoCursorSize</cstring>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QDoubleSpinBox" name="gizmoCursorSize">
+               <property name="toolTip">
+                <string>Scale factor for the transform gizmo and 3D cursor</string>
+               </property>
+               <property name="minimum">
+                <double>0.100000000000000</double>
+               </property>
+               <property name="maximum">
+                <double>10.000000000000000</double>
+               </property>
+               <property name="singleStep">
+                <double>0.050000000000000</double>
+               </property>
+               <property name="value">
+                <double>1.750000000000000</double>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="lblWireframeThickness">
+               <property name="text">
+                <string>Wireframe Thickness</string>
+               </property>
+               <property name="buddy">
+                <cstring>wireframeThickness</cstring>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QDoubleSpinBox" name="wireframeThickness">
+               <property name="toolTip">
+                <string>Line width multiplier for wireframes (object selection, overlays, edit mode)</string>
+               </property>
+               <property name="minimum">
+                <double>0.250000000000000</double>
+               </property>
+               <property name="maximum">
+                <double>8.000000000000000</double>
+               </property>
+               <property name="singleStep">
+                <double>0.250000000000000</double>
+               </property>
+               <property name="value">
+                <double>1.000000000000000</double>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QLabel" name="lblEditVertexSize">
+               <property name="text">
+                <string>Edit Vertex Size</string>
+               </property>
+               <property name="buddy">
+                <cstring>editVertexSize</cstring>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="1">
+              <widget class="QDoubleSpinBox" name="editVertexSize">
+               <property name="toolTip">
+                <string>Size of edit-mode vertex dots in pixels</string>
+               </property>
+               <property name="minimum">
+                <double>1.000000000000000</double>
+               </property>
+               <property name="maximum">
+                <double>16.000000000000000</double>
+               </property>
+               <property name="singleStep">
+                <double>0.500000000000000</double>
+               </property>
+               <property name="value">
+                <double>5.000000000000000</double>
+               </property>
+              </widget>
+             </item>
+             <item row="3" column="0">
+              <widget class="QLabel" name="lblSelectionLineWidth">
+               <property name="text">
+                <string>Selection Line Width</string>
+               </property>
+               <property name="buddy">
+                <cstring>selectionLineWidth</cstring>
+               </property>
+              </widget>
+             </item>
+             <item row="3" column="1">
+              <widget class="QDoubleSpinBox" name="selectionLineWidth">
+               <property name="toolTip">
+                <string>Line width in pixels for selected edges / element highlights in edit mode</string>
+               </property>
+               <property name="minimum">
+                <double>0.500000000000000</double>
+               </property>
+               <property name="maximum">
+                <double>8.000000000000000</double>
+               </property>
+               <property name="singleStep">
+                <double>0.500000000000000</double>
+               </property>
+               <property name="value">
+                <double>2.000000000000000</double>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
           <item row="0" column="2" rowspan="2">
            <widget class="QGroupBox" name="grpStartup">
             <property name="sizePolicy">

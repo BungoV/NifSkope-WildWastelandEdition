@@ -246,6 +246,10 @@ private:
 	// Blender style modal transform gizmo (G/R/S, X/Y/Z constraint, LMB commit, Esc cancel)
 	int gizmoMode = 0;                  // 0 none, 1 move, 2 rotate, 3 scale
 	int gizmoAxis = 0;                  // 0 view plane / all, 1 X, 2 Y, 3 Z
+	int gizmoPlane = 0;                 // move: 0 none, 1..3 = axis excluded (Shift+X/Y/Z)
+	bool gizmoAxisLocal = false;        // second tap of the axis key switched to local
+	bool gizmoTrackball = false;        // R,R: trackball rotation
+	Matrix gizmoBasisOrig;              // basis at gesture start (restore after X,X local)
 	QStringList gizmoNum;               // typed numeric entry (Blender style); all parts empty = mouse drive
 	int gizmoNumCur = 0;                // part being typed (Tab cycles on unconstrained move)
 	QPoint gizmoStartPos;
@@ -432,6 +436,8 @@ public:
 	int snapTargetMode = 0;             // 0 grid step, 1 vertex, 2 edge, 3 face
 	bool snapAlignRot = false;          // orient +Z to the target face normal
 	bool snapDefaultOn = false;         // magnet: snap without holding Ctrl (Ctrl inverts)
+	int snapAffect = 7;                 // bitmask: 1 move, 2 rotate, 4 scale (Blender "Affect")
+	bool orbitSelection = false;        // orbit the view around the selection center
 	static float gizmoRotSnapDeg;       // rotation snap increment
 
 private:

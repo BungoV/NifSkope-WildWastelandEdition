@@ -234,6 +234,12 @@ void GLView::updateSettings()
 	z = settings.value( "General/Camera/Mwheel Zoom Speed", 8 ).toInt();
 	z = std::clamp< int >( z, 0, 16 );
 
+	// viewport display sizes (Options > Settings > Render > Viewport Display)
+	gizmoSizeMul = settings.value( "General/Gizmo Cursor Size", 1.75 ).toFloat();
+	wireWidthMul = settings.value( "General/Wireframe Thickness", 1.0 ).toFloat();
+	vertexPointSize = settings.value( "General/Edit Vertex Size", 5.0 ).toFloat();
+	selLineWidth = settings.value( "General/Selection Line Width", 2.0 ).toFloat();
+
 	settings.endGroup();
 
 	if ( scene )
@@ -770,10 +776,13 @@ void GLView::paintGL()
 				};
 
 				if ( gizmoMode ) {
-					// modal G/R/S: only the relevant sub-gizmo, and only the
-					// locked axis once a constraint is active
+					// modal G/R/S: only the relevant sub-gizmo, only the locked
+					// axis once constrained, and for plane moves the two
+					// in-plane arrows (the excluded axis is hidden)
 					for ( int i = 0; i < 3; i++ ) {
 						if ( gizmoAxis > 0 && gizmoAxis != 1 + i )
+							continue;
+						if ( gizmoMode == 1 && gizmoPlane == 1 + i )
 							continue;
 						if ( gizmoMode == 1 )
 							drawArrow( i, false );
@@ -788,13 +797,34 @@ void GLView::paintGL()
 						drawScaleHandle( i, gizmoHover == 8 + i, false );
 						drawRing( i, gizmoHover == 5 + i );
 					}
-					// center circle: view-plane move (billboarded to the camera)
+					// plane-move handles: small quads between axis pairs,
+					// coloured by the plane's normal axis (Blender)
+					for ( int i = 0; i < 3; i++ ) {
+						int j = ( i + 1 ) % 3, k = ( i + 2 ) % 3;
+						Vector3 a, b;
+						a[j] = 1.0f;
+						b[k] = 1.0f;
+						bool hov = ( gizmoHover == 12 + i );
+						scene->setGLColor( axR[i][0], axR[i][1], axR[i][2], hov ? 0.95f : 0.5f );
+						Vector3 q[6] = {
+							a * ( L * 0.3f ) + b * ( L * 0.3f ), a * ( L * 0.5f ) + b * ( L * 0.3f ),
+							a * ( L * 0.5f ) + b * ( L * 0.5f ),
+							a * ( L * 0.3f ) + b * ( L * 0.3f ), a * ( L * 0.5f ) + b * ( L * 0.5f ),
+							a * ( L * 0.3f ) + b * ( L * 0.5f )
+						};
+						scene->drawTriangles( q, 6, nullptr, true );
+					}
+					// center circle (view-plane move) + white view-rotate ring,
+					// both billboarded to the camera
 					Matrix vtInv = viewTrans.rotation.inverted();
 					Matrix bInv = basis.inverted();
 					Vector3 camN = bInv * ( vtInv * Vector3( 0.0f, 0.0f, 1.0f ) );
 					scene->setGLColor( 1.0f, 1.0f, 1.0f, gizmoHover == 4 ? 1.0f : 0.6f );
 					scene->setGLLineWidth( Settings::lineWidthAxes * 1.2f );
 					scene->drawCircle( Vector3(), camN, L * 0.12f, 32 );
+					scene->setGLColor( 1.0f, 1.0f, 1.0f, gizmoHover == 11 ? 0.95f : 0.4f );
+					scene->setGLLineWidth( Settings::lineWidthAxes * 1.1f );
+					scene->drawCircle( Vector3(), camN, L * 1.02f, 64 );
 				}
 			}
 
@@ -1499,9 +1529,39 @@ void GLView::move( float x, float y, float z )
 
 void GLView::rotate( float x, float y, float z )
 {
+	// orbit around the selection (Blender preference): keep the selection
+	// center fixed in view space while the rotation changes
+	Matrix R1;
+	bool orbitFix = false;
+	Vector3 orbitC;
+	if ( orbitSelection && model && scene && view != ViewWalk && !freeCamera ) {
+		int n = 0;
+		const QSet<int> & sel = editMode ? editShapeBlocks : objSelection;
+		for ( int b : sel ) {
+			Node * nd = scene->getNode( model, model->getBlockIndex( b ) );
+			if ( nd ) {
+				orbitC += nd->worldTrans().translation;
+				n++;
+			}
+		}
+		if ( n ) {
+			orbitC = orbitC / float( n );
+			R1.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+			orbitFix = true;
+		}
+	}
+
 	FloatVector4	tmp( x, y, z, 0.0f );
 	tmp += FloatVector4::convertVector3( &(Rot[0]) );
 	( tmp - ( tmp / 360.0f ).roundValues() * 360.0f ).convertToVector3( &(Rot[0]) );	// wrap to -180.0 to 180.0
+
+	if ( orbitFix ) {
+		// view(w) = R * ( w + Pos ); solve Pos' so the center stays put
+		Matrix R2;
+		R2.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+		Pos = R2.inverted() * ( R1 * ( orbitC + Pos ) ) - orbitC;
+	}
+
 	updateViewpoint();
 	update();
 }
@@ -2058,6 +2118,15 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 			return 8 + i;
 	}
 
+	// plane-move handles: quads between axis pairs (normal = axis i)
+	for ( int i = 0; i < 3; i++ ) {
+		int j = ( i + 1 ) % 3, k = ( i + 2 ) % 3;
+		QPointF pp;
+		if ( worldToScreen( P + ( ax[j] + ax[k] ) * ( gs * 0.4f ), pp )
+			&& std::hypot( pos.x() - pp.x(), pos.y() - pp.y() ) < 8.0 )
+			return 12 + i;
+	}
+
 	// move arrows
 	for ( int i = 0; i < 3; i++ ) {
 		QPointF a, b;
@@ -2090,6 +2159,20 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 		}
 		if ( best < 6.0f )
 			return 5 + i;
+	}
+
+	// white view-rotate ring: billboarded circle around the pivot
+	{
+		Matrix vm;
+		vm.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+		Vector3 camRightW( vm( 0, 0 ), vm( 0, 1 ), vm( 0, 2 ) );
+		QPointF rp;
+		if ( worldToScreen( P + camRightW * ( gs * 1.02f ), rp ) ) {
+			float rr = float( std::hypot( rp.x() - sp.x(), rp.y() - sp.y() ) );
+			float dd = float( std::hypot( pos.x() - sp.x(), pos.y() - sp.y() ) );
+			if ( std::fabs( dd - rr ) < 6.0f )
+				return 11;
+		}
 	}
 
 	return 0;
@@ -2158,6 +2241,9 @@ bool GLView::gizmoBegin( int mode )
 	gizmoBlock = iBlock;
 	gizmoMode = mode;
 	gizmoAxis = 0;
+	gizmoPlane = 0;
+	gizmoAxisLocal = false;
+	gizmoTrackball = false;
 	gizmoNum = QStringList() << QString() << QString() << QString();
 	gizmoNumCur = 0;
 	gizmoStartPos = mapFromGlobal( QCursor::pos() );
@@ -2167,6 +2253,7 @@ bool GLView::gizmoBegin( int mode )
 
 	// freeze the frame of reference for the whole gesture
 	gizmoBasisM = gizmoBasis( iBlock );
+	gizmoBasisOrig = gizmoBasisM;
 	gizmoPivotWorld = gizmoPivotPoint( iBlock );
 	int parentNum = model->getParent( b );
 	Node * pn = ( parentNum >= 0 ) ? scene->getNode( model, model->getBlockIndex( parentNum ) ) : nullptr;
@@ -2183,7 +2270,7 @@ bool GLView::gizmoBegin( int mode )
 	gizmoOrigWorldPos = gizmoParentPos + gizmoParentRot * gizmoOrigTrans * gizmoParentScale;
 
 	static const char * modeNames[4] = { "", "Move", "Rotate", "Scale" };
-	emit gizmoStatus( tr( "%1 [%2]:  move mouse or type a value, X/Y/Z = axis, Ctrl = snap (%3), LMB/Enter = commit, Esc = cancel" )
+	emit gizmoStatus( tr( "%1 [%2]:  X/Y/Z axis (twice = local), Shift+X/Y/Z plane, MMB smart axis, R,R trackball, Ctrl snap (%3), Shift precise, LMB/Enter commit, Esc cancel" )
 		.arg( QLatin1String( modeNames[mode] ), model->resolveString( iBlock, "Name" ) ).arg( gizmoSnapStep ) );
 
 	return true;
@@ -2224,7 +2311,12 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 	const bool numeric = gizmoNumActive();
 	// magnet toggle makes snapping the default; Ctrl inverts it (Blender)
 	bool snap = ( ( ( mods & Qt::ControlModifier ) != 0 ) != snapDefaultOn ) && !numeric;
+	// snapping only applies to the transform types enabled in the snap panel
+	if ( snap && !( snapAffect & ( 1 << ( gizmoMode - 1 ) ) ) )
+		snap = false;
 	float precision = ( mods & Qt::ShiftModifier ) ? 0.2f : 1.0f;
+	// Shift+Ctrl = fine snap increments (Blender)
+	float snapFine = ( snap && ( mods & Qt::ShiftModifier ) ) ? 0.2f : 1.0f;
 
 	// camera orientation in world space
 	Matrix vm;
@@ -2255,6 +2347,15 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 				unit[gizmoAxis - 1] = 1.0f;
 				deltaWorld = ( gizmoBasisM * unit ) * gizmoPartVal( gizmoNum, 0 );
 			}
+		} else if ( gizmoPlane > 0 ) {
+			// plane constraint (Shift+X/Y/Z): view-plane delta with the excluded
+			// axis component removed
+			Vector3 ex;
+			ex[gizmoPlane - 1] = 1.0f;
+			Vector3 n = gizmoBasisM * ex;
+			n.normalize();
+			Vector3 d = camRight * ( dx * wpp ) + camUp * ( -dy * wpp );
+			deltaWorld = d - n * Vector3::dotproduct( d, n );
 		} else if ( gizmoAxis == 0 ) {
 			deltaWorld = camRight * ( dx * wpp ) + camUp * ( -dy * wpp );
 		} else {
@@ -2327,34 +2428,58 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 
 		Vector3 nt = worldToLocalTrans( gizmoOrigWorldPos + deltaWorld );
 		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
+			float step = gizmoSnapStep * snapFine;
 			for ( int c = 0; c < 3; c++ )
-				nt[c] = std::round( nt[c] / gizmoSnapStep ) * gizmoSnapStep;
+				nt[c] = std::round( nt[c] / step ) * step;
 		}
 
 		gizmoLastParam = gizmoBasisM.inverted() * deltaWorld;
 		model->set<Vector3>( iBlock, "Translation", nt );
 		status = tr( "Move: %1, %2, %3" ).arg( nt[0], 0, 'f', 3 ).arg( nt[1], 0, 'f', 3 ).arg( nt[2], 0, 'f', 3 );
 	} else if ( gizmoMode == 2 ) {
-		float angle = numeric ? gizmoPartVal( gizmoNum, 0 ) : dx * 0.5f * precision;
-		if ( snap && gizmoRotSnapDeg > 0.0f )
-			angle = std::round( angle / gizmoRotSnapDeg ) * gizmoRotSnapDeg;
-
-		Vector3 axis;
-		if ( gizmoAxis == 0 ) {
-			axis = camFwd;
-		} else {
-			Vector3 unit;
-			unit[gizmoAxis - 1] = 1.0f;
-			axis = gizmoBasisM * unit;
-		}
-
-		Quat q;
-		q.fromAxisAngle( axis, deg2rad( angle ) );
+		float rotStep = gizmoRotSnapDeg * snapFine;
 		Matrix dr;
-		dr.fromQuat( q );
 
-		gizmoLastParam = Vector3( angle, 0, 0 );
-		gizmoLastRotAxis = axis;
+		if ( gizmoTrackball && !numeric ) {
+			// R,R: trackball rotation around the camera right/up axes
+			float ax = dy * 0.5f * precision;
+			float ay = dx * 0.5f * precision;
+			if ( snap && rotStep > 0.0f ) {
+				ax = std::round( ax / rotStep ) * rotStep;
+				ay = std::round( ay / rotStep ) * rotStep;
+			}
+			Quat q1, q2;
+			q1.fromAxisAngle( camRight, deg2rad( ax ) );
+			q2.fromAxisAngle( camUp, deg2rad( ay ) );
+			Matrix m1, m2;
+			m1.fromQuat( q1 );
+			m2.fromQuat( q2 );
+			dr = m2 * m1;
+			gizmoLastParam = Vector3( ay, ax, 0 );
+			gizmoLastRotAxis = camFwd;
+			status = tr( "Trackball: %1°, %2°" ).arg( ay, 0, 'f', 1 ).arg( ax, 0, 'f', 1 );
+		} else {
+			float angle = numeric ? gizmoPartVal( gizmoNum, 0 ) : dx * 0.5f * precision;
+			if ( snap && rotStep > 0.0f )
+				angle = std::round( angle / rotStep ) * rotStep;
+
+			Vector3 axis;
+			if ( gizmoAxis == 0 ) {
+				axis = camFwd;
+			} else {
+				Vector3 unit;
+				unit[gizmoAxis - 1] = 1.0f;
+				axis = gizmoBasisM * unit;
+			}
+
+			Quat q;
+			q.fromAxisAngle( axis, deg2rad( angle ) );
+			dr.fromQuat( q );
+
+			gizmoLastParam = Vector3( angle, 0, 0 );
+			gizmoLastRotAxis = axis;
+			status = tr( "Rotate: %1°" ).arg( angle, 0, 'f', 1 );
+		}
 
 		// world delta rotation expressed in the parent frame, so it is correct
 		// under rotated parents too
@@ -2364,12 +2489,14 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 			Vector3 newWorld = gizmoPivotWorld + dr * ( gizmoOrigWorldPos - gizmoPivotWorld );
 			model->set<Vector3>( iBlock, "Translation", worldToLocalTrans( newWorld ) );
 		}
-		status = tr( "Rotate: %1°" ).arg( angle, 0, 'f', 1 );
 	} else if ( gizmoMode == 3 ) {
 		float factor = numeric ? gizmoPartVal( gizmoNum, 0 ) : 1.0f + dx * 0.01f * precision;
 		factor = std::max( factor, 0.001f );
-		if ( snap )
-			factor = std::max( std::round( factor * 10.0f ) / 10.0f, 0.1f );
+		if ( snap ) {
+			// Shift+Ctrl = fine snap (0.01 steps instead of 0.1)
+			float ss = ( snapFine < 1.0f ) ? 100.0f : 10.0f;
+			factor = std::max( std::round( factor * ss ) / ss, 0.01f );
+		}
 
 		gizmoLastParam = Vector3( factor, 0, 0 );
 		model->set<float>( iBlock, "Scale", gizmoOrigScale * factor );
@@ -2382,7 +2509,11 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 	}
 
 	static const char * axisNames[4] = { "view", "X", "Y", "Z" };
-	status += tr( "   [axis: %1]" ).arg( QLatin1String( axisNames[gizmoAxis] ) );
+	if ( gizmoPlane > 0 )
+		status += tr( "   [plane: exclude %1]" ).arg( QLatin1String( axisNames[gizmoPlane] ) );
+	else
+		status += tr( "   [axis: %1%2]" ).arg( QLatin1String( axisNames[gizmoAxis] ),
+			gizmoAxisLocal ? tr( " (local)" ) : QString() );
 
 	if ( numeric ) {
 		if ( gizmoMode == 1 && gizmoAxis == 0 ) {
@@ -3058,10 +3189,14 @@ bool GLView::gizmoBeginElement( int mode )
 
 	gizmoMode = mode;
 	gizmoAxis = 0;
+	gizmoPlane = 0;
+	gizmoAxisLocal = false;
+	gizmoTrackball = false;
 	gizmoNum = QStringList() << QString() << QString() << QString();
 	gizmoNumCur = 0;
 	gizmoStartPos = mapFromGlobal( QCursor::pos() );
 	gizmoBasisM = Matrix();	// element transforms use the global frame
+	gizmoBasisOrig = gizmoBasisM;
 	elemTransform = true;
 
 	static const char * modeNames[4] = { "", "Move", "Rotate", "Scale" };
@@ -4423,7 +4558,8 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	// modal transform gizmo
 	if ( gizmoMode ) {
 		// Blender: G/R/S during a gesture switches the transform mode,
-		// resetting to the original values first
+		// resetting to the original values first; R while already rotating
+		// toggles trackball rotation (Blender R,R)
 		if ( event->key() == Qt::Key_G || event->key() == Qt::Key_R || event->key() == Qt::Key_S ) {
 			int nm = ( event->key() == Qt::Key_G ) ? 1 : ( event->key() == Qt::Key_R ? 2 : 3 );
 			if ( nm != gizmoMode ) {
@@ -4433,22 +4569,47 @@ void GLView::keyPressEvent( QKeyEvent * event )
 					gizmoBeginElement( nm );
 				else
 					gizmoBegin( nm );
+			} else if ( nm == 2 && !elemTransform ) {
+				gizmoTrackball = !gizmoTrackball;
+				gizmoAxis = 0;
+				gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
 			}
 			return;
 		}
 		switch ( event->key() ) {
 		case Qt::Key_X:
-			gizmoAxis = 1;
-			gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
-			return;
 		case Qt::Key_Y:
-			gizmoAxis = 2;
+		case Qt::Key_Z: {
+			int ax = ( event->key() == Qt::Key_X ) ? 1 : ( event->key() == Qt::Key_Y ? 2 : 3 );
+			if ( elemTransform ) {
+				// element transforms: plain axis toggle in the global frame
+				gizmoAxis = ( gizmoAxis == ax ) ? 0 : ax;
+			} else if ( ( event->modifiers() & Qt::ShiftModifier ) && gizmoMode == 1 ) {
+				// Shift+X/Y/Z: move in the plane excluding this axis (toggle)
+				gizmoPlane = ( gizmoPlane == ax ) ? 0 : ax;
+				gizmoAxis = 0;
+				gizmoAxisLocal = false;
+				gizmoBasisM = gizmoBasisOrig;
+			} else if ( gizmoAxis == ax && !gizmoAxisLocal ) {
+				// second tap: constrain to the node's LOCAL axis (Blender X,X)
+				gizmoAxisLocal = true;
+				gizmoBasisM = gizmoParentRot * gizmoOrigRot;
+				gizmoPlane = 0;
+			} else if ( gizmoAxis == ax && gizmoAxisLocal ) {
+				// third tap: clear the constraint
+				gizmoAxis = 0;
+				gizmoAxisLocal = false;
+				gizmoBasisM = gizmoBasisOrig;
+			} else {
+				gizmoAxis = ax;
+				gizmoAxisLocal = false;
+				gizmoPlane = 0;
+				gizmoTrackball = false;
+				gizmoBasisM = gizmoBasisOrig;
+			}
 			gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
 			return;
-		case Qt::Key_Z:
-			gizmoAxis = 3;
-			gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
-			return;
+		}
 		case Qt::Key_Escape:
 			gizmoEnd( false );
 			return;
@@ -4770,6 +4931,43 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 void GLView::mousePressEvent( QMouseEvent * event )
 {
 	if ( gizmoMode ) {
+		// MMB during a modal transform: smart axis lock - constrain to the
+		// axis whose screen direction best matches the drag so far (Blender)
+		if ( event->button() == Qt::MiddleButton && !elemTransform ) {
+			QPointF p = getQMouseEventPosition( event );
+			QPointF d = p - QPointF( gizmoStartPos );
+			QPointF sp;
+			if ( std::hypot( d.x(), d.y() ) > 3.0 && worldToScreen( gizmoPivotWorld, sp ) ) {
+				int best = 0;
+				float bestDot = -1.0f;
+				for ( int i = 0; i < 3; i++ ) {
+					Vector3 u;
+					u[i] = 1.0f;
+					QPointF ap;
+					if ( !worldToScreen( gizmoPivotWorld + ( gizmoBasisM * u ) * float( Dist * 0.25 ), ap ) )
+						continue;
+					QPointF av = ap - sp;
+					float al = float( std::hypot( av.x(), av.y() ) );
+					float dl = float( std::hypot( d.x(), d.y() ) );
+					if ( al < 1.0e-3f || dl < 1.0e-3f )
+						continue;
+					float dot = std::fabs( float( av.x() * d.x() + av.y() * d.y() ) ) / ( al * dl );
+					if ( dot > bestDot ) {
+						bestDot = dot;
+						best = i + 1;
+					}
+				}
+				if ( best ) {
+					gizmoAxis = best;
+					gizmoPlane = 0;
+					gizmoAxisLocal = false;
+					gizmoBasisM = gizmoBasisOrig;
+					gizmoUpdate( QPoint( int( p.x() ), int( p.y() ) ), event->modifiers() );
+				}
+			}
+			gizmoSwallowClick = true;
+			return;
+		}
 		gizmoEnd( event->button() == Qt::LeftButton );
 		gizmoSwallowClick = true;
 		return;
@@ -4821,10 +5019,13 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		auto p = getQMouseEventPosition( event );
 		int h = gizmoHandleHitTest( p );
 		if ( h ) {
-			int mode = ( h >= 8 ) ? 3 : ( h >= 5 ? 2 : 1 );
+			// 1-3 arrows, 4 center, 5-7 rings, 8-10 boxes, 11 view ring, 12-14 planes
+			int mode = ( h == 11 ) ? 2 : ( h >= 12 ? 1 : ( h >= 8 ? 3 : ( h >= 5 ? 2 : 1 ) ) );
 			bool started = ( editMode && !pickedElems.isEmpty() ) ? gizmoBeginElement( mode ) : gizmoBegin( mode );
 			if ( started ) {
-				gizmoAxis = ( h == 4 ) ? 0 : ( h >= 8 ? h - 7 : ( h >= 5 ? h - 4 : h ) );
+				gizmoAxis = ( h == 4 || h == 11 || h >= 12 ) ? 0 : ( h >= 8 ? h - 7 : ( h >= 5 ? h - 4 : h ) );
+				if ( h >= 12 )
+					gizmoPlane = h - 11;
 				gizmoStartPos = QPoint( int( p.x() ), int( p.y() ) );
 				gizmoHandleDrag = true;
 				mouseButtonState |= std::uint32_t( event->button() );
@@ -4894,8 +5095,9 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 
 		if ( !isColorPicker ) {
 			bool shift = bool( event->modifiers() & Qt::ShiftModifier );
-			// in object mode Shift extends the multi-selection instead of the
-			// vertex-cycling that indexAt() uses it for
+			// in object mode Shift OR Ctrl extends the multi-selection (Blender
+			// accepts both); Shift alone also drives indexAt()'s vertex cycling
+			bool extend = shift || bool( event->modifiers() & Qt::ControlModifier );
 			QModelIndex idx = indexAt( evtPos, editMode ? shift : false );
 			scene->currentBlock = model->getBlockIndex( idx );
 			scene->currentIndex = idx.sibling( idx.row(), 0 );
@@ -4905,7 +5107,7 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 				int av = idx.isValid() ? model->getBlockNumber( scene->currentBlock ) : -1;
 				while ( av >= 0 && !model->blockInherits( model->getBlockIndex( av ), "NiAVObject" ) )
 					av = model->getParent( av );
-				objectSelectClick( av, shift );
+				objectSelectClick( av, extend );
 			}
 
 			if ( idx.isValid() ) {

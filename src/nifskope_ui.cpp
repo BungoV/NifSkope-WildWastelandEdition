@@ -77,6 +77,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMouseEvent>
 #include <QProgressBar>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QSettings>
 #include <QTimer>
 #include <QToolBar>
@@ -589,70 +592,9 @@ void NifSkope::initDockWidgets()
 		connect( this, &NifSkope::completeLoading, rp, &QWidget::hide );
 	}
 
-	{
-		QSettings gset;
-		GLView::gizmoSizeMul = gset.value( "GLView/Gizmo Size", 1.75 ).toFloat();
-		GLView::wireWidthMul = gset.value( "GLView/Wire Width", 1.0 ).toFloat();
-		GLView::vertexPointSize = gset.value( "GLView/Vertex Point Size", 5.0 ).toFloat();
-		GLView::selLineWidth = gset.value( "GLView/Select Line Width", 2.0 ).toFloat();
-	}
-	QAction * aGizmoSize = new QAction( tr( "Gizmo && Cursor Size..." ), this );
-	connect( aGizmoSize, &QAction::triggered, [this]() {
-		bool ok = false;
-		double v = QInputDialog::getDouble( this, tr( "Gizmo size" ),
-			tr( "Scale factor for the transform gizmo and 3D cursor:" ), GLView::gizmoSizeMul, 0.1, 10.0, 2, &ok );
-		if ( ok ) {
-			GLView::gizmoSizeMul = (float)v;
-			QSettings gset;
-			gset.setValue( "GLView/Gizmo Size", v );
-			ogl->update();
-		}
-	} );
-	ui->mRender->addAction( aGizmoSize );
-
-	QAction * aWireWidth = new QAction( tr( "Wireframe Thickness..." ), this );
-	connect( aWireWidth, &QAction::triggered, [this]() {
-		bool ok = false;
-		double v = QInputDialog::getDouble( this, tr( "Wireframe thickness" ),
-			tr( "Line width multiplier for wireframes (object selection, overlays, edit mode):" ),
-			GLView::wireWidthMul, 0.25, 8.0, 2, &ok );
-		if ( ok ) {
-			GLView::wireWidthMul = (float)v;
-			QSettings gset;
-			gset.setValue( "GLView/Wire Width", v );
-			ogl->update();
-		}
-	} );
-	ui->mRender->addAction( aWireWidth );
-
-	QAction * aVertSize = new QAction( tr( "Vertex Point Size..." ), this );
-	connect( aVertSize, &QAction::triggered, [this]() {
-		bool ok = false;
-		double v = QInputDialog::getDouble( this, tr( "Vertex point size" ),
-			tr( "Size of edit-mode vertex dots in pixels:" ), GLView::vertexPointSize, 1.0, 16.0, 1, &ok );
-		if ( ok ) {
-			GLView::vertexPointSize = (float)v;
-			QSettings gset;
-			gset.setValue( "GLView/Vertex Point Size", v );
-			ogl->update();
-		}
-	} );
-	ui->mRender->addAction( aVertSize );
-
-	QAction * aSelWidth = new QAction( tr( "Selection Line Thickness..." ), this );
-	connect( aSelWidth, &QAction::triggered, [this]() {
-		bool ok = false;
-		double v = QInputDialog::getDouble( this, tr( "Selection line thickness" ),
-			tr( "Line width in pixels for selected edges / element highlights in edit mode:" ),
-			GLView::selLineWidth, 0.5, 8.0, 1, &ok );
-		if ( ok ) {
-			GLView::selLineWidth = (float)v;
-			QSettings gset;
-			gset.setValue( "GLView/Select Line Width", v );
-			ogl->update();
-		}
-	} );
-	ui->mRender->addAction( aSelWidth );
+	// Gizmo/cursor scale, wireframe thickness, vertex point size and selection
+	// line width now live in Options > Settings > Render > Viewport Display;
+	// GLView::updateSettings() reads them on apply.
 
 	QAction * aGizmoHandles = new QAction( tr( "Show Transform Gizmo" ), this );
 	aGizmoHandles->setCheckable( true );
@@ -870,6 +812,13 @@ void NifSkope::initDockWidgets()
 		} );
 		m->addAction( aBillboard );
 
+		// Blender preference: viewport rotation pivots around the selection
+		QAction * aOrbitSel = new QAction( tr( "Orbit Around Selection" ), this );
+		aOrbitSel->setCheckable( true );
+		aOrbitSel->setToolTip( tr( "Rotate the view around the selected objects instead of the view center" ) );
+		connect( aOrbitSel, &QAction::toggled, [this]( bool on ) { ogl->orbitSelection = on; } );
+		m->addAction( aOrbitSel );
+
 		btn->setMenu( m );
 		ui->tRender->insertWidget( ui->aShowCollision, btn );
 		for ( QAction * a : ds )
@@ -879,34 +828,28 @@ void NifSkope::initDockWidgets()
 
 	// Blender-style transform header on the freed toolbar space
 	{
-		auto syncCombo = []( QComboBox * cb, QActionGroup * grp ) {
-			QObject::connect( cb, qOverload<int>( &QComboBox::activated ), [grp]( int i ) {
-				auto acts = grp->actions();
-				if ( i >= 0 && i < acts.size() )
-					acts.at( i )->trigger();
-			} );
-			auto acts = grp->actions();
-			for ( int i = 0; i < acts.size(); i++ ) {
-				QObject::connect( acts.at( i ), &QAction::triggered, [cb, i]() {
-					QSignalBlocker sb( cb );
-					cb->setCurrentIndex( i );
-				} );
-			}
-		};
-
 		ui->tRender->addSeparator();
 
-		QComboBox * cbOrient = new QComboBox( this );
-		cbOrient->addItems( { tr( "Global" ), tr( "Local" ), tr( "Parent" ), tr( "View" ) } );
-		cbOrient->setToolTip( tr( "Transform orientation" ) );
-		syncCombo( cbOrient, grpOrient );
-		ui->tRender->addWidget( cbOrient );
-
-		QComboBox * cbPivot = new QComboBox( this );
-		cbPivot->addItems( { tr( "Origin" ), tr( "Bounds" ), tr( "Median" ), tr( "Cursor" ) } );
-		cbPivot->setToolTip( tr( "Transform pivot point" ) );
-		syncCombo( cbPivot, grpPivot );
-		ui->tRender->addWidget( cbPivot );
+		// Blender-style dropdowns: a flat button showing the current choice,
+		// opening the checkable menu with a section title
+		auto makeDropdown = [this]( QMenu * menu, QActionGroup * grp, const QString & section, const QString & tip ) {
+			menu->insertSection( menu->actions().value( 0 ), section );
+			QToolButton * btn = new QToolButton( this );
+			btn->setPopupMode( QToolButton::InstantPopup );
+			btn->setAutoRaise( true );
+			btn->setToolTip( tip );
+			btn->setMenu( menu );
+			const auto acts = grp->actions();
+			for ( QAction * a : acts ) {
+				QObject::connect( a, &QAction::triggered, [btn, a]() { btn->setText( a->text() ); } );
+				if ( a->isChecked() )
+					btn->setText( a->text() );
+			}
+			ui->tRender->addWidget( btn );
+			return btn;
+		};
+		makeDropdown( mOrient, grpOrient, tr( "Transform Orientations" ), tr( "Transform orientation" ) );
+		makeDropdown( mPivot, grpPivot, tr( "Transform Pivot Point" ), tr( "Transform pivot point" ) );
 
 		QToolButton * btnMagnet = new QToolButton( this );
 		btnMagnet->setCheckable( true );
@@ -916,11 +859,94 @@ void NifSkope::initDockWidgets()
 		connect( btnMagnet, &QToolButton::toggled, [this]( bool on ) { ogl->snapDefaultOn = on; } );
 		ui->tRender->addWidget( btnMagnet );
 
-		QComboBox * cbSnap = new QComboBox( this );
-		cbSnap->addItems( { tr( "Grid" ), tr( "Vertex" ), tr( "Edge" ), tr( "Face" ) } );
-		cbSnap->setToolTip( tr( "Snap target" ) );
-		syncCombo( cbSnap, grpSnapTgt );
-		ui->tRender->addWidget( cbSnap );
+		// Blender-style snapping panel popup next to the magnet
+		{
+			QToolButton * btnSnap = new QToolButton( this );
+			btnSnap->setPopupMode( QToolButton::InstantPopup );
+			btnSnap->setAutoRaise( true );
+			btnSnap->setText( QStringLiteral( "▾" ) );
+			btnSnap->setToolTip( tr( "Snapping options" ) );
+
+			QMenu * snapMenu = new QMenu( btnSnap );
+			QWidget * panel = new QWidget( snapMenu );
+			QVBoxLayout * pl = new QVBoxLayout( panel );
+			pl->setContentsMargins( 10, 8, 10, 8 );
+			pl->setSpacing( 4 );
+
+			auto addHeader = [panel, pl]( const QString & text ) {
+				QLabel * l = new QLabel( text, panel );
+				QFont f = l->font();
+				f.setBold( true );
+				l->setFont( f );
+				pl->addWidget( l );
+			};
+
+			// snap target: mirrors the exclusive action group
+			addHeader( tr( "Snap Target" ) );
+			const auto tgtActs = grpSnapTgt->actions();
+			for ( QAction * ta : tgtActs ) {
+				QPushButton * b = new QPushButton( ta->text(), panel );
+				b->setCheckable( true );
+				b->setChecked( ta->isChecked() );
+				connect( b, &QPushButton::clicked, ta, &QAction::trigger );
+				connect( ta, &QAction::toggled, b, &QPushButton::setChecked );
+				pl->addWidget( b );
+			}
+
+			// which transforms snapping applies to
+			addHeader( tr( "Affect" ) );
+			QWidget * arow = new QWidget( panel );
+			QHBoxLayout * arl = new QHBoxLayout( arow );
+			arl->setContentsMargins( 0, 0, 0, 0 );
+			arl->setSpacing( 2 );
+			const char * affNames[3] = { QT_TR_NOOP( "Move" ), QT_TR_NOOP( "Rotate" ), QT_TR_NOOP( "Scale" ) };
+			for ( int i = 0; i < 3; i++ ) {
+				QPushButton * b = new QPushButton( tr( affNames[i] ), arow );
+				b->setCheckable( true );
+				b->setChecked( ogl->snapAffect & ( 1 << i ) );
+				connect( b, &QPushButton::toggled, [this, i]( bool on ) {
+					if ( on )
+						ogl->snapAffect |= ( 1 << i );
+					else
+						ogl->snapAffect &= ~( 1 << i );
+				} );
+				arl->addWidget( b );
+			}
+			pl->addWidget( arow );
+
+			QCheckBox * cbAlign = new QCheckBox( tr( "Align Rotation to Target" ), panel );
+			cbAlign->setChecked( aAlignRot->isChecked() );
+			connect( cbAlign, &QCheckBox::toggled, aAlignRot, &QAction::setChecked );
+			connect( aAlignRot, &QAction::toggled, cbAlign, &QCheckBox::setChecked );
+			pl->addWidget( cbAlign );
+
+			addHeader( tr( "Rotation Increment" ) );
+			QWidget * rrow = new QWidget( panel );
+			QHBoxLayout * rrl = new QHBoxLayout( rrow );
+			rrl->setContentsMargins( 0, 0, 0, 0 );
+			rrl->setSpacing( 2 );
+			QDoubleSpinBox * spRot = new QDoubleSpinBox( rrow );
+			spRot->setRange( 0.1, 180.0 );
+			spRot->setDecimals( 1 );
+			spRot->setSuffix( QStringLiteral( "°" ) );
+			spRot->setValue( GLView::gizmoRotSnapDeg );
+			connect( spRot, qOverload<double>( &QDoubleSpinBox::valueChanged ),
+				[]( double v ) { GLView::gizmoRotSnapDeg = (float)v; } );
+			QPushButton * b5 = new QPushButton( QStringLiteral( "5°" ), rrow );
+			QPushButton * b1 = new QPushButton( QStringLiteral( "1°" ), rrow );
+			connect( b5, &QPushButton::clicked, [spRot]() { spRot->setValue( 5.0 ); } );
+			connect( b1, &QPushButton::clicked, [spRot]() { spRot->setValue( 1.0 ); } );
+			rrl->addWidget( b5 );
+			rrl->addWidget( b1 );
+			rrl->addWidget( spRot );
+			pl->addWidget( rrow );
+
+			QWidgetAction * wa = new QWidgetAction( snapMenu );
+			wa->setDefaultWidget( panel );
+			snapMenu->addAction( wa );
+			btnSnap->setMenu( snapMenu );
+			ui->tRender->addWidget( btnSnap );
+		}
 
 		// Blender-style vertex / edge / face select buttons (edit mode)
 		{

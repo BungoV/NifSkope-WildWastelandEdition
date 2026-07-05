@@ -62,3 +62,11 @@ Backlog of features/fixes agreed for later. Ordered roughly by priority.
 
 ---
 _Completed items live in the git history on `feature/timeline`._
+
+## Proportional editing (Blender O key)
+Falloff-weighted vertex transforms in edit mode: moving/rotating/scaling picked
+elements also affects nearby unselected vertices, weighted by distance inside
+an adjustable falloff radius (mouse wheel resizes during the modal). Falloff
+curves: smooth / sphere / linear / constant. Needs: falloff radius state +
+wheel handling inside element modals, weight computation in
+gizmoUpdateElement(), circle indicator drawn around the pivot.
