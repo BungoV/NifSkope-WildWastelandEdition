@@ -359,6 +359,15 @@ void NifSkope::initActions()
 	} );
 
 	connect( ogl, &GLView::clicked, this, &NifSkope::select );
+	// object-mode multi-selection -> colour the matching block-list rows
+	connect( ogl, &GLView::objectSelectionChanged, [this]() {
+		if ( !nif )
+			return;
+		nif->selHighlight = ogl->objSelection;
+		nif->selHighlightActive = ogl->objActive;
+		list->viewport()->update();
+		tree->viewport()->update();
+	} );
 	connect( ogl, &GLView::sceneTimeChanged, inspect, &InspectView::updateTime );
 	connect( ogl, &GLView::paintUpdate, inspect, &InspectView::refresh );
 	connect( ogl, &GLView::viewpointChanged, [this]() {
@@ -875,18 +884,18 @@ void NifSkope::initDockWidgets()
 		QToolButton * btnWire = new QToolButton( this );
 		btnWire->setText( tr( "Wire" ) );
 		btnWire->setCheckable( true );
-		btnWire->setChecked( true );
+		btnWire->setChecked( false );
 		btnWire->setAutoRaise( true );
-		btnWire->setToolTip( tr( "Wireframe overlay on the active/edit mesh. On by default in Object Mode; turns off when entering Edit Mode (re-enable to see the full wireframe there)." ) );
-		ogl->wireframeOverlay = true;
+		btnWire->setToolTip( tr( "Wireframe overlay on the active/edit mesh. Off by default (selected objects show an outline instead); toggle on when you want the full wireframe." ) );
+		ogl->wireframeOverlay = false;
 		connect( btnWire, &QToolButton::toggled, [this]( bool on ) {
 			ogl->wireframeOverlay = on;
 			ogl->update();
 		} );
 		connect( ogl, &GLView::editModeChanged, [btnWire]( bool editing ) {
-			// off on entering edit mode (only the selection shows), back on when
-			// returning to object mode
-			btnWire->setChecked( !editing );
+			// off on entering edit mode (only the selection shows)
+			if ( editing && btnWire->isChecked() )
+				btnWire->setChecked( false );
 		} );
 		ui->tRender->addWidget( btnWire );
 

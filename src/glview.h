@@ -190,6 +190,8 @@ signals:
 	void editModeChanged( bool editing );
 	//! Element pick mode changed (0 none, 1 vertex, 2 edge, 3 face)
 	void pickModeChanged( int mode );
+	//! Object-mode multi-selection changed (for the block-list highlight)
+	void objectSelectionChanged();
 	void viewpointChanged();
 	void frontalLightChanged( bool isFrontal );
 
@@ -372,8 +374,15 @@ public:
 	bool editMode = false;
 	int editShapeBlock = -1;            //!< primary mesh (pivot/gizmo fallback)
 	QSet<int> editShapeBlocks;          //!< all meshes being edited (multi-mesh)
-	QSet<int> objMeshSel;               //!< object-mode Shift-click mesh accumulation
 	bool wireframeOverlay = false;      //!< draw a wireframe over the active/edit mesh
+
+	// Blender-style object-mode multi-selection (viewport + block list)
+	QSet<int> objSelection;             //!< selected NiAVObject block numbers
+	int objActive = -1;                 //!< active (last-selected) block
+	//! Apply a viewport click to the object selection (Shift = extend/toggle)
+	void objectSelectClick( int avBlock, bool shift );
+	//! Sync the object selection from a single tree/list selection
+	void syncObjectSelection( int avBlock );
 	//! Enter/leave edit mode (only enters on an editable mesh, not particles)
 	void setEditMode( bool on );
 	//! Is this block a mesh whose vertices we can edit (excludes particle systems)?

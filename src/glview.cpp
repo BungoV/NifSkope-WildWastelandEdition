@@ -760,6 +760,42 @@ void GLView::paintGL()
 		}
 	}
 
+	// object-mode selection outline (Blender-style inverted hull): active node
+	// gets the bright colour, other selected nodes a darker one
+	if ( model && !editMode && !objSelection.isEmpty() ) {
+		QVector<Vector3> hull;
+		for ( Shape * s : scene->shapes ) {
+			if ( !s || s->isHidden() || !objSelection.contains( s->id() ) )
+				continue;
+			if ( s->triangles.isEmpty() || s->verts.size() != s->norms.size() )
+				continue;
+
+			bool active = ( s->id() == objActive );
+			if ( active )
+				scene->setGLColor( 1.0f, 0.6f, 0.05f, 1.0f );	// Blender active (bright orange)
+			else
+				scene->setGLColor( 0.75f, 0.28f, 0.0f, 1.0f );	// Blender selected (darker orange)
+
+			float infl = std::max( s->bounds().radius, 0.001f ) * 0.02f;
+			hull.clear();
+			for ( const Triangle & t : s->triangles ) {
+				if ( t[0] >= s->verts.size() || t[1] >= s->verts.size() || t[2] >= s->verts.size() )
+					continue;
+				for ( int c = 0; c < 3; c++ )
+					hull.append( s->verts[t[c]] + s->norms[t[c]] * infl );
+			}
+			if ( hull.isEmpty() )
+				continue;
+
+			scene->loadModelViewMatrix( s->viewTrans() );
+			glEnable( GL_CULL_FACE );
+			glCullFace( GL_FRONT );	// draw the back faces of the inflated hull => rim
+			scene->drawTriangles( hull.constData(), hull.size(), nullptr, true );
+			glCullFace( GL_BACK );
+			glDisable( GL_CULL_FACE );
+		}
+	}
+
 	// picked reference elements + 3D cursor
 	if ( model && ( !pickedElems.isEmpty() || showCursor || pickMode ) ) {
 		glDisable( GL_DEPTH_TEST );
@@ -2882,8 +2918,13 @@ void GLView::setEditMode( bool on )
 			return;
 		}
 		editMode = true;
-		// edit the shift-accumulated meshes if any, otherwise the selected one
-		editShapeBlocks = objMeshSel;
+		// edit every selected mesh (object-mode multi-selection), plus the one
+		// the current block resolves to
+		editShapeBlocks.clear();
+		for ( int sb : objSelection ) {
+			if ( isEditableMesh( model->getBlockIndex( sb ) ) )
+				editShapeBlocks.insert( sb );
+		}
 		editShapeBlocks.insert( b );
 		editShapeBlock = b;
 		pickMode = 1;	// start in vertex select, like Blender
@@ -2895,7 +2936,6 @@ void GLView::setEditMode( bool on )
 		editMode = false;
 		editShapeBlock = -1;
 		editShapeBlocks.clear();
-		objMeshSel.clear();
 		pickMode = 0;
 		pickedElems.clear();
 		if ( elemTransform )
@@ -2908,6 +2948,59 @@ void GLView::setEditMode( bool on )
 	emit editModeChanged( editMode );
 	emit pickModeChanged( pickMode );
 	doCompile = 1;	// rebuild so the rest-pose toggle takes effect
+	update();
+}
+
+void GLView::objectSelectClick( int avBlock, bool shift )
+{
+	if ( editMode )
+		return;
+	if ( avBlock < 0 ) {
+		if ( !shift ) {
+			objSelection.clear();
+			objActive = -1;
+			emit objectSelectionChanged();
+			update();
+		}
+		return;
+	}
+
+	if ( shift ) {
+		// toggle; the toggled block becomes active if now selected
+		if ( objSelection.contains( avBlock ) ) {
+			objSelection.remove( avBlock );
+			if ( objActive == avBlock )
+				objActive = objSelection.isEmpty() ? -1 : *objSelection.constBegin();
+		} else {
+			objSelection.insert( avBlock );
+			objActive = avBlock;
+		}
+	} else {
+		objSelection.clear();
+		objSelection.insert( avBlock );
+		objActive = avBlock;
+	}
+	emit objectSelectionChanged();
+	update();
+}
+
+void GLView::syncObjectSelection( int avBlock )
+{
+	// a plain single selection from the tree/list replaces the multi-selection.
+	// If the block is already the active one (e.g. this is the echo of a viewport
+	// multi-select click), keep the existing multi-selection intact.
+	if ( editMode )
+		return;
+	if ( avBlock >= 0 && avBlock == objActive && objSelection.contains( avBlock ) )
+		return;
+	objSelection.clear();
+	if ( avBlock >= 0 ) {
+		objSelection.insert( avBlock );
+		objActive = avBlock;
+	} else {
+		objActive = -1;
+	}
+	emit objectSelectionChanged();
 	update();
 }
 
@@ -4310,9 +4403,20 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 		}
 
 		if ( !isColorPicker ) {
-			QModelIndex idx = indexAt( evtPos, bool( event->modifiers() & Qt::ShiftModifier ) );
+			bool shift = bool( event->modifiers() & Qt::ShiftModifier );
+			// in object mode Shift extends the multi-selection instead of the
+			// vertex-cycling that indexAt() uses it for
+			QModelIndex idx = indexAt( evtPos, editMode ? shift : false );
 			scene->currentBlock = model->getBlockIndex( idx );
 			scene->currentIndex = idx.sibling( idx.row(), 0 );
+
+			if ( !editMode ) {
+				// resolve the nearest NiAVObject and update the object selection
+				int av = idx.isValid() ? model->getBlockNumber( scene->currentBlock ) : -1;
+				while ( av >= 0 && !model->blockInherits( model->getBlockIndex( av ), "NiAVObject" ) )
+					av = model->getParent( av );
+				objectSelectClick( av, shift );
+			}
 
 			if ( idx.isValid() ) {
 #if 0

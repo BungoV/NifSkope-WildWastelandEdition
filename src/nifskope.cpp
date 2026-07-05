@@ -483,6 +483,15 @@ void NifSkope::select( const QModelIndex & index )
 	if ( timeline && sender() != timeline )
 		timeline->setCurrentIndex( idx );
 
+	// selecting a block from the tree/list updates the object-mode selection
+	// (outline + block-list highlight); viewport clicks handle this themselves
+	if ( ogl && sender() != ogl && idx.isValid() ) {
+		int av = nif->getBlockNumber( idx );
+		while ( av >= 0 && !nif->blockInherits( nif->getBlockIndex( av ), "NiAVObject" ) )
+			av = nif->getParent( av );
+		ogl->syncObjectSelection( av );
+	}
+
 	// Selecting a key on the timeline unfolds it in Block Details
 	if ( sender() == timeline && idx.isValid() && idx.parent().isValid() ) {
 		QModelIndex p = idx.parent();

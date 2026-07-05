@@ -217,6 +217,11 @@ protected:
 	bool isBlockRow( int row ) const;
 
 public:
+	//! Block-list highlight (WW Edition object-mode multi-selection).
+	//! Top-level block rows in these sets get a coloured background.
+	QSet<qint32> selHighlight;
+	qint32 selHighlightActive = -1;
+
 	//! Get the number of NiBlocks
 	int getBlockCount() const;
 
