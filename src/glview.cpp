@@ -3042,6 +3042,17 @@ void GLView::syncObjectSelection( int avBlock )
 	update();
 }
 
+void GLView::setObjectSelection( const QSet<int> & sel, int active )
+{
+	if ( editMode )
+		return;
+	objSelection = sel;
+	objActive = ( active >= 0 && sel.contains( active ) ) ? active
+	            : ( sel.isEmpty() ? -1 : *sel.constBegin() );
+	emit objectSelectionChanged();
+	update();
+}
+
 void GLView::hideSelected()
 {
 	if ( !model || !scene->currentBlock.isValid() )

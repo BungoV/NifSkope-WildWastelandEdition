@@ -383,6 +383,8 @@ public:
 	void objectSelectClick( int avBlock, bool shift );
 	//! Sync the object selection from a single tree/list selection
 	void syncObjectSelection( int avBlock );
+	//! Set the whole object selection at once (from block-list multi-selection)
+	void setObjectSelection( const QSet<int> & sel, int active );
 	//! Enter/leave edit mode (only enters on an editable mesh, not particles)
 	void setEditMode( bool on );
 	//! Is this block a mesh whose vertices we can edit (excludes particle systems)?

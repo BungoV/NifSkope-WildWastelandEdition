@@ -258,6 +258,36 @@ NifSkope::NifSkope()
 	list->installEventFilter( this );
 	list->header()->resizeSection( NifModel::NameCol, 250 );
 
+	// Block-list multi-selection (Blender-style): Shift/Ctrl-click several blocks
+	list->setSelectionMode( QAbstractItemView::ExtendedSelection );
+	{
+		// orange selection highlight to match the viewport outline
+		QPalette pal = list->palette();
+		pal.setColor( QPalette::Highlight, QColor( 150, 75, 15 ) );
+		pal.setColor( QPalette::HighlightedText, QColor( 255, 255, 255 ) );
+		list->setPalette( pal );
+	}
+	connect( list->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+		[this]( const QItemSelection &, const QItemSelection & ) {
+		if ( !nif || !ogl || ogl->editMode )
+			return;
+		auto toAV = [this]( QModelIndex idx ) {
+			if ( idx.model() == proxy )
+				idx = proxy->mapTo( idx );
+			int b = nif->getBlockNumber( idx );
+			while ( b >= 0 && !nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" ) )
+				b = nif->getParent( b );
+			return b;
+		};
+		QSet<int> sel;
+		for ( const QModelIndex & pidx : list->selectionModel()->selectedRows() ) {
+			int b = toAV( pidx );
+			if ( b >= 0 )
+				sel.insert( b );
+		}
+		ogl->setObjectSelection( sel, toAV( list->selectionModel()->currentIndex() ) );
+	} );
+
 	// Block Details
 	tree = ui->tree;
 	tree->setModel( nif );
