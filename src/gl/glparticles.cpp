@@ -32,6 +32,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glparticles.h"
 
+#include <cmath>
+
 #include "gl/controllers.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -156,9 +158,32 @@ void Particles::drawShapes( NodeList * secondPass )
 		float	s2 = size * worldTrans().scale;
 		prog->uni2f( "particleScale", s2, s2 );
 
+		// atlas sheets (e.g. T_..._4x4.dds) pack many frames: show a single cell
+		// instead of squashing the whole sheet onto every sprite
+		FloatVector4	puv( 0.0f, 0.0f, 1.0f, 1.0f );
+		if ( iData.isValid() && scene->nifModel->getIndex( iData, "Num Subtexture Offsets" ).isValid() ) {
+			int nSub = scene->nifModel->get<int>( iData, "Num Subtexture Offsets" );
+			if ( nSub >= 4 ) {
+				int g = int( std::lround( std::sqrt( double( nSub ) ) ) );
+				if ( g >= 2 ) {
+					float sc = 1.0f / float( g );
+					puv = FloatVector4( 0.0f, 0.0f, sc, sc );
+				}
+			}
+		}
+		prog->uni4f( "particleUV", puv );
+
 		// setup blending
 
 		AlphaProperty::glProperty( aprop, prog );
+		// FO4 effect particles usually rely on the effect shader's blend rather
+		// than a NiAlphaProperty; fall back to standard alpha blending so the
+		// sprites are not drawn opaque
+		if ( !( aprop && aprop->hasAlphaBlend() ) ) {
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+			glDisable( GL_ALPHA_TEST );
+		}
 
 		// setup vertex colors
 

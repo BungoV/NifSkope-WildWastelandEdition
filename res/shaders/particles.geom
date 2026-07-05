@@ -6,6 +6,8 @@ layout ( triangle_strip, max_vertices = 4 ) out;
 #include "uniforms.glsl"
 
 uniform vec2 particleScale;
+// sub-texture cell for atlas sheets: xy = uv offset, zw = uv scale (default 0,0,1,1)
+uniform vec4 particleUV;
 
 in vec3 vsLightDir[];
 in vec3 vsViewDir[];
@@ -38,20 +40,26 @@ void main()
 	float	sx = vsParticleSize[0] * particleScale.x;
 	float	sy = vsParticleSize[0] * particleScale.y;
 
+	vec2	uv;
+
+	uv = particleUV.xy + vec2( 1.0, 1.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
-		texCoords[i] = vec2( 1.0, 1.0 );
+		texCoords[i] = uv;
 	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( sx, sy, 0.0, 0.0 ) );
 	EmitVertex();
+	uv = particleUV.xy + vec2( 0.0, 1.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
-		texCoords[i] = vec2( 0.0, 1.0 );
+		texCoords[i] = uv;
 	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( -sx, sy, 0.0, 0.0 ) );
 	EmitVertex();
+	uv = particleUV.xy + vec2( 1.0, 0.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
-		texCoords[i] = vec2( 1.0, 0.0 );
+		texCoords[i] = uv;
 	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( sx, -sy, 0.0, 0.0 ) );
 	EmitVertex();
+	uv = particleUV.xy + vec2( 0.0, 0.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
-		texCoords[i] = vec2( 0.0, 0.0 );
+		texCoords[i] = uv;
 	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( -sx, -sy, 0.0, 0.0 ) );
 	EmitVertex();
 
