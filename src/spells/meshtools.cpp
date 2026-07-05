@@ -27,21 +27,24 @@ BSD License - see nifskope.h
  *  \brief Material/texture find & replace manager and node-name authority spells.
  */
 
-//! True for any string-valued item (sized strings, file paths and string-table refs)
+//! True for a directly readable string item (sized strings / file paths and the
+//! string-table refs). Deliberately excludes tStringOffset, which resolveString
+//! does not support and which only appears inside controller-sequence blocks.
 static bool tlIsStringItem( const NifItem * item )
 {
 	if ( !item )
 		return false;
 	NifValue::Type t = item->value().type();
-	return item->value().isString() || t == NifValue::tStringIndex || t == NifValue::tStringOffset;
+	return item->value().isString() || t == NifValue::tStringIndex;
 }
 
-//! Does the text look like a material or texture resource path?
+//! Does the text look like a material or texture resource path? (Not behavior
+//! graphs / collision - those are not textures or materials.)
 static bool tlLooksLikeResource( const QString & s )
 {
 	if ( s.isEmpty() )
 		return false;
-	static const char * exts[] = { ".dds", ".bgsm", ".bgem", ".tga", ".nif", ".bto", ".btr", ".hkx" };
+	static const char * exts[] = { ".dds", ".bgsm", ".bgem", ".tga" };
 	QString low = s.toLower();
 	for ( const char * e : exts ) {
 		if ( low.endsWith( QLatin1String( e ) ) )
@@ -50,9 +53,34 @@ static bool tlLooksLikeResource( const QString & s )
 	return low.contains( QLatin1String( "textures" ) ) || low.contains( QLatin1String( "materials" ) );
 }
 
+//! Nearest geometry / owning block for a shader/texture property, for context
+static QString tlOwnerLabel( NifModel * nif, const QModelIndex & iItem )
+{
+	// walk up to the containing block, then find who links to it
+	QModelIndex iBlock = iItem;
+	while ( iBlock.isValid() && iBlock.parent().isValid() )
+		iBlock = iBlock.parent();
+	int bn = nif->getBlockNumber( iBlock );
+	if ( bn < 0 )
+		return QString();
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex iOther = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( iOther, "NiAVObject" ) )
+			continue;
+		const auto links = nif->getChildLinks( b );
+		if ( links.contains( bn ) ) {
+			QString nm = nif->resolveString( iOther, "Name" );
+			return QString( "%1 %2%3" ).arg( b ).arg( nif->itemName( iOther ),
+				nm.isEmpty() ? QString() : QStringLiteral( " \"" ) + nm + QStringLiteral( "\"" ) );
+		}
+	}
+	return QString();
+}
+
 //! Recursively collect resource-path string items under a block
 static void tlCollectResourceStrings( NifModel * nif, const QModelIndex & parent,
-	QVector<QPersistentModelIndex> & out, QStringList & labels, const QString & prefix, int depth = 0 )
+	QVector<QPersistentModelIndex> & out, QStringList & labels, QStringList & owners,
+	const QString & owner, const QString & prefix, int depth = 0 )
 {
 	if ( depth > 12 )
 		return;
@@ -68,10 +96,11 @@ static void tlCollectResourceStrings( NifModel * nif, const QModelIndex & parent
 			if ( tlLooksLikeResource( val ) ) {
 				out.append( QPersistentModelIndex( row ) );
 				labels.append( path );
+				owners.append( owner );
 			}
 		}
 		if ( nif->rowCount( row ) > 0 )
-			tlCollectResourceStrings( nif, row, out, labels, path, depth + 1 );
+			tlCollectResourceStrings( nif, row, out, labels, owners, owner, path, depth + 1 );
 	}
 }
 
@@ -92,13 +121,20 @@ public:
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
 	{
 		QVector<QPersistentModelIndex> items;
-		QStringList labels;
+		QStringList labels, owners;
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			QModelIndex iBlock = nif->getBlockIndex( b );
 			QString head = QString( "%1 %2" ).arg( b ).arg( nif->itemName( iBlock ) );
-			QString nm = nif->resolveString( iBlock, "Name" );
-			tlCollectResourceStrings( nif, iBlock, items, labels, head );
-			Q_UNUSED( nm );
+			// geometry / node this property is attached to (blank until resolved)
+			QString ownerNode;
+			int before = items.size();
+			tlCollectResourceStrings( nif, iBlock, items, labels, owners, QString(), head );
+			// fill in the owning geometry for the entries just collected
+			if ( items.size() > before ) {
+				ownerNode = tlOwnerLabel( nif, iBlock );
+				for ( int k = before; k < owners.size(); k++ )
+					owners[k] = ownerNode;
+			}
 		}
 
 		if ( items.isEmpty() ) {
@@ -121,17 +157,25 @@ public:
 		fr->addWidget( btnReplace );
 		lay->addLayout( fr );
 
-		QTableWidget * tbl = new QTableWidget( items.size(), 2 );
-		tbl->setHorizontalHeaderLabels( { Spell::tr( "Field" ), Spell::tr( "Path (editable)" ) } );
+		QTableWidget * tbl = new QTableWidget( items.size(), 3 );
+		tbl->setHorizontalHeaderLabels( { Spell::tr( "Field" ), Spell::tr( "Owner node" ), Spell::tr( "Path (editable)" ) } );
 		tbl->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
-		tbl->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::Stretch );
+		tbl->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
+		tbl->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
 		tbl->verticalHeader()->setVisible( false );
+		tbl->setSortingEnabled( false );	// fill first, enable after
 		for ( int i = 0; i < items.size(); i++ ) {
 			QTableWidgetItem * c0 = new QTableWidgetItem( labels.at( i ) );
 			c0->setFlags( c0->flags() & ~Qt::ItemIsEditable );
+			c0->setData( Qt::UserRole, i );	// stable back-reference after sorting
 			tbl->setItem( i, 0, c0 );
-			tbl->setItem( i, 1, new QTableWidgetItem( nif->resolveString( QModelIndex( items.at( i ) ) ) ) );
+			QTableWidgetItem * c1 = new QTableWidgetItem( owners.at( i ) );
+			c1->setFlags( c1->flags() & ~Qt::ItemIsEditable );
+			tbl->setItem( i, 1, c1 );
+			tbl->setItem( i, 2, new QTableWidgetItem( nif->resolveString( QModelIndex( items.at( i ) ) ) ) );
 		}
+		// click a column header to sort by id/field, owner, or path (name)
+		tbl->setSortingEnabled( true );
 		lay->addWidget( tbl, 1 );
 
 		QObject::connect( btnReplace, &QPushButton::clicked, [&]() {
@@ -141,7 +185,7 @@ public:
 			QString rep = edRepl->text();
 			int n = 0;
 			for ( int i = 0; i < tbl->rowCount(); i++ ) {
-				QTableWidgetItem * it = tbl->item( i, 1 );
+				QTableWidgetItem * it = tbl->item( i, 2 );
 				if ( it && it->text().contains( f, Qt::CaseInsensitive ) ) {
 					it->setText( it->text().replace( f, rep, Qt::CaseInsensitive ) );
 					n++;
@@ -162,11 +206,19 @@ public:
 
 		int changed = 0;
 		nifSnapshotOp( nif, name(), [&]() {
-			for ( int i = 0; i < items.size(); i++ ) {
+			// rows may be re-sorted; map each back to its item via UserRole
+			for ( int r = 0; r < tbl->rowCount(); r++ ) {
+				QTableWidgetItem * c0 = tbl->item( r, 0 );
+				QTableWidgetItem * c2 = tbl->item( r, 2 );
+				if ( !c0 || !c2 )
+					continue;
+				int i = c0->data( Qt::UserRole ).toInt();
+				if ( i < 0 || i >= items.size() )
+					continue;
 				QModelIndex idx( items.at( i ) );
 				if ( !idx.isValid() )
 					continue;
-				QString newVal = tbl->item( i, 1 )->text();
+				QString newVal = c2->text();
 				if ( newVal != nif->resolveString( idx ) ) {
 					nif->assignString( idx, newVal );
 					changed++;
