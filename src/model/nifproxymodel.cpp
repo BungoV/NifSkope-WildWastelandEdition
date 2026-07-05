@@ -459,6 +459,13 @@ QModelIndex NifProxyModel::mapFromPrimary( const QModelIndex & idx ) const
 	if ( all.isEmpty() )
 		return mapFrom( idx, QModelIndex() );
 
+	// The block can appear under every block that references it (its scene
+	// parent via Children, plus modifier/emitter/palette copies). Prefer the
+	// occurrence sitting under its real scene-graph parent (the block whose
+	// child links hold it), so selecting it doesn't jump to a reference copy.
+	int blockNumber = nif->getBlockNumber( idx );
+	int sceneParent = ( blockNumber >= 0 ) ? nif->getParent( blockNumber ) : -1;
+
 	QModelIndex fallback;
 	for ( const QModelIndex & p : all ) {
 		if ( p.column() != NifModel::NameCol )
@@ -466,12 +473,9 @@ QModelIndex NifProxyModel::mapFromPrimary( const QModelIndex & idx ) const
 		if ( !fallback.isValid() )
 			fallback = p;
 		QModelIndex parent = p.parent();
-		if ( parent.isValid() ) {
-			QModelIndex parentSrc = mapTo( parent );
-			if ( parentSrc.isValid() && nif->blockInherits( parentSrc, "NiDefaultAVObjectPalette" ) )
-				continue;	// skip the palette copy
-		}
-		return p;	// natural (or root-level) occurrence
+		int parentBlock = parent.isValid() ? nif->getBlockNumber( mapTo( parent ) ) : -1;
+		if ( parentBlock == sceneParent )
+			return p;	// occurrence under the real scene-graph parent
 	}
 	return fallback.isValid() ? fallback : mapFrom( idx, QModelIndex() );
 }

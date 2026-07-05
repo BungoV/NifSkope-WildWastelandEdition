@@ -531,13 +531,19 @@ void NifSkope::select( const QModelIndex & index )
 	if ( timeline && sender() != timeline )
 		timeline->setCurrentIndex( idx );
 
-	// selecting a block from the tree/list updates the object-mode selection
-	// (outline + block-list highlight); viewport clicks handle this themselves
-	if ( ogl && sender() != ogl && idx.isValid() ) {
+	// selecting a block from the tree/timeline updates the object-mode selection
+	// (outline + block-list highlight); the block list drives its own multi-
+	// selection via its selectionChanged handler, and viewport clicks handle
+	// this themselves, so both are excluded here.
+	if ( ogl && sender() != ogl && sender() != list && idx.isValid() ) {
 		int av = nif->getBlockNumber( idx );
 		while ( av >= 0 && !nif->blockInherits( nif->getBlockIndex( av ), "NiAVObject" ) )
 			av = nif->getParent( av );
+		// suppress the list mirror: this is a tree/timeline-driven change, and
+		// re-scrolling the block list here would fight the user's navigation.
+		updatingObjFromList = true;
 		ogl->syncObjectSelection( av );
+		updatingObjFromList = false;
 	}
 
 	// Selecting a key on the timeline unfolds it in Block Details
