@@ -64,6 +64,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QPainter>
 #include <QPushButton>
 #include <QRadioButton>
@@ -681,36 +683,87 @@ void GLView::paintGL()
 			if ( gizmoMode || !gizmoHandlesOn ) {
 				scene->drawAxes( Vector3(), gs, true );
 			} else {
-				// Blender-style draggable handles: arrows (move), rings (rotate),
-				// boxes (scale), center dot (view-plane move); modelview is
-				// already the gizmo basis at the pivot
+				// Blender-style draggable handles: arrows with solid cone tips
+				// (move), rings (rotate), solid boxes (scale), center circle
+				// (view-plane move); modelview is already the gizmo basis at
+				// the pivot. Colours match Blender: X #FF3352, Y #8BDC00, Z #2890FF.
 				const float L = gs;
+				const float axR[3][4] = {
+					{ 1.000f, 0.200f, 0.322f, 1.0f },	// X
+					{ 0.545f, 0.863f, 0.000f, 1.0f },	// Y
+					{ 0.157f, 0.565f, 1.000f, 1.0f }	// Z
+				};
+
+				// solid cone: apex at base+dir*len, 12-segment fan + base disc
+				auto solidCone = [this]( const Vector3 & base, const Vector3 & dir, float radius, float len ) {
+					Vector3 n( dir );
+					n.normalize();
+					Vector3 u = Vector3::crossproduct( n, ( std::fabs( n[2] ) < 0.9f )
+						? Vector3( 0.0f, 0.0f, 1.0f ) : Vector3( 1.0f, 0.0f, 0.0f ) );
+					u.normalize();
+					Vector3 v = Vector3::crossproduct( n, u );
+					Vector3 apex = base + n * len;
+					const int sd = 12;
+					QVector<Vector3> tris;
+					tris.reserve( sd * 6 );
+					for ( int i = 0; i < sd; i++ ) {
+						float a0 = float( i ) * float( M_PI * 2.0 / sd );
+						float a1 = float( i + 1 ) * float( M_PI * 2.0 / sd );
+						Vector3 p0 = base + ( u * std::cos( a0 ) + v * std::sin( a0 ) ) * radius;
+						Vector3 p1 = base + ( u * std::cos( a1 ) + v * std::sin( a1 ) ) * radius;
+						tris << apex << p0 << p1;		// side
+						tris << base << p1 << p0;		// base disc
+					}
+					scene->drawTriangles( tris.constData(), size_t( tris.size() ), nullptr, true );
+				};
+				// solid axis-aligned cube (gizmo-local space)
+				auto solidBox = [this]( const Vector3 & c, float h ) {
+					Vector3 p[8];
+					for ( int i = 0; i < 8; i++ )
+						p[i] = c + Vector3( ( i & 1 ) ? h : -h, ( i & 2 ) ? h : -h, ( i & 4 ) ? h : -h );
+					static const int F[12][3] = {
+						{ 0, 2, 3 }, { 0, 3, 1 }, { 4, 5, 7 }, { 4, 7, 6 },
+						{ 0, 1, 5 }, { 0, 5, 4 }, { 2, 6, 7 }, { 2, 7, 3 },
+						{ 0, 4, 6 }, { 0, 6, 2 }, { 1, 3, 7 }, { 1, 7, 5 }
+					};
+					QVector<Vector3> tris;
+					tris.reserve( 36 );
+					for ( auto & f : F )
+						tris << p[f[0]] << p[f[1]] << p[f[2]];
+					scene->drawTriangles( tris.constData(), size_t( tris.size() ), nullptr, true );
+				};
+
 				for ( int i = 0; i < 3; i++ ) {
 					Vector3 u;
 					u[i] = 1.0f;
-					auto axisColor = [this, i]( bool hov ) {
+					auto axisColor = [this, i, &axR]( bool hov ) {
 						if ( hov )
 							scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
 						else
-							scene->setGLColor( i == 0 ? 0.9f : 0.15f, i == 1 ? 0.85f : 0.15f,
-							                   i == 2 ? 0.95f : 0.2f, 0.95f );
+							scene->setGLColor( axR[i][0], axR[i][1], axR[i][2], axR[i][3] );
 					};
-					// move arrow
+					// move arrow: shaft + solid cone tip
 					axisColor( gizmoHover == 1 + i );
-					scene->drawLine( u * ( L * 0.25f ), u * ( L * 1.05f ) );
-					scene->drawSphereSimple( u * ( L * 1.12f ), L * 0.035f, 24, 2 );
-					// scale box
+					scene->setGLLineWidth( Settings::lineWidthAxes * 1.1f );
+					scene->drawLine( u * ( L * 0.2f ), u * ( L * 0.92f ) );
+					solidCone( u * ( L * 0.92f ), u, L * 0.045f, L * 0.18f );
+					// scale box (solid, sits on the shaft)
 					axisColor( gizmoHover == 8 + i );
-					Vector3 bc = u * ( L * 0.55f );
-					Vector3 be( L * 0.04f, L * 0.04f, L * 0.04f );
-					scene->drawBox( bc - be, bc + be );
+					solidBox( u * ( L * 0.62f ), L * 0.045f );
 					// rotation ring
 					axisColor( gizmoHover == 5 + i );
-					scene->drawCircle( Vector3(), u, L * 0.8f, 48 );
+					scene->setGLLineWidth( Settings::lineWidthAxes * 1.1f );
+					scene->drawCircle( Vector3(), u, L * 0.85f, 64 );
 				}
-				// center: view-plane move
-				scene->setGLColor( 1.0f, 1.0f, 1.0f, gizmoHover == 4 ? 1.0f : 0.55f );
-				scene->drawSphereSimple( Vector3(), L * 0.05f, 24, 2 );
+				// center circle: view-plane move (billboarded to the camera)
+				{
+					Matrix vtInv = viewTrans.rotation.inverted();
+					Matrix bInv = basis.inverted();
+					Vector3 camN = bInv * ( vtInv * Vector3( 0.0f, 0.0f, 1.0f ) );
+					scene->setGLColor( 1.0f, 1.0f, 1.0f, gizmoHover == 4 ? 1.0f : 0.6f );
+					scene->setGLLineWidth( Settings::lineWidthAxes * 1.2f );
+					scene->drawCircle( Vector3(), camN, L * 0.12f, 32 );
+				}
 			}
 
 			if ( gizmoMode && gizmoAxis > 0 ) {
@@ -729,12 +782,11 @@ void GLView::paintGL()
 		}
 	}
 
-	// wireframe overlay on the active / edit mesh (drawn under the selection)
-	if ( model && wireframeOverlay ) {
+	// wireframe overlay on the active mesh (object mode only; edit mode draws
+	// its own Blender-style black wireframe below)
+	if ( model && wireframeOverlay && !editMode ) {
 		int wb = -1;
-		if ( editMode ) {
-			wb = editShapeBlock;
-		} else if ( scene->currentBlock.isValid() ) {
+		if ( scene->currentBlock.isValid() ) {
 			int b = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
 			while ( b >= 0 && !isEditableMesh( model->getBlockIndex( b ) ) )
 				b = model->getParent( b );
@@ -798,15 +850,177 @@ void GLView::paintGL()
 		}
 	}
 
-	// picked reference elements + 3D cursor
-	if ( model && ( !pickedElems.isEmpty() || showCursor || pickMode ) ) {
+	// Blender-style edit-mode overlay: black wireframe + black vertex dots,
+	// selected elements orange (#FF8500), active element white, translucent
+	// orange fill on selected faces, and an orange->black gradient on edges
+	// running into selected vertices (vertex mode only). Depth-tested like
+	// Blender; positions are pulled slightly toward the eye to avoid z-fights.
+	if ( model && editMode && !editShapeBlocks.isEmpty() ) {
+		const float dpr = float( devicePixelRatioF() );
+		const FloatVector4 colWire( 0.0f, 0.0f, 0.0f, 1.0f );
+		const FloatVector4 colSel( 1.0f, 0.522f, 0.0f, 1.0f );		// Blender select #FF8500
+		const FloatVector4 colActive( 1.0f, 1.0f, 1.0f, 1.0f );	// active element
+
+		// gather the selection per shape
+		QHash<int, QSet<int>> selVerts;
+		QHash<int, QSet<quint64>> selEdges;
+		QHash<int, QSet<int>> selFaces;
+		auto edgeKey = []( int a, int b ) {
+			return ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) );
+		};
+		for ( const auto & pe : pickedElems ) {
+			if ( pe.type == 1 )
+				selVerts[pe.shapeBlock].insert( pe.e0 );
+			else if ( pe.type == 2 )
+				selEdges[pe.shapeBlock].insert( edgeKey( pe.e0, pe.e1 ) );
+			else if ( pe.type == 3 )
+				selFaces[pe.shapeBlock].insert( pe.e0 );
+		}
+		const PickedElement * activeElem = pickedElems.isEmpty() ? nullptr : &pickedElems.constLast();
+
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+		glDepthMask( GL_FALSE );
+		scene->loadModelViewMatrix( viewTrans );
+		Vector3 eye = viewTrans.inverted() * Vector3( 0.0f, 0.0f, 0.0f );
+
+		for ( int wb : editShapeBlocks ) {
+			Shape * s = shapeForBlock( wb );
+			if ( !s || s->verts.isEmpty() )
+				continue;
+			Transform wt = shapeRenderTrans( s );
+			int nv = s->verts.size();
+
+			// world-space vertices, pulled a hair toward the camera
+			QVector<Vector3> wv( nv );
+			for ( int i = 0; i < nv; i++ ) {
+				Vector3 w = wt * s->verts.at( i );
+				wv[i] = eye + ( w - eye ) * 0.997f;
+			}
+
+			// unique edge list
+			QSet<quint64> eset;
+			QVector<QPair<int, int>> edges;
+			for ( const Triangle & t : s->triangles ) {
+				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+					continue;
+				for ( int e = 0; e < 3; e++ ) {
+					int a = t[e], b = t[( e + 1 ) % 3];
+					quint64 k = edgeKey( a, b );
+					if ( !eset.contains( k ) ) {
+						eset.insert( k );
+						edges.append( qMakePair( a, b ) );
+					}
+				}
+			}
+
+			// selected face fills first (under the wires)
+			if ( selFaces.contains( wb ) ) {
+				QVector<Vector3> ftris, atris;
+				for ( int fi : selFaces.value( wb ) ) {
+					if ( fi < 0 || fi >= s->triangles.size() )
+						continue;
+					const Triangle & t = s->triangles.at( fi );
+					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+						continue;
+					bool act = ( activeElem && activeElem->type == 3
+					             && activeElem->shapeBlock == wb && activeElem->e0 == fi );
+					QVector<Vector3> & dst = act ? atris : ftris;
+					dst << wv[t[0]] << wv[t[1]] << wv[t[2]];
+				}
+				if ( !ftris.isEmpty() ) {
+					scene->setGLColor( 1.0f, 0.522f, 0.0f, 0.30f );
+					scene->drawTriangles( ftris.constData(), size_t( ftris.size() ), nullptr, true );
+				}
+				if ( !atris.isEmpty() ) {
+					scene->setGLColor( 1.0f, 0.72f, 0.35f, 0.36f );	// active face: lighter
+					scene->drawTriangles( atris.constData(), size_t( atris.size() ), nullptr, true );
+				}
+			}
+
+			// base wireframe with per-endpoint colours (gradient in vertex mode)
+			const bool vertMode = bool( pickMode & 1 );
+			const QSet<int> & sv = selVerts[wb];
+			QVector<Vector3> lineVerts;
+			QVector<FloatVector4> lineCols;
+			lineVerts.reserve( edges.size() * 2 );
+			lineCols.reserve( edges.size() * 2 );
+			for ( const auto & e : edges ) {
+				lineVerts << wv[e.first] << wv[e.second];
+				FloatVector4 ca = colWire, cb = colWire;
+				if ( vertMode ) {
+					if ( sv.contains( e.first ) )
+						ca = colSel;
+					if ( sv.contains( e.second ) )
+						cb = colSel;
+				}
+				lineCols << ca << cb;
+			}
+			if ( !lineVerts.isEmpty() ) {
+				scene->setGLLineWidth( 1.0f * dpr );
+				scene->drawLines( lineVerts.constData(), size_t( lineVerts.size() ), lineCols.constData() );
+			}
+
+			// selected edges on top (any mode), slightly wider like Blender
+			if ( selEdges.contains( wb ) ) {
+				QVector<Vector3> selLines, actLines;
+				for ( const auto & e : edges ) {
+					quint64 k = edgeKey( e.first, e.second );
+					if ( !selEdges.value( wb ).contains( k ) )
+						continue;
+					bool act = ( activeElem && activeElem->type == 2 && activeElem->shapeBlock == wb
+					             && edgeKey( activeElem->e0, activeElem->e1 ) == k );
+					QVector<Vector3> & dst = act ? actLines : selLines;
+					dst << wv[e.first] << wv[e.second];
+				}
+				scene->setGLLineWidth( 1.6f * dpr );
+				if ( !selLines.isEmpty() ) {
+					scene->setGLColor( colSel );
+					scene->drawLines( selLines.constData(), size_t( selLines.size() ), nullptr );
+				}
+				if ( !actLines.isEmpty() ) {
+					scene->setGLColor( colActive );
+					scene->drawLines( actLines.constData(), size_t( actLines.size() ), nullptr );
+				}
+			}
+
+			// vertex dots (vertex mode only): black, selected orange, active white
+			if ( vertMode ) {
+				scene->setGLPointSize( 3.0f * dpr );
+				scene->setGLColor( colWire );
+				scene->drawPoints( wv.constData(), size_t( nv ) );
+				if ( !sv.isEmpty() ) {
+					QVector<Vector3> selPts, actPts;
+					for ( int vi : sv ) {
+						if ( vi < 0 || vi >= nv )
+							continue;
+						bool act = ( activeElem && activeElem->type == 1
+						             && activeElem->shapeBlock == wb && activeElem->e0 == vi );
+						( act ? actPts : selPts ).append( wv[vi] );
+					}
+					if ( !selPts.isEmpty() ) {
+						scene->setGLColor( colSel );
+						scene->drawPoints( selPts.constData(), size_t( selPts.size() ) );
+					}
+					if ( !actPts.isEmpty() ) {
+						scene->setGLColor( colActive );
+						scene->drawPoints( actPts.constData(), size_t( actPts.size() ) );
+					}
+				}
+			}
+		}
+
+		glDepthMask( GL_TRUE );
+		glDepthFunc( GL_LESS );
+	}
+
+	// picked reference elements outside edit mode (snap targets etc.)
+	if ( model && !editMode && !pickedElems.isEmpty() ) {
 		glDisable( GL_DEPTH_TEST );
 		glDepthMask( GL_FALSE );
 		scene->loadModelViewMatrix( viewTrans );
 		float ms = std::max( float( Dist ) / 100.0f, 0.005f ) * gizmoSizeMul;
 
-		// selection colours kept distinct from the green wireframe; positions are
-		// recomputed from live vertex data so highlights follow transforms
 		for ( const auto & pe : pickedElems ) {
 			Shape * s = shapeForBlock( pe.shapeBlock );
 			if ( !s )
@@ -865,23 +1079,6 @@ void GLView::paintGL()
 			}
 		}
 
-		if ( showCursor ) {
-			// Blender-style 3D cursor: red/white circle facing the camera + cross
-			const auto & vtr = viewTrans.rotation;
-			Vector3 fwd( vtr( 2, 0 ), vtr( 2, 1 ), vtr( 2, 2 ) );
-			Vector3 right( vtr( 0, 0 ), vtr( 0, 1 ), vtr( 0, 2 ) );
-			Vector3 up( vtr( 1, 0 ), vtr( 1, 1 ), vtr( 1, 2 ) );
-			float cs = ms * 1.6f;
-			scene->setGLLineWidth( Settings::lineWidthAxes * 1.2f );
-			scene->setGLColor( 0.9f, 0.15f, 0.15f, 1.0f );
-			scene->drawCircle( cursorPos, fwd, cs * 0.75f, 24 );
-			scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
-			scene->drawLine( cursorPos - right * cs * 1.4f, cursorPos - right * cs * 0.5f );
-			scene->drawLine( cursorPos + right * cs * 0.5f, cursorPos + right * cs * 1.4f );
-			scene->drawLine( cursorPos - up * cs * 1.4f, cursorPos - up * cs * 0.5f );
-			scene->drawLine( cursorPos + up * cs * 0.5f, cursorPos + up * cs * 1.4f );
-		}
-
 		glDepthMask( GL_TRUE );
 		glEnable( GL_DEPTH_TEST );
 	}
@@ -915,11 +1112,29 @@ void GLView::paintGL()
 	while ( ( err = glGetError() ) != GL_NO_ERROR )
 		qDebug() << tr( "glview.cpp - GL ERROR (paint): " ) << getGLErrorString( int(err) );
 
-	// Blender-style navigation gizmo overlay (2D, drawn over the GL scene)
-	if ( scene->hasOption( Scene::ShowAxes ) ) {
+	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
+	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
+	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) ) {
 		QPainter painter( this );
-		drawNavGizmo( painter );
+		if ( model && showCursor )
+			drawCursorOverlay( painter );
+		if ( scene->hasOption( Scene::ShowAxes ) )
+			drawNavGizmo( painter );
 		painter.end();
+
+		// QPainter changes GL state behind the renderer's back (bound program,
+		// blending, scissor); reset everything that would corrupt the next
+		// selection/picking render, which reuses this context.
+		if ( QOpenGLContext * glCtx = QOpenGLContext::currentContext() ) {
+			QOpenGLFunctions * f = glCtx->functions();
+			f->glUseProgram( 0 );
+			f->glActiveTexture( GL_TEXTURE0 );
+		}
+		glDisable( GL_BLEND );
+		glDisable( GL_SCISSOR_TEST );
+		glDisable( GL_STENCIL_TEST );
+		glEnable( GL_DEPTH_TEST );
+		glDepthMask( GL_TRUE );
 	}
 
 #if DEBUG_FRAME_TIME
@@ -1671,6 +1886,35 @@ void GLView::drawNavGizmo( QPainter & painter )
 	}
 }
 
+void GLView::drawCursorOverlay( QPainter & painter )
+{
+	// Blender-style 3D cursor: red/white dashed circle with four crosshair
+	// ticks, drawn at constant screen size at the projected cursor position
+	QPointF sp;
+	if ( !worldToScreen( cursorPos, sp ) )
+		return;
+
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	const qreal r = 6.5;
+
+	// red base circle, then white dashes over it -> alternating red/white
+	painter.setBrush( Qt::NoBrush );
+	painter.setPen( QPen( QColor( 214, 56, 56 ), 1.6 ) );
+	painter.drawEllipse( sp, r, r );
+	QPen dashPen( QColor( 255, 255, 255 ), 1.6 );
+	dashPen.setDashPattern( { 2.2, 2.2 } );
+	painter.setPen( dashPen );
+	painter.drawEllipse( sp, r, r );
+
+	// dark crosshair ticks just outside the circle
+	painter.setPen( QPen( QColor( 10, 10, 10, 235 ), 1.4 ) );
+	const qreal t0 = r + 1.5, t1 = r + 6.0;
+	painter.drawLine( sp + QPointF( t0, 0 ), sp + QPointF( t1, 0 ) );
+	painter.drawLine( sp - QPointF( t0, 0 ), sp - QPointF( t1, 0 ) );
+	painter.drawLine( sp + QPointF( 0, t0 ), sp + QPointF( 0, t1 ) );
+	painter.drawLine( sp - QPointF( 0, t0 ), sp - QPointF( 0, t1 ) );
+}
+
 Transform GLView::viewTransform() const
 {
 	Transform vt;
@@ -1772,7 +2016,7 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 	// scale boxes first: they sit on the arrow shafts
 	for ( int i = 0; i < 3; i++ ) {
 		QPointF bp;
-		if ( worldToScreen( P + ax[i] * ( gs * 0.55f ), bp )
+		if ( worldToScreen( P + ax[i] * ( gs * 0.62f ), bp )
 			&& std::hypot( pos.x() - bp.x(), pos.y() - bp.y() ) < 8.0 )
 			return 8 + i;
 	}
@@ -1780,8 +2024,8 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 	// move arrows
 	for ( int i = 0; i < 3; i++ ) {
 		QPointF a, b;
-		if ( worldToScreen( P + ax[i] * ( gs * 0.25f ), a )
-			&& worldToScreen( P + ax[i] * ( gs * 1.15f ), b )
+		if ( worldToScreen( P + ax[i] * ( gs * 0.2f ), a )
+			&& worldToScreen( P + ax[i] * ( gs * 1.12f ), b )
 			&& tlPtSegDist( pos, a, b ) < 7.0f )
 			return 1 + i;
 	}
@@ -1791,7 +2035,7 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 		Vector3 u = Vector3::crossproduct( ax[i], ax[( i + 1 ) % 3] );
 		u.normalize();
 		Vector3 v = Vector3::crossproduct( ax[i], u );
-		float r = gs * 0.8f;
+		float r = gs * 0.85f;
 		QPointF prev;
 		bool prevOk = false;
 		float best = 1.0e9f;
@@ -3634,9 +3878,12 @@ void GLView::advanceGears()
 	// Fix movement speed for Starfield scale
 	dT *= scale();
 	float	moveStep = cfg.moveSpd * dT;
-	// Blender fly mode: hold Shift to move faster
-	if ( freeCamera && kbd( Key_Shift ) )
-		moveStep *= 4.0f;
+	// Blender fly mode: scroll wheel sets the base speed, Shift boosts it
+	if ( freeCamera ) {
+		moveStep *= freeCamSpeed;
+		if ( kbd( Key_Shift ) )
+			moveStep *= 4.0f;
+	}
 
 	// TODO: Some kind of input class for choosing the appropriate
 	// keys based on user preferences of what app they would like to
@@ -4503,8 +4750,10 @@ void GLView::mousePressEvent( QMouseEvent * event )
 	}
 
 	// Blender-style navigation gizmo: click an axis ball to snap the view,
-	// or click/drag the surrounding ring to orbit.
-	if ( event->button() == Qt::LeftButton && scene->hasOption( Scene::ShowAxes ) ) {
+	// or click/drag the surrounding ring to orbit. Only plain left-clicks are
+	// intercepted so Shift/Ctrl multi-select clicks always reach the viewport.
+	if ( event->button() == Qt::LeftButton && scene->hasOption( Scene::ShowAxes )
+		&& !( event->modifiers() & ( Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier ) ) ) {
 		int h = navGizmoHitTest( getQMouseEventPosition( event ) );
 		if ( h >= 0 && h < 6 ) {
 			snapToAxis( h );
@@ -4674,6 +4923,14 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 
 void GLView::wheelEvent( QWheelEvent * event )
 {
+	// free camera: the scroll wheel adjusts fly speed (Blender walk/fly mode)
+	if ( freeCamera ) {
+		freeCamSpeed *= ( event->angleDelta().y() > 0 ) ? 1.25f : 0.8f;
+		freeCamSpeed = std::min( std::max( freeCamSpeed, 0.05f ), 50.0f );
+		emit gizmoStatus( tr( "Fly speed: %1x (scroll to adjust)" ).arg( double( freeCamSpeed ), 0, 'f', 2 ) );
+		return;
+	}
+
 	if ( view == ViewWalk ) {
 		mouseMov += Vector3( 0, 0, double( event->angleDelta().y() ) / 4.0 ) * scale();
 	} else {

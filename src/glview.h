@@ -304,6 +304,8 @@ private:
 	void snapToAxis( int axis );
 	//! Draw the navigation gizmo overlay with QPainter.
 	void drawNavGizmo( class QPainter & painter );
+	//! Draw the Blender-style 3D cursor overlay (constant screen size).
+	void drawCursorOverlay( class QPainter & painter );
 
 public:
 	static float gizmoSnapStep;
@@ -382,6 +384,8 @@ public:
 
 	// Blender-like free camera: keyboard movement only while enabled (Shift+F)
 	bool freeCamera = false;
+	//! Fly-mode movement speed multiplier, adjusted with the scroll wheel
+	float freeCamSpeed = 1.0f;
 	//! First-person look that pivots at the camera eye (free camera mouse-look)
 	void freeCameraLook( float dPitch, float dYaw );
 
