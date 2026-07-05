@@ -879,21 +879,23 @@ void NifSkope::initDockWidgets()
 		aGizmoHandles->setIconText( tr( "Gizmo" ) );
 		ui->tRender->addAction( aGizmoHandles );
 
-		// wireframe overlay toggle (auto-off when entering edit mode)
+		// wireframe overlay toggle - on by default in object mode (shows the
+		// selected mesh wireframe), auto-off when entering edit mode
 		QToolButton * btnWire = new QToolButton( this );
 		btnWire->setText( tr( "Wire" ) );
 		btnWire->setCheckable( true );
+		btnWire->setChecked( true );
 		btnWire->setAutoRaise( true );
-		btnWire->setToolTip( tr( "Wireframe overlay on the active/edit mesh. Turns off automatically when entering Edit Mode; enable it there to see the full wireframe." ) );
+		btnWire->setToolTip( tr( "Wireframe overlay on the active/edit mesh. On by default in Object Mode; turns off when entering Edit Mode (re-enable to see the full wireframe there)." ) );
+		ogl->wireframeOverlay = true;
 		connect( btnWire, &QToolButton::toggled, [this]( bool on ) {
 			ogl->wireframeOverlay = on;
 			ogl->update();
 		} );
-		connect( ogl, &GLView::editModeChanged, [btnWire]( bool ) {
-			// Blender: only the selection shows on entering edit mode until you
-			// explicitly re-enable the wireframe
-			if ( btnWire->isChecked() )
-				btnWire->setChecked( false );
+		connect( ogl, &GLView::editModeChanged, [btnWire]( bool editing ) {
+			// off on entering edit mode (only the selection shows), back on when
+			// returning to object mode
+			btnWire->setChecked( !editing );
 		} );
 		ui->tRender->addWidget( btnWire );
 

@@ -636,11 +636,18 @@ void GLView::paintGL()
 	scene->draw();
 
 	// Pivot gizmo: RGB axes at the selected node's origin (oriented to the node),
-	// plus the active constraint axis while a modal G/R/S transform is running
-	if ( model && scene->currentBlock.isValid() ) {
-		int gb = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
-		while ( gb >= 0 && !model->blockInherits( model->getBlockIndex( gb ), "NiAVObject" ) )
-			gb = model->getParent( gb );
+	// plus the active constraint axis while a modal G/R/S transform is running.
+	// In edit mode it follows the picked elements rather than the tree selection.
+	bool showGizmo = editMode ? ( !pickedElems.isEmpty() || elemTransform ) : scene->currentBlock.isValid();
+	if ( model && showGizmo ) {
+		int gb;
+		if ( editMode && editShapeBlock >= 0 ) {
+			gb = editShapeBlock;
+		} else {
+			gb = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+			while ( gb >= 0 && !model->blockInherits( model->getBlockIndex( gb ), "NiAVObject" ) )
+				gb = model->getParent( gb );
+		}
 		Node * gizmoNode = ( gb >= 0 ) ? scene->getNode( model, model->getBlockIndex( gb ) ) : nullptr;
 
 		if ( gizmoNode ) {
@@ -760,23 +767,51 @@ void GLView::paintGL()
 		scene->loadModelViewMatrix( viewTrans );
 		float ms = std::max( float( Dist ) / 100.0f, 0.005f ) * gizmoSizeMul;
 
-		// selection colours kept distinct from the green wireframe
+		// selection colours kept distinct from the green wireframe; positions are
+		// recomputed from live vertex data so highlights follow transforms
 		for ( const auto & pe : pickedElems ) {
+			Shape * s = shapeForBlock( pe.shapeBlock );
+			if ( !s )
+				continue;
+			Transform wt = shapeRenderTrans( s );
+			int nv = s->verts.size();
+
 			if ( pe.type == 1 ) {
+				if ( pe.e0 >= nv )
+					continue;
+				Vector3 v = wt * s->verts[pe.e0];
+				scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );	// contrast halo
+				scene->drawSphereSimple( v, ms * 0.62f, 16, 2 );
 				scene->setGLColor( 1.0f, 0.5f, 0.0f, 1.0f );	// orange verts
-				scene->drawSphereSimple( pe.worldPos, ms * 0.5f, 16, 2 );
+				scene->drawSphereSimple( v, ms * 0.45f, 16, 2 );
 			} else if ( pe.type == 2 ) {
+				if ( pe.e0 >= nv || pe.e1 >= nv )
+					continue;
+				Vector3 a = wt * s->verts[pe.e0], b = wt * s->verts[pe.e1];
+				scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );
+				scene->setGLLineWidth( Settings::lineWidthAxes * 3.4f );
+				scene->drawLine( a, b );
 				scene->setGLColor( 1.0f, 0.9f, 0.2f, 1.0f );	// yellow edges
 				scene->setGLLineWidth( Settings::lineWidthAxes * 1.6f );
-				scene->drawLine( pe.wA, pe.wB );
-				scene->drawSphereSimple( pe.worldPos, ms * 0.35f, 12, 2 );
-			} else if ( pe.type == 3 ) {
-				scene->setGLColor( 1.0f, 0.55f, 0.9f, 1.0f );	// magenta faces
-				scene->setGLLineWidth( Settings::lineWidthAxes * 1.6f );
-				scene->drawLine( pe.wA, pe.wB );
-				scene->drawLine( pe.wB, pe.wC );
-				scene->drawLine( pe.wC, pe.wA );
-				scene->drawLine( pe.worldPos, pe.worldPos + pe.worldNormal * ( ms * 4.0f ) );
+				scene->drawLine( a, b );
+			} else if ( pe.type == 3 && pe.e0 >= 0 && pe.e0 < s->triangles.size() ) {
+				const Triangle & t = s->triangles.at( pe.e0 );
+				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+					continue;
+				Vector3 tri[3] = { wt * s->verts[t[0]], wt * s->verts[t[1]], wt * s->verts[t[2]] };
+				// filled translucent face + solid outline
+				scene->setGLColor( 1.0f, 0.4f, 0.85f, 0.45f );	// magenta fill
+				scene->drawTriangles( tri, 3, nullptr, true );
+				scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );
+				scene->setGLLineWidth( Settings::lineWidthAxes * 3.2f );
+				scene->drawLine( tri[0], tri[1] );
+				scene->drawLine( tri[1], tri[2] );
+				scene->drawLine( tri[2], tri[0] );
+				scene->setGLColor( 1.0f, 0.55f, 0.95f, 1.0f );
+				scene->setGLLineWidth( Settings::lineWidthAxes * 1.5f );
+				scene->drawLine( tri[0], tri[1] );
+				scene->drawLine( tri[1], tri[2] );
+				scene->drawLine( tri[2], tri[0] );
 			}
 		}
 
@@ -1484,17 +1519,24 @@ static float tlPtSegDist( const QPointF & p, const QPointF & a, const QPointF & 
 
 int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 {
-	if ( !model || !scene || !scene->currentBlock.isValid() || view == ViewWalk )
+	if ( !model || !scene || view == ViewWalk )
 		return 0;
 
-	int gb = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
-	while ( gb >= 0 && !model->blockInherits( model->getBlockIndex( gb ), "NiAVObject" ) )
-		gb = model->getParent( gb );
-	if ( gb < 0 )
-		return 0;
+	int gb;
+	if ( editMode && editShapeBlock >= 0 && !pickedElems.isEmpty() ) {
+		gb = editShapeBlock;
+	} else {
+		if ( !scene->currentBlock.isValid() )
+			return 0;
+		gb = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+		while ( gb >= 0 && !model->blockInherits( model->getBlockIndex( gb ), "NiAVObject" ) )
+			gb = model->getParent( gb );
+		if ( gb < 0 )
+			return 0;
+		if ( !model->getIndex( model->getBlockIndex( gb ), "Translation" ).isValid() )
+			return 0;
+	}
 	QModelIndex iGb = model->getBlockIndex( gb );
-	if ( !model->getIndex( iGb, "Translation" ).isValid() )
-		return 0;
 
 	Matrix basis = gizmoBasis( iGb );
 	Vector3 P = gizmoPivotPoint( iGb );

@@ -174,17 +174,13 @@ void Particles::drawShapes( NodeList * secondPass )
 		float	s2 = size * worldTrans().scale;
 		prog->uni2f( "particleScale", s2, s2 );
 
-		// find the effect shader's source texture (FO4 links it directly)
-		QString	srcTex;
-		if ( iShaderProp.isValid() ) {
-			if ( nif->blockInherits( iShaderProp, "BSEffectShaderProperty" ) ) {
+		// the shader property (added to this node by Node::updateImpl for FO4)
+		// resolves and binds the source texture through the normal path
+		BSShaderLightingProperty * shaderProp = findProperty<BSShaderLightingProperty>();
+		QString	srcTex = shaderProp ? shaderProp->fileName( 0 ) : QString();
+		if ( srcTex.isEmpty() && iShaderProp.isValid() ) {
+			if ( nif->blockInherits( iShaderProp, "BSEffectShaderProperty" ) )
 				srcTex = nif->get<QString>( iShaderProp, "Source Texture" );
-			} else {
-				QModelIndex iTexSet = nif->getBlockIndex( nif->getLink( iShaderProp, "Texture Set" ), "BSShaderTextureSet" );
-				QModelIndex iTextures = nif->getIndex( iTexSet, "Textures" );
-				if ( iTextures.isValid() && nif->rowCount( iTextures ) > 0 )
-					srcTex = nif->get<QString>( nif->getIndex( iTextures, 0 ) );
-			}
 		}
 
 		// atlas sheets (e.g. T_..._4x4.dds) pack many frames: show a single cell
@@ -246,9 +242,19 @@ void Particles::drawShapes( NodeList * secondPass )
 		if ( auto p = findProperty<TexturingProperty>(); p )
 			stage += int( p->bind( 0, 0, prog ) );
 
-		bool	texBound = false;
-		if ( !srcTex.isEmpty() ) {
-			// bind the effect-shader source texture directly to the sprite unit
+		if ( shaderProp ) {
+			if ( shaderProp->bind( 0 ) ) {
+				prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", stage ), stage );
+				stage++;
+			}
+			prog->uni2f_l( prog->uniLocation( "textures[%d].uvCenter", 0 ), 0.5f, 0.5f );
+			prog->uni2f_l( prog->uniLocation( "textures[%d].uvScale", 0 ), 1.0f, 1.0f );
+			prog->uni2f_l( prog->uniLocation( "textures[%d].uvOffset", 0 ), 0.0f, 0.0f );
+			prog->uni1f_l( prog->uniLocation( "textures[%d].uvRotation", 0 ), 0.0f );
+			prog->uni1i_l( prog->uniLocation( "textures[%d].coordSet", 0 ), 0 );
+			prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), stage );
+		} else if ( !srcTex.isEmpty() ) {
+			// no render-side property: bind the raw path as a last resort
 			scene->textures->activateTextureUnit( stage );
 			if ( scene->textures->bind( srcTex, nif ) ) {
 				prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", stage ), stage );
@@ -259,21 +265,6 @@ void Particles::drawShapes( NodeList * secondPass )
 				prog->uni1i_l( prog->uniLocation( "textures[%d].coordSet", 0 ), 0 );
 				prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), stage );
 				stage++;
-				texBound = true;
-			}
-		}
-		if ( !texBound ) {
-			if ( auto p = findProperty<BSShaderLightingProperty>(); p ) {
-				if ( p->bind( 0 ) ) {
-					prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", stage ), stage );
-					stage++;
-				}
-				prog->uni2f_l( prog->uniLocation( "textures[%d].uvCenter", 0 ), 0.5f, 0.5f );
-				prog->uni2f_l( prog->uniLocation( "textures[%d].uvScale", 0 ), 1.0f, 1.0f );
-				prog->uni2f_l( prog->uniLocation( "textures[%d].uvOffset", 0 ), 0.0f, 0.0f );
-				prog->uni1f_l( prog->uniLocation( "textures[%d].uvRotation", 0 ), 0.0f );
-				prog->uni1i_l( prog->uniLocation( "textures[%d].coordSet", 0 ), 0 );
-				prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), stage );
 			}
 		}
 
