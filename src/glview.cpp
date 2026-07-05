@@ -3034,15 +3034,37 @@ void GLView::showSnapMenu()
 	m.addSection( tr( "Snap" ) );
 	QAction * aSelGrid = m.addAction( tr( "Selection to Grid" ) );
 	QAction * aSelCur  = m.addAction( tr( "Selection to Cursor" ) );
+	QAction * aSelOrig = m.addAction( tr( "Selection to Node Origin" ) );
 	m.addSeparator();
 	QAction * aCurSel  = m.addAction( tr( "Cursor to Selected" ) );
 	QAction * aCurOrig = m.addAction( tr( "Cursor to World Origin" ) );
+	QAction * aCurNode = m.addAction( tr( "Cursor to Node Origin" ) );
 	QAction * aCurGrid = m.addAction( tr( "Cursor to Grid" ) );
 
 	bool hasSel = !pickedElems.isEmpty();
 	aSelGrid->setEnabled( hasSel );
 	aSelCur->setEnabled( hasSel );
-	aCurSel->setEnabled( hasSel );
+	aSelOrig->setEnabled( hasSel );
+
+	// average origin of the node(s) owning the current selection
+	auto nodeOriginAvg = [this]() {
+		QSet<int> shapes;
+		for ( const auto & pe : pickedElems )
+			if ( pe.shapeBlock >= 0 )
+				shapes.insert( pe.shapeBlock );
+		if ( shapes.isEmpty() && editShapeBlock >= 0 )
+			shapes.insert( editShapeBlock );
+		Vector3 sum;
+		int n = 0;
+		for ( int sb : shapes ) {
+			Node * nd = scene->getNode( model, model->getBlockIndex( sb ) );
+			if ( nd ) {
+				sum += nd->worldTrans().translation;
+				n++;
+			}
+		}
+		return ( n > 0 ) ? ( sum / float( n ) ) : Vector3();
+	};
 
 	QAction * r = m.exec( QCursor::pos() );
 	if ( !r )
@@ -3051,11 +3073,19 @@ void GLView::showSnapMenu()
 		snapSelectionToGrid();
 	} else if ( r == aSelCur ) {
 		movePickedVertsToCursor();
+	} else if ( r == aSelOrig ) {
+		Vector3 saved = cursorPos;
+		cursorPos = nodeOriginAvg();	// reuse the move-to-cursor path
+		movePickedVertsToCursor();
+		cursorPos = saved;
 	} else if ( r == aCurSel ) {
 		cursorPos = pickedMedian();
 		update();
 	} else if ( r == aCurOrig ) {
 		cursorPos = Vector3();
+		update();
+	} else if ( r == aCurNode ) {
+		cursorPos = nodeOriginAvg();
 		update();
 	} else if ( r == aCurGrid ) {
 		float step = std::max( gizmoSnapStep, 0.0001f );

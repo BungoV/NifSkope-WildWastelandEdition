@@ -315,7 +315,7 @@ class spEnforceNameAuthority final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Enforce Node Name Authority" ); }
-	QString page() const override final { return Spell::tr( "Animation" ); }
+	QString page() const override final { return Spell::tr( "Sanitize" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & ) override final
 	{
