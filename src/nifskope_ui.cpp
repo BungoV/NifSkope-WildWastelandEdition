@@ -57,6 +57,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QByteArray>
 #include <QCheckBox>
 #include <QComboBox>
@@ -838,14 +839,63 @@ void NifSkope::initDockWidgets()
 		syncCombo( cbSnap, grpSnapTgt );
 		ui->tRender->addWidget( cbSnap );
 
-		QComboBox * cbPick = new QComboBox( this );
-		cbPick->addItems( { tr( "Select: Node" ), tr( "Select: Vertex" ), tr( "Select: Edge" ), tr( "Select: Face" ) } );
-		cbPick->setToolTip( tr( "Element select mode (1/2/3 in the viewport)" ) );
-		syncCombo( cbPick, grpPick );
-		ui->tRender->addWidget( cbPick );
+		// Blender-style vertex / edge / face select buttons (edit mode)
+		{
+			QColor icoCol( 228, 228, 232 );
+			QToolButton * bVert = new QToolButton( this );
+			QToolButton * bEdge = new QToolButton( this );
+			QToolButton * bFace = new QToolButton( this );
+			QToolButton * elemBtns[3] = { bVert, bEdge, bFace };
+			const char * elemIcons[3] = { "vert", "edge", "face" };
+			const char * elemTips[3] = { "Vertex select (1)", "Edge select (2)", "Face select (3)" };
+			QButtonGroup * elemGrp = new QButtonGroup( this );
+			elemGrp->setExclusive( true );
+			for ( int i = 0; i < 3; i++ ) {
+				elemBtns[i]->setIcon( tlMakeIcon( elemIcons[i], icoCol ) );
+				elemBtns[i]->setToolTip( tr( elemTips[i] ) );
+				elemBtns[i]->setCheckable( true );
+				elemBtns[i]->setAutoRaise( true );
+				elemGrp->addButton( elemBtns[i], i + 1 );
+				connect( elemBtns[i], &QToolButton::clicked, [this, i]() {
+					if ( !ogl->editMode )
+						ogl->setEditMode( true );
+					if ( ogl->editMode )
+						ogl->setPickMode( i + 1 );
+				} );
+				ui->tRender->addWidget( elemBtns[i] );
+			}
+			connect( ogl, &GLView::pickModeChanged, [elemGrp, elemBtns]( int mode ) {
+				if ( mode >= 1 && mode <= 3 ) {
+					QSignalBlocker sb( elemBtns[mode - 1] );
+					elemBtns[mode - 1]->setChecked( true );
+				} else if ( QAbstractButton * c = elemGrp->checkedButton() ) {
+					elemGrp->setExclusive( false );
+					c->setChecked( false );
+					elemGrp->setExclusive( true );
+				}
+			} );
+		}
 
 		aGizmoHandles->setIconText( tr( "Gizmo" ) );
 		ui->tRender->addAction( aGizmoHandles );
+
+		// wireframe overlay toggle (auto-off when entering edit mode)
+		QToolButton * btnWire = new QToolButton( this );
+		btnWire->setText( tr( "Wire" ) );
+		btnWire->setCheckable( true );
+		btnWire->setAutoRaise( true );
+		btnWire->setToolTip( tr( "Wireframe overlay on the active/edit mesh. Turns off automatically when entering Edit Mode; enable it there to see the full wireframe." ) );
+		connect( btnWire, &QToolButton::toggled, [this]( bool on ) {
+			ogl->wireframeOverlay = on;
+			ogl->update();
+		} );
+		connect( ogl, &GLView::editModeChanged, [btnWire]( bool ) {
+			// Blender: only the selection shows on entering edit mode until you
+			// explicitly re-enable the wireframe
+			if ( btnWire->isChecked() )
+				btnWire->setChecked( false );
+		} );
+		ui->tRender->addWidget( btnWire );
 
 		QToolButton * btnCursor = new QToolButton( this );
 		btnCursor->setPopupMode( QToolButton::InstantPopup );

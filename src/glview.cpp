@@ -716,6 +716,43 @@ void GLView::paintGL()
 		}
 	}
 
+	// wireframe overlay on the active / edit mesh (drawn under the selection)
+	if ( model && wireframeOverlay ) {
+		int wb = -1;
+		if ( editMode ) {
+			wb = editShapeBlock;
+		} else if ( scene->currentBlock.isValid() ) {
+			int b = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+			while ( b >= 0 && !isEditableMesh( model->getBlockIndex( b ) ) )
+				b = model->getParent( b );
+			wb = b;
+		}
+		Shape * ws = nullptr;
+		for ( Shape * s : scene->shapes ) {
+			if ( s && s->id() == wb ) {
+				ws = s;
+				break;
+			}
+		}
+		if ( ws && !ws->triangles.isEmpty() ) {
+			glDisable( GL_DEPTH_TEST );
+			glDepthMask( GL_FALSE );
+			scene->loadModelViewMatrix( ws->viewTrans() );
+			scene->setGLColor( scene->wireframeColor );
+			scene->setGLLineWidth( Settings::lineWidthWireframe );
+			int nv = ws->verts.size();
+			for ( const Triangle & t : ws->triangles ) {
+				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+					continue;
+				scene->drawLine( ws->verts[t[0]], ws->verts[t[1]] );
+				scene->drawLine( ws->verts[t[1]], ws->verts[t[2]] );
+				scene->drawLine( ws->verts[t[2]], ws->verts[t[0]] );
+			}
+			glDepthMask( GL_TRUE );
+			glEnable( GL_DEPTH_TEST );
+		}
+	}
+
 	// picked reference elements + 3D cursor
 	if ( model && ( !pickedElems.isEmpty() || showCursor || pickMode ) ) {
 		glDisable( GL_DEPTH_TEST );
@@ -723,17 +760,18 @@ void GLView::paintGL()
 		scene->loadModelViewMatrix( viewTrans );
 		float ms = std::max( float( Dist ) / 100.0f, 0.005f ) * gizmoSizeMul;
 
+		// selection colours kept distinct from the green wireframe
 		for ( const auto & pe : pickedElems ) {
 			if ( pe.type == 1 ) {
-				scene->setGLColor( 0.2f, 1.0f, 0.4f, 1.0f );
+				scene->setGLColor( 1.0f, 0.5f, 0.0f, 1.0f );	// orange verts
 				scene->drawSphereSimple( pe.worldPos, ms * 0.5f, 16, 2 );
 			} else if ( pe.type == 2 ) {
-				scene->setGLColor( 1.0f, 0.7f, 0.1f, 1.0f );
+				scene->setGLColor( 1.0f, 0.9f, 0.2f, 1.0f );	// yellow edges
 				scene->setGLLineWidth( Settings::lineWidthAxes * 1.6f );
 				scene->drawLine( pe.wA, pe.wB );
 				scene->drawSphereSimple( pe.worldPos, ms * 0.35f, 12, 2 );
 			} else if ( pe.type == 3 ) {
-				scene->setGLColor( 0.3f, 0.6f, 1.0f, 1.0f );
+				scene->setGLColor( 1.0f, 0.55f, 0.9f, 1.0f );	// magenta faces
 				scene->setGLLineWidth( Settings::lineWidthAxes * 1.6f );
 				scene->drawLine( pe.wA, pe.wB );
 				scene->drawLine( pe.wB, pe.wC );
@@ -2688,6 +2726,175 @@ void GLView::setEditMode( bool on )
 	}
 
 	emit editModeChanged( editMode );
+	emit pickModeChanged( pickMode );
+	update();
+}
+
+Shape * GLView::shapeForBlock( int b ) const
+{
+	for ( Shape * s : scene->shapes ) {
+		if ( s && s->id() == b )
+			return s;
+	}
+	return nullptr;
+}
+
+void GLView::selectLinked( bool flatOnly )
+{
+	if ( !editMode || pickedElems.isEmpty() )
+		return;
+
+	// seed triangles and vertices per shape from the current selection
+	QHash<int, QSet<int>> seedTris, seedVerts;
+	for ( const auto & pe : pickedElems ) {
+		if ( pe.type == 3 )
+			seedTris[pe.shapeBlock].insert( pe.e0 );
+		else if ( pe.type == 1 )
+			seedVerts[pe.shapeBlock].insert( pe.e0 );
+		else if ( pe.type == 2 ) {
+			seedVerts[pe.shapeBlock].insert( pe.e0 );
+			seedVerts[pe.shapeBlock].insert( pe.e1 );
+		}
+	}
+
+	QSet<int> shapes;
+	for ( int k : seedTris.keys() )
+		shapes.insert( k );
+	for ( int k : seedVerts.keys() )
+		shapes.insert( k );
+
+	int outType = flatOnly ? 3 : ( pickMode ? pickMode : 1 );
+
+	for ( int sb : shapes ) {
+		Shape * s = shapeForBlock( sb );
+		if ( !s || s->triangles.isEmpty() )
+			continue;
+		int nv = s->verts.size();
+
+		// vertex -> incident triangles
+		QHash<int, QVector<int>> vtris;
+		for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+			const Triangle & t = s->triangles.at( ti );
+			if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+				continue;
+			vtris[t[0]].append( ti );
+			vtris[t[1]].append( ti );
+			vtris[t[2]].append( ti );
+		}
+
+		auto triNormal = [&]( int ti ) {
+			const Triangle & t = s->triangles.at( ti );
+			Vector3 n = Vector3::crossproduct( s->verts[t[1]] - s->verts[t[0]], s->verts[t[2]] - s->verts[t[0]] );
+			n.normalize();
+			return n;
+		};
+
+		// seed triangle set (from selected faces and the triangles around seed verts)
+		QSet<int> seed = seedTris.value( sb );
+		for ( int v : seedVerts.value( sb ) )
+			for ( int ti : vtris.value( v ) )
+				seed.insert( ti );
+		if ( seed.isEmpty() )
+			continue;
+
+		// flood fill by shared vertices (optionally only across coplanar faces)
+		QSet<int> comp = seed;
+		QList<int> stack = seed.values();
+		while ( !stack.isEmpty() ) {
+			int ti = stack.takeLast();
+			Vector3 nt = triNormal( ti );
+			const Triangle & t = s->triangles.at( ti );
+			for ( int c = 0; c < 3; c++ ) {
+				for ( int nb : vtris.value( t[c] ) ) {
+					if ( comp.contains( nb ) )
+						continue;
+					if ( flatOnly && Vector3::dotproduct( triNormal( nb ), nt ) < 0.9997f )
+						continue;	// ~1.4 degrees
+					comp.insert( nb );
+					stack.append( nb );
+				}
+			}
+		}
+
+		Transform wt = shapeRenderTrans( s );
+		auto already = [&]( const PickedElement & pe ) { return pickedElems.indexOf( pe ) >= 0; };
+
+		if ( outType == 3 ) {
+			for ( int ti : comp ) {
+				const Triangle & t = s->triangles.at( ti );
+				PickedElement pe;
+				pe.shapeBlock = sb;
+				pe.type = 3;
+				pe.e0 = ti;
+				pe.wA = wt * s->verts[t[0]];
+				pe.wB = wt * s->verts[t[1]];
+				pe.wC = wt * s->verts[t[2]];
+				pe.worldPos = ( pe.wA + pe.wB + pe.wC ) / 3.0f;
+				Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
+				n.normalize();
+				pe.worldNormal = n;
+				if ( !already( pe ) )
+					pickedElems.append( pe );
+			}
+		} else if ( outType == 1 ) {
+			QSet<int> vs;
+			for ( int ti : comp ) {
+				const Triangle & t = s->triangles.at( ti );
+				vs.insert( t[0] );
+				vs.insert( t[1] );
+				vs.insert( t[2] );
+			}
+			for ( int vi : vs ) {
+				PickedElement pe;
+				pe.shapeBlock = sb;
+				pe.type = 1;
+				pe.e0 = vi;
+				pe.worldPos = wt * s->verts[vi];
+				pe.wA = pe.wB = pe.wC = pe.worldPos;
+				if ( !already( pe ) )
+					pickedElems.append( pe );
+			}
+		} else {
+			QSet<QPair<int, int>> edges;
+			for ( int ti : comp ) {
+				const Triangle & t = s->triangles.at( ti );
+				for ( int e = 0; e < 3; e++ ) {
+					int a = t[e], b = t[( e + 1 ) % 3];
+					edges.insert( qMakePair( std::min( a, b ), std::max( a, b ) ) );
+				}
+			}
+			for ( const auto & ed : edges ) {
+				PickedElement pe;
+				pe.shapeBlock = sb;
+				pe.type = 2;
+				pe.e0 = ed.first;
+				pe.e1 = ed.second;
+				pe.wA = wt * s->verts[ed.first];
+				pe.wB = wt * s->verts[ed.second];
+				pe.wC = pe.wA;
+				pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
+				if ( !already( pe ) )
+					pickedElems.append( pe );
+			}
+		}
+	}
+
+	if ( flatOnly && pickMode != 3 ) {
+		pickMode = 3;	// switch to face mode without clearing the new selection
+		emit pickModeChanged( pickMode );
+	}
+	emit gizmoStatus( tr( "Selected linked: %1 element(s)" ).arg( pickedElems.size() ) );
+	update();
+}
+
+void GLView::setPickMode( int m )
+{
+	if ( m == pickMode )
+		return;
+	pickMode = m;
+	if ( m )
+		pickedElems.clear();
+	emit pickModeChanged( pickMode );
 	update();
 }
 
@@ -3538,6 +3745,21 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		return;
 	}
 
+	// edit-mode select-linked (Ctrl+L) and linked flat faces (Shift+Ctrl+Alt+F)
+	if ( editMode ) {
+		Qt::KeyboardModifiers mods = event->modifiers();
+		if ( event->key() == Qt::Key_L && ( mods & Qt::ControlModifier )
+			&& !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+			selectLinked( false );
+			return;
+		}
+		if ( event->key() == Qt::Key_F && ( mods & Qt::ControlModifier )
+			&& ( mods & Qt::AltModifier ) && ( mods & Qt::ShiftModifier ) ) {
+			selectLinked( true );
+			return;
+		}
+	}
+
 	if ( view != ViewWalk && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
 		// Shift+S: snap pie (edit mode) - must beat the plain S scale shortcut
 		if ( event->key() == Qt::Key_S && ( event->modifiers() & Qt::ShiftModifier ) && editMode ) {
@@ -3576,12 +3798,10 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		else if ( event->key() == Qt::Key_3 )
 			pm = 3;
 		if ( pm && editMode ) {
-			pickMode = pm;	// stay in element mode; Tab exits
-			pickedElems.clear();
+			setPickMode( pm );	// stay in element mode; Tab exits
 			static const char * pmNames[4] = { "", "vertex", "edge", "face" };
 			emit gizmoStatus( tr( "Edit Mode - %1 select  (click = pick, Shift+click = add, G/R/S move, X delete, Shift+S snap)" )
 				.arg( QLatin1String( pmNames[pickMode] ) ) );
-			update();
 			return;
 		}
 		if ( event->key() == Qt::Key_C ) {

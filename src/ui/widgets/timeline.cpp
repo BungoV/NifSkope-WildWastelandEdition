@@ -181,6 +181,42 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawRoundedRect( QRectF( 10, 15, 44, 34 ), 4, 4 );
 		p.setBrush( col );
 		p.drawRect( QRectF( 39, 15, 15, 34 ) );
+	} else if ( id == QLatin1String( "vert" ) ) {
+		// Blender vertex-select: square of dots, one corner highlighted
+		p.setBrush( Qt::NoBrush );
+		QPen tp( col, 3 );
+		p.setPen( tp );
+		p.drawRect( QRectF( 18, 18, 28, 28 ) );
+		p.setBrush( col );
+		p.setPen( Qt::NoPen );
+		for ( QPointF c : { QPointF( 18, 18 ), QPointF( 46, 18 ), QPointF( 18, 46 ), QPointF( 46, 46 ) } )
+			p.drawEllipse( c, 5, 5 );
+	} else if ( id == QLatin1String( "edge" ) ) {
+		// Blender edge-select: square with the top edge highlighted
+		p.setBrush( Qt::NoBrush );
+		QPen tp( col, 3 );
+		p.setPen( tp );
+		p.drawRect( QRectF( 18, 18, 28, 28 ) );
+		QPen ep( col, 7 );
+		ep.setCapStyle( Qt::RoundCap );
+		p.setPen( ep );
+		p.drawLine( QPointF( 18, 18 ), QPointF( 46, 18 ) );
+		p.setBrush( col );
+		p.setPen( Qt::NoPen );
+		p.drawEllipse( QPointF( 18, 18 ), 5, 5 );
+		p.drawEllipse( QPointF( 46, 18 ), 5, 5 );
+	} else if ( id == QLatin1String( "face" ) ) {
+		// Blender face-select: filled square with a center dot
+		p.setBrush( Qt::NoBrush );
+		QPen tp( col, 3 );
+		p.setPen( tp );
+		p.drawRect( QRectF( 18, 18, 28, 28 ) );
+		QColor fill = col;
+		fill.setAlpha( 110 );
+		p.fillRect( QRectF( 20, 20, 24, 24 ), fill );
+		p.setBrush( col );
+		p.setPen( Qt::NoPen );
+		p.drawEllipse( QPointF( 32, 32 ), 5, 5 );
 	}
 
 	return QIcon( pm );

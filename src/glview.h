@@ -188,6 +188,8 @@ signals:
 	void transformCommitted( int blockNumber );
 	//! Object/Edit mode changed (for the toolbar mode selector)
 	void editModeChanged( bool editing );
+	//! Element pick mode changed (0 none, 1 vertex, 2 edge, 3 face)
+	void pickModeChanged( int mode );
 	void viewpointChanged();
 	void frontalLightChanged( bool isFrontal );
 
@@ -366,10 +368,18 @@ public:
 	// Blender-like edit mode: vertex/edge/face editing on the selected mesh
 	bool editMode = false;
 	int editShapeBlock = -1;
+	bool wireframeOverlay = false;      //!< draw a wireframe over the active/edit mesh
 	//! Enter/leave edit mode (only enters on an editable mesh, not particles)
 	void setEditMode( bool on );
 	//! Is this block a mesh whose vertices we can edit (excludes particle systems)?
 	bool isEditableMesh( const QModelIndex & iBlock ) const;
+	//! Set the element pick mode (1 vertex, 2 edge, 3 face) and notify the toolbar
+	void setPickMode( int m );
+	//! Select all geometry connected to the current selection (Ctrl+L).
+	//! flatOnly limits growth to coplanar faces (Shift+Ctrl+Alt+F).
+	void selectLinked( bool flatOnly );
+	//! The rendered Shape for a block number, or nullptr
+	class Shape * shapeForBlock( int b ) const;
 	//! Blender Shift+S snap pie: cursor/selection snapping
 	void showSnapMenu();
 	//! Snap picked vertices to the grid (Selection to Grid)
