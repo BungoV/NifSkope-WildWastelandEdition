@@ -848,6 +848,24 @@ void GLView::paintGL()
 		glEnable( GL_DEPTH_TEST );
 	}
 
+	// free-camera crosshair at the centre of the view (Blender fly/walk mode)
+	if ( freeCamera ) {
+		glDisable( GL_DEPTH_TEST );
+		glDepthMask( GL_FALSE );
+		scene->loadModelViewMatrix( viewTrans );
+		Vector3 c = viewTrans.inverted() * Vector3( 0.0f, 0.0f, -float( Dist ) );
+		const auto & vtr = viewTrans.rotation;
+		Vector3 right( vtr( 0, 0 ), vtr( 0, 1 ), vtr( 0, 2 ) );
+		Vector3 up( vtr( 1, 0 ), vtr( 1, 1 ), vtr( 1, 2 ) );
+		float cs = std::max( float( Dist ) / 40.0f, 0.01f );
+		scene->setGLLineWidth( Settings::lineWidthAxes * 1.3f );
+		scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.85f );
+		scene->drawLine( c - right * cs, c + right * cs );
+		scene->drawLine( c - up * cs, c + up * cs );
+		glDepthMask( GL_TRUE );
+		glEnable( GL_DEPTH_TEST );
+	}
+
 	if ( scene->hasOption(Scene::ShowAxes) ) {
 		// Resize viewport to small corner of screen
 		int axesSize = int( std::min< double >( 0.1 * pixelWidth, 125.0 * devicePixelRatioF() ) + 0.5 );
@@ -1458,6 +1476,22 @@ void GLView::setSoloBlock( int blockNumber )
 float GLView::gizmoSnapStep = 1.0f;
 float GLView::gizmoRotSnapDeg = 5.0f;
 float GLView::gizmoSizeMul = 1.75f;
+
+void GLView::freeCameraLook( float dPitch, float dYaw )
+{
+	// eye_world = -Pos + R^-1 * (0,0,2*Dist); keep it fixed while rotating so
+	// the camera looks around its own position instead of orbiting the scene
+	Matrix R;
+	R.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	Rot[0] += dPitch;
+	Rot[2] += dYaw;
+	Rot[0] = std::min( std::max( Rot[0], -179.9f ), 179.9f );
+	Matrix R2;
+	R2.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	Vector3 d( 0.0f, 0.0f, 2.0f * float( Dist ) );
+	Pos += R2.inverted() * d - R.inverted() * d;
+	update();
+}
 
 Transform GLView::viewTransform() const
 {
@@ -3929,7 +3963,9 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			|| event->key() == Qt::Key_Escape ) {
 			freeCamera = false;
 			kbdState = 0;
+			unsetCursor();
 			emit gizmoStatus( QString() );
+			update();
 			return;
 		}
 		int fk = convertKeyCode( event->key() );
@@ -4038,8 +4074,11 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
 		freeCamera = true;
 		kbdState = 0;
-		lastPos = mapFromGlobal( QCursor::pos() );	// avoid a look jump on the first move
+		setCursor( Qt::BlankCursor );	// FPS-style: hide cursor, show a crosshair
+		QCursor::setPos( mapToGlobal( QPoint( width() / 2, height() / 2 ) ) );
+		lastPos = QPointF( width() * 0.5, height() * 0.5 );
 		emit gizmoStatus( tr( "Free camera: move the mouse to look, WASD to fly, Q/E down/up, hold Shift to speed up (Shift+F or Esc to exit)" ) );
+		update();
 		return;
 	}
 
@@ -4117,14 +4156,17 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 		return;
 	}
 
-	// free camera: moving the mouse looks around (no button needed)
+	// free camera: mouse looks around the eye (first person), cursor recentres
 	if ( freeCamera ) {
+		QPointF c( width() * 0.5, height() * 0.5 );
 		auto p = getQMouseEventPosition( event );
-		float ldx = p.x() - lastPos.x();
-		float ldy = p.y() - lastPos.y();
-		mouseRot += Vector3( ldy * 0.5f, 0.0f, ldx * 0.5f );
-		lastPos = p;
-		update();
+		float ldx = float( p.x() - c.x() );
+		float ldy = float( p.y() - c.y() );
+		if ( ldx != 0.0f || ldy != 0.0f ) {
+			freeCameraLook( ldy * 0.2f, ldx * 0.2f );
+			QCursor::setPos( mapToGlobal( QPoint( int( c.x() ), int( c.y() ) ) ) );
+			update();
+		}
 		return;
 	}
 
@@ -4179,6 +4221,7 @@ void GLView::mousePressEvent( QMouseEvent * event )
 	if ( freeCamera ) {
 		freeCamera = false;
 		kbdState = 0;
+		unsetCursor();
 		emit gizmoStatus( QString() );
 		lastPos = getQMouseEventPosition( event );
 		return;

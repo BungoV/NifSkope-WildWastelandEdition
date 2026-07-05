@@ -365,6 +365,8 @@ public:
 
 	// Blender-like free camera: keyboard movement only while enabled (Shift+F)
 	bool freeCamera = false;
+	//! First-person look that pivots at the camera eye (free camera mouse-look)
+	void freeCameraLook( float dPitch, float dYaw );
 
 	// Blender-like edit mode: vertex/edge/face editing on the selected mesh
 	bool editMode = false;
