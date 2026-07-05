@@ -317,6 +317,10 @@ private:
 	//! Disconnect and reconnect the models to the views
 	void swapModels();
 
+	//! (Re)connect the block-list multi-selection handler. Must be re-run
+	//! whenever list->setModel() replaces the view's selection model.
+	void wireBlockListSelection();
+
 	QMenu * lightingWidget();
 	QWidget * filePathWidget( QWidget * );
 

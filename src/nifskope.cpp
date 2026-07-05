@@ -263,32 +263,7 @@ NifSkope::NifSkope()
 	// #FF602A), which the delegate prefers over the selection highlight.
 	list->setSelectionMode( QAbstractItemView::ExtendedSelection );
 	list->setSelectionBehavior( QAbstractItemView::SelectRows );
-	connect( list->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-		[this]( const QItemSelection &, const QItemSelection & ) {
-		if ( !nif || !ogl || ogl->editMode )
-			return;
-		auto toAV = [this]( QModelIndex idx ) {
-			if ( idx.model() == proxy )
-				idx = proxy->mapTo( idx );
-			int b = nif->getBlockNumber( idx );
-			while ( b >= 0 && !nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" ) )
-				b = nif->getParent( b );
-			return b;
-		};
-		QSet<int> sel;
-		// use selectedIndexes() (column 0) so it works regardless of the view's
-		// selection behaviour; selectedRows() can come back empty
-		for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
-			if ( pidx.column() != 0 )
-				continue;
-			int b = toAV( pidx );
-			if ( b >= 0 )
-				sel.insert( b );
-		}
-		if ( sel.isEmpty() )
-			return;	// don't wipe a selection that came from the viewport
-		ogl->setObjectSelection( sel, toAV( list->selectionModel()->currentIndex() ) );
-	} );
+	wireBlockListSelection();
 
 	// Block Details
 	tree = ui->tree;
@@ -428,6 +403,41 @@ NifSkope::~NifSkope()
 		delete currentArchive;
 }
 
+void NifSkope::wireBlockListSelection()
+{
+	// Block-list multi-selection (Blender-style): Shift/Ctrl-click several blocks.
+	// Row colours come from NifModel BackgroundRole (active #FFA040 / secondary
+	// #FF602A). This must be re-run after every list->setModel() because
+	// QAbstractItemView creates a fresh QItemSelectionModel on setModel(),
+	// which silently drops this connection.
+	connect( list->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+		[this]( const QItemSelection &, const QItemSelection & ) {
+		if ( !nif || !ogl || ogl->editMode )
+			return;
+		auto toAV = [this]( QModelIndex idx ) {
+			if ( idx.model() == proxy )
+				idx = proxy->mapTo( idx );
+			int b = nif->getBlockNumber( idx );
+			while ( b >= 0 && !nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" ) )
+				b = nif->getParent( b );
+			return b;
+		};
+		QSet<int> sel;
+		// use selectedIndexes() (column 0) so it works regardless of the view's
+		// selection behaviour; selectedRows() can come back empty
+		for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+			if ( pidx.column() != 0 )
+				continue;
+			int b = toAV( pidx );
+			if ( b >= 0 )
+				sel.insert( b );
+		}
+		if ( sel.isEmpty() )
+			return;	// don't wipe a selection that came from the viewport
+		ogl->setObjectSelection( sel, toAV( list->selectionModel()->currentIndex() ) );
+	} );
+}
+
 void NifSkope::swapModels()
 {
 	// Swap out the models with empty versions while loading the file
@@ -443,6 +453,8 @@ void NifSkope::swapModels()
 		header->setModel( nif );
 		kfmtree->setModel( kfm );
 	}
+	// setModel() on the block list created a new selection model; re-wire.
+	wireBlockListSelection();
 }
 
 void NifSkope::updateSettings()
