@@ -262,6 +262,7 @@ NifSkope::NifSkope()
 	// Row colours come from NifModel BackgroundRole (active #FFA040 / secondary
 	// #FF602A), which the delegate prefers over the selection highlight.
 	list->setSelectionMode( QAbstractItemView::ExtendedSelection );
+	list->setSelectionBehavior( QAbstractItemView::SelectRows );
 	connect( list->selectionModel(), &QItemSelectionModel::selectionChanged, this,
 		[this]( const QItemSelection &, const QItemSelection & ) {
 		if ( !nif || !ogl || ogl->editMode )
@@ -275,11 +276,17 @@ NifSkope::NifSkope()
 			return b;
 		};
 		QSet<int> sel;
-		for ( const QModelIndex & pidx : list->selectionModel()->selectedRows() ) {
+		// use selectedIndexes() (column 0) so it works regardless of the view's
+		// selection behaviour; selectedRows() can come back empty
+		for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+			if ( pidx.column() != 0 )
+				continue;
 			int b = toAV( pidx );
 			if ( b >= 0 )
 				sel.insert( b );
 		}
+		if ( sel.isEmpty() )
+			return;	// don't wipe a selection that came from the viewport
 		ogl->setObjectSelection( sel, toAV( list->selectionModel()->currentIndex() ) );
 	} );
 

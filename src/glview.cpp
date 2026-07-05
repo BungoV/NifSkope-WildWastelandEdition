@@ -2992,8 +2992,15 @@ void GLView::syncObjectSelection( int avBlock )
 	// multi-select click), keep the existing multi-selection intact.
 	if ( editMode )
 		return;
-	if ( avBlock >= 0 && avBlock == objActive && objSelection.contains( avBlock ) )
+	// already part of the multi-selection: just make it active, keep the set
+	if ( avBlock >= 0 && objSelection.contains( avBlock ) ) {
+		if ( objActive != avBlock ) {
+			objActive = avBlock;
+			emit objectSelectionChanged();
+			update();
+		}
 		return;
+	}
 	objSelection.clear();
 	if ( avBlock >= 0 ) {
 		objSelection.insert( avBlock );
