@@ -2305,8 +2305,13 @@ void GLView::movePickedVertsToCursor()
 			for ( int vi : it.value() ) {
 				if ( iVData.isValid() && vi < model->rowCount( iVData ) ) {
 					QModelIndex iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
-					if ( iv.isValid() )
-						model->set<Vector3>( iv, local );
+					if ( iv.isValid() ) {
+						const NifItem * item = static_cast<const NifItem *>( iv.internalPointer() );
+						if ( item && item->hasValueType( NifValue::tHalfVector3 ) )
+							model->set<HalfVector3>( iv, HalfVector3( local ) );
+						else
+							model->set<Vector3>( iv, local );
+					}
 				} else if ( iVerts.isValid() && vi < model->rowCount( iVerts ) ) {
 					model->set<Vector3>( model->getIndex( iVerts, vi ), local );
 				}
@@ -2345,8 +2350,14 @@ static void tlSetVertexLocal( NifModel * model, const QModelIndex & iShape, int 
 	QModelIndex iVData = model->getIndex( iShape, "Vertex Data" );
 	if ( iVData.isValid() && vi >= 0 && vi < model->rowCount( iVData ) ) {
 		QModelIndex iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
-		if ( iv.isValid() )
-			model->set<Vector3>( iv, local );
+		if ( iv.isValid() ) {
+			// FO4 stores vertices as half-precision; set<Vector3> would be rejected
+			const NifItem * item = static_cast<const NifItem *>( iv.internalPointer() );
+			if ( item && item->hasValueType( NifValue::tHalfVector3 ) )
+				model->set<HalfVector3>( iv, HalfVector3( local ) );
+			else
+				model->set<Vector3>( iv, local );
+		}
 		return;
 	}
 	QModelIndex iVerts = model->getIndex( model->getBlockIndex( model->getLink( iShape, "Data" ) ), "Vertices" );

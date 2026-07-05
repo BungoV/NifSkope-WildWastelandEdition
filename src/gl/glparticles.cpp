@@ -34,6 +34,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <cmath>
 
+#include <QRegularExpression>
+
 #include "gl/controllers.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -70,6 +72,11 @@ void Particles::updateImpl( const NifModel * nif, const QModelIndex & index )
 				updateData = true;
 			}
 		}
+
+		// FO4 particle systems link the shader/alpha directly on the block
+		// rather than through the old NiProperty list, so pick them up here
+		iShaderProp = nif->getBlockIndex( nif->getLink( iBlock, "Shader Property" ) );
+		iAlphaProp = nif->getBlockIndex( nif->getLink( iBlock, "Alpha Property" ) );
 	}
 
 	if ( index == iData )
@@ -135,6 +142,15 @@ void Particles::drawShapes( NodeList * secondPass )
 		return;
 	}
 
+	const NifModel * nif = scene->nifModel;
+
+	// FO4 particles are transparent VFX (they carry a shader / alpha property
+	// linked directly): draw them in the second (alpha-blended) pass
+	if ( ( iAlphaProp.isValid() || iShaderProp.isValid() ) && secondPass ) {
+		secondPass->add( this );
+		return;
+	}
+
 	AlphaProperty * aprop = findProperty<AlphaProperty>();
 
 	if ( aprop && aprop->hasAlphaBlend() && secondPass ) {
@@ -158,31 +174,55 @@ void Particles::drawShapes( NodeList * secondPass )
 		float	s2 = size * worldTrans().scale;
 		prog->uni2f( "particleScale", s2, s2 );
 
+		// find the effect shader's source texture (FO4 links it directly)
+		QString	srcTex;
+		if ( iShaderProp.isValid() ) {
+			if ( nif->blockInherits( iShaderProp, "BSEffectShaderProperty" ) ) {
+				srcTex = nif->get<QString>( iShaderProp, "Source Texture" );
+			} else {
+				QModelIndex iTexSet = nif->getBlockIndex( nif->getLink( iShaderProp, "Texture Set" ), "BSShaderTextureSet" );
+				QModelIndex iTextures = nif->getIndex( iTexSet, "Textures" );
+				if ( iTextures.isValid() && nif->rowCount( iTextures ) > 0 )
+					srcTex = nif->get<QString>( nif->getIndex( iTextures, 0 ) );
+			}
+		}
+
 		// atlas sheets (e.g. T_..._4x4.dds) pack many frames: show a single cell
 		// instead of squashing the whole sheet onto every sprite
 		FloatVector4	puv( 0.0f, 0.0f, 1.0f, 1.0f );
+		int	grid = 0;
 		if ( iData.isValid() && scene->nifModel->getIndex( iData, "Num Subtexture Offsets" ).isValid() ) {
 			int nSub = scene->nifModel->get<int>( iData, "Num Subtexture Offsets" );
-			if ( nSub >= 4 ) {
-				int g = int( std::lround( std::sqrt( double( nSub ) ) ) );
-				if ( g >= 2 ) {
-					float sc = 1.0f / float( g );
-					puv = FloatVector4( 0.0f, 0.0f, sc, sc );
-				}
-			}
+			if ( nSub >= 4 )
+				grid = int( std::lround( std::sqrt( double( nSub ) ) ) );
+		}
+		if ( grid < 2 ) {
+			// fall back to an NxN hint in the texture file name (e.g. _4x4)
+			QRegularExpressionMatch mm = QRegularExpression( "(\\d+)x(\\d+)" ).match( srcTex );
+			if ( mm.hasMatch() )
+				grid = mm.captured( 1 ).toInt();
+		}
+		if ( grid >= 2 ) {
+			float sc = 1.0f / float( grid );
+			puv = FloatVector4( 0.0f, 0.0f, sc, sc );
 		}
 		prog->uni4f( "particleUV", puv );
 
-		// setup blending
-
+		// setup blending: honour the linked NiAlphaProperty (FO4 electricity is
+		// additive: SRC_ALPHA, ONE), else fall back to additive
 		AlphaProperty::glProperty( aprop, prog );
-		// FO4 effect particles usually rely on the effect shader's blend rather
-		// than a NiAlphaProperty; fall back to standard alpha blending so the
-		// sprites are not drawn opaque
 		if ( !( aprop && aprop->hasAlphaBlend() ) ) {
+			static const GLenum blendMap[16] = {
+				GL_ONE, GL_ZERO, GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR, GL_DST_COLOR,
+				GL_ONE_MINUS_DST_COLOR, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA,
+				GL_ONE_MINUS_DST_ALPHA, GL_SRC_ALPHA_SATURATE, GL_ONE, GL_ONE, GL_ONE, GL_ONE, GL_ONE };
 			glEnable( GL_BLEND );
-			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 			glDisable( GL_ALPHA_TEST );
+			int flags = iAlphaProp.isValid() ? nif->get<int>( iAlphaProp, "Flags" ) : 0;
+			if ( iAlphaProp.isValid() && ( flags & 1 ) )
+				glBlendFunc( blendMap[( flags >> 1 ) & 0xf], blendMap[( flags >> 5 ) & 0xf] );
+			else
+				glBlendFunc( GL_SRC_ALPHA, GL_ONE );
 		}
 
 		// setup vertex colors
@@ -206,17 +246,35 @@ void Particles::drawShapes( NodeList * secondPass )
 		if ( auto p = findProperty<TexturingProperty>(); p )
 			stage += int( p->bind( 0, 0, prog ) );
 
-		if ( auto p = findProperty<BSShaderLightingProperty>(); p ) {
-			if ( p->bind( 0 ) ) {
+		bool	texBound = false;
+		if ( !srcTex.isEmpty() ) {
+			// bind the effect-shader source texture directly to the sprite unit
+			scene->textures->activateTextureUnit( stage );
+			if ( scene->textures->bind( srcTex, nif ) ) {
 				prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", stage ), stage );
+				prog->uni2f_l( prog->uniLocation( "textures[%d].uvCenter", 0 ), 0.5f, 0.5f );
+				prog->uni2f_l( prog->uniLocation( "textures[%d].uvScale", 0 ), 1.0f, 1.0f );
+				prog->uni2f_l( prog->uniLocation( "textures[%d].uvOffset", 0 ), 0.0f, 0.0f );
+				prog->uni1f_l( prog->uniLocation( "textures[%d].uvRotation", 0 ), 0.0f );
+				prog->uni1i_l( prog->uniLocation( "textures[%d].coordSet", 0 ), 0 );
+				prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), stage );
 				stage++;
+				texBound = true;
 			}
-			prog->uni2f_l( prog->uniLocation( "textures[%d].uvCenter", 0 ), 0.5f, 0.5f );
-			prog->uni2f_l( prog->uniLocation( "textures[%d].uvScale", 0 ), 1.0f, 1.0f );
-			prog->uni2f_l( prog->uniLocation( "textures[%d].uvOffset", 0 ), 0.0f, 0.0f );
-			prog->uni1f_l( prog->uniLocation( "textures[%d].uvRotation", 0 ), 0.0f );
-			prog->uni1i_l( prog->uniLocation( "textures[%d].coordSet", 0 ), 0 );
-			prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), stage );
+		}
+		if ( !texBound ) {
+			if ( auto p = findProperty<BSShaderLightingProperty>(); p ) {
+				if ( p->bind( 0 ) ) {
+					prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", stage ), stage );
+					stage++;
+				}
+				prog->uni2f_l( prog->uniLocation( "textures[%d].uvCenter", 0 ), 0.5f, 0.5f );
+				prog->uni2f_l( prog->uniLocation( "textures[%d].uvScale", 0 ), 1.0f, 1.0f );
+				prog->uni2f_l( prog->uniLocation( "textures[%d].uvOffset", 0 ), 0.0f, 0.0f );
+				prog->uni1f_l( prog->uniLocation( "textures[%d].uvRotation", 0 ), 0.0f );
+				prog->uni1i_l( prog->uniLocation( "textures[%d].coordSet", 0 ), 0 );
+				prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), stage );
+			}
 		}
 
 		if ( !stage ) {

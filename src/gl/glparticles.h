@@ -63,6 +63,8 @@ protected:
 	void updateImpl( const NifModel * nif, const QModelIndex & index ) override;
 
 	QPersistentModelIndex iData;
+	QPersistentModelIndex iShaderProp;   //!< FO4 BSEffectShaderProperty (direct link)
+	QPersistentModelIndex iAlphaProp;    //!< FO4 NiAlphaProperty (direct link)
 	bool updateData = false;
 
 	QVector<Vector3> verts;
