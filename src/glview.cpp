@@ -2632,6 +2632,118 @@ void GLView::deletePickedElements()
 	modelChanged();
 }
 
+bool GLView::isEditableMesh( const QModelIndex & iBlock ) const
+{
+	if ( !model || !iBlock.isValid() )
+		return false;
+	if ( model->blockInherits( iBlock, "NiParticleSystem" ) )
+		return false;	// particle geometry is generated, not hand-editable
+	return model->blockInherits( iBlock, "BSTriShape" )
+	       || model->blockInherits( iBlock, "NiTriBasedGeom" )
+	       || model->blockInherits( iBlock, "BSGeometry" );
+}
+
+void GLView::setEditMode( bool on )
+{
+	if ( on == editMode )
+		return;
+
+	if ( on ) {
+		// walk up to the nearest editable mesh of the current selection
+		int b = model ? model->getBlockNumber( QModelIndex( scene->currentBlock ) ) : -1;
+		while ( b >= 0 && !isEditableMesh( model->getBlockIndex( b ) ) )
+			b = model->getParent( b );
+		if ( b < 0 ) {
+			emit gizmoStatus( tr( "Edit Mode needs a mesh selected (BSTriShape / NiTriShape)" ) );
+			return;
+		}
+		editMode = true;
+		editShapeBlock = b;
+		pickMode = 1;	// start in vertex select, like Blender
+		emit gizmoStatus( tr( "Edit Mode: 1/2/3 = vertex/edge/face, G/R/S move, X delete, Shift+S snap, Tab exits" ) );
+	} else {
+		editMode = false;
+		editShapeBlock = -1;
+		pickMode = 0;
+		pickedElems.clear();
+		if ( elemTransform )
+			gizmoEndElement( false );
+		emit gizmoStatus( QString() );
+	}
+
+	emit editModeChanged( editMode );
+	update();
+}
+
+void GLView::snapSelectionToGrid()
+{
+	if ( !model || pickedElems.isEmpty() )
+		return;
+	QHash<int, QSet<int>> byShape = pickedVertexRefs();
+	if ( byShape.isEmpty() )
+		return;
+	float step = std::max( gizmoSnapStep, 0.0001f );
+
+	nifSnapshotOp( model, tr( "Snap selection to grid" ), [&]() {
+		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
+			QModelIndex iShape = model->getBlockIndex( it.key() );
+			Node * n = scene->getNode( model, iShape );
+			if ( !n )
+				continue;
+			Transform wt = shapeRenderTrans( n );
+			float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+			for ( int vi : it.value() ) {
+				Vector3 local;
+				if ( !tlGetVertexLocal( model, iShape, vi, local ) )
+					continue;
+				Vector3 world = wt * local;
+				for ( int c = 0; c < 3; c++ )
+					world[c] = std::round( world[c] / step ) * step;
+				Vector3 nl = wt.rotation.inverted() * ( ( world - wt.translation ) * ( 1.0f / sc ) );
+				tlSetVertexLocal( model, iShape, vi, nl );
+			}
+		}
+	} );
+	modelChanged();
+}
+
+void GLView::showSnapMenu()
+{
+	QMenu m;
+	m.addSection( tr( "Snap" ) );
+	QAction * aSelGrid = m.addAction( tr( "Selection to Grid" ) );
+	QAction * aSelCur  = m.addAction( tr( "Selection to Cursor" ) );
+	m.addSeparator();
+	QAction * aCurSel  = m.addAction( tr( "Cursor to Selected" ) );
+	QAction * aCurOrig = m.addAction( tr( "Cursor to World Origin" ) );
+	QAction * aCurGrid = m.addAction( tr( "Cursor to Grid" ) );
+
+	bool hasSel = !pickedElems.isEmpty();
+	aSelGrid->setEnabled( hasSel );
+	aSelCur->setEnabled( hasSel );
+	aCurSel->setEnabled( hasSel );
+
+	QAction * r = m.exec( QCursor::pos() );
+	if ( !r )
+		return;
+	if ( r == aSelGrid ) {
+		snapSelectionToGrid();
+	} else if ( r == aSelCur ) {
+		movePickedVertsToCursor();
+	} else if ( r == aCurSel ) {
+		cursorPos = pickedMedian();
+		update();
+	} else if ( r == aCurOrig ) {
+		cursorPos = Vector3();
+		update();
+	} else if ( r == aCurGrid ) {
+		float step = std::max( gizmoSnapStep, 0.0001f );
+		for ( int c = 0; c < 3; c++ )
+			cursorPos[c] = std::round( cursorPos[c] / step ) * step;
+		update();
+	}
+}
+
 QModelIndex parent( QModelIndex ix, QModelIndex xi )
 {
 	ix = ix.sibling( ix.row(), 0 );
@@ -2812,6 +2924,9 @@ void GLView::advanceGears()
 	// Fix movement speed for Starfield scale
 	dT *= scale();
 	float	moveStep = cfg.moveSpd * dT;
+	// Blender fly mode: hold Shift to move faster
+	if ( freeCamera && kbd( Key_Shift ) )
+		moveStep *= 4.0f;
 
 	// TODO: Some kind of input class for choosing the appropriate
 	// keys based on user preferences of what app they would like to
@@ -3385,7 +3500,35 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		}
 	}
 
+	// Free camera (Blender fly): only WASD/Q/E + Shift move; everything else is
+	// locked out until you exit with Shift+F / Esc
+	if ( freeCamera ) {
+		if ( ( event->key() == Qt::Key_F && ( event->modifiers() & Qt::ShiftModifier ) )
+			|| event->key() == Qt::Key_Escape ) {
+			freeCamera = false;
+			kbdState = 0;
+			emit gizmoStatus( QString() );
+			return;
+		}
+		int fk = convertKeyCode( event->key() );
+		if ( fk >= 0 )
+			kbdState = kbdState | ( 1ULL << fk );
+		return;
+	}
+
+	// Tab toggles Blender-style Object / Edit mode (needs a mesh selected)
+	if ( event->key() == Qt::Key_Tab && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		setEditMode( !editMode );
+		return;
+	}
+
 	if ( view != ViewWalk && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		// Shift+S: snap pie (edit mode) - must beat the plain S scale shortcut
+		if ( event->key() == Qt::Key_S && ( event->modifiers() & Qt::ShiftModifier ) && editMode ) {
+			showSnapMenu();
+			return;
+		}
+
 		int m = 0;
 		if ( event->key() == Qt::Key_G )
 			m = 1;
@@ -3396,7 +3539,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 
 		if ( m ) {
 			// with picked elements, G/R/S transforms them; otherwise the node
-			if ( !pickedElems.isEmpty() && gizmoBeginElement( m ) )
+			if ( editMode && !pickedElems.isEmpty() && gizmoBeginElement( m ) )
 				return;
 			if ( gizmoBegin( m ) )
 				return;
@@ -3408,7 +3551,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			return;
 		}
 
-		// element pick modes (Blender: 1/2/3) and the 3D cursor
+		// element pick modes (Blender: 1/2/3) - only in edit mode
 		int pm = 0;
 		if ( event->key() == Qt::Key_1 )
 			pm = 1;
@@ -3416,13 +3559,12 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			pm = 2;
 		else if ( event->key() == Qt::Key_3 )
 			pm = 3;
-		if ( pm ) {
-			pickMode = ( pickMode == pm ) ? 0 : pm;
+		if ( pm && editMode ) {
+			pickMode = pm;	// stay in element mode; Tab exits
+			pickedElems.clear();
 			static const char * pmNames[4] = { "", "vertex", "edge", "face" };
-			emit gizmoStatus( pickMode
-				? tr( "Element select: %1  (click = pick, Shift+click = add/remove, Esc = clear, C = cursor to mouse, Shift+C = cursor to picked)" )
-					.arg( QLatin1String( pmNames[pickMode] ) )
-				: QString() );
+			emit gizmoStatus( tr( "Edit Mode - %1 select  (click = pick, Shift+click = add, G/R/S move, X delete, Shift+S snap)" )
+				.arg( QLatin1String( pmNames[pickMode] ) ) );
 			update();
 			return;
 		}
@@ -3441,14 +3583,13 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		}
 	}
 
-	// Blender-like free camera toggle (frontal light moved to Ctrl+Shift+F)
+	// Blender-like free camera toggle (only reached when entering; the lockout
+	// block above handles exiting). Frontal light is now Ctrl+Shift+F.
 	if ( event->key() == Qt::Key_F && ( event->modifiers() & Qt::ShiftModifier )
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
-		freeCamera = !freeCamera;
+		freeCamera = true;
 		kbdState = 0;
-		emit gizmoStatus( freeCamera
-			? tr( "Free camera ON: WASD move, Q/E down/up, arrow keys rotate, PgUp/PgDn zoom (Shift+F to exit)" )
-			: tr( "Free camera off" ) );
+		emit gizmoStatus( tr( "Free camera: move the mouse to look, WASD to fly, Q/E down/up, hold Shift to speed up (Shift+F or Esc to exit)" ) );
 		return;
 	}
 
@@ -3526,6 +3667,17 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 		return;
 	}
 
+	// free camera: moving the mouse looks around (no button needed)
+	if ( freeCamera ) {
+		auto p = getQMouseEventPosition( event );
+		float ldx = p.x() - lastPos.x();
+		float ldy = p.y() - lastPos.y();
+		mouseRot += Vector3( ldy * 0.5f, 0.0f, ldx * 0.5f );
+		lastPos = p;
+		update();
+		return;
+	}
+
 	// hover highlighting of the gizmo handles
 	if ( gizmoHandlesOn && !mouseButtonState && model ) {
 		int h = gizmoHandleHitTest( getQMouseEventPosition( event ) );
@@ -3569,6 +3721,23 @@ void GLView::mousePressEvent( QMouseEvent * event )
 {
 	if ( gizmoMode ) {
 		gizmoEnd( event->button() == Qt::LeftButton );
+		gizmoSwallowClick = true;
+		return;
+	}
+
+	// clicking exits free camera (Blender walk-mode confirm/cancel)
+	if ( freeCamera ) {
+		freeCamera = false;
+		kbdState = 0;
+		emit gizmoStatus( QString() );
+		lastPos = getQMouseEventPosition( event );
+		return;
+	}
+
+	// edit mode: right-click drops the 3D cursor on the surface (Blender style)
+	if ( editMode && event->button() == Qt::RightButton
+		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		placeCursor( getQMouseEventPosition( event ) );
 		gizmoSwallowClick = true;
 		return;
 	}

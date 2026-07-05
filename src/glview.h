@@ -186,6 +186,8 @@ signals:
 	void transformGesture( int mode, int axis, const Vector3 & param );
 	//! A gizmo transform was committed on this block (for auto-keying)
 	void transformCommitted( int blockNumber );
+	//! Object/Edit mode changed (for the toolbar mode selector)
+	void editModeChanged( bool editing );
 	void viewpointChanged();
 	void frontalLightChanged( bool isFrontal );
 
@@ -360,6 +362,18 @@ public:
 
 	// Blender-like free camera: keyboard movement only while enabled (Shift+F)
 	bool freeCamera = false;
+
+	// Blender-like edit mode: vertex/edge/face editing on the selected mesh
+	bool editMode = false;
+	int editShapeBlock = -1;
+	//! Enter/leave edit mode (only enters on an editable mesh, not particles)
+	void setEditMode( bool on );
+	//! Is this block a mesh whose vertices we can edit (excludes particle systems)?
+	bool isEditableMesh( const QModelIndex & iBlock ) const;
+	//! Blender Shift+S snap pie: cursor/selection snapping
+	void showSnapMenu();
+	//! Snap picked vertices to the grid (Selection to Grid)
+	void snapSelectionToGrid();
 
 	// ---- snapping ----
 	int snapTargetMode = 0;             // 0 grid step, 1 vertex, 2 edge, 3 face

@@ -727,6 +727,23 @@ void NifSkope::initDockWidgets()
 	ui->tFile->removeAction( ui->aOpenMenu );
 	ui->tFile->removeAction( ui->aSaveMenu );
 
+	// Object / Edit mode selector replaces the two select-mode buttons
+	{
+		QComboBox * cbMode = new QComboBox( this );
+		cbMode->addItems( { tr( "Object Mode" ), tr( "Edit Mode" ) } );
+		cbMode->setToolTip( tr( "Object / Edit mode (Tab). Edit mode enables vertex/edge/face editing on the selected mesh." ) );
+		connect( cbMode, qOverload<int>( &QComboBox::activated ), [this]( int i ) {
+			ogl->setEditMode( i == 1 );
+		} );
+		connect( ogl, &GLView::editModeChanged, [cbMode]( bool editing ) {
+			QSignalBlocker sb( cbMode );
+			cbMode->setCurrentIndex( editing ? 1 : 0 );
+		} );
+		ui->tRender->insertWidget( ui->aSelectObject, cbMode );
+		ui->tRender->removeAction( ui->aSelectObject );
+		ui->tRender->removeAction( ui->aSelectVertex );
+	}
+
 	// view directions collapse into one dropdown button
 	{
 		QToolButton * btn = new QToolButton( this );
@@ -1798,6 +1815,9 @@ void NifSkope::contextMenu( const QPoint & pos )
 		idx = header->indexAt( pos );
 		p = header->mapToGlobal( pos );
 	} else if ( sender() == graphicsView ) {
+		// in edit mode right-click drops the 3D cursor instead of the menu
+		if ( ogl->editMode )
+			return;
 		idx = ogl->indexAt( pos, ogl->contextMenuShiftModifier );
 		p = graphicsView->mapToGlobal( pos );
 	} else {
