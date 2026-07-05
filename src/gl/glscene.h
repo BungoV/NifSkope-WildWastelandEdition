@@ -249,6 +249,9 @@ public:
 	bool editMode = false;
 	//! Edit mode: render this block's geometry in its rest pose (no animation)
 	int restPoseBlock = -1;
+	//! Object-mode selection: GLView draws an outline, so the built-in block
+	//! selection wireframe is suppressed while a block-level selection exists
+	bool objSelActive = false;
 
 	TexCache * textures;
 

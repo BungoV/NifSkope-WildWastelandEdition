@@ -490,6 +490,9 @@ void Scene::drawSelection() const
 	if ( editMode )
 		return; // GLView draws its own vertex/edge/face selection overlay
 
+	if ( objSelActive )
+		return; // object-mode selection shows a GLView outline instead
+
 	for ( Node * node : nodes.list() ) {
 		node->drawSelection();
 	}
