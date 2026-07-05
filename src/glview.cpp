@@ -765,11 +765,9 @@ void GLView::paintGL()
 		}
 	}
 
-	// object-mode selection outline (Blender-style): active node gets the bright
-	// colour, other selected nodes a darker one. Opaque meshes use an inverted
-	// hull (silhouette); transparent meshes get an edge outline drawn on top.
+	// object-mode selection: draw the selected meshes as a coloured wireframe.
+	// Active (last-selected) = #FFA040, secondary selected = #FF602A.
 	if ( model && !editMode && !objSelection.isEmpty() ) {
-		QVector<Vector3> hull;
 		for ( Shape * s : scene->shapes ) {
 			if ( !s || s->isHidden() || !objSelection.contains( s->id() ) )
 				continue;
@@ -777,60 +775,25 @@ void GLView::paintGL()
 				continue;
 
 			bool active = ( s->id() == objActive );
-			FloatVector4 col = active ? FloatVector4( 1.0f, 0.6f, 0.05f, 1.0f )
-			                          : FloatVector4( 0.8f, 0.32f, 0.0f, 1.0f );
+			if ( active )
+				scene->setGLColor( 1.0f, 160.0f / 255.0f, 64.0f / 255.0f, 1.0f );		// #FFA040
+			else
+				scene->setGLColor( 1.0f, 96.0f / 255.0f, 42.0f / 255.0f, 1.0f );		// #FF602A
 			int nv = s->verts.size();
 
-			// transparent shapes: an inverted hull would read as a solid blob,
-			// so outline the actual geometry edges instead
-			bool transparent = false;
-			{
-				int alp = model->getLink( model->getBlockIndex( s->id() ), "Alpha Property" );
-				if ( alp >= 0 && ( model->get<int>( model->getBlockIndex( alp ), "Flags" ) & 1 ) )
-					transparent = true;
-			}
-
 			scene->loadModelViewMatrix( s->viewTrans() );
-			scene->setGLColor( col );
-
-			if ( transparent ) {
-				glDisable( GL_DEPTH_TEST );
-				glDepthMask( GL_FALSE );
-				scene->setGLLineWidth( Settings::lineWidthAxes * 1.4f );
-				for ( const Triangle & t : s->triangles ) {
-					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
-						continue;
-					scene->drawLine( s->verts[t[0]], s->verts[t[1]] );
-					scene->drawLine( s->verts[t[1]], s->verts[t[2]] );
-					scene->drawLine( s->verts[t[2]], s->verts[t[0]] );
-				}
-				glDepthMask( GL_TRUE );
-				glEnable( GL_DEPTH_TEST );
-				continue;
-			}
-
-			// inverted hull using per-triangle (face) normals, so it works even
-			// on meshes without stored vertex normals
-			float infl = std::max( s->bounds().radius * 0.03f, float( Dist ) * 0.006f );
-			hull.clear();
+			glDisable( GL_DEPTH_TEST );
+			glDepthMask( GL_FALSE );
+			scene->setGLLineWidth( Settings::lineWidthWireframe );
 			for ( const Triangle & t : s->triangles ) {
 				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
 					continue;
-				Vector3 a = s->verts[t[0]], b = s->verts[t[1]], c = s->verts[t[2]];
-				Vector3 fn = Vector3::crossproduct( b - a, c - a );
-				fn.normalize();
-				hull.append( a + fn * infl );
-				hull.append( b + fn * infl );
-				hull.append( c + fn * infl );
+				scene->drawLine( s->verts[t[0]], s->verts[t[1]] );
+				scene->drawLine( s->verts[t[1]], s->verts[t[2]] );
+				scene->drawLine( s->verts[t[2]], s->verts[t[0]] );
 			}
-			if ( hull.isEmpty() )
-				continue;
-
-			glEnable( GL_CULL_FACE );
-			glCullFace( GL_FRONT );	// draw the back faces of the inflated hull => rim
-			scene->drawTriangles( hull.constData(), hull.size(), nullptr, true );
-			glCullFace( GL_BACK );
-			glDisable( GL_CULL_FACE );
+			glDepthMask( GL_TRUE );
+			glEnable( GL_DEPTH_TEST );
 		}
 	}
 

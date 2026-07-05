@@ -258,15 +258,10 @@ NifSkope::NifSkope()
 	list->installEventFilter( this );
 	list->header()->resizeSection( NifModel::NameCol, 250 );
 
-	// Block-list multi-selection (Blender-style): Shift/Ctrl-click several blocks
+	// Block-list multi-selection (Blender-style): Shift/Ctrl-click several blocks.
+	// Row colours come from NifModel BackgroundRole (active #FFA040 / secondary
+	// #FF602A), which the delegate prefers over the selection highlight.
 	list->setSelectionMode( QAbstractItemView::ExtendedSelection );
-	{
-		// orange selection highlight to match the viewport outline
-		QPalette pal = list->palette();
-		pal.setColor( QPalette::Highlight, QColor( 150, 75, 15 ) );
-		pal.setColor( QPalette::HighlightedText, QColor( 255, 255, 255 ) );
-		list->setPalette( pal );
-	}
 	connect( list->selectionModel(), &QItemSelectionModel::selectionChanged, this,
 		[this]( const QItemSelection &, const QItemSelection & ) {
 		if ( !nif || !ogl || ogl->editMode )

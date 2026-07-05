@@ -1555,8 +1555,8 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 				int bn = getBlockNumber( item );
 				if ( bn >= 0 && selHighlight.contains( bn ) )
 					return ( bn == selHighlightActive )
-						? QColor::fromRgb( 200, 110, 20 )    // active (bright orange)
-						: QColor::fromRgb( 120, 60, 15 );    // selected (darker orange)
+						? QColor::fromRgb( 255, 160, 64 )    // active #FFA040
+						: QColor::fromRgb( 255, 96, 42 );    // secondary #FF602A
 			}
 			// "notify" about an invalid index in "Triangles"
 			// TODO: checkbox, "show invalid only"
