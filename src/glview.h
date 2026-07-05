@@ -290,6 +290,21 @@ private:
 	//! 5-7 rotate rings, 8-10 scale boxes
 	int gizmoHandleHitTest( const QPointF & pos ) const;
 
+	// --- Blender-style navigation gizmo (top-right axis-ball widget) ---
+	bool navGizmoDrag = false;          //!< dragging the gizmo to orbit
+	int  navGizmoHover = -1;            //!< axis ball under the mouse (0..5), 6 = ring, -1 none
+	//! Centre / radius / ball radius of the gizmo in logical (device-independent) px.
+	void navGizmoLayout( QPointF & center, float & radius, float & ballRadius ) const;
+	//! Screen position (logical px) and view-space depth of the 6 axis balls
+	//! (0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z).
+	void navGizmoBalls( QPointF pos[6], float depth[6] ) const;
+	//! Axis ball (0..5) under pos, 6 for the orbit ring, or -1.
+	int  navGizmoHitTest( const QPointF & pos ) const;
+	//! Snap the view so the given axis (0..5) points at the camera.
+	void snapToAxis( int axis );
+	//! Draw the navigation gizmo overlay with QPainter.
+	void drawNavGizmo( class QPainter & painter );
+
 public:
 	static float gizmoSnapStep;
 	static float gizmoSizeMul;          // user scale for gizmo handles + 3D cursor

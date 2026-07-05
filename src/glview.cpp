@@ -64,6 +64,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSettings>
@@ -903,34 +904,8 @@ void GLView::paintGL()
 		glEnable( GL_DEPTH_TEST );
 	}
 
-	if ( scene->hasOption(Scene::ShowAxes) ) {
-		// Resize viewport to small corner of screen
-		int axesSize = int( std::min< double >( 0.1 * pixelWidth, 125.0 * devicePixelRatioF() ) + 0.5 );
-		cx->setViewport( 0, 0, axesSize, axesSize );
-
-		// Square frustum
-		auto nr = 1.0;
-		auto fr = 250.0;
-		GLdouble h2 = std::tan( cfg.fov / 360 * M_PI ) * nr;
-		GLdouble w2 = h2;
-		if ( auto prog = scene->useProgram( "lines.prog" ); prog ) {
-			cx->setProjectionMatrix( Matrix4::fromFrustum( -w2, +w2, -h2, +h2, nr, fr ) );
-			cx->setGlobalUniforms();
-		}
-
-		// Zoom out slightly
-		viewTrans.translation = { 0.0f, 0.0f, -150.0f };
-		scene->loadModelViewMatrix( viewTrans );
-
-		// Find direction of axes
-		const auto & vtr = viewTrans.rotation;
-		Vector3 axesDots( vtr( 2, 0 ), vtr( 2, 1 ), vtr( 2, 2 ) );
-
-		scene->drawAxesOverlay( { 0.0f, 0.0f, 0.0f }, 50.0f, axesDots );
-
-		// Restore viewport size
-		cx->setViewport( 0, 0, pixelWidth, pixelHeight );
-	}
+	// The old GL corner axes indicator is replaced by the Blender-style
+	// navigation gizmo drawn with QPainter at the end of paintGL().
 
 	cx->stopProgram();
 	cx->shrinkCache();
@@ -939,6 +914,13 @@ void GLView::paintGL()
 	GLenum err;
 	while ( ( err = glGetError() ) != GL_NO_ERROR )
 		qDebug() << tr( "glview.cpp - GL ERROR (paint): " ) << getGLErrorString( int(err) );
+
+	// Blender-style navigation gizmo overlay (2D, drawn over the GL scene)
+	if ( scene->hasOption( Scene::ShowAxes ) ) {
+		QPainter painter( this );
+		drawNavGizmo( painter );
+		painter.end();
+	}
 
 #if DEBUG_FRAME_TIME
 	glFlush();
@@ -1528,6 +1510,165 @@ void GLView::freeCameraLook( float dPitch, float dYaw )
 	Vector3 d( 0.0f, 0.0f, 2.0f * float( Dist ) );
 	Pos += R2.inverted() * d - R.inverted() * d;
 	update();
+}
+
+/*
+ *  Blender-style navigation gizmo (top-right axis-ball widget)
+ */
+
+void GLView::navGizmoLayout( QPointF & center, float & radius, float & ballRadius ) const
+{
+	radius = 38.0f;
+	ballRadius = 10.0f;
+	center = QPointF( width() - radius - 18.0f, radius + 18.0f );
+}
+
+void GLView::navGizmoBalls( QPointF pos[6], float depth[6] ) const
+{
+	QPointF center;
+	float R, ballR;
+	navGizmoLayout( center, R, ballR );
+
+	Matrix vtr;
+	vtr.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	float d = R - ballR;
+	// world axis k appears in view space at column k of the rotation matrix;
+	// screen y is flipped, view-space z is depth (positive = toward the camera)
+	for ( int k = 0; k < 3; k++ ) {
+		float sx = vtr( 0, k ), sy = vtr( 1, k ), dz = vtr( 2, k );
+		pos[k * 2]     = center + QPointF(  sx * d, -sy * d );  depth[k * 2]     =  dz;  // +axis
+		pos[k * 2 + 1] = center + QPointF( -sx * d,  sy * d );  depth[k * 2 + 1] = -dz;  // -axis
+	}
+}
+
+int GLView::navGizmoHitTest( const QPointF & p ) const
+{
+	QPointF center;
+	float R, ballR;
+	navGizmoLayout( center, R, ballR );
+
+	QPointF pos[6];
+	float depth[6];
+	navGizmoBalls( pos, depth );
+
+	int best = -1;
+	float bestDepth = -1.0e9f;
+	float hitR = ballR + 3.0f;
+	for ( int i = 0; i < 6; i++ ) {
+		QPointF d = p - pos[i];
+		if ( ( d.x() * d.x() + d.y() * d.y() ) <= hitR * hitR && depth[i] > bestDepth ) {
+			best = i;
+			bestDepth = depth[i];
+		}
+	}
+	if ( best >= 0 )
+		return best;
+
+	// inside the surrounding circle -> orbit ring
+	QPointF dc = p - center;
+	if ( ( dc.x() * dc.x() + dc.y() * dc.y() ) <= R * R )
+		return 6;
+	return -1;
+}
+
+void GLView::snapToAxis( int axis )
+{
+	int k = axis / 2;              // 0 = X, 1 = Y, 2 = Z
+	bool neg = ( axis & 1 );
+
+	Vector3 back( 0.0f, 0.0f, 0.0f );
+	back[k] = neg ? -1.0f : 1.0f;  // view "back" axis = the clicked world axis
+	// choose an up vector that is not parallel to the view direction (Z-up world)
+	Vector3 up = ( k == 2 ) ? Vector3( 0.0f, 1.0f, 0.0f ) : Vector3( 0.0f, 0.0f, 1.0f );
+	Vector3 right = Vector3::crossproduct( up, back ); right.normalize();
+	up = Vector3::crossproduct( back, right ); up.normalize();
+
+	Matrix R;
+	R( 0, 0 ) = right[0]; R( 0, 1 ) = right[1]; R( 0, 2 ) = right[2];
+	R( 1, 0 ) = up[0];    R( 1, 1 ) = up[1];    R( 1, 2 ) = up[2];
+	R( 2, 0 ) = back[0];  R( 2, 1 ) = back[1];  R( 2, 2 ) = back[2];
+
+	float x, y, z;
+	R.toEuler( x, y, z );
+	view = ViewUser;
+	setRotation( rad2deg( x ), rad2deg( y ), rad2deg( z ) );
+	updateViewpoint();
+}
+
+void GLView::drawNavGizmo( QPainter & painter )
+{
+	QPointF center;
+	float R, ballR;
+	navGizmoLayout( center, R, ballR );
+
+	QPointF pos[6];
+	float depth[6];
+	navGizmoBalls( pos, depth );
+
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	painter.setRenderHint( QPainter::TextAntialiasing, true );
+
+	// subtle round background when hovered or dragging
+	if ( navGizmoHover >= 0 || navGizmoDrag ) {
+		painter.setPen( Qt::NoPen );
+		painter.setBrush( QColor( 255, 255, 255, 26 ) );
+		painter.drawEllipse( center, R + 3.0f, R + 3.0f );
+	}
+
+	const QColor axisCol[3] = {
+		QColor( 226,  87,  87 ),   // X red
+		QColor( 140, 200,  75 ),   // Y green
+		QColor(  70, 138, 235 )    // Z blue
+	};
+	const char * axisLabel[3] = { "X", "Y", "Z" };
+
+	// draw far balls first so nearer ones overlap them
+	int order[6] = { 0, 1, 2, 3, 4, 5 };
+	std::sort( order, order + 6, [&]( int a, int b ) { return depth[a] < depth[b]; } );
+
+	QFont font = painter.font();
+	font.setPixelSize( int( ballR * 1.35f ) );
+	font.setBold( true );
+	painter.setFont( font );
+
+	for ( int idx = 0; idx < 6; idx++ ) {
+		int i = order[idx];
+		int k = i / 2;
+		bool positive = !( i & 1 );
+		bool hover = ( i == navGizmoHover );
+		// dim balls that point away from the camera
+		float t = ( depth[i] + 1.0f ) * 0.5f;         // 0 (far) .. 1 (near)
+		float alpha = 0.35f + 0.65f * t;
+		QColor col = axisCol[k];
+
+		// line from centre to the positive axis balls (Blender style)
+		if ( positive ) {
+			QColor lc = col; lc.setAlphaF( alpha );
+			QPen pen( lc, 2.2f );
+			pen.setCapStyle( Qt::RoundCap );
+			painter.setPen( pen );
+			painter.drawLine( center, pos[i] );
+		}
+
+		if ( positive || hover ) {
+			QColor fill = col; fill.setAlphaF( positive ? alpha : ( 0.25f + 0.5f * t ) );
+			painter.setBrush( fill );
+			painter.setPen( hover ? QPen( QColor( 255, 255, 255, 230 ), 1.6f ) : Qt::NoPen );
+			painter.drawEllipse( pos[i], ballR, ballR );
+			// axis letter on positive balls
+			if ( positive ) {
+				painter.setPen( QColor( 20, 20, 20, int( 255 * alpha ) ) );
+				painter.drawText( QRectF( pos[i].x() - ballR, pos[i].y() - ballR, ballR * 2, ballR * 2 ),
+				                  Qt::AlignCenter, axisLabel[k] );
+			}
+		} else {
+			// negative axis: hollow ring
+			QColor ring = col; ring.setAlphaF( alpha );
+			painter.setBrush( QColor( 0, 0, 0, int( 90 * alpha ) ) );
+			painter.setPen( QPen( ring, 1.8f ) );
+			painter.drawEllipse( pos[i], ballR, ballR );
+		}
+	}
 }
 
 Transform GLView::viewTransform() const
@@ -4283,6 +4424,26 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 		return;
 	}
 
+	// dragging the navigation gizmo ring orbits the view
+	if ( navGizmoDrag ) {
+		auto newPos = getQMouseEventPosition( event );
+		mouseRot += Vector3( float( newPos.y() - lastPos.y() ) * 0.5f, 0.0f,
+		                     float( newPos.x() - lastPos.x() ) * 0.5f );
+		lastPos = newPos;
+		view = ViewUser;
+		return;
+	}
+
+	// hover highlighting of the navigation gizmo balls
+	if ( !mouseButtonState && scene->hasOption( Scene::ShowAxes ) ) {
+		int h = navGizmoHitTest( getQMouseEventPosition( event ) );
+		int hoverBall = ( h >= 0 && h < 6 ) ? h : -1;
+		if ( hoverBall != navGizmoHover ) {
+			navGizmoHover = hoverBall;
+			update();
+		}
+	}
+
 	// hover highlighting of the gizmo handles
 	if ( gizmoHandlesOn && !mouseButtonState && model ) {
 		int h = gizmoHandleHitTest( getQMouseEventPosition( event ) );
@@ -4341,6 +4502,24 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		return;
 	}
 
+	// Blender-style navigation gizmo: click an axis ball to snap the view,
+	// or click/drag the surrounding ring to orbit.
+	if ( event->button() == Qt::LeftButton && scene->hasOption( Scene::ShowAxes ) ) {
+		int h = navGizmoHitTest( getQMouseEventPosition( event ) );
+		if ( h >= 0 && h < 6 ) {
+			snapToAxis( h );
+			gizmoSwallowClick = true;
+			mouseButtonState |= std::uint32_t( event->button() );
+			return;
+		} else if ( h == 6 ) {
+			navGizmoDrag = true;
+			mouseButtonState |= std::uint32_t( event->button() );
+			lastPos = getQMouseEventPosition( event );
+			pressPos = lastPos;
+			return;
+		}
+	}
+
 	// edit mode: right-click drops the 3D cursor on the surface (Blender style)
 	if ( editMode && event->button() == Qt::RightButton
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
@@ -4393,6 +4572,12 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 void GLView::mouseReleaseEvent( QMouseEvent * event )
 {
+	if ( navGizmoDrag ) {
+		navGizmoDrag = false;
+		mouseButtonState &= ~( std::uint32_t( event->button() ) );
+		return;
+	}
+
 	if ( gizmoHandleDrag ) {
 		gizmoHandleDrag = false;
 		mouseButtonState &= ~( std::uint32_t( event->button() ) );
