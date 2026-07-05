@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMimeData>
 #include <QClipboard>
 #include <QKeyEvent>
+#include <QPainter>
 
 #include <vector>
 
@@ -210,6 +211,13 @@ void NifTreeView::pasteArray()
 
 void NifTreeView::drawBranches( QPainter * painter, const QRect & rect, const QModelIndex & index ) const
 {
+	// Fill the branch/indent gutter with the row's background colour (e.g. the
+	// object-mode selection highlight) so the arrow area isn't left dark while
+	// the rest of the row is coloured.
+	QVariant bg = index.data( Qt::BackgroundRole );
+	if ( bg.canConvert<QColor>() )
+		painter->fillRect( rect, bg.value<QColor>() );
+
 	if ( rootIsDecorated() )
 		QTreeView::drawBranches( painter, rect, index );
 }
