@@ -592,6 +592,9 @@ void NifSkope::initDockWidgets()
 	{
 		QSettings gset;
 		GLView::gizmoSizeMul = gset.value( "GLView/Gizmo Size", 1.75 ).toFloat();
+		GLView::wireWidthMul = gset.value( "GLView/Wire Width", 1.0 ).toFloat();
+		GLView::vertexPointSize = gset.value( "GLView/Vertex Point Size", 5.0 ).toFloat();
+		GLView::selLineWidth = gset.value( "GLView/Select Line Width", 2.0 ).toFloat();
 	}
 	QAction * aGizmoSize = new QAction( tr( "Gizmo && Cursor Size..." ), this );
 	connect( aGizmoSize, &QAction::triggered, [this]() {
@@ -606,6 +609,50 @@ void NifSkope::initDockWidgets()
 		}
 	} );
 	ui->mRender->addAction( aGizmoSize );
+
+	QAction * aWireWidth = new QAction( tr( "Wireframe Thickness..." ), this );
+	connect( aWireWidth, &QAction::triggered, [this]() {
+		bool ok = false;
+		double v = QInputDialog::getDouble( this, tr( "Wireframe thickness" ),
+			tr( "Line width multiplier for wireframes (object selection, overlays, edit mode):" ),
+			GLView::wireWidthMul, 0.25, 8.0, 2, &ok );
+		if ( ok ) {
+			GLView::wireWidthMul = (float)v;
+			QSettings gset;
+			gset.setValue( "GLView/Wire Width", v );
+			ogl->update();
+		}
+	} );
+	ui->mRender->addAction( aWireWidth );
+
+	QAction * aVertSize = new QAction( tr( "Vertex Point Size..." ), this );
+	connect( aVertSize, &QAction::triggered, [this]() {
+		bool ok = false;
+		double v = QInputDialog::getDouble( this, tr( "Vertex point size" ),
+			tr( "Size of edit-mode vertex dots in pixels:" ), GLView::vertexPointSize, 1.0, 16.0, 1, &ok );
+		if ( ok ) {
+			GLView::vertexPointSize = (float)v;
+			QSettings gset;
+			gset.setValue( "GLView/Vertex Point Size", v );
+			ogl->update();
+		}
+	} );
+	ui->mRender->addAction( aVertSize );
+
+	QAction * aSelWidth = new QAction( tr( "Selection Line Thickness..." ), this );
+	connect( aSelWidth, &QAction::triggered, [this]() {
+		bool ok = false;
+		double v = QInputDialog::getDouble( this, tr( "Selection line thickness" ),
+			tr( "Line width in pixels for selected edges / element highlights in edit mode:" ),
+			GLView::selLineWidth, 0.5, 8.0, 1, &ok );
+		if ( ok ) {
+			GLView::selLineWidth = (float)v;
+			QSettings gset;
+			gset.setValue( "GLView/Select Line Width", v );
+			ogl->update();
+		}
+	} );
+	ui->mRender->addAction( aSelWidth );
 
 	QAction * aGizmoHandles = new QAction( tr( "Show Transform Gizmo" ), this );
 	aGizmoHandles->setCheckable( true );

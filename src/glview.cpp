@@ -680,19 +680,21 @@ void GLView::paintGL()
 			scene->setGLLineWidth( Settings::lineWidthAxes * ( gizmoMode ? 1.6f : 1.0f ) );
 			scene->loadModelViewMatrix( viewTrans * nt );
 
-			if ( gizmoMode || !gizmoHandlesOn ) {
-				scene->drawAxes( Vector3(), gs, true );
-			} else {
-				// Blender-style draggable handles: arrows with solid cone tips
-				// (move), rings (rotate), solid boxes (scale), center circle
-				// (view-plane move); modelview is already the gizmo basis at
-				// the pivot. Colours match Blender: X #FF3352, Y #8BDC00, Z #2890FF.
+			if ( gizmoMode || gizmoHandlesOn ) {
+				// Blender-style handles: arrows with solid cone tips (move),
+				// rings (rotate), solid boxes (scale), center circle (view-
+				// plane move); modelview is already the gizmo basis at the
+				// pivot. Colours match Blender: X #FF3352, Y #8BDC00, Z #2890FF.
+				// During a modal G/R/S only the relevant sub-gizmo is drawn,
+				// and only the constrained axis if one is locked in. The top-
+				// bar toggle only hides the combined (idle) gizmo.
 				const float L = gs;
 				const float axR[3][4] = {
 					{ 1.000f, 0.200f, 0.322f, 1.0f },	// X
 					{ 0.545f, 0.863f, 0.000f, 1.0f },	// Y
 					{ 0.157f, 0.565f, 1.000f, 1.0f }	// Z
 				};
+				const float hw = Settings::lineWidthAxes * ( gizmoMode ? 1.5f : 1.1f );
 
 				// solid cone: apex at base+dir*len, 12-segment fan + base disc
 				auto solidCone = [this]( const Vector3 & base, const Vector3 & dir, float radius, float len ) {
@@ -732,31 +734,61 @@ void GLView::paintGL()
 						tris << p[f[0]] << p[f[1]] << p[f[2]];
 					scene->drawTriangles( tris.constData(), size_t( tris.size() ), nullptr, true );
 				};
-
-				for ( int i = 0; i < 3; i++ ) {
+				auto axisColor = [this, &axR]( int i, bool hov ) {
+					if ( hov )
+						scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
+					else
+						scene->setGLColor( axR[i][0], axR[i][1], axR[i][2], axR[i][3] );
+				};
+				auto drawArrow = [&]( int i, bool hov ) {
 					Vector3 u;
 					u[i] = 1.0f;
-					auto axisColor = [this, i, &axR]( bool hov ) {
-						if ( hov )
-							scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
-						else
-							scene->setGLColor( axR[i][0], axR[i][1], axR[i][2], axR[i][3] );
-					};
-					// move arrow: shaft + solid cone tip
-					axisColor( gizmoHover == 1 + i );
-					scene->setGLLineWidth( Settings::lineWidthAxes * 1.1f );
+					axisColor( i, hov );
+					scene->setGLLineWidth( hw );
 					scene->drawLine( u * ( L * 0.2f ), u * ( L * 0.92f ) );
 					solidCone( u * ( L * 0.92f ), u, L * 0.045f, L * 0.18f );
-					// scale box (solid, sits on the shaft)
-					axisColor( gizmoHover == 8 + i );
-					solidBox( u * ( L * 0.62f ), L * 0.045f );
-					// rotation ring
-					axisColor( gizmoHover == 5 + i );
-					scene->setGLLineWidth( Settings::lineWidthAxes * 1.1f );
+				};
+				auto drawRing = [&]( int i, bool hov ) {
+					Vector3 u;
+					u[i] = 1.0f;
+					axisColor( i, hov );
+					scene->setGLLineWidth( hw );
 					scene->drawCircle( Vector3(), u, L * 0.85f, 64 );
-				}
-				// center circle: view-plane move (billboarded to the camera)
-				{
+				};
+				auto drawScaleHandle = [&]( int i, bool hov, bool withShaft ) {
+					Vector3 u;
+					u[i] = 1.0f;
+					axisColor( i, hov );
+					if ( withShaft ) {
+						// modal scale: Blender look, shaft ending in a box
+						scene->setGLLineWidth( hw );
+						scene->drawLine( u * ( L * 0.2f ), u * ( L * 0.85f ) );
+						solidBox( u * ( L * 0.9f ), L * 0.05f );
+					} else {
+						solidBox( u * ( L * 0.62f ), L * 0.045f );
+					}
+				};
+
+				if ( gizmoMode ) {
+					// modal G/R/S: only the relevant sub-gizmo, and only the
+					// locked axis once a constraint is active
+					for ( int i = 0; i < 3; i++ ) {
+						if ( gizmoAxis > 0 && gizmoAxis != 1 + i )
+							continue;
+						if ( gizmoMode == 1 )
+							drawArrow( i, false );
+						else if ( gizmoMode == 2 )
+							drawRing( i, false );
+						else
+							drawScaleHandle( i, false, true );
+					}
+				} else {
+					for ( int i = 0; i < 3; i++ ) {
+						drawArrow( i, gizmoHover == 1 + i );
+						drawScaleHandle( i, gizmoHover == 8 + i, false );
+						drawRing( i, gizmoHover == 5 + i );
+					}
+					// center circle: view-plane move (billboarded to the camera)
 					Matrix vtInv = viewTrans.rotation.inverted();
 					Matrix bInv = basis.inverted();
 					Vector3 camN = bInv * ( vtInv * Vector3( 0.0f, 0.0f, 1.0f ) );
@@ -804,7 +836,7 @@ void GLView::paintGL()
 			glDepthMask( GL_FALSE );
 			scene->loadModelViewMatrix( ws->viewTrans() );
 			scene->setGLColor( scene->wireframeColor );
-			scene->setGLLineWidth( Settings::lineWidthWireframe );
+			scene->setGLLineWidth( Settings::lineWidthWireframe * wireWidthMul );
 			int nv = ws->verts.size();
 			for ( const Triangle & t : ws->triangles ) {
 				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
@@ -828,7 +860,9 @@ void GLView::paintGL()
 				continue;
 
 			bool active = ( s->id() == objActive );
-			if ( active )
+			if ( gizmoMode )
+				scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );	// white while transforming (Blender)
+			else if ( active )
 				scene->setGLColor( 1.0f, 157.0f / 255.0f, 0.0f, 1.0f );		// #FF9D00
 			else
 				scene->setGLColor( 1.0f, 114.0f / 255.0f, 0.0f, 1.0f );		// #FF7200
@@ -837,7 +871,7 @@ void GLView::paintGL()
 			scene->loadModelViewMatrix( s->viewTrans() );
 			glDisable( GL_DEPTH_TEST );
 			glDepthMask( GL_FALSE );
-			scene->setGLLineWidth( Settings::lineWidthWireframe );
+			scene->setGLLineWidth( Settings::lineWidthWireframe * wireWidthMul );
 			for ( const Triangle & t : s->triangles ) {
 				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
 					continue;
@@ -957,7 +991,7 @@ void GLView::paintGL()
 				lineCols << ca << cb;
 			}
 			if ( !lineVerts.isEmpty() ) {
-				scene->setGLLineWidth( 1.0f * dpr );
+				scene->setGLLineWidth( 1.0f * dpr * wireWidthMul );
 				scene->drawLines( lineVerts.constData(), size_t( lineVerts.size() ), lineCols.constData() );
 			}
 
@@ -973,7 +1007,7 @@ void GLView::paintGL()
 					QVector<Vector3> & dst = act ? actLines : selLines;
 					dst << wv[e.first] << wv[e.second];
 				}
-				scene->setGLLineWidth( 1.6f * dpr );
+				scene->setGLLineWidth( selLineWidth * dpr );
 				if ( !selLines.isEmpty() ) {
 					scene->setGLColor( colSel );
 					scene->drawLines( selLines.constData(), size_t( selLines.size() ), nullptr );
@@ -986,7 +1020,7 @@ void GLView::paintGL()
 
 			// vertex dots (vertex mode only): black, selected orange, active white
 			if ( vertMode ) {
-				scene->setGLPointSize( 3.0f * dpr );
+				scene->setGLPointSize( vertexPointSize * dpr );
 				scene->setGLColor( colWire );
 				scene->drawPoints( wv.constData(), size_t( nv ) );
 				if ( !sv.isEmpty() ) {
@@ -1710,6 +1744,9 @@ void GLView::setSoloBlock( int blockNumber )
 float GLView::gizmoSnapStep = 1.0f;
 float GLView::gizmoRotSnapDeg = 5.0f;
 float GLView::gizmoSizeMul = 1.75f;
+float GLView::wireWidthMul = 1.0f;
+float GLView::vertexPointSize = 5.0f;
+float GLView::selLineWidth = 2.0f;
 
 void GLView::freeCameraLook( float dPitch, float dYaw )
 {

@@ -310,6 +310,9 @@ private:
 public:
 	static float gizmoSnapStep;
 	static float gizmoSizeMul;          // user scale for gizmo handles + 3D cursor
+	static float wireWidthMul;          // wireframe thickness multiplier (overlays + edit mode)
+	static float vertexPointSize;       // edit-mode vertex dot size in logical px
+	static float selLineWidth;          // selected edge/element line width in logical px
 	bool gizmoAutoKey = false;
 	bool gizmoHandlesOn = true;         // draw + pick the draggable handles
 	int gizmoOrient = 0;                // 0 Global, 1 Local, 2 Parent, 3 View
