@@ -531,16 +531,15 @@ void NifSkope::select( const QModelIndex & index )
 	if ( timeline && sender() != timeline )
 		timeline->setCurrentIndex( idx );
 
-	// selecting a block from the tree/timeline updates the object-mode selection
-	// (outline + block-list highlight); the block list drives its own multi-
-	// selection via its selectionChanged handler, and viewport clicks handle
-	// this themselves, so both are excluded here.
-	if ( ogl && sender() != ogl && sender() != list && idx.isValid() ) {
+	// selecting a block from the tree/list/timeline updates the object-mode
+	// selection (outline + block-list highlight); viewport clicks handle this
+	// themselves. This is the reliable single-block colouring path (the block
+	// list's own handler additionally captures multi-selection). Wrapped in
+	// updatingObjFromList so the mirror doesn't re-scroll/jump the list.
+	if ( ogl && sender() != ogl && idx.isValid() ) {
 		int av = nif->getBlockNumber( idx );
 		while ( av >= 0 && !nif->blockInherits( nif->getBlockIndex( av ), "NiAVObject" ) )
 			av = nif->getParent( av );
-		// suppress the list mirror: this is a tree/timeline-driven change, and
-		// re-scrolling the block list here would fight the user's navigation.
 		updatingObjFromList = true;
 		ogl->syncObjectSelection( av );
 		updatingObjFromList = false;

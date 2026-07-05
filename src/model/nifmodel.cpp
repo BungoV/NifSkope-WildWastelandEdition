@@ -1224,6 +1224,19 @@ void NifModel::insertType( NifItem * parent, const NifData & data, int at )
 
 QVariant NifModel::data( const QModelIndex & index, int role ) const
 {
+	// object-mode multi-selection highlight for the block list. Must be handled
+	// on the original index, before buddy() redirects the Value column to the
+	// block's Name child (which is not a top item and would lose the highlight).
+	if ( role == Qt::BackgroundRole && !selHighlight.isEmpty() ) {
+		if ( const NifItem * it = getItem( index ); it && isTopItem( it ) ) {
+			int bn = getBlockNumber( it );
+			if ( bn >= 0 && selHighlight.contains( bn ) )
+				return ( bn == selHighlightActive )
+					? QColor::fromRgb( 255, 160, 64 )    // active #FFA040
+					: QColor::fromRgb( 255, 96, 42 );    // secondary #FF602A
+		}
+	}
+
 	QModelIndex _buddy = buddy( index );
 	if ( _buddy != index )
 		return data( _buddy, role );
@@ -1550,14 +1563,6 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 		return QVariant();
 	case Qt::BackgroundRole:
 		{
-			// object-mode multi-selection highlight on top-level block rows
-			if ( isTopItem( item ) && !selHighlight.isEmpty() ) {
-				int bn = getBlockNumber( item );
-				if ( bn >= 0 && selHighlight.contains( bn ) )
-					return ( bn == selHighlightActive )
-						? QColor::fromRgb( 255, 160, 64 )    // active #FFA040
-						: QColor::fromRgb( 255, 96, 42 );    // secondary #FF602A
-			}
 			// "notify" about an invalid index in "Triangles"
 			// TODO: checkbox, "show invalid only"
 			if ( column == ValueCol && item->isTriangle() ) {
