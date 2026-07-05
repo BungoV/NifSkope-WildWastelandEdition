@@ -2,4 +2,4 @@
 
 # never enabled on models by default
 
-shaders particles.vert particles.geom default.frag
+shaders particles.vert particles.geom particles.frag
