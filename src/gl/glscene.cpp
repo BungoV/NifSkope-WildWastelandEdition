@@ -487,6 +487,9 @@ void Scene::drawSelection() const
 	if ( selecting )
 		return; // do not render the selection when selecting
 
+	if ( editMode )
+		return; // GLView draws its own vertex/edge/face selection overlay
+
 	for ( Node * node : nodes.list() ) {
 		node->drawSelection();
 	}

@@ -848,30 +848,27 @@ void NifSkope::initDockWidgets()
 			QToolButton * elemBtns[3] = { bVert, bEdge, bFace };
 			const char * elemIcons[3] = { "vert", "edge", "face" };
 			const char * elemTips[3] = { "Vertex select (1)", "Edge select (2)", "Face select (3)" };
-			QButtonGroup * elemGrp = new QButtonGroup( this );
-			elemGrp->setExclusive( true );
+			// bits: vertex=1, edge=2, face=4 - independently toggleable (Blender-style)
 			for ( int i = 0; i < 3; i++ ) {
 				elemBtns[i]->setIcon( tlMakeIcon( elemIcons[i], icoCol ) );
-				elemBtns[i]->setToolTip( tr( elemTips[i] ) );
+				elemBtns[i]->setToolTip( tr( elemTips[i] ) + tr( "  (Shift+click to combine)" ) );
 				elemBtns[i]->setCheckable( true );
 				elemBtns[i]->setAutoRaise( true );
-				elemGrp->addButton( elemBtns[i], i + 1 );
-				connect( elemBtns[i], &QToolButton::clicked, [this, i]() {
+				int bit = 1 << i;
+				connect( elemBtns[i], &QToolButton::clicked, [this, bit]() {
 					if ( !ogl->editMode )
 						ogl->setEditMode( true );
-					if ( ogl->editMode )
-						ogl->setPickMode( i + 1 );
+					if ( !ogl->editMode )
+						return;
+					bool shift = ( QApplication::keyboardModifiers() & Qt::ShiftModifier );
+					ogl->setPickMode( shift ? ( ogl->pickMode ^ bit ) : bit );
 				} );
 				ui->tRender->addWidget( elemBtns[i] );
 			}
-			connect( ogl, &GLView::pickModeChanged, [elemGrp, elemBtns]( int mode ) {
-				if ( mode >= 1 && mode <= 3 ) {
-					QSignalBlocker sb( elemBtns[mode - 1] );
-					elemBtns[mode - 1]->setChecked( true );
-				} else if ( QAbstractButton * c = elemGrp->checkedButton() ) {
-					elemGrp->setExclusive( false );
-					c->setChecked( false );
-					elemGrp->setExclusive( true );
+			connect( ogl, &GLView::pickModeChanged, [elemBtns]( int mask ) {
+				for ( int i = 0; i < 3; i++ ) {
+					QSignalBlocker sb( elemBtns[i] );
+					elemBtns[i]->setChecked( mask & ( 1 << i ) );
 				}
 			} );
 		}

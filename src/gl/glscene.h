@@ -245,6 +245,11 @@ public:
 	//! Block numbers temporarily hidden in the viewport (H / Alt+H)
 	QSet<int> hiddenNodes;
 
+	//! Edit mode: suppress the built-in block selection highlight (GLView draws its own)
+	bool editMode = false;
+	//! Edit mode: render this block's geometry in its rest pose (no animation)
+	int restPoseBlock = -1;
+
 	TexCache * textures;
 
 	QPersistentModelIndex currentBlock;

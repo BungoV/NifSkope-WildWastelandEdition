@@ -332,8 +332,9 @@ public:
 		float dist = 1.0e30f;           // world-space distance along the ray
 		Vector3 hitLocal;
 	};
-	//! Closest triangle hit under pos; excludeBlock (and its subtree) is skipped
-	SceneRayHit raycastScene( const QPointF & pos, int excludeBlock = -1 ) const;
+	//! Closest triangle hit under pos; excludeBlock (and its subtree) is skipped.
+	//! If onlyShapes is non-null, only shapes whose block is in it are considered.
+	SceneRayHit raycastScene( const QPointF & pos, int excludeBlock = -1, const QSet<int> * onlyShapes = nullptr ) const;
 	//! Render-accurate local->world transform of a node (honours billboard facing,
 	//! unlike worldTrans()), so picking and highlights line up with what is drawn
 	Transform shapeRenderTrans( class Node * n ) const;
@@ -367,7 +368,9 @@ public:
 
 	// Blender-like edit mode: vertex/edge/face editing on the selected mesh
 	bool editMode = false;
-	int editShapeBlock = -1;
+	int editShapeBlock = -1;            //!< primary mesh (pivot/gizmo fallback)
+	QSet<int> editShapeBlocks;          //!< all meshes being edited (multi-mesh)
+	QSet<int> objMeshSel;               //!< object-mode Shift-click mesh accumulation
 	bool wireframeOverlay = false;      //!< draw a wireframe over the active/edit mesh
 	//! Enter/leave edit mode (only enters on an editable mesh, not particles)
 	void setEditMode( bool on );

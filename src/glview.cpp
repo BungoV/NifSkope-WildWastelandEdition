@@ -2121,7 +2121,7 @@ Transform GLView::shapeRenderTrans( Node * n ) const
 	return scene->view.inverted() * n->viewTrans();
 }
 
-GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock ) const
+GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock, const QSet<int> * onlyShapes ) const
 {
 	SceneRayHit hit;
 	if ( !model || !scene )
@@ -2132,6 +2132,9 @@ GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock 
 
 	for ( Shape * s : scene->shapes ) {
 		if ( !s || s->isHidden() || s->verts.isEmpty() || s->triangles.isEmpty() )
+			continue;
+
+		if ( onlyShapes && !onlyShapes->contains( s->id() ) )
 			continue;
 
 		if ( excludeBlock >= 0 ) {
@@ -2181,7 +2184,9 @@ Vector3 GLView::pickedMedian() const
 
 bool GLView::pickElementAt( const QPointF & pos, bool additive )
 {
-	SceneRayHit hit = raycastScene( pos );
+	// in edit mode restrict picks to the mesh(es) being edited
+	const QSet<int> * only = ( editMode && !editShapeBlocks.isEmpty() ) ? &editShapeBlocks : nullptr;
+	SceneRayHit hit = raycastScene( pos, -1, only );
 	PickedElement pe;
 
 	if ( hit.shape ) {
@@ -2191,12 +2196,41 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 		Vector3 va = s->verts.at( tri[0] ), vb = s->verts.at( tri[1] ), vc = s->verts.at( tri[2] );
 
 		pe.shapeBlock = s->id();
-		pe.type = pickMode;
 		pe.wA = wt * va;
 		pe.wB = wt * vb;
 		pe.wC = wt * vc;
 
-		if ( pickMode == 1 ) {
+		// choose the element type among the enabled modes (bitmask) by cursor
+		// proximity, Blender-style: vertex, then edge, then face
+		int mode = 0;
+		{
+			QPointF sa, sb, sc;
+			bool oka = worldToScreen( pe.wA, sa ), okb = worldToScreen( pe.wB, sb ), okc = worldToScreen( pe.wC, sc );
+			float dv = 1.0e9f;
+			if ( oka ) dv = std::min( dv, float( std::hypot( sa.x() - pos.x(), sa.y() - pos.y() ) ) );
+			if ( okb ) dv = std::min( dv, float( std::hypot( sb.x() - pos.x(), sb.y() - pos.y() ) ) );
+			if ( okc ) dv = std::min( dv, float( std::hypot( sc.x() - pos.x(), sc.y() - pos.y() ) ) );
+			float de = 1.0e9f;
+			if ( oka && okb ) de = std::min( de, tlPtSegDist( pos, sa, sb ) );
+			if ( okb && okc ) de = std::min( de, tlPtSegDist( pos, sb, sc ) );
+			if ( okc && oka ) de = std::min( de, tlPtSegDist( pos, sc, sa ) );
+
+			if ( ( pickMode & 1 ) && dv < 11.0f )
+				mode = 1;
+			else if ( ( pickMode & 2 ) && de < 8.0f )
+				mode = 2;
+			else if ( pickMode & 4 )
+				mode = 3;
+			else if ( pickMode & 1 )
+				mode = 1;
+			else if ( pickMode & 2 )
+				mode = 2;
+			else
+				mode = 3;
+		}
+		pe.type = mode;
+
+		if ( mode == 1 ) {
 			// nearest corner of the hit triangle
 			float d0 = ( va - hit.hitLocal ).squaredLength();
 			float d1 = ( vb - hit.hitLocal ).squaredLength();
@@ -2236,11 +2270,13 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 			n.normalize();
 			pe.worldNormal = n;
 		}
-	} else if ( pickMode == 1 ) {
-		// off-surface: nearest vertex by screen distance
+	} else if ( pickMode & 1 ) {
+		// off-surface: nearest vertex by screen distance (restricted in edit mode)
 		float best = 12.0f;
 		for ( Shape * s : scene->shapes ) {
 			if ( !s || s->isHidden() )
+				continue;
+			if ( only && !only->contains( s->id() ) )
 				continue;
 			Transform wt = shapeRenderTrans( s );
 			for ( int i = 0; i < s->verts.size(); i++ ) {
@@ -2786,21 +2822,32 @@ void GLView::setEditMode( bool on )
 			return;
 		}
 		editMode = true;
+		// edit the shift-accumulated meshes if any, otherwise the selected one
+		editShapeBlocks = objMeshSel;
+		editShapeBlocks.insert( b );
 		editShapeBlock = b;
 		pickMode = 1;	// start in vertex select, like Blender
-		emit gizmoStatus( tr( "Edit Mode: 1/2/3 = vertex/edge/face, G/R/S move, X delete, Shift+S snap, Tab exits" ) );
+		scene->editMode = true;
+		scene->restPoseBlock = b;
+		emit gizmoStatus( tr( "Edit Mode (%1 mesh%2): 1/2/3 = vertex/edge/face, G/R/S, X delete, Shift+S snap, Tab exits" )
+			.arg( editShapeBlocks.size() ).arg( editShapeBlocks.size() == 1 ? "" : "es" ) );
 	} else {
 		editMode = false;
 		editShapeBlock = -1;
+		editShapeBlocks.clear();
+		objMeshSel.clear();
 		pickMode = 0;
 		pickedElems.clear();
 		if ( elemTransform )
 			gizmoEndElement( false );
+		scene->editMode = false;
+		scene->restPoseBlock = -1;
 		emit gizmoStatus( QString() );
 	}
 
 	emit editModeChanged( editMode );
 	emit pickModeChanged( pickMode );
+	doCompile = 1;	// rebuild so the rest-pose toggle takes effect
 	update();
 }
 
@@ -2989,9 +3036,7 @@ void GLView::setPickMode( int m )
 {
 	if ( m == pickMode )
 		return;
-	pickMode = m;
-	if ( m )
-		pickedElems.clear();
+	pickMode = m;	// bitmask: 1 vertex, 2 edge, 4 face (may be combined)
 	emit pickModeChanged( pickMode );
 	update();
 }
@@ -3932,16 +3977,18 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		// element pick modes (Blender: 1/2/3) - only in edit mode
 		int pm = 0;
 		if ( event->key() == Qt::Key_1 )
-			pm = 1;
+			pm = 1;	// vertex bit
 		else if ( event->key() == Qt::Key_2 )
-			pm = 2;
+			pm = 2;	// edge bit
 		else if ( event->key() == Qt::Key_3 )
-			pm = 3;
+			pm = 4;	// face bit
 		if ( pm && editMode ) {
-			setPickMode( pm );	// stay in element mode; Tab exits
-			static const char * pmNames[4] = { "", "vertex", "edge", "face" };
-			emit gizmoStatus( tr( "Edit Mode - %1 select  (click = pick, Shift+click = add, G/R/S move, X delete, Shift+S snap)" )
-				.arg( QLatin1String( pmNames[pickMode] ) ) );
+			// Shift extends the enabled modes (multi-mode), plain sets a single one
+			if ( event->modifiers() & Qt::ShiftModifier )
+				setPickMode( pickMode ^ pm );
+			else
+				setPickMode( pm );
+			emit gizmoStatus( tr( "Edit Mode - select  (click = pick, Shift+click = add, G/R/S move, X delete, Shift+S snap)" ) );
 			return;
 		}
 		if ( event->key() == Qt::Key_C ) {
