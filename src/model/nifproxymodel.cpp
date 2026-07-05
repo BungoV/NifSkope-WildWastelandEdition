@@ -453,6 +453,29 @@ QModelIndex NifProxyModel::mapFrom( const QModelIndex & idx, const QModelIndex &
 	return QModelIndex();
 }
 
+QModelIndex NifProxyModel::mapFromPrimary( const QModelIndex & idx ) const
+{
+	const QList<QModelIndex> all = mapFrom( idx );
+	if ( all.isEmpty() )
+		return mapFrom( idx, QModelIndex() );
+
+	QModelIndex fallback;
+	for ( const QModelIndex & p : all ) {
+		if ( p.column() != NifModel::NameCol )
+			continue;
+		if ( !fallback.isValid() )
+			fallback = p;
+		QModelIndex parent = p.parent();
+		if ( parent.isValid() ) {
+			QModelIndex parentSrc = mapTo( parent );
+			if ( parentSrc.isValid() && nif->blockInherits( parentSrc, "NiDefaultAVObjectPalette" ) )
+				continue;	// skip the palette copy
+		}
+		return p;	// natural (or root-level) occurrence
+	}
+	return fallback.isValid() ? fallback : mapFrom( idx, QModelIndex() );
+}
+
 QList<QModelIndex> NifProxyModel::mapFrom( const QModelIndex & idx ) const
 {
 	QList<QModelIndex> indices;

@@ -366,6 +366,10 @@ private:
 	//! block list, so the list's selectionChanged handler doesn't echo back.
 	bool syncingObjToList = false;
 
+	//! Guard: true while the block list is driving the object selection, so the
+	//! objectSelectionChanged mirror doesn't re-drive (and re-scroll) the list.
+	bool updatingObjFromList = false;
+
 	//! This view shows the block list.
 	NifTreeView * list;
 	//! This view shows the block details.

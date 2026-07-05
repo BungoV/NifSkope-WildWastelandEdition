@@ -374,9 +374,10 @@ void NifSkope::initActions()
 
 		// Mirror the object selection into the block list so the coloured rows
 		// are actually visible (and the list tracks viewport clicks the way
-		// Blender's outliner tracks the 3D view). Guard against the list's own
-		// selectionChanged echoing straight back into the viewport selection.
-		if ( ogl->editMode || syncingObjToList )
+		// Blender's outliner tracks the 3D view). Skip when the change already
+		// came from the list (the list is correct, and re-driving it would jump
+		// the current index to the block's palette copy and break Ctrl+click).
+		if ( ogl->editMode || syncingObjToList || updatingObjFromList )
 			return;
 		syncingObjToList = true;
 		QItemSelection selRows;
@@ -385,7 +386,7 @@ void NifSkope::initActions()
 			QModelIndex src = nif->getBlockIndex( b );
 			if ( !src.isValid() )
 				continue;
-			QModelIndex p = proxy->mapFrom( src, QModelIndex() );
+			QModelIndex p = proxy->mapFromPrimary( src );
 			if ( !p.isValid() )
 				continue;
 			selRows.select( p, p );

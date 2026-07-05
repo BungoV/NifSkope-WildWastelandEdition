@@ -73,6 +73,10 @@ public:
 
 	QModelIndex mapTo( const QModelIndex & index ) const;
 	QModelIndex mapFrom( const QModelIndex & index, const QModelIndex & ref ) const;
+	//! Map a NIF block to the proxy row for its natural position, preferring an
+	//! occurrence not nested under a NiDefaultAVObjectPalette (which lists every
+	//! scene object). Falls back to the first occurrence.
+	QModelIndex mapFromPrimary( const QModelIndex & index ) const;
 
 public slots:
 	void reset();

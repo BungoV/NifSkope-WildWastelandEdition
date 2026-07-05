@@ -434,7 +434,11 @@ void NifSkope::wireBlockListSelection()
 		}
 		if ( sel.isEmpty() )
 			return;	// don't wipe a selection that came from the viewport
+		// the list already shows exactly what the user clicked; tell the mirror
+		// not to re-drive/re-scroll the list off this change
+		updatingObjFromList = true;
 		ogl->setObjectSelection( sel, toAV( list->selectionModel()->currentIndex() ) );
+		updatingObjFromList = false;
 	} );
 }
 
