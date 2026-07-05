@@ -364,6 +364,10 @@ void NifSkope::initActions()
 		if ( !nif )
 			return;
 		nif->selHighlight = ogl->objSelection;
+		// the active node must always be highlighted, even if a selection-path
+		// race left it out of the set
+		if ( ogl->objActive >= 0 )
+			nif->selHighlight.insert( ogl->objActive );
 		nif->selHighlightActive = ogl->objActive;
 		list->viewport()->update();
 		tree->viewport()->update();
