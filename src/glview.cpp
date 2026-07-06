@@ -828,15 +828,27 @@ void GLView::paintGL()
 				}
 			}
 
-			if ( gizmoMode && gizmoAxis > 0 ) {
-				// constraint line in the active orientation through the pivot
-				Vector3 unit;
-				unit[gizmoAxis - 1] = 1.0f;
-				Vector3 a = basis * unit;
+			if ( gizmoMode && ( gizmoAxis > 0 || gizmoPlane > 0 ) ) {
+				// constraint guide lines through the pivot, in the same Blender
+				// axis colours as the gizmo (plane constraints show both axes)
+				static const float gc[3][3] = {
+					{ 1.000f, 0.200f, 0.322f },	// X #FF3352
+					{ 0.545f, 0.863f, 0.000f },	// Y #8BDC00
+					{ 0.157f, 0.565f, 1.000f }	// Z #2890FF
+				};
 				scene->loadModelViewMatrix( viewTrans );
-				scene->setGLColor( gizmoAxis == 1 ? 1.0f : 0.15f, gizmoAxis == 2 ? 1.0f : 0.15f,
-				                   gizmoAxis == 3 ? 1.0f : 0.15f, 0.9f );
-				scene->drawDashLine( pivot - a * ( gs * 40.0f ), pivot + a * ( gs * 40.0f ), 160 );
+				scene->setGLLineWidth( Settings::lineWidthAxes * 0.8f );
+				for ( int i = 0; i < 3; i++ ) {
+					bool show = ( gizmoAxis == 1 + i )
+					            || ( gizmoMode == 1 && gizmoPlane > 0 && gizmoPlane != 1 + i );
+					if ( !show )
+						continue;
+					Vector3 unit;
+					unit[i] = 1.0f;
+					Vector3 a = basis * unit;
+					scene->setGLColor( gc[i][0], gc[i][1], gc[i][2], 0.9f );
+					scene->drawLine( pivot - a * ( gs * 40.0f ), pivot + a * ( gs * 40.0f ) );
+				}
 			}
 
 			glDepthMask( GL_TRUE );

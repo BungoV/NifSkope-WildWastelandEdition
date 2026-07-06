@@ -2013,9 +2013,6 @@ void NifSkope::contextMenu( const QPoint & pos )
 		idx = header->indexAt( pos );
 		p = header->mapToGlobal( pos );
 	} else if ( sender() == graphicsView ) {
-		// in edit mode right-click drops the 3D cursor instead of the menu
-		if ( ogl->editMode )
-			return;
 		idx = ogl->indexAt( pos, ogl->contextMenuShiftModifier );
 		p = graphicsView->mapToGlobal( pos );
 	} else {
@@ -2027,6 +2024,44 @@ void NifSkope::contextMenu( const QPoint & pos )
 	}
 
 	SpellBook contextBook( nif, idx, this, SLOT( select( const QModelIndex & ) ) );
+
+	if ( sender() == graphicsView ) {
+		// viewport right-click: Blender-style menu with the transform actions
+		// on top and the block spells as a submenu
+		QPoint clickPos = pos;
+		auto startModal = [this]( int m ) {
+			if ( ogl->editMode && !ogl->pickedElems.isEmpty() && ogl->gizmoBeginElement( m ) )
+				return;
+			ogl->gizmoBegin( m );
+		};
+
+		QMenu menu( this );
+		menu.addAction( tr( "Place Gizmo (3D Cursor) Here" ), [this, clickPos]() {
+			ogl->placeCursor( QPointF( clickPos ) );
+		} );
+		menu.addSeparator();
+		menu.addAction( tr( "Move\tG" ), [startModal]() { startModal( 1 ); } );
+		menu.addAction( tr( "Rotate\tR" ), [startModal]() { startModal( 2 ); } );
+		menu.addAction( tr( "Scale\tS" ), [startModal]() { startModal( 3 ); } );
+		if ( ogl->editMode ) {
+			menu.addSeparator();
+			QAction * aDel = menu.addAction( tr( "Delete Selected Elements\tX" ), [this]() {
+				ogl->deletePickedElements();
+			} );
+			aDel->setEnabled( !ogl->pickedElems.isEmpty() );
+			QAction * aLinked = menu.addAction( tr( "Select Linked\tCtrl+L" ), [this]() {
+				ogl->selectLinked( false );
+			} );
+			aLinked->setEnabled( !ogl->pickedElems.isEmpty() );
+		}
+		if ( idx.isValid() ) {
+			menu.addSeparator();
+			contextBook.setTitle( tr( "Spells" ) );
+			menu.addMenu( &contextBook );
+		}
+		menu.exec( p );
+		return;
+	}
 
 	if ( !idx.isValid() || nif->flags( idx ) & (Qt::ItemIsEnabled | Qt::ItemIsSelectable) )
 		contextBook.exec( p );
