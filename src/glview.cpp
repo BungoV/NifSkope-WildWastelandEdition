@@ -681,7 +681,7 @@ void GLView::paintGL()
 			nt.rotation = basis;
 			nt.translation = pivot;
 			nt.scale = 1.0f;
-			float gs = gizmoScale();
+			float gs = gizmoScale( pivot );
 
 			scene->setGLLineWidth( Settings::lineWidthAxes * ( gizmoMode ? 1.6f : 1.0f ) );
 			scene->loadModelViewMatrix( viewTrans * nt );
@@ -1175,7 +1175,13 @@ void GLView::paintGL()
 			scene->setGLColor( 0.05f, 0.05f, 0.05f, 1.0f );
 			scene->drawPoints( &o, 1 );
 			scene->setGLPointSize( 6.0f * dpr );
-			scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );	// Blender origin orange
+			// selection colours matching the block list / wireframe:
+			// active (last-selected) #FF9D00, other selected #FF7200
+			bool isActive = editMode ? ( ob == editShapeBlock ) : ( ob == objActive );
+			if ( isActive )
+				scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );
+			else
+				scene->setGLColor( 1.0f, 0.447f, 0.0f, 1.0f );
 			scene->drawPoints( &o, 1 );
 			// dashed relationship line to the parent's origin
 			int pb = model->getParent( ob );
@@ -1843,6 +1849,29 @@ float GLView::wireWidthMul = 1.0f;
 float GLView::vertexPointSize = 5.0f;
 float GLView::selLineWidth = 2.0f;
 
+void GLView::setFreeCamera( bool on )
+{
+	if ( freeCamera == on )
+		return;
+	freeCamera = on;
+	kbdState = 0;
+	if ( on ) {
+		requestActivate();
+		// grab the keyboard for the whole flight: transient focus steals
+		// (tooltips, dock updates) must not stop WASD delivery
+		setKeyboardGrabEnabled( true );
+		setCursor( Qt::BlankCursor );	// FPS-style: hide cursor, show a crosshair
+		QCursor::setPos( mapToGlobal( QPoint( width() / 2, height() / 2 ) ) );
+		lastPos = QPointF( width() * 0.5, height() * 0.5 );
+		emit gizmoStatus( tr( "Free camera: move the mouse to look, WASD to fly, Q/E down/up, hold Shift to speed up (Shift+F or Esc to exit)" ) );
+	} else {
+		setKeyboardGrabEnabled( false );
+		unsetCursor();
+		emit gizmoStatus( QString() );
+	}
+	update();
+}
+
 void GLView::freeCameraLook( float dPitch, float dYaw )
 {
 	// eye_world = -Pos + R^-1 * (0,0,2*Dist); keep it fixed while rotating so
@@ -2128,7 +2157,7 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 
 	Matrix basis = gizmoBasis( iGb );
 	Vector3 P = gizmoPivotPoint( iGb );
-	float gs = gizmoScale();
+	float gs = gizmoScale( P );
 
 	QPointF sp;
 	if ( !worldToScreen( P, sp ) )
@@ -2215,14 +2244,19 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 
 Matrix GLView::gizmoBasis( const QModelIndex & iBlock ) const
 {
-	if ( gizmoOrient == 1 || gizmoOrient == 2 ) {
+	return gizmoBasisFor( iBlock, gizmoOrient );
+}
+
+Matrix GLView::gizmoBasisFor( const QModelIndex & iBlock, int orient ) const
+{
+	if ( orient == 1 || orient == 2 ) {
 		int b = model->getBlockNumber( iBlock );
-		if ( gizmoOrient == 2 )
+		if ( orient == 2 )
 			b = model->getParent( b );
 		Node * n = ( b >= 0 ) ? scene->getNode( model, model->getBlockIndex( b ) ) : nullptr;
 		if ( n )
 			return n->worldTrans().rotation;
-	} else if ( gizmoOrient == 3 ) {
+	} else if ( orient == 3 ) {
 		Matrix vm;
 		vm.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
 		// camera rows become world basis columns (transpose)
@@ -2236,15 +2270,18 @@ Matrix GLView::gizmoBasis( const QModelIndex & iBlock ) const
 	return Matrix();
 }
 
-float GLView::gizmoScale() const
+float GLView::gizmoScale( const Vector3 & pivot ) const
 {
 	// world size for ~90 logical pixels on screen, regardless of camera
-	// distance, zoom or projection - the same behaviour as the 2D cursor
+	// distance, zoom or projection - the same behaviour as the 2D cursor.
+	// In perspective the apparent size depends on the pivot's view-space
+	// depth, not the orbit distance (the pivot can sit well off-center).
 	float hh = std::max( height(), 1 );
 	float wpp;
 	if ( perspectiveMode || view == ViewWalk ) {
+		float depth = -( viewTransform() * pivot )[2];
 		float tanF = float( std::tan( ( cfg.fov / Zoom ) / 360.0 * M_PI ) );
-		wpp = 2.0f * std::max( float( Dist ), 0.01f ) * tanF / hh;
+		wpp = 2.0f * std::max( depth, 0.01f ) * tanF / hh;
 	} else {
 		wpp = 2.0f * float( Dist / Zoom ) / hh;
 	}
@@ -2744,6 +2781,7 @@ void GLView::gizmoEnd( bool commit )
 		// freeze the gesture frame for the redo panel
 		lastGizmoMode = mode;
 		lastGizmoAxis = gizmoAxis;
+		lastGizmoOrient = gizmoOrient;
 		lastGizmoBlock = iBlock;
 		lastBasis = gizmoBasisM;
 		lastPivot = gizmoPivotWorld;
@@ -2761,7 +2799,7 @@ void GLView::gizmoEnd( bool commit )
 	update();
 }
 
-bool GLView::gizmoReapply( const Vector3 & param )
+bool GLView::gizmoReapply( const Vector3 & param, int axisOverride, int orientOverride )
 {
 	if ( !model || !model->undoStack || !lastGizmoMode || !lastGizmoBlock.isValid() )
 		return false;
@@ -2770,6 +2808,31 @@ bool GLView::gizmoReapply( const Vector3 & param )
 		return false;
 
 	QModelIndex iBlock( lastGizmoBlock );
+
+	// the operator panel can re-express the gesture on another axis or in
+	// another orientation; recompute the frozen basis / rotation axis then
+	bool reframed = false;
+	if ( orientOverride >= 0 && orientOverride != lastGizmoOrient ) {
+		lastBasis = gizmoBasisFor( iBlock, orientOverride );
+		lastGizmoOrient = orientOverride;
+		reframed = true;
+	}
+	if ( axisOverride >= 0 && axisOverride != lastGizmoAxis ) {
+		lastGizmoAxis = axisOverride;
+		reframed = true;
+	}
+	if ( reframed && lastGizmoMode == 2 ) {
+		if ( lastGizmoAxis == 0 ) {
+			// view axis: the camera forward direction
+			Matrix vm;
+			vm.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+			gizmoLastRotAxis = Vector3( vm( 2, 0 ), vm( 2, 1 ), vm( 2, 2 ) );
+		} else {
+			Vector3 unit;
+			unit[lastGizmoAxis - 1] = 1.0f;
+			gizmoLastRotAxis = lastBasis * unit;
+		}
+	}
 
 	// revert the previous commit (one merged transaction), then re-apply
 	model->undoStack->undo();
@@ -2980,12 +3043,12 @@ Vector3 GLView::pickedMedian() const
 	return ( n > 0 ) ? ( m / float( n ) ) : m;
 }
 
-bool GLView::pickElementAt( const QPointF & pos, bool additive )
+bool GLView::pickElementUnder( const QPointF & pos, PickedElement & pe ) const
 {
 	// in edit mode restrict picks to the mesh(es) being edited
 	const QSet<int> * only = ( editMode && !editShapeBlocks.isEmpty() ) ? &editShapeBlocks : nullptr;
 	SceneRayHit hit = raycastScene( pos, -1, only );
-	PickedElement pe;
+	pe = PickedElement();
 
 	if ( hit.shape ) {
 		Shape * s = hit.shape;
@@ -3037,7 +3100,7 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 			pe.e0 = tri[corner];
 			pe.worldPos = wt * s->verts.at( pe.e0 );
 			pe.wA = pe.wB = pe.wC = pe.worldPos;
-		} else if ( pickMode == 2 ) {
+		} else if ( mode == 2 ) {
 			// nearest edge of the hit triangle
 			auto edgeDist = [&hit]( const Vector3 & a, const Vector3 & b ) {
 				Vector3 d = b - a;
@@ -3100,6 +3163,15 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 		return false;
 	}
 
+	return true;
+}
+
+bool GLView::pickElementAt( const QPointF & pos, bool additive )
+{
+	PickedElement pe;
+	if ( !pickElementUnder( pos, pe ) )
+		return false;
+
 	if ( additive ) {
 		int at = pickedElems.indexOf( pe );
 		if ( at >= 0 )
@@ -3109,6 +3181,182 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 	} else {
 		pickedElems.clear();
 		pickedElems.append( pe );
+	}
+
+	update();
+	return true;
+}
+
+bool GLView::pickPathSelect( const QPointF & pos )
+{
+	// nothing to path from: behave like a plain extend
+	if ( pickedElems.isEmpty() )
+		return pickElementAt( pos, true );
+
+	PickedElement target;
+	if ( !pickElementUnder( pos, target ) )
+		return false;
+
+	const PickedElement active = pickedElems.constLast();
+	Shape * s = shapeForBlock( target.shapeBlock );
+	if ( active.shapeBlock != target.shapeBlock || active.type != target.type
+		|| !s || s->triangles.isEmpty() ) {
+		// no path across shapes or element types: just extend
+		if ( pickedElems.indexOf( target ) < 0 )
+			pickedElems.append( target );
+		update();
+		return true;
+	}
+
+	int nv = s->verts.size();
+	Transform wt = shapeRenderTrans( s );
+	auto appendElem = [this]( const PickedElement & pe ) {
+		int at = pickedElems.indexOf( pe );
+		if ( at >= 0 )
+			pickedElems.remove( at );	// re-append so the path end becomes active
+		pickedElems.append( pe );
+	};
+	auto vertexElem = [&]( int vi ) {
+		PickedElement pe;
+		pe.shapeBlock = target.shapeBlock;
+		pe.type = 1;
+		pe.e0 = vi;
+		pe.worldPos = wt * s->verts.at( vi );
+		pe.wA = pe.wB = pe.wC = pe.worldPos;
+		return pe;
+	};
+	auto edgeElem = [&]( int a, int b ) {
+		PickedElement pe;
+		pe.shapeBlock = target.shapeBlock;
+		pe.type = 2;
+		pe.e0 = std::min( a, b );
+		pe.e1 = std::max( a, b );
+		pe.wA = wt * s->verts.at( pe.e0 );
+		pe.wB = wt * s->verts.at( pe.e1 );
+		pe.wC = pe.wA;
+		pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
+		return pe;
+	};
+
+	if ( target.type == 3 ) {
+		// face path: BFS over triangles connected by shared edges
+		QHash<QPair<int, int>, QVector<int>> etris;
+		for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+			const Triangle & t = s->triangles.at( ti );
+			if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+				continue;
+			for ( int e = 0; e < 3; e++ ) {
+				int a = t[e], b = t[( e + 1 ) % 3];
+				etris[qMakePair( std::min( a, b ), std::max( a, b ) )].append( ti );
+			}
+		}
+		QHash<int, int> prev;
+		prev.insert( active.e0, active.e0 );
+		QList<int> queue{ active.e0 };
+		while ( !queue.isEmpty() && !prev.contains( target.e0 ) ) {
+			int ti = queue.takeFirst();
+			const Triangle & t = s->triangles.at( ti );
+			for ( int e = 0; e < 3; e++ ) {
+				int a = t[e], b = t[( e + 1 ) % 3];
+				for ( int nb : etris.value( qMakePair( std::min( a, b ), std::max( a, b ) ) ) ) {
+					if ( !prev.contains( nb ) ) {
+						prev.insert( nb, ti );
+						queue.append( nb );
+					}
+				}
+			}
+		}
+		if ( prev.contains( target.e0 ) ) {
+			QVector<int> path;
+			for ( int ti = target.e0; ti != active.e0; ti = prev.value( ti ) )
+				path.prepend( ti );
+			for ( int ti : path ) {
+				const Triangle & t = s->triangles.at( ti );
+				PickedElement pe;
+				pe.shapeBlock = target.shapeBlock;
+				pe.type = 3;
+				pe.e0 = ti;
+				pe.wA = wt * s->verts.at( t[0] );
+				pe.wB = wt * s->verts.at( t[1] );
+				pe.wC = wt * s->verts.at( t[2] );
+				pe.worldPos = ( pe.wA + pe.wB + pe.wC ) / 3.0f;
+				Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
+				n.normalize();
+				pe.worldNormal = n;
+				appendElem( pe );
+			}
+		} else {
+			appendElem( target );
+		}
+		update();
+		return true;
+	}
+
+	// vertex / edge path: BFS over the vertex-edge graph
+	QHash<int, QVector<int>> adj;
+	for ( const Triangle & t : s->triangles ) {
+		if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+			continue;
+		for ( int e = 0; e < 3; e++ ) {
+			int a = t[e], b = t[( e + 1 ) % 3];
+			adj[a].append( b );
+			adj[b].append( a );
+		}
+	}
+
+	QHash<int, int> prev;
+	QList<int> queue;
+	QSet<int> goals;
+	if ( target.type == 1 ) {
+		prev.insert( active.e0, active.e0 );
+		queue.append( active.e0 );
+		goals.insert( target.e0 );
+	} else {
+		// both endpoints of the active edge seed the search; stop at either
+		// endpoint of the target edge
+		prev.insert( active.e0, active.e0 );
+		prev.insert( active.e1, active.e1 );
+		queue << active.e0 << active.e1;
+		goals << target.e0 << target.e1;
+	}
+
+	int reached = -1;
+	while ( !queue.isEmpty() && reached < 0 ) {
+		int v = queue.takeFirst();
+		if ( goals.contains( v ) ) {
+			reached = v;
+			break;
+		}
+		for ( int nb : adj.value( v ) ) {
+			if ( !prev.contains( nb ) ) {
+				prev.insert( nb, v );
+				queue.append( nb );
+			}
+		}
+	}
+
+	if ( reached < 0 ) {
+		appendElem( target );	// disconnected: just extend
+		update();
+		return true;
+	}
+
+	// walk the predecessor chain back from the reached goal to the seed
+	QVector<int> path;
+	for ( int v = reached; ; v = prev.value( v ) ) {
+		path.prepend( v );
+		if ( prev.value( v ) == v )
+			break;
+	}
+
+	if ( target.type == 1 ) {
+		for ( int vi : path )
+			appendElem( vertexElem( vi ) );
+		appendElem( vertexElem( target.e0 ) );
+	} else {
+		for ( int i = 0; i + 1 < path.size(); i++ )
+			appendElem( edgeElem( path.at( i ), path.at( i + 1 ) ) );
+		appendElem( edgeElem( target.e0, target.e1 ) );
 	}
 
 	update();
@@ -4640,6 +4888,11 @@ void GLView::dropEvent( QDropEvent * e )
 
 void GLView::focusOutEvent( QFocusEvent * )
 {
+	// the free camera holds a keyboard grab, so key events keep arriving even
+	// without focus; zeroing the held WASD keys here would stop flight dead
+	// whenever a tooltip or dock update steals focus for a moment
+	if ( freeCamera )
+		return;
 	kbdState = 0;
 	mouseButtonState = 0;
 }
@@ -4808,11 +5061,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	if ( freeCamera ) {
 		if ( ( event->key() == Qt::Key_F && ( event->modifiers() & Qt::ShiftModifier ) )
 			|| event->key() == Qt::Key_Escape ) {
-			freeCamera = false;
-			kbdState = 0;
-			unsetCursor();
-			emit gizmoStatus( QString() );
-			update();
+			setFreeCamera( false );
 			return;
 		}
 		int fk = convertKeyCode( event->key() );
@@ -4956,7 +5205,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 				setPickMode( pickMode ^ pm );
 			else
 				setPickMode( pm );
-			emit gizmoStatus( tr( "Edit Mode - select  (click = pick, Shift+click = add, G/R/S move, X delete, Shift+S snap)" ) );
+			emit gizmoStatus( tr( "Edit Mode - select  (click = pick, Ctrl+click = add, Shift+click = path select, G/R/S move, X delete, Shift+S snap)" ) );
 			return;
 		}
 		if ( event->key() == Qt::Key_C ) {
@@ -4978,14 +5227,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	// block above handles exiting). Frontal light is now Ctrl+Shift+F.
 	if ( event->key() == Qt::Key_F && ( event->modifiers() & Qt::ShiftModifier )
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
-		freeCamera = true;
-		kbdState = 0;
-		requestActivate();	// make sure WASD key events reach this window
-		setCursor( Qt::BlankCursor );	// FPS-style: hide cursor, show a crosshair
-		QCursor::setPos( mapToGlobal( QPoint( width() / 2, height() / 2 ) ) );
-		lastPos = QPointF( width() * 0.5, height() * 0.5 );
-		emit gizmoStatus( tr( "Free camera: move the mouse to look, WASD to fly, Q/E down/up, hold Shift to speed up (Shift+F or Esc to exit)" ) );
-		update();
+		setFreeCamera( true );
 		return;
 	}
 
@@ -5185,12 +5427,8 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 	// clicking exits free camera (Blender walk-mode confirm/cancel)
 	if ( freeCamera ) {
-		freeCamera = false;
-		kbdState = 0;
-		unsetCursor();
-		emit gizmoStatus( QString() );
+		setFreeCamera( false );
 		lastPos = getQMouseEventPosition( event );
-		update();	// repaint so the centre crosshair clears
 		return;
 	}
 
@@ -5246,11 +5484,18 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		}
 	}
 
-	// element reference picking swallows plain clicks while a pick mode is active
+	// element reference picking swallows plain clicks while a pick mode is
+	// active: click = pick, Ctrl+click = extend/toggle, Shift+click = shortest
+	// path from the active element (Blender)
 	if ( pickMode && event->button() == Qt::LeftButton
-		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		&& !( event->modifiers() & Qt::AltModifier ) ) {
 		auto p = getQMouseEventPosition( event );
-		if ( pickElementAt( p, bool( event->modifiers() & Qt::ShiftModifier ) ) ) {
+		bool picked;
+		if ( event->modifiers() & Qt::ShiftModifier )
+			picked = pickPathSelect( p );
+		else
+			picked = pickElementAt( p, bool( event->modifiers() & Qt::ControlModifier ) );
+		if ( picked ) {
 			gizmoSwallowClick = true;
 			mouseButtonState |= std::uint32_t( event->button() );
 			return;

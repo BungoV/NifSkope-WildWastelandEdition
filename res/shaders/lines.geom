@@ -12,10 +12,13 @@ out vec4 C;
 
 void main()
 {
-	C = vec4( vsColor[0].rgb, vsColor[0].a * min( lineWidth, 1.0 ) );
+	// per-endpoint colours so selection gradients interpolate along the edge
+	float	a = min( lineWidth, 1.0 );
+	vec4	c0 = vec4( vsColor[0].rgb, vsColor[0].a * a );
+	vec4	c1 = vec4( vsColor[1].rgb, vsColor[1].a * a );
 
 	vec4	p0 = projectionMatrix * gl_in[0].gl_Position;
 	vec4	p1 = projectionMatrix * gl_in[1].gl_Position;
 
-	drawLine( p0, p1 );
+	drawLine( p0, p1, c0, c1 );
 }

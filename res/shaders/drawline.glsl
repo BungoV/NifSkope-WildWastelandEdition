@@ -1,16 +1,21 @@
 uniform float lineWidth;
 
-void drawLine( vec4 p0, vec4 p1 )
+void drawLine( vec4 p0, vec4 p1, vec4 c0, vec4 c1 )
 {
 	float	p0zw = p0.z + p0.w;
 	float	p1zw = p1.z + p1.w;
 	if ( !( p0zw > 0.0 && p1zw > 0.0 ) ) {
-		if ( p0zw > 0.000001 )
-			p1 = mix( p0, p1, p0zw / ( p0zw - p1zw ) );
-		else if ( p1zw > 0.000001 )
-			p0 = mix( p1, p0, p1zw / ( p1zw - p0zw ) );
-		else
+		if ( p0zw > 0.000001 ) {
+			float	t = p0zw / ( p0zw - p1zw );
+			p1 = mix( p0, p1, t );
+			c1 = mix( c0, c1, t );
+		} else if ( p1zw > 0.000001 ) {
+			float	t = p1zw / ( p1zw - p0zw );
+			p0 = mix( p1, p0, t );
+			c0 = mix( c1, c0, t );
+		} else {
 			return;
+		}
 	}
 
 	vec3	p0_ndc = p0.xyz / p0.w;
@@ -25,12 +30,16 @@ void drawLine( vec4 p0, vec4 p1 )
 	vec2	d = normalize( p1_ss - p0_ss ) * max( lineWidth * 0.5, 0.5 );
 	vec2	n = vec2( -d.y, d.x ) / vpScale;
 
+	C = c0;
 	gl_Position = vec4( p0_ndc.xy + n, p0_ndc.z, 1.0 );
 	EmitVertex();
+	C = c0;
 	gl_Position = vec4( p0_ndc.xy - n, p0_ndc.z, 1.0 );
 	EmitVertex();
+	C = c1;
 	gl_Position = vec4( p1_ndc.xy + n, p1_ndc.z, 1.0 );
 	EmitVertex();
+	C = c1;
 	gl_Position = vec4( p1_ndc.xy - n, p1_ndc.z, 1.0 );
 	EmitVertex();
 

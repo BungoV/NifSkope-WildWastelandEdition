@@ -61,6 +61,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QByteArray>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCursor>
 #include <QDebug>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
@@ -523,6 +524,7 @@ void NifSkope::initDockWidgets()
 		tf.setBold( true );
 		rpTitle->setFont( tf );
 		QToolButton * rpClose = new QToolButton( rp );
+		rpClose->setObjectName( QStringLiteral( "GizmoRedoClose" ) );
 		rpClose->setText( QStringLiteral( "✕" ) );
 		rpClose->setAutoRaise( true );
 		rpl->addWidget( rpTitle, 0, 0, 1, 5 );
@@ -541,37 +543,66 @@ void NifSkope::initDockWidgets()
 			rpl->addWidget( rpVals[i], 1, i * 2 + 1 );
 		}
 
-		auto applyEdit = [this, rp, rpVal0, rpVal1, rpVal2]() {
+		// Blender operator panel extras: rotation axis + transform orientation
+		QLabel * rpAxisLbl = new QLabel( tr( "Axis" ), rp );
+		QComboBox * rpAxis = new QComboBox( rp );
+		rpAxis->addItems( { tr( "View" ), QStringLiteral( "X" ), QStringLiteral( "Y" ), QStringLiteral( "Z" ) } );
+		QLabel * rpOrientLbl = new QLabel( tr( "Orientation" ), rp );
+		QComboBox * rpOrient = new QComboBox( rp );
+		rpOrient->addItems( { tr( "Global" ), tr( "Local" ), tr( "Parent" ), tr( "View" ) } );
+		rpl->addWidget( rpAxisLbl, 2, 0 );
+		rpl->addWidget( rpAxis, 2, 1 );
+		rpl->addWidget( rpOrientLbl, 2, 2 );
+		rpl->addWidget( rpOrient, 2, 3, 1, 3 );
+
+		auto applyEdit = [this, rp, rpVal0, rpVal1, rpVal2, rpAxis, rpOrient]() {
 			if ( !rp->isVisible() )
 				return;
-			if ( !ogl->gizmoReapply( Vector3( (float)rpVal0->value(), (float)rpVal1->value(), (float)rpVal2->value() ) ) )
-				rp->hide();
+			int mode = rp->property( "gestureMode" ).toInt();
+			int axis = ( mode == 2 && rpAxis->isVisible() ) ? rpAxis->currentIndex() : -1;
+			int orient = ( mode == 1 || mode == 2 ) ? rpOrient->currentIndex() : -1;
+			if ( !ogl->gizmoReapply( Vector3( (float)rpVal0->value(), (float)rpVal1->value(), (float)rpVal2->value() ),
+					axis, orient ) ) {
+				// gesture went stale (something else touched the undo stack):
+				// keep the panel visible but freeze its inputs
+				for ( QWidget * w : rp->findChildren<QWidget *>() )
+					if ( w->objectName() != QStringLiteral( "GizmoRedoClose" ) )
+						w->setEnabled( false );
+			}
 		};
 		for ( auto sb : { rpVal0, rpVal1, rpVal2 } )
 			connect( sb, qOverload<double>( &QDoubleSpinBox::valueChanged ), applyEdit );
+		for ( auto cb : { rpAxis, rpOrient } )
+			connect( cb, qOverload<int>( &QComboBox::currentIndexChanged ), applyEdit );
 
 		connect( ogl, &GLView::transformGesture,
-			[this, rp, rpTitle, rpLbl0, rpLbl1, rpLbl2, rpVal0, rpVal1, rpVal2]( int mode, int axis, const Vector3 & p ) {
-			static const char * axisNames[4] = { "View", "X", "Y", "Z" };
-			static const char * orientNames[4] = { "Global", "Local", "Parent", "View" };
+			[this, rp, rpTitle, rpLbl0, rpLbl1, rpLbl2, rpVal0, rpVal1, rpVal2,
+				rpAxisLbl, rpAxis, rpOrientLbl, rpOrient]( int mode, int axis, const Vector3 & p ) {
 			QLabel * lbls[3] = { rpLbl0, rpLbl1, rpLbl2 };
 			QDoubleSpinBox * vals[3] = { rpVal0, rpVal1, rpVal2 };
 
+			for ( QWidget * w : rp->findChildren<QWidget *>() )
+				w->setEnabled( true );	// a stale gesture froze them
 			for ( auto sb : vals )
 				sb->blockSignals( true );
+			rpAxis->blockSignals( true );
+			rpOrient->blockSignals( true );
+
+			rp->setProperty( "gestureMode", mode );
+			rp->setProperty( "gestureBlock", ogl->objActive );
+			rpAxis->setCurrentIndex( std::min( std::max( axis, 0 ), 3 ) );
+			rpOrient->setCurrentIndex( std::min( std::max( ogl->gizmoOrient, 0 ), 3 ) );
 
 			bool three = ( mode == 1 );
 			if ( mode == 1 ) {
-				rpTitle->setText( tr( "Move  (%1%2)" ).arg( QLatin1String( orientNames[ogl->gizmoOrient] ),
-					axis > 0 ? QStringLiteral( " " ) + QLatin1String( axisNames[axis] ) : QString() ) );
+				rpTitle->setText( tr( "Move" ) );
 				const char * comps[3] = { "X", "Y", "Z" };
 				for ( int i = 0; i < 3; i++ ) {
 					lbls[i]->setText( QLatin1String( comps[i] ) );
 					vals[i]->setValue( p[i] );
 				}
 			} else if ( mode == 2 ) {
-				rpTitle->setText( tr( "Rotate around %1 (%2)" ).arg( QLatin1String( axisNames[axis] ),
-					QLatin1String( orientNames[ogl->gizmoOrient] ) ) );
+				rpTitle->setText( tr( "Rotate" ) );
 				lbls[0]->setText( tr( "Angle°" ) );
 				vals[0]->setValue( p[0] );
 			} else {
@@ -584,13 +615,28 @@ void NifSkope::initDockWidgets()
 				lbls[i]->setVisible( three );
 				vals[i]->setVisible( three );
 			}
+			// axis dropdown only applies to rotations; orientation to move + rotate
+			rpAxisLbl->setVisible( mode == 2 );
+			rpAxis->setVisible( mode == 2 );
+			rpOrientLbl->setVisible( mode == 1 || mode == 2 );
+			rpOrient->setVisible( mode == 1 || mode == 2 );
+
 			for ( auto sb : vals )
 				sb->blockSignals( false );
+			rpAxis->blockSignals( false );
+			rpOrient->blockSignals( false );
 
 			rp->adjustSize();
 			rp->move( 10, graphicsView->height() - rp->height() - 10 );
 			rp->show();
 			rp->raise();
+		} );
+
+		// Blender keeps the operator panel up until the selection moves on:
+		// hide only when a different object becomes active (or none)
+		connect( ogl, &GLView::objectSelectionChanged, [this, rp]() {
+			if ( rp->isVisible() && ogl->objActive != rp->property( "gestureBlock" ).toInt() )
+				rp->hide();
 		} );
 
 		connect( this, &NifSkope::completeLoading, rp, &QWidget::hide );
@@ -1946,6 +1992,31 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 	//}
 
 	switch ( e->type() ) {
+	case QEvent::ShortcutOverride:
+	case QEvent::KeyPress: {
+		// Shift+F enters the free camera whenever the pointer is over the
+		// viewport, no matter which widget currently has key focus (entering
+		// must not require clicking the view first). Text-input widgets keep
+		// their keystrokes.
+		auto ke = static_cast<QKeyEvent *>( e );
+		if ( ogl && graphicsView && !ogl->freeCamera
+			&& ke->key() == Qt::Key_F && ( ke->modifiers() & Qt::ShiftModifier )
+			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) )
+			&& isActiveWindow()
+			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			QWidget * fw = QApplication::focusWidget();
+			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
+				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" )
+				|| fw->inherits( "QComboBox" ) );
+			if ( !textInput ) {
+				if ( e->type() == QEvent::KeyPress )
+					ogl->setFreeCamera( true );
+				e->accept();
+				return true;
+			}
+		}
+		break;
+	}
 	case QEvent::MouseButtonPress:
 		// Global mouse press
 		if ( o->isWindowType() ) {

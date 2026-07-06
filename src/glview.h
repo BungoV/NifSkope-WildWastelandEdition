@@ -282,6 +282,8 @@ private:
 
 	//! Orientation basis for the current gizmoOrient setting (world <- basis)
 	Matrix gizmoBasis( const QModelIndex & iBlock ) const;
+	//! Orientation basis for an explicit orientation (0 Global, 1 Local, 2 Parent, 3 View)
+	Matrix gizmoBasisFor( const QModelIndex & iBlock, int orient ) const;
 	//! World-space pivot point for the current gizmoPivot setting
 	Vector3 gizmoPivotPoint( const QModelIndex & iBlock ) const;
 
@@ -294,6 +296,7 @@ private:
 	Vector3 gizmoLastRotAxis;           // world axis of the last rotation
 	int lastGizmoMode = 0;
 	int lastGizmoAxis = 0;
+	int lastGizmoOrient = 0;
 	QPersistentModelIndex lastGizmoBlock;
 	Matrix lastBasis, lastParentRot, lastOrigRot;
 	Vector3 lastPivot, lastParentPos, lastOrigWorldPos, lastOrigTrans;
@@ -308,7 +311,7 @@ private:
 	//! 5-7 rotate rings, 8-10 scale boxes
 	int gizmoHandleHitTest( const QPointF & pos ) const;
 	//! Gizmo size in world units for a constant on-screen size (like the cursor)
-	float gizmoScale() const;
+	float gizmoScale( const Vector3 & pivot ) const;
 	//! Show origin points + parent links of selected nodes (Blender)
 	bool showOrigins = true;
 
@@ -341,8 +344,10 @@ public:
 	int gizmoPivot = 0;                 // 0 node origin, 1 bounding center
 
 	//! Re-apply the last committed gesture with new parameters (redo panel).
+	//! axisOverride (0 View, 1-3 XYZ) and orientOverride (0-3) re-express the
+	//! gesture on another axis / in another orientation when >= 0.
 	//! Returns false if the gesture went stale (undo stack moved on).
-	bool gizmoReapply( const Vector3 & param );
+	bool gizmoReapply( const Vector3 & param, int axisOverride = -1, int orientOverride = -1 );
 
 	// ---- element reference picking (vertex / edge / face) ----
 
@@ -366,6 +371,11 @@ public:
 	Vector3 pickedMedian() const;
 	//! Pick the element under pos into the selection; additive toggles membership
 	bool pickElementAt( const QPointF & pos, bool additive );
+	//! The element under pos, without changing the selection
+	bool pickElementUnder( const QPointF & pos, PickedElement & pe ) const;
+	//! Blender path select: select the shortest path (BFS over the edge graph)
+	//! from the active element to the element under pos, in-between geometry included
+	bool pickPathSelect( const QPointF & pos );
 	//! Mouse ray in world space
 	void mouseRayWorld( const QPointF & pos, Vector3 & origin, Vector3 & dir ) const;
 
@@ -409,6 +419,8 @@ public:
 
 	// Blender-like free camera: keyboard movement only while enabled (Shift+F)
 	bool freeCamera = false;
+	//! Enter/exit the free camera: cursor, keyboard grab and status message
+	void setFreeCamera( bool on );
 	//! Fly-mode movement speed multiplier, adjusted with the scroll wheel
 	float freeCamSpeed = 1.0f;
 	//! First-person look that pivots at the camera eye (free camera mouse-look)
