@@ -70,3 +70,26 @@ an adjustable falloff radius (mouse wheel resizes during the modal). Falloff
 curves: smooth / sphere / linear / constant. Needs: falloff radius state +
 wheel handling inside element modals, weight computation in
 gizmoUpdateElement(), circle indicator drawn around the pivot.
+
+## Feedback batch (2026-07-06) - NEXT UP
+1. Gizmo still not screen-constant: gizmoScale() uses Dist, but perspective
+   apparent size depends on the PIVOT's view-space depth. Fix: wpp from
+   depth = -(viewTransform() * gizmoPivotWorld)[2] instead of Dist (both in
+   paintGL and gizmoHandleHitTest).
+2. Origin dots must use selection colours: active node #FF9D00, secondary
+   #FF7200 (match block list / wireframe), not plain orange.
+3. Edit-mode vertex gradient broken: only edges whose FIRST endpoint is
+   selected turn orange, no interpolation -> lines.prog likely flat-shades the
+   per-vertex colour attribute. Either fix shader interpolation or subdivide
+   each edge into ~6 segments with stepped uniform colours.
+4. Free camera: sometimes cannot enter until LMB-clicking NifSkope first, and
+   WASD dies after ~2s. requestActivate() is not enough - try grabKeyboard()
+   on entry / releaseKeyboard() on exit, and enter via mouse-position check
+   rather than focus.
+5. Element picking: Ctrl+LMB should select verts/edges/faces (not Shift).
+   Shift+LMB = Blender shortest-path select between the active and clicked
+   element (BFS over the edge graph, include in-between geometry).
+6. Blender operator panel for G/R/S (pic: Rotate - Angle, Axis dropdown,
+   Orientation dropdown): extend the existing redo panel with axis +
+   orientation combos; keep it visible until the user selects another
+   object/node (currently hides too eagerly).
