@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QRegularExpression>
 
 #include "gl/controllers.h"
+#include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "glview.h"
@@ -230,48 +231,39 @@ void Particles::drawShapes( NodeList * secondPass )
 		MaterialProperty::glProperty( findProperty<MaterialProperty>(), findProperty<SpecularProperty>(), prog );
 		prog->uni4f( "frontMaterialEmission", FloatVector4( 0.0f ) );
 
-		// setup texturing
+		// setup texturing: the sprite texture always goes on texture unit 0
+		// (the previous code bound through the shader property WITHOUT
+		// activating a unit first, so the texture landed on whatever unit the
+		// last drawn shape left active and the sampler read a stale texture)
 
 		for ( int i = 0; i < TexturingProperty::numTextures; i++ ) {
 			prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", i ), 0 );
 			prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", i ), 0 );
 		}
 
-		int	stage = 0;
+		bool	bound = false;
 
 		if ( auto p = findProperty<TexturingProperty>(); p )
-			stage += int( p->bind( 0, 0, prog ) );
+			bound = p->bind( 0, 0, prog );	// legacy path sets its own uniforms
 
-		if ( shaderProp ) {
-			if ( shaderProp->bind( 0 ) ) {
-				prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", stage ), stage );
-				stage++;
+		if ( !bound ) {
+			scene->textures->activateTextureUnit( 0 );
+			if ( shaderProp )
+				bound = shaderProp->bind( 0 );
+			if ( !bound && !srcTex.isEmpty() )
+				bound = scene->textures->bind( srcTex, nif );
+			if ( !bound ) {
+				static const QString	defaultTexture = "#FFFFFFFF";
+				scene->textures->bind( defaultTexture, scene->nifModel );
 			}
+			prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", 0 ), 0 );
 			prog->uni2f_l( prog->uniLocation( "textures[%d].uvCenter", 0 ), 0.5f, 0.5f );
 			prog->uni2f_l( prog->uniLocation( "textures[%d].uvScale", 0 ), 1.0f, 1.0f );
 			prog->uni2f_l( prog->uniLocation( "textures[%d].uvOffset", 0 ), 0.0f, 0.0f );
 			prog->uni1f_l( prog->uniLocation( "textures[%d].uvRotation", 0 ), 0.0f );
 			prog->uni1i_l( prog->uniLocation( "textures[%d].coordSet", 0 ), 0 );
-			prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), stage );
-		} else if ( !srcTex.isEmpty() ) {
-			// no render-side property: bind the raw path as a last resort
-			scene->textures->activateTextureUnit( stage );
-			if ( scene->textures->bind( srcTex, nif ) ) {
-				prog->uni1i_l( prog->uniLocation( "textureUnits[%d]", stage ), stage );
-				prog->uni2f_l( prog->uniLocation( "textures[%d].uvCenter", 0 ), 0.5f, 0.5f );
-				prog->uni2f_l( prog->uniLocation( "textures[%d].uvScale", 0 ), 1.0f, 1.0f );
-				prog->uni2f_l( prog->uniLocation( "textures[%d].uvOffset", 0 ), 0.0f, 0.0f );
-				prog->uni1f_l( prog->uniLocation( "textures[%d].uvRotation", 0 ), 0.0f );
-				prog->uni1i_l( prog->uniLocation( "textures[%d].coordSet", 0 ), 0 );
-				prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), stage );
-				stage++;
-			}
-		}
-
-		if ( !stage ) {
-			static const QString	defaultTexture = "#FFFFFFFF";
-			scene->textures->activateTextureUnit( 0 );
-			scene->textures->bind( defaultTexture, scene->nifModel );
+			// the fragment shader samples textureUnits[textureUnit - 1]
+			prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), 1 );
 		}
 	}
 
@@ -291,11 +283,31 @@ void Particles::drawShapes( NodeList * secondPass )
 
 	// render the particles
 
+	// FO4 effect shaders multiply the sprite by their (BGEM-aware) emissive
+	// base colour - without this, blue/tinted electricity renders white
+	QVector<Color4>	tinted;
+	if ( !scene->selecting && colors.size() >= verts.size() ) {
+		if ( auto esp = dynamic_cast<BSEffectShaderProperty *>( findProperty<BSShaderLightingProperty>() ) ) {
+			Color4 tint = esp->emissiveColor;
+			float m = std::min( std::max( esp->emissiveMult, 0.0f ), 2.0f );
+			tint = Color4( std::min( tint[0] * m, 1.0f ), std::min( tint[1] * m, 1.0f ),
+			               std::min( tint[2] * m, 1.0f ), tint[3] );
+			if ( tint[0] + tint[1] + tint[2] > 0.02f
+				&& !( tint[0] == 1.0f && tint[1] == 1.0f && tint[2] == 1.0f && tint[3] == 1.0f ) ) {
+				tinted.resize( colors.size() );
+				for ( qsizetype i = 0; i < colors.size(); i++ ) {
+					const Color4 & c = colors.at( i );
+					tinted[i] = Color4( c[0] * tint[0], c[1] * tint[1], c[2] * tint[2], c[3] * tint[3] );
+				}
+			}
+		}
+	}
+
 	qsizetype	numVerts = verts.size();
 	const float *	attrData[5] = { &( verts.constFirst()[0] ), nullptr, nullptr, nullptr, nullptr };
 	unsigned int	attrMask = 0x03;
 	if ( colors.size() >= numVerts ) {
-		attrData[1] = &( colors.constFirst()[0] );
+		attrData[1] = &( ( tinted.size() >= numVerts ? tinted : colors ).constFirst()[0] );
 		attrMask = 0x43;
 	}
 	if ( sizes.size() >= numVerts ) {

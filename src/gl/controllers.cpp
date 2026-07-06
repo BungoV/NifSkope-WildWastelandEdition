@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
+#include "glview.h"
 #include "model/nifmodel.h"
 
 #include <cmath>
@@ -822,8 +823,9 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 		maxParticles = 512;
 	maxParticles = std::min( maxParticles, 4096 );
 
-	// gather BSPositionData spawn points from a block's extra data list
-	auto posDataPoints = [nif, this]( const QModelIndex & iObj, const Transform & wt ) {
+	// gather BSPositionData spawn points (object-local space) from a block's
+	// extra data list
+	auto posDataPoints = [nif, this]( const QModelIndex & iObj ) {
 		QVector<Vector3> pts;
 		QModelIndex iExtraList = nif->getIndex( iObj, "Extra Data List" );
 		for ( int r = 0; r < nif->rowCount( iExtraList ); r++ ) {
@@ -833,7 +835,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			iExtras.append( iED );
 			QVector<float> raw = nif->getArray<float>( nif->getIndex( iED, "Data" ) );
 			for ( int i = 0; i + 2 < raw.size(); i += 3 )
-				pts.append( wt * Vector3( raw[i], raw[i + 1], raw[i + 2] ) );
+				pts.append( Vector3( raw[i], raw[i + 1], raw[i + 2] ) );
 			break;
 		}
 		return pts;
@@ -864,9 +866,13 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			e.lifeSpan = nif->get<float>( iMod, "Life Span" );
 			e.lifeSpanVar = nif->get<float>( iMod, "Life Span Variation" );
 
+			// the emitter object's Node is resolved lazily in updateTime():
+			// during update() the scene graph may not contain it yet, and its
+			// world transform would come back as identity (spawning particles
+			// at the wrong place)
 			QModelIndex iObj = nif->getBlockIndex( nif->getLink( iMod, "Emitter Object" ) );
 			if ( iObj.isValid() )
-				e.emitNode = target->scene->getNode( nif, iObj );
+				e.iEmitObj = iObj;
 
 			if ( mtype == QLatin1String( "NiPSysBoxEmitter" ) ) {
 				e.shape = 1;
@@ -884,36 +890,40 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 				e.shape = 4;
 				// spawn points come from BSPositionData on the emitter object
 				// (falling back to the particle system itself)
-				if ( iObj.isValid() ) {
-					Node * n = target->scene->getNode( nif, iObj );
-					e.points = posDataPoints( iObj, n ? n->worldTrans() : Transform() );
+				if ( iObj.isValid() )
+					e.points = posDataPoints( iObj );
+				if ( e.points.isEmpty() ) {
+					e.points = posDataPoints( iPSys );
+					e.iEmitObj = iPSys;
 				}
-				if ( e.points.isEmpty() )
-					e.points = posDataPoints( iPSys, target->worldTrans() );
 			} else if ( mtype == QLatin1String( "NiPSysMeshEmitter" ) ) {
 				e.shape = 4;
+				e.emitFrom = nif->get<int>( iMod, "Emission Type" );
 				QModelIndex iMeshes = nif->getIndex( iMod, "Emitter Meshes" );
 				for ( int m = 0; m < nif->rowCount( iMeshes ); m++ ) {
 					QModelIndex iMesh = nif->getBlockIndex( nif->getLink( nif->getIndex( iMeshes, m ) ) );
 					if ( !iMesh.isValid() )
 						continue;
-					Node * n = target->scene->getNode( nif, iMesh );
-					Transform wt = n ? n->worldTrans() : Transform();
-					if ( !e.emitNode )
-						e.emitNode = n;
+					// points stay in the first mesh's local space; its world
+					// transform is applied fresh on each emission
+					if ( !e.iEmitObj.isValid() )
+						e.iEmitObj = iMesh;
+					else if ( e.iEmitObj != iMesh )
+						continue;	// preview: one reference frame per emitter
 					QModelIndex iVD = nif->getIndex( iMesh, "Vertex Data" );
 					if ( iVD.isValid() ) {
 						for ( int v = 0; v < nif->rowCount( iVD ) && e.points.size() < 4096; v++ )
-							e.points.append( wt * nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) );
+							e.points.append( nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) );
+						e.tris = nif->getArray<Triangle>( nif->getIndex( iMesh, "Triangles" ) );
 					} else {
-						QModelIndex iVerts = nif->getIndex(
-							nif->getBlockIndex( nif->getLink( iMesh, "Data" ) ), "Vertices" );
-						QVector<Vector3> vv = nif->getArray<Vector3>( iVerts );
+						QModelIndex iMeshData = nif->getBlockIndex( nif->getLink( iMesh, "Data" ) );
+						QVector<Vector3> vv = nif->getArray<Vector3>( nif->getIndex( iMeshData, "Vertices" ) );
 						for ( const Vector3 & v : vv ) {
 							if ( e.points.size() >= 4096 )
 								break;
-							e.points.append( wt * v );
+							e.points.append( v );
 						}
+						e.tris = nif->getArray<Triangle>( nif->getIndex( iMeshData, "Triangles" ) );
 					}
 				}
 			}
@@ -1077,7 +1087,6 @@ void PSysSimController::emitParticle( Emitter & e )
 	SimParticle p;
 
 	Vector3 local;
-	bool worldPos = false;
 	switch ( e.shape ) {
 	case 1:
 		local = Vector3( random( e.dims[0] ) - e.dims[0] * 0.5f,
@@ -1101,9 +1110,42 @@ void PSysSimController::emitParticle( Emitter & e )
 		}
 		break;
 	case 4:
-		if ( !e.points.isEmpty() ) {
+		if ( !e.tris.isEmpty() && e.emitFrom >= 1 && e.emitFrom <= 4 ) {
+			// face / edge emission: sample the triangle, not just its corners
+			const Triangle & t = e.tris.at( std::rand() % e.tris.size() );
+			int nv = e.points.size();
+			if ( t[0] < nv && t[1] < nv && t[2] < nv ) {
+				const Vector3 & a = e.points.at( t[0] );
+				const Vector3 & b = e.points.at( t[1] );
+				const Vector3 & c = e.points.at( t[2] );
+				switch ( e.emitFrom ) {
+				case 1:	// face center
+					local = ( a + b + c ) / 3.0f;
+					break;
+				case 2:	// edge center
+				case 4:	// edge surface
+					{
+						int k = std::rand() % 3;
+						const Vector3 & ea = ( k == 0 ) ? a : ( k == 1 ? b : c );
+						const Vector3 & eb = ( k == 0 ) ? b : ( k == 1 ? c : a );
+						float u = ( e.emitFrom == 2 ) ? 0.5f : random( 1.0f );
+						local = ea + ( eb - ea ) * u;
+					}
+					break;
+				default:	// face surface: uniform barycentric sample
+					{
+						float u = random( 1.0f ), v = random( 1.0f );
+						if ( u + v > 1.0f ) {
+							u = 1.0f - u;
+							v = 1.0f - v;
+						}
+						local = a + ( b - a ) * u + ( c - a ) * v;
+					}
+					break;
+				}
+			}
+		} else if ( !e.points.isEmpty() ) {
 			local = e.points.at( std::rand() % e.points.size() );
-			worldPos = true;	// stored pre-transformed to world space
 		}
 		break;
 	default:
@@ -1116,9 +1158,7 @@ void PSysSimController::emitParticle( Emitter & e )
 		return pw.rotation.inverted() * ( ( w - pw.translation ) * ( 1.0f / psc ) );
 	};
 
-	if ( worldPos ) {
-		p.pos = worldToPSys( local );
-	} else if ( e.emitNode ) {
+	if ( e.emitNode ) {
 		p.pos = worldToPSys( e.emitNode->worldTrans() * local );
 	} else {
 		p.pos = local;
@@ -1183,6 +1223,11 @@ void PSysSimController::updateTime( float time )
 	// emit
 	const QString & curSeq = target->scene->animGroup;
 	for ( Emitter & e : emitters ) {
+		// resolve the emitter object's node now: by simulation time the scene
+		// graph is complete, so the world transform chain is trustworthy
+		if ( !e.emitNode && e.iEmitObj.isValid() )
+			e.emitNode = target->scene->getNode( target->scene->nifModel, QModelIndex( e.iEmitObj ) );
+
 		float rate = e.birthRate;
 		if ( e.iBirthKeys.isValid() ) {
 			interpolate( rate, e.iBirthKeys, time, e.birthIdx );
@@ -1244,6 +1289,276 @@ void PSysSimController::updateTime( float time )
 	}
 	target->active = count;
 	target->size = 1.0f;
+}
+
+
+/*
+ *  ProcLightningController - preview for BSProceduralLightningController
+ */
+
+//! Midpoint-displacement jitter on the v/w components of a (t,v,w) polyline
+static void tlMidpointJag( QVector<Vector3> & pts, int a, int c, float amp )
+{
+	int m = ( a + c ) / 2;
+	if ( m == a || m == c )
+		return;
+	pts[m][1] = ( pts[a][1] + pts[c][1] ) * 0.5f + ( random( 2.0f ) - 1.0f ) * amp;
+	pts[m][2] = ( pts[a][2] + pts[c][2] ) * 0.5f + ( random( 2.0f ) - 1.0f ) * amp;
+	tlMidpointJag( pts, a, m, amp * 0.55f );
+	tlMidpointJag( pts, m, c, amp * 0.55f );
+}
+
+ProcLightningController::ProcLightningController( Node * node, const QModelIndex & index )
+	: Controller( index ), target( node )
+{
+}
+
+bool ProcLightningController::update( const NifModel * nif, const QModelIndex & index )
+{
+	if ( !Controller::update( nif, index ) )
+		return false;
+
+	subdivisions = std::min( std::max( nif->get<int>( iBlock, "Subdivisions" ), 1 ), 12 );
+	numBranches = std::min( std::max( nif->get<int>( iBlock, "Num Branches" ), 0 ), 10 );
+	width = nif->get<float>( iBlock, "Width" );
+	childWidthMult = nif->get<float>( iBlock, "Child Width Mult" );
+	arcOffset = nif->get<float>( iBlock, "Arc Offset" );
+	fadeMain = nif->get<bool>( iBlock, "Fade Main Bolt" );
+	fadeChild = nif->get<bool>( iBlock, "Fade Child Bolts" );
+	animateArc = nif->get<bool>( iBlock, "Animate Arc Offset" );
+	iShaderProp = nif->getBlockIndex( nif->getLink( iBlock, "Shader Property" ) );
+
+	// the Generation / Mutation bool keys live in the controller sequences
+	// (the controller itself only holds blend interpolators)
+	genKeys.clear();
+	mutKeys.clear();
+	int myBlock = nif->getBlockNumber( iBlock );
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex iSeq = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( iSeq, "NiControllerSequence" ) )
+			continue;
+		QString seqName = nif->resolveString( iSeq, "Name" );
+		QModelIndex iCB = nif->getIndex( iSeq, "Controlled Blocks" );
+		for ( int r = 0; r < nif->rowCount( iCB ); r++ ) {
+			QModelIndex iRow = nif->getIndex( iCB, r );
+			if ( nif->getLink( iRow, "Controller" ) != myBlock )
+				continue;
+			QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iRow, "Interpolator" ) );
+			QModelIndex iBD = nif->getBlockIndex( nif->getLink( iInterp, "Data" ) );
+			if ( !iBD.isValid() )
+				continue;
+			SeqKeys sk;
+			sk.seq = seqName;
+			sk.keys = nif->getIndex( iBD, "Data" );
+			if ( nif->resolveString( iRow, "Interpolator ID" ) == QLatin1String( "Mutation" ) )
+				mutKeys.append( sk );
+			else
+				genKeys.append( sk );
+		}
+	}
+
+	nodesResolved = false;	// the scene graph may be mid-rebuild
+	bolts.clear();
+	visible = false;
+
+	return true;
+}
+
+void ProcLightningController::regenerate()
+{
+	bolts.clear();
+
+	// point count: power-of-two segments for the midpoint subdivision
+	int nSeg = 4;
+	while ( nSeg < subdivisions + 1 && nSeg < 32 )
+		nSeg *= 2;
+
+	auto makeBolt = []( Bolt & b, int segs, float amp ) {
+		b.pts.resize( segs + 1 );
+		for ( int i = 0; i <= segs; i++ )
+			b.pts[i] = Vector3( float( i ) / float( segs ), 0.0f, 0.0f );
+		tlMidpointJag( b.pts, 0, segs, amp );
+	};
+
+	Bolt main;
+	makeBolt( main, nSeg, arcOffset );
+	bolts.append( main );
+
+	for ( int k = 0; k < numBranches; k++ ) {
+		Bolt br;
+		br.rootT = 0.2f + random( 0.6f );
+		// branch direction in the (axis, v, w) frame: forward-biased
+		br.dir = Vector3( 0.5f + random( 0.5f ), random( 2.0f ) - 1.0f, random( 2.0f ) - 1.0f );
+		br.dir.normalize();
+		br.lenMul = 0.2f + random( 0.25f );
+		br.widthMul = childWidthMult;
+		makeBolt( br, std::max( nSeg / 2, 4 ), arcOffset * 0.6f );
+		bolts.append( br );
+	}
+}
+
+void ProcLightningController::updateTime( float time )
+{
+	visible = false;
+	if ( !( active && target && target->scene ) )
+		return;
+
+	if ( !nodesResolved ) {
+		nodesResolved = true;
+		startNode = nullptr;
+		endNode = nullptr;
+		// rig convention (edison_pa / shieldtesla): the controller target sits
+		// under "<name>_Start", with a matching "<name>_End" node
+		Node * n = target;
+		while ( n && !n->name.endsWith( QLatin1String( "_Start" ) ) )
+			n = n->parentNode();
+		if ( n ) {
+			startNode = n;
+			QString endName = n->name;
+			endName.chop( 5 );
+			endName += QLatin1String( "End" );
+			for ( Node * cand : target->scene->getNodes() ) {
+				if ( cand && cand->name == endName ) {
+					endNode = cand;
+					break;
+				}
+			}
+		}
+	}
+	if ( !( startNode && endNode ) )
+		return;
+
+	auto evalKeys = [this, time]( QVector<SeqKeys> & list, bool dflt ) {
+		if ( list.isEmpty() )
+			return dflt;
+		SeqKeys * sk = &list[0];
+		const QString & curSeq = target->scene->animGroup;
+		for ( auto & c : list ) {
+			if ( c.seq == curSeq ) {
+				sk = &c;
+				break;
+			}
+		}
+		bool v = dflt;
+		if ( sk->keys.isValid() )
+			interpolate( v, sk->keys, time, sk->idx );
+		return v;
+	};
+
+	if ( !evalKeys( genKeys, true ) ) {
+		bolts.clear();
+		return;
+	}
+
+	bool mut = evalKeys( mutKeys, true ) && animateArc;
+	if ( bolts.isEmpty() || ( mut && std::fabs( time - lastMutation ) >= ( 1.0f / 24.0f ) ) ) {
+		lastMutation = time;
+		regenerate();
+	}
+
+	visible = true;
+}
+
+void ProcLightningController::drawPreview()
+{
+	if ( !( visible && startNode && endNode && target && target->scene ) )
+		return;
+	Scene * sc = target->scene;
+	if ( sc->selecting || bolts.isEmpty() )
+		return;
+
+	Vector3 A = startNode->worldTrans().translation;
+	Vector3 B = endNode->worldTrans().translation;
+	Vector3 axis = B - A;
+	float len = axis.length();
+	if ( len < 1.0e-4f )
+		return;
+	axis = axis * ( 1.0f / len );
+	Vector3 up = ( std::fabs( axis[2] ) < 0.9f ) ? Vector3( 0.0f, 0.0f, 1.0f ) : Vector3( 1.0f, 0.0f, 0.0f );
+	Vector3 v = Vector3::crossproduct( axis, up );
+	v.normalize();
+	Vector3 w = Vector3::crossproduct( axis, v );
+
+	// billboard: expand the strip perpendicular to the camera forward axis
+	Vector3 camZ = sc->view.rotation.inverted() * Vector3( 0.0f, 0.0f, 1.0f );
+
+	// tint from the controller's effect shader (BGEM-aware emissive colour)
+	Color4 tint( 0.45f, 0.7f, 1.0f, 1.0f );
+	if ( iShaderProp.isValid() ) {
+		if ( auto esp = dynamic_cast<BSEffectShaderProperty *>(
+				sc->getProperty( sc->nifModel, QModelIndex( iShaderProp ) ) ) ) {
+			Color4 ec = esp->emissiveColor;
+			float m = std::min( std::max( esp->emissiveMult, 0.0f ), 2.0f );
+			if ( ( ec[0] + ec[1] + ec[2] ) * m > 0.05f )
+				tint = Color4( std::min( ec[0] * m, 1.0f ), std::min( ec[1] * m, 1.0f ),
+				               std::min( ec[2] * m, 1.0f ), 1.0f );
+		}
+	}
+
+	auto boltPoint = [&]( const Bolt & b, int i, const Vector3 & root, const Vector3 & bDir, float bLen ) {
+		const Vector3 & p = b.pts.at( i );
+		return root + bDir * ( p[0] * bLen ) + v * p[1] + w * p[2];
+	};
+
+	QVector<Vector3> tris;
+	QVector<FloatVector4> cols;
+
+	auto addBolt = [&]( const Bolt & b, const Vector3 & root, const Vector3 & bDir, float bLen,
+	                    float halfWidth, const Color4 & col, bool fade ) {
+		for ( int i = 0; i + 1 < b.pts.size(); i++ ) {
+			Vector3 p0 = boltPoint( b, i, root, bDir, bLen );
+			Vector3 p1 = boltPoint( b, i + 1, root, bDir, bLen );
+			Vector3 seg = p1 - p0;
+			Vector3 perp = Vector3::crossproduct( camZ, seg );
+			if ( perp.length() < 1.0e-6f )
+				continue;
+			perp.normalize();
+			perp = perp * halfWidth;
+			float t0 = b.pts.at( i )[0], t1 = b.pts.at( i + 1 )[0];
+			float a0 = fade ? ( 1.0f - t0 ) : 1.0f;
+			float a1 = fade ? ( 1.0f - t1 ) : 1.0f;
+			FloatVector4 c0( col[0], col[1], col[2], col[3] * a0 );
+			FloatVector4 c1( col[0], col[1], col[2], col[3] * a1 );
+			// two triangles per segment
+			tris << ( p0 + perp ) << ( p0 - perp ) << ( p1 + perp );
+			cols << c0 << c0 << c1;
+			tris << ( p1 + perp ) << ( p0 - perp ) << ( p1 - perp );
+			cols << c1 << c0 << c1;
+		}
+	};
+
+	Color4 core( std::min( tint[0] + 0.55f, 1.0f ), std::min( tint[1] + 0.55f, 1.0f ),
+	             std::min( tint[2] + 0.55f, 1.0f ), 0.95f );
+	Color4 glow( tint[0], tint[1], tint[2], 0.4f );
+
+	for ( int bi = 0; bi < bolts.size(); bi++ ) {
+		const Bolt & b = bolts.at( bi );
+		Vector3 root = A;
+		Vector3 bDir = axis;
+		float bLen = len;
+		bool fade = fadeMain;
+		if ( bi > 0 ) {
+			// branch: root on the (unjittered) main axis, frame-space direction
+			root = A + axis * ( b.rootT * len );
+			bDir = axis * b.dir[0] + v * b.dir[1] + w * b.dir[2];
+			bDir.normalize();
+			bLen = len * b.lenMul;
+			fade = fadeChild;
+		}
+		float hw = std::max( width * b.widthMul * 0.5f, 0.1f );
+		addBolt( b, root, bDir, bLen, hw, glow, fade );
+		addBolt( b, root, bDir, bLen, hw * 0.35f, core, fade );
+	}
+
+	if ( tris.isEmpty() )
+		return;
+
+	sc->loadModelViewMatrix( sc->view );
+	sc->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
+	glEnable( GL_DEPTH_TEST );
+	glDepthMask( GL_FALSE );
+	sc->drawTriangles( tris.constData(), size_t( tris.size() ), cols.constData(), true );
+	glDepthMask( GL_TRUE );
 }
 
 

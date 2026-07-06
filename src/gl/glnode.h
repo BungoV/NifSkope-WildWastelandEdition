@@ -82,6 +82,7 @@ class Node : public IControllable
 	friend class VisibilityController;
 	friend class NodeList;
 	friend class LODNode;
+	friend class ProcLightningController;
 
 	typedef union
 	{
@@ -155,6 +156,10 @@ public:
 protected:
 	void setController( const NifModel * nif, const QModelIndex & controller ) override;
 	void updateImpl( const NifModel * nif, const QModelIndex & block ) override;
+
+	//! Procedural lightning preview attached to this node (owned by the
+	//! controllers list; cleared together with it)
+	class ProcLightningController * procLightning = nullptr;
 
 	// set the vertex color override uniform for the current shader program
 	void setGLColor( FloatVector4 c ) const;

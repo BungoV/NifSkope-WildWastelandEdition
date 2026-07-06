@@ -196,6 +196,7 @@ void Node::clear()
 	nodeId = 0;
 	flags.bits = 0;
 	local = Transform();
+	procLightning = nullptr;	// owned by the controllers list, just cleared
 
 	children.clear();
 	properties.clear();
@@ -305,6 +306,12 @@ void Node::setController( const NifModel * nif, const QModelIndex & iController 
 	} else if ( cname == "NiVisController" ) {
 		Controller * ctrl = new VisibilityController( this, iController );
 		registerController(nif, ctrl);
+	} else if ( cname == "BSProceduralLightningController" ) {
+		// preview: the game generates these bolts at runtime; without this the
+		// controlled stub shape renders nothing at all
+		auto ctrl = new ProcLightningController( this, iController );
+		registerController( nif, ctrl );
+		procLightning = ctrl;
 	}
 }
 
@@ -1713,6 +1720,11 @@ void Node::drawShapes( NodeList * secondPass )
 
 	for ( Node * node : children.list() )
 		node->drawShapes( secondPass );
+
+	// procedural lightning preview: drawn once per frame after the children
+	// (this node is never queued to the second pass itself)
+	if ( procLightning )
+		procLightning->drawPreview();
 }
 
 #define Farg( X ) arg( X, 0, 'f', 5 )

@@ -266,8 +266,14 @@ class PSysSimController final : public Controller
 		QString name;
 		int shape = 0;                     // 0 point, 1 box, 2 cylinder, 3 sphere, 4 points (mesh/array)
 		float dims[3] = { 0, 0, 0 };
+		//! Emitter object / mesh block: the Node is resolved lazily at sim time,
+		//! because at update() time the scene graph may not be fully built and
+		//! the object's world transform would come back wrong
+		QPersistentModelIndex iEmitObj;
 		QPointer<Node> emitNode;
-		QVector<Vector3> points;           // mesh / BSPositionData spawn points (emitter space)
+		QVector<Vector3> points;           // mesh / BSPositionData spawn points (emitter-local space)
+		QVector<Triangle> tris;            // mesh emitter triangles (face/edge emission)
+		int emitFrom = 0;                  // NiPSysMeshEmitter emission type (0 verts .. 4 edge surface)
 		float speed = 0, speedVar = 0;
 		float declination = 0, declinationVar = 0;
 		float planar = 0, planarVar = 0;
@@ -324,6 +330,56 @@ protected:
 	void emitParticle( Emitter & e );
 	Color4 particleColor( const Emitter & e, float u ) const;
 	float particleScale( float u ) const;
+};
+
+
+//! Preview renderer for BSProceduralLightningController: the game generates a
+//! jagged bolt between the rig's "*_Start" / "*_End" nodes at runtime (the
+//! controlled BSTriShape is an empty stub). Generation / Mutation are gated by
+//! bool keys in the controller sequences.
+class ProcLightningController final : public Controller
+{
+	struct SeqKeys
+	{
+		QString seq;
+		QPersistentModelIndex keys;
+		int idx = 0;
+	};
+	//! One bolt polyline in the Start->End frame: pts are (t along axis, v, w)
+	struct Bolt
+	{
+		QVector<Vector3> pts;
+		float rootT = 0;                   // branches: start param on the main bolt
+		Vector3 dir;                       // branches: direction in the bolt frame
+		float lenMul = 1;
+		float widthMul = 1;
+	};
+
+	QPointer<Node> target;
+	QPointer<Node> startNode;
+	QPointer<Node> endNode;
+	QPersistentModelIndex iShaderProp;
+	int subdivisions = 6;
+	int numBranches = 1;
+	float width = 16.0f, childWidthMult = 0.75f, arcOffset = 20.0f;
+	bool fadeMain = true, fadeChild = true, animateArc = true;
+	QVector<SeqKeys> genKeys, mutKeys;
+	QVector<Bolt> bolts;
+	float lastMutation = -1.0e30f;
+	bool visible = false;
+	bool nodesResolved = false;
+
+	void regenerate();
+
+public:
+	ProcLightningController( Node * node, const QModelIndex & index );
+
+	bool update( const NifModel * nif, const QModelIndex & index ) override final;
+
+	void updateTime( float time ) override final;
+
+	//! Draw the preview bolt; called from Node::drawShapes after the children
+	void drawPreview();
 };
 
 

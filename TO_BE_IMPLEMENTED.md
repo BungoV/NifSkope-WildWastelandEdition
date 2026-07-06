@@ -2,6 +2,22 @@
 
 Backlog of features/fixes agreed for later. Ordered roughly by priority.
 
+## Particle / VFX preview (2026-07-06) - implemented, in-app verify pending
+- Particle sprites bound their texture on a stale GL texture unit -> wrong
+  texture; now always unit 0 with BSEffectShaderProperty source-texture and
+  raw-path fallbacks, plus the shader's (BGEM-aware) emissive tint.
+- Mesh/array emitter spawn points were cached in world space at load time,
+  before the scene graph was complete -> ~100-unit offset for
+  X01_Torso_Tesla_Lightning:0; points are now emitter-local and the node
+  transform is resolved fresh at simulation time (also follows animation).
+- NiPSysMeshEmitter now honours Emission Type (face surface/center, edge)
+  by sampling triangles instead of raw vertices.
+- BSProceduralLightningController preview: jagged core+glow bolt between the
+  rig's *_Start / *_End nodes, midpoint-displacement jitter re-rolled at
+  24 Hz, branches, width/childWidthMult/arcOffset/fade flags honoured,
+  Generation/Mutation gated by the sequence's bool timeline keys. Flat
+  additive-style colour (BGEM emissive), not the beam texture - preview only.
+
 ## Mesh / engine features (need in-game or careful testing)
 
 ### 1. BSPositionData mesh-emitter spawn distribution
