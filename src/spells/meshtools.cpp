@@ -20,9 +20,13 @@ BSD License - see nifskope.h
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QMenu>
 #include <QUrl>
+
+#include <cstring>
+#include <iterator>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
@@ -274,6 +278,435 @@ static int tlOwnerBlock( NifModel * nif, int bn )
 //! Clipboard for whole BSShaderTextureSet contents
 static QStringList tlCopiedTexSet;
 
+
+/*
+ *  BGSM / BGEM material files (Fallout 4, format version 2)
+ *
+ *  Field order follows ousnius' Material Editor. Opening an existing file
+ *  runs a parse -> serialize -> byte-compare round trip; on any mismatch the
+ *  editor opens read-only so a wrong layout can never corrupt a material.
+ */
+
+struct TlMatField
+{
+	const char * name;
+	char type;             // f float, u u32 (hex), y byte, b bool, t texture path, s string
+	const char * cond;     // present only when this earlier bool field is set
+};
+
+static const TlMatField tlMatBase[] = {
+	{ "Tile Flags", 'u', nullptr },
+	{ "UV Offset U", 'f', nullptr }, { "UV Offset V", 'f', nullptr },
+	{ "UV Scale U", 'f', nullptr }, { "UV Scale V", 'f', nullptr },
+	{ "Alpha", 'f', nullptr },
+	{ "Alpha Blend Mode 0", 'y', nullptr }, { "Alpha Blend Mode 1", 'u', nullptr }, { "Alpha Blend Mode 2", 'u', nullptr },
+	{ "Alpha Test Ref", 'y', nullptr }, { "Alpha Test", 'b', nullptr },
+	{ "ZBuffer Write", 'b', nullptr }, { "ZBuffer Test", 'b', nullptr },
+	{ "Screen Space Reflections", 'b', nullptr }, { "Wetness Control SSR", 'b', nullptr },
+	{ "Decal", 'b', nullptr }, { "Two Sided", 'b', nullptr }, { "Decal No Fade", 'b', nullptr }, { "Non Occluder", 'b', nullptr },
+	{ "Refraction", 'b', nullptr }, { "Refraction Falloff", 'b', nullptr }, { "Refraction Power", 'f', nullptr },
+	{ "Environment Mapping", 'b', nullptr }, { "EnvMap Mask Scale", 'f', nullptr },
+	{ "Grayscale To Palette Color", 'b', nullptr }
+};
+
+static const TlMatField tlMatBgsm[] = {
+	{ "Diffuse Texture", 't', nullptr }, { "Normal Texture", 't', nullptr },
+	{ "SmoothSpec Texture", 't', nullptr }, { "Greyscale Texture", 't', nullptr },
+	{ "EnvMap Texture", 't', nullptr }, { "Glow Texture", 't', nullptr },
+	{ "Inner Layer Texture", 't', nullptr }, { "Wrinkles Texture", 't', nullptr },
+	{ "Displacement Texture", 't', nullptr },
+	{ "Enable Editor Alpha Ref", 'b', nullptr },
+	{ "Rim Lighting", 'b', nullptr }, { "Rim Power", 'f', nullptr }, { "Backlight Power", 'f', nullptr },
+	{ "Subsurface Lighting", 'b', nullptr }, { "Subsurface Rolloff", 'f', nullptr },
+	{ "Specular Enabled", 'b', nullptr }, { "Specular Color", 'u', nullptr },
+	{ "Specular Mult", 'f', nullptr }, { "Smoothness", 'f', nullptr },
+	{ "Fresnel Power", 'f', nullptr },
+	{ "Wetness Spec Scale", 'f', nullptr }, { "Wetness Spec Power", 'f', nullptr },
+	{ "Wetness Min Var", 'f', nullptr }, { "Wetness EnvMap Scale", 'f', nullptr },
+	{ "Wetness Fresnel Power", 'f', nullptr }, { "Wetness Metalness", 'f', nullptr },
+	{ "Root Material Path", 's', nullptr },
+	{ "Aniso Lighting", 'b', nullptr }, { "Emit Enabled", 'b', nullptr },
+	{ "Emittance Color", 'u', "Emit Enabled" }, { "Emittance Mult", 'f', nullptr },
+	{ "Model Space Normals", 'b', nullptr }, { "External Emittance", 'b', nullptr },
+	{ "Back Lighting", 'b', nullptr },
+	{ "Receive Shadows", 'b', nullptr }, { "Hide Secret", 'b', nullptr }, { "Cast Shadows", 'b', nullptr },
+	{ "Dissolve Fade", 'b', nullptr }, { "Assume Shadowmask", 'b', nullptr },
+	{ "Glowmap", 'b', nullptr },
+	{ "EnvMap Window", 'b', nullptr }, { "EnvMap Eye", 'b', nullptr },
+	{ "Hair", 'b', nullptr }, { "Hair Tint Color", 'u', nullptr },
+	{ "Tree", 'b', nullptr }, { "Facegen", 'b', nullptr }, { "Skin Tint", 'b', nullptr }, { "Tessellate", 'b', nullptr },
+	{ "Displacement Bias", 'f', nullptr }, { "Displacement Scale", 'f', nullptr },
+	{ "Tessellation PN Scale", 'f', nullptr }, { "Tessellation Base Factor", 'f', nullptr },
+	{ "Tessellation Fade Distance", 'f', nullptr },
+	{ "Grayscale To Palette Scale", 'f', nullptr },
+	{ "Skew Specular Alpha", 'b', nullptr }
+};
+
+static const TlMatField tlMatBgem[] = {
+	{ "Base Texture", 't', nullptr }, { "Grayscale Texture", 't', nullptr },
+	{ "EnvMap Texture", 't', nullptr }, { "Normal Texture", 't', nullptr },
+	{ "EnvMap Mask Texture", 't', nullptr },
+	{ "Blood Enabled", 'b', nullptr }, { "Effect Lighting Enabled", 'b', nullptr },
+	{ "Falloff Enabled", 'b', nullptr }, { "Falloff Color Enabled", 'b', nullptr },
+	{ "Grayscale To Palette Alpha", 'b', nullptr }, { "Soft Enabled", 'b', nullptr },
+	{ "Base Color", 'u', nullptr }, { "Base Color Scale", 'f', nullptr },
+	{ "Falloff Start Angle", 'f', nullptr }, { "Falloff Stop Angle", 'f', nullptr },
+	{ "Falloff Start Opacity", 'f', nullptr }, { "Falloff Stop Opacity", 'f', nullptr },
+	{ "Lighting Influence", 'f', nullptr }, { "EnvMap Min LOD", 'y', nullptr },
+	{ "Soft Depth", 'f', nullptr }
+};
+
+//! Sequential little-endian reader
+struct TlMatCursor
+{
+	const QByteArray * d;
+	int p = 0;
+	bool ok = true;
+	quint32 u32()
+	{
+		if ( p + 4 > d->size() ) { ok = false; return 0; }
+		quint32 v;
+		std::memcpy( &v, d->constData() + p, 4 );
+		p += 4;
+		return v;
+	}
+	float f32()
+	{
+		quint32 v = u32();
+		float f;
+		std::memcpy( &f, &v, 4 );
+		return f;
+	}
+	quint8 u8()
+	{
+		if ( p + 1 > d->size() ) { ok = false; return 0; }
+		return quint8( d->at( p++ ) );
+	}
+	QString str()
+	{
+		quint32 n = u32();
+		if ( !ok || p + int( n ) > d->size() || n > 4096 ) { ok = false; return QString(); }
+		QByteArray b( d->constData() + p, int( n ) );
+		p += int( n );
+		while ( b.endsWith( '\0' ) )
+			b.chop( 1 );
+		return QString::fromLatin1( b );
+	}
+};
+
+static bool tlMatWalk( const TlMatField * spec, int n, TlMatCursor * rd, QByteArray * wr,
+	QVector<QPair<QString, QVariant>> & vals )
+{
+	auto findVal = [&vals]( const char * nm ) -> QVariant {
+		for ( const auto & v : vals ) {
+			if ( v.first == QLatin1String( nm ) )
+				return v.second;
+		}
+		return QVariant();
+	};
+	auto put32 = [wr]( quint32 v ) { wr->append( reinterpret_cast<const char *>( &v ), 4 ); };
+	for ( int i = 0; i < n; i++ ) {
+		const TlMatField & f = spec[i];
+		if ( f.cond && !findVal( f.cond ).toBool() )
+			continue;
+		if ( rd ) {
+			QVariant v;
+			switch ( f.type ) {
+			case 'f': v = double( rd->f32() ); break;
+			case 'u': v = rd->u32(); break;
+			case 'y': v = uint( rd->u8() ); break;
+			case 'b': v = bool( rd->u8() != 0 ); break;
+			default: v = rd->str(); break;
+			}
+			if ( !rd->ok )
+				return false;
+			vals.append( qMakePair( QString::fromLatin1( f.name ), v ) );
+		} else {
+			QVariant v = findVal( f.name );
+			switch ( f.type ) {
+			case 'f': {
+				float fv = float( v.toDouble() );
+				quint32 u;
+				std::memcpy( &u, &fv, 4 );
+				put32( u );
+				break;
+			}
+			case 'u': put32( v.toUInt() ); break;
+			case 'y': wr->append( char( v.toUInt() & 0xff ) ); break;
+			case 'b': wr->append( char( v.toBool() ? 1 : 0 ) ); break;
+			default: {
+				QByteArray s = v.toString().toLatin1();
+				s.append( '\0' );
+				put32( quint32( s.size() ) );
+				wr->append( s );
+				break;
+			}
+			}
+		}
+	}
+	return true;
+}
+
+static bool tlMatParse( const QByteArray & data, bool bgem, QVector<QPair<QString, QVariant>> & vals )
+{
+	TlMatCursor rd{ &data };
+	quint32 sig = rd.u32(), ver = rd.u32();
+	if ( sig != ( bgem ? 0x4D454742u : 0x4D534742u ) || ver != 2 )
+		return false;
+	if ( !tlMatWalk( tlMatBase, int( std::size( tlMatBase ) ), &rd, nullptr, vals ) )
+		return false;
+	const TlMatField * spec = bgem ? tlMatBgem : tlMatBgsm;
+	int n = bgem ? int( std::size( tlMatBgem ) ) : int( std::size( tlMatBgsm ) );
+	if ( !tlMatWalk( spec, n, &rd, nullptr, vals ) )
+		return false;
+	return rd.p == data.size();	// no trailing bytes = full layout coverage
+}
+
+static QByteArray tlMatSerialize( bool bgem, QVector<QPair<QString, QVariant>> & vals )
+{
+	QByteArray out;
+	quint32 sig = bgem ? 0x4D454742u : 0x4D534742u, ver = 2;
+	out.append( reinterpret_cast<const char *>( &sig ), 4 );
+	out.append( reinterpret_cast<const char *>( &ver ), 4 );
+	tlMatWalk( tlMatBase, int( std::size( tlMatBase ) ), nullptr, &out, vals );
+	const TlMatField * spec = bgem ? tlMatBgem : tlMatBgsm;
+	tlMatWalk( spec, bgem ? int( std::size( tlMatBgem ) ) : int( std::size( tlMatBgsm ) ), nullptr, &out, vals );
+	return out;
+}
+
+//! Sensible defaults for a newly created material
+static void tlMatDefaults( bool bgem, QVector<QPair<QString, QVariant>> & vals )
+{
+	auto walkDef = [&vals]( const TlMatField * spec, int n ) {
+		for ( int i = 0; i < n; i++ ) {
+			QVariant v;
+			switch ( spec[i].type ) {
+			case 'f': v = 0.0; break;
+			case 'u': v = 0u; break;
+			case 'y': v = 0u; break;
+			case 'b': v = false; break;
+			default: v = QString(); break;
+			}
+			vals.append( qMakePair( QString::fromLatin1( spec[i].name ), v ) );
+		}
+	};
+	walkDef( tlMatBase, int( std::size( tlMatBase ) ) );
+	const TlMatField * spec = bgem ? tlMatBgem : tlMatBgsm;
+	walkDef( spec, bgem ? int( std::size( tlMatBgem ) ) : int( std::size( tlMatBgsm ) ) );
+	auto set = [&vals]( const char * nm, const QVariant & v ) {
+		for ( auto & p : vals ) {
+			if ( p.first == QLatin1String( nm ) ) { p.second = v; return; }
+		}
+	};
+	set( "UV Scale U", 1.0 );
+	set( "UV Scale V", 1.0 );
+	set( "Alpha", 1.0 );
+	set( "Alpha Test Ref", 128u );
+	set( "ZBuffer Write", true );
+	set( "ZBuffer Test", true );
+	if ( !bgem ) {
+		set( "Specular Enabled", true );
+		set( "Specular Color", 0xFFFFFFFFu );
+		set( "Specular Mult", 1.0 );
+		set( "Smoothness", 0.5 );
+		set( "Fresnel Power", 5.0 );
+		set( "Emittance Mult", 1.0 );
+		set( "Receive Shadows", true );
+		set( "Cast Shadows", true );
+		set( "Grayscale To Palette Scale", 1.0 );
+	} else {
+		set( "Base Color", 0xFFFFFFFFu );
+		set( "Base Color Scale", 1.0 );
+		set( "Falloff Stop Angle", 1.0 );
+		set( "Falloff Stop Opacity", 1.0 );
+		set( "Soft Depth", 100.0 );
+	}
+}
+
+//! Look up a field's type character in the specs
+static char tlMatFieldType( bool bgem, const QString & name )
+{
+	auto find = [&name]( const TlMatField * spec, int n ) -> char {
+		for ( int i = 0; i < n; i++ ) {
+			if ( name == QLatin1String( spec[i].name ) )
+				return spec[i].type;
+		}
+		return 0;
+	};
+	char t = find( tlMatBase, int( std::size( tlMatBase ) ) );
+	if ( !t )
+		t = find( bgem ? tlMatBgem : tlMatBgsm, bgem ? int( std::size( tlMatBgem ) ) : int( std::size( tlMatBgsm ) ) );
+	return t ? t : 's';
+}
+
+//! View / edit / create a Fallout 4 material file in a property-grid dialog
+static void tlOpenMaterialEditor( NifModel * nif, QWidget * parent, const QString & path, bool newBgem = false )
+{
+	bool bgem = path.isEmpty() ? newBgem : path.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive );
+	QVector<QPair<QString, QVariant>> vals;
+	bool readOnly = false;
+	QString title;
+
+	if ( !path.isEmpty() ) {
+		const char * ext = bgem ? ".bgem" : ".bgsm";
+		std::string fullPath = Game::GameManager::get_full_path( path, "materials/", ext );
+		QByteArray data;
+		if ( !nif->getGameResources().get_file( data, fullPath ) || data.isEmpty() ) {
+			QMessageBox::warning( parent, QObject::tr( "Material Editor" ),
+				QObject::tr( "Could not read '%1' from the loaded resources." ).arg( path ) );
+			return;
+		}
+		if ( !tlMatParse( data, bgem, vals ) ) {
+			QMessageBox::warning( parent, QObject::tr( "Material Editor" ),
+				QObject::tr( "'%1' is not a Fallout 4 version-2 material (or uses an unsupported layout)." ).arg( path ) );
+			return;
+		}
+		// round-trip safety gate: refuse to save if our writer would not
+		// reproduce the original file byte for byte
+		if ( tlMatSerialize( bgem, vals ) != data ) {
+			readOnly = true;
+			title = QObject::tr( "Material Editor - %1 [READ ONLY: layout mismatch]" ).arg( path );
+		} else {
+			title = QObject::tr( "Material Editor - %1" ).arg( path );
+		}
+	} else {
+		tlMatDefaults( bgem, vals );
+		title = QObject::tr( "Material Editor - new %1" ).arg( bgem ? "BGEM" : "BGSM" );
+	}
+
+	QDialog dlg( parent );
+	dlg.setWindowTitle( title );
+	QVBoxLayout * lay = new QVBoxLayout( &dlg );
+
+	QSplitter * split = new QSplitter( Qt::Horizontal, &dlg );
+	QTableWidget * grid = new QTableWidget( vals.size(), 2, split );
+	grid->setHorizontalHeaderLabels( { QObject::tr( "Property" ), QObject::tr( "Value" ) } );
+	grid->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
+	grid->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::Stretch );
+	grid->verticalHeader()->setVisible( false );
+	for ( int i = 0; i < vals.size(); i++ ) {
+		QTableWidgetItem * k = new QTableWidgetItem( vals.at( i ).first );
+		k->setFlags( k->flags() & ~Qt::ItemIsEditable );
+		grid->setItem( i, 0, k );
+		char t = tlMatFieldType( bgem, vals.at( i ).first );
+		QTableWidgetItem * v = new QTableWidgetItem;
+		if ( t == 'b' ) {
+			v->setFlags( ( v->flags() | Qt::ItemIsUserCheckable ) & ~Qt::ItemIsEditable );
+			v->setCheckState( vals.at( i ).second.toBool() ? Qt::Checked : Qt::Unchecked );
+		} else if ( t == 'u' ) {
+			v->setText( QString::number( vals.at( i ).second.toUInt(), 16 ) );
+		} else if ( t == 'f' ) {
+			v->setText( QString::number( vals.at( i ).second.toDouble() ) );
+		} else if ( t == 'y' ) {
+			v->setText( QString::number( vals.at( i ).second.toUInt() ) );
+		} else {
+			v->setText( vals.at( i ).second.toString() );
+		}
+		if ( readOnly )
+			v->setFlags( v->flags() & ~( Qt::ItemIsEditable | Qt::ItemIsUserCheckable ) );
+		grid->setItem( i, 1, v );
+	}
+
+	QScrollArea * prev = new QScrollArea( split );
+	prev->setWidgetResizable( true );
+	prev->setMinimumWidth( 260 );
+	{
+		QLabel * l = new QLabel( QObject::tr( "Select a texture property for a preview" ), prev );
+		l->setAlignment( Qt::AlignCenter );
+		l->setWordWrap( true );
+		prev->setWidget( l );
+	}
+	split->addWidget( grid );
+	split->addWidget( prev );
+	split->setStretchFactor( 0, 3 );
+	split->setStretchFactor( 1, 2 );
+	lay->addWidget( split, 1 );
+
+	// preview + double-click texture browsing
+	QObject::connect( grid, &QTableWidget::currentCellChanged, &dlg, [nif, grid, prev, bgem]( int r, int, int, int ) {
+		if ( r < 0 )
+			return;
+		char t = tlMatFieldType( bgem, grid->item( r, 0 )->text() );
+		QString pth = grid->item( r, 1 )->text();
+		if ( QWidget * old = prev->takeWidget() )
+			old->deleteLater();
+		if ( t == 't' && !pth.isEmpty() ) {
+			try {
+				prev->setWidget( new DDSTextureInfo( nif->getGameResources(), pth, prev ) );
+				return;
+			} catch ( ... ) {}
+		}
+		QLabel * l = new QLabel( ( t == 't' && !pth.isEmpty() )
+			? QObject::tr( "Texture not found:\n%1" ).arg( pth )
+			: QObject::tr( "Select a texture property for a preview" ), prev );
+		l->setAlignment( Qt::AlignCenter );
+		l->setWordWrap( true );
+		prev->setWidget( l );
+	} );
+	QObject::connect( grid, &QTableWidget::cellDoubleClicked, &dlg, [nif, grid, bgem, readOnly]( int r, int col ) {
+		if ( readOnly || col != 1 || r < 0 )
+			return;
+		if ( tlMatFieldType( bgem, grid->item( r, 0 )->text() ) != 't' )
+			return;
+		std::set<std::string_view> files;
+		nif->listResourceFiles( files, &tlTexFileFilter );
+		std::string prv( grid->item( r, 1 )->text().replace( QChar( '\\' ), QChar( '/' ) ).toLower().toStdString() );
+		FileBrowserWidget browser( 720, 540, "Select Texture", files, prv, &( nif->getGameResources() ) );
+		if ( browser.exec() == QDialog::Accepted ) {
+			const std::string_view * s = browser.getItemSelected();
+			if ( s && !s->empty() )
+				grid->item( r, 1 )->setText( tlNormalizeResourcePath( QString::fromUtf8( s->data(), qsizetype( s->length() ) ) ) );
+		}
+	} );
+
+	QDialogButtonBox * bb = new QDialogButtonBox( QDialogButtonBox::Save | QDialogButtonBox::Close, &dlg );
+	bb->button( QDialogButtonBox::Save )->setText( QObject::tr( "Save As..." ) );
+	bb->button( QDialogButtonBox::Save )->setEnabled( !readOnly );
+	lay->addWidget( bb );
+	QObject::connect( bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
+	QObject::connect( bb, &QDialogButtonBox::accepted, &dlg, [&dlg, grid, bgem, nif, path]() {
+		// collect the grid back into ordered values
+		QVector<QPair<QString, QVariant>> outVals;
+		for ( int i = 0; i < grid->rowCount(); i++ ) {
+			QString nm = grid->item( i, 0 )->text();
+			char t = tlMatFieldType( bgem, nm );
+			QTableWidgetItem * v = grid->item( i, 1 );
+			QVariant val;
+			if ( t == 'b' )
+				val = ( v->checkState() == Qt::Checked );
+			else if ( t == 'u' )
+				val = v->text().toUInt( nullptr, 16 );
+			else if ( t == 'y' )
+				val = v->text().toUInt();
+			else if ( t == 'f' )
+				val = v->text().toDouble();
+			else
+				val = tlNormalizeResourcePath( v->text() );
+			outVals.append( qMakePair( nm, val ) );
+		}
+		QByteArray out = tlMatSerialize( bgem, outVals );
+		QString base = path.isEmpty() ? QString( bgem ? "new.bgem" : "new.bgsm" )
+			: QFileInfo( QString( path ).replace( QChar( '\\' ), QChar( '/' ) ) ).fileName();
+		QString fn = QFileDialog::getSaveFileName( &dlg, QObject::tr( "Save material" ),
+			QDir( nif->getFolder() ).filePath( base ),
+			bgem ? QObject::tr( "Effect material (*.bgem)" ) : QObject::tr( "Material (*.bgsm)" ) );
+		if ( fn.isEmpty() )
+			return;
+		QFile f( fn );
+		if ( f.open( QIODevice::WriteOnly ) ) {
+			f.write( out );
+			f.close();
+			Message::info( &dlg, QObject::tr( "Saved %1 (%2 bytes). Place it under a loose 'materials' folder the game loads." )
+				.arg( fn ).arg( out.size() ) );
+		} else {
+			QMessageBox::warning( &dlg, QObject::tr( "Material Editor" ), QObject::tr( "Could not write '%1'." ).arg( fn ) );
+		}
+	} );
+
+	dlg.resize( 860, 640 );
+	dlg.exec();
+}
+
 //! Build the Material / Texture Manager panel: live editing, find & replace,
 //! archive browser, drag & drop, texture preview, selection sync
 QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl )
@@ -316,7 +749,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 
 		QSplitter * split = new QSplitter( Qt::Horizontal, panel );
 		TlPathTable * tbl = new TlPathTable( split );
-		tbl->setHorizontalHeaderLabels( { QObject::tr( "Owner node" ), QObject::tr( "Field" ), QObject::tr( "Path (editable, drag && drop)" ) } );
+		tbl->setHorizontalHeaderLabels( { QObject::tr( "Owner node" ), QObject::tr( "Material" ), QObject::tr( "Path (editable, drag && drop)" ) } );
 		tbl->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
 		tbl->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
 		tbl->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
@@ -352,6 +785,8 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		auto applyVis = [tbl, edFilter, collapsed]() {
 			QString f = edFilter->text();
 			QSet<int> seen;
+			bool wasSorting = tbl->isSortingEnabled();
+			tbl->setSortingEnabled( false );
 			for ( int r = 0; r < tbl->rowCount(); r++ ) {
 				bool match = f.isEmpty();
 				for ( int c = 0; c < 3 && !match; c++ ) {
@@ -359,19 +794,26 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 						match = it->text().contains( f, Qt::CaseInsensitive );
 				}
 				bool hide = !match;
-				if ( !hide ) {
-					if ( QTableWidgetItem * c0 = tbl->item( r, 0 ) ) {
-						int owner = c0->data( Qt::UserRole ).toInt();
-						if ( collapsed->contains( owner ) ) {
-							if ( seen.contains( owner ) )
-								hide = true;	// only the first row of a folded node stays
-							else
-								seen.insert( owner );
-						}
+				if ( QTableWidgetItem * c0 = tbl->item( r, 0 ) ) {
+					int owner = c0->data( Qt::UserRole ).toInt();
+					bool folded = collapsed->contains( owner );
+					if ( !hide && folded ) {
+						if ( seen.contains( owner ) )
+							hide = true;	// only the first row of a folded node stays
+						else
+							seen.insert( owner );
 					}
+					// fold indicator on the owner cell
+					QString base = c0->data( Qt::UserRole + 2 ).toString();
+					QString want = ( folded ? QStringLiteral( "▸ " ) : QStringLiteral( "▾ " ) ) + base;
+					if ( base.isEmpty() )
+						want.clear();
+					if ( c0->text() != want )
+						c0->setText( want );
 				}
 				tbl->setRowHidden( r, hide );
 			}
+			tbl->setSortingEnabled( wasSorting );
 		};
 
 		// object-mode selection colours, mirroring the block list (active
@@ -435,6 +877,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 				QTableWidgetItem * c0 = new QTableWidgetItem( owners.at( i ) );
 				c0->setFlags( c0->flags() & ~Qt::ItemIsEditable );
 				c0->setData( Qt::UserRole, ownerNums.at( i ) );	// owning NiAVObject
+				c0->setData( Qt::UserRole + 2, owners.at( i ) );	// base label for the fold indicator
 				tbl->setItem( i, 0, c0 );
 				QTableWidgetItem * c1 = new QTableWidgetItem( labels.at( i ) );
 				c1->setFlags( c1->flags() & ~Qt::ItemIsEditable );
@@ -487,17 +930,27 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		// selecting a row jumps to the node using the path and previews textures;
 		// material files list the .dds paths they reference
 		QObject::connect( tbl, &QTableWidget::currentCellChanged, panel,
-			[nif, tbl, applying, mw, prevScroll]( int r, int, int, int ) {
+			[nif, tbl, rows, applying, mw, prevScroll]( int r, int col, int, int ) {
 			if ( *applying || r < 0 )
 				return;
 			QTableWidgetItem * c0 = tbl->item( r, 0 );	// owner
-			QTableWidgetItem * c1 = tbl->item( r, 1 );	// field
+			QTableWidgetItem * c1 = tbl->item( r, 1 );	// material/field
 			QTableWidgetItem * c2 = tbl->item( r, 2 );	// path
 			if ( c0 && c1 && mw ) {
+				// column-aware navigation: owner -> node, material -> containing
+				// block, path -> the exact string field in Block Details
 				int owner = c0->data( Qt::UserRole ).toInt();
 				int bn = c1->data( Qt::UserRole + 1 ).toInt();
-				QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection,
-					Q_ARG( QModelIndex, nif->getBlockIndex( owner >= 0 ? owner : bn ) ) );
+				int i = c1->data( Qt::UserRole ).toInt();
+				QModelIndex target;
+				if ( col == 0 )
+					target = nif->getBlockIndex( owner >= 0 ? owner : bn );
+				else if ( col == 1 )
+					target = nif->getBlockIndex( bn );
+				else if ( i >= 0 && i < rows->size() )
+					target = QModelIndex( rows->at( i ) );
+				if ( target.isValid() )
+					QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection, Q_ARG( QModelIndex, target ) );
 			}
 			// preview on the right
 			if ( QWidget * old = prevScroll->takeWidget() )
@@ -660,6 +1113,13 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			QAction * aBrowse = menu.addAction( QObject::tr( "Browse Archives..." ) );
 			QAction * aOpenExt = menu.addAction( QObject::tr( "Open in Default Application" ) );
 			aOpenExt->setEnabled( !c2->text().isEmpty() );
+			bool rowIsMat = c2->text().endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
+			                || c2->text().endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive );
+			QAction * aEditMat = menu.addAction( QObject::tr( "Edit Material..." ) );
+			aEditMat->setEnabled( rowIsMat );
+			QAction * aNewMat = menu.addAction( QObject::tr( "New Material (.bgsm)..." ) );
+			QAction * aNewEff = menu.addAction( QObject::tr( "New Effect Material (.bgem)..." ) );
+			QAction * aAttach = menu.addAction( QObject::tr( "Attach Material to This Field..." ) );
 			QAction * aClear = menu.addAction( QObject::tr( "Clear Path" ) );
 			menu.addSeparator();
 			QAction * aCopy = menu.addAction( QObject::tr( "Copy Path" ) );
@@ -712,6 +1172,23 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 					}
 				} else {
 					Message::info( tbl, QObject::tr( "Could not read '%1' from the loaded resources." ).arg( pth ) );
+				}
+			} else if ( sel == aEditMat ) {
+				tlOpenMaterialEditor( nif, tbl, c2->text() );
+			} else if ( sel == aNewMat ) {
+				tlOpenMaterialEditor( nif, tbl, QString(), false );
+			} else if ( sel == aNewEff ) {
+				tlOpenMaterialEditor( nif, tbl, QString(), true );
+			} else if ( sel == aAttach ) {
+				// pick a .bgsm/.bgem from the archives and assign it to this field
+				std::set<std::string_view> files;
+				nif->listResourceFiles( files, &tlMatFileFilter );
+				std::string prv( QString( c2->text() ).replace( QChar( '\\' ), QChar( '/' ) ).toLower().toStdString() );
+				FileBrowserWidget browser( 720, 540, "Select Material", files, prv, &( nif->getGameResources() ) );
+				if ( browser.exec() == QDialog::Accepted ) {
+					const std::string_view * s = browser.getItemSelected();
+					if ( s && !s->empty() )
+						c2->setText( QString::fromUtf8( s->data(), qsizetype( s->length() ) ) );
 				}
 			} else if ( sel == aClear ) {
 				c2->setText( QString() );

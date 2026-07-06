@@ -2222,6 +2222,12 @@ Vector3 GLView::gizmoPivotPoint( const QModelIndex & iBlock ) const
 		return pickedMedian();
 	if ( gizmoPivot == 3 )
 		return cursorPos;
+	if ( gizmoPivot == 4 && objActive >= 0 ) {
+		// active (last selected) object's origin: multi-selections orbit it
+		Node * an = scene->getNode( model, model->getBlockIndex( objActive ) );
+		if ( an )
+			return an->worldTrans().translation;
+	}
 
 	Node * n = scene->getNode( model, iBlock );
 	if ( !n )

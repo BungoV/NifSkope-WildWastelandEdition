@@ -628,12 +628,13 @@ void NifSkope::initDockWidgets()
 
 	QMenu * mPivot = new QMenu( tr( "Transform Pivot Point" ), this );
 	QActionGroup * grpPivot = new QActionGroup( this );
-	const char * pivotNames[4] = {
+	const char * pivotNames[5] = {
 		QT_TR_NOOP( "Node Origin" ), QT_TR_NOOP( "Bounding Box Center" ),
-		QT_TR_NOOP( "Median Point" ), QT_TR_NOOP( "3D Cursor" )
+		QT_TR_NOOP( "Median Point" ), QT_TR_NOOP( "3D Cursor" ),
+		QT_TR_NOOP( "Active Element (Last Selected)" )
 	};
-	const char * pivotIcons[4] = { "pivot_origin", "pivot_bounds", "pivot_median", "pivot_cursor" };
-	for ( int i = 0; i < 4; i++ ) {
+	const char * pivotIcons[5] = { "pivot_origin", "pivot_bounds", "pivot_median", "pivot_cursor", "pivot_bounds" };
+	for ( int i = 0; i < 5; i++ ) {
 		QAction * a = mPivot->addAction( tlMakeIcon( QLatin1String( pivotIcons[i] ), icoColHdr ), tr( pivotNames[i] ) );
 		a->setCheckable( true );
 		a->setChecked( i == 0 );
@@ -2055,9 +2056,11 @@ void NifSkope::contextMenu( const QPoint & pos )
 			aLinked->setEnabled( !ogl->pickedElems.isEmpty() );
 		}
 		if ( idx.isValid() ) {
+			// flatten the spell categories into the bottom of this menu
 			menu.addSeparator();
-			contextBook.setTitle( tr( "Spells" ) );
-			menu.addMenu( &contextBook );
+			const auto spellActs = contextBook.actions();
+			for ( QAction * a : spellActs )
+				menu.addAction( a );
 		}
 		menu.exec( p );
 		return;
