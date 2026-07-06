@@ -5096,8 +5096,9 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		}
 	}
 
-	// edit mode: right-click drops the 3D cursor on the surface (Blender style)
-	if ( editMode && event->button() == Qt::RightButton
+	// Shift+right-click drops the 3D cursor on the surface in ANY mode
+	// (Blender); plain right-click keeps its usual behaviour in edit mode too
+	if ( event->button() == Qt::RightButton && ( event->modifiers() & Qt::ShiftModifier )
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
 		placeCursor( getQMouseEventPosition( event ) );
 		gizmoSwallowClick = true;

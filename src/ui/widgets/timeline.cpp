@@ -134,12 +134,23 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		tri( true, 12, 30, 32, 14 );
 		diamond( QPointF( 46, 32 ), 10 );
 	} else if ( id == QLatin1String( "magnet" ) ) {
+		// Blender-style horseshoe magnet: tilted, darker body, bright pole tips
+		p.save();
+		p.translate( 32, 34 );
+		p.rotate( -40.0 );
 		p.setBrush( Qt::NoBrush );
-		QPen mp( col, 10 );
+		QColor body = col.darker( 145 );
+		QPen mp( body, 11 );
+		mp.setCapStyle( Qt::FlatCap );
 		p.setPen( mp );
-		p.drawArc( QRectF( 15, 12, 34, 34 ), 0, 180 * 16 );
-		p.drawLine( QPointF( 20, 29 ), QPointF( 20, 48 ) );
-		p.drawLine( QPointF( 44, 29 ), QPointF( 44, 48 ) );
+		p.drawArc( QRectF( -16, -24, 32, 32 ), 0, 180 * 16 );
+		p.drawLine( QPointF( -16, -8 ), QPointF( -16, 10 ) );
+		p.drawLine( QPointF( 16, -8 ), QPointF( 16, 10 ) );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawRect( QRectF( -21.5, 10, 11, 9 ) );
+		p.drawRect( QRectF( 10.5, 10, 11, 9 ) );
+		p.restore();
 	} else if ( id == QLatin1String( "target" ) ) {
 		p.setBrush( Qt::NoBrush );
 		p.drawEllipse( QPointF( 32, 32 ), 16, 16 );

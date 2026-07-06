@@ -879,8 +879,16 @@ void NifSkope::initDockWidgets()
 			QToolButton * btnSnap = new QToolButton( this );
 			btnSnap->setPopupMode( QToolButton::InstantPopup );
 			btnSnap->setAutoRaise( true );
-			btnSnap->setIcon( tlMakeIcon( QStringLiteral( "chevron_down" ), QColor( 228, 228, 232 ) ) );
 			btnSnap->setToolTip( tr( "Snapping options" ) );
+			// the button shows the active snap target's icon (Blender)
+			{
+				const auto tgtActsIco = grpSnapTgt->actions();
+				for ( QAction * ta : tgtActsIco ) {
+					connect( ta, &QAction::triggered, [btnSnap, ta]() { btnSnap->setIcon( ta->icon() ); } );
+					if ( ta->isChecked() )
+						btnSnap->setIcon( ta->icon() );
+				}
+			}
 
 			QMenu * snapMenu = new QMenu( btnSnap );
 			QWidget * panel = new QWidget( snapMenu );

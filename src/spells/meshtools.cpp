@@ -17,7 +17,12 @@ BSD License - see nifskope.h
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QMenu>
+#include <QUrl>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
@@ -238,13 +243,30 @@ static QStringList tlScanMaterialTextures( const QByteArray & data )
 	return out;
 }
 
-//! Nearest NiAVObject whose child links contain the given block, or -1
+//! Nearest NiAVObject reachable by walking the link graph upward from the
+//! given block (transitive: BSShaderTextureSet -> shader property -> shape)
 static int tlOwnerBlock( NifModel * nif, int bn )
 {
-	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
-		if ( nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" )
-			&& nif->getChildLinks( b ).contains( bn ) )
-			return b;
+	QSet<int> visited;
+	QVector<int> frontier;
+	frontier.append( bn );
+	for ( int depth = 0; depth < 8 && !frontier.isEmpty(); depth++ ) {
+		QVector<int> next;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			const auto links = nif->getChildLinks( b );
+			for ( int f : frontier ) {
+				if ( !links.contains( f ) )
+					continue;
+				if ( nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" ) )
+					return b;
+				if ( !visited.contains( b ) ) {
+					visited.insert( b );
+					next.append( b );
+				}
+				break;
+			}
+		}
+		frontier = next;
 	}
 	return -1;
 }
@@ -294,7 +316,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 
 		QSplitter * split = new QSplitter( Qt::Horizontal, panel );
 		TlPathTable * tbl = new TlPathTable( split );
-		tbl->setHorizontalHeaderLabels( { QObject::tr( "Field" ), QObject::tr( "Owner node" ), QObject::tr( "Path (editable, drag && drop)" ) } );
+		tbl->setHorizontalHeaderLabels( { QObject::tr( "Owner node" ), QObject::tr( "Field" ), QObject::tr( "Path (editable, drag && drop)" ) } );
 		tbl->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
 		tbl->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
 		tbl->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
@@ -324,12 +346,40 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		auto rows = std::make_shared<QVector<QPersistentModelIndex>>();
 		auto applying = std::make_shared<bool>( false );
 
+		// row visibility: text filter + per-node collapsed groups (double-click
+		// the owner column, or use the context menu, to fold a node's rows)
+		auto collapsed = std::make_shared<QSet<int>>();
+		auto applyVis = [tbl, edFilter, collapsed]() {
+			QString f = edFilter->text();
+			QSet<int> seen;
+			for ( int r = 0; r < tbl->rowCount(); r++ ) {
+				bool match = f.isEmpty();
+				for ( int c = 0; c < 3 && !match; c++ ) {
+					if ( QTableWidgetItem * it = tbl->item( r, c ) )
+						match = it->text().contains( f, Qt::CaseInsensitive );
+				}
+				bool hide = !match;
+				if ( !hide ) {
+					if ( QTableWidgetItem * c0 = tbl->item( r, 0 ) ) {
+						int owner = c0->data( Qt::UserRole ).toInt();
+						if ( collapsed->contains( owner ) ) {
+							if ( seen.contains( owner ) )
+								hide = true;	// only the first row of a folded node stays
+							else
+								seen.insert( owner );
+						}
+					}
+				}
+				tbl->setRowHidden( r, hide );
+			}
+		};
+
 		// object-mode selection colours, mirroring the block list (active
 		// light blue + #FF9D00, secondary dark blue + #FF7200)
 		auto recolor = [tbl, ogl, applying]() {
 			*applying = true;
 			for ( int r = 0; r < tbl->rowCount(); r++ ) {
-				QTableWidgetItem * c1 = tbl->item( r, 1 );
+				QTableWidgetItem * c1 = tbl->item( r, 0 );	// owner column
 				QTableWidgetItem * c2 = tbl->item( r, 2 );
 				if ( !c1 || !c2 )
 					continue;
@@ -350,7 +400,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			*applying = false;
 		};
 
-		auto rebuild = [nif, tbl, rows, applying, recolor]() {
+		auto rebuild = [nif, tbl, rows, applying, recolor, applyVis]() {
 			*applying = true;
 			tbl->setSortingEnabled( false );
 			tbl->setRowCount( 0 );
@@ -363,11 +413,16 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 				int before = items.size();
 				tlCollectResourceStrings( nif, iBlock, items, labels, owners, QString(), head );
 				if ( items.size() > before ) {
-					QString ownerNode = tlOwnerLabel( nif, iBlock );
-					int ownerNum = tlOwnerBlock( nif, b );
-					// a shader/texture path inside an AVObject block belongs to it
-					if ( nif->blockInherits( iBlock, "NiAVObject" ) )
-						ownerNum = b;
+					// a shader/texture path inside an AVObject block belongs to it;
+					// otherwise walk the link graph up to the nearest one
+					int ownerNum = nif->blockInherits( iBlock, "NiAVObject" ) ? b : tlOwnerBlock( nif, b );
+					QString ownerNode;
+					if ( ownerNum >= 0 ) {
+						QModelIndex iOwner = nif->getBlockIndex( ownerNum );
+						QString nm = nif->resolveString( iOwner, "Name" );
+						ownerNode = QString( "%1 %2%3" ).arg( ownerNum ).arg( nif->itemName( iOwner ),
+							nm.isEmpty() ? QString() : QStringLiteral( " \"" ) + nm + QStringLiteral( "\"" ) );
+					}
 					for ( int k = before; k < owners.size(); k++ ) {
 						owners[k] = ownerNode;
 						blockNums.append( b );
@@ -377,14 +432,14 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			}
 			tbl->setRowCount( items.size() );
 			for ( int i = 0; i < items.size(); i++ ) {
-				QTableWidgetItem * c0 = new QTableWidgetItem( labels.at( i ) );
+				QTableWidgetItem * c0 = new QTableWidgetItem( owners.at( i ) );
 				c0->setFlags( c0->flags() & ~Qt::ItemIsEditable );
-				c0->setData( Qt::UserRole, i );	// stable back-reference after sorting
-				c0->setData( Qt::UserRole + 1, blockNums.at( i ) );	// containing block
+				c0->setData( Qt::UserRole, ownerNums.at( i ) );	// owning NiAVObject
 				tbl->setItem( i, 0, c0 );
-				QTableWidgetItem * c1 = new QTableWidgetItem( owners.at( i ) );
+				QTableWidgetItem * c1 = new QTableWidgetItem( labels.at( i ) );
 				c1->setFlags( c1->flags() & ~Qt::ItemIsEditable );
-				c1->setData( Qt::UserRole, ownerNums.at( i ) );	// owning NiAVObject
+				c1->setData( Qt::UserRole, i );	// stable back-reference after sorting
+				c1->setData( Qt::UserRole + 1, blockNums.at( i ) );	// containing block
 				tbl->setItem( i, 1, c1 );
 				QString path = nif->resolveString( QModelIndex( items.at( i ) ) );
 				QTableWidgetItem * c2 = new QTableWidgetItem( path );
@@ -399,6 +454,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			tbl->setSortingEnabled( true );
 			*applying = false;
 			recolor();
+			applyVis();
 		};
 
 		// live apply with path normalization; this replaces the old
@@ -414,7 +470,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			it->setData( Qt::UserRole, missing );
 			it->setForeground( missing ? QBrush( QColor( 235, 90, 90 ) ) : QBrush() );
 			*applying = false;
-			QTableWidgetItem * c0 = tbl->item( it->row(), 0 );
+			QTableWidgetItem * c0 = tbl->item( it->row(), 1 );	// field column
 			if ( !c0 )
 				return;
 			int i = c0->data( Qt::UserRole ).toInt();
@@ -434,12 +490,12 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			[nif, tbl, applying, mw, prevScroll]( int r, int, int, int ) {
 			if ( *applying || r < 0 )
 				return;
-			QTableWidgetItem * c0 = tbl->item( r, 0 );
-			QTableWidgetItem * c1 = tbl->item( r, 1 );
-			QTableWidgetItem * c2 = tbl->item( r, 2 );
+			QTableWidgetItem * c0 = tbl->item( r, 0 );	// owner
+			QTableWidgetItem * c1 = tbl->item( r, 1 );	// field
+			QTableWidgetItem * c2 = tbl->item( r, 2 );	// path
 			if ( c0 && c1 && mw ) {
-				int owner = c1->data( Qt::UserRole ).toInt();
-				int bn = c0->data( Qt::UserRole + 1 ).toInt();
+				int owner = c0->data( Qt::UserRole ).toInt();
+				int bn = c1->data( Qt::UserRole + 1 ).toInt();
 				QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection,
 					Q_ARG( QModelIndex, nif->getBlockIndex( owner >= 0 ? owner : bn ) ) );
 			}
@@ -504,9 +560,22 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			}
 		};
 		QObject::connect( btnBrowse, &QPushButton::clicked, panel, browseRow );
-		QObject::connect( tbl, &QTableWidget::cellDoubleClicked, panel, [browseRow]( int, int col ) {
-			if ( col != 2 )
-				browseRow();	// double-click Field/Owner opens the browser too
+		QObject::connect( tbl, &QTableWidget::cellDoubleClicked, panel,
+			[tbl, browseRow, collapsed, applyVis]( int r, int col ) {
+			if ( col == 1 ) {
+				browseRow();	// double-click Field opens the archive browser
+			} else if ( col == 0 ) {
+				// double-click Owner folds/unfolds that node's rows
+				QTableWidgetItem * c0 = tbl->item( r, 0 );
+				if ( !c0 )
+					return;
+				int owner = c0->data( Qt::UserRole ).toInt();
+				if ( collapsed->contains( owner ) )
+					collapsed->remove( owner );
+				else
+					collapsed->insert( owner );
+				applyVis();
+			}
 		} );
 
 		QObject::connect( btnReplace, &QPushButton::clicked, panel, [tbl, edFind, edRepl, btnReplace]() {
@@ -525,24 +594,13 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			btnReplace->setText( QObject::tr( "Replace All (%1 changed)" ).arg( n ) );
 		} );
 
-		// live row filter
-		QObject::connect( edFilter, &QLineEdit::textChanged, panel, [tbl]( const QString & f ) {
-			for ( int r = 0; r < tbl->rowCount(); r++ ) {
-				bool match = f.isEmpty();
-				for ( int c = 0; c < 3 && !match; c++ ) {
-					if ( QTableWidgetItem * it = tbl->item( r, c ) )
-						match = it->text().contains( f, Qt::CaseInsensitive );
-				}
-				tbl->setRowHidden( r, !match );
-			}
-		} );
+		// live row filter (combined with the fold state)
+		QObject::connect( edFilter, &QLineEdit::textChanged, panel, applyVis );
 
 		// group rows by their owning node
-		QObject::connect( cbGroup, &QCheckBox::toggled, panel, [tbl]( bool on ) {
-			if ( on )
-				tbl->sortItems( 1 );
-			else
-				tbl->sortItems( 0 );
+		QObject::connect( cbGroup, &QCheckBox::toggled, panel, [tbl, applyVis]( bool on ) {
+			tbl->sortItems( on ? 0 : 1 );
+			applyVis();
 		} );
 
 		// bulk folder retarget: swap a path prefix everywhere it matches
@@ -569,34 +627,48 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			Message::info( panel, QObject::tr( "Retargeted %1 path(s)." ).arg( n ) );
 		} );
 
-		// right-click menu: browse, clear, copy/paste, navigation, texture sets
+		// right-click menu: contextual reveal (depends on the clicked column),
+		// browse, clear, copy/paste, fold, open externally, texture sets
 		QObject::connect( tbl, &QTableWidget::customContextMenuRequested, panel,
-			[nif, tbl, rows, mw, browseRow, rebuild]( const QPoint & pos ) {
+			[nif, tbl, rows, mw, browseRow, rebuild, collapsed, applyVis]( const QPoint & pos ) {
 			QTableWidgetItem * hit = tbl->itemAt( pos );
 			if ( !hit )
 				return;
 			int r = hit->row();
+			int hitCol = hit->column();
 			tbl->setCurrentCell( r, 2 );
-			QTableWidgetItem * c0 = tbl->item( r, 0 );
-			QTableWidgetItem * c1 = tbl->item( r, 1 );
-			QTableWidgetItem * c2 = tbl->item( r, 2 );
+			QTableWidgetItem * c0 = tbl->item( r, 0 );	// owner
+			QTableWidgetItem * c1 = tbl->item( r, 1 );	// field
+			QTableWidgetItem * c2 = tbl->item( r, 2 );	// path
 			if ( !c0 || !c1 || !c2 )
 				return;
-			int i = c0->data( Qt::UserRole ).toInt();
-			int bn = c0->data( Qt::UserRole + 1 ).toInt();
-			int owner = c1->data( Qt::UserRole ).toInt();
+			int i = c1->data( Qt::UserRole ).toInt();
+			int bn = c1->data( Qt::UserRole + 1 ).toInt();
+			int owner = c0->data( Qt::UserRole ).toInt();
 			bool isTexSet = ( nif->itemName( nif->getBlockIndex( bn ) ) == QLatin1String( "BSShaderTextureSet" ) );
 
 			QMenu menu( tbl );
+			// the first entry depends on which column was right-clicked
+			QAction * aReveal;
+			if ( hitCol == 0 )
+				aReveal = menu.addAction( QObject::tr( "Jump to Owner Node" ) );
+			else if ( hitCol == 1 )
+				aReveal = menu.addAction( QObject::tr( "Reveal Containing Block" ) );
+			else
+				aReveal = menu.addAction( QObject::tr( "Reveal Path Field in Block Details" ) );
+			menu.addSeparator();
 			QAction * aBrowse = menu.addAction( QObject::tr( "Browse Archives..." ) );
+			QAction * aOpenExt = menu.addAction( QObject::tr( "Open in Default Application" ) );
+			aOpenExt->setEnabled( !c2->text().isEmpty() );
 			QAction * aClear = menu.addAction( QObject::tr( "Clear Path" ) );
 			menu.addSeparator();
 			QAction * aCopy = menu.addAction( QObject::tr( "Copy Path" ) );
 			QAction * aPaste = menu.addAction( QObject::tr( "Paste Path" ) );
 			aPaste->setEnabled( !QApplication::clipboard()->text().isEmpty() );
 			menu.addSeparator();
-			QAction * aJump = menu.addAction( QObject::tr( "Jump to Node" ) );
-			QAction * aReveal = menu.addAction( QObject::tr( "Reveal in Block Details" ) );
+			QAction * aFold = menu.addAction( collapsed->contains( owner )
+				? QObject::tr( "Expand This Node's Rows" ) : QObject::tr( "Fold This Node's Rows" ) );
+			aFold->setEnabled( owner >= 0 );
 			menu.addSeparator();
 			QAction * aCopySet = menu.addAction( QObject::tr( "Copy Texture Set" ) );
 			aCopySet->setEnabled( isTexSet );
@@ -606,21 +678,53 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			QAction * sel = menu.exec( tbl->viewport()->mapToGlobal( pos ) );
 			if ( !sel )
 				return;
-			if ( sel == aBrowse ) {
+			if ( sel == aReveal && mw ) {
+				QModelIndex target;
+				if ( hitCol == 0 )
+					target = nif->getBlockIndex( owner >= 0 ? owner : bn );
+				else if ( hitCol == 1 )
+					target = nif->getBlockIndex( bn );
+				else if ( i >= 0 && i < rows->size() )
+					target = QModelIndex( rows->at( i ) );
+				if ( target.isValid() )
+					QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection, Q_ARG( QModelIndex, target ) );
+			} else if ( sel == aBrowse ) {
 				browseRow();
+			} else if ( sel == aOpenExt ) {
+				// extract from the archives to temp and open with the default app
+				QString pth = c2->text();
+				QString low = pth.toLower();
+				const char * fld = ( low.endsWith( QLatin1String( ".bgsm" ) ) || low.endsWith( QLatin1String( ".bgem" ) ) )
+					? "materials/" : "textures/";
+				const char * ext = low.endsWith( QLatin1String( ".bgem" ) ) ? ".bgem"
+					: low.endsWith( QLatin1String( ".bgsm" ) ) ? ".bgsm"
+					: low.endsWith( QLatin1String( ".tga" ) ) ? ".tga" : ".dds";
+				std::string fullPath = Game::GameManager::get_full_path( pth, fld, ext );
+				QByteArray data;
+				if ( nif->getGameResources().get_file( data, fullPath ) && !data.isEmpty() ) {
+					QString tmp = QDir::temp().filePath(
+						QFileInfo( QString( pth ).replace( QChar( '\\' ), QChar( '/' ) ) ).fileName() );
+					QFile f( tmp );
+					if ( f.open( QIODevice::WriteOnly ) ) {
+						f.write( data );
+						f.close();
+						QDesktopServices::openUrl( QUrl::fromLocalFile( tmp ) );
+					}
+				} else {
+					Message::info( tbl, QObject::tr( "Could not read '%1' from the loaded resources." ).arg( pth ) );
+				}
 			} else if ( sel == aClear ) {
 				c2->setText( QString() );
 			} else if ( sel == aCopy ) {
 				QApplication::clipboard()->setText( c2->text() );
 			} else if ( sel == aPaste ) {
 				c2->setText( QApplication::clipboard()->text() );
-			} else if ( sel == aJump && mw ) {
-				QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection,
-					Q_ARG( QModelIndex, nif->getBlockIndex( owner >= 0 ? owner : bn ) ) );
-			} else if ( sel == aReveal && mw && i >= 0 && i < rows->size() ) {
-				QModelIndex idx( rows->at( i ) );
-				if ( idx.isValid() )
-					QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection, Q_ARG( QModelIndex, idx ) );
+			} else if ( sel == aFold ) {
+				if ( collapsed->contains( owner ) )
+					collapsed->remove( owner );
+				else
+					collapsed->insert( owner );
+				applyVis();
 			} else if ( sel == aCopySet ) {
 				tlCopiedTexSet.clear();
 				QModelIndex iTex = nif->getIndex( nif->getBlockIndex( bn ), "Textures" );
@@ -637,7 +741,15 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			}
 		} );
 
-		QObject::connect( btnRefresh, &QPushButton::clicked, panel, rebuild );
+		// Refresh re-scans the NIF's paths AND flushes the GL texture cache so
+		// textures edited on disk reload in the viewport and the preview
+		QObject::connect( btnRefresh, &QPushButton::clicked, panel, [rebuild, ogl]() {
+			if ( ogl ) {
+				ogl->flush();
+				ogl->update();
+			}
+			rebuild();
+		} );
 		// rebuild when a different file is loaded, or when the panel is opened
 		QObject::connect( nif, &QAbstractItemModel::modelReset, dock, [dock, rebuild]() {
 			if ( dock->isVisible() )
