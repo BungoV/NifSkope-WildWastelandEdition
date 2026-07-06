@@ -607,13 +607,15 @@ void NifSkope::initDockWidgets()
 	ui->mRender->addAction( aGizmoHandles );
 
 	// Blender-style transform orientation / pivot point selectors
+	const QColor icoColHdr( 228, 228, 232 );
 	QMenu * mOrient = new QMenu( tr( "Transform Orientation" ), this );
 	QActionGroup * grpOrient = new QActionGroup( this );
 	const char * orientNames[4] = {
 		QT_TR_NOOP( "Global" ), QT_TR_NOOP( "Local" ), QT_TR_NOOP( "Parent" ), QT_TR_NOOP( "View" )
 	};
+	const char * orientIcons[4] = { "orient_global", "orient_local", "orient_parent", "orient_view" };
 	for ( int i = 0; i < 4; i++ ) {
-		QAction * a = mOrient->addAction( tr( orientNames[i] ) );
+		QAction * a = mOrient->addAction( tlMakeIcon( QLatin1String( orientIcons[i] ), icoColHdr ), tr( orientNames[i] ) );
 		a->setCheckable( true );
 		a->setChecked( i == 0 );
 		grpOrient->addAction( a );
@@ -627,11 +629,12 @@ void NifSkope::initDockWidgets()
 	QMenu * mPivot = new QMenu( tr( "Transform Pivot Point" ), this );
 	QActionGroup * grpPivot = new QActionGroup( this );
 	const char * pivotNames[4] = {
-		QT_TR_NOOP( "Node Origin" ), QT_TR_NOOP( "Bounding Center" ),
-		QT_TR_NOOP( "Picked Elements Median" ), QT_TR_NOOP( "3D Cursor" )
+		QT_TR_NOOP( "Node Origin" ), QT_TR_NOOP( "Bounding Box Center" ),
+		QT_TR_NOOP( "Median Point" ), QT_TR_NOOP( "3D Cursor" )
 	};
+	const char * pivotIcons[4] = { "pivot_origin", "pivot_bounds", "pivot_median", "pivot_cursor" };
 	for ( int i = 0; i < 4; i++ ) {
-		QAction * a = mPivot->addAction( tr( pivotNames[i] ) );
+		QAction * a = mPivot->addAction( tlMakeIcon( QLatin1String( pivotIcons[i] ), icoColHdr ), tr( pivotNames[i] ) );
 		a->setCheckable( true );
 		a->setChecked( i == 0 );
 		grpPivot->addAction( a );
@@ -830,26 +833,37 @@ void NifSkope::initDockWidgets()
 	{
 		ui->tRender->addSeparator();
 
-		// Blender-style dropdowns: a flat button showing the current choice,
-		// opening the checkable menu with a section title
-		auto makeDropdown = [this]( QMenu * menu, QActionGroup * grp, const QString & section, const QString & tip ) {
+		// Blender-style dropdowns: a flat button showing the current choice's
+		// icon (and text, where Blender shows text), opening the checkable
+		// menu with a section title
+		auto makeDropdown = [this]( QMenu * menu, QActionGroup * grp, const QString & section,
+			const QString & tip, bool showText ) {
 			menu->insertSection( menu->actions().value( 0 ), section );
 			QToolButton * btn = new QToolButton( this );
 			btn->setPopupMode( QToolButton::InstantPopup );
 			btn->setAutoRaise( true );
 			btn->setToolTip( tip );
 			btn->setMenu( menu );
+			btn->setToolButtonStyle( showText ? Qt::ToolButtonTextBesideIcon : Qt::ToolButtonIconOnly );
 			const auto acts = grp->actions();
 			for ( QAction * a : acts ) {
-				QObject::connect( a, &QAction::triggered, [btn, a]() { btn->setText( a->text() ); } );
-				if ( a->isChecked() )
-					btn->setText( a->text() );
+				QObject::connect( a, &QAction::triggered, [btn, a, showText]() {
+					btn->setIcon( a->icon() );
+					if ( showText )
+						btn->setText( a->text() );
+				} );
+				if ( a->isChecked() ) {
+					btn->setIcon( a->icon() );
+					if ( showText )
+						btn->setText( a->text() );
+				}
 			}
 			ui->tRender->addWidget( btn );
 			return btn;
 		};
-		makeDropdown( mOrient, grpOrient, tr( "Transform Orientations" ), tr( "Transform orientation" ) );
-		makeDropdown( mPivot, grpPivot, tr( "Transform Pivot Point" ), tr( "Transform pivot point" ) );
+		// Blender shows text on the orientation selector, icon-only on pivot
+		makeDropdown( mOrient, grpOrient, tr( "Transform Orientations" ), tr( "Transform orientation" ), true );
+		makeDropdown( mPivot, grpPivot, tr( "Transform Pivot Point" ), tr( "Transform pivot point" ), false );
 
 		QToolButton * btnMagnet = new QToolButton( this );
 		btnMagnet->setCheckable( true );

@@ -412,7 +412,11 @@ void NifSkope::wireBlockListSelection()
 	// which silently drops this connection.
 	connect( list->selectionModel(), &QItemSelectionModel::selectionChanged, this,
 		[this]( const QItemSelection &, const QItemSelection & ) {
-		if ( !nif || !ogl || ogl->editMode || syncingObjToList )
+		// 'selecting' is true while NifSkope::select() programmatically drives
+		// the list (e.g. after a viewport click); without this guard the
+		// resulting single-row ClearAndSelect echoed back into the object
+		// selection and collapsed viewport multi-select.
+		if ( !nif || !ogl || ogl->editMode || syncingObjToList || selecting )
 			return;
 		auto toAV = [this]( QModelIndex idx ) {
 			if ( idx.model() == proxy )

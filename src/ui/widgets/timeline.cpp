@@ -217,6 +217,82 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.setBrush( col );
 		p.setPen( Qt::NoPen );
 		p.drawEllipse( QPointF( 32, 32 ), 5, 5 );
+	} else if ( id == QLatin1String( "orient_global" ) ) {
+		// Blender globe: circle + equator + meridian
+		p.setBrush( Qt::NoBrush );
+		QPen gp( col, 4 );
+		p.setPen( gp );
+		p.drawEllipse( QPointF( 32, 32 ), 21, 21 );
+		p.drawEllipse( QPointF( 32, 32 ), 9, 21 );
+		p.drawLine( QPointF( 11, 32 ), QPointF( 53, 32 ) );
+	} else if ( id == QLatin1String( "orient_local" ) ) {
+		// small cube (local space)
+		p.setBrush( Qt::NoBrush );
+		QPen gp( col, 4 );
+		gp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( gp );
+		p.drawRect( QRectF( 14, 22, 26, 26 ) );
+		p.drawLine( QPointF( 14, 22 ), QPointF( 26, 12 ) );
+		p.drawLine( QPointF( 40, 22 ), QPointF( 52, 12 ) );
+		p.drawLine( QPointF( 26, 12 ), QPointF( 52, 12 ) );
+		p.drawLine( QPointF( 52, 12 ), QPointF( 52, 38 ) );
+		p.drawLine( QPointF( 40, 48 ), QPointF( 52, 38 ) );
+	} else if ( id == QLatin1String( "orient_parent" ) ) {
+		// hierarchy: parent box connected to a child box
+		p.setBrush( Qt::NoBrush );
+		QPen gp( col, 4 );
+		p.setPen( gp );
+		p.drawRect( QRectF( 10, 8, 20, 18 ) );
+		p.drawRect( QRectF( 34, 38, 20, 18 ) );
+		p.drawLine( QPointF( 20, 26 ), QPointF( 20, 47 ) );
+		p.drawLine( QPointF( 20, 47 ), QPointF( 34, 47 ) );
+	} else if ( id == QLatin1String( "orient_view" ) ) {
+		// monitor (view space)
+		p.setBrush( Qt::NoBrush );
+		QPen gp( col, 4 );
+		p.setPen( gp );
+		p.drawRoundedRect( QRectF( 10, 12, 44, 30 ), 4, 4 );
+		p.drawLine( QPointF( 32, 42 ), QPointF( 32, 52 ) );
+		p.drawLine( QPointF( 22, 52 ), QPointF( 42, 52 ) );
+	} else if ( id == QLatin1String( "pivot_origin" ) ) {
+		// circle with center dot (median/origin point)
+		p.setBrush( Qt::NoBrush );
+		QPen gp( col, 4 );
+		p.setPen( gp );
+		p.drawEllipse( QPointF( 32, 32 ), 18, 18 );
+		p.setBrush( col );
+		p.setPen( Qt::NoPen );
+		p.drawEllipse( QPointF( 32, 32 ), 6, 6 );
+	} else if ( id == QLatin1String( "pivot_bounds" ) ) {
+		// bounding box with center dot
+		p.setBrush( Qt::NoBrush );
+		QPen gp( col, 4 );
+		p.setPen( gp );
+		p.drawRect( QRectF( 14, 14, 36, 36 ) );
+		p.setBrush( col );
+		p.setPen( Qt::NoPen );
+		p.drawEllipse( QPointF( 32, 32 ), 6, 6 );
+	} else if ( id == QLatin1String( "pivot_median" ) ) {
+		// three points with their median marked
+		p.setBrush( Qt::NoBrush );
+		QPen gp( col, 4 );
+		p.setPen( gp );
+		p.drawEllipse( QPointF( 18, 44 ), 8, 8 );
+		p.drawEllipse( QPointF( 46, 44 ), 8, 8 );
+		p.drawEllipse( QPointF( 32, 16 ), 8, 8 );
+		p.setBrush( col );
+		p.setPen( Qt::NoPen );
+		p.drawEllipse( QPointF( 32, 36 ), 6, 6 );
+	} else if ( id == QLatin1String( "pivot_cursor" ) ) {
+		// mini 3D cursor: circle + crosshair ticks
+		p.setBrush( Qt::NoBrush );
+		QPen gp( col, 4 );
+		p.setPen( gp );
+		p.drawEllipse( QPointF( 32, 32 ), 13, 13 );
+		p.drawLine( QPointF( 32, 8 ), QPointF( 32, 16 ) );
+		p.drawLine( QPointF( 32, 48 ), QPointF( 32, 56 ) );
+		p.drawLine( QPointF( 8, 32 ), QPointF( 16, 32 ) );
+		p.drawLine( QPointF( 48, 32 ), QPointF( 56, 32 ) );
 	}
 
 	return QIcon( pm );
