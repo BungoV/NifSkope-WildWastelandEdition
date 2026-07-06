@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
+#include "gl/renderer.h"
 #include "glview.h"
 #include "model/nifmodel.h"
 
@@ -824,7 +825,10 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	maxParticles = std::min( maxParticles, 4096 );
 
 	// gather BSPositionData spawn points (object-local space) from a block's
-	// extra data list
+	// extra data list. Layout (same as the Generate BSPositionData spell and
+	// vanilla edison_pa_vfx.nif): numVerts*3 positions, numVerts*3 normals,
+	// numTris*3 values, 2 zeros - ONLY the leading positions are spawn points;
+	// reading the whole array as positions scatters particles around origin
 	auto posDataPoints = [nif, this]( const QModelIndex & iObj ) {
 		QVector<Vector3> pts;
 		QModelIndex iExtraList = nif->getIndex( iObj, "Extra Data List" );
@@ -834,8 +838,22 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 				continue;
 			iExtras.append( iED );
 			QVector<float> raw = nif->getArray<float>( nif->getIndex( iED, "Data" ) );
-			for ( int i = 0; i + 2 < raw.size(); i += 3 )
-				pts.append( Vector3( raw[i], raw[i + 1], raw[i + 2] ) );
+
+			// vertex count from the owning mesh bounds the position region
+			int nv = nif->get<int>( iObj, "Num Vertices" );
+			if ( nv <= 0 ) {
+				QModelIndex iMeshData = nif->getBlockIndex( nif->getLink( iObj, "Data" ) );
+				if ( iMeshData.isValid() )
+					nv = nif->get<int>( iMeshData, "Num Vertices" );
+			}
+			int numPos;
+			if ( nv > 0 && nv * 3 <= raw.size() )
+				numPos = nv;
+			else
+				numPos = raw.size() / 6;	// unknown owner: positions + normals halves
+
+			for ( int i = 0; i < numPos; i++ )
+				pts.append( Vector3( raw[i * 3], raw[i * 3 + 1], raw[i * 3 + 2] ) );
 			break;
 		}
 		return pts;
@@ -905,23 +923,34 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 					if ( !iMesh.isValid() )
 						continue;
 					// points stay in the first mesh's local space; its world
-					// transform is applied fresh on each emission
+					// transform (full parent chain, e.g. BSTriShape under the
+					// pauldron NiNode) is applied fresh on each emission
 					if ( !e.iEmitObj.isValid() )
 						e.iEmitObj = iMesh;
 					else if ( e.iEmitObj != iMesh )
 						continue;	// preview: one reference frame per emitter
+
+					// the game emits from the mesh's precomputed BSPositionData
+					// when present (positions match the mesh vertex order, so
+					// the triangles below stay valid for face sampling)
+					e.points = posDataPoints( iMesh );
+
 					QModelIndex iVD = nif->getIndex( iMesh, "Vertex Data" );
 					if ( iVD.isValid() ) {
-						for ( int v = 0; v < nif->rowCount( iVD ) && e.points.size() < 4096; v++ )
-							e.points.append( nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) );
+						if ( e.points.isEmpty() ) {
+							for ( int v = 0; v < nif->rowCount( iVD ) && e.points.size() < 4096; v++ )
+								e.points.append( nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) );
+						}
 						e.tris = nif->getArray<Triangle>( nif->getIndex( iMesh, "Triangles" ) );
 					} else {
 						QModelIndex iMeshData = nif->getBlockIndex( nif->getLink( iMesh, "Data" ) );
-						QVector<Vector3> vv = nif->getArray<Vector3>( nif->getIndex( iMeshData, "Vertices" ) );
-						for ( const Vector3 & v : vv ) {
-							if ( e.points.size() >= 4096 )
-								break;
-							e.points.append( v );
+						if ( e.points.isEmpty() ) {
+							QVector<Vector3> vv = nif->getArray<Vector3>( nif->getIndex( iMeshData, "Vertices" ) );
+							for ( const Vector3 & v : vv ) {
+								if ( e.points.size() >= 4096 )
+									break;
+								e.points.append( v );
+							}
 						}
 						e.tris = nif->getArray<Triangle>( nif->getIndex( iMeshData, "Triangles" ) );
 					}
@@ -1482,17 +1511,19 @@ void ProcLightningController::drawPreview()
 	// billboard: expand the strip perpendicular to the camera forward axis
 	Vector3 camZ = sc->view.rotation.inverted() * Vector3( 0.0f, 0.0f, 1.0f );
 
-	// tint from the controller's effect shader (BGEM-aware emissive colour)
+	// texture + tint from the controller's effect shader; the BGEM material
+	// (e.g. shieldtesla_lightning_beam_blue.bgem) carries both
+	BSShaderLightingProperty * shaderProp = nullptr;
+	if ( iShaderProp.isValid() )
+		shaderProp = dynamic_cast<BSShaderLightingProperty *>(
+			sc->getProperty( sc->nifModel, QModelIndex( iShaderProp ) ) );
 	Color4 tint( 0.45f, 0.7f, 1.0f, 1.0f );
-	if ( iShaderProp.isValid() ) {
-		if ( auto esp = dynamic_cast<BSEffectShaderProperty *>(
-				sc->getProperty( sc->nifModel, QModelIndex( iShaderProp ) ) ) ) {
-			Color4 ec = esp->emissiveColor;
-			float m = std::min( std::max( esp->emissiveMult, 0.0f ), 2.0f );
-			if ( ( ec[0] + ec[1] + ec[2] ) * m > 0.05f )
-				tint = Color4( std::min( ec[0] * m, 1.0f ), std::min( ec[1] * m, 1.0f ),
-				               std::min( ec[2] * m, 1.0f ), 1.0f );
-		}
+	if ( auto esp = dynamic_cast<BSEffectShaderProperty *>( shaderProp ) ) {
+		Color4 ec = esp->emissiveColor;
+		float m = std::min( std::max( esp->emissiveMult, 0.0f ), 2.0f );
+		if ( ( ec[0] + ec[1] + ec[2] ) * m > 0.05f )
+			tint = Color4( std::min( ec[0] * m, 1.0f ), std::min( ec[1] * m, 1.0f ),
+			               std::min( ec[2] * m, 1.0f ), 1.0f );
 	}
 
 	auto boltPoint = [&]( const Bolt & b, int i, const Vector3 & root, const Vector3 & bDir, float bLen ) {
@@ -1502,7 +1533,9 @@ void ProcLightningController::drawPreview()
 
 	QVector<Vector3> tris;
 	QVector<FloatVector4> cols;
+	QVector<Vector2> uvs;
 
+	// one textured strip per bolt: U runs along the bolt, V across the width
 	auto addBolt = [&]( const Bolt & b, const Vector3 & root, const Vector3 & bDir, float bLen,
 	                    float halfWidth, const Color4 & col, bool fade ) {
 		for ( int i = 0; i + 1 < b.pts.size(); i++ ) {
@@ -1522,14 +1555,12 @@ void ProcLightningController::drawPreview()
 			// two triangles per segment
 			tris << ( p0 + perp ) << ( p0 - perp ) << ( p1 + perp );
 			cols << c0 << c0 << c1;
+			uvs << Vector2( t0, 0.0f ) << Vector2( t0, 1.0f ) << Vector2( t1, 0.0f );
 			tris << ( p1 + perp ) << ( p0 - perp ) << ( p1 - perp );
 			cols << c1 << c0 << c1;
+			uvs << Vector2( t1, 0.0f ) << Vector2( t0, 1.0f ) << Vector2( t1, 1.0f );
 		}
 	};
-
-	Color4 core( std::min( tint[0] + 0.55f, 1.0f ), std::min( tint[1] + 0.55f, 1.0f ),
-	             std::min( tint[2] + 0.55f, 1.0f ), 0.95f );
-	Color4 glow( tint[0], tint[1], tint[2], 0.4f );
 
 	for ( int bi = 0; bi < bolts.size(); bi++ ) {
 		const Bolt & b = bolts.at( bi );
@@ -1546,19 +1577,39 @@ void ProcLightningController::drawPreview()
 			fade = fadeChild;
 		}
 		float hw = std::max( width * b.widthMul * 0.5f, 0.1f );
-		addBolt( b, root, bDir, bLen, hw, glow, fade );
-		addBolt( b, root, bDir, bLen, hw * 0.35f, core, fade );
+		addBolt( b, root, bDir, bLen, hw, tint, fade );
 	}
 
-	if ( tris.isEmpty() )
+	if ( tris.isEmpty() || !sc->renderer )
 		return;
 
-	sc->loadModelViewMatrix( sc->view );
-	sc->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
+	auto prog = sc->renderer->useProgram( "boltstrip.prog" );
+	if ( !prog )
+		return;
+	prog->uni4m( "modelViewMatrix", sc->view.toMatrix4() );
+	prog->uni1i( "boltTexture", 0 );
+
+	// beam texture from the BGEM material, else the raw source texture path,
+	// else flat white (strip shows the plain tint)
+	sc->textures->activateTextureUnit( 0 );
+	bool texOk = shaderProp && shaderProp->bind( 0 );
+	if ( !texOk ) {
+		static const QString defaultTexture = QStringLiteral( "#FFFFFFFF" );
+		sc->textures->bind( defaultTexture, sc->nifModel );
+	}
+
+	// lightning beams are additive
+	glEnable( GL_BLEND );
+	glBlendFunc( GL_SRC_ALPHA, GL_ONE );
 	glEnable( GL_DEPTH_TEST );
 	glDepthMask( GL_FALSE );
-	sc->drawTriangles( tris.constData(), size_t( tris.size() ), cols.constData(), true );
+
+	const float * attrData[3] = { &( tris.constFirst()[0] ), &( cols.constFirst()[0] ), &( uvs.constFirst()[0] ) };
+	sc->renderer->bindShape( (unsigned int) tris.size(), 0x0243ULL, 0, attrData, nullptr );
+	sc->renderer->fn->glDrawArrays( GL_TRIANGLES, 0, GLsizei( tris.size() ) );
+
 	glDepthMask( GL_TRUE );
+	glDisable( GL_BLEND );
 }
 
 
