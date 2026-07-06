@@ -12,23 +12,30 @@ Backlog of features/fixes agreed for later. Ordered roughly by priority.
   transform is resolved fresh at simulation time (also follows animation).
 - NiPSysMeshEmitter now honours Emission Type (face surface/center, edge)
   by sampling triangles instead of raw vertices.
-- BSProceduralLightningController preview: jagged core+glow bolt between the
-  rig's *_Start / *_End nodes, midpoint-displacement jitter re-rolled at
-  24 Hz, branches, width/childWidthMult/arcOffset/fade flags honoured,
-  Generation/Mutation gated by the sequence's bool timeline keys. Flat
-  additive-style colour (BGEM emissive), not the beam texture - preview only.
+- BSProceduralLightningController preview: jagged bolt between the rig's
+  *_Start / *_End nodes, midpoint-displacement jitter re-rolled at 24 Hz,
+  branches, width/childWidthMult/arcOffset/fade flags honoured,
+  Generation/Mutation gated by the sequence's bool timeline keys.
+- Bolt strips are textured with the BGEM beam texture (boltstrip.prog),
+  V runs along the bolt (256x2048 tile-V sheets) with the shader property's
+  animated UV offset/scale applied; drawn after the transparent pass to
+  avoid alpha-blend darkening squares.
+- Particle flipbook: per-particle random subtexture cell from NiPSysData
+  Subtexture Offsets (4x4 lightning atlas), passed as a vertex attribute.
 
 ## Mesh / engine features (need in-game or careful testing)
 
-### 1. BSPositionData mesh-emitter spawn distribution
-- **Symptom:** `Generate BSPositionData` on a mesh used by a `NiPSysMeshEmitter`
-  (e.g. `X01_Torso_Tesla_Pulse:0` in `X01_Torso_Tesla_VFX.nif`) makes the game
-  spawn particles in a single spot instead of across all faces.
-- **Notes:** the generated layout (positions + normals + numTris*3 + 2 zeros)
-  matches vanilla `edison_pa_vfx.nif` for the lightning mesh, so the format is
-  probably right; the clustering may be an emitter setting (emit-from
-  vertices/edges/faces) or a different data expectation. Needs a byte-level
-  diff of a known-good mesh-emitter file + in-game iteration.
+### 1. BSPositionData mesh-emitter spawn distribution - ROOT CAUSE FOUND (2026-07-06), in-game verify pending
+- **Was:** the game spawned particles in a single spot from generated data.
+- **Cause:** the "numTris*3 + 2" tail of BSPositionData is NOT half-floats:
+  it is the mesh's triangle index list as RAW uint16 (verified byte-level
+  against vanilla edison_pa_vfx.nif Edison_Torso_Lightning:0), plus a
+  trailing (14, 0). The old spell left the region zeroed, so the engine
+  sampled triangle (0,0,0) forever -> one spot.
+- **Fix shipped:** Generate BSPositionData now writes the triangle indices
+  as u16 bit patterns inside the hfloat array (qfloat16 round-trip) and the
+  vanilla (14, 0) tail. Meaning of the 14 is still unknown (only one vanilla
+  sample); if a regenerated mesh misbehaves in game, compare that value.
 
 ### 2. Merge vertices by distance (edit mode)
 - Blender "Merge > By Distance": weld picked vertices within a threshold,

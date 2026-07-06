@@ -70,6 +70,8 @@ protected:
 	QVector<Vector3> verts;
 	QVector<Color4> colors;
 	QVector<float> sizes;
+	QVector<Vector2> uvOffsets;          //!< per-particle flipbook cell offsets
+	Vector2 uvCell = Vector2( 1.0f, 1.0f );	//!< flipbook cell size (UV scale)
 
 	int active = 0;
 	float size = 0;

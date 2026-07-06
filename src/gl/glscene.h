@@ -52,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 class NifModel;
 class Renderer;
 class Shape;
+class ProcLightningController;
 class QAction;
 class QOpenGLContext;
 class QSettings;
@@ -259,6 +260,11 @@ public:
 	QPersistentModelIndex currentIndex;
 
 	QVector<Shape *> shapes;
+
+	//! Procedural lightning previews collected during the node pass; drawn
+	//! after the transparent (second) pass so alpha-blended geometry can't
+	//! darken square patches over the additive bolts
+	QVector<ProcLightningController *> pendingBolts;
 
 	FloatVector4 currentGLColor;
 	float currentGLLineWidth;

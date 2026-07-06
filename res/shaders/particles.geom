@@ -14,6 +14,7 @@ in vec3 vsViewDir[];
 
 in vec4 vsColor[];
 in float vsParticleSize[];
+in vec2 vsUVOffset[];
 
 out vec3 LightDir;
 out vec3 ViewDir;
@@ -41,23 +42,24 @@ void main()
 	float	sy = vsParticleSize[0] * particleScale.y;
 
 	vec2	uv;
+	vec2	uvBase = particleUV.xy + vsUVOffset[0];
 
-	uv = particleUV.xy + vec2( 1.0, 1.0 ) * particleUV.zw;
+	uv = uvBase + vec2( 1.0, 1.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
 		texCoords[i] = uv;
 	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( sx, sy, 0.0, 0.0 ) );
 	EmitVertex();
-	uv = particleUV.xy + vec2( 0.0, 1.0 ) * particleUV.zw;
+	uv = uvBase + vec2( 0.0, 1.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
 		texCoords[i] = uv;
 	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( -sx, sy, 0.0, 0.0 ) );
 	EmitVertex();
-	uv = particleUV.xy + vec2( 1.0, 0.0 ) * particleUV.zw;
+	uv = uvBase + vec2( 1.0, 0.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
 		texCoords[i] = uv;
 	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( sx, -sy, 0.0, 0.0 ) );
 	EmitVertex();
-	uv = particleUV.xy + vec2( 0.0, 0.0 ) * particleUV.zw;
+	uv = uvBase + vec2( 0.0, 0.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
 		texCoords[i] = uv;
 	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( -sx, -sy, 0.0, 0.0 ) );

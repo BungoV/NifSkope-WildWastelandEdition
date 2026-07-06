@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/renderer.h"
 #include "gl/gltex.h"
 #include "gl/glcontroller.h"
+#include "gl/controllers.h"
 #include "gl/glmesh.h"
 #include "gl/bsshape.h"
 #include "gl/BSMesh.h"
@@ -386,6 +387,8 @@ void Scene::draw()
 
 void Scene::drawShapes()
 {
+	pendingBolts.clear();
+
 	if ( hasOption(DoBlending) ) {
 		NodeList secondPass;
 
@@ -410,6 +413,11 @@ void Scene::drawShapes()
 
 		drawGrid();
 	}
+
+	// additive procedural lightning goes last, over the transparent geometry
+	for ( ProcLightningController * pl : pendingBolts )
+		pl->drawPreview();
+	pendingBolts.clear();
 }
 
 void Scene::drawGrid()

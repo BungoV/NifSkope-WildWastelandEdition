@@ -824,6 +824,17 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 		maxParticles = 512;
 	maxParticles = std::min( maxParticles, 4096 );
 
+	// flipbook cells from the particle data block (each particle gets a random
+	// cell of the sprite sheet, e.g. 16 for a 4x4 lightning atlas)
+	subtexOffsets.clear();
+	{
+		QModelIndex iPD = nif->getBlockIndex( nif->getLink( iPSys, "Data" ) );
+		if ( iPD.isValid() ) {
+			iExtras.append( iPD );
+			subtexOffsets = nif->getArray<Vector4>( nif->getIndex( iPD, "Subtexture Offsets" ) );
+		}
+	}
+
 	// gather BSPositionData spawn points (object-local space) from a block's
 	// extra data list. Layout (same as the Generate BSPositionData spell and
 	// vanilla edison_pa_vfx.nif): numVerts*3 positions, numVerts*3 normals,
@@ -1206,6 +1217,11 @@ void PSysSimController::emitParticle( Emitter & e )
 	p.radius = std::max( e.radius + random( e.radiusVar ), 0.01f );
 	p.color = particleColor( e, 0.0f );
 
+	if ( !subtexOffsets.isEmpty() ) {
+		const Vector4 & s = subtexOffsets.at( std::rand() % subtexOffsets.size() );
+		p.uvOff = Vector2( s[0], s[2] );
+	}
+
 	parts.append( p );
 }
 
@@ -1305,9 +1321,11 @@ void PSysSimController::updateTime( float time )
 
 	// hand the state to the renderer
 	int count = parts.size();
+	bool flipbook = !subtexOffsets.isEmpty();
 	target->verts.resize( count );
 	target->colors.resize( count );
 	target->sizes.resize( count );
+	target->uvOffsets.resize( flipbook ? count : 0 );
 	for ( int i = 0; i < count; i++ ) {
 		const SimParticle & p = parts.at( i );
 		float u = p.age / p.lifespan;
@@ -1315,7 +1333,12 @@ void PSysSimController::updateTime( float time )
 		Emitter dummy;
 		target->colors[i] = hasColorMod ? particleColor( dummy, u ) : p.color;
 		target->sizes[i] = p.radius * particleScale( u );
+		if ( flipbook )
+			target->uvOffsets[i] = p.uvOff;
 	}
+	target->uvCell = flipbook
+		? Vector2( subtexOffsets.first()[1], subtexOffsets.first()[3] )
+		: Vector2( 1.0f, 1.0f );
 	target->active = count;
 	target->size = 1.0f;
 }
@@ -1535,9 +1558,27 @@ void ProcLightningController::drawPreview()
 	QVector<FloatVector4> cols;
 	QVector<Vector2> uvs;
 
-	// one textured strip per bolt: U runs along the bolt, V across the width
+	// beam textures run ALONG V (e.g. shieldtesla_lightning_beam is 256x2048,
+	// tile-V) with the sequences scrolling the shader's V offset; U spans the
+	// width. The shader property carries the (BGEM-aware, animated) UV
+	// offset/scale, so the scrolling shows in the preview too.
+	float uvOffU = 0.0f, uvOffV = 0.0f, uvSclU = 1.0f, uvSclV = 1.0f;
+	if ( shaderProp ) {
+		uvOffU = shaderProp->uvOffset.x;
+		uvOffV = shaderProp->uvOffset.y;
+		uvSclU = shaderProp->uvScale.x;
+		uvSclV = shaderProp->uvScale.y;
+	}
+	const float texAspect = 8.0f;	// beam sheets are ~8x taller than wide
+
 	auto addBolt = [&]( const Bolt & b, const Vector3 & root, const Vector3 & bDir, float bLen,
 	                    float halfWidth, const Color4 & col, bool fade ) {
+		// V repeats so the texture keeps its aspect along the bolt
+		float vTiles = std::max( bLen / std::max( halfWidth * 2.0f * texAspect, 0.1f ), 0.25f );
+		auto vAt = [&]( float t ) {
+			return uvOffV + uvSclV * ( t * vTiles );
+		};
+		float u0 = uvOffU, u1 = uvOffU + uvSclU;
 		for ( int i = 0; i + 1 < b.pts.size(); i++ ) {
 			Vector3 p0 = boltPoint( b, i, root, bDir, bLen );
 			Vector3 p1 = boltPoint( b, i + 1, root, bDir, bLen );
@@ -1550,15 +1591,16 @@ void ProcLightningController::drawPreview()
 			float t0 = b.pts.at( i )[0], t1 = b.pts.at( i + 1 )[0];
 			float a0 = fade ? ( 1.0f - t0 ) : 1.0f;
 			float a1 = fade ? ( 1.0f - t1 ) : 1.0f;
+			float v0 = vAt( t0 ), v1 = vAt( t1 );
 			FloatVector4 c0( col[0], col[1], col[2], col[3] * a0 );
 			FloatVector4 c1( col[0], col[1], col[2], col[3] * a1 );
 			// two triangles per segment
 			tris << ( p0 + perp ) << ( p0 - perp ) << ( p1 + perp );
 			cols << c0 << c0 << c1;
-			uvs << Vector2( t0, 0.0f ) << Vector2( t0, 1.0f ) << Vector2( t1, 0.0f );
+			uvs << Vector2( u0, v0 ) << Vector2( u1, v0 ) << Vector2( u0, v1 );
 			tris << ( p1 + perp ) << ( p0 - perp ) << ( p1 - perp );
 			cols << c1 << c0 << c1;
-			uvs << Vector2( t1, 0.0f ) << Vector2( t0, 1.0f ) << Vector2( t1, 1.0f );
+			uvs << Vector2( u0, v1 ) << Vector2( u1, v0 ) << Vector2( u1, v1 );
 		}
 	};
 

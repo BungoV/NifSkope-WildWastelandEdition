@@ -55,6 +55,8 @@ void Particles::clear()
 	verts.clear();
 	colors.clear();
 	sizes.clear();
+	uvOffsets.clear();
+	uvCell = Vector2( 1.0f, 1.0f );
 }
 
 void Particles::updateImpl( const NifModel * nif, const QModelIndex & index )
@@ -185,23 +187,29 @@ void Particles::drawShapes( NodeList * secondPass )
 		}
 
 		// atlas sheets (e.g. T_..._4x4.dds) pack many frames: show a single cell
-		// instead of squashing the whole sheet onto every sprite
+		// instead of squashing the whole sheet onto every sprite. When the
+		// simulator supplies per-particle cell offsets, only the cell size goes
+		// through the uniform and the offsets ride a vertex attribute.
 		FloatVector4	puv( 0.0f, 0.0f, 1.0f, 1.0f );
-		int	grid = 0;
-		if ( iData.isValid() && scene->nifModel->getIndex( iData, "Num Subtexture Offsets" ).isValid() ) {
-			int nSub = scene->nifModel->get<int>( iData, "Num Subtexture Offsets" );
-			if ( nSub >= 4 )
-				grid = int( std::lround( std::sqrt( double( nSub ) ) ) );
-		}
-		if ( grid < 2 ) {
-			// fall back to an NxN hint in the texture file name (e.g. _4x4)
-			QRegularExpressionMatch mm = QRegularExpression( "(\\d+)x(\\d+)" ).match( srcTex );
-			if ( mm.hasMatch() )
-				grid = mm.captured( 1 ).toInt();
-		}
-		if ( grid >= 2 ) {
-			float sc = 1.0f / float( grid );
-			puv = FloatVector4( 0.0f, 0.0f, sc, sc );
+		if ( uvOffsets.size() >= verts.size() && !uvOffsets.isEmpty() ) {
+			puv = FloatVector4( 0.0f, 0.0f, uvCell[0], uvCell[1] );
+		} else {
+			int	grid = 0;
+			if ( iData.isValid() && scene->nifModel->getIndex( iData, "Num Subtexture Offsets" ).isValid() ) {
+				int nSub = scene->nifModel->get<int>( iData, "Num Subtexture Offsets" );
+				if ( nSub >= 4 )
+					grid = int( std::lround( std::sqrt( double( nSub ) ) ) );
+			}
+			if ( grid < 2 ) {
+				// fall back to an NxN hint in the texture file name (e.g. _4x4)
+				QRegularExpressionMatch mm = QRegularExpression( "(\\d+)x(\\d+)" ).match( srcTex );
+				if ( mm.hasMatch() )
+					grid = mm.captured( 1 ).toInt();
+			}
+			if ( grid >= 2 ) {
+				float sc = 1.0f / float( grid );
+				puv = FloatVector4( 0.0f, 0.0f, sc, sc );
+			}
 		}
 		prog->uni4f( "particleUV", puv );
 
@@ -308,7 +316,12 @@ void Particles::drawShapes( NodeList * secondPass )
 	unsigned int	attrMask = 0x03;
 	if ( colors.size() >= numVerts ) {
 		attrData[1] = &( ( tinted.size() >= numVerts ? tinted : colors ).constFirst()[0] );
-		attrMask = 0x43;
+		attrMask = attrMask | 0x40;
+	}
+	if ( uvOffsets.size() >= numVerts ) {
+		// per-particle flipbook cell offset (vec2 at location 2)
+		attrData[2] = &( uvOffsets.constFirst()[0] );
+		attrMask = attrMask | 0x200;
 	}
 	if ( sizes.size() >= numVerts ) {
 		attrData[4] = sizes.constData();

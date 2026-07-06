@@ -24,6 +24,9 @@ BSD License - see nifskope.h
 #include <QRadioButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
+#include <QFloat16>
+
+#include <bit>
 
 #include <algorithm>
 #include <cmath>
@@ -1255,18 +1258,29 @@ public:
 		       || nif->getBlockIndex( nif->getLink( iBlock, "Data" ), "NiGeometryData" ).isValid();
 	}
 
+	//! A float whose IEEE half-precision encoding equals the raw bit pattern h.
+	//! qfloat16 round-trips all finite bit patterns (including subnormals), so
+	//! set<float> on the hfloat array stores exactly these 16 bits on save.
+	static float halfBitsToFloat( quint16 h )
+	{
+		return float( std::bit_cast< qfloat16 >( h ) );
+	}
+
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
 	{
 		QModelIndex iBlock = nif->getBlockIndex( index );
 
 		// gather vertex positions + normals + triangles (BSTriShape style or legacy)
-		// Vanilla layout (verified against edison_pa_vfx.nif): positions
-		// (numVerts*3), then normals (numVerts*3), then numTris*3 + 2 zeroed
-		// values. The engine reads all three regions; writing positions only
-		// makes it read out of bounds and reject the whole model.
+		// Vanilla layout (verified against edison_pa_vfx.nif, Edison_Torso_Lightning:0):
+		//   numVerts*3 half-floats  - positions
+		//   numVerts*3 half-floats  - normals
+		//   numTris*3  raw uint16   - triangle indices (NOT half-floats!)
+		//   2          raw uint16   - trailing (14, 0) as in vanilla
+		// The engine samples emission points from the triangle list; writing
+		// zeros there makes every particle spawn at the same spot in game.
 		QVector<Vector3> verts;
 		QVector<Vector3> norms;
-		int numTris = 0;
+		QVector<Triangle> tris;
 
 		QModelIndex iVData = nif->getIndex( iBlock, "Vertex Data" );
 		if ( iVData.isValid() ) {
@@ -1279,7 +1293,7 @@ public:
 				if ( iN.isValid() )
 					norms.append( nif->get<Vector3>( iN ) );
 			}
-			numTris = nif->get<int>( iBlock, "Num Triangles" );
+			tris = nif->getArray<Triangle>( nif->getIndex( iBlock, "Triangles" ) );
 		} else {
 			QModelIndex iData = nif->getBlockIndex( nif->getLink( iBlock, "Data" ), "NiGeometryData" );
 			QModelIndex iVerts = nif->getIndex( iData, "Vertices" );
@@ -1288,8 +1302,9 @@ public:
 			QModelIndex iNorms = nif->getIndex( iData, "Normals" );
 			for ( int r = 0; r < nif->rowCount( iNorms ); r++ )
 				norms.append( nif->get<Vector3>( nif->getIndex( iNorms, r ) ) );
-			numTris = nif->get<int>( iData, "Num Triangles" );
+			tris = nif->getArray<Triangle>( nif->getIndex( iData, "Triangles" ) );
 		}
+		int numTris = tris.size();
 
 		if ( verts.isEmpty() ) {
 			QMessageBox::information( nullptr, name(), Spell::tr( "No vertex positions found on this block." ) );
@@ -1310,11 +1325,7 @@ public:
 		}
 		if ( !haveNorms ) {
 			norms.fill( Vector3(), verts.size() );
-			QModelIndex iTris = nif->getIndex( iBlock, "Triangles" );
-			if ( !iTris.isValid() )
-				iTris = nif->getIndex( nif->getBlockIndex( nif->getLink( iBlock, "Data" ) ), "Triangles" );
-			for ( int r = 0; r < nif->rowCount( iTris ); r++ ) {
-				Triangle t = nif->get<Triangle>( nif->getIndex( iTris, r ) );
+			for ( const Triangle & t : tris ) {
 				if ( t[0] >= verts.size() || t[1] >= verts.size() || t[2] >= verts.size() )
 					continue;
 				Vector3 fn = Vector3::crossproduct( verts[t[1]] - verts[t[0]], verts[t[2]] - verts[t[0]] );
@@ -1350,7 +1361,17 @@ public:
 					nif->set<float>( nif->getIndex( iArr, nv * 3 + v * 3 + c ), norms[v][c] );
 				}
 			}
-			// remaining numTris*3 + 2 values stay zero, matching vanilla assets
+			// triangle indices as raw uint16 bit patterns inside the hfloat
+			// array (this is what the engine actually reads for emission)
+			int triBase = nv * 6;
+			for ( int r = 0; r < numTris; r++ ) {
+				for ( int c = 0; c < 3; c++ )
+					nif->set<float>( nif->getIndex( iArr, triBase + r * 3 + c ),
+						halfBitsToFloat( quint16( tris.at( r )[c] ) ) );
+			}
+			// trailing pair: (14, 0) in every vanilla sample seen so far
+			nif->set<float>( nif->getIndex( iArr, triBase + numTris * 3 ), halfBitsToFloat( 14 ) );
+			nif->set<float>( nif->getIndex( iArr, triBase + numTris * 3 + 1 ), 0.0f );
 
 			addLink( nif, QModelIndex( pBlock ), "Extra Data List", nif->getBlockNumber( iPos ) );
 			result = iPos;

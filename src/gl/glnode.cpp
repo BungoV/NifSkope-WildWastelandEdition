@@ -1721,10 +1721,11 @@ void Node::drawShapes( NodeList * secondPass )
 	for ( Node * node : children.list() )
 		node->drawShapes( secondPass );
 
-	// procedural lightning preview: drawn once per frame after the children
-	// (this node is never queued to the second pass itself)
-	if ( procLightning )
-		procLightning->drawPreview();
+	// procedural lightning preview: queued on the scene and drawn after the
+	// transparent pass (alpha-blended shapes drawn over an already-rendered
+	// bolt would darken square patches on it)
+	if ( procLightning && !scene->pendingBolts.contains( procLightning ) )
+		scene->pendingBolts.append( procLightning );
 }
 
 #define Farg( X ) arg( X, 0, 'f', 5 )
