@@ -75,6 +75,7 @@ class QStandardItemModel;
 class QAction;
 class QActionGroup;
 class QComboBox;
+class QFrame;
 class QProgressBar;
 class QTimer;
 class QTreeView;
@@ -399,6 +400,12 @@ private:
 	//! The main window
 	GLView * ogl;
 	QWidget * graphicsView;
+
+	//! Blender-style operator (redo) panel: a floating tool window, because
+	//! the native GL viewport would paint over any child-widget overlay
+	QFrame * gizmoRedoPanel = nullptr;
+	//! Dock the panel at the viewport's bottom-left corner
+	void positionRedoPanel();
 
 	QComboBox * animGroups;
 	QAction * animGroupsAction;

@@ -507,13 +507,20 @@ void NifSkope::initDockWidgets()
 	} );
 	ui->mRender->addAction( aGizmoSnap );
 
-	// Blender-style redo panel: tweak the parameters of the last transform
+	// Blender-style redo panel: tweak the parameters of the last transform.
+	// The GL viewport is a native window (createWindowContainer) that paints
+	// over any child-widget overlay, so the panel must be a floating frameless
+	// tool window positioned over the viewport instead of a child widget.
 	{
-		QFrame * rp = new QFrame( graphicsView );
+		QFrame * rp = new QFrame( this, Qt::Tool | Qt::FramelessWindowHint );
 		rp->setObjectName( QStringLiteral( "GizmoRedoPanel" ) );
 		rp->setFrameShape( QFrame::StyledPanel );
 		rp->setAutoFillBackground( true );
+		// pop up after a gesture without pulling focus off the viewport,
+		// so chained G/R/S shortcuts keep working
+		rp->setAttribute( Qt::WA_ShowWithoutActivating );
 		rp->hide();
+		gizmoRedoPanel = rp;
 
 		QGridLayout * rpl = new QGridLayout( rp );
 		rpl->setContentsMargins( 8, 6, 8, 6 );
@@ -627,7 +634,7 @@ void NifSkope::initDockWidgets()
 			rpOrient->blockSignals( false );
 
 			rp->adjustSize();
-			rp->move( 10, graphicsView->height() - rp->height() - 10 );
+			positionRedoPanel();
 			rp->show();
 			rp->raise();
 		} );
@@ -888,6 +895,16 @@ void NifSkope::initDockWidgets()
 	{
 		ui->tRender->addSeparator();
 
+		// 3D cursor utilities: Blender-style cursor icon, leftmost of the
+		// transform-settings cluster
+		QToolButton * btnCursor = new QToolButton( this );
+		btnCursor->setPopupMode( QToolButton::InstantPopup );
+		btnCursor->setAutoRaise( true );
+		btnCursor->setIcon( tlMakeIcon( QStringLiteral( "cursor3d" ), icoColHdr ) );
+		btnCursor->setToolTip( tr( "3D cursor and element utilities" ) );
+		btnCursor->setMenu( mCursor );
+		ui->tRender->addWidget( btnCursor );
+
 		// Blender-style dropdowns: a flat button showing the current choice's
 		// icon (and text, where Blender shows text), opening the checkable
 		// menu with a section title
@@ -1025,6 +1042,9 @@ void NifSkope::initDockWidgets()
 			ui->tRender->addWidget( btnSnap );
 		}
 
+		// transform-settings cluster ends here (Blender groups these too)
+		ui->tRender->addSeparator();
+
 		// Blender-style vertex / edge / face select buttons (edit mode)
 		{
 			QColor icoCol( 228, 228, 232 );
@@ -1094,13 +1114,6 @@ void NifSkope::initDockWidgets()
 			ogl->update();
 		} );
 		ui->tRender->addWidget( btnOrig );
-
-		QToolButton * btnCursor = new QToolButton( this );
-		btnCursor->setPopupMode( QToolButton::InstantPopup );
-		btnCursor->setText( tr( "Cursor" ) );
-		btnCursor->setToolTip( tr( "3D cursor and element utilities" ) );
-		btnCursor->setMenu( mCursor );
-		ui->tRender->addWidget( btnCursor );
 	}
 
 	// Material / Texture Manager panel (starts floating; toggled from Panels)
@@ -1984,6 +1997,15 @@ void NifSkope::setTheme( nstheme::WindowTheme t )
 }
 
 
+void NifSkope::positionRedoPanel()
+{
+	if ( !gizmoRedoPanel || !graphicsView )
+		return;
+	QPoint corner = graphicsView->mapToGlobal(
+		QPoint( 10, graphicsView->height() - gizmoRedoPanel->height() - 10 ) );
+	gizmoRedoPanel->move( corner );
+}
+
 bool NifSkope::eventFilter( QObject * o, QEvent * e )
 {
 	// TODO: This doesn't seem to be doing anything extra
@@ -1992,6 +2014,18 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 	//}
 
 	switch ( e->type() ) {
+	case QEvent::Move:
+	case QEvent::Resize:
+		// keep the floating operator panel glued to the viewport corner
+		if ( ( o == this || o == graphicsView ) && gizmoRedoPanel && gizmoRedoPanel->isVisible() )
+			positionRedoPanel();
+		break;
+
+	case QEvent::WindowStateChange:
+		if ( o == this && gizmoRedoPanel && gizmoRedoPanel->isVisible() && isMinimized() )
+			gizmoRedoPanel->hide();
+		break;
+
 	case QEvent::ShortcutOverride:
 	case QEvent::KeyPress: {
 		// Shift+F enters the free camera whenever the pointer is over the

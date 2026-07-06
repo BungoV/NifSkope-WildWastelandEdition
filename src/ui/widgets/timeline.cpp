@@ -160,6 +160,24 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawLine( QPointF( 32, 48 ), QPointF( 32, 56 ) );
 		p.drawLine( QPointF( 8, 32 ), QPointF( 16, 32 ) );
 		p.drawLine( QPointF( 48, 32 ), QPointF( 56, 32 ) );
+	} else if ( id == QLatin1String( "cursor3d" ) ) {
+		// Blender 3D cursor: red/white dashed circle with crosshair ticks
+		p.setBrush( Qt::NoBrush );
+		const QColor red( 214, 66, 66 );
+		const float r = 15.0f;
+		for ( int i = 0; i < 8; i++ ) {
+			QPen dp( ( i & 1 ) ? col : red, 6.0 );
+			dp.setCapStyle( Qt::FlatCap );
+			p.setPen( dp );
+			p.drawArc( QRectF( 32 - r, 32 - r, r * 2.0f, r * 2.0f ), ( i * 45 + 22 ) * 16, 45 * 16 );
+		}
+		QPen chp( col, 4.0 );
+		chp.setCapStyle( Qt::RoundCap );
+		p.setPen( chp );
+		p.drawLine( QPointF( 32, 5 ), QPointF( 32, 19 ) );
+		p.drawLine( QPointF( 32, 45 ), QPointF( 32, 59 ) );
+		p.drawLine( QPointF( 5, 32 ), QPointF( 19, 32 ) );
+		p.drawLine( QPointF( 45, 32 ), QPointF( 59, 32 ) );
 	} else if ( id == QLatin1String( "normalize" ) ) {
 		p.drawLine( QPointF( 32, 18 ), QPointF( 32, 46 ) );
 		QPolygonF up;
