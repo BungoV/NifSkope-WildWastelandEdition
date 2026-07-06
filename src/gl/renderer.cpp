@@ -798,6 +798,23 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		}
 		prog->uni1i( "hasCubeMap", hasCubeMap );
 
+		// Screen-space refraction preview (SLSF1_Refraction): the shape draws
+		// in the second pass, so the framebuffer already holds the scene
+		// behind it; distort that with the fragment normal instead of showing
+		// the bare normal map / missing-texture magenta
+		bool	doRefr = false;
+		if ( lsp->hasRefraction && !scene->selecting ) {
+			doRefr = scene->grabRefractionSource();
+			if ( doRefr ) {
+				fn->glActiveTexture( GL_TEXTURE0 + texunit );
+				fn->glBindTexture( GL_TEXTURE_2D, scene->refractionTexId );
+				prog->uni1i_l( prog->uniLocation( "RefractionSrc" ), texunit );
+				texunit++;
+				prog->uni1f( "refractionStrength", lsp->refractionStrength );
+			}
+		}
+		prog->uni1i( "doRefraction", doRefr );
+
 		if ( nifVersion < 151 ) {
 			// Always bind mask regardless of shader settings
 			prog->uniSampler( bsprop, "EnvironmentMap", 5, texunit, white, clamp );

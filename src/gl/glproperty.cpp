@@ -1315,6 +1315,7 @@ void BSLightingShaderProperty::resetParams()
 	useEnvironmentMask = false;
 	hasHeightMap = false;
 	hasRefraction = false;
+	refractionStrength = 0.0f;
 	hasDetailMask = false;
 	hasTintMask = false;
 	hasTintColor = false;
@@ -1464,6 +1465,7 @@ void BSLightingShaderProperty::updateParams( const NifModel * nif )
 			hasSoftlight = hasSF2( ShaderFlags::SLSF2_Soft_Lighting );
 			hasMultiLayerParallax = hasSF2( ShaderFlags::SLSF2_Multi_Layer_Parallax );
 			hasRefraction = hasSF1( ShaderFlags::SLSF1_Refraction );
+			refractionStrength = nif->get<float>( lsp, "Refraction Strength" );
 
 			hasTintMask = isST( ShaderFlags::ST_Facegen );
 			hasDetailMask = hasTintMask;
@@ -1479,6 +1481,9 @@ void BSLightingShaderProperty::updateParams( const NifModel * nif )
 			lightingEffect1 = nif->get<float>( lsp, "Subsurface Rolloff" );
 			backlightPower = nif->get<float>( lsp, "Backlight Power" );
 			fresnelPower = nif->get<float>( lsp, "Fresnel Power" );
+			// FO4+ refraction (used to be handled only for bsVersion < 130)
+			hasRefraction = hasSF1( ShaderFlags::SLSF1_Refraction );
+			refractionStrength = nif->get<float>( lsp, "Refraction Strength" );
 		}
 
 		// Environment Map, Mask and Reflection Scale

@@ -755,6 +755,7 @@ public:
 	bool useEnvironmentMask = false;
 	bool hasHeightMap = false;
 	bool hasRefraction = false;
+	float refractionStrength = 0.0f;
 	bool hasDetailMask = false;
 	bool hasTintMask = false;
 	bool hasTintColor = false;

@@ -385,6 +385,55 @@ void Scene::draw()
 	drawSelection();
 }
 
+bool Scene::grabRefractionSource()
+{
+	if ( !renderer )
+		return false;
+	auto fn = renderer->fn;
+
+	GLint vp[4];
+	glGetIntegerv( GL_VIEWPORT, vp );
+	int w = vp[2], h = vp[3];
+	if ( w < 1 || h < 1 )
+		return false;
+
+	GLint prevRead = 0, prevDraw = 0, prevActive = 0, prevTex = 0;
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+
+	if ( !refractionTexId || refractionTexW != w || refractionTexH != h ) {
+		if ( !refractionTexId )
+			fn->glGenTextures( 1, &refractionTexId );
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+		fn->glBindTexture( GL_TEXTURE_2D, refractionTexId );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+		if ( !refractionFbo )
+			fn->glGenFramebuffers( 1, &refractionFbo );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, refractionFbo );
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, refractionTexId, 0 );
+		refractionTexW = w;
+		refractionTexH = h;
+	} else {
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, refractionFbo );
+	}
+
+	// resolve-blit works from both multisampled and plain framebuffers
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glBlitFramebuffer( vp[0], vp[1], vp[0] + w, vp[1] + h, 0, 0, w, h,
+	                       GL_COLOR_BUFFER_BIT, GL_NEAREST );
+
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	return true;
+}
+
 void Scene::drawShapes()
 {
 	pendingBolts.clear();
@@ -403,9 +452,18 @@ void Scene::drawShapes()
 
 		secondPass.alphaSort();
 
+		// particle systems are additive VFX: draw them after the other
+		// transparent shapes, so standard alpha blending cannot darken
+		// rectangular patches over the already-drawn sprites
+		QVector<Node *> deferredParticles;
 		for ( Node * node : secondPass.list() ) {
-			node->drawShapes();
+			if ( dynamic_cast<Particles *>( node ) )
+				deferredParticles.append( node );
+			else
+				node->drawShapes();
 		}
+		for ( Node * node : deferredParticles )
+			node->drawShapes();
 	} else {
 		for ( Node * node : roots.list() ) {
 			node->drawShapes();

@@ -400,6 +400,9 @@ public:
 	void placeCursor( const QPointF & pos );
 	//! Move the selected node so its origin lands on the cursor (undoable)
 	void snapNodeToCursor();
+	//! Set a block's Translation so its world origin lands on worldPos
+	//! (pushes onto the current ChangeValueCommand transaction)
+	bool snapBlockWorldPos( int blockNum, const Vector3 & worldPos );
 	//! Move all picked vertices to the cursor (edits mesh data, undoable snapshot)
 	void movePickedVertsToCursor();
 	//! Delete picked vertices/edges/faces (and dependent triangles) from the mesh

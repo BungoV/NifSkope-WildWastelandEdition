@@ -3377,22 +3377,16 @@ void GLView::placeCursor( const QPointF & pos )
 	update();
 }
 
-void GLView::snapNodeToCursor()
+bool GLView::snapBlockWorldPos( int b, const Vector3 & worldPos )
 {
-	if ( !model || !scene->currentBlock.isValid() )
-		return;
-
-	int b = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
-	while ( b >= 0 && !model->blockInherits( model->getBlockIndex( b ), "NiAVObject" ) )
-		b = model->getParent( b );
-	if ( b < 0 )
-		return;
+	if ( !model || b < 0 )
+		return false;
 	QModelIndex iBlock = model->getBlockIndex( b );
 	QModelIndex iField = model->getIndex( iBlock, "Translation" );
 	if ( !iField.isValid() )
-		return;
+		return false;
 
-	// cursor world position -> local translation under the parent
+	// world position -> local translation under the parent
 	Matrix pr;
 	Vector3 pp;
 	float ps = 1.0f;
@@ -3404,19 +3398,33 @@ void GLView::snapNodeToCursor()
 		pp = pt.translation;
 		ps = ( pt.scale != 0.0f ) ? pt.scale : 1.0f;
 	}
-	Vector3 nt = pr.inverted() * ( ( cursorPos - pp ) * ( 1.0f / ps ) );
+	Vector3 nt = pr.inverted() * ( ( worldPos - pp ) * ( 1.0f / ps ) );
 
 	QModelIndex vIdx = iField.sibling( iField.row(), NifModel::ValueCol );
 	const NifItem * item = static_cast<const NifItem *>( vIdx.internalPointer() );
 	if ( !item )
-		return;
+		return false;
 	NifValue oldVal = item->value();
 	NifValue nv = oldVal;
-	if ( nv.set( nt, model, item ) ) {
-		ChangeValueCommand::createTransaction();
+	if ( nv.set( nt, model, item ) )
 		model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, nv, model->itemName( iField ), model ) );
-	}
 	update();
+	return true;
+}
+
+void GLView::snapNodeToCursor()
+{
+	if ( !model || !scene->currentBlock.isValid() )
+		return;
+
+	int b = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+	while ( b >= 0 && !model->blockInherits( model->getBlockIndex( b ), "NiAVObject" ) )
+		b = model->getParent( b );
+	if ( b < 0 )
+		return;
+
+	ChangeValueCommand::createTransaction();
+	snapBlockWorldPos( b, cursorPos );
 }
 
 QHash<int, QSet<int>> GLView::pickedVertexRefs() const
@@ -4205,17 +4213,36 @@ void GLView::showSnapMenu()
 	m.addSection( tr( "Snap" ) );
 	QAction * aSelGrid = m.addAction( tr( "Selection to Grid" ) );
 	QAction * aSelCur  = m.addAction( tr( "Selection to Cursor" ) );
-	QAction * aSelOrig = m.addAction( tr( "Selection to Node Origin" ) );
+	QAction * aSelOrig = m.addAction( editMode ? tr( "Selection to Node Origin" ) : tr( "Selection to Active" ) );
 	m.addSeparator();
 	QAction * aCurSel  = m.addAction( tr( "Cursor to Selected" ) );
 	QAction * aCurOrig = m.addAction( tr( "Cursor to World Origin" ) );
-	QAction * aCurNode = m.addAction( tr( "Cursor to Node Origin" ) );
+	QAction * aCurNode = m.addAction( editMode ? tr( "Cursor to Node Origin" ) : tr( "Cursor to Active" ) );
 	QAction * aCurGrid = m.addAction( tr( "Cursor to Grid" ) );
 
-	bool hasSel = !pickedElems.isEmpty();
+	// object mode works on the selected objects' origins instead of vertices
+	bool hasSel = editMode ? !pickedElems.isEmpty() : !objSelection.isEmpty();
 	aSelGrid->setEnabled( hasSel );
 	aSelCur->setEnabled( hasSel );
-	aSelOrig->setEnabled( hasSel );
+	aSelOrig->setEnabled( editMode ? hasSel : ( objActive >= 0 && objSelection.size() > 1 ) );
+	if ( !editMode ) {
+		aCurSel->setEnabled( hasSel );
+		aCurNode->setEnabled( objActive >= 0 );
+	}
+
+	auto objOrigin = [this]( int b ) {
+		Node * nd = scene->getNode( model, model->getBlockIndex( b ) );
+		return nd ? nd->worldTrans().translation : Vector3();
+	};
+	auto objSelectionAvg = [this, &objOrigin]() {
+		Vector3 sum;
+		int n = 0;
+		for ( int b : objSelection ) {
+			sum += objOrigin( b );
+			n++;
+		}
+		return ( n > 0 ) ? ( sum / float( n ) ) : Vector3();
+	};
 
 	// average origin of the node(s) owning the current selection
 	auto nodeOriginAvg = [this]() {
@@ -4241,22 +4268,48 @@ void GLView::showSnapMenu()
 	if ( !r )
 		return;
 	if ( r == aSelGrid ) {
-		snapSelectionToGrid();
+		if ( editMode ) {
+			snapSelectionToGrid();
+		} else {
+			float step = std::max( gizmoSnapStep, 0.0001f );
+			ChangeValueCommand::createTransaction();
+			for ( int b : objSelection ) {
+				Vector3 wp = objOrigin( b );
+				for ( int c = 0; c < 3; c++ )
+					wp[c] = std::round( wp[c] / step ) * step;
+				snapBlockWorldPos( b, wp );
+			}
+		}
 	} else if ( r == aSelCur ) {
-		movePickedVertsToCursor();
+		if ( editMode ) {
+			movePickedVertsToCursor();
+		} else {
+			ChangeValueCommand::createTransaction();
+			for ( int b : objSelection )
+				snapBlockWorldPos( b, cursorPos );
+		}
 	} else if ( r == aSelOrig ) {
-		Vector3 saved = cursorPos;
-		cursorPos = nodeOriginAvg();	// reuse the move-to-cursor path
-		movePickedVertsToCursor();
-		cursorPos = saved;
+		if ( editMode ) {
+			Vector3 saved = cursorPos;
+			cursorPos = nodeOriginAvg();	// reuse the move-to-cursor path
+			movePickedVertsToCursor();
+			cursorPos = saved;
+		} else {
+			Vector3 tgt = objOrigin( objActive );
+			ChangeValueCommand::createTransaction();
+			for ( int b : objSelection ) {
+				if ( b != objActive )
+					snapBlockWorldPos( b, tgt );
+			}
+		}
 	} else if ( r == aCurSel ) {
-		cursorPos = pickedMedian();
+		cursorPos = editMode ? pickedMedian() : objSelectionAvg();
 		update();
 	} else if ( r == aCurOrig ) {
 		cursorPos = Vector3();
 		update();
 	} else if ( r == aCurNode ) {
-		cursorPos = nodeOriginAvg();
+		cursorPos = editMode ? nodeOriginAvg() : objOrigin( objActive );
 		update();
 	} else if ( r == aCurGrid ) {
 		float step = std::max( gizmoSnapStep, 0.0001f );
@@ -5104,8 +5157,9 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	}
 
 	if ( view != ViewWalk && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
-		// Shift+S: snap pie (edit mode) - must beat the plain S scale shortcut
-		if ( event->key() == Qt::Key_S && ( event->modifiers() & Qt::ShiftModifier ) && editMode ) {
+		// Shift+S: snap pie (object and edit mode, Blender) - must beat the
+		// plain S scale shortcut
+		if ( event->key() == Qt::Key_S && ( event->modifiers() & Qt::ShiftModifier ) && model ) {
 			showSnapMenu();
 			return;
 		}

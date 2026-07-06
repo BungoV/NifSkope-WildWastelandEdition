@@ -266,6 +266,14 @@ public:
 	//! darken square patches over the additive bolts
 	QVector<ProcLightningController *> pendingBolts;
 
+	// --- screen-space refraction preview (SLSF1_Refraction) ---
+	unsigned int refractionTexId = 0;   //!< copy of the framebuffer behind the shape
+	unsigned int refractionFbo = 0;
+	int refractionTexW = 0, refractionTexH = 0;
+	//! Resolve-blit the current framebuffer into refractionTexId (MSAA-safe).
+	//! Returns false if the copy is not possible.
+	bool grabRefractionSource();
+
 	FloatVector4 currentGLColor;
 	float currentGLLineWidth;
 	float currentGLPointSize;

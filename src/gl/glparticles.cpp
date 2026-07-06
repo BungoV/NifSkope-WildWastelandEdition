@@ -331,5 +331,12 @@ void Particles::drawShapes( NodeList * secondPass )
 
 	if ( active < numVerts )
 		numVerts = active;
+
+	// transparent sprites must not write depth: they would punch square
+	// holes into transparent geometry drawn after them
+	if ( !scene->selecting )
+		glDepthMask( GL_FALSE );
 	scene->renderer->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );
+	if ( !scene->selecting )
+		glDepthMask( GL_TRUE );
 }
