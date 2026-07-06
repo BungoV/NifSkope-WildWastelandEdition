@@ -2591,7 +2591,31 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 					target = swt * ( d01 <= d12 && d01 <= d20 ? p01 : ( d12 <= d20 ? p12 : p20 ) );
 				}
 
-				deltaWorld = target - gizmoOrigWorldPos;
+				// Snap Base: which part of the selection lands on the target
+				Vector3 base = gizmoOrigWorldPos;	// active (primary node)
+				if ( snapBase == 1 || snapBase == 2 ) {
+					// center (bounds middle) / median of the moved node origins
+					Vector3 mn = gizmoNodes.first().origWorldPos, mx = mn, sum;
+					for ( const auto & st : gizmoNodes ) {
+						sum += st.origWorldPos;
+						for ( int c = 0; c < 3; c++ ) {
+							mn[c] = std::min( mn[c], st.origWorldPos[c] );
+							mx[c] = std::max( mx[c], st.origWorldPos[c] );
+						}
+					}
+					base = ( snapBase == 1 ) ? ( mn + mx ) / 2.0f : sum / float( gizmoNodes.size() );
+				} else if ( snapBase == 0 ) {
+					float bd = 1.0e30f;
+					for ( const auto & st : gizmoNodes ) {
+						float d = ( st.origWorldPos - target ).squaredLength();
+						if ( d < bd ) {
+							bd = d;
+							base = st.origWorldPos;
+						}
+					}
+				}
+
+				deltaWorld = target - base;
 				elemSnapped = true;
 				snapIndicator = true;
 				snapIndicatorPos = target;
@@ -2620,7 +2644,10 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 		}
 
 		Vector3 nt = worldToLocalTrans( gizmoOrigWorldPos + deltaWorld );
-		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
+		// grid stepping only applies to the Increment snap target; with a
+		// vertex/edge/face target and no geometry under the mouse, the move
+		// stays free (Blender) instead of snapping to invisible grid steps
+		if ( snap && !elemSnapped && gizmoSnapStep > 0 && snapTargetMode == 0 ) {
 			float step = gizmoSnapStep * snapFine;
 			for ( int c = 0; c < 3; c++ )
 				nt[c] = std::round( nt[c] / step ) * step;
@@ -3069,21 +3096,33 @@ void GLView::drawObjectOutlines()
 	float dpr = float( devicePixelRatioF() );
 
 	glEnable( GL_STENCIL_TEST );
-	glEnable( GL_DEPTH_TEST );
-	glDepthFunc( GL_LEQUAL );
+	glStencilMask( 0xFF );
+	glDisable( GL_DEPTH_TEST );	// the outline shows around the whole object
 	glDepthMask( GL_FALSE );
 
 	for ( int b : objSelection ) {
-		// all shapes in the selected object's subtree form one silhouette
-		QVector<Shape *> shs;
+		// all shapes in the selected object's subtree form one silhouette;
+		// expanded triangle soup per shape (local space, drawn with the
+		// shape's own modelview)
+		QVector<QPair<Shape *, QVector<Vector3>>> shs;
 		for ( Shape * s : scene->shapes ) {
 			if ( !s || s->isHidden() || s->verts.isEmpty() || s->triangles.isEmpty() )
 				continue;
 			int p = s->id();
 			while ( p >= 0 && p != b )
 				p = model->getParent( p );
-			if ( p == b )
-				shs.append( s );
+			if ( p != b )
+				continue;
+			QVector<Vector3> soup;
+			soup.reserve( s->triangles.size() * 3 );
+			int nv = s->verts.size();
+			for ( const Triangle & t : s->triangles ) {
+				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+					continue;
+				soup << s->verts.at( t[0] ) << s->verts.at( t[1] ) << s->verts.at( t[2] );
+			}
+			if ( !soup.isEmpty() )
+				shs.append( qMakePair( s, soup ) );
 		}
 		if ( shs.isEmpty() )
 			continue;
@@ -3099,16 +3138,15 @@ void GLView::drawObjectOutlines()
 			}
 		}
 
-		// pass 1: mark the object's visible screen area in the stencil buffer
+		// pass 1: mark the object's screen area in the stencil buffer
 		glClear( GL_STENCIL_BUFFER_BIT );
 		glStencilFunc( GL_ALWAYS, 1, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 		glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
-		for ( Shape * s : shs ) {
-			scene->loadModelViewMatrix( s->viewTrans() );
+		for ( const auto & sp : shs ) {
+			scene->loadModelViewMatrix( sp.first->viewTrans() );
 			scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );
-			scene->drawTriangles( s->verts.constData(), size_t( s->verts.size() ), nullptr, true,
-				GL_TRIANGLES, size_t( s->triangles.size() ) * 3, GL_UNSIGNED_SHORT, s->triangles.constData() );
+			scene->drawTriangles( sp.second.constData(), size_t( sp.second.size() ), nullptr, true );
 		}
 		glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
@@ -3121,17 +3159,16 @@ void GLView::drawObjectOutlines()
 			scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );	// #FF9D00
 		else
 			scene->setGLColor( 1.0f, 0.447f, 0.0f, 1.0f );	// #FF7200
-		scene->setGLLineWidth( 3.0f * dpr );
-		for ( Shape * s : shs ) {
-			scene->loadModelViewMatrix( s->viewTrans() );
-			scene->drawTriangles( s->verts.constData(), size_t( s->verts.size() ), nullptr, false,
-				GL_TRIANGLES, size_t( s->triangles.size() ) * 3, GL_UNSIGNED_SHORT, s->triangles.constData() );
+		scene->setGLLineWidth( 3.2f * dpr );
+		for ( const auto & sp : shs ) {
+			scene->loadModelViewMatrix( sp.first->viewTrans() );
+			scene->drawTriangles( sp.second.constData(), size_t( sp.second.size() ), nullptr, false );
 		}
 	}
 
 	glDisable( GL_STENCIL_TEST );
+	glEnable( GL_DEPTH_TEST );
 	glDepthMask( GL_TRUE );
-	glDepthFunc( GL_LESS );
 }
 
 void GLView::hideSelectedElements()
@@ -3880,14 +3917,41 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 					target = swt * ( d01 <= d12 && d01 <= d20 ? p01 : ( d12 <= d20 ? p12 : p20 ) );
 				}
 
-				deltaWorld = target - elemPivot;
+				// Snap Base over the dragged vertices' original positions
+				Vector3 base = elemPivot;	// median (the element pivot)
+				if ( !elemVerts.isEmpty() ) {
+					if ( snapBase == 0 ) {
+						float bd = 1.0e30f;
+						for ( const auto & ev : elemVerts ) {
+							float d = ( ev.origWorld - target ).squaredLength();
+							if ( d < bd ) {
+								bd = d;
+								base = ev.origWorld;
+							}
+						}
+					} else if ( snapBase == 1 ) {
+						Vector3 mn = elemVerts.first().origWorld, mx = mn;
+						for ( const auto & ev : elemVerts ) {
+							for ( int c = 0; c < 3; c++ ) {
+								mn[c] = std::min( mn[c], ev.origWorld[c] );
+								mx[c] = std::max( mx[c], ev.origWorld[c] );
+							}
+						}
+						base = ( mn + mx ) / 2.0f;
+					} else if ( snapBase == 3 && !pickedElems.isEmpty() ) {
+						base = pickedElems.constLast().worldPos;	// active element
+					}
+				}
+
+				deltaWorld = target - base;
 				elemSnapped = true;
 				snapIndicator = true;
 				snapIndicatorPos = target;
 			}
 		}
 
-		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
+		// grid stepping only with the Increment target (see gizmoUpdate)
+		if ( snap && !elemSnapped && gizmoSnapStep > 0 && snapTargetMode == 0 ) {
 			for ( int c = 0; c < 3; c++ )
 				deltaWorld[c] = std::round( deltaWorld[c] / gizmoSnapStep ) * gizmoSnapStep;
 		}

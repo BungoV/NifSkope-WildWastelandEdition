@@ -475,6 +475,7 @@ public:
 
 	// ---- snapping ----
 	int snapTargetMode = 0;             // 0 grid step, 1 vertex, 2 edge, 3 face
+	int snapBase = 0;                   // Blender Snap Base: 0 closest, 1 center, 2 median, 3 active
 	//! Blender-style snap marker: shown at the snapped element while a
 	//! transform gesture is element-snapping
 	bool snapIndicator = false;

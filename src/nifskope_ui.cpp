@@ -983,6 +983,29 @@ void NifSkope::initDockWidgets()
 				pl->addWidget( l );
 			};
 
+			// Blender Snap Base: which part of the selection lands on target
+			addHeader( tr( "Snap Base" ) );
+			{
+				QWidget * brow = new QWidget( panel );
+				QHBoxLayout * brl = new QHBoxLayout( brow );
+				brl->setContentsMargins( 0, 0, 0, 0 );
+				brl->setSpacing( 2 );
+				static const char * baseNames[4] = {
+					QT_TR_NOOP( "Closest" ), QT_TR_NOOP( "Center" ), QT_TR_NOOP( "Median" ), QT_TR_NOOP( "Active" )
+				};
+				QButtonGroup * bgrp = new QButtonGroup( brow );
+				bgrp->setExclusive( true );
+				for ( int i = 0; i < 4; i++ ) {
+					QPushButton * b = new QPushButton( tr( baseNames[i] ), brow );
+					b->setCheckable( true );
+					b->setChecked( i == ogl->snapBase );
+					bgrp->addButton( b );
+					connect( b, &QPushButton::clicked, [this, i]() { ogl->snapBase = i; } );
+					brl->addWidget( b );
+				}
+				pl->addWidget( brow );
+			}
+
 			// snap target: mirrors the exclusive action group
 			addHeader( tr( "Snap Target" ) );
 			const auto tgtActs = grpSnapTgt->actions();
@@ -2081,6 +2104,22 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// must not require clicking the view first). Text-input widgets keep
 		// their keystrokes.
 		auto ke = static_cast<QKeyEvent *>( e );
+		// Alt+H (unhide, Blender) would otherwise be eaten by the Help menu
+		// mnemonic before the viewport ever sees the key
+		if ( ogl && graphicsView && ke->key() == Qt::Key_H
+			&& ( ke->modifiers() & Qt::AltModifier )
+			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::ShiftModifier ) )
+			&& isActiveWindow()
+			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			if ( e->type() == QEvent::KeyPress ) {
+				if ( ogl->editMode )
+					ogl->unhideAllElements();
+				else
+					ogl->unhideAll();
+			}
+			e->accept();
+			return true;
+		}
 		if ( ogl && graphicsView && !ogl->freeCamera
 			&& ke->key() == Qt::Key_F && ( ke->modifiers() & Qt::ShiftModifier )
 			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) )
