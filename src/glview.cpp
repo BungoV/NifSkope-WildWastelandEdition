@@ -681,7 +681,7 @@ void GLView::paintGL()
 			nt.rotation = basis;
 			nt.translation = pivot;
 			nt.scale = 1.0f;
-			float gs = std::max( float(Dist) / 10.0f, 0.05f ) * gizmoSizeMul;
+			float gs = gizmoScale();
 
 			scene->setGLLineWidth( Settings::lineWidthAxes * ( gizmoMode ? 1.6f : 1.0f ) );
 			scene->loadModelViewMatrix( viewTrans * nt );
@@ -1159,20 +1159,35 @@ void GLView::paintGL()
 		glEnable( GL_DEPTH_TEST );
 	}
 
-	// free-camera crosshair at the centre of the view (Blender fly/walk mode)
-	if ( freeCamera ) {
+	// Blender-style origin dots + parent relationship lines for the selection
+	if ( model && showOrigins && ( !objSelection.isEmpty() || ( editMode && !editShapeBlocks.isEmpty() ) ) ) {
+		const QSet<int> & selN = editMode ? editShapeBlocks : objSelection;
 		glDisable( GL_DEPTH_TEST );
 		glDepthMask( GL_FALSE );
 		scene->loadModelViewMatrix( viewTrans );
-		Vector3 c = viewTrans.inverted() * Vector3( 0.0f, 0.0f, -float( Dist ) );
-		const auto & vtr = viewTrans.rotation;
-		Vector3 right( vtr( 0, 0 ), vtr( 0, 1 ), vtr( 0, 2 ) );
-		Vector3 up( vtr( 1, 0 ), vtr( 1, 1 ), vtr( 1, 2 ) );
-		float cs = std::max( float( Dist ) / 40.0f, 0.01f );
-		scene->setGLLineWidth( Settings::lineWidthAxes * 1.3f );
-		scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.85f );
-		scene->drawLine( c - right * cs, c + right * cs );
-		scene->drawLine( c - up * cs, c + up * cs );
+		float dpr = float( devicePixelRatioF() );
+		for ( int ob : selN ) {
+			Node * n = scene->getNode( model, model->getBlockIndex( ob ) );
+			if ( !n )
+				continue;
+			Vector3 o = n->worldTrans().translation;
+			scene->setGLPointSize( 9.0f * dpr );
+			scene->setGLColor( 0.05f, 0.05f, 0.05f, 1.0f );
+			scene->drawPoints( &o, 1 );
+			scene->setGLPointSize( 6.0f * dpr );
+			scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );	// Blender origin orange
+			scene->drawPoints( &o, 1 );
+			// dashed relationship line to the parent's origin
+			int pb = model->getParent( ob );
+			if ( pb >= 0 && model->blockInherits( model->getBlockIndex( pb ), "NiAVObject" ) ) {
+				Node * pn = scene->getNode( model, model->getBlockIndex( pb ) );
+				if ( pn ) {
+					scene->setGLLineWidth( 1.0f * dpr );
+					scene->setGLColor( 0.75f, 0.75f, 0.75f, 0.7f );
+					scene->drawDashLine( o, pn->worldTrans().translation, 24 );
+				}
+			}
+		}
 		glDepthMask( GL_TRUE );
 		glEnable( GL_DEPTH_TEST );
 	}
@@ -1190,12 +1205,20 @@ void GLView::paintGL()
 
 	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
 	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
-	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) ) {
+	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera ) {
 		QPainter painter( this );
 		if ( model && showCursor )
 			drawCursorOverlay( painter );
 		if ( scene->hasOption( Scene::ShowAxes ) )
 			drawNavGizmo( painter );
+		if ( freeCamera ) {
+			// fly-mode crosshair at the exact screen centre (always visible)
+			painter.setRenderHint( QPainter::Antialiasing, true );
+			painter.setPen( QPen( QColor( 255, 255, 255, 220 ), 1.6 ) );
+			QPointF c( width() * 0.5, height() * 0.5 );
+			painter.drawLine( c - QPointF( 9, 0 ), c + QPointF( 9, 0 ) );
+			painter.drawLine( c - QPointF( 0, 9 ), c + QPointF( 0, 9 ) );
+		}
 		painter.end();
 
 		// QPainter changes GL state behind the renderer's back (bound program,
@@ -2105,7 +2128,7 @@ int GLView::gizmoHandleHitTest( const QPointF & pos ) const
 
 	Matrix basis = gizmoBasis( iGb );
 	Vector3 P = gizmoPivotPoint( iGb );
-	float gs = std::max( float( Dist ) / 10.0f, 0.05f ) * gizmoSizeMul;
+	float gs = gizmoScale();
 
 	QPointF sp;
 	if ( !worldToScreen( P, sp ) )
@@ -2211,6 +2234,21 @@ Matrix GLView::gizmoBasis( const QModelIndex & iBlock ) const
 		return b;
 	}
 	return Matrix();
+}
+
+float GLView::gizmoScale() const
+{
+	// world size for ~90 logical pixels on screen, regardless of camera
+	// distance, zoom or projection - the same behaviour as the 2D cursor
+	float hh = std::max( height(), 1 );
+	float wpp;
+	if ( perspectiveMode || view == ViewWalk ) {
+		float tanF = float( std::tan( ( cfg.fov / Zoom ) / 360.0 * M_PI ) );
+		wpp = 2.0f * std::max( float( Dist ), 0.01f ) * tanF / hh;
+	} else {
+		wpp = 2.0f * float( Dist / Zoom ) / hh;
+	}
+	return std::max( wpp, 1.0e-6f ) * 90.0f * ( gizmoSizeMul / 1.75f );
 }
 
 Vector3 GLView::gizmoPivotPoint( const QModelIndex & iBlock ) const
@@ -4823,6 +4861,65 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			return;
 		}
 
+		// A: select all / deselect all (Blender), in object and edit mode
+		if ( event->key() == Qt::Key_A && !( event->modifiers() & Qt::ShiftModifier ) && !freeCamera && model ) {
+			if ( editMode ) {
+				if ( !pickedElems.isEmpty() ) {
+					pickedElems.clear();
+				} else {
+					for ( int wb : editShapeBlocks ) {
+						Shape * sp = shapeForBlock( wb );
+						if ( !sp )
+							continue;
+						Transform wt = shapeRenderTrans( sp );
+						int nv = sp->verts.size();
+						if ( pickMode & 4 ) {
+							for ( int t = 0; t < sp->triangles.size(); t++ ) {
+								const Triangle & tri = sp->triangles.at( t );
+								if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+									continue;
+								PickedElement pe;
+								pe.shapeBlock = wb;
+								pe.type = 3;
+								pe.e0 = t;
+								pe.wA = wt * sp->verts[tri[0]];
+								pe.wB = wt * sp->verts[tri[1]];
+								pe.wC = wt * sp->verts[tri[2]];
+								pe.worldPos = ( pe.wA + pe.wB + pe.wC ) * ( 1.0f / 3.0f );
+								pickedElems.append( pe );
+							}
+						} else {
+							for ( int vi = 0; vi < nv; vi++ ) {
+								PickedElement pe;
+								pe.shapeBlock = wb;
+								pe.type = 1;
+								pe.e0 = vi;
+								pe.worldPos = wt * sp->verts[vi];
+								pe.wA = pe.worldPos;
+								pickedElems.append( pe );
+							}
+						}
+					}
+				}
+				update();
+			} else {
+				if ( !objSelection.isEmpty() ) {
+					objSelection.clear();
+					objActive = -1;
+				} else {
+					for ( Shape * sp : scene->shapes ) {
+						if ( sp && !sp->isHidden() ) {
+							objSelection.insert( sp->id() );
+							objActive = sp->id();
+						}
+					}
+				}
+				emit objectSelectionChanged();
+				update();
+			}
+			return;
+		}
+
 		int m = 0;
 		if ( event->key() == Qt::Key_G )
 			m = 1;
@@ -4883,6 +4980,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
 		freeCamera = true;
 		kbdState = 0;
+		requestActivate();	// make sure WASD key events reach this window
 		setCursor( Qt::BlankCursor );	// FPS-style: hide cursor, show a crosshair
 		QCursor::setPos( mapToGlobal( QPoint( width() / 2, height() / 2 ) ) );
 		lastPos = QPointF( width() * 0.5, height() * 0.5 );
@@ -4967,6 +5065,8 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 
 	// free camera: mouse looks around the eye (first person), cursor recentres
 	if ( freeCamera ) {
+		if ( !isActive() )
+			requestActivate();	// regain key focus so WASD keeps working
 		QPointF c( width() * 0.5, height() * 0.5 );
 		auto p = getQMouseEventPosition( event );
 		float ldx = float( p.x() - c.x() );

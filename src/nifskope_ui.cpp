@@ -435,6 +435,10 @@ void NifSkope::initDockWidgets()
 	dTimeline = new QDockWidget( tr( "Timeline" ), this );
 	dTimeline->setObjectName( "TimelineDock" );
 	timeline = new TimelineWidget( dTimeline );
+	// timeline buttons must not take keyboard focus, otherwise Tab (edit-mode
+	// toggle) cycles the transport buttons after clicking one
+	for ( QAbstractButton * b : timeline->findChildren<QAbstractButton *>() )
+		b->setFocusPolicy( Qt::NoFocus );
 	timeline->setNif( nif );
 	dTimeline->setWidget( timeline );
 	addDockWidget( Qt::BottomDockWidgetArea, dTimeline );
@@ -762,6 +766,9 @@ void NifSkope::initDockWidgets()
 	{
 		QComboBox * cbMode = new QComboBox( this );
 		cbMode->addItems( { tr( "Object Mode" ), tr( "Edit Mode" ) } );
+		// Blender-style mode icons: cube for object mode, vertices for edit mode
+		cbMode->setItemIcon( 0, tlMakeIcon( QStringLiteral( "orient_local" ), QColor( 228, 228, 232 ) ) );
+		cbMode->setItemIcon( 1, tlMakeIcon( QStringLiteral( "vert" ), QColor( 228, 228, 232 ) ) );
 		cbMode->setToolTip( tr( "Object / Edit mode (Tab). Edit mode enables vertex/edge/face editing on the selected mesh." ) );
 		connect( cbMode, qOverload<int>( &QComboBox::activated ), [this]( int i ) {
 			ogl->setEditMode( i == 1 );
@@ -1028,6 +1035,19 @@ void NifSkope::initDockWidgets()
 				btnWire->setChecked( false );
 		} );
 		ui->tRender->addWidget( btnWire );
+
+		// Blender-style origin dots + parent relationship lines toggle
+		QToolButton * btnOrig = new QToolButton( this );
+		btnOrig->setText( tr( "Origins" ) );
+		btnOrig->setCheckable( true );
+		btnOrig->setChecked( true );
+		btnOrig->setAutoRaise( true );
+		btnOrig->setToolTip( tr( "Show origin points of selected nodes and dashed lines to their parents" ) );
+		connect( btnOrig, &QToolButton::toggled, [this]( bool on ) {
+			ogl->showOrigins = on;
+			ogl->update();
+		} );
+		ui->tRender->addWidget( btnOrig );
 
 		QToolButton * btnCursor = new QToolButton( this );
 		btnCursor->setPopupMode( QToolButton::InstantPopup );

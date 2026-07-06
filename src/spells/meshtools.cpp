@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "data/nifvalue.h"
 #include "ui/widgets/ddspreview.h"
 #include "ui/widgets/filebrowser.h"
+#include "ui/widgets/timeline.h"
 #include "glview.h"
 
 #include <QApplication>
@@ -318,7 +319,8 @@ static const TlMatField tlMatBgsm[] = {
 	{ "Enable Editor Alpha Ref", 'b', nullptr },
 	{ "Rim Lighting", 'b', nullptr }, { "Rim Power", 'f', nullptr }, { "Backlight Power", 'f', nullptr },
 	{ "Subsurface Lighting", 'b', nullptr }, { "Subsurface Rolloff", 'f', nullptr },
-	{ "Specular Enabled", 'b', nullptr }, { "Specular Color", 'u', nullptr },
+	{ "Specular Enabled", 'b', nullptr },
+	{ "Specular Color R", 'f', nullptr }, { "Specular Color G", 'f', nullptr }, { "Specular Color B", 'f', nullptr },
 	{ "Specular Mult", 'f', nullptr }, { "Smoothness", 'f', nullptr },
 	{ "Fresnel Power", 'f', nullptr },
 	{ "Wetness Spec Scale", 'f', nullptr }, { "Wetness Spec Power", 'f', nullptr },
@@ -326,14 +328,16 @@ static const TlMatField tlMatBgsm[] = {
 	{ "Wetness Fresnel Power", 'f', nullptr }, { "Wetness Metalness", 'f', nullptr },
 	{ "Root Material Path", 's', nullptr },
 	{ "Aniso Lighting", 'b', nullptr }, { "Emit Enabled", 'b', nullptr },
-	{ "Emittance Color", 'u', "Emit Enabled" }, { "Emittance Mult", 'f', nullptr },
+	{ "Emittance Color R", 'f', "Emit Enabled" }, { "Emittance Color G", 'f', "Emit Enabled" },
+	{ "Emittance Color B", 'f', "Emit Enabled" }, { "Emittance Mult", 'f', nullptr },
 	{ "Model Space Normals", 'b', nullptr }, { "External Emittance", 'b', nullptr },
 	{ "Back Lighting", 'b', nullptr },
 	{ "Receive Shadows", 'b', nullptr }, { "Hide Secret", 'b', nullptr }, { "Cast Shadows", 'b', nullptr },
 	{ "Dissolve Fade", 'b', nullptr }, { "Assume Shadowmask", 'b', nullptr },
 	{ "Glowmap", 'b', nullptr },
 	{ "EnvMap Window", 'b', nullptr }, { "EnvMap Eye", 'b', nullptr },
-	{ "Hair", 'b', nullptr }, { "Hair Tint Color", 'u', nullptr },
+	{ "Hair", 'b', nullptr },
+	{ "Hair Tint Color R", 'f', nullptr }, { "Hair Tint Color G", 'f', nullptr }, { "Hair Tint Color B", 'f', nullptr },
 	{ "Tree", 'b', nullptr }, { "Facegen", 'b', nullptr }, { "Skin Tint", 'b', nullptr }, { "Tessellate", 'b', nullptr },
 	{ "Displacement Bias", 'f', nullptr }, { "Displacement Scale", 'f', nullptr },
 	{ "Tessellation PN Scale", 'f', nullptr }, { "Tessellation Base Factor", 'f', nullptr },
@@ -349,7 +353,8 @@ static const TlMatField tlMatBgem[] = {
 	{ "Blood Enabled", 'b', nullptr }, { "Effect Lighting Enabled", 'b', nullptr },
 	{ "Falloff Enabled", 'b', nullptr }, { "Falloff Color Enabled", 'b', nullptr },
 	{ "Grayscale To Palette Alpha", 'b', nullptr }, { "Soft Enabled", 'b', nullptr },
-	{ "Base Color", 'u', nullptr }, { "Base Color Scale", 'f', nullptr },
+	{ "Base Color R", 'f', nullptr }, { "Base Color G", 'f', nullptr }, { "Base Color B", 'f', nullptr },
+	{ "Base Color Scale", 'f', nullptr },
 	{ "Falloff Start Angle", 'f', nullptr }, { "Falloff Stop Angle", 'f', nullptr },
 	{ "Falloff Start Opacity", 'f', nullptr }, { "Falloff Stop Opacity", 'f', nullptr },
 	{ "Lighting Influence", 'f', nullptr }, { "EnvMap Min LOD", 'y', nullptr },
@@ -506,7 +511,9 @@ static void tlMatDefaults( bool bgem, QVector<QPair<QString, QVariant>> & vals )
 	set( "ZBuffer Test", true );
 	if ( !bgem ) {
 		set( "Specular Enabled", true );
-		set( "Specular Color", 0xFFFFFFFFu );
+		set( "Specular Color R", 1.0 );
+		set( "Specular Color G", 1.0 );
+		set( "Specular Color B", 1.0 );
 		set( "Specular Mult", 1.0 );
 		set( "Smoothness", 0.5 );
 		set( "Fresnel Power", 5.0 );
@@ -515,7 +522,9 @@ static void tlMatDefaults( bool bgem, QVector<QPair<QString, QVariant>> & vals )
 		set( "Cast Shadows", true );
 		set( "Grayscale To Palette Scale", 1.0 );
 	} else {
-		set( "Base Color", 0xFFFFFFFFu );
+		set( "Base Color R", 1.0 );
+		set( "Base Color G", 1.0 );
+		set( "Base Color B", 1.0 );
 		set( "Base Color Scale", 1.0 );
 		set( "Falloff Stop Angle", 1.0 );
 		set( "Falloff Stop Opacity", 1.0 );
@@ -803,13 +812,12 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 						else
 							seen.insert( owner );
 					}
-					// fold indicator on the owner cell
-					QString base = c0->data( Qt::UserRole + 2 ).toString();
-					QString want = ( folded ? QStringLiteral( "▸ " ) : QStringLiteral( "▾ " ) ) + base;
-					if ( base.isEmpty() )
-						want.clear();
-					if ( c0->text() != want )
-						c0->setText( want );
+					// fold indicator icon (icons never affect the sort order,
+					// unlike a text prefix which pushed folded rows around)
+					static const QIcon icoFold = tlMakeIcon( QStringLiteral( "chevron_right" ), QColor( 228, 228, 232 ) );
+					static const QIcon icoOpen = tlMakeIcon( QStringLiteral( "chevron_down" ), QColor( 228, 228, 232 ) );
+					c0->setIcon( c0->data( Qt::UserRole + 2 ).toString().isEmpty()
+						? QIcon() : ( folded ? icoFold : icoOpen ) );
 				}
 				tbl->setRowHidden( r, hide );
 			}

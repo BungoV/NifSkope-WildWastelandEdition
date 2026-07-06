@@ -307,6 +307,10 @@ private:
 	//! Which handle is under this position: 0 none, 1-3 move XYZ, 4 view-plane move,
 	//! 5-7 rotate rings, 8-10 scale boxes
 	int gizmoHandleHitTest( const QPointF & pos ) const;
+	//! Gizmo size in world units for a constant on-screen size (like the cursor)
+	float gizmoScale() const;
+	//! Show origin points + parent links of selected nodes (Blender)
+	bool showOrigins = true;
 
 	// --- Blender-style navigation gizmo (top-right axis-ball widget) ---
 	bool navGizmoDrag = false;          //!< dragging the gizmo to orbit

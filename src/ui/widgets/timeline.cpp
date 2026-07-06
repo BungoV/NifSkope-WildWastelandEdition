@@ -302,6 +302,15 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 			for ( int x = 0; x < 3; x++ )
 				p.drawEllipse( QPointF( 16 + x * 16, 16 + y * 16 ), 4.5, 4.5 );
 		}
+	} else if ( id == QLatin1String( "chevron_right" ) ) {
+		p.setBrush( Qt::NoBrush );
+		QPen cp( col, 7 );
+		cp.setCapStyle( Qt::RoundCap );
+		cp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( cp );
+		QPolygonF ck;
+		ck << QPointF( 26, 18 ) << QPointF( 40, 32 ) << QPointF( 26, 46 );
+		p.drawPolyline( ck );
 	} else if ( id == QLatin1String( "chevron_down" ) ) {
 		p.setBrush( Qt::NoBrush );
 		QPen cp( col, 7 );
