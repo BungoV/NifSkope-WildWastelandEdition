@@ -1211,12 +1211,27 @@ void GLView::paintGL()
 
 	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
 	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
-	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera ) {
+	bool drawSnapMarker = snapIndicator && ( gizmoMode != 0 || elemTransform );
+	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker ) {
 		QPainter painter( this );
 		if ( model && showCursor )
 			drawCursorOverlay( painter );
 		if ( scene->hasOption( Scene::ShowAxes ) )
 			drawNavGizmo( painter );
+		if ( drawSnapMarker ) {
+			// Blender snap marker: orange square outline + white center dot
+			QPointF sp;
+			if ( worldToScreen( snapIndicatorPos, sp ) ) {
+				painter.setRenderHint( QPainter::Antialiasing, true );
+				float r = 7.0f;
+				painter.setPen( QPen( QColor( 0xFF, 0x9D, 0x00, 235 ), 2.0 ) );
+				painter.setBrush( Qt::NoBrush );
+				painter.drawRect( QRectF( sp.x() - r, sp.y() - r, r * 2.0, r * 2.0 ) );
+				painter.setPen( Qt::NoPen );
+				painter.setBrush( QColor( 255, 255, 255, 235 ) );
+				painter.drawEllipse( sp, 1.8, 1.8 );
+			}
+		}
 		if ( freeCamera ) {
 			// fly-mode crosshair at the exact screen centre (always visible)
 			painter.setRenderHint( QPainter::Antialiasing, true );
@@ -2460,6 +2475,7 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 	// snapping only applies to the transform types enabled in the snap panel
 	if ( snap && !( snapAffect & ( 1 << ( gizmoMode - 1 ) ) ) )
 		snap = false;
+	snapIndicator = false;	// re-set below when an element snap engages
 	float precision = ( mods & Qt::ShiftModifier ) ? 0.2f : 1.0f;
 	// Shift+Ctrl = fine snap increments (Blender)
 	float snapFine = ( snap && ( mods & Qt::ShiftModifier ) ) ? 0.2f : 1.0f;
@@ -2548,6 +2564,8 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 
 				deltaWorld = target - gizmoOrigWorldPos;
 				elemSnapped = true;
+				snapIndicator = true;
+				snapIndicatorPos = target;
 
 				if ( snapAlignRot ) {
 					// orient the node's +Z to the target face normal
@@ -3620,6 +3638,9 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 	float dy = pos.y() - gizmoStartPos.y();
 	const bool numeric = gizmoNumActive();
 	bool snap = ( ( ( mods & Qt::ControlModifier ) != 0 ) != snapDefaultOn ) && !numeric;
+	if ( snap && !( snapAffect & ( 1 << ( gizmoMode - 1 ) ) ) )
+		snap = false;
+	snapIndicator = false;
 	float precision = ( mods & Qt::ShiftModifier ) ? 0.2f : 1.0f;
 
 	Matrix vm;
@@ -3662,7 +3683,48 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 			             + ( -dy * wpp ) * ( Vector3::dotproduct( camUp, u ) >= 0 ? 1.0f : -1.0f );
 			deltaWorld = u * amount;
 		}
-		if ( snap && gizmoSnapStep > 0 ) {
+
+		// element snapping (vertex/edge/face target): the selection median
+		// lands on the geometry under the mouse; the edited mesh is excluded
+		bool elemSnapped = false;
+		if ( snap && snapTargetMode > 0 ) {
+			SceneRayHit sh = raycastScene( QPointF( pos ), editShapeBlock );
+			if ( sh.shape ) {
+				Transform swt = shapeRenderTrans( sh.shape );
+				Vector3 target = swt * sh.hitLocal;
+				const Triangle & tri = sh.shape->triangles.at( sh.tri );
+				Vector3 va = sh.shape->verts.at( tri[0] );
+				Vector3 vb = sh.shape->verts.at( tri[1] );
+				Vector3 vc = sh.shape->verts.at( tri[2] );
+
+				if ( snapTargetMode == 1 ) {
+					float d0 = ( va - sh.hitLocal ).squaredLength();
+					float d1 = ( vb - sh.hitLocal ).squaredLength();
+					float d2 = ( vc - sh.hitLocal ).squaredLength();
+					target = swt * ( d0 <= d1 && d0 <= d2 ? va : ( d1 <= d2 ? vb : vc ) );
+				} else if ( snapTargetMode == 2 ) {
+					auto closest = [&sh]( const Vector3 & a, const Vector3 & b ) {
+						Vector3 d = b - a;
+						float len2 = d.squaredLength();
+						float t = ( len2 > 1.0e-12f )
+						          ? std::min( std::max( Vector3::dotproduct( sh.hitLocal - a, d ) / len2, 0.0f ), 1.0f ) : 0.0f;
+						return a + d * t;
+					};
+					Vector3 p01 = closest( va, vb ), p12 = closest( vb, vc ), p20 = closest( vc, va );
+					float d01 = ( p01 - sh.hitLocal ).squaredLength();
+					float d12 = ( p12 - sh.hitLocal ).squaredLength();
+					float d20 = ( p20 - sh.hitLocal ).squaredLength();
+					target = swt * ( d01 <= d12 && d01 <= d20 ? p01 : ( d12 <= d20 ? p12 : p20 ) );
+				}
+
+				deltaWorld = target - elemPivot;
+				elemSnapped = true;
+				snapIndicator = true;
+				snapIndicatorPos = target;
+			}
+		}
+
+		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
 			for ( int c = 0; c < 3; c++ )
 				deltaWorld[c] = std::round( deltaWorld[c] / gizmoSnapStep ) * gizmoSnapStep;
 		}
@@ -5517,8 +5579,10 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 	// grabbing a gizmo handle starts a constrained drag; releasing commits.
 	// checked before element picking so the handles stay usable in edit mode.
+	// Ctrl is allowed: holding it from the start means "drag with snapping"
+	// (Blender), and it previously blocked the drag from ever starting.
 	if ( gizmoHandlesOn && event->button() == Qt::LeftButton && view != ViewWalk
-		&& !kbdState && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		&& !kbdState && !( event->modifiers() & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
 		auto p = getQMouseEventPosition( event );
 		int h = gizmoHandleHitTest( p );
 		if ( h ) {

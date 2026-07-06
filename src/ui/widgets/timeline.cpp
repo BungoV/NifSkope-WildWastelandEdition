@@ -178,6 +178,73 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawLine( QPointF( 32, 45 ), QPointF( 32, 59 ) );
 		p.drawLine( QPointF( 5, 32 ), QPointF( 19, 32 ) );
 		p.drawLine( QPointF( 45, 32 ), QPointF( 59, 32 ) );
+	} else if ( id == QLatin1String( "gizmo" ) ) {
+		// move-gizmo cross: four arrows from the center
+		p.setBrush( col );
+		QPen gp( col, 5 );
+		gp.setCapStyle( Qt::RoundCap );
+		p.setPen( gp );
+		p.drawLine( QPointF( 32, 14 ), QPointF( 32, 50 ) );
+		p.drawLine( QPointF( 14, 32 ), QPointF( 50, 32 ) );
+		auto arrow = [&p]( QPointF tip, QPointF l, QPointF r ) {
+			QPolygonF a;
+			a << tip << l << r;
+			p.drawPolygon( a );
+		};
+		arrow( QPointF( 32, 6 ),  QPointF( 25, 16 ), QPointF( 39, 16 ) );
+		arrow( QPointF( 32, 58 ), QPointF( 25, 48 ), QPointF( 39, 48 ) );
+		arrow( QPointF( 6, 32 ),  QPointF( 16, 25 ), QPointF( 16, 39 ) );
+		arrow( QPointF( 58, 32 ), QPointF( 48, 25 ), QPointF( 48, 39 ) );
+	} else if ( id == QLatin1String( "origins" ) ) {
+		// origin dot with a dashed relationship line to the parent
+		p.setBrush( col );
+		p.setPen( Qt::NoPen );
+		p.drawEllipse( QPointF( 20, 46 ), 8, 8 );
+		p.drawEllipse( QPointF( 48, 16 ), 5, 5 );
+		QPen dp( col, 4 );
+		dp.setStyle( Qt::DotLine );
+		dp.setCapStyle( Qt::RoundCap );
+		p.setPen( dp );
+		p.setBrush( Qt::NoBrush );
+		p.drawLine( QPointF( 25, 40 ), QPointF( 44, 21 ) );
+	} else if ( id == QLatin1String( "shade_wire" ) ) {
+		// Blender wireframe shading: sphere of wires
+		p.setBrush( Qt::NoBrush );
+		QPen wp( col, 4 );
+		p.setPen( wp );
+		p.drawEllipse( QPointF( 32, 32 ), 22, 22 );
+		p.drawEllipse( QRectF( 22, 10, 20, 44 ) );
+		p.drawEllipse( QRectF( 10, 22, 44, 20 ) );
+	} else if ( id == QLatin1String( "shade_solid" ) ) {
+		// Blender solid shading: plain sphere
+		p.setPen( QPen( col, 3 ) );
+		p.setBrush( Qt::NoBrush );
+		p.drawEllipse( QPointF( 32, 32 ), 22, 22 );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 32, 32 ), 14, 14 );
+	} else if ( id == QLatin1String( "shade_material" ) ) {
+		// Blender material/rendered shading: sphere with a highlight
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 32, 32 ), 22, 22 );
+		p.setBrush( QColor( 40, 40, 46 ) );
+		p.drawEllipse( QPointF( 38, 38 ), 16, 16 );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 24, 24 ), 7, 7 );
+	} else if ( id == QLatin1String( "xray" ) ) {
+		// Blender toggle x-ray: two overlapping squares, the back one showing
+		// through the front
+		p.setBrush( Qt::NoBrush );
+		QPen xp( col, 4 );
+		xp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( xp );
+		p.drawRect( QRectF( 22, 10, 32, 32 ) );
+		p.setBrush( col );
+		p.drawRect( QRectF( 10, 22, 32, 32 ) );
+		p.setBrush( QColor( 40, 40, 46 ) );
+		p.setPen( Qt::NoPen );
+		p.drawRect( QRectF( 24, 24, 16, 16 ) );
 	} else if ( id == QLatin1String( "normalize" ) ) {
 		p.drawLine( QPointF( 32, 18 ), QPointF( 32, 46 ) );
 		QPolygonF up;

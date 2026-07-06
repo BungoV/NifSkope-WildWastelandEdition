@@ -345,11 +345,13 @@ void main()
 
 	if ( doRefraction ) {
 		// sample the already-rendered scene behind the shape, displaced by
-		// the (normal-mapped) surface normal - glass / heat-haze preview
+		// the (normal-mapped) surface normal - glass / heat-haze preview.
+		// No specular term: noisy effect normal maps turn it into white
+		// speckles all over the surface.
 		vec2	suv = ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw );
 		vec2	roffs = normal.xy * clamp( refractionStrength, 0.0, 1.0 ) * 0.12;
 		vec3	bg = texture( RefractionSrc, clamp( suv + roffs, vec2( 0.001 ), vec2( 0.999 ) ) ).rgb;
-		color.rgb = bg + tonemap( spec );
+		color.rgb = bg;
 		color.a = 1.0;
 	}
 

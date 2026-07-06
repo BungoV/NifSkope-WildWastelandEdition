@@ -304,8 +304,21 @@ void BSShape::drawShapes( NodeList * secondPass )
 		prog->uni1i( "selectionParam", ( !( selectionFlags & int(Scene::SelVertex) ) ? nodeId : -1 ) );
 	}
 
+	// Blender-style X-ray: constant-alpha blend over whatever is behind,
+	// without writing depth, so everything shows through everything
+	bool xRayDraw = ( scene->xRay && !scene->selecting );
+	if ( xRayDraw ) {
+		glEnable( GL_BLEND );
+		context->fn->glBlendColor( 1.0f, 1.0f, 1.0f, 0.45f );
+		glBlendFunc( GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA );
+		glDepthMask( GL_FALSE );
+	}
+
 	if ( numTriangles > 0 )
 		context->fn->glDrawElements( GL_TRIANGLES, GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
+
+	if ( xRayDraw )
+		glDepthMask( GL_TRUE );
 
 	glDisable( GL_POLYGON_OFFSET_FILL );
 

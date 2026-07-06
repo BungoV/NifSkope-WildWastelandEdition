@@ -266,6 +266,9 @@ public:
 	//! darken square patches over the additive bolts
 	QVector<ProcLightningController *> pendingBolts;
 
+	//! Blender-style X-ray: all geometry renders half-transparent
+	bool xRay = false;
+
 	// --- screen-space refraction preview (SLSF1_Refraction) ---
 	unsigned int refractionTexId = 0;   //!< copy of the framebuffer behind the shape
 	unsigned int refractionFbo = 0;

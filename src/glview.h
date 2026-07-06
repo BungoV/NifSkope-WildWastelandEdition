@@ -467,6 +467,10 @@ public:
 
 	// ---- snapping ----
 	int snapTargetMode = 0;             // 0 grid step, 1 vertex, 2 edge, 3 face
+	//! Blender-style snap marker: shown at the snapped element while a
+	//! transform gesture is element-snapping
+	bool snapIndicator = false;
+	Vector3 snapIndicatorPos;
 	bool snapAlignRot = false;          // orient +Z to the target face normal
 	bool snapDefaultOn = false;         // magnet: snap without holding Ctrl (Ctrl inverts)
 	int snapAffect = 7;                 // bitmask: 1 move, 2 rotate, 4 scale (Blender "Affect")

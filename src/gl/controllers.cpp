@@ -1571,55 +1571,86 @@ void ProcLightningController::drawPreview()
 	}
 	const float texAspect = 8.0f;	// beam sheets are ~8x taller than wide
 
-	auto addBolt = [&]( const Bolt & b, const Vector3 & root, const Vector3 & bDir, float bLen,
-	                    float halfWidth, const Color4 & col, bool fade ) {
-		// V repeats so the texture keeps its aspect along the bolt
+	// a connected ribbon per bolt: joints share mitered vertices so the
+	// segments connect geometrically instead of leaving notches at bends
+	auto addBolt = [&]( const QVector<Vector3> & wpts, const QVector<float> & tvals,
+	                    float halfWidth, float bLen, const Color4 & col, bool fade ) {
+		int n = wpts.size();
+		if ( n < 2 )
+			return;
 		float vTiles = std::max( bLen / std::max( halfWidth * 2.0f * texAspect, 0.1f ), 0.25f );
-		auto vAt = [&]( float t ) {
-			return uvOffV + uvSclV * ( t * vTiles );
-		};
 		float u0 = uvOffU, u1 = uvOffU + uvSclU;
-		for ( int i = 0; i + 1 < b.pts.size(); i++ ) {
-			Vector3 p0 = boltPoint( b, i, root, bDir, bLen );
-			Vector3 p1 = boltPoint( b, i + 1, root, bDir, bLen );
-			Vector3 seg = p1 - p0;
-			Vector3 perp = Vector3::crossproduct( camZ, seg );
+
+		// averaged (mitered) billboard perpendicular per point
+		QVector<Vector3> perps( n );
+		for ( int i = 0; i < n; i++ ) {
+			Vector3 d = wpts.at( std::min( i + 1, n - 1 ) ) - wpts.at( std::max( i - 1, 0 ) );
+			Vector3 perp = Vector3::crossproduct( camZ, d );
 			if ( perp.length() < 1.0e-6f )
-				continue;
-			perp.normalize();
-			perp = perp * halfWidth;
-			float t0 = b.pts.at( i )[0], t1 = b.pts.at( i + 1 )[0];
+				perp = ( i > 0 ) ? perps.at( i - 1 ) : Vector3( 0, 0, 1 ) * halfWidth;
+			else
+				perp = perp * ( halfWidth / perp.length() );
+			perps[i] = perp;
+		}
+
+		for ( int i = 0; i + 1 < n; i++ ) {
+			const Vector3 & p0 = wpts.at( i );
+			const Vector3 & p1 = wpts.at( i + 1 );
+			const Vector3 & q0 = perps.at( i );
+			const Vector3 & q1 = perps.at( i + 1 );
+			float t0 = tvals.at( i ), t1 = tvals.at( i + 1 );
 			float a0 = fade ? ( 1.0f - t0 ) : 1.0f;
 			float a1 = fade ? ( 1.0f - t1 ) : 1.0f;
-			float v0 = vAt( t0 ), v1 = vAt( t1 );
+			float v0 = uvOffV + uvSclV * ( t0 * vTiles );
+			float v1 = uvOffV + uvSclV * ( t1 * vTiles );
 			FloatVector4 c0( col[0], col[1], col[2], col[3] * a0 );
 			FloatVector4 c1( col[0], col[1], col[2], col[3] * a1 );
-			// two triangles per segment
-			tris << ( p0 + perp ) << ( p0 - perp ) << ( p1 + perp );
+			tris << ( p0 + q0 ) << ( p0 - q0 ) << ( p1 + q1 );
 			cols << c0 << c0 << c1;
 			uvs << Vector2( u0, v0 ) << Vector2( u1, v0 ) << Vector2( u0, v1 );
-			tris << ( p1 + perp ) << ( p0 - perp ) << ( p1 - perp );
+			tris << ( p1 + q1 ) << ( p0 - q0 ) << ( p1 - q1 );
 			cols << c1 << c0 << c1;
 			uvs << Vector2( u0, v1 ) << Vector2( u1, v0 ) << Vector2( u1, v1 );
 		}
 	};
 
+	// main bolt world polyline first: branches must root on the JITTERED
+	// main bolt, not on the straight axis, or they float next to it
+	QVector<Vector3> mainPts;
+	QVector<float> mainT;
+	{
+		const Bolt & b = bolts.first();
+		for ( int i = 0; i < b.pts.size(); i++ ) {
+			mainPts.append( boltPoint( b, i, A, axis, len ) );
+			mainT.append( b.pts.at( i )[0] );
+		}
+	}
+	auto mainAt = [&]( float t ) {
+		int nSeg = mainPts.size() - 1;
+		float f = std::min( std::max( t, 0.0f ), 1.0f ) * float( nSeg );
+		int i = std::min( int( f ), nSeg - 1 );
+		float u = f - float( i );
+		return mainPts.at( i ) + ( mainPts.at( i + 1 ) - mainPts.at( i ) ) * u;
+	};
+
 	for ( int bi = 0; bi < bolts.size(); bi++ ) {
 		const Bolt & b = bolts.at( bi );
-		Vector3 root = A;
-		Vector3 bDir = axis;
-		float bLen = len;
-		bool fade = fadeMain;
-		if ( bi > 0 ) {
-			// branch: root on the (unjittered) main axis, frame-space direction
-			root = A + axis * ( b.rootT * len );
-			bDir = axis * b.dir[0] + v * b.dir[1] + w * b.dir[2];
-			bDir.normalize();
-			bLen = len * b.lenMul;
-			fade = fadeChild;
-		}
 		float hw = std::max( width * b.widthMul * 0.5f, 0.1f );
-		addBolt( b, root, bDir, bLen, hw, tint, fade );
+		if ( bi == 0 ) {
+			addBolt( mainPts, mainT, hw, len, tint, fadeMain );
+			continue;
+		}
+		Vector3 root = mainAt( b.rootT );
+		Vector3 bDir = axis * b.dir[0] + v * b.dir[1] + w * b.dir[2];
+		bDir.normalize();
+		float bLen = len * b.lenMul;
+		QVector<Vector3> wpts;
+		QVector<float> tvals;
+		for ( int i = 0; i < b.pts.size(); i++ ) {
+			wpts.append( boltPoint( b, i, root, bDir, bLen ) );
+			tvals.append( b.pts.at( i )[0] );
+		}
+		addBolt( wpts, tvals, hw, bLen, tint, fadeChild );
 	}
 
 	if ( tris.isEmpty() || !sc->renderer )

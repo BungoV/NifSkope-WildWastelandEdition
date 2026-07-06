@@ -884,6 +884,26 @@ void NifSkope::initDockWidgets()
 		connect( aOrbitSel, &QAction::toggled, [this]( bool on ) { ogl->orbitSelection = on; } );
 		m->addAction( aOrbitSel );
 
+		// Blender-style viewport toggles, moved in from the toolbar
+		m->addSeparator();
+		aShowCursor->setIcon( tlMakeIcon( QStringLiteral( "cursor3d" ), icoColHdr ) );
+		mCursor->removeAction( aShowCursor );
+		m->addAction( aShowCursor );
+		aGizmoHandles->setIcon( tlMakeIcon( QStringLiteral( "gizmo" ), icoColHdr ) );
+		m->addAction( aGizmoHandles );
+		QAction * aOrigins = new QAction( tlMakeIcon( QStringLiteral( "origins" ), icoColHdr ), tr( "Show Origins" ), this );
+		aOrigins->setCheckable( true );
+		aOrigins->setChecked( true );
+		aOrigins->setToolTip( tr( "Show origin points of selected nodes and dashed lines to their parents" ) );
+		connect( aOrigins, &QAction::toggled, [this]( bool on ) {
+			ogl->showOrigins = on;
+			ogl->update();
+		} );
+		m->addAction( aOrigins );
+		m->addSeparator();
+		// the 3D cursor / element utilities keep living in a submenu
+		m->addMenu( mCursor );
+
 		btn->setMenu( m );
 		ui->tRender->insertWidget( ui->aShowCollision, btn );
 		for ( QAction * a : ds )
@@ -894,16 +914,6 @@ void NifSkope::initDockWidgets()
 	// Blender-style transform header on the freed toolbar space
 	{
 		ui->tRender->addSeparator();
-
-		// 3D cursor utilities: Blender-style cursor icon, leftmost of the
-		// transform-settings cluster
-		QToolButton * btnCursor = new QToolButton( this );
-		btnCursor->setPopupMode( QToolButton::InstantPopup );
-		btnCursor->setAutoRaise( true );
-		btnCursor->setIcon( tlMakeIcon( QStringLiteral( "cursor3d" ), icoColHdr ) );
-		btnCursor->setToolTip( tr( "3D cursor and element utilities" ) );
-		btnCursor->setMenu( mCursor );
-		ui->tRender->addWidget( btnCursor );
 
 		// Blender-style dropdowns: a flat button showing the current choice's
 		// icon (and text, where Blender shows text), opening the checkable
@@ -1079,13 +1089,10 @@ void NifSkope::initDockWidgets()
 			} );
 		}
 
-		aGizmoHandles->setIconText( tr( "Gizmo" ) );
-		ui->tRender->addAction( aGizmoHandles );
-
-		// wireframe overlay toggle - on by default in object mode (shows the
-		// selected mesh wireframe), auto-off when entering edit mode
+		// Blender-style viewport shading buttons: wireframe overlay / solid
+		// (no lighting) / shaded (full lighting), plus the X-ray toggle
 		QToolButton * btnWire = new QToolButton( this );
-		btnWire->setText( tr( "Wire" ) );
+		btnWire->setIcon( tlMakeIcon( QStringLiteral( "shade_wire" ), icoColHdr ) );
 		btnWire->setCheckable( true );
 		btnWire->setChecked( false );
 		btnWire->setAutoRaise( true );
@@ -1102,18 +1109,47 @@ void NifSkope::initDockWidgets()
 		} );
 		ui->tRender->addWidget( btnWire );
 
-		// Blender-style origin dots + parent relationship lines toggle
-		QToolButton * btnOrig = new QToolButton( this );
-		btnOrig->setText( tr( "Origins" ) );
-		btnOrig->setCheckable( true );
-		btnOrig->setChecked( true );
-		btnOrig->setAutoRaise( true );
-		btnOrig->setToolTip( tr( "Show origin points of selected nodes and dashed lines to their parents" ) );
-		connect( btnOrig, &QToolButton::toggled, [this]( bool on ) {
-			ogl->showOrigins = on;
+		QToolButton * btnSolid = new QToolButton( this );
+		btnSolid->setCheckable( true );
+		btnSolid->setAutoRaise( true );
+		btnSolid->setIcon( tlMakeIcon( QStringLiteral( "shade_solid" ), icoColHdr ) );
+		btnSolid->setToolTip( tr( "Solid shading: base textures without lighting" ) );
+		QToolButton * btnShaded = new QToolButton( this );
+		btnShaded->setCheckable( true );
+		btnShaded->setAutoRaise( true );
+		btnShaded->setIcon( tlMakeIcon( QStringLiteral( "shade_material" ), icoColHdr ) );
+		btnShaded->setToolTip( tr( "Shaded: full lighting (default)" ) );
+		btnSolid->setChecked( !ui->aLighting->isChecked() );
+		btnShaded->setChecked( ui->aLighting->isChecked() );
+		// trigger() (not setChecked) so the scene option group updates
+		connect( btnSolid, &QToolButton::clicked, [this]() {
+			if ( ui->aLighting->isChecked() )
+				ui->aLighting->trigger();
+		} );
+		connect( btnShaded, &QToolButton::clicked, [this]() {
+			if ( !ui->aLighting->isChecked() )
+				ui->aLighting->trigger();
+		} );
+		connect( ui->aLighting, &QAction::toggled, [btnSolid, btnShaded]( bool on ) {
+			QSignalBlocker b1( btnSolid ), b2( btnShaded );
+			btnSolid->setChecked( !on );
+			btnShaded->setChecked( on );
+		} );
+		ui->tRender->addWidget( btnSolid );
+		ui->tRender->addWidget( btnShaded );
+
+		// Blender-style X-ray (Alt+Z)
+		QToolButton * btnXRay = new QToolButton( this );
+		btnXRay->setCheckable( true );
+		btnXRay->setAutoRaise( true );
+		btnXRay->setIcon( tlMakeIcon( QStringLiteral( "xray" ), icoColHdr ) );
+		btnXRay->setToolTip( tr( "Toggle X-ray: render all geometry half-transparent (Alt+Z)" ) );
+		btnXRay->setShortcut( QKeySequence( Qt::ALT | Qt::Key_Z ) );
+		connect( btnXRay, &QToolButton::toggled, [this]( bool on ) {
+			ogl->getScene()->xRay = on;
 			ogl->update();
 		} );
-		ui->tRender->addWidget( btnOrig );
+		ui->tRender->addWidget( btnXRay );
 	}
 
 	// Material / Texture Manager panel (starts floating; toggled from Panels)
