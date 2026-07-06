@@ -314,6 +314,9 @@ private:
 	float gizmoScale( const Vector3 & pivot ) const;
 	//! Show origin points + parent links of selected nodes (Blender)
 	bool showOrigins = true;
+	//! Blender-style silhouette outlines around the object-mode selection
+	//! (active #FF9D00, secondary #FF7200, white while transforming)
+	void drawObjectOutlines();
 
 	// --- Blender-style navigation gizmo (top-right axis-ball widget) ---
 	bool navGizmoDrag = false;          //!< dragging the gizmo to orbit
@@ -405,6 +408,11 @@ public:
 	bool snapBlockWorldPos( int blockNum, const Vector3 & worldPos );
 	//! Move all picked vertices to the cursor (edits mesh data, undoable snapshot)
 	void movePickedVertsToCursor();
+
+	// edit-mode hide (Blender H / Alt+H): per shape block, hidden triangle indices
+	QHash<int, QSet<int>> editHiddenTris;
+	void hideSelectedElements();
+	void unhideAllElements();
 	//! Delete picked vertices/edges/faces (and dependent triangles) from the mesh
 	void deletePickedElements();
 

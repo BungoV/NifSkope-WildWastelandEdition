@@ -314,8 +314,29 @@ void BSShape::drawShapes( NodeList * secondPass )
 		glDepthMask( GL_FALSE );
 	}
 
-	if ( numTriangles > 0 )
+	// edit-mode hidden triangles (Blender H): draw only the visible index
+	// runs; the cached element buffer is reused with byte offsets
+	const QSet<int> * hiddenT = nullptr;
+	{
+		auto ith = scene->hiddenTris.constFind( nodeId );
+		if ( ith != scene->hiddenTris.constEnd() && !ith->isEmpty() )
+			hiddenT = &( *ith );
+	}
+
+	if ( numTriangles > 0 && !hiddenT ) {
 		context->fn->glDrawElements( GL_TRIANGLES, GLsizei( numTriangles * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
+	} else if ( numTriangles > 0 ) {
+		qsizetype runStart = 0;
+		for ( qsizetype i = 0; i <= numTriangles; i++ ) {
+			bool hid = ( i < numTriangles ) && hiddenT->contains( int( i ) );
+			if ( hid || i == numTriangles ) {
+				if ( i > runStart )
+					context->fn->glDrawElements( GL_TRIANGLES, GLsizei( ( i - runStart ) * 3 ),
+						GL_UNSIGNED_SHORT, (void *) ( size_t( runStart ) * 6 ) );
+				runStart = i + 1;
+			}
+		}
+	}
 
 	if ( xRayDraw )
 		glDepthMask( GL_TRUE );

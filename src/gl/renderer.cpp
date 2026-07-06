@@ -803,7 +803,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		// behind it; distort that with the fragment normal instead of showing
 		// the bare normal map / missing-texture magenta
 		bool	doRefr = false;
-		if ( lsp->hasRefraction && !scene->selecting ) {
+		if ( lsp->hasRefraction && scene->showRefraction && !scene->selecting ) {
 			doRefr = scene->grabRefractionSource();
 			if ( doRefr ) {
 				fn->glActiveTexture( GL_TEXTURE0 + texunit );

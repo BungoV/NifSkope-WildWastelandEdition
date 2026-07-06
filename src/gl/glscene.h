@@ -269,6 +269,13 @@ public:
 	//! Blender-style X-ray: all geometry renders half-transparent
 	bool xRay = false;
 
+	//! Edit-mode hidden triangles per shape block (Blender H); only populated
+	//! while edit mode is active - shapes skip these index ranges when drawing
+	QHash<int, QSet<int>> hiddenTris;
+
+	//! Screen-space refraction preview toggle (lighting options)
+	bool showRefraction = true;
+
 	// --- screen-space refraction preview (SLSF1_Refraction) ---
 	unsigned int refractionTexId = 0;   //!< copy of the framebuffer behind the shape
 	unsigned int refractionFbo = 0;

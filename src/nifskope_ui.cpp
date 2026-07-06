@@ -764,7 +764,8 @@ void NifSkope::initDockWidgets()
 		if ( ok )
 			ogl->selectLinked( true, (float)a );
 	} );
-	// (3D cursor menu is on the toolbar Cursor button)
+	// cursor / element utilities live in the Render menu
+	ui->mRender->addMenu( mCursor );
 
 	connect( ogl, &GLView::transformCommitted, timeline, &TimelineWidget::keyNodeTransform );
 
@@ -900,9 +901,6 @@ void NifSkope::initDockWidgets()
 			ogl->update();
 		} );
 		m->addAction( aOrigins );
-		m->addSeparator();
-		// the 3D cursor / element utilities keep living in a submenu
-		m->addMenu( mCursor );
 
 		btn->setMenu( m );
 		ui->tRender->insertWidget( ui->aShowCollision, btn );
@@ -1088,6 +1086,8 @@ void NifSkope::initDockWidgets()
 				}
 			} );
 		}
+
+		ui->tRender->addSeparator();
 
 		// Blender-style viewport shading buttons: wireframe overlay / solid
 		// (no lighting) / shaded (full lighting), plus the X-ray toggle
@@ -1446,6 +1446,18 @@ QMenu * NifSkope::lightingWidget()
 	aLightingWidget->setDefaultWidget( lightingWidget );
 
 	mLight->addAction( aLightingWidget );
+
+	// screen-space refraction preview toggle (SLSF1_Refraction meshes)
+	mLight->addSeparator();
+	QAction * aRefraction = new QAction( tr( "Refraction" ), this );
+	aRefraction->setCheckable( true );
+	aRefraction->setChecked( true );
+	aRefraction->setToolTip( tr( "Preview SLSF1_Refraction meshes by distorting the scene behind them" ) );
+	connect( aRefraction, &QAction::toggled, [this]( bool on ) {
+		ogl->getScene()->showRefraction = on;
+		ogl->update();
+	} );
+	mLight->addAction( aRefraction );
 
 
 	connect( ui->aSaveLighting, &QAction::triggered, lightingWidget, &LightingWidget::saveSettings );

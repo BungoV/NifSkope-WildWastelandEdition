@@ -649,6 +649,10 @@ void GLView::paintGL()
 	glDisable( GL_BLEND );
 	scene->draw();
 
+	// Blender-style selection outlines around the object-mode selection
+	if ( model && !editMode && !objSelection.isEmpty() && !scene->selecting )
+		drawObjectOutlines();
+
 	// Pivot gizmo: RGB axes at the selected node's origin (oriented to the node),
 	// plus the active constraint axis while a modal G/R/S transform is running.
 	// In edit mode it follows the picked elements rather than the tree selection.
@@ -974,14 +978,20 @@ void GLView::paintGL()
 				wv[i] = eye + ( w - eye ) * 0.997f;
 			}
 
-			// unique edge list
+			// unique edge list (hidden triangles excluded, Blender H)
+			const QSet<int> hiddenT = editHiddenTris.value( wb );
+			QSet<int> visVerts;
 			QSet<quint64> eset;
 			QVector<QPair<int, int>> edges;
-			for ( const Triangle & t : s->triangles ) {
+			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+				if ( hiddenT.contains( ti ) )
+					continue;
+				const Triangle & t = s->triangles.at( ti );
 				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
 					continue;
 				for ( int e = 0; e < 3; e++ ) {
 					int a = t[e], b = t[( e + 1 ) % 3];
+					visVerts.insert( a );
 					quint64 k = edgeKey( a, b );
 					if ( !eset.contains( k ) ) {
 						eset.insert( k );
@@ -991,10 +1001,11 @@ void GLView::paintGL()
 			}
 
 			// selected face fills first (under the wires)
+			QVector<Vector3> foutline;
 			if ( selFaces.contains( wb ) ) {
 				QVector<Vector3> ftris, atris;
 				for ( int fi : selFaces.value( wb ) ) {
-					if ( fi < 0 || fi >= s->triangles.size() )
+					if ( fi < 0 || fi >= s->triangles.size() || hiddenT.contains( fi ) )
 						continue;
 					const Triangle & t = s->triangles.at( fi );
 					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
@@ -1003,6 +1014,8 @@ void GLView::paintGL()
 					             && activeElem->shapeBlock == wb && activeElem->e0 == fi );
 					QVector<Vector3> & dst = act ? atris : ftris;
 					dst << wv[t[0]] << wv[t[1]] << wv[t[2]];
+					// Blender outlines every selected face in white
+					foutline << wv[t[0]] << wv[t[1]] << wv[t[1]] << wv[t[2]] << wv[t[2]] << wv[t[0]];
 				}
 				if ( !ftris.isEmpty() ) {
 					scene->setGLColor( 1.0f, 0.522f, 0.0f, 0.30f );
@@ -1060,11 +1073,27 @@ void GLView::paintGL()
 				}
 			}
 
+			// white outline around the selected faces (Blender face select)
+			if ( !foutline.isEmpty() ) {
+				scene->setGLLineWidth( 1.7f * dpr * wireWidthMul );
+				scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );
+				scene->drawLines( foutline.constData(), size_t( foutline.size() ), nullptr );
+			}
+
 			// vertex dots (vertex mode only): black, selected orange, active white
 			if ( vertMode ) {
 				scene->setGLPointSize( vertexPointSize * dpr );
 				scene->setGLColor( colWire );
-				scene->drawPoints( wv.constData(), size_t( nv ) );
+				if ( hiddenT.isEmpty() ) {
+					scene->drawPoints( wv.constData(), size_t( nv ) );
+				} else {
+					QVector<Vector3> visPts;
+					visPts.reserve( visVerts.size() );
+					for ( int vi : visVerts )
+						visPts.append( wv[vi] );
+					if ( !visPts.isEmpty() )
+						scene->drawPoints( visPts.constData(), size_t( visPts.size() ) );
+				}
 				if ( !sv.isEmpty() ) {
 					QVector<Vector3> selPts, actPts;
 					for ( int vi : sv ) {
@@ -3006,7 +3035,17 @@ GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock,
 		Vector3 ld = ri * rd;
 		ld.normalize();
 
+		// hidden edit-mode triangles are not pickable (Blender H)
+		const QSet<int> * hidT = nullptr;
+		if ( editMode ) {
+			auto ith = editHiddenTris.constFind( s->id() );
+			if ( ith != editHiddenTris.constEnd() && !ith->isEmpty() )
+				hidT = &( *ith );
+		}
+
 		for ( int i = 0; i < s->triangles.size(); i++ ) {
+			if ( hidT && hidT->contains( i ) )
+				continue;
 			const Triangle & tri = s->triangles.at( i );
 			if ( tri[0] >= s->verts.size() || tri[1] >= s->verts.size() || tri[2] >= s->verts.size() )
 				continue;
@@ -3023,6 +3062,116 @@ GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock,
 		}
 	}
 	return hit;
+}
+
+void GLView::drawObjectOutlines()
+{
+	float dpr = float( devicePixelRatioF() );
+
+	glEnable( GL_STENCIL_TEST );
+	glEnable( GL_DEPTH_TEST );
+	glDepthFunc( GL_LEQUAL );
+	glDepthMask( GL_FALSE );
+
+	for ( int b : objSelection ) {
+		// all shapes in the selected object's subtree form one silhouette
+		QVector<Shape *> shs;
+		for ( Shape * s : scene->shapes ) {
+			if ( !s || s->isHidden() || s->verts.isEmpty() || s->triangles.isEmpty() )
+				continue;
+			int p = s->id();
+			while ( p >= 0 && p != b )
+				p = model->getParent( p );
+			if ( p == b )
+				shs.append( s );
+		}
+		if ( shs.isEmpty() )
+			continue;
+
+		// white while a transform gesture is running on this object (Blender)
+		bool transforming = false;
+		if ( gizmoMode ) {
+			for ( const auto & st : gizmoNodes ) {
+				if ( model->getBlockNumber( QModelIndex( st.iBlock ) ) == b ) {
+					transforming = true;
+					break;
+				}
+			}
+		}
+
+		// pass 1: mark the object's visible screen area in the stencil buffer
+		glClear( GL_STENCIL_BUFFER_BIT );
+		glStencilFunc( GL_ALWAYS, 1, 0xFF );
+		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+		glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+		for ( Shape * s : shs ) {
+			scene->loadModelViewMatrix( s->viewTrans() );
+			scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );
+			scene->drawTriangles( s->verts.constData(), size_t( s->verts.size() ), nullptr, true,
+				GL_TRIANGLES, size_t( s->triangles.size() ) * 3, GL_UNSIGNED_SHORT, s->triangles.constData() );
+		}
+		glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+
+		// pass 2: thick wireframe clipped to OUTSIDE the stencil = silhouette
+		glStencilFunc( GL_EQUAL, 0, 0xFF );
+		glStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+		if ( transforming )
+			scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
+		else if ( b == objActive )
+			scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );	// #FF9D00
+		else
+			scene->setGLColor( 1.0f, 0.447f, 0.0f, 1.0f );	// #FF7200
+		scene->setGLLineWidth( 3.0f * dpr );
+		for ( Shape * s : shs ) {
+			scene->loadModelViewMatrix( s->viewTrans() );
+			scene->drawTriangles( s->verts.constData(), size_t( s->verts.size() ), nullptr, false,
+				GL_TRIANGLES, size_t( s->triangles.size() ) * 3, GL_UNSIGNED_SHORT, s->triangles.constData() );
+		}
+	}
+
+	glDisable( GL_STENCIL_TEST );
+	glDepthMask( GL_TRUE );
+	glDepthFunc( GL_LESS );
+}
+
+void GLView::hideSelectedElements()
+{
+	if ( !editMode || pickedElems.isEmpty() )
+		return;
+
+	for ( const auto & pe : pickedElems ) {
+		Shape * s = shapeForBlock( pe.shapeBlock );
+		if ( !s )
+			continue;
+		QSet<int> & hid = editHiddenTris[pe.shapeBlock];
+		for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+			const Triangle & t = s->triangles.at( ti );
+			bool h = false;
+			if ( pe.type == 1 ) {
+				h = ( t[0] == pe.e0 || t[1] == pe.e0 || t[2] == pe.e0 );
+			} else if ( pe.type == 2 ) {
+				bool a = ( t[0] == pe.e0 || t[1] == pe.e0 || t[2] == pe.e0 );
+				bool b = ( t[0] == pe.e1 || t[1] == pe.e1 || t[2] == pe.e1 );
+				h = a && b;
+			} else {
+				h = ( ti == pe.e0 );
+			}
+			if ( h )
+				hid.insert( ti );
+		}
+	}
+
+	pickedElems.clear();	// hidden geometry is deselected, like Blender
+	scene->hiddenTris = editHiddenTris;
+	emit gizmoStatus( tr( "Hidden selected elements  (Alt+H to unhide)" ) );
+	update();
+}
+
+void GLView::unhideAllElements()
+{
+	editHiddenTris.clear();
+	scene->hiddenTris.clear();
+	update();
 }
 
 Vector3 GLView::pickedMedian() const
@@ -3685,10 +3834,24 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		}
 
 		// element snapping (vertex/edge/face target): the selection median
-		// lands on the geometry under the mouse; the edited mesh is excluded
+		// lands on the geometry under the mouse. The edited mesh itself is a
+		// valid target (Blender snaps to unselected geometry of the same
+		// mesh); only triangles touching the actively dragged vertices are
+		// rejected, so the selection can't chase itself.
 		bool elemSnapped = false;
 		if ( snap && snapTargetMode > 0 ) {
-			SceneRayHit sh = raycastScene( QPointF( pos ), editShapeBlock );
+			SceneRayHit sh = raycastScene( QPointF( pos ), -1 );
+			if ( sh.shape ) {
+				const Triangle & htri = sh.shape->triangles.at( sh.tri );
+				int hitBlock = sh.shape->id();
+				for ( const auto & ev : elemVerts ) {
+					if ( ev.shape == hitBlock
+						&& ( ev.idx == htri[0] || ev.idx == htri[1] || ev.idx == htri[2] ) ) {
+						sh.shape = nullptr;	// hit the dragged geometry itself
+						break;
+					}
+				}
+			}
 			if ( sh.shape ) {
 				Transform swt = shapeRenderTrans( sh.shape );
 				Vector3 target = swt * sh.hitLocal;
@@ -3954,6 +4117,7 @@ void GLView::setEditMode( bool on )
 		pickMode = 1;	// start in vertex select, like Blender
 		scene->editMode = true;
 		scene->restPoseBlock = b;
+		scene->hiddenTris = editHiddenTris;	// hidden elements apply in edit mode only
 		emit gizmoStatus( tr( "Edit Mode (%1 mesh%2): 1/2/3 = vertex/edge/face, G/R/S, X delete, Shift+S snap, Tab exits" )
 			.arg( editShapeBlocks.size() ).arg( editShapeBlocks.size() == 1 ? "" : "es" ) );
 	} else {
@@ -3966,6 +4130,7 @@ void GLView::setEditMode( bool on )
 			gizmoEndElement( false );
 		scene->editMode = false;
 		scene->restPoseBlock = -1;
+		scene->hiddenTris.clear();	// object mode always shows the full mesh
 		emit gizmoStatus( QString() );
 	}
 
@@ -5206,14 +5371,21 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		}
 	}
 
-	// H hides the selected node, Alt+H reveals everything (object mode)
+	// H hides the selection, Alt+H reveals everything: nodes in object mode,
+	// picked vertices/edges/faces in edit mode (Blender)
 	if ( event->key() == Qt::Key_H ) {
 		if ( event->modifiers() & Qt::AltModifier ) {
-			unhideAll();
+			if ( editMode )
+				unhideAllElements();
+			else
+				unhideAll();
 			return;
 		}
-		if ( !( event->modifiers() & ( Qt::ControlModifier | Qt::ShiftModifier ) ) && !editMode ) {
-			hideSelected();
+		if ( !( event->modifiers() & ( Qt::ControlModifier | Qt::ShiftModifier ) ) ) {
+			if ( editMode )
+				hideSelectedElements();
+			else
+				hideSelected();
 			return;
 		}
 	}
