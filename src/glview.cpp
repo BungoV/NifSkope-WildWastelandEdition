@@ -2269,6 +2269,59 @@ bool GLView::gizmoBegin( int mode )
 	}
 	gizmoOrigWorldPos = gizmoParentPos + gizmoParentRot * gizmoOrigTrans * gizmoParentScale;
 
+	// multi-selection: transform every selected node together (Blender). Nodes
+	// whose ancestor is also selected are skipped so they are not moved twice.
+	gizmoNodes.clear();
+	auto addNode = [this]( int nb ) {
+		QModelIndex ib = model->getBlockIndex( nb );
+		if ( !model->getIndex( ib, "Translation" ).isValid() )
+			return;
+		for ( const auto & gn : gizmoNodes ) {
+			if ( QModelIndex( gn.iBlock ) == ib )
+				return;
+		}
+		GizmoNodeState st;
+		st.iBlock = ib;
+		st.origTrans = model->get<Vector3>( ib, "Translation" );
+		st.origRot = model->get<Matrix>( ib, "Rotation" );
+		st.origScale = model->get<float>( ib, "Scale" );
+		int pn = model->getParent( nb );
+		Node * p = ( pn >= 0 ) ? scene->getNode( model, model->getBlockIndex( pn ) ) : nullptr;
+		if ( p ) {
+			Transform pt = p->worldTrans();
+			st.parentRot = pt.rotation;
+			st.parentPos = pt.translation;
+			st.parentScale = ( pt.scale != 0.0f ) ? pt.scale : 1.0f;
+		}
+		st.origWorldPos = st.parentPos + st.parentRot * st.origTrans * st.parentScale;
+		gizmoNodes.append( st );
+	};
+	addNode( b );	// primary first
+	{
+		QSet<int> cand;
+		cand.insert( b );
+		for ( int sb : objSelection ) {
+			int nb = sb;
+			while ( nb >= 0 && !model->blockInherits( model->getBlockIndex( nb ), "NiAVObject" ) )
+				nb = model->getParent( nb );
+			if ( nb >= 0 )
+				cand.insert( nb );
+		}
+		for ( int nb : cand ) {
+			if ( nb == b )
+				continue;
+			bool ancestorSelected = false;
+			for ( int pp = model->getParent( nb ); pp >= 0; pp = model->getParent( pp ) ) {
+				if ( cand.contains( pp ) ) {
+					ancestorSelected = true;
+					break;
+				}
+			}
+			if ( !ancestorSelected )
+				addNode( nb );
+		}
+	}
+
 	static const char * modeNames[4] = { "", "Move", "Rotate", "Scale" };
 	emit gizmoStatus( tr( "%1 [%2]:  X/Y/Z axis (twice = local), Shift+X/Y/Z plane, MMB smart axis, R,R trackball, Ctrl snap (%3), Shift precise, LMB/Enter commit, Esc cancel" )
 		.arg( QLatin1String( modeNames[mode] ), model->resolveString( iBlock, "Name" ) ).arg( gizmoSnapStep ) );
@@ -2433,9 +2486,18 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 				nt[c] = std::round( nt[c] / step ) * step;
 		}
 
-		gizmoLastParam = gizmoBasisM.inverted() * deltaWorld;
-		model->set<Vector3>( iBlock, "Translation", nt );
+		// effective world delta after snapping, derived from the primary node,
+		// applied identically to every node of the multi-selection
+		Vector3 effDelta = ( gizmoParentPos + gizmoParentRot * ( nt * gizmoParentScale ) ) - gizmoOrigWorldPos;
+		gizmoLastParam = gizmoBasisM.inverted() * effDelta;
+		for ( const auto & st : gizmoNodes ) {
+			Vector3 w = st.origWorldPos + effDelta;
+			model->set<Vector3>( QModelIndex( st.iBlock ), "Translation",
+				st.parentRot.inverted() * ( ( w - st.parentPos ) * ( 1.0f / st.parentScale ) ) );
+		}
 		status = tr( "Move: %1, %2, %3" ).arg( nt[0], 0, 'f', 3 ).arg( nt[1], 0, 'f', 3 ).arg( nt[2], 0, 'f', 3 );
+		if ( gizmoNodes.size() > 1 )
+			status += tr( "  (%1 objects)" ).arg( gizmoNodes.size() );
 	} else if ( gizmoMode == 2 ) {
 		float rotStep = gizmoRotSnapDeg * snapFine;
 		Matrix dr;
@@ -2481,13 +2543,17 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 			status = tr( "Rotate: %1°" ).arg( angle, 0, 'f', 1 );
 		}
 
-		// world delta rotation expressed in the parent frame, so it is correct
-		// under rotated parents too
-		model->set<Matrix>( iBlock, "Rotation", gizmoParentRot.inverted() * dr * gizmoParentRot * gizmoOrigRot );
-
-		if ( gizmoPivot != 0 ) {
-			Vector3 newWorld = gizmoPivotWorld + dr * ( gizmoOrigWorldPos - gizmoPivotWorld );
-			model->set<Vector3>( iBlock, "Translation", worldToLocalTrans( newWorld ) );
+		// world delta rotation expressed in each node's parent frame, so it is
+		// correct under rotated parents too; with a non-origin pivot the nodes
+		// also orbit the shared pivot point
+		for ( const auto & st : gizmoNodes ) {
+			QModelIndex ib( st.iBlock );
+			model->set<Matrix>( ib, "Rotation", st.parentRot.inverted() * dr * st.parentRot * st.origRot );
+			if ( gizmoPivot != 0 ) {
+				Vector3 newWorld = gizmoPivotWorld + dr * ( st.origWorldPos - gizmoPivotWorld );
+				model->set<Vector3>( ib, "Translation",
+					st.parentRot.inverted() * ( ( newWorld - st.parentPos ) * ( 1.0f / st.parentScale ) ) );
+			}
 		}
 	} else if ( gizmoMode == 3 ) {
 		float factor = numeric ? gizmoPartVal( gizmoNum, 0 ) : 1.0f + dx * 0.01f * precision;
@@ -2499,11 +2565,14 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 		}
 
 		gizmoLastParam = Vector3( factor, 0, 0 );
-		model->set<float>( iBlock, "Scale", gizmoOrigScale * factor );
-
-		if ( gizmoPivot != 0 ) {
-			Vector3 newWorld = gizmoPivotWorld + ( gizmoOrigWorldPos - gizmoPivotWorld ) * factor;
-			model->set<Vector3>( iBlock, "Translation", worldToLocalTrans( newWorld ) );
+		for ( const auto & st : gizmoNodes ) {
+			QModelIndex ib( st.iBlock );
+			model->set<float>( ib, "Scale", st.origScale * factor );
+			if ( gizmoPivot != 0 ) {
+				Vector3 newWorld = gizmoPivotWorld + ( st.origWorldPos - gizmoPivotWorld ) * factor;
+				model->set<Vector3>( ib, "Translation",
+					st.parentRot.inverted() * ( ( newWorld - st.parentPos ) * ( 1.0f / st.parentScale ) ) );
+			}
 		}
 		status = tr( "Scale: ×%1 (uniform; NIF scale is a single value)" ).arg( factor, 0, 'f', 2 );
 	}
@@ -2557,19 +2626,37 @@ void GLView::gizmoEnd( bool commit )
 	if ( !model || !iBlock.isValid() )
 		return;
 
-	// capture the dragged values, restore originals, then re-apply through the undo stack
-	Vector3 newTrans = model->get<Vector3>( iBlock, "Translation" );
-	Matrix newRot = model->get<Matrix>( iBlock, "Rotation" );
-	float newScale = model->get<float>( iBlock, "Scale" );
+	// capture the dragged values, restore originals, then re-apply through the
+	// undo stack - for every node of the multi-selection
+	if ( gizmoNodes.isEmpty() ) {
+		GizmoNodeState st;
+		st.iBlock = iBlock;
+		st.origTrans = gizmoOrigTrans;
+		st.origRot = gizmoOrigRot;
+		st.origScale = gizmoOrigScale;
+		gizmoNodes.append( st );
+	}
 
-	model->set<Vector3>( iBlock, "Translation", gizmoOrigTrans );
-	model->set<Matrix>( iBlock, "Rotation", gizmoOrigRot );
-	model->set<float>( iBlock, "Scale", gizmoOrigScale );
+	QVector<Vector3> newTransV( gizmoNodes.size() );
+	QVector<Matrix> newRotV( gizmoNodes.size() );
+	QVector<float> newScaleV( gizmoNodes.size() );
+	for ( int k = 0; k < gizmoNodes.size(); k++ ) {
+		QModelIndex ib( gizmoNodes.at( k ).iBlock );
+		newTransV[k] = model->get<Vector3>( ib, "Translation" );
+		newRotV[k] = model->get<Matrix>( ib, "Rotation" );
+		newScaleV[k] = model->get<float>( ib, "Scale" );
+		model->set<Vector3>( ib, "Translation", gizmoNodes.at( k ).origTrans );
+		model->set<Matrix>( ib, "Rotation", gizmoNodes.at( k ).origRot );
+		model->set<float>( ib, "Scale", gizmoNodes.at( k ).origScale );
+	}
+	Vector3 newTrans = newTransV.value( 0, gizmoOrigTrans );
+	Matrix newRot = newRotV.value( 0, gizmoOrigRot );
+	float newScale = newScaleV.value( 0, gizmoOrigScale );
 
 	if ( commit ) {
 		ChangeValueCommand::createTransaction();
-		auto pushTyped = [this, &iBlock]( const char * fieldName, auto newVal ) {
-			QModelIndex iField = model->getIndex( iBlock, fieldName );
+		auto pushTyped = [this]( const QModelIndex & ib, const char * fieldName, auto newVal ) {
+			QModelIndex iField = model->getIndex( ib, fieldName );
 			if ( !iField.isValid() )
 				return;
 			QModelIndex vIdx = iField.sibling( iField.row(), NifModel::ValueCol );
@@ -2583,12 +2670,17 @@ void GLView::gizmoEnd( bool commit )
 		};
 
 		// pivot-relative rotate/scale moves Translation too, so commit whatever changed
-		if ( !( newTrans == gizmoOrigTrans ) )
-			pushTyped( "Translation", newTrans );
-		if ( !( newRot == gizmoOrigRot ) )
-			pushTyped( "Rotation", newRot );
-		if ( newScale != gizmoOrigScale )
-			pushTyped( "Scale", newScale );
+		for ( int k = 0; k < gizmoNodes.size(); k++ ) {
+			QModelIndex ib( gizmoNodes.at( k ).iBlock );
+			if ( !ib.isValid() )
+				continue;
+			if ( !( newTransV.at( k ) == gizmoNodes.at( k ).origTrans ) )
+				pushTyped( ib, "Translation", newTransV.at( k ) );
+			if ( !( newRotV.at( k ) == gizmoNodes.at( k ).origRot ) )
+				pushTyped( ib, "Rotation", newRotV.at( k ) );
+			if ( newScaleV.at( k ) != gizmoNodes.at( k ).origScale )
+				pushTyped( ib, "Scale", newScaleV.at( k ) );
+		}
 
 		if ( gizmoAutoKey )
 			emit transformCommitted( model->getBlockNumber( iBlock ) );

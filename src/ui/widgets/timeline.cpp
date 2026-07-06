@@ -283,6 +283,23 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.setBrush( col );
 		p.setPen( Qt::NoPen );
 		p.drawEllipse( QPointF( 32, 36 ), 6, 6 );
+	} else if ( id == QLatin1String( "snap_increment" ) ) {
+		// grid of dots (Blender increment/grid snap)
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		for ( int y = 0; y < 3; y++ ) {
+			for ( int x = 0; x < 3; x++ )
+				p.drawEllipse( QPointF( 16 + x * 16, 16 + y * 16 ), 4.5, 4.5 );
+		}
+	} else if ( id == QLatin1String( "chevron_down" ) ) {
+		p.setBrush( Qt::NoBrush );
+		QPen cp( col, 7 );
+		cp.setCapStyle( Qt::RoundCap );
+		cp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( cp );
+		QPolygonF ck;
+		ck << QPointF( 18, 26 ) << QPointF( 32, 40 ) << QPointF( 46, 26 );
+		p.drawPolyline( ck );
 	} else if ( id == QLatin1String( "pivot_cursor" ) ) {
 		// mini 3D cursor: circle + crosshair ticks
 		p.setBrush( Qt::NoBrush );

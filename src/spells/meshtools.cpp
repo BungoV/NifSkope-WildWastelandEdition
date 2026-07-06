@@ -12,8 +12,12 @@ BSD License - see nifskope.h
 #include "data/nifvalue.h"
 #include "ui/widgets/ddspreview.h"
 #include "ui/widgets/filebrowser.h"
+#include "glview.h"
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QClipboard>
+#include <QMenu>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
@@ -193,74 +197,115 @@ protected:
 	}
 };
 
-//! Manage every material and texture path in the file in a persistent panel:
-//! live editing, find & replace, archive browser, drag & drop, texture preview
-class spMaterialTextureManager final : public Spell
+//! Resolve a resource path against the loaded archives, honouring its extension
+static QString tlFindResource( const NifModel * nif, const QString & path )
 {
-public:
-	QString name() const override final { return Spell::tr( "Material / Texture Manager..." ); }
-	QString page() const override final { return Spell::tr( "Textures" ); }
-	bool constant() const override final { return false; }
+	if ( path.isEmpty() )
+		return QString();
+	QString low = path.toLower();
+	if ( low.endsWith( QLatin1String( ".bgsm" ) ) )
+		return nif->findResourceFile( path, "materials", ".bgsm" );
+	if ( low.endsWith( QLatin1String( ".bgem" ) ) )
+		return nif->findResourceFile( path, "materials", ".bgem" );
+	if ( low.endsWith( QLatin1String( ".tga" ) ) )
+		return nif->findResourceFile( path, "textures", ".tga" );
+	return nif->findResourceFile( path, "textures", ".dds" );
+}
 
-	bool isApplicable( const NifModel * nif, const QModelIndex & ) override final
-	{
-		return nif && nif->getBlockCount() > 0;
+//! Extract .dds paths referenced by a binary material file (format-agnostic
+//! printable-string scan; works for BGSM and BGEM)
+static QStringList tlScanMaterialTextures( const QByteArray & data )
+{
+	QStringList out;
+	QByteArray cur;
+	for ( char ch : data ) {
+		if ( ch >= 0x20 && ch != 0x7f ) {
+			cur.append( ch );
+			continue;
+		}
+		if ( cur.size() >= 5 ) {
+			QString s = QString::fromLatin1( cur ).toLower();
+			if ( s.endsWith( QLatin1String( ".dds" ) ) && !out.contains( s ) )
+				out.append( s );
+		}
+		cur.clear();
 	}
+	if ( cur.size() >= 5 ) {
+		QString s = QString::fromLatin1( cur ).toLower();
+		if ( s.endsWith( QLatin1String( ".dds" ) ) && !out.contains( s ) )
+			out.append( s );
+	}
+	return out;
+}
 
-	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+//! Nearest NiAVObject whose child links contain the given block, or -1
+static int tlOwnerBlock( NifModel * nif, int bn )
+{
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		if ( nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" )
+			&& nif->getChildLinks( b ).contains( bn ) )
+			return b;
+	}
+	return -1;
+}
+
+//! Clipboard for whole BSShaderTextureSet contents
+static QStringList tlCopiedTexSet;
+
+//! Build the Material / Texture Manager panel: live editing, find & replace,
+//! archive browser, drag & drop, texture preview, selection sync
+QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl )
+{
 	{
-		static QPointer<QDockWidget> openPanel;
-		if ( openPanel ) {
-			openPanel->show();
-			openPanel->raise();
-			return index;
-		}
-
-		QMainWindow * mw = qobject_cast<QMainWindow *>( qApp->activeWindow() );
-		if ( !mw ) {
-			for ( QWidget * w : qApp->topLevelWidgets() ) {
-				if ( ( mw = qobject_cast<QMainWindow *>( w ) ) )
-					break;
-			}
-		}
-
-		QDockWidget * dock = new QDockWidget( Spell::tr( "Material / Texture Manager" ), mw );
+		QDockWidget * dock = new QDockWidget( QObject::tr( "Material / Texture Manager" ), mw );
 		dock->setObjectName( QStringLiteral( "MatTexManagerDock" ) );
-		dock->setAttribute( Qt::WA_DeleteOnClose );
-		openPanel = dock;
 
 		QWidget * panel = new QWidget( dock );
 		QVBoxLayout * lay = new QVBoxLayout( panel );
 
 		QHBoxLayout * fr = new QHBoxLayout;
+		QLineEdit * edFilter = new QLineEdit( panel );
+		edFilter->setPlaceholderText( QObject::tr( "Filter rows" ) );
+		edFilter->setClearButtonEnabled( true );
 		QLineEdit * edFind = new QLineEdit( panel );
-		edFind->setPlaceholderText( Spell::tr( "Find" ) );
+		edFind->setPlaceholderText( QObject::tr( "Find" ) );
 		QLineEdit * edRepl = new QLineEdit( panel );
-		edRepl->setPlaceholderText( Spell::tr( "Replace with" ) );
-		QPushButton * btnReplace = new QPushButton( Spell::tr( "Replace All" ), panel );
-		QPushButton * btnBrowse = new QPushButton( Spell::tr( "Browse..." ), panel );
-		btnBrowse->setToolTip( Spell::tr( "Pick a replacement from the game archives for the selected row" ) );
-		QPushButton * btnRefresh = new QPushButton( Spell::tr( "Refresh" ), panel );
+		edRepl->setPlaceholderText( QObject::tr( "Replace with" ) );
+		QPushButton * btnReplace = new QPushButton( QObject::tr( "Replace All" ), panel );
+		fr->addWidget( edFilter, 1 );
 		fr->addWidget( edFind, 1 );
 		fr->addWidget( edRepl, 1 );
 		fr->addWidget( btnReplace );
-		fr->addWidget( btnBrowse );
-		fr->addWidget( btnRefresh );
 		lay->addLayout( fr );
+
+		QHBoxLayout * fr2 = new QHBoxLayout;
+		QPushButton * btnBrowse = new QPushButton( QObject::tr( "Browse..." ), panel );
+		btnBrowse->setToolTip( QObject::tr( "Pick a replacement from the game archives for the selected row" ) );
+		QPushButton * btnRetarget = new QPushButton( QObject::tr( "Retarget Folder..." ), panel );
+		btnRetarget->setToolTip( QObject::tr( "Replace a folder prefix on every matching path" ) );
+		QCheckBox * cbGroup = new QCheckBox( QObject::tr( "Group by node" ), panel );
+		QPushButton * btnRefresh = new QPushButton( QObject::tr( "Refresh" ), panel );
+		fr2->addWidget( btnBrowse );
+		fr2->addWidget( btnRetarget );
+		fr2->addWidget( cbGroup );
+		fr2->addStretch( 1 );
+		fr2->addWidget( btnRefresh );
+		lay->addLayout( fr2 );
 
 		QSplitter * split = new QSplitter( Qt::Horizontal, panel );
 		TlPathTable * tbl = new TlPathTable( split );
-		tbl->setHorizontalHeaderLabels( { Spell::tr( "Field" ), Spell::tr( "Owner node" ), Spell::tr( "Path (editable, drag && drop)" ) } );
+		tbl->setHorizontalHeaderLabels( { QObject::tr( "Field" ), QObject::tr( "Owner node" ), QObject::tr( "Path (editable, drag && drop)" ) } );
 		tbl->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
 		tbl->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
 		tbl->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
 		tbl->verticalHeader()->setVisible( false );
+		tbl->setContextMenuPolicy( Qt::CustomContextMenu );
 
 		QScrollArea * prevScroll = new QScrollArea( split );
 		prevScroll->setWidgetResizable( true );
 		prevScroll->setMinimumWidth( 280 );
 		{
-			QLabel * l = new QLabel( Spell::tr( "Select a texture row for a preview" ), prevScroll );
+			QLabel * l = new QLabel( QObject::tr( "Select a texture row for a preview" ), prevScroll );
 			l->setAlignment( Qt::AlignCenter );
 			l->setWordWrap( true );
 			prevScroll->setWidget( l );
@@ -271,7 +316,7 @@ public:
 		split->setStretchFactor( 1, 2 );
 		lay->addWidget( split, 1 );
 
-		QLabel * hint = new QLabel( Spell::tr( "Edits apply immediately (undoable). Paths are normalized on input. Click a row to jump to the node using it." ), panel );
+		QLabel * hint = new QLabel( QObject::tr( "Edits apply immediately (undoable). Paths are normalized on input. Click a row to jump to the node using it; right-click for more." ), panel );
 		hint->setWordWrap( true );
 		lay->addWidget( hint );
 
@@ -279,12 +324,39 @@ public:
 		auto rows = std::make_shared<QVector<QPersistentModelIndex>>();
 		auto applying = std::make_shared<bool>( false );
 
-		auto rebuild = [nif, tbl, rows, applying]() {
+		// object-mode selection colours, mirroring the block list (active
+		// light blue + #FF9D00, secondary dark blue + #FF7200)
+		auto recolor = [tbl, ogl, applying]() {
+			*applying = true;
+			for ( int r = 0; r < tbl->rowCount(); r++ ) {
+				QTableWidgetItem * c1 = tbl->item( r, 1 );
+				QTableWidgetItem * c2 = tbl->item( r, 2 );
+				if ( !c1 || !c2 )
+					continue;
+				int owner = c1->data( Qt::UserRole ).toInt();
+				bool sel = ( owner >= 0 && ogl && ogl->objSelection.contains( owner ) );
+				bool act = ( sel && owner == ogl->objActive );
+				QBrush bg = sel ? QBrush( act ? QColor( 74, 122, 176 ) : QColor( 43, 66, 95 ) ) : QBrush();
+				QBrush fg = sel ? QBrush( act ? QColor( 255, 157, 0 ) : QColor( 255, 114, 0 ) ) : QBrush();
+				for ( int c = 0; c < 3; c++ ) {
+					if ( QTableWidgetItem * it = tbl->item( r, c ) ) {
+						it->setBackground( bg );
+						it->setForeground( fg );
+					}
+				}
+				if ( !sel && c2->data( Qt::UserRole ).toBool() )
+					c2->setForeground( QColor( 235, 90, 90 ) );	// missing resource
+			}
+			*applying = false;
+		};
+
+		auto rebuild = [nif, tbl, rows, applying, recolor]() {
 			*applying = true;
 			tbl->setSortingEnabled( false );
 			tbl->setRowCount( 0 );
 			QVector<QPersistentModelIndex> items;
 			QStringList labels, owners;
+			QVector<int> blockNums, ownerNums;
 			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 				QModelIndex iBlock = nif->getBlockIndex( b );
 				QString head = QString( "%1 %2" ).arg( b ).arg( nif->itemName( iBlock ) );
@@ -292,8 +364,15 @@ public:
 				tlCollectResourceStrings( nif, iBlock, items, labels, owners, QString(), head );
 				if ( items.size() > before ) {
 					QString ownerNode = tlOwnerLabel( nif, iBlock );
-					for ( int k = before; k < owners.size(); k++ )
+					int ownerNum = tlOwnerBlock( nif, b );
+					// a shader/texture path inside an AVObject block belongs to it
+					if ( nif->blockInherits( iBlock, "NiAVObject" ) )
+						ownerNum = b;
+					for ( int k = before; k < owners.size(); k++ ) {
 						owners[k] = ownerNode;
+						blockNums.append( b );
+						ownerNums.append( ownerNum );
+					}
 				}
 			}
 			tbl->setRowCount( items.size() );
@@ -301,24 +380,25 @@ public:
 				QTableWidgetItem * c0 = new QTableWidgetItem( labels.at( i ) );
 				c0->setFlags( c0->flags() & ~Qt::ItemIsEditable );
 				c0->setData( Qt::UserRole, i );	// stable back-reference after sorting
+				c0->setData( Qt::UserRole + 1, blockNums.at( i ) );	// containing block
 				tbl->setItem( i, 0, c0 );
 				QTableWidgetItem * c1 = new QTableWidgetItem( owners.at( i ) );
 				c1->setFlags( c1->flags() & ~Qt::ItemIsEditable );
+				c1->setData( Qt::UserRole, ownerNums.at( i ) );	// owning NiAVObject
 				tbl->setItem( i, 1, c1 );
 				QString path = nif->resolveString( QModelIndex( items.at( i ) ) );
 				QTableWidgetItem * c2 = new QTableWidgetItem( path );
 				// paths missing from the loaded archives show in red
-				bool isMat = path.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
-				             || path.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive );
-				QString found = isMat ? nif->findResourceFile( path, "materials", ".bgsm" )
-				                      : nif->findResourceFile( path, "textures", ".dds" );
-				if ( found.isEmpty() )
+				bool missing = !path.isEmpty() && tlFindResource( nif, path ).isEmpty();
+				c2->setData( Qt::UserRole, missing );
+				if ( missing )
 					c2->setForeground( QColor( 235, 90, 90 ) );
 				tbl->setItem( i, 2, c2 );
 			}
 			*rows = items;
 			tbl->setSortingEnabled( true );
 			*applying = false;
+			recolor();
 		};
 
 		// live apply with path normalization; this replaces the old
@@ -330,10 +410,9 @@ public:
 			*applying = true;
 			if ( norm != it->text() )
 				it->setText( norm );
-			bool isMat = norm.endsWith( QLatin1String( ".bgsm" ) ) || norm.endsWith( QLatin1String( ".bgem" ) );
-			QString found = isMat ? nif->findResourceFile( norm, "materials", ".bgsm" )
-			                      : nif->findResourceFile( norm, "textures", ".dds" );
-			it->setForeground( found.isEmpty() ? QBrush( QColor( 235, 90, 90 ) ) : QBrush() );
+			bool missing = !norm.isEmpty() && tlFindResource( nif, norm ).isEmpty();
+			it->setData( Qt::UserRole, missing );
+			it->setForeground( missing ? QBrush( QColor( 235, 90, 90 ) ) : QBrush() );
 			*applying = false;
 			QTableWidgetItem * c0 = tbl->item( it->row(), 0 );
 			if ( !c0 )
@@ -344,42 +423,32 @@ public:
 			QModelIndex idx( rows->at( i ) );
 			if ( !idx.isValid() || norm == nif->resolveString( idx ) )
 				return;
-			nifSnapshotOp( nif, Spell::tr( "Edit resource path" ), [&]() {
+			nifSnapshotOp( nif, QObject::tr( "Edit resource path" ), [&]() {
 				nif->assignString( idx, norm );
 			} );
 		} );
 
-		// selecting a row jumps to the node using the path and previews textures
+		// selecting a row jumps to the node using the path and previews textures;
+		// material files list the .dds paths they reference
 		QObject::connect( tbl, &QTableWidget::currentCellChanged, panel,
-			[nif, tbl, rows, applying, mw, prevScroll]( int r, int, int, int ) {
+			[nif, tbl, applying, mw, prevScroll]( int r, int, int, int ) {
 			if ( *applying || r < 0 )
 				return;
 			QTableWidgetItem * c0 = tbl->item( r, 0 );
+			QTableWidgetItem * c1 = tbl->item( r, 1 );
 			QTableWidgetItem * c2 = tbl->item( r, 2 );
-			if ( c0 && mw ) {
-				int i = c0->data( Qt::UserRole ).toInt();
-				if ( i >= 0 && i < rows->size() ) {
-					QModelIndex idx( rows->at( i ) );
-					if ( idx.isValid() ) {
-						QModelIndex iBlock = idx;
-						while ( iBlock.parent().isValid() )
-							iBlock = iBlock.parent();
-						int bn = nif->getBlockNumber( iBlock );
-						int owner = -1;
-						for ( int b = 0; b < nif->getBlockCount() && owner < 0; b++ ) {
-							if ( nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" )
-								&& nif->getChildLinks( b ).contains( bn ) )
-								owner = b;
-						}
-						QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection,
-							Q_ARG( QModelIndex, nif->getBlockIndex( owner >= 0 ? owner : bn ) ) );
-					}
-				}
+			if ( c0 && c1 && mw ) {
+				int owner = c1->data( Qt::UserRole ).toInt();
+				int bn = c0->data( Qt::UserRole + 1 ).toInt();
+				QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection,
+					Q_ARG( QModelIndex, nif->getBlockIndex( owner >= 0 ? owner : bn ) ) );
 			}
-			// texture preview on the right
+			// preview on the right
 			if ( QWidget * old = prevScroll->takeWidget() )
 				old->deleteLater();
 			QString pth = c2 ? c2->text() : QString();
+			bool isMat = pth.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
+			             || pth.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive );
 			if ( pth.endsWith( QLatin1String( ".dds" ), Qt::CaseInsensitive ) ) {
 				try {
 					prevScroll->setWidget( new DDSTextureInfo( nif->getGameResources(), pth, prevScroll ) );
@@ -387,11 +456,26 @@ public:
 				} catch ( ... ) {
 					// fall through to the placeholder
 				}
+			} else if ( isMat ) {
+				// list the textures the material file references
+				const char * ext = pth.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive ) ? ".bgem" : ".bgsm";
+				std::string fullPath = Game::GameManager::get_full_path( pth, "materials/", ext );
+				QByteArray data;
+				if ( nif->getGameResources().get_file( data, fullPath ) && !data.isEmpty() ) {
+					QStringList texs = tlScanMaterialTextures( data );
+					QLabel * l = new QLabel( QObject::tr( "Textures referenced by\n%1:\n\n%2" )
+						.arg( pth, texs.isEmpty() ? QObject::tr( "(none found)" ) : texs.join( QStringLiteral( "\n" ) ) ), prevScroll );
+					l->setAlignment( Qt::AlignTop | Qt::AlignLeft );
+					l->setWordWrap( true );
+					l->setTextInteractionFlags( Qt::TextSelectableByMouse );
+					l->setMargin( 8 );
+					prevScroll->setWidget( l );
+					return;
+				}
 			}
-			QLabel * l = new QLabel( pth.isEmpty() ? Spell::tr( "Select a texture row for a preview" )
-				: ( pth.endsWith( QLatin1String( ".dds" ), Qt::CaseInsensitive )
-					? Spell::tr( "Texture not found:\n%1" ).arg( pth )
-					: Spell::tr( "(no preview for material files)" ) ), prevScroll );
+			QLabel * l = new QLabel( pth.isEmpty() ? QObject::tr( "Select a texture row for a preview" )
+				: ( isMat ? QObject::tr( "Material not found:\n%1" ).arg( pth )
+					: QObject::tr( "Texture not found:\n%1" ).arg( pth ) ), prevScroll );
 			l->setAlignment( Qt::AlignCenter );
 			l->setWordWrap( true );
 			prevScroll->setWidget( l );
@@ -438,14 +522,139 @@ public:
 					n++;
 				}
 			}
-			btnReplace->setText( Spell::tr( "Replace All (%1 changed)" ).arg( n ) );
+			btnReplace->setText( QObject::tr( "Replace All (%1 changed)" ).arg( n ) );
+		} );
+
+		// live row filter
+		QObject::connect( edFilter, &QLineEdit::textChanged, panel, [tbl]( const QString & f ) {
+			for ( int r = 0; r < tbl->rowCount(); r++ ) {
+				bool match = f.isEmpty();
+				for ( int c = 0; c < 3 && !match; c++ ) {
+					if ( QTableWidgetItem * it = tbl->item( r, c ) )
+						match = it->text().contains( f, Qt::CaseInsensitive );
+				}
+				tbl->setRowHidden( r, !match );
+			}
+		} );
+
+		// group rows by their owning node
+		QObject::connect( cbGroup, &QCheckBox::toggled, panel, [tbl]( bool on ) {
+			if ( on )
+				tbl->sortItems( 1 );
+			else
+				tbl->sortItems( 0 );
+		} );
+
+		// bulk folder retarget: swap a path prefix everywhere it matches
+		QObject::connect( btnRetarget, &QPushButton::clicked, panel, [tbl, panel]() {
+			bool ok = false;
+			QString from = QInputDialog::getText( panel, QObject::tr( "Retarget folder" ),
+				QObject::tr( "Replace this folder prefix:" ), QLineEdit::Normal, QString(), &ok );
+			if ( !ok || from.isEmpty() )
+				return;
+			QString to = QInputDialog::getText( panel, QObject::tr( "Retarget folder" ),
+				QObject::tr( "...with this prefix:" ), QLineEdit::Normal, from, &ok );
+			if ( !ok )
+				return;
+			from = tlNormalizeResourcePath( from );
+			to = tlNormalizeResourcePath( to );
+			int n = 0;
+			for ( int r = 0; r < tbl->rowCount(); r++ ) {
+				QTableWidgetItem * it = tbl->item( r, 2 );
+				if ( it && it->text().startsWith( from, Qt::CaseInsensitive ) ) {
+					it->setText( to + it->text().mid( from.length() ) );
+					n++;
+				}
+			}
+			Message::info( panel, QObject::tr( "Retargeted %1 path(s)." ).arg( n ) );
+		} );
+
+		// right-click menu: browse, clear, copy/paste, navigation, texture sets
+		QObject::connect( tbl, &QTableWidget::customContextMenuRequested, panel,
+			[nif, tbl, rows, mw, browseRow, rebuild]( const QPoint & pos ) {
+			QTableWidgetItem * hit = tbl->itemAt( pos );
+			if ( !hit )
+				return;
+			int r = hit->row();
+			tbl->setCurrentCell( r, 2 );
+			QTableWidgetItem * c0 = tbl->item( r, 0 );
+			QTableWidgetItem * c1 = tbl->item( r, 1 );
+			QTableWidgetItem * c2 = tbl->item( r, 2 );
+			if ( !c0 || !c1 || !c2 )
+				return;
+			int i = c0->data( Qt::UserRole ).toInt();
+			int bn = c0->data( Qt::UserRole + 1 ).toInt();
+			int owner = c1->data( Qt::UserRole ).toInt();
+			bool isTexSet = ( nif->itemName( nif->getBlockIndex( bn ) ) == QLatin1String( "BSShaderTextureSet" ) );
+
+			QMenu menu( tbl );
+			QAction * aBrowse = menu.addAction( QObject::tr( "Browse Archives..." ) );
+			QAction * aClear = menu.addAction( QObject::tr( "Clear Path" ) );
+			menu.addSeparator();
+			QAction * aCopy = menu.addAction( QObject::tr( "Copy Path" ) );
+			QAction * aPaste = menu.addAction( QObject::tr( "Paste Path" ) );
+			aPaste->setEnabled( !QApplication::clipboard()->text().isEmpty() );
+			menu.addSeparator();
+			QAction * aJump = menu.addAction( QObject::tr( "Jump to Node" ) );
+			QAction * aReveal = menu.addAction( QObject::tr( "Reveal in Block Details" ) );
+			menu.addSeparator();
+			QAction * aCopySet = menu.addAction( QObject::tr( "Copy Texture Set" ) );
+			aCopySet->setEnabled( isTexSet );
+			QAction * aPasteSet = menu.addAction( QObject::tr( "Paste Texture Set" ) );
+			aPasteSet->setEnabled( isTexSet && !tlCopiedTexSet.isEmpty() );
+
+			QAction * sel = menu.exec( tbl->viewport()->mapToGlobal( pos ) );
+			if ( !sel )
+				return;
+			if ( sel == aBrowse ) {
+				browseRow();
+			} else if ( sel == aClear ) {
+				c2->setText( QString() );
+			} else if ( sel == aCopy ) {
+				QApplication::clipboard()->setText( c2->text() );
+			} else if ( sel == aPaste ) {
+				c2->setText( QApplication::clipboard()->text() );
+			} else if ( sel == aJump && mw ) {
+				QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection,
+					Q_ARG( QModelIndex, nif->getBlockIndex( owner >= 0 ? owner : bn ) ) );
+			} else if ( sel == aReveal && mw && i >= 0 && i < rows->size() ) {
+				QModelIndex idx( rows->at( i ) );
+				if ( idx.isValid() )
+					QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection, Q_ARG( QModelIndex, idx ) );
+			} else if ( sel == aCopySet ) {
+				tlCopiedTexSet.clear();
+				QModelIndex iTex = nif->getIndex( nif->getBlockIndex( bn ), "Textures" );
+				for ( int t = 0; t < nif->rowCount( iTex ); t++ )
+					tlCopiedTexSet.append( nif->resolveString( nif->index( t, 0, iTex ) ) );
+			} else if ( sel == aPasteSet ) {
+				QModelIndex iTex = nif->getIndex( nif->getBlockIndex( bn ), "Textures" );
+				nifSnapshotOp( nif, QObject::tr( "Paste texture set" ), [&]() {
+					int n = std::min( (int) tlCopiedTexSet.size(), nif->rowCount( iTex ) );
+					for ( int t = 0; t < n; t++ )
+						nif->assignString( nif->index( t, 0, iTex ), tlCopiedTexSet.at( t ) );
+				} );
+				rebuild();
+			}
 		} );
 
 		QObject::connect( btnRefresh, &QPushButton::clicked, panel, rebuild );
-		// rebuild automatically when a different file is loaded into the model
-		QObject::connect( nif, &QAbstractItemModel::modelReset, dock, rebuild );
+		// rebuild when a different file is loaded, or when the panel is opened
+		QObject::connect( nif, &QAbstractItemModel::modelReset, dock, [dock, rebuild]() {
+			if ( dock->isVisible() )
+				rebuild();
+		} );
+		QObject::connect( dock, &QDockWidget::visibilityChanged, dock, [rebuild]( bool vis ) {
+			if ( vis )
+				rebuild();
+		} );
 
-		rebuild();
+		// selection sync: block-list / viewport selection colours matching rows
+		if ( ogl ) {
+			QObject::connect( ogl, &GLView::objectSelectionChanged, dock, [dock, recolor]() {
+				if ( dock->isVisible() )
+					recolor();
+			} );
+		}
 
 		dock->setWidget( panel );
 		if ( mw )
@@ -453,13 +662,11 @@ public:
 		// starts as its own small floating window; drag onto the main window to dock
 		dock->setFloating( true );
 		dock->resize( 1000, 560 );
-		dock->show();
+		dock->hide();
 
-		return index;
+		return dock;
 	}
-};
-
-REGISTER_SPELL( spMaterialTextureManager )
+}
 
 
 //! Propagate a node's name to the object palette and controller-sequence blocks

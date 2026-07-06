@@ -258,6 +258,20 @@ private:
 	float gizmoOrigScale = 1;
 	QPersistentModelIndex gizmoBlock;
 
+	//! Per-node state for transforming a multi-selection together (Blender)
+	struct GizmoNodeState
+	{
+		QPersistentModelIndex iBlock;
+		Vector3 origTrans;
+		Matrix origRot;
+		float origScale = 1.0f;
+		Matrix parentRot;
+		Vector3 parentPos;
+		float parentScale = 1.0f;
+		Vector3 origWorldPos;
+	};
+	QVector<GizmoNodeState> gizmoNodes; // every transformed node; first = primary
+
 	// captured at gizmoBegin so the frame of reference stays fixed during the drag
 	Matrix gizmoBasisM;                 // orientation basis (world <- constraint space)
 	Vector3 gizmoPivotWorld;            // pivot point in world space

@@ -651,8 +651,9 @@ void NifSkope::initDockWidgets()
 	const char * snapNames[4] = {
 		QT_TR_NOOP( "Grid Step" ), QT_TR_NOOP( "Vertex" ), QT_TR_NOOP( "Edge" ), QT_TR_NOOP( "Face" )
 	};
+	const char * snapIcons[4] = { "snap_increment", "vert", "edge", "face" };
 	for ( int i = 0; i < 4; i++ ) {
-		QAction * a = mSnapTgt->addAction( tr( snapNames[i] ) );
+		QAction * a = mSnapTgt->addAction( tlMakeIcon( QLatin1String( snapIcons[i] ), icoColHdr ), tr( snapNames[i] ) );
 		a->setCheckable( true );
 		a->setChecked( i == 0 );
 		grpSnapTgt->addAction( a );
@@ -878,7 +879,7 @@ void NifSkope::initDockWidgets()
 			QToolButton * btnSnap = new QToolButton( this );
 			btnSnap->setPopupMode( QToolButton::InstantPopup );
 			btnSnap->setAutoRaise( true );
-			btnSnap->setText( QStringLiteral( "▾" ) );
+			btnSnap->setIcon( tlMakeIcon( QStringLiteral( "chevron_down" ), QColor( 228, 228, 232 ) ) );
 			btnSnap->setToolTip( tr( "Snapping options" ) );
 
 			QMenu * snapMenu = new QMenu( btnSnap );
@@ -899,7 +900,7 @@ void NifSkope::initDockWidgets()
 			addHeader( tr( "Snap Target" ) );
 			const auto tgtActs = grpSnapTgt->actions();
 			for ( QAction * ta : tgtActs ) {
-				QPushButton * b = new QPushButton( ta->text(), panel );
+				QPushButton * b = new QPushButton( ta->icon(), ta->text(), panel );
 				b->setCheckable( true );
 				b->setChecked( ta->isChecked() );
 				connect( b, &QPushButton::clicked, ta, &QAction::trigger );
@@ -1027,6 +1028,11 @@ void NifSkope::initDockWidgets()
 		ui->tRender->addWidget( btnCursor );
 	}
 
+	// Material / Texture Manager panel (starts floating; toggled from Panels)
+	extern QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
+	QDockWidget * dMatMgr = tlCreateMatTexManagerDock( nif, this, ogl );
+	dMatMgr->toggleViewAction()->setText( tr( "Material / Texture Manager" ) );
+
 	// dock toggles collapse into one dropdown on the View toolbar
 	{
 		QToolButton * btn = new QToolButton( this );
@@ -1034,7 +1040,7 @@ void NifSkope::initDockWidgets()
 		btn->setText( tr( "Panels" ) );
 		btn->setToolTip( tr( "Show/hide panels" ) );
 		QMenu * m = new QMenu( btn );
-		for ( QDockWidget * dw : { dList, dTree, dHeader, dBrowser, dInsp, dKfm, dRefr, dTimeline } ) {
+		for ( QDockWidget * dw : { dList, dTree, dHeader, dBrowser, dInsp, dKfm, dRefr, dTimeline, dMatMgr } ) {
 			m->addAction( dw->toggleViewAction() );
 			ui->tView->removeAction( dw->toggleViewAction() );
 		}
