@@ -43,10 +43,31 @@ Backlog of features/fixes agreed for later. Ordered roughly by priority.
   vertex array (position/normal/tangent/UV/color/weights) and reindexing.
   Snapshot-undoable. Risky – rewrites vertex data, must be tested carefully.
 
-### 3. Detach / separate selected geometry (edit mode)
-- Blender "Separate (P)": move selected faces into a new BSTriShape block
-  (copy vertex data + triangles, reparent under a NiNode, wire shader/alpha).
-  Complementary to merge; same BSTriShape-rewrite risk.
+### 3. Detach / separate selected geometry (edit mode) - P menu
+- **P key in edit mode** opens a Blender-style "Separate" menu. For now
+  implement **Separate > Selection** only (the other Blender entries — By
+  Material, By Loose Parts — can be greyed/omitted for later).
+- **Separate > Selection:** the selected verts/edges/faces move into a NEW
+  BSTriShape (its own block, reparented under a NiNode), leaving the rest in
+  the original mesh. Copy the full packed vertex data for the moved verts
+  (position/**normal**/tangent/bitangent/UV/color/weights) + the moved
+  triangles reindexed; wire the same shader/alpha property (or a copy).
+- **Preserve normals exactly** on the separated geometry (do NOT recompute
+  them). The seam verts keep their original authored normals, so if the user
+  later joins the pieces back the shading across the seam stays seamless.
+- Snapshot-undoable. BSTriShape-rewrite risk — test carefully.
+
+### 3b. Join geometry (object mode) - Ctrl+J
+- **Ctrl+J in object mode** joins the selected compatible geometry nodes into
+  the active (last-selected) node, Blender-style. "Compatible" = same block
+  type + matching vertex format (BSVertexDesc) + same shader/alpha setup so
+  the merged vertex buffer is valid.
+- Append each source mesh's vertex data (transformed into the active node's
+  local space) and triangles (reindexed by the running vertex offset) onto the
+  active BSTriShape; keep normals/tangents as-is so a prior Separate round-trips
+  seamlessly. Remove the now-empty source blocks. Snapshot-undoable.
+- Inverse of #3; shares the BSTriShape vertex-array read/write helpers, so do
+  the two together.
 
 ### 4. Rest-pose display in edit mode
 - On entering edit mode on an animated frame, show the mesh at its authored
