@@ -192,6 +192,8 @@ signals:
 	void pickModeChanged( int mode );
 	//! Object-mode multi-selection changed (for the block-list highlight)
 	void objectSelectionChanged();
+	//! Viewport-hidden nodes changed (for greying block-list rows)
+	void hiddenNodesChanged();
 	void viewpointChanged();
 	void frontalLightChanged( bool isFrontal );
 
@@ -480,6 +482,8 @@ public:
 	void hideSelected();
 	//! Reveal everything hidden with H
 	void unhideAll();
+	//! Recompute model->dimmedBlocks (hidden nodes + descendants) + repaint list
+	void updateDimmedBlocks();
 	//! The rendered Shape for a block number, or nullptr
 	class Shape * shapeForBlock( int b ) const;
 	//! Blender Shift+S snap pie: cursor/selection snapping

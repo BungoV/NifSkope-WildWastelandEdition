@@ -221,6 +221,8 @@ public:
 	//! Top-level block rows in these sets get a coloured background.
 	QSet<qint32> selHighlight;
 	qint32 selHighlightActive = -1;
+	//! Block numbers to grey out in the block list (viewport-hidden nodes)
+	QSet<qint32> dimmedBlocks;
 
 	//! Get the number of NiBlocks
 	int getBlockCount() const;

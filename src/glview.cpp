@@ -1122,12 +1122,15 @@ void GLView::paintGL()
 			// --- selected elements, always on top ---
 			glDisable( GL_DEPTH_TEST );
 
-			// white outline around every filled face (Blender) - only in edge
-			// or face select mode; in pure vertex mode the edges between
-			// selected verts stay the base colour (no white marking)
-			if ( !foutline.isEmpty() && ( pickMode & ( 2 | 4 ) ) ) {
+			// outline around every filled face: white in edge/face select mode
+			// (Blender), orange in pure vertex mode so the selection still reads
+			// as orange instead of white
+			if ( !foutline.isEmpty() ) {
 				scene->setGLLineWidth( 1.7f * dpr * wireWidthMul );
-				scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );
+				if ( pickMode & ( 2 | 4 ) )
+					scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );
+				else
+					scene->setGLColor( colSel );
 				scene->drawLines( foutline.constData(), size_t( foutline.size() ), nullptr );
 			}
 
@@ -2706,13 +2709,12 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 			}
 		}
 
-		// grid stepping only applies to the Increment snap target; with a
-		// vertex/edge/face target and no geometry under the mouse, the move
-		// stays free (Blender) instead of snapping to invisible grid steps.
-		// Snap the MOVEMENT in the active orientation basis so an axis-
-		// constrained move only snaps along that axis (the other components of
-		// the delta are ~0 and round to 0, leaving those axes untouched).
-		if ( snap && !elemSnapped && gizmoSnapStep > 0 && snapTargetMode == 0 ) {
+		// grid stepping applies whenever snapping is on and no vertex/edge/face
+		// snap engaged (an unhit element-snap move still grid-steps rather than
+		// doing nothing). Snap the MOVEMENT in the active orientation basis so
+		// an axis-constrained move only steps along that axis (the other delta
+		// components are ~0 and round to 0, leaving those axes untouched).
+		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
 			float step = gizmoSnapStep * snapFine;
 			Vector3 deltaBasis = gizmoBasisM.inverted() * deltaWorld;
 			for ( int c = 0; c < 3; c++ )
@@ -2819,6 +2821,13 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 	else
 		status += tr( "   [axis: %1%2]" ).arg( QLatin1String( axisNames[gizmoAxis] ),
 			gizmoAxisLocal ? tr( " (local)" ) : QString() );
+
+	// show the snap state so it is obvious whether snapping is engaging
+	static const char * snapNames[4] = { "grid", "vertex", "edge", "face" };
+	if ( snap )
+		status += tr( "   [snap: %1]" ).arg( QLatin1String( snapNames[std::min( std::max( snapTargetMode, 0 ), 3 )] ) );
+	else
+		status += tr( "   [snap: off - hold Ctrl or enable the magnet]" );
 
 	if ( numeric ) {
 		if ( gizmoMode == 1 && gizmoAxis == 0 ) {
@@ -4019,8 +4028,8 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 			}
 		}
 
-		// grid stepping only with the Increment target (see gizmoUpdate)
-		if ( snap && !elemSnapped && gizmoSnapStep > 0 && snapTargetMode == 0 ) {
+		// grid stepping whenever no element snap engaged (see gizmoUpdate)
+		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
 			for ( int c = 0; c < 3; c++ )
 				deltaWorld[c] = std::round( deltaWorld[c] / gizmoSnapStep ) * gizmoSnapStep;
 		}
@@ -4920,6 +4929,7 @@ void GLView::hideSelected()
 	if ( b < 0 )
 		return;
 	scene->hiddenNodes.insert( b );
+	updateDimmedBlocks();
 	emit gizmoStatus( tr( "Hid node %1 (Alt+H to reveal all)" ).arg( b ) );
 	update();
 }
@@ -4929,8 +4939,29 @@ void GLView::unhideAll()
 	if ( scene->hiddenNodes.isEmpty() )
 		return;
 	scene->hiddenNodes.clear();
+	updateDimmedBlocks();
 	emit gizmoStatus( tr( "Revealed all hidden nodes" ) );
 	update();
+}
+
+void GLView::updateDimmedBlocks()
+{
+	if ( !model )
+		return;
+	QSet<qint32> dim;
+	if ( !scene->hiddenNodes.isEmpty() ) {
+		// a block is dimmed if it, or any ancestor, is a hidden node
+		for ( int b = 0; b < model->getBlockCount(); b++ ) {
+			for ( int p = b; p >= 0; p = model->getParent( p ) ) {
+				if ( scene->hiddenNodes.contains( p ) ) {
+					dim.insert( b );
+					break;
+				}
+			}
+		}
+	}
+	model->dimmedBlocks = dim;
+	emit hiddenNodesChanged();
 }
 
 Shape * GLView::shapeForBlock( int b ) const

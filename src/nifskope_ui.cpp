@@ -363,6 +363,13 @@ void NifSkope::initActions()
 	} );
 
 	connect( ogl, &GLView::clicked, this, &NifSkope::select );
+	// viewport-hidden nodes (H) -> repaint the greyed block-list rows
+	connect( ogl, &GLView::hiddenNodesChanged, [this]() {
+		if ( list )
+			list->viewport()->update();
+		if ( tree )
+			tree->viewport()->update();
+	} );
 	// object-mode multi-selection -> colour the matching block-list rows
 	connect( ogl, &GLView::objectSelectionChanged, [this]() {
 		if ( !nif )

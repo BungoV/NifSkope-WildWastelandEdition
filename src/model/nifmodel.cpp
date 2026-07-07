@@ -1227,7 +1227,8 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 	// object-mode multi-selection highlight for the block list. Must be handled
 	// on the original index, before buddy() redirects the Value column to the
 	// block's Name child (which is not a top item and would lose the highlight).
-	if ( ( role == Qt::BackgroundRole || role == Qt::ForegroundRole ) && !selHighlight.isEmpty() ) {
+	if ( ( role == Qt::BackgroundRole || role == Qt::ForegroundRole )
+		&& ( !selHighlight.isEmpty() || !dimmedBlocks.isEmpty() ) ) {
 		if ( const NifItem * it = getItem( index ); it && isTopItem( it ) ) {
 			int bn = getBlockNumber( it );
 			if ( bn >= 0 && selHighlight.contains( bn ) ) {
@@ -1238,6 +1239,10 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 				return active ? QColor::fromRgb( 255, 157, 0 )         // primary text #FF9D00
 				              : QColor::fromRgb( 255, 114, 0 );        // secondary text #FF7200
 			}
+			// viewport-hidden nodes render greyed in the block list (still
+			// fully selectable)
+			if ( role == Qt::ForegroundRole && bn >= 0 && dimmedBlocks.contains( bn ) )
+				return QColor::fromRgb( 112, 112, 112 );
 		}
 	}
 
