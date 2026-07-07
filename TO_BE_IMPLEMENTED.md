@@ -43,7 +43,13 @@ Backlog of features/fixes agreed for later. Ordered roughly by priority.
   vertex array (position/normal/tangent/UV/color/weights) and reindexing.
   Snapshot-undoable. Risky – rewrites vertex data, must be tested carefully.
 
-### 3. Detach / separate selected geometry (edit mode) - P menu
+### 3. Detach / separate selected geometry (edit mode) - DONE 2026-07-07 (Selection only)
+_Separate > Selection, Join (Ctrl+J) and Duplicate (Shift+D, obj+edit) shipped.
+Remaining: Separate By Material / By Loose Parts (greyed in the P menu);
+object-mode duplicate/separate are BSTriShape-only (NiNode branch duplicate is
+future). Edit-mode selection undo (Ctrl+Z through selection history) still TODO._
+
+### 3z. (superseded) old Separate notes
 - **P key in edit mode** opens a Blender-style "Separate" menu. For now
   implement **Separate > Selection** only (the other Blender entries — By
   Material, By Loose Parts — can be greyed/omitted for later).
