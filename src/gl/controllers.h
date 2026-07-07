@@ -259,6 +259,8 @@ class PSysSimController final : public Controller
 		float radius = 1;
 		Color4 color;
 		Vector2 uvOff;                     // flipbook cell (subtexture offset)
+		float angle = 0;                   // sprite rotation (radians)
+		float angVel = 0;                  // rotation speed (radians/sec)
 	};
 
 	struct Emitter
@@ -317,6 +319,10 @@ class PSysSimController final : public Controller
 	float c1End = 0, c2Start = 0, c2End = 1, c3Start = 1;
 	Color4 modColors[3];
 	QVector<float> scaleKeys;
+	// NiPSysRotationModifier
+	bool hasRotation = false;
+	float rotSpeed = 0, rotSpeedVar = 0, rotAngle = 0, rotAngleVar = 0;
+	bool rotRandomSign = false;
 	//! NiPSysData subtexture offsets (flipbook cells): (offU, sizeU, offV, sizeV)
 	QVector<Vector4> subtexOffsets;
 

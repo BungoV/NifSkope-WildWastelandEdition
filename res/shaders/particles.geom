@@ -15,6 +15,7 @@ in vec3 vsViewDir[];
 in vec4 vsColor[];
 in float vsParticleSize[];
 in vec2 vsUVOffset[];
+in float vsAngle[];
 
 out vec3 LightDir;
 out vec3 ViewDir;
@@ -41,28 +42,37 @@ void main()
 	float	sx = vsParticleSize[0] * particleScale.x;
 	float	sy = vsParticleSize[0] * particleScale.y;
 
+	// per-particle sprite rotation about the view axis (NiPSysRotationModifier)
+	float	ca = cos( vsAngle[0] );
+	float	sa = sin( vsAngle[0] );
+	// rotated corner offsets: (u,v) in [-1,1] scaled by the sprite half-size
+	vec4	c11 = vec4(  ( ca - sa ) * sx, (  sa + ca ) * sy, 0.0, 0.0 );
+	vec4	c01 = vec4(  ( -ca - sa ) * sx, ( -sa + ca ) * sy, 0.0, 0.0 );
+	vec4	c10 = vec4(  ( ca + sa ) * sx, (  sa - ca ) * sy, 0.0, 0.0 );
+	vec4	c00 = vec4(  ( -ca + sa ) * sx, ( -sa - ca ) * sy, 0.0, 0.0 );
+
 	vec2	uv;
 	vec2	uvBase = particleUV.xy + vsUVOffset[0];
 
 	uv = uvBase + vec2( 1.0, 1.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
 		texCoords[i] = uv;
-	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( sx, sy, 0.0, 0.0 ) );
+	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + c11 );
 	EmitVertex();
 	uv = uvBase + vec2( 0.0, 1.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
 		texCoords[i] = uv;
-	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( -sx, sy, 0.0, 0.0 ) );
+	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + c01 );
 	EmitVertex();
 	uv = uvBase + vec2( 1.0, 0.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
 		texCoords[i] = uv;
-	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( sx, -sy, 0.0, 0.0 ) );
+	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + c10 );
 	EmitVertex();
 	uv = uvBase + vec2( 0.0, 0.0 ) * particleUV.zw;
 	for ( int i = 0; i < 9; i++ )
 		texCoords[i] = uv;
-	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + vec4( -sx, -sy, 0.0, 0.0 ) );
+	gl_Position = projectionMatrix * ( gl_in[0].gl_Position + c00 );
 	EmitVertex();
 
 	EndPrimitive();

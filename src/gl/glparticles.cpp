@@ -57,6 +57,7 @@ void Particles::clear()
 	sizes.clear();
 	uvOffsets.clear();
 	uvCell = Vector2( 1.0f, 1.0f );
+	angles.clear();
 }
 
 void Particles::updateImpl( const NifModel * nif, const QModelIndex & index )
@@ -322,6 +323,11 @@ void Particles::drawShapes( NodeList * secondPass )
 		// per-particle flipbook cell offset (vec2 at location 2)
 		attrData[2] = &( uvOffsets.constFirst()[0] );
 		attrMask = attrMask | 0x200;
+	}
+	if ( angles.size() >= numVerts ) {
+		// per-particle sprite rotation angle (float at location 3)
+		attrData[3] = angles.constData();
+		attrMask = attrMask | 0x1000;
 	}
 	if ( sizes.size() >= numVerts ) {
 		attrData[4] = sizes.constData();

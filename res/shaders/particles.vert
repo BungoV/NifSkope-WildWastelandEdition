@@ -6,6 +6,7 @@ out vec3 vsViewDir;
 out vec4 vsColor;
 out float vsParticleSize;
 out vec2 vsUVOffset;
+out float vsAngle;
 
 #include "uniforms.glsl"
 
@@ -17,6 +18,8 @@ layout ( location = 0 ) in vec3 vertexPosition;
 layout ( location = 1 ) in vec4 vertexColor;
 // per-particle flipbook cell offset (defaults to 0,0 when not provided)
 layout ( location = 2 ) in vec2 vertexUV;
+// per-particle sprite rotation in radians (defaults to 0 when not provided)
+layout ( location = 3 ) in float vertexAngle;
 // location 4 (bitangent) is used for sizes because the default is set to vec3(1, 0, 0)
 layout ( location = 4 ) in float particleSize;
 
@@ -35,4 +38,5 @@ void main()
 	vsColor = mix( vertexColor, vertexColorOverride, greaterThan( vertexColorOverride, vec4( 0.0 ) ) );
 	vsParticleSize = particleSize;
 	vsUVOffset = vertexUV;
+	vsAngle = vertexAngle;
 }

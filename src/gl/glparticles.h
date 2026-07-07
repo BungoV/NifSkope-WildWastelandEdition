@@ -72,6 +72,7 @@ protected:
 	QVector<float> sizes;
 	QVector<Vector2> uvOffsets;          //!< per-particle flipbook cell offsets
 	Vector2 uvCell = Vector2( 1.0f, 1.0f );	//!< flipbook cell size (UV scale)
+	QVector<float> angles;               //!< per-particle sprite rotation (radians)
 
 	int active = 0;
 	float size = 0;

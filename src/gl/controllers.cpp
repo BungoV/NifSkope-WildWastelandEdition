@@ -813,6 +813,9 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	dragPct = 0;
 	hasColorMod = false;
 	scaleKeys.clear();
+	hasRotation = false;
+	rotSpeed = rotSpeedVar = rotAngle = rotAngleVar = 0;
+	rotRandomSign = false;
 
 	QModelIndex iPSys = nif->getBlockIndex( nif->getLink( iBlock, "Target" ) );
 	if ( !iPSys.isValid() )
@@ -995,6 +998,13 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 				modColors[c] = nif->get<Color4>( nif->getIndex( iCols, c ) );
 		} else if ( mtype == QLatin1String( "BSPSysScaleModifier" ) ) {
 			scaleKeys = nif->getArray<float>( nif->getIndex( iMod, "Scales" ) );
+		} else if ( mtype == QLatin1String( "NiPSysRotationModifier" ) ) {
+			hasRotation = true;
+			rotSpeed = nif->get<float>( iMod, "Rotation Speed" );
+			rotSpeedVar = nif->get<float>( iMod, "Rotation Speed Variation" );
+			rotAngle = nif->get<float>( iMod, "Rotation Angle" );
+			rotAngleVar = nif->get<float>( iMod, "Rotation Angle Variation" );
+			rotRandomSign = nif->get<bool>( iMod, "Random Rot Speed Sign" );
 		}
 	}
 
@@ -1222,6 +1232,13 @@ void PSysSimController::emitParticle( Emitter & e )
 		p.uvOff = Vector2( s[0], s[2] );
 	}
 
+	if ( hasRotation ) {
+		p.angle = rotAngle + random( rotAngleVar ) - rotAngleVar * 0.5f;
+		p.angVel = rotSpeed + random( rotSpeedVar ) - rotSpeedVar * 0.5f;
+		if ( rotRandomSign && ( std::rand() & 1 ) )
+			p.angVel = -p.angVel;
+	}
+
 	parts.append( p );
 }
 
@@ -1262,6 +1279,7 @@ void PSysSimController::updateTime( float time )
 		if ( dragPct > 0.0f )
 			p.vel *= dragMul;
 		p.pos += p.vel * dt;
+		p.angle += p.angVel * dt;
 		n++;
 	}
 
@@ -1326,6 +1344,7 @@ void PSysSimController::updateTime( float time )
 	target->colors.resize( count );
 	target->sizes.resize( count );
 	target->uvOffsets.resize( flipbook ? count : 0 );
+	target->angles.resize( hasRotation ? count : 0 );
 	for ( int i = 0; i < count; i++ ) {
 		const SimParticle & p = parts.at( i );
 		float u = p.age / p.lifespan;
@@ -1335,6 +1354,8 @@ void PSysSimController::updateTime( float time )
 		target->sizes[i] = p.radius * particleScale( u );
 		if ( flipbook )
 			target->uvOffsets[i] = p.uvOff;
+		if ( hasRotation )
+			target->angles[i] = p.angle;
 	}
 	target->uvCell = flipbook
 		? Vector2( subtexOffsets.first()[1], subtexOffsets.first()[3] )
