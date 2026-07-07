@@ -4794,11 +4794,9 @@ void GLView::showSetOriginMenu()
 	}
 	QMenu m;
 	m.addSection( tr( "Set Origin" ) );
-	QAction * aGTO  = m.addAction( tr( "Geometry to Origin" ) );
-	QAction * aOTG  = m.addAction( tr( "Origin to Geometry" ) );
-	QAction * aOTC  = m.addAction( tr( "Origin to 3D Cursor" ) );
-	QAction * aCoMS = m.addAction( tr( "Origin to Center of Mass (Surface)" ) );
-	QAction * aCoMV = m.addAction( tr( "Origin to Center of Mass (Volume)" ) );
+	QAction * aGTO = m.addAction( tr( "Geometry to Origin" ) );
+	QAction * aOTG = m.addAction( tr( "Origin to Geometry" ) );
+	QAction * aOTC = m.addAction( tr( "Origin to 3D Cursor" ) );
 	QAction * r = m.exec( QCursor::pos() );
 	if ( r == aGTO )
 		setOrigin( 0 );
@@ -4806,10 +4804,6 @@ void GLView::showSetOriginMenu()
 		setOrigin( 1 );
 	else if ( r == aOTC )
 		setOrigin( 2 );
-	else if ( r == aCoMS )
-		setOrigin( 3 );
-	else if ( r == aCoMV )
-		setOrigin( 4 );
 }
 
 void GLView::setOrigin( int mode )
@@ -4822,77 +4816,92 @@ void GLView::setOrigin( int mode )
 	int done = 0;
 	nifSnapshotOp( model, tr( "Set origin" ), [&]() {
 		for ( int sb : targets ) {
-			QModelIndex iShape = model->getBlockIndex( sb );
-			if ( !model->blockInherits( iShape, "BSTriShape" ) )
+			QModelIndex iBlock = model->getBlockIndex( sb );
+			if ( !model->blockInherits( iBlock, "NiAVObject" )
+				|| !model->getIndex( iBlock, "Translation" ).isValid() )
 				continue;
-			Shape * s = shapeForBlock( sb );
-			if ( !s || s->verts.isEmpty() )
-				continue;
-			const QVector<Vector3> & V = s->verts;
 
-			// centre point (local space) that becomes the new origin
+			bool isShape = model->blockInherits( iBlock, "BSTriShape" );
+			Node * node = scene->getNode( model, iBlock );
+			Transform nw = node ? node->worldTrans() : Transform();
+			float nws = ( nw.scale != 0.0f ) ? nw.scale : 1.0f;
+
+			// geometry points in THIS node's local space (a plain NiNode
+			// aggregates the vertices of its descendant shapes)
+			QVector<Vector3> pts;
+			if ( isShape ) {
+				Shape * s = shapeForBlock( sb );
+				if ( s )
+					pts = s->verts;
+			} else {
+				Matrix nwrInv = nw.rotation.inverted();
+				for ( Shape * s : scene->shapes ) {
+					if ( !s || s->verts.isEmpty() )
+						continue;
+					int p = s->id();
+					while ( p >= 0 && p != sb )
+						p = model->getParent( p );
+					if ( p != sb )
+						continue;
+					Transform swt = shapeRenderTrans( s );
+					for ( const Vector3 & v : s->verts )
+						pts.append( nwrInv * ( ( swt * v - nw.translation ) * ( 1.0f / nws ) ) );
+				}
+			}
+
+			// centre C (node-local) that becomes the new origin
 			Vector3 C;
-			auto boundsCentre = [&V]() {
-				Vector3 mn = V.first(), mx = V.first();
-				for ( const Vector3 & v : V )
+			if ( mode == 2 ) {
+				C = nw.rotation.inverted() * ( ( cursorPos - nw.translation ) * ( 1.0f / nws ) );
+			} else {
+				if ( pts.isEmpty() )
+					continue;	// nothing to centre on
+				Vector3 mn = pts.first(), mx = pts.first();
+				for ( const Vector3 & v : pts )
 					for ( int k = 0; k < 3; k++ ) {
 						mn[k] = std::min( mn[k], v[k] );
 						mx[k] = std::max( mx[k], v[k] );
 					}
-				return ( mn + mx ) * 0.5f;
-			};
+				C = ( mn + mx ) * 0.5f;
+			}
 
-			if ( mode == 2 ) {
-				// 3D cursor -> this shape's local space
-				Node * n = scene->getNode( model, iShape );
-				Transform wt = n ? n->worldTrans() : Transform();
-				float ws = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
-				C = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / ws ) );
-			} else if ( mode == 3 || mode == 4 ) {
-				Vector3 acc;
-				double wsum = 0.0;
-				for ( const Triangle & t : s->triangles ) {
-					if ( t[0] >= V.size() || t[1] >= V.size() || t[2] >= V.size() )
-						continue;
-					const Vector3 & a = V[t[0]];
-					const Vector3 & b = V[t[1]];
-					const Vector3 & c = V[t[2]];
-					if ( mode == 3 ) {
-						double area = 0.5 * Vector3::crossproduct( b - a, c - a ).length();
-						acc += ( ( a + b + c ) / 3.0f ) * float( area );
-						wsum += area;
-					} else {
-						double vol = Vector3::dotproduct( a, Vector3::crossproduct( b, c ) ) / 6.0;
-						acc += ( ( a + b + c ) / 4.0f ) * float( vol );
-						wsum += vol;
-					}
-				}
-				C = ( std::fabs( wsum ) > 1.0e-9 ) ? ( acc / float( wsum ) ) : boundsCentre();
+			// shift the contents so C sits at the local origin: vertices for a
+			// shape, the direct child translations for a plain NiNode
+			if ( isShape ) {
+				Shape * s = shapeForBlock( sb );
+				int nv = s ? s->verts.size() : 0;
+				for ( int i = 0; i < nv; i++ )
+					tlSetVertexLocal( model, iBlock, i, s->verts[i] - C );
+				tlUpdateBounds( model, iBlock );
 			} else {
-				C = boundsCentre();
+				QModelIndex iChildren = model->getIndex( iBlock, "Children" );
+				for ( int cr = 0; cr < model->rowCount( iChildren ); cr++ ) {
+					int cb = model->getLink( model->getIndex( iChildren, cr ) );
+					if ( cb < 0 )
+						continue;
+					QModelIndex ic = model->getBlockIndex( cb );
+					if ( !model->getIndex( ic, "Translation" ).isValid() )
+						continue;
+					model->set<Vector3>( ic, "Translation", model->get<Vector3>( ic, "Translation" ) - C );
+				}
 			}
 
-			// shift the geometry so C sits at the local origin
-			for ( int i = 0; i < V.size(); i++ )
-				tlSetVertexLocal( model, iShape, i, V[i] - C );
-
-			// Origin-to-X also moves the node so the geometry stays put in world
+			// Origin-to-X also moves the node so its contents stay put in world
 			if ( mode != 0 ) {
-				Vector3 Tl = model->get<Vector3>( iShape, "Translation" );
-				Matrix Rl = model->get<Matrix>( iShape, "Rotation" );
-				float Sl = model->get<float>( iShape, "Scale" );
-				model->set<Vector3>( iShape, "Translation", Tl + Rl * ( C * Sl ) );
+				Vector3 Tl = model->get<Vector3>( iBlock, "Translation" );
+				Matrix Rl = model->get<Matrix>( iBlock, "Rotation" );
+				float Sl = model->get<float>( iBlock, "Scale" );
+				model->set<Vector3>( iBlock, "Translation", Tl + Rl * ( C * Sl ) );
 			}
 
-			tlUpdateBounds( model, iShape );
 			done++;
 		}
 	} );
 
 	if ( done == 0 )
-		emit gizmoStatus( tr( "Set Origin: no BSTriShape selected" ) );
+		emit gizmoStatus( tr( "Set Origin: nothing applicable selected" ) );
 	else
-		emit gizmoStatus( tr( "Set origin (%1 mesh%2)" ).arg( done ).arg( done == 1 ? "" : "es" ) );
+		emit gizmoStatus( tr( "Set origin (%1 node%2)" ).arg( done ).arg( done == 1 ? "" : "s" ) );
 	modelChanged();
 }
 
