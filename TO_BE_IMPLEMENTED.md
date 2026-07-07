@@ -55,17 +55,12 @@ Backlog of features/fixes agreed for later. Ordered roughly by priority.
 
 ## Object-mode selection + parenting
 
-### 5. Multi-node selection in object mode
-- Shift+Left-click to select multiple nodes. Block Details shows only the
-  **last (active)** selected node. Highlight the active node one colour and the
-  other selected nodes another, Blender-style, in the Block List.
-- **Viewport outline:** selected geometry gets an outline in the 3D view; the
-  outline colour depends on whether it is the **active (last-selected)** node
-  or a **previously-selected** node. Use Blender's colours (active = brighter
-  white/orange, selected = darker orange).
-- Wireframe overlay is **disabled by default** on selected nodes in object
-  mode (the outline replaces it); the Wire toggle can still turn it on.
-- This underpins #6 (multi-node parent needs the selection set + active node).
+### 5. Multi-node selection in object mode - DONE (2026-07-07)
+- Shift+click multi-select (objSelection/objActive), Block List active vs
+  secondary colours, and the stencil silhouette outline (active #FF9D00,
+  secondary #FF7200, white while transforming) all shipped. The old
+  selection wireframe was removed in favour of the outline; the Wire
+  toggle is now an independent overlay. Underpins #6.
 
 ### 6. Parent / Clear-Parent windows (Ctrl+P / Alt+P)
 - **Ctrl+P → Set Parent** dialog: choose the target socket/parent node, and
