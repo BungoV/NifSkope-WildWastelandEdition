@@ -344,18 +344,16 @@ void main()
 	color.rgb = tonemap( color.rgb );
 
 	if ( doRefraction ) {
-		// sample the already-rendered scene behind the shape, displaced by
-		// the (normal-mapped) surface normal - glass / heat-haze preview.
-		// No specular term: noisy effect normal maps turn it into white
-		// speckles all over the surface.
+		// sample the already-rendered scene behind the shape, displaced by the
+		// (normal-mapped) surface normal - glass / heat-haze preview. The base
+		// texture of a refraction mesh is a distortion/noise map (not a diffuse
+		// colour), so it must NOT tint the result: show the clean refracted
+		// background. (Per-texel alpha blending garbled the render because the
+		// base texture is not opacity, so it is deliberately not applied here.)
 		vec2	suv = ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw );
 		vec2	roffs = normal.xy * clamp( refractionStrength, 0.0, 1.0 ) * 0.12;
 		vec3	bg = texture( RefractionSrc, clamp( suv + roffs, vec2( 0.001 ), vec2( 0.999 ) ) ).rgb;
-		// honour the surface opacity (texture alpha * vertex alpha): fully
-		// transparent areas show pure refraction, opaque areas keep the lit
-		// surface, and the base texture tints the refracted background
-		float	op = clamp( baseMap.a * C.a * alpha, 0.0, 1.0 );
-		color.rgb = mix( bg * baseMap.rgb, color.rgb, op );
+		color.rgb = bg;
 		color.a = 1.0;
 	}
 
