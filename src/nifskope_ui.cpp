@@ -1112,14 +1112,35 @@ void NifSkope::initDockWidgets()
 
 		ui->tRender->addSeparator();
 
-		// Blender-style viewport shading modes (exclusive): Wireframe (black
-		// wireframe, opaque, no texture) / Solid (textures, no lighting) /
-		// Shaded (full lighting). X-ray is a separate toggle that combines.
+		// Blender-style X-ray (Alt+Z): combines with any shading mode; sits
+		// left of the shading buttons like Blender's header
+		QToolButton * btnXRay = new QToolButton( this );
+		btnXRay->setCheckable( true );
+		btnXRay->setAutoRaise( true );
+		btnXRay->setIcon( tlMakeIcon( QStringLiteral( "xray" ), icoColHdr ) );
+		btnXRay->setToolTip( tr( "Toggle X-ray: see through geometry (half-transparent when shaded, see-through edges with the wireframe). Alt+Z" ) );
+		btnXRay->setShortcut( QKeySequence( Qt::ALT | Qt::Key_Z ) );
+		connect( btnXRay, &QToolButton::toggled, [this]( bool on ) {
+			ogl->getScene()->xRay = on;
+			ogl->update();
+		} );
+		ui->tRender->addWidget( btnXRay );
+
+		// Wireframe is an independent overlay: it draws black wires on top of
+		// whichever shading (Solid / Shaded) is active, so the texture still
+		// shows. Solid / Shaded remain an exclusive pair (lighting off / on).
 		QToolButton * btnWire = new QToolButton( this );
 		btnWire->setIcon( tlMakeIcon( QStringLiteral( "shade_wire" ), icoColHdr ) );
 		btnWire->setCheckable( true );
 		btnWire->setAutoRaise( true );
-		btnWire->setToolTip( tr( "Wireframe shading: black wireframe over opaque geometry (no texture). Combine with X-ray to see through." ) );
+		btnWire->setToolTip( tr( "Wireframe overlay: black wireframe over the shaded/solid render (combine with X-ray to see through)." ) );
+		ogl->wireframeOverlay = false;
+		connect( btnWire, &QToolButton::toggled, [this]( bool on ) {
+			ogl->wireframeOverlay = on;
+			ogl->update();
+		} );
+		ui->tRender->addWidget( btnWire );
+
 		QToolButton * btnSolid = new QToolButton( this );
 		btnSolid->setCheckable( true );
 		btnSolid->setAutoRaise( true );
@@ -1131,48 +1152,29 @@ void NifSkope::initDockWidgets()
 		btnShaded->setIcon( tlMakeIcon( QStringLiteral( "shade_material" ), icoColHdr ) );
 		btnShaded->setToolTip( tr( "Shaded: full lighting (default)" ) );
 
-		ogl->wireframeOverlay = false;
 		QButtonGroup * shadeGrp = new QButtonGroup( this );
 		shadeGrp->setExclusive( true );
-		shadeGrp->addButton( btnWire, 0 );
-		shadeGrp->addButton( btnSolid, 1 );
-		shadeGrp->addButton( btnShaded, 2 );
+		shadeGrp->addButton( btnSolid, 0 );
+		shadeGrp->addButton( btnShaded, 1 );
 		btnShaded->setChecked( ui->aLighting->isChecked() );
 		btnSolid->setChecked( !ui->aLighting->isChecked() );
 		connect( shadeGrp, &QButtonGroup::idClicked, [this]( int id ) {
-			ogl->wireframeOverlay = ( id == 0 );
 			// Solid = lighting off, Shaded = lighting on (trigger() updates the
-			// scene option group); Wireframe leaves the lighting state alone
-			if ( id == 1 && ui->aLighting->isChecked() )
+			// scene option group)
+			if ( id == 0 && ui->aLighting->isChecked() )
 				ui->aLighting->trigger();
-			else if ( id == 2 && !ui->aLighting->isChecked() )
+			else if ( id == 1 && !ui->aLighting->isChecked() )
 				ui->aLighting->trigger();
 			ogl->update();
 		} );
 		// keep the buttons in sync when lighting is toggled from the menu
-		connect( ui->aLighting, &QAction::toggled, [btnWire, btnSolid, btnShaded]( bool on ) {
-			if ( btnWire->isChecked() )
-				return;	// wireframe mode is active, don't steal it
+		connect( ui->aLighting, &QAction::toggled, [btnSolid, btnShaded]( bool on ) {
 			QSignalBlocker b1( btnSolid ), b2( btnShaded );
 			btnSolid->setChecked( !on );
 			btnShaded->setChecked( on );
 		} );
-		ui->tRender->addWidget( btnWire );
 		ui->tRender->addWidget( btnSolid );
 		ui->tRender->addWidget( btnShaded );
-
-		// Blender-style X-ray (Alt+Z): combines with any shading mode
-		QToolButton * btnXRay = new QToolButton( this );
-		btnXRay->setCheckable( true );
-		btnXRay->setAutoRaise( true );
-		btnXRay->setIcon( tlMakeIcon( QStringLiteral( "xray" ), icoColHdr ) );
-		btnXRay->setToolTip( tr( "Toggle X-ray: see through geometry (half-transparent when shaded, see-through edges in wireframe). Alt+Z" ) );
-		btnXRay->setShortcut( QKeySequence( Qt::ALT | Qt::Key_Z ) );
-		connect( btnXRay, &QToolButton::toggled, [this]( bool on ) {
-			ogl->getScene()->xRay = on;
-			ogl->update();
-		} );
-		ui->tRender->addWidget( btnXRay );
 	}
 
 	// Material / Texture Manager panel (starts floating; toggled from Panels)

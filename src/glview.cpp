@@ -645,10 +645,6 @@ void GLView::paintGL()
 	scene->objSelActive = ( !editMode && !objSelection.isEmpty()
 		&& scene->currentIndex == QModelIndex( scene->currentBlock ) );
 
-	// Blender-style wireframe shading: skip the textured/lit shape draw; the
-	// depth-fill + black wireframe are rendered below (works in both modes)
-	scene->wireframeMode = wireframeOverlay;
-
 	// Draw the model
 	glDisable( GL_BLEND );
 	scene->draw();
@@ -864,69 +860,37 @@ void GLView::paintGL()
 		}
 	}
 
-	// Blender-style wireframe shading (global): the textured shapes were
-	// skipped in scene->draw(), so render a depth-only fill for occlusion
-	// (opaque geometry - no see-through) plus a black wireframe over every
-	// visible mesh. X-ray skips the fill so all edges show through, and edit
-	// mode still gets its coloured selection overlay below.
+	// Blender-style wireframe overlay: a black wireframe drawn on top of the
+	// solid/shaded render, so the texture shows through the faces. Opaque
+	// (depth-tested against the textured geometry) unless X-ray is on, which
+	// makes both the geometry (half-transparent) and every edge show through.
 	if ( model && wireframeOverlay && !scene->selecting ) {
 		auto edgeKey = []( int a, int b ) {
 			return ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) );
 		};
-		auto visibleShape = [this]( Shape * s ) {
-			return s && !s->isHidden() && !s->verts.isEmpty() && !s->triangles.isEmpty();
-		};
 
-		// 1) depth-only occlusion fill (colour untouched, so face interiors
-		//    keep the background - Blender's hollow wireframe look)
-		if ( !scene->xRay ) {
-			glEnable( GL_DEPTH_TEST );
-			glDepthFunc( GL_LESS );
-			glDepthMask( GL_TRUE );
-			glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
-			glEnable( GL_POLYGON_OFFSET_FILL );
-			glPolygonOffset( 1.0f, 1.0f );
-			for ( Shape * s : scene->shapes ) {
-				if ( !visibleShape( s ) )
-					continue;
-				const QSet<int> hidT = editMode ? editHiddenTris.value( s->id() ) : QSet<int>();
-				int nv = s->verts.size();
-				QVector<Vector3> soup;
-				soup.reserve( s->triangles.size() * 3 );
-				for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
-					if ( hidT.contains( ti ) )
-						continue;
-					const Triangle & t = s->triangles.at( ti );
-					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
-						continue;
-					soup << s->verts[t[0]] << s->verts[t[1]] << s->verts[t[2]];
-				}
-				if ( soup.isEmpty() )
-					continue;
-				scene->loadModelViewMatrix( s->viewTrans() );
-				scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );
-				scene->drawTriangles( soup.constData(), size_t( soup.size() ), nullptr, true );
-			}
-			glDisable( GL_POLYGON_OFFSET_FILL );
-			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
-		}
-
-		// 2) black wireframe on top (Blender wireframe colour)
 		glEnable( GL_DEPTH_TEST );
 		glDepthFunc( GL_LEQUAL );
 		glDepthMask( GL_FALSE );
 		if ( scene->xRay )
 			glDisable( GL_DEPTH_TEST );	// X-ray: every edge shows through
-		scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );
+		scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );	// Blender wireframe black
 		scene->setGLLineWidth( Settings::lineWidthWireframe * wireWidthMul );
+
 		for ( Shape * s : scene->shapes ) {
-			if ( !visibleShape( s ) )
+			if ( !s || s->isHidden() || s->verts.isEmpty() || s->triangles.isEmpty() )
 				continue;
 			// edited meshes are wired by the edit overlay (keeps selection colours)
 			if ( editMode && editShapeBlocks.contains( s->id() ) )
 				continue;
 			const QSet<int> hidT = editMode ? editHiddenTris.value( s->id() ) : QSet<int>();
 			int nv = s->verts.size();
+
+			// pull the wire toward the camera (local space) so it sits just in
+			// front of the textured faces instead of z-fighting them
+			Transform mv = s->viewTrans();
+			Vector3 eyeL = mv.inverted() * Vector3( 0.0f, 0.0f, 0.0f );
+
 			QSet<quint64> eset;
 			QVector<Vector3> lines;
 			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
@@ -940,13 +904,14 @@ void GLView::paintGL()
 					quint64 k = edgeKey( a, b );
 					if ( !eset.contains( k ) ) {
 						eset.insert( k );
-						lines << s->verts[a] << s->verts[b];
+						lines << ( eyeL + ( s->verts[a] - eyeL ) * 0.998f )
+						      << ( eyeL + ( s->verts[b] - eyeL ) * 0.998f );
 					}
 				}
 			}
 			if ( lines.isEmpty() )
 				continue;
-			scene->loadModelViewMatrix( s->viewTrans() );
+			scene->loadModelViewMatrix( mv );
 			scene->drawLines( lines.constData(), size_t( lines.size() ), nullptr );
 		}
 		glDepthMask( GL_TRUE );

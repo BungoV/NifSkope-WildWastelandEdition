@@ -33,10 +33,6 @@ void BSMesh::drawShapes( NodeList * secondPass )
 	if ( isHidden() || ( !scene->hasOption(Scene::ShowMarkers) && name.contains(QLatin1StringView("EditorMarker")) ) )
 		return;
 
-	// wireframe shading: GLView renders the depth-fill + black wireframe
-	if ( scene->wireframeMode && !scene->selecting )
-		return;
-
 	// Draw translucent meshes in second pass
 	if ( secondPass && drawInSecondPass ) {
 		secondPass->add(this);

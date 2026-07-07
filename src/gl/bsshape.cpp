@@ -259,11 +259,6 @@ void BSShape::drawShapes( NodeList * secondPass )
 	if ( !scene->hasOption(Scene::ShowMarkers) && name.contains( QLatin1StringView("EditorMarker") ) )
 		return;
 
-	// wireframe shading: GLView renders the depth-fill + black wireframe, so
-	// the textured/lit geometry is skipped entirely (still drawn when picking)
-	if ( scene->wireframeMode && !scene->selecting )
-		return;
-
 	// Draw translucent meshes in second pass
 	if ( secondPass && drawInSecondPass ) {
 		secondPass->add( this );

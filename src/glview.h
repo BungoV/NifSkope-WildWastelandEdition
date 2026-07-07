@@ -441,7 +441,7 @@ public:
 	bool editMode = false;
 	int editShapeBlock = -1;            //!< primary mesh (pivot/gizmo fallback)
 	QSet<int> editShapeBlocks;          //!< all meshes being edited (multi-mesh)
-	bool wireframeOverlay = false;      //!< Blender wireframe shading mode (Scene::wireframeMode)
+	bool wireframeOverlay = false;      //!< Blender wireframe overlay (black wires over the shaded render)
 
 	// Blender-style object-mode multi-selection (viewport + block list)
 	QSet<int> objSelection;             //!< selected NiAVObject block numbers
