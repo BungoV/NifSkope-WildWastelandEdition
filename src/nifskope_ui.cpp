@@ -786,6 +786,17 @@ void NifSkope::initDockWidgets()
 			ui->aAnimPlay->trigger();
 	} );
 
+	// Blender Set Origin menu (Shift+Ctrl+Alt+C). A window-level QAction so it
+	// fires from anywhere in the window (block list, viewport, ...), unlike a
+	// viewport keyPressEvent which needs the GL view to hold keyboard focus.
+	QAction * aSetOrigin = new QAction( this );
+	aSetOrigin->setShortcut( QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::ALT | Qt::Key_C ) );
+	aSetOrigin->setShortcutContext( Qt::WindowShortcut );
+	addAction( aSetOrigin );
+	connect( aSetOrigin, &QAction::triggered, [this]() {
+		ogl->showSetOriginMenu();
+	} );
+
 	// Tabify List and Header
 	tabifyDockWidget( dList, dHeader );
 	tabifyDockWidget( dHeader, dBrowser );
@@ -2231,18 +2242,6 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
 			if ( e->type() == QEvent::KeyPress )
 				ogl->showSeparateMenu();
-			e->accept();
-			return true;
-		}
-		// Shift+Ctrl+Alt+C opens the Set Origin menu (Blender). Routed here so
-		// it fires no matter which widget has focus (object mode only).
-		if ( ogl && graphicsView && ke->key() == Qt::Key_C
-			&& ( ke->modifiers() & Qt::ControlModifier ) && ( ke->modifiers() & Qt::AltModifier )
-			&& ( ke->modifiers() & Qt::ShiftModifier )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
-			if ( e->type() == QEvent::KeyPress )
-				ogl->showSetOriginMenu();
 			e->accept();
 			return true;
 		}

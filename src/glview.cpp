@@ -6227,13 +6227,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		return;
 	}
 
-	// Shift+Ctrl+Alt+C: Blender Set Origin menu (object mode)
-	if ( event->key() == Qt::Key_C
-		&& ( event->modifiers() & Qt::ControlModifier ) && ( event->modifiers() & Qt::AltModifier )
-		&& ( event->modifiers() & Qt::ShiftModifier ) && !editMode && model ) {
-		showSetOriginMenu();
-		return;
-	}
+	// Shift+Ctrl+Alt+C (Set Origin) is a window-level QAction in nifskope_ui.cpp
 
 	// H hides the selection, Alt+H reveals everything: nodes in object mode,
 	// picked vertices/edges/faces in edit mode (Blender)
