@@ -640,10 +640,11 @@ void GLView::paintGL()
 	}
 #endif
 
-	// object-mode block-level selection shows a GLView outline, so suppress the
-	// built-in green selection wireframe for that case
-	scene->objSelActive = ( !editMode && !objSelection.isEmpty()
-		&& scene->currentIndex == QModelIndex( scene->currentBlock ) );
+	// object mode shows the Blender-style silhouette outline for the selection,
+	// so the legacy green selection wireframe is suppressed throughout object
+	// mode (previously it depended on the tree selection matching, which made
+	// it flicker back on after A-select-all / deselect-all)
+	scene->objSelActive = !editMode;
 
 	// Draw the model
 	glDisable( GL_BLEND );
@@ -1025,12 +1026,40 @@ void GLView::paintGL()
 				}
 			}
 
-			// selected face fills first (under the wires)
+			const bool vertMode = bool( pickMode & 1 );
+			const QSet<int> & sv = selVerts[wb];
+			const QSet<quint64> & se = selEdges[wb];
+
+			// Faces to fill (Blender fills a face when it is face-selected OR
+			// all of its verts / all of its edges are selected in vert/edge mode)
+			QSet<int> filledTris;
+			if ( selFaces.contains( wb ) )
+				filledTris = selFaces.value( wb );
+			if ( !sv.isEmpty() || !se.isEmpty() ) {
+				for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+					if ( hiddenT.contains( ti ) )
+						continue;
+					const Triangle & t = s->triangles.at( ti );
+					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+						continue;
+					bool allV = !sv.isEmpty() && sv.contains( t[0] ) && sv.contains( t[1] ) && sv.contains( t[2] );
+					bool allE = !se.isEmpty() && se.contains( edgeKey( t[0], t[1] ) )
+						&& se.contains( edgeKey( t[1], t[2] ) ) && se.contains( edgeKey( t[2], t[0] ) );
+					if ( allV || allE )
+						filledTris.insert( ti );
+				}
+			}
+
+			// Selection (fills, selected edges/verts, outlines) is drawn with
+			// the depth test OFF so nearby unconnected geometry can never
+			// occlude it - the edit cage stays on top, Blender-style. The plain
+			// black wireframe + unselected dots keep the depth test.
 			QVector<Vector3> foutline;
-			if ( selFaces.contains( wb ) ) {
+			if ( !filledTris.isEmpty() ) {
+				glDisable( GL_DEPTH_TEST );
 				QVector<Vector3> ftris, atris;
-				for ( int fi : selFaces.value( wb ) ) {
-					if ( fi < 0 || fi >= s->triangles.size() || hiddenT.contains( fi ) )
+				for ( int fi : filledTris ) {
+					if ( fi < 0 || fi >= s->triangles.size() )
 						continue;
 					const Triangle & t = s->triangles.at( fi );
 					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
@@ -1039,7 +1068,6 @@ void GLView::paintGL()
 					             && activeElem->shapeBlock == wb && activeElem->e0 == fi );
 					QVector<Vector3> & dst = act ? atris : ftris;
 					dst << wv[t[0]] << wv[t[1]] << wv[t[2]];
-					// Blender outlines every selected face in white
 					foutline << wv[t[0]] << wv[t[1]] << wv[t[1]] << wv[t[2]] << wv[t[2]] << wv[t[0]];
 				}
 				if ( !ftris.isEmpty() ) {
@@ -1050,11 +1078,10 @@ void GLView::paintGL()
 					scene->setGLColor( 1.0f, 0.72f, 0.35f, 0.36f );	// active face: lighter
 					scene->drawTriangles( atris.constData(), size_t( atris.size() ), nullptr, true );
 				}
+				glEnable( GL_DEPTH_TEST );
 			}
 
 			// base wireframe with per-endpoint colours (gradient in vertex mode)
-			const bool vertMode = bool( pickMode & 1 );
-			const QSet<int> & sv = selVerts[wb];
 			QVector<Vector3> lineVerts;
 			QVector<FloatVector4> lineCols;
 			lineVerts.reserve( edges.size() * 2 );
@@ -1075,12 +1102,38 @@ void GLView::paintGL()
 				scene->drawLines( lineVerts.constData(), size_t( lineVerts.size() ), lineCols.constData() );
 			}
 
-			// selected edges on top (any mode), slightly wider like Blender
+			// unselected vertex dots (depth-tested)
+			if ( vertMode ) {
+				scene->setGLPointSize( vertexPointSize * dpr );
+				scene->setGLColor( colWire );
+				if ( hiddenT.isEmpty() ) {
+					scene->drawPoints( wv.constData(), size_t( nv ) );
+				} else {
+					QVector<Vector3> visPts;
+					visPts.reserve( visVerts.size() );
+					for ( int vi : visVerts )
+						visPts.append( wv[vi] );
+					if ( !visPts.isEmpty() )
+						scene->drawPoints( visPts.constData(), size_t( visPts.size() ) );
+				}
+			}
+
+			// --- selected elements, always on top ---
+			glDisable( GL_DEPTH_TEST );
+
+			// white outline around every filled face (Blender)
+			if ( !foutline.isEmpty() ) {
+				scene->setGLLineWidth( 1.7f * dpr * wireWidthMul );
+				scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );
+				scene->drawLines( foutline.constData(), size_t( foutline.size() ), nullptr );
+			}
+
+			// selected edges (any mode), slightly wider like Blender
 			if ( selEdges.contains( wb ) ) {
 				QVector<Vector3> selLines, actLines;
 				for ( const auto & e : edges ) {
 					quint64 k = edgeKey( e.first, e.second );
-					if ( !selEdges.value( wb ).contains( k ) )
+					if ( !se.contains( k ) )
 						continue;
 					bool act = ( activeElem && activeElem->type == 2 && activeElem->shapeBlock == wb
 					             && edgeKey( activeElem->e0, activeElem->e1 ) == k );
@@ -1098,46 +1151,28 @@ void GLView::paintGL()
 				}
 			}
 
-			// white outline around the selected faces (Blender face select)
-			if ( !foutline.isEmpty() ) {
-				scene->setGLLineWidth( 1.7f * dpr * wireWidthMul );
-				scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );
-				scene->drawLines( foutline.constData(), size_t( foutline.size() ), nullptr );
+			// selected / active vertex dots
+			if ( vertMode && !sv.isEmpty() ) {
+				scene->setGLPointSize( vertexPointSize * dpr );
+				QVector<Vector3> selPts, actPts;
+				for ( int vi : sv ) {
+					if ( vi < 0 || vi >= nv )
+						continue;
+					bool act = ( activeElem && activeElem->type == 1
+					             && activeElem->shapeBlock == wb && activeElem->e0 == vi );
+					( act ? actPts : selPts ).append( wv[vi] );
+				}
+				if ( !selPts.isEmpty() ) {
+					scene->setGLColor( colSel );
+					scene->drawPoints( selPts.constData(), size_t( selPts.size() ) );
+				}
+				if ( !actPts.isEmpty() ) {
+					scene->setGLColor( colActive );
+					scene->drawPoints( actPts.constData(), size_t( actPts.size() ) );
+				}
 			}
 
-			// vertex dots (vertex mode only): black, selected orange, active white
-			if ( vertMode ) {
-				scene->setGLPointSize( vertexPointSize * dpr );
-				scene->setGLColor( colWire );
-				if ( hiddenT.isEmpty() ) {
-					scene->drawPoints( wv.constData(), size_t( nv ) );
-				} else {
-					QVector<Vector3> visPts;
-					visPts.reserve( visVerts.size() );
-					for ( int vi : visVerts )
-						visPts.append( wv[vi] );
-					if ( !visPts.isEmpty() )
-						scene->drawPoints( visPts.constData(), size_t( visPts.size() ) );
-				}
-				if ( !sv.isEmpty() ) {
-					QVector<Vector3> selPts, actPts;
-					for ( int vi : sv ) {
-						if ( vi < 0 || vi >= nv )
-							continue;
-						bool act = ( activeElem && activeElem->type == 1
-						             && activeElem->shapeBlock == wb && activeElem->e0 == vi );
-						( act ? actPts : selPts ).append( wv[vi] );
-					}
-					if ( !selPts.isEmpty() ) {
-						scene->setGLColor( colSel );
-						scene->drawPoints( selPts.constData(), size_t( selPts.size() ) );
-					}
-					if ( !actPts.isEmpty() ) {
-						scene->setGLColor( colActive );
-						scene->drawPoints( actPts.constData(), size_t( actPts.size() ) );
-					}
-				}
-			}
+			glEnable( GL_DEPTH_TEST );
 		}
 
 		glDepthMask( GL_TRUE );
@@ -2668,15 +2703,21 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 			}
 		}
 
-		Vector3 nt = worldToLocalTrans( gizmoOrigWorldPos + deltaWorld );
 		// grid stepping only applies to the Increment snap target; with a
 		// vertex/edge/face target and no geometry under the mouse, the move
-		// stays free (Blender) instead of snapping to invisible grid steps
+		// stays free (Blender) instead of snapping to invisible grid steps.
+		// Snap the MOVEMENT in the active orientation basis so an axis-
+		// constrained move only snaps along that axis (the other components of
+		// the delta are ~0 and round to 0, leaving those axes untouched).
 		if ( snap && !elemSnapped && gizmoSnapStep > 0 && snapTargetMode == 0 ) {
 			float step = gizmoSnapStep * snapFine;
+			Vector3 deltaBasis = gizmoBasisM.inverted() * deltaWorld;
 			for ( int c = 0; c < 3; c++ )
-				nt[c] = std::round( nt[c] / step ) * step;
+				deltaBasis[c] = std::round( deltaBasis[c] / step ) * step;
+			deltaWorld = gizmoBasisM * deltaBasis;
 		}
+
+		Vector3 nt = worldToLocalTrans( gizmoOrigWorldPos + deltaWorld );
 
 		// effective world delta after snapping, derived from the primary node,
 		// applied identically to every node of the multi-selection
@@ -5863,23 +5904,9 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		}
 	}
 
-	// element reference picking swallows plain clicks while a pick mode is
-	// active: click = pick, Ctrl+click = extend/toggle, Shift+click = shortest
-	// path from the active element (Blender)
-	if ( pickMode && event->button() == Qt::LeftButton
-		&& !( event->modifiers() & Qt::AltModifier ) ) {
-		auto p = getQMouseEventPosition( event );
-		bool picked;
-		if ( event->modifiers() & Qt::ShiftModifier )
-			picked = pickPathSelect( p );
-		else
-			picked = pickElementAt( p, bool( event->modifiers() & Qt::ControlModifier ) );
-		if ( picked ) {
-			gizmoSwallowClick = true;
-			mouseButtonState |= std::uint32_t( event->button() );
-			return;
-		}
-	}
+	// NOTE: edit-mode element picking is deferred to mouseReleaseEvent and only
+	// runs when the click barely moved, so orbiting the camera with LMB (incl.
+	// Ctrl/Shift held) no longer selects or deselects geometry.
 
 	mouseButtonState |= std::uint32_t( event->button() );
 	if ( event->button() == Qt::ForwardButton || event->button() == Qt::BackButton ) {
@@ -5925,6 +5952,19 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 		if ( event->button() == Qt::ForwardButton || event->button() == Qt::BackButton
 			|| event->button() == Qt::MiddleButton ) {
 			event->ignore();
+			return;
+		}
+
+		// edit-mode element picking happens here (on a click, not a drag) so
+		// camera orbiting never changes the selection: click = pick,
+		// Ctrl+click = extend/toggle, Shift+click = shortest-path (Blender)
+		if ( editMode && pickMode && event->button() == Qt::LeftButton && !isColorPicker ) {
+			auto p = evtPos;
+			if ( event->modifiers() & Qt::ShiftModifier )
+				pickPathSelect( p );
+			else
+				pickElementAt( p, bool( event->modifiers() & Qt::ControlModifier ) );
+			update();
 			return;
 		}
 
