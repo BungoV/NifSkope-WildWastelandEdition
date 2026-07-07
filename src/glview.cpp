@@ -4788,8 +4788,8 @@ void GLView::duplicateElements()
 
 void GLView::showSetOriginMenu()
 {
-	if ( editMode || !model || objSelection.isEmpty() ) {
-		emit gizmoStatus( tr( "Set Origin needs a mesh selected in object mode" ) );
+	if ( !model || ( editMode ? editShapeBlocks.isEmpty() : objSelection.isEmpty() ) ) {
+		emit gizmoStatus( tr( "Set Origin needs a mesh selected" ) );
 		return;
 	}
 	QMenu m;
@@ -4814,12 +4814,14 @@ void GLView::showSetOriginMenu()
 
 void GLView::setOrigin( int mode )
 {
-	if ( !model || editMode || objSelection.isEmpty() )
+	// operate on the edited meshes in edit mode, the object selection otherwise
+	const QSet<int> targets = editMode ? editShapeBlocks : objSelection;
+	if ( !model || targets.isEmpty() )
 		return;
 
 	int done = 0;
 	nifSnapshotOp( model, tr( "Set origin" ), [&]() {
-		for ( int sb : objSelection ) {
+		for ( int sb : targets ) {
 			QModelIndex iShape = model->getBlockIndex( sb );
 			if ( !model->blockInherits( iShape, "BSTriShape" ) )
 				continue;
