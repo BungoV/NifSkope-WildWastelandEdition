@@ -269,6 +269,10 @@ public:
 	//! Blender-style X-ray: all geometry renders half-transparent
 	bool xRay = false;
 
+	//! Blender-style wireframe shading: textured shapes skip their draw and
+	//! GLView renders a depth-fill (occlusion) + black wireframe instead
+	bool wireframeMode = false;
+
 	//! Edit-mode hidden triangles per shape block (Blender H); only populated
 	//! while edit mode is active - shapes skip these index ranges when drawing
 	QHash<int, QSet<int>> hiddenTris;

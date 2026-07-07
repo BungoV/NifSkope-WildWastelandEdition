@@ -744,6 +744,10 @@ void Mesh::drawShapes( NodeList * secondPass )
 	if ( !scene->hasOption(Scene::ShowMarkers) && name.startsWith( "EditorMarker" ) )
 		return;
 
+	// wireframe shading: GLView renders the depth-fill + black wireframe
+	if ( scene->wireframeMode && !scene->selecting )
+		return;
+
 	// Draw translucent meshes in second pass
 	if ( secondPass && drawInSecondPass ) {
 		secondPass->add( this );
