@@ -2,7 +2,7 @@
 
 Backlog of features/fixes agreed for later. Ordered roughly by priority.
 
-## Particle / VFX preview (2026-07-06) - implemented, in-app verify pending
+## Particle / VFX preview (2026-07-06) - DONE, user-verified 2026-07-07
 - Particle sprites bound their texture on a stale GL texture unit -> wrong
   texture; now always unit 0 with BSEffectShaderProperty source-texture and
   raw-path fallbacks, plus the shader's (BGEM-aware) emissive tint.
@@ -25,7 +25,7 @@ Backlog of features/fixes agreed for later. Ordered roughly by priority.
 
 ## Mesh / engine features (need in-game or careful testing)
 
-### 1. BSPositionData mesh-emitter spawn distribution - ROOT CAUSE FOUND (2026-07-06), in-game verify pending
+### 1. BSPositionData mesh-emitter spawn distribution - DONE, user-verified 2026-07-07
 - **Was:** the game spawned particles in a single spot from generated data.
 - **Cause:** the "numTris*3 + 2" tail of BSPositionData is NOT half-floats:
   it is the mesh's triangle index list as RAW uint16 (verified byte-level
