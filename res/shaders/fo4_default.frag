@@ -351,7 +351,11 @@ void main()
 		vec2	suv = ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw );
 		vec2	roffs = normal.xy * clamp( refractionStrength, 0.0, 1.0 ) * 0.12;
 		vec3	bg = texture( RefractionSrc, clamp( suv + roffs, vec2( 0.001 ), vec2( 0.999 ) ) ).rgb;
-		color.rgb = bg;
+		// honour the surface opacity (texture alpha * vertex alpha): fully
+		// transparent areas show pure refraction, opaque areas keep the lit
+		// surface, and the base texture tints the refracted background
+		float	op = clamp( baseMap.a * C.a * alpha, 0.0, 1.0 );
+		color.rgb = mix( bg * baseMap.rgb, color.rgb, op );
 		color.a = 1.0;
 	}
 

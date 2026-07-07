@@ -4786,6 +4786,114 @@ void GLView::duplicateElements()
 	emit gizmoStatus( tr( "Duplicated %1 vert(s) - move, or Esc to leave in place" ).arg( totalV ) );
 }
 
+void GLView::showSetOriginMenu()
+{
+	if ( editMode || !model || objSelection.isEmpty() ) {
+		emit gizmoStatus( tr( "Set Origin needs a mesh selected in object mode" ) );
+		return;
+	}
+	QMenu m;
+	m.addSection( tr( "Set Origin" ) );
+	QAction * aGTO  = m.addAction( tr( "Geometry to Origin" ) );
+	QAction * aOTG  = m.addAction( tr( "Origin to Geometry" ) );
+	QAction * aOTC  = m.addAction( tr( "Origin to 3D Cursor" ) );
+	QAction * aCoMS = m.addAction( tr( "Origin to Center of Mass (Surface)" ) );
+	QAction * aCoMV = m.addAction( tr( "Origin to Center of Mass (Volume)" ) );
+	QAction * r = m.exec( QCursor::pos() );
+	if ( r == aGTO )
+		setOrigin( 0 );
+	else if ( r == aOTG )
+		setOrigin( 1 );
+	else if ( r == aOTC )
+		setOrigin( 2 );
+	else if ( r == aCoMS )
+		setOrigin( 3 );
+	else if ( r == aCoMV )
+		setOrigin( 4 );
+}
+
+void GLView::setOrigin( int mode )
+{
+	if ( !model || editMode || objSelection.isEmpty() )
+		return;
+
+	int done = 0;
+	nifSnapshotOp( model, tr( "Set origin" ), [&]() {
+		for ( int sb : objSelection ) {
+			QModelIndex iShape = model->getBlockIndex( sb );
+			if ( !model->blockInherits( iShape, "BSTriShape" ) )
+				continue;
+			Shape * s = shapeForBlock( sb );
+			if ( !s || s->verts.isEmpty() )
+				continue;
+			const QVector<Vector3> & V = s->verts;
+
+			// centre point (local space) that becomes the new origin
+			Vector3 C;
+			auto boundsCentre = [&V]() {
+				Vector3 mn = V.first(), mx = V.first();
+				for ( const Vector3 & v : V )
+					for ( int k = 0; k < 3; k++ ) {
+						mn[k] = std::min( mn[k], v[k] );
+						mx[k] = std::max( mx[k], v[k] );
+					}
+				return ( mn + mx ) * 0.5f;
+			};
+
+			if ( mode == 2 ) {
+				// 3D cursor -> this shape's local space
+				Node * n = scene->getNode( model, iShape );
+				Transform wt = n ? n->worldTrans() : Transform();
+				float ws = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+				C = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / ws ) );
+			} else if ( mode == 3 || mode == 4 ) {
+				Vector3 acc;
+				double wsum = 0.0;
+				for ( const Triangle & t : s->triangles ) {
+					if ( t[0] >= V.size() || t[1] >= V.size() || t[2] >= V.size() )
+						continue;
+					const Vector3 & a = V[t[0]];
+					const Vector3 & b = V[t[1]];
+					const Vector3 & c = V[t[2]];
+					if ( mode == 3 ) {
+						double area = 0.5 * Vector3::crossproduct( b - a, c - a ).length();
+						acc += ( ( a + b + c ) / 3.0f ) * float( area );
+						wsum += area;
+					} else {
+						double vol = Vector3::dotproduct( a, Vector3::crossproduct( b, c ) ) / 6.0;
+						acc += ( ( a + b + c ) / 4.0f ) * float( vol );
+						wsum += vol;
+					}
+				}
+				C = ( std::fabs( wsum ) > 1.0e-9 ) ? ( acc / float( wsum ) ) : boundsCentre();
+			} else {
+				C = boundsCentre();
+			}
+
+			// shift the geometry so C sits at the local origin
+			for ( int i = 0; i < V.size(); i++ )
+				tlSetVertexLocal( model, iShape, i, V[i] - C );
+
+			// Origin-to-X also moves the node so the geometry stays put in world
+			if ( mode != 0 ) {
+				Vector3 Tl = model->get<Vector3>( iShape, "Translation" );
+				Matrix Rl = model->get<Matrix>( iShape, "Rotation" );
+				float Sl = model->get<float>( iShape, "Scale" );
+				model->set<Vector3>( iShape, "Translation", Tl + Rl * ( C * Sl ) );
+			}
+
+			tlUpdateBounds( model, iShape );
+			done++;
+		}
+	} );
+
+	if ( done == 0 )
+		emit gizmoStatus( tr( "Set Origin: no BSTriShape selected" ) );
+	else
+		emit gizmoStatus( tr( "Set origin (%1 mesh%2)" ).arg( done ).arg( done == 1 ? "" : "es" ) );
+	modelChanged();
+}
+
 bool GLView::isEditableMesh( const QModelIndex & iBlock ) const
 {
 	if ( !model || !iBlock.isValid() )
@@ -6116,6 +6224,14 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	if ( event->key() == Qt::Key_J && ( event->modifiers() & Qt::ControlModifier )
 		&& !( event->modifiers() & ( Qt::AltModifier | Qt::ShiftModifier ) ) && !editMode && model ) {
 		joinSelectedObjects();
+		return;
+	}
+
+	// Shift+Ctrl+Alt+C: Blender Set Origin menu (object mode)
+	if ( event->key() == Qt::Key_C
+		&& ( event->modifiers() & Qt::ControlModifier ) && ( event->modifiers() & Qt::AltModifier )
+		&& ( event->modifiers() & Qt::ShiftModifier ) && !editMode && model ) {
+		showSetOriginMenu();
 		return;
 	}
 

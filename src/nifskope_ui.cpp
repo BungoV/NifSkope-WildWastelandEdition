@@ -909,19 +909,9 @@ void NifSkope::initDockWidgets()
 		} );
 		m->addAction( aOrigins );
 
-		// hide particle systems in the viewport
-		QAction * aParticles = new QAction( tr( "Show Particles" ), this );
-		aParticles->setCheckable( true );
-		aParticles->setChecked( true );
-		aParticles->setToolTip( tr( "Render particle systems in the viewport" ) );
-		connect( aParticles, &QAction::toggled, [this]( bool on ) {
-			ogl->getScene()->showParticles = on;
-			ogl->update();
-		} );
-		m->addAction( aParticles );
-
 		// persist these viewport display toggles between sessions (apply the
-		// saved state now - the apply connections above fire on setChecked)
+		// saved state now - the apply connections above fire on setChecked).
+		// Particle rendering lives in the lighting menu, persisted there.
 		{
 			QSettings settings;
 			auto persist = [&settings, this]( QAction * a, const QString & key ) {
@@ -934,7 +924,6 @@ void NifSkope::initDockWidgets()
 			persist( aShowCursor,   QStringLiteral( "GLView/Display/ShowCursor" ) );
 			persist( aGizmoHandles, QStringLiteral( "GLView/Display/ShowGizmo" ) );
 			persist( aOrigins,      QStringLiteral( "GLView/Display/ShowOrigins" ) );
-			persist( aParticles,    QStringLiteral( "GLView/Display/ShowParticles" ) );
 			persist( aBillboard,    QStringLiteral( "GLView/Display/Billboards" ) );
 			persist( aOrbitSel,     QStringLiteral( "GLView/Display/OrbitSelection" ) );
 		}
@@ -1577,6 +1566,23 @@ QMenu * NifSkope::lightingWidget()
 		ogl->update();
 	} );
 	mLight->addAction( aRefraction );
+
+	// render particle systems (moved here from display options); persisted
+	QAction * aParticlesL = new QAction( tr( "Particles" ), this );
+	aParticlesL->setCheckable( true );
+	aParticlesL->setToolTip( tr( "Render particle systems in the viewport" ) );
+	{
+		QSettings settings;
+		aParticlesL->setChecked( settings.value( QStringLiteral( "GLView/Display/ShowParticles" ), true ).toBool() );
+		ogl->getScene()->showParticles = aParticlesL->isChecked();
+	}
+	connect( aParticlesL, &QAction::toggled, [this]( bool on ) {
+		ogl->getScene()->showParticles = on;
+		QSettings s;
+		s.setValue( QStringLiteral( "GLView/Display/ShowParticles" ), on );
+		ogl->update();
+	} );
+	mLight->addAction( aParticlesL );
 
 
 	connect( ui->aSaveLighting, &QAction::triggered, lightingWidget, &LightingWidget::saveSettings );

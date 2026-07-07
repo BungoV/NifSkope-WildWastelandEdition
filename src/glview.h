@@ -431,6 +431,11 @@ public:
 	void duplicateSelection();
 	//! Edit-mode Shift+D: duplicate the picked verts/faces within the mesh
 	void duplicateElements();
+	//! Shift+Ctrl+Alt+C: Blender-style Set Origin menu (object mode)
+	void showSetOriginMenu();
+	//! Set the node origin / move geometry. mode: 0 geometry-to-origin,
+	//! 1 origin-to-geometry, 2 origin-to-cursor, 3 CoM surface, 4 CoM volume
+	void setOrigin( int mode );
 
 	// ---- element modal transform (G/R/S on picked verts/edges/faces) ----
 	bool elemTransform = false;
