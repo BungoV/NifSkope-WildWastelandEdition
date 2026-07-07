@@ -2234,6 +2234,18 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			e->accept();
 			return true;
 		}
+		// Shift+Ctrl+Alt+C opens the Set Origin menu (Blender). Routed here so
+		// it fires no matter which widget has focus (object mode only).
+		if ( ogl && graphicsView && ke->key() == Qt::Key_C
+			&& ( ke->modifiers() & Qt::ControlModifier ) && ( ke->modifiers() & Qt::AltModifier )
+			&& ( ke->modifiers() & Qt::ShiftModifier )
+			&& isActiveWindow()
+			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			if ( e->type() == QEvent::KeyPress )
+				ogl->showSetOriginMenu();
+			e->accept();
+			return true;
+		}
 		if ( ogl && graphicsView && !ogl->freeCamera
 			&& ke->key() == Qt::Key_F && ( ke->modifiers() & Qt::ShiftModifier )
 			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) )
