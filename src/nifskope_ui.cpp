@@ -1141,6 +1141,15 @@ void NifSkope::initDockWidgets()
 		} );
 		ui->tRender->addWidget( btnWire );
 
+		// Base shading modes (exclusive): Flat (uniform dark grey, no texture,
+		// like Blender's wireframe-mode faces) / Solid (textures, no lighting) /
+		// Shaded (full lighting). Flat combines with the Wireframe overlay for
+		// the classic Blender wireframe look.
+		QToolButton * btnFlat = new QToolButton( this );
+		btnFlat->setCheckable( true );
+		btnFlat->setAutoRaise( true );
+		btnFlat->setIcon( tlMakeIcon( QStringLiteral( "shade_flat" ), icoColHdr ) );
+		btnFlat->setToolTip( tr( "Flat shading: uniform dark grey faces, no textures (pair with Wireframe for the Blender wireframe look)" ) );
 		QToolButton * btnSolid = new QToolButton( this );
 		btnSolid->setCheckable( true );
 		btnSolid->setAutoRaise( true );
@@ -1154,27 +1163,37 @@ void NifSkope::initDockWidgets()
 
 		QButtonGroup * shadeGrp = new QButtonGroup( this );
 		shadeGrp->setExclusive( true );
-		shadeGrp->addButton( btnSolid, 0 );
-		shadeGrp->addButton( btnShaded, 1 );
+		shadeGrp->addButton( btnFlat, 0 );
+		shadeGrp->addButton( btnSolid, 1 );
+		shadeGrp->addButton( btnShaded, 2 );
 		btnShaded->setChecked( ui->aLighting->isChecked() );
 		btnSolid->setChecked( !ui->aLighting->isChecked() );
 		connect( shadeGrp, &QButtonGroup::idClicked, [this]( int id ) {
-			// Solid = lighting off, Shaded = lighting on (trigger() updates the
-			// scene option group)
-			if ( id == 0 && ui->aLighting->isChecked() )
+			// Flat = grey fill (no texture); Solid = texture no lighting;
+			// Shaded = full lighting (trigger() updates the scene option group)
+			ogl->getScene()->flatGrey = ( id == 0 );
+			if ( id == 1 && ui->aLighting->isChecked() )
 				ui->aLighting->trigger();
-			else if ( id == 1 && !ui->aLighting->isChecked() )
+			else if ( id == 2 && !ui->aLighting->isChecked() )
 				ui->aLighting->trigger();
 			ogl->update();
 		} );
-		// keep the buttons in sync when lighting is toggled from the menu
-		connect( ui->aLighting, &QAction::toggled, [btnSolid, btnShaded]( bool on ) {
+		// keep Solid/Shaded in sync when lighting is toggled from the menu
+		connect( ui->aLighting, &QAction::toggled, [btnFlat, btnSolid, btnShaded]( bool on ) {
+			if ( btnFlat->isChecked() )
+				return;	// flat mode active, leave it
 			QSignalBlocker b1( btnSolid ), b2( btnShaded );
 			btnSolid->setChecked( !on );
 			btnShaded->setChecked( on );
 		} );
+		ui->tRender->addWidget( btnFlat );
 		ui->tRender->addWidget( btnSolid );
 		ui->tRender->addWidget( btnShaded );
+
+		// make the toolbar separators clearly visible (they are near-invisible
+		// with the default flat theme)
+		ui->tRender->setStyleSheet( QStringLiteral(
+			"QToolBar::separator { background: #7a7a7a; width: 2px; height: 2px; margin: 4px 6px; }" ) );
 	}
 
 	// Material / Texture Manager panel (starts floating; toggled from Panels)

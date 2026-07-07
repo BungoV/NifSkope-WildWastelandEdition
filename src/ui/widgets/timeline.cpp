@@ -223,6 +223,11 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.setPen( Qt::NoPen );
 		p.setBrush( col );
 		p.drawEllipse( QPointF( 32, 32 ), 14, 14 );
+	} else if ( id == QLatin1String( "shade_flat" ) ) {
+		// Blender flat/wireframe-mode faces: a plain filled sphere, no highlight
+		p.setPen( Qt::NoPen );
+		p.setBrush( col.darker( 130 ) );
+		p.drawEllipse( QPointF( 32, 32 ), 22, 22 );
 	} else if ( id == QLatin1String( "shade_material" ) ) {
 		// Blender material/rendered shading: sphere with a highlight
 		p.setPen( Qt::NoPen );

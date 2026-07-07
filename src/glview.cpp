@@ -649,6 +649,38 @@ void GLView::paintGL()
 	glDisable( GL_BLEND );
 	scene->draw();
 
+	// Flat shading: the textured shapes were skipped, so fill every visible
+	// mesh with a uniform dark grey (Blender wireframe-mode faces). X-ray
+	// makes the fill half-transparent so geometry behind shows through.
+	if ( model && scene->flatGrey && !scene->selecting ) {
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LESS );
+		glDepthMask( scene->xRay ? GL_FALSE : GL_TRUE );
+		for ( Shape * s : scene->shapes ) {
+			if ( !s || s->isHidden() || s->verts.isEmpty() || s->triangles.isEmpty() )
+				continue;
+			const QSet<int> hidT = editMode ? editHiddenTris.value( s->id() ) : QSet<int>();
+			int nv = s->verts.size();
+			QVector<Vector3> soup;
+			soup.reserve( s->triangles.size() * 3 );
+			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+				if ( hidT.contains( ti ) )
+					continue;
+				const Triangle & t = s->triangles.at( ti );
+				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+					continue;
+				soup << s->verts[t[0]] << s->verts[t[1]] << s->verts[t[2]];
+			}
+			if ( soup.isEmpty() )
+				continue;
+			scene->loadModelViewMatrix( s->viewTrans() );
+			scene->setGLColor( 0.20f, 0.20f, 0.21f, scene->xRay ? 0.45f : 1.0f );
+			scene->drawTriangles( soup.constData(), size_t( soup.size() ), nullptr, true );
+		}
+		glDepthMask( GL_TRUE );
+		glDisable( GL_BLEND );
+	}
+
 	// Blender-style selection outlines around the object-mode selection
 	if ( model && !editMode && !objSelection.isEmpty() && !scene->selecting )
 		drawObjectOutlines();

@@ -33,6 +33,10 @@ void BSMesh::drawShapes( NodeList * secondPass )
 	if ( isHidden() || ( !scene->hasOption(Scene::ShowMarkers) && name.contains(QLatin1StringView("EditorMarker")) ) )
 		return;
 
+	// flat shading: GLView fills the geometry with uniform grey instead
+	if ( scene->flatGrey && !scene->selecting )
+		return;
+
 	// Draw translucent meshes in second pass
 	if ( secondPass && drawInSecondPass ) {
 		secondPass->add(this);
