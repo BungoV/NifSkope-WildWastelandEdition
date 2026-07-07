@@ -73,6 +73,23 @@ Backlog of features/fixes agreed for later. Ordered roughly by priority.
 
 ## Manager / UI
 
+### 8. Blender-style workspaces
+- A workspace switcher (tabs/dropdown near the top) with three default
+  workspaces, each a saved dock/panel layout:
+  - **Default** — clean layout; the bottom dock area is empty (no timeline,
+    no Material/Texture editor shown by default).
+  - **Materials / Textures** — the Material / Texture editor takes the bottom
+    slot (where the timeline sits in the Animation workspace).
+  - **Animation** — the animation timeline in the bottom slot.
+- Switching a workspace restores that workspace's saved layout (which docks
+  are visible, where, and their sizes). The bottom slot is the shared spot
+  the timeline vs. Material/Texture editor swap into.
+- Impl notes: layouts are `QMainWindow::saveState()`/`restoreState()` blobs
+  keyed per workspace; the timeline (`dTimeline`) and Material/Texture
+  Manager (`dMatMgr`) docks already exist, so the workspace mostly toggles
+  their visibility + tabifies/positions them at the bottom. Persist the
+  active workspace + custom layouts in settings.
+
 ### 7. Material & texture browser with search
 - In the Material / Texture Manager, a "Browse…" button per row that opens a
   resource tree (like the existing node/material selector) with a name search,
