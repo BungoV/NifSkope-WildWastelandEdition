@@ -902,6 +902,36 @@ void NifSkope::initDockWidgets()
 		} );
 		m->addAction( aOrigins );
 
+		// hide particle systems in the viewport
+		QAction * aParticles = new QAction( tr( "Show Particles" ), this );
+		aParticles->setCheckable( true );
+		aParticles->setChecked( true );
+		aParticles->setToolTip( tr( "Render particle systems in the viewport" ) );
+		connect( aParticles, &QAction::toggled, [this]( bool on ) {
+			ogl->getScene()->showParticles = on;
+			ogl->update();
+		} );
+		m->addAction( aParticles );
+
+		// persist these viewport display toggles between sessions (apply the
+		// saved state now - the apply connections above fire on setChecked)
+		{
+			QSettings settings;
+			auto persist = [&settings, this]( QAction * a, const QString & key ) {
+				a->setChecked( settings.value( key, a->isChecked() ).toBool() );
+				connect( a, &QAction::toggled, this, [key]( bool on ) {
+					QSettings s;
+					s.setValue( key, on );
+				} );
+			};
+			persist( aShowCursor,   QStringLiteral( "GLView/Display/ShowCursor" ) );
+			persist( aGizmoHandles, QStringLiteral( "GLView/Display/ShowGizmo" ) );
+			persist( aOrigins,      QStringLiteral( "GLView/Display/ShowOrigins" ) );
+			persist( aParticles,    QStringLiteral( "GLView/Display/ShowParticles" ) );
+			persist( aBillboard,    QStringLiteral( "GLView/Display/Billboards" ) );
+			persist( aOrbitSel,     QStringLiteral( "GLView/Display/OrbitSelection" ) );
+		}
+
 		btn->setMenu( m );
 		ui->tRender->insertWidget( ui->aShowCollision, btn );
 		for ( QAction * a : ds )
@@ -1189,6 +1219,44 @@ void NifSkope::initDockWidgets()
 		ui->tRender->addWidget( btnFlat );
 		ui->tRender->addWidget( btnSolid );
 		ui->tRender->addWidget( btnShaded );
+
+		// persist the wireframe overlay, X-ray and base shading mode
+		{
+			QSettings settings;
+			btnWire->setChecked( settings.value( QStringLiteral( "GLView/Display/Wireframe" ), false ).toBool() );
+			ogl->wireframeOverlay = btnWire->isChecked();
+			connect( btnWire, &QToolButton::toggled, this, []( bool on ) {
+				QSettings s;
+				s.setValue( QStringLiteral( "GLView/Display/Wireframe" ), on );
+			} );
+
+			btnXRay->setChecked( settings.value( QStringLiteral( "GLView/Display/XRay" ), false ).toBool() );
+			ogl->getScene()->xRay = btnXRay->isChecked();
+			connect( btnXRay, &QToolButton::toggled, this, []( bool on ) {
+				QSettings s;
+				s.setValue( QStringLiteral( "GLView/Display/XRay" ), on );
+			} );
+
+			int mode = settings.value( QStringLiteral( "GLView/Display/ShadeMode" ), 2 ).toInt();
+			if ( mode == 0 ) {
+				btnFlat->setChecked( true );
+				ogl->getScene()->flatGrey = true;
+			} else if ( mode == 1 ) {
+				btnSolid->setChecked( true );
+				ogl->getScene()->flatGrey = false;
+				if ( ui->aLighting->isChecked() )
+					ui->aLighting->trigger();
+			} else {
+				btnShaded->setChecked( true );
+				ogl->getScene()->flatGrey = false;
+				if ( !ui->aLighting->isChecked() )
+					ui->aLighting->trigger();
+			}
+			connect( shadeGrp, &QButtonGroup::idClicked, this, []( int id ) {
+				QSettings s;
+				s.setValue( QStringLiteral( "GLView/Display/ShadeMode" ), id );
+			} );
+		}
 
 		// make the toolbar separators clearly visible (they are near-invisible
 		// with the default flat theme)
@@ -2138,6 +2206,18 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				else
 					ogl->unhideAll();
 			}
+			e->accept();
+			return true;
+		}
+		// P opens the edit-mode Separate menu (Blender). The View > Perspective
+		// action also uses P, so only steal it while editing with the pointer
+		// over the viewport; object mode keeps P = perspective toggle.
+		if ( ogl && graphicsView && ogl->editMode && ke->key() == Qt::Key_P
+			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
+			&& isActiveWindow()
+			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			if ( e->type() == QEvent::KeyPress )
+				ogl->showSeparateMenu();
 			e->accept();
 			return true;
 		}

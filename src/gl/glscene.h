@@ -273,6 +273,9 @@ public:
 	//! with a uniform dark grey (Blender wireframe-mode faces)
 	bool flatGrey = false;
 
+	//! Show particle systems in the viewport (display option)
+	bool showParticles = true;
+
 	//! Edit-mode hidden triangles per shape block (Blender H); only populated
 	//! while edit mode is active - shapes skip these index ranges when drawing
 	QHash<int, QSet<int>> hiddenTris;

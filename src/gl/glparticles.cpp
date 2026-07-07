@@ -146,6 +146,11 @@ void Particles::drawShapes( NodeList * secondPass )
 		return;
 	}
 
+	// display option: hide particle systems entirely (still pickable so the
+	// block can be selected in the viewport)
+	if ( !scene->showParticles && !scene->selecting )
+		return;
+
 	const NifModel * nif = scene->nifModel;
 
 	// FO4 particles are transparent VFX (they carry a shader / alpha property

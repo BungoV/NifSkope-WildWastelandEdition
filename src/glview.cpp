@@ -1122,8 +1122,10 @@ void GLView::paintGL()
 			// --- selected elements, always on top ---
 			glDisable( GL_DEPTH_TEST );
 
-			// white outline around every filled face (Blender)
-			if ( !foutline.isEmpty() ) {
+			// white outline around every filled face (Blender) - only in edge
+			// or face select mode; in pure vertex mode the edges between
+			// selected verts stay the base colour (no white marking)
+			if ( !foutline.isEmpty() && ( pickMode & ( 2 | 4 ) ) ) {
 				scene->setGLLineWidth( 1.7f * dpr * wireWidthMul );
 				scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );
 				scene->drawLines( foutline.constData(), size_t( foutline.size() ), nullptr );
@@ -4278,6 +4280,38 @@ static int tlCloneShapeWithProps( NifModel * nif, int srcBlock )
 	return nNew;
 }
 
+//! Blender-style unique name: strip any trailing ".NNN" to a stem, then return
+//! stem.001 / .002 ... using the lowest number not already a node name.
+static QString tlUniqueNodeName( NifModel * nif, const QString & name )
+{
+	QString stem = name;
+	int dot = name.lastIndexOf( QLatin1Char( '.' ) );
+	if ( dot > 0 && name.size() - dot - 1 >= 3 ) {
+		bool allDigits = true;
+		for ( int i = dot + 1; i < name.size(); i++ ) {
+			if ( !name.at( i ).isDigit() ) {
+				allDigits = false;
+				break;
+			}
+		}
+		if ( allDigits )
+			stem = name.left( dot );
+	}
+
+	QSet<QString> used;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex ib = nif->getBlockIndex( b );
+		if ( nif->getIndex( ib, "Name" ).isValid() )
+			used.insert( nif->get<QString>( ib, "Name" ) );
+	}
+	for ( int n = 1; n < 100000; n++ ) {
+		QString cand = stem + QString::asprintf( ".%03d", n );
+		if ( !used.contains( cand ) )
+			return cand;
+	}
+	return stem + QStringLiteral( ".001" );
+}
+
 void GLView::showSeparateMenu()
 {
 	if ( !editMode || pickedElems.isEmpty() ) {
@@ -4354,7 +4388,7 @@ void GLView::separateSelection()
 				blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
 
 			QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
-			model->set<QString>( model->getBlockIndex( nNew ), "Name", nm + QStringLiteral( ".sep" ) );
+			model->set<QString>( model->getBlockIndex( nNew ), "Name", tlUniqueNodeName( model, nm ) );
 
 			// new keeps the separated triangles; original keeps the rest
 			tlKeepTriangles( model, model->getBlockIndex( nNew ), [&]( int t ) { return sep[t]; } );
@@ -4402,7 +4436,7 @@ void GLView::duplicateSelection()
 			if ( parentNum >= 0 )
 				blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
 			QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
-			model->set<QString>( model->getBlockIndex( nNew ), "Name", nm + QStringLiteral( ".dup" ) );
+			model->set<QString>( model->getBlockIndex( nNew ), "Name", tlUniqueNodeName( model, nm ) );
 			newBlocks.append( nNew );
 		}
 	} );
