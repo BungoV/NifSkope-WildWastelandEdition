@@ -4383,7 +4383,7 @@ void GLView::separateSelection()
 void GLView::duplicateSelection()
 {
 	if ( editMode ) {
-		emit gizmoStatus( tr( "Edit-mode duplicate is not available yet" ) );
+		duplicateElements();
 		return;
 	}
 	if ( !model || objSelection.isEmpty() )
@@ -4605,6 +4605,142 @@ void GLView::joinSelectedObjects()
 	emit objectSelectionChanged();
 	emit gizmoStatus( tr( "Joined %1 mesh(es) into the active object" ).arg( joined ) );
 	modelChanged();
+}
+
+void GLView::duplicateElements()
+{
+	if ( !model || pickedElems.isEmpty() )
+		return;
+
+	auto edgeKey = []( int a, int b ) {
+		return ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) );
+	};
+	Q_UNUSED( edgeKey );
+
+	QHash<int, QSet<int>> selVerts = pickedVertexRefs();
+	QHash<int, QSet<int>> selFacesX;
+	for ( const auto & pe : pickedElems )
+		if ( pe.type == 3 && pe.shapeBlock >= 0 )
+			selFacesX[pe.shapeBlock].insert( pe.e0 );
+
+	QSet<int> shapeSet;
+	for ( int k : selVerts.keys() )
+		shapeSet.insert( k );
+	for ( int k : selFacesX.keys() )
+		shapeSet.insert( k );
+	if ( shapeSet.isEmpty() )
+		return;
+
+	QVector<PickedElement> newSel;
+	int totalV = 0;
+
+	nifSnapshotOp( model, tr( "Duplicate" ), [&]() {
+		for ( int sb : shapeSet ) {
+			QModelIndex iShape = model->getBlockIndex( sb );
+			if ( !model->blockInherits( iShape, "BSTriShape" ) )
+				continue;
+			QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+			QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+			if ( !iVD.isValid() || !iTris.isValid() )
+				continue;
+			int oldNV = model->get<int>( iShape, "Num Vertices" );
+			int oldNT = model->get<int>( iShape, "Num Triangles" );
+			int dataSize = model->get<int>( iShape, "Data Size" );
+			int stride = ( oldNV > 0 ) ? ( dataSize - oldNT * 6 ) / oldNV : 0;
+
+			const QSet<int> & sv = selVerts.value( sb );
+			const QSet<int> & sfx = selFacesX.value( sb );
+
+			// faces to duplicate: explicit face selection or all-verts-selected
+			QVector<int> dupFaces;
+			for ( int t = 0; t < oldNT; t++ ) {
+				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+				bool dup = sfx.contains( t )
+					|| ( !sv.isEmpty() && sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) );
+				if ( dup )
+					dupFaces.append( t );
+			}
+
+			// verts to duplicate = selected verts + verts of the duplicated faces
+			QSet<int> dupVertsSet = sv;
+			for ( int t : dupFaces ) {
+				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+				dupVertsSet.insert( tri[0] );
+				dupVertsSet.insert( tri[1] );
+				dupVertsSet.insert( tri[2] );
+			}
+			if ( dupVertsSet.isEmpty() )
+				continue;
+
+			QVector<int> dupVerts( dupVertsSet.constBegin(), dupVertsSet.constEnd() );
+			std::sort( dupVerts.begin(), dupVerts.end() );
+			QHash<int, int> vremap;
+			for ( int i = 0; i < dupVerts.size(); i++ )
+				vremap.insert( dupVerts[i], oldNV + i );
+			QHash<int, int> fremap;
+			for ( int i = 0; i < dupFaces.size(); i++ )
+				fremap.insert( dupFaces[i], oldNT + i );
+
+			// append the duplicated verts (verbatim - same positions/normals)
+			int addNV = dupVerts.size();
+			model->set<int>( iShape, "Num Vertices", oldNV + addNV );
+			model->updateArraySize( iVD );
+			for ( int i = 0; i < addNV; i++ )
+				tlCopyItemValues( model, model->getIndex( iVD, dupVerts[i] ), model->getIndex( iVD, oldNV + i ) );
+
+			// append the duplicated faces (reindexed to the new verts)
+			int addNT = dupFaces.size();
+			if ( addNT > 0 ) {
+				model->set<int>( iShape, "Num Triangles", oldNT + addNT );
+				model->updateArraySize( iTris );
+				for ( int i = 0; i < addNT; i++ ) {
+					Triangle tri = model->get<Triangle>( model->getIndex( iTris, dupFaces[i] ) );
+					tri[0] = quint16( vremap.value( tri[0] ) );
+					tri[1] = quint16( vremap.value( tri[1] ) );
+					tri[2] = quint16( vremap.value( tri[2] ) );
+					model->set<Triangle>( model->getIndex( iTris, oldNT + i ), tri );
+				}
+			}
+			if ( stride > 0 )
+				model->set<int>( iShape, "Data Size", ( oldNV + addNV ) * stride + ( oldNT + addNT ) * 6 );
+
+			// mirror the selection onto the duplicate (coincident, so the world
+			// positions of the original picked elements still apply)
+			for ( const auto & pe : pickedElems ) {
+				if ( pe.shapeBlock != sb )
+					continue;
+				PickedElement np = pe;
+				if ( pe.type == 1 ) {
+					if ( !vremap.contains( pe.e0 ) )
+						continue;
+					np.e0 = vremap.value( pe.e0 );
+				} else if ( pe.type == 2 ) {
+					if ( !vremap.contains( pe.e0 ) || !vremap.contains( pe.e1 ) )
+						continue;
+					np.e0 = vremap.value( pe.e0 );
+					np.e1 = vremap.value( pe.e1 );
+				} else if ( pe.type == 3 ) {
+					if ( !fremap.contains( pe.e0 ) )
+						continue;
+					np.e0 = fremap.value( pe.e0 );
+				}
+				newSel.append( np );
+			}
+			totalV += addNV;
+		}
+	} );
+
+	if ( newSel.isEmpty() ) {
+		emit gizmoStatus( tr( "Nothing to duplicate (select verts / faces)" ) );
+		return;
+	}
+
+	// select the duplicates and start a move; Esc leaves them coincident with
+	// the original (still the only selected geometry), Blender-style
+	pickedElems = newSel;
+	modelChanged();
+	gizmoBeginElement( 1 );
+	emit gizmoStatus( tr( "Duplicated %1 vert(s) - move, or Esc to leave in place" ).arg( totalV ) );
 }
 
 bool GLView::isEditableMesh( const QModelIndex & iBlock ) const

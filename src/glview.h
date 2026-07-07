@@ -427,6 +427,8 @@ public:
 	void joinSelectedObjects();
 	//! Shift+D: duplicate the selection and start a move gesture
 	void duplicateSelection();
+	//! Edit-mode Shift+D: duplicate the picked verts/faces within the mesh
+	void duplicateElements();
 
 	// ---- element modal transform (G/R/S on picked verts/edges/faces) ----
 	bool elemTransform = false;
