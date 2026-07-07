@@ -896,39 +896,9 @@ void GLView::paintGL()
 		}
 	}
 
-	// object-mode selection: draw the selected meshes as a coloured wireframe.
-	// Active (last-selected) = #FF9D00, secondary selected = #FF7200.
-	if ( model && !editMode && !objSelection.isEmpty() ) {
-		for ( Shape * s : scene->shapes ) {
-			if ( !s || s->isHidden() || !objSelection.contains( s->id() ) )
-				continue;
-			if ( s->triangles.isEmpty() || s->verts.isEmpty() )
-				continue;
-
-			bool active = ( s->id() == objActive );
-			if ( gizmoMode )
-				scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );	// white while transforming (Blender)
-			else if ( active )
-				scene->setGLColor( 1.0f, 157.0f / 255.0f, 0.0f, 1.0f );		// #FF9D00
-			else
-				scene->setGLColor( 1.0f, 114.0f / 255.0f, 0.0f, 1.0f );		// #FF7200
-			int nv = s->verts.size();
-
-			scene->loadModelViewMatrix( s->viewTrans() );
-			glDisable( GL_DEPTH_TEST );
-			glDepthMask( GL_FALSE );
-			scene->setGLLineWidth( Settings::lineWidthWireframe * wireWidthMul );
-			for ( const Triangle & t : s->triangles ) {
-				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
-					continue;
-				scene->drawLine( s->verts[t[0]], s->verts[t[1]] );
-				scene->drawLine( s->verts[t[1]], s->verts[t[2]] );
-				scene->drawLine( s->verts[t[2]], s->verts[t[0]] );
-			}
-			glDepthMask( GL_TRUE );
-			glEnable( GL_DEPTH_TEST );
-		}
-	}
+	// object-mode selection is indicated by the Blender-style silhouette
+	// outline (drawObjectOutlines, right after the scene) - the old coloured
+	// wireframe overlay is gone
 
 	// Blender-style edit-mode overlay: black wireframe + black vertex dots,
 	// selected elements orange (#FF8500), active element white, translucent
