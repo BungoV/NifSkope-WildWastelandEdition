@@ -90,10 +90,12 @@ Backlog of features/fixes agreed for later. Ordered roughly by priority.
   their visibility + tabifies/positions them at the bottom. Persist the
   active workspace + custom layouts in settings.
 
-### 7. Material & texture browser with search
-- In the Material / Texture Manager, a "Browse…" button per row that opens a
-  resource tree (like the existing node/material selector) with a name search,
-  to pick a texture/material path instead of typing it.
+### 7. Material & texture browser with search - DONE (user-confirmed 2026-07-07)
+- The Material / Texture Manager has a "Browse…" button (operates on the
+  selected row) that opens FileBrowserWidget filtered to textures/materials,
+  which has its own "Path Filter" search field. Picks a resource path from the
+  game archives instead of typing it. (meshtools.cpp tlCreateMatTexManagerDock
+  + ui/widgets/filebrowser.cpp)
 
 ---
 _Completed items live in the git history on `feature/timeline`._
