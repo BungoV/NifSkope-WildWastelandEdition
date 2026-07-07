@@ -416,6 +416,18 @@ public:
 	//! Delete picked vertices/edges/faces (and dependent triangles) from the mesh
 	void deletePickedElements();
 
+	// ---- Separate (P) / Join (Ctrl+J) / Duplicate (Shift+D), Blender-style ----
+	//! Edit mode: P menu (Selection only for now)
+	void showSeparateMenu();
+	//! Move the selected geometry into a new BSTriShape sibling, preserving
+	//! the vertex data (incl. normals) verbatim so a later Join is seamless
+	void separateSelection();
+	//! Object mode: merge the selected compatible BSTriShapes into the active
+	//! node (verts transformed into its space, triangles reindexed)
+	void joinSelectedObjects();
+	//! Shift+D: duplicate the selection and start a move gesture
+	void duplicateSelection();
+
 	// ---- element modal transform (G/R/S on picked verts/edges/faces) ----
 	bool elemTransform = false;
 	struct ElemVert { int shape; int idx; Vector3 origLocal; Vector3 origWorld; };

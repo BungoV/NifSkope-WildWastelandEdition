@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "fp32vec4.hpp"
 #include "ui/widgets/filebrowser.h"
 #include "qt5compat.hpp"
+#include "spells/blocks.h"	// blockLink for Separate / Duplicate
 
 #include <QApplication>
 #include <QActionGroup>
@@ -4209,6 +4210,403 @@ void GLView::deletePickedElements()
 	modelChanged();
 }
 
+/*
+ *  Separate / Join / Duplicate (Blender P / Ctrl+J / Shift+D)
+ */
+
+//! Clone a block verbatim (all fields, incl. packed vertex data so normals are
+//! preserved byte-for-byte) and append it; returns the new block's index.
+static QModelIndex tlCloneBlock( NifModel * nif, const QModelIndex & iBlock )
+{
+	if ( !iBlock.isValid() )
+		return QModelIndex();
+	QByteArray data;
+	QBuffer buffer( &data );
+	if ( buffer.open( QIODevice::WriteOnly ) && nif->saveIndex( buffer, iBlock ) ) {
+		buffer.close();
+		if ( buffer.open( QIODevice::ReadOnly ) ) {
+			QModelIndex nb = nif->insertNiBlock( nif->itemName( iBlock ), nif->getBlockCount() );
+			nif->loadIndex( buffer, nb );
+			return nb;
+		}
+	}
+	return QModelIndex();
+}
+
+//! Keep only the triangles of a BSTriShape for which keep(triIndex) is true;
+//! rewrites Num Triangles / Triangles / Data Size (verts are left in place).
+static int tlKeepTriangles( NifModel * nif, const QModelIndex & iShape, const std::function<bool( int )> & keep )
+{
+	QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+	if ( !iTris.isValid() || !nif->getIndex( iShape, "Num Triangles" ).isValid() )
+		return 0;
+	int numTris = nif->get<int>( iShape, "Num Triangles" );
+	int numVerts = nif->get<int>( iShape, "Num Vertices" );
+	int dataSize = nif->get<int>( iShape, "Data Size" );
+	int stride = ( numVerts > 0 ) ? ( dataSize - numTris * 6 ) / numVerts : 0;
+	QVector<Triangle> kept;
+	for ( int t = 0; t < numTris && t < nif->rowCount( iTris ); t++ ) {
+		Triangle tri = nif->get<Triangle>( nif->getIndex( iTris, t ) );
+		if ( keep( t ) )
+			kept.append( tri );
+	}
+	nif->set<int>( iShape, "Num Triangles", kept.size() );
+	nif->updateArraySize( iTris );
+	for ( int t = 0; t < kept.size(); t++ )
+		nif->set<Triangle>( nif->getIndex( iTris, t ), kept[t] );
+	if ( stride > 0 )
+		nif->set<int>( iShape, "Data Size", numVerts * stride + kept.size() * 6 );
+	return kept.size();
+}
+
+//! Clone the block plus its shader / alpha property so a split-off mesh does
+//! not share a property block with the original; returns the new block number.
+static int tlCloneShapeWithProps( NifModel * nif, int srcBlock )
+{
+	QModelIndex iNew = tlCloneBlock( nif, nif->getBlockIndex( srcBlock ) );
+	if ( !iNew.isValid() )
+		return -1;
+	int nNew = nif->getBlockNumber( iNew );
+	for ( const char * prop : { "Shader Property", "Alpha Property" } ) {
+		int ref = nif->getLink( nif->getBlockIndex( srcBlock ), prop );
+		if ( ref < 0 )
+			continue;
+		QModelIndex ic = tlCloneBlock( nif, nif->getBlockIndex( ref ) );
+		if ( ic.isValid() )
+			nif->setLink( nif->getBlockIndex( nNew ), prop, nif->getBlockNumber( ic ) );
+	}
+	return nNew;
+}
+
+void GLView::showSeparateMenu()
+{
+	if ( !editMode || pickedElems.isEmpty() ) {
+		emit gizmoStatus( tr( "Separate needs a selection in edit mode" ) );
+		return;
+	}
+	QMenu m;
+	m.addSection( tr( "Separate" ) );
+	QAction * aSel = m.addAction( tr( "Selection" ) );
+	QAction * aMat = m.addAction( tr( "By Material" ) );
+	QAction * aLoose = m.addAction( tr( "By Loose Parts" ) );
+	aMat->setEnabled( false );		// not implemented yet (Blender parity later)
+	aLoose->setEnabled( false );
+	QAction * r = m.exec( QCursor::pos() );
+	if ( r == aSel )
+		separateSelection();
+}
+
+void GLView::separateSelection()
+{
+	if ( !model || !editMode || pickedElems.isEmpty() )
+		return;
+
+	auto edgeKey = []( int a, int b ) {
+		return ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) );
+	};
+
+	QHash<int, QSet<int>> selVerts = pickedVertexRefs();
+	QHash<int, QSet<int>> selFaces;
+	for ( const auto & pe : pickedElems )
+		if ( pe.type == 3 && pe.shapeBlock >= 0 )
+			selFaces[pe.shapeBlock].insert( pe.e0 );
+
+	QSet<int> shapeSet;
+	for ( int k : selVerts.keys() )
+		shapeSet.insert( k );
+	for ( int k : selFaces.keys() )
+		shapeSet.insert( k );
+	Q_UNUSED( edgeKey );
+
+	int totalMoved = 0;
+	int selectBlock = -1;
+	nifSnapshotOp( model, tr( "Separate selection" ), [&]() {
+		for ( int sb : shapeSet ) {
+			QModelIndex iShape = model->getBlockIndex( sb );
+			if ( !model->blockInherits( iShape, "BSTriShape" ) )
+				continue;
+			QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+			if ( !iTris.isValid() )
+				continue;
+			int numTris = model->get<int>( iShape, "Num Triangles" );
+			const QSet<int> & sv = selVerts.value( sb );
+			const QSet<int> & sf = selFaces.value( sb );
+
+			QVector<bool> sep( numTris, false );
+			int sepCount = 0;
+			for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
+				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+				bool s = sf.contains( t )
+					|| ( !sv.isEmpty() && sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) );
+				sep[t] = s;
+				if ( s )
+					sepCount++;
+			}
+			if ( sepCount == 0 || sepCount == numTris )
+				continue;	// nothing to split, or everything (Blender no-ops)
+
+			int nNew = tlCloneShapeWithProps( model, sb );
+			if ( nNew < 0 )
+				continue;
+
+			int parentNum = model->getParent( sb );
+			if ( parentNum >= 0 )
+				blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
+
+			QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
+			model->set<QString>( model->getBlockIndex( nNew ), "Name", nm + QStringLiteral( ".sep" ) );
+
+			// new keeps the separated triangles; original keeps the rest
+			tlKeepTriangles( model, model->getBlockIndex( nNew ), [&]( int t ) { return sep[t]; } );
+			tlKeepTriangles( model, model->getBlockIndex( sb ), [&]( int t ) { return !sep[t]; } );
+
+			totalMoved += sepCount;
+			selectBlock = nNew;
+		}
+	} );
+
+	if ( totalMoved == 0 ) {
+		emit gizmoStatus( tr( "Nothing to separate (select part of the mesh)" ) );
+		return;
+	}
+
+	setEditMode( false );
+	pickedElems.clear();
+	if ( selectBlock >= 0 ) {
+		syncObjectSelection( selectBlock );
+		emit clicked( model->getBlockIndex( selectBlock ) );
+	}
+	emit gizmoStatus( tr( "Separated %1 triangle(s) into a new object" ).arg( totalMoved ) );
+	modelChanged();
+}
+
+void GLView::duplicateSelection()
+{
+	if ( editMode ) {
+		emit gizmoStatus( tr( "Edit-mode duplicate is not available yet" ) );
+		return;
+	}
+	if ( !model || objSelection.isEmpty() )
+		return;
+
+	QVector<int> newBlocks;
+	nifSnapshotOp( model, tr( "Duplicate" ), [&]() {
+		for ( int sb : objSelection ) {
+			QModelIndex iS = model->getBlockIndex( sb );
+			if ( !model->blockInherits( iS, "BSTriShape" ) )
+				continue;	// v1: geometry duplicate (branch duplicate is future)
+			int nNew = tlCloneShapeWithProps( model, sb );
+			if ( nNew < 0 )
+				continue;
+			int parentNum = model->getParent( sb );
+			if ( parentNum >= 0 )
+				blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
+			QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
+			model->set<QString>( model->getBlockIndex( nNew ), "Name", nm + QStringLiteral( ".dup" ) );
+			newBlocks.append( nNew );
+		}
+	} );
+
+	if ( newBlocks.isEmpty() ) {
+		emit gizmoStatus( tr( "Nothing to duplicate (select a mesh)" ) );
+		return;
+	}
+
+	// select the duplicates and immediately start a move gesture (Blender):
+	// cancelling the move leaves the copies at the original position, selected
+	objSelection.clear();
+	for ( int b : newBlocks )
+		objSelection.insert( b );
+	objActive = newBlocks.last();
+	scene->currentBlock = model->getBlockIndex( objActive );
+	scene->currentIndex = QModelIndex( scene->currentBlock );
+	emit objectSelectionChanged();
+	modelChanged();
+	gizmoBegin( 1 );
+	emit gizmoStatus( tr( "Duplicated %1 mesh(es) - move, or Esc to leave in place" ).arg( newBlocks.size() ) );
+}
+
+//! Recursively copy every leaf value from one item subtree to another with an
+//! identical structure (used to append a vertex-data element verbatim).
+static void tlCopyItemValues( NifModel * nif, const QModelIndex & src, const QModelIndex & dst )
+{
+	int rc = nif->rowCount( src );
+	if ( rc > 0 && rc == nif->rowCount( dst ) ) {
+		for ( int r = 0; r < rc; r++ )
+			tlCopyItemValues( nif, nif->getIndex( src, r ), nif->getIndex( dst, r ) );
+	} else {
+		nif->setIndexValue( dst, nif->getValue( src ) );
+	}
+}
+
+//! Is this transform close enough to identity that appending verts verbatim
+//! (no transform) is exact? (the seamless separate->join round-trip case)
+static bool tlNearIdentity( const Transform & t )
+{
+	if ( t.translation.length() > 1.0e-4f || std::fabs( t.scale - 1.0f ) > 1.0e-4f )
+		return false;
+	for ( int i = 0; i < 3; i++ )
+		for ( int j = 0; j < 3; j++ )
+			if ( std::fabs( t.rotation( i, j ) - ( i == j ? 1.0f : 0.0f ) ) > 1.0e-4f )
+				return false;
+	return true;
+}
+
+//! Recompute a BSTriShape's bounding sphere from its vertex positions.
+static void tlUpdateBounds( NifModel * nif, const QModelIndex & iShape )
+{
+	QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
+	QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+	if ( !iBound.isValid() || !iVD.isValid() )
+		return;
+	int nv = nif->rowCount( iVD );
+	if ( nv <= 0 )
+		return;
+	Vector3 mn, mx;
+	for ( int i = 0; i < nv; i++ ) {
+		Vector3 v = nif->get<Vector3>( nif->getIndex( iVD, i ), "Vertex" );
+		if ( i == 0 ) {
+			mn = mx = v;
+		} else {
+			for ( int c = 0; c < 3; c++ ) {
+				mn[c] = std::min( mn[c], v[c] );
+				mx[c] = std::max( mx[c], v[c] );
+			}
+		}
+	}
+	Vector3 c = ( mn + mx ) * 0.5f;
+	float r = 0.0f;
+	for ( int i = 0; i < nv; i++ )
+		r = std::max( r, ( nif->get<Vector3>( nif->getIndex( iVD, i ), "Vertex" ) - c ).length() );
+	nif->set<Vector3>( iBound, "Center", c );
+	nif->set<float>( iBound, "Radius", r );
+}
+
+void GLView::joinSelectedObjects()
+{
+	if ( !model || editMode || objActive < 0 || objSelection.size() < 2 )
+		return;
+	QModelIndex iActive = model->getBlockIndex( objActive );
+	if ( !model->blockInherits( iActive, "BSTriShape" ) ) {
+		emit gizmoStatus( tr( "Join: the active object must be a BSTriShape" ) );
+		return;
+	}
+	quint64 activeDesc = model->get<BSVertexDesc>( iActive, "Vertex Desc" ).Value();
+
+	// compatible sources: same block type + identical vertex format
+	QVector<int> sources;
+	for ( int sb : objSelection ) {
+		if ( sb == objActive )
+			continue;
+		QModelIndex iS = model->getBlockIndex( sb );
+		if ( !model->blockInherits( iS, "BSTriShape" ) )
+			continue;
+		if ( model->get<BSVertexDesc>( iS, "Vertex Desc" ).Value() != activeDesc )
+			continue;
+		sources.append( sb );
+	}
+	if ( sources.isEmpty() ) {
+		emit gizmoStatus( tr( "Join: no compatible meshes selected (need a matching vertex format)" ) );
+		return;
+	}
+
+	Transform activeWorld;
+	if ( Node * an = scene->getNode( model, iActive ) )
+		activeWorld = an->worldTrans();
+
+	int joined = 0;
+	QPersistentModelIndex pActive( iActive );
+	nifSnapshotOp( model, tr( "Join geometry" ), [&]() {
+		Transform activeInv = activeWorld.inverted();
+		for ( int sb : sources ) {
+			QModelIndex iA( pActive );
+			QModelIndex iS = model->getBlockIndex( sb );
+			int oldNV = model->get<int>( iA, "Num Vertices" );
+			int oldNT = model->get<int>( iA, "Num Triangles" );
+			int addNV = model->get<int>( iS, "Num Vertices" );
+			int addNT = model->get<int>( iS, "Num Triangles" );
+			if ( addNV <= 0 || addNT <= 0 )
+				continue;
+
+			Transform srcWorld;
+			if ( Node * sn = scene->getNode( model, iS ) )
+				srcWorld = sn->worldTrans();
+			Transform relT = activeInv * srcWorld;
+			bool ident = tlNearIdentity( relT );
+
+			int dataSize = model->get<int>( iA, "Data Size" );
+			int stride = ( oldNV > 0 ) ? ( dataSize - oldNT * 6 ) / oldNV : 0;
+
+			// append vertex data (verbatim, then transform into active space)
+			model->set<int>( iA, "Num Vertices", oldNV + addNV );
+			QModelIndex iAVD = model->getIndex( iA, "Vertex Data" );
+			QModelIndex iSVD = model->getIndex( iS, "Vertex Data" );
+			model->updateArraySize( iAVD );
+			for ( int i = 0; i < addNV; i++ ) {
+				QModelIndex sVert = model->getIndex( iSVD, i );
+				QModelIndex dVert = model->getIndex( iAVD, oldNV + i );
+				tlCopyItemValues( model, sVert, dVert );
+				if ( !ident ) {
+					Vector3 v = model->get<Vector3>( dVert, "Vertex" );
+					tlSetVertexLocal( model, iA, oldNV + i, relT * v );
+					if ( model->getIndex( dVert, "Normal" ).isValid() ) {
+						Vector3 n = relT.rotation * model->get<Vector3>( dVert, "Normal" );
+						n.normalize();
+						model->set<ByteVector3>( dVert, "Normal", n );
+					}
+					if ( model->getIndex( dVert, "Tangent" ).isValid() ) {
+						Vector3 tg = relT.rotation * model->get<Vector3>( dVert, "Tangent" );
+						tg.normalize();
+						model->set<ByteVector3>( dVert, "Tangent", tg );
+					}
+				}
+			}
+
+			// append triangles, reindexed by the vertex offset
+			QModelIndex iAT = model->getIndex( iA, "Triangles" );
+			QModelIndex iST = model->getIndex( iS, "Triangles" );
+			model->set<int>( iA, "Num Triangles", oldNT + addNT );
+			model->updateArraySize( iAT );
+			for ( int t = 0; t < addNT; t++ ) {
+				Triangle tri = model->get<Triangle>( model->getIndex( iST, t ) );
+				tri[0] = quint16( tri[0] + oldNV );
+				tri[1] = quint16( tri[1] + oldNV );
+				tri[2] = quint16( tri[2] + oldNV );
+				model->set<Triangle>( model->getIndex( iAT, oldNT + t ), tri );
+			}
+			if ( stride > 0 )
+				model->set<int>( iA, "Data Size", ( oldNV + addNV ) * stride + ( oldNT + addNT ) * 6 );
+
+			joined++;
+		}
+
+		tlUpdateBounds( model, QModelIndex( pActive ) );
+
+		// remove the merged source blocks (high -> low so numbers stay valid)
+		QVector<int> rm = sources;
+		std::sort( rm.begin(), rm.end(), std::greater<int>() );
+		for ( int sb : rm )
+			model->removeNiBlock( sb );
+	} );
+
+	if ( joined == 0 ) {
+		emit gizmoStatus( tr( "Join: nothing merged" ) );
+		return;
+	}
+
+	int newActive = model->getBlockNumber( QModelIndex( pActive ) );
+	objSelection.clear();
+	objActive = newActive;
+	if ( newActive >= 0 ) {
+		objSelection.insert( newActive );
+		scene->currentBlock = model->getBlockIndex( newActive );
+		scene->currentIndex = QModelIndex( scene->currentBlock );
+	}
+	emit objectSelectionChanged();
+	emit gizmoStatus( tr( "Joined %1 mesh(es) into the active object" ).arg( joined ) );
+	modelChanged();
+}
+
 bool GLView::isEditableMesh( const QModelIndex & iBlock ) const
 {
 	if ( !model || !iBlock.isValid() )
@@ -5499,6 +5897,25 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			selectLinked( true );
 			return;
 		}
+		// P: Separate menu (Blender)
+		if ( event->key() == Qt::Key_P && !( mods & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+			showSeparateMenu();
+			return;
+		}
+	}
+
+	// Shift+D: duplicate the selection and start a move (object + edit mode)
+	if ( event->key() == Qt::Key_D && ( event->modifiers() & Qt::ShiftModifier )
+		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) && model ) {
+		duplicateSelection();
+		return;
+	}
+
+	// Ctrl+J: join the selected compatible meshes into the active one (object)
+	if ( event->key() == Qt::Key_J && ( event->modifiers() & Qt::ControlModifier )
+		&& !( event->modifiers() & ( Qt::AltModifier | Qt::ShiftModifier ) ) && !editMode && model ) {
+		joinSelectedObjects();
+		return;
 	}
 
 	// H hides the selection, Alt+H reveals everything: nodes in object mode,
