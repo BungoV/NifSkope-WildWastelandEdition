@@ -48,7 +48,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QAction>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
+#include <QCoreApplication>
+#include <QFile>
 #include <QSettings>
+#include <QTextStream>
 
 
 //! \file glscene.cpp %Scene management
@@ -490,6 +493,16 @@ void Scene::drawGrid()
 {
 	// Draw the grid
 	NifSkope *	w;
+	// TEMP DIAGNOSTIC (WW_PERF_TEST): why does the grid skip drawing?
+	if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+		QFile f( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
+		if ( f.open( QIODevice::Append | QIODevice::Text ) )
+			QTextStream( &f ) << "    [drawGrid: opts=0x" << QString::number( options, 16 )
+				<< " showGrid=" << hasOption( ShowGrid )
+				<< " model=" << ( nifModel != nullptr )
+				<< " win=" << ( nifModel && dynamic_cast< NifSkope * >( nifModel->getWindow() ) != nullptr )
+				<< "]\n";
+	}
 	if ( !hasOption(ShowGrid) || !nifModel || ( w = dynamic_cast< NifSkope * >( nifModel->getWindow() ) ) == nullptr )
 		return;
 	GLView *	v = w->getGLView();

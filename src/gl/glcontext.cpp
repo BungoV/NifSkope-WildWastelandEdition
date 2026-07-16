@@ -38,8 +38,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glproperty.h"
 
 #include <chrono>
+#include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QOpenGLContext>
+#include <QTextStream>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #  include <QOpenGLVersionFunctionsFactory>
 #endif
@@ -1242,6 +1245,20 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 		f.glGenBuffers( 1, &ebo );
 		f.glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ebo );
 		f.glBufferData( GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr( elementDataSize ), elementData, GL_STATIC_DRAW );
+	}
+
+	// TEMP DIAGNOSTIC (WW_PERF_TEST): trace small streaming uploads (grid/axes)
+	if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) && dataHash.numVerts <= 100
+		&& !dataHash.elementBytes ) {
+		QFile df( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
+		if ( df.open( QIODevice::Append | QIODevice::Text ) )
+			QTextStream( &df ) << "    [ShapeData create: verts=" << dataHash.numVerts
+				<< " mask=0x" << QString::number( dataHash.attrMask, 16 )
+				<< " vao=" << vao << " vbo=" << vbo
+				<< " ctx=" << quintptr( QOpenGLContext::currentContext() )
+				<< " err=0x" << QString::number( f.glGetError(), 16 )
+				<< " data0=" << ( attrData && attrData[0] ? attrData[0][0] : -9999.0f )
+				<< "]\n";
 	}
 }
 

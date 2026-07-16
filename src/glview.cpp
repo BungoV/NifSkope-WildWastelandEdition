@@ -1068,6 +1068,10 @@ void GLView::paintGL()
 		emit sceneTimeChanged( time, scene->timeMin(), scene->timeMax() );
 		isDisabled = false;
 		doCompile = 0;
+		// the first post-compile frame draws the grid/axes invisibly and
+		// self-heals (see glview.h postCompileRepaints); repaint twice so a
+		// correct frame is on screen without waiting for user input
+		postCompileRepaints = 2;
 	}
 
 	// Center the model
@@ -2295,6 +2299,13 @@ void GLView::paintGL()
 		avgTime += frameTimes[i];
 	std::fprintf( stderr, "Average frame time = %.2f ms\n", avgTime );
 #endif
+
+	// drain the post-compile corrective repaints (grid/axes visibility;
+	// see postCompileRepaints in glview.h)
+	if ( postCompileRepaints > 0 ) {
+		postCompileRepaints--;
+		QTimer::singleShot( 16, this, [this]() { update(); } );
+	}
 
 	emit paintUpdate();
 }

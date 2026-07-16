@@ -1,5 +1,38 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-17 — Startup grid/axes missing until first click: investigation + tentative fix
+
+Reported: after loading a NIF the ground grid (and origin axis lines) do not
+appear until something is clicked in the viewport. Reproduced headlessly with
+the WW_PERF_TEST probe (framebuffer PNG dumps). Established facts:
+
+- Every guard passes on the broken frames: scene options intact, drawGrid
+  executes, buffers allocate, lines.prog resolves, colors/line widths sane,
+  modelview + projection matrices and all queried GL state (FBO, depth, blend,
+  masks, viewport) are BIT-IDENTICAL between a broken and a working frame.
+- The model renders fine in broken frames; only the streaming line geometry
+  (grid, axes) is invisible — the failure is inside the streaming-draw path,
+  not scene state.
+- In probe runs, a frame rendered after the selection state became valid (or
+  after an update+processEvents round trip) always showed the grid, and it
+  stayed visible after deselecting again.
+- grabFramebuffer re-renders offscreen, so probe captures are an imperfect
+  proxy for the live window; final verification must be done in the GUI.
+
+Tentative fix shipped: `GLView::postCompileRepaints` — after a scene compile,
+two follow-up repaints are scheduled (16 ms apart), so the user never sits on
+the stale post-load frame. Harmless regardless; whether it cures the live
+symptom needs a GUI check. If the grid is still missing on load, next step is
+diffing the streaming VAO/program state with a GPU debugger.
+
+Diagnostics kept (all inert without WW_PERF_TEST=1): drawGrid guard + GL-state
+traces, ShapeData creation trace, probe stages with PNG dumps in createWindow.
+
+Build-infra lesson recorded: `make ... | tail` reports TAIL's exit code — a
+compile failure sailed through unnoticed. Build commands now echo make's own
+status; PowerShell 5.1 also mangles bash -lc strings containing double quotes
+(use simple redirects instead of quoted pipelines).
+
 ## 2026-07-16 — Slow click FOUND AND FIXED: the Block Details filter (round 3)
 
 The row-hiding walks (rounds 1-2) were real but not the 3 seconds. A new

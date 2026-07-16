@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QScopeGuard>
 #include "version.h"
 #include "gl/glscene.h"
+#include "gl/renderer.h"
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
 #include "model/nifproxymodel.h"
@@ -621,22 +622,55 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						t.restart();
 					};
 					t.start();
-					skope->ogl->grabFramebuffer();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_baseline.png" );
 					stamp( "baseline paint (grabFramebuffer)" );
 					QPointF center( skope->ogl->width() / 2.0, skope->ogl->height() / 2.0 );
 					QModelIndex pickIdx = skope->ogl->indexAt( center );
 					stamp( "GLView::indexAt(center) pick render" );
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_afterpick.png" );
+					stamp( "paint after pick render only" );
 					log << "  picked block: "
 						<< ( pickIdx.isValid() ? nif->getBlockNumber( pickIdx ) : -1 ) << "\n";
+					// does flushing the geometry cache alone unlock the grid?
+					// (tests the "broken first upload cached forever" theory)
+					if ( skope->ogl->getScene()->renderer ) {
+						auto prvCx = skope->ogl->pushGLContext();
+						skope->ogl->getScene()->renderer->flushCache();
+						skope->ogl->popGLContext( prvCx );
+					}
+					skope->ogl->update();
+					qApp->processEvents();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_afterflush.png" );
+					stamp( "paint after flushCache only" );
+					// does merely making scene->currentBlock valid unlock the grid?
+					skope->ogl->getScene()->currentBlock = nif->getBlockIndex( sb );
+					skope->ogl->update();
+					qApp->processEvents();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_curblockonly.png" );
+					stamp( "paint with only scene->currentBlock set" );
+					skope->ogl->getScene()->currentBlock = QPersistentModelIndex();
+					skope->ogl->update();
+					qApp->processEvents();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_curblockcleared.png" );
+					stamp( "paint after clearing currentBlock again" );
 					skope->ogl->objectSelectClick( sb, false );
 					stamp( "objectSelectClick(largest)" );
 					qApp->processEvents();
 					stamp( "processEvents after objectSelectClick" );
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_afterosc.png" );
+					stamp( "paint after objectSelectClick only" );
 					skope->select( nif->getBlockIndex( sb ) );
 					stamp( "NifSkope::select(largest)" );
 					qApp->processEvents();
 					stamp( "processEvents after select" );
-					skope->ogl->grabFramebuffer();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_withsel.png" );
 					stamp( "paint with selection" );
 					// second round: switch away and back, like a user clicking around
 					skope->select( nif->getBlockIndex( 0 ) );
@@ -649,6 +683,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					stamp( "select(largest) #2 + events" );
 					skope->ogl->grabFramebuffer();
 					stamp( "paint #2" );
+					// does the grid survive a full deselect? (distinguishes a
+					// per-frame selection-gated pass from one-time lazy init)
+					skope->ogl->objectSelectClick( -1, false );
+					qApp->processEvents();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_deselected.png" );
+					stamp( "paint after deselect" );
 					// the Block List click path (what the sweep probe used)
 					if ( skope->list->model() == skope->proxy )
 						skope->list->setCurrentIndex( skope->proxy->mapFrom( nif->getBlockIndex( sb ), QModelIndex() ) );

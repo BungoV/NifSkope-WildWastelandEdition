@@ -981,6 +981,11 @@ private:
 	unsigned char doCompile = 0;
 	bool doCenter = false;
 	unsigned char updatePending = 0;
+	//! Extra repaints scheduled after a scene compile: the first frame after
+	//! a compile renders the streaming line geometry (grid / origin axes)
+	//! invisibly and the failing draw self-heals, so without these the user
+	//! sits on a gridless stale frame until the next input-driven repaint
+	unsigned char postCompileRepaints = 0;
 
 	QTimer * lightVisTimer;
 	int lightVisTimeout;

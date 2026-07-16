@@ -36,8 +36,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glview.h"
 #include "gl/renderer.h"
 
+#include <QCoreApplication>
+#include <QFile>
 #include <QMap>
 #include <QStack>
+#include <QTextStream>
 #include <QVector>
 
 #include <stack>
@@ -831,6 +834,38 @@ void Scene::drawGrid( float s /* grid size / 2 */, int lines /* number of lines 
 	size_t	numVerts = ( size_t( lines ) + 1 ) * 4;
 	FloatVector4 *	colors = nullptr;
 	Vector3 *	positions = allocateVertexAttr( numVerts, &colors );
+	// TEMP DIAGNOSTIC (WW_PERF_TEST): why is the startup grid invisible?
+	if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+		QFile f( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
+		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
+			QTextStream ts( &f );
+			GLint depthFunc = 0, drawFbo = 0, stencilTest = 0, scissor = 0;
+			GLboolean depthTest = 0, blend = 0, depthMask = 0;
+			GLboolean colorMask[4] = { 0, 0, 0, 0 };
+			GLint viewportDims[4] = { 0, 0, 0, 0 };
+			glGetIntegerv( GL_DEPTH_FUNC, &depthFunc );
+			glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo );
+			glGetIntegerv( GL_STENCIL_TEST, &stencilTest );
+			glGetIntegerv( GL_SCISSOR_TEST, &scissor );
+			glGetIntegerv( GL_VIEWPORT, viewportDims );
+			depthTest = glIsEnabled( GL_DEPTH_TEST );
+			blend = glIsEnabled( GL_BLEND );
+			glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+			glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+			ts << "    [drawGrid helper: pos=" << ( positions != nullptr )
+				<< " prog=" << ( useProgram( "lines.prog" ) != nullptr )
+				<< " fbo=" << drawFbo
+				<< " depthFunc=0x" << QString::number( depthFunc, 16 )
+				<< " depthTest=" << int( depthTest ) << " depthMask=" << int( depthMask )
+				<< " blend=" << int( blend ) << " stencil=" << stencilTest
+				<< " scissor=" << scissor
+				<< " colorMask=" << int( colorMask[0] ) << int( colorMask[1] )
+					<< int( colorMask[2] ) << int( colorMask[3] )
+				<< " vp=" << viewportDims[0] << "," << viewportDims[1] << ","
+					<< viewportDims[2] << "," << viewportDims[3]
+				<< "]\n";
+		}
+	}
 	if ( !positions )
 		return;
 
