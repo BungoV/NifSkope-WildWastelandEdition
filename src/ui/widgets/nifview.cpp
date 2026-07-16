@@ -58,10 +58,13 @@ NifTreeView::NifTreeView( QWidget * parent, Qt::WindowFlags flags ) : QTreeView(
 	connect( this, &NifTreeView::collapsed, this, &NifTreeView::onItemCollapsed );
 	// expanding reveals rows the root-scoped hiding pass may never have
 	// visited (whole-model tree mode has no valid root to recurse from) —
-	// re-apply row hiding for whatever just became visible
+	// re-apply row hiding for whatever just became visible. Shallow: hiding
+	// is derived one level per expansion (expanding a 40k-element vertex
+	// array must not walk every element's members; expanding one element
+	// derives its own members via this same hook)
 	connect( this, &NifTreeView::expanded, this, [this]( const QModelIndex & idx ) {
 		if ( nif && nif->getState() == BaseModel::Default )
-			updateConditionRecurse( idx );
+			updateConditionRecurse( idx, false );
 	} );
 }
 
@@ -152,7 +155,10 @@ void NifTreeView::refreshRowHiding()
 		QTimer::singleShot( 0, this, &NifTreeView::refreshRowHiding );
 		return;
 	}
-	updateConditionRecurse( rootIndex() );
+	// shallow: this runs on every block switch, and descending a high-poly
+	// shape's vertex/triangle arrays took seconds per click. Hiding inside
+	// arrays is derived lazily, one level at a time, by the expansion hook.
+	updateConditionRecurse( rootIndex(), false );
 	doItemsLayout();
 	if ( qEnvironmentVariableIsSet( "WW_EXTRUDE_TEST" ) ) {
 		int hiddenCount = 0;
@@ -495,7 +501,10 @@ void NifTreeView::currentChanged( const QModelIndex & current, const QModelIndex
 	QTreeView::currentChanged( current, last );
 
 	if ( nif ) {
-		updateConditionRecurse( current );
+		// shallow: currentChanged fires on every click, and a full descent of
+		// a high-poly shape's arrays took seconds; array interiors are derived
+		// by the expansion hook instead
+		updateConditionRecurse( current, false );
 		// safety net: any interaction re-applies the whole visible block's
 		// row hiding (deferred while loading), so a hiding pass that bailed
 		// mid-load can never leave version-mismatched rows stranded visible

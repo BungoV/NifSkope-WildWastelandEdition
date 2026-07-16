@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Row hiding is now derived lazily (round 2 of the slow-click fix)
+
+The first fix only made the doItemsLayout pass shallow; two more full-subtree
+walks still ran per click: `currentChanged` (fires on every click, full
+descent of the current row's subtree — selecting the sphere block descended
+its 40k-vertex arrays) and `refreshRowHiding` (every block switch). All three
+hot paths now pass `descendArrays=false`; hiding INSIDE arrays is derived
+lazily, one level per expansion, by the (now also shallow) expansion hook —
+expanding an element derives that element's members via the same hook.
+Full walks remain only where they are correctness-critical and rare: the
+explicit "show non-applicable rows" toggle and the dataChanged condition
+update (e.g. VertexDesc edits re-deriving member visibility).
+
+Known tradeoff: an interior array node that stays expanded across block
+switches keeps its earlier-derived hidden set (the rot-prone storage) until
+it is re-expanded or its data changes; the depth-1 version-gated rows the
+original bug was about are still re-derived on every switch/layout.
+
+NOTE when verifying: the reporter's screenshot showed "build ca555d7" in the
+title bar — a stale running instance from BEFORE both perf fixes (NifSkope
+hands new files off to a running process). Fully close every NifSkope window
+before judging a fix.
+
 ## 2026-07-16 — Slow click-select on high-poly blocks fixed; legacy render hotkeys removed
 
 **Perf:** selecting a high-poly shape in the viewport (reported on the
