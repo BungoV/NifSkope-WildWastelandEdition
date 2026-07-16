@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Viewport menus move into the viewport (floating bottom bar)
+
+Follow-up to the header-menu batch below: the Select/Add/Object (and edit/
+paint) menu buttons leave the render toolbar and now live in a floating
+Blender-dark rounded bar centered on the 3D viewport's bottom edge. Like the
+redo panels, the bar is a frameless `Qt::Tool` window (`WA_ShowWithoutActivating`,
+`WA_TranslucentBackground` for real rounded corners) because the native GL
+viewport paints over child widgets. It's glued to the viewport by the same
+event-filter hooks as the redo panels (Move/Resize), hides on minimize,
+returns on restore, and first shows via a deferred call after the main
+window's first Show. Buttons: flat text, hover highlight, selection-blue
+open state, no menu-indicator arrows (Blender look). Mode swapping and the
+shared `GLView::populate*Menu()` builders are unchanged;
+`NifSkope::positionViewportMenuBar()` centers it (redo panels keep the
+bottom-left corner).
+
 ## 2026-07-16 — Viewport RMB menu retired; Blender-style header menus
 
 The 3D viewport no longer has a context menu. A plain right-click (click, not

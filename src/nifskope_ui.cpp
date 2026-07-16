@@ -1833,39 +1833,59 @@ void NifSkope::initDockWidgets()
 		syncModeButton();
 		ui->tRender->insertWidget( ui->aSelectObject, modeButton );
 
-		// Blender-style viewport header menus, right of the mode selector:
-		// Select · Add · Object in object mode, Select · Mesh · Vertex · Edge ·
-		// Face in edit mode, Select · Weights/Paint/Segments while painting.
-		// The menus rebuild on aboutToShow from GLView's populate functions
-		// (shared with the W quick menu), so enabled states are always current.
-		auto makeMenuButton = [this]( const QString & title,
-			void (GLView::*populate)( QMenu * ), QToolButton ** outBtn = nullptr ) -> QAction * {
-			QToolButton * btn = new QToolButton( this );
+		// Blender-style viewport menus in a floating bar docked to the bottom
+		// of the 3D viewport: Select · Add · Object in object mode, Select ·
+		// Mesh · Vertex · Edge · Face in edit mode, Select · Weights/Paint/
+		// Segments while painting. Like the redo panels, the bar must be a
+		// frameless tool window — the native GL viewport paints over child
+		// widgets. The menus rebuild on aboutToShow from GLView's populate
+		// functions (shared with the W quick menu), so enabled states are
+		// always current and the entry points cannot drift apart.
+		QFrame * menuBar = new QFrame( this, Qt::Tool | Qt::FramelessWindowHint );
+		menuBar->setObjectName( QStringLiteral( "ViewportMenuBar" ) );
+		menuBar->setAttribute( Qt::WA_ShowWithoutActivating );
+		menuBar->setAttribute( Qt::WA_TranslucentBackground );
+		// Blender-dark rounded box, same palette family as the redo panels
+		menuBar->setStyleSheet( QStringLiteral(
+			"QFrame#ViewportMenuBar { background: rgba(47,47,47,235);"
+			" border: 1px solid #202020; border-radius: 6px; }"
+			"QToolButton { color: #cccccc; background: transparent; border: none;"
+			" border-radius: 4px; padding: 3px 10px; }"
+			"QToolButton:hover { color: #ffffff; background: #454545; }"
+			"QToolButton:pressed, QToolButton:open { color: #ffffff; background: #4772b3; }"
+			"QToolButton::menu-indicator { image: none; }" ) );
+		menuBar->hide();
+		viewportMenuBar = menuBar;
+		QHBoxLayout * menuBarLay = new QHBoxLayout( menuBar );
+		menuBarLay->setContentsMargins( 6, 3, 6, 3 );
+		menuBarLay->setSpacing( 2 );
+
+		auto makeMenuButton = [this, menuBar, menuBarLay]( const QString & title,
+			void (GLView::*populate)( QMenu * ) ) -> QToolButton * {
+			QToolButton * btn = new QToolButton( menuBar );
 			btn->setText( title );
-			btn->setAutoRaise( true );
 			btn->setToolButtonStyle( Qt::ToolButtonTextOnly );
 			btn->setPopupMode( QToolButton::InstantPopup );
+			btn->setFocusPolicy( Qt::NoFocus );
 			QMenu * menu = new QMenu( btn );
 			connect( menu, &QMenu::aboutToShow, this, [this, menu, populate]() {
 				menu->clear();
 				( ogl->*populate )( menu );
 			} );
 			btn->setMenu( menu );
-			if ( outBtn )
-				*outBtn = btn;
-			return ui->tRender->insertWidget( ui->aSelectObject, btn );
+			menuBarLay->addWidget( btn );
+			return btn;
 		};
-		QToolButton * paintBtn = nullptr;
-		QAction * mbSelect = makeMenuButton( tr( "Select" ), &GLView::populateSelectMenu );
-		QAction * mbAdd = makeMenuButton( tr( "Add" ), &GLView::populateAddMenu );
-		QAction * mbObject = makeMenuButton( tr( "Object" ), &GLView::populateObjectMenu );
-		QAction * mbMesh = makeMenuButton( tr( "Mesh" ), &GLView::populateMeshMenu );
-		QAction * mbVertex = makeMenuButton( tr( "Vertex" ), &GLView::populateVertexMenu );
-		QAction * mbEdge = makeMenuButton( tr( "Edge" ), &GLView::populateEdgeMenu );
-		QAction * mbFace = makeMenuButton( tr( "Face" ), &GLView::populateFaceMenu );
-		QAction * mbPaint = makeMenuButton( tr( "Paint" ), &GLView::populatePaintMenu, &paintBtn );
+		QToolButton * mbSelect = makeMenuButton( tr( "Select" ), &GLView::populateSelectMenu );
+		QToolButton * mbAdd = makeMenuButton( tr( "Add" ), &GLView::populateAddMenu );
+		QToolButton * mbObject = makeMenuButton( tr( "Object" ), &GLView::populateObjectMenu );
+		QToolButton * mbMesh = makeMenuButton( tr( "Mesh" ), &GLView::populateMeshMenu );
+		QToolButton * mbVertex = makeMenuButton( tr( "Vertex" ), &GLView::populateVertexMenu );
+		QToolButton * mbEdge = makeMenuButton( tr( "Edge" ), &GLView::populateEdgeMenu );
+		QToolButton * mbFace = makeMenuButton( tr( "Face" ), &GLView::populateFaceMenu );
+		QToolButton * mbPaint = makeMenuButton( tr( "Paint" ), &GLView::populatePaintMenu );
 		auto syncViewportMenus = [this, mbSelect, mbAdd, mbObject, mbMesh, mbVertex,
-			mbEdge, mbFace, mbPaint, paintBtn]() {
+			mbEdge, mbFace, mbPaint]() {
 			const bool weightPaint = ogl->riggingWeightPaintModeActive();
 			const bool segmentPaint = ogl->segmentPaintModeActive();
 			const bool paint = weightPaint || segmentPaint || ogl->vertexPaintModeActive();
@@ -1881,8 +1901,9 @@ void NifSkope::initDockWidgets()
 			mbFace->setVisible( edit );
 			mbPaint->setVisible( paint );
 			if ( paint )
-				paintBtn->setText( weightPaint ? tr( "Weights" )
+				mbPaint->setText( weightPaint ? tr( "Weights" )
 					: segmentPaint ? tr( "Segments" ) : tr( "Paint" ) );
+			positionViewportMenuBar();
 		};
 		connect( ogl, &GLView::editModeChanged, this, [syncViewportMenus]( bool ) { syncViewportMenus(); } );
 		connect( ogl, &GLView::vertexPaintModeChanged, this, [syncViewportMenus]( bool ) { syncViewportMenus(); } );
@@ -3914,6 +3935,16 @@ void NifSkope::positionRedoPanel()
 	}
 }
 
+void NifSkope::positionViewportMenuBar()
+{
+	if ( !graphicsView || !viewportMenuBar )
+		return;
+	viewportMenuBar->adjustSize();
+	viewportMenuBar->move( graphicsView->mapToGlobal(
+		QPoint( ( graphicsView->width() - viewportMenuBar->width() ) / 2,
+			graphicsView->height() - viewportMenuBar->height() - 10 ) ) );
+}
+
 bool NifSkope::eventFilter( QObject * o, QEvent * e )
 {
 	// TODO: This doesn't seem to be doing anything extra
@@ -3941,7 +3972,7 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 
 	case QEvent::Move:
 	case QEvent::Resize:
-		// keep the floating redo panels glued to the viewport corner
+		// keep the floating redo panels and the viewport menu bar glued
 		if ( o == this || o == graphicsView ) {
 			for ( QFrame * p : { gizmoRedoPanel, operatorRedoPanel, boxRedoPanel, operatorExRedoPanel } ) {
 				if ( p && p->isVisible() ) {
@@ -3949,6 +3980,21 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 					break;
 				}
 			}
+			if ( viewportMenuBar && viewportMenuBar->isVisible() )
+				positionViewportMenuBar();
+		}
+		break;
+
+	case QEvent::Show:
+		// first main-window show: dock the menu bar to the viewport once the
+		// layout has settled (a deferred call — geometry is not final here)
+		if ( o == this && viewportMenuBar && !viewportMenuBar->isVisible() ) {
+			QTimer::singleShot( 0, this, [this]() {
+				if ( viewportMenuBar && !isMinimized() && isVisible() ) {
+					positionViewportMenuBar();
+					viewportMenuBar->show();
+				}
+			} );
 		}
 		break;
 
@@ -3958,6 +4004,13 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				if ( p && p->isVisible() )
 					p->hide();
 			}
+			if ( viewportMenuBar )
+				viewportMenuBar->hide();
+		} else if ( o == this && viewportMenuBar && !viewportMenuBar->isVisible()
+			&& isVisible() ) {
+			// restored from the taskbar: bring the menu bar back
+			positionViewportMenuBar();
+			viewportMenuBar->show();
 		}
 		break;
 
