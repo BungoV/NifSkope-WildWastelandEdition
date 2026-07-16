@@ -117,6 +117,21 @@ void NifTreeView::reset()
 	QTimer::singleShot( 0, this, &NifTreeView::refreshRowHiding );
 }
 
+void NifTreeView::doItemsLayout()
+{
+	// re-derive row hiding right before the layout is rebuilt: the stored
+	// hidden set can silently rot (its persistent indexes get invalidated by
+	// model activity that emits no reset), which previously un-hid the
+	// version-mismatched rows on every block switch after the first
+	if ( !inLayoutHidingRefresh && nif && rootIndex().isValid()
+		&& nif->getState() == BaseModel::Default ) {
+		inLayoutHidingRefresh = true;
+		updateConditionRecurse( rootIndex() );
+		inLayoutHidingRefresh = false;
+	}
+	QTreeView::doItemsLayout();
+}
+
 void NifTreeView::refreshRowHiding()
 {
 	wwHideTrace( QString( "refresh obj=%1 nif=%2 rootValid=%3 state=%4" )

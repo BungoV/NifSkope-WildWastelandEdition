@@ -92,6 +92,12 @@ public slots:
 	//! after every model reset so version-mismatched rows stay hidden.
 	void reset() override;
 
+	//! The hidden-row state lives in QPersistentModelIndexes that assorted
+	//! model activity can silently invalidate (with no reset signal). Re-derive
+	//! it whenever the view rebuilds its layout, so version-gated rows can
+	//! never "un-hide" behind our back.
+	void doItemsLayout() override;
+
 	//! Updates version conditions (connect to dataChanged)
 	void updateConditions( const QModelIndex & topLeft, const QModelIndex & bottomRight );
 protected slots:
@@ -116,6 +122,8 @@ protected:
 	void autoExpandItem( const NifItem * item );
 
 	bool doRowHiding = true;
+	//! re-entry guard for the doItemsLayout hiding refresh
+	bool inLayoutHidingRefresh = false;
 	bool autoExpanded = false;
 public:
 	// Do "smart auto-expand" of items when the view changes NiBlock.

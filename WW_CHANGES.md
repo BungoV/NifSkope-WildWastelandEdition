@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Skyrim/FO76 rows: FINAL fix (hidden-row state rots between clicks)
+
+The user was right and the stale-instance theory was wrong. Reproduced with a
+probe sweep that clicks every BSLightingShaderProperty through the real Block
+List path: the FIRST block visited hides correctly (29/29 rows), every
+SUBSEQUENT block leaks all 29 — matching the screenshot exactly (their block
+32 vs the probe's block 10; earlier probes only ever tested the first block).
+
+Root cause: QTreeView keeps hidden rows as QPersistentModelIndexes, and model
+activity during a block switch silently INVALIDATES them (no modelReset — the
+reset-override never fired). The hiding pass ran and verified 29/58 hidden at
+click time (trace-proven), then the stored set rotted before paint.
+
+Fix: `NifTreeView::doItemsLayout()` override re-derives row hiding for the
+current root right before the view rebuilds its layout (re-entry-guarded,
+skipped while the model is loading). Whatever invalidates the stored set, the
+rows are re-hidden with fresh indexes before anything is drawn. Sweep now
+reports 29/29 hidden on every shader block via the real click path.
+
 ## 2026-07-16 — Row hiding on expansion (tree mode); Skyrim/FO76 rows re-verified
 
 User re-report: greyed Skyrim + FO76 rows visible on a shader property.

@@ -441,6 +441,36 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( f.open( QIODevice::Append | QIODevice::Text ) )
 						QTextStream( &f ) << m << "\n";
 				};
+				// sweep EVERY shader property block: click it like a user would,
+				// then count version-mismatched rows the view still shows
+				auto sweepHiding = [&]( const char * when ) {
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						QModelIndex iB = nif->getBlockIndex( b );
+						if ( !nif->isNiBlock( iB, "BSLightingShaderProperty" ) )
+							continue;
+						if ( skope->list->model() == skope->proxy )
+							skope->list->setCurrentIndex( skope->proxy->mapFrom( iB, QModelIndex() ) );
+						else
+							skope->list->setCurrentIndex( iB );
+						qApp->processEvents();
+						auto countHidden = [&]( const QModelIndex & parent ) {
+							int n = 0;
+							for ( int r = 0; r < nif->rowCount( parent ); r++ )
+								if ( skope->tree->QTreeView::isRowHidden( r, parent ) )
+									n++;
+							return n;
+						};
+						const bool rootMatches = ( skope->tree->rootIndex() == iB );
+						const int hidViaRoot = countHidden( skope->tree->rootIndex() );
+						const int hidViaBlock = countHidden( iB );
+						skope->tree->refreshRowHiding();
+						const int hidAfterManual = countHidden( iB );
+						log << when << ": block " << b << " rootMatches=" << rootMatches
+							<< " hidViaRoot=" << hidViaRoot << " hidViaBlock=" << hidViaBlock
+							<< " afterManualRefresh=" << hidAfterManual << "\n";
+					}
+				};
+				sweepHiding( "sweep" );
 				auto dumpHiding = [&]( const char * when ) {
 					hideMark( QString( "=== %1: select block ===" ).arg( when ) );
 					int pb = -1;
@@ -454,7 +484,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return;
 					}
 					QModelIndex iP = nif->getBlockIndex( pb );
-					skope->select( iP );
+					// mimic the user's actual interaction: a click in the Block
+					// List (proxy) — not a programmatic select
+					if ( skope->list->model() == skope->proxy ) {
+						QModelIndex pIdx = skope->proxy->mapFrom( iP, QModelIndex() );
+						log << when << ": proxy click, proxyValid=" << pIdx.isValid() << "\n";
+						skope->list->setCurrentIndex( pIdx );
+					} else {
+						skope->list->setCurrentIndex( iP );
+					}
 					qApp->processEvents();
 					log << when << ": state=" << int( nif->getState() )
 						<< " treeModelIsNif=" << ( skope->tree->model() == nif )
