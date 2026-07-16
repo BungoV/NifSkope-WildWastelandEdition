@@ -56,6 +56,13 @@ NifTreeView::NifTreeView( QWidget * parent, Qt::WindowFlags flags ) : QTreeView(
 
 	connect( this, &NifTreeView::expanded, this, &NifTreeView::scrollExpand );
 	connect( this, &NifTreeView::collapsed, this, &NifTreeView::onItemCollapsed );
+	// expanding reveals rows the root-scoped hiding pass may never have
+	// visited (whole-model tree mode has no valid root to recurse from) —
+	// re-apply row hiding for whatever just became visible
+	connect( this, &NifTreeView::expanded, this, [this]( const QModelIndex & idx ) {
+		if ( nif && nif->getState() == BaseModel::Default )
+			updateConditionRecurse( idx );
+	} );
 }
 
 NifTreeView::~NifTreeView()

@@ -468,7 +468,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						const bool predHidden = skope->tree->isRowHidden( r, ch );
 						const bool viewHidden = skope->tree->QTreeView::isRowHidden( r, iP );
 						if ( !viewHidden )
-							log << " [" << nif->itemName( ch ) << ( predHidden ? "|PRED!" : "" ) << "]";
+							log << " [" << nif->itemName( ch )
+								<< "/" << nif->itemStrType( ch )
+								<< ( predHidden ? "|PRED!" : "" ) << "]";
 					}
 					log << "\n";
 					hideMark( QString( "=== %1: dump done ===" ).arg( when ) );
