@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Viewport RMB menu retired; Blender-style header menus
+
+The 3D viewport no longer has a context menu. A plain right-click (click, not
+an RMB zoom drag) now drops the gizmo / 3D cursor on the surface under the
+mouse — what Shift+RMB used to do. Shift+RMB is retired (both press handlers
+removed); RMB-drag zoom and RMB-cancel of the box/circle select gadgets are
+unchanged (box-cancel now also suppresses the gizmo drop on release, like
+circle-cancel already did). The keyboard menu key opens the W quick menu.
+
+Everything the RMB menu carried moved to Blender-style viewport header menus —
+flat text buttons right of the mode selector on the render toolbar, swapping
+with the mode:
+
+- **Object mode:** Select · Add · Object (transform/snap/set origin/duplicate/
+  join/parent/show-hide)
+- **Edit mode:** Select · Mesh (transform/snap/origin/extrude/duplicate/
+  separate/symmetrize/normals/floating decal/show-hide/delete) · Vertex
+  (merge/remove doubles/smooth/dissolve) · Edge (loop cut/subdivide/edge
+  slide) · Face (extrude/inset/fill-bridge)
+- **Paint modes:** Select · Weights/Paint/Segments (fill selection + show/hide)
+
+The buttons rebuild their menus on aboutToShow from new
+`GLView::populate*Menu()` functions; the W quick menu shares them (a Transform
+section — Move/Rotate/Scale — now heads W in both modes, hidden while
+painting), so the entry points cannot drift apart. The block-data spell
+submenus (Mesh/Havok/…) left the viewport entirely — they remain on the Block
+List / block-tree context menus, which are untouched. The old RMB-menu-only 3D
+Cursor items were already covered by the Snap… (Shift+S) menu. Implementation:
+`NifSkope::contextMenu`'s graphicsView branch deleted, `contextMenuEvent`
+rewritten to place the cursor, `contextMenuShiftModifier` removed (GLView
+layout change — qmake6 re-run).
+
 ## 2026-07-16 — Skyrim/FO76 rows: FINAL fix (hidden-row state rots between clicks)
 
 The user was right and the stale-instance theory was wrong. Reproduced with a

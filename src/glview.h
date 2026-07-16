@@ -48,6 +48,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //! @file glview.h GLView
 
 class NifSkope;
+class QMenu;
 class QTimer;
 
 
@@ -338,6 +339,7 @@ protected:
 
 	// QWidget Event Handlers
 
+	//! No viewport context menu: a plain right-click drops the gizmo/3D cursor
 	void contextMenuEvent( QContextMenuEvent * );
 	void dragEnterEvent( QDragEnterEvent * );
 	void dragLeaveEvent( QDragLeaveEvent * );
@@ -375,7 +377,6 @@ private:
 	ViewState view;
 	DebugMode debugMode;
 	bool perspectiveMode;
-	bool contextMenuShiftModifier;
 	bool soloMode = false;
 
 	void updateSoloNode();
@@ -846,6 +847,29 @@ public:
 	void showAddPrimitiveMenu();
 	//! W: Blender 2.7x-style Specials quick menu (edit and object mode)
 	void showSpecialsMenu();
+
+	// ---- Blender-style viewport header menus ----
+	// Populate functions shared by the toolbar menu buttons and the W quick
+	// menu so the two entry points can never drift apart. Enabled states are
+	// evaluated at populate time; callers rebuild the menu on aboutToShow.
+	//! Move / Rotate / Scale (G/R/S) via the modal transform
+	void populateTransformMenu( QMenu * m );
+	//! Select menu: All/None/Invert/Box/Circle (+ More/Less/Linked in edit mode)
+	void populateSelectMenu( QMenu * m );
+	//! Add menu (object mode): the primitive shapes
+	void populateAddMenu( QMenu * m );
+	//! Object menu (object mode): transform/snap/origin/duplicate/join/parent/show-hide
+	void populateObjectMenu( QMenu * m );
+	//! Mesh menu (edit mode): transform/snap/duplicate/extrude/separate/normals/delete
+	void populateMeshMenu( QMenu * m );
+	//! Vertex menu (edit mode): merge/doubles/smooth/dissolve
+	void populateVertexMenu( QMenu * m );
+	//! Edge menu (edit mode): loop cut/subdivide/edge slide
+	void populateEdgeMenu( QMenu * m );
+	//! Face menu (edit mode): extrude/inset/fill-bridge
+	void populateFaceMenu( QMenu * m );
+	//! Paint menu (weight/segment/vertex paint): fill selection + show/hide
+	void populatePaintMenu( QMenu * m );
 
 	// ---- selection undo (Blender: selections are undoable, Ctrl+Z) ----
 	struct SelState { QVector<PickedElement> picked; QSet<int> objSel; int objActive = -1; };

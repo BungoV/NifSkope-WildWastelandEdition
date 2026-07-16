@@ -896,7 +896,8 @@ void NifSkope::initActions()
 		ogl->setOrientation( GLView::ViewDefault, false );
 	} );
 
-	connect( graphicsView, &QWidget::customContextMenuRequested, this, &NifSkope::contextMenu );
+	// The viewport has no context menu (right-click places the gizmo); the
+	// Blender-style header menu buttons and W cover the viewport operations.
 
 	// Update Inspector widget with current index
 	connect( tree, &NifTreeView::sigCurrentIndexChanged, inspect, &InspectView::updateSelection );
@@ -1831,6 +1832,64 @@ void NifSkope::initDockWidgets()
 		// the mode signals (including Tab, Esc, RMB, and manager-button changes).
 		syncModeButton();
 		ui->tRender->insertWidget( ui->aSelectObject, modeButton );
+
+		// Blender-style viewport header menus, right of the mode selector:
+		// Select · Add · Object in object mode, Select · Mesh · Vertex · Edge ·
+		// Face in edit mode, Select · Weights/Paint/Segments while painting.
+		// The menus rebuild on aboutToShow from GLView's populate functions
+		// (shared with the W quick menu), so enabled states are always current.
+		auto makeMenuButton = [this]( const QString & title,
+			void (GLView::*populate)( QMenu * ), QToolButton ** outBtn = nullptr ) -> QAction * {
+			QToolButton * btn = new QToolButton( this );
+			btn->setText( title );
+			btn->setAutoRaise( true );
+			btn->setToolButtonStyle( Qt::ToolButtonTextOnly );
+			btn->setPopupMode( QToolButton::InstantPopup );
+			QMenu * menu = new QMenu( btn );
+			connect( menu, &QMenu::aboutToShow, this, [this, menu, populate]() {
+				menu->clear();
+				( ogl->*populate )( menu );
+			} );
+			btn->setMenu( menu );
+			if ( outBtn )
+				*outBtn = btn;
+			return ui->tRender->insertWidget( ui->aSelectObject, btn );
+		};
+		QToolButton * paintBtn = nullptr;
+		QAction * mbSelect = makeMenuButton( tr( "Select" ), &GLView::populateSelectMenu );
+		QAction * mbAdd = makeMenuButton( tr( "Add" ), &GLView::populateAddMenu );
+		QAction * mbObject = makeMenuButton( tr( "Object" ), &GLView::populateObjectMenu );
+		QAction * mbMesh = makeMenuButton( tr( "Mesh" ), &GLView::populateMeshMenu );
+		QAction * mbVertex = makeMenuButton( tr( "Vertex" ), &GLView::populateVertexMenu );
+		QAction * mbEdge = makeMenuButton( tr( "Edge" ), &GLView::populateEdgeMenu );
+		QAction * mbFace = makeMenuButton( tr( "Face" ), &GLView::populateFaceMenu );
+		QAction * mbPaint = makeMenuButton( tr( "Paint" ), &GLView::populatePaintMenu, &paintBtn );
+		auto syncViewportMenus = [this, mbSelect, mbAdd, mbObject, mbMesh, mbVertex,
+			mbEdge, mbFace, mbPaint, paintBtn]() {
+			const bool weightPaint = ogl->riggingWeightPaintModeActive();
+			const bool segmentPaint = ogl->segmentPaintModeActive();
+			const bool paint = weightPaint || segmentPaint || ogl->vertexPaintModeActive();
+			const bool edit = ogl->editModeActive() && !paint;
+			const bool object = !ogl->editModeActive() && !paint;
+			// Select stays in every mode: masking selections while painting
+			mbSelect->setVisible( true );
+			mbAdd->setVisible( object );
+			mbObject->setVisible( object );
+			mbMesh->setVisible( edit );
+			mbVertex->setVisible( edit );
+			mbEdge->setVisible( edit );
+			mbFace->setVisible( edit );
+			mbPaint->setVisible( paint );
+			if ( paint )
+				paintBtn->setText( weightPaint ? tr( "Weights" )
+					: segmentPaint ? tr( "Segments" ) : tr( "Paint" ) );
+		};
+		connect( ogl, &GLView::editModeChanged, this, [syncViewportMenus]( bool ) { syncViewportMenus(); } );
+		connect( ogl, &GLView::vertexPaintModeChanged, this, [syncViewportMenus]( bool ) { syncViewportMenus(); } );
+		connect( ogl, &GLView::riggingWeightPaintModeChanged, this, [syncViewportMenus]( bool ) { syncViewportMenus(); } );
+		connect( ogl, &GLView::segmentPaintModeChanged, this, [syncViewportMenus]( bool ) { syncViewportMenus(); } );
+		syncViewportMenus();
+
 		ui->tRender->removeAction( ui->aSelectObject );
 		ui->tRender->removeAction( ui->aSelectVertex );
 	}
@@ -4367,9 +4426,6 @@ void NifSkope::contextMenu( const QPoint & pos )
 	} else if ( sender() == header ) {
 		idx = header->indexAt( pos );
 		p = header->mapToGlobal( pos );
-	} else if ( sender() == graphicsView ) {
-		idx = ogl->indexAt( pos, ogl->contextMenuShiftModifier );
-		p = graphicsView->mapToGlobal( pos );
 	} else {
 		return;
 	}
@@ -4379,153 +4435,6 @@ void NifSkope::contextMenu( const QPoint & pos )
 	}
 
 	SpellBook contextBook( nif, idx, this, SLOT( select( const QModelIndex & ) ) );
-
-	if ( sender() == graphicsView ) {
-		// viewport right-click: Blender-style menu with the transform actions
-		// on top and the block spells as a submenu
-		QPoint clickPos = pos;
-		const bool weightPaint = ogl->riggingWeightPaintModeActive();
-		const bool vertexPaint = ogl->vertexPaintModeActive();
-		const bool segmentPaint = ogl->segmentPaintModeActive();
-		const bool anyPaint = weightPaint || vertexPaint || segmentPaint;
-		auto startModal = [this]( int m ) {
-			if ( ogl->editMode && !ogl->pickedElems.isEmpty() && ogl->gizmoBeginElement( m ) )
-				return;
-			ogl->gizmoBegin( m );
-		};
-
-		QMenu menu( this );
-		menu.addAction( tr( "Place Gizmo (3D Cursor) Here" ), [this, clickPos]() {
-			ogl->placeCursor( QPointF( clickPos ) );
-		} );
-		if ( !anyPaint ) {
-			menu.addSeparator();
-			menu.addAction( tr( "Move\tG" ), [startModal]() { startModal( 1 ); } );
-			menu.addAction( tr( "Rotate\tR" ), [startModal]() { startModal( 2 ); } );
-			menu.addAction( tr( "Scale\tS" ), [startModal]() { startModal( 3 ); } );
-		}
-		// grow across faces within the sharpness angle; the redo panel that pops
-		// up afterwards lets you readjust the angle live
-		auto linkedByAngle = [this]() {
-			ogl->selectLinked( true, ( ogl->lastOpKind == 2 ) ? ogl->lastOpParam : 30.0f );
-		};
-		if ( ogl->editMode ) {
-			bool hasSel = !ogl->pickedElems.isEmpty();
-			menu.addSeparator();
-			menu.addAction( tr( "Select All\tA" ), [this]() { ogl->selectAll( 1 ); } );
-			menu.addAction( tr( "Deselect All" ), [this]() { ogl->selectAll( 2 ); } );
-			menu.addAction( tr( "Invert Selection\tCtrl+I" ), [this]() { ogl->invertSelection(); } );
-			menu.addAction( tr( "Box Select\tB" ), [this]() { ogl->beginBoxSelect(); } );
-			menu.addAction( tr( "Circle Select\tC" ), [this]() { ogl->beginCircleSelect(); } );
-			menu.addAction( tr( "Select More\tCtrl+=" ), [this]() { ogl->selectMoreLess( true ); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Select Less\tCtrl+-" ), [this]() { ogl->selectMoreLess( false ); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Select Linked\tCtrl+L" ), [this]() { ogl->selectLinked( false ); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Select Linked by Angle…\tCtrl+Alt+Shift+F" ), linkedByAngle )->setEnabled( hasSel );
-			if ( weightPaint || segmentPaint ) {
-				menu.addSeparator();
-				menu.addAction( weightPaint ? tr( "Fill Selected Weight\tCtrl+X" )
-					: tr( "Apply Segment Brush to Selection\tCtrl+X" ), [this, weightPaint]() {
-					if ( weightPaint ) ogl->fillRiggingWeightSelection();
-					else ogl->fillSegmentPaintSelection();
-				} )->setEnabled( hasSel );
-				menu.addSeparator();
-				menu.addAction( tr( "Hide Selection\tH" ), [this]() { ogl->hideSelectedElements(); } )->setEnabled( hasSel );
-				menu.addAction( tr( "Unhide All\tAlt+H" ), [this]() { ogl->unhideAllElements(); } );
-			} else {
-				menu.addSeparator();
-				menu.addAction( tr( "Extrude Region…\tE" ), [this]() { ogl->extrudeRegion(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Fill / Bridge…\tF" ), [this]() { ogl->smartConnect(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Inset Faces…\tI" ), [this]() { ogl->insetRegion(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Loop Cut…\tCtrl+R" ), [this]() { ogl->loopCut(); } );
-			menu.addAction( tr( "Subdivide" ), [this]() { ogl->subdivideSelection(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Edge Slide…\tShift+V" ), [this]() { ogl->edgeSlide(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Smooth Vertices…" ), [this]() { ogl->smoothVertices(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Dissolve Vertices\tCtrl+X" ), [this]() { ogl->dissolveVerts(); } )->setEnabled( hasSel );
-			menu.addSeparator();
-			menu.addAction( tr( "Flip Normals" ), [this]() { ogl->flipSelectedFaces(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Recalculate Normals" ), [this]() { ogl->recalcSelectedNormals(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Symmetrize…" ), [this]() { ogl->symmetrizeShape(); } );
-			menu.addSeparator();
-			menu.addAction( tr( "Duplicate\tShift+D" ), [this]() { ogl->duplicateElements(); } )->setEnabled( hasSel );
-			QMenu * meshTools = nullptr;
-			for ( QAction * action : contextBook.actions() ) {
-				if ( action->menu() && action->menu()->title() == QLatin1String( "Mesh" ) ) {
-					meshTools = action->menu();
-					break;
-				}
-			}
-			if ( !meshTools ) {
-				meshTools = new QMenu( tr( "Mesh" ), &contextBook );
-				contextBook.addMenu( meshTools );
-			}
-			if ( !meshTools->actions().isEmpty() )
-				meshTools->addSeparator();
-			QAction * floatingDecal = meshTools->addAction( tr( "Create Floating Decal…" ), [this]() { ogl->createFloatingDecal(); } );
-			floatingDecal->setEnabled( hasSel );
-			floatingDecal->setToolTip( tr( "Copy selected faces to a separate shape and offset them along their normals" ) );
-			meshTools->setEnabled( true );
-			menu.addAction( tr( "Merge…\tM" ), [this]() { ogl->showMergeMenu(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Separate…\tP" ), [this]() { ogl->showSeparateMenu(); } )->setEnabled( hasSel );
-			menu.addSeparator();
-			menu.addAction( tr( "Snap…\tShift+S" ), [this]() { ogl->showSnapMenu(); } );
-			menu.addAction( tr( "Set Origin…\tShift+Ctrl+Alt+C" ), [this]() { ogl->showSetOriginMenu(); } );
-			QMenu * mCur = menu.addMenu( tr( "3D Cursor" ) );
-			mCur->addAction( tr( "Snap Cursor to Picked" ), [this]() {
-				if ( !ogl->pickedElems.isEmpty() ) {
-					ogl->cursorPos = ogl->pickedMedian();
-					ogl->update();
-				}
-			} )->setEnabled( hasSel );
-			mCur->addAction( tr( "Snap Cursor to World Origin" ), [this]() {
-				ogl->cursorPos = Vector3();
-				ogl->update();
-			} );
-			mCur->addAction( tr( "Move Picked Vertices to Cursor" ), [this]() { ogl->movePickedVertsToCursor(); } )->setEnabled( hasSel );
-			menu.addSeparator();
-			menu.addAction( tr( "Hide Selection\tH" ), [this]() { ogl->hideSelectedElements(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Unhide All\tAlt+H" ), [this]() { ogl->unhideAllElements(); } );
-			menu.addSeparator();
-			menu.addAction( tr( "Delete…\tX" ), [this]() { ogl->showDeleteMenu(); } )->setEnabled( hasSel );
-			}
-		} else {
-			// object mode: the transforms above plus the object-level operations
-			bool hasSel = !ogl->objSelection.isEmpty();
-			menu.addSeparator();
-			menu.addAction( tr( "Select All\tA" ), [this]() { ogl->selectAll( 1 ); } );
-			menu.addAction( tr( "Deselect All" ), [this]() { ogl->selectAll( 2 ); } );
-			menu.addAction( tr( "Invert Selection\tCtrl+I" ), [this]() { ogl->invertSelection(); } );
-			menu.addAction( tr( "Box Select\tB" ), [this]() { ogl->beginBoxSelect(); } );
-			menu.addAction( tr( "Circle Select\tC" ), [this]() { ogl->beginCircleSelect(); } );
-			menu.addSeparator();
-			menu.addAction( tr( "Add Primitive…\tShift+A" ), [this]() { ogl->showAddPrimitiveMenu(); } );
-			menu.addAction( tr( "Duplicate\tShift+D" ), [this]() { ogl->duplicateSelection(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Join\tCtrl+J" ), [this]() { ogl->joinSelectedObjects(); } )->setEnabled( ogl->objSelection.size() >= 2 );
-			QMenu * parentMenu = menu.addMenu( tr( "Parent" ) );
-			parentMenu->addAction( tr( "Set Parent...\tCtrl+P" ), [this]() { ogl->showParentMenu(); } )->setEnabled( hasSel );
-			parentMenu->addAction( tr( "Clear Parent...\tAlt+P" ), [this]() { ogl->showClearParentMenu(); } )->setEnabled( hasSel );
-			menu.addSeparator();
-			menu.addAction( tr( "Snap…\tShift+S" ), [this]() { ogl->showSnapMenu(); } );
-			menu.addAction( tr( "Set Origin…\tShift+Ctrl+Alt+C" ), [this]() { ogl->showSetOriginMenu(); } );
-			QMenu * mCur = menu.addMenu( tr( "3D Cursor" ) );
-			mCur->addAction( tr( "Snap Cursor to World Origin" ), [this]() {
-				ogl->cursorPos = Vector3();
-				ogl->update();
-			} );
-			mCur->addAction( tr( "Snap Node to Cursor" ), [this]() { ogl->snapNodeToCursor(); } )->setEnabled( hasSel );
-			menu.addSeparator();
-			menu.addAction( tr( "Hide\tH" ), [this]() { ogl->hideSelected(); } )->setEnabled( hasSel );
-			menu.addAction( tr( "Unhide All\tAlt+H" ), [this]() { ogl->unhideAll(); } );
-		}
-		if ( !weightPaint && ( idx.isValid() || ogl->editMode ) ) {
-			// Append the regular spell category submenus (Mesh, Havok, etc.).
-			menu.addSeparator();
-			const auto spellActs = contextBook.actions();
-			for ( QAction * a : spellActs )
-				menu.addAction( a );
-		}
-		menu.exec( p );
-		return;
-	}
 
 	if ( sender() == list && !ogl->editMode ) {
 		// The Block List selection is synchronised to objSelection by

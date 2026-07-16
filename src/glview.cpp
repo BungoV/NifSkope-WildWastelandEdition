@@ -169,7 +169,6 @@ GLView::GLView( QWindow * p )
 	view = ViewDefault;
 	debugMode = DbgNone;
 	perspectiveMode = true;
-	contextMenuShiftModifier = false;
 	animState = AnimEnabled;
 
 	Zoom = 1.0;
@@ -9596,7 +9595,14 @@ void GLView::showSpecialsMenu()
 {
 	if ( !model )
 		return;
+	const bool anyPaint = riggingWeightPaintModeActive() || vertexPaintModeActive()
+		|| segmentPaintModeActive();
 	AutoCloseMenu m;
+	// the modal transforms head the quick menu in both modes (not while painting)
+	if ( !anyPaint ) {
+		m.addSection( tr( "Transform" ) );
+		populateTransformMenu( &m );
+	}
 	if ( editMode ) {
 		const bool hasSel = !pickedElems.isEmpty();
 		m.addSection( tr( "Specials" ) );
@@ -9696,6 +9702,176 @@ void GLView::showAddPrimitiveMenu()
 		addPrimitive( 2 );
 	else if ( r == aSph )
 		addPrimitive( 3 );
+}
+
+void GLView::populateTransformMenu( QMenu * m )
+{
+	m->addAction( tr( "Move\tG" ), this, [this]() { startModalTransform( 1 ); } );
+	m->addAction( tr( "Rotate\tR" ), this, [this]() { startModalTransform( 2 ); } );
+	m->addAction( tr( "Scale\tS" ), this, [this]() { startModalTransform( 3 ); } );
+}
+
+void GLView::populateSelectMenu( QMenu * m )
+{
+	if ( !model )
+		return;
+	m->addAction( tr( "All\tA" ), this, [this]() { selectAll( 1 ); } );
+	m->addAction( tr( "None" ), this, [this]() { selectAll( 2 ); } );
+	m->addAction( tr( "Invert\tCtrl+I" ), this, [this]() { invertSelection(); } );
+	m->addSeparator();
+	m->addAction( tr( "Box Select\tB" ), this, [this]() { beginBoxSelect(); } );
+	m->addAction( tr( "Circle Select\tC" ), this, [this]() { beginCircleSelect(); } );
+	if ( editMode ) {
+		const bool hasSel = !pickedElems.isEmpty();
+		m->addSeparator();
+		m->addAction( tr( "Select More\tCtrl+=" ), this,
+			[this]() { selectMoreLess( true ); } )->setEnabled( hasSel );
+		m->addAction( tr( "Select Less\tCtrl+-" ), this,
+			[this]() { selectMoreLess( false ); } )->setEnabled( hasSel );
+		m->addSeparator();
+		m->addAction( tr( "Select Linked\tCtrl+L" ), this,
+			[this]() { selectLinked( false ); } )->setEnabled( hasSel );
+		// grow across faces within the sharpness angle; the redo panel that
+		// pops up afterwards lets you readjust the angle live
+		m->addAction( tr( "Select Linked by Angle…\tCtrl+Alt+Shift+F" ), this, [this]() {
+			selectLinked( true, ( lastOpKind == 2 ) ? lastOpParam : 30.0f );
+		} )->setEnabled( hasSel );
+	}
+}
+
+void GLView::populateAddMenu( QMenu * m )
+{
+	if ( !model )
+		return;
+	m->addAction( tr( "Plane" ), this, [this]() { addPrimitive( 0 ); } );
+	m->addAction( tr( "Cube" ), this, [this]() { addPrimitive( 1 ); } );
+	m->addAction( tr( "Cylinder" ), this, [this]() { addPrimitive( 2 ); } );
+	m->addAction( tr( "UV Sphere" ), this, [this]() { addPrimitive( 3 ); } );
+}
+
+void GLView::populateObjectMenu( QMenu * m )
+{
+	if ( !model )
+		return;
+	const bool hasSel = !objSelection.isEmpty();
+	populateTransformMenu( m->addMenu( tr( "Transform" ) ) );
+	m->addSeparator();
+	m->addAction( tr( "Snap…\tShift+S" ), this, [this]() { showSnapMenu(); } );
+	m->addAction( tr( "Set Origin…\tShift+Ctrl+Alt+C" ), this, [this]() { showSetOriginMenu(); } );
+	m->addSeparator();
+	m->addAction( tr( "Duplicate\tShift+D" ), this,
+		[this]() { duplicateSelection(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Join\tCtrl+J" ), this,
+		[this]() { joinSelectedObjects(); } )->setEnabled( objSelection.size() >= 2 );
+	QMenu * mPar = m->addMenu( tr( "Parent" ) );
+	mPar->addAction( tr( "Set Parent…\tCtrl+P" ), this,
+		[this]() { showParentMenu(); } )->setEnabled( hasSel );
+	mPar->addAction( tr( "Clear Parent…\tAlt+P" ), this,
+		[this]() { showClearParentMenu(); } )->setEnabled( hasSel );
+	m->addSeparator();
+	QMenu * mVis = m->addMenu( tr( "Show/Hide" ) );
+	mVis->addAction( tr( "Hide\tH" ), this, [this]() { hideSelected(); } )->setEnabled( hasSel );
+	mVis->addAction( tr( "Unhide All\tAlt+H" ), this, [this]() { unhideAll(); } );
+}
+
+void GLView::populateMeshMenu( QMenu * m )
+{
+	if ( !model )
+		return;
+	const bool hasSel = !pickedElems.isEmpty();
+	populateTransformMenu( m->addMenu( tr( "Transform" ) ) );
+	m->addSeparator();
+	m->addAction( tr( "Snap…\tShift+S" ), this, [this]() { showSnapMenu(); } );
+	m->addAction( tr( "Set Origin…\tShift+Ctrl+Alt+C" ), this, [this]() { showSetOriginMenu(); } );
+	m->addSeparator();
+	m->addAction( tr( "Extrude Region…\tE" ), this,
+		[this]() { extrudeRegion(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Duplicate\tShift+D" ), this,
+		[this]() { duplicateElements(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Separate…\tP" ), this,
+		[this]() { showSeparateMenu(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Symmetrize…" ), this, [this]() { symmetrizeShape(); } );
+	QMenu * mNorm = m->addMenu( tr( "Normals" ) );
+	mNorm->addAction( tr( "Flip" ), this,
+		[this]() { flipSelectedFaces(); } )->setEnabled( hasSel );
+	mNorm->addAction( tr( "Recalculate" ), this,
+		[this]() { recalcSelectedNormals(); } )->setEnabled( hasSel );
+	m->addSeparator();
+	QAction * aDecal = m->addAction( tr( "Create Floating Decal…" ), this,
+		[this]() { createFloatingDecal(); } );
+	aDecal->setEnabled( hasSel );
+	aDecal->setToolTip( tr( "Copy selected faces to a separate shape and offset them along their normals" ) );
+	m->addSeparator();
+	QMenu * mVis = m->addMenu( tr( "Show/Hide" ) );
+	mVis->addAction( tr( "Hide Selection\tH" ), this,
+		[this]() { hideSelectedElements(); } )->setEnabled( hasSel );
+	mVis->addAction( tr( "Unhide All\tAlt+H" ), this, [this]() { unhideAllElements(); } );
+	m->addSeparator();
+	m->addAction( tr( "Delete…\tX" ), this,
+		[this]() { showDeleteMenu(); } )->setEnabled( hasSel );
+}
+
+void GLView::populateVertexMenu( QMenu * m )
+{
+	if ( !model )
+		return;
+	const bool hasSel = !pickedElems.isEmpty();
+	m->addAction( tr( "Merge…\tM" ), this,
+		[this]() { showMergeMenu(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Remove Doubles…" ), this, [this]() {
+		mergeVertices( 2, ( lastOpKind == 1 ) ? lastOpParam : 0.0001f );
+	} )->setEnabled( hasSel );
+	m->addSeparator();
+	m->addAction( tr( "Smooth Vertices…" ), this,
+		[this]() { smoothVertices(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Dissolve Vertices\tCtrl+X" ), this,
+		[this]() { dissolveVerts(); } )->setEnabled( hasSel );
+}
+
+void GLView::populateEdgeMenu( QMenu * m )
+{
+	if ( !model )
+		return;
+	const bool hasSel = !pickedElems.isEmpty();
+	m->addAction( tr( "Loop Cut…\tCtrl+R" ), this, [this]() { loopCut(); } );
+	m->addAction( tr( "Subdivide" ), this,
+		[this]() { subdivideSelection(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Edge Slide…\tShift+V" ), this,
+		[this]() { edgeSlide(); } )->setEnabled( hasSel );
+}
+
+void GLView::populateFaceMenu( QMenu * m )
+{
+	if ( !model )
+		return;
+	const bool hasSel = !pickedElems.isEmpty();
+	m->addAction( tr( "Extrude Region…\tE" ), this,
+		[this]() { extrudeRegion(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Inset Faces…\tI" ), this,
+		[this]() { insetRegion(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Fill / Bridge…\tF" ), this,
+		[this]() { smartConnect(); } )->setEnabled( hasSel );
+}
+
+void GLView::populatePaintMenu( QMenu * m )
+{
+	if ( !model )
+		return;
+	const bool weightPaint = riggingWeightPaintModeActive();
+	const bool segmentPaint = segmentPaintModeActive();
+	const bool hasSel = !pickedElems.isEmpty();
+	if ( weightPaint ) {
+		m->addAction( tr( "Fill Selected Weight\tCtrl+X" ), this,
+			[this]() { fillRiggingWeightSelection(); } )->setEnabled( hasSel );
+		m->addSeparator();
+	} else if ( segmentPaint ) {
+		m->addAction( tr( "Apply Segment Brush to Selection\tCtrl+X" ), this,
+			[this]() { fillSegmentPaintSelection(); } )->setEnabled( hasSel );
+		m->addSeparator();
+	}
+	m->addAction( tr( "Hide Selection\tH" ), this,
+		[this]() { hideSelectedElements(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Unhide All\tAlt+H" ), this, [this]() { unhideAllElements(); } );
 }
 
 static QVector<int> tlNiNodeParents( NifModel * nif, int child )
@@ -12540,17 +12716,21 @@ void GLView::saveImage()
 
 void GLView::contextMenuEvent( QContextMenuEvent * e )
 {
-	// Shift+RMB is the 3D-cursor placement click (Blender), not a menu
-	if ( e->reason() == QContextMenuEvent::Mouse && ( e->modifiers() & Qt::ShiftModifier ) ) {
+	// The viewport has no context menu. A plain right-click (click, not an
+	// RMB zoom drag) drops the gizmo / 3D cursor on the surface under the
+	// mouse; the keyboard menu key opens the W quick menu instead.
+	if ( e->reason() == QContextMenuEvent::Keyboard ) {
+		mouseButtonState = 0;
+		showSpecialsMenu();
 		e->accept();
 		return;
 	}
-	if ( e->reason() == QContextMenuEvent::Keyboard || ( pressPos - lastPos ).manhattanLength() <= 10 ) {
+	if ( ( pressPos - lastPos ).manhattanLength() <= 10 && model ) {
 		mouseButtonState = 0;
-		contextMenuShiftModifier = bool( e->modifiers() & Qt::ShiftModifier );
-		emit graphicsView->customContextMenuRequested( e->pos() );
-		e->accept();
+		placeCursor( QPointF( e->pos() ) );
+		update();
 	}
+	e->accept();
 }
 
 void GLView::dragEnterEvent( QDragEnterEvent * e )
@@ -13454,8 +13634,8 @@ void GLView::mousePressEvent( QMouseEvent * event )
 			return;
 		}
 		// MMB and Shift+MMB continue into the normal orbit/pan handler. RMB
-		// likewise continues to the normal click path so release opens the
-		// Weight Paint context menu without tearing down the mode.
+		// likewise continues to the normal click path so release drops the
+		// gizmo / 3D cursor without tearing down the mode.
 	}
 
 	if ( vertexPaintMode && vertexPaintBrushEnabled ) {
@@ -13488,15 +13668,6 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		}
 	}
 
-	// Shift+RMB places the 3D cursor (Blender); the context menu is suppressed
-	// for this click in contextMenuEvent
-	if ( event->button() == Qt::RightButton && ( event->modifiers() & Qt::ShiftModifier )
-		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) && model ) {
-		placeCursor( getQMouseEventPosition( event ) );
-		update();
-		return;
-	}
-
 	// circle select armed (C): LMB paints select, MMB paints deselect,
 	// RMB / Esc exits the gadget
 	if ( circleSelecting ) {
@@ -13518,7 +13689,7 @@ void GLView::mousePressEvent( QMouseEvent * event )
 			circlePainting = circleErasing = false;
 			unsetCursor();
 			emit gizmoStatus( QString() );
-			// keep this click from opening the context menu on release
+			// keep this click from dropping the gizmo on release
 			lastPos = cp;
 			pressPos = QPointF( -10000.0, -10000.0 );
 			update();
@@ -13539,6 +13710,8 @@ void GLView::mousePressEvent( QMouseEvent * event )
 			boxSelecting = false;
 			unsetCursor();
 			emit gizmoStatus( tr( "Box select cancelled" ) );
+			// keep this click from dropping the gizmo on release
+			pressPos = QPointF( -10000.0, -10000.0 );
 		}
 		update();
 		return;
@@ -13562,15 +13735,6 @@ void GLView::mousePressEvent( QMouseEvent * event )
 			pressPos = lastPos;
 			return;
 		}
-	}
-
-	// Shift+right-click drops the 3D cursor on the surface in ANY mode
-	// (Blender); plain right-click keeps its usual behaviour in edit mode too
-	if ( event->button() == Qt::RightButton && ( event->modifiers() & Qt::ShiftModifier )
-		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
-		placeCursor( getQMouseEventPosition( event ) );
-		gizmoSwallowClick = true;
-		return;
 	}
 
 	// grabbing a gizmo handle starts a constrained drag; releasing commits.
