@@ -1071,18 +1071,12 @@ void GLView::paintGL()
 		// the grid/axes render invisibly until a frame has run
 		// Scene::drawSelection with a valid current block (empirically
 		// verified; renderer root cause still open). Emulate the first
-		// user click: point the current block at the root for two
-		// corrective repaints, then drop it again. No visible side
-		// effect - the root highlight only draws with Show Nodes on.
+		// user click via a temporary root current-block on the SECOND
+		// post-compile frame - it must not be set during this frame,
+		// or setCenter() frames the empty root node and the camera
+		// starts far away from the model.
 		postCompileRepaints = 2;
-		if ( model && !scene->currentBlock.isValid() ) {
-			QModelIndex iRoot = model->getBlockIndex( 0 );
-			if ( iRoot.isValid() ) {
-				scene->currentBlock = iRoot;
-				scene->currentIndex = iRoot;
-				syntheticCurrentBlock = true;
-			}
-		}
+		pendingSyntheticBlock = true;
 	}
 
 	// Center the model
@@ -2315,8 +2309,20 @@ void GLView::paintGL()
 	// see postCompileRepaints in glview.h)
 	if ( postCompileRepaints > 0 ) {
 		postCompileRepaints--;
-		if ( !postCompileRepaints && syntheticCurrentBlock ) {
-			// the healing frames have rendered: drop the synthetic root
+		if ( pendingSyntheticBlock ) {
+			// the compile + centering frame has painted: heal the streaming
+			// lines on the next frame via a temporary valid current block
+			pendingSyntheticBlock = false;
+			if ( model && !scene->currentBlock.isValid() ) {
+				QModelIndex iRoot = model->getBlockIndex( 0 );
+				if ( iRoot.isValid() ) {
+					scene->currentBlock = iRoot;
+					scene->currentIndex = iRoot;
+					syntheticCurrentBlock = true;
+				}
+			}
+		} else if ( !postCompileRepaints && syntheticCurrentBlock ) {
+			// the healing frame has rendered: drop the synthetic root
 			// reference again unless the user selected something meanwhile
 			syntheticCurrentBlock = false;
 			if ( model && scene->currentBlock == model->getBlockIndex( 0 ) ) {

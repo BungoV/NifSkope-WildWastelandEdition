@@ -992,6 +992,10 @@ private:
 	//! streaming renderer still open — see WW_CHANGES 2026-07-17); the
 	//! reference is dropped again afterwards
 	bool syntheticCurrentBlock = false;
+	//! Arms the synthetic block AFTER the compile frame has painted: setting
+	//! it during the compile frame made setCenter() frame the empty root
+	//! node, so the camera started far away from the model
+	bool pendingSyntheticBlock = false;
 
 	QTimer * lightVisTimer;
 	int lightVisTimeout;
