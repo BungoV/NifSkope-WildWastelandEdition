@@ -101,8 +101,12 @@ public slots:
 	//! Updates version conditions (connect to dataChanged)
 	void updateConditions( const QModelIndex & topLeft, const QModelIndex & bottomRight );
 protected slots:
-	//! Recursively updates version conditions
-	void updateConditionRecurse( const QModelIndex & index );
+	//! Recursively updates version conditions. descendArrays=false skips the
+	//! contents of arrays (their element rows are not individually
+	//! version-gated) — used by the frequent doItemsLayout re-derivation so a
+	//! block with huge vertex/triangle arrays stays cheap to relayout; the
+	//! root-change path keeps the full walk to derive array-member hiding.
+	void updateConditionRecurse( const QModelIndex & index, bool descendArrays = true );
 	//! Called when the current index changes
 	void currentChanged( const QModelIndex & current, const QModelIndex & previous ) override final;
 

@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Slow click-select on high-poly blocks fixed; legacy render hotkeys removed
+
+**Perf:** selecting a high-poly shape in the viewport (reported on the
+x01_torso spheres) had become very slow. Cause: the row-hiding
+`doItemsLayout()` re-derivation walked the Block Details root's ENTIRE
+subtree — including a big shape's vertex/triangle arrays, tens of thousands
+of model visits — and layouts fire constantly (selection change, scroll,
+auto-expand), multiplying the walk several times per click.
+`updateConditionRecurse()` gained a `descendArrays` flag: the frequent
+doItemsLayout pass no longer descends into arrays (array element rows are
+not individually version-gated), while the root-change path
+(`refreshRowHiding`) keeps the full walk that derives array-member hiding.
+The original rot fix stays intact for the rows it was built for.
+
+**Legacy hotkeys removed** (10 shortcut properties stripped from
+nifskope.ui): Lighting Only Alt+L, Update View Alt+U, Silhouette Alt+D,
+Show Grid Shift+G, Textures Alt+T, Vertex Colors Alt+V, Frontal Alt+F,
+Specular Alt+H, Glow Alt+G, Cube Mapping Alt+R. The menu items remain
+clickable; they simply no longer own keys (and Alt+H no longer shadows
+Blender unhide). With no current or default binding they also disappear
+from the Settings ▸ Shortcuts list automatically.
+
 ## 2026-07-16 — Swappable select / place-gizmo mouse buttons
 
 Blender-style "Select With" mouse mapping: by default LMB clicks select and

@@ -126,7 +126,11 @@ void NifTreeView::doItemsLayout()
 	if ( !inLayoutHidingRefresh && nif && rootIndex().isValid()
 		&& nif->getState() == BaseModel::Default ) {
 		inLayoutHidingRefresh = true;
-		updateConditionRecurse( rootIndex() );
+		// shallow walk: layouts happen constantly (selection, scroll, expand),
+		// and descending into a big shape's vertex/triangle arrays here made
+		// every click on a high-poly block take seconds. Array-member hiding
+		// is derived once per root change (refreshRowHiding's full walk).
+		updateConditionRecurse( rootIndex(), false );
 		inLayoutHidingRefresh = false;
 	}
 	QTreeView::doItemsLayout();
@@ -313,7 +317,7 @@ void NifTreeView::updateConditions( const QModelIndex & topLeft, const QModelInd
 	doItemsLayout();
 }
 
-void NifTreeView::updateConditionRecurse( const QModelIndex & index )
+void NifTreeView::updateConditionRecurse( const QModelIndex & index, bool descendArrays )
 {
 	if ( nif->getState() != BaseModel::Default )
 		return;
@@ -326,9 +330,11 @@ void NifTreeView::updateConditionRecurse( const QModelIndex & index )
 	if ( item->parent() && item->parent()->isArray() && !item->childCount() )
 		return;
 
-	for ( int r = 0; r < model()->rowCount( index ); r++ ) {
-		QModelIndex child = model()->index( r, 0, index );
-		updateConditionRecurse( child );
+	if ( descendArrays || !item->isArray() ) {
+		for ( int r = 0; r < model()->rowCount( index ); r++ ) {
+			QModelIndex child = model()->index( r, 0, index );
+			updateConditionRecurse( child, descendArrays );
+		}
 	}
 
 	setRowHidden( index.row(), index.parent(), isRowHidden(item) );

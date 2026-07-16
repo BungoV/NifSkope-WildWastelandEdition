@@ -1679,9 +1679,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    <property name="statusTip">
     <string>Show Textures</string>
    </property>
-   <property name="shortcut">
-    <string>Alt+T</string>
-   </property>
   </action>
   <action name="aVertexColors">
    <property name="checkable">
@@ -1703,9 +1700,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    </property>
    <property name="statusTip">
     <string>Show Vertex Colors</string>
-   </property>
-   <property name="shortcut">
-    <string>Alt+V</string>
    </property>
   </action>
   <action name="aLighting">
@@ -1743,9 +1737,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    <property name="toolTip">
     <string>Frontal Lighting</string>
    </property>
-   <property name="shortcut">
-    <string>Alt+F</string>
-   </property>
   </action>
   <action name="aVisNormals">
    <property name="checkable">
@@ -1761,9 +1752,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    <property name="statusTip">
     <string>Lighting Only</string>
    </property>
-   <property name="shortcut">
-    <string>Alt+L</string>
-   </property>
   </action>
   <action name="aUpdateView">
    <property name="text">
@@ -1771,9 +1759,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    </property>
    <property name="statusTip">
     <string>Flush Texture Cache and Update View</string>
-   </property>
-   <property name="shortcut">
-    <string>Alt+U</string>
    </property>
   </action>
   <action name="aSilhouette">
@@ -1789,9 +1774,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    </property>
    <property name="statusTip">
     <string>Silhouette Visualization</string>
-   </property>
-   <property name="shortcut">
-    <string>Alt+D</string>
    </property>
   </action>
   <action name="aSpecular">
@@ -1811,9 +1793,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    <property name="statusTip">
     <string>Show Specular Highlights</string>
    </property>
-   <property name="shortcut">
-    <string>Alt+H</string>
-   </property>
   </action>
   <action name="aGlow">
    <property name="checkable">
@@ -1831,9 +1810,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    </property>
    <property name="statusTip">
     <string>Show Glow Mapping</string>
-   </property>
-   <property name="shortcut">
-    <string>Alt+G</string>
    </property>
   </action>
   <action name="aShowMarkers">
@@ -1882,9 +1858,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    <property name="toolTip">
     <string>Cube Mapping</string>
    </property>
-   <property name="shortcut">
-    <string>Alt+R</string>
-   </property>
   </action>
   <action name="aBoundsDebug">
    <property name="checkable">
@@ -1900,9 +1873,6 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
    </property>
    <property name="text">
     <string>Show Grid</string>
-   </property>
-   <property name="shortcut">
-    <string>Shift+G</string>
    </property>
   </action>
   <action name="aShowHidden">
