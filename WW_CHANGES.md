@@ -26,18 +26,26 @@ symptom needs a GUI check. If the grid is still missing on load, next step is
 diffing the streaming VAO/program state with a GPU debugger.
 
 UPDATE (00:30): repaints alone were NOT enough — user confirmed live that the
-grid appears only once something is selected. New pinned-down empirical law:
-a frame that runs Scene::drawSelection with a VALID scene->currentBlock heals
-the streaming line drawing permanently (probe: setting currentBlock alone
-fixed it with zero visible artifacts; clearing it afterwards kept it fixed;
-lines.prog's shaders themselves are trivially clean — the geometry shader's
-`alpha = min(lineWidth, 1)` is the only alpha gate and drawLines sets that
-uniform per draw with no value caching). Workaround shipped
-(`syntheticCurrentBlock`): after a compile, currentBlock/currentIndex point at
-the root block for the two corrective repaints, then revert — emulating the
-first user click. The true renderer defect (why the first drawSelection-less
-frames drop streaming lines) remains open; a RenderDoc frame diff is the next
-step if it resurfaces in another form.
+grid appears only once something is selected. A synthetic-currentBlock
+workaround was tried next (point currentBlock at the root for the corrective
+repaints, emulating the first click — probe frames with a valid currentBlock
+always showed the grid); it first broke initial camera centering
+(setCenter() frames the current block's node; the root has zero-radius
+bounds) and, re-sequenced after centering, STILL did not heal the grid live.
+REVERTED (00:45). Conclusion: none of the CPU-visible state theories survive
+— the difference between a real first click and everything emulated so far is
+still unidentified (the click path also runs the pick render + full selection
+sync; probe grabs conflated several of these).
+
+**STATUS: OPEN.** Symptom: grid + origin axes (all streaming line geometry
+inside the scene pass) invisible after loading a NIF until the first click in
+the viewport; harmless otherwise. Everything checked and ruled out is listed
+above; `WW_PERF_TEST=1` re-arms the full instrumentation (stage timings,
+drawGrid guard/GL-state traces, ShapeData creation trace, framebuffer PNG
+dumps). Next step: RenderDoc capture of the first post-load frame vs the
+first post-click frame and diff the grid draw call's GPU state (actually
+bound program, VAO, vertex attribute bindings, uniform values) — printf
+instrumentation has been exhausted.
 
 Diagnostics kept (all inert without WW_PERF_TEST=1): drawGrid guard + GL-state
 traces, ShapeData creation trace, probe stages with PNG dumps in createWindow.

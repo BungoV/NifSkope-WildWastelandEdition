@@ -1068,15 +1068,11 @@ void GLView::paintGL()
 		emit sceneTimeChanged( time, scene->timeMin(), scene->timeMax() );
 		isDisabled = false;
 		doCompile = 0;
-		// the grid/axes render invisibly until a frame has run
-		// Scene::drawSelection with a valid current block (empirically
-		// verified; renderer root cause still open). Emulate the first
-		// user click via a temporary root current-block on the SECOND
-		// post-compile frame - it must not be set during this frame,
-		// or setCenter() frames the empty root node and the camera
-		// starts far away from the model.
+		// two corrective repaints after the compile; the startup grid/axes
+		// defect (see WW_CHANGES 2026-07-17) is still open - a synthetic
+		// current block was tried here and reverted: it did not heal the
+		// grid in live use and framing the root broke setCenter()
 		postCompileRepaints = 2;
-		pendingSyntheticBlock = true;
 	}
 
 	// Center the model
@@ -2305,31 +2301,9 @@ void GLView::paintGL()
 	std::fprintf( stderr, "Average frame time = %.2f ms\n", avgTime );
 #endif
 
-	// drain the post-compile corrective repaints (grid/axes visibility;
-	// see postCompileRepaints in glview.h)
+	// drain the post-compile corrective repaints (see glview.h)
 	if ( postCompileRepaints > 0 ) {
 		postCompileRepaints--;
-		if ( pendingSyntheticBlock ) {
-			// the compile + centering frame has painted: heal the streaming
-			// lines on the next frame via a temporary valid current block
-			pendingSyntheticBlock = false;
-			if ( model && !scene->currentBlock.isValid() ) {
-				QModelIndex iRoot = model->getBlockIndex( 0 );
-				if ( iRoot.isValid() ) {
-					scene->currentBlock = iRoot;
-					scene->currentIndex = iRoot;
-					syntheticCurrentBlock = true;
-				}
-			}
-		} else if ( !postCompileRepaints && syntheticCurrentBlock ) {
-			// the healing frame has rendered: drop the synthetic root
-			// reference again unless the user selected something meanwhile
-			syntheticCurrentBlock = false;
-			if ( model && scene->currentBlock == model->getBlockIndex( 0 ) ) {
-				scene->currentBlock = QPersistentModelIndex();
-				scene->currentIndex = QPersistentModelIndex();
-			}
-		}
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 	}
 

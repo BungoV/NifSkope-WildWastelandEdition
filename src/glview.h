@@ -986,16 +986,6 @@ private:
 	//! invisibly and the failing draw self-heals, so without these the user
 	//! sits on a gridless stale frame until the next input-driven repaint
 	unsigned char postCompileRepaints = 0;
-	//! The post-compile repaints temporarily point scene->currentBlock at the
-	//! root: a frame that runs Scene::drawSelection with a valid current
-	//! block permanently heals the invisible grid/axes (root cause in the
-	//! streaming renderer still open — see WW_CHANGES 2026-07-17); the
-	//! reference is dropped again afterwards
-	bool syntheticCurrentBlock = false;
-	//! Arms the synthetic block AFTER the compile frame has painted: setting
-	//! it during the compile frame made setCenter() frame the empty root
-	//! node, so the camera started far away from the model
-	bool pendingSyntheticBlock = false;
 
 	QTimer * lightVisTimer;
 	int lightVisTimeout;
