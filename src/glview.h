@@ -815,6 +815,36 @@ public:
 	//! the hole), two rim loops = Bridge Edge Loops (band between them)
 	void smartConnect();
 
+	// ---- Phase 3/4 modeling operators ----
+	//! Shared validation for the single-shape vertex operators
+	bool vertexOpTarget( int & sb, QSet<int> & sv, const char * opName );
+	//! Shift+V: slide the selection along its unselected neighbor edges
+	//! (the redo panel's Factor is the modal)
+	void edgeSlide();
+	//! Laplacian relax of the selected verts (panel: Factor / Iterations)
+	void smoothVertices();
+	//! Reverse the winding of the selected faces (+ normal refresh)
+	void flipSelectedFaces();
+	//! Area-weighted normal recompute over the selected verts
+	void recalcSelectedNormals();
+	//! Subdivide the selected edges/faces at their midpoints (tri-native)
+	void subdivideSelection();
+	//! I: inset the selected face region (panel: Thickness / Depth)
+	void insetRegion();
+	//! Ctrl+R: insert cut rings across the edge ring under the cursor
+	//! (panel: Number of Cuts)
+	void loopCut();
+	//! Ctrl+X: dissolve the selected verts, re-capping each one's 1-ring
+	void dissolveVerts();
+	//! Mirror the mesh across a local axis, welding the seam
+	//! (panel: Axis / Merge Distance)
+	void symmetrizeShape();
+	//! Shift+A (object mode): add a primitive BSTriShape cloned from the
+	//! active shape's layout + material. kind: 0 plane, 1 cube, 2 cylinder,
+	//! 3 UV sphere
+	void addPrimitive( int kind );
+	void showAddPrimitiveMenu();
+
 	// ---- selection undo (Blender: selections are undoable, Ctrl+Z) ----
 	struct SelState { QVector<PickedElement> picked; QSet<int> objSel; int objActive = -1; };
 	QVector<SelState> selUndo, selRedo;

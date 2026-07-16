@@ -4026,6 +4026,50 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			e->accept();
 			return true;
 		}
+		// the Blender modeling operators (edit mode, pointer over the view):
+		// I inset, Ctrl+R loop cut, Shift+V edge slide, Ctrl+X dissolve
+		if ( ogl && graphicsView && ogl->editMode && !ogl->freeCamera
+			&& !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
+			&& !ogl->segmentPaintModeActive()
+			&& isActiveWindow()
+			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			const auto mods = ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier );
+			int op = 0;
+			if ( ke->key() == Qt::Key_I && mods == Qt::KeyboardModifiers() )
+				op = 1;
+			else if ( ke->key() == Qt::Key_R && mods == Qt::ControlModifier )
+				op = 2;
+			else if ( ke->key() == Qt::Key_V && mods == Qt::ShiftModifier )
+				op = 3;
+			else if ( ke->key() == Qt::Key_X && mods == Qt::ControlModifier )
+				op = 4;
+			if ( op ) {
+				if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() ) {
+					if ( op == 1 )
+						ogl->insetRegion();
+					else if ( op == 2 )
+						ogl->loopCut();
+					else if ( op == 3 )
+						ogl->edgeSlide();
+					else
+						ogl->dissolveVerts();
+				}
+				e->accept();
+				return true;
+			}
+		}
+		// Shift+A adds a primitive (object mode, pointer over the view)
+		if ( ogl && graphicsView && !ogl->editMode && !ogl->freeCamera
+			&& ke->key() == Qt::Key_A
+			&& ( ke->modifiers() & Qt::ShiftModifier )
+			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) )
+			&& isActiveWindow()
+			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
+				ogl->showAddPrimitiveMenu();
+			e->accept();
+			return true;
+		}
 		if ( ogl && graphicsView
 			&& ke->key() == Qt::Key_F && ( ke->modifiers() & Qt::ShiftModifier )
 			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) )
@@ -4332,6 +4376,17 @@ void NifSkope::contextMenu( const QPoint & pos )
 				menu.addSeparator();
 				menu.addAction( tr( "Extrude Region…\tE" ), [this]() { ogl->extrudeRegion(); } )->setEnabled( hasSel );
 			menu.addAction( tr( "Fill / Bridge…\tF" ), [this]() { ogl->smartConnect(); } )->setEnabled( hasSel );
+			menu.addAction( tr( "Inset Faces…\tI" ), [this]() { ogl->insetRegion(); } )->setEnabled( hasSel );
+			menu.addAction( tr( "Loop Cut…\tCtrl+R" ), [this]() { ogl->loopCut(); } );
+			menu.addAction( tr( "Subdivide" ), [this]() { ogl->subdivideSelection(); } )->setEnabled( hasSel );
+			menu.addAction( tr( "Edge Slide…\tShift+V" ), [this]() { ogl->edgeSlide(); } )->setEnabled( hasSel );
+			menu.addAction( tr( "Smooth Vertices…" ), [this]() { ogl->smoothVertices(); } )->setEnabled( hasSel );
+			menu.addAction( tr( "Dissolve Vertices\tCtrl+X" ), [this]() { ogl->dissolveVerts(); } )->setEnabled( hasSel );
+			menu.addSeparator();
+			menu.addAction( tr( "Flip Normals" ), [this]() { ogl->flipSelectedFaces(); } )->setEnabled( hasSel );
+			menu.addAction( tr( "Recalculate Normals" ), [this]() { ogl->recalcSelectedNormals(); } )->setEnabled( hasSel );
+			menu.addAction( tr( "Symmetrize…" ), [this]() { ogl->symmetrizeShape(); } );
+			menu.addSeparator();
 			menu.addAction( tr( "Duplicate\tShift+D" ), [this]() { ogl->duplicateElements(); } )->setEnabled( hasSel );
 			QMenu * meshTools = nullptr;
 			for ( QAction * action : contextBook.actions() ) {
@@ -4383,6 +4438,7 @@ void NifSkope::contextMenu( const QPoint & pos )
 			menu.addAction( tr( "Box Select\tB" ), [this]() { ogl->beginBoxSelect(); } );
 			menu.addAction( tr( "Circle Select\tC" ), [this]() { ogl->beginCircleSelect(); } );
 			menu.addSeparator();
+			menu.addAction( tr( "Add Primitive…\tShift+A" ), [this]() { ogl->showAddPrimitiveMenu(); } );
 			menu.addAction( tr( "Duplicate\tShift+D" ), [this]() { ogl->duplicateSelection(); } )->setEnabled( hasSel );
 			menu.addAction( tr( "Join\tCtrl+J" ), [this]() { ogl->joinSelectedObjects(); } )->setEnabled( ogl->objSelection.size() >= 2 );
 			QMenu * parentMenu = menu.addMenu( tr( "Parent" ) );

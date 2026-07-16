@@ -1,10 +1,14 @@
 # Modeling Tools — Geometry Creation & Connection Plan
 
-Drafted: 2026-07-15. Status: **Batch 1 shipped 2026-07-15 (user testing
-pending): F0.a Redo Panel v2 + Phase 1 Extrude Region (E).** F0.b exists as
-glview.cpp statics (tlExtrudePlanBuild/tlExtrudeApplyPlan/
-tlRecalcNormalsSubset/tlWorldToLocalDelta); promote to a shared file when the
-UV editor needs them. Next: Fill (F) + Bridge Edge Loops.
+Drafted: 2026-07-15. Status 2026-07-16: **ALL BATCHES SHIPPED except Bevel**
+(user testing pending). Live: Extrude (E), Fill/Bridge (F, with Cuts/Twist),
+Loop Cut (Ctrl+R), Edge Slide (Shift+V), Subdivide, Inset (I), Dissolve
+Vertices (Ctrl+X), Symmetrize, Flip/Recalc Normals, Add Primitive (Shift+A),
+all on in-place undo (TlExtrudeCommand / TlMeshGrowCommand /
+TlShapeStateCommand) with Redo Panel v2. DEFERRED: Bevel (tri-mesh corner
+terminations — do not ship a guess); Delete/Merge/Duplicate still
+snapshot-undo; old Merge/Select-Linked panels not yet on Panel v2. Kernel
+still lives as glview.cpp statics; promote when the UV editor needs it.
 Goal: take the fork from a mesh *editor* (select/transform/delete/merge/rip)
 to a mesh *modeler*: Blender's geometry **creation** (Extrude, Inset, primitives)
 and **connection** (Fill, Bridge, Connect, Loop Cut) operators, in the 3D

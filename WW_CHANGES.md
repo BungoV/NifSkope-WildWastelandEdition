@@ -1,5 +1,51 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Modeling tools batches 3-5: eight operators at once
+
+Everything remaining from `MODELING_TOOLS_PLAN.md` except Bevel (deferred:
+correct tri-mesh corner terminations are a mesh-corrupter risk; better zero
+than wrong). Prior work committed first as d5765c4. All BSTriShape-only,
+Processing-batched writes, area-weighted normal refresh, Redo Panel v2.
+
+- **Loop Cut (Ctrl+R)** — ring walk from the edge under the cursor across
+  tri-pair "quads" (diagonal chosen by opposite-tri validity + most-parallel
+  continuation; a/b chain orientation propagated); ladder re-triangulation
+  (2(C+1) tris per quad, winding matched to the original face normal); new
+  ring verts are true row interpolations (`tlWriteLerpVertex`: UVs, normals,
+  top-4 bone weights). Panel: Number of Cuts (1-64). No slide in v1 — select
+  the new ring and use Edge Slide.
+- **Edge Slide (Shift+V)** — the selection slides along its unselected
+  neighbor edges; the panel's Factor (-1..1) IS the modal. Positions via
+  ChangeValueCommand transaction + in-transaction normal refresh.
+- **Subdivide** (menu) — midpoint split of the selected edges/faces
+  (1/2/3-marked-edge tri splits, winding preserved).
+- **Inset Faces (I)** — region inset via the extrude plan machinery (dup
+  boundary + rim band), duplicates pulled inward perpendicular to the region
+  normal. Panel: Thickness / Depth (armed at 0 — scrub to inset).
+- **Dissolve Vertices (Ctrl+X)** — each interior vert's fan is removed and
+  its 1-ring re-capped (ear clip); boundary/non-manifold verts skipped with a
+  count. Also cleans up extrude scaffolds.
+- **Symmetrize** (menu) — mirror across a local axis with seam weld: keeps
+  one side, snaps near-plane verts onto the plane, mirrored copies with
+  flipped winding + mirrored normals/tangents. Panel: Direction (6-way enum —
+  first Enum consumer of Redo Panel v2) / Merge Distance. v1: crossing
+  triangles are dropped, not bisected; bone weights copy unmirrored.
+- **Flip Normals / Recalculate Normals** (menu) — winding reversal of the
+  selected faces / area-weighted vertex-normal recompute, both as single
+  ChangeValueCommand transactions.
+- **Add Primitive (Shift+A, object mode)** — Plane / Cube / Cylinder / UV
+  Sphere as a new BSTriShape at the 3D cursor, cloned from the active shape's
+  vertex layout + shader/alpha properties (skinned templates rejected), with
+  normals/tangents/UVs generated. Panel: Size / Segments.
+- New shared machinery: `TlShapeStateCommand` (generic in-place undo for
+  arbitrary single-shape rewrites — snapshots the Vertex Data + Triangles
+  subtrees as typed values via tlCaptureValues/tlRestoreValues; no model
+  reload), `TlExtrudeCommand` generalized to an apply closure (Inset reuses
+  it), `tlPushPositionCommands`, `vertexOpTarget` shared validation.
+- DEFERRED (explicit): Bevel; in-place undo for Delete/Merge/Duplicate (still
+  snapshot-flash on Ctrl+Z); old Merge/Select-Linked panels not yet migrated
+  to Redo Panel v2.
+
 ## 2026-07-16 — Modeling tools batch 2: Fill (F) + Bridge Edge Loops
 
 `MODELING_TOOLS_PLAN.md` Phase 2, the connection cluster. One smart operator
