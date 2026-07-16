@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Row hiding on expansion (tree mode); Skyrim/FO76 rows re-verified
+
+User re-report: greyed Skyrim + FO76 rows visible on a shader property.
+Probe-verified on the CURRENT build against the same file: all version-gated
+rows (Skyrim flag variants, GTEFO76 data, Num SF1/SF1) ARE hidden — the
+screenshot matches the pre-fix row set, i.e. a stale running NifSkope
+instance (the app hands off to a running instance, so opening a NIF can
+silently reuse an old process; fully close all windows after an update).
+One real gap found and fixed anyway: the root-scoped hiding pass never
+covered whole-model TREE mode (invalid root) or rows first revealed by
+expanding — an `expanded` hook now re-applies hiding for whatever becomes
+visible. Probe now logs row types alongside names.
+
 ## 2026-07-16 — W: Blender-style Specials quick menu
 
 `W` over the viewport (user request) opens the 2.7x-style Specials menu — the
