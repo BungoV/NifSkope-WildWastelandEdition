@@ -25,6 +25,20 @@ the stale post-load frame. Harmless regardless; whether it cures the live
 symptom needs a GUI check. If the grid is still missing on load, next step is
 diffing the streaming VAO/program state with a GPU debugger.
 
+UPDATE (00:30): repaints alone were NOT enough — user confirmed live that the
+grid appears only once something is selected. New pinned-down empirical law:
+a frame that runs Scene::drawSelection with a VALID scene->currentBlock heals
+the streaming line drawing permanently (probe: setting currentBlock alone
+fixed it with zero visible artifacts; clearing it afterwards kept it fixed;
+lines.prog's shaders themselves are trivially clean — the geometry shader's
+`alpha = min(lineWidth, 1)` is the only alpha gate and drawLines sets that
+uniform per draw with no value caching). Workaround shipped
+(`syntheticCurrentBlock`): after a compile, currentBlock/currentIndex point at
+the root block for the two corrective repaints, then revert — emulating the
+first user click. The true renderer defect (why the first drawSelection-less
+frames drop streaming lines) remains open; a RenderDoc frame diff is the next
+step if it resurfaces in another form.
+
 Diagnostics kept (all inert without WW_PERF_TEST=1): drawGrid guard + GL-state
 traces, ShapeData creation trace, probe stages with PNG dumps in createWindow.
 
