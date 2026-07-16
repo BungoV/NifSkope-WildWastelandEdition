@@ -45,6 +45,13 @@ public:
 		restore( dataBefore );
 	}
 
+	//! Refresh the redo snapshot after a lightweight live preview has edited the
+	//! already-created result in place.  The original undo snapshot is retained.
+	void setAfterSnapshot( const QByteArray & after )
+	{
+		dataAfter = after;
+	}
+
 private:
 	void restore( const QByteArray & data )
 	{

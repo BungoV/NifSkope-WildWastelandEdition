@@ -35,6 +35,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 #include "message.h"
+#include "nifsnapshot.h"
+#include "data/niftypes.h"
 #include "spellbook.h"
 #include "version.h"
 #include "gl/glscene.h"
@@ -54,25 +56,52 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QActionGroup>
 #include <QApplication>
 #include <QBuffer>
+#include <QButtonGroup>
 #include <QByteArray>
 #include <QCloseEvent>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
+#include <QDirIterator>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QFile>
 #include <QFileInfo>
+#include <QFocusEvent>
+#include <QHBoxLayout>
+#include <QInputDialog>
+#include <QKeyEvent>
+#include <QLabel>
+#include <QMenu>
 #include <QMessageBox>
 #include <QProgressBar>
+#include <QPushButton>
+#include <QStyledItemDelegate>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QTranslator>
 #include <QUrl>
+#include <QVBoxLayout>
 #include <QCryptographicHash>
 
 #include <QListView>
+#include <QLineEdit>
+#include <QShortcut>
 #include <QTreeView>
 #include <QStandardItemModel>
+#include <QStyle>
 #include <QStyleFactory>
+#include <QSplitter>
+#include <QTabBar>
+#include <QToolBar>
+#include <QToolButton>
+
+#include <functional>
+#include <algorithm>
+#include <utility>
+#include <vector>
 
 #include "ba2file.hpp"
 #include "bsamodel.h"
@@ -95,6 +124,339 @@ const QList<QPair<QString, QString>> NifSkope::filetypes = {
 	// Miscellaneous NIF types
 	{ "NIFCache", "nifcache" }, { "TEXCache", "texcache" }, { "PCPatch", "pcpatch" }, { "JMI", "jmi" },
 	{ "Divinity 2 Character Template", "cat" }
+};
+
+namespace
+{
+
+QList<NifSkope *> sessionDocumentWindows;
+QList<BackgroundNifDocument *> sessionBackgroundDocuments;
+
+constexpr int NifBrowserSourceRole = Qt::UserRole + 37;
+constexpr int NifBrowserLooseFile = 1;
+constexpr int NifBrowserDocumentRole = Qt::UserRole + 38;
+constexpr int NifBrowserBackgroundDocumentRole = Qt::UserRole + 39;
+constexpr int NifBrowserConfiguredResource = 2;
+constexpr int NifBrowserGameRole = Qt::UserRole + 40;
+
+class LoadedNifsTreeView final : public QTreeView
+{
+public:
+	explicit LoadedNifsTreeView( QWidget * parent = nullptr ) : QTreeView( parent ) {}
+	QTreeView * sourceView = nullptr;
+	std::function<void()> addBrowserSelection;
+
+protected:
+	void dragEnterEvent( QDragEnterEvent * event ) override
+	{
+		if ( event->source() == sourceView ) event->acceptProposedAction();
+		else QTreeView::dragEnterEvent( event );
+	}
+
+	void dragMoveEvent( QDragMoveEvent * event ) override
+	{
+		if ( event->source() == sourceView ) event->acceptProposedAction();
+		else QTreeView::dragMoveEvent( event );
+	}
+
+	void dropEvent( QDropEvent * event ) override
+	{
+		if ( event->source() == sourceView && addBrowserSelection ) {
+			addBrowserSelection();
+			event->acceptProposedAction();
+			return;
+		}
+		QTreeView::dropEvent( event );
+	}
+};
+
+class LoadedNifsDelegate final : public QStyledItemDelegate
+{
+public:
+	explicit LoadedNifsDelegate( QObject * parent = nullptr ) : QStyledItemDelegate( parent ) {}
+
+	void paint( QPainter * painter, const QStyleOptionViewItem & option,
+		const QModelIndex & index ) const override
+	{
+		QStyleOptionViewItem opt( option );
+		initStyleOption( &opt, index );
+		const QVariant background = index.data( Qt::BackgroundRole );
+		const QVariant foreground = index.data( Qt::ForegroundRole );
+		if ( background.canConvert<QColor>() ) {
+			opt.backgroundBrush = background.value<QColor>();
+			// The Block List lets its explicit primary/secondary role colours win
+			// over the platform selection brush; mirror that behavior exactly.
+			opt.state &= ~QStyle::State_Selected;
+		}
+		if ( foreground.canConvert<QColor>() ) {
+			const QColor color = foreground.value<QColor>();
+			opt.palette.setColor( QPalette::Text, color );
+			opt.palette.setColor( QPalette::HighlightedText, color );
+		}
+		const QWidget * widget = option.widget;
+		QStyle * style = widget ? widget->style() : QApplication::style();
+		style->drawControl( QStyle::CE_ItemViewItem, &opt, painter, widget );
+	}
+};
+
+static int sessionSceneParent( const NifModel * nif, int block )
+{
+	int found = -1;
+	for ( int parent = 0; parent < nif->getBlockCount(); parent++ ) {
+		QModelIndex iParent = nif->getBlockIndex( parent );
+		if ( !nif->blockInherits( iParent, "NiNode" )
+			|| !nif->getLinkArray( iParent, "Children" ).contains( block ) )
+			continue;
+		if ( found >= 0 )
+			return -2;
+		found = parent;
+	}
+	return found;
+}
+
+static bool sessionAbsoluteWorld( const NifModel * nif, int block, Transform & world )
+{
+	QVector<int> chain;
+	QSet<int> seen;
+	for ( int current = block; nif->isValidBlockNumber( current ) && !seen.contains( current ); ) {
+		seen << current;
+		if ( !nif->blockInherits( nif->getBlockIndex( current ), "NiAVObject" ) )
+			return false;
+		chain << current;
+		int parent = sessionSceneParent( nif, current );
+		if ( parent == -2 )
+			return false;
+		current = parent;
+	}
+	if ( chain.isEmpty() )
+		return false;
+	world = Transform();
+	for ( int i = chain.size() - 1; i >= 0; i-- )
+		world = world * Transform( nif, nif->getBlockIndex( chain.at( i ) ) );
+	return true;
+}
+
+//! Flatten FO4 BSTriShape geometry from a secondary document into world-space
+//! triangles. This is preview-only: materials, picking and NIF ownership remain
+//! with the document that owns the model.
+static QVector<Vector3> sessionDocumentTriangleSoup( const NifModel * nif )
+{
+	QVector<Vector3> soup;
+	if ( !nif )
+		return soup;
+	for ( int block = 0; block < nif->getBlockCount(); block++ ) {
+		QModelIndex shape = nif->getBlockIndex( block );
+		if ( !nif->blockInherits( shape, "BSTriShape" ) )
+			continue;
+		QModelIndex vertices = nif->getIndex( shape, "Vertex Data" );
+		QModelIndex triangles = nif->getIndex( shape, "Triangles" );
+		if ( !vertices.isValid() || !triangles.isValid() )
+			continue;
+		Transform world;
+		if ( !sessionAbsoluteWorld( nif, block, world ) )
+			world = Transform( nif, shape );
+		QVector<Vector3> points;
+		points.reserve( nif->rowCount( vertices ) );
+		for ( int vertex = 0; vertex < nif->rowCount( vertices ); vertex++ )
+			points << ( world * nif->get<Vector3>( nif->getIndex( nif->getIndex( vertices, vertex ), "Vertex" ) ) );
+		for ( int triangle = 0; triangle < nif->rowCount( triangles ); triangle++ ) {
+			Triangle t = nif->get<Triangle>( nif->getIndex( triangles, triangle ) );
+			if ( t.v1() >= points.size() || t.v2() >= points.size() || t.v3() >= points.size() )
+				continue;
+			soup << points.at( t.v1() ) << points.at( t.v2() ) << points.at( t.v3() );
+		}
+	}
+	return soup;
+}
+
+//! A one-cell editor used by the Block List.  Unlike the general value
+//! delegate, it lets us validate unique node names and update animation
+//! references as one undoable operation before the edit is accepted.
+class BlockListRenameEdit final : public QLineEdit
+{
+public:
+	explicit BlockListRenameEdit( QWidget * parent ) : QLineEdit( parent ) {}
+
+	std::function<bool( const QString & )> commitRename;
+
+	void cancel()
+	{
+		if ( finished ) return;
+		finished = true;
+		hide();
+		deleteLater();
+	}
+
+protected:
+	void keyPressEvent( QKeyEvent * event ) override
+	{
+		if ( event->key() == Qt::Key_Escape ) {
+			cancel();
+			event->accept();
+			return;
+		}
+		if ( event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter ) {
+			acceptRename();
+			event->accept();
+			return;
+		}
+		QLineEdit::keyPressEvent( event );
+	}
+
+	void focusOutEvent( QFocusEvent * event ) override
+	{
+		QLineEdit::focusOutEvent( event );
+		if ( !finished && !committing ) acceptRename();
+	}
+
+private:
+	void acceptRename()
+	{
+		if ( finished || committing ) return;
+		committing = true;
+		const bool accepted = !commitRename || commitRename( text() );
+		committing = false;
+		if ( accepted ) {
+			finished = true;
+			hide();
+			deleteLater();
+		} else {
+			QTimer::singleShot( 0, this, [this]() {
+				if ( !finished ) {
+					show();
+					setFocus( Qt::OtherFocusReason );
+					selectAll();
+				}
+			} );
+		}
+	}
+
+	bool finished = false;
+	bool committing = false;
+};
+
+static int propagateSceneObjectName( NifModel * nif, int nodeNumber,
+	const QString & oldName, const QString & newName )
+{
+	int fixes = 0;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex block = nif->getBlockIndex( b );
+		if ( nif->blockInherits( block, "NiDefaultAVObjectPalette" ) ) {
+			QModelIndex objects = nif->getIndex( block, "Objs" );
+			for ( int row = 0; row < nif->rowCount( objects ); row++ ) {
+				QModelIndex object = nif->index( row, 0, objects );
+				bool matches = nif->getLink( object, "AV Object" ) == nodeNumber;
+				if ( !matches && !oldName.isEmpty() )
+					matches = nif->resolveString( object, "Name" ) == oldName;
+				if ( matches ) {
+					nif->assignString( object, "Name", newName );
+					fixes++;
+				}
+			}
+		} else if ( nif->blockInherits( block, "NiControllerSequence" ) ) {
+			QModelIndex controlled = nif->getIndex( block, "Controlled Blocks" );
+			for ( int row = 0; row < nif->rowCount( controlled ); row++ ) {
+				QModelIndex entry = nif->index( row, 0, controlled );
+				if ( !oldName.isEmpty() && nif->resolveString( entry, "Node Name" ) == oldName ) {
+					nif->assignString( entry, "Node Name", newName );
+					fixes++;
+				}
+			}
+		}
+	}
+	return fixes;
+}
+
+static bool renameSceneObjectInline( NifModel * nif, const QModelIndex & block,
+	const QString & requestedName, QString * error, int * updatedReferences )
+{
+	if ( error ) error->clear();
+	if ( updatedReferences ) *updatedReferences = 0;
+	if ( !nif || !block.isValid() || !nif->blockInherits( block, "NiAVObject" ) ) {
+		if ( error ) *error = QObject::tr( "This block has no unique scene-object Name to rename." );
+		return false;
+	}
+
+	const QString newName = requestedName.trimmed();
+	const QString oldName = nif->resolveString( block, "Name" );
+	if ( newName == oldName ) return true;
+	if ( newName.isEmpty() ) {
+		if ( error ) *error = QObject::tr( "A scene-object name cannot be empty." );
+		return false;
+	}
+
+	const int nodeNumber = nif->getBlockNumber( block );
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		if ( b == nodeNumber ) continue;
+		QModelIndex other = nif->getBlockIndex( b );
+		if ( nif->blockInherits( other, "NiAVObject" )
+			&& nif->resolveString( other, "Name" ).compare( newName, Qt::CaseInsensitive ) == 0 ) {
+			if ( error ) *error = QObject::tr(
+				"Another scene object already uses the name '%1'. Choose a unique name." ).arg( newName );
+			return false;
+		}
+	}
+
+	int fixes = 0;
+	const bool saved = nifSnapshotOp( nif, QObject::tr( "Rename node to %1" ).arg( newName ), [&]() {
+		nif->assignString( block, "Name", newName );
+		fixes = propagateSceneObjectName( nif, nodeNumber, oldName, newName );
+	} );
+	if ( !saved ) {
+		if ( error ) *error = QObject::tr( "The rename could not be added to the undo history." );
+		return false;
+	}
+	if ( updatedReferences ) *updatedReferences = fixes;
+	return true;
+}
+
+} // namespace
+
+/*! A Loaded NIFs workspace member without any window, viewport, or views.
+ *
+ * Explicitly enrolled donors used to be full hidden NifSkope windows; each one
+ * constructed a complete main-window UI and a GL viewport it never showed.
+ * This data-only layer keeps just the parsed model plus enough source identity
+ * to reload it into a real window if the user promotes it to primary. Because
+ * a background document has no editing UI, its model can never become dirty,
+ * so promotion may safely re-parse from the original source.
+ */
+class BackgroundNifDocument
+{
+public:
+	BackgroundNifDocument()
+	{
+		nif = new NifModel;
+		// Batch background parses must never raise modal message boxes.
+		nif->setMessageMode( BaseModel::MSG_TEST );
+	}
+
+	~BackgroundNifDocument()
+	{
+		sessionBackgroundDocuments.removeAll( this );
+		delete nif;
+	}
+
+	QString displayName() const
+	{
+		QString name = QFileInfo( currentFile ).fileName();
+		return name.isEmpty() ? QObject::tr( "Untitled" ) : name;
+	}
+
+	bool selectedInWorkspace() const
+	{
+		return sessionPreviewVisible && !sessionPreviewUnloaded;
+	}
+
+	NifModel * nif = nullptr;
+	//! Display path: an absolute loose-file path or a "[Game]/meshes/..." label.
+	QString currentFile;
+	int configuredResourceGame = -1;
+	QString configuredResourcePath;
+	//! The visible window whose workspace this document belongs to.
+	NifSkope * workspaceRoot = nullptr;
+	bool sessionPreviewVisible = false;
+	bool sessionPreviewUnloaded = false;
 };
 
 static const QHash<QString, QString> migrateTo1_2 = {
@@ -195,9 +557,10 @@ QString NifSkope::fileFilters( bool allFiles )
  * main GUI window
  */
 
-NifSkope::NifSkope()
+NifSkope::NifSkope( bool background )
 	: QMainWindow(), ui( new Ui::MainWindow )
 {
+	backgroundWorkspaceDocument = background;
 	// Init UI
 	ui->setupUi( this );
 
@@ -205,7 +568,10 @@ NifSkope::NifSkope()
 		ui->mTheme->addAction( s )->setCheckable( true );
 	}
 
-	qApp->installEventFilter( this );
+	if ( !backgroundWorkspaceDocument ) {
+		qApp->installEventFilter( this );
+		applicationEventFilterInstalled = true;
+	}
 
 	// Init Dialogs
 
@@ -238,8 +604,16 @@ NifSkope::NifSkope()
 	// Setup Window Modified on data change
 	connect( nif, &NifModel::dataChanged, [this]( const QModelIndex &, const QModelIndex & ) {
 		// Only if UI is enabled (prevents asterisk from flashing during save/load)
+		const bool becameDirty = !isWindowModified() && !windowTitle().isEmpty() && isEnabled();
 		if ( !windowTitle().isEmpty() && isEnabled() )
 			setWindowModified( true );
+		// Editing the primary cannot change its secondary preview geometry. Only
+		// refresh tab labels here; rebuilding every open mesh per vertex edit
+		// would make transforms and paint strokes unnecessarily expensive.
+		if ( becameDirty )
+			for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
+				if ( document && ( !document->backgroundWorkspaceDocument || document->isVisible() ) )
+					document->rebuildDocumentTabs();
 	} );
 
 	kfm = new KfmModel( this );
@@ -265,6 +639,144 @@ NifSkope::NifSkope()
 	list->setSelectionBehavior( QAbstractItemView::SelectRows );
 	wireBlockListSelection();
 
+	// Compact recursive filter for both hierarchy and flat Block List modes.
+	// Parents stay visible when any descendant matches; search is deliberately
+	// view-only and never changes the NIF or object selection.
+	QWidget * blockNavigation = new QWidget( ui->dockWidgetContents_4 );
+	QHBoxLayout * blockNavigationLayout = new QHBoxLayout( blockNavigation );
+	blockNavigationLayout->setContentsMargins( 0, 0, 0, 0 );
+	blockNavigationLayout->setSpacing( 2 );
+	// Themed grey chevrons instead of Qt's black standard arrow icons, which
+	// clashed with the rest of the toolbar.
+	const QColor navIconColor( 210, 210, 214 );
+	blockListBack = new QToolButton( blockNavigation );
+	blockListBack->setAutoRaise( true );
+	blockListBack->setIcon( tlMakeIcon( QStringLiteral( "chevron_left" ), navIconColor ) );
+	blockListBack->setToolTip( tr( "Previous selected block" ) );
+	blockListForward = new QToolButton( blockNavigation );
+	blockListForward->setAutoRaise( true );
+	blockListForward->setIcon( tlMakeIcon( QStringLiteral( "chevron_right" ), navIconColor ) );
+	blockListForward->setToolTip( tr( "Next selected block" ) );
+	blockNavigationLayout->addWidget( blockListBack );
+	blockNavigationLayout->addWidget( blockListForward );
+	blockListSearch = new QLineEdit( blockNavigation );
+	blockListSearch->setObjectName( QStringLiteral( "BlockListSearch" ) );
+	blockListSearch->setClearButtonEnabled( true );
+	blockListSearch->setPlaceholderText( tr( "Search blocks by type, name, value, or #..." ) );
+	blockListSearch->setToolTip( tr( "Space-separated terms must all match. Ctrl+F focuses this field; Esc clears it." ) );
+	blockNavigationLayout->addWidget( blockListSearch, 1 );
+	QToolButton * goToBlockButton = new QToolButton( blockNavigation );
+	goToBlockButton->setAutoRaise( true );
+	goToBlockButton->setText( QStringLiteral( "#" ) );
+	goToBlockButton->setToolTip( tr( "Go to block (Ctrl+G)" ) );
+	blockNavigationLayout->addWidget( goToBlockButton );
+	blockListPin = new QToolButton( blockNavigation );
+	blockListPin->setAutoRaise( true );
+	blockListPin->setCheckable( true );
+	blockListPin->setText( QString::fromUtf8( "\xE2\x98\x85" ) );
+	blockListPin->setToolTip( tr( "Pin this block; use the arrow to revisit pinned blocks" ) );
+	blockListPin->setPopupMode( QToolButton::MenuButtonPopup );
+	blockListPin->setMenu( new QMenu( blockListPin ) );
+	blockNavigationLayout->addWidget( blockListPin );
+	blockListRelations = new QToolButton( blockNavigation );
+	blockListRelations->setAutoRaise( true );
+	blockListRelations->setText( tr( "Links" ) );
+	blockListRelations->setToolTip( tr( "Outgoing links and blocks that reference the selection" ) );
+	blockListRelations->setPopupMode( QToolButton::InstantPopup );
+	blockListRelations->setMenu( new QMenu( blockListRelations ) );
+	blockNavigationLayout->addWidget( blockListRelations );
+	ui->verticalLayout_2->removeWidget( ui->listButtonFrame );
+	blockNavigationLayout->addWidget( ui->listButtonFrame );
+	ui->verticalLayout_2->insertWidget( 0, blockNavigation );
+
+	QWidget * blockFilters = new QWidget( ui->dockWidgetContents_4 );
+	QHBoxLayout * blockFilterLayout = new QHBoxLayout( blockFilters );
+	blockFilterLayout->setContentsMargins( 0, 0, 0, 0 );
+	blockFilterLayout->setSpacing( 1 );
+	blockListFilterGroup = new QButtonGroup( blockFilters );
+	blockListFilterGroup->setExclusive( true );
+	struct BlockFilterDef { int id; QString name; QString icon; };
+	const QList<BlockFilterDef> blockFilterDefs = {
+		{ 0, tr( "All blocks" ), QString() },
+		{ 1, tr( "Geometry" ), QStringLiteral( ":/btn/blockGeometry" ) },
+		{ 2, tr( "Scene nodes" ), QStringLiteral( ":/btn/blockNode" ) },
+		{ 3, tr( "Skinning and bones" ), QStringLiteral( ":/btn/skinned" ) },
+		{ 4, tr( "Materials, shaders, and textures" ), QStringLiteral( ":/btn/blockMaterial" ) },
+		{ 5, tr( "Collision" ), QStringLiteral( ":/btn/showCollision" ) },
+		{ 6, tr( "Animation and controllers" ), QStringLiteral( ":/btn/blockAnimation" ) },
+		{ 7, tr( "Extra data" ), QStringLiteral( ":/btn/blockExtraData" ) }
+	};
+	for ( const BlockFilterDef & def : blockFilterDefs ) {
+		QToolButton * button = new QToolButton( blockFilters );
+		button->setAutoRaise( true );
+		button->setCheckable( true );
+		button->setToolTip( def.name );
+		if ( def.icon.isEmpty() ) button->setText( tr( "All" ) );
+		else button->setIcon( QIcon( def.icon ) );
+		button->setChecked( def.id == 0 );
+		blockListFilterGroup->addButton( button, def.id );
+		blockFilterLayout->addWidget( button );
+	}
+	blockFilterLayout->addStretch( 1 );
+	ui->verticalLayout_2->insertWidget( 1, blockFilters );
+	blockListBreadcrumb = new QLabel( ui->dockWidgetContents_4 );
+	blockListBreadcrumb->setTextInteractionFlags( Qt::TextSelectableByMouse );
+	blockListBreadcrumb->setStyleSheet( QStringLiteral( "color: #a8a8a8; padding: 1px 2px;" ) );
+	blockListBreadcrumb->setToolTip( tr( "Scene-parent path for the selected block" ) );
+	ui->verticalLayout_2->insertWidget( 2, blockListBreadcrumb );
+	blockListFooter = new QLabel( ui->dockWidgetContents_4 );
+	blockListFooter->setStyleSheet( QStringLiteral( "color: #a8a8a8; padding: 2px;" ) );
+	ui->verticalLayout_2->addWidget( blockListFooter );
+	connect( blockListSearch, &QLineEdit::textChanged, this, [this]() { applyBlockListFilter(); } );
+	connect( blockListFilterGroup, &QButtonGroup::idClicked, this, [this]( int id ) {
+		blockListQuickFilter = id;
+		applyBlockListFilter();
+	} );
+	connect( blockListBack, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( -1 ); } );
+	connect( blockListForward, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( 1 ); } );
+	connect( goToBlockButton, &QToolButton::clicked, this, &NifSkope::goToBlock );
+	connect( blockListPin, &QToolButton::clicked, this, [this]( bool checked ) {
+		int block = nif ? nif->getBlockNumber( currentNifIndex() ) : -1;
+		if ( block < 0 ) return;
+		if ( checked ) blockListPins.insert( block );
+		else blockListPins.remove( block );
+		updateBlockListNavigation( currentNifIndex() );
+	} );
+	auto scheduleBlockFilter = [this]() {
+		QTimer::singleShot( 0, this, [this]() {
+			applyBlockListFilter();
+			updateBlockListNavigation( currentNifIndex() );
+		} );
+	};
+	connect( proxy, &QAbstractItemModel::modelReset, this, scheduleBlockFilter );
+	connect( proxy, &QAbstractItemModel::layoutChanged, this, scheduleBlockFilter );
+	connect( proxy, &QAbstractItemModel::rowsInserted, this,
+		[this]( const QModelIndex &, int, int ) { applyBlockListFilter(); } );
+	connect( proxy, &QAbstractItemModel::rowsRemoved, this,
+		[this]( const QModelIndex &, int, int ) { applyBlockListFilter(); } );
+	connect( proxy, &QAbstractItemModel::dataChanged, this,
+		[this]( const QModelIndex &, const QModelIndex &, const QList<int> & ) {
+			if ( blockListSearch && !blockListSearch->text().isEmpty() ) applyBlockListFilter();
+		} );
+	auto * findBlocks = new QShortcut( QKeySequence::Find, ui->ListDock );
+	findBlocks->setContext( Qt::WidgetWithChildrenShortcut );
+	connect( findBlocks, &QShortcut::activated, blockListSearch, [this]() {
+		blockListSearch->setFocus( Qt::ShortcutFocusReason );
+		blockListSearch->selectAll();
+	} );
+	auto * clearBlockSearch = new QShortcut( QKeySequence( Qt::Key_Escape ), blockListSearch );
+	clearBlockSearch->setContext( Qt::WidgetShortcut );
+	connect( clearBlockSearch, &QShortcut::activated, blockListSearch, &QLineEdit::clear );
+	auto * goToBlockShortcut = new QShortcut( QKeySequence( QStringLiteral( "Ctrl+G" ) ), ui->ListDock );
+	goToBlockShortcut->setContext( Qt::WidgetWithChildrenShortcut );
+	connect( goToBlockShortcut, &QShortcut::activated, this, &NifSkope::goToBlock );
+	auto * renameBlock = new QShortcut( QKeySequence( Qt::Key_F2 ), list );
+	renameBlock->setContext( Qt::WidgetWithChildrenShortcut );
+	connect( renameBlock, &QShortcut::activated, this,
+		[this]() { renameBlockListIndex( list->currentIndex(), true ); } );
+	connect( list, &NifTreeView::doubleClicked, this,
+		[this]( const QModelIndex & index ) { renameBlockListIndex( index, false ); } );
+
 	// Block Details
 	tree = ui->tree;
 	tree->setModel( nif );
@@ -274,6 +786,18 @@ NifSkope::NifSkope()
 	tree->header()->moveSection( 1, 2 );
 	tree->header()->resizeSection( NifModel::NameCol, 135 );
 	tree->header()->resizeSection( NifModel::ValueCol, 250 );
+	blockDetailsSearch = new QLineEdit( ui->dockWidgetContents_2 );
+	blockDetailsSearch->setClearButtonEnabled( true );
+	blockDetailsSearch->setPlaceholderText( tr( "Filter fields by name or value..." ) );
+	blockDetailsSearch->setToolTip( tr( "Parents remain visible when a nested field matches. Ctrl+Shift+F focuses this field." ) );
+	ui->verticalLayout->insertWidget( 0, blockDetailsSearch );
+	connect( blockDetailsSearch, &QLineEdit::textChanged, this, [this]() { applyBlockDetailsFilter(); } );
+	auto * findBlockFields = new QShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+F" ) ), ui->TreeDock );
+	findBlockFields->setContext( Qt::WidgetWithChildrenShortcut );
+	connect( findBlockFields, &QShortcut::activated, blockDetailsSearch, [this]() {
+		blockDetailsSearch->setFocus( Qt::ShortcutFocusReason );
+		blockDetailsSearch->selectAll();
+	} );
 	// Allow multi-row paste
 	//	Note: this has some side effects such as vertex selection
 	//	in viewport being wrong if you attempt to select many rows.
@@ -299,12 +823,156 @@ NifSkope::NifSkope()
 	refrbrwsr = ui->refrBrowser;
 	refrbrwsr->setNifModel( nif );
 
-	// Archive Browser
+	// NIF Browser
 	bsaView = ui->bsaView;
 	connect( bsaView, &QTreeView::doubleClicked, this, &NifSkope::openArchiveFile );
+	bsaView->setSelectionMode( QAbstractItemView::ExtendedSelection );
+	bsaView->setSelectionBehavior( QAbstractItemView::SelectRows );
+	bsaView->setDragEnabled( true );
+	bsaView->setDragDropMode( QAbstractItemView::DragOnly );
+	bsaView->setDefaultDropAction( Qt::CopyAction );
+	bsaView->setContextMenuPolicy( Qt::CustomContextMenu );
+	ui->bsaFilter->setPlaceholderText( tr( "Search available and loaded NIFs..." ) );
+	auto * loadBrowserSelection = new QPushButton( tr( "Load Selected" ), ui->frame );
+	loadBrowserSelection->setToolTip( tr( "Load every selected NIF as a document" ) );
+	ui->horizontalLayout_2->addWidget( loadBrowserSelection );
+	connect( loadBrowserSelection, &QPushButton::clicked,
+		this, &NifSkope::openNifBrowserSelection );
+	auto * refreshBrowser = new QPushButton( tr( "Refresh" ), ui->bsaTitleBar );
+	refreshBrowser->setToolTip( tr( "Reload available NIFs from the resource paths configured in Settings" ) );
+	nifBrowserArchivesToggle = new QPushButton( tr( "Load Archives" ), ui->bsaTitleBar );
+	nifBrowserArchivesToggle->setCheckable( true );
+	nifBrowserArchivesToggle->setChecked( true );
+	nifBrowserArchivesToggle->setToolTip( tr( "Show NIFs stored in configured BA2/BSA archives" ) );
+	nifBrowserLooseToggle = new QPushButton( tr( "Load Loose NIFs" ), ui->bsaTitleBar );
+	nifBrowserLooseToggle->setCheckable( true );
+	nifBrowserLooseToggle->setChecked( true );
+	nifBrowserLooseToggle->setToolTip( tr( "Show loose NIF files from configured mesh folders" ) );
+	ui->bsaTitleBar->layout()->addWidget( nifBrowserArchivesToggle );
+	ui->bsaTitleBar->layout()->addWidget( nifBrowserLooseToggle );
+	ui->bsaTitleBar->layout()->addWidget( refreshBrowser );
+	connect( refreshBrowser, &QPushButton::clicked,
+		this, &NifSkope::populateConfiguredNifBrowser );
+	connect( nifBrowserArchivesToggle, &QPushButton::toggled,
+		this, &NifSkope::populateConfiguredNifBrowser );
+	connect( nifBrowserLooseToggle, &QPushButton::toggled,
+		this, &NifSkope::populateConfiguredNifBrowser );
 
 	bsaModel = new BSAModel( this );
 	bsaProxyModel = new BSAProxyModel( this );
+	loadedNifsModel = new QStandardItemModel( this );
+	loadedNifsModel->setHorizontalHeaderLabels( { tr( "Loaded NIFs" ) } );
+	auto * loadedWorkspaceView = new LoadedNifsTreeView( ui->dockWidgetContents_7 );
+	loadedNifsView = loadedWorkspaceView;
+	loadedNifsView->setObjectName( QStringLiteral( "LoadedNifsView" ) );
+	loadedNifsView->setModel( loadedNifsModel );
+	loadedNifsView->setItemDelegate( new LoadedNifsDelegate( loadedNifsView ) );
+	loadedNifsView->setRootIsDecorated( false );
+	loadedNifsView->setAlternatingRowColors( false );
+	loadedNifsView->setSelectionMode( QAbstractItemView::ExtendedSelection );
+	loadedNifsView->setSelectionBehavior( QAbstractItemView::SelectRows );
+	loadedNifsView->setAcceptDrops( true );
+	loadedNifsView->setDragDropMode( QAbstractItemView::DropOnly );
+	loadedNifsView->setDropIndicatorShown( true );
+	loadedNifsView->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+	loadedNifsView->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+	loadedNifsView->setContextMenuPolicy( Qt::CustomContextMenu );
+	loadedNifsView->setMinimumHeight( 82 );
+	loadedNifsView->header()->setStretchLastSection( true );
+	loadedWorkspaceView->sourceView = bsaView;
+	loadedWorkspaceView->addBrowserSelection = [this]() { addNifBrowserSelectionToLoaded(); };
+	wireLoadedNifsSelection();
+
+	// Available resources and loaded documents are related but distinct. Keep
+	// them in resizable upper/lower panes instead of mixing both into one tree.
+	ui->verticalLayout_5->removeWidget( bsaView );
+	auto * browserSplitter = new QSplitter( Qt::Vertical, ui->dockWidgetContents_7 );
+	browserSplitter->setObjectName( QStringLiteral( "NifBrowserSplitter" ) );
+	browserSplitter->setChildrenCollapsible( false );
+	browserSplitter->addWidget( bsaView );
+	browserSplitter->addWidget( loadedNifsView );
+	browserSplitter->setStretchFactor( 0, 5 );
+	browserSplitter->setStretchFactor( 1, 1 );
+	browserSplitter->setSizes( { 420, 120 } );
+	ui->verticalLayout_5->addWidget( browserSplitter );
+	bsaModel->init();
+	bsaProxyModel->setSourceModel( bsaModel );
+	bsaView->setModel( bsaProxyModel );
+	bsaView->setSortingEnabled( true );
+	bsaView->hideColumn( 1 );
+	bsaView->setColumnWidth( 0, 300 );
+	bsaView->setColumnWidth( 2, 70 );
+	bsaProxyModel->sort( 0, Qt::AscendingOrder );
+	ui->bsaFilter->setEnabled( true );
+	ui->bsaFilenameOnly->setEnabled( true );
+	auto * browserFilterTimer = new QTimer( this );
+	browserFilterTimer->setSingleShot( true );
+	connect( ui->bsaFilter, &QLineEdit::textChanged,
+		[browserFilterTimer]() { browserFilterTimer->start( 300 ); } );
+	connect( browserFilterTimer, &QTimer::timeout, this, [this]() {
+		const QString text = ui->bsaFilter->text();
+		bsaProxyModel->setFilterRegularExpression(
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+			QRegularExpression( QRegularExpression::wildcardToRegularExpression( text ).chopped( 2 ).mid( 2 ),
+				QRegularExpression::CaseInsensitiveOption )
+#else
+			QRegularExpression::fromWildcard(
+				text, Qt::CaseInsensitive, QRegularExpression::UnanchoredWildcardConversion )
+#endif
+		);
+		bsaView->expandAll();
+		if ( text.isEmpty() ) {
+			bsaView->collapseAll();
+			bsaProxyModel->resetFilter();
+			rebuildLoadedNifsBrowserGroup();
+		}
+	} );
+	connect( ui->bsaFilenameOnly, &QCheckBox::toggled,
+		bsaProxyModel, &BSAProxyModel::setFilterByNameOnly );
+	connect( bsaView, &QTreeView::customContextMenuRequested, this,
+		[this]( const QPoint & pos ) {
+			const QModelIndex index = bsaView->indexAt( pos );
+			if ( NifSkope * document = documentFromBrowserIndex( index ) ) {
+				showDocumentMenu( document, bsaView->viewport()->mapToGlobal( pos ) );
+				return;
+			}
+			const QString path = index.sibling( index.row(), 1 ).data( Qt::EditRole ).toString();
+			if ( path.isEmpty() ) return;
+			// Right-clicking inside a multi-selection acts on the whole selection,
+			// like the Load Selected button; right-clicking outside it acts on the
+			// row under the cursor only.
+			QModelIndexList selectedRows;
+			if ( bsaView->selectionModel() )
+				selectedRows = bsaView->selectionModel()->selectedRows( 0 );
+			const bool useSelection = selectedRows.size() > 1
+				&& selectedRows.contains( index.sibling( index.row(), 0 ) );
+			QMenu menu( this );
+			QAction * open = menu.addAction( tr( "Open NIF" ) );
+			QAction * add = menu.addAction( useSelection
+				? tr( "Add %1 Selected to Loaded NIFs" ).arg( selectedRows.size() )
+				: tr( "Add to Loaded NIFs" ) );
+			QAction * chosen = menu.exec( bsaView->viewport()->mapToGlobal( pos ) );
+			if ( chosen == open ) openArchiveFile( index );
+			else if ( chosen == add ) {
+				if ( useSelection ) addNifBrowserSelectionToLoaded();
+				else queueNifBrowserIndexToLoaded( index );
+			}
+		} );
+	connect( loadedNifsView, &QTreeView::doubleClicked, this,
+		[this]( const QModelIndex & index ) {
+			if ( NifSkope * document = documentFromBrowserIndex( index ) )
+				activateDocumentTab( documentTabWindows.indexOf( document ) );
+			else if ( BackgroundNifDocument * background = backgroundDocumentFromBrowserIndex( index ) )
+				promoteBackgroundDocument( background );
+		} );
+	connect( loadedNifsView, &QTreeView::customContextMenuRequested, this,
+		[this]( const QPoint & pos ) {
+			const QModelIndex index = loadedNifsView->indexAt( pos );
+			if ( NifSkope * document = documentFromBrowserIndex( index ) )
+				showDocumentMenu( document, loadedNifsView->viewport()->mapToGlobal( pos ) );
+			else if ( BackgroundNifDocument * background = backgroundDocumentFromBrowserIndex( index ) )
+				showBackgroundDocumentMenu( background, loadedNifsView->viewport()->mapToGlobal( pos ) );
+		} );
 
 	// Empty Model for swapping out before model fill
 	emptyModel = new QStandardItemModel( this );
@@ -313,6 +981,21 @@ NifSkope::NifSkope()
 	/* ********************** */
 
 	connect( list, &NifTreeView::sigCurrentIndexChanged, this, &NifSkope::select );
+	connect( this, &NifSkope::currentNifIndexChanged, this,
+		[this]( const QModelIndex & index ) {
+			updateBlockListNavigation( index );
+			applyBlockDetailsFilter();
+		} );
+	connect( this, &NifSkope::beginLoading, this, [this]() {
+		blockListHistory.clear();
+		blockListPins.clear();
+		blockListHistoryPosition = -1;
+		navigatingBlockListHistory = false;
+		if ( blockListBack ) blockListBack->setEnabled( false );
+		if ( blockListForward ) blockListForward->setEnabled( false );
+		if ( blockListBreadcrumb ) blockListBreadcrumb->setText( tr( "Loading..." ) );
+		if ( blockListFooter ) blockListFooter->clear();
+	} );
 	connect( list, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
 	connect( tree, &NifTreeView::sigCurrentIndexChanged, this, &NifSkope::select );
 	connect( tree, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
@@ -376,14 +1059,30 @@ NifSkope::NifSkope()
 	initConnections();
 
 	connect( options, &SettingsDialog::saveSettings, this, &NifSkope::updateSettings );
-	connect( options, &SettingsDialog::localeChanged, this, &NifSkope::sltLocaleChanged );
+	if ( !backgroundWorkspaceDocument ) {
+		connect( options, &SettingsDialog::saveSettings, this,
+			[this]() { QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser ); } );
+		connect( options, &SettingsDialog::localeChanged, this, &NifSkope::sltLocaleChanged );
+		connect( this, &NifSkope::completeLoading, this,
+			[this]( bool success, const QString & ) {
+				if ( success ) QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
+			} );
+		connect( qApp, &QApplication::lastWindowClosed, this, &NifSkope::exitRequested );
+	}
 
-	connect( qApp, &QApplication::lastWindowClosed, this, &NifSkope::exitRequested );
+	sessionDocumentWindows.append( this );
+	initDocumentSession();
+	connect( nif->undoStack, &QUndoStack::cleanChanged, this,
+		[]( bool ) { NifSkope::refreshAllDocumentSessions(); } );
+	refreshAllDocumentSessions();
 }
 
 void NifSkope::exitRequested()
 {
-	qApp->removeEventFilter( this );
+	if ( applicationEventFilterInstalled ) {
+		qApp->removeEventFilter( this );
+		applicationEventFilterInstalled = false;
+	}
 	// Must disconnect from this signal as it's set once for each widget for some reason
 	disconnect( qApp, &QApplication::lastWindowClosed, this, &NifSkope::exitRequested );
 
@@ -397,10 +1096,468 @@ NifSkope::~NifSkope()
 {
 	// work around crash that would occur if the UV editor is still open and it is the last window
 	disconnect( qApp, &QApplication::lastWindowClosed, this, &NifSkope::exitRequested );
+	if ( applicationEventFilterInstalled ) {
+		qApp->removeEventFilter( this );
+		applicationEventFilterInstalled = false;
+	}
 
+	sessionDocumentWindows.removeAll( this );
+	refreshAllDocumentSessions();
 	delete ui;
 	if ( currentArchive )
 		delete currentArchive;
+}
+
+QList<NifSkope *> NifSkope::openDocuments()
+{
+	QList<NifSkope *> documents;
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
+		if ( document ) documents << document;
+	return documents;
+}
+
+QList<NifSkope *> NifSkope::selectedWorkspaceDocuments()
+{
+	QList<NifSkope *> documents;
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
+		if ( document && document->sessionCollectionMember
+			&& document->sessionPreviewVisible && !document->sessionPreviewUnloaded )
+			documents << document;
+	return documents;
+}
+
+QList<QPair<NifModel *, QString>> NifSkope::selectedWorkspaceModels()
+{
+	QList<QPair<NifModel *, QString>> models;
+	for ( NifSkope * document : NifSkope::selectedWorkspaceDocuments() )
+		models << qMakePair( document->nif, document->currentFile );
+	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) )
+		if ( document && document->selectedInWorkspace() )
+			models << qMakePair( document->nif, document->currentFile );
+	return models;
+}
+
+NifSkope * NifSkope::documentForModel( const NifModel * model )
+{
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
+		if ( document && document->nif == model )
+			return document;
+	return nullptr;
+}
+
+QString NifSkope::documentDisplayName() const
+{
+	QString name = QFileInfo( currentFile ).fileName();
+	if ( name.isEmpty() )
+		name = tr( "Untitled" );
+	if ( isWindowModified() || ( nif && nif->undoStack && !nif->undoStack->isClean() ) )
+		name += QStringLiteral( " *" );
+	return name;
+}
+
+void NifSkope::initDocumentSession()
+{
+	// Keep a non-visual tab model for the existing document switching logic;
+	// the actual session UI is an expandable Loaded NIFs category in the NIF
+	// Browser tree.
+	documentTabs = new QTabBar( this );
+	documentTabs->setObjectName( QStringLiteral( "OpenNifDocumentTabs" ) );
+	documentTabs->hide();
+	connect( documentTabs, &QTabBar::currentChanged, this, &NifSkope::activateDocumentTab );
+	connect( documentTabs, &QTabBar::tabCloseRequested, this, [this]( int index ) {
+		if ( index < 0 || index >= documentTabWindows.size() ) return;
+		NifSkope * document = documentTabWindows.at( index );
+		if ( !document ) return;
+		if ( document != this && ( document->isWindowModified()
+			|| !document->nif->undoStack->isClean() ) ) {
+			activateDocumentTab( index );
+			QTimer::singleShot( 0, document, &QWidget::close );
+		} else document->close();
+	} );
+}
+
+void NifSkope::rebuildDocumentTabs()
+{
+	if ( !documentTabs )
+		return;
+	QSignalBlocker blocker( documentTabs );
+	while ( documentTabs->count() > 0 )
+		documentTabs->removeTab( documentTabs->count() - 1 );
+	documentTabWindows.clear();
+	int current = -1;
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
+		if ( !document ) continue;
+		int tab = documentTabs->addTab( document == this
+			? tr( "Primary: %1" ).arg( document->documentDisplayName() )
+			: document->documentDisplayName() );
+		documentTabWindows << document;
+		if ( document == this ) current = tab;
+		if ( document != this ) {
+			documentTabs->setTabIcon( tab, style()->standardIcon(
+				document->sessionPreviewVisible && !document->sessionPreviewUnloaded
+					? QStyle::SP_DialogApplyButton : QStyle::SP_DialogCancelButton ) );
+			documentTabs->setTabToolTip( tab, document->sessionPreviewVisible
+				&& !document->sessionPreviewUnloaded
+				? tr( "Secondary document visible in the combined viewport" )
+				: tr( "Secondary document excluded from the combined viewport" ) );
+		} else {
+			documentTabs->setTabToolTip( tab, tr( "Primary editable document" ) );
+		}
+	}
+	if ( current >= 0 ) documentTabs->setCurrentIndex( current );
+	documentTabs->hide();
+	rebuildLoadedNifsBrowserGroup();
+}
+
+void NifSkope::rebuildLoadedNifsBrowserGroup()
+{
+	if ( !loadedNifsModel ) return;
+	syncingLoadedNifsSelection = true;
+	loadedNifsModel->removeRows( 0, loadedNifsModel->rowCount() );
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
+		if ( !document ) continue;
+		const bool primary = document == this;
+		// The primary document always appears in its own Loaded NIFs list, even
+		// when it was never explicitly enrolled, so the marked-primary row and
+		// the viewport always agree about what is being edited.
+		if ( !primary && !document->sessionCollectionMember ) continue;
+		const quintptr pointer = reinterpret_cast<quintptr>( document );
+		const bool visible = document->sessionPreviewVisible && !document->sessionPreviewUnloaded;
+		auto * name = new QStandardItem( document->documentDisplayName() );
+		name->setEditable( false );
+		name->setData( qulonglong( pointer ), NifBrowserDocumentRole );
+		if ( primary ) {
+			name->setIcon( style()->standardIcon( QStyle::SP_ArrowRight ) );
+			name->setBackground( QColor::fromRgb( 74, 122, 176 ) );
+			name->setForeground( QColor::fromRgb( 255, 157, 0 ) );
+		} else if ( visible ) {
+			name->setBackground( QColor::fromRgb( 43, 66, 95 ) );
+			name->setForeground( QColor::fromRgb( 255, 114, 0 ) );
+		}
+		name->setToolTip( primary ? tr( "Primary editable document" )
+			: ( visible
+				? tr( "Selected secondary document; visible and available to workspace tools" )
+				: tr( "Loaded but unselected; not shown or used by workspace tools" ) ) );
+		loadedNifsModel->appendRow( name );
+		if ( loadedNifsView && visible && !primary ) {
+			const QModelIndex row = loadedNifsModel->index( loadedNifsModel->rowCount() - 1, 0 );
+			loadedNifsView->selectionModel()->select( row,
+				QItemSelectionModel::Select | QItemSelectionModel::Rows );
+		}
+	}
+	// Data-only background documents share the secondary palette; they can never
+	// be the primary row because promotion always goes through a real window.
+	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
+		if ( !document ) continue;
+		const bool visible = document->selectedInWorkspace();
+		auto * name = new QStandardItem( document->displayName() );
+		name->setEditable( false );
+		name->setData( qulonglong( reinterpret_cast<quintptr>( document ) ),
+			NifBrowserBackgroundDocumentRole );
+		if ( visible ) {
+			name->setBackground( QColor::fromRgb( 43, 66, 95 ) );
+			name->setForeground( QColor::fromRgb( 255, 114, 0 ) );
+		}
+		name->setToolTip( visible
+			? tr( "Selected secondary document; visible and available to workspace tools" )
+			: tr( "Loaded but unselected; not shown or used by workspace tools" ) );
+		loadedNifsModel->appendRow( name );
+		if ( loadedNifsView && visible ) {
+			const QModelIndex row = loadedNifsModel->index( loadedNifsModel->rowCount() - 1, 0 );
+			loadedNifsView->selectionModel()->select( row,
+				QItemSelectionModel::Select | QItemSelectionModel::Rows );
+		}
+	}
+	if ( loadedNifsView ) {
+		loadedNifsView->header()->setStretchLastSection( true );
+		loadedNifsView->viewport()->update();
+	}
+	syncingLoadedNifsSelection = false;
+}
+
+void NifSkope::wireLoadedNifsSelection()
+{
+	if ( !loadedNifsView || !loadedNifsView->selectionModel() ) return;
+	connect( loadedNifsView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+		[this]( const QItemSelection &, const QItemSelection & ) {
+			if ( syncingLoadedNifsSelection ) return;
+			QSet<NifSkope *> selected;
+			QSet<BackgroundNifDocument *> selectedBackground;
+			for ( const QModelIndex & row : loadedNifsView->selectionModel()->selectedRows( 0 ) ) {
+				if ( NifSkope * document = documentFromBrowserIndex( row ) ) selected << document;
+				if ( BackgroundNifDocument * document = backgroundDocumentFromBrowserIndex( row ) )
+					selectedBackground << document;
+			}
+			for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
+				if ( !document || !document->sessionCollectionMember ) continue;
+				document->sessionPreviewVisible = ( document == this || selected.contains( document ) );
+				document->sessionPreviewUnloaded = false;
+			}
+			for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
+				if ( !document ) continue;
+				document->sessionPreviewVisible = selectedBackground.contains( document );
+				document->sessionPreviewUnloaded = false;
+			}
+			refreshAllDocumentSessions();
+		} );
+}
+
+void NifSkope::activateDocumentTab( int index )
+{
+	if ( index < 0 || index >= documentTabWindows.size() )
+		return;
+	NifSkope * document = documentTabWindows.at( index );
+	if ( !document || document == this )
+		return;
+	if ( document->sessionCollectionMember ) {
+		document->sessionPreviewVisible = true;
+		document->sessionPreviewUnloaded = false;
+	}
+	// The NIF Browser is a session-level workflow even though each document
+	// retains its own window/model. Lazily mirror the selected archive/game
+	// folder into a document the first time it becomes primary.
+	if ( !currentArchivePath.isEmpty() && document->currentArchivePath.isEmpty() )
+		document->openArchive( currentArchivePath );
+	document->setGeometry( geometry() );
+	if ( applicationEventFilterInstalled ) {
+		qApp->removeEventFilter( this );
+		applicationEventFilterInstalled = false;
+	}
+	if ( !document->applicationEventFilterInstalled ) {
+		qApp->installEventFilter( document );
+		document->applicationEventFilterInstalled = true;
+	}
+	if ( isMaximized() ) document->showMaximized();
+	else document->showNormal();
+	document->raise();
+	document->activateWindow();
+	hide();
+	if ( !document->configuredNifBrowserPopulated )
+		QTimer::singleShot( 0, document, &NifSkope::populateConfiguredNifBrowser );
+	document->refreshSessionPreview();
+	refreshAllDocumentSessions();
+}
+
+void NifSkope::showDocumentTabMenu( const QPoint & pos )
+{
+	if ( !documentTabs ) return;
+	int index = documentTabs->tabAt( pos );
+	if ( index < 0 || index >= documentTabWindows.size() ) return;
+	NifSkope * document = documentTabWindows.at( index );
+	if ( !document ) return;
+	showDocumentMenu( document, documentTabs->mapToGlobal( pos ) );
+}
+
+NifSkope * NifSkope::documentFromBrowserIndex( const QModelIndex & index ) const
+{
+	if ( !index.isValid() ) return nullptr;
+	QModelIndex name = index.sibling( index.row(), 0 );
+	const quintptr pointer = quintptr( name.data( NifBrowserDocumentRole ).toULongLong() );
+	if ( !pointer ) return nullptr;
+	NifSkope * document = reinterpret_cast<NifSkope *>( pointer );
+	return sessionDocumentWindows.contains( document ) ? document : nullptr;
+}
+
+BackgroundNifDocument * NifSkope::backgroundDocumentFromBrowserIndex( const QModelIndex & index ) const
+{
+	if ( !index.isValid() ) return nullptr;
+	QModelIndex name = index.sibling( index.row(), 0 );
+	const quintptr pointer = quintptr( name.data( NifBrowserBackgroundDocumentRole ).toULongLong() );
+	if ( !pointer ) return nullptr;
+	BackgroundNifDocument * document = reinterpret_cast<BackgroundNifDocument *>( pointer );
+	return sessionBackgroundDocuments.contains( document ) ? document : nullptr;
+}
+
+void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
+{
+	// The primary shows in its own list even without being an enrolled member;
+	// its menu still offers the whole-workspace and close actions.
+	if ( !document || ( document != this && !document->sessionCollectionMember ) ) return;
+	const int index = documentTabWindows.indexOf( document );
+	if ( index < 0 ) return;
+	QMenu menu( this );
+	QAction * makePrimary = menu.addAction( tr( "Make Primary / Edit" ) );
+	makePrimary->setEnabled( document != this );
+	QAction * visible = menu.addAction( tr( "Selected / Visible in Workspace" ) );
+	visible->setCheckable( true );
+	visible->setChecked( document->sessionPreviewVisible && !document->sessionPreviewUnloaded );
+	visible->setEnabled( document != this );
+	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
+	isolate->setEnabled( document != this );
+	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
+	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
+	menu.addSeparator();
+	QAction * unload = menu.addAction( tr( "Remove from Loaded NIFs" ) );
+	// The primary's automatic row cannot be removed from its own workspace.
+	unload->setEnabled( document != this );
+	QAction * close = menu.addAction( tr( "Close Document" ) );
+	QAction * chosen = menu.exec( globalPos );
+	if ( chosen == makePrimary ) activateDocumentTab( index );
+	else if ( chosen == visible ) {
+		document->sessionPreviewVisible = visible->isChecked();
+		document->sessionPreviewUnloaded = false;
+		refreshAllDocumentSessions();
+	} else if ( chosen == isolate ) {
+		for ( NifSkope * other : std::as_const( sessionDocumentWindows ) )
+			if ( other && other != this && other->sessionCollectionMember ) {
+				other->sessionPreviewVisible = ( other == document );
+				if ( other == document ) other->sessionPreviewUnloaded = false;
+			}
+		for ( BackgroundNifDocument * other : std::as_const( sessionBackgroundDocuments ) )
+			if ( other ) other->sessionPreviewVisible = false;
+		refreshAllDocumentSessions();
+	} else if ( chosen == showAll || chosen == hideAll ) {
+		for ( NifSkope * other : std::as_const( sessionDocumentWindows ) )
+			if ( other && other != this && other->sessionCollectionMember ) {
+				other->sessionPreviewVisible = ( chosen == showAll );
+				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
+			}
+		for ( BackgroundNifDocument * other : std::as_const( sessionBackgroundDocuments ) )
+			if ( other ) {
+				other->sessionPreviewVisible = ( chosen == showAll );
+				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
+			}
+		refreshAllDocumentSessions();
+	} else if ( chosen == unload ) {
+		document->sessionCollectionMember = false;
+		document->sessionPreviewUnloaded = true;
+		document->sessionPreviewVisible = false;
+		refreshAllDocumentSessions();
+	} else if ( chosen == close ) {
+		if ( document != this && ( document->isWindowModified()
+			|| !document->nif->undoStack->isClean() ) ) {
+			activateDocumentTab( index );
+			QTimer::singleShot( 0, document, &QWidget::close );
+		} else document->close();
+	}
+}
+
+void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, const QPoint & globalPos )
+{
+	if ( !document ) return;
+	QMenu menu( this );
+	QAction * makePrimary = menu.addAction( tr( "Make Primary / Edit" ) );
+	QAction * visible = menu.addAction( tr( "Selected / Visible in Workspace" ) );
+	visible->setCheckable( true );
+	visible->setChecked( document->selectedInWorkspace() );
+	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
+	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
+	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
+	menu.addSeparator();
+	// A data-only document exists solely as a workspace member, so removing it
+	// from the Loaded NIFs list and closing it are the same operation.
+	QAction * unload = menu.addAction( tr( "Remove from Loaded NIFs" ) );
+	QAction * close = menu.addAction( tr( "Close Document" ) );
+	QAction * chosen = menu.exec( globalPos );
+	if ( chosen == makePrimary ) promoteBackgroundDocument( document );
+	else if ( chosen == visible ) {
+		document->sessionPreviewVisible = visible->isChecked();
+		document->sessionPreviewUnloaded = false;
+		refreshAllDocumentSessions();
+	} else if ( chosen == isolate ) {
+		for ( NifSkope * other : std::as_const( sessionDocumentWindows ) )
+			if ( other && other != this && other->sessionCollectionMember )
+				other->sessionPreviewVisible = false;
+		for ( BackgroundNifDocument * other : std::as_const( sessionBackgroundDocuments ) )
+			if ( other ) {
+				other->sessionPreviewVisible = ( other == document );
+				if ( other == document ) other->sessionPreviewUnloaded = false;
+			}
+		refreshAllDocumentSessions();
+	} else if ( chosen == showAll || chosen == hideAll ) {
+		for ( NifSkope * other : std::as_const( sessionDocumentWindows ) )
+			if ( other && other != this && other->sessionCollectionMember ) {
+				other->sessionPreviewVisible = ( chosen == showAll );
+				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
+			}
+		for ( BackgroundNifDocument * other : std::as_const( sessionBackgroundDocuments ) )
+			if ( other ) {
+				other->sessionPreviewVisible = ( chosen == showAll );
+				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
+			}
+		refreshAllDocumentSessions();
+	} else if ( chosen == unload || chosen == close ) {
+		removeBackgroundDocument( document );
+	}
+}
+
+void NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
+{
+	if ( !document ) return;
+	// The window starts as a hidden background window so it cannot flash before
+	// its model is ready; activateDocumentTab() performs the visible switch.
+	NifSkope * window = NifSkope::createWindow( QString(), true );
+	window->sessionCollectionMember = true;
+	window->sessionPreviewVisible = false;
+	window->sessionPreviewUnloaded = false;
+	bool loaded = false;
+	QString sourceLabel = document->displayName();
+	if ( document->configuredResourceGame >= 0 && !document->configuredResourcePath.isEmpty() ) {
+		loaded = loadConfiguredNifIntoDocument( window,
+			document->configuredResourceGame, document->configuredResourcePath );
+	} else {
+		QString fname = document->currentFile;
+		emit window->beginLoading();
+		loaded = window->nif->loadFromFile( fname );
+		if ( loaded ) {
+			window->configuredResourceGame = -1;
+			window->configuredResourcePath.clear();
+			window->setCurrentFile( fname );
+		}
+		emit window->completeLoading( loaded, fname );
+	}
+	if ( !loaded ) {
+		window->sessionCollectionMember = false;
+		window->close();
+		statusBar()->showMessage(
+			tr( "Could not reload %1 for editing." ).arg( sourceLabel ), 5000 );
+		refreshAllDocumentSessions();
+		return;
+	}
+	delete document;
+	// The new window replaces the data-only entry; rebuild this window's tab
+	// bookkeeping so the promoted document can be activated by index.
+	refreshAllDocumentSessions();
+	const int index = documentTabWindows.indexOf( window );
+	if ( index >= 0 )
+		activateDocumentTab( index );
+}
+
+void NifSkope::removeBackgroundDocument( BackgroundNifDocument * document )
+{
+	if ( !document ) return;
+	// The destructor detaches the document from the session list.
+	delete document;
+	refreshAllDocumentSessions();
+}
+
+void NifSkope::refreshSessionPreview()
+{
+	if ( !ogl ) return;
+	QVector<Vector3> soup;
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
+		if ( !document || document == this || !document->sessionCollectionMember
+			|| !document->sessionPreviewVisible
+			|| document->sessionPreviewUnloaded || document->currentFile.isEmpty() )
+			continue;
+		soup += sessionDocumentTriangleSoup( document->nif );
+	}
+	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
+		if ( !document || !document->selectedInWorkspace() || document->currentFile.isEmpty() )
+			continue;
+		soup += sessionDocumentTriangleSoup( document->nif );
+	}
+	if ( soup.isEmpty() ) ogl->clearSessionDocumentPreview();
+	else ogl->setSessionDocumentPreview( soup );
+}
+
+void NifSkope::refreshAllDocumentSessions()
+{
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
+		if ( document && ( !document->backgroundWorkspaceDocument || document->isVisible() ) )
+			document->rebuildDocumentTabs();
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
+		if ( document && document->isVisible() ) document->refreshSessionPreview();
 }
 
 void NifSkope::wireBlockListSelection()
@@ -446,6 +1603,323 @@ void NifSkope::wireBlockListSelection()
 	} );
 }
 
+void NifSkope::applyBlockListFilter()
+{
+	if ( !list || !proxy || !nif || !blockListSearch ) return;
+	const QStringList terms = blockListSearch->text().simplified().split(
+		QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+	auto directMatch = [this, &terms]( const QModelIndex & viewIndex ) {
+		QModelIndex source = ( viewIndex.model() == proxy ? proxy->mapTo( viewIndex ) : viewIndex );
+		int block = nif->getBlockNumber( source );
+		if ( block < 0 || !blockMatchesQuickFilter( block ) ) return false;
+		QModelIndex blockIndex = nif->getBlockIndex( block );
+		QString searchable = QStringLiteral( "%1 #%1 %2 %3" ).arg( block )
+			.arg( nif->itemName( blockIndex ), nif->get<QString>( blockIndex, "Name" ) );
+		if ( viewIndex.isValid() ) {
+			searchable += QLatin1Char( ' ' ) + viewIndex.data( Qt::DisplayRole ).toString();
+			if ( viewIndex.sibling( viewIndex.row(), 1 ).isValid() )
+				searchable += QLatin1Char( ' ' ) + viewIndex.sibling( viewIndex.row(), 1 ).data( Qt::DisplayRole ).toString();
+		}
+		for ( const QString & term : terms )
+			if ( !searchable.contains( term, Qt::CaseInsensitive ) ) return false;
+		return true;
+	};
+
+	if ( list->model() == nif ) {
+		for ( int row = 0; row < nif->rowCount(); row++ ) {
+			QModelIndex index = nif->index( row, 0 );
+			int block = nif->getBlockNumber( index );
+			const bool isBlock = block >= 0;
+			const bool keep = !isBlock || directMatch( index );
+			list->setRowHidden( row, QModelIndex(), !keep );
+		}
+		return;
+	}
+	if ( list->model() != proxy ) return;
+	auto filterBranch = [&]( auto && self, const QModelIndex & parent ) -> bool {
+		bool branchMatches = false;
+		for ( int row = 0; row < proxy->rowCount( parent ); row++ ) {
+			QModelIndex index = proxy->index( row, 0, parent );
+			const bool childMatches = self( self, index );
+			const bool rowMatches = directMatch( index );
+			const bool keep = rowMatches || childMatches;
+			list->setRowHidden( row, parent, !keep );
+			if ( !terms.isEmpty() && childMatches ) list->expand( index );
+			branchMatches = branchMatches || rowMatches || childMatches;
+		}
+		return branchMatches;
+	};
+	filterBranch( filterBranch, QModelIndex() );
+}
+
+void NifSkope::applyBlockDetailsFilter()
+{
+	if ( !tree || !nif || !blockDetailsSearch || tree->model() != nif ) return;
+	const QStringList terms = blockDetailsSearch->text().simplified().split(
+		QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+	auto filterBranch = [&]( auto && self, const QModelIndex & parent ) -> bool {
+		bool branchMatches = false;
+		for ( int row = 0; row < nif->rowCount( parent ); row++ ) {
+			QModelIndex nameIndex = nif->index( row, NifModel::NameCol, parent );
+			const bool childMatches = self( self, nameIndex );
+			QString searchable = nameIndex.data( Qt::DisplayRole ).toString();
+			QModelIndex valueIndex = nif->index( row, NifModel::ValueCol, parent );
+			if ( valueIndex.isValid() ) searchable += QLatin1Char( ' ' ) + valueIndex.data( Qt::DisplayRole ).toString();
+			bool rowMatches = true;
+			for ( const QString & term : terms )
+				if ( !searchable.contains( term, Qt::CaseInsensitive ) ) {
+					rowMatches = false;
+					break;
+				}
+			const bool keep = terms.isEmpty() || rowMatches || childMatches;
+			tree->setRowHidden( row, parent, !keep );
+			if ( !terms.isEmpty() && childMatches ) tree->expand( nameIndex );
+			branchMatches = branchMatches || rowMatches || childMatches;
+		}
+		return branchMatches;
+	};
+	filterBranch( filterBranch, tree->rootIndex() );
+}
+
+bool NifSkope::blockMatchesQuickFilter( int block ) const
+{
+	if ( !nif || block < 0 || blockListQuickFilter == 0 ) return true;
+	QModelIndex index = nif->getBlockIndex( block );
+	if ( !index.isValid() ) return false;
+	const QString type = nif->itemName( index );
+	switch ( blockListQuickFilter ) {
+	case 1:
+		return nif->blockInherits( index, "NiGeometry" )
+			|| type.contains( QStringLiteral( "TriShape" ), Qt::CaseInsensitive )
+			|| type.contains( QStringLiteral( "Mesh" ), Qt::CaseInsensitive );
+	case 2:
+		return nif->blockInherits( index, "NiNode" );
+	case 3:
+		return type.contains( QStringLiteral( "Skin" ), Qt::CaseInsensitive )
+			|| type.contains( QStringLiteral( "Bone" ), Qt::CaseInsensitive );
+	case 4:
+		return nif->blockInherits( index, "NiProperty" )
+			|| type.contains( QStringLiteral( "Shader" ), Qt::CaseInsensitive )
+			|| type.contains( QStringLiteral( "Material" ), Qt::CaseInsensitive )
+			|| type.contains( QStringLiteral( "Texture" ), Qt::CaseInsensitive )
+			|| type.contains( QStringLiteral( "Image" ), Qt::CaseInsensitive );
+	case 5:
+		return type.startsWith( QStringLiteral( "bhk" ) )
+			|| type.contains( QStringLiteral( "Collision" ), Qt::CaseInsensitive );
+	case 6:
+		return nif->blockInherits( index, "NiTimeController" )
+			|| type.contains( QStringLiteral( "Controller" ), Qt::CaseInsensitive )
+			|| type.contains( QStringLiteral( "Interpolator" ), Qt::CaseInsensitive )
+			|| type.contains( QStringLiteral( "Sequence" ), Qt::CaseInsensitive )
+			|| type.contains( QStringLiteral( "Keyframe" ), Qt::CaseInsensitive );
+	case 7:
+		return nif->blockInherits( index, "NiExtraData" )
+			|| type.contains( QStringLiteral( "ExtraData" ), Qt::CaseInsensitive );
+	default:
+		return true;
+	}
+}
+
+void NifSkope::navigateBlockListHistory( int delta )
+{
+	if ( !nif || blockListHistory.isEmpty() ) return;
+	int next = blockListHistoryPosition + delta;
+	while ( next >= 0 && next < blockListHistory.size() ) {
+		int block = blockListHistory.at( next );
+		if ( nif->getBlockIndex( block ).isValid() ) {
+			blockListHistoryPosition = next;
+			navigatingBlockListHistory = true;
+			select( nif->getBlockIndex( block ) );
+			return;
+		}
+		next += delta;
+	}
+}
+
+void NifSkope::goToBlock()
+{
+	if ( !nif || nif->getBlockCount() <= 0 ) return;
+	bool accepted = false;
+	QString query = QInputDialog::getText( this, tr( "Go to Block" ),
+		tr( "Block number, type, or name:" ), QLineEdit::Normal, QString(), &accepted ).trimmed();
+	if ( !accepted || query.isEmpty() ) return;
+	QString numberText = query;
+	if ( numberText.startsWith( QLatin1Char( '#' ) ) ) numberText.remove( 0, 1 );
+	bool numberOK = false;
+	int block = numberText.toInt( &numberOK );
+	if ( !( numberOK && block >= 0 && block < nif->getBlockCount() ) ) {
+		block = -1;
+		for ( int candidate = 0; candidate < nif->getBlockCount(); candidate++ ) {
+			QModelIndex index = nif->getBlockIndex( candidate );
+			QString haystack = nif->itemName( index ) + QLatin1Char( ' ' ) + nif->get<QString>( index, "Name" );
+			if ( haystack.contains( query, Qt::CaseInsensitive ) ) {
+				block = candidate;
+				break;
+			}
+		}
+	}
+	if ( block < 0 ) {
+		ui->statusbar->showMessage( tr( "No block matches \"%1\"." ).arg( query ), 3500 );
+		return;
+	}
+	blockListSearch->clear();
+	blockListQuickFilter = 0;
+	if ( blockListFilterGroup && blockListFilterGroup->button( 0 ) )
+		blockListFilterGroup->button( 0 )->setChecked( true );
+	applyBlockListFilter();
+	select( nif->getBlockIndex( block ) );
+}
+
+void NifSkope::updateBlockListNavigation( const QModelIndex & selection )
+{
+	if ( !nif ) return;
+	QModelIndex index = selection.isValid() ? selection : currentNifIndex();
+	int block = nif->getBlockNumber( index );
+	if ( block >= 0 ) {
+		if ( navigatingBlockListHistory ) {
+			navigatingBlockListHistory = false;
+		} else if ( blockListHistoryPosition < 0 || blockListHistory.value( blockListHistoryPosition, -1 ) != block ) {
+			while ( blockListHistory.size() > blockListHistoryPosition + 1 ) blockListHistory.removeLast();
+			blockListHistory.append( block );
+			if ( blockListHistory.size() > 64 ) blockListHistory.removeFirst();
+			blockListHistoryPosition = blockListHistory.size() - 1;
+		}
+	}
+	if ( blockListBack ) blockListBack->setEnabled( blockListHistoryPosition > 0 );
+	if ( blockListForward ) blockListForward->setEnabled(
+		blockListHistoryPosition >= 0 && blockListHistoryPosition + 1 < blockListHistory.size() );
+
+	auto blockLabel = [this]( int b ) {
+		QModelIndex i = nif->getBlockIndex( b );
+		QString name = nif->get<QString>( i, "Name" );
+		return name.isEmpty() ? tr( "#%1 %2" ).arg( b ).arg( nif->itemName( i ) )
+			: tr( "#%1 %2" ).arg( b ).arg( name );
+	};
+	if ( blockListBreadcrumb ) {
+		QStringList path;
+		QSet<int> visited;
+		int parent = block;
+		while ( parent >= 0 && !visited.contains( parent ) ) {
+			visited.insert( parent );
+			path.prepend( blockLabel( parent ) );
+			parent = nif->getParent( parent );
+		}
+		blockListBreadcrumb->setText( path.isEmpty() ? tr( "No block selected" ) : path.join( QStringLiteral( "  >  " ) ) );
+		blockListBreadcrumb->setToolTip( blockListBreadcrumb->text() );
+	}
+	if ( blockListPin ) {
+		QSignalBlocker blocker( blockListPin );
+		blockListPin->setEnabled( block >= 0 );
+		blockListPin->setChecked( blockListPins.contains( block ) );
+		QMenu * menu = blockListPin->menu();
+		menu->clear();
+		QList<int> pins = blockListPins.values();
+		std::sort( pins.begin(), pins.end() );
+		if ( pins.isEmpty() ) menu->addAction( tr( "No pinned blocks" ) )->setEnabled( false );
+		for ( int pinned : pins ) {
+			if ( !nif->getBlockIndex( pinned ).isValid() ) continue;
+			QAction * action = menu->addAction( blockLabel( pinned ) );
+			connect( action, &QAction::triggered, this, [this, pinned]() { select( nif->getBlockIndex( pinned ) ); } );
+		}
+	}
+	if ( blockListRelations ) {
+		QMenu * menu = blockListRelations->menu();
+		menu->clear();
+		QList<int> outgoing = ( block >= 0 ? nif->getChildLinks( block ) : QList<int>() );
+		QList<int> incoming = ( block >= 0 ? nif->getParentLinks( block ) : QList<int>() );
+		std::sort( outgoing.begin(), outgoing.end() );
+		std::sort( incoming.begin(), incoming.end() );
+		outgoing.erase( std::unique( outgoing.begin(), outgoing.end() ), outgoing.end() );
+		incoming.erase( std::unique( incoming.begin(), incoming.end() ), incoming.end() );
+		blockListRelations->setEnabled( block >= 0 && !( outgoing.isEmpty() && incoming.isEmpty() ) );
+		blockListRelations->setText( tr( "Links %1/%2" ).arg( outgoing.size() ).arg( incoming.size() ) );
+		auto addLinks = [this, menu, &blockLabel]( const QString & title, const QList<int> & links ) {
+			menu->addSection( title );
+			if ( links.isEmpty() ) menu->addAction( tr( "None" ) )->setEnabled( false );
+			for ( int linked : links ) {
+				if ( !nif->getBlockIndex( linked ).isValid() ) continue;
+				QAction * action = menu->addAction( blockLabel( linked ) );
+				connect( action, &QAction::triggered, this, [this, linked]() { select( nif->getBlockIndex( linked ) ); } );
+			}
+		};
+		addLinks( tr( "Links to" ), outgoing );
+		addLinks( tr( "Referenced by" ), incoming );
+	}
+	if ( blockListFooter ) {
+		qint64 vertices = 0;
+		qint64 triangles = 0;
+		int shapes = 0;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex shape = nif->getBlockIndex( b );
+			if ( !( nif->blockInherits( shape, "NiGeometry" )
+				|| nif->itemName( shape ).contains( QStringLiteral( "TriShape" ), Qt::CaseInsensitive ) ) ) continue;
+			shapes++;
+			QModelIndex counts = shape;
+			if ( !nif->getIndex( counts, "Num Vertices" ).isValid() ) {
+				int data = nif->getLink( shape, "Data" );
+				if ( data >= 0 ) counts = nif->getBlockIndex( data );
+			}
+			if ( nif->getIndex( counts, "Num Vertices" ).isValid() ) vertices += nif->get<int>( counts, "Num Vertices" );
+			if ( nif->getIndex( counts, "Num Triangles" ).isValid() ) triangles += nif->get<int>( counts, "Num Triangles" );
+		}
+		blockListFooter->setText( tr( "%1 blocks  ·  %2 shapes  ·  %3 verts  ·  %4 tris" )
+			.arg( nif->getBlockCount() ).arg( shapes ).arg( vertices ).arg( triangles ) );
+		blockListFooter->setToolTip( tr( "NIF %1 · Bethesda version %2" ).arg( nif->getVersion() ).arg( nif->getBSVersion() ) );
+	}
+}
+
+void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUnavailable )
+{
+	if ( !nif || !proxy || !index.isValid() || index.model() != proxy ) return;
+	// Mouse activation is intentionally limited to the visible object-name
+	// column. F2 passes notifyIfUnavailable=true and remains row-oriented.
+	if ( !notifyIfUnavailable && index.column() != 1 ) return;
+	QModelIndex block = nif->getBlockIndex( proxy->mapTo( index.sibling( index.row(), 0 ) ) );
+	const bool renameable = block.isValid() && nif->blockInherits( block, "NiAVObject" )
+		&& nif->getIndex( block, "Name" ).isValid();
+	if ( !renameable ) {
+		if ( notifyIfUnavailable && ui && ui->statusbar )
+			ui->statusbar->showMessage( tr( "This block has no unique scene-object Name to rename." ), 3000 );
+		return;
+	}
+
+	// Blender-style in-place editing: turn the displayed Value cell into a
+	// line edit instead of opening a modal input dialog.
+	if ( auto * previous = dynamic_cast<BlockListRenameEdit *>(
+		list->viewport()->findChild<QLineEdit *>( QStringLiteral( "BlockListRenameEdit" ) ) ) )
+		previous->cancel();
+
+	const QModelIndex valueIndex = index.sibling( index.row(), 1 );
+	list->scrollTo( valueIndex );
+	QRect cell = list->visualRect( valueIndex );
+	if ( !cell.isValid() || cell.isEmpty() ) return;
+
+	const int blockNumber = nif->getBlockNumber( block );
+	auto * editor = new BlockListRenameEdit( list->viewport() );
+	editor->setObjectName( QStringLiteral( "BlockListRenameEdit" ) );
+	editor->setGeometry( cell );
+	editor->setText( nif->resolveString( block, "Name" ) );
+	editor->setToolTip( tr( "Enter accepts; Esc cancels." ) );
+	editor->commitRename = [this, blockNumber]( const QString & name ) {
+		QModelIndex currentBlock = nif ? nif->getBlockIndex( blockNumber ) : QModelIndex();
+		QString error;
+		int updatedReferences = 0;
+		if ( !renameSceneObjectInline( nif, currentBlock, name, &error, &updatedReferences ) ) {
+			QMessageBox::warning( this, tr( "Rename" ), error );
+			return false;
+		}
+		if ( updatedReferences > 0 && ui && ui->statusbar )
+			ui->statusbar->showMessage(
+				tr( "Renamed node and updated %1 palette/sequence reference(s)." )
+					.arg( updatedReferences ), 4000 );
+		QTimer::singleShot( 0, this, [this]() { applyBlockListFilter(); } );
+		return true;
+	};
+	editor->show();
+	editor->setFocus( Qt::MouseFocusReason );
+	editor->selectAll();
+}
+
 void NifSkope::swapModels()
 {
 	// Swap out the models with empty versions while loading the file
@@ -463,6 +1937,7 @@ void NifSkope::swapModels()
 	}
 	// setModel() on the block list created a new selection model; re-wire.
 	wireBlockListSelection();
+	QTimer::singleShot( 0, this, [this]() { applyBlockListFilter(); } );
 }
 
 void NifSkope::updateSettings()
@@ -486,14 +1961,61 @@ SettingsDialog * NifSkope::getOptions()
 
 void NifSkope::closeEvent( QCloseEvent * e )
 {
-	saveUi();
-
-	if ( saveConfirm() )
+	if ( closingWorkspaceGroup ) {
 		e->accept();
-	else
+		return;
+	}
+
+	if ( !backgroundWorkspaceDocument || isVisible() ) saveUi();
+	if ( !saveConfirm() ) {
 		e->ignore();
+		return;
+	}
+
+	// A visible document is the one user-facing window for its loaded-NIF
+	// workspace. Closing it closes every invisible model container in the same
+	// group instead of promoting one of those containers into another window.
+	if ( isVisible() ) {
+		NifSkope * group = workspaceRoot ? workspaceRoot : this;
+		QList<NifSkope *> members;
+		for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
+			if ( !document || document == this ) continue;
+			NifSkope * documentGroup = document->workspaceRoot
+				? document->workspaceRoot : document;
+			if ( documentGroup == group ) members << document;
+		}
+		// Confirm every potentially edited member before closing any of them, so
+		// Cancel leaves the complete workspace intact.
+		for ( NifSkope * document : std::as_const( members ) ) {
+			if ( !document->saveConfirm() ) {
+				e->ignore();
+				return;
+			}
+		}
+		for ( NifSkope * document : std::as_const( members ) )
+			document->closingWorkspaceGroup = true;
+		for ( NifSkope * document : std::as_const( members ) )
+			document->close();
+		// Data-only members have no window to close and can never hold unsaved
+		// edits; delete the ones owned by this workspace outright. Iterate a
+		// copy because each destructor detaches itself from the session list.
+		const QList<BackgroundNifDocument *> backgroundMembers = sessionBackgroundDocuments;
+		for ( BackgroundNifDocument * document : backgroundMembers )
+			if ( document && ( !document->workspaceRoot || document->workspaceRoot == group ) )
+				delete document;
+	}
+	e->accept();
 }
 
+
+void NifSkope::castSpell( const QString & id, const QModelIndex & index )
+{
+	if ( book ) {
+		SpellPtr spell = SpellBook::lookup( id );
+		if ( spell )
+			book->cast( nif, index, spell );
+	}
+}
 
 void NifSkope::select( const QModelIndex & index )
 {
@@ -510,6 +2032,12 @@ void NifSkope::select( const QModelIndex & index )
 
 	QModelIndex prevIdx = currentIdx;
 	currentIdx = idx;
+	// The persistent menubar SpellBook must follow the same normalized NIF
+	// index as the views. Context menus create a fresh SpellBook at the clicked
+	// index, but without this update the top Spells menu remains at its initial
+	// invalid index and hides selection-specific pages such as Rigging.
+	if ( book )
+		book->sltIndex( currentIdx );
 
 	selecting = true;
 
@@ -645,6 +2173,8 @@ void NifSkope::select( const QModelIndex & index )
 
 			if ( tree->rootIndex() != root )
 				tree->setRootIndex( root );
+			else
+				tree->refreshRowHiding();	// same block: recover a stranded hiding pass
 
 			tree->setCurrentIndex( idx.sibling( idx.row(), 0 ) );
 
@@ -661,6 +2191,7 @@ void NifSkope::select( const QModelIndex & index )
 	}
 
 	selecting = false;
+	emit currentNifIndexChanged( currentIdx );
 }
 
 void NifSkope::setListMode()
@@ -709,6 +2240,8 @@ void NifSkope::setListMode()
 			head->resizeSection( 1, s1 );
 		}
 	}
+	wireBlockListSelection();
+	applyBlockListFilter();
 }
 
 // 'Recent Files' Helpers
@@ -783,6 +2316,10 @@ QString NifSkope::getCurrentFile() const
 void NifSkope::setCurrentFile( const QString & filename )
 {
 	currentFile = QDir::fromNativeSeparators( filename );
+	if ( QFileInfo( currentFile ).isAbsolute() ) {
+		configuredResourceGame = -1;
+		configuredResourcePath.clear();
+	}
 
 	nif->refreshFileInfo( currentFile );
 
@@ -802,6 +2339,7 @@ void NifSkope::setCurrentFile( const QString & filename )
 	settings.setValue( "File/Recent File List", files );
 
 	updateAllRecentFileActions();
+	refreshAllDocumentSessions();
 }
 
 void NifSkope::setCurrentArchiveFile( const QString & filepath )
@@ -967,6 +2505,179 @@ static bool archiveFilterFunction( [[maybe_unused]] void * p, const std::string_
 	return ( s.ends_with( ".nif" ) || s.ends_with( ".bto" ) || s.ends_with( ".btr" ) );
 }
 
+void NifSkope::populateConfiguredNifBrowser()
+{
+	if ( !bsaModel || !bsaProxyModel || !bsaView || !nif ) return;
+	configuredNifBrowserPopulated = true;
+	const Game::GameMode game = Game::GameManager::get_game( nif );
+	const bool includeArchives = !nifBrowserArchivesToggle || nifBrowserArchivesToggle->isChecked();
+	const bool includeLoose = !nifBrowserLooseToggle || nifBrowserLooseToggle->isChecked();
+
+	// Replace only available-source rows. Loaded NIFs are rebuilt below from
+	// the live session and therefore remain independent of resource refreshes.
+	if ( bsaModel->rowCount() > 0 )
+		bsaModel->removeRows( 0, bsaModel->rowCount() );
+	if ( bsaModel->columnCount() < 3 ) bsaModel->init();
+
+	auto * available = new QStandardItem( tr( "Available NIFs" ) );
+	available->setToolTip( tr( "Merged archive and loose files from the configured %1 resource paths" )
+		.arg( Game::StringForMode( game ) ) );
+	QHash<QString, QStandardItem *> folders;
+	folders.insert( QString(), available );
+
+	// The normal renderer resource cache deliberately excludes NIFs for modern
+	// Bethesda games. Build a dedicated mesh-only virtual filesystem from the
+	// exact same configured paths so archives and loose mesh folders both work.
+	if ( currentArchive ) delete currentArchive;
+	currentArchive = new BA2File();
+	currentArchivePath.clear();
+	currentArchiveNames.clear();
+	int skippedResourceCount = 0;
+	for ( const QString & resourcePath : Game::GameManager::folders( game ) ) {
+		if ( resourcePath.isEmpty() ) continue;
+		// Resource lists commonly contain dedicated texture and material folders.
+		// They cannot contain meshes and BA2File reports them as invalid archive
+		// roots, so do not feed them to the NIF-only browser indexer.
+		const QFileInfo resourceInfo( resourcePath );
+		const QString leafName = resourceInfo.fileName();
+		if ( resourceInfo.isDir()
+			&& ( leafName.compare( QStringLiteral( "textures" ), Qt::CaseInsensitive ) == 0
+				|| leafName.compare( QStringLiteral( "materials" ), Qt::CaseInsensitive ) == 0 ) ) {
+			++skippedResourceCount;
+			continue;
+		}
+		try {
+#ifdef Q_OS_WIN32
+			currentArchive->loadArchivePath(
+				resourcePath.toLocal8Bit().constData(), &archiveFilterFunction );
+#else
+			currentArchive->loadArchivePath(
+				resourcePath.toStdString().c_str(), &archiveFilterFunction );
+#endif
+		} catch ( const std::exception & ) {
+			// A bad or non-mesh configured entry is not an application error. In
+			// particular, never use qWarning here: the application-wide Qt message
+			// handler presents every warning as a modal dialog.
+			++skippedResourceCount;
+		}
+	}
+	if ( skippedResourceCount > 0 ) {
+		available->setToolTip( available->toolTip() + tr( "\n%1 non-mesh or unreadable resource path(s) skipped." )
+			.arg( skippedResourceCount ) );
+	}
+	std::vector<std::string_view> resourceFiles;
+	currentArchive->getFileList( resourceFiles, false, &archiveFilterFunction );
+	int fileCount = 0;
+	for ( const std::string_view & filePathView : resourceFiles ) {
+		const BA2File::FileInfo * fileInfo = currentArchive->findFile( filePathView );
+		const bool isLooseFile = fileInfo && fileInfo->archiveType < 0;
+		if ( ( isLooseFile && !includeLoose ) || ( !isLooseFile && !includeArchives ) )
+			continue;
+		QString fullPath = QString::fromUtf8( filePathView.data(), qsizetype( filePathView.size() ) )
+			.replace( '\\', '/' );
+		if ( !fullPath.startsWith( QStringLiteral( "meshes/" ), Qt::CaseInsensitive ) )
+			continue;
+		QString relativePath = fullPath.mid( 7 );
+		QString folderPath = relativePath.section( '/', 0, -2 );
+		QStandardItem * parent = available;
+		QString accumulated;
+		for ( const QString & part : folderPath.split( '/', Qt::SkipEmptyParts ) ) {
+			if ( !accumulated.isEmpty() ) accumulated += QChar( '/' );
+			accumulated += part;
+			if ( !folders.contains( accumulated ) ) {
+				auto * folder = new QStandardItem( part );
+				parent->appendRow( { folder, new QStandardItem(), new QStandardItem() } );
+				folders.insert( accumulated, folder );
+			}
+			parent = folders.value( accumulated );
+		}
+
+		auto * name = new QStandardItem( relativePath.section( '/', -1 ) );
+		name->setToolTip( isLooseFile ? tr( "Loose NIF" ) : tr( "Archive NIF" ) );
+		name->setData( NifBrowserConfiguredResource, NifBrowserSourceRole );
+		name->setData( int( game ), NifBrowserGameRole );
+		auto * path = new QStandardItem( fullPath );
+		path->setData( NifBrowserConfiguredResource, NifBrowserSourceRole );
+		path->setData( int( game ), NifBrowserGameRole );
+		parent->appendRow( { name, path, new QStandardItem() } );
+		++fileCount;
+	}
+
+	if ( fileCount == 0 ) {
+		auto * empty = new QStandardItem( tr( "No configured NIF resources for %1" )
+			.arg( Game::StringForMode( game ) ) );
+		empty->setEnabled( false );
+		available->appendRow( { empty, new QStandardItem(), new QStandardItem() } );
+	}
+	bsaModel->insertRow( 0, { available, new QStandardItem(), new QStandardItem() } );
+	rebuildLoadedNifsBrowserGroup();
+
+	if ( bsaProxyModel->sourceModel() != bsaModel ) bsaProxyModel->setSourceModel( bsaModel );
+	if ( bsaView->model() != bsaProxyModel ) bsaView->setModel( bsaProxyModel );
+	bsaView->setSortingEnabled( true );
+	bsaView->hideColumn( 1 );
+	bsaProxyModel->sort( 0, Qt::AscendingOrder );
+	ui->bsaName->setText( tr( "%1 configured resources" ).arg( Game::StringForMode( game ) ) );
+	QModelIndex visibleAvailable = bsaProxyModel->mapFromSource( available->index() );
+	if ( visibleAvailable.isValid() ) bsaView->expand( visibleAvailable );
+}
+
+bool NifSkope::extractConfiguredNifBytes( int gameID, const QString & path,
+	QByteArray & bytes, QString & displayPath ) const
+{
+	if ( path.isEmpty() || gameID < int( Game::OTHER )
+		|| gameID >= int( Game::NUM_GAMES ) ) return false;
+	const Game::GameMode game = Game::GameMode( gameID );
+	displayPath = QStringLiteral( "[%1]/%2" )
+		.arg( Game::StringForMode( game ), path );
+	if ( !currentArchive ) return false;
+	const std::string virtualPath = path.toLower().toStdString();
+	const BA2File::FileInfo * file = currentArchive->findFile( virtualPath );
+	if ( !file ) {
+		if ( ui && ui->statusbar ) ui->statusbar->showMessage(
+			tr( "Could not load %1 from configured resources." ).arg( path ), 5000 );
+		return false;
+	}
+	BA2File::UCharArray extracted;
+	const unsigned char * dataPtr = nullptr;
+	const size_t dataSize = currentArchive->extractFile( dataPtr, extracted, virtualPath );
+	bytes = QByteArray( reinterpret_cast<const char *>( dataPtr ), qsizetype( dataSize ) );
+	return !bytes.isEmpty();
+}
+
+bool NifSkope::loadConfiguredNifIntoDocument( NifSkope * target, int gameID, const QString & path )
+{
+	if ( !target ) return false;
+	QByteArray bytes;
+	QString displayPath;
+	if ( !extractConfiguredNifBytes( gameID, path, bytes, displayPath ) )
+		return false;
+
+	QBuffer buffer( &bytes );
+	if ( !buffer.open( QIODevice::ReadOnly ) ) return false;
+	emit target->beginLoading();
+	const bool loaded = target->nif->load( buffer );
+	if ( loaded ) {
+		target->configuredResourceGame = gameID;
+		target->configuredResourcePath = path;
+		target->setCurrentFile( displayPath );
+	}
+	emit target->completeLoading( loaded, displayPath );
+	buffer.close();
+	refreshAllDocumentSessions();
+	return loaded;
+}
+
+void NifSkope::openConfiguredNif( int game, const QString & path )
+{
+	NifSkope * target = this;
+	if ( !currentFile.isEmpty() || isWindowModified()
+		|| ( nif && !nif->undoStack->isClean() ) )
+		target = NifSkope::createWindow();
+	if ( !loadConfiguredNifIntoDocument( target, game, path ) && target != this )
+		target->close();
+}
+
 bool NifSkope::loadArchivesFromFolder( QString archive )
 {
 	if ( !( archive.endsWith( "/Data", Qt::CaseInsensitive ) || archive.endsWith( "\\Data", Qt::CaseInsensitive ) ) ) {
@@ -1036,8 +2747,9 @@ void NifSkope::openArchive( const QString & archive )
 	} else {
 		// load all mesh archives from a folder
 		if ( !loadArchivesFromFolder( archive ) ) {
-			clearCurrentArchive();
-			return;
+			// A Data folder containing only loose meshes is still a valid NIF
+			// Browser source; appendLooseNifsToBrowser() handles it below.
+			qCWarning( nsIo ) << "No mesh archives found; checking loose files.";
 		}
 	}
 
@@ -1047,11 +2759,23 @@ void NifSkope::openArchive( const QString & archive )
 		// Models
 		bsaModel->init();
 
-		// Populate model from BSA
+		// Populate the unified NIF Browser from archives and any loose files in
+		// the same Data folder.
 		bsaModel->fillModel( currentArchive, "meshes" );
+		QString looseRoot = archive;
+		if ( isArchiveFolder ) {
+			if ( !( looseRoot.endsWith( "/Data", Qt::CaseInsensitive )
+				|| looseRoot.endsWith( "\\Data", Qt::CaseInsensitive ) ) ) {
+				QString dataFolder = QDir( looseRoot ).filePath( QStringLiteral( "Data" ) );
+				if ( QFileInfo( dataFolder ).isDir() ) looseRoot = dataFolder;
+			}
+		} else {
+			looseRoot = QFileInfo( archive ).absolutePath();
+		}
+		appendLooseNifsToBrowser( looseRoot );
 
 		if ( bsaModel->rowCount() == 0 ) {
-			qCWarning( nsIo ) << "The BSA does not contain any meshes.";
+			qCWarning( nsIo ) << "No archived or loose NIF meshes were found.";
 			clearCurrentArchive();
 			return;
 		}
@@ -1064,6 +2788,7 @@ void NifSkope::openArchive( const QString & archive )
 		bsaView->hideColumn( 1 );
 		bsaView->setColumnWidth( 0, 300 );
 		bsaView->setColumnWidth( 2, 50 );
+		rebuildLoadedNifsBrowserGroup();
 
 		// Sort proxy after model/view is populated
 		bsaProxyModel->sort( 0, Qt::AscendingOrder );
@@ -1082,78 +2807,261 @@ void NifSkope::openArchive( const QString & archive )
 		// Bring tab to front
 		dBrowser->raise();
 
-		// Filter
-		auto filterTimer = new QTimer( this );
-		filterTimer->setSingleShot( true );
+		// Reapply the existing search to the newly populated source.
+		ui->bsaFilter->textChanged( ui->bsaFilter->text() );
+	}
+}
 
-		connect( ui->bsaFilter, &QLineEdit::textChanged, [filterTimer]() { filterTimer->start( 300 ); } );
-		connect( filterTimer, &QTimer::timeout, [this]() {
-			auto text = ui->bsaFilter->text();
+void NifSkope::appendLooseNifsToBrowser( const QString & dataFolder )
+{
+	if ( !bsaModel || dataFolder.isEmpty() ) return;
+	QDir dataDir( dataFolder );
+	QString meshesPath = dataDir.filePath( QStringLiteral( "meshes" ) );
+	if ( !QFileInfo( meshesPath ).isDir() ) return;
 
-			bsaProxyModel->setFilterRegularExpression(
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-				QRegularExpression( QRegularExpression::wildcardToRegularExpression( text ).chopped( 2 ).mid( 2 ),
-									QRegularExpression::CaseInsensitiveOption )
-#else
-				QRegularExpression::fromWildcard(
-					text, Qt::CaseInsensitive, QRegularExpression::UnanchoredWildcardConversion )
-#endif
-			);
-			bsaView->expandAll();
+	auto * looseRoot = new QStandardItem( tr( "Loose Files" ) );
+	auto * loosePath = new QStandardItem();
+	auto * looseSize = new QStandardItem();
+	QHash<QString, QStandardItem *> folders;
+	folders.insert( QString(), looseRoot );
 
-			if ( text.isEmpty() ) {
-				bsaView->collapseAll();
-				bsaProxyModel->resetFilter();
+	QDirIterator it( meshesPath,
+		QStringList{ QStringLiteral( "*.nif" ), QStringLiteral( "*.bto" ), QStringLiteral( "*.btr" ) },
+		QDir::Files, QDirIterator::Subdirectories );
+	int fileCount = 0;
+	while ( it.hasNext() ) {
+		QString absolutePath = QDir::fromNativeSeparators( it.next() );
+		QString relativePath = dataDir.relativeFilePath( absolutePath ).replace( '\\', '/' );
+		QString folderPath = relativePath.section( '/', 0, -2 );
+		QStandardItem * parent = looseRoot;
+		QString accumulated;
+		for ( const QString & part : folderPath.split( '/', Qt::SkipEmptyParts ) ) {
+			if ( !accumulated.isEmpty() ) accumulated += QChar( '/' );
+			accumulated += part;
+			if ( !folders.contains( accumulated ) ) {
+				auto * folder = new QStandardItem( part );
+				parent->appendRow( { folder, new QStandardItem(), new QStandardItem() } );
+				folders.insert( accumulated, folder );
 			}
+			parent = folders.value( accumulated );
+		}
 
-		} );
+		QFileInfo info( absolutePath );
+		auto * fileItem = new QStandardItem( info.fileName() );
+		fileItem->setData( NifBrowserLooseFile, NifBrowserSourceRole );
+		auto * pathItem = new QStandardItem( absolutePath );
+		pathItem->setData( NifBrowserLooseFile, NifBrowserSourceRole );
+		const qint64 bytes = info.size();
+		auto * sizeItem = new QStandardItem( bytes > 1024
+			? QString::number( bytes / 1024 ) + QStringLiteral( "KB" )
+			: QString::number( bytes ) + QStringLiteral( "B" ) );
+		parent->appendRow( { fileItem, pathItem, sizeItem } );
+		++fileCount;
+	}
 
-		connect( ui->bsaFilenameOnly, &QCheckBox::toggled, bsaProxyModel, &BSAProxyModel::setFilterByNameOnly );
-
-		// Update filter when switching open archives
-		filterTimer->start( 0 );
+	if ( fileCount > 0 )
+		bsaModel->appendRow( { looseRoot, loosePath, looseSize } );
+	else {
+		delete looseRoot;
+		delete loosePath;
+		delete looseSize;
 	}
 }
 
 void NifSkope::openArchiveFile( const QModelIndex & index )
 {
+	if ( NifSkope * document = documentFromBrowserIndex( index ) ) {
+		activateDocumentTab( documentTabWindows.indexOf( document ) );
+		return;
+	}
 	QString filepath = index.sibling( index.row(), 1 ).data( Qt::EditRole ).toString();
 
-	if ( !filepath.isEmpty() )
-		openArchiveFileString( currentArchive, filepath );
+	if ( filepath.isEmpty() ) return;
+	QModelIndex nameIndex = index.sibling( index.row(), 0 );
+	const int source = nameIndex.data( NifBrowserSourceRole ).toInt();
+	if ( source == NifBrowserConfiguredResource ) {
+		openConfiguredNif( nameIndex.data( NifBrowserGameRole ).toInt(), filepath );
+		return;
+	}
+	if ( source == NifBrowserLooseFile ) {
+		openFile( filepath );
+		return;
+	}
+	openArchiveFileString( currentArchive, filepath );
+}
+
+void NifSkope::openNifBrowserSelection()
+{
+	if ( !bsaView || !bsaView->selectionModel() ) return;
+	const QModelIndexList rows = bsaView->selectionModel()->selectedRows( 0 );
+	for ( const QModelIndex & row : rows )
+		if ( !documentFromBrowserIndex( row )
+			&& !row.sibling( row.row(), 1 ).data( Qt::EditRole ).toString().isEmpty() )
+			openArchiveFile( row );
+}
+
+void NifSkope::addNifBrowserIndexToLoaded( const QModelIndex & index )
+{
+	if ( !index.isValid() ) return;
+	const QModelIndex nameIndex = index.sibling( index.row(), 0 );
+	const QString path = index.sibling( index.row(), 1 ).data( Qt::EditRole ).toString();
+	if ( path.isEmpty() ) return;
+	const int source = nameIndex.data( NifBrowserSourceRole ).toInt();
+	const int game = nameIndex.data( NifBrowserGameRole ).toInt();
+
+	NifSkope * target = nullptr;
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
+		if ( !document ) continue;
+		if ( source == NifBrowserConfiguredResource
+			&& document->configuredResourceGame == game
+			&& document->configuredResourcePath.compare( path, Qt::CaseInsensitive ) == 0 ) {
+			target = document;
+			break;
+		}
+		if ( source == NifBrowserLooseFile
+			&& QFileInfo( document->currentFile ).absoluteFilePath().compare(
+				QFileInfo( path ).absoluteFilePath(), Qt::CaseInsensitive ) == 0 ) {
+			target = document;
+			break;
+		}
+	}
+
+	if ( target ) {
+		const bool wasMember = target->sessionCollectionMember;
+		target->sessionCollectionMember = true;
+		target->sessionPreviewUnloaded = false;
+		if ( !wasMember ) target->sessionPreviewVisible = ( target == this );
+		refreshAllDocumentSessions();
+		return;
+	}
+
+	// Already enrolled as a data-only document?
+	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
+		if ( !document ) continue;
+		const bool matchesConfigured = source == NifBrowserConfiguredResource
+			&& document->configuredResourceGame == game
+			&& document->configuredResourcePath.compare( path, Qt::CaseInsensitive ) == 0;
+		const bool matchesLoose = source == NifBrowserLooseFile
+			&& document->configuredResourceGame < 0
+			&& QFileInfo( document->currentFile ).absoluteFilePath().compare(
+				QFileInfo( path ).absoluteFilePath(), Qt::CaseInsensitive ) == 0;
+		if ( matchesConfigured || matchesLoose ) {
+			document->sessionPreviewUnloaded = false;
+			refreshAllDocumentSessions();
+			return;
+		}
+	}
+
+	// New workspace members are parsed into a data-only background document:
+	// just a NifModel plus its source identity, with no hidden window, UI, or
+	// GL viewport. A real window is only constructed if the user promotes the
+	// document to primary.
+	auto * document = new BackgroundNifDocument;
+	document->workspaceRoot = workspaceRoot ? workspaceRoot : this;
+	bool loaded = false;
+	if ( source == NifBrowserConfiguredResource ) {
+		QByteArray bytes;
+		QString displayPath;
+		if ( extractConfiguredNifBytes( game, path, bytes, displayPath ) ) {
+			QBuffer buffer( &bytes );
+			if ( buffer.open( QIODevice::ReadOnly ) ) {
+				loaded = document->nif->load( buffer );
+				buffer.close();
+			}
+		}
+		if ( loaded ) {
+			document->configuredResourceGame = game;
+			document->configuredResourcePath = path;
+			document->currentFile = displayPath;
+		}
+	} else if ( source == NifBrowserLooseFile ) {
+		loaded = document->nif->loadFromFile( path );
+		if ( loaded )
+			document->currentFile = path;
+	}
+	if ( !loaded ) {
+		delete document;
+		if ( ui && ui->statusbar ) ui->statusbar->showMessage(
+			tr( "Could not load %1 into the Loaded NIFs workspace." ).arg( path ), 5000 );
+		return;
+	}
+	sessionBackgroundDocuments.append( document );
+	refreshAllDocumentSessions();
+}
+
+void NifSkope::addNifBrowserSelectionToLoaded()
+{
+	if ( !bsaView || !bsaView->selectionModel() ) return;
+	const QModelIndexList rows = bsaView->selectionModel()->selectedRows( 0 );
+	for ( const QModelIndex & row : rows )
+		queueNifBrowserIndexToLoaded( row );
+}
+
+void NifSkope::queueNifBrowserIndexToLoaded( const QModelIndex & index )
+{
+	if ( !index.isValid() ) return;
+	const QPersistentModelIndex persistentIndex( index );
+	if ( !pendingWorkspaceLoads.contains( persistentIndex ) )
+		pendingWorkspaceLoads.append( persistentIndex );
+	if ( processingWorkspaceLoad ) return;
+	processingWorkspaceLoad = true;
+	QTimer::singleShot( 0, this, &NifSkope::processNextNifBrowserLoad );
+}
+
+void NifSkope::processNextNifBrowserLoad()
+{
+	if ( pendingWorkspaceLoads.isEmpty() ) {
+		processingWorkspaceLoad = false;
+		statusBar()->showMessage( tr( "Finished loading background NIFs" ), 3000 );
+		return;
+	}
+
+	const QPersistentModelIndex index = pendingWorkspaceLoads.takeFirst();
+	statusBar()->showMessage( tr( "Loading background NIFs... %1 remaining" )
+		.arg( pendingWorkspaceLoads.size() + 1 ) );
+	if ( index.isValid() ) addNifBrowserIndexToLoaded( index );
+
+	// NifModel and the renderer are UI-thread objects. Yield between documents
+	// instead of moving them unsafely to a worker thread, so input and painting
+	// can be processed between individual file parses.
+	QTimer::singleShot( 0, this, &NifSkope::processNextNifBrowserLoad );
 }
 
 void NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filepath )
 {
-	if ( !currentArchive || currentArchiveNames.empty() )
+	if ( !bsa || currentArchiveNames.empty() )
 		return;
 	std::string	filePathStr( filepath.toLower().toStdString() );
-	auto	fd = currentArchive->findFile( filePathStr );
+	auto	fd = bsa->findFile( filePathStr );
 	if ( !fd )
-		return;
-	if ( !saveConfirm() )
 		return;
 
 	// Read data from BSA
 	BA2File::UCharArray	data;
 	const unsigned char *	dataPtr;
 	size_t	dataSize = bsa->extractFile( dataPtr, data, filePathStr );
-	QBuffer	buf;
-	buf.setData( reinterpret_cast< const char * >(dataPtr), qsizetype(dataSize) );
+	QByteArray bytes( reinterpret_cast< const char * >( dataPtr ), qsizetype( dataSize ) );
+	QBuffer	buf( &bytes );
 
 	// Format like "BSANAME.BSA/path/to/file.nif"
 	QString path( currentArchiveNames[std::min( size_t(fd->archiveFile), size_t(currentArchiveNames.size() - 1) )] );
 	path = path + "/" + filepath;
 
 	if ( buf.open( QBuffer::ReadOnly ) ) {
+		NifSkope * target = this;
+		if ( !currentFile.isEmpty() || isWindowModified()
+			|| ( nif && !nif->undoStack->isClean() ) )
+			target = NifSkope::createWindow();
+		target->configuredResourceGame = -1;
+		target->configuredResourcePath.clear();
 
-		emit beginLoading();
+		emit target->beginLoading();
 
-		bool loaded = nif->load( buf );
+		bool loaded = target->nif->load( buf );
 		if ( loaded )
-			setCurrentFile( path );
+			target->setCurrentFile( path );
 
-		emit completeLoading( loaded, path );
+		emit target->completeLoading( loaded, path );
 
 		//if ( loaded ) {
 		//	QCryptographicHash hash( QCryptographicHash::Md5 );
@@ -1166,26 +3074,26 @@ void NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filep
 		//}
 
 		buf.close();
+		refreshAllDocumentSessions();
 	}
 }
 
 
 void NifSkope::openFile( QString & file )
 {
-	if ( !saveConfirm() )
-		return;
-
-	loadFile( file );
+	if ( currentFile.isEmpty() && !( isWindowModified() || !nif->undoStack->isClean() ) )
+		loadFile( file );
+	else
+		NifSkope::createWindow( file );
 }
 
 void NifSkope::openRecentFile()
 {
-	if ( !saveConfirm() )
-		return;
-
 	QAction * action = qobject_cast<QAction *>(sender());
-	if ( action )
-		loadFile( action->data().toString() );
+	if ( action ) {
+		QString file = action->data().toString();
+		openFile( file );
+	}
 }
 
 void NifSkope::openRecentArchive()
@@ -1205,9 +3113,9 @@ void NifSkope::openRecentArchiveFile()
 
 void NifSkope::openFiles( QStringList & files )
 {
-	// Open first file in current window if blank
-	//	or only one file selected.
-	if ( ( getCurrentFile().isEmpty() || files.count() == 1 )
+	// Reuse only a genuinely blank document. Every other selected file receives
+	// its own session tab and therefore its own selection/Undo/dirty state.
+	if ( getCurrentFile().isEmpty()
 		&& !( isWindowModified() || ( nif && !nif->undoStack->isClean() ) ) ) {
 		QString first = files.takeFirst();
 		if ( !first.isEmpty() )
@@ -1221,6 +3129,8 @@ void NifSkope::openFiles( QStringList & files )
 
 void NifSkope::saveFile( const QString & filename )
 {
+	configuredResourceGame = -1;
+	configuredResourcePath.clear();
 	setCurrentFile( filename );
 	save();
 }
@@ -1229,6 +3139,8 @@ void NifSkope::loadFile( const QString & filename )
 {
 	QApplication::setOverrideCursor( Qt::WaitCursor );
 
+	configuredResourceGame = -1;
+	configuredResourcePath.clear();
 	setCurrentFile( filename );
 	QTimer::singleShot( 0, this, SLOT( load() ) );
 }
@@ -1240,6 +3152,11 @@ void NifSkope::reload()
 
 void NifSkope::load()
 {
+	if ( configuredResourceGame >= 0 && !configuredResourcePath.isEmpty() ) {
+		loadConfiguredNifIntoDocument(
+			this, configuredResourceGame, configuredResourcePath );
+		return;
+	}
 	{
 		QString	fname = currentFile.toLower().replace('\\', '/');
 		qsizetype	n1 = fname.indexOf(".ba2/");

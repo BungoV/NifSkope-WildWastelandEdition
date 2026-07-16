@@ -37,9 +37,94 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QVector>
 #include <QDebug>
+#include <QIcon>
 
 
 //! @file nifproxymodel.cpp NifProxyItem
+
+//! Compact semantic icons for top-level NIF blocks.  These are supplied by
+//! the proxy rather than NifModel so Block Details remains a data editor and
+//! only the Block List receives category decoration.
+static QIcon blockListCategoryIcon( const NifModel * nif, const QModelIndex & source )
+{
+	if ( !nif ) return QIcon();
+	QModelIndex block = nif->getBlockIndex( source );
+	if ( !block.isValid() ) return QIcon();
+
+	const QString type = nif->itemName( block );
+	if ( type.startsWith( QStringLiteral( "bhk" ) )
+		|| type.contains( QStringLiteral( "Collision" ), Qt::CaseInsensitive ) )
+		return QIcon( QStringLiteral( ":/btn/showCollision" ) );
+	if ( type.contains( QStringLiteral( "Particle" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Emitter" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Modifier" ), Qt::CaseInsensitive ) )
+		return QIcon( QStringLiteral( ":/btn/blockParticles" ) );
+	if ( nif->blockInherits( block, "NiLight" ) )
+		return QIcon( QStringLiteral( ":/btn/bulb" ) );
+	if ( nif->blockInherits( block, "NiCamera" ) )
+		return QIcon( QStringLiteral( ":/btn/blockCamera" ) );
+	if ( type.contains( QStringLiteral( "Skin" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Bone" ), Qt::CaseInsensitive ) )
+		return QIcon( QStringLiteral( ":/btn/skinned" ) );
+	if ( nif->blockInherits( block, "NiGeometry" )
+		|| type.contains( QStringLiteral( "TriShape" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Mesh" ), Qt::CaseInsensitive ) )
+		return QIcon( QStringLiteral( ":/btn/blockGeometry" ) );
+	if ( nif->blockInherits( block, "NiNode" ) )
+		return QIcon( QStringLiteral( ":/btn/blockNode" ) );
+	if ( type.contains( QStringLiteral( "Texture" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Image" ), Qt::CaseInsensitive ) )
+		return QIcon( QStringLiteral( ":/btn/blockTexture" ) );
+	if ( nif->blockInherits( block, "NiProperty" )
+		|| type.contains( QStringLiteral( "Shader" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Material" ), Qt::CaseInsensitive ) )
+		return QIcon( QStringLiteral( ":/btn/blockMaterial" ) );
+	if ( nif->blockInherits( block, "NiTimeController" )
+		|| type.contains( QStringLiteral( "Controller" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Interpolator" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Sequence" ), Qt::CaseInsensitive )
+		|| type.contains( QStringLiteral( "Keyframe" ), Qt::CaseInsensitive ) )
+		return QIcon( QStringLiteral( ":/btn/blockAnimation" ) );
+	if ( nif->blockInherits( block, "NiExtraData" )
+		|| type.contains( QStringLiteral( "ExtraData" ), Qt::CaseInsensitive ) )
+		return QIcon( QStringLiteral( ":/btn/blockExtraData" ) );
+	return QIcon( QStringLiteral( ":/btn/selectObject" ) );
+}
+
+static QString blockListSummary( const NifModel * nif, const QModelIndex & source )
+{
+	if ( !nif ) return QString();
+	int blockNumber = nif->getBlockNumber( source );
+	QModelIndex block = nif->getBlockIndex( blockNumber );
+	if ( blockNumber < 0 || !block.isValid() ) return QString();
+	const QString type = nif->itemName( block );
+	const QString name = nif->get<QString>( block, "Name" );
+	QStringList lines;
+	lines << QObject::tr( "#%1  %2" ).arg( blockNumber ).arg( type );
+	if ( !name.isEmpty() ) lines << name;
+	if ( nif->blockInherits( block, "NiGeometry" )
+		|| type.contains( QStringLiteral( "TriShape" ), Qt::CaseInsensitive ) ) {
+		QModelIndex counts = block;
+		if ( !nif->getIndex( counts, "Num Vertices" ).isValid() ) {
+			int data = nif->getLink( block, "Data" );
+			if ( data >= 0 ) counts = nif->getBlockIndex( data );
+		}
+		int verts = nif->getIndex( counts, "Num Vertices" ).isValid() ? nif->get<int>( counts, "Num Vertices" ) : 0;
+		int tris = nif->getIndex( counts, "Num Triangles" ).isValid() ? nif->get<int>( counts, "Num Triangles" ) : 0;
+		const bool skinned = nif->getLink( block, "Skin" ) >= 0
+			|| type.contains( QStringLiteral( "SubIndex" ), Qt::CaseInsensitive );
+		lines << QObject::tr( "%1 vertices · %2 triangles%3" ).arg( verts ).arg( tris )
+			.arg( skinned ? QObject::tr( " · skinned" ) : QString() );
+	} else if ( nif->blockInherits( block, "NiNode" ) ) {
+		lines << QObject::tr( "%1 child link(s)" ).arg( nif->getChildLinks( blockNumber ).size() );
+	} else if ( nif->blockInherits( block, "NiTimeController" ) ) {
+		int target = nif->getLink( block, "Target" );
+		if ( target >= 0 ) lines << QObject::tr( "Target: #%1" ).arg( target );
+	}
+	lines << QObject::tr( "%1 outgoing link(s) · %2 reference(s)" )
+		.arg( nif->getChildLinks( blockNumber ).size() ).arg( nif->getParentLinks( blockNumber ).size() );
+	return lines.join( QLatin1Char( '\n' ) );
+}
 
 class NifProxyItem
 {
@@ -521,6 +606,10 @@ QVariant NifProxyModel::data( const QModelIndex & index, int role ) const
 {
 	if ( !( nif && index.isValid() ) )
 		return QVariant();
+	if ( role == Qt::DecorationRole && index.column() == 0 )
+		return blockListCategoryIcon( nif, mapTo( index ) );
+	if ( role == Qt::ToolTipRole )
+		return blockListSummary( nif, mapTo( index ) );
 
 	return nif->data( mapTo( index ), role );
 }

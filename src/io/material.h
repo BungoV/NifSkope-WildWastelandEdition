@@ -60,6 +60,24 @@ public:
 	const QStringList & textures() const { return textureList; }
 	bool isEffectMaterial() const { return isBGEM; }
 	bool isShaderMaterial() const { return isBGSM; }
+	quint32 fileVersion() const { return version; }
+	Vector2 uvOffset() const { return Vector2( fUOffset, fVOffset ); }
+	Vector2 uvScale() const { return Vector2( fUScale, fVScale ); }
+	float alpha() const { return fAlpha; }
+	quint32 alphaSourceBlend() const { return iAlphaSrc; }
+	quint32 alphaDestinationBlend() const { return iAlphaDst; }
+	quint8 alphaTestThreshold() const { return iAlphaTestRef; }
+	float refractionPower() const { return fRefractionPower; }
+	float environmentMapScale() const { return fEnvironmentMappingMaskScale; }
+	Color3 emittanceColor() const { return cEmittanceColor; }
+	quint32 commonShaderFlags1() const {
+		return ( tileFlags & 3U ) | ( bAlphaBlend ? 0x0004U : 0U ) | ( bAlphaTest ? 0x0008U : 0U )
+			| ( bZBufferWrite ? 0x0010U : 0U ) | ( bZBufferTest ? 0x0020U : 0U )
+			| ( bScreenSpaceReflections ? 0x0040U : 0U ) | ( bWetnessControl_ScreenSpaceReflections ? 0x0080U : 0U )
+			| ( bDecal ? 0x0100U : 0U ) | ( bTwoSided ? 0x0200U : 0U ) | ( bDecalNoFade ? 0x0400U : 0U )
+			| ( bNonOccluder ? 0x0800U : 0U ) | ( bRefraction ? 0x1000U : 0U ) | ( bRefractionFalloff ? 0x2000U : 0U )
+			| ( bEnvironmentMapping ? 0x4000U : 0U ) | ( bGrayscaleToPaletteColor ? 0x8000U : 0U );
+	}
 	static void createMaterialData( QByteArray & data, const NifModel * nif, const QModelIndex & index );
 
 protected:
@@ -127,6 +145,29 @@ class ShaderMaterial : public Material
 
 public:
 	ShaderMaterial( const QString & name, const NifModel * nif, const QModelIndex & index );
+	quint32 shaderFlags2() const {
+		return ( bEnableEditorAlphaRef ? 0x00000001U : 0U ) | ( bTranslucency ? 0x00000002U : 0U )
+			| ( bTranslucencyThickObject ? 0x00000004U : 0U ) | ( bTranslucencyMixAlbedoWithSubsurfaceCol ? 0x00000008U : 0U )
+			| ( bSpecularEnabled ? 0x00000010U : 0U ) | ( bPBR ? 0x00000020U : 0U ) | ( bCustomPorosity ? 0x00000040U : 0U )
+			| ( bAnisoLighting ? 0x00000080U : 0U ) | ( bEmitEnabled ? 0x00000100U : 0U )
+			| ( bModelSpaceNormals ? 0x00000200U : 0U ) | ( bExternalEmittance ? 0x00000400U : 0U )
+			| ( bUseAdaptativeEmissive ? 0x00000800U : 0U ) | ( bReceiveShadows ? 0x00001000U : 0U )
+			| ( bHideSecret ? 0x00002000U : 0U ) | ( bCastShadows ? 0x00004000U : 0U )
+			| ( bDissolveFade ? 0x00008000U : 0U ) | ( bAssumeShadowmask ? 0x00010000U : 0U )
+			| ( bGlowmap ? 0x00020000U : 0U ) | ( bHair ? 0x00040000U : 0U ) | ( bTree ? 0x00080000U : 0U )
+			| ( bFacegen ? 0x00100000U : 0U ) | ( bSkinTint ? 0x00200000U : 0U ) | ( bTessellate ? 0x00400000U : 0U )
+			| ( bSkewSpecularAlpha ? 0x00800000U : 0U ) | ( bTerrain ? 0x01000000U : 0U )
+			| ( bRimLighting ? 0x02000000U : 0U ) | ( bSubsurfaceLighting ? 0x04000000U : 0U )
+			| ( bBackLighting ? 0x08000000U : 0U ) | ( bEnvironmentMappingWindow ? 0x10000000U : 0U )
+			| ( bEnvironmentMappingEye ? 0x20000000U : 0U );
+	}
+	Color3 specularColor() const { return cSpecularColor; }
+	float specularStrength() const { return fSpecularMult; }
+	float smoothness() const { return fSmoothness; }
+	float fresnelPower() const { return fFresnelPower; }
+	float emittanceMultiple() const { return fEmittanceMult; }
+	float grayscaleToPaletteScale() const { return fGrayscaleToPaletteScale; }
+	QString rootMaterialPath() const { return sRootMaterialPath; }
 
 protected:
 	bool readFile( QDataStream & in ) override final;
@@ -208,6 +249,22 @@ class EffectMaterial : public Material
 
 public:
 	EffectMaterial( const QString & name, const NifModel * nif, const QModelIndex & index );
+	quint32 effectShaderFlags2() const {
+		return ( bEnvironmentMapping ? 0x0001U : 0U ) | ( bBloodEnabled ? 0x0002U : 0U )
+			| ( bEffectLightingEnabled ? 0x0004U : 0U ) | ( bFalloffEnabled ? 0x0008U : 0U )
+			| ( bFalloffColorEnabled ? 0x0010U : 0U ) | ( bGrayscaleToPaletteAlpha ? 0x0020U : 0U )
+			| ( bSoftEnabled ? 0x0040U : 0U ) | ( bGlowmap ? 0x0080U : 0U )
+			| ( bEffectPbrSpecular ? 0x0100U : 0U ) | ( bGlassEnabled ? 0x0200U : 0U );
+	}
+	Color3 baseColor() const { return cBaseColor; }
+	float baseColorScale() const { return fBaseColorScale; }
+	float falloffStartAngle() const { return fFalloffStartAngle; }
+	float falloffStopAngle() const { return fFalloffStopAngle; }
+	float falloffStartOpacity() const { return fFalloffStartOpacity; }
+	float falloffStopOpacity() const { return fFalloffStopOpacity; }
+	float lightingInfluence() const { return fLightingInfluence; }
+	quint8 environmentMapMinLod() const { return iEnvmapMinLOD; }
+	float softFalloffDepth() const { return fSoftDepth; }
 
 protected:
 	bool readFile( QDataStream & in ) override final;

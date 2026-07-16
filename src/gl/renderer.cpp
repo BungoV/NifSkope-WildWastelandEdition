@@ -491,7 +491,8 @@ bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * me
 			textureReplModes = textureReplModes >> 2;
 			const CE2Material::UVStream *	uvStream = layer->uvStream;
 			if ( j == 0 ) {
-				if ( (scene->hasVisMode(Scene::VisNormalsOnly) && scene->hasOption(Scene::DoLighting)) || useErrorColor ) {
+				if ( !scene->hasOption(Scene::DoDiffuse)
+					|| (scene->hasVisMode(Scene::VisNormalsOnly) && scene->hasOption(Scene::DoLighting)) || useErrorColor ) {
 					texturePath = &emptyTexturePath;
 					textureReplacement = ( useErrorColor ? 0xFFFF00FFU : 0xFFFFFFFFU );
 					textureReplacementMode = 1;
@@ -500,7 +501,7 @@ bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * me
 					textureReplacement = ( ( scene->options & Scene::DoTexturing ) ? 0xFFFF00FFU : 0xFFFFFFFFU );
 					textureReplacementMode = 1;
 				}
-			} else if ( j == 1 && !scene->hasOption(Scene::DoLighting) ) {
+			} else if ( j == 1 && ( !scene->hasOption(Scene::DoLighting) || !scene->hasOption(Scene::DoNormalMap) ) ) {
 				texturePath = &emptyTexturePath;
 				textureReplacement = 0xFFFF8080U;
 				textureReplacementMode = 3;
@@ -569,7 +570,10 @@ bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * me
 	prog->uniSampler_l( prog->uniLocation("textureUnits"), 2, texunit - 2, TexCache::num_texture_units - 2 );
 
 	mesh->setUniforms( prog );
-	prog->uni4f( "vertexColorOverride", FloatVector4( scene->hasOption(Scene::DoVertexColors) ? 0.0f : 1.0f ) );
+	FloatVector4 vertexColorOverride( scene->hasOption(Scene::DoVertexColors) ? 0.0f : 1.0f );
+	if ( !scene->hasOption(Scene::DoVertexAlpha) )
+		vertexColorOverride[3] = 1.0f;
+	prog->uni4f( "vertexColorOverride", vertexColorOverride );
 
 	// setup alpha blending and testing
 
@@ -647,13 +651,15 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		// BSLightingShaderProperty
 
 		const QString *	forced = &emptyString;
-		if ( scene->hasOption(Scene::DoLighting) && scene->hasVisMode(Scene::VisNormalsOnly) )
-			forced = &white;
+		if ( !scene->hasOption(Scene::DoDiffuse) || ( scene->hasOption(Scene::DoLighting)
+			&& ( scene->hasVisMode(Scene::VisNormalsOnly) || scene->hasVisMode(Scene::VisVertexColors) ) )
+			)
+			forced = &white;	// diffuse -> white so the vertex colour becomes the albedo
 		const QString &	alt = ( !scene->hasOption(Scene::DoErrorColor) ? white : magenta );
 		prog->uniSampler( bsprop, "BaseMap", 0, texunit, alt, clamp, *forced );
 
 		forced = &emptyString;
-		if ( !scene->hasOption(Scene::DoLighting) )
+		if ( !scene->hasOption(Scene::DoLighting) || !scene->hasOption(Scene::DoNormalMap) )
 			forced = &default_n;
 		prog->uniSampler( lsp, "NormalMap", 1, texunit, emptyString, clamp, *forced );
 
@@ -667,18 +673,20 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni2f( "uvScale", lsp->uvScale.x, lsp->uvScale.y );
 		prog->uni2f( "uvOffset", lsp->uvOffset.x, lsp->uvOffset.y );
 
-		prog->uni1i( "greyscaleColor", lsp->greyscaleColor );
+		const bool useMaterialTint = scene->hasOption( Scene::DoMaterialTint );
+		const bool useDetailTextures = scene->hasOption( Scene::DoDetailTextures );
+		prog->uni1i( "greyscaleColor", lsp->greyscaleColor && useMaterialTint );
 		prog->uniSampler( bsprop, "GreyscaleMap", 3, texunit, "", TexClampMode::CLAMP_S_CLAMP_T );
 
-		prog->uni1i( "hasTintColor", lsp->hasTintColor );
-		if ( lsp->hasTintColor ) {
+		prog->uni1i( "hasTintColor", lsp->hasTintColor && useMaterialTint );
+		if ( lsp->hasTintColor && useMaterialTint ) {
 			prog->uni3f( "tintColor", lsp->tintColor.red(), lsp->tintColor.green(), lsp->tintColor.blue() );
 		}
 
-		prog->uni1i( "hasDetailMask", lsp->hasDetailMask );
+		prog->uni1i( "hasDetailMask", lsp->hasDetailMask && useDetailTextures );
 		prog->uniSampler( bsprop, "DetailMask", 3, texunit, "#FF404040", clamp );
 
-		prog->uni1i( "hasTintMask", lsp->hasTintMask );
+		prog->uni1i( "hasTintMask", lsp->hasTintMask && useMaterialTint );
 		prog->uniSampler( bsprop, "TintMask", 6, texunit, gray, clamp );
 
 		// Rim & Soft params
@@ -718,6 +726,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		// Specular params
 		float s = ( scene->hasOption(Scene::DoSpecular) && scene->hasOption(Scene::DoLighting) ) ? lsp->specularStrength : 0.0;
 		prog->uni1f( "specStrength", s );
+		prog->uni1b( "useGloss", scene->hasOption(Scene::DoGloss) );
 		prog->uni3f( "specColor", lsp->specularColor.red(), lsp->specularColor.green(), lsp->specularColor.blue() );
 		prog->uni1i( "hasSpecularMap", lsp->hasSpecularMap );
 
@@ -757,7 +766,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		// Multi-Layer
 
 		prog->uniSampler( bsprop, "InnerMap", 6, texunit, default_n, clamp );
-		if ( lsp->hasMultiLayerParallax ) {
+		if ( lsp->hasMultiLayerParallax && useDetailTextures ) {
 			prog->uni2f( "innerScale", lsp->innerTextureScale.x, lsp->innerTextureScale.y );
 			prog->uni1f( "innerThickness", lsp->innerThickness );
 
@@ -830,7 +839,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		}
 
 		// Parallax
-		prog->uni1i( "hasHeightMap", lsp->hasHeightMap );
+		prog->uni1i( "hasHeightMap", lsp->hasHeightMap && scene->hasOption(Scene::DoParallax) );
 		prog->uniSampler( bsprop, "HeightMap", 3, texunit, gray, clamp );
 
 	} else {
@@ -843,7 +852,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni1i( "hasGreyscaleMap", esp->hasGreyscaleMap );
 
 		prog->uni1i( "greyscaleAlpha", esp->greyscaleAlpha );
-		prog->uni1i( "greyscaleColor", esp->greyscaleColor );
+		prog->uni1i( "greyscaleColor", esp->greyscaleColor && scene->hasOption(Scene::DoMaterialTint) );
 
 
 		prog->uni1i( "useFalloff", esp->useFalloff );
@@ -853,7 +862,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		// Glow params
 
 		prog->uni4f( "glowColor", FloatVector4( esp->emissiveColor ) );
-		prog->uni1f( "glowMult", esp->emissiveMult );
+		prog->uni1f( "glowMult", scene->hasOption(Scene::DoGlow) ? esp->emissiveMult : 0.0f );
 
 		// Falloff params
 
@@ -864,14 +873,16 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 
 		// BSEffectShader textures (FIXME: should implement using error color?)
 
-		prog->uniSampler( bsprop, "BaseMap", 0, texunit, white, clamp );
+		prog->uniSampler( bsprop, "BaseMap", 0, texunit, white, clamp,
+						  scene->hasOption(Scene::DoDiffuse) ? emptyString : white );
 		prog->uniSampler( bsprop, "GreyscaleMap", 1, texunit, "", TexClampMode::CLAMP_S_CLAMP_T );
 
 		if ( nifVersion >= 130 ) {
 
 			prog->uni1f( "lightingInfluence", esp->lightingInfluence );
 
-			prog->uni1i( "hasNormalMap", esp->hasNormalMap && scene->hasOption(Scene::DoLighting) );
+			prog->uni1i( "hasNormalMap", esp->hasNormalMap && scene->hasOption(Scene::DoLighting)
+						&& scene->hasOption(Scene::DoNormalMap) );
 
 			prog->uniSampler( bsprop, "NormalMap", 3, texunit, default_n, clamp );
 
@@ -929,11 +940,17 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				//	yet "Has Vertex Colors" is not.
 				c.blendValues( FloatVector4( 1.0e-15f ), 0x07 );
 			}
-		} else if ( mesh->isVertexAlphaAnimation
+		} else if ( !scene->hasOption(Scene::DoVertexAlpha) || mesh->isVertexAlphaAnimation
 					|| ( nifVersion < 130 && lsp && !lsp->hasSF1(ShaderFlags::SLSF1_Vertex_Alpha) ) ) {
 			// TODO (Gavrant): suspicious code. Should the check be replaced with !bsprop->hasVertexAlpha ?
 			c[3] = 1.0f;
 		}
+
+		// Vertex-colour shading: the diffuse is forced white above, so the albedo
+		// becomes the per-vertex colour. Show the real vertex colour (including its
+		// alpha) regardless of the vertex-colour display toggle or shader flags.
+		if ( scene->hasVisMode(Scene::VisVertexColors) )
+			c = ( mesh->hasVertexColors && !mesh->colors.isEmpty() ) ? FloatVector4( 0.0f ) : FloatVector4( 1.0f );
 
 		prog->uni4f( "vertexColorOverride", c );
 	}
@@ -1043,8 +1060,10 @@ bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * me
 		mesh->depthTest = bsprop->depthTest;
 		mesh->depthWrite = bsprop->depthWrite;
 		const QString *	forced = &emptyString;
-		if ( scene->hasOption(Scene::DoLighting) && scene->hasVisMode(Scene::VisNormalsOnly) )
-			forced = &white;
+		if ( !scene->hasOption(Scene::DoDiffuse) || ( scene->hasOption(Scene::DoLighting)
+			&& ( scene->hasVisMode(Scene::VisNormalsOnly) || scene->hasVisMode(Scene::VisVertexColors) ) )
+			)
+			forced = &white;	// diffuse -> white so the vertex colour becomes the albedo
 
 		const QString &	alt = ( esp || !scene->hasOption(Scene::DoErrorColor) ? white : magenta );
 
@@ -1054,7 +1073,9 @@ bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * me
 		GLint uniBaseMap = prog->uniLocation( "BaseMap" );
 		if ( uniBaseMap >= 0 ) [[likely]] {
 			fn->glActiveTexture( GL_TEXTURE0 + texunit );
-			if ( !texprop->bind( 0 ) )
+			if ( !scene->hasOption(Scene::DoDiffuse) )
+				texprop->bind( 0, white );
+			else if ( !texprop->bind( 0 ) )
 				texprop->bind( 0, ( !scene->hasOption(Scene::DoErrorColor) ? white : magenta ) );
 			fn->glUniform1i( uniBaseMap, texunit++ );
 		}
@@ -1076,7 +1097,7 @@ bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * me
 	const TexCache::Tex::ImageInfo *	txtInfo = nullptr;
 	if ( bsprop ) {
 		const QString *	forced = &emptyString;
-		if ( esp || !scene->hasOption(Scene::DoLighting) )
+		if ( esp || !scene->hasOption(Scene::DoLighting) || !scene->hasOption(Scene::DoNormalMap) )
 			forced = &default_n;
 		prog->uniSampler( bsprop, "NormalMap", 1, texunit, emptyString, clamp, *forced );
 		if ( hasSpecular )
@@ -1094,7 +1115,7 @@ bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * me
 					fname = fname.insert( pos, "_n" );
 			}
 
-			if ( fname.isEmpty() || !texprop->bind( 0, fname ) )
+			if ( !scene->hasOption(Scene::DoNormalMap) || fname.isEmpty() || !texprop->bind( 0, fname ) )
 				texprop->bind( 0, default_n );
 			else
 				txtInfo = scene->getTextureInfo( fname );
@@ -1153,7 +1174,7 @@ bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * me
 		if ( i ) {
 			quint32	applyMode = nif->get<quint32>( i );
 			isDecal = ( applyMode == 1 );
-			if ( applyMode == 4 )
+			if ( applyMode == 4 && scene->hasOption(Scene::DoParallax) )
 				parallaxMaxSteps = 1;
 		}
 	}
@@ -1161,18 +1182,18 @@ bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * me
 		isDecal = bsprop->hasSF1( ShaderFlags::SF1( ShaderFlags::SLSF1_Decal | ShaderFlags::SLSF1_Dynamic_Decal ) );
 		hasCubeMap = hasCubeMap && bsprop->hasSF1( ShaderFlags::SLSF1_Environment_Mapping );
 		cubeMapScale = bsprop->environmentReflection;
-		if ( bsprop->hasSF1( ShaderFlags::SLSF1_Parallax_Occlusion ) ) {
+		if ( scene->hasOption(Scene::DoParallax) && bsprop->hasSF1( ShaderFlags::SLSF1_Parallax_Occlusion ) ) {
 			const NifItem *	i = bsprop->getItem( nif, "Parallax Max Passes" );
 			if ( i )
 				parallaxMaxSteps = std::max< int >( roundFloat( nif->get<float>(i) ), 4 );
 			i = bsprop->getItem( nif, "Parallax Scale" );
 			if ( i )
 				parallaxScale *= nif->get<float>( i );
-		} else if ( bsprop->hasSF1( ShaderFlags::SLSF1_Parallax ) ) {
+		} else if ( scene->hasOption(Scene::DoParallax) && bsprop->hasSF1( ShaderFlags::SLSF1_Parallax ) ) {
 			parallaxMaxSteps = 2;
 		}
 		if ( esp ) {
-			glowMult = 1.0f;
+			glowMult = ( scene->hasOption(Scene::DoGlow) && scene->hasOption(Scene::DoLighting) ? 1.0f : 0.0f );
 			falloffParams = FloatVector4( esp->falloff.startAngle, esp->falloff.stopAngle,
 											esp->falloff.startOpacity, esp->falloff.stopOpacity );
 		}
@@ -1195,13 +1216,15 @@ bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * me
 			}
 		}
 		// TODO (Gavrant): suspicious code. Should the check be replaced with !bsprop->hasVertexAlpha ?
-		if ( mesh->isVertexAlphaAnimation || ( mesh->bslsp && !mesh->bslsp->hasSF1(ShaderFlags::SLSF1_Vertex_Alpha) ) )
+		if ( !scene->hasOption(Scene::DoVertexAlpha) || mesh->isVertexAlphaAnimation
+			|| ( mesh->bslsp && !mesh->bslsp->hasSF1(ShaderFlags::SLSF1_Vertex_Alpha) ) )
 			vcOverride[3] = 1.0f;
 
 		VertexColorProperty::glProperty( mesh->findProperty< VertexColorProperty >(), vcOverride, prog );
 	}
 	prog->uni1b( "isEffect", bool(esp) );
 	prog->uni1b( "hasSpecular", hasSpecular );
+	prog->uni1b( "useGloss", scene->hasOption(Scene::DoGloss) );
 	prog->uni1b( "hasEmit", hasEmit );
 	prog->uni1b( "hasGlowMap", hasGlowMap );
 	prog->uni1b( "hasCubeMap", hasCubeMap );

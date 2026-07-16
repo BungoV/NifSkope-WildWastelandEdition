@@ -318,6 +318,9 @@ class PSysSimController final : public Controller
 	float fadeIn = 0.1f, fadeOut = 0.9f;
 	float c1End = 0, c2Start = 0, c2End = 1, c3Start = 1;
 	Color4 modColors[3];
+	// NiPSysColorModifier: a NiColorData RGBA gradient sampled by particle age
+	bool hasColorGradient = false;
+	QPersistentModelIndex iColorGradKeys;
 	QVector<float> scaleKeys;
 	// NiPSysRotationModifier
 	bool hasRotation = false;

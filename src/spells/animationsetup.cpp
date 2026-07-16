@@ -460,7 +460,7 @@ public:
 		lay->addWidget( grpSeq );
 
 		lay->addWidget( new QLabel( Spell::tr( "New interpolators start with 2 default keys.\n"
-			"Use the Timeline to edit them, or its channel copy/paste to clone keys from another lane." ), &dlg ) );
+			"Use the Animation Manager to edit them, or its channel copy/paste to clone keys from another lane." ), &dlg ) );
 
 		auto buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg );
 		QObject::connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );

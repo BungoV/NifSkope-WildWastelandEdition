@@ -24,6 +24,19 @@ LightingWidget::LightingWidget( GLView * ogl, QWidget * parent ) : QWidget(paren
 {
 	ui->setupUi(this);
 
+	// Material contribution switches now live in the viewport-shading menu.
+	// Keep this popup focused on actual light controls and the PBR environment
+	// cubemap; hiding the old fixed slots also avoids empty "..." buttons when
+	// fewer legacy actions are supplied.
+	for ( QToolButton * button : { ui->btnTextures, ui->btnVertexColors,
+		ui->btnSpecular, ui->btnCubemap, ui->btnGlow,
+		ui->btnLightingOnly, ui->btnSilhouette } )
+		button->hide();
+	ui->btnLoadCubeMap->setText( tr( "Choose PBR Environment Cubemap..." ) );
+	ui->btnLoadCubeMap->setToolTip( tr( "Choose the environment cubemap used by the PBR viewport workflow" ) );
+	ui->btnLoadCubeMap->setIconSize( QSize( 20, 20 ) );
+	ui->gridLayout_2->addWidget( ui->btnLoadCubeMap, 0, 0, 1, 4 );
+
 	setDefaults();
 
 	// Disable Frontal checkbox (and sliders) when no lighting
@@ -87,16 +100,8 @@ void LightingWidget::setDefaults()
 
 void LightingWidget::setActions( QVector<QAction *> atns )
 {
-	ui->btnLighting->setDefaultAction( atns.value(0) );
-	ui->btnTextures->setDefaultAction( atns.value(1) );
-	ui->btnVertexColors->setDefaultAction( atns.value(2) );
-	ui->btnSpecular->setDefaultAction( atns.value(3) );
-	ui->btnCubemap->setDefaultAction( atns.value(4) );
-	ui->btnGlow->setDefaultAction( atns.value(5) );
-	ui->btnLightingOnly->setDefaultAction( atns.value(6) );
-	ui->btnSilhouette->setDefaultAction( atns.value(7) );
-
-	connect( ui->btnLighting, &QToolButton::toggled, atns.value(3), &QAction::setEnabled );
+	if ( !atns.isEmpty() )
+		ui->btnLighting->setDefaultAction( atns.constFirst() );
 }
 
 void LightingWidget::saveSettings()

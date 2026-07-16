@@ -43,6 +43,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QDebug>
 #include <QElapsedTimer>
 
+#include <cmath>
+
 Shape::Shape( Scene * s, const QModelIndex & b ) : Node( s, b )
 {
 	shapeNumber = s->shapes.count();
@@ -166,6 +168,71 @@ void Shape::updateBoneTransforms()
 #endif
 
 	needUpdateBounds = false;
+}
+
+//! Build the affine matrix produced by bonetransform.glsl for one vertex.
+//! Matrix4 is column-major, while boneTransforms stores three row vectors.
+static bool vertexSkinMatrix( const std::vector<FloatVector4> & transforms,
+	const std::vector<FloatVector4> & weights0, const std::vector<FloatVector4> & weights1,
+	int vertexIndex, Matrix4 & out )
+{
+	if ( vertexIndex < 0 || size_t( vertexIndex ) >= weights0.size() || transforms.empty() )
+		return false;
+
+	FloatVector4 rows[3] = { FloatVector4( 0.0f ), FloatVector4( 0.0f ), FloatVector4( 0.0f ) };
+	float weightSum = 0.0f;
+	for ( int i = 0; i < 8; i++ ) {
+		if ( i >= 4 && size_t( vertexIndex ) >= weights1.size() )
+			break;
+		float packed = ( i < 4 ) ? weights0[size_t( vertexIndex )][i]
+			: weights1[size_t( vertexIndex )][i - 4];
+		if ( !( packed > 0.0f ) )
+			break;
+		int bone = int( packed ) & 0xFF;
+		float weight = packed - std::floor( packed );
+		if ( size_t( bone * 3 + 2 ) >= transforms.size() || !( weight > 0.0f ) )
+			continue;
+		for ( int r = 0; r < 3; r++ )
+			rows[r] += transforms[size_t( bone * 3 + r )] * weight;
+		weightSum += weight;
+	}
+	if ( !( weightSum > 0.0f ) )
+		return false;
+
+	float invWeight = 1.0f / weightSum;
+	for ( int r = 0; r < 3; r++ )
+		for ( int c = 0; c < 4; c++ )
+			out( unsigned( c ), unsigned( r ) ) = rows[r][c] * invWeight;
+	return true;
+}
+
+Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const
+{
+	Matrix4 m;
+	return vertexSkinMatrix( boneTransforms, boneWeights0, boneWeights1, vertexIndex, m )
+		? ( m * local ) : local;
+}
+
+bool Shape::unskinVertex( int vertexIndex, const Vector3 & skinnedLocal, Vector3 & local ) const
+{
+	Matrix4 m;
+	if ( !vertexSkinMatrix( boneTransforms, boneWeights0, boneWeights1, vertexIndex, m ) ) {
+		local = skinnedLocal;
+		return true;
+	}
+	// Reject a singular weighted 3x3 before asking Matrix4::inverted(). A
+	// singular result can occur only with pathological skin transforms, but an
+	// edit must never silently turn that into corrupt vertex coordinates.
+	const float a00 = m( 0, 0 ), a01 = m( 1, 0 ), a02 = m( 2, 0 );
+	const float a10 = m( 0, 1 ), a11 = m( 1, 1 ), a12 = m( 2, 1 );
+	const float a20 = m( 0, 2 ), a21 = m( 1, 2 ), a22 = m( 2, 2 );
+	const float det = a00 * ( a11 * a22 - a12 * a21 )
+		- a01 * ( a10 * a22 - a12 * a20 )
+		+ a02 * ( a10 * a21 - a11 * a20 );
+	if ( std::fabs( det ) < 1.0e-8f )
+		return false;
+	local = m.inverted() * skinnedLocal;
+	return true;
 }
 
 void Shape::convertTriangleStrip( const void * indicesData, size_t numIndices )
@@ -299,7 +366,7 @@ void Shape::drawNormals( int btnMask, int vertexSelected, float lineLength ) con
 	}
 }
 
-void Shape::drawWireframe( FloatVector4 color ) const
+void Shape::drawWireframe( FloatVector4 color, float lineWidth ) const
 {
 	auto	context = scene->renderer;
 	qsizetype	n = std::min< qsizetype >( lodTriangleCount, triangles.size() );
@@ -312,7 +379,7 @@ void Shape::drawWireframe( FloatVector4 color ) const
 	setUniforms( prog );
 	prog->uni4f( "vertexColorOverride", FloatVector4( 1.0e-15f ).maxValues( color ) );
 	prog->uni1i( "selectionParam", -1 );
-	prog->uni1f( "lineWidth", GLView::Settings::lineWidthWireframe );
+	prog->uni1f( "lineWidth", lineWidth > 0.0f ? lineWidth : GLView::Settings::lineWidthWireframe );
 
 	context->fn->glDrawElements( GL_TRIANGLES, GLsizei( n * 3 ), GL_UNSIGNED_SHORT, (void *) 0 );
 }

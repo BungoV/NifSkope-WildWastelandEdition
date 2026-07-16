@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QLineEdit>
 #include <QMenu>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QScrollBar>
 #include <QSplitter>
@@ -160,6 +161,139 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawLine( QPointF( 32, 48 ), QPointF( 32, 56 ) );
 		p.drawLine( QPointF( 8, 32 ), QPointF( 16, 32 ) );
 		p.drawLine( QPointF( 48, 32 ), QPointF( 56, 32 ) );
+	} else if ( id == QLatin1String( "brush" ) || id == QLatin1String( "mode_weightpaint" ) ) {
+		// paintbrush: diagonal wooden handle, metal ferrule, tapered bristles
+		p.save();
+		p.translate( 33, 31 );
+		p.rotate( 45.0 );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawRoundedRect( QRectF( -3.5, -28, 7, 20 ), 3, 3 );  // slim handle
+		p.setBrush( col.darker( 150 ) );
+		p.drawRoundedRect( QRectF( -6, -9, 12, 7 ), 1.5, 1.5 ); // ferrule band
+		p.setBrush( col );
+		QPainterPath bristles;                                  // bristle tuft
+		bristles.moveTo( -6, -2 );
+		bristles.lineTo( 6, -2 );
+		bristles.lineTo( 3.2, 20 );
+		bristles.quadTo( 0, 24, -3.2, 20 );
+		bristles.closeSubpath();
+		p.drawPath( bristles );
+		p.restore();
+	} else if ( id == QLatin1String( "chevron_left" ) || id == QLatin1String( "chevron_right" ) ) {
+		// thin nav chevron (‹ ›) in the theme colour, not Qt's black arrow icon
+		const bool left = ( id == QLatin1String( "chevron_left" ) );
+		QPen cp( col, 6.0 );
+		cp.setCapStyle( Qt::RoundCap );
+		cp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( cp );
+		p.setBrush( Qt::NoBrush );
+		const float xTip = left ? 25.0f : 39.0f;
+		const float xBack = left ? 39.0f : 25.0f;
+		QPolygonF chev;
+		chev << QPointF( xBack, 18 ) << QPointF( xTip, 32 ) << QPointF( xBack, 46 );
+		p.drawPolyline( chev );
+	} else if ( id == QLatin1String( "mode_object" ) ) {
+		// solid-ish isometric cube (Object Mode)
+		p.setBrush( Qt::NoBrush );
+		QPen op( col, 4.0 );
+		op.setJoinStyle( Qt::RoundJoin );
+		p.setPen( op );
+		QPolygonF top;
+		top << QPointF( 32, 12 ) << QPointF( 52, 23 ) << QPointF( 32, 34 ) << QPointF( 12, 23 );
+		p.drawPolygon( top );
+		p.drawLine( QPointF( 12, 23 ), QPointF( 12, 43 ) );
+		p.drawLine( QPointF( 52, 23 ), QPointF( 52, 43 ) );
+		p.drawLine( QPointF( 32, 34 ), QPointF( 32, 54 ) );
+		p.drawLine( QPointF( 12, 43 ), QPointF( 32, 54 ) );
+		p.drawLine( QPointF( 52, 43 ), QPointF( 32, 54 ) );
+	} else if ( id == QLatin1String( "mode_edit" ) ) {
+		// wireframe triangle with vertex handles (Edit Mode)
+		p.setBrush( Qt::NoBrush );
+		QPen ep( col, 3.5 );
+		ep.setJoinStyle( Qt::RoundJoin );
+		p.setPen( ep );
+		QPolygonF tri;
+		tri << QPointF( 32, 14 ) << QPointF( 52, 50 ) << QPointF( 12, 50 );
+		p.drawPolygon( tri );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		for ( const QPointF & v : { QPointF( 32, 14 ), QPointF( 52, 50 ), QPointF( 12, 50 ) } )
+			p.drawRect( QRectF( v.x() - 4.5, v.y() - 4.5, 9, 9 ) );
+	} else if ( id == QLatin1String( "mode_vertexpaint" ) ) {
+		// triangle with per-vertex greyscale dots (Vertex Paint)
+		p.setBrush( Qt::NoBrush );
+		QPen vp( col.darker( 160 ), 3.0 );
+		vp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( vp );
+		QPolygonF tri;
+		tri << QPointF( 32, 15 ) << QPointF( 51, 49 ) << QPointF( 13, 49 );
+		p.drawPolygon( tri );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 32, 15 ), 6.5, 6.5 );
+		p.setBrush( col.darker( 175 ) );
+		p.drawEllipse( QPointF( 51, 49 ), 6.5, 6.5 );
+		p.setBrush( col.darker( 260 ) );
+		p.drawEllipse( QPointF( 13, 49 ), 6.5, 6.5 );
+	} else if ( id == QLatin1String( "mode_segment" ) ) {
+		// a shape split into greyscale segments (Segment Paint)
+		p.setPen( Qt::NoPen );
+		p.setBrush( col.darker( 240 ) );
+		p.drawRect( QRectF( 15, 18, 11.3, 28 ) );
+		p.setBrush( col.darker( 160 ) );
+		p.drawRect( QRectF( 26.3, 18, 11.3, 28 ) );
+		p.setBrush( col );
+		p.drawRect( QRectF( 37.6, 18, 11.3, 28 ) );
+		p.setBrush( Qt::NoBrush );
+		QPen sp( col, 3.0 );
+		sp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( sp );
+		p.drawRoundedRect( QRectF( 15, 18, 34, 28 ), 3, 3 );
+	} else if ( id == QLatin1String( "mode_deform" ) ) {
+		// deformation lattice/cage around a blob (Deformed Cage toggle)
+		p.setPen( Qt::NoPen );
+		p.setBrush( col.darker( 210 ) );
+		p.drawEllipse( QPointF( 32, 34 ), 9, 9 );
+		p.setBrush( Qt::NoBrush );
+		QPen dp( col, 2.4 );
+		dp.setStyle( Qt::DashLine );
+		p.setPen( dp );
+		p.drawRect( QRectF( 13, 15, 38, 38 ) );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		for ( const QPointF & v : { QPointF( 13, 15 ), QPointF( 51, 15 ), QPointF( 13, 53 ),
+			QPointF( 51, 53 ), QPointF( 32, 15 ), QPointF( 13, 34 ), QPointF( 51, 34 ), QPointF( 32, 53 ) } )
+			p.drawRect( QRectF( v.x() - 3.2, v.y() - 3.2, 6.4, 6.4 ) );
+	} else if ( id == QLatin1String( "collision" ) ) {
+		// wireframe cube: collision preview
+		p.setBrush( Qt::NoBrush );
+		QPen cp( col, 4.0 );
+		cp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( cp );
+		p.drawRect( QRectF( 10, 22, 32, 32 ) );
+		p.drawRect( QRectF( 22, 10, 32, 32 ) );
+		p.drawLine( QPointF( 10, 22 ), QPointF( 22, 10 ) );
+		p.drawLine( QPointF( 42, 22 ), QPointF( 54, 10 ) );
+		p.drawLine( QPointF( 10, 54 ), QPointF( 22, 42 ) );
+		p.drawLine( QPointF( 42, 54 ), QPointF( 54, 42 ) );
+	} else if ( id == QLatin1String( "view_center" ) ) {
+		// re-center the camera: four corner brackets framing a center dot
+		p.setBrush( Qt::NoBrush );
+		QPen bp( col, 5.0 );
+		bp.setCapStyle( Qt::RoundCap );
+		p.setPen( bp );
+		auto bracket = [&p]( QPointF c, float sx, float sy ) {
+			p.drawLine( c, c + QPointF( 14 * sx, 0 ) );
+			p.drawLine( c, c + QPointF( 0, 14 * sy ) );
+		};
+		bracket( QPointF( 10, 10 ), 1, 1 );
+		bracket( QPointF( 54, 10 ), -1, 1 );
+		bracket( QPointF( 10, 54 ), 1, -1 );
+		bracket( QPointF( 54, 54 ), -1, -1 );
+		p.setBrush( col );
+		p.setPen( Qt::NoPen );
+		p.drawEllipse( QPointF( 32, 32 ), 6, 6 );
 	} else if ( id == QLatin1String( "cursor3d" ) ) {
 		// Blender 3D cursor: red/white dashed circle with crosshair ticks
 		p.setBrush( Qt::NoBrush );
@@ -237,6 +371,31 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawEllipse( QPointF( 38, 38 ), 16, 16 );
 		p.setBrush( col );
 		p.drawEllipse( QPointF( 24, 24 ), 7, 7 );
+	} else if ( id == QLatin1String( "shade_normalspec" ) ) {
+		// Surface diagnostics: neutral sphere, normal direction and gloss glint.
+		p.setPen( Qt::NoPen );
+		p.setBrush( col.darker( 145 ) );
+		p.drawEllipse( QPointF( 32, 32 ), 22, 22 );
+		QPen np( col, 5.0 );
+		np.setCapStyle( Qt::RoundCap );
+		p.setPen( np );
+		p.drawLine( QPointF( 21, 43 ), QPointF( 42, 22 ) );
+		QPolygonF arrow;
+		arrow << QPointF( 42, 22 ) << QPointF( 32, 25 ) << QPointF( 39, 32 );
+		p.setBrush( col );
+		p.drawPolygon( arrow );
+		p.setPen( Qt::NoPen );
+		p.setBrush( QColor( 255, 255, 255, 230 ) );
+		p.drawEllipse( QPointF( 23, 21 ), 5, 5 );
+	} else if ( id == QLatin1String( "shade_vertexcolor" ) ) {
+		// Vertex colours: a sphere painted with red/green/blue/yellow patches
+		p.setPen( Qt::NoPen );
+		p.setClipRegion( QRegion( QRect( 10, 10, 44, 44 ), QRegion::Ellipse ) );
+		p.fillRect( QRectF( 10, 10, 22, 22 ), QColor( 210, 80, 80 ) );
+		p.fillRect( QRectF( 32, 10, 22, 22 ), QColor( 95, 185, 95 ) );
+		p.fillRect( QRectF( 10, 32, 22, 22 ), QColor( 85, 125, 220 ) );
+		p.fillRect( QRectF( 32, 32, 22, 22 ), QColor( 225, 205, 85 ) );
+		p.setClipping( false );
 	} else if ( id == QLatin1String( "xray" ) ) {
 		// Blender toggle x-ray: two overlapping squares, the back one showing
 		// through the front
@@ -282,6 +441,18 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawRoundedRect( QRectF( 10, 15, 44, 34 ), 4, 4 );
 		p.setBrush( col );
 		p.drawRect( QRectF( 39, 15, 15, 34 ) );
+	} else if ( id == QLatin1String( "workspace" ) ) {
+		// Four clean layout cells, matching the monochrome NifSkope toolbar set.
+		p.setBrush( Qt::NoBrush );
+		QPen wp( col, 4.0 );
+		wp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( wp );
+		p.drawRoundedRect( QRectF( 9, 11, 46, 42 ), 4, 4 );
+		p.drawLine( QPointF( 32, 12 ), QPointF( 32, 52 ) );
+		p.drawLine( QPointF( 10, 32 ), QPointF( 54, 32 ) );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawRoundedRect( QRectF( 35, 35, 16, 14 ), 2, 2 );
 	} else if ( id == QLatin1String( "vert" ) ) {
 		// Blender vertex-select: square of dots, one corner highlighted
 		p.setBrush( Qt::NoBrush );
@@ -454,7 +625,7 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	seqBox = new QComboBox( this );
 	seqBox->setSizeAdjustPolicy( QComboBox::AdjustToContents );
 	seqBox->setMinimumWidth( 100 );
-	seqBox->setToolTip( tr( "Animation sequence shown in the timeline (synced with the Animation toolbar)" ) );
+	seqBox->setToolTip( tr( "Animation sequence shown in the Animation Manager (synced with the Animation toolbar)" ) );
 	connect( seqBox, qOverload<int>( &QComboBox::activated ), this, &TimelineWidget::sequenceChosen );
 
 	filterBox = new QLineEdit( this );
@@ -917,7 +1088,8 @@ QString TimelineWidget::controllerLabel( const QModelIndex & iController ) const
 void TimelineWidget::sequenceChosen( int comboRow )
 {
 	if ( comboRow >= 2 && comboRow - 2 < sequences.count() && sequences[comboRow - 2].isValid() ) {
-		emit indexSelected( QModelIndex( sequences[comboRow - 2] ) );
+		// switching the displayed animation must NOT change the block-list /
+		// viewport selection (only switch which sequence drives the timeline)
 		if ( !syncingSequence )
 			emit sequenceActivated( seqBox->itemText( comboRow ) );
 	}

@@ -38,8 +38,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QFileInfo>
 #include <QLocale>
 #include <QModelIndex>
+#include <QPersistentModelIndex>
 #include <QSet>
 #include <QUndoCommand>
+#include <QVector>
 
 #include <memory>
 
@@ -58,6 +60,7 @@ namespace nstypes
 	QString operator""_uip( const char * str, size_t sz );
 }
 
+class BackgroundNifDocument;
 class GLView;
 class InspectView;
 class KfmModel;
@@ -74,10 +77,18 @@ class BSAProxyModel;
 class QStandardItemModel;
 class QAction;
 class QActionGroup;
+class QButtonGroup;
 class QComboBox;
 class QFrame;
+class QLineEdit;
+class QLabel;
+class QMenu;
 class QProgressBar;
+class QPushButton;
 class QTimer;
+class QToolButton;
+class QToolBar;
+class QTabBar;
 class QTreeView;
 class QUdpSocket;
 
@@ -103,7 +114,7 @@ class NifSkope final : public QMainWindow
 	Q_OBJECT
 
 public:
-	NifSkope();
+	explicit NifSkope( bool background = false );
 	~NifSkope();
 
 	Ui::MainWindow * ui;
@@ -117,13 +128,26 @@ public:
 
 	//! Returns path of currently open file
 	QString getCurrentFile() const;
+	//! Currently selected NiBlock index in the list or tree view
+	QModelIndex currentNifIndex() const;
 
 	/*! Create and initialize a new NifSkope application window.
 	 *
 	 * @param fname The name of the file to load in the new NifSkope window.
 	 * @return		The newly created NifSkope instance.
 	 */
-	static NifSkope * createWindow( const QString & fname = QString() );
+	static NifSkope * createWindow( const QString & fname = QString(), bool background = false );
+	//! Open NIF documents in this application session. Each document keeps its
+	//! own model, selection, Undo stack and dirty state; the active one is primary.
+	static QList<NifSkope *> openDocuments();
+	//! Documents explicitly added to the Loaded NIFs workspace and currently selected.
+	static QList<NifSkope *> selectedWorkspaceDocuments();
+	//! Selected workspace members as model/display-path pairs. Unlike
+	//! selectedWorkspaceDocuments() this includes data-only background documents,
+	//! which own a NifModel but no window; tools that only read donor geometry
+	//! must use this list.
+	static QList<QPair<NifModel *, QString>> selectedWorkspaceModels();
+	static NifSkope * documentForModel( const NifModel * model );
 
 	static SettingsDialog * getOptions();
 
@@ -159,6 +183,10 @@ public:
 	{
 		return ogl;
 	}
+	inline NifModel * getNifModel() const
+	{
+		return nif;
+	}
 
 	/*! For each NIF path on fileList, load the file, run processFunc() on the model, and save the modified file
 	 * if processFunc() returned true. The optional processFuncData pointer is passed to the function.
@@ -172,6 +200,8 @@ signals:
 	void completeLoading( bool, QString & );
 	void beginSave();
 	void completeSave( bool, QString & );
+	//! Emitted after all views and the menubar SpellBook adopt a new NIF index.
+	void currentNifIndexChanged( const QModelIndex & );
 
 public slots:
 	void openFile( QString & );
@@ -181,6 +211,7 @@ public slots:
 	void openArchive( const QString & );
 	void openArchiveFile( const QModelIndex & );
 	void openArchiveFileString( const BA2File *, const QString & );
+	void openNifBrowserSelection();
 
 	void enableUi();
 
@@ -188,6 +219,8 @@ public slots:
 
 	//! Select a NIF index
 	void select( const QModelIndex & );
+	//! Run a registered spell through the persistent SpellBook (menus/workspaces share this path).
+	void castSpell( const QString & id, const QModelIndex & index );
 
 	// Automatic slots
 
@@ -293,6 +326,31 @@ private:
 	void initToolBars();
 	void initMenu();
 	void initConnections();
+	void initDocumentSession();
+	void rebuildDocumentTabs();
+	void rebuildLoadedNifsBrowserGroup();
+	void wireLoadedNifsSelection();
+	void addNifBrowserIndexToLoaded( const QModelIndex & index );
+	void queueNifBrowserIndexToLoaded( const QModelIndex & index );
+	void processNextNifBrowserLoad();
+	void addNifBrowserSelectionToLoaded();
+	void activateDocumentTab( int index );
+	void showDocumentTabMenu( const QPoint & pos );
+	void showDocumentMenu( NifSkope * document, const QPoint & globalPos );
+	NifSkope * documentFromBrowserIndex( const QModelIndex & index ) const;
+	BackgroundNifDocument * backgroundDocumentFromBrowserIndex( const QModelIndex & index ) const;
+	void showBackgroundDocumentMenu( BackgroundNifDocument * document, const QPoint & globalPos );
+	//! Attach a real window to a data-only background document: create it hidden,
+	//! reload the NIF from its source, then run the normal primary switch.
+	void promoteBackgroundDocument( BackgroundNifDocument * document );
+	void removeBackgroundDocument( BackgroundNifDocument * document );
+	//! Locate a configured-resource NIF in the primary's combined archive and
+	//! return its raw bytes plus the "[Game]/path" display path.
+	bool extractConfiguredNifBytes( int gameID, const QString & path,
+		QByteArray & bytes, QString & displayPath ) const;
+	void refreshSessionPreview();
+	static void refreshAllDocumentSessions();
+	QString documentDisplayName() const;
 
 	void loadFile( const QString & );
 	void saveFile( const QString & );
@@ -309,11 +367,12 @@ private:
 	void setCurrentArchive( bool );
 	void setCurrentArchiveFile( const QString & );
 	void clearCurrentArchive();
+	void appendLooseNifsToBrowser( const QString & );
+	void populateConfiguredNifBrowser();
+	void openConfiguredNif( int game, const QString & path );
+	bool loadConfiguredNifIntoDocument( NifSkope * target, int game, const QString & path );
 	void updateRecentArchiveActions();
 	void updateRecentArchiveFileActions();
-
-	//! Currently selected NiBlock index in the list or tree view
-	QModelIndex currentNifIndex() const;
 
 	//! Disconnect and reconnect the models to the views
 	void swapModels();
@@ -321,6 +380,20 @@ private:
 	//! (Re)connect the block-list multi-selection handler. Must be re-run
 	//! whenever list->setModel() replaces the view's selection model.
 	void wireBlockListSelection();
+	//! Reapply the recursive Block List text filter.
+	void applyBlockListFilter();
+	//! Reapply the recursive Block Details field-name/value filter.
+	void applyBlockDetailsFilter();
+	//! Rebuild breadcrumb, history, pin, relationship and footer state.
+	void updateBlockListNavigation( const QModelIndex & index = QModelIndex() );
+	//! Move through the recently selected block history.
+	void navigateBlockListHistory( int delta );
+	//! Ctrl+G block-number/name jump.
+	void goToBlock();
+	//! Category test used by the compact quick-filter buttons.
+	bool blockMatchesQuickFilter( int block ) const;
+	//! Begin an inline, synced rename for a uniquely named scene object.
+	void renameBlockListIndex( const QModelIndex & index, bool notifyIfUnavailable );
 
 	QMenu * lightingWidget();
 	QWidget * filePathWidget( QWidget * );
@@ -373,12 +446,31 @@ private:
 
 	//! This view shows the block list.
 	NifTreeView * list;
+	//! Inline Block List search field.
+	QLineEdit * blockListSearch = nullptr;
+	QLineEdit * blockDetailsSearch = nullptr;
+	QToolButton * blockListBack = nullptr;
+	QToolButton * blockListForward = nullptr;
+	QToolButton * blockListPin = nullptr;
+	QToolButton * blockListRelations = nullptr;
+	QButtonGroup * blockListFilterGroup = nullptr;
+	QLabel * blockListBreadcrumb = nullptr;
+	QLabel * blockListFooter = nullptr;
+	QVector<int> blockListHistory;
+	QSet<int> blockListPins;
+	int blockListHistoryPosition = -1;
+	int blockListQuickFilter = 0;
+	bool navigatingBlockListHistory = false;
 	//! This view shows the block details.
 	NifTreeView * tree;
 	//! This view shows the file header.
 	NifTreeView * header;
 	//! This view shows the archive browser files.
 	QTreeView * bsaView;
+	QPushButton * nifBrowserArchivesToggle = nullptr;
+	QPushButton * nifBrowserLooseToggle = nullptr;
+	//! Separate lower pane containing the live multi-NIF session.
+	QTreeView * loadedNifsView = nullptr;
 
 	//! This view shows the KFM file, if any.
 	NifTreeView * kfmtree;
@@ -400,11 +492,37 @@ private:
 	//! The main window
 	GLView * ogl;
 	QWidget * graphicsView;
+	QTabBar * documentTabs = nullptr;
+	QList<NifSkope *> documentTabWindows;
+	bool sessionPreviewVisible = true;
+	bool sessionPreviewUnloaded = false;
+	bool sessionCollectionMember = false;
+	bool syncingLoadedNifsSelection = false;
+	NifSkope * workspaceRoot = nullptr;
+	bool backgroundWorkspaceDocument = false;
+	bool closingWorkspaceGroup = false;
+	bool applicationEventFilterInstalled = false;
+	bool configuredNifBrowserPopulated = false;
+	QList<QPersistentModelIndex> pendingWorkspaceLoads;
+	bool processingWorkspaceLoad = false;
+	int configuredResourceGame = -1;
+	QString configuredResourcePath;
+	bool hasLoadedDocument = false;
+	//! Tab toggles Object Mode against the last non-object viewport mode.
+	//! Values follow the selector order: 1 Edit, 2 Vertex Paint,
+	//! 3 Weight Paint, 4 Segment Paint. Edit is the initial fallback.
+	int lastViewportNonObjectMode = 1;
 
 	//! Blender-style operator (redo) panel: a floating tool window, because
 	//! the native GL viewport would paint over any child-widget overlay
 	QFrame * gizmoRedoPanel = nullptr;
-	//! Dock the panel at the viewport's bottom-left corner
+	//! Operator redo panel (Merge by Distance / Select Linked by Angle)
+	QFrame * operatorRedoPanel = nullptr;
+	//! Box-select redo panel (Deselect the boxed geometry instead)
+	QFrame * boxRedoPanel = nullptr;
+	//! Generalized operator redo panel (typed parameter list: Extrude, …)
+	QFrame * operatorExRedoPanel = nullptr;
+	//! Dock the panels at the viewport's bottom-left corner
 	void positionRedoPanel();
 
 	QComboBox * animGroups;
@@ -467,6 +585,7 @@ private:
 
 	BSAModel * bsaModel;
 	BSAProxyModel * bsaProxyModel;
+	QStandardItemModel * loadedNifsModel = nullptr;
 	QStandardItemModel * emptyModel;
 
 	QMenu * mRecentArchiveFiles;

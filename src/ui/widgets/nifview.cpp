@@ -40,8 +40,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QApplication>
 #include <QMimeData>
 #include <QClipboard>
+#include <QFile>
 #include <QKeyEvent>
 #include <QPainter>
+#include <QTextStream>
+#include <QTimer>
 
 #include <vector>
 
@@ -80,6 +83,59 @@ void NifTreeView::setRootIndex( const QModelIndex & index )
 		root = root.sibling( root.row(), 0 );
 
 	QTreeView::setRootIndex( root );
+
+	// Re-apply row hiding for the newly shown block's fields. currentChanged
+	// only refreshes the current field's subtree, so without this the sibling
+	// rows keep stale visibility — e.g. version-mismatched fields (Skyrim
+	// shader flags on a Fallout 4 NIF) would stay visible when switching blocks.
+	refreshRowHiding();
+}
+
+// TEMP DIAGNOSTIC (WW_EXTRUDE_TEST): trace refreshRowHiding decisions
+static void wwHideTrace( const QString & msg )
+{
+	if ( !qEnvironmentVariableIsSet( "WW_EXTRUDE_TEST" ) )
+		return;
+	QFile f( QApplication::applicationDirPath() + "/ww_hide.log" );
+	if ( f.open( QIODevice::Append | QIODevice::Text ) )
+		QTextStream( &f ) << msg << "\n";
+}
+
+void NifTreeView::reset()
+{
+	wwHideTrace( QString( "RESET on %1" ).arg( objectName() ) );
+	QTreeView::reset();
+	// the reset cleared every hidden row; re-apply once things settle (the
+	// root/current usually get restored right after the reset)
+	QTimer::singleShot( 0, this, &NifTreeView::refreshRowHiding );
+}
+
+void NifTreeView::refreshRowHiding()
+{
+	wwHideTrace( QString( "refresh obj=%1 nif=%2 rootValid=%3 state=%4" )
+		.arg( objectName() ).arg( nif != nullptr )
+		.arg( rootIndex().isValid() )
+		.arg( nif ? int( nif->getState() ) : -1 ) );
+	if ( !nif || !rootIndex().isValid() )
+		return;
+	if ( nif->getState() != BaseModel::Default ) {
+		// mid-load (e.g. the session-restore selection while the file is still
+		// parsing): updateConditionRecurse would silently bail and the rows
+		// would stay stranded-visible, because a later select() of the same
+		// block skips setRootIndex. Retry once the model settles.
+		QTimer::singleShot( 0, this, &NifTreeView::refreshRowHiding );
+		return;
+	}
+	updateConditionRecurse( rootIndex() );
+	doItemsLayout();
+	if ( qEnvironmentVariableIsSet( "WW_EXTRUDE_TEST" ) ) {
+		int hiddenCount = 0;
+		for ( int r = 0; r < model()->rowCount( rootIndex() ); r++ )
+			if ( QTreeView::isRowHidden( r, rootIndex() ) )
+				hiddenCount++;
+		wwHideTrace( QString( "  applied on %1: %2 of %3 rows hidden" )
+			.arg( objectName() ).arg( hiddenCount ).arg( model()->rowCount( rootIndex() ) ) );
+	}
 }
 
 void NifTreeView::clearRootIndex()
@@ -112,13 +168,16 @@ bool NifTreeView::isRowHidden( [[maybe_unused]] int r, const QModelIndex & index
 bool NifTreeView::isRowHidden( const NifItem * rowItem ) const
 {
 	if ( rowItem && nif ) {
-		if ( doRowHiding || rowItem->hasTypeCondition() ) {
-			if ( !nif->evalCondition( rowItem ) )
-				return true;
-		} else {
-			if ( !nif->evalVersion( rowItem ) )
-				return true;
-		}
+		// A field that does not apply to this file's version is always hidden,
+		// regardless of the row-hiding mode or a type condition. Without this,
+		// version-conditioned typed fields (e.g. the Skyrim shader-flag variants
+		// on a Fallout 4 NIF) would still show because only their `cond` — not
+		// their version condition — was being evaluated.
+		if ( !nif->evalVersion( rowItem ) )
+			return true;
+
+		if ( ( doRowHiding || rowItem->hasTypeCondition() ) && !nif->evalCondition( rowItem ) )
+			return true;
 	}
 
 	return false;
@@ -254,10 +313,13 @@ void NifTreeView::updateConditionRecurse( const QModelIndex & index )
 }
 
 auto splitMime = []( QString format ) {
-	QStringList split = format.split( "/" );
-	if ( split.value( 0 ) == "nifskope"
-		 && (split.value( 1 ) == "niblock" || split.value( 1 ) == "nibranch") )
-		return !split.value( 2 ).isEmpty();
+	for ( const QString & separator : { QStringLiteral( "/" ), QStringLiteral( "\u02C2" ) } ) {
+		QStringList split = format.split( separator );
+		if ( split.value( 0 ) == QLatin1String( "nifskope" )
+			&& ( split.value( 1 ) == QLatin1String( "niblock" )
+				|| split.value( 1 ) == QLatin1String( "nibranch" ) ) )
+			return !split.value( 2 ).isEmpty();
+	}
 
 	return false;
 };
@@ -404,8 +466,13 @@ void NifTreeView::currentChanged( const QModelIndex & current, const QModelIndex
 {
 	QTreeView::currentChanged( current, last );
 
-	if ( nif )
+	if ( nif ) {
 		updateConditionRecurse( current );
+		// safety net: any interaction re-applies the whole visible block's
+		// row hiding (deferred while loading), so a hiding pass that bailed
+		// mid-load can never leave version-mismatched rows stranded visible
+		refreshRowHiding();
+	}
 
 	autoExpanded = false;
 	if ( doAutoExpanding )

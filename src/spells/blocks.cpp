@@ -25,13 +25,26 @@
 const char * B_ERR = QT_TR_NOOP( "%1 failed with errors." );
 const char * REF_MSG = QT_TR_NOOP( "Found %1 References" );
 
- // Use Unicode symbols for separators
- // to lessen chance of splitting incorrectly.
- // (Previous separators were `|` and `/`)
-const char * NAME_SEP = "˃"; // This is Unicode U+02C3
-const char * MIME_SEP = "˂"; // This is Unicode U+02C2
-const char * STR_BR = "nifskope˂nibranch˂%1";
-const char * STR_BL = "nifskope˂niblock˂%1˂%2";
+// Clipboard MIME names must remain ASCII on Windows. Unicode separators were
+// not reliably advertised to another open NifSkope window, causing Paste
+// Branch to fail isApplicable() and disappear from the context menu.
+const char * NAME_SEP = "˃"; // Existing serialized parent-name separator
+const char * STR_BR = "nifskope/nibranch/%1";
+const char * STR_BL = "nifskope/niblock/%1/%2";
+
+static QStringList splitCopyPasteMime( const QString & format )
+{
+	// Read the restored ASCII format plus the format emitted by interim builds,
+	// so a branch already on the clipboard can still be pasted after upgrade.
+	for ( const QString & separator : { QStringLiteral( "/" ), QStringLiteral( "\u02C2" ) } ) {
+		QStringList split = format.split( separator );
+		if ( split.value( MIME_IDX_APP ) == QLatin1String( "nifskope" )
+			&& ( split.value( MIME_IDX_STREAM ) == QLatin1String( "nibranch" )
+				|| split.value( MIME_IDX_STREAM ) == QLatin1String( "niblock" ) ) )
+			return split;
+	}
+	return {};
+}
 
 
 // Since nifxml doesn't track any of this data...
@@ -1114,7 +1127,7 @@ public:
 
 	QPair<QString, QString> acceptFormat( const QString & format, const NifModel * nif )
 	{
-		QStringList split = format.split( MIME_SEP );
+		QStringList split = splitCopyPasteMime( format );
 
 		NiMesh::DataStreamMetadata metadata = {};
 		auto bType = nif->extractRTTIArgs( split.value( MIME_IDX_TYPE ), metadata );
@@ -1230,7 +1243,7 @@ public:
 
 	QPair<QString, QString> acceptFormat( const QString & format, const NifModel * nif, const QModelIndex & iBlock )
 	{
-		QStringList split = format.split( MIME_SEP );
+		QStringList split = splitCopyPasteMime( format );
 
 		NiMesh::DataStreamMetadata metadata = {};
 		auto bType = nif->extractRTTIArgs( split.value( MIME_IDX_TYPE ), metadata );
@@ -1404,7 +1417,7 @@ REGISTER_SPELL( spCopyBranch )
 QString spPasteBranch::acceptFormat( const QString & format, const NifModel * nif )
 {
 	Q_UNUSED( nif );
-	QStringList split = format.split( MIME_SEP );
+	QStringList split = splitCopyPasteMime( format );
 
 	if ( split.value( MIME_IDX_APP ) == "nifskope" && split.value( MIME_IDX_STREAM ) == "nibranch" )
 		return split.value( MIME_IDX_VER );
@@ -1553,7 +1566,7 @@ public:
 	QString acceptFormat( const QString & format, const NifModel * nif )
 	{
 		Q_UNUSED( nif );
-		QStringList split = format.split( MIME_SEP );
+		QStringList split = splitCopyPasteMime( format );
 
 		if ( split.value( 0 ) == "nifskope" && split.value( 1 ) == "nibranch" )
 			return split.value( 2 );

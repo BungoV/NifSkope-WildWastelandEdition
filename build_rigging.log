@@ -1,0 +1,63 @@
+make -f Makefile.Release
+make[1]: Entering directory '/e/Projects/ClaudeNifskope'
+g++ -c -fno-keep-inline-dllexport -march=nocona -msahf -mtune=generic -Wa,-mbig-obj -Ilib/qhull/src -isystem lib/gli/gli -isystem lib/gli/external -Ilib/libfo76utils/src -std=c++20 -O3 -march=haswell -std=gnu++2a -Wall -Wextra -Wextra -fexceptions -mthreads -DUNICODE -D_UNICODE -DWIN32 -DMINGW_HAS_SECURE_API=1 -DQT_DISABLE_DEPRECATED_BEFORE=0x060400 -DQT_NO_DEBUG_OUTPUT -D_USE_MATH_DEFINES -DQT_NO_CAST_FROM_BYTEARRAY -DQT_NO_URL_CAST_FROM_STRING -DNIFSKOPE_VERSION=\"2.0.dev11\" -DNIFSKOPE_REVISION=\"e354db4\" -DEDIT_ON_ACTIVATE -DQT_NO_DEBUG -DQT_OPENGLWIDGETS_LIB -DQT_OPENGL_LIB -DQT_WIDGETS_LIB -DQT_GUI_LIB -DQT_XML_LIB -DQT_NETWORK_LIB -DQT_CORE_LIB -DQT_NEEDS_QMAIN -I. -Isrc -Ilib -IC:/msys64/ucrt64/include/qt6 -IC:/msys64/ucrt64/include/qt6/QtOpenGLWidgets -IC:/msys64/ucrt64/include/qt6/QtOpenGL -IC:/msys64/ucrt64/include/qt6/QtWidgets -IC:/msys64/ucrt64/include/qt6/QtGui -IC:/msys64/ucrt64/include/qt6/QtXml -IC:/msys64/ucrt64/include/qt6/QtNetwork -IC:/msys64/ucrt64/include/qt6/QtCore -IGeneratedFiles/.moc -IGeneratedFiles/.ui -I/include -IC:/msys64/ucrt64/share/qt6/mkspecs/win32-g++  -o GeneratedFiles/.obj/riggingtools.o src/spells/riggingtools.cpp
+sed.exe -e s/@VERSION@/2.0.dev11/ E:/Projects/ClaudeNifskope/build/README.md.in > E:/Projects/ClaudeNifskope/README.md 
+g++ -Wl,-s -Wl,-subsystem,windows -mthreads -o release/NifSkope.exe @GeneratedFiles/.obj/object_script.NifSkope.Release -lopengl32 -lgdi32 C:/msys64/ucrt64/lib/libQt6OpenGLWidgets.dll.a C:/msys64/ucrt64/lib/libQt6OpenGL.dll.a C:/msys64/ucrt64/lib/libQt6Widgets.dll.a C:/msys64/ucrt64/lib/libQt6Gui.dll.a C:/msys64/ucrt64/lib/libQt6Xml.dll.a C:/msys64/ucrt64/lib/libQt6Network.dll.a C:/msys64/ucrt64/lib/libQt6Core.dll.a -lmingw32 C:/msys64/ucrt64/lib/libQt6EntryPoint.a -lshell32  
+test -d E:/Projects/ClaudeNifskope/release/shaders || mkdir -p E:/Projects/ClaudeNifskope/release/shaders 
+rm -rf E:/Projects/ClaudeNifskope/release/shaders 
+cp -f -R E:/Projects/ClaudeNifskope/res/shaders E:/Projects/ClaudeNifskope/release/shaders 
+test -d E:/Projects/ClaudeNifskope/release/ || mkdir -p E:/Projects/ClaudeNifskope/release/ 
+cp -f E:/Projects/ClaudeNifskope/build/nif.xml E:/Projects/ClaudeNifskope/release/ 
+cp -f E:/Projects/ClaudeNifskope/build/docsys/kfmxml/kfm.xml E:/Projects/ClaudeNifskope/release/ 
+cp -f E:/Projects/ClaudeNifskope/res/style.qss E:/Projects/ClaudeNifskope/release/ 
+cp -f E:/Projects/ClaudeNifskope/res/qt.conf E:/Projects/ClaudeNifskope/release/ 
+test -d E:/Projects/ClaudeNifskope/release/ || mkdir -p E:/Projects/ClaudeNifskope/release/ 
+cp -f E:/Projects/ClaudeNifskope/CHANGELOG.md E:/Projects/ClaudeNifskope/release/CHANGELOG.txt 
+cp -f E:/Projects/ClaudeNifskope/LICENSE.md E:/Projects/ClaudeNifskope/release/LICENSE.txt 
+cp -f E:/Projects/ClaudeNifskope/README.md E:/Projects/ClaudeNifskope/release/README.txt 
+cp -f E:/Projects/ClaudeNifskope/README_GLTF.md E:/Projects/ClaudeNifskope/release/README_GLTF.txt 
+test -d E:/Projects/ClaudeNifskope/release/ || mkdir -p E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6core.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6gui.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6xml.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6opengl.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6network.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6widgets.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6openglwidgets.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libb2-1.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libbrotlicommon.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libbrotlidec.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libbz2-1.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libdouble-conversion.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libfreetype-6.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libglib-2.*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libgraphite2.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libharfbuzz-0.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libiconv-2.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libicudt*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libicuin*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libicuuc*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libintl-8.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libjpeg-8.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libmd4c.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libpcre2-16*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libpcre2-8*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libpng16-*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libsharpyuv-*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libwebp-*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libwebpdemux-*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libwebpmux-*.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libzstd.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/zlib1.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libgcc_s_seh-1.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libstdc++-6.dll E:/Projects/ClaudeNifskope/release/ 
+cp -f C:/msys64/ucrt64/bin/libwinpthread-1.dll E:/Projects/ClaudeNifskope/release/ 
+test -d E:/Projects/ClaudeNifskope/release/platforms || mkdir -p E:/Projects/ClaudeNifskope/release/platforms 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/platforms/qminimal.dll E:/Projects/ClaudeNifskope/release/platforms 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/platforms/qwindows.dll E:/Projects/ClaudeNifskope/release/platforms 
+test -d E:/Projects/ClaudeNifskope/release/imageformats || mkdir -p E:/Projects/ClaudeNifskope/release/imageformats 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/imageformats/qjpeg.dll E:/Projects/ClaudeNifskope/release/imageformats 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/imageformats/qwebp.dll E:/Projects/ClaudeNifskope/release/imageformats 
+test -d E:/Projects/ClaudeNifskope/release/styles || mkdir -p E:/Projects/ClaudeNifskope/release/styles 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/styles/qmodernwindowsstyle.dll E:/Projects/ClaudeNifskope/release/styles 
+make[1]: Leaving directory '/e/Projects/ClaudeNifskope'

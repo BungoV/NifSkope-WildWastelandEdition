@@ -123,7 +123,7 @@ void SpellBook::cast( NifModel * nif, const QModelIndex & index, SpellPtr spell 
 		return;
 	}
 
-	if ( !suppressConfirm && spell->page() != "Array" ) {
+	if ( !suppressConfirm && !spell->undoable() && spell->page() != "Array" ) {
 		response = CheckableMessageBox::question( this, "Confirmation", "This action cannot currently be undone. Do you want to continue?", "Do not ask me again", &accepted );
 
 		if ( accepted )
@@ -156,8 +156,13 @@ void SpellBook::cast( NifModel * nif, const QModelIndex & index, SpellPtr spell 
 
 void SpellBook::sltSpellTriggered( QAction * action )
 {
-	SpellPtr spell = Map.value( action );
-	cast( Nif, Index, spell );
+	// A SpellBook can also host native application actions (for example the
+	// Block List's Hierarchy submenu). Only actions registered as spells belong
+	// on the spell-casting path.
+	auto it = Map.constFind( action );
+	if ( it == Map.constEnd() )
+		return;
+	cast( Nif, Index, it.value() );
 }
 
 void SpellBook::sltNif( NifModel * nif )
@@ -234,6 +239,24 @@ void SpellBook::newSpellRegistered( SpellPtr spell )
 		act = addAction( spell->icon(), spell->name() );
 	act->setShortcut( spell->hotkey() );
 	Map.insert( act, spell );
+
+	// Transform and Block are the two structural editing categories. Keep
+	// Block directly below Transform regardless of static spell registration
+	// order, while leaving every other category in its established order.
+	QAction * transformPage = nullptr;
+	QAction * blockPage = nullptr;
+	for ( QAction * pageAction : actions() ) {
+		if ( pageAction->menu() && pageAction->menu()->title() == tr( "Transform" ) ) transformPage = pageAction;
+		else if ( pageAction->menu() && pageAction->menu()->title() == tr( "Block" ) ) blockPage = pageAction;
+	}
+	if ( transformPage && blockPage ) {
+		QList<QAction *> top = actions();
+		int transformIndex = top.indexOf( transformPage );
+		removeAction( blockPage );
+		top = actions();
+		QAction * before = ( transformIndex + 1 < top.size() ) ? top.at( transformIndex + 1 ) : nullptr;
+		if ( before ) insertAction( before, blockPage ); else addAction( blockPage );
+	}
 }
 
 void SpellBook::registerSpell( SpellPtr spell )

@@ -812,6 +812,8 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	gravityStrength = 0;
 	dragPct = 0;
 	hasColorMod = false;
+	hasColorGradient = false;
+	iColorGradKeys = QModelIndex();
 	scaleKeys.clear();
 	hasRotation = false;
 	rotSpeed = rotSpeedVar = rotAngle = rotAngleVar = 0;
@@ -1005,6 +1007,18 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			rotAngle = nif->get<float>( iMod, "Rotation Angle" );
 			rotAngleVar = nif->get<float>( iMod, "Rotation Angle Variation" );
 			rotRandomSign = nif->get<bool>( iMod, "Random Rot Speed Sign" );
+		} else if ( mtype == QLatin1String( "NiPSysColorModifier" ) ) {
+			// RGBA gradient over the particle's normalised age (age/lifespan);
+			// the NiColorData "Data" key group holds Color4 keys with times
+			QModelIndex iCData = nif->getBlockIndex( nif->getLink( iMod, "Data" ), "NiColorData" );
+			if ( iCData.isValid() ) {
+				iExtras.append( iCData );
+				QModelIndex iKeys = nif->getIndex( iCData, "Data" );
+				if ( iKeys.isValid() && nif->get<int>( iKeys, "Num Keys" ) > 0 ) {
+					iColorGradKeys = iKeys;
+					hasColorGradient = true;
+				}
+			}
 		}
 	}
 
@@ -1102,7 +1116,13 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 Color4 PSysSimController::particleColor( const Emitter & e, float u ) const
 {
 	Color4 c = e.color;
-	if ( hasColorMod ) {
+	if ( hasColorGradient && iColorGradKeys.isValid() ) {
+		// NiPSysColorModifier: sample the RGBA gradient at the normalised age.
+		// The gradient carries its own alpha keys, so the BSPSysSimpleColor
+		// fadeIn/fadeOut below is skipped for it.
+		int i = 0;
+		interpolate( c, iColorGradKeys, std::min( std::max( u, 0.0f ), 1.0f ), i );
+	} else if ( hasColorMod ) {
 		if ( u < c1End || c2Start <= c1End )
 			c = modColors[0];
 		else if ( u < c2Start )
@@ -1115,10 +1135,12 @@ Color4 PSysSimController::particleColor( const Emitter & e, float u ) const
 			c = modColors[2];
 	}
 	float a = c[3];
-	if ( fadeIn > 0.0f && u < fadeIn )
-		a *= u / fadeIn;
-	if ( fadeOut < 1.0f && u > fadeOut )
-		a *= ( 1.0f - u ) / ( 1.0f - fadeOut );
+	if ( !hasColorGradient ) {
+		if ( fadeIn > 0.0f && u < fadeIn )
+			a *= u / fadeIn;
+		if ( fadeOut < 1.0f && u > fadeOut )
+			a *= ( 1.0f - u ) / ( 1.0f - fadeOut );
+	}
 	return Color4( c[0], c[1], c[2], std::max( a, 0.0f ) );
 }
 
@@ -1350,7 +1372,7 @@ void PSysSimController::updateTime( float time )
 		float u = p.age / p.lifespan;
 		target->verts[i] = p.pos;
 		Emitter dummy;
-		target->colors[i] = hasColorMod ? particleColor( dummy, u ) : p.color;
+		target->colors[i] = ( hasColorMod || hasColorGradient ) ? particleColor( dummy, u ) : p.color;
 		target->sizes[i] = p.radius * particleScale( u );
 		if ( flipbook )
 			target->uvOffsets[i] = p.uvOff;

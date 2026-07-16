@@ -19,6 +19,14 @@
         <file alias="undock">icon/undock.png</file>
     </qresource>
     <qresource prefix="/btn">
+        <file alias="blockNode">icon/block-node.png</file>
+        <file alias="blockGeometry">icon/block-geometry.png</file>
+        <file alias="blockMaterial">icon/block-material.png</file>
+        <file alias="blockTexture">icon/block-texture.png</file>
+        <file alias="blockAnimation">icon/block-animation.png</file>
+        <file alias="blockParticles">icon/block-particles.png</file>
+        <file alias="blockCamera">icon/block-camera.png</file>
+        <file alias="blockExtraData">icon/block-extra-data.png</file>
         <file alias="viewWalk">icon/button_view_walk.png</file>
         <file alias="cubeTop16">icon/cube-top-16.png</file>
         <file alias="cubeFront16">icon/cube-front-16.png</file>

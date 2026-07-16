@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "ui/widgets/filebrowser.h"
 #include "ui/widgets/timeline.h"
 #include "glview.h"
+#include "io/material.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -28,25 +29,33 @@ BSD License - see nifskope.h
 
 #include <cstring>
 #include <iterator>
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
+#include <QGridLayout>
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QHash>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSplitter>
+#include <QStyledItemDelegate>
 #include <QTableWidget>
+#include <QToolButton>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 
 /*! \file meshtools.cpp
@@ -156,13 +165,31 @@ static QString tlNormalizeResourcePath( QString s )
 	return s.toLower();
 }
 
-//! Path table with drag & drop: dragging a path cell drops its text onto
-//! another row's path (also accepts plain-text drops from outside)
-class TlPathTable final : public QTableWidget
+//! Only the Path column (2) is inline-editable; every other column is display
+//! only, mirroring how the Collision Manager tree presents read-only fields.
+class TlPathEditDelegate final : public QStyledItemDelegate
 {
 public:
-	TlPathTable( QWidget * parent = nullptr ) : QTableWidget( 0, 3, parent )
+	using QStyledItemDelegate::QStyledItemDelegate;
+	QWidget * createEditor( QWidget * parent, const QStyleOptionViewItem & option,
+		const QModelIndex & index ) const override
 	{
+		if ( index.column() != 2 )
+			return nullptr;
+		return QStyledItemDelegate::createEditor( parent, option, index );
+	}
+};
+
+//! Material/texture tree with drag & drop: dragging a path drops its text onto
+//! another item's Path column (also accepts plain-text drops from outside).
+//! A real QTreeWidget so materials own their textures as native children, with
+//! the same expand arrows, sort indicator and scrollbars as the Collision list.
+class TlMaterialTree final : public QTreeWidget
+{
+public:
+	TlMaterialTree( QWidget * parent = nullptr ) : QTreeWidget( parent )
+	{
+		setColumnCount( 4 );
 		setDragEnabled( true );
 		setAcceptDrops( true );
 		viewport()->setAcceptDrops( true );
@@ -173,14 +200,11 @@ public:
 protected:
 	void startDrag( Qt::DropActions ) override
 	{
-		QTableWidgetItem * it = currentItem();
-		if ( !it )
-			return;
-		QTableWidgetItem * src = item( it->row(), 2 );
-		if ( !src || src->text().isEmpty() )
+		QTreeWidgetItem * it = currentItem();
+		if ( !it || it->text( 2 ).isEmpty() )
 			return;
 		QMimeData * md = new QMimeData;
-		md->setText( src->text() );
+		md->setText( it->text( 2 ) );
 		QDrag * drag = new QDrag( this );
 		drag->setMimeData( md );
 		drag->exec( Qt::CopyAction );
@@ -197,11 +221,9 @@ protected:
 	}
 	void dropEvent( QDropEvent * e ) override
 	{
-		QTableWidgetItem * it = itemAt( e->position().toPoint() );
+		QTreeWidgetItem * it = itemAt( e->position().toPoint() );
 		if ( it && e->mimeData()->hasText() ) {
-			QTableWidgetItem * dst = item( it->row(), 2 );
-			if ( dst )
-				dst->setText( e->mimeData()->text() );	// itemChanged applies + normalizes
+			it->setText( 2, e->mimeData()->text() );	// itemChanged applies + normalizes
 			e->acceptProposedAction();
 		}
 	}
@@ -222,30 +244,164 @@ static QString tlFindResource( const NifModel * nif, const QString & path )
 	return nif->findResourceFile( path, "textures", ".dds" );
 }
 
-//! Extract .dds paths referenced by a binary material file (format-agnostic
-//! printable-string scan; works for BGSM and BGEM)
-static QStringList tlScanMaterialTextures( const QByteArray & data )
+static QModelIndex tlShaderBlock( const NifModel * nif, const QModelIndex & index )
 {
-	QStringList out;
-	QByteArray cur;
-	for ( char ch : data ) {
-		if ( ch >= 0x20 && ch != 0x7f ) {
-			cur.append( ch );
-			continue;
-		}
-		if ( cur.size() >= 5 ) {
-			QString s = QString::fromLatin1( cur ).toLower();
-			if ( s.endsWith( QLatin1String( ".dds" ) ) && !out.contains( s ) )
-				out.append( s );
-		}
-		cur.clear();
+	QModelIndex block = nif ? nif->getBlockIndex( index ) : QModelIndex();
+	if ( block.isValid() && nif->blockInherits( block, { "BSLightingShaderProperty", "BSEffectShaderProperty" } ) )
+		return block;
+	return QModelIndex();
+}
+
+static QString tlShaderMaterialPath( const NifModel * nif, const QModelIndex & shader )
+{
+	return shader.isValid() ? tlNormalizeResourcePath( nif->resolveString( shader, "Name" ) ) : QString();
+}
+
+static void tlSetIfPresent( NifModel * nif, const QModelIndex & block, const char * field, float value )
+{
+	if ( nif->getIndex( block, field ).isValid() )
+		nif->set<float>( block, field, value );
+}
+
+template <typename T>
+static void tlSetIfPresent( NifModel * nif, const QModelIndex & block, const char * field, const T & value )
+{
+	if ( nif->getIndex( block, field ).isValid() )
+		nif->set<T>( block, field, value );
+}
+
+static QModelIndex tlFillShaderTextureSet( NifModel * nif, const QModelIndex & shader, const QStringList & textures )
+{
+	if ( !shader.isValid() || !nif->blockInherits( shader, "BSLightingShaderProperty" ) )
+		return QModelIndex();
+	int texNum = nif->getLink( shader, "Texture Set" );
+	QModelIndex texSet = nif->getBlockIndex( texNum );
+	if ( !texSet.isValid() || nif->itemName( texSet ) != QLatin1String( "BSShaderTextureSet" ) ) {
+		texSet = nif->insertNiBlock( "BSShaderTextureSet" );
+		if ( !texSet.isValid() )
+			return QModelIndex();
+		nif->setLink( shader, "Texture Set", nif->getBlockNumber( texSet ) );
 	}
-	if ( cur.size() >= 5 ) {
-		QString s = QString::fromLatin1( cur ).toLower();
-		if ( s.endsWith( QLatin1String( ".dds" ) ) && !out.contains( s ) )
-			out.append( s );
+	int count = std::max( 10, int( textures.size() ) );
+	nif->set<quint32>( texSet, "Num Textures", quint32( count ) );
+	QModelIndex array = nif->getIndex( texSet, "Textures" );
+	nif->updateArraySize( array );
+	for ( int i = 0; i < nif->rowCount( array ); i++ )
+		nif->assignString( nif->index( i, 0, array ), i < textures.size() ? tlNormalizeResourcePath( textures.at( i ) ) : QString() );
+	return texSet;
+}
+
+static bool tlSyncShaderFromMaterial( NifModel * nif, const QModelIndex & shader, bool full, QString * error = nullptr )
+{
+	QString path = tlShaderMaterialPath( nif, shader );
+	bool lighting = nif->blockInherits( shader, "BSLightingShaderProperty" );
+	bool effect = nif->blockInherits( shader, "BSEffectShaderProperty" );
+	if ( path.isEmpty() || ( lighting && !path.endsWith( ".bgsm" ) ) || ( effect && !path.endsWith( ".bgem" ) ) ) {
+		if ( error ) *error = QObject::tr( "The shader does not reference a matching BGSM/BGEM material." );
+		return false;
 	}
-	return out;
+	if ( lighting ) {
+		ShaderMaterial mat( path, nif, shader );
+		if ( !mat.isValid() ) { if ( error ) *error = QObject::tr( "Could not read '%1'." ).arg( path ); return false; }
+		tlSetIfPresent( nif, shader, "UV Offset", mat.uvOffset() );
+		tlSetIfPresent( nif, shader, "UV Scale", mat.uvScale() );
+		tlSetIfPresent( nif, shader, "Alpha", mat.alpha() );
+		tlSetIfPresent( nif, shader, "Refraction Strength", mat.refractionPower() );
+		tlSetIfPresent( nif, shader, "Environment Map Scale", mat.environmentMapScale() );
+		tlSetIfPresent( nif, shader, "Emissive Color", mat.emittanceColor() );
+		tlSetIfPresent( nif, shader, "Emissive Multiple", mat.emittanceMultiple() );
+		tlSetIfPresent( nif, shader, "Specular Color", mat.specularColor() );
+		tlSetIfPresent( nif, shader, "Specular Strength", mat.specularStrength() );
+		tlSetIfPresent( nif, shader, "Smoothness", mat.smoothness() );
+		tlSetIfPresent( nif, shader, "Fresnel Power", mat.fresnelPower() );
+		tlSetIfPresent( nif, shader, "Grayscale to Palette Scale", mat.grayscaleToPaletteScale() );
+		if ( nif->getIndex( shader, "Root Material" ).isValid() )
+			nif->assignString( shader, "Root Material", mat.rootMaterialPath() );
+		tlFillShaderTextureSet( nif, shader, mat.textures() );
+		if ( full ) {
+			tlSetIfPresent( nif, shader, "Shader Flags 1", mat.commonShaderFlags1() );
+			tlSetIfPresent( nif, shader, "Shader Flags 2", mat.shaderFlags2() );
+			tlSetIfPresent( nif, shader, "Alpha Source Blend Mode", mat.alphaSourceBlend() );
+			tlSetIfPresent( nif, shader, "Alpha Destination Blend Mode", mat.alphaDestinationBlend() );
+			tlSetIfPresent( nif, shader, "Alpha Test Threshold", mat.alphaTestThreshold() );
+		}
+	} else {
+		EffectMaterial mat( path, nif, shader );
+		if ( !mat.isValid() ) { if ( error ) *error = QObject::tr( "Could not read '%1'." ).arg( path ); return false; }
+		tlSetIfPresent( nif, shader, "UV Offset", mat.uvOffset() );
+		tlSetIfPresent( nif, shader, "UV Scale", mat.uvScale() );
+		tlSetIfPresent( nif, shader, "Alpha", mat.alpha() );
+		tlSetIfPresent( nif, shader, "Base Color", mat.baseColor() );
+		tlSetIfPresent( nif, shader, "Base Color Scale", mat.baseColorScale() );
+		tlSetIfPresent( nif, shader, "Falloff Start Angle", mat.falloffStartAngle() );
+		tlSetIfPresent( nif, shader, "Falloff Stop Angle", mat.falloffStopAngle() );
+		tlSetIfPresent( nif, shader, "Falloff Start Opacity", mat.falloffStartOpacity() );
+		tlSetIfPresent( nif, shader, "Falloff Stop Opacity", mat.falloffStopOpacity() );
+		tlSetIfPresent( nif, shader, "Lighting Influence", mat.lightingInfluence() );
+		tlSetIfPresent( nif, shader, "Env Map Min LOD", mat.environmentMapMinLod() );
+		tlSetIfPresent( nif, shader, "Soft Falloff Depth", mat.softFalloffDepth() );
+		tlSetIfPresent( nif, shader, "Emissive Color", mat.emittanceColor() );
+		const QStringList tex = mat.textures();
+		static const char * fields[] = { "Source Texture", "Greyscale Texture", "Env Map Texture", "Normal Texture", "Env Mask Texture" };
+		for ( int i = 0; i < 5 && i < tex.size(); i++ )
+			if ( nif->getIndex( shader, fields[i] ).isValid() ) nif->assignString( shader, fields[i], tlNormalizeResourcePath( tex.at( i ) ) );
+		if ( full ) {
+			tlSetIfPresent( nif, shader, "Shader Flags 1", mat.commonShaderFlags1() );
+			tlSetIfPresent( nif, shader, "Shader Flags 2", mat.effectShaderFlags2() );
+		}
+	}
+	return true;
+}
+
+static QStringList tlMaterialIssues( NifModel * nif, const QModelIndex & shader )
+{
+	QStringList issues;
+	QString path = tlShaderMaterialPath( nif, shader );
+	bool lighting = nif->blockInherits( shader, "BSLightingShaderProperty" );
+	if ( path.isEmpty() ) return { QObject::tr( "No BGSM/BGEM material is assigned." ) };
+	if ( ( lighting && !path.endsWith( ".bgsm" ) ) || ( !lighting && !path.endsWith( ".bgem" ) ) )
+		issues << QObject::tr( "Material type does not match the shader property type." );
+	if ( tlFindResource( nif, path ).isEmpty() )
+		issues << QObject::tr( "Material file is missing: %1" ).arg( path );
+	QStringList textures;
+	quint32 expected1 = 0, expected2 = 0;
+	bool valid = false;
+	if ( lighting ) {
+		ShaderMaterial mat( path, nif, shader ); valid = mat.isValid(); textures = mat.textures();
+		expected1 = mat.commonShaderFlags1(); expected2 = mat.shaderFlags2();
+		if ( valid ) {
+			QModelIndex set = nif->getBlockIndex( nif->getLink( shader, "Texture Set" ) );
+			if ( !set.isValid() ) issues << QObject::tr( "BSShaderTextureSet is missing." );
+			else {
+				QModelIndex a = nif->getIndex( set, "Textures" );
+				for ( int i = 0; i < textures.size() && i < nif->rowCount( a ); i++ )
+					if ( tlNormalizeResourcePath( nif->resolveString( nif->index( i, 0, a ) ) ) != tlNormalizeResourcePath( textures.at( i ) ) ) {
+						issues << QObject::tr( "BSShaderTextureSet differs from the BGSM." ); break;
+					}
+			}
+		}
+	} else {
+		EffectMaterial mat( path, nif, shader ); valid = mat.isValid(); textures = mat.textures();
+		expected1 = mat.commonShaderFlags1(); expected2 = mat.effectShaderFlags2();
+	}
+	if ( !valid ) issues << QObject::tr( "Material file could not be decoded." );
+	for ( const QString & tex : textures )
+		if ( !tex.isEmpty() && tlFindResource( nif, tex ).isEmpty() ) issues << QObject::tr( "Texture is missing: %1" ).arg( tex );
+	if ( valid && ( nif->get<quint32>( shader, "Shader Flags 1" ) != expected1
+		|| nif->get<quint32>( shader, "Shader Flags 2" ) != expected2 ) )
+		issues << QObject::tr( "Shader flags are out of sync with the material file." );
+	issues.removeDuplicates();
+	return issues;
+}
+
+static QString tlMaterialComparison( NifModel * nif, const QModelIndex & shader )
+{
+	QStringList issues = tlMaterialIssues( nif, shader );
+	QString path = tlShaderMaterialPath( nif, shader );
+	QString result = QObject::tr( "Material: %1\nShader block: %2\n\n" ).arg( path, nif->itemName( shader ) );
+	result += issues.isEmpty() ? QObject::tr( "MATCH — the NIF shader agrees with the material file." )
+		: QObject::tr( "DIFFERENCES\n• %1" ).arg( issues.join( QStringLiteral( "\n• " ) ) );
+	return result;
 }
 
 //! Nearest NiAVObject reachable by walking the link graph upward from the
@@ -278,6 +434,17 @@ static int tlOwnerBlock( NifModel * nif, int bn )
 
 //! Clipboard for whole BSShaderTextureSet contents
 static QStringList tlCopiedTexSet;
+
+struct TlCopiedMaterialSetup
+{
+	bool valid = false;
+	bool effect = false;
+	QString path;
+	quint32 flags1 = 0;
+	quint32 flags2 = 0;
+	QStringList textures;
+};
+static TlCopiedMaterialSetup tlCopiedMaterialSetup;
 
 
 /*
@@ -716,193 +883,477 @@ static void tlOpenMaterialEditor( NifModel * nif, QWidget * parent, const QStrin
 	dlg.exec();
 }
 
-//! Build the Material / Texture Manager panel: live editing, find & replace,
-//! archive browser, drag & drop, texture preview, selection sync
+//! Build the Material Manager plus an independent movable Texture Preview.
 QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl )
 {
 	{
-		QDockWidget * dock = new QDockWidget( QObject::tr( "Material / Texture Manager" ), mw );
+		QDockWidget * dock = new QDockWidget( QObject::tr( "Material Manager" ), mw );
 		dock->setObjectName( QStringLiteral( "MatTexManagerDock" ) );
+		dock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
 
 		QWidget * panel = new QWidget( dock );
-		QVBoxLayout * lay = new QVBoxLayout( panel );
+		QVBoxLayout * materialLay = new QVBoxLayout( panel );
+		materialLay->setContentsMargins( 6, 6, 6, 6 );
+		materialLay->setSpacing( 6 );
+
+		// Floating shell that only hosts the preview while it is detached; by
+		// default the preview is nested at the bottom of the panel instead.
+		QDialog * previewWindow = new QDialog( mw, Qt::Tool | Qt::WindowTitleHint
+			| Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint );
+		previewWindow->setWindowTitle( QObject::tr( "Texture Preview" ) );
+		previewWindow->setObjectName( QStringLiteral( "TexturePreviewWindow" ) );
+		QVBoxLayout * previewWindowLay = new QVBoxLayout( previewWindow );
+		previewWindowLay->setContentsMargins( 6, 6, 6, 6 );
 
 		QHBoxLayout * fr = new QHBoxLayout;
 		QLineEdit * edFilter = new QLineEdit( panel );
 		edFilter->setPlaceholderText( QObject::tr( "Filter rows" ) );
 		edFilter->setClearButtonEnabled( true );
-		QLineEdit * edFind = new QLineEdit( panel );
-		edFind->setPlaceholderText( QObject::tr( "Find" ) );
-		QLineEdit * edRepl = new QLineEdit( panel );
-		edRepl->setPlaceholderText( QObject::tr( "Replace with" ) );
-		QPushButton * btnReplace = new QPushButton( QObject::tr( "Replace All" ), panel );
+		QPushButton * btnReplaceDlg = new QPushButton( QObject::tr( "Replace..." ), panel );
+		btnReplaceDlg->setToolTip( QObject::tr( "Find & replace across every path" ) );
 		fr->addWidget( edFilter, 1 );
-		fr->addWidget( edFind, 1 );
-		fr->addWidget( edRepl, 1 );
-		fr->addWidget( btnReplace );
-		lay->addLayout( fr );
+		fr->addWidget( btnReplaceDlg );
+		materialLay->addLayout( fr );
 
 		QHBoxLayout * fr2 = new QHBoxLayout;
 		QPushButton * btnBrowse = new QPushButton( QObject::tr( "Browse..." ), panel );
 		btnBrowse->setToolTip( QObject::tr( "Pick a replacement from the game archives for the selected row" ) );
 		QPushButton * btnRetarget = new QPushButton( QObject::tr( "Retarget Folder..." ), panel );
 		btnRetarget->setToolTip( QObject::tr( "Replace a folder prefix on every matching path" ) );
-		QCheckBox * cbGroup = new QCheckBox( QObject::tr( "Group by node" ), panel );
 		QPushButton * btnRefresh = new QPushButton( QObject::tr( "Refresh" ), panel );
+		QPushButton * btnCheck = new QPushButton( QObject::tr( "Check Materials" ), panel );
+		QPushButton * btnDuplicates = new QPushButton( QObject::tr( "Find Duplicates" ), panel );
+		btnRetarget->hide(); btnCheck->hide(); btnDuplicates->hide();
+		QPushButton * btnPreview = new QPushButton( QObject::tr( "Texture Preview..." ), panel );
 		fr2->addWidget( btnBrowse );
-		fr2->addWidget( btnRetarget );
-		fr2->addWidget( cbGroup );
+		fr2->addWidget( btnPreview );
 		fr2->addStretch( 1 );
 		fr2->addWidget( btnRefresh );
-		lay->addLayout( fr2 );
+		QToolButton * btnMore = new QToolButton( panel );
+		btnMore->setText( QObject::tr( "More..." ) );
+		btnMore->setPopupMode( QToolButton::InstantPopup );
+		QMenu * moreMenu = new QMenu( btnMore );
+		QAction * retargetAction = moreMenu->addAction( QObject::tr( "Retarget Folder..." ) );
+		QAction * checkAction = moreMenu->addAction( QObject::tr( "Check Materials" ) );
+		QAction * duplicatesAction = moreMenu->addAction( QObject::tr( "Find Duplicates" ) );
+		btnMore->setMenu( moreMenu );
+		fr2->addWidget( btnMore );
+		QObject::connect( retargetAction, &QAction::triggered, btnRetarget, &QPushButton::click );
+		QObject::connect( checkAction, &QAction::triggered, btnCheck, &QPushButton::click );
+		QObject::connect( duplicatesAction, &QAction::triggered, btnDuplicates, &QPushButton::click );
+		materialLay->addLayout( fr2 );
 
-		QSplitter * split = new QSplitter( Qt::Horizontal, panel );
-		TlPathTable * tbl = new TlPathTable( split );
-		tbl->setHorizontalHeaderLabels( { QObject::tr( "Owner node" ), QObject::tr( "Material" ), QObject::tr( "Path (editable, drag && drop)" ) } );
-		tbl->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
-		tbl->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
-		tbl->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
-		tbl->verticalHeader()->setVisible( false );
-		tbl->setContextMenuPolicy( Qt::CustomContextMenu );
+		// The list and the nested preview share a draggable vertical splitter.
+		QSplitter * vSplit = new QSplitter( Qt::Vertical, panel );
+		vSplit->setChildrenCollapsible( false );
 
-		QScrollArea * prevScroll = new QScrollArea( split );
+		QWidget * listPane = new QWidget( vSplit );
+		QVBoxLayout * listLay = new QVBoxLayout( listPane );
+		listLay->setContentsMargins( 0, 0, 0, 0 );
+		listLay->setSpacing( 4 );
+
+		QLabel * inventoryHeader = new QLabel( QObject::tr( "Materials in file" ), listPane );
+		inventoryHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; padding: 4px 2px; }" ) );
+		listLay->addWidget( inventoryHeader );
+
+		// Materials own their textures as native tree children: same expand
+		// arrows, single-column sort indicator, alternating rows and horizontal
+		// scrollbar as the Collision Manager node list.
+		TlMaterialTree * tree = new TlMaterialTree( listPane );
+		tree->setHeaderLabels( { QObject::tr( "Material" ), QObject::tr( "Mesh" ), QObject::tr( "Path" ), QObject::tr( "Status" ) } );
+		tree->setRootIsDecorated( true );
+		tree->setUniformRowHeights( true );
+		tree->setExpandsOnDoubleClick( true );
+		tree->setAlternatingRowColors( true );
+		tree->setSelectionMode( QAbstractItemView::SingleSelection );
+		tree->setContextMenuPolicy( Qt::CustomContextMenu );
+		tree->setEditTriggers( QAbstractItemView::EditKeyPressed );
+		tree->setItemDelegate( new TlPathEditDelegate( tree ) );
+		tree->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+		tree->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOn );
+		tree->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
+		tree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
+		tree->header()->setSectionResizeMode( 2, QHeaderView::ResizeToContents );
+		tree->header()->setSectionResizeMode( 3, QHeaderView::Stretch );
+		tree->setMinimumHeight( 150 );
+		tree->setSortingEnabled( true );
+		tree->sortByColumn( 0, Qt::AscendingOrder );
+		// same selection colours the Collision Manager tree uses
+		tree->setStyleSheet( QStringLiteral(
+			"QTreeWidget::item:selected { background: rgb(74,122,176); color: rgb(255,157,0); }"
+			"QTreeWidget::item:selected:!active { background: rgb(43,66,95); color: rgb(255,114,0); }" ) );
+		listLay->addWidget( tree, 1 );
+
+		vSplit->addWidget( listPane );
+		materialLay->addWidget( vSplit, 1 );
+
+		// The preview is nested at the bottom of the panel inside its own
+		// container so it can be reparented into the floating shell on demand.
+		QWidget * previewContainer = new QWidget( vSplit );
+		QVBoxLayout * previewLay = new QVBoxLayout( previewContainer );
+		previewLay->setContentsMargins( 0, 0, 0, 0 );
+		previewLay->setSpacing( 4 );
+
+		QHBoxLayout * previewHeaderRow = new QHBoxLayout;
+		QLabel * previewHeader = new QLabel( QObject::tr( "Texture Preview" ), previewContainer );
+		previewHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; padding: 4px 2px; }" ) );
+		QToolButton * btnDetach = new QToolButton( previewContainer );
+		btnDetach->setText( QObject::tr( "Detach" ) );
+		btnDetach->setToolTip( QObject::tr( "Pop the texture preview out into its own window" ) );
+		btnDetach->setAutoRaise( true );
+		previewHeaderRow->addWidget( previewHeader );
+		previewHeaderRow->addStretch( 1 );
+		previewHeaderRow->addWidget( btnDetach );
+		previewLay->addLayout( previewHeaderRow );
+
+		// A single full-width preview pane. The material tree's texture rows are
+		// the selector now, so the old per-texture slot list / type buttons are
+		// gone, giving the preview all of the width.
+		QScrollArea * prevScroll = new QScrollArea( previewContainer );
 		prevScroll->setWidgetResizable( true );
-		prevScroll->setMinimumWidth( 280 );
 		{
 			QLabel * l = new QLabel( QObject::tr( "Select a texture row for a preview" ), prevScroll );
 			l->setAlignment( Qt::AlignCenter );
 			l->setWordWrap( true );
 			prevScroll->setWidget( l );
 		}
-		split->addWidget( tbl );
-		split->addWidget( prevScroll );
-		split->setStretchFactor( 0, 3 );
-		split->setStretchFactor( 1, 2 );
-		lay->addWidget( split, 1 );
+		previewLay->addWidget( prevScroll, 1 );
 
-		QLabel * hint = new QLabel( QObject::tr( "Edits apply immediately (undoable). Paths are normalized on input. Click a row to jump to the node using it; right-click for more." ), panel );
+		vSplit->addWidget( previewContainer );
+		// preview takes the larger share below a compact material list, matching
+		// the default panel layout; the splitter stays user-draggable
+		vSplit->setStretchFactor( 0, 2 );
+		vSplit->setStretchFactor( 1, 3 );
+		vSplit->setSizes( { 240, 560 } );
+
+		// Detach pops the preview into the floating shell; docking (button again
+		// or closing the float) nests it back under the list.
+		auto detached = std::make_shared<bool>( false );
+		auto dockPreview = [vSplit, previewContainer, previewWindow, btnDetach, detached]() {
+			vSplit->addWidget( previewContainer );	// reparents out of the float
+			previewContainer->show();
+			previewWindow->hide();
+			btnDetach->setText( QObject::tr( "Detach" ) );
+			*detached = false;
+		};
+		auto detachPreview = [previewWindow, previewWindowLay, previewContainer, btnDetach, detached]() {
+			previewWindowLay->addWidget( previewContainer );	// reparents into the float
+			previewContainer->show();
+			previewWindow->show();
+			previewWindow->raise();
+			previewWindow->activateWindow();
+			btnDetach->setText( QObject::tr( "Dock" ) );
+			*detached = true;
+		};
+		QObject::connect( btnDetach, &QToolButton::clicked, previewContainer,
+			[detached, detachPreview, dockPreview]() { if ( *detached ) dockPreview(); else detachPreview(); } );
+		QObject::connect( previewWindow, &QDialog::finished, previewContainer,
+			[detached, dockPreview]( int ) { if ( *detached ) dockPreview(); } );
+
+		// preview a .dds path directly in the pane (helper used by row selection)
+		auto showTexture = [nif, prevScroll]( const QString & path ) {
+			if ( QWidget * old = prevScroll->takeWidget() )
+				old->deleteLater();
+			if ( path.isEmpty() ) {
+				QLabel * l = new QLabel( QObject::tr( "Select a texture row for a preview" ), prevScroll );
+				l->setAlignment( Qt::AlignCenter ); l->setWordWrap( true );
+				prevScroll->setWidget( l );
+				return;
+			}
+			try {
+				prevScroll->setWidget( new DDSTextureInfo( nif->getGameResources(), path, prevScroll ) );
+			} catch ( ... ) {
+				QLabel * l = new QLabel( QObject::tr( "Texture not found:\n%1" ).arg( path ), prevScroll );
+				l->setAlignment( Qt::AlignCenter ); l->setWordWrap( true );
+				prevScroll->setWidget( l );
+			}
+		};
+		// The toolbar button now pops the nested preview out into its window.
+		QObject::connect( btnPreview, &QPushButton::clicked, previewWindow,
+			[detached, detachPreview, previewWindow]() {
+				if ( !*detached ) detachPreview();
+				else { previewWindow->raise(); previewWindow->activateWindow(); }
+			} );
+
+		QLabel * hint = new QLabel( QObject::tr( "Live, undoable edits · Double-click a material to unfold · Right-click for tools" ), panel );
 		hint->setWordWrap( true );
-		lay->addWidget( hint );
+		hint->setMaximumHeight( 24 );
+		materialLay->addWidget( hint );
 
 		// shared state for the lambdas
 		auto rows = std::make_shared<QVector<QPersistentModelIndex>>();
 		auto applying = std::make_shared<bool>( false );
 
-		// row visibility: text filter + per-node collapsed groups (double-click
-		// the owner column, or use the context menu, to fold a node's rows)
-		auto collapsed = std::make_shared<QSet<int>>();
-		auto applyVis = [tbl, edFilter, collapsed]() {
+		// text filter across all columns; a material stays visible when it or any
+		// of its textures match, and matches auto-expand so hits are revealed.
+		// Folding itself is native (the expand arrow / double-click), like the
+		// Collision Manager tree.
+		auto applyVis = [tree, edFilter]() {
 			QString f = edFilter->text();
-			QSet<int> seen;
-			bool wasSorting = tbl->isSortingEnabled();
-			tbl->setSortingEnabled( false );
-			for ( int r = 0; r < tbl->rowCount(); r++ ) {
-				bool match = f.isEmpty();
-				for ( int c = 0; c < 3 && !match; c++ ) {
-					if ( QTableWidgetItem * it = tbl->item( r, c ) )
-						match = it->text().contains( f, Qt::CaseInsensitive );
+			auto matches = [&f]( QTreeWidgetItem * it ) {
+				if ( f.isEmpty() )
+					return true;
+				for ( int c = 0; c < 4; c++ )
+					if ( it->text( c ).contains( f, Qt::CaseInsensitive ) )
+						return true;
+				return false;
+			};
+			for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+				QTreeWidgetItem * mat = tree->topLevelItem( i );
+				bool matMatch = matches( mat );
+				bool anyChild = false;
+				for ( int c = 0; c < mat->childCount(); c++ ) {
+					bool childMatch = matMatch || matches( mat->child( c ) );
+					mat->child( c )->setHidden( !childMatch );
+					anyChild = anyChild || childMatch;
 				}
-				bool hide = !match;
-				if ( QTableWidgetItem * c0 = tbl->item( r, 0 ) ) {
-					int owner = c0->data( Qt::UserRole ).toInt();
-					bool folded = collapsed->contains( owner );
-					if ( !hide && folded ) {
-						if ( seen.contains( owner ) )
-							hide = true;	// only the first row of a folded node stays
-						else
-							seen.insert( owner );
-					}
-					// fold indicator icon (icons never affect the sort order,
-					// unlike a text prefix which pushed folded rows around)
-					static const QIcon icoFold = tlMakeIcon( QStringLiteral( "chevron_right" ), QColor( 228, 228, 232 ) );
-					static const QIcon icoOpen = tlMakeIcon( QStringLiteral( "chevron_down" ), QColor( 228, 228, 232 ) );
-					c0->setIcon( c0->data( Qt::UserRole + 2 ).toString().isEmpty()
-						? QIcon() : ( folded ? icoFold : icoOpen ) );
-				}
-				tbl->setRowHidden( r, hide );
+				mat->setHidden( !( matMatch || anyChild ) );
+				if ( !f.isEmpty() && anyChild )
+					mat->setExpanded( true );	// reveal the matching textures
 			}
-			tbl->setSortingEnabled( wasSorting );
 		};
 
 		// object-mode selection colours, mirroring the block list (active
-		// light blue + #FF9D00, secondary dark blue + #FF7200)
-		auto recolor = [tbl, ogl, applying]() {
+		// light blue + #FF9D00, secondary dark blue + #FF7200); a material and
+		// all of its textures share the owning node's highlight
+		auto recolor = [tree, ogl, applying]() {
 			*applying = true;
-			for ( int r = 0; r < tbl->rowCount(); r++ ) {
-				QTableWidgetItem * c1 = tbl->item( r, 0 );	// owner column
-				QTableWidgetItem * c2 = tbl->item( r, 2 );
-				if ( !c1 || !c2 )
-					continue;
-				int owner = c1->data( Qt::UserRole ).toInt();
+			auto colorItem = [ogl]( QTreeWidgetItem * it, int owner ) {
 				bool sel = ( owner >= 0 && ogl && ogl->objSelection.contains( owner ) );
 				bool act = ( sel && owner == ogl->objActive );
 				QBrush bg = sel ? QBrush( act ? QColor( 74, 122, 176 ) : QColor( 43, 66, 95 ) ) : QBrush();
 				QBrush fg = sel ? QBrush( act ? QColor( 255, 157, 0 ) : QColor( 255, 114, 0 ) ) : QBrush();
-				for ( int c = 0; c < 3; c++ ) {
-					if ( QTableWidgetItem * it = tbl->item( r, c ) ) {
-						it->setBackground( bg );
-						it->setForeground( fg );
-					}
+				for ( int c = 0; c < 4; c++ ) {
+					it->setBackground( c, bg );
+					it->setForeground( c, fg );
 				}
-				if ( !sel && c2->data( Qt::UserRole ).toBool() )
-					c2->setForeground( QColor( 235, 90, 90 ) );	// missing resource
+				if ( !sel && it->data( 2, Qt::UserRole ).toBool() )
+					it->setForeground( 2, QColor( 235, 90, 90 ) );	// missing resource
+			};
+			// only the material row carries the owner highlight; its texture
+			// children keep their own colours (Blender highlights the parent
+			// node, not its children)
+			for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+				QTreeWidgetItem * mat = tree->topLevelItem( i );
+				colorItem( mat, mat->data( 0, Qt::UserRole + 3 ).toInt() );
 			}
 			*applying = false;
 		};
 
-		auto rebuild = [nif, tbl, rows, applying, recolor, applyVis]() {
+		auto rebuild = [nif, tree, inventoryHeader, rows, applying, recolor, applyVis]() {
 			*applying = true;
-			tbl->setSortingEnabled( false );
-			tbl->setRowCount( 0 );
+			bool wasSorting = tree->isSortingEnabled();
+			tree->setSortingEnabled( false );
+			tree->clear();
 			QVector<QPersistentModelIndex> items;
-			QStringList labels, owners;
-			QVector<int> blockNums, ownerNums;
+			QStringList labels, owners, explicitPaths;
+			QVector<int> blockNums, ownerNums, groupNums;
+			QVector<bool> parentRows;
 			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
-				QModelIndex iBlock = nif->getBlockIndex( b );
-				QString head = QString( "%1 %2" ).arg( b ).arg( nif->itemName( iBlock ) );
-				int before = items.size();
-				tlCollectResourceStrings( nif, iBlock, items, labels, owners, QString(), head );
-				if ( items.size() > before ) {
-					// a shader/texture path inside an AVObject block belongs to it;
-					// otherwise walk the link graph up to the nearest one
-					int ownerNum = nif->blockInherits( iBlock, "NiAVObject" ) ? b : tlOwnerBlock( nif, b );
-					QString ownerNode;
-					if ( ownerNum >= 0 ) {
-						QModelIndex iOwner = nif->getBlockIndex( ownerNum );
-						QString nm = nif->resolveString( iOwner, "Name" );
-						ownerNode = QString( "%1 %2%3" ).arg( ownerNum ).arg( nif->itemName( iOwner ),
-							nm.isEmpty() ? QString() : QStringLiteral( " \"" ) + nm + QStringLiteral( "\"" ) );
+				QModelIndex shader = nif->getBlockIndex( b );
+				bool lighting = nif->blockInherits( shader, "BSLightingShaderProperty" );
+				bool effect = nif->blockInherits( shader, "BSEffectShaderProperty" );
+				if ( !lighting && !effect ) continue;
+				int ownerNum = tlOwnerBlock( nif, b );
+				QString ownerNode = QObject::tr( "Shader %1" ).arg( b );
+				if ( ownerNum >= 0 ) {
+					QModelIndex owner = nif->getBlockIndex( ownerNum );
+					QString name = nif->resolveString( owner, "Name" );
+					ownerNode = name.isEmpty() ? QObject::tr( "Block %1" ).arg( ownerNum ) : name;
+				}
+				auto appendRow = [&]( const QModelIndex & item, const QString & label, int containing, bool parent ) {
+					if ( !item.isValid() ) return;
+					items.append( QPersistentModelIndex( item ) ); labels.append( label ); owners.append( ownerNode );
+					blockNums.append( containing ); ownerNums.append( ownerNum ); groupNums.append( b ); parentRows.append( parent );
+					explicitPaths.append( QString() );
+				};
+				// A material-file (BGSM/BGEM) texture is not backed by any NIF field:
+				// it carries an explicit path and an invalid index (preview-only row).
+				auto appendMatTexture = [&]( const QString & path, const QString & label, int containing ) {
+					items.append( QPersistentModelIndex() ); labels.append( label ); owners.append( ownerNode );
+					blockNums.append( containing ); ownerNums.append( ownerNum ); groupNums.append( b ); parentRows.append( false );
+					explicitPaths.append( path );
+				};
+				appendRow( nif->getIndex( shader, "Name" ), effect ? QObject::tr( "BGEM" ) : QObject::tr( "BGSM" ), b, true );
+				if ( lighting ) {
+					// Authoritative Bethesda texture-set slot meanings (see the
+					// BSShaderTextureSet.Textures comment in nif.xml). Slot 7 is the
+					// back-lighting map on Skyrim, but Fallout 4 / 76 (BS version
+					// >= 130) repurpose it as the specular/gloss map — matching how
+					// the renderer binds slot 7 as SpecularMap for those versions.
+					quint32 bs = nif->getBSVersion();
+					auto slotName = [bs]( int t ) -> QString {
+						switch ( t ) {
+						case 0: return QObject::tr( "Diffuse" );
+						case 1: return QObject::tr( "Normal" );
+						case 2: return QObject::tr( "Glow/Skin" );
+						case 3: return QObject::tr( "Height" );
+						case 4: return QObject::tr( "Environment" );
+						case 5: return QObject::tr( "Env Mask" );
+						case 6: return QObject::tr( "Subsurface" );
+						case 7: return bs >= 130 ? QObject::tr( "Spec/Gloss" ) : QObject::tr( "Backlight" );
+						case 9: return QObject::tr( "Reflectivity" );	// Fallout 76
+						case 10: return QObject::tr( "Lighting" );		// Fallout 76
+						default: return QObject::tr( "Texture %1" ).arg( t + 1 );
+						}
+					};
+					// A BGSM's own texture array uses a DIFFERENT order than a
+					// BSShaderTextureSet (see the BGSM1_*/BGSM20_* enum in
+					// glproperty.cpp): index 2 is the specular/gloss map, not glow.
+					// Label material-file textures by that native order, so the tree
+					// agrees with what the renderer samples.
+					auto bgsmTexLabel = []( int i, int count ) -> QString {
+						if ( count >= 10 ) {			// Fallout 76 10-texture layout
+							switch ( i ) {
+							case 0: return QObject::tr( "Diffuse" );
+							case 1: return QObject::tr( "Normal" );
+							case 2: return QObject::tr( "Spec/Gloss" );
+							case 3: return QObject::tr( "Greyscale" );
+							case 4: return QObject::tr( "Glow" );
+							case 5: return QObject::tr( "Env Mask" );
+							case 6: return QObject::tr( "Reflectance" );
+							case 7: return QObject::tr( "Lighting" );
+							}
+						} else {						// Fallout 4 9-texture layout
+							switch ( i ) {
+							case 0: return QObject::tr( "Diffuse" );
+							case 1: return QObject::tr( "Normal" );
+							case 2: return QObject::tr( "Spec/Gloss" );
+							case 3: return QObject::tr( "Greyscale" );
+							case 4: return QObject::tr( "Environment" );
+							case 5: return QObject::tr( "Glow / Env Mask" );
+							}
+						}
+						return QObject::tr( "Texture %1" ).arg( i + 1 );
+					};
+					// Fallout 4 materials are the source of truth: a linked BGSM
+					// overrides any BSShaderTextureSet, so list the material file's
+					// own textures as the children when it is readable.
+					QString matPath = tlNormalizeResourcePath( nif->resolveString( shader, "Name" ) );
+					QStringList matTex;
+					if ( matPath.endsWith( ".bgsm" ) ) {
+						ShaderMaterial mat( matPath, nif, shader );
+						if ( mat.isValid() ) matTex = mat.textures();
 					}
-					for ( int k = before; k < owners.size(); k++ ) {
-						owners[k] = ownerNode;
-						blockNums.append( b );
-						ownerNums.append( ownerNum );
+					if ( !matTex.isEmpty() ) {
+						for ( int t = 0; t < matTex.size(); t++ ) {
+							QString tp = matTex.at( t ).trimmed();
+							if ( !tp.isEmpty() ) appendMatTexture( tp, bgsmTexLabel( t, matTex.size() ), b );
+						}
+					} else {
+						// no readable material: fall back to the NIF texture set.
+						// rowCount() of an invalid index returns the ROOT child count,
+						// so guard against a shader that has no Texture Set at all.
+						int setNum = nif->getLink( shader, "Texture Set" );
+						QModelIndex set = nif->getBlockIndex( setNum );
+						QModelIndex array = nif->getIndex( set, "Textures" );
+						if ( array.isValid() )
+							for ( int t = 0; t < nif->rowCount( array ); t++ ) if ( !nif->resolveString( nif->index( t, 0, array ) ).isEmpty() )
+								appendRow( nif->index( t, 0, array ), slotName( t ), setNum, false );
+					}
+				} else {
+					static const char * fields[] = { "Source Texture", "Greyscale Texture", "Env Map Texture", "Normal Texture", "Env Mask Texture" };
+					static const char * names[] = { "Diffuse", "Greyscale", "Environment", "Normal", "Environment Mask" };
+					// The linked BGEM overrides the shader's inline texture fields.
+					QString matPath = tlNormalizeResourcePath( nif->resolveString( shader, "Name" ) );
+					QStringList matTex;
+					if ( matPath.endsWith( ".bgem" ) ) {
+						EffectMaterial mat( matPath, nif, shader );
+						if ( mat.isValid() ) matTex = mat.textures();
+					}
+					if ( !matTex.isEmpty() ) {
+						for ( int t = 0; t < matTex.size(); t++ ) {
+							QString tp = matTex.at( t ).trimmed();
+							if ( !tp.isEmpty() )
+								appendMatTexture( tp, t < 5 ? QObject::tr( names[t] ) : QObject::tr( "Texture %1" ).arg( t + 1 ), b );
+						}
+					} else {
+						for ( int t = 0; t < 5; t++ ) {
+							QModelIndex field = nif->getIndex( shader, fields[t] );
+							if ( field.isValid() && !nif->resolveString( field ).isEmpty() ) appendRow( field, QObject::tr( names[t] ), b, false );
+						}
 					}
 				}
 			}
-			tbl->setRowCount( items.size() );
+			QHash<QString, int> materialUses;
+			for ( const QPersistentModelIndex & item : items ) {
+				QString p = tlNormalizeResourcePath( nif->resolveString( QModelIndex( item ) ) );
+				if ( p.endsWith( ".bgsm" ) || p.endsWith( ".bgem" ) ) materialUses[p]++;
+			}
+			QHash<int, QTreeWidgetItem *> matItems;	// group (shader block) -> material row
 			for ( int i = 0; i < items.size(); i++ ) {
-				QTableWidgetItem * c0 = new QTableWidgetItem( owners.at( i ) );
-				c0->setFlags( c0->flags() & ~Qt::ItemIsEditable );
-				c0->setData( Qt::UserRole, ownerNums.at( i ) );	// owning NiAVObject
-				c0->setData( Qt::UserRole + 2, owners.at( i ) );	// base label for the fold indicator
-				tbl->setItem( i, 0, c0 );
-				QTableWidgetItem * c1 = new QTableWidgetItem( labels.at( i ) );
-				c1->setFlags( c1->flags() & ~Qt::ItemIsEditable );
-				c1->setData( Qt::UserRole, i );	// stable back-reference after sorting
-				c1->setData( Qt::UserRole + 1, blockNums.at( i ) );	// containing block
-				tbl->setItem( i, 1, c1 );
-				QString path = nif->resolveString( QModelIndex( items.at( i ) ) );
-				QTableWidgetItem * c2 = new QTableWidgetItem( path );
+				int source = i;
+				int group = groupNums.at( source );
+				bool isMaterial = parentRows.at( source );
+				// material-file texture rows carry an explicit path (no NIF field)
+				QString path = !explicitPaths.at( source ).isEmpty()
+					? explicitPaths.at( source )
+					: nif->resolveString( QModelIndex( items.at( source ) ) );
 				// paths missing from the loaded archives show in red
 				bool missing = !path.isEmpty() && tlFindResource( nif, path ).isEmpty();
-				c2->setData( Qt::UserRole, missing );
+				QStringList badges;
+				if ( missing ) badges << QObject::tr( "MISSING" );
+				QString normalized = tlNormalizeResourcePath( path );
+				QModelIndex containing = nif->getBlockIndex( blockNums.at( source ) );
+				QModelIndex shader = tlShaderBlock( nif, containing );
+				if ( shader.isValid() && ( normalized.endsWith( ".bgsm" ) || normalized.endsWith( ".bgem" ) )
+					&& !tlMaterialIssues( nif, shader ).isEmpty() ) badges << QObject::tr( "OUT OF SYNC" );
+				if ( ( normalized.endsWith( ".bgsm" ) || normalized.endsWith( ".bgem" ) ) && materialUses.value( normalized ) > 1 )
+					badges << QObject::tr( "SHARED ×%1" ).arg( materialUses.value( normalized ) );
+				if ( nif->itemName( containing ) == QLatin1String( "BSShaderTextureSet" ) ) {
+					for ( int s = 0; s < nif->getBlockCount(); s++ ) {
+						QModelIndex candidate = nif->getBlockIndex( s );
+						if ( nif->blockInherits( candidate, "BSLightingShaderProperty" )
+							&& nif->getLink( candidate, "Texture Set" ) == blockNums.at( source ) ) {
+							for ( const QString & issue : tlMaterialIssues( nif, candidate ) )
+								if ( issue.contains( "TextureSet" ) ) { badges << QObject::tr( "OVERRIDDEN" ); break; }
+							break;
+						}
+					}
+				}
+
+				QTreeWidgetItem * it;
+				if ( isMaterial ) {
+					// material row: col0 = material file (or type), col1 = owning mesh
+					QString matLabel = ( normalized.endsWith( ".bgsm" ) || normalized.endsWith( ".bgem" ) )
+						? QFileInfo( QString( path ).replace( QChar( '\\' ), QChar( '/' ) ) ).fileName()
+						: labels.at( source );
+					it = new QTreeWidgetItem( tree );
+					it->setText( 0, matLabel );
+					it->setText( 1, owners.at( source ) );	// owning mesh / node name
+					it->setData( 0, Qt::UserRole, group );	// stable hierarchy group
+					it->setData( 0, Qt::UserRole + 3, ownerNums.at( source ) );	// owning NiAVObject
+					QFont f = it->font( 0 ); f.setBold( true ); it->setFont( 0, f );
+					matItems.insert( group, it );
+				} else {
+					// texture row: col0 = slot label (Diffuse/Normal/...), col1 blank
+					QTreeWidgetItem * parent = matItems.value( group, nullptr );
+					it = parent ? new QTreeWidgetItem( parent ) : new QTreeWidgetItem( tree );
+					it->setText( 0, labels.at( source ) );
+				}
+				it->setData( 1, Qt::UserRole, source );	// stable back-reference into rows
+				it->setData( 1, Qt::UserRole + 1, blockNums.at( source ) );	// containing block
+				it->setData( 1, Qt::UserRole + 4, group );	// owning shader/material group
+				it->setText( 2, path );
+				it->setData( 2, Qt::UserRole, missing );
 				if ( missing )
-					c2->setForeground( QColor( 235, 90, 90 ) );
-				tbl->setItem( i, 2, c2 );
+					it->setForeground( 2, QColor( 235, 90, 90 ) );
+				it->setText( 3, badges.join( QStringLiteral( "  " ) ) );
+				if ( badges.contains( QObject::tr( "MISSING" ) ) || badges.contains( QObject::tr( "OUT OF SYNC" ) ) )
+					it->setForeground( 3, QColor( 235, 150, 55 ) );
+				// only the Path column is inline-editable (enforced by the delegate)
+				bool nifBacked = items.at( source ).isValid();
+					it->setData( 1, Qt::UserRole + 5, !nifBacked );	// material-file (preview-only) row
+					if ( nifBacked )
+						it->setFlags( it->flags() | Qt::ItemIsEditable );
 			}
 			*rows = items;
-			tbl->setSortingEnabled( true );
+			int materialCount = matItems.size();
+			int textureCount = items.size() - materialCount;
+			inventoryHeader->setText( materialCount
+				? QObject::tr( "Materials in file  -  %1 material(s), %2 texture(s)" ).arg( materialCount ).arg( textureCount )
+				: QObject::tr( "Materials in file" ) );
+			tree->setSortingEnabled( wasSorting );	// re-sort; materials start folded
 			*applying = false;
 			recolor();
 			applyVis();
@@ -910,21 +1361,18 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 
 		// live apply with path normalization; this replaces the old
 		// apply-on-OK flow whose sorted-row mapping could silently drop edits
-		QObject::connect( tbl, &QTableWidget::itemChanged, panel, [nif, tbl, rows, applying]( QTableWidgetItem * it ) {
-			if ( *applying || !it || it->column() != 2 )
+		QObject::connect( tree, &QTreeWidget::itemChanged, panel, [nif, rows, applying]( QTreeWidgetItem * it, int column ) {
+			if ( *applying || !it || column != 2 )
 				return;
-			QString norm = tlNormalizeResourcePath( it->text() );
+			QString norm = tlNormalizeResourcePath( it->text( 2 ) );
 			*applying = true;
-			if ( norm != it->text() )
-				it->setText( norm );
+			if ( norm != it->text( 2 ) )
+				it->setText( 2, norm );
 			bool missing = !norm.isEmpty() && tlFindResource( nif, norm ).isEmpty();
-			it->setData( Qt::UserRole, missing );
-			it->setForeground( missing ? QBrush( QColor( 235, 90, 90 ) ) : QBrush() );
+			it->setData( 2, Qt::UserRole, missing );
+			it->setForeground( 2, missing ? QBrush( QColor( 235, 90, 90 ) ) : QBrush() );
 			*applying = false;
-			QTableWidgetItem * c0 = tbl->item( it->row(), 1 );	// field column
-			if ( !c0 )
-				return;
-			int i = c0->data( Qt::UserRole ).toInt();
+			int i = it->data( 1, Qt::UserRole ).toInt();
 			if ( i < 0 || i >= rows->size() )
 				return;
 			QModelIndex idx( rows->at( i ) );
@@ -935,78 +1383,68 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			} );
 		} );
 
-		// selecting a row jumps to the node using the path and previews textures;
-		// material files list the .dds paths they reference
-		QObject::connect( tbl, &QTableWidget::currentCellChanged, panel,
-			[nif, tbl, rows, applying, mw, prevScroll]( int r, int col, int, int ) {
-			if ( *applying || r < 0 )
+		// clicking a column reveals the matching block: Material -> containing
+		// shader/texture-set block, Mesh -> owning node, Path -> the string field
+		QObject::connect( tree, &QTreeWidget::itemClicked, panel, [nif, rows, mw]( QTreeWidgetItem * it, int col ) {
+			if ( !it || !mw )
 				return;
-			QTableWidgetItem * c0 = tbl->item( r, 0 );	// owner
-			QTableWidgetItem * c1 = tbl->item( r, 1 );	// material/field
-			QTableWidgetItem * c2 = tbl->item( r, 2 );	// path
-			if ( c0 && c1 && mw ) {
-				// column-aware navigation: owner -> node, material -> containing
-				// block, path -> the exact string field in Block Details
-				int owner = c0->data( Qt::UserRole ).toInt();
-				int bn = c1->data( Qt::UserRole + 1 ).toInt();
-				int i = c1->data( Qt::UserRole ).toInt();
-				QModelIndex target;
-				if ( col == 0 )
-					target = nif->getBlockIndex( owner >= 0 ? owner : bn );
-				else if ( col == 1 )
-					target = nif->getBlockIndex( bn );
-				else if ( i >= 0 && i < rows->size() )
-					target = QModelIndex( rows->at( i ) );
-				if ( target.isValid() )
-					QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection, Q_ARG( QModelIndex, target ) );
-			}
-			// preview on the right
-			if ( QWidget * old = prevScroll->takeWidget() )
-				old->deleteLater();
-			QString pth = c2 ? c2->text() : QString();
-			bool isMat = pth.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
-			             || pth.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive );
-			if ( pth.endsWith( QLatin1String( ".dds" ), Qt::CaseInsensitive ) ) {
-				try {
-					prevScroll->setWidget( new DDSTextureInfo( nif->getGameResources(), pth, prevScroll ) );
-					return;
-				} catch ( ... ) {
-					// fall through to the placeholder
-				}
-			} else if ( isMat ) {
-				// list the textures the material file references
-				const char * ext = pth.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive ) ? ".bgem" : ".bgsm";
-				std::string fullPath = Game::GameManager::get_full_path( pth, "materials/", ext );
-				QByteArray data;
-				if ( nif->getGameResources().get_file( data, fullPath ) && !data.isEmpty() ) {
-					QStringList texs = tlScanMaterialTextures( data );
-					QLabel * l = new QLabel( QObject::tr( "Textures referenced by\n%1:\n\n%2" )
-						.arg( pth, texs.isEmpty() ? QObject::tr( "(none found)" ) : texs.join( QStringLiteral( "\n" ) ) ), prevScroll );
-					l->setAlignment( Qt::AlignTop | Qt::AlignLeft );
-					l->setWordWrap( true );
-					l->setTextInteractionFlags( Qt::TextSelectableByMouse );
-					l->setMargin( 8 );
-					prevScroll->setWidget( l );
-					return;
+			QTreeWidgetItem * matItem = it->parent() ? it->parent() : it;
+			int owner = matItem->data( 0, Qt::UserRole + 3 ).toInt();
+			int bn = it->data( 1, Qt::UserRole + 1 ).toInt();
+			int i = it->data( 1, Qt::UserRole ).toInt();
+			QModelIndex target;
+			if ( col == 0 )
+				target = nif->getBlockIndex( bn );
+			else if ( col == 1 )
+				target = nif->getBlockIndex( owner >= 0 ? owner : bn );
+			else if ( i >= 0 && i < rows->size() )
+				target = QModelIndex( rows->at( i ) );
+			if ( target.isValid() )
+				QMetaObject::invokeMethod( mw, "select", Qt::QueuedConnection, Q_ARG( QModelIndex, target ) );
+		} );
+
+		// selecting a texture row previews it directly; selecting a material row
+		// previews its first (diffuse) texture.  Updates in place whether the
+		// preview is nested or detached.
+		QObject::connect( tree, &QTreeWidget::currentItemChanged, panel,
+			[showTexture, nif]( QTreeWidgetItem * cur, QTreeWidgetItem * ) {
+			if ( !cur ) { showTexture( QString() ); return; }
+			QString pth = cur->text( 2 );
+			if ( !pth.endsWith( QLatin1String( ".dds" ), Qt::CaseInsensitive ) ) {
+				if ( cur->childCount() > 0 ) {
+					pth = cur->child( 0 )->text( 2 );	// material -> its first texture child
+				} else if ( pth.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
+						 || pth.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive ) ) {
+					// A BGSM/BGEM-driven material can have no NIF BSShaderTextureSet
+					// (its textures live inside the material file). Read the material
+					// file's own textures so its diffuse still previews.
+					QModelIndex shader = nif->getBlockIndex( cur->data( 1, Qt::UserRole + 1 ).toInt() );
+					QStringList tex;
+					if ( shader.isValid() ) {
+						if ( pth.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive ) ) {
+							EffectMaterial mat( pth, nif, shader );
+							if ( mat.isValid() ) tex = mat.textures();
+						} else {
+							ShaderMaterial mat( pth, nif, shader );
+							if ( mat.isValid() ) tex = mat.textures();
+						}
+					}
+					pth.clear();
+					for ( const QString & t : tex )
+						if ( t.endsWith( QLatin1String( ".dds" ), Qt::CaseInsensitive ) ) { pth = t; break; }
 				}
 			}
-			QLabel * l = new QLabel( pth.isEmpty() ? QObject::tr( "Select a texture row for a preview" )
-				: ( isMat ? QObject::tr( "Material not found:\n%1" ).arg( pth )
-					: QObject::tr( "Texture not found:\n%1" ).arg( pth ) ), prevScroll );
-			l->setAlignment( Qt::AlignCenter );
-			l->setWordWrap( true );
-			prevScroll->setWidget( l );
+			showTexture( pth.endsWith( QLatin1String( ".dds" ), Qt::CaseInsensitive ) ? pth : QString() );
 		} );
 
 		// archive browser (the "Select Material" / texture picker) for the row
-		auto browseRow = [nif, tbl]() {
-			int r = tbl->currentRow();
-			if ( r < 0 )
+		auto browseRow = [nif, tree]() {
+			QTreeWidgetItem * it = tree->currentItem();
+			if ( !it )
 				return;
-			QTableWidgetItem * c2 = tbl->item( r, 2 );
-			if ( !c2 )
-				return;
-			QString cur = c2->text();
+			if ( it->data( 1, Qt::UserRole + 5 ).toBool() )
+					return;	// material-file texture row: defined by the BGSM/BGEM, not editable here
+				QString cur = it->text( 2 );
 			bool isMat = cur.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
 			             || cur.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive );
 			std::set<std::string_view> files;
@@ -1017,55 +1455,68 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			if ( browser.exec() == QDialog::Accepted ) {
 				const std::string_view * s = browser.getItemSelected();
 				if ( s && !s->empty() )
-					c2->setText( QString::fromUtf8( s->data(), qsizetype( s->length() ) ) );
+					it->setText( 2, QString::fromUtf8( s->data(), qsizetype( s->length() ) ) );
 			}
 		};
 		QObject::connect( btnBrowse, &QPushButton::clicked, panel, browseRow );
-		QObject::connect( tbl, &QTableWidget::cellDoubleClicked, panel,
-			[tbl, browseRow, collapsed, applyVis]( int r, int col ) {
-			if ( col == 1 ) {
-				browseRow();	// double-click Field opens the archive browser
-			} else if ( col == 0 ) {
-				// double-click Owner folds/unfolds that node's rows
-				QTableWidgetItem * c0 = tbl->item( r, 0 );
-				if ( !c0 )
-					return;
-				int owner = c0->data( Qt::UserRole ).toInt();
-				if ( collapsed->contains( owner ) )
-					collapsed->remove( owner );
-				else
-					collapsed->insert( owner );
-				applyVis();
-			}
+		// double-clicking a texture (a leaf) opens the archive browser; a material
+		// with textures instead toggles its children via the native expand arrow
+		QObject::connect( tree, &QTreeWidget::itemDoubleClicked, panel,
+			[browseRow]( QTreeWidgetItem * it, int ) {
+			if ( it && it->childCount() == 0 )
+				browseRow();
 		} );
 
-		QObject::connect( btnReplace, &QPushButton::clicked, panel, [tbl, edFind, edRepl, btnReplace]() {
+		// Find & Replace lives in its own small dialog (Notepad++ style) opened
+		// from the "Replace..." button, keeping the toolbar row uncluttered.
+		QDialog * replaceDlg = new QDialog( panel );
+		replaceDlg->setWindowTitle( QObject::tr( "Replace in Paths" ) );
+		QGridLayout * rg = new QGridLayout( replaceDlg );
+		QLineEdit * edFind = new QLineEdit( replaceDlg );
+		QLineEdit * edRepl = new QLineEdit( replaceDlg );
+		edFind->setMinimumWidth( 240 );
+		QCheckBox * cbCase = new QCheckBox( QObject::tr( "Match case" ), replaceDlg );
+		QPushButton * btnReplaceAll = new QPushButton( QObject::tr( "Replace All" ), replaceDlg );
+		QPushButton * btnCloseDlg = new QPushButton( QObject::tr( "Close" ), replaceDlg );
+		QLabel * replaceStatus = new QLabel( replaceDlg );
+		rg->addWidget( new QLabel( QObject::tr( "Find what:" ), replaceDlg ), 0, 0 );
+		rg->addWidget( edFind, 0, 1 );
+		rg->addWidget( btnReplaceAll, 0, 2 );
+		rg->addWidget( new QLabel( QObject::tr( "Replace with:" ), replaceDlg ), 1, 0 );
+		rg->addWidget( edRepl, 1, 1 );
+		rg->addWidget( btnCloseDlg, 1, 2 );
+		rg->addWidget( cbCase, 2, 1 );
+		rg->addWidget( replaceStatus, 3, 0, 1, 3 );
+		QObject::connect( btnReplaceDlg, &QPushButton::clicked, replaceDlg, [replaceDlg, replaceStatus]() {
+			replaceStatus->clear();
+			replaceDlg->show(); replaceDlg->raise(); replaceDlg->activateWindow();
+		} );
+		QObject::connect( btnCloseDlg, &QPushButton::clicked, replaceDlg, &QDialog::hide );
+		QObject::connect( btnReplaceAll, &QPushButton::clicked, replaceDlg, [tree, edFind, edRepl, cbCase, replaceStatus]() {
 			QString f = edFind->text();
 			if ( f.isEmpty() )
 				return;
 			QString rep = edRepl->text();
+			Qt::CaseSensitivity cs = cbCase->isChecked() ? Qt::CaseSensitive : Qt::CaseInsensitive;
 			int n = 0;
-			for ( int i = 0; i < tbl->rowCount(); i++ ) {
-				QTableWidgetItem * it = tbl->item( i, 2 );
-				if ( it && it->text().contains( f, Qt::CaseInsensitive ) ) {
-					it->setText( QString( it->text() ).replace( f, rep, Qt::CaseInsensitive ) );
-					n++;
+			for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+				QTreeWidgetItem * m = tree->topLevelItem( i );
+				for ( int j = -1; j < m->childCount(); j++ ) {
+					QTreeWidgetItem * it = ( j < 0 ) ? m : m->child( j );
+					if ( it->text( 2 ).contains( f, cs ) ) {
+						it->setText( 2, QString( it->text( 2 ) ).replace( f, rep, cs ) );
+						n++;
+					}
 				}
 			}
-			btnReplace->setText( QObject::tr( "Replace All (%1 changed)" ).arg( n ) );
+			replaceStatus->setText( QObject::tr( "%1 path(s) changed" ).arg( n ) );
 		} );
 
 		// live row filter (combined with the fold state)
 		QObject::connect( edFilter, &QLineEdit::textChanged, panel, applyVis );
 
-		// group rows by their owning node
-		QObject::connect( cbGroup, &QCheckBox::toggled, panel, [tbl, applyVis]( bool on ) {
-			tbl->sortItems( on ? 0 : 1 );
-			applyVis();
-		} );
-
 		// bulk folder retarget: swap a path prefix everywhere it matches
-		QObject::connect( btnRetarget, &QPushButton::clicked, panel, [tbl, panel]() {
+		QObject::connect( btnRetarget, &QPushButton::clicked, panel, [tree, panel]() {
 			bool ok = false;
 			QString from = QInputDialog::getText( panel, QObject::tr( "Retarget folder" ),
 				QObject::tr( "Replace this folder prefix:" ), QLineEdit::Normal, QString(), &ok );
@@ -1078,53 +1529,124 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			from = tlNormalizeResourcePath( from );
 			to = tlNormalizeResourcePath( to );
 			int n = 0;
-			for ( int r = 0; r < tbl->rowCount(); r++ ) {
-				QTableWidgetItem * it = tbl->item( r, 2 );
-				if ( it && it->text().startsWith( from, Qt::CaseInsensitive ) ) {
-					it->setText( to + it->text().mid( from.length() ) );
-					n++;
+			for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+				QTreeWidgetItem * m = tree->topLevelItem( i );
+				for ( int j = -1; j < m->childCount(); j++ ) {
+					QTreeWidgetItem * it = ( j < 0 ) ? m : m->child( j );
+					if ( it->text( 2 ).startsWith( from, Qt::CaseInsensitive ) ) {
+						it->setText( 2, to + it->text( 2 ).mid( from.length() ) );
+						n++;
+					}
 				}
 			}
 			Message::info( panel, QObject::tr( "Retargeted %1 path(s)." ).arg( n ) );
 		} );
 
+		QObject::connect( btnCheck, &QPushButton::clicked, panel, [nif, panel]() {
+			QStringList report;
+			int shaderCount = 0;
+			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+				QModelIndex shader = tlShaderBlock( nif, nif->getBlockIndex( b ) );
+				if ( !shader.isValid() ) continue;
+				shaderCount++;
+				QStringList issues = tlMaterialIssues( nif, shader );
+				if ( !issues.isEmpty() ) report << QObject::tr( "Block %1 — %2\n  • %3" )
+					.arg( b ).arg( tlShaderMaterialPath( nif, shader ), issues.join( QStringLiteral( "\n  • " ) ) );
+			}
+			QMessageBox::information( panel, QObject::tr( "Material Check" ), report.isEmpty()
+				? QObject::tr( "Checked %1 shader properties. No problems were found." ).arg( shaderCount )
+				: QObject::tr( "%1 shader properties need attention:\n\n%2" ).arg( report.size() ).arg( report.join( QStringLiteral( "\n\n" ) ) ) );
+		} );
+
+		QObject::connect( btnDuplicates, &QPushButton::clicked, panel, [nif, panel, rebuild]() {
+			QHash<QString, QVector<int>> groups;
+			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+				QModelIndex shader = tlShaderBlock( nif, nif->getBlockIndex( b ) );
+				if ( !shader.isValid() ) continue;
+				QStringList textureSignature;
+				if ( nif->blockInherits( shader, "BSLightingShaderProperty" ) ) {
+					QModelIndex set = nif->getBlockIndex( nif->getLink( shader, "Texture Set" ) );
+					QModelIndex a = nif->getIndex( set, "Textures" );
+					if ( a.isValid() )
+						for ( int i = 0; i < nif->rowCount( a ); i++ ) textureSignature << tlNormalizeResourcePath( nif->resolveString( nif->index( i, 0, a ) ) );
+				} else {
+					static const char * fields[] = { "Source Texture", "Greyscale Texture", "Env Map Texture", "Normal Texture", "Env Mask Texture" };
+					for ( const char * field : fields ) textureSignature << tlNormalizeResourcePath( nif->resolveString( shader, field ) );
+				}
+				QString sig = QStringLiteral( "%1|%2|%3|%4|%5" ).arg( nif->itemName( shader ), tlShaderMaterialPath( nif, shader ),
+					QString::number( nif->get<quint32>( shader, "Shader Flags 1" ), 16 ),
+					QString::number( nif->get<quint32>( shader, "Shader Flags 2" ), 16 ), textureSignature.join( QChar( '|' ) ) );
+				groups[sig].append( b );
+			}
+			QStringList lines; QVector<QVector<int>> duplicates;
+			for ( auto it = groups.cbegin(); it != groups.cend(); ++it ) if ( it.value().size() > 1 ) {
+				duplicates.append( it.value() );
+				QStringList nums; for ( int b : it.value() ) nums << QString::number( b );
+				lines << QObject::tr( "Blocks %1" ).arg( nums.join( QStringLiteral( ", " ) ) );
+			}
+			if ( duplicates.isEmpty() ) { QMessageBox::information( panel, QObject::tr( "Duplicate Materials" ), QObject::tr( "No identical shader setups were found." ) ); return; }
+			QMessageBox box( QMessageBox::Information, QObject::tr( "Duplicate Materials" ),
+				QObject::tr( "Identical shader setups:\n\n%1\n\nSharing them reduces redundant shader blocks. The unused copies are left orphaned for normal cleanup." ).arg( lines.join( QChar( '\n' ) ) ),
+				QMessageBox::Cancel, panel );
+			QPushButton * consolidate = box.addButton( QObject::tr( "Share Identical Setups" ), QMessageBox::AcceptRole );
+			box.exec(); if ( box.clickedButton() != consolidate ) return;
+			nifSnapshotOp( nif, QObject::tr( "Consolidate duplicate materials" ), [&]() {
+				for ( const QVector<int> & group : duplicates ) {
+					int keep = group.first();
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						QModelIndex owner = nif->getBlockIndex( b );
+						QModelIndex field = nif->getIndex( owner, "Shader Property" );
+						if ( field.isValid() && group.mid( 1 ).contains( nif->getLink( field ) )) nif->setLink( field, keep );
+					}
+				}
+			} );
+			rebuild();
+		} );
+
 		// right-click menu: contextual reveal (depends on the clicked column),
 		// browse, clear, copy/paste, fold, open externally, texture sets
-		QObject::connect( tbl, &QTableWidget::customContextMenuRequested, panel,
-			[nif, tbl, rows, mw, browseRow, rebuild, collapsed, applyVis]( const QPoint & pos ) {
-			QTableWidgetItem * hit = tbl->itemAt( pos );
+		QObject::connect( tree, &QTreeWidget::customContextMenuRequested, panel,
+			[nif, tree, rows, mw, ogl, browseRow, rebuild]( const QPoint & pos ) {
+			QTreeWidgetItem * hit = tree->itemAt( pos );
 			if ( !hit )
 				return;
-			int r = hit->row();
-			int hitCol = hit->column();
-			tbl->setCurrentCell( r, 2 );
-			QTableWidgetItem * c0 = tbl->item( r, 0 );	// owner
-			QTableWidgetItem * c1 = tbl->item( r, 1 );	// field
-			QTableWidgetItem * c2 = tbl->item( r, 2 );	// path
-			if ( !c0 || !c1 || !c2 )
-				return;
-			int i = c1->data( Qt::UserRole ).toInt();
-			int bn = c1->data( Qt::UserRole + 1 ).toInt();
-			int owner = c0->data( Qt::UserRole ).toInt();
+			int hitCol = tree->columnAt( pos.x() );
+			if ( hitCol < 0 )
+				hitCol = 2;
+			tree->setCurrentItem( hit );
+			QTreeWidgetItem * matItem = hit->parent() ? hit->parent() : hit;	// owning material row
+			int i = hit->data( 1, Qt::UserRole ).toInt();
+			int bn = hit->data( 1, Qt::UserRole + 1 ).toInt();
+			int owner = matItem->data( 0, Qt::UserRole + 3 ).toInt();
 			bool isTexSet = ( nif->itemName( nif->getBlockIndex( bn ) ) == QLatin1String( "BSShaderTextureSet" ) );
+			QModelIndex shader = tlShaderBlock( nif, nif->getBlockIndex( bn ) );
+			if ( !shader.isValid() && isTexSet ) for ( int s = 0; s < nif->getBlockCount(); s++ ) {
+				QModelIndex candidate = nif->getBlockIndex( s );
+				if ( nif->blockInherits( candidate, "BSLightingShaderProperty" ) && nif->getLink( candidate, "Texture Set" ) == bn ) { shader = candidate; break; }
+			}
 
-			QMenu menu( tbl );
+			QMenu menu( tree );
 			// the first entry depends on which column was right-clicked
 			QAction * aReveal;
 			if ( hitCol == 0 )
-				aReveal = menu.addAction( QObject::tr( "Jump to Owner Node" ) );
+				aReveal = menu.addAction( QObject::tr( "Reveal Material Block" ) );
 			else if ( hitCol == 1 )
-				aReveal = menu.addAction( QObject::tr( "Reveal Containing Block" ) );
+				aReveal = menu.addAction( QObject::tr( "Jump to Owning Mesh" ) );
 			else
 				aReveal = menu.addAction( QObject::tr( "Reveal Path Field in Block Details" ) );
 			menu.addSeparator();
 			QAction * aBrowse = menu.addAction( QObject::tr( "Browse Archives..." ) );
 			QAction * aOpenExt = menu.addAction( QObject::tr( "Open in Default Application" ) );
-			aOpenExt->setEnabled( !c2->text().isEmpty() );
-			bool rowIsMat = c2->text().endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
-			                || c2->text().endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive );
+			aOpenExt->setEnabled( !hit->text( 2 ).isEmpty() );
+			bool rowIsMat = hit->text( 2 ).endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
+			                || hit->text( 2 ).endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive );
 			QAction * aEditMat = menu.addAction( QObject::tr( "Edit Material..." ) );
 			aEditMat->setEnabled( rowIsMat );
+			QAction * aCheckMat = menu.addAction( QObject::tr( "Check Material" ) );
+			QAction * aCompareMat = menu.addAction( QObject::tr( "Compare with BGSM/BGEM" ) );
+			QAction * aSyncSafe = menu.addAction( QObject::tr( "Sync from BGSM/BGEM (Safe)" ) );
+			QAction * aSyncFull = menu.addAction( QObject::tr( "Sync from BGSM/BGEM (Full)" ) );
+			for ( QAction * a : { aCheckMat, aCompareMat, aSyncSafe, aSyncFull } ) a->setEnabled( shader.isValid() );
 			QAction * aNewMat = menu.addAction( QObject::tr( "New Material (.bgsm)..." ) );
 			QAction * aNewEff = menu.addAction( QObject::tr( "New Effect Material (.bgem)..." ) );
 			QAction * aAttach = menu.addAction( QObject::tr( "Attach Material to This Field..." ) );
@@ -1133,25 +1655,34 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			QAction * aCopy = menu.addAction( QObject::tr( "Copy Path" ) );
 			QAction * aPaste = menu.addAction( QObject::tr( "Paste Path" ) );
 			aPaste->setEnabled( !QApplication::clipboard()->text().isEmpty() );
+			QAction * aCopySetup = menu.addAction( QObject::tr( "Copy Material Setup" ) );
+			QAction * aPasteSetup = menu.addAction( QObject::tr( "Paste Material Setup" ) );
+			aCopySetup->setEnabled( shader.isValid() );
+			aPasteSetup->setEnabled( shader.isValid() && tlCopiedMaterialSetup.valid
+				&& tlCopiedMaterialSetup.effect == nif->blockInherits( shader, "BSEffectShaderProperty" ) );
+			QAction * aSelectUsers = menu.addAction( QObject::tr( "Select All Geometry Using This Material" ) );
+			QAction * aAssignSelected = menu.addAction( QObject::tr( "Assign to Selected Shapes" ) );
+			aSelectUsers->setEnabled( shader.isValid() && ogl );
+			aAssignSelected->setEnabled( shader.isValid() && ogl && !ogl->objSelection.isEmpty() );
 			menu.addSeparator();
-			QAction * aFold = menu.addAction( collapsed->contains( owner )
-				? QObject::tr( "Expand This Node's Rows" ) : QObject::tr( "Fold This Node's Rows" ) );
-			aFold->setEnabled( owner >= 0 );
+			QAction * aFold = menu.addAction( matItem->isExpanded()
+				? QObject::tr( "Fold This Material's Textures" ) : QObject::tr( "Expand This Material's Textures" ) );
+			aFold->setEnabled( matItem->childCount() > 0 );
 			menu.addSeparator();
 			QAction * aCopySet = menu.addAction( QObject::tr( "Copy Texture Set" ) );
 			aCopySet->setEnabled( isTexSet );
 			QAction * aPasteSet = menu.addAction( QObject::tr( "Paste Texture Set" ) );
 			aPasteSet->setEnabled( isTexSet && !tlCopiedTexSet.isEmpty() );
 
-			QAction * sel = menu.exec( tbl->viewport()->mapToGlobal( pos ) );
+			QAction * sel = menu.exec( tree->viewport()->mapToGlobal( pos ) );
 			if ( !sel )
 				return;
 			if ( sel == aReveal && mw ) {
 				QModelIndex target;
 				if ( hitCol == 0 )
-					target = nif->getBlockIndex( owner >= 0 ? owner : bn );
-				else if ( hitCol == 1 )
 					target = nif->getBlockIndex( bn );
+				else if ( hitCol == 1 )
+					target = nif->getBlockIndex( owner >= 0 ? owner : bn );
 				else if ( i >= 0 && i < rows->size() )
 					target = QModelIndex( rows->at( i ) );
 				if ( target.isValid() )
@@ -1160,7 +1691,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 				browseRow();
 			} else if ( sel == aOpenExt ) {
 				// extract from the archives to temp and open with the default app
-				QString pth = c2->text();
+				QString pth = hit->text( 2 );
 				QString low = pth.toLower();
 				const char * fld = ( low.endsWith( QLatin1String( ".bgsm" ) ) || low.endsWith( QLatin1String( ".bgem" ) ) )
 					? "materials/" : "textures/";
@@ -1179,46 +1710,99 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 						QDesktopServices::openUrl( QUrl::fromLocalFile( tmp ) );
 					}
 				} else {
-					Message::info( tbl, QObject::tr( "Could not read '%1' from the loaded resources." ).arg( pth ) );
+					Message::info( tree, QObject::tr( "Could not read '%1' from the loaded resources." ).arg( pth ) );
 				}
 			} else if ( sel == aEditMat ) {
-				tlOpenMaterialEditor( nif, tbl, c2->text() );
+				tlOpenMaterialEditor( nif, tree, hit->text( 2 ) );
+			} else if ( sel == aCheckMat ) {
+				QStringList issues = tlMaterialIssues( nif, shader );
+				QMessageBox::information( tree, QObject::tr( "Check Material" ), issues.isEmpty()
+					? QObject::tr( "No material problems were found." ) : QObject::tr( "• %1" ).arg( issues.join( QStringLiteral( "\n• " ) ) ) );
+			} else if ( sel == aCompareMat ) {
+				QMessageBox::information( tree, QObject::tr( "Material Comparison" ), tlMaterialComparison( nif, shader ) );
+			} else if ( sel == aSyncSafe || sel == aSyncFull ) {
+				QString error; bool ok = false;
+				nifSnapshotOp( nif, QObject::tr( "Sync material" ), [&]() { ok = tlSyncShaderFromMaterial( nif, shader, sel == aSyncFull, &error ); } );
+				if ( !ok ) QMessageBox::warning( tree, QObject::tr( "Sync Material" ), error );
+				rebuild();
 			} else if ( sel == aNewMat ) {
-				tlOpenMaterialEditor( nif, tbl, QString(), false );
+				tlOpenMaterialEditor( nif, tree, QString(), false );
 			} else if ( sel == aNewEff ) {
-				tlOpenMaterialEditor( nif, tbl, QString(), true );
+				tlOpenMaterialEditor( nif, tree, QString(), true );
 			} else if ( sel == aAttach ) {
 				// pick a .bgsm/.bgem from the archives and assign it to this field
 				std::set<std::string_view> files;
 				nif->listResourceFiles( files, &tlMatFileFilter );
-				std::string prv( QString( c2->text() ).replace( QChar( '\\' ), QChar( '/' ) ).toLower().toStdString() );
+				std::string prv( QString( hit->text( 2 ) ).replace( QChar( '\\' ), QChar( '/' ) ).toLower().toStdString() );
 				FileBrowserWidget browser( 720, 540, "Select Material", files, prv, &( nif->getGameResources() ) );
 				if ( browser.exec() == QDialog::Accepted ) {
 					const std::string_view * s = browser.getItemSelected();
 					if ( s && !s->empty() )
-						c2->setText( QString::fromUtf8( s->data(), qsizetype( s->length() ) ) );
+						hit->setText( 2,QString::fromUtf8( s->data(), qsizetype( s->length() ) ) );
 				}
 			} else if ( sel == aClear ) {
-				c2->setText( QString() );
+				hit->setText( 2,QString() );
 			} else if ( sel == aCopy ) {
-				QApplication::clipboard()->setText( c2->text() );
+				QApplication::clipboard()->setText( hit->text( 2 ) );
 			} else if ( sel == aPaste ) {
-				c2->setText( QApplication::clipboard()->text() );
+				hit->setText( 2,QApplication::clipboard()->text() );
+			} else if ( sel == aCopySetup ) {
+				tlCopiedMaterialSetup = TlCopiedMaterialSetup();
+				tlCopiedMaterialSetup.valid = true;
+				tlCopiedMaterialSetup.effect = nif->blockInherits( shader, "BSEffectShaderProperty" );
+				tlCopiedMaterialSetup.path = tlShaderMaterialPath( nif, shader );
+				tlCopiedMaterialSetup.flags1 = nif->get<quint32>( shader, "Shader Flags 1" );
+				tlCopiedMaterialSetup.flags2 = nif->get<quint32>( shader, "Shader Flags 2" );
+				if ( !tlCopiedMaterialSetup.effect ) {
+					QModelIndex a = nif->getIndex( nif->getBlockIndex( nif->getLink( shader, "Texture Set" ) ), "Textures" );
+					if ( a.isValid() )
+						for ( int t = 0; t < nif->rowCount( a ); t++ ) tlCopiedMaterialSetup.textures << nif->resolveString( nif->index( t, 0, a ) );
+				} else {
+					static const char * fields[] = { "Source Texture", "Greyscale Texture", "Env Map Texture", "Normal Texture", "Env Mask Texture" };
+					for ( const char * field : fields ) tlCopiedMaterialSetup.textures << nif->resolveString( shader, field );
+				}
+			} else if ( sel == aPasteSetup ) {
+				nifSnapshotOp( nif, QObject::tr( "Paste material setup" ), [&]() {
+					nif->assignString( shader, "Name", tlCopiedMaterialSetup.path );
+					tlSetIfPresent( nif, shader, "Shader Flags 1", tlCopiedMaterialSetup.flags1 );
+					tlSetIfPresent( nif, shader, "Shader Flags 2", tlCopiedMaterialSetup.flags2 );
+					if ( !tlCopiedMaterialSetup.effect ) tlFillShaderTextureSet( nif, shader, tlCopiedMaterialSetup.textures );
+					else {
+						static const char * fields[] = { "Source Texture", "Greyscale Texture", "Env Map Texture", "Normal Texture", "Env Mask Texture" };
+						for ( int t = 0; t < 5 && t < tlCopiedMaterialSetup.textures.size(); t++ )
+							if ( nif->getIndex( shader, fields[t] ).isValid() ) nif->assignString( shader, fields[t], tlCopiedMaterialSetup.textures.at( t ) );
+					}
+				} );
+				rebuild();
+			} else if ( sel == aSelectUsers ) {
+				QSet<int> users; QString path = tlShaderMaterialPath( nif, shader );
+				for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+					QModelIndex shape = nif->getBlockIndex( b ); int linked = nif->getLink( shape, "Shader Property" );
+					QModelIndex linkedShader = nif->getBlockIndex( linked );
+					if ( linkedShader.isValid() && tlShaderMaterialPath( nif, linkedShader ) == path ) users.insert( b );
+				}
+				ogl->setObjectSelection( users, users.isEmpty() ? -1 : *users.constBegin() );
+			} else if ( sel == aAssignSelected ) {
+				int shaderNum = nif->getBlockNumber( shader );
+				nifSnapshotOp( nif, QObject::tr( "Assign material to selected shapes" ), [&]() {
+					for ( int b : ogl->objSelection ) {
+						QModelIndex shape = nif->getBlockIndex( b );
+						if ( nif->getIndex( shape, "Shader Property" ).isValid() ) nif->setLink( shape, "Shader Property", shaderNum );
+					}
+				} );
+				rebuild();
 			} else if ( sel == aFold ) {
-				if ( collapsed->contains( owner ) )
-					collapsed->remove( owner );
-				else
-					collapsed->insert( owner );
-				applyVis();
+				matItem->setExpanded( !matItem->isExpanded() );
 			} else if ( sel == aCopySet ) {
 				tlCopiedTexSet.clear();
 				QModelIndex iTex = nif->getIndex( nif->getBlockIndex( bn ), "Textures" );
-				for ( int t = 0; t < nif->rowCount( iTex ); t++ )
-					tlCopiedTexSet.append( nif->resolveString( nif->index( t, 0, iTex ) ) );
+				if ( iTex.isValid() )
+					for ( int t = 0; t < nif->rowCount( iTex ); t++ )
+						tlCopiedTexSet.append( nif->resolveString( nif->index( t, 0, iTex ) ) );
 			} else if ( sel == aPasteSet ) {
 				QModelIndex iTex = nif->getIndex( nif->getBlockIndex( bn ), "Textures" );
 				nifSnapshotOp( nif, QObject::tr( "Paste texture set" ), [&]() {
-					int n = std::min( (int) tlCopiedTexSet.size(), nif->rowCount( iTex ) );
+					int n = iTex.isValid() ? std::min( (int) tlCopiedTexSet.size(), nif->rowCount( iTex ) ) : 0;
 					for ( int t = 0; t < n; t++ )
 						nif->assignString( nif->index( t, 0, iTex ), tlCopiedTexSet.at( t ) );
 				} );
@@ -1244,6 +1828,9 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			if ( vis )
 				rebuild();
 		} );
+		QObject::connect( dock, &QDockWidget::visibilityChanged, previewWindow, [previewWindow]( bool vis ) {
+			if ( !vis ) previewWindow->hide();
+		} );
 
 		// selection sync: block-list / viewport selection colours matching rows
 		if ( ogl ) {
@@ -1254,16 +1841,184 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		}
 
 		dock->setWidget( panel );
-		if ( mw )
+		if ( mw ) {
 			mw->addDockWidget( Qt::RightDockWidgetArea, dock );
-		// starts as its own small floating window; drag onto the main window to dock
-		dock->setFloating( true );
-		dock->resize( 1000, 560 );
+		}
+		// The very first time the panel is opened, size it to a comfortable
+		// default width (matching the Material Manager screenshot). After that
+		// the user's saved layout / drags win, so we never fight them.
+		QObject::connect( dock, &QDockWidget::visibilityChanged, dock, [dock, mw]( bool vis ) {
+			if ( !vis )
+				return;
+			QSettings settings;
+			if ( settings.value( QStringLiteral( "MatTexManager/InitialWidthSet" ), false ).toBool() )
+				return;
+			settings.setValue( QStringLiteral( "MatTexManager/InitialWidthSet" ), true );
+			if ( mw )
+				mw->resizeDocks( { dock }, { 690 }, Qt::Horizontal );
+		} );
+		previewWindow->resize( 760, 680 );
+		previewWindow->hide();
+		// docks on the right beside the Collision Manager rather than floating wide
+		dock->setFloating( false );
 		dock->hide();
 
 		return dock;
 	}
 }
+
+class spFillShaderTextureSet final : public Spell
+{
+public:
+	QString name() const override final { return tr( "Fill BSShaderTextureSet from BGSM" ); }
+	QString page() const override final { return tr( "Material" ); }
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex shader = tlShaderBlock( nif, index );
+		return shader.isValid() && nif->blockInherits( shader, "BSLightingShaderProperty" )
+			&& tlShaderMaterialPath( nif, shader ).endsWith( ".bgsm" );
+	}
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex shader = tlShaderBlock( nif, index );
+		QString path = tlShaderMaterialPath( nif, shader );
+		ShaderMaterial mat( path, nif, shader );
+		if ( !mat.isValid() ) {
+			QMessageBox::warning( QApplication::activeWindow(), tr( "Fill BSShaderTextureSet" ), tr( "Could not read '%1'." ).arg( path ) );
+			return shader;
+		}
+		nifSnapshotOp( nif, tr( "Fill BSShaderTextureSet" ), [&]() { tlFillShaderTextureSet( nif, shader, mat.textures() ); } );
+		return shader;
+	}
+};
+REGISTER_SPELL( spFillShaderTextureSet )
+
+class spSyncShaderMaterial final : public Spell
+{
+public:
+	QString name() const override final { return tr( "Sync Shader Property from BGSM/BGEM..." ); }
+	QString page() const override final { return tr( "Material" ); }
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return tlShaderBlock( nif, index ).isValid();
+	}
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex shader = tlShaderBlock( nif, index );
+		QMessageBox box( QMessageBox::Question, tr( "Sync Shader Property" ),
+			tr( "Safe Sync updates textures and numeric shader settings.\n\nFull Sync also replaces both shader-flag fields and blend/test settings." ),
+			QMessageBox::Cancel, QApplication::activeWindow() );
+		QPushButton * safe = box.addButton( tr( "Safe Sync" ), QMessageBox::AcceptRole );
+		QPushButton * full = box.addButton( tr( "Full Sync" ), QMessageBox::DestructiveRole );
+		box.setDefaultButton( safe );
+		box.exec();
+		if ( box.clickedButton() != safe && box.clickedButton() != full ) return shader;
+		bool doFull = box.clickedButton() == full;
+		QString error;
+		bool ok = false;
+		nifSnapshotOp( nif, doFull ? tr( "Full material sync" ) : tr( "Safe material sync" ), [&]() {
+			ok = tlSyncShaderFromMaterial( nif, shader, doFull, &error );
+		} );
+		if ( !ok ) QMessageBox::warning( QApplication::activeWindow(), tr( "Sync Shader Property" ), error );
+		return shader;
+	}
+};
+REGISTER_SPELL( spSyncShaderMaterial )
+
+class spCheckMaterial final : public Spell
+{
+public:
+	QString name() const override final { return tr( "Check Material" ); }
+	QString page() const override final { return tr( "Material" ); }
+	bool constant() const override final { return true; }
+	bool checker() const override final { return true; }
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { return tlShaderBlock( nif, index ).isValid(); }
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex shader = tlShaderBlock( nif, index );
+		QStringList issues = tlMaterialIssues( nif, shader );
+		QMessageBox::information( QApplication::activeWindow(), tr( "Check Material" ), issues.isEmpty()
+			? tr( "No material problems were found." ) : tr( "• %1" ).arg( issues.join( QStringLiteral( "\n• " ) ) ) );
+		return shader;
+	}
+};
+REGISTER_SPELL( spCheckMaterial )
+
+class spCompareMaterial final : public Spell
+{
+public:
+	QString name() const override final { return tr( "Compare with BGSM/BGEM" ); }
+	QString page() const override final { return tr( "Material" ); }
+	bool constant() const override final { return true; }
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { return tlShaderBlock( nif, index ).isValid(); }
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex shader = tlShaderBlock( nif, index );
+		QMessageBox::information( QApplication::activeWindow(), tr( "Material Comparison" ), tlMaterialComparison( nif, shader ) );
+		return shader;
+	}
+};
+REGISTER_SPELL( spCompareMaterial )
+
+class spCopyMaterialSetup final : public Spell
+{
+public:
+	QString name() const override final { return tr( "Copy Material Setup" ); }
+	QString page() const override final { return tr( "Material" ); }
+	bool constant() const override final { return true; }
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { return tlShaderBlock( nif, index ).isValid(); }
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex shader = tlShaderBlock( nif, index );
+		tlCopiedMaterialSetup = TlCopiedMaterialSetup();
+		tlCopiedMaterialSetup.valid = true;
+		tlCopiedMaterialSetup.effect = nif->blockInherits( shader, "BSEffectShaderProperty" );
+		tlCopiedMaterialSetup.path = tlShaderMaterialPath( nif, shader );
+		tlCopiedMaterialSetup.flags1 = nif->get<quint32>( shader, "Shader Flags 1" );
+		tlCopiedMaterialSetup.flags2 = nif->get<quint32>( shader, "Shader Flags 2" );
+		if ( !tlCopiedMaterialSetup.effect ) {
+			QModelIndex set = nif->getBlockIndex( nif->getLink( shader, "Texture Set" ) );
+			QModelIndex a = nif->getIndex( set, "Textures" );
+			if ( a.isValid() )
+				for ( int i = 0; i < nif->rowCount( a ); i++ ) tlCopiedMaterialSetup.textures << nif->resolveString( nif->index( i, 0, a ) );
+		} else {
+			static const char * fields[] = { "Source Texture", "Greyscale Texture", "Env Map Texture", "Normal Texture", "Env Mask Texture" };
+			for ( const char * field : fields ) tlCopiedMaterialSetup.textures << nif->resolveString( shader, field );
+		}
+		return shader;
+	}
+};
+REGISTER_SPELL( spCopyMaterialSetup )
+
+class spPasteMaterialSetup final : public Spell
+{
+public:
+	QString name() const override final { return tr( "Paste Material Setup" ); }
+	QString page() const override final { return tr( "Material" ); }
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex shader = tlShaderBlock( nif, index );
+		return tlCopiedMaterialSetup.valid && shader.isValid()
+			&& tlCopiedMaterialSetup.effect == nif->blockInherits( shader, "BSEffectShaderProperty" );
+	}
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex shader = tlShaderBlock( nif, index );
+		nifSnapshotOp( nif, tr( "Paste material setup" ), [&]() {
+			nif->assignString( shader, "Name", tlCopiedMaterialSetup.path );
+			tlSetIfPresent( nif, shader, "Shader Flags 1", tlCopiedMaterialSetup.flags1 );
+			tlSetIfPresent( nif, shader, "Shader Flags 2", tlCopiedMaterialSetup.flags2 );
+			if ( !tlCopiedMaterialSetup.effect ) tlFillShaderTextureSet( nif, shader, tlCopiedMaterialSetup.textures );
+			else {
+				static const char * fields[] = { "Source Texture", "Greyscale Texture", "Env Map Texture", "Normal Texture", "Env Mask Texture" };
+				for ( int i = 0; i < 5 && i < tlCopiedMaterialSetup.textures.size(); i++ )
+					if ( nif->getIndex( shader, fields[i] ).isValid() ) nif->assignString( shader, fields[i], tlCopiedMaterialSetup.textures.at( i ) );
+			}
+		} );
+		return shader;
+	}
+};
+REGISTER_SPELL( spPasteMaterialSetup )
 
 
 //! Propagate a node's name to the object palette and controller-sequence blocks
@@ -1311,7 +2066,7 @@ public:
 	{
 		QModelIndex iBlock = nif ? nif->getBlockIndex( index ) : QModelIndex();
 		return iBlock.isValid() && nif->getIndex( iBlock, "Name" ).isValid()
-		       && nif->blockInherits( iBlock, "NiObjectNET" );
+		       && nif->blockInherits( iBlock, "NiAVObject" );
 	}
 
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
@@ -1322,10 +2077,24 @@ public:
 
 		bool ok = false;
 		QString newName = QInputDialog::getText( nullptr, name(),
-			Spell::tr( "New name (the palette and all controller sequences will be updated to match):" ),
-			QLineEdit::Normal, oldName, &ok );
+			Spell::tr( "New unique scene-object name (palettes and controller sequences will be updated):" ),
+			QLineEdit::Normal, oldName, &ok ).trimmed();
 		if ( !ok || newName == oldName )
 			return index;
+		if ( newName.isEmpty() ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr( "A scene-object name cannot be empty." ) );
+			return index;
+		}
+		for ( int block = 0; block < nif->getBlockCount(); block++ ) {
+			if ( block == nodeNum ) continue;
+			QModelIndex other = nif->getBlockIndex( block );
+			if ( nif->blockInherits( other, "NiAVObject" )
+				&& nif->resolveString( other, "Name" ).compare( newName, Qt::CaseInsensitive ) == 0 ) {
+				QMessageBox::warning( nullptr, name(), Spell::tr(
+					"Another scene object already uses the name '%1'. Choose a unique name." ).arg( newName ) );
+				return index;
+			}
+		}
 
 		int fixes = 0;
 		nifSnapshotOp( nif, Spell::tr( "Rename node to %1" ).arg( newName ), [&]() {

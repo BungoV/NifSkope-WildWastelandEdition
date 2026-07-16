@@ -1,0 +1,772 @@
+<title>Collision Manager — UI Concept</title>
+<style>
+  /* ── page ground (theme-aware; the app mockup itself is deliberately dark) ── */
+  :root {
+    --pg-bg: #f0ede6;
+    --pg-ink: #26241f;
+    --pg-sub: #6b675d;
+    --pg-line: #d8d3c6;
+    --pg-card: #f7f5f0;
+    --accent: #c77d2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --pg-bg: #191713;
+      --pg-ink: #e4e0d6;
+      --pg-sub: #99937f;
+      --pg-line: #35322a;
+      --pg-card: #211f19;
+    }
+  }
+  :root[data-theme="dark"] {
+    --pg-bg: #191713; --pg-ink: #e4e0d6; --pg-sub: #99937f;
+    --pg-line: #35322a; --pg-card: #211f19;
+  }
+  :root[data-theme="light"] {
+    --pg-bg: #f0ede6; --pg-ink: #26241f; --pg-sub: #6b675d;
+    --pg-line: #d8d3c6; --pg-card: #f7f5f0;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--pg-bg); color: var(--pg-ink);
+    font: 15px/1.55 "Segoe UI", system-ui, sans-serif;
+    margin: 0; padding: 28px 20px 60px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  .eyebrow {
+    font: 600 11px/1 Consolas, monospace; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 10px;
+  }
+  h1 { font-size: 26px; font-weight: 650; margin: 0 0 6px; text-wrap: balance; }
+  .sub { color: var(--pg-sub); margin: 0 0 22px; max-width: 72ch; }
+  .hint { color: var(--pg-sub); font-size: 12.5px; margin: 10px 2px 0; }
+  .hint b { color: var(--pg-ink); font-weight: 600; }
+
+  /* ── the mocked application window ── */
+  .mockscroll { overflow-x: auto; border-radius: 8px; }
+  .window {
+    min-width: 1080px; position: relative;
+    background: #232528; border: 1px solid #46484c; border-radius: 8px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.35);
+    color: #d6d3cd; font-size: 12px; overflow: hidden;
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 14px;
+    background: #2e3033; padding: 7px 12px; border-bottom: 1px solid #1c1d1f;
+  }
+  .titlebar .appdot { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
+  .titlebar .fname { font-weight: 600; color: #e8e5de; }
+  .menus { display: flex; gap: 14px; color: #a9a69e; }
+  .winbtns { margin-left: auto; display: flex; gap: 10px; color: #85827a; letter-spacing: 2px; }
+
+  .body { display: flex; }
+  .viewport {
+    flex: 1; position: relative; background: #26282b; min-height: 560px;
+    background-image: radial-gradient(ellipse at 50% 42%, #2d3034 0%, #26282b 62%, #202225 100%);
+  }
+  .viewport svg { display: block; width: 100%; height: 560px; }
+  .vp-hud {
+    position: absolute; top: 10px; left: 12px; color: #8c8a83;
+    font: 11px Consolas, monospace;
+  }
+
+  /* ── dock ── */
+  .dock {
+    width: 392px; background: #2b2d30; border-left: 1px solid #1c1d1f;
+    display: flex; flex-direction: column;
+  }
+  .docktitle {
+    display: flex; align-items: center; background: #35373b;
+    padding: 6px 10px; font-weight: 600; color: #e8e5de;
+    border-bottom: 1px solid #212225;
+  }
+  .docktitle .glyphs { margin-left: auto; color: #85827a; letter-spacing: 4px; font-size: 11px; }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 10px; border-bottom: 1px solid #212225; background: #2f3134;
+  }
+  .toolbar label { display: flex; align-items: center; gap: 5px; color: #c9c6bf; cursor: pointer; }
+  select.qt {
+    background: #232528; color: #e0ddd6; border: 1px solid #4a4d52;
+    border-radius: 3px; padding: 2px 6px; font: inherit;
+  }
+  .qtcheck { accent-color: #c77d2a; }
+
+  .panelhead {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; background: #323438; border-top: 1px solid #212225;
+    border-bottom: 1px solid #212225; color: #efe9db; font-weight: 600;
+  }
+  .panelhead .k {
+    font: 600 10px/1 Consolas, monospace; color: #c77d2a;
+    border: 1px solid #6b511f; border-radius: 3px; padding: 2px 5px;
+  }
+  .panelhead .right { margin-left: auto; color: #8c8a83; font-weight: 400; }
+
+  /* browser table */
+  .rows { max-height: 178px; overflow-y: auto; }
+  .rowhead, .row {
+    display: grid; grid-template-columns: 26px 30px 1fr 84px 72px 46px 74px;
+    align-items: center; gap: 4px; padding: 4px 8px;
+  }
+  .rowhead {
+    color: #8c8a83; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+    border-bottom: 1px solid #212225; position: sticky; top: 0; background: #2b2d30;
+  }
+  .row { border-bottom: 1px solid #26272a; cursor: pointer; }
+  .row:hover { background: #33363a; }
+  .row.sel { background: #1d3a52; outline: 1px solid #3d84c4; }
+  .row.hidden-shape { opacity: .42; }
+  .eye { cursor: pointer; text-align: center; color: #b9b6ae; user-select: none; }
+  .swatch { display: flex; align-items: center; }
+  .swatch i {
+    width: 16px; height: 16px; border-radius: 3px; display: block;
+    border: 2px solid transparent;
+  }
+  .nodename { font-weight: 600; color: #e6e3dc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .shapeinfo, .layercell, .matcell { color: #b9b6ae; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .masscell { color: #b9b6ae; text-align: right; font-variant-numeric: tabular-nums; }
+  .chip {
+    font: 600 9.5px/1 Consolas, monospace; letter-spacing: .04em;
+    padding: 3px 5px; border-radius: 3px; text-align: center;
+  }
+  .chip.compiled { background: #4a3a17; color: #eec06a; }
+  .chip.editable { background: #1e3d2a; color: #7fd6a0; }
+
+  /* create panel */
+  .create { padding: 8px 10px 10px; border-bottom: 1px solid #212225; }
+  .typegrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 8px; }
+  .typebtn {
+    background: #232528; border: 1px solid #4a4d52; border-radius: 3px;
+    color: #c9c6bf; text-align: center; padding: 6px 2px 5px; cursor: pointer; line-height: 1.25;
+  }
+  .typebtn small { display: block; font-size: 9.5px; color: #8c8a83; }
+  .typebtn.on { border-color: #c77d2a; color: #eec06a; background: #2e2a20; }
+  .formrow { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+  .formrow .lbl { width: 52px; color: #a9a69e; }
+  .btn {
+    background: #3a3d41; color: #e6e3dc; border: 1px solid #55585d;
+    border-radius: 3px; padding: 5px 12px; cursor: pointer; font: inherit;
+  }
+  .btn.primary { background: #6b4d1c; border-color: #a0783a; color: #f4d9a2; font-weight: 600; }
+
+  /* physics panel */
+  .phys { padding: 8px 10px; border-bottom: 1px solid #212225; }
+  .physgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
+  .field { display: flex; align-items: center; gap: 6px; }
+  .field .lbl { flex: 1; color: #a9a69e; white-space: nowrap; }
+  .field .val {
+    width: 86px; background: #232528; border: 1px solid #4a4d52; border-radius: 3px;
+    padding: 2px 6px; color: #e6e3dc; text-align: right; font-variant-numeric: tabular-nums;
+  }
+  .field .val.combo { text-align: left; }
+  .phys.dim .val { color: #77746d; }
+  .physnote { color: #8c8a83; font-size: 11px; margin-top: 7px; }
+  .physnote a { color: #eec06a; text-decoration: underline; cursor: pointer; }
+
+  /* compile bar */
+  .compilebar {
+    margin-top: auto; display: flex; gap: 8px; align-items: center;
+    padding: 9px 10px; background: #2f3134; border-top: 1px solid #212225;
+  }
+  .compilebar .status { color: #8c8a83; margin-right: auto; }
+
+  /* bottom status bar */
+  .statusbar {
+    display: flex; align-items: center; gap: 8px;
+    background: #2e3033; border-top: 1px solid #1c1d1f;
+    padding: 5px 12px; font: 11.5px Consolas, monospace; color: #b9b6ae;
+    position: relative;
+  }
+  .statusbar .selsw { width: 11px; height: 11px; border-radius: 2px; border: 2px solid #fff; }
+  .statusbar b { color: #e8e5de; font-weight: 600; }
+
+  /* callout chips on the mock */
+  .callout {
+    position: absolute; z-index: 5; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: #1d1305; font: 700 12px/22px "Segoe UI", sans-serif;
+    text-align: center; box-shadow: 0 0 0 3px rgba(0,0,0,.35);
+  }
+
+  /* ── notes ── */
+  .notes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 26px; }
+  @media (max-width: 900px) { .notes { grid-template-columns: 1fr; } }
+  .note {
+    background: var(--pg-card); border: 1px solid var(--pg-line); border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .note h3 { display: flex; gap: 9px; align-items: center; font-size: 14.5px; margin: 0 0 7px; }
+  .note h3 .n {
+    flex: none; width: 21px; height: 21px; border-radius: 50%; background: var(--accent);
+    color: #1d1305; font: 700 12px/21px "Segoe UI", sans-serif; text-align: center;
+  }
+  .note p { margin: 0; color: var(--pg-sub); font-size: 13.5px; }
+  .note b { color: var(--pg-ink); font-weight: 600; }
+
+  /* legend */
+  .legend {
+    margin-top: 22px; background: var(--pg-card); border: 1px solid var(--pg-line);
+    border-radius: 8px; padding: 14px 16px; display: flex; gap: 40px; flex-wrap: wrap;
+  }
+  .legend h4 {
+    margin: 0 0 9px; font: 600 11px/1 Consolas, monospace;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--pg-sub);
+  }
+  .lrow { display: flex; gap: 14px; flex-wrap: wrap; }
+  .litem { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .litem i { width: 15px; height: 15px; border-radius: 3px; display: block; }
+  .litem.wire i { background: #232528; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .row, .typebtn, .btn { transition: background .12s, border-color .12s; }
+  }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">ClaudeNifSkope · Wild Wasteland Edition</p>
+  <h1>Collision Manager — UI concept</h1>
+  <p class="sub">Third manager dock after Timeline and Mat/Tex. The viewport shows the new
+  <b>solid collision display</b>; the dock is the browse → create → tune → compile pipeline.
+  This mockup is live where it matters:</p>
+  <p class="hint">Try it — <b>click a row</b> (or a collision shell in the viewport) to select it,
+  toggle an <b>eye</b>, switch <b>Colour by</b>, and untick <b>Solid</b> to compare with today’s wireframe-only look.</p>
+
+  <div class="mockscroll" style="margin-top:14px; position:relative;">
+  <div class="window">
+    <div class="titlebar">
+      <span class="appdot"></span>
+      <span class="fname">WastelandBarricade01.nif — NifSkope WW</span>
+      <nav class="menus"><span>File</span><span>Edit</span><span>View</span><span>Render</span><span>Spells</span><span>Help</span></nav>
+      <span class="winbtns">— ▢ ✕</span>
+    </div>
+    <div class="body">
+      <div class="viewport">
+        <div class="vp-hud">persp · collision preview</div>
+        <svg id="vp" viewBox="0 0 660 560" aria-label="3D viewport mockup: barricade scene with translucent collision shells"></svg>
+        <span class="callout" style="left:14px; bottom:14px;">1</span>
+      </div>
+
+      <div class="dock">
+        <div class="docktitle">Collision Manager <span class="glyphs">◱ ✕</span></div>
+
+        <div class="toolbar" style="position:relative;">
+          <label>Colour by
+            <select class="qt" id="colormode">
+              <option value="material" selected>Material</option>
+              <option value="layer">Layer</option>
+              <option value="state">State</option>
+              <option value="type">Type</option>
+            </select>
+          </label>
+          <label><input type="checkbox" class="qtcheck" id="solid" checked> Solid</label>
+          <label><input type="checkbox" class="qtcheck" id="xray"> X-ray</label>
+          <label><input type="checkbox" class="qtcheck" id="colonly"> Collision only</label>
+          <label>Labels
+            <select class="qt" id="labelmode">
+              <option value="off">Off</option>
+              <option value="selected" selected>Selected</option>
+              <option value="all">All</option>
+            </select>
+          </label>
+          <span class="callout" style="right:-8px; top:-8px;">2</span>
+        </div>
+
+        <div class="panelhead" style="position:relative;">
+          <span class="k">A</span> Collision in file
+          <span class="right">1 system · 4 bodies</span>
+          <span class="callout" style="right:-8px; top:16px;">3</span>
+        </div>
+        <div class="rowhead">
+          <span></span><span></span><span>Node</span><span>Shape</span><span>Coll type</span><span>Mat</span><span style="text-align:right">Mass · State</span>
+        </div>
+        <div class="rows" id="rows"></div>
+
+        <div class="panelhead" style="position:relative;">
+          <span class="k">B</span> Create collision
+          <span class="right">from: Barrel01 (BSTriShape)</span>
+          <span class="callout" style="right:-8px; top:16px;">4</span>
+        </div>
+        <div class="create">
+          <div class="typegrid">
+            <div class="typebtn">Box<small>OBB fit</small></div>
+            <div class="typebtn">Sphere<small>miniball</small></div>
+            <div class="typebtn on">Capsule<small>PCA fit</small></div>
+            <div class="typebtn">Hull<small>qhull</small></div>
+            <div class="typebtn">Decomp<small>CoACD</small></div>
+            <div class="typebtn">Mesh<small>tri chain</small></div>
+          </div>
+          <div class="formrow">
+            <span class="lbl">Preset</span>
+            <select class="qt"><option>Prop (dynamic)</option><option>Static</option><option>My rusty props ★</option><option>Custom</option></select>
+            <button class="btn" title="Save current settings as a named preset" style="padding:3px 8px;">💾</button>
+            <span class="lbl" style="width:auto">Coll. type</span>
+            <select class="qt">
+              <option>PROPS (10)</option><option>STATIC (1)</option><option>ANIMSTATIC (2)</option>
+              <option>CLUTTER (4)</option><option>TRIGGER (12)</option><option>DEBRIS_SMALL (19)</option>
+              <option>INVISIBLE_WALL (27)</option><option>STAIRHELPER (31)</option><option>NAVCUT (49)</option>
+              <option disabled>— all 57 from Fallout4Layer —</option>
+            </select>
+          </div>
+          <div class="formrow">
+            <span class="lbl">Material</span>
+            <input class="qt" id="matsearch" list="matlist" type="text" value="MaterialMetalSolid" placeholder="type to search 157 materials…"
+                   style="flex:1; background:#232528; color:#e0ddd6; border:1px solid #4a4d52; border-radius:3px; padding:3px 6px; font:inherit;">
+            <datalist id="matlist">
+              <option value="MaterialMetalSolid"></option><option value="Material_Metal"></option>
+              <option value="Material_Wood"></option><option value="MaterialWoodCrate"></option>
+              <option value="MaterialStoneConcrete"></option><option value="MaterialDirtGravel"></option>
+              <option value="MaterialGlassBottle"></option><option value="MaterialStoneBrokenStairs"></option>
+              <option value="MaterialClothCushion"></option><option value="MaterialOrganicSkin"></option>
+            </datalist>
+            <label style="white-space:nowrap"><input type="checkbox" class="qtcheck" checked> Replace</label>
+          </div>
+          <div class="formrow">
+            <span class="lbl"></span>
+            <span style="color:#8c8a83; font:11px Consolas,monospace;" id="matinfo"></span>
+          </div>
+          <div class="formrow" style="justify-content:flex-end; margin-bottom:0;">
+            <button class="btn">Collision → BSTriShape</button>
+            <button class="btn primary">BSTriShape → Collision</button>
+          </div>
+        </div>
+
+        <div class="panelhead" style="position:relative;">
+          <span class="k">C</span> Physics — <span id="physnode" style="color:#eec06a">Barrel01</span>
+          <span class="callout" style="right:-8px; top:16px;">5</span>
+        </div>
+        <div class="phys" id="phys">
+          <div class="physgrid">
+            <div class="field"><span class="lbl">Coll. type</span><span class="val combo" id="f-coltype">PROPS (10) ▾</span></div>
+            <div class="field"><span class="lbl">Material</span><span class="val combo" id="f-mat">MetalSolid ▾</span></div>
+            <div class="field"><span class="lbl">Mass</span><span class="val" id="f-mass">12.0</span></div>
+            <div class="field"><span class="lbl">Motion</span><span class="val combo" id="f-motion">Dynamic (3) ▾</span></div>
+            <div class="field"><span class="lbl">Friction</span><span class="val" id="f-fric">0.50</span></div>
+            <div class="field"><span class="lbl">Quality</span><span class="val combo" id="f-qual">Moving (4) ▾</span></div>
+            <div class="field"><span class="lbl">Restitution</span><span class="val" id="f-rest">0.40</span></div>
+            <div class="field"><span class="lbl">Solver deact.</span><span class="val combo" id="f-solver">Low (2) ▾</span></div>
+            <div class="field"><span class="lbl">Lin. damping</span><span class="val" id="f-ldamp">0.10</span></div>
+            <div class="field"><span class="lbl">Max lin. vel.</span><span class="val" id="f-maxlv">104.4</span></div>
+            <div class="field"><span class="lbl">Ang. damping</span><span class="val" id="f-adamp">0.05</span></div>
+            <div class="field"><span class="lbl">Max ang. vel.</span><span class="val" id="f-maxav">31.6</span></div>
+          </div>
+          <div class="physnote" id="physnote">Editable legacy body — changes write to the bhkRigidBody immediately.</div>
+        </div>
+
+        <div class="compilebar" style="position:relative;">
+          <span class="status" id="compilestatus">2 editable · 2 compiled</span>
+          <button class="btn">Decode</button>
+          <button class="btn primary">Compile ▸</button>
+          <span class="callout" style="right:-8px; top:-10px;">6</span>
+        </div>
+      </div>
+    </div>
+    <div class="statusbar" id="statusbar">
+      <i class="selsw" id="ssw"></i><span id="stext"></span>
+      <span class="callout" style="right:8px; top:-11px;">7</span>
+    </div>
+  </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><h3><span class="n">1</span>Solid collision display</h3>
+      <p>Translucent fill (~30 % alpha, unlit, depth-write off, backfaces darker) + full-alpha
+      <b>wire overlay</b>. Reads as a synthetic shell next to lit BSTriShapes — never confusable.
+      <b>X-ray</b> shows shells through geometry; <b>Collision only</b> hides render meshes.
+      <b>Material labels</b> (Off / Selected / All): dot + name at each shell, halo text,
+      auto-hidden for shapes too small on screen so the viewport never clutters.</p></div>
+    <div class="note"><h3><span class="n">2</span>One hue, four meanings — a mode</h3>
+      <p><b>Colour by Material</b> (default), Layer, State, or Type. Fill hue carries the mode;
+      the <b>wire always encodes shape type</b> (white box, yellow hull, cyan capsule, magenta mesh),
+      so type stays readable in every mode.</p></div>
+    <div class="note"><h3><span class="n">3</span>Browser = the truth table</h3>
+      <p>One row per body (the Body ID binding we validated). Swatches double as the legend,
+      eye toggles per-shape visibility, chips show <b>COMPILED</b> vs <b>EDITABLE</b>.
+      Selecting a row selects the block and highlights the shell.</p></div>
+    <div class="note"><h3><span class="n">4</span>Create from BSTriShape</h3>
+      <p>Six fits — Box, Sphere, Capsule, Hull, CoACD decomposition, tri-mesh.
+      <b>Material is a search field</b>: type a full or partial name and the 157-entry list
+      filters live; an unmatched name becomes a valid <b>custom material</b> (CRC32 of the name)
+      and is remembered. <b>💾 saves the whole setup</b> — coll type + material + physics — as a
+      named preset. The <b>BSTriShape → Collision</b> / <b>Collision → BSTriShape</b> pair is the
+      round trip. Presets write the validated authoring values (dynamic 3/4/2, static 5/0/1).</p></div>
+    <div class="note"><h3><span class="n">5</span>Physics, 3ds-Max parity</h3>
+      <p>Every field we decode — mass, friction, restitution, damping, velocities, layer,
+      material, motion/quality — live-edits the legacy body. Compiled rows grey out with a
+      one-click <b>Decode to edit</b>.</p></div>
+    <div class="note"><h3><span class="n">6</span>Compile — no Elric</h3>
+      <p><b>hknpencode</b> packs the legacy tree straight into a bhkPhysicsSystem packfile
+      (PyNifly-proven format + our corrections), one body per node, Body IDs wired.
+      Validated by round-tripping the controlled pairs and FileConvert-as-linter.</p></div>
+    <div class="note"><h3><span class="n">7</span>Status readout &amp; transforms</h3>
+      <p>Selecting collision anywhere shows a one-line readout in the bottom bar —
+      node, shape, collision type, material, state, mass, friction. And collision
+      <b>transforms like a BSTriShape</b>: G/R/S in the viewport writes to the owning
+      node (whole body), the transform-shape wrapper (sub-shapes), or shape fields
+      (primitives). Compiled shells prompt <i>Decode to edit</i>.</p></div>
+  </div>
+
+  <div class="legend">
+    <div>
+      <h4>Fill · material families (157 materials bucketed by name)</h4>
+      <div class="lrow">
+        <span class="litem"><i style="background:#a3743f"></i>wood</span>
+        <span class="litem"><i style="background:#8f8d86"></i>stone</span>
+        <span class="litem"><i style="background:#7d93a8"></i>metal</span>
+        <span class="litem"><i style="background:#7fd4d9"></i>glass</span>
+        <span class="litem"><i style="background:#b08a4a"></i>dirt</span>
+        <span class="litem"><i style="background:#9a7dc0"></i>cloth</span>
+        <span class="litem"><i style="background:#c98a8a"></i>flesh</span>
+      </div>
+    </div>
+    <div>
+      <h4>Wire · shape type (always)</h4>
+      <div class="lrow">
+        <span class="litem wire"><i style="border:2px solid #e0e0e0"></i>box</span>
+        <span class="litem wire"><i style="border:2px solid #e3c94d"></i>convex hull</span>
+        <span class="litem wire"><i style="border:2px solid #4dd8d8"></i>sphere / capsule</span>
+        <span class="litem wire"><i style="border:2px solid #d84dd8"></i>tri mesh</span>
+        <span class="litem wire"><i style="border:2px solid #e8963d"></i>compound</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ── palettes ── */
+  var WIRE = { box:"#e0e0e0", hull:"#e3c94d", capsule:"#4dd8d8", mesh:"#d84dd8" };
+  var FILL = {
+    material: { wood:"#a3743f", stone:"#8f8d86", metal:"#7d93a8" },
+    layer:    { "STATIC":"#7fb069", "STAIRHELPER":"#e0a33d", "PROPS":"#b07de0" },
+    state:    { compiled:"#e0a33d", editable:"#5aa9e6" },
+    type:     { box:"#c9c9c9", hull:"#d8c04d", capsule:"#4dc4c4", mesh:"#c44dc4" }
+  };
+  var SELCOL = "#55baff";
+
+  /* ── scene data: shapes drive both viewport and browser rows ── */
+  var bodies = [
+    { id:"ground", node:"Ground01",  type:"mesh",    typeLabel:"Mesh (312 tri)", mat:"stone", matLabel:"StoneConcrete",
+      layer:"STATIC", state:"compiled", mass:0,
+      phys:{ coltype:"STATIC (1) ▾", mat:"StoneConcrete ▾",
+             mass:"0.0", motion:"Fixed (5) ▾", fric:"0.50", qual:"Invalid (0) ▾", solver:"Off (1) ▾",
+             rest:"0.40", ldamp:"0.10", adamp:"0.05", maxlv:"104.4", maxav:"31.6",
+             note:"Compiled packfile — <a id='declink'>Decode to edit</a>." } },
+    { id:"crate",  node:"Crate01",   type:"box",     typeLabel:"Box",            mat:"wood",  matLabel:"WoodCrate",
+      layer:"STATIC", state:"compiled", mass:0,
+      phys:{ coltype:"STATIC (1) ▾", mat:"WoodCrate ▾",
+             mass:"0.0", motion:"Fixed (5) ▾", fric:"0.50", qual:"Invalid (0) ▾", solver:"Off (1) ▾",
+             rest:"0.40", ldamp:"0.10", adamp:"0.05", maxlv:"104.4", maxav:"31.6",
+             note:"Compiled packfile — <a>Decode to edit</a>." } },
+    { id:"ramp",   node:"C_Ramp01",  type:"hull",    typeLabel:"Hull (12 v)",    mat:"wood",  matLabel:"Wood",
+      layer:"STAIRHELPER", state:"editable", mass:0,
+      phys:{ coltype:"STAIRHELPER (31) ▾", mat:"Material_Wood ▾",
+             mass:"0.0", motion:"Fixed (5) ▾", fric:"0.50", qual:"Invalid (0) ▾", solver:"Off (1) ▾",
+             rest:"0.40", ldamp:"0.10", adamp:"0.05", maxlv:"104.4", maxav:"31.6",
+             note:"Editable legacy body — changes write to the bhkRigidBody immediately." } },
+    { id:"barrel", node:"Barrel01",  type:"capsule", typeLabel:"Cylinder",       mat:"metal", matLabel:"MetalSolid",
+      layer:"PROPS", state:"editable", mass:12,
+      phys:{ coltype:"PROPS (10) ▾", mat:"MetalSolid ▾",
+             mass:"12.0", motion:"Dynamic (3) ▾", fric:"0.50", qual:"Moving (4) ▾", solver:"Low (2) ▾",
+             rest:"0.40", ldamp:"0.10", adamp:"0.05", maxlv:"104.4", maxav:"31.6",
+             note:"Editable legacy body — changes write to the bhkRigidBody immediately." } }
+  ];
+
+  /* ── iso projection ── */
+  var CX = 318, CY = 268, UX = 44, UY = 25, UZ = 46;
+  function P(x, y, z) { return [ CX + (x - y) * UX, CY + (x + y) * UY - z * UZ ]; }
+  function pts(list) { return list.map(function (v) { return P(v[0], v[1], v[2]).join(","); }).join(" "); }
+
+  var svg = document.getElementById("vp");
+  var NS = "http://www.w3.org/2000/svg";
+  function poly(points, fill, stroke, sw, extra) {
+    var p = document.createElementNS(NS, "polygon");
+    p.setAttribute("points", points);
+    p.setAttribute("fill", fill || "none");
+    if (stroke) { p.setAttribute("stroke", stroke); p.setAttribute("stroke-width", sw || 1.4); p.setAttribute("stroke-linejoin", "round"); }
+    if (extra) for (var k in extra) p.setAttribute(k, extra[k]);
+    return p;
+  }
+  function group(cls) { var g = document.createElementNS(NS, "g"); if (cls) g.setAttribute("class", cls); return g; }
+
+  /* box faces: [top, +x, +y] visible from this camera */
+  function boxFaces(x0, y0, x1, y1, z0, z1) {
+    return [
+      [[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]],           // top
+      [[x1,y0,z0],[x1,y1,z0],[x1,y1,z1],[x1,y0,z1]],           // +x
+      [[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]]            // +y
+    ];
+  }
+  /* wedge high at x=xa (z=h), low at x=xb: [slope, +y tri] visible */
+  function wedgeFaces(xa, xb, y0, y1, h) {
+    return [
+      [[xa,y0,h],[xb,y0,0],[xb,y1,0],[xa,y1,h]],
+      [[xa,y1,0],[xb,y1,0],[xa,y1,h]]
+    ];
+  }
+  /* octagon prism: top + camera-facing sides */
+  function prismFaces(cx0, cy0, r, z0, z1, n) {
+    n = n || 8;
+    var ring0 = [], ring1 = [], i, a;
+    for (i = 0; i < n; i++) {
+      a = (i + 0.5) / n * Math.PI * 2;
+      ring0.push([cx0 + r * Math.cos(a), cy0 + r * Math.sin(a), z0]);
+      ring1.push([cx0 + r * Math.cos(a), cy0 + r * Math.sin(a), z1]);
+    }
+    var faces = [ ring1.slice() ]; // top
+    for (i = 0; i < n; i++) {
+      var j = (i + 1) % n;
+      var mx = (ring0[i][0] + ring0[j][0]) / 2 - cx0, my = (ring0[i][1] + ring0[j][1]) / 2 - cy0;
+      if (mx + my > 0) faces.push([ring0[i], ring0[j], ring1[j], ring1[i]]);
+    }
+    return faces;
+  }
+
+  /* render-mesh shading: [top, +x, +y] tones */
+  function shadedBox(g, x0, y0, x1, y1, z0, z1, tones) {
+    var f = boxFaces(x0, y0, x1, y1, z0, z1);
+    g.appendChild(poly(pts(f[0]), tones[0]));
+    g.appendChild(poly(pts(f[1]), tones[1]));
+    g.appendChild(poly(pts(f[2]), tones[2]));
+  }
+
+  /* ── static scene: render meshes ── */
+  var meshLayer = group("rendermeshes");
+  svg.appendChild(meshLayer);
+
+  // ground slab
+  meshLayer.appendChild(poly(pts([[-3.4,-3.4,0],[4.6,-3.4,0],[4.6,4.6,0],[-3.4,4.6,0]]), "#33363a"));
+  // barrel render mesh (octagon prism, metal tones)
+  (function () {
+    var g = group();
+    prismFaces(-1.5, 2.4, 0.55, 0, 1.35).forEach(function (f, i) {
+      g.appendChild(poly(pts(f), i === 0 ? "#6d7a86" : (i % 2 ? "#57626d" : "#4c565f")));
+    });
+    // barrel bands
+    g.appendChild(poly(pts(prismFaces(-1.5, 2.4, 0.56, 0.42, 0.5)[0]), "none", "#3f474e", 1));
+    meshLayer.appendChild(g);
+  })();
+  // crate render mesh (wood tones)
+  (function () {
+    var g = group();
+    shadedBox(g, 0.2, 0.2, 2.2, 2.2, 0, 1.6, ["#7d6040", "#6b5133", "#57432c"]);
+    // plank lines on top
+    g.appendChild(poly(pts([[0.2,1.2,1.6],[2.2,1.2,1.6]]), "none", "#65503a", 1));
+    g.appendChild(poly(pts([[1.2,0.2,1.6],[1.2,2.2,1.6]]), "none", "#65503a", 1));
+    meshLayer.appendChild(g);
+  })();
+  // ramp render mesh
+  (function () {
+    var g = group();
+    var f = wedgeFaces(2.2, 4.3, 0.5, 1.9, 1.55);
+    g.appendChild(poly(pts(f[0]), "#75603f"));
+    g.appendChild(poly(pts(f[1]), "#52412c"));
+    meshLayer.appendChild(g);
+  })();
+
+  /* ── collision shells ── */
+  var shellDefs = {
+    ground: { faces: [[[-3.4,-3.4,0.03],[4.6,-3.4,0.03],[4.6,4.6,0.03],[-3.4,4.6,0.03]]],
+              wires: (function () {
+                var w = [], i;
+                for (i = -2; i <= 4; i += 2) w.push([[i,-3.4,0.03],[i,4.6,0.03]]);
+                for (i = -2; i <= 4; i += 2) w.push([[-3.4,i,0.03],[4.6,i,0.03]]);
+                // a few diagonals: it's a tri mesh
+                w.push([[-2,-3.4,0.03],[-3.4,-2,0.03]]); w.push([[0,-3.4,0.03],[-3.4,0,0.03]]);
+                w.push([[2,-3.4,0.03],[-3.4,2,0.03]]);  w.push([[4,-3.4,0.03],[-3.4,4,0.03]]);
+                w.push([[4.6,-2,0.03],[-2,4.6,0.03]]);  w.push([[4.6,0,0.03],[0,4.6,0.03]]);
+                w.push([[4.6,2,0.03],[2,4.6,0.03]]);
+                return w;
+              })() },
+    crate:  { faces: boxFaces(0.08, 0.08, 2.32, 2.32, -0.04, 1.72) },
+    ramp:   { faces: wedgeFaces(2.14, 4.42, 0.42, 1.98, 1.62) },
+    barrel: { faces: prismFaces(-1.5, 2.4, 0.68, -0.03, 1.48, 12) }
+  };
+
+  var shellLayer = group("shells");
+  svg.appendChild(shellLayer);
+
+  /* material labels in the viewport: anchored at a per-shape point,
+     colored dot + halo text so they read over any background */
+  var labelAnchor = {
+    ground: [3.4, 3.4, 0.05], crate: [1.2, 1.2, 1.74],
+    ramp: [3.3, 1.2, 0.85], barrel: [-1.5, 2.4, 1.52]
+  };
+  var labelLayer = group("mlabels");
+  var labelEls = {};
+  var shellEls = {};
+  ["ground", "barrel", "crate", "ramp"].forEach(function (id) {
+    var g = group("shell");
+    g.setAttribute("data-id", id);
+    g.style.cursor = "pointer";
+    var def = shellDefs[id];
+    def.faces.forEach(function (f) { g.appendChild(poly(pts(f), "#888", null, 0, { "class": "cfill" })); });
+    def.faces.forEach(function (f) { g.appendChild(poly(pts(f), "none", "#fff", 1.4, { "class": "cwire" })); });
+    (def.wires || []).forEach(function (w) { g.appendChild(poly(pts(w), "none", "#fff", 0.9, { "class": "cwire aux" })); });
+    shellLayer.appendChild(g);
+    shellEls[id] = g;
+
+    // label: dot + text with dark halo
+    var la = P(labelAnchor[id][0], labelAnchor[id][1], labelAnchor[id][2]);
+    var lg = group("mlabel");
+    var dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", la[0] - 6); dot.setAttribute("cy", la[1] - 4); dot.setAttribute("r", 3);
+    var txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", la[0] + 2); txt.setAttribute("y", la[1]);
+    txt.setAttribute("style",
+      "font:10px Consolas,monospace; fill:#e8e5de; paint-order:stroke; stroke:#1c1d1f; stroke-width:3px;");
+    lg.appendChild(dot); lg.appendChild(txt);
+    labelLayer.appendChild(lg);
+    labelEls[id] = { g: lg, dot: dot, txt: txt };
+  });
+  svg.appendChild(labelLayer);
+
+  /* ── browser rows ── */
+  var rowsEl = document.getElementById("rows");
+  bodies.forEach(function (b) {
+    var r = document.createElement("div");
+    r.className = "row"; r.setAttribute("data-id", b.id);
+    r.innerHTML =
+      '<span class="eye" title="show / hide">👁</span>' +
+      '<span class="swatch"><i data-sw></i></span>' +
+      '<span class="nodename">' + b.node + '</span>' +
+      '<span class="shapeinfo">' + b.typeLabel + '</span>' +
+      '<span class="layercell">' + b.layer + '</span>' +
+      '<span class="matcell">' + b.matLabel + '</span>' +
+      '<span class="masscell">' + (b.state === "editable" && b.mass ? b.mass.toFixed(1) + " · " : "") +
+        '<span class="chip ' + b.state + '">' + b.state.toUpperCase() + "</span></span>";
+    rowsEl.appendChild(r);
+    b.rowEl = r;
+  });
+
+  /* ── state + repaint ── */
+  var selected = "barrel", hidden = {}, mode = "material",
+      solid = true, xray = false, colonly = false, labelmode = "selected";
+
+  function fillFor(b) {
+    var pal = FILL[mode];
+    return mode === "material" ? pal[b.mat]
+         : mode === "layer"    ? pal[b.layer]
+         : mode === "state"    ? pal[b.state]
+         :                       pal[b.type];
+  }
+
+  function repaint() {
+    bodies.forEach(function (b) {
+      var g = shellEls[b.id], sel = b.id === selected, hid = !!hidden[b.id];
+      g.style.display = hid ? "none" : "";
+      var fills = g.querySelectorAll(".cfill"), wires = g.querySelectorAll(".cwire");
+      var fc = fillFor(b), wc = sel ? SELCOL : WIRE[b.type];
+      fills.forEach(function (f) {
+        f.setAttribute("fill", fc);
+        f.setAttribute("fill-opacity", solid ? (sel ? 0.42 : (xray ? 0.36 : 0.26)) : 0);
+      });
+      wires.forEach(function (w) {
+        w.setAttribute("stroke", wc);
+        w.setAttribute("stroke-width", (sel ? 2.4 : 1.4) * (w.classList.contains("aux") ? 0.65 : 1));
+        w.setAttribute("stroke-opacity", sel ? 1 : 0.9);
+      });
+      // row
+      b.rowEl.classList.toggle("sel", sel);
+      b.rowEl.classList.toggle("hidden-shape", hid);
+      b.rowEl.querySelector(".eye").textContent = hid ? "─" : "👁";
+      var sw = b.rowEl.querySelector("[data-sw]");
+      sw.style.background = fc; sw.style.borderColor = WIRE[b.type];
+    });
+    meshLayer.style.opacity = colonly ? 0.08 : 1;
+
+    // material labels: Off / Selected / All (only on visible shells)
+    bodies.forEach(function (b) {
+      var le = labelEls[b.id];
+      var show = !hidden[b.id] &&
+        (labelmode === "all" || (labelmode === "selected" && b.id === selected));
+      le.g.style.display = show ? "" : "none";
+      if (show) {
+        le.dot.setAttribute("fill", fillFor(b));
+        le.txt.textContent = b.matLabel;
+      }
+    });
+
+    // physics panel
+    var b = bodies.filter(function (x) { return x.id === selected; })[0];
+    document.getElementById("physnode").textContent = b.node;
+    var map = { coltype:"f-coltype", mat:"f-mat",
+                mass:"f-mass", motion:"f-motion", fric:"f-fric", qual:"f-qual", solver:"f-solver",
+                rest:"f-rest", ldamp:"f-ldamp", adamp:"f-adamp", maxlv:"f-maxlv", maxav:"f-maxav" };
+    for (var k in map) document.getElementById(map[k]).textContent = b.phys[k];
+    document.getElementById("physnote").innerHTML = b.phys.note;
+    document.getElementById("phys").classList.toggle("dim", b.state === "compiled");
+
+    // bottom status bar readout
+    var sw = document.getElementById("ssw");
+    sw.style.background = fillFor(b); sw.style.borderColor = WIRE[b.type];
+    document.getElementById("stext").innerHTML =
+      "<b>" + b.node + "</b> — " + b.typeLabel + " · " + b.layer +
+      " · Material" + b.matLabel.replace("Material_", "") + " · " + b.state.toUpperCase() +
+      " · " + b.phys.mass + " kg · fric " + b.phys.fric + " rest " + b.phys.rest;
+  }
+
+  /* ── events ── */
+  rowsEl.addEventListener("click", function (e) {
+    var row = e.target.closest(".row"); if (!row) return;
+    var id = row.getAttribute("data-id");
+    if (e.target.classList.contains("eye")) { hidden[id] = !hidden[id]; }
+    else selected = id;
+    repaint();
+  });
+  shellLayer.addEventListener("click", function (e) {
+    var g = e.target.closest(".shell"); if (!g) return;
+    selected = g.getAttribute("data-id"); repaint();
+  });
+  document.getElementById("colormode").addEventListener("change", function (e) { mode = e.target.value; repaint(); });
+
+  /* custom material: FO4 material value = CRC32 (poly EDB88320, init 0,
+     no final xor) of the lowercased name — verified against nif.xml
+     (crc("materialwoodcrate") == 341181474, crc("metal") == 104858580) */
+  var crcTab = (function () {
+    var t = [], i, j, c;
+    for (i = 0; i < 256; i++) {
+      c = i;
+      for (j = 0; j < 8; j++) c = (c & 1) ? (c >>> 1) ^ 0xEDB88320 : c >>> 1;
+      t.push(c >>> 0);
+    }
+    return t;
+  })();
+  function bethCrc(s) {
+    var h = 0, i, b = s.toLowerCase();
+    for (i = 0; i < b.length; i++) h = (h >>> 8) ^ crcTab[(h ^ b.charCodeAt(i)) & 0xFF];
+    return h >>> 0;
+  }
+  /* material search: type full/partial name (datalist filters live);
+     known name -> shows its enum value; unknown -> "custom, CRC 0x..." */
+  var KNOWN_MATS = {
+    // legacy names hash from short strings; values from nif.xml
+    "material_metal": 104858580, "material_wood": 500811281,
+    "materialwoodcrate": 341181474, "materialmetalsolid": 706373264,
+    "materialdirtgravel": 428587608, "materialglassbottle": 493553910,
+    "materialstonebrokenstairs": 811073006, "materialclothcushion": 630687820,
+    "materialorganicskin": 591247106
+  };
+  function matFeedback() {
+    var name = document.getElementById("matsearch").value.trim();
+    var out = document.getElementById("matinfo");
+    if (!name) { out.textContent = "type to search all 157, or any custom name"; return; }
+    var known = KNOWN_MATS[name.toLowerCase()];
+    var crc = known !== undefined ? known : bethCrc(name);
+    out.textContent = (known !== undefined ? "known material · value " : "custom material · CRC 0x" ) +
+      (known !== undefined ? String(crc) : ("0000000" + crc.toString(16).toUpperCase()).slice(-8)) +
+      (known !== undefined ? "" : " — will be saved to your preset list");
+  }
+  document.getElementById("matsearch").addEventListener("input", matFeedback);
+  matFeedback();
+  document.getElementById("solid").addEventListener("change", function (e) { solid = e.target.checked; repaint(); });
+  document.getElementById("xray").addEventListener("change", function (e) { xray = e.target.checked; repaint(); });
+  document.getElementById("colonly").addEventListener("change", function (e) { colonly = e.target.checked; repaint(); });
+  document.getElementById("labelmode").addEventListener("change", function (e) { labelmode = e.target.value; repaint(); });
+
+  repaint();
+})();
+</script>

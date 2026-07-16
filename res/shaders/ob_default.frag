@@ -16,6 +16,7 @@ uniform int vertexColorFlags;
 
 uniform bool isEffect;
 uniform bool hasSpecular;
+uniform bool useGloss;
 uniform bool hasEmit;
 uniform bool hasGlowMap;
 uniform bool hasCubeMap;
@@ -199,7 +200,7 @@ void main()
 			vec3 H = normalize( L + E );
 			float NdotH = dot( normal, H );
 			if ( NdotH > 0.0 ) {
-				vec3 spec = frontMaterialSpecular.rgb * pow( NdotH, frontMaterialShininess );
+				vec3 spec = frontMaterialSpecular.rgb * pow( NdotH, useGloss ? frontMaterialShininess : 1.0 );
 				color.rgb += spec * frontMaterialSpecular.a * normalMap.a;
 			}
 		}

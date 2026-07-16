@@ -75,6 +75,8 @@ public:
 	virtual QIcon icon() const { return QIcon(); }
 	//! Whether the spell does not modify the file
 	virtual bool constant() const { return false; }
+	//! Whether the spell records its complete mutation in the model undo stack
+	virtual bool undoable() const { return false; }
 	//! Whether the spell shows up in block list instead of a context menu
 	virtual bool instant() const { return false; }
 	//! Whether the spell performs a sanitizing function

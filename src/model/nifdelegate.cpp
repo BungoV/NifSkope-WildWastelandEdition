@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QItemDelegate> // Inherited
 #include <QComboBox>
+#include <QIcon>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QPainter>
@@ -170,9 +171,10 @@ public:
 		int namerole = (index.isValid() && index.column() == 0) ? Qt::DisplayRole : NifSkopeDisplayRole;
 
 		QString text = index.data( namerole ).toString();
-		QString deco = index.data( Qt::DecorationRole ).toString();
+		QVariant decoration = index.data( Qt::DecorationRole );
+		QString deco = decoration.toString();
 		QString user = index.data( Qt::UserRole ).toString();
-		QIcon icon;
+		QIcon icon = decoration.canConvert<QIcon>() ? qvariant_cast<QIcon>( decoration ) : QIcon();
 
 		if ( !user.isEmpty() ) {
 			// Find the icon for this Spell if one exists

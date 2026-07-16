@@ -68,7 +68,7 @@ public:
 	void drawVerts( float pointSize, int vertexSelected ) const;
 	// btnMask & 1 = draw bitangents, btnMask & 2 = draw tangents, btnMask & 4 = draw normals
 	void drawNormals( int btnMask = 4, int vertexSelected = -1, float lineLength = 0.25f ) const;
-	void drawWireframe( FloatVector4 color ) const;
+	void drawWireframe( FloatVector4 color, float lineWidth = -1.0f ) const;
 	// i = first triangle, n = number of triangles to draw
 	void drawTriangles( qsizetype i, qsizetype n, FloatVector4 color ) const;
 	void drawWeights( int vertexSelected ) const;
@@ -76,6 +76,10 @@ public:
 	void drawBoundingBox( const Vector3 & boundsCenter, const Vector3 & boundsDims, FloatVector4 color ) const;
 	void setUniforms( NifSkopeOpenGLContext::Program * prog ) const;
 	bool bindShape() const;
+	//! Evaluate/invert the same blended vertex skin transform used by the GPU.
+	//! False from unskinVertex means the weighted matrix was singular.
+	Vector3 skinVertex( int vertexIndex, const Vector3 & local ) const;
+	bool unskinVertex( int vertexIndex, const Vector3 & skinnedLocal, Vector3 & local ) const;
 
 	virtual QModelIndex vertexAt( int ) const { return QModelIndex(); }
 	virtual QModelIndex triangleAt( int ) const { return QModelIndex(); }

@@ -22,6 +22,13 @@ uniform bool gridEnabled[3];
 uniform vec4 backgroundColor;
 uniform vec2 textureColorScale;
 
+// 0 = repeat the image across every tile (legacy default when unset);
+// 1 = show only the 0-1 tile, dark outside (Blender default)
+uniform int tileMode;
+// texture-pixel grid: xy = texture resolution in texels, 0 = disabled;
+// z = line alpha, w = fade-in start (view UV span below which it appears)
+uniform vec4 pixelGrid;
+
 in vec2 texCoord;
 
 out vec4 fragColor;
@@ -41,8 +48,10 @@ vec4 srgbCompress( vec4 c )
 
 vec3 drawGridLines( vec3 color, float x, float s )
 {
-	vec3	f = vec3( x ) * vec3( 4.0, 16.0, 64.0 );
-	f = abs( f - round( f ) ) * vec3( 0.25, 0.0625, 0.015625 ) * s;
+	// Blender-style base of 8 subdivisions per tile, with ×8 finer levels that
+	// fade in when zoomed (gridEnabled/gridColors alpha are driven host-side)
+	vec3	f = vec3( x ) * vec3( 8.0, 64.0, 512.0 );
+	f = abs( f - round( f ) ) * vec3( 0.125, 0.015625, 0.001953125 ) * s;
 	f = max( f - ( gridLineWidths * 0.5 - 0.5 ), vec3( 0.0 ) );
 	if ( gridEnabled[0] && f.x < 1.0 )
 		return mix( color, gridColors[0].rgb, ( cos( f.x * 3.14159265 ) * 0.5 + 0.5 ) * gridColors[0].a );
@@ -53,11 +62,32 @@ vec3 drawGridLines( vec3 color, float x, float s )
 	return color;
 }
 
+// subtle grid at texture-pixel boundaries; alpha follows how close the pixel
+// edge is, so it only firms up when zoomed in enough to matter
+vec3 drawPixelGrid( vec3 color )
+{
+	if ( pixelGrid.x < 0.5 || pixelGrid.y < 0.5 )
+		return color;
+	vec2	texel = texCoord.st * pixelGrid.xy;
+	vec2	d = abs( texel - round( texel ) );
+	// pixel size on screen, in the same units as pixelScale (texels/screenpx)
+	vec2	px = pixelScale / pixelGrid.xy;
+	// fade the whole grid in as pixels grow past a few screen pixels
+	float	vis = clamp( ( min( px.x, px.y ) - 2.0 ) * 0.5, 0.0, 1.0 );
+	if ( vis <= 0.0 )
+		return color;
+	float	line = 1.0 - smoothstep( 0.0, 1.0, min( d.x * px.x, d.y * px.y ) );
+	return mix( color, vec3( 1.0 ), line * pixelGrid.z * vis );
+}
+
 void main()
 {
 	vec4	color = vec4( 0.0 );
 
-	if ( texCoord.s >= -1.0 && texCoord.s <= 2.0 && texCoord.t >= -1.0 && texCoord.t <= 2.0 ) {
+	bool	inTile = texCoord.s >= -1.0 && texCoord.s <= 2.0 && texCoord.t >= -1.0 && texCoord.t <= 2.0;
+	if ( tileMode == 1 )
+		inTile = texCoord.s >= 0.0 && texCoord.s <= 1.0 && texCoord.t >= 0.0 && texCoord.t <= 1.0;
+	if ( inTile ) {
 		vec2	offs = texCoord.st - uvCenter;
 		float	r_c = cos( uvRotation );
 		float	r_s = sin( uvRotation ) * -1.0;
@@ -90,7 +120,14 @@ void main()
 
 	color = vec4( mix( backgroundColor.rgb, color.rgb, color.a ), 1.0 );
 
-	color.rgb = drawGridLines( drawGridLines( color.rgb, texCoord.s, pixelScale.x ), texCoord.t, pixelScale.y );
+	// When not repeating, confine grid + pixel lines to the 0-1 tile (Blender):
+	// outside is plain background, no lines.
+	bool inGridTile = tileMode != 1
+		|| ( texCoord.s >= 0.0 && texCoord.s <= 1.0 && texCoord.t >= 0.0 && texCoord.t <= 1.0 );
+	if ( inGridTile ) {
+		color.rgb = drawPixelGrid( color.rgb );
+		color.rgb = drawGridLines( drawGridLines( color.rgb, texCoord.s, pixelScale.x ), texCoord.t, pixelScale.y );
+	}
 
 	fragColor = color;
 }

@@ -279,6 +279,89 @@ void Particles::drawShapes( NodeList * secondPass )
 			// the fragment shader samples textureUnits[textureUnit - 1]
 			prog->uni1i_l( prog->uniLocation( "textures[%d].textureUnit", 0 ), 1 );
 		}
+
+		// effect-shader features from the linked BSEffectShaderProperty (.bgem):
+		// normal-map driven falloff, greyscale-to-palette gradients and cube-map
+		// reflection - flat sprites otherwise miss all of these in preview
+		prog->uni1i( "hasNormalMap", 0 );
+		prog->uni1i( "hasGreyscaleMap", 0 );
+		prog->uni1i( "hasCubeMap", 0 );
+		prog->uni1i( "greyscaleColor", 0 );
+		prog->uni1i( "greyscaleAlpha", 0 );
+		prog->uni1i( "useFalloff", 0 );
+		prog->uni1i( "hasRGBFalloff", 0 );
+		prog->uni4f( "glowColor", FloatVector4( 1.0f, 1.0f, 1.0f, 1.0f ) );
+		prog->uni1f( "glowMult", 1.0f );
+		prog->uni4f( "falloffParams", FloatVector4( 1.0f, 0.0f, 1.0f, 1.0f ) );
+		prog->uni1f( "envReflection", 0.0f );
+
+		// the CubeMap sampler must always point at its own complete texture
+		// unit: a samplerCube sharing a unit with a sampler2D is a GL error at
+		// draw time, so bind a neutral gray cube on unit 3 up front (the real
+		// environment map, if any, overwrites this binding below)
+		scene->textures->activateTextureUnit( 3 );
+		scene->bindCube( "#FF555555c", 1 );
+		prog->uni1i( "CubeMap", 3 );
+		scene->textures->activateTextureUnit( 0 );
+
+		if ( auto esp = dynamic_cast<BSEffectShaderProperty *>( shaderProp ) ) {
+			// emissive tint: an unset / near-black emissive would zero out the
+			// sprite, so fall back to white (plain base texture) in that case
+			FloatVector4	gc( esp->emissiveColor );
+			float	gm = esp->emissiveMult;
+			if ( gc[0] + gc[1] + gc[2] < 0.02f ) {
+				gc = FloatVector4( 1.0f, 1.0f, 1.0f, gc[3] );
+				gm = 1.0f;
+			}
+			prog->uni4f( "glowColor", gc );
+			prog->uni1f( "glowMult", std::min( std::max( gm, 0.0f ), 4.0f ) );
+
+			prog->uni1i( "greyscaleColor", esp->greyscaleColor );
+			prog->uni1i( "greyscaleAlpha", esp->greyscaleAlpha );
+			prog->uni1i( "useFalloff", esp->useFalloff );
+			prog->uni1i( "hasRGBFalloff", esp->hasRGBFalloff );
+			prog->uni4f( "falloffParams", FloatVector4( esp->falloff.startAngle, esp->falloff.stopAngle,
+														esp->falloff.startOpacity, esp->falloff.stopOpacity ) );
+
+			// normal map -> texture unit 1
+			if ( esp->hasNormalMap && scene->hasOption( Scene::DoLighting ) ) {
+				QString	nmName = esp->fileName( 3 );
+				if ( !nmName.isEmpty() ) {
+					scene->textures->activateTextureUnit( 1 );
+					if ( scene->textures->bind( nmName, nif ) ) {
+						prog->uni1i( "NormalMap", 1 );
+						prog->uni1i( "hasNormalMap", 1 );
+					}
+				}
+			}
+
+			// greyscale palette -> texture unit 2
+			if ( esp->hasGreyscaleMap && ( esp->greyscaleColor || esp->greyscaleAlpha ) ) {
+				QString	gsName = esp->fileName( 1 );
+				if ( !gsName.isEmpty() ) {
+					scene->textures->activateTextureUnit( 2 );
+					if ( scene->textures->bind( gsName, nif ) ) {
+						prog->uni1i( "GreyscaleMap", 2 );
+						prog->uni1i( "hasGreyscaleMap", 1 );
+					}
+				}
+			}
+
+			// environment cube map -> texture unit 3
+			if ( esp->hasEnvironmentMap && scene->hasOption( Scene::DoCubeMapping )
+				 && scene->hasOption( Scene::DoLighting ) ) {
+				QString	cubeName = esp->fileName( 2 );
+				scene->textures->activateTextureUnit( 3 );
+				if ( !cubeName.isEmpty() && scene->bindCube( cubeName ) ) {
+					prog->uni1i( "CubeMap", 3 );
+					prog->uni1i( "hasCubeMap", 1 );
+					prog->uni1f( "envReflection", esp->environmentReflection );
+				}
+			}
+
+			// leave unit 0 (the sprite base map) active for the draw
+			scene->textures->activateTextureUnit( 0 );
+		}
 	}
 
 	// setup z buffer
@@ -297,31 +380,15 @@ void Particles::drawShapes( NodeList * secondPass )
 
 	// render the particles
 
-	// FO4 effect shaders multiply the sprite by their (BGEM-aware) emissive
-	// base colour - without this, blue/tinted electricity renders white
-	QVector<Color4>	tinted;
-	if ( !scene->selecting && colors.size() >= verts.size() ) {
-		if ( auto esp = dynamic_cast<BSEffectShaderProperty *>( findProperty<BSShaderLightingProperty>() ) ) {
-			Color4 tint = esp->emissiveColor;
-			float m = std::min( std::max( esp->emissiveMult, 0.0f ), 2.0f );
-			tint = Color4( std::min( tint[0] * m, 1.0f ), std::min( tint[1] * m, 1.0f ),
-			               std::min( tint[2] * m, 1.0f ), tint[3] );
-			if ( tint[0] + tint[1] + tint[2] > 0.02f
-				&& !( tint[0] == 1.0f && tint[1] == 1.0f && tint[2] == 1.0f && tint[3] == 1.0f ) ) {
-				tinted.resize( colors.size() );
-				for ( qsizetype i = 0; i < colors.size(); i++ ) {
-					const Color4 & c = colors.at( i );
-					tinted[i] = Color4( c[0] * tint[0], c[1] * tint[1], c[2] * tint[2], c[3] * tint[3] );
-				}
-			}
-		}
-	}
+	// the emissive tint and greyscale palette are now applied in the fragment
+	// shader (glowColor / GreyscaleMap uniforms), so the raw per-particle
+	// vertex colours are handed to the shader unchanged
 
 	qsizetype	numVerts = verts.size();
 	const float *	attrData[5] = { &( verts.constFirst()[0] ), nullptr, nullptr, nullptr, nullptr };
 	unsigned int	attrMask = 0x03;
 	if ( colors.size() >= numVerts ) {
-		attrData[1] = &( ( tinted.size() >= numVerts ? tinted : colors ).constFirst()[0] );
+		attrData[1] = &( colors.constFirst()[0] );
 		attrMask = attrMask | 0x40;
 	}
 	if ( uvOffsets.size() >= numVerts ) {

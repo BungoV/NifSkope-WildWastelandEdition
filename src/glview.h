@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QPersistentModelIndex>
 #include <QSet>
 #include <chrono>
+#include <functional>
 
 
 //! @file glview.h GLView
@@ -61,6 +62,84 @@ public:
 	GLView( QWindow * parent );
 	~GLView();
 	QWidget * createWindowContainer( QWidget * parent );
+
+	//! One typed parameter of the generalized operator redo panel (Redo Panel
+	//! v2, MODELING_TOOLS_PLAN.md F0.a): floats/ints render as DragSpinBoxes,
+	//! bools as checkboxes, enums as dropdowns.
+	struct TlOpParam
+	{
+		enum Type { Float, Int, Bool, Enum };
+		QString label;
+		int type = Float;
+		double value = 0.0;                 //!< Bool: 0/1; Enum: index
+		double mn = -1.0e6, mx = 1.0e6, step = 0.01;
+		int decimals = 4;
+		QStringList enumNames;
+	};
+	//! Temporary collision-authoring overlay. The triangle soup is in world
+	//! coordinates and never touches the NIF until the operator is applied.
+	void setCollisionPreview( const QVector<Vector3> & triangleSoup );
+	void clearCollisionPreview();
+	//! Read-only Rigging donor overlay. Geometry is copied into target model
+	//! space and is never inserted into the active NIF or selection buffer.
+	void setRiggingDonorPreview( const QVector<Vector3> & triangleSoup );
+	void setRiggingDonorPreviewStyle( bool filled, bool wireframe, float opacity );
+	void clearRiggingDonorPreview();
+	int riggingDonorPreviewTriangleCount() const { return riggingDonorPreviewSoup.size() / 3; }
+	//! Read-only geometry from other open NIF documents. It is deliberately a
+	//! separate neutral overlay so Rigging's selected cyan donor remains clear.
+	void setSessionDocumentPreview( const QVector<Vector3> & triangleSoup );
+	void clearSessionDocumentPreview();
+	//! Per-corner colour overlay used by the Rigging selected-bone heatmap.
+	void setRiggingWeightPreview( const QVector<Vector3> & triangleSoup,
+		const QVector<FloatVector4> & colors );
+	//! Replace only heatmap colours during a live paint stroke; geometry is static.
+	void setRiggingWeightPreviewColors( const QVector<FloatVector4> & colors );
+	void clearRiggingWeightPreview();
+	int riggingWeightPreviewTriangleCount() const { return riggingWeightPreviewSoup.size() / 3; }
+	//! Modal screen-space brush used by the Rigging Manager. The viewport only
+	//! identifies target vertices and falloff; the manager owns model writes.
+	void setRiggingWeightPaintMode( bool enabled, int targetBlock = -1, int brushMode = 0,
+		float radius = 32.0f, float paintWeight = 1.0f, float strength = 0.25f );
+	bool riggingWeightPaintModeActive() const { return riggingWeightPaintMode; }
+	void setRiggingWeightPaintBrushEnabled( bool enabled );
+	bool riggingWeightPaintBrushActive() const { return riggingWeightPaintMode && riggingWeightPaintBrushEnabled; }
+	//! Replace the active bone's weight on every selected vertex (Ctrl+X).
+	//! Runs deferred and re-entrancy-guarded: a Ctrl+X fill triggers a full
+	//! model snapshot, so it must never run nested inside the key event or
+	//! stack up under keyboard autorepeat (that was a hard freeze).
+	void fillRiggingWeightSelection();
+	//! Assign/remove all selected faces for the active binary segment (Ctrl+X).
+	void fillSegmentPaintSelection();
+	//! Guard so a deferred Ctrl+X fill cannot re-enter or queue duplicates.
+	bool paintFillPending = false;
+	float riggingWeightPaintBrushRadius() const { return riggingWeightPaintRadius; }
+	//! Vertex Paint shares the same evaluated edit-cage selection and navigation
+	//! model as Weight Paint. The manager owns RGBA writes and Undo snapshots.
+	void setVertexPaintMode( bool enabled, int targetBlock = -1, float radius = 32.0f );
+	bool vertexPaintModeActive() const { return vertexPaintMode; }
+	void setVertexPaintBrushEnabled( bool enabled );
+	bool vertexPaintBrushActive() const { return vertexPaintMode && vertexPaintBrushEnabled; }
+	float vertexPaintBrushRadius() const { return vertexPaintRadius; }
+	//! Lightweight live preview; does not touch the NIF model.
+	void setVertexPaintPreviewColors( int targetBlock, const QVector<Color4> & colors );
+	//! Binary face-membership painting for FO4 BSSubIndexTriShape segments.
+	void setSegmentPaintMode( bool enabled, int targetBlock = -1, float radius = 32.0f );
+	bool segmentPaintModeActive() const { return segmentPaintMode; }
+	void setSegmentPaintBrushEnabled( bool enabled );
+	bool segmentPaintBrushActive() const { return segmentPaintMode && segmentPaintBrushEnabled; }
+	float segmentPaintBrushRadius() const { return segmentPaintRadius; }
+	bool editModeActive() const { return editMode; }
+	//! Edit the evaluated, skinned cage (default) or raw authored bind vertices.
+	void setEditDeformedCage( bool enabled );
+	bool editDeformedCageEnabled() const { return editDeformedCage; }
+	bool editDeformedCageActive() const { return editMode && ( riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || editDeformedCage ); }
+	//! Evaluate a shape vertex with its current skin and rendered node transform.
+	bool evaluatedVertexWorld( int shapeBlock, int vertexIndex, Vector3 & world ) const;
+	//! Object-mode selection exposed read-only for contextual workspace tools.
+	//! The active object is the primary selection; all others are secondary.
+	const QSet<int> & selectedObjectBlocks() const { return objSelection; }
+	int activeObjectBlock() const { return objActive; }
 
 	NifSkopeOpenGLContext * glContext = nullptr;
 
@@ -121,6 +200,13 @@ public:
 	void flush();
 
 	void center();
+	//! Blender Numpad-.: frame the current selection (falls back to center())
+	void frameSelected();
+	//! Blender Home: frame the complete visible scene, ignoring the active block.
+	void frameAll();
+	//! Handle viewport-scoped Blender numpad navigation. When trigger is false,
+	//! only reports whether the key is owned so ShortcutOverride can reserve it.
+	bool handleBlenderNumpad( int key, Qt::KeyboardModifiers modifiers, bool trigger );
 	void move( float, float, float );
 	void rotate( float, float, float );
 	void rotateLight( float, float );
@@ -135,6 +221,12 @@ public:
 
 	void setOrientation( GLView::ViewState, bool recenter = true );
 	void flipOrientation();
+	inline ViewState viewState() const { return view; }
+	//! Return the exact axis view represented by the current rotation, or
+	//! ViewDefault when the camera is at an arbitrary user angle.
+	ViewState axisAlignedViewState() const;
+	inline bool isPerspectiveProjection() const { return perspectiveMode || view == ViewWalk; }
+	inline float orthographicHalfHeight() const { return float( Dist / Zoom ); }
 
 	void setDebugMode( DebugMode );
 	static bool selectPBRCubeMapForGame( quint32 bsVersion );
@@ -184,17 +276,49 @@ signals:
 	//! A transform gesture was committed: mode (1 move / 2 rotate / 3 scale), axis,
 	//! parameter (move: basis-space offsets; rotate: angle in [0]; scale: factor in [0])
 	void transformGesture( int mode, int axis, const Vector3 & param );
+	//! Show the operator redo panel for Merge (1), Select-Linked (2), or Floating Decal (3)
+	void operatorPanel( int kind, float param );
+	//! Show the generalized operator redo panel (typed parameter list)
+	void operatorPanelEx( const QString & title, const QVector<GLView::TlOpParam> & params );
+	//! A box select was applied (shows the gesture redo panel)
+	void boxSelectApplied();
+	//! A circle-select paint stroke finished (shows the gesture redo panel)
+	void circleSelectApplied();
 	//! A gizmo transform was committed on this block (for auto-keying)
 	void transformCommitted( int blockNumber );
 	//! Object/Edit mode changed (for the toolbar mode selector)
 	void editModeChanged( bool editing );
+	void editDeformedCageChanged( bool enabled );
 	//! Element pick mode changed (0 none, 1 vertex, 2 edge, 3 face)
 	void pickModeChanged( int mode );
+	//! Edit-mode element selection changed (emitted once per event-loop turn,
+	//! after the mutation completed; consumed by the UV editor for mirroring)
+	void elementSelectionChanged();
 	//! Object-mode multi-selection changed (for the block-list highlight)
 	void objectSelectionChanged();
 	//! Viewport-hidden nodes changed (for greying block-list rows)
 	void hiddenNodesChanged();
+	//! Rigging paint samples are deliberately model-free. One begin/end pair is
+	//! one prospective Undo command; commit=false discards the collected stroke.
+	void riggingWeightStrokeBegan();
+	void riggingWeightBrushSample( int targetBlock, const QVector<int> & vertices,
+		const QVector<float> & falloff, int brushMode, float paintWeight, float strength );
+	void riggingWeightStrokeEnded( bool commit );
+	void riggingWeightPaintModeChanged( bool enabled );
+	void riggingWeightPaintBrushChanged( bool enabled );
+	void vertexPaintStrokeBegan();
+	void vertexPaintBrushSample( int targetBlock, const QVector<int> & vertices,
+		const QVector<float> & falloff );
+	void vertexPaintStrokeEnded( bool commit );
+	void vertexPaintModeChanged( bool enabled );
+	void vertexPaintBrushChanged( bool enabled );
+	void segmentPaintStrokeBegan();
+	void segmentPaintBrushSample( int targetBlock, const QVector<int> & triangles );
+	void segmentPaintStrokeEnded( bool commit );
+	void segmentPaintModeChanged( bool enabled );
+	void segmentPaintBrushChanged( bool enabled );
 	void viewpointChanged();
+	void projectionChanged( bool perspective );
 	void frontalLightChanged( bool isFrontal );
 
 	void sequenceStopped();
@@ -236,6 +360,17 @@ private:
 
 	NifModel * model;
 	Scene * scene = nullptr;
+	QVector<Vector3> collisionPreviewSoup;
+	QVector<Vector3> sessionDocumentPreviewSoup;
+	//! Per-vertex flat-shaded colors for the opaque session preview; computed
+	//! once per soup rebuild from face normals against a fixed light direction.
+	QVector<FloatVector4> sessionDocumentPreviewColors;
+	QVector<Vector3> riggingDonorPreviewSoup;
+	bool riggingDonorPreviewFilled = true;
+	bool riggingDonorPreviewWireframe = true;
+	float riggingDonorPreviewOpacity = 0.24f;
+	QVector<Vector3> riggingWeightPreviewSoup;
+	QVector<FloatVector4> riggingWeightPreviewColors;
 
 	ViewState view;
 	DebugMode debugMode;
@@ -255,6 +390,10 @@ private:
 	QStringList gizmoNum;               // typed numeric entry (Blender style); all parts empty = mouse drive
 	int gizmoNumCur = 0;                // part being typed (Tab cycles on unconstrained move)
 	QPoint gizmoStartPos;
+	//! Accumulated cursor-wrap offset: the modal drag is unbounded (Blender),
+	//! so when the cursor wraps around a screen edge the jump is carried here
+	//! and added to the reported position to keep the motion continuous
+	QPoint gizmoWrapOffset;
 	Vector3 gizmoOrigTrans;
 	Matrix gizmoOrigRot;
 	float gizmoOrigScale = 1;
@@ -305,10 +444,21 @@ private:
 	float lastParentScale = 1.0f;
 	float lastOrigScale = 1.0f;
 	int lastUndoIndex = -1;
-	//! Camera transform identical to the one paintGL uses
+	// last committed EDIT-MODE (element) gesture, frozen for the redo panel
+	// (lastElemVerts is declared after the ElemVert struct, below)
+	bool lastGestureElement = false;    //!< the last gesture edited verts, not a node
+	Vector3 lastElemPivot;
+	int lastElemMode = 0;               //!< 1 move, 2 rotate, 3 scale
+	int lastElemAxis = 0;
+	//! Re-apply the last edit-mode transform with new parameters (redo panel)
+	bool gizmoReapplyElement( const Vector3 & param, int axisOverride );
+public:
+	//! Camera transform identical to the one paintGL uses (used by the UV
+	//! editor's Project From View)
 	Transform viewTransform() const;
 	//! Project a world point to logical widget coordinates
 	bool worldToScreen( const Vector3 & w, QPointF & out ) const;
+private:
 	//! Which handle is under this position: 0 none, 1-3 move XYZ, 4 view-plane move,
 	//! 5-7 rotate rings, 8-10 scale boxes
 	int gizmoHandleHitTest( const QPointF & pos ) const;
@@ -372,6 +522,9 @@ public:
 		}
 	};
 	QVector<PickedElement> pickedElems;
+	//! Per-shape edit-mode selections remembered for the session (restored on
+	//! re-entering edit mode on the same mesh; cleared when a new file loads)
+	QHash<int, QVector<PickedElement>> savedElemSelections;
 
 	Vector3 pickedMedian() const;
 	//! Pick the element under pos into the selection; additive toggles membership
@@ -397,6 +550,12 @@ public:
 	//! Render-accurate local->world transform of a node (honours billboard facing,
 	//! unlike worldTrans()), so picking and highlights line up with what is drawn
 	Transform shapeRenderTrans( class Node * n ) const;
+	//! Vertex position in the coordinate space currently exposed by Edit Mode.
+	Vector3 editVertexLocal( class Shape * shape, int vertexIndex ) const;
+	//! Convert an Edit Mode cage position back to the authored vertex position.
+	bool editVertexRawLocal( class Shape * shape, int vertexIndex,
+		const Vector3 & cageLocal, Vector3 & rawLocal ) const;
+	void refreshPickedElementPositions();
 
 	// ---- 3D cursor ----
 	Vector3 cursorPos;                  // world space
@@ -415,8 +574,23 @@ public:
 	QHash<int, QSet<int>> editHiddenTris;
 	void hideSelectedElements();
 	void unhideAllElements();
-	//! Delete picked vertices/edges/faces (and dependent triangles) from the mesh
-	void deletePickedElements();
+	//! Universal toolbar visibility commands. In Edit/Weight Paint, isolate the
+	//! selected geometry; in Object Mode, isolate all selected objects.
+	void isolateSelected();
+	//! Isolate only the active/primary object, regardless of viewport mode.
+	void isolatePrimary();
+	//! Hide every selected object except the active/primary object.
+	void hideSecondarySelection();
+	//! Clear object isolation, hidden objects, and hidden edit geometry.
+	void restoreAllVisibility();
+	//! Blender-style delete menu (X / Delete) in edit mode
+	void showDeleteMenu();
+	//! Delete geometry per Blender mode: 0 Vertices, 1 Edges, 2 Faces, 3 Only Faces
+	void deleteGeometry( int mode );
+	//! Blender-style Merge menu (M) in edit mode
+	void showMergeMenu();
+	//! Merge selected vertices. mode: 0 At Center, 1 At Cursor, 2 By Distance
+	void mergeVertices( int mode, float threshold = 0.001f );
 
 	// ---- Separate (P) / Join (Ctrl+J) / Duplicate (Shift+D), Blender-style ----
 	//! Edit mode: P menu (Selection only for now)
@@ -431,6 +605,19 @@ public:
 	void duplicateSelection();
 	//! Edit-mode Shift+D: duplicate the picked verts/faces within the mesh
 	void duplicateElements();
+	//! Blender-style Ctrl+P menu. The active NiNode is the parent; any selected
+	//! NiAVObject-compatible blocks are children.
+	void showParentMenu();
+	//! Set the selection's parent. mode: 0 replace parents + keep world,
+	//! 1 replace parents + keep local, 2 add another parent + keep local.
+	void parentSelection( int mode );
+	//! Blender-style Alt+P menu.
+	void showClearParentMenu();
+	//! Remove all NiNode parents from selected objects, optionally preserving world transforms.
+	void clearParentSelection( bool keepWorld );
+	//! Copy the selected faces to a separate BSTriShape and lift them along their
+	//! vertex normals, ready for an independently assigned decal material.
+	void createFloatingDecal( float offset = 0.1f );
 	//! Shift+Ctrl+Alt+C: Blender-style Set Origin menu (object mode)
 	void showSetOriginMenu();
 	//! Set the node origin / move geometry. mode: 0 geometry-to-origin,
@@ -439,12 +626,18 @@ public:
 
 	// ---- element modal transform (G/R/S on picked verts/edges/faces) ----
 	bool elemTransform = false;
-	struct ElemVert { int shape; int idx; Vector3 origLocal; Vector3 origWorld; };
+	struct ElemVert { int shape; int idx; Vector3 origLocal; Vector3 origWorld; Vector3 currentLocal; };
 	QVector<ElemVert> elemVerts;
+	QVector<ElemVert> lastElemVerts;    //!< last committed edit gesture, for the redo panel
 	Vector3 elemPivot;                  // world-space pivot (median or 3D cursor)
-	QByteArray elemBefore;              // model snapshot at gesture start (undo)
 	//! Vertices affected by the current picked-element selection, grouped per shape
 	QHash<int, QSet<int>> pickedVertexRefs() const;
+	//! Nearest vertex to a screen position across the editable shapes (within
+	//! radius px); returns its distance and fills out. Floating verts (extruded
+	//! spurs) sit in front of other surfaces and never raycast, so vertex
+	//! picking must consider this in addition to the surface hit.
+	float nearestScreenVertex( const QPointF & pos, float radius,
+		const QSet<int> * only, PickedElement & out ) const;
 	bool gizmoBeginElement( int mode );
 	void gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods );
 	void gizmoEndElement( bool commit );
@@ -460,6 +653,8 @@ public:
 
 	// Blender-like edit mode: vertex/edge/face editing on the selected mesh
 	bool editMode = false;
+	bool editSkinningWasEnabled = false; //!< render option restored when leaving Edit/Weight Paint
+	bool editDeformedCage = true;        //!< evaluated skinned cage; false exposes raw bind vertices
 	int editShapeBlock = -1;            //!< primary mesh (pivot/gizmo fallback)
 	QSet<int> editShapeBlocks;          //!< all meshes being edited (multi-mesh)
 	bool wireframeOverlay = false;      //!< Blender wireframe overlay (black wires over the shaded render)
@@ -473,6 +668,175 @@ public:
 	void syncObjectSelection( int avBlock );
 	//! Set the whole object selection at once (from block-list multi-selection)
 	void setObjectSelection( const QSet<int> & sel, int active );
+
+	// ---- Blender box select (B) + invert (Ctrl+I) ----
+	bool boxSelecting = false;          //!< armed by B until a drag completes / cancels
+	bool boxSelectDrag = false;         //!< actively rubber-banding a rectangle
+	QPoint boxSelectStart;              //!< drag anchor (widget coords)
+	QPoint boxSelectCur;                //!< current drag corner (widget coords)
+	int boxSelectPrevActive = -1;       //!< object-mode primary before the box select
+	//! B: arm box select in edit or object mode
+	void beginBoxSelect();
+	//! Apply the finished rectangle. Additive: plain adds, Shift/Ctrl deselects
+	void applyBoxSelect( const QRect & rect, Qt::KeyboardModifiers mods );
+	QRect lastBoxRect;                  //!< last applied rectangle (for the redo panel)
+	bool boxReapplying = false;         //!< suppress re-arming the panel during Deselect
+	int lastGestureKind = 0;            //!< 1 box, 2 circle stroke (for the redo panel)
+	QVector<QPointF> lastCircleStroke;  //!< brush positions of the last select stroke
+	float lastCircleStrokeRad = 26.0f;  //!< brush radius of that stroke
+	//! The redo panel's Deselect button: re-apply the last box / circle stroke
+	//! subtractively
+	void deselectLastGesture();
+	//! Ctrl+I: invert the selection (object mode: objects; edit mode: elements)
+	void invertSelection();
+	//! A key / context menu: 0 = Blender A toggle, 1 = select all, 2 = deselect all
+	void selectAll( int action = 0 );
+	//! Ctrl+= / Ctrl+-: grow / shrink the edit-mode selection one adjacency ring
+	void selectMoreLess( bool more );
+	//! Alt+click: select the edge loop through the edge under pos (extend keeps
+	//! the current selection). Returns false if no edge was hit.
+	bool selectEdgeLoop( const QPointF & pos, bool extend );
+
+	// ---- Blender circle select (C) ----
+	bool circleSelecting = false;       //!< armed by C until RMB / Esc exits
+	bool circlePainting = false;        //!< LMB held: painting select
+	bool circleErasing = false;         //!< MMB held: painting deselect
+	QPointF circleSelectPos;            //!< brush position (widget coords)
+	static float circleSelectRadius;    //!< brush radius in px (persists for the session)
+	//! C: arm the circle-select brush (LMB paints, MMB erases, wheel resizes,
+	//! RMB / Esc exits)
+	void beginCircleSelect();
+	//! Select (erase=false) / deselect (erase=true) everything under the brush
+	void applyCircleSelect( const QPointF & pos, bool erase );
+
+	// ---- Rigging weight-paint brush ----
+	bool riggingWeightPaintMode = false;
+	bool riggingWeightPaintBrushEnabled = true;
+	bool riggingWeightPaintStroke = false;
+	int riggingWeightPaintTarget = -1;
+	int riggingWeightPaintBrushMode = 0;
+	float riggingWeightPaintRadius = 32.0f;
+	float riggingWeightPaintWeight = 1.0f;
+	float riggingWeightPaintStrength = 0.25f;
+	QPointF riggingWeightPaintPos;
+	QPointF riggingWeightPaintLastSample;
+	//! Static projection/front-face cache for one LMB stroke. Camera, mesh and
+	//! selection cannot change during that stroke, so recomputing them for every
+	//! high-frequency mouse event only adds latency.
+	bool riggingWeightPaintProjectionValid = false;
+	QVector<QPointF> riggingWeightPaintScreen;
+	QVector<int> riggingWeightPaintCandidates;
+	std::chrono::steady_clock::time_point riggingWeightPaintSampleTime;
+	//! Emit vertices touched by a swept screen-space brush segment.
+	void applyRiggingWeightPaintBrush( const QPointF & from, const QPointF & to );
+
+	// ---- RGBA vertex-paint brush ----
+	bool vertexPaintMode = false;
+	bool vertexPaintBrushEnabled = true;
+	bool vertexPaintStroke = false;
+	int vertexPaintTarget = -1;
+	float vertexPaintRadius = 32.0f;
+	QPointF vertexPaintPos;
+	QPointF vertexPaintLastSample;
+	bool vertexPaintProjectionValid = false;
+	QVector<QPointF> vertexPaintScreen;
+	QVector<int> vertexPaintCandidates;
+	std::chrono::steady_clock::time_point vertexPaintSampleTime;
+	void applyVertexPaintBrush( const QPointF & from, const QPointF & to );
+
+	// ---- Binary segment/subsegment face-paint brush ----
+	bool segmentPaintMode = false;
+	bool segmentPaintBrushEnabled = true;
+	bool segmentPaintStroke = false;
+	int segmentPaintTarget = -1;
+	float segmentPaintRadius = 32.0f;
+	QPointF segmentPaintPos;
+	QPointF segmentPaintLastSample;
+	bool segmentPaintProjectionValid = false;
+	QVector<QPointF> segmentPaintScreen;
+	QVector<int> segmentPaintCandidates;
+	std::chrono::steady_clock::time_point segmentPaintSampleTime;
+	void applySegmentPaintBrush( const QPointF & from, const QPointF & to );
+	//! Start a modal G/R/S transform from a shortcut (edit elements if picked,
+	//! else the active object/node). Returns false if a gesture is already active
+	//! so the viewport can handle in-gesture mode switching. Lets the block-list
+	//! selection be transformed even when the list, not the view, has focus.
+	bool startModalTransform( int mode );
+
+	// ---- operator redo panel (Merge distance / Select-Linked angle / decal offset) ----
+	int lastOpKind = 0;                 //!< 0 none, 1 merge, 2 select linked, 3 floating decal
+	float lastOpParam = 0.0f;
+	QVector<PickedElement> lastOpSeed;  //!< selection to restore before a re-run
+	int lastOpUndoIndex = -1;
+	bool opReapplying = false;          //!< suppress re-arming the panel while re-running
+	struct DecalPreviewVert { int shape = -1; int vertex = -1; Vector3 base; Vector3 normal; };
+	QVector<DecalPreviewVert> lastDecalVerts; //!< cached generated verts for fast offset preview
+	//! Re-run the last Merge / Select-Linked / Floating-Decal operation with a new
+	//! value. Returns false if the gesture went stale (something else touched
+	//! the undo stack) so the panel can freeze its inputs.
+	bool reapplyOperator( float param );
+	//! Store the final in-place decal preview in the structural command's redo snapshot.
+	void commitOperatorPreview();
+
+	// ---- generalized operator redo panel (Redo Panel v2, typed params) ----
+	QVector<TlOpParam> lastOpExParams;
+	int lastOpExUndoSteps = 0;          //!< undo-stack entries the whole gesture spans
+	int lastOpExUndoIndex = -1;         //!< stale guard (undo index right after the op)
+	QVector<PickedElement> lastOpExSeed; //!< selection to restore before a re-run
+	//! Re-executes the armed operator with new params. Undo handling and seed
+	//! restore are reapplyOperatorEx's job; this only (re)runs the op.
+	std::function<void( const QVector<TlOpParam> & )> lastOpExRerun;
+	bool opExReapplying = false;
+	//! Arm the generalized panel: the op sets lastOpExRerun first, then calls
+	//! this with the current param values, the seed (pre-op selection) and how
+	//! many undo entries the interactive gesture pushed.
+	void armOperatorPanelEx( const QString & title, const QVector<TlOpParam> & params,
+		int undoSteps, const QVector<PickedElement> & seed );
+	//! Undo the armed gesture, restore its seed selection and re-run with the
+	//! new parameters. Returns false when stale (panel freezes its inputs).
+	bool reapplyOperatorEx( const QVector<TlOpParam> & params );
+
+	// ---- Extrude (E), MODELING_TOOLS_PLAN Phase 1 ----
+	//! Blender E: extrude the picked region / edge run of one BSTriShape,
+	//! then chain a modal move on the new cap
+	void extrudeRegion();
+	bool extrudeChainArmed = false;     //!< the running element move belongs to an extrude
+	QVector<PickedElement> extrudeSeed; //!< pre-extrude selection (redo panel seed)
+	int extrudeUndoIndexBase = -1;      //!< undo index before the extrude snapshot
+	//! Verts whose normals refresh when the chained move commits (cap + ring)
+	QSet<int> extrudeTouchedVerts;
+	int extrudeTouchedShape = -1;
+	//! Arm (and immediately consolidate) the extrude redo panel after the
+	//! chained move commits or cancels; worldDelta = the move's world offset
+	void armExtrudeRedoPanel( const Vector3 & worldDelta );
+
+	// ---- Fill (F) / Bridge Edge Loops, MODELING_TOOLS_PLAN Phase 2 ----
+	//! Blender-style smart connect: one closed rim loop selected = Fill (cap
+	//! the hole), two rim loops = Bridge Edge Loops (band between them)
+	void smartConnect();
+
+	// ---- selection undo (Blender: selections are undoable, Ctrl+Z) ----
+	struct SelState { QVector<PickedElement> picked; QSet<int> objSel; int objActive = -1; };
+	QVector<SelState> selUndo, selRedo;
+	int selUndoModelIndex = -2;         //!< model undo index the sel stacks are synced to
+	//! Coalesces elementSelectionChanged into one deferred emission per turn
+	bool elemSelNotifyPending = false;
+	void scheduleElementSelectionNotify();
+	//! Snapshot the current selection before a change (call at the top of any
+	//! selection mutator so Ctrl+Z can step back through selections)
+	void recordSelection();
+	bool selectionUndo();               //!< restore the previous selection; false if none
+	bool selectionRedo();
+	bool hasSelectionUndo();
+	bool hasSelectionRedo();
+
+	//! Replace one shape's edit-mode element selection from an external editor
+	//! (the UV workspace); other shapes' picks are kept. World positions are
+	//! re-derived internally, so callers only fill block/type/indices.
+	void setElementSelectionExternal( int shapeBlock, const QVector<PickedElement> & elems, int mode );
+	//! Set the element pick mode (1 vertex / 2 edge / 3 face) with notification.
+	void setElementPickMode( int mode );
+
 	//! Enter/leave edit mode (only enters on an editable mesh, not particles)
 	void setEditMode( bool on );
 	//! Is this block a mesh whose vertices we can edit (excludes particle systems)?
@@ -527,6 +891,13 @@ private:
 	float Dist;
 	Vector3 Pos;
 	Vector3 Rot;
+	// The explicit Save/Load View commands are session-only. Keeping the
+	// snapshot on GLView preserves it while opening another NIF in this window
+	// without leaking camera transforms into the next application session.
+	bool userViewSaved = false;
+	float userViewDist = 128.0f;
+	Vector3 userViewPos;
+	Vector3 userViewRot;
 	GLdouble Zoom;
 	GLdouble axis;
 

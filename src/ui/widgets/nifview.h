@@ -82,6 +82,16 @@ public slots:
 	//! Sets Hiding of non-applicable rows
 	void setRowHiding( bool );
 
+	//! Re-apply row hiding over the whole visible block. Safe to call any
+	//! time; defers itself while the model is loading/processing (a bailed
+	//! mid-load application would otherwise strand version-mismatched rows
+	//! visible, since a later select() of the same block skips setRootIndex).
+	void refreshRowHiding();
+
+	//! QTreeView::reset() clears all hidden-row state; re-apply row hiding
+	//! after every model reset so version-mismatched rows stay hidden.
+	void reset() override;
+
 	//! Updates version conditions (connect to dataChanged)
 	void updateConditions( const QModelIndex & topLeft, const QModelIndex & bottomRight );
 protected slots:

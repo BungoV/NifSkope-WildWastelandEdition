@@ -4,6 +4,7 @@
 #include <QPaintEvent>
 #include <QSize>
 #include <QWidget>
+#include <QWheelEvent>
 
 #include "ddstxt16.hpp"
 #include "gamemanager.h"
@@ -16,8 +17,12 @@ protected:
 	const DDSTexture16 *	t = nullptr;
 	// bit 0 = normal map, bit 1 = signed format, bit 2 = invert cube map Z axis
 	unsigned short	textureFlags = 0;
+	unsigned short	baseTextureFlags = 0;
 	unsigned short	defaultSize = 512;
 	float	mipLevel = 0.0f;
+	float zoomFactor = 1.0f;
+	unsigned int channelMask = 15;
+	bool showUVTiles = false;
 
 	static void threadFunction( DDSTexturePreview * p, std::uint32_t * imgBuf, int w, int h, int y0, int y1 );
 
@@ -26,11 +31,19 @@ public:
 	virtual ~DDSTexturePreview();
 
 	void setTexture( const DDSTexture16 * txt, bool isNormalMap, bool invertCubeMapZAxis );
+	void setZoom( float zoom );
+	float zoom() const { return zoomFactor; }
+	void setChannelMask( unsigned int mask );
+	void setUVTiles( bool enabled );
 
 	QSize sizeHint() const override;
 
+signals:
+	void zoomChanged( float zoom );
+
 protected:
 	void paintEvent( QPaintEvent * ) override;
+	void wheelEvent( QWheelEvent * event ) override;
 };
 
 class DDSTextureInfo : public QWidget

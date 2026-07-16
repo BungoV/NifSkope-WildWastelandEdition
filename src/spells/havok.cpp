@@ -2,11 +2,15 @@
 
 #include "gl/glshape.h"
 #include "gl/gltools.h"
+#include "gl/hknpdecode.h"
 #include "glview.h"
 #include "nifskope.h"
+#include "nifsnapshot.h"
 #include "spells/blocks.h"
+#include "data/nifvalue.h"
 
 #include "lib/coacd.h"
+#include "libfo76utils/src/common.hpp"
 #include "lib/nvtristripwrapper.h"
 #include "lib/qhull.h"
 #include "meshoptimizer/src/meshoptimizer.h"
@@ -24,6 +28,7 @@
 #include <QSpinBox>
 
 #include <algorithm> // std::sort
+#include <cfloat>
 
 // Brief description is deliberately not autolinked to class Spell
 /*! \file havok.cpp
@@ -34,6 +39,9 @@
 
 //! For Havok coordinate transforms
 static const float havokConst = 7.0f;
+
+static quint32 collisionCreateMaterial( const NifModel * nif );
+static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigidBody );
 
 //! Creates a convex hull using Qhull
 class spCreateCVS final : public Spell
@@ -67,7 +75,7 @@ public:
 			if ( GLView * ogl = w->getGLView(); ogl )
 				scene = ogl->getScene();
 		}
-		if ( !scene && scene->renderer )
+		if ( !scene || !scene->renderer )
 			return false;
 		QModelIndex iBlock = nif->getBlockIndex( index );
 		if ( auto node = scene->getNode( nif, iBlock ); node )
@@ -109,7 +117,7 @@ public:
 				if ( GLView * ogl = w->getGLView(); ogl )
 					scene = ogl->getScene();
 			}
-			if ( !scene && scene->renderer )
+			if ( !scene || !scene->renderer )
 				return index;
 			if ( auto node = scene->getNode( nif, iBlock ); node )
 				getShapeData( meshes, nif, node, nif->getBlockNumber( iParent ) );
@@ -126,8 +134,34 @@ public:
 		float	simplifyMaxError = 0.0f;
 		bool	replaceShape = false;
 		bool	enableCoACD = false;
-		if ( !settingsDialog( coacd, precision, radius, simplifyMaxError, replaceShape, enableCoACD ) )
+		QSettings previewSettings;
+		const bool quickCreate = previewSettings.value( "CollisionManager/Preview/QuickCreate", false ).toBool();
+		if ( quickCreate ) {
+			precision = previewSettings.value( "CollisionManager/Preview/Precision", 0.25f ).toFloat();
+			radius = previewSettings.value( "CollisionManager/Preview/Radius", 0.05f ).toFloat();
+			replaceShape = previewSettings.value( "CollisionManager/Create/Replace", true ).toBool();
+			enableCoACD = previewSettings.value( "CollisionManager/Preview/Decomposition", false ).toBool();
+			coacd.threshold = previewSettings.value( "CollisionManager/Preview/Threshold", 0.05 ).toDouble();
+			coacd.maxConvexHull = previewSettings.value( "CollisionManager/Preview/MaxHulls", 16 ).toInt();
+			coacd.merge = ( coacd.maxConvexHull > 0 );
+		} else if ( !settingsDialog( coacd, precision, radius, simplifyMaxError, replaceShape, enableCoACD ) ) {
 			return index;
+		}
+
+		if ( quickCreate ) {
+			float ratio = std::clamp( previewSettings.value( "CollisionManager/Preview/Ratio", 1.0 ).toFloat(), 0.01f, 1.0f );
+			if ( ratio < 0.999f ) {
+				auto & m = meshes.first();
+				QVector<unsigned int> newIndices( m.indices.size() );
+				size_t target = std::max<size_t>( 3, size_t( ( m.indices.size() / 3 ) * ratio ) * 3 );
+				size_t n = meshopt_simplify( newIndices.data(), m.indices.constData(), size_t( m.indices.size() ),
+					&( m.verts.constFirst()[0] ), size_t( m.verts.size() ), sizeof( Vector3 ),
+					target, 0.02f, meshopt_SimplifyLockBorder, nullptr );
+				newIndices.resize( qsizetype( n ) );
+				m.indices = newIndices;
+				m.removeDuplicateVertices();
+			}
+		}
 
 		if ( simplifyMaxError >= 0.00005f ) {
 			auto &	m = meshes.first();
@@ -221,6 +255,11 @@ public:
 			// radius is always 0.1?
 			// TODO: Figure out if radius is not arbitrarily set in vanilla NIFs
 			nif->set<float>( iCVS, "Radius", radius );
+			QModelIndex materialShape = iCVS;
+			if ( nif->blockInherits( materialShape, "bhkTransformShape" ) )
+				materialShape = nif->getBlockIndex( nif->getLink( materialShape, "Shape" ) );
+			if ( quint32 material = collisionCreateMaterial( nif ); material && materialShape.isValid() )
+				nif->set<quint32>( materialShape, "Material", material );
 
 			QModelIndex collisionLink = nif->getIndex( iParent, "Collision Object" );
 			QModelIndex collisionObject = nif->getBlockIndex( nif->getLink( collisionLink ) );
@@ -242,6 +281,7 @@ public:
 
 				nif->setLink( rigidBodyLink, nif->getBlockNumber( rigidBody ) );
 			}
+			applyCollisionBodySettings( nif, rigidBody );
 
 			QPersistentModelIndex shapeLink = nif->getIndex( rigidBody, "Shape" );
 			QPersistentModelIndex shape = nif->getBlockIndex( nif->getLink( shapeLink ) );
@@ -613,7 +653,555 @@ bool spCreateCVS::settingsDialog( CoACD & coacd, float & precision, float & radi
 	return true;
 }
 
-REGISTER_SPELL( spCreateCVS )
+static quint32 collisionCreateMaterial( const NifModel * nif )
+{
+	QSettings settings;
+	QString text = settings.value( "CollisionManager/Create/Material", "MaterialMetalSolid" ).toString().trimmed();
+	bool ok = false;
+	quint32 value = text.toUInt( &ok, 0 );
+	if ( !ok ) {
+		QString enumType = nif->getBSVersion() >= 170 ? QStringLiteral( "Fallout76HavokMaterial" )
+			: nif->getBSVersion() >= 130 ? QStringLiteral( "Fallout4HavokMaterial" )
+			: nif->getBSVersion() >= 83 ? QStringLiteral( "SkyrimHavokMaterial" )
+			: nif->getBSVersion() > 0 ? QStringLiteral( "Fallout3HavokMaterial" )
+			: QStringLiteral( "OblivionHavokMaterial" );
+		value = NifValue::enumOptionValue( enumType, text, &ok );
+		if ( !ok ) {
+			// Accept the exporter-facing label (Concrete) and migrate the old
+			// Collision Manager's shortened identifier (StoneConcrete) while
+			// preserving the canonical enum value/CRC.
+			const auto & options = NifValue::enumOptionData( enumType ).o;
+			for ( auto it = options.cbegin(); it != options.cend(); ++it ) {
+				QString shortId = it.value().first;
+				if ( shortId.startsWith( QLatin1String( "Material" ) ) ) shortId.remove( 0, 8 );
+				if ( it.value().second.compare( text, Qt::CaseInsensitive ) == 0
+					|| shortId.compare( text, Qt::CaseInsensitive ) == 0 ) {
+					value = it.key(); ok = true; break;
+				}
+			}
+		}
+	}
+	if ( !ok ) {
+		const QVariantMap custom = settings.value( "CollisionManager/CustomMaterials" ).toMap();
+		auto it = custom.constFind( text );
+		if ( it != custom.cend() ) { value = it.value().toUInt(); ok = true; }
+	}
+	if ( !ok && !text.isEmpty() && nif->getBSVersion() >= 130 ) {
+		// Fallout 4/76 permit custom physical-material editor IDs. Match the
+		// Bethesda exporter: lowercase CRC32, initial value 0, no final XOR.
+		std::uint32_t hash = 0;
+		for ( QChar c : text )
+			hashFunctionCRC32( hash, static_cast<unsigned char>( c.toLower().unicode() ) );
+		value = quint32( hash ); ok = true;
+		QVariantMap custom = settings.value( "CollisionManager/CustomMaterials" ).toMap();
+		custom.insert( text, value );
+		settings.setValue( "CollisionManager/CustomMaterials", custom );
+	}
+	return ok ? value : 0;
+}
+
+static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigidBody )
+{
+	QSettings settings;
+	const int layer = settings.value( "CollisionManager/Create/Layer", 10 ).toInt();
+	const int preset = settings.value( "CollisionManager/Create/Preset", 1 ).toInt();
+	QModelIndex info = nif->getIndex( rigidBody, "Rigid Body Info" );
+	if ( !info.isValid() ) return;
+	QModelIndex filter = nif->getIndex( info, "Havok Filter" );
+	if ( filter.isValid() ) nif->set<quint32>( filter, "Layer", quint32( layer ) );
+	if ( preset == 2 ) return;
+	const bool dynamic = ( preset == 1 );
+	const bool animated = ( preset == 3 );
+	// Static and Stairhelper bodies are fixed; Anim Static is keyframed. Prop
+	// keeps the established dynamic/moving defaults.
+	nif->set<quint32>( info, "Motion System", dynamic ? 3u : animated ? 6u : 7u );
+	nif->set<quint32>( info, "Quality Type", dynamic ? 4u : animated ? 2u : 1u );
+	nif->set<quint32>( info, "Solver Deactivation", dynamic ? 2u : 1u );
+	nif->set<float>( info, "Mass", dynamic ? 10.0f : 0.0f );
+	nif->set<float>( info, "Friction", 0.5f );
+	nif->set<float>( info, "Restitution", 0.4f );
+}
+
+static QModelIndex attachCollisionShape( NifModel * nif, const QModelIndex & parentNode,
+	const QModelIndex & newShape, const QModelIndex & fallback )
+{
+	QSettings settings;
+	const bool replace = settings.value( "CollisionManager/Create/Replace", true ).toBool();
+	QModelIndex collisionLink = nif->getIndex( parentNode, "Collision Object" );
+	QModelIndex collisionObject = nif->getBlockIndex( nif->getLink( collisionLink ) );
+	if ( collisionObject.isValid() && !nif->blockInherits( collisionObject, "bhkCollisionObject" ) ) {
+		QMessageBox::warning( nullptr, Spell::tr( "Create Collision" ),
+			Spell::tr( "This node has compiled collision. Decompile it before adding editable collision shapes." ) );
+		spRemoveBranch().castIfApplicable( nif, newShape );
+		return fallback;
+	}
+	if ( !collisionObject.isValid() ) {
+		collisionObject = nif->insertNiBlock( "bhkCollisionObject" );
+		nif->setLink( collisionLink, nif->getBlockNumber( collisionObject ) );
+		nif->setLink( collisionObject, "Target", nif->getBlockNumber( parentNode ) );
+	}
+	QModelIndex rigidBody = nif->getBlockIndex( nif->getLink( collisionObject, "Body" ) );
+	if ( !rigidBody.isValid() ) {
+		rigidBody = nif->insertNiBlock( "bhkRigidBody" );
+		nif->setLink( collisionObject, "Body", nif->getBlockNumber( rigidBody ) );
+	}
+
+	QModelIndex shapeLink = nif->getIndex( rigidBody, "Shape" );
+	QPersistentModelIndex oldShape = nif->getBlockIndex( nif->getLink( shapeLink ) );
+	if ( oldShape.isValid() && !replace ) {
+		QVector<qint32> shapes;
+		QModelIndex listShape = oldShape;
+		if ( nif->blockInherits( oldShape, "bhkListShape" ) ) {
+			shapes = nif->getLinkArray( oldShape, "Sub Shapes" );
+		} else {
+			shapes.append( nif->getBlockNumber( oldShape ) );
+			listShape = nif->insertNiBlock( "bhkListShape" );
+			nif->setLink( shapeLink, nif->getBlockNumber( listShape ) );
+		}
+		shapes.append( nif->getBlockNumber( newShape ) );
+		nif->set<uint>( listShape, "Num Sub Shapes", uint( shapes.size() ) );
+		nif->updateArraySize( listShape, "Sub Shapes" );
+		nif->setLinkArray( listShape, "Sub Shapes", shapes );
+		nif->set<uint>( listShape, "Num Filters", uint( shapes.size() ) );
+		nif->updateArraySize( listShape, "Filters" );
+	} else {
+		nif->setLink( shapeLink, nif->getBlockNumber( newShape ) );
+		if ( oldShape.isValid() )
+			spRemoveBranch().castIfApplicable( nif, oldShape );
+	}
+
+	applyCollisionBodySettings( nif, rigidBody );
+	return rigidBody;
+}
+
+static bool gatherCollisionMesh( NifModel * nif, const QModelIndex & index,
+	QModelIndex & parentNode, spCreateCVS::MeshData & mesh )
+{
+	QModelIndex block = nif->getBlockIndex( index );
+	parentNode = block;
+	if ( !nif->blockInherits( parentNode, "NiNode" ) ) {
+		parentNode = nif->getBlockIndex( nif->getParent( block ) );
+		if ( !( parentNode.isValid() && nif->blockInherits( parentNode, "NiNode" ) ) )
+			return false;
+	}
+	Scene * scene = nullptr;
+	if ( NifSkope * w = dynamic_cast<NifSkope *>( nif->getWindow() ); w ) {
+		if ( GLView * ogl = w->getGLView(); ogl ) scene = ogl->getScene();
+	}
+	if ( !scene || !scene->renderer ) return false;
+	QVector<spCreateCVS::MeshData> meshes;
+	if ( const Node * node = scene->getNode( nif, block ); node )
+		spCreateCVS::getShapeData( meshes, nif, node, nif->getBlockNumber( parentNode ) );
+	if ( meshes.isEmpty() ) return false;
+	mesh = meshes.first();
+	mesh.removeDuplicateVertices();
+	return mesh.verts.size() >= 3;
+}
+
+static void collisionPcaBasis( const QVector<Vector3> & points, Vector3 & center, Vector3 axes[3] )
+{
+	center = Vector3();
+	for ( const Vector3 & p : points ) center += p;
+	center /= float( points.size() );
+	float a[3][3] = {};
+	for ( const Vector3 & p : points ) {
+		Vector3 d = p - center;
+		for ( int r = 0; r < 3; r++ ) for ( int c = 0; c < 3; c++ ) a[r][c] += d[r] * d[c];
+	}
+	float v[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+	for ( int iteration = 0; iteration < 24; iteration++ ) {
+		int p = 0, q = 1;
+		if ( std::fabs( a[0][2] ) > std::fabs( a[p][q] ) ) { p = 0; q = 2; }
+		if ( std::fabs( a[1][2] ) > std::fabs( a[p][q] ) ) { p = 1; q = 2; }
+		if ( std::fabs( a[p][q] ) < 1.0e-8f ) break;
+		float angle = 0.5f * std::atan2( 2.0f * a[p][q], a[q][q] - a[p][p] );
+		float cs = std::cos( angle ), sn = std::sin( angle );
+		for ( int k = 0; k < 3; k++ ) {
+			float apk = a[p][k], aqk = a[q][k];
+			a[p][k] = cs * apk - sn * aqk; a[q][k] = sn * apk + cs * aqk;
+		}
+		for ( int k = 0; k < 3; k++ ) {
+			float akp = a[k][p], akq = a[k][q];
+			a[k][p] = cs * akp - sn * akq; a[k][q] = sn * akp + cs * akq;
+			float vkp = v[k][p], vkq = v[k][q];
+			v[k][p] = cs * vkp - sn * vkq; v[k][q] = sn * vkp + cs * vkq;
+		}
+	}
+	int order[3] = { 0, 1, 2 };
+	std::sort( order, order + 3, [&a]( int x, int y ) { return a[x][x] > a[y][y]; } );
+	for ( int i = 0; i < 3; i++ ) axes[i] = Vector3( v[0][order[i]], v[1][order[i]], v[2][order[i]] ).normalize();
+	if ( Vector3::dotproduct( Vector3::crossproduct( axes[0], axes[1] ), axes[2] ) < 0.0f ) axes[2] = -axes[2];
+}
+
+enum FittedCollisionType { FitBox, FitSphere, FitCapsule };
+
+static QModelIndex createFittedCollision( NifModel * nif, const QModelIndex & index, FittedCollisionType kind )
+{
+	QModelIndex parent;
+	spCreateCVS::MeshData mesh;
+	if ( !gatherCollisionMesh( nif, index, parent, mesh ) ) return index;
+	Vector3 center, axes[3];
+	collisionPcaBasis( mesh.verts, center, axes );
+	const quint32 material = collisionCreateMaterial( nif );
+	nif->setState( BaseModel::Processing );
+	QModelIndex rootShape, materialShape;
+	if ( kind == FitBox ) {
+		float lo[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
+		float hi[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+		for ( const Vector3 & point : mesh.verts ) for ( int i = 0; i < 3; i++ ) {
+			float p = Vector3::dotproduct( point, axes[i] ); lo[i] = std::min( lo[i], p ); hi[i] = std::max( hi[i], p );
+		}
+		Vector3 boxCenter, dimensions;
+		for ( int i = 0; i < 3; i++ ) {
+			boxCenter += axes[i] * ( ( lo[i] + hi[i] ) * 0.5f ); dimensions[i] = ( hi[i] - lo[i] ) * 0.5f;
+		}
+		materialShape = nif->insertNiBlock( "bhkBoxShape" );
+		nif->set<Vector3>( materialShape, "Dimensions", dimensions );
+		nif->set<float>( materialShape, "Radius", 0.05f );
+		Transform transform; transform.translation = boxCenter;
+		for ( int r = 0; r < 3; r++ ) for ( int c = 0; c < 3; c++ ) transform.rotation( r, c ) = axes[c][r];
+		rootShape = nif->insertNiBlock( "bhkTransformShape" );
+		nif->setLink( rootShape, "Shape", nif->getBlockNumber( materialShape ) );
+		nif->set<Matrix4>( rootShape, "Transform", transform.toMatrix4() );
+	} else if ( kind == FitSphere ) {
+		Vector3 a = mesh.verts.first(), b = a;
+		for ( const Vector3 & p : mesh.verts ) if ( ( p - a ).squaredLength() > ( b - a ).squaredLength() ) b = p;
+		a = b;
+		for ( const Vector3 & p : mesh.verts ) if ( ( p - a ).squaredLength() > ( b - a ).squaredLength() ) b = p;
+		center = ( a + b ) * 0.5f;
+		float radius = ( b - a ).length() * 0.5f;
+		for ( const Vector3 & p : mesh.verts ) {
+			float distance = ( p - center ).length();
+			if ( distance > radius ) { float next = ( radius + distance ) * 0.5f; center += ( p - center ) * ( ( next - radius ) / distance ); radius = next; }
+		}
+		materialShape = nif->insertNiBlock( "bhkSphereShape" );
+		nif->set<float>( materialShape, "Radius", radius );
+		rootShape = nif->insertNiBlock( "bhkTransformShape" );
+		nif->setLink( rootShape, "Shape", nif->getBlockNumber( materialShape ) );
+		nif->set<Matrix4>( rootShape, "Transform", Transform( center, 1.0f ).toMatrix4() );
+	} else {
+		float lo = FLT_MAX, hi = -FLT_MAX, radius = 0.0f;
+		for ( const Vector3 & point : mesh.verts ) {
+			Vector3 d = point - center; float t = Vector3::dotproduct( d, axes[0] );
+			lo = std::min( lo, t ); hi = std::max( hi, t ); radius = std::max( radius, ( d - axes[0] * t ).length() );
+		}
+		float a = lo + radius, b = hi - radius;
+		if ( a > b ) a = b = ( lo + hi ) * 0.5f;
+		materialShape = rootShape = nif->insertNiBlock( "bhkCapsuleShape" );
+		nif->set<Vector3>( rootShape, "First Point", center + axes[0] * a );
+		nif->set<Vector3>( rootShape, "Second Point", center + axes[0] * b );
+		nif->set<float>( rootShape, "Radius", radius ); nif->set<float>( rootShape, "Radius 1", radius ); nif->set<float>( rootShape, "Radius 2", radius );
+	}
+	if ( material ) nif->set<quint32>( materialShape, "Material", material );
+	QModelIndex result = attachCollisionShape( nif, parent, rootShape, index );
+	nif->restoreState(); nif->updateModel();
+	return result;
+}
+
+#define DECLARE_FITTED_COLLISION_SPELL( ClassName, DisplayName, Kind ) \
+class ClassName final : public Spell { public: \
+	QString name() const override final { return Spell::tr( DisplayName ); } \
+	QString page() const override final { return Spell::tr( "Havok" ); } \
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { spCreateCVS s; return s.isApplicable( nif, index ); } \
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final { return createFittedCollision( nif, index, Kind ); } \
+}; REGISTER_SPELL( ClassName )
+
+DECLARE_FITTED_COLLISION_SPELL( spCreateBoxCollision, "Create Box Collision", FitBox )
+DECLARE_FITTED_COLLISION_SPELL( spCreateSphereCollision, "Create Sphere Collision", FitSphere )
+DECLARE_FITTED_COLLISION_SPELL( spCreateCapsuleCollision, "Create Capsule Collision", FitCapsule )
+
+class spCreateConvexHullCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Create Convex Hull Collision" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { spCreateCVS s; return s.isApplicable( nif, index ); }
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QSettings s; s.beginGroup( "Spells/Havok/Create Convex Shapes" ); s.setValue( "Enable CoACD", false ); s.endGroup();
+		spCreateCVS create; return create.cast( nif, index );
+	}
+};
+REGISTER_SPELL( spCreateConvexHullCollision )
+
+class spCreateConvexDecompositionCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Create Convex Decomposition Collision" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { spCreateCVS s; return s.isApplicable( nif, index ); }
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QSettings s; s.beginGroup( "Spells/Havok/Create Convex Shapes" ); s.setValue( "Enable CoACD", true ); s.endGroup();
+		spCreateCVS create; return create.cast( nif, index );
+	}
+};
+REGISTER_SPELL( spCreateConvexDecompositionCollision )
+
+//! Create an accurate editable triangle-mesh collision from rendered geometry.
+class spCreateAccurateMeshCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Create Accurate Mesh Collision" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		spCreateCVS geometryCheck;
+		return geometryCheck.isApplicable( nif, index );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex iBlock = nif->getBlockIndex( index );
+		QModelIndex iParent = iBlock;
+		if ( !nif->blockInherits( iParent, "NiNode" ) ) {
+			iParent = nif->getBlockIndex( nif->getParent( iBlock ) );
+			if ( !( iParent.isValid() && nif->blockInherits( iParent, "NiNode" ) ) )
+				return index;
+		}
+
+		Scene * scene = nullptr;
+		if ( NifSkope * w = dynamic_cast<NifSkope *>( nif->getWindow() ); w ) {
+			if ( GLView * ogl = w->getGLView(); ogl )
+				scene = ogl->getScene();
+		}
+		if ( !scene || !scene->renderer )
+			return index;
+
+		QVector<spCreateCVS::MeshData> meshes;
+		if ( const Node * node = scene->getNode( nif, iBlock ); node )
+			spCreateCVS::getShapeData( meshes, nif, node, nif->getBlockNumber( iParent ) );
+		if ( meshes.isEmpty() )
+			return index;
+		auto & mesh = meshes.first();
+		mesh.removeDuplicateVertices();
+		QSettings previewSettings;
+		if ( previewSettings.value( "CollisionManager/Preview/QuickCreate", false ).toBool() ) {
+			float ratio = std::clamp( previewSettings.value( "CollisionManager/Preview/Ratio", 1.0 ).toFloat(), 0.01f, 1.0f );
+			if ( ratio < 0.999f && mesh.indices.size() >= 6 ) {
+				QVector<unsigned int> newIndices( mesh.indices.size() );
+				size_t target = std::max<size_t>( 3, size_t( ( mesh.indices.size() / 3 ) * ratio ) * 3 );
+				size_t n = meshopt_simplify( newIndices.data(), mesh.indices.constData(), size_t( mesh.indices.size() ),
+					&( mesh.verts.constFirst()[0] ), size_t( mesh.verts.size() ), sizeof( Vector3 ),
+					target, 0.02f, meshopt_SimplifyLockBorder, nullptr );
+				newIndices.resize( qsizetype( n ) );
+				mesh.indices = newIndices;
+				mesh.removeDuplicateVertices();
+			}
+		}
+		if ( mesh.verts.size() < 3 || mesh.indices.size() < 3 )
+			return index;
+		if ( mesh.verts.size() > 65535 ) {
+			QMessageBox::warning( nullptr, tr( "Create Accurate Mesh Collision" ),
+				tr( "Accurate mesh collision is limited to 65,535 vertices. Decimate the geometry first." ) );
+			return index;
+		}
+
+		nif->setState( BaseModel::Processing );
+		QModelIndex iData = nif->insertNiBlock( "NiTriStripsData" );
+		const int nv = int( mesh.verts.size() );
+		const int nt = int( mesh.indices.size() / 3 );
+		const float scale = spCreateCVS::getHavokScale( nif );
+		QVector<Vector3> verts( nv );
+		Vector3 center;
+		for ( int v = 0; v < nv; v++ ) {
+			verts[v] = mesh.verts.at( v ) * scale;
+			center += verts[v];
+		}
+		center /= float( nv );
+		float boundRadius = 0.0f;
+		for ( const Vector3 & v : verts )
+			boundRadius = std::max( boundRadius, ( v - center ).length() );
+
+		nif->set<int>( iData, "Num Vertices", nv );
+		nif->set<int>( iData, "Has Vertices", 1 );
+		nif->updateArraySize( iData, "Vertices" );
+		nif->setArray<Vector3>( iData, "Vertices", verts );
+		QModelIndex iBound = nif->getIndex( iData, "Bounding Sphere" );
+		if ( iBound.isValid() ) {
+			nif->set<Vector3>( iBound, "Center", center );
+			nif->set<float>( iBound, "Radius", boundRadius );
+		}
+		nif->set<int>( iData, "Num Triangles", nt );
+		nif->set<int>( iData, "Num Strips", nt );
+		nif->set<int>( iData, "Has Points", 1 );
+		QModelIndex iLengths = nif->getIndex( iData, "Strip Lengths" );
+		QModelIndex iPoints = nif->getIndex( iData, "Points" );
+		if ( iLengths.isValid() && iPoints.isValid() ) {
+			nif->updateArraySize( iLengths );
+			nif->updateArraySize( iPoints );
+			for ( int t = 0; t < nt; t++ ) {
+				nif->set<int>( nif->getIndex( iLengths, t ), 3 );
+				QModelIndex iStrip = nif->getIndex( iPoints, t );
+				nif->updateArraySize( iStrip );
+				const int o = t * 3;
+				nif->setArray<quint16>( iStrip, {
+					quint16( mesh.indices.at( o ) ), quint16( mesh.indices.at( o + 1 ) ),
+					quint16( mesh.indices.at( o + 2 ) ) } );
+			}
+		}
+
+		QModelIndex iStrips = nif->insertNiBlock( "bhkNiTriStripsShape" );
+		nif->set<float>( iStrips, "Radius", 0.1f );
+		nif->set<uint>( iStrips, "Num Strips Data", 1 );
+		nif->updateArraySize( iStrips, "Strips Data" );
+		nif->setLink( nif->getIndex( nif->getIndex( iStrips, "Strips Data" ), 0 ),
+			nif->getBlockNumber( iData ) );
+		nif->set<uint>( iStrips, "Num Filters", 1 );
+		nif->updateArraySize( iStrips, "Filters" );
+		if ( quint32 material = collisionCreateMaterial( nif ); material )
+			nif->set<quint32>( iStrips, "Material", material );
+		QModelIndex iMopp = nif->insertNiBlock( "bhkMoppBvTreeShape" );
+		nif->setLink( iMopp, "Shape", nif->getBlockNumber( iStrips ) );
+		QModelIndex result = attachCollisionShape( nif, iParent, iMopp, index );
+		nif->restoreState();
+		nif->updateModel();
+		return result;
+	}
+};
+
+REGISTER_SPELL( spCreateAccurateMeshCollision )
+
+//! Build temporary world-space collision geometry for the Collision Manager.
+//! kind 0 = convex hull/decomposition, kind 1 = accurate/decimated mesh.
+bool tlBuildCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
+	float ratio, bool decomposition, float precision, float threshold, int maxHulls,
+	QVector<Vector3> & triangleSoup, QString & statistics )
+{
+	triangleSoup.clear();
+	statistics.clear();
+	QModelIndex parent;
+	spCreateCVS::MeshData mesh;
+	if ( !gatherCollisionMesh( nif, index, parent, mesh ) || mesh.indices.size() < 3 ) {
+		statistics = Spell::tr( "Select a BSTriShape or NiNode with rendered geometry." );
+		return false;
+	}
+	ratio = std::clamp( ratio, 0.01f, 1.0f );
+	if ( ratio < 0.999f && mesh.indices.size() >= 6 ) {
+		QVector<unsigned int> simplified( mesh.indices.size() );
+		size_t target = std::max<size_t>( 3, size_t( ( mesh.indices.size() / 3 ) * ratio ) * 3 );
+		size_t n = meshopt_simplify( simplified.data(), mesh.indices.constData(), size_t( mesh.indices.size() ),
+			&( mesh.verts.constFirst()[0] ), size_t( mesh.verts.size() ), sizeof( Vector3 ),
+			target, 0.02f, meshopt_SimplifyLockBorder, nullptr );
+		simplified.resize( qsizetype( n ) );
+		mesh.indices = simplified;
+		mesh.removeDuplicateVertices();
+	}
+
+	Scene * scene = nullptr;
+	if ( NifSkope * w = dynamic_cast<NifSkope *>( nif->getWindow() ); w ) {
+		if ( GLView * view = w->getGLView(); view ) scene = view->getScene();
+	}
+	const Node * parentNode = scene ? scene->getNode( nif, parent ) : nullptr;
+	if ( !parentNode ) {
+		statistics = Spell::tr( "The source node is not available in the viewport." );
+		return false;
+	}
+	const Transform world = parentNode->worldTrans();
+	const float scale = spCreateCVS::getHavokScale( nif );
+	auto appendTriangle = [&]( const Vector3 & a, const Vector3 & b, const Vector3 & c ) {
+		triangleSoup.append( world * ( a * scale ) );
+		triangleSoup.append( world * ( b * scale ) );
+		triangleSoup.append( world * ( c * scale ) );
+	};
+
+	int hullCount = 0;
+	if ( kind == 1 ) {
+		for ( qsizetype i = 0; i + 2 < mesh.indices.size(); i += 3 ) {
+			unsigned int a = mesh.indices.at( i ), b = mesh.indices.at( i + 1 ), c = mesh.indices.at( i + 2 );
+			if ( a < unsigned( mesh.verts.size() ) && b < unsigned( mesh.verts.size() ) && c < unsigned( mesh.verts.size() ) )
+				appendTriangle( mesh.verts.at( a ), mesh.verts.at( b ), mesh.verts.at( c ) );
+		}
+	} else {
+		QVector<spCreateCVS::MeshData> pieces;
+		pieces.append( mesh );
+		if ( decomposition ) {
+			CoACD coacd;
+			coacd.threshold = std::clamp( double( threshold ), 0.01, 1.0 );
+			coacd.maxConvexHull = std::clamp( maxHulls, 1, 256 );
+			coacd.merge = true;
+			spCreateCVS::createConvexShapes( pieces, coacd );
+		}
+		for ( const auto & piece : pieces ) {
+			QVector<Vector4> hullVerts, hullNorms;
+			QVector<Triangle> faces = compute_convex_hull( piece.verts, hullVerts, hullNorms,
+				std::max( 0.0f, precision ) / scale );
+			if ( faces.isEmpty() ) continue;
+			hullCount++;
+			for ( const Triangle & face : faces ) {
+				if ( face[0] < piece.verts.size() && face[1] < piece.verts.size() && face[2] < piece.verts.size() )
+					appendTriangle( piece.verts.at( face[0] ), piece.verts.at( face[1] ), piece.verts.at( face[2] ) );
+			}
+		}
+	}
+	if ( triangleSoup.isEmpty() ) {
+		statistics = Spell::tr( "No preview geometry could be generated with these settings." );
+		return false;
+	}
+	statistics = kind == 1
+		? Spell::tr( "%1 triangles  -  %2% of source" ).arg( triangleSoup.size() / 3 ).arg( int( ratio * 100.0f + 0.5f ) )
+		: Spell::tr( "%1 hull(s)  -  %2 preview triangles" ).arg( hullCount ).arg( triangleSoup.size() / 3 );
+	return true;
+}
+
+QModelIndex tlCommitCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
+	float ratio, bool decomposition, float precision, float threshold, int maxHulls )
+{
+	QSettings settings;
+	settings.setValue( "CollisionManager/Preview/QuickCreate", true );
+	settings.setValue( "CollisionManager/Preview/Ratio", std::clamp( ratio, 0.01f, 1.0f ) );
+	settings.setValue( "CollisionManager/Preview/Decomposition", decomposition );
+	settings.setValue( "CollisionManager/Preview/Precision", precision );
+	settings.setValue( "CollisionManager/Preview/Threshold", threshold );
+	settings.setValue( "CollisionManager/Preview/MaxHulls", maxHulls );
+	QModelIndex result;
+	if ( kind == 1 ) {
+		spCreateAccurateMeshCollision create;
+		result = create.cast( nif, index );
+	} else {
+		spCreateCVS create;
+		result = create.cast( nif, index );
+	}
+	settings.setValue( "CollisionManager/Preview/QuickCreate", false );
+	return result;
+}
+
+//! User-facing collision creation entry point. Ask for the fundamental shape
+//! choice before opening the chosen workflow's detailed settings.
+class spCreateCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Create Collision…" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		spCreateCVS create;
+		return create.isApplicable( nif, index );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QMessageBox choice( QMessageBox::Question, tr( "Create Collision" ),
+			tr( "Choose how closely the collision should follow the source geometry." ),
+			QMessageBox::Cancel );
+		QPushButton * accurate = choice.addButton( tr( "Accurate Mesh" ), QMessageBox::AcceptRole );
+		QPushButton * convex = choice.addButton( tr( "Convex" ), QMessageBox::ActionRole );
+		choice.setDefaultButton( convex );
+		choice.exec();
+		if ( choice.clickedButton() == accurate ) {
+			spCreateAccurateMeshCollision create;
+			return create.cast( nif, index );
+		}
+		if ( choice.clickedButton() != convex )
+			return index;
+		spCreateCVS create;
+		return create.cast( nif, index );
+	}
+};
+
+REGISTER_SPELL( spCreateCollision )
 
 
 //! Transforms Havok constraints
@@ -965,3 +1553,411 @@ public:
 };
 
 REGISTER_SPELL( spConvertConvexListShape )
+
+//! Decompile FO4 compiled collision (bhkPhysicsSystem) into editable legacy blocks
+class spDecodeCompiledCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Decompile Compiled Collision" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+
+	//! Resolve the bhkPhysicsSystem / bhkRagdollSystem from the clicked block
+	static QModelIndex systemBlock( const NifModel * nif, const QModelIndex & index )
+	{
+		QModelIndex iBlock = nif->getBlockIndex( index );
+		if ( nif->blockInherits( iBlock, "bhkNPCollisionObject" ) )
+			iBlock = nif->getBlockIndex( nif->getLink( iBlock, "Data" ) );
+		if ( nif->isNiBlock( iBlock, "bhkPhysicsSystem" ) || nif->isNiBlock( iBlock, "bhkRagdollSystem" ) )
+			return iBlock;
+		return QModelIndex();
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		QModelIndex iSys = systemBlock( nif, index );
+		return iSys.isValid() && nif->get<QByteArray>( iSys, "Binary Data" ).size() > 0x100;
+	}
+
+	//! Write the decoded Havok material CRC into a shape's HavokMaterial field
+	static void setShapeMaterial( NifModel * nif, const QModelIndex & iShape, quint32 crc )
+	{
+		// resolves through the HavokMaterial compound (same pattern as
+		// spConvertListShape); the enum value is the CRC itself
+		if ( crc )
+			nif->set<quint32>( iShape, "Material", crc );
+	}
+
+	//! Build the legacy shape block(s) for one decoded hknp shape
+	static qint32 buildShape( NifModel * nif, const HknpShape & shp, float sc )
+	{
+		if ( shp.primType == 1 ) {
+			// sphere: the center (capA) is folded into the transform wrapper
+			QModelIndex iSph = nif->insertNiBlock( "bhkSphereShape" );
+			nif->set<float>( iSph, "Radius", shp.primRadius );
+			setShapeMaterial( nif, iSph, shp.materialCRC );
+			return nif->getBlockNumber( iSph );
+		}
+		if ( shp.primType == 2 ) {
+			QModelIndex iCap = nif->insertNiBlock( "bhkCapsuleShape" );
+			nif->set<float>( iCap, "Radius", shp.primRadius );
+			nif->set<Vector3>( iCap, "First Point", shp.capA );
+			nif->set<float>( iCap, "Radius 1", shp.primRadius );
+			nif->set<Vector3>( iCap, "Second Point", shp.capB );
+			nif->set<float>( iCap, "Radius 2", shp.primRadius );
+			setShapeMaterial( nif, iCap, shp.materialCRC );
+			return nif->getBlockNumber( iCap );
+		}
+		if ( shp.isConvex ) {
+			// an axis-aligned origin-centered 8-vert / 6-face hull is a box
+			if ( shp.verts.size() == 8 && shp.faces.size() == 6 ) {
+				Vector3 h;
+				bool isBox = true;
+				for ( const Vector3 & v : shp.verts ) {
+					for ( int c = 0; c < 3; c++ )
+						h[c] = std::max( h[c], std::fabs( v[c] ) );
+				}
+				for ( const Vector3 & v : shp.verts ) {
+					for ( int c = 0; c < 3; c++ ) {
+						if ( std::fabs( std::fabs( v[c] ) - h[c] ) > 1.0e-4f )
+							isBox = false;
+					}
+				}
+				if ( isBox ) {
+					QModelIndex iBox = nif->insertNiBlock( "bhkBoxShape" );
+					nif->set<Vector3>( iBox, "Dimensions", h );
+					nif->set<float>( iBox, "Radius", shp.convexRadius );
+					setShapeMaterial( nif, iBox, shp.materialCRC );
+					return nif->getBlockNumber( iBox );
+				}
+			}
+			QModelIndex iCVS = nif->insertNiBlock( "bhkConvexVerticesShape" );
+			nif->set<float>( iCVS, "Radius", shp.convexRadius );
+			QVector<Vector4> verts, norms;
+			for ( const Vector3 & v : shp.verts )
+				verts.append( Vector4( v[0], v[1], v[2], 0.0f ) );
+			for ( const Vector4 & p : shp.planes ) {
+				// skip the padding planes Elric appends (zero normal)
+				if ( Vector3( p[0], p[1], p[2] ).length() > 0.5f )
+					norms.append( p );
+			}
+			nif->set<uint>( iCVS, "Num Vertices", uint( verts.size() ) );
+			nif->updateArraySize( iCVS, "Vertices" );
+			nif->setArray<Vector4>( iCVS, "Vertices", verts );
+			nif->set<uint>( iCVS, "Num Normals", uint( norms.size() ) );
+			nif->updateArraySize( iCVS, "Normals" );
+			nif->setArray<Vector4>( iCVS, "Normals", norms );
+			setShapeMaterial( nif, iCVS, shp.materialCRC );
+			return nif->getBlockNumber( iCVS );
+		}
+
+		// triangle mesh: NiTriStripsData (one strip per triangle) under
+		// bhkNiTriStripsShape + bhkMoppBvTreeShape - the same chain the 3ds Max
+		// exporter emits. The MOPP is left empty: run Update MOPP Code, or let
+		// Elric rebuild it when the file is processed again.
+		QModelIndex iData = nif->insertNiBlock( "NiTriStripsData" );
+		int nv = int( shp.verts.size() );
+		int nt = int( shp.tris.size() );
+		nif->set<int>( iData, "Num Vertices", nv );
+		nif->set<int>( iData, "Has Vertices", 1 );
+		nif->updateArraySize( iData, "Vertices" );
+		QVector<Vector3> verts( nv );
+		Vector3 center;
+		for ( int i = 0; i < nv; i++ ) {
+			verts[i] = shp.verts.at( i ) * sc;
+			center += verts[i];
+		}
+		if ( nv > 0 )
+			center /= float( nv );
+		float radius = 0.0f;
+		for ( const Vector3 & v : verts )
+			radius = std::max( radius, ( v - center ).length() );
+		nif->setArray<Vector3>( iData, "Vertices", verts );
+		QModelIndex iBound = nif->getIndex( iData, "Bounding Sphere" );
+		if ( iBound.isValid() ) {
+			nif->set<Vector3>( iBound, "Center", center );
+			nif->set<float>( iBound, "Radius", radius );
+		}
+		nif->set<int>( iData, "Num Triangles", nt );
+		nif->set<int>( iData, "Num Strips", nt );
+		nif->set<int>( iData, "Has Points", 1 );
+		QModelIndex iLengths = nif->getIndex( iData, "Strip Lengths" );
+		QModelIndex iPoints = nif->getIndex( iData, "Points" );
+		if ( iLengths.isValid() && iPoints.isValid() ) {
+			nif->updateArraySize( iLengths );
+			nif->updateArraySize( iPoints );
+			for ( int t = 0; t < nt; t++ ) {
+				nif->set<int>( nif->getIndex( iLengths, t ), 3 );
+				QModelIndex iStrip = nif->getIndex( iPoints, t );
+				nif->updateArraySize( iStrip );
+				const Triangle & tri = shp.tris.at( t );
+				nif->setArray<quint16>( iStrip, { tri[0], tri[1], tri[2] } );
+			}
+		}
+
+		QModelIndex iStrips = nif->insertNiBlock( "bhkNiTriStripsShape" );
+		nif->set<float>( iStrips, "Radius", 0.1f );
+		nif->set<uint>( iStrips, "Num Strips Data", 1 );
+		nif->updateArraySize( iStrips, "Strips Data" );
+		nif->setLink( nif->getIndex( nif->getIndex( iStrips, "Strips Data" ), 0 ),
+						nif->getBlockNumber( iData ) );
+		nif->set<uint>( iStrips, "Num Filters", 1 );
+		nif->updateArraySize( iStrips, "Filters" );
+		setShapeMaterial( nif, iStrips, shp.materialCRC );
+
+		QModelIndex iMopp = nif->insertNiBlock( "bhkMoppBvTreeShape" );
+		nif->setLink( iMopp, "Shape", nif->getBlockNumber( iStrips ) );
+		return nif->getBlockNumber( iMopp );
+	}
+
+	//! Internal implementation used by both the one-system and all-system
+	//! commands. The public cast() methods provide the single snapshot boundary.
+	QModelIndex decodeRaw( NifModel * nif, const QModelIndex & index )
+	{
+		QModelIndex iSys = systemBlock( nif, index );
+		if ( !iSys.isValid() )
+			return index;
+		HknpSystem sys = hknpDecode( nif->get<QByteArray>( iSys, "Binary Data" ) );
+		if ( !sys.valid ) {
+			QMessageBox::warning( nullptr, tr( "Decompile Compiled Collision" ),
+				tr( "Could not decompile the Havok data: %1" ).arg( sys.error ) );
+			return index;
+		}
+
+		// Every collision object referencing this system names ITS body via
+		// "Body ID", and that body is placed by that object's node transform
+		// (the cinfo transform is only a rest pose - validated on vanilla
+		// stair helpers, and the same binding the preview draws with).
+		int sysNum = nif->getBlockNumber( iSys );
+		QVector<QPair<quint32, int>> refs;	// (body id, node block number)
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex ib = nif->getBlockIndex( b );
+			if ( nif->blockInherits( ib, "bhkNPCollisionObject" ) && nif->getLink( ib, "Data" ) == sysNum )
+				refs.append( { nif->get<quint32>( ib, "Body ID" ),
+					nif->isValidBlockNumber( nif->getLink( ib, "Target" ) )
+						? nif->getLink( ib, "Target" ) : nif->getParent( b ) } );
+		}
+
+		// This operation inserts, rewires, and removes an entire collision graph.
+		// Suppress link/view refreshes until the graph is internally consistent;
+		// otherwise the viewport can observe half-built bodies between mutations.
+		nif->setState( BaseModel::Loading );
+		float sc = havokConst * 10.0f;	// Havok -> game units for FO4
+
+		// built shapes grouped by the body they belong to (shapes no body
+		// references, bodyId -1, belong to body 0 - the rule the preview uses)
+		QVector<QPair<quint32, QVector<qint32>>> bodyShapes;
+		for ( const HknpShape & shp : sys.shapes ) {
+			qint32 num = buildShape( nif, shp, sc );
+			// a sphere's center folds into the wrapper's translation
+			Vector3 extraT;
+			if ( shp.primType == 1 )
+				extraT = shp.capA;
+			Vector3 wrapT = shp.trans + shp.transformed( extraT ) - shp.transformed( Vector3() );
+			bool identRot = ( shp.rotRows[0] - Vector3( 1, 0, 0 ) ).length() < 1.0e-6f
+							&& ( shp.rotRows[1] - Vector3( 0, 1, 0 ) ).length() < 1.0e-6f
+							&& ( shp.rotRows[2] - Vector3( 0, 0, 1 ) ).length() < 1.0e-6f;
+			bool identScale = ( shp.scaleVec - Vector3( 1, 1, 1 ) ).length() < 1.0e-6f;
+			bool needWrap = ( shp.hasTransform && !( identRot && identScale && shp.trans.length() < 1.0e-6f ) )
+							|| extraT.length() > 1.0e-6f;
+			if ( num >= 0 && needWrap ) {
+				// verbatim NIF Matrix4: rows = scale_i * rotation row i,
+				// translation in row 3 (byte-identical to the pre-Elric form)
+				QModelIndex iTfm = nif->insertNiBlock(
+					shp.isConvex ? "bhkConvexTransformShape" : "bhkTransformShape" );
+				nif->setLink( iTfm, "Shape", num );
+				float m16[16] = {
+					shp.rotRows[0][0] * shp.scaleVec[0], shp.rotRows[0][1] * shp.scaleVec[0],
+						shp.rotRows[0][2] * shp.scaleVec[0], 0.0f,
+					shp.rotRows[1][0] * shp.scaleVec[1], shp.rotRows[1][1] * shp.scaleVec[1],
+						shp.rotRows[1][2] * shp.scaleVec[1], 0.0f,
+					shp.rotRows[2][0] * shp.scaleVec[2], shp.rotRows[2][1] * shp.scaleVec[2],
+						shp.rotRows[2][2] * shp.scaleVec[2], 0.0f,
+					wrapT[0], wrapT[1], wrapT[2], 1.0f
+				};
+				nif->set<Matrix4>( iTfm, "Transform", Matrix4( m16 ) );
+				num = nif->getBlockNumber( iTfm );
+			}
+			if ( num < 0 )
+				continue;
+			quint32 id = shp.bodyId >= 0 ? quint32( shp.bodyId ) : 0;
+			bool grouped = false;
+			for ( auto & bs : bodyShapes ) {
+				if ( bs.first == id ) { bs.second.append( num ); grouped = true; break; }
+			}
+			if ( !grouped )
+				bodyShapes.append( { id, { num } } );
+		}
+
+		// one bhkRigidBody + bhkCollisionObject per body, attached to that
+		// body's own node - the exact inverse of Elric's compile, so the node
+		// transform places the body just like the compiled form
+		QPersistentModelIndex iRoot;
+		for ( const auto & bs : bodyShapes ) {
+			qint32 rootShape = bs.second.first();
+			if ( bs.second.size() > 1 ) {
+				QModelIndex iList = nif->insertNiBlock( "bhkListShape" );
+				nif->set<uint>( iList, "Num Sub Shapes", uint( bs.second.size() ) );
+				nif->updateArraySize( iList, "Sub Shapes" );
+				nif->setLinkArray( iList, "Sub Shapes", bs.second );
+				rootShape = nif->getBlockNumber( iList );
+			}
+			if ( !iRoot.isValid() )
+				iRoot = nif->getBlockIndex( rootShape );
+
+			QModelIndex iBody = nif->insertNiBlock( "bhkRigidBody" );
+			nif->setLink( iBody, "Shape", rootShape );
+
+			// physics decoded from the packfile (validated against controlled
+			// Elric pairs; enum values match what the 3ds Max exporter
+			// authors: dynamic props Motion System 3 / Quality 4 / Solver
+			// Deactivation 2, statics 5 / 0 / 1)
+			QModelIndex iInfo = nif->getIndex( iBody, "Rigid Body Info" );
+			if ( iInfo.isValid() ) {
+				HknpBodyPhys phys = ( int( bs.first ) < sys.bodyPhys.size() )
+									? sys.bodyPhys.at( int( bs.first ) ) : HknpBodyPhys();
+				QModelIndex iFilter = nif->getIndex( iInfo, "Havok Filter" );
+				if ( iFilter.isValid() ) {
+					quint32 decodedLayer = phys.layer;
+					if ( decodedLayer == 0 ) decodedLayer = ( sys.dynamic && phys.hasMotion ) ? 10u : 1u;
+					nif->set<quint32>( iFilter, "Layer", decodedLayer );
+					nif->set<quint32>( iFilter, "Flags", phys.filterFlags );
+					nif->set<quint32>( iFilter, "Group", phys.filterGroup );
+				}
+				nif->set<float>( iInfo, "Friction", phys.friction );
+				nif->set<float>( iInfo, "Restitution", phys.restitution );
+				nif->set<float>( iInfo, "Linear Damping", sys.linDamping );
+				nif->set<float>( iInfo, "Angular Damping", sys.angDamping );
+				nif->set<float>( iInfo, "Gravity Factor", sys.gravityFactor );
+				nif->set<float>( iInfo, "Max Linear Velocity", sys.maxLinVelocity );
+				nif->set<float>( iInfo, "Max Angular Velocity", sys.maxAngVelocity );
+				nif->set<float>( iInfo, "Penetration Depth", 0.15f );
+				nif->set<float>( iInfo, "Time Factor", 1.0f );
+				nif->set<quint32>( iInfo, "Collision Response", 1 );	// SIMPLE_CONTACT
+				nif->set<quint32>( iInfo, "Process Contact Callback Delay 3", 0xffff );
+				nif->set<quint32>( iInfo, "Num Shape Keys in Contact Point", 3 );
+				nif->set<quint32>( iInfo, "Deactivator Type", 1 );
+				bool dyn = sys.dynamic && phys.hasMotion;
+				nif->set<quint32>( iInfo, "Motion System", dyn ? 3u : 5u );
+				nif->set<quint32>( iInfo, "Solver Deactivation", dyn ? 2u : 1u );
+				nif->set<quint32>( iInfo, "Quality Type", dyn ? 4u : 0u );
+				nif->set<float>( iInfo, "Mass", dyn ? sys.mass : 0.0f );
+				QModelIndex iInertia = nif->getIndex( iInfo, "Inertia Tensor" );
+				if ( dyn && iInertia.isValid() ) {
+					nif->set<float>( iInertia, "m11", sys.inertia[0] );
+					nif->set<float>( iInertia, "m22", sys.inertia[1] );
+					nif->set<float>( iInertia, "m33", sys.inertia[2] );
+				}
+				if ( dyn ) {
+					// identity-rotation dynamic bodies store the center of
+					// mass in the cinfo position
+					nif->set<Vector4>( iInfo, "Center",
+						Vector4( phys.com[0], phys.com[1], phys.com[2], 0.0f ) );
+				}
+			}
+
+			// the node whose collision object named this body; a body no
+			// object names falls back to the first referencing node
+			int nodeNum = -1;
+			for ( const auto & ref : refs ) {
+				if ( ref.first == bs.first ) { nodeNum = ref.second; break; }
+			}
+			if ( nodeNum < 0 && !refs.isEmpty() )
+				nodeNum = refs.first().second;
+
+			QModelIndex iCO = nif->insertNiBlock( "bhkCollisionObject" );
+			nif->setLink( iCO, "Body", nif->getBlockNumber( iBody ) );
+			QModelIndex iNode = nif->getBlockIndex( nodeNum );
+			if ( iNode.isValid() ) {
+				nif->setLink( iCO, "Target", nodeNum );
+				nif->setLink( nif->getIndex( iNode, "Collision Object" ), nif->getBlockNumber( iCO ) );
+			}
+		}
+
+		// drop EVERY referencing bhkNPCollisionObject plus the system itself
+		// (each node now carries its own decoded collision object). Removing
+		// only the first would leave the others with dangling references.
+		QVector<int> toRemove;
+		toRemove.append( sysNum );
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex ib = nif->getBlockIndex( b );
+			if ( nif->blockInherits( ib, "bhkNPCollisionObject" ) && nif->getLink( ib, "Data" ) == sysNum )
+				toRemove.append( b );
+		}
+		// remove high-to-low so lower block numbers stay valid; removeNiBlock
+		// updates all link references (dangling ones become -1)
+		std::sort( toRemove.begin(), toRemove.end(), []( int a, int b ) { return a > b; } );
+		for ( int b : toRemove )
+			nif->removeNiBlock( b );
+		nif->restoreState();
+		nif->updateModel();
+
+		if ( !sys.unknownShapes.isEmpty() ) {
+			QMessageBox::warning( nullptr, tr( "Decompile Compiled Collision" ),
+				tr( "Some shape types could not be decompiled and were skipped: %1" )
+					.arg( sys.unknownShapes.join( QLatin1String( ", " ) ) ) );
+		}
+
+		return QModelIndex( iRoot );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QPersistentModelIndex result;
+		nifSnapshotOp( nif, name(), [&]() { result = decodeRaw( nif, index ); } );
+		return QModelIndex( result );
+	}
+};
+
+REGISTER_SPELL( spDecodeCompiledCollision )
+
+//! Decompile every compiled collision system in the file
+class spDecodeAllCompiledCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Decompile All Compiled Collision" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		// offered from the Spells menu, or when right-clicking any compiled
+		// collision block (runs on every system in the file either way)
+		if ( index.isValid() && !spDecodeCompiledCollision::systemBlock( nif, index ).isValid() )
+			return false;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex ib = nif->getBlockIndex( b );
+			if ( nif->isNiBlock( ib, "bhkPhysicsSystem" )
+				&& nif->get<QByteArray>( ib, "Binary Data" ).size() > 0x100 )
+				return true;
+		}
+		return false;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		spDecodeCompiledCollision decoder;
+		QPersistentModelIndex result;
+		nifSnapshotOp( nif, name(), [&]() {
+			// each decode removes / inserts blocks, so rescan after every pass
+			for ( bool again = true; again; ) {
+				again = false;
+				for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+					QModelIndex ib = nif->getBlockIndex( b );
+					if ( nif->isNiBlock( ib, "bhkPhysicsSystem" ) && decoder.isApplicable( nif, ib ) ) {
+						QModelIndex decoded = decoder.decodeRaw( nif, ib );
+						if ( !result.isValid() && decoded.isValid() ) result = decoded;
+						again = true;
+						break;
+					}
+				}
+			}
+		} );
+		// The right-click invocation index normally points at a system block that
+		// was removed above. Returning it leaves SpellBook with a dangling
+		// QModelIndex and caused the post-decode heap-corruption crash. Select a
+		// newly created persistent block instead.
+		Q_UNUSED( index );
+		return QModelIndex( result );
+	}
+};
+
+REGISTER_SPELL( spDecodeAllCompiledCollision )

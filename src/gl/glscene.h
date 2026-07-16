@@ -120,7 +120,14 @@ public:
 		DisableShaders = 0x8000,	// unsupported with core profile OpenGL
 		ShowHidden = 0x10000,
 		DoSkinning = 0x20000,
-		DoErrorColor = 0x40000
+		DoErrorColor = 0x40000,
+		DoDiffuse = 0x80000,
+		DoNormalMap = 0x100000,
+		DoVertexAlpha = 0x200000,
+		DoParallax = 0x400000,
+		DoMaterialTint = 0x800000,
+		DoDetailTextures = 0x1000000,
+		DoGloss = 0x2000000
 	};
 	Q_DECLARE_FLAGS( SceneOptions, SceneOption );
 
@@ -159,7 +166,8 @@ public:
 		VisNone = 0x0,
 		VisLightPos = 0x1,
 		VisNormalsOnly = 0x2,
-		VisSilhouette = 0x4
+		VisSilhouette = 0x4,
+		VisVertexColors = 0x8
 	};
 
 	Q_DECLARE_FLAGS( VisMode, VisModes );
@@ -361,7 +369,8 @@ public:
 						unsigned int elementType = 0, const void * elementData = nullptr );
 	void drawAxes( const Vector3 & c, float axis, bool color = true );
 	void drawAxesOverlay( const Vector3 & c, float axis, const Vector3 & axesDots );
-	void drawGrid( float s, int lines, int sub, FloatVector4 color, FloatVector4 axis1Color, FloatVector4 axis2Color );
+	void drawGrid( float s, int lines, int sub, FloatVector4 color, FloatVector4 axis1Color,
+		FloatVector4 axis2Color, const Vector3 & center = Vector3(), float minorFade = 1.0f );
 	void drawBox( const Vector3 & a, const Vector3 & b );
 	void drawCircle( const Vector3 & c, const Vector3 & n, float r, int sd = 16 );
 	void drawArc( const Vector3 & c, const Vector3 & x, const Vector3 & y, float an, float ax, int sd = 8 );

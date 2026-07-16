@@ -66,7 +66,9 @@ Scene::Scene( TexCache * texcache, QObject * parent ) :
 
 	textures = texcache;
 
-	options = ( DoLighting | DoTexturing | DoMultisampling | DoBlending | DoVertexColors | DoSpecular | DoGlow | DoCubeMapping );
+	options = ( DoLighting | DoTexturing | DoMultisampling | DoBlending | DoVertexColors | DoSpecular | DoGlow
+				| DoCubeMapping | DoDiffuse | DoNormalMap | DoVertexAlpha | DoParallax | DoMaterialTint
+				| DoDetailTextures | DoGloss );
 
 	lodLevel = Level0;
 
@@ -369,7 +371,13 @@ void Scene::transform( const Transform & trans, float time )
 
 void Scene::draw()
 {
-	drawShapes();
+	QSettings collisionSettings;
+	const bool collisionOnly = collisionSettings.value( "CollisionManager/CollisionOnly", false ).toBool()
+		&& hasOption( ShowCollision );
+	if ( collisionOnly )
+		drawGrid();
+	else
+		drawShapes();
 
 	glDisable( GL_CULL_FACE );
 	glDisable( GL_STENCIL_TEST );
@@ -494,8 +502,108 @@ void Scene::drawGrid()
 	glDepthFunc( GL_LESS );
 
 	FloatVector4	c0 = gridColor;
-	FloatVector4	c1( 1.0f, 0.0f, 0.0f, 1.0f );
-	FloatVector4	c2( 0.0f, 1.0f, 0.0f, 1.0f );
+	FloatVector4	cX( 0.85f, 0.16f, 0.16f, 1.0f );
+	FloatVector4	cY( 0.20f, 0.65f, 0.24f, 1.0f );
+	FloatVector4	cZ( 0.20f, 0.38f, 0.85f, 1.0f );
+
+	// Blender-style orthographic grid: align it to the current screen plane,
+	// adapt spacing to zoom, anchor subdivisions to world zero, and place it
+	// behind the scene so geometry cleanly occludes it instead of z-fighting.
+	if ( !v->isPerspectiveProjection() ) {
+		const GLView::ViewState axisView = v->axisAlignedViewState();
+		if ( axisView == GLView::ViewDefault )
+			return; // Blender hides the planar grid in arbitrary User Orthographic views.
+		Transform gridTrans = view;
+		gridTrans.rotation = Matrix();
+		const QSize viewport = v->getSizeInPixels();
+		const float halfH = std::max( v->orthographicHalfHeight(), v->scale() );
+		const float halfW = halfH * float( std::max( viewport.width(), 1 ) )
+			/ float( std::max( viewport.height(), 1 ) );
+		const float worldPerPixel = ( halfH * 2.0f ) / float( std::max( viewport.height(), 1 ) );
+		BoundSphere viewBounds = view * bounds();
+		const float clipRadius = std::max( viewBounds.radius, 1024.0f * v->scale() );
+		gridTrans.translation[2] = -( std::fabs( viewBounds.center[2] ) + clipRadius * 1.45f );
+
+		FloatVector4 axisHorizontal = c0;
+		FloatVector4 axisVertical = c0;
+		switch ( axisView ) {
+		case GLView::ViewTop:
+		case GLView::ViewBottom:
+			axisHorizontal = cX;
+			axisVertical = cY;
+			break;
+		case GLView::ViewFront:
+		case GLView::ViewBack:
+			axisHorizontal = cX;
+			axisVertical = cZ;
+			break;
+		case GLView::ViewLeft:
+		case GLView::ViewRight:
+			axisHorizontal = cY;
+			axisVertical = cZ;
+			break;
+		default:
+			break;
+		}
+		axisHorizontal = ( ( axisHorizontal + c0 ) * 0.5f ).blendValues( c0, 0x08 );
+		axisVertical = ( ( axisVertical + c0 ) * 0.5f ).blendValues( c0, 0x08 );
+		loadModelViewMatrix( gridTrans );
+
+		glEnable( GL_BLEND );
+		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+
+		// Blender-style decade crossfade: draw three power-of-ten grid levels
+		// whose brightness fades with the sub-decade zoom position. Lines shared
+		// between levels (every 10th, every 100th) are reinforced by alpha-over
+		// blending, giving the fine/minor/major hierarchy with no popping as the
+		// view crosses a decade boundary.
+		const float anchorPx = 42.0f;	// screen spacing of the finest level at full fade-in
+		const float logPos = std::log10( std::max( worldPerPixel * anchorPx, 1.0e-9f ) );
+		const float baseExp = std::floor( logPos );
+		float frac = logPos - baseExp;
+		frac = frac * frac * ( 3.0f - 2.0f * frac );		// smoothstep easing
+		const float fineStep = std::pow( 10.0f, baseExp );
+		const float levelStep[3]  = { fineStep, fineStep * 10.0f, fineStep * 100.0f };
+		const float levelAlpha[3] = { 1.0f - frac, 1.0f, frac };
+		const float halfExtent = std::max( halfW, halfH ) * 1.15f;
+		for ( int lv = 0; lv < 3; lv++ ) {
+			if ( levelAlpha[lv] <= 0.02f )
+				continue;
+			const float st = levelStep[lv];
+			const int nHalf = std::max( 1, int( std::ceil( halfExtent / st ) ) );
+			const float cx = std::round( -view.translation[0] / st ) * st;
+			const float cy = std::round( -view.translation[1] / st ) * st;
+			FloatVector4 lc = c0;
+			lc[3] = c0[3] * levelAlpha[lv];
+			glEnable( GL_BLEND );
+			drawGrid( float( nHalf ) * st, nHalf * 2, 1, lc, lc, lc,
+				Vector3( cx, cy, 0.0f ), 0.0f );
+		}
+
+		// Axis lines through the world origin, opaque, over the faded grid.
+		glEnable( GL_BLEND );
+		setGLLineWidth( GLView::Settings::lineWidthGrid );
+		{
+			const float vcx = -view.translation[0];
+			const float vcy = -view.translation[1];
+			FloatVector4 * acol = nullptr;
+			Vector3 * ap = allocateVertexAttr( 4, &acol );
+			if ( ap ) {
+				ap[0] = Vector3( vcx - halfExtent, 0.0f, 0.0f );
+				ap[1] = Vector3( vcx + halfExtent, 0.0f, 0.0f );
+				ap[2] = Vector3( 0.0f, vcy - halfExtent, 0.0f );
+				ap[3] = Vector3( 0.0f, vcy + halfExtent, 0.0f );
+				acol[0] = acol[1] = axisHorizontal;
+				acol[2] = acol[3] = axisVertical;
+				drawLines( ap, 4, acol );
+			}
+		}
+		glDisable( GL_BLEND );
+		return;
+	}
+
+	FloatVector4 c1 = cX;
+	FloatVector4 c2 = cY;
 
 	// Keep the grid "grounded" regardless of Up Axis
 	Transform gridTrans = view;

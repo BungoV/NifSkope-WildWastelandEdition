@@ -38,8 +38,16 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "qt5compat.hpp"
 
 #include <QContextMenuEvent>
+#include <QApplication>
+#include <QClipboard>
+#include <QDialogButtonBox>
 #include <QDialog>
+#include <QEventLoop>
+#include <QFormLayout>
+#include <QFrame>
+#include <QGuiApplication>
 #include <QIcon>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
@@ -48,9 +56,391 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QPushButton>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QRegularExpressionValidator>
+#include <QScreen>
+#include <QSettings>
+#include <QSignalBlocker>
+#include <QSpinBox>
+#include <QToolButton>
 #include <QTransform>
+#include <QTimer>
 
+#ifdef Q_OS_WIN
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#endif
+
+#include <algorithm>
+#include <functional>
 #include <math.h>
+#include <utility>
+
+namespace
+{
+QString colorChipStyle( const QColor & color )
+{
+	return QStringLiteral( "QPushButton { background: %1; border: 1px solid #777; border-radius: 2px; }"
+		"QPushButton:hover { border: 2px solid white; }" ).arg( color.name( QColor::HexArgb ) );
+}
+
+QString colorSliderStyle( const QString & stops )
+{
+	return QStringLiteral(
+		"QSlider::groove:horizontal { height: 8px; border: 1px solid #303030; border-radius: 4px;"
+		" background: qlineargradient(x1:0, y1:0, x2:1, y2:0, %1); }"
+		"QSlider::handle:horizontal { width: 10px; margin: -4px 0; border: 1px solid #d8d8d8;"
+		" border-radius: 5px; background: #f0f0f0; }"
+		"QSlider::handle:horizontal:hover { border-color: white; background: white; }" ).arg( stops );
+}
+
+QString twoColorStops( const QColor & first, const QColor & last )
+{
+	return QStringLiteral( "stop:0 %1, stop:1 %2" )
+		.arg( first.name( QColor::HexRgb ), last.name( QColor::HexRgb ) );
+}
+
+//! Integer counterpart of the transform redo panel's DragSpinBox.  A plain
+//! click selects the value for typing; a horizontal click-drag scrubs it.
+//! Hover-only step arrows and the active scrub highlight mirror that panel.
+class ColorDragSpinBox final : public QSpinBox
+{
+public:
+	explicit ColorDragSpinBox( QWidget * parent = nullptr ) : QSpinBox( parent )
+	{
+		setButtonSymbols( QAbstractSpinBox::NoButtons );
+		setAlignment( Qt::AlignCenter );
+		setStyleSheet( QStringLiteral(
+			"QSpinBox { background: #545454; border: none; border-radius: 3px; color: #e6e6e6; }"
+			"QLineEdit { background: transparent; border: none; color: #e6e6e6;"
+			" selection-background-color: #4772b3; selection-color: #ffffff; }" ) );
+		if ( QLineEdit * editor = lineEdit() ) {
+			editor->installEventFilter( this );
+			editor->setMouseTracking( true );
+			editor->setCursor( Qt::SizeHorCursor );
+		}
+	}
+
+protected:
+	static constexpr int arrowWidth = 16;
+
+	void resizeEvent( QResizeEvent * event ) override
+	{
+		QSpinBox::resizeEvent( event );
+		if ( QLineEdit * editor = lineEdit() )
+			editor->setGeometry( arrowWidth, 0, std::max( width() - 2 * arrowWidth, 0 ), height() );
+	}
+
+	void enterEvent( QEnterEvent * event ) override
+	{
+		QSpinBox::enterEvent( event );
+		hovered = true;
+		update();
+	}
+
+	void leaveEvent( QEvent * event ) override
+	{
+		QSpinBox::leaveEvent( event );
+		hovered = false;
+		update();
+	}
+
+	void mousePressEvent( QMouseEvent * event ) override
+	{
+		if ( event->button() == Qt::LeftButton ) {
+			const int x = int( event->position().x() );
+			if ( x < arrowWidth ) { stepBy( -1 ); Q_EMIT editingFinished(); return; }
+			if ( x > width() - arrowWidth ) { stepBy( 1 ); Q_EMIT editingFinished(); return; }
+		}
+		QSpinBox::mousePressEvent( event );
+	}
+
+	bool eventFilter( QObject * object, QEvent * event ) override
+	{
+		QLineEdit * editor = lineEdit();
+		if ( object == editor ) {
+			if ( event->type() == QEvent::MouseButtonPress ) {
+				auto mouse = static_cast<QMouseEvent *>( event );
+				if ( mouse->button() == Qt::LeftButton ) {
+					dragging = true;
+					moved = false;
+					pressX = int( mouse->globalPosition().x() );
+					startValue = value();
+					return true;
+				}
+			} else if ( event->type() == QEvent::MouseMove && dragging ) {
+				auto mouse = static_cast<QMouseEvent *>( event );
+				const int dx = int( mouse->globalPosition().x() ) - pressX;
+				if ( !moved && std::abs( dx ) > 2 ) {
+					moved = true;
+					update();
+				}
+				if ( moved ) {
+					const double scale = ( mouse->modifiers() & Qt::ShiftModifier ) ? 0.01 : 0.1;
+					setValue( qRound( startValue + double( dx ) * singleStep() * scale ) );
+				}
+				return true;
+			} else if ( event->type() == QEvent::MouseButtonRelease && dragging ) {
+				dragging = false;
+				const bool finishedScrub = moved;
+				if ( !moved ) {
+					editor->selectAll();
+					editor->setFocus();
+				}
+				moved = false;
+				update();
+				if ( finishedScrub )
+					Q_EMIT editingFinished();
+				return true;
+			}
+		}
+		return QSpinBox::eventFilter( object, event );
+	}
+
+	void paintEvent( QPaintEvent * event ) override
+	{
+		QSpinBox::paintEvent( event );
+		QPainter painter( this );
+		painter.setRenderHint( QPainter::Antialiasing );
+		if ( dragging && moved ) {
+			painter.setPen( Qt::NoPen );
+			painter.setBrush( QColor( 255, 255, 255, 45 ) );
+			painter.drawRoundedRect( rect().adjusted( 0, 0, -1, -1 ), 3.0, 3.0 );
+		}
+		if ( hovered && !( dragging && moved ) && !( lineEdit() && lineEdit()->hasFocus() ) ) {
+			painter.setPen( QColor( 230, 230, 230 ) );
+			painter.drawText( QRect( 0, 0, arrowWidth, height() ), Qt::AlignCenter, QStringLiteral( "‹" ) );
+			painter.drawText( QRect( width() - arrowWidth, 0, arrowWidth, height() ), Qt::AlignCenter, QStringLiteral( "›" ) );
+		}
+	}
+
+private:
+	bool dragging = false;
+	bool moved = false;
+	bool hovered = false;
+	int pressX = 0;
+	int startValue = 0;
+};
+
+// On Windows the sampler is a tiny mouse-transparent tooltip that follows the
+// cursor while GetPixel / GetAsyncKeyState read the real desktop globally.
+// Unlike a virtual-desktop overlay this remains fast and can click through to
+// other applications. Other platforms retain the screenshot-overlay fallback.
+class ScreenColorSampler final : public QDialog
+{
+public:
+	explicit ScreenColorSampler( QWidget * parent = nullptr ) : QDialog( parent )
+	{
+		setWindowFlags( Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint );
+		setAttribute( Qt::WA_TranslucentBackground );
+
+#ifdef Q_OS_WIN
+		setAttribute( Qt::WA_TransparentForMouseEvents );
+		setFixedSize( 300, 62 );
+		pollTimer = new QTimer( this );
+		pollTimer->setTimerType( Qt::PreciseTimer );
+		connect( pollTimer, &QTimer::timeout, this, [this]() { pollDesktop(); } );
+		positionTooltip( QCursor::pos() );
+#else
+		setMouseTracking( true );
+		setCursor( Qt::CrossCursor );
+
+		QRect desktop;
+		for ( QScreen * screen : QGuiApplication::screens() ) {
+			Capture capture;
+			capture.geometry = screen->geometry();
+			QPixmap pixmap = screen->grabWindow( 0 );
+			capture.ratio = pixmap.devicePixelRatio();
+			capture.image = pixmap.toImage().convertToFormat( QImage::Format_ARGB32 );
+			captures.append( capture );
+			desktop = desktop.isNull() ? capture.geometry : desktop.united( capture.geometry );
+		}
+		setGeometry( desktop );
+#endif
+	}
+
+	QColor selectedColor() const { return selected; }
+
+	int run()
+	{
+		// Deliberately avoid QDialog::exec(): a nested application-modal sampler
+		// can strand focus on an invisible modal window after another application
+		// receives the sampling click. The outer color dialog remains visible.
+		setWindowModality( Qt::NonModal );
+		show();
+		QEventLoop loop;
+		connect( this, &QDialog::finished, &loop, &QEventLoop::quit );
+		loop.exec();
+		return result();
+	}
+
+protected:
+	void showEvent( QShowEvent * event ) override
+	{
+		QDialog::showEvent( event );
+#ifdef Q_OS_WIN
+		armed = false;
+		leftWasDown = true;
+		pollTimer->start( 16 );
+#else
+		grabMouse();
+		grabKeyboard();
+#endif
+	}
+
+	void mouseMoveEvent( QMouseEvent * event ) override
+	{
+#ifdef Q_OS_WIN
+		QDialog::mouseMoveEvent( event );
+#else
+		Q_UNUSED( event );
+		hover = sampleAt( QCursor::pos() );
+		update();
+#endif
+	}
+
+	void mousePressEvent( QMouseEvent * event ) override
+	{
+#ifdef Q_OS_WIN
+		QDialog::mousePressEvent( event );
+#else
+		if ( event->button() == Qt::LeftButton ) {
+			selected = sampleAt( QCursor::pos() );
+			releaseMouse();
+			releaseKeyboard();
+			accept();
+		} else if ( event->button() == Qt::RightButton ) {
+			releaseMouse();
+			releaseKeyboard();
+			reject();
+		}
+#endif
+	}
+
+	void keyPressEvent( QKeyEvent * event ) override
+	{
+		if ( event->key() == Qt::Key_Escape ) {
+#ifndef Q_OS_WIN
+			releaseMouse();
+			releaseKeyboard();
+#endif
+			reject();
+			return;
+		}
+		QDialog::keyPressEvent( event );
+	}
+
+	void paintEvent( QPaintEvent * event ) override
+	{
+		Q_UNUSED( event );
+#ifdef Q_OS_WIN
+		const QRect card = rect().adjusted( 0, 0, -1, -1 );
+#else
+		const QPoint cursor = mapFromGlobal( QCursor::pos() );
+		QRect card( cursor + QPoint( 18, 18 ), QSize( 300, 62 ) );
+		if ( card.right() > width() ) card.moveRight( cursor.x() - 18 );
+		if ( card.bottom() > height() ) card.moveBottom( cursor.y() - 18 );
+#endif
+		QPainter painter( this );
+		painter.setRenderHint( QPainter::Antialiasing );
+		painter.setPen( QColor( 230, 230, 230 ) );
+		painter.setBrush( QColor( 32, 32, 32, 235 ) );
+		painter.drawRoundedRect( card, 5, 5 );
+		QRect swatch = card.adjusted( 8, 8, -244, -8 );
+		painter.setBrush( hover );
+		painter.drawRect( swatch );
+		painter.setBrush( Qt::NoBrush );
+		painter.drawText( card.adjusted( 64, 7, -8, -31 ), Qt::AlignVCenter,
+			hover.name( QColor::HexRgb ).toUpper() );
+		painter.setPen( QColor( 180, 180, 180 ) );
+		painter.drawText( card.adjusted( 64, 29, -8, -7 ), Qt::AlignVCenter,
+			tr( "Click to sample · Esc to cancel" ) );
+	}
+
+private:
+#ifdef Q_OS_WIN
+	void positionTooltip( const QPoint & cursor )
+	{
+		QRect screenGeometry;
+		if ( QScreen * screen = QGuiApplication::screenAt( cursor ) )
+			screenGeometry = screen->geometry();
+		else if ( QScreen * primary = QGuiApplication::primaryScreen() )
+			screenGeometry = primary->geometry();
+		QPoint position = cursor + QPoint( 18, 18 );
+		if ( position.x() + width() > screenGeometry.right() ) position.setX( cursor.x() - width() - 18 );
+		if ( position.y() + height() > screenGeometry.bottom() ) position.setY( cursor.y() - height() - 18 );
+		move( position );
+	}
+
+	void pollDesktop()
+	{
+		const QPoint cursor = QCursor::pos();
+		POINT nativeCursor = { cursor.x(), cursor.y() };
+		GetCursorPos( &nativeCursor );
+		HDC desktop = GetDC( nullptr );
+		if ( desktop ) {
+			const COLORREF pixel = GetPixel( desktop, nativeCursor.x, nativeCursor.y );
+			ReleaseDC( nullptr, desktop );
+			if ( pixel != CLR_INVALID )
+				hover = QColor( GetRValue( pixel ), GetGValue( pixel ), GetBValue( pixel ) );
+		}
+		positionTooltip( cursor );
+		update();
+
+		// The low bit records a press since the previous call, so even a quick
+		// click that begins and ends between two 16 ms ticks is not missed.
+		const SHORT leftState = GetAsyncKeyState( VK_LBUTTON );
+		const bool leftDown = ( leftState & 0x8000 ) != 0;
+		const bool leftPressed = ( leftState & 0x0001 ) != 0;
+		if ( !armed ) {
+			if ( !leftDown ) { armed = true; leftWasDown = false; }
+		} else if ( leftPressed || ( leftDown && !leftWasDown ) ) {
+			selected = hover;
+			pollTimer->stop();
+			accept();
+			return;
+		}
+		leftWasDown = leftDown;
+
+		if ( ( GetAsyncKeyState( VK_RBUTTON ) & 0x8001 ) != 0
+			|| ( GetAsyncKeyState( VK_ESCAPE ) & 0x8001 ) != 0 ) {
+			pollTimer->stop();
+			reject();
+		}
+	}
+#endif
+
+	struct Capture
+	{
+		QRect geometry;
+		QImage image;
+		qreal ratio = 1.0;
+	};
+
+	QColor sampleAt( const QPoint & global ) const
+	{
+		for ( const Capture & capture : captures ) {
+			if ( !capture.geometry.contains( global ) )
+				continue;
+			if ( capture.image.isNull() )
+				return Qt::black;
+			const QPoint logical = global - capture.geometry.topLeft();
+			const int x = qBound( 0, qRound( logical.x() * capture.ratio ), capture.image.width() - 1 );
+			const int y = qBound( 0, qRound( logical.y() * capture.ratio ), capture.image.height() - 1 );
+			return capture.image.pixelColor( x, y );
+		}
+		return Qt::black;
+	}
+
+	QVector<Capture> captures;
+	QColor selected;
+	QColor hover = Qt::black;
+#ifdef Q_OS_WIN
+	QTimer * pollTimer = nullptr;
+	bool armed = false;
+	bool leftWasDown = true;
+#endif
+};
+}
 
 ColorWheel::ColorWheel( QWidget * parent ) : QWidget( parent )
 {
@@ -130,6 +520,12 @@ void ColorWheel::setSizeHint( const QSize & s )
 	sHint = s;
 }
 
+void ColorWheel::setDiscMode( bool enabled )
+{
+	discMode = enabled;
+	update();
+}
+
 QSize ColorWheel::minimumSizeHint() const
 {
 	return { 50, 50 };
@@ -147,6 +543,36 @@ void ColorWheel::paintEvent( QPaintEvent * e )
 {
 	Q_UNUSED( e );
 	double s = qMin( width(), height() ) / 2.0;
+	if ( discMode ) {
+		QImage image( size(), QImage::Format_ARGB32_Premultiplied );
+		image.fill( Qt::transparent );
+		const QPointF center( width() * 0.5, height() * 0.5 );
+		const double radius = qMax( 1.0, s - 2.0 );
+		for ( int py = 0; py < height(); py++ ) {
+			QRgb * scan = reinterpret_cast<QRgb *>( image.scanLine( py ) );
+			for ( int px = 0; px < width(); px++ ) {
+				const double dx = px + 0.5 - center.x();
+				const double dy = py + 0.5 - center.y();
+				const double distance = std::sqrt( dx * dx + dy * dy );
+				if ( distance > radius ) continue;
+				double hue = std::atan2( dy, dx ) / ( 2.0 * M_PI );
+				if ( hue < 0.0 ) hue += 1.0;
+				scan[px] = QColor::fromHsvF( hue, qBound( 0.0, distance / radius, 1.0 ), V ).rgba();
+			}
+		}
+		QPainter painter( this );
+		painter.setRenderHint( QPainter::Antialiasing );
+		painter.drawImage( 0, 0, image );
+		const double angle = H * 2.0 * M_PI;
+		const QPointF marker = center + QPointF( std::cos( angle ), std::sin( angle ) ) * ( S * radius );
+		painter.setBrush( QColor::fromHsvF( H, S, V ) );
+		painter.setPen( QPen( QColor( 245, 245, 245 ), 2.0 ) );
+		painter.drawEllipse( marker, 6.0, 6.0 );
+		painter.setPen( QPen( QColor( 25, 25, 25 ), 1.0 ) );
+		painter.setBrush( Qt::NoBrush );
+		painter.drawEllipse( marker, 7.5, 7.5 );
+		return;
+	}
 	double c = s - s / 5;
 
 	QPainter p( this );
@@ -234,6 +660,8 @@ void ColorWheel::mousePressEvent( QMouseEvent * e )
 
 	if ( d > s )
 		pressed = Nope;
+	else if ( discMode )
+		pressed = Disc;
 	else if ( d > c )
 		pressed = Circle;
 	else
@@ -281,7 +709,17 @@ void ColorWheel::contextMenuEvent( QContextMenuEvent * e )
 
 void ColorWheel::setColor( double x, double y )
 {
-	if ( pressed == Circle ) {
+	if ( pressed == Disc ) {
+		const double dx = x - width() * 0.5;
+		const double dy = y - height() * 0.5;
+		const double radius = qMax( 1.0, qMin( width(), height() ) * 0.5 - 2.0 );
+		H = std::atan2( dy, dx ) / ( 2.0 * M_PI );
+		if ( H < 0.0 ) H += 1.0;
+		S = qBound( 0.0, std::sqrt( dx * dx + dy * dy ) / radius, 1.0 );
+		update();
+		emit sigColor( getColor() );
+		emit sigColorEdited( getColor() );
+	} else if ( pressed == Circle ) {
 		QLineF l( QPointF( width() / 2.0, height() / 2.0 ), QPointF( x, y ) );
 		H = l.angle() / 360.0 - 0.25;
 		H -= std::floor( H );
@@ -318,42 +756,718 @@ void ColorWheel::setColor( double x, double y )
 	}
 }
 
+ColorPickerPanel::ColorPickerPanel( const QColor & color, bool alpha,
+	QWidget * parent ) : QWidget( parent ), originalColor( color ),
+	currentColor( color ), alphaEnabled( alpha )
+{
+	setMinimumWidth( 650 );
+	setStyleSheet( QStringLiteral(
+		"QLabel { color: #dddddd; }"
+		"QLineEdit { background: #545454; border: 1px solid #303030; border-radius: 3px;"
+		" color: #eeeeee; padding: 3px 6px; selection-background-color: #4772b3; }"
+		"QPushButton, QToolButton { background: #454545; border: 1px solid #606060; border-radius: 3px;"
+		" color: #e2e2e2; padding: 4px 9px; }"
+		"QPushButton:hover, QToolButton:hover { background: #525252; border-color: #777777; }"
+		"QPushButton:pressed, QToolButton:pressed { background: #303030; }" ) );
+	QVBoxLayout * outer = new QVBoxLayout( this );
+	outer->setContentsMargins( 0, 0, 0, 0 );
+	outer->setSpacing( 8 );
+	QHBoxLayout * content = new QHBoxLayout;
+	content->setSpacing( 22 );
+	outer->addLayout( content, 1 );
+
+	QVBoxLayout * left = new QVBoxLayout;
+	left->setSpacing( 7 );
+	content->addLayout( left, 1 );
+	QHBoxLayout * previews = new QHBoxLayout;
+	previews->setAlignment( Qt::AlignHCenter );
+	QPushButton * previousChip = new QPushButton( this );
+	QPushButton * currentChip = new QPushButton( this );
+	auto addPreview = [&]( QPushButton * chip, const QString & label ) {
+		QVBoxLayout * column = new QVBoxLayout;
+		column->setSpacing( 2 );
+		chip->setFixedSize( 62, 38 );
+		column->addWidget( chip, 0, Qt::AlignHCenter );
+		QLabel * caption = new QLabel( label, this );
+		caption->setAlignment( Qt::AlignHCenter );
+		caption->setStyleSheet( QStringLiteral( "color: #bdbdbd;" ) );
+		column->addWidget( caption );
+		previews->addLayout( column );
+	};
+	addPreview( previousChip, tr( "Previous" ) );
+	QLabel * arrow = new QLabel( QStringLiteral( "›" ), this );
+	arrow->setAlignment( Qt::AlignCenter );
+	previews->addWidget( arrow );
+	addPreview( currentChip, tr( "Current" ) );
+	previousChip->setToolTip( tr( "Previous color — click to restore" ) );
+	currentChip->setToolTip( tr( "Current color" ) );
+	currentChip->setAttribute( Qt::WA_TransparentForMouseEvents );
+	previousChip->setStyleSheet( colorChipStyle( originalColor ) );
+	left->addLayout( previews );
+
+	ColorWheel * hsv = new ColorWheel( currentColor, this );
+	hsv->setAlpha( alphaEnabled );
+	hsv->setDiscMode( true );
+	hsv->setFixedSize( 250, 250 );
+	left->addWidget( hsv, 0, Qt::AlignHCenter );
+
+	QHBoxLayout * paletteTitle = new QHBoxLayout;
+	QLabel * paletteLabel = new QLabel( tr( "Palette" ), this );
+	paletteLabel->setStyleSheet( QStringLiteral( "font-weight: 600;" ) );
+	paletteTitle->addWidget( paletteLabel );
+	QPushButton * addCustom = new QPushButton( tr( "+  Add" ), this );
+	addCustom->setToolTip( tr( "Save the current color to the custom palette" ) );
+	paletteTitle->addWidget( addCustom, 0, Qt::AlignRight );
+	left->addLayout( paletteTitle );
+	QGridLayout * palette = new QGridLayout;
+	palette->setSpacing( 3 );
+	left->addLayout( palette );
+	const QList<QColor> presetColors = {
+		Qt::black, QColor( 64, 64, 64 ), QColor( 128, 128, 128 ), QColor( 192, 192, 192 ), Qt::white,
+		QColor( 128, 0, 0 ), Qt::red, QColor( 255, 128, 0 ), Qt::yellow, QColor( 128, 128, 0 ),
+		QColor( 0, 128, 0 ), Qt::green, QColor( 0, 128, 128 ), Qt::cyan, QColor( 0, 0, 128 ),
+		Qt::blue, QColor( 128, 0, 128 ), Qt::magenta, QColor( 255, 128, 192 ), QColor( 128, 64, 0 )
+	};
+
+	QVBoxLayout * values = new QVBoxLayout;
+	values->setSpacing( 7 );
+	content->addLayout( values, 1 );
+	QHBoxLayout * hexRow = new QHBoxLayout;
+	hexRow->addWidget( new QLabel( tr( "Hex" ), this ) );
+	QLineEdit * hex = new QLineEdit( this );
+	hex->setMaxLength( 7 );
+	hex->setValidator( new QRegularExpressionValidator(
+		QRegularExpression( QStringLiteral( "#?[0-9A-Fa-f]{6}" ) ), hex ) );
+	hex->setAlignment( Qt::AlignCenter );
+	hexRow->addWidget( hex, 1 );
+	QToolButton * copyHex = new QToolButton( this );
+	copyHex->setText( tr( "Copy" ) );
+	copyHex->setToolTip( tr( "Copy the hexadecimal color value" ) );
+	hexRow->addWidget( copyHex );
+	values->addLayout( hexRow );
+
+	auto makeByteSpin = [this]() {
+		QSpinBox * spin = new ColorDragSpinBox( this );
+		spin->setRange( 0, 255 );
+		spin->setFixedWidth( 72 );
+		return spin;
+	};
+	auto makeSlider = [this]( int maximum ) {
+		QSlider * slider = new QSlider( Qt::Horizontal, this );
+		slider->setRange( 0, maximum );
+		slider->setSingleStep( 1 );
+		slider->setPageStep( 1 );
+		slider->setMinimumWidth( 150 );
+		return slider;
+	};
+	QSpinBox * red = makeByteSpin();
+	QSpinBox * green = makeByteSpin();
+	QSpinBox * blue = makeByteSpin();
+	QSpinBox * hue = new ColorDragSpinBox( this );
+	hue->setRange( 0, 359 ); hue->setSuffix( QStringLiteral( "°" ) ); hue->setFixedWidth( 72 );
+	QSpinBox * saturation = new ColorDragSpinBox( this );
+	saturation->setRange( 0, 100 ); saturation->setSuffix( QStringLiteral( "%" ) ); saturation->setFixedWidth( 72 );
+	QSpinBox * value = new ColorDragSpinBox( this );
+	value->setRange( 0, 100 ); value->setSuffix( QStringLiteral( "%" ) ); value->setFixedWidth( 72 );
+	QSpinBox * opacity = makeByteSpin();
+	QSlider * redSlider = makeSlider( 255 );
+	QSlider * greenSlider = makeSlider( 255 );
+	QSlider * blueSlider = makeSlider( 255 );
+	QSlider * hueSlider = makeSlider( 359 );
+	QSlider * saturationSlider = makeSlider( 100 );
+	QSlider * valueSlider = makeSlider( 100 );
+	QSlider * opacitySlider = makeSlider( 255 );
+	if ( !alphaEnabled ) {
+		opacity->hide();
+		opacitySlider->hide();
+	}
+
+	auto sectionLabel = [this, values]( const QString & title, const QString & note ) {
+		QHBoxLayout * row = new QHBoxLayout;
+		QLabel * heading = new QLabel( title, this );
+		heading->setStyleSheet( QStringLiteral( "font-weight: 600;" ) );
+		row->addWidget( heading );
+		QLabel * detail = new QLabel( note, this );
+		detail->setStyleSheet( QStringLiteral( "color: #ababab;" ) );
+		row->addWidget( detail, 0, Qt::AlignRight );
+		values->addLayout( row );
+		QFrame * line = new QFrame( this );
+		line->setFrameShape( QFrame::HLine );
+		line->setStyleSheet( QStringLiteral( "color: #555555;" ) );
+		values->addWidget( line );
+	};
+	auto addValueRow = [this, values]( const QString & label,
+		QSlider * slider, QSpinBox * spin ) {
+		QHBoxLayout * row = new QHBoxLayout;
+		row->setSpacing( 8 );
+		QLabel * name = new QLabel( label, this );
+		name->setFixedWidth( 18 );
+		name->setAlignment( Qt::AlignCenter );
+		row->addWidget( name );
+		row->addWidget( slider, 1 );
+		row->addWidget( spin );
+		values->addLayout( row );
+	};
+	sectionLabel( tr( "RGB" ), tr( "0–255" ) );
+	addValueRow( tr( "R" ), redSlider, red );
+	addValueRow( tr( "G" ), greenSlider, green );
+	addValueRow( tr( "B" ), blueSlider, blue );
+	sectionLabel( tr( "HSV" ), tr( "Hue · Saturation · Value" ) );
+	addValueRow( tr( "H" ), hueSlider, hue );
+	addValueRow( tr( "S" ), saturationSlider, saturation );
+	addValueRow( tr( "V" ), valueSlider, value );
+	if ( alphaEnabled ) {
+		sectionLabel( tr( "Alpha" ), tr( "0–255" ) );
+		addValueRow( tr( "A" ), opacitySlider, opacity );
+	}
+
+	auto linkSlider = [this]( QSlider * slider, QSpinBox * spin ) {
+		connect( slider, &QSlider::valueChanged, spin, &QSpinBox::setValue );
+		connect( spin, qOverload<int>( &QSpinBox::valueChanged ), slider, &QSlider::setValue );
+	};
+	linkSlider( redSlider, red );
+	linkSlider( greenSlider, green );
+	linkSlider( blueSlider, blue );
+	linkSlider( hueSlider, hue );
+	linkSlider( saturationSlider, saturation );
+	linkSlider( valueSlider, value );
+	linkSlider( opacitySlider, opacity );
+
+	QPushButton * eyedropper = new QPushButton( tr( "Pick from Screen…" ), this );
+	eyedropper->setIcon( QIcon::fromTheme( QStringLiteral( "color-picker" ) ) );
+	eyedropper->setToolTip( tr( "Sample a color anywhere on any screen" ) );
+	values->addWidget( eyedropper );
+
+	QHBoxLayout * customTitle = new QHBoxLayout;
+	QLabel * customLabel = new QLabel( tr( "Custom colors" ), this );
+	customLabel->setStyleSheet( QStringLiteral( "font-weight: 600;" ) );
+	customTitle->addWidget( customLabel );
+	QLabel * customHint = new QLabel( tr( "Click Add to save" ), this );
+	customHint->setStyleSheet( QStringLiteral( "color: #ababab;" ) );
+	customTitle->addWidget( customHint, 0, Qt::AlignRight );
+	values->addLayout( customTitle );
+	QGridLayout * customGrid = new QGridLayout;
+	customGrid->setSpacing( 4 );
+	values->addLayout( customGrid );
+	values->addStretch();
+	QSettings settings;
+	customColors = settings.value( QStringLiteral( "ColorDialog/CustomColors" ) ).toStringList();
+	while ( customColors.size() < 8 ) customColors.append( QStringLiteral( "#808080" ) );
+	QList<QPushButton *> customChips;
+	for ( int i = 0; i < 8; i++ ) {
+		QPushButton * chip = new QPushButton( this );
+		chip->setFixedSize( 34, 24 );
+		chip->setStyleSheet( colorChipStyle( QColor( customColors.at( i ) ) ) );
+		customGrid->addWidget( chip, i / 8, i % 8 );
+		customChips.append( chip );
+	}
+
+	if ( !alphaEnabled ) currentColor.setAlpha( 255 );
+	applyColor = [=, this]( const QColor & requested, bool updateWheel ) {
+		if ( syncing || !requested.isValid() ) return;
+		syncing = true;
+		currentColor = requested;
+		if ( !alphaEnabled ) currentColor.setAlpha( 255 );
+		if ( updateWheel ) hsv->setColor( currentColor );
+		QSignalBlocker redBlocker( red );
+		QSignalBlocker greenBlocker( green );
+		QSignalBlocker blueBlocker( blue );
+		QSignalBlocker hueBlocker( hue );
+		QSignalBlocker saturationBlocker( saturation );
+		QSignalBlocker valueBlocker( value );
+		QSignalBlocker opacityBlocker( opacity );
+		QSignalBlocker redSliderBlocker( redSlider );
+		QSignalBlocker greenSliderBlocker( greenSlider );
+		QSignalBlocker blueSliderBlocker( blueSlider );
+		QSignalBlocker hueSliderBlocker( hueSlider );
+		QSignalBlocker saturationSliderBlocker( saturationSlider );
+		QSignalBlocker valueSliderBlocker( valueSlider );
+		QSignalBlocker opacitySliderBlocker( opacitySlider );
+		QSignalBlocker hexBlocker( hex );
+		red->setValue( currentColor.red() );
+		green->setValue( currentColor.green() );
+		blue->setValue( currentColor.blue() );
+		hue->setValue( qMax( 0, currentColor.hsvHue() ) );
+		saturation->setValue( qRound( currentColor.hsvSaturationF() * 100.0 ) );
+		value->setValue( qRound( currentColor.valueF() * 100.0 ) );
+		opacity->setValue( currentColor.alpha() );
+		redSlider->setValue( currentColor.red() );
+		greenSlider->setValue( currentColor.green() );
+		blueSlider->setValue( currentColor.blue() );
+		hueSlider->setValue( qMax( 0, currentColor.hsvHue() ) );
+		saturationSlider->setValue( qRound( currentColor.hsvSaturationF() * 100.0 ) );
+		valueSlider->setValue( qRound( currentColor.valueF() * 100.0 ) );
+		opacitySlider->setValue( currentColor.alpha() );
+		hex->setText( currentColor.name( QColor::HexRgb ).toUpper() );
+		currentChip->setStyleSheet( colorChipStyle( currentColor ) );
+		redSlider->setStyleSheet( colorSliderStyle( twoColorStops(
+			QColor( 0, currentColor.green(), currentColor.blue() ),
+			QColor( 255, currentColor.green(), currentColor.blue() ) ) ) );
+		greenSlider->setStyleSheet( colorSliderStyle( twoColorStops(
+			QColor( currentColor.red(), 0, currentColor.blue() ),
+			QColor( currentColor.red(), 255, currentColor.blue() ) ) ) );
+		blueSlider->setStyleSheet( colorSliderStyle( twoColorStops(
+			QColor( currentColor.red(), currentColor.green(), 0 ),
+			QColor( currentColor.red(), currentColor.green(), 255 ) ) ) );
+		hueSlider->setStyleSheet( colorSliderStyle( QStringLiteral(
+			"stop:0 #ff0000, stop:0.167 #ffff00, stop:0.333 #00ff00, stop:0.5 #00ffff,"
+			" stop:0.667 #0000ff, stop:0.833 #ff00ff, stop:1 #ff0000" ) ) );
+		const int hsvHue = qMax( 0, currentColor.hsvHue() );
+		const int hsvValue = currentColor.value();
+		saturationSlider->setStyleSheet( colorSliderStyle( twoColorStops(
+			QColor::fromHsv( hsvHue, 0, hsvValue ), QColor::fromHsv( hsvHue, 255, hsvValue ) ) ) );
+		valueSlider->setStyleSheet( colorSliderStyle( twoColorStops(
+			Qt::black, QColor::fromHsv( hsvHue, currentColor.hsvSaturation(), 255 ) ) ) );
+		opacitySlider->setStyleSheet( colorSliderStyle( twoColorStops(
+			QColor( 48, 48, 48 ), currentColor ) ) );
+		syncing = false;
+		if ( colorChangedCallback ) colorChangedCallback( currentColor );
+	};
+
+	connect( hsv, &ColorWheel::sigColor, this, [=, this]( const QColor & wheelColor ) {
+		QColor next = wheelColor;
+		next.setAlpha( currentColor.alpha() );
+		applyColor( next, false );
+	} );
+	auto rgbChanged = [=, this]() {
+		applyColor( QColor( red->value(), green->value(), blue->value(), opacity->value() ), true );
+	};
+	connect( red, qOverload<int>( &QSpinBox::valueChanged ), this, rgbChanged );
+	connect( green, qOverload<int>( &QSpinBox::valueChanged ), this, rgbChanged );
+	connect( blue, qOverload<int>( &QSpinBox::valueChanged ), this, rgbChanged );
+	auto hsvChanged = [=, this]() {
+		QColor next = QColor::fromHsv( hue->value(), qRound( saturation->value() * 2.55 ),
+			qRound( value->value() * 2.55 ), opacity->value() );
+		applyColor( next, true );
+	};
+	connect( hue, qOverload<int>( &QSpinBox::valueChanged ), this, hsvChanged );
+	connect( saturation, qOverload<int>( &QSpinBox::valueChanged ), this, hsvChanged );
+	connect( value, qOverload<int>( &QSpinBox::valueChanged ), this, hsvChanged );
+	connect( opacity, qOverload<int>( &QSpinBox::valueChanged ), this, [=, this]() {
+		QColor next = currentColor;
+		next.setAlpha( opacity->value() );
+		applyColor( next, true );
+	} );
+	connect( hex, &QLineEdit::editingFinished, this, [=, this]() {
+		QString text = hex->text();
+		if ( !text.startsWith( QLatin1Char( '#' ) ) ) text.prepend( QLatin1Char( '#' ) );
+		QColor next( text );
+		next.setAlpha( currentColor.alpha() );
+		applyColor( next, true );
+	} );
+	connect( copyHex, &QToolButton::clicked, this, [=]() {
+		QApplication::clipboard()->setText( hex->text() );
+	} );
+	connect( previousChip, &QPushButton::clicked, this, [=, this]() {
+		applyColor( originalColor, true );
+	} );
+	connect( eyedropper, &QPushButton::clicked, this, [=, this]() {
+		QWidget * host = window();
+		ScreenColorSampler sampler( host );
+		if ( sampler.run() == QDialog::Accepted ) {
+			QColor sampled = sampler.selectedColor();
+			sampled.setAlpha( currentColor.alpha() );
+			applyColor( sampled, true );
+		}
+		if ( host ) {
+			host->raise();
+			host->activateWindow();
+		}
+#ifdef Q_OS_WIN
+		if ( host ) SetForegroundWindow( reinterpret_cast<HWND>( host->winId() ) );
+#endif
+	} );
+
+	for ( int i = 0; i < presetColors.size(); i++ ) {
+		QPushButton * chip = new QPushButton( this );
+		chip->setFixedSize( 27, 20 );
+		chip->setStyleSheet( colorChipStyle( presetColors.at( i ) ) );
+		palette->addWidget( chip, i / 10, i % 10 );
+		connect( chip, &QPushButton::clicked, this, [=, this]() {
+			QColor next = presetColors.at( i );
+			next.setAlpha( currentColor.alpha() );
+			applyColor( next, true );
+		} );
+	}
+	for ( int i = 0; i < customChips.size(); i++ ) {
+		connect( customChips.at( i ), &QPushButton::clicked, this, [=, this]() {
+			QColor next( customColors.at( i ) );
+			next.setAlpha( currentColor.alpha() );
+			applyColor( next, true );
+		} );
+	}
+	connect( addCustom, &QPushButton::clicked, this, [=, this]() {
+		QSettings settings;
+		int slot = settings.value( QStringLiteral( "ColorDialog/NextCustomSlot" ), 0 ).toInt()
+			% customChips.size();
+		customColors[slot] = currentColor.name( QColor::HexRgb );
+		customChips.at( slot )->setStyleSheet( colorChipStyle( currentColor ) );
+		settings.setValue( QStringLiteral( "ColorDialog/CustomColors" ), customColors );
+		settings.setValue( QStringLiteral( "ColorDialog/NextCustomSlot" ),
+			( slot + 1 ) % customChips.size() );
+	} );
+
+	applyColor( currentColor, true );
+	QLabel * interactionHint = new QLabel(
+		tr( "Drag a slider or numeric field; hold Shift for fine control" ), this );
+	interactionHint->setStyleSheet( QStringLiteral( "color: #ababab;" ) );
+	outer->addWidget( interactionHint );
+}
+
+QColor ColorPickerPanel::getColor() const
+{
+	return currentColor;
+}
+
+void ColorPickerPanel::setColor( const QColor & color )
+{
+	if ( applyColor ) applyColor( color, true );
+}
+
+void ColorPickerPanel::setColorChangedCallback(
+	std::function<void( const QColor & )> callback )
+{
+	colorChangedCallback = std::move( callback );
+}
+
 QColor ColorWheel::choose( const QColor & c, bool alphaEnable, QWidget * parent )
 {
 	QDialog dlg( parent );
-	dlg.setWindowTitle( "Choose a Color" );
-	QGridLayout * grid = new QGridLayout;
-	dlg.setLayout( grid );
+	dlg.setWindowTitle( tr( "Choose a Color" ) );
+	dlg.setMinimumSize( 680, 445 );
+	dlg.setStyleSheet( QStringLiteral(
+		"QDialog { background: #383838; color: #dddddd; }"
+		"QLabel { color: #dddddd; }"
+		"QLineEdit { background: #545454; border: 1px solid #303030; border-radius: 3px;"
+		" color: #eeeeee; padding: 3px 6px; selection-background-color: #4772b3; }"
+		"QPushButton, QToolButton { background: #454545; border: 1px solid #606060; border-radius: 3px;"
+		" color: #e2e2e2; padding: 4px 9px; }"
+		"QPushButton:hover, QToolButton:hover { background: #525252; border-color: #777777; }"
+		"QPushButton:pressed, QToolButton:pressed { background: #303030; }" ) );
+	QVBoxLayout * outer = new QVBoxLayout( &dlg );
+	outer->setContentsMargins( 12, 12, 12, 10 );
+	outer->setSpacing( 10 );
+	QHBoxLayout * content = new QHBoxLayout;
+	content->setSpacing( 22 );
+	outer->addLayout( content, 1 );
 
-	ColorWheel * hsv = new ColorWheel;
-	hsv->setColor( c );
-	grid->addWidget( hsv, 0, 0, 1, 2 );
+	QVBoxLayout * left = new QVBoxLayout;
+	left->setSpacing( 7 );
+	content->addLayout( left, 1 );
+	QHBoxLayout * previews = new QHBoxLayout;
+	previews->setAlignment( Qt::AlignHCenter );
+	QPushButton * previousChip = new QPushButton( &dlg );
+	QPushButton * currentChip = new QPushButton( &dlg );
+	auto addPreview = [&]( QPushButton * chip, const QString & label ) {
+		QVBoxLayout * column = new QVBoxLayout;
+		column->setSpacing( 2 );
+		chip->setFixedSize( 62, 38 );
+		column->addWidget( chip, 0, Qt::AlignHCenter );
+		QLabel * caption = new QLabel( label, &dlg );
+		caption->setAlignment( Qt::AlignHCenter );
+		caption->setStyleSheet( QStringLiteral( "color: #bdbdbd;" ) );
+		column->addWidget( caption );
+		previews->addLayout( column );
+	};
+	addPreview( previousChip, tr( "Previous" ) );
+	QLabel * arrow = new QLabel( QStringLiteral( "›" ), &dlg );
+	arrow->setAlignment( Qt::AlignCenter );
+	previews->addWidget( arrow );
+	addPreview( currentChip, tr( "Current" ) );
+	previousChip->setToolTip( tr( "Previous color — click to restore" ) );
+	currentChip->setToolTip( tr( "Current color" ) );
+	currentChip->setAttribute( Qt::WA_TransparentForMouseEvents );
+	previousChip->setStyleSheet( colorChipStyle( c ) );
+	left->addLayout( previews );
+
+	ColorWheel * hsv = new ColorWheel( c );
 	hsv->setAlpha( alphaEnable );
+	hsv->setDiscMode( true );
+	hsv->setFixedSize( 250, 250 );
+	left->addWidget( hsv, 0, Qt::AlignHCenter );
 
-	AlphaSlider * alpha = new AlphaSlider;
-	alpha->setColor( c );
-	alpha->setValue( c.alphaF() );
-	hsv->setAlphaValue( c.alphaF() );
-	alpha->setOrientation( Qt::Vertical );
-	grid->addWidget( alpha, 0, 2 );
-	alpha->setVisible( alphaEnable );
-	connect( hsv, &ColorWheel::sigColor, alpha, &AlphaSlider::setColor );
-	connect( alpha, &AlphaSlider::valueChanged, hsv, &ColorWheel::setAlphaValue );
+	QHBoxLayout * paletteTitle = new QHBoxLayout;
+	QLabel * paletteLabel = new QLabel( tr( "Palette" ), &dlg );
+	paletteLabel->setStyleSheet( QStringLiteral( "font-weight: 600;" ) );
+	paletteTitle->addWidget( paletteLabel );
+	QPushButton * addCustom = new QPushButton( tr( "+  Add" ), &dlg );
+	addCustom->setToolTip( tr( "Save the current color to the custom palette" ) );
+	paletteTitle->addWidget( addCustom, 0, Qt::AlignRight );
+	left->addLayout( paletteTitle );
+	QGridLayout * palette = new QGridLayout;
+	palette->setSpacing( 3 );
+	left->addLayout( palette );
+	const QList<QColor> presetColors = {
+		Qt::black, QColor( 64, 64, 64 ), QColor( 128, 128, 128 ), QColor( 192, 192, 192 ), Qt::white,
+		QColor( 128, 0, 0 ), Qt::red, QColor( 255, 128, 0 ), Qt::yellow, QColor( 128, 128, 0 ),
+		QColor( 0, 128, 0 ), Qt::green, QColor( 0, 128, 128 ), Qt::cyan, QColor( 0, 0, 128 ),
+		Qt::blue, QColor( 128, 0, 128 ), Qt::magenta, QColor( 255, 128, 192 ), QColor( 128, 64, 0 )
+	};
 
-	QHBoxLayout * hbox = new QHBoxLayout;
-	grid->addLayout( hbox, 1, 0, 1, 3 );
-	QPushButton * ok = new QPushButton( "Ok" );
-	hbox->addWidget( ok );
-	QPushButton * cancel = new QPushButton( "Cancel" );
-	hbox->addWidget( cancel );
-	connect( ok, &QPushButton::clicked, &dlg, &QDialog::accept );
-	connect( cancel, &QPushButton::clicked, &dlg, &QDialog::reject );
+	QVBoxLayout * values = new QVBoxLayout;
+	values->setSpacing( 7 );
+	content->addLayout( values, 1 );
+	QHBoxLayout * hexRow = new QHBoxLayout;
+	hexRow->addWidget( new QLabel( tr( "Hex" ), &dlg ) );
+	QLineEdit * hex = new QLineEdit( &dlg );
+	hex->setMaxLength( 7 );
+	hex->setValidator( new QRegularExpressionValidator( QRegularExpression( QStringLiteral( "#?[0-9A-Fa-f]{6}" ) ), hex ) );
+	hex->setAlignment( Qt::AlignCenter );
+	hexRow->addWidget( hex, 1 );
+	QToolButton * copyHex = new QToolButton( &dlg );
+	copyHex->setText( tr( "Copy" ) );
+	copyHex->setToolTip( tr( "Copy the hexadecimal color value" ) );
+	hexRow->addWidget( copyHex );
+	values->addLayout( hexRow );
 
-	if ( dlg.exec() == QDialog::Accepted ) {
-		QColor color = hsv->getColor();
-		color.setAlphaF( alpha->value() );
-		return color;
+	auto makeByteSpin = [&dlg]() {
+		QSpinBox * spin = new ColorDragSpinBox( &dlg );
+		spin->setRange( 0, 255 );
+		spin->setFixedWidth( 72 );
+		return spin;
+	};
+	auto makeSlider = [&dlg]( int maximum ) {
+		QSlider * slider = new QSlider( Qt::Horizontal, &dlg );
+		slider->setRange( 0, maximum );
+		slider->setSingleStep( 1 );
+		slider->setPageStep( 1 );
+		slider->setMinimumWidth( 150 );
+		return slider;
+	};
+	QSpinBox * red = makeByteSpin();
+	QSpinBox * green = makeByteSpin();
+	QSpinBox * blue = makeByteSpin();
+	QSpinBox * hue = new ColorDragSpinBox( &dlg ); hue->setRange( 0, 359 ); hue->setSuffix( QStringLiteral( "°" ) ); hue->setFixedWidth( 72 );
+	QSpinBox * saturation = new ColorDragSpinBox( &dlg ); saturation->setRange( 0, 100 ); saturation->setSuffix( QStringLiteral( "%" ) ); saturation->setFixedWidth( 72 );
+	QSpinBox * value = new ColorDragSpinBox( &dlg ); value->setRange( 0, 100 ); value->setSuffix( QStringLiteral( "%" ) ); value->setFixedWidth( 72 );
+	QSpinBox * opacity = makeByteSpin();
+	QSlider * redSlider = makeSlider( 255 );
+	QSlider * greenSlider = makeSlider( 255 );
+	QSlider * blueSlider = makeSlider( 255 );
+	QSlider * hueSlider = makeSlider( 359 );
+	QSlider * saturationSlider = makeSlider( 100 );
+	QSlider * valueSlider = makeSlider( 100 );
+	QSlider * opacitySlider = makeSlider( 255 );
+	// Color3 has no alpha row. These widgets still participate in the shared
+	// synchronization code, but must not float as orphan children at (0, 0).
+	if ( !alphaEnable ) {
+		opacity->hide();
+		opacitySlider->hide();
 	}
+
+	auto sectionLabel = [&dlg, values]( const QString & title, const QString & note ) {
+		QHBoxLayout * row = new QHBoxLayout;
+		QLabel * heading = new QLabel( title, &dlg );
+		heading->setStyleSheet( QStringLiteral( "font-weight: 600;" ) );
+		row->addWidget( heading );
+		QLabel * detail = new QLabel( note, &dlg );
+		detail->setStyleSheet( QStringLiteral( "color: #ababab;" ) );
+		row->addWidget( detail, 0, Qt::AlignRight );
+		values->addLayout( row );
+		QFrame * line = new QFrame( &dlg );
+		line->setFrameShape( QFrame::HLine );
+		line->setStyleSheet( QStringLiteral( "color: #555555;" ) );
+		values->addWidget( line );
+	};
+	auto addValueRow = [&dlg, values]( const QString & label, QSlider * slider, QSpinBox * spin ) {
+		QHBoxLayout * row = new QHBoxLayout;
+		row->setSpacing( 8 );
+		QLabel * name = new QLabel( label, &dlg );
+		name->setFixedWidth( 18 );
+		name->setAlignment( Qt::AlignCenter );
+		row->addWidget( name );
+		row->addWidget( slider, 1 );
+		row->addWidget( spin );
+		values->addLayout( row );
+	};
+	sectionLabel( tr( "RGB" ), tr( "0–255" ) );
+	addValueRow( tr( "R" ), redSlider, red );
+	addValueRow( tr( "G" ), greenSlider, green );
+	addValueRow( tr( "B" ), blueSlider, blue );
+	sectionLabel( tr( "HSV" ), tr( "Hue · Saturation · Value" ) );
+	addValueRow( tr( "H" ), hueSlider, hue );
+	addValueRow( tr( "S" ), saturationSlider, saturation );
+	addValueRow( tr( "V" ), valueSlider, value );
+	if ( alphaEnable ) {
+		sectionLabel( tr( "Alpha" ), tr( "0–255" ) );
+		addValueRow( tr( "A" ), opacitySlider, opacity );
+	}
+
+	auto linkSlider = [&dlg]( QSlider * slider, QSpinBox * spin ) {
+		connect( slider, &QSlider::valueChanged, spin, &QSpinBox::setValue );
+		connect( spin, qOverload<int>( &QSpinBox::valueChanged ), slider, &QSlider::setValue );
+	};
+	linkSlider( redSlider, red );
+	linkSlider( greenSlider, green );
+	linkSlider( blueSlider, blue );
+	linkSlider( hueSlider, hue );
+	linkSlider( saturationSlider, saturation );
+	linkSlider( valueSlider, value );
+	linkSlider( opacitySlider, opacity );
+
+	QPushButton * eyedropper = new QPushButton( tr( "Pick from Screen…" ), &dlg );
+	eyedropper->setIcon( QIcon::fromTheme( QStringLiteral( "color-picker" ) ) );
+	eyedropper->setToolTip( tr( "Sample a color anywhere on any screen" ) );
+	values->addWidget( eyedropper );
+
+	QHBoxLayout * customTitle = new QHBoxLayout;
+	QLabel * customLabel = new QLabel( tr( "Custom colors" ), &dlg );
+	customLabel->setStyleSheet( QStringLiteral( "font-weight: 600;" ) );
+	customTitle->addWidget( customLabel );
+	QLabel * customHint = new QLabel( tr( "Click Add to save" ), &dlg );
+	customHint->setStyleSheet( QStringLiteral( "color: #ababab;" ) );
+	customTitle->addWidget( customHint, 0, Qt::AlignRight );
+	values->addLayout( customTitle );
+	QGridLayout * customGrid = new QGridLayout;
+	customGrid->setSpacing( 4 );
+	values->addLayout( customGrid );
+	values->addStretch();
+	QSettings settings;
+	QStringList customColors = settings.value( QStringLiteral( "ColorDialog/CustomColors" ) ).toStringList();
+	while ( customColors.size() < 8 ) customColors.append( QStringLiteral( "#808080" ) );
+	QList<QPushButton *> customChips;
+	for ( int i = 0; i < 8; i++ ) {
+		QPushButton * chip = new QPushButton( &dlg );
+		chip->setFixedSize( 34, 24 );
+		chip->setStyleSheet( colorChipStyle( QColor( customColors.at( i ) ) ) );
+		customGrid->addWidget( chip, i / 8, i % 8 );
+		customChips.append( chip );
+	}
+
+	QColor current = c;
+	if ( !alphaEnable ) current.setAlpha( 255 );
+	bool syncing = false;
+	std::function<void( const QColor &, bool )> setCurrent;
+	setCurrent = [&]( const QColor & requested, bool updateWheel ) {
+		if ( syncing || !requested.isValid() ) return;
+		syncing = true;
+		current = requested;
+		if ( !alphaEnable ) current.setAlpha( 255 );
+		if ( updateWheel ) hsv->setColor( current );
+		QSignalBlocker redBlocker( red );
+		QSignalBlocker greenBlocker( green );
+		QSignalBlocker blueBlocker( blue );
+		QSignalBlocker hueBlocker( hue );
+		QSignalBlocker saturationBlocker( saturation );
+		QSignalBlocker valueBlocker( value );
+		QSignalBlocker opacityBlocker( opacity );
+		QSignalBlocker redSliderBlocker( redSlider );
+		QSignalBlocker greenSliderBlocker( greenSlider );
+		QSignalBlocker blueSliderBlocker( blueSlider );
+		QSignalBlocker hueSliderBlocker( hueSlider );
+		QSignalBlocker saturationSliderBlocker( saturationSlider );
+		QSignalBlocker valueSliderBlocker( valueSlider );
+		QSignalBlocker opacitySliderBlocker( opacitySlider );
+		QSignalBlocker hexBlocker( hex );
+		red->setValue( current.red() );
+		green->setValue( current.green() );
+		blue->setValue( current.blue() );
+		hue->setValue( qMax( 0, current.hsvHue() ) );
+		saturation->setValue( qRound( current.hsvSaturationF() * 100.0 ) );
+		value->setValue( qRound( current.valueF() * 100.0 ) );
+		opacity->setValue( current.alpha() );
+		redSlider->setValue( current.red() );
+		greenSlider->setValue( current.green() );
+		blueSlider->setValue( current.blue() );
+		hueSlider->setValue( qMax( 0, current.hsvHue() ) );
+		saturationSlider->setValue( qRound( current.hsvSaturationF() * 100.0 ) );
+		valueSlider->setValue( qRound( current.valueF() * 100.0 ) );
+		opacitySlider->setValue( current.alpha() );
+		hex->setText( current.name( QColor::HexRgb ).toUpper() );
+		currentChip->setStyleSheet( colorChipStyle( current ) );
+		redSlider->setStyleSheet( colorSliderStyle( twoColorStops( QColor( 0, current.green(), current.blue() ), QColor( 255, current.green(), current.blue() ) ) ) );
+		greenSlider->setStyleSheet( colorSliderStyle( twoColorStops( QColor( current.red(), 0, current.blue() ), QColor( current.red(), 255, current.blue() ) ) ) );
+		blueSlider->setStyleSheet( colorSliderStyle( twoColorStops( QColor( current.red(), current.green(), 0 ), QColor( current.red(), current.green(), 255 ) ) ) );
+		hueSlider->setStyleSheet( colorSliderStyle( QStringLiteral(
+			"stop:0 #ff0000, stop:0.167 #ffff00, stop:0.333 #00ff00, stop:0.5 #00ffff,"
+			" stop:0.667 #0000ff, stop:0.833 #ff00ff, stop:1 #ff0000" ) ) );
+		const int hsvHue = qMax( 0, current.hsvHue() );
+		const int hsvValue = current.value();
+		saturationSlider->setStyleSheet( colorSliderStyle( twoColorStops(
+			QColor::fromHsv( hsvHue, 0, hsvValue ), QColor::fromHsv( hsvHue, 255, hsvValue ) ) ) );
+		valueSlider->setStyleSheet( colorSliderStyle( twoColorStops(
+			Qt::black, QColor::fromHsv( hsvHue, current.hsvSaturation(), 255 ) ) ) );
+		opacitySlider->setStyleSheet( colorSliderStyle( twoColorStops( QColor( 48, 48, 48 ), current ) ) );
+		syncing = false;
+	};
+
+	connect( hsv, &ColorWheel::sigColor, &dlg, [&]( const QColor & wheelColor ) {
+		QColor next = wheelColor;
+		next.setAlpha( current.alpha() );
+		setCurrent( next, false );
+	} );
+	auto rgbChanged = [&]() { setCurrent( QColor( red->value(), green->value(), blue->value(), opacity->value() ), true ); };
+	connect( red, qOverload<int>( &QSpinBox::valueChanged ), &dlg, rgbChanged );
+	connect( green, qOverload<int>( &QSpinBox::valueChanged ), &dlg, rgbChanged );
+	connect( blue, qOverload<int>( &QSpinBox::valueChanged ), &dlg, rgbChanged );
+	auto hsvChanged = [&]() {
+		QColor next = QColor::fromHsv( hue->value(), qRound( saturation->value() * 2.55 ),
+			qRound( value->value() * 2.55 ), opacity->value() );
+		setCurrent( next, true );
+	};
+	connect( hue, qOverload<int>( &QSpinBox::valueChanged ), &dlg, hsvChanged );
+	connect( saturation, qOverload<int>( &QSpinBox::valueChanged ), &dlg, hsvChanged );
+	connect( value, qOverload<int>( &QSpinBox::valueChanged ), &dlg, hsvChanged );
+	connect( opacity, qOverload<int>( &QSpinBox::valueChanged ), &dlg, [&]() {
+		QColor next = current; next.setAlpha( opacity->value() ); setCurrent( next, true );
+	} );
+	connect( hex, &QLineEdit::editingFinished, &dlg, [&]() {
+		QString text = hex->text(); if ( !text.startsWith( QLatin1Char( '#' ) ) ) text.prepend( QLatin1Char( '#' ) );
+		QColor next( text ); next.setAlpha( current.alpha() ); setCurrent( next, true );
+	} );
+	connect( copyHex, &QToolButton::clicked, &dlg, [&]() {
+		QApplication::clipboard()->setText( hex->text() );
+	} );
+	connect( previousChip, &QPushButton::clicked, &dlg, [&]() { setCurrent( c, true ); } );
+	connect( eyedropper, &QPushButton::clicked, &dlg, [&]() {
+		ScreenColorSampler sampler( &dlg );
+		if ( sampler.run() == QDialog::Accepted ) {
+			QColor sampled = sampler.selectedColor(); sampled.setAlpha( current.alpha() ); setCurrent( sampled, true );
+		}
+		dlg.raise();
+		dlg.activateWindow();
+#ifdef Q_OS_WIN
+		// The sampling click may activate another process. Bring the still-visible
+		// color dialog back so the user can immediately confirm or keep editing.
+		SetForegroundWindow( reinterpret_cast<HWND>( dlg.winId() ) );
+#endif
+	} );
+
+	for ( int i = 0; i < presetColors.size(); i++ ) {
+		QPushButton * chip = new QPushButton( &dlg );
+		chip->setFixedSize( 27, 20 );
+		chip->setStyleSheet( colorChipStyle( presetColors.at( i ) ) );
+		palette->addWidget( chip, i / 10, i % 10 );
+		connect( chip, &QPushButton::clicked, &dlg, [&, i]() {
+			QColor next = presetColors.at( i ); next.setAlpha( current.alpha() ); setCurrent( next, true );
+		} );
+	}
+	for ( int i = 0; i < customChips.size(); i++ ) {
+		connect( customChips.at( i ), &QPushButton::clicked, &dlg, [&, i]() {
+			QColor next( customColors.at( i ) ); next.setAlpha( current.alpha() ); setCurrent( next, true );
+		} );
+	}
+	connect( addCustom, &QPushButton::clicked, &dlg, [&]() {
+		int slot = settings.value( QStringLiteral( "ColorDialog/NextCustomSlot" ), 0 ).toInt() % customChips.size();
+		customColors[slot] = current.name( QColor::HexRgb );
+		customChips.at( slot )->setStyleSheet( colorChipStyle( current ) );
+		settings.setValue( QStringLiteral( "ColorDialog/CustomColors" ), customColors );
+		settings.setValue( QStringLiteral( "ColorDialog/NextCustomSlot" ), ( slot + 1 ) % customChips.size() );
+	} );
+
+	setCurrent( current, true );
+	QHBoxLayout * footer = new QHBoxLayout;
+	QLabel * interactionHint = new QLabel( tr( "Drag a slider or numeric field; hold Shift for fine control" ), &dlg );
+	interactionHint->setStyleSheet( QStringLiteral( "color: #ababab;" ) );
+	footer->addWidget( interactionHint, 1 );
+	QDialogButtonBox * buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg );
+	footer->addWidget( buttons );
+	outer->addLayout( footer );
+	connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );
+	connect( buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
+
+	if ( dlg.exec() == QDialog::Accepted )
+		return current;
 
 	return c;
 }

@@ -819,7 +819,8 @@ void Scene::drawBox( const Vector3 & a, const Vector3 & b )
 }
 
 void Scene::drawGrid( float s /* grid size / 2 */, int lines /* number of lines - 1 */, int sub /* # subdivisions */,
-						FloatVector4 color, FloatVector4 axis1Color, FloatVector4 axis2Color )
+						FloatVector4 color, FloatVector4 axis1Color, FloatVector4 axis2Color,
+						const Vector3 & center, float minorFade )
 {
 	if ( selecting )
 		return;
@@ -837,42 +838,38 @@ void Scene::drawGrid( float s /* grid size / 2 */, int lines /* number of lines 
 	Vector3 *	p = positions;
 	FloatVector4 *	c = colors;
 	for ( int i = 0; i <= lines; i++, p = p + 4, c = c + 4 ) {
-		float	t = float( i ) * scale1 - s;
-		p[0] = Vector3( t, -s, 0.0f );
-		p[1] = Vector3( t, s, 0.0f );
-		p[2] = Vector3( -s, t, 0.0f );
-		p[3] = Vector3( s, t, 0.0f );
-		if ( i == ( lines >> 1 ) ) {
-			c[0] = axis2Color;
-			c[1] = axis2Color;
-			c[2] = axis1Color;
-			c[3] = axis1Color;
-		} else {
-			c[0] = color;
-			c[1] = color;
-			c[2] = color;
-			c[3] = color;
-		}
+		const float tx = float( i ) * scale1 - s + center[0];
+		const float ty = float( i ) * scale1 - s + center[1];
+		p[0] = Vector3( tx, center[1] - s, 0.0f );
+		p[1] = Vector3( tx, center[1] + s, 0.0f );
+		p[2] = Vector3( center[0] - s, ty, 0.0f );
+		p[3] = Vector3( center[0] + s, ty, 0.0f );
+		const float eps = scale1 * 0.01f;
+		c[0] = c[1] = ( std::fabs( tx ) <= eps ? axis2Color : color );
+		c[2] = c[3] = ( std::fabs( ty ) <= eps ? axis1Color : color );
 	}
 	setGLLineWidth( GLView::Settings::lineWidthGrid );
 	drawLines( positions, numVerts, colors );
 
+	minorFade = std::clamp( minorFade, 0.0f, 1.0f );
 	numVerts = size_t( lines ) * size_t( sub - 1 ) * 4;
-	positions = allocateVertexAttr( numVerts );
-	if ( positions ) {
+	if ( minorFade > 0.02f && ( positions = allocateVertexAttr( numVerts ) ) != nullptr ) {
 		float	scale2 = s * 2.0f / float( lines * sub );
 		p = positions;
 		for ( int i = 0; i < lines; i++ ) {
 			for ( int j = 1; j < sub; j++, p = p + 4 ) {
-				float	t = float( i * sub + j ) * scale2 - s;
-				p[0] = Vector3( t, -s, 0.0f );
-				p[1] = Vector3( t, s, 0.0f );
-				p[2] = Vector3( -s, t, 0.0f );
-				p[3] = Vector3( s, t, 0.0f );
+				const float tx = float( i * sub + j ) * scale2 - s + center[0];
+				const float ty = float( i * sub + j ) * scale2 - s + center[1];
+				p[0] = Vector3( tx, center[1] - s, 0.0f );
+				p[1] = Vector3( tx, center[1] + s, 0.0f );
+				p[2] = Vector3( center[0] - s, ty, 0.0f );
+				p[3] = Vector3( center[0] + s, ty, 0.0f );
 			}
 		}
-		setGLColor( color );
-		setGLLineWidth( GLView::Settings::lineWidthGrid * 0.25f );
+		FloatVector4 minorColor = color * 0.55f;
+		minorColor[3] = color[3] * 0.65f * minorFade;
+		setGLColor( minorColor );
+		setGLLineWidth( GLView::Settings::lineWidthGrid * 0.5f );
 		drawLines( positions, numVerts );
 	}
 

@@ -13,6 +13,7 @@ uniform sampler2D BacklightMap;
 uniform vec3 specColor;
 uniform float specStrength;
 uniform float specGlossiness;
+uniform bool useGloss;
 
 uniform vec3 glowColor;
 uniform float glowMult;
@@ -147,7 +148,7 @@ void main()
 		s = normalMap.a;
 	}
 
-	vec3 spec = clamp( specColor * specStrength * s * pow(NdotH, specGlossiness), 0.0, 1.0 );
+	vec3 spec = clamp( specColor * specStrength * s * pow(NdotH, useGloss ? specGlossiness : 1.0), 0.0, 1.0 );
 	spec *= D.rgb;
 
 

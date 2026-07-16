@@ -13,6 +13,7 @@ uniform samplerCube CubeMap;
 uniform vec3 specColor;
 uniform float specStrength;
 uniform float specGlossiness;
+uniform bool useGloss;
 
 uniform vec3 glowColor;
 uniform float glowMult;
@@ -177,7 +178,7 @@ void main()
 	}
 
 	// Specular
-	vec3 spec = clamp( specColor * specStrength * normalMap.a * pow(NdotH, specGlossiness), 0.0, 1.0 );
+	vec3 spec = clamp( specColor * specStrength * normalMap.a * pow(NdotH, useGloss ? specGlossiness : 1.0), 0.0, 1.0 );
 	spec *= D.rgb;
 
 	// Emissive

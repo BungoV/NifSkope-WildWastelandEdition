@@ -39,6 +39,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QColor>
 #include <QRegularExpression>
 #include <QSlider>
+#include <QStringList>
+
+#include <functional>
 
 
 //! \file colorwheel.h ColorWheel, ColorSpinBox
@@ -68,6 +71,7 @@ public:
 	QSize minimumSizeHint() const override final;
 
 	void setSizeHint( const QSize & s );
+	void setDiscMode( bool enabled );
 
 	int heightForWidth( int width ) const override final;
 
@@ -96,10 +100,34 @@ private:
 
 	enum
 	{
-		Nope, Circle, Triangle
+		Nope, Circle, Triangle, Disc
 	} pressed = Nope;
 
 	QSize sHint;
+	bool discMode = false;
+};
+
+//! The complete NifSkope color chooser as an embeddable, live-editing panel.
+//! It mirrors the modal chooser's controls, synchronization, palettes, numeric
+//! scrubbing, and screen sampling for editors that need immediate updates.
+class ColorPickerPanel final : public QWidget
+{
+public:
+	explicit ColorPickerPanel( const QColor & color, bool alpha = true,
+		QWidget * parent = nullptr );
+
+	QColor getColor() const;
+	void setColor( const QColor & color );
+	void setColorChangedCallback( std::function<void( const QColor & )> callback );
+
+private:
+	QColor originalColor;
+	QColor currentColor;
+	bool alphaEnabled = true;
+	bool syncing = false;
+	QStringList customColors;
+	std::function<void( const QColor &, bool )> applyColor;
+	std::function<void( const QColor & )> colorChangedCallback;
 };
 
 class QLabel;

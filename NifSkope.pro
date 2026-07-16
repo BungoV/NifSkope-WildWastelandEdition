@@ -173,6 +173,8 @@ HEADERS += \
 	src/gl/glshape.h \
 	src/gl/gltex.h \
 	src/gl/gltools.h \
+	src/gl/hknpdecode.h \
+	src/gl/hknpencode.h \
 	src/gl/icontrollable.h \
 	src/gl/renderer.h \
 	src/io/material.h \
@@ -259,6 +261,8 @@ SOURCES += \
 	src/gl/gltex.cpp \
 	src/gl/gltexloaders.cpp \
 	src/gl/gltools.cpp \
+	src/gl/hknpdecode.cpp \
+	src/gl/hknpencode.cpp \
 	src/gl/renderer.cpp \
 	src/io/materialfile.cpp \
 	src/io/MeshFile.cpp \
@@ -282,6 +286,8 @@ SOURCES += \
 	src/spells/blocks.cpp \
 	src/spells/bounds.cpp \
 	src/spells/meshtools.cpp \
+	src/spells/collisiontools.cpp \
+	src/spells/riggingtools.cpp \
 	src/spells/color.cpp \
 	src/spells/fileextract.cpp \
 	src/spells/filerename.cpp \
@@ -340,6 +346,7 @@ SOURCES += \
 	src/message.cpp \
 	src/nifskope.cpp \
 	src/nifskope_ui.cpp \
+	src/uvtools.cpp \
 	src/spellbook.cpp \
 	src/version.cpp \
 	lib/meshlet.cpp \
@@ -501,8 +508,9 @@ win32 {
 }
 
 win32 {
-    # GL libs for Qt 5.5+
-    LIBS += -lopengl32
+    # GL libs for Qt 5.5+; GDI supplies desktop pixel sampling for the
+    # cross-application color eyedropper.
+    LIBS += -lopengl32 -lgdi32
 }
 
 macx {

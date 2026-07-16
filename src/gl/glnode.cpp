@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/controllers.h"
 #include "gl/glscene.h"
 #include "gl/glmarker.h"
+#include "gl/hknpdecode.h"
 #include "model/nifmodel.h"
 #include "ui/settingsdialog.h"
 #include "glview.h"
@@ -805,6 +806,43 @@ void Node::drawHvkShape( const NifModel * nif, const QModelIndex & iShape, HvkSh
 	if ( scene->selecting )
 		scene->setGLColor( getColorKeyFromID( nif->getBlockNumber( iShape ) ) );
 
+	QSettings collisionSettings;
+	const bool solidCollision = collisionSettings.value( "CollisionManager/Solid", true ).toBool();
+	const bool xrayCollision = collisionSettings.value( "CollisionManager/XRay", false ).toBool();
+	const int colourMode = collisionSettings.value( "CollisionManager/ColourBy", 0 ).toInt();
+	const int labelsMode = collisionSettings.value( "CollisionManager/Labels", 1 ).toInt();
+	bool selectedCollision = ( scene->currentBlock == iShape );
+	for ( HvkShapeStackItem * i = stack; i && !selectedCollision; i = i->parent )
+		selectedCollision = ( scene->currentBlock == i->iShape );
+	FloatVector4 wireColour = origin_color4fv;
+	if ( colourMode == 0 ) {
+		quint32 material = nif->get<quint32>( iShape, "Material" );
+		static const FloatVector4 palette[8] = {
+			{ 0.64f, 0.45f, 0.25f, 1.0f }, { 0.50f, 0.58f, 0.66f, 1.0f },
+			{ 0.56f, 0.55f, 0.52f, 1.0f }, { 0.48f, 0.70f, 0.72f, 1.0f },
+			{ 0.72f, 0.54f, 0.28f, 1.0f }, { 0.60f, 0.42f, 0.68f, 1.0f },
+			{ 0.72f, 0.45f, 0.50f, 1.0f }, { 0.45f, 0.62f, 0.45f, 1.0f }
+		};
+		wireColour = palette[ material & 7U ];
+	} else if ( colourMode == 2 ) {
+		wireColour = FloatVector4( 0.35f, 0.72f, 0.95f, 1.0f );
+	} else if ( colourMode == 3 ) {
+		if ( name.contains( QLatin1String( "Sphere" ) ) || name.contains( QLatin1String( "Capsule" ) ) )
+			wireColour = FloatVector4( 0.30f, 0.85f, 0.85f, 1.0f );
+		else if ( name.contains( QLatin1String( "Convex" ) ) || name.contains( QLatin1String( "Box" ) ) )
+			wireColour = FloatVector4( 0.89f, 0.79f, 0.30f, 1.0f );
+		else
+			wireColour = FloatVector4( 0.85f, 0.30f, 0.85f, 1.0f );
+	}
+	if ( selectedCollision )
+		wireColour = scene->highlightColor;
+	FloatVector4 fillColour = wireColour;
+	fillColour[3] = selectedCollision ? 0.42f : 0.30f;
+	if ( !scene->selecting ) {
+		if ( xrayCollision ) glDisable( GL_DEPTH_TEST ); else glEnable( GL_DEPTH_TEST );
+		scene->setGLColor( wireColour );
+	}
+
 	if ( name == "bhkSphereShape" ) {
 		scene->drawSphereSimple( Vector3(), nif->get<float>( iShape, "Radius" ), 24, 6 );
 
@@ -831,30 +869,25 @@ void Node::drawHvkShape( const NifModel * nif, const QModelIndex & iShape, HvkSh
 
 	} else if ( name == "bhkNiTriStripsShape" ) {
 		scene->pushAndMultModelViewMatrix( Transform( Vector3(), bhkInvScale( nif ) ) );
-
-		scene->drawNiTSS( nif, iShape );
-#if 0
-		if ( Options::getHavokState() == HAVOK_SOLID ) {
-			QColor c = Options::hlColor();
-			c.setAlphaF( 0.3 );
-			scene->setGLColor( c );
-
+		if ( solidCollision && !scene->selecting ) {
+			scene->setGLColor( fillColour );
+			glDepthMask( GL_FALSE );
 			scene->drawNiTSS( nif, iShape, true );
+			glDepthMask( GL_TRUE );
+			scene->setGLColor( wireColour );
 		}
-#endif
+		scene->drawNiTSS( nif, iShape );
 		scene->popModelViewMatrix();
 
 	} else if ( name == "bhkConvexVerticesShape" ) {
-		scene->drawConvexHull( nif, iShape, 1.0 );
-#if 0
-		if ( Options::getHavokState() == HAVOK_SOLID ) {
-			QColor c = Options::hlColor();
-			c.setAlphaF( 0.3 );
-			scene->setGLColor( c );
-
-			scene->drawConvexHull( nif, iShape, havokScale, true );
+		if ( solidCollision && !scene->selecting ) {
+			scene->setGLColor( fillColour );
+			glDepthMask( GL_FALSE );
+			scene->drawConvexHull( nif, iShape, 1.0, true );
+			glDepthMask( GL_TRUE );
+			scene->setGLColor( wireColour );
 		}
-#endif
+		scene->drawConvexHull( nif, iShape, 1.0 );
 
 	} else if ( name == "bhkPackedNiTriStripsShape" || name == "hkPackedNiTriStripsData" ) {
 		QModelIndex iData = nif->getBlockIndex( nif->getLink( iShape, "Data" ) );
@@ -872,6 +905,14 @@ void Node::drawHvkShape( const NifModel * nif, const QModelIndex & iShape, HvkSh
 					triangles[i] = nif->get<Triangle>( iTriangle );
 			}
 
+			if ( solidCollision && !scene->selecting ) {
+				scene->setGLColor( fillColour );
+				glDepthMask( GL_FALSE );
+				scene->drawTriangles( verts.constData(), size_t( verts.size() ), nullptr, true, GL_TRIANGLES,
+					size_t( triangles.size() ) * 3, GL_UNSIGNED_SHORT, triangles.constData() );
+				glDepthMask( GL_TRUE );
+				scene->setGLColor( wireColour );
+			}
 			scene->drawTriangles( verts.constData(), size_t( verts.size() ), nullptr, false, GL_TRIANGLES,
 									size_t( triangles.size() ) * 3, GL_UNSIGNED_SHORT, triangles.constData() );
 
@@ -990,17 +1031,17 @@ void Node::drawHvkShape( const NifModel * nif, const QModelIndex & iShape, HvkSh
 		// bhkCompressedMeshShape overrides the scale from parent nodes
 		scene->multModelViewMatrix( Transform( Vector3(),
 												nif->get<Vector4>( iShape, "Scale Copy" )[0] / worldTrans().scale ) );
-		scene->drawCMS( nif, iShape );
-#if 0
-		if ( Options::getHavokState() == HAVOK_SOLID ) {
-			QColor c = Options::hlColor();
-			c.setAlphaF( 0.3 );
-			scene->setGLColor( c );
-
+		if ( solidCollision && !scene->selecting ) {
+			scene->setGLColor( fillColour );
+			glDepthMask( GL_FALSE );
 			scene->drawCMS( nif, iShape, true );
+			glDepthMask( GL_TRUE );
+			scene->setGLColor( wireColour );
 		}
-#endif
+		scene->drawCMS( nif, iShape );
 	}
+	if ( !scene->selecting && labelsMode > 0 && ( labelsMode == 2 || selectedCollision ) )
+		scene->renderText( Vector3(), name );
 }
 
 void Node::drawHvkConstraint( const NifModel * nif, const QModelIndex & iConstraint, Scene * scene )
@@ -1406,6 +1447,135 @@ void Node::drawHavok()
 	if ( !iObject.isValid() )
 		return;
 
+	// FO4 compiled collision (bhkNPCollisionObject -> bhkPhysicsSystem): the
+	// Binary Data is a Havok 2014 packfile; decode (cached) and draw the
+	// shapes as wireframe in this node's space
+	if ( QModelIndex iSys = nif->getBlockIndex( nif->getLink( iObject, "Data" ) );
+		iSys.isValid() && nif->blockInherits( iSys, "bhkSystem" ) ) {
+		// A system is shared by several nodes: each node's bhkNPCollisionObject
+		// names ITS body via "Body ID", and that body is placed by THIS node's
+		// world transform (validated on vanilla stair helpers - the node
+		// transform is authoritative, the cinfo position is only a rest pose).
+		// Each collision object draws exactly its own body, so nothing is ever
+		// drawn twice.
+		quint32 wantBody = nif->get<quint32>( iObject, "Body ID" );
+		QByteArray hkData = nif->get<QByteArray>( iSys, "Binary Data" );
+		if ( hkData.size() > 0x100 && !scene->selecting ) {
+			const HknpSystem & sys = hknpDecodeCached( hkData );
+			if ( sys.valid ) {
+				QSettings collisionSettings;
+				const bool solidCollision = collisionSettings.value( "CollisionManager/Solid", true ).toBool();
+				const bool xrayCollision = collisionSettings.value( "CollisionManager/XRay", false ).toBool();
+				const int colourMode = collisionSettings.value( "CollisionManager/ColourBy", 0 ).toInt();
+				const int labelsMode = collisionSettings.value( "CollisionManager/Labels", 1 ).toInt();
+				if ( xrayCollision )
+					glDisable( GL_DEPTH_TEST );
+				else
+					glEnable( GL_DEPTH_TEST );
+				glDepthFunc( GL_LEQUAL );
+				scene->setGLLineWidth( GLView::Settings::lineWidthWireframe );
+				const bool selectedCollision = ( scene->currentBlock == iSys || scene->currentBlock == iObject );
+				HknpBodyPhys bodyPhys;
+				if ( int( wantBody ) < sys.bodyPhys.size() )
+					bodyPhys = sys.bodyPhys.at( int( wantBody ) );
+				auto fillColour = [colourMode, bodyPhys]( const HknpShape & shp ) {
+					if ( colourMode == 1 ) {
+						if ( bodyPhys.layer == 31 ) return FloatVector4( 0.88f, 0.64f, 0.24f, 0.30f );
+						if ( bodyPhys.layer == 10 ) return FloatVector4( 0.69f, 0.49f, 0.88f, 0.30f );
+						return FloatVector4( 0.50f, 0.69f, 0.41f, 0.30f );
+					}
+					if ( colourMode == 2 )
+						return FloatVector4( 0.88f, 0.64f, 0.24f, 0.30f );
+					if ( colourMode == 3 ) {
+						if ( shp.hasTransform ) return FloatVector4( 0.91f, 0.59f, 0.24f, 0.30f );
+						if ( shp.primType ) return FloatVector4( 0.30f, 0.85f, 0.85f, 0.30f );
+						if ( shp.isConvex ) return FloatVector4( 0.89f, 0.79f, 0.30f, 0.30f );
+						return FloatVector4( 0.85f, 0.30f, 0.85f, 0.30f );
+					}
+					// Material CRCs do not carry their source names in a compiled
+					// packfile. Use a stable family-like palette until the manager's
+					// reverse material table is shared with the renderer.
+					static const FloatVector4 materialPalette[8] = {
+						{ 0.64f, 0.45f, 0.25f, 0.30f }, { 0.50f, 0.58f, 0.66f, 0.30f },
+						{ 0.56f, 0.55f, 0.52f, 0.30f }, { 0.48f, 0.70f, 0.72f, 0.30f },
+						{ 0.72f, 0.54f, 0.28f, 0.30f }, { 0.60f, 0.42f, 0.68f, 0.30f },
+						{ 0.72f, 0.45f, 0.50f, 0.30f }, { 0.45f, 0.62f, 0.45f, 0.30f }
+					};
+					return materialPalette[ shp.materialCRC & 7U ];
+				};
+				auto wireColour = []( const HknpShape & shp ) {
+					if ( shp.hasTransform ) return FloatVector4( 0.91f, 0.59f, 0.24f, 1.0f );
+					if ( shp.primType ) return FloatVector4( 0.30f, 0.85f, 0.85f, 1.0f );
+					if ( shp.isConvex ) {
+						bool box = ( shp.verts.size() == 8 && shp.faces.size() == 6 );
+						return box ? FloatVector4( 0.88f, 0.88f, 0.88f, 1.0f )
+								   : FloatVector4( 0.89f, 0.79f, 0.30f, 1.0f );
+					}
+					return FloatVector4( 0.85f, 0.30f, 0.85f, 1.0f );
+				};
+				const float sc = 69.99125f;	// Havok units -> game units (validated)
+				// This node's world transform places the body; compound instance
+				// transforms are applied per vertex on the CPU
+				// (HknpShape::transformed).
+				scene->pushAndMultModelViewMatrix( worldTrans() );
+				for ( const HknpShape & shp : sys.shapes ) {
+					// draw only the body bound to this collision object; shapes
+					// not referenced by any body (bodyId -1) draw with body 0
+					if ( shp.bodyId >= 0 ? quint32( shp.bodyId ) != wantBody : wantBody != 0 )
+						continue;
+					int nv = shp.verts.size();
+					// guard against malformed decoded shapes so a bad decode can
+					// never crash the draw (empty/oversized geometry, or triangle
+					// indices out of range would fault glDrawElements)
+					if ( nv < 3 || nv > 200000 || shp.tris.isEmpty() )
+						continue;
+					bool badIndex = false;
+					for ( const Triangle & t : shp.tris ) {
+						if ( t[0] >= nv || t[1] >= nv || t[2] >= nv ) { badIndex = true; break; }
+					}
+					if ( badIndex )
+						continue;
+					QVector<Vector3> pos( nv );
+					for ( int i = 0; i < nv; i++ )
+						pos[i] = shp.transformed( shp.verts.at( i ) ) * sc;
+					if ( solidCollision ) {
+						FloatVector4 fill = selectedCollision ? scene->highlightColor : fillColour( shp );
+						fill[3] = selectedCollision ? 0.42f : 0.30f;
+						scene->setGLColor( fill );
+						glDepthMask( GL_FALSE );
+						glEnable( GL_POLYGON_OFFSET_FILL );
+						glPolygonOffset( -1.0f, -1.0f );
+						scene->drawTriangles( pos.constData(), size_t( nv ), nullptr, true,
+								GL_TRIANGLES, size_t( shp.tris.size() ) * 3,
+								GL_UNSIGNED_SHORT, shp.tris.constData() );
+						glDisable( GL_POLYGON_OFFSET_FILL );
+					}
+					FloatVector4 wire = selectedCollision ? scene->highlightColor : wireColour( shp );
+					wire[3] = 1.0f;
+					scene->setGLColor( wire );
+					glDepthMask( GL_TRUE );
+					scene->drawTriangles( pos.constData(), size_t( nv ), nullptr, false,
+										GL_TRIANGLES, size_t( shp.tris.size() ) * 3,
+										GL_UNSIGNED_SHORT, shp.tris.constData() );
+					if ( labelsMode > 0 && ( labelsMode == 2 || selectedCollision ) ) {
+						Vector3 center;
+						for ( const Vector3 & p : pos ) center += p;
+						center /= float( pos.size() );
+						QString label = shp.primType == 1 ? QObject::tr( "Sphere" )
+							: shp.primType == 2 ? QObject::tr( "Capsule" )
+							: shp.isConvex ? QObject::tr( "Hull (%1 v)" ).arg( shp.verts.size() )
+							: QObject::tr( "Mesh (%1 tri)" ).arg( shp.tris.size() );
+						scene->renderText( center, label );
+					}
+				}
+				scene->popModelViewMatrix();
+				glEnable( GL_DEPTH_TEST );
+				glDepthMask( GL_TRUE );
+			}
+		}
+		return;
+	}
+
 	QModelIndex iBody = nif->getBlockIndex( nif->getLink( iObject, "Body" ) );
 
 	if ( const Transform * t = scene->transformCache.find( bhkBodyTransKey( nif->getBlockNumber( iBody ) ) ); t )
@@ -1452,6 +1622,10 @@ void Node::drawHavok()
 	scene->pushModelViewMatrix();
 	drawHvkShape( nif, iShape, nullptr, scene, colors[ color_index ], *m );
 	scene->currentModelViewMatrix = m;
+	if ( !scene->selecting ) {
+		glEnable( GL_DEPTH_TEST );
+		glDepthMask( GL_TRUE );
+	}
 
 	if ( scene->hasOption(Scene::ShowAxes) ) {
 		QModelIndex iBodyInfo;

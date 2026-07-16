@@ -1,12 +1,23 @@
 #include "spellbook.h"
+#include "nifsnapshot.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QHeaderView>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLayout>
+#include <QLineEdit>
+#include <QMouseEvent>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QSet>
 #include <QSpinBox>
+#include <QTreeWidget>
+
+#include <algorithm>
 
 
 // Brief description is deliberately not autolinked to class Spell
@@ -15,6 +26,253 @@
  *
  * All classes here inherit from the Spell class.
  */
+
+namespace
+{
+class ShaderFlagTree final : public QTreeWidget
+{
+public:
+	explicit ShaderFlagTree( QWidget * parent = nullptr ) : QTreeWidget( parent ) {}
+
+protected:
+	void mousePressEvent( QMouseEvent * event ) override
+	{
+		if ( event->button() == Qt::LeftButton ) {
+			if ( QTreeWidgetItem * item = itemAt( event->position().toPoint() ) ) {
+				setCurrentItem( item );
+				item->setCheckState( 0, item->checkState( 0 ) == Qt::Checked ? Qt::Unchecked : Qt::Checked );
+				event->accept();
+				return;
+			}
+		}
+		QTreeWidget::mousePressEvent( event );
+	}
+
+	void keyPressEvent( QKeyEvent * event ) override
+	{
+		if ( event->key() == Qt::Key_Space && currentItem() ) {
+			currentItem()->setCheckState( 0,
+				currentItem()->checkState( 0 ) == Qt::Checked ? Qt::Unchecked : Qt::Checked );
+			event->accept();
+			return;
+		}
+		QTreeWidget::keyPressEvent( event );
+	}
+};
+
+QString shaderFlagDisplayName( QString name )
+{
+	name.replace( QLatin1Char( '_' ), QLatin1Char( ' ' ) );
+	name.replace( QRegularExpression( QStringLiteral( "([a-z])([A-Z])" ) ), QStringLiteral( "\\1 \\2" ) );
+	name.replace( QStringLiteral( "ZBuffer" ), QStringLiteral( "Z-Buffer" ), Qt::CaseInsensitive );
+	name.replace( QStringLiteral( "Localmap" ), QStringLiteral( "Local Map" ), Qt::CaseInsensitive );
+	name.replace( QStringLiteral( "Premult" ), QStringLiteral( "Premultiplied" ), Qt::CaseInsensitive );
+	return name;
+}
+
+QString shaderFlagKey( QString name )
+{
+	name = name.toLower();
+	name.remove( QRegularExpression( QStringLiteral( "[^a-z0-9]" ) ) );
+	return name;
+}
+
+QString shaderFlagCategory( const QString & rawName )
+{
+	const QString key = shaderFlagKey( rawName );
+	if ( key.contains( "vertex" ) || key.contains( "skinned" ) || key.contains( "normal" )
+		|| key.contains( "tessell" ) || key.contains( "projecteduv" ) || key.contains( "transformchanged" ) )
+		return QObject::tr( "Geometry" );
+	if ( key.contains( "specular" ) || key.contains( "lighting" ) || key.contains( "shadow" )
+		|| key.contains( "environment" ) || key.contains( "falloff" ) || key.contains( "emittance" )
+		|| key.contains( "emit" ) )
+		return QObject::tr( "Lighting" );
+	if ( key.contains( "palette" ) || key.contains( "tint" ) || key.contains( "texture" )
+		|| key.contains( "glow" ) || key.contains( "parallax" ) || key.contains( "gradient" ) )
+		return QObject::tr( "Material" );
+	if ( key.contains( "zbuffer" ) || key.contains( "alpha" ) || key.contains( "fade" )
+		|| key.contains( "sided" ) || key.contains( "wireframe" ) || key.contains( "decal" )
+		|| key.contains( "refraction" ) )
+		return QObject::tr( "Rendering" );
+	return QObject::tr( "Specialized" );
+}
+
+}
+
+//! Edit Shader Flags 1 and 2 as one compact, version-aware list.
+class spEditShaderFlags final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Shader Flags…" ); }
+	QString page() const override final { return Spell::tr( "Shader" ); }
+	QIcon icon() const override final { return QIcon( ":/img/flag" ); }
+	bool constant() const override final { return true; }
+	bool instant() const override final { return true; }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		const QString itemName = nif->itemName( index );
+		if ( itemName != QLatin1String( "Shader Flags 1" ) && itemName != QLatin1String( "Shader Flags 2" ) )
+			return false;
+		const QModelIndex block = nif->getBlockIndex( index );
+		const QModelIndex flags1 = nif->getIndex( block, "Shader Flags 1" );
+		const QModelIndex flags2 = nif->getIndex( block, "Shader Flags 2" );
+		return flags1.isValid() && flags2.isValid()
+			&& NifValue::enumType( nif->itemStrType( flags1 ) ) == NifValue::eFlags
+			&& NifValue::enumType( nif->itemStrType( flags2 ) ) == NifValue::eFlags;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		const QModelIndex block = nif->getBlockIndex( index );
+		const QModelIndex flags1 = nif->getIndex( block, "Shader Flags 1" );
+		const QModelIndex flags2 = nif->getIndex( block, "Shader Flags 2" );
+		if ( !flags1.isValid() || !flags2.isValid() ) return index;
+
+		struct Entry {
+			int field = 0;
+			int bit = 0;
+			QString rawName;
+			QString name;
+			QString description;
+			QString category;
+		};
+		QVector<Entry> entries;
+		auto collect = [&]( int field, const QModelIndex & flagIndex ) {
+			const QString type = nif->itemStrType( flagIndex );
+			const NifValue::EnumOptions & options = NifValue::enumOptionData( type );
+			for ( auto it = options.o.cbegin(); it != options.o.cend(); ++it ) {
+				Entry entry;
+				entry.field = field;
+				entry.bit = int( it.key() );
+				entry.rawName = it.value().first;
+				entry.name = shaderFlagDisplayName( entry.rawName );
+				entry.description = it.value().second;
+				entry.category = shaderFlagCategory( entry.rawName );
+				entries.append( entry );
+			}
+		};
+		collect( 1, flags1 );
+		collect( 2, flags2 );
+		if ( entries.isEmpty() ) return index;
+
+		quint32 value1 = nif->get<quint32>( flags1 );
+		quint32 value2 = nif->get<quint32>( flags2 );
+		const quint32 original1 = value1;
+		const quint32 original2 = value2;
+
+		QDialog dialog;
+		dialog.setWindowTitle( Spell::tr( "Shader Flags" ) );
+		dialog.resize( 460, 360 );
+		dialog.setMinimumSize( 400, 320 );
+		dialog.setStyleSheet( QStringLiteral(
+			"QDialog { background: #383838; color: #dddddd; }"
+			"QLabel { color: #dddddd; }"
+			"QComboBox, QLineEdit, QTreeWidget { background: #454545; border: 1px solid #303030; color: #e4e4e4; }"
+			"QLineEdit { border-radius: 3px; padding: 3px 7px; selection-background-color: #4772b3; }"
+			"QTreeWidget::item { height: 26px; }"
+			"QTreeWidget::item:hover { background: #505050; }"
+			"QHeaderView::section { background: #333333; color: #bbbbbb; border: none;"
+			" border-bottom: 1px solid #555555; padding: 4px 6px; }"
+			"QPushButton { background: #454545; border: 1px solid #606060; border-radius: 3px;"
+			" color: #e2e2e2; padding: 4px 10px; }"
+			"QPushButton:hover { background: #525252; border-color: #777777; }" ) );
+		QVBoxLayout * layout = new QVBoxLayout( &dialog );
+		layout->setContentsMargins( 10, 10, 10, 8 );
+		layout->setSpacing( 7 );
+
+		QHBoxLayout * toolbar = new QHBoxLayout;
+		toolbar->addWidget( new QLabel( Spell::tr( "Filter" ), &dialog ) );
+		QLineEdit * filterEdit = new QLineEdit( &dialog );
+		filterEdit->setPlaceholderText( Spell::tr( "Type a flag name, category, or F2 bit 25…" ) );
+		filterEdit->setClearButtonEnabled( true );
+		toolbar->addWidget( filterEdit, 1 );
+		QLabel * countLabel = new QLabel( &dialog );
+		countLabel->setStyleSheet( QStringLiteral( "color: #bbbbbb;" ) );
+		toolbar->addWidget( countLabel );
+		layout->addLayout( toolbar );
+
+		ShaderFlagTree * tree = new ShaderFlagTree( &dialog );
+		tree->setColumnCount( 2 );
+		tree->setHeaderLabels( { Spell::tr( "Flag" ), Spell::tr( "Stored in" ) } );
+		tree->setRootIsDecorated( false );
+		tree->setAlternatingRowColors( true );
+		tree->setSelectionMode( QAbstractItemView::SingleSelection );
+		tree->header()->setStretchLastSection( false );
+		tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+		tree->header()->setSectionResizeMode( 1, QHeaderView::Fixed );
+		tree->header()->resizeSection( 1, 86 );
+		layout->addWidget( tree, 1 );
+
+		QLabel * rawValues = new QLabel( &dialog );
+		rawValues->setStyleSheet( QStringLiteral( "color: #bdbdbd; font-family: monospace;" ) );
+		QDialogButtonBox * buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog );
+		QHBoxLayout * footer = new QHBoxLayout;
+		footer->addWidget( rawValues, 1 );
+		footer->addWidget( buttons );
+		layout->addLayout( footer );
+
+		int shownCount = entries.size();
+		auto refreshSummary = [&]() {
+			int selected = 0;
+			for ( int bit = 0; bit < 32; bit++ ) {
+				if ( value1 & ( quint32( 1 ) << bit ) ) selected++;
+				if ( value2 & ( quint32( 1 ) << bit ) ) selected++;
+			}
+			countLabel->setText( Spell::tr( "%1 selected · %2 shown" ).arg( selected ).arg( shownCount ) );
+			rawValues->setText( QStringLiteral( "F1 0x%1   F2 0x%2" )
+				.arg( value1, 8, 16, QLatin1Char( '0' ) ).arg( value2, 8, 16, QLatin1Char( '0' ) ).toUpper() );
+		};
+		auto populate = [&]() {
+			QSignalBlocker blocker( tree );
+			tree->clear();
+			shownCount = 0;
+			const QString filter = filterEdit->text().trimmed();
+			for ( const Entry & entry : entries ) {
+				const QString location = Spell::tr( "F%1 bit %2" ).arg( entry.field ).arg( entry.bit );
+				const QString searchable = entry.name + QLatin1Char( ' ' ) + entry.rawName
+					+ QLatin1Char( ' ' ) + entry.category + QLatin1Char( ' ' ) + location;
+				if ( !filter.isEmpty() && !searchable.contains( filter, Qt::CaseInsensitive ) ) continue;
+				QTreeWidgetItem * item = new QTreeWidgetItem( tree );
+				item->setText( 0, entry.name );
+				item->setText( 1, Spell::tr( "F%1 · bit %2" ).arg( entry.field ).arg( entry.bit ) );
+				item->setData( 0, Qt::UserRole, entry.field );
+				item->setData( 0, Qt::UserRole + 1, entry.bit );
+				item->setFlags( item->flags() | Qt::ItemIsUserCheckable );
+				const quint32 fieldValue = entry.field == 1 ? value1 : value2;
+				item->setCheckState( 0, fieldValue & ( quint32( 1 ) << entry.bit ) ? Qt::Checked : Qt::Unchecked );
+				if ( !entry.description.trimmed().isEmpty() ) item->setToolTip( 0, entry.description.trimmed() );
+				item->setForeground( 1, QColor( 170, 170, 170 ) );
+				shownCount++;
+			}
+			refreshSummary();
+		};
+		QObject::connect( filterEdit, &QLineEdit::textChanged, &dialog, [&]( const QString & ) { populate(); } );
+		QObject::connect( tree, &QTreeWidget::itemChanged, &dialog, [&]( QTreeWidgetItem * item, int column ) {
+			if ( column != 0 ) return;
+			const int field = item->data( 0, Qt::UserRole ).toInt();
+			const int bit = item->data( 0, Qt::UserRole + 1 ).toInt();
+			quint32 & fieldValue = field == 1 ? value1 : value2;
+			const quint32 mask = quint32( 1 ) << bit;
+			if ( item->checkState( 0 ) == Qt::Checked ) fieldValue |= mask; else fieldValue &= ~mask;
+			refreshSummary();
+		} );
+		QObject::connect( buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept );
+		QObject::connect( buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
+		populate();
+		filterEdit->setFocus();
+
+		if ( dialog.exec() == QDialog::Accepted && ( value1 != original1 || value2 != original2 ) ) {
+			nifSnapshotOp( nif, Spell::tr( "Edit shader flags" ), [&]() {
+				nif->set<quint32>( flags1, value1 );
+				nif->set<quint32>( flags2, value2 );
+			} );
+		}
+		return index;
+	}
+};
+
+REGISTER_SPELL( spEditShaderFlags )
 
 //! Edit flags
 class spEditFlags : public Spell

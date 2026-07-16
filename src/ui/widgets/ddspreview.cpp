@@ -33,13 +33,71 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ddspreview.h"
 #include "sfcube2.hpp"
 #include <thread>
+#include <cmath>
 
+#include <QApplication>
 #include <QGridLayout>
+#include <QCheckBox>
+#include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPixmap>
 #include <QSettings>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QToolButton>
+#include <QVBoxLayout>
+
+class TexturePreviewCanvas final : public QScrollArea
+{
+public:
+	explicit TexturePreviewCanvas( QWidget * parent = nullptr ) : QScrollArea( parent ) {}
+	DDSTexturePreview * preview = nullptr;
+
+protected:
+	void wheelEvent( QWheelEvent * event ) override
+	{
+		if ( !preview ) { QScrollArea::wheelEvent( event ); return; }
+		QPointF pos = event->position();
+		double rx = preview->width() > 0 ? double( horizontalScrollBar()->value() + pos.x() ) / double( preview->width() ) : 0.5;
+		double ry = preview->height() > 0 ? double( verticalScrollBar()->value() + pos.y() ) / double( preview->height() ) : 0.5;
+		preview->setZoom( preview->zoom() * ( event->angleDelta().y() > 0 ? 1.25f : 0.8f ) );
+		horizontalScrollBar()->setValue( qRound( rx * preview->width() - pos.x() ) );
+		verticalScrollBar()->setValue( qRound( ry * preview->height() - pos.y() ) );
+		event->accept();
+	}
+	void mousePressEvent( QMouseEvent * event ) override
+	{
+		if ( event->button() == Qt::MiddleButton ) {
+			panning = true; lastPan = event->position().toPoint();
+			viewport()->setCursor( Qt::ClosedHandCursor ); event->accept(); return;
+		}
+		QScrollArea::mousePressEvent( event );
+	}
+	void mouseMoveEvent( QMouseEvent * event ) override
+	{
+		if ( panning ) {
+			QPoint now = event->position().toPoint(); QPoint delta = now - lastPan; lastPan = now;
+			horizontalScrollBar()->setValue( horizontalScrollBar()->value() - delta.x() );
+			verticalScrollBar()->setValue( verticalScrollBar()->value() - delta.y() );
+			event->accept(); return;
+		}
+		QScrollArea::mouseMoveEvent( event );
+	}
+	void mouseReleaseEvent( QMouseEvent * event ) override
+	{
+		if ( event->button() == Qt::MiddleButton && panning ) {
+			panning = false; viewport()->unsetCursor(); event->accept(); return;
+		}
+		QScrollArea::mouseReleaseEvent( event );
+	}
+private:
+	bool panning = false;
+	QPoint lastPan;
+};
 
 void DDSTexturePreview::threadFunction( DDSTexturePreview * p, std::uint32_t * imgBuf, int w, int h, int y0, int y1 )
 {
@@ -135,7 +193,7 @@ void DDSTexturePreview::threadFunction( DDSTexturePreview * p, std::uint32_t * i
 DDSTexturePreview::DDSTexturePreview( QWidget * parent )
 	: QWidget( parent )
 {
-	setSizePolicy( QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding );
+	setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Fixed );
 
 	QSettings	settings;
 	int	tmp = settings.value( "Settings/UI/Texture Preview Default Size", 512 ).toInt();
@@ -167,6 +225,38 @@ void DDSTexturePreview::setTexture( const DDSTexture16 * txt, bool isNormalMap, 
 	}
 	if ( invertCubeMapZAxis )
 		textureFlags = textureFlags | 4;
+	baseTextureFlags = textureFlags;
+	resize( sizeHint() );
+}
+
+void DDSTexturePreview::setZoom( float zoom )
+{
+	zoom = std::clamp( zoom, 0.125f, 8.0f );
+	if ( std::fabs( zoomFactor - zoom ) < 0.0001f ) return;
+	zoomFactor = zoom;
+	resize( sizeHint() );
+	updateGeometry();
+	update();
+	emit zoomChanged( zoomFactor );
+}
+
+void DDSTexturePreview::setChannelMask( unsigned int mask )
+{
+	channelMask = mask & 15U;
+	if ( channelMask == 0 ) channelMask = 15U;
+	update();
+}
+
+void DDSTexturePreview::setUVTiles( bool enabled )
+{
+	showUVTiles = enabled;
+	update();
+}
+
+void DDSTexturePreview::wheelEvent( QWheelEvent * event )
+{
+	setZoom( zoomFactor * ( event->angleDelta().y() > 0 ? 1.25f : 0.8f ) );
+	event->accept();
 }
 
 void DDSTexturePreview::paintEvent( [[maybe_unused]] QPaintEvent * e )
@@ -212,11 +302,57 @@ void DDSTexturePreview::paintEvent( [[maybe_unused]] QPaintEvent * e )
 			delete threads[i];
 		}
 	}
+	if ( channelMask != 15U ) {
+		int selected = 0;
+		for ( int bit = 0; bit < 4; bit++ ) if ( channelMask & ( 1U << bit ) ) selected++;
+		for ( int y = 0; y < h; y++ ) for ( int x = 0; x < w; x++ ) {
+			QRgb px = img.pixel( x, y );
+			int components[4] = { qRed( px ), qGreen( px ), qBlue( px ), qAlpha( px ) };
+			if ( selected == 1 ) {
+				// a single channel (including alpha) reads as greyscale intensity
+				int value = 0;
+				for ( int bit = 0; bit < 4; bit++ ) if ( channelMask & ( 1U << bit ) ) value = components[bit];
+				img.setPixel( x, y, qRgb( value, value, value ) );
+			} else {
+				// composite the selected colour channels.  A selected alpha is a
+				// no-op when mixed with colour channels (so e.g. R+A shows the red
+				// channel rather than washing to white); alpha only reads on its
+				// own, via the single-channel greyscale path above.  Always opaque,
+				// so an unselected or zero alpha can never composite down to black.
+				int red = ( channelMask & 1U ) ? components[0] : 0;
+				int green = ( channelMask & 2U ) ? components[1] : 0;
+				int blue = ( channelMask & 4U ) ? components[2] : 0;
+				img.setPixel( x, y, qRgb( red, green, blue ) );	// opaque
+			}
+		}
+	}
 
 	int	xOffs = int( ( w1 - double( w ) ) / ( r * 2.0 ) + 0.5 );
 	int	yOffs = int( ( h1 - double( h ) ) / ( r * 2.0 ) + 0.5 );
 	QPainter	p( this );
 	p.drawImage( QPoint( xOffs, yOffs ), img, img.rect() );
+	if ( showUVTiles ) {
+		// Adaptive UV grid, like Blender's UV editor: the 0..1 space is always
+		// split into quarters (bright major lines), and finer subdivisions fade
+		// in as the user zooms in so the grid stays useful at any zoom.
+		int	minor = 4;
+		for ( float z = zoomFactor; z >= 1.999f && minor < 256; z *= 0.5f )
+			minor <<= 1;
+		p.setPen( QColor( 255, 255, 255, 40 ) );
+		for ( int i = 1; i < minor; i++ ) {
+			int	gx = xOffs + int( qint64( w ) * i / minor );
+			int	gy = yOffs + int( qint64( h ) * i / minor );
+			p.drawLine( gx, yOffs, gx, yOffs + h );
+			p.drawLine( xOffs, gy, xOffs + w, gy );
+		}
+		p.setPen( QColor( 255, 255, 255, 120 ) );
+		for ( int i = 1; i < 4; i++ ) {
+			p.drawLine( xOffs + ( w * i / 4 ), yOffs, xOffs + ( w * i / 4 ), yOffs + h );
+			p.drawLine( xOffs, yOffs + ( h * i / 4 ), xOffs + w, yOffs + ( h * i / 4 ) );
+		}
+		p.setPen( QColor( 255, 255, 255, 150 ) );
+		p.drawRect( xOffs, yOffs, w - 1, h - 1 );
+	}
 }
 
 QSize DDSTexturePreview::sizeHint() const
@@ -230,7 +366,7 @@ QSize DDSTexturePreview::sizeHint() const
 			w = w << 2;
 			h = h << 1;
 		}
-		double	scale = double( defaultSize ) / double( std::max( w, h ) );
+		double	scale = ( double( defaultSize ) * double( zoomFactor ) ) / double( std::max( w, h ) );
 		w = int( double( w ) * scale + 0.5 );
 		h = int( double( h ) * scale + 0.5 );
 	}
@@ -265,27 +401,109 @@ DDSTextureInfo::DDSTextureInfo(
 		t = new DDSTexture16( reinterpret_cast< const unsigned char * >( textureData.constData() ),
 								size_t( textureData.size() ), 0, true );
 
-		QGridLayout *	grid = new QGridLayout( this );
-		grid->setContentsMargins( 0, 0, 0, 0 );
-		grid->setColumnStretch( 0, 0 );
-		grid->setColumnStretch( 1, 1 );
-		grid->setColumnMinimumWidth( 0, 100 );
-		grid->addWidget( new QLabel( tr( "File size" ), this ), 0, 0 );
-		grid->addWidget( new QLabel( QString::number( fileSize ), this ), 0, 1 );
-		grid->addWidget( new QLabel( tr( "Width" ), this ), 1, 0 );
-		grid->addWidget( new QLabel( QString::number( t->getWidth() ), this ), 1, 1 );
-		grid->addWidget( new QLabel( tr( "Height" ), this ), 2, 0 );
-		grid->addWidget( new QLabel( QString::number( t->getHeight() ), this ), 2, 1 );
-		grid->addWidget( new QLabel( tr( "Mipmaps" ), this ), 3, 0 );
-		grid->addWidget( new QLabel( QString::number( t->getMaxMipLevel() + 1 ), this ), 3, 1 );
-		grid->addWidget( new QLabel( tr( "Num textures" ), this ), 4, 0 );
-		grid->addWidget( new QLabel( QString::number( t->getTextureCount() ), this ), 4, 1 );
-		grid->addWidget( new QLabel( tr( "Pixel format" ), this ), 5, 0 );
-		grid->addWidget( new QLabel( QString( t->getFormatName() ), this ), 5, 1 );
+		QVBoxLayout * outer = new QVBoxLayout( this );
+		outer->setContentsMargins( 0, 0, 0, 0 );
+		QHBoxLayout * controls = new QHBoxLayout;
+		controls->setSpacing( 4 );
+		controls->addWidget( new QLabel( tr( "Channels" ), this ) );
+		QList<QPushButton *> channelButtons;
+		const QStringList channelNames = { QStringLiteral( "R" ), QStringLiteral( "G" ), QStringLiteral( "B" ), QStringLiteral( "A" ) };
+		for ( int i = 0; i < channelNames.size(); i++ ) {
+			QPushButton * button = new QPushButton( channelNames.at( i ), this );
+			button->setCheckable( true );
+			button->setAutoExclusive( false );
+			button->setChecked( true );
+			button->setFixedWidth( 30 );
+			button->setToolTip( tr( "Left-click to view only the %1 channel; Shift+click to add or remove it. A single channel shows as greyscale." ).arg( channelNames.at( i ) ) );
+			channelButtons.append( button );
+			controls->addWidget( button );
+		}
+		QCheckBox * uvTiles = new QCheckBox( tr( "UV tiles" ), this );
+		uvTiles->setToolTip( tr( "Persistent UV tile overlay" ) );
+		uvTiles->setChecked( QSettings().value( QStringLiteral( "TexturePreview/UVTiles" ), false ).toBool() );
+		controls->addWidget( uvTiles );
+		controls->addStretch( 1 );
+		QPushButton * zoomOut = new QPushButton( QStringLiteral( "−" ), this );
+		QPushButton * zoomIn = new QPushButton( QStringLiteral( "+" ), this );
+		QPushButton * zoomReset = new QPushButton( tr( "100%" ), this );
+		zoomOut->setFixedWidth( 30 ); zoomIn->setFixedWidth( 30 ); zoomReset->setFixedWidth( 58 );
+		controls->addWidget( new QLabel( tr( "Zoom" ), this ) );
+		controls->addWidget( zoomOut ); controls->addWidget( zoomReset ); controls->addWidget( zoomIn );
+		outer->addLayout( controls );
 		bool	isNormalMap = ( t->getChannelCount() == 2 && !fullPath.ends_with( "_s.dds" ) );
 		textureView = new DDSTexturePreview( this );
 		textureView->setTexture( t, isNormalMap, invertCubeZAxis );
-		grid->addWidget( textureView, 6, 0, 1, 2 );
+		textureView->setUVTiles( uvTiles->isChecked() );
+		DDSTexturePreview * preview = textureView;
+		TexturePreviewCanvas * canvas = new TexturePreviewCanvas( this );
+		canvas->setWidgetResizable( false );
+		canvas->setAlignment( Qt::AlignCenter );
+		canvas->preview = textureView;
+		textureView->setAttribute( Qt::WA_TransparentForMouseEvents, true );
+		canvas->setWidget( textureView );
+		outer->addWidget( canvas, 1 );
+		auto updateChannels = [preview, channelButtons]() {
+			unsigned int mask = 0;
+			for ( int i = 0; i < channelButtons.size(); i++ ) if ( channelButtons.at( i )->isChecked() ) mask |= ( 1U << i );
+			if ( !mask ) { channelButtons.at( 0 )->setChecked( true ); mask = 1U; }
+			preview->setChannelMask( mask );
+		};
+		// Left-click isolates a single channel (image-editor / Blender style);
+		// Shift+click toggles a channel in/out of the current selection.  The
+		// buttons are checkable, so a plain click already auto-toggled the one
+		// that was pressed — for the isolate case we override every button's
+		// state so exactly the clicked one ends up selected.
+		for ( int i = 0; i < channelButtons.size(); i++ ) {
+			connect( channelButtons.at( i ), &QPushButton::clicked, this,
+				[channelButtons, updateChannels, i]() {
+					bool shift = QApplication::keyboardModifiers().testFlag( Qt::ShiftModifier );
+					if ( !shift ) {
+						for ( int j = 0; j < channelButtons.size(); j++ ) {
+							QSignalBlocker blocker( channelButtons.at( j ) );
+							channelButtons.at( j )->setChecked( j == i );
+						}
+					}
+					updateChannels();
+				} );
+		}
+		connect( uvTiles, &QCheckBox::toggled, this, [preview]( bool on ) {
+			preview->setUVTiles( on );
+			QSettings().setValue( QStringLiteral( "TexturePreview/UVTiles" ), on );
+		} );
+		connect( zoomOut, &QPushButton::clicked, this, [preview]() { preview->setZoom( preview->zoom() * 0.8f ); } );
+		connect( zoomIn, &QPushButton::clicked, this, [preview]() { preview->setZoom( preview->zoom() * 1.25f ); } );
+		connect( zoomReset, &QPushButton::clicked, this, [preview]() { preview->setZoom( 1.0f ); } );
+		connect( preview, &DDSTexturePreview::zoomChanged, this, [zoomReset]( float zoom ) {
+			zoomReset->setText( QStringLiteral( "%1%" ).arg( qRound( zoom * 100.0f ) ) );
+		} );
+
+		QToolButton * detailsButton = new QToolButton( this );
+		detailsButton->setText( tr( "Texture details" ) );
+		detailsButton->setCheckable( true );
+		detailsButton->setChecked( false );
+		detailsButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+		detailsButton->setArrowType( Qt::RightArrow );
+		outer->addWidget( detailsButton );
+
+		QWidget * details = new QWidget( this );
+		QGridLayout * grid = new QGridLayout( details );
+		grid->setContentsMargins( 8, 0, 8, 4 );
+		grid->setColumnStretch( 1, 1 );
+		auto addDetail = [grid, details]( int row, const QString & name, const QString & value ) {
+			grid->addWidget( new QLabel( name, details ), row, 0 );
+			grid->addWidget( new QLabel( value, details ), row, 1 );
+		};
+		addDetail( 0, tr( "File size" ), QString::number( fileSize ) );
+		addDetail( 1, tr( "Dimensions" ), tr( "%1 × %2" ).arg( t->getWidth() ).arg( t->getHeight() ) );
+		addDetail( 2, tr( "Mipmaps" ), QString::number( t->getMaxMipLevel() + 1 ) );
+		addDetail( 3, tr( "Num textures" ), QString::number( t->getTextureCount() ) );
+		addDetail( 4, tr( "Pixel format" ), QString( t->getFormatName() ) );
+		details->setVisible( false );
+		outer->addWidget( details );
+		connect( detailsButton, &QToolButton::toggled, details, &QWidget::setVisible );
+		connect( detailsButton, &QToolButton::toggled, this, [detailsButton]( bool open ) {
+			detailsButton->setArrowType( open ? Qt::DownArrow : Qt::RightArrow );
+		} );
 	} catch ( ... ) {
 		delete t;
 		throw;

@@ -63,6 +63,35 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QInputDialog>
+#include <QMouseEvent>
+#include <QScreen>
+#include <QTimer>
+
+namespace {
+//! A QMenu that cancels itself once the pointer moves well clear of it, so the
+//! small operator pop-ups (Delete / Merge / Separate / Snap / Set Origin) close
+//! on hover-out, Blender-style. A grabbed menu does not reliably get mouseMove
+//! events off itself, so it polls the global cursor against its screen geometry.
+//! The main right-click context menu keeps normal click-to-dismiss (unaffected).
+class AutoCloseMenu final : public QMenu
+{
+public:
+	explicit AutoCloseMenu( QWidget * parent = nullptr ) : QMenu( parent )
+	{
+		m_timer.setInterval( 60 );
+		connect( &m_timer, &QTimer::timeout, this, [this]() {
+			if ( !geometry().adjusted( -46, -46, 46, 46 ).contains( QCursor::pos() ) )
+				close();
+		} );
+	}
+protected:
+	void showEvent( QShowEvent * e ) override { QMenu::showEvent( e ); m_timer.start(); }
+	void hideEvent( QHideEvent * e ) override { m_timer.stop(); QMenu::hideEvent( e ); }
+private:
+	QTimer m_timer;
+};
+}
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QOpenGLContext>
@@ -111,6 +140,7 @@ GLView::GLView( QWindow * p )
 {
 	QSettings settings;
 	int	aa = settings.value( "Settings/Render/General/Msaa Samples", 2 ).toInt();
+	editDeformedCage = settings.value( "GLView/Edit/DeformedCage", true ).toBool();
 	aa = std::clamp< int >( aa, 0, 4 );
 
 	QSurfaceFormat	fmt;
@@ -205,6 +235,470 @@ QWidget * GLView::createWindowContainer( QWidget * parent )
 	return graphicsView;
 }
 
+void GLView::setCollisionPreview( const QVector<Vector3> & triangleSoup )
+{
+	collisionPreviewSoup = triangleSoup;
+	update();
+}
+
+void GLView::clearCollisionPreview()
+{
+	if ( collisionPreviewSoup.isEmpty() )
+		return;
+	collisionPreviewSoup.clear();
+	update();
+}
+
+void GLView::setRiggingDonorPreview( const QVector<Vector3> & triangleSoup )
+{
+	riggingDonorPreviewSoup = triangleSoup;
+	update();
+}
+
+void GLView::setRiggingDonorPreviewStyle( bool filled, bool wireframe, float opacity )
+{
+	riggingDonorPreviewFilled = filled;
+	riggingDonorPreviewWireframe = wireframe;
+	riggingDonorPreviewOpacity = qBound( 0.02f, opacity, 0.95f );
+	update();
+}
+
+void GLView::clearRiggingDonorPreview()
+{
+	if ( riggingDonorPreviewSoup.isEmpty() )
+		return;
+	riggingDonorPreviewSoup.clear();
+	update();
+}
+
+void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup )
+{
+	sessionDocumentPreviewSoup = triangleSoup;
+	// The preview is drawn opaque, so a single flat color would collapse into
+	// an unreadable silhouette. Bake simple per-face lambert shading from a
+	// fixed world-space light once per rebuild; the draw itself stays a plain
+	// colored triangle soup.
+	sessionDocumentPreviewColors.clear();
+	sessionDocumentPreviewColors.reserve( sessionDocumentPreviewSoup.size() );
+	static const Vector3 lightDir = Vector3( 0.35f, -0.45f, 0.82f ).normalize();
+	const FloatVector4 base( 0.46f, 0.54f, 0.62f, 1.0f );
+	for ( qsizetype i = 0; i + 2 < sessionDocumentPreviewSoup.size(); i += 3 ) {
+		Vector3 normal = Vector3::crossproduct(
+			sessionDocumentPreviewSoup.at( i + 1 ) - sessionDocumentPreviewSoup.at( i ),
+			sessionDocumentPreviewSoup.at( i + 2 ) - sessionDocumentPreviewSoup.at( i ) );
+		if ( normal.squaredLength() > 0.0f )
+			normal.normalize();
+		const float shade = 0.45f
+			+ 0.55f * std::fabs( Vector3::dotproduct( normal, lightDir ) );
+		FloatVector4 color = base * shade;
+		color[3] = 1.0f;
+		sessionDocumentPreviewColors << color << color << color;
+	}
+	update();
+}
+
+void GLView::clearSessionDocumentPreview()
+{
+	if ( sessionDocumentPreviewSoup.isEmpty() )
+		return;
+	sessionDocumentPreviewSoup.clear();
+	sessionDocumentPreviewColors.clear();
+	update();
+}
+
+void GLView::setRiggingWeightPreview( const QVector<Vector3> & triangleSoup,
+	const QVector<FloatVector4> & colors )
+{
+	if ( triangleSoup.size() != colors.size() ) {
+		clearRiggingWeightPreview();
+		return;
+	}
+	riggingWeightPreviewSoup = triangleSoup;
+	riggingWeightPreviewColors = colors;
+	update();
+}
+
+void GLView::setRiggingWeightPreviewColors( const QVector<FloatVector4> & colors )
+{
+	if ( colors.size() != riggingWeightPreviewSoup.size() )
+		return;
+	riggingWeightPreviewColors = colors;
+	update();
+}
+
+void GLView::clearRiggingWeightPreview()
+{
+	if ( riggingWeightPreviewSoup.isEmpty() && riggingWeightPreviewColors.isEmpty() )
+		return;
+	riggingWeightPreviewSoup.clear();
+	riggingWeightPreviewColors.clear();
+	update();
+}
+
+void GLView::setRiggingWeightPaintMode( bool enabled, int targetBlock, int brushMode,
+	float radius, float paintWeight, float strength )
+{
+	if ( enabled && vertexPaintMode )
+		setVertexPaintMode( false );
+	if ( enabled && segmentPaintMode )
+		setSegmentPaintMode( false );
+	if ( enabled && ( !model || !scene || targetBlock < 0 || !shapeForBlock( targetBlock ) ) )
+		enabled = false;
+	const bool wasEnabled = riggingWeightPaintMode;
+
+	riggingWeightPaintTarget = enabled ? targetBlock : -1;
+	riggingWeightPaintBrushMode = qBound( 0, brushMode, 3 );
+	riggingWeightPaintRadius = qBound( 4.0f, radius, 400.0f );
+	riggingWeightPaintWeight = qBound( 0.0f, paintWeight, 1.0f );
+	riggingWeightPaintStrength = qBound( 0.0f, strength, 1.0f );
+	riggingWeightPaintProjectionValid = false;
+	riggingWeightPaintScreen.clear();
+	riggingWeightPaintCandidates.clear();
+
+	if ( enabled && !wasEnabled ) {
+		// Weight Paint shares Edit Mode's complete element-selection engine.
+		// Enter it on the paint target, then keep Weight Paint as the public mode
+		// while Tab/the toolbar brush button switches the active tool.
+		if ( editMode )
+			setEditMode( false );
+		QModelIndex target = model->getBlockIndex( targetBlock );
+		scene->currentBlock = target;
+		scene->currentIndex = target.sibling( target.row(), 0 );
+		setEditMode( true );
+		if ( !editMode ) {
+			riggingWeightPaintTarget = -1;
+			return;
+		}
+		editShapeBlocks.clear();
+		editShapeBlocks.insert( targetBlock );
+		editShapeBlock = targetBlock;
+		scene->restPoseBlock = targetBlock;
+		for ( int i = pickedElems.size() - 1; i >= 0; i-- )
+			if ( pickedElems.at( i ).shapeBlock != targetBlock )
+				pickedElems.remove( i );
+
+		riggingWeightPaintMode = true;
+		// Weight Paint always operates on the evaluated surface, even when the
+		// user's normal Edit Mode preference is Raw Bind Position.
+		scene->options.setFlag( Scene::DoSkinning, true );
+		if ( Shape * shape = shapeForBlock( targetBlock ) )
+			shape->updateBoneTransforms();
+		refreshPickedElementPositions();
+		riggingWeightPaintBrushEnabled = true;
+		boxSelecting = false;
+		boxSelectDrag = false;
+		circleSelecting = false;
+		circlePainting = circleErasing = false;
+		riggingWeightPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+		setCursor( Qt::BlankCursor );
+	} else if ( !enabled && wasEnabled ) {
+		if ( riggingWeightPaintStroke )
+			emit riggingWeightStrokeEnded( false );
+		riggingWeightPaintStroke = false;
+		riggingWeightPaintMode = false;
+		riggingWeightPaintBrushEnabled = false;
+		unsetCursor();
+		if ( editMode )
+			setEditMode( false );
+	}
+
+	if ( wasEnabled != riggingWeightPaintMode ) {
+		emit riggingWeightPaintBrushChanged( riggingWeightPaintBrushActive() );
+		emit riggingWeightPaintModeChanged( enabled );
+	}
+	if ( riggingWeightPaintMode )
+		emit gizmoStatus( riggingWeightPaintBrushEnabled
+			? tr( "Weight Paint - Brush: LMB paints, wheel = zoom, RMB = menu, Tab = Object Mode, Esc = done" )
+			: tr( "Weight Paint - Select: 1/2/3 vertex/edge/face, Ctrl+X fills, Tab = brush" ) );
+	update();
+}
+
+void GLView::setVertexPaintPreviewColors( int targetBlock, const QVector<Color4> & colors )
+{
+	Shape * shape = shapeForBlock( targetBlock );
+	if ( !shape || colors.size() != shape->verts.size() )
+		return;
+	shape->colors = colors;
+	shape->clearHash();
+	update();
+}
+
+void GLView::setVertexPaintMode( bool enabled, int targetBlock, float radius )
+{
+	if ( enabled && riggingWeightPaintMode )
+		setRiggingWeightPaintMode( false );
+	if ( enabled && segmentPaintMode )
+		setSegmentPaintMode( false );
+	if ( enabled && ( !model || !scene || targetBlock < 0 || !shapeForBlock( targetBlock ) ) )
+		enabled = false;
+	const bool wasEnabled = vertexPaintMode;
+
+	vertexPaintTarget = enabled ? targetBlock : -1;
+	vertexPaintRadius = qBound( 4.0f, radius, 400.0f );
+	vertexPaintProjectionValid = false;
+	vertexPaintScreen.clear();
+	vertexPaintCandidates.clear();
+
+	if ( enabled && !wasEnabled ) {
+		if ( editMode )
+			setEditMode( false );
+		QModelIndex target = model->getBlockIndex( targetBlock );
+		scene->currentBlock = target;
+		scene->currentIndex = target.sibling( target.row(), 0 );
+		setEditMode( true );
+		if ( !editMode ) {
+			vertexPaintTarget = -1;
+			return;
+		}
+		editShapeBlocks.clear();
+		editShapeBlocks.insert( targetBlock );
+		editShapeBlock = targetBlock;
+		scene->restPoseBlock = targetBlock;
+		for ( int i = pickedElems.size() - 1; i >= 0; i-- )
+			if ( pickedElems.at( i ).shapeBlock != targetBlock )
+				pickedElems.remove( i );
+		vertexPaintMode = true;
+		// Paint on the same evaluated surface the user sees in Object Mode.
+		scene->options.setFlag( Scene::DoSkinning, true );
+		if ( Shape * shape = shapeForBlock( targetBlock ) )
+			shape->updateBoneTransforms();
+		refreshPickedElementPositions();
+		vertexPaintBrushEnabled = true;
+		boxSelecting = boxSelectDrag = false;
+		circleSelecting = circlePainting = circleErasing = false;
+		vertexPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+		setCursor( Qt::BlankCursor );
+	} else if ( !enabled && wasEnabled ) {
+		if ( vertexPaintStroke )
+			emit vertexPaintStrokeEnded( false );
+		vertexPaintStroke = false;
+		vertexPaintMode = false;
+		vertexPaintBrushEnabled = false;
+		unsetCursor();
+		if ( editMode )
+			setEditMode( false );
+	}
+
+	if ( wasEnabled != vertexPaintMode ) {
+		emit vertexPaintBrushChanged( vertexPaintBrushActive() );
+		emit vertexPaintModeChanged( vertexPaintMode );
+	}
+	if ( vertexPaintMode )
+		emit gizmoStatus( vertexPaintBrushEnabled
+			? tr( "Vertex Paint - Brush: LMB paints, wheel = zoom, RMB = menu, Tab = Object Mode, Esc = done" )
+			: tr( "Vertex Paint - Select: 1/2/3 vertex/edge/face, Tab = brush" ) );
+	update();
+}
+
+void GLView::setVertexPaintBrushEnabled( bool enabled )
+{
+	if ( !vertexPaintMode )
+		enabled = false;
+	if ( vertexPaintBrushEnabled == enabled )
+		return;
+	if ( vertexPaintStroke )
+		emit vertexPaintStrokeEnded( false );
+	vertexPaintStroke = false;
+	vertexPaintBrushEnabled = enabled;
+	vertexPaintProjectionValid = false;
+	vertexPaintScreen.clear();
+	vertexPaintCandidates.clear();
+	if ( enabled ) {
+		boxSelecting = boxSelectDrag = false;
+		circleSelecting = circlePainting = circleErasing = false;
+		vertexPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+		setCursor( Qt::BlankCursor );
+		emit gizmoStatus( tr( "Vertex Paint - Brush: LMB paints, wheel = zoom, RMB = menu, Tab = Object Mode" ) );
+	} else {
+		unsetCursor();
+		emit gizmoStatus( tr( "Vertex Paint - Select: 1/2/3 vertex/edge/face, Tab = brush" ) );
+	}
+	emit vertexPaintBrushChanged( enabled );
+	update();
+}
+
+void GLView::setSegmentPaintMode( bool enabled, int targetBlock, float radius )
+{
+	if ( enabled && riggingWeightPaintMode ) setRiggingWeightPaintMode( false );
+	if ( enabled && vertexPaintMode ) setVertexPaintMode( false );
+	if ( enabled && ( !model || !scene || targetBlock < 0 || !shapeForBlock( targetBlock ) ) )
+		enabled = false;
+	const bool wasEnabled = segmentPaintMode;
+	segmentPaintTarget = enabled ? targetBlock : -1;
+	segmentPaintRadius = qBound( 4.0f, radius, 400.0f );
+	segmentPaintProjectionValid = false;
+	segmentPaintScreen.clear();
+	segmentPaintCandidates.clear();
+	if ( enabled && !wasEnabled ) {
+		if ( editMode ) setEditMode( false );
+		QModelIndex target = model->getBlockIndex( targetBlock );
+		scene->currentBlock = target;
+		scene->currentIndex = target.sibling( target.row(), 0 );
+		setEditMode( true );
+		if ( !editMode ) { segmentPaintTarget = -1; return; }
+		editShapeBlocks.clear();
+		editShapeBlocks.insert( targetBlock );
+		editShapeBlock = targetBlock;
+		scene->restPoseBlock = targetBlock;
+		for ( int i = pickedElems.size() - 1; i >= 0; i-- )
+			if ( pickedElems.at( i ).shapeBlock != targetBlock ) pickedElems.remove( i );
+		segmentPaintMode = true;
+		scene->options.setFlag( Scene::DoSkinning, true );
+		if ( Shape * shape = shapeForBlock( targetBlock ) ) shape->updateBoneTransforms();
+		refreshPickedElementPositions();
+		setPickMode( 3 );
+		segmentPaintBrushEnabled = true;
+		boxSelecting = boxSelectDrag = false;
+		circleSelecting = circlePainting = circleErasing = false;
+		segmentPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+		setCursor( Qt::BlankCursor );
+	} else if ( !enabled && wasEnabled ) {
+		if ( segmentPaintStroke ) emit segmentPaintStrokeEnded( false );
+		segmentPaintStroke = false;
+		segmentPaintMode = false;
+		segmentPaintBrushEnabled = false;
+		unsetCursor();
+		if ( editMode ) setEditMode( false );
+	}
+	if ( wasEnabled != segmentPaintMode ) {
+		emit segmentPaintBrushChanged( segmentPaintBrushActive() );
+		emit segmentPaintModeChanged( segmentPaintMode );
+	}
+	if ( segmentPaintMode )
+		emit gizmoStatus( segmentPaintBrushEnabled
+			? tr( "Segment Paint - Brush: LMB assigns/removes faces, wheel = zoom, Tab = Object Mode" )
+			: tr( "Segment Paint - Face Select: selection masks painting, Tab = brush" ) );
+	update();
+}
+
+void GLView::setSegmentPaintBrushEnabled( bool enabled )
+{
+	if ( !segmentPaintMode ) enabled = false;
+	if ( segmentPaintBrushEnabled == enabled ) return;
+	if ( segmentPaintStroke ) emit segmentPaintStrokeEnded( false );
+	segmentPaintStroke = false;
+	segmentPaintBrushEnabled = enabled;
+	segmentPaintProjectionValid = false;
+	segmentPaintScreen.clear();
+	segmentPaintCandidates.clear();
+	if ( enabled ) {
+		boxSelecting = boxSelectDrag = false;
+		circleSelecting = circlePainting = circleErasing = false;
+		segmentPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+		setCursor( Qt::BlankCursor );
+	} else {
+		unsetCursor();
+		setPickMode( 3 );
+	}
+	emit segmentPaintBrushChanged( enabled );
+	emit gizmoStatus( enabled
+		? tr( "Segment Paint - Brush: LMB assigns/removes faces, wheel = zoom, Tab = Object Mode" )
+		: tr( "Segment Paint - Face Select: selection masks painting, Tab = brush" ) );
+	update();
+}
+
+void GLView::setRiggingWeightPaintBrushEnabled( bool enabled )
+{
+	if ( !riggingWeightPaintMode )
+		enabled = false;
+	if ( riggingWeightPaintBrushEnabled == enabled )
+		return;
+	if ( riggingWeightPaintStroke )
+		emit riggingWeightStrokeEnded( false );
+	riggingWeightPaintStroke = false;
+	riggingWeightPaintBrushEnabled = enabled;
+	riggingWeightPaintProjectionValid = false;
+	riggingWeightPaintScreen.clear();
+	riggingWeightPaintCandidates.clear();
+	if ( enabled ) {
+		boxSelecting = boxSelectDrag = false;
+		circleSelecting = circlePainting = circleErasing = false;
+		riggingWeightPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+		setCursor( Qt::BlankCursor );
+		emit gizmoStatus( tr( "Weight Paint - Brush: LMB paints, wheel = zoom, Tab = Object Mode, RMB/Esc = done" ) );
+	} else {
+		unsetCursor();
+		emit gizmoStatus( tr( "Weight Paint - Select: 1/2/3 vertex/edge/face, Ctrl+X fills, Tab = brush" ) );
+	}
+	emit riggingWeightPaintBrushChanged( enabled );
+	update();
+}
+
+void GLView::fillRiggingWeightSelection()
+{
+	if ( !riggingWeightPaintMode || riggingWeightPaintTarget < 0 )
+		return;
+	// One pending fill at a time. The fill emits a stroke whose commit slot
+	// serializes the whole model into an Undo snapshot; without this guard,
+	// keyboard autorepeat (or a double delivery) stacks dozens of snapshots
+	// synchronously and freezes the UI.
+	if ( paintFillPending )
+		return;
+	QSet<int> selected = pickedVertexRefs().value( riggingWeightPaintTarget );
+	if ( selected.isEmpty() ) {
+		emit gizmoStatus( tr( "Weight Paint: select vertices, edges, or faces before Ctrl+X" ) );
+		return;
+	}
+	paintFillPending = true;
+	// Run outside the key-event handler so the snapshot/undo push and any
+	// resulting modal cannot re-enter the event that triggered us.
+	QTimer::singleShot( 0, this, [this]() {
+		paintFillPending = false;
+		if ( !riggingWeightPaintMode || riggingWeightPaintTarget < 0 )
+			return;
+		QSet<int> sel = pickedVertexRefs().value( riggingWeightPaintTarget );
+		if ( sel.isEmpty() )
+			return;
+		QVector<int> vertices( sel.constBegin(), sel.constEnd() );
+		std::sort( vertices.begin(), vertices.end() );
+		QVector<float> fullStrength( vertices.size(), 1.0f );
+		emit riggingWeightStrokeBegan();
+		emit riggingWeightBrushSample( riggingWeightPaintTarget, vertices, fullStrength,
+			2, riggingWeightPaintWeight, 1.0f ); // Replace at the current Weight value
+		emit riggingWeightStrokeEnded( true );
+	} );
+}
+
+void GLView::fillSegmentPaintSelection()
+{
+	if ( !segmentPaintMode || segmentPaintTarget < 0 )
+		return;
+	if ( paintFillPending )
+		return;
+	Shape * shape = shapeForBlock( segmentPaintTarget );
+	if ( !shape ) return;
+	paintFillPending = true;
+	QTimer::singleShot( 0, this, [this]() {
+		paintFillPending = false;
+		if ( !segmentPaintMode || segmentPaintTarget < 0 )
+			return;
+		Shape * shape = shapeForBlock( segmentPaintTarget );
+		if ( !shape ) return;
+		QSet<int> exactFaces;
+		QSet<int> selectedVertices = pickedVertexRefs().value( segmentPaintTarget );
+		for ( const auto & pe : pickedElems )
+			if ( pe.shapeBlock == segmentPaintTarget && pe.type == 3 && pe.e0 >= 0 )
+				exactFaces.insert( pe.e0 );
+		QSet<int> selectedFaces = exactFaces;
+		if ( exactFaces.isEmpty() && !selectedVertices.isEmpty() ) {
+			for ( int triangle = 0; triangle < shape->triangles.size(); triangle++ ) {
+				const Triangle & tri = shape->triangles.at( triangle );
+				if ( selectedVertices.contains( tri.v1() ) || selectedVertices.contains( tri.v2() )
+					|| selectedVertices.contains( tri.v3() ) ) selectedFaces.insert( triangle );
+			}
+		}
+		if ( selectedFaces.isEmpty() ) {
+			emit gizmoStatus( tr( "Segment Paint: select vertices, edges, or faces before Ctrl+X" ) );
+			return;
+		}
+		QVector<int> triangles = selectedFaces.values();
+		std::sort( triangles.begin(), triangles.end() );
+		emit segmentPaintStrokeBegan();
+		emit segmentPaintBrushSample( segmentPaintTarget, triangles );
+		emit segmentPaintStrokeEnded( true );
+	} );
+}
+
 float	GLView::Settings::vertexPointSize = 5.0f;
 float	GLView::Settings::tbnPointSize = 7.0f;
 float	GLView::Settings::vertexSelectPointSize = 8.5f;
@@ -223,9 +717,13 @@ void GLView::updateSettings()
 	settings.beginGroup( "Settings/Render" );
 
 	cfg.background = Color4( settings.value( "Colors/Background", QColor( 46, 46, 46 ) ).value<QColor>() );
-	cfg.fov = settings.value( "General/Camera/Field Of View" ).toFloat();
-	cfg.moveSpd = settings.value( "General/Camera/Movement Speed" ).toFloat();
-	cfg.rotSpd = settings.value( "General/Camera/Rotation Speed" ).toFloat();
+	// Preserve the Settings defaults on a clean profile. QVariant::toFloat()
+	// returns zero for a missing key, which previously reduced both keyboard
+	// camera transforms and Shift+F fly movement to a no-op until the Render
+	// settings page had been saved at least once.
+	cfg.fov = std::clamp( settings.value( "General/Camera/Field Of View", 60.0f ).toFloat(), 45.0f, 120.0f );
+	cfg.moveSpd = std::clamp( settings.value( "General/Camera/Movement Speed", 350.0f ).toFloat(), 0.0f, 7000.0f );
+	cfg.rotSpd = std::clamp( settings.value( "General/Camera/Rotation Speed", 45.0f ).toFloat(), 15.0f, 1500.0f );
 	cfg.upAxis = UpAxis(settings.value( "General/Up Axis", ZAxis ).toInt());
 	int	z = settings.value( "General/Camera/Startup Direction", 1 ).toInt();
 	static const ViewState	startupDirections[6] = {
@@ -651,6 +1149,274 @@ void GLView::paintGL()
 	glDisable( GL_BLEND );
 	scene->draw();
 
+	// Selected-bone weight heatmap. Per-corner colours are supplied by the
+	// Rigging Manager, while the viewport owns only an ephemeral triangle soup.
+	if ( !riggingWeightPreviewSoup.isEmpty()
+		&& riggingWeightPreviewSoup.size() == riggingWeightPreviewColors.size()
+		&& !scene->selecting ) {
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+		glDepthMask( GL_FALSE );
+		glEnable( GL_BLEND );
+		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+		scene->loadModelViewMatrix( viewTrans );
+		glEnable( GL_POLYGON_OFFSET_FILL );
+		glPolygonOffset( -1.0f, -1.0f );
+		scene->drawTriangles( riggingWeightPreviewSoup.constData(),
+			size_t( riggingWeightPreviewSoup.size() ), riggingWeightPreviewColors.constData(), true );
+		glDisable( GL_POLYGON_OFFSET_FILL );
+		glDisable( GL_BLEND );
+		glDepthMask( GL_TRUE );
+		glDepthFunc( GL_LESS );
+	}
+
+	// Blender-style Weight Paint selection mask. Unlike Edit Mode, Weight Paint
+	// must not cover the useful heat colours with orange selection fill. The
+	// paintable selection stays at full heatmap colour; protected geometry gets
+	// Blender's neutral-grey veil. Face-mask boundaries and selected vertex/edge
+	// cues are white, while unselected cage elements remain black.
+	const bool elementPaintMode = riggingWeightPaintMode || vertexPaintMode || segmentPaintMode;
+	const int elementPaintTarget = riggingWeightPaintMode ? riggingWeightPaintTarget
+		: vertexPaintMode ? vertexPaintTarget : segmentPaintTarget;
+	if ( model && elementPaintMode && elementPaintTarget >= 0
+		&& !pickedElems.isEmpty() && !scene->selecting ) {
+		Shape * s = shapeForBlock( elementPaintTarget );
+		QSet<int> selectedVerts = pickedVertexRefs().value( elementPaintTarget );
+		if ( s && !s->isHidden() && !selectedVerts.isEmpty()
+			&& !s->verts.isEmpty() && !s->triangles.isEmpty() ) {
+			const float dpr = float( devicePixelRatioF() );
+			const int nv = s->verts.size();
+			const bool faceMask = bool( pickMode & 4 );
+			const bool vertexMask = bool( pickMode & 1 );
+			const bool edgeMask = bool( pickMode & 2 );
+			const QSet<int> hiddenT = editHiddenTris.value( elementPaintTarget );
+
+			QSet<int> selectedFaces;
+			QSet<quint64> selectedEdges;
+			auto edgeKey = []( int a, int b ) {
+				return ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) );
+			};
+			for ( const PickedElement & pe : pickedElems ) {
+				if ( pe.shapeBlock != elementPaintTarget )
+					continue;
+				if ( pe.type == 3 )
+					selectedFaces.insert( pe.e0 );
+				else if ( pe.type == 2 )
+					selectedEdges.insert( edgeKey( pe.e0, pe.e1 ) );
+			}
+
+			Transform wt = shapeRenderTrans( s );
+			QVector<Vector3> worldVerts( nv );
+			for ( int i = 0; i < nv; i++ )
+				worldVerts[i] = wt * editVertexLocal( s, i );
+
+			// In face mode a triangle is selected explicitly. Vertex and edge modes
+			// use the actual paintable vertex set, allowing Blender's characteristic
+			// soft grey transition across a triangle with a partly selected corner set.
+			QVector<Vector3> maskSoup;
+			QVector<FloatVector4> maskColors;
+			maskSoup.reserve( s->triangles.size() * 3 );
+			maskColors.reserve( s->triangles.size() * 3 );
+			const FloatVector4 clearMask( 0.55f, 0.55f, 0.55f, 0.0f );
+			const FloatVector4 greyMask( 0.55f, 0.55f, 0.55f, 0.68f );
+			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+				if ( hiddenT.contains( ti ) )
+					continue;
+				const Triangle & t = s->triangles.at( ti );
+				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+					continue;
+				const bool faceSelected = faceMask && selectedFaces.contains( ti );
+				for ( int corner = 0; corner < 3; corner++ ) {
+					const int vi = t[corner];
+					maskSoup.append( worldVerts.at( vi ) );
+					maskColors.append( faceMask
+						? ( faceSelected ? clearMask : greyMask )
+						: ( selectedVerts.contains( vi ) ? clearMask : greyMask ) );
+				}
+			}
+
+			if ( !maskSoup.isEmpty() ) {
+				glEnable( GL_DEPTH_TEST );
+				glDepthFunc( GL_LEQUAL );
+				glDepthMask( GL_FALSE );
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+				scene->loadModelViewMatrix( viewTrans );
+				glEnable( GL_POLYGON_OFFSET_FILL );
+				glPolygonOffset( -2.0f, -2.0f );
+				scene->drawTriangles( maskSoup.constData(), size_t( maskSoup.size() ),
+					maskColors.constData(), true );
+				glDisable( GL_POLYGON_OFFSET_FILL );
+				glDisable( GL_BLEND );
+				glDepthMask( GL_TRUE );
+				glDepthFunc( GL_LESS );
+			}
+
+			// Build the visible cage once. Face mode uses only the boundary between
+			// selected and protected faces; vertex/edge modes retain Blender's
+			// black cage with selected endpoints/edges changed to white.
+			struct MaskEdge {
+				int a = -1;
+				int b = -1;
+				int adjacent = 0;
+				bool selectedSide = false;
+				bool protectedSide = false;
+			};
+			QHash<quint64, MaskEdge> maskEdges;
+			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+				if ( hiddenT.contains( ti ) )
+					continue;
+				const Triangle & t = s->triangles.at( ti );
+				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+					continue;
+				const bool selected = selectedFaces.contains( ti );
+				for ( int e = 0; e < 3; e++ ) {
+					const int a = t[e], b = t[( e + 1 ) % 3];
+					const quint64 key = edgeKey( a, b );
+					MaskEdge & edge = maskEdges[key];
+					edge.a = std::min( a, b );
+					edge.b = std::max( a, b );
+					edge.adjacent++;
+					edge.selectedSide = edge.selectedSide || selected;
+					edge.protectedSide = edge.protectedSide || !selected;
+				}
+			}
+
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+			glDepthMask( GL_FALSE );
+			scene->loadModelViewMatrix( viewTrans );
+			if ( faceMask ) {
+				QVector<Vector3> boundary;
+				for ( auto it = maskEdges.constBegin(); it != maskEdges.constEnd(); ++it ) {
+					const MaskEdge & edge = it.value();
+					if ( edge.selectedSide && ( edge.protectedSide || edge.adjacent == 1 ) )
+						boundary << worldVerts.at( edge.a ) << worldVerts.at( edge.b );
+				}
+				if ( !boundary.isEmpty() ) {
+					glDisable( GL_DEPTH_TEST );
+					scene->setGLLineWidth( 1.35f * dpr * wireWidthMul );
+					scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );
+					scene->drawLines( boundary.constData(), size_t( boundary.size() ), nullptr );
+					glEnable( GL_DEPTH_TEST );
+				}
+			} else if ( vertexMask || edgeMask ) {
+				const FloatVector4 black( 0.0f, 0.0f, 0.0f, 1.0f );
+				const FloatVector4 white( 1.0f, 1.0f, 1.0f, 1.0f );
+				QVector<Vector3> lines;
+				QVector<FloatVector4> lineColors;
+				lines.reserve( maskEdges.size() * 2 );
+				lineColors.reserve( maskEdges.size() * 2 );
+				for ( auto it = maskEdges.constBegin(); it != maskEdges.constEnd(); ++it ) {
+					const MaskEdge & edge = it.value();
+					lines << worldVerts.at( edge.a ) << worldVerts.at( edge.b );
+					if ( edgeMask && selectedEdges.contains( it.key() ) )
+						lineColors << white << white;
+					else
+						lineColors << ( selectedVerts.contains( edge.a ) ? white : black )
+							<< ( selectedVerts.contains( edge.b ) ? white : black );
+				}
+				if ( !lines.isEmpty() ) {
+					scene->setGLLineWidth( 1.0f * dpr * wireWidthMul );
+					scene->drawLines( lines.constData(), size_t( lines.size() ), lineColors.constData() );
+				}
+				if ( vertexMask ) {
+					QVector<Vector3> unselectedPoints, selectedPoints;
+					for ( int vi = 0; vi < nv; vi++ )
+						( selectedVerts.contains( vi ) ? selectedPoints : unselectedPoints )
+							.append( worldVerts.at( vi ) );
+					scene->setGLPointSize( vertexPointSize * dpr );
+					if ( !unselectedPoints.isEmpty() ) {
+						scene->setGLColor( black );
+						scene->drawPoints( unselectedPoints.constData(), size_t( unselectedPoints.size() ) );
+					}
+					if ( !selectedPoints.isEmpty() ) {
+						glDisable( GL_DEPTH_TEST );
+						scene->setGLColor( white );
+						scene->drawPoints( selectedPoints.constData(), size_t( selectedPoints.size() ) );
+						glEnable( GL_DEPTH_TEST );
+					}
+				}
+			}
+			glDepthMask( GL_TRUE );
+			glDepthFunc( GL_LESS );
+		}
+	}
+
+	// Other open NIF documents form a neutral, read-only scene assembly around
+	// the active document. They do not participate in picking or saving. The
+	// preview is fully opaque (alpha comes from the baked per-face colors) and
+	// writes depth so it occludes, and is occluded by, the primary correctly.
+	if ( !sessionDocumentPreviewSoup.isEmpty() && !scene->selecting ) {
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+		glDepthMask( GL_TRUE );
+		scene->loadModelViewMatrix( viewTrans );
+		scene->setGLColor( 0.46f, 0.54f, 0.62f, 1.0f );
+		glEnable( GL_POLYGON_OFFSET_FILL );
+		glPolygonOffset( 1.0f, 1.0f );
+		const bool shaded =
+			sessionDocumentPreviewColors.size() == sessionDocumentPreviewSoup.size();
+		scene->drawTriangles( sessionDocumentPreviewSoup.constData(),
+			size_t( sessionDocumentPreviewSoup.size() ),
+			shaded ? sessionDocumentPreviewColors.constData() : nullptr, true );
+		glDisable( GL_POLYGON_OFFSET_FILL );
+		glDepthFunc( GL_LESS );
+	}
+
+	// Rigging donor overlay: copied, read-only donor geometry in target model
+	// space. It is deliberately outside Scene, so it cannot be picked, saved,
+	// skinned, or confused with target blocks. Cyan distinguishes it from the
+	// amber Collision Manager preview and orange target selection.
+	if ( !riggingDonorPreviewSoup.isEmpty() && !scene->selecting
+		&& ( riggingDonorPreviewFilled || riggingDonorPreviewWireframe ) ) {
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+		glDepthMask( GL_FALSE );
+		scene->loadModelViewMatrix( viewTrans );
+		if ( riggingDonorPreviewFilled ) {
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+			scene->setGLColor( 0.08f, 0.66f, 1.0f, riggingDonorPreviewOpacity );
+			glEnable( GL_POLYGON_OFFSET_FILL );
+			glPolygonOffset( -2.0f, -2.0f );
+			scene->drawTriangles( riggingDonorPreviewSoup.constData(),
+				size_t( riggingDonorPreviewSoup.size() ), nullptr, true );
+			glDisable( GL_POLYGON_OFFSET_FILL );
+			glDisable( GL_BLEND );
+		}
+		if ( riggingDonorPreviewWireframe ) {
+			scene->setGLColor( 0.18f, 0.82f, 1.0f, 1.0f );
+			scene->setGLLineWidth( Settings::lineWidthHighlight * 0.8f );
+			scene->drawTriangles( riggingDonorPreviewSoup.constData(),
+				size_t( riggingDonorPreviewSoup.size() ), nullptr, false );
+		}
+		glDepthMask( GL_TRUE );
+		glDepthFunc( GL_LESS );
+	}
+
+	// Collision Manager live preview: translucent amber fill plus a bright
+	// wire overlay. This is a world-space triangle soup owned by the viewport,
+	// not a model block, so cancelling the operator is a zero-cost clear.
+	if ( !collisionPreviewSoup.isEmpty() && !scene->selecting ) {
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+		glEnable( GL_BLEND );
+		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+		glDepthMask( GL_FALSE );
+		scene->loadModelViewMatrix( viewTrans );
+		scene->setGLColor( 1.0f, 0.58f, 0.08f, 0.28f );
+		glEnable( GL_POLYGON_OFFSET_FILL );
+		glPolygonOffset( -1.0f, -1.0f );
+		scene->drawTriangles( collisionPreviewSoup.constData(), size_t( collisionPreviewSoup.size() ), nullptr, true );
+		glDisable( GL_POLYGON_OFFSET_FILL );
+		glDepthMask( GL_TRUE );
+		scene->setGLColor( 1.0f, 0.72f, 0.16f, 1.0f );
+		scene->setGLLineWidth( Settings::lineWidthHighlight );
+		scene->drawTriangles( collisionPreviewSoup.constData(), size_t( collisionPreviewSoup.size() ), nullptr, false );
+		glDisable( GL_BLEND );
+	}
+
 	// Flat shading: the textured shapes were skipped, so fill every visible
 	// mesh with a uniform dark grey (Blender wireframe-mode faces). X-ray
 	// makes the fill half-transparent so geometry behind shows through.
@@ -665,13 +1431,17 @@ void GLView::paintGL()
 			int nv = s->verts.size();
 			QVector<Vector3> soup;
 			soup.reserve( s->triangles.size() * 3 );
+			auto displayLocal = [this, s]( int vi ) {
+				return scene->hasOption( Scene::DoSkinning )
+					? s->skinVertex( vi, s->verts[vi] ) : s->verts[vi];
+			};
 			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
 				if ( hidT.contains( ti ) )
 					continue;
 				const Triangle & t = s->triangles.at( ti );
 				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
 					continue;
-				soup << s->verts[t[0]] << s->verts[t[1]] << s->verts[t[2]];
+				soup << displayLocal( t[0] ) << displayLocal( t[1] ) << displayLocal( t[2] );
 			}
 			if ( soup.isEmpty() )
 				continue;
@@ -690,11 +1460,14 @@ void GLView::paintGL()
 	// Pivot gizmo: RGB axes at the selected node's origin (oriented to the node),
 	// plus the active constraint axis while a modal G/R/S transform is running.
 	// In edit mode it follows the picked elements rather than the tree selection.
-	bool showGizmo = editMode ? ( !pickedElems.isEmpty() || elemTransform ) : scene->currentBlock.isValid();
+	bool showGizmo = editMode ? ( !pickedElems.isEmpty() || elemTransform )
+	                          : ( objActive >= 0 || scene->currentBlock.isValid() );
 	if ( model && showGizmo ) {
 		int gb;
 		if ( editMode && editShapeBlock >= 0 ) {
 			gb = editShapeBlock;
+		} else if ( !editMode && objActive >= 0 ) {
+			gb = objActive;	// follow the active object/node (incl. block-list picks)
 		} else {
 			gb = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
 			while ( gb >= 0 && !model->blockInherits( model->getBlockIndex( gb ), "NiAVObject" ) )
@@ -724,14 +1497,29 @@ void GLView::paintGL()
 			scene->setGLLineWidth( Settings::lineWidthAxes * ( gizmoMode ? 1.6f : 1.0f ) );
 			scene->loadModelViewMatrix( viewTrans * nt );
 
-			if ( gizmoMode || gizmoHandlesOn ) {
+			// object origin dot (Blender): always shown for the selected object /
+			// node so geometry-less nodes (NiNode, lights) are visible and can be
+			// grabbed, even with the gizmo handles toggled off
+			if ( !editMode ) {
+				scene->setGLPointSize( 8.0f * float( devicePixelRatioF() ) );
+				if ( gb == objActive )
+					scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );	// active #FF9D00
+				else
+					scene->setGLColor( 1.0f, 0.447f, 0.0f, 1.0f );	// secondary #FF7200
+				Vector3 o;
+				scene->drawPoints( &o, 1 );
+			}
+
+			if ( gizmoHandlesOn ) {
 				// Blender-style handles: arrows with solid cone tips (move),
 				// rings (rotate), solid boxes (scale), center circle (view-
 				// plane move); modelview is already the gizmo basis at the
 				// pivot. Colours match Blender: X #FF3352, Y #8BDC00, Z #2890FF.
 				// During a modal G/R/S only the relevant sub-gizmo is drawn,
-				// and only the constrained axis if one is locked in. The top-
-				// bar toggle only hides the combined (idle) gizmo.
+				// and only the constrained axis if one is locked in. When the
+				// Show Gizmo toggle is off nothing is drawn here (not even during
+				// a modal gesture) - only the axis constraint guide lines below
+				// still show, so a G+X/Y/Z move stays readable.
 				const float L = gs;
 				const float axR[3][4] = {
 					{ 1.000f, 0.200f, 0.322f, 1.0f },	// X
@@ -962,7 +1750,7 @@ void GLView::paintGL()
 	// orange fill on selected faces, and an orange->black gradient on edges
 	// running into selected vertices (vertex mode only). Depth-tested like
 	// Blender; positions are pulled slightly toward the eye to avoid z-fights.
-	if ( model && editMode && !editShapeBlocks.isEmpty() ) {
+	if ( model && editMode && !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && !editShapeBlocks.isEmpty() ) {
 		const float dpr = float( devicePixelRatioF() );
 		const FloatVector4 colWire( 0.0f, 0.0f, 0.0f, 1.0f );
 		const FloatVector4 colSel( 1.0f, 0.522f, 0.0f, 1.0f );		// Blender select #FF8500
@@ -1001,7 +1789,7 @@ void GLView::paintGL()
 			// world-space vertices, pulled a hair toward the camera
 			QVector<Vector3> wv( nv );
 			for ( int i = 0; i < nv; i++ ) {
-				Vector3 w = wt * s->verts.at( i );
+				Vector3 w = wt * editVertexLocal( s, i );
 				wv[i] = eye + ( w - eye ) * 0.997f;
 			}
 
@@ -1031,20 +1819,25 @@ void GLView::paintGL()
 			const QSet<int> & sv = selVerts[wb];
 			const QSet<quint64> & se = selEdges[wb];
 
-			// Faces to fill (Blender fills a face when it is face-selected OR
-			// all of its verts / all of its edges are selected in vert/edge mode)
+			// Faces to fill: a face is filled when it is face-selected, OR (only in
+			// the matching select mode) all of its verts / all of its edges are
+			// selected. Gating the implicit fill on the mode bit keeps face mode
+			// from lighting up a de-selected face just because its verts are still
+			// covered by selected neighbours (the invert-in-face-mode surprise).
+			const bool fillByVerts = bool( pickMode & 1 ) && !sv.isEmpty();
+			const bool fillByEdges = bool( pickMode & 2 ) && !se.isEmpty();
 			QSet<int> filledTris;
 			if ( selFaces.contains( wb ) )
 				filledTris = selFaces.value( wb );
-			if ( !sv.isEmpty() || !se.isEmpty() ) {
+			if ( fillByVerts || fillByEdges ) {
 				for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
 					if ( hiddenT.contains( ti ) )
 						continue;
 					const Triangle & t = s->triangles.at( ti );
 					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
 						continue;
-					bool allV = !sv.isEmpty() && sv.contains( t[0] ) && sv.contains( t[1] ) && sv.contains( t[2] );
-					bool allE = !se.isEmpty() && se.contains( edgeKey( t[0], t[1] ) )
+					bool allV = fillByVerts && sv.contains( t[0] ) && sv.contains( t[1] ) && sv.contains( t[2] );
+					bool allE = fillByEdges && se.contains( edgeKey( t[0], t[1] ) )
 						&& se.contains( edgeKey( t[1], t[2] ) ) && se.contains( edgeKey( t[2], t[0] ) );
 					if ( allV || allE )
 						filledTris.insert( ti );
@@ -1055,7 +1848,8 @@ void GLView::paintGL()
 			// the depth test OFF so nearby unconnected geometry can never
 			// occlude it - the edit cage stays on top, Blender-style. The plain
 			// black wireframe + unselected dots keep the depth test.
-			QVector<Vector3> foutline;
+			QVector<Vector3> foutline;	// non-active filled faces (orange outline)
+			QVector<Vector3> aoutline;	// the active/primary face (white outline)
 			if ( !filledTris.isEmpty() ) {
 				glDisable( GL_DEPTH_TEST );
 				QVector<Vector3> ftris, atris;
@@ -1069,7 +1863,10 @@ void GLView::paintGL()
 					             && activeElem->shapeBlock == wb && activeElem->e0 == fi );
 					QVector<Vector3> & dst = act ? atris : ftris;
 					dst << wv[t[0]] << wv[t[1]] << wv[t[2]];
-					foutline << wv[t[0]] << wv[t[1]] << wv[t[1]] << wv[t[2]] << wv[t[2]] << wv[t[0]];
+					// only the active face gets the white outline (Blender); the
+					// rest of the selection stays orange
+					QVector<Vector3> & odst = act ? aoutline : foutline;
+					odst << wv[t[0]] << wv[t[1]] << wv[t[1]] << wv[t[2]] << wv[t[2]] << wv[t[0]];
 				}
 				if ( !ftris.isEmpty() ) {
 					scene->setGLColor( 1.0f, 0.522f, 0.0f, 0.30f );
@@ -1127,11 +1924,13 @@ void GLView::paintGL()
 			// as orange instead of white
 			if ( !foutline.isEmpty() ) {
 				scene->setGLLineWidth( 1.7f * dpr * wireWidthMul );
-				if ( pickMode & ( 2 | 4 ) )
-					scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );
-				else
-					scene->setGLColor( colSel );
+				scene->setGLColor( colSel );	// non-primary selected faces: orange
 				scene->drawLines( foutline.constData(), size_t( foutline.size() ), nullptr );
+			}
+			if ( !aoutline.isEmpty() ) {
+				scene->setGLLineWidth( 1.7f * dpr * wireWidthMul );
+				scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.95f );	// active/primary face: white (Blender)
+				scene->drawLines( aoutline.constData(), size_t( aoutline.size() ), nullptr );
 			}
 
 			// selected edges (any mode), slightly wider like Blender
@@ -1202,7 +2001,7 @@ void GLView::paintGL()
 			if ( pe.type == 1 ) {
 				if ( pe.e0 >= nv )
 					continue;
-				Vector3 v = wt * s->verts[pe.e0];
+				Vector3 v = wt * editVertexLocal( s, pe.e0 );
 				scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );	// contrast halo
 				scene->drawSphereSimple( v, ms * 0.62f, 16, 2 );
 				scene->setGLColor( 1.0f, 0.5f, 0.0f, 1.0f );	// orange verts
@@ -1210,7 +2009,7 @@ void GLView::paintGL()
 			} else if ( pe.type == 2 ) {
 				if ( pe.e0 >= nv || pe.e1 >= nv )
 					continue;
-				Vector3 a = wt * s->verts[pe.e0], b = wt * s->verts[pe.e1];
+				Vector3 a = wt * editVertexLocal( s, pe.e0 ), b = wt * editVertexLocal( s, pe.e1 );
 				scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );
 				scene->setGLLineWidth( Settings::lineWidthAxes * 3.4f );
 				scene->drawLine( a, b );
@@ -1221,7 +2020,8 @@ void GLView::paintGL()
 				const Triangle & t = s->triangles.at( pe.e0 );
 				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
 					continue;
-				Vector3 tri[3] = { wt * s->verts[t[0]], wt * s->verts[t[1]], wt * s->verts[t[2]] };
+				Vector3 tri[3] = { wt * editVertexLocal( s, t[0] ),
+					wt * editVertexLocal( s, t[1] ), wt * editVertexLocal( s, t[2] ) };
 				// filled translucent face + solid outline
 				scene->setGLColor( 1.0f, 0.4f, 0.85f, 0.45f );	// magenta fill
 				scene->drawTriangles( tri, 3, nullptr, true );
@@ -1307,7 +2107,28 @@ void GLView::paintGL()
 	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
 	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
 	bool drawSnapMarker = snapIndicator && ( gizmoMode != 0 || elemTransform );
-	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker ) {
+	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode ) {
+		// The scene passes (esp. collision wireframe) leave GL state that
+		// QPainter inherits: depth test on (so filled overlay shapes get
+		// depth-rejected against the geometry, while text glyphs survive - the
+		// "gizmo vanishes but XYZ letters stay" bug), a custom blend func, a
+		// bound program/VAO, and a non-fill polygon mode. Reset all of it so
+		// the QPainter overlay renders predictably.
+		if ( QOpenGLContext * glCtx = QOpenGLContext::currentContext() ) {
+			QOpenGLFunctions * f = glCtx->functions();
+			f->glDisable( GL_DEPTH_TEST );
+			f->glDepthMask( GL_TRUE );
+			f->glDisable( GL_BLEND );
+			f->glDisable( GL_CULL_FACE );
+			f->glDisable( GL_SCISSOR_TEST );
+			f->glUseProgram( 0 );
+			// NOTE: do NOT glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0) here - the
+			// element-buffer binding is part of the currently bound VAO's state,
+			// and the renderer caches and reuses that VAO. Clearing it corrupts
+			// the cached shape's index buffer and crashes the next glDrawElements
+			// (seen as a crash when interacting with the collision preview).
+		}
+		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		QPainter painter( this );
 		if ( model && showCursor )
 			drawCursorOverlay( painter );
@@ -1334,6 +2155,45 @@ void GLView::paintGL()
 			QPointF c( width() * 0.5, height() * 0.5 );
 			painter.drawLine( c - QPointF( 9, 0 ), c + QPointF( 9, 0 ) );
 			painter.drawLine( c - QPointF( 0, 9 ), c + QPointF( 0, 9 ) );
+		}
+		if ( boxSelectDrag ) {
+			// Blender box-select rectangle: faint fill + dashed white outline
+			painter.setRenderHint( QPainter::Antialiasing, false );
+			QRect r = QRect( boxSelectStart, boxSelectCur ).normalized();
+			painter.setPen( QPen( QColor( 255, 255, 255, 235 ), 1.0, Qt::DashLine ) );
+			painter.setBrush( QColor( 255, 255, 255, 26 ) );
+			painter.drawRect( r );
+		}
+		if ( circleSelecting ) {
+			// Blender circle-select brush: dashed white circle following the cursor
+			painter.setRenderHint( QPainter::Antialiasing, true );
+			painter.setPen( QPen( QColor( 255, 255, 255, 235 ), 1.0, Qt::DashLine ) );
+			painter.setBrush( ( circlePainting || circleErasing )
+				? QBrush( QColor( 255, 255, 255, 18 ) ) : QBrush( Qt::NoBrush ) );
+			painter.drawEllipse( circleSelectPos, qreal( circleSelectRadius ), qreal( circleSelectRadius ) );
+		}
+		if ( riggingWeightPaintMode && riggingWeightPaintBrushEnabled && !freeCamera ) {
+			// Cyan distinguishes weight painting from the white selection brush.
+			painter.setRenderHint( QPainter::Antialiasing, true );
+			painter.setPen( QPen( QColor( 0x39, 0xD9, 0xFF, 245 ), 1.5, Qt::DashLine ) );
+			painter.setBrush( riggingWeightPaintStroke
+				? QBrush( QColor( 0x39, 0xD9, 0xFF, 28 ) ) : QBrush( Qt::NoBrush ) );
+			painter.drawEllipse( riggingWeightPaintPos, qreal( riggingWeightPaintRadius ),
+				qreal( riggingWeightPaintRadius ) );
+		}
+		if ( vertexPaintMode && vertexPaintBrushEnabled && !freeCamera ) {
+			painter.setRenderHint( QPainter::Antialiasing, true );
+			painter.setPen( QPen( QColor( 0xFF, 0x9D, 0x3D, 245 ), 1.5, Qt::DashLine ) );
+			painter.setBrush( vertexPaintStroke
+				? QBrush( QColor( 0xFF, 0x9D, 0x3D, 28 ) ) : QBrush( Qt::NoBrush ) );
+			painter.drawEllipse( vertexPaintPos, qreal( vertexPaintRadius ), qreal( vertexPaintRadius ) );
+		}
+		if ( segmentPaintMode && segmentPaintBrushEnabled && !freeCamera ) {
+			painter.setRenderHint( QPainter::Antialiasing, true );
+			painter.setPen( QPen( QColor( 0x57, 0xE3, 0x68, 245 ), 1.5, Qt::DashLine ) );
+			painter.setBrush( segmentPaintStroke
+				? QBrush( QColor( 0x57, 0xE3, 0x68, 28 ) ) : QBrush( Qt::NoBrush ) );
+			painter.drawEllipse( segmentPaintPos, qreal( segmentPaintRadius ), qreal( segmentPaintRadius ) );
 		}
 		painter.end();
 
@@ -1680,6 +2540,13 @@ void GLView::move( float x, float y, float z )
 
 void GLView::rotate( float x, float y, float z )
 {
+	// Blender's default Auto Perspective behaviour: orbiting away from an
+	// axis-aligned orthographic view returns to perspective. This keeps the
+	// horizontal ground grid visible after MMB or numpad orbit, while a static
+	// arbitrary User Orthographic view (entered with Numpad 5) remains gridless.
+	if ( !perspectiveMode && view != ViewWalk )
+		setProjection( true );
+
 	// orbit around the selection (Blender preference): keep the selection
 	// center fixed in view space while the rotation changes
 	Matrix R1;
@@ -1754,6 +2621,178 @@ void GLView::setCenter()
 	}
 }
 
+void GLView::frameSelected()
+{
+	// Blender Numpad-.: center + zoom the camera on the selection; with no
+	// selection, frame the whole model like Center does
+	if ( !model || !scene ) {
+		center();
+		return;
+	}
+	Vector3 lo, hi;
+	bool have = false;
+	auto grow = [&]( const Vector3 & p ) {
+		if ( !have ) {
+			lo = hi = p;
+			have = true;
+			return;
+		}
+		for ( int i = 0; i < 3; i++ ) {
+			lo[i] = std::min( lo[i], p[i] );
+			hi[i] = std::max( hi[i], p[i] );
+		}
+	};
+	if ( editMode && !pickedElems.isEmpty() ) {
+		for ( const PickedElement & pe : pickedElems ) {
+			grow( pe.wA );
+			if ( pe.type >= 2 )
+				grow( pe.wB );
+			if ( pe.type == 3 )
+				grow( pe.wC );
+		}
+	} else if ( !editMode && !objSelection.isEmpty() ) {
+		for ( Shape * s : scene->shapes ) {
+			if ( !s || !objSelection.contains( s->id() ) )
+				continue;
+			Transform wt = shapeRenderTrans( s );
+			if ( s->verts.isEmpty() ) {
+				grow( wt * Vector3() );
+			} else {
+				for ( const Vector3 & v : s->verts )
+					grow( wt * v );
+			}
+		}
+	}
+	if ( !have ) {
+		center();
+		return;
+	}
+	Vector3 c = ( lo + hi ) * 0.5f;
+	float radius = ( hi - c ).length();
+	Pos = -c;
+	Dist = std::max( radius * 1.2f, 0.5f );
+	Zoom = 1.0;
+	update();
+}
+
+void GLView::frameAll()
+{
+	if ( !scene )
+		return;
+	BoundSphere bs = scene->bounds();
+	if ( bs.radius < scale() )
+		bs.radius = 1024.0f * scale();
+	Pos = -bs.center;
+	Dist = bs.radius * 1.2f;
+	Zoom = 1.0;
+	update();
+}
+
+bool GLView::handleBlenderNumpad( int key, Qt::KeyboardModifiers modifiers, bool trigger )
+{
+	const Qt::KeyboardModifiers commandMods = modifiers
+		& ( Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier );
+	const bool keypad = modifiers.testFlag( Qt::KeypadModifier );
+
+	// Home is part of Blender's view-navigation set even though it is not on
+	// every compact numpad.
+	if ( !keypad ) {
+		if ( key != Qt::Key_Home || commandMods != Qt::NoModifier )
+			return false;
+		if ( trigger )
+			frameAll();
+		return true;
+	}
+
+	const bool ctrl = commandMods.testFlag( Qt::ControlModifier );
+	const bool shift = commandMods.testFlag( Qt::ShiftModifier );
+	const bool alt = commandMods.testFlag( Qt::AltModifier );
+	if ( alt )
+		return false; // Ctrl+Alt+Num0 remains reserved for future active-camera support.
+
+	auto setAxisView = [this, trigger]( ViewState state ) {
+		if ( trigger ) {
+			setProjection( false );
+			setOrientation( state, false );
+		}
+	};
+	auto orbit = [this, trigger]( float pitch, float yaw ) {
+		if ( trigger ) {
+			view = ViewUser;
+			rotate( pitch, 0.0f, yaw );
+		}
+	};
+	auto pan = [this, trigger]( float x, float y ) {
+		if ( trigger ) {
+			const float step = std::max( float( Dist / Zoom ) * 0.10f, scale() );
+			move( x * step, y * step, 0.0f );
+		}
+	};
+
+	switch ( key ) {
+	case Qt::Key_1:
+		if ( shift ) return false;
+		setAxisView( ctrl ? ViewBack : ViewFront );
+		return true;
+	case Qt::Key_3:
+		if ( shift ) return false;
+		setAxisView( ctrl ? ViewLeft : ViewRight );
+		return true;
+	case Qt::Key_7:
+		if ( shift ) return false;
+		setAxisView( ctrl ? ViewBottom : ViewTop );
+		return true;
+	case Qt::Key_2:
+		if ( ctrl ) return false;
+		if ( shift ) pan( 0.0f, 1.0f ); else orbit( 15.0f, 0.0f );
+		return true;
+	case Qt::Key_4:
+		if ( ctrl ) return false;
+		if ( shift ) pan( 1.0f, 0.0f ); else orbit( 0.0f, -15.0f );
+		return true;
+	case Qt::Key_6:
+		if ( ctrl ) return false;
+		if ( shift ) pan( -1.0f, 0.0f ); else orbit( 0.0f, 15.0f );
+		return true;
+	case Qt::Key_8:
+		if ( ctrl ) return false;
+		if ( shift ) pan( 0.0f, -1.0f ); else orbit( -15.0f, 0.0f );
+		return true;
+	case Qt::Key_5:
+		if ( commandMods != Qt::NoModifier ) return false;
+		if ( trigger ) setProjection( !perspectiveMode );
+		return true;
+	case Qt::Key_9:
+		if ( commandMods != Qt::NoModifier ) return false;
+		if ( trigger ) flipOrientation();
+		return true;
+	case Qt::Key_Plus:
+		if ( commandMods != Qt::NoModifier ) return false;
+		if ( trigger ) setZoom( float( Zoom ) * 1.2f );
+		return true;
+	case Qt::Key_Minus:
+		if ( commandMods != Qt::NoModifier ) return false;
+		if ( trigger ) setZoom( float( Zoom ) / 1.2f );
+		return true;
+	case Qt::Key_Period:
+	case Qt::Key_Comma:
+		if ( commandMods != Qt::NoModifier ) return false;
+		if ( trigger ) frameSelected();
+		return true;
+	case Qt::Key_Slash:
+		if ( commandMods != Qt::NoModifier ) return false;
+		if ( trigger ) {
+			const bool isolated = editMode ? !editHiddenTris.isEmpty()
+				: ( scene && ( !scene->hiddenNodes.isEmpty() || scene->soloNode >= 0 ) );
+			if ( isolated ) restoreAllVisibility(); else isolateSelected();
+		}
+		return true;
+	default:
+		break;
+	}
+	return false;
+}
+
 void GLView::setDistance( float x )
 {
 	Dist = x;
@@ -1774,8 +2813,11 @@ void GLView::setPosition( const Vector3 & v )
 
 void GLView::setProjection( bool isPersp )
 {
+	if ( perspectiveMode == isPersp )
+		return;
 	perspectiveMode = isPersp;
 	update();
+	emit projectionChanged( perspectiveMode );
 }
 
 void GLView::setRotation( float x, float y, float z )
@@ -1847,6 +2889,25 @@ void GLView::setOrientation( GLView::ViewState state, bool recenter )
 	// Recenter
 	if ( recenter )
 		center();
+}
+
+GLView::ViewState GLView::axisAlignedViewState() const
+{
+	Matrix current;
+	current.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+	for ( int i = 0; i < 6; i++ ) {
+		Matrix candidate;
+		candidate.fromEuler( deg2rad( viewRotations[i][0] ), deg2rad( viewRotations[i][1] ),
+			deg2rad( viewRotations[i][2] ) );
+		float maxDifference = 0.0f;
+		for ( int row = 0; row < 3; row++ )
+			for ( int column = 0; column < 3; column++ )
+				maxDifference = std::max( maxDifference,
+					std::fabs( current( row, column ) - candidate( row, column ) ) );
+		if ( maxDifference <= 1.0e-4f )
+			return ViewState( int( ViewTop ) + i );
+	}
+	return ViewDefault;
 }
 
 void GLView::updateViewpoint()
@@ -1963,6 +3024,16 @@ void GLView::setFreeCamera( bool on )
 {
 	if ( freeCamera == on )
 		return;
+	if ( on && riggingWeightPaintStroke ) {
+		emit riggingWeightStrokeEnded( false );
+		riggingWeightPaintStroke = false;
+		mouseButtonState &= ~std::uint32_t( Qt::LeftButton );
+	}
+	if ( on && segmentPaintStroke ) {
+		emit segmentPaintStrokeEnded( false );
+		segmentPaintStroke = false;
+		mouseButtonState &= ~std::uint32_t( Qt::LeftButton );
+	}
 	freeCamera = on;
 	kbdState = 0;
 	if ( on ) {
@@ -1976,8 +3047,26 @@ void GLView::setFreeCamera( bool on )
 		emit gizmoStatus( tr( "Free camera: move the mouse to look, WASD to fly, Q/E down/up, hold Shift to speed up (Shift+F or Esc to exit)" ) );
 	} else {
 		setKeyboardGrabEnabled( false );
-		unsetCursor();
-		emit gizmoStatus( QString() );
+		if ( riggingWeightPaintBrushActive() ) {
+			riggingWeightPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+			setCursor( Qt::BlankCursor );
+			emit gizmoStatus( tr( "Weight Paint - Brush: LMB paints, wheel = zoom, Tab = Object Mode, RMB/Esc = done" ) );
+		} else if ( vertexPaintBrushActive() ) {
+			vertexPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+			setCursor( Qt::BlankCursor );
+			emit gizmoStatus( tr( "Vertex Paint - Brush: LMB paints, wheel = zoom, Tab = Object Mode, RMB/Esc = done" ) );
+		} else if ( segmentPaintBrushActive() ) {
+			segmentPaintPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+			setCursor( Qt::BlankCursor );
+			emit gizmoStatus( tr( "Segment Paint - Brush: LMB assigns/removes faces, wheel = zoom, Tab = Object Mode" ) );
+		} else {
+			unsetCursor();
+			emit gizmoStatus( riggingWeightPaintMode
+				? tr( "Weight Paint - Select: 1/2/3 vertex/edge/face, Ctrl+X fills, Tab = brush" )
+				: vertexPaintMode ? tr( "Vertex Paint - Select: 1/2/3 vertex/edge/face, Tab = brush" )
+				: segmentPaintMode ? tr( "Segment Paint - Face Select: selection masks painting, Tab = brush" )
+				: QString() );
+		}
 	}
 	update();
 }
@@ -2424,12 +3513,31 @@ Vector3 GLView::gizmoPivotPoint( const QModelIndex & iBlock ) const
 	return n->worldTrans().translation;
 }
 
+bool GLView::startModalTransform( int mode )
+{
+	if ( gizmoMode )
+		return false;	// a gesture is running; keyPressEvent handles mode switch
+	if ( editMode && !pickedElems.isEmpty() && gizmoBeginElement( mode ) )
+		return true;
+	return gizmoBegin( mode );
+}
+
 bool GLView::gizmoBegin( int mode )
 {
-	if ( !model || !scene->currentBlock.isValid() )
+	if ( !model )
 		return false;
 
-	QModelIndex iBlock = model->getBlockIndex( QModelIndex( scene->currentBlock ) );
+	// in object mode transform the ACTIVE selection (which a block-list pick
+	// updates via objActive); scene->currentBlock is not always kept in sync
+	// with a block-list selection, so relying on it dropped non-shape nodes
+	QModelIndex iBlock;
+	if ( !editMode && objActive >= 0 )
+		iBlock = model->getBlockIndex( objActive );
+	if ( !iBlock.isValid() ) {
+		if ( !scene->currentBlock.isValid() )
+			return false;
+		iBlock = model->getBlockIndex( QModelIndex( scene->currentBlock ) );
+	}
 	// walk up to the nearest transformable object
 	int b = model->getBlockNumber( iBlock );
 	while ( b >= 0 && !model->blockInherits( model->getBlockIndex( b ), "NiAVObject" ) )
@@ -2528,6 +3636,14 @@ bool GLView::gizmoBegin( int mode )
 	static const char * modeNames[4] = { "", "Move", "Rotate", "Scale" };
 	emit gizmoStatus( tr( "%1 [%2]:  X/Y/Z axis (twice = local), Shift+X/Y/Z plane, MMB smart axis, R,R trackball, Ctrl snap (%3), Shift precise, LMB/Enter commit, Esc cancel" )
 		.arg( QLatin1String( modeNames[mode] ), model->resolveString( iBlock, "Name" ) ).arg( gizmoSnapStep ) );
+
+	// Blender: the modal gesture owns the mouse and keyboard for its whole
+	// life, so the drag keeps working outside the viewport (over docks, other
+	// windows) and X/Y/Z / typed values / Esc reach the modal even when the
+	// block list has key focus
+	gizmoWrapOffset = QPoint();
+	setMouseGrabEnabled( true );
+	setKeyboardGrabEnabled( true );
 
 	return true;
 }
@@ -2682,9 +3798,25 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 				}
 
 				deltaWorld = target - base;
+				// constrain the snap to the active axis / plane so an axis+snap
+				// move only shifts along it (the snapped coordinate matches the
+				// target, Blender), instead of dropping fully onto the target
+				if ( gizmoAxis > 0 ) {
+					Vector3 unit;
+					unit[gizmoAxis - 1] = 1.0f;
+					Vector3 saxis = gizmoBasisM * unit;
+					saxis.normalize();
+					deltaWorld = saxis * Vector3::dotproduct( deltaWorld, saxis );
+				} else if ( gizmoPlane > 0 ) {
+					Vector3 ex;
+					ex[gizmoPlane - 1] = 1.0f;
+					Vector3 snrm = gizmoBasisM * ex;
+					snrm.normalize();
+					deltaWorld = deltaWorld - snrm * Vector3::dotproduct( deltaWorld, snrm );
+				}
 				elemSnapped = true;
 				snapIndicator = true;
-				snapIndicatorPos = target;
+				snapIndicatorPos = target;	// Blender: the marker sits on the snap target
 
 				if ( snapAlignRot ) {
 					// orient the node's +Z to the target face normal
@@ -2714,7 +3846,7 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 		// doing nothing). Snap the MOVEMENT in the active orientation basis so
 		// an axis-constrained move only steps along that axis (the other delta
 		// components are ~0 and round to 0, leaving those axes untouched).
-		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
+		if ( snap && snapTargetMode == 0 && !elemSnapped && gizmoSnapStep > 0 ) {
 			float step = gizmoSnapStep * snapFine;
 			Vector3 deltaBasis = gizmoBasisM.inverted() * deltaWorld;
 			for ( int c = 0; c < 3; c++ )
@@ -2866,10 +3998,13 @@ void GLView::gizmoEnd( bool commit )
 	QModelIndex iBlock( gizmoBlock );
 	int mode = gizmoMode;
 	gizmoMode = 0;
+	setMouseGrabEnabled( false );	// the gesture owned the mouse + keyboard
+	setKeyboardGrabEnabled( false );
 	emit gizmoStatus( QString() );
 
-	if ( !model || !iBlock.isValid() )
+	if ( !model || !iBlock.isValid() ) {
 		return;
+	}
 
 	// capture the dragged values, restore originals, then re-apply through the
 	// undo stack - for every node of the multi-selection
@@ -2931,6 +4066,7 @@ void GLView::gizmoEnd( bool commit )
 			emit transformCommitted( model->getBlockNumber( iBlock ) );
 
 		// freeze the gesture frame for the redo panel
+		lastGestureElement = false;
 		lastGizmoMode = mode;
 		lastGizmoAxis = gizmoAxis;
 		lastGizmoOrient = gizmoOrient;
@@ -2951,8 +4087,89 @@ void GLView::gizmoEnd( bool commit )
 	update();
 }
 
+static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi );
+
+bool GLView::gizmoReapplyElement( const Vector3 & param, int axisOverride )
+{
+	if ( !model || !model->undoStack || !lastElemMode || lastElemVerts.isEmpty() )
+		return false;
+	if ( model->undoStack->index() != lastUndoIndex )
+		return false;	// stale: something else touched the undo stack
+	int axis = ( axisOverride >= 0 ) ? axisOverride : lastElemAxis;
+
+	// undo the committed edit, then re-apply the same gesture with new params
+	model->undoStack->undo();
+
+	QHash<int, Transform> xf;
+	auto toLocal = [&]( int shape, const Vector3 & w ) {
+		if ( !xf.contains( shape ) ) {
+			Node * n = scene->getNode( model, model->getBlockIndex( shape ) );
+			xf.insert( shape, n ? shapeRenderTrans( n ) : Transform() );
+		}
+		Transform wt = xf.value( shape );
+		float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+		return wt.rotation.inverted() * ( ( w - wt.translation ) * ( 1.0f / sc ) );
+	};
+
+	Matrix dr;
+	if ( lastElemMode == 2 ) {
+		Vector3 rax;
+		if ( axis == 0 ) {
+			Matrix vm;
+			vm.fromEuler( deg2rad( Rot[0] ), deg2rad( Rot[1] ), deg2rad( Rot[2] ) );
+			rax = Vector3( vm( 2, 0 ), vm( 2, 1 ), vm( 2, 2 ) );
+		} else {
+			rax[axis - 1] = 1.0f;
+		}
+		Quat q;
+		q.fromAxisAngle( rax, deg2rad( param[0] ) );
+		dr.fromQuat( q );
+	}
+
+	ChangeValueCommand::createTransaction();
+	for ( const ElemVert & ev : lastElemVerts ) {
+		Vector3 w;
+		if ( lastElemMode == 1 ) {
+			Vector3 d = param;
+			if ( axis > 0 ) { float a = d[axis - 1]; d = Vector3(); d[axis - 1] = a; }
+			w = ev.origWorld + d;
+		} else if ( lastElemMode == 2 ) {
+			w = lastElemPivot + dr * ( ev.origWorld - lastElemPivot );
+		} else {
+			Vector3 rel = ev.origWorld - lastElemPivot;
+			if ( axis > 0 ) rel[axis - 1] *= param[0]; else rel = rel * param[0];
+			w = lastElemPivot + rel;
+		}
+		QModelIndex iShape = model->getBlockIndex( ev.shape );
+		QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx );
+		const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
+		if ( !item )
+			continue;
+		Vector3 cageLocal = toLocal( ev.shape, w );
+		Vector3 local;
+		Shape * shape = shapeForBlock( ev.shape );
+		if ( !shape || !editVertexRawLocal( shape, ev.idx, cageLocal, local ) )
+			continue;
+		NifValue oldVal = item->value();
+		NifValue newVal = oldVal;
+		if ( item->hasValueType( NifValue::tHalfVector3 ) )
+			newVal.set<HalfVector3>( HalfVector3( local ), model, item );
+		else
+			newVal.set<Vector3>( local, model, item );
+		if ( !( oldVal == newVal ) )
+			model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, newVal, tr( "Vertex" ), model ) );
+	}
+	lastElemAxis = axis;
+	lastUndoIndex = model->undoStack->index();
+	modelChanged();
+	update();
+	return true;
+}
+
 bool GLView::gizmoReapply( const Vector3 & param, int axisOverride, int orientOverride )
 {
+	if ( lastGestureElement )
+		return gizmoReapplyElement( param, axisOverride );
 	if ( !model || !model->undoStack || !lastGizmoMode || !lastGizmoBlock.isValid() )
 		return false;
 	// the gesture is stale once anything else touches the undo stack
@@ -3108,6 +4325,107 @@ Transform GLView::shapeRenderTrans( Node * n ) const
 	return scene->view.inverted() * n->viewTrans();
 }
 
+Vector3 GLView::editVertexLocal( Shape * shape, int vertexIndex ) const
+{
+	if ( !shape || vertexIndex < 0 || vertexIndex >= shape->verts.size() )
+		return Vector3();
+	const Vector3 raw = shape->verts.at( vertexIndex );
+	return editDeformedCageActive() ? shape->skinVertex( vertexIndex, raw ) : raw;
+}
+
+bool GLView::evaluatedVertexWorld( int shapeBlock, int vertexIndex, Vector3 & world ) const
+{
+	Shape * shape = shapeForBlock( shapeBlock );
+	if ( !shape || vertexIndex < 0 || vertexIndex >= shape->verts.size() )
+		return false;
+	world = shapeRenderTrans( shape ) * shape->skinVertex( vertexIndex, shape->verts.at( vertexIndex ) );
+	return true;
+}
+
+bool GLView::editVertexRawLocal( Shape * shape, int vertexIndex,
+	const Vector3 & cageLocal, Vector3 & rawLocal ) const
+{
+	if ( !shape || vertexIndex < 0 || vertexIndex >= shape->verts.size() )
+		return false;
+	if ( !editDeformedCageActive() ) {
+		rawLocal = cageLocal;
+		return true;
+	}
+	return shape->unskinVertex( vertexIndex, cageLocal, rawLocal );
+}
+
+void GLView::refreshPickedElementPositions()
+{
+	// drop picks whose elements no longer exist (an in-place topology undo
+	// shrinks the arrays under a live selection)
+	for ( int i = pickedElems.size() - 1; i >= 0; i-- ) {
+		const PickedElement & pe = pickedElems.at( i );
+		Shape * shape = shapeForBlock( pe.shapeBlock );
+		if ( !shape )
+			continue;	// scene not rebuilt yet: judged on the next refresh
+		const int nv = shape->verts.size();
+		bool ok = true;
+		if ( pe.type == 1 )
+			ok = ( pe.e0 >= 0 && pe.e0 < nv );
+		else if ( pe.type == 2 )
+			ok = ( pe.e0 >= 0 && pe.e0 < nv && pe.e1 >= 0 && pe.e1 < nv );
+		else if ( pe.type == 3 )
+			ok = ( pe.e0 >= 0 && pe.e0 < shape->triangles.size() );
+		if ( !ok )
+			pickedElems.removeAt( i );
+	}
+	for ( PickedElement & pe : pickedElems ) {
+		Shape * shape = shapeForBlock( pe.shapeBlock );
+		if ( !shape )
+			continue;
+		Transform wt = shapeRenderTrans( shape );
+		const int nv = shape->verts.size();
+		if ( pe.type == 1 && pe.e0 >= 0 && pe.e0 < nv ) {
+			pe.worldPos = wt * editVertexLocal( shape, pe.e0 );
+			pe.wA = pe.wB = pe.wC = pe.worldPos;
+		} else if ( pe.type == 2 && pe.e0 >= 0 && pe.e0 < nv && pe.e1 >= 0 && pe.e1 < nv ) {
+			pe.wA = wt * editVertexLocal( shape, pe.e0 );
+			pe.wB = wt * editVertexLocal( shape, pe.e1 );
+			pe.wC = pe.wA;
+			pe.worldPos = ( pe.wA + pe.wB ) * 0.5f;
+		} else if ( pe.type == 3 && pe.e0 >= 0 && pe.e0 < shape->triangles.size() ) {
+			const Triangle & tri = shape->triangles.at( pe.e0 );
+			if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+				continue;
+			pe.wA = wt * editVertexLocal( shape, tri[0] );
+			pe.wB = wt * editVertexLocal( shape, tri[1] );
+			pe.wC = wt * editVertexLocal( shape, tri[2] );
+			pe.worldPos = ( pe.wA + pe.wB + pe.wC ) * ( 1.0f / 3.0f );
+		}
+	}
+}
+
+void GLView::setEditDeformedCage( bool enabled )
+{
+	if ( editDeformedCage == enabled )
+		return;
+	if ( elemTransform )
+		gizmoEndElement( false );
+	editDeformedCage = enabled;
+	QSettings().setValue( "GLView/Edit/DeformedCage", enabled );
+	if ( editMode && scene ) {
+		const bool evaluated = riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || editDeformedCage;
+		scene->options.setFlag( Scene::DoSkinning, evaluated );
+		for ( int block : editShapeBlocks ) {
+			if ( Shape * shape = shapeForBlock( block ) )
+				shape->updateBoneTransforms();
+		}
+		refreshPickedElementPositions();
+		doCompile = 1;
+	}
+	emit editDeformedCageChanged( enabled );
+	if ( editMode && !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode )
+		emit gizmoStatus( enabled
+			? tr( "Edit Mode - Deformed Cage (evaluated game/skinned position)" )
+			: tr( "Edit Mode - Raw Bind Position" ) );
+	update();
+}
+
 GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock, const QSet<int> * onlyShapes ) const
 {
 	SceneRayHit hit;
@@ -3155,7 +4473,8 @@ GLView::SceneRayHit GLView::raycastScene( const QPointF & pos, int excludeBlock,
 			if ( tri[0] >= s->verts.size() || tri[1] >= s->verts.size() || tri[2] >= s->verts.size() )
 				continue;
 			float t = 0;
-			if ( tlRayTri( lo, ld, s->verts.at( tri[0] ), s->verts.at( tri[1] ), s->verts.at( tri[2] ), t ) ) {
+			if ( tlRayTri( lo, ld, editVertexLocal( s, tri[0] ), editVertexLocal( s, tri[1] ),
+				 editVertexLocal( s, tri[2] ), t ) ) {
 				float worldT = t * sc;
 				if ( worldT < hit.dist ) {
 					hit.dist = worldT;
@@ -3179,10 +4498,10 @@ void GLView::drawObjectOutlines()
 	glDepthMask( GL_FALSE );
 
 	for ( int b : objSelection ) {
-		// all shapes in the selected object's subtree form one silhouette;
-		// expanded triangle soup per shape (local space, drawn with the
-		// shape's own modelview)
-		QVector<QPair<Shape *, QVector<Vector3>>> shs;
+		// All shapes in the selected object's subtree form one silhouette. Use
+		// each Shape's own cached vertex/index buffer: its outline shaders apply
+		// the same GPU bone transforms as the normal skinned mesh draw.
+		QVector<Shape *> shs;
 		for ( Shape * s : scene->shapes ) {
 			if ( !s || s->isHidden() || s->verts.isEmpty() || s->triangles.isEmpty() )
 				continue;
@@ -3191,16 +4510,7 @@ void GLView::drawObjectOutlines()
 				p = model->getParent( p );
 			if ( p != b )
 				continue;
-			QVector<Vector3> soup;
-			soup.reserve( s->triangles.size() * 3 );
-			int nv = s->verts.size();
-			for ( const Triangle & t : s->triangles ) {
-				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
-					continue;
-				soup << s->verts.at( t[0] ) << s->verts.at( t[1] ) << s->verts.at( t[2] );
-			}
-			if ( !soup.isEmpty() )
-				shs.append( qMakePair( s, soup ) );
+			shs.append( s );
 		}
 		if ( shs.isEmpty() )
 			continue;
@@ -3221,26 +4531,23 @@ void GLView::drawObjectOutlines()
 		glStencilFunc( GL_ALWAYS, 1, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 		glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
-		for ( const auto & sp : shs ) {
-			scene->loadModelViewMatrix( sp.first->viewTrans() );
-			scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );
-			scene->drawTriangles( sp.second.constData(), size_t( sp.second.size() ), nullptr, true );
+		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+		for ( Shape * shape : shs ) {
+			if ( shape->bindShape() )
+				shape->drawTriangles( 0, shape->triangles.size(), FloatVector4( 0.0f, 0.0f, 0.0f, 1.0f ) );
 		}
 		glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
 		// pass 2: thick wireframe clipped to OUTSIDE the stencil = silhouette
 		glStencilFunc( GL_EQUAL, 0, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
-		if ( transforming )
-			scene->setGLColor( 1.0f, 1.0f, 1.0f, 1.0f );
-		else if ( b == objActive )
-			scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );	// #FF9D00
-		else
-			scene->setGLColor( 1.0f, 0.447f, 0.0f, 1.0f );	// #FF7200
-		scene->setGLLineWidth( 3.2f * dpr );
-		for ( const auto & sp : shs ) {
-			scene->loadModelViewMatrix( sp.first->viewTrans() );
-			scene->drawTriangles( sp.second.constData(), size_t( sp.second.size() ), nullptr, false );
+		FloatVector4 outlineColor = transforming
+			? FloatVector4( 1.0f, 1.0f, 1.0f, 1.0f )
+			: b == objActive ? FloatVector4( 1.0f, 0.616f, 0.0f, 1.0f )	// #FF9D00
+			: FloatVector4( 1.0f, 0.447f, 0.0f, 1.0f );				// #FF7200
+		for ( Shape * shape : shs ) {
+			if ( shape->bindShape() )
+				shape->drawWireframe( outlineColor, 3.2f * dpr );
 		}
 	}
 
@@ -3289,6 +4596,131 @@ void GLView::unhideAllElements()
 	update();
 }
 
+void GLView::isolateSelected()
+{
+	if ( !model || !scene )
+		return;
+
+	if ( editMode ) {
+		if ( pickedElems.isEmpty() ) {
+			emit gizmoStatus( tr( "Select geometry before isolating it" ) );
+			return;
+		}
+		const QHash<int, QSet<int>> selectedVertices = pickedVertexRefs();
+		for ( int block : editShapeBlocks ) {
+			Shape * shape = shapeForBlock( block );
+			if ( !shape )
+				continue;
+			const QSet<int> keep = selectedVertices.value( block );
+			QSet<int> & hidden = editHiddenTris[block];
+			for ( int triangle = 0; triangle < shape->triangles.size(); triangle++ ) {
+				const Triangle & t = shape->triangles.at( triangle );
+				// Hiding unselected vertices in Blender also hides any face that
+				// needs one of those vertices. The same rule naturally covers
+				// edge and face selections through pickedVertexRefs().
+				if ( !keep.contains( t[0] ) || !keep.contains( t[1] ) || !keep.contains( t[2] ) )
+					hidden.insert( triangle );
+			}
+		}
+		scene->hiddenTris = editHiddenTris;
+		emit gizmoStatus( tr( "Isolated selected geometry  (Restore All to reveal everything)" ) );
+		update();
+		return;
+	}
+
+	if ( objSelection.isEmpty() ) {
+		emit gizmoStatus( tr( "Select one or more objects before isolating them" ) );
+		return;
+	}
+
+	// Preserve selected objects, their descendants, and the ancestor chain
+	// needed to reach them. Every unrelated NiAVObject can be hidden safely.
+	QSet<int> relevant;
+	for ( int selected : objSelection ) {
+		for ( int p = selected; p >= 0; p = model->getParent( p ) )
+			relevant.insert( p );
+		for ( int b = 0; b < model->getBlockCount(); b++ ) {
+			for ( int p = b; p >= 0; p = model->getParent( p ) ) {
+				if ( p == selected ) {
+					relevant.insert( b );
+					break;
+				}
+			}
+		}
+	}
+	soloMode = false;
+	scene->soloNode = -1;
+	scene->hiddenNodes.clear();
+	for ( int b = 0; b < model->getBlockCount(); b++ ) {
+		QModelIndex block = model->getBlockIndex( b );
+		if ( model->blockInherits( block, "NiAVObject" ) && !relevant.contains( b ) )
+			scene->hiddenNodes.insert( b );
+	}
+	updateDimmedBlocks();
+	emit gizmoStatus( tr( "Isolated %1 selected object(s)" ).arg( objSelection.size() ) );
+	update();
+}
+
+void GLView::isolatePrimary()
+{
+	if ( !model || !scene )
+		return;
+	int primary = editMode ? editShapeBlock : objActive;
+	if ( primary < 0 && scene->currentBlock.isValid() ) {
+		primary = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+		while ( primary >= 0 && !model->blockInherits( model->getBlockIndex( primary ), "NiAVObject" ) )
+			primary = model->getParent( primary );
+	}
+	if ( primary < 0 ) {
+		emit gizmoStatus( tr( "No primary object is selected" ) );
+		return;
+	}
+
+	// A primary is one subtree, so the scene's explicit isolation slot is both
+	// cheaper and more exact than building a hidden-node set for every sibling.
+	soloMode = false;
+	scene->hiddenNodes.clear();
+	updateDimmedBlocks();
+	scene->soloNode = primary;
+	emit gizmoStatus( tr( "Isolated primary object %1" ).arg( primary ) );
+	update();
+}
+
+void GLView::hideSecondarySelection()
+{
+	if ( !model || !scene )
+		return;
+	int primary = editMode ? editShapeBlock : objActive;
+	int hidden = 0;
+	for ( int block : objSelection ) {
+		if ( block != primary && model->blockInherits( model->getBlockIndex( block ), "NiAVObject" ) ) {
+			scene->hiddenNodes.insert( block );
+			hidden++;
+		}
+	}
+	if ( hidden <= 0 ) {
+		emit gizmoStatus( tr( "No secondary selected objects to hide" ) );
+		return;
+	}
+	updateDimmedBlocks();
+	emit gizmoStatus( tr( "Hid %1 secondary selected object(s)" ).arg( hidden ) );
+	update();
+}
+
+void GLView::restoreAllVisibility()
+{
+	if ( !scene )
+		return;
+	soloMode = false;
+	scene->soloNode = -1;
+	editHiddenTris.clear();
+	scene->hiddenTris.clear();
+	scene->hiddenNodes.clear();
+	updateDimmedBlocks();
+	emit gizmoStatus( tr( "Restored all hidden geometry and objects" ) );
+	update();
+}
+
 Vector3 GLView::pickedMedian() const
 {
 	Vector3 m;
@@ -3303,17 +4735,18 @@ Vector3 GLView::pickedMedian() const
 			Transform wt = shapeRenderTrans( s );
 			int nv = s->verts.size();
 			if ( pe.type == 1 && pe.e0 < nv ) {
-				m += wt * s->verts[pe.e0];
+				m += wt * editVertexLocal( s, pe.e0 );
 				n++;
 				continue;
 			} else if ( pe.type == 2 && pe.e0 < nv && pe.e1 < nv ) {
-				m += wt * ( ( s->verts[pe.e0] + s->verts[pe.e1] ) * 0.5f );
+				m += ( wt * editVertexLocal( s, pe.e0 ) + wt * editVertexLocal( s, pe.e1 ) ) * 0.5f;
 				n++;
 				continue;
 			} else if ( pe.type == 3 && pe.e0 >= 0 && pe.e0 < s->triangles.size() ) {
 				const Triangle & t = s->triangles.at( pe.e0 );
 				if ( t[0] < nv && t[1] < nv && t[2] < nv ) {
-					m += wt * ( ( s->verts[t[0]] + s->verts[t[1]] + s->verts[t[2]] ) / 3.0f );
+					m += ( wt * editVertexLocal( s, t[0] ) + wt * editVertexLocal( s, t[1] )
+						+ wt * editVertexLocal( s, t[2] ) ) / 3.0f;
 					n++;
 					continue;
 				}
@@ -3323,6 +4756,53 @@ Vector3 GLView::pickedMedian() const
 		n++;
 	}
 	return ( n > 0 ) ? ( m / float( n ) ) : m;
+}
+
+float GLView::nearestScreenVertex( const QPointF & pos, float radius,
+	const QSet<int> * only, PickedElement & out ) const
+{
+	out = PickedElement();
+	float best = radius;
+	// occlusion test: a vertex hidden behind opaque geometry is not pickable
+	// (Blender picks front-most; X-ray mode deliberately picks through). One
+	// raycast at the vertex's own screen position, compared along the view
+	// ray — a vertex ON the hit surface (its own triangles) passes the
+	// tolerance. Only candidates that would become the winner are tested.
+	auto visible = [this, only]( const Vector3 & wv, const QPointF & sp ) {
+		if ( !scene || scene->xRay )
+			return true;
+		Vector3 rayO, rayD;
+		mouseRayWorld( sp, rayO, rayD );
+		SceneRayHit hit = raycastScene( sp, -1, only );
+		if ( !hit.shape )
+			return true;
+		const float tVert = Vector3::dotproduct( wv - rayO, rayD );
+		return !( hit.dist < tVert * 0.999f - 0.01f );
+	};
+	for ( Shape * s : scene->shapes ) {
+		if ( !s || s->isHidden() )
+			continue;
+		if ( only && !only->contains( s->id() ) )
+			continue;
+		Transform wt = shapeRenderTrans( s );
+		for ( int i = 0; i < s->verts.size(); i++ ) {
+			QPointF sp;
+			Vector3 wv = wt * editVertexLocal( s, i );
+			if ( !worldToScreen( wv, sp ) )
+				continue;
+			float d = float( std::hypot( sp.x() - pos.x(), sp.y() - pos.y() ) );
+			if ( d < best && visible( wv, sp ) ) {
+				best = d;
+				out.shapeBlock = s->id();
+				out.type = 1;
+				out.e0 = i;
+				out.e1 = -1;
+				out.worldPos = wv;
+				out.wA = out.wB = out.wC = wv;
+			}
+		}
+	}
+	return best;
 }
 
 bool GLView::pickElementUnder( const QPointF & pos, PickedElement & pe ) const
@@ -3336,7 +4816,8 @@ bool GLView::pickElementUnder( const QPointF & pos, PickedElement & pe ) const
 		Shape * s = hit.shape;
 		Transform wt = shapeRenderTrans( s );
 		const Triangle & tri = s->triangles.at( hit.tri );
-		Vector3 va = s->verts.at( tri[0] ), vb = s->verts.at( tri[1] ), vc = s->verts.at( tri[2] );
+		Vector3 va = editVertexLocal( s, tri[0] ), vb = editVertexLocal( s, tri[1] );
+		Vector3 vc = editVertexLocal( s, tri[2] );
 
 		pe.shapeBlock = s->id();
 		pe.wA = wt * va;
@@ -3380,8 +4861,17 @@ bool GLView::pickElementUnder( const QPointF & pos, PickedElement & pe ) const
 			float d2 = ( vc - hit.hitLocal ).squaredLength();
 			int corner = ( d0 <= d1 && d0 <= d2 ) ? 0 : ( d1 <= d2 ? 1 : 2 );
 			pe.e0 = tri[corner];
-			pe.worldPos = wt * s->verts.at( pe.e0 );
+			pe.worldPos = wt * editVertexLocal( s, pe.e0 );
 			pe.wA = pe.wB = pe.wC = pe.worldPos;
+			// a floating vertex (extruded spur) in front of this surface never
+			// raycasts — prefer it when it is closer to the cursor on screen
+			QPointF cs;
+			const float cornerDist = worldToScreen( pe.worldPos, cs )
+				? float( std::hypot( cs.x() - pos.x(), cs.y() - pos.y() ) ) : 1.0e9f;
+			PickedElement freeVert;
+			const float freeDist = nearestScreenVertex( pos, std::min( cornerDist, 11.0f ), only, freeVert );
+			if ( freeVert.shapeBlock >= 0 && freeDist < cornerDist )
+				pe = freeVert;
 		} else if ( mode == 2 ) {
 			// nearest edge of the hit triangle
 			auto edgeDist = [&hit]( const Vector3 & a, const Vector3 & b ) {
@@ -3402,8 +4892,8 @@ bool GLView::pickElementUnder( const QPointF & pos, PickedElement & pe ) const
 			}
 			pe.e0 = std::min( ea, eb );
 			pe.e1 = std::max( ea, eb );
-			pe.wA = wt * s->verts.at( pe.e0 );
-			pe.wB = wt * s->verts.at( pe.e1 );
+			pe.wA = wt * editVertexLocal( s, pe.e0 );
+			pe.wB = wt * editVertexLocal( s, pe.e1 );
 			pe.wC = pe.wA;
 			pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
 		} else {
@@ -3415,30 +4905,7 @@ bool GLView::pickElementUnder( const QPointF & pos, PickedElement & pe ) const
 		}
 	} else if ( pickMode & 1 ) {
 		// off-surface: nearest vertex by screen distance (restricted in edit mode)
-		float best = 12.0f;
-		for ( Shape * s : scene->shapes ) {
-			if ( !s || s->isHidden() )
-				continue;
-			if ( only && !only->contains( s->id() ) )
-				continue;
-			Transform wt = shapeRenderTrans( s );
-			for ( int i = 0; i < s->verts.size(); i++ ) {
-				QPointF sp;
-				Vector3 wv = wt * s->verts.at( i );
-				if ( !worldToScreen( wv, sp ) )
-					continue;
-				float d = float( std::hypot( sp.x() - pos.x(), sp.y() - pos.y() ) );
-				if ( d < best ) {
-					best = d;
-					pe.shapeBlock = s->id();
-					pe.type = 1;
-					pe.e0 = i;
-					pe.e1 = -1;
-					pe.worldPos = wv;
-					pe.wA = pe.wB = pe.wC = wv;
-				}
-			}
-		}
+		nearestScreenVertex( pos, 12.0f, only, pe );
 		if ( pe.shapeBlock < 0 )
 			return false;
 	} else {
@@ -3453,6 +4920,7 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 	PickedElement pe;
 	if ( !pickElementUnder( pos, pe ) )
 		return false;
+	recordSelection();
 
 	if ( additive ) {
 		int at = pickedElems.indexOf( pe );
@@ -3478,6 +4946,7 @@ bool GLView::pickPathSelect( const QPointF & pos )
 	PickedElement target;
 	if ( !pickElementUnder( pos, target ) )
 		return false;
+	recordSelection();
 
 	const PickedElement active = pickedElems.constLast();
 	Shape * s = shapeForBlock( target.shapeBlock );
@@ -3503,7 +4972,7 @@ bool GLView::pickPathSelect( const QPointF & pos )
 		pe.shapeBlock = target.shapeBlock;
 		pe.type = 1;
 		pe.e0 = vi;
-		pe.worldPos = wt * s->verts.at( vi );
+		pe.worldPos = wt * editVertexLocal( s, vi );
 		pe.wA = pe.wB = pe.wC = pe.worldPos;
 		return pe;
 	};
@@ -3513,8 +4982,8 @@ bool GLView::pickPathSelect( const QPointF & pos )
 		pe.type = 2;
 		pe.e0 = std::min( a, b );
 		pe.e1 = std::max( a, b );
-		pe.wA = wt * s->verts.at( pe.e0 );
-		pe.wB = wt * s->verts.at( pe.e1 );
+		pe.wA = wt * editVertexLocal( s, pe.e0 );
+		pe.wB = wt * editVertexLocal( s, pe.e1 );
 		pe.wC = pe.wA;
 		pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
 		return pe;
@@ -3558,9 +5027,9 @@ bool GLView::pickPathSelect( const QPointF & pos )
 				pe.shapeBlock = target.shapeBlock;
 				pe.type = 3;
 				pe.e0 = ti;
-				pe.wA = wt * s->verts.at( t[0] );
-				pe.wB = wt * s->verts.at( t[1] );
-				pe.wC = wt * s->verts.at( t[2] );
+				pe.wA = wt * editVertexLocal( s, t[0] );
+				pe.wB = wt * editVertexLocal( s, t[1] );
+				pe.wC = wt * editVertexLocal( s, t[2] );
 				pe.worldPos = ( pe.wA + pe.wB + pe.wC ) / 3.0f;
 				Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
 				n.normalize();
@@ -3748,7 +5217,8 @@ void GLView::movePickedVertsToCursor()
 		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
 			QModelIndex iShape = model->getBlockIndex( it.key() );
 			Node * n = scene->getNode( model, iShape );
-			if ( !n )
+			Shape * shape = shapeForBlock( it.key() );
+			if ( !n || !shape )
 				continue;
 			Transform wt = shapeRenderTrans( n );
 			float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
@@ -3760,17 +5230,20 @@ void GLView::movePickedVertsToCursor()
 				iVerts = model->getIndex( iShape, "Vertices" );
 
 			for ( int vi : it.value() ) {
+				Vector3 rawLocal;
+				if ( !editVertexRawLocal( shape, vi, local, rawLocal ) )
+					continue;
 				if ( iVData.isValid() && vi < model->rowCount( iVData ) ) {
 					QModelIndex iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
 					if ( iv.isValid() ) {
 						const NifItem * item = static_cast<const NifItem *>( iv.internalPointer() );
 						if ( item && item->hasValueType( NifValue::tHalfVector3 ) )
-							model->set<HalfVector3>( iv, HalfVector3( local ) );
+							model->set<HalfVector3>( iv, HalfVector3( rawLocal ) );
 						else
-							model->set<Vector3>( iv, local );
+							model->set<Vector3>( iv, rawLocal );
 					}
 				} else if ( iVerts.isValid() && vi < model->rowCount( iVerts ) ) {
-					model->set<Vector3>( model->getIndex( iVerts, vi ), local );
+					model->set<Vector3>( model->getIndex( iVerts, vi ), rawLocal );
 				}
 			}
 		}
@@ -3837,7 +5310,8 @@ bool GLView::gizmoBeginElement( int mode )
 	for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
 		QModelIndex iShape = model->getBlockIndex( it.key() );
 		Node * n = scene->getNode( model, iShape );
-		if ( !n )
+		Shape * shape = shapeForBlock( it.key() );
+		if ( !n || !shape )
 			continue;
 		Transform wt = shapeRenderTrans( n );
 		for ( int vi : it.value() ) {
@@ -3848,7 +5322,8 @@ bool GLView::gizmoBeginElement( int mode )
 			ev.shape = it.key();
 			ev.idx = vi;
 			ev.origLocal = local;
-			ev.origWorld = wt * local;
+			ev.origWorld = wt * ( editDeformedCageActive() ? shape->skinVertex( vi, local ) : local );
+			ev.currentLocal = local;
 			elemVerts.append( ev );
 		}
 	}
@@ -3863,14 +5338,6 @@ bool GLView::gizmoBeginElement( int mode )
 		for ( const auto & ev : elemVerts )
 			m += ev.origWorld;
 		elemPivot = m / float( elemVerts.size() );
-	}
-
-	// snapshot the whole model for a single undo step
-	elemBefore.clear();
-	{
-		QBuffer buf( &elemBefore );
-		buf.open( QIODevice::WriteOnly );
-		model->save( buf );
 	}
 
 	gizmoMode = mode;
@@ -3888,6 +5355,11 @@ bool GLView::gizmoBeginElement( int mode )
 	static const char * modeNames[4] = { "", "Move", "Rotate", "Scale" };
 	emit gizmoStatus( tr( "%1 %2 element(s):  move mouse or type a value, X/Y/Z = axis, Ctrl = snap, LMB/Enter = commit, Esc = cancel" )
 		.arg( QLatin1String( modeNames[mode] ) ).arg( elemVerts.size() ) );
+
+	// Blender: the modal gesture owns the mouse and keyboard (see gizmoBegin)
+	gizmoWrapOffset = QPoint();
+	setMouseGrabEnabled( true );
+	setKeyboardGrabEnabled( true );
 
 	update();
 	return true;
@@ -3925,6 +5397,24 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		return wt.rotation.inverted() * ( ( w - wt.translation ) * ( 1.0f / sc ) );
 	};
 
+	// Edit-mode dragging is a renderer preview. Writing every selected packed
+	// vertex into NifModel on every mouse event emitted thousands of model
+	// notifications and made BSSubIndexTriShape transforms progressively slower.
+	// Keep the authored model untouched until release and invalidate each affected
+	// shape's GPU cache once per sample.
+	QSet<Shape *> previewShapes;
+	auto previewVertex = [&]( ElemVert & ev, const Vector3 & cageLocal ) {
+		Shape * shape = shapeForBlock( ev.shape );
+		if ( shape && ev.idx >= 0 && ev.idx < shape->verts.size() ) {
+			Vector3 rawLocal;
+			if ( !editVertexRawLocal( shape, ev.idx, cageLocal, rawLocal ) )
+				return;
+			ev.currentLocal = rawLocal;
+			shape->verts[ev.idx] = rawLocal;
+			previewShapes.insert( shape );
+		}
+	};
+
 	QString status;
 
 	if ( gizmoMode == 1 ) {
@@ -3955,46 +5445,79 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		// rejected, so the selection can't chase itself.
 		bool elemSnapped = false;
 		if ( snap && snapTargetMode > 0 ) {
-			SceneRayHit sh = raycastScene( QPointF( pos ), -1 );
-			if ( sh.shape ) {
-				const Triangle & htri = sh.shape->triangles.at( sh.tri );
-				int hitBlock = sh.shape->id();
-				for ( const auto & ev : elemVerts ) {
-					if ( ev.shape == hitBlock
-						&& ( ev.idx == htri[0] || ev.idx == htri[1] || ev.idx == htri[2] ) ) {
-						sh.shape = nullptr;	// hit the dragged geometry itself
-						break;
+			Vector3 target;
+			bool haveTarget = false;
+
+			if ( snapTargetMode == 1 ) {
+				// Blender vertex snap: nearest vertex to the cursor in SCREEN space.
+				// A surface raycast only fires when the cursor is exactly over a
+				// triangle, so it missed whenever the pointer sat just beside the
+				// target vertex (over empty space) - that was the "can't snap on an
+				// axis" report. Dragged vertices are skipped so it can't chase itself.
+				float bestD = 24.0f;
+				for ( Shape * s : scene->shapes ) {
+					if ( !s || s->isHidden() || s->verts.isEmpty() )
+						continue;
+					int sid = s->id();
+					Transform wt = shapeRenderTrans( s );
+					for ( int i = 0; i < s->verts.size(); i++ ) {
+						bool dragged = false;
+						for ( const auto & ev : elemVerts )
+							if ( ev.shape == sid && ev.idx == i ) { dragged = true; break; }
+						if ( dragged )
+							continue;
+						Vector3 wv = wt * editVertexLocal( s, i );
+						QPointF sp;
+						if ( !worldToScreen( wv, sp ) )
+							continue;
+						float d = float( std::hypot( sp.x() - pos.x(), sp.y() - pos.y() ) );
+						if ( d < bestD ) {
+							bestD = d;
+							target = wv;
+							haveTarget = true;
+						}
 					}
 				}
-			}
-			if ( sh.shape ) {
-				Transform swt = shapeRenderTrans( sh.shape );
-				Vector3 target = swt * sh.hitLocal;
-				const Triangle & tri = sh.shape->triangles.at( sh.tri );
-				Vector3 va = sh.shape->verts.at( tri[0] );
-				Vector3 vb = sh.shape->verts.at( tri[1] );
-				Vector3 vc = sh.shape->verts.at( tri[2] );
-
-				if ( snapTargetMode == 1 ) {
-					float d0 = ( va - sh.hitLocal ).squaredLength();
-					float d1 = ( vb - sh.hitLocal ).squaredLength();
-					float d2 = ( vc - sh.hitLocal ).squaredLength();
-					target = swt * ( d0 <= d1 && d0 <= d2 ? va : ( d1 <= d2 ? vb : vc ) );
-				} else if ( snapTargetMode == 2 ) {
-					auto closest = [&sh]( const Vector3 & a, const Vector3 & b ) {
-						Vector3 d = b - a;
-						float len2 = d.squaredLength();
-						float t = ( len2 > 1.0e-12f )
-						          ? std::min( std::max( Vector3::dotproduct( sh.hitLocal - a, d ) / len2, 0.0f ), 1.0f ) : 0.0f;
-						return a + d * t;
-					};
-					Vector3 p01 = closest( va, vb ), p12 = closest( vb, vc ), p20 = closest( vc, va );
-					float d01 = ( p01 - sh.hitLocal ).squaredLength();
-					float d12 = ( p12 - sh.hitLocal ).squaredLength();
-					float d20 = ( p20 - sh.hitLocal ).squaredLength();
-					target = swt * ( d01 <= d12 && d01 <= d20 ? p01 : ( d12 <= d20 ? p12 : p20 ) );
+			} else {
+				// edge / face: surface raycast, then nearest point on the hit edge
+				SceneRayHit sh = raycastScene( QPointF( pos ), -1 );
+				if ( sh.shape ) {
+					const Triangle & htri = sh.shape->triangles.at( sh.tri );
+					int hitBlock = sh.shape->id();
+					for ( const auto & ev : elemVerts ) {
+						if ( ev.shape == hitBlock
+							&& ( ev.idx == htri[0] || ev.idx == htri[1] || ev.idx == htri[2] ) ) {
+							sh.shape = nullptr;
+							break;
+						}
+					}
 				}
+				if ( sh.shape ) {
+					Transform swt = shapeRenderTrans( sh.shape );
+					target = swt * sh.hitLocal;
+					const Triangle & tri = sh.shape->triangles.at( sh.tri );
+					Vector3 va = editVertexLocal( sh.shape, tri[0] );
+					Vector3 vb = editVertexLocal( sh.shape, tri[1] );
+					Vector3 vc = editVertexLocal( sh.shape, tri[2] );
+					if ( snapTargetMode == 2 ) {
+						auto closest = [&sh]( const Vector3 & a, const Vector3 & b ) {
+							Vector3 d = b - a;
+							float len2 = d.squaredLength();
+							float t = ( len2 > 1.0e-12f )
+							          ? std::min( std::max( Vector3::dotproduct( sh.hitLocal - a, d ) / len2, 0.0f ), 1.0f ) : 0.0f;
+							return a + d * t;
+						};
+						Vector3 p01 = closest( va, vb ), p12 = closest( vb, vc ), p20 = closest( vc, va );
+						float d01 = ( p01 - sh.hitLocal ).squaredLength();
+						float d12 = ( p12 - sh.hitLocal ).squaredLength();
+						float d20 = ( p20 - sh.hitLocal ).squaredLength();
+						target = swt * ( d01 <= d12 && d01 <= d20 ? p01 : ( d12 <= d20 ? p12 : p20 ) );
+					}
+					haveTarget = true;
+				}
+			}
 
+			if ( haveTarget ) {
 				// Snap Base over the dragged vertices' original positions
 				Vector3 base = elemPivot;	// median (the element pivot)
 				if ( !elemVerts.isEmpty() ) {
@@ -4022,19 +5545,30 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 				}
 
 				deltaWorld = target - base;
+				// constrain the snap to the locked axis: move only along it so the
+				// vertex's axis coordinate matches the target vertex (Blender G,X +
+				// vertex snap), instead of jumping the whole way onto the target
+				if ( gizmoAxis > 0 ) {
+					float a = deltaWorld[gizmoAxis - 1];
+					deltaWorld = Vector3();
+					deltaWorld[gizmoAxis - 1] = a;
+				}
 				elemSnapped = true;
 				snapIndicator = true;
-				snapIndicatorPos = target;
+				snapIndicatorPos = target;	// Blender: the marker sits on the snap target
 			}
 		}
 
-		// grid stepping whenever no element snap engaged (see gizmoUpdate)
-		if ( snap && !elemSnapped && gizmoSnapStep > 0 ) {
+		// grid stepping ONLY when the Grid Step target is selected. With a
+		// vertex/edge/face target, an un-hit move is free (Blender), not grid-
+		// snapped - otherwise snapping to nothing quietly jumps to the grid.
+		if ( snap && snapTargetMode == 0 && !elemSnapped && gizmoSnapStep > 0 ) {
 			for ( int c = 0; c < 3; c++ )
 				deltaWorld[c] = std::round( deltaWorld[c] / gizmoSnapStep ) * gizmoSnapStep;
 		}
-		for ( const auto & ev : elemVerts )
-			tlSetVertexLocal( model, model->getBlockIndex( ev.shape ), ev.idx, toLocal( ev.shape, ev.origWorld + deltaWorld ) );
+		gizmoLastParam = deltaWorld;
+		for ( auto & ev : elemVerts )
+			previewVertex( ev, toLocal( ev.shape, ev.origWorld + deltaWorld ) );
 		status = tr( "Move: %1, %2, %3" ).arg( deltaWorld[0], 0, 'f', 3 ).arg( deltaWorld[1], 0, 'f', 3 ).arg( deltaWorld[2], 0, 'f', 3 );
 	} else if ( gizmoMode == 2 ) {
 		float angle = numeric ? gizmoPartVal( gizmoNum, 0 ) : dx * 0.5f * precision;
@@ -4049,21 +5583,25 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		q.fromAxisAngle( axis, deg2rad( angle ) );
 		Matrix dr;
 		dr.fromQuat( q );
-		for ( const auto & ev : elemVerts ) {
+		gizmoLastParam = Vector3( angle, 0.0f, 0.0f );
+		for ( auto & ev : elemVerts ) {
 			Vector3 w = elemPivot + dr * ( ev.origWorld - elemPivot );
-			tlSetVertexLocal( model, model->getBlockIndex( ev.shape ), ev.idx, toLocal( ev.shape, w ) );
+			previewVertex( ev, toLocal( ev.shape, w ) );
 		}
 		status = tr( "Rotate: %1°" ).arg( angle, 0, 'f', 1 );
 	} else if ( gizmoMode == 3 ) {
 		float factor = numeric ? gizmoPartVal( gizmoNum, 0 ) : 1.0f + dx * 0.01f * precision;
 		if ( snap )
 			factor = std::round( factor * 10.0f ) / 10.0f;
-		for ( const auto & ev : elemVerts ) {
-			Vector3 w = elemPivot + ( ev.origWorld - elemPivot ) * factor;
-			tlSetVertexLocal( model, model->getBlockIndex( ev.shape ), ev.idx, toLocal( ev.shape, w ) );
+		gizmoLastParam = Vector3( factor, 0.0f, 0.0f );
+		for ( auto & ev : elemVerts ) {
+			Vector3 rel = ev.origWorld - elemPivot; if ( gizmoAxis > 0 ) rel[gizmoAxis - 1] *= factor; else rel = rel * factor; Vector3 w = elemPivot + rel;	/* axis-constrained scale (Blender S,X/Y/Z) */
+			previewVertex( ev, toLocal( ev.shape, w ) );
 		}
 		status = tr( "Scale: ×%1" ).arg( factor, 0, 'f', 3 );
 	}
+	for ( Shape * shape : previewShapes )
+		shape->clearHash();
 
 	static const char * axisNames[4] = { "view", "X", "Y", "Z" };
 	emit gizmoStatus( status + tr( "   [axis: %1]" ).arg( QLatin1String( axisNames[gizmoAxis] ) ) );
@@ -4089,12 +5627,83 @@ static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iSh
 	return QModelIndex();
 }
 
+//! Area-weighted normal accumulation for a subset of verts (current model
+//! positions); shared by the direct write (tlRecalcNormalsSubset) and the
+//! undo-tracked write (tlPushNormalCommands).
+static QHash<int, Vector3> tlAccumulateAreaNormals( NifModel * model, const QModelIndex & iShape,
+	const QSet<int> & verts )
+{
+	QHash<int, Vector3> acc;
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	if ( !iVD.isValid() || !iTris.isValid() || verts.isEmpty() )
+		return acc;
+	// non-reporting probe: a layout without normals is normal, not a warning
+	if ( !model->getItem( model->getIndex( iVD, 0 ), "Normal" ) )
+		return acc;
+	const int numVerts = model->get<int>( iShape, "Num Vertices" );
+	const int numTris = model->get<int>( iShape, "Num Triangles" );
+	QVector<Vector3> pos( numVerts );
+	for ( int i = 0; i < numVerts; i++ )
+		pos[i] = model->get<Vector3>( model->getIndex( iVD, i ), "Vertex" );
+	for ( int v : verts )
+		if ( v >= 0 && v < numVerts )
+			acc.insert( v, Vector3() );
+	for ( int t = 0; t < numTris; t++ ) {
+		Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+		if ( !( acc.contains( tri[0] ) || acc.contains( tri[1] ) || acc.contains( tri[2] ) ) )
+			continue;
+		// unnormalized cross = area weighting (degenerate scaffolds contribute 0)
+		Vector3 n = Vector3::crossproduct( pos.at( tri[1] ) - pos.at( tri[0] ),
+			pos.at( tri[2] ) - pos.at( tri[0] ) );
+		for ( int c = 0; c < 3; c++ ) {
+			auto it = acc.find( tri[c] );
+			if ( it != acc.end() )
+				it.value() += n;
+		}
+	}
+	return acc;
+}
+
+//! Recompute the given verts' normals via ChangeValueCommands, so the writes
+//! join the currently open transaction (the extrude-chained move commit) and
+//! undo with it — no whole-model snapshot, no reload.
+static void tlPushNormalCommands( NifModel * model, const QModelIndex & iShape, const QSet<int> & verts )
+{
+	if ( !model || !model->undoStack )
+		return;
+	const QHash<int, Vector3> acc = tlAccumulateAreaNormals( model, iShape, verts );
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	for ( auto it = acc.constBegin(); it != acc.constEnd(); ++it ) {
+		Vector3 n = it.value();
+		if ( n.squaredLength() < 1.0e-16f )
+			continue;
+		n.normalize();
+		QModelIndex row = model->getIndex( iVD, it.key() );
+		if ( !model->getItem( row, "Normal" ) )
+			continue;	// tolerate an incomplete row rather than warn per vertex
+		QModelIndex nIdx = model->getIndex( row, "Normal" );
+		const NifItem * item = nIdx.isValid() ? static_cast<const NifItem *>( nIdx.internalPointer() ) : nullptr;
+		if ( !item )
+			continue;
+		NifValue oldVal = item->value();
+		NifValue newVal = oldVal;
+		newVal.set<ByteVector3>( n, model, item );
+		if ( !( oldVal == newVal ) )
+			model->undoStack->push( new ChangeValueCommand( nIdx, oldVal, newVal, GLView::tr( "Normal" ), model ) );
+	}
+}
+
 void GLView::gizmoEndElement( bool commit )
 {
 	if ( !elemTransform )
 		return;
+	int mode = gizmoMode;		// captured before clearing, for the redo panel
+	int axis = gizmoAxis;
 	elemTransform = false;
 	gizmoMode = 0;
+	setMouseGrabEnabled( false );	// the gesture owned the mouse + keyboard
+	setKeyboardGrabEnabled( false );
 	emit gizmoStatus( QString() );
 
 	if ( model ) {
@@ -4102,8 +5711,8 @@ void GLView::gizmoEndElement( bool commit )
 			// Undo via per-vertex value commands rather than a whole-model
 			// snapshot: serialising the entire FO4 model on every edit is slow
 			// and was corrupting some files. Each vertex already holds its new
-			// value from the live drag; restore the original, then push a
-			// ChangeValueCommand that re-applies the new one.
+			// value from the renderer preview; the model still contains the
+			// original, so push one ChangeValueCommand per changed vertex now.
 			ChangeValueCommand::createTransaction();
 			for ( const ElemVert & ev : elemVerts ) {
 				QModelIndex iShape = model->getBlockIndex( ev.shape );
@@ -4111,114 +5720,83 @@ void GLView::gizmoEndElement( bool commit )
 				const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
 				if ( !item )
 					continue;
-				NifValue newVal = item->value();		// current (dragged) value
-				NifValue oldVal = newVal;
+				NifValue oldVal = item->value();
+				NifValue newVal = oldVal;
 				bool half = item->hasValueType( NifValue::tHalfVector3 );
 				if ( half )
-					oldVal.set<HalfVector3>( HalfVector3( ev.origLocal ), model, item );
+					newVal.set<HalfVector3>( HalfVector3( ev.currentLocal ), model, item );
 				else
-					oldVal.set<Vector3>( ev.origLocal, model, item );
+					newVal.set<Vector3>( ev.currentLocal, model, item );
 				if ( !( oldVal == newVal ) )
 					model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, newVal, tr( "Vertex" ), model ) );
 			}
+			// freeze the gesture for the edit-mode operator redo panel
+			lastGestureElement = true;
+			lastElemMode = mode;
+			lastElemAxis = axis;
+			lastElemVerts = elemVerts;
+			lastElemPivot = elemPivot;
+			lastUndoIndex = model->undoStack ? model->undoStack->index() : -1;
+			if ( extrudeChainArmed ) {
+				// the move belongs to an extrude: refresh the new walls' and
+				// cap's normals for the final positions inside this same
+				// transaction, then arm the extrude redo panel instead of the
+				// plain transform panel
+				extrudeChainArmed = false;
+				if ( extrudeTouchedShape >= 0 && !extrudeTouchedVerts.isEmpty() )
+					tlPushNormalCommands( model, model->getBlockIndex( extrudeTouchedShape ),
+						extrudeTouchedVerts );
+				armExtrudeRedoPanel( ( mode == 1 ) ? gizmoLastParam : Vector3() );
+			} else {
+				emit transformGesture( mode, axis, gizmoLastParam );
+			}
 		} else {
-			// cancel: restore original vertex positions in place
-			for ( const ElemVert & ev : elemVerts )
-				tlSetVertexLocal( model, model->getBlockIndex( ev.shape ), ev.idx, ev.origLocal );
+			// cancel: the model was never touched; restore only the renderer preview
+			QSet<Shape *> restored;
+			for ( const ElemVert & ev : elemVerts ) {
+				Shape * shape = shapeForBlock( ev.shape );
+				if ( shape && ev.idx >= 0 && ev.idx < shape->verts.size() ) {
+					shape->verts[ev.idx] = ev.origLocal;
+					restored.insert( shape );
+				}
+			}
+			for ( Shape * shape : restored ) shape->clearHash();
+			if ( extrudeChainArmed ) {
+				// Esc after E: the extrusion stays in place at zero offset
+				// (Blender); the panel still lets the offset be dialed in
+				extrudeChainArmed = false;
+				armExtrudeRedoPanel( Vector3() );
+			}
 		}
 	}
 
 	elemVerts.clear();
-	elemBefore.clear();
-	modelChanged();
+	refreshPickedElementPositions();
 	update();
 }
 
-void GLView::deletePickedElements()
+void GLView::showDeleteMenu()
 {
-	if ( !model || pickedElems.isEmpty() )
+	if ( !editMode || pickedElems.isEmpty() ) {
+		emit gizmoStatus( tr( "Delete needs a selection in edit mode" ) );
 		return;
-
-	// vertices to delete (verts, edge endpoints, face corners)
-	QHash<int, QSet<int>> vertsByShape = pickedVertexRefs();
-	// explicitly face-selected triangles
-	QHash<int, QSet<int>> faceTris;
-	for ( const auto & pe : pickedElems ) {
-		if ( pe.type == 3 && pe.shapeBlock >= 0 )
-			faceTris[pe.shapeBlock].insert( pe.e0 );
 	}
-
-	QSet<int> shapes;
-	for ( int k : vertsByShape.keys() )
-		shapes.insert( k );
-	for ( int k : faceTris.keys() )
-		shapes.insert( k );
-	if ( shapes.isEmpty() )
-		return;
-
-	int removed = 0;
-	nifSnapshotOp( model, tr( "Delete mesh elements" ), [&]() {
-		for ( int sb : shapes ) {
-			QModelIndex iShape = model->getBlockIndex( sb );
-			const QSet<int> & delVerts = vertsByShape.value( sb );
-			const QSet<int> & delFaces = faceTris.value( sb );
-
-			auto keepTri = [&]( const Triangle & tri, int t ) {
-				if ( delFaces.contains( t ) )
-					return false;
-				if ( !delVerts.isEmpty() && ( delVerts.contains( tri[0] ) || delVerts.contains( tri[1] ) || delVerts.contains( tri[2] ) ) )
-					return false;
-				return true;
-			};
-
-			// BSTriShape: triangles + Num Triangles + Data Size live on the block
-			QModelIndex iTris = model->getIndex( iShape, "Triangles" );
-			if ( iTris.isValid() && model->getIndex( iShape, "Num Triangles" ).isValid() ) {
-				int numTris = model->get<int>( iShape, "Num Triangles" );
-				int numVerts = model->get<int>( iShape, "Num Vertices" );
-				int dataSize = model->get<int>( iShape, "Data Size" );
-				int stride = ( numVerts > 0 ) ? ( dataSize - numTris * 6 ) / numVerts : 0;
-				QVector<Triangle> keep;
-				for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
-					Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
-					if ( keepTri( tri, t ) )
-						keep.append( tri );
-				}
-				removed += numTris - keep.size();
-				model->set<int>( iShape, "Num Triangles", keep.size() );
-				model->updateArraySize( iTris );
-				for ( int t = 0; t < keep.size(); t++ )
-					model->set<Triangle>( model->getIndex( iTris, t ), keep[t] );
-				if ( stride > 0 )
-					model->set<int>( iShape, "Data Size", numVerts * stride + keep.size() * 6 );
-				continue;
-			}
-
-			// legacy NiTriShapeData
-			QModelIndex iData = model->getBlockIndex( model->getLink( iShape, "Data" ) );
-			QModelIndex iTris2 = model->getIndex( iData, "Triangles" );
-			if ( iTris2.isValid() ) {
-				int numTris = model->get<int>( iData, "Num Triangles" );
-				QVector<Triangle> keep;
-				for ( int t = 0; t < numTris && t < model->rowCount( iTris2 ); t++ ) {
-					Triangle tri = model->get<Triangle>( model->getIndex( iTris2, t ) );
-					if ( keepTri( tri, t ) )
-						keep.append( tri );
-				}
-				removed += numTris - keep.size();
-				model->set<int>( iData, "Num Triangles", keep.size() );
-				if ( model->getIndex( iData, "Num Triangle Points" ).isValid() )
-					model->set<int>( iData, "Num Triangle Points", keep.size() * 3 );
-				model->updateArraySize( iTris2 );
-				for ( int t = 0; t < keep.size(); t++ )
-					model->set<Triangle>( model->getIndex( iTris2, t ), keep[t] );
-			}
-		}
-	} );
-
-	emit gizmoStatus( tr( "Deleted %1 triangle(s)" ).arg( removed ) );
-	pickedElems.clear();
-	modelChanged();
+	AutoCloseMenu m;
+	m.addSection( tr( "Delete" ) );
+	QAction * aVerts = m.addAction( tr( "Vertices" ) );
+	QAction * aEdges = m.addAction( tr( "Edges" ) );
+	QAction * aFaces = m.addAction( tr( "Faces" ) );
+	m.addSeparator();
+	QAction * aOnlyFaces = m.addAction( tr( "Only Faces" ) );
+	QAction * r = m.exec( QCursor::pos() );
+	if ( r == aVerts )
+		deleteGeometry( 0 );
+	else if ( r == aEdges )
+		deleteGeometry( 1 );
+	else if ( r == aFaces )
+		deleteGeometry( 2 );
+	else if ( r == aOnlyFaces )
+		deleteGeometry( 3 );
 }
 
 /*
@@ -4327,7 +5905,7 @@ void GLView::showSeparateMenu()
 		emit gizmoStatus( tr( "Separate needs a selection in edit mode" ) );
 		return;
 	}
-	QMenu m;
+	AutoCloseMenu m;
 	m.addSection( tr( "Separate" ) );
 	QAction * aSel = m.addAction( tr( "Selection" ) );
 	QAction * aMat = m.addAction( tr( "By Material" ) );
@@ -4525,6 +6103,488 @@ static void tlUpdateBounds( NifModel * nif, const QModelIndex & iShape )
 	nif->set<float>( iBound, "Radius", r );
 }
 
+//! Blender-style delete on one shape. V = selected vertices (edge/face picks
+//! contribute their corners), F = explicitly face-picked triangle indices.
+//! mode: 0 Vertices, 1 Edges, 2 Faces, 3 Only Faces. For a BSTriShape the packed
+//! vertex array is compacted and the triangles reindexed (Faces removes verts
+//! left orphaned, like Blender); legacy NiTriShapeData only drops triangles.
+static void tlDeleteGeometry( NifModel * nif, const QModelIndex & iShape,
+                              const QSet<int> & V, const QSet<int> & F, int mode,
+                              int & removedTris, int & removedVerts,
+                              QVector<int> & outRemap, bool & outVertsRemoved )
+{
+	// triangle source: BSTriShape stores them inline, legacy in the Data block
+	QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+	bool bsShape = iTris.isValid() && nif->getIndex( iShape, "Num Triangles" ).isValid();
+	QModelIndex iTrisArr = iTris;
+	QModelIndex iCountBlock = iShape;
+	if ( !bsShape ) {
+		QModelIndex iData = nif->getBlockIndex( nif->getLink( iShape, "Data" ) );
+		iTrisArr = nif->getIndex( iData, "Triangles" );
+		iCountBlock = iData;
+		if ( !iTrisArr.isValid() )
+			return;
+	}
+
+	int numTris = std::min( nif->get<int>( iCountBlock, "Num Triangles" ), nif->rowCount( iTrisArr ) );
+	QVector<Triangle> tris;
+	tris.reserve( numTris );
+	for ( int t = 0; t < numTris; t++ )
+		tris.append( nif->get<Triangle>( nif->getIndex( iTrisArr, t ) ) );
+
+	auto cornersIn = [&]( const Triangle & tri ) {
+		return int( V.contains( tri[0] ) ) + int( V.contains( tri[1] ) ) + int( V.contains( tri[2] ) );
+	};
+
+	QVector<Triangle> keptTris;
+	for ( int t = 0; t < numTris; t++ ) {
+		const Triangle & tri = tris.at( t );
+		bool remove;
+		switch ( mode ) {
+		case 0:	remove = cornersIn( tri ) > 0;  break;	// Vertices: any corner
+		case 1:	remove = cornersIn( tri ) >= 2; break;	// Edges: a selected edge
+		default:	remove = F.contains( t ) || cornersIn( tri ) == 3; break;	// Faces
+		}
+		if ( !remove )
+			keptTris.append( tri );
+	}
+	removedTris += numTris - keptTris.size();
+
+	bool removeLoose = ( mode == 2 );	// Faces removes orphaned verts (Blender)
+	const QSet<int> & explicitDrop = ( mode == 0 ) ? V : QSet<int>();
+
+	QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+	if ( bsShape && iVD.isValid() ) {
+		int numVerts = nif->get<int>( iShape, "Num Vertices" );
+		int dataSize = nif->get<int>( iShape, "Data Size" );
+		int stride = ( numVerts > 0 ) ? ( dataSize - numTris * 6 ) / numVerts : 0;
+
+		QSet<int> used;
+		for ( const Triangle & tri : keptTris ) {
+			used.insert( tri[0] ); used.insert( tri[1] ); used.insert( tri[2] );
+		}
+		QVector<int> remap( numVerts, -1 );
+		int newN = 0;
+		for ( int v = 0; v < numVerts; v++ ) {
+			if ( explicitDrop.contains( v ) )
+				continue;
+			if ( removeLoose && !used.contains( v ) )
+				continue;
+			remap[v] = newN++;
+		}
+		removedVerts += numVerts - newN;
+		outRemap = remap;
+		outVertsRemoved = ( newN != numVerts );
+
+		if ( newN != numVerts ) {
+			// forward compaction: the new index is always <= the old one, so
+			// copying in increasing order never clobbers a slot still to be read
+			for ( int v = 0; v < numVerts; v++ ) {
+				int j = remap[v];
+				if ( j >= 0 && j != v )
+					tlCopyItemValues( nif, nif->getIndex( iVD, v ), nif->getIndex( iVD, j ) );
+			}
+			nif->set<int>( iShape, "Num Vertices", newN );
+			nif->updateArraySize( iVD );
+		}
+
+		nif->set<int>( iShape, "Num Triangles", keptTris.size() );
+		nif->updateArraySize( iTrisArr );
+		for ( int t = 0; t < keptTris.size(); t++ ) {
+			const Triangle & tri = keptTris.at( t );
+			int a = ( remap[tri[0]] < 0 ) ? 0 : remap[tri[0]];
+			int b = ( remap[tri[1]] < 0 ) ? 0 : remap[tri[1]];
+			int c = ( remap[tri[2]] < 0 ) ? 0 : remap[tri[2]];
+			nif->set<Triangle>( nif->getIndex( iTrisArr, t ), Triangle( a, b, c ) );
+		}
+		if ( stride > 0 )
+			nif->set<int>( iShape, "Data Size", newN * stride + keptTris.size() * 6 );
+
+		tlUpdateBounds( nif, iShape );
+	} else {
+		// legacy NiTriShapeData: drop triangles only, leave verts in place
+		nif->set<int>( iCountBlock, "Num Triangles", keptTris.size() );
+		if ( nif->getIndex( iCountBlock, "Num Triangle Points" ).isValid() )
+			nif->set<int>( iCountBlock, "Num Triangle Points", keptTris.size() * 3 );
+		nif->updateArraySize( iTrisArr );
+		for ( int t = 0; t < keptTris.size(); t++ )
+			nif->set<Triangle>( nif->getIndex( iTrisArr, t ), keptTris.at( t ) );
+	}
+}
+
+//! Keep a shape's skin data consistent after a delete (mirrors NifSkope's own
+//! spRemoveWasteVertices): remap NiSkinData bone vertex-weight indices through
+//! the vertex remap, and return the block number of a now-stale NiSkinPartition
+//! for the caller to remove (or -1). FO4 BSSkin::Instance carries neither a
+//! NiSkinData nor a NiSkinPartition (skin weights are inline in the vertex data,
+//! already compacted), so this no-ops there.
+static int tlSkinResync( NifModel * nif, const QModelIndex & iShape,
+                         const QVector<int> & remap, bool vertsRemoved )
+{
+	QModelIndex iSkinInst = nif->getBlockIndex( nif->getLink( iShape, "Skin Instance" ) );
+	if ( !iSkinInst.isValid() )
+		iSkinInst = nif->getBlockIndex( nif->getLink( iShape, "Skin" ) );
+	QModelIndex iSkinData = nif->getBlockIndex( nif->getLink( iSkinInst, "Data" ), "NiSkinData" );
+
+	// NiSkinData: per-bone vertex-weight lists index shape vertices; drop weights
+	// for deleted verts and reindex the survivors through the remap
+	if ( vertsRemoved && iSkinData.isValid() ) {
+		QModelIndex iBones = nif->getIndex( iSkinData, "Bone List" );
+		for ( int b = 0; b < nif->rowCount( iBones ); b++ ) {
+			QModelIndex iBone = nif->getIndex( iBones, b );
+			QModelIndex iWeights = nif->getIndex( iBone, "Vertex Weights" );
+			QVector<QPair<int, float>> kept;
+			for ( int w = 0; w < nif->rowCount( iWeights ); w++ ) {
+				QModelIndex iw = nif->getIndex( iWeights, w );
+				int idx = nif->get<int>( iw, "Index" );
+				if ( idx >= 0 && idx < remap.size() && remap[idx] >= 0 )
+					kept.append( qMakePair( remap[idx], nif->get<float>( iw, "Weight" ) ) );
+			}
+			nif->set<int>( iBone, "Num Vertices", kept.size() );
+			nif->updateArraySize( iWeights );
+			for ( int w = 0; w < kept.size(); w++ ) {
+				nif->set<int>( nif->getIndex( iWeights, w ), "Index", kept[w].first );
+				nif->set<float>( nif->getIndex( iWeights, w ), "Weight", kept[w].second );
+			}
+		}
+	}
+
+	// NiSkinPartition: its vertex maps + triangles are now stale. Rebuilding one
+	// correctly is non-trivial, so (like spRemoveWasteVertices) drop it and let
+	// the user regenerate with the "Make Skin Partition" spell.
+	QModelIndex iSkinPart = nif->getBlockIndex( nif->getLink( iSkinInst, "Skin Partition" ), "NiSkinPartition" );
+	if ( !iSkinPart.isValid() )
+		iSkinPart = nif->getBlockIndex( nif->getLink( iSkinData, "Skin Partition" ), "NiSkinPartition" );
+	return iSkinPart.isValid() ? nif->getBlockNumber( iSkinPart ) : -1;
+}
+
+void GLView::deleteGeometry( int mode )
+{
+	if ( !model || pickedElems.isEmpty() )
+		return;
+
+	QHash<int, QSet<int>> vertsByShape = pickedVertexRefs();
+	QHash<int, QSet<int>> faceTris;
+	for ( const auto & pe : pickedElems )
+		if ( pe.type == 3 && pe.shapeBlock >= 0 )
+			faceTris[pe.shapeBlock].insert( pe.e0 );
+
+	QSet<int> shapes;
+	for ( int k : vertsByShape.keys() )
+		shapes.insert( k );
+	for ( int k : faceTris.keys() )
+		shapes.insert( k );
+	if ( shapes.isEmpty() )
+		return;
+
+	int removedTris = 0, removedVerts = 0;
+	QVector<int> partitions;
+	nifSnapshotOp( model, tr( "Delete" ), [&]() {
+		// Processing suppresses the per-leaf dataChanged storm: compacting the
+		// packed vertex array is thousands of value writes, and live views
+		// (UV editor reload, Block Details) reacting to EVERY one froze the
+		// app for ~10 s per deleted vertex on a 3k-vert mesh. One dataChanged
+		// per shape at the end tells them everything they need.
+		model->setState( BaseModel::Processing );
+		for ( int sb : shapes ) {
+			QModelIndex iShape = model->getBlockIndex( sb );
+			QVector<int> remap;
+			bool vertsRemoved = false;
+			tlDeleteGeometry( model, iShape, vertsByShape.value( sb ), faceTris.value( sb ),
+			                  mode, removedTris, removedVerts, remap, vertsRemoved );
+			int part = tlSkinResync( model, iShape, remap, vertsRemoved );
+			if ( part >= 0 && !partitions.contains( part ) )
+				partitions.append( part );
+		}
+		model->restoreState();
+		for ( int sb : shapes ) {
+			QModelIndex iS = model->getBlockIndex( sb );
+			if ( iS.isValid() )
+				model->dataChanged( iS, iS );
+		}
+		// remove now-stale skin partitions last, highest block number first so
+		// the block numbers still in flight above don't shift under us
+		std::sort( partitions.begin(), partitions.end(), std::greater<int>() );
+		for ( int p : partitions )
+			model->removeNiBlock( p );
+	} );
+
+	QString msg = ( removedVerts > 0 )
+		? tr( "Deleted %1 vertices, %2 triangles" ).arg( removedVerts ).arg( removedTris )
+		: tr( "Deleted %1 triangles" ).arg( removedTris );
+	if ( !partitions.isEmpty() )
+		msg += tr( " — stale skin partition removed (regenerate with Make Skin Partition)" );
+	emit gizmoStatus( msg );
+	pickedElems.clear();
+	modelChanged();
+}
+
+//! union-find root with path compression
+static int tlFindRoot( QVector<int> & p, int x )
+{
+	while ( p[x] != x ) {
+		p[x] = p[p[x]];
+		x = p[x];
+	}
+	return x;
+}
+
+void GLView::showMergeMenu()
+{
+	if ( !editMode || pickedElems.isEmpty() ) {
+		emit gizmoStatus( tr( "Merge needs a vertex selection in edit mode" ) );
+		return;
+	}
+	AutoCloseMenu m;
+	m.addSection( tr( "Merge" ) );
+	QAction * aCenter = m.addAction( tr( "At Center" ) );
+	QAction * aCursor = m.addAction( tr( "At Cursor" ) );
+	m.addSeparator();
+	QAction * aDist = m.addAction( tr( "By Distance…" ) );
+	QAction * r = m.exec( QCursor::pos() );
+	if ( r == aCenter )
+		mergeVertices( 0 );
+	else if ( r == aCursor )
+		mergeVertices( 1 );
+	else if ( r == aDist )
+		// merge tiny by default; the redo panel is where you dial the distance up
+		mergeVertices( 2, ( lastOpKind == 1 ) ? lastOpParam : 0.0001f );
+}
+
+void GLView::mergeVertices( int mode, float threshold )
+{
+	if ( !model || !editMode || pickedElems.isEmpty() )
+		return;
+	QVector<PickedElement> seed = pickedElems;	// restored by the redo panel
+	QHash<int, QSet<int>> byShape = pickedVertexRefs();
+	if ( byShape.isEmpty() )
+		return;
+
+	int mergedVerts = 0, removedTris = 0;
+	nifSnapshotOp( model, tr( "Merge vertices" ), [&]() {
+		// suppress the per-leaf dataChanged storm (see deleteGeometry)
+		model->setState( BaseModel::Processing );
+		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); ++it ) {
+			int sb = it.key();
+			QModelIndex iShape = model->getBlockIndex( sb );
+			QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+			QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+			if ( !iVD.isValid() || !iTris.isValid() )
+				continue;	// BSTriShape only (legacy meshes not welded here)
+			int numVerts = model->get<int>( iShape, "Num Vertices" );
+			int numTris = model->get<int>( iShape, "Num Triangles" );
+			int dataSize = model->get<int>( iShape, "Data Size" );
+			int stride = ( numVerts > 0 ) ? ( dataSize - numTris * 6 ) / numVerts : 0;
+
+			QVector<int> selList( it.value().constBegin(), it.value().constEnd() );
+			if ( selList.size() < 1 )
+				continue;
+			auto localPos = [&]( int i ) { return model->get<Vector3>( model->getIndex( iVD, i ), "Vertex" ); };
+
+			// union-find over the selected verts: which ones weld together
+			QVector<int> parent( numVerts );
+			for ( int i = 0; i < numVerts; i++ )
+				parent[i] = i;
+
+			if ( mode == 0 || mode == 1 ) {
+				// At Center / At Cursor: all selected verts collapse to one
+				int rep = selList[0];
+				for ( int i : selList )
+					rep = std::min( rep, i );
+				for ( int i : selList )
+					parent[i] = rep;
+				Vector3 np;
+				if ( mode == 1 ) {
+					Node * n = shapeForBlock( sb );
+					Transform wt = n ? shapeRenderTrans( n ) : Transform();
+					float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+					np = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / sc ) );
+				} else {
+					for ( int i : selList )
+						np += localPos( i );
+					np = np / float( selList.size() );
+				}
+				tlSetVertexLocal( model, iShape, rep, np );
+			} else {
+				// By Distance: union verts within the threshold, weld each group
+				// to its average position
+				for ( int a = 0; a < selList.size(); a++ )
+					for ( int b = a + 1; b < selList.size(); b++ ) {
+						if ( ( localPos( selList[a] ) - localPos( selList[b] ) ).length() <= threshold ) {
+							int ra = tlFindRoot( parent, selList[a] ), rb = tlFindRoot( parent, selList[b] );
+							if ( ra != rb )
+								parent[std::max( ra, rb )] = std::min( ra, rb );
+						}
+					}
+				QHash<int, QVector<int>> groups;
+				for ( int i : selList )
+					groups[tlFindRoot( parent, i )].append( i );
+				for ( auto g = groups.constBegin(); g != groups.constEnd(); ++g ) {
+					Vector3 avg;
+					for ( int i : g.value() )
+						avg += localPos( i );
+					avg = avg / float( g.value().size() );
+					tlSetVertexLocal( model, iShape, g.key(), avg );
+				}
+			}
+
+			// weld[i] = the surviving vertex i collapses into
+			QVector<int> remap( numVerts, -1 );
+			int newN = 0;
+			for ( int i = 0; i < numVerts; i++ )
+				if ( tlFindRoot( parent, i ) == i )
+					remap[i] = newN++;			// this vertex survives
+			for ( int i = 0; i < numVerts; i++ )
+				remap[i] = remap[tlFindRoot( parent, i )];
+			mergedVerts += numVerts - newN;
+
+			// compact the vertex array (forward copy: survivor new index <= old)
+			if ( newN != numVerts ) {
+				for ( int i = 0; i < numVerts; i++ ) {
+					int j = remap[i];
+					if ( tlFindRoot( parent, i ) == i && j != i )
+						tlCopyItemValues( model, model->getIndex( iVD, i ), model->getIndex( iVD, j ) );
+				}
+				model->set<int>( iShape, "Num Vertices", newN );
+				model->updateArraySize( iVD );
+			}
+
+			// rewrite triangles, dropping ones gone degenerate after the weld
+			QVector<Triangle> kept;
+			for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
+				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+				int a = remap[tri[0]], b = remap[tri[1]], c = remap[tri[2]];
+				if ( a == b || b == c || a == c )
+					continue;
+				kept.append( Triangle( a, b, c ) );
+			}
+			removedTris += numTris - kept.size();
+			model->set<int>( iShape, "Num Triangles", kept.size() );
+			model->updateArraySize( iTris );
+			for ( int t = 0; t < kept.size(); t++ )
+				model->set<Triangle>( model->getIndex( iTris, t ), kept[t] );
+			if ( stride > 0 )
+				model->set<int>( iShape, "Data Size", newN * stride + kept.size() * 6 );
+
+			tlUpdateBounds( model, iShape );
+			tlSkinResync( model, iShape, remap, newN != numVerts );
+		}
+		model->restoreState();
+		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); ++it ) {
+			QModelIndex iS = model->getBlockIndex( it.key() );
+			if ( iS.isValid() )
+				model->dataChanged( iS, iS );
+		}
+	} );
+
+	emit gizmoStatus( tr( "Merged %1 vertices, removed %2 triangles" ).arg( mergedVerts ).arg( removedTris ) );
+	pickedElems.clear();
+	modelChanged();
+	// arm the redo panel so the merge distance can be readjusted afterwards
+	if ( mode == 2 && !opReapplying ) {
+		lastOpKind = 1;
+		lastOpParam = threshold;
+		lastOpSeed = seed;
+		lastOpUndoIndex = model->undoStack ? model->undoStack->index() : -1;
+		emit operatorPanel( 1, threshold );
+	}
+}
+
+bool GLView::reapplyOperator( float param )
+{
+	if ( opReapplying || lastOpKind == 0 )
+		return false;
+	opReapplying = true;	// suppress re-arming the panel while we re-run
+	if ( lastOpKind == 1 ) {
+		// merge by distance: undo the previous merge, restore the seed, re-merge
+		if ( !model || !model->undoStack || model->undoStack->index() != lastOpUndoIndex ) {
+			opReapplying = false;
+			return false;	// something else touched the undo stack — stale
+		}
+		model->undoStack->undo();
+		pickedElems = lastOpSeed;
+		mergeVertices( 2, param );
+		lastOpUndoIndex = model->undoStack ? model->undoStack->index() : -1;
+	} else if ( lastOpKind == 2 ) {
+		// select linked by angle: restore the seed selection, re-grow
+		pickedElems = lastOpSeed;
+		selectLinked( true, param );
+	} else if ( lastOpKind == 3 ) {
+		// Floating decal preview is deliberately in-place: rebuilding cloned
+		// blocks and serializing the whole NIF for every scrub tick was very slow.
+		if ( !model || !model->undoStack || model->undoStack->index() != lastOpUndoIndex ) {
+			opReapplying = false;
+			return false;
+		}
+		QSet<int> touched;
+		for ( const DecalPreviewVert & dv : lastDecalVerts ) {
+			QModelIndex iShape = model->getBlockIndex( dv.shape );
+			if ( !iShape.isValid() ) {
+				opReapplying = false;
+				return false;
+			}
+			tlSetVertexLocal( model, iShape, dv.vertex, dv.base + dv.normal * param );
+			touched.insert( dv.shape );
+		}
+		for ( int sb : touched )
+			tlUpdateBounds( model, model->getBlockIndex( sb ) );
+		modelChanged();
+	}
+	lastOpParam = param;
+	opReapplying = false;
+	return true;
+}
+
+void GLView::commitOperatorPreview()
+{
+	if ( lastOpKind != 3 || !model || !model->undoStack
+		|| model->undoStack->index() != lastOpUndoIndex || lastOpUndoIndex <= 0 )
+		return;
+	QByteArray after;
+	QBuffer buf( &after );
+	if ( !buf.open( QIODevice::WriteOnly ) || !model->save( buf ) )
+		return;
+	const QUndoCommand * command = model->undoStack->command( lastOpUndoIndex - 1 );
+	auto snapshot = dynamic_cast<NifSnapshotCommand *>( const_cast<QUndoCommand *>( command ) );
+	if ( snapshot )
+		snapshot->setAfterSnapshot( after );
+}
+
+// ---------------------------------------------------------------------------
+// generalized operator redo panel (Redo Panel v2, MODELING_TOOLS_PLAN F0.a)
+
+void GLView::armOperatorPanelEx( const QString & title, const QVector<TlOpParam> & params,
+	int undoSteps, const QVector<PickedElement> & seed )
+{
+	if ( opExReapplying )
+		return;
+	lastOpExParams = params;
+	lastOpExUndoSteps = std::max( undoSteps, 0 );
+	lastOpExSeed = seed;
+	lastOpExUndoIndex = ( model && model->undoStack ) ? model->undoStack->index() : -1;
+	emit operatorPanelEx( title, params );
+}
+
+bool GLView::reapplyOperatorEx( const QVector<TlOpParam> & params )
+{
+	if ( opExReapplying || !lastOpExRerun || !model || !model->undoStack )
+		return false;
+	if ( model->undoStack->index() != lastOpExUndoIndex )
+		return false;	// something else touched the undo stack — stale
+	opExReapplying = true;
+	for ( int i = 0; i < lastOpExUndoSteps; i++ )
+		model->undoStack->undo();
+	pickedElems = lastOpExSeed;	// re-run on the operator's original selection
+	const int base = model->undoStack->index();
+	lastOpExRerun( params );
+	lastOpExUndoSteps = model->undoStack->index() - base;
+	lastOpExUndoIndex = model->undoStack->index();
+	lastOpExParams = params;
+	opExReapplying = false;
+	update();
+	return true;
+}
+
 void GLView::joinSelectedObjects()
 {
 	if ( !model || editMode || objActive < 0 || objSelection.size() < 2 )
@@ -4678,6 +6738,8 @@ void GLView::duplicateElements()
 	int totalV = 0;
 
 	nifSnapshotOp( model, tr( "Duplicate" ), [&]() {
+		// suppress the per-leaf dataChanged storm (see deleteGeometry)
+		model->setState( BaseModel::Processing );
 		for ( int sb : shapeSet ) {
 			QModelIndex iShape = model->getBlockIndex( sb );
 			if ( !model->blockInherits( iShape, "BSTriShape" ) )
@@ -4771,6 +6833,12 @@ void GLView::duplicateElements()
 			}
 			totalV += addNV;
 		}
+		model->restoreState();
+		for ( int sb : shapeSet ) {
+			QModelIndex iS = model->getBlockIndex( sb );
+			if ( iS.isValid() )
+				model->dataChanged( iS, iS );
+		}
 	} );
 
 	if ( newSel.isEmpty() ) {
@@ -4786,13 +6854,1542 @@ void GLView::duplicateElements()
 	emit gizmoStatus( tr( "Duplicated %1 vert(s) - move, or Esc to leave in place" ).arg( totalV ) );
 }
 
+// ---------------------------------------------------------------------------
+// Extrude (E) — MODELING_TOOLS_PLAN Phase 1
+
+//! Recompute area-weighted vertex normals for the given verts only (the
+//! packed FO4 layout may omit the Normal field entirely — then this no-ops).
+//! Tangents are left alone; run Update Tangent Space for a full refresh.
+static void tlRecalcNormalsSubset( NifModel * model, const QModelIndex & iShape, const QSet<int> & verts )
+{
+	const QHash<int, Vector3> acc = tlAccumulateAreaNormals( model, iShape, verts );
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	for ( auto it = acc.constBegin(); it != acc.constEnd(); ++it ) {
+		Vector3 n = it.value();
+		if ( n.squaredLength() < 1.0e-16f )
+			continue;
+		n.normalize();
+		QModelIndex row = model->getIndex( iVD, it.key() );
+		if ( !model->getItem( row, "Normal" ) )
+			continue;	// tolerate an incomplete row rather than warn per vertex
+		model->set<ByteVector3>( row, "Normal", n );
+	}
+}
+
+//! World-space delta -> shape-local delta via the scene node transform
+//! (approximation for skinned meshes with a deformed cage — same convention
+//! as the redo panels elsewhere).
+static Vector3 tlWorldToLocalDelta( Scene * scene, NifModel * model, int block, const Vector3 & d )
+{
+	Node * nd = scene ? scene->getNode( model, model->getBlockIndex( block ) ) : nullptr;
+	if ( !nd )
+		return d;
+	Transform t = nd->worldTrans();
+	Vector3 local = t.rotation.inverted() * d;
+	if ( t.scale > 1.0e-6f && t.scale != 1.0f )
+		local /= t.scale;
+	return local;
+}
+
+//! Extrude plan, computed READ-ONLY before the snapshot mutates anything
+//! (nifSnapshotOp always pushes, so a failed op must never reach it).
+struct TlExtrudePlan
+{
+	QVector<int> dupVerts;              //!< originals to duplicate, sorted
+	QHash<int, int> vremap;             //!< original -> duplicate index
+	QVector<int> repointFaces;          //!< region faces re-pointed onto the duplicates
+	struct Wall { int a, b; };          //!< boundary edge a->b in cap winding
+	QVector<Wall> walls;
+	//! Blender vertex extrude: verts that extrude to a bare edge. NIF has no
+	//! loose edges, so each becomes a zero-area scaffold triangle (v, v', v')
+	//! — it draws as the edge line in wireframe, a later edge extrude turns it
+	//! into real faces, and a weld drops it as degenerate.
+	QVector<int> spurVerts;
+	QSet<int> capVerts;                 //!< final indices that move with the extrusion
+	int oldNV = 0, oldNT = 0, stride = 0;
+};
+
+static bool tlExtrudePlanBuild( NifModel * model, const QModelIndex & iShape,
+	const QSet<int> & selVerts, const QSet<int> & selFacesX,
+	const QVector<QPair<int, int>> & selEdges, TlExtrudePlan & plan, QString & err )
+{
+	plan = TlExtrudePlan();
+	plan.oldNV = model->get<int>( iShape, "Num Vertices" );
+	plan.oldNT = model->get<int>( iShape, "Num Triangles" );
+	const int dataSize = model->get<int>( iShape, "Data Size" );
+	plan.stride = ( plan.oldNV > 0 ) ? ( dataSize - plan.oldNT * 6 ) / plan.oldNV : 0;
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	if ( !iTris.isValid() || plan.oldNT < 1 ) {
+		err = GLView::tr( "Extrude: unexpected mesh layout" );
+		return false;
+	}
+	QVector<Triangle> tris( plan.oldNT );
+	for ( int t = 0; t < plan.oldNT; t++ )
+		tris[t] = model->get<Triangle>( model->getIndex( iTris, t ) );
+
+	auto ekey = []( int a, int b ) {
+		if ( a > b ) std::swap( a, b );
+		return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+	};
+
+	// degenerate scaffold triangles (vertex-extrude spurs, welded leftovers)
+	// are edge stand-ins, never region faces
+	auto isDegenerate = [&tris]( int t ) {
+		const Triangle & tr = tris.at( t );
+		return tr[0] == tr[1] || tr[1] == tr[2] || tr[0] == tr[2];
+	};
+
+	// region faces: explicit face picks, or faces with every corner selected
+	QSet<int> fsel;
+	for ( int f : selFacesX )
+		if ( f >= 0 && f < plan.oldNT && !isDegenerate( f ) )
+			fsel << f;
+	if ( !selVerts.isEmpty() )
+		for ( int t = 0; t < plan.oldNT; t++ )
+			if ( !isDegenerate( t )
+				&& selVerts.contains( tris[t][0] ) && selVerts.contains( tris[t][1] )
+				&& selVerts.contains( tris[t][2] ) )
+				fsel << t;
+
+	QSet<int> dupSet;
+	if ( !fsel.isEmpty() ) {
+		// region mode: boundary = edges used by exactly one region face; those
+		// verts split, interior verts ride along with the cap
+		QHash<quint64, int> edgeUse;
+		for ( int f : std::as_const( fsel ) ) {
+			const Triangle & t = tris.at( f );
+			edgeUse[ekey( t[0], t[1] )]++;
+			edgeUse[ekey( t[1], t[2] )]++;
+			edgeUse[ekey( t[2], t[0] )]++;
+		}
+		for ( int f : std::as_const( fsel ) ) {
+			const Triangle & t = tris.at( f );
+			for ( int e = 0; e < 3; e++ ) {
+				const int a = t[e], b = t[( e + 1 ) % 3];
+				if ( edgeUse.value( ekey( a, b ) ) == 1 ) {
+					plan.walls.append( { a, b } );	// a->b in cap winding
+					dupSet << a << b;
+				}
+			}
+		}
+		plan.repointFaces = QVector<int>( fsel.constBegin(), fsel.constEnd() );
+		std::sort( plan.repointFaces.begin(), plan.repointFaces.end() );
+	} else {
+		// edge-run mode: explicit edge picks, else mesh edges induced by the
+		// selected verts; the run extrudes to a ribbon of wall quads
+		QVector<QPair<int, int>> edges = selEdges;
+		if ( edges.isEmpty() && !selVerts.isEmpty() ) {
+			QSet<quint64> seen;
+			for ( int t = 0; t < plan.oldNT; t++ ) {
+				for ( int e = 0; e < 3; e++ ) {
+					const int a = tris[t][e], b = tris[t][( e + 1 ) % 3];
+					if ( a != b && selVerts.contains( a ) && selVerts.contains( b )
+						&& !seen.contains( ekey( a, b ) ) ) {
+						seen << ekey( a, b );
+						edges.append( { a, b } );
+					}
+				}
+			}
+		}
+		// orient each edge by the winding of one adjacent face so the ribbon
+		// faces the same way as the surrounding surface
+		QHash<quint64, QPair<int, int>> winding;
+		for ( int t = 0; t < plan.oldNT; t++ )
+			for ( int e = 0; e < 3; e++ ) {
+				const int a = tris[t][e], b = tris[t][( e + 1 ) % 3];
+				if ( a != b && !winding.contains( ekey( a, b ) ) )
+					winding.insert( ekey( a, b ), { a, b } );
+			}
+		QSet<quint64> seenE;
+		QSet<int> covered;
+		for ( const auto & ed : std::as_const( edges ) ) {
+			if ( ed.first == ed.second )
+				continue;	// a degenerate self-edge can't extrude
+			const quint64 k = ekey( ed.first, ed.second );
+			if ( seenE.contains( k ) )
+				continue;
+			seenE << k;
+			const auto w = winding.value( k, ed );
+			plan.walls.append( { w.first, w.second } );
+			dupSet << ed.first << ed.second;
+			covered << ed.first << ed.second;
+		}
+		// verts not on any extruded edge are Blender vertex extrudes: they pull
+		// out a bare edge, realised as a zero-area scaffold triangle
+		for ( int v : selVerts ) {
+			if ( !covered.contains( v ) ) {
+				plan.spurVerts.append( v );
+				dupSet << v;
+			}
+		}
+		std::sort( plan.spurVerts.begin(), plan.spurVerts.end() );
+		if ( dupSet.isEmpty() ) {
+			err = GLView::tr( "Extrude: nothing to extrude" );
+			return false;
+		}
+	}
+	if ( dupSet.isEmpty() && fsel.isEmpty() ) {
+		err = GLView::tr( "Extrude: nothing to extrude" );
+		return false;
+	}
+	if ( plan.oldNV + dupSet.size() > 0xFFFF ) {
+		err = GLView::tr( "Extrude: would exceed the 65,535-vertex limit of BSTriShape" );
+		return false;
+	}
+	plan.dupVerts = QVector<int>( dupSet.constBegin(), dupSet.constEnd() );
+	std::sort( plan.dupVerts.begin(), plan.dupVerts.end() );
+	for ( int i = 0; i < plan.dupVerts.size(); i++ )
+		plan.vremap.insert( plan.dupVerts.at( i ), plan.oldNV + i );
+	// the cap = duplicated boundary verts + (region mode) the interior verts
+	for ( int i = 0; i < plan.dupVerts.size(); i++ )
+		plan.capVerts << plan.oldNV + i;
+	for ( int f : std::as_const( plan.repointFaces ) ) {
+		const Triangle & t = tris.at( f );
+		for ( int c = 0; c < 3; c++ )
+			if ( !plan.vremap.contains( t[c] ) )
+				plan.capVerts << t[c];
+	}
+	return true;
+}
+
+//! Mutate the mesh per the plan (run inside nifSnapshotOp): duplicate the
+//! boundary verts, re-point the region faces, stitch the side walls, offset
+//! the cap and refresh normals/bounds.
+static void tlExtrudeApplyPlan( NifModel * model, const QModelIndex & iShape,
+	const TlExtrudePlan & plan, const Vector3 & localOffset, bool flipNormals )
+{
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	if ( !iVD.isValid() || !iTris.isValid() )
+		return;
+	// suppress the per-leaf dataChanged storm and any mid-mutation view
+	// reactions; one dataChanged for the shape goes out at the end
+	model->setState( BaseModel::Processing );
+
+	// append the duplicated verts (verbatim rows: UVs, weights, colors copy)
+	const int addNV = plan.dupVerts.size();
+	model->set<int>( iShape, "Num Vertices", plan.oldNV + addNV );
+	model->updateArraySize( iVD );
+	for ( int i = 0; i < addNV; i++ )
+		tlCopyItemValues( model, model->getIndex( iVD, plan.dupVerts.at( i ) ),
+			model->getIndex( iVD, plan.oldNV + i ) );
+
+	// re-point the region faces onto the duplicates: the surface detaches and
+	// becomes the moving cap while the surrounding mesh keeps the originals
+	for ( int f : std::as_const( plan.repointFaces ) ) {
+		Triangle tri = model->get<Triangle>( model->getIndex( iTris, f ) );
+		bool changed = false;
+		for ( int c = 0; c < 3; c++ ) {
+			auto it = plan.vremap.constFind( tri[c] );
+			if ( it != plan.vremap.constEnd() ) {
+				tri[c] = quint16( it.value() );
+				changed = true;
+			}
+		}
+		if ( changed )
+			model->set<Triangle>( model->getIndex( iTris, f ), tri );
+	}
+
+	// side walls: boundary edge a->b (cap winding) gets the quad a,b,b',a' as
+	// two outward-facing triangles (a,b,b') + (a,b',a'); vertex spurs get one
+	// zero-area scaffold triangle (v, v', v') that draws as the new edge
+	const int addNT = plan.walls.size() * 2 + plan.spurVerts.size();
+	if ( addNT > 0 ) {
+		model->set<int>( iShape, "Num Triangles", plan.oldNT + addNT );
+		model->updateArraySize( iTris );
+		int t = plan.oldNT;
+		for ( const TlExtrudePlan::Wall & w : std::as_const( plan.walls ) ) {
+			const quint16 a = quint16( w.a ), b = quint16( w.b );
+			const quint16 a2 = quint16( plan.vremap.value( w.a ) );
+			const quint16 b2 = quint16( plan.vremap.value( w.b ) );
+			Triangle t1( a, b, b2 ), t2( a, b2, a2 );
+			if ( flipNormals ) {
+				t1 = Triangle( a, b2, b );
+				t2 = Triangle( a, a2, b2 );
+			}
+			model->set<Triangle>( model->getIndex( iTris, t++ ), t1 );
+			model->set<Triangle>( model->getIndex( iTris, t++ ), t2 );
+		}
+		for ( int v : std::as_const( plan.spurVerts ) ) {
+			const quint16 d = quint16( plan.vremap.value( v ) );
+			model->set<Triangle>( model->getIndex( iTris, t++ ), Triangle( quint16( v ), d, d ) );
+		}
+	}
+	if ( plan.stride > 0 )
+		model->set<int>( iShape, "Data Size",
+			( plan.oldNV + addNV ) * plan.stride + ( plan.oldNT + addNT ) * 6 );
+
+	// offset the cap
+	if ( !( localOffset == Vector3() ) ) {
+		for ( int v : plan.capVerts ) {
+			Vector3 p = model->get<Vector3>( model->getIndex( iVD, v ), "Vertex" );
+			tlSetVertexLocal( model, iShape, v, p + localOffset );
+		}
+	}
+
+	// refresh normals of everything the extrusion touched (cap + the original
+	// boundary ring that now borders the walls)
+	QSet<int> touched = plan.capVerts;
+	for ( int v : std::as_const( plan.dupVerts ) )
+		touched << v;
+	tlRecalcNormalsSubset( model, iShape, touched );
+	tlUpdateBounds( model, iShape );
+	model->restoreState();
+	model->dataChanged( QModelIndex( iShape ), QModelIndex( iShape ) );
+}
+
+// ---------------------------------------------------------------------------
+// Fill (F) / Bridge Edge Loops — MODELING_TOOLS_PLAN Phase 2
+
+//! An ordered run of rim vertices (closed = ring). The order follows the
+//! HOLE direction (reverse of the adjacent surface winding), so a cap wound
+//! in loop order faces the same way as the surrounding surface.
+struct TlLoop
+{
+	QVector<int> verts;
+	bool closed = false;
+};
+
+//! Extract ordered rim loops from the selection: explicit edge picks if any,
+//! else the mesh boundary edges (exactly one adjacent non-degenerate face)
+//! whose both endpoints are selected. Returns false with err on non-manifold
+//! chains or when nothing usable is selected.
+static bool tlExtractLoops( NifModel * model, const QModelIndex & iShape,
+	const QSet<int> & selVerts, const QVector<QPair<int, int>> & selEdges,
+	QVector<TlLoop> & loops, QString & err )
+{
+	loops.clear();
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	const int numTris = model->get<int>( iShape, "Num Triangles" );
+	if ( !iTris.isValid() || numTris < 1 ) {
+		err = GLView::tr( "Fill/Bridge: unexpected mesh layout" );
+		return false;
+	}
+	QVector<Triangle> tris( numTris );
+	for ( int t = 0; t < numTris; t++ )
+		tris[t] = model->get<Triangle>( model->getIndex( iTris, t ) );
+
+	auto ekey = []( int a, int b ) {
+		if ( a > b ) std::swap( a, b );
+		return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+	};
+	auto degenerate = []( const Triangle & t ) {
+		return t[0] == t[1] || t[1] == t[2] || t[0] == t[2];
+	};
+
+	// surface winding of each undirected edge (first non-degenerate face wins)
+	QHash<quint64, QPair<int, int>> winding;
+	QHash<quint64, int> useCount;
+	for ( int t = 0; t < numTris; t++ ) {
+		if ( degenerate( tris.at( t ) ) )
+			continue;
+		for ( int e = 0; e < 3; e++ ) {
+			const int a = tris[t][e], b = tris[t][( e + 1 ) % 3];
+			useCount[ekey( a, b )]++;
+			if ( !winding.contains( ekey( a, b ) ) )
+				winding.insert( ekey( a, b ), { a, b } );
+		}
+	}
+
+	// candidate rim edges, directed along the HOLE (reverse surface winding)
+	QHash<int, int> next;           // from -> to
+	QSet<int> hasIncoming;
+	auto addDirected = [&]( int from, int to, QString & e2 ) {
+		if ( next.contains( from ) && next.value( from ) != to ) {
+			e2 = GLView::tr( "Fill/Bridge: the selected rim is non-manifold (a vertex joins 3+ rim edges)" );
+			return false;
+		}
+		next.insert( from, to );
+		hasIncoming << to;
+		return true;
+	};
+	if ( !selEdges.isEmpty() ) {
+		QSet<quint64> seen;
+		for ( const auto & ed : selEdges ) {
+			if ( ed.first == ed.second || seen.contains( ekey( ed.first, ed.second ) ) )
+				continue;
+			seen << ekey( ed.first, ed.second );
+			const auto w = winding.value( ekey( ed.first, ed.second ), ed );
+			if ( !addDirected( w.second, w.first, err ) )
+				return false;
+		}
+	} else {
+		for ( auto it = useCount.constBegin(); it != useCount.constEnd(); ++it ) {
+			if ( it.value() != 1 )
+				continue;	// interior edge
+			const auto w = winding.value( it.key() );
+			if ( !selVerts.contains( w.first ) || !selVerts.contains( w.second ) )
+				continue;
+			if ( !addDirected( w.second, w.first, err ) )
+				return false;
+		}
+	}
+	if ( next.isEmpty() ) {
+		err = GLView::tr( "Fill/Bridge: select the rim of a hole (boundary vertices or edges)" );
+		return false;
+	}
+
+	// chain: open runs start at verts with no incoming edge, the rest are rings
+	QSet<int> visited;
+	auto walk = [&]( int start, bool closed ) {
+		TlLoop loop;
+		loop.closed = closed;
+		int v = start;
+		while ( true ) {
+			loop.verts.append( v );
+			visited << v;
+			auto it = next.constFind( v );
+			if ( it == next.constEnd() )
+				break;
+			v = it.value();
+			if ( v == start ) {
+				loop.closed = true;
+				break;
+			}
+			if ( visited.contains( v ) )
+				break;	// merged into an earlier walk (shouldn't happen when manifold)
+		}
+		if ( loop.verts.size() >= 2 )
+			loops.append( loop );
+	};
+	for ( auto it = next.constBegin(); it != next.constEnd(); ++it )
+		if ( !hasIncoming.contains( it.key() ) )
+			walk( it.key(), false );
+	for ( auto it = next.constBegin(); it != next.constEnd(); ++it )
+		if ( !visited.contains( it.key() ) )
+			walk( it.key(), true );
+	if ( loops.isEmpty() ) {
+		err = GLView::tr( "Fill/Bridge: no usable rim loop in the selection" );
+		return false;
+	}
+	return true;
+}
+
+//! Newell plane normal of an ordered polygon
+static Vector3 tlNewellNormal( const QVector<Vector3> & p )
+{
+	Vector3 n;
+	for ( int i = 0; i < p.size(); i++ ) {
+		const Vector3 & a = p.at( i );
+		const Vector3 & b = p.at( ( i + 1 ) % p.size() );
+		n[0] += ( a[1] - b[1] ) * ( a[2] + b[2] );
+		n[1] += ( a[2] - b[2] ) * ( a[0] + b[0] );
+		n[2] += ( a[0] - b[0] ) * ( a[1] + b[1] );
+	}
+	return n;
+}
+
+//! Ear-clip an ordered (closed) polygon; returns triangles as loop-order
+//! index triples, wound in loop order. Falls back to a fan when stuck
+//! (degenerate/self-intersecting rims still produce something usable).
+static QVector<Triangle> tlEarClip( const QVector<Vector3> & poly )
+{
+	QVector<Triangle> out;
+	const int n = poly.size();
+	if ( n < 3 )
+		return out;
+	// project onto the dominant plane of the Newell normal
+	Vector3 nrm = tlNewellNormal( poly );
+	int drop = 2;
+	if ( std::fabs( nrm[0] ) >= std::fabs( nrm[1] ) && std::fabs( nrm[0] ) >= std::fabs( nrm[2] ) )
+		drop = 0;
+	else if ( std::fabs( nrm[1] ) >= std::fabs( nrm[2] ) )
+		drop = 1;
+	const int ax = ( drop + 1 ) % 3, ay = ( drop + 2 ) % 3;
+	const float sign = ( nrm[drop] >= 0.0f ) ? 1.0f : -1.0f;
+	QVector<QPointF> p2( n );
+	for ( int i = 0; i < n; i++ )
+		p2[i] = QPointF( poly.at( i )[ax], sign * poly.at( i )[ay] );
+	auto cross2 = []( const QPointF & o, const QPointF & a, const QPointF & b ) {
+		return ( a.x() - o.x() ) * ( b.y() - o.y() ) - ( a.y() - o.y() ) * ( b.x() - o.x() );
+	};
+	QVector<int> idx( n );
+	for ( int i = 0; i < n; i++ )
+		idx[i] = i;
+	int guard = 0;
+	while ( idx.size() > 3 && guard < n * n ) {
+		bool clipped = false;
+		for ( int i = 0; i < idx.size(); i++ ) {
+			const int i0 = idx.at( ( i + idx.size() - 1 ) % idx.size() );
+			const int i1 = idx.at( i );
+			const int i2 = idx.at( ( i + 1 ) % idx.size() );
+			if ( cross2( p2[i0], p2[i1], p2[i2] ) <= 0.0 )
+				continue;	// reflex
+			bool ear = true;
+			for ( int j : std::as_const( idx ) ) {
+				if ( j == i0 || j == i1 || j == i2 )
+					continue;
+				if ( cross2( p2[i0], p2[i1], p2[j] ) > 0.0
+					&& cross2( p2[i1], p2[i2], p2[j] ) > 0.0
+					&& cross2( p2[i2], p2[i0], p2[j] ) > 0.0 ) {
+					ear = false;
+					break;
+				}
+			}
+			if ( ear ) {
+				out.append( Triangle( quint16( i0 ), quint16( i1 ), quint16( i2 ) ) );
+				idx.removeAt( i );
+				clipped = true;
+				break;
+			}
+			guard++;
+		}
+		if ( !clipped )
+			break;	// stuck: fan the remainder below
+	}
+	if ( idx.size() == 3 ) {
+		out.append( Triangle( quint16( idx[0] ), quint16( idx[1] ), quint16( idx[2] ) ) );
+	} else {
+		for ( int i = 1; i + 1 < idx.size(); i++ )
+			out.append( Triangle( quint16( idx[0] ), quint16( idx[i] ), quint16( idx[i + 1] ) ) );
+	}
+	return out;
+}
+
+//! Fill dst's row with an interpolation of rows va and vb (t = 0..1):
+//! position, UV, normal/tangent (renormalized) and bone weights (merged,
+//! top 4, renormalized); everything else copies from va.
+static void tlWriteLerpVertex( NifModel * model, const QModelIndex & iShape,
+	int dst, int va, int vb, float t )
+{
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	QModelIndex rowA = model->getIndex( iVD, va );
+	QModelIndex rowB = model->getIndex( iVD, vb );
+	QModelIndex rowD = model->getIndex( iVD, dst );
+	if ( !rowA.isValid() || !rowB.isValid() || !rowD.isValid() )
+		return;
+	tlCopyItemValues( model, rowA, rowD );
+	const Vector3 pa = model->get<Vector3>( rowA, "Vertex" );
+	const Vector3 pb = model->get<Vector3>( rowB, "Vertex" );
+	tlSetVertexLocal( model, iShape, dst, pa + ( pb - pa ) * t );
+	if ( model->getItem( rowA, "UV" ) ) {
+		Vector2 uv = model->get<Vector2>( rowA, "UV" ) * ( 1.0f - t )
+			+ model->get<Vector2>( rowB, "UV" ) * t;
+		model->set<HalfVector2>( rowD, "UV", HalfVector2( uv ) );
+	}
+	for ( const char * attr : { "Normal", "Tangent" } ) {
+		if ( !model->getItem( rowA, attr ) )
+			continue;
+		Vector3 v = model->get<Vector3>( rowA, attr ) * ( 1.0f - t )
+			+ model->get<Vector3>( rowB, attr ) * t;
+		if ( v.squaredLength() > 1.0e-12f ) {
+			v.normalize();
+			model->set<ByteVector3>( rowD, attr, v );
+		}
+	}
+	if ( model->getItem( rowA, "Bone Weights" ) ) {
+		QHash<int, float> acc;
+		for ( int side = 0; side < 2; side++ ) {
+			const QModelIndex & row = side ? rowB : rowA;
+			const float scale = side ? t : ( 1.0f - t );
+			QModelIndex iW = model->getIndex( row, "Bone Weights" );
+			QModelIndex iI = model->getIndex( row, "Bone Indices" );
+			for ( int j = 0; j < 4; j++ ) {
+				const float w = model->get<float>( model->getIndex( iW, j ) ) * scale;
+				if ( w > 0.0f )
+					acc[int( model->get<quint8>( model->getIndex( iI, j ) ) )] += w;
+			}
+		}
+		QVector<QPair<int, float>> weights;
+		for ( auto it = acc.constBegin(); it != acc.constEnd(); ++it )
+			weights.append( { it.key(), it.value() } );
+		std::sort( weights.begin(), weights.end(),
+			[]( const auto & a, const auto & b ) { return a.second > b.second; } );
+		while ( weights.size() > 4 )
+			weights.removeLast();
+		float sum = 0.0f;
+		for ( const auto & w : std::as_const( weights ) )
+			sum += w.second;
+		QModelIndex iW = model->getIndex( rowD, "Bone Weights" );
+		QModelIndex iI = model->getIndex( rowD, "Bone Indices" );
+		for ( int j = 0; j < 4; j++ ) {
+			const bool on = ( j < weights.size() && sum > 0.0f );
+			model->set<float>( model->getIndex( iW, j ), on ? weights.at( j ).second / sum : 0.0f );
+			model->set<quint8>( model->getIndex( iI, j ), quint8( on ? weights.at( j ).first : 0 ) );
+		}
+	}
+}
+
+//! In-place undo for operators that only APPEND verts/triangles and refresh
+//! normals of existing verts (Fill, Bridge): redo runs the op's apply
+//! closure, undo shrinks the arrays back and restores the saved normals and
+//! Data Size — instant, no snapshot reload.
+class TlMeshGrowCommand final : public QUndoCommand
+{
+public:
+	TlMeshGrowCommand( NifModel * model, const QModelIndex & iShape,
+		const QSet<int> & touchedVerts, const QString & text,
+		std::function<void()> applyFn )
+		: nif( model ), block( iShape ), apply( std::move( applyFn ) )
+	{
+		setText( text );
+		oldNV = nif->get<int>( iShape, "Num Vertices" );
+		oldNT = nif->get<int>( iShape, "Num Triangles" );
+		oldDataSize = nif->get<int>( iShape, "Data Size" );
+		QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+		const bool hasNormals = iVD.isValid()
+			&& nif->getItem( nif->getIndex( iVD, 0 ), "Normal" );
+		if ( hasNormals )
+			for ( int v : touchedVerts )
+				if ( v >= 0 && v < oldNV )
+					savedNrm.append( { v, nif->get<Vector3>( nif->getIndex( iVD, v ), "Normal" ) } );
+	}
+
+	void redo() override
+	{
+		if ( QModelIndex( block ).isValid() && apply )
+			apply();
+	}
+
+	void undo() override
+	{
+		QModelIndex iShape( block );
+		if ( !iShape.isValid() )
+			return;
+		nif->setState( BaseModel::Processing );
+		QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+		nif->set<int>( iShape, "Num Triangles", oldNT );
+		nif->updateArraySize( iTris );
+		nif->set<int>( iShape, "Num Vertices", oldNV );
+		nif->updateArraySize( iVD );
+		for ( const auto & sn : std::as_const( savedNrm ) ) {
+			QModelIndex row = nif->getIndex( iVD, sn.first );
+			if ( nif->getItem( row, "Normal" ) )
+				nif->set<ByteVector3>( row, "Normal", sn.second );
+		}
+		nif->set<int>( iShape, "Data Size", oldDataSize );
+		nif->restoreState();
+		nif->dataChanged( iShape, iShape );
+	}
+
+private:
+	NifModel * nif;
+	QPersistentModelIndex block;
+	std::function<void()> apply;
+	int oldNV = 0, oldNT = 0, oldDataSize = 0;
+	QVector<QPair<int, Vector3>> savedNrm;
+};
+
+//! In-place undo for Extrude (no whole-model snapshot, so no reload flash on
+//! Ctrl+Z or redo-panel scrubbing): redo applies the plan, undo shrinks the
+//! arrays back and restores the re-pointed triangles, moved positions,
+//! refreshed normals, Data Size and bounds.
+class TlExtrudeCommand final : public QUndoCommand
+{
+public:
+	TlExtrudeCommand( NifModel * model, const QModelIndex & iShape,
+		const TlExtrudePlan & extrudePlan, const Vector3 & localOffset, bool flipNormals )
+		: nif( model ), block( iShape ), plan( extrudePlan ),
+		offset( localOffset ), flip( flipNormals )
+	{
+		setText( GLView::tr( "Extrude" ) );
+		// capture the before-state an in-place undo needs
+		QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+		oldDataSize = nif->get<int>( iShape, "Data Size" );
+		QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
+		if ( iBound.isValid() ) {
+			boundCenter = nif->get<Vector3>( iBound, "Center" );
+			boundRadius = nif->get<float>( iBound, "Radius" );
+		}
+		for ( int f : plan.repointFaces )
+			savedTris.append( { f, nif->get<Triangle>( nif->getIndex( iTris, f ) ) } );
+		QSet<int> touched;	// original verts the op moves / re-lights
+		for ( int v : plan.capVerts )
+			if ( v < plan.oldNV )
+				touched << v;
+		for ( int v : plan.dupVerts )
+			touched << v;
+		const bool hasNormals = iVD.isValid()
+			&& nif->getItem( nif->getIndex( iVD, 0 ), "Normal" );
+		for ( int v : touched ) {
+			QModelIndex row = nif->getIndex( iVD, v );
+			savedPos.append( { v, nif->get<Vector3>( row, "Vertex" ) } );
+			if ( hasNormals )
+				savedNrm.append( { v, nif->get<Vector3>( row, "Normal" ) } );
+		}
+	}
+
+	void redo() override
+	{
+		QModelIndex iShape( block );
+		if ( iShape.isValid() )
+			tlExtrudeApplyPlan( nif, iShape, plan, offset, flip );
+	}
+
+	void undo() override
+	{
+		QModelIndex iShape( block );
+		if ( !iShape.isValid() )
+			return;
+		nif->setState( BaseModel::Processing );
+		QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+		// drop the appended geometry (walls/scaffolds first, then the dup verts)
+		nif->set<int>( iShape, "Num Triangles", plan.oldNT );
+		nif->updateArraySize( iTris );
+		nif->set<int>( iShape, "Num Vertices", plan.oldNV );
+		nif->updateArraySize( iVD );
+		// restore the re-pointed region faces
+		for ( const auto & st : std::as_const( savedTris ) )
+			nif->set<Triangle>( nif->getIndex( iTris, st.first ), st.second );
+		// restore moved positions and refreshed normals of the original verts
+		for ( const auto & sp : std::as_const( savedPos ) )
+			tlSetVertexLocal( nif, iShape, sp.first, sp.second );
+		for ( const auto & sn : std::as_const( savedNrm ) ) {
+			QModelIndex row = nif->getIndex( iVD, sn.first );
+			if ( nif->getItem( row, "Normal" ) )
+				nif->set<ByteVector3>( row, "Normal", sn.second );
+		}
+		nif->set<int>( iShape, "Data Size", oldDataSize );
+		QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
+		if ( iBound.isValid() ) {
+			nif->set<Vector3>( iBound, "Center", boundCenter );
+			nif->set<float>( iBound, "Radius", boundRadius );
+		}
+		nif->restoreState();
+		nif->dataChanged( iShape, iShape );
+	}
+
+private:
+	NifModel * nif;
+	QPersistentModelIndex block;
+	TlExtrudePlan plan;
+	Vector3 offset;
+	bool flip;
+	int oldDataSize = 0;
+	Vector3 boundCenter;
+	float boundRadius = 0.0f;
+	QVector<QPair<int, Triangle>> savedTris;
+	QVector<QPair<int, Vector3>> savedPos;
+	QVector<QPair<int, Vector3>> savedNrm;
+};
+
+void GLView::extrudeRegion()
+{
+	if ( !model || !editMode || pickedElems.isEmpty() ) {
+		emit gizmoStatus( tr( "Extrude needs a selection in edit mode" ) );
+		return;
+	}
+	if ( gizmoMode != 0 )
+		return;
+	// v1: one shape at a time
+	const int sb = pickedElems.first().shapeBlock;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) ) {
+		if ( pe.shapeBlock != sb ) {
+			emit gizmoStatus( tr( "Extrude works on one mesh at a time" ) );
+			return;
+		}
+	}
+	QModelIndex iShape = model->getBlockIndex( sb );
+	if ( !model->blockInherits( iShape, "BSTriShape" ) ) {
+		emit gizmoStatus( tr( "Extrude is supported on FO4 (BSTriShape) meshes only" ) );
+		return;
+	}
+	const QSet<int> sv = pickedVertexRefs().value( sb );
+	QSet<int> sfx;
+	QVector<QPair<int, int>> sedges;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) ) {
+		if ( pe.type == 3 )
+			sfx << pe.e0;
+		else if ( pe.type == 2 )
+			sedges.append( { pe.e0, pe.e1 } );
+	}
+
+	TlExtrudePlan plan;
+	QString err;
+	if ( !tlExtrudePlanBuild( model, iShape, sv, sfx, sedges, plan, err ) ) {
+		emit gizmoStatus( err );
+		return;
+	}
+
+	extrudeSeed = pickedElems;
+	extrudeUndoIndexBase = ( model->undoStack ) ? model->undoStack->index() : -1;
+	extrudeTouchedShape = sb;
+	extrudeTouchedVerts = plan.capVerts;
+	for ( int v : std::as_const( plan.dupVerts ) )
+		extrudeTouchedVerts << v;
+	// in-place undo command (push applies via redo): Ctrl+Z and redo-panel
+	// scrubbing stay instant, with no whole-model snapshot reload
+	if ( model->undoStack )
+		model->undoStack->push( new TlExtrudeCommand( model, iShape, plan, Vector3(), false ) );
+	else
+		tlExtrudeApplyPlan( model, iShape, plan, Vector3(), false );
+
+	// select the cap: verts/edges remap onto the duplicates, region faces were
+	// re-pointed in place so face picks stay valid
+	auto capSelection = [this]( const TlExtrudePlan & p ) {
+		QVector<PickedElement> sel;
+		sel.reserve( lastOpExSeed.size() + extrudeSeed.size() );
+		const QVector<PickedElement> & src = extrudeSeed;
+		for ( const PickedElement & pe : src ) {
+			PickedElement np = pe;
+			if ( pe.type == 1 ) {
+				np.e0 = p.vremap.value( pe.e0, pe.e0 );
+			} else if ( pe.type == 2 ) {
+				np.e0 = p.vremap.value( pe.e0, pe.e0 );
+				np.e1 = p.vremap.value( pe.e1, pe.e1 );
+			}
+			sel.append( np );
+		}
+		return sel;
+	};
+	pickedElems = capSelection( plan );
+	modelChanged();
+
+	// the re-run callback rebuilds the plan from the seed selection and applies
+	// the offset inside one snapshot (proper normals, single undo entry)
+	lastOpExRerun = [this, sb, sv, sfx, sedges, capSelection]( const QVector<TlOpParam> & ps ) {
+		QModelIndex iS = model->getBlockIndex( sb );
+		TlExtrudePlan p2;
+		QString e2;
+		if ( !iS.isValid() || !tlExtrudePlanBuild( model, iS, sv, sfx, sedges, p2, e2 ) )
+			return;
+		const Vector3 world( float( ps.value( 0 ).value ), float( ps.value( 1 ).value ),
+			float( ps.value( 2 ).value ) );
+		const bool flip = ( ps.value( 3 ).value != 0.0 );
+		const Vector3 local = tlWorldToLocalDelta( scene, model, sb, world );
+		if ( model->undoStack )
+			model->undoStack->push( new TlExtrudeCommand( model, iS, p2, local, flip ) );
+		else
+			tlExtrudeApplyPlan( model, iS, p2, local, flip );
+		pickedElems = capSelection( p2 );
+		modelChanged();
+	};
+
+	// chain a modal move on the cap; its commit/cancel arms the redo panel
+	extrudeChainArmed = true;
+	if ( !gizmoBeginElement( 1 ) ) {
+		extrudeChainArmed = false;
+		armExtrudeRedoPanel( Vector3() );
+	}
+	emit gizmoStatus( tr( "Extruded %1 vert(s), %2 wall tri(s) - move, Esc leaves in place" )
+		.arg( plan.dupVerts.size() ).arg( plan.walls.size() * 2 ) );
+}
+
+void GLView::armExtrudeRedoPanel( const Vector3 & worldDelta )
+{
+	QVector<TlOpParam> ps( 4 );
+	static const char * axisNames[3] = { QT_TR_NOOP( "Move X" ), "Y", "Z" };
+	for ( int i = 0; i < 3; i++ ) {
+		ps[i].label = tr( axisNames[i] );
+		ps[i].type = TlOpParam::Float;
+		ps[i].value = double( worldDelta[i] );
+		ps[i].step = 0.01;
+		ps[i].decimals = 4;
+	}
+	ps[3].label = tr( "Flip Normals" );
+	ps[3].type = TlOpParam::Bool;
+	ps[3].value = 0.0;
+	const int steps = ( model && model->undoStack && extrudeUndoIndexBase >= 0 )
+		? model->undoStack->index() - extrudeUndoIndexBase : 1;
+	armOperatorPanelEx( tr( "Extrude Region and Move" ), ps, std::max( steps, 1 ), extrudeSeed );
+	// NOTE: no eager consolidation — the chained move already refreshed the
+	// normals inside its own transaction, and with TlExtrudeCommand both undo
+	// paths are in-place anyway (no snapshot, no reload flash).
+}
+
+//! Cap one closed rim loop (ear-clip in the loop's best-fit plane). The loop
+//! order follows the hole direction, so loop-order winding faces like the
+//! surrounding surface; flip reverses it. Runs under Processing and emits one
+//! dataChanged (call from TlMeshGrowCommand::redo).
+static void tlFillApply( NifModel * model, const QModelIndex & iShape,
+	const QVector<int> & loop, bool flipNormals )
+{
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	if ( !iVD.isValid() || !iTris.isValid() || loop.size() < 3 )
+		return;
+	QVector<Vector3> pos( loop.size() );
+	for ( int i = 0; i < loop.size(); i++ )
+		pos[i] = model->get<Vector3>( model->getIndex( iVD, loop.at( i ) ), "Vertex" );
+	const QVector<Triangle> cap = tlEarClip( pos );	// loop-order indices
+	if ( cap.isEmpty() )
+		return;
+	model->setState( BaseModel::Processing );
+	const int numVerts = model->get<int>( iShape, "Num Vertices" );
+	const int oldNT = model->get<int>( iShape, "Num Triangles" );
+	const int dataSize = model->get<int>( iShape, "Data Size" );
+	const int stride = ( numVerts > 0 ) ? ( dataSize - oldNT * 6 ) / numVerts : 0;
+	model->set<int>( iShape, "Num Triangles", oldNT + cap.size() );
+	model->updateArraySize( iTris );
+	for ( int t = 0; t < cap.size(); t++ ) {
+		Triangle m( quint16( loop.at( cap[t][0] ) ), quint16( loop.at( cap[t][1] ) ),
+			quint16( loop.at( cap[t][2] ) ) );
+		if ( flipNormals )
+			std::swap( m[1], m[2] );
+		model->set<Triangle>( model->getIndex( iTris, oldNT + t ), m );
+	}
+	if ( stride > 0 )
+		model->set<int>( iShape, "Data Size",
+			numVerts * stride + ( oldNT + cap.size() ) * 6 );
+	tlRecalcNormalsSubset( model, iShape,
+		QSet<int>( loop.constBegin(), loop.constEnd() ) );
+	model->restoreState();
+	model->dataChanged( QModelIndex( iShape ), QModelIndex( iShape ) );
+}
+
+//! Connect two rim loops with a band of triangles (Blender's Bridge Edge
+//! Loops). Handles unequal vertex counts via an arc-length zip; cuts insert
+//! interpolated rings (equal-count loops only — weights/UVs lerp per pair).
+//! Returns a short status note. Runs under Processing, one dataChanged.
+static QString tlBridgeApply( NifModel * model, const QModelIndex & iShape,
+	const TlLoop & loopA, const TlLoop & loopB, int cuts, int twist, bool flipNormals )
+{
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	if ( !iVD.isValid() || !iTris.isValid() )
+		return QString();
+	auto readPos = [&]( int v ) {
+		return model->get<Vector3>( model->getIndex( iVD, v ), "Vertex" );
+	};
+
+	// A in SURFACE order (the band is a wall like extrude's: edge a->b of the
+	// surface pairs with the far ring); B aligned to follow A spatially.
+	QVector<int> A = loopA.verts;
+	std::reverse( A.begin(), A.end() );
+	QVector<int> B = loopB.verts;
+	const bool closed = loopA.closed;	// caller guarantees both match
+
+	if ( closed && !B.isEmpty() ) {
+		// start B at its vertex nearest to A's start (+ twist)
+		int best = 0;
+		float bestD = 1.0e30f;
+		const Vector3 a0 = readPos( A.first() );
+		for ( int j = 0; j < B.size(); j++ ) {
+			const float d = ( readPos( B.at( j ) ) - a0 ).squaredLength();
+			if ( d < bestD ) {
+				bestD = d;
+				best = j;
+			}
+		}
+		const int off = ( ( best + twist ) % B.size() + B.size() ) % B.size();
+		QVector<int> rot;
+		rot.reserve( B.size() );
+		for ( int j = 0; j < B.size(); j++ )
+			rot.append( B.at( ( off + j ) % B.size() ) );
+		B = rot;
+	}
+	// direction: sample a few fractional positions and keep the orientation
+	// with the smaller total distance
+	auto sampleDist = [&]( const QVector<int> & bb ) {
+		float sum = 0.0f;
+		for ( float s : { 0.0f, 0.25f, 0.5f, 0.75f } ) {
+			const int ia = int( s * ( A.size() - 1 ) + 0.5f );
+			const int ib = int( s * ( bb.size() - 1 ) + 0.5f );
+			sum += ( readPos( A.at( ia ) ) - readPos( bb.at( ib ) ) ).squaredLength();
+		}
+		return sum;
+	};
+	{
+		QVector<int> rev = B;
+		std::reverse( rev.begin(), rev.end() );
+		if ( closed && rev.size() > 1 ) {
+			// keep the same start vertex after reversing a ring
+			rev.prepend( rev.takeLast() );
+		}
+		if ( sampleDist( rev ) < sampleDist( B ) )
+			B = rev;
+	}
+
+	const int nA = A.size(), nB = B.size();
+	QString note;
+	if ( cuts > 0 && nA != nB ) {
+		note = GLView::tr( " (cuts need equal loop lengths: %1 vs %2)" ).arg( nA ).arg( nB );
+		cuts = 0;
+	}
+	const int oldNV = model->get<int>( iShape, "Num Vertices" );
+	if ( cuts > 0 && oldNV + cuts * nA > 0xFFFF ) {
+		cuts = std::max( 0, ( 0xFFFF - oldNV ) / std::max( nA, 1 ) );
+		note = GLView::tr( " (cuts clamped by the 65,535-vertex limit)" );
+	}
+
+	model->setState( BaseModel::Processing );
+	const int oldNT = model->get<int>( iShape, "Num Triangles" );
+	const int dataSize = model->get<int>( iShape, "Data Size" );
+	const int stride = ( oldNV > 0 ) ? ( dataSize - oldNT * 6 ) / oldNV : 0;
+
+	// interpolated rings for the cuts (equal counts guaranteed here)
+	QVector<QVector<int>> rings;
+	rings.append( A );
+	if ( cuts > 0 ) {
+		model->set<int>( iShape, "Num Vertices", oldNV + cuts * nA );
+		model->updateArraySize( iVD );
+		int nv = oldNV;
+		for ( int r = 1; r <= cuts; r++ ) {
+			const float t = float( r ) / float( cuts + 1 );
+			QVector<int> ring( nA );
+			for ( int i = 0; i < nA; i++ ) {
+				tlWriteLerpVertex( model, iShape, nv, A.at( i ), B.at( i ), t );
+				ring[i] = nv++;
+			}
+			rings.append( ring );
+		}
+	}
+	rings.append( B );
+
+	// band triangles between consecutive rings
+	QVector<Triangle> band;
+	for ( int r = 0; r + 1 < rings.size(); r++ ) {
+		const QVector<int> & bot = rings.at( r );
+		const QVector<int> & top = rings.at( r + 1 );
+		if ( bot.size() == top.size() ) {
+			// equal counts: one quad (a,b,b') + (a,b',a') per edge
+			const int n = bot.size();
+			const int segs = closed ? n : n - 1;
+			for ( int i = 0; i < segs; i++ ) {
+				const quint16 a = quint16( bot.at( i ) );
+				const quint16 b = quint16( bot.at( ( i + 1 ) % n ) );
+				const quint16 a2 = quint16( top.at( i ) );
+				const quint16 b2 = quint16( top.at( ( i + 1 ) % n ) );
+				band.append( Triangle( a, b, b2 ) );
+				band.append( Triangle( a, b2, a2 ) );
+			}
+		} else {
+			// unequal: zip by normalized arc length
+			auto params = [&]( const QVector<int> & loop ) {
+				QVector<float> p( loop.size() + ( closed ? 1 : 0 ), 0.0f );
+				float total = 0.0f;
+				for ( int i = 1; i < p.size(); i++ ) {
+					total += ( readPos( loop.at( i % loop.size() ) )
+						- readPos( loop.at( i - 1 ) ) ).length();
+					p[i] = total;
+				}
+				if ( total > 1.0e-9f )
+					for ( float & v : p )
+						v /= total;
+				return p;
+			};
+			const QVector<float> pa = params( bot );
+			const QVector<float> pb = params( top );
+			const int endA = closed ? bot.size() : bot.size() - 1;
+			const int endB = closed ? top.size() : top.size() - 1;
+			int i = 0, j = 0;
+			while ( i < endA || j < endB ) {
+				bool advanceA;
+				if ( i >= endA )
+					advanceA = false;
+				else if ( j >= endB )
+					advanceA = true;
+				else
+					advanceA = ( pa.at( i + 1 ) <= pb.at( j + 1 ) );
+				const quint16 ai = quint16( bot.at( i % bot.size() ) );
+				const quint16 bj = quint16( top.at( j % top.size() ) );
+				if ( advanceA ) {
+					band.append( Triangle( ai, quint16( bot.at( ( i + 1 ) % bot.size() ) ), bj ) );
+					i++;
+				} else {
+					band.append( Triangle( ai, quint16( top.at( ( j + 1 ) % top.size() ) ), bj ) );
+					j++;
+				}
+			}
+		}
+	}
+	if ( flipNormals )
+		for ( Triangle & t : band )
+			std::swap( t[1], t[2] );
+
+	const int newNV = model->get<int>( iShape, "Num Vertices" );
+	model->set<int>( iShape, "Num Triangles", oldNT + band.size() );
+	model->updateArraySize( iTris );
+	for ( int t = 0; t < band.size(); t++ )
+		model->set<Triangle>( model->getIndex( iTris, oldNT + t ), band.at( t ) );
+	if ( stride > 0 )
+		model->set<int>( iShape, "Data Size",
+			newNV * stride + ( oldNT + band.size() ) * 6 );
+
+	QSet<int> touched;
+	for ( const QVector<int> & ring : std::as_const( rings ) )
+		for ( int v : ring )
+			touched << v;
+	tlRecalcNormalsSubset( model, iShape, touched );
+	model->restoreState();
+	model->dataChanged( QModelIndex( iShape ), QModelIndex( iShape ) );
+	return note;
+}
+
+void GLView::smartConnect()
+{
+	if ( !model || !editMode || pickedElems.isEmpty() ) {
+		emit gizmoStatus( tr( "Fill/Bridge needs a rim selection in edit mode" ) );
+		return;
+	}
+	if ( gizmoMode != 0 )
+		return;
+	const int sb = pickedElems.first().shapeBlock;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) ) {
+		if ( pe.shapeBlock != sb ) {
+			emit gizmoStatus( tr( "Fill/Bridge works on one mesh at a time (Join first)" ) );
+			return;
+		}
+	}
+	QModelIndex iShape = model->getBlockIndex( sb );
+	if ( !model->blockInherits( iShape, "BSTriShape" ) ) {
+		emit gizmoStatus( tr( "Fill/Bridge is supported on FO4 (BSTriShape) meshes only" ) );
+		return;
+	}
+	const QSet<int> sv = pickedVertexRefs().value( sb );
+	QVector<QPair<int, int>> sedges;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) )
+		if ( pe.type == 2 && pe.e0 != pe.e1 )
+			sedges.append( { pe.e0, pe.e1 } );
+
+	QVector<TlLoop> loops;
+	QString err;
+	if ( !tlExtractLoops( model, iShape, sv, sedges, loops, err ) ) {
+		emit gizmoStatus( err );
+		return;
+	}
+	const QVector<PickedElement> seed = pickedElems;
+	const QPersistentModelIndex pShape( iShape );
+
+	if ( loops.size() == 1 && loops.first().closed && loops.first().verts.size() >= 3 ) {
+		// ---- Fill ----
+		const QVector<int> loop = loops.first().verts;
+		const QSet<int> touched( loop.constBegin(), loop.constEnd() );
+		if ( model->undoStack ) {
+			const int base = model->undoStack->index();
+			model->undoStack->push( new TlMeshGrowCommand( model, iShape, touched, tr( "Fill" ),
+				[this, pShape, loop]() { tlFillApply( model, QModelIndex( pShape ), loop, false ); } ) );
+			modelChanged();
+			emit gizmoStatus( tr( "Filled the hole with %1 triangle(s)" ).arg( loop.size() - 2 ) );
+			lastOpExRerun = [this, sb, sv, sedges, pShape]( const QVector<TlOpParam> & ps ) {
+				QModelIndex iS( pShape );
+				QVector<TlLoop> l2;
+				QString e2;
+				if ( !iS.isValid() || !tlExtractLoops( model, iS, sv, sedges, l2, e2 )
+					|| l2.size() != 1 || !l2.first().closed )
+					return;
+				const QVector<int> lv = l2.first().verts;
+				const QSet<int> t2( lv.constBegin(), lv.constEnd() );
+				const bool flip = ( ps.value( 0 ).value != 0.0 );
+				model->undoStack->push( new TlMeshGrowCommand( model, iS, t2, tr( "Fill" ),
+					[this, pShape, lv, flip]() { tlFillApply( model, QModelIndex( pShape ), lv, flip ); } ) );
+				modelChanged();
+			};
+			QVector<TlOpParam> ps( 1 );
+			ps[0].label = tr( "Flip Normals" );
+			ps[0].type = TlOpParam::Bool;
+			ps[0].value = 0.0;
+			armOperatorPanelEx( tr( "Fill" ), ps, model->undoStack->index() - base, seed );
+		}
+	} else if ( loops.size() == 2 ) {
+		// ---- Bridge Edge Loops ----
+		if ( loops.at( 0 ).closed != loops.at( 1 ).closed ) {
+			emit gizmoStatus( tr( "Bridge: the two rims must both be closed rings or both open runs" ) );
+			return;
+		}
+		const TlLoop la = loops.at( 0 ), lb = loops.at( 1 );
+		QSet<int> touched;
+		for ( int v : la.verts ) touched << v;
+		for ( int v : lb.verts ) touched << v;
+		if ( model->undoStack ) {
+			const int base = model->undoStack->index();
+			model->undoStack->push( new TlMeshGrowCommand( model, iShape, touched, tr( "Bridge Edge Loops" ),
+				[this, pShape, la, lb]() { tlBridgeApply( model, QModelIndex( pShape ), la, lb, 0, 0, false ); } ) );
+			modelChanged();
+			emit gizmoStatus( tr( "Bridged the loops (%1 + %2 rim verts)" )
+				.arg( la.verts.size() ).arg( lb.verts.size() ) );
+			lastOpExRerun = [this, sb, sv, sedges, pShape]( const QVector<TlOpParam> & ps ) {
+				QModelIndex iS( pShape );
+				QVector<TlLoop> l2;
+				QString e2;
+				if ( !iS.isValid() || !tlExtractLoops( model, iS, sv, sedges, l2, e2 )
+					|| l2.size() != 2 || l2.at( 0 ).closed != l2.at( 1 ).closed )
+					return;
+				const int cuts = std::clamp( int( ps.value( 0 ).value + 0.5 ), 0, 64 );
+				const int twist = int( ps.value( 1 ).value );
+				const bool flip = ( ps.value( 2 ).value != 0.0 );
+				QSet<int> t2;
+				for ( int v : l2.at( 0 ).verts ) t2 << v;
+				for ( int v : l2.at( 1 ).verts ) t2 << v;
+				const TlLoop a2 = l2.at( 0 ), b2 = l2.at( 1 );
+				model->undoStack->push( new TlMeshGrowCommand( model, iS, t2, tr( "Bridge Edge Loops" ),
+					[this, pShape, a2, b2, cuts, twist, flip]() {
+						tlBridgeApply( model, QModelIndex( pShape ), a2, b2, cuts, twist, flip );
+					} ) );
+				modelChanged();
+			};
+			QVector<TlOpParam> ps( 3 );
+			ps[0].label = tr( "Number of Cuts" );
+			ps[0].type = TlOpParam::Int;
+			ps[0].value = 0.0;
+			ps[0].mn = 0.0;
+			ps[0].mx = 64.0;
+			ps[0].step = 1.0;
+			ps[1].label = tr( "Twist" );
+			ps[1].type = TlOpParam::Int;
+			ps[1].value = 0.0;
+			ps[1].mn = -64.0;
+			ps[1].mx = 64.0;
+			ps[1].step = 1.0;
+			ps[2].label = tr( "Flip Normals" );
+			ps[2].type = TlOpParam::Bool;
+			ps[2].value = 0.0;
+			armOperatorPanelEx( tr( "Bridge Edge Loops" ), ps, model->undoStack->index() - base, seed );
+		}
+	} else {
+		emit gizmoStatus( tr( "Fill/Bridge: select ONE closed rim (fill) or TWO rims (bridge) — found %1 loop(s)" )
+			.arg( loops.size() ) );
+	}
+}
+
+static QVector<int> tlNiNodeParents( NifModel * nif, int child )
+{
+	QVector<int> parents;
+	if ( !nif || child < 0 )
+		return parents;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex iNode = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( iNode, "NiNode" ) )
+			continue;
+		if ( nif->getLinkArray( nif->getIndex( iNode, "Children" ) ).contains( child ) )
+			parents.append( b );
+	}
+	return parents;
+}
+
+static bool tlSceneDescendantContains( NifModel * nif, int root, int wanted, QSet<int> & visited )
+{
+	if ( root == wanted )
+		return true;
+	if ( !nif || root < 0 || visited.contains( root ) )
+		return false;
+	visited.insert( root );
+	QModelIndex iRoot = nif->getBlockIndex( root );
+	if ( !nif->blockInherits( iRoot, "NiNode" ) )
+		return false;
+	for ( int child : nif->getLinkArray( nif->getIndex( iRoot, "Children" ) ) )
+		if ( tlSceneDescendantContains( nif, child, wanted, visited ) )
+			return true;
+	return false;
+}
+
+void GLView::showParentMenu()
+{
+	if ( editMode )
+		return;
+	AutoCloseMenu menu;
+	menu.addSection( tr( "Set Parent" ) );
+	QAction * keepWorld = menu.addAction( tr( "Object (Keep Transform)" ) );
+	QAction * keepLocal = menu.addAction( tr( "Object (Keep Local Transform)" ) );
+	menu.addSeparator();
+	QAction * link = menu.addAction( tr( "Link to Additional Parent" ) );
+	link->setToolTip( tr( "Keep existing parents and add another NiNode link; the local transform is shared" ) );
+	QAction * chosen = menu.exec( QCursor::pos() );
+	if ( chosen == keepWorld ) parentSelection( 0 );
+	else if ( chosen == keepLocal ) parentSelection( 1 );
+	else if ( chosen == link ) parentSelection( 2 );
+}
+
+void GLView::parentSelection( int mode )
+{
+	if ( !model || editMode || objSelection.isEmpty() ) {
+		emit gizmoStatus( tr( "Set Parent needs one or more selected scene objects" ) );
+		return;
+	}
+
+	int target = -1;
+	if ( objSelection.size() > 1 && objActive >= 0
+		&& model->blockInherits( model->getBlockIndex( objActive ), "NiNode" ) )
+		target = objActive;
+
+	if ( target < 0 ) {
+		QStringList labels;
+		QVector<int> blocks;
+		for ( int b = 0; b < model->getBlockCount(); b++ ) {
+			QModelIndex iBlock = model->getBlockIndex( b );
+			if ( !model->blockInherits( iBlock, "NiNode" ) )
+				continue;
+			QString name = model->resolveString( iBlock, "Name" );
+			if ( name.isEmpty() ) name = tr( "Unnamed NiNode" );
+			labels.append( tr( "%1  [block %2]" ).arg( name ).arg( b ) );
+			blocks.append( b );
+		}
+		if ( blocks.isEmpty() ) {
+			emit gizmoStatus( tr( "This NIF contains no NiNode that can be used as a parent" ) );
+			return;
+		}
+		bool ok = false;
+		QString selected = QInputDialog::getItem( nullptr, tr( "Set Parent" ),
+			tr( "Parent NiNode:" ), labels, 0, false, &ok );
+		if ( !ok ) return;
+		target = blocks.value( labels.indexOf( selected ), -1 );
+	}
+
+	QSet<int> children = objSelection;
+	children.remove( target );
+	QVector<int> validChildren;
+	int incompatible = 0, cycles = 0;
+	for ( int child : children ) {
+		QModelIndex iChild = model->getBlockIndex( child );
+		if ( !model->blockInherits( iChild, "NiAVObject" ) ) {
+			incompatible++;
+			continue;
+		}
+		QSet<int> visited;
+		if ( tlSceneDescendantContains( model, child, target, visited ) ) {
+			cycles++;
+			continue;
+		}
+		validChildren.append( child );
+	}
+	if ( validChildren.isEmpty() ) {
+		emit gizmoStatus( cycles ? tr( "Set Parent refused: the requested hierarchy would create a cycle" )
+			: tr( "Select a compatible child object as well as the parent NiNode" ) );
+		return;
+	}
+
+	auto worldTransform = [this]( int block ) {
+		QModelIndex iBlock = model->getBlockIndex( block );
+		if ( Node * node = scene->getNode( model, iBlock ) )
+			return node->worldTrans();
+		Transform local( model, iBlock );
+		int parent = model->getParent( block );
+		if ( parent >= 0 )
+			if ( Node * parentNode = scene->getNode( model, model->getBlockIndex( parent ) ) )
+				return parentNode->worldTrans() * local;
+		return local;
+	};
+	QHash<int, Transform> oldWorld;
+	for ( int child : validChildren )
+		oldWorld.insert( child, worldTransform( child ) );
+	Transform parentWorld = worldTransform( target );
+
+	nifSnapshotOp( model, mode == 2 ? tr( "Link to additional parent" ) : tr( "Set parent" ), [&]() {
+		for ( int child : validChildren ) {
+			QModelIndex iChild = model->getBlockIndex( child );
+			if ( mode != 2 ) {
+				for ( int oldParent : tlNiNodeParents( model, child ) ) {
+					delLink( model, model->getBlockIndex( oldParent ), QStringLiteral( "Children" ), child );
+					if ( model->blockInherits( iChild, "NiDynamicEffect" ) )
+						delLink( model, model->getBlockIndex( oldParent ), QStringLiteral( "Effects" ), child );
+				}
+			}
+			blockLink( model, model->getBlockIndex( target ), iChild );
+			if ( mode == 0 && Transform::canConstruct( model, iChild ) )
+				( parentWorld.inverted() * oldWorld.value( child ) ).writeBack( model, iChild );
+		}
+	} );
+
+	objSelection.insert( target );
+	objActive = target;
+	scene->currentBlock = model->getBlockIndex( target );
+	scene->currentIndex = QModelIndex( scene->currentBlock );
+	emit objectSelectionChanged();
+	modelChanged();
+	QString message = mode == 2
+		? tr( "Linked %1 object(s) to an additional parent" ).arg( validChildren.size() )
+		: tr( "Parented %1 object(s) to %2" ).arg( validChildren.size() ).arg( model->resolveString( model->getBlockIndex( target ), "Name" ) );
+	if ( incompatible ) message += tr( "; skipped %1 incompatible block(s)" ).arg( incompatible );
+	if ( cycles ) message += tr( "; skipped %1 cycle(s)" ).arg( cycles );
+	emit gizmoStatus( message );
+}
+
+void GLView::showClearParentMenu()
+{
+	if ( editMode )
+		return;
+	AutoCloseMenu menu;
+	menu.addSection( tr( "Clear Parent" ) );
+	QAction * clear = menu.addAction( tr( "Clear Parent" ) );
+	QAction * keep = menu.addAction( tr( "Clear and Keep Transform" ) );
+	QAction * inverse = menu.addAction( tr( "Clear Parent Inverse" ) );
+	inverse->setEnabled( false );
+	inverse->setToolTip( tr( "NIF scene objects do not store Blender-style parent-inverse matrices" ) );
+	QAction * chosen = menu.exec( QCursor::pos() );
+	if ( chosen == clear ) clearParentSelection( false );
+	else if ( chosen == keep ) clearParentSelection( true );
+}
+
+void GLView::clearParentSelection( bool keepWorld )
+{
+	if ( !model || editMode || objSelection.isEmpty() ) {
+		emit gizmoStatus( tr( "Clear Parent needs selected scene objects" ) );
+		return;
+	}
+	QVector<int> children;
+	QHash<int, Transform> oldWorld;
+	for ( int child : objSelection ) {
+		QModelIndex iChild = model->getBlockIndex( child );
+		if ( !model->blockInherits( iChild, "NiAVObject" ) || tlNiNodeParents( model, child ).isEmpty() )
+			continue;
+		children.append( child );
+		if ( keepWorld ) {
+			if ( Node * node = scene->getNode( model, iChild ) ) oldWorld.insert( child, node->worldTrans() );
+			else oldWorld.insert( child, Transform( model, iChild ) );
+		}
+	}
+	if ( children.isEmpty() ) {
+		emit gizmoStatus( tr( "The selected objects have no NiNode parent links" ) );
+		return;
+	}
+
+	nifSnapshotOp( model, keepWorld ? tr( "Clear parent and keep transform" ) : tr( "Clear parent" ), [&]() {
+		for ( int child : children ) {
+			QModelIndex iChild = model->getBlockIndex( child );
+			for ( int parent : tlNiNodeParents( model, child ) ) {
+				delLink( model, model->getBlockIndex( parent ), QStringLiteral( "Children" ), child );
+				if ( model->blockInherits( iChild, "NiDynamicEffect" ) )
+					delLink( model, model->getBlockIndex( parent ), QStringLiteral( "Effects" ), child );
+			}
+			if ( keepWorld && oldWorld.contains( child ) && Transform::canConstruct( model, iChild ) )
+				oldWorld.value( child ).writeBack( model, iChild );
+		}
+	} );
+	modelChanged();
+	emit gizmoStatus( keepWorld
+		? tr( "Cleared %1 parent link(s) and preserved world transforms" ).arg( children.size() )
+		: tr( "Cleared %1 parent link(s)" ).arg( children.size() ) );
+}
+
+void GLView::createFloatingDecal( float offset )
+{
+	if ( !model || pickedElems.isEmpty() || ( !editMode && !opReapplying ) ) {
+		emit gizmoStatus( tr( "Floating Decal needs selected faces in edit mode" ) );
+		return;
+	}
+
+	const QVector<PickedElement> seed = pickedElems;
+	QHash<int, QSet<int>> selectedVerts = pickedVertexRefs();
+	QHash<int, QSet<int>> explicitFaces;
+	for ( const PickedElement & pe : pickedElems )
+		if ( pe.type == 3 && pe.shapeBlock >= 0 )
+			explicitFaces[pe.shapeBlock].insert( pe.e0 );
+
+	// Resolve vertex/edge selections to complete triangles.  This matches the
+	// duplicate tool, while face mode remains the natural decal workflow.
+	QHash<int, QSet<int>> facesByShape;
+	QSet<int> shapes;
+	for ( int sb : selectedVerts.keys() )
+		shapes.insert( sb );
+	for ( int sb : explicitFaces.keys() )
+		shapes.insert( sb );
+	for ( int sb : shapes ) {
+		QModelIndex iShape = model->getBlockIndex( sb );
+		if ( !model->blockInherits( iShape, "BSTriShape" ) )
+			continue;
+		QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+		int nt = std::min( model->get<int>( iShape, "Num Triangles" ), model->rowCount( iTris ) );
+		const QSet<int> & sv = selectedVerts.value( sb );
+		for ( int t = 0; t < nt; t++ ) {
+			Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+			if ( explicitFaces.value( sb ).contains( t )
+				|| ( !sv.isEmpty() && sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) ) )
+				facesByShape[sb].insert( t );
+		}
+	}
+	if ( facesByShape.isEmpty() ) {
+		emit gizmoStatus( tr( "Floating Decal needs at least one complete selected face" ) );
+		return;
+	}
+
+	QVector<int> newBlocks;
+	QVector<DecalPreviewVert> previewVerts;
+	int totalFaces = 0;
+	nifSnapshotOp( model, tr( "Create Floating Decal" ), [&]() {
+		for ( auto it = facesByShape.constBegin(); it != facesByShape.constEnd(); ++it ) {
+			const int sb = it.key();
+			const QSet<int> chosen = it.value();
+			if ( chosen.isEmpty() )
+				continue;
+			int nNew = tlCloneShapeWithProps( model, sb );
+			if ( nNew < 0 )
+				continue;
+			QModelIndex iNew = model->getBlockIndex( nNew );
+			int parentNum = model->getParent( sb );
+			if ( parentNum >= 0 )
+				blockLink( model, model->getBlockIndex( parentNum ), iNew );
+
+			QString srcName = model->get<QString>( model->getBlockIndex( sb ), "Name" );
+			model->set<QString>( iNew, "Name", tlUniqueNodeName( model, srcName + QStringLiteral( "_Decal" ) ) );
+			int kept = tlKeepTriangles( model, iNew, [&chosen]( int t ) { return chosen.contains( t ); } );
+			if ( kept <= 0 )
+				continue;
+
+			QModelIndex iVD = model->getIndex( iNew, "Vertex Data" );
+			QModelIndex iTris = model->getIndex( iNew, "Triangles" );
+			int nv = model->rowCount( iVD );
+			QVector<Vector3> geometricNormals( nv );
+			QSet<int> usedVerts;
+			for ( int t = 0; t < kept && t < model->rowCount( iTris ); t++ ) {
+				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+				Vector3 a, b, c;
+				if ( !tlGetVertexLocal( model, iNew, tri[0], a )
+					|| !tlGetVertexLocal( model, iNew, tri[1], b )
+					|| !tlGetVertexLocal( model, iNew, tri[2], c ) )
+					continue;
+				Vector3 fn = Vector3::crossproduct( b - a, c - a );
+				if ( fn.length() > 1.0e-8f )
+					fn.normalize();
+				for ( int k = 0; k < 3; k++ ) {
+					int vi = tri[k];
+					if ( vi >= 0 && vi < nv ) {
+						usedVerts.insert( vi );
+						geometricNormals[vi] += fn;
+					}
+				}
+			}
+
+			for ( int vi : usedVerts ) {
+				Vector3 normal;
+				QModelIndex iVert = model->getIndex( iVD, vi );
+				if ( model->getIndex( iVert, "Normal" ).isValid() )
+					normal = model->get<Vector3>( iVert, "Normal" );
+				if ( normal.length() <= 1.0e-8f )
+					normal = geometricNormals.value( vi );
+				if ( normal.length() <= 1.0e-8f )
+					continue;
+				normal.normalize();
+				Vector3 pos;
+				if ( tlGetVertexLocal( model, iNew, vi, pos ) ) {
+					previewVerts.append( DecalPreviewVert{ nNew, vi, pos, normal } );
+					tlSetVertexLocal( model, iNew, vi, pos + normal * offset );
+				}
+			}
+			tlUpdateBounds( model, iNew );
+			newBlocks.append( nNew );
+			totalFaces += kept;
+		}
+	} );
+
+	if ( newBlocks.isEmpty() ) {
+		emit gizmoStatus( tr( "No floating decal geometry was created" ) );
+		return;
+	}
+
+	setEditMode( false );
+	pickedElems.clear();
+	objSelection.clear();
+	for ( int b : newBlocks )
+		objSelection.insert( b );
+	objActive = newBlocks.last();
+	scene->currentBlock = model->getBlockIndex( objActive );
+	scene->currentIndex = QModelIndex( scene->currentBlock );
+	emit objectSelectionChanged();
+	emit clicked( scene->currentBlock );
+	modelChanged();
+
+	if ( !opReapplying ) {
+		lastOpKind = 3;
+		lastOpParam = offset;
+		lastOpSeed = seed;
+		lastDecalVerts = previewVerts;
+		lastOpUndoIndex = model->undoStack ? model->undoStack->index() : -1;
+		emit operatorPanel( 3, offset );
+	}
+	emit gizmoStatus( tr( "Created %1 floating decal face(s) in %2 separate shape(s) - assign the new shape its decal material" )
+		.arg( totalFaces ).arg( newBlocks.size() ) );
+}
+
 void GLView::showSetOriginMenu()
 {
 	if ( !model || ( editMode ? editShapeBlocks.isEmpty() : objSelection.isEmpty() ) ) {
 		emit gizmoStatus( tr( "Set Origin needs a mesh selected" ) );
 		return;
 	}
-	QMenu m;
+	AutoCloseMenu m;
 	m.addSection( tr( "Set Origin" ) );
 	QAction * aGTO = m.addAction( tr( "Geometry to Origin" ) );
 	QAction * aOTG = m.addAction( tr( "Origin to Geometry" ) );
@@ -4931,6 +8528,11 @@ void GLView::setEditMode( bool on )
 			return;
 		}
 		editMode = true;
+		// Remember the global render preference, then let Edit Mode's explicit
+		// cage preference decide whether it exposes evaluated or raw positions.
+		// Weight Paint forces evaluated skinning immediately after entering.
+		editSkinningWasEnabled = scene->hasOption( Scene::DoSkinning );
+		scene->options.setFlag( Scene::DoSkinning, editDeformedCage );
 		// edit every selected mesh (object-mode multi-selection), plus the one
 		// the current block resolves to
 		editShapeBlocks.clear();
@@ -4940,14 +8542,73 @@ void GLView::setEditMode( bool on )
 		}
 		editShapeBlocks.insert( b );
 		editShapeBlock = b;
+		for ( int wb : editShapeBlocks )
+			if ( Shape * shape = shapeForBlock( wb ) )
+				shape->updateBoneTransforms();
 		pickMode = 1;	// start in vertex select, like Blender
+		// restore this session's remembered selection for these meshes,
+		// re-deriving world positions from the current geometry (the mesh
+		// or its transform may have changed since the selection was saved)
+		pickedElems.clear();
+		int typeBits = 0;
+		for ( int wb : editShapeBlocks ) {
+			auto it = savedElemSelections.constFind( wb );
+			if ( it == savedElemSelections.constEnd() )
+				continue;
+			Shape * sp = shapeForBlock( wb );
+			if ( !sp )
+				continue;
+			Transform wt = shapeRenderTrans( sp );
+			int nv = sp->verts.size();
+			for ( PickedElement pe : *it ) {
+				if ( pe.type == 1 ) {
+					if ( pe.e0 < 0 || pe.e0 >= nv )
+						continue;
+					pe.worldPos = wt * editVertexLocal( sp, pe.e0 );
+					pe.wA = pe.worldPos;
+				} else if ( pe.type == 2 ) {
+					if ( pe.e0 < 0 || pe.e0 >= nv || pe.e1 < 0 || pe.e1 >= nv )
+						continue;
+					pe.wA = wt * editVertexLocal( sp, pe.e0 );
+					pe.wB = wt * editVertexLocal( sp, pe.e1 );
+					pe.wC = pe.wA;
+					pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
+				} else if ( pe.type == 3 ) {
+					if ( pe.e0 < 0 || pe.e0 >= sp->triangles.size() )
+						continue;
+					const Triangle & tri = sp->triangles.at( pe.e0 );
+					if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+						continue;
+					pe.wA = wt * editVertexLocal( sp, tri[0] );
+					pe.wB = wt * editVertexLocal( sp, tri[1] );
+					pe.wC = wt * editVertexLocal( sp, tri[2] );
+					pe.worldPos = ( pe.wA + pe.wB + pe.wC ) * ( 1.0f / 3.0f );
+				} else {
+					continue;
+				}
+				typeBits |= ( pe.type == 3 ) ? 4 : pe.type;
+				pickedElems.append( pe );
+			}
+		}
+		if ( typeBits )
+			pickMode = typeBits;	// re-enable the modes the restored elements need
 		scene->editMode = true;
 		scene->restPoseBlock = b;
 		scene->hiddenTris = editHiddenTris;	// hidden elements apply in edit mode only
 		emit gizmoStatus( tr( "Edit Mode (%1 mesh%2): 1/2/3 = vertex/edge/face, G/R/S, X delete, Shift+S snap, Tab exits" )
 			.arg( editShapeBlocks.size() ).arg( editShapeBlocks.size() == 1 ? "" : "es" ) );
 	} else {
+		// remember the selection per mesh so re-entering edit mode on the
+		// same object restores it (an empty save means "user deselected all")
+		for ( int wb : editShapeBlocks ) {
+			QVector<PickedElement> kept;
+			for ( const PickedElement & pe : pickedElems )
+				if ( pe.shapeBlock == wb )
+					kept.append( pe );
+			savedElemSelections.insert( wb, kept );
+		}
 		editMode = false;
+		scene->options.setFlag( Scene::DoSkinning, editSkinningWasEnabled );
 		editShapeBlock = -1;
 		editShapeBlocks.clear();
 		pickMode = 0;
@@ -4970,6 +8631,7 @@ void GLView::objectSelectClick( int avBlock, bool shift )
 {
 	if ( editMode )
 		return;
+	recordSelection();
 	if ( avBlock < 0 ) {
 		if ( !shift ) {
 			objSelection.clear();
@@ -5037,6 +8699,1302 @@ void GLView::setObjectSelection( const QSet<int> & sel, int active )
 	update();
 }
 
+// ---- 2D triangle / rectangle overlap, for geometry-accurate box select ----
+static bool tlSegSegHit( const QPointF & a, const QPointF & b, const QPointF & c, const QPointF & d )
+{
+	auto cross = []( const QPointF & p, const QPointF & q ) { return p.x() * q.y() - p.y() * q.x(); };
+	QPointF r = b - a, s = d - c;
+	double rxs = cross( r, s );
+	if ( std::fabs( rxs ) < 1.0e-9 )
+		return false;
+	double t = cross( c - a, s ) / rxs;
+	double u = cross( c - a, r ) / rxs;
+	return t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0;
+}
+static bool tlPointInTri2D( const QPointF & p, const QPointF & a, const QPointF & b, const QPointF & c )
+{
+	auto sign = []( const QPointF & p1, const QPointF & p2, const QPointF & p3 ) {
+		return ( p1.x() - p3.x() ) * ( p2.y() - p3.y() ) - ( p2.x() - p3.x() ) * ( p1.y() - p3.y() );
+	};
+	double d1 = sign( p, a, b ), d2 = sign( p, b, c ), d3 = sign( p, c, a );
+	bool neg = ( d1 < 0.0 ) || ( d2 < 0.0 ) || ( d3 < 0.0 );
+	bool pos = ( d1 > 0.0 ) || ( d2 > 0.0 ) || ( d3 > 0.0 );
+	return !( neg && pos );
+}
+//! Does the screen-space triangle (a,b,c) overlap the rectangle at all? Covers a
+//! triangle vertex inside the box, the box sitting inside the triangle, and edge
+//! crossings - so box select catches faces even when no vertex is in the box.
+static bool tlBoxTriOverlap( const QRectF & r, const QPointF & a, const QPointF & b, const QPointF & c )
+{
+	if ( r.contains( a ) || r.contains( b ) || r.contains( c ) )
+		return true;
+	QPointF rc[4] = { r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft() };
+	if ( tlPointInTri2D( rc[0], a, b, c ) )
+		return true;
+	QPointF tv[3] = { a, b, c };
+	for ( int i = 0; i < 3; i++ )
+		for ( int j = 0; j < 4; j++ )
+			if ( tlSegSegHit( tv[i], tv[( i + 1 ) % 3], rc[j], rc[( j + 1 ) % 4] ) )
+				return true;
+	return false;
+}
+
+void GLView::beginBoxSelect()
+{
+	if ( !model )
+		return;
+	if ( riggingWeightPaintMode )
+		setRiggingWeightPaintBrushEnabled( false );
+	if ( vertexPaintMode )
+		setVertexPaintBrushEnabled( false );
+	if ( segmentPaintMode )
+		setSegmentPaintBrushEnabled( false );
+	boxSelecting = true;
+	boxSelectDrag = false;
+	boxSelectPrevActive = objActive;	// restored later if it survives the box
+	setCursor( Qt::CrossCursor );
+	emit gizmoStatus( tr( "Box select: drag a rectangle (Shift adds, Ctrl removes)" ) );
+	update();
+}
+
+void GLView::applyBoxSelect( const QRect & rect, Qt::KeyboardModifiers mods )
+{
+	if ( !model || !scene )
+		return;
+	recordSelection();
+	// plain drag adds, Shift- or Ctrl-drag deselects what's inside the box
+	bool sub = mods & ( Qt::ShiftModifier | Qt::ControlModifier );
+	bool xray = scene->xRay;
+	QRect r = rect.normalized();
+
+	// view direction into the scene, for back-face rejection when not x-raying
+	Vector3 rayO, rayD;
+	mouseRayWorld( QPointF( r.center() ), rayO, rayD );
+
+	if ( !editMode ) {
+		// object mode: a shape is picked if any of its geometry projects into the
+		// box. Testing the node origin (Blender's rule) is wrong for NIF shapes:
+		// skinned/attached meshes routinely sit at the skeleton root (0,0,0) far
+		// from their visible verts, so an origin test could never catch them.
+		QSet<int> hit;
+		QRectF rF( r );
+		for ( Shape * s : scene->shapes ) {
+			if ( !s || s->isHidden() )
+				continue;
+			Transform wt = shapeRenderTrans( s );
+			int nv = s->verts.size();
+			QVector<QPointF> sp( nv );
+			QVector<bool> ok( nv, false );
+			for ( int i = 0; i < nv; i++ ) {
+				Vector3 local = scene->hasOption( Scene::DoSkinning )
+					? s->skinVertex( i, s->verts.at( i ) ) : s->verts.at( i );
+				ok[i] = worldToScreen( wt * local, sp[i] );
+			}
+			bool inside = false;
+			// a vertex inside the box (fast path)
+			for ( int i = 0; i < nv && !inside; i++ )
+				if ( ok[i] && rF.contains( sp[i] ) )
+					inside = true;
+			// else the box may straddle an edge or sit inside a face: test the
+			// actual triangles so any geometry under the box is caught
+			if ( !inside ) {
+				for ( const Triangle & t : s->triangles ) {
+					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv || !ok[t[0]] || !ok[t[1]] || !ok[t[2]] )
+						continue;
+					if ( tlBoxTriOverlap( rF, sp[t[0]], sp[t[1]], sp[t[2]] ) ) {
+						inside = true;
+						break;
+					}
+				}
+			}
+			// vertexless shapes: fall back to the node origin
+			if ( !inside && nv == 0 ) {
+				QPointF o;
+				inside = worldToScreen( wt * Vector3(), o ) && rF.contains( o );
+			}
+			if ( inside )
+				hit.insert( s->id() );
+		}
+		// additive by default: the box only ever grows the selection,
+		// Shift/Ctrl-drag deselects; A / click-empty clears
+		QSet<int> sel = sub ? ( objSelection - hit ) : ( objSelection | hit );
+		// box select sets no new primary; keep the pre-box primary if it survived
+		objSelection = sel;
+		objActive = ( boxSelectPrevActive >= 0 && sel.contains( boxSelectPrevActive ) )
+		            ? boxSelectPrevActive : -1;
+		emit objectSelectionChanged();
+		emit gizmoStatus( tr( "Box selected %1 object(s)" ).arg( sel.size() ) );
+		if ( !boxReapplying ) {
+			lastBoxRect = r;
+			lastGestureKind = 1;
+			emit boxSelectApplied();
+		}
+		update();
+		return;
+	}
+
+	// edit mode: collect verts / edges / faces inside the box per pick mode
+	QVector<PickedElement> box;
+	for ( Shape * s : scene->shapes ) {
+		if ( !s || s->isHidden() || !editShapeBlocks.contains( s->id() ) )
+			continue;
+		Transform wt = shapeRenderTrans( s );
+		int nv = s->verts.size();
+		QVector<Vector3> wv( nv );
+		QVector<bool> inBox( nv, false );
+		for ( int i = 0; i < nv; i++ ) {
+			wv[i] = wt * editVertexLocal( s, i );
+			QPointF p;
+			if ( worldToScreen( wv[i], p ) )
+				inBox[i] = r.contains( p.toPoint() );
+		}
+		// front-facing test (x-ray off = only what you can see): a triangle is
+		// visible if its geometric normal faces the camera; a vertex/edge is
+		// visible if it belongs to such a triangle
+		QVector<bool> tFront( s->triangles.size(), true );
+		QVector<bool> vFront;
+		if ( !xray ) {
+			vFront.fill( false, nv );
+			for ( int t = 0; t < s->triangles.size(); t++ ) {
+				const Triangle & tri = s->triangles.at( t );
+				if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+					continue;
+				Vector3 n = Vector3::crossproduct( wv[tri[1]] - wv[tri[0]], wv[tri[2]] - wv[tri[0]] );
+				bool front = Vector3::dotproduct( n, rayD ) < 0.0f;
+				tFront[t] = front;
+				if ( front ) {
+					vFront[tri[0]] = true; vFront[tri[1]] = true; vFront[tri[2]] = true;
+				}
+			}
+		}
+		auto vVis = [&]( int i ) { return xray || ( i < vFront.size() && vFront[i] ); };
+
+		if ( pickMode & 1 ) {
+			for ( int i = 0; i < nv; i++ ) {
+				if ( inBox[i] && vVis( i ) ) {
+					PickedElement pe;
+					pe.shapeBlock = s->id(); pe.type = 1; pe.e0 = i; pe.e1 = -1;
+					pe.worldPos = wv[i]; pe.wA = pe.wB = pe.wC = wv[i];
+					box.append( pe );
+				}
+			}
+		}
+		if ( pickMode & 2 ) {
+			QSet<qint64> seen;
+			for ( int t = 0; t < s->triangles.size(); t++ ) {
+				const Triangle & tri = s->triangles.at( t );
+				for ( int e = 0; e < 3; e++ ) {
+					int a = tri[e], b = tri[( e + 1 ) % 3];
+					if ( a >= nv || b >= nv )
+						continue;
+					int lo = std::min( a, b ), hi = std::max( a, b );
+					qint64 key = ( qint64( lo ) << 32 ) | quint32( hi );
+					if ( seen.contains( key ) )
+						continue;
+					seen.insert( key );
+					if ( inBox[lo] && inBox[hi] && vVis( lo ) && vVis( hi ) ) {
+						PickedElement pe;
+						pe.shapeBlock = s->id(); pe.type = 2; pe.e0 = lo; pe.e1 = hi;
+						pe.wA = wv[lo]; pe.wB = wv[hi]; pe.wC = pe.wA;
+						pe.worldPos = ( wv[lo] + wv[hi] ) * 0.5f;
+						box.append( pe );
+					}
+				}
+			}
+		}
+		if ( pickMode & 4 ) {
+			for ( int t = 0; t < s->triangles.size(); t++ ) {
+				const Triangle & tri = s->triangles.at( t );
+				if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+					continue;
+				if ( !xray && !tFront[t] )
+					continue;
+				Vector3 ctr = ( wv[tri[0]] + wv[tri[1]] + wv[tri[2]] ) / 3.0f;
+				QPointF cp;
+				if ( worldToScreen( ctr, cp ) && r.contains( cp.toPoint() ) ) {
+					PickedElement pe;
+					pe.shapeBlock = s->id(); pe.type = 3; pe.e0 = t; pe.e1 = -1;
+					pe.wA = wv[tri[0]]; pe.wB = wv[tri[1]]; pe.wC = wv[tri[2]];
+					pe.worldPos = ctr;
+					Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
+					n.normalize();
+					pe.worldNormal = n;
+					box.append( pe );
+				}
+			}
+		}
+	}
+
+	// additive by default: plain drag adds, Shift/Ctrl-drag deselects
+	for ( const PickedElement & pe : box ) {
+		int at = pickedElems.indexOf( pe );
+		if ( sub ) {
+			if ( at >= 0 )
+				pickedElems.remove( at );
+		} else if ( at < 0 ) {
+			pickedElems.append( pe );
+		}
+	}
+	emit gizmoStatus( tr( "Box select: %1 element(s) selected" ).arg( pickedElems.size() ) );
+	if ( !boxReapplying ) {
+		lastBoxRect = r;
+		lastGestureKind = 1;
+		emit boxSelectApplied();
+	}
+	update();
+}
+
+void GLView::deselectLastGesture()
+{
+	// re-run the last box / circle stroke subtractively; only meaningful right
+	// after the gesture (its coordinates are in screen space, so a camera move
+	// retargets it)
+	if ( lastGestureKind == 1 ) {
+		if ( !lastBoxRect.isValid() || lastBoxRect.width() < 2 || lastBoxRect.height() < 2 )
+			return;
+		boxReapplying = true;
+		applyBoxSelect( lastBoxRect, Qt::ControlModifier );
+		boxReapplying = false;
+	} else if ( lastGestureKind == 2 && !lastCircleStroke.isEmpty() ) {
+		recordSelection();
+		float saved = circleSelectRadius;
+		circleSelectRadius = lastCircleStrokeRad;
+		for ( const QPointF & p : lastCircleStroke )
+			applyCircleSelect( p, true );
+		circleSelectRadius = saved;
+	}
+}
+
+void GLView::selectAll( int action )
+{
+	// action: 0 = toggle like Blender's A key (all if nothing picked, else
+	// deselect), 1 = select all, 2 = deselect all
+	if ( !model )
+		return;
+	if ( riggingWeightPaintMode )
+		setRiggingWeightPaintBrushEnabled( false );
+	if ( vertexPaintMode )
+		setVertexPaintBrushEnabled( false );
+	if ( segmentPaintMode )
+		setSegmentPaintBrushEnabled( false );
+	recordSelection();
+	if ( editMode ) {
+		bool clearOnly = ( action == 2 ) || ( action == 0 && !pickedElems.isEmpty() );
+		pickedElems.clear();
+		if ( !clearOnly ) {
+			for ( int wb : editShapeBlocks ) {
+				Shape * sp = shapeForBlock( wb );
+				if ( !sp )
+					continue;
+				Transform wt = shapeRenderTrans( sp );
+				int nv = sp->verts.size();
+				if ( pickMode & 4 ) {
+					for ( int t = 0; t < sp->triangles.size(); t++ ) {
+						const Triangle & tri = sp->triangles.at( t );
+						if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+							continue;
+						PickedElement pe;
+						pe.shapeBlock = wb;
+						pe.type = 3;
+						pe.e0 = t;
+						pe.wA = wt * editVertexLocal( sp, tri[0] );
+						pe.wB = wt * editVertexLocal( sp, tri[1] );
+						pe.wC = wt * editVertexLocal( sp, tri[2] );
+						pe.worldPos = ( pe.wA + pe.wB + pe.wC ) * ( 1.0f / 3.0f );
+						pickedElems.append( pe );
+					}
+				} else {
+					for ( int vi = 0; vi < nv; vi++ ) {
+						PickedElement pe;
+						pe.shapeBlock = wb;
+						pe.type = 1;
+						pe.e0 = vi;
+						pe.worldPos = wt * editVertexLocal( sp, vi );
+						pe.wA = pe.worldPos;
+						pickedElems.append( pe );
+					}
+				}
+			}
+		}
+		update();
+	} else {
+		bool clearOnly = ( action == 2 ) || ( action == 0 && !objSelection.isEmpty() );
+		objSelection.clear();
+		objActive = -1;
+		if ( !clearOnly ) {
+			for ( Shape * sp : scene->shapes ) {
+				if ( sp && !sp->isHidden() ) {
+					objSelection.insert( sp->id() );
+					objActive = sp->id();
+				}
+			}
+		}
+		emit objectSelectionChanged();
+		update();
+	}
+}
+
+void GLView::selectMoreLess( bool more )
+{
+	// Blender Ctrl+= / Ctrl+-: grow the selection one adjacency ring, or drop
+	// its boundary elements
+	if ( !editMode || !model || pickedElems.isEmpty() )
+		return;
+	if ( riggingWeightPaintMode )
+		setRiggingWeightPaintBrushEnabled( false );
+	if ( vertexPaintMode )
+		setVertexPaintBrushEnabled( false );
+	if ( segmentPaintMode )
+		setSegmentPaintBrushEnabled( false );
+	recordSelection();
+
+	auto ekey = []( int a, int b ) {
+		return ( qint64( std::min( a, b ) ) << 32 ) | quint32( std::max( a, b ) );
+	};
+
+	QVector<PickedElement> result;
+	for ( int wb : editShapeBlocks ) {
+		Shape * sp = shapeForBlock( wb );
+		if ( !sp )
+			continue;
+		Transform wt = shapeRenderTrans( sp );
+		int nv = sp->verts.size();
+
+		QSet<int> selV, selF;
+		QSet<qint64> selE;
+		for ( const PickedElement & pe : pickedElems ) {
+			if ( pe.shapeBlock != wb )
+				continue;
+			if ( pe.type == 1 )
+				selV.insert( pe.e0 );
+			else if ( pe.type == 2 )
+				selE.insert( ekey( pe.e0, pe.e1 ) );
+			else if ( pe.type == 3 )
+				selF.insert( pe.e0 );
+		}
+		if ( selV.isEmpty() && selE.isEmpty() && selF.isEmpty() )
+			continue;
+
+		// adjacency from the triangle list
+		QHash<int, QSet<int>> vAdj;
+		QHash<qint64, QVector<int>> eTris;
+		for ( int t = 0; t < sp->triangles.size(); t++ ) {
+			const Triangle & tri = sp->triangles.at( t );
+			if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+				continue;
+			for ( int e = 0; e < 3; e++ ) {
+				int a = tri[e], b = tri[( e + 1 ) % 3];
+				vAdj[a].insert( b );
+				vAdj[b].insert( a );
+				eTris[ ekey( a, b ) ].append( t );
+			}
+		}
+
+		QSet<int> newV = selV, newF = selF;
+		QSet<qint64> newE = selE;
+
+		if ( more ) {
+			for ( int v : selV )
+				for ( int n : vAdj.value( v ) )
+					newV.insert( n );
+			// edges grow across shared endpoints
+			QSet<int> evs;
+			for ( qint64 k : selE ) {
+				evs.insert( int( k >> 32 ) );
+				evs.insert( int( k & 0xffffffff ) );
+			}
+			for ( auto it = eTris.constBegin(); it != eTris.constEnd(); ++it ) {
+				int a = int( it.key() >> 32 ), b = int( it.key() & 0xffffffff );
+				if ( evs.contains( a ) || evs.contains( b ) )
+					newE.insert( it.key() );
+			}
+			// faces grow across shared edges
+			for ( int t : selF ) {
+				const Triangle & tri = sp->triangles.at( t );
+				for ( int e = 0; e < 3; e++ )
+					for ( int n : eTris.value( ekey( tri[e], tri[( e + 1 ) % 3] ) ) )
+						newF.insert( n );
+			}
+		} else {
+			// keep only elements whose whole neighborhood is selected
+			newV.clear();
+			newE.clear();
+			newF.clear();
+			for ( int v : selV ) {
+				bool inner = true;
+				for ( int n : vAdj.value( v ) ) {
+					if ( !selV.contains( n ) ) {
+						inner = false;
+						break;
+					}
+				}
+				if ( inner )
+					newV.insert( v );
+			}
+			for ( qint64 k : selE ) {
+				int ends[2] = { int( k >> 32 ), int( k & 0xffffffff ) };
+				bool inner = true;
+				for ( int end : ends ) {
+					for ( int n : vAdj.value( end ) ) {
+						if ( !selE.contains( ekey( end, n ) ) ) {
+							inner = false;
+							break;
+						}
+					}
+					if ( !inner )
+						break;
+				}
+				if ( inner )
+					newE.insert( k );
+			}
+			for ( int t : selF ) {
+				const Triangle & tri = sp->triangles.at( t );
+				bool inner = true;
+				for ( int e = 0; e < 3 && inner; e++ ) {
+					for ( int n : eTris.value( ekey( tri[e], tri[( e + 1 ) % 3] ) ) ) {
+						if ( n != t && !selF.contains( n ) ) {
+							inner = false;
+							break;
+						}
+					}
+				}
+				if ( inner )
+					newF.insert( t );
+			}
+		}
+
+		// rebuild the picks with fresh world coordinates
+		for ( int v : newV ) {
+			if ( v < 0 || v >= nv )
+				continue;
+			PickedElement pe;
+			pe.shapeBlock = wb;
+			pe.type = 1;
+			pe.e0 = v;
+			pe.e1 = -1;
+			pe.worldPos = wt * editVertexLocal( sp, v );
+			pe.wA = pe.wB = pe.wC = pe.worldPos;
+			result.append( pe );
+		}
+		for ( qint64 k : newE ) {
+			int a = int( k >> 32 ), b = int( k & 0xffffffff );
+			if ( a < 0 || a >= nv || b < 0 || b >= nv )
+				continue;
+			PickedElement pe;
+			pe.shapeBlock = wb;
+			pe.type = 2;
+			pe.e0 = a;
+			pe.e1 = b;
+			pe.wA = wt * editVertexLocal( sp, a );
+			pe.wB = wt * editVertexLocal( sp, b );
+			pe.wC = pe.wA;
+			pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
+			result.append( pe );
+		}
+		for ( int t : newF ) {
+			if ( t < 0 || t >= sp->triangles.size() )
+				continue;
+			const Triangle & tri = sp->triangles.at( t );
+			if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+				continue;
+			PickedElement pe;
+			pe.shapeBlock = wb;
+			pe.type = 3;
+			pe.e0 = t;
+			pe.e1 = -1;
+			pe.wA = wt * editVertexLocal( sp, tri[0] );
+			pe.wB = wt * editVertexLocal( sp, tri[1] );
+			pe.wC = wt * editVertexLocal( sp, tri[2] );
+			pe.worldPos = ( pe.wA + pe.wB + pe.wC ) * ( 1.0f / 3.0f );
+			Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
+			n.normalize();
+			pe.worldNormal = n;
+			result.append( pe );
+		}
+	}
+
+	pickedElems = result;
+	emit gizmoStatus( ( more ? tr( "Select More: %1 element(s)" ) : tr( "Select Less: %1 element(s)" ) )
+		.arg( pickedElems.size() ) );
+	update();
+}
+
+bool GLView::selectEdgeLoop( const QPointF & pos, bool extend )
+{
+	if ( !editMode || !model )
+		return false;
+
+	// need an edge under the cursor whatever the current pick mode is
+	int savedMode = pickMode;
+	pickMode = 2;
+	PickedElement hit;
+	bool ok = pickElementUnder( pos, hit );
+	pickMode = savedMode;
+	if ( !ok || hit.type != 2 )
+		return false;
+
+	Shape * sp = shapeForBlock( hit.shapeBlock );
+	if ( !sp )
+		return false;
+	int nv = sp->verts.size();
+
+	auto ekey = []( int a, int b ) {
+		return ( qint64( std::min( a, b ) ) << 32 ) | quint32( std::max( a, b ) );
+	};
+
+	QHash<qint64, QVector<int>> eTris;
+	QHash<int, QVector<QPair<int, qint64>>> vEdges;	// vert -> (other end, edge key)
+	for ( int t = 0; t < sp->triangles.size(); t++ ) {
+		const Triangle & tri = sp->triangles.at( t );
+		if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+			continue;
+		for ( int e = 0; e < 3; e++ ) {
+			int a = tri[e], b = tri[( e + 1 ) % 3];
+			qint64 k = ekey( a, b );
+			if ( !eTris.contains( k ) ) {
+				vEdges[a].append( qMakePair( b, k ) );
+				vEdges[b].append( qMakePair( a, k ) );
+			}
+			eTris[k].append( t );
+		}
+	}
+
+	auto edgeDir = [this, sp]( int from, int to ) {
+		Vector3 d = editVertexLocal( sp, to ) - editVertexLocal( sp, from );
+		float l = d.length();
+		if ( l > 1.0e-8f )
+			d /= l;
+		return d;
+	};
+
+	// walk from both ends of the clicked edge. A triangulated mesh has no true
+	// quad loops, so continue with the most collinear edge that shares no
+	// triangle with the current one (boundary edges walk the boundary instead)
+	QSet<qint64> loop;
+	qint64 startKey = ekey( hit.e0, hit.e1 );
+	loop.insert( startKey );
+	for ( int dir = 0; dir < 2; dir++ ) {
+		int prev = ( dir == 0 ) ? hit.e0 : hit.e1;
+		int cur = ( dir == 0 ) ? hit.e1 : hit.e0;
+		qint64 curKey = startKey;
+		for ( int guard = 0; guard < 100000; guard++ ) {
+			bool curBoundary = eTris.value( curKey ).size() < 2;
+			Vector3 inDir = edgeDir( prev, cur );
+			int bestNext = -1;
+			qint64 bestKey = 0;
+			float bestDot = 0.5f;	// require the turn to stay under ~60 degrees
+			for ( const auto & cand : vEdges.value( cur ) ) {
+				if ( cand.second == curKey || loop.contains( cand.second ) )
+					continue;
+				bool candBoundary = eTris.value( cand.second ).size() < 2;
+				if ( curBoundary ) {
+					if ( !candBoundary )
+						continue;	// a boundary loop stays on the boundary
+				} else {
+					bool shares = false;
+					for ( int t : eTris.value( curKey ) ) {
+						if ( eTris.value( cand.second ).contains( t ) ) {
+							shares = true;
+							break;
+						}
+					}
+					if ( shares )
+						continue;
+				}
+				float dot = Vector3::dotproduct( inDir, edgeDir( cur, cand.first ) );
+				if ( dot > bestDot ) {
+					bestDot = dot;
+					bestNext = cand.first;
+					bestKey = cand.second;
+				}
+			}
+			if ( bestNext < 0 )
+				break;
+			loop.insert( bestKey );
+			prev = cur;
+			cur = bestNext;
+			curKey = bestKey;
+		}
+	}
+
+	recordSelection();
+	if ( !extend )
+		pickedElems.clear();
+	Transform wt = shapeRenderTrans( sp );
+	for ( qint64 k : loop ) {
+		int a = int( k >> 32 ), b = int( k & 0xffffffff );
+		if ( a < 0 || a >= nv || b < 0 || b >= nv )
+			continue;
+		PickedElement pe;
+		pe.shapeBlock = hit.shapeBlock;
+		pe.type = 2;
+		pe.e0 = a;
+		pe.e1 = b;
+		pe.wA = wt * editVertexLocal( sp, a );
+		pe.wB = wt * editVertexLocal( sp, b );
+		pe.wC = pe.wA;
+		pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
+		if ( pickedElems.indexOf( pe ) < 0 )
+			pickedElems.append( pe );
+	}
+	if ( !( pickMode & 2 ) )
+		setPickMode( pickMode | 2 );	// make the loop visible and editable
+	emit gizmoStatus( tr( "Edge loop: %1 edge(s)" ).arg( loop.size() ) );
+	update();
+	return true;
+}
+
+float GLView::circleSelectRadius = 26.0f;
+
+void GLView::beginCircleSelect()
+{
+	if ( !model )
+		return;
+	if ( riggingWeightPaintMode )
+		setRiggingWeightPaintBrushEnabled( false );
+	if ( vertexPaintMode )
+		setVertexPaintBrushEnabled( false );
+	if ( segmentPaintMode )
+		setSegmentPaintBrushEnabled( false );
+	boxSelecting = false;	// the two gadgets are exclusive
+	boxSelectDrag = false;
+	circleSelecting = true;
+	circlePainting = false;
+	circleErasing = false;
+	circleSelectPos = QPointF( mapFromGlobal( QCursor::pos() ) );
+	setCursor( Qt::BlankCursor );
+	emit gizmoStatus( tr( "Circle Select:  LMB paint select, MMB deselect, wheel = size, RMB/Esc = done" ) );
+	update();
+}
+
+void GLView::applyRiggingWeightPaintBrush( const QPointF & from, const QPointF & to )
+{
+	if ( !riggingWeightPaintMode || !riggingWeightPaintBrushEnabled || !model || !scene )
+		return;
+	Shape * shape = shapeForBlock( riggingWeightPaintTarget );
+	if ( !shape || shape->isHidden() || shape->verts.isEmpty() )
+		return;
+
+	int nv = shape->verts.size();
+	if ( !riggingWeightPaintProjectionValid ) {
+		Transform wt = shapeRenderTrans( shape );
+		QVector<Vector3> world( nv );
+		for ( int vertex = 0; vertex < nv; vertex++ )
+			world[vertex] = wt * editVertexLocal( shape, vertex );
+
+		QVector<bool> front;
+		if ( !scene->xRay ) {
+			front.fill( false, nv );
+			Vector3 rayOrigin, rayDirection;
+			mouseRayWorld( to, rayOrigin, rayDirection );
+			for ( const Triangle & triangle : shape->triangles ) {
+				if ( triangle[0] >= nv || triangle[1] >= nv || triangle[2] >= nv )
+					continue;
+				Vector3 normal = Vector3::crossproduct( world[triangle[1]] - world[triangle[0]],
+					world[triangle[2]] - world[triangle[0]] );
+				if ( Vector3::dotproduct( normal, rayDirection ) < 0.0f ) {
+					front[triangle[0]] = true;
+					front[triangle[1]] = true;
+					front[triangle[2]] = true;
+				}
+			}
+		}
+
+		riggingWeightPaintScreen.resize( nv );
+		riggingWeightPaintCandidates.clear();
+		QSet<int> selected = pickedVertexRefs().value( riggingWeightPaintTarget );
+		auto cacheVertex = [&]( int vertex ) {
+			if ( vertex < 0 || vertex >= nv || ( !scene->xRay && !front.value( vertex ) ) )
+				return;
+			QPointF screen;
+			if ( worldToScreen( world.at( vertex ), screen ) ) {
+				riggingWeightPaintScreen[vertex] = screen;
+				riggingWeightPaintCandidates.append( vertex );
+			}
+		};
+		if ( selected.isEmpty() ) {
+			riggingWeightPaintCandidates.reserve( nv );
+			for ( int vertex = 0; vertex < nv; vertex++ )
+				cacheVertex( vertex );
+		} else {
+			riggingWeightPaintCandidates.reserve( selected.size() );
+			for ( int vertex : selected )
+				cacheVertex( vertex );
+		}
+		riggingWeightPaintProjectionValid = true;
+	}
+
+	QVector<int> vertices;
+	QVector<float> falloff;
+	float radius2 = riggingWeightPaintRadius * riggingWeightPaintRadius;
+	QPointF segment = to - from;
+	qreal segmentLength2 = segment.x() * segment.x() + segment.y() * segment.y();
+	vertices.reserve( riggingWeightPaintCandidates.size() );
+	falloff.reserve( riggingWeightPaintCandidates.size() );
+	auto testVertex = [&]( int vertex ) {
+		const QPointF & screen = riggingWeightPaintScreen.at( vertex );
+		qreal t = 0.0;
+		if ( segmentLength2 > 1.0e-6 ) {
+			QPointF fromVertex = screen - from;
+			t = qBound( qreal( 0.0 ),
+				( fromVertex.x() * segment.x() + fromVertex.y() * segment.y() ) / segmentLength2,
+				qreal( 1.0 ) );
+		}
+		QPointF delta = screen - ( from + segment * t );
+		float distance2 = float( delta.x() * delta.x() + delta.y() * delta.y() );
+		if ( distance2 > radius2 )
+			return;
+		float linear = 1.0f - std::sqrt( distance2 ) / riggingWeightPaintRadius;
+		float smooth = linear * linear * ( 3.0f - 2.0f * linear );
+		vertices.append( vertex );
+		falloff.append( smooth );
+	};
+	for ( int vertex : riggingWeightPaintCandidates )
+		testVertex( vertex );
+	if ( !vertices.isEmpty() )
+		emit riggingWeightBrushSample( riggingWeightPaintTarget, vertices, falloff,
+			riggingWeightPaintBrushMode, riggingWeightPaintWeight, riggingWeightPaintStrength );
+}
+
+void GLView::applyVertexPaintBrush( const QPointF & from, const QPointF & to )
+{
+	if ( !vertexPaintMode || !vertexPaintBrushEnabled || !model || !scene )
+		return;
+	Shape * shape = shapeForBlock( vertexPaintTarget );
+	if ( !shape || shape->isHidden() || shape->verts.isEmpty() )
+		return;
+
+	const int nv = shape->verts.size();
+	if ( !vertexPaintProjectionValid ) {
+		Transform wt = shapeRenderTrans( shape );
+		QVector<Vector3> world( nv );
+		for ( int vertex = 0; vertex < nv; vertex++ )
+			world[vertex] = wt * editVertexLocal( shape, vertex );
+
+		QVector<bool> front;
+		if ( !scene->xRay ) {
+			front.fill( false, nv );
+			Vector3 rayOrigin, rayDirection;
+			mouseRayWorld( to, rayOrigin, rayDirection );
+			for ( const Triangle & triangle : shape->triangles ) {
+				if ( triangle[0] >= nv || triangle[1] >= nv || triangle[2] >= nv )
+					continue;
+				Vector3 normal = Vector3::crossproduct( world[triangle[1]] - world[triangle[0]],
+					world[triangle[2]] - world[triangle[0]] );
+				if ( Vector3::dotproduct( normal, rayDirection ) < 0.0f ) {
+					front[triangle[0]] = true;
+					front[triangle[1]] = true;
+					front[triangle[2]] = true;
+				}
+			}
+		}
+
+		vertexPaintScreen.resize( nv );
+		vertexPaintCandidates.clear();
+		QSet<int> selected = pickedVertexRefs().value( vertexPaintTarget );
+		auto cacheVertex = [&]( int vertex ) {
+			if ( vertex < 0 || vertex >= nv || ( !scene->xRay && !front.value( vertex ) ) )
+				return;
+			QPointF screen;
+			if ( worldToScreen( world.at( vertex ), screen ) ) {
+				vertexPaintScreen[vertex] = screen;
+				vertexPaintCandidates.append( vertex );
+			}
+		};
+		if ( selected.isEmpty() ) {
+			vertexPaintCandidates.reserve( nv );
+			for ( int vertex = 0; vertex < nv; vertex++ )
+				cacheVertex( vertex );
+		} else {
+			vertexPaintCandidates.reserve( selected.size() );
+			for ( int vertex : selected )
+				cacheVertex( vertex );
+		}
+		vertexPaintProjectionValid = true;
+	}
+
+	QVector<int> vertices;
+	QVector<float> falloff;
+	const float radius2 = vertexPaintRadius * vertexPaintRadius;
+	QPointF segment = to - from;
+	qreal segmentLength2 = segment.x() * segment.x() + segment.y() * segment.y();
+	vertices.reserve( vertexPaintCandidates.size() );
+	falloff.reserve( vertexPaintCandidates.size() );
+	for ( int vertex : vertexPaintCandidates ) {
+		const QPointF & screen = vertexPaintScreen.at( vertex );
+		qreal t = 0.0;
+		if ( segmentLength2 > 1.0e-6 ) {
+			QPointF fromVertex = screen - from;
+			t = qBound( qreal( 0.0 ),
+				( fromVertex.x() * segment.x() + fromVertex.y() * segment.y() ) / segmentLength2,
+				qreal( 1.0 ) );
+		}
+		QPointF delta = screen - ( from + segment * t );
+		float distance2 = float( delta.x() * delta.x() + delta.y() * delta.y() );
+		if ( distance2 > radius2 )
+			continue;
+		float linear = 1.0f - std::sqrt( distance2 ) / vertexPaintRadius;
+		float smooth = linear * linear * ( 3.0f - 2.0f * linear );
+		vertices.append( vertex );
+		falloff.append( smooth );
+	}
+	if ( !vertices.isEmpty() )
+		emit vertexPaintBrushSample( vertexPaintTarget, vertices, falloff );
+}
+
+void GLView::applySegmentPaintBrush( const QPointF & from, const QPointF & to )
+{
+	if ( !segmentPaintMode || !segmentPaintBrushEnabled || !model || !scene ) return;
+	Shape * shape = shapeForBlock( segmentPaintTarget );
+	if ( !shape || shape->isHidden() || shape->triangles.isEmpty() ) return;
+	const int nt = shape->triangles.size();
+	const int nv = shape->verts.size();
+	if ( !segmentPaintProjectionValid ) {
+		Transform wt = shapeRenderTrans( shape );
+		QVector<Vector3> world( nv );
+		for ( int vertex = 0; vertex < nv; vertex++ )
+			world[vertex] = wt * editVertexLocal( shape, vertex );
+		QSet<int> selectedFaces;
+		for ( const PickedElement & pe : pickedElems )
+			if ( pe.shapeBlock == segmentPaintTarget && pe.type == 3 && pe.e0 >= 0 )
+				selectedFaces.insert( pe.e0 );
+		const bool masked = !pickedElems.isEmpty();
+		QSet<int> selectedVertices;
+		if ( masked && selectedFaces.isEmpty() )
+			selectedVertices = pickedVertexRefs().value( segmentPaintTarget );
+		segmentPaintScreen.resize( nt );
+		segmentPaintCandidates.clear();
+		Vector3 rayOrigin, rayDirection;
+		mouseRayWorld( to, rayOrigin, rayDirection );
+		for ( int triangleIndex = 0; triangleIndex < nt; triangleIndex++ ) {
+			const Triangle & triangle = shape->triangles.at( triangleIndex );
+			if ( triangle[0] >= nv || triangle[1] >= nv || triangle[2] >= nv ) continue;
+			if ( masked ) {
+				if ( !selectedFaces.isEmpty() && !selectedFaces.contains( triangleIndex ) ) continue;
+				if ( selectedFaces.isEmpty() && !selectedVertices.contains( triangle[0] )
+					&& !selectedVertices.contains( triangle[1] )
+					&& !selectedVertices.contains( triangle[2] ) ) continue;
+			}
+			Vector3 normal = Vector3::crossproduct( world[triangle[1]] - world[triangle[0]],
+				world[triangle[2]] - world[triangle[0]] );
+			if ( !scene->xRay && Vector3::dotproduct( normal, rayDirection ) >= 0.0f ) continue;
+			QPointF screen;
+			if ( worldToScreen( ( world[triangle[0]] + world[triangle[1]] + world[triangle[2]] ) / 3.0f, screen ) ) {
+				segmentPaintScreen[triangleIndex] = screen;
+				segmentPaintCandidates.append( triangleIndex );
+			}
+		}
+		segmentPaintProjectionValid = true;
+	}
+	QVector<int> triangles;
+	const float radius2 = segmentPaintRadius * segmentPaintRadius;
+	QPointF segment = to - from;
+	qreal length2 = segment.x() * segment.x() + segment.y() * segment.y();
+	for ( int triangleIndex : segmentPaintCandidates ) {
+		const QPointF & screen = segmentPaintScreen.at( triangleIndex );
+		qreal t = 0.0;
+		if ( length2 > 1.0e-6 ) {
+			QPointF d = screen - from;
+			t = qBound( qreal( 0.0 ),
+				( d.x() * segment.x() + d.y() * segment.y() ) / length2, qreal( 1.0 ) );
+		}
+		QPointF delta = screen - ( from + segment * t );
+		if ( float( delta.x() * delta.x() + delta.y() * delta.y() ) <= radius2 )
+			triangles.append( triangleIndex );
+	}
+	if ( !triangles.isEmpty() )
+		emit segmentPaintBrushSample( segmentPaintTarget, triangles );
+}
+
+void GLView::applyCircleSelect( const QPointF & pos, bool erase )
+{
+	if ( !model || !scene )
+		return;
+	float rad = circleSelectRadius;
+	float rad2 = rad * rad;
+	auto inCircleF = [&]( const QPointF & p ) {
+		QPointF d = p - pos;
+		return float( d.x() * d.x() + d.y() * d.y() ) <= rad2;
+	};
+
+	// view direction for back-face rejection when not x-raying
+	Vector3 rayO, rayD;
+	mouseRayWorld( pos, rayO, rayD );
+	bool xray = scene->xRay;
+
+	if ( !editMode ) {
+		// object mode: any vertex under the brush picks the shape
+		for ( Shape * s : scene->shapes ) {
+			if ( !s || s->isHidden() )
+				continue;
+			Transform wt = shapeRenderTrans( s );
+			bool inside = false;
+			QPointF sp2;
+			for ( const Vector3 & v : s->verts ) {
+				if ( worldToScreen( wt * v, sp2 ) && inCircleF( sp2 ) ) {
+					inside = true;
+					break;
+				}
+			}
+			if ( !inside && s->verts.isEmpty() )
+				inside = worldToScreen( wt * Vector3(), sp2 ) && inCircleF( sp2 );
+			if ( !inside )
+				continue;
+			if ( erase ) {
+				objSelection.remove( s->id() );
+				if ( objActive == s->id() )
+					objActive = objSelection.isEmpty() ? -1 : *objSelection.constBegin();
+			} else {
+				objSelection.insert( s->id() );
+			}
+		}
+		emit objectSelectionChanged();
+		update();
+		return;
+	}
+
+	// edit mode: verts / edges / faces under the brush per pick mode
+	for ( Shape * s : scene->shapes ) {
+		if ( !s || s->isHidden() || !editShapeBlocks.contains( s->id() ) )
+			continue;
+		Transform wt = shapeRenderTrans( s );
+		int nv = s->verts.size();
+		QVector<Vector3> wv( nv );
+		QVector<QPointF> sp( nv );
+		QVector<bool> in( nv, false ), ok( nv, false );
+		for ( int i = 0; i < nv; i++ ) {
+			wv[i] = wt * editVertexLocal( s, i );
+			ok[i] = worldToScreen( wv[i], sp[i] );
+			in[i] = ok[i] && inCircleF( sp[i] );
+		}
+		// front-facing test, same rule as box select
+		QVector<bool> tFront( s->triangles.size(), true );
+		QVector<bool> vFront;
+		if ( !xray ) {
+			vFront.fill( false, nv );
+			for ( int t = 0; t < s->triangles.size(); t++ ) {
+				const Triangle & tri = s->triangles.at( t );
+				if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+					continue;
+				Vector3 n = Vector3::crossproduct( wv[tri[1]] - wv[tri[0]], wv[tri[2]] - wv[tri[0]] );
+				bool front = Vector3::dotproduct( n, rayD ) < 0.0f;
+				tFront[t] = front;
+				if ( front ) {
+					vFront[tri[0]] = true;
+					vFront[tri[1]] = true;
+					vFront[tri[2]] = true;
+				}
+			}
+		}
+		auto vVis = [&]( int i ) { return xray || ( i < vFront.size() && vFront[i] ); };
+		auto applyPick = [&]( PickedElement & pe ) {
+			int at = pickedElems.indexOf( pe );
+			if ( erase ) {
+				if ( at >= 0 )
+					pickedElems.remove( at );
+			} else if ( at < 0 ) {
+				pickedElems.append( pe );
+			}
+		};
+
+		if ( pickMode & 1 ) {
+			for ( int i = 0; i < nv; i++ ) {
+				if ( in[i] && vVis( i ) ) {
+					PickedElement pe;
+					pe.shapeBlock = s->id();
+					pe.type = 1;
+					pe.e0 = i;
+					pe.e1 = -1;
+					pe.worldPos = wv[i];
+					pe.wA = pe.wB = pe.wC = wv[i];
+					applyPick( pe );
+				}
+			}
+		}
+		if ( pickMode & 2 ) {
+			QSet<qint64> seen;
+			for ( int t = 0; t < s->triangles.size(); t++ ) {
+				const Triangle & tri = s->triangles.at( t );
+				for ( int e = 0; e < 3; e++ ) {
+					int a = tri[e], b = tri[( e + 1 ) % 3];
+					if ( a >= nv || b >= nv )
+						continue;
+					int lo = std::min( a, b ), hi = std::max( a, b );
+					qint64 key = ( qint64( lo ) << 32 ) | quint32( hi );
+					if ( seen.contains( key ) )
+						continue;
+					seen.insert( key );
+					// the brush touches an edge if either endpoint or the
+					// midpoint falls inside the circle
+					bool touch = ( in[lo] && vVis( lo ) ) || ( in[hi] && vVis( hi ) );
+					if ( !touch && ok[lo] && ok[hi] && vVis( lo ) && vVis( hi ) )
+						touch = inCircleF( ( sp[lo] + sp[hi] ) / 2.0 );
+					if ( touch ) {
+						PickedElement pe;
+						pe.shapeBlock = s->id();
+						pe.type = 2;
+						pe.e0 = lo;
+						pe.e1 = hi;
+						pe.wA = wv[lo];
+						pe.wB = wv[hi];
+						pe.wC = pe.wA;
+						pe.worldPos = ( wv[lo] + wv[hi] ) * 0.5f;
+						applyPick( pe );
+					}
+				}
+			}
+		}
+		if ( pickMode & 4 ) {
+			for ( int t = 0; t < s->triangles.size(); t++ ) {
+				const Triangle & tri = s->triangles.at( t );
+				if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+					continue;
+				if ( !xray && !tFront[t] )
+					continue;
+				Vector3 ctr = ( wv[tri[0]] + wv[tri[1]] + wv[tri[2]] ) / 3.0f;
+				QPointF cp;
+				bool touch = worldToScreen( ctr, cp ) && inCircleF( cp );
+				for ( int e = 0; e < 3 && !touch; e++ )
+					touch = in[tri[e]];
+				if ( touch ) {
+					PickedElement pe;
+					pe.shapeBlock = s->id();
+					pe.type = 3;
+					pe.e0 = t;
+					pe.e1 = -1;
+					pe.wA = wv[tri[0]];
+					pe.wB = wv[tri[1]];
+					pe.wC = wv[tri[2]];
+					pe.worldPos = ctr;
+					Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
+					n.normalize();
+					pe.worldNormal = n;
+					applyPick( pe );
+				}
+			}
+		}
+	}
+	update();
+}
+
+void GLView::invertSelection()
+{
+	if ( !model || !scene )
+		return;
+	if ( riggingWeightPaintMode )
+		setRiggingWeightPaintBrushEnabled( false );
+	if ( vertexPaintMode )
+		setVertexPaintBrushEnabled( false );
+	if ( segmentPaintMode )
+		setSegmentPaintBrushEnabled( false );
+	recordSelection();
+
+	if ( !editMode ) {
+		// object mode: every selectable shape not currently selected
+		QSet<int> universe;
+		for ( Shape * s : scene->shapes )
+			if ( s && !s->isHidden() )
+				universe.insert( s->id() );
+		QSet<int> sel = universe - objSelection;
+		objSelection = sel;
+		objActive = ( objActive >= 0 && sel.contains( objActive ) )
+		            ? objActive : ( sel.isEmpty() ? -1 : *sel.constBegin() );
+		emit objectSelectionChanged();
+		emit gizmoStatus( tr( "Inverted selection (%1 object(s))" ).arg( sel.size() ) );
+		update();
+		return;
+	}
+
+	// edit mode: invert per enabled pick mode over the edited shapes
+	QHash<int, QSet<int>> selV, selF;
+	QHash<int, QSet<qint64>> selE;
+	for ( const PickedElement & pe : pickedElems ) {
+		if ( pe.type == 1 )
+			selV[pe.shapeBlock].insert( pe.e0 );
+		else if ( pe.type == 3 )
+			selF[pe.shapeBlock].insert( pe.e0 );
+		else if ( pe.type == 2 ) {
+			int lo = std::min( pe.e0, pe.e1 ), hi = std::max( pe.e0, pe.e1 );
+			selE[pe.shapeBlock].insert( ( qint64( lo ) << 32 ) | quint32( hi ) );
+		}
+	}
+
+	QVector<PickedElement> inv;
+	for ( Shape * s : scene->shapes ) {
+		if ( !s || s->isHidden() || !editShapeBlocks.contains( s->id() ) )
+			continue;
+		Transform wt = shapeRenderTrans( s );
+		int nv = s->verts.size();
+		if ( pickMode & 1 ) {
+			const QSet<int> & have = selV.value( s->id() );
+			for ( int i = 0; i < nv; i++ ) {
+				if ( have.contains( i ) )
+					continue;
+				PickedElement pe;
+				pe.shapeBlock = s->id(); pe.type = 1; pe.e0 = i; pe.e1 = -1;
+				pe.worldPos = wt * editVertexLocal( s, i ); pe.wA = pe.wB = pe.wC = pe.worldPos;
+				inv.append( pe );
+			}
+		}
+		if ( pickMode & 4 ) {
+			const QSet<int> & have = selF.value( s->id() );
+			for ( int t = 0; t < s->triangles.size(); t++ ) {
+				const Triangle & tri = s->triangles.at( t );
+				if ( have.contains( t ) || tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
+					continue;
+				PickedElement pe;
+				pe.shapeBlock = s->id(); pe.type = 3; pe.e0 = t; pe.e1 = -1;
+				pe.wA = wt * editVertexLocal( s, tri[0] );
+				pe.wB = wt * editVertexLocal( s, tri[1] );
+				pe.wC = wt * editVertexLocal( s, tri[2] );
+				pe.worldPos = ( pe.wA + pe.wB + pe.wC ) / 3.0f;
+				inv.append( pe );
+			}
+		}
+		if ( pickMode & 2 ) {
+			const QSet<qint64> & have = selE.value( s->id() );
+			QSet<qint64> seen;
+			for ( int t = 0; t < s->triangles.size(); t++ ) {
+				const Triangle & tri = s->triangles.at( t );
+				for ( int e = 0; e < 3; e++ ) {
+					int a = tri[e], b = tri[( e + 1 ) % 3];
+					if ( a >= nv || b >= nv )
+						continue;
+					int lo = std::min( a, b ), hi = std::max( a, b );
+					qint64 key = ( qint64( lo ) << 32 ) | quint32( hi );
+					if ( seen.contains( key ) )
+						continue;
+					seen.insert( key );
+					if ( have.contains( key ) )
+						continue;
+					PickedElement pe;
+					pe.shapeBlock = s->id(); pe.type = 2; pe.e0 = lo; pe.e1 = hi;
+					pe.wA = wt * editVertexLocal( s, lo ); pe.wB = wt * editVertexLocal( s, hi ); pe.wC = pe.wA;
+					pe.worldPos = ( pe.wA + pe.wB ) * 0.5f;
+					inv.append( pe );
+				}
+			}
+		}
+	}
+	pickedElems = inv;
+	emit gizmoStatus( tr( "Inverted selection (%1 element(s))" ).arg( pickedElems.size() ) );
+	update();
+}
+
+// Selection undo: a small dedicated history so any selection (click, box, invert,
+// select-all) can be reverted with Ctrl+Z. It resets whenever the model itself
+// changes (detected via the undo-stack index) so Ctrl+Z after an edit undoes the
+// edit, not a stale selection - and it never dirties the document.
+static void tlSyncSelUndo( NifModel * model, QVector<GLView::SelState> & u,
+                           QVector<GLView::SelState> & r, int & syncedIndex )
+{
+	int mi = ( model && model->undoStack ) ? model->undoStack->index() : -1;
+	if ( mi != syncedIndex ) {
+		u.clear();
+		r.clear();
+		syncedIndex = mi;
+	}
+}
+
+void GLView::recordSelection()
+{
+	tlSyncSelUndo( model, selUndo, selRedo, selUndoModelIndex );
+	selRedo.clear();
+	selUndo.append( SelState{ pickedElems, objSelection, objActive } );
+	if ( selUndo.size() > 128 )
+		selUndo.remove( 0, selUndo.size() - 128 );
+	// Every element-selection mutator snapshots first, so this is the one
+	// choke point where external mirrors (the UV editor) can be notified.
+	// Deferred: the mutation itself happens after this call returns.
+	scheduleElementSelectionNotify();
+}
+
+void GLView::scheduleElementSelectionNotify()
+{
+	if ( elemSelNotifyPending )
+		return;
+	elemSelNotifyPending = true;
+	QTimer::singleShot( 0, this, [this]() {
+		elemSelNotifyPending = false;
+		emit elementSelectionChanged();
+	} );
+}
+
+void GLView::setElementSelectionExternal( int shapeBlock, const QVector<PickedElement> & elems, int mode )
+{
+	if ( !editMode )
+		return;
+	recordSelection();
+	QVector<PickedElement> kept;
+	kept.reserve( pickedElems.size() + elems.size() );
+	for ( const PickedElement & pe : std::as_const( pickedElems ) )
+		if ( pe.shapeBlock != shapeBlock )
+			kept << pe;
+	kept += elems;
+	pickedElems = kept;
+	if ( mode >= 1 && mode <= 3 && pickMode != mode ) {
+		pickMode = mode;
+		emit pickModeChanged( mode );
+	}
+	refreshPickedElementPositions();
+	update();
+}
+
+void GLView::setElementPickMode( int mode )
+{
+	if ( mode < 0 || mode > 3 || mode == pickMode )
+		return;
+	pickMode = mode;
+	emit pickModeChanged( mode );
+	update();
+}
+
+bool GLView::hasSelectionUndo()
+{
+	tlSyncSelUndo( model, selUndo, selRedo, selUndoModelIndex );
+	return !selUndo.isEmpty();
+}
+
+bool GLView::hasSelectionRedo()
+{
+	tlSyncSelUndo( model, selUndo, selRedo, selUndoModelIndex );
+	return !selRedo.isEmpty();
+}
+
+bool GLView::selectionUndo()
+{
+	if ( !hasSelectionUndo() )
+		return false;
+	selRedo.append( SelState{ pickedElems, objSelection, objActive } );
+	SelState s = selUndo.takeLast();
+	pickedElems = s.picked;
+	objSelection = s.objSel;
+	objActive = s.objActive;
+	if ( !editMode )
+		emit objectSelectionChanged();
+	scheduleElementSelectionNotify();
+	emit gizmoStatus( tr( "Undo selection" ) );
+	update();
+	return true;
+}
+
+bool GLView::selectionRedo()
+{
+	if ( !hasSelectionRedo() )
+		return false;
+	selUndo.append( SelState{ pickedElems, objSelection, objActive } );
+	SelState s = selRedo.takeLast();
+	pickedElems = s.picked;
+	objSelection = s.objSel;
+	objActive = s.objActive;
+	if ( !editMode )
+		emit objectSelectionChanged();
+	scheduleElementSelectionNotify();
+	emit gizmoStatus( tr( "Redo selection" ) );
+	update();
+	return true;
+}
+
 void GLView::hideSelected()
 {
 	if ( !model || !scene->currentBlock.isValid() )
@@ -5097,6 +10055,13 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 	const float cosThresh = std::cos( deg2rad( std::max( maxAngleDeg, 0.0f ) ) );
 	if ( !editMode || pickedElems.isEmpty() )
 		return;
+	if ( riggingWeightPaintMode )
+		setRiggingWeightPaintBrushEnabled( false );
+	if ( vertexPaintMode )
+		setVertexPaintBrushEnabled( false );
+	if ( segmentPaintMode )
+		setSegmentPaintBrushEnabled( false );
+	QVector<PickedElement> preGrowSel = pickedElems;	// restored by the redo panel
 
 	// seed triangles and vertices per shape from the current selection
 	QHash<int, QSet<int>> seedTris, seedVerts;
@@ -5117,7 +10082,11 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 	for ( int k : seedVerts.keys() )
 		shapes.insert( k );
 
-	int outType = flatOnly ? 3 : ( pickMode ? pickMode : 1 );
+	// pickMode is a bitmask (1 vertex, 2 edge, 4 face), while PickedElement
+	// stores element types as 1/2/3. Passing face bit 4 through as an element
+	// type previously fell into the edge branch, making Select Linked appear to
+	// do nothing in face mode.
+	int outType = flatOnly ? 3 : ( ( pickMode & 4 ) ? 3 : ( ( pickMode & 2 ) ? 2 : 1 ) );
 
 	for ( int sb : shapes ) {
 		Shape * s = shapeForBlock( sb );
@@ -5138,7 +10107,8 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 
 		auto triNormal = [&]( int ti ) {
 			const Triangle & t = s->triangles.at( ti );
-			Vector3 n = Vector3::crossproduct( s->verts[t[1]] - s->verts[t[0]], s->verts[t[2]] - s->verts[t[0]] );
+			Vector3 n = Vector3::crossproduct( editVertexLocal( s, t[1] ) - editVertexLocal( s, t[0] ),
+				editVertexLocal( s, t[2] ) - editVertexLocal( s, t[0] ) );
 			n.normalize();
 			return n;
 		};
@@ -5180,9 +10150,9 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 				pe.shapeBlock = sb;
 				pe.type = 3;
 				pe.e0 = ti;
-				pe.wA = wt * s->verts[t[0]];
-				pe.wB = wt * s->verts[t[1]];
-				pe.wC = wt * s->verts[t[2]];
+				pe.wA = wt * editVertexLocal( s, t[0] );
+				pe.wB = wt * editVertexLocal( s, t[1] );
+				pe.wC = wt * editVertexLocal( s, t[2] );
 				pe.worldPos = ( pe.wA + pe.wB + pe.wC ) / 3.0f;
 				Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
 				n.normalize();
@@ -5203,7 +10173,7 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 				pe.shapeBlock = sb;
 				pe.type = 1;
 				pe.e0 = vi;
-				pe.worldPos = wt * s->verts[vi];
+				pe.worldPos = wt * editVertexLocal( s, vi );
 				pe.wA = pe.wB = pe.wC = pe.worldPos;
 				if ( !already( pe ) )
 					pickedElems.append( pe );
@@ -5223,8 +10193,8 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 				pe.type = 2;
 				pe.e0 = ed.first;
 				pe.e1 = ed.second;
-				pe.wA = wt * s->verts[ed.first];
-				pe.wB = wt * s->verts[ed.second];
+				pe.wA = wt * editVertexLocal( s, ed.first );
+				pe.wB = wt * editVertexLocal( s, ed.second );
 				pe.wC = pe.wA;
 				pe.worldPos = ( pe.wA + pe.wB ) / 2.0f;
 				if ( !already( pe ) )
@@ -5233,11 +10203,18 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 		}
 	}
 
-	if ( flatOnly && pickMode != 3 ) {
-		pickMode = 3;	// switch to face mode without clearing the new selection
+	if ( flatOnly && pickMode != 4 ) {
+		pickMode = 4;	// switch to face mode without clearing the new selection
 		emit pickModeChanged( pickMode );
 	}
 	emit gizmoStatus( tr( "Selected linked: %1 element(s)" ).arg( pickedElems.size() ) );
+	// arm the redo panel (only the by-angle variant) so the sharpness can be tweaked
+	if ( flatOnly && !opReapplying ) {
+		lastOpKind = 2;
+		lastOpParam = maxAngleDeg;
+		lastOpSeed = preGrowSel;
+		emit operatorPanel( 2, maxAngleDeg );
+	}
 	update();
 }
 
@@ -5263,7 +10240,8 @@ void GLView::snapSelectionToGrid()
 		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
 			QModelIndex iShape = model->getBlockIndex( it.key() );
 			Node * n = scene->getNode( model, iShape );
-			if ( !n )
+			Shape * shape = shapeForBlock( it.key() );
+			if ( !n || !shape )
 				continue;
 			Transform wt = shapeRenderTrans( n );
 			float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
@@ -5271,11 +10249,13 @@ void GLView::snapSelectionToGrid()
 				Vector3 local;
 				if ( !tlGetVertexLocal( model, iShape, vi, local ) )
 					continue;
-				Vector3 world = wt * local;
+				Vector3 world = wt * ( editDeformedCageActive() ? shape->skinVertex( vi, local ) : local );
 				for ( int c = 0; c < 3; c++ )
 					world[c] = std::round( world[c] / step ) * step;
-				Vector3 nl = wt.rotation.inverted() * ( ( world - wt.translation ) * ( 1.0f / sc ) );
-				tlSetVertexLocal( model, iShape, vi, nl );
+				Vector3 cageLocal = wt.rotation.inverted() * ( ( world - wt.translation ) * ( 1.0f / sc ) );
+				Vector3 rawLocal;
+				if ( editVertexRawLocal( shape, vi, cageLocal, rawLocal ) )
+					tlSetVertexLocal( model, iShape, vi, rawLocal );
 			}
 		}
 	} );
@@ -5284,15 +10264,18 @@ void GLView::snapSelectionToGrid()
 
 void GLView::showSnapMenu()
 {
-	QMenu m;
+	AutoCloseMenu m;
 	m.addSection( tr( "Snap" ) );
 	QAction * aSelGrid = m.addAction( tr( "Selection to Grid" ) );
 	QAction * aSelCur  = m.addAction( tr( "Selection to Cursor" ) );
 	QAction * aSelOrig = m.addAction( editMode ? tr( "Selection to Node Origin" ) : tr( "Selection to Active" ) );
+	// edit mode: the active element (last picked) is a separate snap target
+	QAction * aSelAct = editMode ? m.addAction( tr( "Selection to Active" ) ) : nullptr;
 	m.addSeparator();
 	QAction * aCurSel  = m.addAction( tr( "Cursor to Selected" ) );
 	QAction * aCurOrig = m.addAction( tr( "Cursor to World Origin" ) );
 	QAction * aCurNode = m.addAction( editMode ? tr( "Cursor to Node Origin" ) : tr( "Cursor to Active" ) );
+	QAction * aCurAct = editMode ? m.addAction( tr( "Cursor to Active" ) ) : nullptr;
 	QAction * aCurGrid = m.addAction( tr( "Cursor to Grid" ) );
 
 	// object mode works on the selected objects' origins instead of vertices
@@ -5300,6 +10283,10 @@ void GLView::showSnapMenu()
 	aSelGrid->setEnabled( hasSel );
 	aSelCur->setEnabled( hasSel );
 	aSelOrig->setEnabled( editMode ? hasSel : ( objActive >= 0 && objSelection.size() > 1 ) );
+	if ( aSelAct )
+		aSelAct->setEnabled( hasSel && pickedElems.size() > 1 );
+	if ( aCurAct )
+		aCurAct->setEnabled( hasSel );
 	if ( !editMode ) {
 		aCurSel->setEnabled( hasSel );
 		aCurNode->setEnabled( objActive >= 0 );
@@ -5377,6 +10364,15 @@ void GLView::showSnapMenu()
 					snapBlockWorldPos( b, tgt );
 			}
 		}
+	} else if ( aSelAct && r == aSelAct ) {
+		// collapse the selection onto the active (last picked) element
+		Vector3 saved = cursorPos;
+		cursorPos = pickedElems.constLast().worldPos;
+		movePickedVertsToCursor();	// reuse the move-to-cursor path
+		cursorPos = saved;
+	} else if ( aCurAct && r == aCurAct ) {
+		cursorPos = pickedElems.constLast().worldPos;
+		update();
 	} else if ( r == aCurSel ) {
 		cursorPos = editMode ? pickedMedian() : objSelectionAvg();
 		update();
@@ -5496,30 +10492,19 @@ void GLView::setSceneSequence( const QString & seqname )
 // TODO: Multiple user views, ala Recent Files
 void GLView::saveUserView()
 {
-	QSettings settings;
-	settings.beginGroup( "GLView" );
-	settings.beginGroup( "User View" );
-	settings.setValue( "RotX", Rot[0] );
-	settings.setValue( "RotY", Rot[1] );
-	settings.setValue( "RotZ", Rot[2] );
-	settings.setValue( "PosX", Pos[0] );
-	settings.setValue( "PosY", Pos[1] );
-	settings.setValue( "PosZ", Pos[2] );
-	settings.setValue( "Dist", Dist );
-	settings.endGroup();
-	settings.endGroup();
+	userViewRot = Rot;
+	userViewPos = Pos;
+	userViewDist = Dist;
+	userViewSaved = true;
 }
 
 void GLView::loadUserView()
 {
-	QSettings settings;
-	settings.beginGroup( "GLView" );
-	settings.beginGroup( "User View" );
-	setRotation( settings.value( "RotX" ).toDouble(), settings.value( "RotY" ).toDouble(), settings.value( "RotZ" ).toDouble() );
-	setPosition( settings.value( "PosX" ).toDouble(), settings.value( "PosY" ).toDouble(), settings.value( "PosZ" ).toDouble() );
-	setDistance( settings.value( "Dist" ).toDouble() );
-	settings.endGroup();
-	settings.endGroup();
+	if ( !userViewSaved )
+		return;
+	setRotation( userViewRot[0], userViewRot[1], userViewRot[2] );
+	setPosition( userViewPos );
+	setDistance( userViewDist );
 }
 
 inline bool GLView::kbd( int n ) const
@@ -5892,6 +10877,11 @@ void GLView::saveImage()
 
 void GLView::contextMenuEvent( QContextMenuEvent * e )
 {
+	// Shift+RMB is the 3D-cursor placement click (Blender), not a menu
+	if ( e->reason() == QContextMenuEvent::Mouse && ( e->modifiers() & Qt::ShiftModifier ) ) {
+		e->accept();
+		return;
+	}
 	if ( e->reason() == QContextMenuEvent::Keyboard || ( pressPos - lastPos ).manhattanLength() <= 10 ) {
 		mouseButtonState = 0;
 		contextMenuShiftModifier = bool( e->modifiers() & Qt::ShiftModifier );
@@ -6084,6 +11074,72 @@ int GLView::convertKeyCode( int n ) const
 
 void GLView::keyPressEvent( QKeyEvent * event )
 {
+	const Qt::KeyboardModifiers mods = event->modifiers();
+	if ( segmentPaintMode && event->key() == Qt::Key_Tab
+		&& !( mods & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		setSegmentPaintMode( false );
+		return;
+	}
+	if ( segmentPaintMode && event->key() == Qt::Key_Escape
+		&& !boxSelecting && !circleSelecting ) {
+		setSegmentPaintMode( false );
+		return;
+	}
+	if ( vertexPaintMode && event->key() == Qt::Key_Tab
+		&& !( mods & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		setVertexPaintMode( false );
+		return;
+	}
+	if ( vertexPaintMode && event->key() == Qt::Key_Escape
+		&& !boxSelecting && !circleSelecting ) {
+		setVertexPaintMode( false );
+		return;
+	}
+	if ( riggingWeightPaintMode && event->key() == Qt::Key_Tab
+		&& !( mods & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+		setRiggingWeightPaintMode( false );
+		return;
+	}
+	if ( riggingWeightPaintMode && event->key() == Qt::Key_X
+		&& ( mods & Qt::ControlModifier )
+		&& !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		if ( !event->isAutoRepeat() )
+			fillRiggingWeightSelection();
+		return;
+	}
+	if ( segmentPaintMode && event->key() == Qt::Key_X
+		&& ( mods & Qt::ControlModifier )
+		&& !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		if ( !event->isAutoRepeat() )
+			fillSegmentPaintSelection();
+		return;
+	}
+	if ( riggingWeightPaintMode && event->key() == Qt::Key_Escape
+		&& !boxSelecting && !circleSelecting ) {
+		setRiggingWeightPaintMode( false );
+		return;
+	}
+	// Escape disarms an armed / in-progress box select (Blender)
+	if ( boxSelecting && event->key() == Qt::Key_Escape ) {
+		boxSelecting = false;
+		boxSelectDrag = false;
+		unsetCursor();
+		emit gizmoStatus( tr( "Box select cancelled" ) );
+		update();
+		return;
+	}
+
+	// Escape exits the circle-select brush
+	if ( circleSelecting && event->key() == Qt::Key_Escape ) {
+		circleSelecting = false;
+		circlePainting = false;
+		circleErasing = false;
+		unsetCursor();
+		emit gizmoStatus( QString() );
+		update();
+		return;
+	}
+
 	// modal transform gizmo
 	if ( gizmoMode ) {
 		// Blender: G/R/S during a gesture switches the transform mode,
@@ -6170,15 +11226,27 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			}
 			return;
 		default:
-			if ( ( event->key() >= Qt::Key_0 && event->key() <= Qt::Key_9 )
-				|| event->key() == Qt::Key_Period || event->key() == Qt::Key_Comma ) {
-				if ( gizmoNumCur < gizmoNum.size() ) {
-					QChar c = ( event->key() == Qt::Key_Comma ) ? QLatin1Char( '.' )
-					          : QChar( (ushort)( event->key() == Qt::Key_Period ? '.' : '0' + ( event->key() - Qt::Key_0 ) ) );
-					if ( c != QLatin1Char( '.' ) || !gizmoNum[gizmoNumCur].contains( QLatin1Char( '.' ) ) )
-						gizmoNum[gizmoNumCur].append( c );
-					gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
-				}
+			// Use the produced text as well as Qt's key code.  In particular,
+			// keypad decimal keys and non-English keyboard layouts do not always
+			// arrive as Key_Period/Key_Comma even though they type '.' or ','.
+			QChar c;
+			if ( event->key() >= Qt::Key_0 && event->key() <= Qt::Key_9 )
+				c = QChar( ushort( '0' + ( event->key() - Qt::Key_0 ) ) );
+			else if ( event->key() == Qt::Key_Period || event->key() == Qt::Key_Comma )
+				c = QLatin1Char( '.' );
+			else if ( !event->text().isEmpty() ) {
+				const QChar typed = event->text().at( 0 );
+				if ( typed.isDigit() )
+					c = typed;
+				else if ( typed == QLatin1Char( '.' ) || typed == QLatin1Char( ',' ) )
+					c = QLatin1Char( '.' );
+			}
+
+			if ( !c.isNull() && gizmoNumCur < gizmoNum.size() ) {
+				QString & s = gizmoNum[gizmoNumCur];
+				if ( c != QLatin1Char( '.' ) || !s.contains( QLatin1Char( '.' ) ) )
+					s.append( c );
+				gizmoUpdate( mapFromGlobal( QCursor::pos() ), event->modifiers() );
 			}
 			return;
 		}
@@ -6204,6 +11272,19 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		return;
 	}
 
+	// Blender hierarchy shortcuts in object mode.
+	if ( !editMode && event->key() == Qt::Key_P ) {
+		Qt::KeyboardModifiers mods = event->modifiers();
+		if ( ( mods & Qt::ControlModifier ) && !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+			showParentMenu();
+			return;
+		}
+		if ( ( mods & Qt::AltModifier ) && !( mods & ( Qt::ControlModifier | Qt::ShiftModifier ) ) ) {
+			showClearParentMenu();
+			return;
+		}
+	}
+
 	// edit-mode select-linked (Ctrl+L) and linked flat faces (Shift+Ctrl+Alt+F)
 	if ( editMode ) {
 		Qt::KeyboardModifiers mods = event->modifiers();
@@ -6214,18 +11295,21 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		}
 		if ( event->key() == Qt::Key_F && ( mods & Qt::ControlModifier )
 			&& ( mods & Qt::AltModifier ) && ( mods & Qt::ShiftModifier ) ) {
-			selectLinked( true );
+			// Blender "Select Linked Flat Faces": grow across faces within the
+			// sharpness angle; the redo panel lets you tweak the angle afterwards
+			selectLinked( true, ( lastOpKind == 2 ) ? lastOpParam : 30.0f );
 			return;
 		}
 		// P: Separate menu (Blender)
-		if ( event->key() == Qt::Key_P && !( mods & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && event->key() == Qt::Key_P
+			&& !( mods & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
 			showSeparateMenu();
 			return;
 		}
 	}
 
 	// Shift+D: duplicate the selection and start a move (object + edit mode)
-	if ( event->key() == Qt::Key_D && ( event->modifiers() & Qt::ShiftModifier )
+	if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && event->key() == Qt::Key_D && ( event->modifiers() & Qt::ShiftModifier )
 		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) && model ) {
 		duplicateSelection();
 		return;
@@ -6262,67 +11346,15 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	if ( view != ViewWalk && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
 		// Shift+S: snap pie (object and edit mode, Blender) - must beat the
 		// plain S scale shortcut
-		if ( event->key() == Qt::Key_S && ( event->modifiers() & Qt::ShiftModifier ) && model ) {
+		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && event->key() == Qt::Key_S
+			&& ( event->modifiers() & Qt::ShiftModifier ) && model ) {
 			showSnapMenu();
 			return;
 		}
 
 		// A: select all / deselect all (Blender), in object and edit mode
 		if ( event->key() == Qt::Key_A && !( event->modifiers() & Qt::ShiftModifier ) && !freeCamera && model ) {
-			if ( editMode ) {
-				if ( !pickedElems.isEmpty() ) {
-					pickedElems.clear();
-				} else {
-					for ( int wb : editShapeBlocks ) {
-						Shape * sp = shapeForBlock( wb );
-						if ( !sp )
-							continue;
-						Transform wt = shapeRenderTrans( sp );
-						int nv = sp->verts.size();
-						if ( pickMode & 4 ) {
-							for ( int t = 0; t < sp->triangles.size(); t++ ) {
-								const Triangle & tri = sp->triangles.at( t );
-								if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv )
-									continue;
-								PickedElement pe;
-								pe.shapeBlock = wb;
-								pe.type = 3;
-								pe.e0 = t;
-								pe.wA = wt * sp->verts[tri[0]];
-								pe.wB = wt * sp->verts[tri[1]];
-								pe.wC = wt * sp->verts[tri[2]];
-								pe.worldPos = ( pe.wA + pe.wB + pe.wC ) * ( 1.0f / 3.0f );
-								pickedElems.append( pe );
-							}
-						} else {
-							for ( int vi = 0; vi < nv; vi++ ) {
-								PickedElement pe;
-								pe.shapeBlock = wb;
-								pe.type = 1;
-								pe.e0 = vi;
-								pe.worldPos = wt * sp->verts[vi];
-								pe.wA = pe.worldPos;
-								pickedElems.append( pe );
-							}
-						}
-					}
-				}
-				update();
-			} else {
-				if ( !objSelection.isEmpty() ) {
-					objSelection.clear();
-					objActive = -1;
-				} else {
-					for ( Shape * sp : scene->shapes ) {
-						if ( sp && !sp->isHidden() ) {
-							objSelection.insert( sp->id() );
-							objActive = sp->id();
-						}
-					}
-				}
-				emit objectSelectionChanged();
-				update();
-			}
+			selectAll( 0 );
 			return;
 		}
 
@@ -6334,7 +11366,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		else if ( event->key() == Qt::Key_S )
 			m = 3;
 
-		if ( m ) {
+		if ( m && !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode ) {
 			// with picked elements, G/R/S transforms them; otherwise the node
 			if ( editMode && !pickedElems.isEmpty() && gizmoBeginElement( m ) )
 				return;
@@ -6342,9 +11374,10 @@ void GLView::keyPressEvent( QKeyEvent * event )
 				return;
 		}
 
-		// delete picked vertices / edges / faces
-		if ( ( event->key() == Qt::Key_Delete || event->key() == Qt::Key_X ) && !pickedElems.isEmpty() ) {
-			deletePickedElements();
+		// delete picked vertices / edges / faces (Blender X / Delete menu)
+		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && ( event->key() == Qt::Key_Delete || event->key() == Qt::Key_X )
+			&& editMode && !pickedElems.isEmpty() ) {
+			showDeleteMenu();
 			return;
 		}
 
@@ -6357,6 +11390,12 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		else if ( event->key() == Qt::Key_3 )
 			pm = 4;	// face bit
 		if ( pm && editMode ) {
+			if ( riggingWeightPaintMode )
+				setRiggingWeightPaintBrushEnabled( false );
+			if ( vertexPaintMode )
+				setVertexPaintBrushEnabled( false );
+			if ( segmentPaintMode )
+				setSegmentPaintBrushEnabled( false );
 			// Shift extends the enabled modes (multi-mode), plain sets a single one
 			if ( event->modifiers() & Qt::ShiftModifier )
 				setPickMode( pickMode ^ pm );
@@ -6369,8 +11408,18 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			if ( event->modifiers() & Qt::ShiftModifier )
 				cursorPos = pickedElems.isEmpty() ? Vector3() : pickedMedian();
 			else
-				placeCursor( mapFromGlobal( QCursor::pos() ) );
+				beginCircleSelect();	// cursor placement moved to Shift+RMB (Blender)
 			update();
+			return;
+		}
+		// Ctrl+= / Ctrl+- grow / shrink the selection (Blender Select More/Less)
+		if ( ( event->modifiers() & Qt::ControlModifier )
+			&& ( event->key() == Qt::Key_Plus || event->key() == Qt::Key_Equal ) ) {
+			selectMoreLess( true );
+			return;
+		}
+		if ( ( event->modifiers() & Qt::ControlModifier ) && event->key() == Qt::Key_Minus ) {
+			selectMoreLess( false );
 			return;
 		}
 		if ( event->key() == Qt::Key_Escape && !pickedElems.isEmpty() ) {
@@ -6378,6 +11427,20 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			update();
 			return;
 		}
+	}
+
+	// C arms circle select in object mode too (edit mode handles it above)
+	if ( event->key() == Qt::Key_C && !editMode && model
+		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		beginCircleSelect();
+		return;
+	}
+
+	// Numpad-. (or plain .) frames the current selection (Blender)
+	if ( event->key() == Qt::Key_Period && model
+		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		frameSelected();
+		return;
 	}
 
 	// Blender-like free camera toggle (only reached when entering; the lockout
@@ -6457,12 +11520,34 @@ void GLView::mouseDoubleClickEvent( QMouseEvent * )
 void GLView::mouseMoveEvent( QMouseEvent * event )
 {
 	if ( gizmoMode ) {
+		// Blender: the drag is unbounded — the mouse is grabbed for the whole
+		// gesture, and at a screen edge the cursor wraps to the opposite side.
+		// The teleport jump is accumulated in gizmoWrapOffset so the position
+		// fed to the gesture stays continuous.
+		if ( QScreen * scr = screen() ) {
+			QRect sg = scr->geometry();
+			QPoint gl( int( event->globalPosition().x() ), int( event->globalPosition().y() ) );
+			QPoint wrapped = gl;
+			if ( gl.x() <= sg.left() )
+				wrapped.setX( sg.right() - 1 );
+			else if ( gl.x() >= sg.right() )
+				wrapped.setX( sg.left() + 1 );
+			if ( gl.y() <= sg.top() )
+				wrapped.setY( sg.bottom() - 1 );
+			else if ( gl.y() >= sg.bottom() )
+				wrapped.setY( sg.top() + 1 );
+			if ( wrapped != gl ) {
+				gizmoWrapOffset += gl - wrapped;
+				QCursor::setPos( scr, wrapped );
+			}
+		}
 		auto gp = getQMouseEventPosition( event );
-		gizmoUpdate( QPoint( (int)gp.x(), (int)gp.y() ), event->modifiers() );
+		gizmoUpdate( QPoint( (int)gp.x(), (int)gp.y() ) + gizmoWrapOffset, event->modifiers() );
 		return;
 	}
 
-	// free camera: mouse looks around the eye (first person), cursor recentres
+	// Fly look has priority over every modal viewport tool. Weight Paint stays
+	// active underneath and resumes when fly mode exits.
 	if ( freeCamera ) {
 		if ( !isActive() )
 			requestActivate();	// regain key focus so WASD keeps working
@@ -6475,6 +11560,85 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 			QCursor::setPos( mapToGlobal( QPoint( int( c.x() ), int( c.y() ) ) ) );
 			update();
 		}
+		return;
+	}
+
+	// Rigging weight paint: one swept pass covers the full segment between mouse
+	// events. This stays continuous without projecting every vertex once per
+	// synthetic dab. MMB is allowed through to the shared orbit/pan path below.
+	if ( riggingWeightPaintMode && riggingWeightPaintBrushEnabled ) {
+		riggingWeightPaintPos = getQMouseEventPosition( event );
+		if ( riggingWeightPaintStroke ) {
+			auto now = std::chrono::steady_clock::now();
+			if ( std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - riggingWeightPaintSampleTime ).count() < 8 ) {
+				update();
+				return;
+			}
+			applyRiggingWeightPaintBrush( riggingWeightPaintLastSample, riggingWeightPaintPos );
+			riggingWeightPaintLastSample = riggingWeightPaintPos;
+			riggingWeightPaintSampleTime = now;
+			update();
+			return;
+		}
+		update();
+		if ( !( event->buttons() & Qt::MiddleButton ) )
+			return;
+	}
+
+	if ( vertexPaintMode && vertexPaintBrushEnabled ) {
+		vertexPaintPos = getQMouseEventPosition( event );
+		if ( vertexPaintStroke ) {
+			auto now = std::chrono::steady_clock::now();
+			if ( std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - vertexPaintSampleTime ).count() < 8 ) {
+				update();
+				return;
+			}
+			applyVertexPaintBrush( vertexPaintLastSample, vertexPaintPos );
+			vertexPaintLastSample = vertexPaintPos;
+			vertexPaintSampleTime = now;
+			update();
+			return;
+		}
+		update();
+		if ( !( event->buttons() & Qt::MiddleButton ) )
+			return;
+	}
+
+	if ( segmentPaintMode && segmentPaintBrushEnabled ) {
+		segmentPaintPos = getQMouseEventPosition( event );
+		if ( segmentPaintStroke ) {
+			auto now = std::chrono::steady_clock::now();
+			if ( std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - segmentPaintSampleTime ).count() < 8 ) { update(); return; }
+			applySegmentPaintBrush( segmentPaintLastSample, segmentPaintPos );
+			segmentPaintLastSample = segmentPaintPos;
+			segmentPaintSampleTime = now;
+			update();
+			return;
+		}
+		update();
+		if ( !( event->buttons() & Qt::MiddleButton ) ) return;
+	}
+
+	// circle select: the brush follows the cursor and keeps painting while held
+	if ( circleSelecting ) {
+		circleSelectPos = getQMouseEventPosition( event );
+		if ( circlePainting ) {
+			lastCircleStroke.append( circleSelectPos );
+			applyCircleSelect( circleSelectPos, false );
+		} else if ( circleErasing ) {
+			applyCircleSelect( circleSelectPos, true );
+		}
+		update();
+		return;
+	}
+
+	// box select: grow the rubber-band rectangle
+	if ( boxSelectDrag ) {
+		boxSelectCur = getQMouseEventPosition( event ).toPoint();
+		update();
 		return;
 	}
 
@@ -6520,16 +11684,39 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 		dy = 0.0f;
 	}
 
-	if ( ( buttonMask & Qt::LeftButton ) && !kbd( Key_MoveCam ) ) {
+	// Blender-style viewport navigation: plain MMB orbits and Shift+MMB
+	// pans. LMB is reserved for selection and tools; it never transforms the
+	// camera. Explicit legacy item/light transforms keep their own LMB chords.
+	if ( buttonMask & Qt::MiddleButton ) {
+		if ( event->modifiers() & Qt::ShiftModifier ) {
+			// Convert logical screen pixels to view-plane world units at the
+			// model's current camera depth. The old axis/viewport-size scale was
+			// tied only to mesh bounds and felt increasingly sluggish as the
+			// camera moved away. This matches the projection math, so pan speed
+			// tracks what is visible on screen like Blender's Shift+MMB pan.
+			float hh = float( std::max( height(), 1 ) );
+			float worldPerPixel;
+			if ( perspectiveMode || view == ViewWalk ) {
+				float depth = std::max( float( Dist * 2.0 ), 0.01f );
+				if ( scene ) {
+					float sceneDepth = -( viewTransform() * scene->bounds().center )[2];
+					if ( sceneDepth > 0.01f )
+						depth = sceneDepth;
+				}
+				float tanHalfFov = float( std::tan( ( cfg.fov / Zoom ) / 360.0 * M_PI ) );
+				worldPerPixel = 2.0f * depth * tanHalfFov / hh;
+			} else {
+				worldPerPixel = 2.0f * float( Dist / Zoom ) / hh;
+			}
+			mouseMov += Vector3( dx * worldPerPixel, -dy * worldPerPixel, 0.0f );
+		} else {
+			mouseRot += Vector3( dy * 0.5f, 0.0f, dx * 0.5f );
+		}
+	} else if ( buttonMask & Qt::LeftButton ) {
 		if ( kbd( Key_RotateXY ) || kbd( Key_RotateZ ) || kbd( Key_Scale ) || kbd( Key_TranslateXY ) )
 			transformItem( dx, dy );
 		else if ( !frontalLight && ( event->modifiers() & Qt::ShiftModifier ) )
 			rotateLight( dy * 0.5f, dx * 0.5f );
-		else
-			mouseRot += Vector3( dy * 0.5f, 0.0f, dx * 0.5f );
-	} else if ( ( buttonMask & Qt::MiddleButton ) || ( ( buttonMask & Qt::LeftButton ) && kbd( Key_MoveCam ) ) ) {
-		float d = axis / (qMax( width(), height() ) + 1);
-		mouseMov += Vector3( dx * d, -dy * d, 0.0f );
 	} else if ( buttonMask & Qt::RightButton ) {
 		setDistance( Dist - (dx + dy) * (axis / (qMax( width(), height() ) + 1)) );
 	}
@@ -6582,10 +11769,115 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		return;
 	}
 
-	// clicking exits free camera (Blender walk-mode confirm/cancel)
+	// Fly mode owns the mouse even when Weight Paint or a selection gadget is
+	// active underneath. A click confirms/exits fly mode, matching Blender.
 	if ( freeCamera ) {
 		setFreeCamera( false );
 		lastPos = getQMouseEventPosition( event );
+		return;
+	}
+
+	if ( riggingWeightPaintMode && riggingWeightPaintBrushEnabled ) {
+		riggingWeightPaintPos = getQMouseEventPosition( event );
+		if ( event->button() == Qt::LeftButton ) {
+			riggingWeightPaintStroke = true;
+			riggingWeightPaintLastSample = riggingWeightPaintPos;
+			riggingWeightPaintProjectionValid = false;
+			riggingWeightPaintSampleTime = std::chrono::steady_clock::now();
+			emit riggingWeightStrokeBegan();
+			applyRiggingWeightPaintBrush( riggingWeightPaintPos, riggingWeightPaintPos );
+			mouseButtonState |= std::uint32_t( event->button() );
+			update();
+			return;
+		}
+		// MMB and Shift+MMB continue into the normal orbit/pan handler. RMB
+		// likewise continues to the normal click path so release opens the
+		// Weight Paint context menu without tearing down the mode.
+	}
+
+	if ( vertexPaintMode && vertexPaintBrushEnabled ) {
+		vertexPaintPos = getQMouseEventPosition( event );
+		if ( event->button() == Qt::LeftButton ) {
+			vertexPaintStroke = true;
+			vertexPaintLastSample = vertexPaintPos;
+			vertexPaintProjectionValid = false;
+			vertexPaintSampleTime = std::chrono::steady_clock::now();
+			emit vertexPaintStrokeBegan();
+			applyVertexPaintBrush( vertexPaintPos, vertexPaintPos );
+			mouseButtonState |= std::uint32_t( event->button() );
+			update();
+			return;
+		}
+	}
+
+	if ( segmentPaintMode && segmentPaintBrushEnabled ) {
+		segmentPaintPos = getQMouseEventPosition( event );
+		if ( event->button() == Qt::LeftButton ) {
+			segmentPaintStroke = true;
+			segmentPaintLastSample = segmentPaintPos;
+			segmentPaintProjectionValid = false;
+			segmentPaintSampleTime = std::chrono::steady_clock::now();
+			emit segmentPaintStrokeBegan();
+			applySegmentPaintBrush( segmentPaintPos, segmentPaintPos );
+			mouseButtonState |= std::uint32_t( event->button() );
+			update();
+			return;
+		}
+	}
+
+	// Shift+RMB places the 3D cursor (Blender); the context menu is suppressed
+	// for this click in contextMenuEvent
+	if ( event->button() == Qt::RightButton && ( event->modifiers() & Qt::ShiftModifier )
+		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) && model ) {
+		placeCursor( getQMouseEventPosition( event ) );
+		update();
+		return;
+	}
+
+	// circle select armed (C): LMB paints select, MMB paints deselect,
+	// RMB / Esc exits the gadget
+	if ( circleSelecting ) {
+		auto cp = getQMouseEventPosition( event );
+		circleSelectPos = cp;
+		if ( event->button() == Qt::LeftButton ) {
+			recordSelection();	// one undo step per paint stroke
+			circlePainting = true;
+			lastCircleStroke.clear();	// record the stroke for the redo panel
+			lastCircleStroke.append( cp );
+			lastCircleStrokeRad = circleSelectRadius;
+			applyCircleSelect( cp, false );
+		} else if ( event->button() == Qt::MiddleButton ) {
+			recordSelection();
+			circleErasing = true;
+			applyCircleSelect( cp, true );
+		} else if ( event->button() == Qt::RightButton ) {
+			circleSelecting = false;
+			circlePainting = circleErasing = false;
+			unsetCursor();
+			emit gizmoStatus( QString() );
+			// keep this click from opening the context menu on release
+			lastPos = cp;
+			pressPos = QPointF( -10000.0, -10000.0 );
+			update();
+			return;
+		}
+		mouseButtonState |= std::uint32_t( event->button() );
+		update();
+		return;
+	}
+
+	// box select armed (B): left-drag rubber-bands a rectangle, right-click cancels
+	if ( boxSelecting ) {
+		if ( event->button() == Qt::LeftButton ) {
+			boxSelectDrag = true;
+			boxSelectStart = boxSelectCur = getQMouseEventPosition( event ).toPoint();
+			mouseButtonState |= std::uint32_t( event->button() );
+		} else if ( event->button() == Qt::RightButton ) {
+			boxSelecting = false;
+			unsetCursor();
+			emit gizmoStatus( tr( "Box select cancelled" ) );
+		}
+		update();
 		return;
 	}
 
@@ -6660,6 +11952,86 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 void GLView::mouseReleaseEvent( QMouseEvent * event )
 {
+	if ( riggingWeightPaintMode && riggingWeightPaintBrushEnabled
+		&& riggingWeightPaintStroke && event->button() == Qt::LeftButton ) {
+		QPointF releasePos = getQMouseEventPosition( event );
+		// Most releases arrive at the same position as the last move event. Avoid
+		// projecting/sampling the full brush a second time there; it was pure work
+		// in normal mode and an unintended extra dab with Accumulate enabled.
+		QPointF releaseDelta = releasePos - riggingWeightPaintLastSample;
+		if ( std::hypot( releaseDelta.x(), releaseDelta.y() ) >= 0.5 )
+			applyRiggingWeightPaintBrush( riggingWeightPaintLastSample, releasePos );
+		riggingWeightPaintLastSample = releasePos;
+		riggingWeightPaintStroke = false;
+		riggingWeightPaintProjectionValid = false;
+		riggingWeightPaintScreen.clear();
+		riggingWeightPaintCandidates.clear();
+		mouseButtonState &= ~( std::uint32_t( event->button() ) );
+		emit riggingWeightStrokeEnded( true );
+		update();
+		return;
+	}
+	if ( vertexPaintMode && vertexPaintBrushEnabled
+		&& vertexPaintStroke && event->button() == Qt::LeftButton ) {
+		QPointF releasePos = getQMouseEventPosition( event );
+		QPointF releaseDelta = releasePos - vertexPaintLastSample;
+		if ( std::hypot( releaseDelta.x(), releaseDelta.y() ) >= 0.5 )
+			applyVertexPaintBrush( vertexPaintLastSample, releasePos );
+		vertexPaintLastSample = releasePos;
+		vertexPaintStroke = false;
+		vertexPaintProjectionValid = false;
+		vertexPaintScreen.clear();
+		vertexPaintCandidates.clear();
+		mouseButtonState &= ~( std::uint32_t( event->button() ) );
+		emit vertexPaintStrokeEnded( true );
+		update();
+		return;
+	}
+	if ( segmentPaintMode && segmentPaintBrushEnabled
+		&& segmentPaintStroke && event->button() == Qt::LeftButton ) {
+		QPointF releasePos = getQMouseEventPosition( event );
+		QPointF delta = releasePos - segmentPaintLastSample;
+		if ( std::hypot( delta.x(), delta.y() ) >= 0.5 )
+			applySegmentPaintBrush( segmentPaintLastSample, releasePos );
+		segmentPaintLastSample = releasePos;
+		segmentPaintStroke = false;
+		segmentPaintProjectionValid = false;
+		segmentPaintScreen.clear();
+		segmentPaintCandidates.clear();
+		mouseButtonState &= ~( std::uint32_t( event->button() ) );
+		emit segmentPaintStrokeEnded( true );
+		update();
+		return;
+	}
+	// circle select: end the paint stroke but stay armed
+	if ( circleSelecting && ( circlePainting || circleErasing ) ) {
+		bool wasSelect = circlePainting;
+		circlePainting = false;
+		circleErasing = false;
+		mouseButtonState &= ~( std::uint32_t( event->button() ) );
+		if ( wasSelect && !lastCircleStroke.isEmpty() ) {
+			lastGestureKind = 2;	// arm the gesture redo panel's Deselect
+			emit circleSelectApplied();
+		}
+		update();
+		return;
+	}
+
+	// finish a box select: apply the rectangle, then disarm
+	if ( boxSelectDrag ) {
+		boxSelectDrag = false;
+		boxSelecting = false;
+		mouseButtonState &= ~( std::uint32_t( event->button() ) );
+		unsetCursor();
+		QRect r = QRect( boxSelectStart, getQMouseEventPosition( event ).toPoint() ).normalized();
+		if ( r.width() >= 2 && r.height() >= 2 )
+			applyBoxSelect( r, event->modifiers() );
+		else
+			emit gizmoStatus( tr( "Box select cancelled" ) );
+		update();
+		return;
+	}
+
 	if ( navGizmoDrag ) {
 		navGizmoDrag = false;
 		mouseButtonState &= ~( std::uint32_t( event->button() ) );
@@ -6687,6 +12059,10 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 #else
 	bool	isColorPicker = bool( event->modifiers() & Qt::AltModifier );
 #endif
+	// in edit mode Alt+LMB / Ctrl+LMB are selection clicks (edge loop / extend,
+	// Blender), never the background color picker
+	if ( editMode && pickMode && event->button() == Qt::LeftButton )
+		isColorPicker = false;
 	if ( model && ( pressPos - evtPos ).manhattanLength() <= 3 ) {
 		if ( event->button() == Qt::ForwardButton || event->button() == Qt::BackButton
 			|| event->button() == Qt::MiddleButton ) {
@@ -6696,13 +12072,18 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 
 		// edit-mode element picking happens here (on a click, not a drag) so
 		// camera orbiting never changes the selection: click = pick,
-		// Ctrl+click = extend/toggle, Shift+click = shortest-path (Blender)
+		// Ctrl+click = extend/toggle, Shift+click = shortest-path,
+		// Alt+click = edge loop (Shift+Alt extends it) - all Blender
 		if ( editMode && pickMode && event->button() == Qt::LeftButton && !isColorPicker ) {
 			auto p = evtPos;
-			if ( event->modifiers() & Qt::ShiftModifier )
+			if ( event->modifiers() & Qt::AltModifier ) {
+				if ( !selectEdgeLoop( p, bool( event->modifiers() & Qt::ShiftModifier ) ) )
+					emit gizmoStatus( tr( "Edge loop: no edge under the cursor" ) );
+			} else if ( event->modifiers() & Qt::ShiftModifier ) {
 				pickPathSelect( p );
-			else
+			} else {
 				pickElementAt( p, bool( event->modifiers() & Qt::ControlModifier ) );
+			}
 			update();
 			return;
 		}
@@ -6776,11 +12157,19 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 
 void GLView::wheelEvent( QWheelEvent * event )
 {
-	// free camera: the scroll wheel adjusts fly speed (Blender walk/fly mode)
+	// Fly mode owns the wheel even if a paint/selection tool remains active.
 	if ( freeCamera ) {
 		freeCamSpeed *= ( event->angleDelta().y() > 0 ) ? 1.25f : 0.8f;
 		freeCamSpeed = std::min( std::max( freeCamSpeed, 0.05f ), 50.0f );
 		emit gizmoStatus( tr( "Fly speed: %1x (scroll to adjust)" ).arg( double( freeCamSpeed ), 0, 'f', 2 ) );
+		return;
+	}
+
+	// circle select: the scroll wheel resizes the brush (Blender)
+	if ( circleSelecting ) {
+		float d = ( event->angleDelta().y() > 0 ) ? 1.15f : ( 1.0f / 1.15f );
+		circleSelectRadius = std::min( std::max( circleSelectRadius * d, 4.0f ), 400.0f );
+		update();
 		return;
 	}
 
