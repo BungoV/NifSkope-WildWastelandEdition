@@ -28,6 +28,7 @@ SettingsDialog::SettingsDialog( QWidget * parent ) :
 	content->addWidget( new SettingsGeneral( this ) );
 	content->addWidget( new SettingsRender( this ) );
 	content->addWidget( new SettingsResources( this ) );
+	content->addWidget( new SettingsShortcuts( this ) );
 
 	categories->setCurrentRow( 0 );
 

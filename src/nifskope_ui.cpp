@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glview.h"
 #include "message.h"
 #include "nifsnapshot.h"
+#include "shortcutregistry.h"
 #include "spellbook.h"
 #include "version.h"
 #include "gl/glscene.h"
@@ -3935,6 +3936,27 @@ void NifSkope::positionRedoPanel()
 	}
 }
 
+void NifSkope::applyShortcutOverrides()
+{
+	auto & reg = ShortcutRegistry::get();
+	QSettings settings;
+	settings.beginGroup( QStringLiteral( "Shortcuts" ) );
+	const auto acts = findChildren<QAction *>();
+	for ( QAction * a : acts ) {
+		const QString name = a->objectName();
+		if ( name.isEmpty() )
+			continue;
+		// remember the factory default before any override touches it
+		reg.noteActionDefault( name, a->shortcut() );
+		const QVariant v = settings.value( QStringLiteral( "action." ) + name );
+		if ( v.isValid() )
+			a->setShortcut( QKeySequence::fromString( v.toString(), QKeySequence::PortableText ) );
+		else if ( a->shortcut() != reg.actionDefault( name ) )
+			a->setShortcut( reg.actionDefault( name ) );	// override was removed
+	}
+	settings.endGroup();
+}
+
 void NifSkope::positionViewportMenuBar()
 {
 	if ( !graphicsView || !viewportMenuBar )
@@ -4028,6 +4050,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		const bool keyFocusIsTextInput = keyFocus && ( keyFocus->inherits( "QLineEdit" )
 			|| keyFocus->inherits( "QTextEdit" ) || keyFocus->inherits( "QPlainTextEdit" )
 			|| keyFocus->inherits( "QAbstractSpinBox" ) || keyFocus->inherits( "QComboBox" ) );
+		// rebindable viewport shortcuts (see tlRegisterViewportShortcuts)
+		const auto & vpKeys = ShortcutRegistry::get();
 		// Blender numpad navigation is viewport-scoped. Reserve recognized keys
 		// during ShortcutOverride so the legacy QAction shortcuts cannot recenter
 		// the model before the viewport-preserving handler sees the KeyPress.
@@ -4045,7 +4069,7 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// Object <-> Weight Paint behave consistently. Future paint modes can
 		// join by enabling their existing selector actions.
 		if ( pointerOverViewport && !keyFocusIsTextInput
-			&& ke->key() == Qt::Key_Tab && ke->modifiers() == Qt::NoModifier ) {
+			&& vpKeys.matches( "viewport.toggle_edit_mode", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() ) {
 				if ( ogl->vertexPaintModeActive() ) {
 					lastViewportNonObjectMode = 2;
@@ -4075,16 +4099,16 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			return true;
 		}
 		if ( pointerOverViewport && ogl->riggingWeightPaintModeActive()
-			&& !keyFocusIsTextInput && ke->key() == Qt::Key_X
-			&& ke->modifiers() == Qt::ControlModifier ) {
+			&& !keyFocusIsTextInput
+			&& vpKeys.matches( "viewport.paint_fill", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
 				ogl->fillRiggingWeightSelection();
 			e->accept();
 			return true;
 		}
 		if ( pointerOverViewport && ogl->segmentPaintModeActive()
-			&& !keyFocusIsTextInput && ke->key() == Qt::Key_X
-			&& ke->modifiers() == Qt::ControlModifier ) {
+			&& !keyFocusIsTextInput
+			&& vpKeys.matches( "viewport.paint_fill", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
 				ogl->fillSegmentPaintSelection();
 			e->accept();
@@ -4092,11 +4116,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		}
 		// Alt+H (unhide, Blender) would otherwise be eaten by the Help menu
 		// mnemonic before the viewport ever sees the key
-		if ( ogl && graphicsView && ke->key() == Qt::Key_H
-			&& ( ke->modifiers() & Qt::AltModifier )
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		if ( pointerOverViewport
+			&& vpKeys.matches( "viewport.unhide_all", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress ) {
 				if ( ogl->editMode )
 					ogl->unhideAllElements();
@@ -4109,13 +4130,12 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// Ctrl+P / Alt+P are Blender-style Set/Clear Parent in object mode.
 		// They work over both the viewport and the Block List; the latter already
 		// mirrors its row selection into GLView's object selection.
-		if ( ogl && graphicsView && !ogl->editMode && ke->key() == Qt::Key_P
+		if ( ogl && graphicsView && !ogl->editMode
 			&& isActiveWindow()
 			&& ( graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) )
 				|| ( list && list->rect().contains( list->mapFromGlobal( QCursor::pos() ) ) ) ) ) {
-			Qt::KeyboardModifiers mods = ke->modifiers();
-			bool setParent = ( mods & Qt::ControlModifier ) && !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) );
-			bool clearParent = ( mods & Qt::AltModifier ) && !( mods & ( Qt::ControlModifier | Qt::ShiftModifier ) );
+			bool setParent = vpKeys.matches( "viewport.parent_set", ke->key(), ke->modifiers() );
+			bool clearParent = vpKeys.matches( "viewport.parent_clear", ke->key(), ke->modifiers() );
 			QWidget * fw = QApplication::focusWidget();
 			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
 				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" )
@@ -4131,22 +4151,18 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// P opens the edit-mode Separate menu (Blender). The View > Perspective
 		// action also uses P, so only steal it while editing with the pointer
 		// over the viewport; object mode keeps P = perspective toggle.
-		if ( ogl && graphicsView && ogl->editMode && !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
-			&& ke->key() == Qt::Key_P
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		if ( pointerOverViewport && ogl->editMode && !ogl->riggingWeightPaintModeActive()
+			&& !ogl->vertexPaintModeActive()
+			&& vpKeys.matches( "viewport.separate", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress )
 				ogl->showSeparateMenu();
 			e->accept();
 			return true;
 		}
-		// M opens the edit-mode Merge menu (Blender) with the pointer over the view
-		if ( ogl && graphicsView && ogl->editMode && !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
-			&& ke->key() == Qt::Key_M
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		// the edit-mode Merge menu (Blender M) with the pointer over the view
+		if ( pointerOverViewport && ogl->editMode && !ogl->riggingWeightPaintModeActive()
+			&& !ogl->vertexPaintModeActive()
+			&& vpKeys.matches( "viewport.merge", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress )
 				ogl->showMergeMenu();
 			e->accept();
@@ -4154,46 +4170,37 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		}
 		// E extrudes the selection (Blender) with the pointer over the view;
 		// in free-camera / walk mode E stays camera-up
-		if ( ogl && graphicsView && ogl->editMode && !ogl->freeCamera
+		if ( pointerOverViewport && ogl->editMode && !ogl->freeCamera
 			&& !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
-			&& ke->key() == Qt::Key_E
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			&& vpKeys.matches( "viewport.extrude", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
 				ogl->extrudeRegion();
 			e->accept();
 			return true;
 		}
-		// F fills a hole / bridges two rims (Blender) in edit mode with the
+		// fill a hole / bridge two rims (Blender F) in edit mode with the
 		// pointer over the view; F stays Front View everywhere else
-		if ( ogl && graphicsView && ogl->editMode && !ogl->freeCamera
+		if ( pointerOverViewport && ogl->editMode && !ogl->freeCamera
 			&& !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
-			&& ke->key() == Qt::Key_F
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			&& vpKeys.matches( "viewport.fill", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
 				ogl->smartConnect();
 			e->accept();
 			return true;
 		}
 		// the Blender modeling operators (edit mode, pointer over the view):
-		// I inset, Ctrl+R loop cut, Shift+V edge slide, Ctrl+X dissolve
-		if ( ogl && graphicsView && ogl->editMode && !ogl->freeCamera
+		// inset, loop cut, edge slide, dissolve
+		if ( pointerOverViewport && ogl->editMode && !ogl->freeCamera
 			&& !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
-			&& !ogl->segmentPaintModeActive()
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
-			const auto mods = ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier );
+			&& !ogl->segmentPaintModeActive() ) {
 			int op = 0;
-			if ( ke->key() == Qt::Key_I && mods == Qt::KeyboardModifiers() )
+			if ( vpKeys.matches( "viewport.inset", ke->key(), ke->modifiers() ) )
 				op = 1;
-			else if ( ke->key() == Qt::Key_R && mods == Qt::ControlModifier )
+			else if ( vpKeys.matches( "viewport.loop_cut", ke->key(), ke->modifiers() ) )
 				op = 2;
-			else if ( ke->key() == Qt::Key_V && mods == Qt::ShiftModifier )
+			else if ( vpKeys.matches( "viewport.edge_slide", ke->key(), ke->modifiers() ) )
 				op = 3;
-			else if ( ke->key() == Qt::Key_X && mods == Qt::ControlModifier )
+			else if ( vpKeys.matches( "viewport.dissolve", ke->key(), ke->modifiers() ) )
 				op = 4;
 			if ( op ) {
 				if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() ) {
@@ -4212,13 +4219,10 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		}
 		// W opens the Blender-style Specials quick menu (edit + object mode);
 		// in free-camera / walk mode W stays camera-forward
-		if ( ogl && graphicsView && !ogl->freeCamera && ogl->view != GLView::ViewWalk
+		if ( pointerOverViewport && !ogl->freeCamera && ogl->view != GLView::ViewWalk
 			&& !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
 			&& !ogl->segmentPaintModeActive()
-			&& ke->key() == Qt::Key_W
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			&& vpKeys.matches( "viewport.quick_menu", ke->key(), ke->modifiers() ) ) {
 			QWidget * fw = QApplication::focusWidget();
 			const bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
 				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" ) );
@@ -4229,23 +4233,16 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				return true;
 			}
 		}
-		// Shift+A adds a primitive (object mode, pointer over the view)
-		if ( ogl && graphicsView && !ogl->editMode && !ogl->freeCamera
-			&& ke->key() == Qt::Key_A
-			&& ( ke->modifiers() & Qt::ShiftModifier )
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		// add a primitive (object mode, pointer over the view, Blender Shift+A)
+		if ( pointerOverViewport && !ogl->editMode && !ogl->freeCamera
+			&& vpKeys.matches( "viewport.add_primitive", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
 				ogl->showAddPrimitiveMenu();
 			e->accept();
 			return true;
 		}
-		if ( ogl && graphicsView
-			&& ke->key() == Qt::Key_F && ( ke->modifiers() & Qt::ShiftModifier )
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		if ( pointerOverViewport
+			&& vpKeys.matches( "viewport.free_camera", ke->key(), ke->modifiers() ) ) {
 			QWidget * fw = QApplication::focusWidget();
 			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
 				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" )
@@ -4257,12 +4254,10 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				return true;
 			}
 		}
-		// B arms Blender box select (edit or object mode) with the pointer over
+		// arm Blender box select (edit or object mode) with the pointer over
 		// the viewport, whatever widget has key focus
-		if ( ogl && graphicsView && ke->key() == Qt::Key_B
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		if ( pointerOverViewport
+			&& vpKeys.matches( "viewport.select.box", ke->key(), ke->modifiers() ) ) {
 			QWidget * fw = QApplication::focusWidget();
 			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
 				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" )
@@ -4274,23 +4269,18 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				return true;
 			}
 		}
-		// Ctrl+I inverts the selection (edit: elements, object: objects)
-		if ( ogl && graphicsView && ke->key() == Qt::Key_I
-			&& ( ke->modifiers() & Qt::ControlModifier )
-			&& !( ke->modifiers() & ( Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		// invert the selection (edit: elements, object: objects)
+		if ( pointerOverViewport
+			&& vpKeys.matches( "viewport.select.invert", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress )
 				ogl->invertSelection();
 			e->accept();
 			return true;
 		}
-		// C arms the circle-select brush (edit or object mode) with the pointer
+		// arm the circle-select brush (edit or object mode) with the pointer
 		// over the viewport, whatever widget has key focus
-		if ( ogl && graphicsView && ke->key() == Qt::Key_C
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		if ( pointerOverViewport
+			&& vpKeys.matches( "viewport.select.circle", ke->key(), ke->modifiers() ) ) {
 			QWidget * fw = QApplication::focusWidget();
 			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
 				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" )
@@ -4302,23 +4292,22 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				return true;
 			}
 		}
-		// Ctrl+= / Ctrl+- grow / shrink the edit-mode selection (Select More/Less)
-		if ( ogl && graphicsView && ogl->editMode
-			&& ( ke->key() == Qt::Key_Plus || ke->key() == Qt::Key_Equal || ke->key() == Qt::Key_Minus )
-			&& ( ke->modifiers() & Qt::ControlModifier )
-			&& !( ke->modifiers() & Qt::AltModifier )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
-			if ( e->type() == QEvent::KeyPress )
-				ogl->selectMoreLess( ke->key() != Qt::Key_Minus );
-			e->accept();
-			return true;
+		// grow / shrink the edit-mode selection (Select More/Less); the keyboard
+		// produces either Plus or Equal for the same physical key
+		if ( pointerOverViewport && ogl->editMode ) {
+			const int mlKey = ( ke->key() == Qt::Key_Plus ) ? Qt::Key_Equal : ke->key();
+			const bool more = vpKeys.matches( "viewport.select.more", mlKey, ke->modifiers() );
+			const bool less = !more && vpKeys.matches( "viewport.select.less", mlKey, ke->modifiers() );
+			if ( more || less ) {
+				if ( e->type() == QEvent::KeyPress )
+					ogl->selectMoreLess( more );
+				e->accept();
+				return true;
+			}
 		}
-		// Numpad-. (or plain .) frames the selection with the pointer over the view
-		if ( ogl && graphicsView && ke->key() == Qt::Key_Period
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+		// frame the selection with the pointer over the view (Blender Numpad-.)
+		if ( pointerOverViewport
+			&& vpKeys.matches( "viewport.frame_selection", ke->key(), ke->modifiers() ) ) {
 			QWidget * fw = QApplication::focusWidget();
 			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
 				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" )
@@ -4352,22 +4341,19 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// so an object/node picked in the block list (which keeps key focus) can be
 		// moved/rotated/scaled. Only starts when no gesture is running - during a
 		// gesture the viewport keeps in-gesture mode switching.
-		if ( ogl && graphicsView && !ogl->freeCamera && !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
-			&& e->type() == QEvent::KeyPress
-			&& ( ke->key() == Qt::Key_G || ke->key() == Qt::Key_R || ke->key() == Qt::Key_S )
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
-			QWidget * fw = QApplication::focusWidget();
-			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
-				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" )
-				|| fw->inherits( "QComboBox" ) );
-			if ( !textInput ) {
-				int mode = ( ke->key() == Qt::Key_G ) ? 1 : ( ke->key() == Qt::Key_R ? 2 : 3 );
-				if ( ogl->startModalTransform( mode ) ) {
-					e->accept();
-					return true;
-				}
+		if ( pointerOverViewport && !ogl->freeCamera && !ogl->riggingWeightPaintModeActive()
+			&& !ogl->vertexPaintModeActive()
+			&& e->type() == QEvent::KeyPress && !keyFocusIsTextInput ) {
+			int mode = 0;
+			if ( vpKeys.matches( "viewport.transform.move", ke->key(), ke->modifiers() ) )
+				mode = 1;
+			else if ( vpKeys.matches( "viewport.transform.rotate", ke->key(), ke->modifiers() ) )
+				mode = 2;
+			else if ( vpKeys.matches( "viewport.transform.scale", ke->key(), ke->modifiers() ) )
+				mode = 3;
+			if ( mode && ogl->startModalTransform( mode ) ) {
+				e->accept();
+				return true;
 			}
 		}
 		// A / Alt+A = select all / deselect all when the pointer is over the
@@ -4375,17 +4361,12 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// focus — focus-follows-mouse alone is unreliable when focus is taken
 		// while the pointer is already inside the viewport, so A "sometimes"
 		// missed. This makes it work every time the cursor is over the viewport.
-		if ( ogl && graphicsView && !ogl->freeCamera && e->type() == QEvent::KeyPress
-			&& ke->key() == Qt::Key_A && !ke->isAutoRepeat()
-			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::ShiftModifier ) )
-			&& isActiveWindow()
-			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
-			QWidget * fw = QApplication::focusWidget();
-			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
-				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" )
-				|| fw->inherits( "QComboBox" ) );
-			if ( !textInput && nif ) {
-				ogl->selectAll( ( ke->modifiers() & Qt::AltModifier ) ? 2 : 0 );
+		if ( pointerOverViewport && !ogl->freeCamera && e->type() == QEvent::KeyPress
+			&& !ke->isAutoRepeat() && !keyFocusIsTextInput && nif ) {
+			const bool selAll = vpKeys.matches( "viewport.select.all", ke->key(), ke->modifiers() );
+			const bool selNone = !selAll && vpKeys.matches( "viewport.select.none", ke->key(), ke->modifiers() );
+			if ( selAll || selNone ) {
+				ogl->selectAll( selNone ? 2 : 0 );
 				e->accept();
 				return true;
 			}

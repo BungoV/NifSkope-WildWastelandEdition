@@ -1059,6 +1059,11 @@ NifSkope::NifSkope( bool background )
 	initConnections();
 
 	connect( options, &SettingsDialog::saveSettings, this, &NifSkope::updateSettings );
+	// Rebindable QAction shortcuts: apply stored overrides now that every
+	// action exists, and re-apply after each settings save (the Shortcuts
+	// pane writes before this connection runs, so the values are current)
+	applyShortcutOverrides();
+	connect( options, &SettingsDialog::saveSettings, this, &NifSkope::applyShortcutOverrides );
 	if ( !backgroundWorkspaceDocument ) {
 		connect( options, &SettingsDialog::saveSettings, this,
 			[this]() { QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser ); } );

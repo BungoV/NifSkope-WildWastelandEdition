@@ -13,6 +13,9 @@
 class SettingsDialog;
 class QStringListModel;
 class QListWidget;
+class QLineEdit;
+class QTreeWidget;
+class QTreeWidgetItem;
 
 namespace Ui {
 class SettingsGeneral;
@@ -126,6 +129,35 @@ private:
 	QStringListModel * folders;
 
 	QStringList applicableFolders{ "materials", "textures", "geometries" };
+};
+
+//! Rebindable keyboard shortcuts: the 3D viewport bindings from the
+//! ShortcutRegistry plus every QAction that currently has a shortcut,
+//! searchable and grouped by category.
+class SettingsShortcuts : public SettingsPane
+{
+	Q_OBJECT
+
+public:
+	explicit SettingsShortcuts( QWidget * parent = nullptr );
+	~SettingsShortcuts();
+
+	void read() override final;
+	void write() override final;
+	void setDefault() override final;
+
+protected:
+	void showEvent( QShowEvent * ) override;
+
+private:
+	void addRow( QTreeWidgetItem * parent, int kind, const QString & id,
+		const QString & label, const QKeySequence & cur, const QKeySequence & def );
+	void applyFilter( const QString & text );
+	void updateConflicts();
+
+	QLineEdit * search = nullptr;
+	QTreeWidget * tree = nullptr;
+	bool populated = false;
 };
 
 

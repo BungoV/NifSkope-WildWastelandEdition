@@ -207,6 +207,11 @@ public slots:
 	void openFile( QString & );
 	void openFiles( QStringList & );
 
+	//! Apply stored "Shortcuts/action.<objectName>" overrides to this
+	//! window's QActions (also records each action's factory default the
+	//! first time it is seen, so overrides can be removed again)
+	void applyShortcutOverrides();
+
 	bool loadArchivesFromFolder( QString );
 	void openArchive( const QString & );
 	void openArchiveFile( const QModelIndex & );

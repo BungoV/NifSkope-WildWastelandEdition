@@ -227,6 +227,7 @@ HEADERS += \
 	src/glview.h \
 	src/message.h \
 	src/nifskope.h \
+	src/shortcutregistry.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
 	src/spellbook.h \
@@ -336,6 +337,7 @@ SOURCES += \
 	src/ui/checkablemessagebox.cpp \
 	src/ui/settingsdialog.cpp \
 	src/ui/settingspane.cpp \
+	src/ui/settingsshortcuts.cpp \
 	src/xml/kfmxml.cpp \
 	src/xml/nifexpr.cpp \
 	src/xml/nifxml.cpp \
@@ -346,6 +348,7 @@ SOURCES += \
 	src/message.cpp \
 	src/nifskope.cpp \
 	src/nifskope_ui.cpp \
+	src/shortcutregistry.cpp \
 	src/uvtools.cpp \
 	src/spellbook.cpp \
 	src/version.cpp \

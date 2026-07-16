@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/undocommands.h"
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
+#include "shortcutregistry.h"
 #include "ui/settingsdialog.h"
 #include "ui/widgets/fileselect.h"
 #include "fp32vec4.hpp"
@@ -135,9 +136,73 @@ const Vector3 GLView::viewRotations[6] = {
 	{ -90.0f, 0.0f, 0.0f }		// Back
 };
 
+//! Register the 3D viewport's rebindable shortcuts (once per process).
+//! Every id here has at least one matches() call in GLView::keyPressEvent or
+//! NifSkope::eventFilter; the settings Shortcuts page edits them. The modal
+//! gesture grammar (X/Y/Z axis locks, numeric entry, Esc/Enter) and the
+//! Blender numpad view block stay fixed.
+static void tlRegisterViewportShortcuts()
+{
+	static bool done = false;
+	if ( done )
+		return;
+	done = true;
+	auto & r = ShortcutRegistry::get();
+	const QString cat = QObject::tr( "3D Viewport" );
+	const QString catSel = QObject::tr( "3D Viewport - Selection" );
+	const QString catEdit = QObject::tr( "3D Viewport - Edit Mode" );
+	const QString catObj = QObject::tr( "3D Viewport - Object Mode" );
+
+	r.reg( "viewport.toggle_edit_mode", QObject::tr( "Toggle Object / Edit Mode" ), cat, QKeySequence( Qt::Key_Tab ) );
+	r.reg( "viewport.quick_menu", QObject::tr( "Specials Quick Menu" ), cat, QKeySequence( Qt::Key_W ) );
+	r.reg( "viewport.transform.move", QObject::tr( "Move (modal transform)" ), cat, QKeySequence( Qt::Key_G ) );
+	r.reg( "viewport.transform.rotate", QObject::tr( "Rotate (modal transform)" ), cat, QKeySequence( Qt::Key_R ) );
+	r.reg( "viewport.transform.scale", QObject::tr( "Scale (modal transform)" ), cat, QKeySequence( Qt::Key_S ) );
+	r.reg( "viewport.hide", QObject::tr( "Hide Selection" ), cat, QKeySequence( Qt::Key_H ) );
+	r.reg( "viewport.unhide_all", QObject::tr( "Unhide All" ), cat, QKeySequence( Qt::ALT | Qt::Key_H ) );
+	r.reg( "viewport.duplicate", QObject::tr( "Duplicate" ), cat, QKeySequence( Qt::SHIFT | Qt::Key_D ) );
+	r.reg( "viewport.snap", QObject::tr( "Snap Menu" ), cat, QKeySequence( Qt::SHIFT | Qt::Key_S ) );
+	r.reg( "viewport.frame_selection", QObject::tr( "Frame Selection" ), cat, QKeySequence( Qt::Key_Period ) );
+	r.reg( "viewport.free_camera", QObject::tr( "Free Camera (Fly / Walk)" ), cat, QKeySequence( Qt::SHIFT | Qt::Key_F ) );
+	r.reg( "viewport.snap_cursor_median", QObject::tr( "Snap 3D Cursor to Selection" ), cat, QKeySequence( Qt::SHIFT | Qt::Key_C ) );
+
+	r.reg( "viewport.select.all", QObject::tr( "Select All (toggle)" ), catSel, QKeySequence( Qt::Key_A ) );
+	r.reg( "viewport.select.none", QObject::tr( "Deselect All" ), catSel, QKeySequence( Qt::ALT | Qt::Key_A ) );
+	r.reg( "viewport.select.invert", QObject::tr( "Invert Selection" ), catSel, QKeySequence( Qt::CTRL | Qt::Key_I ) );
+	r.reg( "viewport.select.box", QObject::tr( "Box Select" ), catSel, QKeySequence( Qt::Key_B ) );
+	r.reg( "viewport.select.circle", QObject::tr( "Circle Select" ), catSel, QKeySequence( Qt::Key_C ) );
+	r.reg( "viewport.select.more", QObject::tr( "Select More" ), catSel, QKeySequence( Qt::CTRL | Qt::Key_Equal ) );
+	r.reg( "viewport.select.less", QObject::tr( "Select Less" ), catSel, QKeySequence( Qt::CTRL | Qt::Key_Minus ) );
+	r.reg( "viewport.select.linked", QObject::tr( "Select Linked" ), catSel, QKeySequence( Qt::CTRL | Qt::Key_L ) );
+	r.reg( "viewport.select.linked_angle", QObject::tr( "Select Linked by Angle" ), catSel,
+		QKeySequence( Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_F ) );
+
+	r.reg( "viewport.pick_vertex", QObject::tr( "Pick Mode: Vertex (Shift extends)" ), catEdit, QKeySequence( Qt::Key_1 ) );
+	r.reg( "viewport.pick_edge", QObject::tr( "Pick Mode: Edge (Shift extends)" ), catEdit, QKeySequence( Qt::Key_2 ) );
+	r.reg( "viewport.pick_face", QObject::tr( "Pick Mode: Face (Shift extends)" ), catEdit, QKeySequence( Qt::Key_3 ) );
+	r.reg( "viewport.extrude", QObject::tr( "Extrude Region" ), catEdit, QKeySequence( Qt::Key_E ) );
+	r.reg( "viewport.inset", QObject::tr( "Inset Faces" ), catEdit, QKeySequence( Qt::Key_I ) );
+	r.reg( "viewport.fill", QObject::tr( "Fill / Bridge" ), catEdit, QKeySequence( Qt::Key_F ) );
+	r.reg( "viewport.loop_cut", QObject::tr( "Loop Cut" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_R ) );
+	r.reg( "viewport.edge_slide", QObject::tr( "Edge Slide" ), catEdit, QKeySequence( Qt::SHIFT | Qt::Key_V ) );
+	r.reg( "viewport.dissolve", QObject::tr( "Dissolve Vertices" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_X ) );
+	r.reg( "viewport.merge", QObject::tr( "Merge Menu" ), catEdit, QKeySequence( Qt::Key_M ) );
+	r.reg( "viewport.separate", QObject::tr( "Separate Menu" ), catEdit, QKeySequence( Qt::Key_P ) );
+	r.reg( "viewport.delete", QObject::tr( "Delete Menu" ), catEdit, QKeySequence( Qt::Key_X ) );
+
+	r.reg( "viewport.add_primitive", QObject::tr( "Add Primitive Menu" ), catObj, QKeySequence( Qt::SHIFT | Qt::Key_A ) );
+	r.reg( "viewport.join", QObject::tr( "Join Selected Objects" ), catObj, QKeySequence( Qt::CTRL | Qt::Key_J ) );
+	r.reg( "viewport.parent_set", QObject::tr( "Set Parent Menu" ), catObj, QKeySequence( Qt::CTRL | Qt::Key_P ) );
+	r.reg( "viewport.parent_clear", QObject::tr( "Clear Parent Menu" ), catObj, QKeySequence( Qt::ALT | Qt::Key_P ) );
+
+	r.reg( "viewport.paint_fill", QObject::tr( "Paint: Fill Selection (weight / segment)" ), cat,
+		QKeySequence( Qt::CTRL | Qt::Key_X ) );
+}
+
 GLView::GLView( QWindow * p )
 	: QOpenGLWindow( QOpenGLWindow::NoPartialUpdate, p )
 {
+	tlRegisterViewportShortcuts();
 	QSettings settings;
 	int	aa = settings.value( "Settings/Render/General/Msaa Samples", 2 ).toInt();
 	editDeformedCage = settings.value( "GLView/Edit/DeformedCage", true ).toBool();
@@ -12918,8 +12983,9 @@ int GLView::convertKeyCode( int n ) const
 void GLView::keyPressEvent( QKeyEvent * event )
 {
 	const Qt::KeyboardModifiers mods = event->modifiers();
-	if ( segmentPaintMode && event->key() == Qt::Key_Tab
-		&& !( mods & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+	// rebindable shortcuts: exact key+modifier matching against the registry
+	const auto & shortcuts = ShortcutRegistry::get();
+	if ( segmentPaintMode && shortcuts.matches( "viewport.toggle_edit_mode", event->key(), mods ) ) {
 		setSegmentPaintMode( false );
 		return;
 	}
@@ -12928,8 +12994,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		setSegmentPaintMode( false );
 		return;
 	}
-	if ( vertexPaintMode && event->key() == Qt::Key_Tab
-		&& !( mods & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+	if ( vertexPaintMode && shortcuts.matches( "viewport.toggle_edit_mode", event->key(), mods ) ) {
 		setVertexPaintMode( false );
 		return;
 	}
@@ -12938,21 +13003,16 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		setVertexPaintMode( false );
 		return;
 	}
-	if ( riggingWeightPaintMode && event->key() == Qt::Key_Tab
-		&& !( mods & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+	if ( riggingWeightPaintMode && shortcuts.matches( "viewport.toggle_edit_mode", event->key(), mods ) ) {
 		setRiggingWeightPaintMode( false );
 		return;
 	}
-	if ( riggingWeightPaintMode && event->key() == Qt::Key_X
-		&& ( mods & Qt::ControlModifier )
-		&& !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+	if ( riggingWeightPaintMode && shortcuts.matches( "viewport.paint_fill", event->key(), mods ) ) {
 		if ( !event->isAutoRepeat() )
 			fillRiggingWeightSelection();
 		return;
 	}
-	if ( segmentPaintMode && event->key() == Qt::Key_X
-		&& ( mods & Qt::ControlModifier )
-		&& !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+	if ( segmentPaintMode && shortcuts.matches( "viewport.paint_fill", event->key(), mods ) ) {
 		if ( !event->isAutoRepeat() )
 			fillSegmentPaintSelection();
 		return;
@@ -12988,8 +13048,14 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		// Blender: G/R/S during a gesture switches the transform mode,
 		// resetting to the original values first; R while already rotating
 		// toggles trackball rotation (Blender R,R)
-		if ( event->key() == Qt::Key_G || event->key() == Qt::Key_R || event->key() == Qt::Key_S ) {
-			int nm = ( event->key() == Qt::Key_G ) ? 1 : ( event->key() == Qt::Key_R ? 2 : 3 );
+		int nm = 0;
+		if ( shortcuts.matches( "viewport.transform.move", event->key(), mods ) )
+			nm = 1;
+		else if ( shortcuts.matches( "viewport.transform.rotate", event->key(), mods ) )
+			nm = 2;
+		else if ( shortcuts.matches( "viewport.transform.scale", event->key(), mods ) )
+			nm = 3;
+		if ( nm ) {
 			if ( nm != gizmoMode ) {
 				bool wasElem = elemTransform;
 				gizmoEnd( false );
@@ -13098,7 +13164,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	// Free camera (Blender fly): only WASD/Q/E + Shift move; everything else is
 	// locked out until you exit with Shift+F / Esc
 	if ( freeCamera ) {
-		if ( ( event->key() == Qt::Key_F && ( event->modifiers() & Qt::ShiftModifier ) )
+		if ( shortcuts.matches( "viewport.free_camera", event->key(), mods )
 			|| event->key() == Qt::Key_Escape ) {
 			setFreeCamera( false );
 			return;
@@ -13110,103 +13176,98 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	}
 
 	// Tab toggles Blender-style Object / Edit mode (needs a mesh selected)
-	if ( event->key() == Qt::Key_Tab && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+	if ( shortcuts.matches( "viewport.toggle_edit_mode", event->key(), mods ) ) {
 		setEditMode( !editMode );
 		return;
 	}
 
 	// Blender hierarchy shortcuts in object mode.
-	if ( !editMode && event->key() == Qt::Key_P ) {
-		Qt::KeyboardModifiers mods = event->modifiers();
-		if ( ( mods & Qt::ControlModifier ) && !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
-			showParentMenu();
-			return;
-		}
-		if ( ( mods & Qt::AltModifier ) && !( mods & ( Qt::ControlModifier | Qt::ShiftModifier ) ) ) {
-			showClearParentMenu();
-			return;
-		}
+	if ( !editMode && shortcuts.matches( "viewport.parent_set", event->key(), mods ) ) {
+		showParentMenu();
+		return;
+	}
+	if ( !editMode && shortcuts.matches( "viewport.parent_clear", event->key(), mods ) ) {
+		showClearParentMenu();
+		return;
 	}
 
-	// edit-mode select-linked (Ctrl+L) and linked flat faces (Shift+Ctrl+Alt+F)
+	// edit-mode select-linked and linked flat faces
 	if ( editMode ) {
-		Qt::KeyboardModifiers mods = event->modifiers();
-		if ( event->key() == Qt::Key_L && ( mods & Qt::ControlModifier )
-			&& !( mods & ( Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		if ( shortcuts.matches( "viewport.select.linked", event->key(), mods ) ) {
 			selectLinked( false );
 			return;
 		}
-		if ( event->key() == Qt::Key_F && ( mods & Qt::ControlModifier )
-			&& ( mods & Qt::AltModifier ) && ( mods & Qt::ShiftModifier ) ) {
+		if ( shortcuts.matches( "viewport.select.linked_angle", event->key(), mods ) ) {
 			// Blender "Select Linked Flat Faces": grow across faces within the
 			// sharpness angle; the redo panel lets you tweak the angle afterwards
 			selectLinked( true, ( lastOpKind == 2 ) ? lastOpParam : 30.0f );
 			return;
 		}
-		// P: Separate menu (Blender)
-		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && event->key() == Qt::Key_P
-			&& !( mods & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+		// Separate menu (Blender)
+		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode
+			&& shortcuts.matches( "viewport.separate", event->key(), mods ) ) {
 			showSeparateMenu();
 			return;
 		}
 	}
 
-	// Shift+D: duplicate the selection and start a move (object + edit mode)
-	if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && event->key() == Qt::Key_D && ( event->modifiers() & Qt::ShiftModifier )
-		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) && model ) {
+	// duplicate the selection and start a move (object + edit mode)
+	if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode
+		&& shortcuts.matches( "viewport.duplicate", event->key(), mods ) && model ) {
 		duplicateSelection();
 		return;
 	}
 
-	// Ctrl+J: join the selected compatible meshes into the active one (object)
-	if ( event->key() == Qt::Key_J && ( event->modifiers() & Qt::ControlModifier )
-		&& !( event->modifiers() & ( Qt::AltModifier | Qt::ShiftModifier ) ) && !editMode && model ) {
+	// join the selected compatible meshes into the active one (object)
+	if ( shortcuts.matches( "viewport.join", event->key(), mods ) && !editMode && model ) {
 		joinSelectedObjects();
 		return;
 	}
 
 	// Shift+Ctrl+Alt+C (Set Origin) is a window-level QAction in nifskope_ui.cpp
 
-	// H hides the selection, Alt+H reveals everything: nodes in object mode,
-	// picked vertices/edges/faces in edit mode (Blender)
-	if ( event->key() == Qt::Key_H ) {
-		if ( event->modifiers() & Qt::AltModifier ) {
-			if ( editMode )
-				unhideAllElements();
-			else
-				unhideAll();
-			return;
-		}
-		if ( !( event->modifiers() & ( Qt::ControlModifier | Qt::ShiftModifier ) ) ) {
-			if ( editMode )
-				hideSelectedElements();
-			else
-				hideSelected();
-			return;
-		}
+	// hide the selection / reveal everything: nodes in object mode,
+	// picked vertices/edges/faces in edit mode (Blender H / Alt+H)
+	if ( shortcuts.matches( "viewport.unhide_all", event->key(), mods ) ) {
+		if ( editMode )
+			unhideAllElements();
+		else
+			unhideAll();
+		return;
+	}
+	if ( shortcuts.matches( "viewport.hide", event->key(), mods ) ) {
+		if ( editMode )
+			hideSelectedElements();
+		else
+			hideSelected();
+		return;
 	}
 
-	if ( view != ViewWalk && !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
-		// Shift+S: snap pie (object and edit mode, Blender) - must beat the
+	if ( view != ViewWalk ) {
+		// snap pie (object and edit mode, Blender Shift+S) - must beat the
 		// plain S scale shortcut
-		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && event->key() == Qt::Key_S
-			&& ( event->modifiers() & Qt::ShiftModifier ) && model ) {
+		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode
+			&& shortcuts.matches( "viewport.snap", event->key(), mods ) && model ) {
 			showSnapMenu();
 			return;
 		}
 
-		// A: select all / deselect all (Blender), in object and edit mode
-		if ( event->key() == Qt::Key_A && !( event->modifiers() & Qt::ShiftModifier ) && !freeCamera && model ) {
+		// select all (toggle) / deselect all (Blender A / Alt+A)
+		if ( shortcuts.matches( "viewport.select.all", event->key(), mods ) && !freeCamera && model ) {
 			selectAll( 0 );
+			return;
+		}
+		if ( shortcuts.matches( "viewport.select.none", event->key(), mods ) && !freeCamera && model ) {
+			selectAll( 2 );
 			return;
 		}
 
 		int m = 0;
-		if ( event->key() == Qt::Key_G )
+		if ( shortcuts.matches( "viewport.transform.move", event->key(), mods ) )
 			m = 1;
-		else if ( event->key() == Qt::Key_R )
+		else if ( shortcuts.matches( "viewport.transform.rotate", event->key(), mods ) )
 			m = 2;
-		else if ( event->key() == Qt::Key_S )
+		else if ( shortcuts.matches( "viewport.transform.scale", event->key(), mods ) )
 			m = 3;
 
 		if ( m && !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode ) {
@@ -13217,20 +13278,26 @@ void GLView::keyPressEvent( QKeyEvent * event )
 				return;
 		}
 
-		// delete picked vertices / edges / faces (Blender X / Delete menu)
-		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode && ( event->key() == Qt::Key_Delete || event->key() == Qt::Key_X )
+		// delete picked vertices / edges / faces (Blender X / Delete menu);
+		// the Delete key is a fixed alternate
+		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode
+			&& ( shortcuts.matches( "viewport.delete", event->key(), mods )
+				|| ( event->key() == Qt::Key_Delete
+					&& !( mods & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) )
 			&& editMode && !pickedElems.isEmpty() ) {
 			showDeleteMenu();
 			return;
 		}
 
-		// element pick modes (Blender: 1/2/3) - only in edit mode
+		// element pick modes (Blender: 1/2/3); Shift extends the enabled set,
+		// so it is stripped before matching the binding
+		const Qt::KeyboardModifiers pmMods = mods & ~Qt::ShiftModifier;
 		int pm = 0;
-		if ( event->key() == Qt::Key_1 )
+		if ( shortcuts.matches( "viewport.pick_vertex", event->key(), pmMods ) )
 			pm = 1;	// vertex bit
-		else if ( event->key() == Qt::Key_2 )
+		else if ( shortcuts.matches( "viewport.pick_edge", event->key(), pmMods ) )
 			pm = 2;	// edge bit
-		else if ( event->key() == Qt::Key_3 )
+		else if ( shortcuts.matches( "viewport.pick_face", event->key(), pmMods ) )
 			pm = 4;	// face bit
 		if ( pm && editMode ) {
 			if ( riggingWeightPaintMode )
@@ -13247,21 +13314,24 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			emit gizmoStatus( tr( "Edit Mode - select  (click = pick, Ctrl+click = add, Shift+click = path select, G/R/S move, X delete, Shift+S snap)" ) );
 			return;
 		}
-		if ( event->key() == Qt::Key_C ) {
-			if ( event->modifiers() & Qt::ShiftModifier )
-				cursorPos = pickedElems.isEmpty() ? Vector3() : pickedMedian();
-			else
-				beginCircleSelect();	// cursor placement moved to Shift+RMB (Blender)
+		if ( shortcuts.matches( "viewport.snap_cursor_median", event->key(), mods ) ) {
+			cursorPos = pickedElems.isEmpty() ? Vector3() : pickedMedian();
 			update();
 			return;
 		}
-		// Ctrl+= / Ctrl+- grow / shrink the selection (Blender Select More/Less)
-		if ( ( event->modifiers() & Qt::ControlModifier )
-			&& ( event->key() == Qt::Key_Plus || event->key() == Qt::Key_Equal ) ) {
+		if ( shortcuts.matches( "viewport.select.circle", event->key(), mods ) ) {
+			beginCircleSelect();	// cursor placement moved to plain RMB (Blender)
+			update();
+			return;
+		}
+		// grow / shrink the selection (Blender Select More/Less); the keyboard
+		// produces either Plus or Equal for the same physical key
+		const int mlKey = ( event->key() == Qt::Key_Plus ) ? Qt::Key_Equal : event->key();
+		if ( shortcuts.matches( "viewport.select.more", mlKey, mods ) ) {
 			selectMoreLess( true );
 			return;
 		}
-		if ( ( event->modifiers() & Qt::ControlModifier ) && event->key() == Qt::Key_Minus ) {
+		if ( shortcuts.matches( "viewport.select.less", mlKey, mods ) ) {
 			selectMoreLess( false );
 			return;
 		}
@@ -13272,24 +13342,21 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		}
 	}
 
-	// C arms circle select in object mode too (edit mode handles it above)
-	if ( event->key() == Qt::Key_C && !editMode && model
-		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+	// circle select arms in object mode too (edit mode handles it above)
+	if ( shortcuts.matches( "viewport.select.circle", event->key(), mods ) && !editMode && model ) {
 		beginCircleSelect();
 		return;
 	}
 
-	// Numpad-. (or plain .) frames the current selection (Blender)
-	if ( event->key() == Qt::Key_Period && model
-		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+	// frame the current selection (Blender Numpad-.)
+	if ( shortcuts.matches( "viewport.frame_selection", event->key(), mods ) && model ) {
 		frameSelected();
 		return;
 	}
 
 	// Blender-like free camera toggle (only reached when entering; the lockout
 	// block above handles exiting). Frontal light is now Ctrl+Shift+F.
-	if ( event->key() == Qt::Key_F && ( event->modifiers() & Qt::ShiftModifier )
-		&& !( event->modifiers() & ( Qt::ControlModifier | Qt::AltModifier ) ) ) {
+	if ( shortcuts.matches( "viewport.free_camera", event->key(), mods ) ) {
 		setFreeCamera( true );
 		return;
 	}

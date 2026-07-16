@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Rebindable shortcuts (Settings ▸ Shortcuts, with search)
+
+Everything currently bound can now be rebound in Settings ▸ Shortcuts:
+
+- **New `ShortcutRegistry`** (`src/shortcutregistry.{h,cpp}`): central table of
+  the ~38 built-in 3D-viewport bindings (ids like `viewport.transform.move`),
+  each with label/category/default/current; user overrides persist under
+  QSettings `Shortcuts/<id>`. `matches(id, key, mods)` does exact
+  key+modifier matching. Bindings registered once in glview.cpp
+  (`tlRegisterViewportShortcuts`).
+- **Viewport key handlers converted**: every hard-coded key check in
+  `GLView::keyPressEvent` and the viewport-scoped block of
+  `NifSkope::eventFilter` now goes through `matches()` — mode toggles, G/R/S
+  (including in-gesture mode switching), selection ops (A/Alt+A, B, C, Ctrl+I,
+  Ctrl+L, Ctrl+Alt+Shift+F, Ctrl+=/−), H/Alt+H, X delete, M/P menus,
+  Shift+D/S/A/C/V/F, Ctrl+J/P/R/X, Alt+P, 1/2/3 pick modes (Shift still
+  extends), paint fills, frame selection, free camera. Fixed by design: the
+  modal gesture grammar (X/Y/Z axis locks, numeric entry, Esc/Enter), the
+  Delete-key alternate, Escape, and the Blender numpad view block.
+- **QAction shortcuts**: `NifSkope::applyShortcutOverrides()` records each
+  action's factory default and applies `Shortcuts/action.<objectName>`
+  overrides at startup and after every settings save (per window; `options`
+  dialog is shared).
+- **Settings ▸ Shortcuts pane** (`src/ui/settingsshortcuts.cpp`, registered in
+  settingsdialog.cpp): search bar filtering by name, category, id, or key
+  ("extrude", "Ctrl+R"); category-grouped tree (viewport categories + one per
+  menu); inline QKeySequenceEdit capture (single chord); per-row reset button;
+  duplicates within a group highlighted red (cross-group sharing allowed —
+  different scopes); Restore Defaults resets every row. The pane populates
+  lazily on first show (actions don't exist yet when the dialog is built) and
+  hooks the standard pane read/write/Apply flow.
+
 ## 2026-07-16 — Viewport menus move into the viewport (floating bottom bar)
 
 Follow-up to the header-menu batch below: the Select/Add/Object (and edit/
