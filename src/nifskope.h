@@ -454,6 +454,9 @@ private:
 	//! Inline Block List search field.
 	QLineEdit * blockListSearch = nullptr;
 	QLineEdit * blockDetailsSearch = nullptr;
+	//! A Block Details filter is (or just was) active; lets the empty-filter
+	//! case skip the full-block walk that cost ~0.5 s per click on big shapes
+	bool blockDetailsFilterWasActive = false;
 	QToolButton * blockListBack = nullptr;
 	QToolButton * blockListForward = nullptr;
 	QToolButton * blockListPin = nullptr;

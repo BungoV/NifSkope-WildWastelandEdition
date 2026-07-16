@@ -38,6 +38,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
 #include "spellbook.h"
+
+#include <QScopeGuard>
 #include "version.h"
 #include "gl/glscene.h"
 #include "model/kfmmodel.h"
@@ -588,6 +590,79 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	// TEMP DIAGNOSTIC (WW_PERF_TEST=1, remove when the slow click-select is
+	// fixed): after the file loads, time every stage of the click-select
+	// pipeline on the largest BSTriShape, dump to ww_perf_test.log, quit.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			// let startup painting/shader compiles settle first
+			QTimer::singleShot( 2000, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					int sb = -1, sbVerts = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						QModelIndex iB = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( iB, "BSTriShape" ) )
+							continue;
+						int nv = nif->get<int>( iB, "Num Vertices" );
+						if ( nv > sbVerts ) { sbVerts = nv; sb = b; }
+					}
+					if ( sb < 0 ) { log << "no BSTriShape\n"; break; }
+					log << "largest shape: block " << sb << " verts " << sbVerts << "\n";
+					QElapsedTimer t;
+					auto stamp = [&]( const char * name ) {
+						log << name << ": " << t.elapsed() << " ms\n";
+						log.flush();
+						t.restart();
+					};
+					t.start();
+					skope->ogl->grabFramebuffer();
+					stamp( "baseline paint (grabFramebuffer)" );
+					QPointF center( skope->ogl->width() / 2.0, skope->ogl->height() / 2.0 );
+					QModelIndex pickIdx = skope->ogl->indexAt( center );
+					stamp( "GLView::indexAt(center) pick render" );
+					log << "  picked block: "
+						<< ( pickIdx.isValid() ? nif->getBlockNumber( pickIdx ) : -1 ) << "\n";
+					skope->ogl->objectSelectClick( sb, false );
+					stamp( "objectSelectClick(largest)" );
+					qApp->processEvents();
+					stamp( "processEvents after objectSelectClick" );
+					skope->select( nif->getBlockIndex( sb ) );
+					stamp( "NifSkope::select(largest)" );
+					qApp->processEvents();
+					stamp( "processEvents after select" );
+					skope->ogl->grabFramebuffer();
+					stamp( "paint with selection" );
+					// second round: switch away and back, like a user clicking around
+					skope->select( nif->getBlockIndex( 0 ) );
+					qApp->processEvents();
+					stamp( "select(block 0) + events" );
+					skope->ogl->objectSelectClick( sb, false );
+					stamp( "objectSelectClick #2" );
+					skope->select( nif->getBlockIndex( sb ) );
+					qApp->processEvents();
+					stamp( "select(largest) #2 + events" );
+					skope->ogl->grabFramebuffer();
+					stamp( "paint #2" );
+					// the Block List click path (what the sweep probe used)
+					if ( skope->list->model() == skope->proxy )
+						skope->list->setCurrentIndex( skope->proxy->mapFrom( nif->getBlockIndex( sb ), QModelIndex() ) );
+					else
+						skope->list->setCurrentIndex( nif->getBlockIndex( sb ) );
+					qApp->processEvents();
+					stamp( "Block List setCurrentIndex(largest) + events" );
+				} while ( false );
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	if ( !fname.isEmpty() ) {
 		skope->loadFile( fname );
 	}
@@ -842,6 +917,17 @@ void NifSkope::initActions()
 	} );
 	// object-mode multi-selection -> colour the matching block-list rows
 	connect( ogl, &GLView::objectSelectionChanged, [this]() {
+		QElapsedTimer perfT;	// TEMP DIAGNOSTIC (WW_PERF_TEST)
+		perfT.start();
+		auto perfMark = [&perfT]() {
+			if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+				QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+				if ( f.open( QIODevice::Append | QIODevice::Text ) )
+					QTextStream( &f ) << "    [list mirror: " << perfT.elapsed() << " ms]\n";
+			}
+		};
+		Q_UNUSED( perfMark );
+		auto perfGuard = qScopeGuard( perfMark );
 		if ( !nif )
 			return;
 		nif->selHighlight = ogl->objSelection;

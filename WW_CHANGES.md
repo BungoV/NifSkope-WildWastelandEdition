@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Slow click FOUND AND FIXED: the Block Details filter (round 3)
+
+The row-hiding walks (rounds 1-2) were real but not the 3 seconds. A new
+WW_PERF_TEST probe (env-gated stage timing in NifSkope::select + the
+selection-changed handlers, driven headlessly on the user's x01_torso.nif)
+attributed it exactly:
+
+- `applyBlockDetailsFilter()` ran on EVERY `currentNifIndexChanged` and — even
+  with an EMPTY filter box — recursed the entire current block and
+  **stringified every value column** (38k vertices × members ≈ 480 ms), and it
+  fired TWICE per viewport click (direct select + the list-mirror echo).
+  Fix: early-out when the filter is empty and no filter was previously active
+  (`blockDetailsFilterWasActive`); clearing a real filter still walks once to
+  un-hide.
+- The UV editor rebuilt itself from the viewport on every object-selection
+  change even while hidden (~55 ms): now defers to its next showEvent
+  (`viewportRebuildPending` + `deferredRebuildCb`).
+
+Probe before → after: objectSelectClick 545 ms → 5 ms; NifSkope::select
+485 ms → 3 ms; pick render and paints were always 1-2 ms. Rigging /
+vertex-paint / meshtools handlers measured 0 ms (already visibility-guarded
+or cheap).
+
+The WW_PERF_TEST instrumentation stays in (zero cost unless the env var is
+set): run `WW_PERF_TEST=1 NifSkope.exe <file>` to re-measure; it writes
+ww_perf_test.log next to the exe and quits.
+
 ## 2026-07-16 — Row hiding is now derived lazily (round 2 of the slow-click fix)
 
 The first fix only made the doItemsLayout pass shallow; two more full-subtree

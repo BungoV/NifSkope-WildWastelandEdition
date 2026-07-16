@@ -8,8 +8,11 @@
 
 #include "model/nifmodel.h"
 
+#include <QApplication>
 #include <QCoreApplication>
 #include <QCheckBox>
+#include <QElapsedTimer>
+#include <QFile>
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDropEvent>
@@ -5720,7 +5723,15 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	} );
 	if ( ogl )
 		QObject::connect( ogl, &GLView::objectSelectionChanged, panel, [=]() {
+			QElapsedTimer perfT;	// TEMP DIAGNOSTIC (WW_PERF_TEST)
+			perfT.start();
 			refresh( skope ? skope->currentNifIndex() : QModelIndex() );
+			if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+				QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+				if ( f.open( QIODevice::Append | QIODevice::Text ) )
+					QTextStream( &f ) << "    [rigging refresh: " << perfT.elapsed()
+						<< " ms, visible=" << panel->isVisible() << "]\n";
+			}
 		} );
 	if ( skope ) {
 		QObject::connect( skope, &NifSkope::currentNifIndexChanged, panel, refresh );
@@ -6056,7 +6067,15 @@ QDockWidget * tlCreateVertexPaintManagerDock( NifModel * nif, QMainWindow * mw, 
 			}
 		} );
 		QObject::connect( ogl, &GLView::objectSelectionChanged, panel, [=]() {
+			QElapsedTimer perfT;	// TEMP DIAGNOSTIC (WW_PERF_TEST)
+			perfT.start();
 			refreshTarget( skope ? skope->currentNifIndex() : QModelIndex() );
+			if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+				QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+				if ( f.open( QIODevice::Append | QIODevice::Text ) )
+					QTextStream( &f ) << "    [vertex-paint refreshTarget: " << perfT.elapsed()
+						<< " ms, visible=" << panel->isVisible() << "]\n";
+			}
 		} );
 	}
 	if ( skope ) {

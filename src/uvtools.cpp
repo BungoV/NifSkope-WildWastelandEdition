@@ -28,6 +28,8 @@ BSD License - see nifskope.h
 #include <QAbstractSpinBox>
 #include <QAction>
 #include <QApplication>
+#include <QElapsedTimer>
+#include <QFile>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCursor>
@@ -655,6 +657,13 @@ public:
 
 	// ---- data / sync ----
 	bool applyingEdit = false;          //!< suppress our own dataChanged echoes
+	//! a selection/mode change arrived while the editor was hidden; the
+	//! rebuild is deferred to the next showEvent (rebuilding a big mesh
+	//! costs real time, so a hidden editor must not chase every click)
+	bool viewportRebuildPending = false;
+	//! the full rebuild wiring (rebuildFromViewport + dock combos), set by
+	//! tlCreateUVManagerDock so the deferred rebuild refreshes the combos too
+	std::function<void()> deferredRebuildCb;
 	void rebuildFromViewport();
 	void clearData();
 	void reloadShapeUVs( int block );
@@ -752,6 +761,18 @@ protected:
 	//! Focus-follows-mouse (Blender): entering the canvas grabs keyboard focus
 	//! so G/R/S/A and the other single-key shortcuts fire without a prior click.
 	void enterEvent( QEnterEvent * e ) override;
+	//! service a rebuild that was deferred while the editor was hidden
+	void showEvent( QShowEvent * e ) override
+	{
+		QOpenGLWidget::showEvent( e );
+		if ( viewportRebuildPending ) {
+			viewportRebuildPending = false;
+			if ( deferredRebuildCb )
+				deferredRebuildCb();
+			else
+				rebuildFromViewport();
+		}
+	}
 
 private:
 	NifSkopeOpenGLContext * cx = nullptr;
@@ -5674,14 +5695,23 @@ QDockWidget * tlCreateUVManagerDock( NifModel * nif, QMainWindow * mw, GLView * 
 		refreshUnderlayCombo();
 		refreshUVSetCombo();
 	};
-	QObject::connect( ogl, &GLView::editModeChanged, view, [rebuild]( bool ) { rebuild(); } );
+	// a hidden editor defers to its next showEvent instead of rebuilding a
+	// (possibly huge) mesh on every viewport selection change
+	view->deferredRebuildCb = rebuild;
+	auto rebuildOrDefer = [view, rebuild]() {
+		if ( view->isVisible() )
+			rebuild();
+		else
+			view->viewportRebuildPending = true;
+	};
+	QObject::connect( ogl, &GLView::editModeChanged, view, [rebuildOrDefer]( bool ) { rebuildOrDefer(); } );
 	QObject::connect( ogl, &GLView::elementSelectionChanged, view,
 		[view]() { view->syncSelectionFromViewport(); } );
 	// Object Mode is a read-only view; follow the object selection so the shown
 	// mesh (and its secondaries) track what is selected in the 3D viewport.
-	QObject::connect( ogl, &GLView::objectSelectionChanged, view, [view, rebuild]() {
+	QObject::connect( ogl, &GLView::objectSelectionChanged, view, [view, rebuildOrDefer]() {
 		if ( !view->ogl->editMode )
-			rebuild();
+			rebuildOrDefer();
 	} );
 	QObject::connect( ogl, &GLView::pickModeChanged, view, [view]( int mode ) {
 		if ( mode >= 1 && mode <= 3 )

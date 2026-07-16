@@ -66,6 +66,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QFocusEvent>
@@ -1662,6 +1663,14 @@ void NifSkope::applyBlockDetailsFilter()
 	if ( !tree || !nif || !blockDetailsSearch || tree->model() != nif ) return;
 	const QStringList terms = blockDetailsSearch->text().simplified().split(
 		QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+	// No filter and none to clear: skip the walk. It recurses the whole
+	// current block and STRINGIFIES every value column - on a 38k-vertex
+	// shape that was ~0.5 s per selection change (and it runs twice per
+	// viewport click via the list-mirror echo), which made click-selecting
+	// high-poly shapes take seconds.
+	if ( terms.isEmpty() && !blockDetailsFilterWasActive )
+		return;
+	blockDetailsFilterWasActive = !terms.isEmpty();
 	auto filterBranch = [&]( auto && self, const QModelIndex & parent ) -> bool {
 		bool branchMatches = false;
 		for ( int row = 0; row < nif->rowCount( parent ); row++ ) {
@@ -2037,12 +2046,27 @@ void NifSkope::select( const QModelIndex & index )
 
 	QModelIndex prevIdx = currentIdx;
 	currentIdx = idx;
+
+	// TEMP DIAGNOSTIC (WW_PERF_TEST): stage timing for the slow click-select
+	QElapsedTimer perfT;
+	const bool perfOn = qEnvironmentVariableIsSet( "WW_PERF_TEST" );
+	if ( perfOn )
+		perfT.start();
+	auto perfMark = [&perfT, perfOn]( const char * what ) {
+		if ( !perfOn )
+			return;
+		QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+		if ( f.open( QIODevice::Append | QIODevice::Text ) )
+			QTextStream( &f ) << "    [select/" << what << ": " << perfT.restart() << " ms]\n";
+	};
+
 	// The persistent menubar SpellBook must follow the same normalized NIF
 	// index as the views. Context menus create a fresh SpellBook at the clicked
 	// index, but without this update the top Spells menu remains at its initial
 	// invalid index and hides selection-specific pages such as Rigging.
 	if ( book )
 		book->sltIndex( currentIdx );
+	perfMark( "book sltIndex" );
 
 	selecting = true;
 
@@ -2064,9 +2088,11 @@ void NifSkope::select( const QModelIndex & index )
 	if ( sender() != ogl ) {
 		ogl->setCurrentIndex( idx );
 	}
+	perfMark( "ogl setCurrentIndex" );
 
 	if ( timeline && sender() != timeline )
 		timeline->setCurrentIndex( idx );
+	perfMark( "timeline setCurrentIndex" );
 
 	// selecting a block from the tree/list/timeline updates the object-mode
 	// selection (outline + block-list highlight); viewport clicks handle this
@@ -2081,6 +2107,7 @@ void NifSkope::select( const QModelIndex & index )
 		ogl->syncObjectSelection( av );
 		updatingObjFromList = false;
 	}
+	perfMark( "syncObjectSelection" );
 
 	// Selecting a key on the timeline unfolds it in Block Details
 	if ( sender() == timeline && idx.isValid() && idx.parent().isValid() ) {
@@ -2171,6 +2198,7 @@ void NifSkope::select( const QModelIndex & index )
 			list->setCurrentIndex( nif->getTopIndex( idx ) );
 		}
 	}
+	perfMark( "list mapping/setCurrentIndex" );
 
 	if ( sender() != tree ) {
 		if ( dList->isVisible() ) {
@@ -2194,9 +2222,11 @@ void NifSkope::select( const QModelIndex & index )
 			tree->setCurrentIndex( idx.sibling( idx.row(), 0 ) );
 		}
 	}
+	perfMark( "tree root/current" );
 
 	selecting = false;
 	emit currentNifIndexChanged( currentIdx );
+	perfMark( "emit currentNifIndexChanged" );
 }
 
 void NifSkope::setListMode()
