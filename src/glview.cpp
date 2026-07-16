@@ -9592,6 +9592,91 @@ void GLView::addPrimitive( int kind )
 		.arg( tr( primNames[std::clamp( kind, 0, 3 )] ) ) );
 }
 
+void GLView::showSpecialsMenu()
+{
+	if ( !model )
+		return;
+	AutoCloseMenu m;
+	if ( editMode ) {
+		const bool hasSel = !pickedElems.isEmpty();
+		m.addSection( tr( "Specials" ) );
+		QAction * aSubd = m.addAction( tr( "Subdivide" ) );
+		QAction * aSmooth = m.addAction( tr( "Smooth Vertices…" ) );
+		QAction * aMerge = m.addAction( tr( "Merge…" ) );
+		QAction * aDoubles = m.addAction( tr( "Remove Doubles…" ) );
+		QAction * aDissolve = m.addAction( tr( "Dissolve Vertices" ) );
+		m.addSeparator();
+		QAction * aExtrude = m.addAction( tr( "Extrude Region…" ) );
+		QAction * aFill = m.addAction( tr( "Fill / Bridge…" ) );
+		QAction * aInset = m.addAction( tr( "Inset Faces…" ) );
+		QAction * aSlide = m.addAction( tr( "Edge Slide…" ) );
+		m.addSeparator();
+		QAction * aFlip = m.addAction( tr( "Flip Normals" ) );
+		QAction * aRecalc = m.addAction( tr( "Recalculate Normals" ) );
+		QAction * aSym = m.addAction( tr( "Symmetrize…" ) );
+		m.addSeparator();
+		QAction * aHide = m.addAction( tr( "Hide Selection" ) );
+		QAction * aReveal = m.addAction( tr( "Reveal All" ) );
+		QAction * aInvert = m.addAction( tr( "Invert Selection" ) );
+		for ( QAction * a : { aSubd, aSmooth, aMerge, aDoubles, aDissolve, aExtrude,
+			aFill, aInset, aSlide, aFlip, aRecalc, aHide } )
+			a->setEnabled( hasSel );
+		QAction * r = m.exec( QCursor::pos() );
+		if ( r == aSubd )
+			subdivideSelection();
+		else if ( r == aSmooth )
+			smoothVertices();
+		else if ( r == aMerge )
+			showMergeMenu();
+		else if ( r == aDoubles )
+			mergeVertices( 2, ( lastOpKind == 1 ) ? lastOpParam : 0.0001f );
+		else if ( r == aDissolve )
+			dissolveVerts();
+		else if ( r == aExtrude )
+			extrudeRegion();
+		else if ( r == aFill )
+			smartConnect();
+		else if ( r == aInset )
+			insetRegion();
+		else if ( r == aSlide )
+			edgeSlide();
+		else if ( r == aFlip )
+			flipSelectedFaces();
+		else if ( r == aRecalc )
+			recalcSelectedNormals();
+		else if ( r == aSym )
+			symmetrizeShape();
+		else if ( r == aHide )
+			hideSelectedElements();
+		else if ( r == aReveal )
+			unhideAllElements();
+		else if ( r == aInvert )
+			invertSelection();
+	} else {
+		const bool hasSel = !objSelection.isEmpty();
+		m.addSection( tr( "Specials" ) );
+		QAction * aAdd = m.addAction( tr( "Add Primitive…" ) );
+		QAction * aDup = m.addAction( tr( "Duplicate" ) );
+		QAction * aJoin = m.addAction( tr( "Join" ) );
+		m.addSeparator();
+		QAction * aSnap = m.addAction( tr( "Snap…" ) );
+		QAction * aOrigin = m.addAction( tr( "Set Origin…" ) );
+		aDup->setEnabled( hasSel );
+		aJoin->setEnabled( objSelection.size() > 1 );
+		QAction * r = m.exec( QCursor::pos() );
+		if ( r == aAdd )
+			showAddPrimitiveMenu();
+		else if ( r == aDup )
+			duplicateSelection();
+		else if ( r == aJoin )
+			joinSelectedObjects();
+		else if ( r == aSnap )
+			showSnapMenu();
+		else if ( r == aOrigin )
+			showSetOriginMenu();
+	}
+}
+
 void GLView::showAddPrimitiveMenu()
 {
 	if ( !model || editMode )

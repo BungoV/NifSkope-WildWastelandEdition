@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — W: Blender-style Specials quick menu
+
+`W` over the viewport (user request) opens the 2.7x-style Specials menu — the
+one-key hub for the modeling operators (hover-out AutoCloseMenu, like the
+other operator popups). Guarded so W stays camera-forward in free-camera /
+walk mode and ignored while a text field has focus.
+
+- **Edit mode:** Subdivide, Smooth Vertices…, Merge…, Remove Doubles…
+  (= Merge by Distance with the redo-panel default), Dissolve Vertices |
+  Extrude Region…, Fill / Bridge…, Inset Faces…, Edge Slide… | Flip Normals,
+  Recalculate Normals, Symmetrize… | Hide Selection, Reveal All, Invert
+  Selection. Selection-dependent items grey out. (Loop Cut is deliberately
+  absent — it needs the cursor on an edge, so it stays on Ctrl+R.)
+- **Object mode:** Add Primitive…, Duplicate, Join | Snap…, Set Origin….
+
 ## 2026-07-16 — Modeling tools batches 3-5: eight operators at once
 
 Everything remaining from `MODELING_TOOLS_PLAN.md` except Bevel (deferred:

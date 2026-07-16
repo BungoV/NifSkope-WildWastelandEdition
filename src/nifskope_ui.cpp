@@ -4058,6 +4058,25 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				return true;
 			}
 		}
+		// W opens the Blender-style Specials quick menu (edit + object mode);
+		// in free-camera / walk mode W stays camera-forward
+		if ( ogl && graphicsView && !ogl->freeCamera && ogl->view != GLView::ViewWalk
+			&& !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
+			&& !ogl->segmentPaintModeActive()
+			&& ke->key() == Qt::Key_W
+			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) )
+			&& isActiveWindow()
+			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) ) ) {
+			QWidget * fw = QApplication::focusWidget();
+			const bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )
+				|| fw->inherits( "QPlainTextEdit" ) || fw->inherits( "QAbstractSpinBox" ) );
+			if ( !textInput ) {
+				if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
+					ogl->showSpecialsMenu();
+				e->accept();
+				return true;
+			}
+		}
 		// Shift+A adds a primitive (object mode, pointer over the view)
 		if ( ogl && graphicsView && !ogl->editMode && !ogl->freeCamera
 			&& ke->key() == Qt::Key_A

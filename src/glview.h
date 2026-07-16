@@ -844,6 +844,8 @@ public:
 	//! 3 UV sphere
 	void addPrimitive( int kind );
 	void showAddPrimitiveMenu();
+	//! W: Blender 2.7x-style Specials quick menu (edit and object mode)
+	void showSpecialsMenu();
 
 	// ---- selection undo (Blender: selections are undoable, Ctrl+Z) ----
 	struct SelState { QVector<PickedElement> picked; QSet<int> objSel; int objActive = -1; };
