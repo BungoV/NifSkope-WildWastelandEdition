@@ -131,6 +131,14 @@ public:
 	bool segmentPaintBrushActive() const { return segmentPaintMode && segmentPaintBrushEnabled; }
 	float segmentPaintBrushRadius() const { return segmentPaintRadius; }
 	bool editModeActive() const { return editMode; }
+	//! Blender-style mouse mapping: false = select with LMB and place the 3D
+	//! cursor/gizmo with RMB (default); true = swapped (2.7x right-click select).
+	//! Only the click roles swap; drags (orbit / zoom), the select gadgets and
+	//! the gizmo handles keep their buttons.
+	bool selectWithRightMouse = false;
+	Qt::MouseButton selectMouseButton() const { return selectWithRightMouse ? Qt::RightButton : Qt::LeftButton; }
+	Qt::MouseButton cursorPlaceButton() const { return selectWithRightMouse ? Qt::LeftButton : Qt::RightButton; }
+	void setSelectWithRightMouse( bool on ) { selectWithRightMouse = on; }
 	//! Edit the evaluated, skinned cage (default) or raw authored bind vertices.
 	void setEditDeformedCage( bool enabled );
 	bool editDeformedCageEnabled() const { return editDeformedCage; }

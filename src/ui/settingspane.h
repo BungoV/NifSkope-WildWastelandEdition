@@ -13,6 +13,7 @@
 class SettingsDialog;
 class QStringListModel;
 class QListWidget;
+class QComboBox;
 class QLineEdit;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -157,6 +158,7 @@ private:
 
 	QLineEdit * search = nullptr;
 	QTreeWidget * tree = nullptr;
+	QComboBox * mouseSelect = nullptr;
 	bool populated = false;
 };
 

@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-16 — Swappable select / place-gizmo mouse buttons
+
+Blender-style "Select With" mouse mapping: by default LMB clicks select and
+RMB clicks place the gizmo / 3D cursor; a new option swaps them (2.7x
+right-click select). Only the *click* roles swap — drags (orbit / RMB zoom),
+the box/circle gadgets, gizmo handles, and paint strokes keep their buttons.
+
+- `GLView::selectWithRightMouse` + `selectMouseButton()` / `cursorPlaceButton()`;
+  stored as QSettings `Shortcuts/MouseSelect` = left|right, read at GLView
+  construction and pushed per-window by `applyShortcutOverrides()` after each
+  settings save.
+- Click interpretation is now fully explicit in `mouseReleaseEvent`: the
+  edit-mode element pick, the object/block select, and the cursor placement
+  each check their button. This also fixes a latent quirk where a plain RMB
+  click silently re-picked the selection before placing the gizmo (the select
+  block had no button check).
+- Cursor placement moved out of `contextMenuEvent` into `mouseReleaseEvent`
+  (no more synthesized QContextMenuEvent; the keyboard menu key still opens W).
+- Settings ▸ Shortcuts grew a "Select with mouse button" combo at the top, and
+  a rebindable, unbound-by-default `viewport.swap_mouse_select` key toggles the
+  mapping live with a status-bar confirmation.
+
 ## 2026-07-16 — Rebindable shortcuts (Settings ▸ Shortcuts, with search)
 
 Everything currently bound can now be rebound in Settings ▸ Shortcuts:

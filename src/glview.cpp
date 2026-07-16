@@ -197,6 +197,9 @@ static void tlRegisterViewportShortcuts()
 
 	r.reg( "viewport.paint_fill", QObject::tr( "Paint: Fill Selection (weight / segment)" ), cat,
 		QKeySequence( Qt::CTRL | Qt::Key_X ) );
+	// unbound by default; the Shortcuts page also offers this as a combo box
+	r.reg( "viewport.swap_mouse_select", QObject::tr( "Swap Select / Place-Gizmo Mouse Buttons" ), cat,
+		QKeySequence() );
 }
 
 GLView::GLView( QWindow * p )
@@ -206,6 +209,7 @@ GLView::GLView( QWindow * p )
 	QSettings settings;
 	int	aa = settings.value( "Settings/Render/General/Msaa Samples", 2 ).toInt();
 	editDeformedCage = settings.value( "GLView/Edit/DeformedCage", true ).toBool();
+	selectWithRightMouse = settings.value( "Shortcuts/MouseSelect" ).toString() == QLatin1String( "right" );
 	aa = std::clamp< int >( aa, 0, 4 );
 
 	QSurfaceFormat	fmt;
@@ -12781,19 +12785,12 @@ void GLView::saveImage()
 
 void GLView::contextMenuEvent( QContextMenuEvent * e )
 {
-	// The viewport has no context menu. A plain right-click (click, not an
-	// RMB zoom drag) drops the gizmo / 3D cursor on the surface under the
-	// mouse; the keyboard menu key opens the W quick menu instead.
+	// The viewport has no context menu. Mouse clicks are interpreted in
+	// mouseReleaseEvent (select vs place-gizmo, swappable buttons); the
+	// keyboard menu key opens the W quick menu.
 	if ( e->reason() == QContextMenuEvent::Keyboard ) {
 		mouseButtonState = 0;
 		showSpecialsMenu();
-		e->accept();
-		return;
-	}
-	if ( ( pressPos - lastPos ).manhattanLength() <= 10 && model ) {
-		mouseButtonState = 0;
-		placeCursor( QPointF( e->pos() ) );
-		update();
 	}
 	e->accept();
 }
@@ -13172,6 +13169,18 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		int fk = convertKeyCode( event->key() );
 		if ( fk >= 0 )
 			kbdState = kbdState | ( 1ULL << fk );
+		return;
+	}
+
+	// swap which mouse button selects vs places the gizmo (unbound by default;
+	// also settable from the Shortcuts settings page)
+	if ( shortcuts.matches( "viewport.swap_mouse_select", event->key(), mods ) ) {
+		setSelectWithRightMouse( !selectWithRightMouse );
+		QSettings().setValue( "Shortcuts/MouseSelect",
+			selectWithRightMouse ? QLatin1String( "right" ) : QLatin1String( "left" ) );
+		emit gizmoStatus( selectWithRightMouse
+			? tr( "Select with RIGHT mouse - LEFT places the gizmo" )
+			: tr( "Select with LEFT mouse - RIGHT places the gizmo" ) );
 		return;
 	}
 
@@ -13953,9 +13962,9 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 #else
 	bool	isColorPicker = bool( event->modifiers() & Qt::AltModifier );
 #endif
-	// in edit mode Alt+LMB / Ctrl+LMB are selection clicks (edge loop / extend,
-	// Blender), never the background color picker
-	if ( editMode && pickMode && event->button() == Qt::LeftButton )
+	// in edit mode Alt+click / Ctrl+click on the select button are selection
+	// clicks (edge loop / extend, Blender), never the background color picker
+	if ( editMode && pickMode && event->button() == selectMouseButton() )
 		isColorPicker = false;
 	if ( model && ( pressPos - evtPos ).manhattanLength() <= 3 ) {
 		if ( event->button() == Qt::ForwardButton || event->button() == Qt::BackButton
@@ -13968,7 +13977,7 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 		// camera orbiting never changes the selection: click = pick,
 		// Ctrl+click = extend/toggle, Shift+click = shortest-path,
 		// Alt+click = edge loop (Shift+Alt extends it) - all Blender
-		if ( editMode && pickMode && event->button() == Qt::LeftButton && !isColorPicker ) {
+		if ( editMode && pickMode && event->button() == selectMouseButton() && !isColorPicker ) {
 			auto p = evtPos;
 			if ( event->modifiers() & Qt::AltModifier ) {
 				if ( !selectEdgeLoop( p, bool( event->modifiers() & Qt::ShiftModifier ) ) )
@@ -13982,7 +13991,7 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 			return;
 		}
 
-		if ( !isColorPicker ) {
+		if ( !isColorPicker && event->button() == selectMouseButton() ) {
 			bool shift = bool( event->modifiers() & Qt::ShiftModifier );
 			// in object mode Shift OR Ctrl extends the multi-selection (Blender
 			// accepts both); Shift alone also drives indexAt()'s vertex cycling
@@ -14007,7 +14016,7 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 				emit clicked( idx );
 			}
 
-		} else {
+		} else if ( isColorPicker ) {
 			// Color Picker / Eyedrop tool
 			auto	prvContext = pushGLContext();
 			{
@@ -14037,15 +14046,12 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 		update();
 	}
 
-	if ( event->button() == Qt::RightButton && !isColorPicker ) {
-		QContextMenuEvent	e( QContextMenuEvent::Mouse,
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-								event->pos(), event->globalPos(),
-#else
-								evtPos.toPoint(), event->globalPosition().toPoint(),
-#endif
-								event->modifiers() );
-		contextMenuEvent( &e );
+	// a plain click (not a drag) on the cursor-place button drops the gizmo /
+	// 3D cursor on the surface under the mouse (select/place buttons swappable)
+	if ( event->button() == cursorPlaceButton() && !isColorPicker && model
+		&& ( pressPos - evtPos ).manhattanLength() <= 10 ) {
+		placeCursor( evtPos );
+		update();
 	}
 }
 

@@ -3954,6 +3954,10 @@ void NifSkope::applyShortcutOverrides()
 		else if ( a->shortcut() != reg.actionDefault( name ) )
 			a->setShortcut( reg.actionDefault( name ) );	// override was removed
 	}
+	// Blender-style mouse mapping (select vs place-gizmo click)
+	if ( ogl )
+		ogl->setSelectWithRightMouse(
+			settings.value( QStringLiteral( "MouseSelect" ) ).toString() == QLatin1String( "right" ) );
 	settings.endGroup();
 }
 

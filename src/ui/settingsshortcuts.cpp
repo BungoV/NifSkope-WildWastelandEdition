@@ -5,6 +5,8 @@
 #include "shortcutregistry.h"
 
 #include <QApplication>
+#include <QComboBox>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QKeySequenceEdit>
 #include <QLabel>
@@ -45,6 +47,17 @@ SettingsShortcuts::SettingsShortcuts( QWidget * parent ) :
 	tf.setPointSize( tf.pointSize() + 4 );
 	title->setFont( tf );
 	lay->addWidget( title );
+
+	// Blender-style mouse mapping: which button selects, the other places
+	// the gizmo / 3D cursor. Drags (orbit / zoom) keep their buttons.
+	QHBoxLayout * mouseRow = new QHBoxLayout();
+	mouseRow->addWidget( new QLabel( tr( "Select with mouse button:" ), this ) );
+	mouseSelect = new QComboBox( this );
+	mouseSelect->addItem( tr( "Left  (Right places the gizmo)" ) );
+	mouseSelect->addItem( tr( "Right  (Left places the gizmo)" ) );
+	mouseRow->addWidget( mouseSelect, 1 );
+	lay->addLayout( mouseRow );
+	connect( mouseSelect, &QComboBox::currentIndexChanged, this, [this]( int ) { modifyPane(); } );
 
 	search = new QLineEdit( this );
 	search->setPlaceholderText( tr( "Search shortcuts...  (name, category or key, e.g. \"extrude\" or \"Ctrl+R\")" ) );
@@ -122,6 +135,14 @@ void SettingsShortcuts::addRow( QTreeWidgetItem * parent, int kind, const QStrin
 
 void SettingsShortcuts::read()
 {
+	{
+		QSettings settings;
+		QSignalBlocker blocker( mouseSelect );
+		mouseSelect->setCurrentIndex(
+			settings.value( QStringLiteral( "Shortcuts/MouseSelect" ) ).toString()
+				== QLatin1String( "right" ) ? 1 : 0 );
+	}
+
 	tree->clear();
 	auto & reg = ShortcutRegistry::get();
 
@@ -206,6 +227,8 @@ void SettingsShortcuts::write()
 		return;
 	auto & reg = ShortcutRegistry::get();
 	QSettings settings;
+	settings.setValue( QStringLiteral( "Shortcuts/MouseSelect" ),
+		mouseSelect->currentIndex() == 1 ? QLatin1String( "right" ) : QLatin1String( "left" ) );
 	for ( int g = 0; g < tree->topLevelItemCount(); g++ ) {
 		QTreeWidgetItem * group = tree->topLevelItem( g );
 		for ( int i = 0; i < group->childCount(); i++ ) {
@@ -239,6 +262,7 @@ void SettingsShortcuts::setDefault()
 {
 	if ( !populated )
 		read();
+	mouseSelect->setCurrentIndex( 0 );
 	for ( int g = 0; g < tree->topLevelItemCount(); g++ ) {
 		QTreeWidgetItem * group = tree->topLevelItem( g );
 		for ( int i = 0; i < group->childCount(); i++ ) {
