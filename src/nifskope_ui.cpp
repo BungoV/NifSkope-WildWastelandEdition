@@ -4309,13 +4309,13 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			e->accept();
 			return true;
 		}
-		// fill a hole / bridge two rims (Blender F) in edit mode with the
-		// pointer over the view; F stays Front View everywhere else
+		// Blender F: form a quad from two adjacent picked triangles, else
+		// fill a hole / bridge two rims; F stays Front View everywhere else
 		if ( pointerOverViewport && ogl->editMode && !ogl->freeCamera
 			&& !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
 			&& vpKeys.matches( "viewport.fill", ke->key(), ke->modifiers() ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
-				ogl->smartConnect();
+				ogl->makeFace();
 			e->accept();
 			return true;
 		}
@@ -4333,6 +4333,10 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				op = 3;
 			else if ( vpKeys.matches( "viewport.dissolve", ke->key(), ke->modifiers() ) )
 				op = 4;
+			else if ( vpKeys.matches( "viewport.tris_to_quads", ke->key(), ke->modifiers() ) )
+				op = 5;
+			else if ( vpKeys.matches( "viewport.triangulate", ke->key(), ke->modifiers() ) )
+				op = 6;
 			if ( op ) {
 				if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() ) {
 					if ( op == 1 )
@@ -4341,8 +4345,12 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 						ogl->loopCut();
 					else if ( op == 3 )
 						ogl->edgeSlide();
-					else
+					else if ( op == 4 )
 						ogl->dissolveVerts();
+					else if ( op == 5 )
+						ogl->trisToQuads();
+					else
+						ogl->triangulateSelection( 0 );
 				}
 				e->accept();
 				return true;

@@ -1,5 +1,35 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-17 — Quad modeling, stage 1: quad layer, Make Face (F), Tris to Quads (Alt+J), Triangulate (Ctrl+T)
+
+Blender-style quads over the triangle-only NIF format. A quad is a pair of
+adjacent triangles whose shared edge is *marked* as a diagonal
+(`GLView::quadDiagonals`, per shape): the edit-mode wireframe hides the
+diagonal, face picking selects both halves as one face, and Loop Cut walks
+marked diagonals in preference to its parallel-direction guess. **The NIF
+data stays triangles at all times, so saving needs no triangulation step** —
+the requested "triangulate on save" holds by construction. Mark sets are
+undoable (TlQuadMarksCommand) and validated against the live topology: a
+changed vertex count invalidates a shape's marks, non-manifold or hidden
+diagonals draw normally again.
+
+- **F — Make Face**: two adjacent face-picked triangles (or exactly the four
+  corner vertices of a tri pair) form a quad; anything else falls back to the
+  existing Fill / Bridge, so F keeps all its old uses. Registered binding
+  renamed "Make Face (quad) / Fill / Bridge".
+- **Alt+J — Tris to Quads**: greedily pairs the face-selected triangles,
+  Blender-style: candidates rejected above a 40° face-angle (fold) or 40°
+  corner deviation from 90° (shape), best-cost pairs win.
+- **Ctrl+T / Face ▸ Triangulate Faces**: splits selected quads back to
+  visible triangles with diagonal options — Keep Diagonals (Ctrl+T default),
+  Beauty (Delaunay max-min angle), Shortest Diagonal, Longest Diagonal. Flips
+  rewrite the two triangles (undoable, winding preserved via the quad loop).
+- Face menu and the W Specials carry the new entries.
+
+Known v1 limits: box/circle select still add quad halves individually (the
+fill highlight can show a half-quad); Subdivide is not yet quad-aware; the
+Knife (K) is the next stage.
+
 ## 2026-07-17 — Startup grid/axes missing until first click: investigation + tentative fix
 
 Reported: after loading a NIF the ground grid (and origin axis lines) do not

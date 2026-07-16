@@ -583,6 +583,36 @@ public:
 	QHash<int, QSet<int>> editHiddenTris;
 	void hideSelectedElements();
 	void unhideAllElements();
+
+	// ---- quad layer (Blender-style quads over the triangle-only NIF) ----
+	//! A quad is a pair of adjacent triangles whose shared edge is "marked" as
+	//! a diagonal: the wireframe hides it, face picking selects both halves,
+	//! and Loop Cut prefers it over the geometric guess. The NIF data itself
+	//! stays triangles at all times, so saving needs no triangulation step.
+	//! Marks are validated against the live topology on use; a changed vertex
+	//! count invalidates a shape's marks wholesale (guarded by quadMarkVerts).
+	QHash<int, QSet<quint64>> quadDiagonals;
+	QHash<int, int> quadMarkVerts;      //!< vertex count the marks were made for
+	static quint64 quadEdgeKey( int a, int b )
+	{
+		if ( a > b ) { int t = a; a = b; b = t; }
+		return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+	}
+	//! The validated diagonal set for a shape (empty when stale)
+	const QSet<quint64> quadMarksFor( int shapeBlock ) const;
+	bool isQuadDiagonal( int shapeBlock, int a, int b ) const;
+	//! The marked partner triangle of tri (same shape), or -1
+	int quadPartnerTri( int shapeBlock, int tri ) const;
+	//! Replace a shape's marks through the undo stack
+	void setQuadMarks( int shapeBlock, const QSet<quint64> & marks, const QString & opName );
+	//! F: form a quad from 2 adjacent face-picked tris / 4 verts, else fill/bridge
+	void makeFace();
+	//! Alt+J: greedily pair the face-selected triangles into quads
+	void trisToQuads( float maxFaceAngleDeg = 40.0f, float maxShapeAngleDeg = 40.0f );
+	//! Ctrl+T: dissolve quads in the selection back to visible triangles.
+	//! diagonalMode: 0 keep current, 1 beauty (max-min-angle), 2 shortest
+	//! diagonal, 3 longest diagonal — flips rewrite the two triangles.
+	void triangulateSelection( int diagonalMode = 0 );
 	//! Universal toolbar visibility commands. In Edit/Weight Paint, isolate the
 	//! selected geometry; in Object Mode, isolate all selected objects.
 	void isolateSelected();

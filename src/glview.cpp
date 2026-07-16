@@ -182,7 +182,9 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.pick_face", QObject::tr( "Pick Mode: Face (Shift extends)" ), catEdit, QKeySequence( Qt::Key_3 ) );
 	r.reg( "viewport.extrude", QObject::tr( "Extrude Region" ), catEdit, QKeySequence( Qt::Key_E ) );
 	r.reg( "viewport.inset", QObject::tr( "Inset Faces" ), catEdit, QKeySequence( Qt::Key_I ) );
-	r.reg( "viewport.fill", QObject::tr( "Fill / Bridge" ), catEdit, QKeySequence( Qt::Key_F ) );
+	r.reg( "viewport.fill", QObject::tr( "Make Face (quad) / Fill / Bridge" ), catEdit, QKeySequence( Qt::Key_F ) );
+	r.reg( "viewport.tris_to_quads", QObject::tr( "Tris to Quads" ), catEdit, QKeySequence( Qt::ALT | Qt::Key_J ) );
+	r.reg( "viewport.triangulate", QObject::tr( "Triangulate Faces" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_T ) );
 	r.reg( "viewport.loop_cut", QObject::tr( "Loop Cut" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_R ) );
 	r.reg( "viewport.edge_slide", QObject::tr( "Edge Slide" ), catEdit, QKeySequence( Qt::SHIFT | Qt::Key_V ) );
 	r.reg( "viewport.dissolve", QObject::tr( "Dissolve Vertices" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_X ) );
@@ -1866,8 +1868,28 @@ void GLView::paintGL()
 				wv[i] = eye + ( w - eye ) * 0.997f;
 			}
 
-			// unique edge list (hidden triangles excluded, Blender H)
+			// unique edge list (hidden triangles excluded, Blender H). Marked
+			// quad diagonals are skipped so a tri pair reads as one quad —
+			// but only while both halves are visible and the edge is still
+			// manifold (otherwise the mark is stale and the edge shows).
 			const QSet<int> hiddenT = editHiddenTris.value( wb );
+			const QSet<quint64> qmarks = quadMarksFor( wb );
+			QHash<quint64, int> markAdj;
+			if ( !qmarks.isEmpty() ) {
+				for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+					if ( hiddenT.contains( ti ) )
+						continue;
+					const Triangle & t = s->triangles.at( ti );
+					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv
+						|| t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+						continue;
+					for ( int e = 0; e < 3; e++ ) {
+						quint64 k = edgeKey( t[e], t[( e + 1 ) % 3] );
+						if ( qmarks.contains( k ) )
+							markAdj[k]++;
+					}
+				}
+			}
 			QSet<int> visVerts;
 			QSet<quint64> eset;
 			QVector<QPair<int, int>> edges;
@@ -1883,6 +1905,8 @@ void GLView::paintGL()
 					quint64 k = edgeKey( a, b );
 					if ( !eset.contains( k ) ) {
 						eset.insert( k );
+						if ( qmarks.contains( k ) && markAdj.value( k ) == 2 )
+							continue;	// interior quad diagonal: not drawn
 						edges.append( qMakePair( a, b ) );
 					}
 				}
@@ -5001,14 +5025,46 @@ bool GLView::pickElementAt( const QPointF & pos, bool additive )
 		return false;
 	recordSelection();
 
+	// picking one half of a marked quad picks the whole quad (both tris)
+	PickedElement partner;
+	if ( pe.type == 3 ) {
+		const int tj = quadPartnerTri( pe.shapeBlock, pe.e0 );
+		Shape * s = ( tj >= 0 ) ? shapeForBlock( pe.shapeBlock ) : nullptr;
+		if ( s && tj < s->triangles.size() ) {
+			const Triangle & t = s->triangles.at( tj );
+			Transform wt = shapeRenderTrans( s );
+			partner.shapeBlock = pe.shapeBlock;
+			partner.type = 3;
+			partner.e0 = tj;
+			partner.wA = wt * editVertexLocal( s, t[0] );
+			partner.wB = wt * editVertexLocal( s, t[1] );
+			partner.wC = wt * editVertexLocal( s, t[2] );
+			partner.worldPos = ( partner.wA + partner.wB + partner.wC ) / 3.0f;
+			Vector3 n = Vector3::crossproduct( partner.wB - partner.wA, partner.wC - partner.wA );
+			n.normalize();
+			partner.worldNormal = n;
+		}
+	}
+	const bool havePartner = ( partner.shapeBlock >= 0 );
+
 	if ( additive ) {
 		int at = pickedElems.indexOf( pe );
-		if ( at >= 0 )
+		if ( at >= 0 ) {
 			pickedElems.remove( at );
-		else
+			if ( havePartner ) {
+				int pat = pickedElems.indexOf( partner );
+				if ( pat >= 0 )
+					pickedElems.remove( pat );
+			}
+		} else {
+			if ( havePartner && pickedElems.indexOf( partner ) < 0 )
+				pickedElems.append( partner );
 			pickedElems.append( pe );
+		}
 	} else {
 		pickedElems.clear();
+		if ( havePartner )
+			pickedElems.append( partner );
 		pickedElems.append( pe );
 	}
 
@@ -8833,6 +8889,438 @@ void GLView::insetRegion()
 }
 
 // ---------------------------------------------------------------------------
+// Quad layer: Blender-style quads over the triangle-only NIF. A quad is a
+// tri pair whose shared edge is marked as a diagonal; the NIF data stays
+// triangles at all times, so saving needs no triangulation step.
+
+//! Undo/redo for a shape's diagonal-mark set (view-layer state, but users
+//! expect Ctrl+Z for Make Face / Tris to Quads / Triangulate)
+class TlQuadMarksCommand final : public QUndoCommand
+{
+public:
+	TlQuadMarksCommand( GLView * view, int shapeBlock,
+		const QSet<quint64> & newMarks, int newVertCount, const QString & text )
+		: gv( view ), sb( shapeBlock ), after( newMarks ), nvAfter( newVertCount )
+	{
+		before = gv->quadDiagonals.value( sb );
+		nvBefore = gv->quadMarkVerts.value( sb, -1 );
+		setText( text );
+	}
+	void undo() override
+	{
+		gv->quadDiagonals[sb] = before;
+		gv->quadMarkVerts[sb] = nvBefore;
+		gv->update();
+	}
+	void redo() override
+	{
+		gv->quadDiagonals[sb] = after;
+		gv->quadMarkVerts[sb] = nvAfter;
+		gv->update();
+	}
+private:
+	GLView *	gv;
+	int	sb;
+	QSet<quint64>	before, after;
+	int	nvBefore = -1, nvAfter = -1;
+};
+
+const QSet<quint64> GLView::quadMarksFor( int shapeBlock ) const
+{
+	// a changed vertex count means the indices the marks were recorded
+	// against no longer line up: treat the whole set as stale
+	auto it = quadDiagonals.constFind( shapeBlock );
+	if ( it == quadDiagonals.constEnd() || it->isEmpty() )
+		return QSet<quint64>();
+	Shape * s = shapeForBlock( shapeBlock );
+	if ( !s || quadMarkVerts.value( shapeBlock, -1 ) != s->verts.size() )
+		return QSet<quint64>();
+	return *it;
+}
+
+bool GLView::isQuadDiagonal( int shapeBlock, int a, int b ) const
+{
+	auto it = quadDiagonals.constFind( shapeBlock );
+	if ( it == quadDiagonals.constEnd() )
+		return false;
+	Shape * s = shapeForBlock( shapeBlock );
+	if ( !s || quadMarkVerts.value( shapeBlock, -1 ) != s->verts.size() )
+		return false;
+	return it->contains( quadEdgeKey( a, b ) );
+}
+
+int GLView::quadPartnerTri( int shapeBlock, int tri ) const
+{
+	const QSet<quint64> marks = quadMarksFor( shapeBlock );
+	if ( marks.isEmpty() )
+		return -1;
+	Shape * s = shapeForBlock( shapeBlock );
+	if ( !s || tri < 0 || tri >= s->triangles.size() )
+		return -1;
+	const Triangle & t = s->triangles.at( tri );
+	if ( t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+		return -1;
+	for ( int e = 0; e < 3; e++ ) {
+		const int a = t[e], b = t[( e + 1 ) % 3];
+		if ( !marks.contains( quadEdgeKey( a, b ) ) )
+			continue;
+		// the partner is the one other non-degenerate triangle on this edge
+		int partner = -1;
+		for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+			if ( ti == tri )
+				continue;
+			const Triangle & o = s->triangles.at( ti );
+			if ( o[0] == o[1] || o[1] == o[2] || o[0] == o[2] )
+				continue;
+			int hits = 0;
+			for ( int c = 0; c < 3; c++ )
+				hits += int( o[c] == a || o[c] == b );
+			if ( hits == 2 ) {
+				if ( partner >= 0 ) {	// non-manifold edge: no unique partner
+					partner = -1;
+					break;
+				}
+				partner = ti;
+			}
+		}
+		if ( partner >= 0 )
+			return partner;
+	}
+	return -1;
+}
+
+void GLView::setQuadMarks( int shapeBlock, const QSet<quint64> & marks, const QString & opName )
+{
+	Shape * s = shapeForBlock( shapeBlock );
+	if ( !s || !model || !model->undoStack )
+		return;
+	model->undoStack->push(
+		new TlQuadMarksCommand( this, shapeBlock, marks, s->verts.size(), opName ) );
+}
+
+void GLView::makeFace()
+{
+	// Blender F: two adjacent face-picked triangles (or the four corners of
+	// a tri pair) form a quad by marking their shared edge; anything else
+	// falls through to the fill / bridge operator
+	do {
+		if ( !model || !editMode || pickedElems.isEmpty() )
+			break;
+		int sb = -1;
+		QVector<int> faces;
+		QSet<int> verts;
+		bool other = false;
+		for ( const PickedElement & pe : std::as_const( pickedElems ) ) {
+			if ( sb >= 0 && pe.shapeBlock != sb ) { other = true; break; }
+			sb = pe.shapeBlock;
+			if ( pe.type == 3 )
+				faces << pe.e0;
+			else if ( pe.type == 1 )
+				verts << pe.e0;
+			else
+				other = true;
+		}
+		Shape * s = ( !other && sb >= 0 ) ? shapeForBlock( sb ) : nullptr;
+		if ( !s )
+			break;
+		auto degenerate = []( const Triangle & t ) {
+			return t[0] == t[1] || t[1] == t[2] || t[0] == t[2];
+		};
+		int tA = -1, tB = -1;
+		if ( faces.size() == 2 && verts.isEmpty() ) {
+			tA = faces.at( 0 );
+			tB = faces.at( 1 );
+		} else if ( faces.isEmpty() && verts.size() == 4 ) {
+			// exactly the two triangles covered by the four picked corners
+			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+				const Triangle & t = s->triangles.at( ti );
+				if ( degenerate( t ) )
+					continue;
+				if ( verts.contains( t[0] ) && verts.contains( t[1] ) && verts.contains( t[2] ) ) {
+					if ( tA < 0 )
+						tA = ti;
+					else if ( tB < 0 )
+						tB = ti;
+					else { tA = tB = -1; break; }	// more than two: ambiguous
+				}
+			}
+		}
+		if ( tA < 0 || tB < 0 || tA == tB
+			|| tA >= s->triangles.size() || tB >= s->triangles.size() )
+			break;
+		const Triangle & ta = s->triangles.at( tA );
+		const Triangle & tb = s->triangles.at( tB );
+		if ( degenerate( ta ) || degenerate( tb ) )
+			break;
+		// the shared edge
+		int shared[2] = { -1, -1 };
+		int n = 0;
+		for ( int i = 0; i < 3 && n < 2; i++ )
+			for ( int j = 0; j < 3; j++ )
+				if ( ta[i] == tb[j] ) { shared[n++] = ta[i]; break; }
+		if ( n != 2 )
+			break;
+		QSet<quint64> marks = quadMarksFor( sb );
+		const quint64 k = quadEdgeKey( shared[0], shared[1] );
+		if ( marks.contains( k ) )
+			break;	// already a quad: fall through (F is also fill)
+		marks.insert( k );
+		setQuadMarks( sb, marks, tr( "Make Quad" ) );
+		emit gizmoStatus( tr( "Quad formed (triangulated automatically on save)" ) );
+		update();
+		return;
+	} while ( false );
+
+	smartConnect();
+}
+
+void GLView::trisToQuads( float maxFaceAngleDeg, float maxShapeAngleDeg )
+{
+	if ( !model || !editMode ) {
+		emit gizmoStatus( tr( "Tris to Quads needs edit mode" ) );
+		return;
+	}
+	// group the face selection per shape
+	QHash<int, QSet<int>> selFaces;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) )
+		if ( pe.type == 3 )
+			selFaces[pe.shapeBlock].insert( pe.e0 );
+	if ( selFaces.isEmpty() ) {
+		emit gizmoStatus( tr( "Tris to Quads: select the faces to join (A selects all)" ) );
+		return;
+	}
+	const float cosFace = std::cos( deg2rad( maxFaceAngleDeg ) );
+	int joined = 0;
+	for ( auto it = selFaces.constBegin(); it != selFaces.constEnd(); ++it ) {
+		const int sb = it.key();
+		Shape * s = shapeForBlock( sb );
+		if ( !s )
+			continue;
+		const QSet<int> & sel = it.value();
+		auto degenerate = []( const Triangle & t ) {
+			return t[0] == t[1] || t[1] == t[2] || t[0] == t[2];
+		};
+		auto triNormal = [&]( int ti ) {
+			const Triangle & t = s->triangles.at( ti );
+			Vector3 n = Vector3::crossproduct(
+				editVertexLocal( s, t[1] ) - editVertexLocal( s, t[0] ),
+				editVertexLocal( s, t[2] ) - editVertexLocal( s, t[0] ) );
+			n.normalize();
+			return n;
+		};
+		auto thirdVert = [&]( int ti, int a, int b ) {
+			const Triangle & t = s->triangles.at( ti );
+			for ( int c = 0; c < 3; c++ )
+				if ( t[c] != a && t[c] != b )
+					return int( t[c] );
+			return -1;
+		};
+		QSet<quint64> marks = quadMarksFor( sb );
+		// triangles already in quads are not up for pairing
+		QSet<int> taken;
+		for ( int ti : sel )
+			if ( quadPartnerTri( sb, ti ) >= 0 )
+				taken << ti;
+		// candidate shared edges between two free selected triangles
+		QHash<quint64, QVector<int>> edgeTris;
+		for ( int ti : sel ) {
+			if ( taken.contains( ti ) || ti < 0 || ti >= s->triangles.size() )
+				continue;
+			const Triangle & t = s->triangles.at( ti );
+			if ( degenerate( t ) )
+				continue;
+			for ( int e = 0; e < 3; e++ )
+				edgeTris[quadEdgeKey( t[e], t[( e + 1 ) % 3] )] << ti;
+		}
+		struct Cand { quint64 key; int tA, tB; float cost; };
+		QVector<Cand> cands;
+		for ( auto et = edgeTris.constBegin(); et != edgeTris.constEnd(); ++et ) {
+			if ( et.value().size() != 2 )
+				continue;
+			const int tA = et.value().at( 0 ), tB = et.value().at( 1 );
+			// face angle: reject folds
+			const Vector3 nA = triNormal( tA ), nB = triNormal( tB );
+			const float d = Vector3::dotproduct( nA, nB );
+			if ( d < cosFace )
+				continue;
+			// quad shape: corner angles' worst deviation from 90 degrees
+			const int a = int( et.key() >> 32 ), b = int( et.key() & 0xFFFFFFFF );
+			const int c = thirdVert( tA, a, b ), e = thirdVert( tB, a, b );
+			if ( c < 0 || e < 0 || c == e )
+				continue;
+			const Vector3 P[4] = { editVertexLocal( s, c ), editVertexLocal( s, a ),
+				editVertexLocal( s, e ), editVertexLocal( s, b ) };
+			float worst = 0.0f;
+			for ( int i = 0; i < 4; i++ ) {
+				Vector3 u = P[( i + 3 ) % 4] - P[i];
+				Vector3 v = P[( i + 1 ) % 4] - P[i];
+				const float len = u.length() * v.length();
+				if ( len < 1.0e-12f ) { worst = 1.0e9f; break; }
+				const float ang = rad2deg(
+					std::acos( std::clamp( Vector3::dotproduct( u, v ) / len, -1.0f, 1.0f ) ) );
+				worst = std::max( worst, std::fabs( ang - 90.0f ) );
+			}
+			if ( worst > maxShapeAngleDeg )
+				continue;
+			Cand cd;
+			cd.key = et.key();
+			cd.tA = tA;
+			cd.tB = tB;
+			cd.cost = worst + rad2deg( std::acos( std::clamp( d, -1.0f, 1.0f ) ) );
+			cands.append( cd );
+		}
+		std::sort( cands.begin(), cands.end(),
+			[]( const Cand & x, const Cand & y ) { return x.cost < y.cost; } );
+		QSet<int> used;
+		int shapeJoined = 0;
+		for ( const Cand & cd : std::as_const( cands ) ) {
+			if ( used.contains( cd.tA ) || used.contains( cd.tB ) )
+				continue;
+			used << cd.tA << cd.tB;
+			marks.insert( cd.key );
+			shapeJoined++;
+		}
+		if ( shapeJoined > 0 ) {
+			setQuadMarks( sb, marks, tr( "Tris to Quads" ) );
+			joined += shapeJoined;
+		}
+	}
+	emit gizmoStatus( joined > 0
+		? tr( "Tris to Quads: %1 quad(s) formed" ).arg( joined )
+		: tr( "Tris to Quads: no pair within the angle limits" ) );
+	update();
+}
+
+void GLView::triangulateSelection( int diagonalMode )
+{
+	if ( !model || !editMode ) {
+		emit gizmoStatus( tr( "Triangulate needs edit mode" ) );
+		return;
+	}
+	QHash<int, QSet<int>> selFaces;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) )
+		if ( pe.type == 3 )
+			selFaces[pe.shapeBlock].insert( pe.e0 );
+	if ( selFaces.isEmpty() ) {
+		emit gizmoStatus( tr( "Triangulate: select the quads to split" ) );
+		return;
+	}
+	int split = 0;
+	for ( auto it = selFaces.constBegin(); it != selFaces.constEnd(); ++it ) {
+		const int sb = it.key();
+		Shape * s = shapeForBlock( sb );
+		if ( !s )
+			continue;
+		QSet<quint64> marks = quadMarksFor( sb );
+		if ( marks.isEmpty() )
+			continue;
+		QModelIndex iShape = model->getBlockIndex( sb );
+		QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+		if ( !iTris.isValid() )
+			continue;
+		// collect the quads whose both halves are in the selection
+		struct Quad { quint64 key; int tA, tB; };
+		QVector<Quad> quads;
+		QSet<int> seen;
+		for ( int ti : it.value() ) {
+			if ( seen.contains( ti ) )
+				continue;
+			const int tj = quadPartnerTri( sb, ti );
+			if ( tj < 0 || !it.value().contains( tj ) )
+				continue;
+			seen << ti << tj;
+			// the marked shared edge
+			const Triangle & t = s->triangles.at( ti );
+			for ( int e = 0; e < 3; e++ ) {
+				const quint64 k = quadEdgeKey( t[e], t[( e + 1 ) % 3] );
+				if ( marks.contains( k ) ) {
+					Quad q;
+					q.key = k;
+					q.tA = ti;
+					q.tB = tj;
+					quads.append( q );
+					break;
+				}
+			}
+		}
+		if ( quads.isEmpty() )
+			continue;
+		// diagonal flips (everything except "keep") rewrite the two triangles
+		QVector<QPair<int, Triangle>> rewrites;
+		for ( const Quad & q : std::as_const( quads ) ) {
+			marks.remove( q.key );
+			if ( diagonalMode == 0 )
+				continue;
+			const int a = int( q.key >> 32 ), b = int( q.key & 0xFFFFFFFF );
+			auto thirdVert = [&]( int ti ) {
+				const Triangle & t = s->triangles.at( ti );
+				for ( int c = 0; c < 3; c++ )
+					if ( t[c] != a && t[c] != b )
+						return int( t[c] );
+				return -1;
+			};
+			const int c = thirdVert( q.tA ), d = thirdVert( q.tB );
+			if ( c < 0 || d < 0 || c == d )
+				continue;
+			const Vector3 pa = editVertexLocal( s, a ), pb = editVertexLocal( s, b );
+			const Vector3 pc = editVertexLocal( s, c ), pd = editVertexLocal( s, d );
+			bool flip = false;
+			if ( diagonalMode == 2 )
+				flip = ( pc - pd ).length() < ( pa - pb ).length();
+			else if ( diagonalMode == 3 )
+				flip = ( pc - pd ).length() > ( pa - pb ).length();
+			else {
+				// beauty: Delaunay max-min-angle criterion on the quad c,a,d,b
+				auto minAngle = []( const Vector3 & x, const Vector3 & y, const Vector3 & z ) {
+					auto ang = []( const Vector3 & u, const Vector3 & v ) {
+						const float len = u.length() * v.length();
+						return ( len < 1.0e-12f ) ? 0.0f
+							: std::acos( std::clamp( Vector3::dotproduct( u, v ) / len, -1.0f, 1.0f ) );
+					};
+					return std::min( { ang( y - x, z - x ), ang( x - y, z - y ), ang( x - z, y - z ) } );
+				};
+				const float keepMin = std::min( minAngle( pa, pb, pc ), minAngle( pa, pb, pd ) );
+				const float flipMin = std::min( minAngle( pc, pd, pa ), minAngle( pc, pd, pb ) );
+				flip = flipMin > keepMin + 1.0e-6f;
+			}
+			if ( !flip )
+				continue;
+			// quad perimeter loop c -> a -> d -> b, wound like the original pair
+			Vector3 loopN = Vector3::crossproduct( pa - pc, pd - pc )
+				+ Vector3::crossproduct( pd - pc, pb - pc );
+			const Triangle & tOld = s->triangles.at( q.tA );
+			Vector3 oldN = Vector3::crossproduct(
+				editVertexLocal( s, tOld[1] ) - editVertexLocal( s, tOld[0] ),
+				editVertexLocal( s, tOld[2] ) - editVertexLocal( s, tOld[0] ) );
+			const bool reverse = Vector3::dotproduct( loopN, oldN ) < 0.0f;
+			Triangle n1, n2;
+			if ( !reverse ) {
+				n1 = Triangle( quint16( c ), quint16( a ), quint16( d ) );
+				n2 = Triangle( quint16( c ), quint16( d ), quint16( b ) );
+			} else {
+				n1 = Triangle( quint16( d ), quint16( a ), quint16( c ) );
+				n2 = Triangle( quint16( b ), quint16( d ), quint16( c ) );
+			}
+			rewrites.append( qMakePair( q.tA, n1 ) );
+			rewrites.append( qMakePair( q.tB, n2 ) );
+		}
+		if ( !rewrites.isEmpty() ) {
+			nifSnapshotOp( model, tr( "Triangulate" ), [&]() {
+				for ( const auto & rw : std::as_const( rewrites ) )
+					model->set<Triangle>( model->getIndex( iTris, rw.first ), rw.second );
+				model->dataChanged( QModelIndex( iShape ), QModelIndex( iShape ) );
+			} );
+		}
+		setQuadMarks( sb, marks, tr( "Triangulate" ) );
+		split += quads.size();
+	}
+	emit gizmoStatus( split > 0
+		? tr( "Triangulate: %1 quad(s) split back to triangles" ).arg( split )
+		: tr( "Triangulate: no quads in the selection" ) );
+	update();
+}
+
+// ---------------------------------------------------------------------------
 // Loop Cut (Ctrl+R)
 
 void GLView::loopCut()
@@ -8890,7 +9378,9 @@ void GLView::loopCut()
 	};
 
 	// ring walk: from oriented edge (a,b) + the walk-side triangle, hop the
-	// tri-pair "quad" to the parallel edge; orientation keeps a on the a-chain
+	// tri-pair "quad" to the parallel edge; orientation keeps a on the a-chain.
+	// An explicitly marked quad diagonal (Make Face / Tris to Quads) always
+	// wins over the parallel-direction guess.
 	struct RingStep { int a2 = -1, b2 = -1, triA = -1, triB = -1; };
 	auto step = [&]( int a, int b, int triA ) -> RingStep {
 		RingStep r;
@@ -8912,9 +9402,12 @@ void GLView::loopCut()
 			const int y = thirdVert( triB, x, c );
 			if ( y < 0 || y == a || y == b )
 				continue;
+			const bool marked = isQuadDiagonal( sb, x, c );
 			Vector3 f = readPos( y ) - readPos( c );
-			const float d = std::fabs( Vector3::dotproduct( f, eDir ) )
+			float d = std::fabs( Vector3::dotproduct( f, eDir ) )
 				/ std::max( f.length() * eDir.length(), 1.0e-9f );
+			if ( marked )
+				d = 2.0f;	// beats any geometric score
 			if ( d > bestDot ) {
 				bestDot = d;
 				r.triA = triA;
@@ -9693,9 +10186,11 @@ void GLView::showSpecialsMenu()
 		QAction * aDissolve = m.addAction( tr( "Dissolve Vertices" ) );
 		m.addSeparator();
 		QAction * aExtrude = m.addAction( tr( "Extrude Region…" ) );
-		QAction * aFill = m.addAction( tr( "Fill / Bridge…" ) );
+		QAction * aFill = m.addAction( tr( "Make Face / Fill / Bridge…" ) );
 		QAction * aInset = m.addAction( tr( "Inset Faces…" ) );
 		QAction * aSlide = m.addAction( tr( "Edge Slide…" ) );
+		QAction * aT2Q = m.addAction( tr( "Tris to Quads" ) );
+		QAction * aTriang = m.addAction( tr( "Triangulate Faces" ) );
 		m.addSeparator();
 		QAction * aFlip = m.addAction( tr( "Flip Normals" ) );
 		QAction * aRecalc = m.addAction( tr( "Recalculate Normals" ) );
@@ -9705,7 +10200,7 @@ void GLView::showSpecialsMenu()
 		QAction * aReveal = m.addAction( tr( "Reveal All" ) );
 		QAction * aInvert = m.addAction( tr( "Invert Selection" ) );
 		for ( QAction * a : { aSubd, aSmooth, aMerge, aDoubles, aDissolve, aExtrude,
-			aFill, aInset, aSlide, aFlip, aRecalc, aHide } )
+			aFill, aInset, aSlide, aT2Q, aTriang, aFlip, aRecalc, aHide } )
 			a->setEnabled( hasSel );
 		QAction * r = m.exec( QCursor::pos() );
 		if ( r == aSubd )
@@ -9721,11 +10216,15 @@ void GLView::showSpecialsMenu()
 		else if ( r == aExtrude )
 			extrudeRegion();
 		else if ( r == aFill )
-			smartConnect();
+			makeFace();
 		else if ( r == aInset )
 			insetRegion();
 		else if ( r == aSlide )
 			edgeSlide();
+		else if ( r == aT2Q )
+			trisToQuads();
+		else if ( r == aTriang )
+			triangulateSelection( 0 );
 		else if ( r == aFlip )
 			flipSelectedFaces();
 		else if ( r == aRecalc )
@@ -9929,8 +10428,21 @@ void GLView::populateFaceMenu( QMenu * m )
 		[this]() { extrudeRegion(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Inset Faces…\tI" ), this,
 		[this]() { insetRegion(); } )->setEnabled( hasSel );
-	m->addAction( tr( "Fill / Bridge…\tF" ), this,
-		[this]() { smartConnect(); } )->setEnabled( hasSel );
+	m->addAction( tr( "Make Face / Fill / Bridge…\tF" ), this,
+		[this]() { makeFace(); } )->setEnabled( hasSel );
+	m->addSeparator();
+	m->addAction( tr( "Tris to Quads\tAlt+J" ), this,
+		[this]() { trisToQuads(); } )->setEnabled( hasSel );
+	QMenu * mTri = m->addMenu( tr( "Triangulate Faces" ) );
+	mTri->setEnabled( hasSel );
+	mTri->addAction( tr( "Keep Diagonals\tCtrl+T" ), this,
+		[this]() { triangulateSelection( 0 ); } );
+	mTri->addAction( tr( "Beauty (max-min angle)" ), this,
+		[this]() { triangulateSelection( 1 ); } );
+	mTri->addAction( tr( "Shortest Diagonal" ), this,
+		[this]() { triangulateSelection( 2 ); } );
+	mTri->addAction( tr( "Longest Diagonal" ), this,
+		[this]() { triangulateSelection( 3 ); } );
 }
 
 void GLView::populatePaintMenu( QMenu * m )
