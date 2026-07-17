@@ -135,12 +135,13 @@ void Scene::updateSettings( QSettings & settings )
 {
 	settings.beginGroup( "Settings/Render/Colors/" );
 
-	// Blender-matched grid brightness. The grid draws with FRAMEBUFFER_SRGB
-	// off, so the old default (99,99,99 @ 0.8) displayed much dimmer than
-	// Blender's; values saved with that old default migrate to the new one.
-	QColor gridQC = settings.value( "Grid Color", QColor( 150, 150, 150, 235 ) ).value<QColor>();
-	if ( gridQC == QColor( 99, 99, 99, 204 ) )
-		gridQC = QColor( 150, 150, 150, 235 );
+	// Blender-matched grid brightness: on the default #2e2e2e background the
+	// blended lines sit ~15 levels above it (minor) / ~23 (major via the
+	// decade double-draw), matching Blender's subtle grid. Values saved with
+	// either earlier default migrate to the tuned one.
+	QColor gridQC = settings.value( "Grid Color", QColor( 80, 80, 80, 115 ) ).value<QColor>();
+	if ( gridQC == QColor( 99, 99, 99, 204 ) || gridQC == QColor( 150, 150, 150, 235 ) )
+		gridQC = QColor( 80, 80, 80, 115 );
 	gridColor = FloatVector4( Color4( gridQC ) );
 	highlightColor = FloatVector4( Color4( settings.value( "Highlight", QColor( 255, 255, 0 ) ).value<QColor>() ) );
 	wireframeColor = FloatVector4( Color4( settings.value( "Wireframe", QColor( 0, 255, 0 ) ).value<QColor>() ) );
@@ -566,6 +567,9 @@ void Scene::drawGrid()
 		}
 		axisHorizontal = ( ( axisHorizontal + c0 ) * 0.5f ).blendValues( c0, 0x08 );
 		axisVertical = ( ( axisVertical + c0 ) * 0.5f ).blendValues( c0, 0x08 );
+		// the red/green axes stay strong regardless of the grid alpha (Blender)
+		axisHorizontal[3] = std::max( axisHorizontal[3], 0.85f );
+		axisVertical[3] = std::max( axisVertical[3], 0.85f );
 		loadModelViewMatrix( gridTrans );
 
 		glEnable( GL_BLEND );
@@ -646,6 +650,9 @@ void Scene::drawGrid()
 	}
 	c1 = ( ( c1 + c0 ) * 0.5f ).blendValues( c0, 0x08 );
 	c2 = ( ( c2 + c0 ) * 0.5f ).blendValues( c0, 0x08 );
+	// the red/green axis rows stay strong regardless of the grid alpha (Blender)
+	c1[3] = std::max( c1[3], 0.85f );
+	c2[3] = std::max( c2[3], 0.85f );
 
 	loadModelViewMatrix( gridTrans );
 
