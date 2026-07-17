@@ -231,6 +231,10 @@ public:
 	void setOrientation( GLView::ViewState, bool recenter = true );
 	void flipOrientation();
 	inline ViewState viewState() const { return view; }
+	//! Radius of the origin axes marker; glProjection() extends the clip
+	//! range by an origin sphere of this radius when Show Axes is on, and
+	//! the ortho grid must mirror that to stay inside the far plane
+	float axisMarkerRadius() const { return float( axis ); }
 	//! Return the exact axis view represented by the current rotation, or
 	//! ViewDefault when the camera is at an arbitrary user angle.
 	ViewState axisAlignedViewState() const;

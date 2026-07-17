@@ -634,6 +634,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					qApp->processEvents();
 					skope->ogl->grabFramebuffer().save(
 						QApplication::applicationDirPath() + "/ww_perf_orthofront.png" );
+					skope->ogl->handleBlenderNumpad( Qt::Key_7,
+						Qt::KeypadModifier | Qt::ControlModifier, true );
+					qApp->processEvents();
+					log << "  bottom: Rot=" << skope->ogl->Rot[0] << "," << skope->ogl->Rot[1]
+						<< "," << skope->ogl->Rot[2]
+						<< " view=" << int( skope->ogl->view )
+						<< " persp=" << int( skope->ogl->perspectiveMode )
+						<< " axisState=" << int( skope->ogl->axisAlignedViewState() ) << "\n";
+					log.flush();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_orthobottom.png" );
 					skope->ogl->handleBlenderNumpad( Qt::Key_5, Qt::KeypadModifier, true );
 					qApp->processEvents();
 					stamp( "ortho view grabs" );

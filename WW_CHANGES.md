@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-17 — Ortho grid: two depth bugs fixed (user-confirmed), Blender-matched
+
+Two long-standing ortho-view grid defects found via the headless render probe
+(framebuffer PNG grabs through the real numpad path + pixel histograms):
+
+- **Coplanar depth suppression**: the decade grid levels and the origin axis
+  lines are coplanar; with GL_LESS the first (faint fine) level to write
+  depth suppressed every co-linear line drawn after it — the strong
+  mid/major levels and the red/green axes were invisible (measured ~0.055
+  effective alpha instead of 0.5). Fixed with GL_LEQUAL for the grid pass.
+- **Far-plane clipping in "opposite" views (Ctrl+7 bottom, back, right)**:
+  glProjection() extends the clip range by an origin sphere when Show Axes
+  is on, but the grid plane's z-push used scene-only bounds. In views where
+  the origin sits nearer the camera than the model, the far plane shrank and
+  the plane (pushed to 1.45× the radius) landed beyond it — grid and axes
+  clipped wholesale. The grid now mirrors glProjection's bounds exactly
+  (new GLView::axisMarkerRadius() accessor). User-confirmed fixed.
+
+Grid cosmetics settled with the user against Blender 4.5 references:
+grid default 100,100,100 @ 0.5 (all earlier defaults migrate), near-pure
+red/green axis colours with a 0.9 alpha floor, UV editor lines softened to
+neutral grey, and the UV grid made zoom-adaptive (gridBaseDiv, powers of 8).
+
 ## 2026-07-17 — A-key fix (menu bar stole activation); Blender-matched grids
 
 - **"A stopped working in edit mode"**: the floating viewport menu bar is a

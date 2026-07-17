@@ -542,6 +542,13 @@ void Scene::drawGrid()
 			/ float( std::max( viewport.height(), 1 ) );
 		const float worldPerPixel = ( halfH * 2.0f ) / float( std::max( viewport.height(), 1 ) );
 		BoundSphere viewBounds = view * bounds();
+		// mirror glProjection()'s clip-range bounds exactly: it extends them
+		// by an origin sphere when Show Axes is on. Without this the plane
+		// (pushed to 1.45x the radius) landed BEYOND the far plane in the
+		// views where the origin sits nearer the camera than the model
+		// (bottom/back/right), clipping the grid and axes wholesale.
+		if ( hasOption( ShowAxes ) )
+			viewBounds |= BoundSphere( view * Vector3(), v->axisMarkerRadius() );
 		const float clipRadius = std::max( viewBounds.radius, 1024.0f * v->scale() );
 		gridTrans.translation[2] = -( std::fabs( viewBounds.center[2] ) + clipRadius * 1.45f );
 
