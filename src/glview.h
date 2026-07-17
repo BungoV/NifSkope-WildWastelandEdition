@@ -748,6 +748,34 @@ public:
 	//! Select (erase=false) / deselect (erase=true) everything under the brush
 	void applyCircleSelect( const QPointF & pos, bool erase );
 
+	// ---- knife (K): Blender-style cut tool ----
+	//! One placed (or hovered) cut point: snapped to a vertex, onto an edge
+	//! at edgeT, or a free point on a face (waypoint only in v1)
+	struct KnifePoint
+	{
+		int shapeBlock = -1;
+		int snapVert = -1;
+		int edgeA = -1, edgeB = -1;
+		float edgeT = 0.0f;
+		Vector3 world;
+		QPointF screen;
+		bool valid() const { return shapeBlock >= 0; }
+	};
+	bool knifeActive = false;           //!< armed by K until Enter applies / Esc cancels
+	QVector<KnifePoint> knifePoints;    //!< committed cut points, in click order
+	KnifePoint knifeHoverPt;            //!< live point under the cursor
+	bool knifeHoverValid = false;
+	//! K: arm the knife (LMB places cut points, MMB orbits, Enter cuts, Esc cancels)
+	void beginKnife();
+	void cancelKnife();
+	//! place a cut point at the cursor
+	void knifeAddPoint( const QPointF & pos );
+	//! Enter: split every edge the cut polyline crosses (through-vertex points
+	//! pass without new geometry; face waypoints only steer the line in v1)
+	void knifeApply();
+	//! raycast + Blender-style snapping (vertex 11px, edge 8px, else face)
+	bool knifeProbe( const QPointF & pos, KnifePoint & kp ) const;
+
 	// ---- Rigging weight-paint brush ----
 	bool riggingWeightPaintMode = false;
 	bool riggingWeightPaintBrushEnabled = true;

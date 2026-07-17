@@ -186,6 +186,7 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.tris_to_quads", QObject::tr( "Tris to Quads" ), catEdit, QKeySequence( Qt::ALT | Qt::Key_J ) );
 	r.reg( "viewport.triangulate", QObject::tr( "Triangulate Faces" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_T ) );
 	r.reg( "viewport.loop_cut", QObject::tr( "Loop Cut" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_R ) );
+	r.reg( "viewport.knife", QObject::tr( "Knife" ), catEdit, QKeySequence( Qt::Key_K ) );
 	r.reg( "viewport.edge_slide", QObject::tr( "Edge Slide" ), catEdit, QKeySequence( Qt::SHIFT | Qt::Key_V ) );
 	r.reg( "viewport.dissolve", QObject::tr( "Dissolve Vertices" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_X ) );
 	r.reg( "viewport.merge", QObject::tr( "Merge Menu" ), catEdit, QKeySequence( Qt::Key_M ) );
@@ -2204,7 +2205,7 @@ void GLView::paintGL()
 	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
 	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
 	bool drawSnapMarker = snapIndicator && ( gizmoMode != 0 || elemTransform );
-	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode ) {
+	if ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode ) {
 		// The scene passes (esp. collision wireframe) leave GL state that
 		// QPainter inherits: depth test on (so filled overlay shapes get
 		// depth-rejected against the geometry, while text glyphs survive - the
@@ -2269,6 +2270,50 @@ void GLView::paintGL()
 				? QBrush( QColor( 255, 255, 255, 18 ) ) : QBrush( Qt::NoBrush ) );
 			painter.drawEllipse( circleSelectPos, qreal( circleSelectRadius ), qreal( circleSelectRadius ) );
 		}
+		if ( knifeActive ) {
+			// Blender knife: white cut line, green squares on committed points
+			// (snapped ones filled), dashed rubber band to the hover point.
+			// Points are re-projected every frame so the line stays glued to
+			// the surface while orbiting with MMB.
+			painter.setRenderHint( QPainter::Antialiasing, true );
+			QVector<QPointF> kscr;
+			kscr.reserve( knifePoints.size() );
+			for ( const KnifePoint & kp : std::as_const( knifePoints ) ) {
+				QPointF sp;
+				if ( worldToScreen( kp.world, sp ) )
+					kscr.append( sp );
+				else
+					kscr.append( QPointF( -1.0e6, -1.0e6 ) );
+			}
+			painter.setPen( QPen( QColor( 255, 255, 255, 240 ), 1.6 ) );
+			for ( int i = 0; i + 1 < kscr.size(); i++ )
+				painter.drawLine( kscr.at( i ), kscr.at( i + 1 ) );
+			if ( knifeHoverValid && !kscr.isEmpty() ) {
+				QPointF hp;
+				if ( worldToScreen( knifeHoverPt.world, hp ) ) {
+					painter.setPen( QPen( QColor( 255, 255, 255, 200 ), 1.2, Qt::DashLine ) );
+					painter.drawLine( kscr.constLast(), hp );
+				}
+			}
+			const QColor snapGreen( 0x39, 0xE0, 0x63, 245 );
+			for ( int i = 0; i < kscr.size(); i++ ) {
+				const KnifePoint & kp = knifePoints.at( i );
+				const bool snapped = ( kp.snapVert >= 0 || kp.edgeA >= 0 );
+				painter.setPen( QPen( snapGreen, 1.4 ) );
+				painter.setBrush( snapped ? QBrush( snapGreen ) : QBrush( Qt::NoBrush ) );
+				const float r = 3.0f;
+				painter.drawRect( QRectF( kscr.at( i ).x() - r, kscr.at( i ).y() - r, r * 2.0, r * 2.0 ) );
+			}
+			if ( knifeHoverValid ) {
+				QPointF hp;
+				if ( worldToScreen( knifeHoverPt.world, hp ) ) {
+					const bool snapped = ( knifeHoverPt.snapVert >= 0 || knifeHoverPt.edgeA >= 0 );
+					painter.setPen( QPen( snapped ? snapGreen : QColor( 255, 255, 255, 235 ), 1.4 ) );
+					painter.setBrush( Qt::NoBrush );
+					painter.drawEllipse( hp, 4.0, 4.0 );
+				}
+			}
+		}
 		if ( riggingWeightPaintMode && riggingWeightPaintBrushEnabled && !freeCamera ) {
 			// Cyan distinguishes weight painting from the white selection brush.
 			painter.setRenderHint( QPainter::Antialiasing, true );
@@ -2297,9 +2342,16 @@ void GLView::paintGL()
 		// QPainter changes GL state behind the renderer's back (bound program,
 		// blending, scissor); reset everything that would corrupt the next
 		// selection/picking render, which reuses this context.
+		// IMPORTANT: unbind through the renderer, not with a raw
+		// glUseProgram(0) — the raw call desynced the renderer's cached
+		// current program, so the next frame's first draw with the SAME
+		// cached program (typically lines.prog, i.e. the ground grid and
+		// origin axes) skipped the rebind and rendered with program 0:
+		// this was the "no grid until something is clicked" startup bug.
+		if ( scene->haveRenderer() )
+			scene->renderer->stopProgram();
 		if ( QOpenGLContext * glCtx = QOpenGLContext::currentContext() ) {
 			QOpenGLFunctions * f = glCtx->functions();
-			f->glUseProgram( 0 );
 			f->glActiveTexture( GL_TEXTURE0 );
 		}
 		glDisable( GL_BLEND );
@@ -9321,6 +9373,379 @@ void GLView::triangulateSelection( int diagonalMode )
 }
 
 // ---------------------------------------------------------------------------
+// Knife (K): Blender-style cut tool. Cut points snap to vertices and edges;
+// Enter splits every edge the polyline crosses (arbitrary split position,
+// attributes lerped), Esc cancels. Face clicks are waypoints in v1.
+
+void GLView::beginKnife()
+{
+	if ( !model || !editMode || gizmoMode != 0
+		|| riggingWeightPaintMode || vertexPaintMode || segmentPaintMode ) {
+		emit gizmoStatus( tr( "Knife needs edit mode" ) );
+		return;
+	}
+	// the knife replaces any armed select gadget
+	boxSelecting = false;
+	boxSelectDrag = false;
+	circleSelecting = false;
+	circlePainting = false;
+	circleErasing = false;
+	knifeActive = true;
+	knifePoints.clear();
+	knifeHoverValid = knifeProbe( QPointF( mapFromGlobal( QCursor::pos() ) ), knifeHoverPt );
+	setCursor( Qt::CrossCursor );
+	emit gizmoStatus( tr( "Knife: LMB place cut points (snaps to verts/edges), MMB orbit, Enter cut, Esc cancel" ) );
+	update();
+}
+
+void GLView::cancelKnife()
+{
+	knifeActive = false;
+	knifePoints.clear();
+	knifeHoverValid = false;
+	unsetCursor();
+	emit gizmoStatus( tr( "Knife cancelled" ) );
+	update();
+}
+
+bool GLView::knifeProbe( const QPointF & pos, KnifePoint & kp ) const
+{
+	kp = KnifePoint();
+	if ( !model )
+		return false;
+	const QSet<int> * only = ( !editShapeBlocks.isEmpty() ) ? &editShapeBlocks : nullptr;
+	SceneRayHit hit = raycastScene( pos, -1, only );
+	if ( !hit.shape || hit.tri < 0 || hit.tri >= hit.shape->triangles.size() )
+		return false;
+	Shape * s = hit.shape;
+	if ( editHiddenTris.value( s->id() ).contains( hit.tri ) )
+		return false;
+	const Triangle & t = s->triangles.at( hit.tri );
+	if ( t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+		return false;
+	Transform wt = shapeRenderTrans( s );
+	Vector3 wv[3];
+	QPointF sc[3];
+	bool ok[3];
+	for ( int i = 0; i < 3; i++ ) {
+		wv[i] = wt * editVertexLocal( s, t[i] );
+		ok[i] = worldToScreen( wv[i], sc[i] );
+	}
+	kp.shapeBlock = s->id();
+
+	// vertex snap (Blender: strongest)
+	float bestV = 11.0f;
+	int vi = -1;
+	for ( int i = 0; i < 3; i++ ) {
+		if ( !ok[i] )
+			continue;
+		const float d = float( std::hypot( sc[i].x() - pos.x(), sc[i].y() - pos.y() ) );
+		if ( d < bestV ) {
+			bestV = d;
+			vi = i;
+		}
+	}
+	if ( vi >= 0 ) {
+		kp.snapVert = t[vi];
+		kp.world = wv[vi];
+		kp.screen = sc[vi];
+		return true;
+	}
+
+	// edge snap
+	float bestE = 8.0f;
+	int ei = -1;
+	float eu = 0.0f;
+	for ( int i = 0; i < 3; i++ ) {
+		const int j = ( i + 1 ) % 3;
+		if ( !ok[i] || !ok[j] )
+			continue;
+		const QPointF d = sc[j] - sc[i];
+		const float len2 = float( d.x() * d.x() + d.y() * d.y() );
+		if ( len2 < 1.0e-6f )
+			continue;
+		float u = float( ( pos.x() - sc[i].x() ) * d.x() + ( pos.y() - sc[i].y() ) * d.y() ) / len2;
+		u = std::clamp( u, 0.0f, 1.0f );
+		const QPointF c = sc[i] + d * u;
+		const float dist = float( std::hypot( c.x() - pos.x(), c.y() - pos.y() ) );
+		if ( dist < bestE ) {
+			bestE = dist;
+			ei = i;
+			eu = u;
+		}
+	}
+	if ( ei >= 0 ) {
+		const int j = ( ei + 1 ) % 3;
+		int a = t[ei], b = t[j];
+		float u = std::clamp( eu, 0.02f, 0.98f );
+		if ( a > b ) {
+			std::swap( a, b );
+			u = 1.0f - u;
+		}
+		kp.edgeA = a;
+		kp.edgeB = b;
+		kp.edgeT = u;
+		kp.world = wt * ( editVertexLocal( s, kp.edgeA ) * ( 1.0f - u )
+			+ editVertexLocal( s, kp.edgeB ) * u );
+		worldToScreen( kp.world, kp.screen );
+		return true;
+	}
+
+	// free point on the face (v1: waypoint only)
+	kp.world = wt * hit.hitLocal;
+	worldToScreen( kp.world, kp.screen );
+	return true;
+}
+
+void GLView::knifeAddPoint( const QPointF & pos )
+{
+	KnifePoint kp;
+	if ( !knifeProbe( pos, kp ) ) {
+		emit gizmoStatus( tr( "Knife: click on the edited mesh" ) );
+		return;
+	}
+	if ( !knifePoints.isEmpty() && knifePoints.constLast().shapeBlock != kp.shapeBlock ) {
+		emit gizmoStatus( tr( "Knife: one mesh per cut" ) );
+		return;
+	}
+	knifePoints.append( kp );
+	update();
+}
+
+void GLView::knifeApply()
+{
+	const QVector<KnifePoint> pts = knifePoints;
+	knifeActive = false;
+	knifePoints.clear();
+	knifeHoverValid = false;
+	unsetCursor();
+	if ( pts.size() < 2 || !model ) {
+		emit gizmoStatus( tr( "Knife: place at least two points, then Enter" ) );
+		update();
+		return;
+	}
+	const int sb = pts.constFirst().shapeBlock;
+	Shape * s = shapeForBlock( sb );
+	QModelIndex iShape = model->getBlockIndex( sb );
+	if ( !s || !model->blockInherits( iShape, "BSTriShape" ) ) {
+		emit gizmoStatus( tr( "Knife is supported on FO4 (BSTriShape) meshes only" ) );
+		update();
+		return;
+	}
+
+	// fresh screen positions (the view may have orbited since the clicks)
+	QVector<QPointF> scr( pts.size() );
+	for ( int i = 0; i < pts.size(); i++ ) {
+		if ( !worldToScreen( pts.at( i ).world, scr[i] ) ) {
+			emit gizmoStatus( tr( "Knife: a cut point is behind the camera" ) );
+			update();
+			return;
+		}
+	}
+
+	// cut set: normalized edge key -> split position
+	QHash<quint64, float> cuts;
+	auto addCut = [&cuts]( int a, int b, float t ) {
+		if ( a == b )
+			return;
+		if ( a > b ) {
+			std::swap( a, b );
+			t = 1.0f - t;
+		}
+		const quint64 k = quadEdgeKey( a, b );
+		if ( !cuts.contains( k ) )
+			cuts.insert( k, std::clamp( t, 0.02f, 0.98f ) );
+	};
+	for ( const KnifePoint & kp : pts )
+		if ( kp.edgeA >= 0 )
+			addCut( kp.edgeA, kp.edgeB, kp.edgeT );
+
+	// candidate edges: unique edges of visible, front-facing triangles
+	const QSet<int> hiddenT = editHiddenTris.value( sb );
+	Transform wt = shapeRenderTrans( s );
+	const Vector3 eye = viewTransform().inverted() * Vector3( 0.0f, 0.0f, 0.0f );
+	struct ScrEdge { int a, b; QPointF sa, sb; };
+	QVector<ScrEdge> edges;
+	{
+		QSet<quint64> seen;
+		for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+			if ( hiddenT.contains( ti ) )
+				continue;
+			const Triangle & t = s->triangles.at( ti );
+			if ( t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+				continue;
+			const Vector3 w0 = wt * editVertexLocal( s, t[0] );
+			const Vector3 w1 = wt * editVertexLocal( s, t[1] );
+			const Vector3 w2 = wt * editVertexLocal( s, t[2] );
+			Vector3 n = Vector3::crossproduct( w1 - w0, w2 - w0 );
+			if ( Vector3::dotproduct( n, eye - ( w0 + w1 + w2 ) / 3.0f ) <= 0.0f )
+				continue;	// back-facing: Blender's default knife cuts what you see
+			for ( int e = 0; e < 3; e++ ) {
+				const int a = t[e], b = t[( e + 1 ) % 3];
+				const quint64 k = quadEdgeKey( a, b );
+				if ( seen.contains( k ) )
+					continue;
+				seen.insert( k );
+				ScrEdge se;
+				se.a = std::min( a, b );
+				se.b = std::max( a, b );
+				QPointF pa, pb;
+				if ( !worldToScreen( wt * editVertexLocal( s, se.a ), pa )
+					|| !worldToScreen( wt * editVertexLocal( s, se.b ), pb ) )
+					continue;
+				se.sa = pa;
+				se.sb = pb;
+				edges.append( se );
+			}
+		}
+	}
+
+	// 2D segment/segment crossings between the polyline and the edges
+	for ( int i = 0; i + 1 < pts.size(); i++ ) {
+		const QPointF p0 = scr.at( i ), p1 = scr.at( i + 1 );
+		const QPointF r = p1 - p0;
+		for ( const ScrEdge & se : std::as_const( edges ) ) {
+			const QPointF q0 = se.sa, q1 = se.sb;
+			const QPointF q = q1 - q0;
+			const double denom = r.x() * q.y() - r.y() * q.x();
+			if ( std::fabs( denom ) < 1.0e-9 )
+				continue;
+			const QPointF d = q0 - p0;
+			const double tSeg = ( d.x() * q.y() - d.y() * q.x() ) / denom;
+			const double uEdge = ( d.x() * r.y() - d.y() * r.x() ) / denom;
+			if ( tSeg < 0.0 || tSeg > 1.0 || uEdge < 0.02 || uEdge > 0.98 )
+				continue;
+			addCut( se.a, se.b, float( uEdge ) );
+		}
+	}
+
+	if ( cuts.isEmpty() ) {
+		emit gizmoStatus( tr( "Knife: the line crossed no edges" ) );
+		update();
+		return;
+	}
+	const int oldNV = model->get<int>( iShape, "Num Vertices" );
+	if ( oldNV + cuts.size() > 0xFFFF ) {
+		emit gizmoStatus( tr( "Knife: result would exceed the 65,535-vertex limit" ) );
+		update();
+		return;
+	}
+
+	// apply: split each cut edge at its position, then re-split the affected
+	// triangles exactly like Subdivide does (its splitting is t-agnostic)
+	const QPersistentModelIndex pShape( iShape );
+	QVector<QPair<quint64, float>> cutList;
+	cutList.reserve( cuts.size() );
+	for ( auto it = cuts.constBegin(); it != cuts.constEnd(); ++it )
+		cutList.append( qMakePair( it.key(), it.value() ) );
+	auto applyKnife = [this, pShape, cutList]() {
+		QModelIndex iS( pShape );
+		if ( !iS.isValid() )
+			return;
+		auto ekey = []( int a, int b ) {
+			if ( a > b ) std::swap( a, b );
+			return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+		};
+		QModelIndex iVD = model->getIndex( iS, "Vertex Data" );
+		QModelIndex iT = model->getIndex( iS, "Triangles" );
+		const int nv = model->get<int>( iS, "Num Vertices" );
+		const int nt = model->get<int>( iS, "Num Triangles" );
+		const int ds = model->get<int>( iS, "Data Size" );
+		const int stride = ( nv > 0 ) ? ( ds - nt * 6 ) / nv : 0;
+		QVector<Triangle> tv( nt );
+		for ( int t = 0; t < nt; t++ )
+			tv[t] = model->get<Triangle>( model->getIndex( iT, t ) );
+
+		model->setState( BaseModel::Processing );
+		model->set<int>( iS, "Num Vertices", nv + cutList.size() );
+		model->updateArraySize( iVD );
+		QHash<quint64, int> mid;
+		int nvi = nv;
+		for ( const auto & c : cutList ) {
+			const int a = int( c.first >> 32 ), b = int( c.first & 0xFFFFFFFFu );
+			tlWriteLerpVertex( model, iS, nvi, a, b, c.second );
+			mid.insert( c.first, nvi++ );
+		}
+		QVector<Triangle> out;
+		out.reserve( nt * 2 );
+		QSet<int> touched;
+		for ( int t = 0; t < nt; t++ ) {
+			const Triangle & tr = tv.at( t );
+			if ( tr[0] == tr[1] || tr[1] == tr[2] || tr[0] == tr[2] ) {
+				out.append( tr );
+				continue;
+			}
+			int m[3];
+			int count = 0;
+			for ( int e = 0; e < 3; e++ ) {
+				m[e] = mid.value( ekey( tr[e], tr[( e + 1 ) % 3] ), -1 );
+				if ( m[e] >= 0 )
+					count++;
+			}
+			if ( count == 0 ) {
+				out.append( tr );
+				continue;
+			}
+			touched << tr[0] << tr[1] << tr[2];
+			for ( int e = 0; e < 3; e++ )
+				if ( m[e] >= 0 )
+					touched << m[e];
+			const quint16 a = tr[0], b = tr[1], c = tr[2];
+			const int mab = m[0], mbc = m[1], mca = m[2];
+			if ( count == 3 ) {
+				out.append( Triangle( a, quint16( mab ), quint16( mca ) ) );
+				out.append( Triangle( quint16( mab ), b, quint16( mbc ) ) );
+				out.append( Triangle( quint16( mca ), quint16( mbc ), c ) );
+				out.append( Triangle( quint16( mab ), quint16( mbc ), quint16( mca ) ) );
+			} else if ( count == 2 ) {
+				quint16 p = a, q = b, r = c;
+				int m1 = mab, m2 = mbc;
+				if ( mab >= 0 && mca >= 0 ) {
+					p = c; q = a; r = b;
+					m1 = mca; m2 = mab;
+				} else if ( mbc >= 0 && mca >= 0 ) {
+					p = b; q = c; r = a;
+					m1 = mbc; m2 = mca;
+				}
+				out.append( Triangle( quint16( m1 ), q, quint16( m2 ) ) );
+				out.append( Triangle( p, quint16( m1 ), quint16( m2 ) ) );
+				out.append( Triangle( p, quint16( m2 ), r ) );
+			} else {
+				quint16 p = a, q = b, r = c;
+				int m1 = mab;
+				if ( mbc >= 0 ) {
+					p = b; q = c; r = a;
+					m1 = mbc;
+				} else if ( mca >= 0 ) {
+					p = c; q = a; r = b;
+					m1 = mca;
+				}
+				out.append( Triangle( p, quint16( m1 ), r ) );
+				out.append( Triangle( quint16( m1 ), q, r ) );
+			}
+		}
+		model->set<int>( iS, "Num Triangles", out.size() );
+		model->updateArraySize( iT );
+		for ( int t = 0; t < out.size(); t++ )
+			model->set<Triangle>( model->getIndex( iT, t ), out.at( t ) );
+		if ( stride > 0 )
+			model->set<int>( iS, "Data Size",
+				( nv + int( cutList.size() ) ) * stride + out.size() * 6 );
+		tlRecalcNormalsSubset( model, iS, touched );
+		tlUpdateBounds( model, iS );
+		model->restoreState();
+		model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+	};
+	if ( model->undoStack )
+		model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Knife" ), applyKnife ) );
+	else
+		applyKnife();
+	modelChanged();
+	emit gizmoStatus( tr( "Knife: cut %1 edge(s)" ).arg( cuts.size() ) );
+	update();
+}
+
+// ---------------------------------------------------------------------------
 // Loop Cut (Ctrl+R)
 
 void GLView::loopCut()
@@ -10413,6 +10838,7 @@ void GLView::populateEdgeMenu( QMenu * m )
 		return;
 	const bool hasSel = !pickedElems.isEmpty();
 	m->addAction( tr( "Loop Cut…\tCtrl+R" ), this, [this]() { loopCut(); } );
+	m->addAction( tr( "Knife…\tK" ), this, [this]() { beginKnife(); } );
 	m->addAction( tr( "Subdivide" ), this,
 		[this]() { subdivideSelection(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Edge Slide…\tShift+V" ), this,
@@ -10948,6 +11374,9 @@ void GLView::setEditMode( bool on )
 {
 	if ( on == editMode )
 		return;
+
+	if ( knifeActive )
+		cancelKnife();
 
 	if ( on ) {
 		// walk up to the nearest editable mesh of the current selection
@@ -13542,6 +13971,15 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		setRiggingWeightPaintMode( false );
 		return;
 	}
+	// the knife is modal: Enter applies, Esc cancels, other keys stay inert
+	if ( knifeActive ) {
+		if ( event->key() == Qt::Key_Escape )
+			cancelKnife();
+		else if ( event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter )
+			knifeApply();
+		return;
+	}
+
 	// Escape disarms an armed / in-progress box select (Blender)
 	if ( boxSelecting && event->key() == Qt::Key_Escape ) {
 		boxSelecting = false;
@@ -13851,6 +14289,10 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			update();
 			return;
 		}
+		if ( shortcuts.matches( "viewport.knife", event->key(), mods ) && editMode ) {
+			beginKnife();
+			return;
+		}
 		if ( shortcuts.matches( "viewport.select.circle", event->key(), mods ) ) {
 			beginCircleSelect();	// cursor placement moved to plain RMB (Blender)
 			update();
@@ -13961,6 +14403,12 @@ void GLView::mouseDoubleClickEvent( QMouseEvent * )
 
 void GLView::mouseMoveEvent( QMouseEvent * event )
 {
+	// knife rubber band follows the cursor (also while MMB-orbiting)
+	if ( knifeActive ) {
+		knifeHoverValid = knifeProbe( getQMouseEventPosition( event ), knifeHoverPt );
+		update();
+	}
+
 	if ( gizmoMode ) {
 		// Blender: the drag is unbounded — the mouse is grabbed for the whole
 		// gesture, and at a screen edge the cursor wraps to the opposite side.
@@ -14265,6 +14713,22 @@ void GLView::mousePressEvent( QMouseEvent * event )
 			update();
 			return;
 		}
+	}
+
+	// knife armed (K): LMB places cut points, RMB cancels, MMB orbits
+	if ( knifeActive ) {
+		if ( event->button() == Qt::LeftButton ) {
+			knifeAddPoint( getQMouseEventPosition( event ) );
+			gizmoSwallowClick = true;
+			return;
+		}
+		if ( event->button() == Qt::RightButton ) {
+			cancelKnife();
+			// keep this click from dropping the gizmo on release
+			pressPos = QPointF( -10000.0, -10000.0 );
+			return;
+		}
+		// MMB continues into the normal orbit handler
 	}
 
 	// circle select armed (C): LMB paints select, MMB paints deselect,

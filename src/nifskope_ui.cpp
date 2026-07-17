@@ -4183,6 +4183,25 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			|| keyFocus->inherits( "QAbstractSpinBox" ) || keyFocus->inherits( "QComboBox" ) );
 		// rebindable viewport shortcuts (see tlRegisterViewportShortcuts)
 		const auto & vpKeys = ShortcutRegistry::get();
+		// the knife is modal: the viewport handles Enter/Esc itself; every
+		// other single-key viewport shortcut stays inert while it is armed
+		if ( ogl && ogl->knifeActive && !keyFocusIsTextInput ) {
+			if ( ke->key() == Qt::Key_Escape || ke->key() == Qt::Key_Return
+				|| ke->key() == Qt::Key_Enter ) {
+				if ( e->type() == QEvent::KeyPress ) {
+					if ( ke->key() == Qt::Key_Escape )
+						ogl->cancelKnife();
+					else
+						ogl->knifeApply();
+				}
+				e->accept();
+				return true;
+			}
+			if ( pointerOverViewport ) {
+				e->accept();
+				return true;
+			}
+		}
 		// Blender numpad navigation is viewport-scoped. Reserve recognized keys
 		// during ShortcutOverride so the legacy QAction shortcuts cannot recenter
 		// the model before the viewport-preserving handler sees the KeyPress.
@@ -4337,6 +4356,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				op = 5;
 			else if ( vpKeys.matches( "viewport.triangulate", ke->key(), ke->modifiers() ) )
 				op = 6;
+			else if ( vpKeys.matches( "viewport.knife", ke->key(), ke->modifiers() ) )
+				op = 7;
 			if ( op ) {
 				if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() ) {
 					if ( op == 1 )
@@ -4349,8 +4370,10 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 						ogl->dissolveVerts();
 					else if ( op == 5 )
 						ogl->trisToQuads();
-					else
+					else if ( op == 6 )
 						ogl->triangulateSelection( 0 );
+					else
+						ogl->beginKnife();
 				}
 				e->accept();
 				return true;

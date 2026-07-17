@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-17 — Knife tool (K) + THE STARTUP GRID BUG FIXED FOR REAL
+
+**Grid bug root cause found at last** (while adding the knife preview): the
+QPainter overlay cleanup at the end of paintGL called a RAW `glUseProgram(0)`
+every frame, desyncing the renderer's cached current program. When the last
+cached program of a frame was `lines.prog` (exactly what the ground grid and
+origin axes leave behind), the next frame's grid draw hit the cache, skipped
+the rebind, and rendered with program 0 — invisible. With a selection, later
+overlay passes bind other programs, the cache mismatches, the rebind happens,
+and everything "healed" — which is why only the first click ever fixed it.
+Fix: unbind through `renderer->stopProgram()` so the cache stays coherent.
+This also explains every earlier falsified theory; the WW_PERF_TEST probes
+were chasing state that was identical because the desync lived in a cache the
+traces never printed.
+
+**Knife (K)** — Blender-style modal cut tool (v1):
+- K arms it in edit mode (cross cursor, status hints). LMB places cut points
+  with Blender snapping (vertex 11 px, then edge 8 px, else a free point on
+  the face); MMB orbits mid-cut (the line is re-projected each frame and
+  stays glued to the surface); Enter applies; Esc / RMB cancels; leaving edit
+  mode cancels. While armed, all other single-key viewport shortcuts are
+  inert (modal, like Blender).
+- Preview: white cut line, dashed rubber band to the hover point, green
+  squares on committed points (filled when snapped), green/white hover ring.
+- Apply splits every edge the polyline crosses (screen-space crossing test
+  against front-facing, non-hidden triangles), inserting lerped vertices at
+  the exact crossing (attributes interpolated via tlWriteLerpVertex) and
+  re-splitting affected triangles with the proven Subdivide splitter (1/2/3
+  cut edges per tri). One undo step (TlShapeStateCommand "Knife").
+- v1 limits: points snapped to a face interior are waypoints only (cuts land
+  on the crossed edges); occluded front-facing edges can still be cut
+  (Blender's "cut through" behaviour, permanently on); one mesh per cut.
+- Edge menu gained "Knife… K"; binding `viewport.knife` is rebindable.
+
 ## 2026-07-17 — Quad modeling, stage 1: quad layer, Make Face (F), Tris to Quads (Alt+J), Triangulate (Ctrl+T)
 
 Blender-style quads over the triangle-only NIF format. A quad is a pair of
