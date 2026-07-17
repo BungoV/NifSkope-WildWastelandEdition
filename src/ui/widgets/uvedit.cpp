@@ -355,6 +355,9 @@ void UVWidget::paintGL()
 	}
 	prog->uni4fv( "gridColors", gridColors, 3 );
 	prog->uni3f( "gridLineWidths", gridLineWidths[0], gridLineWidths[1], gridLineWidths[2] );
+	// the shared uvedit shader's grid base is zoom-adaptive now; this legacy
+	// editor keeps its classic fixed 8-per-tile look
+	prog->uni1f( "gridBaseDiv", 8.0f );
 	bool	gridEnabled[3] = { true, ( zoom <= ( GRIDSEGS * GRIDSEGS / 2.0 ) ), ( zoom <= ( GRIDSEGS / 2.0 ) ) };
 	prog->uni1bv( "gridEnabled", gridEnabled, 3 );
 	prog->uni4f( "backgroundColor", bgColor );

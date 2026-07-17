@@ -135,7 +135,13 @@ void Scene::updateSettings( QSettings & settings )
 {
 	settings.beginGroup( "Settings/Render/Colors/" );
 
-	gridColor = FloatVector4( Color4( settings.value( "Grid Color", QColor( 99, 99, 99, 204 ) ).value<QColor>() ) );
+	// Blender-matched grid brightness. The grid draws with FRAMEBUFFER_SRGB
+	// off, so the old default (99,99,99 @ 0.8) displayed much dimmer than
+	// Blender's; values saved with that old default migrate to the new one.
+	QColor gridQC = settings.value( "Grid Color", QColor( 150, 150, 150, 235 ) ).value<QColor>();
+	if ( gridQC == QColor( 99, 99, 99, 204 ) )
+		gridQC = QColor( 150, 150, 150, 235 );
+	gridColor = FloatVector4( Color4( gridQC ) );
 	highlightColor = FloatVector4( Color4( settings.value( "Highlight", QColor( 255, 255, 0 ) ).value<QColor>() ) );
 	wireframeColor = FloatVector4( Color4( settings.value( "Wireframe", QColor( 0, 255, 0 ) ).value<QColor>() ) );
 

@@ -1187,8 +1187,10 @@ void UVEditorView::paintGL()
 	prog->uni1f( "uvRotation", 0.0f );
 	prog->uni2f( "pixelScale",
 		float( pixelWidth ) / viewScaleAndOffset[0], float( pixelHeight ) / viewScaleAndOffset[1] );
-	// Blender look: uniform, subtle, slightly cool-grey lines. The 8-subdivision
-	// base is always on; the ×8 and ×64 finer levels fade in as you zoom in.
+	// Blender look: uniform, subtle, slightly cool-grey lines. The grid is
+	// zoom-adaptive (Blender-style): the coarsest level's spacing stays in a
+	// readable screen range at ANY zoom (coarsening beyond one line per tile
+	// when far out), and the ×8 finer level crossfades in as you zoom in.
 	FloatVector4 gridColors[3] = {
 		FloatVector4( 0.90f, 0.92f, 0.95f, 0.17f ),
 		FloatVector4( 0.90f, 0.92f, 0.95f, 0.13f ),
@@ -1199,15 +1201,13 @@ void UVEditorView::paintGL()
 		GLView::Settings::lineWidthGrid * ( 6.0f / 7.0f ),
 		GLView::Settings::lineWidthGrid * ( 4.0f / 7.0f )
 	};
-	// Each finer level fades in over the octave before its gate (full at half
-	// the gate, invisible above it), so grids reveal smoothly on zoom-in.
-	auto gridFade = []( double z, double gate ) {
-		return float( std::clamp( 2.0 - 2.0 * z / gate, 0.0, 1.0 ) );
-	};
-	const float fadeMid = gridFade( zoom, 0.5 );
-	const float fadeFine = gridFade( zoom, 0.0625 );
-	gridColors[1][3] *= fadeMid;
-	gridColors[2][3] *= fadeFine;
+	const float sPx = std::min( float( pixelWidth ) / viewScaleAndOffset[0],
+		float( pixelHeight ) / viewScaleAndOffset[1] );
+	const double octave = std::log( std::max( double( sPx ), 1.0e-3 ) / 24.0 ) / std::log( 8.0 );
+	const double octaveFloor = std::floor( octave );
+	const float gridBaseDiv = float( std::pow( 8.0, octaveFloor ) );
+	const float octaveFrac = float( octave - octaveFloor );
+	gridColors[1][3] *= octaveFrac;
 	for ( int i = 0; i < 3; i++ ) {
 		if ( gridLineWidths[i] < 1.0f ) {
 			gridColors[i][3] *= gridLineWidths[i];
@@ -1216,10 +1216,11 @@ void UVEditorView::paintGL()
 	}
 	prog->uni4fv( "gridColors", gridColors, 3 );
 	prog->uni3f( "gridLineWidths", gridLineWidths[0], gridLineWidths[1], gridLineWidths[2] );
+	prog->uni1f( "gridBaseDiv", gridBaseDiv );
 	// Hide the subdivision grid entirely when an image is loaded (Blender shows
 	// the image, not the grid). The pixel grid (below) is independent.
-	bool gridEnabled[3] = { !hasImageUnderlay, ( !hasImageUnderlay && fadeMid > 0.004f ),
-		( !hasImageUnderlay && fadeFine > 0.004f ) };
+	bool gridEnabled[3] = { !hasImageUnderlay, ( !hasImageUnderlay && octaveFrac > 0.004f ),
+		false };
 	prog->uni1bv( "gridEnabled", gridEnabled, 3 );
 	prog->uni4f( "backgroundColor", bgColor );
 	// Show a loaded image close to full brightness; keep the checker dimmer so

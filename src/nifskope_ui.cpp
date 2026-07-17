@@ -1969,7 +1969,12 @@ void NifSkope::initDockWidgets()
 		// widgets. The menus rebuild on aboutToShow from GLView's populate
 		// functions (shared with the W quick menu), so enabled states are
 		// always current and the entry points cannot drift apart.
-		QFrame * menuBar = new QFrame( this, Qt::Tool | Qt::FramelessWindowHint );
+		// WindowDoesNotAcceptFocus: clicking a menu button must not activate
+		// this tool window — that deactivated the main window, which killed
+		// focus-follows-mouse and with it every viewport key (A, G/R/S, ...)
+		// until the user clicked inside the viewport again
+		QFrame * menuBar = new QFrame( this,
+			Qt::Tool | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus );
 		menuBar->setObjectName( QStringLiteral( "ViewportMenuBar" ) );
 		menuBar->setAttribute( Qt::WA_ShowWithoutActivating );
 		menuBar->setAttribute( Qt::WA_TranslucentBackground );

@@ -18,6 +18,9 @@ uniform vec2 pixelScale;
 uniform vec4 gridColors[3];
 uniform vec3 gridLineWidths;
 uniform bool gridEnabled[3];
+// zoom-adaptive base subdivision (lines per UV unit, may be < 1 when zoomed
+// far out); the finer levels are fixed x8 / x64 multiples of it
+uniform float gridBaseDiv;
 
 uniform vec4 backgroundColor;
 uniform vec2 textureColorScale;
@@ -48,10 +51,12 @@ vec4 srgbCompress( vec4 c )
 
 vec3 drawGridLines( vec3 color, float x, float s )
 {
-	// Blender-style base of 8 subdivisions per tile, with ×8 finer levels that
-	// fade in when zoomed (gridEnabled/gridColors alpha are driven host-side)
-	vec3	f = vec3( x ) * vec3( 8.0, 64.0, 512.0 );
-	f = abs( f - round( f ) ) * vec3( 0.125, 0.015625, 0.001953125 ) * s;
+	// Blender-style zoom-adaptive grid: the base level rescales with zoom so
+	// its lines stay readable at any distance, finer ×8 levels fade in when
+	// zoomed (gridEnabled/gridColors alpha are driven host-side)
+	vec3	divs = max( gridBaseDiv, 1.0e-9 ) * vec3( 1.0, 8.0, 64.0 );
+	vec3	f = vec3( x ) * divs;
+	f = abs( f - round( f ) ) / divs * s;
 	f = max( f - ( gridLineWidths * 0.5 - 0.5 ), vec3( 0.0 ) );
 	if ( gridEnabled[0] && f.x < 1.0 )
 		return mix( color, gridColors[0].rgb, ( cos( f.x * 3.14159265 ) * 0.5 + 0.5 ) * gridColors[0].a );

@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-17 — A-key fix (menu bar stole activation); Blender-matched grids
+
+- **"A stopped working in edit mode"**: the floating viewport menu bar is a
+  separate Qt::Tool window — clicking any of its menu buttons ACTIVATED that
+  window, deactivating the main one. Focus-follows-mouse is gated on
+  isActiveWindow(), so every viewport key (A, G/R/S, …) went dead until the
+  next click inside the viewport. The bar now carries
+  Qt::WindowDoesNotAcceptFocus: its menus work as before but never steal
+  activation.
+- **3D viewport grid dimmer than Blender**: the grid draws with
+  FRAMEBUFFER_SRGB off, so the old default (99,99,99 @ 0.8 alpha) displayed
+  much darker than intended. New default 150,150,150 @ 0.92; values saved
+  with the old default migrate automatically (Settings ▸ Render color picker
+  default updated to match).
+- **UV editor grid vanished when zoomed out**: the shader's grid levels were
+  FIXED subdivisions (8/64/512 per tile) — zoomed out they packed sub-pixel
+  and washed out to nothing. The grid base is now zoom-adaptive
+  (`gridBaseDiv` uniform, powers of 8 keeping the coarsest spacing in a
+  readable 24–192 px band at any distance, coarsening beyond one line per
+  tile when far out) with the ×8 finer level crossfading in on zoom — the
+  Blender behaviour. The legacy uvedit widget keeps its classic fixed grid
+  (it passes gridBaseDiv = 8).
+
 ## 2026-07-17 — Quad feedback batch: diagonal in selection outline; redo panels
 
 User feedback on stage 1, all three points addressed:
