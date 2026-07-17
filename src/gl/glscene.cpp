@@ -576,6 +576,12 @@ void Scene::drawGrid()
 
 		glEnable( GL_BLEND );
 		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+		// the decade levels and the axis lines are COPLANAR: with GL_LESS the
+		// first level to write depth suppressed every co-linear line drawn
+		// after it (the strong mid/major levels and the red/green axes were
+		// invisible, leaving only the faint fine level). LEQUAL lets the
+		// intended alpha-over reinforcement and the axes draw on top.
+		glDepthFunc( GL_LEQUAL );
 
 		// Blender-style decade crossfade: draw three power-of-ten grid levels
 		// whose brightness fades with the sub-decade zoom position. Lines shared

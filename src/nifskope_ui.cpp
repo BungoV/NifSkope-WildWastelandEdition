@@ -625,6 +625,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->ogl->grabFramebuffer().save(
 						QApplication::applicationDirPath() + "/ww_perf_baseline.png" );
 					stamp( "baseline paint (grabFramebuffer)" );
+					// grid/axis rendering in the axis-aligned ortho views
+					skope->ogl->handleBlenderNumpad( Qt::Key_7, Qt::KeypadModifier, true );
+					qApp->processEvents();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_orthotop.png" );
+					skope->ogl->handleBlenderNumpad( Qt::Key_1, Qt::KeypadModifier, true );
+					qApp->processEvents();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_perf_orthofront.png" );
+					skope->ogl->handleBlenderNumpad( Qt::Key_5, Qt::KeypadModifier, true );
+					qApp->processEvents();
+					stamp( "ortho view grabs" );
 					QPointF center( skope->ogl->width() / 2.0, skope->ogl->height() / 2.0 );
 					QModelIndex pickIdx = skope->ogl->indexAt( center );
 					stamp( "GLView::indexAt(center) pick render" );
