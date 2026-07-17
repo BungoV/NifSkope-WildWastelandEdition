@@ -135,13 +135,14 @@ void Scene::updateSettings( QSettings & settings )
 {
 	settings.beginGroup( "Settings/Render/Colors/" );
 
-	// Blender-matched grid brightness: on the default #2e2e2e background the
-	// blended lines sit ~15 levels above it (minor) / ~23 (major via the
-	// decade double-draw), matching Blender's subtle grid. Values saved with
-	// either earlier default migrate to the tuned one.
-	QColor gridQC = settings.value( "Grid Color", QColor( 80, 80, 80, 115 ) ).value<QColor>();
-	if ( gridQC == QColor( 99, 99, 99, 204 ) || gridQC == QColor( 150, 150, 150, 235 ) )
-		gridQC = QColor( 80, 80, 80, 115 );
+	// Blender-matched grid brightness: majors read clearly, the finest decade
+	// level stays faintly visible (it carries alpha * (1 - fade), so the base
+	// alpha must not be too low). Values saved with any earlier default
+	// migrate to the tuned one.
+	QColor gridQC = settings.value( "Grid Color", QColor( 100, 100, 100, 128 ) ).value<QColor>();
+	if ( gridQC == QColor( 99, 99, 99, 204 ) || gridQC == QColor( 150, 150, 150, 235 )
+		|| gridQC == QColor( 80, 80, 80, 115 ) )
+		gridQC = QColor( 100, 100, 100, 128 );
 	gridColor = FloatVector4( Color4( gridQC ) );
 	highlightColor = FloatVector4( Color4( settings.value( "Highlight", QColor( 255, 255, 0 ) ).value<QColor>() ) );
 	wireframeColor = FloatVector4( Color4( settings.value( "Wireframe", QColor( 0, 255, 0 ) ).value<QColor>() ) );
@@ -565,11 +566,12 @@ void Scene::drawGrid()
 		default:
 			break;
 		}
-		axisHorizontal = ( ( axisHorizontal + c0 ) * 0.5f ).blendValues( c0, 0x08 );
-		axisVertical = ( ( axisVertical + c0 ) * 0.5f ).blendValues( c0, 0x08 );
-		// the red/green axes stay strong regardless of the grid alpha (Blender)
-		axisHorizontal[3] = std::max( axisHorizontal[3], 0.85f );
-		axisVertical[3] = std::max( axisVertical[3], 0.85f );
+		// near-pure, near-opaque axis colours (Blender's vivid red/green);
+		// the old 50/50 blend with the grid grey muted them to invisibility
+		axisHorizontal = ( axisHorizontal * 0.75f + c0 * 0.25f ).blendValues( c0, 0x08 );
+		axisVertical = ( axisVertical * 0.75f + c0 * 0.25f ).blendValues( c0, 0x08 );
+		axisHorizontal[3] = std::max( axisHorizontal[3], 0.9f );
+		axisVertical[3] = std::max( axisVertical[3], 0.9f );
 		loadModelViewMatrix( gridTrans );
 
 		glEnable( GL_BLEND );
@@ -648,11 +650,11 @@ void Scene::drawGrid()
 		}
 		gridTrans.rotation = gridTrans.rotation * Matrix( ap );
 	}
-	c1 = ( ( c1 + c0 ) * 0.5f ).blendValues( c0, 0x08 );
-	c2 = ( ( c2 + c0 ) * 0.5f ).blendValues( c0, 0x08 );
-	// the red/green axis rows stay strong regardless of the grid alpha (Blender)
-	c1[3] = std::max( c1[3], 0.85f );
-	c2[3] = std::max( c2[3], 0.85f );
+	// near-pure, near-opaque axis rows (Blender's vivid red/green)
+	c1 = ( c1 * 0.75f + c0 * 0.25f ).blendValues( c0, 0x08 );
+	c2 = ( c2 * 0.75f + c0 * 0.25f ).blendValues( c0, 0x08 );
+	c1[3] = std::max( c1[3], 0.9f );
+	c2[3] = std::max( c2[3], 0.9f );
 
 	loadModelViewMatrix( gridTrans );
 

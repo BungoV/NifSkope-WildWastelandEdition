@@ -1191,10 +1191,11 @@ void UVEditorView::paintGL()
 	// zoom-adaptive (Blender-style): the coarsest level's spacing stays in a
 	// readable screen range at ANY zoom (coarsening beyond one line per tile
 	// when far out), and the ×8 finer level crossfades in as you zoom in.
+	// Blender-matched: neutral grey lines only slightly above the background
 	FloatVector4 gridColors[3] = {
-		FloatVector4( 0.90f, 0.92f, 0.95f, 0.17f ),
-		FloatVector4( 0.90f, 0.92f, 0.95f, 0.13f ),
-		FloatVector4( 0.90f, 0.92f, 0.95f, 0.09f )
+		FloatVector4( 0.72f, 0.74f, 0.78f, 0.13f ),
+		FloatVector4( 0.72f, 0.74f, 0.78f, 0.10f ),
+		FloatVector4( 0.72f, 0.74f, 0.78f, 0.07f )
 	};
 	float gridLineWidths[3] = {
 		GLView::Settings::lineWidthGrid,
