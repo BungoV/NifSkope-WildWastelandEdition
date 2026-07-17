@@ -607,12 +607,15 @@ public:
 	void setQuadMarks( int shapeBlock, const QSet<quint64> & marks, const QString & opName );
 	//! F: form a quad from 2 adjacent face-picked tris / 4 verts, else fill/bridge
 	void makeFace();
-	//! Alt+J: greedily pair the face-selected triangles into quads
-	void trisToQuads( float maxFaceAngleDeg = 40.0f, float maxShapeAngleDeg = 40.0f );
+	//! Alt+J: greedily pair the face-selected triangles into quads.
+	//! armPanel arms the Blender-style adjust-last-operation panel (off when
+	//! called from the panel's own rerun).
+	void trisToQuads( float maxFaceAngleDeg = 40.0f, float maxShapeAngleDeg = 40.0f,
+		bool armPanel = true );
 	//! Ctrl+T: dissolve quads in the selection back to visible triangles.
 	//! diagonalMode: 0 keep current, 1 beauty (max-min-angle), 2 shortest
 	//! diagonal, 3 longest diagonal — flips rewrite the two triangles.
-	void triangulateSelection( int diagonalMode = 0 );
+	void triangulateSelection( int diagonalMode = 0, bool armPanel = true );
 	//! Universal toolbar visibility commands. In Edit/Weight Paint, isolate the
 	//! selected geometry; in Object Mode, isolate all selected objects.
 	void isolateSelected();

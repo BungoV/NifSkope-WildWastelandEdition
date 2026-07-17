@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-17 — Quad feedback batch: diagonal in selection outline; redo panels
+
+User feedback on stage 1, all three points addressed:
+
+- "F does not immediately create a visual quad / quads re-show their
+  triangles when selected again": the base wireframe hid the marked diagonal
+  correctly, but the selected-face OUTLINE drew all three edges of every
+  filled triangle — putting the diagonal right back on top while the quad (or
+  its verts) were selected, i.e. immediately after F. The outline builder now
+  skips valid marked diagonals, so a quad reads as a quad the moment F lands
+  and whenever it is selected.
+- "No popup with triangulation options": Triangulate (Ctrl+T) now arms the
+  Blender-style adjust-last-operation panel with a Quad Method dropdown
+  (Keep Diagonals / Beauty / Shortest Diagonal / Longest Diagonal) — switch
+  the method live after the cut, F9-style. Tris to Quads (Alt+J) got its
+  panel too (Max Face Angle° / Max Shape Angle°, scrubbable).
+
 ## 2026-07-17 — Knife tool (K) + THE STARTUP GRID BUG FIXED FOR REAL
 
 **Grid bug root cause found at last** (while adding the knife preview): the

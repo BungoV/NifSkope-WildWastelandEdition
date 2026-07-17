@@ -1962,9 +1962,17 @@ void GLView::paintGL()
 					QVector<Vector3> & dst = act ? atris : ftris;
 					dst << wv[t[0]] << wv[t[1]] << wv[t[2]];
 					// only the active face gets the white outline (Blender); the
-					// rest of the selection stays orange
+					// rest of the selection stays orange. A marked quad diagonal
+					// is never outlined - otherwise selecting a quad would draw
+					// its hidden diagonal right back on top of the fill
 					QVector<Vector3> & odst = act ? aoutline : foutline;
-					odst << wv[t[0]] << wv[t[1]] << wv[t[1]] << wv[t[2]] << wv[t[2]] << wv[t[0]];
+					for ( int e = 0; e < 3; e++ ) {
+						const int a = t[e], b = t[( e + 1 ) % 3];
+						const quint64 k = edgeKey( a, b );
+						if ( !qmarks.isEmpty() && qmarks.contains( k ) && markAdj.value( k ) == 2 )
+							continue;
+						odst << wv[a] << wv[b];
+					}
 				}
 				if ( !ftris.isEmpty() ) {
 					scene->setGLColor( 1.0f, 0.522f, 0.0f, 0.30f );
@@ -9126,12 +9134,14 @@ void GLView::makeFace()
 	smartConnect();
 }
 
-void GLView::trisToQuads( float maxFaceAngleDeg, float maxShapeAngleDeg )
+void GLView::trisToQuads( float maxFaceAngleDeg, float maxShapeAngleDeg, bool armPanel )
 {
 	if ( !model || !editMode ) {
 		emit gizmoStatus( tr( "Tris to Quads needs edit mode" ) );
 		return;
 	}
+	const QVector<PickedElement> seed = pickedElems;
+	const int undoBase = model->undoStack ? model->undoStack->index() : 0;
 	// group the face selection per shape
 	QHash<int, QSet<int>> selFaces;
 	for ( const PickedElement & pe : std::as_const( pickedElems ) )
@@ -9240,15 +9250,40 @@ void GLView::trisToQuads( float maxFaceAngleDeg, float maxShapeAngleDeg )
 	emit gizmoStatus( joined > 0
 		? tr( "Tris to Quads: %1 quad(s) formed" ).arg( joined )
 		: tr( "Tris to Quads: no pair within the angle limits" ) );
+	if ( joined > 0 && armPanel && model->undoStack ) {
+		// Blender-style adjust-last-operation panel: scrub the angle limits
+		lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+			trisToQuads( float( ps.value( 0 ).value ), float( ps.value( 1 ).value ), false );
+		};
+		QVector<TlOpParam> ps( 2 );
+		ps[0].label = tr( "Max Face Angle°" );
+		ps[0].type = TlOpParam::Float;
+		ps[0].value = maxFaceAngleDeg;
+		ps[0].mn = 0.0;
+		ps[0].mx = 180.0;
+		ps[0].step = 1.0;
+		ps[0].decimals = 1;
+		ps[1].label = tr( "Max Shape Angle°" );
+		ps[1].type = TlOpParam::Float;
+		ps[1].value = maxShapeAngleDeg;
+		ps[1].mn = 0.0;
+		ps[1].mx = 180.0;
+		ps[1].step = 1.0;
+		ps[1].decimals = 1;
+		armOperatorPanelEx( tr( "Tris to Quads" ), ps,
+			model->undoStack->index() - undoBase, seed );
+	}
 	update();
 }
 
-void GLView::triangulateSelection( int diagonalMode )
+void GLView::triangulateSelection( int diagonalMode, bool armPanel )
 {
 	if ( !model || !editMode ) {
 		emit gizmoStatus( tr( "Triangulate needs edit mode" ) );
 		return;
 	}
+	const QVector<PickedElement> seed = pickedElems;
+	const int undoBase = model->undoStack ? model->undoStack->index() : 0;
 	QHash<int, QSet<int>> selFaces;
 	for ( const PickedElement & pe : std::as_const( pickedElems ) )
 		if ( pe.type == 3 )
@@ -9369,6 +9404,21 @@ void GLView::triangulateSelection( int diagonalMode )
 	emit gizmoStatus( split > 0
 		? tr( "Triangulate: %1 quad(s) split back to triangles" ).arg( split )
 		: tr( "Triangulate: no quads in the selection" ) );
+	if ( split > 0 && armPanel && model->undoStack ) {
+		// Blender-style adjust-last-operation panel: switch the quad method live
+		lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+			triangulateSelection( int( ps.value( 0 ).value + 0.5 ), false );
+		};
+		QVector<TlOpParam> ps( 1 );
+		ps[0].label = tr( "Quad Method" );
+		ps[0].type = TlOpParam::Enum;
+		ps[0].value = diagonalMode;
+		ps[0].enumNames = QStringList()
+			<< tr( "Keep Diagonals" ) << tr( "Beauty (max-min angle)" )
+			<< tr( "Shortest Diagonal" ) << tr( "Longest Diagonal" );
+		armOperatorPanelEx( tr( "Triangulate Faces" ), ps,
+			model->undoStack->index() - undoBase, seed );
+	}
 	update();
 }
 
