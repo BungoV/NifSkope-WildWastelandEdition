@@ -7393,6 +7393,8 @@ void GLView::duplicateElements()
 	QVector<PickedElement> newSel;
 	int totalV = 0;
 	bool capSkipped = false;
+	auto lastNewShape = std::make_shared<int>( -1 );
+	int newShapeCount = 0;
 
 	// per-shape inputs precomputed from pre-op state so the redo closures are
 	// deterministic; the append-only mutation runs under an in-place command
@@ -7434,9 +7436,51 @@ void GLView::duplicateElements()
 		if ( dupVertsSet.isEmpty() )
 			continue;
 		// vertex indices and Num Vertices are uint16 — a duplicate past the
-		// cap wraps every new Triangle write onto unrelated early vertices
+		// cap wraps every new Triangle write onto unrelated early vertices.
+		// Offer to duplicate into a NEW shape instead (the Separate recipe
+		// minus the source edit: clone with props, keep only the selected
+		// faces, leave the original untouched — the clone keeps the source's
+		// vertex array, so it can never itself exceed the cap).
 		if ( oldNV + dupVertsSet.size() > 0xFFFF ) {
-			capSkipped = true;
+			if ( dupFaces.isEmpty() ) {
+				capSkipped = true;	// loose verts only: no faces to carry over
+				continue;
+			}
+			const QString srcName = model->get<QString>( iShape, "Name" );
+			if ( QMessageBox::question( nullptr, tr( "Duplicate" ),
+					tr( "Duplicating %1 vertices would push \"%2\" past the "
+						"65,535-vertex limit of one BSTriShape.\n\n"
+						"Duplicate the selection into a NEW shape instead?" )
+						.arg( dupVertsSet.size() ).arg( srcName ),
+					QMessageBox::Yes | QMessageBox::Cancel ) != QMessageBox::Yes ) {
+				capSkipped = true;
+				continue;
+			}
+			QVector<bool> dupMask( oldNT, false );
+			for ( int t : std::as_const( dupFaces ) )
+				dupMask[t] = true;
+			auto parents = std::make_shared<QVector<int>>();
+			auto applyDupNew = [this, sb, dupMask, parents, lastNewShape]() {
+				int nNew = tlCloneShapeWithProps( model, sb );
+				if ( nNew < 0 )
+					return;
+				int parentNum = model->getParent( sb );
+				if ( parentNum >= 0 ) {
+					blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
+					parents->append( parentNum );
+				}
+				QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
+				model->set<QString>( model->getBlockIndex( nNew ), "Name", tlUniqueNodeName( model, nm ) );
+				tlKeepTriangles( model, model->getBlockIndex( nNew ),
+					[dupMask]( int t ) { return t >= 0 && t < dupMask.size() && dupMask.at( t ); } );
+				*lastNewShape = nNew;
+			};
+			if ( model->undoStack )
+				model->undoStack->push( new TlBlockAppendCommand( model,
+					tr( "Duplicate" ), applyDupNew, parents ) );
+			else
+				applyDupNew();
+			newShapeCount++;
 			continue;
 		}
 
@@ -7519,6 +7563,17 @@ void GLView::duplicateElements()
 		model->undoStack->endMacro();
 
 	if ( newSel.isEmpty() ) {
+		if ( *lastNewShape >= 0 ) {
+			// everything went into new shape(s): hand over like Separate does
+			setEditMode( false );
+			pickedElems.clear();
+			syncObjectSelection( *lastNewShape );
+			emit clicked( model->getBlockIndex( *lastNewShape ) );
+			emit gizmoStatus( tr( "Duplicated the selection into %1 new shape(s) - press G to move" )
+				.arg( newShapeCount ) );
+			modelChanged();
+			return;
+		}
 		emit gizmoStatus( capSkipped
 			? tr( "Duplicate: would exceed the 65,535-vertex limit of BSTriShape" )
 			: tr( "Nothing to duplicate (select verts / faces)" ) );
@@ -7530,8 +7585,12 @@ void GLView::duplicateElements()
 	pickedElems = newSel;
 	modelChanged();
 	gizmoBeginElement( 1 );
-	emit gizmoStatus( tr( "Duplicated %1 vert(s) - move, or Esc to leave in place" ).arg( totalV )
-		+ ( capSkipped ? tr( " (a shape at the 65,535-vertex limit was skipped)" ) : QString() ) );
+	QString note;
+	if ( newShapeCount > 0 )
+		note = tr( " (+%1 over-limit shape(s) duplicated as new objects)" ).arg( newShapeCount );
+	else if ( capSkipped )
+		note = tr( " (a shape at the 65,535-vertex limit was skipped)" );
+	emit gizmoStatus( tr( "Duplicated %1 vert(s) - move, or Esc to leave in place" ).arg( totalV ) + note );
 }
 
 // ---------------------------------------------------------------------------

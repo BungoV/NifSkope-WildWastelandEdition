@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-18d — Duplicate over the cap now offers "duplicate into a new shape"
+
+User feedback on 18c: the hard refusal blocked the actual workflow
+(duplicating most of a 38k-vert mesh is legitimate). Edit-mode Duplicate
+now, when the copy would cross the 65,535-vertex cap, pops a confirmation
+("Duplicate the selection into a NEW shape instead?"). On Yes it reuses the
+Separate recipe minus the source edit: tlCloneShapeWithProps clone, linked
+to the same parent, tlUniqueNodeName, tlKeepTriangles keeps only the
+selected faces, original untouched — the clone inherits the source's vertex
+array so this path can never itself exceed the cap. Undo =
+TlBlockAppendCommand inside the existing Duplicate macro. If everything
+went to new shapes, edit mode exits and the new shape is selected (press G
+to move — same handoff as Separate); mixed selections keep the normal
+coincident-move gesture with a status note. Loose-vert-only over-cap
+selections (no faces to carry) still refuse. Like Separate, the clone keeps
+the full vertex array with only the selected triangles — unused verts can
+be pruned later with the existing cleanup spells.
+
 ## 2026-07-18c — Duplicate/Join: 65,535-vertex cap enforced (user-reported corruption)
 
 User repro: edit-mode Duplicate of many separate areas on the 38,450-vert
