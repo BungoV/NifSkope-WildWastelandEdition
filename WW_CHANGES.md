@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-18e — Clone freeze fixed: tlCloneBlock now loads with signals suppressed
+
+User: duplicating into a new shape (18d) froze NifSkope after the confirm.
+Headless repro (WW_DUPFREEZE_TEST harness in nifskope_ui.cpp — drives the
+real edit-mode duplicate on the 38,450-vert PBR mesh, over-cap path, confirm
+auto-answered) reproduced a >45 s hang, and step logging pinned it INSIDE
+tlCloneShapeWithProps → tlCloneBlock. Object-mode duplicate (=2) hung the
+same way, so this was a latent bug in the shared clone helper, NOT the 18d
+code — object-mode Duplicate/Separate/Add-Primitive on any high-poly shape
+would have hung too.
+
+Root cause: NifModel::loadIndex() (unlike the full-file load()) does NOT set
+Loading state, so populating a 38k-vertex clone emitted a change signal per
+value/array write, and with doCompile==0 the live scene ran scene->update()
+tens of thousands of times → quadratic. Fix: tlCloneBlock brackets the
+insert+loadIndex in setState(Loading)/restoreState (mirroring the real
+loader) and emits one dataChanged for the new block. Clone of the 38k shape
+now ~0.8 s; full edit-mode duplicate-into-new-shape ~1.3 s (was a freeze).
+Also gave tlKeepTriangles the standard setState(Processing) write-guard so
+its large triangle-array rewrite doesn't re-storm signals (helps Separate
+too). Verified end to end: PBR.001 written with 38450 verts / 76800 tris,
+correct format, saved + reparsed clean. The clone shares the source's
+BSSkin::Instance, same as object-mode Duplicate and Separate.
+
 ## 2026-07-18d — Duplicate over the cap now offers "duplicate into a new shape"
 
 User feedback on 18c: the hard refusal blocked the actual workflow

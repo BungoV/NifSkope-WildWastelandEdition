@@ -735,6 +735,100 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	// TEST HARNESS (WW_DUPFREEZE_TEST=1 edit-mode / =2 object-mode): reproduce
+	// "duplicate most of a high-poly mesh" headlessly and TIME it — regression
+	// guard for the tlCloneBlock freeze (loadIndex populated a 38k-vert clone
+	// without Loading state, so every write emitted a signal the live scene
+	// reacted to → quadratic). =1 enters edit mode, selects all faces (forces
+	// the over-cap new-shape path, confirm auto-answered Yes), times
+	// duplicateElements(); =2 times object-mode duplicateSelection(). Logs
+	// block-count delta + elapsed to ww_dupfreeze_test.log, quits.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DUPFREEZE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_dupfreeze_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				// answer the over-cap confirmation Yes as soon as it appears
+				QTimer driver;
+				QObject::connect( &driver, &QTimer::timeout, skope, [&log]() {
+					QWidget * w = QApplication::activeModalWidget();
+					if ( auto * mb = qobject_cast<QMessageBox *>( w ) ) {
+						QAbstractButton * btn = mb->button( QMessageBox::Yes );
+						log << "  confirm: " << QString( mb->text() ).replace( '\n', ' ' ).left( 200 ) << "\n";
+						log.flush();
+						if ( btn )
+							btn->click();
+					}
+				} );
+				driver.start( 30 );
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					int sb = -1, best = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						QModelIndex iB = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( iB, "BSTriShape" ) )
+							continue;
+						int nv = nif->get<int>( iB, "Num Vertices" );
+						if ( nv > best ) { best = nv; sb = b; }
+					}
+					if ( sb < 0 ) { log << "no BSTriShape\n"; break; }
+					log << "shape: block " << sb << " '"
+						<< nif->get<QString>( nif->getBlockIndex( sb ), "Name" ) << "' verts "
+						<< best << " tris " << nif->get<int>( nif->getBlockIndex( sb ), "Num Triangles" ) << "\n";
+					// build the scene so shapeForBlock() has geometry
+					skope->ogl->grabFramebuffer();
+					skope->ogl->getScene()->currentBlock = nif->getBlockIndex( sb );
+					skope->ogl->syncObjectSelection( sb );
+					// WW_DUPFREEZE_TEST=2 → object-mode duplicate (same clone,
+					// no edit overlay) to isolate whether the clone or the
+					// edit-mode machinery is the freeze
+					if ( qgetenv( "WW_DUPFREEZE_TEST" ) == "2" ) {
+						const int before = nif->getBlockCount();
+						log << "object mode; blocks before " << before << "\n";
+						log.flush();
+						QElapsedTimer t2; t2.start();
+						skope->ogl->duplicateSelection();
+						log << "object duplicateSelection returned in " << t2.elapsed()
+							<< " ms; blocks after " << nif->getBlockCount() << "\n";
+						break;
+					}
+					skope->ogl->setEditMode( true );
+					skope->ogl->setPickMode( 4 );	// faces
+					skope->ogl->selectAll( 1 );
+					const int before = nif->getBlockCount();
+					log << "in edit mode; selected all faces; blocks before " << before << "\n";
+					log.flush();
+					QElapsedTimer t; t.start();
+					skope->ogl->duplicateElements();
+					const qint64 ms = t.elapsed();
+					const int after = nif->getBlockCount();
+					log << "duplicateElements returned in " << ms << " ms; blocks after " << after
+						<< " (delta " << ( after - before ) << ")\n";
+					// find the new shape (highest-numbered BSTriShape sharing the stem)
+					int newBlk = -1;
+					for ( int b = nif->getBlockCount() - 1; b >= before; b-- )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) ) { newBlk = b; break; }
+					if ( newBlk >= 0 )
+						log << "new shape: block " << newBlk << " '"
+							<< nif->get<QString>( nif->getBlockIndex( newBlk ), "Name" ) << "' verts "
+							<< nif->get<int>( nif->getBlockIndex( newBlk ), "Num Vertices" ) << " tris "
+							<< nif->get<int>( nif->getBlockIndex( newBlk ), "Num Triangles" ) << "\n";
+					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
+					}
+				} while ( false );
+				driver.stop();
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	// TEMP DIAGNOSTIC (WW_PERF_TEST=1, remove when the slow click-select is
 	// fixed): after the file loads, time every stage of the click-select
 	// pipeline on the largest BSTriShape, dump to ww_perf_test.log, quit.

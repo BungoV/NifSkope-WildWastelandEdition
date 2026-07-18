@@ -6140,7 +6140,15 @@ static QModelIndex tlCloneBlock( NifModel * nif, const QModelIndex & iBlock )
 		buffer.close();
 		if ( buffer.open( QIODevice::ReadOnly ) ) {
 			QModelIndex nb = nif->insertNiBlock( nif->itemName( iBlock ), nif->getBlockCount() );
+			// loadIndex populates every item without setting Loading state (the
+			// full-file loader does), so on a high-poly block each of tens of
+			// thousands of value/array writes emits a change signal and the live
+			// scene reacts per write — quadratic, a multi-second freeze. Mirror
+			// the real loader: suppress signals during the block build.
+			nif->setState( BaseModel::Loading );
 			nif->loadIndex( buffer, nb );
+			nif->restoreState();
+			nif->dataChanged( nb, nb );
 			return nb;
 		}
 	}
@@ -6164,12 +6172,18 @@ static int tlKeepTriangles( NifModel * nif, const QModelIndex & iShape, const st
 		if ( keep( t ) )
 			kept.append( tri );
 	}
+	// suppress the per-write dataChanged storm: a large kept-triangle rewrite
+	// otherwise makes every live view (edit overlay, block list) react per
+	// write, which is quadratic and freezes on high-poly shapes
+	nif->setState( BaseModel::Processing );
 	nif->set<int>( iShape, "Num Triangles", kept.size() );
 	nif->updateArraySize( iTris );
 	for ( int t = 0; t < kept.size(); t++ )
 		nif->set<Triangle>( nif->getIndex( iTris, t ), kept[t] );
 	if ( stride > 0 )
 		nif->set<int>( iShape, "Data Size", numVerts * stride + kept.size() * 6 );
+	nif->restoreState();
+	nif->dataChanged( iShape, iShape );
 	return kept.size();
 }
 
