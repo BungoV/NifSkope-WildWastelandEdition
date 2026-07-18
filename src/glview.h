@@ -293,6 +293,8 @@ signals:
 	void operatorPanel( int kind, float param );
 	//! Show the generalized operator redo panel (typed parameter list)
 	void operatorPanelEx( const QString & title, const QVector<GLView::TlOpParam> & params );
+	//! F9: move the visible adjust panel next to the mouse cursor
+	void redoPanelToCursor();
 	//! A box select was applied (shows the gesture redo panel)
 	void boxSelectApplied();
 	//! A circle-select paint stroke finished (shows the gesture redo panel)
@@ -315,6 +317,11 @@ signals:
 	//! one prospective Undo command; commit=false discards the collected stroke.
 	void riggingWeightStrokeBegan();
 	void riggingWeightBrushSample( int targetBlock, const QVector<int> & vertices,
+		const QVector<float> & falloff, int brushMode, float paintWeight, float strength );
+	//! The X-mirrored half of a brush sample (only while riggingPaintMirrorX):
+	//! the rigging panel accumulates these separately and commits them onto
+	//! the L/R counterpart bone
+	void riggingWeightBrushSampleMirrored( int targetBlock, const QVector<int> & vertices,
 		const QVector<float> & falloff, int brushMode, float paintWeight, float strength );
 	void riggingWeightStrokeEnded( bool commit );
 	void riggingWeightPaintModeChanged( bool enabled );
@@ -607,8 +614,29 @@ public:
 	bool isQuadDiagonal( int shapeBlock, int a, int b ) const;
 	//! The marked partner triangle of tri (same shape), or -1
 	int quadPartnerTri( int shapeBlock, int tri ) const;
-	//! Replace a shape's marks through the undo stack
-	void setQuadMarks( int shapeBlock, const QSet<quint64> & marks, const QString & opName );
+	//! Cached tri -> partner map for a shape's marked quads (O(1) lookups for
+	//! box/circle select and Subdivide; invalidated on mark changes and by
+	//! the vertex-count guard)
+	const QHash<int, int> & quadPartnerMap( int shapeBlock ) const;
+	mutable QHash<int, QPair<int, QHash<int, int>>> quadPartnerCache;
+
+	// ---- X-mirror editing (Blender's Mirror X) ----
+	//! Modal transforms also move the unselected mirror partner of each
+	//! vertex, X-negated in local space; partners are paired by position
+	//! (1e-3 tolerance) at first use and cached per topology
+	bool mirrorEditing = false;
+	mutable QHash<int, QPair<int, QHash<int, int>>> mirrorPairCache;
+	int mirrorPartnerOf( int shapeBlock, int vi ) const;
+	//! Fill a face PickedElement for a triangle (world corners, center, normal)
+	bool buildFacePick( int shapeBlock, int tri, PickedElement & pe ) const;
+	//! Add the missing quad partners of any face picks in elems (a marked
+	//! quad always selects / deselects as one face)
+	void expandQuadPartners( QVector<PickedElement> & elems ) const;
+	//! Replace a shape's marks through the undo stack. vertCountOverride
+	//! records the marks against a vertex count other than the shape's
+	//! current one (for ops whose scene state is not yet rebuilt).
+	void setQuadMarks( int shapeBlock, const QSet<quint64> & marks, const QString & opName,
+		int vertCountOverride = -1 );
 	//! F: form a quad from 2 adjacent face-picked tris / 4 verts, else fill/bridge
 	void makeFace();
 	//! Alt+J: greedily pair the face-selected triangles into quads.
@@ -651,6 +679,18 @@ public:
 	void duplicateSelection();
 	//! Edit-mode Shift+D: duplicate the picked verts/faces within the mesh
 	void duplicateElements();
+	//! Y: detach the face selection in place — boundary verts are duplicated
+	//! and the selected faces re-pointed onto the copies (no new block)
+	void splitSelection();
+	//! V: rip along the selected interior edge path; the side under the
+	//! cursor takes the duplicated verts and a chained move starts.
+	//! v1: interior path verts only (>= 2 edges), one mesh per rip.
+	void ripSelection();
+	//! Ctrl+B: bevel the selected edge path — rip + offset both rows into
+	//! their side's surface plane + bridge with a marked-quad strip that
+	//! tapers closed into the welded endpoints. Width scrubbable (panel);
+	//! width < 0 = derive from the average path edge length.
+	void bevelSelection( float width = -1.0f, bool armPanel = true );
 	//! Blender-style Ctrl+P menu. The active NiNode is the parent; any selected
 	//! NiAVObject-compatible blocks are children.
 	void showParentMenu();
@@ -672,7 +712,8 @@ public:
 
 	// ---- element modal transform (G/R/S on picked verts/edges/faces) ----
 	bool elemTransform = false;
-	struct ElemVert { int shape; int idx; Vector3 origLocal; Vector3 origWorld; Vector3 currentLocal; };
+	struct ElemVert { int shape; int idx; Vector3 origLocal; Vector3 origWorld; Vector3 currentLocal;
+		int mirrorOf = -1; };	//!< >= 0: follower of elemVerts[mirrorOf], X-negated (X-mirror)
 	QVector<ElemVert> elemVerts;
 	QVector<ElemVert> lastElemVerts;    //!< last committed edit gesture, for the redo panel
 	Vector3 elemPivot;                  // world-space pivot (median or 3D cursor)
@@ -739,6 +780,11 @@ public:
 	void selectAll( int action = 0 );
 	//! Ctrl+= / Ctrl+-: grow / shrink the edit-mode selection one adjacency ring
 	void selectMoreLess( bool more );
+	//! Blender Checker Deselect: drop every Nth selected element (redo panel)
+	void checkerDeselect( int nth = 2, int offset = 0, bool armPanel = true );
+	//! Shift+R: re-run the last adjust-panel operator with its current
+	//! parameter values on the current selection (Blender Repeat Last)
+	void repeatLastOperator();
 	//! Alt+click: select the edge loop through the edge under pos (extend keeps
 	//! the current selection). Returns false if no edge was hit.
 	bool selectEdgeLoop( const QPointF & pos, bool extend );
@@ -764,21 +810,30 @@ public:
 		int snapVert = -1;
 		int edgeA = -1, edgeB = -1;
 		float edgeT = 0.0f;
+		int faceTri = -1;               //!< free point: the hit triangle …
+		Vector3 bary;                   //!< … and its barycentric coordinates
 		Vector3 world;
 		QPointF screen;
 		bool valid() const { return shapeBlock >= 0; }
 	};
 	bool knifeActive = false;           //!< armed by K until Enter applies / Esc cancels
+	bool knifeCutThrough = true;        //!< Z while armed: also cut occluded (but front-facing) edges
 	QVector<KnifePoint> knifePoints;    //!< committed cut points, in click order
 	KnifePoint knifeHoverPt;            //!< live point under the cursor
 	bool knifeHoverValid = false;
+	//! undo-stack activity while the knife is armed invalidates the cut
+	//! points' vertex indices, so it cancels the knife (armed in beginKnife)
+	QMetaObject::Connection knifeUndoConn;
 	//! K: arm the knife (LMB places cut points, MMB orbits, Enter cuts, Esc cancels)
 	void beginKnife();
 	void cancelKnife();
 	//! place a cut point at the cursor
 	void knifeAddPoint( const QPointF & pos );
-	//! Enter: split every edge the cut polyline crosses (through-vertex points
-	//! pass without new geometry; face waypoints only steer the line in v1)
+	//! Z while armed: toggle cutting occluded front-facing edges
+	void knifeToggleCutThrough();
+	//! Enter: v2 — interior points become poked vertices (one per triangle),
+	//! every crossed edge splits at the crossing, multi-mesh polylines apply
+	//! per shape in one undo macro
 	void knifeApply();
 	//! raycast + Blender-style snapping (vertex 11px, edge 8px, else face)
 	bool knifeProbe( const QPointF & pos, KnifePoint & kp ) const;
@@ -786,6 +841,10 @@ public:
 	// ---- Rigging weight-paint brush ----
 	bool riggingWeightPaintMode = false;
 	bool riggingWeightPaintBrushEnabled = true;
+	//! Mirror weight-paint strokes across local X (position-paired partners;
+	//! the rigging panel commits the mirrored half onto the L/R counterpart
+	//! bone when one exists)
+	bool riggingPaintMirrorX = false;
 	bool riggingWeightPaintStroke = false;
 	int riggingWeightPaintTarget = -1;
 	int riggingWeightPaintBrushMode = 0;
@@ -838,8 +897,9 @@ public:
 	bool startModalTransform( int mode );
 
 	// ---- operator redo panel (Merge distance / Select-Linked angle / decal offset) ----
-	int lastOpKind = 0;                 //!< 0 none, 1 merge, 2 select linked, 3 floating decal
+	int lastOpKind = 0;                 //!< 0 none, 3 floating decal (1/2 migrated to Redo Panel v2)
 	float lastOpParam = 0.0f;
+	float lastMergeDistance = 0.0001f;  //!< Remove Doubles' default (last used By Distance value)
 	QVector<PickedElement> lastOpSeed;  //!< selection to restore before a re-run
 	int lastOpUndoIndex = -1;
 	bool opReapplying = false;          //!< suppress re-arming the panel while re-running

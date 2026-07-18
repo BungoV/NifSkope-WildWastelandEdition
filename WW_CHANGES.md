@@ -1,5 +1,238 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-18 — Cross-area batch: rigging 3B + paint mirroring, multi-section hknp encoder, link jump
+
+User asked to "finish the remaining percentages" across rigging, collision,
+and the UI overhauls. Everything below is build-green and probe-passed
+(287 ms load, 1.0-1.2 ms/frame) but GUI/asset-untested. EXPLICITLY NOT
+attempted (cannot be validated blind): compound/instance Havok encoding (no
+reference pairs), CustomizationRemapNewBonesData (open leaked-pointer
+question), in-game validations, and the remaining timeline-overhaul and
+block-list cosmetic items (summary COLUMN, inline flag editor, collapsible
+sections — tooltips/Flags-spell near-equivalents already exist).
+
+- **Rigging: weight-paint Mirror (X)** — checkbox in the paint panel. The
+  brush emits a second, mirrored sample stream (position-paired partners via
+  mirrorPartnerOf, already-brushed verts skipped); the panel accumulates it
+  separately and commits it onto the **L/R counterpart bone** resolved by
+  name (riggingFlipBoneName: Left/Right words, FO4 LArm_/RArm_-style
+  prefixes, _L/_R suffixes; same bone when no side marker). Main + mirrored
+  halves are ONE undo macro. No live heatmap for the mirrored side (the
+  heatmap shows the selected bone).
+- **Rigging: transfer options** — Mapping combo (Closest Face = barycentric
+  default / Nearest Vertex = verbatim copy for identical topology) and Max
+  Bones (1-4) spin in the workspace's advanced group; persisted QSettings
+  read by riggingTransfer itself, so the atomic flow AND direct spells all
+  honor them.
+- **Rigging Phase 3B: Create Skin (bind to node)** — new spell + workspace
+  button "0.": gives an entirely UNSKINNED BSTriShape a complete FO4 skin.
+  VertexDesc gains VA_SKINNING (ResetAttributeOffsets + Data Size + array
+  rebuild) with every existing attribute preserved by name (positional
+  leaf-value capture/restore per field); all verts bind to one chosen node
+  (weight 1.0, slot 0); BSSkin::BoneData (bounding sphere in bone space,
+  skin-to-bone = inv(boneWorldAbs) * shapeWorldAbs so the mesh does not
+  move) + BSSkin::Instance (Skeleton Root -> block 0) wired to the shape.
+  The donor pipeline then works on it unchanged. Snapshot undo. Shader
+  skinned-flag NOT touched (message tells the user to check the material).
+  VERIFY: mesh must not move after casting, then in-game.
+- **Collision: multi-section compressed-mesh encoder** — the 255-vert/tri
+  cap is gone. Meshes partition into spatial slabs (longest-axis sort,
+  greedy fill to the u8 section budgets), each section quantizes against its
+  OWN domain (11:11:10 bits — precision now scales with density), quads
+  hold section-relative u8 indices, boundary verts duplicate (the
+  shared-vertex table stays unused, like every decoded Elric sample).
+  Single-section output stays byte-identical to the in-game-validated
+  writer (including its +0x4c quirk; multi-section writes the semantically
+  correct 0 there). Compile's round-trip gate now also requires the decoded
+  triangle count to equal the input. Up to 4096 sections (~1M tris).
+  VERIFY: compile a >255-vert collision, then walk on it in-game.
+- **Block Details: link jump** — double-clicking a link field's NAME column
+  selects the linked block; the Value column keeps its inline editor.
+
+## 2026-07-17 — Modeling backlog mega-batch (9 features), build green, GUI-untested
+
+The user green-lit the whole modeling backlog in one order. Everything below
+compiled clean per feature and the WW_PERF_TEST probe passes (load, edit-mode
+entry, select-all, 0.77-0.87 ms/frame — unchanged), but NONE of it has had an
+interactive GUI pass yet. Test priority: in-place undo of Delete/Merge on a
+real mesh, Rip, X-mirror, quad Subdivide, knife pokes.
+
+- **Checker Deselect** (Select menu, unbound-by-default rebindable key):
+  drops every Nth selected element, Nth/Offset in a Redo Panel v2 panel.
+  Order = selection order, not Blender's connectivity walk (documented).
+- **Repeat Last (Shift+R)**: re-runs the last adjust-panel operator with its
+  current parameter values on the CURRENT selection (`lastOpExRerun` was
+  already a plain re-run — repeat is that, minus the undo-and-adjust).
+  Gesture transforms and pre-v2 panels are not repeatable (documented).
+- **F9**: moves the visible redo panel next to the cursor (screen-clamped;
+  new `GLView::redoPanelToCursor` signal, handled beside the panel glue).
+- **Quad stage 2**: box AND circle select now select/deselect marked quads
+  as whole faces via a new cached tri→partner map
+  (`GLView::quadPartnerMap`, invalidated by the marks command, vert-count
+  guard and file load). Subdivide treats a fully-marked quad as a QUAD:
+  four sub-quads around a center vert on the diagonal midpoint, diagonal
+  not cut, sub-quad diagonals re-marked; surviving marks now RE-RECORD
+  against the new vertex count (marks used to die on every subdivide), all
+  in one undo macro (`setQuadMarks` grew a vert-count override for this).
+- **Rest-pose display**: `Scene::restPoseBlock` finally has a consumer —
+  Node::viewTrans/worldTrans return `restWorldTrans()` (authored transforms
+  straight from the NIF, whole parent chain) for the edited shape. Bone-level
+  GPU skinning is deliberately unaffected (node-level rest pose only).
+- **In-place undo, 5 of 6**: Delete / Merge / edit-Duplicate use per-shape
+  TlShapeStateCommands in a macro (legacy-skin shapes fall back to snapshot —
+  NiSkinData rewrites and partition removal aren't captured in place);
+  object-Duplicate / Add Primitive use the new `TlBlockAppendCommand`
+  (redo re-runs the append-only creation closure, undo removes the created
+  block range highest-first and prunes the null child links via
+  `tlRemoveNullChildLink`); Separate = state-capture command (empty apply)
+  + append command per shape. **Join stays snapshot DELIBERATELY** (it
+  REMOVES blocks — restoring renumbered blocks + model-wide links in place
+  is the real corruption risk; commented at the call site). The command
+  helpers moved above the operator functions (qmake re-run needed).
+  Redo closures capture everything BY VALUE (cursor target, selection
+  lists) so a later redo is deterministic; counters report via shared_ptr.
+- **Split (Y)**: detaches the face selection in place — boundary verts
+  duplicated, selected faces re-pointed, selection follows the detached
+  side. Per-shape in-place undo.
+- **Rip (V)**: rips along a selected interior manifold edge path (no
+  branches, >= 2 edges; one mesh per rip). Per interior path vertex the
+  incident-face fan is split into side arcs (union-find, path edges are the
+  cuts); the side under the cursor floods from the nearest path face,
+  interior verts with faces on both sides duplicate, move-side faces
+  re-point, and a chained move starts on the ripped verts (Esc keeps them
+  coincident). Path ENDPOINTS stay welded (the slit tapers closed) — that is
+  also why single-edge rips are rejected.
+- **Mirror editing (X)**: Mesh ▸ Mirror Editing (X), persisted
+  (GLView/Edit/MirrorX). Mirror partners pair by position (1e-3 tol,
+  27-cell spatial hash probe; center-line verts pair with nobody; cache per
+  topology). Unselected partners join modal G/R/S gestures as FOLLOWER
+  ElemVerts (`mirrorOf`): excluded from pivot + direct transform, they take
+  their source's new local position X-negated each update — raw/authored
+  space, so deformed cages mirror sanely. Commit/cancel handle them through
+  the normal elemVerts paths (per-vertex value commands / preview restore).
+  If both sides are selected, both transform directly (no double-apply).
+- **Knife v2**: interior cut points become real POKED vertices (barycentric
+  attributes via new `tlWriteBaryVertex`, host tri fanned; bary clamped
+  inward so fans can't degenerate; one poke per triangle); multi-mesh
+  polylines apply per shape inside one undo macro; **Z toggles cut-through**
+  while armed (off = a crossing must be visible: the ray at the crossing
+  must hit one of the edge's own faces first). Handled in both key paths
+  (GLView keyPressEvent + the app-level modal swallow).
+- **Redo Panel v2 migration**: Merge by Distance and Select Linked by Angle
+  left the old single-value panel (`lastOpKind` 1/2 retired; 3 = floating
+  decal keeps it). Remove Doubles' default now comes from
+  `lastMergeDistance`. This also makes both Shift+R-repeatable.
+- **Bevel (Ctrl+B) — IMPLEMENTED after all** (user said continue): the
+  rip + offset + bridge construction. Same input contract as Rip (one mesh,
+  interior manifold path, no branches, >= 2 edges or a closed loop; both
+  sides must not connect around the path). The path rips, both rows offset
+  half the width into their own side's surface plane (centroid-based side
+  direction ⊥ the local path direction — a v1 approximation of Blender's
+  edge-slide directions), and the slit bridges with a MARKED-QUAD strip that
+  tapers closed into the welded endpoints via one triangle each — the
+  corner-termination minefield never opens. Strip winding = one whole-strip
+  decision against side A's surface normal. Old quad marks touching the path
+  are dropped (side B edges re-pointed), strip diagonals marked, all in one
+  undo macro (state command + marks, vert-count override). Width scrubs in a
+  Redo Panel v2 panel (default = ¼ average path edge length); Edge menu +
+  rebindable Ctrl+B. Segments = 1 only in v1. The HIGHEST-risk item of the
+  batch — test it after Rip, on a copy of the mesh.
+
+## 2026-07-17 — Open in place: files replace the current document (new-window on request)
+
+User request: opening a NIF (File ▸ Open, Recent Files, Recent Archive Files,
+the NIF browser) used to spawn a new window whenever the current one held a
+file. Every open path now loads INTO the current window, replacing the
+document; unsaved changes prompt the existing Save/Discard/Cancel
+(`saveConfirm()`) first. Opening a new window is still available, on request:
+
+- **Right-click a Recent Files / Recent Archives / Recent Archive Files entry**
+  (including the toolbar Open flyout's recent list) → "Open in New Window".
+  Implemented as a strictly-scoped eventFilter on exactly those four menus
+  (the filter also sits on qApp, so scope by pointer, not by cast). The
+  popup opens OVER the still-open menu chain (Qt stacks popups like
+  submenus); the chain is closed only when the choice is actually made —
+  dismissing drops back into the open menu. (First cut closed the chain
+  BEFORE popping up, which read as "all the menus disappear" — user report,
+  fixed same day.) Recent-archive entries open a fresh window with the
+  archive loaded in its browser. Status tips advertise the right-click.
+- **NIF browser context menu** grew "Open NIF in New Window" next to
+  "Open NIF" (routes per source: configured resource / loose file / archive
+  member, via `openArchiveFile( index, newWindow )`).
+
+Plumbing: `openFile`/`openArchiveFile`/`openArchiveFileString`/
+`openConfiguredNif` return bool = "not cancelled", so batch opens can abort
+cleanly: multi-select Open and the browser's Load Selected open the FIRST
+file in place (one prompt; cancel aborts the batch) and every additional file
+in its own window, as before. Dropping NIFs on the viewport follows the same
+rules (it routes through `openFiles`). The bsaView doubleClicked connect
+became a lambda (PMF connects don't tolerate the added default arg).
+
+Deliberate exceptions: **Reload** of an archive-loaded file re-extracts in
+place with NO prompt (`confirmReplace=false` — Reload is an explicit discard,
+matching the loose-file reload), and the OS/single-instance handoff still
+opens its own window.
+
+Verified: build green; WW_PERF_TEST probe full pipeline on X01_Torso_Tesla
+unchanged (0.8-0.9 ms/frame). The prompt flows themselves need a quick
+interactive check (open-over-dirty via each path, cancel, right-click menus).
+
+## 2026-07-17 — Review fix batch: cross-file state bleed, quad/knife hardening, O(T²) quad ops
+
+Fixes from a code review of the recent quad/knife/grid work. Build green;
+WW_PERF_TEST probe re-run on X01_Torso_Tesla.nif (full load + select + edit
+mode + frame benches, 0.7-0.8 ms/frame — unchanged). The knife/quad paths
+themselves still want interactive GUI verification.
+
+- **Cross-file state bleed (worst find)**: `editHiddenTris`, `scene->hiddenTris`,
+  `quadDiagonals`/`quadMarkVerts` were never cleared on file load (only
+  `savedElemSelections` was) — all keyed by block number, and `hiddenTris` is
+  consulted by the NORMAL render (bsshape.cpp): hide triangles in file A, open
+  file B, and a same-numbered shape silently rendered with holes; quad marks
+  bled whenever the vertex count coincided (likely across variants of the same
+  mesh). All cleared in the same completeLoading hook now. Snapshot-undo
+  reloads (nif->load()) intentionally keep the state — completeLoading only
+  fires on real file loads.
+- **Make Face (F)**: a triangle can only be half of ONE quad — F now refuses
+  with a status hint when a picked tri already carries a marked diagonal
+  (previously a second diagonal could hide two edges of one tri and made the
+  partner lookup edge-order dependent).
+- **Tris to Quads / Triangulate O(T²) freeze fixed**: both called
+  `quadPartnerTri()` (full triangle scan) once per selected face — select-all
+  on a marked mesh scaled quadratically. New `tlBuildEdgeTris()` builds an
+  edge→(two tris, saturating count) adjacency once per shape; partner lookups
+  are O(1) via `tlQuadPartnerVia()` (same semantics incl. the non-manifold
+  no-unique-partner rule). `quadPartnerTri()` stays for the single-pick path.
+- **Triangulate undo**: flip modes pushed TWO entries per shape (snapshot +
+  marks) — one Ctrl+Z restored the marks but left the flipped triangles.
+  Wrapped per shape in a QUndoStack macro: one Ctrl+Z per shape now. The
+  adjust-panel undoSteps counting is macro-aware by construction (index delta).
+- **Knife vs undo**: undo could still fire while the knife was armed (Edit
+  menu by mouse; Ctrl+Z with the pointer off the viewport) and invalidate the
+  cut points' vertex indices. beginKnife now watches
+  `QUndoStack::indexChanged` and cancels the knife on any stack activity
+  (watcher disarmed before knifeApply pushes its own command); applyKnife
+  additionally drops any cut whose vertices no longer exist before writing
+  lerp rows (belt and braces — also covers a redo after external changes).
+- **Knife stale picks**: the cut rebuilds the triangle list (face indices
+  shift, cut edges are replaced), so edge/face picks on the cut shape are now
+  dropped after apply; vertex picks survive (indices only ever appended).
+- **Knife overlay**: committed points that fail to project after an MMB orbit
+  (behind the camera) drew lines to a (-1e6,-1e6) sentinel — a spurious line
+  shooting across the viewport. Segments/markers touching an unprojectable
+  point are now skipped.
+- **drawGrid hygiene**: the ortho grid pass restores GL_LESS before returning
+  (the coplanar-fix LEQUAL no longer leaks into later passes; benign today
+  since every pass sets its own depth func, but cheap to make airtight).
+
+Reviewed but deliberately NOT changed: the per-frame edit-overlay rebuild
+(O(V) transform + O(T) edge dedup every frame — 0.6-0.8 ms/frame on real
+meshes; a revision-keyed cache is the fix if profiling ever demands it, and a
+missed invalidation there would corrupt the edit wireframe), and the
+load-time attribution (the probe's reload peel-off shows ~⅔ of the attached
+overhead is the Block Details + Header tree views — that investigation is
+in flight).
+
 ## 2026-07-17 — Ortho grid: two depth bugs fixed (user-confirmed), Blender-matched
 
 Two long-standing ortho-view grid defects found via the headless render probe

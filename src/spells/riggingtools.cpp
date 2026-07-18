@@ -36,7 +36,9 @@
 #include <QPushButton>
 #include <QProgressDialog>
 #include <QSet>
+#include <QSettings>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QScrollArea>
 #include <QShortcut>
 #include <QSlider>
@@ -620,11 +622,18 @@ static Vector3 riggingClosestOnTri( const Vector3 & p, const Vector3 & a, const 
 }
 
 //! Transfer donor skin onto target positions: per target vertex, closest point on the
-//! nearest donor triangle, barycentric-blend the 3 donor verts' weights, top-4 + normalize.
+//! nearest donor triangle, barycentric-blend the 3 donor verts' weights, top-N + normalize.
+//! Mapping mode and max influences come from the persisted Rigging settings
+//! (the workspace panel exposes them): mode 0 = closest face (barycentric),
+//! mode 1 = nearest vertex (verbatim weights — for identical topology).
 static QVector<QVector<QPair<QString, float>>> riggingTransfer( const RigShape & donor,
 	const QVector<Vector3> & targetPos, QVector<float> * outSnap = nullptr,
 	const std::function<bool( int, int )> & progress = {}, bool * outCancelled = nullptr )
 {
+	QSettings transferSettings;
+	const int mappingMode = transferSettings.value( "Rigging/MappingMode", 0 ).toInt();
+	const int maxInfluences = std::clamp(
+		transferSettings.value( "Rigging/MaxInfluences", 4 ).toInt(), 1, 4 );
 	if ( outCancelled )
 		*outCancelled = false;
 	QVector<QVector<int>> incident( donor.pos.size() );
@@ -650,13 +659,17 @@ static QVector<QVector<QPair<QString, float>>> riggingTransfer( const RigShape &
 		}
 
 		float bb = 1e30f, bbary[3] = { 1, 0, 0 };
-		int bt = incident[nv].isEmpty() ? -1 : incident[nv].first();
-		for ( int t : incident[nv] ) {
-			const Triangle & tr = donor.tris[t];
-			float bary[3];
-			Vector3 cpt = riggingClosestOnTri( p, donor.pos[tr.v1()], donor.pos[tr.v2()], donor.pos[tr.v3()], bary );
-			float d = ( cpt - p ).squaredLength();
-			if ( d < bb ) { bb = d; bt = t; bbary[0] = bary[0]; bbary[1] = bary[1]; bbary[2] = bary[2]; }
+		// nearest-vertex mode skips the face refinement and lands in the
+		// verbatim nearest-vertex branch below
+		int bt = ( mappingMode == 0 && !incident[nv].isEmpty() ) ? incident[nv].first() : -1;
+		if ( mappingMode == 0 ) {
+			for ( int t : incident[nv] ) {
+				const Triangle & tr = donor.tris[t];
+				float bary[3];
+				Vector3 cpt = riggingClosestOnTri( p, donor.pos[tr.v1()], donor.pos[tr.v2()], donor.pos[tr.v3()], bary );
+				float d = ( cpt - p ).squaredLength();
+				if ( d < bb ) { bb = d; bt = t; bbary[0] = bary[0]; bbary[1] = bary[1]; bbary[2] = bary[2]; }
+			}
 		}
 
 		std::map<QString, float> acc;
@@ -677,7 +690,7 @@ static QVector<QVector<QPair<QString, float>>> riggingTransfer( const RigShape &
 		QVector<QPair<QString, float>> v;
 		for ( const auto & kv : acc ) v << qMakePair( kv.first, kv.second );
 		std::sort( v.begin(), v.end(), []( const QPair<QString, float> & a, const QPair<QString, float> & b ) { return a.second > b.second; } );
-		if ( v.size() > 4 ) v.resize( 4 );
+		if ( v.size() > maxInfluences ) v.resize( maxInfluences );
 		float sum = 0; for ( const auto & pr : v ) sum += pr.second;
 		if ( sum > 0 ) for ( auto & pr : v ) pr.second /= sum;
 		out << v;
@@ -1834,6 +1847,206 @@ public:
 REGISTER_SPELL( spRiggingBindExistingNodes )
 
 // ---------------------------------------------------------------------------
+// Phase 3B: create a complete FO4 skin on an entirely UNSKINNED BSTriShape.
+// The shape's vertex layout gains the skinning attribute (VertexDesc rebuild
+// + packed Vertex Data rewrite, every existing attribute preserved by name),
+// a BSSkin::Instance / BSSkin::BoneData pair is created bound to one chosen
+// node with weight 1.0 everywhere, and the skin-to-bone transform is chosen
+// so the mesh does not move: inv(boneWorld) * shapeWorld. From there the
+// existing donor pipeline (Import Donor Bone Nodes -> Bind Donor Bones ->
+// Transfer Weights) takes over exactly as on any skinned target.
+
+//! Recursively snapshot / restore every leaf value of one vertex field
+//! (positional within the field; the old fields' layouts are unchanged by
+//! the skinning attribute, which only APPENDS new fields).
+static void riggingCaptureLeaves( const NifModel * nif, const QModelIndex & idx, QVector<NifValue> & out )
+{
+	const int rc = nif->rowCount( idx );
+	if ( rc > 0 ) {
+		for ( int r = 0; r < rc; r++ )
+			riggingCaptureLeaves( nif, nif->getIndex( idx, r ), out );
+	} else {
+		out.append( nif->getValue( idx ) );
+	}
+}
+
+static void riggingRestoreLeaves( NifModel * nif, const QModelIndex & idx, const QVector<NifValue> & in, int & pos )
+{
+	const int rc = nif->rowCount( idx );
+	if ( rc > 0 ) {
+		for ( int r = 0; r < rc; r++ )
+			riggingRestoreLeaves( nif, nif->getIndex( idx, r ), in, pos );
+	} else if ( pos < in.size() ) {
+		nif->setIndexValue( idx, in.at( pos++ ) );
+	}
+}
+
+class spRiggingCreateSkin final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Create Skin (bind to node)..." ); }
+	QString page() const override final { return Spell::tr( "Rigging" ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return nif && nif->getBSVersion() >= 130 && nif->blockInherits( index, "BSTriShape" )
+			&& nif->getIndex( index, "Vertex Data" ).isValid()
+			&& nif->getLink( index, "Skin" ) < 0;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		const int shapeBlock = nif->getBlockNumber( index );
+		const int nv = nif->get<int>( index, "Num Vertices" );
+		const int nt = nif->get<int>( index, "Num Triangles" );
+		if ( nv <= 0 ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr( "The shape has no vertices." ) );
+			return index;
+		}
+
+		// bind-node choice: every NiNode, defaulting to the shape's parent
+		QStringList labels;
+		QVector<int> nodes;
+		int defaultRow = 0;
+		const int parentNode = riggingSceneParent( nif, shapeBlock );
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex nb = nif->getBlockIndex( b );
+			if ( !nif->blockInherits( nb, "NiNode" ) )
+				continue;
+			QString nm = nif->get<QString>( nb, "Name" );
+			if ( b == parentNode )
+				defaultRow = labels.size();
+			labels << QString( "%1 [%2]" ).arg( nm.isEmpty() ? Spell::tr( "<node>" ) : nm ).arg( b );
+			nodes << b;
+		}
+		if ( nodes.isEmpty() ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr( "The file has no NiNode to bind to." ) );
+			return index;
+		}
+		bool ok = false;
+		const QString chosen = QInputDialog::getItem( nullptr, name(),
+			Spell::tr( "Bind every vertex (weight 1.0) to this node.\nThe donor pipeline can then replace the weights:" ),
+			labels, defaultRow, false, &ok );
+		if ( !ok )
+			return index;
+		const int bindNode = nodes.at( labels.indexOf( chosen ) );
+
+		// the mesh must not move: skin-to-bone = inv(boneWorld) * shapeWorld
+		Transform boneWorld, shapeWorld;
+		if ( !riggingNodeAbsoluteWorld( nif, bindNode, boneWorld )
+			|| !riggingNodeAbsoluteWorld( nif, shapeBlock, shapeWorld ) ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "Could not resolve the node transforms (broken parent chain)." ) );
+			return index;
+		}
+		const Transform skinToBone = boneWorld.inverted() * shapeWorld;
+
+		// capture every existing per-vertex field by name, positionally
+		QModelIndex iVD = nif->getIndex( index, "Vertex Data" );
+		struct FieldSave { QString name; QVector<NifValue> values; };
+		QVector<QVector<FieldSave>> saved( nv );
+		for ( int v = 0; v < nv && v < nif->rowCount( iVD ); v++ ) {
+			QModelIndex row = nif->getIndex( iVD, v );
+			for ( int c = 0; c < nif->rowCount( row ); c++ ) {
+				QModelIndex field = nif->getIndex( row, c );
+				FieldSave fs;
+				fs.name = nif->itemName( field );
+				riggingCaptureLeaves( nif, field, fs.values );
+				saved[v].append( fs );
+			}
+		}
+
+		// mesh bound in bind-bone space, for the BoneData entry
+		BoundSphere localBound;
+		{
+			QVector<Vector3> pos( nv );
+			for ( int v = 0; v < nv; v++ )
+				pos[v] = skinToBone * nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" );
+			localBound = BoundSphere( pos, true );
+		}
+
+		QPersistentModelIndex pShape( index );
+		nifSnapshotOp( nif, Spell::tr( "Create skin" ), [&]() {
+			nif->holdUpdates( true );
+			nif->setState( BaseModel::Processing );
+			QModelIndex iShape( pShape );
+
+			// 1. the vertex layout gains the skinning attribute
+			BSVertexDesc desc = nif->get<BSVertexDesc>( iShape, "Vertex Desc" );
+			desc.SetFlag( VertexAttribute( 6 ) );	// VA_SKINNING
+			desc.ResetAttributeOffsets( nif->getBSVersion() );
+			nif->set<BSVertexDesc>( iShape, "Vertex Desc", desc );
+			nif->set<uint>( iShape, "Data Size",
+				desc.GetVertexSize() * uint( nv ) + 6u * uint( nt ) );
+			QModelIndex iVD2 = nif->getIndex( iShape, "Vertex Data" );
+			nif->updateArraySize( iVD2 );
+
+			// 2. restore the captured attributes; the appended skin slots
+			// bind everything to slot 0 with weight 1.0
+			for ( int v = 0; v < nv && v < nif->rowCount( iVD2 ); v++ ) {
+				QModelIndex row = nif->getIndex( iVD2, v );
+				for ( int c = 0; c < nif->rowCount( row ); c++ ) {
+					QModelIndex field = nif->getIndex( row, c );
+					const QString fieldName = nif->itemName( field );
+					for ( const FieldSave & fs : std::as_const( saved[v] ) ) {
+						if ( fs.name != fieldName )
+							continue;
+						int pos = 0;
+						riggingRestoreLeaves( nif, field, fs.values, pos );
+						break;
+					}
+				}
+				QModelIndex iW = nif->getIndex( row, "Bone Weights" );
+				QModelIndex iI = nif->getIndex( row, "Bone Indices" );
+				for ( int j = 0; j < 4 && iW.isValid() && iI.isValid(); j++ ) {
+					nif->set<float>( nif->getIndex( iW, j ), j == 0 ? 1.0f : 0.0f );
+					nif->set<quint8>( nif->getIndex( iI, j ), 0 );
+				}
+			}
+
+			// 3. BSSkin::BoneData with the one bind bone
+			QModelIndex iData = nif->insertNiBlock( "BSSkin::BoneData" );
+			nif->set<uint>( iData, "Num Bones", 1 );
+			QModelIndex iList = nif->getIndex( iData, "Bone List" );
+			nif->updateArraySize( iList );
+			QModelIndex iEntry = nif->getIndex( iList, 0 );
+			if ( iEntry.isValid() ) {
+				QModelIndex iSphere = nif->getIndex( iEntry, "Bounding Sphere" );
+				if ( iSphere.isValid() ) {
+					nif->set<Vector3>( iSphere, "Center", localBound.center );
+					nif->set<float>( iSphere, "Radius", localBound.radius );
+				}
+				skinToBone.writeBack( nif, iEntry );
+			}
+
+			// 4. BSSkin::Instance wired to the shape
+			QModelIndex iInst = nif->insertNiBlock( "BSSkin::Instance" );
+			nif->setLink( nif->getIndex( iInst, "Data" ), nif->getBlockNumber( iData ) );
+			// vanilla convention: the skeleton root link points at block 0
+			if ( nif->blockInherits( nif->getBlockIndex( 0 ), "NiNode" ) )
+				nif->setLink( nif->getIndex( iInst, "Skeleton Root" ), 0 );
+			nif->set<uint>( iInst, "Num Bones", 1 );
+			QModelIndex iBones = nif->getIndex( iInst, "Bones" );
+			nif->updateArraySize( iBones );
+			nif->setLink( nif->getIndex( iBones, 0 ), bindNode );
+			nif->setLink( nif->getIndex( iShape, "Skin" ), nif->getBlockNumber( iInst ) );
+
+			nif->restoreState();
+			nif->holdUpdates( false );
+		} );
+
+		QMessageBox::information( nullptr, name(), Spell::tr(
+			"Skin created: every vertex bound to \"%1\" with weight 1.0 (the mesh must not have moved — verify).\n\n"
+			"Next: Import Donor Bone Nodes / Bind Donor Bones / Transfer Weights work on this shape now.\n"
+			"Check the material's skinned shader flag manually — this spell does not edit shader properties." )
+			.arg( chosen ) );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spRiggingCreateSkin )
+
+// ---------------------------------------------------------------------------
 // FO4 CustomizationRemapData. Each vertex contributes the exact packed skin
 // record used by the game: four float16 weights followed by four uint8 bone
 // indices. This snapshots the shape's current standard-skeleton binding.
@@ -2926,6 +3139,44 @@ static bool riggingBuildPaintStroke( const NifModel * nif, const QModelIndex & s
 		if ( changed ) result.append( painted );
 	}
 	return true;
+}
+
+//! The L/R counterpart of a bone name for mirrored painting (Blender's
+//! vertex-group flipping): swaps Left/Right words, FO4-style L/R prefixes
+//! (LArm_/RArm_, LLeg_/RLeg_) and _L/_R side suffixes. Returns the input
+//! unchanged when no side marker is recognized.
+static QString riggingFlipBoneName( const QString & name )
+{
+	auto swapWord = []( QString s, const QString & a, const QString & b ) {
+		const int ia = s.indexOf( a ), ib = s.indexOf( b );
+		if ( ia >= 0 && ( ib < 0 || ia < ib ) )
+			s.replace( ia, a.size(), b );
+		else if ( ib >= 0 )
+			s.replace( ib, b.size(), a );
+		return s;
+	};
+	if ( name.contains( QLatin1String( "Left" ) ) || name.contains( QLatin1String( "Right" ) ) )
+		return swapWord( name, QStringLiteral( "Left" ), QStringLiteral( "Right" ) );
+	if ( name.contains( QLatin1String( "left" ) ) || name.contains( QLatin1String( "right" ) ) )
+		return swapWord( name, QStringLiteral( "left" ), QStringLiteral( "right" ) );
+	// FO4 skeleton style: leading L/R followed by an uppercase letter
+	// (LArm_ForeArm1, RLeg_Calf) — "Lung"/"Leg" style names don't match
+	if ( name.size() >= 2 && name.at( 1 ).isUpper() ) {
+		if ( name.startsWith( QLatin1Char( 'L' ) ) )
+			return QStringLiteral( "R" ) + name.mid( 1 );
+		if ( name.startsWith( QLatin1Char( 'R' ) ) )
+			return QStringLiteral( "L" ) + name.mid( 1 );
+	}
+	// side suffixes / segments: "_L", "_R", ".L", ".R", " L", " R"
+	for ( const char sep : { '_', '.', ' ' } ) {
+		const QString sl = QString( sep ) + QLatin1String( "L" );
+		const QString sr = QString( sep ) + QLatin1String( "R" );
+		if ( name.endsWith( sl ) )
+			return name.left( name.size() - 1 ) + QLatin1String( "R" );
+		if ( name.endsWith( sr ) )
+			return name.left( name.size() - 1 ) + QLatin1String( "L" );
+	}
+	return name;
 }
 
 static int riggingApplyPaintStroke( NifModel * nif, const QModelIndex & shape,
@@ -4106,6 +4357,11 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	paintAccumulate->setToolTip( QObject::tr(
 		"Build weight repeatedly while a stroke passes over the same vertex. When off, each vertex is capped to one brush application per LMB drag." ) );
 	paintLayout->addWidget( paintAccumulate );
+	auto * paintMirror = new QCheckBox( QObject::tr( "Mirror (X)" ), paintGroup );
+	paintMirror->setObjectName( QStringLiteral( "RiggingWeightPaintMirror" ) );
+	paintMirror->setToolTip( QObject::tr(
+		"Also paint the position-mirrored vertices across local X. The mirrored half commits onto the L/R counterpart bone when one exists (LArm_/RArm_, Left/Right, _L/_R), otherwise onto the same bone." ) );
+	paintLayout->addWidget( paintMirror );
 	auto * paintStatus = new QLabel( QObject::tr( "Select a skin bone, then start painting in the viewport." ), paintGroup );
 	paintStatus->setObjectName( QStringLiteral( "RiggingWeightPaintStatus" ) );
 	paintStatus->setWordWrap( true );
@@ -4213,6 +4469,9 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	auto * advancedLayout = new QVBoxLayout( advanced );
 	advancedLayout->setContentsMargins( 6, 8, 6, 6 );
 	advancedLayout->setSpacing( 4 );
+	auto * createSkin = new QPushButton( QObject::tr( "0. Create Skin (bind to node)..." ), advanced );
+	createSkin->setToolTip( QObject::tr(
+		"Phase 3B: give an entirely unskinned BSTriShape a complete FO4 skin (weight 1.0 to one node), so the donor pipeline below can run on it" ) );
 	auto * rebind = new QPushButton( QObject::tr( "Rebind to Reference Skeleton..." ), advanced );
 	rebind->setToolTip( QObject::tr(
 		"Compare this skin with an explicit game skeleton, then optionally rebuild BoneData while preserving raw geometry" ) );
@@ -4220,16 +4479,46 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	auto * importNodes = new QPushButton( QObject::tr( "2. Import Donor Bone Nodes..." ), advanced );
 	auto * bindBones = new QPushButton( QObject::tr( "3. Bind Donor Bones..." ), advanced );
 	auto * transferWeights = new QPushButton( QObject::tr( "4. Transfer Weights (existing bones)..." ), advanced );
+	// transfer options: persisted, read by riggingTransfer for EVERY entry
+	// path (atomic flow and direct spells alike)
+	auto * mappingRow = new QHBoxLayout;
+	mappingRow->addWidget( new QLabel( QObject::tr( "Mapping" ), advanced ) );
+	auto * mappingMode = new QComboBox( advanced );
+	mappingMode->setObjectName( QStringLiteral( "RiggingMappingMode" ) );
+	mappingMode->addItems( { QObject::tr( "Closest Face" ), QObject::tr( "Nearest Vertex" ) } );
+	mappingMode->setToolTip( QObject::tr(
+		"Closest Face blends the nearest donor triangle barycentrically (default). Nearest Vertex copies the nearest donor vertex's weights verbatim — best for identical or near-identical topology." ) );
+	mappingRow->addWidget( mappingMode, 1 );
+	mappingRow->addWidget( new QLabel( QObject::tr( "Max Bones" ), advanced ) );
+	auto * maxInfluences = new QSpinBox( advanced );
+	maxInfluences->setObjectName( QStringLiteral( "RiggingMaxInfluences" ) );
+	maxInfluences->setRange( 1, 4 );
+	maxInfluences->setToolTip( QObject::tr(
+		"Cap the influences per vertex (FO4 stores up to 4). Lower caps re-normalize the strongest bones." ) );
+	mappingRow->addWidget( maxInfluences );
+	{
+		QSettings transferSettings;
+		mappingMode->setCurrentIndex(
+			std::clamp( transferSettings.value( "Rigging/MappingMode", 0 ).toInt(), 0, 1 ) );
+		maxInfluences->setValue(
+			std::clamp( transferSettings.value( "Rigging/MaxInfluences", 4 ).toInt(), 1, 4 ) );
+	}
+	QObject::connect( mappingMode, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+		panel, []( int idx ) { QSettings().setValue( "Rigging/MappingMode", idx ); } );
+	QObject::connect( maxInfluences, QOverload<int>::of( &QSpinBox::valueChanged ),
+		panel, []( int v ) { QSettings().setValue( "Rigging/MaxInfluences", v ); } );
 	auto * hint = new QLabel( QObject::tr(
 		"For inspection, repair, and partial files." ), advanced );
 	hint->setWordWrap( true );
 	hint->setStyleSheet( QStringLiteral( "QLabel { color: palette(mid); }" ) );
 	advancedLayout->addWidget( hint );
+	advancedLayout->addWidget( createSkin );
 	advancedLayout->addWidget( rebind );
 	advancedLayout->addWidget( generate );
 	advancedLayout->addWidget( importNodes );
 	advancedLayout->addWidget( bindBones );
 	advancedLayout->addWidget( transferWeights );
+	advancedLayout->addLayout( mappingRow );
 	const QList<QWidget *> advancedWidgets = { hint, rebind, generate, importNodes, bindBones, transferWeights };
 	for ( QWidget * widget : advancedWidgets )
 		widget->setVisible( false );
@@ -4258,6 +4547,7 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	auto paintStrokeWeight = std::make_shared<float>( 1.0f );
 	auto paintStrokeStrength = std::make_shared<float>( 0.25f );
 	auto paintStrokeAccumulate = std::make_shared<bool>( false );
+	auto paintStrokeMirror = std::make_shared<QMap<int, float>>();
 	auto paintCommitting = std::make_shared<bool>( false );
 	auto segmentStrokeFaces = std::make_shared<QSet<int>>();
 	auto segmentBaseMembership = std::make_shared<QVector<int>>();
@@ -4594,29 +4884,78 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 					ogl->setRiggingWeightPreviewColors( *heatmapColors );
 				}
 			} );
+		// mirrored half of the stroke: accumulated separately, committed onto
+		// the L/R counterpart bone (no live heatmap — that shows the selected
+		// bone, not the counterpart)
+		QObject::connect( ogl, &GLView::riggingWeightBrushSampleMirrored, panel,
+			[=]( int target, const QVector<int> & vertices, const QVector<float> & falloff,
+				int, float, float ) {
+				if ( target != *paintStrokeTarget || vertices.size() != falloff.size() )
+					return;
+				for ( int i = 0; i < vertices.size(); i++ ) {
+					float & amount = ( *paintStrokeMirror )[vertices.at( i )];
+					amount = *paintStrokeAccumulate
+						? qMin( 1024.0f, amount + qMax( 0.0f, falloff.at( i ) ) )
+						: qMax( amount, falloff.at( i ) );
+				}
+			} );
+		QObject::connect( paintMirror, &QCheckBox::toggled, panel, [=]( bool on ) {
+			ogl->riggingPaintMirrorX = on;
+		} );
+		paintMirror->setChecked( ogl->riggingPaintMirrorX );
 		QObject::connect( ogl, &GLView::riggingWeightStrokeEnded, panel, [=]( bool commit ) {
 			if ( !commit || paintStroke->isEmpty() || *paintStrokeTarget != *targetBlock ) {
 				paintStroke->clear();
+				paintStrokeMirror->clear();
 				rebuildHeatmap();
 				return;
 			}
 			QString error;
 			bool boundsUpdated = false;
 			*paintCommitting = true;
+			// mirrored stroke + main stroke = one undo step together
+			const bool mirrored = !paintStrokeMirror->isEmpty();
+			if ( mirrored && nif->undoStack )
+				nif->undoStack->beginMacro( QObject::tr( "Paint stroke (mirrored)" ) );
 			int changed = riggingApplyPaintStroke( nif, nif->getBlockIndex( *targetBlock ),
 				*paintStrokeBone, *paintStroke, *paintStrokeMode, *paintStrokeWeight,
 				*paintStrokeStrength, *paintStrokeAccumulate, boundsUpdated, error );
+			int mirroredChanged = 0;
+			if ( mirrored && changed >= 0 ) {
+				// resolve the counterpart bone by name; same bone when the
+				// name has no side marker (spine, head, ...)
+				int mirrorBone = *paintStrokeBone;
+				const QStringList names = riggingBoneNames( nif, nif->getBlockIndex( *targetBlock ) );
+				if ( mirrorBone >= 0 && mirrorBone < names.size() ) {
+					const int fi = names.indexOf( riggingFlipBoneName( names.at( mirrorBone ) ) );
+					if ( fi >= 0 )
+						mirrorBone = fi;
+				}
+				QString mError;
+				bool mBounds = false;
+				mirroredChanged = riggingApplyPaintStroke( nif, nif->getBlockIndex( *targetBlock ),
+					mirrorBone, *paintStrokeMirror, *paintStrokeMode, *paintStrokeWeight,
+					*paintStrokeStrength, *paintStrokeAccumulate, mBounds, mError );
+				if ( mirroredChanged < 0 )
+					mirroredChanged = 0;	// the main half still applied; report it
+			}
+			if ( mirrored && nif->undoStack )
+				nif->undoStack->endMacro();
 			*paintCommitting = false;
 			paintStroke->clear();
+			paintStrokeMirror->clear();
 			if ( changed < 0 ) {
 				paintStatus->setText( error );
 				QMessageBox::warning( mw, QObject::tr( "Manual Weight Painting" ), error );
-			} else if ( changed == 0 ) {
+			} else if ( changed + mirroredChanged == 0 ) {
 				paintStatus->setText( QObject::tr( "Stroke made no weight changes." ) );
 			} else {
-				paintStatus->setText( boundsUpdated
+				QString text = boundsUpdated
 					? QObject::tr( "Painted %1 vertices as one Undo step." ).arg( changed )
-					: QObject::tr( "Painted %1 vertices. Bone bounds could not be recalculated." ).arg( changed ) );
+					: QObject::tr( "Painted %1 vertices. Bone bounds could not be recalculated." ).arg( changed );
+				if ( mirroredChanged > 0 )
+					text += QObject::tr( " Mirrored onto %1 vertices." ).arg( mirroredChanged );
+				paintStatus->setText( text );
 			}
 			rebuildHeatmap();
 		} );
@@ -4811,7 +5150,8 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 		{ generate, riggingPage + Spell::tr( "Generate CustomizationRemapData" ) },
 		{ importNodes, riggingPage + Spell::tr( "Import Donor Bone Nodes..." ) },
 		{ bindBones, riggingPage + Spell::tr( "Bind Donor Bones (existing nodes)..." ) },
-		{ transferWeights, riggingPage + Spell::tr( "Transfer Weights (existing bones)..." ) }
+		{ transferWeights, riggingPage + Spell::tr( "Transfer Weights (existing bones)..." ) },
+		{ createSkin, riggingPage + Spell::tr( "Create Skin (bind to node)..." ) }
 	};
 	auto updateContextButton = [=]() {
 		bool hasTransferableSelection = false;

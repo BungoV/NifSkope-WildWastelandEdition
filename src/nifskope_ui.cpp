@@ -76,6 +76,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QFontDialog>
 #include <QFrame>
 #include <QGridLayout>
+#include <QScreen>
 #include <QInputDialog>
 #include <QGroupBox>
 #include <QLabel>
@@ -595,11 +596,25 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// fixed): after the file loads, time every stage of the click-select
 	// pipeline on the largest BSTriShape, dump to ww_perf_test.log, quit.
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+		// launch -> loaded wall time (includes window construction and the
+		// synchronous UI-thread NIF parse)
+		auto launchTimer = std::make_shared<QElapsedTimer>();
+		launchTimer->start();
+		QObject::connect( skope, &NifSkope::beginLoading, skope, [launchTimer]() {
+			QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+			if ( f.open( QIODevice::Append | QIODevice::Text ) )
+				QTextStream( &f ) << "[launch->beginLoading: " << launchTimer->elapsed() << " ms]\n";
+		} );
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [launchTimer]( bool, QString & ) {
+			QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+			if ( f.open( QIODevice::Append | QIODevice::Text ) )
+				QTextStream( &f ) << "[launch->completeLoading: " << launchTimer->elapsed() << " ms]\n";
+		} );
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			// let startup painting/shader compiles settle first
 			QTimer::singleShot( 2000, skope, [skope, ok]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_perf_test.log" );
-				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+				if ( !logf.open( QIODevice::Append | QIODevice::Text ) )
 					return;
 				QTextStream log( &logf );
 				NifModel * nif = skope->getNifModel();
@@ -720,6 +735,75 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->list->setCurrentIndex( nif->getBlockIndex( sb ) );
 					qApp->processEvents();
 					stamp( "Block List setCurrentIndex(largest) + events" );
+
+					// ---- frame-time benchmark: object mode, then edit mode ----
+					// slight camera rotation between frames defeats any
+					// content-identical caching, like a user orbiting
+					auto benchFrames = [&]( const char * name, int frames ) {
+						skope->ogl->grabFramebuffer();	// warm
+						QElapsedTimer bt;
+						bt.start();
+						for ( int i = 0; i < frames; i++ ) {
+							skope->ogl->rotate( 0.0f, 0.0f, 0.7f );
+							skope->ogl->grabFramebuffer();
+						}
+						log << name << ": " << ( double( bt.elapsed() ) / frames )
+							<< " ms/frame over " << frames << "\n";
+						log.flush();
+					};
+					// pure parse cost without any attached views: the delta to
+					// launch->completeLoading is Qt model/view reaction overhead
+					{
+						NifModel bare( skope );
+						bare.setMessageMode( BaseModel::MSG_TEST );
+						QElapsedTimer pt;
+						pt.start();
+						const bool ok2 = bare.loadFromFile( skope->currentFile );
+						log << "bare NifModel parse: " << pt.elapsed()
+							<< " ms ok=" << int( ok2 ) << "\n";
+						log.flush();
+					}
+					// attribute the overhead: reload attached, then peel the
+					// consumers off one by one (probe quits after, no restore)
+					{
+						QElapsedTimer rt;
+						rt.start();
+						skope->nif->loadFromFile( skope->currentFile );
+						log << "reload fully attached: " << rt.elapsed() << " ms\n";
+						log.flush();
+						skope->tree->setModel( skope->nifEmpty );
+						skope->header->setModel( skope->nifEmpty );
+						rt.restart();
+						skope->nif->loadFromFile( skope->currentFile );
+						log << "reload w/o details+header trees: " << rt.elapsed() << " ms\n";
+						log.flush();
+						skope->list->setModel( skope->proxyEmpty );
+						rt.restart();
+						skope->nif->loadFromFile( skope->currentFile );
+						log << "reload w/o block list view too: " << rt.elapsed() << " ms\n";
+						log.flush();
+						skope->proxy->setModel( skope->nifEmpty );
+						rt.restart();
+						skope->nif->loadFromFile( skope->currentFile );
+						log << "reload w/o proxy model too: " << rt.elapsed() << " ms\n";
+						log.flush();
+					}
+					benchFrames( "bench object mode", 30 );
+					skope->select( nif->getBlockIndex( sb ) );
+					qApp->processEvents();
+					skope->ogl->setEditMode( true );
+					qApp->processEvents();
+					if ( skope->ogl->editMode ) {
+						benchFrames( "bench edit mode (no selection)", 30 );
+						skope->ogl->selectAll( 1 );
+						qApp->processEvents();
+						benchFrames( "bench edit mode (all selected)", 30 );
+						skope->ogl->selectAll( 2 );
+						skope->ogl->setEditMode( false );
+						qApp->processEvents();
+					} else {
+						log << "edit mode did not engage\n";
+					}
 				} while ( false );
 				logf.close();
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
@@ -1664,8 +1748,37 @@ void NifSkope::initDockWidgets()
 		connect( this, &NifSkope::completeLoading, xp, &QWidget::hide );
 	}
 
-	// per-object edit-mode selections are remembered only until a new file loads
-	connect( this, &NifSkope::completeLoading, [this]() { ogl->savedElemSelections.clear(); } );
+	// F9 (Blender): move the visible adjust panel next to the mouse cursor
+	connect( ogl, &GLView::redoPanelToCursor, this, [this]() {
+		for ( QFrame * p : { gizmoRedoPanel, operatorRedoPanel, boxRedoPanel, operatorExRedoPanel } ) {
+			if ( !p || !p->isVisible() )
+				continue;
+			QPoint pos = QCursor::pos() - QPoint( 16, p->height() + 12 );
+			if ( QScreen * sc = QGuiApplication::screenAt( QCursor::pos() ) ) {
+				const QRect avail = sc->availableGeometry();
+				pos.setX( std::clamp( pos.x(), avail.left(), avail.right() - p->width() ) );
+				pos.setY( std::clamp( pos.y(), avail.top(), avail.bottom() - p->height() ) );
+			}
+			p->move( pos );
+			return;
+		}
+	} );
+
+	// per-object edit-mode selections are remembered only until a new file loads.
+	// The hide state and quad-diagonal marks are keyed by block number, so they
+	// MUST go too: a shape in the next file can land on the same block number
+	// (hiddenTris is consulted by the normal render — stale entries silently
+	// punched holes in freshly loaded meshes).
+	connect( this, &NifSkope::completeLoading, [this]() {
+		ogl->savedElemSelections.clear();
+		ogl->editHiddenTris.clear();
+		ogl->quadDiagonals.clear();
+		ogl->quadMarkVerts.clear();
+		ogl->quadPartnerCache.clear();
+		ogl->mirrorPairCache.clear();
+		if ( ogl->scene )
+			ogl->scene->hiddenTris.clear();
+	} );
 
 	// A selection restored while the file was still parsing bails out of the
 	// row-hiding pass (model state != Default) and a later select() of the
@@ -3273,6 +3386,13 @@ void NifSkope::initMenu()
 		mRecentArchiveFiles->addAction( recentArchiveFileActs[i] );
 	}
 
+	// right-clicking a recent entry offers "Open in New Window" (a plain
+	// click opens in this window, replacing the current document) — handled
+	// in eventFilter, scoped to exactly these menus
+	ui->mRecentFiles->installEventFilter( this );
+	ui->mRecentArchives->installEventFilter( this );
+	mRecentArchiveFiles->installEventFilter( this );
+
 	// Load & Save
 	QMenu * mSave = new QMenu( this );
 	mSave->setObjectName( "mSave" );
@@ -3289,6 +3409,8 @@ void NifSkope::initMenu()
 	aRecentFilesSeparator = mOpen->addSeparator();
 	for ( int i = 0; i < NumRecentFiles; ++i )
 		mOpen->addAction( recentFileActs[i] );
+	mOpenFlyout = mOpen;
+	mOpen->installEventFilter( this );	// right-click recents: Open in New Window
 
 	auto setFlyout = []( QToolButton * btn, QMenu * m ) {
 		btn->setObjectName( "btnFlyoutMenu" );
@@ -4215,10 +4337,12 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// other single-key viewport shortcut stays inert while it is armed
 		if ( ogl && ogl->knifeActive && !keyFocusIsTextInput ) {
 			if ( ke->key() == Qt::Key_Escape || ke->key() == Qt::Key_Return
-				|| ke->key() == Qt::Key_Enter ) {
+				|| ke->key() == Qt::Key_Enter || ke->key() == Qt::Key_Z ) {
 				if ( e->type() == QEvent::KeyPress ) {
 					if ( ke->key() == Qt::Key_Escape )
 						ogl->cancelKnife();
+					else if ( ke->key() == Qt::Key_Z )
+						ogl->knifeToggleCutThrough();
 					else
 						ogl->knifeApply();
 				}
@@ -4563,12 +4687,55 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		}
 		break;
 	}
-	case QEvent::MouseButtonPress:
-		// Global mouse press
-		if ( o->isWindowType() ) {
-			//qDebug() << "Mouse Press";
+	case QEvent::MouseButtonPress: {
+		// Right-clicking an entry in the Recent Files / Recent Archives menus
+		// (or the toolbar Open flyout) offers opening in a new window instead
+		// of replacing this window's document. Scoped to exactly these menus.
+		if ( o == ui->mRecentFiles || o == ui->mRecentArchives
+			|| o == mRecentArchiveFiles || o == mOpenFlyout ) {
+			auto me = static_cast<QMouseEvent *>( e );
+			if ( me->button() != Qt::RightButton )
+				break;
+			QMenu * menu = static_cast<QMenu *>( o );
+			QAction * act = menu->actionAt( me->position().toPoint() );
+			int kind = -1;	// 0 = NIF file, 1 = archive, 2 = file inside archive
+			for ( int i = 0; i < NumRecentFiles && kind < 0; i++ ) {
+				if ( act == recentFileActs[i] )
+					kind = 0;
+				else if ( act == recentArchiveActs[i] )
+					kind = 1;
+				else if ( act == recentArchiveFileActs[i] )
+					kind = 2;
+			}
+			const QString path = act ? act->data().toString() : QString();
+			if ( kind >= 0 && !path.isEmpty() ) {
+				const QPoint globalPos = me->globalPosition().toPoint();
+				// pop up OVER the still-open menu chain (Qt stacks popups the
+				// same way submenus do). Only an actual choice closes the
+				// chain — dismissing drops back into the open menu.
+				QMenu ctx( this );
+				QAction * inNew = ctx.addAction( tr( "Open in New Window" ) );
+				if ( ctx.exec( globalPos ) == inNew ) {
+					for ( QWidget * w : QApplication::topLevelWidgets() )
+						if ( qobject_cast<QMenu *>( w ) && w->isVisible() )
+							w->close();
+					if ( kind == 0 ) {
+						NifSkope::createWindow( path );
+					} else if ( kind == 1 ) {
+						NifSkope * w = NifSkope::createWindow();
+						w->openArchive( path );
+					} else {
+						openArchiveFileString( currentArchive, path, true );
+					}
+				}
+			}
+			// swallow every right-click in these menus (some styles would
+			// otherwise trigger the entry, i.e. replace the document)
+			e->accept();
+			return true;
 		}
 		break;
+	}
 
 	case QEvent::MouseButtonRelease:
 		// Global mouse release

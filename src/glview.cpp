@@ -49,6 +49,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "qt5compat.hpp"
 #include "spells/blocks.h"	// blockLink for Separate / Duplicate
 
+#include <memory>
+
 #include <QApplication>
 #include <QActionGroup>
 #include <QButtonGroup>
@@ -176,6 +178,7 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.select.linked", QObject::tr( "Select Linked" ), catSel, QKeySequence( Qt::CTRL | Qt::Key_L ) );
 	r.reg( "viewport.select.linked_angle", QObject::tr( "Select Linked by Angle" ), catSel,
 		QKeySequence( Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_F ) );
+	r.reg( "viewport.select.checker", QObject::tr( "Checker Deselect" ), catSel, QKeySequence() );
 
 	r.reg( "viewport.pick_vertex", QObject::tr( "Pick Mode: Vertex (Shift extends)" ), catEdit, QKeySequence( Qt::Key_1 ) );
 	r.reg( "viewport.pick_edge", QObject::tr( "Pick Mode: Edge (Shift extends)" ), catEdit, QKeySequence( Qt::Key_2 ) );
@@ -189,9 +192,16 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.knife", QObject::tr( "Knife" ), catEdit, QKeySequence( Qt::Key_K ) );
 	r.reg( "viewport.edge_slide", QObject::tr( "Edge Slide" ), catEdit, QKeySequence( Qt::SHIFT | Qt::Key_V ) );
 	r.reg( "viewport.dissolve", QObject::tr( "Dissolve Vertices" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_X ) );
+	r.reg( "viewport.split", QObject::tr( "Split" ), catEdit, QKeySequence( Qt::Key_Y ) );
+	r.reg( "viewport.rip", QObject::tr( "Rip" ), catEdit, QKeySequence( Qt::Key_V ) );
+	r.reg( "viewport.bevel", QObject::tr( "Bevel" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_B ) );
 	r.reg( "viewport.merge", QObject::tr( "Merge Menu" ), catEdit, QKeySequence( Qt::Key_M ) );
 	r.reg( "viewport.separate", QObject::tr( "Separate Menu" ), catEdit, QKeySequence( Qt::Key_P ) );
 	r.reg( "viewport.delete", QObject::tr( "Delete Menu" ), catEdit, QKeySequence( Qt::Key_X ) );
+	r.reg( "viewport.repeat_last", QObject::tr( "Repeat Last Operator" ), catEdit,
+		QKeySequence( Qt::SHIFT | Qt::Key_R ) );
+	r.reg( "viewport.panel_to_cursor", QObject::tr( "Adjust Panel at Cursor" ), catEdit,
+		QKeySequence( Qt::Key_F9 ) );
 
 	r.reg( "viewport.add_primitive", QObject::tr( "Add Primitive Menu" ), catObj, QKeySequence( Qt::SHIFT | Qt::Key_A ) );
 	r.reg( "viewport.join", QObject::tr( "Join Selected Objects" ), catObj, QKeySequence( Qt::CTRL | Qt::Key_J ) );
@@ -213,6 +223,7 @@ GLView::GLView( QWindow * p )
 	int	aa = settings.value( "Settings/Render/General/Msaa Samples", 2 ).toInt();
 	editDeformedCage = settings.value( "GLView/Edit/DeformedCage", true ).toBool();
 	selectWithRightMouse = settings.value( "Shortcuts/MouseSelect" ).toString() == QLatin1String( "right" );
+	mirrorEditing = settings.value( "GLView/Edit/MirrorX", false ).toBool();
 	aa = std::clamp< int >( aa, 0, 4 );
 
 	QSurfaceFormat	fmt;
@@ -2284,19 +2295,17 @@ void GLView::paintGL()
 			// Points are re-projected every frame so the line stays glued to
 			// the surface while orbiting with MMB.
 			painter.setRenderHint( QPainter::Antialiasing, true );
-			QVector<QPointF> kscr;
-			kscr.reserve( knifePoints.size() );
-			for ( const KnifePoint & kp : std::as_const( knifePoints ) ) {
-				QPointF sp;
-				if ( worldToScreen( kp.world, sp ) )
-					kscr.append( sp );
-				else
-					kscr.append( QPointF( -1.0e6, -1.0e6 ) );
-			}
+			// a point can fail to project after an MMB orbit puts it behind
+			// the camera: segments touching such a point are simply not drawn
+			QVector<QPointF> kscr( knifePoints.size() );
+			QVector<bool> kok( knifePoints.size() );
+			for ( int i = 0; i < knifePoints.size(); i++ )
+				kok[i] = worldToScreen( knifePoints.at( i ).world, kscr[i] );
 			painter.setPen( QPen( QColor( 255, 255, 255, 240 ), 1.6 ) );
 			for ( int i = 0; i + 1 < kscr.size(); i++ )
-				painter.drawLine( kscr.at( i ), kscr.at( i + 1 ) );
-			if ( knifeHoverValid && !kscr.isEmpty() ) {
+				if ( kok.at( i ) && kok.at( i + 1 ) )
+					painter.drawLine( kscr.at( i ), kscr.at( i + 1 ) );
+			if ( knifeHoverValid && !kscr.isEmpty() && kok.constLast() ) {
 				QPointF hp;
 				if ( worldToScreen( knifeHoverPt.world, hp ) ) {
 					painter.setPen( QPen( QColor( 255, 255, 255, 200 ), 1.2, Qt::DashLine ) );
@@ -2305,6 +2314,8 @@ void GLView::paintGL()
 			}
 			const QColor snapGreen( 0x39, 0xE0, 0x63, 245 );
 			for ( int i = 0; i < kscr.size(); i++ ) {
+				if ( !kok.at( i ) )
+					continue;
 				const KnifePoint & kp = knifePoints.at( i );
 				const bool snapped = ( kp.snapVert >= 0 || kp.edgeA >= 0 );
 				painter.setPen( QPen( snapGreen, 1.4 ) );
@@ -5492,6 +5503,67 @@ static void tlSetVertexLocal( NifModel * model, const QModelIndex & iShape, int 
 		model->set<Vector3>( model->getIndex( iVerts, vi ), local );
 }
 
+int GLView::mirrorPartnerOf( int shapeBlock, int vi ) const
+{
+	Shape * s = shapeForBlock( shapeBlock );
+	if ( !s || vi < 0 || vi >= s->verts.size() )
+		return -1;
+	auto it = mirrorPairCache.constFind( shapeBlock );
+	if ( it != mirrorPairCache.constEnd() && it->first == s->verts.size() )
+		return it->second.value( vi, -1 );
+
+	// build: spatial hash of the positions, then pair each vertex with the
+	// nearest X-negated match within tolerance (27-cell probe so grid
+	// boundaries cannot hide a partner); center-line verts pair with nobody
+	const float tol = 1.0e-3f;
+	auto cellKey = []( int x, int y, int z ) {
+		return ( quint64( quint32( x ) ) * 73856093ULL )
+			^ ( quint64( quint32( y ) ) * 19349663ULL )
+			^ ( quint64( quint32( z ) ) * 83492791ULL );
+	};
+	auto cellOf = [tol]( float v ) { return int( std::floor( v / ( tol * 2.0f ) ) ); };
+	QHash<quint64, QVector<int>> buckets;
+	const int nv = s->verts.size();
+	for ( int i = 0; i < nv; i++ ) {
+		const Vector3 & p = s->verts.at( i );
+		buckets[cellKey( cellOf( p[0] ), cellOf( p[1] ), cellOf( p[2] ) )].append( i );
+	}
+	QHash<int, int> pairs;
+	for ( int i = 0; i < nv; i++ ) {
+		const Vector3 & p = s->verts.at( i );
+		if ( std::fabs( p[0] ) <= tol )
+			continue;
+		const Vector3 m( -p[0], p[1], p[2] );
+		int best = -1;
+		float bestD = tol;
+		const int cx = cellOf( m[0] ), cy = cellOf( m[1] ), cz = cellOf( m[2] );
+		for ( int ox = -1; ox <= 1; ox++ ) {
+			for ( int oy = -1; oy <= 1; oy++ ) {
+				for ( int oz = -1; oz <= 1; oz++ ) {
+					auto bIt = buckets.constFind( cellKey( cx + ox, cy + oy, cz + oz ) );
+					if ( bIt == buckets.constEnd() )
+						continue;
+					for ( int j : *bIt ) {
+						if ( j == i )
+							continue;
+						const float d = ( s->verts.at( j ) - m ).length();
+						if ( d < bestD ) {
+							bestD = d;
+							best = j;
+						}
+					}
+				}
+			}
+		}
+		if ( best >= 0 )
+			pairs.insert( i, best );
+	}
+	QPair<int, QHash<int, int>> & slot = mirrorPairCache[shapeBlock];
+	slot.first = nv;
+	slot.second = pairs;
+	return slot.second.value( vi, -1 );
+}
+
 bool GLView::gizmoBeginElement( int mode )
 {
 	if ( !model || pickedElems.isEmpty() )
@@ -5533,6 +5605,43 @@ bool GLView::gizmoBeginElement( int mode )
 		for ( const auto & ev : elemVerts )
 			m += ev.origWorld;
 		elemPivot = m / float( elemVerts.size() );
+	}
+
+	// X-mirror: unselected mirror partners join the gesture as FOLLOWERS —
+	// they take the X-negated local of their source each update, and are
+	// excluded from the pivot and from the direct transform
+	if ( mirrorEditing ) {
+		QSet<quint64> inGesture;
+		for ( const auto & ev : elemVerts )
+			inGesture.insert( ( quint64( quint32( ev.shape ) ) << 32 ) | quint32( ev.idx ) );
+		const int nSrc = elemVerts.size();
+		for ( int i = 0; i < nSrc; i++ ) {
+			const ElemVert src = elemVerts.at( i );
+			const int mi = mirrorPartnerOf( src.shape, src.idx );
+			if ( mi < 0 )
+				continue;
+			const quint64 key = ( quint64( quint32( src.shape ) ) << 32 ) | quint32( mi );
+			if ( inGesture.contains( key ) )
+				continue;	// both sides selected: both transform directly
+			QModelIndex iShape = model->getBlockIndex( src.shape );
+			Node * pn = scene->getNode( model, iShape );
+			Shape * shape = shapeForBlock( src.shape );
+			if ( !pn || !shape )
+				continue;
+			Vector3 local;
+			if ( !tlGetVertexLocal( model, iShape, mi, local ) )
+				continue;
+			ElemVert ev;
+			ev.shape = src.shape;
+			ev.idx = mi;
+			ev.origLocal = local;
+			ev.origWorld = shapeRenderTrans( pn )
+				* ( editDeformedCageActive() ? shape->skinVertex( mi, local ) : local );
+			ev.currentLocal = local;
+			ev.mirrorOf = i;
+			elemVerts.append( ev );
+			inGesture.insert( key );
+		}
 	}
 
 	gizmoMode = mode;
@@ -5762,8 +5871,11 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 				deltaWorld[c] = std::round( deltaWorld[c] / gizmoSnapStep ) * gizmoSnapStep;
 		}
 		gizmoLastParam = deltaWorld;
-		for ( auto & ev : elemVerts )
+		for ( auto & ev : elemVerts ) {
+			if ( ev.mirrorOf >= 0 )
+				continue;	// X-mirror follower: set from its source below
 			previewVertex( ev, toLocal( ev.shape, ev.origWorld + deltaWorld ) );
+		}
 		status = tr( "Move: %1, %2, %3" ).arg( deltaWorld[0], 0, 'f', 3 ).arg( deltaWorld[1], 0, 'f', 3 ).arg( deltaWorld[2], 0, 'f', 3 );
 	} else if ( gizmoMode == 2 ) {
 		float angle = numeric ? gizmoPartVal( gizmoNum, 0 ) : dx * 0.5f * precision;
@@ -5780,6 +5892,8 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		dr.fromQuat( q );
 		gizmoLastParam = Vector3( angle, 0.0f, 0.0f );
 		for ( auto & ev : elemVerts ) {
+			if ( ev.mirrorOf >= 0 )
+				continue;	// X-mirror follower
 			Vector3 w = elemPivot + dr * ( ev.origWorld - elemPivot );
 			previewVertex( ev, toLocal( ev.shape, w ) );
 		}
@@ -5790,10 +5904,26 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 			factor = std::round( factor * 10.0f ) / 10.0f;
 		gizmoLastParam = Vector3( factor, 0.0f, 0.0f );
 		for ( auto & ev : elemVerts ) {
+			if ( ev.mirrorOf >= 0 )
+				continue;	// X-mirror follower
 			Vector3 rel = ev.origWorld - elemPivot; if ( gizmoAxis > 0 ) rel[gizmoAxis - 1] *= factor; else rel = rel * factor; Vector3 w = elemPivot + rel;	/* axis-constrained scale (Blender S,X/Y/Z) */
 			previewVertex( ev, toLocal( ev.shape, w ) );
 		}
 		status = tr( "Scale: ×%1" ).arg( factor, 0, 'f', 3 );
+	}
+	// X-mirror followers take their source's new position with local X
+	// negated (raw/authored space, so deformed cages mirror sanely)
+	for ( auto & ev : elemVerts ) {
+		if ( ev.mirrorOf < 0 || ev.mirrorOf >= elemVerts.size() )
+			continue;
+		const Vector3 & srcL = elemVerts.at( ev.mirrorOf ).currentLocal;
+		const Vector3 mLocal( -srcL[0], srcL[1], srcL[2] );
+		Shape * shape = shapeForBlock( ev.shape );
+		if ( shape && ev.idx >= 0 && ev.idx < shape->verts.size() ) {
+			ev.currentLocal = mLocal;
+			shape->verts[ev.idx] = mLocal;
+			previewShapes.insert( shape );
+		}
 	}
 	for ( Shape * shape : previewShapes )
 		shape->clearHash();
@@ -6112,6 +6242,163 @@ void GLView::showSeparateMenu()
 		separateSelection();
 }
 
+//! Recursively snapshot every leaf value of an item subtree (order matches
+//! tlRestoreValues' traversal). Generic — captures any field layout exactly.
+static void tlCaptureValues( NifModel * nif, const QModelIndex & idx, QVector<NifValue> & out )
+{
+	const int rc = nif->rowCount( idx );
+	if ( rc > 0 ) {
+		for ( int r = 0; r < rc; r++ )
+			tlCaptureValues( nif, nif->getIndex( idx, r ), out );
+	} else {
+		out.append( nif->getValue( idx ) );
+	}
+}
+
+static void tlRestoreValues( NifModel * nif, const QModelIndex & idx, const QVector<NifValue> & in, int & pos )
+{
+	const int rc = nif->rowCount( idx );
+	if ( rc > 0 ) {
+		for ( int r = 0; r < rc; r++ )
+			tlRestoreValues( nif, nif->getIndex( idx, r ), in, pos );
+	} else if ( pos < in.size() ) {
+		nif->setIndexValue( idx, in.at( pos++ ) );
+	}
+}
+
+//! In-place undo for arbitrary single-shape topology rewrites (Loop Cut,
+//! Subdivide, Dissolve, Symmetrize — anything that rewrites triangles or
+//! removes verts): the constructor snapshots the shape's counts + the whole
+//! Vertex Data and Triangles subtrees as typed values; undo restores them
+//! exactly. Heavier than the targeted commands (a few MB / ~0.5 s on big
+//! meshes) but still no model reload, no flash.
+class TlShapeStateCommand final : public QUndoCommand
+{
+public:
+	TlShapeStateCommand( NifModel * model, const QModelIndex & iShape,
+		const QString & text, std::function<void()> applyFn )
+		: nif( model ), block( iShape ), apply( std::move( applyFn ) )
+	{
+		setText( text );
+		oldNV = nif->get<int>( iShape, "Num Vertices" );
+		oldNT = nif->get<int>( iShape, "Num Triangles" );
+		oldDataSize = nif->get<int>( iShape, "Data Size" );
+		QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
+		if ( iBound.isValid() ) {
+			boundCenter = nif->get<Vector3>( iBound, "Center" );
+			boundRadius = nif->get<float>( iBound, "Radius" );
+		}
+		tlCaptureValues( nif, nif->getIndex( iShape, "Vertex Data" ), vertexState );
+		tlCaptureValues( nif, nif->getIndex( iShape, "Triangles" ), triState );
+	}
+
+	void redo() override
+	{
+		if ( QModelIndex( block ).isValid() && apply )
+			apply();
+	}
+
+	void undo() override
+	{
+		QModelIndex iShape( block );
+		if ( !iShape.isValid() )
+			return;
+		nif->setState( BaseModel::Processing );
+		QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+		nif->set<int>( iShape, "Num Vertices", oldNV );
+		nif->updateArraySize( iVD );
+		nif->set<int>( iShape, "Num Triangles", oldNT );
+		nif->updateArraySize( iTris );
+		int pos = 0;
+		tlRestoreValues( nif, iVD, vertexState, pos );
+		pos = 0;
+		tlRestoreValues( nif, iTris, triState, pos );
+		nif->set<int>( iShape, "Data Size", oldDataSize );
+		QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
+		if ( iBound.isValid() ) {
+			nif->set<Vector3>( iBound, "Center", boundCenter );
+			nif->set<float>( iBound, "Radius", boundRadius );
+		}
+		nif->restoreState();
+		nif->dataChanged( iShape, iShape );
+	}
+
+private:
+	NifModel * nif;
+	QPersistentModelIndex block;
+	std::function<void()> apply;
+	int oldNV = 0, oldNT = 0, oldDataSize = 0;
+	Vector3 boundCenter;
+	float boundRadius = 0.0f;
+	QVector<NifValue> vertexState, triState;
+};
+
+//! Remove ONE null (-1) entry from a node's Children array, scanning from the
+//! end — removeNiBlock turns our appended child link into a null ref, and
+//! addLink would append another slot on redo instead of reusing it
+static void tlRemoveNullChildLink( NifModel * nif, int parentBlock )
+{
+	QModelIndex iParent = nif->getBlockIndex( parentBlock );
+	QModelIndex iSize = nif->getIndex( iParent, "Num Children" );
+	QModelIndex iArray = nif->getIndex( iParent, "Children" );
+	if ( !iSize.isValid() || !iArray.isValid() )
+		return;
+	const int n = nif->get<int>( iSize );
+	for ( int c = n - 1; c >= 0; c-- ) {
+		if ( nif->getLink( nif->getIndex( iArray, c ) ) != -1 )
+			continue;
+		for ( int j = c; j < n - 1; j++ )
+			nif->setLink( nif->getIndex( iArray, j ),
+				nif->getLink( nif->getIndex( iArray, j + 1 ) ) );
+		nif->set<int>( iSize, n - 1 );
+		nif->updateArraySize( iArray );
+		return;
+	}
+}
+
+//! In-place undo for operators that only APPEND new blocks (object-mode
+//! Duplicate, Separate's clone, Add Primitive): redo runs the creation
+//! closure and records the appended block range; undo removes those blocks
+//! (highest first) and prunes the null child links the removal leaves in the
+//! recorded parents. NifModel appends blocks deterministically, so a later
+//! redo recreates the same numbers.
+class TlBlockAppendCommand final : public QUndoCommand
+{
+public:
+	TlBlockAppendCommand( NifModel * model, const QString & text,
+		std::function<void()> createFn,
+		std::shared_ptr<QVector<int>> linkedParentsOut = nullptr )
+		: nif( model ), create( std::move( createFn ) ),
+		linkedParents( std::move( linkedParentsOut ) )
+	{
+		setText( text );
+	}
+	void redo() override
+	{
+		base = nif->getBlockCount();
+		if ( linkedParents )
+			linkedParents->clear();
+		if ( create )
+			create();
+		made = nif->getBlockCount() - base;
+	}
+	void undo() override
+	{
+		for ( int b = base + made - 1; b >= base; b-- )
+			if ( b < nif->getBlockCount() )
+				nif->removeNiBlock( b );
+		if ( linkedParents )
+			for ( int p : std::as_const( *linkedParents ) )
+				tlRemoveNullChildLink( nif, p );
+	}
+private:
+	NifModel * nif;
+	std::function<void()> create;
+	std::shared_ptr<QVector<int>> linkedParents;
+	int base = 0, made = 0;
+};
+
 void GLView::separateSelection()
 {
 	if ( !model || !editMode || pickedElems.isEmpty() )
@@ -6134,52 +6421,70 @@ void GLView::separateSelection()
 		shapeSet.insert( k );
 	Q_UNUSED( edgeKey );
 
-	int totalMoved = 0;
-	int selectBlock = -1;
-	nifSnapshotOp( model, tr( "Separate selection" ), [&]() {
-		for ( int sb : shapeSet ) {
-			QModelIndex iShape = model->getBlockIndex( sb );
-			if ( !model->blockInherits( iShape, "BSTriShape" ) )
-				continue;
-			QModelIndex iTris = model->getIndex( iShape, "Triangles" );
-			if ( !iTris.isValid() )
-				continue;
-			int numTris = model->get<int>( iShape, "Num Triangles" );
-			const QSet<int> & sv = selVerts.value( sb );
-			const QSet<int> & sf = selFaces.value( sb );
+	// in-place undo per shape: a pure state-capture command (empty apply)
+	// snapshots the source arrays, then the append command runs the actual
+	// separate — undo removes the clone (+ its null child link) and restores
+	// the source. Everything precomputed so redo closures are deterministic.
+	const bool inPlaceU = ( model->undoStack != nullptr );
+	auto movedCount = std::make_shared<int>( 0 );
+	auto lastNew = std::make_shared<int>( -1 );
+	if ( inPlaceU )
+		model->undoStack->beginMacro( tr( "Separate selection" ) );
+	for ( int sb : shapeSet ) {
+		QModelIndex iShape = model->getBlockIndex( sb );
+		if ( !model->blockInherits( iShape, "BSTriShape" ) )
+			continue;
+		QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+		if ( !iTris.isValid() )
+			continue;
+		int numTris = model->get<int>( iShape, "Num Triangles" );
+		const QSet<int> & sv = selVerts.value( sb );
+		const QSet<int> & sf = selFaces.value( sb );
 
-			QVector<bool> sep( numTris, false );
-			int sepCount = 0;
-			for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
-				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
-				bool s = sf.contains( t )
-					|| ( !sv.isEmpty() && sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) );
-				sep[t] = s;
-				if ( s )
-					sepCount++;
-			}
-			if ( sepCount == 0 || sepCount == numTris )
-				continue;	// nothing to split, or everything (Blender no-ops)
+		QVector<bool> sep( numTris, false );
+		int sepCount = 0;
+		for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
+			Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+			bool s = sf.contains( t )
+				|| ( !sv.isEmpty() && sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) );
+			sep[t] = s;
+			if ( s )
+				sepCount++;
+		}
+		if ( sepCount == 0 || sepCount == numTris )
+			continue;	// nothing to split, or everything (Blender no-ops)
 
+		auto parents = std::make_shared<QVector<int>>();
+		auto applySep = [this, sb, sep, sepCount, parents, movedCount, lastNew]() {
 			int nNew = tlCloneShapeWithProps( model, sb );
 			if ( nNew < 0 )
-				continue;
-
+				return;
 			int parentNum = model->getParent( sb );
-			if ( parentNum >= 0 )
+			if ( parentNum >= 0 ) {
 				blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
-
+				parents->append( parentNum );
+			}
 			QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
 			model->set<QString>( model->getBlockIndex( nNew ), "Name", tlUniqueNodeName( model, nm ) );
-
 			// new keeps the separated triangles; original keeps the rest
 			tlKeepTriangles( model, model->getBlockIndex( nNew ), [&]( int t ) { return sep[t]; } );
 			tlKeepTriangles( model, model->getBlockIndex( sb ), [&]( int t ) { return !sep[t]; } );
-
-			totalMoved += sepCount;
-			selectBlock = nNew;
+			*movedCount += sepCount;
+			*lastNew = nNew;
+		};
+		if ( inPlaceU ) {
+			model->undoStack->push( new TlShapeStateCommand( model, iShape,
+				tr( "Separate selection" ), std::function<void()>() ) );
+			model->undoStack->push( new TlBlockAppendCommand( model,
+				tr( "Separate selection" ), applySep, parents ) );
+		} else {
+			applySep();
 		}
-	} );
+	}
+	if ( inPlaceU )
+		model->undoStack->endMacro();
+	int totalMoved = *movedCount;
+	int selectBlock = *lastNew;
 
 	if ( totalMoved == 0 ) {
 		emit gizmoStatus( tr( "Nothing to separate (select part of the mesh)" ) );
@@ -6205,9 +6510,16 @@ void GLView::duplicateSelection()
 	if ( !model || objSelection.isEmpty() )
 		return;
 
-	QVector<int> newBlocks;
-	nifSnapshotOp( model, tr( "Duplicate" ), [&]() {
-		for ( int sb : objSelection ) {
+	// in-place undo: the duplicate only APPENDS blocks (shape + property
+	// clones); undo removes them and prunes the null child links the removal
+	// leaves behind — no model reload, no flash
+	const QSet<int> sel = objSelection;	// the closure's own copy: same
+										// iteration order on every redo
+	auto parents = std::make_shared<QVector<int>>();
+	auto madeShapes = std::make_shared<QVector<int>>();
+	auto createDup = [this, sel, parents, madeShapes]() {
+		madeShapes->clear();
+		for ( int sb : sel ) {
 			QModelIndex iS = model->getBlockIndex( sb );
 			if ( !model->blockInherits( iS, "BSTriShape" ) )
 				continue;	// v1: geometry duplicate (branch duplicate is future)
@@ -6215,13 +6527,20 @@ void GLView::duplicateSelection()
 			if ( nNew < 0 )
 				continue;
 			int parentNum = model->getParent( sb );
-			if ( parentNum >= 0 )
+			if ( parentNum >= 0 ) {
 				blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
+				parents->append( parentNum );
+			}
 			QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
 			model->set<QString>( model->getBlockIndex( nNew ), "Name", tlUniqueNodeName( model, nm ) );
-			newBlocks.append( nNew );
+			madeShapes->append( nNew );
 		}
-	} );
+	};
+	if ( model->undoStack )
+		model->undoStack->push( new TlBlockAppendCommand( model, tr( "Duplicate" ), createDup, parents ) );
+	else
+		createDup();
+	QVector<int> newBlocks = *madeShapes;
 
 	if ( newBlocks.isEmpty() ) {
 		emit gizmoStatus( tr( "Nothing to duplicate (select a mesh)" ) );
@@ -6474,6 +6793,58 @@ void GLView::deleteGeometry( int mode )
 
 	int removedTris = 0, removedVerts = 0;
 	QVector<int> partitions;
+
+	// in-place undo whenever no shape carries legacy skin blocks: for pure
+	// FO4 BSTriShapes tlSkinResync provably no-ops (skin is inline in Vertex
+	// Data) and no block is removed, so a per-shape TlShapeStateCommand
+	// restores everything — no model reload, no flash on Ctrl+Z
+	bool inPlace = ( model->undoStack != nullptr );
+	for ( int sb : shapes ) {
+		QModelIndex iShape = model->getBlockIndex( sb );
+		if ( !model->blockInherits( iShape, "BSTriShape" ) ) {
+			inPlace = false;
+			break;
+		}
+		QModelIndex iSI = model->getBlockIndex( model->getLink( iShape, "Skin Instance" ) );
+		if ( !iSI.isValid() )
+			iSI = model->getBlockIndex( model->getLink( iShape, "Skin" ) );
+		if ( iSI.isValid()
+			&& ( model->getBlockIndex( model->getLink( iSI, "Data" ), "NiSkinData" ).isValid()
+				|| model->getBlockIndex( model->getLink( iSI, "Skin Partition" ), "NiSkinPartition" ).isValid() ) ) {
+			inPlace = false;
+			break;
+		}
+	}
+
+	if ( inPlace ) {
+		auto remT = std::make_shared<int>( 0 );
+		auto remV = std::make_shared<int>( 0 );
+		model->undoStack->beginMacro( tr( "Delete" ) );
+		for ( int sb : shapes ) {
+			QModelIndex iShape = model->getBlockIndex( sb );
+			const QSet<int> sv = vertsByShape.value( sb );
+			const QSet<int> sf = faceTris.value( sb );
+			const QPersistentModelIndex pShape( iShape );
+			auto applyDel = [this, pShape, sv, sf, mode, remT, remV]() {
+				QModelIndex iS( pShape );
+				if ( !iS.isValid() )
+					return;
+				// Processing suppresses the per-leaf dataChanged storm (the
+				// compaction is thousands of value writes)
+				model->setState( BaseModel::Processing );
+				QVector<int> remap;
+				bool vertsRemoved = false;
+				tlDeleteGeometry( model, iS, sv, sf, mode, *remT, *remV, remap, vertsRemoved );
+				model->restoreState();
+				model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+			};
+			model->undoStack->push(
+				new TlShapeStateCommand( model, iShape, tr( "Delete" ), applyDel ) );
+		}
+		model->undoStack->endMacro();
+		removedTris = *remT;
+		removedVerts = *remV;
+	} else
 	nifSnapshotOp( model, tr( "Delete" ), [&]() {
 		// Processing suppresses the per-leaf dataChanged storm: compacting the
 		// packed vertex array is thousands of value writes, and live views
@@ -6543,7 +6914,110 @@ void GLView::showMergeMenu()
 		mergeVertices( 1 );
 	else if ( r == aDist )
 		// merge tiny by default; the redo panel is where you dial the distance up
-		mergeVertices( 2, ( lastOpKind == 1 ) ? lastOpParam : 0.0001f );
+		mergeVertices( 2, lastMergeDistance );
+}
+
+//! Per-shape merge body shared by the in-place and snapshot undo paths.
+//! haveTarget/targetLocal is the precomputed local-space cursor position for
+//! At Cursor mode (resolved at arm time so a later redo stays deterministic).
+static void tlMergeShapeVerts( NifModel * model, const QModelIndex & iShape,
+	const QVector<int> & selList, int mode, float threshold,
+	bool haveTarget, const Vector3 & targetLocal, int & mergedVerts, int & removedTris )
+{
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	if ( !iVD.isValid() || !iTris.isValid() || selList.size() < 1 )
+		return;	// BSTriShape only (legacy meshes not welded here)
+	int numVerts = model->get<int>( iShape, "Num Vertices" );
+	int numTris = model->get<int>( iShape, "Num Triangles" );
+	int dataSize = model->get<int>( iShape, "Data Size" );
+	int stride = ( numVerts > 0 ) ? ( dataSize - numTris * 6 ) / numVerts : 0;
+	auto localPos = [&]( int i ) { return model->get<Vector3>( model->getIndex( iVD, i ), "Vertex" ); };
+
+	// union-find over the selected verts: which ones weld together
+	QVector<int> parent( numVerts );
+	for ( int i = 0; i < numVerts; i++ )
+		parent[i] = i;
+
+	if ( mode == 0 || mode == 1 ) {
+		// At Center / At Cursor: all selected verts collapse to one
+		int rep = selList[0];
+		for ( int i : selList )
+			rep = std::min( rep, i );
+		for ( int i : selList )
+			parent[i] = rep;
+		Vector3 np;
+		if ( haveTarget ) {
+			np = targetLocal;
+		} else {
+			for ( int i : selList )
+				np += localPos( i );
+			np = np / float( selList.size() );
+		}
+		tlSetVertexLocal( model, iShape, rep, np );
+	} else {
+		// By Distance: union verts within the threshold, weld each group
+		// to its average position
+		for ( int a = 0; a < selList.size(); a++ )
+			for ( int b = a + 1; b < selList.size(); b++ ) {
+				if ( ( localPos( selList[a] ) - localPos( selList[b] ) ).length() <= threshold ) {
+					int ra = tlFindRoot( parent, selList[a] ), rb = tlFindRoot( parent, selList[b] );
+					if ( ra != rb )
+						parent[std::max( ra, rb )] = std::min( ra, rb );
+				}
+			}
+		QHash<int, QVector<int>> groups;
+		for ( int i : selList )
+			groups[tlFindRoot( parent, i )].append( i );
+		for ( auto g = groups.constBegin(); g != groups.constEnd(); ++g ) {
+			Vector3 avg;
+			for ( int i : g.value() )
+				avg += localPos( i );
+			avg = avg / float( g.value().size() );
+			tlSetVertexLocal( model, iShape, g.key(), avg );
+		}
+	}
+
+	// weld[i] = the surviving vertex i collapses into
+	QVector<int> remap( numVerts, -1 );
+	int newN = 0;
+	for ( int i = 0; i < numVerts; i++ )
+		if ( tlFindRoot( parent, i ) == i )
+			remap[i] = newN++;			// this vertex survives
+	for ( int i = 0; i < numVerts; i++ )
+		remap[i] = remap[tlFindRoot( parent, i )];
+	mergedVerts += numVerts - newN;
+
+	// compact the vertex array (forward copy: survivor new index <= old)
+	if ( newN != numVerts ) {
+		for ( int i = 0; i < numVerts; i++ ) {
+			int j = remap[i];
+			if ( tlFindRoot( parent, i ) == i && j != i )
+				tlCopyItemValues( model, model->getIndex( iVD, i ), model->getIndex( iVD, j ) );
+		}
+		model->set<int>( iShape, "Num Vertices", newN );
+		model->updateArraySize( iVD );
+	}
+
+	// rewrite triangles, dropping ones gone degenerate after the weld
+	QVector<Triangle> kept;
+	for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
+		Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+		int a = remap[tri[0]], b = remap[tri[1]], c = remap[tri[2]];
+		if ( a == b || b == c || a == c )
+			continue;
+		kept.append( Triangle( a, b, c ) );
+	}
+	removedTris += numTris - kept.size();
+	model->set<int>( iShape, "Num Triangles", kept.size() );
+	model->updateArraySize( iTris );
+	for ( int t = 0; t < kept.size(); t++ )
+		model->set<Triangle>( model->getIndex( iTris, t ), kept[t] );
+	if ( stride > 0 )
+		model->set<int>( iShape, "Data Size", newN * stride + kept.size() * 6 );
+
+	tlUpdateBounds( model, iShape );
+	tlSkinResync( model, iShape, remap, newN != numVerts );
 }
 
 void GLView::mergeVertices( int mode, float threshold )
@@ -6556,132 +7030,101 @@ void GLView::mergeVertices( int mode, float threshold )
 		return;
 
 	int mergedVerts = 0, removedTris = 0;
-	nifSnapshotOp( model, tr( "Merge vertices" ), [&]() {
-		// suppress the per-leaf dataChanged storm (see deleteGeometry)
-		model->setState( BaseModel::Processing );
-		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); ++it ) {
-			int sb = it.key();
-			QModelIndex iShape = model->getBlockIndex( sb );
-			QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
-			QModelIndex iTris = model->getIndex( iShape, "Triangles" );
-			if ( !iVD.isValid() || !iTris.isValid() )
-				continue;	// BSTriShape only (legacy meshes not welded here)
-			int numVerts = model->get<int>( iShape, "Num Vertices" );
-			int numTris = model->get<int>( iShape, "Num Triangles" );
-			int dataSize = model->get<int>( iShape, "Data Size" );
-			int stride = ( numVerts > 0 ) ? ( dataSize - numTris * 6 ) / numVerts : 0;
 
-			QVector<int> selList( it.value().constBegin(), it.value().constEnd() );
-			if ( selList.size() < 1 )
+	// per-shape inputs precomputed so redo closures stay deterministic (the
+	// cursor target is resolved NOW; a later cursor move must not change redo)
+	struct MergeJob { int sb; QVector<int> selList; bool haveTarget = false; Vector3 targetLocal; };
+	QVector<MergeJob> jobs;
+	bool inPlace = ( model->undoStack != nullptr );
+	for ( auto it = byShape.constBegin(); it != byShape.constEnd(); ++it ) {
+		MergeJob j;
+		j.sb = it.key();
+		j.selList = QVector<int>( it.value().constBegin(), it.value().constEnd() );
+		std::sort( j.selList.begin(), j.selList.end() );
+		j.haveTarget = ( mode == 1 );
+		if ( j.haveTarget ) {
+			Node * n = shapeForBlock( j.sb );
+			Transform wt = n ? shapeRenderTrans( n ) : Transform();
+			float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+			j.targetLocal = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / sc ) );
+		}
+		QModelIndex iShape = model->getBlockIndex( j.sb );
+		// legacy NiSkinData / partitions: the resync writes outside the shape
+		// and would not be captured in place
+		QModelIndex iSI = model->getBlockIndex( model->getLink( iShape, "Skin Instance" ) );
+		if ( !iSI.isValid() )
+			iSI = model->getBlockIndex( model->getLink( iShape, "Skin" ) );
+		if ( iSI.isValid()
+			&& ( model->getBlockIndex( model->getLink( iSI, "Data" ), "NiSkinData" ).isValid()
+				|| model->getBlockIndex( model->getLink( iSI, "Skin Partition" ), "NiSkinPartition" ).isValid() ) )
+			inPlace = false;
+		jobs.append( j );
+	}
+
+	if ( inPlace ) {
+		auto mv = std::make_shared<int>( 0 );
+		auto rt = std::make_shared<int>( 0 );
+		model->undoStack->beginMacro( tr( "Merge vertices" ) );
+		for ( const MergeJob & j : std::as_const( jobs ) ) {
+			QModelIndex iShape = model->getBlockIndex( j.sb );
+			if ( !model->getIndex( iShape, "Vertex Data" ).isValid() )
 				continue;
-			auto localPos = [&]( int i ) { return model->get<Vector3>( model->getIndex( iVD, i ), "Vertex" ); };
-
-			// union-find over the selected verts: which ones weld together
-			QVector<int> parent( numVerts );
-			for ( int i = 0; i < numVerts; i++ )
-				parent[i] = i;
-
-			if ( mode == 0 || mode == 1 ) {
-				// At Center / At Cursor: all selected verts collapse to one
-				int rep = selList[0];
-				for ( int i : selList )
-					rep = std::min( rep, i );
-				for ( int i : selList )
-					parent[i] = rep;
-				Vector3 np;
-				if ( mode == 1 ) {
-					Node * n = shapeForBlock( sb );
-					Transform wt = n ? shapeRenderTrans( n ) : Transform();
-					float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
-					np = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / sc ) );
-				} else {
-					for ( int i : selList )
-						np += localPos( i );
-					np = np / float( selList.size() );
-				}
-				tlSetVertexLocal( model, iShape, rep, np );
-			} else {
-				// By Distance: union verts within the threshold, weld each group
-				// to its average position
-				for ( int a = 0; a < selList.size(); a++ )
-					for ( int b = a + 1; b < selList.size(); b++ ) {
-						if ( ( localPos( selList[a] ) - localPos( selList[b] ) ).length() <= threshold ) {
-							int ra = tlFindRoot( parent, selList[a] ), rb = tlFindRoot( parent, selList[b] );
-							if ( ra != rb )
-								parent[std::max( ra, rb )] = std::min( ra, rb );
-						}
-					}
-				QHash<int, QVector<int>> groups;
-				for ( int i : selList )
-					groups[tlFindRoot( parent, i )].append( i );
-				for ( auto g = groups.constBegin(); g != groups.constEnd(); ++g ) {
-					Vector3 avg;
-					for ( int i : g.value() )
-						avg += localPos( i );
-					avg = avg / float( g.value().size() );
-					tlSetVertexLocal( model, iShape, g.key(), avg );
-				}
-			}
-
-			// weld[i] = the surviving vertex i collapses into
-			QVector<int> remap( numVerts, -1 );
-			int newN = 0;
-			for ( int i = 0; i < numVerts; i++ )
-				if ( tlFindRoot( parent, i ) == i )
-					remap[i] = newN++;			// this vertex survives
-			for ( int i = 0; i < numVerts; i++ )
-				remap[i] = remap[tlFindRoot( parent, i )];
-			mergedVerts += numVerts - newN;
-
-			// compact the vertex array (forward copy: survivor new index <= old)
-			if ( newN != numVerts ) {
-				for ( int i = 0; i < numVerts; i++ ) {
-					int j = remap[i];
-					if ( tlFindRoot( parent, i ) == i && j != i )
-						tlCopyItemValues( model, model->getIndex( iVD, i ), model->getIndex( iVD, j ) );
-				}
-				model->set<int>( iShape, "Num Vertices", newN );
-				model->updateArraySize( iVD );
-			}
-
-			// rewrite triangles, dropping ones gone degenerate after the weld
-			QVector<Triangle> kept;
-			for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
-				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
-				int a = remap[tri[0]], b = remap[tri[1]], c = remap[tri[2]];
-				if ( a == b || b == c || a == c )
-					continue;
-				kept.append( Triangle( a, b, c ) );
-			}
-			removedTris += numTris - kept.size();
-			model->set<int>( iShape, "Num Triangles", kept.size() );
-			model->updateArraySize( iTris );
-			for ( int t = 0; t < kept.size(); t++ )
-				model->set<Triangle>( model->getIndex( iTris, t ), kept[t] );
-			if ( stride > 0 )
-				model->set<int>( iShape, "Data Size", newN * stride + kept.size() * 6 );
-
-			tlUpdateBounds( model, iShape );
-			tlSkinResync( model, iShape, remap, newN != numVerts );
+			const QPersistentModelIndex pShape( iShape );
+			const QVector<int> selList = j.selList;
+			const bool haveT = j.haveTarget;
+			const Vector3 tgt = j.targetLocal;
+			auto applyMerge = [this, pShape, selList, mode, threshold, haveT, tgt, mv, rt]() {
+				QModelIndex iS( pShape );
+				if ( !iS.isValid() )
+					return;
+				// suppress the per-leaf dataChanged storm (see deleteGeometry)
+				model->setState( BaseModel::Processing );
+				tlMergeShapeVerts( model, iS, selList, mode, threshold, haveT, tgt, *mv, *rt );
+				model->restoreState();
+				model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+			};
+			model->undoStack->push(
+				new TlShapeStateCommand( model, iShape, tr( "Merge vertices" ), applyMerge ) );
 		}
-		model->restoreState();
-		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); ++it ) {
-			QModelIndex iS = model->getBlockIndex( it.key() );
-			if ( iS.isValid() )
-				model->dataChanged( iS, iS );
-		}
-	} );
+		model->undoStack->endMacro();
+		mergedVerts = *mv;
+		removedTris = *rt;
+	} else {
+		nifSnapshotOp( model, tr( "Merge vertices" ), [&]() {
+			// suppress the per-leaf dataChanged storm (see deleteGeometry)
+			model->setState( BaseModel::Processing );
+			for ( const MergeJob & j : std::as_const( jobs ) )
+				tlMergeShapeVerts( model, model->getBlockIndex( j.sb ), j.selList, mode,
+					threshold, j.haveTarget, j.targetLocal, mergedVerts, removedTris );
+			model->restoreState();
+			for ( const MergeJob & j : std::as_const( jobs ) ) {
+				QModelIndex iS = model->getBlockIndex( j.sb );
+				if ( iS.isValid() )
+					model->dataChanged( iS, iS );
+			}
+		} );
+	}
 
 	emit gizmoStatus( tr( "Merged %1 vertices, removed %2 triangles" ).arg( mergedVerts ).arg( removedTris ) );
 	pickedElems.clear();
 	modelChanged();
-	// arm the redo panel so the merge distance can be readjusted afterwards
-	if ( mode == 2 && !opReapplying ) {
-		lastOpKind = 1;
-		lastOpParam = threshold;
-		lastOpSeed = seed;
-		lastOpUndoIndex = model->undoStack ? model->undoStack->index() : -1;
-		emit operatorPanel( 1, threshold );
+	// Redo Panel v2: scrub the merge distance afterwards (the whole merge is
+	// one undo macro, so the reapply undoes exactly one entry)
+	if ( mode == 2 ) {
+		lastMergeDistance = threshold;
+		lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+			mergeVertices( 2, float( ps.value( 0 ).value ) );
+		};
+		QVector<TlOpParam> ps( 1 );
+		ps[0].label = tr( "Merge Distance" );
+		ps[0].type = TlOpParam::Float;
+		ps[0].value = threshold;
+		ps[0].mn = 0.0;
+		ps[0].mx = 1000.0;
+		ps[0].step = 0.01;
+		ps[0].decimals = 4;
+		armOperatorPanelEx( tr( "Merge by Distance" ), ps,
+			model->undoStack ? 1 : 0, seed );
 	}
 }
 
@@ -6814,6 +7257,11 @@ void GLView::joinSelectedObjects()
 
 	int joined = 0;
 	QPersistentModelIndex pActive( iActive );
+	// DELIBERATELY snapshot undo (the one remaining topology op with a reload
+	// flash on Ctrl+Z): Join REMOVES the source blocks, which renumbers every
+	// block above them and rewrites links model-wide — restoring that in
+	// place would need exact block re-insertion at original indices with full
+	// link mending. The snapshot is the safe undo here.
 	nifSnapshotOp( model, tr( "Join geometry" ), [&]() {
 		Transform activeInv = activeWorld.inverted();
 		for ( int sb : sources ) {
@@ -6932,109 +7380,123 @@ void GLView::duplicateElements()
 	QVector<PickedElement> newSel;
 	int totalV = 0;
 
-	nifSnapshotOp( model, tr( "Duplicate" ), [&]() {
-		// suppress the per-leaf dataChanged storm (see deleteGeometry)
-		model->setState( BaseModel::Processing );
-		for ( int sb : shapeSet ) {
-			QModelIndex iShape = model->getBlockIndex( sb );
-			if ( !model->blockInherits( iShape, "BSTriShape" ) )
-				continue;
-			QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
-			QModelIndex iTris = model->getIndex( iShape, "Triangles" );
-			if ( !iVD.isValid() || !iTris.isValid() )
-				continue;
-			int oldNV = model->get<int>( iShape, "Num Vertices" );
-			int oldNT = model->get<int>( iShape, "Num Triangles" );
-			int dataSize = model->get<int>( iShape, "Data Size" );
-			int stride = ( oldNV > 0 ) ? ( dataSize - oldNT * 6 ) / oldNV : 0;
+	// per-shape inputs precomputed from pre-op state so the redo closures are
+	// deterministic; the append-only mutation runs under an in-place command
+	const bool macroU = ( model->undoStack != nullptr );
+	if ( macroU )
+		model->undoStack->beginMacro( tr( "Duplicate" ) );
+	for ( int sb : shapeSet ) {
+		QModelIndex iShape = model->getBlockIndex( sb );
+		if ( !model->blockInherits( iShape, "BSTriShape" ) )
+			continue;
+		QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+		QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+		if ( !iVD.isValid() || !iTris.isValid() )
+			continue;
+		const int oldNV = model->get<int>( iShape, "Num Vertices" );
+		const int oldNT = model->get<int>( iShape, "Num Triangles" );
 
-			const QSet<int> & sv = selVerts.value( sb );
-			const QSet<int> & sfx = selFacesX.value( sb );
+		const QSet<int> & sv = selVerts.value( sb );
+		const QSet<int> & sfx = selFacesX.value( sb );
 
-			// faces to duplicate: explicit face selection or all-verts-selected
-			QVector<int> dupFaces;
-			for ( int t = 0; t < oldNT; t++ ) {
-				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
-				bool dup = sfx.contains( t )
-					|| ( !sv.isEmpty() && sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) );
-				if ( dup )
-					dupFaces.append( t );
-			}
+		// faces to duplicate: explicit face selection or all-verts-selected
+		QVector<int> dupFaces;
+		for ( int t = 0; t < oldNT; t++ ) {
+			Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+			bool dup = sfx.contains( t )
+				|| ( !sv.isEmpty() && sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) );
+			if ( dup )
+				dupFaces.append( t );
+		}
 
-			// verts to duplicate = selected verts + verts of the duplicated faces
-			QSet<int> dupVertsSet = sv;
-			for ( int t : dupFaces ) {
-				Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
-				dupVertsSet.insert( tri[0] );
-				dupVertsSet.insert( tri[1] );
-				dupVertsSet.insert( tri[2] );
-			}
-			if ( dupVertsSet.isEmpty() )
-				continue;
+		// verts to duplicate = selected verts + verts of the duplicated faces
+		QSet<int> dupVertsSet = sv;
+		for ( int t : dupFaces ) {
+			Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
+			dupVertsSet.insert( tri[0] );
+			dupVertsSet.insert( tri[1] );
+			dupVertsSet.insert( tri[2] );
+		}
+		if ( dupVertsSet.isEmpty() )
+			continue;
 
-			QVector<int> dupVerts( dupVertsSet.constBegin(), dupVertsSet.constEnd() );
-			std::sort( dupVerts.begin(), dupVerts.end() );
-			QHash<int, int> vremap;
-			for ( int i = 0; i < dupVerts.size(); i++ )
-				vremap.insert( dupVerts[i], oldNV + i );
-			QHash<int, int> fremap;
-			for ( int i = 0; i < dupFaces.size(); i++ )
-				fremap.insert( dupFaces[i], oldNT + i );
+		QVector<int> dupVerts( dupVertsSet.constBegin(), dupVertsSet.constEnd() );
+		std::sort( dupVerts.begin(), dupVerts.end() );
+		QHash<int, int> vremap;
+		for ( int i = 0; i < dupVerts.size(); i++ )
+			vremap.insert( dupVerts[i], oldNV + i );
+		QHash<int, int> fremap;
+		for ( int i = 0; i < dupFaces.size(); i++ )
+			fremap.insert( dupFaces[i], oldNT + i );
+
+		const QPersistentModelIndex pShape( iShape );
+		auto applyDup = [this, pShape, dupVerts, dupFaces, vremap, oldNV, oldNT]() {
+			QModelIndex iS( pShape );
+			if ( !iS.isValid() )
+				return;
+			// suppress the per-leaf dataChanged storm (see deleteGeometry)
+			model->setState( BaseModel::Processing );
+			QModelIndex iVD2 = model->getIndex( iS, "Vertex Data" );
+			QModelIndex iT2 = model->getIndex( iS, "Triangles" );
+			const int ds = model->get<int>( iS, "Data Size" );
+			const int stride = ( oldNV > 0 ) ? ( ds - oldNT * 6 ) / oldNV : 0;
 
 			// append the duplicated verts (verbatim - same positions/normals)
-			int addNV = dupVerts.size();
-			model->set<int>( iShape, "Num Vertices", oldNV + addNV );
-			model->updateArraySize( iVD );
+			const int addNV = dupVerts.size();
+			model->set<int>( iS, "Num Vertices", oldNV + addNV );
+			model->updateArraySize( iVD2 );
 			for ( int i = 0; i < addNV; i++ )
-				tlCopyItemValues( model, model->getIndex( iVD, dupVerts[i] ), model->getIndex( iVD, oldNV + i ) );
+				tlCopyItemValues( model, model->getIndex( iVD2, dupVerts[i] ), model->getIndex( iVD2, oldNV + i ) );
 
 			// append the duplicated faces (reindexed to the new verts)
-			int addNT = dupFaces.size();
+			const int addNT = dupFaces.size();
 			if ( addNT > 0 ) {
-				model->set<int>( iShape, "Num Triangles", oldNT + addNT );
-				model->updateArraySize( iTris );
+				model->set<int>( iS, "Num Triangles", oldNT + addNT );
+				model->updateArraySize( iT2 );
 				for ( int i = 0; i < addNT; i++ ) {
-					Triangle tri = model->get<Triangle>( model->getIndex( iTris, dupFaces[i] ) );
+					Triangle tri = model->get<Triangle>( model->getIndex( iT2, dupFaces[i] ) );
 					tri[0] = quint16( vremap.value( tri[0] ) );
 					tri[1] = quint16( vremap.value( tri[1] ) );
 					tri[2] = quint16( vremap.value( tri[2] ) );
-					model->set<Triangle>( model->getIndex( iTris, oldNT + i ), tri );
+					model->set<Triangle>( model->getIndex( iT2, oldNT + i ), tri );
 				}
 			}
 			if ( stride > 0 )
-				model->set<int>( iShape, "Data Size", ( oldNV + addNV ) * stride + ( oldNT + addNT ) * 6 );
+				model->set<int>( iS, "Data Size", ( oldNV + addNV ) * stride + ( oldNT + addNT ) * 6 );
+			model->restoreState();
+			model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+		};
+		if ( model->undoStack )
+			model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Duplicate" ), applyDup ) );
+		else
+			applyDup();
 
-			// mirror the selection onto the duplicate (coincident, so the world
-			// positions of the original picked elements still apply)
-			for ( const auto & pe : pickedElems ) {
-				if ( pe.shapeBlock != sb )
+		// mirror the selection onto the duplicate (coincident, so the world
+		// positions of the original picked elements still apply)
+		for ( const auto & pe : pickedElems ) {
+			if ( pe.shapeBlock != sb )
+				continue;
+			PickedElement np = pe;
+			if ( pe.type == 1 ) {
+				if ( !vremap.contains( pe.e0 ) )
 					continue;
-				PickedElement np = pe;
-				if ( pe.type == 1 ) {
-					if ( !vremap.contains( pe.e0 ) )
-						continue;
-					np.e0 = vremap.value( pe.e0 );
-				} else if ( pe.type == 2 ) {
-					if ( !vremap.contains( pe.e0 ) || !vremap.contains( pe.e1 ) )
-						continue;
-					np.e0 = vremap.value( pe.e0 );
-					np.e1 = vremap.value( pe.e1 );
-				} else if ( pe.type == 3 ) {
-					if ( !fremap.contains( pe.e0 ) )
-						continue;
-					np.e0 = fremap.value( pe.e0 );
-				}
-				newSel.append( np );
+				np.e0 = vremap.value( pe.e0 );
+			} else if ( pe.type == 2 ) {
+				if ( !vremap.contains( pe.e0 ) || !vremap.contains( pe.e1 ) )
+					continue;
+				np.e0 = vremap.value( pe.e0 );
+				np.e1 = vremap.value( pe.e1 );
+			} else if ( pe.type == 3 ) {
+				if ( !fremap.contains( pe.e0 ) )
+					continue;
+				np.e0 = fremap.value( pe.e0 );
 			}
-			totalV += addNV;
+			newSel.append( np );
 		}
-		model->restoreState();
-		for ( int sb : shapeSet ) {
-			QModelIndex iS = model->getBlockIndex( sb );
-			if ( iS.isValid() )
-				model->dataChanged( iS, iS );
-		}
-	} );
+		totalV += dupVerts.size();
+	}
+	if ( macroU )
+		model->undoStack->endMacro();
 
 	if ( newSel.isEmpty() ) {
 		emit gizmoStatus( tr( "Nothing to duplicate (select verts / faces)" ) );
@@ -7605,6 +8067,71 @@ static void tlWriteLerpVertex( NifModel * model, const QModelIndex & iShape,
 	}
 }
 
+//! Three-source generalization of tlWriteLerpVertex: dst = u*va + v*vb + w*vc
+//! (barycentric). Attributes interpolate the same way (normals/tangents
+//! renormalized, bone weights merged / top-4 / renormalized).
+static void tlWriteBaryVertex( NifModel * model, const QModelIndex & iShape,
+	int dst, int va, int vb, int vc, const Vector3 & bary )
+{
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	QModelIndex rows[3] = { model->getIndex( iVD, va ), model->getIndex( iVD, vb ),
+		model->getIndex( iVD, vc ) };
+	QModelIndex rowD = model->getIndex( iVD, dst );
+	if ( !rows[0].isValid() || !rows[1].isValid() || !rows[2].isValid() || !rowD.isValid() )
+		return;
+	tlCopyItemValues( model, rows[0], rowD );
+	Vector3 p;
+	for ( int k = 0; k < 3; k++ )
+		p += model->get<Vector3>( rows[k], "Vertex" ) * bary[k];
+	tlSetVertexLocal( model, iShape, dst, p );
+	if ( model->getItem( rows[0], "UV" ) ) {
+		Vector2 uv;
+		for ( int k = 0; k < 3; k++ )
+			uv += model->get<Vector2>( rows[k], "UV" ) * bary[k];
+		model->set<HalfVector2>( rowD, "UV", HalfVector2( uv ) );
+	}
+	for ( const char * attr : { "Normal", "Tangent" } ) {
+		if ( !model->getItem( rows[0], attr ) )
+			continue;
+		Vector3 v;
+		for ( int k = 0; k < 3; k++ )
+			v += model->get<Vector3>( rows[k], attr ) * bary[k];
+		if ( v.squaredLength() > 1.0e-12f ) {
+			v.normalize();
+			model->set<ByteVector3>( rowD, attr, v );
+		}
+	}
+	if ( model->getItem( rows[0], "Bone Weights" ) ) {
+		QHash<int, float> acc;
+		for ( int k = 0; k < 3; k++ ) {
+			QModelIndex iW = model->getIndex( rows[k], "Bone Weights" );
+			QModelIndex iI = model->getIndex( rows[k], "Bone Indices" );
+			for ( int j = 0; j < 4; j++ ) {
+				const float w = model->get<float>( model->getIndex( iW, j ) ) * bary[k];
+				if ( w > 0.0f )
+					acc[int( model->get<quint8>( model->getIndex( iI, j ) ) )] += w;
+			}
+		}
+		QVector<QPair<int, float>> weights;
+		for ( auto it = acc.constBegin(); it != acc.constEnd(); ++it )
+			weights.append( { it.key(), it.value() } );
+		std::sort( weights.begin(), weights.end(),
+			[]( const auto & a, const auto & b ) { return a.second > b.second; } );
+		while ( weights.size() > 4 )
+			weights.removeLast();
+		float sum = 0.0f;
+		for ( const auto & w : std::as_const( weights ) )
+			sum += w.second;
+		QModelIndex iW = model->getIndex( rowD, "Bone Weights" );
+		QModelIndex iI = model->getIndex( rowD, "Bone Indices" );
+		for ( int j = 0; j < 4; j++ ) {
+			const bool on = ( j < weights.size() && sum > 0.0f );
+			model->set<float>( model->getIndex( iW, j ), on ? weights.at( j ).second / sum : 0.0f );
+			model->set<quint8>( model->getIndex( iI, j ), quint8( on ? weights.at( j ).first : 0 ) );
+		}
+	}
+}
+
 //! In-place undo for operators that only APPEND verts/triangles and refresh
 //! normals of existing verts (Fill, Bridge): redo runs the op's apply
 //! closure, undo shrinks the arrays back and restores the saved normals and
@@ -7761,97 +8288,6 @@ private:
 	QVector<QPair<int, Vector3>> savedNrm;
 };
 
-//! Recursively snapshot every leaf value of an item subtree (order matches
-//! tlRestoreValues' traversal). Generic — captures any field layout exactly.
-static void tlCaptureValues( NifModel * nif, const QModelIndex & idx, QVector<NifValue> & out )
-{
-	const int rc = nif->rowCount( idx );
-	if ( rc > 0 ) {
-		for ( int r = 0; r < rc; r++ )
-			tlCaptureValues( nif, nif->getIndex( idx, r ), out );
-	} else {
-		out.append( nif->getValue( idx ) );
-	}
-}
-
-static void tlRestoreValues( NifModel * nif, const QModelIndex & idx, const QVector<NifValue> & in, int & pos )
-{
-	const int rc = nif->rowCount( idx );
-	if ( rc > 0 ) {
-		for ( int r = 0; r < rc; r++ )
-			tlRestoreValues( nif, nif->getIndex( idx, r ), in, pos );
-	} else if ( pos < in.size() ) {
-		nif->setIndexValue( idx, in.at( pos++ ) );
-	}
-}
-
-//! In-place undo for arbitrary single-shape topology rewrites (Loop Cut,
-//! Subdivide, Dissolve, Symmetrize — anything that rewrites triangles or
-//! removes verts): the constructor snapshots the shape's counts + the whole
-//! Vertex Data and Triangles subtrees as typed values; undo restores them
-//! exactly. Heavier than the targeted commands (a few MB / ~0.5 s on big
-//! meshes) but still no model reload, no flash.
-class TlShapeStateCommand final : public QUndoCommand
-{
-public:
-	TlShapeStateCommand( NifModel * model, const QModelIndex & iShape,
-		const QString & text, std::function<void()> applyFn )
-		: nif( model ), block( iShape ), apply( std::move( applyFn ) )
-	{
-		setText( text );
-		oldNV = nif->get<int>( iShape, "Num Vertices" );
-		oldNT = nif->get<int>( iShape, "Num Triangles" );
-		oldDataSize = nif->get<int>( iShape, "Data Size" );
-		QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
-		if ( iBound.isValid() ) {
-			boundCenter = nif->get<Vector3>( iBound, "Center" );
-			boundRadius = nif->get<float>( iBound, "Radius" );
-		}
-		tlCaptureValues( nif, nif->getIndex( iShape, "Vertex Data" ), vertexState );
-		tlCaptureValues( nif, nif->getIndex( iShape, "Triangles" ), triState );
-	}
-
-	void redo() override
-	{
-		if ( QModelIndex( block ).isValid() && apply )
-			apply();
-	}
-
-	void undo() override
-	{
-		QModelIndex iShape( block );
-		if ( !iShape.isValid() )
-			return;
-		nif->setState( BaseModel::Processing );
-		QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
-		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
-		nif->set<int>( iShape, "Num Vertices", oldNV );
-		nif->updateArraySize( iVD );
-		nif->set<int>( iShape, "Num Triangles", oldNT );
-		nif->updateArraySize( iTris );
-		int pos = 0;
-		tlRestoreValues( nif, iVD, vertexState, pos );
-		pos = 0;
-		tlRestoreValues( nif, iTris, triState, pos );
-		nif->set<int>( iShape, "Data Size", oldDataSize );
-		QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
-		if ( iBound.isValid() ) {
-			nif->set<Vector3>( iBound, "Center", boundCenter );
-			nif->set<float>( iBound, "Radius", boundRadius );
-		}
-		nif->restoreState();
-		nif->dataChanged( iShape, iShape );
-	}
-
-private:
-	NifModel * nif;
-	QPersistentModelIndex block;
-	std::function<void()> apply;
-	int oldNV = 0, oldNT = 0, oldDataSize = 0;
-	Vector3 boundCenter;
-	float boundRadius = 0.0f;
-	QVector<NifValue> vertexState, triState;
-};
 
 void GLView::extrudeRegion()
 {
@@ -8715,15 +9151,74 @@ void GLView::subdivideSelection()
 		emit gizmoStatus( tr( "Subdivide: select edges or faces" ) );
 		return;
 	}
+
+	// quad-aware (Blender): a marked-diagonal tri pair whose diagonal and all
+	// four outer edges are marked subdivides as a QUAD — four sub-quads around
+	// a center vertex on the diagonal midpoint; the diagonal itself is not cut
+	struct QuadSub { int tA, tB; quint64 diag; int loop[4]; quint64 outer[4]; };
+	QVector<QuadSub> quads;
+	QSet<int> quadTris;
+	{
+		const QHash<int, int> & qmap = quadPartnerMap( sb );
+		for ( auto qi = qmap.constBegin(); qi != qmap.constEnd(); ++qi ) {
+			const int tA = qi.key(), tB = qi.value();
+			if ( tA > tB || tA < 0 || tB < 0 || tA >= numTris || tB >= numTris )
+				continue;	// each pair once
+			const Triangle & ta = tris.at( tA );
+			const Triangle & tb = tris.at( tB );
+			if ( degenerate( ta ) || degenerate( tb ) )
+				continue;
+			// diagonal = the shared edge; c / d = the off-diagonal corners
+			int a = -1, b = -1, c = -1, d = -1;
+			for ( int i = 0; i < 3; i++ ) {
+				const bool shared = ( ta[i] == tb[0] || ta[i] == tb[1] || ta[i] == tb[2] );
+				if ( !shared )
+					c = ta[i];
+				else if ( a < 0 )
+					a = ta[i];
+				else
+					b = ta[i];
+			}
+			for ( int i = 0; i < 3; i++ )
+				if ( tb[i] != a && tb[i] != b )
+					d = tb[i];
+			if ( a < 0 || b < 0 || c < 0 || d < 0 || c == d )
+				continue;
+			QuadSub q;
+			q.tA = tA;
+			q.tB = tB;
+			q.diag = ekey( a, b );
+			if ( !marked.contains( q.diag ) )
+				continue;
+			// corner loop in tA's winding: c -> x -> d -> y keeps orientation
+			const int ci = ( ta[0] == c ) ? 0 : ( ta[1] == c ) ? 1 : 2;
+			q.loop[0] = c;
+			q.loop[1] = ta[( ci + 1 ) % 3];
+			q.loop[2] = d;
+			q.loop[3] = ta[( ci + 2 ) % 3];
+			bool all = true;
+			for ( int i = 0; i < 4; i++ ) {
+				q.outer[i] = ekey( q.loop[i], q.loop[( i + 1 ) % 4] );
+				all = all && marked.contains( q.outer[i] );
+			}
+			if ( !all )
+				continue;
+			quads.append( q );
+			quadTris << tA << tB;
+		}
+		for ( const QuadSub & q : std::as_const( quads ) )
+			marked.remove( q.diag );
+	}
+
 	const int oldNV = model->get<int>( iShape, "Num Vertices" );
-	if ( oldNV + marked.size() > 0xFFFF ) {
+	if ( oldNV + marked.size() + quads.size() > 0xFFFF ) {
 		emit gizmoStatus( tr( "Subdivide: would exceed the 65,535-vertex limit" ) );
 		return;
 	}
 
 	const QPersistentModelIndex pShape( iShape );
 	const QVector<quint64> markedList( marked.constBegin(), marked.constEnd() );
-	auto applySubdivide = [this, pShape, markedList, ekey]() {
+	auto applySubdivide = [this, pShape, markedList, ekey, quads, quadTris]() {
 		QModelIndex iS( pShape );
 		if ( !iS.isValid() )
 			return;
@@ -8738,8 +9233,8 @@ void GLView::subdivideSelection()
 			tv[t] = model->get<Triangle>( model->getIndex( iT, t ) );
 
 		model->setState( BaseModel::Processing );
-		// midpoint vert per marked edge
-		model->set<int>( iS, "Num Vertices", nv + markedList.size() );
+		// midpoint vert per marked edge, plus a center vert per quad
+		model->set<int>( iS, "Num Vertices", nv + markedList.size() + quads.size() );
 		model->updateArraySize( iVD );
 		QHash<quint64, int> mid;
 		int nvi = nv;
@@ -8748,11 +9243,19 @@ void GLView::subdivideSelection()
 			tlWriteLerpVertex( model, iS, nvi, a, b, 0.5f );
 			mid.insert( k, nvi++ );
 		}
+		const int centerBase = nvi;
+		for ( const QuadSub & q : quads ) {
+			tlWriteLerpVertex( model, iS, nvi,
+				int( q.diag >> 32 ), int( q.diag & 0xFFFFFFFFu ), 0.5f );
+			nvi++;
+		}
 		// re-split each affected triangle by its marked-edge count
 		QVector<Triangle> out;
 		out.reserve( nt * 2 );
 		QSet<int> touched;
 		for ( int t = 0; t < nt; t++ ) {
+			if ( quadTris.contains( t ) )
+				continue;	// re-emitted below as a quad grid
 			const Triangle & tr = tv.at( t );
 			if ( tr[0] == tr[1] || tr[1] == tr[2] || tr[0] == tr[2] ) {
 				out.append( tr );
@@ -8809,24 +9312,93 @@ void GLView::subdivideSelection()
 				out.append( Triangle( quint16( m1 ), q, r ) );
 			}
 		}
+		// quad grids: 4 sub-quads (8 tris) around the center vertex, wound
+		// like the original pair
+		for ( int qi = 0; qi < quads.size(); qi++ ) {
+			const QuadSub & q = quads.at( qi );
+			const int X = centerBase + qi;
+			int M[4];
+			bool okAll = true;
+			for ( int i = 0; i < 4; i++ ) {
+				M[i] = mid.value( q.outer[i], -1 );
+				okAll = okAll && M[i] >= 0;
+			}
+			if ( !okAll ) {	// cannot happen by construction; keep the originals
+				out.append( tv.at( q.tA ) );
+				out.append( tv.at( q.tB ) );
+				continue;
+			}
+			for ( int i = 0; i < 4; i++ ) {
+				const quint16 p0 = quint16( q.loop[i] ), p1 = quint16( M[i] );
+				const quint16 p2 = quint16( X ), p3 = quint16( M[( i + 3 ) % 4] );
+				out.append( Triangle( p0, p1, p3 ) );
+				out.append( Triangle( p1, p2, p3 ) );
+			}
+			for ( int i = 0; i < 4; i++ )
+				touched << q.loop[i] << M[i];
+			touched << X;
+		}
 		model->set<int>( iS, "Num Triangles", out.size() );
 		model->updateArraySize( iT );
 		for ( int t = 0; t < out.size(); t++ )
 			model->set<Triangle>( model->getIndex( iT, t ), out.at( t ) );
 		if ( stride > 0 )
 			model->set<int>( iS, "Data Size",
-				( nv + int( markedList.size() ) ) * stride + out.size() * 6 );
+				( nv + int( markedList.size() ) + int( quads.size() ) ) * stride + out.size() * 6 );
 		tlRecalcNormalsSubset( model, iS, touched );
 		tlUpdateBounds( model, iS );
 		model->restoreState();
 		model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
 	};
-	if ( model->undoStack )
+
+	// re-record the quad marks against the new vertex count: surviving old
+	// diagonals keep their indices (vertices are only appended), a cut
+	// diagonal's mark dies with its edge, and each subdivided quad trades its
+	// diagonal for the four sub-quad diagonals. Computed BEFORE the apply so
+	// every input is pre-mutation state.
+	QSet<quint64> newMarks = quadMarksFor( sb );
+	const bool marksUpdate = !newMarks.isEmpty() || !quads.isEmpty();
+	if ( marksUpdate ) {
+		for ( auto it = newMarks.begin(); it != newMarks.end(); ) {
+			if ( marked.contains( *it ) )
+				it = newMarks.erase( it );
+			else
+				++it;
+		}
+		QHash<quint64, int> midIdx;
+		for ( int i = 0; i < markedList.size(); i++ )
+			midIdx.insert( markedList.at( i ), oldNV + i );
+		for ( const QuadSub & q : std::as_const( quads ) ) {
+			newMarks.remove( q.diag );
+			int M[4];
+			bool okAll = true;
+			for ( int i = 0; i < 4; i++ ) {
+				M[i] = midIdx.value( q.outer[i], -1 );
+				okAll = okAll && M[i] >= 0;
+			}
+			if ( !okAll )
+				continue;
+			for ( int i = 0; i < 4; i++ )
+				newMarks.insert( ekey( M[i], M[( i + 3 ) % 4] ) );
+		}
+	}
+
+	if ( model->undoStack ) {
+		if ( marksUpdate )
+			model->undoStack->beginMacro( tr( "Subdivide" ) );
 		model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Subdivide" ), applySubdivide ) );
-	else
+		if ( marksUpdate ) {
+			setQuadMarks( sb, newMarks, tr( "Subdivide" ),
+				oldNV + markedList.size() + quads.size() );
+			model->undoStack->endMacro();
+		}
+	} else {
 		applySubdivide();
+	}
 	modelChanged();
-	emit gizmoStatus( tr( "Subdivided %1 edge(s)" ).arg( marked.size() ) );
+	emit gizmoStatus( quads.isEmpty()
+		? tr( "Subdivided %1 edge(s)" ).arg( marked.size() )
+		: tr( "Subdivided %1 edge(s) and %2 quad(s)" ).arg( marked.size() ).arg( quads.size() ) );
 }
 
 //! Inset the region described by an extrude plan: create it like a zero-offset
@@ -8970,12 +9542,14 @@ public:
 	{
 		gv->quadDiagonals[sb] = before;
 		gv->quadMarkVerts[sb] = nvBefore;
+		gv->quadPartnerCache.remove( sb );
 		gv->update();
 	}
 	void redo() override
 	{
 		gv->quadDiagonals[sb] = after;
 		gv->quadMarkVerts[sb] = nvAfter;
+		gv->quadPartnerCache.remove( sb );
 		gv->update();
 	}
 private:
@@ -9049,13 +9623,14 @@ int GLView::quadPartnerTri( int shapeBlock, int tri ) const
 	return -1;
 }
 
-void GLView::setQuadMarks( int shapeBlock, const QSet<quint64> & marks, const QString & opName )
+void GLView::setQuadMarks( int shapeBlock, const QSet<quint64> & marks, const QString & opName,
+	int vertCountOverride )
 {
 	Shape * s = shapeForBlock( shapeBlock );
 	if ( !s || !model || !model->undoStack )
 		return;
-	model->undoStack->push(
-		new TlQuadMarksCommand( this, shapeBlock, marks, s->verts.size(), opName ) );
+	model->undoStack->push( new TlQuadMarksCommand( this, shapeBlock, marks,
+		vertCountOverride >= 0 ? vertCountOverride : s->verts.size(), opName ) );
 }
 
 void GLView::makeFace()
@@ -9124,6 +9699,20 @@ void GLView::makeFace()
 		const quint64 k = quadEdgeKey( shared[0], shared[1] );
 		if ( marks.contains( k ) )
 			break;	// already a quad: fall through (F is also fill)
+		// a triangle can only be half of ONE quad: a second diagonal on the
+		// same tri would hide two of its edges and make the partner lookup
+		// edge-order dependent
+		auto inQuad = [&]( const Triangle & t ) {
+			for ( int e = 0; e < 3; e++ )
+				if ( marks.contains( quadEdgeKey( t[e], t[( e + 1 ) % 3] ) ) )
+					return true;
+			return false;
+		};
+		if ( inQuad( ta ) || inQuad( tb ) ) {
+			emit gizmoStatus( tr( "Make Face: a triangle already belongs to a quad (Triangulate it first)" ) );
+			update();
+			return;
+		}
 		marks.insert( k );
 		setQuadMarks( sb, marks, tr( "Make Quad" ) );
 		emit gizmoStatus( tr( "Quad formed (triangulated automatically on save)" ) );
@@ -9132,6 +9721,132 @@ void GLView::makeFace()
 	} while ( false );
 
 	smartConnect();
+}
+
+//! Edge -> the (up to two) non-degenerate triangles on it; n saturates at 3
+//! so a non-manifold edge is detectable without storing every triangle.
+//! Built once per shape (O(T)) so the batch quad operators can look partners
+//! up in O(1) — quadPartnerTri() scans all triangles per call, which turned
+//! select-all Tris to Quads / Triangulate into an O(T²) freeze.
+struct TlEdgeTris { int t0 = -1, t1 = -1; int n = 0; };
+
+static QHash<quint64, TlEdgeTris> tlBuildEdgeTris( Shape * s )
+{
+	QHash<quint64, TlEdgeTris> adj;
+	adj.reserve( s->triangles.size() * 3 / 2 );
+	for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+		const Triangle & t = s->triangles.at( ti );
+		if ( t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+			continue;
+		for ( int e = 0; e < 3; e++ ) {
+			TlEdgeTris & et = adj[GLView::quadEdgeKey( t[e], t[( e + 1 ) % 3] )];
+			if ( et.n == 0 )
+				et.t0 = ti;
+			else if ( et.n == 1 )
+				et.t1 = ti;
+			if ( et.n < 3 )
+				et.n++;
+		}
+	}
+	return adj;
+}
+
+//! quadPartnerTri() via the prebuilt adjacency: the one other triangle on a
+//! marked edge of tri, or -1 (non-manifold edges have no unique partner)
+static int tlQuadPartnerVia( const QSet<quint64> & marks,
+	const QHash<quint64, TlEdgeTris> & adj, Shape * s, int tri )
+{
+	if ( marks.isEmpty() || !s || tri < 0 || tri >= s->triangles.size() )
+		return -1;
+	const Triangle & t = s->triangles.at( tri );
+	if ( t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+		return -1;
+	for ( int e = 0; e < 3; e++ ) {
+		const quint64 k = GLView::quadEdgeKey( t[e], t[( e + 1 ) % 3] );
+		if ( !marks.contains( k ) )
+			continue;
+		const TlEdgeTris et = adj.value( k );
+		if ( et.n != 2 )
+			continue;
+		const int other = ( et.t0 == tri ) ? et.t1 : et.t0;
+		if ( other >= 0 && other != tri )
+			return other;
+	}
+	return -1;
+}
+
+const QHash<int, int> & GLView::quadPartnerMap( int shapeBlock ) const
+{
+	static const QHash<int, int> empty;
+	Shape * s = shapeForBlock( shapeBlock );
+	const QSet<quint64> marks = quadMarksFor( shapeBlock );
+	if ( !s || marks.isEmpty() )
+		return empty;
+	auto it = quadPartnerCache.constFind( shapeBlock );
+	if ( it != quadPartnerCache.constEnd() && it->first == s->verts.size() )
+		return it->second;
+	QHash<int, int> map;
+	const QHash<quint64, TlEdgeTris> adj = tlBuildEdgeTris( s );
+	for ( auto et = adj.constBegin(); et != adj.constEnd(); ++et ) {
+		if ( et.value().n != 2 || !marks.contains( et.key() ) )
+			continue;
+		map.insert( et.value().t0, et.value().t1 );
+		map.insert( et.value().t1, et.value().t0 );
+	}
+	QPair<int, QHash<int, int>> & slot = quadPartnerCache[shapeBlock];
+	slot.first = s->verts.size();
+	slot.second = map;
+	return slot.second;
+}
+
+bool GLView::buildFacePick( int shapeBlock, int tri, PickedElement & pe ) const
+{
+	Shape * s = shapeForBlock( shapeBlock );
+	if ( !s || tri < 0 || tri >= s->triangles.size() )
+		return false;
+	const Triangle & t = s->triangles.at( tri );
+	if ( t[0] >= s->verts.size() || t[1] >= s->verts.size() || t[2] >= s->verts.size() )
+		return false;
+	Transform wt = shapeRenderTrans( s );
+	pe = PickedElement();
+	pe.shapeBlock = shapeBlock;
+	pe.type = 3;
+	pe.e0 = tri;
+	pe.wA = wt * editVertexLocal( s, t[0] );
+	pe.wB = wt * editVertexLocal( s, t[1] );
+	pe.wC = wt * editVertexLocal( s, t[2] );
+	pe.worldPos = ( pe.wA + pe.wB + pe.wC ) / 3.0f;
+	Vector3 n = Vector3::crossproduct( pe.wB - pe.wA, pe.wC - pe.wA );
+	n.normalize();
+	pe.worldNormal = n;
+	return true;
+}
+
+void GLView::expandQuadPartners( QVector<PickedElement> & elems ) const
+{
+	auto key = []( int sb, int t ) {
+		return ( quint64( quint32( sb ) ) << 32 ) | quint32( t );
+	};
+	QSet<quint64> have;
+	for ( const PickedElement & pe : std::as_const( elems ) )
+		if ( pe.type == 3 )
+			have.insert( key( pe.shapeBlock, pe.e0 ) );
+	if ( have.isEmpty() )
+		return;
+	const int n = elems.size();
+	for ( int i = 0; i < n; i++ ) {
+		const PickedElement & pe = elems.at( i );
+		if ( pe.type != 3 )
+			continue;
+		const int tj = quadPartnerMap( pe.shapeBlock ).value( pe.e0, -1 );
+		if ( tj < 0 || have.contains( key( pe.shapeBlock, tj ) ) )
+			continue;
+		PickedElement partner;
+		if ( buildFacePick( pe.shapeBlock, tj, partner ) ) {
+			have.insert( key( pe.shapeBlock, tj ) );
+			elems.append( partner );
+		}
+	}
 }
 
 void GLView::trisToQuads( float maxFaceAngleDeg, float maxShapeAngleDeg, bool armPanel )
@@ -9178,11 +9893,15 @@ void GLView::trisToQuads( float maxFaceAngleDeg, float maxShapeAngleDeg, bool ar
 			return -1;
 		};
 		QSet<quint64> marks = quadMarksFor( sb );
-		// triangles already in quads are not up for pairing
+		// triangles already in quads are not up for pairing (O(1) partner
+		// lookups via the prebuilt adjacency; only needed when marks exist)
 		QSet<int> taken;
-		for ( int ti : sel )
-			if ( quadPartnerTri( sb, ti ) >= 0 )
-				taken << ti;
+		if ( !marks.isEmpty() ) {
+			const QHash<quint64, TlEdgeTris> adj = tlBuildEdgeTris( s );
+			for ( int ti : sel )
+				if ( tlQuadPartnerVia( marks, adj, s, ti ) >= 0 )
+					taken << ti;
+		}
 		// candidate shared edges between two free selected triangles
 		QHash<quint64, QVector<int>> edgeTris;
 		for ( int ti : sel ) {
@@ -9305,14 +10024,16 @@ void GLView::triangulateSelection( int diagonalMode, bool armPanel )
 		QModelIndex iTris = model->getIndex( iShape, "Triangles" );
 		if ( !iTris.isValid() )
 			continue;
-		// collect the quads whose both halves are in the selection
+		// collect the quads whose both halves are in the selection (O(1)
+		// partner lookups via the prebuilt adjacency)
+		const QHash<quint64, TlEdgeTris> adj = tlBuildEdgeTris( s );
 		struct Quad { quint64 key; int tA, tB; };
 		QVector<Quad> quads;
 		QSet<int> seen;
 		for ( int ti : it.value() ) {
 			if ( seen.contains( ti ) )
 				continue;
-			const int tj = quadPartnerTri( sb, ti );
+			const int tj = tlQuadPartnerVia( marks, adj, s, ti );
 			if ( tj < 0 || !it.value().contains( tj ) )
 				continue;
 			seen << ti << tj;
@@ -9391,6 +10112,11 @@ void GLView::triangulateSelection( int diagonalMode, bool armPanel )
 			rewrites.append( qMakePair( q.tA, n1 ) );
 			rewrites.append( qMakePair( q.tB, n2 ) );
 		}
+		// one undo step per shape: without the macro, Ctrl+Z restored the
+		// marks but left the flipped triangles until a second Ctrl+Z
+		const bool macro = !rewrites.isEmpty() && model->undoStack;
+		if ( macro )
+			model->undoStack->beginMacro( tr( "Triangulate" ) );
 		if ( !rewrites.isEmpty() ) {
 			nifSnapshotOp( model, tr( "Triangulate" ), [&]() {
 				for ( const auto & rw : std::as_const( rewrites ) )
@@ -9399,6 +10125,8 @@ void GLView::triangulateSelection( int diagonalMode, bool armPanel )
 			} );
 		}
 		setQuadMarks( sb, marks, tr( "Triangulate" ) );
+		if ( macro )
+			model->undoStack->endMacro();
 		split += quads.size();
 	}
 	emit gizmoStatus( split > 0
@@ -9419,6 +10147,819 @@ void GLView::triangulateSelection( int diagonalMode, bool armPanel )
 		armOperatorPanelEx( tr( "Triangulate Faces" ), ps,
 			model->undoStack->index() - undoBase, seed );
 	}
+	update();
+}
+
+// ---------------------------------------------------------------------------
+// Split (Y) / Rip (V) — Blender-style in-place detachment
+
+void GLView::splitSelection()
+{
+	if ( !model || !editMode || pickedElems.isEmpty() ) {
+		emit gizmoStatus( tr( "Split needs a selection in edit mode" ) );
+		return;
+	}
+	QHash<int, QSet<int>> selVertsH = pickedVertexRefs();
+	QHash<int, QSet<int>> selFacesH;
+	for ( const auto & pe : pickedElems )
+		if ( pe.type == 3 && pe.shapeBlock >= 0 )
+			selFacesH[pe.shapeBlock].insert( pe.e0 );
+	QSet<int> shapeSet;
+	for ( int k : selVertsH.keys() )
+		shapeSet.insert( k );
+	for ( int k : selFacesH.keys() )
+		shapeSet.insert( k );
+
+	int totalDup = 0;
+	QVector<QPair<int, QHash<int, int>>> remapsByShape;
+	const bool macroU = ( model->undoStack != nullptr );
+	if ( macroU )
+		model->undoStack->beginMacro( tr( "Split" ) );
+	for ( int sb : shapeSet ) {
+		QModelIndex iShape = model->getBlockIndex( sb );
+		if ( !model->blockInherits( iShape, "BSTriShape" ) )
+			continue;
+		QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+		QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+		if ( !iVD.isValid() || !iTris.isValid() )
+			continue;
+		const int nT = model->get<int>( iShape, "Num Triangles" );
+		const int nV = model->get<int>( iShape, "Num Vertices" );
+		const QSet<int> & sv = selVertsH.value( sb );
+		const QSet<int> & sf = selFacesH.value( sb );
+
+		// region faces: explicit face picks, or faces fully covered by verts
+		QSet<int> region = sf;
+		QVector<Triangle> tris( nT );
+		for ( int t = 0; t < nT; t++ ) {
+			tris[t] = model->get<Triangle>( model->getIndex( iTris, t ) );
+			if ( !region.contains( t ) && !sv.isEmpty()
+				&& sv.contains( tris[t][0] ) && sv.contains( tris[t][1] ) && sv.contains( tris[t][2] ) )
+				region.insert( t );
+		}
+		if ( region.isEmpty() || region.size() == nT )
+			continue;	// nothing selected here, or everything (no boundary)
+
+		// boundary verts: used by region AND non-region faces
+		QSet<int> regionVerts, outsideVerts;
+		for ( int t = 0; t < nT; t++ ) {
+			const Triangle & tr = tris.at( t );
+			if ( tr[0] == tr[1] || tr[1] == tr[2] || tr[0] == tr[2] )
+				continue;
+			for ( int c = 0; c < 3; c++ )
+				( region.contains( t ) ? regionVerts : outsideVerts ).insert( tr[c] );
+		}
+		QVector<int> dupList;
+		for ( int v : regionVerts )
+			if ( outsideVerts.contains( v ) )
+				dupList.append( v );
+		if ( dupList.isEmpty() )
+			continue;	// already detached
+		std::sort( dupList.begin(), dupList.end() );
+		if ( nV + dupList.size() > 0xFFFF ) {
+			emit gizmoStatus( tr( "Split: would exceed the 65,535-vertex limit" ) );
+			continue;
+		}
+		QHash<int, int> vremap;
+		for ( int i = 0; i < dupList.size(); i++ )
+			vremap.insert( dupList.at( i ), nV + i );
+		QVector<int> regionList( region.constBegin(), region.constEnd() );
+		std::sort( regionList.begin(), regionList.end() );
+
+		const QPersistentModelIndex pShape( iShape );
+		auto applySplit = [this, pShape, dupList, vremap, regionList, nV]() {
+			QModelIndex iS( pShape );
+			if ( !iS.isValid() )
+				return;
+			model->setState( BaseModel::Processing );
+			QModelIndex iVD2 = model->getIndex( iS, "Vertex Data" );
+			QModelIndex iT2 = model->getIndex( iS, "Triangles" );
+			const int nT2 = model->get<int>( iS, "Num Triangles" );
+			const int ds = model->get<int>( iS, "Data Size" );
+			const int stride = ( nV > 0 ) ? ( ds - nT2 * 6 ) / nV : 0;
+			model->set<int>( iS, "Num Vertices", nV + dupList.size() );
+			model->updateArraySize( iVD2 );
+			for ( int i = 0; i < dupList.size(); i++ )
+				tlCopyItemValues( model, model->getIndex( iVD2, dupList.at( i ) ),
+					model->getIndex( iVD2, nV + i ) );
+			for ( int t : regionList ) {
+				Triangle tr = model->get<Triangle>( model->getIndex( iT2, t ) );
+				for ( int c = 0; c < 3; c++ )
+					if ( vremap.contains( tr[c] ) )
+						tr[c] = quint16( vremap.value( tr[c] ) );
+				model->set<Triangle>( model->getIndex( iT2, t ), tr );
+			}
+			if ( stride > 0 )
+				model->set<int>( iS, "Data Size",
+					int( nV + dupList.size() ) * stride + nT2 * 6 );
+			model->restoreState();
+			model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+		};
+		if ( model->undoStack )
+			model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Split" ), applySplit ) );
+		else
+			applySplit();
+		remapsByShape.append( qMakePair( sb, vremap ) );
+		totalDup += dupList.size();
+	}
+	if ( macroU )
+		model->undoStack->endMacro();
+
+	if ( totalDup == 0 ) {
+		emit gizmoStatus( tr( "Split: the selection shares no boundary with the rest of the mesh" ) );
+		return;
+	}
+	// the selection follows the split-off side: boundary vertex/edge picks
+	// move onto the duplicates (face indices are unchanged)
+	for ( PickedElement & pe : pickedElems ) {
+		for ( const auto & pr : std::as_const( remapsByShape ) ) {
+			if ( pe.shapeBlock != pr.first )
+				continue;
+			if ( pe.type == 1 && pr.second.contains( pe.e0 ) ) {
+				pe.e0 = pr.second.value( pe.e0 );
+			} else if ( pe.type == 2 ) {
+				if ( pr.second.contains( pe.e0 ) )
+					pe.e0 = pr.second.value( pe.e0 );
+				if ( pr.second.contains( pe.e1 ) )
+					pe.e1 = pr.second.value( pe.e1 );
+			}
+		}
+	}
+	modelChanged();
+	emit gizmoStatus( tr( "Split: %1 boundary vert(s) duplicated — the selection is the detached part" )
+		.arg( totalDup ) );
+	update();
+}
+
+void GLView::ripSelection()
+{
+	if ( !model || !editMode ) {
+		emit gizmoStatus( tr( "Rip needs edit mode" ) );
+		return;
+	}
+	auto ekey = []( int a, int b ) {
+		if ( a > b ) std::swap( a, b );
+		return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+	};
+	// the edge path (one mesh per rip in v1)
+	int sb = -1;
+	QSet<quint64> pathEdges;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) ) {
+		if ( pe.type != 2 )
+			continue;
+		if ( sb >= 0 && pe.shapeBlock != sb ) {
+			emit gizmoStatus( tr( "Rip: one mesh per rip" ) );
+			return;
+		}
+		sb = pe.shapeBlock;
+		pathEdges.insert( ekey( pe.e0, pe.e1 ) );
+	}
+	if ( sb < 0 || pathEdges.isEmpty() ) {
+		emit gizmoStatus( tr( "Rip: select an edge path in edge mode" ) );
+		return;
+	}
+	Shape * s = shapeForBlock( sb );
+	QModelIndex iShape = model->getBlockIndex( sb );
+	if ( !s || !model->blockInherits( iShape, "BSTriShape" ) ) {
+		emit gizmoStatus( tr( "Rip is supported on FO4 (BSTriShape) meshes only" ) );
+		return;
+	}
+	const int nV = s->verts.size();
+	const int nT = s->triangles.size();
+	auto degenerate = []( const Triangle & t ) {
+		return t[0] == t[1] || t[1] == t[2] || t[0] == t[2];
+	};
+
+	// validation: interior manifold path, no branches
+	const QHash<quint64, TlEdgeTris> adj = tlBuildEdgeTris( s );
+	for ( quint64 k : std::as_const( pathEdges ) ) {
+		if ( adj.value( k ).n != 2 ) {
+			emit gizmoStatus( tr( "Rip: the path must run through interior manifold edges" ) );
+			return;
+		}
+	}
+	QHash<int, int> degree;
+	for ( quint64 k : std::as_const( pathEdges ) ) {
+		degree[int( k >> 32 )]++;
+		degree[int( k & 0xFFFFFFFFu )]++;
+	}
+	for ( auto it = degree.constBegin(); it != degree.constEnd(); ++it ) {
+		if ( it.value() > 2 ) {
+			emit gizmoStatus( tr( "Rip: branching paths are not supported" ) );
+			return;
+		}
+	}
+
+	// seed: the path-adjacent face whose center is screen-closest to the
+	// cursor — that side follows the mouse (Blender)
+	const QPointF cur( mapFromGlobal( QCursor::pos() ) );
+	Transform wt = shapeRenderTrans( s );
+	float bestD = 1.0e30f;
+	int seedFace = -1;
+	for ( quint64 k : std::as_const( pathEdges ) ) {
+		const TlEdgeTris et = adj.value( k );
+		for ( int f : { et.t0, et.t1 } ) {
+			if ( f < 0 || f >= nT )
+				continue;
+			const Triangle & tr = s->triangles.at( f );
+			Vector3 c = ( wt * editVertexLocal( s, tr[0] ) + wt * editVertexLocal( s, tr[1] )
+				+ wt * editVertexLocal( s, tr[2] ) ) / 3.0f;
+			QPointF sp;
+			if ( !worldToScreen( c, sp ) )
+				continue;
+			const float d = float( std::hypot( sp.x() - cur.x(), sp.y() - cur.y() ) );
+			if ( d < bestD ) {
+				bestD = d;
+				seedFace = f;
+			}
+		}
+	}
+	if ( seedFace < 0 ) {
+		emit gizmoStatus( tr( "Rip: could not resolve the rip side" ) );
+		return;
+	}
+
+	// per interior path vertex, split the incident-face fan into the arcs on
+	// either side of the path (components not crossing path edges)
+	QHash<int, QVector<int>> vertFaces;
+	for ( int t = 0; t < nT; t++ ) {
+		const Triangle & tr = s->triangles.at( t );
+		if ( degenerate( tr ) )
+			continue;
+		for ( int c = 0; c < 3; c++ )
+			if ( degree.value( tr[c], 0 ) == 2 )	// interior path verts only
+				vertFaces[tr[c]].append( t );
+	}
+	struct VertArcs { int v; QVector<QSet<int>> comps; };
+	QVector<VertArcs> arcs;
+	for ( auto it = vertFaces.constBegin(); it != vertFaces.constEnd(); ++it ) {
+		const int v = it.key();
+		const QVector<int> & fl = it.value();
+		QVector<int> par( fl.size() );
+		for ( int i = 0; i < fl.size(); i++ )
+			par[i] = i;
+		// faces at v sharing a NON-path edge (v, o) union into one arc
+		QHash<int, QVector<int>> byOther;
+		for ( int i = 0; i < fl.size(); i++ ) {
+			const Triangle & tr = s->triangles.at( fl.at( i ) );
+			for ( int c = 0; c < 3; c++ )
+				if ( tr[c] != v )
+					byOther[tr[c]].append( i );
+		}
+		for ( auto ot = byOther.constBegin(); ot != byOther.constEnd(); ++ot ) {
+			if ( pathEdges.contains( ekey( v, ot.key() ) ) )
+				continue;
+			for ( int i = 1; i < ot.value().size(); i++ ) {
+				int ra = tlFindRoot( par, ot.value().at( 0 ) );
+				int rb = tlFindRoot( par, ot.value().at( i ) );
+				if ( ra != rb )
+					par[std::max( ra, rb )] = std::min( ra, rb );
+			}
+		}
+		QHash<int, QSet<int>> comps;
+		for ( int i = 0; i < fl.size(); i++ )
+			comps[tlFindRoot( par, i )].insert( fl.at( i ) );
+		if ( comps.size() < 2 )
+			continue;	// fan not split here (shouldn't happen mid-path)
+		VertArcs va;
+		va.v = v;
+		for ( auto ct = comps.constBegin(); ct != comps.constEnd(); ++ct )
+			va.comps.append( ct.value() );
+		arcs.append( va );
+	}
+	if ( arcs.isEmpty() ) {
+		emit gizmoStatus( tr( "Rip: select a path of at least two edges (interior verts rip)" ) );
+		return;
+	}
+
+	// flood the moving side from the seed through overlapping arcs
+	QSet<int> moveFaces;
+	moveFaces.insert( seedFace );
+	bool changed = true;
+	while ( changed ) {
+		changed = false;
+		for ( const VertArcs & va : std::as_const( arcs ) ) {
+			for ( const QSet<int> & comp : va.comps ) {
+				bool touch = false;
+				for ( int f : comp )
+					if ( moveFaces.contains( f ) ) {
+						touch = true;
+						break;
+					}
+				if ( !touch )
+					continue;
+				for ( int f : comp )
+					if ( !moveFaces.contains( f ) ) {
+						moveFaces.insert( f );
+						changed = true;
+					}
+			}
+		}
+	}
+
+	// rip verts: interior path verts with arcs on BOTH sides
+	QVector<int> dupList;
+	for ( const VertArcs & va : std::as_const( arcs ) ) {
+		bool hasMove = false, hasStay = false;
+		for ( const QSet<int> & comp : va.comps ) {
+			bool m = false;
+			for ( int f : comp )
+				if ( moveFaces.contains( f ) ) {
+					m = true;
+					break;
+				}
+			( m ? hasMove : hasStay ) = true;
+		}
+		if ( hasMove && hasStay )
+			dupList.append( va.v );
+	}
+	if ( dupList.isEmpty() ) {
+		emit gizmoStatus( tr( "Rip: nothing to rip here" ) );
+		return;
+	}
+	std::sort( dupList.begin(), dupList.end() );
+	if ( nV + dupList.size() > 0xFFFF ) {
+		emit gizmoStatus( tr( "Rip: would exceed the 65,535-vertex limit" ) );
+		return;
+	}
+	QHash<int, int> vremap;
+	for ( int i = 0; i < dupList.size(); i++ )
+		vremap.insert( dupList.at( i ), nV + i );
+
+	// move-side triangles that touch a ripped vert re-point onto the copies
+	QVector<QPair<int, Triangle>> repoint;
+	for ( int f : std::as_const( moveFaces ) ) {
+		if ( f < 0 || f >= nT )
+			continue;
+		Triangle tr = s->triangles.at( f );
+		bool ch = false;
+		for ( int c = 0; c < 3; c++ ) {
+			if ( vremap.contains( tr[c] ) ) {
+				tr[c] = quint16( vremap.value( tr[c] ) );
+				ch = true;
+			}
+		}
+		if ( ch )
+			repoint.append( qMakePair( f, tr ) );
+	}
+
+	const QPersistentModelIndex pShape( iShape );
+	auto applyRip = [this, pShape, dupList, repoint, nV]() {
+		QModelIndex iS( pShape );
+		if ( !iS.isValid() )
+			return;
+		model->setState( BaseModel::Processing );
+		QModelIndex iVD2 = model->getIndex( iS, "Vertex Data" );
+		QModelIndex iT2 = model->getIndex( iS, "Triangles" );
+		const int nT2 = model->get<int>( iS, "Num Triangles" );
+		const int ds = model->get<int>( iS, "Data Size" );
+		const int stride = ( nV > 0 ) ? ( ds - nT2 * 6 ) / nV : 0;
+		model->set<int>( iS, "Num Vertices", nV + dupList.size() );
+		model->updateArraySize( iVD2 );
+		for ( int i = 0; i < dupList.size(); i++ )
+			tlCopyItemValues( model, model->getIndex( iVD2, dupList.at( i ) ),
+				model->getIndex( iVD2, nV + i ) );
+		for ( const auto & rp : repoint )
+			model->set<Triangle>( model->getIndex( iT2, rp.first ), rp.second );
+		if ( stride > 0 )
+			model->set<int>( iS, "Data Size",
+				int( nV + dupList.size() ) * stride + nT2 * 6 );
+		model->restoreState();
+		model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+	};
+	if ( model->undoStack )
+		model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Rip" ), applyRip ) );
+	else
+		applyRip();
+
+	// select the ripped copies and start the chained move (Blender: the
+	// ripped side follows the mouse; Esc keeps it coincident)
+	pickedElems.clear();
+	for ( int v : std::as_const( dupList ) ) {
+		PickedElement pe;
+		pe.shapeBlock = sb;
+		pe.type = 1;
+		pe.e0 = vremap.value( v );
+		pe.worldPos = wt * editVertexLocal( s, v );
+		pe.wA = pe.wB = pe.wC = pe.worldPos;
+		pickedElems.append( pe );
+	}
+	pickMode |= 1;
+	modelChanged();
+	gizmoBeginElement( 1 );
+	emit gizmoStatus( tr( "Rip: %1 vert(s) ripped — move the ripped side, Esc keeps it in place" )
+		.arg( dupList.size() ) );
+}
+
+void GLView::bevelSelection( float width, bool armPanel )
+{
+	// Bevel via rip + offset + bridge: rip the edge path, push both rows
+	// half the width into their own side's surface plane, and bridge the
+	// slit with a marked-quad strip. The path ENDPOINTS stay welded and the
+	// strip tapers closed into them with one triangle each — so the corner
+	// terminations that made bevel a mesh-corrupter risk never arise.
+	// Same input contract as Rip: one mesh, interior manifold path, no
+	// branches, at least two edges (or a closed loop).
+	if ( !model || !editMode ) {
+		emit gizmoStatus( tr( "Bevel needs edit mode" ) );
+		return;
+	}
+	auto ekey = []( int a, int b ) {
+		if ( a > b ) std::swap( a, b );
+		return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+	};
+	const QVector<PickedElement> seed = pickedElems;
+	int sb = -1;
+	QSet<quint64> pathEdges;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) ) {
+		if ( pe.type != 2 )
+			continue;
+		if ( sb >= 0 && pe.shapeBlock != sb ) {
+			emit gizmoStatus( tr( "Bevel: one mesh per bevel" ) );
+			return;
+		}
+		sb = pe.shapeBlock;
+		pathEdges.insert( ekey( pe.e0, pe.e1 ) );
+	}
+	if ( sb < 0 || pathEdges.isEmpty() ) {
+		emit gizmoStatus( tr( "Bevel: select an edge path in edge mode" ) );
+		return;
+	}
+	Shape * s = shapeForBlock( sb );
+	QModelIndex iShape = model->getBlockIndex( sb );
+	if ( !s || !model->blockInherits( iShape, "BSTriShape" ) ) {
+		emit gizmoStatus( tr( "Bevel is supported on FO4 (BSTriShape) meshes only" ) );
+		return;
+	}
+	const int nV = s->verts.size();
+	const int nT = s->triangles.size();
+	auto degenerate = []( const Triangle & t ) {
+		return t[0] == t[1] || t[1] == t[2] || t[0] == t[2];
+	};
+
+	const QHash<quint64, TlEdgeTris> adj = tlBuildEdgeTris( s );
+	for ( quint64 k : std::as_const( pathEdges ) ) {
+		if ( adj.value( k ).n != 2 ) {
+			emit gizmoStatus( tr( "Bevel: the path must run through interior manifold edges" ) );
+			return;
+		}
+	}
+	QHash<int, int> degree;
+	for ( quint64 k : std::as_const( pathEdges ) ) {
+		degree[int( k >> 32 )]++;
+		degree[int( k & 0xFFFFFFFFu )]++;
+	}
+	QHash<int, QVector<int>> nbr;
+	for ( quint64 k : std::as_const( pathEdges ) ) {
+		const int a = int( k >> 32 ), b = int( k & 0xFFFFFFFFu );
+		nbr[a].append( b );
+		nbr[b].append( a );
+	}
+	for ( auto it = degree.constBegin(); it != degree.constEnd(); ++it ) {
+		if ( it.value() > 2 ) {
+			emit gizmoStatus( tr( "Bevel: branching paths are not supported" ) );
+			return;
+		}
+	}
+
+	// ordered chain walk (open: endpoint to endpoint; closed: full ring)
+	bool closed = true;
+	int start = -1;
+	for ( auto it = degree.constBegin(); it != degree.constEnd(); ++it ) {
+		if ( it.value() == 1 ) {
+			start = it.key();
+			closed = false;
+			break;
+		}
+	}
+	if ( start < 0 )
+		start = int( *pathEdges.constBegin() >> 32 );
+	QVector<int> chain;
+	{
+		int prev = -1, cur = start;
+		chain.append( cur );
+		while ( chain.size() <= pathEdges.size() + 1 ) {
+			int nxt = -1;
+			for ( int cand : nbr.value( cur ) )
+				if ( cand != prev ) {
+					nxt = cand;
+					break;
+				}
+			if ( nxt < 0 || ( closed && nxt == start ) )
+				break;
+			chain.append( nxt );
+			prev = cur;
+			cur = nxt;
+		}
+	}
+	const int expected = closed ? pathEdges.size() : pathEdges.size() + 1;
+	if ( chain.size() != expected ) {
+		emit gizmoStatus( tr( "Bevel: the selected edges must form one connected path" ) );
+		return;
+	}
+	// interior verts, in chain order (closed loop: every vert)
+	QVector<int> interior;
+	QVector<int> chainPos;	// interior[i]'s index in chain
+	for ( int ci = 0; ci < chain.size(); ci++ ) {
+		if ( degree.value( chain.at( ci ), 0 ) == 2 ) {
+			interior.append( chain.at( ci ) );
+			chainPos.append( ci );
+		}
+	}
+	if ( interior.isEmpty() ) {
+		emit gizmoStatus( tr( "Bevel: select a path of at least two edges (interior verts bevel)" ) );
+		return;
+	}
+	if ( nV + interior.size() > 0xFFFF ) {
+		emit gizmoStatus( tr( "Bevel: would exceed the 65,535-vertex limit" ) );
+		return;
+	}
+
+	// per interior vertex, the incident-face fan splits into side arcs
+	QHash<int, QVector<int>> vertFaces;
+	for ( int t = 0; t < nT; t++ ) {
+		const Triangle & tr = s->triangles.at( t );
+		if ( degenerate( tr ) )
+			continue;
+		for ( int c = 0; c < 3; c++ )
+			if ( degree.value( tr[c], 0 ) == 2 )
+				vertFaces[tr[c]].append( t );
+	}
+	struct VertArcs { int v; QVector<QSet<int>> comps; };
+	QVector<VertArcs> arcs;
+	for ( auto it = vertFaces.constBegin(); it != vertFaces.constEnd(); ++it ) {
+		const int v = it.key();
+		const QVector<int> & fl = it.value();
+		QVector<int> par( fl.size() );
+		for ( int i = 0; i < fl.size(); i++ )
+			par[i] = i;
+		QHash<int, QVector<int>> byOther;
+		for ( int i = 0; i < fl.size(); i++ ) {
+			const Triangle & tr = s->triangles.at( fl.at( i ) );
+			for ( int c = 0; c < 3; c++ )
+				if ( tr[c] != v )
+					byOther[tr[c]].append( i );
+		}
+		for ( auto ot = byOther.constBegin(); ot != byOther.constEnd(); ++ot ) {
+			if ( pathEdges.contains( ekey( v, ot.key() ) ) )
+				continue;
+			for ( int i = 1; i < ot.value().size(); i++ ) {
+				int ra = tlFindRoot( par, ot.value().at( 0 ) );
+				int rb = tlFindRoot( par, ot.value().at( i ) );
+				if ( ra != rb )
+					par[std::max( ra, rb )] = std::min( ra, rb );
+			}
+		}
+		QHash<int, QSet<int>> comps;
+		for ( int i = 0; i < fl.size(); i++ )
+			comps[tlFindRoot( par, i )].insert( fl.at( i ) );
+		if ( comps.size() < 2 )
+			continue;
+		VertArcs va;
+		va.v = v;
+		for ( auto ct = comps.constBegin(); ct != comps.constEnd(); ++ct )
+			va.comps.append( ct.value() );
+		arcs.append( va );
+	}
+
+	// flood both sides from the two faces of the first path edge
+	auto flood = [&arcs]( int seedFace ) {
+		QSet<int> fs;
+		fs.insert( seedFace );
+		bool changed = true;
+		while ( changed ) {
+			changed = false;
+			for ( const VertArcs & va : std::as_const( arcs ) ) {
+				for ( const QSet<int> & comp : va.comps ) {
+					bool touch = false;
+					for ( int f : comp )
+						if ( fs.contains( f ) ) {
+							touch = true;
+							break;
+						}
+					if ( !touch )
+						continue;
+					for ( int f : comp )
+						if ( !fs.contains( f ) ) {
+							fs.insert( f );
+							changed = true;
+						}
+				}
+			}
+		}
+		return fs;
+	};
+	const TlEdgeTris eSeed = adj.value( ekey( chain.at( 0 ), chain.at( 1 ) ) );
+	QSet<int> sideA = flood( eSeed.t0 );
+	QSet<int> sideB = flood( eSeed.t1 );
+	if ( sideA.intersects( sideB ) ) {
+		emit gizmoStatus( tr( "Bevel: the two sides of the path connect — cannot bevel here" ) );
+		return;
+	}
+
+	// default width: a quarter of the average path edge length
+	if ( width < 0.0f ) {
+		float len = 0.0f;
+		for ( quint64 k : std::as_const( pathEdges ) )
+			len += ( s->verts.at( int( k >> 32 ) ) - s->verts.at( int( k & 0xFFFFFFFFu ) ) ).length();
+		width = 0.25f * len / float( pathEdges.size() );
+	}
+
+	// offsets: each row moves half the width into its own side's surface
+	// plane, perpendicular to the local path direction (centroid-based side
+	// direction — a v1 approximation of Blender's edge-slide directions)
+	QHash<int, int> vremap;
+	for ( int i = 0; i < interior.size(); i++ )
+		vremap.insert( interior.at( i ), nV + i );
+	QVector<Vector3> offA( interior.size() ), offB( interior.size() );
+	for ( int i = 0; i < interior.size(); i++ ) {
+		const int v = interior.at( i );
+		const int ci = chainPos.at( i );
+		const int vPrev = chain.at( ( ci - 1 + chain.size() ) % chain.size() );
+		const int vNext = chain.at( ( ci + 1 ) % chain.size() );
+		const Vector3 p = s->verts.at( v );
+		Vector3 pathDir = s->verts.at( vNext ) - s->verts.at( vPrev );
+		if ( pathDir.squaredLength() > 1.0e-12f )
+			pathDir.normalize();
+		auto sideDir = [&]( const QSet<int> & side ) {
+			Vector3 acc;
+			int cnt = 0;
+			for ( int f : vertFaces.value( v ) ) {
+				if ( !side.contains( f ) )
+					continue;
+				const Triangle & tr = s->triangles.at( f );
+				const Vector3 c = ( s->verts.at( tr[0] ) + s->verts.at( tr[1] )
+					+ s->verts.at( tr[2] ) ) / 3.0f;
+				acc += c - p;
+				cnt++;
+			}
+			if ( cnt == 0 )
+				return Vector3();
+			acc = acc / float( cnt );
+			acc -= pathDir * Vector3::dotproduct( acc, pathDir );
+			if ( acc.squaredLength() > 1.0e-12f )
+				acc.normalize();
+			return acc;
+		};
+		offA[i] = p + sideDir( sideA ) * ( width * 0.5f );
+		offB[i] = p + sideDir( sideB ) * ( width * 0.5f );
+	}
+
+	// side B faces touching an interior vert re-point onto the copies
+	QVector<QPair<int, Triangle>> repoint;
+	for ( int f : std::as_const( sideB ) ) {
+		if ( f < 0 || f >= nT )
+			continue;
+		Triangle tr = s->triangles.at( f );
+		bool ch = false;
+		for ( int c = 0; c < 3; c++ ) {
+			if ( vremap.contains( tr[c] ) ) {
+				tr[c] = quint16( vremap.value( tr[c] ) );
+				ch = true;
+			}
+		}
+		if ( ch )
+			repoint.append( qMakePair( f, tr ) );
+	}
+
+	// bridge the slit with a quad strip (+ end triangles on an open chain)
+	QVector<Triangle> fill;
+	QSet<quint64> stripDiags;
+	auto addQuad = [&]( int a0, int a1, int b1, int b0 ) {
+		// quad loop a0 -> a1 -> b1 -> b0, diagonal a0-b1
+		fill.append( Triangle( quint16( a0 ), quint16( a1 ), quint16( b1 ) ) );
+		fill.append( Triangle( quint16( a0 ), quint16( b1 ), quint16( b0 ) ) );
+		stripDiags.insert( ekey( a0, b1 ) );
+	};
+	for ( int i = 0; i + 1 < interior.size(); i++ ) {
+		if ( chainPos.at( i + 1 ) != chainPos.at( i ) + 1 )
+			continue;	// not chain-adjacent (cannot happen on a valid path)
+		addQuad( interior.at( i ), interior.at( i + 1 ),
+			vremap.value( interior.at( i + 1 ) ), vremap.value( interior.at( i ) ) );
+	}
+	if ( closed ) {
+		addQuad( interior.constLast(), interior.constFirst(),
+			vremap.value( interior.constFirst() ), vremap.value( interior.constLast() ) );
+	} else {
+		// taper triangles into the welded endpoints
+		fill.append( Triangle( quint16( chain.constFirst() ),
+			quint16( interior.constFirst() ), quint16( vremap.value( interior.constFirst() ) ) ) );
+		fill.append( Triangle( quint16( chain.constLast() ),
+			quint16( vremap.value( interior.constLast() ) ), quint16( interior.constLast() ) ) );
+	}
+
+	// winding: one decision for the whole strip, from the surface normal of
+	// side A around the path vs the first quad's normal at offset positions
+	{
+		Vector3 surfN;
+		for ( int f : std::as_const( sideA ) ) {
+			if ( f < 0 || f >= nT )
+				continue;
+			const Triangle & tr = s->triangles.at( f );
+			surfN += Vector3::crossproduct( s->verts.at( tr[1] ) - s->verts.at( tr[0] ),
+				s->verts.at( tr[2] ) - s->verts.at( tr[0] ) );
+		}
+		auto posOf = [&]( int v ) {
+			for ( int i = 0; i < interior.size(); i++ ) {
+				if ( interior.at( i ) == v )
+					return offA.at( i );
+				if ( vremap.value( interior.at( i ), -1 ) == v )
+					return offB.at( i );
+			}
+			return s->verts.at( v );
+		};
+		if ( !fill.isEmpty() ) {
+			const Triangle & f0 = fill.constFirst();
+			const Vector3 n0 = Vector3::crossproduct( posOf( f0[1] ) - posOf( f0[0] ),
+				posOf( f0[2] ) - posOf( f0[0] ) );
+			if ( Vector3::dotproduct( n0, surfN ) < 0.0f ) {
+				for ( Triangle & tr : fill )
+					std::swap( tr[1], tr[2] );
+			}
+		}
+	}
+
+	// apply in place; strip diagonals recorded as quad marks in the macro
+	const QPersistentModelIndex pShape( iShape );
+	const QVector<int> interiorCopy = interior;
+	auto applyBevel = [this, pShape, interiorCopy, offA, offB, repoint, fill, nV]() {
+		QModelIndex iS( pShape );
+		if ( !iS.isValid() )
+			return;
+		model->setState( BaseModel::Processing );
+		QModelIndex iVD2 = model->getIndex( iS, "Vertex Data" );
+		QModelIndex iT2 = model->getIndex( iS, "Triangles" );
+		const int nT2 = model->get<int>( iS, "Num Triangles" );
+		const int ds = model->get<int>( iS, "Data Size" );
+		const int stride = ( nV > 0 ) ? ( ds - nT2 * 6 ) / nV : 0;
+		model->set<int>( iS, "Num Vertices", nV + interiorCopy.size() );
+		model->updateArraySize( iVD2 );
+		for ( int i = 0; i < interiorCopy.size(); i++ ) {
+			tlCopyItemValues( model, model->getIndex( iVD2, interiorCopy.at( i ) ),
+				model->getIndex( iVD2, nV + i ) );
+			tlSetVertexLocal( model, iS, nV + i, offB.at( i ) );
+			tlSetVertexLocal( model, iS, interiorCopy.at( i ), offA.at( i ) );
+		}
+		for ( const auto & rp : repoint )
+			model->set<Triangle>( model->getIndex( iT2, rp.first ), rp.second );
+		model->set<int>( iS, "Num Triangles", nT2 + fill.size() );
+		model->updateArraySize( iT2 );
+		for ( int i = 0; i < fill.size(); i++ )
+			model->set<Triangle>( model->getIndex( iT2, nT2 + i ), fill.at( i ) );
+		if ( stride > 0 )
+			model->set<int>( iS, "Data Size",
+				int( nV + interiorCopy.size() ) * stride + ( nT2 + fill.size() ) * 6 );
+		QSet<int> touched;
+		for ( int i = 0; i < interiorCopy.size(); i++ )
+			touched << interiorCopy.at( i ) << ( nV + i );
+		for ( const Triangle & tr : fill )
+			touched << tr[0] << tr[1] << tr[2];
+		tlRecalcNormalsSubset( model, iS, touched );
+		tlUpdateBounds( model, iS );
+		model->restoreState();
+		model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+	};
+
+	// marks: keep valid old marks that don't touch the beveled path (side B
+	// edges were re-pointed), add the strip's diagonals
+	QSet<quint64> newMarks;
+	{
+		const QSet<quint64> oldMarks = quadMarksFor( sb );
+		QSet<int> pathVerts( degree.keyBegin(), degree.keyEnd() );
+		for ( quint64 k : oldMarks ) {
+			if ( !pathVerts.contains( int( k >> 32 ) )
+				&& !pathVerts.contains( int( k & 0xFFFFFFFFu ) ) )
+				newMarks.insert( k );
+		}
+		newMarks |= stripDiags;
+	}
+	if ( model->undoStack ) {
+		model->undoStack->beginMacro( tr( "Bevel" ) );
+		model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Bevel" ), applyBevel ) );
+		setQuadMarks( sb, newMarks, tr( "Bevel" ), nV + interior.size() );
+		model->undoStack->endMacro();
+	} else {
+		applyBevel();
+	}
+	pickedElems.clear();
+	modelChanged();
+
+	if ( armPanel && model->undoStack ) {
+		lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+			bevelSelection( float( ps.value( 0 ).value ), false );
+		};
+		QVector<TlOpParam> ps( 1 );
+		ps[0].label = tr( "Width" );
+		ps[0].type = TlOpParam::Float;
+		ps[0].value = width;
+		ps[0].mn = 0.0;
+		ps[0].mx = 10000.0;
+		ps[0].step = 0.05;
+		ps[0].decimals = 3;
+		armOperatorPanelEx( tr( "Bevel" ), ps, 1, seed );
+	}
+	emit gizmoStatus( tr( "Bevel: %1 vert(s) beveled into a %2-quad strip" )
+		.arg( interior.size() ).arg( fill.size() / 2 ) );
 	update();
 }
 
@@ -9444,12 +10985,24 @@ void GLView::beginKnife()
 	knifePoints.clear();
 	knifeHoverValid = knifeProbe( QPointF( mapFromGlobal( QCursor::pos() ) ), knifeHoverPt );
 	setCursor( Qt::CrossCursor );
-	emit gizmoStatus( tr( "Knife: LMB place cut points (snaps to verts/edges), MMB orbit, Enter cut, Esc cancel" ) );
+	// the cut points reference vertex indices: any undo-stack activity while
+	// the knife is armed (Edit menu Undo, Ctrl+Z with the pointer off the
+	// viewport, a spell) can invalidate them, so it cancels the knife
+	if ( model->undoStack ) {
+		knifeUndoConn = connect( model->undoStack, &QUndoStack::indexChanged,
+			this, [this]( int ) {
+				if ( knifeActive )
+					cancelKnife();
+			} );
+	}
+	emit gizmoStatus( tr( "Knife: LMB place cut points (snaps to verts/edges), MMB orbit, Z cut-through (%1), Enter cut, Esc cancel" )
+		.arg( knifeCutThrough ? tr( "on" ) : tr( "off" ) ) );
 	update();
 }
 
 void GLView::cancelKnife()
 {
+	disconnect( knifeUndoConn );
 	knifeActive = false;
 	knifePoints.clear();
 	knifeHoverValid = false;
@@ -9541,7 +11094,29 @@ bool GLView::knifeProbe( const QPointF & pos, KnifePoint & kp ) const
 		return true;
 	}
 
-	// free point on the face (v1: waypoint only)
+	// free point on the face: becomes a poked vertex on apply (v2). The
+	// barycentrics are clamped slightly inward so the fan cannot degenerate.
+	kp.faceTri = hit.tri;
+	{
+		const Vector3 pa = editVertexLocal( s, t[0] );
+		const Vector3 pb = editVertexLocal( s, t[1] );
+		const Vector3 pc = editVertexLocal( s, t[2] );
+		const Vector3 n = Vector3::crossproduct( pb - pa, pc - pa );
+		const float a2 = n.squaredLength();
+		if ( a2 > 1.0e-16f ) {
+			const Vector3 & p = hit.hitLocal;
+			float u = Vector3::dotproduct( Vector3::crossproduct( pc - pb, p - pb ), n ) / a2;
+			float v = Vector3::dotproduct( Vector3::crossproduct( pa - pc, p - pc ), n ) / a2;
+			float w = 1.0f - u - v;
+			u = std::max( u, 0.02f );
+			v = std::max( v, 0.02f );
+			w = std::max( w, 0.02f );
+			const float sum = u + v + w;
+			kp.bary = Vector3( u / sum, v / sum, w / sum );
+		} else {
+			kp.faceTri = -1;
+		}
+	}
 	kp.world = wt * hit.hitLocal;
 	worldToScreen( kp.world, kp.screen );
 	return true;
@@ -9554,31 +11129,33 @@ void GLView::knifeAddPoint( const QPointF & pos )
 		emit gizmoStatus( tr( "Knife: click on the edited mesh" ) );
 		return;
 	}
-	if ( !knifePoints.isEmpty() && knifePoints.constLast().shapeBlock != kp.shapeBlock ) {
-		emit gizmoStatus( tr( "Knife: one mesh per cut" ) );
-		return;
-	}
+	// v2: the polyline may run across several edit-session meshes; the cut
+	// applies per shape on Enter
 	knifePoints.append( kp );
+	update();
+}
+
+void GLView::knifeToggleCutThrough()
+{
+	knifeCutThrough = !knifeCutThrough;
+	emit gizmoStatus( knifeCutThrough
+		? tr( "Knife: cut-through ON (occluded front-facing edges are cut)" )
+		: tr( "Knife: cut-through OFF (only visible edges are cut)" ) );
 	update();
 }
 
 void GLView::knifeApply()
 {
+	// disarm the undo-stack watcher FIRST: the apply itself pushes commands
+	disconnect( knifeUndoConn );
 	const QVector<KnifePoint> pts = knifePoints;
+	const bool cutThrough = knifeCutThrough;
 	knifeActive = false;
 	knifePoints.clear();
 	knifeHoverValid = false;
 	unsetCursor();
 	if ( pts.size() < 2 || !model ) {
 		emit gizmoStatus( tr( "Knife: place at least two points, then Enter" ) );
-		update();
-		return;
-	}
-	const int sb = pts.constFirst().shapeBlock;
-	Shape * s = shapeForBlock( sb );
-	QModelIndex iShape = model->getBlockIndex( sb );
-	if ( !s || !model->blockInherits( iShape, "BSTriShape" ) ) {
-		emit gizmoStatus( tr( "Knife is supported on FO4 (BSTriShape) meshes only" ) );
 		update();
 		return;
 	}
@@ -9593,205 +11170,310 @@ void GLView::knifeApply()
 		}
 	}
 
-	// cut set: normalized edge key -> split position
-	QHash<quint64, float> cuts;
-	auto addCut = [&cuts]( int a, int b, float t ) {
-		if ( a == b )
-			return;
-		if ( a > b ) {
-			std::swap( a, b );
-			t = 1.0f - t;
-		}
-		const quint64 k = quadEdgeKey( a, b );
-		if ( !cuts.contains( k ) )
-			cuts.insert( k, std::clamp( t, 0.02f, 0.98f ) );
-	};
+	// v2: the polyline may span several edit-session meshes; each applies
+	// its own cuts, all inside one undo macro
+	QSet<int> shapes;
 	for ( const KnifePoint & kp : pts )
-		if ( kp.edgeA >= 0 )
-			addCut( kp.edgeA, kp.edgeB, kp.edgeT );
+		shapes.insert( kp.shapeBlock );
 
-	// candidate edges: unique edges of visible, front-facing triangles
-	const QSet<int> hiddenT = editHiddenTris.value( sb );
-	Transform wt = shapeRenderTrans( s );
 	const Vector3 eye = viewTransform().inverted() * Vector3( 0.0f, 0.0f, 0.0f );
-	struct ScrEdge { int a, b; QPointF sa, sb; };
-	QVector<ScrEdge> edges;
-	{
-		QSet<quint64> seen;
-		for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
-			if ( hiddenT.contains( ti ) )
+	int totalCuts = 0, totalPokes = 0;
+	const bool macroU = ( model->undoStack != nullptr );
+	if ( macroU )
+		model->undoStack->beginMacro( tr( "Knife" ) );
+	for ( int sb : std::as_const( shapes ) ) {
+		Shape * s = shapeForBlock( sb );
+		QModelIndex iShape = model->getBlockIndex( sb );
+		if ( !s || !model->blockInherits( iShape, "BSTriShape" ) )
+			continue;
+
+		// interior points on this shape become poked vertices (one per tri)
+		struct Poke { int tri; Vector3 bary; };
+		QVector<Poke> pokes;
+		QSet<int> pokedTris;
+		for ( const KnifePoint & kp : pts ) {
+			if ( kp.shapeBlock != sb || kp.snapVert >= 0 || kp.edgeA >= 0
+				|| kp.faceTri < 0 || kp.faceTri >= s->triangles.size() )
 				continue;
-			const Triangle & t = s->triangles.at( ti );
-			if ( t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
-				continue;
-			const Vector3 w0 = wt * editVertexLocal( s, t[0] );
-			const Vector3 w1 = wt * editVertexLocal( s, t[1] );
-			const Vector3 w2 = wt * editVertexLocal( s, t[2] );
-			Vector3 n = Vector3::crossproduct( w1 - w0, w2 - w0 );
-			if ( Vector3::dotproduct( n, eye - ( w0 + w1 + w2 ) / 3.0f ) <= 0.0f )
-				continue;	// back-facing: Blender's default knife cuts what you see
-			for ( int e = 0; e < 3; e++ ) {
-				const int a = t[e], b = t[( e + 1 ) % 3];
-				const quint64 k = quadEdgeKey( a, b );
-				if ( seen.contains( k ) )
-					continue;
-				seen.insert( k );
-				ScrEdge se;
-				se.a = std::min( a, b );
-				se.b = std::max( a, b );
-				QPointF pa, pb;
-				if ( !worldToScreen( wt * editVertexLocal( s, se.a ), pa )
-					|| !worldToScreen( wt * editVertexLocal( s, se.b ), pb ) )
-					continue;
-				se.sa = pa;
-				se.sb = pb;
-				edges.append( se );
+			if ( pokedTris.contains( kp.faceTri ) )
+				continue;	// one poke per triangle (v2)
+			pokedTris.insert( kp.faceTri );
+			Poke pk;
+			pk.tri = kp.faceTri;
+			pk.bary = kp.bary;
+			pokes.append( pk );
+		}
+
+		// cut set: normalized edge key -> split position
+		QHash<quint64, float> cuts;
+		auto addCut = [&cuts]( int a, int b, float t ) {
+			if ( a == b )
+				return;
+			if ( a > b ) {
+				std::swap( a, b );
+				t = 1.0f - t;
 			}
-		}
-	}
-
-	// 2D segment/segment crossings between the polyline and the edges
-	for ( int i = 0; i + 1 < pts.size(); i++ ) {
-		const QPointF p0 = scr.at( i ), p1 = scr.at( i + 1 );
-		const QPointF r = p1 - p0;
-		for ( const ScrEdge & se : std::as_const( edges ) ) {
-			const QPointF q0 = se.sa, q1 = se.sb;
-			const QPointF q = q1 - q0;
-			const double denom = r.x() * q.y() - r.y() * q.x();
-			if ( std::fabs( denom ) < 1.0e-9 )
-				continue;
-			const QPointF d = q0 - p0;
-			const double tSeg = ( d.x() * q.y() - d.y() * q.x() ) / denom;
-			const double uEdge = ( d.x() * r.y() - d.y() * r.x() ) / denom;
-			if ( tSeg < 0.0 || tSeg > 1.0 || uEdge < 0.02 || uEdge > 0.98 )
-				continue;
-			addCut( se.a, se.b, float( uEdge ) );
-		}
-	}
-
-	if ( cuts.isEmpty() ) {
-		emit gizmoStatus( tr( "Knife: the line crossed no edges" ) );
-		update();
-		return;
-	}
-	const int oldNV = model->get<int>( iShape, "Num Vertices" );
-	if ( oldNV + cuts.size() > 0xFFFF ) {
-		emit gizmoStatus( tr( "Knife: result would exceed the 65,535-vertex limit" ) );
-		update();
-		return;
-	}
-
-	// apply: split each cut edge at its position, then re-split the affected
-	// triangles exactly like Subdivide does (its splitting is t-agnostic)
-	const QPersistentModelIndex pShape( iShape );
-	QVector<QPair<quint64, float>> cutList;
-	cutList.reserve( cuts.size() );
-	for ( auto it = cuts.constBegin(); it != cuts.constEnd(); ++it )
-		cutList.append( qMakePair( it.key(), it.value() ) );
-	auto applyKnife = [this, pShape, cutList]() {
-		QModelIndex iS( pShape );
-		if ( !iS.isValid() )
-			return;
-		auto ekey = []( int a, int b ) {
-			if ( a > b ) std::swap( a, b );
-			return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+			const quint64 k = quadEdgeKey( a, b );
+			if ( !cuts.contains( k ) )
+				cuts.insert( k, std::clamp( t, 0.02f, 0.98f ) );
 		};
-		QModelIndex iVD = model->getIndex( iS, "Vertex Data" );
-		QModelIndex iT = model->getIndex( iS, "Triangles" );
-		const int nv = model->get<int>( iS, "Num Vertices" );
-		const int nt = model->get<int>( iS, "Num Triangles" );
-		const int ds = model->get<int>( iS, "Data Size" );
-		const int stride = ( nv > 0 ) ? ( ds - nt * 6 ) / nv : 0;
-		QVector<Triangle> tv( nt );
-		for ( int t = 0; t < nt; t++ )
-			tv[t] = model->get<Triangle>( model->getIndex( iT, t ) );
+		for ( const KnifePoint & kp : pts )
+			if ( kp.shapeBlock == sb && kp.edgeA >= 0 )
+				addCut( kp.edgeA, kp.edgeB, kp.edgeT );
 
-		model->setState( BaseModel::Processing );
-		model->set<int>( iS, "Num Vertices", nv + cutList.size() );
-		model->updateArraySize( iVD );
-		QHash<quint64, int> mid;
-		int nvi = nv;
-		for ( const auto & c : cutList ) {
-			const int a = int( c.first >> 32 ), b = int( c.first & 0xFFFFFFFFu );
-			tlWriteLerpVertex( model, iS, nvi, a, b, c.second );
-			mid.insert( c.first, nvi++ );
-		}
-		QVector<Triangle> out;
-		out.reserve( nt * 2 );
-		QSet<int> touched;
-		for ( int t = 0; t < nt; t++ ) {
-			const Triangle & tr = tv.at( t );
-			if ( tr[0] == tr[1] || tr[1] == tr[2] || tr[0] == tr[2] ) {
-				out.append( tr );
-				continue;
-			}
-			int m[3];
-			int count = 0;
-			for ( int e = 0; e < 3; e++ ) {
-				m[e] = mid.value( ekey( tr[e], tr[( e + 1 ) % 3] ), -1 );
-				if ( m[e] >= 0 )
-					count++;
-			}
-			if ( count == 0 ) {
-				out.append( tr );
-				continue;
-			}
-			touched << tr[0] << tr[1] << tr[2];
-			for ( int e = 0; e < 3; e++ )
-				if ( m[e] >= 0 )
-					touched << m[e];
-			const quint16 a = tr[0], b = tr[1], c = tr[2];
-			const int mab = m[0], mbc = m[1], mca = m[2];
-			if ( count == 3 ) {
-				out.append( Triangle( a, quint16( mab ), quint16( mca ) ) );
-				out.append( Triangle( quint16( mab ), b, quint16( mbc ) ) );
-				out.append( Triangle( quint16( mca ), quint16( mbc ), c ) );
-				out.append( Triangle( quint16( mab ), quint16( mbc ), quint16( mca ) ) );
-			} else if ( count == 2 ) {
-				quint16 p = a, q = b, r = c;
-				int m1 = mab, m2 = mbc;
-				if ( mab >= 0 && mca >= 0 ) {
-					p = c; q = a; r = b;
-					m1 = mca; m2 = mab;
-				} else if ( mbc >= 0 && mca >= 0 ) {
-					p = b; q = c; r = a;
-					m1 = mbc; m2 = mca;
+		// candidate edges: unique edges of visible, front-facing triangles
+		const QSet<int> hiddenT = editHiddenTris.value( sb );
+		Transform wt = shapeRenderTrans( s );
+		struct ScrEdge { int a, b; QPointF sa, sb; };
+		QVector<ScrEdge> edges;
+		{
+			QSet<quint64> seen;
+			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+				if ( hiddenT.contains( ti ) )
+					continue;
+				const Triangle & t = s->triangles.at( ti );
+				if ( t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+					continue;
+				const Vector3 w0 = wt * editVertexLocal( s, t[0] );
+				const Vector3 w1 = wt * editVertexLocal( s, t[1] );
+				const Vector3 w2 = wt * editVertexLocal( s, t[2] );
+				Vector3 n = Vector3::crossproduct( w1 - w0, w2 - w0 );
+				if ( Vector3::dotproduct( n, eye - ( w0 + w1 + w2 ) / 3.0f ) <= 0.0f )
+					continue;	// back-facing: the knife cuts what you see
+				for ( int e = 0; e < 3; e++ ) {
+					const int a = t[e], b = t[( e + 1 ) % 3];
+					const quint64 k = quadEdgeKey( a, b );
+					if ( seen.contains( k ) )
+						continue;
+					seen.insert( k );
+					ScrEdge se;
+					se.a = std::min( a, b );
+					se.b = std::max( a, b );
+					QPointF pa, pb;
+					if ( !worldToScreen( wt * editVertexLocal( s, se.a ), pa )
+						|| !worldToScreen( wt * editVertexLocal( s, se.b ), pb ) )
+						continue;
+					se.sa = pa;
+					se.sb = pb;
+					edges.append( se );
 				}
-				out.append( Triangle( quint16( m1 ), q, quint16( m2 ) ) );
-				out.append( Triangle( p, quint16( m1 ), quint16( m2 ) ) );
-				out.append( Triangle( p, quint16( m2 ), r ) );
-			} else {
-				quint16 p = a, q = b, r = c;
-				int m1 = mab;
-				if ( mbc >= 0 ) {
-					p = b; q = c; r = a;
-					m1 = mbc;
-				} else if ( mca >= 0 ) {
-					p = c; q = a; r = b;
-					m1 = mca;
-				}
-				out.append( Triangle( p, quint16( m1 ), r ) );
-				out.append( Triangle( quint16( m1 ), q, r ) );
 			}
 		}
-		model->set<int>( iS, "Num Triangles", out.size() );
-		model->updateArraySize( iT );
-		for ( int t = 0; t < out.size(); t++ )
-			model->set<Triangle>( model->getIndex( iT, t ), out.at( t ) );
-		if ( stride > 0 )
-			model->set<int>( iS, "Data Size",
-				( nv + int( cutList.size() ) ) * stride + out.size() * 6 );
-		tlRecalcNormalsSubset( model, iS, touched );
-		tlUpdateBounds( model, iS );
-		model->restoreState();
-		model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
-	};
-	if ( model->undoStack )
-		model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Knife" ), applyKnife ) );
-	else
-		applyKnife();
+
+		// 2D crossings between the polyline and this shape's edges. With
+		// cut-through OFF the crossing itself must be visible: the first
+		// thing the ray hits there has to be one of the edge's own faces.
+		for ( int i = 0; i + 1 < pts.size(); i++ ) {
+			const QPointF p0 = scr.at( i ), p1 = scr.at( i + 1 );
+			const QPointF r = p1 - p0;
+			for ( const ScrEdge & se : std::as_const( edges ) ) {
+				const QPointF q0 = se.sa, q1 = se.sb;
+				const QPointF q = q1 - q0;
+				const double denom = r.x() * q.y() - r.y() * q.x();
+				if ( std::fabs( denom ) < 1.0e-9 )
+					continue;
+				const QPointF d = q0 - p0;
+				const double tSeg = ( d.x() * q.y() - d.y() * q.x() ) / denom;
+				const double uEdge = ( d.x() * r.y() - d.y() * r.x() ) / denom;
+				if ( tSeg < 0.0 || tSeg > 1.0 || uEdge < 0.02 || uEdge > 0.98 )
+					continue;
+				if ( !cutThrough ) {
+					const QPointF cp = p0 + r * tSeg;
+					SceneRayHit oh = raycastScene( cp, -1 );
+					if ( !oh.shape || oh.shape->id() != sb
+						|| oh.tri < 0 || oh.tri >= oh.shape->triangles.size() )
+						continue;
+					const Triangle & ot = oh.shape->triangles.at( oh.tri );
+					int hitsAB = 0;
+					for ( int c = 0; c < 3; c++ )
+						hitsAB += int( ot[c] == se.a || ot[c] == se.b );
+					if ( hitsAB < 2 )
+						continue;	// something else is in front here
+				}
+				addCut( se.a, se.b, float( uEdge ) );
+			}
+		}
+
+		if ( cuts.isEmpty() && pokes.isEmpty() )
+			continue;
+		const int oldNV = model->get<int>( iShape, "Num Vertices" );
+		if ( oldNV + cuts.size() + pokes.size() > 0xFFFF ) {
+			emit gizmoStatus( tr( "Knife: result would exceed the 65,535-vertex limit" ) );
+			continue;
+		}
+
+		// apply: poke the interior points (fanning their host triangles),
+		// split each cut edge, then re-split the affected triangles exactly
+		// like Subdivide does (its splitting is t-agnostic)
+		const QPersistentModelIndex pShape( iShape );
+		QVector<QPair<quint64, float>> cutList;
+		cutList.reserve( cuts.size() );
+		for ( auto it = cuts.constBegin(); it != cuts.constEnd(); ++it )
+			cutList.append( qMakePair( it.key(), it.value() ) );
+		auto applyKnife = [this, pShape, cutList, pokes]() {
+			QModelIndex iS( pShape );
+			if ( !iS.isValid() )
+				return;
+			auto ekey = []( int a, int b ) {
+				if ( a > b ) std::swap( a, b );
+				return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+			};
+			QModelIndex iVD = model->getIndex( iS, "Vertex Data" );
+			QModelIndex iT = model->getIndex( iS, "Triangles" );
+			const int nv = model->get<int>( iS, "Num Vertices" );
+			const int nt = model->get<int>( iS, "Num Triangles" );
+			const int ds = model->get<int>( iS, "Data Size" );
+			const int stride = ( nv > 0 ) ? ( ds - nt * 6 ) / nv : 0;
+			// safety net: everything captured at click time must still
+			// reference live rows (undo elsewhere could have changed them)
+			QVector<QPair<quint64, float>> validCuts;
+			validCuts.reserve( cutList.size() );
+			for ( const auto & c : cutList ) {
+				const int a = int( c.first >> 32 ), b = int( c.first & 0xFFFFFFFFu );
+				if ( a >= 0 && b >= 0 && a < nv && b < nv && a != b )
+					validCuts.append( c );
+			}
+			QVector<Poke> validPokes;
+			validPokes.reserve( pokes.size() );
+			for ( const Poke & pk : pokes )
+				if ( pk.tri >= 0 && pk.tri < nt )
+					validPokes.append( pk );
+			if ( validCuts.isEmpty() && validPokes.isEmpty() )
+				return;
+			QVector<Triangle> tv( nt );
+			for ( int t = 0; t < nt; t++ )
+				tv[t] = model->get<Triangle>( model->getIndex( iT, t ) );
+
+			model->setState( BaseModel::Processing );
+			model->set<int>( iS, "Num Vertices",
+				nv + validPokes.size() + validCuts.size() );
+			model->updateArraySize( iVD );
+			int nvi = nv;
+			QSet<int> touched;
+			// pokes first: a new interior vertex fans its host triangle (the
+			// fans keep every original edge, so the cut pass runs unchanged)
+			QVector<Triangle> tv2;
+			tv2.reserve( nt + validPokes.size() * 2 );
+			QHash<int, int> pokeVert;
+			for ( const Poke & pk : validPokes ) {
+				const Triangle & ht = tv.at( pk.tri );
+				if ( ht[0] == ht[1] || ht[1] == ht[2] || ht[0] == ht[2] )
+					continue;
+				tlWriteBaryVertex( model, iS, nvi, ht[0], ht[1], ht[2], pk.bary );
+				pokeVert.insert( pk.tri, nvi );
+				touched << ht[0] << ht[1] << ht[2] << nvi;
+				nvi++;
+			}
+			for ( int t = 0; t < nt; t++ ) {
+				const Triangle & tr = tv.at( t );
+				auto pv = pokeVert.constFind( t );
+				if ( pv == pokeVert.constEnd() ) {
+					tv2.append( tr );
+					continue;
+				}
+				const quint16 p = quint16( pv.value() );
+				tv2.append( Triangle( tr[0], tr[1], p ) );
+				tv2.append( Triangle( tr[1], tr[2], p ) );
+				tv2.append( Triangle( tr[2], tr[0], p ) );
+			}
+			// midpoint vert per cut edge
+			QHash<quint64, int> mid;
+			for ( const auto & c : validCuts ) {
+				const int a = int( c.first >> 32 ), b = int( c.first & 0xFFFFFFFFu );
+				tlWriteLerpVertex( model, iS, nvi, a, b, c.second );
+				mid.insert( c.first, nvi++ );
+			}
+			QVector<Triangle> out;
+			out.reserve( tv2.size() * 2 );
+			for ( int t = 0; t < tv2.size(); t++ ) {
+				const Triangle & tr = tv2.at( t );
+				if ( tr[0] == tr[1] || tr[1] == tr[2] || tr[0] == tr[2] ) {
+					out.append( tr );
+					continue;
+				}
+				int m[3];
+				int count = 0;
+				for ( int e = 0; e < 3; e++ ) {
+					m[e] = mid.value( ekey( tr[e], tr[( e + 1 ) % 3] ), -1 );
+					if ( m[e] >= 0 )
+						count++;
+				}
+				if ( count == 0 ) {
+					out.append( tr );
+					continue;
+				}
+				touched << tr[0] << tr[1] << tr[2];
+				for ( int e = 0; e < 3; e++ )
+					if ( m[e] >= 0 )
+						touched << m[e];
+				const quint16 a = tr[0], b = tr[1], c = tr[2];
+				const int mab = m[0], mbc = m[1], mca = m[2];
+				if ( count == 3 ) {
+					out.append( Triangle( a, quint16( mab ), quint16( mca ) ) );
+					out.append( Triangle( quint16( mab ), b, quint16( mbc ) ) );
+					out.append( Triangle( quint16( mca ), quint16( mbc ), c ) );
+					out.append( Triangle( quint16( mab ), quint16( mbc ), quint16( mca ) ) );
+				} else if ( count == 2 ) {
+					quint16 p = a, q = b, r = c;
+					int m1 = mab, m2 = mbc;
+					if ( mab >= 0 && mca >= 0 ) {
+						p = c; q = a; r = b;
+						m1 = mca; m2 = mab;
+					} else if ( mbc >= 0 && mca >= 0 ) {
+						p = b; q = c; r = a;
+						m1 = mbc; m2 = mca;
+					}
+					out.append( Triangle( quint16( m1 ), q, quint16( m2 ) ) );
+					out.append( Triangle( p, quint16( m1 ), quint16( m2 ) ) );
+					out.append( Triangle( p, quint16( m2 ), r ) );
+				} else {
+					quint16 p = a, q = b, r = c;
+					int m1 = mab;
+					if ( mbc >= 0 ) {
+						p = b; q = c; r = a;
+						m1 = mbc;
+					} else if ( mca >= 0 ) {
+						p = c; q = a; r = b;
+						m1 = mca;
+					}
+					out.append( Triangle( p, quint16( m1 ), r ) );
+					out.append( Triangle( quint16( m1 ), q, r ) );
+				}
+			}
+			model->set<int>( iS, "Num Triangles", out.size() );
+			model->updateArraySize( iT );
+			for ( int t = 0; t < out.size(); t++ )
+				model->set<Triangle>( model->getIndex( iT, t ), out.at( t ) );
+			if ( stride > 0 )
+				model->set<int>( iS, "Data Size",
+					( nv + int( validPokes.size() ) + int( validCuts.size() ) ) * stride
+						+ out.size() * 6 );
+			tlRecalcNormalsSubset( model, iS, touched );
+			tlUpdateBounds( model, iS );
+			model->restoreState();
+			model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+		};
+		if ( model->undoStack )
+			model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Knife" ), applyKnife ) );
+		else
+			applyKnife();
+		// the cut rebuilt the triangle list: edge/face picks on this shape
+		// would silently point at the wrong elements (vertex picks survive)
+		for ( int i = pickedElems.size() - 1; i >= 0; i-- )
+			if ( pickedElems.at( i ).shapeBlock == sb && pickedElems.at( i ).type != 1 )
+				pickedElems.remove( i );
+		totalCuts += cuts.size();
+		totalPokes += pokes.size();
+	}
+	if ( macroU )
+		model->undoStack->endMacro();
+
 	modelChanged();
-	emit gizmoStatus( tr( "Knife: cut %1 edge(s)" ).arg( cuts.size() ) );
+	if ( totalCuts == 0 && totalPokes == 0 )
+		emit gizmoStatus( tr( "Knife: the line crossed no edges" ) );
+	else
+		emit gizmoStatus( tr( "Knife: cut %1 edge(s), poked %2 interior point(s)" )
+			.arg( totalCuts ).arg( totalPokes ) );
 	update();
 }
 
@@ -10556,15 +12238,21 @@ void GLView::addPrimitive( int kind )
 	const Vector3 at = cursorPos;
 
 	auto applyAdd = [this, tmpl, kind, at]( float size, int segs ) {
-		int newBlock = -1;
-		nifSnapshotOp( model, tr( "Add %1" ).arg( tr( primNames[std::clamp( kind, 0, 3 )] ) ), [&]() {
-			newBlock = tlCloneShapeWithProps( model, tmpl );
+		// in-place undo: the primitive only APPENDS blocks (clone + props);
+		// undo removes them and prunes the null child link
+		auto parents = std::make_shared<QVector<int>>();
+		auto madeShape = std::make_shared<int>( -1 );
+		auto createPrim = [this, tmpl, kind, at, size, segs, parents, madeShape]() {
+			*madeShape = -1;
+			int newBlock = tlCloneShapeWithProps( model, tmpl );
 			if ( newBlock < 0 )
 				return;
 			QModelIndex iNew = model->getBlockIndex( newBlock );
 			const int parentNum = model->getParent( tmpl );
-			if ( parentNum >= 0 )
+			if ( parentNum >= 0 ) {
 				blockLink( model, model->getBlockIndex( parentNum ), iNew );
+				parents->append( parentNum );
+			}
 			model->set<QString>( iNew, "Name",
 				tlUniqueNodeName( model, tr( primNames[std::clamp( kind, 0, 3 )] ) ) );
 			model->set<Vector3>( iNew, "Translation", at );
@@ -10605,11 +12293,17 @@ void GLView::addPrimitive( int kind )
 				model->set<int>( iNew, "Data Size", pv.size() * stride + pt.size() * 6 );
 			tlUpdateBounds( model, iNew );
 			model->restoreState();
-		} );
-		if ( newBlock >= 0 ) {
+			*madeShape = newBlock;
+		};
+		if ( model->undoStack )
+			model->undoStack->push( new TlBlockAppendCommand( model,
+				tr( "Add %1" ).arg( tr( primNames[std::clamp( kind, 0, 3 )] ) ), createPrim, parents ) );
+		else
+			createPrim();
+		if ( *madeShape >= 0 ) {
 			modelChanged();
-			syncObjectSelection( newBlock );
-			emit clicked( model->getBlockIndex( newBlock ) );
+			syncObjectSelection( *madeShape );
+			emit clicked( model->getBlockIndex( *madeShape ) );
 		}
 	};
 	if ( !model->undoStack )
@@ -10685,7 +12379,7 @@ void GLView::showSpecialsMenu()
 		else if ( r == aMerge )
 			showMergeMenu();
 		else if ( r == aDoubles )
-			mergeVertices( 2, ( lastOpKind == 1 ) ? lastOpParam : 0.0001f );
+			mergeVertices( 2, lastMergeDistance );
 		else if ( r == aDissolve )
 			dissolveVerts();
 		else if ( r == aExtrude )
@@ -10772,6 +12466,9 @@ void GLView::populateSelectMenu( QMenu * m )
 	m->addAction( tr( "All\tA" ), this, [this]() { selectAll( 1 ); } );
 	m->addAction( tr( "None" ), this, [this]() { selectAll( 2 ); } );
 	m->addAction( tr( "Invert\tCtrl+I" ), this, [this]() { invertSelection(); } );
+	if ( editMode )
+		m->addAction( tr( "Checker Deselect…" ), this,
+			[this]() { checkerDeselect(); } )->setEnabled( pickedElems.size() >= 2 );
 	m->addSeparator();
 	m->addAction( tr( "Box Select\tB" ), this, [this]() { beginBoxSelect(); } );
 	m->addAction( tr( "Circle Select\tC" ), this, [this]() { beginCircleSelect(); } );
@@ -10861,8 +12558,23 @@ void GLView::populateMeshMenu( QMenu * m )
 		[this]() { hideSelectedElements(); } )->setEnabled( hasSel );
 	mVis->addAction( tr( "Unhide All\tAlt+H" ), this, [this]() { unhideAllElements(); } );
 	m->addSeparator();
+	m->addAction( tr( "Split\tY" ), this,
+		[this]() { splitSelection(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Delete…\tX" ), this,
 		[this]() { showDeleteMenu(); } )->setEnabled( hasSel );
+	m->addSeparator();
+	// Blender's Mirror X: modal transforms also move the unselected mirror
+	// partner of each vertex (paired by position, X-negated)
+	QAction * aMirror = m->addAction( tr( "Mirror Editing (X)" ) );
+	aMirror->setCheckable( true );
+	aMirror->setChecked( mirrorEditing );
+	connect( aMirror, &QAction::toggled, this, [this]( bool on ) {
+		mirrorEditing = on;
+		QSettings settings;
+		settings.setValue( "GLView/Edit/MirrorX", on );
+		emit gizmoStatus( on ? tr( "Mirror editing ON (X axis, position-paired)" )
+			: tr( "Mirror editing off" ) );
+	} );
 }
 
 void GLView::populateVertexMenu( QMenu * m )
@@ -10873,13 +12585,16 @@ void GLView::populateVertexMenu( QMenu * m )
 	m->addAction( tr( "Merge…\tM" ), this,
 		[this]() { showMergeMenu(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Remove Doubles…" ), this, [this]() {
-		mergeVertices( 2, ( lastOpKind == 1 ) ? lastOpParam : 0.0001f );
+		mergeVertices( 2, lastMergeDistance );
 	} )->setEnabled( hasSel );
 	m->addSeparator();
 	m->addAction( tr( "Smooth Vertices…" ), this,
 		[this]() { smoothVertices(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Dissolve Vertices\tCtrl+X" ), this,
 		[this]() { dissolveVerts(); } )->setEnabled( hasSel );
+	m->addSeparator();
+	m->addAction( tr( "Rip Vertices\tV" ), this,
+		[this]() { ripSelection(); } )->setEnabled( hasSel );
 }
 
 void GLView::populateEdgeMenu( QMenu * m )
@@ -10889,6 +12604,8 @@ void GLView::populateEdgeMenu( QMenu * m )
 	const bool hasSel = !pickedElems.isEmpty();
 	m->addAction( tr( "Loop Cut…\tCtrl+R" ), this, [this]() { loopCut(); } );
 	m->addAction( tr( "Knife…\tK" ), this, [this]() { beginKnife(); } );
+	m->addAction( tr( "Bevel…\tCtrl+B" ), this,
+		[this]() { bevelSelection(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Subdivide" ), this,
 		[this]() { subdivideSelection(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Edge Slide…\tShift+V" ), this,
@@ -11835,6 +13552,9 @@ void GLView::applyBoxSelect( const QRect & rect, Qt::KeyboardModifiers mods )
 		}
 	}
 
+	// a marked quad selects / deselects as one face
+	expandQuadPartners( box );
+
 	// additive by default: plain drag adds, Shift/Ctrl-drag deselects
 	for ( const PickedElement & pe : box ) {
 		int at = pickedElems.indexOf( pe );
@@ -12361,9 +14081,31 @@ void GLView::applyRiggingWeightPaintBrush( const QPointF & from, const QPointF &
 	};
 	for ( int vertex : riggingWeightPaintCandidates )
 		testVertex( vertex );
-	if ( !vertices.isEmpty() )
-		emit riggingWeightBrushSample( riggingWeightPaintTarget, vertices, falloff,
-			riggingWeightPaintBrushMode, riggingWeightPaintWeight, riggingWeightPaintStrength );
+	if ( vertices.isEmpty() )
+		return;
+	emit riggingWeightBrushSample( riggingWeightPaintTarget, vertices, falloff,
+		riggingWeightPaintBrushMode, riggingWeightPaintWeight, riggingWeightPaintStrength );
+
+	// X-mirror: the position-paired partners of the brushed verts form the
+	// mirrored half of the stroke (partners already under the brush are
+	// skipped — they were painted directly)
+	if ( riggingPaintMirrorX ) {
+		QSet<int> brushed( vertices.constBegin(), vertices.constEnd() );
+		QVector<int> mVerts;
+		QVector<float> mFall;
+		mVerts.reserve( vertices.size() );
+		mFall.reserve( vertices.size() );
+		for ( int i = 0; i < vertices.size(); i++ ) {
+			const int mi = mirrorPartnerOf( riggingWeightPaintTarget, vertices.at( i ) );
+			if ( mi >= 0 && !brushed.contains( mi ) ) {
+				mVerts.append( mi );
+				mFall.append( falloff.at( i ) );
+			}
+		}
+		if ( !mVerts.isEmpty() )
+			emit riggingWeightBrushSampleMirrored( riggingWeightPaintTarget, mVerts, mFall,
+				riggingWeightPaintBrushMode, riggingWeightPaintWeight, riggingWeightPaintStrength );
+	}
 }
 
 void GLView::applyVertexPaintBrush( const QPointF & from, const QPointF & to )
@@ -12680,6 +14422,11 @@ void GLView::applyCircleSelect( const QPointF & pos, bool erase )
 					n.normalize();
 					pe.worldNormal = n;
 					applyPick( pe );
+					// a marked quad selects / deselects as one face
+					const int tj = quadPartnerMap( s->id() ).value( t, -1 );
+					PickedElement partner;
+					if ( tj >= 0 && buildFacePick( s->id(), tj, partner ) )
+						applyPick( partner );
 				}
 			}
 		}
@@ -12789,6 +14536,60 @@ void GLView::invertSelection()
 	pickedElems = inv;
 	emit gizmoStatus( tr( "Inverted selection (%1 element(s))" ).arg( pickedElems.size() ) );
 	update();
+}
+
+void GLView::checkerDeselect( int nth, int offset, bool armPanel )
+{
+	// Blender Checker Deselect: drop every Nth element of the selection.
+	// Order = the selection's own order (click / box-scan order), not
+	// Blender's connectivity walk — good enough for the alternating pattern.
+	if ( !editMode || pickedElems.size() < 2 ) {
+		emit gizmoStatus( tr( "Checker Deselect needs at least two selected elements" ) );
+		return;
+	}
+	const QVector<PickedElement> seed = pickedElems;
+	nth = std::max( nth, 2 );
+	QVector<PickedElement> kept;
+	kept.reserve( pickedElems.size() );
+	for ( int i = 0; i < pickedElems.size(); i++ )
+		if ( ( ( i + offset ) % nth ) != 0 )
+			kept.append( pickedElems.at( i ) );
+	const int dropped = pickedElems.size() - kept.size();
+	pickedElems = kept;
+	if ( armPanel && model && model->undoStack ) {
+		lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+			checkerDeselect( int( ps.value( 0 ).value + 0.5 ), int( ps.value( 1 ).value + 0.5 ), false );
+		};
+		QVector<TlOpParam> ps( 2 );
+		ps[0].label = tr( "Deselect every Nth" );
+		ps[0].type = TlOpParam::Int;
+		ps[0].value = nth;
+		ps[0].mn = 2.0;
+		ps[0].mx = 100.0;
+		ps[0].step = 1.0;
+		ps[1].label = tr( "Offset" );
+		ps[1].type = TlOpParam::Int;
+		ps[1].value = offset;
+		ps[1].mn = 0.0;
+		ps[1].mx = 100.0;
+		ps[1].step = 1.0;
+		armOperatorPanelEx( tr( "Checker Deselect" ), ps, 0, seed );
+	}
+	emit gizmoStatus( tr( "Checker Deselect: %1 deselected, %2 kept" )
+		.arg( dropped ).arg( pickedElems.size() ) );
+	update();
+}
+
+void GLView::repeatLastOperator()
+{
+	// Blender Repeat Last (Shift+R): run the last panel operator again with
+	// its current parameter values, on the CURRENT selection — a fresh
+	// application, not the panel's undo-and-adjust
+	if ( !lastOpExRerun ) {
+		emit gizmoStatus( tr( "Repeat Last: no repeatable operator yet (adjust-panel operators only)" ) );
+		return;
+	}
+	lastOpExRerun( lastOpExParams );
 }
 
 // Selection undo: a small dedicated history so any selection (click, box, invert,
@@ -13118,12 +14919,21 @@ void GLView::selectLinked( bool flatOnly, float maxAngleDeg )
 		emit pickModeChanged( pickMode );
 	}
 	emit gizmoStatus( tr( "Selected linked: %1 element(s)" ).arg( pickedElems.size() ) );
-	// arm the redo panel (only the by-angle variant) so the sharpness can be tweaked
-	if ( flatOnly && !opReapplying ) {
-		lastOpKind = 2;
-		lastOpParam = maxAngleDeg;
-		lastOpSeed = preGrowSel;
-		emit operatorPanel( 2, maxAngleDeg );
+	// Redo Panel v2 (only the by-angle variant): pure selection op, nothing
+	// on the undo stack — the reapply just restores the seed and re-grows
+	if ( flatOnly ) {
+		lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+			selectLinked( true, float( ps.value( 0 ).value ) );
+		};
+		QVector<TlOpParam> ps( 1 );
+		ps[0].label = tr( "Sharpness°" );
+		ps[0].type = TlOpParam::Float;
+		ps[0].value = maxAngleDeg;
+		ps[0].mn = 0.0;
+		ps[0].mx = 180.0;
+		ps[0].step = 1.0;
+		ps[0].decimals = 1;
+		armOperatorPanelEx( tr( "Select Linked by Angle" ), ps, 0, preGrowSel );
 	}
 	update();
 }
@@ -14021,12 +15831,15 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		setRiggingWeightPaintMode( false );
 		return;
 	}
-	// the knife is modal: Enter applies, Esc cancels, other keys stay inert
+	// the knife is modal: Enter applies, Esc cancels, Z toggles cut-through,
+	// other keys stay inert
 	if ( knifeActive ) {
 		if ( event->key() == Qt::Key_Escape )
 			cancelKnife();
 		else if ( event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter )
 			knifeApply();
+		else if ( event->key() == Qt::Key_Z )
+			knifeToggleCutThrough();
 		return;
 	}
 
@@ -14341,6 +16154,30 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		}
 		if ( shortcuts.matches( "viewport.knife", event->key(), mods ) && editMode ) {
 			beginKnife();
+			return;
+		}
+		if ( shortcuts.matches( "viewport.repeat_last", event->key(), mods ) ) {
+			repeatLastOperator();
+			return;
+		}
+		if ( shortcuts.matches( "viewport.panel_to_cursor", event->key(), mods ) ) {
+			emit redoPanelToCursor();
+			return;
+		}
+		if ( shortcuts.matches( "viewport.select.checker", event->key(), mods ) && editMode ) {
+			checkerDeselect();
+			return;
+		}
+		if ( shortcuts.matches( "viewport.split", event->key(), mods ) && editMode ) {
+			splitSelection();
+			return;
+		}
+		if ( shortcuts.matches( "viewport.rip", event->key(), mods ) && editMode ) {
+			ripSelection();
+			return;
+		}
+		if ( shortcuts.matches( "viewport.bevel", event->key(), mods ) && editMode ) {
+			bevelSelection();
 			return;
 		}
 		if ( shortcuts.matches( "viewport.select.circle", event->key(), mods ) ) {

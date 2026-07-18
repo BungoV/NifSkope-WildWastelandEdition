@@ -197,10 +197,63 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 {
 	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
 	if ( in.verts.isEmpty() || in.tris.isEmpty() ) return fail( QStringLiteral( "Collision has no mesh geometry." ) );
-	if ( in.verts.size() > 255 || in.tris.size() > 255 )
-		return fail( QStringLiteral( "The current hknp mesh section supports at most 255 vertices and 255 triangles. Use Decimate first." ) );
+	if ( in.verts.size() > 0xFFFF )
+		return fail( QStringLiteral( "Collision meshes support at most 65,535 vertices." ) );
 	for ( const Triangle & t : in.tris ) if ( t[0] >= in.verts.size() || t[1] >= in.verts.size() || t[2] >= in.verts.size() )
 		return fail( QStringLiteral( "Collision contains an invalid triangle index." ) );
+
+	// One hknp section holds at most 255 packed vertices and 255 primitives
+	// (u8 count fields — see hknpdecode's layout notes). Larger meshes are
+	// partitioned into sections: triangles are sorted into spatial slabs
+	// along the longest axis so consecutive tris share verts, then greedily
+	// packed until either budget would overflow. Verts shared between
+	// sections are simply duplicated (the shared-vertex table stays unused,
+	// like every Elric sample we decoded).
+	struct MeshSec { QVector<int> tris; QVector<quint16> verts; QHash<quint16, quint8> vmap; };
+	QVector<MeshSec> secs;
+	{
+		Vector3 gmn = in.verts.first(), gmx = gmn;
+		for ( const Vector3 & v : in.verts )
+			for ( int a = 0; a < 3; a++ ) { gmn[a] = std::min( gmn[a], v[a] ); gmx[a] = std::max( gmx[a], v[a] ); }
+		const Vector3 ext = gmx - gmn;
+		int axis = 0;
+		if ( ext[1] > ext[axis] ) axis = 1;
+		if ( ext[2] > ext[axis] ) axis = 2;
+		QVector<int> order( in.tris.size() );
+		for ( int i = 0; i < order.size(); i++ ) order[i] = i;
+		std::sort( order.begin(), order.end(), [&]( int a, int b ) {
+			const Triangle & ta = in.tris.at( a ), & tb = in.tris.at( b );
+			const float ca = in.verts[ta[0]][axis] + in.verts[ta[1]][axis] + in.verts[ta[2]][axis];
+			const float cb = in.verts[tb[0]][axis] + in.verts[tb[1]][axis] + in.verts[tb[2]][axis];
+			return ca < cb;
+		} );
+		MeshSec cur;
+		auto flush = [&]() { if ( !cur.tris.isEmpty() ) { secs.append( cur ); cur = MeshSec(); } };
+		for ( int ti : order ) {
+			const Triangle & t = in.tris.at( ti );
+			quint16 uniq[3]; int nu = 0;
+			for ( int c = 0; c < 3; c++ ) {
+				bool seen = false;
+				for ( int p = 0; p < nu; p++ ) seen = seen || uniq[p] == t[c];
+				if ( !seen ) uniq[nu++] = t[c];
+			}
+			int newVerts = 0;
+			for ( int p = 0; p < nu; p++ )
+				if ( !cur.vmap.contains( uniq[p] ) ) newVerts++;
+			if ( cur.tris.size() >= 255 || cur.vmap.size() + newVerts > 255 )
+				flush();
+			for ( int p = 0; p < nu; p++ ) {
+				if ( !cur.vmap.contains( uniq[p] ) ) {
+					cur.vmap.insert( uniq[p], quint8( cur.verts.size() ) );
+					cur.verts.append( uniq[p] );
+				}
+			}
+			cur.tris.append( ti );
+		}
+		flush();
+	}
+	if ( secs.size() > 4096 )
+		return fail( QStringLiteral( "Collision mesh needs more than 4096 hknp sections. Use Decimate first." ) );
 
 	QHash<QString, quint32> names; QByteArray cn = classNames( names ); Fixups fx; QByteArray data;
 	auto write = [&data]( const QByteArray & bytes ) { quint32 at = quint32( data.size() ); data.append( bytes ); return at; };
@@ -221,30 +274,58 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 
 	Vector3 mn = in.verts.first(), mx = mn;
 	for ( const Vector3 & v : in.verts ) for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], v[a] ); mx[a] = std::max( mx[a], v[a] ); }
-	Vector3 step( mx[0] > mn[0] ? ( mx[0] - mn[0] ) / 2047.0f : 1.0f,
-		mx[1] > mn[1] ? ( mx[1] - mn[1] ) / 2047.0f : 1.0f,
-		mx[2] > mn[2] ? ( mx[2] - mn[2] ) / 1023.0f : 1.0f );
-	QByteArray quads; for ( const Triangle & t : in.tris ) { quads.append( char( t[0] ) ); quads.append( char( t[1] ) ); quads.append( char( t[2] ) ); quads.append( char( t[2] ) ); }
-	QByteArray packed; for ( const Vector3 & v : in.verts ) {
-		auto quant = []( float value, float base, float scale, int maximum ) { return std::clamp( int( std::lround( ( value - base ) / scale ) ), 0, maximum ); };
-		quint32 x = quint32( quant( v[0], mn[0], step[0], 2047 ) ), y = quint32( quant( v[1], mn[1], step[1], 2047 ) ), z = quint32( quant( v[2], mn[2], step[2], 1023 ) );
-		appendU32( packed, x | ( y << 11 ) | ( z << 22 ) );
+
+	// per-section emission: each section quantizes against its OWN domain
+	// (that is the point of sections — precision scales with density), quads
+	// hold section-relative u8 indices, packed verts concatenate per section
+	const bool legacySingle = ( secs.size() == 1 );
+	QByteArray quads, packed, sectionsBlob;
+	quint32 firstPrim = 0, totalPacked = 0;
+	for ( const MeshSec & sc : std::as_const( secs ) ) {
+		Vector3 smn = in.verts.at( sc.verts.first() ), smx = smn;
+		for ( quint16 gv : sc.verts )
+			for ( int a = 0; a < 3; a++ ) { smn[a] = std::min( smn[a], in.verts.at( gv )[a] ); smx[a] = std::max( smx[a], in.verts.at( gv )[a] ); }
+		const Vector3 step( smx[0] > smn[0] ? ( smx[0] - smn[0] ) / 2047.0f : 1.0f,
+			smx[1] > smn[1] ? ( smx[1] - smn[1] ) / 2047.0f : 1.0f,
+			smx[2] > smn[2] ? ( smx[2] - smn[2] ) / 1023.0f : 1.0f );
+		for ( int ti : sc.tris ) {
+			const Triangle & t = in.tris.at( ti );
+			const quint8 a = sc.vmap.value( t[0] ), b = sc.vmap.value( t[1] ), c = sc.vmap.value( t[2] );
+			quads.append( char( a ) ); quads.append( char( b ) ); quads.append( char( c ) ); quads.append( char( c ) );
+		}
+		for ( quint16 gv : sc.verts ) {
+			auto quant = []( float value, float base, float scale, int maximum ) { return std::clamp( int( std::lround( ( value - base ) / scale ) ), 0, maximum ); };
+			const Vector3 & v = in.verts.at( gv );
+			quint32 x = quint32( quant( v[0], smn[0], step[0], 2047 ) ), y = quint32( quant( v[1], smn[1], step[1], 2047 ) ), z = quint32( quant( v[2], smn[2], step[2], 1023 ) );
+			appendU32( packed, x | ( y << 11 ) | ( z << 22 ) );
+		}
+		QByteArray section( 0x60, 0 );
+		setU32( section, 0x0c, 0x80000000u );
+		for ( int a = 0; a < 3; a++ ) { setFloat( section, 0x10 + a * 4, smn[a] ); setFloat( section, 0x20 + a * 4, smx[a] ); setFloat( section, 0x30 + a * 4, smn[a] ); setFloat( section, 0x3c + a * 4, step[a] ); }
+		setU32( section, 0x48, totalPacked );
+		// the decoded field is firstSharedIndex << 8 | numSharedIndices; the
+		// in-game-validated single-section writer put the vert count here
+		// (harmless: >> 8 is 0 for counts <= 255) — keep it byte-exact, and
+		// write the semantically correct 0 for multi-section files
+		setU32( section, 0x4c, legacySingle ? quint32( sc.verts.size() ) : 0u );
+		setU32( section, 0x50, ( firstPrim << 8 ) | quint32( sc.tris.size() ) );
+		section[0x58] = char( sc.verts.size() );
+		sectionsBlob += section;
+		firstPrim += quint32( sc.tris.size() );
+		totalPacked += quint32( sc.verts.size() );
 	}
-	quint32 shapeData = quint32( data.size() ), sections = shapeData + 0xa0, quadData = sections + 0x60, vertData = quadData + quint32( quads.size() );
+
+	quint32 shapeData = quint32( data.size() ), sections = shapeData + 0xa0,
+		quadData = sections + quint32( sectionsBlob.size() ), vertData = quadData + quint32( quads.size() );
 	QByteArray sd( 0xa0, 0 ); setU32( sd, 0x0c, 0x80000000u ); setU32( sd, 0x1c, 0x80000000u );
 	for ( int a = 0; a < 3; a++ ) { setFloat( sd, 0x20 + a * 4, mn[a] ); setFloat( sd, 0x30 + a * 4, mx[a] ); }
-	setU32( sd, 0x4c, 0x80000000u ); setU32( sd, 0x58, 1 ); setU32( sd, 0x5c, 0x80000001u );
+	setU32( sd, 0x4c, 0x80000000u );
+	setU32( sd, 0x58, quint32( secs.size() ) ); setU32( sd, 0x5c, 0x80000000u | quint32( secs.size() ) );
 	setU32( sd, 0x68, quint32( in.tris.size() ) ); setU32( sd, 0x6c, 0x80000000u | quint32( in.tris.size() ) );
-	setU32( sd, 0x7c, 0x80000000u ); setU32( sd, 0x88, quint32( in.verts.size() ) ); setU32( sd, 0x8c, 0x80000000u | quint32( in.verts.size() ) ); setU32( sd, 0x9c, 0x80000000u );
+	setU32( sd, 0x7c, 0x80000000u ); setU32( sd, 0x88, totalPacked ); setU32( sd, 0x8c, 0x80000000u | totalPacked ); setU32( sd, 0x9c, 0x80000000u );
 	write( sd ); fx.virtuals.append( { shapeData, 0, names.value( QStringLiteral( "hknpCompressedMeshShapeData" ) ) } ); fx.global.append( { shape + 0x60, 2, shapeData } );
 	fx.local.append( { shapeData + 0x50, sections } ); fx.local.append( { shapeData + 0x60, quadData } ); fx.local.append( { shapeData + 0x80, vertData } );
-	QByteArray section( 0x60, 0 ); setU32( section, 0x0c, 0x80000000u );
-	for ( int a = 0; a < 3; a++ ) { setFloat( section, 0x10 + a * 4, mn[a] ); setFloat( section, 0x20 + a * 4, mx[a] ); setFloat( section, 0x30 + a * 4, mn[a] ); setFloat( section, 0x3c + a * 4, step[a] ); }
-	setU32( section, 0x48, 0 ); setU32( section, 0x4c, quint32( in.verts.size() ) ); setU32( section, 0x50, quint32( in.tris.size() ) );
-	// FO4's section stores the packed-vertex count in the low byte at +0x58.
-	// Keep the +0x4c count as well for compatibility with existing writers.
-	section[0x58] = char( in.verts.size() );
-	write( section ); write( quads ); write( packed ); pad( data, 16 );
+	write( sectionsBlob ); write( quads ); write( packed ); pad( data, 16 );
 
 	QByteArray local = fx.localTable(), global = fx.globalTable(), virtuals = fx.virtualTable();
 	quint32 cnStart = 0x100, cnEnd = cnStart + quint32( cn.size() ), dataStart = cnEnd;

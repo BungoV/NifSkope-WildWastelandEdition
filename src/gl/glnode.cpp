@@ -331,6 +331,14 @@ const Transform & Node::viewTrans() const
 	if ( scene->transformCache.find( p, key ) )
 		return *p;
 
+	// edit mode shows the edited mesh at its authored rest transform
+	// (Blender): the whole parent chain uses the NIF data, not the
+	// controller-animated locals. Bone-level skinning is unaffected.
+	if ( scene->restPoseBlock == nodeId ) {
+		*p = scene->view * restWorldTrans();
+		return *p;
+	}
+
 	*p = ( !parent ? scene->view : parent->viewTrans() ) * local;
 	return *p;
 }
@@ -342,11 +350,23 @@ const Transform & Node::worldTrans() const
 	if ( scene->transformCache.find( p, key ) )
 		return *p;
 
+	if ( scene->restPoseBlock == nodeId ) {
+		*p = restWorldTrans();
+		return *p;
+	}
+
 	*p = local;
 	if ( parent )
 		*p = parent->worldTrans() * *p;
 
 	return *p;
+}
+
+Transform Node::restWorldTrans() const
+{
+	auto nif = NifModel::fromValidIndex( iBlock );
+	Transform t = nif ? Transform( nif, iBlock ) : local;
+	return parent ? parent->restWorldTrans() * t : t;
 }
 
 const Transform & Node::localTrans( int root ) const

@@ -1492,6 +1492,14 @@ private:
 		if ( !roundTrip.valid || roundTrip.shapes.isEmpty() || roundTrip.shapes.first().tris.isEmpty() ) {
 			QMessageBox::critical( this, tr( "Compile Collision" ), tr( "The generated packfile failed NifSkope's round-trip check: %1" ).arg( roundTrip.error ) ); return;
 		}
+		// multi-section files must decode to exactly the input triangles
+		// (section boundaries duplicate verts, so only the tri count is stable)
+		if ( roundTrip.shapes.first().tris.size() != input.tris.size() ) {
+			QMessageBox::critical( this, tr( "Compile Collision" ),
+				tr( "Round-trip triangle count mismatch (%1 encoded, %2 decoded) — the packfile was not written." )
+					.arg( input.tris.size() ).arg( roundTrip.shapes.first().tris.size() ) );
+			return;
+		}
 		QPersistentModelIndex oldObject = blockIndex( objectBlock ), target = node;
 		QPersistentModelIndex newObject, newSystem;
 		nifSnapshotOp( nif, tr( "Compile collision" ), [&, this]() {

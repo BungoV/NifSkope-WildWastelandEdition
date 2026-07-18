@@ -128,6 +128,9 @@ public:
 	virtual const Transform & worldTrans() const;
 	virtual const Transform & localTrans() const { return local; }
 	virtual const Transform & localTrans( int parentNode ) const;
+	//! Authored (unanimated) world transform read straight from the NIF data;
+	//! Scene::restPoseBlock draws with this so edit mode shows the rest pose
+	Transform restWorldTrans() const;
 
 	virtual bool isHidden() const;
 	virtual QString textStats() const;

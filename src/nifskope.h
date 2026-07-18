@@ -204,7 +204,10 @@ signals:
 	void currentNifIndexChanged( const QModelIndex & );
 
 public slots:
-	void openFile( QString & );
+	//! Open in the current window, replacing the current document after an
+	//! unsaved-changes prompt; returns false when the user cancels.
+	//! (Right-click a recent entry for Open in New Window.)
+	bool openFile( QString & );
 	void openFiles( QStringList & );
 
 	//! Apply stored "Shortcuts/action.<objectName>" overrides to this
@@ -214,8 +217,12 @@ public slots:
 
 	bool loadArchivesFromFolder( QString );
 	void openArchive( const QString & );
-	void openArchiveFile( const QModelIndex & );
-	void openArchiveFileString( const BA2File *, const QString & );
+	//! These return false only when the user cancels the unsaved-changes
+	//! prompt (so batch opens can abort); failures to extract return true.
+	//! confirmReplace=false skips the prompt (the Reload path).
+	bool openArchiveFile( const QModelIndex & index, bool newWindow = false );
+	bool openArchiveFileString( const BA2File *, const QString &, bool newWindow = false,
+		bool confirmReplace = true );
 	void openNifBrowserSelection();
 
 	void enableUi();
@@ -374,7 +381,7 @@ private:
 	void clearCurrentArchive();
 	void appendLooseNifsToBrowser( const QString & );
 	void populateConfiguredNifBrowser();
-	void openConfiguredNif( int game, const QString & path );
+	bool openConfiguredNif( int game, const QString & path, bool newWindow = false );
 	bool loadConfiguredNifIntoDocument( NifSkope * target, int game, const QString & path );
 	void updateRecentArchiveActions();
 	void updateRecentArchiveFileActions();
@@ -604,6 +611,9 @@ private:
 	QStandardItemModel * emptyModel;
 
 	QMenu * mRecentArchiveFiles;
+	//! The toolbar Open flyout (holds the recent-file actions too); kept as a
+	//! member so the right-click "Open in New Window" filter can scope to it
+	QMenu * mOpenFlyout = nullptr;
 };
 
 

@@ -826,7 +826,8 @@ NifSkope::NifSkope( bool background )
 
 	// NIF Browser
 	bsaView = ui->bsaView;
-	connect( bsaView, &QTreeView::doubleClicked, this, &NifSkope::openArchiveFile );
+	connect( bsaView, &QTreeView::doubleClicked, this,
+		[this]( const QModelIndex & index ) { openArchiveFile( index ); } );
 	bsaView->setSelectionMode( QAbstractItemView::ExtendedSelection );
 	bsaView->setSelectionBehavior( QAbstractItemView::SelectRows );
 	bsaView->setDragEnabled( true );
@@ -949,11 +950,13 @@ NifSkope::NifSkope( bool background )
 				&& selectedRows.contains( index.sibling( index.row(), 0 ) );
 			QMenu menu( this );
 			QAction * open = menu.addAction( tr( "Open NIF" ) );
+			QAction * openNew = menu.addAction( tr( "Open NIF in New Window" ) );
 			QAction * add = menu.addAction( useSelection
 				? tr( "Add %1 Selected to Loaded NIFs" ).arg( selectedRows.size() )
 				: tr( "Add to Loaded NIFs" ) );
 			QAction * chosen = menu.exec( bsaView->viewport()->mapToGlobal( pos ) );
 			if ( chosen == open ) openArchiveFile( index );
+			else if ( chosen == openNew ) openArchiveFile( index, true );
 			else if ( chosen == add ) {
 				if ( useSelection ) addNifBrowserSelectionToLoaded();
 				else queueNifBrowserIndexToLoaded( index );
@@ -1001,6 +1004,17 @@ NifSkope::NifSkope( bool background )
 	connect( tree, &NifTreeView::sigCurrentIndexChanged, this, &NifSkope::select );
 	connect( tree, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
 	connect( tree, &NifTreeView::sigCurrentIndexChanged, refrbrwsr, &ReferenceBrowser::browse );
+	// Block Details: double-clicking a link field's NAME column jumps to the
+	// linked block (the Value column keeps its inline editor for retargeting)
+	connect( tree, &NifTreeView::doubleClicked, this, [this]( const QModelIndex & idx ) {
+		if ( !nif || !idx.isValid() || idx.model() != nif || idx.column() != 0 )
+			return;
+		if ( !nif->isLink( idx ) )
+			return;
+		const int link = nif->getLink( idx );
+		if ( nif->isValidBlockNumber( link ) )
+			select( nif->getBlockIndex( link ) );
+	} );
 	connect( header, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
 	connect( kfmtree, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
 
@@ -2305,7 +2319,8 @@ int updateRecentActions( QAction * acts[], const QStringList & files )
 		}
 		acts[i]->setText( text );
 		acts[i]->setData( fileName );
-		acts[i]->setStatusTip( fileName );
+		acts[i]->setStatusTip( fileName.isEmpty() ? fileName
+			: fileName + QObject::tr( "  (right-click: Open in New Window)" ) );
 		acts[i]->setVisible( true );
 	}
 	acts[0]->setEnabled( numRecentFiles > 0 );
@@ -2703,14 +2718,18 @@ bool NifSkope::loadConfiguredNifIntoDocument( NifSkope * target, int gameID, con
 	return loaded;
 }
 
-void NifSkope::openConfiguredNif( int game, const QString & path )
+bool NifSkope::openConfiguredNif( int game, const QString & path, bool newWindow )
 {
+	// open in place unless a new window was asked for; unsaved changes in
+	// the current document prompt Save/Discard/Cancel first
 	NifSkope * target = this;
-	if ( !currentFile.isEmpty() || isWindowModified()
-		|| ( nif && !nif->undoStack->isClean() ) )
+	if ( newWindow )
 		target = NifSkope::createWindow();
+	else if ( !saveConfirm() )
+		return false;
 	if ( !loadConfiguredNifIntoDocument( target, game, path ) && target != this )
 		target->close();
+	return true;
 }
 
 bool NifSkope::loadArchivesFromFolder( QString archive )
@@ -2903,36 +2922,45 @@ void NifSkope::appendLooseNifsToBrowser( const QString & dataFolder )
 	}
 }
 
-void NifSkope::openArchiveFile( const QModelIndex & index )
+bool NifSkope::openArchiveFile( const QModelIndex & index, bool newWindow )
 {
 	if ( NifSkope * document = documentFromBrowserIndex( index ) ) {
 		activateDocumentTab( documentTabWindows.indexOf( document ) );
-		return;
+		return true;
 	}
 	QString filepath = index.sibling( index.row(), 1 ).data( Qt::EditRole ).toString();
 
-	if ( filepath.isEmpty() ) return;
+	if ( filepath.isEmpty() ) return true;
 	QModelIndex nameIndex = index.sibling( index.row(), 0 );
 	const int source = nameIndex.data( NifBrowserSourceRole ).toInt();
-	if ( source == NifBrowserConfiguredResource ) {
-		openConfiguredNif( nameIndex.data( NifBrowserGameRole ).toInt(), filepath );
-		return;
-	}
+	if ( source == NifBrowserConfiguredResource )
+		return openConfiguredNif( nameIndex.data( NifBrowserGameRole ).toInt(), filepath, newWindow );
 	if ( source == NifBrowserLooseFile ) {
-		openFile( filepath );
-		return;
+		if ( newWindow ) {
+			NifSkope::createWindow( filepath );
+			return true;
+		}
+		return openFile( filepath );
 	}
-	openArchiveFileString( currentArchive, filepath );
+	return openArchiveFileString( currentArchive, filepath, newWindow );
 }
 
 void NifSkope::openNifBrowserSelection()
 {
 	if ( !bsaView || !bsaView->selectionModel() ) return;
 	const QModelIndexList rows = bsaView->selectionModel()->selectedRows( 0 );
-	for ( const QModelIndex & row : rows )
-		if ( !documentFromBrowserIndex( row )
-			&& !row.sibling( row.row(), 1 ).data( Qt::EditRole ).toString().isEmpty() )
-			openArchiveFile( row );
+	// like a multi-select Open: the first file replaces the current document
+	// (unsaved-changes prompt included; a cancel aborts the batch), every
+	// additional file gets its own window
+	bool first = true;
+	for ( const QModelIndex & row : rows ) {
+		if ( documentFromBrowserIndex( row )
+			|| row.sibling( row.row(), 1 ).data( Qt::EditRole ).toString().isEmpty() )
+			continue;
+		if ( !openArchiveFile( row, !first ) )
+			return;
+		first = false;
+	}
 }
 
 void NifSkope::addNifBrowserIndexToLoaded( const QModelIndex & index )
@@ -3062,14 +3090,15 @@ void NifSkope::processNextNifBrowserLoad()
 	QTimer::singleShot( 0, this, &NifSkope::processNextNifBrowserLoad );
 }
 
-void NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filepath )
+bool NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filepath, bool newWindow,
+	bool confirmReplace )
 {
 	if ( !bsa || currentArchiveNames.empty() )
-		return;
+		return true;
 	std::string	filePathStr( filepath.toLower().toStdString() );
 	auto	fd = bsa->findFile( filePathStr );
 	if ( !fd )
-		return;
+		return true;
 
 	// Read data from BSA
 	BA2File::UCharArray	data;
@@ -3083,10 +3112,13 @@ void NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filep
 	path = path + "/" + filepath;
 
 	if ( buf.open( QBuffer::ReadOnly ) ) {
+		// open in place unless a new window was asked for; unsaved changes
+		// in the current document prompt Save/Discard/Cancel first
 		NifSkope * target = this;
-		if ( !currentFile.isEmpty() || isWindowModified()
-			|| ( nif && !nif->undoStack->isClean() ) )
+		if ( newWindow )
 			target = NifSkope::createWindow();
+		else if ( confirmReplace && !saveConfirm() )
+			return false;
 		target->configuredResourceGame = -1;
 		target->configuredResourcePath.clear();
 
@@ -3111,15 +3143,19 @@ void NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filep
 		buf.close();
 		refreshAllDocumentSessions();
 	}
+	return true;
 }
 
 
-void NifSkope::openFile( QString & file )
+bool NifSkope::openFile( QString & file )
 {
-	if ( currentFile.isEmpty() && !( isWindowModified() || !nif->undoStack->isClean() ) )
-		loadFile( file );
-	else
-		NifSkope::createWindow( file );
+	// Open in place: the new file replaces the current document, prompting
+	// Save/Discard/Cancel first when there are unsaved changes. Right-click
+	// a recent entry (or use the NIF browser context menu) for a new window.
+	if ( !saveConfirm() )
+		return false;
+	loadFile( file );
+	return true;
 }
 
 void NifSkope::openRecentFile()
@@ -3148,14 +3184,15 @@ void NifSkope::openRecentArchiveFile()
 
 void NifSkope::openFiles( QStringList & files )
 {
-	// Reuse only a genuinely blank document. Every other selected file receives
-	// its own session tab and therefore its own selection/Undo/dirty state.
-	if ( getCurrentFile().isEmpty()
-		&& !( isWindowModified() || ( nif && !nif->undoStack->isClean() ) ) ) {
-		QString first = files.takeFirst();
-		if ( !first.isEmpty() )
-			loadFile( first );
-	}
+	if ( files.isEmpty() )
+		return;
+
+	// The first file replaces the current document (with the unsaved-changes
+	// prompt); every additional selected file still gets its own window.
+	// Cancelling the prompt aborts the whole batch.
+	QString first = files.takeFirst();
+	if ( !first.isEmpty() && !openFile( first ) )
+		return;
 
 	for ( const QString & file : files ) {
 		NifSkope::createWindow( file );
@@ -3201,13 +3238,30 @@ void NifSkope::load()
 		if ( n1 != qsizetype(-1) && currentArchive ) {
 			fname.remove( 0, n1 + 5 );
 			if ( !fname.isEmpty() ) {
-				openArchiveFileString( currentArchive, fname );
+				// Reload of an archive-loaded file: re-extract in place with
+				// no unsaved-changes prompt (Reload is an explicit discard,
+				// like the loose-file reload below)
+				openArchiveFileString( currentArchive, fname, false, false );
 				return;
 			}
 		}
 	}
 
+	// TEMP DIAGNOSTIC (WW_PERF_TEST): phase timing of the real load path
+	QElapsedTimer perfT;
+	const bool perfOn = qEnvironmentVariableIsSet( "WW_PERF_TEST" );
+	if ( perfOn )
+		perfT.start();
+	auto perfMark = [&perfT, perfOn]( const char * what ) {
+		if ( !perfOn )
+			return;
+		QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+		if ( f.open( QIODevice::Append | QIODevice::Text ) )
+			QTextStream( &f ) << "[load/" << what << ": " << perfT.restart() << " ms]\n";
+	};
+
 	emit beginLoading();
+	perfMark( "beginLoading consumers" );
 
 	QFileInfo f( QDir::fromNativeSeparators( currentFile ) );
 	f.makeAbsolute();
@@ -3225,8 +3279,10 @@ void NifSkope::load()
 	}
 
 	bool loaded = nif->loadFromFile( fname );
+	perfMark( "loadFromFile (views detached)" );
 
 	emit completeLoading( loaded, fname );
+	perfMark( "completeLoading consumers" );
 
 	//if ( loaded ) {
 	//	filehash = fileChecksum( fname, QCryptographicHash::Md5 );

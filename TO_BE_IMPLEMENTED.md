@@ -2,14 +2,74 @@
 
 Backlog of features/fixes agreed for later. Ordered roughly by priority.
 
-## Modeling tools — geometry creation & connection (2026-07-15) — CONCEPT
-Full plan in `MODELING_TOOLS_PLAN.md`: generalized operator redo panel
-(floats + checkboxes + enums), shared topology kernel (append/interpolate
-verts incl. skin weights, boundary loops, edge rings), then phased operators —
-Extrude (E), Fill (F), Bridge Edge Loops, Connect (J), Subdivide, Loop Cut
-(Ctrl+R), Inset (I), Slide, Bevel (Ctrl+B), Smooth, Dissolve, Symmetrize,
-Flip/Recalc Normals, Add Primitive (Shift+A). BSTriShape-only, 65,535-vert
-cap guard, snapshot undo per op. Proportional editing stays declined.
+## Backlog snapshot (2026-07-17, verified against the code)
+
+Older sections below list items that have since shipped — each is marked at
+its heading. What is ACTUALLY open, verified by code inspection:
+
+**Modeling / edit mode** — ALL IMPLEMENTED 2026-07-17 (build green, probe
+passes; **GUI verification pending** — see WW_CHANGES "Modeling backlog
+mega-batch"), with two deliberate exceptions:
+- Join keeps snapshot undo (block removal = renumbering + model-wide link
+  rewrites; restoring that in place is the real corruption risk).
+- Bevel (Ctrl+B) — IMPLEMENTED 2026-07-17 via rip + offset + bridge
+  (marked-quad strip, tapered ends — no corner terminations). Segments = 1
+  in v1; width in the redo panel. Highest-risk item of the batch: GUI-test
+  after Rip, on a copy of the mesh.
+- Proportional editing — DECLINED, keep it that way.
+
+**Rigging** (authoritative: BONE_WEIGHT_TRANSFER_PLAN.md; updated 07-18)
+- DONE 07-18: Phase 3B "Create Skin (bind to node)" (unskinned target →
+  complete FO4 skin, donor pipeline then applies); weight-paint Mirror (X)
+  with L/R counterpart-bone flipping; Mapping mode + Max Bones transfer
+  controls (persisted, honored by every entry path). All GUI-untested.
+- Still open: independent persistent skeleton reference, classic NiSkin
+  backend, CustomizationRemapNewBonesData (open leaked-pointer question),
+  pruning zero-result bones, in-game FaceGen validation, shader
+  skinned-flag handling for newly created skins.
+
+**Collision Manager — P4** (P1–P3 landed; encoder extended 07-18)
+- DONE 07-18: multi-section compressed-mesh encoder (255 cap lifted;
+  per-section domains; single-section output byte-identical to the
+  validated writer; round-trip gate hardened). Needs an in-game walk test.
+- Still open: compound/instance encoding (BLOCKED on reference pairs — do
+  not build blind), per-triangle face-material painting,
+  hknpBSMaterialProperties beyond the single-material table.
+
+**UI overhauls (parked, but PARTIALLY shipped — verified 2026-07-17)**
+- Block List & Details overhaul: of the doc's top-6 phasing, ~half already
+  exists in code — block-list search filter, category icons
+  (blockListCategoryIcon via DecorationRole), summary tooltips, the
+  Links to / Referenced by jump menu, a shape/vert/tri footer, and the
+  Block Details field filter (Ctrl+Shift+F). Still missing: named flag
+  editor, typed/validated link-field editors with pick, collapsible
+  detail sections, a real per-type summary COLUMN, and the editing &
+  workflow items. BLOCK_LIST_DETAILS_OVERHAUL.md severely undersells the
+  current state ("design-only") — trust this note instead.
+- Animation Manager visual overhaul: the timeline dock v1 is shipped
+  (lanes, keyframe diamonds, playhead sync, sequence combo, graph pane,
+  B-spline range bars, text-key lanes; ~2.2k lines + edit/views files).
+  TIMELINE_PLAN.md tracks the rest: 43 open checkboxes across Display &
+  layout / Editing / Playback / Spells / Viewport / Interchange /
+  Portability — that list IS the visual-overhaul backlog.
+
+**UV editor**
+- Cross-mesh operators (merge/mirror/unwrap/pack act on the active mesh only).
+
+**Performance**
+- Load time: probe-attributed — ~⅔ of attached-reload overhead is the Block
+  Details + Header tree views reacting to the model reset (~520 ms on a
+  38k-vert file); first load carries ~550 ms one-time cost beyond that.
+- Edit-overlay per-frame rebuild (O(V)+O(T) per frame) — cache only if
+  profiling ever demands it (0.6–0.9 ms/frame on current meshes).
+
+## Modeling tools — geometry creation & connection (2026-07-15) — SHIPPED except leftovers
+Full plan in `MODELING_TOOLS_PLAN.md`. Landed 07-15/07-16: Redo Panel v2,
+Extrude, Fill/Bridge, Loop Cut, Edge Slide, Subdivide, Inset, Dissolve,
+Symmetrize, Flip/Recalc Normals, Add Primitive, Smooth, Merge; later Knife
+(K) and the quad layer (F / Alt+J / Ctrl+T). Still open: Bevel, the in-place
+undo conversions and panel migrations listed in the snapshot above.
+Proportional editing stays declined.
 
 ## Particle / VFX preview (2026-07-06) - DONE, user-verified 2026-07-07
 - Particle sprites bound their texture on a stale GL texture unit -> wrong
@@ -40,7 +100,8 @@ cap guard, snapshot undo per op. Proportional editing stays declined.
   the view-space normal directly. glparticles.cpp binds NormalMap→u1,
   GreyscaleMap→u2, CubeMap→u3 (neutral gray cube always bound so the
   samplerCube never shares a unit with a sampler2D). In-app verify pending.
-  Still unhandled: NiPSysColorModifier (NiColorData) lifetime colour gradient.
+  NiPSysColorModifier (NiColorData) lifetime colour gradient: since handled
+  (controllers.cpp, RGBA keys over normalised particle age — verified 07-17).
 
 ## Mesh / engine features (need in-game or careful testing)
 
@@ -88,7 +149,7 @@ cap guard, snapshot undo per op. Proportional editing stays declined.
   vanilla (14, 0) tail. Meaning of the 14 is still unknown (only one vanilla
   sample); if a regenerated mesh misbehaves in game, compare that value.
 
-### 2. Merge vertices by distance (edit mode)
+### 2. Merge vertices by distance (edit mode) — DONE (Merge ▸ By Distance…, redo panel; WW_CHANGES 07-15)
 - Blender "Merge > By Distance": weld picked vertices within a threshold,
   remap triangles, drop unused verts. Requires rewriting the packed BSTriShape
   vertex array (position/normal/tangent/UV/color/weights) and reindexing.
@@ -114,7 +175,7 @@ future). Edit-mode selection undo (Ctrl+Z through selection history) still TODO.
   later joins the pieces back the shading across the seam stays seamless.
 - Snapshot-undoable. BSTriShape-rewrite risk — test carefully.
 
-### 3b. Join geometry (object mode) - Ctrl+J
+### 3b. Join geometry (object mode) - Ctrl+J — DONE (joinSelectedObjects)
 - **Ctrl+J in object mode** joins the selected compatible geometry nodes into
   the active (last-selected) node, Blender-style. "Compatible" = same block
   type + matching vertex format (BSVertexDesc) + same shader/alpha setup so
@@ -475,23 +536,23 @@ select-linked, box deselect... the redo-panel state already stores them).
 F9 pops the current redo panel next to the mouse cursor (it lives at the
 viewport's bottom-left otherwise).
 
-### Smooth Vertices
+### Smooth Vertices — DONE (W ▸ Smooth Vertices…, redo panel)
 Laplacian smooth on the selected verts (average with edge neighbors),
 factor + iterations in a redo panel. Low-risk vertex rewrite; good for
 fixing lumpy geometry.
 
-### Rip (V) and Split (Y)
+### Rip (V) and Split (Y) — STILL OPEN in the 3D viewport (UV editor's Y = UV rip only)
 Split (Y): duplicate the selected verts and reassign the selected faces to
 the copies, detaching them in place (no new block — unlike Separate).
 Rip (V): split along the selected edge path and enter a move modal on the
 ripped side. Shares Separate's vertex-array machinery.
 
-### Extrude (E)
+### Extrude (E) — DONE (07-15, incl. vertex/edge extrude + in-place undo)
 Duplicate the selected boundary verts, bridge triangles between original and
 copy, then enter a move modal on the copies. Normals/UVs on the new side
 walls need care. Medium-high effort.
 
-### UV editing overhaul (HUGE undertaking)
+### UV editing overhaul (HUGE undertaking) — DONE (full editor: LSCM/pins, layout tools, sticky seams, multi-mesh; UV_EDITOR_PLAN.md)
 A proper UV editing workspace, roughly in stages:
 1. **UV viewer dock**: draw the edited mesh's UV layout (triangles in UV
    space) with the base texture underneath; sync selection with the 3D view.

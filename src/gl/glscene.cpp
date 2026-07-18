@@ -637,6 +637,7 @@ void Scene::drawGrid()
 			}
 		}
 		glDisable( GL_BLEND );
+		glDepthFunc( GL_LESS );	// the grid's LEQUAL must not leak into later passes
 		return;
 	}
 
