@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-18c — Duplicate/Join: 65,535-vertex cap enforced (user-reported corruption)
+
+User repro: edit-mode Duplicate of many separate areas on the 38,450-vert
+PBR sphere-grid mesh (x01_torso.nif) → 76,900 verts → giant orange blobs and
+cross-mesh streaks. Root cause: BSTriShape stores Num Vertices and every
+Triangle corner as uint16; `duplicateElements` had NO cap guard, so
+`quint16( vremap.value(...) )` wrapped every new triangle onto unrelated
+early vertices (38,450 × 2 = 76,900 > 65,535). Every OTHER growth op already
+guarded (Extrude/Subdivide/Split/Rip/Bevel/Knife/Symmetrize refuse; Bridge
+and Loop Cut clamp) — Duplicate and Join were the two that slipped through.
+
+- `duplicateElements`: refuses a shape whose duplicate would cross the cap
+  (status message; other selected shapes still duplicate, with a note).
+- `joinSelectedObjects`: skips sources that would push the active shape past
+  the cap AND now removes only the sources actually merged — previously a
+  skipped/empty source block was DELETED without being merged (silent data
+  loss on the same code path).
+
+Recovery note for the repro file: the wrapped duplicate is a normal undo
+step — Ctrl+Z restores the mesh; do not save the corrupted state.
+
 ## 2026-07-18b — Create Skin: corruption found by automated test, spell rewritten (byte-patch + reload)
 
 Built a headless test harness (WW_CREATESKIN_TEST=1 env hook in

@@ -7256,6 +7256,8 @@ void GLView::joinSelectedObjects()
 		activeWorld = an->worldTrans();
 
 	int joined = 0;
+	bool capSkipped = false;
+	QVector<int> merged;
 	QPersistentModelIndex pActive( iActive );
 	// DELIBERATELY snapshot undo (the one remaining topology op with a reload
 	// flash on Ctrl+Z): Join REMOVES the source blocks, which renumbers every
@@ -7273,6 +7275,12 @@ void GLView::joinSelectedObjects()
 			int addNT = model->get<int>( iS, "Num Triangles" );
 			if ( addNV <= 0 || addNT <= 0 )
 				continue;
+			// vertex indices and Num Vertices are uint16 — merging past the
+			// cap wraps the reindexed triangles onto unrelated vertices
+			if ( oldNV + addNV > 0xFFFF ) {
+				capSkipped = true;
+				continue;
+			}
 
 			Transform srcWorld;
 			if ( Node * sn = scene->getNode( model, iS ) )
@@ -7324,19 +7332,23 @@ void GLView::joinSelectedObjects()
 				model->set<int>( iA, "Data Size", ( oldNV + addNV ) * stride + ( oldNT + addNT ) * 6 );
 
 			joined++;
+			merged.append( sb );
 		}
 
 		tlUpdateBounds( model, QModelIndex( pActive ) );
 
-		// remove the merged source blocks (high -> low so numbers stay valid)
-		QVector<int> rm = sources;
+		// remove ONLY the merged source blocks (high -> low so numbers stay
+		// valid); skipped sources must survive untouched
+		QVector<int> rm = merged;
 		std::sort( rm.begin(), rm.end(), std::greater<int>() );
 		for ( int sb : rm )
 			model->removeNiBlock( sb );
 	} );
 
 	if ( joined == 0 ) {
-		emit gizmoStatus( tr( "Join: nothing merged" ) );
+		emit gizmoStatus( capSkipped
+			? tr( "Join: would exceed the 65,535-vertex limit of BSTriShape" )
+			: tr( "Join: nothing merged" ) );
 		return;
 	}
 
@@ -7349,7 +7361,8 @@ void GLView::joinSelectedObjects()
 		scene->currentIndex = QModelIndex( scene->currentBlock );
 	}
 	emit objectSelectionChanged();
-	emit gizmoStatus( tr( "Joined %1 mesh(es) into the active object" ).arg( joined ) );
+	emit gizmoStatus( tr( "Joined %1 mesh(es) into the active object" ).arg( joined )
+		+ ( capSkipped ? tr( " (some skipped at the 65,535-vertex limit)" ) : QString() ) );
 	modelChanged();
 }
 
@@ -7379,6 +7392,7 @@ void GLView::duplicateElements()
 
 	QVector<PickedElement> newSel;
 	int totalV = 0;
+	bool capSkipped = false;
 
 	// per-shape inputs precomputed from pre-op state so the redo closures are
 	// deterministic; the append-only mutation runs under an in-place command
@@ -7419,6 +7433,12 @@ void GLView::duplicateElements()
 		}
 		if ( dupVertsSet.isEmpty() )
 			continue;
+		// vertex indices and Num Vertices are uint16 — a duplicate past the
+		// cap wraps every new Triangle write onto unrelated early vertices
+		if ( oldNV + dupVertsSet.size() > 0xFFFF ) {
+			capSkipped = true;
+			continue;
+		}
 
 		QVector<int> dupVerts( dupVertsSet.constBegin(), dupVertsSet.constEnd() );
 		std::sort( dupVerts.begin(), dupVerts.end() );
@@ -7499,7 +7519,9 @@ void GLView::duplicateElements()
 		model->undoStack->endMacro();
 
 	if ( newSel.isEmpty() ) {
-		emit gizmoStatus( tr( "Nothing to duplicate (select verts / faces)" ) );
+		emit gizmoStatus( capSkipped
+			? tr( "Duplicate: would exceed the 65,535-vertex limit of BSTriShape" )
+			: tr( "Nothing to duplicate (select verts / faces)" ) );
 		return;
 	}
 
@@ -7508,7 +7530,8 @@ void GLView::duplicateElements()
 	pickedElems = newSel;
 	modelChanged();
 	gizmoBeginElement( 1 );
-	emit gizmoStatus( tr( "Duplicated %1 vert(s) - move, or Esc to leave in place" ).arg( totalV ) );
+	emit gizmoStatus( tr( "Duplicated %1 vert(s) - move, or Esc to leave in place" ).arg( totalV )
+		+ ( capSkipped ? tr( " (a shape at the 65,535-vertex limit was skipped)" ) : QString() ) );
 }
 
 // ---------------------------------------------------------------------------
