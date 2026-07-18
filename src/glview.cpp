@@ -7407,6 +7407,21 @@ int GLView::deleteBlocksWithConfirm( const QVector<int> & blocks )
 	QPushButton * del = box.addButton( tr( "Delete" ), QMessageBox::AcceptRole );
 	box.addButton( tr( "Cancel" ), QMessageBox::RejectRole );
 	box.setDefaultButton( del );
+	// Blender-style: pop the confirm at the cursor rather than screen-centre.
+	// adjustSize() gives a valid size hint to centre on; clamp to the cursor's
+	// screen so it never opens partly off-screen.
+	box.adjustSize();
+	const QPoint cursor = QCursor::pos();
+	QRect fg( QPoint( 0, 0 ), box.size() );
+	fg.moveCenter( cursor );
+	if ( QScreen * scr = QGuiApplication::screenAt( cursor ) ) {
+		const QRect avail = scr->availableGeometry();
+		if ( fg.left() < avail.left() ) fg.moveLeft( avail.left() );
+		if ( fg.top() < avail.top() ) fg.moveTop( avail.top() );
+		if ( fg.right() > avail.right() ) fg.moveRight( avail.right() );
+		if ( fg.bottom() > avail.bottom() ) fg.moveBottom( avail.bottom() );
+	}
+	box.move( fg.topLeft() );
 	box.exec();
 	if ( box.clickedButton() != del )
 		return 0;

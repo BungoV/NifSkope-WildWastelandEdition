@@ -845,6 +845,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				QTimer driver;
 				QObject::connect( &driver, &QTimer::timeout, skope, [&log]() {
 					if ( auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) ) {
+						const QPoint c = QCursor::pos();
+						const QPoint boxC = mb->frameGeometry().center();
+						log << "  popup centre (" << boxC.x() << "," << boxC.y() << ") vs cursor ("
+							<< c.x() << "," << c.y() << "); offset "
+							<< ( boxC - c ).manhattanLength() << " px\n";
 						for ( QAbstractButton * b : mb->buttons() )
 							if ( mb->buttonRole( b ) == QMessageBox::AcceptRole ) {
 								log << "  confirm '" << mb->text() << "' -> " << b->text() << "\n";
@@ -888,6 +893,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log.flush();
 					skope->ogl->setObjectSelection( QSet<int>( targets.constBegin(), targets.constEnd() ),
 						targets.first() );
+					// park the cursor at a known point so the popup-placement
+					// check has a reference (Blender-style at-cursor confirm)
+					QCursor::setPos( 900, 500 );
 					const int removed = skope->ogl->deleteBlocksWithConfirm( targets );
 					const int after = nif->getBlockCount();
 					log << "deleteBlocksWithConfirm returned " << removed

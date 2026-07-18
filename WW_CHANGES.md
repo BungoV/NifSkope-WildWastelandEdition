@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-18g — Delete confirm pops at the cursor (Blender)
+
+The "Delete selected objects?" box opened screen-centre; now it opens
+centred on the cursor like Blender's confirm. deleteBlocksWithConfirm
+adjustSize()s the box, centres its rect on QCursor::pos(), clamps to the
+cursor's screen availableGeometry so it never opens partly off-screen, and
+moves it before exec(). Verified headlessly (WW_DELETE_TEST parks the
+cursor, harness logs popup-centre vs cursor): 8 px offset (window frame),
+i.e. at the cursor.
+
 ## 2026-07-18f — Object-mode / Block-List delete (Blender X)
 
 New `GLView::deleteBlocksWithConfirm(blocks)` — the shared core for deleting
