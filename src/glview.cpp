@@ -6100,6 +6100,43 @@ void GLView::gizmoEndElement( bool commit )
 	update();
 }
 
+//! Blender-style popup placement: move a modal dialog so `onCursor` (usually
+//! its primary action button) opens directly under the pointer for an instant
+//! click. Call after the buttons are added, before exec() — adjustSize() lays
+//! the dialog out so the child geometry is valid. Clamped to the cursor's
+//! screen so it never opens partly off-screen. Pass onCursor = nullptr to
+//! centre the whole dialog on the cursor instead.
+static void tlPlacePopupAtCursor( QWidget * box, QWidget * onCursor )
+{
+	if ( !box )
+		return;
+	// show() realizes and lays the dialog out (so the button's real screen
+	// position exists) but does not paint until the event loop starts inside
+	// exec() — so repositioning now is flicker-free. QMessageBox child geometry
+	// is unreliable BEFORE show, hence measuring the button after it.
+	box->adjustSize();
+	box->show();
+	const QPoint cursor = QCursor::pos();
+	const QPoint anchor = ( onCursor && box->isAncestorOf( onCursor ) )
+		? onCursor->mapToGlobal( onCursor->rect().center() )
+		: box->frameGeometry().center();
+	// shift the whole window so the anchor lands on the cursor (delta is
+	// coordinate-system agnostic, sidestepping frame-margin confusion)
+	box->move( box->pos() + ( cursor - anchor ) );
+	// clamp back onto the cursor's screen if an edge pushed it off
+	if ( QScreen * scr = QGuiApplication::screenAt( cursor ) ) {
+		const QRect avail = scr->availableGeometry();
+		const QRect fg = box->frameGeometry();
+		QPoint adj;
+		if ( fg.left() < avail.left() ) adj.setX( avail.left() - fg.left() );
+		else if ( fg.right() > avail.right() ) adj.setX( avail.right() - fg.right() );
+		if ( fg.top() < avail.top() ) adj.setY( avail.top() - fg.top() );
+		else if ( fg.bottom() > avail.bottom() ) adj.setY( avail.bottom() - fg.bottom() );
+		if ( !adj.isNull() )
+			box->move( box->pos() + adj );
+	}
+}
+
 void GLView::showDeleteMenu()
 {
 	if ( !editMode || pickedElems.isEmpty() ) {
@@ -7407,21 +7444,8 @@ int GLView::deleteBlocksWithConfirm( const QVector<int> & blocks )
 	QPushButton * del = box.addButton( tr( "Delete" ), QMessageBox::AcceptRole );
 	box.addButton( tr( "Cancel" ), QMessageBox::RejectRole );
 	box.setDefaultButton( del );
-	// Blender-style: pop the confirm at the cursor rather than screen-centre.
-	// adjustSize() gives a valid size hint to centre on; clamp to the cursor's
-	// screen so it never opens partly off-screen.
-	box.adjustSize();
-	const QPoint cursor = QCursor::pos();
-	QRect fg( QPoint( 0, 0 ), box.size() );
-	fg.moveCenter( cursor );
-	if ( QScreen * scr = QGuiApplication::screenAt( cursor ) ) {
-		const QRect avail = scr->availableGeometry();
-		if ( fg.left() < avail.left() ) fg.moveLeft( avail.left() );
-		if ( fg.top() < avail.top() ) fg.moveTop( avail.top() );
-		if ( fg.right() > avail.right() ) fg.moveRight( avail.right() );
-		if ( fg.bottom() > avail.bottom() ) fg.moveBottom( avail.bottom() );
-	}
-	box.move( fg.topLeft() );
+	// Blender-style: open with the Delete button under the pointer
+	tlPlacePopupAtCursor( &box, del );
 	box.exec();
 	if ( box.clickedButton() != del )
 		return 0;
@@ -7562,12 +7586,17 @@ void GLView::duplicateElements()
 				continue;
 			}
 			const QString srcName = model->get<QString>( iShape, "Name" );
-			if ( QMessageBox::question( nullptr, tr( "Duplicate" ),
-					tr( "Duplicating %1 vertices would push \"%2\" past the "
-						"65,535-vertex limit of one BSTriShape.\n\n"
-						"Duplicate the selection into a NEW shape instead?" )
-						.arg( dupVertsSet.size() ).arg( srcName ),
-					QMessageBox::Yes | QMessageBox::Cancel ) != QMessageBox::Yes ) {
+			QMessageBox capBox( QMessageBox::NoIcon, tr( "Duplicate" ),
+				tr( "Duplicating %1 vertices would push \"%2\" past the "
+					"65,535-vertex limit of one BSTriShape.\n\n"
+					"Duplicate the selection into a NEW shape instead?" )
+					.arg( dupVertsSet.size() ).arg( srcName ), QMessageBox::NoButton );
+			QPushButton * newShapeBtn = capBox.addButton( tr( "New Shape" ), QMessageBox::AcceptRole );
+			capBox.addButton( tr( "Cancel" ), QMessageBox::RejectRole );
+			capBox.setDefaultButton( newShapeBtn );
+			tlPlacePopupAtCursor( &capBox, newShapeBtn );
+			capBox.exec();
+			if ( capBox.clickedButton() != newShapeBtn ) {
 				capSkipped = true;
 				continue;
 			}

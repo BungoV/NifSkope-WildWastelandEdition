@@ -846,13 +846,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				QObject::connect( &driver, &QTimer::timeout, skope, [&log]() {
 					if ( auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) ) {
 						const QPoint c = QCursor::pos();
-						const QPoint boxC = mb->frameGeometry().center();
-						log << "  popup centre (" << boxC.x() << "," << boxC.y() << ") vs cursor ("
-							<< c.x() << "," << c.y() << "); offset "
-							<< ( boxC - c ).manhattanLength() << " px\n";
 						for ( QAbstractButton * b : mb->buttons() )
 							if ( mb->buttonRole( b ) == QMessageBox::AcceptRole ) {
-								log << "  confirm '" << mb->text() << "' -> " << b->text() << "\n";
+								const QPoint btnC = b->mapToGlobal( b->rect().center() );
+								log << "  action button '" << b->text() << "' centre ("
+									<< btnC.x() << "," << btnC.y() << ") vs cursor ("
+									<< c.x() << "," << c.y() << "); offset "
+									<< ( btnC - c ).manhattanLength() << " px\n";
+								log << "  confirm '" << mb->text().left( 40 ) << "'\n";
 								log.flush();
 								b->click();
 								break;

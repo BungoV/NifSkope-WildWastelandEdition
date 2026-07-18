@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-18h — Confirm popups open with the action button under the cursor
+
+Blender opens a confirm with its action button beneath the pointer for an
+instant click. New reusable `tlPlacePopupAtCursor(box, button)`: adjustSize +
+show() (lays the dialog out without painting — paint waits for exec()'s event
+loop, so it's flicker-free), measures the button's real screen position, and
+shifts the whole window so the button lands on the cursor, clamped to the
+cursor's screen. Applied to the "Delete selected objects?" confirm (Delete
+button) and the over-cap duplicate confirm (its accept button, relabelled
+"New Shape" / "Cancel" so it reads as an action). The operator pop-ups
+(edit-mode Delete/Merge/Separate/Snap/Set Origin menus) already exec at the
+cursor. Verified headlessly (WW_DELETE_TEST): action-button centre lands 0 px
+from the parked cursor.
+
 ## 2026-07-18g — Delete confirm pops at the cursor (Blender)
 
 The "Delete selected objects?" box opened screen-centre; now it opens
