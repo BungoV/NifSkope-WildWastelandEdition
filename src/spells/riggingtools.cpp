@@ -220,6 +220,11 @@ static QString riggingChooseDonorFile( const NifModel * nif )
 {
 	if ( riggingWorkflow.active )
 		return riggingWorkflow.donorFile;
+	// TEMP TEST SEAM (WW_CREATESKIN_TEST harness): the native file dialog
+	// cannot be auto-driven, so an env var supplies the donor path directly.
+	const QByteArray envDonor = qgetenv( "WW_TEST_DONOR" );
+	if ( !envDonor.isEmpty() )
+		return QString::fromLocal8Bit( envDonor );
 	riggingSessionDonorFile.reset();
 	riggingSessionDonorLabel.clear();
 	NifSkope * receiver = NifSkope::documentForModel( nif );
@@ -1711,10 +1716,27 @@ public:
 				maxPoseDelta = qMax( maxPoseDelta, riggingTransformDelta( donorPose, targetPose ) );
 			compared++;
 		}
-		if ( compared == 0 || maxDelta > 0.001f || maxPoseDelta > 0.001f ) {
-			QMessageBox::warning( nullptr, name(), compared == 0
-				? Spell::tr( "No shared BoneData entry exists to verify a compatible bind space." )
-				: Spell::tr( "Donor and target shared bindings differ (BoneData delta %1, pose delta %2). "
+		if ( compared == 0 ) {
+			// No bone in common (e.g. a skin freshly made by Create Skin,
+			// bound to a single scene node). Entry-by-entry verification is
+			// impossible, so verify the same guarantee directly: if both
+			// shapes occupy the same skeleton-root-relative space, the
+			// donor's BoneData records are valid in the target bind space
+			// too. Per-node rest poses of every bone actually bound are
+			// still verified individually below.
+			Transform targetSpace, donorSpace;
+			if ( !riggingNodeWorld( nif, nif->getBlockNumber( index ), targetRoot, targetSpace )
+				|| !riggingNodeWorld( &donor, donor.getBlockNumber( iDonorShape ), donorRoot, donorSpace )
+				|| riggingTransformDelta( targetSpace, donorSpace ) > 0.001f ) {
+				QMessageBox::warning( nullptr, name(), Spell::tr(
+					"No shared BoneData entry exists to verify a compatible bind space, "
+					"and the shapes are not in the same skeleton-root-relative space. "
+					"Binding records were not copied." ) );
+				return index;
+			}
+		} else if ( maxDelta > 0.001f || maxPoseDelta > 0.001f ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "Donor and target shared bindings differ (BoneData delta %1, pose delta %2). "
 					"Binding records were not copied." )
 					.arg( maxDelta, 0, 'g', 4 ).arg( maxPoseDelta, 0, 'g', 4 ) );
 			return index;
@@ -1848,37 +1870,133 @@ REGISTER_SPELL( spRiggingBindExistingNodes )
 
 // ---------------------------------------------------------------------------
 // Phase 3B: create a complete FO4 skin on an entirely UNSKINNED BSTriShape.
-// The shape's vertex layout gains the skinning attribute (VertexDesc rebuild
-// + packed Vertex Data rewrite, every existing attribute preserved by name),
-// a BSSkin::Instance / BSSkin::BoneData pair is created bound to one chosen
+// A BSSkin::Instance / BSSkin::BoneData pair is created bound to one chosen
 // node with weight 1.0 everywhere, and the skin-to-bone transform is chosen
 // so the mesh does not move: inv(boneWorld) * shapeWorld. From there the
 // existing donor pipeline (Import Donor Bone Nodes -> Bind Donor Bones ->
 // Transfer Weights) takes over exactly as on any skinned target.
+//
+// The vertex-layout change is done at the BYTE level on a serialized copy of
+// the model, which is then reloaded. The model's own BSVertexData row
+// machinery cannot be trusted through a Vertex Desc change: updateArraySize
+// early-returns when the vertex count is unchanged, row-children condition
+// checks pass for BOTH precision variants of a field (so lookups by name are
+// ambiguous), the per-row weight arrays are not instantiated until a deferred
+// update cascade runs, and the save path then writes a record layout that
+// contradicts the descriptor (see WW_CHANGES 2026-07-18b for the full
+// diagnosis). The loader is the one code path proven to build skinned rows
+// correctly, so the spell routes the layout change through it. Every byte
+// walk below self-validates and the spell aborts without changes on any
+// mismatch.
 
-//! Recursively snapshot / restore every leaf value of one vertex field
-//! (positional within the field; the old fields' layouts are unchanged by
-//! the skinning attribute, which only APPENDS new fields).
-static void riggingCaptureLeaves( const NifModel * nif, const QModelIndex & idx, QVector<NifValue> & out )
+struct RiggingShapeBytes
 {
-	const int rc = nif->rowCount( idx );
-	if ( rc > 0 ) {
-		for ( int r = 0; r < rc; r++ )
-			riggingCaptureLeaves( nif, nif->getIndex( idx, r ), out );
-	} else {
-		out.append( nif->getValue( idx ) );
-	}
+	qsizetype descOff = 0;      // Vertex Desc (uint64)
+	qsizetype dataSizeOff = 0;  // Data Size (uint32)
+	qsizetype vertsOff = 0;     // first vertex record
+	quint64 desc = 0;
+	quint32 numTri = 0;
+	quint32 numVert = 0;
+	quint32 dataSize = 0;
+};
+
+static bool riggingLocateShapeBytes( const QByteArray & bytes, qsizetype blockStart,
+	qsizetype blockSize, RiggingShapeBytes & out )
+{
+	const qsizetype end = blockStart + blockSize;
+	if ( end > bytes.size() )
+		return false;
+	auto u32 = [&]( qsizetype at ) -> quint32 {
+		quint32 v; memcpy( &v, bytes.constData() + at, 4 ); return v;
+	};
+	qsizetype o = blockStart;
+	if ( o + 8 > end )
+		return false;
+	o += 4;                                  // Name
+	o += 4 + 4 * qsizetype( u32( o ) );      // Extra Data List
+	o += 8;                                  // Controller, Flags
+	o += 12 + 36 + 4;                        // Translation, Rotation, Scale
+	o += 4;                                  // Collision Object
+	o += 16;                                 // Bounding Sphere
+	o += 12;                                 // Skin, Shader Property, Alpha Property
+	if ( o + 8 + 4 + 2 + 4 > end )
+		return false;
+	out.descOff = o;
+	memcpy( &out.desc, bytes.constData() + o, 8 ); o += 8;
+	out.numTri = u32( o ); o += 4;
+	quint16 nv16; memcpy( &nv16, bytes.constData() + o, 2 ); o += 2;
+	out.numVert = nv16;
+	out.dataSizeOff = o;
+	out.dataSize = u32( o ); o += 4;
+	out.vertsOff = o;
+	// self-validation: this walk only holds for layouts where Vertex Data
+	// directly follows Data Size and fills it exactly
+	const quint32 stride = quint32( out.desc & 0xF ) * 4;
+	if ( out.numVert == 0 || stride == 0 )
+		return false;
+	if ( out.dataSize != stride * out.numVert + 6 * out.numTri )
+		return false;
+	if ( out.vertsOff + qsizetype( out.dataSize ) > end )
+		return false;
+	return true;
 }
 
-static void riggingRestoreLeaves( NifModel * nif, const QModelIndex & idx, const QVector<NifValue> & in, int & pos )
+//! Block starts/sizes and the offset of the header's block-size table.
+static bool riggingLocateBlocks( const QByteArray & bytes, QVector<qsizetype> & starts,
+	QVector<quint32> & sizes, qsizetype & sizeTableOff )
 {
-	const int rc = nif->rowCount( idx );
-	if ( rc > 0 ) {
-		for ( int r = 0; r < rc; r++ )
-			riggingRestoreLeaves( nif, nif->getIndex( idx, r ), in, pos );
-	} else if ( pos < in.size() ) {
-		nif->setIndexValue( idx, in.at( pos++ ) );
+	const qsizetype n = bytes.size();
+	const uchar * d = reinterpret_cast<const uchar *>( bytes.constData() );
+	auto u32 = [&]( qsizetype at ) -> quint32 {
+		quint32 v; memcpy( &v, d + at, 4 ); return v;
+	};
+	qsizetype nl = bytes.indexOf( '\n' );
+	if ( nl < 0 )
+		return false;
+	qsizetype o = nl + 1;
+	if ( o + 17 > n )
+		return false;
+	o += 4 + 1 + 4;                          // version, endianness, user version
+	const quint32 numBlocks = u32( o ); o += 4;
+	const quint32 bsVersion = u32( o ); o += 4;
+	const int nShortStrings = ( bsVersion >= 130 ) ? 4 : 3;	// author/process/export[/max path]
+	for ( int i = 0; i < nShortStrings; i++ ) {
+		if ( o >= n ) return false;
+		o += 1 + d[o];
 	}
+	if ( o + 2 > n )
+		return false;
+	quint16 numTypes; memcpy( &numTypes, d + o, 2 ); o += 2;
+	for ( int i = 0; i < numTypes; i++ ) {
+		if ( o + 4 > n ) return false;
+		o += 4 + u32( o );
+	}
+	o += 2 * numBlocks;                      // block type indices
+	sizeTableOff = o;
+	if ( o + 4 * qsizetype( numBlocks ) > n )
+		return false;
+	sizes.resize( numBlocks );
+	for ( quint32 i = 0; i < numBlocks; i++ )
+		sizes[i] = u32( sizeTableOff + 4 * i );
+	o += 4 * numBlocks;
+	if ( o + 8 > n )
+		return false;
+	const quint32 numStrings = u32( o ); o += 4;
+	o += 4;                                  // max string length
+	for ( quint32 i = 0; i < numStrings; i++ ) {
+		if ( o + 4 > n ) return false;
+		o += 4 + u32( o );
+	}
+	if ( o + 4 > n )
+		return false;
+	const quint32 numGroups = u32( o ); o += 4;
+	o += 4 * numGroups;
+	starts.resize( numBlocks );
+	for ( quint32 i = 0; i < numBlocks; i++ ) {
+		starts[i] = o;
+		o += sizes[i];
+	}
+	return o <= n;
 }
 
 class spRiggingCreateSkin final : public Spell
@@ -1941,87 +2059,60 @@ public:
 		}
 		const Transform skinToBone = boneWorld.inverted() * shapeWorld;
 
-		// capture every existing per-vertex field by name, positionally
-		QModelIndex iVD = nif->getIndex( index, "Vertex Data" );
-		struct FieldSave { QString name; QVector<NifValue> values; };
-		QVector<QVector<FieldSave>> saved( nv );
-		for ( int v = 0; v < nv && v < nif->rowCount( iVD ); v++ ) {
-			QModelIndex row = nif->getIndex( iVD, v );
-			for ( int c = 0; c < nif->rowCount( row ); c++ ) {
-				QModelIndex field = nif->getIndex( row, c );
-				FieldSave fs;
-				fs.name = nif->itemName( field );
-				riggingCaptureLeaves( nif, field, fs.values );
-				saved[v].append( fs );
-			}
+		// the new vertex layout: the same attributes plus skinning
+		const BSVertexDesc oldDesc = nif->get<BSVertexDesc>( index, "Vertex Desc" );
+		if ( !oldDesc.HasFlag( VertexAttribute::VA_POSITION ) ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr(
+				"The shape stores no positions in its Vertex Data (dynamic shape?) — not supported." ) );
+			return index;
 		}
-
-		// mesh bound in bind-bone space, for the BoneData entry
-		BoundSphere localBound;
-		{
-			QVector<Vector3> pos( nv );
-			for ( int v = 0; v < nv; v++ )
-				pos[v] = skinToBone * nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" );
-			localBound = BoundSphere( pos, true );
+		BSVertexDesc newDesc = oldDesc;
+		newDesc.SetFlag( VertexAttribute( 6 ) );	// VA_SKINNING
+		newDesc.ResetAttributeOffsets( nif->getBSVersion() );
+		const quint32 oldStride = oldDesc.GetVertexSize();
+		const quint32 newStride = newDesc.GetVertexSize();
+		const quint32 skinOff = newDesc.GetAttributeOffset( VertexAttribute::VA_SKINNING );
+		if ( newStride != oldStride + 12 || skinOff > oldStride ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr(
+				"Unexpected vertex layout (stride %1 -> %2); no changes were made." )
+				.arg( oldStride ).arg( newStride ) );
+			return index;
 		}
+		const bool fullPrecPos = oldDesc.HasFlag( VertexFlags::VF_FULLPREC )
+			|| nif->getBSVersion() == 100;
 
-		QPersistentModelIndex pShape( index );
+		bool opOk = false;
+		QString opError;
 		nifSnapshotOp( nif, Spell::tr( "Create skin" ), [&]() {
-			nif->holdUpdates( true );
-			nif->setState( BaseModel::Processing );
-			QModelIndex iShape( pShape );
-
-			// 1. the vertex layout gains the skinning attribute
-			BSVertexDesc desc = nif->get<BSVertexDesc>( iShape, "Vertex Desc" );
-			desc.SetFlag( VertexAttribute( 6 ) );	// VA_SKINNING
-			desc.ResetAttributeOffsets( nif->getBSVersion() );
-			nif->set<BSVertexDesc>( iShape, "Vertex Desc", desc );
-			nif->set<uint>( iShape, "Data Size",
-				desc.GetVertexSize() * uint( nv ) + 6u * uint( nt ) );
-			QModelIndex iVD2 = nif->getIndex( iShape, "Vertex Data" );
-			nif->updateArraySize( iVD2 );
-
-			// 2. restore the captured attributes; the appended skin slots
-			// bind everything to slot 0 with weight 1.0
-			for ( int v = 0; v < nv && v < nif->rowCount( iVD2 ); v++ ) {
-				QModelIndex row = nif->getIndex( iVD2, v );
-				for ( int c = 0; c < nif->rowCount( row ); c++ ) {
-					QModelIndex field = nif->getIndex( row, c );
-					const QString fieldName = nif->itemName( field );
-					for ( const FieldSave & fs : std::as_const( saved[v] ) ) {
-						if ( fs.name != fieldName )
-							continue;
-						int pos = 0;
-						riggingRestoreLeaves( nif, field, fs.values, pos );
-						break;
-					}
-				}
-				QModelIndex iW = nif->getIndex( row, "Bone Weights" );
-				QModelIndex iI = nif->getIndex( row, "Bone Indices" );
-				for ( int j = 0; j < 4 && iW.isValid() && iI.isValid(); j++ ) {
-					nif->set<float>( nif->getIndex( iW, j ), j == 0 ? 1.0f : 0.0f );
-					nif->set<quint8>( nif->getIndex( iI, j ), 0 );
+			// insurance: any failure past block insertion restores this state
+			QByteArray pristine;
+			{
+				QBuffer buf( &pristine );
+				if ( !buf.open( QIODevice::WriteOnly ) || !nif->save( buf ) ) {
+					opError = Spell::tr( "Could not serialize the model." );
+					return;
 				}
 			}
+			auto restorePristine = [&]() {
+				QBuffer buf( &pristine );
+				if ( buf.open( QIODevice::ReadOnly ) )
+					nif->load( buf );
+			};
 
-			// 3. BSSkin::BoneData with the one bind bone
+			// 1. skin blocks against the still-unchanged vertex layout
+			QModelIndex iShape = nif->getBlockIndex( shapeBlock );
 			QModelIndex iData = nif->insertNiBlock( "BSSkin::BoneData" );
+			const int boneDataBlock = nif->getBlockNumber( iData );
 			nif->set<uint>( iData, "Num Bones", 1 );
 			QModelIndex iList = nif->getIndex( iData, "Bone List" );
 			nif->updateArraySize( iList );
 			QModelIndex iEntry = nif->getIndex( iList, 0 );
-			if ( iEntry.isValid() ) {
-				QModelIndex iSphere = nif->getIndex( iEntry, "Bounding Sphere" );
-				if ( iSphere.isValid() ) {
-					nif->set<Vector3>( iSphere, "Center", localBound.center );
-					nif->set<float>( iSphere, "Radius", localBound.radius );
-				}
+			if ( iEntry.isValid() )
 				skinToBone.writeBack( nif, iEntry );
-			}
 
-			// 4. BSSkin::Instance wired to the shape
+			// 2. BSSkin::Instance wired to the shape
 			QModelIndex iInst = nif->insertNiBlock( "BSSkin::Instance" );
-			nif->setLink( nif->getIndex( iInst, "Data" ), nif->getBlockNumber( iData ) );
+			nif->setLink( nif->getIndex( iInst, "Data" ), boneDataBlock );
 			// vanilla convention: the skeleton root link points at block 0
 			if ( nif->blockInherits( nif->getBlockIndex( 0 ), "NiNode" ) )
 				nif->setLink( nif->getIndex( iInst, "Skeleton Root" ), 0 );
@@ -2031,16 +2122,109 @@ public:
 			nif->setLink( nif->getIndex( iBones, 0 ), bindNode );
 			nif->setLink( nif->getIndex( iShape, "Skin" ), nif->getBlockNumber( iInst ) );
 
-			nif->restoreState();
-			nif->holdUpdates( false );
+			// 3. serialize; the vertex records still use the OLD layout here,
+			// the one state the save path reproduces faithfully
+			QByteArray bytes;
+			{
+				QBuffer buf( &bytes );
+				if ( !buf.open( QIODevice::WriteOnly ) || !nif->save( buf ) ) {
+					opError = Spell::tr( "Could not serialize the model." );
+					restorePristine();
+					return;
+				}
+			}
+
+			// 4. locate the shape block in the bytes and cross-check
+			QVector<qsizetype> starts;
+			QVector<quint32> sizes;
+			qsizetype sizeTableOff = 0;
+			RiggingShapeBytes sh;
+			if ( !riggingLocateBlocks( bytes, starts, sizes, sizeTableOff )
+				|| shapeBlock >= starts.size()
+				|| !riggingLocateShapeBytes( bytes, starts[shapeBlock], sizes[shapeBlock], sh )
+				|| sh.desc != oldDesc.Value()
+				|| int( sh.numVert ) != nv || int( sh.numTri ) != nt ) {
+				opError = Spell::tr( "The serialized shape block did not match the expected layout; no changes were made." );
+				restorePristine();
+				return;
+			}
+
+			// 5. rebuild the file: each record gains 12 skin bytes at the
+			// skinning offset — weight 1.0/0/0/0 as float16, indices 0/0/0/0
+			const char skinBytes[12] = { 0, 0x3C, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+			const qsizetype vertsEnd = sh.vertsOff + qsizetype( nv ) * oldStride;
+			QByteArray out;
+			out.reserve( bytes.size() + qsizetype( nv ) * 12 );
+			out.append( bytes.constData(), sh.vertsOff );
+			QVector<Vector3> positions( nv );
+			for ( int v = 0; v < nv; v++ ) {
+				const char * rec = bytes.constData() + sh.vertsOff + qsizetype( v ) * oldStride;
+				out.append( rec, skinOff );
+				out.append( skinBytes, 12 );
+				out.append( rec + skinOff, oldStride - skinOff );
+				if ( fullPrecPos ) {
+					float p[3];
+					memcpy( p, rec, 12 );
+					positions[v] = Vector3( p[0], p[1], p[2] );
+				} else {
+					quint16 h[3];
+					memcpy( h, rec, 6 );
+					positions[v] = Vector3( float( std::bit_cast<qfloat16>( h[0] ) ),
+						float( std::bit_cast<qfloat16>( h[1] ) ),
+						float( std::bit_cast<qfloat16>( h[2] ) ) );
+				}
+			}
+			out.append( bytes.constData() + vertsEnd, bytes.size() - vertsEnd );
+
+			// patch desc, Data Size, and the header's block-size entry in place
+			const quint64 newDescVal = newDesc.Value();
+			memcpy( out.data() + sh.descOff, &newDescVal, 8 );
+			const quint32 newDataSize = newStride * quint32( nv ) + 6u * quint32( nt );
+			memcpy( out.data() + sh.dataSizeOff, &newDataSize, 4 );
+			const quint32 newBlockSize = sizes[shapeBlock] + quint32( nv ) * 12u;
+			memcpy( out.data() + sizeTableOff + 4 * qsizetype( shapeBlock ), &newBlockSize, 4 );
+
+			// 6. reload through the loader — the model now holds the same
+			// state it would after opening a natively skinned file
+			{
+				QBuffer buf( &out );
+				if ( !buf.open( QIODevice::ReadOnly ) || !nif->load( buf ) ) {
+					opError = Spell::tr( "Could not reload the patched model." );
+					restorePristine();
+					return;
+				}
+			}
+
+			// 7. bounding sphere in bind-bone space (plain value writes on the
+			// reloaded model)
+			for ( int v = 0; v < nv; v++ )
+				positions[v] = skinToBone * positions[v];
+			const BoundSphere localBound( positions, true );
+			QModelIndex iData2 = nif->getBlockIndex( boneDataBlock );
+			QModelIndex iEntry2 = nif->getIndex( nif->getIndex( iData2, "Bone List" ), 0 );
+			if ( iEntry2.isValid() ) {
+				QModelIndex iSphere = nif->getIndex( iEntry2, "Bounding Sphere" );
+				if ( iSphere.isValid() ) {
+					nif->set<Vector3>( iSphere, "Center", localBound.center );
+					nif->set<float>( iSphere, "Radius", localBound.radius );
+				}
+			}
+			opOk = true;
 		} );
+
+		if ( !opOk ) {
+			QMessageBox::warning( nullptr, name(), opError.isEmpty()
+				? Spell::tr( "Create Skin failed; the model was restored." ) : opError );
+			return nif->getBlockIndex( shapeBlock );
+		}
 
 		QMessageBox::information( nullptr, name(), Spell::tr(
 			"Skin created: every vertex bound to \"%1\" with weight 1.0 (the mesh must not have moved — verify).\n\n"
 			"Next: Import Donor Bone Nodes / Bind Donor Bones / Transfer Weights work on this shape now.\n"
 			"Check the material's skinned shader flag manually — this spell does not edit shader properties." )
 			.arg( chosen ) );
-		return index;
+		// the reload invalidated the original index; block numbering is unchanged
+		return nif->getBlockIndex( shapeBlock );
 	}
 };
 

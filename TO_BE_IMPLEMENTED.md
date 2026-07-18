@@ -22,7 +22,17 @@ mega-batch"), with two deliberate exceptions:
 - DONE 07-18: Phase 3B "Create Skin (bind to node)" (unskinned target →
   complete FO4 skin, donor pipeline then applies); weight-paint Mirror (X)
   with L/R counterpart-bone flipping; Mapping mode + Max Bones transfer
-  controls (persisted, honored by every entry path). All GUI-untested.
+  controls (persisted, honored by every entry path).
+- 07-18b: Create Skin REWRITTEN after the automated gauntlet
+  (tools/createskin_test/) proved the first version corrupted the mesh;
+  now byte-patch + reload, fully verified end-to-end including the donor
+  transfer on its output (WW_CHANGES 2026-07-18b). Mirror (X) and the
+  transfer controls remain GUI-untested.
+- KNOWN MODEL LANDMINE (own project, not rigging): after any Vertex Desc
+  edit with an unchanged vertex count, BSVertexData row conditions accept
+  both precision variants and the save layout diverges from the desc.
+  Affects the stock Vertex Flags spell (flags.cpp) too. Details in
+  WW_CHANGES 2026-07-18b.
 - Still open: independent persistent skeleton reference, classic NiSkin
   backend, CustomizationRemapNewBonesData (open leaked-pointer question),
   pruning zero-result bones, in-game FaceGen validation, shader

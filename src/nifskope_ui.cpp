@@ -87,6 +87,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMouseEvent>
 #include <QProgressBar>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -589,6 +590,148 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			} while ( false );
 			logf.close();
 			QTimer::singleShot( 0, qApp, &QApplication::quit );
+		} );
+	}
+
+	// TEMP TEST HARNESS (WW_CREATESKIN_TEST=1): after the file loads, cast the
+	// real "Create Skin (bind to node)" spell on the first unskinned BSTriShape
+	// through NifSkope::castSpell — the exact path the menu and workspace
+	// button share — auto-driving its modal dialogs from a timer (QInputDialog
+	// accepted, QMessageBox answered Yes/Ok, QProgressDialog left alone).
+	// Saves <input>_skinned.nif; with WW_TEST_DONOR set, then runs the atomic
+	// "Transfer Bones and Weights" on the same shape and saves
+	// <input>_transferred.nif. WW_TEST_PICKNODE=<substring> picks a
+	// non-default bind node (the mesh must not move for ANY choice). Dumps
+	// ww_createskin_test.log next to the exe and quits.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_CREATESKIN_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
+			QTimer::singleShot( 500, skope, [skope, ok, fname]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_createskin_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				int stage = 1;	// 1 = create-skin dialogs, 2 = transfer dialogs
+				QTimer driver;
+				QObject::connect( &driver, &QTimer::timeout, skope, [&log, &stage]() {
+					QWidget * w = QApplication::activeModalWidget();
+					if ( !w || qobject_cast<QProgressDialog *>( w ) )
+						return;
+					if ( auto * in = qobject_cast<QInputDialog *>( w ) ) {
+						const QByteArray pick = qgetenv( "WW_TEST_PICKNODE" );
+						auto * combo = in->findChild<QComboBox *>();
+						if ( stage == 1 && combo && !pick.isEmpty() ) {
+							for ( int i = 0; i < combo->count(); i++ ) {
+								if ( combo->itemText( i ).contains( QString::fromLocal8Bit( pick ) ) ) {
+									combo->setCurrentIndex( i );
+									break;
+								}
+							}
+						}
+						log << "  dialog [" << in->windowTitle() << "] accepted"
+							<< ( combo ? QString( ": %1" ).arg( combo->currentText() ) : QString() )
+							<< "\n";
+						log.flush();
+						in->accept();
+						return;
+					}
+					if ( auto * mb = qobject_cast<QMessageBox *>( w ) ) {
+						// the transfer confirm defaults to Cancel; click Yes/Ok
+						QAbstractButton * btn = mb->button( QMessageBox::Yes );
+						if ( !btn )
+							btn = mb->button( QMessageBox::Ok );
+						if ( !btn && !mb->buttons().isEmpty() )
+							btn = mb->buttons().first();
+						log << "  messagebox [" << mb->windowTitle() << "]: "
+							<< QString( mb->text() ).replace( '\n', ' ' ).left( 300 ) << "\n";
+						log.flush();
+						if ( btn )
+							btn->click();
+						return;
+					}
+				} );
+				driver.start( 250 );
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					int sb = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						QModelIndex iB = nif->getBlockIndex( b );
+						if ( nif->blockInherits( iB, "BSTriShape" )
+							&& nif->getIndex( iB, "Vertex Data" ).isValid()
+							&& nif->getLink( iB, "Skin" ) < 0 ) {
+							sb = b;
+							break;
+						}
+					}
+					if ( sb < 0 ) { log << "no unskinned BSTriShape\n"; break; }
+					QPersistentModelIndex pShape( nif->getBlockIndex( sb ) );
+					log << "target: block " << sb << " '"
+						<< nif->get<QString>( nif->getBlockIndex( sb ), "Name" ) << "' verts "
+						<< nif->get<int>( nif->getBlockIndex( sb ), "Num Vertices" ) << "\n";
+					log.flush();
+					// deterministic transfer options; suppress the generic
+					// not-undoable confirmation (a CheckableMessageBox the
+					// driver does not know how to answer)
+					QSettings cfg;
+					cfg.setValue( "Settings/Suppress Undoable Confirmation", true );
+					cfg.setValue( "Rigging/MappingMode", 1 );	// Nearest Vertex
+					cfg.setValue( "Rigging/MaxInfluences", 4 );
+
+					auto dumpRow0 = [&log, nif]( const QModelIndex & iShape, const char * tag ) {
+						QModelIndex iVD0 = nif->getIndex( iShape, "Vertex Data" );
+						QModelIndex row0 = nif->getIndex( iVD0, 0 );
+						log << tag << " desc 0x" << QString::number(
+							nif->get<BSVertexDesc>( iShape, "Vertex Desc" ).Value(), 16 )
+							<< " row0 children " << nif->rowCount( row0 ) << ":\n";
+						for ( int c = 0; c < nif->rowCount( row0 ); c++ ) {
+							QModelIndex raw = nif->getIndex( row0, c, 0 );
+							QModelIndex cond = nif->getIndex( row0, c );	// condition-checked
+							const NifItem * it = nif->getItem( raw, false );
+							log << "  [" << c << "] " << nif->itemName( raw )
+								<< " <" << nif->itemStrType( raw ) << ">"
+								<< " cond=" << cond.isValid()
+								<< " condStr='" << ( it ? it->cond() : QString( "?" ) ) << "'"
+								<< " cless=" << ( it ? it->isConditionless() : -1 )
+								<< " kids=" << nif->rowCount( raw )
+								<< " val='" << nif->getValue( raw ).toString().left( 32 ) << "'\n";
+						}
+						log.flush();
+					};
+					dumpRow0( pShape, "PRE-SPELL:" );
+					skope->castSpell( QLatin1String( "Rigging/Create Skin (bind to node)..." ), pShape );
+					// the spell reloads the model; block numbering is unchanged
+					pShape = QPersistentModelIndex( nif->getBlockIndex( sb ) );
+					const int skinLink = nif->getLink( pShape, "Skin" );
+					log << "after create-skin: Skin link " << skinLink << "\n";
+					dumpRow0( pShape, "POST-SPELL:" );
+					if ( skinLink < 0 ) { log << "FAIL: no skin created\n"; break; }
+					QString outSkinned = fname;
+					if ( outSkinned.endsWith( QLatin1String( ".nif" ), Qt::CaseInsensitive ) )
+						outSkinned.chop( 4 );
+					outSkinned += QLatin1String( "_skinned.nif" );
+					log << "save skinned ok " << nif->saveToFile( outSkinned )
+						<< ": " << outSkinned << "\n";
+					log.flush();
+
+					if ( !qEnvironmentVariableIsSet( "WW_TEST_DONOR" ) )
+						break;
+					stage = 2;
+					skope->castSpell( QLatin1String( "Rigging/Transfer Bones and Weights..." ), pShape );
+					QModelIndex iInst = nif->getBlockIndex( nif->getLink( pShape, "Skin" ) );
+					log << "after transfer: instance bones "
+						<< nif->get<int>( iInst, "Num Bones" ) << "\n";
+					QString outTransferred = fname;
+					if ( outTransferred.endsWith( QLatin1String( ".nif" ), Qt::CaseInsensitive ) )
+						outTransferred.chop( 4 );
+					outTransferred += QLatin1String( "_transferred.nif" );
+					log << "save transferred ok " << nif->saveToFile( outTransferred )
+						<< ": " << outTransferred << "\n";
+				} while ( false );
+				driver.stop();
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
 		} );
 	}
 

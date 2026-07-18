@@ -1,5 +1,74 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-18b — Create Skin: corruption found by automated test, spell rewritten (byte-patch + reload)
+
+Built a headless test harness (WW_CREATESKIN_TEST=1 env hook in
+nifskope_ui.cpp, same pattern as the extrude/perf hooks) that drives the REAL
+spell through NifSkope::castSpell with an auto-answer timer for its dialogs,
+then verifies the saved NIF with an independent Python parser
+(tools/createskin_test/). Test asset: X01_ArmLeft.nif with the skin stripped
+at byte level (donor = the untouched original, so a Nearest-Vertex transfer
+must reproduce the original weights exactly).
+
+**The shipped spell corrupted the mesh.** Diagnosis, all empirically proven:
+
+- `updateArraySize` early-returns when the vertex count is unchanged, so the
+  "layout rebuild" after adding VA_SKINNING never happened.
+- BSVertexData rows carry BOTH precision variants of "Vertex"/"Bitangent X"
+  as children, and **condition checks pass for all of them** (`getIndex` by
+  index or name cannot tell the real field from its dormant twin). The
+  capture/restore-by-name therefore wrote the zero-valued full-precision
+  twins over the real half-precision values: positions and bitangent X
+  zeroed in-model.
+- The per-row Bone Weights/Indices arrays had 0 children at write time (the
+  deferred update cascade instantiates them only at holdUpdates(false)), so
+  the weight-1.0 writes silently no-opped.
+- The save path then wrote 40-byte full-precision-shaped records while desc
+  and Data Size claimed 32 — the output file was corrupt beyond the zeros
+  (triangles land at nv*40, header block size disagrees with Data Size).
+
+**Fix — the spell no longer touches vertex rows through the model.** It
+builds BSSkin::BoneData/Instance and the Skin link against the untouched
+layout (block-level ops, proven good), serializes the model (faithful for
+the unchanged layout), patches the BYTES (desc, Data Size, header block
+size; each record gains 12 skin bytes = weight 1.0/0/0/0 float16 + indices
+0/0/0/0 at the skinning offset), and reloads through the loader — the one
+code path proven to build skinned rows correctly. Every byte walk
+self-validates and any failure restores the pre-op serialization. The
+bounding sphere is written after reload (plain value ops). The mesh bound
+now comes from decoded record positions (the old code read the zero Vector3
+twin — the shipped bound was a degenerate point at the skin-to-bone origin).
+
+**Second find — Bind Donor Bones refused fresh skins.** With zero bones in
+common (a Create Skin target knows only its bind node) the "shared BoneData
+entry" bind-space check had nothing to compare and hard-refused, so the
+atomic transfer rolled back (the rollback worked as designed). Added the
+sound fallback: when no entry is shared, verify the two shapes occupy the
+same skeleton-root-relative space directly — same guarantee, and per-node
+rest poses of every bone actually bound are still verified individually
+downstream.
+
+**Verification (all green, tools/createskin_test/README.md has the recipe):**
+- Create Skin, default parent node: 961/961 non-skin vertex bytes
+  byte-identical, 961/961 exact weight-1.0-slot-0 records, triangles
+  untouched, stored skin-to-bone == inv(boneWorld)·shapeWorld exactly,
+  max |skinned − static| = 0.000000 over all verts.
+- Deliberately bound to a rotated, translated NON-parent bone
+  (LArm_ForeArm1): max deviation 8e-6 (float16 noise) — the compensation is
+  right for any node choice.
+- Full pipeline (Create Skin → Transfer Bones and Weights, Nearest Vertex):
+  5 bones bound, 961 verts transferred, remap blob written; 940/961 weights
+  match the donor exactly, all 21 outliers are coincident seam vertices
+  (distance-0 ties between position twins on different bones — inherently
+  ambiguous for any position-based mapping, not a defect). Geometry
+  byte-identical through the whole pipeline.
+
+Model-machinery landmine for LATER (not fixed here, affects the stock
+Vertex Flags spell in flags.cpp too): after a Vertex Desc edit the model's
+row conditions/save layout diverge as described above. Any spell that edits
+vertex-layout flags through set<BSVertexDesc> + updateArraySize on an
+unchanged count is suspect until that is fixed.
+
 ## 2026-07-18 — Cross-area batch: rigging 3B + paint mirroring, multi-section hknp encoder, link jump
 
 User asked to "finish the remaining percentages" across rigging, collision,
