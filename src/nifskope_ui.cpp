@@ -829,6 +829,93 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	// TEST HARNESS (WW_DELETE_TEST=1): exercise object-mode multi-delete
+	// headlessly. Object-selects the two smallest BSTriShapes plus (if present)
+	// one whole NiNode branch, runs deleteBlocksWithConfirm with the confirm
+	// auto-clicked, verifies the branch closure was removed and no dangling -1
+	// child link remains, saves (WW_TEST_SAVE) and quits.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DELETE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 600, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_delete_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QTimer driver;
+				QObject::connect( &driver, &QTimer::timeout, skope, [&log]() {
+					if ( auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) ) {
+						for ( QAbstractButton * b : mb->buttons() )
+							if ( mb->buttonRole( b ) == QMessageBox::AcceptRole ) {
+								log << "  confirm '" << mb->text() << "' -> " << b->text() << "\n";
+								log.flush();
+								b->click();
+								break;
+							}
+					}
+				} );
+				driver.start( 30 );
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					// pick two smallest BSTriShapes as leaf targets
+					QVector<QPair<int,int>> shapes;	// (verts, block)
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+							shapes.append( { nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" ), b } );
+					std::sort( shapes.begin(), shapes.end() );
+					QVector<int> targets;
+					QStringList names;
+					for ( int i = 0; i < shapes.size() && targets.size() < 2; i++ ) {
+						targets.append( shapes[i].second );
+						names << nif->get<QString>( nif->getBlockIndex( shapes[i].second ), "Name" );
+					}
+					if ( targets.isEmpty() ) { log << "no shapes\n"; break; }
+					// record parents + expected survivor count
+					QSet<int> expectRemoved;
+					std::function<void(int)> closure = [&]( int bl ) {
+						if ( bl < 0 || expectRemoved.contains( bl ) ) return;
+						expectRemoved.insert( bl );
+						for ( int l : nif->getChildLinks( bl ) )
+							if ( l >= 0 && nif->getParent( l ) == bl ) closure( l );
+					};
+					for ( int t : targets ) closure( t );
+					const int before = nif->getBlockCount();
+					QStringList targetStrs;
+					for ( int t : targets ) targetStrs << QString::number( t );
+					log << "targets [" << targetStrs.join( "," ) << "] names " << names.join( ", " )
+						<< "; branch-closure " << expectRemoved.size()
+						<< "; blocks before " << before << "\n";
+					log.flush();
+					skope->ogl->setObjectSelection( QSet<int>( targets.constBegin(), targets.constEnd() ),
+						targets.first() );
+					const int removed = skope->ogl->deleteBlocksWithConfirm( targets );
+					const int after = nif->getBlockCount();
+					log << "deleteBlocksWithConfirm returned " << removed
+						<< "; blocks after " << after << " (delta " << ( before - after ) << ")\n";
+					// verify no dangling -1 child link anywhere
+					int dangling = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						QModelIndex iCh = nif->getIndex( nif->getBlockIndex( b ), "Children" );
+						if ( !iCh.isValid() ) continue;
+						for ( int c = 0; c < nif->rowCount( iCh ); c++ )
+							if ( nif->getLink( nif->getIndex( iCh, c ) ) == -1 ) dangling++;
+					}
+					log << "dangling -1 child links after delete: " << dangling
+						<< ( ( before - after == expectRemoved.size() && dangling == 0 )
+							? "  PASS\n" : "  CHECK\n" );
+					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
+					}
+				} while ( false );
+				driver.stop();
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	// TEMP DIAGNOSTIC (WW_PERF_TEST=1, remove when the slow click-select is
 	// fixed): after the file loads, time every stage of the click-select
 	// pipeline on the largest BSTriShape, dump to ww_perf_test.log, quit.
@@ -4562,6 +4649,29 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// createWindowContainer cannot be relied on as the sole recipient of the
 		// second shortcut. Text-input widgets keep their keystrokes.
 		auto ke = static_cast<QKeyEvent *>( e );
+		// Block List: X or Delete removes the selected block(s) and their
+		// branches (Blender-style, with the same "Delete selected objects?"
+		// confirmation as the viewport). Works on a multi-selection.
+		if ( o == list && ogl && nif
+			&& ( ke->key() == Qt::Key_X || ke->key() == Qt::Key_Delete )
+			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() ) {
+				QSet<int> sel;
+				for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+					if ( pidx.column() != 0 )
+						continue;
+					QModelIndex idx = pidx;
+					if ( idx.model() == proxy )
+						idx = proxy->mapTo( idx );
+					int b = nif->getBlockNumber( idx );
+					if ( b >= 0 )
+						sel.insert( b );
+				}
+				if ( !sel.isEmpty() )
+					ogl->deleteBlocksWithConfirm( QVector<int>( sel.constBegin(), sel.constEnd() ) );
+			}
+			return true;
+		}
 		const bool pointerOverViewport = ogl && graphicsView && isActiveWindow()
 			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) );
 		QWidget * keyFocus = QApplication::focusWidget();

@@ -6350,14 +6350,16 @@ private:
 
 //! Remove ONE null (-1) entry from a node's Children array, scanning from the
 //! end — removeNiBlock turns our appended child link into a null ref, and
-//! addLink would append another slot on redo instead of reusing it
-static void tlRemoveNullChildLink( NifModel * nif, int parentBlock )
+//! addLink would append another slot on redo instead of reusing it. Returns
+//! true if a null entry was removed (callers deleting several children of one
+//! parent loop until it returns false).
+static bool tlRemoveNullChildLink( NifModel * nif, int parentBlock )
 {
 	QModelIndex iParent = nif->getBlockIndex( parentBlock );
 	QModelIndex iSize = nif->getIndex( iParent, "Num Children" );
 	QModelIndex iArray = nif->getIndex( iParent, "Children" );
 	if ( !iSize.isValid() || !iArray.isValid() )
-		return;
+		return false;
 	const int n = nif->get<int>( iSize );
 	for ( int c = n - 1; c >= 0; c-- ) {
 		if ( nif->getLink( nif->getIndex( iArray, c ) ) != -1 )
@@ -6367,8 +6369,9 @@ static void tlRemoveNullChildLink( NifModel * nif, int parentBlock )
 				nif->getLink( nif->getIndex( iArray, j + 1 ) ) );
 		nif->set<int>( iSize, n - 1 );
 		nif->updateArraySize( iArray );
-		return;
+		return true;
 	}
+	return false;
 }
 
 //! In-place undo for operators that only APPEND new blocks (object-mode
@@ -7378,6 +7381,89 @@ void GLView::joinSelectedObjects()
 	emit gizmoStatus( tr( "Joined %1 mesh(es) into the active object" ).arg( joined )
 		+ ( capSkipped ? tr( " (some skipped at the 65,535-vertex limit)" ) : QString() ) );
 	modelChanged();
+}
+
+void GLView::deleteSelectedObjects()
+{
+	if ( !model || editMode || objSelection.isEmpty() )
+		return;
+	deleteBlocksWithConfirm( QVector<int>( objSelection.constBegin(), objSelection.constEnd() ) );
+}
+
+int GLView::deleteBlocksWithConfirm( const QVector<int> & blocks )
+{
+	if ( !model )
+		return 0;
+	// keep only valid, distinct blocks
+	QSet<int> roots;
+	for ( int b : blocks )
+		if ( b >= 0 && b < model->getBlockCount() )
+			roots.insert( b );
+	if ( roots.isEmpty() )
+		return 0;
+
+	QMessageBox box( QMessageBox::NoIcon, tr( "Delete" ),
+		tr( "Delete selected objects?" ), QMessageBox::NoButton );
+	QPushButton * del = box.addButton( tr( "Delete" ), QMessageBox::AcceptRole );
+	box.addButton( tr( "Cancel" ), QMessageBox::RejectRole );
+	box.setDefaultButton( del );
+	box.exec();
+	if ( box.clickedButton() != del )
+		return 0;
+
+	// branch closure: each selected block plus every descendant it parents
+	// (matches Remove Branch; shared refs / property blocks are left alone)
+	QSet<int> closure;
+	std::function<void( int )> collect = [&]( int b ) {
+		if ( b < 0 || closure.contains( b ) )
+			return;
+		closure.insert( b );
+		for ( int link : model->getChildLinks( b ) )
+			if ( link >= 0 && model->getParent( link ) == b )
+				collect( link );
+	};
+	for ( int b : std::as_const( roots ) )
+		collect( b );
+
+	// parents that survive the deletion get a dangling -1 child link to prune
+	QSet<int> survivingParents;
+	for ( int b : std::as_const( roots ) ) {
+		int p = model->getParent( b );
+		if ( p >= 0 && !closure.contains( p ) )
+			survivingParents.insert( p );
+	}
+
+	// block numbers shift as rows are removed; track everything by persistent
+	// index so the whole thing is order-independent and one undo step
+	QVector<QPersistentModelIndex> pDelete;
+	for ( int b : std::as_const( closure ) )
+		pDelete.append( model->getBlockIndex( b ) );
+	QVector<QPersistentModelIndex> pParents;
+	for ( int p : std::as_const( survivingParents ) )
+		pParents.append( model->getBlockIndex( p ) );
+
+	// block removal renumbers every later block and rewrites links model-wide;
+	// a whole-model snapshot is the safe single-step undo (as Join uses)
+	nifSnapshotOp( model, tr( "Delete objects" ), [&]() {
+		for ( const QPersistentModelIndex & p : std::as_const( pDelete ) )
+			if ( p.isValid() )
+				model->removeNiBlock( model->getBlockNumber( p ) );
+		for ( const QPersistentModelIndex & p : std::as_const( pParents ) )
+			if ( p.isValid() )
+				while ( tlRemoveNullChildLink( model, model->getBlockNumber( p ) ) )
+					;
+	} );
+
+	// the selection is gone; drop any stale references and refresh
+	objSelection.clear();
+	objActive = -1;
+	pickedElems.clear();
+	scene->currentBlock = QModelIndex();
+	scene->currentIndex = QModelIndex();
+	emit objectSelectionChanged();
+	emit gizmoStatus( tr( "Deleted %1 object(s)" ).arg( roots.size() ) );
+	modelChanged();
+	return roots.size();
 }
 
 void GLView::duplicateElements()
@@ -12610,6 +12696,8 @@ void GLView::populateObjectMenu( QMenu * m )
 		[this]() { duplicateSelection(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Join\tCtrl+J" ), this,
 		[this]() { joinSelectedObjects(); } )->setEnabled( objSelection.size() >= 2 );
+	m->addAction( tr( "Delete\tX" ), this,
+		[this]() { deleteSelectedObjects(); } )->setEnabled( hasSel );
 	QMenu * mPar = m->addMenu( tr( "Parent" ) );
 	mPar->addAction( tr( "Set Parent…\tCtrl+P" ), this,
 		[this]() { showParentMenu(); } )->setEnabled( hasSel );
@@ -16207,15 +16295,21 @@ void GLView::keyPressEvent( QKeyEvent * event )
 				return;
 		}
 
-		// delete picked vertices / edges / faces (Blender X / Delete menu);
-		// the Delete key is a fixed alternate
+		// delete (Blender X / Delete): in edit mode the verts/edges/faces menu;
+		// in object mode the selected objects (with a confirmation). Delete key
+		// is a fixed alternate for both.
 		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode
 			&& ( shortcuts.matches( "viewport.delete", event->key(), mods )
 				|| ( event->key() == Qt::Key_Delete
-					&& !( mods & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) )
-			&& editMode && !pickedElems.isEmpty() ) {
-			showDeleteMenu();
-			return;
+					&& !( mods & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) ) ) {
+			if ( editMode && !pickedElems.isEmpty() ) {
+				showDeleteMenu();
+				return;
+			}
+			if ( !editMode && !objSelection.isEmpty() ) {
+				deleteSelectedObjects();
+				return;
+			}
 		}
 
 		// element pick modes (Blender: 1/2/3); Shift extends the enabled set,

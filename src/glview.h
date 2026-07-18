@@ -675,6 +675,13 @@ public:
 	//! Object mode: merge the selected compatible BSTriShapes into the active
 	//! node (verts transformed into its space, triangles reindexed)
 	void joinSelectedObjects();
+	//! Object-mode X (Blender): delete the current object selection after a
+	//! confirmation, whole branch each, as one undo step.
+	void deleteSelectedObjects();
+	//! Delete the given blocks and their child branches as one undo step,
+	//! after a Blender-style "Delete selected objects?" confirmation. Shared
+	//! by the object-mode viewport and the Block List. Returns blocks removed.
+	int deleteBlocksWithConfirm( const QVector<int> & blocks );
 	//! Shift+D: duplicate the selection and start a move gesture
 	void duplicateSelection();
 	//! Edit-mode Shift+D: duplicate the picked verts/faces within the mesh

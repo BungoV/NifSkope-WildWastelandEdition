@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-18f — Object-mode / Block-List delete (Blender X)
+
+New `GLView::deleteBlocksWithConfirm(blocks)` — the shared core for deleting
+whole objects. Shows Blender's "Delete selected objects?" confirm (Delete /
+Cancel), computes each selected block's branch closure (the block plus every
+descendant it parents — matches Remove Branch; shared refs and blocks owned
+by OTHER shapes are left alone), removes them all as ONE snapshot-undo step
+(block removal renumbers + rewrites links model-wide, so snapshot undo like
+Join), tracks everything by QPersistentModelIndex so order/​renumbering can't
+bite, and prunes the dangling -1 child links removeNiBlock leaves in
+surviving parents (tlRemoveNullChildLink now returns bool + loops).
+
+Wired to three entry points, all multi-selection aware:
+- **Object-mode X / Delete** (viewport, GLView::keyPressEvent): deletes the
+  object selection. `deleteSelectedObjects()`.
+- **Object context menu**: "Delete  X".
+- **Block List X / Delete** (NifSkope::eventFilter, guarded to `o == list`):
+  deletes the selected block(s) — gathers block numbers from the list
+  selection (proxy-mapped) and calls the same core, same prompt. The list is
+  already ExtendedSelection so Shift/Ctrl multi-select works.
+
+Verified headlessly (WW_DELETE_TEST harness): selecting two shapes on the
+37-block torso and confirming removed exactly their 9-block branch closure
+(2 shapes + owned skin/shader/segment blocks), 0 dangling child links, and
+all five surviving shapes kept valid renumbered skin links; saved + reparsed
+clean. Confirm text verified = "Delete selected objects?".
+
 ## 2026-07-18e — Clone freeze fixed: tlCloneBlock now loads with signals suppressed
 
 User: duplicating into a new shape (18d) froze NifSkope after the confirm.
