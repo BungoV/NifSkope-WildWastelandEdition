@@ -31,6 +31,9 @@ changed yet — this is the plan.
 
 ## Tier 1 — low effort, high or guaranteed impact
 
+> STATUS 2026-07-20: items 1–4 SHIPPED (commit `629dfcf`, WW_CHANGES.md
+> "Performance batch 1", harnesses green, GUI verify pending). Items 5–8 open.
+
 1. **Stop re-indexing the game archives on every file load.**
    `populateConfiguredNifBrowser` (`nifskope.cpp:2576`, fired from every
    `completeLoading` at `:1088`) deletes and rebuilds the entire `BA2File`
