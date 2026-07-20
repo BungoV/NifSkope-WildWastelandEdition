@@ -37,18 +37,44 @@ on top of the same NifModel.
 
 ---
 
+## Visual language rules (feedback 2026-07-20 — binding)
+
+The first mockup draft looked like a web app; **rejected**. The overhaul must
+read as the same application as the rest of WW NifSkope. Concretely:
+
+- **The curated view IS a Name | Value tree** (QTreeView + delegate), with
+  alternating rows, the standard fonts and colors, and section headers that
+  expand/collapse exactly like compound rows do today. Not a form of custom
+  widgets, not cards.
+- **Reference aesthetic = the shipped Shader Flags dialog** and the Block
+  List header: flat #383838/#454545 surfaces, 1px #303030 borders, grey
+  #a8a8a8 secondary text, flat auto-raise tool buttons.
+- **No pills, no filled badges, no colored chips, no filled-bar sliders.**
+  Errors are red *text* ("(missing)"), links are colored *text*, scrubbable
+  numbers are marked with a dotted underline only, and flag summaries are
+  plain text ("F1 0x8040028B — Specular, Skinned, +6").
+- **Extra controls hide until hover** (↗ jump, ▾ pick, ★ pin, Edit…) at the
+  row's right edge — rows stay as quiet as today's until pointed at.
+- The header is **two plain text lines** (breadcrumb, summary) plus one flat
+  button row, styled like the existing Block List breadcrumb/footer lines.
+- Diff highlighting uses the existing conventions (orange = the
+  viewport-selection accent) rather than new colors.
+
 ## The concept, top to bottom
 
-### 1. Header card (always visible above the fields)
+### 1. Header (always visible above the fields)
 
-- Type icon + block number + type name; **inline-editable Name**.
-- **Clickable breadcrumb** of the scene-parent chain (jump anywhere up).
-- Per-type **summary line**: shape → "4.0k v · 4.5k t · skinned (62 bones) ·
-  7 segs"; shader → material path with a red MISSING badge; sequence →
-  "24 controlled blocks · 3.2s".
-- Quick actions: ▲ parent · Links peek (reuse) · ★ pin block · ⚡ spells ·
-  **Copy Values / Paste Values** (see §4).
-- **View toggle: Curated | Raw | Diff** (Raw = today's tree, unchanged).
+Two quiet text lines + one flat button row (block-list header styling):
+
+- Line 1: block number · **inline-editable Name** (flat until hovered) ·
+  type name in grey.
+- Line 2: **clickable breadcrumb** of the scene-parent chain.
+- Line 3: per-type **summary text**: shape → "4.0k v · 4.5k t · skinned
+  (62 bones) · 7 segs"; shader → material path with "(missing)" in red;
+  sequence → "24 controlled blocks · 3.2s".
+- Button row: ▲ parent · Links n/m (reuse) · ★ pin · Copy Values ·
+  Paste Values · **view toggle Curated | Raw | Diff** (Raw = today's tree,
+  unchanged).
 
 ### 2. Curated sections (the core change)
 
@@ -70,28 +96,38 @@ away. First-class templates for the daily types:
 Fallback for unknown/rare types: header card + Raw tree only — no template
 maintenance burden for the long tail.
 
-**Implementation anchor:** this is the `NifBlockEditor` pattern (already in
-tree, used by the bounds/light/material/transform spells) grown into a real
-panel: typed editor widgets bound to model indices, refreshed on dataChanged.
-It must consult `evalCondition`/`evalVersion` so version-gated fields never
-render (same rules as the tree's row hiding).
+**Implementation anchor:** per the visual rules, the curated view is a
+tree (QTreeView or QTreeWidget) whose rows BIND to model indices — section
+rows are plain parent rows, field rows show the model value through the
+existing delegate (which is where the typed editing already happens). The
+`NifBlockEditor` machinery (bounds/light/material/transform spells) is the
+precedent for index-bound refresh-on-dataChanged; the delegate work in §3
+extends the *existing* `NifDelegate`, so Raw view gets the same editor
+upgrades for free. Curated rows must consult `evalCondition`/`evalVersion`
+so version-gated fields never render (same rules as the tree's row hiding).
 
 ### 3. Typed field editors (curated view; the delegate keeps working as-is in Raw)
 
 - **Numeric:** DragSpinBox scrubbing everywhere (the viewport panels' widget,
-  promoted to a shared location). 0–1 floats scrub as sliders; angle fields
-  display degrees.
+  promoted to a shared location) — visually just the value with a dotted
+  underline until hovered, per the visual rules; 0–1 floats scrub with a
+  finer step, angle fields display degrees.
 - **Rotation:** shown/edited as Euler XYZ (matrix under the hood — the
   transform-edit spell already does this math).
 - **Vector3 / Color:** single-row triple/quad scrub; colors get a swatch +
   picker (ColorWheel exists).
-- **Link fields:** `[icon] BSShaderTextureSet "Armor_d" #113  [jump] [pick]` —
-  pick opens a searchable popup of type-compatible blocks, plus "New…"
-  (insert block + link). Invalid links red. This is v1's #3, unbuilt.
-- **Flags:** compact chip row of set bits; click opens the 2026-07-20d dialog.
-- **Texture/material paths:** Browse against the configured-resources VFS
-  (the NIF Browser's BA2 index — now cached, so this is cheap), red
-  missing-file state, thumbnail tooltip via TexCache.
+- **Link fields:** value cell reads `Armor_d [113 → 114]  BSShaderTextureSet`
+  (target name in link color, type in grey); hover reveals flat ↗ jump and
+  ▾ pick buttons at the row edge — pick opens a searchable popup of
+  type-compatible blocks, plus "New…" (insert block + link). Invalid links
+  = red text. This is v1's #3, unbuilt.
+- **Flags:** value cell shows hex + a grey named-bit summary ("F1 0x8040028B
+  — Specular, Skinned, +6"); hover reveals Edit… opening the 2026-07-20d
+  dialog.
+- **Texture/material paths:** hover reveals a Browse (…) button resolving
+  against the configured-resources VFS (the NIF Browser's BA2 index — now
+  cached, so this is cheap); missing file = red text, thumbnail tooltip via
+  TexCache.
 - **String-index fields:** resolved string shown beside the raw index
   (read-only derived value).
 - **Tooltips from nif.xml** descriptions on every label (data already parsed).
