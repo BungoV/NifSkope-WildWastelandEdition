@@ -1830,6 +1830,9 @@ private:
 			s.setValue( "CollisionManager/XRay", xray->isChecked() );
 			s.setValue( "CollisionManager/CollisionOnly", only->isChecked() );
 			s.setValue( "CollisionManager/Labels", labels->currentIndex() );
+			// Scene::draw reads a cached copy (a per-frame QSettings read is a
+			// registry access) — push the change to it.
+			Scene::refreshCollisionOnlySetting();
 			if ( ogl ) ogl->update();
 		};
 		connect( colour, qOverload<int>( &QComboBox::currentIndexChanged ), this, [saveDisplay]( int ) { saveDisplay(); } );

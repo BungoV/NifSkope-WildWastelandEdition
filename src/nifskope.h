@@ -464,6 +464,9 @@ private:
 	//! A Block Details filter is (or just was) active; lets the empty-filter
 	//! case skip the full-block walk that cost ~0.5 s per click on big shapes
 	bool blockDetailsFilterWasActive = false;
+	//! Same idea for the block list: an inactive filter with nothing to clear
+	//! must not walk (and build a searchable string for) every block.
+	bool blockListFilterWasActive = false;
 	QToolButton * blockListBack = nullptr;
 	QToolButton * blockListForward = nullptr;
 	QToolButton * blockListPin = nullptr;

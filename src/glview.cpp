@@ -2216,10 +2216,14 @@ void GLView::paintGL()
 	cx->stopProgram();
 	cx->shrinkCache();
 
-	// Check for errors
+#ifndef QT_NO_DEBUG
+	// Check for errors. glGetError is a client-server sync point — debug
+	// builds only (release also compiles the message out via
+	// QT_NO_DEBUG_OUTPUT, which would leave a silent per-frame stall).
 	GLenum err;
 	while ( ( err = glGetError() ) != GL_NO_ERROR )
 		qDebug() << tr( "glview.cpp - GL ERROR (paint): " ) << getGLErrorString( int(err) );
+#endif
 
 	// 2D overlays drawn over the GL scene with QPainter: the Blender-style
 	// navigation gizmo and the 3D cursor (constant screen size, like Blender)
@@ -4291,7 +4295,23 @@ void GLView::gizmoEnd( bool commit )
 	update();
 }
 
+//! Per-shape resolution cache for tlVertexValueIndex. getIndex(name) is an
+//! uncached linear scan with a string compare per sibling — two of them per
+//! call made the per-vertex loops pay O(fields) name scans per vertex. The
+//! "Vertex Data" array and the row number of the "Vertex" field inside a
+//! vertex row are identical for every vertex of a shape (fixed-compound rows
+//! are structurally identical — the model's own shared-condition-cache
+//! invariant), so resolve them once per shape and index children directly.
+struct TlVertexFieldCache {
+	QModelIndex iVData;	// BSTriShape "Vertex Data" (invalid on legacy meshes)
+	QModelIndex iVerts;	// legacy NiTriShapeData "Vertices"
+	int fieldRow = -1;	// row of "Vertex" inside a Vertex Data element
+	int shapeBlock = -2;	// which shape the cache is resolved for
+};
+
 static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi );
+static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi,
+	TlVertexFieldCache & cache );
 
 bool GLView::gizmoReapplyElement( const Vector3 & param, int axisOverride )
 {
@@ -4333,6 +4353,7 @@ bool GLView::gizmoReapplyElement( const Vector3 & param, int axisOverride )
 	ChangeValueCommand::createTransaction();
 	{
 		TlCommandBatch batch( model );
+		TlVertexFieldCache fieldCache;
 		for ( const ElemVert & ev : lastElemVerts ) {
 			Vector3 w;
 			if ( lastElemMode == 1 ) {
@@ -4347,7 +4368,7 @@ bool GLView::gizmoReapplyElement( const Vector3 & param, int axisOverride )
 				w = lastElemPivot + rel;
 			}
 			QModelIndex iShape = model->getBlockIndex( ev.shape );
-			QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx );
+			QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx, fieldCache );
 			const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
 			if ( !item )
 				continue;
@@ -5969,22 +5990,40 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 }
 
 // value-column index of a vertex position field (BSTriShape or legacy)
-static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi )
+static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi,
+	TlVertexFieldCache & cache )
 {
-	QModelIndex iv;
-	QModelIndex iVData = model->getIndex( iShape, "Vertex Data" );
-	if ( iVData.isValid() && vi >= 0 && vi < model->rowCount( iVData ) )
-		iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
-	if ( !iv.isValid() ) {
-		QModelIndex iVerts = model->getIndex( model->getBlockIndex( model->getLink( iShape, "Data" ) ), "Vertices" );
-		if ( !iVerts.isValid() )
-			iVerts = model->getIndex( iShape, "Vertices" );
-		if ( iVerts.isValid() && vi >= 0 && vi < model->rowCount( iVerts ) )
-			iv = model->getIndex( iVerts, vi );
+	const int blockNum = model->getBlockNumber( iShape );
+	if ( cache.shapeBlock != blockNum ) {
+		cache.shapeBlock = blockNum;
+		cache.fieldRow = -1;
+		cache.iVerts = QModelIndex();
+		cache.iVData = model->getIndex( iShape, "Vertex Data" );
+		if ( cache.iVData.isValid() && model->rowCount( cache.iVData ) > 0 ) {
+			// resolve through the name path once so field conditions apply
+			QModelIndex f = model->getIndex( model->getIndex( cache.iVData, 0 ), "Vertex" );
+			cache.fieldRow = f.isValid() ? f.row() : -1;
+		}
+		if ( cache.fieldRow < 0 ) {
+			cache.iVerts = model->getIndex( model->getBlockIndex( model->getLink( iShape, "Data" ) ), "Vertices" );
+			if ( !cache.iVerts.isValid() )
+				cache.iVerts = model->getIndex( iShape, "Vertices" );
+		}
 	}
+	QModelIndex iv;
+	if ( cache.fieldRow >= 0 && vi >= 0 && vi < model->rowCount( cache.iVData ) )
+		iv = model->index( cache.fieldRow, 0, model->index( vi, 0, cache.iVData ) );
+	else if ( cache.iVerts.isValid() && vi >= 0 && vi < model->rowCount( cache.iVerts ) )
+		iv = model->index( vi, 0, cache.iVerts );
 	if ( iv.isValid() )
 		return iv.sibling( iv.row(), NifModel::ValueCol );
 	return QModelIndex();
+}
+
+static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi )
+{
+	TlVertexFieldCache cache;
+	return tlVertexValueIndex( model, iShape, vi, cache );
 }
 
 //! Area-weighted normal accumulation for a subset of verts (current model
@@ -6036,15 +6075,22 @@ static void tlPushNormalCommands( NifModel * model, const QModelIndex & iShape, 
 	batch.touch( model->getBlockNumber( iShape ) );
 	const QHash<int, Vector3> acc = tlAccumulateAreaNormals( model, iShape, verts );
 	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	// resolve the "Normal" field's row once (rows are structurally identical);
+	// direct child indexing below still tolerates incomplete rows (null item)
+	int normalFieldRow = -1;
 	for ( auto it = acc.constBegin(); it != acc.constEnd(); ++it ) {
 		Vector3 n = it.value();
 		if ( n.squaredLength() < 1.0e-16f )
 			continue;
 		n.normalize();
 		QModelIndex row = model->getIndex( iVD, it.key() );
-		if ( !model->getItem( row, "Normal" ) )
-			continue;	// tolerate an incomplete row rather than warn per vertex
-		QModelIndex nIdx = model->getIndex( row, "Normal" );
+		if ( normalFieldRow < 0 ) {
+			const NifItem * nItem = model->getItem( row, "Normal" );
+			if ( !nItem )
+				continue;	// tolerate an incomplete row rather than warn per vertex
+			normalFieldRow = nItem->row();
+		}
+		QModelIndex nIdx = model->index( normalFieldRow, 0, row );
 		const NifItem * item = nIdx.isValid() ? static_cast<const NifItem *>( nIdx.internalPointer() ) : nullptr;
 		if ( !item )
 			continue;
@@ -6078,9 +6124,10 @@ void GLView::gizmoEndElement( bool commit )
 			ChangeValueCommand::createTransaction();
 			{
 				TlCommandBatch batch( model );
+				TlVertexFieldCache fieldCache;
 				for ( const ElemVert & ev : elemVerts ) {
 					QModelIndex iShape = model->getBlockIndex( ev.shape );
-					QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx );
+					QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx, fieldCache );
 					const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
 					if ( !item )
 						continue;
@@ -9567,8 +9614,9 @@ static void tlPushPositionCommands( NifModel * model, const QModelIndex & iShape
 		return;
 	TlCommandBatch batch( model );
 	batch.touch( model->getBlockNumber( iShape ) );
+	TlVertexFieldCache fieldCache;
 	for ( const auto & tg : targets ) {
-		QModelIndex vIdx = tlVertexValueIndex( model, iShape, tg.first );
+		QModelIndex vIdx = tlVertexValueIndex( model, iShape, tg.first, fieldCache );
 		const NifItem * item = vIdx.isValid()
 			? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
 		if ( !item )

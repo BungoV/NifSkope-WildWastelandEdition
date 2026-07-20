@@ -856,8 +856,14 @@ public:
 
 			QList<int> del = blocksToDelete.values();
 			std::sort( del.begin(), del.end(), std::greater<int>() );
+			// batch the removals: every removeNiBlock otherwise runs a full-model
+			// updateLinks/updateFooter — M removals = M full rebuilds (the
+			// havok/optimize removal loops use this same Loading+updateModel pattern)
+			nif->setState( BaseModel::Loading );
 			for ( int b : del )
 				nif->removeNiBlock( b );
+			nif->restoreState();
+			nif->updateModel();
 		} );
 
 		return QModelIndex();

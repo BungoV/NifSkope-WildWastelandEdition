@@ -745,8 +745,16 @@ NifSkope::NifSkope( bool background )
 		else blockListPins.remove( block );
 		updateBlockListNavigation( currentNifIndex() );
 	} );
-	auto scheduleBlockFilter = [this]() {
-		QTimer::singleShot( 0, this, [this]() {
+	// One deferred filter run per event-loop turn, no matter how many model
+	// signals arrive — a block insert/remove burst used to run the whole
+	// filter walk once per signal, immediately.
+	auto blockFilterPending = std::make_shared<bool>( false );
+	auto scheduleBlockFilter = [this, blockFilterPending]() {
+		if ( *blockFilterPending )
+			return;
+		*blockFilterPending = true;
+		QTimer::singleShot( 0, this, [this, blockFilterPending]() {
+			*blockFilterPending = false;
 			applyBlockListFilter();
 			updateBlockListNavigation( currentNifIndex() );
 		} );
@@ -754,9 +762,9 @@ NifSkope::NifSkope( bool background )
 	connect( proxy, &QAbstractItemModel::modelReset, this, scheduleBlockFilter );
 	connect( proxy, &QAbstractItemModel::layoutChanged, this, scheduleBlockFilter );
 	connect( proxy, &QAbstractItemModel::rowsInserted, this,
-		[this]( const QModelIndex &, int, int ) { applyBlockListFilter(); } );
+		[scheduleBlockFilter]( const QModelIndex &, int, int ) { scheduleBlockFilter(); } );
 	connect( proxy, &QAbstractItemModel::rowsRemoved, this,
-		[this]( const QModelIndex &, int, int ) { applyBlockListFilter(); } );
+		[scheduleBlockFilter]( const QModelIndex &, int, int ) { scheduleBlockFilter(); } );
 	connect( proxy, &QAbstractItemModel::dataChanged, this,
 		[this]( const QModelIndex &, const QModelIndex &, const QList<int> & ) {
 			if ( blockListSearch && !blockListSearch->text().isEmpty() ) applyBlockListFilter();
@@ -1651,6 +1659,14 @@ void NifSkope::applyBlockListFilter()
 	if ( !list || !proxy || !nif || !blockListSearch ) return;
 	const QStringList terms = blockListSearch->text().simplified().split(
 		QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+	// No filter and none to clear: skip. Without this every block-list rows
+	// signal walked all blocks and built a formatted searchable string per
+	// block (getBlockNumber + itemName + Name lookups + .arg) just to decide
+	// "keep everything".
+	const bool filterActive = !terms.isEmpty() || blockListQuickFilter != 0;
+	if ( !filterActive && !blockListFilterWasActive )
+		return;
+	blockListFilterWasActive = filterActive;
 	auto directMatch = [this, &terms]( const QModelIndex & viewIndex ) {
 		QModelIndex source = ( viewIndex.model() == proxy ? proxy->mapTo( viewIndex ) : viewIndex );
 		int block = nif->getBlockNumber( source );

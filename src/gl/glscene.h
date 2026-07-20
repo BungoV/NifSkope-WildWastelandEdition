@@ -73,6 +73,12 @@ public:
 	void updateShaders();
 	void updateSettings( QSettings & settings );
 
+	//! Cached "CollisionManager/CollisionOnly" setting — Scene::draw runs per
+	//! frame and a QSettings read is a registry access; the collision panel
+	//! calls refreshCollisionOnlySetting() when the checkbox changes.
+	static bool collisionOnlySetting;
+	static void refreshCollisionOnlySetting();
+
 	void clear( bool flushTextures = true );
 	void make( NifModel * nif, bool flushTextures = false );
 

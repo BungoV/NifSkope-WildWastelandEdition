@@ -59,6 +59,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Scene::Scene( TexCache * texcache, QObject * parent ) :
 	QObject( parent )
 {
+	refreshCollisionOnlySetting();
 	currentBlock = currentIndex = QModelIndex();
 	selecting = 0;
 	animate = true;
@@ -380,11 +381,17 @@ void Scene::transform( const Transform & trans, float time )
 	// TODO: purge unused textures
 }
 
-void Scene::draw()
+bool Scene::collisionOnlySetting = false;
+
+void Scene::refreshCollisionOnlySetting()
 {
 	QSettings collisionSettings;
-	const bool collisionOnly = collisionSettings.value( "CollisionManager/CollisionOnly", false ).toBool()
-		&& hasOption( ShowCollision );
+	collisionOnlySetting = collisionSettings.value( "CollisionManager/CollisionOnly", false ).toBool();
+}
+
+void Scene::draw()
+{
+	const bool collisionOnly = collisionOnlySetting && hasOption( ShowCollision );
 	if ( collisionOnly )
 		drawGrid();
 	else
@@ -502,7 +509,9 @@ void Scene::drawGrid()
 	// Draw the grid
 	NifSkope *	w;
 	// TEMP DIAGNOSTIC (WW_PERF_TEST): why does the grid skip drawing?
-	if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+	// (env read hoisted — this runs per frame)
+	static const bool wwPerfTest = qEnvironmentVariableIsSet( "WW_PERF_TEST" );
+	if ( wwPerfTest ) {
 		QFile f( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) )
 			QTextStream( &f ) << "    [drawGrid: opts=0x" << QString::number( options, 16 )

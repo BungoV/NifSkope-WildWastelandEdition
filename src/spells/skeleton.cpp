@@ -1233,9 +1233,13 @@ public:
 			int keyframeResponse = QMessageBox::question( nullptr, Spell::tr( "Mirror Armature" ), Spell::tr( "Do you wish to flip animation?" ), QMessageBox::StandardButtons( QMessageBox::Yes | QMessageBox::Discard | QMessageBox::Cancel ) );
 
 			if ( keyframeResponse == QMessageBox::Discard ) {
-				// delete blocks
+				// delete blocks — batched: every removeNiBlock otherwise runs a
+				// full-model updateLinks/updateFooter (the havok/optimize removal
+				// loops use this same Loading+updateModel pattern; this scan only
+				// reads block names, never link lists)
 				int n = 0;
 
+				nif->setState( BaseModel::Loading );
 				while ( n < nif->getBlockCount() ) {
 					QModelIndex iBlock = nif->getBlockIndex( n );
 
@@ -1244,6 +1248,8 @@ public:
 					else
 						n++;
 				}
+				nif->restoreState();
+				nif->updateModel();
 			} else if ( keyframeResponse != QMessageBox::Yes ) {
 				return index;
 			}

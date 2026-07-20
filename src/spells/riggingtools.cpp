@@ -3451,6 +3451,18 @@ static bool riggingReadVertexColors( NifModel * nif, const QModelIndex & shape,
 	return true;
 }
 
+//! Row of `fieldName` inside a Vertex Data element, resolved once per loop —
+//! rows are structurally identical (the model's shared-condition-cache
+//! invariant) and getIndex(name) is a linear name scan per call, so the
+//! per-vertex loops were paying two scans per vertex.
+static int riggingVertexFieldRow( NifModel * nif, const QModelIndex & iVD, const char * fieldName )
+{
+	if ( !iVD.isValid() || nif->rowCount( iVD ) < 1 )
+		return -1;
+	QModelIndex f = nif->getIndex( nif->getIndex( iVD, 0 ), fieldName );
+	return f.isValid() ? f.row() : -1;
+}
+
 //! Add the packed RGBA field to FO4 vertex records when necessary. Opaque white
 //! is neutral for existing materials and gives both RGB and Alpha paint a safe
 //! starting value. The descriptor resize and initialization are one Undo step.
@@ -3486,9 +3498,11 @@ static bool riggingEnsureVertexColors( NifModel * nif, const QModelIndex & shape
 		// this loop emitted one signal + dependent-condition sibling scan per
 		// vertex — a 38k-signal storm. The desc/DataSize writes above stay
 		// outside so their dependent-condition invalidation still runs.
+		const int colorFieldRow = riggingVertexFieldRow( nif, iVD, "Vertex Colors" );
 		nif->setState( BaseModel::Processing );
 		for ( int vertex = 0; vertex < nif->rowCount( iVD ); vertex++ ) {
-			QModelIndex color = nif->getIndex( nif->getIndex( iVD, vertex ), "Vertex Colors" );
+			QModelIndex color = ( colorFieldRow >= 0 )
+				? nif->index( colorFieldRow, 0, nif->getIndex( iVD, vertex ) ) : QModelIndex();
 			writesOk = color.isValid()
 				&& nif->set<ByteColor4>( color, ByteColor4( FloatVector4( 1.0f ) ) ) && writesOk;
 		}
@@ -3517,12 +3531,20 @@ static int riggingCommitVertexColors( NifModel * nif, const QModelIndex & shape,
 	bool writesOk = true;
 	bool snapshot = nifSnapshotOp( nif, Spell::tr( "Paint vertex colors on %1 vertices" ).arg( ordered.size() ), [&]() {
 		bool previousHold = nif->holdUpdates( true );
+		// per-leaf signals off for the stroke (holdUpdates does not suppress
+		// them — only the model state does); one span emit at the end, same
+		// as riggingEnsureVertexColors
+		const int colorFieldRow = riggingVertexFieldRow( nif, iVD, "Vertex Colors" );
+		nif->setState( BaseModel::Processing );
 		for ( int vertex : ordered ) {
 			if ( vertex < 0 || vertex >= colors.size() ) continue;
-			QModelIndex color = nif->getIndex( nif->getIndex( iVD, vertex ), "Vertex Colors" );
+			QModelIndex color = ( colorFieldRow >= 0 )
+				? nif->index( colorFieldRow, 0, nif->getIndex( iVD, vertex ) ) : QModelIndex();
 			writesOk = color.isValid()
 				&& nif->set<ByteColor4>( color, ByteColor4( FloatVector4( colors.at( vertex ) ) ) ) && writesOk;
 		}
+		nif->restoreState();
+		nif->dataChanged( shape, shape );
 		nif->holdUpdates( previousHold );
 	} );
 	if ( !snapshot || !writesOk ) {

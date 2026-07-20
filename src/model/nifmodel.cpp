@@ -494,6 +494,9 @@ void NifModel::updateHeader()
 		QVector<QString> blockTypes;
 		QVector<int> blockTypeIndices;
 		QVector<int> blockSizes;
+		// blockTypes.indexOf was a linear QString scan per block —
+		// O(blocks × distinct types) on every header refresh
+		QHash<QString, int> blockTypeMap;
 
 		for ( int r = firstBlockRow(); r <= lastBlockRow(); r++ ) {
 			NifItem * itemBlock = root->child( r );
@@ -502,10 +505,11 @@ void NifModel::updateHeader()
 
 			QString blockName = createRTTIName( itemBlock );
 
-			int iBlockType = blockTypes.indexOf( blockName );
+			int iBlockType = blockTypeMap.value( blockName, -1 );
 			if ( iBlockType < 0 ) {
 				blockTypes.append( blockName );
 				iBlockType = blockTypes.count() - 1;
+				blockTypeMap.insert( blockName, iBlockType );
 			}
 			blockTypeIndices.append( iBlockType );
 
