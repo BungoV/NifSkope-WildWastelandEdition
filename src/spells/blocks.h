@@ -76,6 +76,14 @@ public:
 };
 
 
+//! Block List multi-selection copy: put the union of the given roots' branches
+//! onto the clipboard in the branch format that spPasteBranch consumes.
+bool copyBlockBranchesToClipboard( NifModel * nif, const QList<qint32> & roots );
+
+//! Publish the Block List's current multi-selection (block numbers) so the Copy
+//! Branch spell can union every selected block's branch. Call on selection change.
+void setBlockListSelection( const QList<qint32> & blocks );
+
 //! Add a link to the specified block to a link array
 /*!
 * @param nif The model

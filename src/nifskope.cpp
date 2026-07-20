@@ -38,6 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "data/niftypes.h"
 #include "spellbook.h"
+#include "spells/blocks.h"	// setBlockListSelection for Copy Branch multi-select
 #include "version.h"
 #include "gl/glscene.h"
 #include "model/kfmmodel.h"
@@ -139,6 +140,7 @@ constexpr int NifBrowserDocumentRole = Qt::UserRole + 38;
 constexpr int NifBrowserBackgroundDocumentRole = Qt::UserRole + 39;
 constexpr int NifBrowserConfiguredResource = 2;
 constexpr int NifBrowserGameRole = Qt::UserRole + 40;
+constexpr int NifBrowserFolderPathRole = Qt::UserRole + 41;
 
 class LoadedNifsTreeView final : public QTreeView
 {
@@ -1589,6 +1591,22 @@ void NifSkope::wireBlockListSelection()
 	// which silently drops this connection.
 	connect( list->selectionModel(), &QItemSelectionModel::selectionChanged, this,
 		[this]( const QItemSelection &, const QItemSelection & ) {
+		// Publish the raw multi-selection (block numbers) so the Copy Branch
+		// spell can union every selected block's branch. Done before the
+		// object-sync guards below so it stays current even while selection
+		// is driven programmatically.
+		if ( nif ) {
+			QList<qint32> selBlocks;
+			for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+				if ( pidx.column() != 0 )
+					continue;
+				QModelIndex src = ( pidx.model() == proxy ) ? proxy->mapTo( pidx ) : pidx;
+				int b = nif->getBlockNumber( src );
+				if ( b >= 0 && !selBlocks.contains( b ) )
+					selBlocks.append( b );
+			}
+			setBlockListSelection( selBlocks );
+		}
 		// 'selecting' is true while NifSkope::select() programmatically drives
 		// the list (e.g. after a viewport click); without this guard the
 		// resulting single-row ClearAndSelect echoed back into the object
@@ -2565,6 +2583,32 @@ void NifSkope::populateConfiguredNifBrowser()
 
 	// Replace only available-source rows. Loaded NIFs are rebuilt below from
 	// the live session and therefore remain independent of resource refreshes.
+
+	// Preserve which Available-NIFs folders the user had expanded: the rebuild
+	// below replaces every item, which would otherwise snap the tree shut to the
+	// root on each refresh / nif load. Folder items are tagged with their
+	// accumulated path (NifBrowserFolderPathRole); record the open ones now and
+	// re-expand the matching paths once the new tree is in place.
+	QSet<QString> expandedFolderPaths;
+	if ( bsaView->model() == bsaProxyModel ) {
+		std::function<void( QStandardItem * )> collectExpanded = [&]( QStandardItem * item ) {
+			for ( int r = 0; r < item->rowCount(); ++r ) {
+				QStandardItem * child = item->child( r, 0 );
+				if ( !child )
+					continue;
+				const QVariant folderPath = child->data( NifBrowserFolderPathRole );
+				if ( folderPath.isValid() ) {
+					const QModelIndex proxyIdx = bsaProxyModel->mapFromSource( child->index() );
+					if ( proxyIdx.isValid() && bsaView->isExpanded( proxyIdx ) )
+						expandedFolderPaths.insert( folderPath.toString() );
+				}
+				if ( child->hasChildren() )
+					collectExpanded( child );
+			}
+		};
+		collectExpanded( bsaModel->invisibleRootItem() );
+	}
+
 	if ( bsaModel->rowCount() > 0 )
 		bsaModel->removeRows( 0, bsaModel->rowCount() );
 	if ( bsaModel->columnCount() < 3 ) bsaModel->init();
@@ -2636,6 +2680,7 @@ void NifSkope::populateConfiguredNifBrowser()
 			accumulated += part;
 			if ( !folders.contains( accumulated ) ) {
 				auto * folder = new QStandardItem( part );
+				folder->setData( accumulated, NifBrowserFolderPathRole );
 				parent->appendRow( { folder, new QStandardItem(), new QStandardItem() } );
 				folders.insert( accumulated, folder );
 			}
@@ -2670,6 +2715,16 @@ void NifSkope::populateConfiguredNifBrowser()
 	ui->bsaName->setText( tr( "%1 configured resources" ).arg( Game::StringForMode( game ) ) );
 	QModelIndex visibleAvailable = bsaProxyModel->mapFromSource( available->index() );
 	if ( visibleAvailable.isValid() ) bsaView->expand( visibleAvailable );
+
+	// Re-open the folders that were expanded before the rebuild, so loading a nif
+	// (or hitting Refresh) leaves the tree where the user had it.
+	for ( auto it = folders.constBegin(); it != folders.constEnd(); ++it ) {
+		if ( it.key().isEmpty() || !expandedFolderPaths.contains( it.key() ) )
+			continue;
+		const QModelIndex proxyIdx = bsaProxyModel->mapFromSource( it.value()->index() );
+		if ( proxyIdx.isValid() )
+			bsaView->expand( proxyIdx );
+	}
 }
 
 bool NifSkope::extractConfiguredNifBytes( int gameID, const QString & path,

@@ -6,3 +6,11 @@ Makefile*
 *.o
 Doxyfile
 apidocs/
+.buildtmp/
+build_*.log
+build_out.txt
+build_trim.log
+qmake_out.txt
+__pycache__/
+ww_*.log
+ww_*.png

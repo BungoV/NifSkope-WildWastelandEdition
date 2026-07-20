@@ -1332,13 +1332,15 @@ bool spCopyBranch::isApplicable( const NifModel * nif, const QModelIndex & index
 	return nif->isNiBlock( index );
 }
 
-QModelIndex spCopyBranch::cast( NifModel * nif, const QModelIndex & index )
+//! Serialize a set of blocks as a branch payload onto the clipboard, remapping
+//! internal links (shared by single-branch Copy Branch and the Block List's
+//! multi-selection copy). Returns false and reports on failure.
+static bool serializeBranchToClipboard( NifModel * nif, const QList<qint32> & blocks )
 {
-	QList<qint32> blocks;
-	populateBlocks( blocks, nif, nif->getBlockNumber( index ) );
+	if ( blocks.isEmpty() )
+		return false;
 
 	QMap<qint32, qint32> blockMap;
-
 	for ( int b = 0; b < blocks.count(); b++ )
 		blockMap.insert( blocks[b], b );
 
@@ -1360,8 +1362,8 @@ QModelIndex spCopyBranch::cast( NifModel * nif, const QModelIndex & index )
 					}
 				}
 
-				Message::append( tr( B_ERR ).arg( name() ),
-								 tr( "failed to map parent link %1 %2 for block %3 %4; %5." )
+				Message::append( Spell::tr( B_ERR ).arg( Spell::tr( "Copy Branch" ) ),
+								 Spell::tr( "failed to map parent link %1 %2 for block %3 %4; %5." )
 									.arg( link )
 									.arg( nif->itemName( nif->getBlockIndex( link ) ) )
 									.arg( block )
@@ -1369,7 +1371,7 @@ QModelIndex spCopyBranch::cast( NifModel * nif, const QModelIndex & index )
 									.arg( failMessage ),
 								 QMessageBox::Critical
 				);
-				return index;
+				return false;
 			}
 		}
 	}
@@ -1393,19 +1395,58 @@ QModelIndex spCopyBranch::cast( NifModel * nif, const QModelIndex & index )
 				ds << serializeStrings( nif, iBlock, bType );
 
 			if ( !nif->saveIndex( buffer, iBlock ) ) {
-				Message::append( tr( B_ERR ).arg( name() ),
-								 tr( "failed to save block %1 %2." ).arg( block ).arg( bType ),
+				Message::append( Spell::tr( B_ERR ).arg( Spell::tr( "Copy Branch" ) ),
+								 Spell::tr( "failed to save block %1 %2." ).arg( block ).arg( bType ),
 								 QMessageBox::Critical
 				);
-				return index;
+				return false;
 			}
 		}
 
 		QMimeData * mime = new QMimeData;
 		mime->setData( QString( STR_BR ).arg( nif->getVersion() ), data );
 		QApplication::clipboard()->setMimeData( mime );
+		return true;
 	}
 
+	return false;
+}
+
+//! Block List multi-selection copy: the union of every selected root's branch
+//! goes onto the clipboard in the branch format, so Paste Branch recreates
+//! them all (with internal links remapped) in one step.
+bool copyBlockBranchesToClipboard( NifModel * nif, const QList<qint32> & roots )
+{
+	QList<qint32> blocks;
+	for ( qint32 r : roots )
+		populateBlocks( blocks, nif, r );	// dedups; unions overlapping branches
+	return serializeBranchToClipboard( nif, blocks );
+}
+
+// The Block List's current multi-selection (block numbers), published by the UI.
+// Copy Branch is reached through a shortcut/menu that only hands the spell one
+// index, so this is how the spell learns the user picked several blocks.
+static QList<qint32> blockListSelection;
+
+void setBlockListSelection( const QList<qint32> & blocks )
+{
+	blockListSelection = blocks;
+}
+
+QModelIndex spCopyBranch::cast( NifModel * nif, const QModelIndex & index )
+{
+	const qint32 cur = nif->getBlockNumber( index );
+
+	// If the Block List has several blocks selected and this cast is on one of
+	// them, copy the union of every selected block's branch; otherwise copy just
+	// this one branch (the classic single-block behaviour).
+	QList<qint32> roots;
+	if ( blockListSelection.size() > 1 && blockListSelection.contains( cur ) )
+		roots = blockListSelection;
+	else
+		roots.append( cur );
+
+	copyBlockBranchesToClipboard( nif, roots );
 	return index;
 }
 
@@ -1502,6 +1543,7 @@ QModelIndex spPasteBranch::cast( NifModel * nif, const QModelIndex & index )
 					}
 
 					QModelIndex iRoot;
+					QVector<int> pasted;
 
 					nif->holdUpdates( true );
 					for ( int c = 0; c < count; c++ ) {
@@ -1530,13 +1572,37 @@ QModelIndex spPasteBranch::cast( NifModel * nif, const QModelIndex & index )
 						if ( nif->checkVersion( 0x14010001, 0 ) )
 							deserializeStrings( nif, block, bType, strings );
 
-
+						pasted.append( nif->getBlockNumber( block ) );
 						if ( c == 0 )
 							iRoot = block;
 					}
 					nif->holdUpdates( false );
 
-					blockLink( nif, index, iRoot );
+					// Link every ROOT of the pasted set (a block not childed by
+					// another pasted block) to the target. For a single branch
+					// that is just iRoot (unchanged); for a multi-selection copy
+					// each independent root is slotted in individually.
+					//
+					// blockLink picks the right slot for the pair (a NiAVObject
+					// under a NiNode -> Children, a NiProperty under a shape ->
+					// Properties, ...). If the chosen target can't hold a root —
+					// e.g. Ctrl+V while a shape, not a node, is current — a scene
+					// object would be left orphaned; fall back to the nearest
+					// NiNode ancestor of the target so it still slots in.
+					const QSet<int> pastedSet( pasted.constBegin(), pasted.constEnd() );
+					QModelIndex iNode = index;
+					while ( iNode.isValid() && !nif->blockInherits( iNode, "NiNode" ) )
+						iNode = nif->getBlockIndex( nif->getParent( iNode ) );
+
+					for ( int nb : std::as_const( pasted ) ) {
+						if ( pastedSet.contains( nif->getParent( nb ) ) )
+							continue;	// not a root — childed by another pasted block
+						QModelIndex iBlock = nif->getBlockIndex( nb );
+						blockLink( nif, index, iBlock );
+						if ( nif->getParent( nb ) < 0 && iNode.isValid() && iNode != index
+							&& nif->blockInherits( iBlock, "NiAVObject" ) )
+							blockLink( nif, iNode, iBlock );	// still orphaned: attach to a node
+					}
 
 					return iRoot;
 				}

@@ -540,16 +540,6 @@ private:
 	//! Dock the panels at the viewport's bottom-left corner
 	void positionRedoPanel();
 
-	//! Blender-style viewport menu bar (Select · Add · Object / Select ·
-	//! Mesh · Vertex · Edge · Face / paint), a floating tool window docked
-	//! to the viewport's bottom edge — same rules as the redo panels
-	QFrame * viewportMenuBar = nullptr;
-	//! Center the menu bar on the viewport's bottom edge
-	void positionViewportMenuBar();
-
-	QComboBox * animGroups;
-	QAction * animGroupsAction;
-
 	bool selecting = false;
 	bool initialShowEvent = true;
 

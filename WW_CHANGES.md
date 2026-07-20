@@ -1,5 +1,292 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-19g — NIF Browser keeps its expanded folders when you load a nif
+
+Loading a nif rebuilds the NIF Browser's "Available NIFs" tree from scratch in
+`populateConfiguredNifBrowser` (every successful load fires it via
+`completeLoading`). The rebuild replaced every item and only re-expanded the top
+"Available NIFs" node, so any folders the user had opened (e.g. armor ▸
+armoredcoat) snapped shut on each load.
+
+- Folder items are now tagged with their accumulated path
+  (`NifBrowserFolderPathRole`). Before the rebuild, `populateConfiguredNifBrowser`
+  walks the live tree and records which tagged folders are expanded; after the new
+  tree is built and sorted, it re-expands the folders whose paths match — so the
+  browser stays exactly where the user left it across loads, Refresh, and the
+  archive/loose toggles.
+
+Verified headlessly (`WW_BROWSER_TEST=1`, a new harness): expand the first
+Available-NIFs folder, repopulate (what a load does), and the folder is still
+open — **PASS** (`actors` expanded before=1, after=1).
+
+## 2026-07-19f — Viewport mode menus dock into the toolbar; animation bar retired
+
+The Blender-style viewport header menus — **Select · Add · Object** in object
+mode, **Select · Mesh · Vertex · Edge · Face** in edit mode, **Select ·
+Weights/Segments/Paint** while painting — were a floating translucent overlay
+pinned to the bottom of the 3D viewport. They now live in a **docked toolbar
+(`tMode`)** in the top toolbar row, in the slot the animation bar used to hold.
+
+- **Animation bar removed.** The old `tAnim` toolbar (Play / Loop / Switch +
+  timeline slider + animation-group combo) is gone: every one of its functions
+  already exists in the **animation workspace** (Timeline dock) — the transport
+  triggers `aAnimPlay`, the playhead replaces the slider (`setSceneTime` ↔
+  `sceneTimeChanged`), and the sequence selector replaces the group combo
+  (`setSceneSequence` / `sequenceChanged`), with Loop / Switch mirrored in via
+  `TimelineWidget::addAnimActions`. The `.ui`'s `tAnim` toolbar was repurposed
+  and renamed `tMode`; the `aAnimate` / `aAnimPlay` / `aAnimLoop` / `aAnimSwitch`
+  **actions** and the `GLView` animation state machine (`updateAnimationState`)
+  are untouched — only the redundant main-window widgets and their wiring went.
+  `aAnimSwitch`'s show-only-with-multiple-sequences rule is now recomputed
+  straight from the scene (`getScene()->animGroups.count() > 1`) on
+  `sequencesUpdated`, so the dock's Switch button still appears correctly.
+- **Overlay machinery deleted.** As ordinary window chrome the menus need none
+  of the floating overlay's workarounds, all now removed: the frameless
+  `WA_ShowWithoutActivating` tool window, its hand-rolled dark stylesheet,
+  `positionViewportMenuBar()`, and the `eventFilter` Show / Move / Resize /
+  WindowStateChange hooks that kept it glued to the viewport and dodged the
+  focus-follows-mouse deactivation bug. A docked toolbar clicks without
+  deactivating the main window, so that bug can't recur.
+- **Per-mode collapse preserved.** Each button is added with
+  `QToolBar::addWidget`, and it's the returned `QAction`'s visibility that's
+  toggled per mode (the idiom the old anim-group combo already used) — so the
+  toolbar slot collapses cleanly rather than leaving a gap, which hiding the
+  `QToolButton` alone would not.
+
+The Render-toolbar **mode selector** ("Object Mode" dropdown) and the viewport
+visibility dropdown are unaffected — only the header *menus* moved.
+
+In-app verified (`WW_UI_SHOT=1`, a new harness that grabs the whole main window
+to `ww_ui_shot.png` and quits): with a mesh loaded in Object Mode the top
+toolbar row shows **Select · Add · Object** at its right end and there is no
+animation bar; the app starts cleanly (exit 0), so none of the removed
+overlay/animation symbols break startup.
+
+## 2026-07-19e — Separate (P) is skin- and segment-aware for FO4 meshes
+
+Blender-style **Separate** (`GLView::separateSelection`) split a skinned
+`BSSubIndexTriShape` incorrectly, the mirror of the old Join bug:
+
+- **Shared skin (fixed).** `tlCloneShapeWithProps` clones a single block, so the
+  split-off shape's `"Skin"` link still pointed at the **original's**
+  `BSSkin::Instance` / `BSSkin::BoneData` — two shapes driving one skin, which is
+  a malformed NIF (the binder already rejects shared BoneData). New
+  `separateCloneSkin` gives the clone its **own** Instance + BoneData and relinks;
+  the Skeleton Root and per-bone node pointers stay shared (the common skeleton,
+  correctly referenced by both halves).
+- **Stale segments (fixed).** `tlKeepTriangles` rewrites only the triangle array,
+  leaving every segment's `Start Index` / `Num Primitives` pointing past the new,
+  smaller triangle buffer on **both** halves. New `separateBuildSegments` rebuilds
+  each slot (and subsegment) for the kept subset: since FO4 segments are
+  contiguous in triangle order and `tlKeepTriangles` preserves order, a range's
+  new position is the count of kept triangles before its original start
+  (prefix-sum). The **slot count and shared Segment Data (Per-Segment-Data / SSF)
+  are kept intact** — a slot that lost all its triangles just becomes empty
+  (`Num Primitives` 0), so the dismemberment structure and SSF alignment stay
+  valid.
+- **Orphan-vertex trim.** `tlCompactVertices` then drops the verts each half no
+  longer uses and reindexes its triangles (the compaction `tlDeleteGeometry`
+  already does in Faces mode), so each piece is vertex-optimal like Blender's
+  Separate rather than carrying the whole shared vertex buffer. FO4 skin weights
+  are inline in the vertex record (moved with it) and there is no NiSkinData /
+  NiSkinPartition to reindex, so no skin fix-up is needed; segments are triangle-
+  indexed and unaffected.
+- **Undo.** `TlShapeStateCommand` also snapshots the `Segment` subtree +
+  `Num Primitives`, so Ctrl+Z restores the source's segment ranges (not just its
+  verts/tris), and now pre-sizes each grown-back row's conditional skin arrays
+  before the value restore so a vert-removing op's undo can't hit the 0-length-
+  array landmine. The clone + new skin blocks are dropped by the existing
+  `TlBlockAppendCommand`.
+
+Vertex colours / alpha survive the split AND the compaction: each vertex record
+(RGBA — alpha = the colour's A channel) moves verbatim with its vertex, and the
+triangle remap is validated to keep the mesh geometry identical.
+
+Verified headlessly (`WW_SEP_TEST`; `WW_SEP_BLOCK` targets a specific shape):
+- Vault 111 suit (3106 v / 5033 t / 7 seg / 20 subseg, **no** vertex colours),
+  split the first half of the faces → source 2515 t (skin 69/70, kept), clone
+  2518 t (skin **79/80, its own**); both halves: 7 segments,
+  `Σ Num Primitives == Num Triangles`, contiguous, orphan verts trimmed to
+  source **1624** / clone **1557** (from 3106; `geomOk`, `noOrphan`), **0**
+  zeroed weights.
+- Coloured shape (torso block 111, 68 v / 64 t / 4 seg, **VF_COLORS**): split
+  in half → both halves keep all 4 segments (`sumPrim == tris`, contiguous),
+  distinct skins (112/113 vs 118/119), and **every vertex colour/alpha preserved**
+  (`colorOk`) on source AND clone.
+- Byte level (`verify_join.py`): both output shapes internally consistent — 62 /
+  1 bones (Instance == Bones == BoneData), segments cover [0, tris), Data Size
+  consistent — **PASS** on both the vault and coloured splits.
+- Undo restores verts / tris / segment ranges and drops the appended clone + skin
+  blocks (block count back to the original) — **UNDO PASS**.
+
+## 2026-07-19d — Paint-mode viewport selector auto-acquires a target
+
+Picking **Weight / Vertex / Segment Paint** from the viewport mode dropdown did
+nothing — and gave **no feedback** — unless a mesh was already selected. The
+handler opens the manager, auto-picks the first bone, and clicks its Start
+Painting button; with nothing selected the bone list is empty, that button is
+disabled, and the handler silently flipped back to Object Mode
+(`nifskope_ui.cpp`). This bit right after a Join, which leaves no live selection.
+
+- **Auto-acquire.** A shared `acquirePaintTarget( requireSkin )` helper now runs
+  when no target is set: it selects the object the user is looking at (the active
+  object) if it qualifies, else the file's **sole** qualifying shape (never
+  guessing between several). `requireSkin` gates Weight / Segment paint (need a
+  skin) vs Vertex paint (any tri-shape). It drives `NifSkope::select()`, whose
+  synchronous `currentNifIndexChanged` repopulates the manager before the handler
+  re-checks it — so the mode engages in one click.
+- **Feedback.** When it still can't start, the status bar now says why —
+  "no skinned mesh to paint…", "select which mesh… (this file has several)", or
+  "select a bone / segment row, then Start Painting" — instead of silently
+  reverting.
+
+Verified headlessly (`WW_WP_TEST`, vault suit, nothing pre-selected):
+`objActive -1` → trigger `ViewportWeightPaintAction` → `weightPaintModeActive 1`
+— **PASS** (previously it would have reverted). Join regression re-run in the
+same binary: unchanged — **PASS**.
+
+## 2026-07-19c — Join: donor segments merge by dismemberment *slot*, not appended
+
+The 07-19b merge appended each donor's non-empty top-level segments as **new
+top-level segments** past the active's. That's wrong for FO4: `BSSubIndexTriShape`
+segments are **indexed dismemberment slots** — the shared Segment Data / SSF
+maps slot *i* to a body-part / cut. A donor's SEG 3 (e.g. shape 74 — segments
+SEG 0–3 with all 230 faces in SEG 3, but **no** subsegments and **no** shared
+Segment Data of its own) was landing as a brand-new slot the receiver's SSF
+never defines, growing the vault suit to 9 segments the game can't address.
+
+`GLView::joinBuildSegments` now merges **donor segment i into receiver segment i**:
+
+- Triangles are **reordered** so every slot stays one contiguous `[Start, Start+
+  count)` range after donor faces fold in — donor slot *i*'s faces are inserted
+  at the end of receiver slot *i*'s run, and all later slots (and their
+  subsegments) shift by that delta.
+- The receiver's **subsegments, Per-Segment-Data (body-part Bone IDs + cut
+  offsets), and SSF are preserved** — only `Start Index` / counts move; every
+  `Parent Array Index` still resolves.
+- Donors with more slots than the receiver flatten their surplus into the last
+  common slot (reported), so no undefined slot is ever created.
+
+Verified — vault 111 suit (receiver 7 seg / 20 subseg) + donors 74 & 63:
+- **Num Segments 7 / Total 27, unchanged** (was ballooning to 9). seg3 grew
+  2052 → 2356 = donor 74's 230 + 63's 74 folded into slot 3.
+- seg2's 5 subsegments untouched (`parentPSD=2`); seg4/5/6 + their subsegments
+  shifted +304 tris, all `parentPSD` intact. Coverage 5033 contiguous, SSF kept.
+- Byte verify (`verify_join.py vault_joined.nif 3106 5033`): verts 3106, tris
+  5033, bones 62, segments 7, desc `0x5b00050430208` — **PASS**.
+- Torso regression unaffected: **mode 1** 5684 tris / Num 1 / contiguous — PASS;
+  **mode 2** 5748 tris / Num 4 / contiguous — PASS.
+
+## 2026-07-19b — Join (Ctrl+J) is rigging-aware: skin, segments, colors merge
+
+Object-mode **Join** (`GLView::joinSelectedObjects`) previously did a
+geometry-only merge (append verts/tris, transform normals) that **corrupted**
+FO4 skinned meshes: per-vertex Bone Indices were copied verbatim but still
+pointed into each source's own bone list, the active's `BSSkin::Instance` /
+`BoneData` were never extended, and `BSSubIndexTriShape` segments described only
+the original triangle count. Now it merges the rig:
+
+- **Bones/weights/BSSkin::Instance.** Each source's bones are unioned into the
+  active's `BSSkin::Instance` + `BSSkin::BoneData` (matched by bone **NiNode
+  block number** — same file, so identity, no name ambiguity), missing bones
+  appended (Ptr + BoneData transform, reusing the Transfer-weights append
+  pattern), and every appended vertex's Bone Indices remapped into the merged
+  list. Weights carry over verbatim. 256-bone (uint8) overflow skips a source.
+- **Segments (incl. subsegments / dismemberment).** The active's own segments —
+  and its shared **Segment Data** (subsegments, Per-Segment-Data with body-part
+  Bone IDs + dismemberment cut offsets, SSF file) — are preserved unchanged
+  (its triangles keep positions `[0, activeTris)`). Each donor's non-empty
+  top-level segments are appended as new top-level segments with `Start Index`
+  shifted past the active, plus a default Per-Segment-Data row **at the end** of
+  the PSD array — so every existing subsegment `Parent Array Index` / Segment
+  Start still resolves, and the receiver's dismemberment stays intact. Donor
+  subsegments are flattened (reported). (Earlier this collapsed `Num < Total`
+  shapes to one segment, destroying dismemberment — the Vault 111 suit's
+  7 seg / 20 subseg regressed to 1 seg / 0 subseg; fixed.)
+- **Vertex + alpha colors** ride along with the verbatim vertex copy.
+- **Superset formats.** Compatibility was `identical desc`; now a source merges
+  if it shares the active's structural layout and carries **no attribute the
+  active lacks**. A source *missing* a fillable attribute the active has is
+  promoted with a default — **opaque-white vertex color**, single-bone bind
+  (weight [1,0,0,0] index 0), zero eye data — so e.g. a colourless mesh joins a
+  coloured active and gets white. A source **richer** than the active is skipped
+  with a message telling the user to make the richest mesh the active object
+  (no risky in-place vertex-desc rebuild).
+- **Perf.** The merge wraps its bulk writes in `setState(BaseModel::Processing)`
+  + `restoreState()` + one `dataChanged`, like the other topology ops — without
+  it every one of thousands of vertex writes made the live scene react
+  (quadratic; a multi-second freeze / apparent hang on a 4k-vertex join).
+- **Skin-copy landmine (fixed).** A freshly grown `BSVertexData` row leaves its
+  `#ARG#`-conditional arrays (`Bone Weights` / `Bone Indices`) **0-length** until
+  a deferred cascade — so `tlCopyItemValues` silently dropped the donor skin and
+  every appended vertex came out weight-0 (rendered at the origin, "weights don't
+  transfer"). The merge now `updateArraySize`s each new row's weight/index arrays
+  to the source's length *before* copying, so the skin actually carries over.
+  (Neither Default's `onItemValueChange` nor Processing builds these per-row.)
+
+Verified headlessly (WW_JOIN_TEST in nifskope_ui.cpp, x01tesla_torso):
+- **mode 1** (biggest shape active): the four same-desc `Edison_Torso`/glow
+  shapes → merged 4309 verts / 5684 tris, bone list unioned to {5,6,7,8}, 0
+  vertex bone indices out of range, 4 segments covering all triangles.
+- **mode 2** (richest-format shape active): the coloured shape absorbs the four
+  colourless ones → 4377 verts / 5748 tris, 8 segments, and the 4309 appended
+  verts are all opaque white while the active's own verts keep their colours.
+Both green live-model and byte-level (`tools/join_test/verify_join.py`: skin
+Num Bones == Bones == BoneData, all indices < Num Bones, segments cover
+[0, tris), Data Size consistent). Both complete in ~5 s (was a freeze).
+
+Also verified on **vault111suit.nif** (mode 1): receiver `Vault111Suit_YanEdits:0`
+has 7 segments / 20 subsegments + SSF; after absorbing two donors the merged
+shape is 3106 v / 5033 t, 62 bones (unioned, all indices in range), and
+**9 segments / 29 total with all 20 original subsegments, cut offsets and the
+SSF preserved** — the two donors added as segs 7-8 with default PSD rows at the
+end. verify_join.py now checks Segment Data self-consistency (Num/Total match,
+Segment Starts == Num, Per Segment Data == Total). The harness also asserts the
+appended donor verts keep non-zero skin weight (0 zero-weight verts) — the check
+that would have caught the skin-copy landmine above.
+
+## 2026-07-19a — Copy/Paste Branch (Ctrl+C / Ctrl+V) go multi-selection
+
+Copy Branch and Paste Branch already own Ctrl+C / Ctrl+V (their
+`QKeySequence::Copy` / `::Paste` hotkeys). They now handle a **multi-block
+selection** and slot every branch back in — "copy these five blocks, paste
+them, have them land in the right place".
+
+**Copy Branch** unions every *selected* block's branch. A spell is only handed
+one index by its shortcut/menu, so the block-list selection is published to the
+spell: `NifSkope`'s `list` selectionChanged handler calls the new
+`setBlockListSelection(blockNumbers)` (spells/blocks.h), and `spCopyBranch::cast`
+unions all of them (via `copyBlockBranchesToClipboard`, `populateBlocks` dedups
+overlaps) when the cast lands on one of the selected blocks; otherwise it copies
+just that one branch (unchanged single-block behaviour).
+
+**Paste Branch** links *each* root of the pasted set (a block not childed by
+another pasted block), not just the first — the old code linked only `iRoot`.
+`blockLink` picks the correct slot per pair (NiAVObject under a NiNode ->
+Children, NiProperty under a shape -> Properties, ...). New: if a scene-object
+root can't attach to the chosen target — the realistic Ctrl+V case, where the
+current block is a *shape*, not a node — it falls back to the nearest NiNode
+ancestor of the target so it still slots in instead of being orphaned. Narrowly
+scoped: only fires for a still-orphaned (`getParent < 0`) NiAVObject root, so
+property/extra-data/single-node pastes are unaffected.
+
+Dropped the earlier dead-end: a dedicated Ctrl+C / Ctrl+V event filter on the
+block list (nifskope_ui.cpp). It fought the real spell QActions — Ctrl+V is a
+WindowShortcut processed in `QApplication::notify` before a widget event filter
+sees the key, so the filter's paste-under-nearest-node branch never ran and the
+spell pasted onto the raw (non-node) selection, orphaning the copies. Enhancing
+the spells themselves is the right layer.
+
+Verified headlessly (WW_COPYPASTE_TEST, x01tesla_torso, 116 blocks / 5
+BSSubIndexTriShapes): selecting the two smallest shapes, casting Copy Branch
+(union = 10 blocks = both shape+skin+shader branches), then casting Paste Branch
+onto a *shape* — blocks 116->126 (delta 10 = the union, so both branches really
+were copied); the nearest NiNode "Scene Root" gained exactly 2 children whose
+types match the roots in order (both slotted in via the fallback, not just the
+first); 0 pasted child links point back into the original range (internal links
+remapped). Saved + reparsed clean (`tools/copypaste_test/verify_copypaste.py`):
+Scene Root children `[…,111,116,121]`, 0 dangling / out-of-range.
+
 ## 2026-07-18h — Confirm popups open with the action button under the cursor
 
 Blender opens a confirm with its action button beneath the pointer for an

@@ -65,8 +65,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QButtonGroup>
 #include <QByteArray>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QCursor>
+#include <QMimeData>
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QDockWidget>
@@ -925,6 +927,721 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	// TEST HARNESS (WW_COPYPASTE_TEST=1): exercise the multi-block Copy Branch /
+	// Paste Branch spells end to end, through the SAME path Ctrl+C / Ctrl+V take
+	// (NifSkope::castSpell -> SpellBook::cast -> spell->cast). Selects the two
+	// smallest BSTriShapes in the block list (which publishes the selection Copy
+	// Branch reads), casts Copy Branch (union of both branches), then casts Paste
+	// Branch WITH A SHAPE as the target — the realistic Ctrl+V case where the
+	// current block is not a node — so the "slot into the nearest NiNode"
+	// fallback is exercised. Verifies:
+	//   - the clipboard holds a nibranch payload (copy succeeded),
+	//   - block-count delta == the copied branch union size (the union really was
+	//     copied, not just one branch),
+	//   - the nearest NiNode gained exactly roots.count() children whose types
+	//     match the copied roots in order (every root slotted in, not just the
+	//     first), and
+	//   - no pasted block has a child link pointing back into the original
+	//     blocks (internal links were remapped, not left dangling).
+	// Saves (WW_TEST_SAVE) and quits. Log: release/ww_copypaste_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COPYPASTE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 600, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_copypaste_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+
+					// roots = the two smallest BSTriShapes (independent branches,
+					// each a scene object that belongs under a NiNode)
+					QVector<QPair<int,int>> shapes;	// (verts, block)
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+							shapes.append( { nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" ), b } );
+					std::sort( shapes.begin(), shapes.end() );
+					QVector<int> roots;
+					QStringList names, rootTypes;
+					for ( int i = 0; i < shapes.size() && roots.size() < 2; i++ ) {
+						roots.append( shapes[i].second );
+						names << nif->get<QString>( nif->getBlockIndex( shapes[i].second ), "Name" );
+						rootTypes << nif->itemName( nif->getBlockIndex( shapes[i].second ) );
+					}
+					if ( roots.isEmpty() ) { log << "no shapes\n"; break; }
+					if ( roots.size() < 2 )
+						log << "note: only one shape found; multi-root path degenerates to single\n";
+
+					// expected copy union == populateBlocks (DFS over child links,
+					// dedup); mirror it exactly so the count delta is predictable
+					QSet<int> unionSet;
+					std::function<void(int)> dfs = [&]( int b ) {
+						if ( b < 0 || unionSet.contains( b ) ) return;
+						unionSet.insert( b );
+						for ( int l : nif->getChildLinks( b ) ) dfs( l );
+					};
+					for ( int r : roots ) dfs( r );
+
+					// where the fallback should slot the roots: nearest NiNode
+					// ancestor of the shape we will paste onto
+					int tb = roots.first();
+					while ( tb >= 0 && !nif->blockInherits( nif->getBlockIndex( tb ), "NiNode" ) )
+						tb = nif->getParent( tb );
+					if ( tb < 0 ) tb = 0;
+					QModelIndex iTarget = nif->getBlockIndex( tb );
+					const int childrenBefore = nif->rowCount( nif->getIndex( iTarget, "Children" ) );
+
+					QStringList rootStrs;
+					for ( int r : roots ) rootStrs << QString::number( r );
+					log << "roots [" << rootStrs.join( "," ) << "] (" << rootTypes.join( ", " )
+						<< ") names " << names.join( ", " ) << "\n";
+					log << "copy union " << unionSet.size() << " blocks; nearest NiNode " << tb
+						<< " '" << nif->get<QString>( iTarget, "Name" ) << "' children before "
+						<< childrenBefore << "\n";
+					log.flush();
+
+					// --- COPY: select both shapes (publishes the selection Copy
+					// Branch reads), then cast Copy Branch on one of them ---
+					skope->list->selectionModel()->clearSelection();
+					for ( int r : roots ) {
+						QModelIndex p = skope->proxy->mapFrom( nif->getBlockIndex( r ), QModelIndex() );
+						skope->list->selectionModel()->select( p,
+							QItemSelectionModel::Select | QItemSelectionModel::Rows );
+					}
+					skope->castSpell( QStringLiteral( "Block/Copy Branch" ),
+						nif->getBlockIndex( roots.first() ) );
+					bool copied = false;
+					if ( const QMimeData * md = QApplication::clipboard()->mimeData() )
+						for ( const QString & f : md->formats() )
+							if ( f.contains( QLatin1String( "nibranch" ) ) ) { copied = true; break; }
+					log << "after Copy Branch: clipboard holds nibranch payload: " << copied << "\n";
+					log.flush();
+					if ( !copied ) { log << "FAIL: copy produced no branch payload\n"; break; }
+
+					// --- PASTE: cast Paste Branch onto a SHAPE (not a node), so the
+					// fallback must slot each root into the nearest NiNode. Suppress
+					// the generic not-undoable confirm the SpellBook would pop. ---
+					QSettings cfg;
+					cfg.setValue( "Settings/Suppress Undoable Confirmation", true );
+					const int origCount = nif->getBlockCount();
+					skope->castSpell( QStringLiteral( "Block/Paste Branch" ),
+						nif->getBlockIndex( roots.first() ) );
+					const int newCount = nif->getBlockCount();
+					const int delta = newCount - origCount;
+					log << "after Paste Branch: blocks " << origCount << " -> " << newCount
+						<< " (delta " << delta << ", expected " << unionSet.size() << ")\n";
+
+					// the nearest NiNode's Children must have grown by roots.count()
+					iTarget = nif->getBlockIndex( tb );
+					QModelIndex iChildren = nif->getIndex( iTarget, "Children" );
+					const int childrenAfter = nif->rowCount( iChildren );
+					log << "node children " << childrenBefore << " -> " << childrenAfter
+						<< " (delta " << ( childrenAfter - childrenBefore )
+						<< ", expected " << roots.size() << ")\n";
+
+					// the last roots.count() children must be pasted blocks
+					// (>= origCount) whose types match the copied roots, in order
+					int typeMatches = 0, attached = 0;
+					for ( int k = 0; k < roots.size(); k++ ) {
+						int row = childrenAfter - roots.size() + k;
+						if ( row < 0 ) continue;
+						int child = nif->getLink( nif->getIndex( iChildren, row ) );
+						if ( child >= origCount ) attached++;
+						if ( child >= 0 && nif->itemName( nif->getBlockIndex( child ) ) == rootTypes[k] )
+							typeMatches++;
+					}
+					log << "slotted-in roots " << attached << "/" << roots.size()
+						<< "; type order matches " << typeMatches << "/" << roots.size() << "\n";
+
+					// remap invariant: no pasted block links a child back into the
+					// original range [0, origCount) — that would be the classic
+					// paste bug (only the first root remapped / dangling links)
+					int backLinks = 0;
+					for ( int b = origCount; b < newCount; b++ )
+						for ( int l : nif->getChildLinks( b ) )
+							if ( l >= 0 && l < origCount ) backLinks++;
+					log << "pasted-block child links into original range: " << backLinks
+						<< " (expected 0)\n";
+
+					const bool pass = delta == unionSet.size()
+						&& ( childrenAfter - childrenBefore ) == roots.size()
+						&& attached == roots.size()
+						&& typeMatches == roots.size()
+						&& backLinks == 0;
+					log << ( pass ? "PASS\n" : "CHECK: one or more invariants failed\n" );
+
+					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
+					}
+				} while ( false );
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_JOIN_TEST=1): exercise rigging-aware Ctrl+J on FO4 skinned
+	// segmented meshes. Object-selects the largest BSSubIndexTriShape plus every
+	// other BSSubIndexTriShape sharing its vertex desc, runs GLView::
+	// joinSelectedObjects(), and verifies on the merged shape:
+	//   - Num Vertices / Num Triangles == the sums of the participants,
+	//   - the skin bone list == the UNION of the participants' bone NiNodes
+	//     (Num Bones consistent across Instance/Bones/BoneData),
+	//   - every per-vertex Bone Index < merged Num Bones (indices were remapped,
+	//     not left pointing into a source's old shorter list),
+	//   - segments cover [0, Num Triangles) with Sum(Num Primitives) == tris.
+	// Saves (WW_TEST_SAVE) and quits. Log: release/ww_join_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_JOIN_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_join_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				auto boneNodes = [nif]( int shapeBlock ) {
+					QSet<int> nodes;
+					QModelIndex iInst = nif->getBlockIndex( nif->getLink( nif->getBlockIndex( shapeBlock ), "Skin" ) );
+					QModelIndex iBones = nif->getIndex( iInst, "Bones" );
+					for ( int i = 0; i < nif->rowCount( iBones ); i++ )
+						nodes.insert( nif->getLink( nif->getIndex( iBones, i ) ) );
+					return nodes;
+				};
+				auto flagsOf = [nif]( int b ) {
+					return quint16( ( nif->get<BSVertexDesc>( nif->getBlockIndex( b ), "Vertex Desc" ).Value() >> 44 ) & 0xFFFF );
+				};
+				const int mode = QString::fromLocal8Bit( qgetenv( "WW_JOIN_TEST" ) ).toInt();
+				const quint16 fillable = quint16( VF_COLORS | VF_SKINNED | VF_EYEDATA );
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					// active: mode 2 = richest vertex format (tie-break biggest);
+					// otherwise the biggest shape (Phase A path)
+					int active = -1;
+					long long best = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSSubIndexTriShape" ) ) {
+							int nv = nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" );
+							int bits = 0; for ( quint16 f = flagsOf( b ); f; f >>= 1 ) bits += f & 1;
+							long long key = ( mode == 2 ) ? ( qint64( bits ) << 24 ) + nv : nv;
+							if ( key > best ) { best = key; active = b; }
+						}
+					if ( active < 0 ) { log << "no BSSubIndexTriShape\n"; break; }
+					quint64 desc = nif->get<BSVertexDesc>( nif->getBlockIndex( active ), "Vertex Desc" ).Value();
+					const quint16 aFlags = flagsOf( active );
+					const int activeOrigV = nif->get<int>( nif->getBlockIndex( active ), "Num Vertices" );
+					// sources: same structural layout, nothing the active lacks
+					// (mirrors GLView::joinSelectedObjects compatibility)
+					QVector<int> parts{ active };
+					bool anySourceLacksColor = false;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						if ( b == active || !nif->blockInherits( nif->getBlockIndex( b ), "BSSubIndexTriShape" ) )
+							continue;
+						quint16 sf = flagsOf( b );
+						if ( ( aFlags & ~fillable ) != ( sf & ~fillable ) || ( sf & ~aFlags ) )
+							continue;
+						if ( ( aFlags & VF_COLORS ) && !( sf & VF_COLORS ) )
+							anySourceLacksColor = true;
+						parts.append( b );
+					}
+					if ( parts.size() < 2 ) { log << "need >=2 compatible BSSubIndexTriShapes\n"; break; }
+
+					int expV = 0, expT = 0;
+					QSet<int> expBones;
+					QStringList partStr;
+					for ( int b : parts ) {
+						expV += nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" );
+						expT += nif->get<int>( nif->getBlockIndex( b ), "Num Triangles" );
+						expBones |= boneNodes( b );
+						partStr << QString( "%1(v%2,t%3)" ).arg( b )
+							.arg( nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" ) )
+							.arg( nif->get<int>( nif->getBlockIndex( b ), "Num Triangles" ) );
+					}
+					QList<int> eb = expBones.values(); std::sort( eb.begin(), eb.end() );
+					log << "active " << active << " desc 0x" << QString::number( desc, 16 )
+						<< " participants [" << partStr.join( ", " ) << "]\n";
+					{
+						QStringList s; for ( int n : eb ) s << QString::number( n );
+						log << "expect verts " << expV << " tris " << expT
+							<< " bone-node union " << eb.size() << " {" << s.join( "," ) << "}\n";
+					}
+					log.flush();
+
+					// build the scene (world transforms) then object-select + join
+					skope->ogl->grabFramebuffer();
+					QSet<int> sel( parts.constBegin(), parts.constEnd() );
+					skope->ogl->setObjectSelection( sel, active );
+					skope->ogl->joinSelectedObjects();
+
+					// merged shape = the biggest BSSubIndexTriShape now
+					int merged = -1, mv = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSSubIndexTriShape" ) ) {
+							int nv = nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" );
+							if ( nv > mv ) { mv = nv; merged = b; }
+						}
+					if ( merged < 0 ) { log << "no merged shape\n"; break; }
+					QModelIndex iM = nif->getBlockIndex( merged );
+					int gotV = nif->get<int>( iM, "Num Vertices" );
+					int gotT = nif->get<int>( iM, "Num Triangles" );
+					log << "merged block " << merged << " verts " << gotV
+						<< " (expect " << expV << ") tris " << gotT << " (expect " << expT << ")\n";
+
+					// skin: counts + bone-node union
+					QModelIndex iInst = nif->getBlockIndex( nif->getLink( iM, "Skin" ) );
+					QModelIndex iData = nif->getBlockIndex( nif->getLink( iInst, "Data" ) );
+					int nbInst = nif->get<int>( iInst, "Num Bones" );
+					int nbArr = nif->rowCount( nif->getIndex( iInst, "Bones" ) );
+					int nbData = nif->get<int>( iData, "Num Bones" );
+					QSet<int> gotBones = boneNodes( merged );
+					QList<int> gb = gotBones.values(); std::sort( gb.begin(), gb.end() );
+					{ QStringList s; for ( int n : gb ) s << QString::number( n );
+						log << "merged bones Num=" << nbInst << " arr=" << nbArr << " data=" << nbData
+							<< " nodes{" << s.join( "," ) << "}\n"; }
+
+					// every per-vertex bone index < Num Bones, and the appended donor
+					// verts must keep non-zero skin weight (the merge must not drop
+					// the skin when it copies each vertex record)
+					int badIdx = 0, zeroW = 0;
+					QModelIndex iVD = nif->getIndex( iM, "Vertex Data" );
+					for ( int v = 0; v < gotV; v++ ) {
+						QModelIndex iRec = nif->getIndex( iVD, v );
+						QModelIndex iI = nif->getIndex( iRec, "Bone Indices" );
+						for ( int k = 0; k < nif->rowCount( iI ); k++ )
+							if ( nif->get<quint8>( nif->getIndex( iI, k ) ) >= nbInst ) badIdx++;
+						if ( v >= activeOrigV ) {
+							QModelIndex iW = nif->getIndex( iRec, "Bone Weights" );
+							float sum = 0;
+							for ( int k = 0; k < nif->rowCount( iW ); k++ )
+								sum += nif->get<float>( nif->getIndex( iW, k ) );
+							if ( sum < 1e-4f ) zeroW++;
+						}
+					}
+					log << "vertex bone indices >= Num Bones: " << badIdx << " (expect 0)\n";
+					log << "appended verts [" << activeOrigV << "," << gotV << ") zero-weight: "
+						<< zeroW << " (expect 0)\n";
+
+					// segment coverage
+					int nSeg = nif->get<int>( iM, "Num Segments" );
+					int nTot = nif->get<int>( iM, "Total Segments" );
+					QModelIndex iSeg = nif->getIndex( iM, "Segment" );
+					int sumPrim = 0; bool contiguous = true; int expectStart = 0;
+					QVector<QPair<int,int>> segList;
+					for ( int s = 0; s < nif->rowCount( iSeg ); s++ ) {
+						int si = nif->get<quint32>( nif->getIndex( iSeg, s ), "Start Index" );
+						int np = nif->get<quint32>( nif->getIndex( iSeg, s ), "Num Primitives" );
+						segList.append( { si, np } );
+					}
+					std::sort( segList.begin(), segList.end() );
+					for ( const auto & pr : segList ) {
+						if ( pr.second == 0 ) continue;
+						if ( pr.first != expectStart ) contiguous = false;
+						expectStart += pr.second * 3; sumPrim += pr.second;
+					}
+					// shared Segment Data (subsegments) consistency when Num<Total
+					bool segDataOk = true;
+					if ( nSeg < nTot ) {
+						QModelIndex iSD = nif->getIndex( iM, "Segment Data" );
+						int sdNum = nif->get<int>( iSD, "Num Segments" );
+						int sdTot = nif->get<int>( iSD, "Total Segments" );
+						int nStarts = nif->rowCount( nif->getIndex( iSD, "Segment Starts" ) );
+						int nPsd = nif->rowCount( nif->getIndex( iSD, "Per Segment Data" ) );
+						segDataOk = iSD.isValid() && sdNum == nSeg && sdTot == nTot
+							&& nStarts == nSeg && nPsd == nTot;
+						log << "  segData Num=" << sdNum << " Total=" << sdTot
+							<< " starts=" << nStarts << " psd=" << nPsd
+							<< " SSF='" << nif->get<QString>( iSD, "SSF File" ) << "' ok=" << segDataOk << "\n";
+					}
+					log << "segments Num=" << nSeg << " Total=" << nTot << " sumPrim=" << sumPrim
+						<< " (expect " << gotT << ") contiguous=" << contiguous << "\n";
+
+					// superset color fill: when the active has vertex colors and a
+					// merged source lacked them, the appended verts must be opaque
+					// white (the active's own [0, activeOrigV) verts keep colours).
+					bool colorOk = true;
+					if ( ( aFlags & VF_COLORS ) && anySourceLacksColor ) {
+						int nonWhite = 0;
+						for ( int v = activeOrigV; v < gotV; v++ ) {
+							ByteColor4 c = nif->get<ByteColor4>( nif->getIndex( iVD, v ), "Vertex Colors" );
+							if ( c.red() < 0.99f || c.green() < 0.99f || c.blue() < 0.99f || c.alpha() < 0.99f )
+								nonWhite++;
+						}
+						colorOk = ( nonWhite == 0 );
+						log << "appended verts [" << activeOrigV << "," << gotV << ") non-white colors: "
+							<< nonWhite << " (expect 0)\n";
+					}
+
+					const bool pass = gotV == expV && gotT == expT && gb == eb
+						&& nbInst == nbArr && nbInst == nbData && badIdx == 0 && zeroW == 0
+						&& segDataOk && sumPrim == gotT && contiguous && colorOk;
+					log << ( pass ? "PASS\n" : "CHECK: one or more invariants failed\n" );
+
+					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
+					}
+				} while ( false );
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_SEP_TEST=1): exercise skin/segment-aware Separate (P) on an
+	// FO4 skinned segmented mesh. Edit-selects the first half of the largest
+	// BSSubIndexTriShape's faces, runs GLView::separateSelection(), and verifies on
+	// BOTH resulting shapes:
+	//   - they reference DIFFERENT BSSkin::Instance and BoneData blocks (the clone
+	//     was given its OWN skin, not left sharing the original's), while the source
+	//     keeps its original skin,
+	//   - each shape's segments cover [0, Num Triangles) with Sum(Num Primitives)
+	//     == its Num Triangles (ranges rebuilt for the new subset),
+	//   - source tris + new tris == the original triangle count (nothing lost),
+	//   - all verts retained on both, no per-vertex weight zeroed.
+	// Saves (WW_SEP_SAVE) and quits. Log: release/ww_sep_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SEP_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_sep_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				auto skinData = [nif]( int block ) {
+					int inst = nif->getLink( nif->getBlockIndex( block ), "Skin" );
+					int data = inst >= 0 ? nif->getLink( nif->getBlockIndex( inst ), "Data" ) : -1;
+					return QPair<int, int>( inst, data );
+				};
+				auto segCoverage = [nif]( int block, int & sumPrim, bool & contiguous, int & numSeg ) {
+					QModelIndex iB = nif->getBlockIndex( block );
+					numSeg = nif->get<int>( iB, "Num Segments" );
+					QModelIndex iSeg = nif->getIndex( iB, "Segment" );
+					QVector<QPair<int, int>> segList;
+					for ( int s = 0; s < nif->rowCount( iSeg ); s++ )
+						segList.append( { int( nif->get<quint32>( nif->getIndex( iSeg, s ), "Start Index" ) ),
+						                  int( nif->get<quint32>( nif->getIndex( iSeg, s ), "Num Primitives" ) ) } );
+					std::sort( segList.begin(), segList.end() );
+					sumPrim = 0; contiguous = true; int expectStart = 0;
+					for ( const auto & pr : segList ) {
+						if ( pr.second == 0 ) continue;
+						if ( pr.first != expectStart ) contiguous = false;
+						expectStart += pr.second * 3; sumPrim += pr.second;
+					}
+				};
+				auto zeroWeights = [nif]( int block ) {
+					int zero = 0;
+					QModelIndex iVD = nif->getIndex( nif->getBlockIndex( block ), "Vertex Data" );
+					for ( int v = 0; v < nif->rowCount( iVD ); v++ ) {
+						QModelIndex iW = nif->getIndex( nif->getIndex( iVD, v ), "Bone Weights" );
+						float s = 0;
+						for ( int k = 0; k < nif->rowCount( iW ); k++ )
+							s += nif->get<float>( nif->getIndex( iW, k ) );
+						if ( s < 1e-4f ) zero++;
+					}
+					return zero;
+				};
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					// WW_SEP_BLOCK targets a specific shape (e.g. a coloured one to
+					// exercise the vertex-colour path); otherwise the largest.
+					int sb = -1, sbVerts = -1;
+					if ( qEnvironmentVariableIsSet( "WW_SEP_BLOCK" ) ) {
+						int req = QString::fromLocal8Bit( qgetenv( "WW_SEP_BLOCK" ) ).toInt();
+						if ( req >= 0 && req < nif->getBlockCount()
+							&& nif->blockInherits( nif->getBlockIndex( req ), "BSSubIndexTriShape" ) )
+							sb = req;
+						else
+							log << "WW_SEP_BLOCK " << req << " is not a BSSubIndexTriShape; using largest\n";
+					}
+					if ( sb < 0 )
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSSubIndexTriShape" ) ) {
+								int nv = nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" );
+								if ( nv > sbVerts ) { sbVerts = nv; sb = b; }
+							}
+					if ( sb < 0 ) { log << "no BSSubIndexTriShape\n"; break; }
+					const int origTris = nif->get<int>( nif->getBlockIndex( sb ), "Num Triangles" );
+					const int origVerts = nif->get<int>( nif->getBlockIndex( sb ), "Num Vertices" );
+					const int origBlocks = nif->getBlockCount();
+					const QPair<int, int> srcSkinBefore = skinData( sb );
+					// snapshot original geometry + colours so we can prove the split
+					// preserved them after the orphan-vertex compaction reindexes
+					// everything: canonical triangle position-triples (catches a bad
+					// remap that scrambles the mesh) and (position, RGBA) pairs (vertex
+					// alpha is the A channel).
+					const bool srcHasColor =
+						( ( nif->get<BSVertexDesc>( nif->getBlockIndex( sb ), "Vertex Desc" ).Value() >> 44 ) & 0x20 ) != 0;
+					auto posKey = []( const Vector3 & p ) {
+						return QString::asprintf( "%.4f_%.4f_%.4f", p[0], p[1], p[2] );
+					};
+					auto colorKey = []( const ByteColor4 & c ) {
+						return QString::asprintf( "%.3f,%.3f,%.3f,%.3f", c.red(), c.green(), c.blue(), c.alpha() );
+					};
+					QVector<Vector3> origPos;
+					QSet<QString> origTriPos, origPosColor;
+					{
+						QModelIndex iVD = nif->getIndex( nif->getBlockIndex( sb ), "Vertex Data" );
+						QModelIndex iT = nif->getIndex( nif->getBlockIndex( sb ), "Triangles" );
+						for ( int v = 0; v < nif->rowCount( iVD ); v++ ) {
+							Vector3 p = nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" );
+							origPos.append( p );
+							if ( srcHasColor )
+								origPosColor.insert( posKey( p ) + "#"
+									+ colorKey( nif->get<ByteColor4>( nif->getIndex( iVD, v ), "Vertex Colors" ) ) );
+						}
+						for ( int t = 0; t < nif->rowCount( iT ); t++ ) {
+							Triangle tri = nif->get<Triangle>( nif->getIndex( iT, t ) );
+							QStringList k;
+							for ( int c = 0; c < 3; c++ )
+								k << ( tri[c] < origPos.size() ? posKey( origPos[tri[c]] ) : QString() );
+							k.sort();
+							origTriPos.insert( k.join( QLatin1Char( '|' ) ) );
+						}
+					}
+					// validate a resulting shape: geometry (every triangle's position-
+					// triple exists in the original), no orphan verts remain, and every
+					// vertex's (position, colour) is an original pair.
+					auto validateShape = [&]( int block, bool & geomOk, bool & noOrphan, bool & colorOk, int & vc ) {
+						QModelIndex iVD = nif->getIndex( nif->getBlockIndex( block ), "Vertex Data" );
+						QModelIndex iT = nif->getIndex( nif->getBlockIndex( block ), "Triangles" );
+						vc = nif->rowCount( iVD );
+						QVector<Vector3> pos;
+						for ( int v = 0; v < vc; v++ )
+							pos.append( nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) );
+						QVector<bool> used( vc, false );
+						geomOk = true;
+						for ( int t = 0; t < nif->rowCount( iT ); t++ ) {
+							Triangle tri = nif->get<Triangle>( nif->getIndex( iT, t ) );
+							QStringList k;
+							bool inRange = true;
+							for ( int c = 0; c < 3; c++ ) {
+								if ( tri[c] >= vc ) { inRange = false; continue; }
+								used[tri[c]] = true;
+								k << posKey( pos[tri[c]] );
+							}
+							k.sort();
+							if ( !inRange || !origTriPos.contains( k.join( QLatin1Char( '|' ) ) ) )
+								geomOk = false;
+						}
+						noOrphan = true;
+						for ( int v = 0; v < vc; v++ )
+							if ( !used[v] ) noOrphan = false;
+						colorOk = true;
+						if ( srcHasColor )
+							for ( int v = 0; v < vc; v++ ) {
+								QString key = posKey( pos[v] ) + "#"
+									+ colorKey( nif->get<ByteColor4>( nif->getIndex( iVD, v ), "Vertex Colors" ) );
+								if ( !origPosColor.contains( key ) ) colorOk = false;
+							}
+					};
+					log << "source block " << sb << " verts " << origVerts << " tris " << origTris
+						<< " colors " << ( srcHasColor ? "Y" : "n" )
+						<< " skin(inst " << srcSkinBefore.first << ", data " << srcSkinBefore.second << ")\n";
+					log.flush();
+
+					// build the scene, enter edit mode, select the first half of faces
+					skope->ogl->grabFramebuffer();
+					QSet<int> objSel; objSel.insert( sb );
+					skope->ogl->setObjectSelection( objSel, sb );
+					skope->ogl->setEditMode( true );
+					log << "editMode=" << skope->ogl->editModeActive() << "\n";
+					QVector<GLView::PickedElement> faces;
+					const int half = origTris / 2;
+					for ( int t = 0; t < half; t++ ) {
+						GLView::PickedElement pe;
+						if ( skope->ogl->buildFacePick( sb, t, pe ) )
+							faces.append( pe );
+					}
+					log << "selected " << faces.size() << " of " << origTris << " faces\n";
+					log.flush();
+					skope->ogl->setElementSelectionExternal( sb, faces, 3 );
+					skope->ogl->separateSelection();
+
+					int nw = -1;
+					for ( int b = origBlocks; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSSubIndexTriShape" ) ) { nw = b; break; }
+					if ( nw < 0 ) { log << "no separated shape produced\n"; break; }
+
+					const int srcTris = nif->get<int>( nif->getBlockIndex( sb ), "Num Triangles" );
+					const int newTris = nif->get<int>( nif->getBlockIndex( nw ), "Num Triangles" );
+					const int srcVerts = nif->get<int>( nif->getBlockIndex( sb ), "Num Vertices" );
+					const int newVerts = nif->get<int>( nif->getBlockIndex( nw ), "Num Vertices" );
+					const QPair<int, int> srcSkinAfter = skinData( sb );
+					const QPair<int, int> newSkin = skinData( nw );
+					log << "source now: tris " << srcTris << " verts " << srcVerts
+						<< " skin(inst " << srcSkinAfter.first << ", data " << srcSkinAfter.second << ")\n";
+					log << "new block " << nw << ": tris " << newTris << " verts " << newVerts
+						<< " skin(inst " << newSkin.first << ", data " << newSkin.second << ")\n";
+
+					int srcSum, newSum, srcSeg, newSeg; bool srcCont, newCont;
+					segCoverage( sb, srcSum, srcCont, srcSeg );
+					segCoverage( nw, newSum, newCont, newSeg );
+					log << "source segments Num=" << srcSeg << " sumPrim=" << srcSum
+						<< " (expect " << srcTris << ") contiguous=" << srcCont << "\n";
+					log << "new segments Num=" << newSeg << " sumPrim=" << newSum
+						<< " (expect " << newTris << ") contiguous=" << newCont << "\n";
+
+					const int srcZero = zeroWeights( sb ), newZero = zeroWeights( nw );
+					log << "zero-weight verts src=" << srcZero << " new=" << newZero << " (expect 0/0)\n";
+
+					bool srcGeom, srcNoOrphan, srcColor, newGeom, newNoOrphan, newColor;
+					int srcVC = 0, newVC = 0;
+					validateShape( sb, srcGeom, srcNoOrphan, srcColor, srcVC );
+					validateShape( nw, newGeom, newNoOrphan, newColor, newVC );
+					log << "source: verts " << srcVC << " (orig " << origVerts << ") geomOk " << srcGeom
+						<< " noOrphan " << srcNoOrphan << " colorOk " << srcColor << "\n";
+					log << "new:    verts " << newVC << " geomOk " << newGeom
+						<< " noOrphan " << newNoOrphan << " colorOk " << newColor
+						<< " (colors " << ( srcHasColor ? "present" : "n/a" ) << ")\n";
+
+					const bool skinDistinct = newSkin.first >= 0 && newSkin.first != srcSkinAfter.first
+						&& newSkin.second >= 0 && newSkin.second != srcSkinAfter.second
+						&& srcSkinAfter.first == srcSkinBefore.first;
+					const bool trisConserved = ( srcTris + newTris == origTris );
+					const bool segOk = srcSum == srcTris && newSum == newTris && srcCont && newCont
+						&& srcSeg > 0 && newSeg > 0;
+					const bool weightsOk = srcZero == 0 && newZero == 0;
+					const bool geomOk = srcGeom && newGeom && srcNoOrphan && newNoOrphan;
+					const bool colorOk = srcColor && newColor;
+					const bool trimmed = srcVC < origVerts && newVC < origVerts;	// orphans dropped
+					const bool pass = skinDistinct && trisConserved && segOk && weightsOk
+						&& geomOk && colorOk && trimmed;
+					log << "skinDistinct=" << skinDistinct << " trisConserved=" << trisConserved
+						<< " segOk=" << segOk << " weightsOk=" << weightsOk << " geomOk=" << geomOk
+						<< " colorOk=" << colorOk << " trimmed=" << trimmed << "\n";
+					log << ( pass ? "PASS\n" : "CHECK: one or more invariants failed\n" );
+
+					if ( qEnvironmentVariableIsSet( "WW_SEP_SAVE" ) ) {
+						QString out = qEnvironmentVariable( "WW_SEP_SAVE" );
+						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
+					}
+
+					// Undo (Ctrl+Z) must fully restore the source: verts, triangles,
+					// segment ranges, AND drop the appended clone/skin blocks.
+					if ( nif->undoStack ) {
+						nif->undoStack->undo();
+						const int uTris = nif->get<int>( nif->getBlockIndex( sb ), "Num Triangles" );
+						const int uVerts = nif->get<int>( nif->getBlockIndex( sb ), "Num Vertices" );
+						int uSum, uSeg; bool uCont;
+						segCoverage( sb, uSum, uCont, uSeg );
+						bool uGeom, uNoOrphan, uColor; int uVC;
+						validateShape( sb, uGeom, uNoOrphan, uColor, uVC );
+						const int uZero = zeroWeights( sb );	// catches the grow-back skin-array landmine
+						const int uBlocks = nif->getBlockCount();
+						const bool undoOk = uTris == origTris && uVerts == origVerts
+							&& uSum == origTris && uCont && uBlocks == origBlocks
+							&& uGeom && uColor && uZero == 0;
+						log << "after undo: tris " << uTris << " (expect " << origTris << ") verts " << uVerts
+							<< " (expect " << origVerts << ") segSum " << uSum << " contiguous " << uCont
+							<< " blocks " << uBlocks << " geomOk " << uGeom << " colorOk " << uColor
+							<< " zeroW " << uZero << "\n";
+						log << ( undoOk ? "UNDO PASS\n" : "UNDO CHECK: source not fully restored\n" );
+					}
+				} while ( false );
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_WP_TEST=1): verify the viewport Weight Paint selector
+	// auto-acquires a target. Loads with NOTHING selected, triggers the
+	// ViewportWeightPaintAction, and checks the paint mode actually engaged (the
+	// old handler silently reverted to Object Mode when no mesh was pre-selected).
+	// Log: release/ww_wp_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WP_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_wp_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					skope->ogl->grabFramebuffer();	// build the scene; leave nothing selected
+					log << "objActive before=" << skope->ogl->activeObjectBlock() << "\n";
+					QAction * wp = skope->findChild<QAction *>( QStringLiteral( "ViewportWeightPaintAction" ) );
+					if ( !wp ) { log << "no ViewportWeightPaintAction\n"; break; }
+					wp->trigger();
+					const bool active = skope->ogl->riggingWeightPaintModeActive();
+					log << "weightPaintModeActive=" << active << "\n";
+					log << ( active ? "PASS\n" : "CHECK: weight paint did not engage on auto-acquire\n" );
+				} while ( false );
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEMP DIAGNOSTIC (WW_UI_SHOT=1): after the file loads and layout settles,
+	// grab the whole main window (toolbars + docks) to ww_ui_shot.png and quit
+	// — used to eyeball toolbar/menu changes offscreen (run with
+	// -platform offscreen so nothing pops onto the desktop).
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_UI_SHOT" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
+			QTimer::singleShot( 2500, skope, [skope]() {
+				skope->grab().save( QApplication::applicationDirPath() + "/ww_ui_shot.png" );
+				qApp->quit();
+			} );
+		} );
+	}
+
+	// TEMP DIAGNOSTIC (WW_BROWSER_TEST=1): confirm the Available-NIFs tree keeps
+	// its expanded folders across the load-triggered repopulate. Expands the first
+	// folder, repopulates (exactly what completeLoading does), and checks the
+	// folder is still open. -> ww_browser_test.log, quit.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BROWSER_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
+			QTimer::singleShot( 2500, skope, [skope]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_browser_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				QTreeView * view = skope->bsaView;
+				QAbstractItemModel * m = view ? view->model() : nullptr;
+				if ( !view || !m ) { log << "no browser view/model\n"; qApp->quit(); return; }
+				auto findRoot = [&]() -> QModelIndex {
+					for ( int r = 0; r < m->rowCount(); ++r ) {
+						QModelIndex idx = m->index( r, 0 );
+						if ( m->data( idx ).toString() == QLatin1String( "Available NIFs" ) )
+							return idx;
+					}
+					return QModelIndex();
+				};
+				QModelIndex root = findRoot();
+				if ( !root.isValid() ) { log << "no Available NIFs root\n"; qApp->quit(); return; }
+				view->expand( root );
+				QModelIndex folder;
+				for ( int r = 0; r < m->rowCount( root ); ++r ) {
+					QModelIndex idx = m->index( r, 0, root );
+					if ( m->hasChildren( idx ) ) { folder = idx; break; }
+				}
+				if ( !folder.isValid() ) { log << "no folder under Available NIFs (browser empty?)\n"; qApp->quit(); return; }
+				const QString folderText = m->data( folder ).toString();
+				view->expand( folder );
+				const bool before = view->isExpanded( folder );
+				log << "folder='" << folderText << "' expanded before repopulate=" << before << "\n";
+				skope->populateConfiguredNifBrowser();   // what loading a nif triggers
+				QModelIndex root2 = findRoot();
+				bool after = false;
+				if ( root2.isValid() ) {
+					for ( int r = 0; r < m->rowCount( root2 ); ++r ) {
+						QModelIndex idx = m->index( r, 0, root2 );
+						if ( m->data( idx ).toString() == folderText ) { after = view->isExpanded( idx ); break; }
+					}
+				}
+				log << "folder='" << folderText << "' expanded after repopulate=" << after << "\n";
+				log << ( ( before && after ) ? "PASS\n" : "FAIL\n" );
+				qApp->quit();
+			} );
+		} );
+	}
+
 	// TEMP DIAGNOSTIC (WW_PERF_TEST=1, remove when the slow click-select is
 	// fixed): after the file loads, time every stage of the click-select
 	// pipeline on the largest BSTriShape, dump to ww_perf_test.log, quit.
@@ -1179,8 +1896,6 @@ void NifSkope::initActions()
 	for ( auto i : ui->mRender->actions() )
 		allActions.insert( i );
 	for ( auto i : ui->tRender->actions() )
-		allActions.insert( i );
-	for ( auto i : ui->tAnim->actions() )
 		allActions.insert( i );
 
 	// Undo/Redo
@@ -2310,7 +3025,7 @@ void NifSkope::initDockWidgets()
 	// ---- main toolbar overhaul: smaller icons, merged dropdowns, transform header ----
 
 	// smaller icons everywhere (~75%)
-	for ( QToolBar * tb : { ui->tFile, ui->tRender, ui->tAnim, ui->tView, ui->tLOD } ) {
+	for ( QToolBar * tb : { ui->tFile, ui->tRender, ui->tMode, ui->tView, ui->tLOD } ) {
 		QSize is = tb->iconSize();
 		tb->setIconSize( QSize( is.width() * 3 / 4, is.height() * 3 / 4 ) );
 	}
@@ -2430,41 +3145,23 @@ void NifSkope::initDockWidgets()
 		syncModeButton();
 		ui->tRender->insertWidget( ui->aSelectObject, modeButton );
 
-		// Blender-style viewport menus in a floating bar docked to the bottom
-		// of the 3D viewport: Select · Add · Object in object mode, Select ·
-		// Mesh · Vertex · Edge · Face in edit mode, Select · Weights/Paint/
-		// Segments while painting. Like the redo panels, the bar must be a
-		// frameless tool window — the native GL viewport paints over child
-		// widgets. The menus rebuild on aboutToShow from GLView's populate
-		// functions (shared with the W quick menu), so enabled states are
-		// always current and the entry points cannot drift apart.
-		// WindowDoesNotAcceptFocus: clicking a menu button must not activate
-		// this tool window — that deactivated the main window, which killed
-		// focus-follows-mouse and with it every viewport key (A, G/R/S, ...)
-		// until the user clicked inside the viewport again
-		QFrame * menuBar = new QFrame( this,
-			Qt::Tool | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus );
-		menuBar->setObjectName( QStringLiteral( "ViewportMenuBar" ) );
-		menuBar->setAttribute( Qt::WA_ShowWithoutActivating );
-		menuBar->setAttribute( Qt::WA_TranslucentBackground );
-		// Blender-dark rounded box, same palette family as the redo panels
-		menuBar->setStyleSheet( QStringLiteral(
-			"QFrame#ViewportMenuBar { background: rgba(47,47,47,235);"
-			" border: 1px solid #202020; border-radius: 6px; }"
-			"QToolButton { color: #cccccc; background: transparent; border: none;"
-			" border-radius: 4px; padding: 3px 10px; }"
-			"QToolButton:hover { color: #ffffff; background: #454545; }"
-			"QToolButton:pressed, QToolButton:open { color: #ffffff; background: #4772b3; }"
-			"QToolButton::menu-indicator { image: none; }" ) );
-		menuBar->hide();
-		viewportMenuBar = menuBar;
-		QHBoxLayout * menuBarLay = new QHBoxLayout( menuBar );
-		menuBarLay->setContentsMargins( 6, 3, 6, 3 );
-		menuBarLay->setSpacing( 2 );
+		// Blender-style viewport header menus: Select · Add · Object in object
+		// mode, Select · Mesh · Vertex · Edge · Face in edit mode, Select ·
+		// Weights/Paint/Segments while painting. These now live in a docked
+		// toolbar (tMode) in the top toolbar row, in place of the old animation
+		// bar, rather than a floating overlay — as ordinary window chrome they
+		// need none of the overlay's focus/positioning workarounds. The menus
+		// rebuild on aboutToShow from GLView's populate functions (shared with
+		// the W quick menu), so enabled states are always current and the entry
+		// points cannot drift apart.
+		QToolBar * modeBar = ui->tMode;
 
-		auto makeMenuButton = [this, menuBar, menuBarLay]( const QString & title,
-			void (GLView::*populate)( QMenu * ) ) -> QToolButton * {
-			QToolButton * btn = new QToolButton( menuBar );
+		// Each button is added with addWidget; the returned QAction is what we
+		// show/hide to collapse the toolbar slot per mode (the same idiom the
+		// old anim-group combo used — hiding the QToolButton alone leaves a gap).
+		auto makeMenuButton = [this, modeBar]( const QString & title,
+			void (GLView::*populate)( QMenu * ), QAction ** outAct ) -> QToolButton * {
+			QToolButton * btn = new QToolButton( modeBar );
 			btn->setText( title );
 			btn->setToolButtonStyle( Qt::ToolButtonTextOnly );
 			btn->setPopupMode( QToolButton::InstantPopup );
@@ -2475,37 +3172,40 @@ void NifSkope::initDockWidgets()
 				( ogl->*populate )( menu );
 			} );
 			btn->setMenu( menu );
-			menuBarLay->addWidget( btn );
+			QAction * act = modeBar->addWidget( btn );
+			if ( outAct )
+				*outAct = act;
 			return btn;
 		};
-		QToolButton * mbSelect = makeMenuButton( tr( "Select" ), &GLView::populateSelectMenu );
-		QToolButton * mbAdd = makeMenuButton( tr( "Add" ), &GLView::populateAddMenu );
-		QToolButton * mbObject = makeMenuButton( tr( "Object" ), &GLView::populateObjectMenu );
-		QToolButton * mbMesh = makeMenuButton( tr( "Mesh" ), &GLView::populateMeshMenu );
-		QToolButton * mbVertex = makeMenuButton( tr( "Vertex" ), &GLView::populateVertexMenu );
-		QToolButton * mbEdge = makeMenuButton( tr( "Edge" ), &GLView::populateEdgeMenu );
-		QToolButton * mbFace = makeMenuButton( tr( "Face" ), &GLView::populateFaceMenu );
-		QToolButton * mbPaint = makeMenuButton( tr( "Paint" ), &GLView::populatePaintMenu );
-		auto syncViewportMenus = [this, mbSelect, mbAdd, mbObject, mbMesh, mbVertex,
-			mbEdge, mbFace, mbPaint]() {
+		QAction * aSelect = nullptr, * aAdd = nullptr, * aObject = nullptr, * aMesh = nullptr,
+			* aVertex = nullptr, * aEdge = nullptr, * aFace = nullptr, * aPaint = nullptr;
+		makeMenuButton( tr( "Select" ), &GLView::populateSelectMenu, &aSelect );
+		makeMenuButton( tr( "Add" ), &GLView::populateAddMenu, &aAdd );
+		makeMenuButton( tr( "Object" ), &GLView::populateObjectMenu, &aObject );
+		makeMenuButton( tr( "Mesh" ), &GLView::populateMeshMenu, &aMesh );
+		makeMenuButton( tr( "Vertex" ), &GLView::populateVertexMenu, &aVertex );
+		makeMenuButton( tr( "Edge" ), &GLView::populateEdgeMenu, &aEdge );
+		makeMenuButton( tr( "Face" ), &GLView::populateFaceMenu, &aFace );
+		QToolButton * mbPaint = makeMenuButton( tr( "Paint" ), &GLView::populatePaintMenu, &aPaint );
+		auto syncViewportMenus = [this, aSelect, aAdd, aObject, aMesh, aVertex,
+			aEdge, aFace, aPaint, mbPaint]() {
 			const bool weightPaint = ogl->riggingWeightPaintModeActive();
 			const bool segmentPaint = ogl->segmentPaintModeActive();
 			const bool paint = weightPaint || segmentPaint || ogl->vertexPaintModeActive();
 			const bool edit = ogl->editModeActive() && !paint;
 			const bool object = !ogl->editModeActive() && !paint;
 			// Select stays in every mode: masking selections while painting
-			mbSelect->setVisible( true );
-			mbAdd->setVisible( object );
-			mbObject->setVisible( object );
-			mbMesh->setVisible( edit );
-			mbVertex->setVisible( edit );
-			mbEdge->setVisible( edit );
-			mbFace->setVisible( edit );
-			mbPaint->setVisible( paint );
+			aSelect->setVisible( true );
+			aAdd->setVisible( object );
+			aObject->setVisible( object );
+			aMesh->setVisible( edit );
+			aVertex->setVisible( edit );
+			aEdge->setVisible( edit );
+			aFace->setVisible( edit );
+			aPaint->setVisible( paint );
 			if ( paint )
 				mbPaint->setText( weightPaint ? tr( "Weights" )
 					: segmentPaint ? tr( "Segments" ) : tr( "Paint" ) );
-			positionViewportMenuBar();
 		};
 		connect( ogl, &GLView::editModeChanged, this, [syncViewportMenus]( bool ) { syncViewportMenus(); } );
 		connect( ogl, &GLView::vertexPaintModeChanged, this, [syncViewportMenus]( bool ) { syncViewportMenus(); } );
@@ -3607,11 +4307,55 @@ void NifSkope::initDockWidgets()
 		QAction * segmentPaintMode = findChild<QAction *>( QStringLiteral( "ViewportSegmentPaintAction" ) );
 		QAction * objectMode = findChild<QAction *>( QStringLiteral( "ViewportObjectModeAction" ) );
 		QAction * editMode = findChild<QAction *>( QStringLiteral( "ViewportEditModeAction" ) );
+		// Auto-acquire a paint target so entering a paint mode from the viewport
+		// selector works even when nothing is selected yet (e.g. right after a
+		// Join clears the selection). Prefers the object the user is looking at
+		// (the active object); otherwise the file's sole qualifying shape — it
+		// never guesses between several. requireSkin gates Weight / Segment paint
+		// (which need a skin) against Vertex paint (any tri-shape). Selecting the
+		// block drives NifSkope::select(), whose synchronous currentNifIndexChanged
+		// repopulates the manager before the caller re-checks it. Returns the
+		// acquired block, or AcquireNone / AcquireAmbiguous for the caller's hint.
+		enum { AcquireNone = -1, AcquireAmbiguous = -2 };
+		auto acquirePaintTarget = [this]( bool requireSkin ) -> int {
+			NifModel * nif = getNifModel();
+			if ( !nif )
+				return AcquireNone;
+			auto qualifies = [nif, requireSkin]( int b ) {
+				QModelIndex idx = nif->getBlockIndex( b );
+				if ( !idx.isValid()
+					|| ( !nif->blockInherits( idx, "NiTriBasedGeom" )
+						&& !nif->blockInherits( idx, "BSTriShape" ) ) )
+					return false;
+				if ( !requireSkin )
+					return true;
+				return nif->getLink( idx, "Skin" ) >= 0 || nif->getLink( idx, "Skin Instance" ) >= 0;
+			};
+			const int active = ogl ? ogl->activeObjectBlock() : -1;
+			if ( active >= 0 && qualifies( active ) ) {
+				select( nif->getBlockIndex( active ) );
+				return active;
+			}
+			int found = AcquireNone;
+			for ( int b = 0, n = nif->getBlockCount(); b < n; b++ ) {
+				if ( !qualifies( b ) )
+					continue;
+				if ( found >= 0 )
+					return AcquireAmbiguous;
+				found = b;
+			}
+			if ( found >= 0 )
+				select( nif->getBlockIndex( found ) );
+			return found;
+		};
 		if ( weightPaintMode )
 			connect( weightPaintMode, &QAction::triggered, this,
-				[this, activateWorkspace, dRiggingMgr, weightPaintMode, objectMode, editMode]() {
+				[this, activateWorkspace, acquirePaintTarget, dRiggingMgr, weightPaintMode, objectMode, editMode]() {
 				activateWorkspace( 4 );
 				QTreeWidget * bones = dRiggingMgr->findChild<QTreeWidget *>( QStringLiteral( "RiggingBoneTree" ) );
+				int acquired = AcquireNone;
+				if ( bones && bones->topLevelItemCount() == 0 )
+					acquired = acquirePaintTarget( true ); // no target yet — try to select one
 				if ( bones && !bones->currentItem() && bones->topLevelItemCount() > 0 )
 					bones->setCurrentItem( bones->topLevelItem( 0 ) );
 				QPushButton * paint = dRiggingMgr->findChild<QPushButton *>( QStringLiteral( "RiggingWeightPaintButton" ) );
@@ -3621,31 +4365,57 @@ void NifSkope::initDockWidgets()
 					weightPaintMode->setChecked( false );
 					if ( ogl->editModeActive() && editMode ) editMode->setChecked( true );
 					else if ( objectMode ) objectMode->setChecked( true );
+					statusBar()->showMessage(
+						( bones && bones->topLevelItemCount() == 0 )
+							? ( acquired == AcquireAmbiguous
+								? tr( "Weight Paint: select which skinned mesh to paint (this file has several)." )
+								: tr( "Weight Paint: no skinned mesh to paint — select a skinned BSTriShape first." ) )
+							: tr( "Weight Paint: select a bone in the Rigging Manager, then Start Painting." ),
+						6000 );
 				}
 				} );
 		if ( vertexPaintMode )
 			connect( vertexPaintMode, &QAction::triggered, this,
-				[this, activateWorkspace, dVertexPaintMgr, vertexPaintMode, objectMode, editMode]() {
+				[this, activateWorkspace, acquirePaintTarget, dVertexPaintMgr, vertexPaintMode, objectMode, editMode]() {
 				activateWorkspace( 5 );
 				QPushButton * paint = dVertexPaintMgr->findChild<QPushButton *>( QStringLiteral( "VertexPaintButton" ) );
+				int acquired = AcquireNone;
+				if ( paint && !paint->isEnabled() )
+					acquired = acquirePaintTarget( false ); // any tri-shape can take vertex colors
 				if ( paint && paint->isEnabled() && !paint->isChecked() )
 					paint->click();
 				if ( !ogl->vertexPaintModeActive() ) {
 					vertexPaintMode->setChecked( false );
 					if ( ogl->editModeActive() && editMode ) editMode->setChecked( true );
 					else if ( objectMode ) objectMode->setChecked( true );
+					statusBar()->showMessage(
+						acquired == AcquireAmbiguous
+							? tr( "Vertex Paint: select which mesh to paint (this file has several)." )
+							: tr( "Vertex Paint: no paintable mesh — select a tri-shape first." ),
+						6000 );
 				}
 				} );
 		if ( segmentPaintMode )
 			connect( segmentPaintMode, &QAction::triggered, this,
-				[this, activateWorkspace, dRiggingMgr, segmentPaintMode, objectMode, editMode]() {
+				[this, activateWorkspace, acquirePaintTarget, dRiggingMgr, segmentPaintMode, objectMode, editMode]() {
 				activateWorkspace( 4 );
+				QTreeWidget * bones = dRiggingMgr->findChild<QTreeWidget *>( QStringLiteral( "RiggingBoneTree" ) );
+				int acquired = AcquireNone;
+				if ( bones && bones->topLevelItemCount() == 0 )
+					acquired = acquirePaintTarget( true ); // populate the segment list
 				QPushButton * paint = dRiggingMgr->findChild<QPushButton *>( QStringLiteral( "RiggingSegmentPaintButton" ) );
 				if ( paint && paint->isEnabled() && !paint->isChecked() ) paint->click();
 				if ( !ogl->segmentPaintModeActive() ) {
 					segmentPaintMode->setChecked( false );
 					if ( ogl->editModeActive() && editMode ) editMode->setChecked( true );
 					else if ( objectMode ) objectMode->setChecked( true );
+					statusBar()->showMessage(
+						( bones && bones->topLevelItemCount() == 0 )
+							? ( acquired == AcquireAmbiguous
+								? tr( "Segment Paint: select which skinned mesh to paint (this file has several)." )
+								: tr( "Segment Paint: no skinned mesh with segments — select a BSSubIndexTriShape first." ) )
+							: tr( "Segment Paint: select a segment or subsegment row, then Start Painting." ),
+						6000 );
 				}
 				} );
 		workspaces->setMenu( workspaceMenu );
@@ -3817,9 +4587,9 @@ void NifSkope::initToolBars()
 	grpView->setExclusive( true );
 
 
-	// Animate
-	connect( ui->aAnimate, &QAction::toggled, ui->tAnim, &QToolBar::setVisible );
-	connect( ui->tAnim, &QToolBar::visibilityChanged, ui->aAnimate, &QAction::setChecked );
+	// Animate — the visible transport/timeline now lives entirely in the
+	// animation workspace (Timeline dock); the actions below still drive the
+	// GLView animation state machine and are mirrored by the dock.
 
 	/*enum AnimationStates
 	{
@@ -3840,53 +4610,14 @@ void NifSkope::initToolBars()
 	connect( ui->aAnimLoop, &QAction::toggled, ogl, &GLView::updateAnimationState );
 	connect( ui->aAnimSwitch, &QAction::toggled, ogl, &GLView::updateAnimationState );
 
-	// Animation timeline slider
-	auto animSlider = new FloatSlider( Qt::Horizontal, true, true );
-	auto animSliderEdit = new FloatEdit( ui->tAnim );
-
-	animSlider->addEditor( animSliderEdit );
-	animSlider->setParent( ui->tAnim );
-	animSlider->setMinimumWidth( 200 );
-	animSlider->setMaximumWidth( 500 );
-	animSlider->setSizePolicy( QSizePolicy::Minimum, QSizePolicy::MinimumExpanding );
-
-	connect( ogl, &GLView::sceneTimeChanged, animSlider, &FloatSlider::set );
-	connect( ogl, &GLView::sceneTimeChanged, animSliderEdit, &FloatEdit::set );
-	connect( animSlider, &FloatSlider::valueChanged, ogl, &GLView::setSceneTime );
-	connect( animSlider, &FloatSlider::valueChanged, animSliderEdit, &FloatEdit::setValue );
-	connect( animSliderEdit, static_cast<void (FloatEdit::*)(float)>(&FloatEdit::sigEdited), ogl, &GLView::setSceneTime );
-	connect( animSliderEdit, static_cast<void (FloatEdit::*)(float)>(&FloatEdit::sigEdited), animSlider, &FloatSlider::setValue );
-
-	// Animations
-	animGroups = new QComboBox( ui->tAnim );
-	animGroups->setMinimumWidth( 60 );
-	animGroups->setSizeAdjustPolicy( QComboBox::AdjustToContents );
-	animGroups->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Minimum );
-	connect( animGroups, &QComboBox::textActivated, ogl, &GLView::setSceneSequence );
-
-	ui->tAnim->addWidget( animSlider );
-	animGroupsAction = ui->tAnim->addWidget( animGroups );
-
-	connect( ogl, &GLView::sequencesDisabled, ui->tAnim, &QToolBar::hide );
+	// The timeline slider and animation-group combo formerly shown here have
+	// moved to the animation workspace (Timeline dock: playhead scrub +
+	// sequence selector). Only the wiring the dock and state machine rely on
+	// remains: aAnimPlay's pressed state tracks playback, and aAnimSwitch — a
+	// toggle the dock exposes — is only meaningful with more than one sequence.
 	connect( ogl, &GLView::sequenceStopped, ui->aAnimPlay, &QAction::toggle );
-	connect( ogl, &GLView::sequenceChanged, [this]( const QString & seqname ) {
-		animGroups->setCurrentIndex( ogl->getScene()->animGroups.indexOf( seqname ) );
-	} );
 	connect( ogl, &GLView::sequencesUpdated, [this]() {
-		ui->tAnim->show();
-
-		animGroups->clear();
-		animGroups->addItems( ogl->getScene()->animGroups );
-		animGroups->setCurrentIndex( ogl->getScene()->animGroups.indexOf( ogl->getScene()->animGroup ) );
-
-		if ( animGroups->count() == 0 ) {
-			animGroupsAction->setVisible( false );
-			ui->aAnimSwitch->setVisible( false );
-		} else {
-			ui->aAnimSwitch->setVisible( animGroups->count() != 1 );
-			animGroupsAction->setVisible( true );
-			animGroups->adjustSize();
-		}
+		ui->aAnimSwitch->setVisible( ogl->getScene()->animGroups.count() > 1 );
 	} );
 
 	connect ( ogl->scene, &Scene::disableSave, [this]() {
@@ -4057,7 +4788,7 @@ void NifSkope::onLoadBegin()
 
 	ogl->setDisabled( true );
 	setEnabled( false );
-	ui->tAnim->setEnabled( false );
+	ui->tMode->setEnabled( false );
 
 	ui->tLOD->setEnabled( false );
 	ui->tLOD->setVisible( false );
@@ -4202,9 +4933,7 @@ void NifSkope::enableUi()
 	ui->aHeader->setEnabled( true );
 
 	ui->mRender->setEnabled( true );
-	ui->tAnim->setEnabled( true );
-	animGroups->clear();
-
+	ui->tMode->setEnabled( true );
 
 	ui->tRender->setEnabled( true );
 
@@ -4571,16 +5300,6 @@ void NifSkope::applyShortcutOverrides()
 	settings.endGroup();
 }
 
-void NifSkope::positionViewportMenuBar()
-{
-	if ( !graphicsView || !viewportMenuBar )
-		return;
-	viewportMenuBar->adjustSize();
-	viewportMenuBar->move( graphicsView->mapToGlobal(
-		QPoint( ( graphicsView->width() - viewportMenuBar->width() ) / 2,
-			graphicsView->height() - viewportMenuBar->height() - 10 ) ) );
-}
-
 bool NifSkope::eventFilter( QObject * o, QEvent * e )
 {
 	// TODO: This doesn't seem to be doing anything extra
@@ -4608,7 +5327,7 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 
 	case QEvent::Move:
 	case QEvent::Resize:
-		// keep the floating redo panels and the viewport menu bar glued
+		// keep the floating redo panels glued to the viewport
 		if ( o == this || o == graphicsView ) {
 			for ( QFrame * p : { gizmoRedoPanel, operatorRedoPanel, boxRedoPanel, operatorExRedoPanel } ) {
 				if ( p && p->isVisible() ) {
@@ -4616,21 +5335,6 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 					break;
 				}
 			}
-			if ( viewportMenuBar && viewportMenuBar->isVisible() )
-				positionViewportMenuBar();
-		}
-		break;
-
-	case QEvent::Show:
-		// first main-window show: dock the menu bar to the viewport once the
-		// layout has settled (a deferred call — geometry is not final here)
-		if ( o == this && viewportMenuBar && !viewportMenuBar->isVisible() ) {
-			QTimer::singleShot( 0, this, [this]() {
-				if ( viewportMenuBar && !isMinimized() && isVisible() ) {
-					positionViewportMenuBar();
-					viewportMenuBar->show();
-				}
-			} );
 		}
 		break;
 
@@ -4640,13 +5344,6 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				if ( p && p->isVisible() )
 					p->hide();
 			}
-			if ( viewportMenuBar )
-				viewportMenuBar->hide();
-		} else if ( o == this && viewportMenuBar && !viewportMenuBar->isVisible()
-			&& isVisible() ) {
-			// restored from the taskbar: bring the menu bar back
-			positionViewportMenuBar();
-			viewportMenuBar->show();
 		}
 		break;
 
@@ -4681,6 +5378,11 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			}
 			return true;
 		}
+		// Block List Ctrl+C / Ctrl+V are the Copy Branch / Paste Branch spells
+		// (QKeySequence::Copy/Paste hotkeys). They are multi-selection aware in
+		// the spells themselves — Copy Branch unions every selected block's
+		// branch (via the published block-list selection), Paste Branch slots
+		// each pasted root back in — so no dedicated event-filter handler here.
 		const bool pointerOverViewport = ogl && graphicsView && isActiveWindow()
 			&& graphicsView->rect().contains( graphicsView->mapFromGlobal( QCursor::pos() ) );
 		QWidget * keyFocus = QApplication::focusWidget();

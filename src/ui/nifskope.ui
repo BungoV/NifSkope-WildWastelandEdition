@@ -91,9 +91,9 @@
    <addaction name="aShowMarkers"/>
    <addaction name="aShowHidden"/>
   </widget>
-  <widget class="QToolBar" name="tAnim">
+  <widget class="QToolBar" name="tMode">
    <property name="windowTitle">
-    <string>Animation</string>
+    <string>Mode</string>
    </property>
    <property name="allowedAreas">
     <set>Qt::BottomToolBarArea|Qt::TopToolBarArea</set>
@@ -110,9 +110,6 @@
    <attribute name="toolBarBreak">
     <bool>false</bool>
    </attribute>
-   <addaction name="aAnimPlay"/>
-   <addaction name="aAnimLoop"/>
-   <addaction name="aAnimSwitch"/>
   </widget>
   <widget class="QToolBar" name="tLOD">
    <property name="sizePolicy">

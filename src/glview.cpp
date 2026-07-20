@@ -6341,6 +6341,17 @@ public:
 		}
 		tlCaptureValues( nif, nif->getIndex( iShape, "Vertex Data" ), vertexState );
 		tlCaptureValues( nif, nif->getIndex( iShape, "Triangles" ), triState );
+		// FO4 sub-index segments: a triangle rewrite (e.g. Separate) also rewrites
+		// each slot's Start Index / Num Primitives, so snapshot the Segment subtree
+		// to restore it. The slot count never changes here, so a value round-trip is
+		// enough (no array resize on undo).
+		QModelIndex iSeg = nif->getIndex( iShape, "Segment" );
+		if ( iSeg.isValid() ) {
+			hasSeg = true;
+			tlCaptureValues( nif, iSeg, segState );
+		}
+		if ( nif->getIndex( iShape, "Num Primitives" ).isValid() )
+			oldNumPrim = nif->get<quint32>( iShape, "Num Primitives" );
 	}
 
 	void redo() override
@@ -6359,6 +6370,19 @@ public:
 		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
 		nif->set<int>( iShape, "Num Vertices", oldNV );
 		nif->updateArraySize( iVD );
+		// Growing Vertex Data back (undo of a vert-removing op like Separate's
+		// compaction or Dissolve) leaves each restored row's #ARG#-conditional skin
+		// arrays 0-length until a deferred cascade — which would misalign the
+		// positional restore below. Size them first (same landmine as the Join
+		// append); a no-op when nothing grew or on unskinned shapes.
+		for ( int v = 0; v < oldNV; v++ ) {
+			QModelIndex row = nif->getIndex( iVD, v );
+			for ( const char * fld : { "Bone Weights", "Bone Indices" } ) {
+				QModelIndex a = nif->getIndex( row, fld );
+				if ( a.isValid() )
+					nif->updateArraySize( a );
+			}
+		}
 		nif->set<int>( iShape, "Num Triangles", oldNT );
 		nif->updateArraySize( iTris );
 		int pos = 0;
@@ -6370,6 +6394,15 @@ public:
 		if ( iBound.isValid() ) {
 			nif->set<Vector3>( iBound, "Center", boundCenter );
 			nif->set<float>( iBound, "Radius", boundRadius );
+		}
+		if ( hasSeg ) {
+			QModelIndex iSeg = nif->getIndex( iShape, "Segment" );
+			if ( iSeg.isValid() ) {
+				int spos = 0;
+				tlRestoreValues( nif, iSeg, segState, spos );
+			}
+			if ( nif->getIndex( iShape, "Num Primitives" ).isValid() )
+				nif->set<quint32>( iShape, "Num Primitives", oldNumPrim );
 		}
 		nif->restoreState();
 		nif->dataChanged( iShape, iShape );
@@ -6383,6 +6416,9 @@ private:
 	Vector3 boundCenter;
 	float boundRadius = 0.0f;
 	QVector<NifValue> vertexState, triState;
+	bool hasSeg = false;
+	quint32 oldNumPrim = 0;
+	QVector<NifValue> segState;
 };
 
 //! Remove ONE null (-1) entry from a node's Children array, scanning from the
@@ -6452,6 +6488,78 @@ private:
 	std::shared_ptr<QVector<int>> linkedParents;
 	int base = 0, made = 0;
 };
+
+//! After a Separate splits a BSSubIndexTriShape's triangles (tlKeepTriangles keeps
+//! the subset for which keep(t) is true, preserving original order), rebuild every
+//! segment / subsegment range for the kept subset. FO4 segments are contiguous
+//! ranges in triangle order and the kept triangles stay grouped by slot, so a
+//! range's new position is simply the count of kept triangles before its original
+//! start. The slot COUNT and the shared Segment Data (Per-Segment-Data / SSF) are
+//! left intact: a slot that lost every triangle becomes empty (Num Primitives 0),
+//! which keeps the dismemberment structure and SSF alignment valid.
+static void separateBuildSegments( NifModel * m, const QModelIndex & iShape, const QVector<bool> & keep )
+{
+	if ( !m->blockInherits( iShape, "BSSubIndexTriShape" ) )
+		return;
+	const int origTris = keep.size();
+	QVector<int> keptBefore( origTris + 1, 0 );	// keptBefore[t] = # kept in [0, t)
+	for ( int t = 0; t < origTris; t++ )
+		keptBefore[t + 1] = keptBefore[t] + ( keep[t] ? 1 : 0 );
+	auto remap = [&]( const QModelIndex & range ) {
+		int s = int( m->get<quint32>( range, "Start Index" ) ) / 3;
+		int n = int( m->get<quint32>( range, "Num Primitives" ) );
+		s = qBound( 0, s, origTris );
+		const int e = qBound( 0, s + n, origTris );
+		m->set<quint32>( range, "Start Index", quint32( keptBefore[s] * 3 ) );
+		m->set<quint32>( range, "Num Primitives", quint32( keptBefore[e] - keptBefore[s] ) );
+	};
+	m->setState( BaseModel::Processing );
+	QModelIndex iSeg = m->getIndex( iShape, "Segment" );
+	for ( int i = 0; i < m->rowCount( iSeg ); i++ ) {
+		QModelIndex s = m->getIndex( iSeg, i );
+		remap( s );
+		QModelIndex iSub = m->getIndex( s, "Sub Segment" );
+		for ( int j = 0; j < m->rowCount( iSub ); j++ )
+			remap( m->getIndex( iSub, j ) );
+	}
+	if ( m->getIndex( iShape, "Num Primitives" ).isValid() )
+		m->set<quint32>( iShape, "Num Primitives", quint32( keptBefore[origTris] ) );
+	m->restoreState();
+	m->dataChanged( iShape, iShape );
+}
+
+//! Give a just-cloned shape its OWN skin so a Separate does not leave the two
+//! halves sharing one BSSkin::Instance / BoneData (editing one would silently alter
+//! the other, and a shared skin instance is a malformed NIF). The Skeleton Root and
+//! per-bone node pointers stay shared — those are the common skeleton, correctly
+//! referenced by both halves. Handles FO4 "Skin" (BSSkin::Instance -> "Data"
+//! BSSkin::BoneData) and, best effort, classic "Skin Instance" (-> Data / Skin
+//! Partition). New blocks are appended, so the enclosing TlBlockAppendCommand undoes
+//! them with the clone.
+static void separateCloneSkin( NifModel * nif, int shapeBlock )
+{
+	QModelIndex iShape = nif->getBlockIndex( shapeBlock );
+	const char * linkName = nif->getLink( iShape, "Skin" ) >= 0 ? "Skin"
+		: ( nif->getLink( iShape, "Skin Instance" ) >= 0 ? "Skin Instance" : nullptr );
+	if ( !linkName )
+		return;
+	QModelIndex iInst = tlCloneBlock( nif, nif->getBlockIndex( nif->getLink( iShape, linkName ) ) );
+	if ( !iInst.isValid() )
+		return;
+	for ( const char * child : { "Data", "Skin Partition" } ) {
+		const int ref = nif->getLink( iInst, child );
+		if ( ref < 0 )
+			continue;
+		QModelIndex ic = tlCloneBlock( nif, nif->getBlockIndex( ref ) );
+		if ( ic.isValid() )
+			nif->setLink( iInst, child, nif->getBlockNumber( ic ) );
+	}
+	nif->setLink( nif->getBlockIndex( shapeBlock ), linkName, nif->getBlockNumber( iInst ) );
+}
+
+//! (defined further down, alongside tlDeleteGeometry's compaction) — drop
+//! vertices no triangle uses and reindex, so each Separate half is vertex-optimal.
+static void tlCompactVertices( NifModel * nif, const QModelIndex & iShape );
 
 void GLView::separateSelection()
 {
@@ -6523,6 +6631,20 @@ void GLView::separateSelection()
 			// new keeps the separated triangles; original keeps the rest
 			tlKeepTriangles( model, model->getBlockIndex( nNew ), [&]( int t ) { return sep[t]; } );
 			tlKeepTriangles( model, model->getBlockIndex( sb ), [&]( int t ) { return !sep[t]; } );
+			// Skinned split (FO4): the clone must not share the original's skin, and
+			// both halves' sub-index segment ranges must be rebuilt for their new
+			// triangle subset (tlKeepTriangles leaves the old ranges stale).
+			separateCloneSkin( model, nNew );
+			QVector<bool> keepSrc( sep.size() );
+			for ( int t = 0; t < sep.size(); t++ )
+				keepSrc[t] = !sep[t];
+			separateBuildSegments( model, model->getBlockIndex( nNew ), sep );
+			separateBuildSegments( model, model->getBlockIndex( sb ), keepSrc );
+			// vertex-optimal finish: drop the verts each half no longer uses. Done
+			// after the segment rebuild — compaction only reindexes triangle corners,
+			// never triangle order/count, so the triangle-space segment ranges hold.
+			tlCompactVertices( model, model->getBlockIndex( nNew ) );
+			tlCompactVertices( model, model->getBlockIndex( sb ) );
 			*movedCount += sepCount;
 			*lastNew = nNew;
 		};
@@ -6669,6 +6791,61 @@ static void tlUpdateBounds( NifModel * nif, const QModelIndex & iShape )
 		r = std::max( r, ( nif->get<Vector3>( nif->getIndex( iVD, i ), "Vertex" ) - c ).length() );
 	nif->set<Vector3>( iBound, "Center", c );
 	nif->set<float>( iBound, "Radius", r );
+}
+
+//! Drop vertices that no triangle references and compact the packed vertex array,
+//! reindexing the triangles — the vertex-optimal finish for a Separate (mirrors the
+//! compaction tlDeleteGeometry does in Faces mode). FO4 skin weights are inline in
+//! each vertex record (moved with it) and there is no NiSkinData / NiSkinPartition
+//! to reindex (see tlSkinResync), so no skin fix-up is needed; sub-index segments
+//! are triangle-indexed and untouched. Shrink-only, so the grown-row conditional-
+//! array landmine never applies.
+static void tlCompactVertices( NifModel * nif, const QModelIndex & iShape )
+{
+	QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+	QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+	if ( !iVD.isValid() || !iTris.isValid() || !nif->getIndex( iShape, "Num Vertices" ).isValid() )
+		return;
+	const int numVerts = nif->get<int>( iShape, "Num Vertices" );
+	const int numTris = std::min( nif->get<int>( iShape, "Num Triangles" ), nif->rowCount( iTris ) );
+
+	QVector<bool> used( numVerts, false );
+	for ( int t = 0; t < numTris; t++ ) {
+		Triangle tri = nif->get<Triangle>( nif->getIndex( iTris, t ) );
+		for ( int k = 0; k < 3; k++ )
+			if ( tri[k] < numVerts )
+				used[tri[k]] = true;
+	}
+	QVector<int> remap( numVerts, -1 );
+	int newN = 0;
+	for ( int v = 0; v < numVerts; v++ )
+		if ( used[v] )
+			remap[v] = newN++;
+	if ( newN == numVerts )
+		return;	// nothing orphaned
+
+	const int dataSize = nif->get<int>( iShape, "Data Size" );
+	const int stride = ( numVerts > 0 ) ? ( dataSize - numTris * 6 ) / numVerts : 0;
+
+	nif->setState( BaseModel::Processing );
+	// forward compaction: the new index is always <= the old one, so copying in
+	// increasing order never clobbers a slot still to be read
+	for ( int v = 0; v < numVerts; v++ )
+		if ( remap[v] >= 0 && remap[v] != v )
+			tlCopyItemValues( nif, nif->getIndex( iVD, v ), nif->getIndex( iVD, remap[v] ) );
+	nif->set<int>( iShape, "Num Vertices", newN );
+	nif->updateArraySize( iVD );
+	for ( int t = 0; t < numTris; t++ ) {
+		Triangle tri = nif->get<Triangle>( nif->getIndex( iTris, t ) );
+		for ( int k = 0; k < 3; k++ )
+			tri[k] = quint16( ( tri[k] < numVerts && remap[tri[k]] >= 0 ) ? remap[tri[k]] : 0 );
+		nif->set<Triangle>( nif->getIndex( iTris, t ), tri );
+	}
+	if ( stride > 0 )
+		nif->set<int>( iShape, "Data Size", newN * stride + numTris * 6 );
+	tlUpdateBounds( nif, iShape );
+	nif->restoreState();
+	nif->dataChanged( iShape, iShape );
 }
 
 //! Blender-style delete on one shape. V = selected vertices (edge/face picks
@@ -7277,6 +7454,249 @@ bool GLView::reapplyOperatorEx( const QVector<TlOpParam> & params )
 	return true;
 }
 
+//! FO4 skin instance behind a shape (the "Skin" link → BSSkin::Instance).
+static QModelIndex joinSkinInstance( NifModel * m, const QModelIndex & iShape )
+{
+	QModelIndex iInst = m->getBlockIndex( m->getLink( iShape, "Skin" ) );
+	return m->isNiBlock( iInst, "BSSkin::Instance" ) ? iInst : QModelIndex();
+}
+
+//! BSSkin::BoneData behind a skin instance (its "Data" link).
+static QModelIndex joinBoneData( NifModel * m, const QModelIndex & iInst )
+{
+	QModelIndex iData = m->getBlockIndex( m->getLink( iInst, "Data" ) );
+	return m->isNiBlock( iData, "BSSkin::BoneData" ) ? iData : QModelIndex();
+}
+
+//! Union a source shape's skin bones into the active's BSSkin::Instance + BoneData.
+//! Bones are matched by their NiNode block number (same file → identity match),
+//! and any bone the active lacks is appended (its Bones Ptr + BoneData transform).
+//! Fills boneMap[sourceBoneIndex] = activeBoneIndex for remapping the source's
+//! per-vertex Bone Indices. Returns false if the merged count would exceed the
+//! uint8 (256) bone limit.
+static bool joinMergeBones( NifModel * m, const QModelIndex & iActiveInst,
+	const QModelIndex & iActiveData, const QModelIndex & iSrcInst,
+	const QModelIndex & iSrcData, QHash<int, int> & boneMap )
+{
+	QModelIndex iAB = m->getIndex( iActiveInst, "Bones" );
+	QModelIndex iAL = m->getIndex( iActiveData, "Bone List" );
+	QModelIndex iSB = m->getIndex( iSrcInst, "Bones" );
+	QModelIndex iSL = m->getIndex( iSrcData, "Bone List" );
+	if ( !iAB.isValid() || !iAL.isValid() || !iSB.isValid() || !iSL.isValid() )
+		return false;
+
+	const int aCount = m->rowCount( iAB );
+	const int sCount = m->rowCount( iSB );
+	QVector<int> activeNodes( aCount );
+	for ( int i = 0; i < aCount; i++ )
+		activeNodes[i] = m->getLink( m->getIndex( iAB, i ) );
+
+	QVector<int> appendSrc;	// source bone rows the active does not already have
+	for ( int j = 0; j < sCount; j++ ) {
+		int node = m->getLink( m->getIndex( iSB, j ) );
+		int at = activeNodes.indexOf( node );
+		if ( at < 0 ) {
+			at = aCount + appendSrc.size();
+			appendSrc.append( j );
+			activeNodes.append( node );
+		}
+		boneMap.insert( j, at );
+	}
+	const int newCount = aCount + appendSrc.size();
+	if ( newCount > 256 )
+		return false;
+	if ( appendSrc.isEmpty() )
+		return true;
+
+	m->set<quint32>( iActiveInst, "Num Bones", quint32( newCount ) );
+	m->updateArraySize( iAB );
+	m->set<quint32>( iActiveData, "Num Bones", quint32( newCount ) );
+	m->updateArraySize( iAL );
+	for ( int n = 0; n < appendSrc.size(); n++ ) {
+		int ai = aCount + n, sj = appendSrc[n];
+		m->setLink( m->getIndex( iAB, ai ), m->getLink( m->getIndex( iSB, sj ) ) );
+		tlCopyItemValues( m, m->getIndex( iSL, sj ), m->getIndex( iAL, ai ) );	// sphere+rot+trans+scale
+	}
+	return true;
+}
+
+//! Remap the per-vertex Bone Indices of a just-appended vertex range through a
+//! source→active bone map (indices came across pointing into the source's list).
+static void joinRemapBoneIndices( NifModel * m, const QModelIndex & iShape,
+	int firstVert, int count, const QHash<int, int> & boneMap )
+{
+	QModelIndex iVD = m->getIndex( iShape, "Vertex Data" );
+	for ( int i = firstVert; i < firstVert + count; i++ ) {
+		QModelIndex iIdx = m->getIndex( m->getIndex( iVD, i ), "Bone Indices" );
+		if ( !iIdx.isValid() || m->rowCount( iIdx ) != 4 )
+			continue;
+		for ( int k = 0; k < 4; k++ ) {
+			int old = m->get<quint8>( m->getIndex( iIdx, k ) );
+			m->set<quint8>( m->getIndex( iIdx, k ), quint8( boneMap.value( old, 0 ) ) );
+		}
+	}
+}
+
+//! Merge FO4 sub-index segments after a Join. Segments are indexed dismemberment
+//! slots, so each donor's segment i joins the ACTIVE's segment i: the merged
+//! triangle buffer is REORDERED so every slot stays one contiguous range (donor
+//! faces appended right after the receiver's faces for that slot). The active's
+//! shared Segment Data (Per-Segment-Data with body-part Bone IDs / cut offsets,
+//! SSF) and its subsegments are preserved — subsegment triangle ranges are just
+//! repositioned; donor subsegments are flattened into their slot (droppedSubsegs).
+//! `donors` is (source block number, its triangle base in the merged buffer).
+static void joinMergeSegmentsByIndex( NifModel * m, const QModelIndex & iActive,
+	const QVector<QPair<int, int>> & donors, bool & droppedSubsegs )
+{
+	if ( !m->blockInherits( iActive, "BSSubIndexTriShape" ) )
+		return;
+
+	QModelIndex iTris = m->getIndex( iActive, "Triangles" );
+	const int nTris = m->rowCount( iTris );
+	QVector<Triangle> tris( nTris );
+	for ( int t = 0; t < nTris; t++ )
+		tris[t] = m->get<Triangle>( m->getIndex( iTris, t ) );
+
+	struct Sub { int start, num; quint32 parent, unused; };	// triangle units
+	struct Seg { int start, num; quint32 parentArr; QVector<Sub> subs; };
+
+	// the active's segments (with subsegments)
+	QVector<Seg> recv;
+	QModelIndex iActSeg = m->getIndex( iActive, "Segment" );
+	const int recvNum = m->rowCount( iActSeg );
+	for ( int i = 0; i < recvNum; i++ ) {
+		QModelIndex s = m->getIndex( iActSeg, i );
+		Seg seg;
+		seg.start = int( m->get<quint32>( s, "Start Index" ) ) / 3;
+		seg.num = int( m->get<quint32>( s, "Num Primitives" ) );
+		seg.parentArr = m->get<quint32>( s, "Parent Array Index" );
+		QModelIndex iSub = m->getIndex( s, "Sub Segment" );
+		for ( int j = 0; j < m->rowCount( iSub ); j++ ) {
+			QModelIndex ss = m->getIndex( iSub, j );
+			seg.subs.append( { int( m->get<quint32>( ss, "Start Index" ) ) / 3,
+			                   int( m->get<quint32>( ss, "Num Primitives" ) ),
+			                   m->get<quint32>( ss, "Parent Array Index" ),
+			                   m->get<quint32>( ss, "Unused" ) } );
+		}
+		recv.append( seg );
+	}
+
+	// each donor's segments, in MERGED-buffer triangle coordinates
+	QVector<QVector<QPair<int, int>>> don;	// per donor: per slot (start, num)
+	for ( const auto & d : donors ) {
+		QModelIndex iD = m->getBlockIndex( d.first );
+		const int base = d.second;
+		QVector<QPair<int, int>> segs;
+		if ( m->blockInherits( iD, "BSSubIndexTriShape" ) && m->get<quint32>( iD, "Num Segments" ) > 0 ) {
+			if ( m->get<quint32>( iD, "Num Segments" ) < m->get<quint32>( iD, "Total Segments" ) )
+				droppedSubsegs = true;
+			QModelIndex iDSeg = m->getIndex( iD, "Segment" );
+			for ( int i = 0; i < m->rowCount( iDSeg ); i++ ) {
+				QModelIndex s = m->getIndex( iDSeg, i );
+				segs.append( { base + int( m->get<quint32>( s, "Start Index" ) ) / 3,
+				               int( m->get<quint32>( s, "Num Primitives" ) ) } );
+			}
+		} else {
+			segs.append( { base, m->get<int>( iD, "Num Triangles" ) } );	// unsegmented -> slot 0
+		}
+		don.append( segs );
+	}
+
+	int maxIdx = recvNum;
+	for ( const auto & ds : don )
+		maxIdx = qMax( maxIdx, ds.size() );
+
+	// rebuild the triangle order grouped by slot: receiver slot i, then each
+	// donor's slot i
+	QVector<Triangle> out;
+	out.reserve( nTris );
+	QVector<Seg> outSeg;
+	QVector<bool> used( nTris, false );
+	for ( int i = 0; i < maxIdx; i++ ) {
+		Seg os; os.start = out.size(); os.parentArr = 0xFFFFFFFFu;
+		if ( i < recv.size() ) {
+			const Seg & rs = recv[i];
+			int b = out.size();
+			for ( int t = 0; t < rs.num && rs.start + t < nTris; t++ ) {
+				out.append( tris[rs.start + t] );
+				used[rs.start + t] = true;
+			}
+			os.parentArr = rs.parentArr;
+			for ( const Sub & su : rs.subs )
+				os.subs.append( { b + ( su.start - rs.start ), su.num, su.parent, su.unused } );
+		}
+		for ( const auto & ds : don )
+			if ( i < ds.size() )
+				for ( int t = 0; t < ds[i].second && ds[i].first + t < nTris; t++ ) {
+					out.append( tris[ds[i].first + t] );
+					used[ds[i].first + t] = true;
+				}
+		os.num = out.size() - os.start;
+		outSeg.append( os );
+	}
+	// safety: any triangle no segment claimed goes into the last slot so nothing
+	// is dropped (well-formed FO4 meshes cover everything, so this is usually a no-op)
+	if ( out.size() < nTris ) {
+		if ( outSeg.isEmpty() )
+			outSeg.append( { 0, 0, 0xFFFFFFFFu, {} } );
+		for ( int t = 0; t < nTris; t++ )
+			if ( !used[t] ) { out.append( tris[t] ); outSeg.last().num++; }
+	}
+
+	// write the reordered triangles
+	for ( int t = 0; t < out.size() && t < nTris; t++ )
+		m->set<Triangle>( m->getIndex( iTris, t ), out[t] );
+
+	// write Segment[] (slot count only grows if a donor had more slots)
+	int totalSubs = 0;
+	for ( const Seg & o : outSeg )
+		totalSubs += o.subs.size();
+	m->set<quint32>( iActive, "Num Segments", quint32( outSeg.size() ) );
+	m->set<quint32>( iActive, "Total Segments", quint32( outSeg.size() + totalSubs ) );
+	iActSeg = m->getIndex( iActive, "Segment" );
+	m->updateArraySize( iActSeg );
+	for ( int i = 0; i < outSeg.size(); i++ ) {
+		QModelIndex s = m->getIndex( iActSeg, i );
+		m->set<quint32>( s, "Start Index", quint32( outSeg[i].start * 3 ) );
+		m->set<quint32>( s, "Num Primitives", quint32( outSeg[i].num ) );
+		m->set<quint32>( s, "Parent Array Index", outSeg[i].parentArr );
+		m->set<quint32>( s, "Num Sub Segments", quint32( outSeg[i].subs.size() ) );
+		QModelIndex iSub = m->getIndex( s, "Sub Segment" );
+		m->updateArraySize( iSub );
+		for ( int j = 0; j < outSeg[i].subs.size(); j++ ) {
+			QModelIndex ss = m->getIndex( iSub, j );
+			m->set<quint32>( ss, "Start Index", quint32( outSeg[i].subs[j].start * 3 ) );
+			m->set<quint32>( ss, "Num Primitives", quint32( outSeg[i].subs[j].num ) );
+			m->set<quint32>( ss, "Parent Array Index", outSeg[i].subs[j].parent );
+			m->set<quint32>( ss, "Unused", outSeg[i].subs[j].unused );
+		}
+	}
+	m->set<quint32>( iActive, "Num Primitives", quint32( nTris ) );
+
+	// Shared Segment Data: the active's Per-Segment-Data / Segment Starts / SSF
+	// stay valid as-is when the slot count is unchanged (the common case — donor
+	// slots fit within the active's). Only extend it if new top-level slots were
+	// added by a donor with more segments than the active.
+	QModelIndex iSD = m->getIndex( iActive, "Segment Data" );
+	if ( iSD.isValid() && outSeg.size() > recvNum ) {
+		int oldNum = m->get<quint32>( iSD, "Num Segments" );
+		int oldTot = m->get<quint32>( iSD, "Total Segments" );
+		m->set<quint32>( iSD, "Num Segments", quint32( outSeg.size() ) );
+		m->set<quint32>( iSD, "Total Segments", quint32( outSeg.size() + totalSubs ) );
+		QModelIndex iStarts = m->getIndex( iSD, "Segment Starts" );
+		m->updateArraySize( iStarts );
+		QModelIndex iPsd = m->getIndex( iSD, "Per Segment Data" );
+		m->updateArraySize( iPsd );
+		for ( int i = oldNum; i < outSeg.size(); i++ ) {
+			m->set<quint32>( m->getIndex( iStarts, i ), quint32( oldTot + ( i - oldNum ) ) );
+			QModelIndex p = m->getIndex( iPsd, oldTot + ( i - oldNum ) );
+			m->set<quint32>( p, "User Index", quint32( i ) );
+			m->set<quint32>( p, "Bone ID", 0xFFFFFFFFu );
+			m->set<quint32>( p, "Num Cut Offsets", 0 );
+		}
+	}
+}
+
 void GLView::joinSelectedObjects()
 {
 	if ( !model || editMode || objActive < 0 || objSelection.size() < 2 )
@@ -7287,30 +7707,56 @@ void GLView::joinSelectedObjects()
 		return;
 	}
 	quint64 activeDesc = model->get<BSVertexDesc>( iActive, "Vertex Desc" ).Value();
+	const quint16 activeFlags = quint16( ( activeDesc >> 44 ) & 0xFFFF );
+	// attributes we can synthesise a sensible default for on a source that lacks
+	// them (opaque-white color, single-bone bind, zero eye data); everything else
+	// (position precision, UVs, normals, tangents) must match to merge by field.
+	const quint16 fillable = quint16( VF_COLORS | VF_SKINNED | VF_EYEDATA );
 
-	// compatible sources: same block type + identical vertex format
-	QVector<int> sources;
+	// compatible sources: same structural vertex format as the active, and no
+	// attribute the active lacks. A source missing a fillable attribute the
+	// active has is promoted with a default (fillMask); a source RICHER than the
+	// active is skipped (the user should make it the active object instead).
+	QVector<QPair<int, quint16>> sources;	// (block, fillMask)
+	bool richerSkipped = false;
 	for ( int sb : objSelection ) {
 		if ( sb == objActive )
 			continue;
 		QModelIndex iS = model->getBlockIndex( sb );
 		if ( !model->blockInherits( iS, "BSTriShape" ) )
 			continue;
-		if ( model->get<BSVertexDesc>( iS, "Vertex Desc" ).Value() != activeDesc )
+		quint16 srcFlags = quint16( ( model->get<BSVertexDesc>( iS, "Vertex Desc" ).Value() >> 44 ) & 0xFFFF );
+		if ( ( activeFlags & ~fillable ) != ( srcFlags & ~fillable ) )
+			continue;	// different structural layout — cannot merge by field
+		if ( srcFlags & ~activeFlags ) {	// source has an attribute the active lacks
+			richerSkipped = true;
 			continue;
-		sources.append( sb );
+		}
+		sources.append( { sb, quint16( activeFlags & ~srcFlags & fillable ) } );
 	}
 	if ( sources.isEmpty() ) {
-		emit gizmoStatus( tr( "Join: no compatible meshes selected (need a matching vertex format)" ) );
+		emit gizmoStatus( richerSkipped
+			? tr( "Join: selected mesh(es) have vertex data the active lacks — make the "
+				"richest mesh (e.g. the one with vertex colors) the active object" )
+			: tr( "Join: no compatible meshes selected (need a matching vertex format)" ) );
 		return;
 	}
+
+	// rigging-aware merge: the active's skin (BSSkin::Instance + BoneData) is
+	// extended with each source's bones and every appended vertex's Bone Indices
+	// is remapped into the merged bone list; FO4 segments are concatenated.
+	QPersistentModelIndex pActiveInst = joinSkinInstance( model, iActive );
+	QPersistentModelIndex pActiveData =
+		pActiveInst.isValid() ? joinBoneData( model, QModelIndex( pActiveInst ) ) : QModelIndex();
+	const bool activeSkinned = pActiveInst.isValid() && pActiveData.isValid();
+	const bool activeSegmented = model->blockInherits( iActive, "BSSubIndexTriShape" );
 
 	Transform activeWorld;
 	if ( Node * an = scene->getNode( model, iActive ) )
 		activeWorld = an->worldTrans();
 
 	int joined = 0;
-	bool capSkipped = false;
+	bool capSkipped = false, boneCapSkipped = false, droppedSubsegs = false;
 	QVector<int> merged;
 	QPersistentModelIndex pActive( iActive );
 	// DELIBERATELY snapshot undo (the one remaining topology op with a reload
@@ -7320,7 +7766,18 @@ void GLView::joinSelectedObjects()
 	// link mending. The snapshot is the safe undo here.
 	nifSnapshotOp( model, tr( "Join geometry" ), [&]() {
 		Transform activeInv = activeWorld.inverted();
-		for ( int sb : sources ) {
+		// suppress per-write signals during the bulk append: otherwise every live
+		// view reacts to each of thousands of vertex writes — quadratic, a
+		// multi-second freeze on high-poly joins (mirrors the other topology ops)
+		model->setState( BaseModel::Processing );
+
+		// donors whose segments get appended to the active after the merge:
+		// (source block number, its triangle base in the merged mesh)
+		QVector<QPair<int, int>> segDonors;
+
+		for ( const QPair<int, quint16> & src : sources ) {
+			const int sb = src.first;
+			const quint16 fillMask = src.second;
 			QModelIndex iA( pActive );
 			QModelIndex iS = model->getBlockIndex( sb );
 			int oldNV = model->get<int>( iA, "Num Vertices" );
@@ -7336,6 +7793,21 @@ void GLView::joinSelectedObjects()
 				continue;
 			}
 
+			// union the source's bones into the active skin FIRST (so a 256-bone
+			// overflow skips the source before any geometry is appended)
+			QHash<int, int> boneMap;
+			QModelIndex iSInst, iSData;
+			if ( activeSkinned ) {
+				iSInst = joinSkinInstance( model, iS );
+				iSData = iSInst.isValid() ? joinBoneData( model, iSInst ) : QModelIndex();
+				if ( iSInst.isValid() && iSData.isValid()
+					&& !joinMergeBones( model, QModelIndex( pActiveInst ), QModelIndex( pActiveData ),
+						iSInst, iSData, boneMap ) ) {
+					boneCapSkipped = true;
+					continue;
+				}
+			}
+
 			Transform srcWorld;
 			if ( Node * sn = scene->getNode( model, iS ) )
 				srcWorld = sn->worldTrans();
@@ -7345,7 +7817,8 @@ void GLView::joinSelectedObjects()
 			int dataSize = model->get<int>( iA, "Data Size" );
 			int stride = ( oldNV > 0 ) ? ( dataSize - oldNT * 6 ) / oldNV : 0;
 
-			// append vertex data (verbatim, then transform into active space)
+			// append vertex data (verbatim — colors/weights carry over — then
+			// transform position/normal/tangent into the active's space)
 			model->set<int>( iA, "Num Vertices", oldNV + addNV );
 			QModelIndex iAVD = model->getIndex( iA, "Vertex Data" );
 			QModelIndex iSVD = model->getIndex( iS, "Vertex Data" );
@@ -7353,6 +7826,16 @@ void GLView::joinSelectedObjects()
 			for ( int i = 0; i < addNV; i++ ) {
 				QModelIndex sVert = model->getIndex( iSVD, i );
 				QModelIndex dVert = model->getIndex( iAVD, oldNV + i );
+				// A freshly grown BSVertexData row leaves its #ARG#-conditional
+				// arrays (Bone Weights/Indices) 0-length until a deferred cascade,
+				// so tlCopyItemValues would silently drop the skin. Size them to
+				// match the source first, then the copy fills them.
+				for ( const char * fld : { "Bone Weights", "Bone Indices" } ) {
+					QModelIndex da = model->getIndex( dVert, fld );
+					QModelIndex sa = model->getIndex( sVert, fld );
+					if ( da.isValid() && sa.isValid() && model->rowCount( da ) < model->rowCount( sa ) )
+						model->updateArraySize( da );
+				}
 				tlCopyItemValues( model, sVert, dVert );
 				if ( !ident ) {
 					Vector3 v = model->get<Vector3>( dVert, "Vertex" );
@@ -7368,7 +7851,25 @@ void GLView::joinSelectedObjects()
 						model->set<ByteVector3>( dVert, "Tangent", tg );
 					}
 				}
+				// promote a source vertex to the active's superset: default any
+				// attribute the active has but the source lacked
+				if ( fillMask & VF_COLORS )
+					model->set<ByteColor4>( dVert, "Vertex Colors", ByteColor4( FloatVector4( 1.0f ) ) );	// opaque white
+				if ( fillMask & VF_SKINNED ) {
+					QModelIndex iW = model->getIndex( dVert, "Bone Weights" );
+					QModelIndex iI = model->getIndex( dVert, "Bone Indices" );
+					if ( iW.isValid() && iI.isValid() )
+						for ( int j = 0; j < 4; j++ ) {
+							model->set<float>( model->getIndex( iW, j ), j == 0 ? 1.0f : 0.0f );
+							model->set<quint8>( model->getIndex( iI, j ), 0 );
+						}
+				}
+				if ( ( fillMask & VF_EYEDATA ) && model->getIndex( dVert, "Eye Data" ).isValid() )
+					model->set<float>( dVert, "Eye Data", 0.0f );
 			}
+			// remap the appended verts' Bone Indices into the merged bone list
+			if ( activeSkinned && !boneMap.isEmpty() )
+				joinRemapBoneIndices( model, iA, oldNV, addNV, boneMap );
 
 			// append triangles, reindexed by the vertex offset
 			QModelIndex iAT = model->getIndex( iA, "Triangles" );
@@ -7385,9 +7886,24 @@ void GLView::joinSelectedObjects()
 			if ( stride > 0 )
 				model->set<int>( iA, "Data Size", ( oldNV + addNV ) * stride + ( oldNT + addNT ) * 6 );
 
+			// remember this donor + its triangle base so its segments can be
+			// appended to the active's segmentation after the merge
+			if ( activeSegmented )
+				segDonors.append( { sb, oldNT } );
+
 			joined++;
 			merged.append( sb );
 		}
+
+		// merge each donor's segments into the active's matching slots (reorders
+		// triangles), keeping the active's subsegments / shared Segment Data intact
+		if ( activeSegmented && joined > 0 )
+			joinMergeSegmentsByIndex( model, QModelIndex( pActive ), segDonors, droppedSubsegs );
+
+		// end of bulk writes: restore normal signalling, emit one change for the
+		// whole active block, then do the few-op bounds + block removal live
+		model->restoreState();
+		model->dataChanged( QModelIndex( pActive ), QModelIndex( pActive ) );
 
 		tlUpdateBounds( model, QModelIndex( pActive ) );
 
@@ -7402,7 +7918,9 @@ void GLView::joinSelectedObjects()
 	if ( joined == 0 ) {
 		emit gizmoStatus( capSkipped
 			? tr( "Join: would exceed the 65,535-vertex limit of BSTriShape" )
-			: tr( "Join: nothing merged" ) );
+			: boneCapSkipped
+				? tr( "Join: would exceed the 256-bone limit of BSSkin" )
+				: tr( "Join: nothing merged" ) );
 		return;
 	}
 
@@ -7416,7 +7934,10 @@ void GLView::joinSelectedObjects()
 	}
 	emit objectSelectionChanged();
 	emit gizmoStatus( tr( "Joined %1 mesh(es) into the active object" ).arg( joined )
-		+ ( capSkipped ? tr( " (some skipped at the 65,535-vertex limit)" ) : QString() ) );
+		+ ( capSkipped ? tr( " (some skipped at the 65,535-vertex limit)" ) : QString() )
+		+ ( boneCapSkipped ? tr( " (some skipped at the 256-bone limit)" ) : QString() )
+		+ ( richerSkipped ? tr( " (some skipped — richer vertex format than the active)" ) : QString() )
+		+ ( droppedSubsegs ? tr( " (donor subsegments not carried)" ) : QString() ) );
 	modelChanged();
 }
 
