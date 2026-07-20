@@ -1273,6 +1273,28 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 	if ( ndr )
 		role = Qt::DisplayRole;
 
+	// diff-vs-reference column: the reference block's value for differing
+	// rows, empty everywhere else (the column is only shown while diffing)
+	if ( column == WwRefCol ) {
+		switch ( role ) {
+		case Qt::DisplayRole:
+			if ( diffRefBlock >= 0 && diffItems.contains( item ) ) {
+				const QString refText = diffRefText.value( item );
+				if ( !refText.isEmpty() )
+					return QStringLiteral( "◆ " ) + refText;
+			}
+			return QVariant();
+		case Qt::ForegroundRole:
+			return QColor::fromRgb( 154, 154, 154 );
+		case Qt::ToolTipRole:
+			if ( diffRefBlock >= 0 && diffItems.contains( item ) )
+				return tr( "Block %1's value — click it, or drag it onto the row, to apply" ).arg( diffRefBlock );
+			return QVariant();
+		default:
+			return QVariant();
+		}
+	}
+
 	switch ( role ) {
 	case Qt::DisplayRole:
 		{
@@ -1636,12 +1658,6 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 			if ( column == ValueCol && item->isCount()
 				&& ( item->hasName( "Flags" ) || item->hasName( "Integer Data" ) ) )
 				return wwFlagFieldSummary( this, index );
-		}
-		return QVariant();
-	case WwDiffRefTextRole:
-		{
-			if ( column == ValueCol && diffRefBlock >= 0 && diffItems.contains( item ) )
-				return diffRefText.value( item );
 		}
 		return QVariant();
 	default:

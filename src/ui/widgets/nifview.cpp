@@ -280,7 +280,7 @@ void NifTreeView::pasteArray()
 	QModelIndexList selected = selectionModel()->selectedIndexes();
 	QModelIndexList values = valueIndexList( selected );
 
-	Q_ASSERT( selected.size() == 10 );
+	Q_ASSERT( selected.size() == NifModel::NumColumns );
 	Q_ASSERT( values.size() == 1 );
 
 	auto root = values.at( 0 );

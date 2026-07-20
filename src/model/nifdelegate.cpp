@@ -41,6 +41,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QItemDelegate> // Inherited
 #include <QComboBox>
+#include <QCursor>
+#include <QGuiApplication>
 #include <QIcon>
 #include <QLineEdit>
 #include <QMenu>
@@ -48,6 +50,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QPainter>
 #include <QListView>
 #include <QMessageBox>
+#include <QTimer>
+#include <QToolTip>
 
 
 //! @file nifdelegate.cpp NifDelegate
@@ -60,8 +64,41 @@ extern void qt_format_text( const QFont & font, const QRectF & _r,
 class NifDelegate final : public QItemDelegate
 {
 	SpellBookPtr book;
-	//! Row whose painted reference value is being pressed/dragged (diff mode)
+	//! Row whose Reference-column value is being pressed/dragged (diff mode)
 	QPersistentModelIndex wwRefPress;
+	//! Cursor-following ghost shown while dragging a reference value. Item
+	//! views don't route mouse-move to editorEvent, so a short timer tracks
+	//! the cursor instead (same pattern as the hover-out operator menus).
+	QTimer * wwRefGhostTimer = nullptr;
+	QString wwRefGhostText;
+
+	void startRefGhost( const QString & text )
+	{
+		wwRefGhostText = text;
+		if ( !wwRefGhostTimer ) {
+			wwRefGhostTimer = new QTimer( this );
+			wwRefGhostTimer->setInterval( 50 );
+			connect( wwRefGhostTimer, &QTimer::timeout, this, [this]() {
+				// self-heal: a release outside any row never reaches
+				// editorEvent, so stop as soon as the button is up
+				if ( !( QGuiApplication::mouseButtons() & Qt::LeftButton ) ) {
+					wwRefPress = QPersistentModelIndex();
+					stopRefGhost();
+					return;
+				}
+				QToolTip::showText( QCursor::pos() + QPoint( 16, 12 ), wwRefGhostText );
+			} );
+		}
+		QToolTip::showText( QCursor::pos() + QPoint( 16, 12 ), wwRefGhostText );
+		wwRefGhostTimer->start();
+	}
+
+	void stopRefGhost()
+	{
+		if ( wwRefGhostTimer )
+			wwRefGhostTimer->stop();
+		QToolTip::hideText();
+	}
 
 public:
 	NifDelegate( QObject * p, SpellBookPtr sb = 0 ) : QItemDelegate( p ), book( sb )
@@ -102,16 +139,6 @@ public:
 	static QRect jumpGlyphRect( const QRect & cell )
 	{
 		return QRect( cell.right() - 35, cell.top(), 17, cell.height() );
-	}
-
-	//! Where a differing row's reference value is painted (right-aligned in
-	//! the Value cell; link rows leave the hover-glyph zone free).
-	static QRect refValueRect( const QStyleOptionViewItem & opt, const QString & refText, int rightInset )
-	{
-		int w = opt.fontMetrics.horizontalAdvance( refText )
-			+ opt.fontMetrics.horizontalAdvance( QStringLiteral( "◆ " ) ) + 8;
-		w = qMin( w, opt.rect.width() / 2 );
-		return QRect( opt.rect.right() - rightInset - w, opt.rect.top(), w, opt.rect.height() );
 	}
 
 	//! Write the diff reference's value onto this row (one undoable change).
@@ -197,6 +224,34 @@ public:
 		Q_ASSERT( event );
 		Q_ASSERT( model );
 
+		// Reference column (diff mode): press picks the value up — a ghost
+		// follows the cursor — and releasing on the same row applies it.
+		// Handled before the editable guard (the column itself is read-only).
+		if ( ( event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease )
+			&& static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton
+			&& model->inherits( "NifModel" ) ) {
+			if ( event->type() == QEvent::MouseButtonPress ) {
+				if ( index.column() == NifModel::WwRefCol ) {
+					const QString refText = index.data( Qt::DisplayRole ).toString();
+					if ( !refText.isEmpty() ) {
+						wwRefPress = QPersistentModelIndex( index );
+						startRefGhost( refText );
+						return true;
+					}
+				}
+				wwRefPress = QPersistentModelIndex();
+			} else if ( wwRefPress.isValid() ) {
+				const bool sameRow = wwRefPress.row() == index.row()
+					&& wwRefPress.parent() == index.parent();
+				wwRefPress = QPersistentModelIndex();
+				stopRefGhost();
+				if ( sameRow ) {
+					applyReferenceValue( model, index );
+					return true;
+				}
+			}
+		}
+
 		// Ignore indices which are not editable
 		//	since this QItemDelegate bypasses the flags.
 		if ( !(model->flags( index ) & Qt::ItemIsEditable) )
@@ -227,35 +282,6 @@ public:
 									Q_ARG( QModelIndex, nif->getBlockIndex( link ) ) );
 							}
 						}
-						return true;
-					}
-				}
-			}
-
-			// diff-vs-reference: press on the painted reference value, release
-			// anywhere on the same row = apply it (covers both a plain click
-			// and "drag it onto the value")
-			if ( static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton
-				&& index.column() == NifModel::ValueCol && model->inherits( "NifModel" ) ) {
-				const QString refText = index.data( WwDiffRefTextRole ).toString();
-				const QPoint refPos = static_cast<QMouseEvent *>(event)->pos();
-				if ( event->type() == QEvent::MouseButtonPress ) {
-					bool hit = false;
-					if ( !refText.isEmpty() ) {
-						QModelIndex si;
-						int lnk = -1;
-						const int inset = linkAt( model, index, si, lnk ) ? 36 : 0;
-						hit = refValueRect( option, refText, inset ).contains( refPos );
-					}
-					wwRefPress = hit ? QPersistentModelIndex( index ) : QPersistentModelIndex();
-					if ( hit )
-						return true;
-				} else if ( event->type() == QEvent::MouseButtonRelease && wwRefPress.isValid() ) {
-					const bool sameRow = wwRefPress.row() == index.row()
-						&& wwRefPress.parent() == index.parent();
-					wwRefPress = QPersistentModelIndex();
-					if ( sameRow ) {
-						applyReferenceValue( model, index );
 						return true;
 					}
 				}
@@ -415,49 +441,18 @@ public:
 			drawFocus( painter, opt, tRect );
 		}
 
-		// diff-vs-reference: the reference block's value sits right-aligned
-		// beside the current value ("current   ◆ reference")
-		QString refText;
-		QRect refR;
-		if ( index.column() == NifModel::ValueCol ) {
-			refText = index.data( WwDiffRefTextRole ).toString();
-			if ( !refText.isEmpty() ) {
-				QModelIndex si;
-				int lnk = -1;
-				const int inset = linkAt( index.model(), index, si, lnk ) ? 36 : 0;
-				refR = refValueRect( opt, refText, inset );
-			}
-		}
-
 		// grey decoded suffix for flag fields ("14 — Hidden, Shadow")
 		if ( index.column() == NifModel::ValueCol && !text.isEmpty() ) {
 			QString summary = index.data( WwFlagSummaryRole ).toString();
 			if ( !summary.isEmpty() ) {
 				const int mainW = opt.fontMetrics.horizontalAdvance( text ) + 8;
 				QRect sRect = tRect.adjusted( mainW, 0, -2, 0 );
-				if ( refR.isValid() )
-					sRect.setRight( qMin( sRect.right(), refR.left() - 6 ) );
 				if ( sRect.width() > 24 ) {
 					painter->setPen( QColor( 128, 128, 128 ) );
 					painter->drawText( sRect, Qt::AlignLeft | Qt::AlignVCenter,
 						opt.fontMetrics.elidedText(
 							QStringLiteral( "— " ) + summary, Qt::ElideRight, sRect.width() ) );
 				}
-			}
-		}
-
-		if ( refR.isValid() ) {
-			// only when it fits clear of the current value's text
-			const int mainRight = tRect.x() + opt.fontMetrics.horizontalAdvance( text ) + 12;
-			if ( refR.left() >= mainRight ) {
-				const QString refGlyph = QStringLiteral( "◆ " );
-				const int gw = opt.fontMetrics.horizontalAdvance( refGlyph );
-				painter->setPen( QColor( 255, 157, 0 ) );
-				painter->drawText( QRect( refR.left(), refR.top(), gw, refR.height() ),
-					Qt::AlignLeft | Qt::AlignVCenter, refGlyph );
-				painter->setPen( QColor( 154, 154, 154 ) );
-				painter->drawText( refR.adjusted( gw, 0, -4, 0 ), Qt::AlignLeft | Qt::AlignVCenter,
-					opt.fontMetrics.elidedText( refText, Qt::ElideRight, refR.width() - gw - 4 ) );
 			}
 		}
 

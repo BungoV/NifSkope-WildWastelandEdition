@@ -50,10 +50,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //! Grey inline suffix appended to a flag field's Value cell by the delegate
 //! (e.g. "Hidden, Shadow"). Empty/invalid for non-flag rows.
 #define WwFlagSummaryRole (Qt::UserRole + 43)
-//! Diff-vs-reference: the reference block's value for a differing row,
-//! painted right-aligned beside the current value by the delegate. Empty
-//! when not diffing or when the row matches the reference.
-#define WwDiffRefTextRole (Qt::UserRole + 44)
 
 
 // Used for Block Name hashing
@@ -219,7 +215,10 @@ public:
 		Ver1Col    = 7,
 		Ver2Col    = 8,
 		VerCondCol = 9,
-		NumColumns = 10,
+		//! Diff-vs-reference (WW): the reference block's value. Hidden
+		//! everywhere except Block Details while a diff reference is set.
+		WwRefCol   = 10,
+		NumColumns = 11,
 	};
 
 	// QAbstractItemModel

@@ -5031,6 +5031,12 @@ void NifSkope::restoreUi()
 	header->header()->restoreState( settings.value( "Header Header"_uip ).toByteArray() );
 	kfmtree->header()->restoreState( settings.value( "Kfmtree Header"_uip ).toByteArray() );
 
+	// header restoreState from a pre-Reference-column layout leaves the new
+	// section visible; it must start hidden everywhere (diff state shows it)
+	tree->setColumnHidden( NifModel::WwRefCol, true );
+	header->setColumnHidden( NifModel::WwRefCol, true );
+	kfmtree->setColumnHidden( NifModel::WwRefCol, true );
+
 	auto hideSections = []( NifTreeView * tree, bool hidden ) {
 		tree->header()->setSectionHidden( NifModel::ArgCol, hidden );
 		tree->header()->setSectionHidden( NifModel::Arr1Col, hidden );

@@ -522,6 +522,8 @@ QVariant BaseModel::headerData( int section, Qt::Orientation orientation, int ro
 			return tr( "until" );
 		case VerCondCol:
 			return tr( "Version Condition" );
+		case WwRefCol:
+			return tr( "Reference" );
 		default:
 			return QVariant();
 		}

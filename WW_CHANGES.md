@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20h — Diff reference gets its own column (supersedes 07-20g's in-cell suffix)
+
+User feedback on 07-20g: the reference value painted inside the Value cell
+read as clutter — they wanted a real second value column. Replaced.
+
+**Reference column** (`WwRefCol` = column 10, basemodel.h; NumColumns 10→11):
+a real tree column headed "Reference", shown in Block Details only while a
+diff reference is set (slides in right after Value, 160px default), hidden
+again on clear. Differing rows show "◆ <reference value>" in grey; other
+rows are empty. Served straight from NifModel's diffRefText — the
+WwDiffRefTextRole + delegate-painted suffix from 07-20g are REMOVED.
+Column-count fallout handled: pasteArray's hardcoded size assert →
+NumColumns; the new column starts hidden in tree/header/kfmtree (incl.
+after header restoreState from pre-column layouts, which would otherwise
+surface it) and in the block list's list-mode.
+
+**Drag ghost**: pressing a reference value picks it up — a cursor-following
+label shows exactly what you're carrying (QToolTip re-anchored by a 50ms
+timer, the AutoCloseMenu polling pattern, since item views don't route
+mouse-move to editorEvent; self-heals by watching the physical button
+state). Release anywhere on the same row applies it as one undoable
+change; release elsewhere cancels. Handled BEFORE the delegate's
+editable-flag guard — the column itself is read-only.
+
+**Alt+J note**: user asked for Tris to Quads — it already exists (Alt+J,
+edit mode, pointer over the viewport, faces selected; adjust panel with
+Max Face/Shape Angle). No change made; documented the gating instead.
+
 ## 2026-07-20g — Diff values side-by-side + drag/copy the reference; Blender scrub on Details editors
 
 Follow-ups to 07-20f from the user's first hands-on session.

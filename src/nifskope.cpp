@@ -811,6 +811,8 @@ NifSkope::NifSkope( bool background )
 	tree->header()->moveSection( 1, 2 );
 	tree->header()->resizeSection( NifModel::NameCol, 135 );
 	tree->header()->resizeSection( NifModel::ValueCol, 250 );
+	// the Reference column only appears while a diff reference is set
+	tree->setColumnHidden( NifModel::WwRefCol, true );
 	blockDetailsSearch = new QLineEdit( ui->dockWidgetContents_2 );
 	blockDetailsSearch->setClearButtonEnabled( true );
 	blockDetailsSearch->setPlaceholderText( tr( "Filter fields by name or value..." ) );
@@ -856,12 +858,14 @@ NifSkope::NifSkope( bool background )
 	header->header()->moveSection( 1, 2 );
 	header->header()->resizeSection( NifModel::NameCol, 135 );
 	header->header()->resizeSection( NifModel::ValueCol, 250 );
+	header->setColumnHidden( NifModel::WwRefCol, true );
 
 	// KFM
 	kfmtree = ui->kfmtree;
 	kfmtree->setModel( kfm );
 	kfmtree->setItemDelegate( kfm->createDelegate( this ) );
 	kfmtree->installEventFilter( this );
+	kfmtree->setColumnHidden( NifModel::WwRefCol, true );
 
 	// Help Browser
 	refrbrwsr = ui->refrBrowser;
@@ -2006,8 +2010,10 @@ void NifSkope::clearDiffReference()
 	}
 	if ( wwDiffBanner )
 		wwDiffBanner->hide();
-	if ( tree )
+	if ( tree ) {
+		tree->setColumnHidden( NifModel::WwRefCol, true );
 		tree->viewport()->update();
+	}
 	if ( list )
 		list->viewport()->update();
 }
@@ -2128,6 +2134,18 @@ void NifSkope::updateDiffHighlight()
 			text += tr( " — %1 row(s) differ" ).arg( diffLeaves );
 		wwDiffLabel->setText( text );
 		wwDiffBanner->show();
+	}
+
+	// the Reference column rides the diff state: shown right after Value,
+	// hidden again when the reference is cleared
+	if ( tree && tree->isColumnHidden( NifModel::WwRefCol ) ) {
+		tree->setColumnHidden( NifModel::WwRefCol, false );
+		QHeaderView * hh = tree->header();
+		const int wantVisual = hh->visualIndex( NifModel::ValueCol ) + 1;
+		if ( hh->visualIndex( NifModel::WwRefCol ) != wantVisual )
+			hh->moveSection( hh->visualIndex( NifModel::WwRefCol ), wantVisual );
+		if ( hh->sectionSize( NifModel::WwRefCol ) < 60 )
+			hh->resizeSection( NifModel::WwRefCol, 160 );
 	}
 
 	if ( tree )
@@ -2788,6 +2806,7 @@ void NifSkope::setListMode()
 			list->setColumnHidden( NifModel::Ver1Col, true );
 			list->setColumnHidden( NifModel::Ver2Col, true );
 			list->setColumnHidden( NifModel::VerCondCol, true );
+			list->setColumnHidden( NifModel::WwRefCol, true );
 			head->resizeSection( 0, s0 );
 			head->resizeSection( 1, s1 );
 		}
