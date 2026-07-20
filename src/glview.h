@@ -873,6 +873,42 @@ public:
 	//! raycast + Blender-style snapping (vertex 11px, edge 8px, else face)
 	bool knifeProbe( const QPointF & pos, KnifePoint & kp ) const;
 
+	// ---- Loop Cut modal (Ctrl+R): Blender behavior ----
+	// Phase 1: the ring under the cursor previews in yellow, the wheel sets
+	// the cut count. LMB applies the (centered) cut and enters phase 2, where
+	// the mouse slides the new loop(s); LMB keeps the slid position, RMB/Esc
+	// keeps the loop centered. One undo step for the whole gesture.
+	bool loopCutActive = false;
+	int loopCutPhase = 0;               //!< 1 choosing the ring, 2 sliding
+	int loopCutCuts = 1;
+	float loopCutFactor = 0.0f;
+	//! ring resolved from the hovered edge, in index space (world preview
+	//! positions derive per paint so orbiting keeps the loop glued)
+	int loopCutShape = -1;
+	QVector<QPair<int, int>> loopCutRingEdges;
+	QVector<QPair<int, int>> loopCutQuadTris;
+	bool loopCutClosed = false;
+	quint64 loopCutSeedEdge = 0;        //!< hover cache: same edge = no recompute
+	//! per-shape adjacency cached while the modal is up — a probe runs per
+	//! mouse move and must not rebuild an O(T) hash on a big mesh each time
+	int loopCutAdjShape = -1;
+	QVector<Triangle> loopCutTriCache;
+	QHash<quint64, QVector<int>> loopCutAdjCache;
+	QPersistentModelIndex loopCutPShape;
+	QVector<QVector<int>> loopCutNewVerts;   //!< phase 2: cut verts per ring edge
+	QVector<PickedElement> loopCutSeedSel;   //!< selection snapshot for the redo panel
+	int loopCutSlideBaseX = 0;
+	void beginLoopCut();
+	void cancelLoopCut();
+	//! resolve the ring under the cursor (phase 1)
+	void loopCutProbe( const QPointF & pos );
+	//! LMB in phase 1: apply the centered cut, select the loop, begin slide
+	void loopCutConfirmRing();
+	//! phase 2: mouse X → slide factor, written live
+	void loopCutSlideUpdate( int globalX );
+	//! finish phase 2: keep the current factor (or recenter), close the macro
+	void loopCutFinish( bool centered );
+
 	// ---- Rigging weight-paint brush ----
 	bool riggingWeightPaintMode = false;
 	bool riggingWeightPaintBrushEnabled = true;

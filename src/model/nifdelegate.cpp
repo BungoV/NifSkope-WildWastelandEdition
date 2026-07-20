@@ -40,6 +40,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "qt5compat.hpp"
 
 #include <QItemDelegate> // Inherited
+#include <QAbstractItemView>
+#include <QApplication>
 #include <QComboBox>
 #include <QCursor>
 #include <QGuiApplication>
@@ -64,39 +66,49 @@ extern void qt_format_text( const QFont & font, const QRectF & _r,
 class NifDelegate final : public QItemDelegate
 {
 	SpellBookPtr book;
-	//! Row whose Reference-column value is being pressed/dragged (diff mode)
-	QPersistentModelIndex wwRefPress;
-	//! Cursor-following ghost shown while dragging a reference value. Item
+	//! Reference-column drag state (diff mode). A press arms the drag; only
+	//! after the cursor moves past the start-drag distance does it become
+	//! one (a plain click just selects the row — it never applies). Item
 	//! views don't route mouse-move to editorEvent, so a short timer tracks
 	//! the cursor instead (same pattern as the hover-out operator menus).
-	QTimer * wwRefGhostTimer = nullptr;
+	QPersistentModelIndex wwRefPress;
+	QPoint wwRefPressGlobal;
+	bool wwRefDragging = false;
+	NifValue wwRefDragValue;
 	QString wwRefGhostText;
+	QTimer * wwRefGhostTimer = nullptr;
 
-	void startRefGhost( const QString & text )
+	void armRefDrag( const QString & text )
 	{
 		wwRefGhostText = text;
+		wwRefDragging = false;
 		if ( !wwRefGhostTimer ) {
 			wwRefGhostTimer = new QTimer( this );
-			wwRefGhostTimer->setInterval( 50 );
+			wwRefGhostTimer->setInterval( 30 );
 			connect( wwRefGhostTimer, &QTimer::timeout, this, [this]() {
 				// self-heal: a release outside any row never reaches
-				// editorEvent, so stop as soon as the button is up
+				// editorEvent, so cancel as soon as the button is up
 				if ( !( QGuiApplication::mouseButtons() & Qt::LeftButton ) ) {
-					wwRefPress = QPersistentModelIndex();
-					stopRefGhost();
+					cancelRefDrag();
 					return;
 				}
-				QToolTip::showText( QCursor::pos() + QPoint( 16, 12 ), wwRefGhostText );
+				if ( !wwRefDragging
+					&& ( QCursor::pos() - wwRefPressGlobal ).manhattanLength()
+						> QApplication::startDragDistance() )
+					wwRefDragging = true;
+				if ( wwRefDragging )
+					QToolTip::showText( QCursor::pos() + QPoint( 16, 12 ), wwRefGhostText );
 			} );
 		}
-		QToolTip::showText( QCursor::pos() + QPoint( 16, 12 ), wwRefGhostText );
 		wwRefGhostTimer->start();
 	}
 
-	void stopRefGhost()
+	void cancelRefDrag()
 	{
 		if ( wwRefGhostTimer )
 			wwRefGhostTimer->stop();
+		wwRefPress = QPersistentModelIndex();
+		wwRefDragging = false;
 		QToolTip::hideText();
 	}
 
@@ -141,23 +153,18 @@ public:
 		return QRect( cell.right() - 35, cell.top(), 17, cell.height() );
 	}
 
-	//! Write the diff reference's value onto this row (one undoable change).
-	void applyReferenceValue( QAbstractItemModel * model, const QModelIndex & index ) const
+	//! Write a dragged value onto the row under the drop, when the value
+	//! types match (one undoable change; silently no-op otherwise).
+	void applyValueToRow( NifModel * nif, const QModelIndex & index, const NifValue & v ) const
 	{
-		if ( !model->inherits( "NifModel" ) )
-			return;
-		NifModel * nif = static_cast<NifModel *>( model );
 		const NifItem * item = nif->getItem( index );
-		const auto it = nif->diffRefValues.constFind( item );
-		if ( !item || it == nif->diffRefValues.constEnd() )
-			return;
-		if ( item->valueType() != it.value().type() )
+		if ( !item || item->valueType() != v.type() || v.type() == NifValue::tNone )
 			return;
 		QModelIndex vi = nif->itemToIndex( item, NifModel::ValueCol );
 		if ( !vi.isValid() )
 			return;
 		ChangeValueCommand::createTransaction();
-		nif->undoStack->push( new ChangeValueCommand( vi, item->value(), it.value(), item->name(), nif ) );
+		nif->undoStack->push( new ChangeValueCommand( vi, item->value(), v, item->name(), nif ) );
 	}
 
 	//! ▾ popup: retarget the link to any type-compatible block (or None),
@@ -224,31 +231,41 @@ public:
 		Q_ASSERT( event );
 		Q_ASSERT( model );
 
-		// Reference column (diff mode): press picks the value up — a ghost
-		// follows the cursor — and releasing on the same row applies it.
-		// Handled before the editable guard (the column itself is read-only).
+		// Reference column (diff mode): dragging a reference value past the
+		// start-drag distance picks it up (ghost follows the cursor); dropping
+		// it on a row with a matching value type applies it there. A plain
+		// click only selects the row — it never applies. Handled before the
+		// editable guard (the column itself is read-only).
 		if ( ( event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease )
 			&& static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton
 			&& model->inherits( "NifModel" ) ) {
+			NifModel * nifm = static_cast<NifModel *>( model );
 			if ( event->type() == QEvent::MouseButtonPress ) {
 				if ( index.column() == NifModel::WwRefCol ) {
-					const QString refText = index.data( Qt::DisplayRole ).toString();
-					if ( !refText.isEmpty() ) {
+					const NifItem * srcItem = nifm->getItem( index );
+					const auto it = nifm->diffRefValues.constFind( srcItem );
+					if ( srcItem && it != nifm->diffRefValues.constEnd() ) {
 						wwRefPress = QPersistentModelIndex( index );
-						startRefGhost( refText );
-						return true;
+						wwRefPressGlobal = QCursor::pos();
+						wwRefDragValue = it.value();
+						armRefDrag( index.data( Qt::DisplayRole ).toString() );
+						return true;	// swallowed; click-select is re-done on release
 					}
 				}
-				wwRefPress = QPersistentModelIndex();
+				cancelRefDrag();
 			} else if ( wwRefPress.isValid() ) {
-				const bool sameRow = wwRefPress.row() == index.row()
-					&& wwRefPress.parent() == index.parent();
-				wwRefPress = QPersistentModelIndex();
-				stopRefGhost();
-				if ( sameRow ) {
-					applyReferenceValue( model, index );
-					return true;
+				const bool wasDrag = wwRefDragging;
+				cancelRefDrag();
+				if ( wasDrag ) {
+					// drop: apply the dragged value to the row under the cursor
+					applyValueToRow( nifm, index, wwRefDragValue );
+				} else {
+					// plain click: just select the row (the press was swallowed)
+					if ( auto view = qobject_cast<QAbstractItemView *>(
+							const_cast<QWidget *>( option.widget ) ) )
+						view->setCurrentIndex( index.sibling( index.row(), 0 ) );
 				}
+				return true;
 			}
 		}
 

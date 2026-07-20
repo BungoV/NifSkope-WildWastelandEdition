@@ -1288,7 +1288,7 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 			return QColor::fromRgb( 154, 154, 154 );
 		case Qt::ToolTipRole:
 			if ( diffRefBlock >= 0 && diffItems.contains( item ) )
-				return tr( "Block %1's value — click it, or drag it onto the row, to apply" ).arg( diffRefBlock );
+				return tr( "Block %1's value — drag it onto a row to apply" ).arg( diffRefBlock );
 			return QVariant();
 		default:
 			return QVariant();

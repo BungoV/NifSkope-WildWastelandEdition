@@ -5432,6 +5432,32 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			|| keyFocus->inherits( "QAbstractSpinBox" ) || keyFocus->inherits( "QComboBox" ) );
 		// rebindable viewport shortcuts (see tlRegisterViewportShortcuts)
 		const auto & vpKeys = ShortcutRegistry::get();
+		// loop cut is modal: Esc cancels/recenters, Enter confirms; every
+		// other single-key viewport shortcut stays inert while it is armed
+		if ( ogl && ogl->loopCutActive && !keyFocusIsTextInput ) {
+			if ( ke->key() == Qt::Key_Escape || ke->key() == Qt::Key_Return
+				|| ke->key() == Qt::Key_Enter ) {
+				if ( e->type() == QEvent::KeyPress ) {
+					if ( ke->key() == Qt::Key_Escape ) {
+						if ( ogl->loopCutPhase == 2 )
+							ogl->loopCutFinish( true );
+						else
+							ogl->cancelLoopCut();
+					} else {
+						if ( ogl->loopCutPhase == 2 )
+							ogl->loopCutFinish( false );
+						else
+							ogl->loopCutConfirmRing();
+					}
+				}
+				e->accept();
+				return true;
+			}
+			if ( pointerOverViewport ) {
+				e->accept();
+				return true;
+			}
+		}
 		// the knife is modal: the viewport handles Enter/Esc itself; every
 		// other single-key viewport shortcut stays inert while it is armed
 		if ( ogl && ogl->knifeActive && !keyFocusIsTextInput ) {
@@ -5609,6 +5635,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				op = 6;
 			else if ( vpKeys.matches( "viewport.knife", ke->key(), ke->modifiers() ) )
 				op = 7;
+			else if ( vpKeys.matches( "viewport.bevel", ke->key(), ke->modifiers() ) )
+				op = 8;
 			if ( op ) {
 				if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() ) {
 					if ( op == 1 )
@@ -5623,8 +5651,10 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 						ogl->trisToQuads();
 					else if ( op == 6 )
 						ogl->triangulateSelection( 0 );
-					else
+					else if ( op == 7 )
 						ogl->beginKnife();
+					else
+						ogl->bevelSelection();
 				}
 				e->accept();
 				return true;

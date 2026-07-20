@@ -1,5 +1,60 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20i — Modal Loop Cut, quad fill fix, Bevel reachability, reference drag v2
+
+Four user-reported issues from hands-on testing.
+
+**Loop Cut is now Blender's modal (Ctrl+R)** (glview.cpp/h, nifskope_ui.cpp):
+Ctrl+R arms the modal — the ring under the cursor previews as a yellow loop
+glued to the surface (re-projected per frame, so MMB orbiting works
+mid-modal), the scroll wheel sets 1–64 cuts, LMB applies the cut and
+chains straight into a slide phase where the mouse moves the new loop(s)
+along the ring; LMB places, RMB/Esc recenters, Esc in phase 1 cancels.
+The whole gesture is ONE undo step (macro: TlShapeStateCommand cut +
+optional slide command), and the adjust panel arms afterwards with Number
+of Cuts + Factor, re-run as a single command with the factor baked into
+the lerp. Implementation notes: the ring walk moved into loopCutProbe with
+a per-shape adjacency cache (a probe runs per mouse move — no O(T) hash
+rebuild per move on big meshes; same-edge hovers skip recompute);
+`tlApplyLoopCut`'s new-vert indices are deterministic (nv + i*cuts + k) so
+the slide phase can address them without plumbing; the live slide is
+preview-only writes, then the commit restores center and pushes the slide
+command so undo captures the right pre-state; the new loop lands SELECTED
+in vertex mode. Coexistence: startModalTransform refuses while a modal
+tool owns the mouse; edit-mode exit mid-slide finishes centered (never
+strands the open macro); knife-style key interception in the event filter.
+
+**Quad selection fill artifact FIXED** (glview.cpp fill overlay): the two
+halves of a marked quad rendered different orange tones — the active
+face's lighter fill (0.36α warm) vs the selected fill (0.30α orange) split
+along the hidden diagonal, because only one tri of a pair can be the
+active element. The active face's quad partner now counts as active too,
+so a quad reads as one uniformly-lit face (one quadPartnerTri lookup per
+frame, only while marks exist).
+
+**Bevel made reachable** (glview.cpp, nifskope_ui.cpp): the implementation
+was complete but (a) Ctrl+B had NO pointer-over-viewport event-filter
+routing — it only fired when the GL window held keyboard focus, unlike
+E/F/I/K/etc. — now routed as op 8 in the shared modeling-ops block;
+(b) it was missing from the W Specials menu — added ("Bevel…\tCtrl+B");
+(c) it silently bailed unless edge-mode picks formed the path — a
+vertex-mode fallback now derives the edge path from a selected vertex run
+(edges whose both endpoints are selected), with the same chain guards.
+
+**Reference drag v2** (nifdelegate.cpp): click-to-apply REMOVED per user —
+a plain click on a Reference cell now only selects the row. The drag arms
+on press but only becomes one past QApplication::startDragDistance();
+the ghost then follows the cursor, and the drop applies the dragged
+NifValue to whatever row it lands on IF the value type matches (so a
+reference Glossiness can be dropped onto another float field too).
+Release elsewhere/no match = clean cancel; self-heals via the physical
+mouse-button check.
+
+Build: green. GUI checks owed: modal loop cut end-to-end (preview, wheel,
+slide, undo as one step, adjust panel), quad fill uniformity, Ctrl+B with
+focus in a dock, vertex-run bevel, drag-threshold feel on the Reference
+column.
+
 ## 2026-07-20h — Diff reference gets its own column (supersedes 07-20g's in-cell suffix)
 
 User feedback on 07-20g: the reference value painted inside the Value cell
