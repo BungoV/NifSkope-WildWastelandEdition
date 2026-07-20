@@ -620,6 +620,34 @@ public:
 	const QHash<int, int> & quadPartnerMap( int shapeBlock ) const;
 	mutable QHash<int, QPair<int, QHash<int, int>>> quadPartnerCache;
 
+	// ---- overlay soup caches (perf) ----
+	//! Camera-independent edit-overlay structures cached across repaints.
+	//! Rebuilding the unique-edge / quad-adjacency / filled-tris sets is an
+	//! O(T) hash pass with fresh allocations that used to run every frame,
+	//! camera orbits included. Positions stay per-frame (they depend on the
+	//! eye); topology survives gestures (a move changes no indices) and
+	//! growth (extrude) is caught by the size fingerprints. filledTris also
+	//! depends on the selection — fingerprinted per frame via selHash, so
+	//! selection mutations need no hooks.
+	struct EditOverlaySets {
+		QVector<QPair<int, int>> edges;
+		QVector<int> visVerts;
+		QHash<quint64, int> markAdj;
+		QSet<int> filledTris;
+		int nTris = -1, nVerts = -1, nHidden = -1, nMarks = -1;
+		quint64 selHash = 1;
+		int pickModeUsed = -1;
+	};
+	QHash<int, EditOverlaySets> editOverlaySets;
+	bool editOverlaySetsValid = false;
+	//! Wireframe-overlay unique edge lists (same idea; positions per frame)
+	QHash<int, QVector<QPair<int, int>>> wireEdgeCache;
+	QHash<int, quint64> wireEdgeCacheKey;
+	bool wireEdgeCacheValid = false;
+	//! Drop both overlay caches — call after anything that changes topology,
+	//! hidden triangles, or quad marks outside the size fingerprints' reach
+	void invalidateOverlayCaches() { editOverlaySetsValid = false; wireEdgeCacheValid = false; }
+
 	// ---- X-mirror editing (Blender's Mirror X) ----
 	//! Modal transforms also move the unselected mirror partner of each
 	//! vertex, X-negated in local space; partners are paired by position

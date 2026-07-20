@@ -1786,6 +1786,14 @@ void GLView::paintGL()
 		scene->setGLColor( 0.0f, 0.0f, 0.0f, 1.0f );	// Blender wireframe black
 		scene->setGLLineWidth( Settings::lineWidthWireframe * wireWidthMul );
 
+		// unique edge lists are cached across frames (the QSet dedup pass over
+		// every triangle was running per repaint); only the camera-dependent
+		// positions are rebuilt each frame
+		if ( !wireEdgeCacheValid ) {
+			wireEdgeCache.clear();
+			wireEdgeCacheKey.clear();
+			wireEdgeCacheValid = true;
+		}
 		for ( Shape * s : scene->shapes ) {
 			if ( !s || s->isHidden() || s->verts.isEmpty() || s->triangles.isEmpty() )
 				continue;
@@ -1800,26 +1808,39 @@ void GLView::paintGL()
 			Transform mv = s->viewTrans();
 			Vector3 eyeL = mv.inverted() * Vector3( 0.0f, 0.0f, 0.0f );
 
-			QSet<quint64> eset;
-			QVector<Vector3> lines;
-			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
-				if ( hidT.contains( ti ) )
-					continue;
-				const Triangle & t = s->triangles.at( ti );
-				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
-					continue;
-				for ( int e = 0; e < 3; e++ ) {
-					int a = t[e], b = t[( e + 1 ) % 3];
-					quint64 k = edgeKey( a, b );
-					if ( !eset.contains( k ) ) {
-						eset.insert( k );
-						lines << ( eyeL + ( s->verts[a] - eyeL ) * 0.998f )
-						      << ( eyeL + ( s->verts[b] - eyeL ) * 0.998f );
+			const quint64 wkey = quint64( quint32( s->triangles.size() ) )
+				| ( quint64( quint32( nv ) ) << 24 ) | ( quint64( quint32( hidT.size() ) ) << 48 );
+			auto itW = wireEdgeCache.constFind( s->id() );
+			if ( itW == wireEdgeCache.constEnd() || wireEdgeCacheKey.value( s->id() ) != wkey ) {
+				QVector<QPair<int, int>> built;
+				QSet<quint64> eset;
+				for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+					if ( hidT.contains( ti ) )
+						continue;
+					const Triangle & t = s->triangles.at( ti );
+					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+						continue;
+					for ( int e = 0; e < 3; e++ ) {
+						int a = t[e], b = t[( e + 1 ) % 3];
+						quint64 k = edgeKey( a, b );
+						if ( !eset.contains( k ) ) {
+							eset.insert( k );
+							built.append( qMakePair( a, b ) );
+						}
 					}
 				}
+				itW = wireEdgeCache.insert( s->id(), built );
+				wireEdgeCacheKey.insert( s->id(), wkey );
 			}
-			if ( lines.isEmpty() )
+			const QVector<QPair<int, int>> & wedges = itW.value();
+			if ( wedges.isEmpty() )
 				continue;
+			QVector<Vector3> lines;
+			lines.reserve( wedges.size() * 2 );
+			for ( const auto & e : wedges ) {
+				lines << ( eyeL + ( s->verts[e.first] - eyeL ) * 0.998f )
+				      << ( eyeL + ( s->verts[e.second] - eyeL ) * 0.998f );
+			}
 			scene->loadModelViewMatrix( mv );
 			scene->drawLines( lines.constData(), size_t( lines.size() ), nullptr );
 		}
@@ -1860,6 +1881,21 @@ void GLView::paintGL()
 		}
 		const PickedElement * activeElem = pickedElems.isEmpty() ? nullptr : &pickedElems.constLast();
 
+		// Selection fingerprint: the cached filledTris must follow every
+		// pickedElems mutation, and there are many mutation sites — an FNV
+		// over the elements is O(selection) per frame and needs no hooks.
+		quint64 selHash = 0xcbf29ce484222325ULL;
+		for ( const auto & pe : pickedElems ) {
+			selHash = ( selHash ^ ( quint64( quint32( pe.shapeBlock ) )
+				| ( quint64( quint32( pe.type ) ) << 24 ) ) ) * 1099511628211ULL;
+			selHash = ( selHash ^ ( quint64( quint32( pe.e0 ) )
+				| ( quint64( quint32( pe.e1 ) ) << 32 ) ) ) * 1099511628211ULL;
+		}
+		if ( !editOverlaySetsValid ) {
+			editOverlaySets.clear();
+			editOverlaySetsValid = true;
+		}
+
 		glEnable( GL_DEPTH_TEST );
 		glDepthFunc( GL_LEQUAL );
 		glDepthMask( GL_FALSE );
@@ -1884,44 +1920,60 @@ void GLView::paintGL()
 			// quad diagonals are skipped so a tri pair reads as one quad —
 			// but only while both halves are visible and the edge is still
 			// manifold (otherwise the mark is stale and the edge shows).
+			// All index-space sets are cached across frames (EditOverlaySets);
+			// only positions (camera-dependent) rebuild per repaint.
 			const QSet<int> hiddenT = editHiddenTris.value( wb );
 			const QSet<quint64> qmarks = quadMarksFor( wb );
-			QHash<quint64, int> markAdj;
-			if ( !qmarks.isEmpty() ) {
+			EditOverlaySets & es = editOverlaySets[wb];
+			const bool structuralValid = ( es.nTris == s->triangles.size() && es.nVerts == nv
+				&& es.nHidden == hiddenT.size() && es.nMarks == qmarks.size() );
+			if ( !structuralValid ) {
+				es.markAdj.clear();
+				if ( !qmarks.isEmpty() ) {
+					for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+						if ( hiddenT.contains( ti ) )
+							continue;
+						const Triangle & t = s->triangles.at( ti );
+						if ( t[0] >= nv || t[1] >= nv || t[2] >= nv
+							|| t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+							continue;
+						for ( int e = 0; e < 3; e++ ) {
+							quint64 k = edgeKey( t[e], t[( e + 1 ) % 3] );
+							if ( qmarks.contains( k ) )
+								es.markAdj[k]++;
+						}
+					}
+				}
+				es.visVerts.clear();
+				es.edges.clear();
+				QSet<int> visSet;
+				QSet<quint64> eset;
 				for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
 					if ( hiddenT.contains( ti ) )
 						continue;
 					const Triangle & t = s->triangles.at( ti );
-					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv
-						|| t[0] == t[1] || t[1] == t[2] || t[0] == t[2] )
+					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
 						continue;
 					for ( int e = 0; e < 3; e++ ) {
-						quint64 k = edgeKey( t[e], t[( e + 1 ) % 3] );
-						if ( qmarks.contains( k ) )
-							markAdj[k]++;
+						int a = t[e], b = t[( e + 1 ) % 3];
+						visSet.insert( a );
+						quint64 k = edgeKey( a, b );
+						if ( !eset.contains( k ) ) {
+							eset.insert( k );
+							if ( qmarks.contains( k ) && es.markAdj.value( k ) == 2 )
+								continue;	// interior quad diagonal: not drawn
+							es.edges.append( qMakePair( a, b ) );
+						}
 					}
 				}
-			}
-			QSet<int> visVerts;
-			QSet<quint64> eset;
-			QVector<QPair<int, int>> edges;
-			for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
-				if ( hiddenT.contains( ti ) )
-					continue;
-				const Triangle & t = s->triangles.at( ti );
-				if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
-					continue;
-				for ( int e = 0; e < 3; e++ ) {
-					int a = t[e], b = t[( e + 1 ) % 3];
-					visVerts.insert( a );
-					quint64 k = edgeKey( a, b );
-					if ( !eset.contains( k ) ) {
-						eset.insert( k );
-						if ( qmarks.contains( k ) && markAdj.value( k ) == 2 )
-							continue;	// interior quad diagonal: not drawn
-						edges.append( qMakePair( a, b ) );
-					}
-				}
+				es.visVerts.reserve( visSet.size() );
+				for ( int vi : std::as_const( visSet ) )
+					es.visVerts.append( vi );
+				es.nTris = s->triangles.size();
+				es.nVerts = nv;
+				es.nHidden = hiddenT.size();
+				es.nMarks = qmarks.size();
+				es.selHash = selHash + 1;	// force the filled-tris rebuild below
 			}
 
 			const bool vertMode = bool( pickMode & 1 );
@@ -1933,25 +1985,33 @@ void GLView::paintGL()
 			// selected. Gating the implicit fill on the mode bit keeps face mode
 			// from lighting up a de-selected face just because its verts are still
 			// covered by selected neighbours (the invert-in-face-mode surprise).
-			const bool fillByVerts = bool( pickMode & 1 ) && !sv.isEmpty();
-			const bool fillByEdges = bool( pickMode & 2 ) && !se.isEmpty();
-			QSet<int> filledTris;
-			if ( selFaces.contains( wb ) )
-				filledTris = selFaces.value( wb );
-			if ( fillByVerts || fillByEdges ) {
-				for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
-					if ( hiddenT.contains( ti ) )
-						continue;
-					const Triangle & t = s->triangles.at( ti );
-					if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
-						continue;
-					bool allV = fillByVerts && sv.contains( t[0] ) && sv.contains( t[1] ) && sv.contains( t[2] );
-					bool allE = fillByEdges && se.contains( edgeKey( t[0], t[1] ) )
-						&& se.contains( edgeKey( t[1], t[2] ) ) && se.contains( edgeKey( t[2], t[0] ) );
-					if ( allV || allE )
-						filledTris.insert( ti );
+			if ( es.selHash != selHash || es.pickModeUsed != pickMode ) {
+				const bool fillByVerts = bool( pickMode & 1 ) && !sv.isEmpty();
+				const bool fillByEdges = bool( pickMode & 2 ) && !se.isEmpty();
+				es.filledTris.clear();
+				if ( selFaces.contains( wb ) )
+					es.filledTris = selFaces.value( wb );
+				if ( fillByVerts || fillByEdges ) {
+					for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
+						if ( hiddenT.contains( ti ) )
+							continue;
+						const Triangle & t = s->triangles.at( ti );
+						if ( t[0] >= nv || t[1] >= nv || t[2] >= nv )
+							continue;
+						bool allV = fillByVerts && sv.contains( t[0] ) && sv.contains( t[1] ) && sv.contains( t[2] );
+						bool allE = fillByEdges && se.contains( edgeKey( t[0], t[1] ) )
+							&& se.contains( edgeKey( t[1], t[2] ) ) && se.contains( edgeKey( t[2], t[0] ) );
+						if ( allV || allE )
+							es.filledTris.insert( ti );
+					}
 				}
+				es.selHash = selHash;
+				es.pickModeUsed = pickMode;
 			}
+			const QVector<QPair<int, int>> & edges = es.edges;
+			const QHash<quint64, int> & markAdj = es.markAdj;
+			const QSet<int> & filledTris = es.filledTris;
+			const QVector<int> & visVerts = es.visVerts;
 
 			// Selection (fills, selected edges/verts, outlines) is drawn with
 			// the depth test OFF so nearby unconnected geometry can never
@@ -4795,6 +4855,7 @@ void GLView::hideSelectedElements()
 		Shape * s = shapeForBlock( pe.shapeBlock );
 		if ( !s )
 			continue;
+		invalidateOverlayCaches();
 		QSet<int> & hid = editHiddenTris[pe.shapeBlock];
 		for ( int ti = 0; ti < s->triangles.size(); ti++ ) {
 			const Triangle & t = s->triangles.at( ti );
@@ -4823,6 +4884,7 @@ void GLView::unhideAllElements()
 {
 	editHiddenTris.clear();
 	scene->hiddenTris.clear();
+	invalidateOverlayCaches();
 	update();
 }
 
@@ -4842,6 +4904,7 @@ void GLView::isolateSelected()
 			if ( !shape )
 				continue;
 			const QSet<int> keep = selectedVertices.value( block );
+			invalidateOverlayCaches();
 			QSet<int> & hidden = editHiddenTris[block];
 			for ( int triangle = 0; triangle < shape->triangles.size(); triangle++ ) {
 				const Triangle & t = shape->triangles.at( triangle );
@@ -4946,6 +5009,7 @@ void GLView::restoreAllVisibility()
 	editHiddenTris.clear();
 	scene->hiddenTris.clear();
 	scene->hiddenNodes.clear();
+	invalidateOverlayCaches();
 	updateDimmedBlocks();
 	emit gizmoStatus( tr( "Restored all hidden geometry and objects" ) );
 	update();
@@ -10386,6 +10450,7 @@ public:
 		gv->quadDiagonals[sb] = before;
 		gv->quadMarkVerts[sb] = nvBefore;
 		gv->quadPartnerCache.remove( sb );
+		gv->invalidateOverlayCaches();
 		gv->update();
 	}
 	void redo() override
@@ -10393,6 +10458,7 @@ public:
 		gv->quadDiagonals[sb] = after;
 		gv->quadMarkVerts[sb] = nvAfter;
 		gv->quadPartnerCache.remove( sb );
+		gv->invalidateOverlayCaches();
 		gv->update();
 	}
 private:
@@ -15978,6 +16044,8 @@ QModelIndex parent( QModelIndex ix, QModelIndex xi )
 
 void GLView::dataChanged( const QModelIndex & idx, const QModelIndex & xdi )
 {
+	invalidateOverlayCaches();
+
 	if ( doCompile )
 		return;
 
@@ -16005,6 +16073,8 @@ void GLView::dataChanged( const QModelIndex & idx, const QModelIndex & xdi )
 
 void GLView::modelChanged()
 {
+	invalidateOverlayCaches();
+
 	if ( doCompile )
 		return;
 
