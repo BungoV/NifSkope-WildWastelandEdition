@@ -1,5 +1,14 @@
 # Block List & Block Details — Overhaul Plan
 
+> **2026-07-20: the Block DETAILS half of this doc is superseded by
+> `BLOCK_DETAILS_OVERHAUL_PLAN.md`** (v2 concept + mockup in
+> `docs/block_details_mockup.html`). Much of this doc's top-6 has shipped
+> since it was written: block-list search/icons/chips, Links/Referenced-by
+> peek, the Details field filter, the named flag dialogs, and flag
+> copy/paste. The Block LIST sections below remain the reference for the
+> remaining list-side items (summary column, badges, drag-to-reparent —
+> the latter recommended against in v2).
+
 **Status:** Backlog / design notes. **Not being implemented yet** (agreed 2026-07-12).
 **Direction:** **Blender-familiar** — lean into the N-panel / icon / drag-reparent
 interaction model rather than only bolting polish onto the classic

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Block Details Overhaul v2 — Mockup</title>
+<style>
+  :root {
+    --bg: #2b2b2b; --panel: #383838; --well: #454545; --line: #303030;
+    --txt: #e4e4e4; --dim: #a8a8a8; --faint: #777;
+    --accent: #4772b3; --orange: #ff8500; --red: #d9534f; --green: #6a9955;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--txt); font: 12px "Segoe UI", sans-serif;
+         margin: 0; padding: 18px; display: flex; gap: 18px; flex-wrap: wrap; }
+  .dock { background: var(--panel); border: 1px solid var(--line); width: 380px;
+          border-radius: 4px; overflow: hidden; }
+  .dock h1 { font-size: 12px; margin: 0; padding: 6px 10px; background: #333;
+             border-bottom: 1px solid #555; color: #bbb; font-weight: 600; }
+  .note { width: 380px; color: var(--dim); font-size: 11px; line-height: 1.5; }
+  .note b { color: var(--txt); }
+
+  /* header card */
+  .card { padding: 8px 10px; border-bottom: 1px solid var(--line); background: #3d3d3d; }
+  .card .row1 { display: flex; align-items: center; gap: 7px; }
+  .typeicon { width: 18px; height: 18px; border-radius: 3px; background: #7b5ea7;
+              display: inline-flex; align-items: center; justify-content: center;
+              font-size: 10px; font-weight: bold; }
+  .blockno { color: var(--faint); }
+  .name { background: var(--well); border: 1px solid var(--line); border-radius: 3px;
+          padding: 2px 7px; color: var(--txt); flex: 1; }
+  .crumb { color: var(--dim); margin-top: 5px; font-size: 11px; }
+  .crumb a { color: #8fb0dd; text-decoration: none; }
+  .summary { margin-top: 4px; color: var(--dim); }
+  .badge { background: var(--red); color: #fff; border-radius: 3px; padding: 0 5px;
+           font-size: 10px; margin-left: 5px; }
+  .actions { display: flex; gap: 4px; margin-top: 7px; }
+  .actions button, .viewtoggle button {
+      background: var(--well); border: 1px solid #606060; color: var(--txt);
+      border-radius: 3px; padding: 2px 9px; cursor: pointer; font-size: 11px; }
+  .actions button:hover { background: #525252; }
+  .viewtoggle { display: flex; gap: 0; margin-left: auto; }
+  .viewtoggle button { border-radius: 0; border-right: none; }
+  .viewtoggle button:first-child { border-radius: 3px 0 0 3px; }
+  .viewtoggle button:last-child { border-radius: 0 3px 3px 0; border-right: 1px solid #606060; }
+  .viewtoggle .on { background: var(--accent); border-color: var(--accent); }
+
+  /* sections */
+  details { border-bottom: 1px solid var(--line); }
+  summary { padding: 5px 10px; cursor: pointer; color: #cfcfcf; font-weight: 600;
+            background: #343434; user-select: none; list-style: none; }
+  summary::before { content: "▾ "; color: var(--faint); }
+  details:not([open]) summary::before { content: "▸ "; }
+  .fields { padding: 4px 0; }
+  .f { display: flex; align-items: center; gap: 6px; padding: 3px 10px; }
+  .f:hover { background: #404040; }
+  .f label { width: 118px; color: var(--dim); flex-shrink: 0; }
+  .pin { color: #555; cursor: pointer; width: 12px; }
+  .pin.on { color: var(--orange); }
+  .scrub { background: var(--well); border: 1px solid var(--line); border-radius: 3px;
+           padding: 2px 7px; flex: 1; position: relative; cursor: ew-resize;
+           display: flex; justify-content: space-between; }
+  .scrub .arr { color: var(--faint); }
+  .slider { flex: 1; height: 18px; background: var(--well); border: 1px solid var(--line);
+            border-radius: 3px; position: relative; cursor: ew-resize; }
+  .slider .fill { position: absolute; inset: 0 auto 0 0; background: #55688a;
+                  border-radius: 2px; }
+  .slider .val { position: absolute; inset: 0; display: flex; align-items: center;
+                 justify-content: center; }
+  .triple { display: flex; gap: 4px; flex: 1; }
+  .triple .scrub { flex: 1; padding: 2px 5px; }
+  .swatch { width: 22px; height: 18px; border-radius: 3px; border: 1px solid #222; }
+  .linkchip { background: #3f4a5f; border: 1px solid #55688a; border-radius: 3px;
+              padding: 2px 7px; flex: 1; display: flex; gap: 6px; align-items: center; }
+  .linkchip .t { color: #8fb0dd; }
+  .linkchip .jump, .linkchip .pick { margin-left: auto; color: var(--dim); cursor: pointer; }
+  .linkchip .pick { margin-left: 4px; }
+  .flagchips { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+  .chip { background: #4a4a4a; border: 1px solid #5c5c5c; border-radius: 8px;
+          padding: 1px 8px; font-size: 10px; color: #cfcfcf; }
+  .chip.more { background: none; border-style: dashed; cursor: pointer; }
+  .path { flex: 1; display: flex; gap: 4px; align-items: center; }
+  .path input { flex: 1; background: var(--well); border: 1px solid var(--line);
+                border-radius: 3px; color: var(--txt); padding: 2px 7px; font-size: 11px; }
+  .path input.missing { border-color: var(--red); }
+  .derived { color: var(--faint); font-style: italic; }
+
+  /* diff */
+  .diff td { padding: 3px 8px; border-bottom: 1px solid var(--line); }
+  .diff { width: 100%; border-collapse: collapse; }
+  .diff th { text-align: left; padding: 4px 8px; color: var(--dim); background: #343434;
+             font-weight: 600; }
+  .ne { background: #4a3a2a; }
+  .take { color: var(--orange); cursor: pointer; }
+
+  /* table view */
+  .grid { width: 100%; border-collapse: collapse; font-family: Consolas, monospace;
+          font-size: 11px; }
+  .grid th { background: #343434; color: var(--dim); padding: 3px 6px; text-align: right;
+             border: 1px solid var(--line); position: sticky; top: 0; }
+  .grid td { padding: 2px 6px; text-align: right; border: 1px solid var(--line);
+             color: #cfcfcf; }
+  .grid tr.sel td { background: #4a3a2a; }
+  .grid td.bad { color: var(--red); font-weight: bold; }
+  .stats td { color: var(--faint); font-style: italic; }
+  .tbar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line);
+          align-items: center; color: var(--dim); }
+  .tbar button { background: var(--well); border: 1px solid #606060; color: var(--txt);
+                 border-radius: 3px; padding: 2px 8px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="note">
+  <b>Block Details Overhaul v2 — mockup.</b> Left: the upgraded dock in
+  <b>Curated</b> view (header card, pinned fields, task-shaped sections, typed
+  editors). Right: <b>Diff</b> view and the <b>array table</b> dock. The Raw
+  view is today's tree, unchanged, one toggle away. Sections collapse
+  (click the headers — they work), state persists per block type.
+  <br><br>
+  Fields show the editor vocabulary: <b>scrub</b> fields drag like Blender,
+  0–1 floats render as sliders, rotation edits as Euler, links are chips with
+  jump ↗ and pick ▾, flags are chips opening the flag dialog, paths validate
+  against the archive VFS. ★ pins a field to the top for that block type.
+</div>
+
+<div class="dock">
+  <h1>Block Details — Curated view</h1>
+  <div class="card">
+    <div class="row1">
+      <span class="typeicon">S</span>
+      <span class="blockno">#113</span>
+      <input class="name" value="ArmorShader">
+      <span title="BSLightingShaderProperty" style="color:var(--faint)">BSLightingShaderProperty</span>
+    </div>
+    <div class="crumb">⌂ <a href="#">Scene Root</a> › <a href="#">Tank_Armor</a> › <a href="#">X01_Torso_Tesla:0</a> › <b>ArmorShader</b></div>
+    <div class="summary">materials/armor/x01/armor.bgsm <span class="badge">MISSING</span></div>
+    <div class="actions">
+      <button title="Jump to parent">▲</button>
+      <button>Links 2/1</button>
+      <button title="Pin block">★</button>
+      <button title="Spells">⚡</button>
+      <button>Copy Values</button>
+      <button>Paste Values</button>
+      <div class="viewtoggle">
+        <button class="on">Curated</button><button>Raw</button><button>Diff</button>
+      </div>
+    </div>
+  </div>
+
+  <details open>
+    <summary>Pinned</summary>
+    <div class="fields">
+      <div class="f"><span class="pin on">★</span><label>Glossiness</label>
+        <div class="scrub"><span class="arr">‹</span> 80.0 <span class="arr">›</span></div></div>
+      <div class="f"><span class="pin on">★</span><label>Specular Strength</label>
+        <div class="slider"><div class="fill" style="width:65%"></div><div class="val">0.65</div></div></div>
+    </div>
+  </details>
+
+  <details open>
+    <summary>Material</summary>
+    <div class="fields">
+      <div class="f"><span class="pin">★</span><label>Name (material)</label>
+        <div class="path"><input class="missing" value="materials/armor/x01/armor.bgsm"><button>…</button></div></div>
+      <div class="f"><span class="pin">★</span><label>Texture Set</label>
+        <div class="linkchip"><span class="t">BSShaderTextureSet</span> Armor_d #114
+          <span class="jump" title="Jump to block">↗</span><span class="pick" title="Pick another">▾</span></div></div>
+      <div class="f"><span class="pin">★</span><label>Emissive Color</label>
+        <div class="swatch" style="background:#26343f"></div>
+        <div class="triple"><div class="scrub">0.15</div><div class="scrub">0.20</div><div class="scrub">0.25</div></div></div>
+      <div class="f"><span class="pin">★</span><label>Emissive Multiple</label>
+        <div class="scrub"><span class="arr">‹</span> 1.000 <span class="arr">›</span></div></div>
+    </div>
+  </details>
+
+  <details open>
+    <summary>Flags</summary>
+    <div class="fields">
+      <div class="f"><span class="pin">★</span><label>Shader Flags</label>
+        <div class="flagchips">
+          <span class="chip">Specular</span><span class="chip">Skinned</span>
+          <span class="chip">Vertex Alpha</span><span class="chip">Env Mapping</span>
+          <span class="chip more" title="Open the flag dialog">+6 · edit…</span>
+        </div></div>
+    </div>
+  </details>
+
+  <details>
+    <summary>UV Transform</summary>
+    <div class="fields"></div>
+  </details>
+  <details>
+    <summary>Other (14 fields)</summary>
+    <div class="fields"></div>
+  </details>
+</div>
+
+<div style="display:flex; flex-direction:column; gap:18px;">
+  <div class="dock">
+    <h1>Diff view — #113 ArmorShader vs ▾ #127 ArmorShader_Glow</h1>
+    <table class="diff">
+      <tr><th>Field</th><th>#113</th><th>#127</th><th></th></tr>
+      <tr><td>Glossiness</td><td>80.0</td><td>80.0</td><td></td></tr>
+      <tr class="ne"><td>Emissive Multiple</td><td>1.000</td><td><b>4.500</b></td><td class="take" title="Copy #127's value">◀</td></tr>
+      <tr class="ne"><td>Emissive Color</td><td>0.15 0.20 0.25</td><td><b>0.90 0.45 0.10</b></td><td class="take">◀</td></tr>
+      <tr class="ne"><td>Shader Flags F2</td><td>0x00000031</td><td><b>0x00000035</b></td><td class="take">◀</td></tr>
+      <tr><td>Specular Strength</td><td>0.65</td><td>0.65</td><td></td></tr>
+      <tr><td colspan="4" style="text-align:right; padding:6px 10px;"><button style="background:var(--well); border:1px solid #606060; color:var(--txt); border-radius:3px; padding:2px 10px;">Apply all differences ◀</button></td></tr>
+    </table>
+  </div>
+
+  <div class="dock" style="width:430px">
+    <h1>Vertex Data — table view (virtualized)</h1>
+    <div class="tbar">
+      <span>4,031 rows</span><button>Columns ▾</button><button>Stats</button>
+      <button>Export CSV…</button><span style="margin-left:auto">sync: <b style="color:var(--orange)">viewport ●</b></span>
+    </div>
+    <table class="grid">
+      <tr><th>#</th><th>Vertex X</th><th>Y</th><th>Z</th><th>W0</th><th>W1</th><th>B0</th><th>B1</th></tr>
+      <tr><td>1521</td><td>-3.021</td><td>12.44</td><td>-98.20</td><td>0.750</td><td>0.250</td><td>5</td><td>6</td></tr>
+      <tr class="sel"><td>1522</td><td>-3.010</td><td>12.51</td><td>-98.11</td><td>0.800</td><td>0.200</td><td>5</td><td>6</td></tr>
+      <tr><td>1523</td><td>-2.988</td><td>12.60</td><td>-98.05</td><td class="bad">NaN</td><td>0.000</td><td>5</td><td>0</td></tr>
+      <tr><td>1524</td><td>-2.971</td><td>12.66</td><td>-97.95</td><td>1.000</td><td>0.000</td><td>5</td><td>0</td></tr>
+      <tr class="stats"><td>min/max</td><td>-14.2/14.2</td><td>-9.8/22.1</td><td>-121/-64</td><td>0–1 <b class="bad" style="font-style:normal">1 NaN</b></td><td>0–1</td><td>0–61</td><td>0–61</td></tr>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>
