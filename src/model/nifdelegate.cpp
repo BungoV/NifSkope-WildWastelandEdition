@@ -48,6 +48,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPointer>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
@@ -78,6 +79,11 @@ class NifDelegate final : public QItemDelegate
 	NifValue wwRefDragValue;
 	QString wwRefGhostText;
 	QTimer * wwRefGhostTimer = nullptr;
+	//! the view the drag started in. The DROP is finished from the tracking
+	//! timer, not editorEvent: item views only route a mouse release to the
+	//! delegate when it lands on the PRESSED cell, and a drag by definition
+	//! releases somewhere else.
+	QPointer<QAbstractItemView> wwRefView;
 	//! frameless floating label as the drag ghost — a QToolTip re-shows (and
 	//! fades) on every reposition, which read as shimmering; this one is
 	//! created once and only ever move()d
@@ -91,9 +97,23 @@ class NifDelegate final : public QItemDelegate
 			wwRefGhostTimer = new QTimer( this );
 			wwRefGhostTimer->setInterval( 16 );
 			connect( wwRefGhostTimer, &QTimer::timeout, this, [this]() {
-				// self-heal: a release outside any row never reaches
-				// editorEvent, so cancel as soon as the button is up
+				// the button is up: finish the drop HERE. The view only routes
+				// a release to editorEvent when it lands on the pressed cell,
+				// so a real drag (released over a different cell) would never
+				// be seen there.
 				if ( !( QGuiApplication::mouseButtons() & Qt::LeftButton ) ) {
+					if ( wwRefDragging && wwRefView && wwRefPress.isValid() ) {
+						const QPoint vp = wwRefView->viewport()->mapFromGlobal( QCursor::pos() );
+						if ( wwRefView->viewport()->rect().contains( vp ) ) {
+							const QModelIndex di = wwRefView->indexAt( vp );
+							if ( di.isValid() && di.column() == NifModel::ValueCol
+								&& di.model() && di.model()->inherits( "NifModel" ) ) {
+								applyValueToRow(
+									static_cast<NifModel *>( const_cast<QAbstractItemModel *>( di.model() ) ),
+									di, wwRefDragValue );
+							}
+						}
+					}
 					cancelRefDrag();
 					return;
 				}
@@ -273,21 +293,20 @@ public:
 						wwRefPress = QPersistentModelIndex( index );
 						wwRefPressGlobal = QCursor::pos();
 						wwRefDragValue = it.value();
+						wwRefView = qobject_cast<QAbstractItemView *>(
+							const_cast<QWidget *>( option.widget ) );
 						armRefDrag( index.data( Qt::DisplayRole ).toString() );
 						return true;	// swallowed; click-select is re-done on release
 					}
 				}
 				cancelRefDrag();
 			} else if ( wwRefPress.isValid() ) {
+				// this only fires when the release lands back on the pressed
+				// Reference cell (view routing); a real drag's drop is handled
+				// by the tracking timer above
 				const bool wasDrag = wwRefDragging;
 				cancelRefDrag();
-				if ( wasDrag ) {
-					// drop applies ONLY when released over a Value cell —
-					// anywhere else (incl. the Reference column itself, i.e.
-					// dragging in place) is a clean cancel
-					if ( index.column() == NifModel::ValueCol )
-						applyValueToRow( nifm, index, wwRefDragValue );
-				} else {
+				if ( !wasDrag ) {
 					// plain click: just select the row (the press was swallowed)
 					if ( auto view = qobject_cast<QAbstractItemView *>(
 							const_cast<QWidget *>( option.widget ) ) )

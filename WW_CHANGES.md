@@ -11,6 +11,15 @@ Drops now apply ONLY when released over a Value cell; anywhere else
 (Reference/Name/Type columns, other rows without a type match, off-row)
 cancels cleanly. Tooltip wording updated to match.
 
+**Follow-up (d2552fc), "nothing happens on drop": Qt item views only route
+a mouse RELEASE to the delegate's editorEvent when it lands on the pressed
+cell — a drag by definition releases on a different cell, so the
+Value-cell drop never fired. The ghost's tracking timer now detects
+button-up itself, resolves the cell under the cursor via view->indexAt,
+and applies there. Lesson for any delegate-driven drag: editorEvent is
+press/same-cell-release only; cross-cell gestures need view-level or
+timer-level completion.**
+
 ## 2026-07-20i — Modal Loop Cut, quad fill fix, Bevel reachability, reference drag v2
 
 Four user-reported issues from hands-on testing.
