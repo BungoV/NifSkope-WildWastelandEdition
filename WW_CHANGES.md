@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20o — Loop Cut v3: single-vertex edge cut on tris, full adjust panel, edge-mode A
+
+- **Plain triangles: single-vertex cut (Blender)** — when the hovered edge
+  has no marked-quad ring, Ctrl+R degenerates to Blender's single-vertex
+  placement: the preview is a yellow dot on the hovered edge (so the
+  preview now FOLLOWS the mouse everywhere instead of freezing at the
+  last quad ring), and confirming splits just that edge — `tlApplyEdgeCut`
+  adds the cut vert(s) and fans the ≤2 adjacent triangles with winding
+  preserved. Its own "Edge Cut" panel: Cuts / Factor / Clamp / Flipped.
+- **Full Loop Cut panel** — the ring path's panel now carries the
+  supported set of Blender's Loop Cut and Slide: Number of Cuts,
+  Smoothness (normal-direction bulge, scaled by edge length), Falloff
+  (Inverse Square / Sharp / Linear / Sphere / Smooth — shapes the bulge
+  across multiple cuts), Factor, Flipped (mirrors the slide), Clamp
+  (off allows a mild ±0.5 overshoot past the edge ends). Not carried:
+  Even (needs per-edge arc-length slide), Correct UVs (UVs are always
+  interpolated correctly here), Mirror Editing.
+- **A selects all in edge mode** — selectAll built verts or faces only;
+  edge pick mode fell into the vertex branch. It now builds every unique
+  non-degenerate edge as a proper edge pick.
+
 ## 2026-07-20n — Loop Cut v2: Blender parity (quads-only, stays quads, centered + panel, typed count, orange loop)
 
 User feedback on the first modal: cuts triangulated visibly, passed

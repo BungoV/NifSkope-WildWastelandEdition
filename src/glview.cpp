@@ -2445,6 +2445,13 @@ void GLView::paintGL()
 						if ( ok.at( i ) && ok.at( j ) )
 							painter.drawLine( pts.at( i ), pts.at( j ) );
 					}
+					// single-edge fallback (plain triangles): the "loop" is
+					// one vertex per cut — preview as dots on the edge
+					if ( nEdges == 1 && ok.at( 0 ) ) {
+						painter.setBrush( QColor( 255, 204, 0, 235 ) );
+						painter.drawEllipse( pts.at( 0 ), 3.5, 3.5 );
+						painter.setBrush( Qt::NoBrush );
+					}
 				}
 			}
 		}
@@ -12480,7 +12487,8 @@ void GLView::knifeApply()
 //! vertex count: nv + i*cuts + k, in ring-edge order.
 static void tlApplyLoopCut( NifModel * model, const QPersistentModelIndex & pShape,
 	const QVector<QPair<int, int>> & ringEdges, const QVector<QPair<int, int>> & quadTris,
-	int cuts, float factor )
+	int cuts, float factor, float smooth = 0.0f, int falloff = 0,
+	bool clampT = true, bool flipped = false )
 {
 	QModelIndex iS( pShape );
 	if ( !iS.isValid() )
@@ -12494,11 +12502,15 @@ static void tlApplyLoopCut( NifModel * model, const QPersistentModelIndex & pSha
 	cuts = std::clamp( cuts, 1, 64 );
 	if ( nv + cuts * ringEdges.size() > 0xFFFF )
 		cuts = std::max( 1, int( ( 0xFFFF - nv ) / std::max( ringEdges.size(), qsizetype( 1 ) ) ) );
-	const float f = std::clamp( factor, -1.0f, 1.0f );
-	auto cutT = [f, cuts]( int k ) {
+	float f = std::clamp( factor, -1.0f, 1.0f );
+	if ( flipped )
+		f = -f;
+	auto cutT = [f, cuts, clampT]( int k ) {
 		float t = float( k + 1 ) / float( cuts + 1 );
 		t = ( f >= 0.0f ) ? t + f * ( 1.0f - t ) : t * ( 1.0f + f );
-		return std::clamp( t, 0.001f, 0.999f );
+		// Clamp keeps the loop on its edges; off allows a mild overshoot
+		return clampT ? std::clamp( t, 0.001f, 0.999f )
+		              : std::clamp( t, -0.5f, 1.5f );
 	};
 	auto readP = [&]( int v ) {
 		return model->get<Vector3>( model->getIndex( iVD2, v ), "Vertex" );
@@ -12522,6 +12534,53 @@ static void tlApplyLoopCut( NifModel * model, const QPersistentModelIndex & pSha
 	QVector<Triangle> tv( nt );
 	for ( int t = 0; t < nt; t++ )
 		tv[t] = model->get<Triangle>( model->getIndex( iT, t ) );
+
+	// smoothness: bulge the new loop along the surface normal, shaped by the
+	// falloff profile across multiple cuts (Blender's Smoothness/Falloff)
+	if ( smooth != 0.0f ) {
+		const int n = ringEdges.size();
+		const bool closedRing = ( quadTris.size() == n );
+		QVector<Vector3> spanN( quadTris.size() );
+		for ( int q = 0; q < quadTris.size(); q++ ) {
+			const Triangle ot = tv.at( quadTris.at( q ).first );
+			Vector3 nn = Vector3::crossproduct( readP( ot[1] ) - readP( ot[0] ),
+				readP( ot[2] ) - readP( ot[0] ) );
+			nn.normalize();
+			spanN[q] = nn;
+		}
+		for ( int i = 0; i < n; i++ ) {
+			int qa = i - 1, qb = i;
+			if ( qa < 0 )
+				qa = closedRing ? quadTris.size() - 1 : -1;
+			if ( qb >= quadTris.size() )
+				qb = -1;
+			Vector3 nn;
+			if ( qa >= 0 )
+				nn += spanN.at( qa );
+			if ( qb >= 0 )
+				nn += spanN.at( qb );
+			nn.normalize();
+			const float len = ( readP( ringEdges.at( i ).second )
+				- readP( ringEdges.at( i ).first ) ).length();
+			for ( int k = 0; k < cuts; k++ ) {
+				const float t = float( k + 1 ) / float( cuts + 1 );
+				const float u = 1.0f - std::fabs( 2.0f * t - 1.0f );
+				float w;
+				switch ( falloff ) {
+				case 1:  w = u * u; break;						// Sharp
+				case 2:  w = u; break;							// Linear
+				case 3:  w = std::sin( u * 1.5707963f ); break;	// Sphere
+				case 4:  w = u * u * ( 3.0f - 2.0f * u ); break;	// Smooth
+				default: w = u * ( 2.0f - u ); break;			// Inverse Square
+				}
+				if ( cuts == 1 )
+					w = 1.0f;
+				const int v = cutsOf.at( i ).at( k );
+				tlSetVertexLocal( model, iS, v, readP( v ) + nn * ( smooth * len * w ) );
+			}
+		}
+	}
+
 	QVector<Triangle> extra;
 	QSet<int> touched;
 	for ( int q = 0; q < quadTris.size(); q++ ) {
@@ -12568,6 +12627,90 @@ static void tlApplyLoopCut( NifModel * model, const QPersistentModelIndex & pSha
 	if ( stride > 0 )
 		model->set<int>( iS, "Data Size",
 			( nv + cuts * int( ringEdges.size() ) ) * stride + ( nt + extra.size() ) * 6 );
+	tlRecalcNormalsSubset( model, iS, touched );
+	model->restoreState();
+	model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
+}
+
+//! Blender's loop cut over plain triangles degenerates to a single edge:
+//! split the hovered edge with `cuts` verts and fan the (<=2) adjacent tris.
+static void tlApplyEdgeCut( NifModel * model, const QPersistentModelIndex & pShape,
+	int va, int vb, int cuts, float factor, bool clampT = true, bool flipped = false )
+{
+	QModelIndex iS( pShape );
+	if ( !iS.isValid() )
+		return;
+	QModelIndex iVD = model->getIndex( iS, "Vertex Data" );
+	QModelIndex iT = model->getIndex( iS, "Triangles" );
+	const int nv = model->get<int>( iS, "Num Vertices" );
+	const int nt = model->get<int>( iS, "Num Triangles" );
+	const int ds = model->get<int>( iS, "Data Size" );
+	const int stride = ( nv > 0 ) ? ( ds - nt * 6 ) / nv : 0;
+	cuts = std::clamp( cuts, 1, 64 );
+	if ( nv + cuts > 0xFFFF )
+		return;
+	float f = std::clamp( factor, -1.0f, 1.0f );
+	if ( flipped )
+		f = -f;
+	auto cutT = [f, cuts, clampT]( int k ) {
+		float t = float( k + 1 ) / float( cuts + 1 );
+		t = ( f >= 0.0f ) ? t + f * ( 1.0f - t ) : t * ( 1.0f + f );
+		return clampT ? std::clamp( t, 0.001f, 0.999f ) : std::clamp( t, -0.5f, 1.5f );
+	};
+	model->setState( BaseModel::Processing );
+	model->set<int>( iS, "Num Vertices", nv + cuts );
+	model->updateArraySize( iVD );
+	QVector<int> mids( cuts );
+	for ( int k = 0; k < cuts; k++ ) {
+		tlWriteLerpVertex( model, iS, nv + k, va, vb, cutT( k ) );
+		mids[k] = nv + k;
+	}
+	QVector<Triangle> tv( nt );
+	for ( int t = 0; t < nt; t++ )
+		tv[t] = model->get<Triangle>( model->getIndex( iT, t ) );
+	QVector<Triangle> extra;
+	QSet<int> touched;
+	touched << va << vb;
+	for ( int m : std::as_const( mids ) )
+		touched << m;
+	for ( int t = 0; t < nt; t++ ) {
+		const Triangle & tr = tv.at( t );
+		if ( tr[0] == tr[1] || tr[1] == tr[2] || tr[0] == tr[2] )
+			continue;
+		int e = -1;
+		bool fwd = true;
+		for ( int i = 0; i < 3; i++ ) {
+			const int a = tr[i], b = tr[( i + 1 ) % 3];
+			if ( a == va && b == vb ) { e = i; fwd = true; break; }
+			if ( a == vb && b == va ) { e = i; fwd = false; break; }
+		}
+		if ( e < 0 )
+			continue;
+		const int c = tr[( e + 2 ) % 3];
+		touched << c;
+		// fan a -> mids -> b against apex c, preserving the winding
+		QVector<int> chain;
+		chain << ( fwd ? va : vb );
+		if ( fwd ) {
+			for ( int m : std::as_const( mids ) )
+				chain << m;
+		} else {
+			for ( int k = cuts - 1; k >= 0; k-- )
+				chain << mids.at( k );
+		}
+		chain << ( fwd ? vb : va );
+		tv[t] = Triangle( quint16( chain.at( 0 ) ), quint16( chain.at( 1 ) ), quint16( c ) );
+		for ( int k = 1; k + 1 < chain.size(); k++ )
+			extra.append( Triangle( quint16( chain.at( k ) ), quint16( chain.at( k + 1 ) ), quint16( c ) ) );
+	}
+	model->set<int>( iS, "Num Triangles", nt + extra.size() );
+	model->updateArraySize( iT );
+	for ( int t = 0; t < nt; t++ )
+		model->set<Triangle>( model->getIndex( iT, t ), tv.at( t ) );
+	for ( int t = 0; t < extra.size(); t++ )
+		model->set<Triangle>( model->getIndex( iT, nt + t ), extra.at( t ) );
+	if ( stride > 0 )
+		model->set<int>( iS, "Data Size", ( nv + cuts ) * stride + ( nt + extra.size() ) * 6 );
 	tlRecalcNormalsSubset( model, iS, touched );
 	model->restoreState();
 	model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
@@ -12804,8 +12947,18 @@ void GLView::loopCutProbe( const QPointF & pos )
 			quads = allQ;
 		}
 	}
-	if ( quads.isEmpty() )
-		return;		// boundary/pole edge: keep the previous preview
+	if ( quads.isEmpty() ) {
+		// no quad ring from here (plain triangles, boundary, pole): Blender
+		// degenerates to a single-vertex cut on the hovered edge — the
+		// preview becomes a dot and confirming splits just this edge
+		loopCutShape = sb;
+		loopCutSeedEdge = seedKey;
+		loopCutRingEdges = { { pe.e0, pe.e1 } };
+		loopCutQuadTris.clear();
+		loopCutClosed = false;
+		update();
+		return;
+	}
 
 	loopCutShape = sb;
 	loopCutSeedEdge = seedKey;
@@ -12821,8 +12974,8 @@ void GLView::loopCutConfirmRing()
 {
 	if ( !loopCutActive )
 		return;
-	if ( loopCutShape < 0 || loopCutRingEdges.isEmpty() || loopCutQuadTris.isEmpty() ) {
-		emit gizmoStatus( tr( "Loop Cut: hover an edge of a quad strip (Tris to Quads marks them)" ) );
+	if ( loopCutShape < 0 || loopCutRingEdges.isEmpty() ) {
+		emit gizmoStatus( tr( "Loop Cut: hover an edge of the edited mesh first" ) );
 		return;
 	}
 	QModelIndex iShape = model->getBlockIndex( loopCutShape );
@@ -12831,6 +12984,77 @@ void GLView::loopCutConfirmRing()
 		return;
 	}
 	const int nvBase = model->get<int>( iShape, "Num Vertices" );
+
+	// plain-triangle fallback: the "loop" is a single edge — split it
+	if ( loopCutQuadTris.isEmpty() ) {
+		const int va = loopCutRingEdges.first().first;
+		const int vb = loopCutRingEdges.first().second;
+		const int ecuts = std::clamp( loopCutCuts, 1,
+			std::max( 1, 0xFFFF - nvBase ) );
+		NifModel * mdl = model;
+		const QPersistentModelIndex pShape( iShape );
+		const int sb = loopCutShape;
+		model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Edge Cut" ),
+			[mdl, pShape, va, vb, ecuts]() {
+				tlApplyEdgeCut( mdl, pShape, va, vb, ecuts, 0.0f );
+			} ) );
+		modelChanged();
+		pickedElems.clear();
+		for ( int k = 0; k < ecuts; k++ ) {
+			PickedElement npe;
+			npe.shapeBlock = sb;
+			npe.type = 1;
+			npe.e0 = nvBase + k;
+			pickedElems.append( npe );
+		}
+		pickMode = 1;
+		refreshPickedElementPositions();
+		const QVector<PickedElement> eseed = loopCutSeedSel;
+		lastOpExRerun = [this, mdl, pShape, va, vb]( const QVector<TlOpParam> & ps ) {
+			QModelIndex iS( pShape );
+			if ( !iS.isValid() )
+				return;
+			const int rcuts = std::clamp( int( ps.value( 0 ).value + 0.5 ), 1, 64 );
+			const float rfac = std::clamp( float( ps.value( 1 ).value ), -1.0f, 1.0f );
+			const bool rclamp = ps.value( 2 ).value >= 0.5;
+			const bool rflip = ps.value( 3 ).value >= 0.5;
+			mdl->undoStack->push( new TlShapeStateCommand( mdl, iS, tr( "Edge Cut" ),
+				[mdl, pShape, va, vb, rcuts, rfac, rclamp, rflip]() {
+					tlApplyEdgeCut( mdl, pShape, va, vb, rcuts, rfac, rclamp, rflip );
+				} ) );
+			modelChanged();
+		};
+		QVector<TlOpParam> eps( 4 );
+		eps[0].label = tr( "Number of Cuts" );
+		eps[0].type = TlOpParam::Int;
+		eps[0].value = ecuts;
+		eps[0].mn = 1.0;
+		eps[0].mx = 64.0;
+		eps[0].step = 1.0;
+		eps[1].label = tr( "Factor" );
+		eps[1].type = TlOpParam::Float;
+		eps[1].value = 0.0;
+		eps[1].mn = -1.0;
+		eps[1].mx = 1.0;
+		eps[1].step = 0.02;
+		eps[1].decimals = 2;
+		eps[2].label = tr( "Clamp" );
+		eps[2].type = TlOpParam::Bool;
+		eps[2].value = 1.0;
+		eps[3].label = tr( "Flipped" );
+		eps[3].type = TlOpParam::Bool;
+		eps[3].value = 0.0;
+		armOperatorPanelEx( tr( "Edge Cut" ), eps, 1, eseed );
+		loopCutActive = false;
+		loopCutShape = -1;
+		loopCutAdjShape = -1;
+		loopCutTriCache.clear();
+		loopCutAdjCache.clear();
+		unsetCursor();
+		emit gizmoStatus( tr( "Edge Cut: %1 vertex(es) placed centered on the edge (plain triangles here — quads make a full loop)" ).arg( ecuts ) );
+		update();
+		return;
+	}
 	// effective cut count under the 65,535-vert cap (same clamp as the
 	// apply, so the deterministic new-vert indices stay in sync)
 	int cuts = std::clamp( loopCutCuts, 1, 64 );
@@ -12904,32 +13128,55 @@ void GLView::loopCutConfirmRing()
 		if ( !iS.isValid() )
 			return;
 		const int rcuts = std::clamp( int( ps.value( 0 ).value + 0.5 ), 1, 64 );
-		const float rfac = std::clamp( float( ps.value( 1 ).value ), -1.0f, 1.0f );
+		const float rsmooth = std::clamp( float( ps.value( 1 ).value ), -4.0f, 4.0f );
+		const int rfall = std::clamp( int( ps.value( 2 ).value + 0.5 ), 0, 4 );
+		const float rfac = std::clamp( float( ps.value( 3 ).value ), -1.0f, 1.0f );
+		const bool rflip = ps.value( 4 ).value >= 0.5;
+		const bool rclamp = ps.value( 5 ).value >= 0.5;
 		const int nv0 = mdl->get<int>( iS, "Num Vertices" );
 		mdl->undoStack->beginMacro( tr( "Loop Cut" ) );
 		mdl->undoStack->push( new TlShapeStateCommand( mdl, iS, tr( "Loop Cut" ),
-			[mdl, pShape, ringEdges, quadTris, rcuts, rfac]() {
-				tlApplyLoopCut( mdl, pShape, ringEdges, quadTris, rcuts, rfac );
+			[mdl, pShape, ringEdges, quadTris, rcuts, rfac, rsmooth, rfall, rclamp, rflip]() {
+				tlApplyLoopCut( mdl, pShape, ringEdges, quadTris, rcuts, rfac,
+					rsmooth, rfall, rclamp, rflip );
 			} ) );
 		setQuadMarks( sb, oldMarks + cellDiagonals( rcuts, nv0 ), tr( "Loop Cut" ),
 			nv0 + rcuts * int( ringEdges.size() ) );
 		mdl->undoStack->endMacro();
 		modelChanged();
 	};
-	QVector<TlOpParam> ps( 2 );
+	QVector<TlOpParam> ps( 6 );
 	ps[0].label = tr( "Number of Cuts" );
 	ps[0].type = TlOpParam::Int;
 	ps[0].value = cuts;
 	ps[0].mn = 1.0;
 	ps[0].mx = 64.0;
 	ps[0].step = 1.0;
-	ps[1].label = tr( "Factor" );
+	ps[1].label = tr( "Smoothness" );
 	ps[1].type = TlOpParam::Float;
 	ps[1].value = 0.0;
-	ps[1].mn = -1.0;
-	ps[1].mx = 1.0;
+	ps[1].mn = -4.0;
+	ps[1].mx = 4.0;
 	ps[1].step = 0.02;
 	ps[1].decimals = 2;
+	ps[2].label = tr( "Falloff" );
+	ps[2].type = TlOpParam::Enum;
+	ps[2].value = 0.0;
+	ps[2].enumNames = { tr( "Inverse Square" ), tr( "Sharp" ), tr( "Linear" ),
+		tr( "Sphere" ), tr( "Smooth" ) };
+	ps[3].label = tr( "Factor" );
+	ps[3].type = TlOpParam::Float;
+	ps[3].value = 0.0;
+	ps[3].mn = -1.0;
+	ps[3].mx = 1.0;
+	ps[3].step = 0.02;
+	ps[3].decimals = 2;
+	ps[4].label = tr( "Flipped" );
+	ps[4].type = TlOpParam::Bool;
+	ps[4].value = 0.0;
+	ps[5].label = tr( "Clamp" );
+	ps[5].type = TlOpParam::Bool;
+	ps[5].value = 1.0;
 	armOperatorPanelEx( tr( "Loop Cut" ), ps, 1, seed );
 
 	const int nLoop = nRing * cuts;
@@ -14832,6 +15079,32 @@ void GLView::selectAll( int action )
 						pe.wC = wt * editVertexLocal( sp, tri[2] );
 						pe.worldPos = ( pe.wA + pe.wB + pe.wC ) * ( 1.0f / 3.0f );
 						pickedElems.append( pe );
+					}
+				} else if ( pickMode & 2 ) {
+					// edge mode: every unique non-degenerate edge
+					QSet<quint64> seen;
+					for ( int t = 0; t < sp->triangles.size(); t++ ) {
+						const Triangle & tri = sp->triangles.at( t );
+						if ( tri[0] >= nv || tri[1] >= nv || tri[2] >= nv
+							|| tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2] )
+							continue;
+						for ( int e = 0; e < 3; e++ ) {
+							const int a = tri[e], b = tri[( e + 1 ) % 3];
+							const quint64 k = ( quint64( quint32( std::min( a, b ) ) ) << 32 )
+								| quint32( std::max( a, b ) );
+							if ( seen.contains( k ) )
+								continue;
+							seen.insert( k );
+							PickedElement pe;
+							pe.shapeBlock = wb;
+							pe.type = 2;
+							pe.e0 = a;
+							pe.e1 = b;
+							pe.wA = wt * editVertexLocal( sp, a );
+							pe.wB = wt * editVertexLocal( sp, b );
+							pe.worldPos = ( pe.wA + pe.wB ) * 0.5f;
+							pickedElems.append( pe );
+						}
 					}
 				} else {
 					for ( int vi = 0; vi < nv; vi++ ) {
