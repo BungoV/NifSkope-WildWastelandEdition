@@ -34,9 +34,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define NIFTREEVIEW_H
 
 #include <QTreeView> // Inherited
+#include <QSet>
 #include <data/nifvalue.h>
 
 #include <memory>
+#include <utility>
 
 class NifItem;
 
@@ -60,8 +62,22 @@ public:
 	bool evalConditions() const { return doRowHiding; }
 	//! Is a row hidden?
 	bool isRowHidden( int row, const QModelIndex & parent ) const;
+
+	//! Block Details text filter (WW): while active, rows outside the keep
+	//! set hide IN ADDITION to condition/version hiding. The filter must live
+	//! here because every hiding re-derivation (doItemsLayout, the expansion
+	//! hook, resets) rewrites row visibility from isRowHidden() — a filter
+	//! applied only by the window was silently clobbered by the next pass.
+	void setDetailsFilter( bool active, QSet<const void *> && keep )
+	{
+		detailsFilterActive = active;
+		detailsFilterKeep = std::move( keep );
+	}
 protected:
 	bool isRowHidden( const NifItem * rowItem ) const;
+
+	bool detailsFilterActive = false;
+	QSet<const void *> detailsFilterKeep;
 
 public:
 	//! Minimum size

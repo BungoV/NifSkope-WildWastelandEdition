@@ -199,6 +199,11 @@ bool NifTreeView::isRowHidden( [[maybe_unused]] int r, const QModelIndex & index
 
 bool NifTreeView::isRowHidden( const NifItem * rowItem ) const
 {
+	// active Block Details text filter: everything outside the keep set is
+	// hidden, on top of the condition/version rules below
+	if ( rowItem && detailsFilterActive && !detailsFilterKeep.contains( rowItem ) )
+		return true;
+
 	if ( rowItem && nif ) {
 		// A field that does not apply to this file's version is always hidden,
 		// regardless of the row-hiding mode or a type condition. Without this,

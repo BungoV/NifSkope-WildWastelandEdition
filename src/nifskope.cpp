@@ -1769,28 +1769,70 @@ void NifSkope::applyBlockDetailsFilter()
 	if ( terms.isEmpty() && !blockDetailsFilterWasActive )
 		return;
 	blockDetailsFilterWasActive = !terms.isEmpty();
-	auto filterBranch = [&]( auto && self, const QModelIndex & parent ) -> bool {
+
+	if ( terms.isEmpty() ) {
+		tree->setDetailsFilter( false, {} );
+		tree->refreshRowHiding();	// back to pure condition/version hiding
+		return;
+	}
+
+	// Collect the rows to KEEP: matches (against name, value, AND type),
+	// their ancestors (the path to a match stays visible), and matches'
+	// whole subtrees (expanding a matching compound must show its members).
+	// The keep set is handed to the view and enforced inside isRowHidden(),
+	// because the view re-derives row visibility on every relayout — a
+	// filter applied as one-shot setRowHidden calls was clobbered by the
+	// next derivation pass, which made searching look broken.
+	QSet<const void *> keep;
+	std::function<void( const NifItem * )> keepSubtree =
+		[&]( const NifItem * it ) {
+		if ( !it || keep.contains( it ) )
+			return;
+		keep.insert( it );
+		for ( const NifItem * c : it->children() )
+			keepSubtree( c );
+	};
+	std::function<bool( const QModelIndex & )> walk =
+		[&]( const QModelIndex & parent ) -> bool {
 		bool branchMatches = false;
 		for ( int row = 0; row < nif->rowCount( parent ); row++ ) {
 			QModelIndex nameIndex = nif->index( row, NifModel::NameCol, parent );
-			const bool childMatches = self( self, nameIndex );
+			const NifItem * item = nif->getItem( nameIndex );
+			if ( !item )
+				continue;
 			QString searchable = nameIndex.data( Qt::DisplayRole ).toString();
 			QModelIndex valueIndex = nif->index( row, NifModel::ValueCol, parent );
-			if ( valueIndex.isValid() ) searchable += QLatin1Char( ' ' ) + valueIndex.data( Qt::DisplayRole ).toString();
+			if ( valueIndex.isValid() )
+				searchable += QLatin1Char( ' ' ) + valueIndex.data( Qt::DisplayRole ).toString();
+			QModelIndex typeIndex = nif->index( row, NifModel::TypeCol, parent );
+			if ( typeIndex.isValid() )
+				searchable += QLatin1Char( ' ' ) + typeIndex.data( Qt::DisplayRole ).toString();
 			bool rowMatches = true;
-			for ( const QString & term : terms )
+			for ( const QString & term : terms ) {
 				if ( !searchable.contains( term, Qt::CaseInsensitive ) ) {
 					rowMatches = false;
 					break;
 				}
-			const bool keep = terms.isEmpty() || rowMatches || childMatches;
-			tree->setRowHidden( row, parent, !keep );
-			if ( !terms.isEmpty() && childMatches ) tree->expand( nameIndex );
-			branchMatches = branchMatches || rowMatches || childMatches;
+			}
+			if ( rowMatches ) {
+				// a match keeps its whole subtree — and skips the per-member
+				// stringify walk (a matched Vertex Data no longer costs a
+				// 38k-element text build)
+				keepSubtree( item );
+				branchMatches = true;
+				continue;
+			}
+			if ( walk( nameIndex ) ) {
+				keep.insert( item );
+				tree->expand( nameIndex );
+				branchMatches = true;
+			}
 		}
 		return branchMatches;
 	};
-	filterBranch( filterBranch, tree->rootIndex() );
+	walk( tree->rootIndex() );
+	tree->setDetailsFilter( true, std::move( keep ) );
+	tree->refreshRowHiding();
 }
 
 // ---- Block Details sticky view state (WW) ---------------------------------

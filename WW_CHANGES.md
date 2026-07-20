@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20k — Block Details search actually filters; boxed viewport mode buttons
+
+**Search fix** (nifview.h/cpp, nifskope.cpp): the field filter LOOKED broken
+("can't search for scale / data size / type") because it was: the view
+re-derives row visibility from isRowHidden() on every relayout
+(doItemsLayout, the expansion hook, resets — the row-hiding machinery from
+the version-condition fixes), and the filter's one-shot setRowHidden calls
+were clobbered by the very next pass, often triggered by the filter's own
+row hiding. The filter now computes a KEEP set (matching rows + ancestors
++ matches' whole subtrees) handed to NifTreeView::setDetailsFilter, and
+isRowHidden() enforces it alongside the condition/version rules — every
+derivation pass now preserves the filter instead of fighting it. Also:
+the Type column is searchable now ("Ref<BSShaderProperty>", "Vector3"...),
+and a matching compound keeps its subtree visible when expanded (and skips
+the per-member stringify — a matched Vertex Data no longer walks 38k
+elements building text).
+
+**Boxed mode buttons** (nifskope_ui.cpp makeMenuButton): the Select / Add /
+Object / Mesh / Vertex / Edge / Face / Paint dropdowns on the mode toolbar
+now use the same boxed style as the Panels / Workspaces selectors (1px
+#555 border, #383838 well, rounded 4px, hover brighten) with slimmer
+padding since up to eight share the row — they read as buttons instead of
+floating text.
+
 ## 2026-07-20j — Reference drag polish: no shimmer, drop = Value cells only
 
 Two user reports on 07-20i's drag: (1) the ghost shimmered — QToolTip

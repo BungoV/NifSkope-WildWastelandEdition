@@ -3199,6 +3199,16 @@ void NifSkope::initDockWidgets()
 			btn->setToolButtonStyle( Qt::ToolButtonTextOnly );
 			btn->setPopupMode( QToolButton::InstantPopup );
 			btn->setFocusPolicy( Qt::NoFocus );
+			btn->setAutoRaise( false );
+			// boxed like the Panels / Workspaces selectors (slimmer padding:
+			// up to eight of these share the row)
+			btn->setStyleSheet( QStringLiteral(
+				"QToolButton { padding: 3px 9px; border: 1px solid #555; border-radius: 4px;"
+				" background: #383838; color: #ddd; font-weight: 600; }"
+				"QToolButton:hover { background: #4a4a4a; border-color: #777; color: white; }"
+				"QToolButton:pressed { background: #2b2b2b; }"
+				"QToolButton::menu-indicator { subcontrol-position: right center;"
+				" subcontrol-origin: padding; }" ) );
 			QMenu * menu = new QMenu( btn );
 			connect( menu, &QMenu::aboutToShow, this, [this, menu, populate]() {
 				menu->clear();
