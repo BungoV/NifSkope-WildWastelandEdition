@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20c — Performance batch 3 (PERFORMANCE_PLAN.md Tier 3)
+
+**15a — NifItem slab pool (shipped).** `NifItem` now allocates from a
+chunked free-list pool (class-level `operator new`/`delete`,
+`nifitem.cpp`): 8192-slot 16-aligned chunks, freed slots recycle through an
+intrusive free list, mutex-guarded because the XML checker parses on worker
+threads; chunks live for the process. NifItem has no subclasses so every
+slot is `sizeof(NifItem)` (a defensive guard throws if that invariant ever
+breaks). **Measured** (launch→completeLoading, 2 runs each):
+missilesilocontrolroom04twofloors (2.0 MB, block-heavy) 1490–1561 →
+1442–1463 ms; PBR x01_torso (1.8 MB, vertex-heavy) 3062–3106 →
+2911–2942 ms (~5% of wall clock incl. fixed startup overhead; the parse
+share is larger, plus ongoing locality gains that this metric can't see).
+
+**17 — snapshot-undo retirement (completed to its safe boundary).** Delete
+and Merge-by-distance were ALREADY in-place (per-shape
+`TlShapeStateCommand`, snapshot only for legacy NiSkinData/NiSkinPartition
+meshes where blocks really are removed) — the plan/memory note was stale.
+The one remaining value-only snapshot op, **Snap → Verts to 3D cursor**
+(`movePickedVertsToCursor`), now pushes merged `ChangeValueCommands` via
+`tlPushPositionCommands` (signal-batched, lookup-memoized) instead of
+serializing the whole file twice and reloading on Ctrl+Z. Every op still on
+snapshot undo removes/adds blocks (Join, object-mode delete, Triangulate,
+parenting, decal creation) — snapshot is the *correct* mechanism there
+(block renumbering + model-wide link rewrites), per the standing design
+note.
+
+**15b — statically-dead field skipping: REJECTED with evidence.** Every
+field of `BSVertexData`/`BSVertexDataSSE` is `#ARG#`-gated (nif.xml — the
+Vertex Desc), and the desc IS editable post-load (Vertex Flags spell,
+Create Skin, ensure-vertex-colors). Skipping dead fields at build time
+would require rebuilding every row on desc change — inside the exact
+machinery that produced the 2026-07-18b Create Skin corruption and the
+0-length-conditional-array landmine. No per-field version conditions exist
+there to exploit safely. Folded into the 15c design instead.
+
+**15c / 16 — flattened packed vertex storage + off-thread parse: DEFERRED
+as one joint project** (design constraints recorded in
+PERFORMANCE_PLAN.md). Measurements above show item construction dominates
+load; the safe off-thread split (raw block buffers off-thread, items on the
+UI thread) moves only IO/decompression, so it doesn't pay until flattened
+storage makes the raw buffer *be* the model's storage. Doing them together
+is the real Tier-3 endgame; doing either alone under-delivers.
+
+Verification: build green; WW_JOIN_TEST=1, WW_SEP_TEST (+undo, which
+exercises TlShapeStateCommand round-trips over the pooled items),
+WW_BROWSER_TEST, WW_COPYPASTE_TEST all PASS on the final binary. GUI check
+owed: Snap → Verts to 3D cursor undo/redo (no reload flash expected now).
+
 ## 2026-07-20b — Performance batch 2 (PERFORMANCE_PLAN.md Tier 1 rest + Tier 2)
 
 Three commits (2a/2b/2c), each built + harness-verified before the next.

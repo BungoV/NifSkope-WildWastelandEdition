@@ -292,6 +292,15 @@ struct NifBlock
 class NifItem
 {
 public:
+	//! Pooled allocation. A 38k-vertex FO4 shape materializes ~1.5 million
+	//! NifItems; one general-purpose heap allocation each dominated raw parse
+	//! time and scattered the tree across the heap. Fixed-size chunks with a
+	//! free list keep allocation O(1) and neighbouring items adjacent.
+	//! Thread-safe (mutex) because the XML checker parses NifModels on worker
+	//! threads. NifItem has no subclasses — the pool slots are sizeof(NifItem).
+	static void * operator new( std::size_t size );
+	static void operator delete( void * p ) noexcept;
+
 	NifItem() = delete;
 
 	NifItem( BaseModel * model, NifItem * parent )

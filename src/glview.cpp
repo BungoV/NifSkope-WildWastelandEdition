@@ -4381,6 +4381,8 @@ struct TlVertexFieldCache {
 static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi );
 static QModelIndex tlVertexValueIndex( NifModel * model, const QModelIndex & iShape, int vi,
 	TlVertexFieldCache & cache );
+static void tlPushPositionCommands( NifModel * model, const QModelIndex & iShape,
+	const QVector<QPair<int, Vector3>> & targets );
 
 bool GLView::gizmoReapplyElement( const Vector3 & param, int axisOverride )
 {
@@ -5541,48 +5543,39 @@ QHash<int, QSet<int>> GLView::pickedVertexRefs() const
 
 void GLView::movePickedVertsToCursor()
 {
-	if ( !model || pickedElems.isEmpty() )
+	if ( !model || pickedElems.isEmpty() || !model->undoStack )
 		return;
 
 	QHash<int, QSet<int>> byShape = pickedVertexRefs();
 	if ( byShape.isEmpty() )
 		return;
 
-	nifSnapshotOp( model, tr( "Move vertices to 3D cursor" ), [&]() {
-		for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
-			QModelIndex iShape = model->getBlockIndex( it.key() );
-			Node * n = scene->getNode( model, iShape );
-			Shape * shape = shapeForBlock( it.key() );
-			if ( !n || !shape )
-				continue;
-			Transform wt = shapeRenderTrans( n );
-			float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
-			Vector3 local = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / sc ) );
+	// Value-level undo (merged ChangeValueCommands via tlPushPositionCommands,
+	// which also batches signals and memoizes the field lookups) instead of a
+	// whole-model snapshot — this op only writes vertex positions, and the
+	// snapshot serialized the entire file twice and reloaded it on Ctrl+Z.
+	ChangeValueCommand::createTransaction();
+	model->undoStack->beginMacro( tr( "Move vertices to 3D cursor" ) );
+	for ( auto it = byShape.constBegin(); it != byShape.constEnd(); it++ ) {
+		QModelIndex iShape = model->getBlockIndex( it.key() );
+		Node * n = scene->getNode( model, iShape );
+		Shape * shape = shapeForBlock( it.key() );
+		if ( !n || !shape )
+			continue;
+		Transform wt = shapeRenderTrans( n );
+		float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+		Vector3 local = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / sc ) );
 
-			QModelIndex iVData = model->getIndex( iShape, "Vertex Data" );
-			QModelIndex iVerts = model->getIndex( model->getBlockIndex( model->getLink( iShape, "Data" ) ), "Vertices" );
-			if ( !iVData.isValid() && !iVerts.isValid() )
-				iVerts = model->getIndex( iShape, "Vertices" );
-
-			for ( int vi : it.value() ) {
-				Vector3 rawLocal;
-				if ( !editVertexRawLocal( shape, vi, local, rawLocal ) )
-					continue;
-				if ( iVData.isValid() && vi < model->rowCount( iVData ) ) {
-					QModelIndex iv = model->getIndex( model->getIndex( iVData, vi ), "Vertex" );
-					if ( iv.isValid() ) {
-						const NifItem * item = static_cast<const NifItem *>( iv.internalPointer() );
-						if ( item && item->hasValueType( NifValue::tHalfVector3 ) )
-							model->set<HalfVector3>( iv, HalfVector3( rawLocal ) );
-						else
-							model->set<Vector3>( iv, rawLocal );
-					}
-				} else if ( iVerts.isValid() && vi < model->rowCount( iVerts ) ) {
-					model->set<Vector3>( model->getIndex( iVerts, vi ), rawLocal );
-				}
-			}
+		QVector<QPair<int, Vector3>> targets;
+		targets.reserve( it.value().size() );
+		for ( int vi : it.value() ) {
+			Vector3 rawLocal;
+			if ( editVertexRawLocal( shape, vi, local, rawLocal ) )
+				targets.append( qMakePair( vi, rawLocal ) );
 		}
-	} );
+		tlPushPositionCommands( model, iShape, targets );
+	}
+	model->undoStack->endMacro();
 
 	pickedElems.clear();
 	modelChanged();	// rebuild the shape display lists

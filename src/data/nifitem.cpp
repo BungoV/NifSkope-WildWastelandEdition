@@ -34,6 +34,103 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/basemodel.h"
 
 #include <new>
+#include <mutex>
+#include <vector>
+#include <memory>
+#include <cstdlib>
+#include <algorithm>
+#ifdef _WIN32
+#include <malloc.h>	// _aligned_malloc / _aligned_free
+#endif
+
+// ---- NifItem slab pool ----------------------------------------------------
+// One general-purpose heap allocation per item dominated parse wall-time for
+// high-poly meshes (~1.5M items / 38k-vert shape) and scattered the tree
+// across the heap. Slots come from large chunks and recycle through an
+// intrusive free list (the freed slot stores the next pointer). Chunks are
+// never returned to the OS — edit churn reuses them via the free list, and
+// the pool lives for the process. The mutex is uncontended outside the XML
+// checker's worker threads.
+namespace {
+
+struct NifItemPool {
+	static constexpr std::size_t slotAlign = alignof( std::max_align_t ) > 16
+		? alignof( std::max_align_t ) : 16;	// FloatVector4 members need 16
+	static constexpr std::size_t chunkSlotCount = 8192;
+
+	std::mutex mutex;
+	void * freeList = nullptr;
+	std::vector<std::unique_ptr<char, decltype( &std::free )>> chunks;
+	std::size_t slotSize = 0;
+
+	void * allocate( std::size_t size )
+	{
+		std::lock_guard<std::mutex> lock( mutex );
+		if ( !slotSize ) {
+			slotSize = ( std::max( size, sizeof( void * ) ) + ( slotAlign - 1 ) )
+				& ~( slotAlign - 1 );
+		}
+		// NifItem has no subclasses, so every request is sizeof(NifItem);
+		// this guard only fires if that invariant is ever broken
+		if ( size > slotSize )
+			throw std::bad_alloc();
+		if ( void * p = freeList ) {
+			freeList = *static_cast<void **>( p );
+			return p;
+		}
+		char * chunk = static_cast<char *>(
+#ifdef _WIN32
+			_aligned_malloc( slotSize * chunkSlotCount, slotAlign )
+#else
+			std::aligned_alloc( slotAlign, slotSize * chunkSlotCount )
+#endif
+		);
+		if ( !chunk )
+			throw std::bad_alloc();
+#ifdef _WIN32
+		chunks.emplace_back( chunk, &freeAligned );
+#else
+		chunks.emplace_back( chunk, &std::free );
+#endif
+		// thread the fresh chunk's slots 1..N-1 onto the free list, hand out slot 0
+		for ( std::size_t i = chunkSlotCount - 1; i >= 1; i-- ) {
+			void * slot = chunk + i * slotSize;
+			*static_cast<void **>( slot ) = freeList;
+			freeList = slot;
+		}
+		return chunk;
+	}
+
+	void deallocate( void * p ) noexcept
+	{
+		std::lock_guard<std::mutex> lock( mutex );
+		*static_cast<void **>( p ) = freeList;
+		freeList = p;
+	}
+
+#ifdef _WIN32
+	static void freeAligned( void * p ) { _aligned_free( p ); }
+#endif
+};
+
+NifItemPool & nifItemPool()
+{
+	static NifItemPool pool;
+	return pool;
+}
+
+}	// namespace
+
+void * NifItem::operator new( std::size_t size )
+{
+	return nifItemPool().allocate( size );
+}
+
+void NifItem::operator delete( void * p ) noexcept
+{
+	if ( p )
+		nifItemPool().deallocate( p );
+}
 
 bool NifData::compareStrings( const QChar * s, const char * t, size_t l )
 {

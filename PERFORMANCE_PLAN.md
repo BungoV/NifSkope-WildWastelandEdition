@@ -164,6 +164,23 @@ changed yet — this is the plan.
 
 ## Tier 3 — structural (big effort, biggest ceilings)
 
+> STATUS 2026-07-20c (WW_CHANGES.md "Performance batch 3"):
+> **15a SHIPPED** — NifItem slab pool, measured ~5% wall-clock on the
+> vertex-heavy reference (3.06 s → 2.93 s launch→loaded) + locality gains.
+> **15b REJECTED with evidence** — all BSVertexData fields are #ARG#-gated
+> (desc-editable post-load), no version-gated dead fields exist; skipping
+> requires row rebuilds on desc change = the Create Skin corruption zone.
+> **17 DONE to its safe boundary** — Delete/Merge were already in-place
+> (stale note); Snap→Verts-to-cursor converted to merged value commands;
+> everything still on snapshot removes/adds blocks and stays so BY DESIGN.
+> **15c + 16 DEFERRED as one joint project**: measurements show item
+> construction dominates load, so off-thread parsing of raw buffers only
+> pays once flattened packed storage makes the raw buffer the model's
+> actual storage. Prereqs for that project: full harness gauntlet green at
+> every step (join/sep/copypaste/createskin/extrude/dupfreeze), a design
+> for QPersistentModelIndex stability over virtualized rows, and the #ARG#
+> condition-cache contract preserved or replaced wholesale.
+
 15. **The NifItem explosion — the tax on everything.** Each packed
     `BSVertexData` row materializes ~30–40 individually heap-allocated
     `NifItem`s (~88–96 B each) — *both* precision variants of every field are
