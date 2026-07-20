@@ -683,14 +683,20 @@ NifSkope::NifSkope( bool background )
 	blockNavigationLayout->addWidget( blockListPin );
 	blockListRelations = new QToolButton( blockNavigation );
 	blockListRelations->setAutoRaise( true );
-	blockListRelations->setText( tr( "Links" ) );
-	blockListRelations->setToolTip( tr( "Outgoing links and blocks that reference the selection" ) );
+	blockListRelations->setText( tr( "0/0" ) );
+	blockListRelations->setToolTip( tr( "Links: outgoing links / blocks that reference the selection" ) );
 	blockListRelations->setPopupMode( QToolButton::InstantPopup );
 	blockListRelations->setMenu( new QMenu( blockListRelations ) );
 	blockNavigationLayout->addWidget( blockListRelations );
 	ui->verticalLayout_2->removeWidget( ui->listButtonFrame );
 	blockNavigationLayout->addWidget( ui->listButtonFrame );
 	ui->verticalLayout_2->insertWidget( 0, blockNavigation );
+	// The Block List dock must fold down to a sliver when the user wants the
+	// viewport: none of the header rows may impose a minimum width. The search
+	// field compresses first (it is the stretch item); past its minimum the
+	// rows simply clip from the right.
+	blockListSearch->setMinimumWidth( 48 );
+	blockNavigation->setMinimumWidth( 1 );
 
 	QWidget * blockFilters = new QWidget( ui->dockWidgetContents_4 );
 	QHBoxLayout * blockFilterLayout = new QHBoxLayout( blockFilters );
@@ -721,14 +727,20 @@ NifSkope::NifSkope( bool background )
 		blockFilterLayout->addWidget( button );
 	}
 	blockFilterLayout->addStretch( 1 );
+	// the chip row and the two labels otherwise dictate the dock's minimum
+	// width (8 chips ≈ 200px; the breadcrumb/footer text can be arbitrarily
+	// long) — allow them all to clip so the dock folds
+	blockFilters->setMinimumWidth( 1 );
 	ui->verticalLayout_2->insertWidget( 1, blockFilters );
 	blockListBreadcrumb = new QLabel( ui->dockWidgetContents_4 );
 	blockListBreadcrumb->setTextInteractionFlags( Qt::TextSelectableByMouse );
 	blockListBreadcrumb->setStyleSheet( QStringLiteral( "color: #a8a8a8; padding: 1px 2px;" ) );
 	blockListBreadcrumb->setToolTip( tr( "Scene-parent path for the selected block" ) );
+	blockListBreadcrumb->setMinimumWidth( 1 );
 	ui->verticalLayout_2->insertWidget( 2, blockListBreadcrumb );
 	blockListFooter = new QLabel( ui->dockWidgetContents_4 );
 	blockListFooter->setStyleSheet( QStringLiteral( "color: #a8a8a8; padding: 2px;" ) );
+	blockListFooter->setMinimumWidth( 1 );
 	ui->verticalLayout_2->addWidget( blockListFooter );
 	connect( blockListSearch, &QLineEdit::textChanged, this, [this]() { applyBlockListFilter(); } );
 	connect( blockListFilterGroup, &QButtonGroup::idClicked, this, [this]( int id ) {
@@ -1899,7 +1911,9 @@ void NifSkope::updateBlockListNavigation( const QModelIndex & selection )
 		outgoing.erase( std::unique( outgoing.begin(), outgoing.end() ), outgoing.end() );
 		incoming.erase( std::unique( incoming.begin(), incoming.end() ), incoming.end() );
 		blockListRelations->setEnabled( block >= 0 && !( outgoing.isEmpty() && incoming.isEmpty() ) );
-		blockListRelations->setText( tr( "Links %1/%2" ).arg( outgoing.size() ).arg( incoming.size() ) );
+		// compact "out/in" counts only — the word "Links" cost ~35px of the
+		// dock's minimum width (the tooltip carries the meaning)
+		blockListRelations->setText( tr( "%1/%2" ).arg( outgoing.size() ).arg( incoming.size() ) );
 		auto addLinks = [this, menu, &blockLabel]( const QString & title, const QList<int> & links ) {
 			menu->addSection( title );
 			if ( links.isEmpty() ) menu->addAction( tr( "None" ) )->setEnabled( false );

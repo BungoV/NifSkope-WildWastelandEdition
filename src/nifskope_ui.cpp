@@ -3049,10 +3049,15 @@ void NifSkope::initDockWidgets()
 
 	// ---- main toolbar overhaul: smaller icons, merged dropdowns, transform header ----
 
-	// smaller icons everywhere (~75%)
+	// smaller icons everywhere (~75%); toolbars are fixed in place — the
+	// dotted drag grips read as sliders and wasted row width, so group
+	// boundaries are drawn by the thin 2px separator line instead
 	for ( QToolBar * tb : { ui->tFile, ui->tRender, ui->tMode, ui->tView, ui->tLOD } ) {
 		QSize is = tb->iconSize();
 		tb->setIconSize( QSize( is.width() * 3 / 4, is.height() * 3 / 4 ) );
+		tb->setMovable( false );
+		tb->setStyleSheet( QStringLiteral(
+			"QToolBar::separator { background: #7a7a7a; width: 2px; height: 2px; margin: 4px 6px; }" ) );
 	}
 
 	// open/save already live in the File menu; drop them from the toolbar
@@ -3180,6 +3185,9 @@ void NifSkope::initDockWidgets()
 		// the W quick menu), so enabled states are always current and the entry
 		// points cannot drift apart.
 		QToolBar * modeBar = ui->tMode;
+		// thin line where the drag grip used to sit, delimiting the mode menus
+		// from the previous toolbar group
+		modeBar->addSeparator();
 
 		// Each button is added with addWidget; the returned QAction is what we
 		// show/hide to collapse the toolbar slot per mode (the same idiom the
@@ -4239,6 +4247,8 @@ void NifSkope::initDockWidgets()
 	// Regular dock toggles collapse into one dropdown on the View toolbar.
 	// Manager docks live in the adjacent Workspaces menu instead.
 	{
+		// thin line where this toolbar's drag grip used to sit
+		ui->tView->addSeparator();
 		QToolButton * btn = new QToolButton( this );
 		btn->setPopupMode( QToolButton::InstantPopup );
 		btn->setText( tr( "Panels" ) );

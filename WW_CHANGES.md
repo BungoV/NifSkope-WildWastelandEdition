@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20e — Right-click flag copy/paste, foldable Block List, toolbar grips → separators
+
+**Copy Flags / Paste Flags in the context menu** (flags.cpp): two new
+instant spells on every flag field the Flags/Shader Flags spells handle.
+Copy puts the raw value(s) on the same kind-tagged clipboard the dialogs
+use; Paste only appears when the clipboard holds a COMPATIBLE kind — so
+right-click → Copy Flags on one block, right-click → Paste Flags on
+another, fully interoperable with the dialogs' buttons, across files and
+windows. Details: shader properties copy F1+F2 together (keyed by enum
+types, one snapshot undo step on paste); every spEditFlags type has its own
+kind (alpha, controller, rigid body incl. the Col Filter Copy mirror,
+zbuffer, BSX, NiAVObject, …) — even the combo-based editors' raw values
+copy/paste safely between same-type blocks. `getFlagIndex`/`queryType`
+became static for reuse.
+
+**Block List folds to a sliver** (nifskope.cpp): the header rows dictated
+the dock's minimum width. The Links button is now compact counts ("2/0",
+meaning in the tooltip), the search field's minimum dropped to 48px, and
+the nav row / filter-chip row / breadcrumb / footer labels all allow
+clipping (minimum width 1) — so the dock can be dragged nearly closed for
+a bigger viewport, elements clipping from the right as it narrows.
+
+**Toolbar drag grips removed** (nifskope_ui.cpp): tRender/tMode/tView/tLOD
+are now fixed (setMovable(false)) like tFile — the dotted grips read as
+sliders and wasted row width. Group boundaries are drawn by the thin 2px
+separator line instead (the tRender separator style now applies to all top
+toolbars; tMode and tView start with one where their grips used to sit).
+
+Build green, startup + join harness smoke PASS. GUI checks owed: right-click
+Copy/Paste Flags round-trip (incl. dialog interop), folding the Block List
+dock to minimum, and the toolbar row reading cleanly without grips.
+
 ## 2026-07-20d — Generic flag dialog (Node/BSX get the Shader Flags UI) + flag copy/paste
 
 The modern Shader Flags dialog (filterable checkbox tree, "Stored in"

@@ -21,6 +21,7 @@
 #include <QTreeWidget>
 
 #include <algorithm>
+#include <utility>
 
 
 // Brief description is deliberately not autolinked to class Spell
@@ -125,6 +126,23 @@ struct WwFlagEntry {
 };
 
 constexpr const char * wwFlagsMimeType = "application/x-nifskope-flags";
+
+void wwFlagsToClipboard( const QString & kindId, const QStringList & labels, const QVector<quint32> & values )
+{
+	QStringList hexes, readable;
+	for ( int f = 0; f < values.size(); f++ ) {
+		hexes << QString::number( values.at( f ), 16 );
+		const QString label = ( f < labels.size() && !labels.at( f ).isEmpty() )
+			? labels.at( f ) : QObject::tr( "Flags" );
+		readable << QStringLiteral( "%1 0x%2" ).arg( label )
+			.arg( QString::number( values.at( f ), 16 ).rightJustified( 8, QLatin1Char( '0' ) ).toUpper() );
+	}
+	auto * mime = new QMimeData;
+	mime->setData( QLatin1String( wwFlagsMimeType ),
+		( kindId + QLatin1Char( '\n' ) + hexes.join( QLatin1Char( ',' ) ) ).toUtf8() );
+	mime->setText( readable.join( QStringLiteral( "  " ) ) );
+	QGuiApplication::clipboard()->setMimeData( mime );
+}
 
 QVector<quint32> wwFlagsFromClipboard( const QString & kindId, int fieldCount )
 {
@@ -282,17 +300,13 @@ bool wwFlagListDialog( const QString & title, const QString & kindId,
 		refreshSummary();
 	} );
 	QObject::connect( copyButton, &QPushButton::clicked, &dialog, [&]() {
-		QStringList hexes, readable;
+		QStringList labels;
+		QVector<quint32> values;
 		for ( int f = 0; f < fields.size(); f++ ) {
-			hexes << QString::number( fields.at( f ).value, 16 );
-			readable << QStringLiteral( "%1 0x%2" ).arg( fieldTag( f ) )
-				.arg( QString::number( fields.at( f ).value, 16 ).rightJustified( 8, QLatin1Char( '0' ) ).toUpper() );
+			labels << fieldTag( f );
+			values << fields.at( f ).value;
 		}
-		auto * mime = new QMimeData;
-		mime->setData( QLatin1String( wwFlagsMimeType ),
-			( kindId + QLatin1Char( '\n' ) + hexes.join( QLatin1Char( ',' ) ) ).toUtf8() );
-		mime->setText( readable.join( QStringLiteral( "  " ) ) );
-		QGuiApplication::clipboard()->setMimeData( mime );
+		wwFlagsToClipboard( kindId, labels, values );
 	} );
 	QObject::connect( pasteButton, &QPushButton::clicked, &dialog, [&]() {
 		const QVector<quint32> values = wwFlagsFromClipboard( kindId, fields.size() );
@@ -418,7 +432,7 @@ public:
 	};
 
 	//! Find the index of flags relative to a given NIF index
-	QModelIndex getFlagIndex( const NifModel * nif, const QModelIndex & index ) const
+	static QModelIndex getFlagIndex( const NifModel * nif, const QModelIndex & index )
 	{
 		if ( nif->itemName( index ) == "Flags" && nif->isNiBlock( index.parent() ) )
 			return index;
@@ -446,7 +460,7 @@ public:
 	}
 
 	//! Determine the applicable flag editing dialog for a NIF block type
-	FlagType queryType( const NifModel * nif, const QModelIndex & index ) const
+	static FlagType queryType( const NifModel * nif, const QModelIndex & index )
 	{
 		if ( nif->getValue( index ).isCount() ) {
 			QString name = nif->itemName( index.parent() );
@@ -1578,3 +1592,147 @@ void spEditVertexDesc::setVertexPositions( const QVector<Vector4> & verts, NifMo
 }
 
 REGISTER_SPELL( spEditVertexDesc )
+
+// ---- flag copy / paste (right-click in Block Details) ---------------------
+// The same kind-tagged clipboard the flag dialogs use, exposed as context-menu
+// spells. Copy Flags puts the raw value(s) of the flag field under the cursor
+// on the system clipboard; Paste Flags is only offered when the clipboard was
+// filled from a COMPATIBLE flag field (same kind — same enum types for shader
+// flags), so incompatible bits can never cross. Interoperates with the
+// dialogs' Copy/Paste buttons, across blocks, files, and windows.
+
+namespace
+{
+
+struct WwFlagTarget {
+	QString kindId;
+	QStringList labels;
+	QVector<QPersistentModelIndex> fields;
+	spEditFlags::FlagType flagType = spEditFlags::None;
+};
+
+bool wwResolveFlagTarget( const NifModel * nif, const QModelIndex & index, WwFlagTarget & out )
+{
+	if ( !index.isValid() )
+		return false;
+
+	// shader properties: F1 + F2 travel together, keyed by their enum types
+	const QString itemName = nif->itemName( index );
+	if ( itemName == QLatin1String( "Shader Flags 1" ) || itemName == QLatin1String( "Shader Flags 2" ) ) {
+		const QModelIndex block = nif->getBlockIndex( index );
+		const QModelIndex f1 = nif->getIndex( block, "Shader Flags 1" );
+		const QModelIndex f2 = nif->getIndex( block, "Shader Flags 2" );
+		if ( f1.isValid() && f2.isValid()
+			&& NifValue::enumType( nif->itemStrType( f1 ) ) == NifValue::eFlags
+			&& NifValue::enumType( nif->itemStrType( f2 ) ) == NifValue::eFlags ) {
+			out.kindId = QStringLiteral( "shader/" ) + nif->itemStrType( f1 )
+				+ QLatin1Char( '+' ) + nif->itemStrType( f2 );
+			out.labels = { QStringLiteral( "F1" ), QStringLiteral( "F2" ) };
+			out.fields = { QPersistentModelIndex( f1 ), QPersistentModelIndex( f2 ) };
+			out.flagType = spEditFlags::None;
+			return true;
+		}
+		return false;
+	}
+
+	const QModelIndex iFlags = spEditFlags::getFlagIndex( nif, index );
+	const spEditFlags::FlagType type = spEditFlags::queryType( nif, iFlags );
+	if ( type == spEditFlags::None )
+		return false;
+	static const QHash<int, QString> kinds{
+		{ spEditFlags::Alpha, QStringLiteral( "alpha" ) },
+		{ spEditFlags::Billboard, QStringLiteral( "billboard" ) },
+		{ spEditFlags::Controller, QStringLiteral( "controller" ) },
+		{ spEditFlags::MatColControl, QStringLiteral( "matcolcontroller" ) },
+		{ spEditFlags::Node, QStringLiteral( "node" ) },
+		{ spEditFlags::RigidBody, QStringLiteral( "rigidbody" ) },
+		{ spEditFlags::Shape, QStringLiteral( "shape" ) },
+		{ spEditFlags::Stencil, QStringLiteral( "stencil" ) },
+		{ spEditFlags::TexDesc, QStringLiteral( "texdesc" ) },
+		{ spEditFlags::VertexColor, QStringLiteral( "vertexcolor" ) },
+		{ spEditFlags::ZBuffer, QStringLiteral( "zbuffer" ) },
+		{ spEditFlags::BSX, QStringLiteral( "bsxflags" ) },
+		{ spEditFlags::NiAVObject, QStringLiteral( "niavobject" ) },
+	};
+	out.kindId = kinds.value( int( type ) );
+	if ( out.kindId.isEmpty() )
+		return false;
+	out.labels = { QObject::tr( "Flags" ) };
+	out.fields = { QPersistentModelIndex( iFlags ) };
+	out.flagType = type;
+	return true;
+}
+
+}
+
+//! Copy the raw flag value(s) under the cursor to the clipboard
+class spCopyFlagValues final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Copy Flags" ); }
+	QIcon icon() const override final { return QIcon( ":/img/flag" ); }
+	bool constant() const override final { return true; }
+	bool instant() const override final { return true; }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		WwFlagTarget target;
+		return wwResolveFlagTarget( nif, index, target );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		WwFlagTarget target;
+		if ( !wwResolveFlagTarget( nif, index, target ) )
+			return index;
+		QVector<quint32> values;
+		for ( const QPersistentModelIndex & f : std::as_const( target.fields ) )
+			values.append( quint32( nif->get<int>( QModelIndex( f ) ) ) );
+		wwFlagsToClipboard( target.kindId, target.labels, values );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spCopyFlagValues )
+
+//! Paste flag value(s) copied from a compatible flag field
+class spPasteFlagValues final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Paste Flags" ); }
+	QIcon icon() const override final { return QIcon( ":/img/flag" ); }
+	bool instant() const override final { return true; }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		WwFlagTarget target;
+		return wwResolveFlagTarget( nif, index, target )
+			&& !wwFlagsFromClipboard( target.kindId, target.fields.size() ).isEmpty();
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		WwFlagTarget target;
+		if ( !wwResolveFlagTarget( nif, index, target ) )
+			return index;
+		const QVector<quint32> values = wwFlagsFromClipboard( target.kindId, target.fields.size() );
+		if ( values.isEmpty() )
+			return index;
+		if ( target.fields.size() > 1 ) {
+			// shader flags: both fields as one snapshot undo step, matching the dialog
+			nifSnapshotOp( nif, Spell::tr( "Paste shader flags" ), [&]() {
+				for ( int f = 0; f < target.fields.size(); f++ )
+					nif->set<quint32>( QModelIndex( target.fields.at( f ) ), values.at( f ) );
+			} );
+		} else {
+			nif->set<int>( QModelIndex( target.fields.first() ), int( values.first() ) );
+			// the rigid-body editor mirrors Col Filter into Col Filter Copy
+			if ( target.flagType == spEditFlags::RigidBody )
+				nif->set<int>( nif->getBlockIndex( target.fields.first() ),
+					"Col Filter Copy", int( values.first() ) );
+		}
+		return index;
+	}
+};
+
+REGISTER_SPELL( spPasteFlagValues )
