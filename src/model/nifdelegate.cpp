@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QComboBox>
 #include <QIcon>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QListView>
@@ -65,6 +66,101 @@ public:
 	{
 	}
 
+	// ---- link rows: hover ↗ (jump) / ▾ (pick) glyphs -----------------------
+
+	//! Resolve an index to (NifModel, source index, link value) when it is the
+	//! Value cell of a Ref/Ptr row; returns nullptr otherwise.
+	static NifModel * linkAt( const QAbstractItemModel * model, const QModelIndex & index,
+		QModelIndex & sourceIndex, int & link )
+	{
+		if ( !index.isValid() || index.column() != NifModel::ValueCol )
+			return nullptr;
+
+		NifModel * nif = nullptr;
+		sourceIndex = index;
+		if ( model->inherits( "NifModel" ) ) {
+			nif = static_cast<NifModel *>( const_cast<QAbstractItemModel *>( model ) );
+		} else if ( model->inherits( "NifProxyModel" ) ) {
+			auto proxy = static_cast<NifProxyModel *>( const_cast<QAbstractItemModel *>( model ) );
+			nif = static_cast<NifModel *>( proxy->model() );
+			sourceIndex = proxy->mapTo( index );
+		}
+		if ( !nif || !nif->isLink( sourceIndex ) )
+			return nullptr;
+
+		link = nif->getLink( sourceIndex );
+		return nif;
+	}
+
+	static QRect pickGlyphRect( const QRect & cell )
+	{
+		return QRect( cell.right() - 17, cell.top(), 17, cell.height() );
+	}
+
+	static QRect jumpGlyphRect( const QRect & cell )
+	{
+		return QRect( cell.right() - 35, cell.top(), 17, cell.height() );
+	}
+
+	//! ▾ popup: retarget the link to any type-compatible block (or None),
+	//! as one undoable value change.
+	void execLinkPickMenu( NifModel * nif, const QModelIndex & sourceIndex,
+		QAbstractItemModel * viewModel, const QModelIndex & viewIndex, const QPoint & globalPos ) const
+	{
+		QVariant v = viewIndex.data( Qt::EditRole );
+		if ( !v.canConvert<NifValue>() )
+			return;
+		NifValue nv = v.value<NifValue>();
+		if ( nv.type() != NifValue::tLink && nv.type() != NifValue::tUpLink )
+			return;
+
+		const int currentLink = nif->getLink( sourceIndex );
+		QString templ = nif->itemTempl( sourceIndex );
+		if ( templ.isEmpty() || templ == QLatin1String( "TEMPLATE" ) )
+			templ = QStringLiteral( "NiObject" );
+
+		QMenu menu;
+		QAction * aNone = menu.addAction( QObject::tr( "None" ) );
+		aNone->setData( -1 );
+		aNone->setCheckable( true );
+		aNone->setChecked( currentLink < 0 );
+		menu.addSeparator();
+
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex iBlock = nif->getBlockIndex( b );
+			if ( !iBlock.isValid() )
+				continue;
+			if ( !nif->blockInherits( iBlock, templ ) && nif->itemName( iBlock ) != templ )
+				continue;
+			QString label = QString::number( b ) + QLatin1String( " — " ) + nif->itemName( iBlock );
+			QString bname = nif->get<QString>( iBlock, "Name" );
+			if ( !bname.isEmpty() ) {
+				if ( bname.size() > 40 )
+					bname = bname.left( 37 ) + QLatin1String( "..." );
+				label += QLatin1String( " \"" ) + bname + QLatin1Char( '"' );
+			}
+			QAction * a = menu.addAction( label );
+			a->setData( b );
+			a->setCheckable( true );
+			a->setChecked( b == currentLink );
+		}
+
+		QAction * chosen = menu.exec( globalPos );
+		if ( !chosen )
+			return;
+		const int target = chosen->data().toInt();
+		if ( target == currentLink )
+			return;
+
+		nv.setLink( target, nullptr, nullptr );
+		QVariant v2;
+		v2.setValue( nv );
+		const QString valueType = viewModel->sibling( viewIndex.row(), 0, viewIndex ).data().toString();
+		ChangeValueCommand::createTransaction();
+		nif->undoStack->push( new ChangeValueCommand( sourceIndex, v2, nv.toString(), valueType, nif ) );
+		viewModel->setData( viewIndex, v2, Qt::EditRole );
+	}
+
 	virtual bool editorEvent( QEvent * event, QAbstractItemModel * model, const QStyleOptionViewItem & option, const QModelIndex & index ) override final
 	{
 		Q_ASSERT( event );
@@ -78,6 +174,32 @@ public:
 		switch ( event->type() ) {
 		case QEvent::MouseButtonPress:
 		case QEvent::MouseButtonRelease:
+
+			// link-row hover glyphs: ↗ jumps to the linked block, ▾ opens the
+			// retarget picker. Handled on release; the press still selects.
+			if ( static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton ) {
+				QModelIndex sourceIndex;
+				int link = -1;
+				NifModel * nif = linkAt( model, index, sourceIndex, link );
+				if ( nif ) {
+					const QPoint pos = static_cast<QMouseEvent *>(event)->pos();
+					const bool onPick = pickGlyphRect( option.rect ).contains( pos );
+					const bool onJump = jumpGlyphRect( option.rect ).contains( pos );
+					if ( onPick || onJump ) {
+						if ( event->type() == QEvent::MouseButtonRelease ) {
+							if ( onPick ) {
+								execLinkPickMenu( nif, sourceIndex, model, index,
+									static_cast<QMouseEvent *>(event)->globalPosition().toPoint() );
+							} else if ( link >= 0 && nif->isValidBlockNumber( link ) ) {
+								// the delegate's parent is the NifSkope window
+								QMetaObject::invokeMethod( parent(), "select",
+									Q_ARG( QModelIndex, nif->getBlockIndex( link ) ) );
+							}
+						}
+						return true;
+					}
+				}
+			}
 
 			if ( static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton
 			     && decoRect( option ).contains( static_cast<QMouseEvent *>(event)->pos() ) )
@@ -231,6 +353,42 @@ public:
 		if ( !text.isEmpty() ) {
 			drawDisplay( painter, opt, tRect, text );
 			drawFocus( painter, opt, tRect );
+		}
+
+		// grey decoded suffix for flag fields ("14 — Hidden, Shadow")
+		if ( index.column() == NifModel::ValueCol && !text.isEmpty() ) {
+			QString summary = index.data( WwFlagSummaryRole ).toString();
+			if ( !summary.isEmpty() ) {
+				const int mainW = opt.fontMetrics.horizontalAdvance( text ) + 8;
+				QRect sRect = tRect.adjusted( mainW, 0, -2, 0 );
+				if ( sRect.width() > 24 ) {
+					painter->setPen( QColor( 128, 128, 128 ) );
+					painter->drawText( sRect, Qt::AlignLeft | Qt::AlignVCenter,
+						opt.fontMetrics.elidedText(
+							QStringLiteral( "— " ) + summary, Qt::ElideRight, sRect.width() ) );
+				}
+			}
+		}
+
+		// link rows: quiet hover glyphs at the right edge of the Value cell
+		// (↗ jump to target, ▾ pick a new target). Invisible at rest.
+		if ( opt.state & QStyle::State_MouseOver ) {
+			QModelIndex sourceIndex;
+			int link = -1;
+			if ( linkAt( index.model(), index, sourceIndex, link ) ) {
+				const QRect pickR = pickGlyphRect( opt.rect );
+				const QRect jumpR = jumpGlyphRect( opt.rect );
+				// backfill so the glyphs stay legible over long value text
+				QColor bg = ( opt.state & QStyle::State_Selected )
+					? opt.palette.color( cg, QPalette::Highlight )
+					: opt.palette.color( cg, ( opt.features & QStyleOptionViewItem::Alternate )
+						? QPalette::AlternateBase : QPalette::Base );
+				painter->fillRect( link >= 0 ? jumpR.united( pickR ) : pickR, bg );
+				painter->setPen( QColor( 154, 154, 154 ) );
+				if ( link >= 0 )
+					painter->drawText( jumpR, Qt::AlignCenter, QStringLiteral( "↗" ) );
+				painter->drawText( pickR, Qt::AlignCenter, QStringLiteral( "▾" ) );
+			}
 		}
 
 		painter->restore();

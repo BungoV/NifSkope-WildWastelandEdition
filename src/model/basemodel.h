@@ -47,6 +47,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <climits>
 
 #define NifSkopeDisplayRole (Qt::UserRole + 42)
+//! Grey inline suffix appended to a flag field's Value cell by the delegate
+//! (e.g. "Hidden, Shadow"). Empty/invalid for non-flag rows.
+#define WwFlagSummaryRole (Qt::UserRole + 43)
 
 
 // Used for Block Name hashing

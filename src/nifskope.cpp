@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
 #include "model/nifproxymodel.h"
+#include "model/undocommands.h"
 #include "ui/widgets/fileselect.h"
 #include "ui/widgets/nifview.h"
 #include "ui/widgets/refrbrowser.h"
@@ -90,6 +91,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QListView>
 #include <QLineEdit>
+#include <QScrollBar>
 #include <QShortcut>
 #include <QTreeView>
 #include <QStandardItemModel>
@@ -815,6 +817,25 @@ NifSkope::NifSkope( bool background )
 	blockDetailsSearch->setToolTip( tr( "Parents remain visible when a nested field matches. Ctrl+Shift+F focuses this field." ) );
 	ui->verticalLayout->insertWidget( 0, blockDetailsSearch );
 	connect( blockDetailsSearch, &QLineEdit::textChanged, this, [this]() { applyBlockDetailsFilter(); } );
+	// diff-vs-reference banner: one flat grey line above the filter, hidden
+	// until a reference block is set (Block List right-click)
+	wwDiffBanner = new QWidget( ui->dockWidgetContents_2 );
+	{
+		auto * bannerLayout = new QHBoxLayout( wwDiffBanner );
+		bannerLayout->setContentsMargins( 4, 2, 2, 2 );
+		bannerLayout->setSpacing( 4 );
+		wwDiffLabel = new QLabel( wwDiffBanner );
+		wwDiffLabel->setStyleSheet( QStringLiteral( "color: #bbbbbb;" ) );
+		bannerLayout->addWidget( wwDiffLabel, 1 );
+		auto * clearDiffBtn = new QToolButton( wwDiffBanner );
+		clearDiffBtn->setText( QStringLiteral( "✕" ) );
+		clearDiffBtn->setAutoRaise( true );
+		clearDiffBtn->setToolTip( tr( "Stop diffing against the reference block" ) );
+		connect( clearDiffBtn, &QToolButton::clicked, this, [this]() { clearDiffReference(); } );
+		bannerLayout->addWidget( clearDiffBtn );
+	}
+	ui->verticalLayout->insertWidget( 0, wwDiffBanner );
+	wwDiffBanner->hide();
 	auto * findBlockFields = new QShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+F" ) ), ui->TreeDock );
 	findBlockFields->setContext( Qt::WidgetWithChildrenShortcut );
 	connect( findBlockFields, &QShortcut::activated, blockDetailsSearch, [this]() {
@@ -1044,6 +1065,14 @@ NifSkope::NifSkope( bool background )
 	} );
 	connect( header, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
 	connect( kfmtree, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
+
+	// diff-vs-reference upkeep: edits re-derive the differing rows once per
+	// burst; block insert/remove revalidates the reference; a fresh load
+	// drops it entirely
+	connect( nif, &NifModel::dataChanged, this, [this]() { queueDiffRecompute(); } );
+	connect( nif, &NifModel::rowsInserted, this, [this]() { queueDiffRecompute(); } );
+	connect( nif, &NifModel::rowsRemoved, this, [this]() { queueDiffRecompute(); } );
+	connect( this, &NifSkope::beginLoading, this, [this]() { clearDiffReference(); } );
 
 	// Create GLView
 	/* ********************** */
@@ -1760,6 +1789,385 @@ void NifSkope::applyBlockDetailsFilter()
 	filterBranch( filterBranch, tree->rootIndex() );
 }
 
+// ---- Block Details sticky view state (WW) ---------------------------------
+// Expansion + scroll are remembered per block TYPE, so hopping between five
+// BSTriShapes keeps the same rows open instead of resetting every click.
+
+namespace
+{
+const QChar wwPathSep( '\x1f' );
+
+QString wwDetailsRowKey( const NifModel * nif, const QModelIndex & idx )
+{
+	// row identity: field name normally, row number inside arrays (array
+	// element names are positional pseudonyms)
+	QModelIndex parent = idx.parent();
+	if ( parent.isValid() && nif->isArray( parent ) )
+		return QString::number( idx.row() );
+	return nif->itemName( idx );
+}
+}
+
+void NifSkope::wwCaptureDetailsState()
+{
+	if ( !tree || !nif || tree->model() != nif )
+		return;
+	QModelIndex root = tree->rootIndex();
+	if ( !root.isValid() || !nif->isNiBlock( root ) )
+		return;
+
+	WwDetailsState state;
+	std::function<void( const QModelIndex &, const QString & )> walk =
+		[&]( const QModelIndex & parent, const QString & prefix ) {
+		const int cnt = nif->rowCount( parent );
+		// don't walk giant arrays (their elements aren't worth remembering,
+		// and a 38k-row walk per block switch is exactly the kind of cost
+		// this dock just got rid of)
+		if ( cnt > 2000 )
+			return;
+		for ( int r = 0; r < cnt; r++ ) {
+			QModelIndex c = nif->index( r, 0, parent );
+			if ( !c.isValid() || !tree->isExpanded( c ) )
+				continue;
+			const QString key = prefix.isEmpty()
+				? wwDetailsRowKey( nif, c )
+				: prefix + wwPathSep + wwDetailsRowKey( nif, c );
+			state.expanded << key;
+			walk( c, key );
+		}
+	};
+	walk( root, QString() );
+	state.scroll = tree->verticalScrollBar() ? tree->verticalScrollBar()->value() : 0;
+	wwDetailsState.insert( nif->itemName( root ), state );
+}
+
+bool NifSkope::wwHasDetailsState( const QModelIndex & root ) const
+{
+	return root.isValid() && nif && wwDetailsState.contains( nif->itemName( root ) );
+}
+
+void NifSkope::wwRestoreDetailsState( const QModelIndex & root )
+{
+	if ( !tree || !nif || !root.isValid() )
+		return;
+	const auto it = wwDetailsState.constFind( nif->itemName( root ) );
+	if ( it == wwDetailsState.constEnd() )
+		return;
+
+	for ( const QString & path : it->expanded ) {
+		QModelIndex idx = root;
+		const QStringList segs = path.split( wwPathSep );
+		for ( const QString & seg : segs ) {
+			QModelIndex next;
+			bool numeric = false;
+			const int row = seg.toInt( &numeric );
+			if ( numeric && nif->isArray( idx ) ) {
+				next = nif->index( row, 0, idx );
+			} else {
+				next = nif->getIndex( idx, seg );
+				if ( next.isValid() )
+					next = next.sibling( next.row(), 0 );
+			}
+			idx = next;
+			if ( !idx.isValid() )
+				break;
+		}
+		if ( idx.isValid() && idx != root )
+			tree->expand( idx );
+	}
+
+	// scroll after the expansions have relaid the view
+	const int scroll = it->scroll;
+	QTimer::singleShot( 0, tree, [this, scroll]() {
+		if ( tree && tree->verticalScrollBar() )
+			tree->verticalScrollBar()->setValue( scroll );
+	} );
+}
+
+// ---- field-value clipboard (WW) -------------------------------------------
+// Copy any leaf field once, then paste it onto every selected block that has
+// the same field (resolved by name path), as a single undo step. Shared
+// across windows like the row clipboard.
+
+namespace
+{
+struct WwFieldClipboard {
+	QString fieldName;
+	QString displayValue;
+	QVector<QPair<QString, int>> path;	// (name, row) segments from block root
+	NifValue value;
+	bool valid = false;
+};
+WwFieldClipboard wwFieldClip;
+}
+
+void NifSkope::wwCopyFieldValue( const QModelIndex & index )
+{
+	if ( !nif )
+		return;
+	const NifItem * item = nif->getItem( index );
+	if ( !item || item->valueType() == NifValue::tNone )
+		return;
+
+	QVector<QPair<QString, int>> path;
+	const NifItem * walk = item;
+	while ( walk && !nif->isTopItem( walk ) ) {
+		path.prepend( { walk->name(), walk->row() } );
+		walk = walk->parent();
+	}
+	// only block fields multi-paste (header rows have no counterparts)
+	if ( !walk || nif->getBlockNumber( walk ) < 0 || path.isEmpty() )
+		return;
+
+	wwFieldClip.fieldName = item->name();
+	wwFieldClip.displayValue = item->getValueAsString();
+	if ( wwFieldClip.displayValue.size() > 24 )
+		wwFieldClip.displayValue = wwFieldClip.displayValue.left( 21 ) + QLatin1String( "..." );
+	wwFieldClip.path = path;
+	wwFieldClip.value = item->value();
+	wwFieldClip.valid = true;
+}
+
+bool NifSkope::wwFieldClipboardValid() const
+{
+	return wwFieldClip.valid;
+}
+
+QString NifSkope::wwFieldClipboardLabel() const
+{
+	if ( !wwFieldClip.valid )
+		return QString();
+	if ( wwFieldClip.displayValue.isEmpty() )
+		return QStringLiteral( "\"%1\"" ).arg( wwFieldClip.fieldName );
+	return QStringLiteral( "\"%1\" = %2" ).arg( wwFieldClip.fieldName, wwFieldClip.displayValue );
+}
+
+void NifSkope::wwPasteFieldToBlocks( const QList<qint32> & blocks )
+{
+	if ( !nif || !wwFieldClip.valid || blocks.isEmpty() )
+		return;
+
+	ChangeValueCommand::createTransaction();
+	int applied = 0;
+	for ( qint32 b : blocks ) {
+		const NifItem * item = nif->getBlockItem( b );
+		for ( const auto & seg : std::as_const( wwFieldClip.path ) ) {
+			if ( !item )
+				break;
+			if ( item->isArray() )
+				item = item->child( seg.second );
+			else
+				item = nif->getItem( item, seg.first, false );
+		}
+		if ( !item || item->valueType() != wwFieldClip.value.type() )
+			continue;
+		QModelIndex vi = nif->itemToIndex( item, NifModel::ValueCol );
+		if ( !vi.isValid() )
+			continue;
+		// old value is captured before the push; push() itself applies the new
+		nif->undoStack->push( new ChangeValueCommand(
+			vi, item->value(), wwFieldClip.value, item->name(), nif ) );
+		applied++;
+	}
+	statusBar()->showMessage(
+		tr( "Pasted %1 onto %2 of %3 selected blocks" )
+			.arg( wwFieldClipboardLabel() ).arg( applied ).arg( blocks.size() ), 4000 );
+}
+
+// ---- diff-vs-reference (WW) -----------------------------------------------
+// Pin one block as the reference; whatever Block Details then shows gets its
+// differing rows accented in the standard orange. The differing-item sets
+// live in NifModel (served per-role); the reference values for "Take" live
+// here. Recomputed once per block switch / edit burst, never per paint.
+
+void NifSkope::setDiffReference( const QModelIndex & blockIndex )
+{
+	if ( !nif )
+		return;
+	QModelIndex block = blockIndex;
+	if ( block.isValid() && block.model() == proxy )
+		block = proxy->mapTo( block );
+	const int bn = nif->getBlockNumber( block );
+	if ( bn < 0 )
+		return;
+	wwDiffRefIndex = QPersistentModelIndex( nif->getBlockIndex( bn ) );
+	nif->diffRefBlock = bn;
+	updateDiffHighlight();
+}
+
+void NifSkope::clearDiffReference()
+{
+	wwDiffRefIndex = QPersistentModelIndex();
+	wwDiffRefValues.clear();
+	if ( nif ) {
+		nif->diffRefBlock = -1;
+		nif->diffItems.clear();
+		nif->diffRefText.clear();
+	}
+	if ( wwDiffBanner )
+		wwDiffBanner->hide();
+	if ( tree )
+		tree->viewport()->update();
+	if ( list )
+		list->viewport()->update();
+}
+
+void NifSkope::queueDiffRecompute()
+{
+	if ( wwDiffRecomputeQueued || !nif || nif->diffRefBlock < 0 )
+		return;
+	wwDiffRecomputeQueued = true;
+	QTimer::singleShot( 0, this, [this]() {
+		wwDiffRecomputeQueued = false;
+		updateDiffHighlight();
+	} );
+}
+
+void NifSkope::updateDiffHighlight()
+{
+	if ( !nif )
+		return;
+	if ( !wwDiffRefIndex.isValid() ) {
+		// reference block got deleted (or the file reloaded)
+		if ( nif->diffRefBlock >= 0 )
+			clearDiffReference();
+		return;
+	}
+	if ( nif->getState() != BaseModel::Default ) {
+		queueDiffRecompute();
+		return;
+	}
+
+	nif->diffItems.clear();
+	nif->diffRefText.clear();
+	wwDiffRefValues.clear();
+	nif->diffRefBlock = nif->getBlockNumber( QModelIndex( wwDiffRefIndex ) );
+
+	const QModelIndex rootIdx = ( tree && tree->model() == nif ) ? tree->rootIndex() : QModelIndex();
+	const NifItem * cur = nif->getItem( rootIdx );
+	const NifItem * ref = nif->getItem( QModelIndex( wwDiffRefIndex ) );
+	int diffLeaves = 0;
+
+	if ( cur && ref && cur != ref && rootIdx.isValid() && nif->isNiBlock( rootIdx ) ) {
+		auto valueDiffers = []( const NifItem * a, const NifItem * b ) {
+			if ( a->valueType() != b->valueType() )
+				return true;
+			if ( a->valueType() == NifValue::tNone )
+				return false;
+			return a->getValueAsVariant() != b->getValueAsVariant();
+		};
+		std::function<bool( const NifItem *, const NifItem * )> walk =
+			[&]( const NifItem * c, const NifItem * r ) -> bool {
+			const int ccnt = c->childCount();
+			const int rcnt = r->childCount();
+			if ( !ccnt && !rcnt ) {
+				if ( !valueDiffers( c, r ) )
+					return false;
+				diffLeaves++;
+				// bound the stored reference data on pathological diffs
+				if ( wwDiffRefValues.size() < 4000 ) {
+					QString refText = r->getValueAsString();
+					if ( refText.size() > 100 )
+						refText = refText.left( 97 ) + QLatin1String( "..." );
+					nif->diffRefText.insert( c, refText );
+					wwDiffRefValues.insert( c, r->value() );
+				}
+				return true;
+			}
+			bool differs = false;
+			if ( c->isArray() && ccnt != rcnt ) {
+				// different lengths: flag the array row, skip element compare
+				differs = true;
+			} else if ( ccnt > 500 ) {
+				// big arrays are compared by length only (perf guardrail);
+				// element-level diff of vertex data is the table view's job
+			} else {
+				for ( int i = 0; i < ccnt; i++ ) {
+					const NifItem * cc = c->child( i );
+					if ( !cc )
+						continue;
+					const NifItem * rc = ( i < rcnt ) ? r->child( i ) : nullptr;
+					if ( rc && !c->isArray() && rc->name() != cc->name() )
+						rc = nullptr;
+					if ( !rc && !c->isArray() ) {
+						for ( int j = 0; j < rcnt; j++ ) {
+							const NifItem * cand = r->child( j );
+							if ( cand && cand->name() == cc->name() ) {
+								rc = cand;
+								break;
+							}
+						}
+					}
+					if ( !rc ) {
+						// no counterpart on the reference side
+						nif->diffItems.insert( cc );
+						differs = true;
+						continue;
+					}
+					if ( walk( cc, rc ) ) {
+						nif->diffItems.insert( cc );
+						differs = true;
+					}
+				}
+			}
+			return differs;
+		};
+		walk( cur, ref );
+	}
+
+	// banner: one plain grey line above the filter field
+	if ( wwDiffBanner && wwDiffLabel ) {
+		const QModelIndex refIdx( wwDiffRefIndex );
+		QString text = tr( "Diff vs: %1 %2" )
+			.arg( nif->diffRefBlock ).arg( nif->itemName( refIdx ) );
+		if ( cur && ref && cur == ref )
+			text += tr( " — showing the reference block" );
+		else if ( cur && ref && cur->name() != ref->name() )
+			text += tr( " — different types, matching fields only" );
+		else if ( cur && ref )
+			text += tr( " — %1 row(s) differ" ).arg( diffLeaves );
+		wwDiffLabel->setText( text );
+		wwDiffBanner->show();
+	}
+
+	if ( tree )
+		tree->viewport()->update();
+	if ( list )
+		list->viewport()->update();
+}
+
+void NifSkope::wwTakeReferenceValue( const QModelIndex & index )
+{
+	if ( !nif )
+		return;
+	const NifItem * item = nif->getItem( index );
+	const auto it = wwDiffRefValues.constFind( item );
+	if ( !item || it == wwDiffRefValues.constEnd() )
+		return;
+	QModelIndex vi = nif->itemToIndex( item, NifModel::ValueCol );
+	if ( !vi.isValid() )
+		return;
+	ChangeValueCommand::createTransaction();
+	nif->undoStack->push( new ChangeValueCommand( vi, item->value(), it.value(), item->name(), nif ) );
+}
+
+void NifSkope::wwTakeAllReferenceValues()
+{
+	if ( !nif || wwDiffRefValues.isEmpty() )
+		return;
+	ChangeValueCommand::createTransaction();
+	// iterate over a copy: the pushes fire dataChanged, which queues (deferred)
+	// diff recomputes that will rebuild wwDiffRefValues afterwards
+	const auto refValues = wwDiffRefValues;
+	for ( auto it = refValues.constBegin(); it != refValues.constEnd(); ++it ) {
+		const NifItem * item = static_cast<const NifItem *>( it.key() );
+		QModelIndex vi = nif->itemToIndex( item, NifModel::ValueCol );
+		if ( !vi.isValid() )
+			continue;
+		nif->undoStack->push( new ChangeValueCommand( vi, item->value(), it.value(), item->name(), nif ) );
+	}
+}
+
 bool NifSkope::blockMatchesQuickFilter( int block ) const
 {
 	if ( !nif || block < 0 || blockListQuickFilter == 0 ) return true;
@@ -2271,12 +2679,27 @@ void NifSkope::select( const QModelIndex & index )
 		if ( dList->isVisible() ) {
 			QModelIndex root = nif->getTopIndex( idx );
 
-			if ( tree->rootIndex() != root )
+			const bool rootChanged = ( tree->rootIndex() != root );
+			// sticky per-type view state: remember the block we're leaving,
+			// and prefer the remembered layout over the type auto-expand
+			const bool hasSticky = rootChanged && wwHasDetailsState( root );
+			if ( rootChanged ) {
+				wwCaptureDetailsState();
 				tree->setRootIndex( root );
-			else
+			} else
 				tree->refreshRowHiding();	// same block: recover a stranded hiding pass
 
+			if ( hasSticky )
+				tree->doAutoExpanding = false;
 			tree->setCurrentIndex( idx.sibling( idx.row(), 0 ) );
+			if ( hasSticky ) {
+				tree->doAutoExpanding = true;
+				wwRestoreDetailsState( root );
+			}
+
+			// diff-vs-reference follows whatever block is shown
+			if ( rootChanged && nif->diffRefBlock >= 0 )
+				updateDiffHighlight();
 
 			// Expand BSShaderTextureSet by default
 			//if ( root.child( 1, 0 ).data().toString() == "Textures" )

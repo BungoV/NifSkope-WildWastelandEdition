@@ -224,6 +224,15 @@ public:
 	//! Block numbers to grey out in the block list (viewport-hidden nodes)
 	QSet<qint32> dimmedBlocks;
 
+	//! Diff-vs-reference (WW Edition). While diffRefBlock >= 0, Value cells of
+	//! items in diffItems render in the orange accent, their tooltips show the
+	//! reference's value (diffRefText), and the reference block's row in the
+	//! block list carries a marker. Both containers are computed and owned by
+	//! NifSkope::updateDiffHighlight(); the model only serves them per-role.
+	QSet<const void *> diffItems;
+	QHash<const void *, QString> diffRefText;
+	qint32 diffRefBlock = -1;
+
 	//! Get the number of NiBlocks
 	int getBlockCount() const;
 

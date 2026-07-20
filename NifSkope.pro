@@ -231,6 +231,7 @@ HEADERS += \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
 	src/spellbook.h \
+	src/wwflagsummary.h \
 	src/version.h \
 	lib/coacd.h \
 	lib/dds.h \

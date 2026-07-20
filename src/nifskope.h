@@ -36,12 +36,16 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMainWindow>     // Inherited
 #include <QObject>         // Inherited
 #include <QFileInfo>
+#include <QHash>
 #include <QLocale>
 #include <QModelIndex>
 #include <QPersistentModelIndex>
 #include <QSet>
+#include <QStringList>
 #include <QUndoCommand>
 #include <QVector>
+
+#include <data/nifvalue.h>
 
 #include <memory>
 
@@ -396,6 +400,30 @@ private:
 	void applyBlockListFilter();
 	//! Reapply the recursive Block Details field-name/value filter.
 	void applyBlockDetailsFilter();
+
+	// ---- Block Details sticky view state (WW): expansion + scroll survive
+	// switching between blocks of the same type ----
+	void wwCaptureDetailsState();
+	bool wwHasDetailsState( const QModelIndex & root ) const;
+	void wwRestoreDetailsState( const QModelIndex & root );
+
+	// ---- field-value clipboard (WW): copy a field once, paste it onto every
+	// selected block that has the field, as one undo step ----
+	void wwCopyFieldValue( const QModelIndex & index );
+	bool wwFieldClipboardValid() const;
+	QString wwFieldClipboardLabel() const;
+	void wwPasteFieldToBlocks( const QList<qint32> & blocks );
+
+	// ---- diff-vs-reference (WW): compare the shown block against a pinned
+	// reference block; differing rows accent orange ----
+	void setDiffReference( const QModelIndex & blockIndex );
+	void clearDiffReference();
+	//! Recompute the differing-row set for the block currently shown.
+	void updateDiffHighlight();
+	//! Coalesce recomputes across a dataChanged burst.
+	void queueDiffRecompute();
+	void wwTakeReferenceValue( const QModelIndex & index );
+	void wwTakeAllReferenceValues();
 	//! Rebuild breadcrumb, history, pin, relationship and footer state.
 	void updateBlockListNavigation( const QModelIndex & index = QModelIndex() );
 	//! Move through the recently selected block history.
@@ -481,6 +509,18 @@ private:
 	bool navigatingBlockListHistory = false;
 	//! This view shows the block details.
 	NifTreeView * tree;
+	//! Sticky Block Details view state, keyed by block type name.
+	struct WwDetailsState {
+		QStringList expanded;	//!< paths of expanded rows ("name|row" segments)
+		int scroll = 0;
+	};
+	QHash<QString, WwDetailsState> wwDetailsState;
+	//! Diff-vs-reference state (sets served to views live in NifModel).
+	QPersistentModelIndex wwDiffRefIndex;
+	QHash<const void *, NifValue> wwDiffRefValues;
+	QWidget * wwDiffBanner = nullptr;
+	QLabel * wwDiffLabel = nullptr;
+	bool wwDiffRecomputeQueued = false;
 	//! This view shows the file header.
 	NifTreeView * header;
 	//! This view shows the archive browser files.

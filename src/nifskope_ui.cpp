@@ -5962,6 +5962,72 @@ void NifSkope::contextMenu( const QPoint & pos )
 			contextBook.addMenu( hierarchy );
 	}
 
+	// WW: field clipboard + diff-vs-reference actions
+	if ( sender() == tree && nif && idx.isValid() && idx.model() == nif ) {
+		const NifItem * item = nif->getItem( idx );
+		const bool leafValue = item && item->valueType() != NifValue::tNone
+			&& nif->getBlockNumber( idx ) >= 0;
+		const bool differing = nif->diffRefBlock >= 0 && item && nif->diffItems.contains( item );
+		if ( leafValue || differing )
+			contextBook.addSeparator();
+		if ( leafValue ) {
+			QAction * aCopy = contextBook.addAction( tr( "Copy Field Value" ) );
+			connect( aCopy, &QAction::triggered, this,
+				[this, pidx = QPersistentModelIndex( idx )]() { wwCopyFieldValue( pidx ); } );
+		}
+		if ( differing ) {
+			if ( wwDiffRefValues.contains( item ) ) {
+				QAction * aTake = contextBook.addAction( tr( "Take Reference Value" ) );
+				connect( aTake, &QAction::triggered, this,
+					[this, pidx = QPersistentModelIndex( idx )]() { wwTakeReferenceValue( pidx ); } );
+			}
+			if ( !wwDiffRefValues.isEmpty() ) {
+				QAction * aTakeAll = contextBook.addAction(
+					tr( "Take All Reference Values (%1)" ).arg( wwDiffRefValues.size() ) );
+				connect( aTakeAll, &QAction::triggered, this,
+					[this]() { wwTakeAllReferenceValues(); } );
+			}
+		}
+	}
+	if ( sender() == list && nif ) {
+		contextBook.addSeparator();
+		const int bn = nif->getBlockNumber( idx );
+		if ( bn >= 0 && bn != nif->diffRefBlock ) {
+			QAction * aRef = contextBook.addAction( tr( "Set as Diff Reference" ) );
+			aRef->setToolTip( tr( "Highlight how any block you select differs from this one" ) );
+			connect( aRef, &QAction::triggered, this,
+				[this, pidx = QPersistentModelIndex( idx )]() { setDiffReference( pidx ); } );
+		}
+		if ( nif->diffRefBlock >= 0 ) {
+			QAction * aClr = contextBook.addAction(
+				tr( "Clear Diff Reference (%1)" ).arg( nif->diffRefBlock ) );
+			connect( aClr, &QAction::triggered, this, [this]() { clearDiffReference(); } );
+		}
+		if ( wwFieldClipboardValid() ) {
+			// paste onto the block-list multi-selection; fall back to the
+			// clicked block when nothing (else) is selected
+			QList<qint32> blocks;
+			if ( list->selectionModel() ) {
+				for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+					if ( pidx.column() != 0 )
+						continue;
+					QModelIndex src = ( pidx.model() == proxy ) ? proxy->mapTo( pidx ) : pidx;
+					int b = nif->getBlockNumber( src );
+					if ( b >= 0 && !blocks.contains( b ) )
+						blocks.append( b );
+				}
+			}
+			if ( blocks.isEmpty() && bn >= 0 )
+				blocks.append( bn );
+			if ( !blocks.isEmpty() ) {
+				QAction * aPaste = contextBook.addAction(
+					tr( "Paste %1 to %2 Block(s)" ).arg( wwFieldClipboardLabel() ).arg( blocks.size() ) );
+				connect( aPaste, &QAction::triggered, this,
+					[this, blocks]() { wwPasteFieldToBlocks( blocks ); } );
+			}
+		}
+	}
+
 	if ( !idx.isValid() || nif->flags( idx ) & (Qt::ItemIsEnabled | Qt::ItemIsSelectable) )
 		contextBook.exec( p );
 }

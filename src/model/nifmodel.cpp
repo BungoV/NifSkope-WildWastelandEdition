@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "xml/xmlconfig.h"
 #include "message.h"
 #include "spellbook.h"
+#include "wwflagsummary.h"
 #include "data/niftypes.h"
 #include "io/nifstream.h"
 #include "libfo76utils/src/filebuf.hpp"
@@ -1250,6 +1251,14 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 		}
 	}
 
+	// diff-vs-reference: differing rows accent their Value text in the same
+	// orange the object-mode selection uses. Checked before buddy() so the
+	// getItem() below sees the row's own item.
+	if ( role == Qt::ForegroundRole && diffRefBlock >= 0 && index.column() == ValueCol ) {
+		if ( const NifItem * it = getItem( index ); it && diffItems.contains( it ) )
+			return QColor::fromRgb( 255, 157, 0 );
+	}
+
 	QModelIndex _buddy = buddy( index );
 	if ( _buddy != index )
 		return data( _buddy, role );
@@ -1277,8 +1286,13 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 					// Prepend a space to the name for top level items and subitems of the 1st level.
 					const QString & namePrefix = ( !p || p == root || !p->parent() || p->parent() == root ) ? SPACE_QSTRING : EMPTY_QSTRING;
 
-					if ( isNiBlock(item) )
-						return QString( namePrefix % QString::number( getBlockNumber(item) ) % SPACE_QSTRING % item->name() );
+					if ( isNiBlock(item) ) {
+						QString bname( namePrefix % QString::number( getBlockNumber(item) ) % SPACE_QSTRING % item->name() );
+						// mark the diff reference block in the block list
+						if ( diffRefBlock >= 0 && getBlockNumber( item ) == diffRefBlock )
+							bname += QStringLiteral( " ◆" );
+						return bname;
+					}
 
 					if ( p && p->isArray() && !p->isBinary() ) {
 						QHash<QString, QString> & pseudonymMap = arrayPseudonyms;
@@ -1497,6 +1511,13 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 				return NifValue::typeDescription( item->strType() );
 			case ValueCol:
 				{
+					// diff-vs-reference: differing rows show the reference's value
+					if ( diffRefBlock >= 0 && diffItems.contains( item ) ) {
+						const QString refText = diffRefText.value( item );
+						if ( !refText.isEmpty() )
+							return tr( "Reference (%1): %2" ).arg( diffRefBlock ).arg( refText );
+					}
+
 					switch ( item->valueType() ) {
 					case NifValue::tByte:
 					case NifValue::tWord:
@@ -1605,6 +1626,16 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 				if ( spell )
 					return spell->page() + "/" + spell->name();
 			}
+		}
+		return QVariant();
+	case WwFlagSummaryRole:
+		{
+			// grey decoded suffix for flag fields ("14 — Hidden, ...").
+			// Cheap name gate first; the real resolution happens in
+			// wwFlagFieldSummary (spells/flags.cpp).
+			if ( column == ValueCol && item->isCount()
+				&& ( item->hasName( "Flags" ) || item->hasName( "Integer Data" ) ) )
+				return wwFlagFieldSummary( this, index );
 		}
 		return QVariant();
 	default:

@@ -1736,3 +1736,169 @@ public:
 };
 
 REGISTER_SPELL( spPasteFlagValues )
+
+// ---- inline flag decoding (Block Details grey suffix) ---------------------
+// One-line human summary of a flag field's meaning, shown by NifDelegate in
+// grey after the raw value. Bit interpretations deliberately mirror the
+// dialogs above; keep both in sync when a layout changes.
+
+#include "wwflagsummary.h"
+
+namespace
+{
+
+// Join set-bit names, keeping the suffix short: 3 names + "+N".
+QString wwJoinFlagNames( const QStringList & parts )
+{
+	if ( parts.isEmpty() )
+		return QString();
+	if ( parts.size() <= 3 )
+		return parts.join( QLatin1String( ", " ) );
+	return QStringList( parts.mid( 0, 3 ) ).join( QLatin1String( ", " ) )
+		+ QObject::tr( ", +%1" ).arg( parts.size() - 3 );
+}
+
+QString wwNamedBitsSummary( quint32 flags, const QStringList & names )
+{
+	QStringList parts;
+	for ( int bit = 0; bit < 32; bit++ ) {
+		if ( !( flags & ( quint32( 1 ) << bit ) ) )
+			continue;
+		if ( bit < names.size() && !names.at( bit ).isEmpty() )
+			parts << names.at( bit );
+		else
+			parts << QObject::tr( "Bit %1" ).arg( bit );
+	}
+	return wwJoinFlagNames( parts );
+}
+
+}
+
+QString wwFlagFieldSummary( const NifModel * nif, const QModelIndex & index )
+{
+	const spEditFlags::FlagType type = spEditFlags::queryType( nif, index );
+	if ( type == spEditFlags::None )
+		return QString();
+
+	const quint32 f = quint32( nif->get<int>( index ) );
+
+	static const QStringList collideModes{
+		QString(), QObject::tr( "Col: Triangles" ),
+		QObject::tr( "Col: Bounding Box" ), QObject::tr( "Col: Continue" ) };
+	static const QStringList loopModes{
+		QString(), QObject::tr( "Reverse" ), QObject::tr( "Clamp" ) };
+	static const QStringList blendModes{
+		QObject::tr( "One" ), QObject::tr( "Zero" ), QObject::tr( "Src Color" ),
+		QObject::tr( "Inv Src Color" ), QObject::tr( "Dst Color" ), QObject::tr( "Inv Dst Color" ),
+		QObject::tr( "Src Alpha" ), QObject::tr( "Inv Src Alpha" ), QObject::tr( "Dst Alpha" ),
+		QObject::tr( "Inv Dst Alpha" ), QObject::tr( "Src Alpha Saturate" ) };
+	static const QStringList testModes{
+		QObject::tr( "Always" ), QObject::tr( "Less" ), QObject::tr( "Equal" ),
+		QObject::tr( "Less or Equal" ), QObject::tr( "Greater" ), QObject::tr( "Not Equal" ),
+		QObject::tr( "Greater or Equal" ), QObject::tr( "Never" ) };
+
+	QStringList parts;
+
+	switch ( type ) {
+	case spEditFlags::Node:
+	case spEditFlags::Billboard:
+	case spEditFlags::Shape:
+		{
+			if ( f & 1 )
+				parts << QObject::tr( "Hidden" );
+			const int col = ( f >> 1 ) & 3;
+			if ( col > 0 && col < collideModes.size() )
+				parts << collideModes.at( col );
+			if ( type == spEditFlags::Node && ( f & 8 ) )
+				parts << QObject::tr( "No Skin Influence" );
+			if ( type == spEditFlags::Shape && ( f & 0x40 ) )
+				parts << QObject::tr( "Shadow" );
+		}
+		break;
+	case spEditFlags::Controller:
+	case spEditFlags::MatColControl:
+		{
+			parts << ( ( f & 8 ) ? QObject::tr( "Active" ) : QObject::tr( "Inactive" ) );
+			const int loop = ( f >> 1 ) & 3;
+			if ( loop > 0 && loop <= loopModes.size() && !loopModes.value( loop ).isEmpty() )
+				parts << loopModes.at( loop );
+		}
+		break;
+	case spEditFlags::Alpha:
+		{
+			if ( f & 1 )
+				parts << QObject::tr( "Blend %1/%2" )
+					.arg( blendModes.value( ( f >> 1 ) & 0x0f ) )
+					.arg( blendModes.value( ( f >> 5 ) & 0x0f ) );
+			if ( f & 0x200 )
+				parts << QObject::tr( "Test %1" ).arg( testModes.value( ( f >> 10 ) & 7 ) );
+			if ( f & 0x2000 )
+				parts << QObject::tr( "No Sorter" );
+			if ( parts.isEmpty() )
+				parts << QObject::tr( "Off" );
+		}
+		break;
+	case spEditFlags::ZBuffer:
+		{
+			parts << ( ( f & 1 ) ? QObject::tr( "Z On" ) : QObject::tr( "Z Off" ) );
+			if ( !( f & 2 ) )
+				parts << QObject::tr( "Read Only" );
+			const int fn = ( f >> 2 ) & 7;
+			if ( ( f & 1 ) && fn != 3 )	// LEQUAL is the unremarkable default
+				parts << testModes.value( fn );
+		}
+		break;
+	case spEditFlags::VertexColor:
+		{
+			static const QStringList vertModes{
+				QObject::tr( "Src Ignore" ), QObject::tr( "Src Emissive" ),
+				QObject::tr( "Src Amb/Diff" ) };
+			parts << ( ( ( f >> 3 ) & 1 ) ? QObject::tr( "Emis+Amb+Diff" ) : QObject::tr( "Emissive" ) );
+			parts << vertModes.value( ( f >> 4 ) & 3, QString() );
+			parts.removeAll( QString() );
+		}
+		break;
+	case spEditFlags::TexDesc:
+		{
+			static const QStringList clampModes{
+				QObject::tr( "Clamp Both" ), QObject::tr( "Clamp S Wrap T" ),
+				QObject::tr( "Wrap S Clamp T" ), QObject::tr( "Wrap Both" ) };
+			parts << QObject::tr( "UV %1" ).arg( f & 0xff );
+			parts << clampModes.value( ( f >> 12 ) & 0x0f, QString() );
+			parts.removeAll( QString() );
+		}
+		break;
+	case spEditFlags::BSX:
+		{
+			static const QStringList bsxNames{
+				QObject::tr( "Animated" ), QObject::tr( "Havok" ), QObject::tr( "Ragdoll" ),
+				QObject::tr( "Complex" ), QObject::tr( "Addon" ), QObject::tr( "Editor Marker" ),
+				QObject::tr( "Dynamic" ), QObject::tr( "Articulated" ),
+				QObject::tr( "Needs Transform Updates" ), QObject::tr( "External Emit" ) };
+			return wwNamedBitsSummary( f, bsxNames );
+		}
+	case spEditFlags::NiAVObject:
+		{
+			static const QStringList avNames{
+				QObject::tr( "Hidden" ), QObject::tr( "Selective Update" ),
+				QObject::tr( "Sel. Upd. Transforms" ), QObject::tr( "Sel. Upd. Controller" ),
+				QObject::tr( "Sel. Upd. Rigid" ), QObject::tr( "Display Object" ),
+				QObject::tr( "Disable Sorting" ), QObject::tr( "Sel. Upd. Transforms Override" ),
+				QString(), QObject::tr( "Save External Geom Data" ),
+				QObject::tr( "No Decals" ), QObject::tr( "Always Draw" ),
+				QObject::tr( "Mesh LOD (FO4)" ), QObject::tr( "Fixed Bound" ),
+				QObject::tr( "Top Fade Node" ), QObject::tr( "Ignore Fade" ),
+				QObject::tr( "No Anim Sync (X)" ), QObject::tr( "No Anim Sync (Y)" ),
+				QObject::tr( "No Anim Sync (Z)" ), QObject::tr( "No Anim Sync (S)" ),
+				QObject::tr( "No Dismember" ), QObject::tr( "No Dismember Validity" ),
+				QObject::tr( "Render Use" ), QObject::tr( "Materials Applied" ),
+				QObject::tr( "High Detail" ), QObject::tr( "Force Update" ),
+				QObject::tr( "Pre-Processed Node" ), QObject::tr( "Mesh LOD (Skyrim)" ) };
+			return wwNamedBitsSummary( f, avNames );
+		}
+	default:
+		break;
+	}
+
+	return wwJoinFlagNames( parts );
+}

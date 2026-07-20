@@ -1,5 +1,74 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20f — Block Details batch: link jump/pick, decoded flags, field paste-to-many, sticky state, diff-vs-reference
+
+Five additions to the Block Details dock from the overhaul concept
+(BLOCK_DETAILS_OVERHAUL_PLAN.md), all keeping the existing Name|Value|Type
+tree exactly as it is at rest. Pre-batch backup: git branch
+`backup/pre-details-batch-20260720` + `release/NifSkope_backup_pre_details_20260720.exe`.
+
+**Link rows: hover ↗ jump / ▾ pick** (nifdelegate.cpp): hovering a Ref/Ptr
+row's Value cell shows two quiet grey glyphs at its right edge. ↗ selects
+the linked block (via the delegate's parent NifSkope window, invokeMethod
+"select"); ▾ pops a menu of every type-compatible block in the file
+("12 — BSLightingShaderProperty \"name\"", checkmark on the current target,
+None on top) — retargeting a link never means memorizing block numbers.
+The pick is one undoable ChangeValueCommand. Compatibility = the link
+field's template type via blockInherits. Invisible at rest; the glyph zone
+backfills with the row's base/alternate/highlight colour for legibility.
+
+**Decoded flags inline** (flags.cpp `wwFlagFieldSummary`, wwflagsummary.h,
+nifmodel.cpp, nifdelegate.cpp): flag fields show a grey suffix after the
+raw value — "14 — Selective Update, Sel. Upd. Transforms, +1". Served by
+the model as WwFlagSummaryRole (basemodel.h, UserRole+43) gated on
+name Flags/Integer Data + isCount, decoded next to the flag dialogs so bit
+interpretations stay in one place (NiAVObject + BSX by named-bit list —
+3 names then "+N"; Node/Shape/Billboard, Controller, Alpha blend/test,
+ZBuffer, VertexColor, TexDesc by mode summary). Painted by the delegate
+after the value text, elided, dropped entirely when the column is narrow.
+
+**Field copy → paste-to-many** (nifskope.cpp, nifskope_ui.cpp): right-click
+any leaf field in Block Details → "Copy Field Value" (name path from block
+root + NifValue, shared across windows). Then right-click the Block List →
+"Paste \"Glossiness\" = 80 to 5 Block(s)" writes it onto every selected
+block that has the field (path resolved by name, arrays by row; value type
+must match — mismatches are skipped, status bar reports applied/total).
+One undo step via ChangeValueCommand transaction merging; old values are
+captured before each push (push() itself applies — note pasteTo() in
+nifview.cpp pre-sets and then records item->value() as "old", which makes
+its undo a no-op; deliberately not copied here).
+
+**Sticky Block Details state per block type** (nifskope.cpp, select()):
+switching to a block of a type you already visited restores that type's
+expansion set and scroll position instead of resetting + auto-expanding
+(auto-expand still runs for never-visited types). Expansion paths are
+name-based ("name|row" segments, row numbers inside arrays); capture
+skips arrays >2000 rows so a 38k-vertex shape stays O(top-level rows).
+Session-only (QHash keyed by block type name).
+
+**Diff-vs-reference** (nifskope.cpp/h, nifmodel.cpp/h, nifskope_ui.cpp):
+Block List right-click → "Set as Diff Reference" pins a block (marked ◆ in
+the list); from then on whatever Block Details shows gets every differing
+Value cell accented in the standard selection orange (#FF9D00), with the
+reference's value in the tooltip. A flat grey banner above the field
+filter says "Diff vs: 31 BSLightingShaderProperty — 6 row(s) differ"
+(✕ clears; also via list right-click). Right-click a differing row →
+"Take Reference Value", or "Take All Reference Values (N)" — one undo
+step. The diff walk runs once per block switch / edit burst (dataChanged →
+single-shot coalesced recompute), never per paint: sets of differing
+NifItem pointers live in NifModel (diffItems/diffRefText/diffRefBlock,
+same pattern as selHighlight) and data() just looks them up. Guardrails:
+arrays >500 elements compare by length only; different-type blocks compare
+matching field names only (banner notes it); stored reference values cap
+at 4000 leaves. Reference invalidation (block deleted, file reload) clears
+cleanly via QPersistentModelIndex + beginLoading.
+
+Build: green (qmake6 re-run for the new header + role). GUI checks owed:
+hover glyphs on link rows (incl. a proxy-hierarchy edge: glyphs are
+Value-cell-hover only), flag suffix legibility on narrow columns, paste-
+to-many undo as one step, sticky expansion across same-type blocks, diff
+accent + Take Theirs round-trip.
+
 ## 2026-07-20e — Right-click flag copy/paste, foldable Block List, toolbar grips → separators
 
 **Copy Flags / Paste Flags in the context menu** (flags.cpp): two new
