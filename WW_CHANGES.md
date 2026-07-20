@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20d — Generic flag dialog (Node/BSX get the Shader Flags UI) + flag copy/paste
+
+The modern Shader Flags dialog (filterable checkbox tree, "Stored in"
+column, live hex footer) is now a reusable component
+(`wwFlagListDialog`, flags.cpp) driven by a field list + bit-entry list,
+and two more flag editors use it:
+
+- **Node Flags** (`niavFlags` — NiAVObject flags on 20.2.0.7 files, the old
+  plain 32-checkbox column) and **BSX Flags** (`bsxFlags`). Both list all
+  32 bits (named where known, "Bit N" otherwise — BSX previously hid bits
+  10–31 entirely; they were preserved on write but invisible).
+- The editors with multi-bit enum fields behind combo boxes (node/legacy,
+  controller, rigid body, Z-buffer, stencil, billboard, vertex color,
+  TexDesc, alpha) deliberately keep their dialogs — a raw bit checklist
+  would be a usability downgrade for e.g. a 2-bit collision mode.
+
+**Copy/Paste between compatible flags.** The dialog has Copy and Paste
+buttons wired to the system clipboard with a kind-tagged MIME payload
+(`application/x-nifskope-flags`): Paste only enables when the clipboard
+holds values copied from the SAME kind — shader flags paste between shader
+properties of the same enum types (Skyrim vs FO4 shader flags do NOT
+cross-paste; different bit meanings), node flags between NiAVObjects, BSX
+between BSXFlags blocks. Works across windows/instances (system
+clipboard); the plain-text fallback ("F1 0x8040028B  F2 0x00000031") is
+for humans.
+
+Write-back semantics unchanged per editor (shader = both fields in one
+snapshot undo step; node/BSX = the existing direct set). Build green,
+startup + join harness smoke PASS; the dialogs themselves need a GUI pass
+(open each of the three, filter, toggle, copy → paste onto another block,
+verify the hex footer matches the Block Details value).
+
 ## 2026-07-20c — Performance batch 3 (PERFORMANCE_PLAN.md Tier 3)
 
 **15a — NifItem slab pool (shipped).** `NifItem` now allocates from a

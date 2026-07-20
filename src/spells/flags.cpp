@@ -2,14 +2,17 @@
 #include "nifsnapshot.h"
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QGuiApplication>
 #include <QHeaderView>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -97,6 +100,218 @@ QString shaderFlagCategory( const QString & rawName )
 	return QObject::tr( "Specialized" );
 }
 
+// ---- generic flag-list dialog (the Shader Flags UI, reusable) -------------
+// One filterable checkbox tree over the named bits of one or more flag
+// fields, with the hex footer and clipboard Copy / Paste. Copy puts the raw
+// field values on the system clipboard tagged with `kindId`; Paste only
+// enables when the clipboard holds values copied from the SAME kind (and
+// field count), so flag data moves between compatible fields only — e.g.
+// shader flags between two FO4 shader properties, or node flags between two
+// NiAVObjects, but never shader bits onto a node. The plain-text fallback
+// ("F1 0x8040028B  F2 0x00000031") pastes nowhere and is just readable.
+
+struct WwFlagField {
+	QString label;		// "F1"; empty = single-field kind, shown as "Flags"
+	quint32 value = 0;
+};
+
+struct WwFlagEntry {
+	int field = 0;		// index into the fields vector
+	int bit = 0;
+	QString name;
+	QString rawName;	// extra search text (may be empty)
+	QString description;	// tooltip (may be empty)
+	QString category;	// extra search text (may be empty)
+};
+
+constexpr const char * wwFlagsMimeType = "application/x-nifskope-flags";
+
+QVector<quint32> wwFlagsFromClipboard( const QString & kindId, int fieldCount )
+{
+	const QMimeData * mime = QGuiApplication::clipboard()->mimeData();
+	if ( !mime || !mime->hasFormat( QLatin1String( wwFlagsMimeType ) ) )
+		return {};
+	const QString payload = QString::fromUtf8( mime->data( QLatin1String( wwFlagsMimeType ) ) );
+	const int split = payload.indexOf( QLatin1Char( '\n' ) );
+	if ( split < 0 || payload.left( split ) != kindId )
+		return {};
+	QVector<quint32> values;
+	for ( const QString & part : payload.mid( split + 1 ).split( QLatin1Char( ',' ) ) ) {
+		bool ok = false;
+		values.append( part.toUInt( &ok, 16 ) );
+		if ( !ok )
+			return {};
+	}
+	if ( values.size() != fieldCount )
+		return {};
+	return values;
+}
+
+bool wwFlagListDialog( const QString & title, const QString & kindId,
+	QVector<WwFlagField> & fields, const QVector<WwFlagEntry> & entries )
+{
+	if ( fields.isEmpty() || entries.isEmpty() )
+		return false;
+	const bool multiField = fields.size() > 1;
+	auto fieldTag = [&]( int f ) {
+		return multiField ? fields.at( f ).label
+			: ( fields.at( f ).label.isEmpty() ? QObject::tr( "Flags" ) : fields.at( f ).label );
+	};
+
+	QDialog dialog;
+	dialog.setWindowTitle( title );
+	dialog.resize( 460, 360 );
+	dialog.setMinimumSize( 400, 320 );
+	dialog.setStyleSheet( QStringLiteral(
+		"QDialog { background: #383838; color: #dddddd; }"
+		"QLabel { color: #dddddd; }"
+		"QComboBox, QLineEdit, QTreeWidget { background: #454545; border: 1px solid #303030; color: #e4e4e4; }"
+		"QLineEdit { border-radius: 3px; padding: 3px 7px; selection-background-color: #4772b3; }"
+		"QTreeWidget::item { height: 26px; }"
+		"QTreeWidget::item:hover { background: #505050; }"
+		"QHeaderView::section { background: #333333; color: #bbbbbb; border: none;"
+		" border-bottom: 1px solid #555555; padding: 4px 6px; }"
+		"QPushButton { background: #454545; border: 1px solid #606060; border-radius: 3px;"
+		" color: #e2e2e2; padding: 4px 10px; }"
+		"QPushButton:hover { background: #525252; border-color: #777777; }"
+		"QPushButton:disabled { color: #777777; border-color: #4a4a4a; }" ) );
+	QVBoxLayout * layout = new QVBoxLayout( &dialog );
+	layout->setContentsMargins( 10, 10, 10, 8 );
+	layout->setSpacing( 7 );
+
+	QHBoxLayout * toolbar = new QHBoxLayout;
+	toolbar->addWidget( new QLabel( QObject::tr( "Filter" ), &dialog ) );
+	QLineEdit * filterEdit = new QLineEdit( &dialog );
+	filterEdit->setPlaceholderText( QObject::tr( "Type a flag name, category, or bit 25…" ) );
+	filterEdit->setClearButtonEnabled( true );
+	toolbar->addWidget( filterEdit, 1 );
+	QLabel * countLabel = new QLabel( &dialog );
+	countLabel->setStyleSheet( QStringLiteral( "color: #bbbbbb;" ) );
+	toolbar->addWidget( countLabel );
+	layout->addLayout( toolbar );
+
+	ShaderFlagTree * tree = new ShaderFlagTree( &dialog );
+	tree->setColumnCount( 2 );
+	tree->setHeaderLabels( { QObject::tr( "Flag" ), QObject::tr( "Stored in" ) } );
+	tree->setRootIsDecorated( false );
+	tree->setAlternatingRowColors( true );
+	tree->setSelectionMode( QAbstractItemView::SingleSelection );
+	tree->header()->setStretchLastSection( false );
+	tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+	tree->header()->setSectionResizeMode( 1, QHeaderView::Fixed );
+	tree->header()->resizeSection( 1, 86 );
+	layout->addWidget( tree, 1 );
+
+	QLabel * rawValues = new QLabel( &dialog );
+	rawValues->setStyleSheet( QStringLiteral( "color: #bdbdbd; font-family: monospace;" ) );
+	QPushButton * copyButton = new QPushButton( QObject::tr( "Copy" ), &dialog );
+	copyButton->setToolTip( QObject::tr( "Copy the raw flag value(s) to the clipboard" ) );
+	QPushButton * pasteButton = new QPushButton( QObject::tr( "Paste" ), &dialog );
+	pasteButton->setToolTip( QObject::tr( "Paste flag value(s) copied from a compatible flag field" ) );
+	QDialogButtonBox * buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog );
+	QHBoxLayout * footer = new QHBoxLayout;
+	footer->addWidget( rawValues, 1 );
+	footer->addWidget( copyButton );
+	footer->addWidget( pasteButton );
+	footer->addWidget( buttons );
+	layout->addLayout( footer );
+
+	int shownCount = entries.size();
+	auto refreshSummary = [&]() {
+		int selected = 0;
+		for ( const WwFlagField & f : fields ) {
+			for ( int bit = 0; bit < 32; bit++ ) {
+				if ( f.value & ( quint32( 1 ) << bit ) )
+					selected++;
+			}
+		}
+		countLabel->setText( QObject::tr( "%1 selected · %2 shown" ).arg( selected ).arg( shownCount ) );
+		QStringList raw;
+		for ( int f = 0; f < fields.size(); f++ ) {
+			raw << QStringLiteral( "%1 0x%2" ).arg( fieldTag( f ) )
+				.arg( QString::number( fields.at( f ).value, 16 ).rightJustified( 8, QLatin1Char( '0' ) ).toUpper() );
+		}
+		rawValues->setText( raw.join( QStringLiteral( "   " ) ) );
+	};
+	auto populate = [&]() {
+		QSignalBlocker blocker( tree );
+		tree->clear();
+		shownCount = 0;
+		const QString filter = filterEdit->text().trimmed();
+		for ( const WwFlagEntry & entry : entries ) {
+			const QString location = multiField
+				? QObject::tr( "%1 bit %2" ).arg( fieldTag( entry.field ) ).arg( entry.bit )
+				: QObject::tr( "bit %1" ).arg( entry.bit );
+			const QString searchable = entry.name + QLatin1Char( ' ' ) + entry.rawName
+				+ QLatin1Char( ' ' ) + entry.category + QLatin1Char( ' ' ) + location;
+			if ( !filter.isEmpty() && !searchable.contains( filter, Qt::CaseInsensitive ) )
+				continue;
+			QTreeWidgetItem * item = new QTreeWidgetItem( tree );
+			item->setText( 0, entry.name );
+			item->setText( 1, multiField
+				? QObject::tr( "%1 · bit %2" ).arg( fieldTag( entry.field ) ).arg( entry.bit )
+				: QObject::tr( "bit %1" ).arg( entry.bit ) );
+			item->setData( 0, Qt::UserRole, entry.field );
+			item->setData( 0, Qt::UserRole + 1, entry.bit );
+			item->setFlags( item->flags() | Qt::ItemIsUserCheckable );
+			const quint32 fieldValue = fields.at( entry.field ).value;
+			item->setCheckState( 0, fieldValue & ( quint32( 1 ) << entry.bit ) ? Qt::Checked : Qt::Unchecked );
+			if ( !entry.description.trimmed().isEmpty() )
+				item->setToolTip( 0, entry.description.trimmed() );
+			item->setForeground( 1, QColor( 170, 170, 170 ) );
+			shownCount++;
+		}
+		refreshSummary();
+	};
+	auto refreshPaste = [&]() {
+		pasteButton->setEnabled( !wwFlagsFromClipboard( kindId, fields.size() ).isEmpty() );
+	};
+	QObject::connect( filterEdit, &QLineEdit::textChanged, &dialog, [&]( const QString & ) { populate(); } );
+	QObject::connect( tree, &QTreeWidget::itemChanged, &dialog, [&]( QTreeWidgetItem * item, int column ) {
+		if ( column != 0 )
+			return;
+		const int field = item->data( 0, Qt::UserRole ).toInt();
+		const int bit = item->data( 0, Qt::UserRole + 1 ).toInt();
+		if ( field < 0 || field >= fields.size() )
+			return;
+		const quint32 mask = quint32( 1 ) << bit;
+		if ( item->checkState( 0 ) == Qt::Checked )
+			fields[field].value |= mask;
+		else
+			fields[field].value &= ~mask;
+		refreshSummary();
+	} );
+	QObject::connect( copyButton, &QPushButton::clicked, &dialog, [&]() {
+		QStringList hexes, readable;
+		for ( int f = 0; f < fields.size(); f++ ) {
+			hexes << QString::number( fields.at( f ).value, 16 );
+			readable << QStringLiteral( "%1 0x%2" ).arg( fieldTag( f ) )
+				.arg( QString::number( fields.at( f ).value, 16 ).rightJustified( 8, QLatin1Char( '0' ) ).toUpper() );
+		}
+		auto * mime = new QMimeData;
+		mime->setData( QLatin1String( wwFlagsMimeType ),
+			( kindId + QLatin1Char( '\n' ) + hexes.join( QLatin1Char( ',' ) ) ).toUtf8() );
+		mime->setText( readable.join( QStringLiteral( "  " ) ) );
+		QGuiApplication::clipboard()->setMimeData( mime );
+	} );
+	QObject::connect( pasteButton, &QPushButton::clicked, &dialog, [&]() {
+		const QVector<quint32> values = wwFlagsFromClipboard( kindId, fields.size() );
+		if ( values.isEmpty() )
+			return;
+		for ( int f = 0; f < fields.size(); f++ )
+			fields[f].value = values.at( f );
+		populate();
+	} );
+	QObject::connect( QGuiApplication::clipboard(), &QClipboard::dataChanged, &dialog, refreshPaste );
+	QObject::connect( buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept );
+	QObject::connect( buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
+	populate();
+	refreshPaste();
+	filterEdit->setFocus();
+
+	return dialog.exec() == QDialog::Accepted;
+}
+
 }
 
 //! Edit Shader Flags 1 and 2 as one compact, version-aware list.
@@ -129,20 +344,12 @@ public:
 		const QModelIndex flags2 = nif->getIndex( block, "Shader Flags 2" );
 		if ( !flags1.isValid() || !flags2.isValid() ) return index;
 
-		struct Entry {
-			int field = 0;
-			int bit = 0;
-			QString rawName;
-			QString name;
-			QString description;
-			QString category;
-		};
-		QVector<Entry> entries;
+		QVector<WwFlagEntry> entries;
 		auto collect = [&]( int field, const QModelIndex & flagIndex ) {
 			const QString type = nif->itemStrType( flagIndex );
 			const NifValue::EnumOptions & options = NifValue::enumOptionData( type );
 			for ( auto it = options.o.cbegin(); it != options.o.cend(); ++it ) {
-				Entry entry;
+				WwFlagEntry entry;
 				entry.field = field;
 				entry.bit = int( it.key() );
 				entry.rawName = it.value().first;
@@ -152,120 +359,28 @@ public:
 				entries.append( entry );
 			}
 		};
-		collect( 1, flags1 );
-		collect( 2, flags2 );
+		collect( 0, flags1 );
+		collect( 1, flags2 );
 		if ( entries.isEmpty() ) return index;
 
-		quint32 value1 = nif->get<quint32>( flags1 );
-		quint32 value2 = nif->get<quint32>( flags2 );
-		const quint32 original1 = value1;
-		const quint32 original2 = value2;
+		QVector<WwFlagField> fields( 2 );
+		fields[0].label = QStringLiteral( "F1" );
+		fields[0].value = nif->get<quint32>( flags1 );
+		fields[1].label = QStringLiteral( "F2" );
+		fields[1].value = nif->get<quint32>( flags2 );
+		const quint32 original1 = fields[0].value;
+		const quint32 original2 = fields[1].value;
 
-		QDialog dialog;
-		dialog.setWindowTitle( Spell::tr( "Shader Flags" ) );
-		dialog.resize( 460, 360 );
-		dialog.setMinimumSize( 400, 320 );
-		dialog.setStyleSheet( QStringLiteral(
-			"QDialog { background: #383838; color: #dddddd; }"
-			"QLabel { color: #dddddd; }"
-			"QComboBox, QLineEdit, QTreeWidget { background: #454545; border: 1px solid #303030; color: #e4e4e4; }"
-			"QLineEdit { border-radius: 3px; padding: 3px 7px; selection-background-color: #4772b3; }"
-			"QTreeWidget::item { height: 26px; }"
-			"QTreeWidget::item:hover { background: #505050; }"
-			"QHeaderView::section { background: #333333; color: #bbbbbb; border: none;"
-			" border-bottom: 1px solid #555555; padding: 4px 6px; }"
-			"QPushButton { background: #454545; border: 1px solid #606060; border-radius: 3px;"
-			" color: #e2e2e2; padding: 4px 10px; }"
-			"QPushButton:hover { background: #525252; border-color: #777777; }" ) );
-		QVBoxLayout * layout = new QVBoxLayout( &dialog );
-		layout->setContentsMargins( 10, 10, 10, 8 );
-		layout->setSpacing( 7 );
+		// copy/paste compatibility follows the enum types, so e.g. Skyrim and
+		// FO4 shader flag values never cross-paste (different bit meanings)
+		const QString kindId = QStringLiteral( "shader/" ) + nif->itemStrType( flags1 )
+			+ QLatin1Char( '+' ) + nif->itemStrType( flags2 );
 
-		QHBoxLayout * toolbar = new QHBoxLayout;
-		toolbar->addWidget( new QLabel( Spell::tr( "Filter" ), &dialog ) );
-		QLineEdit * filterEdit = new QLineEdit( &dialog );
-		filterEdit->setPlaceholderText( Spell::tr( "Type a flag name, category, or F2 bit 25…" ) );
-		filterEdit->setClearButtonEnabled( true );
-		toolbar->addWidget( filterEdit, 1 );
-		QLabel * countLabel = new QLabel( &dialog );
-		countLabel->setStyleSheet( QStringLiteral( "color: #bbbbbb;" ) );
-		toolbar->addWidget( countLabel );
-		layout->addLayout( toolbar );
-
-		ShaderFlagTree * tree = new ShaderFlagTree( &dialog );
-		tree->setColumnCount( 2 );
-		tree->setHeaderLabels( { Spell::tr( "Flag" ), Spell::tr( "Stored in" ) } );
-		tree->setRootIsDecorated( false );
-		tree->setAlternatingRowColors( true );
-		tree->setSelectionMode( QAbstractItemView::SingleSelection );
-		tree->header()->setStretchLastSection( false );
-		tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
-		tree->header()->setSectionResizeMode( 1, QHeaderView::Fixed );
-		tree->header()->resizeSection( 1, 86 );
-		layout->addWidget( tree, 1 );
-
-		QLabel * rawValues = new QLabel( &dialog );
-		rawValues->setStyleSheet( QStringLiteral( "color: #bdbdbd; font-family: monospace;" ) );
-		QDialogButtonBox * buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog );
-		QHBoxLayout * footer = new QHBoxLayout;
-		footer->addWidget( rawValues, 1 );
-		footer->addWidget( buttons );
-		layout->addLayout( footer );
-
-		int shownCount = entries.size();
-		auto refreshSummary = [&]() {
-			int selected = 0;
-			for ( int bit = 0; bit < 32; bit++ ) {
-				if ( value1 & ( quint32( 1 ) << bit ) ) selected++;
-				if ( value2 & ( quint32( 1 ) << bit ) ) selected++;
-			}
-			countLabel->setText( Spell::tr( "%1 selected · %2 shown" ).arg( selected ).arg( shownCount ) );
-			rawValues->setText( QStringLiteral( "F1 0x%1   F2 0x%2" )
-				.arg( value1, 8, 16, QLatin1Char( '0' ) ).arg( value2, 8, 16, QLatin1Char( '0' ) ).toUpper() );
-		};
-		auto populate = [&]() {
-			QSignalBlocker blocker( tree );
-			tree->clear();
-			shownCount = 0;
-			const QString filter = filterEdit->text().trimmed();
-			for ( const Entry & entry : entries ) {
-				const QString location = Spell::tr( "F%1 bit %2" ).arg( entry.field ).arg( entry.bit );
-				const QString searchable = entry.name + QLatin1Char( ' ' ) + entry.rawName
-					+ QLatin1Char( ' ' ) + entry.category + QLatin1Char( ' ' ) + location;
-				if ( !filter.isEmpty() && !searchable.contains( filter, Qt::CaseInsensitive ) ) continue;
-				QTreeWidgetItem * item = new QTreeWidgetItem( tree );
-				item->setText( 0, entry.name );
-				item->setText( 1, Spell::tr( "F%1 · bit %2" ).arg( entry.field ).arg( entry.bit ) );
-				item->setData( 0, Qt::UserRole, entry.field );
-				item->setData( 0, Qt::UserRole + 1, entry.bit );
-				item->setFlags( item->flags() | Qt::ItemIsUserCheckable );
-				const quint32 fieldValue = entry.field == 1 ? value1 : value2;
-				item->setCheckState( 0, fieldValue & ( quint32( 1 ) << entry.bit ) ? Qt::Checked : Qt::Unchecked );
-				if ( !entry.description.trimmed().isEmpty() ) item->setToolTip( 0, entry.description.trimmed() );
-				item->setForeground( 1, QColor( 170, 170, 170 ) );
-				shownCount++;
-			}
-			refreshSummary();
-		};
-		QObject::connect( filterEdit, &QLineEdit::textChanged, &dialog, [&]( const QString & ) { populate(); } );
-		QObject::connect( tree, &QTreeWidget::itemChanged, &dialog, [&]( QTreeWidgetItem * item, int column ) {
-			if ( column != 0 ) return;
-			const int field = item->data( 0, Qt::UserRole ).toInt();
-			const int bit = item->data( 0, Qt::UserRole + 1 ).toInt();
-			quint32 & fieldValue = field == 1 ? value1 : value2;
-			const quint32 mask = quint32( 1 ) << bit;
-			if ( item->checkState( 0 ) == Qt::Checked ) fieldValue |= mask; else fieldValue &= ~mask;
-			refreshSummary();
-		} );
-		QObject::connect( buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept );
-		QObject::connect( buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
-		populate();
-		filterEdit->setFocus();
-
-		if ( dialog.exec() == QDialog::Accepted && ( value1 != original1 || value2 != original2 ) ) {
+		if ( wwFlagListDialog( Spell::tr( "Shader Flags" ), kindId, fields, entries )
+			&& ( fields[0].value != original1 || fields[1].value != original2 ) ) {
 			nifSnapshotOp( nif, Spell::tr( "Edit shader flags" ), [&]() {
-				nif->set<quint32>( flags1, value1 );
-				nif->set<quint32>( flags2, value2 );
+				nif->set<quint32>( flags1, fields[0].value );
+				nif->set<quint32>( flags2, fields[1].value );
 			} );
 		}
 		return index;
@@ -743,12 +858,9 @@ public:
 	//! Set BSX flags
 	void bsxFlags( NifModel * nif, const QModelIndex & index )
 	{
-		quint32 flags = nif->get<int>( index );
+		const quint32 flags = nif->get<int>( index );
 
-		QDialog dlg;
-		QVBoxLayout * vbox = new QVBoxLayout( &dlg );
-
-		QStringList flagNames{
+		const QStringList flagNames{
 			Spell::tr( "Animated" ),            // 1
 			Spell::tr( "Havok" ),               // 2
 			Spell::tr( "Ragdoll" ),             // 4
@@ -765,35 +877,33 @@ public:
 			//Spell::tr( "Searched Breakable (Runtime Only?)" ) // 8192
 		};
 
-		QList<QCheckBox *> chkBoxes;
-		int x = 0;
-		for ( const QString& flagName : flagNames ) {
-			chkBoxes << dlgCheck( vbox, QString( "%1: %2 (%3)" ).arg( Spell::tr( "Bit %1" ).arg( x ) ).arg( flagName ).arg( 1 << x ) );
-			chkBoxes.last()->setChecked( flags & ( 1 << x ) );
-			x++;
+		// generic flag dialog (filter, hex footer, Copy/Paste between BSXFlags
+		// blocks). Every bit is listed so unknown high bits are visible and
+		// ride along with copy/paste instead of being preserved invisibly.
+		QVector<WwFlagField> fields( 1 );
+		fields[0].value = flags;
+		QVector<WwFlagEntry> entries;
+		for ( int bit = 0; bit < 32; bit++ ) {
+			WwFlagEntry entry;
+			entry.bit = bit;
+			entry.name = ( bit < flagNames.size() && !flagNames.at( bit ).isEmpty() )
+				? flagNames.at( bit )
+				: Spell::tr( "Bit %1" ).arg( bit );
+			entries.append( entry );
 		}
 
-		dlgButtons( &dlg, vbox );
-
-		if ( dlg.exec() == QDialog::Accepted ) {
-			x = 0;
-			for ( QCheckBox * chk : chkBoxes ) {
-				flags = ( flags & ( ~( 1 << x ) ) ) | ( chk->isChecked() ? 1 << x : 0 );
-				x++;
-			}
-			nif->set<int>( index, flags );
+		if ( wwFlagListDialog( Spell::tr( "BSX Flags" ), QStringLiteral( "bsxflags" ), fields, entries )
+			&& fields[0].value != flags ) {
+			nif->set<int>( index, fields[0].value );
 		}
 	}
 
 	//! Set NiAVObject flags
 	void niavFlags( NifModel * nif, const QModelIndex & index )
 	{
-		quint32 flags = nif->get<int>( index );
+		const quint32 flags = nif->get<int>( index );
 
-		QDialog dlg;
-		QVBoxLayout * vbox = new QVBoxLayout( &dlg );
-
-		QStringList flagNames{
+		const QStringList flagNames{
 			Spell::tr( "Hidden" ),                          // 1
 			Spell::tr( "Selective Update" ),                // 2
 			Spell::tr( "Selective Update Transforms" ),     // 4
@@ -829,24 +939,23 @@ public:
 
 		};
 
-		QList<QCheckBox *> chkBoxes;
-		int x = 0;
-		for ( const QString& flagName : flagNames ) {
-			chkBoxes << dlgCheck( vbox, QString( "%1: %2 (%3)" ).arg( Spell::tr( "Bit %1" ).arg( x ) )
-								  .arg( flagName ).arg( (uint)(1 << x) ) );
-			chkBoxes.last()->setChecked( flags & (1 << x) );
-			x++;
+		// generic flag dialog (filter, hex footer, Copy/Paste between
+		// NiAVObject flag fields — nodes and shapes share the same layout)
+		QVector<WwFlagField> fields( 1 );
+		fields[0].value = flags;
+		QVector<WwFlagEntry> entries;
+		for ( int bit = 0; bit < 32; bit++ ) {
+			WwFlagEntry entry;
+			entry.bit = bit;
+			entry.name = ( bit < flagNames.size() && !flagNames.at( bit ).isEmpty() )
+				? flagNames.at( bit )
+				: Spell::tr( "Bit %1" ).arg( bit );
+			entries.append( entry );
 		}
 
-		dlgButtons( &dlg, vbox );
-
-		if ( dlg.exec() == QDialog::Accepted ) {
-			x = 0;
-			for ( QCheckBox * chk : chkBoxes ) {
-				flags = (flags & (~(1 << x))) | (chk->isChecked() ? 1 << x : 0);
-				x++;
-			}
-			nif->set<int>( index, flags );
+		if ( wwFlagListDialog( Spell::tr( "Node Flags" ), QStringLiteral( "niavobject" ), fields, entries )
+			&& fields[0].value != flags ) {
+			nif->set<int>( index, fields[0].value );
 		}
 	}
 
