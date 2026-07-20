@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20l — Type chips show matches ONLY (flat while filtered)
+
+User: "if I filter by these types, show me them only." Hierarchy mode
+fundamentally can't — a tree row can never display without its ancestors,
+so a chip filter always dragged the parent chain along. A quick-filter
+chip now temporarily switches the Block List to the FLAT list view (every
+block of the chosen category, nothing else); clicking All restores the
+hierarchy — but only if the chip is what left it (a user already in flat
+mode stays there). goToBlock's programmatic chip reset restores too.
+
 ## 2026-07-20k — Block Details search actually filters; boxed viewport mode buttons
 
 **Search fix** (nifview.h/cpp, nifskope.cpp): the field filter LOOKED broken

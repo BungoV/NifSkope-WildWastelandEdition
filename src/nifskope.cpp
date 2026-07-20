@@ -747,6 +747,23 @@ NifSkope::NifSkope( bool background )
 	connect( blockListSearch, &QLineEdit::textChanged, this, [this]() { applyBlockListFilter(); } );
 	connect( blockListFilterGroup, &QButtonGroup::idClicked, this, [this]( int id ) {
 		blockListQuickFilter = id;
+		// a type chip means "show me those blocks ONLY". Hierarchy mode can't
+		// do that (a tree row can never show without its ancestors), so a chip
+		// temporarily switches the list to the flat list view; All restores
+		// the hierarchy if the chip was what left it.
+		if ( id != 0 ) {
+			if ( list->model() == proxy ) {
+				blockListFilterRestoreHierarchy = true;
+				if ( aList )
+					aList->setChecked( true );
+				setListMode();
+			}
+		} else if ( blockListFilterRestoreHierarchy ) {
+			blockListFilterRestoreHierarchy = false;
+			if ( aHierarchy )
+				aHierarchy->setChecked( true );
+			setListMode();
+		}
 		applyBlockListFilter();
 	} );
 	connect( blockListBack, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( -1 ); } );
@@ -2357,6 +2374,12 @@ void NifSkope::goToBlock()
 	blockListQuickFilter = 0;
 	if ( blockListFilterGroup && blockListFilterGroup->button( 0 ) )
 		blockListFilterGroup->button( 0 )->setChecked( true );
+	if ( blockListFilterRestoreHierarchy ) {
+		blockListFilterRestoreHierarchy = false;
+		if ( aHierarchy )
+			aHierarchy->setChecked( true );
+		setListMode();
+	}
 	applyBlockListFilter();
 	select( nif->getBlockIndex( block ) );
 }

@@ -510,6 +510,8 @@ private:
 	QSet<int> blockListPins;
 	int blockListHistoryPosition = -1;
 	int blockListQuickFilter = 0;
+	//! a quick-filter chip switched the list to flat mode; All switches back
+	bool blockListFilterRestoreHierarchy = false;
 	bool navigatingBlockListHistory = false;
 	//! This view shows the block details.
 	NifTreeView * tree;
