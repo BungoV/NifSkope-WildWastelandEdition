@@ -14,3 +14,5 @@ qmake_out.txt
 __pycache__/
 ww_*.log
 ww_*.png
+qmake_*.log
+build_run.log

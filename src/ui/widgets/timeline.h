@@ -207,6 +207,11 @@ protected slots:
 	void runLint();
 
 protected:
+	//! Deferred-refresh flag: a refresh requested while the dock is hidden is
+	//! remembered and replayed by showEvent instead of scanning invisibly.
+	bool refreshPending = false;
+	void showEvent( QShowEvent * event ) override;
+
 	// ---- scanning (timeline.cpp)
 	void scanModel();
 	void buildLanes();

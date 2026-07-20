@@ -884,6 +884,14 @@ void TimelineWidget::refreshLater()
 	refreshTimer->start();
 }
 
+void TimelineWidget::showEvent( QShowEvent * event )
+{
+	QWidget::showEvent( event );
+	// Repay a refresh that was skipped while the dock was hidden.
+	if ( refreshPending )
+		refreshTimer->start();
+}
+
 void TimelineWidget::transportToggle( int dir )
 {
 	if ( playDir == dir ) {
@@ -946,6 +954,15 @@ void TimelineWidget::refresh()
 		refreshTimer->start();
 		return;
 	}
+
+	// scanModel() walks every block of the file. While the Animation Manager
+	// dock is hidden (closed or a background tab) that work is invisible —
+	// remember that a refresh is owed and run it when the dock next shows.
+	if ( !isVisible() ) {
+		refreshPending = true;
+		return;
+	}
+	refreshPending = false;
 
 	scanning = true;
 

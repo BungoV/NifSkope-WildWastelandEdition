@@ -518,6 +518,13 @@ private:
 	bool closingWorkspaceGroup = false;
 	bool applicationEventFilterInstalled = false;
 	bool configuredNifBrowserPopulated = false;
+	//! NIF-browser rebuild cache: signatures of the last-built archive index /
+	//! tree, so a load with unchanged resources skips the re-scan; a populate
+	//! requested while the browser dock is hidden is deferred until it shows.
+	QString nifBrowserIndexSignature;
+	QString nifBrowserTreeSignature;
+	int nifBrowserSkippedResources = 0;
+	bool nifBrowserPopulatePending = false;
 	QList<QPersistentModelIndex> pendingWorkspaceLoads;
 	bool processingWorkspaceLoad = false;
 	int configuredResourceGame = -1;

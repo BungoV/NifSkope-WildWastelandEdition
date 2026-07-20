@@ -1602,6 +1602,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				QFile logf( QApplication::applicationDirPath() + "/ww_browser_test.log" );
 				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
 				QTextStream log( &logf );
+				// The browser dock starts tabified behind the Header dock, so the
+				// load-time populate is deferred by the visibility gate. Show the
+				// dock and populate directly to build the tree under test.
+				if ( skope->dBrowser ) { skope->dBrowser->show(); skope->dBrowser->raise(); }
+				skope->populateConfiguredNifBrowser();
 				QTreeView * view = skope->bsaView;
 				QAbstractItemModel * m = view ? view->model() : nullptr;
 				if ( !view || !m ) { log << "no browser view/model\n"; qApp->quit(); return; }
@@ -1626,7 +1631,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				view->expand( folder );
 				const bool before = view->isExpanded( folder );
 				log << "folder='" << folderText << "' expanded before repopulate=" << before << "\n";
-				skope->populateConfiguredNifBrowser();   // what loading a nif triggers
+				// Full-rebuild path: clear the cache signatures so this populate
+				// really re-scans and rebuilds (what Refresh / changed settings do).
+				skope->nifBrowserIndexSignature.clear();
+				skope->nifBrowserTreeSignature.clear();
+				skope->populateConfiguredNifBrowser();
 				QModelIndex root2 = findRoot();
 				bool after = false;
 				if ( root2.isValid() ) {
@@ -1635,8 +1644,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						if ( m->data( idx ).toString() == folderText ) { after = view->isExpanded( idx ); break; }
 					}
 				}
-				log << "folder='" << folderText << "' expanded after repopulate=" << after << "\n";
-				log << ( ( before && after ) ? "PASS\n" : "FAIL\n" );
+				log << "folder='" << folderText << "' expanded after full rebuild=" << after << "\n";
+				// Fast path: an unchanged-signature populate (what loading a nif now
+				// triggers) must reuse the tree — a persistent index into it
+				// survives; a real rebuild (removeRows + insertRow) kills it.
+				QPersistentModelIndex rootBefore( findRoot() );
+				skope->populateConfiguredNifBrowser();
+				const bool fastPath = rootBefore.isValid();
+				log << "unchanged-signature populate reused tree=" << fastPath << "\n";
+				log << ( ( before && after && fastPath ) ? "PASS\n" : "FAIL\n" );
 				qApp->quit();
 			} );
 		} );
@@ -2195,6 +2211,13 @@ void NifSkope::initDockWidgets()
 	dInsp = ui->InspectDock;
 	dKfm = ui->KfmDock;
 	dBrowser = ui->BrowserDock;
+
+	// A populate requested while the NIF Browser was hidden (closed dock or a
+	// background tab) was deferred; replay it when the dock actually shows.
+	connect( dBrowser, &QDockWidget::visibilityChanged, this, [this]( bool visible ) {
+		if ( visible && nifBrowserPopulatePending )
+			QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
+	} );
 
 	// Animation Manager
 	dTimeline = new QDockWidget( tr( "Animation Manager" ), this );
@@ -2833,9 +2856,11 @@ void NifSkope::initDockWidgets()
 	// same block skips setRootIndex — re-apply once the load has completed so
 	// version-mismatched rows (Skyrim fields on FO4 NIFs) never stay stranded.
 	connect( this, &NifSkope::completeLoading, [this]() {
-		if ( tree )
+		// Hidden views can skip this: NifTreeView::doItemsLayout re-derives the
+		// row hiding before the first layout when the dock is next shown.
+		if ( tree && tree->isVisible() )
 			tree->refreshRowHiding();
-		if ( header )
+		if ( header && header->isVisible() )
 			header->refreshRowHiding();
 	} );
 

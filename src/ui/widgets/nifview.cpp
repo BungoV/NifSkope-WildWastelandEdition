@@ -319,8 +319,40 @@ void NifTreeView::updateConditions( const QModelIndex & topLeft, const QModelInd
 		return;
 
 	Q_UNUSED( bottomRight );
-	updateConditionRecurse( topLeft.parent() );
+	// Was updateConditionRecurse( parent ) with a full array descent: a
+	// block-level field edit then walked every element (and every element's
+	// members) of the block's arrays — O(38k × fields) per qualifying edit,
+	// twice (Block Details + Header both connect here). The expanded-aware
+	// walk derives the same visible result at O(visible rows): hidden state
+	// of closed subtrees is derived lazily on expansion anyway (see the
+	// expanded() hook), exactly like every other hiding pass in this view.
+	updateConditionsLazy( topLeft.parent() );
 	doItemsLayout();
+}
+
+void NifTreeView::updateConditionsLazy( const QModelIndex & index )
+{
+	if ( nif->getState() != BaseModel::Default )
+		return;
+
+	NifItem * item = static_cast<NifItem *>( index.internalPointer() );
+	if ( index.isValid() && !item )
+		return;
+
+	// Skip flat array items
+	if ( item && item->parent() && item->parent()->isArray() && !item->childCount() )
+		return;
+
+	// Descend only where the children are actually on screen: the invisible
+	// root, the view root, or an expanded row. A closed row's subtree keeps
+	// its stale flags harmlessly and re-derives them when opened.
+	if ( !index.isValid() || index == rootIndex() || isExpanded( index ) ) {
+		for ( int r = 0, cnt = model()->rowCount( index ); r < cnt; r++ )
+			updateConditionsLazy( model()->index( r, 0, index ) );
+	}
+
+	if ( item )
+		setRowHidden( index.row(), index.parent(), isRowHidden( item ) );
 }
 
 void NifTreeView::updateConditionRecurse( const QModelIndex & index, bool descendArrays )

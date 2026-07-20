@@ -3481,11 +3481,19 @@ static bool riggingEnsureVertexColors( NifModel * nif, const QModelIndex & shape
 		QModelIndex iVD = nif->getIndex( shape, "Vertex Data" );
 		if ( iVD.isValid() )
 			nif->updateArraySize( iVD );
+		// holdUpdates defers header/link refresh but does NOT suppress the
+		// per-leaf dataChanged (only the model state does): without Processing
+		// this loop emitted one signal + dependent-condition sibling scan per
+		// vertex — a 38k-signal storm. The desc/DataSize writes above stay
+		// outside so their dependent-condition invalidation still runs.
+		nif->setState( BaseModel::Processing );
 		for ( int vertex = 0; vertex < nif->rowCount( iVD ); vertex++ ) {
 			QModelIndex color = nif->getIndex( nif->getIndex( iVD, vertex ), "Vertex Colors" );
 			writesOk = color.isValid()
 				&& nif->set<ByteColor4>( color, ByteColor4( FloatVector4( 1.0f ) ) ) && writesOk;
 		}
+		nif->restoreState();
+		nif->dataChanged( shape, shape );
 		nif->holdUpdates( previousHold );
 	} );
 	if ( !snapshot || !writesOk ) {
@@ -5401,8 +5409,18 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	QObject::connect( boneSearch, &QLineEdit::textChanged, panel, [=]() { applyBoneFilter(); } );
 	QObject::connect( boneKindFilter, &QComboBox::currentIndexChanged, panel, [=]() { applyBoneFilter(); } );
 	auto refreshingBoneTrees = std::make_shared<bool>( false );
+	auto riggingRefreshPending = std::make_shared<bool>( false );
 
 	auto refresh = [=]( const QModelIndex & current ) {
+		// This fires on every selection change and rebuilds both bone trees.
+		// While the Rigging Manager dock is hidden that work is invisible (and
+		// painting is already force-stopped by the dock's hide hook) — remember
+		// that a refresh is owed and let the show hook replay it.
+		if ( !panel->isVisible() ) {
+			*riggingRefreshPending = true;
+			return;
+		}
+		*riggingRefreshPending = false;
 		*refreshingBoneTrees = true;
 		int selectedBlock = nif->getBlockNumber( current );
 		if ( ogl ) {
@@ -6298,6 +6316,10 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 				if ( !heatmapSoup->isEmpty() ) resetHeatmap();
 			} );
 	QObject::connect( dock, &QDockWidget::visibilityChanged, panel, [=]( bool visible ) {
+		// Repay a tree refresh skipped while hidden before re-applying overlays,
+		// so the trees reflect the selection the overlays are computed from.
+		if ( visible && *riggingRefreshPending )
+			refresh( skope ? skope->currentNifIndex() : QModelIndex() );
 		if ( !ogl )
 			return;
 		if ( visible )

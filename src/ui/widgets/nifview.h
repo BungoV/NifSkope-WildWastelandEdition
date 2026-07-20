@@ -107,6 +107,12 @@ protected slots:
 	//! block with huge vertex/triangle arrays stays cheap to relayout; the
 	//! root-change path keeps the full walk to derive array-member hiding.
 	void updateConditionRecurse( const QModelIndex & index, bool descendArrays = true );
+	//! Expanded-aware re-derivation for the dataChanged path: applies row
+	//! hiding to exactly the rows the user can see, descending only into
+	//! open subtrees (closed ones re-derive on expansion via the lazy hook).
+	//! Bounds a block-field edit to O(visible rows) instead of walking every
+	//! element of a 38k-row vertex array.
+	void updateConditionsLazy( const QModelIndex & index );
 	//! Called when the current index changes
 	void currentChanged( const QModelIndex & current, const QModelIndex & previous ) override final;
 

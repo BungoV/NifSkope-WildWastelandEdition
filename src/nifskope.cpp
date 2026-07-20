@@ -855,8 +855,13 @@ NifSkope::NifSkope( bool background )
 	ui->bsaTitleBar->layout()->addWidget( nifBrowserArchivesToggle );
 	ui->bsaTitleBar->layout()->addWidget( nifBrowserLooseToggle );
 	ui->bsaTitleBar->layout()->addWidget( refreshBrowser );
-	connect( refreshBrowser, &QPushButton::clicked,
-		this, &NifSkope::populateConfiguredNifBrowser );
+	connect( refreshBrowser, &QPushButton::clicked, this, [this]() {
+		// Refresh means "re-read the disk" — drop the cached signatures so the
+		// populate below cannot take the unchanged-resources fast path.
+		nifBrowserIndexSignature.clear();
+		nifBrowserTreeSignature.clear();
+		populateConfiguredNifBrowser();
+	} );
 	connect( nifBrowserArchivesToggle, &QPushButton::toggled,
 		this, &NifSkope::populateConfiguredNifBrowser );
 	connect( nifBrowserLooseToggle, &QPushButton::toggled,
@@ -2576,10 +2581,42 @@ static bool archiveFilterFunction( [[maybe_unused]] void * p, const std::string_
 void NifSkope::populateConfiguredNifBrowser()
 {
 	if ( !bsaModel || !bsaProxyModel || !bsaView || !nif ) return;
+
+	// Indexing every configured archive and rebuilding the tree is by far the
+	// most expensive completeLoading reaction. While the browser dock is hidden
+	// (closed or a background tab) defer the whole rebuild; the dock's
+	// visibilityChanged hook replays it when it next shows.
+	if ( dBrowser && !dBrowser->isVisible() ) {
+		nifBrowserPopulatePending = true;
+		return;
+	}
+	nifBrowserPopulatePending = false;
+
 	configuredNifBrowserPopulated = true;
 	const Game::GameMode game = Game::GameManager::get_game( nif );
 	const bool includeArchives = !nifBrowserArchivesToggle || nifBrowserArchivesToggle->isChecked();
 	const bool includeLoose = !nifBrowserLooseToggle || nifBrowserLooseToggle->isChecked();
+
+	// Re-scanning the game's archives and rebuilding the item tree only depends
+	// on (game, configured resource paths) and the two source toggles. Loading
+	// a nif changes neither, so cache both stages behind signatures: an
+	// unchanged tree only refreshes the Loaded NIFs group (the one part that
+	// does change per load), and an unchanged index skips the archive re-scan
+	// even when the tree must re-filter (a toggle flip). The explicit
+	// open-archive browser mode sets currentArchivePath and must never be
+	// treated as the configured index, and Refresh clears the signatures to
+	// force a true re-scan.
+	const QStringList resourceFolders = Game::GameManager::folders( game );
+	const QString indexSignature = QString::number( int( game ) ) + QLatin1Char( '\n' )
+		+ resourceFolders.join( QLatin1Char( '\n' ) );
+	const QString treeSignature = indexSignature + QLatin1Char( '\n' )
+		+ QLatin1Char( includeArchives ? '1' : '0' ) + QLatin1Char( includeLoose ? '1' : '0' );
+	const bool configuredIndexLive = currentArchive && currentArchivePath.isEmpty();
+	if ( configuredIndexLive && treeSignature == nifBrowserTreeSignature
+		&& bsaView->model() == bsaProxyModel && bsaProxyModel->sourceModel() == bsaModel ) {
+		rebuildLoadedNifsBrowserGroup();
+		return;
+	}
 
 	// Replace only available-source rows. Loaded NIFs are rebuilt below from
 	// the live session and therefore remain independent of resource refreshes.
@@ -2622,42 +2659,47 @@ void NifSkope::populateConfiguredNifBrowser()
 	// The normal renderer resource cache deliberately excludes NIFs for modern
 	// Bethesda games. Build a dedicated mesh-only virtual filesystem from the
 	// exact same configured paths so archives and loose mesh folders both work.
-	if ( currentArchive ) delete currentArchive;
-	currentArchive = new BA2File();
-	currentArchivePath.clear();
-	currentArchiveNames.clear();
-	int skippedResourceCount = 0;
-	for ( const QString & resourcePath : Game::GameManager::folders( game ) ) {
-		if ( resourcePath.isEmpty() ) continue;
-		// Resource lists commonly contain dedicated texture and material folders.
-		// They cannot contain meshes and BA2File reports them as invalid archive
-		// roots, so do not feed them to the NIF-only browser indexer.
-		const QFileInfo resourceInfo( resourcePath );
-		const QString leafName = resourceInfo.fileName();
-		if ( resourceInfo.isDir()
-			&& ( leafName.compare( QStringLiteral( "textures" ), Qt::CaseInsensitive ) == 0
-				|| leafName.compare( QStringLiteral( "materials" ), Qt::CaseInsensitive ) == 0 ) ) {
-			++skippedResourceCount;
-			continue;
-		}
-		try {
+	// Reuse the previously built index when the (game, paths) signature matches
+	// — a source-toggle flip re-filters the tree but must not re-read the disk.
+	if ( !( configuredIndexLive && indexSignature == nifBrowserIndexSignature ) ) {
+		if ( currentArchive ) delete currentArchive;
+		currentArchive = new BA2File();
+		currentArchivePath.clear();
+		currentArchiveNames.clear();
+		nifBrowserSkippedResources = 0;
+		for ( const QString & resourcePath : resourceFolders ) {
+			if ( resourcePath.isEmpty() ) continue;
+			// Resource lists commonly contain dedicated texture and material folders.
+			// They cannot contain meshes and BA2File reports them as invalid archive
+			// roots, so do not feed them to the NIF-only browser indexer.
+			const QFileInfo resourceInfo( resourcePath );
+			const QString leafName = resourceInfo.fileName();
+			if ( resourceInfo.isDir()
+				&& ( leafName.compare( QStringLiteral( "textures" ), Qt::CaseInsensitive ) == 0
+					|| leafName.compare( QStringLiteral( "materials" ), Qt::CaseInsensitive ) == 0 ) ) {
+				++nifBrowserSkippedResources;
+				continue;
+			}
+			try {
 #ifdef Q_OS_WIN32
-			currentArchive->loadArchivePath(
-				resourcePath.toLocal8Bit().constData(), &archiveFilterFunction );
+				currentArchive->loadArchivePath(
+					resourcePath.toLocal8Bit().constData(), &archiveFilterFunction );
 #else
-			currentArchive->loadArchivePath(
-				resourcePath.toStdString().c_str(), &archiveFilterFunction );
+				currentArchive->loadArchivePath(
+					resourcePath.toStdString().c_str(), &archiveFilterFunction );
 #endif
-		} catch ( const std::exception & ) {
-			// A bad or non-mesh configured entry is not an application error. In
-			// particular, never use qWarning here: the application-wide Qt message
-			// handler presents every warning as a modal dialog.
-			++skippedResourceCount;
+			} catch ( const std::exception & ) {
+				// A bad or non-mesh configured entry is not an application error. In
+				// particular, never use qWarning here: the application-wide Qt message
+				// handler presents every warning as a modal dialog.
+				++nifBrowserSkippedResources;
+			}
 		}
+		nifBrowserIndexSignature = indexSignature;
 	}
-	if ( skippedResourceCount > 0 ) {
+	if ( nifBrowserSkippedResources > 0 ) {
 		available->setToolTip( available->toolTip() + tr( "\n%1 non-mesh or unreadable resource path(s) skipped." )
-			.arg( skippedResourceCount ) );
+			.arg( nifBrowserSkippedResources ) );
 	}
 	std::vector<std::string_view> resourceFiles;
 	currentArchive->getFileList( resourceFiles, false, &archiveFilterFunction );
@@ -2725,6 +2767,8 @@ void NifSkope::populateConfiguredNifBrowser()
 		if ( proxyIdx.isValid() )
 			bsaView->expand( proxyIdx );
 	}
+
+	nifBrowserTreeSignature = treeSignature;
 }
 
 bool NifSkope::extractConfiguredNifBytes( int gameID, const QString & path,

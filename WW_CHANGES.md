@@ -1,5 +1,96 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20 — Performance batch 1 (PERFORMANCE_PLAN.md Tier 1, items 1–4)
+
+First slice of the performance plan: the four highest-value / lowest-risk
+fixes from the holistic survey. No behavioral changes intended — the same
+work happens, it just stops happening when nothing needs it.
+
+**1. NIF Browser stops re-indexing the game archives on every load**
+(`nifskope.cpp populateConfiguredNifBrowser`). Every successful
+`completeLoading` used to delete the `BA2File` VFS, re-scan every configured
+resource path, re-enumerate the merged file list, and rebuild the whole
+`QStandardItem` tree — even with the dock closed. Now:
+- Two-level signature cache: the archive **index** is keyed by
+  (game, resource-path list) and reused when unchanged; the **tree** is keyed
+  by that plus the Load Archives / Load Loose toggles. An unchanged-tree
+  populate only refreshes the Loaded NIFs group (the one per-load part). A
+  toggle flip re-filters the tree without touching the disk.
+- Visibility gate: while the browser dock is hidden (closed or a background
+  tab — it ships tabified behind Header) the populate is deferred
+  (`nifBrowserPopulatePending`) and replayed by a new
+  `dockVisibilityChanged` hook on show.
+- The explicit open-archive mode is untouched: it sets `currentArchivePath`,
+  which disqualifies the cached index (`configuredIndexLive`), so the next
+  configured populate rebuilds fully, as before. **Refresh** now clears both
+  signatures first — it still means "re-read the disk".
+
+**2. Hidden docks stop reacting** — the collision dock's gate pattern applied
+to the two remaining offenders:
+- Timeline (`timeline.cpp refresh`): `scanModel()` walks every block of the
+  file on each coalesced dataChanged/reset; it now defers while the
+  Animation Manager dock is hidden (`refreshPending` + `showEvent` replay).
+- Rigging Manager (`spells/riggingtools.cpp`): the `refresh` lambda fires on
+  every selection change and cleared + rebuilt both bone trees even hidden.
+  Now it defers while the panel is hidden; the dock's existing
+  `visibilityChanged` hook replays the pending refresh *before* re-applying
+  overlays/heatmap (painting is already force-stopped on hide, so no mode
+  can be stranded).
+- The post-load `refreshRowHiding()` calls for Block Details/Header skip
+  hidden views — `NifTreeView::doItemsLayout` re-derives hiding before the
+  first layout when the dock next shows anyway.
+
+**3. Block Details layout costs**:
+- `uniformRowHeights=true` on the Block Details tree (`nifskope.ui`) — it was
+  the only big view with it off, forcing a delegate `sizeHint` (a
+  text-measure) per row on every relayout. All rows are single-line.
+- `NifTreeView::updateConditions` (the dataChanged reactor) no longer does a
+  full array descent: a block-level field edit used to walk **every element
+  (and every element's members) of the block's arrays** — O(38k × fields)
+  per qualifying edit, twice (Block Details + Header both connect). New
+  `updateConditionsLazy` re-derives exactly the *visible* rows, descending
+  only into the invisible root / view root / expanded rows — the same lazy
+  one-level-per-expansion rule the expansion hook and `refreshRowHiding`
+  already use, so closed subtrees still re-derive when opened.
+
+**4. Remaining per-leaf dataChanged storms killed**:
+- `riggingEnsureVertexColors`: the 38k-vertex opaque-white init loop ran
+  under `holdUpdates`, which defers header/link refresh but does **not**
+  suppress per-leaf `dataChanged` — one signal + dependent-condition sibling
+  scan per vertex. The loop now runs under `setState(Processing)` with one
+  span emit; the Vertex Desc / Data Size writes stay outside so their
+  dependent-condition invalidation still runs.
+- First application of big gestures: `QUndoStack::push` runs each command's
+  `redo()` **before** merging, and a size-1 `ChangeValueCommand::redo` does
+  not enter Processing — so committing a 38k-vert move emitted 38k signals
+  (only the undo/redo *replay* was batched). New `TlCommandBatch` RAII
+  (glview.cpp) suppresses per-leaf signals around the push loops and emits
+  one span per touched shape: applied to the element gesture commit, the
+  redo-panel re-apply, `tlPushPositionCommands`, `tlPushNormalCommands`
+  (covers Edge Slide / Smooth / extrude-chain normals), and Flip Faces.
+  The model state is a stack, so the nesting is safe.
+
+Verification (build green 2026-07-20 14:50, all on X01_Torso_Tesla.nif):
+- `WW_BROWSER_TEST` (extended): folder expansion preserved through a genuine
+  full rebuild (signatures cleared first), **and** the new fast path proven —
+  an unchanged-signature populate reused the tree (a `QPersistentModelIndex`
+  into it survived; a rebuild would have killed it) — **PASS**.
+- Regressions re-run on the new binary, all unchanged: `WW_JOIN_TEST=1`
+  (merged 4031 v / 4529 t, bones {3,4}, 0 zero-weight appended verts,
+  segments contiguous) — **PASS**; `WW_SEP_TEST` — **PASS + UNDO PASS**;
+  `WW_COPYPASTE_TEST` (delta 9 blocks, 2/2 roots slotted) — **PASS**.
+- `TlCommandBatch` is RAII over the model's own state *stack* (restore +
+  span-emit cannot be skipped by an early return); the interactive gesture
+  paths it wraps need a GUI pass — G/R/S commit + redo panel re-apply on a
+  big selection, Edge Slide, Smooth, Flip/Recalc Normals, and Vertex Paint
+  on a colourless mesh (the ensure-colors init).
+- GUI checks still owed for the rest of the batch: Block Details relayout
+  feel on a 38k-vert shape (uniformRowHeights + lazy condition walk — check
+  version-gated rows still hide right while editing fields with arrays
+  expanded), Timeline/Rigging docks catching up when re-shown, and the NIF
+  Browser after changing resource folders in Settings (must rebuild) vs
+  plain loads (must not).
+
 ## 2026-07-19g — NIF Browser keeps its expanded folders when you load a nif
 
 Loading a nif rebuilds the NIF Browser's "Available NIFs" tree from scratch in

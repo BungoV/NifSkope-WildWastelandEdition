@@ -4157,6 +4157,36 @@ void GLView::gizmoUpdate( const QPoint & pos, Qt::KeyboardModifiers mods )
 	update();
 }
 
+//! Batches a per-vertex ChangeValueCommand push loop. QUndoStack::push runs
+//! each new command's redo() BEFORE merging it into the transaction, and a
+//! size-1 redo() applies without Processing — so the FIRST application of a
+//! big gesture emitted one dataChanged (plus the dependent-condition sibling
+//! scan) per vertex, a 38k-signal storm; only the undo/redo replay was
+//! batched. Scope one of these around the push loop: per-leaf signals are
+//! suppressed for the scope (the state is a stack, nesting is safe) and one
+//! span per touched shape is emitted at the end.
+struct TlCommandBatch {
+	NifModel * nif;
+	QSet<int> shapes;
+	explicit TlCommandBatch( NifModel * m ) : nif( m )
+	{
+		if ( nif )
+			nif->setState( BaseModel::Processing );
+	}
+	void touch( int shapeBlock ) { shapes << shapeBlock; }
+	~TlCommandBatch()
+	{
+		if ( !nif )
+			return;
+		nif->restoreState();
+		for ( int b : std::as_const( shapes ) ) {
+			QModelIndex i = nif->getBlockIndex( b );
+			if ( i.isValid() )
+				nif->dataChanged( i, i );
+		}
+	}
+};
+
 void GLView::gizmoEnd( bool commit )
 {
 	gizmoHandleDrag = false;
@@ -4301,37 +4331,42 @@ bool GLView::gizmoReapplyElement( const Vector3 & param, int axisOverride )
 	}
 
 	ChangeValueCommand::createTransaction();
-	for ( const ElemVert & ev : lastElemVerts ) {
-		Vector3 w;
-		if ( lastElemMode == 1 ) {
-			Vector3 d = param;
-			if ( axis > 0 ) { float a = d[axis - 1]; d = Vector3(); d[axis - 1] = a; }
-			w = ev.origWorld + d;
-		} else if ( lastElemMode == 2 ) {
-			w = lastElemPivot + dr * ( ev.origWorld - lastElemPivot );
-		} else {
-			Vector3 rel = ev.origWorld - lastElemPivot;
-			if ( axis > 0 ) rel[axis - 1] *= param[0]; else rel = rel * param[0];
-			w = lastElemPivot + rel;
+	{
+		TlCommandBatch batch( model );
+		for ( const ElemVert & ev : lastElemVerts ) {
+			Vector3 w;
+			if ( lastElemMode == 1 ) {
+				Vector3 d = param;
+				if ( axis > 0 ) { float a = d[axis - 1]; d = Vector3(); d[axis - 1] = a; }
+				w = ev.origWorld + d;
+			} else if ( lastElemMode == 2 ) {
+				w = lastElemPivot + dr * ( ev.origWorld - lastElemPivot );
+			} else {
+				Vector3 rel = ev.origWorld - lastElemPivot;
+				if ( axis > 0 ) rel[axis - 1] *= param[0]; else rel = rel * param[0];
+				w = lastElemPivot + rel;
+			}
+			QModelIndex iShape = model->getBlockIndex( ev.shape );
+			QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx );
+			const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
+			if ( !item )
+				continue;
+			Vector3 cageLocal = toLocal( ev.shape, w );
+			Vector3 local;
+			Shape * shape = shapeForBlock( ev.shape );
+			if ( !shape || !editVertexRawLocal( shape, ev.idx, cageLocal, local ) )
+				continue;
+			NifValue oldVal = item->value();
+			NifValue newVal = oldVal;
+			if ( item->hasValueType( NifValue::tHalfVector3 ) )
+				newVal.set<HalfVector3>( HalfVector3( local ), model, item );
+			else
+				newVal.set<Vector3>( local, model, item );
+			if ( !( oldVal == newVal ) ) {
+				model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, newVal, tr( "Vertex" ), model ) );
+				batch.touch( ev.shape );
+			}
 		}
-		QModelIndex iShape = model->getBlockIndex( ev.shape );
-		QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx );
-		const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
-		if ( !item )
-			continue;
-		Vector3 cageLocal = toLocal( ev.shape, w );
-		Vector3 local;
-		Shape * shape = shapeForBlock( ev.shape );
-		if ( !shape || !editVertexRawLocal( shape, ev.idx, cageLocal, local ) )
-			continue;
-		NifValue oldVal = item->value();
-		NifValue newVal = oldVal;
-		if ( item->hasValueType( NifValue::tHalfVector3 ) )
-			newVal.set<HalfVector3>( HalfVector3( local ), model, item );
-		else
-			newVal.set<Vector3>( local, model, item );
-		if ( !( oldVal == newVal ) )
-			model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, newVal, tr( "Vertex" ), model ) );
 	}
 	lastElemAxis = axis;
 	lastUndoIndex = model->undoStack->index();
@@ -5997,6 +6032,8 @@ static void tlPushNormalCommands( NifModel * model, const QModelIndex & iShape, 
 {
 	if ( !model || !model->undoStack )
 		return;
+	TlCommandBatch batch( model );
+	batch.touch( model->getBlockNumber( iShape ) );
 	const QHash<int, Vector3> acc = tlAccumulateAreaNormals( model, iShape, verts );
 	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
 	for ( auto it = acc.constBegin(); it != acc.constEnd(); ++it ) {
@@ -6039,21 +6076,26 @@ void GLView::gizmoEndElement( bool commit )
 			// value from the renderer preview; the model still contains the
 			// original, so push one ChangeValueCommand per changed vertex now.
 			ChangeValueCommand::createTransaction();
-			for ( const ElemVert & ev : elemVerts ) {
-				QModelIndex iShape = model->getBlockIndex( ev.shape );
-				QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx );
-				const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
-				if ( !item )
-					continue;
-				NifValue oldVal = item->value();
-				NifValue newVal = oldVal;
-				bool half = item->hasValueType( NifValue::tHalfVector3 );
-				if ( half )
-					newVal.set<HalfVector3>( HalfVector3( ev.currentLocal ), model, item );
-				else
-					newVal.set<Vector3>( ev.currentLocal, model, item );
-				if ( !( oldVal == newVal ) )
-					model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, newVal, tr( "Vertex" ), model ) );
+			{
+				TlCommandBatch batch( model );
+				for ( const ElemVert & ev : elemVerts ) {
+					QModelIndex iShape = model->getBlockIndex( ev.shape );
+					QModelIndex vIdx = tlVertexValueIndex( model, iShape, ev.idx );
+					const NifItem * item = vIdx.isValid() ? static_cast<const NifItem *>( vIdx.internalPointer() ) : nullptr;
+					if ( !item )
+						continue;
+					NifValue oldVal = item->value();
+					NifValue newVal = oldVal;
+					bool half = item->hasValueType( NifValue::tHalfVector3 );
+					if ( half )
+						newVal.set<HalfVector3>( HalfVector3( ev.currentLocal ), model, item );
+					else
+						newVal.set<Vector3>( ev.currentLocal, model, item );
+					if ( !( oldVal == newVal ) ) {
+						model->undoStack->push( new ChangeValueCommand( vIdx, oldVal, newVal, tr( "Vertex" ), model ) );
+						batch.touch( ev.shape );
+					}
+				}
 			}
 			// freeze the gesture for the edit-mode operator redo panel
 			lastGestureElement = true;
@@ -9523,6 +9565,8 @@ static void tlPushPositionCommands( NifModel * model, const QModelIndex & iShape
 {
 	if ( !model || !model->undoStack )
 		return;
+	TlCommandBatch batch( model );
+	batch.touch( model->getBlockNumber( iShape ) );
 	for ( const auto & tg : targets ) {
 		QModelIndex vIdx = tlVertexValueIndex( model, iShape, tg.first );
 		const NifItem * item = vIdx.isValid()
@@ -9811,20 +9855,24 @@ void GLView::flipSelectedFaces()
 	}
 	ChangeValueCommand::createTransaction();
 	QSet<int> touched;
-	for ( int t : std::as_const( faces ) ) {
-		QModelIndex tIdx = model->getIndex( iTris, t );
-		const NifItem * item = tIdx.isValid()
-			? static_cast<const NifItem *>( tIdx.internalPointer() ) : nullptr;
-		if ( !item )
-			continue;
-		Triangle tri = model->get<Triangle>( tIdx );
-		touched << tri[0] << tri[1] << tri[2];
-		std::swap( tri[1], tri[2] );
-		NifValue oldVal = item->value();
-		NifValue newVal = oldVal;
-		newVal.set<Triangle>( tri, model, item );
-		if ( !( oldVal == newVal ) )
-			model->undoStack->push( new ChangeValueCommand( tIdx, oldVal, newVal, tr( "Triangle" ), model ) );
+	{
+		TlCommandBatch batch( model );
+		batch.touch( model->getBlockNumber( iShape ) );
+		for ( int t : std::as_const( faces ) ) {
+			QModelIndex tIdx = model->getIndex( iTris, t );
+			const NifItem * item = tIdx.isValid()
+				? static_cast<const NifItem *>( tIdx.internalPointer() ) : nullptr;
+			if ( !item )
+				continue;
+			Triangle tri = model->get<Triangle>( tIdx );
+			touched << tri[0] << tri[1] << tri[2];
+			std::swap( tri[1], tri[2] );
+			NifValue oldVal = item->value();
+			NifValue newVal = oldVal;
+			newVal.set<Triangle>( tri, model, item );
+			if ( !( oldVal == newVal ) )
+				model->undoStack->push( new ChangeValueCommand( tIdx, oldVal, newVal, tr( "Triangle" ), model ) );
+		}
 	}
 	tlPushNormalCommands( model, iShape, touched );
 	modelChanged();

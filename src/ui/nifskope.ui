@@ -715,7 +715,7 @@ background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0
         <bool>true</bool>
        </property>
        <property name="uniformRowHeights">
-        <bool>false</bool>
+        <bool>true</bool>
        </property>
       </widget>
      </item>
