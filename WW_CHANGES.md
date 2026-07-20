@@ -1,5 +1,79 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20b — Performance batch 2 (PERFORMANCE_PLAN.md Tier 1 rest + Tier 2)
+
+Three commits (2a/2b/2c), each built + harness-verified before the next.
+
+**2a — remaining Tier-1 quickies + model-layer wins:**
+- `Scene::draw` read `CollisionManager/CollisionOnly` from QSettings — a
+  registry access — **every frame**; now a cached static the collision
+  panel pushes to on toggle. `drawGrid`'s per-frame env-var probe hoisted.
+  The per-frame `glGetError` drain in paintGL is debug-only now (it is a
+  client-server sync point, and release already silenced its message —
+  a stall with no output). Other `glGetError` users are event-driven only.
+- `applyBlockListFilter` early-outs when no filter is active and none needs
+  clearing (it walked all blocks building formatted searchable strings on
+  every rows signal, empty search box included) and the rows signals are
+  coalesced to one deferred run per event-loop turn.
+- `updateHeader` block-type dedup via QHash (was `indexOf` per block =
+  O(blocks × types) string scanning on every structural edit).
+- **Batch multi-block removal**: every `removeNiBlock` outside Loading
+  state runs a full-model `updateLinks` + `updateFooter`. The NiKeyframe
+  purge (skeleton.cpp) and the unreferenced-interpolator cleanup
+  (animationsetup.cpp) now use the same Loading + `updateModel()` batch
+  pattern havok/optimize already had — one rebuild instead of M. The
+  riggingtools single-node removal and optimize's property-merge loop are
+  deliberately NOT batched: both consult live link lists between removals.
+- **Named-lookup memoization in per-vertex loops**: `getIndex(name)` is an
+  uncached linear scan; fixed-compound rows are structurally identical, so
+  field row numbers resolve once per shape. `tlVertexValueIndex` gained a
+  cached overload (`TlVertexFieldCache`) used by the gesture commit, the
+  redo-panel re-apply and `tlPushPositionCommands`; `tlPushNormalCommands`
+  resolves the Normal row once; the rigging vertex-color init and
+  paint-stroke commit resolve "Vertex Colors" once (and the stroke commit
+  now also runs under Processing with one span emit — same storm as the
+  init loop had).
+
+**2b — overlay soup caches:** the edit-mode overlay rebuilt its
+unique-edge / quad-adjacency / filled-tris sets (O(T) hashing + fresh
+allocations) on **every repaint**, camera orbits included, and the
+wireframe overlay repeated the same edge dedup per shape per frame.
+Index-space structures now persist across frames (`EditOverlaySets`,
+`wireEdgeCache`): positions stay per-frame (they carry the toward-eye
+pull), so gestures/deforms need no invalidation; topology growth is caught
+by size fingerprints; `filledTris` follows the selection via a per-frame
+FNV fingerprint over `pickedElems` (no hooks at the many mutation sites);
+explicit `invalidateOverlayCaches()` covers what fingerprints cannot see
+(hide/unhide, solo-restore, quad-mark undo/redo, any model dataChanged).
+
+**2c — scene transform early-out:** `Scene::transform` cleared the
+transform cache and re-walked every node (and re-evaluated every
+controller, and re-queried the model for every `bhkRigidBody`) on every
+repaint. The propagation is a pure function of (scene content, camera,
+time, animate flag) — it now returns immediately when none of those
+changed. Dirty hooks: `update()`/`clear()`/`setSequence()` (make routes
+through the first two), the five `restPoseBlock` writers (rest-pose swaps
+change `worldTrans` derivation), and paintGL forces the full pass while a
+modal gesture or paint stroke is live. Camera moves, animation time, and
+the animate flag are compared directly. LOD/billboard camera dependence is
+safe: any view change runs the full pass.
+
+**Deliberately deferred, with reasons** (documented in PERFORMANCE_PLAN.md):
+- T2.13 draw sorting by program/texture: real batching needs the recursive
+  draw restructured into sortable lists plus per-shape uniform caching
+  (Tier-3-scale), and micro-guards on `glUseProgram` are exactly the
+  renderer cache-desync landmine of the startup-grid bug.
+- T2.14 frustum-culling particle/lightning systems: the sim must keep
+  running for correct resume, draw-only culling has minimal payoff, and a
+  wrong-space plane test would silently blank VFX previews with no
+  headless way to catch it.
+
+Verification: build green per stage; `WW_JOIN_TEST=1`, `WW_SEP_TEST`
+(+undo), `WW_BROWSER_TEST` (incl. fast-path check) PASS per stage (2c run
+below). GUI checks owed: edit-mode overlay correctness after hide/unhide +
+quad-mark undo, rest-pose toggle, LOD/billboard behavior during orbit,
+animation playback, and the collision-only toggle.
+
 ## 2026-07-20 — Performance batch 1 (PERFORMANCE_PLAN.md Tier 1, items 1–4)
 
 First slice of the performance plan: the four highest-value / lowest-risk

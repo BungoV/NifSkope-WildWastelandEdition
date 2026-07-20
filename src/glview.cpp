@@ -455,6 +455,7 @@ void GLView::setRiggingWeightPaintMode( bool enabled, int targetBlock, int brush
 		editShapeBlocks.insert( targetBlock );
 		editShapeBlock = targetBlock;
 		scene->restPoseBlock = targetBlock;
+		scene->transformDirty = true;	// rest-pose switch changes worldTrans derivation
 		for ( int i = pickedElems.size() - 1; i >= 0; i-- )
 			if ( pickedElems.at( i ).shapeBlock != targetBlock )
 				pickedElems.remove( i );
@@ -536,6 +537,7 @@ void GLView::setVertexPaintMode( bool enabled, int targetBlock, float radius )
 		editShapeBlocks.insert( targetBlock );
 		editShapeBlock = targetBlock;
 		scene->restPoseBlock = targetBlock;
+		scene->transformDirty = true;	// rest-pose switch changes worldTrans derivation
 		for ( int i = pickedElems.size() - 1; i >= 0; i-- )
 			if ( pickedElems.at( i ).shapeBlock != targetBlock )
 				pickedElems.remove( i );
@@ -622,6 +624,7 @@ void GLView::setSegmentPaintMode( bool enabled, int targetBlock, float radius )
 		editShapeBlocks.insert( targetBlock );
 		editShapeBlock = targetBlock;
 		scene->restPoseBlock = targetBlock;
+		scene->transformDirty = true;	// rest-pose switch changes worldTrans derivation
 		for ( int i = pickedElems.size() - 1; i >= 0; i-- )
 			if ( pickedElems.at( i ).shapeBlock != targetBlock ) pickedElems.remove( i );
 		segmentPaintMode = true;
@@ -1100,6 +1103,12 @@ void GLView::paintGL()
 	// Transform the scene (viewTransform() must stay identical to this)
 	Transform	viewTrans = viewTransform();
 
+	// Modal gestures and paint strokes preview geometry by writing Shape data
+	// directly — force the full propagation while one is live so nothing
+	// derived from it can go stale mid-gesture (the early-out in
+	// Scene::transform only skips when scene content is untouched).
+	if ( gizmoMode != 0 || elemTransform || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode )
+		scene->transformDirty = true;
 	scene->transform( viewTrans, time );
 
 	// Setup projection mode
@@ -14132,6 +14141,7 @@ void GLView::setEditMode( bool on )
 			pickMode = typeBits;	// re-enable the modes the restored elements need
 		scene->editMode = true;
 		scene->restPoseBlock = b;
+		scene->transformDirty = true;	// rest-pose switch changes worldTrans derivation
 		scene->hiddenTris = editHiddenTris;	// hidden elements apply in edit mode only
 		emit gizmoStatus( tr( "Edit Mode (%1 mesh%2): 1/2/3 = vertex/edge/face, G/R/S, X delete, Shift+S snap, Tab exits" )
 			.arg( editShapeBlocks.size() ).arg( editShapeBlocks.size() == 1 ? "" : "es" ) );
@@ -14155,6 +14165,7 @@ void GLView::setEditMode( bool on )
 			gizmoEndElement( false );
 		scene->editMode = false;
 		scene->restPoseBlock = -1;
+		scene->transformDirty = true;	// rest-pose switch changes worldTrans derivation
 		scene->hiddenTris.clear();	// object mode always shows the full mesh
 		emit gizmoStatus( QString() );
 	}

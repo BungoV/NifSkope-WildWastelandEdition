@@ -173,6 +173,7 @@ void Scene::clear( [[maybe_unused]] bool flushTextures )
 		renderer->flushCache();
 
 	sceneBoundsValid = timeBoundsValid = false;
+	transformDirty = true;
 
 	nifModel = nullptr;
 }
@@ -218,6 +219,7 @@ void Scene::update( const NifModel * nif, const QModelIndex & index )
 	}
 
 	timeBoundsValid = false;
+	transformDirty = true;
 }
 
 void Scene::updateSceneOptions( bool checked )
@@ -348,6 +350,7 @@ Property * Scene::getProperty( const NifModel * nif, const QModelIndex & iParent
 void Scene::setSequence( const QString & seqname )
 {
 	animGroup = seqname;
+	transformDirty = true;
 
 	for ( Node * node : nodes.list() ) {
 		node->setSequence( seqname );
@@ -361,6 +364,23 @@ void Scene::setSequence( const QString & seqname )
 
 void Scene::transform( const Transform & trans, float time )
 {
+	// The propagation below re-derives every node's world/view transform and
+	// re-evaluates every controller — a pure function of (scene content,
+	// camera, time, animate). A camera-idle repaint (selection change,
+	// overlay update) used to pay the whole walk for an identical result;
+	// skip it when nothing that feeds it has changed.
+	if ( !transformDirty && lastViewValid && time == this->time
+		&& animate == lastAnimateState
+		&& trans.rotation == lastViewTrans.rotation
+		&& trans.translation == lastViewTrans.translation
+		&& trans.scale == lastViewTrans.scale ) {
+		return;
+	}
+	transformDirty = false;
+	lastViewValid = true;
+	lastViewTrans = trans;
+	lastAnimateState = animate;
+
 	view = trans;
 	this->time = time;
 

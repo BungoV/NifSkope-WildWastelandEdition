@@ -79,6 +79,17 @@ public:
 	static bool collisionOnlySetting;
 	static void refreshCollisionOnlySetting();
 
+	//! Transform-propagation early-out (Scene::transform). The full walk is a
+	//! pure function of (scene content, camera, animation time, animate flag);
+	//! when none changed since the last run, transform() returns immediately.
+	//! Everything that mutates scene content sets this — update()/make()/
+	//! clear()/setSequence(), the rest-pose switch, and GLView forces it while
+	//! a modal gesture or paint stroke previews geometry.
+	bool transformDirty = true;
+	bool lastAnimateState = false;
+	Transform lastViewTrans;
+	bool lastViewValid = false;
+
 	void clear( bool flushTextures = true );
 	void make( NifModel * nif, bool flushTextures = false );
 

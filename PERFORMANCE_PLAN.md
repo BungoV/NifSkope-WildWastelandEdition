@@ -31,8 +31,9 @@ changed yet — this is the plan.
 
 ## Tier 1 — low effort, high or guaranteed impact
 
-> STATUS 2026-07-20: items 1–4 SHIPPED (commit `629dfcf`, WW_CHANGES.md
-> "Performance batch 1", harnesses green, GUI verify pending). Items 5–8 open.
+> STATUS 2026-07-20b: **ALL Tier 1 SHIPPED** — items 1–5 in `629dfcf`
+> (batch 1; note items 3+4 of the batch covered plan items 3–5), items 6–8
+> in `09dff35` (batch 2a). Harnesses green, GUI verify pending.
 
 1. **Stop re-indexing the game archives on every file load.**
    `populateConfiguredNifBrowser` (`nifskope.cpp:2576`, fired from every
@@ -106,6 +107,18 @@ changed yet — this is the plan.
    on every structural edit / holdUpdates release.
 
 ## Tier 2 — medium effort, solid wins
+
+> STATUS 2026-07-20b: 9 (overlay caches, `34da085`), 10 (transform
+> early-out, batch 2c), 11 (batch removal — the two batchable sites; the
+> riggingtools and optimize property-merge loops consult live links between
+> removals and stay per-removal), 12 (lookup memoization) SHIPPED.
+> 13 DEFERRED: real program/texture batching needs the recursive draw
+> collected into sortable lists + per-shape uniform caching (Tier-3-scale);
+> a bare `glUseProgram` current-check is the renderer cache-desync landmine
+> (see the startup-grid bug) — do not ship the micro-version.
+> 14 DEFERRED: sim must keep running for correct resume; draw-only culling
+> has minimal payoff and a wrong-space plane test silently blanks VFX with
+> no headless catch. Revisit only with a GUI test protocol.
 
 9. **Cache the edit-mode overlay behind a dirty flag.** The whole overlay —
    world-vert array, unique-edge dedup, `filledTris`, wire/point soups
