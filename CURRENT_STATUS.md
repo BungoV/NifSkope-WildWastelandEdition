@@ -1,6 +1,7 @@
 # Wild Wasteland NifSkope — Current Status
 
-Updated: **2026-07-16**
+Updated: **2026-07-20** — branch `feature/timeline` @ `8323dc9`, build green
+(exe 2026-07-19 21:38), all headless harnesses passing.
 
 This is the short handoff document. `WW_CHANGES.md` remains the detailed change
 history, `BONE_WEIGHT_TRANSFER_PLAN.md` describes the transfer design,
@@ -28,37 +29,40 @@ rigging evidence.
 - Relink can fail with the exe locked/in use; kill stragglers and force the
   relink rather than assuming a code error.
 
-## Latest completed change: Block List row-hiding fix (RESOLVED, confirmed) — commit `b0b330d`
+## Latest completed work: 2026-07-17 → 07-19 (details in `WW_CHANGES.md`)
 
-Version-gated shader-property rows (Skyrim BSLightingShaderProperty rows, and
-the FO76 rows: GTEFO76, Num SF1 / SF1) leaked back into the Block List after
-switching between shader blocks. **Confirmed fixed by the user.**
+Everything below is built, headlessly verified, and committed through
+`8323dc9`; **GUI verification by the user is pending** unless noted.
 
-Root cause — this was the misleading part: the hiding pass genuinely ran and
-applied on *every* click (the trace showed 29/58 rows hidden at that instant),
-but Qt stores hidden rows as **persistent index handles**, and model activity
-during a block-to-block switch silently invalidated those handles **with no
-reset signal**. The hidden set was still "there," just full of dead references,
-so the rows re-drew visible before paint. Earlier reset-repair hooks never fired
-because no reset signal was emitted.
-
-Why verification kept lying: every probe tested the *first* shader block clicked
-in a session, and the first block always hides correctly. The bug only appears
-on the second and later shader blocks reached by clicking through the Block
-List. The fix was found by upgrading the probe to sweep **all** shader
-properties through the real Block List click path — it then reproduced instantly
-(block 10 clean; blocks 14/18/23/28/32 each leaking exactly 29 rows).
-
-The fix: the view now re-derives the row hiding inside a `doItemsLayout`
-override — right before it rebuilds its layout — so no matter what invalidated
-the stored persistent set, the version-gated rows are re-hidden with fresh
-handles before anything is drawn. Guarding individual invalidation sites was
-abandoned in favor of this single re-derivation point. Sweep now reports 29/29
-hidden on every shader block through the same click path the user uses.
-
-- Build: **PASS**, exe timestamped 13:18 on 2026-07-16.
-- Verified via the all-blocks sweep probe on the user's file; user confirmed in
-  the GUI (clicking through several shapes' shader properties).
+- **07-17 modeling mega-batch** — Knife (K), quad layer (F / Alt+J / Ctrl+T),
+  Bevel (Ctrl+B, rip+offset+bridge), Smooth, plus the remaining modeling
+  backlog. Bevel is the highest-risk item: GUI-test it on a copy of a mesh.
+- **07-18 Create Skin rewritten** (`4b47668`) — the first version corrupted
+  unskinned meshes (caught by the automated gauntlet, not the GUI). Now builds
+  skin blocks at block level, serializes, byte-patches desc/DataSize/records,
+  and reloads through the loader. Full gauntlet green, including a donor
+  transfer run on its own output. Model landmine documented in
+  `WW_CHANGES.md 2026-07-18b`: any spell doing `set<BSVertexDesc>` +
+  `updateArraySize` on an unchanged vertex count is suspect (stock Vertex
+  Flags spell included).
+- **07-18** — clone-freeze fix (`loadIndex` populates with signals live; wrap
+  in Loading state), 65,535-vertex cap in Duplicate/Join,
+  duplicate-into-new-shape offer at the cap, Blender X delete in object
+  mode/Block List with cursor-anchored confirm popups.
+- **07-19 batch** (`8323dc9`) — Copy/Paste Branch handle multi-selection and
+  slot every pasted root; **Join (Ctrl+J) is rigging-aware** (BSSkin union +
+  per-vertex bone-index remap, vertex colors, superset-format promotion) and
+  merges donor segments **into matching dismemberment slots** (subsegments /
+  Per-Segment-Data / SSF preserved); **Separate (P) is skin- and
+  segment-aware** (own BSSkin clone, prefix-sum segment rebuild, orphan-vertex
+  compaction); paint-mode viewport selector auto-acquires a target; viewport
+  mode menus docked as the `tMode` toolbar and the redundant animation bar
+  retired (all functions live in the Timeline dock); NIF Browser keeps
+  expanded folders across loads.
+- Headless harnesses added along the way (env-gated in `nifskope_ui.cpp`):
+  `WW_JOIN_TEST`, `WW_SEP_TEST`, `WW_WP_TEST`, `WW_COPYPASTE_TEST`,
+  `WW_UI_SHOT`, `WW_BROWSER_TEST`, plus byte-level verifiers under
+  `tools/join_test/` and `tools/copypaste_test/`.
 - Output: `E:\Projects\ClaudeNifskope\release\NifSkope.exe`
 
 ## Current implemented state
@@ -80,9 +84,15 @@ hidden on every shader block through the same click path the user uses.
   the version-gated shader-property row hiding (fixed above).
 - Unified viewport shading/effects menu, Blender numpad views/navigation,
   axis-only orthographic grids, and the normal perspective ground grid.
-- Blender-style modeling tools: Loop Cut, Edge Slide, Subdivide, Inset,
-  Dissolve, Symmetrize, Flip/Recalculate Normals, Add Primitive, and the W
-  Specials quick menu (edit + object mode).
+- Blender-style modeling tools: Extrude, Fill/Bridge, Loop Cut, Edge Slide,
+  Subdivide, Inset, Dissolve, Symmetrize, Flip/Recalculate Normals, Add
+  Primitive, Knife, Bevel, Merge, Smooth, delete (X), and the W Specials quick
+  menu (edit + object mode).
+- Rigging-aware object ops: Join (Ctrl+J) unions BSSkin bones/weights and
+  merges segments by dismemberment slot; Separate (P) clones its own skin,
+  rebuilds segment ranges, and compacts orphan vertices; Copy/Paste Branch
+  (Ctrl+C/V) handle multi-block selections. Create Skin binds an unskinned
+  FO4 mesh to a skeleton (byte-patch + reload pipeline).
 - NIF Browser combines configured archives and loose mesh paths; Available NIFs
   above a separate Loaded NIFs pane; explicit right-click/drag enrollment into a
   combined workspace. Only selected loaded documents render or act as donors;
@@ -129,7 +139,9 @@ creates no new seams (phase 4).
 - Skeleton Manager and Pose Manager workspaces are placeholders.
 - Game-accurate lighting, PBR channel support, and subsurface scattering remain
   future/disabled.
-- Fully skinning an entirely unskinned target still needs the complete FO4 skin
-  structures and packed vertex layout created.
+- Fully skinning an unskinned target: DONE 07-18 (Create Skin, rewritten to
+  byte-patch + reload after the first version corrupted meshes — see
+  `WW_CHANGES.md 2026-07-18b`). Still open: classic NiSkin backend,
+  independent persistent skeleton reference, zero-weight bone pruning.
 - In-game deformation, FaceGen/customization, and final visual behavior remain
   manual production checks.
