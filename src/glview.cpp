@@ -10818,7 +10818,24 @@ void GLView::trisToQuads( float maxFaceAngleDeg, float maxShapeAngleDeg, bool ar
 		if ( pe.type == 3 )
 			selFaces[pe.shapeBlock].insert( pe.e0 );
 	if ( selFaces.isEmpty() ) {
-		emit gizmoStatus( tr( "Tris to Quads: select the faces to join (A selects all)" ) );
+		// vertex / edge pick modes (Blender's implicit rule): a face counts
+		// as selected when all three of its vertices are covered by the
+		// selection, so Alt+J works from any select mode
+		const QHash<int, QSet<int>> byVerts = pickedVertexRefs();
+		for ( auto it = byVerts.constBegin(); it != byVerts.constEnd(); ++it ) {
+			Shape * vs = shapeForBlock( it.key() );
+			if ( !vs )
+				continue;
+			const QSet<int> & sv = it.value();
+			for ( int t = 0; t < vs->triangles.size(); t++ ) {
+				const Triangle & tri = vs->triangles.at( t );
+				if ( sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) )
+					selFaces[it.key()].insert( t );
+			}
+		}
+	}
+	if ( selFaces.isEmpty() ) {
+		emit gizmoStatus( tr( "Tris to Quads: select the faces (or their verts/edges) to join — A selects all" ) );
 		return;
 	}
 	const float cosFace = std::cos( deg2rad( maxFaceAngleDeg ) );

@@ -1,5 +1,38 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20m — Alt+J from any select mode, isolate menu verified + harness, Render dedup, UI polish
+
+**Tris to Quads from vertex/edge modes** (glview.cpp): Alt+J only read face
+picks; selections made in vertex or edge mode silently produced "select
+the faces". Blender's implicit rule now applies: a face counts as
+selected when all three of its verts are covered by the selection
+(pickedVertexRefs), so Alt+J works in every select mode.
+
+**Isolate/visibility menu VERIFIED WORKING + regression harness**
+(WW_ISOLATE_TEST=1 in nifskope_ui.cpp): user reported the viewport
+visibility menu "doesn't seem to work". A new headless harness drives
+Isolate Selected → Restore All on a real NIF and checks both state
+(hiddenNodes, per-shape isHidden) and pixels (framebuffer diffs with
+pumped repaints): PASS — 6 nodes hidden, viewport visibly changes,
+restore recovers. HARNESS GOTCHA for future tests:
+QOpenGLWindow::grabFramebuffer does NOT repaint; pump update() +
+processEvents twice before grabbing or you diff two copies of the same
+stale frame. Note for users: isolating with EVERYTHING selected hides
+nothing (all blocks are relevant) — that reads as "didn't work".
+
+**Render menu dedup** (user request): removed the entries that live
+elsewhere — Solo Selected (display dropdown; Alt+Q re-registered
+window-scope so the shortcut still fires), Show Transform Gizmo (display
+dropdown), and the 3D Cursor & Elements submenu (all entries exist in the
+viewport right-click menus / display dropdown). Auto-Key, Gizmo Snap
+Distance, Update View, Save Current Lighting stay — not duplicated.
+
+**UI polish**: the mode selector (Object Mode / Edit Mode / …) keeps a
+constant width across all mode labels (max label metric + icon), so the
+toolbar row no longer shifts on mode change; the Block List's NiNode
+category dot is a quiet grayish-white code-drawn dot instead of the
+orange resource (read as a status light).
+
 ## 2026-07-20l — Type chips show matches ONLY (flat while filtered)
 
 User: "if I filter by these types, show me them only." Hierarchy mode

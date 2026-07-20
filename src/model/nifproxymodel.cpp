@@ -38,6 +38,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QVector>
 #include <QDebug>
 #include <QIcon>
+#include <QPainter>
+#include <QPixmap>
 
 
 //! @file nifproxymodel.cpp NifProxyItem
@@ -70,8 +72,21 @@ static QIcon blockListCategoryIcon( const NifModel * nif, const QModelIndex & so
 		|| type.contains( QStringLiteral( "TriShape" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Mesh" ), Qt::CaseInsensitive ) )
 		return QIcon( QStringLiteral( ":/btn/blockGeometry" ) );
-	if ( nif->blockInherits( block, "NiNode" ) )
-		return QIcon( QStringLiteral( ":/btn/blockNode" ) );
+	if ( nif->blockInherits( block, "NiNode" ) ) {
+		// grayish-white dot: the stock orange resource dot read as a status
+		// light rather than a quiet category mark
+		static const QIcon nodeDot = []() {
+			QPixmap pm( 16, 16 );
+			pm.fill( Qt::transparent );
+			QPainter p( &pm );
+			p.setRenderHint( QPainter::Antialiasing, true );
+			p.setPen( Qt::NoPen );
+			p.setBrush( QColor( 214, 214, 210 ) );
+			p.drawEllipse( QRectF( 4.5, 4.5, 7.0, 7.0 ) );
+			return QIcon( pm );
+		}();
+		return nodeDot;
+	}
 	if ( type.contains( QStringLiteral( "Texture" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Image" ), Qt::CaseInsensitive ) )
 		return QIcon( QStringLiteral( ":/btn/blockTexture" ) );

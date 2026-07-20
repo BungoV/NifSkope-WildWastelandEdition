@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QScopeGuard>
 #include "version.h"
 #include "gl/glscene.h"
+#include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
@@ -733,6 +734,70 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << "done\n";
 				logf.close();
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_ISOLATE_TEST=1): drive the visibility menu's isolate /
+	// restore paths headlessly and verify BOTH the state (hiddenNodes,
+	// per-shape isHidden) and the pixels (framebuffer diff) actually change.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_ISOLATE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_isolate_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				auto pixDiff = []( const QImage & a, const QImage & b ) {
+					if ( a.size() != b.size() || a.isNull() )
+						return -1;
+					int d = 0;
+					for ( int y = 0; y < a.height(); y += 4 )
+						for ( int x = 0; x < a.width(); x += 4 )
+							if ( a.pixel( x, y ) != b.pixel( x, y ) )
+								d++;
+					return d;
+				};
+				// grabFramebuffer() reads the CURRENT buffer without repainting;
+				// a fresh paint must be pumped through the event loop first
+				auto freshGrab = [skope]() {
+					skope->ogl->update();
+					QCoreApplication::processEvents( QEventLoop::AllEvents, 250 );
+					QCoreApplication::processEvents( QEventLoop::AllEvents, 250 );
+					return skope->ogl->grabFramebuffer();
+				};
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					QVector<int> shapes;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+							shapes.append( b );
+					if ( shapes.size() < 2 ) { log << "need 2+ shapes\n"; break; }
+					const QImage before = freshGrab();
+					skope->ogl->getScene()->currentBlock = nif->getBlockIndex( shapes.at( 0 ) );
+					skope->ogl->syncObjectSelection( shapes.at( 0 ) );
+					skope->ogl->isolateSelected();
+					log << "hiddenNodes after isolate: "
+						<< skope->ogl->getScene()->hiddenNodes.size() << "\n";
+					for ( Shape * s : skope->ogl->getScene()->shapes ) {
+						if ( s )
+							log << "  shape block " << s->id() << " isHidden="
+								<< s->isHidden() << "\n";
+					}
+					const QImage isolated = freshGrab();
+					log << "pixel diff before->isolated: " << pixDiff( before, isolated )
+						<< " (0 means the viewport did NOT change)\n";
+					skope->ogl->restoreAllVisibility();
+					const QImage restored = freshGrab();
+					log << "hiddenNodes after restore: "
+						<< skope->ogl->getScene()->hiddenNodes.size() << "\n";
+					log << "pixel diff isolated->restored: " << pixDiff( isolated, restored ) << "\n";
+					log << ( pixDiff( before, isolated ) > 0 && pixDiff( isolated, restored ) > 0
+						? "PASS\n" : "FAIL\n" );
+				} while ( false );
+				log << "DONE\n";
+				QTimer::singleShot( 300, qApp, &QApplication::quit );
 			} );
 		} );
 	}
@@ -2268,7 +2333,9 @@ void NifSkope::initDockWidgets()
 	aSolo->setToolTip( tr( "Render only the selected node's subtree, hiding all other geometry (Alt+Q)" ) );
 	connect( aSolo, &QAction::toggled, ogl, &GLView::setSoloMode );
 	ui->tRender->addAction( aSolo );
-	ui->mRender->addAction( aSolo );
+	// deliberately NOT in the Render menu: Solo lives in the display-toggles
+	// dropdown; window-scope registration keeps Alt+Q working regardless
+	addAction( aSolo );
 
 	// Transform gizmo companions
 	connect( ogl, &GLView::gizmoStatus, [this]( const QString & s ) {
@@ -2876,7 +2943,8 @@ void NifSkope::initDockWidgets()
 		ogl->gizmoHandlesOn = on;
 		ogl->update();
 	} );
-	ui->mRender->addAction( aGizmoHandles );
+	// not in the Render menu: Show Transform Gizmo lives in the display-
+	// toggles dropdown (duplicate entries confused more than they helped)
 
 	// Blender-style transform orientation / pivot point selectors
 	const QColor icoColHdr( 228, 228, 232 );
@@ -2995,8 +3063,10 @@ void NifSkope::initDockWidgets()
 		// the operator redo panel that pops up lets you readjust the angle live
 		ogl->selectLinked( true, ( ogl->lastOpKind == 2 ) ? ogl->lastOpParam : 30.0f );
 	} );
-	// cursor / element utilities live in the Render menu
-	ui->mRender->addMenu( mCursor );
+	// deliberately NOT added to the Render menu: every entry here is also in
+	// the viewport right-click menus (snap/select-linked) or the display
+	// dropdown (Show 3D Cursor), and the duplication confused more than it
+	// helped. The menu object stays alive as the owner of its actions.
 
 	connect( ogl, &GLView::transformCommitted, timeline, &TimelineWidget::keyNodeTransform );
 
@@ -3110,6 +3180,18 @@ void NifSkope::initDockWidgets()
 			modeGroup->addAction( action );
 		}
 		modeButton->setMenu( modeMenu );
+
+		// constant width across every mode label, so the toolbar row doesn't
+		// shift when the mode changes
+		{
+			const QFontMetrics fm( modeButton->font() );
+			int wMax = 0;
+			for ( const QString & s : { tr( "Object Mode" ), tr( "Edit Mode" ),
+					tr( "Vertex Paint" ), tr( "Weight Paint" ), tr( "Segment Paint" ) } )
+				wMax = std::max( wMax, fm.horizontalAdvance( s ) );
+			// text + icon + paddings/border + menu indicator
+			modeButton->setFixedWidth( wMax + modeButton->iconSize().width() + 46 );
+		}
 
 		auto syncModeButton = [this, modeButton, objectMode, editMode, vertexPaintMode,
 			weightPaintMode, segmentPaintMode, objectIcon, editIcon, vertexPaintIcon, weightPaintIcon, segmentPaintIcon]() {
