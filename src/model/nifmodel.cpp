@@ -1638,6 +1638,12 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 				return wwFlagFieldSummary( this, index );
 		}
 		return QVariant();
+	case WwDiffRefTextRole:
+		{
+			if ( column == ValueCol && diffRefBlock >= 0 && diffItems.contains( item ) )
+				return diffRefText.value( item );
+		}
+		return QVariant();
 	default:
 		return QVariant();
 	}

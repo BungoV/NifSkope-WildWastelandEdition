@@ -1,5 +1,49 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20g — Diff values side-by-side + drag/copy the reference; Blender scrub on Details editors
+
+Follow-ups to 07-20f from the user's first hands-on session.
+
+**Reference value painted beside the current value** (nifdelegate.cpp,
+WwDiffRefTextRole = UserRole+44): in diff mode every differing row now
+shows "◆ <reference value>" right-aligned in its Value cell — orange
+diamond, grey text — so current and reference read as two columns with no
+tooltip digging. Skipped when the column is too narrow for both; the flag
+suffix yields space to it; link rows inset it clear of the hover glyphs.
+The stored reference NifValues moved from NifSkope into NifModel
+(`diffRefValues`, beside diffItems/diffRefText) so the delegate can apply
+them directly.
+
+**Grab the reference value**: press the painted "◆ value" and release
+anywhere on the same row — a plain click or a drag-onto-the-value both
+write the reference's value onto the field, as one undoable
+ChangeValueCommand. The diff recompute then un-highlights the row.
+
+**Copy/paste it**: right-click a differing row → "Copy Reference Value"
+fills the SAME field clipboard as Copy Field Value (path + the reference's
+NifValue) — so the reference's Glossiness can be pasted onto the current
+block, or onto five blocks at once via the Block List "Paste … to N
+Block(s)". Leaf rows also gained "Paste Field Value (<label>)" in the
+Details menu for single-row pastes without touching the Block List.
+
+**Blender scrub on Block Details editors** (valueedit.cpp `WwScrubFilter`
++ `wwAttachScrubbers`): the DragSpinBox press-drag behavior from the
+viewport redo panels, as an installable event filter on the editor's line
+edit — press-drag scrubs (per-pixel step scales with the value's
+magnitude; Shift = ×0.1 fine), plain click selects-all for typing, cursor
+is the horizontal-drag arrow. Attached to every numeric editor ValueEdit
+creates: FloatEdit (floats), QSpinBox/UIntSpinBox (ints), and the numeric
+children inside VectorEdit/RotationEdit/ColorEdit/TriangleEdit — so
+Translation X/Y/Z and Euler rotations scrub too. Model commit still
+happens on editor close (Enter/focus-out), one undo step per edit, so a
+scrub is a single undoable change, not a stream. Links/text/enums
+untouched.
+
+Build: green. GUI checks owed: ref-value legibility on narrow Value
+columns, click-vs-drag feel on the ◆ zone, scrub feel (step scaling) on
+Scale vs Translation vs int fields, and that click-to-type still lands
+in the editors' select-all state.
+
 ## 2026-07-20f — Block Details batch: link jump/pick, decoded flags, field paste-to-many, sticky state, diff-vs-reference
 
 Five additions to the Block Details dock from the overhaul concept

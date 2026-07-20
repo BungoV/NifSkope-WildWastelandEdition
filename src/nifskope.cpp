@@ -1998,11 +1998,11 @@ void NifSkope::setDiffReference( const QModelIndex & blockIndex )
 void NifSkope::clearDiffReference()
 {
 	wwDiffRefIndex = QPersistentModelIndex();
-	wwDiffRefValues.clear();
 	if ( nif ) {
 		nif->diffRefBlock = -1;
 		nif->diffItems.clear();
 		nif->diffRefText.clear();
+		nif->diffRefValues.clear();
 	}
 	if ( wwDiffBanner )
 		wwDiffBanner->hide();
@@ -2040,7 +2040,7 @@ void NifSkope::updateDiffHighlight()
 
 	nif->diffItems.clear();
 	nif->diffRefText.clear();
-	wwDiffRefValues.clear();
+	nif->diffRefValues.clear();
 	nif->diffRefBlock = nif->getBlockNumber( QModelIndex( wwDiffRefIndex ) );
 
 	const QModelIndex rootIdx = ( tree && tree->model() == nif ) ? tree->rootIndex() : QModelIndex();
@@ -2065,12 +2065,12 @@ void NifSkope::updateDiffHighlight()
 					return false;
 				diffLeaves++;
 				// bound the stored reference data on pathological diffs
-				if ( wwDiffRefValues.size() < 4000 ) {
+				if ( nif->diffRefValues.size() < 4000 ) {
 					QString refText = r->getValueAsString();
 					if ( refText.size() > 100 )
 						refText = refText.left( 97 ) + QLatin1String( "..." );
 					nif->diffRefText.insert( c, refText );
-					wwDiffRefValues.insert( c, r->value() );
+					nif->diffRefValues.insert( c, r->value() );
 				}
 				return true;
 			}
@@ -2141,8 +2141,8 @@ void NifSkope::wwTakeReferenceValue( const QModelIndex & index )
 	if ( !nif )
 		return;
 	const NifItem * item = nif->getItem( index );
-	const auto it = wwDiffRefValues.constFind( item );
-	if ( !item || it == wwDiffRefValues.constEnd() )
+	const auto it = nif->diffRefValues.constFind( item );
+	if ( !item || it == nif->diffRefValues.constEnd() )
 		return;
 	QModelIndex vi = nif->itemToIndex( item, NifModel::ValueCol );
 	if ( !vi.isValid() )
@@ -2153,12 +2153,12 @@ void NifSkope::wwTakeReferenceValue( const QModelIndex & index )
 
 void NifSkope::wwTakeAllReferenceValues()
 {
-	if ( !nif || wwDiffRefValues.isEmpty() )
+	if ( !nif || nif->diffRefValues.isEmpty() )
 		return;
 	ChangeValueCommand::createTransaction();
 	// iterate over a copy: the pushes fire dataChanged, which queues (deferred)
-	// diff recomputes that will rebuild wwDiffRefValues afterwards
-	const auto refValues = wwDiffRefValues;
+	// diff recomputes that will rebuild the model's reference sets afterwards
+	const auto refValues = nif->diffRefValues;
 	for ( auto it = refValues.constBegin(); it != refValues.constEnd(); ++it ) {
 		const NifItem * item = static_cast<const NifItem *>( it.key() );
 		QModelIndex vi = nif->itemToIndex( item, NifModel::ValueCol );
@@ -2166,6 +2166,50 @@ void NifSkope::wwTakeAllReferenceValues()
 			continue;
 		nif->undoStack->push( new ChangeValueCommand( vi, item->value(), it.value(), item->name(), nif ) );
 	}
+}
+
+void NifSkope::wwPasteFieldToRow( const QModelIndex & index )
+{
+	if ( !nif || !wwFieldClip.valid )
+		return;
+	const NifItem * item = nif->getItem( index );
+	if ( !item || item->valueType() != wwFieldClip.value.type() )
+		return;
+	QModelIndex vi = nif->itemToIndex( item, NifModel::ValueCol );
+	if ( !vi.isValid() )
+		return;
+	ChangeValueCommand::createTransaction();
+	nif->undoStack->push( new ChangeValueCommand( vi, item->value(), wwFieldClip.value, item->name(), nif ) );
+}
+
+void NifSkope::wwCopyReferenceValue( const QModelIndex & index )
+{
+	// same clipboard as Copy Field Value, but carrying the REFERENCE block's
+	// value for this row — so it can be pasted onto this block, other rows,
+	// or the block-list multi-selection
+	if ( !nif )
+		return;
+	const NifItem * item = nif->getItem( index );
+	const auto it = nif->diffRefValues.constFind( item );
+	if ( !item || it == nif->diffRefValues.constEnd() )
+		return;
+
+	QVector<QPair<QString, int>> path;
+	const NifItem * walk = item;
+	while ( walk && !nif->isTopItem( walk ) ) {
+		path.prepend( { walk->name(), walk->row() } );
+		walk = walk->parent();
+	}
+	if ( !walk || nif->getBlockNumber( walk ) < 0 || path.isEmpty() )
+		return;
+
+	wwFieldClip.fieldName = item->name();
+	wwFieldClip.displayValue = it.value().toString();
+	if ( wwFieldClip.displayValue.size() > 24 )
+		wwFieldClip.displayValue = wwFieldClip.displayValue.left( 21 ) + QLatin1String( "..." );
+	wwFieldClip.path = path;
+	wwFieldClip.value = it.value();
+	wwFieldClip.valid = true;
 }
 
 bool NifSkope::blockMatchesQuickFilter( int block ) const

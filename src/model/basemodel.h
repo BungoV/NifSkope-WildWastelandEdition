@@ -50,6 +50,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //! Grey inline suffix appended to a flag field's Value cell by the delegate
 //! (e.g. "Hidden, Shadow"). Empty/invalid for non-flag rows.
 #define WwFlagSummaryRole (Qt::UserRole + 43)
+//! Diff-vs-reference: the reference block's value for a differing row,
+//! painted right-aligned beside the current value by the delegate. Empty
+//! when not diffing or when the row matches the reference.
+#define WwDiffRefTextRole (Qt::UserRole + 44)
 
 
 // Used for Block Name hashing

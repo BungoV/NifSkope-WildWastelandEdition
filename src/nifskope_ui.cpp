@@ -5974,16 +5974,25 @@ void NifSkope::contextMenu( const QPoint & pos )
 			QAction * aCopy = contextBook.addAction( tr( "Copy Field Value" ) );
 			connect( aCopy, &QAction::triggered, this,
 				[this, pidx = QPersistentModelIndex( idx )]() { wwCopyFieldValue( pidx ); } );
+			if ( wwFieldClipboardValid() ) {
+				QAction * aPasteRow = contextBook.addAction(
+					tr( "Paste Field Value (%1)" ).arg( wwFieldClipboardLabel() ) );
+				connect( aPasteRow, &QAction::triggered, this,
+					[this, pidx = QPersistentModelIndex( idx )]() { wwPasteFieldToRow( pidx ); } );
+			}
 		}
 		if ( differing ) {
-			if ( wwDiffRefValues.contains( item ) ) {
+			if ( nif->diffRefValues.contains( item ) ) {
 				QAction * aTake = contextBook.addAction( tr( "Take Reference Value" ) );
 				connect( aTake, &QAction::triggered, this,
 					[this, pidx = QPersistentModelIndex( idx )]() { wwTakeReferenceValue( pidx ); } );
+				QAction * aCopyRef = contextBook.addAction( tr( "Copy Reference Value" ) );
+				connect( aCopyRef, &QAction::triggered, this,
+					[this, pidx = QPersistentModelIndex( idx )]() { wwCopyReferenceValue( pidx ); } );
 			}
-			if ( !wwDiffRefValues.isEmpty() ) {
+			if ( !nif->diffRefValues.isEmpty() ) {
 				QAction * aTakeAll = contextBook.addAction(
-					tr( "Take All Reference Values (%1)" ).arg( wwDiffRefValues.size() ) );
+					tr( "Take All Reference Values (%1)" ).arg( nif->diffRefValues.size() ) );
 				connect( aTakeAll, &QAction::triggered, this,
 					[this]() { wwTakeAllReferenceValues(); } );
 			}

@@ -413,6 +413,10 @@ private:
 	bool wwFieldClipboardValid() const;
 	QString wwFieldClipboardLabel() const;
 	void wwPasteFieldToBlocks( const QList<qint32> & blocks );
+	//! Paste the field clipboard onto one specific row (type-checked).
+	void wwPasteFieldToRow( const QModelIndex & index );
+	//! Fill the field clipboard with the diff reference's value for this row.
+	void wwCopyReferenceValue( const QModelIndex & index );
 
 	// ---- diff-vs-reference (WW): compare the shown block against a pinned
 	// reference block; differing rows accent orange ----
@@ -515,9 +519,8 @@ private:
 		int scroll = 0;
 	};
 	QHash<QString, WwDetailsState> wwDetailsState;
-	//! Diff-vs-reference state (sets served to views live in NifModel).
+	//! Diff-vs-reference state (item sets and reference values live in NifModel).
 	QPersistentModelIndex wwDiffRefIndex;
-	QHash<const void *, NifValue> wwDiffRefValues;
 	QWidget * wwDiffBanner = nullptr;
 	QLabel * wwDiffLabel = nullptr;
 	bool wwDiffRecomputeQueued = false;

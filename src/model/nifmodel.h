@@ -231,6 +231,9 @@ public:
 	//! NifSkope::updateDiffHighlight(); the model only serves them per-role.
 	QSet<const void *> diffItems;
 	QHash<const void *, QString> diffRefText;
+	//! The reference's actual values for differing leaves, so the delegate's
+	//! click/drag-apply and the "Take Reference Value" actions can write them.
+	QHash<const void *, NifValue> diffRefValues;
 	qint32 diffRefBlock = -1;
 
 	//! Get the number of NiBlocks

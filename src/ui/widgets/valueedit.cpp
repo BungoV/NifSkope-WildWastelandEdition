@@ -37,17 +37,129 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QLabel>   // Inherited
 #include <QSpinBox> // Inherited
 #include <QAction>
+#include <QDoubleSpinBox>
 #include <QFrame>
 #include <QLayout>
 #include <QLineEdit>
+#include <QMouseEvent>
 #include <QResizeEvent>
 #include <QScrollBar>
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QToolButton>
 
+#include <cmath>
+#include <functional>
+#include <utility>
+
 
 //! \file valueedit.cpp Value edit widget implementations
+
+// ---- Blender-style scrub for numeric editors (WW) -------------------------
+// The DragSpinBox behavior from the viewport redo panels, as an installable
+// filter: press-drag on the editor's line edit scrubs the value (Shift =
+// fine), a plain click selects-all for typing. Attached to every numeric
+// editor ValueEdit creates, including the FloatEdits inside the compound
+// editors (vectors, rotations, colors, triangles).
+
+namespace
+{
+
+class WwScrubFilter final : public QObject
+{
+public:
+	WwScrubFilter( QLineEdit * le, std::function<double()> get,
+		std::function<void( double )> set, bool integer )
+		: QObject( le ), target( le ), getVal( get ), setVal( set ), isInt( integer )
+	{
+		le->installEventFilter( this );
+		le->setCursor( Qt::SizeHorCursor );
+	}
+
+protected:
+	bool eventFilter( QObject * o, QEvent * ev ) override
+	{
+		if ( o != target )
+			return QObject::eventFilter( o, ev );
+
+		if ( ev->type() == QEvent::MouseButtonPress ) {
+			auto me = static_cast<QMouseEvent *>( ev );
+			if ( me->button() == Qt::LeftButton ) {
+				dragging = true;
+				moved = false;
+				pressX = int( me->globalPosition().x() );
+				startVal = getVal();
+				return true;	// swallow: don't let the line edit start selecting
+			}
+		} else if ( ev->type() == QEvent::MouseMove && dragging ) {
+			auto me = static_cast<QMouseEvent *>( ev );
+			const int dx = int( me->globalPosition().x() ) - pressX;
+			if ( !moved && std::abs( dx ) > 2 )
+				moved = true;
+			if ( moved ) {
+				// per-pixel step scales with the value's magnitude (Blender)
+				double per = isInt ? 0.1 : std::max( 0.01, std::abs( startVal ) * 0.005 );
+				if ( me->modifiers() & Qt::ShiftModifier )
+					per *= 0.1;
+				const double nv = startVal + double( dx ) * per;
+				setVal( isInt ? double( qRound64( nv ) ) : nv );
+			}
+			return true;
+		} else if ( ev->type() == QEvent::MouseButtonRelease && dragging ) {
+			dragging = false;
+			if ( !moved ) {		// a plain click: edit the value
+				target->selectAll();
+				target->setFocus();
+			}
+			moved = false;
+			return true;
+		}
+
+		return QObject::eventFilter( o, ev );
+	}
+
+private:
+	QLineEdit * target;
+	std::function<double()> getVal;
+	std::function<void( double )> setVal;
+	bool isInt;
+	bool dragging = false, moved = false;
+	int pressX = 0;
+	double startVal = 0.0;
+};
+
+//! Attach scrubbers to every numeric input inside (or being) `root`.
+void wwAttachScrubbers( QWidget * root )
+{
+	QList<FloatEdit *> floats = root->findChildren<FloatEdit *>();
+	if ( auto fe = qobject_cast<FloatEdit *>( root ) )
+		floats << fe;
+	for ( FloatEdit * fe : std::as_const( floats ) ) {
+		new WwScrubFilter( fe,
+			[fe]() { return double( fe->value() ); },
+			[fe]( double v ) { fe->setValue( float( v ) ); }, false );
+	}
+
+	QList<QAbstractSpinBox *> spins = root->findChildren<QAbstractSpinBox *>();
+	if ( auto sb = qobject_cast<QAbstractSpinBox *>( root ) )
+		spins << sb;
+	for ( QAbstractSpinBox * sb : std::as_const( spins ) ) {
+		QLineEdit * le = sb->findChild<QLineEdit *>();
+		if ( !le )
+			continue;
+		if ( auto ds = qobject_cast<QDoubleSpinBox *>( sb ) ) {
+			new WwScrubFilter( le,
+				[ds]() { return ds->value(); },
+				[ds]( double v ) { ds->setValue( v ); }, false );
+		} else if ( auto is = qobject_cast<QSpinBox *>( sb ) ) {
+			new WwScrubFilter( le,
+				[is]() { return double( is->value() ); },
+				[is]( double v ) { is->setValue( int( v ) ); }, true );
+		}
+	}
+}
+
+}
 
 ValueEdit::ValueEdit( QWidget * parent ) : QWidget( parent ), typ( NifValue::tNone ), edit( 0 )
 {
@@ -367,6 +479,11 @@ void ValueEdit::setValue( const NifValue & v )
 		edit = nullptr;
 		break;
 	}
+
+	// Blender number-field behavior on every numeric input (press-drag
+	// scrubs, click types) — no-op for link/text/enum editors
+	if ( edit )
+		wwAttachScrubbers( edit );
 
 	resizeEditor();
 
