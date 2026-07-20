@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20j — Reference drag polish: no shimmer, drop = Value cells only
+
+Two user reports on 07-20i's drag: (1) the ghost shimmered — QToolTip
+re-shows (with fade) on every reposition; replaced with a parentless
+frameless QLabel (Qt::ToolTip flag, flat #383838 style) created once and
+only ever move()d, on a 16 ms tick. (2) releasing the drag anywhere on the
+row applied the value — even back over the donor Reference cell itself.
+Drops now apply ONLY when released over a Value cell; anywhere else
+(Reference/Name/Type columns, other rows without a type match, off-row)
+cancels cleanly. Tooltip wording updated to match.
+
 ## 2026-07-20i — Modal Loop Cut, quad fill fix, Bevel reachability, reference drag v2
 
 Four user-reported issues from hands-on testing.

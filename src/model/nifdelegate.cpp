@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QCursor>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
@@ -77,6 +78,10 @@ class NifDelegate final : public QItemDelegate
 	NifValue wwRefDragValue;
 	QString wwRefGhostText;
 	QTimer * wwRefGhostTimer = nullptr;
+	//! frameless floating label as the drag ghost — a QToolTip re-shows (and
+	//! fades) on every reposition, which read as shimmering; this one is
+	//! created once and only ever move()d
+	QLabel * wwRefGhost = nullptr;
 
 	void armRefDrag( const QString & text )
 	{
@@ -84,7 +89,7 @@ class NifDelegate final : public QItemDelegate
 		wwRefDragging = false;
 		if ( !wwRefGhostTimer ) {
 			wwRefGhostTimer = new QTimer( this );
-			wwRefGhostTimer->setInterval( 30 );
+			wwRefGhostTimer->setInterval( 16 );
 			connect( wwRefGhostTimer, &QTimer::timeout, this, [this]() {
 				// self-heal: a release outside any row never reaches
 				// editorEvent, so cancel as soon as the button is up
@@ -94,10 +99,24 @@ class NifDelegate final : public QItemDelegate
 				}
 				if ( !wwRefDragging
 					&& ( QCursor::pos() - wwRefPressGlobal ).manhattanLength()
-						> QApplication::startDragDistance() )
+						> QApplication::startDragDistance() ) {
 					wwRefDragging = true;
-				if ( wwRefDragging )
-					QToolTip::showText( QCursor::pos() + QPoint( 16, 12 ), wwRefGhostText );
+					if ( !wwRefGhost ) {
+						wwRefGhost = new QLabel( nullptr,
+							Qt::ToolTip | Qt::FramelessWindowHint );
+						wwRefGhost->setAttribute( Qt::WA_TransparentForMouseEvents );
+						wwRefGhost->setAttribute( Qt::WA_ShowWithoutActivating );
+						wwRefGhost->setStyleSheet( QStringLiteral(
+							"QLabel { background: #383838; color: #dddddd;"
+							" border: 1px solid #303030; padding: 2px 6px; }" ) );
+					}
+					wwRefGhost->setText( wwRefGhostText );
+					wwRefGhost->adjustSize();
+					wwRefGhost->move( QCursor::pos() + QPoint( 18, 14 ) );
+					wwRefGhost->show();
+				}
+				if ( wwRefDragging && wwRefGhost )
+					wwRefGhost->move( QCursor::pos() + QPoint( 18, 14 ) );
 			} );
 		}
 		wwRefGhostTimer->start();
@@ -109,12 +128,18 @@ class NifDelegate final : public QItemDelegate
 			wwRefGhostTimer->stop();
 		wwRefPress = QPersistentModelIndex();
 		wwRefDragging = false;
-		QToolTip::hideText();
+		if ( wwRefGhost )
+			wwRefGhost->hide();
 	}
 
 public:
 	NifDelegate( QObject * p, SpellBookPtr sb = 0 ) : QItemDelegate( p ), book( sb )
 	{
+	}
+
+	~NifDelegate() override
+	{
+		delete wwRefGhost;	// top-level (parentless) ghost window
 	}
 
 	// ---- link rows: hover ↗ (jump) / ▾ (pick) glyphs -----------------------
@@ -257,8 +282,11 @@ public:
 				const bool wasDrag = wwRefDragging;
 				cancelRefDrag();
 				if ( wasDrag ) {
-					// drop: apply the dragged value to the row under the cursor
-					applyValueToRow( nifm, index, wwRefDragValue );
+					// drop applies ONLY when released over a Value cell —
+					// anywhere else (incl. the Reference column itself, i.e.
+					// dragging in place) is a clean cancel
+					if ( index.column() == NifModel::ValueCol )
+						applyValueToRow( nifm, index, wwRefDragValue );
 				} else {
 					// plain click: just select the row (the press was swallowed)
 					if ( auto view = qobject_cast<QAbstractItemView *>(
