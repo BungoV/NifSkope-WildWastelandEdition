@@ -2415,7 +2415,7 @@ void GLView::paintGL()
 				}
 			}
 		}
-		if ( loopCutActive && loopCutPhase == 1 && loopCutShape >= 0
+		if ( loopCutActive && loopCutShape >= 0
 			&& !loopCutRingEdges.isEmpty() ) {
 			// Blender loop-cut preview: the would-be loop(s) in yellow, glued
 			// to the surface (positions re-derived + re-projected per frame)
@@ -12573,38 +12573,6 @@ static void tlApplyLoopCut( NifModel * model, const QPersistentModelIndex & pSha
 	model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
 }
 
-//! Re-lerp an existing cut loop's verts at slide factor f (phase-2 live
-//! preview and the committed slide command share this).
-static void tlLoopCutSlideWrite( NifModel * model, const QPersistentModelIndex & pShape,
-	const QVector<QPair<int, int>> & ringEdges, const QVector<QVector<int>> & newVerts,
-	int cuts, float f, bool recalcNormals )
-{
-	QModelIndex iS( pShape );
-	if ( !iS.isValid() )
-		return;
-	const int nv = model->get<int>( iS, "Num Vertices" );
-	f = std::clamp( f, -1.0f, 1.0f );
-	QSet<int> touched;
-	model->setState( BaseModel::Processing );
-	for ( int i = 0; i < ringEdges.size() && i < newVerts.size(); i++ ) {
-		for ( int k = 0; k < cuts && k < newVerts.at( i ).size(); k++ ) {
-			const int v = newVerts.at( i ).at( k );
-			if ( v < 0 || v >= nv )
-				continue;
-			float t = float( k + 1 ) / float( cuts + 1 );
-			t = ( f >= 0.0f ) ? t + f * ( 1.0f - t ) : t * ( 1.0f + f );
-			t = std::clamp( t, 0.001f, 0.999f );
-			tlWriteLerpVertex( model, iS, v, ringEdges.at( i ).first,
-				ringEdges.at( i ).second, t );
-			touched << v << ringEdges.at( i ).first << ringEdges.at( i ).second;
-		}
-	}
-	model->restoreState();
-	if ( recalcNormals )
-		tlRecalcNormalsSubset( model, iS, touched );
-	model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
-}
-
 void GLView::loopCut()
 {
 	// Ctrl+R is modal now (Blender): this entry just arms it
@@ -12629,30 +12597,26 @@ void GLView::beginLoopCut()
 	circlePainting = false;
 	circleErasing = false;
 	loopCutActive = true;
-	loopCutPhase = 1;
 	loopCutCuts = 1;
-	loopCutFactor = 0.0f;
+	loopCutTyped = -1;
 	loopCutShape = -1;
 	loopCutSeedEdge = 0;
 	loopCutRingEdges.clear();
 	loopCutQuadTris.clear();
-	loopCutNewVerts.clear();
 	loopCutSeedSel = pickedElems;
 	setCursor( Qt::CrossCursor );
 	loopCutProbe( QPointF( mapFromGlobal( QCursor::pos() ) ) );
-	emit gizmoStatus( tr( "Loop Cut: hover an edge — wheel sets cuts, LMB confirms, RMB/Esc cancels" ) );
+	emit gizmoStatus( tr( "Loop Cut: hover a quad-strip edge — wheel/digits set cuts, LMB confirms, RMB/Esc cancels" ) );
 	update();
 }
 
 void GLView::cancelLoopCut()
 {
 	loopCutActive = false;
-	loopCutPhase = 0;
 	loopCutShape = -1;
 	loopCutSeedEdge = 0;
 	loopCutRingEdges.clear();
 	loopCutQuadTris.clear();
-	loopCutNewVerts.clear();
 	loopCutAdjShape = -1;
 	loopCutTriCache.clear();
 	loopCutAdjCache.clear();
@@ -12662,7 +12626,7 @@ void GLView::cancelLoopCut()
 
 void GLView::loopCutProbe( const QPointF & pos )
 {
-	if ( !model || loopCutPhase != 1 )
+	if ( !model || !loopCutActive )
 		return;
 	// the edge under the cursor seeds the ring (same trick as edge-loop select)
 	const int savedPickMode = pickMode;
@@ -12741,12 +12705,15 @@ void GLView::loopCutProbe( const QPointF & pos )
 			const int y = thirdVert( triB, x, c );
 			if ( y < 0 || y == a || y == b )
 				continue;
-			const bool marked = isQuadDiagonal( sb, x, c );
+			// Blender: a loop cut runs through QUADS only — plain triangles
+			// stop the loop. Only explicitly marked quad diagonals (Make
+			// Face / Tris to Quads) qualify as a hop; when both edges of the
+			// corner are marked, the better-aligned side wins.
+			if ( !isQuadDiagonal( sb, x, c ) )
+				continue;
 			Vector3 f = readPos( y ) - readPos( c );
-			float d = std::fabs( Vector3::dotproduct( f, eDir ) )
+			const float d = std::fabs( Vector3::dotproduct( f, eDir ) )
 				/ std::max( f.length() * eDir.length(), 1.0e-9f );
-			if ( marked )
-				d = 2.0f;	// beats any geometric score
 			if ( d > bestDot ) {
 				bestDot = d;
 				r.triA = triA;
@@ -12852,10 +12819,10 @@ void GLView::loopCutProbe( const QPointF & pos )
 
 void GLView::loopCutConfirmRing()
 {
-	if ( loopCutPhase != 1 )
+	if ( !loopCutActive )
 		return;
 	if ( loopCutShape < 0 || loopCutRingEdges.isEmpty() || loopCutQuadTris.isEmpty() ) {
-		emit gizmoStatus( tr( "Loop Cut: hover an edge of the edited mesh first" ) );
+		emit gizmoStatus( tr( "Loop Cut: hover an edge of a quad strip (Tris to Quads marks them)" ) );
 		return;
 	}
 	QModelIndex iShape = model->getBlockIndex( loopCutShape );
@@ -12863,115 +12830,90 @@ void GLView::loopCutConfirmRing()
 		cancelLoopCut();
 		return;
 	}
-	loopCutPShape = QPersistentModelIndex( iShape );
 	const int nvBase = model->get<int>( iShape, "Num Vertices" );
-	// effective cut count under the 65,535-vert cap (same clamp as the apply,
-	// so the deterministic new-vert indices below stay in sync)
+	// effective cut count under the 65,535-vert cap (same clamp as the
+	// apply, so the deterministic new-vert indices stay in sync)
 	int cuts = std::clamp( loopCutCuts, 1, 64 );
 	if ( nvBase + cuts * loopCutRingEdges.size() > 0xFFFF )
 		cuts = std::max( 1, int( ( 0xFFFF - nvBase )
 			/ std::max( loopCutRingEdges.size(), qsizetype( 1 ) ) ) );
-	loopCutCuts = cuts;
 
 	NifModel * mdl = model;
-	const QPersistentModelIndex pShape = loopCutPShape;
+	const QPersistentModelIndex pShape( iShape );
 	const QVector<QPair<int, int>> ringEdges = loopCutRingEdges;
 	const QVector<QPair<int, int>> quadTris = loopCutQuadTris;
-	// the whole gesture (cut + slide) is ONE undo step
+	const int sb = loopCutShape;
+	const QSet<quint64> oldMarks = quadMarksFor( sb );
+
+	// cell diagonals of the new ladder, derived the same way tlApplyLoopCut
+	// builds its rows: per span q the rows are (aI,aJ), the cut rungs, then
+	// (bI,bJ); each row pair forms one cell whose hidden diagonal is
+	// (row[k].first, row[k+1].second). Value captures: the panel re-run
+	// closure outlives this call.
+	auto cellDiagonals = [ringEdges, quadTris]( int nCuts, int nv0 ) {
+		QSet<quint64> dg;
+		const int n = ringEdges.size();
+		for ( int q = 0; q < quadTris.size(); q++ ) {
+			const int i = q, j = ( q + 1 ) % n;
+			QVector<QPair<int, int>> rows;
+			rows.append( { ringEdges.at( i ).first, ringEdges.at( j ).first } );
+			for ( int k = 0; k < nCuts; k++ )
+				rows.append( { nv0 + i * nCuts + k, nv0 + j * nCuts + k } );
+			rows.append( { ringEdges.at( i ).second, ringEdges.at( j ).second } );
+			for ( int k = 0; k + 1 < rows.size(); k++ )
+				dg.insert( quadEdgeKey( rows.at( k ).first, rows.at( k + 1 ).second ) );
+		}
+		return dg;
+	};
+
+	// the whole gesture (cut + quad marks) is ONE undo step; the cut is
+	// placed CENTERED (Blender: slide afterwards via the panel's Factor)
 	model->undoStack->beginMacro( tr( "Loop Cut" ) );
 	model->undoStack->push( new TlShapeStateCommand( model, iShape, tr( "Loop Cut" ),
 		[mdl, pShape, ringEdges, quadTris, cuts]() {
 			tlApplyLoopCut( mdl, pShape, ringEdges, quadTris, cuts, 0.0f );
 		} ) );
-	modelChanged();
-
-	// new-vert indices are deterministic from the pre-push vertex count
-	loopCutNewVerts.clear();
-	loopCutNewVerts.resize( ringEdges.size() );
-	int nvi = nvBase;
-	for ( int i = 0; i < ringEdges.size(); i++ ) {
-		loopCutNewVerts[i].resize( cuts );
-		for ( int k = 0; k < cuts; k++ )
-			loopCutNewVerts[i][k] = nvi++;
-	}
-
-	// land with the new loop selected (vertex mode), ready to slide
-	pickedElems.clear();
-	for ( const QVector<int> & vk : std::as_const( loopCutNewVerts ) ) {
-		for ( int v : vk ) {
-			PickedElement npe;
-			npe.shapeBlock = loopCutShape;
-			npe.type = 1;
-			npe.e0 = v;
-			pickedElems.append( npe );
-		}
-	}
-	pickMode = 1;
-	refreshPickedElementPositions();
-
-	loopCutPhase = 2;
-	loopCutFactor = 0.0f;
-	loopCutSlideBaseX = QCursor::pos().x();
-	emit gizmoStatus( tr( "Loop Cut: %1 cut(s) — move to slide, LMB place, RMB/Esc center" ).arg( cuts ) );
-	update();
-}
-
-void GLView::loopCutSlideUpdate( int globalX )
-{
-	if ( loopCutPhase != 2 || !model )
-		return;
-	const float f = std::clamp( float( globalX - loopCutSlideBaseX ) / 200.0f, -1.0f, 1.0f );
-	if ( std::fabs( f - loopCutFactor ) < 0.002f )
-		return;
-	loopCutFactor = f;
-	tlLoopCutSlideWrite( model, loopCutPShape, loopCutRingEdges, loopCutNewVerts,
-		loopCutCuts, f, false );
-	refreshPickedElementPositions();
-	emit gizmoStatus( tr( "Loop Cut slide: %1 — LMB place, RMB/Esc center" )
-		.arg( double( f ), 0, 'f', 2 ) );
-	update();
-}
-
-void GLView::loopCutFinish( bool centered )
-{
-	if ( loopCutPhase != 2 || !model ) {
-		cancelLoopCut();
-		return;
-	}
-	const float f = centered ? 0.0f : loopCutFactor;
-	// return to the centered baseline first, so the slide command captures
-	// the correct pre-state (the live writes were preview-only)
-	tlLoopCutSlideWrite( model, loopCutPShape, loopCutRingEdges, loopCutNewVerts,
-		loopCutCuts, 0.0f, f == 0.0f );
-	NifModel * mdl = model;
-	const QPersistentModelIndex pShape = loopCutPShape;
-	const QVector<QPair<int, int>> ringEdges = loopCutRingEdges;
-	const QVector<QPair<int, int>> quadTris = loopCutQuadTris;
-	const QVector<QVector<int>> newVerts = loopCutNewVerts;
-	const int cuts = loopCutCuts;
-	if ( f != 0.0f && loopCutPShape.isValid() ) {
-		const float ff = f;
-		model->undoStack->push( new TlShapeStateCommand( model, QModelIndex( loopCutPShape ),
-			tr( "Slide" ),
-			[mdl, pShape, ringEdges, newVerts, cuts, ff]() {
-				tlLoopCutSlideWrite( mdl, pShape, ringEdges, newVerts, cuts, ff, true );
-			} ) );
-	}
+	// the new cells stay QUADS: every cell diagonal gets a quad mark
+	setQuadMarks( sb, oldMarks + cellDiagonals( cuts, nvBase ), tr( "Loop Cut" ),
+		nvBase + cuts * int( ringEdges.size() ) );
 	model->undoStack->endMacro();
 	modelChanged();
+
+	// the new loop lands selected as EDGES (orange), Blender-style
+	pickedElems.clear();
+	const int nRing = ringEdges.size();
+	for ( int k = 0; k < cuts; k++ ) {
+		for ( int q = 0; q < quadTris.size(); q++ ) {
+			const int i = q, j = ( q + 1 ) % nRing;
+			PickedElement pe;
+			pe.shapeBlock = sb;
+			pe.type = 2;
+			pe.e0 = nvBase + i * cuts + k;
+			pe.e1 = nvBase + j * cuts + k;
+			pickedElems.append( pe );
+		}
+	}
+	pickMode = 2;
 	refreshPickedElementPositions();
 
-	// adjust-last-operation panel: cuts + factor re-run as one command
-	lastOpExRerun = [this, mdl, pShape, ringEdges, quadTris]( const QVector<TlOpParam> & ps ) {
+	// adjust panel: Number of Cuts + Factor, re-run as one macro
+	const QVector<PickedElement> seed = loopCutSeedSel;
+	lastOpExRerun = [this, mdl, pShape, ringEdges, quadTris, sb, oldMarks, cellDiagonals](
+		const QVector<TlOpParam> & ps ) {
 		QModelIndex iS( pShape );
 		if ( !iS.isValid() )
 			return;
 		const int rcuts = std::clamp( int( ps.value( 0 ).value + 0.5 ), 1, 64 );
 		const float rfac = std::clamp( float( ps.value( 1 ).value ), -1.0f, 1.0f );
+		const int nv0 = mdl->get<int>( iS, "Num Vertices" );
+		mdl->undoStack->beginMacro( tr( "Loop Cut" ) );
 		mdl->undoStack->push( new TlShapeStateCommand( mdl, iS, tr( "Loop Cut" ),
 			[mdl, pShape, ringEdges, quadTris, rcuts, rfac]() {
 				tlApplyLoopCut( mdl, pShape, ringEdges, quadTris, rcuts, rfac );
 			} ) );
+		setQuadMarks( sb, oldMarks + cellDiagonals( rcuts, nv0 ), tr( "Loop Cut" ),
+			nv0 + rcuts * int( ringEdges.size() ) );
+		mdl->undoStack->endMacro();
 		modelChanged();
 	};
 	QVector<TlOpParam> ps( 2 );
@@ -12983,23 +12925,52 @@ void GLView::loopCutFinish( bool centered )
 	ps[0].step = 1.0;
 	ps[1].label = tr( "Factor" );
 	ps[1].type = TlOpParam::Float;
-	ps[1].value = f;
+	ps[1].value = 0.0;
 	ps[1].mn = -1.0;
 	ps[1].mx = 1.0;
 	ps[1].step = 0.02;
 	ps[1].decimals = 2;
-	armOperatorPanelEx( tr( "Loop Cut" ), ps, 1, loopCutSeedSel );
+	armOperatorPanelEx( tr( "Loop Cut" ), ps, 1, seed );
 
-	const int nLoop = int( ringEdges.size() ) * cuts;
+	const int nLoop = nRing * cuts;
 	loopCutActive = false;
-	loopCutPhase = 0;
+	loopCutShape = -1;
 	loopCutAdjShape = -1;
 	loopCutTriCache.clear();
 	loopCutAdjCache.clear();
 	unsetCursor();
-	emit gizmoStatus( tr( "Loop Cut: %1-vert loop placed (factor %2)" )
-		.arg( nLoop ).arg( double( f ), 0, 'f', 2 ) );
+	emit gizmoStatus( tr( "Loop Cut: %1-vert loop placed centered — Cuts / Factor in the panel" )
+		.arg( nLoop ) );
 	update();
+}
+
+bool GLView::loopCutModalKey( int key )
+{
+	if ( !loopCutActive )
+		return false;
+	int c = loopCutCuts;
+	if ( key >= Qt::Key_0 && key <= Qt::Key_9 ) {
+		const int d = key - Qt::Key_0;
+		loopCutTyped = ( loopCutTyped < 0 ) ? d : loopCutTyped * 10 + d;
+		loopCutTyped = std::min( loopCutTyped, 64 );
+		c = std::max( loopCutTyped, 1 );
+	} else if ( key == Qt::Key_Backspace ) {
+		loopCutTyped = ( loopCutTyped >= 10 ) ? loopCutTyped / 10 : -1;
+		c = ( loopCutTyped > 0 ) ? loopCutTyped : 1;
+	} else if ( key == Qt::Key_Plus || key == Qt::Key_Equal ) {
+		loopCutTyped = -1;
+		c = c + 1;
+	} else if ( key == Qt::Key_Minus ) {
+		loopCutTyped = -1;
+		c = c - 1;
+	} else {
+		return false;
+	}
+	loopCutCuts = std::clamp( c, 1, 64 );
+	emit gizmoStatus( tr( "Loop Cut: %1 cut(s) — digits type a count, +/- adjust, LMB/Enter confirms" )
+		.arg( loopCutCuts ) );
+	update();
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -14369,14 +14340,8 @@ void GLView::setEditMode( bool on )
 
 	if ( knifeActive )
 		cancelKnife();
-	if ( loopCutActive ) {
-		// mid-slide: keep the loop (centered) and close the undo macro
-		// cleanly rather than stranding it open
-		if ( loopCutPhase == 2 )
-			loopCutFinish( true );
-		else
-			cancelLoopCut();
-	}
+	if ( loopCutActive )
+		cancelLoopCut();
 
 	if ( on ) {
 		// walk up to the nearest editable mesh of the current selection
@@ -17070,20 +17035,15 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		setRiggingWeightPaintMode( false );
 		return;
 	}
-	// loop cut is modal: Esc cancels (or recenters the slide), Enter confirms
-	// the current phase, other keys stay inert
+	// loop cut is modal: Esc cancels, Enter confirms, digits/+/- set the cut
+	// count, other keys stay inert
 	if ( loopCutActive ) {
-		if ( event->key() == Qt::Key_Escape ) {
-			if ( loopCutPhase == 2 )
-				loopCutFinish( true );
-			else
-				cancelLoopCut();
-		} else if ( event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter ) {
-			if ( loopCutPhase == 2 )
-				loopCutFinish( false );
-			else
-				loopCutConfirmRing();
-		}
+		if ( event->key() == Qt::Key_Escape )
+			cancelLoopCut();
+		else if ( event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter )
+			loopCutConfirmRing();
+		else
+			loopCutModalKey( event->key() );
 		return;
 	}
 
@@ -17558,12 +17518,9 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 		update();
 	}
 
-	// loop-cut preview / slide follows the cursor (also while MMB-orbiting)
+	// loop-cut ring preview follows the cursor (also while MMB-orbiting)
 	if ( loopCutActive ) {
-		if ( loopCutPhase == 1 )
-			loopCutProbe( getQMouseEventPosition( event ) );
-		else
-			loopCutSlideUpdate( int( event->globalPosition().x() ) );
+		loopCutProbe( getQMouseEventPosition( event ) );
 		update();
 	}
 
@@ -17873,22 +17830,16 @@ void GLView::mousePressEvent( QMouseEvent * event )
 		}
 	}
 
-	// loop cut armed (Ctrl+R): LMB confirms the ring / places the slide,
-	// RMB cancels (phase 1) or recenters (phase 2), MMB orbits
+	// loop cut armed (Ctrl+R): LMB confirms the centered cut, RMB cancels,
+	// MMB orbits
 	if ( loopCutActive ) {
 		if ( event->button() == Qt::LeftButton ) {
-			if ( loopCutPhase == 1 )
-				loopCutConfirmRing();
-			else
-				loopCutFinish( false );
+			loopCutConfirmRing();
 			gizmoSwallowClick = true;
 			return;
 		}
 		if ( event->button() == Qt::RightButton ) {
-			if ( loopCutPhase == 2 )
-				loopCutFinish( true );
-			else
-				cancelLoopCut();
+			cancelLoopCut();
 			// keep this click from dropping the gizmo on release
 			pressPos = QPointF( -10000.0, -10000.0 );
 			return;
@@ -18235,12 +18186,11 @@ void GLView::wheelEvent( QWheelEvent * event )
 
 	// loop cut: the wheel sets the number of cuts (Blender)
 	if ( loopCutActive ) {
-		if ( loopCutPhase == 1 ) {
-			loopCutCuts = std::clamp(
-				loopCutCuts + ( event->angleDelta().y() > 0 ? 1 : -1 ), 1, 64 );
-			emit gizmoStatus( tr( "Loop Cut: %1 cut(s) — LMB confirms" ).arg( loopCutCuts ) );
-			update();
-		}
+		loopCutTyped = -1;
+		loopCutCuts = std::clamp(
+			loopCutCuts + ( event->angleDelta().y() > 0 ? 1 : -1 ), 1, 64 );
+		emit gizmoStatus( tr( "Loop Cut: %1 cut(s) — LMB confirms" ).arg( loopCutCuts ) );
+		update();
 		return;		// no zoom mid-gesture
 	}
 

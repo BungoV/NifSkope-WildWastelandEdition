@@ -5524,24 +5524,22 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			|| keyFocus->inherits( "QAbstractSpinBox" ) || keyFocus->inherits( "QComboBox" ) );
 		// rebindable viewport shortcuts (see tlRegisterViewportShortcuts)
 		const auto & vpKeys = ShortcutRegistry::get();
-		// loop cut is modal: Esc cancels/recenters, Enter confirms; every
-		// other single-key viewport shortcut stays inert while it is armed
+		// loop cut is modal: Esc cancels, Enter confirms, digits/+/-/Backspace
+		// set the cut count; every other single-key viewport shortcut stays
+		// inert while it is armed
 		if ( ogl && ogl->loopCutActive && !keyFocusIsTextInput ) {
 			if ( ke->key() == Qt::Key_Escape || ke->key() == Qt::Key_Return
 				|| ke->key() == Qt::Key_Enter ) {
 				if ( e->type() == QEvent::KeyPress ) {
-					if ( ke->key() == Qt::Key_Escape ) {
-						if ( ogl->loopCutPhase == 2 )
-							ogl->loopCutFinish( true );
-						else
-							ogl->cancelLoopCut();
-					} else {
-						if ( ogl->loopCutPhase == 2 )
-							ogl->loopCutFinish( false );
-						else
-							ogl->loopCutConfirmRing();
-					}
+					if ( ke->key() == Qt::Key_Escape )
+						ogl->cancelLoopCut();
+					else
+						ogl->loopCutConfirmRing();
 				}
+				e->accept();
+				return true;
+			}
+			if ( e->type() == QEvent::KeyPress && ogl->loopCutModalKey( ke->key() ) ) {
 				e->accept();
 				return true;
 			}

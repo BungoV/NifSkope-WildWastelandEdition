@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-20n — Loop Cut v2: Blender parity (quads-only, stays quads, centered + panel, typed count, orange loop)
+
+User feedback on the first modal: cuts triangulated visibly, passed
+through plain triangles, the new loop wasn't highlighted, and there was
+no numeric input. All addressed:
+
+- **Quads only, like Blender**: the ring walk hops through MARKED quad
+  diagonals only (Make Face / Tris to Quads) — plain triangles stop the
+  loop. On an all-tri FO4 mesh, run Tris to Quads first; that is Blender's
+  own behavior on triangulated meshes.
+- **The cut stays quads**: every new ladder cell's diagonal gets a quad
+  mark (setQuadMarks joins the undo macro), so the result reads as quads,
+  not a triangulated strip. Cell diagonals are derived deterministically
+  from the same rows tlApplyLoopCut builds (nv + i*cuts + k), shared by
+  the confirm and the panel re-run.
+- **Confirm = centered cut + adjust panel** (the interactive mouse-slide
+  phase is gone per user spec): LMB/Enter places the loop dead-center and
+  arms the "Loop Cut" panel with Number of Cuts + Factor (the supported
+  subset of Blender's Loop Cut and Slide panel); Factor slides the loop
+  after the fact, re-run as one macro (cut + marks = one undo step).
+- **New loop lands selected as EDGES** — orange selection lines across
+  every cut loop, edge pick mode active, ready for G/S.
+- **Numeric input while armed**: type digits for an exact count
+  (multi-digit, Backspace edits), +/- adjusts, wheel still works.
+  Keys are routed both through GLView::keyPressEvent and the event-filter
+  interception so they work regardless of keyboard focus.
+
 ## 2026-07-20m — Alt+J from any select mode, isolate menu verified + harness, Render dedup, UI polish
 
 **Tris to Quads from vertex/edge modes** (glview.cpp): Alt+J only read face
