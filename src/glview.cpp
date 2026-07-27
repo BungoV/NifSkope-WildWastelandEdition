@@ -17654,6 +17654,11 @@ void GLView::modelDestroyed()
  * UI
  */
 
+void GLView::setAnimSpeed( float speed )
+{
+	animSpeed = speed;
+}
+
 void GLView::setSceneTime( float t )
 {
 	time = t;
@@ -17714,9 +17719,18 @@ void GLView::advanceGears()
 	if ( ( animState & AnimEnabled ) && ( animState & AnimPlay )
 		&& scene->timeMin() != scene->timeMax() )
 	{
-		time += dT;
+		time += dT * animSpeed;
 
-		if ( time > scene->timeMax() ) {
+		// Reverse playback is just a negative animSpeed, so BOTH ends need the
+		// wrap logic - a sequence run backwards finishes at timeMin. Written once
+		// and applied to whichever end this direction is heading for, so loop and
+		// cycle cannot behave differently depending on the sign.
+		const bool reverse = ( animSpeed < 0.0f );
+		const bool finished = reverse ? ( time < scene->timeMin() )
+									  : ( time > scene->timeMax() );
+		const float wrapTo = reverse ? scene->timeMax() : scene->timeMin();
+
+		if ( finished ) {
 			if ( ( animState & AnimSwitch ) && !scene->animGroups.isEmpty() ) {
 				int ix = scene->animGroups.indexOf( scene->animGroup );
 
@@ -17725,12 +17739,12 @@ void GLView::advanceGears()
 
 				setSceneSequence( scene->animGroups.value( ix ) );
 			} else if ( animState & AnimLoop ) {
-				time = scene->timeMin();
+				time = wrapTo;
 			} else {
 				// Animation has completed and is not looping
 				//	or cycling through animations.
 				// Reset time and state and then inform UI it has stopped.
-				time = scene->timeMin();
+				time = wrapTo;
 				animState &= ~AnimPlay;
 				emit sequenceStopped();
 			}

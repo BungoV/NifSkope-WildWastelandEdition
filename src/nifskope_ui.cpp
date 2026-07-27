@@ -6369,6 +6369,193 @@ void NifSkope::initDockWidgets()
 		} );
 	}
 
+	/* Animation transport: play/pause, sequence, loop, more, and a mini timeline.
+	 *
+	 * Sits at the head of the View toolbar so it is reachable without opening the
+	 * Timeline dock or switching to the Animation workspace - the common case is
+	 * "play this and look at it", which should not cost a layout change.
+	 *
+	 * It drives the EXISTING actions (aAnimPlay / aAnimLoop / aAnimSwitch) and
+	 * Scene::animGroups rather than keeping its own state, so this, the Timeline
+	 * dock's transport and Space in the viewport can never disagree.
+	 *
+	 * Always present, disabled when the file has no sequences. A control that
+	 * vanishes between files is worse than one that is visibly unavailable: you
+	 * cannot learn where it lives, and its absence is indistinguishable from not
+	 * having found it yet.
+	 */
+	{
+		const QColor icoCol( wwSkinColor( "text" ) );
+		const QString boxQss = wwBoxedButtonQss( QStringLiteral( "3px 6px" ) )
+			+ QStringLiteral( "QToolButton:disabled { color:%1; border-color:%2; }" )
+				.arg( wwSkinColor( "textMuted" ), wwSkinColor( "borderDim" ) );
+
+		auto * animPlayBtn = new QToolButton( this );
+		animPlayBtn->setDefaultAction( ui->aAnimPlay );
+		animPlayBtn->setToolButtonStyle( Qt::ToolButtonIconOnly );
+		animPlayBtn->setAutoRaise( false );
+		animPlayBtn->setStyleSheet( boxQss );
+		// the glyph follows the action's checked state: showing "pause" while
+		// paused would say what the button IS rather than what it DOES
+		const QColor icoColOff( wwSkinColor( "textMuted" ) );
+		auto syncPlayIcon = [this, animPlayBtn, icoCol, icoColOff]() {
+			const bool playing = ui->aAnimPlay->isChecked();
+			ui->aAnimPlay->setIcon( tlMakeIcon(
+				playing ? QStringLiteral( "pause" ) : QStringLiteral( "play" ),
+				ui->aAnimPlay->isEnabled() ? icoCol : icoColOff ) );
+			animPlayBtn->setToolTip( playing ? tr( "Pause animation" ) : tr( "Play animation" ) );
+		};
+		syncPlayIcon();
+		connect( ui->aAnimPlay, &QAction::toggled, this, syncPlayIcon );
+
+		auto * animSeqBtn = new QToolButton( this );
+		animSeqBtn->setPopupMode( QToolButton::InstantPopup );
+		animSeqBtn->setIcon( tlMakeIcon( QStringLiteral( "sequence" ), icoCol ) );
+		animSeqBtn->setToolButtonStyle( Qt::ToolButtonIconOnly );
+		animSeqBtn->setAutoRaise( false );
+		animSeqBtn->setStyleSheet( boxQss );
+		animSeqBtn->setToolTip( tr( "Animation sequence to play" ) );
+		auto * animSeqMenu = new QMenu( animSeqBtn );
+		animSeqBtn->setMenu( animSeqMenu );
+
+		auto * animLoopBtn = new QToolButton( this );
+		animLoopBtn->setDefaultAction( ui->aAnimLoop );
+		ui->aAnimLoop->setIcon( tlMakeIcon( QStringLiteral( "loop" ), icoCol ) );
+		animLoopBtn->setToolButtonStyle( Qt::ToolButtonIconOnly );
+		animLoopBtn->setAutoRaise( false );
+		animLoopBtn->setStyleSheet( boxQss );
+
+		auto * animMoreBtn = new QToolButton( this );
+		animMoreBtn->setPopupMode( QToolButton::InstantPopup );
+		animMoreBtn->setIcon( tlMakeIcon( QStringLiteral( "settings" ), icoCol ) );
+		animMoreBtn->setToolButtonStyle( Qt::ToolButtonIconOnly );
+		animMoreBtn->setAutoRaise( false );
+		animMoreBtn->setStyleSheet( boxQss );
+		animMoreBtn->setToolTip( tr( "More animation settings" ) );
+		auto * animMoreMenu = new QMenu( animMoreBtn );
+		animMoreBtn->setMenu( animMoreMenu );
+
+		// Reverse is a sign on the playback rate, so the two share one exclusive
+		// speed group and cannot contradict each other.
+		animMoreMenu->addSection( tr( "Playback" ) );
+		QAction * aReverse = animMoreMenu->addAction( tr( "Play Reversed" ) );
+		aReverse->setCheckable( true );
+		animMoreMenu->addAction( ui->aAnimSwitch );		// cycle through sequences
+		animMoreMenu->addSection( tr( "Speed" ) );
+		auto * speedGroup = new QActionGroup( animMoreMenu );
+		speedGroup->setExclusive( true );
+		const float speeds[] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
+		for ( float sp : speeds ) {
+			QAction * a = animMoreMenu->addAction( tr( "%1x" ).arg( sp ) );
+			a->setCheckable( true );
+			a->setChecked( sp == 1.0f );
+			a->setData( sp );
+			speedGroup->addAction( a );
+		}
+		auto applySpeed = [this, speedGroup, aReverse]() {
+			float sp = 1.0f;
+			if ( QAction * a = speedGroup->checkedAction() )
+				sp = a->data().toFloat();
+			ogl->setAnimSpeed( aReverse->isChecked() ? -sp : sp );
+		};
+		connect( speedGroup, &QActionGroup::triggered, this, [applySpeed]( QAction * ) { applySpeed(); } );
+		connect( aReverse, &QAction::toggled, this, [applySpeed]( bool ) { applySpeed(); } );
+		animMoreMenu->addSeparator();
+		animMoreMenu->addAction( dTimeline->toggleViewAction() );
+
+		// Mini timeline. Integer slider over a float range, so it carries its own
+		// resolution rather than borrowing the sequence's.
+		const int animTicks = 1000;
+		auto * animScrub = new QSlider( Qt::Horizontal, this );
+		animScrub->setRange( 0, animTicks );
+		animScrub->setFixedWidth( 64 );
+		animScrub->setToolTip( tr( "Scrub the current sequence" ) );
+		animScrub->setFocusPolicy( Qt::NoFocus );
+
+		// One guard for the obvious feedback loop: scrubbing sets the scene time,
+		// which emits sceneTimeChanged, which would move the slider under the
+		// cursor mid-drag.
+		auto * scrubbing = new bool( false );
+		connect( animScrub, &QSlider::valueChanged, this, [this, scrubbing, animTicks]( int v ) {
+			if ( *scrubbing )
+				return;
+			Scene * sc = ogl->getScene();
+			const float mn = sc->timeMin(), mx = sc->timeMax();
+			if ( mx > mn )
+				ogl->setSceneTime( mn + ( mx - mn ) * float( v ) / float( animTicks ) );
+		} );
+		connect( ogl, &GLView::sceneTimeChanged, this,
+			[animScrub, scrubbing, animTicks]( float t, float mn, float mx ) {
+				if ( !( mx > mn ) )
+					return;
+				const int v = int( ( t - mn ) / ( mx - mn ) * float( animTicks ) + 0.5f );
+				*scrubbing = true;
+				animScrub->setValue( std::clamp( v, 0, animTicks ) );
+				*scrubbing = false;
+			} );
+
+		// Sequence list and the enabled/disabled state both follow the file.
+		auto refreshAnimBar = [this, animSeqMenu, animSeqBtn, animMoreBtn, animScrub,
+							   icoCol, icoColOff, syncPlayIcon]() {
+			Scene * sc = ogl->getScene();
+			const QStringList groups = sc ? sc->animGroups : QStringList();
+			/* Animatable is a TIME RANGE, not a sequence list.
+			 *
+			 * Plenty of files animate through standalone controllers with no named
+			 * NiControllerSequence at all - every NiPSys effect in Meshes/Effects is
+			 * like this, and they are exactly what someone opens to watch something
+			 * move. Gating on animGroups greyed the transport out on all of them.
+			 * The sequence BUTTON still needs a non-empty list, since with nothing
+			 * to choose from it would open an empty menu.
+			 */
+			const bool have = sc && sc->timeMax() > sc->timeMin();
+			const bool haveGroups = !groups.isEmpty();
+
+			animSeqMenu->clear();
+			for ( const QString & g : groups ) {
+				QAction * a = animSeqMenu->addAction( g.isEmpty() ? tr( "(unnamed)" ) : g );
+				a->setCheckable( true );
+				a->setChecked( g == sc->animGroup );
+				connect( a, &QAction::triggered, this, [this, g]() { ogl->setSceneSequence( g ); } );
+			}
+			QString label = sc ? sc->animGroup : QString();
+			if ( !haveGroups )
+				label = tr( "No named sequence" );
+			else if ( label.isEmpty() )
+				label = tr( "(unnamed)" );
+			animSeqBtn->setToolTip( haveGroups ? tr( "Sequence: %1" ).arg( label )
+											   : tr( "Animation sequence to play" ) );
+
+			// The two action-backed buttons take their enabled state from the
+			// ACTION, not the button, so disabling the widget alone left them live.
+			ui->aAnimPlay->setEnabled( have );
+			ui->aAnimLoop->setEnabled( have );
+			animSeqBtn->setEnabled( haveGroups );
+			animMoreBtn->setEnabled( have );
+			animScrub->setEnabled( have );
+
+			// regenerate the glyphs in the state's colour, then the play/pause one
+			// through its own helper so the play-vs-pause choice stays in one place
+			animSeqBtn->setIcon( tlMakeIcon( QStringLiteral( "sequence" ),
+											 haveGroups ? icoCol : icoColOff ) );
+			ui->aAnimLoop->setIcon( tlMakeIcon( QStringLiteral( "loop" ),
+												have ? icoCol : icoColOff ) );
+			animMoreBtn->setIcon( tlMakeIcon( QStringLiteral( "settings" ),
+											  have ? icoCol : icoColOff ) );
+			syncPlayIcon();
+		};
+		connect( ogl, &GLView::sequencesUpdated, this, refreshAnimBar );
+		connect( this, &NifSkope::completeLoading, this,
+			[refreshAnimBar]( bool, QString & ) { refreshAnimBar(); } );
+		refreshAnimBar();
+
+		ui->tView->addWidget( animPlayBtn );
+		ui->tView->addWidget( animSeqBtn );
+		ui->tView->addWidget( animLoopBtn );
+		ui->tView->addWidget( animMoreBtn );
+		ui->tView->addWidget( animScrub );
+	}
+
 	// Regular dock toggles collapse into one dropdown on the View toolbar.
 	// Manager docks live in the adjacent Workspaces menu instead.
 	{

@@ -119,6 +119,30 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		tri( true, 20, 50 );
 	} else if ( id == QLatin1String( "playback" ) ) {
 		tri( false, 44, 14 );
+	} else if ( id == QLatin1String( "loop" ) ) {
+		// arrow-headed ring: a circle with a wedge at the top-right
+		QPen ring( col, 6.0 );
+		ring.setCapStyle( Qt::FlatCap );
+		p.setPen( ring );
+		p.setBrush( Qt::NoBrush );
+		p.drawArc( QRectF( 15, 15, 34, 34 ), 60 * 16, 300 * 16 );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		QPolygonF head;
+		head << QPointF( 40, 8 ) << QPointF( 52, 18 ) << QPointF( 38, 24 );
+		p.drawPolygon( head );
+	} else if ( id == QLatin1String( "sequence" ) ) {
+		// three stacked bars: a list of takes
+		p.setPen( Qt::NoPen );
+		p.drawRoundedRect( QRectF( 14, 17, 36, 7 ), 3, 3 );
+		p.drawRoundedRect( QRectF( 14, 29, 36, 7 ), 3, 3 );
+		p.drawRoundedRect( QRectF( 14, 41, 24, 7 ), 3, 3 );
+	} else if ( id == QLatin1String( "settings" ) ) {
+		// horizontal ellipsis - "more", deliberately not a gear, which reads as
+		// application preferences rather than as options for this control
+		p.setPen( Qt::NoPen );
+		for ( int i = 0; i < 3; i++ )
+			p.drawEllipse( QPointF( 16.0 + i * 16.0, 32.0 ), 5.0, 5.0 );
 	} else if ( id == QLatin1String( "pause" ) ) {
 		p.drawRoundedRect( QRectF( 18, 14, 9, 36 ), 2, 2 );
 		p.drawRoundedRect( QRectF( 37, 14, 9, 36 ), 2, 2 );

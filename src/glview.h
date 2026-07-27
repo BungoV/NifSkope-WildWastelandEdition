@@ -302,6 +302,14 @@ public slots:
 	void update();
 	void setCurrentIndex( const QModelIndex & );
 	void setSceneTime( float );
+	/*! Playback rate, and the only way to play backwards.
+	 *
+	 * Negative runs the sequence in reverse; advanceGears() mirrors the timeMax
+	 * wrap at timeMin so loop and cycle behave the same in both directions. 1.0
+	 * is real time.
+	 */
+	void setAnimSpeed( float speed );
+	float animationSpeed() const { return animSpeed; }
 	void setSceneSequence( const QString & );
 	//! Render only the currently selected node's subtree (follows the selection)
 	void setSoloMode( bool );
@@ -1271,6 +1279,7 @@ private:
 	QTimer * timer;
 	std::chrono::steady_clock::time_point lastTime;
 	float time;
+	float animSpeed = 1.0f;
 
 	float Dist;
 	Vector3 Pos;

@@ -1,5 +1,60 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27x — Animation transport on the View toolbar
+
+Play/pause, sequence, loop, more, and a mini timeline, at the head of the View
+toolbar — reachable without opening the Timeline dock or switching to the
+Animation workspace. The common case is "play this and look at it", which should
+not cost a layout change.
+
+It drives the **existing** actions (`aAnimPlay` / `aAnimLoop` / `aAnimSwitch`) and
+`Scene::animGroups` rather than keeping parallel state, so this, the Timeline
+dock's transport and Space in the viewport cannot disagree.
+
+- **Play/Pause** — the glyph shows what the button *does*, not what it is
+- **Sequence** — icon-only dropdown of `animGroups`, current one checked
+- **Loop**
+- **More** — Play Reversed, cycle through sequences, speed (0.25–4x), and a
+  toggle for the Timeline dock
+- **Mini timeline** — 64 px scrubber over `[timeMin, timeMax]`
+
+### Reverse playback did not exist
+
+`advanceGears()` did a bare `time += dT`. It now scales by a new
+`GLView::animSpeed`, which may be negative, and **both** ends carry the wrap
+logic — a sequence run backwards finishes at `timeMin`. Written once and applied
+to whichever end the current direction is heading for, so loop and cycle cannot
+behave differently depending on the sign. Reverse is the sign on the rate, so it
+and the speed choice share one group and cannot contradict each other.
+
+### Two bugs found while building it
+
+- **Gating on `animGroups` was wrong.** Plenty of files animate through
+  standalone controllers with no named `NiControllerSequence` — every NiPSys
+  effect in `Meshes/Effects` is like this, and they are exactly what someone
+  opens to watch something move. The transport was greyed out on all of them.
+  Animatable is a **time range**: `timeMax() > timeMin()`. The sequence *button*
+  still needs a non-empty list, since with nothing to choose it would open an
+  empty menu.
+- **`setEnabled()` on a `QToolButton` with a `defaultAction` does nothing** — the
+  button mirrors the action's state. Play and Loop stayed live with no animation
+  until the actions themselves were disabled.
+
+### Fitting it in
+
+At 1920 px the toolbar had no room: the first version pushed **Panels and
+Workspaces off the end**. The sequence button's text label was the expensive part,
+so it is icon-only with the name in its tooltip and checked in its menu. Both
+buttons survive now.
+
+Greying needed doing by hand as well. Qt's own disabled-icon fade measured 232 vs
+209 peak brightness — about 10%, which does not read as unavailable — and
+`wwBoxedButtonQss` colours text, useless for icon-only buttons. The glyphs are
+generated, so they are now generated in `textMuted` when disabled: **176 vs 235**.
+
+Verified by measurement on both states, with an animated file and without.
+Render regression 7/7 identical, including the time-driven `particles_mist`.
+
 ## 2026-07-27w — Block List category icons follow the skin
 
 27t recoloured only the `NiNode` dot and left the other eleven as stock resource
