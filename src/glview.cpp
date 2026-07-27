@@ -1742,9 +1742,17 @@ void GLView::paintGL()
 	// baselines, because pixelWidth/pixelHeight do not necessarily equal the
 	// viewport this frame is actually being drawn with (indexAt() sets its own for
 	// the pick render, and DPR scaling differs), so forcing them every frame moves
-	// the viewport. It also fixed nothing — viewportDimensions in globalUniforms
-	// measured as correctly populated (0,0,395,517, sane projectionMatrix) at the
-	// grid draw, so the zero-viewport/NaN theory was wrong. See WW_CHANGES 07-27i.
+	// the viewport. That part still stands.
+	//
+	// CORRECTION (07-27r): the second half of this comment used to say the
+	// zero-viewport/NaN theory "was wrong", on the strength of a probe reading
+	// (0,0,395,517) at the grid draw. That probe read the CPU-SIDE struct. A
+	// RenderDoc capture of the line draw reads what the GPU actually got, and it
+	// was 0,0,0,0 — the theory was right and the measurement was aimed at the
+	// wrong side of the upload. Fixed in setGlobalUniforms(), which now falls back
+	// to the live GL viewport when the value was never set; see the comment there.
+	// Same class of mistake as the startup-grid bug of 07-11: printf cannot see a
+	// cache-vs-GPU desync.
 
 	// Clear Viewport
 	if ( scene->hasVisMode(Scene::VisSilhouette) ) {

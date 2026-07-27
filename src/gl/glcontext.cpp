@@ -1038,6 +1038,38 @@ void NifSkopeOpenGLContext::setViewTransform( const Transform & t, int upAxis, f
 
 void NifSkopeOpenGLContext::setGlobalUniforms()
 {
+	/* Never upload a zero viewport — it makes the line geometry shader emit NaN.
+	 *
+	 * lines.geom divides by vpScale, which is viewportDimensions.zw * 0.5, and
+	 * normalizes (p1_ss - p0_ss) where both are scaled by it. At zero that is
+	 * normalize(0,0) and a divide by zero, so every emitted gl_Position is NaN
+	 * and the rasteriser drops the primitive. The geometry IS emitted — a capture
+	 * of the grid draw shows 22 triangles out of the GS and no pixels — which is
+	 * why forcing the colour red also produced nothing, and why POINTS from the
+	 * same streaming path still drew: they never touch vpScale.
+	 *
+	 * setViewport() is the only writer, and it is called from just resizeGL() and
+	 * indexAt(). resizeGL() returns early when the context is not valid yet
+	 * WITHOUT setting it, and if no later resize arrives the value stays zero for
+	 * the life of the window — until a click runs indexAt(). That is exactly the
+	 * "grid and axes do not appear until I click in the viewport" defect (07-17).
+	 *
+	 * getViewport() above already carries this fallback; the upload path simply
+	 * never got it. Read-only, so it cannot move the viewport the way forcing
+	 * setViewport() per frame did — that attempt shifted every render-regression
+	 * baseline and was reverted. Only fires when the value was never set.
+	 */
+	if ( globalUniforms->viewportDimensions[2] <= 0 ) [[unlikely]] {
+		GLint	viewportDims[4] = { 0, 0, 0, 0 };
+		fn->glGetIntegerv( GL_VIEWPORT, viewportDims );
+		if ( viewportDims[2] > 0 && viewportDims[3] > 0 ) {
+			globalUniforms->viewportDimensions[0] = viewportDims[0];
+			globalUniforms->viewportDimensions[1] = viewportDims[1];
+			globalUniforms->viewportDimensions[2] = viewportDims[2];
+			globalUniforms->viewportDimensions[3] = viewportDims[3];
+		}
+	}
+
 	fn->glBindBuffer( GL_UNIFORM_BUFFER, globalUniformsBufferObject );
 	fn->glBufferData( GL_UNIFORM_BUFFER, GLsizeiptr( sizeof(GlobalUniforms) ), globalUniforms, GL_DYNAMIC_DRAW );
 	fn->glBindBuffer( GL_UNIFORM_BUFFER, 0 );

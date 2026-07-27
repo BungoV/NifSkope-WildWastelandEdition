@@ -1,5 +1,63 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27r — The 07-17 line defect is FIXED: a zero viewport in the uniform block
+
+Open since 07-17: the ground grid, origin axes and 3D cursor did not appear until
+you clicked in the viewport. Ten days of probing eliminated the program cache
+(GPU-verified), depth, colour, alpha, geometry, FBO, uniform-block binding,
+clipping, GL errors and the geometry stage. It was none of those.
+
+**`globalUniforms.viewportDimensions` reached the GPU as `0, 0, 0, 0`.**
+
+`lines.geom` divides by `vpScale = viewportDimensions.zw * 0.5` and normalizes
+`p1_ss - p0_ss`, where both are scaled by it. At zero that is `normalize(0,0)`
+plus a divide by zero, so every emitted `gl_Position` is NaN and the rasteriser
+drops the primitive. This accounts for every symptom that made the bug so hard to
+place:
+
+- the geometry **is** emitted — the capture shows 22 triangles out of the GS for
+  the grid draw, and no pixels
+- forcing the fragment colour to red gave `redPx=0`, because the vertices were
+  NaN and colour was never involved
+- **POINTS from the same streaming path still drew** — they never touch `vpScale`
+- **a pick render healed it**: `indexAt()` calls `setViewport()`, so after one
+  click the value is right for the life of the window
+
+`setViewport()` is the only writer and is called from just `resizeGL()` and
+`indexAt()`. `resizeGL()` returns early when the context is not yet valid,
+**without** setting it, and if no later resize arrives the value stays zero until
+something clicks.
+
+Fix in `setGlobalUniforms()`: when `viewportDimensions[2] <= 0`, fill from the
+live `GL_VIEWPORT` before uploading. `getViewport()` already carried exactly this
+fallback — the upload path simply never got it. Read-only, so it cannot move the
+viewport the way forcing `setViewport()` per frame did (that attempt shifted all
+seven baselines and was reverted; that warning still stands and is unchanged).
+
+Verified both ways round on the same scene:
+
+| | `viewportDimensions` on the GPU | grid / axes |
+|---|---|---|
+| before | `0, 0, 0, 0` | absent |
+| after | `0, 0, 1434, 730` | drawn |
+
+**Render regression: 7/7 identical**, as expected — the harness's `indexAt()`
+warm-up was already forcing lines on, and this produces the same state. That
+warm-up is now redundant and can go once there is confidence the fix covers every
+path; it is left in for determinism.
+
+### The correction that mattered
+
+`glview.cpp` carried a comment stating the zero-viewport/NaN theory "was wrong",
+citing a probe that read `(0,0,395,517)` at the grid draw. **That probe read the
+CPU-side struct**; the GPU had the zeros. The theory was right and the
+measurement was aimed at the wrong side of the upload. The comment is corrected
+in place rather than deleted, because it is the second time this exact trap has
+cost days here — see the 07-11 startup-grid bug, whose lesson was already
+recorded as "printf cannot see a cache-vs-GPU desync". It could not be seen
+without a capture, which is why 07-27q's in-app RenderDoc plumbing had to land
+first.
+
 ## 2026-07-27q — NifSkope opens on a cube, like Blender
 
 Launching with no file gave an empty document, which is nowhere to click: most of

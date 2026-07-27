@@ -97,10 +97,25 @@ is disabled with a full write mask; effect-shader shapes still render; the grid
 is not occluded. **Eliminated:** per-draw GL state, cubemap completeness,
 uniform-block binding, unconditional base-alpha-as-opacity.
 
-**Next diagnostic:** qrenderdoc GUI → EID 87 → Mesh Viewer ▸ VS Out, then Debug
-Pixel. Not rdc-cli — its `debug vertex` shows `0xCCCCCCCC` inputs on the
-*working* legacy draw too, so that output is an artifact and cannot be read as
-evidence.
+**Next diagnostic — now actually possible (07-27q/r).** Every prior finding here
+came from captures that contained only Qt's composite blit, so "RenderDoc
+confirmed X" in the paragraph above is worth re-checking rather than trusting.
+The in-app capture path lands real frames now:
+
+```
+WW_RDC_FRAMES=4 WW_RDC_OUT=%TEMP%\pbr\cap NifSkope.exe <file.nif>
+rdc open %TEMP%\pbr\cap_paint002_capture.rdc && rdc draws && rdc cbuffer <eid> --stage vs
+```
+
+Start by reading the **uniform block contents at the failing draw**, because that
+is exactly what the 07-17 line defect turned out to be: `viewportDimensions`
+arriving as zeros while the CPU-side struct read correct. A probe on the app side
+cannot see that. `rdc cbuffer`, `rdc rt <eid>` (colour target after a specific
+draw) and `rdc snapshot <eid>` (full state + shader source) are the tools that
+settled it.
+
+Note `rdc debug vertex` shows `0xCCCCCCCC` inputs on the *working* legacy draw
+too, so that output is an artifact and cannot be read as evidence.
 
 To resume: flip the constant and re-enable the two greyed menu entries. Full
 findings in `WW_CHANGES.md 2026-07-27e`.
