@@ -1,5 +1,42 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27n - Bone collision: viewing and editing already work (investigation, no code)
+
+Goal: edit bone collision in the Collision Manager. Measured what already exists
+before building anything, and most of it does.
+
+**The ragdoll IS the bone collision.** Decoding the brahmin skeleton's
+bhkRagdollSystem (block 8) with the existing Havok / Decompile Compiled Collision
+spell yields **39 bhkCapsuleShape** blocks - one capsule per bone - plus a
+bhkListShape, a bhkRigidBody and a bhkCollisionObject. All ordinary editable
+legacy blocks. 97 blocks in, 99 out.
+
+**The Collision Manager already enumerates it.** Its browser loop guards only on
+ and then follows that object's Data
+link to whatever system block it points at - there is NO system-type filter
+anywhere ( appears zero times in collisiontools.cpp). Decoding
+is generic too: .
+So a skeleton's 41 bone-collision objects populate the browser as-is, and the
+existing translucent-solid + wire viewport display draws them with no renderer
+work. **Step 1 of the plan needed no implementation.**
+
+**Corrects my own earlier claim** that nothing called the decoder for ragdolls:
+havok.cpp:1570 accepts bhkRagdollSystem explicitly, and it works.
+
+**The single real gap: compiling back.** After a decompile you hold legacy blocks
+and can edit capsule radius, endpoints, layer, material and rigid-body physics -
+but nothing re-emits a bhkRagdollSystem packfile. hknpencode was written for
+bhkPhysicsSystem compressed-mesh and convex shapes.
+
+**One caveat to check before trusting the round trip:** the decode collapsed 41
+bhkNPCollisionObjects into 2, with a single bhkRigidBody owning a bhkListShape of
+39 capsules. So the per-bone BODY association may be flattened by the decode even
+though the shapes survive. Whether each capsule can still be attributed to its
+bone matters for a bone-collision editor, and is the next thing to verify.
+
+Also still true: Decode All only accepts bhkPhysicsSystem, so it silently skips
+ragdolls; only the single-block Decompile handles them. Cheap inconsistency to fix.
+
 ## 2026-07-27m — The regression guard was never deterministic: it was the line defect
 
 Chasing why all seven baselines drifted found the answer, and it corrects two
