@@ -1,5 +1,40 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27v — Block Details was bound to the empty model at startup
+
+Reported: no block details, whatever is selected. **A regression from 27q**, mine.
+
+`onLoadBegin()` and `onLoadComplete()` each call `swapModels()`, which **toggles**
+the views between the real models and the empty ones that keep them quiet during
+a load. The starter-scene path emitted only `completeLoading` — added in 27q to
+fix a stale camera — so that toggle ran an **odd** number of times and left
+`tree`, `header`, `list` and `kfmtree` bound to `nifEmpty`.
+
+The tell was in the screenshot: Block Details showed a header reading **version
+20.0.0.5, User Version 11, Num Blocks 0** for a document that is 20.2.0.7 / 12
+with 4 blocks. Not a wrong root — a different model. Selection was never broken;
+`setRootIndex()` was being called on a tree pointing at the wrong model.
+
+Fix: emit `beginLoading` before building and `completeLoading` after, in that
+order, exactly as `loadFile()` does, so the pair balances. `completeLoading` now
+carries the real success flag rather than an unconditional `true`.
+
+Verified with a whole-window grab: Block Details reads **20.2.0.7 / 12 /
+Num Blocks 4**.
+
+**Lesson: `swapModels()` is a toggle with no idempotence and no assertion.** Any
+future path that fabricates a document must emit both signals or call neither.
+Worth giving it an explicit `bool showEmpty` argument at some point so an
+unbalanced call cannot silently invert the UI.
+
+Also: `WW_UI_SHOT` no longer requires a file name, and is exempt from the
+startup-cube guard alongside `WW_STARTER_SHOT`. The starter document emits
+`completeLoading` now, so the whole-window harness works on the startup scene —
+which is the only way to eyeball the docks in that state, and how this was
+confirmed.
+
+Render regression 7/7 identical.
+
 ## 2026-07-27u — The black cube: an unwritten bitangent, and another NaN
 
 Closes the item 27t left open. **The starter scene never wrote Bitangent X/Y/Z.**

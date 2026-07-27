@@ -425,7 +425,8 @@ static bool startupCubeWanted()
 {
 	// WW_STARTER_SHOT is the harness FOR this path, so it is the one WW_ variable
 	// that must not switch it off.
-	if ( !qEnvironmentVariableIsSet( "WW_STARTER_SHOT" ) ) {
+	if ( !qEnvironmentVariableIsSet( "WW_STARTER_SHOT" )
+		&& !qEnvironmentVariableIsSet( "WW_UI_SHOT" ) ) {
 		const QStringList envKeys = QProcessEnvironment::systemEnvironment().keys();
 		for ( const QString & key : envKeys ) {
 			if ( key.startsWith( QLatin1String( "WW_" ) ) )
@@ -3388,7 +3389,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	// grab the whole main window (toolbars + docks) to ww_ui_shot.png and quit
 	// — used to eyeball toolbar/menu changes offscreen (run with
 	// -platform offscreen so nothing pops onto the desktop).
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_UI_SHOT" ) ) {
+	// No fname requirement: the starter document emits completeLoading too, so
+	// this now works on the startup scene, which is the only way to eyeball the
+	// docks in that state.
+	if ( qEnvironmentVariableIsSet( "WW_UI_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2500, skope, [skope]() {
 				// WW_UI_SHOT_DOCK=<objectName> opens that dock before the grab.
@@ -3818,20 +3822,29 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		// its vertex layout and material.
 		NifModel * nif = skope->getNifModel();
 		QString error;
-		if ( nif && nifCreateStarterScene( nif, STARTER_CUBE_SIZE, &error ) ) {
+		/* Bracket the build in beginLoading/completeLoading, exactly as loadFile()
+		 * does, and in that order.
+		 *
+		 * Everything that reacts to a document arriving hangs off these, and
+		 * building the model directly skips all of it. But they MUST be paired:
+		 * onLoadBegin() and onLoadComplete() each call swapModels(), which TOGGLES
+		 * the views between the real models and the empty ones used to keep them
+		 * quiet during a load. Emitting only completeLoading — which is what this
+		 * did at first — runs that toggle an odd number of times and leaves the
+		 * views bound to nifEmpty, so Block Details showed a header with
+		 * "Num Blocks 0" and a stale version instead of the selected block.
+		 */
+		QString noFile;
+		emit skope->beginLoading();
+		const bool built = nif && nifCreateStarterScene( nif, STARTER_CUBE_SIZE, &error );
+		if ( built && nif->undoStack ) {
 			// the starting state, not an edit: an untouched window must not ask
 			// about saving on close
-			if ( nif->undoStack ) {
-				nif->undoStack->clear();
-				nif->undoStack->setClean();
-			}
-			// Everything that reacts to a document arriving hangs off
-			// completeLoading, and building the model directly skips all of it —
-			// which showed up as the cube drawing unshaded black where the same
-			// file, opened normally, draws in the viewport's no-texture magenta.
-			// An empty file name is the truthful argument: there is no file.
-			QString noFile;
-			emit skope->completeLoading( true, noFile );
+			nif->undoStack->clear();
+			nif->undoStack->setClean();
+		}
+		emit skope->completeLoading( built, noFile );
+		if ( built ) {
 			if ( skope->ogl ) {
 				skope->ogl->updateScene();
 				skope->ogl->frameAll();
