@@ -195,13 +195,20 @@ static void decodeConvexLike( Reader & r, qsizetype B, const QString & className
 		payload = fieldOff + r.u16( fieldOff + 2 );
 	};
 
-	quint16 nv, np, nf, ni;
-	qsizetype pv, pp, pf, pi;
+	/* Read the VERTEX array first, and nothing else yet.
+	 *
+	 * The plane / face / index relArrays at +0x40, +0x44 and +0x48 only exist on a
+	 * polytope. On a sphere the vertex payload starts at +0x30 + 0x10, which IS
+	 * +0x40, so those three fields are vertex bytes reinterpreted as counts -- on
+	 * the Deathclaw ragdoll +0x44 reads 0x7f20 = 32544 faces. Reading them up
+	 * front meant the shared sanity check tripped and the function returned before
+	 * the sphere branch below could ever run, so every hknpSphereShape decoded to
+	 * nothing.
+	 */
+	quint16 nv;
+	qsizetype pv;
 	relArray( B + 0x30, nv, pv );
-	relArray( B + 0x40, np, pp );
-	relArray( B + 0x44, nf, pf );
-	relArray( B + 0x48, ni, pi );
-	if ( nv > 4096 || nf > 4096 || ni > 16384 )
+	if ( nv > 4096 )
 		return;	// sanity: not the layout we expect
 
 	QVector<Vector3> raw;
@@ -241,6 +248,15 @@ static void decodeConvexLike( Reader & r, qsizetype B, const QString & className
 		synthCapsule( shape, a, b, shape.primRadius );
 		return;
 	}
+
+	// Polytope-only arrays, read after the primitives have returned above.
+	quint16 np, nf, ni;
+	qsizetype pp, pf, pi;
+	relArray( B + 0x40, np, pp );
+	relArray( B + 0x44, nf, pf );
+	relArray( B + 0x48, ni, pi );
+	if ( nf > 4096 || ni > 16384 )
+		return;
 
 	shape.verts = raw;
 	for ( int i = 0; i < np; i++ )
@@ -697,6 +713,14 @@ HknpSystem hknpDecode( const QByteArray & data )
 			shape.bodyId = bp.second.id;
 			applyResolvedBodyMaterial( shape, shape.bodyId );
 			sys.shapes.append( shape );
+		} else {
+			// Say so. A body's shape that fails here used to vanish without a
+			// trace - pass 3 reports its failures but pass 2 did not - which is
+			// exactly how the broken sphere decode stayed invisible once bodies
+			// started resolving and spheres stopped reaching pass 3.
+			const QString cls = objClass.value( bp.first );
+			if ( !cls.isEmpty() && !sys.unknownShapes.contains( cls ) )
+				sys.unknownShapes.append( cls );
 		}
 	}
 	for ( const auto & bp : bodies )
