@@ -1391,16 +1391,28 @@ void PSysSimController::updateTime( float time )
  *  ProcLightningController - preview for BSProceduralLightningController
  */
 
+//! xorshift32 in [0, range). Deterministic given the state, unlike random().
+static float tlBoltRandom( quint32 & state, float range )
+{
+	state ^= state << 13;
+	state ^= state >> 17;
+	state ^= state << 5;
+	return float( double( state ) * ( 1.0 / 4294967296.0 ) ) * range;
+}
+
 //! Midpoint-displacement jitter on the v/w components of a (t,v,w) polyline
-static void tlMidpointJag( QVector<Vector3> & pts, int a, int c, float amp )
+static void tlMidpointJag( QVector<Vector3> & pts, int a, int c, float amp, quint32 & rng )
 {
 	int m = ( a + c ) / 2;
 	if ( m == a || m == c )
 		return;
-	pts[m][1] = ( pts[a][1] + pts[c][1] ) * 0.5f + ( random( 2.0f ) - 1.0f ) * amp;
-	pts[m][2] = ( pts[a][2] + pts[c][2] ) * 0.5f + ( random( 2.0f ) - 1.0f ) * amp;
-	tlMidpointJag( pts, a, m, amp * 0.55f );
-	tlMidpointJag( pts, m, c, amp * 0.55f );
+	pts[m][1] = ( pts[a][1] + pts[c][1] ) * 0.5f + ( tlBoltRandom( rng, 2.0f ) - 1.0f ) * amp;
+	pts[m][2] = ( pts[a][2] + pts[c][2] ) * 0.5f + ( tlBoltRandom( rng, 2.0f ) - 1.0f ) * amp;
+	// Classic midpoint displacement halves the amplitude per level. 0.55 was a
+	// guess that barely showed at 3 levels; at the correct 7 it compounds into a
+	// visibly too-noisy bolt.
+	tlMidpointJag( pts, a, m, amp * 0.5f, rng );
+	tlMidpointJag( pts, m, c, amp * 0.5f, rng );
 }
 
 ProcLightningController::ProcLightningController( Node * node, const QModelIndex & index )
@@ -1415,6 +1427,9 @@ bool ProcLightningController::update( const NifModel * nif, const QModelIndex & 
 
 	subdivisions = std::min( std::max( nif->get<int>( iBlock, "Subdivisions" ), 1 ), 12 );
 	numBranches = std::min( std::max( nif->get<int>( iBlock, "Num Branches" ), 0 ), 10 );
+	numBranchesVar = std::min( std::max( nif->get<int>( iBlock, "Num Branches Variation" ), 0 ), 10 );
+	boltLength = nif->get<float>( iBlock, "Length" );
+	boltLengthVar = nif->get<float>( iBlock, "Length Variation" );
 	width = nif->get<float>( iBlock, "Width" );
 	childWidthMult = nif->get<float>( iBlock, "Child Width Mult" );
 	arcOffset = nif->get<float>( iBlock, "Arc Offset" );
@@ -1423,10 +1438,39 @@ bool ProcLightningController::update( const NifModel * nif, const QModelIndex & 
 	animateArc = nif->get<bool>( iBlock, "Animate Arc Offset" );
 	iShaderProp = nif->getBlockIndex( nif->getLink( iBlock, "Shader Property" ) );
 
+	// Interpolators 3-9 animate the generation parameters. They are -1 on the
+	// shieldtesla bolts, but were previously not read at all, so any asset that
+	// animates width/branching/arc offset rendered with static values.
+	// NiBlendFloatInterpolator stubs are skipped deliberately: like
+	// Generation/Mutation their real keys live in the sequences, and there is no
+	// asset here to verify that path against — a wrong guess would animate the
+	// bolt incorrectly rather than leave it static.
+	auto paramCurve = [nif, this]( const char * field ) {
+		ParamCurve pc;
+		QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iBlock, field ), "NiFloatInterpolator" );
+		if ( iInterp.isValid() ) {
+			QModelIndex iData = nif->getBlockIndex( nif->getLink( iInterp, "Data" ), "NiFloatData" );
+			if ( iData.isValid() ) {
+				pc.keys = nif->getIndex( iData, "Data" );
+				pc.valid = pc.keys.isValid();
+			}
+		}
+		return pc;
+	};
+	cSubdiv    = paramCurve( "Interpolator 3: Subdivision" );
+	cBranches  = paramCurve( "Interpolator 4: Num Branches" );
+	cBranchVar = paramCurve( "Interpolator 5: Num Branches Var" );
+	cLength    = paramCurve( "Interpolator 6: Length" );
+	cLengthVar = paramCurve( "Interpolator 7: Length Var" );
+	cWidth     = paramCurve( "Interpolator 8: Width" );
+	cArc       = paramCurve( "Interpolator 9: Arc Offset" );
+
 	// the Generation / Mutation bool keys live in the controller sequences
 	// (the controller itself only holds blend interpolators)
 	genKeys.clear();
 	mutKeys.clear();
+	for ( int k = 0; k < PCount; k++ )
+		paramKeys[k].clear();
 	int myBlock = nif->getBlockNumber( iBlock );
 	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 		QModelIndex iSeq = nif->getBlockIndex( b );
@@ -1445,12 +1489,48 @@ bool ProcLightningController::update( const NifModel * nif, const QModelIndex & 
 			SeqKeys sk;
 			sk.seq = seqName;
 			sk.keys = nif->getIndex( iBD, "Data" );
-			if ( nif->resolveString( iRow, "Interpolator ID" ) == QLatin1String( "Mutation" ) )
+			// Partition by Interpolator ID. Anything that is neither Mutation nor
+			// Generation is a sequence-driven PARAMETER curve (Width, Arc
+			// Offset, ...); it used to fall into genKeys, where an unrelated
+			// float curve would switch the whole bolt on and off as if it were
+			// the Generation flag. An empty ID is Generation — that is how the
+			// shieldtesla sequences author it.
+			const QString interpId = nif->resolveString( iRow, "Interpolator ID" );
+			if ( interpId == QLatin1String( "Mutation" ) ) {
 				mutKeys.append( sk );
-			else
+			} else if ( interpId.isEmpty() || interpId == QLatin1String( "Generation" ) ) {
 				genKeys.append( sk );
+			} else {
+				// A named parameter curve. Match loosely on the controller's own
+				// field names — authoring tools spell these with and without
+				// spaces — and drop anything unrecognised rather than guessing.
+				static const char * const paramIds[PCount] = {
+					"subdivision", "numbranches", "numbranchesvar",
+					"length", "lengthvar", "width", "arcoffset"
+				};
+				QString norm = interpId;
+				norm.remove( QLatin1Char( ' ' ) ).remove( QLatin1Char( '_' ) );
+				norm = norm.toLower();
+				for ( int k = 0; k < PCount; k++ ) {
+					if ( norm == QLatin1String( paramIds[k] ) ) {
+						paramKeys[k].append( sk );
+						break;
+					}
+				}
+			}
 		}
 	}
+
+	rngSeed = quint32( nif->getBlockNumber( iBlock ) + 1 );
+
+	// seed the per-frame values so frame 1 is right even without curves
+	effSubdiv = subdivisions;
+	effBranches = numBranches;
+	effBranchVar = numBranchesVar;
+	effLength = boltLength;
+	effLengthVar = boltLengthVar;
+	effArc = arcOffset;
+	effWidth = width;
 
 	nodesResolved = false;	// the scene graph may be mid-rebuild
 	bolts.clear();
@@ -1459,36 +1539,105 @@ bool ProcLightningController::update( const NifModel * nif, const QModelIndex & 
 	return true;
 }
 
-void ProcLightningController::regenerate()
+void ProcLightningController::regenerate( float time )
 {
 	bolts.clear();
 
-	// point count: power-of-two segments for the midpoint subdivision
+	// Subdivisions is a SEGMENT COUNT, not a recursion depth. Reading it as a
+	// depth (2^7 = 128 segments) was tested and is wrong: these bolts are ~25
+	// units end to end and 4 units wide, so 128 segments makes each quad 0.2
+	// units long by 4 wide — 20x wider than long. Consecutive quads then fan out
+	// as separate blades instead of reading as a beam, which is exactly what
+	// "the bolts do not connect to each other" looked like, and it got worse the
+	// wider the bolt. Round up to a power of two for the midpoint subdivision.
 	int nSeg = 4;
-	while ( nSeg < subdivisions + 1 && nSeg < 32 )
+	while ( nSeg < effSubdiv + 1 && nSeg < 32 )
 		nSeg *= 2;
 
-	auto makeBolt = []( Bolt & b, int segs, float amp ) {
+	// Arc Offset is the bolt's maximum excursion from the straight line, not the
+	// FIRST level's amplitude. Feeding it in raw compounded it down the
+	// recursion (12.5 + 6.25 + 3.125 + ... ~= 2x Arc Offset), so on these bolts
+	// -- 25.3 units end to end with Arc Offset 12.5 -- the lateral wander could
+	// equal the whole bolt length. The path doubled back on itself constantly,
+	// which both stops it reading as a bolt between two points and flips the
+	// ribbon's perpendicular at every reversal. Normalise so the accumulated
+	// displacement sums to Arc Offset instead.
+	// Re-seed from (controller, mutation tick): the tick is the time quantised to
+	// the mutation cadence, so scrubbing back to a time redraws exactly what was
+	// there before and two runs of the same frame agree.
+	const quint32 tick = quint32( std::max( time, 0.0f ) * 24.0f );
+	rngState = ( rngSeed * 2654435761u ) ^ ( tick * 2246822519u );
+	if ( !rngState )
+		rngState = 1;	// xorshift cannot escape zero
+
+	auto makeBolt = [this]( Bolt & b, int segs, float amp ) {
 		b.pts.resize( segs + 1 );
 		for ( int i = 0; i <= segs; i++ )
 			b.pts[i] = Vector3( float( i ) / float( segs ), 0.0f, 0.0f );
-		tlMidpointJag( b.pts, 0, segs, amp );
+
+		int levels = 0;
+		for ( int s = segs; s > 1; s >>= 1 )
+			levels++;
+		// sum of amp * 0.5^k for k in [0, levels) -> normalise to reach `amp`
+		float series = 2.0f * ( 1.0f - std::pow( 0.5f, float( std::max( levels, 1 ) ) ) );
+		tlMidpointJag( b.pts, 0, segs, amp / std::max( series, 1.0e-3f ), rngState );
 	};
 
 	Bolt main;
-	makeBolt( main, nSeg, arcOffset );
+	makeBolt( main, nSeg, effArc );
 	bolts.append( main );
 
-	for ( int k = 0; k < numBranches; k++ ) {
+	// Num Branches Variation is a +/- spread around Num Branches, re-rolled on
+	// every mutation (was ignored: the count was pinned to Num Branches).
+	int nBranch = effBranches;
+	if ( effBranchVar > 0 )
+		nBranch += int( tlBoltRandom( rngState, float( effBranchVar * 2 + 1 ) ) ) - effBranchVar;
+	nBranch = std::min( std::max( nBranch, 0 ), 20 );
+
+	const int firstChild = bolts.size();
+	for ( int k = 0; k < nBranch; k++ ) {
 		Bolt br;
-		br.rootT = 0.2f + random( 0.6f );
+		br.parent = 0;
+		br.rootT = 0.2f + tlBoltRandom( rngState, 0.6f );
 		// branch direction in the (axis, v, w) frame: forward-biased
-		br.dir = Vector3( 0.5f + random( 0.5f ), random( 2.0f ) - 1.0f, random( 2.0f ) - 1.0f );
+		br.dir = Vector3( 0.5f + tlBoltRandom( rngState, 0.5f ),
+		                  tlBoltRandom( rngState, 2.0f ) - 1.0f,
+		                  tlBoltRandom( rngState, 2.0f ) - 1.0f );
 		br.dir.normalize();
-		br.lenMul = 0.2f + random( 0.25f );
+		// Branch length stays a FRACTION of the main bolt. Using the authored
+		// Length here was tried and is wrong: Length is 32 on bolts that span
+		// 25.3 units, so branches came out longer than the bolt itself and shot
+		// off in directions with nothing to do with the end node. Whatever
+		// Length means (most likely the main bolt length for controllers with no
+		// _Start/_End pair, where there is no node distance to span), it is not
+		// this. Child Width Mult 0.5 agrees that children are subordinate.
+		br.lenMul = 0.2f + tlBoltRandom( rngState, 0.25f );
 		br.widthMul = childWidthMult;
-		makeBolt( br, std::max( nSeg / 2, 4 ), arcOffset * 0.6f );
+		makeBolt( br, std::max( nSeg / 2, 4 ), effArc * 0.6f );
 		bolts.append( br );
+	}
+
+	// Second level: forks off the branches, with Child Width Mult compounding
+	// per level. That compounding is what makes it read as forking lightning
+	// rather than a fan of equal-weight strands, and it is presumably why the
+	// field is a MULTIPLIER rather than an absolute child width. Only about half
+	// the branches fork, and depth stops at 2 — a third level costs segments for
+	// detail invisible at bolt scale.
+	const int lastChild = bolts.size();
+	for ( int k = firstChild; k < lastChild; k++ ) {
+		if ( tlBoltRandom( rngState, 1.0f ) < 0.5f )
+			continue;
+		Bolt gr;
+		gr.parent = k;
+		gr.rootT = 0.3f + tlBoltRandom( rngState, 0.5f );
+		gr.dir = Vector3( 0.5f + tlBoltRandom( rngState, 0.5f ),
+		                  tlBoltRandom( rngState, 2.0f ) - 1.0f,
+		                  tlBoltRandom( rngState, 2.0f ) - 1.0f );
+		gr.dir.normalize();
+		gr.lenMul = 0.3f + tlBoltRandom( rngState, 0.3f );
+		gr.widthMul = childWidthMult * childWidthMult;
+		makeBolt( gr, std::max( nSeg / 4, 4 ), effArc * 0.35f );
+		bolts.append( gr );
 	}
 }
 
@@ -1520,7 +1669,12 @@ void ProcLightningController::updateTime( float time )
 			}
 		}
 	}
-	if ( !( startNode && endNode ) )
+	// A rig that does not follow the *_Start / *_End convention used to render
+	// NOTHING at all. Fall back to emitting along the target's own axis for
+	// Length — which is very likely what Length is for, since it is meaningless
+	// when two nodes already define the span.
+	spanNodes = ( startNode && endNode );
+	if ( !spanNodes && !( target && boltLength > 0.0f ) )
 		return;
 
 	auto evalKeys = [this, time]( QVector<SeqKeys> & list, bool dflt ) {
@@ -1545,10 +1699,56 @@ void ProcLightningController::updateTime( float time )
 		return;
 	}
 
+	// Interpolators 3-9 for this frame; a change in a shape parameter forces a
+	// rebuild even when the bolt is not mutating.
+	// A direct NiFloatInterpolator wins; otherwise fall back to the sequence's
+	// keys for that parameter (the NiBlendFloatInterpolator-stub case).
+	auto evalCurve = [this, time]( ParamCurve & pc, ParamId pid, float dflt ) {
+		if ( pc.valid ) {
+			float v = dflt;
+			interpolate( v, pc.keys, time, pc.idx );
+			return v;
+		}
+		QVector<SeqKeys> & seq = paramKeys[pid];
+		if ( !seq.isEmpty() ) {
+			SeqKeys * sk = &seq[0];
+			const QString & curSeq = target->scene->animGroup;
+			for ( auto & c : seq ) {
+				if ( c.seq == curSeq ) {
+					sk = &c;
+					break;
+				}
+			}
+			if ( sk->keys.isValid() ) {
+				float v = dflt;
+				interpolate( v, sk->keys, time, sk->idx );
+				return v;
+			}
+		}
+		return dflt;
+	};
+	auto asInt = []( float f, int lo, int hi ) {
+		return std::min( std::max( int( f + 0.5f ), lo ), hi );
+	};
+	int pSubdiv = asInt( evalCurve( cSubdiv, PSubdiv, float( subdivisions ) ), 1, 12 );
+	int pBranches = asInt( evalCurve( cBranches, PBranches, float( numBranches ) ), 0, 10 );
+	int pBranchVar = asInt( evalCurve( cBranchVar, PBranchVar, float( numBranchesVar ) ), 0, 10 );
+	float pLength = evalCurve( cLength, PLength, boltLength );
+	float pLengthVar = evalCurve( cLengthVar, PLengthVar, boltLengthVar );
+	float pArc = evalCurve( cArc, PArc, arcOffset );
+	effWidth = evalCurve( cWidth, PWidth, width );
+
+	const bool paramsChanged = pSubdiv != effSubdiv || pBranches != effBranches
+		|| pBranchVar != effBranchVar || pLength != effLength
+		|| pLengthVar != effLengthVar || pArc != effArc;
+	effSubdiv = pSubdiv; effBranches = pBranches; effBranchVar = pBranchVar;
+	effLength = pLength; effLengthVar = pLengthVar; effArc = pArc;
+
 	bool mut = evalKeys( mutKeys, true ) && animateArc;
-	if ( bolts.isEmpty() || ( mut && std::fabs( time - lastMutation ) >= ( 1.0f / 24.0f ) ) ) {
+	if ( bolts.isEmpty() || paramsChanged
+		|| ( mut && std::fabs( time - lastMutation ) >= ( 1.0f / 24.0f ) ) ) {
 		lastMutation = time;
-		regenerate();
+		regenerate( time );
 	}
 
 	visible = true;
@@ -1556,14 +1756,25 @@ void ProcLightningController::updateTime( float time )
 
 void ProcLightningController::drawPreview()
 {
-	if ( !( visible && startNode && endNode && target && target->scene ) )
+	if ( !( visible && target && target->scene ) )
 		return;
 	Scene * sc = target->scene;
 	if ( sc->selecting || bolts.isEmpty() )
 		return;
 
-	Vector3 A = startNode->worldTrans().translation;
-	Vector3 B = endNode->worldTrans().translation;
+	Vector3 A, B;
+	if ( spanNodes ) {
+		A = startNode->worldTrans().translation;
+		B = endNode->worldTrans().translation;
+	} else {
+		// No end node to reach: emit along the target's local +Y for Length.
+		// +Y is the authored bolt axis on the rigs that DO have a pair — the
+		// shieldtesla End sits at local (0, +25, 0) from its Start — so the same
+		// convention is the best available guess for rigs without one.
+		const Transform & tt = target->worldTrans();
+		A = tt.translation;
+		B = A + tt.rotation * Vector3( 0.0f, effLength, 0.0f );
+	}
 	Vector3 axis = B - A;
 	float len = axis.length();
 	if ( len < 1.0e-4f )
@@ -1592,9 +1803,26 @@ void ProcLightningController::drawPreview()
 			               std::min( ec[2] * m, 1.0f ), 1.0f );
 	}
 
-	auto boltPoint = [&]( const Bolt & b, int i, const Vector3 & root, const Vector3 & bDir, float bLen ) {
+	// The jag lives in the plane PERPENDICULAR to the bolt's own direction, so
+	// each bolt needs its own frame. Branches used to be displaced along the
+	// main bolt's v/w: a branch heading along v had its "lateral" offset pushed
+	// down its own axis, so it folded back on itself and read as disconnected
+	// spikes instead of a continuous bolt.
+	auto boltPoint = [&]( const Bolt & b, int i, const Vector3 & root, const Vector3 & bDir,
+	                      const Vector3 & bv, const Vector3 & bw, float bLen ) {
 		const Vector3 & p = b.pts.at( i );
-		return root + bDir * ( p[0] * bLen ) + v * p[1] + w * p[2];
+		return root + bDir * ( p[0] * bLen ) + bv * p[1] + bw * p[2];
+	};
+
+	//! orthonormal (v, w) pair perpendicular to dir
+	auto frameFor = []( const Vector3 & dir, Vector3 & fv, Vector3 & fw ) {
+		Vector3 up = ( std::fabs( dir[2] ) < 0.9f ) ? Vector3( 0.0f, 0.0f, 1.0f ) : Vector3( 1.0f, 0.0f, 0.0f );
+		fv = Vector3::crossproduct( dir, up );
+		if ( fv.length() < 1.0e-6f )
+			fv = Vector3( 1.0f, 0.0f, 0.0f );
+		fv.normalize();
+		fw = Vector3::crossproduct( dir, fv );
+		fw.normalize();
 	};
 
 	QVector<Vector3> tris;
@@ -1612,7 +1840,20 @@ void ProcLightningController::drawPreview()
 		uvSclU = shaderProp->uvScale.x;
 		uvSclV = shaderProp->uvScale.y;
 	}
-	const float texAspect = 8.0f;	// beam sheets are ~8x taller than wide
+	// Beam sheets are tall and narrow, and the ratio sets how often the texture
+	// repeats along the bolt. Take it from the ACTUAL texture rather than
+	// assuming 8:1 — a wrong aspect is invisible as "wrong tiling density",
+	// which is impossible to guess at from a screenshot.
+	float texAspect = 8.0f;
+	if ( shaderProp && sc->textures ) {
+		QString texName = shaderProp->fileName( 0 );
+		if ( !texName.isEmpty() ) {
+			if ( const TexCache::Tex::ImageInfo * ti = sc->textures->getTextureInfo( QStringView( texName ) ) ) {
+				if ( ti->width > 0 && ti->height > 0 )
+					texAspect = float( ti->height ) / float( ti->width );
+			}
+		}
+	}
 
 	// a connected ribbon per bolt: joints share mitered vertices so the
 	// segments connect geometrically instead of leaving notches at bends
@@ -1621,18 +1862,53 @@ void ProcLightningController::drawPreview()
 		int n = wpts.size();
 		if ( n < 2 )
 			return;
-		float vTiles = std::max( bLen / std::max( halfWidth * 2.0f * texAspect, 0.1f ), 0.25f );
 		float u0 = uvOffU, u1 = uvOffU + uvSclU;
+
+		// V follows ARC LENGTH along the ribbon, not the straight-axis parameter
+		// t. Driving V from t only looked right while the bolt was nearly
+		// straight (the old 8-segment version): at the correct subdivision the
+		// jagged path is much longer than the axis, so a t-based V smeared one
+		// span of texture over the whole zigzag — and because each segment took
+		// its V straight from t, lateral jumps stretched V unevenly and the
+		// tiles never lined up.
+		QVector<float> arc( n );
+		arc[0] = 0.0f;
+		for ( int i = 1; i < n; i++ )
+			arc[i] = arc[i - 1] + ( wpts.at( i ) - wpts.at( i - 1 ) ).length();
+		float totalLen = arc.at( n - 1 );
+		if ( totalLen < 1.0e-4f )
+			totalLen = std::max( bLen, 1.0e-4f );	// degenerate: fall back to the axis
+
+		// One tile every (width * aspect) world units, rounded to a WHOLE number
+		// of tiles so the strip wraps seamlessly instead of ending mid-texture.
+		float period = std::max( halfWidth * 2.0f * texAspect, 0.1f );
+		float vTiles = std::max( std::round( totalLen / period ), 1.0f );
 
 		// averaged (mitered) billboard perpendicular per point
 		QVector<Vector3> perps( n );
 		for ( int i = 0; i < n; i++ ) {
 			Vector3 d = wpts.at( std::min( i + 1, n - 1 ) ) - wpts.at( std::max( i - 1, 0 ) );
-			Vector3 perp = Vector3::crossproduct( camZ, d );
-			if ( perp.length() < 1.0e-6f )
+			// |cross(camZ, d)| is sin(angle between the segment and the view
+			// axis). Near zero the segment points AT the camera and its width
+			// direction is undefined — normalising it there amplifies noise into
+			// a random direction, so the strip spins and tears at exactly those
+			// segments. That is the "bolts do not connect on some angles" break:
+			// it depends on the view, not on the bolt. Below ~15 degrees, hold
+			// the previous segment's side instead of recomputing.
+			Vector3 dn = d;
+			dn.normalize();
+			Vector3 perp = Vector3::crossproduct( camZ, dn );
+			float sinA = perp.length();
+			if ( sinA < 0.25f )
 				perp = ( i > 0 ) ? perps.at( i - 1 ) : Vector3( 0, 0, 1 ) * halfWidth;
 			else
-				perp = perp * ( halfWidth / perp.length() );
+				perp = perp * ( halfWidth / sinA );
+			// Keep the ribbon's winding consistent. cross(camZ, d) flips sign
+			// wherever the jagged path doubles back, which twists the strip into
+			// a bowtie and pinches it to nothing at the crossing — reads as the
+			// geometry coming apart. Carry the previous side forward instead.
+			if ( i > 0 && Vector3::dotproduct( perp, perps.at( i - 1 ) ) < 0.0f )
+				perp = -perp;
 			perps[i] = perp;
 		}
 
@@ -1641,11 +1917,13 @@ void ProcLightningController::drawPreview()
 			const Vector3 & p1 = wpts.at( i + 1 );
 			const Vector3 & q0 = perps.at( i );
 			const Vector3 & q1 = perps.at( i + 1 );
-			float t0 = tvals.at( i ), t1 = tvals.at( i + 1 );
-			float a0 = fade ? ( 1.0f - t0 ) : 1.0f;
-			float a1 = fade ? ( 1.0f - t1 ) : 1.0f;
-			float v0 = uvOffV + uvSclV * ( t0 * vTiles );
-			float v1 = uvOffV + uvSclV * ( t1 * vTiles );
+			// normalized position along the DRAWN ribbon: drives both the tiling
+			// and the tip fade, so neither depends on how jagged the bolt is
+			float s0 = arc.at( i ) / totalLen, s1 = arc.at( i + 1 ) / totalLen;
+			float a0 = fade ? ( 1.0f - s0 ) : 1.0f;
+			float a1 = fade ? ( 1.0f - s1 ) : 1.0f;
+			float v0 = uvOffV + uvSclV * ( s0 * vTiles );
+			float v1 = uvOffV + uvSclV * ( s1 * vTiles );
 			FloatVector4 c0( col[0], col[1], col[2], col[3] * a0 );
 			FloatVector4 c1( col[0], col[1], col[2], col[3] * a1 );
 			tris << ( p0 + q0 ) << ( p0 - q0 ) << ( p1 + q1 );
@@ -1657,43 +1935,62 @@ void ProcLightningController::drawPreview()
 		}
 	};
 
-	// main bolt world polyline first: branches must root on the JITTERED
-	// main bolt, not on the straight axis, or they float next to it
-	QVector<Vector3> mainPts;
-	QVector<float> mainT;
-	{
-		const Bolt & b = bolts.first();
-		for ( int i = 0; i < b.pts.size(); i++ ) {
-			mainPts.append( boltPoint( b, i, A, axis, len ) );
-			mainT.append( b.pts.at( i )[0] );
-		}
-	}
-	auto mainAt = [&]( float t ) {
-		int nSeg = mainPts.size() - 1;
+	// Every bolt's world polyline, parents before children (regenerate() appends
+	// in that order). A child roots on its parent's JITTERED path and takes its
+	// frame from the parent's TANGENT there, so a branch-of-a-branch nests off
+	// the strand it grew from instead of being laid out in the main bolt's frame.
+	QVector<QVector<Vector3>> polys( bolts.size() );
+	QVector<float> boltLens( bolts.size(), 0.0f );
+
+	auto sampleAt = []( const QVector<Vector3> & pts, float t, Vector3 & pos, Vector3 & tangent ) {
+		int nSeg = pts.size() - 1;
 		float f = std::min( std::max( t, 0.0f ), 1.0f ) * float( nSeg );
 		int i = std::min( int( f ), nSeg - 1 );
 		float u = f - float( i );
-		return mainPts.at( i ) + ( mainPts.at( i + 1 ) - mainPts.at( i ) ) * u;
+		pos = pts.at( i ) + ( pts.at( i + 1 ) - pts.at( i ) ) * u;
+		tangent = pts.at( i + 1 ) - pts.at( i );
+		if ( tangent.length() < 1.0e-6f )
+			tangent = Vector3( 0.0f, 0.0f, 1.0f );
+		tangent.normalize();
 	};
 
 	for ( int bi = 0; bi < bolts.size(); bi++ ) {
 		const Bolt & b = bolts.at( bi );
-		float hw = std::max( width * b.widthMul * 0.5f, 0.1f );
-		if ( bi == 0 ) {
-			addBolt( mainPts, mainT, hw, len, tint, fadeMain );
-			continue;
+		Vector3 root, bDir, bv, bw;
+		float bLen;
+
+		if ( b.parent < 0 ) {
+			root = A;
+			bDir = axis;
+			bv = v;
+			bw = w;
+			bLen = len;
+		} else {
+			const QVector<Vector3> & pp = polys.at( b.parent );
+			if ( pp.size() < 2 )
+				continue;	// parent was skipped; orphan a child rather than crash
+			Vector3 ptan;
+			sampleAt( pp, b.rootT, root, ptan );
+			Vector3 pv, pw;
+			frameFor( ptan, pv, pw );
+			bDir = ptan * b.dir[0] + pv * b.dir[1] + pw * b.dir[2];
+			bDir.normalize();
+			frameFor( bDir, bv, bw );
+			bLen = boltLens.at( b.parent ) * b.lenMul;
 		}
-		Vector3 root = mainAt( b.rootT );
-		Vector3 bDir = axis * b.dir[0] + v * b.dir[1] + w * b.dir[2];
-		bDir.normalize();
-		float bLen = len * b.lenMul;
-		QVector<Vector3> wpts;
+		boltLens[bi] = bLen;
+
+		QVector<Vector3> & wpts = polys[bi];
 		QVector<float> tvals;
+		wpts.reserve( b.pts.size() );
+		tvals.reserve( b.pts.size() );
 		for ( int i = 0; i < b.pts.size(); i++ ) {
-			wpts.append( boltPoint( b, i, root, bDir, bLen ) );
+			wpts.append( boltPoint( b, i, root, bDir, bv, bw, bLen ) );
 			tvals.append( b.pts.at( i )[0] );
 		}
-		addBolt( wpts, tvals, hw, bLen, tint, fadeChild );
+
+		float hw = std::max( effWidth * b.widthMul * 0.5f, 0.1f );
+		addBolt( wpts, tvals, hw, bLen, tint, ( b.parent < 0 ) ? fadeMain : fadeChild );
 	}
 
 	if ( tris.isEmpty() || !sc->renderer )

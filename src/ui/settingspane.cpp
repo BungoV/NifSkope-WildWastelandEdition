@@ -21,9 +21,11 @@
 #include <QListWidget>
 #include <QLocale>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QStringListModel>
 #include <QTimer>
 
@@ -314,6 +316,22 @@ SettingsGeneral::SettingsGeneral( QWidget * parent ) :
 	color( "Base Highlight", ui->colorHighlight, ui->highlight, colors[Highlight] );
 	color( "Text Highlight", ui->colorHighlightText, ui->highlightText, colors[HighlightText] );
 	color( "Bright Text", ui->colorBrightText, ui->brightText, colors[BrightText] );
+
+	// NifSkope library folder: Browse picks a directory. The line edit itself is
+	// read/written by the generic pane machinery (key Settings/Library/Library
+	// Folder — the same key the Pose Manager dock's Folder... button uses); an
+	// empty value falls back to the default in the dock.
+	connect( ui->btnLibraryBrowse, &QPushButton::clicked, this, [this]() {
+		const QString start = ui->libraryFolder->text().isEmpty()
+			? QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation )
+			: ui->libraryFolder->text();
+		const QString dir = QFileDialog::getExistingDirectory( this,
+			tr( "NifSkope library folder" ), start );
+		if ( !dir.isEmpty() ) {
+			ui->libraryFolder->setText( dir );
+			modifyPane();   // setText() doesn't emit textEdited; mark dirty by hand
+		}
+	} );
 }
 
 SettingsGeneral::~SettingsGeneral()

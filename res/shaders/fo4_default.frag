@@ -153,6 +153,22 @@ float OrenNayarFull(float NdotL, float NdotV, float LdotV, float roughness)
 	return L1 + L2;
 }
 
+// GGX/Trowbridge-Reitz normal distribution. Ported from the PBR Material
+// Editor's shader (D_GGX/G1 there) so the two tools agree on the spec/gloss
+// response instead of NifSkope using a normalized Phong lobe.
+float D_GGX( float NdotH, float alpha )
+{
+	float a2 = alpha * alpha;
+	float d = NdotH * NdotH * ( a2 - 1.0 ) + 1.0;
+	return a2 / max( M_PI * d * d, 0.0001 );
+}
+
+// Smith geometry term, one direction. k = (rough+1)^2/8 (the editor's split).
+float G1( float NdotX, float k )
+{
+	return NdotX / max( NdotX * ( 1.0 - k ) + k, 0.0001 );
+}
+
 // Schlick's Fresnel approximation
 float fresnelSchlick( float VdotH, float F0 )
 {
@@ -269,21 +285,38 @@ void main()
 		}
 	}
 
-	// Specular
+	// Specular — GGX + Smith + Schlick, matching the material editor's BRDF:
+	//   spec = D_GGX(NoH, a) * G1(NoL,k) * G1(NoV,k) * F / (4 NoL NoV)
+	// with a = rough^2 and k = (rough+1)^2/8.
 	float g = 1.0;
 	float s = 1.0;
 	float smoothness = clamp( specGlossiness, 0.0, 1.0 );
-	float specMask = 1.0;
-	vec3 spec = vec3(0.0);
 	if ( hasSpecularMap ) {
+		// G is gloss, R is the specular mask (measured, not assumed). A flat
+		// white G correctly falls back to the material's scalar smoothness.
 		g = specMap.g;
 		s = specMap.r;
 		smoothness = g * smoothness;
-		float fSpecularPower = exp2( smoothness * 10 + 1 );
-		specMask = s * specStrength;
-
-		spec = TorranceSparrow( NdotL0, NdotH, NdotV, VdotH, vec3(specMask), fSpecularPower, 0.2 ) * NdotL0 * D.rgb * specColor;
 	}
+	// Specular is no longer gated on hasSpecularMap: a material with only the
+	// scalar Smoothness/Specular Strength authored used to render completely
+	// matte, which is not what the game does with it.
+	float specMask = s * specStrength;
+
+	// FO4 encodes NO metallicity, so F0 is the dielectric constant and _s.R
+	// stays what it is authored as — a specular MASK, not a metalness channel.
+	// The old hardcoded F0 of 0.2 was ~5x too reflective for a dielectric; the
+	// editor's default is 0.04.
+	float rough = clamp( 1.0 - smoothness, 0.02, 1.0 );
+	float alphaR = rough * rough;
+	float kSmith = ( rough + 1.0 ) * ( rough + 1.0 ) * 0.125;
+	// fresnelSchlick honours the material's authored Fresnel Power rather than
+	// hardwiring ^5 — that field exists in FO4 and the editor has no equivalent.
+	float F = fresnelSchlick( VdotH, 0.04 );
+	vec3 spec = vec3( D_GGX( NdotH, alphaR )
+	                  * G1( NdotL0, kSmith ) * G1( NdotV, kSmith )
+	                  * F / max( 4.0 * NdotL0 * NdotV, 0.001 ) )
+	            * specMask * NdotL0 * D.rgb * specColor;
 
 	// Environment
 	vec4 cube = textureLod( CubeMap, reflectedWS, 8.0 - smoothness * 8.0 );
@@ -331,13 +364,17 @@ void main()
 		albedo *= tintColor;
 	}
 
-	// Diffuse
-	color.rgb = diffuse * albedo * D.rgb;
+	// Diffuse. (1 - F) is the editor's energy conservation: light reflected by
+	// the specular lobe is no longer also counted as diffuse, so glancing angles
+	// stop reading brighter than the material can physically be. The lobe shape
+	// stays Oren-Nayar rather than the editor's Lambert — it is roughness-aware
+	// and is what the rest of the FO4 path is tuned against.
+	color.rgb = diffuse * albedo * D.rgb * ( 1.0 - F );
 	// Ambient
 	color.rgb += A.rgb * albedo;
 	// Specular
 	color.rgb += spec;
-	color.rgb += A.rgb * specMask * fresnelSchlick( VdotH, 0.2 ) * (1.0 - NdotV) * D.rgb;
+	color.rgb += A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * (1.0 - NdotV) * D.rgb;
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
 

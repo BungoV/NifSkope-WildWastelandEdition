@@ -10,30 +10,158 @@
     Template Variables:
     ${theme} = Theme name ("dark", "light") for icon path customization
     ${rgb} = Highlight colors in an "R, G, B" string to combine with opacity in rgba()
+
+    Skin variables (substituted by NifSkope::loadTheme from skinVars[]):
+    ${bg} ${bgWin} ${bgBar} ${bgPanel} ${bgAlt} ${bgCard} ${bgInput}
+    ${bgBtn} ${bgBtnHover} ${bgBtnDown} ${bgHeader}
+    ${border} ${borderDim} ${borderStrong} ${focus} ${scroll} ${scrollHover}
+    ${text} ${textMuted} ${textBright} ${accent}
+
+    The dark column of that table is the PBR Material Editor's palette, so the
+    two tools read as one product. Do NOT hardcode hex here: the same sheet
+    serves the light theme, and every colour below must come from a variable
+    or palette() or the light theme turns into dark widgets on a light window.
+
+    Deliberately NOT styled here:
+    - fonts: the view font is a user setting (Settings > General), and a
+      font-family in QSS outranks setFont() — it would silently kill it.
+    - QWidget as a blanket selector: it fills custom-painted widgets (GL
+      container, timeline views) that draw their own background.
+    - ::item colours and checkbox ::indicator images: the palette already
+      carries Highlight/HighlightedText, and the item delegates paint their
+      own foregrounds (link blue, diff grey, pinned star). Leave both to
+      Fusion + the delegates so nothing fights over them.
 */
 
 
-/* Remove light border for dark theme */
+/* ---------------------------------------------------------------- surfaces */
+
+QMainWindow, QDialog { background: ${bgWin}; }
+QMenuBar, QToolBar, QStatusBar { background: ${bgBar}; color: ${text}; }
+QStatusBar { color: ${textMuted}; }
 QToolBar { border: 1px solid transparent; }
+QMenu { background: ${bgBar}; color: ${text}; border: 1px solid ${borderStrong}; }
+QMenu::item { padding: 4px 24px; }
+QMenuBar::item { padding: 4px 8px; background: transparent; }
+QMenuBar::item:selected, QMenu::item:selected { background: rgba(${rgb}, 255); }
+QMenu::item:disabled { color: ${textMuted}; }
+QMenu::separator { height: 1px; background: ${borderDim}; margin: 4px 8px; }
+
+/* Docks are the whole layout in NifSkope, so their titles carry the panel
+   plate the material editor uses for its side/preview panels. */
+QDockWidget {
+    titlebar-close-icon: url(:/wnd/close);
+    titlebar-normal-icon: url(:/wnd/undock);
+    color: ${textMuted};
+}
+QDockWidget::title {
+    background: ${bgPanel};
+    color: ${textMuted};
+    padding: 4px 6px;
+    text-align: left;
+}
+QMainWindow::separator { background: ${borderStrong}; width: 3px; height: 3px; }
+QSplitter::handle { background: ${borderStrong}; width: 2px; height: 2px; }
+
+QScrollArea, QAbstractScrollArea { border: none; }
+QFrame[frameShape="4"], QFrame[frameShape="5"] { color: ${borderDim}; }
 
 /* Fix tooltip display */
-QToolTip { color: #ffffff; background-color: #555; border: 1px solid transparent; }
+QToolTip { color: ${text}; background-color: ${bgBar}; border: 1px solid ${borderStrong}; }
+
+
+/* ------------------------------------------------------------------- views */
+
+QTreeView, QTreeWidget, QListView, QListWidget, QTableView, QTableWidget, QPlainTextEdit, QTextEdit {
+    background: ${bgPanel};
+    alternate-background-color: ${bgAlt};
+    border: 1px solid ${border};
+    outline: none;
+}
+QHeaderView { background: ${bgHeader}; }
+QHeaderView::section {
+    background: ${bgHeader};
+    color: ${textMuted};
+    border: none;
+    border-right: 1px solid ${borderDim};
+    border-bottom: 1px solid ${borderDim};
+    padding: 3px 6px;
+}
+QHeaderView::section:hover { color: ${text}; }
 
 /* Fix display of Settings category list */
 QListWidget#categoryList { padding: 10px; }
 QListWidget#categoryList::item { height: 20px; padding: 10px; }
 QListWidget#categoryList::item::text { padding-left: 10px; }
 
-/* Fix display of close/undock for dark themes */
-QDockWidget {
-    titlebar-close-icon: url(:/wnd/close);
-    titlebar-normal-icon: url(:/wnd/undock);
+
+/* ------------------------------------------------------------ scroll bars */
+
+QScrollBar:vertical { background: ${bgBar}; width: 14px; margin: 0; }
+QScrollBar:horizontal { background: ${bgBar}; height: 14px; margin: 0; }
+QScrollBar::handle:vertical { background: ${scroll}; min-height: 30px; border-radius: 5px; margin: 2px; }
+QScrollBar::handle:horizontal { background: ${scroll}; min-width: 30px; border-radius: 5px; margin: 2px; }
+QScrollBar::handle:hover { background: ${scrollHover}; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+
+/* ------------------------------------------------------------- form inputs */
+
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QAbstractSpinBox {
+    background: ${bgInput};
+    border: 1px solid ${border};
+    border-radius: 2px;
+    padding: 1px 5px;
+    selection-background-color: rgba(${rgb}, 255);
+}
+QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus { border-color: ${focus}; }
+QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
+    background: ${bgWin};
+    border-color: ${borderDim};
+    color: ${textMuted};
+}
+QComboBox QAbstractItemView {
+    background: ${bgPanel};
+    border: 1px solid ${borderStrong};
+    selection-background-color: rgba(${rgb}, 255);
 }
 
-/* Toolbar Buttons */
+QGroupBox {
+    border: 1px solid ${border};
+    border-radius: 2px;
+    margin-top: 8px;
+    padding-top: 7px;
+}
+QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; background: ${bgPanel}; }
+QGroupBox:disabled { color: ${textMuted}; }
+
+QTabWidget::pane { border: 1px solid ${border}; background: ${bg}; top: -1px; }
+QTabBar::tab { background: ${bgWin}; color: ${textMuted}; border: 1px solid ${borderDim}; padding: 5px 10px; }
+QTabBar::tab:selected { background: ${bgInput}; color: ${textBright}; border-bottom-color: ${bgInput}; }
+QTabBar::tab:hover:!selected { background: ${bgBtnHover}; color: ${text}; }
+
+QProgressBar { background: ${bgPanel}; border: 1px solid ${border}; border-radius: 2px; text-align: center; }
+QProgressBar::chunk { background: rgba(${rgb}, 255); }
+
+
+/* ---------------------------------------------------------------- buttons */
+
+QPushButton, QComboBox { min-height: 21px; }
+QPushButton {
+    background: ${bgBtn};
+    border: 1px solid ${border};
+    border-radius: 2px;
+    padding: 1px 9px;
+}
+QPushButton:hover { background: ${bgBtnHover}; }
+QPushButton:pressed, QPushButton:checked { background: ${bgBtnDown}; }
+QPushButton:disabled { background: ${bgWin}; border-color: ${borderDim}; color: ${textMuted}; }
 
 /* Flyout menus need padding for down arrow */
 #btnFlyoutMenu { padding-left: 2px; padding-right: 10px; }
+
+/* Toolbar Buttons */
 
 /* Fix toolbar button spacing */
 #tRender QToolButton#btnRender:enabled,
@@ -45,18 +173,37 @@ QDockWidget {
     border: 1px solid transparent;
 }
 
-/* Selected toolbar buttons */
+/* Selected toolbar buttons — flat fill, matching the material editor's
+   toggles (the old radial gradient was the one thing that still read as
+   2.0.dev). */
 #tRender QToolButton#btnRender:enabled:checked,
 #tAnim QToolButton:enabled:checked,
 #mLight QAbstractButton:enabled:checked {
-    border: 1px solid rgba(0, 0, 0, 32);
-    background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.66, fx:0.5, fy:0.5, stop:0 rgba(255, 255, 255, 0), stop:0.5 rgba(${rgb}, 32), stop:1 rgba(${rgb}, 128));
+    background: rgba(${rgb}, 255);
+    border: 1px solid ${focus};
 }
 
 /* Hovered toolbar buttons */
 #tRender QToolButton#btnRender:enabled:hover,
 #tAnim QToolButton:enabled:hover,
 #mLight QAbstractButton:enabled:hover {
-    border: 1px solid rgba(${rgb}, 255); 
-    background: qradialgradient(spread:pad, cx:0.5, cy:0.5, radius:0.66, fx:0.5, fy:0.5, stop:0 rgba(255, 255, 255, 0), stop:0.33 rgba(${rgb}, 64), stop:1 rgba(${rgb}, 128));
+    background: ${bgBtnHover};
+    border: 1px solid ${border};
 }
+#tRender QToolButton#btnRender:enabled:checked:hover,
+#tAnim QToolButton:enabled:checked:hover,
+#mLight QAbstractButton:enabled:checked:hover {
+    background: rgba(${rgb}, 200);
+    border: 1px solid ${focus};
+}
+
+QToolBar QToolButton { border: 1px solid transparent; border-radius: 2px; padding: 2px 4px; }
+QToolBar QToolButton:hover { background: ${bgBtnHover}; border-color: ${border}; }
+QToolBar QToolButton:pressed { background: ${bgBtnDown}; }
+QToolBar QToolButton:checked { background: rgba(${rgb}, 255); border-color: ${focus}; }
+QToolBar QToolButton:disabled { color: ${textMuted}; }
+QToolBar::separator { background: ${border}; width: 2px; height: 2px; margin: 4px 6px; }
+
+QCheckBox, QRadioButton { spacing: 6px; background: transparent; }
+QCheckBox:disabled, QRadioButton:disabled { color: ${textMuted}; }
+QLabel { background: transparent; }

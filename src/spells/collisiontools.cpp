@@ -6,6 +6,7 @@
 #include "model/nifmodel.h"
 #include "data/nifvalue.h"
 #include "nifsnapshot.h"
+#include "wwskin.h"
 #include "lib/qhull.h"
 #include "lib/nvtristripwrapper.h"
 #include "spells/blocks.h"
@@ -118,9 +119,10 @@ public:
 		setButtonSymbols( QAbstractSpinBox::NoButtons );
 		setAlignment( Qt::AlignCenter );
 		setStyleSheet( QStringLiteral(
-			"QDoubleSpinBox { background:#545454; border:none; border-radius:3px; color:#e6e6e6; }"
-			"QLineEdit { background:transparent; border:none; color:#e6e6e6;"
-			" selection-background-color:#4772b3; selection-color:white; }" ) );
+			"QDoubleSpinBox { background:%1; border:none; border-radius:3px; color:%2; }"
+			"QLineEdit { background:transparent; border:none; color:%2;"
+			" selection-background-color:%3; selection-color:white; }" )
+			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ) ) );
 		if ( QLineEdit * edit = lineEdit() ) {
 			edit->installEventFilter( this );
 			edit->setMouseTracking( true );
@@ -1028,7 +1030,7 @@ private:
 		if ( overBudget ) budget += tr( " | Budget warning - decimation recommended" );
 		summary->setText( budget );
 		summary->setStyleSheet( overBudget
-			? QStringLiteral( "QLabel { color:#e8a93f; padding:3px; }" )
+			? QStringLiteral( "QLabel { color:%1; padding:3px; }" ).arg( wwSkinColor( "accentText" ) )
 			: QStringLiteral( "QLabel { color:palette(mid); padding:3px; }" ) );
 		updating = false;
 		updateDetails();
@@ -1666,7 +1668,8 @@ private:
 			float( previewPrecision->value() ), float( previewThreshold->value() ),
 			previewMaxHulls->value(), soup, statistics );
 		previewStats->setText( statistics );
-		previewStats->setStyleSheet( ok ? QStringLiteral( "color:#b8b8b8" ) : QStringLiteral( "color:#e06b65" ) );
+		previewStats->setStyleSheet( ok ? QStringLiteral( "color:%1" ).arg( wwSkinColor( "textMuted" ) )
+										: QStringLiteral( "color:%1" ).arg( wwSkinColor( "danger" ) ) );
 		if ( ok ) ogl->setCollisionPreview( soup ); else ogl->clearCollisionPreview();
 		positionPreviewPanel();
 	}
@@ -1681,15 +1684,18 @@ private:
 		previewPanel->setAttribute( Qt::WA_ShowWithoutActivating );
 		previewPanel->setProperty( "collapsed", false );
 		previewPanel->setStyleSheet( QStringLiteral(
-			"QFrame#CollisionOperatorPanel { background:#2f2f2f; border:1px solid #202020; }"
-			"QLabel { color:#cccccc; background:transparent; }"
-			"QToolButton { color:#cccccc; background:transparent; border:none; }"
-			"QToolButton:hover { color:white; }"
-			"QPushButton { background:#545454; color:#e6e6e6; border:none; border-radius:3px; padding:4px 14px; }"
-			"QPushButton:hover { background:#656565; }"
-			"QPushButton:pressed { background:#4772b3; }"
-			"QComboBox { background:#282828; color:#e6e6e6; border:none; border-radius:3px; padding:2px 6px; }"
-			"QSpinBox { background:#545454; color:#e6e6e6; border:none; border-radius:3px; padding:2px 6px; }" ) );
+			"QFrame#CollisionOperatorPanel { background:%1; border:1px solid %2; }"
+			"QLabel { color:%3; background:transparent; }"
+			"QToolButton { color:%3; background:transparent; border:none; }"
+			"QToolButton:hover { color:%4; }"
+			"QPushButton { background:%5; color:%3; border:none; border-radius:3px; padding:4px 14px; }"
+			"QPushButton:hover { background:%6; }"
+			"QPushButton:pressed { background:%7; }"
+			"QComboBox { background:%8; color:%3; border:none; border-radius:3px; padding:2px 6px; }"
+			"QSpinBox { background:%5; color:%3; border:none; border-radius:3px; padding:2px 6px; }" )
+			.arg( wwSkinColor( "bgCard" ), wwSkinColor( "borderStrong" ), wwSkinColor( "text" ),
+				  wwSkinColor( "textBright" ), wwSkinColor( "bgInput" ), wwSkinColor( "bgBtnHover" ),
+				  wwSkinColor( "bgBtnDown" ), wwSkinColor( "bgPanel" ) ) );
 
 		auto * outer = new QVBoxLayout( previewPanel );
 		outer->setContentsMargins( 10, 8, 10, 8 ); outer->setSpacing( 4 );
@@ -1942,9 +1948,11 @@ private:
 		auto * convexMethod = new QComboBox( createGroup );
 		convexMethod->addItems( { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } );
 		createGroup->setStyleSheet( QStringLiteral(
-			"QToolButton { border: 1px solid #555; border-radius: 3px; padding: 3px; background: #353535; }"
-			"QToolButton:hover { background: #454545; }"
-			"QToolButton:checked { border-color: #e3a12f; color: #ffc15a; background: #4a3b22; }" ) );
+			"QToolButton { border: 1px solid %1; border-radius: 3px; padding: 3px; background: %2; }"
+			"QToolButton:hover { background: %3; }"
+			"QToolButton:checked { border-color: %4; color: %5; background: %6; }" )
+			.arg( wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
+				  wwSkinColor( "accent" ), wwSkinColor( "accentText" ), wwSkinColor( "accentBg" ) ) );
 		QSettings createSettings;
 		convexMethod->setCurrentIndex( createSettings.value( "CollisionManager/Create/ConvexMethod", 0 ).toInt() );
 		auto * preset = new QComboBox( createGroup );

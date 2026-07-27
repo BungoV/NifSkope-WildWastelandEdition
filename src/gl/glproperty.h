@@ -38,6 +38,33 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "material.hpp"
 #include "model/nifmodel.h"
 #include "gl/glcontext.hpp"
+#include "io/pbrmfile.h"
+
+//! Settings/Render/PBRM Auto Replace, cached like Scene::collisionOnlySetting so
+//! material resolution never reads QSettings per shader property. Governs
+//! same-name .pbrm discovery ONLY — a material that links a .pbrm directly is
+//! always honoured. Free functions rather than a static member: the member would
+//! have to live in a public section of BSShaderLightingProperty, and inserting an
+//! access specifier mid-class silently changes the access of everything after it.
+void setPbrmAutoReplace( bool on );
+bool pbrmAutoReplaceEnabled();
+
+//! Shading menu ▸ lighting mode. Exactly one is active.
+enum PbrmLightingMode
+{
+	//! Spec/gloss only. A resolved PBRM is ignored entirely.
+	PbrmModeLegacy = 0,
+	//! PBR only — every shape goes through pbrm_default. Shapes with no PBRM are
+	//! driven from their legacy material (rough = 1 - smoothness, dielectric,
+	//! no metal), so the whole scene is under one BRDF.
+	PbrmModePBR = 1,
+	//! "Legacy and PBR" — per shape: PBR where a PBRM resolved, spec/gloss
+	//! everywhere else. PBR always overrides legacy when one is available.
+	PbrmModeLegacyAndPBR = 2,
+};
+
+void setPbrmMode( int mode );
+int pbrmMode();
 
 #include <QHash>
 #include <QPersistentModelIndex>
@@ -707,6 +734,24 @@ public:
 	// returns the texture uniform value (0: no texture, -1: use replacement, >= 1: sampler array index)
 	int getSFTexture( int & texunit, FloatVector4 & replUniform, const std::string_view & texturePath, std::uint32_t textureReplacement, int textureReplacementMode, const CE2Material::UVStream * uvStream );
 
+	// --- PBRM (PBR Material Editor material) ---
+	// Public because the renderer reads them; placed above the existing
+	// `protected:` rather than introducing a new specifier, which would silently
+	// change the access of everything after it.
+	//! Resolved PBRM for this property, if one applies. Two routes, and the
+	//! priority matters: a material name ending in .pbrm is a DIRECT link and is
+	//! always honoured; a .bgsm/.bgem only adopts a same-name .pbrm beside it
+	//! while pbrmAutoReplaceEnabled(). On the base class because .bgem effect
+	//! materials resolve exactly the same way.
+	PbrmMaterial pbrm;
+	//! true when `pbrm` parsed AND is inside the supported slice
+	bool pbrmValid = false;
+	//! valid document, unsupported shader/requirement — fail closed rather than
+	//! quietly rendering the BGSM as if nothing were wrong
+	bool pbrmUnsupported = false;
+	//! the material path the PBRM came from (may differ from `name`)
+	QString pbrmPath;
+
 protected:
 	ShaderFlags::SF1 flags1 = ShaderFlags::SLSF1_ZBuffer_Test;
 	ShaderFlags::SF2 flags2 = ShaderFlags::SLSF2_ZBuffer_Write;
@@ -722,6 +767,8 @@ protected:
 	QString	materialPath;
 	AllocBuffers	sfMatDataBuf;
 	void setMaterial( const NifModel * nif, const QModelIndex & index, bool isEffect );
+	//! Resolve a direct-linked or same-name .pbrm for this property.
+	void resolvePbrm( const NifModel * nif );
 	void setSFMaterial( const QString & mat_name );
 	void loadSFMaterial();
 	const CE2Material * createDefaultSFMaterial();
@@ -756,6 +803,7 @@ public:
 	bool hasHeightMap = false;
 	bool hasRefraction = false;
 	float refractionStrength = 0.0f;
+
 	bool hasDetailMask = false;
 	bool hasTintMask = false;
 	bool hasTintColor = false;

@@ -178,6 +178,7 @@ HEADERS += \
 	src/gl/icontrollable.h \
 	src/gl/renderer.h \
 	src/io/material.h \
+	src/io/pbrmfile.h \
 	src/io/MeshFile.h \
 	src/io/nifstream.h \
 	src/lib/importex/3ds.h \
@@ -188,6 +189,7 @@ HEADERS += \
 	src/model/nifmodel.h \
 	src/model/nifproxymodel.h \
 	src/model/undocommands.h \
+	src/spells/animationsetup.h \
 	src/spells/blocks.h \
 	src/spells/mesh.h \
 	src/spells/misc.h \
@@ -226,12 +228,15 @@ HEADERS += \
 	src/gamemanager.h \
 	src/glview.h \
 	src/message.h \
+	src/nifcli.h \
+	src/nifmerge.h \
 	src/nifskope.h \
 	src/shortcutregistry.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
 	src/spellbook.h \
 	src/wwflagsummary.h \
+	src/wwskin.h \
 	src/version.h \
 	lib/coacd.h \
 	lib/dds.h \
@@ -267,6 +272,7 @@ SOURCES += \
 	src/gl/hknpencode.cpp \
 	src/gl/renderer.cpp \
 	src/io/materialfile.cpp \
+	src/io/pbrmfile.cpp \
 	src/io/MeshFile.cpp \
 	src/io/nifstream.cpp \
 	src/lib/importex/3ds.cpp \
@@ -347,7 +353,10 @@ SOURCES += \
 	src/glview.cpp \
 	src/main.cpp \
 	src/message.cpp \
+	src/nifcli.cpp \
+	src/nifmerge.cpp \
 	src/nifskope.cpp \
+	src/posetools.cpp \
 	src/nifskope_ui.cpp \
 	src/shortcutregistry.cpp \
 	src/uvtools.cpp \

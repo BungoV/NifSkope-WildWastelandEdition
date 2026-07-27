@@ -236,6 +236,14 @@ public:
 	QHash<const void *, NifValue> diffRefValues;
 	qint32 diffRefBlock = -1;
 
+	//! Pinned fields (WW Edition). Items here get a leading star in the Name
+	//! column of Block Details. Pinning is remembered per block TYPE as a field
+	//! path (see NifSkope::wwFieldPath) and persisted in settings; this set is
+	//! just the resolved items for the CURRENTLY shown block, recomputed by
+	//! NifSkope::wwUpdatePinnedItems() on every block switch. Same window-owned
+	//! pattern as diffItems/selHighlight: the model only serves it per-role.
+	QSet<const void *> pinnedItems;
+
 	//! Get the number of NiBlocks
 	int getBlockCount() const;
 

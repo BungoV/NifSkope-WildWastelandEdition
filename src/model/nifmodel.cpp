@@ -55,6 +55,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 const QString EMPTY_QSTRING;
 const QString SPACE_QSTRING(" ");
 const QString DOT_QSTRING(".");
+//! Leading marker on a pinned field's name (WW Edition)
+const QString PIN_QSTRING(QString::fromUtf8("\xe2\x98\x85 "));	// "★ "
 
 QHash<QString, QString> arrayPseudonyms;
 QHash<QString, QString> multiArrayPseudonyms1;
@@ -1316,6 +1318,11 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 						return bname;
 					}
 
+					// A pinned field carries a leading star: a marker, not a
+					// badge, per the Block Details visual rules.
+					const QString & pinMark = pinnedItems.contains( item )
+						? PIN_QSTRING : EMPTY_QSTRING;
+
 					if ( p && p->isArray() && !p->isBinary() ) {
 						QHash<QString, QString> & pseudonymMap = arrayPseudonyms;
 						// Is it a 2nd level array of a multi-array?
@@ -1328,10 +1335,10 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 								pseudonymMap = multiArrayPseudonyms2;
 						}
 
-						return QString( namePrefix % pseudonymMap.value( item->name(), item->name() ) % SPACE_QSTRING % QString::number( item->row() ) );
+						return QString( namePrefix % pinMark % pseudonymMap.value( item->name(), item->name() ) % SPACE_QSTRING % QString::number( item->row() ) );
 					}
 
-					return namePrefix + item->name();
+					return namePrefix + pinMark + item->name();
 				}
 				break;
 			case TypeCol:

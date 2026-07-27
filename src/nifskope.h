@@ -228,6 +228,12 @@ public slots:
 	bool openArchiveFileString( const BA2File *, const QString &, bool newWindow = false,
 		bool confirmReplace = true );
 	void openNifBrowserSelection();
+	//! Modal NIF Browser picker: shows the archive / loose resource tree and, on
+	//! accept, fills \a bytesOut with the chosen NIF's data and \a labelOut with a
+	//! display name. Returns false if cancelled or nothing suitable was picked.
+	//! Reuses the browser's model and the same archive extraction the NIF Browser
+	//! dock uses, so no separate archive UI is needed.
+	bool pickNifFromBrowser( QWidget * parent, QByteArray & bytesOut, QString & labelOut );
 
 	void enableUi();
 
@@ -385,6 +391,10 @@ private:
 	void clearCurrentArchive();
 	void appendLooseNifsToBrowser( const QString & );
 	void populateConfiguredNifBrowser();
+	//! The actual tree rebuild, minus the dock-hidden deferral gate. The picker
+	//! (pickNifFromBrowser) calls this directly so it gets a populated tree even
+	//! when the browser dock is hidden.
+	void populateConfiguredNifBrowserNow();
 	bool openConfiguredNif( int game, const QString & path, bool newWindow = false );
 	bool loadConfiguredNifIntoDocument( NifSkope * target, int game, const QString & path );
 	void updateRecentArchiveActions();
@@ -406,6 +416,20 @@ private:
 	void wwCaptureDetailsState();
 	bool wwHasDetailsState( const QModelIndex & root ) const;
 	void wwRestoreDetailsState( const QModelIndex & root );
+
+	// ---- pinned fields (WW): star the handful of fields you actually tune on
+	// a block type, then filter down to just those on every block of that type ----
+	//! Stable path from the owning block down to a field, '\x1f'-separated
+	//! (array elements identify by row, everything else by name).
+	QString wwFieldPath( const QModelIndex & index ) const;
+	//! Resolve a path produced by wwFieldPath back to an index under a block.
+	QModelIndex wwResolveFieldPath( const QModelIndex & root, const QString & path ) const;
+	bool wwIsFieldPinned( const QModelIndex & index ) const;
+	void wwTogglePinField( const QModelIndex & index );
+	//! Re-resolve the shown block's pinned paths into NifModel::pinnedItems.
+	void wwUpdatePinnedItems();
+	void wwLoadPinnedFields();
+	void wwSavePinnedFields() const;
 
 	// ---- field-value clipboard (WW): copy a field once, paste it onto every
 	// selected block that has the field, as one undo step ----
@@ -493,9 +517,17 @@ private:
 	//! Inline Block List search field.
 	QLineEdit * blockListSearch = nullptr;
 	QLineEdit * blockDetailsSearch = nullptr;
+	//! "Pinned only" toggle beside the Block Details filter.
+	QToolButton * blockDetailsPinFilter = nullptr;
 	//! A Block Details filter is (or just was) active; lets the empty-filter
 	//! case skip the full-block walk that cost ~0.5 s per click on big shapes
 	bool blockDetailsFilterWasActive = false;
+
+	//! Pinned fields, per block TYPE -> set of field paths (see wwFieldPath).
+	//! Persisted in QSettings under "BlockDetails/PinnedFields".
+	QHash<QString, QSet<QString>> wwPinnedFields;
+	//! While true the Block Details filter keeps ONLY pinned rows.
+	bool wwPinnedOnly = false;
 	//! Same idea for the block list: an inactive filter with nothing to clear
 	//! must not walk (and build a searchable string for) every block.
 	bool blockListFilterWasActive = false;

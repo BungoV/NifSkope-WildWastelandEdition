@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "spellbook.h"
 #include "spells/blocks.h"	// setBlockListSelection for Copy Branch multi-select
 #include "version.h"
+#include "wwskin.h"
 #include "gl/glscene.h"
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
@@ -63,6 +64,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QCloseEvent>
 #include <QDebug>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QSortFilterProxyModel>
 #include <QDir>
 #include <QDirIterator>
 #include <QDragEnterEvent>
@@ -736,12 +740,12 @@ NifSkope::NifSkope( bool background )
 	ui->verticalLayout_2->insertWidget( 1, blockFilters );
 	blockListBreadcrumb = new QLabel( ui->dockWidgetContents_4 );
 	blockListBreadcrumb->setTextInteractionFlags( Qt::TextSelectableByMouse );
-	blockListBreadcrumb->setStyleSheet( QStringLiteral( "color: #a8a8a8; padding: 1px 2px;" ) );
+	blockListBreadcrumb->setStyleSheet( QStringLiteral( "color: %1; padding: 1px 2px;" ).arg( wwSkinColor( "textMuted" ) ) );
 	blockListBreadcrumb->setToolTip( tr( "Scene-parent path for the selected block" ) );
 	blockListBreadcrumb->setMinimumWidth( 1 );
 	ui->verticalLayout_2->insertWidget( 2, blockListBreadcrumb );
 	blockListFooter = new QLabel( ui->dockWidgetContents_4 );
-	blockListFooter->setStyleSheet( QStringLiteral( "color: #a8a8a8; padding: 2px;" ) );
+	blockListFooter->setStyleSheet( QStringLiteral( "color: %1; padding: 2px;" ).arg( wwSkinColor( "textMuted" ) ) );
 	blockListFooter->setMinimumWidth( 1 );
 	ui->verticalLayout_2->addWidget( blockListFooter );
 	connect( blockListSearch, &QLineEdit::textChanged, this, [this]() { applyBlockListFilter(); } );
@@ -834,7 +838,29 @@ NifSkope::NifSkope( bool background )
 	blockDetailsSearch->setClearButtonEnabled( true );
 	blockDetailsSearch->setPlaceholderText( tr( "Filter fields by name or value..." ) );
 	blockDetailsSearch->setToolTip( tr( "Parents remain visible when a nested field matches. Ctrl+Shift+F focuses this field." ) );
-	ui->verticalLayout->insertWidget( 0, blockDetailsSearch );
+	// filter row: search field + the pinned-only toggle, flat and auto-raise
+	// like the Block List header buttons
+	{
+		auto * filterRow = new QWidget( ui->dockWidgetContents_2 );
+		auto * fl = new QHBoxLayout( filterRow );
+		fl->setContentsMargins( 0, 0, 0, 0 );
+		fl->setSpacing( 2 );
+		fl->addWidget( blockDetailsSearch, 1 );
+
+		wwLoadPinnedFields();
+		blockDetailsPinFilter = new QToolButton( filterRow );
+		blockDetailsPinFilter->setText( QString::fromUtf8( "\xe2\x98\x85" ) );	// ★
+		blockDetailsPinFilter->setCheckable( true );
+		blockDetailsPinFilter->setAutoRaise( true );
+		blockDetailsPinFilter->setToolTip(
+			tr( "Show only pinned fields.\nRight-click any field to pin it; pins are remembered per block type." ) );
+		fl->addWidget( blockDetailsPinFilter, 0 );
+		ui->verticalLayout->insertWidget( 0, filterRow );
+		connect( blockDetailsPinFilter, &QToolButton::toggled, this, [this]( bool on ) {
+			wwPinnedOnly = on;
+			applyBlockDetailsFilter();
+		} );
+	}
 	connect( blockDetailsSearch, &QLineEdit::textChanged, this, [this]() { applyBlockDetailsFilter(); } );
 	// diff-vs-reference banner: one flat grey line above the filter, hidden
 	// until a reference block is set (Block List right-click)
@@ -844,7 +870,7 @@ NifSkope::NifSkope( bool background )
 		bannerLayout->setContentsMargins( 4, 2, 2, 2 );
 		bannerLayout->setSpacing( 4 );
 		wwDiffLabel = new QLabel( wwDiffBanner );
-		wwDiffLabel->setStyleSheet( QStringLiteral( "color: #bbbbbb;" ) );
+		wwDiffLabel->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
 		bannerLayout->addWidget( wwDiffLabel, 1 );
 		auto * clearDiffBtn = new QToolButton( wwDiffBanner );
 		clearDiffBtn->setText( QStringLiteral( "✕" ) );
@@ -1783,11 +1809,14 @@ void NifSkope::applyBlockDetailsFilter()
 	// shape that was ~0.5 s per selection change (and it runs twice per
 	// viewport click via the list-mirror echo), which made click-selecting
 	// high-poly shapes take seconds.
-	if ( terms.isEmpty() && !blockDetailsFilterWasActive )
+	// The pinned-only toggle is a filter in its own right, so it has to defeat
+	// the empty-terms fast path and keep the walk alive while it is on.
+	const bool pinnedOn = wwPinnedOnly;
+	if ( terms.isEmpty() && !pinnedOn && !blockDetailsFilterWasActive )
 		return;
-	blockDetailsFilterWasActive = !terms.isEmpty();
+	blockDetailsFilterWasActive = !terms.isEmpty() || pinnedOn;
 
-	if ( terms.isEmpty() ) {
+	if ( terms.isEmpty() && !pinnedOn ) {
 		tree->setDetailsFilter( false, {} );
 		tree->refreshRowHiding();	// back to pure condition/version hiding
 		return;
@@ -1809,6 +1838,32 @@ void NifSkope::applyBlockDetailsFilter()
 		for ( const NifItem * c : it->children() )
 			keepSubtree( c );
 	};
+
+	// Pinned-only: the keep set is the pinned rows, their subtrees (a pinned
+	// compound must be expandable) and their ancestors (the path to a pinned
+	// row has to stay visible, same rule the text filter uses). With no text
+	// typed this IS the filter; with text, the search narrows within it.
+	if ( pinnedOn ) {
+		wwUpdatePinnedItems();
+		const QModelIndex root = tree->rootIndex();
+		for ( const void * p : nif->pinnedItems ) {
+			const NifItem * item = static_cast<const NifItem *>( p );
+			keepSubtree( item );
+			for ( const NifItem * a = item->parent(); a; a = a->parent() ) {
+				if ( a == nif->getItem( root ) )
+					break;
+				keep.insert( a );
+			}
+		}
+		if ( terms.isEmpty() ) {
+			tree->setDetailsFilter( true, std::move( keep ) );
+			tree->refreshRowHiding();
+			return;
+		}
+	}
+	const QSet<const void *> pinnedKeep = pinnedOn ? keep : QSet<const void *>();
+	if ( pinnedOn )
+		keep.clear();
 	std::function<bool( const QModelIndex & )> walk =
 		[&]( const QModelIndex & parent ) -> bool {
 		bool branchMatches = false;
@@ -1848,6 +1903,8 @@ void NifSkope::applyBlockDetailsFilter()
 		return branchMatches;
 	};
 	walk( tree->rootIndex() );
+	if ( pinnedOn )
+		keep.intersect( pinnedKeep );
 	tree->setDetailsFilter( true, std::move( keep ) );
 	tree->refreshRowHiding();
 }
@@ -1869,6 +1926,145 @@ QString wwDetailsRowKey( const NifModel * nif, const QModelIndex & idx )
 		return QString::number( idx.row() );
 	return nif->itemName( idx );
 }
+}
+
+// ---- pinned fields (WW) ---------------------------------------------------
+// Pinning is remembered per block TYPE as a field PATH, not as an item
+// pointer or a row number: the whole point is that starring Glossiness on one
+// BSLightingShaderProperty stars it on every one you click afterwards. The
+// path convention is shared with the sticky-expansion state above.
+
+QString NifSkope::wwFieldPath( const QModelIndex & index ) const
+{
+	if ( !nif || !index.isValid() || index.model() != nif )
+		return QString();
+	const QModelIndex block = nif->getBlockIndex( index );
+	if ( !block.isValid() )
+		return QString();
+
+	QStringList segs;
+	QModelIndex idx = index.sibling( index.row(), 0 );
+	while ( idx.isValid() && idx != block ) {
+		segs.prepend( wwDetailsRowKey( nif, idx ) );
+		idx = idx.parent();
+	}
+	// index was not under a block (header/footer/the block row itself)
+	if ( !idx.isValid() || segs.isEmpty() )
+		return QString();
+	return segs.join( wwPathSep );
+}
+
+QModelIndex NifSkope::wwResolveFieldPath( const QModelIndex & root, const QString & path ) const
+{
+	if ( !nif || !root.isValid() || path.isEmpty() )
+		return QModelIndex();
+
+	QModelIndex idx = root;
+	const QStringList segs = path.split( wwPathSep );
+	for ( const QString & seg : segs ) {
+		QModelIndex next;
+		bool numeric = false;
+		const int row = seg.toInt( &numeric );
+		if ( numeric && nif->isArray( idx ) ) {
+			next = nif->index( row, 0, idx );
+		} else {
+			next = nif->getIndex( idx, seg );
+			if ( next.isValid() )
+				next = next.sibling( next.row(), 0 );
+		}
+		idx = next;
+		if ( !idx.isValid() )
+			return QModelIndex();
+	}
+	return idx;
+}
+
+bool NifSkope::wwIsFieldPinned( const QModelIndex & index ) const
+{
+	if ( !nif )
+		return false;
+	const QModelIndex block = nif->getBlockIndex( index );
+	const QString path = wwFieldPath( index );
+	if ( !block.isValid() || path.isEmpty() )
+		return false;
+	return wwPinnedFields.value( nif->itemName( block ) ).contains( path );
+}
+
+void NifSkope::wwTogglePinField( const QModelIndex & index )
+{
+	if ( !nif )
+		return;
+	const QModelIndex block = nif->getBlockIndex( index );
+	const QString path = wwFieldPath( index );
+	if ( !block.isValid() || path.isEmpty() )
+		return;
+
+	const QString type = nif->itemName( block );
+	QSet<QString> & set = wwPinnedFields[type];
+	if ( set.contains( path ) )
+		set.remove( path );
+	else
+		set.insert( path );
+	if ( set.isEmpty() )
+		wwPinnedFields.remove( type );
+
+	wwSavePinnedFields();
+	wwUpdatePinnedItems();
+	// the star lives in the Name column's DisplayRole
+	if ( tree )
+		tree->viewport()->update();
+	// a pin/unpin while the pinned-only filter is up changes what's visible
+	if ( wwPinnedOnly )
+		applyBlockDetailsFilter();
+}
+
+void NifSkope::wwUpdatePinnedItems()
+{
+	if ( !nif )
+		return;
+	nif->pinnedItems.clear();
+	if ( !tree || tree->model() != nif )
+		return;
+	const QModelIndex root = tree->rootIndex();
+	if ( !root.isValid() || !nif->isNiBlock( root ) )
+		return;
+
+	const auto it = wwPinnedFields.constFind( nif->itemName( root ) );
+	if ( it == wwPinnedFields.constEnd() )
+		return;
+	for ( const QString & path : *it ) {
+		QModelIndex idx = wwResolveFieldPath( root, path );
+		if ( idx.isValid() ) {
+			if ( const NifItem * item = nif->getItem( idx ) )
+				nif->pinnedItems.insert( item );
+		}
+	}
+}
+
+void NifSkope::wwLoadPinnedFields()
+{
+	wwPinnedFields.clear();
+	QSettings settings;
+	settings.beginGroup( QStringLiteral( "BlockDetails/PinnedFields" ) );
+	for ( const QString & type : settings.childKeys() ) {
+		const QStringList paths = settings.value( type ).toStringList();
+		if ( !paths.isEmpty() )
+			wwPinnedFields.insert( type, QSet<QString>( paths.constBegin(), paths.constEnd() ) );
+	}
+	settings.endGroup();
+}
+
+void NifSkope::wwSavePinnedFields() const
+{
+	QSettings settings;
+	settings.beginGroup( QStringLiteral( "BlockDetails/PinnedFields" ) );
+	settings.remove( QString() );	// drop types that no longer have pins
+	for ( auto it = wwPinnedFields.constBegin(); it != wwPinnedFields.constEnd(); ++it ) {
+		QStringList paths( it.value().constBegin(), it.value().constEnd() );
+		paths.sort();
+		settings.setValue( it.key(), paths );
+	}
+	settings.endGroup();
 }
 
 void NifSkope::wwCaptureDetailsState()
@@ -2828,6 +3024,14 @@ void NifSkope::select( const QModelIndex & index )
 			if ( rootChanged && nif->diffRefBlock >= 0 )
 				updateDiffHighlight();
 
+			// pinned stars are per block type, so they must be re-resolved
+			// against this block's items on every switch
+			if ( rootChanged ) {
+				wwUpdatePinnedItems();
+				if ( wwPinnedOnly )
+					applyBlockDetailsFilter();
+			}
+
 			// Expand BSShaderTextureSet by default
 			//if ( root.child( 1, 0 ).data().toString() == "Textures" )
 			//	tree->expandAll();
@@ -3171,6 +3375,12 @@ void NifSkope::populateConfiguredNifBrowser()
 		nifBrowserPopulatePending = true;
 		return;
 	}
+	populateConfiguredNifBrowserNow();
+}
+
+void NifSkope::populateConfiguredNifBrowserNow()
+{
+	if ( !bsaModel || !bsaProxyModel || !bsaView || !nif ) return;
 	nifBrowserPopulatePending = false;
 
 	configuredNifBrowserPopulated = true;
@@ -3641,6 +3851,90 @@ void NifSkope::openNifBrowserSelection()
 			return;
 		first = false;
 	}
+}
+
+bool NifSkope::pickNifFromBrowser( QWidget * parent, QByteArray & bytesOut, QString & labelOut )
+{
+	if ( !bsaModel || !bsaProxyModel )
+		return false;
+
+	// Build the archive/loose tree now, even if the browser dock is hidden.
+	populateConfiguredNifBrowserNow();
+	if ( bsaModel->rowCount() == 0 ) {
+		QMessageBox::information( parent, tr( "Load skeleton from archive" ),
+			tr( "No game archives or loose files are available.\n\n"
+			    "Configure a game's data folders in Settings → Resources, then its "
+			    "meshes will be listed here." ) );
+		return false;
+	}
+
+	QDialog dlg( parent );
+	dlg.setWindowTitle( tr( "Load skeleton from archive" ) );
+	dlg.resize( 560, 640 );
+	auto * lay = new QVBoxLayout( &dlg );
+
+	auto * filterEdit = new QLineEdit( &dlg );
+	filterEdit->setPlaceholderText( tr( "Filter by name…" ) );
+	filterEdit->setClearButtonEnabled( true );
+	lay->addWidget( filterEdit );
+
+	// A private filter proxy chained on the shared browser model, so filtering
+	// here never disturbs the NIF Browser dock's own view of the same model.
+	auto * filterProxy = new QSortFilterProxyModel( &dlg );
+	filterProxy->setSourceModel( bsaProxyModel );
+	filterProxy->setRecursiveFilteringEnabled( true );
+	filterProxy->setFilterCaseSensitivity( Qt::CaseInsensitive );
+	filterProxy->setFilterKeyColumn( 0 );
+
+	auto * view = new QTreeView( &dlg );
+	view->setModel( filterProxy );
+	view->setSelectionMode( QAbstractItemView::SingleSelection );
+	view->setSelectionBehavior( QAbstractItemView::SelectRows );
+	view->setUniformRowHeights( true );
+	if ( filterProxy->columnCount() > 2 )
+		view->setColumnHidden( 2, true );   // keep name + path, hide size
+	lay->addWidget( view, 1 );
+
+	connect( filterEdit, &QLineEdit::textChanged, filterProxy,
+		[filterProxy]( const QString & t ) { filterProxy->setFilterFixedString( t ); } );
+
+	auto * buttons = new QDialogButtonBox( QDialogButtonBox::Open | QDialogButtonBox::Cancel, &dlg );
+	if ( auto * ok = buttons->button( QDialogButtonBox::Open ) )
+		ok->setText( tr( "Load skeleton" ) );
+	lay->addWidget( buttons );
+	connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );
+	connect( buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
+	connect( view, &QTreeView::doubleClicked, &dlg, &QDialog::accept );
+
+	if ( dlg.exec() != QDialog::Accepted )
+		return false;
+
+	QModelIndex sel = view->currentIndex();
+	if ( !sel.isValid() )
+		return false;
+	sel = filterProxy->mapToSource( sel );     // back to the browser model
+	const QModelIndex nameIndex = sel.sibling( sel.row(), 0 );
+	const QString path = sel.sibling( sel.row(), 1 ).data( Qt::EditRole ).toString();
+	if ( path.isEmpty() )                       // a folder / archive row, not a file
+		return false;
+	const int source = nameIndex.data( NifBrowserSourceRole ).toInt();
+	const int game = nameIndex.data( NifBrowserGameRole ).toInt();
+
+	if ( source == NifBrowserConfiguredResource ) {
+		QString displayPath;
+		if ( !extractConfiguredNifBytes( game, path, bytesOut, displayPath ) )
+			return false;
+		labelOut = QFileInfo( displayPath.isEmpty() ? path : displayPath ).fileName();
+	} else if ( source == NifBrowserLooseFile ) {
+		QFile f( path );
+		if ( !f.open( QIODevice::ReadOnly ) )
+			return false;
+		bytesOut = f.readAll();
+		labelOut = QFileInfo( path ).fileName();
+	} else {
+		return false;                           // e.g. a Loaded-NIFs row
+	}
+	return true;
 }
 
 void NifSkope::addNifBrowserIndexToLoaded( const QModelIndex & index )

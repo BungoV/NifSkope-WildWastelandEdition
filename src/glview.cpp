@@ -42,6 +42,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
+#include "wwskin.h"
+#include "spells/animationsetup.h"
 #include "ui/settingsdialog.h"
 #include "ui/widgets/fileselect.h"
 #include "fp32vec4.hpp"
@@ -179,6 +181,8 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.select.linked_angle", QObject::tr( "Select Linked by Angle" ), catSel,
 		QKeySequence( Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_F ) );
 	r.reg( "viewport.select.checker", QObject::tr( "Checker Deselect" ), catSel, QKeySequence() );
+	r.reg( "viewport.proportional", QObject::tr( "Proportional Editing (toggle)" ), catEdit, QKeySequence( Qt::Key_O ) );
+	r.reg( "viewport.proportional_falloff", QObject::tr( "Cycle Proportional Falloff" ), catEdit, QKeySequence( Qt::SHIFT | Qt::Key_O ) );
 
 	r.reg( "viewport.pick_vertex", QObject::tr( "Pick Mode: Vertex (Shift extends)" ), catEdit, QKeySequence( Qt::Key_1 ) );
 	r.reg( "viewport.pick_edge", QObject::tr( "Pick Mode: Edge (Shift extends)" ), catEdit, QKeySequence( Qt::Key_2 ) );
@@ -496,6 +500,537 @@ void GLView::setRiggingWeightPaintMode( bool enabled, int targetBlock, int brush
 	update();
 }
 
+// ---- Pose Mode -------------------------------------------------------------
+
+void GLView::refreshPoseBones()
+{
+	poseBones.clear();
+	poseHoverBone = -1;
+	if ( !model )
+		return;
+
+	// union of the bones every skinned shape references
+	QSet<int> bones;
+	QSet<int> deforming;
+	for ( int b = 0; b < model->getBlockCount(); b++ ) {
+		QModelIndex iShape = model->getBlockIndex( b );
+		if ( !model->blockInherits( iShape, "NiAVObject" ) )
+			continue;
+		int skin = model->getLink( iShape, "Skin" );
+		if ( skin < 0 )
+			continue;
+		QModelIndex iBones = model->getIndex( model->getBlockIndex( skin ), "Bones" );
+		for ( int r = 0; r < model->rowCount( iBones ); r++ ) {
+			int node = model->getLink( model->getIndex( iBones, r ) );
+			if ( node >= 0 ) { bones.insert( node ); deforming.insert( node ); }
+		}
+	}
+	// filter 1 = deforming only (all found bones already deform, kept for parity);
+	// filter 2 = face sculpt bones. For a readable skeleton we also want the
+	// PARENT chain of each kept bone so the connections have something to attach
+	// to, so add ancestors up to the common root as draw-only context.
+	QSet<int> keep;
+	for ( int n : bones ) {
+		const QString name = model->get<QString>( model->getBlockIndex( n ), "Name" );
+		bool take = true;
+		if ( poseBoneFilterMode == 2 )   // face sculpt: all skin_bone_* (C/L/R)
+			take = name.startsWith( QLatin1String( "skin_bone_" ) );
+		if ( take )
+			keep.insert( n );
+	}
+	if ( keep.isEmpty() )       // filter emptied the set — fall back to all bones
+		keep = bones;
+	// include ancestors so parenting lines connect
+	QSet<int> withParents = keep;
+	for ( int n : keep ) {
+		int p = model->getParent( n );
+		while ( p >= 0 && !withParents.contains( p ) ) {
+			QModelIndex ip = model->getBlockIndex( p );
+			if ( !model->blockInherits( ip, "NiNode" ) )
+				break;
+			withParents.insert( p );
+			p = model->getParent( p );
+		}
+	}
+	poseBones = withParents.values();
+	std::sort( poseBones.begin(), poseBones.end() );
+
+	// Characteristic bone length = median nearest-neighbour distance among the
+	// bones. Facial rigs are a dense cluster of tiny bones; body rigs are
+	// spread out. This makes the drawn bones uniform and readable in either
+	// case, instead of stubs that scale with a far-off parent.
+	if ( scene && poseBones.size() >= 2 ) {
+		QVector<Vector3> pos;
+		pos.reserve( poseBones.size() );
+		for ( int b : poseBones )
+			if ( Node * n = scene->getNode( model, model->getBlockIndex( b ) ) )
+				pos.append( n->worldTrans().translation );
+		QVector<float> nn;
+		for ( int i = 0; i < pos.size(); i++ ) {
+			float best = -1.0f;
+			for ( int j = 0; j < pos.size(); j++ ) {
+				if ( i == j ) continue;
+				float d = ( pos[i] - pos[j] ).length();
+				if ( d > 1e-4f && ( best < 0 || d < best ) )
+					best = d;
+			}
+			if ( best > 0 )
+				nn.append( best );
+		}
+		if ( !nn.isEmpty() ) {
+			std::sort( nn.begin(), nn.end() );
+			poseBoneSize = qMax( 0.5f, nn.at( nn.size() / 2 ) * 0.6f );
+		}
+	}
+}
+
+Vector3 GLView::poseBoneTail( int boneBlock ) const
+{
+	// The bone is drawn as a short shape from its head toward its tail, with the
+	// length CAPPED to the characteristic bone size so a bone parented to a
+	// far-off root doesn't stretch across the screen. Direction is toward the
+	// mean of child bones, or the bone's local +Y for a leaf.
+	Node * n = scene ? scene->getNode( model, model->getBlockIndex( boneBlock ) ) : nullptr;
+	if ( !n )
+		return Vector3();
+	const Vector3 head = n->worldTrans().translation;
+	const float cap = poseBoneSize * 2.0f;
+
+	Vector3 sum;
+	int count = 0;
+	for ( int c : model->getChildLinks( boneBlock ) ) {
+		if ( !poseBones.contains( c ) )
+			continue;
+		if ( Node * cn = scene->getNode( model, model->getBlockIndex( c ) ) ) {
+			sum += cn->worldTrans().translation;
+			count++;
+		}
+	}
+	Vector3 dir;
+	if ( count > 0 )
+		dir = ( sum / float( count ) ) - head;      // toward children
+	else
+		dir = n->worldTrans().rotation * Vector3( 0, 1, 0 );  // leaf: local +Y
+
+	float len = dir.length();
+	if ( len < 1e-4f )
+		return head + Vector3( 0, 0, cap );          // degenerate; nominal up
+	return head + dir * ( qMin( len, cap ) / len );
+}
+
+void GLView::capturePoseRest()
+{
+	poseRestPose.clear();
+	if ( !model )
+		return;
+	for ( int b : poseBones ) {
+		QModelIndex iB = model->getBlockIndex( b );
+		if ( iB.isValid() )
+			poseRestPose.insert( b, Transform( model, iB ) );
+	}
+}
+
+void GLView::poseResetBone( int block, int channels )
+{
+	if ( !model || poseRestPose.isEmpty() || channels == 0 )
+		return;
+
+	QList<int> targets;
+	if ( block >= 0 )
+		targets << block;
+	else
+		targets = poseRestPose.keys();
+
+	// Snapshot undo (like the other structural pose ops): straightforward and
+	// guaranteed correct — reset is occasional, so the reload is not a concern.
+	nifSnapshotOp( model, tr( "Reset pose" ), [&]() {
+		for ( int b : targets ) {
+			auto rest = poseRestPose.constFind( b );
+			if ( rest == poseRestPose.constEnd() )
+				continue;
+			QModelIndex iB = model->getBlockIndex( b );
+			if ( !iB.isValid() )
+				continue;
+			if ( channels & 1 ) {   // rotation
+				Matrix m = rest->rotation;
+				model->set<Matrix>( iB, "Rotation", m );
+			}
+			if ( channels & 2 )     // location
+				model->set<Vector3>( iB, "Translation", rest->translation );
+			if ( channels & 4 )     // scale
+				model->set<float>( iB, "Scale", rest->scale );
+		}
+	} );
+
+	if ( scene )
+		scene->transformDirty = true;
+	update();
+	emit gizmoStatus( tr( "Reset %1 bone(s)" ).arg( targets.size() ) );
+}
+
+extern QString wwFlipBoneName( const QString & name );
+
+// rest transforms captured on pose-mode entry, keyed by bone NAME (the key OS
+// pose XML uses); falls back to nothing when a bone wasn't captured
+QHash<QString, Transform> GLView::poseRestByName() const
+{
+	QHash<QString, Transform> byName;
+	if ( !model )
+		return byName;
+	for ( auto it = poseRestPose.constBegin(); it != poseRestPose.constEnd(); ++it ) {
+		const QString nm = model->get<QString>( model->getBlockIndex( it.key() ), "Name" );
+		if ( !nm.isEmpty() )
+			byName.insert( nm, it.value() );
+	}
+	return byName;
+}
+
+int GLView::poseImportOutfitStudio( const QString & path, float blend, QString * error )
+{
+	int applied = 0, missing = 0;
+	if ( !AnimSetup::applyOutfitStudioPose( model, path, poseRestByName(), blend,
+	                                        &applied, &missing, error ) )
+		return 0;
+	if ( scene )
+		scene->transformDirty = true;
+	refreshPoseBones();
+	update();
+	emit gizmoStatus( tr( "Imported pose: %1 bone(s) posed, %2 not in this skeleton" )
+		.arg( applied ).arg( missing ) );
+	return applied;
+}
+
+bool GLView::poseExportOutfitStudio( const QString & path, const QString & name, QString * error )
+{
+	// export diffs the current pose against the block-keyed rest captured on
+	// pose-mode entry — exact, and immune to same-name bones
+	return AnimSetup::writeOutfitStudioPose( model, path, name, poseRestPose, error );
+}
+
+int GLView::poseMirrorBone( int block )
+{
+	if ( !model || block < 0 )
+		return -1;
+	QModelIndex iSrc = model->getBlockIndex( block );
+	const QString name = model->get<QString>( iSrc, "Name" );
+	const QString flip = wwFlipBoneName( name );
+	if ( flip == name )
+		return -1;   // no L/R counterpart in the name
+
+	// find the counterpart bone by flipped name among the posed bones
+	int dst = -1;
+	for ( int b : poseBones ) {
+		if ( model->get<QString>( model->getBlockIndex( b ), "Name" ) == flip ) {
+			dst = b;
+			break;
+		}
+	}
+	if ( dst < 0 )
+		return -1;
+
+	auto restS = poseRestPose.constFind( block );
+	auto restD = poseRestPose.constFind( dst );
+	if ( restS == poseRestPose.constEnd() || restD == poseRestPose.constEnd() )
+		return -1;
+
+	// Mirror the source's motion RELATIVE TO ITS REST, then apply that mirrored
+	// delta relative to the counterpart's rest. Mirroring relative to rest (not
+	// absolute) is what lets an asymmetric-in-world but symmetric-in-motion rig
+	// mirror correctly. Mx = diag(-1,1,1): translation.x flips; rotation is the
+	// proper rotation Mx * R * Mx (det stays +1).
+	Transform curS( model, iSrc );
+	Transform deltaS = restS->inverted() * curS;         // rest-local delta
+
+	Matrix mx;   // diag(-1,1,1)
+	mx( 0, 0 ) = -1; mx( 1, 1 ) = 1; mx( 2, 2 ) = 1;
+	Transform deltaM;
+	deltaM.translation = Vector3( -deltaS.translation[0], deltaS.translation[1], deltaS.translation[2] );
+	deltaM.rotation = mx * deltaS.rotation * mx;
+	deltaM.scale = deltaS.scale;
+
+	Transform newD = Transform( *restD ) * deltaM;
+
+	QModelIndex iDst = model->getBlockIndex( dst );
+	nifSnapshotOp( model, tr( "Mirror pose to %1" ).arg( flip ), [&]() {
+		model->set<Vector3>( iDst, "Translation", newD.translation );
+		model->set<Matrix>( iDst, "Rotation", newD.rotation );
+		model->set<float>( iDst, "Scale", newD.scale );
+	} );
+	if ( scene )
+		scene->transformDirty = true;
+	update();
+	emit gizmoStatus( tr( "Mirrored pose to %1" ).arg( flip ) );
+	return dst;
+}
+
+void GLView::setPoseMode( bool enabled )
+{
+	if ( enabled == poseMode )
+		return;
+	if ( enabled ) {
+		// leave any conflicting mode, like the paint modes do
+		if ( editMode )
+			setEditMode( false );
+		if ( vertexPaintMode )
+			setVertexPaintMode( false );
+		if ( segmentPaintMode )
+			setSegmentPaintMode( false );
+		if ( riggingWeightPaintMode )
+			setRiggingWeightPaintMode( false );
+		// skinning must be on so posing a bone visibly deforms the mesh
+		scene->options.setFlag( Scene::DoSkinning, true );
+		refreshPoseBones();
+		capturePoseRest();       // the pose you loaded is the "rest" reset returns to
+		poseBaked = false;
+		// default the gizmo to Local so a selected bone shows its own rotation
+		gizmoOrient = 1;
+		poseMode = true;
+		emit gizmoStatus( tr( "Pose Mode - click a bone, then G/R/S to pose it; the mesh follows. Tab = Object Mode" ) );
+	} else {
+		// Non-destructive: return the real bone nodes to the originals captured
+		// on entry, so the saved NIF is never left altered. The pose persists
+		// only via a pose file / the library. "Bake to bones" opts out.
+		if ( poseNonDestructive && !poseBaked && !poseRestPose.isEmpty() )
+			poseResetBone( -1, 7 );
+		poseMode = false;
+		poseHoverBone = -1;
+		emit gizmoStatus( poseNonDestructive && !poseBaked
+			? tr( "Object Mode - bones restored (pose was not baked)" ) : tr( "Object Mode" ) );
+	}
+	scene->transformDirty = true;
+	emit poseModeChanged( poseMode );
+	update();
+}
+
+int GLView::poseBoneAt( const QPointF & pos ) const
+{
+	if ( !poseMode || poseBones.isEmpty() )
+		return -1;
+	// nearest bone segment (head->tail) in screen space, within a pixel radius.
+	// worldToScreen works in LOGICAL pixels (width()/height()), same space as
+	// the event position, so the radius is logical too — no dpr factor.
+	const float pickR = 12.0f;
+	float best = pickR * pickR;
+	int bestBone = -1;
+	for ( int b : poseBones ) {
+		Node * n = scene->getNode( model, model->getBlockIndex( b ) );
+		if ( !n )
+			continue;
+		QPointF hs, ts;
+		bool ho = worldToScreen( n->worldTrans().translation, hs );
+		bool to = worldToScreen( poseBoneTail( b ), ts );
+		if ( !ho )
+			continue;
+		// distance from the click to the head point, and to the head->tail segment
+		float d2 = float( QPointF::dotProduct( pos - hs, pos - hs ) );
+		if ( to ) {
+			QPointF ab = ts - hs;
+			float len2 = float( QPointF::dotProduct( ab, ab ) );
+			if ( len2 > 1e-3f ) {
+				float t = qBound( 0.0f, float( QPointF::dotProduct( pos - hs, ab ) ) / len2, 1.0f );
+				QPointF proj = hs + ab * t;
+				d2 = qMin( d2, float( QPointF::dotProduct( pos - proj, pos - proj ) ) );
+			}
+		}
+		if ( d2 < best ) { best = d2; bestBone = b; }
+	}
+	return bestBone;
+}
+
+int GLView::poseBoneProbeForTest() const
+{
+	// project a spatially distinct bone's head to screen (a face sculpt bone,
+	// not the root at origin which overlaps others), then ask poseBoneAt to
+	// resolve it — a self-consistency check for draw + pick sharing geometry
+	if ( poseBones.isEmpty() )
+		return -1;
+	int b = poseBones.first();
+	for ( int cand : poseBones ) {
+		if ( model->get<QString>( model->getBlockIndex( cand ), "Name" )
+				.startsWith( QLatin1String( "skin_bone_" ) ) ) {
+			b = cand;
+			break;
+		}
+	}
+	Node * n = scene ? scene->getNode( model, model->getBlockIndex( b ) ) : nullptr;
+	if ( !n )
+		return -1;
+	QPointF sp;
+	if ( !worldToScreen( n->worldTrans().translation, sp ) )
+		return -1;
+	return poseBoneAt( sp );
+}
+
+void GLView::rebuildPoseWeights()
+{
+	for ( int i = 0; i < PoseWeightBuckets; i++ )
+		poseWeightPts[i].clear();
+	if ( !poseShowWeights || !poseMode || !model )
+		return;
+
+	// target = the bones being inspected: hover + active + selection
+	QSet<int> targets = objSelection;
+	if ( objActive >= 0 )
+		targets.insert( objActive );
+	if ( poseHoverBone >= 0 )
+		targets.insert( poseHoverBone );
+	if ( targets.isEmpty() )
+		return;
+
+	for ( int b = 0; b < model->getBlockCount(); b++ ) {
+		QModelIndex iShape = model->getBlockIndex( b );
+		if ( !model->blockInherits( iShape, "BSTriShape" ) )
+			continue;
+		const int skin = model->getLink( iShape, "Skin" );
+		if ( skin < 0 )
+			continue;
+		QModelIndex iBones = model->getIndex( model->getBlockIndex( skin ), "Bones" );
+
+		// which shape-local bone indices correspond to the target bones
+		QSet<int> localTargets;
+		for ( int r = 0; r < model->rowCount( iBones ); r++ )
+			if ( targets.contains( model->getLink( model->getIndex( iBones, r ) ) ) )
+				localTargets.insert( r );
+		if ( localTargets.isEmpty() )
+			continue;
+
+		Node * sn = scene->getNode( model, iShape );
+		const Transform wt = sn ? sn->worldTrans() : Transform();
+		QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+		const int nv = model->rowCount( iVD );
+		for ( int v = 0; v < nv; v++ ) {
+			QModelIndex row = model->getIndex( iVD, v );
+			QModelIndex iIdx = model->getIndex( row, "Bone Indices" );
+			QModelIndex iW = model->getIndex( row, "Bone Weights" );
+			if ( !iIdx.isValid() || !iW.isValid() )
+				break;   // not a skinned vertex layout
+			float w = 0.0f;
+			for ( int k = 0; k < 4; k++ )
+				if ( localTargets.contains( int( model->get<quint8>( model->getIndex( iIdx, k ) ) ) ) )
+					w += model->get<float>( model->getIndex( iW, k ) );
+			if ( w <= 0.001f )
+				continue;
+			int bucket = qBound( 0, int( w * PoseWeightBuckets ), PoseWeightBuckets - 1 );
+			poseWeightPts[bucket].append( wt * model->get<Vector3>( row, "Vertex" ) );
+		}
+	}
+}
+
+void GLView::drawPoseWeights()
+{
+	if ( !poseShowWeights || !poseMode || !model )
+		return;
+
+	// rebuild only when the inspected bone set changes (hover moves, selection)
+	quint64 sig = 1469598103934665603ull;
+	auto mix = [&sig]( int x ) { sig = ( sig ^ quint64( x ) ) * 1099511628211ull; };
+	mix( poseHoverBone );
+	mix( objActive );
+	for ( int s : objSelection )
+		mix( s );
+	if ( sig != poseWeightSig ) {
+		poseWeightSig = sig;
+		rebuildPoseWeights();
+	}
+
+	glDisable( GL_DEPTH_TEST );
+	glDepthMask( GL_FALSE );
+	scene->loadModelViewMatrix( viewTransform() );
+	const float dpr = float( devicePixelRatioF() );
+	// blue (weak) -> green -> red (strong) heat, brighter/larger for stronger
+	static const float heat[PoseWeightBuckets][3] = {
+		{ 0.30f, 0.45f, 1.00f }, { 0.20f, 0.85f, 0.95f }, { 0.30f, 0.95f, 0.35f },
+		{ 0.95f, 0.85f, 0.20f }, { 1.00f, 0.35f, 0.20f }
+	};
+	for ( int i = 0; i < PoseWeightBuckets; i++ ) {
+		if ( poseWeightPts[i].isEmpty() )
+			continue;
+		scene->setGLPointSize( ( 3.5f + 0.7f * i ) * dpr );
+		scene->setGLColor( heat[i][0], heat[i][1], heat[i][2], 0.9f );
+		scene->drawPoints( poseWeightPts[i].constData(), poseWeightPts[i].size() );
+	}
+	glDepthMask( GL_TRUE );
+	glEnable( GL_DEPTH_TEST );
+}
+
+void GLView::drawPoseSkeleton()
+{
+	if ( !poseMode || !model || !scene || poseBones.isEmpty() )
+		return;
+
+	glDisable( GL_DEPTH_TEST );
+	glDepthMask( GL_FALSE );
+	scene->loadModelViewMatrix( viewTransform() );
+	const float dpr = float( devicePixelRatioF() );
+
+	// Pass 1: thin dashed relationship lines to each bone's parent (Blender's
+	// bone relationship lines) — dim, so they read as structure, not clutter.
+	if ( poseShowRelations ) {
+		scene->setGLLineWidth( 1.0f * dpr );
+		scene->setGLColor( 0.5f, 0.5f, 0.55f, 0.45f );
+		for ( int b : poseBones ) {
+			int p = model->getParent( b );
+			if ( p < 0 || !poseBones.contains( p ) )
+				continue;
+			Node * n = scene->getNode( model, model->getBlockIndex( b ) );
+			Node * pn = scene->getNode( model, model->getBlockIndex( p ) );
+			if ( n && pn )
+				scene->drawDashLine( pn->worldTrans().translation, n->worldTrans().translation, 8 );
+		}
+	}
+
+	// Depth range across the drawn bones, so nearer bones can be drawn brighter
+	// than farther ones — a strong cue that makes a dense cluster far easier to
+	// read and pick (nearest = full brightness, farthest = dim).
+	const Transform vt = viewTransform();
+	float dMin = 1e30f, dMax = -1e30f;
+	QHash<int, float> depth;
+	for ( int b : poseBones ) {
+		Node * n = scene->getNode( model, model->getBlockIndex( b ) );
+		if ( !n )
+			continue;
+		const float d = -( vt * n->worldTrans().translation )[2];   // camera-space, +front
+		depth.insert( b, d );
+		dMin = qMin( dMin, d );
+		dMax = qMax( dMax, d );
+	}
+	const float dRange = qMax( 1e-3f, dMax - dMin );
+
+	// Pass 2: the bones themselves — a short capped shape head->tail + a joint dot.
+	for ( int b : poseBones ) {
+		Node * n = scene->getNode( model, model->getBlockIndex( b ) );
+		if ( !n )
+			continue;
+		const Vector3 head = n->worldTrans().translation;
+		const Vector3 tail = poseBoneTail( b );
+
+		const bool isActive = ( b == objActive || objSelection.contains( b ) );
+		const bool isHover = ( b == poseHoverBone );
+		const bool isPinned = posePinned.contains( b );
+		// near = 1.0, far = 0.35; selected/hover ignore depth so they stay clear
+		const float t = ( dMax - depth.value( b, dMax ) ) / dRange;   // 1 near, 0 far
+		const float f = 0.35f + 0.65f * t;
+		if ( isActive )
+			scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );          // #FF9D00
+		else if ( isPinned )
+			scene->setGLColor( 0.85f * f, 0.85f * f, 0.88f * f, 0.4f + 0.6f * t );  // locked = pale grey
+		else if ( isHover )
+			scene->setGLColor( 1.0f, 0.85f, 0.4f, 1.0f );           // warm hover
+		else
+			scene->setGLColor( 0.55f * f, 0.72f * f, 1.0f * f, 0.35f + 0.6f * t );
+
+		scene->setGLLineWidth( ( isActive ? 2.8f : 1.8f ) * dpr );
+		scene->drawLine( head, tail );
+
+		// joint dot at the head — the main click target; nearer dots a touch bigger
+		scene->setGLPointSize( ( isActive ? 9.0f : ( isHover ? 7.0f : ( 4.0f + 2.0f * t ) ) ) * dpr );
+		scene->drawPoints( &head, 1 );
+	}
+
+	glDepthMask( GL_TRUE );
+	glEnable( GL_DEPTH_TEST );
+}
+
 void GLView::setVertexPaintPreviewColors( int targetBlock, const QVector<Color4> & colors )
 {
 	Shape * shape = shapeForBlock( targetBlock );
@@ -801,7 +1336,15 @@ void GLView::updateSettings()
 	QSettings settings;
 	settings.beginGroup( "Settings/Render" );
 
-	cfg.background = Color4( settings.value( "Colors/Background", QColor( 46, 46, 46 ) ).value<QColor>() );
+	// Default follows the skin ("viewport") rather than a neutral 46/46/46 grey,
+	// which read cold next to the blue-charcoal chrome.
+	cfg.background = Color4( settings.value( "Colors/Background",
+		QColor::fromString( wwSkinColor( "viewport" ) ) ).value<QColor>() );
+
+	// Same-name .pbrm discovery. Cached into a static so material resolution
+	// never reads QSettings per shader property. Direct .pbrm links are not
+	// affected by this toggle.
+	setPbrmAutoReplace( settings.value( "PBRM Auto Replace", true ).toBool() );
 	// Preserve the Settings defaults on a clean profile. QVariant::toFloat()
 	// returns zero for a missing key, which previously reduced both keyboard
 	// camera transforms and Shift+F fly movement to a no-op until the Render
@@ -2249,6 +2792,12 @@ void GLView::paintGL()
 		glEnable( GL_DEPTH_TEST );
 	}
 
+	// Pose Mode: bone-influence overlay under the skeleton, then the skeleton
+	if ( poseMode ) {
+		drawPoseWeights();
+		drawPoseSkeleton();
+	}
+
 	// Blender-style origin dots + parent relationship lines for the selection
 	if ( model && showOrigins && ( !objSelection.isEmpty() || ( editMode && !editShapeBlocks.isEmpty() ) ) ) {
 		const QSet<int> & selN = editMode ? editShapeBlocks : objSelection;
@@ -2329,6 +2878,39 @@ void GLView::paintGL()
 		}
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		QPainter painter( this );
+		// Pose Mode bone name labels. With the Names toggle on, every bone is
+		// labelled; the hovered bone is ALWAYS labelled (a hover tooltip under
+		// the cursor) even when the toggle is off.
+		if ( poseMode && model && !poseBones.isEmpty() ) {
+			painter.setRenderHint( QPainter::Antialiasing, true );
+			QFont f = painter.font();
+			f.setPointSizeF( 8.0 );
+			painter.setFont( f );
+			auto label = [&]( int b, bool underCursor ) {
+				Node * n = scene->getNode( model, model->getBlockIndex( b ) );
+				if ( !n )
+					return;
+				QPointF sp;
+				if ( !worldToScreen( n->worldTrans().translation, sp ) )
+					return;
+				const QString name = model->get<QString>( model->getBlockIndex( b ), "Name" );
+				if ( name.isEmpty() )
+					return;
+				const bool hot = ( b == objActive || b == poseHoverBone );
+				// hovered label sits just BELOW the joint, others to the right
+				const QPointF off = underCursor ? QPointF( -1, 15 ) : QPointF( 6, 3 );
+				painter.setPen( QColor( 0, 0, 0, 200 ) );
+				painter.drawText( sp + off + QPointF( 1, 1 ), name );
+				painter.setPen( hot ? QColor( 255, 200, 90 ) : QColor( 200, 216, 255 ) );
+				painter.drawText( sp + off, name );
+			};
+			if ( poseShowBoneNames )
+				for ( int b : poseBones )
+					if ( b != poseHoverBone )
+						label( b, false );
+			if ( poseHoverBone >= 0 )
+				label( poseHoverBone, true );   // always, and under the cursor
+		}
 		if ( model && showCursor )
 			drawCursorOverlay( painter );
 		if ( scene->hasOption( Scene::ShowAxes ) )
@@ -3882,6 +4464,9 @@ bool GLView::gizmoBegin( int mode )
 	// whose ancestor is also selected are skipped so they are not moved twice.
 	gizmoNodes.clear();
 	auto addNode = [this]( int nb ) {
+		// pinned bones are locked: never moved by a pose transform
+		if ( poseMode && posePinned.contains( nb ) )
+			return;
 		QModelIndex ib = model->getBlockIndex( nb );
 		if ( !model->getIndex( ib, "Translation" ).isValid() )
 			return;
@@ -5702,11 +6287,13 @@ int GLView::mirrorPartnerOf( int shapeBlock, int vi ) const
 		buckets[cellKey( cellOf( p[0] ), cellOf( p[1] ), cellOf( p[2] ) )].append( i );
 	}
 	QHash<int, int> pairs;
+	const int ax = qBound( 0, mirrorAxis, 2 );
 	for ( int i = 0; i < nv; i++ ) {
 		const Vector3 & p = s->verts.at( i );
-		if ( std::fabs( p[0] ) <= tol )
+		if ( std::fabs( p[ax] ) <= tol )
 			continue;
-		const Vector3 m( -p[0], p[1], p[2] );
+		Vector3 m = p;
+		m[ax] = -m[ax];   // mirror across the chosen axis plane
 		int best = -1;
 		float bestD = tol;
 		const int cx = cellOf( m[0] ), cy = cellOf( m[1] ), cz = cellOf( m[2] );
@@ -5735,6 +6322,102 @@ int GLView::mirrorPartnerOf( int shapeBlock, int vi ) const
 	slot.first = nv;
 	slot.second = pairs;
 	return slot.second.value( vi, -1 );
+}
+
+int GLView::proportionalSelfTestForTest( bool & falloffMonotonic )
+{
+	falloffMonotonic = false;
+	if ( !model )
+		return -1;
+	// biggest editable shape
+	int sb = -1, best = -1;
+	for ( int b = 0; b < model->getBlockCount(); b++ ) {
+		if ( !isEditableMesh( model->getBlockIndex( b ) ) )
+			continue;
+		int nv = model->get<int>( model->getBlockIndex( b ), "Num Vertices" );
+		if ( nv > best ) { best = nv; sb = b; }
+	}
+	if ( sb < 0 )
+		return -1;
+	scene->currentBlock = model->getBlockIndex( sb );
+	scene->currentIndex = scene->currentBlock;
+	setEditMode( true );
+	if ( !editMode )
+		return -1;
+
+	// pick a central vertex
+	Shape * shape = shapeForBlock( sb );
+	if ( !shape || shape->verts.isEmpty() )
+		return -1;
+	pickedElems.clear();
+	PickedElement pe;
+	pe.shapeBlock = sb;
+	pe.type = 1;
+	pe.e0 = shape->verts.size() / 2;
+	pickedElems.append( pe );
+	pickMode = 1;
+
+	proportionalEdit = true;
+	proportionalFalloff = 0;   // Smooth
+	proportionalRadius = 0.0f; // auto
+	if ( !gizmoBeginElement( 1 ) )
+		return -1;
+
+	// count neighbours (falloff < 1) and check nearer => higher weight
+	const Vector3 sel = elemVerts.isEmpty() ? Vector3() : elemVerts.first().origWorld;
+	int neighbours = 0;
+	float nearD = 1e30f, farD = -1.0f, nearW = 0, farW = 1;
+	for ( const auto & ev : elemVerts ) {
+		if ( ev.falloff >= 0.999f )
+			continue;
+		neighbours++;
+		float d = ( ev.origWorld - sel ).length();
+		if ( d < nearD ) { nearD = d; nearW = ev.falloff; }
+		if ( d > farD ) { farD = d; farW = ev.falloff; }
+	}
+	falloffMonotonic = ( neighbours < 2 ) || ( nearW >= farW );
+
+	// cancel the gesture cleanly and leave edit mode
+	gizmoMode = 0;
+	elemTransform = false;
+	elemVerts.clear();
+	pickedElems.clear();
+	proportionalEdit = false;
+	setEditMode( false );
+	return neighbours;
+}
+
+float GLView::proportionalWeight( float d, float radius, int vseed ) const
+{
+	if ( radius <= 0.0f || d >= radius )
+		return 0.0f;
+	const float x = 1.0f - d / radius;   // 1 at centre, 0 at the edge
+	switch ( proportionalFalloff ) {
+	case 1: return std::sqrt( qMax( 0.0f, 2.0f * x - x * x ) );  // Sphere
+	case 2: return std::sqrt( x );                              // Root
+	case 3: return x * ( 2.0f - x );                            // Inverse Square
+	case 4: return x * x;                                       // Sharp
+	case 5: return x;                                           // Linear
+	case 6: return 1.0f;                                        // Constant
+	case 7: {                                                   // Random
+		quint32 h = quint32( vseed ) * 2654435761u; h ^= h >> 15;
+		return x * ( float( h & 0xffff ) / 65535.0f );
+	}
+	default: return x * x * ( 3.0f - 2.0f * x );                // Smooth (smoothstep)
+	}
+}
+
+float GLView::proportionalEffectiveRadius() const
+{
+	if ( proportionalRadius > 0.0f )
+		return proportionalRadius;
+	// auto: a fraction of the edited shapes' bounding radius
+	float best = 0.0f;
+	for ( int sb : editShapeBlocks ) {
+		if ( Shape * s = shapeForBlock( sb ) )
+			best = qMax( best, s->bounds().radius );
+	}
+	return ( best > 0.0f ) ? best * 0.25f : 10.0f;
 }
 
 bool GLView::gizmoBeginElement( int mode )
@@ -5778,6 +6461,60 @@ bool GLView::gizmoBeginElement( int mode )
 		for ( const auto & ev : elemVerts )
 			m += ev.origWorld;
 		elemPivot = m / float( elemVerts.size() );
+	}
+
+	// Proportional editing: unselected vertices within the radius of a selected
+	// vertex join the gesture as followers with a falloff weight (< 1), so the
+	// transform spreads smoothly. Excluded from the pivot (computed above).
+	if ( proportionalEdit ) {
+		const float radius = proportionalEffectiveRadius();
+		QSet<quint64> selected;
+		for ( const auto & ev : elemVerts )
+			selected.insert( ( quint64( quint32( ev.shape ) ) << 32 ) | quint32( ev.idx ) );
+		// per-shape original selected-world positions, to measure distance
+		QHash<int, QVector<Vector3>> selWorldByShape;
+		for ( const auto & ev : elemVerts )
+			selWorldByShape[ev.shape].append( ev.origWorld );
+
+		const int nDirect = elemVerts.size();
+		for ( int sb : editShapeBlocks ) {
+			Shape * shape = shapeForBlock( sb );
+			QModelIndex iShape = model->getBlockIndex( sb );
+			Node * n = scene->getNode( model, iShape );
+			if ( !shape || !n )
+				continue;
+			auto sw = selWorldByShape.constFind( sb );
+			if ( sw == selWorldByShape.constEnd() )
+				continue;   // no selection on this shape → nothing spreads here
+			Transform wt = shapeRenderTrans( n );
+			const int nv = shape->verts.size();
+			for ( int vi = 0; vi < nv; vi++ ) {
+				if ( selected.contains( ( quint64( quint32( sb ) ) << 32 ) | quint32( vi ) ) )
+					continue;
+				Vector3 local;
+				if ( !tlGetVertexLocal( model, iShape, vi, local ) )
+					continue;
+				Vector3 w = wt * ( editDeformedCageActive() ? shape->skinVertex( vi, local ) : local );
+				// nearest selected vertex on this shape
+				float dmin = 1.0e30f;
+				for ( const Vector3 & p : sw.value() )
+					dmin = qMin( dmin, ( w - p ).length() );
+				if ( dmin >= radius )
+					continue;
+				float fw = proportionalWeight( dmin, radius, vi );
+				if ( fw <= 1.0e-4f )
+					continue;
+				ElemVert ev;
+				ev.shape = sb;
+				ev.idx = vi;
+				ev.origLocal = local;
+				ev.origWorld = w;
+				ev.currentLocal = local;
+				ev.falloff = fw;
+				elemVerts.append( ev );
+			}
+		}
+		Q_UNUSED( nDirect );
 	}
 
 	// X-mirror: unselected mirror partners join the gesture as FOLLOWERS —
@@ -6047,7 +6784,8 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		for ( auto & ev : elemVerts ) {
 			if ( ev.mirrorOf >= 0 )
 				continue;	// X-mirror follower: set from its source below
-			previewVertex( ev, toLocal( ev.shape, ev.origWorld + deltaWorld ) );
+			// proportional followers move by delta scaled by their falloff
+			previewVertex( ev, toLocal( ev.shape, ev.origWorld + deltaWorld * ev.falloff ) );
 		}
 		status = tr( "Move: %1, %2, %3" ).arg( deltaWorld[0], 0, 'f', 3 ).arg( deltaWorld[1], 0, 'f', 3 ).arg( deltaWorld[2], 0, 'f', 3 );
 	} else if ( gizmoMode == 2 ) {
@@ -6067,7 +6805,12 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		for ( auto & ev : elemVerts ) {
 			if ( ev.mirrorOf >= 0 )
 				continue;	// X-mirror follower
-			Vector3 w = elemPivot + dr * ( ev.origWorld - elemPivot );
+			Matrix drf = dr;
+			if ( ev.falloff < 0.999f ) {   // proportional: rotate by angle*falloff
+				Quat qf; qf.fromAxisAngle( axis, deg2rad( angle * ev.falloff ) );
+				drf.fromQuat( qf );
+			}
+			Vector3 w = elemPivot + drf * ( ev.origWorld - elemPivot );
 			previewVertex( ev, toLocal( ev.shape, w ) );
 		}
 		status = tr( "Rotate: %1°" ).arg( angle, 0, 'f', 1 );
@@ -6079,7 +6822,9 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		for ( auto & ev : elemVerts ) {
 			if ( ev.mirrorOf >= 0 )
 				continue;	// X-mirror follower
-			Vector3 rel = ev.origWorld - elemPivot; if ( gizmoAxis > 0 ) rel[gizmoAxis - 1] *= factor; else rel = rel * factor; Vector3 w = elemPivot + rel;	/* axis-constrained scale (Blender S,X/Y/Z) */
+			// proportional followers scale toward 1 by their falloff
+			const float ff = ( ev.falloff < 0.999f ) ? ( 1.0f + ( factor - 1.0f ) * ev.falloff ) : factor;
+			Vector3 rel = ev.origWorld - elemPivot; if ( gizmoAxis > 0 ) rel[gizmoAxis - 1] *= ff; else rel = rel * ff; Vector3 w = elemPivot + rel;	/* axis-constrained scale (Blender S,X/Y/Z) */
 			previewVertex( ev, toLocal( ev.shape, w ) );
 		}
 		status = tr( "Scale: ×%1" ).arg( factor, 0, 'f', 3 );
@@ -6090,7 +6835,8 @@ void GLView::gizmoUpdateElement( const QPoint & pos, Qt::KeyboardModifiers mods 
 		if ( ev.mirrorOf < 0 || ev.mirrorOf >= elemVerts.size() )
 			continue;
 		const Vector3 & srcL = elemVerts.at( ev.mirrorOf ).currentLocal;
-		const Vector3 mLocal( -srcL[0], srcL[1], srcL[2] );
+		Vector3 mLocal = srcL;
+		mLocal[qBound( 0, mirrorAxis, 2 )] = -mLocal[qBound( 0, mirrorAxis, 2 )];
 		Shape * shape = shapeForBlock( ev.shape );
 		if ( shape && ev.idx >= 0 && ev.idx < shape->verts.size() ) {
 			ev.currentLocal = mLocal;
@@ -14004,18 +14750,38 @@ void GLView::populateMeshMenu( QMenu * m )
 	m->addAction( tr( "Delete…\tX" ), this,
 		[this]() { showDeleteMenu(); } )->setEnabled( hasSel );
 	m->addSeparator();
-	// Blender's Mirror X: modal transforms also move the unselected mirror
-	// partner of each vertex (paired by position, X-negated)
-	QAction * aMirror = m->addAction( tr( "Mirror Editing (X)" ) );
+	// Blender's Mirror Editing: modal transforms also move the unselected mirror
+	// partner of each vertex (paired by position across the chosen axis plane)
+	QMenu * mirrorMenu = m->addMenu( tr( "Mirror Editing" ) );
+	QAction * aMirror = mirrorMenu->addAction( tr( "Enabled" ) );
 	aMirror->setCheckable( true );
 	aMirror->setChecked( mirrorEditing );
 	connect( aMirror, &QAction::toggled, this, [this]( bool on ) {
 		mirrorEditing = on;
 		QSettings settings;
 		settings.setValue( "GLView/Edit/MirrorX", on );
-		emit gizmoStatus( on ? tr( "Mirror editing ON (X axis, position-paired)" )
+		emit gizmoStatus( on ? tr( "Mirror editing ON (position-paired)" )
 			: tr( "Mirror editing off" ) );
 	} );
+	mirrorMenu->addSeparator();
+	QActionGroup * mirrorAxisGrp = new QActionGroup( mirrorMenu );
+	static const char * axisLbl[3] = { "X axis", "Y axis", "Z axis" };
+	for ( int a = 0; a < 3; a++ ) {
+		QAction * aa = mirrorMenu->addAction( tr( axisLbl[a] ) );
+		aa->setCheckable( true );
+		aa->setChecked( mirrorAxis == a );
+		mirrorAxisGrp->addAction( aa );
+		connect( aa, &QAction::triggered, this, [this, a]() {
+			setMirrorAxis( a );
+			emit gizmoStatus( tr( "Mirror axis: %1" ).arg( QLatin1String( axisLbl[a] ) ) );
+		} );
+	}
+	// proportional editing quick access (also O / Shift+O)
+	m->addSeparator();
+	QAction * aProp = m->addAction( tr( "Proportional Editing (O)" ) );
+	aProp->setCheckable( true );
+	aProp->setChecked( proportionalEdit );
+	connect( aProp, &QAction::toggled, this, [this]( bool on ) { setProportionalEdit( on ); } );
 }
 
 void GLView::populateVertexMenu( QMenu * m )
@@ -16637,6 +17403,15 @@ void GLView::modelChanged()
 {
 	invalidateOverlayCaches();
 
+	// keep the pose skeleton in step with the model: bones (and their block
+	// numbers) change on any reload, so a stale poseBones list would draw and
+	// pick the wrong nodes — or nothing, if it was built on an empty model.
+	if ( poseMode ) {
+		refreshPoseBones();
+		if ( poseRestPose.isEmpty() )
+			capturePoseRest();
+	}
+
 	if ( doCompile )
 		return;
 
@@ -17663,6 +18438,21 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			checkerDeselect();
 			return;
 		}
+		// proportional editing: O toggles, Shift+O cycles the falloff curve
+		// (works in edit mode for vertices and pose mode for bones)
+		if ( shortcuts.matches( "viewport.proportional_falloff", event->key(), mods )
+			 && ( editMode || poseMode ) ) {
+			static const char * fn[8] = { "Smooth", "Sphere", "Root", "Inverse Square",
+				"Sharp", "Linear", "Constant", "Random" };
+			proportionalFalloff = ( proportionalFalloff + 1 ) % 8;
+			emit gizmoStatus( tr( "Proportional falloff: %1" ).arg( QLatin1String( fn[proportionalFalloff] ) ) );
+			return;
+		}
+		if ( shortcuts.matches( "viewport.proportional", event->key(), mods )
+			 && ( editMode || poseMode ) ) {
+			setProportionalEdit( !proportionalEdit );
+			return;
+		}
 		if ( shortcuts.matches( "viewport.split", event->key(), mods ) && editMode ) {
 			splitSelection();
 			return;
@@ -17785,6 +18575,15 @@ void GLView::mouseDoubleClickEvent( QMouseEvent * )
 
 void GLView::mouseMoveEvent( QMouseEvent * event )
 {
+	// Pose Mode hover highlight: light the bone under the cursor
+	if ( poseMode && !gizmoMode ) {
+		int h = poseBoneAt( getQMouseEventPosition( event ) );
+		if ( h != poseHoverBone ) {
+			poseHoverBone = h;
+			update();
+		}
+	}
+
 	// knife rubber band follows the cursor (also while MMB-orbiting)
 	if ( knifeActive ) {
 		knifeHoverValid = knifeProbe( getQMouseEventPosition( event ), knifeHoverPt );
@@ -18362,6 +19161,26 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 		if ( event->button() == Qt::ForwardButton || event->button() == Qt::BackButton
 			|| event->button() == Qt::MiddleButton ) {
 			event->ignore();
+			return;
+		}
+
+		// Pose Mode: a click picks the nearest bone (not the mesh under it) and
+		// selects that bone node, so the existing G/R/S transform poses it.
+		// Shift/Ctrl+click adds to the selection; G/R/S then poses every selected
+		// bone at once (the object gizmo already transforms all of objSelection).
+		if ( poseMode && event->button() == selectMouseButton() && !isColorPicker ) {
+			int bone = poseBoneAt( evtPos );
+			if ( bone >= 0 ) {
+				const bool extend = event->modifiers() & ( Qt::ShiftModifier | Qt::ControlModifier );
+				objectSelectClick( bone, extend );
+				scene->currentBlock = model->getBlockIndex( bone );
+				scene->currentIndex = scene->currentBlock;
+				emit poseBonePicked( bone );
+				emit clicked( model->getBlockIndex( bone ) );
+			} else if ( !( event->modifiers() & ( Qt::ShiftModifier | Qt::ControlModifier ) ) ) {
+				objectSelectClick( -1, false );   // click empty = clear selection
+			}
+			update();
 			return;
 		}
 

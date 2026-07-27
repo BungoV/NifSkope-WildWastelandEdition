@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "glview.h"
 #include "nifskope.h"
 #include "nifsnapshot.h"
+#include "wwskin.h"
 #include "gl/glcontext.hpp"
 #include "gl/gltex.h"
 #include "gl/glscene.h"
@@ -100,9 +101,10 @@ public:
 		setButtonSymbols( QAbstractSpinBox::NoButtons );	// we draw ‹ › ourselves
 		setAlignment( Qt::AlignCenter );
 		setStyleSheet( QStringLiteral(
-			"QDoubleSpinBox { background: #545454; border: none; border-radius: 3px; color: #e6e6e6; }"
-			"QLineEdit { background: transparent; border: none; color: #e6e6e6;"
-			" selection-background-color: #4772b3; selection-color: #ffffff; }" ) );
+			"QDoubleSpinBox { background: %1; border: none; border-radius: 3px; color: %2; }"
+			"QLineEdit { background: transparent; border: none; color: %2;"
+			" selection-background-color: %3; selection-color: #ffffff; }" )
+			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ) ) );
 		if ( QLineEdit * le = lineEdit() ) {
 			// the spin box's internal line edit gets the mouse events, so drive
 			// the drag from an event filter on it (a subclass override never fires)
@@ -5536,10 +5538,12 @@ QDockWidget * tlCreateUVManagerDock( NifModel * nif, QMainWindow * mw, GLView * 
 	opPanel->setAutoFillBackground( true );
 	opPanel->setStyleSheet( QStringLiteral(
 		"QFrame#UVOperatorPanel {"
-		" background: #2f2f2f; border: 1px solid #202020; }"
-		"QLabel { color: #cccccc; background: transparent; }"
-		"QToolButton { color: #cccccc; background: transparent; border: none; }"
-		"QToolButton:hover { color: #ffffff; }" ) );
+		" background: %1; border: 1px solid %2; }"
+		"QLabel { color: %3; background: transparent; }"
+		"QToolButton { color: %3; background: transparent; border: none; }"
+		"QToolButton:hover { color: %4; }" )
+		.arg( wwSkinColor( "bgCard" ), wwSkinColor( "borderStrong" ),
+			  wwSkinColor( "text" ), wwSkinColor( "textBright" ) ) );
 	opPanel->hide();
 
 	auto * opOuter = new QVBoxLayout( opPanel );

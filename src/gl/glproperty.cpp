@@ -981,6 +981,99 @@ void BSShaderLightingProperty::setMaterial( const NifModel * nif, const QModelIn
 		delete newMaterial;
 	else
 		material = newMaterial;
+
+	resolvePbrm( nif );
+}
+
+/*! PBRM rendering is UNFINISHED — the PBR programs bind and issue draws but
+ * produce no pixels for lighting-shader shapes (WW_CHANGES 2026-07-27e has the
+ * RenderDoc findings and the eliminated causes).
+ *
+ * Gated here rather than only in the UI so that no code path — settings restore,
+ * a stale QSettings value, a future caller — can switch it on by accident. Flip
+ * this one constant to resume, and re-enable the matching menu entries.
+ */
+static constexpr bool pbrmFeatureEnabled = false;
+
+static bool pbrmAutoReplaceCached = true;
+
+void setPbrmAutoReplace( bool on )
+{
+	pbrmAutoReplaceCached = on;
+}
+
+bool pbrmAutoReplaceEnabled()
+{
+	return pbrmFeatureEnabled && pbrmAutoReplaceCached;
+}
+
+static int pbrmModeCached = PbrmModeLegacy;
+
+void setPbrmMode( int mode )
+{
+	pbrmModeCached = ( mode >= PbrmModeLegacy && mode <= PbrmModeLegacyAndPBR ) ? mode : PbrmModeLegacy;
+}
+
+int pbrmMode()
+{
+	// Force Legacy while the feature is gated, whatever is stored.
+	return pbrmFeatureEnabled ? pbrmModeCached : int( PbrmModeLegacy );
+}
+
+/*! Resolve a PBRM for this property.
+ *
+ * 1. **Direct link** — the material name itself ends in `.pbrm`. Unconditional:
+ *    the asset asked for it explicitly.
+ * 2. **Same-name discovery** — a `.bgsm`/`.bgem` with a `foo.pbrm` beside it,
+ *    only while `pbrmAutoReplace` is on.
+ *
+ * Case 2 is deliberately an editor-side preview convenience: it lets an existing
+ * FO4 asset be previewed against a new PBRM without editing the NIF. The PBRM
+ * spec says a runtime consults no same-name BGSM/BGEM, which case 1 honours —
+ * that is why case 2 is opt-in and must not be mistaken for runtime behaviour.
+ *
+ * Reads through `getResourceFile`, the same VFS path Material::openFile uses, so
+ * a PBRM inside a BA2 resolves exactly like a BGSM does.
+ */
+void BSShaderLightingProperty::resolvePbrm( const NifModel * nif )
+{
+	pbrm = PbrmMaterial();
+	pbrmValid = false;
+	pbrmUnsupported = false;
+	pbrmPath.clear();
+
+	if ( !nif || name.isEmpty() )
+		return;
+
+	QString candidate;
+	if ( name.endsWith( QLatin1StringView( ".pbrm" ), Qt::CaseInsensitive ) ) {
+		candidate = name;
+	} else if ( pbrmAutoReplaceEnabled()
+		&& ( name.endsWith( QLatin1StringView( ".bgsm" ), Qt::CaseInsensitive )
+			|| name.endsWith( QLatin1StringView( ".bgem" ), Qt::CaseInsensitive ) ) ) {
+		candidate = name.left( name.length() - 5 ) + QLatin1StringView( ".pbrm" );
+	}
+	if ( candidate.isEmpty() )
+		return;
+
+	// Probe quietly first. getResourceFile() logs "not found in archives" on a
+	// miss, and for same-name discovery a miss is the NORMAL case — every BGSM in
+	// every scene would emit a warning on every load.
+	if ( nif->findResourceFile( candidate, "materials", "" ).isEmpty() )
+		return;
+
+	QByteArray data;
+	nif->getResourceFile( data, candidate, "materials", "" );
+	if ( data.isEmpty() )
+		return;
+
+	pbrm = pbrmParse( data );
+	if ( !pbrm.error.isEmpty() )
+		return;			// malformed: leave the BGSM in charge
+
+	pbrmValid = pbrm.ok;
+	pbrmUnsupported = pbrm.unsupported;
+	pbrmPath = candidate;
 }
 
 void BSShaderLightingProperty::setSFMaterial( const QString & mat_name )

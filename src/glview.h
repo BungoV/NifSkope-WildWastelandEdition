@@ -119,6 +119,42 @@ public:
 	//! model as Weight Paint. The manager owns RGBA writes and Undo snapshots.
 	void setVertexPaintMode( bool enabled, int targetBlock = -1, float radius = 32.0f );
 	bool vertexPaintModeActive() const { return vertexPaintMode; }
+
+	// Pose Mode: a viewport mode (peer of Object/Edit/paint) for posing the
+	// skeleton. While active the bones are drawn connected by parenting and
+	// clicks pick bones instead of meshes; a click selects the bone node so the
+	// existing G/R/S transform poses it. No mesh topology is touched.
+	void setPoseMode( bool enabled );
+	bool poseModeActive() const { return poseMode; }
+	//! Show bone names beside the bones (toggle).
+	void setPoseShowBoneNames( bool on ) { poseShowBoneNames = on; update(); }
+	//! Show dashed parent-relationship lines (toggle).
+	void setPoseShowRelations( bool on ) { poseShowRelations = on; update(); }
+	//! Which bones are drawn/pickable: 0 all, 1 deforming only, 2 face sculpt (skin_bone_C_*).
+	void setPoseBoneFilter( int filter ) { poseBoneFilterMode = filter; refreshPoseBones(); update(); }
+	int poseBoneFilter() const { return poseBoneFilterMode; }
+	//! Restore bone(s) to the rest captured on entering pose mode. channels
+	//! bitmask: 1 rotation, 2 location, 4 scale (7 = all). block < 0 = all bones.
+	void poseResetBone( int block, int channels );
+	//! Mirror a bone's pose onto its L/R counterpart across the X axis (Blender
+	//! X-Axis Mirror). Assumes a symmetric rig. Returns the counterpart block,
+	//! or -1 if none was found by name.
+	int poseMirrorBone( int block );
+	//! Import / export an Outfit Studio pose XML, using the rest captured on
+	//! entering pose mode as the delta base. Import returns bones applied (0 =
+	//! failure, message in *error); export returns success.
+	int poseImportOutfitStudio( const QString & path, float blend, QString * error );
+	bool poseExportOutfitStudio( const QString & path, const QString & name, QString * error );
+	//! Test hooks (WW_POSEDRAW_TEST): bone count, and does poseBoneAt resolve a
+	//! bone at its own drawn screen position.
+	int poseBoneCountForTest() const { return poseBones.size(); }
+	int poseBoneProbeForTest() const;
+	bool worldToScreenForTest( const Vector3 & w, QPointF & out ) const { return worldToScreen( w, out ); }
+	int objectSelectionCountForTest() const { return objSelection.size(); }
+	int poseWeightPointCountForTest() const { int n = 0; for ( int i = 0; i < PoseWeightBuckets; i++ ) n += poseWeightPts[i].size(); return n; }
+	//! Set up a central-vertex pick + proportional move on the biggest shape;
+	//! reports neighbours gathered and whether nearer neighbours got more weight.
+	int proportionalSelfTestForTest( bool & falloffMonotonic );
 	void setVertexPaintBrushEnabled( bool enabled );
 	bool vertexPaintBrushActive() const { return vertexPaintMode && vertexPaintBrushEnabled; }
 	float vertexPaintBrushRadius() const { return vertexPaintRadius; }
@@ -332,6 +368,9 @@ signals:
 	void vertexPaintStrokeEnded( bool commit );
 	void vertexPaintModeChanged( bool enabled );
 	void vertexPaintBrushChanged( bool enabled );
+	void poseModeChanged( bool enabled );
+	//! A bone was picked in the viewport (block number), so the dock can sync.
+	void poseBonePicked( int blockNumber );
 	void segmentPaintStrokeBegan();
 	void segmentPaintBrushSample( int targetBlock, const QVector<int> & triangles );
 	void segmentPaintStrokeEnded( bool commit );
@@ -653,8 +692,15 @@ public:
 	//! vertex, X-negated in local space; partners are paired by position
 	//! (1e-3 tolerance) at first use and cached per topology
 	bool mirrorEditing = false;
+	int mirrorAxis = 0;                  //!< 0 X, 1 Y, 2 Z (Blender mirror axis)
 	mutable QHash<int, QPair<int, QHash<int, int>>> mirrorPairCache;
 	int mirrorPartnerOf( int shapeBlock, int vi ) const;
+public:
+	void setMirrorEditing( bool on ) { mirrorEditing = on; }
+	bool mirrorEditingActive() const { return mirrorEditing; }
+	void setMirrorAxis( int a ) { a = qBound( 0, a, 2 ); if ( a != mirrorAxis ) { mirrorAxis = a; mirrorPairCache.clear(); } }
+	int mirrorAxisValue() const { return mirrorAxis; }
+private:
 	//! Fill a face PickedElement for a triangle (world corners, center, normal)
 	bool buildFacePick( int shapeBlock, int tri, PickedElement & pe ) const;
 	//! Add the missing quad partners of any face picks in elems (a marked
@@ -748,9 +794,27 @@ public:
 	// ---- element modal transform (G/R/S on picked verts/edges/faces) ----
 	bool elemTransform = false;
 	struct ElemVert { int shape; int idx; Vector3 origLocal; Vector3 origWorld; Vector3 currentLocal;
-		int mirrorOf = -1; };	//!< >= 0: follower of elemVerts[mirrorOf], X-negated (X-mirror)
+		int mirrorOf = -1;	//!< >= 0: follower of elemVerts[mirrorOf], X-negated (X-mirror)
+		float falloff = 1.0f; };	//!< < 1: proportional-editing neighbour, transform scaled
 	QVector<ElemVert> elemVerts;
 	QVector<ElemVert> lastElemVerts;    //!< last committed edit gesture, for the redo panel
+
+	// Proportional editing (Blender O): a transform spreads to unselected
+	// vertices within a radius, scaled by a falloff curve.
+	bool proportionalEdit = false;
+	int  proportionalFalloff = 0;       //!< 0 Smooth 1 Sphere 2 Root 3 InvSquare 4 Sharp 5 Linear 6 Constant 7 Random
+	float proportionalRadius = 0.0f;    //!< world units; 0 = auto from model size
+	//! Falloff weight for a neighbour at world distance d within the radius.
+	float proportionalWeight( float d, float radius, int vseed ) const;
+	//! Effective radius (auto-sized from the edited shapes' bounds if 0).
+	float proportionalEffectiveRadius() const;
+public:
+	void setProportionalEdit( bool on ) { proportionalEdit = on; emit gizmoStatus( on ? tr( "Proportional editing on" ) : tr( "Proportional editing off" ) ); }
+	bool proportionalEditActive() const { return proportionalEdit; }
+	void setProportionalFalloff( int f ) { proportionalFalloff = qBound( 0, f, 7 ); }
+	int  proportionalFalloffType() const { return proportionalFalloff; }
+	void setProportionalRadius( float r ) { proportionalRadius = qMax( 0.0f, r ); }
+	float proportionalRadiusValue() const { return proportionalRadius; }
 	Vector3 elemPivot;                  // world-space pivot (median or 3D cursor)
 	//! Vertices affected by the current picked-element selection, grouped per shape
 	QHash<int, QSet<int>> pickedVertexRefs() const;
@@ -937,6 +1001,52 @@ public:
 	int vertexPaintTarget = -1;
 	float vertexPaintRadius = 32.0f;
 	QPointF vertexPaintPos;
+
+	// ---- Pose Mode ----
+	bool poseMode = false;
+	bool poseShowBoneNames = false;
+	bool poseShowRelations = true;        //!< draw parent-relationship lines
+	bool poseShowWeights = false;         //!< highlight the hovered/selected bone's verts
+	bool poseNonDestructive = true;       //!< restore real bone nodes on exit
+	bool poseBaked = false;               //!< this session's pose was committed
+	int  poseBoneFilterMode = 0;          //!< 0 all, 1 deforming, 2 face sculpt
+	QSet<int> posePinned;                 //!< bones locked from transforms
+public:
+	void setPoseShowWeights( bool on ) { poseShowWeights = on; update(); }
+	void setPoseNonDestructive( bool on ) { poseNonDestructive = on; }
+	bool poseNonDestructiveActive() const { return poseNonDestructive; }
+	//! Commit the current pose so leaving pose mode won't restore the bones.
+	void poseBakeToBones() { poseBaked = true; capturePoseRest(); emit gizmoStatus( tr( "Pose baked into the bones" ) ); }
+	//! Pin / unpin a bone (locked from transforms, mirror, proportional spread).
+	void poseTogglePin( int block ) { if ( posePinned.contains( block ) ) posePinned.remove( block ); else posePinned.insert( block ); update(); }
+	bool poseIsPinned( int block ) const { return posePinned.contains( block ); }
+	void poseClearPins() { posePinned.clear(); update(); }
+	QVector<int> poseBones;               //!< bone block numbers currently drawn/pickable
+	int  poseHoverBone = -1;              //!< bone under the cursor (hover highlight)
+	float poseBoneSize = 4.0f;            //!< characteristic bone length (capped stub size)
+	// weight-influence overlay: verts the hovered/active bone drives, bucketed
+	// by weight so a dense mesh draws in a handful of point batches (rebuilt
+	// only when the target bone changes, keyed by poseWeightSig)
+	static constexpr int PoseWeightBuckets = 5;
+	QVector<Vector3> poseWeightPts[PoseWeightBuckets];
+	quint64 poseWeightSig = ~0ull;
+	void rebuildPoseWeights();
+	void drawPoseWeights();
+	//! Rebuild poseBones from the file's skinned shapes under the active filter.
+	void refreshPoseBones();
+	//! Draw the skeleton (bones + parenting) — called from paintGL in pose mode.
+	void drawPoseSkeleton();
+	//! Screen-space nearest bone to a viewport point; -1 if none within range.
+	int poseBoneAt( const QPointF & pos ) const;
+	//! A bone's tail in world space: its sole child's origin, the mean of several
+	//! children, or a short stub down the local axis for a leaf.
+	Vector3 poseBoneTail( int boneBlock ) const;
+	//! Local transforms captured on entering pose mode = the "rest" a reset
+	//! restores to. Keyed by block number.
+	QHash<int, Transform> poseRestPose;
+	void capturePoseRest();
+	//! Rest transforms keyed by bone NAME (the key OS pose XML uses).
+	QHash<QString, Transform> poseRestByName() const;
 	QPointF vertexPaintLastSample;
 	bool vertexPaintProjectionValid = false;
 	QVector<QPointF> vertexPaintScreen;

@@ -1112,6 +1112,69 @@
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="library">
+      <attribute name="title">
+       <string>NifSkope Library</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayoutLibrary">
+       <item>
+        <widget class="QGroupBox" name="grpLibrary">
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+         <property name="title">
+          <string>Library folder</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayoutLibFolder">
+          <item>
+           <widget class="QLabel" name="lblLibraryInfo">
+            <property name="text">
+             <string>Root folder where NifSkope keeps your saved files. The Pose Manager stores poses in its &quot;Poses&quot; subfolder; future features will use their own subfolders. Leave empty to use the default location.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayoutLibFolder">
+            <item>
+             <widget class="QLineEdit" name="libraryFolder">
+              <property name="placeholderText">
+               <string>Default: Documents/NifSkope</string>
+              </property>
+              <property name="toolTip">
+               <string>Absolute path to the NifSkope library root. Shared with the Pose Manager's Folder... button.</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnLibraryBrowse">
+              <property name="text">
+               <string>Browse...</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="verticalSpacerLibrary">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
     </widget>
    </item>
   </layout>

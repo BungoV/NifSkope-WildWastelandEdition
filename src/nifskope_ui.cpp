@@ -34,10 +34,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui_nifskope.h"
 
 #include "glview.h"
+#include "nifmerge.h"
 #include "message.h"
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
 #include "spellbook.h"
+#include "wwskin.h"
 
 #include <QScopeGuard>
 #include "version.h"
@@ -59,6 +61,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/xmlcheck.h"
 #include "ui/about_dialog.h"
 #include "ui/settingsdialog.h"
+#include "ui/settingspane.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -72,10 +75,13 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMimeData>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QDialog>
+#include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFontDialog>
 #include <QFrame>
 #include <QGridLayout>
@@ -91,7 +97,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QProgressBar>
 #include <QMessageBox>
 #include <QProgressDialog>
+#include "spells/animationsetup.h"
+
+#include <QListWidget>
 #include <QPushButton>
+#include <QSlider>
+#include <QTabWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSettings>
@@ -158,9 +169,10 @@ public:
 		// Blender number field: dark rounded well, value roughly centered
 		setAlignment( Qt::AlignCenter );
 		setStyleSheet( QStringLiteral(
-			"QDoubleSpinBox { background: #545454; border: none; border-radius: 3px; color: #e6e6e6; }"
-			"QLineEdit { background: transparent; border: none; color: #e6e6e6;"
-			" selection-background-color: #4772b3; selection-color: #ffffff; }" ) );
+			"QDoubleSpinBox { background: %1; border: none; border-radius: 3px; color: %2; }"
+			"QLineEdit { background: transparent; border: none; color: %2;"
+			" selection-background-color: %3; selection-color: #ffffff; }" )
+			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ) ) );
 		if ( QLineEdit * le = lineEdit() ) {
 			// the spin box's internal line edit gets the mouse events, so drive
 			// the drag from an event filter on it (a subclass override never fires)
@@ -301,13 +313,17 @@ using namespace nstypes;
 using namespace nstheme;
 
 
+// The dark palette is the PBR Material Editor's (PBRMaterialEditorQt,
+// resources/style.qss) so the two tools read as one product. Bump
+// themePaletteVersion in loadTheme() when these change, or existing installs
+// keep the colours already written to their settings.
 QColor NifSkope::defaultsDark[6] = {
-	QColor( 60, 60, 60 ),    /// nstheme::Base
-	QColor( 50, 50, 50 ),    /// nstheme::BaseAlt
-	Qt::white,               /// nstheme::Text
-	QColor( 204, 204, 204 ), /// nstheme::Highlight
-	Qt::black,               /// nstheme::HighlightText
-	QColor( 255, 66, 58 )    /// nstheme::BrightText
+	QColor( 0x30, 0x32, 0x36 ), /// nstheme::Base
+	QColor( 0x2d, 0x30, 0x34 ), /// nstheme::BaseAlt
+	QColor( 0xe6, 0xe8, 0xeb ), /// nstheme::Text
+	QColor( 0x3d, 0x6f, 0x9f ), /// nstheme::Highlight
+	QColor( 0xff, 0xff, 0xff ), /// nstheme::HighlightText
+	QColor( 0xf0, 0xa5, 0x4a )  /// nstheme::BrightText
 };
 
 QColor NifSkope::defaultsLight[6] = {
@@ -318,6 +334,79 @@ QColor NifSkope::defaultsLight[6] = {
 	Qt::white,               /// nstheme::HighlightText
 	Qt::red                  /// nstheme::BrightText
 };
+
+
+/*! Skin surfaces — the single source for every colour in `res/style.qss` (as
+ * `${name}`) AND for the per-widget stylesheets in the docks (via
+ * wwSkinColor(), declared in wwskin.h).
+ *
+ * The dark column is the PBR Material Editor's palette, so the two tools read
+ * as one product ahead of the merge. Both columns exist because ONE stylesheet
+ * serves both themes: hardcoding the dark values would leave the light theme as
+ * dark widgets on a light window.
+ *
+ * Add a colour here rather than writing a literal anywhere else.
+ */
+static const struct WwSkinVar { const char * name; const char * dark; const char * light; } skinVars[] = {
+	{ "bg",           "#303236", "#f0f0f0" },  // content background
+	{ "bgWin",        "#292b2f", "#e4e4e4" },  // window / dialog plate
+	{ "bgBar",        "#25272a", "#dcdcdc" },  // menu, tool and status bars
+	{ "bgPanel",      "#27292d", "#e8e8e8" },  // docks, views, panels
+	{ "bgAlt",        "#2d3034", "#f6f6f6" },  // alternating rows
+	{ "bgCard",       "#2b2d31", "#ffffff" },  // framed sections, floating panels
+	{ "bgInput",      "#3c3f44", "#ffffff" },  // line edits, combos, spins
+	{ "bgBtn",        "#3a3d42", "#e9e9e9" },
+	{ "bgBtnHover",   "#484c52", "#dadada" },
+	{ "bgBtnDown",    "#355f86", "#c4d6e6" },
+	{ "bgHeader",     "#2c2f33", "#e0e0e0" },  // header view sections
+	{ "border",       "#4d5056", "#b4b4b4" },
+	{ "borderDim",    "#3a3d42", "#c8c8c8" },
+	{ "borderStrong", "#1b1c1f", "#9a9a9a" },  // panel outlines, splitters
+	{ "focus",        "#5d92c5", "#3d78ae" },
+	{ "scroll",       "#62666c", "#b0b0b0" },  // scrollbar handle
+	{ "scrollHover",  "#777c83", "#909090" },
+	{ "text",         "#e6e8eb", "#202020" },
+	{ "textMuted",    "#aeb3ba", "#5a5f66" },
+	{ "textBright",   "#f2f3f5", "#000000" },
+	{ "accent",       "#f0a54a", "#c07000" },  // selection accent, active toggles
+	{ "accentText",   "#ffb54a", "#a05a00" },  // text on an accented toggle
+	{ "accentBg",     "#40331f", "#f6e6c8" },  // amber toggle plate
+	{ "danger",       "#ff8484", "#c0392b" },  // invalid / error text
+	{ "viewport",     "#2b2d31", "#c8ccd0" },  // GL clear colour (Render settings default)
+};
+
+//! Which column wwSkinColor() serves. loadTheme() keeps it current; defaults to
+//! dark for anything built before the first theme load.
+static bool wwSkinLightTheme = false;
+
+QString wwSkinColor( const char * name )
+{
+	for ( const WwSkinVar & v : skinVars ) {
+		if ( qstrcmp( v.name, name ) == 0 )
+			return QString::fromLatin1( wwSkinLightTheme ? v.light : v.dark );
+	}
+
+	qWarning() << "wwSkinColor: unknown skin colour" << name;
+	return QString();
+}
+
+/*! The boxed toolbar-selector look: the viewport mode dropdown, the mode row's
+ * menu buttons, and the Panels / Workspaces selectors. One definition so the
+ * sites cannot drift apart — they were three copies of the same greys.
+ */
+static QString wwBoxedButtonQss( const QString & padding )
+{
+	return QStringLiteral(
+		"QToolButton { padding: %1; border: 1px solid %2; border-radius: 4px;"
+		" background: %3; color: %4; font-weight: 600; }"
+		"QToolButton:hover { background: %5; border-color: %6; color: %7; }"
+		"QToolButton:pressed, QToolButton::menu-button:pressed { background: %8; }"
+		"QToolButton::menu-indicator { subcontrol-position: right center;"
+		" subcontrol-origin: padding; }" )
+		.arg( padding, wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "text" ),
+			  wwSkinColor( "bgBtnHover" ), wwSkinColor( "focus" ), wwSkinColor( "textBright" ),
+			  wwSkinColor( "bgBtnDown" ) );
+}
 
 
 
@@ -1355,6 +1444,1481 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	// TEST HARNESS (WW_VERTEXFLAGS_TEST): probe the "Vertex Flags" landmine
+	// recorded in WW_CHANGES 2026-07-18b — the note flags every spell that does
+	// set<BSVertexDesc> + updateArraySize on an UNCHANGED vertex count as
+	// suspect, the stock spEditVertexDesc included, because updateArraySize
+	// early-returns when the row count does not move (nifmodel.cpp:626).
+	//
+	// Casts the REAL spell through NifSkope::castSpell (the path the Block
+	// Details context menu uses) with a timer ticking its modal checkbox dialog,
+	// so the whole shipping code path runs — including the getVertexPositions /
+	// setVertexPositions round trip that has to carry positions across a
+	// precision change.
+	//
+	// Two independent observables:
+	//   - in-model: row 0 of "Vertex Data" must expose exactly the fields the
+	//     new desc claims, and every vertex position must survive the edit.
+	//   - on disk: WW_TEST_SAVE writes the result and verify_vertexflags.py
+	//     compares each shape's declared stride against the bytes the header's
+	//     block-size table says were actually written.
+	//
+	// =1 toggles Colors (stride +/-4B, one variant per field); =2 toggles Full
+	// Precision (stride +/-8B), the sharper case: "Vertex" and "Bitangent X"
+	// each appear TWICE in BSVertexData (Vector3/float vs HalfVector3/hfloat),
+	// so a by-name lookup cannot tell the variants apart.
+	// Log: release/ww_vertexflags_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_VERTEXFLAGS_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_vertexflags_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				const int mode = QString::fromLocal8Bit( qgetenv( "WW_VERTEXFLAGS_TEST" ) ).toInt();
+				const bool fullPrec = ( mode == 2 );
+				// checkbox order matches spEditVertexDesc's flagNames list
+				const int chkIndex = fullPrec ? 10 : 5;
+
+				// tick the spell's modal dialog: flip the one checkbox, accept
+				QTimer driver;
+				QObject::connect( &driver, &QTimer::timeout, skope, [&log, chkIndex]() {
+					QWidget * w = QApplication::activeModalWidget();
+					if ( !w || qobject_cast<QProgressDialog *>( w ) )
+						return;
+					if ( auto * mb = qobject_cast<QMessageBox *>( w ) ) {
+						QAbstractButton * btn = mb->button( QMessageBox::Yes );
+						if ( !btn )
+							btn = mb->button( QMessageBox::Ok );
+						if ( !btn && !mb->buttons().isEmpty() )
+							btn = mb->buttons().first();
+						if ( btn )
+							btn->click();
+						return;
+					}
+					if ( auto * dlg = qobject_cast<QDialog *>( w ) ) {
+						QList<QCheckBox *> chks = dlg->findChildren<QCheckBox *>();
+						if ( chkIndex < 0 || chkIndex >= chks.size() ) {
+							log << "  dialog has " << chks.size()
+								<< " checkboxes, index " << chkIndex << " out of range\n";
+							dlg->reject();
+							return;
+						}
+						QCheckBox * c = chks.at( chkIndex );
+						c->setChecked( !c->isChecked() );
+						log << "  dialog: toggled checkbox[" << chkIndex << "] '"
+							<< c->text() << "' -> " << c->isChecked() << ", accepting\n";
+						log.flush();
+						dlg->accept();
+					}
+				} );
+				driver.start( 200 );
+
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					int shape = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) ) { shape = b; break; }
+					if ( shape < 0 ) { log << "no BSTriShape\n"; break; }
+
+					QModelIndex iShape = nif->getBlockIndex( shape );
+					QModelIndex iDesc  = nif->getIndex( iShape, "Vertex Desc" );
+					QModelIndex iVD    = nif->getIndex( iShape, "Vertex Data" );
+					if ( !iDesc.isValid() || !iVD.isValid() || !nif->getIndex( iVD, 0 ).isValid() ) {
+						log << "shape " << shape << " has no Vertex Desc / Vertex Data rows\n";
+						break;
+					}
+
+					const VertexAttribute att = fullPrec ? VertexAttribute( 10 ) : VA_COLOR;
+					const char * probe = fullPrec ? "Vertex" : "Vertex Colors";
+
+					// Reading the row layout back is itself subject to the hazard
+					// this harness exists to check: "Vertex" names BOTH precision
+					// variants, so mere existence proves nothing. For Colors the
+					// name is unique and existence is the answer; for Full
+					// Precision we have to ask the LIVE item for its value type.
+					auto rowMatchesDesc = [nif, fullPrec]( const QModelIndex & iArr, bool want ) {
+						const NifItem * row0 = nif->getItem( iArr, 0, false );
+						if ( !row0 )
+							return false;
+						if ( !fullPrec )
+							return nif->getItem( row0, "Vertex Colors" ) != nullptr ? want : !want;
+						const NifItem * v = nif->getItem( row0, "Vertex" );
+						if ( !v )
+							return false;
+						const bool isFull = ( v->valueType() == NifValue::tVector3 );
+						return isFull == want;
+					};
+					BSVertexDesc desc = nif->get<BSVertexDesc>( iDesc );
+					const int numVerts = nif->get<int>( iShape, "Num Vertices" );
+					const int numTris  = nif->get<int>( iShape, "Num Triangles" );
+					const bool hadFlag = desc.HasFlag( att );
+					const uint oldSize = desc.GetVertexSize();
+
+					// positions before, to prove the spell carried them across the
+					// layout change rather than reinterpreting the old bytes
+					QVector<Vector3> before( numVerts );
+					for ( int v = 0; v < numVerts; v++ )
+						before[v] = nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" );
+
+					log << "shape block " << shape << " '" << nif->get<QString>( iShape, "Name" ) << "'\n";
+					log << "mode " << mode << ": toggling "
+						<< ( fullPrec ? "Full Precision" : "Colors" ) << " via the real spell\n";
+					log << "before: desc 0x" << QString::number( desc.Value(), 16 )
+						<< " flags 0x" << QString::number( ( desc.Value() >> 44 ) & 0xFFFF, 16 )
+						<< " vertexSize " << oldSize
+						<< " numVerts " << numVerts << " numTris " << numTris
+						<< " DataSize " << nif->get<uint>( iShape, "Data Size" )
+						<< " rows " << nif->rowCount( iVD ) << "\n";
+					log << "before: row0 layout matches desc for '" << probe << "' = "
+						<< rowMatchesDesc( iVD, hadFlag )
+						<< " (desc flag " << hadFlag << ")\n";
+					log.flush();
+
+					QSettings cfg;
+					cfg.setValue( "Settings/Suppress Undoable Confirmation", true );
+					skope->castSpell( QLatin1String( "Vertex Flags" ), iDesc );
+
+					// re-resolve: the spell may rebuild the block's items
+					iShape = nif->getBlockIndex( shape );
+					iVD    = nif->getIndex( iShape, "Vertex Data" );
+					desc   = nif->get<BSVertexDesc>( iShape, "Vertex Desc" );
+					const bool wantFlag = !hadFlag;
+					const bool gotFlag  = desc.HasFlag( att );
+					const bool exposes  = rowMatchesDesc( iVD, wantFlag );
+
+					log << "after:  desc 0x" << QString::number( desc.Value(), 16 )
+						<< " flags 0x" << QString::number( ( desc.Value() >> 44 ) & 0xFFFF, 16 )
+						<< " vertexSize " << oldSize << " -> " << desc.GetVertexSize()
+						<< " DataSize " << nif->get<uint>( iShape, "Data Size" )
+						<< " rows " << nif->rowCount( iVD ) << "\n";
+					log << "after:  desc flag " << gotFlag << " (want " << wantFlag << ")"
+						<< ( gotFlag == wantFlag ? "  OK" : "  <-- SPELL DID NOT APPLY" ) << "\n";
+					log << "after:  row0 layout matches desc for '" << probe << "' = " << exposes
+						<< ( exposes ? "  OK" : "  <-- ROW LAYOUT DISAGREES WITH DESC" ) << "\n";
+
+					// positions must survive: half->full is exact, full->half costs
+					// at most half-precision rounding, so scale tolerance by magnitude
+					int moved = 0;
+					float worst = 0.0f;
+					for ( int v = 0; v < numVerts; v++ ) {
+						Vector3 a = before[v];
+						Vector3 b = nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" );
+						float d = ( a - b ).length();
+						if ( d > 0.002f * qMax( 1.0f, a.length() ) )
+							moved++;
+						worst = qMax( worst, d );
+					}
+					log << "positions: " << moved << " of " << numVerts
+						<< " moved beyond tolerance (expect 0), worst delta " << worst << "\n";
+
+					const bool pass = gotFlag == wantFlag && exposes && moved == 0;
+					log << ( pass ? "in-model: PASS\n"
+						: "in-model: FAIL — desc, row layout or vertex values diverged\n" );
+
+					if ( qEnvironmentVariableIsSet( "WW_TEST_SAVE" ) ) {
+						QString out = qEnvironmentVariable( "WW_TEST_SAVE" );
+						log << "save ok " << nif->saveToFile( out ) << ": " << out << "\n";
+					}
+				} while ( false );
+				driver.stop();
+				log << "done\n";
+				logf.close();
+				// The spell dirties the document, so quitting can raise a
+				// save-changes prompt after this scope (and its driver) is gone.
+				// Leave an app-owned answerer running so the process cannot strand.
+				QTimer * quitDriver = new QTimer( qApp );
+				QObject::connect( quitDriver, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb )
+						return;
+					QAbstractButton * btn = mb->button( QMessageBox::Discard );
+					if ( !btn )
+						btn = mb->button( QMessageBox::No );
+					if ( !btn )
+						btn = mb->button( QMessageBox::Ok );
+					if ( !btn && !mb->buttons().isEmpty() )
+						btn = mb->buttons().first();
+					if ( btn )
+						btn->click();
+				} );
+				quitDriver->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_POSEDOCK_TEST=1): the Pose Manager dock is wired to the
+	// shared pose API. Finds the dock, shows it, checks the bone list populated,
+	// drives Save current (auto-answering the name dialog) and confirms a pose
+	// sequence appeared, then drives Apply and confirms it ran. UI over the API
+	// that WW_POSE_TEST / the CLI already prove numerically.
+	// Log: release/ww_posedock_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSEDOCK_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1000, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_posedock_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+
+				// auto-answer the "Pose name" QInputDialog the Save button opens
+				QTimer dlgDriver;
+				QObject::connect( &dlgDriver, &QTimer::timeout, skope, [&log]() {
+					if ( auto * in = qobject_cast<QInputDialog *>( QApplication::activeModalWidget() ) ) {
+						in->setTextValue( QStringLiteral( "DockPose" ) );
+						log << "  answered pose-name dialog\n"; log.flush();
+						in->accept();
+					}
+				} );
+				dlgDriver.start( 150 );
+
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					QDockWidget * dock = skope->findChild<QDockWidget *>( QStringLiteral( "PoseManagerDock" ) );
+					if ( !dock ) { fails << "PoseManagerDock not found"; break; }
+					dock->show();
+					dock->raise();
+					qApp->processEvents();
+
+					auto * boneList = dock->findChild<QListWidget *>( QStringLiteral( "PoseBoneList" ) );
+					auto * poseListW = dock->findChild<QListWidget *>( QStringLiteral( "PosePoseList" ) );
+					auto * slider = dock->findChild<QSlider *>( QStringLiteral( "PoseBlendSlider" ) );
+					if ( !boneList || !poseListW || !slider ) { fails << "dock widgets missing"; break; }
+					log << "bone list rows: " << boneList->count() << "\n";
+					if ( boneList->count() < 1 )
+						fails << "bone list did not populate";
+
+					// find and click Save current
+					QPushButton * saveBtn = nullptr, * applyBtn = nullptr;
+					for ( QPushButton * b : dock->findChildren<QPushButton *>() ) {
+						if ( b->text().contains( "Save" ) ) saveBtn = b;
+						if ( b->text() == QStringLiteral( "Apply" ) ) applyBtn = b;
+					}
+					if ( !saveBtn || !applyBtn ) { fails << "Save/Apply buttons missing"; break; }
+
+					const int posesBefore = poseListW->count();
+					saveBtn->click();
+					qApp->processEvents();
+					log << "poses after Save: " << poseListW->count() << " (was " << posesBefore << ")\n";
+					if ( poseListW->count() != posesBefore + 1 )
+						fails << "Save current did not add a pose to the library";
+
+					const bool inFile = AnimSetup::sequenceNames( nif ).contains( QStringLiteral( "DockPose" ) );
+					log << "'DockPose' sequence in the file: " << inFile << "\n";
+					if ( !inFile )
+						fails << "the saved pose is not a sequence in the model";
+
+					// select it, set blend 50%, Apply
+					for ( int r = 0; r < poseListW->count(); r++ )
+						if ( poseListW->item( r )->text() == QStringLiteral( "DockPose" ) )
+							poseListW->setCurrentRow( r );
+					slider->setValue( 50 );
+					qApp->processEvents();
+					applyBtn->click();
+					qApp->processEvents();
+					log << "Apply at 50% ran without error\n";
+				} while ( false );
+
+				dlgDriver.stop();
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty() ? "PASS — Pose Manager dock drives the pose API\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer * quitDriver = new QTimer( qApp );
+				QObject::connect( quitDriver, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb ) return;
+					QAbstractButton * btn = mb->button( QMessageBox::Discard );
+					if ( !btn ) btn = mb->button( QMessageBox::No );
+					if ( !btn && !mb->buttons().isEmpty() ) btn = mb->buttons().first();
+					if ( btn ) btn->click();
+				} );
+				quitDriver->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_POSEDRAW_TEST=1): Pose Mode draws the skeleton and picks
+	// bones. grab() can't see the native GL child (airspace), so this uses
+	// grabFramebuffer + a pixel diff to confirm the skeleton overlay appears,
+	// checks the bone list built, and confirms poseBoneAt() resolves a bone at
+	// a drawn bone's screen position.
+	// Log: release/ww_posedraw_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSEDRAW_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_posedraw_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+				auto pump = [skope]() {
+					skope->ogl->update(); qApp->processEvents();
+					skope->ogl->update(); qApp->processEvents();
+				};
+				auto pixDelta = []( const QImage & a, const QImage & b ) {
+					if ( a.isNull() || b.isNull() || a.size() != b.size() ) return -1;
+					int n = 0;
+					for ( int y = 0; y < a.height(); y += 2 )
+						for ( int x = 0; x < a.width(); x += 2 )
+							if ( a.pixel( x, y ) != b.pixel( x, y ) ) n++;
+					return n;
+				};
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					// the Pose dock may already have entered pose mode during
+					// init; force a clean off->on so the pixel diff is meaningful
+					skope->ogl->setPoseMode( false );
+					pump();
+					QImage before = skope->ogl->grabFramebuffer();
+					skope->ogl->setPoseMode( true );
+					pump();
+					log << "pose mode active: " << skope->ogl->poseModeActive() << "\n";
+					log << "bones drawn/pickable: " << skope->ogl->poseBoneCountForTest() << "\n";
+					if ( !skope->ogl->poseModeActive() )
+						fails << "pose mode did not activate";
+					if ( skope->ogl->poseBoneCountForTest() < 1 )
+						fails << "no bones in the skeleton";
+
+					QImage after = skope->ogl->grabFramebuffer();
+					after.save( QApplication::applicationDirPath() + "/ww_posedraw.png" );
+					const int dPix = pixDelta( before, after );
+
+					// also capture a labelled, face-filtered view for eyeballing
+					skope->ogl->setPoseShowBoneNames( true );
+					skope->ogl->setPoseBoneFilter( 2 );   // face sculpt
+					pump();
+					skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_posedraw_labelled.png" );
+					skope->ogl->setPoseBoneFilter( 0 );
+					skope->ogl->setPoseShowBoneNames( false );
+					log << "framebuffer pixels changed by the skeleton overlay: " << dPix << "\n";
+					if ( dPix == 0 )
+						fails << "skeleton overlay did not draw (no pixels changed)";
+
+					// pick: the screen position of a drawn bone must resolve to it
+					int probe = skope->ogl->poseBoneProbeForTest();
+					log << "poseBoneAt(a bone's screen pos) -> " << probe << "\n";
+					if ( probe < 0 )
+						fails << "poseBoneAt did not resolve a bone at its own drawn position";
+
+					// RESET: pose a bone away from rest, then reset restores it
+					if ( probe >= 0 ) {
+						QModelIndex iB = nif->getBlockIndex( probe );
+						const Vector3 rest = nif->get<Vector3>( iB, "Translation" );
+						nif->set<Vector3>( iB, "Translation", rest + Vector3( 50, 0, 0 ) );
+						pump();
+						skope->ogl->poseResetBone( probe, 7 );   // all channels
+						pump();
+						const Vector3 back = nif->get<Vector3>( nif->getBlockIndex( probe ), "Translation" );
+						const float d = ( back - rest ).length();
+						log << "reset: bone moved +50 then reset, delta from rest = " << d << " (expect ~0)\n";
+						if ( d > 1e-2f )
+							fails << "reset did not restore the bone to its rest transform";
+						// re-resolve probe: the snapshot reload may renumber picks,
+						// but block numbers are stable across value edits
+					}
+
+					// MULTI-SELECT: two Shift+clicks accumulate into objSelection
+					{
+						QList<int> distinct;
+						for ( int b = 0; b < nif->getBlockCount() && distinct.size() < 2; b++ )
+							if ( nif->get<QString>( nif->getBlockIndex( b ), "Name" )
+									.startsWith( QLatin1String( "skin_bone_" ) ) )
+								distinct << b;
+						if ( distinct.size() == 2 ) {
+							auto clickBone = [&]( int blk, Qt::KeyboardModifiers mods ) {
+								Node * n = skope->ogl->getScene()->getNode( nif, nif->getBlockIndex( blk ) );
+								QPointF sp;
+								if ( !n || !skope->ogl->worldToScreenForTest( n->worldTrans().translation, sp ) )
+									return;
+								QPoint lp( int( sp.x() ), int( sp.y() ) );
+								QMouseEvent pr( QEvent::MouseButtonPress, lp, skope->ogl->mapToGlobal( lp ),
+									Qt::LeftButton, Qt::LeftButton, mods );
+								QMouseEvent rl( QEvent::MouseButtonRelease, lp, skope->ogl->mapToGlobal( lp ),
+									Qt::LeftButton, Qt::LeftButton, mods );
+								qApp->sendEvent( skope->ogl, &pr );
+								qApp->sendEvent( skope->ogl, &rl );
+							};
+							clickBone( distinct[0], Qt::NoModifier );
+							clickBone( distinct[1], Qt::ShiftModifier );   // add
+							pump();
+							const int selCount = skope->ogl->objectSelectionCountForTest();
+							log << "multi-select: 2 Shift-clicks -> " << selCount << " selected (expect 2)\n";
+							if ( selCount != 2 )
+								fails << "Shift-click did not accumulate a multi-bone selection";
+						}
+					}
+
+					// MIRROR: pose a left bone, mirror to the right, check the
+					// counterpart moved and its X translation is the mirror image
+					{
+						int left = -1, right = -1;
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							QString nm = nif->get<QString>( nif->getBlockIndex( b ), "Name" );
+							if ( nm.startsWith( QLatin1String( "skin_bone_L_" ) ) ) {
+								QString r = QStringLiteral( "skin_bone_R_" ) + nm.mid( 12 );
+								for ( int c = 0; c < nif->getBlockCount(); c++ )
+									if ( nif->get<QString>( nif->getBlockIndex( c ), "Name" ) == r ) {
+										left = b; right = c; break;
+									}
+							}
+							if ( left >= 0 ) break;
+						}
+						if ( left >= 0 ) {
+							QModelIndex iL = nif->getBlockIndex( left );
+							const Vector3 rBefore = nif->get<Vector3>( nif->getBlockIndex( right ), "Translation" );
+							Vector3 lt = nif->get<Vector3>( iL, "Translation" );
+							nif->set<Vector3>( iL, "Translation", lt + Vector3( 0, 5, 0 ) );  // pose left
+							pump();
+							int got = skope->ogl->poseMirrorBone( left );
+							pump();
+							const Vector3 rAfter = nif->get<Vector3>( nif->getBlockIndex( right ), "Translation" );
+							const float moved = ( rAfter - rBefore ).length();
+							log << "mirror: L='" << nif->get<QString>( iL, "Name" ) << "' -> counterpart block "
+								<< got << ", right bone moved " << moved << " (expect > 0)\n";
+							if ( got != right )
+								fails << "mirror did not resolve the correct R counterpart";
+							if ( moved < 1e-3f )
+								fails << "mirror did not move the counterpart bone";
+						} else {
+							log << "mirror: no L/R bone pair in this rig; skipped\n";
+						}
+					}
+
+					// a real click at that bone's screen position must SELECT it
+					if ( probe >= 0 ) {
+						Node * n = skope->ogl->getScene()->getNode( nif, nif->getBlockIndex( probe ) );
+						QPointF sp;
+						if ( n && skope->ogl->worldToScreenForTest( n->worldTrans().translation, sp ) ) {
+							int pickedBlock = -1;
+							QMetaObject::Connection c = QObject::connect( skope->ogl,
+								&GLView::poseBonePicked, skope, [&pickedBlock]( int b ) { pickedBlock = b; } );
+							// worldToScreen returns LOGICAL pixels, same space the
+							// event position uses — no dpr conversion.
+							QPoint local( int( sp.x() ), int( sp.y() ) );
+							QMouseEvent press( QEvent::MouseButtonPress, local, skope->ogl->mapToGlobal( local ),
+								Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+							QMouseEvent release( QEvent::MouseButtonRelease, local, skope->ogl->mapToGlobal( local ),
+								Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+							qApp->sendEvent( skope->ogl, &press );
+							qApp->sendEvent( skope->ogl, &release );
+							pump();
+							QObject::disconnect( c );
+							log << "click at bone " << probe << "'s screen pos selected block "
+								<< pickedBlock << " (active=" << skope->ogl->activeObjectBlock() << ")\n";
+							if ( skope->ogl->activeObjectBlock() != probe )
+								fails << "clicking a bone did not make it the active object";
+						}
+					}
+				} while ( false );
+
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty() ? "PASS — skeleton draws and bones are pickable\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_POSEEXTRAS_TEST=1): weight-influence overlay + proportional
+	// editing. (1) select a skinned bone, turn Weights on, confirm the overlay
+	// found vertices it drives. (2) proportional self-test: pick a central vertex,
+	// enable proportional editing, begin a move, confirm neighbours were gathered
+	// with a distance-decreasing falloff.
+	// Log: release/ww_poseextras_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSEEXTRAS_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1000, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_poseextras_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+				auto pump = [skope]() { skope->ogl->update(); qApp->processEvents(); skope->ogl->update(); qApp->processEvents(); };
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+
+					// (1) weight overlay
+					skope->ogl->setPoseMode( true );
+					pump();
+					int bone = skope->ogl->poseBoneProbeForTest();
+					if ( bone >= 0 ) {
+						skope->ogl->getScene();
+						skope->ogl->setObjectSelection( QSet<int>{ bone }, bone );
+						skope->ogl->setPoseShowWeights( true );
+						pump();
+						const int wp = skope->ogl->poseWeightPointCountForTest();
+						log << "weight overlay: bone " << bone << " drives " << wp << " vertex point(s)\n";
+						if ( wp < 1 )
+							fails << "weight overlay found no influenced vertices";
+						skope->ogl->setPoseShowWeights( false );
+					} else {
+						log << "no bone for weight test\n";
+					}
+					skope->ogl->setPoseMode( false );
+					pump();
+
+					// (2) proportional editing gather
+					bool monotonic = false;
+					const int neigh = skope->ogl->proportionalSelfTestForTest( monotonic );
+					log << "proportional editing: " << neigh << " neighbour(s) gathered, falloff decreases with distance: "
+						<< ( monotonic ? "yes" : "no" ) << "\n";
+					if ( neigh < 1 )
+						fails << "proportional editing gathered no neighbours";
+					if ( !monotonic )
+						fails << "proportional falloff did not decrease with distance";
+				} while ( false );
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty() ? "PASS — weight overlay + proportional editing work\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer * qd = new QTimer( qApp );
+				QObject::connect( qd, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb ) return;
+					QAbstractButton * bn = mb->button( QMessageBox::Discard );
+					if ( !bn ) bn = mb->button( QMessageBox::No );
+					if ( !bn && !mb->buttons().isEmpty() ) bn = mb->buttons().first();
+					if ( bn ) bn->click();
+				} );
+				qd->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_OSPOSE_TEST=1): Outfit Studio pose XML round-trip.
+	// Enters pose mode (captures rest), poses a bone by a known Euler delta,
+	// exports an OS pose XML, resets the bone, re-imports, and checks the bone
+	// returns to the posed orientation — proving export/import are exact
+	// inverses. Also parse-imports a real PA pose file if WW_OSPOSE_FILE is set.
+	// Log: release/ww_ospose_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_OSPOSE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1000, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_ospose_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					skope->ogl->setPoseMode( true );
+					qApp->processEvents();
+					const int b = skope->ogl->poseBoneProbeForTest();
+					if ( b < 0 ) { fails << "no bone to pose"; break; }
+					QModelIndex iB = nif->getBlockIndex( b );
+
+					// pose the bone by an arbitrary multi-axis rotation, then
+					// verify export->reset->import reproduces the SAME rotation
+					// matrix (representation-independent — the OS rot vector math
+					// only has to be a faithful inverse of itself)
+					auto matDiff = []( const Matrix & a, const Matrix & b2 ) {
+						float d = 0;
+						for ( int r = 0; r < 3; r++ )
+							for ( int c = 0; c < 3; c++ )
+								d += std::fabs( a( r, c ) - b2( r, c ) );
+						return d;
+					};
+					const Matrix restRot = nif->get<Matrix>( iB, "Rotation" );
+					Matrix dr; dr.fromEuler( 0.3f, -0.2f, 0.5f );
+					const Matrix posed = restRot * dr;
+					nif->set<Matrix>( iB, "Rotation", posed );
+					qApp->processEvents();
+
+					const QString xml = QApplication::applicationDirPath() + "/ww_ospose_out.xml";
+					QString err;
+					if ( !skope->ogl->poseExportOutfitStudio( xml, QStringLiteral( "RoundTrip" ), &err ) ) {
+						fails << ( "export failed: " + err );
+						break;
+					}
+
+					skope->ogl->poseResetBone( b, 7 );
+					qApp->processEvents();
+					const int n = skope->ogl->poseImportOutfitStudio( xml, 1.0f, &err );
+					log << "import applied " << n << " bone(s)\n";
+					if ( n <= 0 ) { fails << ( "import failed: " + err ); break; }
+
+					const Matrix back = nif->get<Matrix>( nif->getBlockIndex( b ), "Rotation" );
+					const float dMat = matDiff( posed, back );
+					log << "round-trip rotation-matrix diff = " << dMat << " (expect ~0)\n";
+					if ( dMat > 1e-3f )
+						fails << "OS pose export->import did not reproduce the bone rotation";
+
+					// optional: parse a real PA pose file, count matched bones
+					const QByteArray real = qgetenv( "WW_OSPOSE_FILE" );
+					if ( !real.isEmpty() ) {
+						int applied = skope->ogl->poseImportOutfitStudio(
+							QString::fromLocal8Bit( real ), 1.0f, &err );
+						log << "real file '" << QString::fromLocal8Bit( real ) << "': "
+							<< applied << " bone(s) matched this skeleton (" << err << ")\n";
+					}
+				} while ( false );
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty() ? "PASS — OS pose XML round-trips exactly\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer * qd = new QTimer( qApp );
+				QObject::connect( qd, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb ) return;
+					QAbstractButton * bn = mb->button( QMessageBox::Discard );
+					if ( !bn ) bn = mb->button( QMessageBox::No );
+					if ( !bn && !mb->buttons().isEmpty() ) bn = mb->buttons().first();
+					if ( bn ) bn->click();
+				} );
+				qd->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_POSELIB_TEST=1): the folder-based pose library, driven
+	// through the actual dock. Points the library at a throwaway folder using
+	// the same QSettings key poseLibraryFolder() reads (proving the override
+	// persists), poses a bone, saves a pose file into the folder the way "Save
+	// current" does, nudges the dock's bone-search box so refresh() re-lists the
+	// folder, confirms the saved pose shows up in the library list, then selects
+	// it and clicks the dock's real Apply button — proving the list->select->
+	// apply path is wired, not just the underlying OS import/export. Finally
+	// clicks Delete (auto-answering the confirm) and checks the file is gone.
+	// Log: release/ww_poselib_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSELIB_TEST" ) ) {
+		// A persistent modal answerer: Delete pops a Yes/No confirm and any error
+		// pops a warning; keep one running so a click that spins a nested event
+		// loop never hangs the harness. Prefers Yes, then Ok/Discard/No/first.
+		QTimer * modal = new QTimer( skope );
+		QObject::connect( modal, &QTimer::timeout, skope, []() {
+			auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+			if ( !mb ) return;
+			// the save-on-quit prompt must be DECLINED — clicking Yes there opens a
+			// native save dialog we can't drive (that was the earlier hang). The
+			// Delete confirm ("Delete pose") must be ACCEPTED with Yes.
+			QAbstractButton * bn = nullptr;
+			if ( mb->windowTitle().contains( QStringLiteral( "Save Confirmation" ) ) ) {
+				bn = mb->button( QMessageBox::No );
+			} else {
+				bn = mb->button( QMessageBox::Yes );
+				if ( !bn ) bn = mb->button( QMessageBox::Ok );
+				if ( !bn ) bn = mb->button( QMessageBox::Discard );
+				if ( !bn && !mb->buttons().isEmpty() ) bn = mb->buttons().first();
+			}
+			if ( bn ) bn->click();
+		} );
+		modal->start( 50 );
+
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1000, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_poselib_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+
+					// point the library ROOT at a throwaway folder via the exact key
+					// the library reads, and prove the override persists. Poses live
+					// in <root>/Poses.
+					const QString folder = QApplication::applicationDirPath() + "/ww_poselib";
+					const QString poseFolder = QDir( folder ).filePath( "Poses" );
+					QDir().mkpath( poseFolder );
+					for ( const QFileInfo & fi : QDir( poseFolder ).entryInfoList( { "*.xml" }, QDir::Files ) )
+						QFile::remove( fi.absoluteFilePath() );
+					{ QSettings s; s.setValue( "Settings/Library/Library Folder", folder ); s.sync(); }
+					{ QSettings s2; if ( s2.value( "Settings/Library/Library Folder" ).toString() != folder )
+						fails << "library folder QSettings override did not persist"; }
+
+					skope->ogl->setPoseMode( true );
+					qApp->processEvents();
+					const int b = skope->ogl->poseBoneProbeForTest();
+					if ( b < 0 ) { fails << "no bone to pose"; break; }
+					QModelIndex iB = nif->getBlockIndex( b );
+
+					// pose the bone, then save into <root>/Poses the way the dock's
+					// "Save current" does (OS xml -> poseFolder/name.xml)
+					const Matrix restRot = nif->get<Matrix>( iB, "Rotation" );
+					Matrix dr; dr.fromEuler( 0.25f, -0.15f, 0.4f );
+					const Matrix posed = restRot * dr;
+					nif->set<Matrix>( iB, "Rotation", posed );
+					qApp->processEvents();
+					const QString saved = QDir( poseFolder ).filePath( "HarnessPose.xml" );
+					QString err;
+					if ( !skope->ogl->poseExportOutfitStudio( saved, "HarnessPose", &err ) ) {
+						fails << ( "save to library failed: " + err ); break;
+					}
+					log << "saved pose file exists = " << QFile::exists( saved ) << "\n";
+
+					// drive the dock's refresh via the bone-search signal and
+					// confirm the saved pose is now listed in the library
+					QDockWidget * dock = skope->findChild<QDockWidget *>( "PoseManagerDock" );
+					auto * search = dock ? dock->findChild<QLineEdit *>( "PoseBoneSearch" ) : nullptr;
+					auto * poseList = dock ? dock->findChild<QListWidget *>( "PosePoseList" ) : nullptr;
+					auto * folderLbl = dock ? dock->findChild<QLabel *>( "PoseLibraryFolderLabel" ) : nullptr;
+					if ( !dock || !search || !poseList ) { fails << "dock widgets not found"; break; }
+					search->setText( "zzzrefresh" ); qApp->processEvents();
+					search->clear(); qApp->processEvents();
+					log << "folder label = '" << ( folderLbl ? folderLbl->text() : QString() ) << "'\n";
+					log << "pose list count after refresh = " << poseList->count() << "\n";
+					// re-find the list item on demand: every model edit fires a
+					// queued refresh() that CLEARS and rebuilds the list, so any
+					// cached QListWidgetItem* is dangling after processEvents.
+					auto findPose = [&]() -> QListWidgetItem * {
+						for ( int r = 0; r < poseList->count(); r++ )
+							if ( poseList->item( r )->text() == "HarnessPose" )
+								return poseList->item( r );
+						return nullptr;
+					};
+					if ( !findPose() ) { fails << "saved pose not listed in the library"; break; }
+
+					auto matDiff = []( const Matrix & a, const Matrix & b2 ) {
+						float d = 0;
+						for ( int r = 0; r < 3; r++ )
+							for ( int c = 0; c < 3; c++ )
+								d += std::fabs( a( r, c ) - b2( r, c ) );
+						return d;
+					};
+
+					// (a) isolate the core: reset, then import the saved file
+					// DIRECTLY at full strength. This is exactly what WW_OSPOSE
+					// proves; if it fails HERE the harness state differs, if only
+					// the button fails it's the dock wiring.
+					skope->ogl->poseResetBone( b, 7 );
+					qApp->processEvents();
+					const Matrix atRest = nif->get<Matrix>( nif->getBlockIndex( b ), "Rotation" );
+					log << "posed-vs-rest displacement = " << matDiff( posed, atRest ) << " (bone did reset)\n";
+					const int nd = skope->ogl->poseImportOutfitStudio( saved, 1.0f, &err );
+					qApp->processEvents();
+					const Matrix backDirect = nif->get<Matrix>( nif->getBlockIndex( b ), "Rotation" );
+					log << "DIRECT import n=" << nd << " diff = " << matDiff( posed, backDirect ) << " (expect ~0)\n";
+
+					// (b) the dock button path: reset FIRST (this fires the queued
+					// refresh), let it settle, THEN re-find + select the pose and
+					// click the real Apply button.
+					skope->ogl->poseResetBone( b, 7 );
+					qApp->processEvents();
+					auto * slider = dock->findChild<QSlider *>( "PoseBlendSlider" );
+					log << "blend slider value = " << ( slider ? slider->value() : -1 ) << "\n";
+					QListWidgetItem * item = findPose();
+					if ( !item ) { fails << "saved pose vanished from list after reset"; break; }
+					poseList->setCurrentItem( item );
+					log << "poseList currentItem = '"
+						<< ( poseList->currentItem() ? poseList->currentItem()->text() : QString() ) << "'\n";
+					QPushButton * applyBtn = nullptr;
+					for ( QPushButton * pb : dock->findChildren<QPushButton *>() )
+						if ( pb->text() == "Apply" ) applyBtn = pb;
+					if ( !applyBtn ) { fails << "Apply button not found"; break; }
+					applyBtn->click();
+					qApp->processEvents();
+					const Matrix back = nif->get<Matrix>( nif->getBlockIndex( b ), "Rotation" );
+					const float dMat = matDiff( posed, back );
+					log << "BUTTON apply-from-library rotation diff = " << dMat << " (expect ~0)\n";
+					if ( dMat > 1e-3f )
+						fails << "applying the library pose did not reproduce the bone rotation";
+
+					// Delete via the dock button (confirm auto-answered) removes it.
+					// Apply also fired a refresh, so re-find the item again.
+					QPushButton * delBtn = nullptr;
+					for ( QPushButton * pb : dock->findChildren<QPushButton *>() )
+						if ( pb->text() == "Delete" ) delBtn = pb;
+					QListWidgetItem * delItem = findPose();
+					if ( !delBtn || !delItem ) {
+						fails << "Delete precondition missing (button or list item)";
+					} else {
+						poseList->setCurrentItem( delItem );
+						log << "before Delete: currentItem = '"
+							<< ( poseList->currentItem() ? poseList->currentItem()->text() : QString() )
+							<< "', file exists = " << QFile::exists( saved ) << "\n";
+						delBtn->click();
+						qApp->processEvents();
+						log << "pose file exists after Delete = " << QFile::exists( saved ) << "\n";
+						if ( QFile::exists( saved ) )
+							fails << "Delete did not remove the pose file";
+					}
+				} while ( false );
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty() ? "PASS — folder pose library saves, lists, applies, deletes\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_POSESETTINGS_TEST=1): the General -> Poses settings tab.
+	// Opens the Settings dialog (loadSettings populates the field), types a test
+	// folder into the pose-library line edit, marks the pane modified, and hits
+	// Apply (saveSettings). Then it (1) confirms the value persisted to EXACTLY
+	// the key the dock reads — Settings/Poses/Pose Library Folder, the humanized
+	// form of the "poseLibraryFolder" object name — and (2) shows the Pose
+	// Manager dock and checks its folder label updates to the same folder,
+	// proving the settings tab and the dock's Folder... button share one key.
+	// Log: release/ww_posesettings_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSESETTINGS_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_posesettings_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				QStringList fails;
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					SettingsDialog * opt = skope->getOptions();
+					if ( !opt ) { fails << "no settings dialog"; break; }
+					opt->show();               // showEvent emits loadSettings -> panes read()
+					qApp->processEvents();
+
+					auto * tab = opt->findChild<QWidget *>( "library" );
+					auto * edt = opt->findChild<QLineEdit *>( "libraryFolder" );
+					auto * btn = opt->findChild<QPushButton *>( "btnLibraryBrowse" );
+					log << "library tab = " << ( tab ? 1 : 0 ) << ", line edit = " << ( edt ? 1 : 0 )
+						<< ", browse button = " << ( btn ? 1 : 0 ) << "\n";
+					if ( !tab || !edt || !btn ) { fails << "NifSkope Library settings widgets missing"; break; }
+
+					const QString testDir = QApplication::applicationDirPath() + "/ww_posesettings";
+					QDir().mkpath( testDir );
+					edt->setText( testDir );
+					// setText() doesn't mark the pane dirty; do it so write() persists
+					for ( SettingsPane * p : opt->findChildren<SettingsPane *>() )
+						if ( p->findChild<QLineEdit *>( "libraryFolder" ) )
+							p->modifyPane();
+					opt->apply();              // emits saveSettings -> panes write()
+					qApp->processEvents();
+
+					QSettings s;
+					const QString stored = s.value( "Settings/Library/Library Folder" ).toString();
+					log << "stored key value = '" << stored << "'\n";
+					if ( stored != testDir )
+						fails << "settings did not persist to key Settings/Library/Library Folder";
+
+					// the dock must read the SAME key: show it, check the folder
+					// label (which shows the library root's name)
+					QDockWidget * dock = skope->findChild<QDockWidget *>( "PoseManagerDock" );
+					if ( !dock ) { fails << "PoseManagerDock not found"; break; }
+					dock->show();
+					qApp->processEvents();
+					auto * lbl = dock->findChild<QLabel *>( "PoseLibraryFolderLabel" );
+					const QString labelText = lbl ? lbl->text() : QString();
+					log << "dock folder label = '" << labelText << "' (expect 'ww_posesettings')\n";
+					if ( labelText != QStringLiteral( "ww_posesettings" ) )
+						fails << "dock did not pick up the folder set in Settings";
+
+					// grab the NifSkope Library settings tab for visual review
+					if ( auto * tabs = opt->findChild<QTabWidget *>( "general" ) ) {
+						tabs->setCurrentWidget( tab );
+						qApp->processEvents();
+						opt->grab().save( QApplication::applicationDirPath() + "/ww_settings_poses.png" );
+					}
+				} while ( false );
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty()
+					? "PASS — NifSkope Library settings tab writes the shared key and the dock reads it\n"
+					: "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				// dismiss the save-on-quit prompt (decline), then quit
+				QTimer * qd = new QTimer( qApp );
+				QObject::connect( qd, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb ) return;
+					QAbstractButton * bn = mb->button( QMessageBox::No );
+					if ( !bn ) bn = mb->button( QMessageBox::Discard );
+					if ( !bn && !mb->buttons().isEmpty() ) bn = mb->buttons().first();
+					if ( bn ) bn->click();
+				} );
+				qd->start( 50 );
+				QTimer::singleShot( 300, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_MERGEARCH_TEST=1): load-skeleton-from-archive plumbing.
+	// (1) the dock's "From game archive..." menu action exists; (2) the new
+	// in-memory merge nifMergeData() produces the SAME result as nifMergeFile()
+	// — merge the current NIF into itself both ways, undoing between, and compare
+	// the block/node counts; (3) pickNifFromBrowser() opens and cancels cleanly
+	// (a timer rejects whatever modal it shows). The archive EXTRACTION itself is
+	// the NIF Browser's own proven path (extractConfiguredNifBytes), and needs
+	// configured game archives to exercise for real. Log: ww_mergearch_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_MERGEARCH_TEST" ) ) {
+		// auto-answer any modal the picker raises (its QDialog, or a "no archives"
+		// info box), and decline the save-on-quit prompt so nothing hangs
+		QTimer * mergeArchModal = new QTimer( skope );
+		QObject::connect( mergeArchModal, &QTimer::timeout, skope, []() {
+			QWidget * w = QApplication::activeModalWidget();
+			if ( !w ) return;
+			if ( auto * mb = qobject_cast<QMessageBox *>( w ) ) {
+				if ( mb->windowTitle().contains( QStringLiteral( "Save Confirmation" ) ) ) {
+					if ( auto * no = mb->button( QMessageBox::No ) ) no->click();
+				} else if ( !mb->buttons().isEmpty() ) {
+					mb->buttons().first()->click();
+				}
+			} else if ( auto * dlg = qobject_cast<QDialog *>( w ) ) {
+				dlg->reject();
+			}
+		} );
+		mergeArchModal->start( 50 );
+
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 900, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_mergearch_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+
+					// (1) the dock's archive menu action exists
+					QDockWidget * dock = skope->findChild<QDockWidget *>( "PoseManagerDock" );
+					QAction * arch = dock ? dock->findChild<QAction *>( "PoseLoadSkeletonArchiveAction" ) : nullptr;
+					log << "archive menu action present = " << ( arch ? 1 : 0 ) << "\n";
+					if ( !arch ) fails << "Load-skeleton 'From game archive' action missing";
+
+					// (2) nifMergeData(bytes) == nifMergeFile(path). Merge the
+					// current NIF into itself both ways, undoing between.
+					const QString src = nif->getFileInfo().absoluteFilePath();
+					if ( src.isEmpty() || !QFile::exists( src ) ) { fails << "no source path to merge"; break; }
+					const int base = nif->getBlockCount();
+
+					QByteArray bytes;
+					{ QFile f( src ); if ( f.open( QIODevice::ReadOnly ) ) { bytes = f.readAll(); f.close(); } }
+					NifMergeResult rd;
+					const bool okD = nifMergeData( nif, bytes, QStringLiteral( "self.nif" ), true, rd );
+					const int afterData = nif->getBlockCount();
+					log << "nifMergeData ok=" << okD << " blocksAdded=" << rd.blocksAdded
+						<< " reused=" << rd.nodesReused << " added=" << rd.nodesAdded
+						<< " count " << base << "->" << afterData << "\n";
+					if ( nif->undoStack ) nif->undoStack->undo();
+					qApp->processEvents();
+					const int afterUndo = nif->getBlockCount();
+					log << "block count after undo = " << afterUndo << " (expect " << base << ")\n";
+					if ( afterUndo != base ) fails << "merge did not undo cleanly";
+
+					NifMergeResult rf;
+					const bool okF = nifMergeFile( nif, src, true, rf );
+					log << "nifMergeFile ok=" << okF << " blocksAdded=" << rf.blocksAdded
+						<< " reused=" << rf.nodesReused << " added=" << rf.nodesAdded << "\n";
+					if ( nif->undoStack ) nif->undoStack->undo();
+					qApp->processEvents();
+
+					if ( !okD || !okF )
+						fails << "a merge failed";
+					else if ( rd.blocksAdded != rf.blocksAdded || rd.nodesReused != rf.nodesReused
+						|| rd.nodesAdded != rf.nodesAdded )
+						fails << "nifMergeData and nifMergeFile produced different results";
+
+					// (3) the picker opens and cancels cleanly (timer rejects it)
+					QByteArray pb; QString pl;
+					const bool picked = skope->pickNifFromBrowser( skope, pb, pl );
+					log << "pickNifFromBrowser (auto-cancelled) returned " << picked << " (expect 0)\n";
+					if ( picked ) fails << "picker returned true when cancelled";
+				} while ( false );
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty()
+					? "PASS — archive merge plumbing wired; nifMergeData matches nifMergeFile\n"
+					: "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer::singleShot( 200, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_POSEHIER_TEST=1): is bone-by-bone posing actually usable?
+	// Two properties decide that, beyond "a bone moves the mesh" (WW_POSE_TEST):
+	//   1. HIERARCHY — rotating a PARENT bone must move its child bones and the
+	//      armour weighted to them, or you would have to transform all ~68 bones
+	//      one at a time. Proven by composing each bone's world transform from
+	//      the model (walk parents) and checking a child bone's world position
+	//      moves when only its ancestor is rotated.
+	//   2. CUMULATIVE — transforming several bones must stack into one pose, not
+	//      overwrite. Proven by rotating three separate bones and watching the
+	//      skinned bounds keep changing.
+	// Log: release/ww_posehier_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSEHIER_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_posehier_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+
+				// world transform of a block, composed straight from the model
+				auto worldTrans = [nif]( int block ) {
+					Transform t;
+					int b = block;
+					QList<int> chain;
+					while ( b >= 0 ) { chain.prepend( b ); b = nif->getParent( b ); }
+					for ( int n : chain )
+						t = t * Transform( nif, nif->getBlockIndex( n ) );
+					return t;
+				};
+				auto pump = [skope]() {
+					skope->ogl->update(); qApp->processEvents();
+					skope->ogl->update(); qApp->processEvents();
+				};
+
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					Scene * scene = skope->ogl->getScene();
+					if ( !scene ) { fails << "no scene"; break; }
+					pump();
+
+					// the skin bones of the first skinned shape
+					Shape * shape = nullptr;
+					for ( Shape * s : scene->shapes ) {
+						if ( s && nif->getLink( nif->getBlockIndex( s->id() ), "Skin" ) >= 0 ) { shape = s; break; }
+					}
+					if ( !shape ) { fails << "no skinned shape"; break; }
+					QModelIndex iSkin = nif->getBlockIndex( nif->getLink( nif->getBlockIndex( shape->id() ), "Skin" ) );
+					QModelIndex iBones = nif->getIndex( iSkin, "Bones" );
+					QSet<int> skinBones;
+					for ( int r = 0; r < nif->rowCount( iBones ); r++ )
+						skinBones.insert( nif->getLink( nif->getIndex( iBones, r ) ) );
+
+					// Hierarchy: rotating a bone's ANCESTOR must carry the bone
+					// (and the armour weighted to it) along — the shoulder→arm→
+					// hand behaviour. Prefer an ancestor that is itself a skin
+					// bone (a true "pose the shoulder" case); fall back to any
+					// non-root ancestor node, which still proves propagation.
+					int parent = -1, child = -1;
+					QList<int> sortedBones = skinBones.values();
+					std::sort( sortedBones.begin(), sortedBones.end() );
+					for ( int c : sortedBones ) {
+						int p = nif->getParent( c );
+						while ( p >= 0 ) {
+							if ( skinBones.contains( p ) ) { parent = p; child = c; break; }
+							p = nif->getParent( p );
+						}
+						if ( parent >= 0 ) break;
+					}
+					if ( parent < 0 ) {
+						// no skin-bone-to-skin-bone nesting (e.g. a flat facial
+						// rig); prove propagation with any bone's parent node
+						for ( int c : sortedBones ) {
+							int p = nif->getParent( c );
+							if ( p >= 0 ) { parent = p; child = c; break; }
+						}
+						log << "(no skin-bone chain in this skeleton; using a bone's parent node)\n";
+					}
+					if ( parent < 0 ) {
+						log << "every skin bone is a root; hierarchy check not applicable\n";
+					} else {
+						log << "parent bone " << parent << " '" << nif->get<QString>( nif->getBlockIndex( parent ), "Name" )
+							<< "'  child bone " << child << " '" << nif->get<QString>( nif->getBlockIndex( child ), "Name" ) << "'\n";
+						const Vector3 childBefore = worldTrans( child ).translation;
+						const Matrix rBefore = nif->get<Matrix>( nif->getBlockIndex( parent ), "Rotation" );
+						Matrix rot; rot.fromEuler( 0, 0, float( 40.0 * 3.14159265 / 180.0 ) );
+						nif->set<Matrix>( nif->getBlockIndex( parent ), "Rotation", rBefore * rot );
+						const Vector3 childAfter = worldTrans( child ).translation;
+						const float d = ( childAfter - childBefore ).length();
+						log << "  rotating ONLY the parent moved the child bone's world position by " << d << " (expect > 0)\n";
+						if ( d <= 1e-3f )
+							fails << "child bone did not follow its parent — hierarchy is not propagating";
+						nif->set<Matrix>( nif->getBlockIndex( parent ), "Rotation", rBefore );	// restore
+					}
+
+					// CUMULATIVE: rotate three bones in turn, bounds must keep moving
+					QList<int> some = skinBones.values();
+					std::sort( some.begin(), some.end() );
+					pump();
+					BoundSphere prev = shape->bounds();
+					int stacked = 0;
+					for ( int i = 0; i < some.size() && stacked < 3; i++ ) {
+						int b = some.at( i );
+						QModelIndex iB = nif->getBlockIndex( b );
+						Matrix r0 = nif->get<Matrix>( iB, "Rotation" );
+						Matrix rot; rot.fromEuler( 0, 0, float( 20.0 * 3.14159265 / 180.0 ) );
+						nif->set<Matrix>( iB, "Rotation", r0 * rot );
+						scene->transformDirty = true;
+						pump();
+						BoundSphere now = shape->bounds();
+						const float moved = ( now.center - prev.center ).length() + std::fabs( now.radius - prev.radius );
+						log << "  posed bone " << b << " -> bounds moved " << moved << "\n";
+						if ( moved > 1e-4f ) stacked++;
+						prev = now;
+					}
+					log << "bones that each further changed the pose: " << stacked << " of 3\n";
+					if ( stacked < 2 )
+						fails << "posing multiple bones did not accumulate";
+				} while ( false );
+
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty()
+					? "PASS — parent bones carry their children, and poses stack bone by bone\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer * quitDriver = new QTimer( qApp );
+				QObject::connect( quitDriver, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb ) return;
+					QAbstractButton * btn = mb->button( QMessageBox::Discard );
+					if ( !btn ) btn = mb->button( QMessageBox::No );
+					if ( !btn && !mb->buttons().isEmpty() ) btn = mb->buttons().first();
+					if ( btn ) btn->click();
+				} );
+				quitDriver->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_POSE_TEST=1): does moving a bone NiNode actually pose a
+	// skinned mesh? Shape::updateBoneTransforms() derives each bone matrix from
+	// bone->localTrans(skeletonRoot) — the LIVE node transform — so posing
+	// should already work with no new feature. This proves it, or disproves it.
+	//
+	// Rotates the first bone that some shape is skinned to, then checks:
+	//   - the shape's CPU-side boneTransforms changed (the skinning maths saw it),
+	//   - its bounding sphere moved (the deformation is geometric, not cosmetic),
+	//   - the rendered framebuffer changed (it reaches the screen).
+	// Restores the bone afterwards and re-checks, so a false positive from some
+	// unrelated per-frame jitter is caught.
+	// Log: release/ww_pose_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_POSE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_pose_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					Scene * scene = skope->ogl->getScene();
+					if ( !scene ) { fails << "no scene"; break; }
+
+					// force a full draw so shapes and bone transforms exist
+					auto pump = [skope]() {
+						skope->ogl->update();
+						qApp->processEvents();
+						skope->ogl->update();
+						qApp->processEvents();
+					};
+					pump();
+
+					// every skinned shape in the scene (Shape's own skin members
+					// are protected, so judge from the model)
+					QVector<Shape *> skinned;
+					for ( Shape * s : scene->shapes ) {
+						if ( !s )
+							continue;
+						QModelIndex iS = nif->getBlockIndex( s->id() );
+						if ( nif->getLink( iS, "Skin" ) >= 0 )
+							skinned.append( s );
+					}
+					if ( skinned.isEmpty() ) { fails << "no skinned shape in the scene"; break; }
+					Shape * shape = skinned.first();
+					log << skinned.size() << " skinned shape(s) in the scene\n";
+
+					const int shapeBlock = shape->id();
+					QModelIndex iShape = nif->getBlockIndex( shapeBlock );
+					QModelIndex iSkin = nif->getBlockIndex( nif->getLink( iShape, "Skin" ) );
+					QModelIndex iBones = nif->getIndex( iSkin, "Bones" );
+					if ( !iBones.isValid() || nif->rowCount( iBones ) < 1 ) {
+						fails << "shape has no Bones array";
+						break;
+					}
+					const int boneBlock = nif->getLink( nif->getIndex( iBones, 0 ) );
+					QModelIndex iBone = nif->getBlockIndex( boneBlock );
+					if ( !iBone.isValid() ) { fails << "bone link is invalid"; break; }
+
+					log << "shape block " << shapeBlock << " '" << nif->get<QString>( iShape, "Name" ) << "'"
+						<< " skinned to " << nif->rowCount( iBones ) << " bone(s)\n";
+					log << "posing bone block " << boneBlock << " '"
+						<< nif->get<QString>( iBone, "Name" ) << "'\n";
+
+					// bounds() is public and is recomputed by updateBoneTransforms()
+					// straight from the live bone matrices, so it is a faithful
+					// numeric proxy for "the skinning saw the bone move".
+					auto bounds = [shape]() { return shape->bounds(); };
+
+					const BoundSphere bsBefore = bounds();
+					QHash<int, BoundSphere> shapeBoundsBefore;
+					for ( Shape * s : skinned )
+						shapeBoundsBefore.insert( s->id(), s->bounds() );
+					QImage imgBefore = skope->ogl->grabFramebuffer();
+
+					// rotate the bone 30 degrees about Z
+					const Matrix rotBefore = nif->get<Matrix>( iBone, "Rotation" );
+					Matrix rot;
+					rot.fromEuler( 0.0f, 0.0f, float( 30.0 * 3.14159265 / 180.0 ) );
+					nif->set<Matrix>( iBone, "Rotation", rotBefore * rot );
+					scene->transformDirty = true;
+					pump();
+
+					const BoundSphere bsAfter = bounds();
+					QImage imgAfter = skope->ogl->grabFramebuffer();
+
+					auto pixDelta = []( const QImage & a, const QImage & b ) {
+						if ( a.isNull() || b.isNull() || a.size() != b.size() )
+							return -1;
+						int n = 0;
+						for ( int y = 0; y < a.height(); y += 2 )
+							for ( int x = 0; x < a.width(); x += 2 )
+								if ( a.pixel( x, y ) != b.pixel( x, y ) )
+									n++;
+						return n;
+					};
+
+					const float dBounds = ( bsAfter.center - bsBefore.center ).length()
+						+ std::fabs( bsAfter.radius - bsBefore.radius );
+					const int dPix = pixDelta( imgBefore, imgAfter );
+
+					log << "skinned bounds delta: " << dBounds << " (expect > 0)\n";
+					log << "  before c(" << bsBefore.center[0] << "," << bsBefore.center[1]
+						<< "," << bsBefore.center[2] << ") r" << bsBefore.radius << "\n";
+					log << "  after  c(" << bsAfter.center[0] << "," << bsAfter.center[1]
+						<< "," << bsAfter.center[2] << ") r" << bsAfter.radius << "\n";
+					log << "framebuffer pixels changed: " << dPix << "\n";
+
+					if ( dBounds <= 1e-4f )
+						fails << "skinned bounds unchanged — the mesh does NOT follow the bone";
+
+					// The real claim for a merged armour set: EVERY piece whose
+					// skin references the posed bone must follow it. If merge's
+					// node de-duplication failed, some piece would be bound to a
+					// private copy of the bone and would stay put.
+					int followed = 0, shouldFollow = 0;
+					for ( Shape * s : skinned ) {
+						QModelIndex iS = nif->getBlockIndex( s->id() );
+						QModelIndex iSk = nif->getBlockIndex( nif->getLink( iS, "Skin" ) );
+						QModelIndex iBl = nif->getIndex( iSk, "Bones" );
+						bool uses = false;
+						for ( int r = 0; r < nif->rowCount( iBl ); r++ )
+							if ( nif->getLink( nif->getIndex( iBl, r ) ) == boneBlock ) { uses = true; break; }
+						if ( !uses )
+							continue;
+						shouldFollow++;
+						const float d = ( s->bounds().center - shapeBoundsBefore.value( s->id() ).center ).length()
+							+ std::fabs( s->bounds().radius - shapeBoundsBefore.value( s->id() ).radius );
+						log << "  shape " << s->id() << " '" << nif->get<QString>( iS, "Name" )
+							<< "' uses the bone, moved " << d << "\n";
+						if ( d > 1e-4f )
+							followed++;
+					}
+					log << "pieces bound to that bone: " << shouldFollow
+						<< ", pieces that moved: " << followed << "\n";
+					if ( shouldFollow > 0 && followed != shouldFollow )
+						fails << QString( "%1 of %2 piece(s) bound to the bone did NOT move — "
+							"they are on a private copy of the skeleton" )
+							.arg( shouldFollow - followed ).arg( shouldFollow );
+					if ( dPix == 0 )
+						fails << "framebuffer identical — the pose does not reach the screen";
+					if ( dPix < 0 )
+						log << "  (framebuffer compare unavailable; relying on the numeric check)\n";
+
+					// restore and confirm it goes back, so the deltas above were
+					// caused by the edit and not by frame-to-frame noise
+					nif->set<Matrix>( iBone, "Rotation", rotBefore );
+					scene->transformDirty = true;
+					pump();
+					const BoundSphere bsBack = bounds();
+					const float dBack = ( bsBack.center - bsBefore.center ).length()
+						+ std::fabs( bsBack.radius - bsBefore.radius );
+					log << "after restore, bounds delta vs original: " << dBack << " (expect ~0)\n";
+					if ( dBack > 1e-2f )
+						fails << "restoring the bone did not restore the mesh";
+				} while ( false );
+
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty()
+					? "PASS — posing a bone deforms the skinned mesh live\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer * quitDriver = new QTimer( qApp );
+				QObject::connect( quitDriver, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb )
+						return;
+					QAbstractButton * btn = mb->button( QMessageBox::Discard );
+					if ( !btn )
+						btn = mb->button( QMessageBox::No );
+					if ( !btn && !mb->buttons().isEmpty() )
+						btn = mb->buttons().first();
+					if ( btn )
+						btn->click();
+				} );
+				quitDriver->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_PINNED_TEST=1): Block Details pinned fields. Pins a field
+	// on one block, then checks the pin follows to ANOTHER block of the same
+	// type (the whole point — pins are per block TYPE, stored as a field path,
+	// not as an item pointer or row number), that the star reaches the Name
+	// column's display text, that the ★ pinned-only filter hides exactly the
+	// unpinned rows, and that unpinning undoes all of it.
+	// Log: release/ww_pinned_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PINNED_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_pinned_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+
+					// two blocks of the same type, with a common named field
+					const QString field = QStringLiteral( "Flags" );
+					QHash<QString, QVector<int>> byType;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						byType[nif->itemName( nif->getBlockIndex( b ) )].append( b );
+					int blockA = -1, blockB = -1;
+					QString type;
+					for ( auto it = byType.constBegin(); it != byType.constEnd(); ++it ) {
+						if ( it.value().size() < 2 )
+							continue;
+						if ( !nif->getIndex( nif->getBlockIndex( it.value().at( 0 ) ), field ).isValid() )
+							continue;
+						type = it.key(); blockA = it.value().at( 0 ); blockB = it.value().at( 1 );
+						break;
+					}
+					if ( blockA < 0 ) { log << "no type with 2 blocks carrying a '" << field << "' field\n"; break; }
+					log << "type '" << type << "' blocks A=" << blockA << " B=" << blockB
+						<< " field '" << field << "'\n";
+
+					// start clean so a previous run's settings cannot mask a failure
+					skope->wwPinnedFields.clear();
+					skope->wwSavePinnedFields();
+
+					// --- pin on block A ---
+					skope->select( nif->getBlockIndex( blockA ) );
+					QModelIndex iA = nif->getIndex( nif->getBlockIndex( blockA ), field );
+					const QString path = skope->wwFieldPath( iA );
+					log << "field path '" << path << "'\n";
+					if ( path.isEmpty() ) { fails << "wwFieldPath returned empty"; break; }
+					skope->wwTogglePinField( iA );
+
+					const NifItem * itemA = nif->getItem( iA );
+					if ( !nif->pinnedItems.contains( itemA ) )
+						fails << "after pin, block A's item is not in pinnedItems";
+					if ( !skope->wwIsFieldPinned( iA ) )
+						fails << "after pin, wwIsFieldPinned(A) is false";
+
+					// the star must reach the Name column's display text
+					const QString shownA = nif->index( iA.row(), NifModel::NameCol,
+						iA.parent() ).data( Qt::DisplayRole ).toString();
+					log << "block A name cell: '" << shownA << "'\n";
+					if ( !shownA.contains( QString::fromUtf8( "\xe2\x98\x85" ) ) )
+						fails << "pinned field's Name cell has no star";
+
+					// --- the point: switch to block B, same type ---
+					skope->select( nif->getBlockIndex( blockB ) );
+					QModelIndex iB = nif->getIndex( nif->getBlockIndex( blockB ), field );
+					const NifItem * itemB = nif->getItem( iB );
+					if ( !nif->pinnedItems.contains( itemB ) )
+						fails << "pin did NOT follow to block B (per-type resolution broken)";
+					if ( !skope->wwIsFieldPinned( iB ) )
+						fails << "wwIsFieldPinned(B) is false";
+					log << "pin followed to block B: "
+						<< ( nif->pinnedItems.contains( itemB ) ? "yes" : "NO" ) << "\n";
+
+					// --- pinned-only filter hides exactly the unpinned rows ---
+					// NOTE: read the visibility the view ACTUALLY applied, via
+					// QTreeView. NifTreeView's same-named overload marks its row
+					// argument [[maybe_unused]] and reads index.internalPointer(),
+					// so passing (row, parent) asks about the PARENT row instead.
+					QModelIndex rootB = nif->getBlockIndex( blockB );
+					int visibleBefore = 0;
+					for ( int r = 0; r < nif->rowCount( rootB ); r++ )
+						if ( !skope->tree->QTreeView::isRowHidden( r, rootB ) )
+							visibleBefore++;
+					skope->blockDetailsPinFilter->setChecked( true );
+					int visibleAfter = 0, pinnedVisible = 0;
+					for ( int r = 0; r < nif->rowCount( rootB ); r++ ) {
+						if ( skope->tree->QTreeView::isRowHidden( r, rootB ) )
+							continue;
+						visibleAfter++;
+						if ( nif->getItem( nif->index( r, 0, rootB ) ) == itemB )
+							pinnedVisible++;
+					}
+					log << "top-level rows visible: " << visibleBefore
+						<< " -> " << visibleAfter << " with the pin filter on"
+						<< " (pinned row visible: " << pinnedVisible << ")\n";
+					if ( visibleAfter != 1 || pinnedVisible != 1 )
+						fails << QString( "pin filter should leave exactly the 1 pinned row, left %1" )
+							.arg( visibleAfter );
+
+					// --- unpin undoes everything ---
+					skope->blockDetailsPinFilter->setChecked( false );
+					skope->wwTogglePinField( iB );
+					if ( nif->pinnedItems.contains( itemB ) )
+						fails << "after unpin, item still in pinnedItems";
+					if ( skope->wwPinnedFields.contains( type ) )
+						fails << "after unpin, the type still has a pin set";
+					const QString shownAfter = nif->index( iB.row(), NifModel::NameCol,
+						iB.parent() ).data( Qt::DisplayRole ).toString();
+					if ( shownAfter.contains( QString::fromUtf8( "\xe2\x98\x85" ) ) )
+						fails << "after unpin, the star is still on the Name cell";
+
+					// --- persistence round trip ---
+					skope->wwTogglePinField( iB );
+					skope->wwPinnedFields.clear();
+					skope->wwLoadPinnedFields();
+					if ( !skope->wwPinnedFields.value( type ).contains( path ) )
+						fails << "pin did not survive a settings save/load round trip";
+					log << "persistence round trip: "
+						<< ( skope->wwPinnedFields.value( type ).contains( path ) ? "ok" : "LOST" ) << "\n";
+					skope->wwPinnedFields.clear();
+					skope->wwSavePinnedFields();
+				} while ( false );
+
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty() ? "PASS\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer * quitDriver = new QTimer( qApp );
+				QObject::connect( quitDriver, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb )
+						return;
+					QAbstractButton * btn = mb->button( QMessageBox::Discard );
+					if ( !btn )
+						btn = mb->button( QMessageBox::No );
+					if ( !btn && !mb->buttons().isEmpty() )
+						btn = mb->buttons().first();
+					if ( btn )
+						btn->click();
+				} );
+				quitDriver->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	// TEST HARNESS (WW_SEP_TEST=1): exercise skin/segment-aware Separate (P) on an
 	// FO4 skinned segmented mesh. Edit-selects the first half of the largest
 	// BSSubIndexTriShape's faces, runs GLView::separateSelection(), and verifies on
@@ -1651,7 +3215,108 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_UI_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2500, skope, [skope]() {
+				// WW_UI_SHOT_DOCK=<objectName> opens that dock before the grab.
+				const QByteArray dockName = qgetenv( "WW_UI_SHOT_DOCK" );
+				if ( !dockName.isEmpty() ) {
+					if ( QDockWidget * d = skope->findChild<QDockWidget *>( QString::fromLocal8Bit( dockName ) ) ) {
+						d->show();
+						d->raise();
+						qApp->processEvents();
+					}
+				}
+				// WW_UI_SHOT_POSE=1 flips the viewport into Pose Mode first.
+				if ( qEnvironmentVariableIsSet( "WW_UI_SHOT_POSE" ) ) {
+					skope->ogl->setPoseMode( true );
+					qApp->processEvents();
+					skope->ogl->update();
+					qApp->processEvents();
+				}
 				skope->grab().save( QApplication::applicationDirPath() + "/ww_ui_shot.png" );
+				qApp->quit();
+			} );
+		} );
+	}
+
+	// RENDER REGRESSION BASELINE (WW_RENDER_SHOT=<out.png>): grab the GL
+	// framebuffer for one NIF and quit, so a driver script can walk a corpus and
+	// pixel-diff before/after a shader change. This is the guard for the particle
+	// simulation and screen-space refraction — both are easy to break from the
+	// lighting path and neither has any other automated check.
+	//
+	// Determinism is the whole point, so two things are pinned rather than left
+	// to whatever was persisted or to wall-clock:
+	//   * camera — setOrientation( recenter ) instead of the per-file stored
+	//     camera, or every baseline is framed differently;
+	//   * scene time — the particle sim is time-driven (CPU NiPSysUpdateCtlr),
+	//     so a wall-clock grab can never reproduce the same pixels.
+	// WW_RENDER_TIME (seconds, default 1.0) and WW_RENDER_VIEW (ViewState index,
+	// default ViewFront) override them.
+	//
+	// Uses ogl->grabFramebuffer(), NOT skope->grab(): the viewport is a native
+	// window, so the widget grab returns white where the 3D content should be.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_RENDER_SHOT" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
+			QTimer::singleShot( 2500, skope, [skope]() {
+				QString out = qEnvironmentVariable( "WW_RENDER_SHOT" );
+				if ( out.isEmpty() || out == QStringLiteral( "1" ) )
+					out = QApplication::applicationDirPath() + "/ww_render_shot.png";
+
+				// Pin the window size. The framebuffer follows the restored
+				// window geometry, so baselines captured in one session compared
+				// as "size mismatch" against another — the guard silently
+				// stopped guarding. WW_RENDER_SIZE=WxH overrides.
+				{
+					int rw = 1280, rh = 800;
+					const QString szEnv = qEnvironmentVariable( "WW_RENDER_SIZE" );
+					if ( szEnv.contains( QLatin1Char( 'x' ) ) ) {
+						const QStringList parts = szEnv.split( QLatin1Char( 'x' ) );
+						if ( parts.size() == 2 ) {
+							rw = qMax( parts.at( 0 ).toInt(), 320 );
+							rh = qMax( parts.at( 1 ).toInt(), 240 );
+						}
+					}
+					skope->showNormal();
+					skope->resize( rw, rh );
+					qApp->processEvents();
+				}
+
+				if ( skope->ogl ) {
+					int	viewIdx = qEnvironmentVariableIntValue( "WW_RENDER_VIEW" );
+					if ( viewIdx <= 0 || viewIdx > int( GLView::ViewWalk ) )
+						viewIdx = int( GLView::ViewFront );
+					skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
+
+					// Force the two Viewport Effects toggles ON. They default to
+					// true in Scene but are overwritten from the persisted menu
+					// state at startup, so with them unchecked the refraction and
+					// particle cases render identically to a plain mesh and the
+					// regression set silently guards nothing. A harness must
+					// exercise the code path, not the user's preferences.
+					if ( Scene * sc = skope->ogl->getScene() ) {
+						sc->showRefraction = true;
+						sc->showParticles = true;
+					}
+
+					// WW_RENDER_SEQ=<name> selects a sequence. Without it the
+					// scene takes animGroups.first(), which on FO4 VFX files is
+					// the one-shot "autoPlay" — sequence-gated effects (the
+					// procedural lightning's Generation keys) never fire there.
+					const QString seq = qEnvironmentVariable( "WW_RENDER_SEQ" );
+					if ( !seq.isEmpty() )
+						skope->ogl->setSceneSequence( seq );
+
+					bool	timeOk = false;
+					float	t = qEnvironmentVariable( "WW_RENDER_TIME" ).toFloat( &timeOk );
+					skope->ogl->setSceneTime( timeOk ? t : 1.0f );
+
+					// grabFramebuffer() reads the CURRENT buffer without
+					// repainting — pump twice or the grab is a stale frame.
+					for ( int i = 0; i < 2; i++ ) {
+						skope->ogl->update();
+						qApp->processEvents();
+					}
+					skope->ogl->grabFramebuffer().save( out );
+				}
 				qApp->quit();
 			} );
 		} );
@@ -2322,8 +3987,9 @@ void NifSkope::initDockWidgets()
 	} );
 
 	connect( timeline, &TimelineWidget::playPauseRequested, [this]() {
-		if ( ui->aAnimate->isChecked() )
-			ui->aAnimPlay->trigger();
+		// No aAnimate gate: it made the dock's play button do nothing, silently,
+		// whenever View > Animations was off. aAnimPlay now enables it itself.
+		ui->aAnimPlay->trigger();
 	} );
 
 	// Solo / preview-only rendering of the selected node
@@ -2364,15 +4030,18 @@ void NifSkope::initDockWidgets()
 	// shared Blender-dark styling for the floating redo panels
 	const QString redoPanelQss = QStringLiteral(
 		"QFrame#GizmoRedoPanel, QFrame#OperatorRedoPanel, QFrame#BoxSelectRedoPanel, QFrame#OperatorExRedoPanel {"
-		" background: #2f2f2f; border: 1px solid #202020; }"
-		"QCheckBox { color: #cccccc; background: transparent; }"
-		"QLabel { color: #cccccc; background: transparent; }"
-		"QToolButton { color: #cccccc; background: transparent; border: none; }"
-		"QToolButton:hover { color: #ffffff; }"
-		"QPushButton { background: #545454; color: #e6e6e6; border: none; border-radius: 3px; padding: 3px 14px; }"
-		"QPushButton:hover { background: #656565; }"
-		"QPushButton:pressed { background: #4772b3; }"
-		"QComboBox { background: #282828; color: #e6e6e6; border: none; border-radius: 3px; padding: 2px 6px; }" );
+		" background: %1; border: 1px solid %2; }"
+		"QCheckBox { color: %3; background: transparent; }"
+		"QLabel { color: %3; background: transparent; }"
+		"QToolButton { color: %3; background: transparent; border: none; }"
+		"QToolButton:hover { color: %4; }"
+		"QPushButton { background: %5; color: %3; border: none; border-radius: 3px; padding: 3px 14px; }"
+		"QPushButton:hover { background: %6; }"
+		"QPushButton:pressed { background: %7; }"
+		"QComboBox { background: %8; color: %3; border: none; border-radius: 3px; padding: 2px 6px; }" )
+		.arg( wwSkinColor( "bgCard" ), wwSkinColor( "borderStrong" ), wwSkinColor( "text" ),
+			  wwSkinColor( "textBright" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
+			  wwSkinColor( "bgBtnDown" ), wwSkinColor( "bgPanel" ) );
 
 	// Blender-style redo panel: tweak the parameters of the last transform.
 	// The GL viewport is a native window (createWindowContainer) that paints
@@ -3076,8 +4745,8 @@ void NifSkope::initDockWidgets()
 	aPlaySpace->setShortcutContext( Qt::WidgetWithChildrenShortcut );
 	graphicsView->addAction( aPlaySpace );
 	connect( aPlaySpace, &QAction::triggered, [this]() {
-		if ( ui->aAnimate->isChecked() )
-			ui->aAnimPlay->trigger();
+		// see above: Space must not be a silent no-op either
+		ui->aAnimPlay->trigger();
 	} );
 
 	// Blender Set Origin menu (Shift+Ctrl+Alt+C). A window-level QAction so it
@@ -3127,7 +4796,8 @@ void NifSkope::initDockWidgets()
 		tb->setIconSize( QSize( is.width() * 3 / 4, is.height() * 3 / 4 ) );
 		tb->setMovable( false );
 		tb->setStyleSheet( QStringLiteral(
-			"QToolBar::separator { background: #7a7a7a; width: 2px; height: 2px; margin: 4px 6px; }" ) );
+			"QToolBar::separator { background: %1; width: 2px; height: 2px; margin: 4px 6px; }" )
+			.arg( wwSkinColor( "border" ) ) );
 	}
 
 	// open/save already live in the File menu; drop them from the toolbar
@@ -3152,12 +4822,7 @@ void NifSkope::initDockWidgets()
 		modeButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		modeButton->setMinimumWidth( 118 );
 		modeButton->setAutoRaise( false );
-		modeButton->setStyleSheet( QStringLiteral(
-			"QToolButton { padding: 4px 10px; border: 1px solid #555; border-radius: 4px;"
-			" background: #383838; color: #ddd; font-weight: 600; }"
-			"QToolButton:hover { background: #4a4a4a; border-color: #777; color: white; }"
-			"QToolButton:pressed, QToolButton::menu-button:pressed { background: #2b2b2b; }"
-			"QToolButton::menu-indicator { subcontrol-position: right center; subcontrol-origin: padding; }" ) );
+		modeButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "4px 10px" ) ) );
 		modeButton->setToolTip( tr( "Viewport interaction mode. Tab toggles Object Mode and the last non-object mode." ) );
 
 		QMenu * modeMenu = new QMenu( modeButton );
@@ -3165,17 +4830,20 @@ void NifSkope::initDockWidgets()
 		modeGroup->setExclusive( true );
 		QAction * objectMode = modeMenu->addAction( objectIcon, tr( "Object Mode" ) );
 		QAction * editMode = modeMenu->addAction( editIcon, tr( "Edit Mode" ) );
+		QAction * poseMode = modeMenu->addAction( objectIcon, tr( "Pose Mode" ) );
 		QAction * vertexPaintMode = modeMenu->addAction( vertexPaintIcon, tr( "Vertex Paint" ) );
 		QAction * weightPaintMode = modeMenu->addAction( weightPaintIcon, tr( "Weight Paint" ) );
 		QAction * segmentPaintMode = modeMenu->addAction( segmentPaintIcon, tr( "Segment Paint" ) );
 		objectMode->setObjectName( QStringLiteral( "ViewportObjectModeAction" ) );
 		editMode->setObjectName( QStringLiteral( "ViewportEditModeAction" ) );
+		poseMode->setObjectName( QStringLiteral( "ViewportPoseModeAction" ) );
 		vertexPaintMode->setObjectName( QStringLiteral( "ViewportVertexPaintAction" ) );
 		weightPaintMode->setObjectName( QStringLiteral( "ViewportWeightPaintAction" ) );
 		segmentPaintMode->setObjectName( QStringLiteral( "ViewportSegmentPaintAction" ) );
+		poseMode->setToolTip( tr( "Pose the skeleton: bones are drawn and clickable; click one then G/R/S to pose it." ) );
 		vertexPaintMode->setToolTip( tr( "Paint per-vertex RGB colour or alpha on the active mesh." ) );
 		segmentPaintMode->setToolTip( tr( "Paint binary face membership for FO4 segments and subsegments." ) );
-		for ( QAction * action : { objectMode, editMode, vertexPaintMode, weightPaintMode, segmentPaintMode } ) {
+		for ( QAction * action : { objectMode, editMode, poseMode, vertexPaintMode, weightPaintMode, segmentPaintMode } ) {
 			action->setCheckable( true );
 			modeGroup->addAction( action );
 		}
@@ -3186,32 +4854,37 @@ void NifSkope::initDockWidgets()
 		{
 			const QFontMetrics fm( modeButton->font() );
 			int wMax = 0;
-			for ( const QString & s : { tr( "Object Mode" ), tr( "Edit Mode" ),
+			for ( const QString & s : { tr( "Object Mode" ), tr( "Edit Mode" ), tr( "Pose Mode" ),
 					tr( "Vertex Paint" ), tr( "Weight Paint" ), tr( "Segment Paint" ) } )
 				wMax = std::max( wMax, fm.horizontalAdvance( s ) );
 			// text + icon + paddings/border + menu indicator
 			modeButton->setFixedWidth( wMax + modeButton->iconSize().width() + 46 );
 		}
 
-		auto syncModeButton = [this, modeButton, objectMode, editMode, vertexPaintMode,
+		auto syncModeButton = [this, modeButton, objectMode, editMode, poseMode, vertexPaintMode,
 			weightPaintMode, segmentPaintMode, objectIcon, editIcon, vertexPaintIcon, weightPaintIcon, segmentPaintIcon]() {
 			bool paintingWeights = ogl->riggingWeightPaintModeActive();
 			bool paintingVertices = ogl->vertexPaintModeActive();
 			bool paintingSegments = ogl->segmentPaintModeActive();
 			bool editing = ogl->editModeActive();
+			bool posing = ogl->poseModeActive();
 			QSignalBlocker objectBlocker( objectMode );
 			QSignalBlocker editBlocker( editMode );
+			QSignalBlocker poseBlocker( poseMode );
 			QSignalBlocker vertexBlocker( vertexPaintMode );
 			QSignalBlocker weightBlocker( weightPaintMode );
 			QSignalBlocker segmentBlocker( segmentPaintMode );
-			objectMode->setChecked( !paintingWeights && !paintingVertices && !paintingSegments && !editing );
-			editMode->setChecked( !paintingWeights && !paintingVertices && !paintingSegments && editing );
+			bool anyOther = paintingWeights || paintingVertices || paintingSegments || editing || posing;
+			objectMode->setChecked( !anyOther );
+			editMode->setChecked( !paintingWeights && !paintingVertices && !paintingSegments && !posing && editing );
+			poseMode->setChecked( posing );
 			vertexPaintMode->setChecked( paintingVertices );
 			weightPaintMode->setChecked( paintingWeights );
 			segmentPaintMode->setChecked( paintingSegments );
 			modeButton->setText( paintingWeights ? QObject::tr( "Weight Paint" )
 				: paintingVertices ? QObject::tr( "Vertex Paint" )
 				: paintingSegments ? QObject::tr( "Segment Paint" )
+				: posing ? QObject::tr( "Pose Mode" )
 				: ( editing ? QObject::tr( "Edit Mode" ) : QObject::tr( "Object Mode" ) ) );
 			modeButton->setIcon( paintingWeights ? weightPaintIcon
 				: paintingVertices ? vertexPaintIcon : paintingSegments ? segmentPaintIcon
@@ -3221,13 +4894,22 @@ void NifSkope::initDockWidgets()
 			ogl->setRiggingWeightPaintMode( false );
 			ogl->setVertexPaintMode( false );
 			ogl->setSegmentPaintMode( false );
+			ogl->setPoseMode( false );
 			ogl->setEditMode( false );
 		} );
 		connect( editMode, &QAction::triggered, this, [this]() {
 			ogl->setRiggingWeightPaintMode( false );
 			ogl->setVertexPaintMode( false );
 			ogl->setSegmentPaintMode( false );
+			ogl->setPoseMode( false );
 			ogl->setEditMode( true );
+		} );
+		connect( poseMode, &QAction::triggered, this, [this]() {
+			ogl->setRiggingWeightPaintMode( false );
+			ogl->setVertexPaintMode( false );
+			ogl->setSegmentPaintMode( false );
+			ogl->setEditMode( false );
+			ogl->setPoseMode( true );
 		} );
 		connect( ogl, &GLView::editModeChanged, this, [this, syncModeButton]( bool enabled ) {
 			if ( enabled && !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
@@ -3250,6 +4932,11 @@ void NifSkope::initDockWidgets()
 		connect( ogl, &GLView::segmentPaintModeChanged, this,
 			[this, syncModeButton]( bool enabled ) {
 				if ( enabled ) lastViewportNonObjectMode = 4;
+				syncModeButton();
+			} );
+		connect( ogl, &GLView::poseModeChanged, this,
+			[this, syncModeButton]( bool enabled ) {
+				if ( enabled ) lastViewportNonObjectMode = 5;
 				syncModeButton();
 			} );
 		// GLView always starts in object mode; subsequent changes arrive through
@@ -3284,13 +4971,7 @@ void NifSkope::initDockWidgets()
 			btn->setAutoRaise( false );
 			// boxed like the Panels / Workspaces selectors (slimmer padding:
 			// up to eight of these share the row)
-			btn->setStyleSheet( QStringLiteral(
-				"QToolButton { padding: 3px 9px; border: 1px solid #555; border-radius: 4px;"
-				" background: #383838; color: #ddd; font-weight: 600; }"
-				"QToolButton:hover { background: #4a4a4a; border-color: #777; color: white; }"
-				"QToolButton:pressed { background: #2b2b2b; }"
-				"QToolButton::menu-indicator { subcontrol-position: right center;"
-				" subcontrol-origin: padding; }" ) );
+			btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 9px" ) ) );
 			QMenu * menu = new QMenu( btn );
 			connect( menu, &QMenu::aboutToShow, this, [this, menu, populate]() {
 				menu->clear();
@@ -3959,16 +5640,73 @@ void NifSkope::initDockWidgets()
 		shadeMenu->addSection( tr( "Material Workflow" ) );
 		QActionGroup * workflowGrp = new QActionGroup( shadeMenu );
 		workflowGrp->setExclusive( true );
-		QAction * specGlossWorkflow = shadeMenu->addAction( ui->aSpecular->icon(), tr( "Specular / Gloss" ) );
-		specGlossWorkflow->setCheckable( true );
-		specGlossWorkflow->setChecked( true );
-		specGlossWorkflow->setToolTip( tr( "Use the currently supported specular/gloss material workflow" ) );
-		workflowGrp->addAction( specGlossWorkflow );
-		QAction * pbrWorkflow = shadeMenu->addAction( tr( "PBR: Roughness / Metallic (Planned)" ) );
-		pbrWorkflow->setCheckable( true );
-		pbrWorkflow->setEnabled( false );
-		pbrWorkflow->setToolTip( tr( "Reserved for the future PBR viewport renderer" ) );
-		workflowGrp->addAction( pbrWorkflow );
+		// Three exclusive lighting modes. Only the program choice changes between
+		// them, so switching needs a repaint, not a scene rebuild.
+		struct LightingModeDef { int mode; QString name; QString tip; };
+		const LightingModeDef lightingModes[] = {
+			{ PbrmModeLegacy, tr( "Legacy" ),
+			  tr( "Render only spec/gloss lighting. A resolved .pbrm is ignored." ) },
+			{ PbrmModePBR, tr( "PBR" ),
+			  tr( "Render only PBR lighting. Shapes without a .pbrm are driven from their "
+			      "legacy material, so the whole scene sits under one BRDF." ) },
+			{ PbrmModeLegacyAndPBR, tr( "Legacy and PBR" ),
+			  tr( "Render both: PBR wherever a .pbrm is available, spec/gloss everywhere else. "
+			      "PBR always overrides a legacy material when one is available." ) },
+		};
+		// The PBR modes are UNFINISHED — they bind and draw but render nothing for
+		// lighting-shader shapes (WW_CHANGES 2026-07-27e). Greyed out and forced
+		// to Legacy until that is fixed; `pbrmFeatureEnabled` in glproperty.cpp
+		// gates the runtime side so a stored setting cannot re-enable them.
+		const int activeMode = PbrmModeLegacy;
+		setPbrmMode( activeMode );
+		for ( const LightingModeDef & def : lightingModes ) {
+			const bool finished = ( def.mode == PbrmModeLegacy );
+			QAction * a = shadeMenu->addAction( def.mode == PbrmModeLegacy ? ui->aSpecular->icon() : QIcon(),
+				finished ? def.name : tr( "%1 (unfinished)" ).arg( def.name ) );
+			a->setCheckable( true );
+			a->setChecked( def.mode == activeMode );
+			a->setEnabled( finished );
+			a->setToolTip( finished ? def.tip
+				: tr( "Not finished: the PBR path issues draws but renders nothing for "
+				      "lighting-shader shapes. Disabled until that is fixed." ) );
+			workflowGrp->addAction( a );
+			const int mode = def.mode;
+			connect( a, &QAction::triggered, this, [this, mode]( bool on ) {
+				if ( !on )
+					return;		// exclusive group: only act on the one switched ON
+				QSettings settings;
+				settings.setValue( QStringLiteral( "Settings/Render/PBRM Mode" ), mode );
+				setPbrmMode( mode );
+				if ( ogl )
+					ogl->update();
+			} );
+		}
+		shadeMenu->addSeparator();
+
+		// Same-name .pbrm discovery. NOT part of the workflow radio group: it is
+		// an independent toggle, and it governs discovery only — a material whose
+		// name already ends in .pbrm is a direct link and is always honoured.
+		// Greyed out alongside the PBR modes: substituting a material that nothing
+		// can draw would only hide the legacy one.
+		QAction * pbrmAuto = shadeMenu->addAction( tr( "Auto-replace BGSM/BGEM with .pbrm (unfinished)" ) );
+		pbrmAuto->setCheckable( true );
+		pbrmAuto->setChecked( false );
+		pbrmAuto->setEnabled( false );
+		pbrmAuto->setToolTip( tr( "When a material has a same-name .pbrm beside it, use the .pbrm instead. "
+			"Disabled until the PBR render path works." ) );
+		connect( pbrmAuto, &QAction::toggled, this, [this]( bool on ) {
+			QSettings settings;
+			settings.setValue( QStringLiteral( "Settings/Render/PBRM Auto Replace" ), on );
+			setPbrmAutoReplace( on );
+			// Materials are resolved when a property is built, so the scene has
+			// to rebuild for the change to take effect.
+			if ( ogl ) {
+				ogl->updateSettings();
+				ogl->getScene()->clear();
+				ogl->setNif( nif );
+				ogl->update();
+			}
+		} );
 
 		shadeMenu->addSeparator();
 		shadeMenu->addSection( tr( "Material Contributions" ) );
@@ -4018,9 +5756,11 @@ void NifSkope::initDockWidgets()
 		// is the highlight: blue fill + orange text (matches the edit-mode accent)
 		const QString channelToggleQss = QStringLiteral(
 			"QToolButton { text-align: left; padding: 3px 6px; border-radius: 2px; background: transparent; }"
-			"QToolButton:hover { background: #555555; }"
-			"QToolButton:checked { background: #4772b3; color: #ff9d00; }"
-			"QToolButton:disabled { color: #777777; }" );
+			"QToolButton:hover { background: %1; }"
+			"QToolButton:checked { background: %2; color: %3; }"
+			"QToolButton:disabled { color: %4; }" )
+			.arg( wwSkinColor( "bgBtnHover" ), wwSkinColor( "bgBtnDown" ),
+				  wwSkinColor( "accentText" ), wwSkinColor( "textMuted" ) );
 		QWidget * contributionPanel = new QWidget( shadeMenu );
 		contributionPanel->setObjectName( QStringLiteral( "ShadingChannelMixer" ) );
 		QGridLayout * contributionLayout = new QGridLayout( contributionPanel );
@@ -4043,7 +5783,7 @@ void NifSkope::initDockWidgets()
 				QFont groupFont = groupLabel->font();
 				groupFont.setBold( true );
 				groupLabel->setFont( groupFont );
-				groupLabel->setStyleSheet( QStringLiteral( "color: #a8a8a8; padding: 3px 2px 1px 2px;" ) );
+				groupLabel->setStyleSheet( QStringLiteral( "color: %1; padding: 3px 2px 1px 2px;" ).arg( wwSkinColor( "textMuted" ) ) );
 				contributionLayout->addWidget( groupLabel, channelRow++, 0, 1, 2 );
 				currentContributionGroup = def.group;
 			}
@@ -4285,7 +6025,8 @@ void NifSkope::initDockWidgets()
 		// make the toolbar separators clearly visible (they are near-invisible
 		// with the default flat theme)
 		ui->tRender->setStyleSheet( QStringLiteral(
-			"QToolBar::separator { background: #7a7a7a; width: 2px; height: 2px; margin: 4px 6px; }" ) );
+			"QToolBar::separator { background: %1; width: 2px; height: 2px; margin: 4px 6px; }" )
+			.arg( wwSkinColor( "border" ) ) );
 	}
 
 	// Material Manager workspace; texture preview is its own movable window.
@@ -4316,11 +6057,18 @@ void NifSkope::initDockWidgets()
 	QDockWidget * dUVMgr = tlCreateUVManagerDock( nif, this, ogl );
 	dUVMgr->toggleViewAction()->setText( tr( "UV Editor" ) );
 
+	// Pose Manager: bone selection for posing + a save/apply/blend pose library.
+	// The posing engine is the live skinning path; this dock is the library and
+	// a bone list that drives selection so G/R/S is one click away.
+	extern QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
+	QDockWidget * dPoseMgr = tlCreatePoseManagerDock( nif, this, ogl );
+	dPoseMgr->toggleViewAction()->setText( tr( "Pose Manager" ) );
+
 	// These docks occupy one manager/workspace slot. Keep the policy on
 	// the docks themselves so the planned Blender-style workspace selector can
 	// later activate a role instead of knowing about each concrete manager.
 	const QList<QDockWidget *> workspaceManagers = {
-		dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr
+		dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr
 	};
 	for ( QDockWidget * manager : workspaceManagers )
 		manager->setProperty( "workspaceRole", QStringLiteral( "manager" ) );
@@ -4348,12 +6096,7 @@ void NifSkope::initDockWidgets()
 		btn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		btn->setMinimumWidth( 96 );
 		btn->setAutoRaise( false );
-		btn->setStyleSheet( QStringLiteral(
-			"QToolButton { padding: 4px 10px; border: 1px solid #555; border-radius: 4px;"
-			" background: #383838; color: #ddd; font-weight: 600; }"
-			"QToolButton:hover { background: #4a4a4a; border-color: #777; color: white; }"
-			"QToolButton:pressed, QToolButton::menu-button:pressed { background: #2b2b2b; }"
-			"QToolButton::menu-indicator { subcontrol-position: right center; subcontrol-origin: padding; }" ) );
+		btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "4px 10px" ) ) );
 		btn->setToolTip( tr( "Show/hide panels" ) );
 		QMenu * m = new QMenu( btn );
 		for ( QDockWidget * dw : { dList, dTree, dHeader, dBrowser, dInsp, dKfm, dRefr } ) {
@@ -4377,7 +6120,7 @@ void NifSkope::initDockWidgets()
 		workspaceGroup->setExclusive( true );
 		const QStringList workspaceNames = {
 			tr( "Default" ), tr( "Animation" ), tr( "Materials" ), tr( "Collision" ),
-			tr( "Rigging" ), tr( "Vertex Paint" ), tr( "UV Editing" )
+			tr( "Rigging" ), tr( "Vertex Paint" ), tr( "UV Editing" ), tr( "Pose" )
 		};
 		QList<QAction *> workspaceActions;
 		for ( const QString & name : workspaceNames ) {
@@ -4393,9 +6136,7 @@ void NifSkope::initDockWidgets()
 		};
 		const QList<PlannedWorkspace> plannedWorkspaces = {
 			{ tr( "Skeleton Manager (Planned)" ),
-				tr( "Future skeleton hierarchy, rest-pose, bone transform, and validation workspace" ) },
-			{ tr( "Pose Manager (Planned)" ),
-				tr( "Future character posing, prop staging, reusable pose, and load-screen composition workspace" ) }
+				tr( "Future skeleton hierarchy, rest-pose, bone transform, and validation workspace" ) }
 		};
 		for ( const PlannedWorkspace & planned : plannedWorkspaces ) {
 			QAction * action = workspaceMenu->addAction( planned.name );
@@ -4403,7 +6144,7 @@ void NifSkope::initDockWidgets()
 			action->setToolTip( planned.description );
 		}
 		const QList<QDockWidget *> managers = {
-			dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr
+			dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr
 		};
 		auto activateWorkspace = [this, managers, workspaceActions]( int workspace ) {
 			workspace = std::clamp( workspace, 0, int( managers.size() ) );
@@ -4733,6 +6474,18 @@ void NifSkope::initToolBars()
 	ui->aAnimSwitch->setData( GLView::AnimSwitch );
 
 	connect( ui->aAnimate, &QAction::toggled, ogl, &GLView::updateAnimationState );
+
+	// Play implies animation enabled. advanceGears() requires BOTH AnimEnabled
+	// and AnimPlay, and View > Animations is persisted ("GLView/Enable
+	// Animations"), so one stray click there disabled playback permanently and
+	// every play path — this action, the Timeline dock's transport, Space in the
+	// viewport — became a silent no-op. That reads exactly like "animation is
+	// broken" with nothing to discover. Connected BEFORE the state slot below so
+	// AnimEnabled is already set when AnimPlay arrives.
+	connect( ui->aAnimPlay, &QAction::triggered, this, [this]( bool checked ) {
+		if ( checked && !ui->aAnimate->isChecked() )
+			ui->aAnimate->setChecked( true );	// emits toggled -> sets AnimEnabled
+	} );
 	connect( ui->aAnimPlay, &QAction::triggered, ogl, &GLView::updateAnimationState );
 	connect( ui->aAnimLoop, &QAction::toggled, ogl, &GLView::updateAnimationState );
 	connect( ui->aAnimSwitch, &QAction::toggled, ogl, &GLView::updateAnimationState );
@@ -5242,6 +6995,27 @@ void NifSkope::loadTheme()
 		break;
 	}
 
+	// The six colour keys below are persisted (setTheme writes them, and the
+	// General settings pane round-trips them), so they OUTRANK defaultsDark[]
+	// on any install that has run before — a new default palette would never
+	// show up. Refresh them once per palette revision instead.
+	constexpr int themePaletteVersion = 3;	// 3: viewport clear colour joined the skin
+	if ( settings.value( "Settings/Theme/Palette Version", 1 ).toInt() != themePaletteVersion ) {
+		const QColor * defaults = ( theme == ThemeLight ) ? defaultsLight : defaultsDark;
+		settings.setValue( "Settings/Theme/Base Color", defaults[Base] );
+		settings.setValue( "Settings/Theme/Base Color Alt", defaults[BaseAlt] );
+		settings.setValue( "Settings/Theme/Text", defaults[Text] );
+		settings.setValue( "Settings/Theme/Highlight", defaults[Highlight] );
+		settings.setValue( "Settings/Theme/Highlight Text", defaults[HighlightText] );
+		settings.setValue( "Settings/Theme/Bright Text", defaults[BrightText] );
+		// The viewport clear colour is a Render setting with its own stored key,
+		// so it survives a palette change too and leaves the largest surface in
+		// the window off-skin. Drop the override and let GLView's default (the
+		// "viewport" skin colour) apply.
+		settings.remove( "Settings/Render/Colors/Background" );
+		settings.setValue( "Settings/Theme/Palette Version", themePaletteVersion );
+	}
+
 	QPalette pal;
 	auto baseC = settings.value( "Settings/Theme/Base Color", defaultsDark[Base] ).value<QColor>();
 	auto baseCAlt = settings.value( "Settings/Theme/Base Color Alt", defaultsDark[BaseAlt] ).value<QColor>();
@@ -5320,6 +7094,12 @@ void NifSkope::loadTheme()
 
 	// Theme name for icon path customization
 	styleData.replace( "${theme}", (theme == ThemeDark) ? "dark" : "light" );
+
+	// Skin surfaces — table at the top of this file, shared with wwSkinColor().
+	wwSkinLightTheme = ( theme == ThemeLight );
+	for ( const WwSkinVar & v : skinVars )
+		styleData.replace( QLatin1String( "${" ) + QLatin1String( v.name ) + QLatin1String( "}" ),
+						   QLatin1String( wwSkinLightTheme ? v.light : v.dark ) );
 
 	// Highlight colors in an "R, G, B" string to combine with opacity in rgba()
 	auto rgb = QString("%1, %2, %3").arg(baseCHighlight.red())
@@ -6094,8 +7874,20 @@ void NifSkope::contextMenu( const QPoint & pos )
 		const bool leafValue = item && item->valueType() != NifValue::tNone
 			&& nif->getBlockNumber( idx ) >= 0;
 		const bool differing = nif->diffRefBlock >= 0 && item && nif->diffItems.contains( item );
-		if ( leafValue || differing )
+		// pin/unpin: any field under a block, not just leaves — starring a
+		// compound (a whole Bounding Sphere, say) is a legitimate thing to want
+		const bool pinnable = item && !wwFieldPath( idx ).isEmpty();
+		if ( leafValue || differing || pinnable )
 			contextBook.addSeparator();
+		if ( pinnable ) {
+			const bool pinned = wwIsFieldPinned( idx );
+			QAction * aPin = contextBook.addAction( pinned
+				? tr( "Unpin Field" ) : tr( "Pin Field" ) );
+			aPin->setToolTip( tr( "Pinned fields are starred on every block of this type, "
+				"and the ★ button above the field list filters down to just them." ) );
+			connect( aPin, &QAction::triggered, this,
+				[this, pidx = QPersistentModelIndex( idx )]() { wwTogglePinField( pidx ); } );
+		}
 		if ( leafValue ) {
 			QAction * aCopy = contextBook.addAction( tr( "Copy Field Value" ) );
 			connect( aCopy, &QAction::triggered, this,

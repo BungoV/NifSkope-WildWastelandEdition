@@ -1,5 +1,6 @@
 #include "spellbook.h"
 #include "nifsnapshot.h"
+#include "wwskin.h"
 
 #include <QCheckBox>
 #include <QClipboard>
@@ -180,19 +181,14 @@ bool wwFlagListDialog( const QString & title, const QString & kindId,
 	dialog.setWindowTitle( title );
 	dialog.resize( 460, 360 );
 	dialog.setMinimumSize( 400, 320 );
+	// The global stylesheet (res/style.qss) now carries the dialog, input, button,
+	// header and tree surfaces, so all that stays here is what is specific to
+	// this dialog: the taller flag rows and their hover. The rest was a
+	// hardcoded copy of the old palette and simply overrode the skin.
 	dialog.setStyleSheet( QStringLiteral(
-		"QDialog { background: #383838; color: #dddddd; }"
-		"QLabel { color: #dddddd; }"
-		"QComboBox, QLineEdit, QTreeWidget { background: #454545; border: 1px solid #303030; color: #e4e4e4; }"
-		"QLineEdit { border-radius: 3px; padding: 3px 7px; selection-background-color: #4772b3; }"
 		"QTreeWidget::item { height: 26px; }"
-		"QTreeWidget::item:hover { background: #505050; }"
-		"QHeaderView::section { background: #333333; color: #bbbbbb; border: none;"
-		" border-bottom: 1px solid #555555; padding: 4px 6px; }"
-		"QPushButton { background: #454545; border: 1px solid #606060; border-radius: 3px;"
-		" color: #e2e2e2; padding: 4px 10px; }"
-		"QPushButton:hover { background: #525252; border-color: #777777; }"
-		"QPushButton:disabled { color: #777777; border-color: #4a4a4a; }" ) );
+		"QTreeWidget::item:hover { background: %1; }" )
+		.arg( wwSkinColor( "bgBtnHover" ) ) );
 	QVBoxLayout * layout = new QVBoxLayout( &dialog );
 	layout->setContentsMargins( 10, 10, 10, 8 );
 	layout->setSpacing( 7 );
@@ -204,7 +200,7 @@ bool wwFlagListDialog( const QString & title, const QString & kindId,
 	filterEdit->setClearButtonEnabled( true );
 	toolbar->addWidget( filterEdit, 1 );
 	QLabel * countLabel = new QLabel( &dialog );
-	countLabel->setStyleSheet( QStringLiteral( "color: #bbbbbb;" ) );
+	countLabel->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
 	toolbar->addWidget( countLabel );
 	layout->addLayout( toolbar );
 
@@ -221,7 +217,7 @@ bool wwFlagListDialog( const QString & title, const QString & kindId,
 	layout->addWidget( tree, 1 );
 
 	QLabel * rawValues = new QLabel( &dialog );
-	rawValues->setStyleSheet( QStringLiteral( "color: #bdbdbd; font-family: monospace;" ) );
+	rawValues->setStyleSheet( QStringLiteral( "color: %1; font-family: monospace;" ).arg( wwSkinColor( "textMuted" ) ) );
 	QPushButton * copyButton = new QPushButton( QObject::tr( "Copy" ), &dialog );
 	copyButton->setToolTip( QObject::tr( "Copy the raw flag value(s) to the clipboard" ) );
 	QPushButton * pasteButton = new QPushButton( QObject::tr( "Paste" ), &dialog );

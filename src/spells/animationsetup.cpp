@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "spellbook.h"
+#include "spells/animationsetup.h"
 #include "spells/blocks.h"
 #include "nifsnapshot.h"
 
@@ -25,6 +26,10 @@ BSD License - see nifskope.h
 #include <QSpinBox>
 #include <QVBoxLayout>
 #include <QFloat16>
+#include <QFile>
+#include <QFileInfo>
+#include <QXmlStreamReader>
+#include <QXmlStreamWriter>
 
 #include <bit>
 
@@ -44,19 +49,14 @@ static const char * effectFloatVars[10] = {
 };
 
 //! What kind of value a controller animates
-enum CtlrKind
-{
-	KindFloat = 0, KindColor, KindBool, KindTransform
-};
-
-struct CtlrOption
-{
-	QString type;      //!< Controller block type
-	QString label;     //!< Dialog label
-	CtlrKind kind;
-	bool hasEffectVar = false;   //!< Offers the effect shader variable combo
-	bool hasIntVar = false;      //!< Offers a numeric variable field (lighting shader)
-};
+// CtlrKind / CtlrOption now live in animationsetup.h so the headless CLI can
+// name the same controller set; pull them into this file's scope unchanged.
+using AnimSetup::CtlrKind;
+using AnimSetup::CtlrOption;
+using AnimSetup::KindFloat;
+using AnimSetup::KindColor;
+using AnimSetup::KindBool;
+using AnimSetup::KindTransform;
 
 //! Find the AV object that owns a property block (or the block itself if it is one)
 static QModelIndex ownerAVObject( const NifModel * nif, const QModelIndex & iBlock )
@@ -336,6 +336,674 @@ static QModelIndex createSequence( NifModel * nif, const QModelIndex & iManager,
 
 
 //! Attach controllers to a block and optionally wire it into a controller sequence
+// ---- parameterised core (shared by the dialog and the headless CLI) -------
+
+namespace AnimSetup
+{
+
+QVector<CtlrOption> controllerOptions( const NifModel * nif, const QModelIndex & iBlock )
+{
+	QVector<CtlrOption> options;
+	if ( !nif || !iBlock.isValid() )
+		return options;
+
+	if ( nif->blockInherits( iBlock, "BSEffectShaderProperty" ) ) {
+		options.append( { "BSEffectShaderPropertyFloatController", Spell::tr( "Float variable" ), KindFloat, true, false } );
+		options.append( { "BSEffectShaderPropertyColorController", Spell::tr( "Emissive color" ), KindColor, false, false } );
+	} else if ( nif->blockInherits( iBlock, "BSLightingShaderProperty" ) ) {
+		options.append( { "BSLightingShaderPropertyFloatController", Spell::tr( "Float variable (numeric id)" ), KindFloat, false, true } );
+		options.append( { "BSLightingShaderPropertyColorController", Spell::tr( "Color variable" ), KindColor, false, false } );
+	} else if ( nif->blockInherits( iBlock, "NiAlphaProperty" ) ) {
+		options.append( { "BSNiAlphaPropertyTestRefController", Spell::tr( "Alpha test threshold" ), KindFloat, false, false } );
+	} else {
+		if ( nif->blockInherits( iBlock, "NiLight" ) ) {
+			options.append( { "NiLightDimmerController", Spell::tr( "Light dimmer" ), KindFloat, false, false } );
+			options.append( { "NiLightColorController", Spell::tr( "Light color" ), KindColor, false, false } );
+		}
+		options.append( { "NiTransformController", Spell::tr( "Transform (position/rotation/scale)" ), KindTransform, false, false } );
+		options.append( { "NiVisController", Spell::tr( "Visibility (on/off)" ), KindBool, false, false } );
+	}
+	return options;
+}
+
+QStringList sequenceNames( const NifModel * nif )
+{
+	QStringList names;
+	if ( !nif )
+		return names;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex i = nif->getBlockIndex( b );
+		if ( nif->blockInherits( i, "NiControllerSequence" ) )
+			names << nif->resolveString( i, "Name" );
+	}
+	return names;
+}
+
+bool setupControllers( NifModel * nif, const QModelIndex & iBlock,
+                       const Params & p, QString * error )
+{
+	auto fail = [error]( const QString & msg ) {
+		if ( error )
+			*error = msg;
+		return false;
+	};
+
+	if ( !nif || !iBlock.isValid() )
+		return fail( QStringLiteral( "invalid target block" ) );
+
+	const QVector<CtlrOption> options = controllerOptions( nif, iBlock );
+	if ( options.isEmpty() )
+		return fail( QStringLiteral( "no controllers apply to this block type" ) );
+	if ( p.chosen.isEmpty() )
+		return fail( QStringLiteral( "no controller selected" ) );
+	for ( int i : p.chosen ) {
+		if ( i < 0 || i >= options.size() )
+			return fail( QStringLiteral( "controller index %1 out of range" ).arg( i ) );
+	}
+
+	const QModelIndex iAV = ownerAVObject( nif, iBlock );
+	const QString nodeName = nif->resolveString( iAV, "Name" );
+	const bool isProperty = ( iAV != iBlock );
+
+	// Resolve the target sequence BY NAME (the dialog used a combo index,
+	// which is meaningless to a caller that never saw the combo).
+	QPersistentModelIndex pExistingSeq;
+	if ( p.useSequence && !p.newSequence ) {
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex i = nif->getBlockIndex( b );
+			if ( !nif->blockInherits( i, "NiControllerSequence" ) )
+				continue;
+			if ( p.sequenceName.isEmpty() || nif->resolveString( i, "Name" ) == p.sequenceName ) {
+				pExistingSeq = QPersistentModelIndex( i );
+				break;
+			}
+		}
+		if ( !pExistingSeq.isValid() )
+			return fail( p.sequenceName.isEmpty()
+				? QStringLiteral( "the file has no NiControllerSequence; pass a new sequence name" )
+				: QStringLiteral( "no sequence named '%1'" ).arg( p.sequenceName ) );
+	}
+	if ( p.useSequence && p.newSequence && p.sequenceName.trimmed().isEmpty() )
+		return fail( QStringLiteral( "sequence name must not be empty" ) );
+
+	QPersistentModelIndex pBlock( iBlock );
+	QPersistentModelIndex pAV( iAV );
+	bool created = false;
+
+	nifSnapshotOp( nif, Spell::tr( "Setup controllers on %1" ).arg( nodeName ), [&]() {
+		QModelIndex block( pBlock );
+		QModelIndex av( pAV );
+		float start = 0.0f, stop = 1.0f;
+
+		QModelIndex iManager, iSeq;
+		if ( p.useSequence ) {
+			iManager = ensureControllerManager( nif );
+			if ( !iManager.isValid() )
+				return;
+
+			if ( p.newSequence ) {
+				iSeq = createSequence( nif, iManager, p.sequenceName.trimmed(), start, stop );
+			} else {
+				iSeq = QModelIndex( pExistingSeq );
+				start = nif->get<float>( iSeq, "Start Time" );
+				stop  = nif->get<float>( iSeq, "Stop Time" );
+			}
+		}
+
+		for ( int optIdx : p.chosen ) {
+			const CtlrOption & opt = options[optIdx];
+
+			QModelIndex iCtlr;
+			int ctlrNum = -1;
+
+			if ( opt.kind == KindTransform && p.useSequence ) {
+				// sequence-driven transforms ride the manager's multi-target controller
+				ensureExtraTarget( nif, iManager, nif->getBlockNumber( av ) );
+				qint32 next = nif->getLink( iManager, "Next Controller" );
+				while ( next >= 0 ) {
+					QModelIndex i = nif->getBlockIndex( next );
+					if ( nif->blockInherits( i, "NiMultiTargetTransformController" ) ) {
+						ctlrNum = next;
+						break;
+					}
+					next = nif->getLink( i, "Next Controller" );
+				}
+			} else {
+				iCtlr = nif->insertNiBlock( opt.type );
+				ctlrNum = nif->getBlockNumber( iCtlr );
+				nif->set<int>( iCtlr, "Flags", p.useSequence ? 0x004C : 0x0008 );
+				nif->set<float>( iCtlr, "Frequency", 1.0f );
+				nif->set<float>( iCtlr, "Start Time", start );
+				nif->set<float>( iCtlr, "Stop Time", stop );
+				nif->setLink( iCtlr, "Target", nif->getBlockNumber( block ) );
+
+				if ( opt.hasEffectVar )
+					nif->set<int>( iCtlr, "Controlled Variable", p.effectVar );
+				if ( opt.hasIntVar && nif->getIndex( iCtlr, "Controlled Variable" ).isValid() )
+					nif->set<int>( iCtlr, "Controlled Variable", p.intVar );
+
+				int poseInterp = createInterpolator( nif, opt.kind, start, stop, av );
+				nif->setLink( iCtlr, "Interpolator", poseInterp );
+
+				attachControllerToChain( nif, block, ctlrNum );
+			}
+
+			if ( p.useSequence && iSeq.isValid() ) {
+				int seqInterp = createInterpolator( nif, opt.kind, start, stop, av );
+				QString propType = isProperty ? nif->itemName( block ) : QString();
+				QString ctype = ( opt.kind == KindTransform ) ? QStringLiteral( "NiTransformController" ) : opt.type;
+				appendControlledBlock( nif, iSeq, seqInterp, ctlrNum, nodeName, propType, ctype );
+				ensurePaletteEntry( nif, iManager, nodeName, nif->getBlockNumber( av ) );
+			}
+			created = true;
+		}
+	} );
+
+	if ( !created )
+		return fail( QStringLiteral( "nothing was created" ) );
+	return true;
+}
+
+// ---- poses ----------------------------------------------------------------
+
+QVector<int> poseBoneNodes( const NifModel * nif )
+{
+	QVector<int> bones;
+	if ( !nif )
+		return bones;
+	QSet<int> seen;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex iShape = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( iShape, "NiAVObject" ) )
+			continue;
+		const int skin = nif->getLink( iShape, "Skin" );
+		if ( skin < 0 )
+			continue;
+		QModelIndex iBones = nif->getIndex( nif->getBlockIndex( skin ), "Bones" );
+		for ( int r = 0; r < nif->rowCount( iBones ); r++ ) {
+			const int node = nif->getLink( nif->getIndex( iBones, r ) );
+			if ( node >= 0 && !seen.contains( node ) ) {
+				seen.insert( node );
+				bones.append( node );
+			}
+		}
+	}
+	return bones;
+}
+
+namespace
+{
+
+//! The manager's NiMultiTargetTransformController, which drives posed bones.
+int multiTargetController( NifModel * nif, const QModelIndex & iManager )
+{
+	qint32 next = nif->getLink( iManager, "Next Controller" );
+	while ( next >= 0 ) {
+		QModelIndex i = nif->getBlockIndex( next );
+		if ( nif->blockInherits( i, "NiMultiTargetTransformController" ) )
+			return next;
+		next = nif->getLink( i, "Next Controller" );
+	}
+	return -1;
+}
+
+//! One key at t=0 in each channel, holding the node's current transform.
+int createPoseInterpolator( NifModel * nif, const QModelIndex & iNode )
+{
+	const Vector3 trans = nif->get<Vector3>( iNode, "Translation" );
+	const Matrix  rotM  = nif->get<Matrix>( iNode, "Rotation" );
+	const float   scale = nif->get<float>( iNode, "Scale" );
+	const Quat    rot   = rotM.toQuat();
+
+	QModelIndex iInterp = nif->insertNiBlock( "NiTransformInterpolator" );
+	QModelIndex iData   = nif->insertNiBlock( "NiTransformData" );
+
+	// The interpolator's own Transform is what a reader falls back to, so fill
+	// it as well as the keys — a one-key pose should be unambiguous.
+	if ( QModelIndex iTM = nif->getIndex( iInterp, "Transform" ); iTM.isValid() ) {
+		nif->set<Vector3>( iTM, "Translation", trans );
+		nif->set<float>( iTM, "Scale", scale );
+		if ( QModelIndex iRot = nif->getIndex( iTM, "Rotation" ); iRot.isValid() )
+			nif->set<Quat>( iRot, rot );
+	}
+
+	if ( QModelIndex iG = nif->getIndex( iData, "Translations" ); iG.isValid() ) {
+		nif->set<int>( iG, "Num Keys", 1 );
+		nif->set<int>( iG, "Interpolation", 1 );
+		nif->updateArraySize( nif->getIndex( iG, "Keys" ) );
+		QModelIndex iK = nif->getIndex( nif->getIndex( iG, "Keys" ), 0 );
+		nif->set<float>( iK, "Time", 0.0f );
+		nif->set<Vector3>( iK, "Value", trans );
+	}
+
+	if ( QModelIndex iG = nif->getIndex( iData, "Scales" ); iG.isValid() ) {
+		nif->set<int>( iG, "Num Keys", 1 );
+		nif->set<int>( iG, "Interpolation", 1 );
+		nif->updateArraySize( nif->getIndex( iG, "Keys" ) );
+		QModelIndex iK = nif->getIndex( nif->getIndex( iG, "Keys" ), 0 );
+		nif->set<float>( iK, "Time", 0.0f );
+		nif->set<float>( iK, "Value", scale );
+	}
+
+	// Rotation keys are not in a KeyGroup: Num Rotation Keys / Rotation Type
+	// gate a Quaternion Keys array (see NiKeyframeData in nif.xml). Type must
+	// not be 4 (XYZ) or the quaternion array is conditioned out.
+	nif->set<int>( iData, "Num Rotation Keys", 1 );
+	nif->set<int>( iData, "Rotation Type", 1 );	// LINEAR
+	if ( QModelIndex iQ = nif->getIndex( iData, "Quaternion Keys" ); iQ.isValid() ) {
+		nif->updateArraySize( iQ );
+		QModelIndex iK = nif->getIndex( iQ, 0 );
+		nif->set<float>( iK, "Time", 0.0f );
+		nif->set<Quat>( iK, "Value", rot );
+	}
+
+	nif->setLink( iInterp, "Data", nif->getBlockNumber( iData ) );
+	return nif->getBlockNumber( iInterp );
+}
+
+} // namespace
+
+bool savePose( NifModel * nif, const QString & name, QString * error )
+{
+	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return false; };
+	if ( !nif )
+		return fail( QStringLiteral( "no model" ) );
+	if ( name.trimmed().isEmpty() )
+		return fail( QStringLiteral( "pose name must not be empty" ) );
+	if ( sequenceNames( nif ).contains( name ) )
+		return fail( QStringLiteral( "a sequence named '%1' already exists" ).arg( name ) );
+
+	const QVector<int> bones = poseBoneNodes( nif );
+	if ( bones.isEmpty() )
+		return fail( QStringLiteral( "no skinned shape, so there are no bones to pose" ) );
+
+	bool ok = false;
+	nifSnapshotOp( nif, Spell::tr( "Save pose %1" ).arg( name ), [&]() {
+		QModelIndex iManager = ensureControllerManager( nif );
+		if ( !iManager.isValid() )
+			return;
+		QModelIndex iSeq = createSequence( nif, iManager, name.trimmed(), 0.0f, 0.0f );
+		if ( !iSeq.isValid() )
+			return;
+
+		for ( int b : bones ) {
+			QModelIndex iNode = nif->getBlockIndex( b );
+			const QString nodeName = nif->resolveString( iNode, "Name" );
+			if ( nodeName.isEmpty() )
+				continue;
+			ensureExtraTarget( nif, iManager, b );
+			const int ctlr = multiTargetController( nif, iManager );
+			const int interp = createPoseInterpolator( nif, iNode );
+			appendControlledBlock( nif, iSeq, interp, ctlr, nodeName,
+								   QString(), QStringLiteral( "NiTransformController" ) );
+			ensurePaletteEntry( nif, iManager, nodeName, b );
+		}
+		ok = true;
+	} );
+
+	if ( !ok )
+		return fail( QStringLiteral( "could not create the pose sequence" ) );
+	return true;
+}
+
+namespace
+{
+
+//! Find a NiControllerSequence by name; invalid index when absent.
+QModelIndex findSequence( const NifModel * nif, const QString & name )
+{
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex i = nif->getBlockIndex( b );
+		if ( nif->blockInherits( i, "NiControllerSequence" )
+			 && nif->resolveString( i, "Name" ) == name )
+			return i;
+	}
+	return QModelIndex();
+}
+
+//! The t=0 transform a ControlledBlock's interpolator holds: first key,
+//! falling back to the interpolator's own Transform.
+BoneTransform transformOf( const NifModel * nif, const QModelIndex & iInterp )
+{
+	BoneTransform bt;
+	QModelIndex iTM = nif->getIndex( iInterp, "Transform" );
+	bt.translation = nif->get<Vector3>( iTM, "Translation" );
+	bt.scale       = nif->get<float>( iTM, "Scale" );
+	bt.rotation    = nif->get<Quat>( nif->getIndex( iTM, "Rotation" ) );
+
+	QModelIndex iData = nif->getBlockIndex( nif->getLink( iInterp, "Data" ) );
+	if ( iData.isValid() ) {
+		QModelIndex iK = nif->getIndex( nif->getIndex( nif->getIndex( iData, "Translations" ), "Keys" ), 0 );
+		if ( iK.isValid() )
+			bt.translation = nif->get<Vector3>( iK, "Value" );
+		QModelIndex iS = nif->getIndex( nif->getIndex( nif->getIndex( iData, "Scales" ), "Keys" ), 0 );
+		if ( iS.isValid() )
+			bt.scale = nif->get<float>( iS, "Value" );
+		QModelIndex iQ = nif->getIndex( nif->getIndex( iData, "Quaternion Keys" ), 0 );
+		if ( iQ.isValid() )
+			bt.rotation = nif->get<Quat>( iQ, "Value" );
+	}
+	return bt;
+}
+
+} // namespace
+
+QHash<QString, BoneTransform> readPose( const NifModel * nif, const QString & name )
+{
+	QHash<QString, BoneTransform> pose;
+	if ( !nif )
+		return pose;
+	QModelIndex iSeq = findSequence( nif, name );
+	if ( !iSeq.isValid() )
+		return pose;
+
+	QModelIndex iCB = nif->getIndex( iSeq, "Controlled Blocks" );
+	for ( int r = 0; r < nif->rowCount( iCB ); r++ ) {
+		QModelIndex iRow = nif->getIndex( iCB, r );
+		QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iRow, "Interpolator" ) );
+		if ( !nif->blockInherits( iInterp, "NiTransformInterpolator" ) )
+			continue;
+		const QString nodeName = nif->resolveString( iRow, "Node Name" );
+		if ( !nodeName.isEmpty() )
+			pose.insert( nodeName, transformOf( nif, iInterp ) );
+	}
+	return pose;
+}
+
+// ---- Outfit Studio pose XML ----------------------------------------------
+
+namespace
+{
+
+// Verbatim port of nifly's RotVecToMat / RotMatToVec (ousnius/nifly, used by
+// BodySlide/Outfit Studio). An OS pose's rotX/rotY/rotZ is a ROTATION VECTOR
+// (axis * angle, Rodrigues) — NOT three Euler angles. nifly's Matrix3 is
+// row-major m[row][col] applied as M*v, identical to NifSkope's Matrix, so
+// these produce bit-identical rotations to Outfit Studio. (Using Euler here was
+// wrong for any multi-axis bone; it only happened to match on single-axis
+// finger curls, where a rotation vector equals the same-axis Euler angle.)
+Matrix osRotVecToMat( const Vector3 & v )
+{
+	const double angle = std::sqrt( double( v[0] ) * v[0] + double( v[1] ) * v[1] + double( v[2] ) * v[2] );
+	const double cosang = std::cos( angle );
+	const double sinang = std::sin( angle );
+	const double onemcosang = ( cosang > 0.5 ) ? ( sinang * sinang / ( 1 + cosang ) ) : ( 1 - cosang );
+	const Vector3 n = ( angle != 0.0 ) ? ( v / float( angle ) ) : Vector3( 1.0f, 0.0f, 0.0f );
+	Matrix m;
+	m( 0, 0 ) = float( n[0] * n[0] * onemcosang + cosang );
+	m( 1, 1 ) = float( n[1] * n[1] * onemcosang + cosang );
+	m( 2, 2 ) = float( n[2] * n[2] * onemcosang + cosang );
+	m( 0, 1 ) = float( n[0] * n[1] * onemcosang + n[2] * sinang );
+	m( 1, 0 ) = float( n[0] * n[1] * onemcosang - n[2] * sinang );
+	m( 1, 2 ) = float( n[1] * n[2] * onemcosang + n[0] * sinang );
+	m( 2, 1 ) = float( n[1] * n[2] * onemcosang - n[0] * sinang );
+	m( 2, 0 ) = float( n[2] * n[0] * onemcosang + n[1] * sinang );
+	m( 0, 2 ) = float( n[2] * n[0] * onemcosang - n[1] * sinang );
+	return m;
+}
+
+Vector3 osRotMatToVec( const Matrix & m )
+{
+	const double cosang = ( double( m( 0, 0 ) ) + m( 1, 1 ) + m( 2, 2 ) - 1 ) * 0.5;
+	if ( cosang > 0.5 ) {
+		Vector3 v( m( 1, 2 ) - m( 2, 1 ), m( 2, 0 ) - m( 0, 2 ), m( 0, 1 ) - m( 1, 0 ) );
+		const double s = v.length();
+		if ( s == 0.0 )
+			return Vector3();
+		return v * float( std::asin( s * 0.5 ) / s );
+	}
+	if ( cosang > -1 ) {
+		Vector3 v( m( 1, 2 ) - m( 2, 1 ), m( 2, 0 ) - m( 0, 2 ), m( 0, 1 ) - m( 1, 0 ) );
+		v.normalize();
+		return v * float( std::acos( cosang ) );
+	}
+	double x = ( m( 0, 0 ) - cosang ) * 0.5, y = ( m( 1, 1 ) - cosang ) * 0.5, z = ( m( 2, 2 ) - cosang ) * 0.5;
+	if ( x < 0.0 ) x = 0.0;
+	if ( y < 0.0 ) y = 0.0;
+	if ( z < 0.0 ) z = 0.0;
+	Vector3 v( float( std::sqrt( x ) ), float( std::sqrt( y ) ), float( std::sqrt( z ) ) );
+	v.normalize();
+	if ( m( 1, 2 ) < m( 2, 1 ) ) v[0] = -v[0];
+	if ( m( 2, 0 ) < m( 0, 2 ) ) v[1] = -v[1];
+	if ( m( 0, 1 ) < m( 1, 0 ) ) v[2] = -v[2];
+	return v * float( PI );
+}
+
+//! block number of every named NiAVObject, keyed by name.
+QHash<QString, int> namedAVObjects( const NifModel * nif )
+{
+	QHash<QString, int> byName;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( i, "NiAVObject" ) )
+			continue;
+		const QString n = nif->resolveString( i, "Name" );
+		if ( !n.isEmpty() && !byName.contains( n ) )
+			byName.insert( n, b );
+	}
+	return byName;
+}
+
+} // namespace
+
+bool applyOutfitStudioPose( NifModel * nif, const QString & path,
+                            const QHash<QString, Transform> & restByName,
+                            float blend, int * appliedOut, int * missingOut, QString * error )
+{
+	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return false; };
+	if ( !nif )
+		return fail( QStringLiteral( "no model" ) );
+
+	QFile f( path );
+	if ( !f.open( QIODevice::ReadOnly | QIODevice::Text ) )
+		return fail( QStringLiteral( "cannot open %1" ).arg( path ) );
+
+	// parse: bone name -> (euler radians, translation delta)
+	struct Delta { Vector3 euler; Vector3 trans; };
+	QHash<QString, Delta> deltas;
+	QXmlStreamReader xml( &f );
+	while ( !xml.atEnd() ) {
+		if ( xml.readNext() == QXmlStreamReader::StartElement
+			 && xml.name() == QLatin1String( "Bone" ) ) {
+			const QXmlStreamAttributes a = xml.attributes();
+			const QString bn = a.value( QLatin1String( "name" ) ).toString();
+			if ( bn.isEmpty() )
+				continue;
+			Delta d;
+			d.euler = Vector3( a.value( QLatin1String( "rotX" ) ).toFloat(),
+			                   a.value( QLatin1String( "rotY" ) ).toFloat(),
+			                   a.value( QLatin1String( "rotZ" ) ).toFloat() );
+			d.trans = Vector3( a.value( QLatin1String( "transX" ) ).toFloat(),
+			                   a.value( QLatin1String( "transY" ) ).toFloat(),
+			                   a.value( QLatin1String( "transZ" ) ).toFloat() );
+			deltas.insert( bn, d );
+		}
+	}
+	if ( xml.hasError() )
+		return fail( QStringLiteral( "XML parse error: %1" ).arg( xml.errorString() ) );
+	if ( deltas.isEmpty() )
+		return fail( QStringLiteral( "%1 has no <Bone> entries" ).arg( QFileInfo( path ).fileName() ) );
+
+	const QHash<QString, int> nodes = namedAVObjects( nif );
+	int applied = 0, missing = 0;
+
+	nifSnapshotOp( nif, Spell::tr( "Import Outfit Studio pose" ), [&]() {
+		for ( auto it = deltas.constBegin(); it != deltas.constEnd(); ++it ) {
+			auto node = nodes.constFind( it.key() );
+			if ( node == nodes.constEnd() ) {
+				missing++;
+				continue;
+			}
+			QModelIndex iNode = nif->getBlockIndex( *node );
+
+			// base = rest for this bone (mode-entry snapshot, or the current
+			// bind pose when standalone / not captured)
+			Transform base;
+			auto r = restByName.constFind( it.key() );
+			if ( r != restByName.constEnd() )
+				base = *r;
+			else
+				base = Transform( nif, iNode );
+
+			// delta as a Transform, then target = base * delta (rotate in the
+			// bone's own local frame; OS deltas are rest-relative). The pose's
+			// rot* is a rotation VECTOR, so use nifly's Rodrigues conversion.
+			Transform delta;
+			delta.rotation = osRotVecToMat( it->euler );
+			delta.translation = it->trans;
+			delta.scale = 1.0f;
+			Transform target = base * delta;
+
+			if ( std::fabs( blend - 1.0f ) > 1e-6f ) {
+				Transform cur( nif, iNode );
+				target.translation = cur.translation * ( 1.0f - blend ) + target.translation * blend;
+				Quat q = Quat::slerp( blend, cur.rotation.toQuat(), target.rotation.toQuat() );
+				target.rotation.fromQuat( q );
+			}
+
+			nif->set<Vector3>( iNode, "Translation", target.translation );
+			nif->set<Matrix>( iNode, "Rotation", target.rotation );
+			applied++;
+		}
+	} );
+
+	if ( appliedOut ) *appliedOut = applied;
+	if ( missingOut ) *missingOut = missing;
+	if ( applied == 0 )
+		return fail( QStringLiteral( "no bone names in the pose matched this skeleton (%1 missing)" ).arg( missing ) );
+	return true;
+}
+
+bool writeOutfitStudioPose( NifModel * nif, const QString & path, const QString & poseName,
+                            const QHash<int, Transform> & restByBlock, QString * error )
+{
+	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return false; };
+	if ( !nif )
+		return fail( QStringLiteral( "no model" ) );
+
+	// gather posed bones (delta from rest above a small threshold), sorted by
+	// name to match Outfit Studio's output ordering. Rest is keyed by block, so
+	// the delta is always diffed against the exact node it was captured from.
+	struct Row { QString name; Vector3 euler; Vector3 trans; };
+	QVector<Row> rows;
+	for ( auto it = restByBlock.constBegin(); it != restByBlock.constEnd(); ++it ) {
+		QModelIndex iNode = nif->getBlockIndex( it.key() );
+		const QString name = nif->get<QString>( iNode, "Name" );
+		if ( name.isEmpty() )
+			continue;
+		Transform cur( nif, iNode );
+		Transform delta = it.value().inverted() * cur;   // rest-relative
+		Row row;
+		row.name = name;
+		row.euler = osRotMatToVec( delta.rotation );      // rotation VECTOR, not Euler
+		row.trans = delta.translation;
+		const float rotMag = std::fabs( row.euler[0] ) + std::fabs( row.euler[1] ) + std::fabs( row.euler[2] );
+		if ( rotMag < 1e-4f && row.trans.length() < 1e-4f )
+			continue;   // unposed — omit, like OS
+		rows.append( row );
+	}
+	std::sort( rows.begin(), rows.end(), []( const Row & a, const Row & b ) { return a.name < b.name; } );
+	if ( rows.isEmpty() )
+		return fail( QStringLiteral( "no bones are posed — nothing to export" ) );
+
+	QFile f( path );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) )
+		return fail( QStringLiteral( "cannot write %1" ).arg( path ) );
+
+	QXmlStreamWriter xml( &f );
+	xml.setAutoFormatting( true );
+	xml.setAutoFormattingIndent( 4 );
+	xml.writeStartDocument( QStringLiteral( "1.0" ) );
+	xml.writeStartElement( QStringLiteral( "PoseData" ) );
+	xml.writeStartElement( QStringLiteral( "Pose" ) );
+	QString pn = poseName.trimmed();
+	if ( pn.isEmpty() )
+		pn = QFileInfo( path ).completeBaseName();
+	xml.writeAttribute( QStringLiteral( "name" ), pn );
+	auto num = []( float v ) { return QString::number( v, 'g', 8 ); };
+	for ( const Row & row : rows ) {
+		xml.writeStartElement( QStringLiteral( "Bone" ) );
+		xml.writeAttribute( QStringLiteral( "name" ), row.name );
+		xml.writeAttribute( QStringLiteral( "rotX" ), num( row.euler[0] ) );
+		xml.writeAttribute( QStringLiteral( "rotY" ), num( row.euler[1] ) );
+		xml.writeAttribute( QStringLiteral( "rotZ" ), num( row.euler[2] ) );
+		xml.writeAttribute( QStringLiteral( "transX" ), num( row.trans[0] ) );
+		xml.writeAttribute( QStringLiteral( "transY" ), num( row.trans[1] ) );
+		xml.writeAttribute( QStringLiteral( "transZ" ), num( row.trans[2] ) );
+		xml.writeEndElement();
+	}
+	xml.writeEndElement();   // Pose
+	xml.writeEndElement();   // PoseData
+	xml.writeEndDocument();
+	return true;
+}
+
+bool applyPose( NifModel * nif, const QString & name, float blend, QString * error )
+{
+	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return false; };
+	if ( !nif )
+		return fail( QStringLiteral( "no model" ) );
+
+	const QHash<QString, BoneTransform> pose = readPose( nif, name );
+	if ( pose.isEmpty() )
+		return fail( findSequence( nif, name ).isValid()
+			? QStringLiteral( "'%1' has no bone transforms" ).arg( name )
+			: QStringLiteral( "no sequence named '%1'" ).arg( name ) );
+
+	// node name -> block, so the pose resolves without a scene graph
+	QHash<QString, int> nodes;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( i, "NiAVObject" ) )
+			continue;
+		const QString n = nif->resolveString( i, "Name" );
+		if ( !n.isEmpty() && !nodes.contains( n ) )
+			nodes.insert( n, b );
+	}
+
+	int applied = 0, missing = 0;
+	nifSnapshotOp( nif, Spell::tr( "Apply pose %1" ).arg( name ), [&]() {
+		for ( auto it = pose.constBegin(); it != pose.constEnd(); ++it ) {
+			auto node = nodes.constFind( it.key() );
+			if ( node == nodes.constEnd() ) {
+				missing++;
+				continue;
+			}
+			QModelIndex iNode = nif->getBlockIndex( *node );
+			BoneTransform target = it.value();
+
+			// blend < 1 interpolates from where the bone is now toward the pose
+			// (Blender's pose-strength slider). blend == 1 is a plain replace.
+			if ( std::fabs( blend - 1.0f ) > 1e-6f ) {
+				BoneTransform cur;
+				cur.translation = nif->get<Vector3>( iNode, "Translation" );
+				cur.rotation    = nif->get<Matrix>( iNode, "Rotation" ).toQuat();
+				cur.scale       = nif->get<float>( iNode, "Scale" );
+				target.translation = cur.translation * ( 1.0f - blend ) + target.translation * blend;
+				target.scale       = cur.scale * ( 1.0f - blend ) + target.scale * blend;
+				target.rotation    = Quat::slerp( blend, cur.rotation, target.rotation );
+			}
+
+			Matrix m;
+			m.fromQuat( target.rotation );
+			nif->set<Vector3>( iNode, "Translation", target.translation );
+			nif->set<Matrix>( iNode, "Rotation", m );
+			if ( target.scale > 0.0f )
+				nif->set<float>( iNode, "Scale", target.scale );
+			applied++;
+		}
+	} );
+
+	if ( applied == 0 )
+		return fail( QStringLiteral( "'%1' posed no bones (%2 node name(s) not found)" )
+			.arg( name ).arg( missing ) );
+	if ( error && missing > 0 )
+		*error = QStringLiteral( "%1 bone(s) in the pose are not in this file" ).arg( missing );
+	return true;
+}
+
+} // namespace AnimSetup
+
 class spSetupControllers final : public Spell
 {
 public:
@@ -358,37 +1026,19 @@ public:
 		QModelIndex iBlock = nif->getBlockIndex( index );
 		QModelIndex iAV = ownerAVObject( nif, iBlock );
 		QString nodeName = nif->resolveString( iAV, "Name" );
-		bool isProperty = ( iAV != iBlock );
 
-		// available controller types for this block
-		QVector<CtlrOption> options;
-		if ( nif->blockInherits( iBlock, "BSEffectShaderProperty" ) ) {
-			options.append( { "BSEffectShaderPropertyFloatController", Spell::tr( "Float variable" ), KindFloat, true, false } );
-			options.append( { "BSEffectShaderPropertyColorController", Spell::tr( "Emissive color" ), KindColor, false, false } );
-		} else if ( nif->blockInherits( iBlock, "BSLightingShaderProperty" ) ) {
-			options.append( { "BSLightingShaderPropertyFloatController", Spell::tr( "Float variable (numeric id)" ), KindFloat, false, true } );
-			options.append( { "BSLightingShaderPropertyColorController", Spell::tr( "Color variable" ), KindColor, false, false } );
-		} else if ( nif->blockInherits( iBlock, "NiAlphaProperty" ) ) {
-			options.append( { "BSNiAlphaPropertyTestRefController", Spell::tr( "Alpha test threshold" ), KindFloat, false, false } );
-		} else {
-			if ( nif->blockInherits( iBlock, "NiLight" ) ) {
-				options.append( { "NiLightDimmerController", Spell::tr( "Light dimmer" ), KindFloat, false, false } );
-				options.append( { "NiLightColorController", Spell::tr( "Light color" ), KindColor, false, false } );
-			}
-			options.append( { "NiTransformController", Spell::tr( "Transform (position/rotation/scale)" ), KindTransform, false, false } );
-			options.append( { "NiVisController", Spell::tr( "Visibility (on/off)" ), KindBool, false, false } );
-		}
+		// available controller types for this block (shared with the CLI)
+		const QVector<CtlrOption> options = AnimSetup::controllerOptions( nif, iBlock );
 
-		// existing sequences
+		// existing sequences (names for the combo, plus which already animate
+		// this node — the core resolves the chosen sequence by name itself)
 		QStringList seqNames;
-		QVector<QPersistentModelIndex> seqIdxs;
 		QStringList inSequences;
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			QModelIndex i = nif->getBlockIndex( b );
 			if ( nif->blockInherits( i, "NiControllerSequence" ) ) {
 				QString sn = nif->resolveString( i, "Name" );
 				seqNames << sn;
-				seqIdxs.append( i );
 
 				QModelIndex iCtrl = nif->getIndex( i, "Controlled Blocks" );
 				for ( int r = 0; r < nif->rowCount( iCtrl ); r++ ) {
@@ -478,89 +1128,20 @@ public:
 		if ( chosen.isEmpty() )
 			return index;
 
-		bool useSequence = !rbNone->isChecked();
-		bool newSeq = rbNew->isChecked();
-		QString seqName = newSeq ? newNameEdit->text().trimmed() : seqCombo->currentText();
-		int existingSeqPick = seqCombo->currentIndex();
+		// hand the dialog's answers to the shared core
+		AnimSetup::Params p;
+		p.chosen      = chosen;
+		p.useSequence = !rbNone->isChecked();
+		p.newSequence = rbNew->isChecked();
+		p.sequenceName = p.newSequence ? newNameEdit->text().trimmed() : seqCombo->currentText();
+		if ( effectVarBox )
+			p.effectVar = effectVarBox->currentData().toInt();
+		if ( intVarBox )
+			p.intVar = intVarBox->value();
 
-		if ( useSequence && newSeq && seqName.isEmpty() ) {
-			QMessageBox::warning( nullptr, name(), Spell::tr( "Sequence name must not be empty." ) );
-			return index;
-		}
-
-		QPersistentModelIndex pBlock( iBlock );
-		QPersistentModelIndex pAV( iAV );
-
-		nifSnapshotOp( nif, Spell::tr( "Setup controllers on %1" ).arg( nodeName ), [&]() {
-			QModelIndex block( pBlock );
-			QModelIndex av( pAV );
-			float start = 0.0f, stop = 1.0f;
-
-			QModelIndex iManager, iSeq;
-			if ( useSequence ) {
-				iManager = ensureControllerManager( nif );
-				if ( !iManager.isValid() )
-					return;
-
-				if ( newSeq ) {
-					iSeq = createSequence( nif, iManager, seqName, start, stop );
-				} else if ( existingSeqPick >= 0 && existingSeqPick < seqIdxs.count() ) {
-					iSeq = QModelIndex( seqIdxs[existingSeqPick] );
-					start = nif->get<float>( iSeq, "Start Time" );
-					stop = nif->get<float>( iSeq, "Stop Time" );
-				}
-			}
-
-			for ( int optIdx : chosen ) {
-				const CtlrOption & opt = options[optIdx];
-
-				// the controller attached to the target (with its own pose interpolator)
-				QModelIndex iCtlr;
-				int ctlrNum = -1;
-
-				if ( opt.kind == KindTransform && useSequence ) {
-					// sequence-driven transforms use the manager's multi target controller
-					ensureExtraTarget( nif, iManager, nif->getBlockNumber( av ) );
-					qint32 next = nif->getLink( iManager, "Next Controller" );
-					while ( next >= 0 ) {
-						QModelIndex i = nif->getBlockIndex( next );
-						if ( nif->blockInherits( i, "NiMultiTargetTransformController" ) ) {
-							ctlrNum = next;
-							break;
-						}
-						next = nif->getLink( i, "Next Controller" );
-					}
-				} else {
-					iCtlr = nif->insertNiBlock( opt.type );
-					ctlrNum = nif->getBlockNumber( iCtlr );
-					nif->set<int>( iCtlr, "Flags", useSequence ? 0x004C : 0x0008 );
-					nif->set<float>( iCtlr, "Frequency", 1.0f );
-					nif->set<float>( iCtlr, "Start Time", start );
-					nif->set<float>( iCtlr, "Stop Time", stop );
-					nif->setLink( iCtlr, "Target", nif->getBlockNumber( block ) );
-
-					if ( opt.hasEffectVar && effectVarBox )
-						nif->set<int>( iCtlr, "Controlled Variable", effectVarBox->currentData().toInt() );
-					if ( opt.hasIntVar && intVarBox ) {
-						if ( nif->getIndex( iCtlr, "Controlled Variable" ).isValid() )
-							nif->set<int>( iCtlr, "Controlled Variable", intVarBox->value() );
-					}
-
-					int poseInterp = createInterpolator( nif, opt.kind, start, stop, av );
-					nif->setLink( iCtlr, "Interpolator", poseInterp );
-
-					attachControllerToChain( nif, block, ctlrNum );
-				}
-
-				if ( useSequence && iSeq.isValid() ) {
-					int seqInterp = createInterpolator( nif, opt.kind, start, stop, av );
-					QString propType = isProperty ? nif->itemName( block ) : QString();
-					QString ctype = ( opt.kind == KindTransform ) ? QStringLiteral( "NiTransformController" ) : opt.type;
-					appendControlledBlock( nif, iSeq, seqInterp, ctlrNum, nodeName, propType, ctype );
-					ensurePaletteEntry( nif, iManager, nodeName, nif->getBlockNumber( av ) );
-				}
-			}
-		} );
+		QString error;
+		if ( !AnimSetup::setupControllers( nif, iBlock, p, &error ) )
+			QMessageBox::warning( nullptr, name(), error );
 
 		return index;
 	}

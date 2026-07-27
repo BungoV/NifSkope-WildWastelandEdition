@@ -77,6 +77,9 @@ protected:
 	bool setupProgramCE1( const NifModel *, Program *, Shape * );
 	// Oblivion, Fallout 3/New Vegas
 	bool setupProgramFO3( const NifModel *, Program *, Shape * );
+	// PBRM (PBR Material Editor) metallic/roughness, selected by name rather
+	// than by .prog conditions — see setupProgram()
+	bool setupProgramPBRM( const NifModel *, Program *, Shape * );
 	// other games
 	void setupFixedFunction( Shape * );
 

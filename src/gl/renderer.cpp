@@ -110,6 +110,27 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		return currentProgram;
 	}
 
+	// PBRM route. Whether a shape uses it depends on a runtime material
+	// resolution and a UI mode, neither of which a .prog condition can express
+	// (those evaluate NIF data), so it is selected by name here rather than by
+	// the condition scan below. Checked before the hint so switching modes cannot
+	// leave a shape on a cached program.
+	//   Legacy         : never
+	//   PBR            : always — shapes without a PBRM are driven from their
+	//                    legacy material so the whole scene sits under one BRDF
+	//   Legacy and PBR : only where a PBRM resolved; PBR overrides legacy there
+	const int lightingMode = pbrmMode();
+	const bool wantPbrm = mesh->bslsp
+		&& ( lightingMode == PbrmModePBR
+			|| ( lightingMode == PbrmModeLegacyAndPBR && mesh->bslsp->pbrmValid ) );
+	if ( wantPbrm ) {
+		if ( Program * program = useProgram( "pbrm_default.prog" ) ) {
+			if ( setupProgramPBRM( nif, program, mesh ) )
+				return program;
+			stopProgram();
+		}
+	}
+
 	if ( hint && hint->status ) [[likely]] {
 		Program * program = hint;
 		fn->glUseProgram( program->id );
@@ -619,6 +640,154 @@ bool Renderer::setupProgramCE2( const NifModel * nif, Program * prog, Shape * me
 		fn->glCullFace( GL_BACK );
 	}
 	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+
+	return true;
+}
+
+/*! Material setup for the PBRM metallic/roughness program.
+ *
+ * Textures are bound by explicit path rather than through `uniSampler`, which
+ * resolves slots out of the shader property's own texture list — a PBRM's paths
+ * live in the material document, not in the NIF.
+ *
+ * Feature bits are handed to the shader verbatim so it never guesses whether a
+ * channel is real: a clear bit means "use the constant", which is exactly the
+ * override semantics the reader already resolved.
+ */
+bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * mesh )
+{
+	auto scene = mesh->scene;
+	auto lsp = mesh->bslsp;
+	if ( !( lsp && scene && scene->textures ) )
+		return false;
+
+	int texunit = 0;
+
+	// PBR mode renders EVERYTHING through this program, so a shape with no PBRM
+	// has to be driven from its legacy material instead. Spec/gloss maps onto
+	// metallic/roughness the same way the conversion pipeline does it: gloss is
+	// inverted to roughness, FO4 carries no metallicity so metal is 0, and F0 is
+	// the dielectric constant. Not a substitute for an authored PBRM — it is what
+	// "show me the whole scene under one BRDF" can honestly mean.
+	PbrmMaterial derived;
+	if ( !lsp->pbrmValid ) {
+		derived.roughness = std::clamp( 1.0f - lsp->specularGloss, 0.02f, 1.0f );
+		derived.metallic = 0.0f;
+		derived.ao = 1.0f;
+		derived.f0 = 0.04f;
+		derived.normalStrength = 1.0f;
+		derived.opacity = 1.0f;
+		// Diffuse and normal exist in the legacy slots, so tell the shader to
+		// sample them; there is no legacy RMAOS or emissive-intensity map, so
+		// those bits stay clear and the constants above apply.
+		derived.features = PbrmMaterial::BaseColorTexture | PbrmMaterial::NormalTexture;
+	}
+	const PbrmMaterial & m = lsp->pbrmValid ? lsp->pbrm : derived;
+
+	auto bindPath = [&]( const char * uniform, const QString & path, const QString & fallback ) {
+		int uni = prog->uniLocation( uniform );
+		if ( uni < 0 )
+			return;
+		fn->glActiveTexture( GL_TEXTURE0 + GLenum( texunit ) );
+		bool bound = false;
+		if ( !path.isEmpty() )
+			bound = scene->textures->bind( QStringView( path ), nif );
+		if ( !bound )
+			scene->textures->bind( QStringView( fallback ), nif );
+		prog->uni1i_l( uni, texunit );
+		texunit++;
+	};
+
+	// A slot that is off is a legitimate authoring state, so missing textures
+	// fall back to a neutral rather than to magenta.
+	if ( lsp->pbrmValid ) {
+		bindPath( "BaseMap", m.baseColor.lookupPath, white );
+		bindPath( "NormalMap", m.normal.lookupPath, ::default_n );
+		bindPath( "RmaosMap", m.rmaos.lookupPath, white );
+		bindPath( "EmissiveMap", m.emissive.lookupPath, black );
+	} else {
+		// Legacy fallback: pull diffuse and normal from the property's own slots
+		// via uniSampler, which is what resolves them for the spec/gloss path.
+		TexClampMode clamp = lsp->clampMode;
+		QString emptyString;
+		prog->uniSampler( lsp, "BaseMap", 0, texunit, white, clamp, emptyString );
+		prog->uniSampler( lsp, "NormalMap", 1, texunit, ::default_n, clamp, emptyString );
+		bindPath( "RmaosMap", QString(), white );
+		bindPath( "EmissiveMap", QString(), black );
+	}
+
+	prog->uni1i( "pbrFeatures", int( m.features ) );
+
+	prog->uni3f( "pbrBaseColor", m.baseColorRGB[0], m.baseColorRGB[1], m.baseColorRGB[2] );
+	prog->uni1f( "pbrOpacity", m.opacity );
+	prog->uni1f( "pbrRoughness", m.roughness );
+	prog->uni1f( "pbrMetallic", m.metallic );
+	prog->uni1f( "pbrAo", m.ao );
+	prog->uni1f( "pbrF0", m.f0 );
+	prog->uni1f( "pbrNormalStrength", m.normalStrength );
+	prog->uni3f( "pbrEmissiveColor", m.emissiveRGB[0], m.emissiveRGB[1], m.emissiveRGB[2] );
+	prog->uni1f( "pbrEmissiveIntensity", m.emissiveIntensity );
+
+	// Alpha and the UV transform still come from the NIF/BGSM side: how a shape
+	// blends is a property of the geometry's use, not of the PBRM document.
+	prog->uni1f( "alpha", lsp->alpha );
+	prog->uni2f( "uvScale", lsp->uvScale.x, lsp->uvScale.y );
+	prog->uni2f( "uvOffset", lsp->uvOffset.x, lsp->uvOffset.y );
+
+	// Environment: reuse whatever cube map the property already resolved. It is
+	// all NifSkope has — the editor's prefiltered IBL has no counterpart here.
+	bool hasCubeMap = ( scene->hasOption( Scene::DoCubeMapping ) && scene->hasOption( Scene::DoLighting )
+		&& lsp->hasEnvironmentMap );
+	int uniCubeMap = prog->uniLocation( "CubeMap" );
+	if ( uniCubeMap >= 0 ) {
+		const QString & fname = lsp->fileName( 4 );
+		fn->glActiveTexture( GL_TEXTURE0 + GLenum( texunit ) );
+		if ( hasCubeMap && ( fname.isEmpty() || !scene->bindCube( fname ) ) )
+			hasCubeMap = false;
+		if ( !hasCubeMap ) {
+			// Must still bind SOMETHING complete: a sampler the shader references
+			// with an incomplete texture attached can invalidate the whole draw,
+			// not just the sample. cube_sk is Skyrim's and is absent from FO4
+			// archives, so it left exactly that hole — pick by version the way
+			// the spec/gloss path does.
+			const std::uint32_t bsv = nif->getBSVersion();
+			const QString & fallback = ( bsv < 128 ? ::cube_sk : ::cube_fo4 );
+			if ( !scene->bindCube( fallback ) )
+				scene->bindCube( ::cube_sk );
+		}
+		prog->uni1i_l( uniCubeMap, texunit );
+		texunit++;
+	}
+	prog->uni1i( "hasCubeMap", hasCubeMap );
+	prog->uni1f( "envReflection", lsp->environmentReflection );
+
+	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
+	// the shape inherit whatever blend/depth state the previous program left
+	// behind, and it drew nothing at all — the geometry was there, the state was
+	// not. AlphaProperty::glProperty also supplies alphaFlags/alphaThreshold,
+	// which the fragment shader reads.
+	if ( mesh->translucent && scene->hasOption( Scene::DoBlending ) ) {
+		glEnable( GL_BLEND );
+		fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
+		prog->uni1i( "alphaFlags", ( mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest() ? 12 : 8 ) );
+		prog->uni1f( "alphaThreshold", 0.1f );
+	} else {
+		AlphaProperty::glProperty( mesh->alphaProperty, prog );
+	}
+
+	if ( lsp->hasSF1( ShaderFlags::SF1( ShaderFlags::SLSF1_Decal | ShaderFlags::SLSF1_Dynamic_Decal ) ) ) {
+		glEnable( GL_POLYGON_OFFSET_FILL );
+		glPolygonOffset( -1.0f, -1.0f );
+	}
+
+	if ( !mesh->depthTest ) {
+		glDisable( GL_DEPTH_TEST );
+	} else {
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+	}
+	glDepthMask( !mesh->depthWrite || mesh->translucent ? GL_FALSE : GL_TRUE );
+	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
 	return true;
 }

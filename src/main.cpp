@@ -30,6 +30,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ***** END LICENCE BLOCK *****/
 
+#include "nifcli.h"
 #include "nifskope.h"
 #include "version.h"
 #include "data/nifvalue.h"
@@ -173,7 +174,9 @@ int main( int argc, char * argv[] )
 			return 0;
 		}
 	} else {
-		// Future command line batch tools here
+		// Headless batch mode: -no-gui selected a plain QCoreApplication above,
+		// so there are no widgets and no GL context. See src/nifcli.cpp.
+		return nifskopeCliMain( app->arguments() );
 	}
 
 	return 0;

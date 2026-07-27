@@ -361,27 +361,63 @@ class ProcLightningController final : public Controller
 	struct Bolt
 	{
 		QVector<Vector3> pts;
-		float rootT = 0;                   // branches: start param on the main bolt
-		Vector3 dir;                       // branches: direction in the bolt frame
-		float lenMul = 1;
+		int parent = -1;                   // -1 = main bolt, else index into bolts[]
+		float rootT = 0;                   // start param along the PARENT bolt
+		Vector3 dir;                       // direction in the PARENT's frame
+		float lenMul = 1;                  // fraction of the parent's length
 		float widthMul = 1;
+	};
+
+	//! One of Interpolators 3-9 (Subdivision..Arc Offset): a float curve that
+	//! animates a generation parameter. Absent (link -1) on most assets.
+	struct ParamCurve
+	{
+		QPersistentModelIndex keys;
+		int idx = 0;
+		bool valid = false;
 	};
 
 	QPointer<Node> target;
 	QPointer<Node> startNode;
 	QPointer<Node> endNode;
 	QPersistentModelIndex iShaderProp;
+	ParamCurve cSubdiv, cBranches, cBranchVar, cLength, cLengthVar, cWidth, cArc;
+	//! Same seven parameters when the controller holds NiBlendFloatInterpolator
+	//! stubs instead: like Generation/Mutation, the real keys then live in the
+	//! sequences' Controlled Blocks, keyed by Interpolator ID.
+	enum ParamId { PSubdiv, PBranches, PBranchVar, PLength, PLengthVar, PWidth, PArc, PCount };
+	QVector<SeqKeys> paramKeys[PCount];
+	//! false when there is no _Start/_End pair and the bolt is emitted along the
+	//! target's own axis for Length instead of spanning two nodes
+	bool spanNodes = false;
 	int subdivisions = 6;
 	int numBranches = 1;
+	int numBranchesVar = 0;
+	float boltLength = 0.0f, boltLengthVar = 0.0f;
 	float width = 16.0f, childWidthMult = 0.75f, arcOffset = 20.0f;
 	bool fadeMain = true, fadeChild = true, animateArc = true;
 	QVector<SeqKeys> genKeys, mutKeys;
+	//! generation parameters after Interpolators 3-9 are applied for this frame
+	int effSubdiv = 6, effBranches = 1, effBranchVar = 0;
+	float effLength = 0.0f, effLengthVar = 0.0f, effArc = 20.0f, effWidth = 16.0f;
 	QVector<Bolt> bolts;
 	float lastMutation = -1.0e30f;
 	bool visible = false;
 	bool nodesResolved = false;
 
-	void regenerate();
+	//! Deterministic per-mutation RNG. The global random() made every rebuild
+	//! unique, so scrubbing the timeline backwards produced a DIFFERENT bolt and
+	//! the render-regression harness could not pixel-compare lightning at all.
+	//! Seeded from (block number, mutation index) so a given time reproduces.
+	quint32 rngSeed = 0;
+	quint32 rngState = 1;
+
+	//! Seeded from the QUANTISED TIME, not a mutation counter: a counter makes
+	//! the bolt depend on how many times regenerate() happened to run before the
+	//! frame was observed, which varies with frame timing and broke
+	//! reproducibility. Keyed on time, the same instant always redraws the same
+	//! bolt no matter how it was reached.
+	void regenerate( float time );
 
 public:
 	ProcLightningController( Node * node, const QModelIndex & index );

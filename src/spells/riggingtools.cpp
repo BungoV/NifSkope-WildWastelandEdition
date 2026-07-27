@@ -3341,6 +3341,10 @@ static QString riggingFlipBoneName( const QString & name )
 	};
 	if ( name.contains( QLatin1String( "Left" ) ) || name.contains( QLatin1String( "Right" ) ) )
 		return swapWord( name, QStringLiteral( "Left" ), QStringLiteral( "Right" ) );
+	// FO4 facial/segment style: an "_L_" / "_R_" infix segment
+	// (skin_bone_L_Cheek <-> skin_bone_R_Cheek)
+	if ( name.contains( QLatin1String( "_L_" ) ) || name.contains( QLatin1String( "_R_" ) ) )
+		return swapWord( name, QStringLiteral( "_L_" ), QStringLiteral( "_R_" ) );
 	if ( name.contains( QLatin1String( "left" ) ) || name.contains( QLatin1String( "right" ) ) )
 		return swapWord( name, QStringLiteral( "left" ), QStringLiteral( "right" ) );
 	// FO4 skeleton style: leading L/R followed by an uppercase letter
@@ -3361,6 +3365,12 @@ static QString riggingFlipBoneName( const QString & name )
 			return name.left( name.size() - 1 ) + QLatin1String( "L" );
 	}
 	return name;
+}
+
+//! Exported wrapper so the Pose Manager's X-mirror can reuse the L/R name flip.
+QString wwFlipBoneName( const QString & name )
+{
+	return riggingFlipBoneName( name );
 }
 
 static int riggingApplyPaintStroke( NifModel * nif, const QModelIndex & shape,
