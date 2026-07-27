@@ -140,15 +140,24 @@ struct HknpConstraint
 
 	/*! The joint's frame in each body's space: a rotation basis and a pivot.
 	 *
-	 * hkTransform at constraint +0x30 (parent side) and +0x70 (child side), four
-	 * hkVector4 each - three basis rows then the pivot. Confirmed by checking
-	 * every constraint in all 35 vanilla ragdolls: 1514 of 1514 hkp* frames are
-	 * orthonormal with determinant +1, which bytes at a wrong offset are not. The
-	 * four that fail are hknpBreakableConstraintData, a different wrapper class
-	 * with its own layout, and are skipped rather than decoded.
+	 * Havok's transformA / transformB, the two hkTransforms of the constraint's
+	 * SET_LOCAL_TRANSFORMS atom, four hkVector4 each - three basis rows then the
+	 * pivot. A belongs to the CHILD body and B to the PARENT, matching the binding
+	 * entry's own order (child at +0x08, parent at +0x0c).
+	 *
+	 * Which is which was settled by measurement, not by the names: a joint sits at
+	 * the child bone's origin, so in the child's own space its pivot is (0,0,0) and
+	 * in the parent's space it is the child's local translation - which hkaSkeleton's
+	 * referencePose supplies independently. Across 755 joints, pivotA is (0,0,0) for
+	 * 98.8% and pivotB equals the child's reference-pose position for 93.9%.
+	 *
+	 * That the offsets are right at all was checked separately: 1514 of 1514 hkp*
+	 * frames are orthonormal with determinant +1, which bytes at a wrong offset are
+	 * not. hknpBreakableConstraintData is a wrapper with its own layout; the decoder
+	 * follows it to the real constraint rather than misreading it.
 	 */
 	bool hasFrames = false;
-	Vector3 rotA[3], rotB[3];
+	Vector3 rotA[3], rotB[3];   //!< A = child side, B = parent side
 	Vector3 pivotA, pivotB;
 
 	/*! How far the joint may move. Which of these are filled depends on kind:
@@ -160,6 +169,31 @@ struct HknpConstraint
 	HknpAngLimit hinge;   //!< the single range of a limited hinge (knee, elbow)
 	float friction = 0.0f;    //!< maxFrictionTorque, resisting rotation
 	bool motorEnabled = false;   //!< a powered joint (keyframed / animation-driven)
+};
+
+/*! One bone of the ragdoll's own skeleton copy (hkaSkeleton).
+ *
+ * hkaSkeleton sits at the packfile root alongside hknpRagdollData, one per
+ * ragdoll, and holds hkArrays at +0x18 (parentIndices, hkInt16), +0x28 (bones,
+ * 16 bytes each) and +0x38 (referencePose, hkQsTransform at 48 bytes). The four
+ * arrays after those are empty in every vanilla ragdoll.
+ *
+ * Bone index equals body index: all 757 constraint bindings across the 35 vanilla
+ * ragdolls name the same parent as parentIndices does, and every ragdoll has
+ * exactly one more bone than it has joints, rooted at index 0.
+ *
+ * NAMES ARE NOT HERE. Bethesda strips them - every hkaBone's name pointer is null
+ * and carries no fixup - so the names must come from the NIF's own node list.
+ */
+struct HknpBone
+{
+	int parent = -1;                //!< index into HknpSystem::bones; -1 at the root
+	bool lockTranslation = false;
+	//! reference (rest) pose, local to the parent. Scale is (1,1,1) on all 792
+	//! vanilla bones and the rotation is a unit quaternion on all 792, which is
+	//! what confirmed the 48-byte hkQsTransform stride.
+	Vector3 translation;
+	Quat rotation;
 };
 
 //! A decoded bhkPhysicsSystem blob
@@ -193,6 +227,8 @@ struct HknpSystem
 	 */
 	//! Ragdoll joints, empty for a plain physics system. See HknpConstraint.
 	QVector<HknpConstraint> constraints;
+	//! The ragdoll's own skeleton copy, indexed like the bodies. See HknpBone.
+	QVector<HknpBone> bones;
 	bool positionalBodies = false;
 	//! class names present but not decoded
 	QStringList unknownShapes;

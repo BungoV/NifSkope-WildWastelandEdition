@@ -1,5 +1,51 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28b — hkaSkeleton decodes, and the joint frames were labelled backwards
+
+`hkaSkeleton` is a root object of its own beside `hknpRagdollData`, one per
+ragdoll. `hkArray`s at `+0x18` parentIndices (`hkInt16`), `+0x28` bones (16 bytes
+each) and `+0x38` referencePose (`hkQsTransform`, 48 bytes: translation, rotation,
+scale); the four arrays after those are empty in every vanilla ragdoll. Now on
+`HknpSystem::bones`, and `collision` prints the rest pose per bone.
+
+**Bone index equals body index.** All **757** constraint bindings name the same
+parent that `parentIndices` does — zero disagreements — and every ragdoll has
+exactly one more bone than it has joints, rooted at index 0. Those are two
+separately written arrays, so agreeing edge for edge is evidence, not restatement.
+
+The `hkQsTransform` stride was confirmed the same way: all **792** vanilla bones
+have a unit-quaternion rotation (worst deviation 3.6e-07) and a scale of exactly
+`(1,1,1)`.
+
+**Names are not in the packfile.** Every `hkaBone`'s name pointer is null and
+carries no fixup — Bethesda strips them. They have to come from the NIF's node
+list, which is what the existing body→node mapping already does.
+
+Havok stores a quaternion `xyzw` and NifSkope's `Quat` is `wxyz`. Note that a unit
+norm does *not* check a reorder, since a permutation preserves it; the reorder was
+verified directly against the raw bytes instead, **792 of 792** correct.
+
+### The frame labels were the wrong way round
+
+The previous entry called constraint `+0x30` the parent side and `+0x70` the
+child side. It is the other way round, and `referencePose` is what settled it: a
+joint sits at the child bone's origin, so in the child's own space its pivot is
+`(0,0,0)` and in the parent's space it is the child's local translation. Measured
+over 755 joints, frame A (`+0x30`) has a zero pivot **98.8%** of the time and
+frame B (`+0x70`) equals the child's rest position **93.9%** of the time. So **A
+is the child side, B the parent side** — which also matches the binding entry's
+own order, child at `+0x08` and parent at `+0x0c`.
+
+No decoded value changes; `collision` was already printing the useful one. The
+labels on `rotA`/`rotB` were wrong, and would have sent the encoder's transforms
+to the wrong slots.
+
+Cross-checking the two decodes against each other end to end: of 707 joints whose
+child bone is identifiable, **659 have a parent-side pivot equal to the child's
+rest translation**. The remaining 48 differ by small authored offsets (a knee
+6 mm out, the human head 29 mm) — a joint's rotation centre need not sit exactly
+on the bone origin.
+
 ## 2026-07-28a — Ragdoll joint limits decode: the atom chain
 
 The piece the previous entry deliberately left undone. A constraint object is a

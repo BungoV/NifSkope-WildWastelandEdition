@@ -328,10 +328,26 @@ order; each is independently verifiable against a vanilla file:
 
    Two vanilla hinges store min/max transposed (`+5.00/-5.00`, `+0.10/-0.10`);
    that is the file's own data and is reported, not silently corrected.
-5. **`hkaSkeleton`** — the ragdoll's own copy of the skeleton.
+5. ~~**`hkaSkeleton`**~~ **DONE 07-28b.** A root object beside `hknpRagdollData`,
+   one per ragdoll: `hkArray`s at `+0x18` parentIndices (`hkInt16`), `+0x28` bones
+   (16 bytes: a name pointer, always null here, then `lockTranslation`) and `+0x38`
+   referencePose (`hkQsTransform`, 48 bytes). The four arrays after those are empty
+   in every vanilla ragdoll. On `HknpSystem::bones`; `collision` prints the rest pose.
+
+   **Bone index == body index**: all 757 constraint bindings agree with
+   `parentIndices`, and bones == joints + 1 on all 35. Rotations are unit
+   quaternions and scales exactly `(1,1,1)` on all 792 bones.
+
+   **Bone names are NOT in the packfile** — every name pointer is null and unfixed.
+   They must come from the NIF node list, as the body→node mapping already does.
 6. Only then the encoder. The array machinery in `hknpEncodeCompressedMesh` is
    directly reusable — the ragdoll root uses the same `hkArray` layout at the same
    offsets. Validate by round-trip on all 35 ragdolls.
+
+   Watch the constraint frames: `HknpConstraint::rotA/pivotA` is the **child**
+   side and `rotB/pivotB` the **parent** side (measured, see WW_CHANGES 07-28b) —
+   they were documented the wrong way round until then, and swapping them on write
+   would produce a ragdoll that looks decodable and behaves wrongly.
 
 Working tools for this: `NifSkope -no-gui collision <file>` prints the bindings and
 the decode result; `--extract -b N -o F.bin` writes the raw packfile for

@@ -552,6 +552,38 @@ HknpSystem hknpDecode( const QByteArray & data )
 		return -1;
 	};
 
+	/* hkaSkeleton: the ragdoll's own copy of the bone hierarchy, one per packfile
+	 * and a root object in its own right rather than a member of the ragdoll data.
+	 * hkArrays at +0x18 parentIndices (hkInt16), +0x28 bones (16 bytes: a name
+	 * pointer that is always null here, then lockTranslation) and +0x38
+	 * referencePose (hkQsTransform, 48 bytes: translation, rotation, scale).
+	 */
+	for ( const auto & obj : objects ) {
+		if ( obj.second != QLatin1String( "hkaSkeleton" ) )
+			continue;
+		const qsizetype par = local.value( obj.first + 0x18, -1 );
+		const qsizetype bon = local.value( obj.first + 0x28, -1 );
+		const qsizetype rp  = local.value( obj.first + 0x38, -1 );
+		const quint32 n = r.u32( obj.first + 0x20 );
+		if ( par < 0 || n == 0 || n > 4096 )
+			continue;
+		for ( quint32 i = 0; i < n && r.ok; i++ ) {
+			HknpBone b;
+			b.parent = qint16( r.u16( par + qsizetype( i ) * 2 ) );
+			if ( bon >= 0 )
+				b.lockTranslation = r.u8( bon + qsizetype( i ) * 16 + 8 ) != 0;
+			if ( rp >= 0 ) {
+				const qsizetype e = rp + qsizetype( i ) * 48;
+				b.translation = r.vec3( e );
+				// Havok stores a quaternion xyzw; NifSkope's Quat is wxyz
+				b.rotation = Quat( r.f32( e + 28 ), r.f32( e + 16 ),
+					r.f32( e + 20 ), r.f32( e + 24 ) );
+			}
+			sys.bones.append( b );
+		}
+		break;
+	}
+
 	// body transforms: hknpPhysicsSystemData bodyCinfos (payload via local
 	// fixup at PSD+0x40, 0x60 bytes each) place each top-level shape: shape
 	// pointer at +0x00 (global fixup), position at +0x30, orientation

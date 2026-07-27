@@ -453,6 +453,26 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 						.arg( phys.layer, -6 ).arg( mine )
 				  << Qt::endl;
 		}
+		if ( !sys.bones.isEmpty() ) {
+			int locked = 0;
+			for ( const HknpBone & b : sys.bones )
+				locked += b.lockTranslation ? 1 : 0;
+			out() << "  hkaSkeleton bones        " << sys.bones.size()
+				  << " (" << locked << " translation-locked)" << Qt::endl;
+			out() << QString( "  %1 %2 %3 %4" ).arg( "bone", -5 ).arg( "parent", -7 )
+						.arg( "rest translation", -26 ).arg( "rest rotation (wxyz)" ) << Qt::endl;
+			for ( int i = 0; i < sys.bones.size(); i++ ) {
+				const HknpBone & b = sys.bones.at( i );
+				out() << QString( "  %1 %2 %3 %4 %5   %6 %7 %8 %9%10" )
+							.arg( i, -5 ).arg( b.parent, -7 )
+							.arg( b.translation[0], 8, 'f', 3 ).arg( b.translation[1], 8, 'f', 3 )
+							.arg( b.translation[2], 8, 'f', 3 )
+							.arg( b.rotation[0], 8, 'f', 4 ).arg( b.rotation[1], 8, 'f', 4 )
+							.arg( b.rotation[2], 8, 'f', 4 ).arg( b.rotation[3], 8, 'f', 4 )
+							.arg( b.lockTranslation ? "  locked" : "" )
+					  << Qt::endl;
+			}
+		}
 		if ( !sys.constraints.isEmpty() ) {
 			out() << "  joints                   " << sys.constraints.size() << Qt::endl;
 			out() << QString( "  %1 %2 %3" ).arg( "child", -34 ).arg( "parent", -34 )
