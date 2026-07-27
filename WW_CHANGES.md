@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27m — The regression guard was never deterministic: it was the line defect
+
+Chasing why all seven baselines drifted found the answer, and it corrects two
+earlier explanations of mine.
+
+**Cause.** Streaming LINE geometry — ground grid, origin axes, 3D cursor — draws
+nothing until a pick render has run (the open 07-17 defect). Whether that had
+happened varied between harness runs, so the grid was present in some captures
+and absent from others. The diff sizes prove it: largest on 
+(54,581 px, a near-empty scene where the grid IS most of the content), small on
+ (3,805 px, where the duct covers it).
+
+**Fix (a workaround, not a fix for the defect):** the harness now runs one
+ before grabbing, which performs the pick render and puts the line path
+deterministically ON. Re-baselined once; 7/7 identical on two consecutive
+compares. Remove this when the defect itself is solved.
+
+**Two of my earlier explanations were wrong, and are corrected here:**
+- 07-27j/k blamed  cold-vs-warm drift on a particle-sim warm-up.
+  It was the grid.  bytes was the grid-present render and  the
+  grid-absent one — nothing to do with the sim.
+- Earlier today I suspected persisted view state, then AA/anisotropic settings.
+  Both were tested and eliminated (removing the AA keys changed nothing).
+
+**Also eliminated along the way**, so nobody re-tests them: persisted dock layout
+(sizes matched throughout), lighting settings (no  key exists —
+all defaults),  (no  key, as the palette migration
+intends), and a skeletonView leak into normal renders (checked a current capture:
+duct renders, no bones).
+
+**Process note.**  was committed without running the regression set,
+which is how a whole commit went by with the guard red. The set is cheap; run it
+before every commit that touches rendering, the harness, or a dock.
+
 ## 2026-07-27l — Harness runs no longer overwrite the user's dock layout (regression fix)
 
 **Reported:** NifSkope launches with Block List, Block Details, Header and NIF

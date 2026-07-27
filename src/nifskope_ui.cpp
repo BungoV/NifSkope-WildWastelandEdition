@@ -3473,6 +3473,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					// grabFramebuffer() reads the CURRENT buffer without
 					// repainting — pump twice or the grab is a stale frame.
+					// Warm the line path. Streaming LINE geometry (grid, origin axes, 3D
+					// cursor) draws nothing until a pick render has run - the open 07-17
+					// defect. Whether that had happened varied per run, so the grid was in
+					// some captures and absent from others and the guard could not be
+					// trusted. indexAt() runs the pick render, making it deterministically
+					// on. A workaround for that defect, not a fix - remove when it is solved.
+					skope->ogl->indexAt( QPointF( skope->ogl->width() * 0.5,
+												  skope->ogl->height() * 0.5 ) );
+					qApp->processEvents();
 					for ( int i = 0; i < 2; i++ ) {
 						skope->ogl->update();
 						qApp->processEvents();
