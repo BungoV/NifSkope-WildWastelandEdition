@@ -303,10 +303,17 @@ order; each is independently verifiable against a vanilla file:
    read first now, polytope arrays only after the primitives return. **All 35
    vanilla ragdolls decode with zero undecoded shape classes**, including
    Deathclaw 28/28, `Robot/SkeletonRef` 48/48 and `skeletonSentryBodyPart` 24/24.
-4. **`hkpRagdollConstraintData` / `hkpLimitedHingeConstraintData` /
-   `hkpPositionConstraintMotor`** — the joints. Without these a re-emitted ragdoll
-   has no joints, which is worse than no button at all. Start from the root `+0x50`
-   binding array: 38 bindings share 24 distinct constraint objects.
+4. **The joints — HALF DONE 07-27ae.** The **binding graph** is decoded and on
+   `HknpSystem::constraints`: root `+0x50`, 0x18 an entry, constraint pointer at
+   `+0x00` (global fixup), child body `+0x08`, parent body `+0x0c`, 8 bytes pad.
+   Verified on the brahmin against the skeleton itself — all 38 name a bone and its
+   nearest *embodied* ancestor (bodiless intermediates like `LNeckHub` skipped) —
+   and all 35 vanilla ragdolls decode, 757 joints of which 237 are hinges.
+
+   **Still to do: the constraint PAYLOADS.** `hkpRagdollConstraintData`,
+   `hkpLimitedHingeConstraintData` and `hkpPositionConstraintMotor` objects hold
+   the pivots, axes and angular limits, and none of that is read yet. An encoder
+   needs them — the graph alone would re-emit joints with no limits.
 5. **`hkaSkeleton`** — the ragdoll's own copy of the skeleton.
 6. Only then the encoder. The array machinery in `hknpEncodeCompressedMesh` is
    directly reusable — the ragdoll root uses the same `hkArray` layout at the same

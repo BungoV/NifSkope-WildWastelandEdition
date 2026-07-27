@@ -522,6 +522,21 @@ HknpSystem hknpDecode( const QByteArray & data )
 			sys.density = r.f32( di + 0x08 );
 			sys.inertia = r.vec3( di + 0x20 );
 		}
+		/* Ragdoll joints: the array at +0x50, one entry per non-root body.
+		 * Only hknpRagdollData carries it; a physics system leaves it empty.
+		 */
+		if ( qsizetype cons = local.value( obj.first + 0x50, -1 ); cons >= 0 ) {
+			const quint32 nc = r.u32( obj.first + 0x58 );
+			for ( quint32 i = 0; i < nc && nc <= 4096 && r.ok; i++ ) {
+				const qsizetype e = cons + qsizetype( i ) * 0x18;
+				HknpConstraint jc;
+				jc.childBody = int( r.u32( e + 0x08 ) );
+				jc.parentBody = int( r.u32( e + 0x0c ) );
+				jc.kind = objClass.value( global.value( e, -1 ) );
+				sys.constraints.append( jc );
+			}
+		}
+
 		for ( quint32 i = 0; i < nb; i++ ) {
 			qsizetype c = cinfos + qsizetype( i ) * 0x60;
 			HknpBodyPhys phys;

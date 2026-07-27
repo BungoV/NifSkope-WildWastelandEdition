@@ -94,6 +94,29 @@ struct HknpBodyPhys
 	float angDamping = 0.05f;           //!< dyn_motion +0x1C
 };
 
+/*! One ragdoll joint: which two bodies it binds, and what kind it is.
+ *
+ * From hknpRagdollData's array at +0x50 - 0x18 bytes an entry, one per non-root
+ * body: constraint pointer at +0x00 (a global fixup), child body at +0x08, parent
+ * body at +0x0c, 8 bytes of padding.
+ *
+ * Verified on the brahmin ragdoll against the skeleton itself: all 38 bindings
+ * name a bone and its nearest ancestor that HAS a body (bodiless intermediates
+ * like LNeckHub are skipped, which a ragdoll must do). The kinds line up
+ * anatomically too - the 8 hkpLimitedHinge entries are exactly the two knees,
+ * two elbows, two wrists and two toes, with ball-and-socket everywhere else.
+ *
+ * The constraint OBJECTS these point at - pivots, limits, twist axes - are not
+ * decoded yet; this is the joint graph, not the joint parameters.
+ */
+struct HknpConstraint
+{
+	int childBody = -1;
+	int parentBody = -1;
+	//! Havok class name, e.g. hkpRagdollConstraintData / hkpLimitedHingeConstraintData
+	QString kind;
+};
+
 //! A decoded bhkPhysicsSystem blob
 struct HknpSystem
 {
@@ -123,6 +146,8 @@ struct HknpSystem
 	 * caller that knows how many collision objects reference the system should
 	 * check that count against shapes.size() before relying on it.
 	 */
+	//! Ragdoll joints, empty for a plain physics system. See HknpConstraint.
+	QVector<HknpConstraint> constraints;
 	bool positionalBodies = false;
 	//! class names present but not decoded
 	QStringList unknownShapes;

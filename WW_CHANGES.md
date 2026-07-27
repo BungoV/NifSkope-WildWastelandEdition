@@ -1,5 +1,43 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27ae — The ragdoll joint graph decodes
+
+`hknpRagdollData`'s array at `+0x50` is the constraint binding table — 0x18 bytes
+an entry, one per non-root body:
+
+```
++0x00  void*   constraint data   (global fixup)
++0x08  uint32  child body
++0x0c  uint32  parent body
++0x10  uint64  padding
+```
+
+Now on `HknpSystem::constraints`, and printed by `collision`.
+
+### Why this is more than a guess
+
+The body → node map and the bone parent tree both come from the **NIF**,
+independently of the packfile, so checking one against the other is evidence
+rather than restatement. On the brahmin, **all 38 bindings name a bone and its
+nearest ancestor that has a body** — bodiless intermediates such as `LNeckHub`
+are skipped, which a ragdoll has to do since it cannot constrain to a bone with
+no collision. My first check called those six "mismatches"; the check was wrong,
+not the data.
+
+The kinds corroborate it anatomically. The eight `hkpLimitedHingeConstraintData`
+entries are exactly the **two knees, two elbows, two wrists and two toes** — every
+genuine hinge joint on the animal — with ball-and-socket everywhere else.
+
+All 35 vanilla FO4 actor ragdolls decode: **757 joints, 237 of them hinges**.
+
+### What is still missing
+
+This is the joint **graph**, not the joint **parameters**. The
+`hkpRagdollConstraintData` / `hkpLimitedHingeConstraintData` /
+`hkpPositionConstraintMotor` objects hold pivots, axes and angular limits, and
+none of that is read. An encoder built on the graph alone would emit joints with
+no limits, which is its own kind of broken.
+
 ## 2026-07-27ad — hknpSphereShape decodes: every vanilla ragdoll is now complete
 
 A sphere's vertex payload starts at `+0x30 + 0x10`, which **is** `+0x40` — exactly

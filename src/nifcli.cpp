@@ -453,6 +453,25 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 						.arg( phys.layer, -6 ).arg( mine )
 				  << Qt::endl;
 		}
+		if ( !sys.constraints.isEmpty() ) {
+			out() << "  joints                   " << sys.constraints.size() << Qt::endl;
+			out() << QString( "  %1 %2 %3" ).arg( "child", -34 ).arg( "parent", -34 )
+						.arg( "constraint" ) << Qt::endl;
+			auto nodeFor = [&]( int body ) {
+				for ( const auto & ref : it.value() ) {
+					if ( int( ref.first ) == body )
+						return nif.get<QString>( nif.getBlockIndex( ref.second ), "Name" );
+				}
+				return QString( "body %1" ).arg( body );
+			};
+			for ( const HknpConstraint & jc : sys.constraints ) {
+				out() << QString( "  %1 %2 %3" )
+							.arg( nodeFor( jc.childBody ), -34 )
+							.arg( nodeFor( jc.parentBody ), -34 )
+							.arg( jc.kind )
+					  << Qt::endl;
+			}
+		}
 		out() << QString( "  %1 %2 %3 %4" ).arg( "shape", -6 ).arg( "class", -34 )
 					.arg( "body", -6 ).arg( "geometry" ) << Qt::endl;
 		for ( int i = 0; i < sys.shapes.size(); i++ ) {
