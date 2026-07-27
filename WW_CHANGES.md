@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27z — Row icons were pinned to the top of the row, not centred
+
+`NifDelegate::decoRect()` returned `QRect( opt.rect.topLeft(), opt.decorationSize )`
+— comment and all: *"allways upper left"*. Anchoring at the row's top means an
+icon shorter than the row sits high by half the difference. Rows in the Block
+List are 20 px against a 16 px decoration, so every icon was **2 px above** where
+it belonged while the text beside it centred itself.
+
+Now centred vertically in the row. Computed from the row height rather than
+hardcoded, so it stays correct across font size, DPI and style changes.
+
+Measured on the `NiNode` row, before and after:
+
+| | icon centre | text centre | offset |
+|---|---|---|---|
+| before | y 219.5 | y 222 | **2.5 px high** |
+| after | y 221.5 | y 222 | 0.5 px |
+
+The half pixel left is rounding on a 6 px dot in a 20 px row, not a bias.
+
+This delegate serves the Block List, Block Details, the Header view and the KFM
+tree, so it corrects icon alignment in all four. Render regression not run:
+`nifdelegate.cpp` is item-view painting and no draw path touches it.
+
 ## 2026-07-27y — The Scene nodes filter chip uses the node dot
 
 The Block List drew one category two ways: the tree row had the themed dot while

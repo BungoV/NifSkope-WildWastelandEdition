@@ -707,8 +707,20 @@ public:
 
 	QRect decoRect( const QStyleOptionViewItem & opt ) const
 	{
-		// allways upper left
-		return QRect( opt.rect.topLeft(), opt.decorationSize );
+		/* Left edge, but vertically CENTRED in the row.
+		 *
+		 * This used to anchor at opt.rect.topLeft(), which pins the icon to the top
+		 * of the row. Rows are taller than the 16px decoration - 20px in the Block
+		 * List - so every icon sat (20-16)/2 = 2px high while the text beside it
+		 * centred itself, which is exactly how it looked: consistently a couple of
+		 * pixels above where it belonged.
+		 *
+		 * Centring rather than hardcoding an offset, so it stays right whatever the
+		 * row height and decoration size work out to (font size, DPI, style).
+		 */
+		QRect r( opt.rect.topLeft(), opt.decorationSize );
+		r.moveTop( opt.rect.top() + ( opt.rect.height() - r.height() ) / 2 );
+		return r;
 	}
 
 	QRect textRect( const QStyleOptionViewItem & opt ) const
