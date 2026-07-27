@@ -530,6 +530,76 @@ void Scene::drawLines( const Vector3 * positions, size_t numVerts, const FloatVe
 		color.maxValues( FloatVector4( 1.0e-15f ) );
 	}
 	prog->uni4f( "vertexColorOverride", color );
+
+	// TEMP DIAGNOSTIC (WW_GRID_PROBE): the startup grid/axes defect.
+	//
+	// This asks the GPU what is bound, not the renderer's cache. The 07-17
+	// instrumentation logged `prog=(useProgram("lines.prog") != nullptr)`, which
+	// is the CACHE — Scene::useProgram returns the cached pointer without
+	// rebinding when getCurrentProgram() already names lines.prog. If that cache
+	// is ever stale, every uniform above (modelViewMatrix included) is sent to
+	// whichever program is really bound, and the grid draws with a garbage
+	// matrix while every logged value looks healthy. That is exactly the blind
+	// spot that made printf "exhausted" last time.
+	//
+	// Deliberately its own env var, NOT WW_PERF_TEST: that probe's
+	// update+processEvents round trips make the grid appear, so it cannot
+	// observe the broken frame.
+	if ( !selecting ) [[unlikely]] {
+		static const bool wwGridProbe = qEnvironmentVariableIsSet( "WW_GRID_PROBE" );
+		static int wwGridProbeCount = 0;
+		if ( wwGridProbe && wwGridProbeCount < 40 ) {
+			wwGridProbeCount++;
+			GLint gpuProg = 0, gpuVao = 0;
+			glGetIntegerv( GL_CURRENT_PROGRAM, &gpuProg );
+			glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &gpuVao );
+			const GLint mvLoc = context->fn->glGetUniformLocation( GLuint( gpuProg ), "modelViewMatrix" );
+			GLint depthFunc = 0, vp[4] = { 0, 0, 0, 0 };
+			GLboolean depthTest = glIsEnabled( GL_DEPTH_TEST ), depthMask = 0;
+			glGetIntegerv( GL_DEPTH_FUNC, &depthFunc );
+			glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+			glGetIntegerv( GL_VIEWPORT, vp );
+			// WW_GRID_NODEPTH: force the line draw through, ignoring depth. If the
+			// grid appears with this set, it was being depth-rejected; if it stays
+			// invisible, it is never reaching the colour buffer at all. That single
+			// bit splits the remaining suspects in half.
+			static const bool wwNoDepth = qEnvironmentVariableIsSet( "WW_GRID_NODEPTH" );
+			if ( wwNoDepth )
+				glDisable( GL_DEPTH_TEST );
+			// WW_GRID_RED: paint the line geometry opaque red and fat. If red does
+			// not appear, the draw never rasterizes into the colour buffer and the
+			// "invisible grid" is not a subtle blend/contrast problem.
+			static const bool wwRed = qEnvironmentVariableIsSet( "WW_GRID_RED" );
+			if ( wwRed ) {
+				prog->uni4f( "vertexColorOverride", FloatVector4( 1.0f, 0.0f, 0.0f, 1.0f ) );
+				prog->uni1f( "lineWidth", 8.0f );
+			}
+			QFile f( QCoreApplication::applicationDirPath() + "/ww_grid_probe.log" );
+			if ( f.open( QIODevice::Append | QIODevice::Text ) )
+				QTextStream( &f ) << "[drawLines #" << wwGridProbeCount
+					<< " verts=" << numVerts
+					<< " gpuProg=" << gpuProg << " expected=" << prog->id
+					<< ( GLuint( gpuProg ) == prog->id ? " MATCH" : " ***MISMATCH***" )
+					<< " vao=" << gpuVao
+					<< " mvLocOnBound=" << mvLoc
+					<< " mv0=" << ( *currentModelViewMatrix ).data()[0]
+					<< " colr=" << color[0]
+					<< " depthTest=" << int( depthTest ) << " depthFunc=0x"
+					<< QString::number( depthFunc, 16 ) << " depthMask=" << int( depthMask )
+					<< " vp=" << vp[2] << "x" << vp[3]
+					<< " lineWidth=" << currentGLLineWidth
+					// transparent-vs-offscreen: vertex-colour alpha and the raw
+					// extent of the first line. A ±1024 grid must cross a view
+					// framed on a ~100-unit prop, so an in-range extent with a
+					// zero alpha means invisible-not-absent.
+					<< " vcAlpha=" << ( colors ? colors[0][3] : -1.0f )
+					<< " glColAlpha=" << currentGLColor[3]
+					<< " p0=(" << positions[0][0] << "," << positions[0][1] << "," << positions[0][2] << ")"
+					<< " p1=(" << positions[1][0] << "," << positions[1][1] << "," << positions[1][2] << ")"
+					<< "]\n";
+		}
+	}
+
 	context->fn->glDrawArrays( GLenum( elementMode ), 0, GLsizei( numVerts ) );
 }
 

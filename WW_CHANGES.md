@@ -1,5 +1,61 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27i — Startup grid/axes: NOT FIXED, but four theories killed and a headless repro found
+
+Re-opened the 07-17 defect (grid + origin axes invisible until the first
+viewport click). **Still open.** No behaviour change shipped — only env-gated
+diagnostics. What is now known that was not before:
+
+**1. There IS a headless reproducer.** A clean `WW_RENDER_SHOT` capture of
+`ACDuctConnector01.nif` has no grid; the `lit_setdressing` baseline has never had
+one. 07-17 concluded probe captures were "an imperfect proxy" and that live GUI
+verification was required — but the plain harness reproduces it exactly. The
+reason the old instrumentation kept seeing healthy frames is that **`WW_PERF_TEST`
+masks the bug**: its `update`+`processEvents` round trips are precisely what
+heals the grid, so the probe could never observe a broken frame. Any future
+attempt should use `WW_GRID_PROBE`, not `WW_PERF_TEST`.
+
+**2. Program-cache desync is disproven — at the GPU, not the cache.** This was
+the leading theory, and the one the earlier startup-grid fix was built on. The
+07-17 probe logged `prog=(useProgram("lines.prog") != nullptr)`, which is the
+*cache*: `Scene::useProgram` (gltools.cpp:432) returns the cached pointer
+**without rebinding** when `getCurrentProgram()` already names the program, so
+that log could never detect a stale binding. Querying `GL_CURRENT_PROGRAM`
+directly gives `gpuProg=47 expected=47 MATCH` on every single grid draw, with the
+VAO bound and `modelViewMatrix` resolving on the actually-bound program. Both raw
+`glUseProgram` sites in renderer.cpp do update `currentProgram`, and the raw
+`glUseProgram(0)` at glview.cpp:2872 is preceded by a proper `cx->stopProgram()`
+at :2843, so there is no desync to find.
+
+**3. Not depth rejection.** `WW_GRID_NODEPTH=1` disables `GL_DEPTH_TEST` for the
+line draws. The grid stays invisible.
+
+**4. Not colour, alpha, contrast or geometry.** `WW_GRID_RED=1` forces the line
+geometry opaque red at 8 px. **No red appears anywhere.** Logged values are all
+sane: vertex-colour alpha 0.5, a ±1024 plane at Z=0 (`p0=(-1024,-1024,0)`,
+`p1=(-1024,1024,0)`), viewport 395×517, colour mask open, blend on.
+
+**Where that leaves it.** A draw is issued, with the right program, the right VAO,
+valid uniforms, depth off and forced opaque red — and none of it reaches the image
+that gets presented. So the instrumented draws are not the draws that produce the
+visible frame. Combined with 07-17's note that `grabFramebuffer()` re-renders
+offscreen, and the drawGrid trace reporting `fbo=0`, the sharpest remaining
+hypothesis is a **render-target / pass mismatch**: the streaming line pass writes
+to a different framebuffer than the one presented. **Next step: log the bound
+draw-FBO in the line pass and in the presented pass and compare** — that is a
+much narrower question than 07-17's "diff all GPU state in RenderDoc", and it can
+be answered headlessly.
+
+Also checked and *not* a bug: the harness looked unpinned (`vp=395x517` rather
+than 1280×800), but `nifskope_ui.cpp:3269` pins the *window* to 1280×800 and
+395×517 is just the GL viewport's share of it once the docks take their space.
+
+Diagnostics kept, all inert unless their env var is set. Note two of them
+deliberately *change* rendering when enabled, so they are debug switches, not
+probes: `WW_GRID_NODEPTH` (disables depth test) and `WW_GRID_RED` (forces red,
+8 px). `WW_GRID_PROBE` only logs, to `ww_grid_probe.log` beside the exe, capped at
+40 lines.
+
 ## 2026-07-27h — Refraction was dead for every BGSM-backed FO4 mesh (fixed)
 
 Chasing "the refraction regression fixture guards nothing" found a real renderer
