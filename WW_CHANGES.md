@@ -1,5 +1,57 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27u — The black cube: an unwritten bitangent, and another NaN
+
+Closes the item 27t left open. **The starter scene never wrote Bitangent X/Y/Z.**
+
+The lighting shader builds a tangent-space basis from normal, tangent and
+bitangent and normalizes it. A bitangent of exactly `(0,0,0)` makes that a
+`normalize(0,0,0)` — NaN — and the shape renders pure black however correct its
+base map, lights and uniforms are. **The same failure mode as the 07-17 line
+defect**: a zero that becomes NaN inside a shader. Two in one day.
+
+Fix: `bitangent = cross( normal, tangent )`, written into the three fields.
+Verified per face — the +Z face gets `(0, 1, 0)`, the +Y and +X faces `(0, 0, -1)`,
+each the correct cross product.
+
+### Why every comparison said "identical"
+
+This is the useful part. The textures, uniforms, lights, shader program, blend
+state and draw list genuinely *were* identical between the working and broken
+renders — every table in 27t is accurate. The difference was in the **vertex
+buffers**, which were the last thing dumped:
+
+```
+LOADED (grey):    bitangentVector  0.000 0.004 0.004
+STARTUP (black):  bitangentVector  0.000 0.000 0.000
+```
+
+And that is also why the same document loaded from disk rendered correctly:
+saving round-trips the bitangent through the `normbyte` encoding, where a stored
+0 decodes to about **0.0039** — tiny, but non-zero, so the basis survives. Only
+the freshly-built in-memory document carries exact zeros. A bug that repairs
+itself on the first save is exactly the kind that looks impossible.
+
+**Lesson, and it is a repeat.** 27t's tables compared everything *bound* to the
+draw and nothing *fed* to it. Vertex buffers are shader input too. When output
+contradicts inputs that all look right, dump the vertex buffers before concluding
+the state is identical — `rdc script` with `GetVBuffers()` + `GetBufferData()`
+does it in one call, and would have found this hours earlier.
+
+### Two tool facts worth keeping
+
+- **The inline-colour texture format is `#AABBGGRR`, not `#AARRGGBB`**
+  (`gltexloaders.cpp:990`). The starter cube's grey is symmetric so it was right
+  by luck; the renderer's own `default_n = "#FFFF8080"` decoding to RGBA
+  `80 80 FF FF` — a flat normal — is what proves the order.
+- **`rdc debug pixel` is as unusable as `rdc debug vertex` here**: every input
+  reads `-107374176.0`, which is `0xCCCCCCCC` as a float. The backlog warned about
+  the vertex path; it applies to the pixel path too.
+- **`rdc diff --pipeline` times out** on these captures at the default 60 s; pass
+  `--timeout`. `--draws` works fine.
+
+Render regression 7/7 identical.
+
 ## 2026-07-27t — Fallout 4 by default, cube on the grid, themed node dot
 
 Three reported items; two fixed, one **still open and honestly unresolved**.
@@ -36,7 +88,9 @@ light skin. Now `wwSkinColor( "text" )`, per the skin rule that colours come fro
 `skinVars[]` and never from literals. Cached per colour so a theme switch
 rebuilds the pixmap instead of serving the old one forever.
 
-### STILL OPEN: the startup cube renders black
+### RESOLVED in 27u — see below. The account of the hunt is kept.
+
+### The startup cube rendered black
 
 The same document renders **grey when loaded from a file and black at startup**,
 and I could not find the cause. What the captures rule out — all read at the cube

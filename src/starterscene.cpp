@@ -139,6 +139,26 @@ bool nifCreateStarterScene( NifModel * nif, float size, QString * error )
 			t = Vector3( 1, 0, 0 );
 		t.normalize();
 		nif->set<ByteVector3>( row, "Tangent", t );
+
+		/* The bitangent MUST be written, and this is not cosmetic.
+		 *
+		 * The lighting shader builds a tangent-space basis from normal, tangent
+		 * and bitangent and normalizes it. Leaving the bitangent at its zero
+		 * default makes that normalize() a normalize(0,0,0) - NaN - and the shape
+		 * renders pure BLACK however correct its base map and lights are. That was
+		 * the black starter cube, and it is the same failure mode as the 07-17
+		 * line defect: a zero that becomes NaN in a shader.
+		 *
+		 * It only showed up on the freshly-built document. Saving and reloading put
+		 * the bitangent through the normbyte encoding, where a stored 0 decodes to
+		 * about 0.0039 - tiny, but non-zero, so the basis survives and the same
+		 * file loaded from disk rendered correctly. A capture of both showed
+		 * exactly (0,0,0) against (0, 0.004, 0.004).
+		 */
+		const Vector3 b = Vector3::crossproduct( verts.at( i ).nrm, t );
+		nif->set<float>( row, "Bitangent X", b[0] );
+		nif->set<float>( row, "Bitangent Y", b[1] );
+		nif->set<float>( row, "Bitangent Z", b[2] );
 	}
 	QModelIndex iTriangles = nif->getIndex( iShape, "Triangles" );
 	nif->updateArraySize( iTriangles );
