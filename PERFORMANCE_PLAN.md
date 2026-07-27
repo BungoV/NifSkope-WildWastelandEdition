@@ -1,5 +1,12 @@
 # NifSkope WW — Performance Plan (2026-07-20)
 
+> **BACKLOG MOVED — 2026-07-21.** This file is **design detail / history only**.
+> The single authoritative list of what is left to implement is
+> **`TO_BE_IMPLEMENTED.md`**. Do not record open work here and do not trust any
+> status claim below: this file's own claims have been wrong in both directions
+> before, which is exactly why the backlog was consolidated into one place.
+
+
 Holistic survey of where time goes, from four parallel code audits: file load,
 per-frame rendering, the data-model layer, and UI signal reactions. Every claim
 below was verified against source with file:line references. Nothing has been

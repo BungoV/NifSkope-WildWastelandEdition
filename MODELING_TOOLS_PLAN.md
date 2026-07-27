@@ -1,5 +1,12 @@
 # Modeling Tools — Geometry Creation & Connection Plan
 
+> **BACKLOG MOVED — 2026-07-21.** This file is **design detail / history only**.
+> The single authoritative list of what is left to implement is
+> **`TO_BE_IMPLEMENTED.md`**. Do not record open work here and do not trust any
+> status claim below: this file's own claims have been wrong in both directions
+> before, which is exactly why the backlog was consolidated into one place.
+
+
 Drafted: 2026-07-15. Status 2026-07-16: **ALL BATCHES SHIPPED except Bevel**
 (user testing pending). Live: Extrude (E), Fill/Bridge (F, with Cuts/Twist),
 Loop Cut (Ctrl+R), Edge Slide (Shift+V), Subdivide, Inset (I), Dissolve

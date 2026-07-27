@@ -1,5 +1,12 @@
 # UV Editing Workspace — Implementation Plan
 
+> **BACKLOG MOVED — 2026-07-21.** This file is **design detail / history only**.
+> The single authoritative list of what is left to implement is
+> **`TO_BE_IMPLEMENTED.md`**. Do not record open work here and do not trust any
+> status claim below: this file's own claims have been wrong in both directions
+> before, which is exactly why the backlog was consolidated into one place.
+
+
 Drafted: 2026-07-14. Status as of 2026-07-15: **Phases 1–4 shipped and
 user-validated in-app** (see WW_CHANGES.md for the full per-batch record).
 Beyond the plan below, also shipped: adjust-last-operation redo panels

@@ -1,309 +1,542 @@
-# NifSkope – WW Edition — To Be Implemented
+# NifSkope — WW Edition: To Be Implemented
 
-Backlog of features/fixes agreed for later. Ordered roughly by priority.
+**This is THE backlog.** One file, everything that is left. Consolidated
+2026-07-21 from what used to be seven scattered plan documents, each of which
+independently claimed to know what was open — and several of which were wrong.
 
-## Backlog snapshot (2026-07-17, verified against the code)
+**Last full verification against the code: 2026-07-27.**
 
-Older sections below list items that have since shipped — each is marked at
-its heading. What is ACTUALLY open, verified by code inspection:
-
-**Modeling / edit mode** — ALL IMPLEMENTED 2026-07-17 (build green, probe
-passes; **GUI verification pending** — see WW_CHANGES "Modeling backlog
-mega-batch"), with two deliberate exceptions:
-- Join keeps snapshot undo (block removal = renumbering + model-wide link
-  rewrites; restoring that in place is the real corruption risk).
-- Bevel (Ctrl+B) — IMPLEMENTED 2026-07-17 via rip + offset + bridge
-  (marked-quad strip, tapered ends — no corner terminations). Segments = 1
-  in v1; width in the redo panel. Highest-risk item of the batch: GUI-test
-  after Rip, on a copy of the mesh.
-- Proportional editing — DECLINED, keep it that way.
-
-**Rigging** (authoritative: BONE_WEIGHT_TRANSFER_PLAN.md; updated 07-18)
-- DONE 07-18: Phase 3B "Create Skin (bind to node)" (unskinned target →
-  complete FO4 skin, donor pipeline then applies); weight-paint Mirror (X)
-  with L/R counterpart-bone flipping; Mapping mode + Max Bones transfer
-  controls (persisted, honored by every entry path).
-- 07-18b: Create Skin REWRITTEN after the automated gauntlet
-  (tools/createskin_test/) proved the first version corrupted the mesh;
-  now byte-patch + reload, fully verified end-to-end including the donor
-  transfer on its output (WW_CHANGES 2026-07-18b). Mirror (X) and the
-  transfer controls remain GUI-untested.
-- KNOWN MODEL LANDMINE (own project, not rigging): after any Vertex Desc
-  edit with an unchanged vertex count, BSVertexData row conditions accept
-  both precision variants and the save layout diverges from the desc.
-  Affects the stock Vertex Flags spell (flags.cpp) too. Details in
-  WW_CHANGES 2026-07-18b.
-- Still open: independent persistent skeleton reference, classic NiSkin
-  backend, CustomizationRemapNewBonesData (open leaked-pointer question),
-  pruning zero-result bones, in-game FaceGen validation, shader
-  skinned-flag handling for newly created skins.
-
-**Collision Manager — P4** (P1–P3 landed; encoder extended 07-18)
-- DONE 07-18: multi-section compressed-mesh encoder (255 cap lifted;
-  per-section domains; single-section output byte-identical to the
-  validated writer; round-trip gate hardened). Needs an in-game walk test.
-- Still open: compound/instance encoding (BLOCKED on reference pairs — do
-  not build blind), per-triangle face-material painting,
-  hknpBSMaterialProperties beyond the single-material table.
-
-**UI overhauls (parked, but PARTIALLY shipped — verified 2026-07-17)**
-- Block List & Details overhaul: of the doc's top-6 phasing, ~half already
-  exists in code — block-list search filter, category icons
-  (blockListCategoryIcon via DecorationRole), summary tooltips, the
-  Links to / Referenced by jump menu, a shape/vert/tri footer, and the
-  Block Details field filter (Ctrl+Shift+F). Still missing: named flag
-  editor, typed/validated link-field editors with pick, collapsible
-  detail sections, a real per-type summary COLUMN, and the editing &
-  workflow items. BLOCK_LIST_DETAILS_OVERHAUL.md severely undersells the
-  current state ("design-only") — trust this note instead.
-- Animation Manager visual overhaul: the timeline dock v1 is shipped
-  (lanes, keyframe diamonds, playhead sync, sequence combo, graph pane,
-  B-spline range bars, text-key lanes; ~2.2k lines + edit/views files).
-  TIMELINE_PLAN.md tracks the rest: 43 open checkboxes across Display &
-  layout / Editing / Playback / Spells / Viewport / Interchange /
-  Portability — that list IS the visual-overhaul backlog.
-
-**UV editor**
-- Cross-mesh operators (merge/mirror/unwrap/pack act on the active mesh only).
-
-**Performance**
-- Load time: probe-attributed — ~⅔ of attached-reload overhead is the Block
-  Details + Header tree views reacting to the model reset (~520 ms on a
-  38k-vert file); first load carries ~550 ms one-time cost beyond that.
-- Edit-overlay per-frame rebuild (O(V)+O(T) per frame) — cache only if
-  profiling ever demands it (0.6–0.9 ms/frame on current meshes).
-
-## Modeling tools — geometry creation & connection (2026-07-15) — SHIPPED except leftovers
-Full plan in `MODELING_TOOLS_PLAN.md`. Landed 07-15/07-16: Redo Panel v2,
-Extrude, Fill/Bridge, Loop Cut, Edge Slide, Subdivide, Inset, Dissolve,
-Symmetrize, Flip/Recalc Normals, Add Primitive, Smooth, Merge; later Knife
-(K) and the quad layer (F / Alt+J / Ctrl+T). Still open: Bevel, the in-place
-undo conversions and panel migrations listed in the snapshot above.
-Proportional editing stays declined.
-
-## Particle / VFX preview (2026-07-06) - DONE, user-verified 2026-07-07
-- Particle sprites bound their texture on a stale GL texture unit -> wrong
-  texture; now always unit 0 with BSEffectShaderProperty source-texture and
-  raw-path fallbacks, plus the shader's (BGEM-aware) emissive tint.
-- Mesh/array emitter spawn points were cached in world space at load time,
-  before the scene graph was complete -> ~100-unit offset for
-  X01_Torso_Tesla_Lightning:0; points are now emitter-local and the node
-  transform is resolved fresh at simulation time (also follows animation).
-- NiPSysMeshEmitter now honours Emission Type (face surface/center, edge)
-  by sampling triangles instead of raw vertices.
-- BSProceduralLightningController preview: jagged bolt between the rig's
-  *_Start / *_End nodes, midpoint-displacement jitter re-rolled at 24 Hz,
-  branches, width/childWidthMult/arcOffset/fade flags honoured,
-  Generation/Mutation gated by the sequence's bool timeline keys.
-- Bolt strips are textured with the BGEM beam texture (boltstrip.prog),
-  V runs along the bolt (256x2048 tile-V sheets) with the shader property's
-  animated UV offset/scale applied; drawn after the transparent pass to
-  avoid alpha-blend darkening squares.
-- Particle flipbook: per-particle random subtexture cell from NiPSysData
-  Subtexture Offsets (4x4 lightning atlas), passed as a vertex attribute.
-- Particle effect-shader shading (2026-07-07): particles.frag now applies the
-  BSEffectShaderProperty (.bgem) features flat sprites previously missed —
-  normal-map view-angle falloff (useFalloff/hasRGBFalloff), greyscale-to-palette
-  colour+alpha gradients (GreyscaleMap), and env cube-map reflection. Emissive
-  tint (glowColor/glowMult) moved from the CPU pre-multiply into the shader.
-  Billboard tangent frame is identity in view space, so the sampled normal is
-  the view-space normal directly. glparticles.cpp binds NormalMap→u1,
-  GreyscaleMap→u2, CubeMap→u3 (neutral gray cube always bound so the
-  samplerCube never shares a unit with a sampler2D). In-app verify pending.
-  NiPSysColorModifier (NiColorData) lifetime colour gradient: since handled
-  (controllers.cpp, RGBA keys over normalised particle age — verified 07-17).
-
-## Mesh / engine features (need in-game or careful testing)
-
-### 0. Delete Vertices/Edges/Faces (edit mode) - DONE 2026-07-07, verify pending
-- Blender-style X / Delete menu (Vertices / Edges / Faces / Only Faces) in edit
-  mode. GLView::showDeleteMenu + deleteGeometry(mode); tlDeleteGeometry rewrites
-  the BSTriShape: removes triangles per mode, compacts the packed vertex array
-  (forward-copy: new index <= old, so no clobber) and reindexes, updates
-  Num Vertices/Num Triangles/Data Size + bounds. Faces mode removes orphaned
-  verts (Blender); Only Faces keeps them. Legacy NiTriShapeData drops triangles
-  only. Snapshot-undoable.
-- **Skin data (DONE 2026-07-07):** tlSkinResync (mirrors NifSkope's own
-  spRemoveWasteVertices) now runs after each delete — it remaps NiSkinData bone
-  vertex-weight indices through the vertex remap, and drops a now-stale
-  NiSkinPartition so the user can regenerate it (Make Skin Partition). FO4
-  BSSkin::Instance has neither (inline skin, already compacted), so it no-ops
-  there. Partition blocks are removed after all shape edits, highest block first.
-  Deeper future option (not needed for FO4): remap a partition in place instead
-  of dropping it.
-
-### 0b. Box select (B) + Invert selection (Ctrl+I) - DONE 2026-07-07, verify pending
-- **Box select (B):** GLView::beginBoxSelect (routed via NifSkope::eventFilter,
-  pointer-over-viewport, edit+object) arms a rubber-band; mousePress/Move/Release
-  drive boxSelectDrag; paintGL draws the dashed rectangle. applyBoxSelect: object
-  mode picks shapes whose origin projects into the box (no primary set — keeps the
-  remembered boxSelectPrevActive if it survives, else -1, so you click to set a
-  primary, Blender-style); edit mode selects verts/edges/faces per pickMode.
-  X-ray ON = everything in the box; X-ray OFF = front-facing only (geometric
-  triangle normal vs view dir — an approximation of true occlusion; a depth-buffer
-  test would be exact, future). Shift adds, Ctrl removes, else replaces.
-- **Invert (Ctrl+I):** GLView::invertSelection — object mode inverts membership
-  over all visible shapes; edit mode inverts verts/edges/faces per enabled pickMode
-  over editShapeBlocks. Routed via eventFilter too.
-- B and Ctrl+I had no prior binds (plain I = scale key mapping, unaffected).
-
-### 1. BSPositionData mesh-emitter spawn distribution - DONE, user-verified 2026-07-07
-- **Was:** the game spawned particles in a single spot from generated data.
-- **Cause:** the "numTris*3 + 2" tail of BSPositionData is NOT half-floats:
-  it is the mesh's triangle index list as RAW uint16 (verified byte-level
-  against vanilla edison_pa_vfx.nif Edison_Torso_Lightning:0), plus a
-  trailing (14, 0). The old spell left the region zeroed, so the engine
-  sampled triangle (0,0,0) forever -> one spot.
-- **Fix shipped:** Generate BSPositionData now writes the triangle indices
-  as u16 bit patterns inside the hfloat array (qfloat16 round-trip) and the
-  vanilla (14, 0) tail. Meaning of the 14 is still unknown (only one vanilla
-  sample); if a regenerated mesh misbehaves in game, compare that value.
-
-### 2. Merge vertices by distance (edit mode) — DONE (Merge ▸ By Distance…, redo panel; WW_CHANGES 07-15)
-- Blender "Merge > By Distance": weld picked vertices within a threshold,
-  remap triangles, drop unused verts. Requires rewriting the packed BSTriShape
-  vertex array (position/normal/tangent/UV/color/weights) and reindexing.
-  Snapshot-undoable. Risky – rewrites vertex data, must be tested carefully.
-
-### 3. Detach / separate selected geometry (edit mode) - DONE 2026-07-07 (Selection only)
-_Separate > Selection, Join (Ctrl+J) and Duplicate (Shift+D, obj+edit) shipped.
-Remaining: Separate By Material / By Loose Parts (greyed in the P menu);
-object-mode duplicate/separate are BSTriShape-only (NiNode branch duplicate is
-future). Edit-mode selection undo (Ctrl+Z through selection history) still TODO._
-
-### 3z. (superseded) old Separate notes
-- **P key in edit mode** opens a Blender-style "Separate" menu. For now
-  implement **Separate > Selection** only (the other Blender entries — By
-  Material, By Loose Parts — can be greyed/omitted for later).
-- **Separate > Selection:** the selected verts/edges/faces move into a NEW
-  BSTriShape (its own block, reparented under a NiNode), leaving the rest in
-  the original mesh. Copy the full packed vertex data for the moved verts
-  (position/**normal**/tangent/bitangent/UV/color/weights) + the moved
-  triangles reindexed; wire the same shader/alpha property (or a copy).
-- **Preserve normals exactly** on the separated geometry (do NOT recompute
-  them). The seam verts keep their original authored normals, so if the user
-  later joins the pieces back the shading across the seam stays seamless.
-- Snapshot-undoable. BSTriShape-rewrite risk — test carefully.
-
-### 3b. Join geometry (object mode) - Ctrl+J — DONE (joinSelectedObjects)
-- **Ctrl+J in object mode** joins the selected compatible geometry nodes into
-  the active (last-selected) node, Blender-style. "Compatible" = same block
-  type + matching vertex format (BSVertexDesc) + same shader/alpha setup so
-  the merged vertex buffer is valid.
-- Append each source mesh's vertex data (transformed into the active node's
-  local space) and triangles (reindexed by the running vertex offset) onto the
-  active BSTriShape; keep normals/tangents as-is so a prior Separate round-trips
-  seamlessly. Remove the now-empty source blocks. Snapshot-undoable.
-- Inverse of #3; shares the BSTriShape vertex-array read/write helpers, so do
-  the two together.
-
-### 4. Rest-pose display in edit mode
-- On entering edit mode on an animated frame, show the mesh at its authored
-  (unanimated) node transform, like Blender. Needs a per-node override in the
-  render transform pipeline for `Scene::restPoseBlock` (already stored).
-
-## Object-mode selection + parenting
-
-### 5. Multi-node selection in object mode - DONE (2026-07-07)
-- Shift+click multi-select (objSelection/objActive), Block List active vs
-  secondary colours, and the stencil silhouette outline (active #FF9D00,
-  secondary #FF7200, white while transforming) all shipped. The old
-  selection wireframe was removed in favour of the outline; the Wire
-  toggle is now an independent overlay. Underpins #6.
-
-### 6. Parent / Clear-Parent windows (Ctrl+P / Alt+P) — DONE (2026-07-11)
-- **Ctrl+P → Set Parent** supports Object (Keep Transform), Object (Keep
-  Local Transform), and Link to Additional Parent. With multiple selections,
-  the active (last-selected) `NiNode` is the parent; a target-node picker is
-  shown when no selected parent is available.
-- Parent targets may be any `NiNode` subclass. Children may be any
-  `NiAVObject` subclass, including `NiNode`, `BSTriShape`,
-  `BSSubIndexTriShape`, and other compatible scene-object blocks. Pure mesh
-  data, property, controller, and extra-data blocks are intentionally excluded
-  because the NIF schema does not permit them in a `NiNode` Children array.
-- **Alt+P → Clear Parent** supports Clear Parent and Clear and Keep Transform.
-  Clear Parent Inverse is displayed disabled because NIF scene nodes do not
-  have Blender's separate parent-inverse matrix.
-- Both operations are snapshot-undoable, prevent hierarchy cycles, update all
-  relevant `NiNode` Children/Effects links, and preserve world transforms when
-  requested. The commands are also available from the object-mode viewport
-  context menu.
-
-## Manager / UI
-
-### 9. Block List & Block Details overhaul (design-only, 2026-07-12)
-- Blender-familiar redesign of the block list (search + quick filters, type
-  icon/colour coding, per-type summary column, status badges, referenced-by
-  peek) and block details (field filter + collapsible sections, named flag
-  editor, jumpable/validated link fields, typed value editors). Full notes and
-  phasing in **`BLOCK_LIST_DETAILS_OVERHAUL.md`**. Direction locked as
-  Blender-familiar; dock-vs-in-place still open. Not scheduled yet.
-
-### 8. Blender-style workspaces - DONE (2026-07-12)
-- A workspace switcher (tabs/dropdown near the top) with three default
-  workspaces, each a saved dock/panel layout:
-  - **Default** — clean layout; the bottom dock area is empty (no timeline,
-    no Material/Texture editor shown by default).
-  - **Materials / Textures** — the Material / Texture editor takes the bottom
-    slot (where the timeline sits in the Animation workspace).
-  - **Animation** — the animation timeline in the bottom slot.
-- Switching a workspace restores that workspace's saved layout (which docks
-  are visible, where, and their sizes). The bottom slot is the shared spot
-  the timeline vs. Material/Texture editor swap into.
-- Impl notes: layouts are `QMainWindow::saveState()`/`restoreState()` blobs
-  keyed per workspace; the timeline (`dTimeline`) and Material/Texture
-  Manager (`dMatMgr`) docks already exist, so the workspace mostly toggles
-  their visibility + tabifies/positions them at the bottom. Persist the
-  active workspace + custom layouts in settings.
-
-### 7. Material & texture browser with search - DONE (user-confirmed 2026-07-07)
-- The Material / Texture Manager has a "Browse…" button (operates on the
-  selected row) that opens FileBrowserWidget filtered to textures/materials,
-  which has its own "Path Filter" search field. Picks a resource path from the
-  game archives instead of typing it. (meshtools.cpp tlCreateMatTexManagerDock
-  + ui/widgets/filebrowser.cpp)
+The 07-27 sweep found **five** stale claims and **six** items that were missing
+from this file entirely. Same failure mode as the 07-21 sweep: two of the five
+were features NifSkope has *always* had (stock behaviour filed as new work),
+one was reversed by a later user decision and never un-filed, and one had grown
+by 14 units while the estimate stayed frozen. Details in the two lists at the
+bottom.
 
 ---
-_Completed items live in the git history on `feature/timeline`._
 
-## Display compiled FO4 collision (bhkPhysicsSystem) — INVESTIGATED 2026-07-08, feasible
-Goal: render Elric-compiled collision (bhkNPCollisionObject → bhkPhysicsSystem
-"Binary Data") in the viewport like legacy bhkShape trees.
+## How to use this file
 
-**Findings (validated against before/after Elric pairs in
-`C:\Users\bungo\Documents\3dsMax\export\{meshes,processed}`):**
-- The blob is a standard **Havok 2014.1 binary packfile** (magic
-  57E0E057/10C0C010, v11, 64-bit pointers, little-endian): header, 3 sections
-  (`__classnames__`, `__types__` (empty), `__data__`), and local/global/
-  virtual fixup tables. Virtual fixups map object offsets → class names, so
-  objects can be located without the full type system.
-- FO4 uses the **hknp** engine. Only two geometry classes appear across box /
-  convex / trimesh samples:
-  - **hknpConvexPolytopeShape** (box AND convex hull): FULLY DECODED —
-    convexRadius float; then hkRelArray descriptors (u16 count + u16 offset
-    relative to the descriptor's own address): vertices (hkVector4, w =
-    vertex id), planes (hkVector4), faces (u16 firstIndex + u8 numIndices +
-    u8 flags), u8 vertex indices. Verified: box verts ±0.13287 == raw
-    bhkBoxShape half-extents exactly.
-  - **hknpCompressedMeshShapeData** (trimesh): hkcdStaticMeshTree-style —
-    quantization domain AABB + float grid steps + per-section packed
-    vertices (bit-packed against the domain) + u8[4] primitive indices.
-    Located all pieces in the sample; vertex bit-unpacking still to work out
-    (known format, community references: hkxpack / ck-cmd).
-- Scale: Havok units × 69.99125 = game units (same as legacy bhk).
-- Body transforms live in hknpPhysicsSystemData's bodyCinfos (needed for
-  multi-body systems, e.g. ragdolls; single static bodies are identity).
+1. **Verify against the code before building anything listed here.** These docs
+   have been wrong in *both* directions. On 2026-07-21 a single review found
+   **nine** stale claims: six Blender-batch items marked open that were fully
+   implemented (Mirror editing, Checker deselect, Repeat Last, F9, Rip, Split),
+   rest-pose display marked open when it had shipped, a "model landmine" that
+   was an untested conjecture and proved false, and `TIMELINE_PLAN.md`'s 43
+   unticked checkboxes which were **all** implemented.
+2. **The code is the only complete inventory.** Docs are also wrong by
+   *omission*: the Skeleton Manager and Pose Manager workspaces — the two
+   largest un-started features in the project — existed only as disabled UI
+   entries and a line in `CURRENT_STATUS.md`, and were missing from the backlog
+   entirely. When asking "what's left", grep for `setEnabled( false )`
+   placeholders and greyed menu items as well as reading markdown.
+3. **Fast checks**: the `viewport.*` shortcut registry at the top of
+   `glview.cpp` settles any viewport feature in seconds. For everything else,
+   grep the feature's identifiers.
+4. **Check whether the "missing" feature is stock NifSkope.** Two 07-27 stale
+   claims (string-index display, nif.xml tooltips) were upstream behaviour that
+   had simply never been looked for. Grep `nifmodel.cpp`'s `data()` role
+   switches before filing display work.
+5. **Grep the code, not just one file.** The 07-27 sweep initially "confirmed"
+   the NifItem slab pool as unbuilt because the grep covered `nifmodel.cpp` and
+   `nifitem.h` but not `nifitem.cpp`. It had shipped.
+6. **A file on disk is not necessarily compiled.** `src/collisiontools.cpp` is a
+   committed orphan that no longer builds (see §14). Diff the `.pro`'s exact
+   paths against `find src -name '*.cpp'` — matching on basename alone hides it.
 
-**Implementation plan:**
-1. Port the packfile walker (header/sections/classnames/virtual fixups) to
-   C++ — `tools/hkparse.py` in this repo is the working reference.
-2. Decode hknpConvexPolytopeShape → wireframe verts/faces (done on paper).
-3. Decode hknpCompressedMeshShapeData vertex packing (compare against the
-   raw NiTriStripsData ground truth to validate).
-4. Hook into Node::drawHavok: when bhkNPCollisionObject links a
-   bhkPhysicsSystem, parse the blob (cache per block), draw like
-   drawHvkShape with the ×69.99125 scale.
-5. bhkRagdollSystem shares the container — same code path later.
+**Related files** — none of them carry backlog any more:
+
+| file | role |
+|---|---|
+| `WW_CHANGES.md` | change log / history. Update it with every batch. |
+| `CURRENT_STATUS.md` | session handoff: build rules, working agreement, gotchas |
+| `BLOCK_DETAILS_OVERHAUL_PLAN.md` | design detail + binding visual rules |
+| `MODELING_TOOLS_PLAN.md`, `UV_EDITOR_PLAN.md` | design detail |
+| `TIMELINE_PLAN.md` | historical v1/v2 checklist (all ticked) |
+| `PERFORMANCE_PLAN.md` | tiered analysis + measurements, incl. deferral rationale |
+| `BONE_WEIGHT_TRANSFER_PLAN.md` | validated skin math, transfer design |
+| `COLLISION_MANAGER_HANDOFF.md` | validated packfile offsets, test assets, gotchas |
+| `BLOCK_LIST_DETAILS_OVERHAUL.md` | superseded v1 design notes (list side only) |
+
+---
+
+## Summary — everything open, by size
+
+| # | area | size | state |
+|---|---|---|---|
+| 0 | **Renderer: PBR draws empty frames** | medium | **parked behind one constant** — hottest open bug |
+| 1 | **Skeleton Manager** workspace | large | not started — biggest open feature |
+| 2 | **Pose Manager** workspace | large | **SHIPPED 07-22d..l**; prop staging + 4 refinements deferred |
+| 3 | Performance 15c + 16 (flattened storage + off-thread parse) | large | deferred as one joint project, prereqs listed |
+| 4 | Collision Manager P4 | medium | partly **blocked** (compound/instance) |
+| 5 | Block Details: remaining typed editors | small | **2 of 4 were already done**; 2 remain, ready to build |
+| 6 | Block Details: array table (P4) | medium | not started |
+| 7 | Block Details: whole-file search, recent values/revert, hex viewer (P5) | medium | not started |
+| 8 | Block List: summary column, status badges | small | not started |
+| 9 | Rigging leftovers | medium | partly absorbed by #1 |
+| 10 | UV editor: cross-mesh operators | medium | active-mesh-only is current design |
+| 11 | Animation: 3 remaining gaps | small | the other 43 items are done |
+| 12 | Rendering: spec/gloss **SHIPPED**, PBR **parked**, SSS future | large | see §0 and §12 |
+| 13 | CLI follow-ups (see §13) | small–medium | base CLI shipped 07-21e; harness port is 22 files, not 8 |
+| 14 | Repo hygiene: orphaned source, 54 uncommitted files | small | new 07-27 |
+| 15 | Viewport: Separate By Material / By Loose Parts | small | new 07-27 — disabled placeholders |
+
+---
+
+## 0. Renderer — PBR draws empty frames (HOTTEST)
+
+Everything for PBR shipped over 07-27b..e and is then **switched off** by
+`static constexpr bool pbrmFeatureEnabled = false;` at `glproperty.cpp:996`.
+The gate is in code, not just the UI, so a stale QSettings value cannot switch
+it on behind a greyed-out menu — verified by leaving `Settings/Render/PBRM Mode`
+set to PBR in the registry and confirming a full frame still rendered.
+
+`BSLightingShaderProperty` shapes draw **nothing** in PBR mode. RenderDoc
+confirmed program selection, texture binding and draw submission all work; blend
+is disabled with a full write mask; effect-shader shapes still render; the grid
+is not occluded. **Eliminated:** per-draw GL state, cubemap completeness,
+uniform-block binding, unconditional base-alpha-as-opacity.
+
+**Next diagnostic:** qrenderdoc GUI → EID 87 → Mesh Viewer ▸ VS Out, then Debug
+Pixel. Not rdc-cli — its `debug vertex` shows `0xCCCCCCCC` inputs on the
+*working* legacy draw too, so that output is an artifact and cannot be read as
+evidence.
+
+To resume: flip the constant and re-enable the two greyed menu entries. Full
+findings in `WW_CHANGES.md 2026-07-27e`.
+
+### Also open, and it guards the thing PBR must not break
+
+`RENDERER_MATCH_PLAN.md §0`: `tests/render/refraction_fixture.nif` renders
+**byte-identical** to the unmodified head, so `doRefraction` is never true and
+that baseline currently guards nothing. Ruled out: the flag is in the file, no
+BGSM override, `showRefraction` forced true, branch not version-gated. Leading
+hypothesis: `SLSF1_Refraction = 1 << 15` is Skyrim's bit layout applied to FO4's
+flags. Better fixture = a **vanilla** FO4 asset found by scanning the corpus for
+the bit.
+
+The plan said don't touch §1/§2 until this is resolved. Both were built anyway
+(07-27a..e). The regression set stayed clean throughout, so it likely cost
+nothing — but refraction is the exact thing the change was supposed to not
+break, and it is still unguarded.
+
+---
+
+## 1. Skeleton Manager workspace — NOT STARTED
+
+Reserved as a **disabled** workspace menu entry — `plannedWorkspaces` in
+`nifskope_ui.cpp:6137` ("Skeleton Manager (Planned)"), below the six implemented
+workspaces (Timeline, Material, Collision, Rigging, Vertex Paint, UV). No dock is
+created — deliberately, so persisted workspace indexes do not shift when it
+lands. (Verified 07-27; the entry moved from ~L4747 as the file grew.)
+
+**Design: `SKELETON_AND_POSE_PLAN.md`** (2026-07-21) — Blender-grounded
+(Armature Edit Mode), with the rebind hazard, phasing and CLI surface worked out.
+
+Tooltip contract: *"skeleton hierarchy, rest-pose, bone transform, and
+validation workspace."*
+
+**This absorbs several items previously filed as loose rigging tasks** — an
+independent persistent skeleton reference is this workspace's prerequisite, not
+a separate feature, and zero-weight bone pruning belongs here too.
+
+Building blocks that already exist:
+- `Scene::restPoseBlock` + `Node::restWorldTrans()` — rest-pose display, shipped
+  (`glnode.cpp:337/353`, five writers in `glview.cpp`).
+- Rigging Manager: bone list, donor/target bone compare, transfer, weight paint.
+- `BONE_WEIGHT_TRANSFER_PLAN.md` — validated inverse-bind and transfer math.
+- FO4 `CustomizationRemapData` decode (see the reference memory / plan doc).
+
+## 2. Pose Manager workspace — SHIPPED 2026-07-22d..l (1 feature + 4 refinements open)
+
+Built: posing engine already worked (live skinning); pose library + blend in
+`AnimSetup` (`savePose`/`applyPose`/`readPose`); the dock (`src/posetools.cpp`,
+Workspaces ▸ Pose) with a bone list that drives selection, save/apply/delete and
+a blend slider. Verified by `WW_POSEDOCK_TEST` + a screenshot. CLI `pose` mirrors
+it. Load-screen composition resolved to `merge` (07-22a).
+
+Much more shipped after 07-22d than this section used to admit: 07-22e..l added
+bone-by-bone posing, viewport skeleton + click-to-pose, Outfit Studio pose XML,
+load-skeleton-from-archive, a folder-based pose library, and the 07-22i batch
+(weights overlay, hover name, multi-select, pin, non-destructive posing,
+proportional editing, mirror axis).
+
+**Still open — one feature:**
+- **Prop staging** (attach an external NIF under a bone) — 0 hits in
+  `posetools.cpp`. Blocked on a question below.
+
+**Deferred refinements** (all from 07-22i, all bounded, none blocking):
+- **Pose-mode bone proportional editing** — the edit-mode version shipped; the
+  object-gizmo path is parent-space and more intricate. The falloff infra is
+  already shared, so this is a contained follow-up.
+- **Topology-based mirror pairing** — position pairing works for symmetric
+  meshes, which is every real case so far.
+- **Weight overlay uses bind positions** (shape world transform × vertex) —
+  exact for an unposed mesh, lags the deformed surface once bones are posed.
+- **Non-destructive posing is a mode-boundary guarantee**, not a display
+  overlay: bone nodes *are* touched while in Pose Mode and restored on exit. A
+  never-touch-the-nodes version is a larger rearchitecture.
+
+**Mirror / paste-flipped poses is DONE** — `PoseMirrorButton` +
+`ogl->poseMirrorBone()` (`posetools.cpp:192`, `:491`). It was filed as open here
+while `poseMirrorBone` already existed; 07-22i says so explicitly.
+
+**Design: `SKELETON_AND_POSE_PLAN.md`** (2026-07-21) — Blender-grounded (Pose
+Mode + Pose Library). Key decision recorded there: **a pose IS a
+`NiControllerSequence` carrying one key per bone at t=0** — the NIF equivalent
+of a Blender Action — so the library reuses the sequence machinery `anim-setup`
+and the timeline already provide instead of inventing a pose format.
+
+Tooltip contract: *"character posing, prop staging, reusable pose, and
+load-screen composition workspace."*
+
+(The stale line "Nothing built" lived here until 07-27, four shipping days after
+the dock landed. The plan's build order — pose library B.1 before bone
+transforms A.3 — was followed and is now history rather than guidance.)
+
+**One question still blocks prop staging** (plan §B.6): does it edit the saved
+file, or is it preview-only? The other two questions in that section are answered
+and should not be re-asked — load-screen composition resolved to `merge` (07-22a)
+and the pose library is a folder of files, i.e. cross-file (07-22j).
+
+## 3. Performance — 15c + 16, deferred as ONE joint project
+
+Authoritative analysis, measurements and rationale: `PERFORMANCE_PLAN.md`.
+Tier 1, Tier 2 and Tier 3 batch 1 (NifItem slab pool) have shipped.
+
+- **15c — flattened packed storage** for `BSVertexData` rows, and
+- **16 — off-thread raw-buffer parse.**
+
+Deferred together on evidence: measurement shows item *construction* dominates
+load, and an off-thread parse only pays once flattened storage makes the raw
+buffer the model's storage. Prereqs recorded in the plan: full gauntlet per
+step, a `QPersistentModelIndex`-over-virtual-rows design, and the `#ARG#`
+condition-cache contract either preserved exactly or replaced wholesale.
+
+**Deliberately not doing** (rationale in the plan, do not re-open casually):
+- T2.13 draw sorting — needs a draw-loop restructure plus per-shape uniform
+  caching (Tier-3 scale), and a bare `glUseProgram` current-check is exactly the
+  cache-desync landmine behind the old startup-grid bug.
+- T2.14 particle frustum culling — the sim must keep running for correct resume,
+  draw-only culling has minimal payoff, and a wrong-space plane test silently
+  blanks VFX with no headless test to catch it.
+
+## 4. Collision Manager — P4
+
+P1–P3 have landed; the multi-section compressed-mesh encoder shipped 07-18.
+Precisely (re-checked 07-27, the old wording here was ambiguous): a section still
+holds ≤255 verts/tris — that is the format — and the encoder now partitions a
+mesh into up to **4096** such sections by spatial slab, with per-section domains,
+and single-section output stays byte-identical to the validated writer.
+
+- **Compound / instance encoding — BLOCKED.** Needs reference pairs to validate
+  against. `COLLISION_MANAGER_HANDOFF.md` is explicit: **do not build blind.**
+- Per-triangle face-material painting — open (0 hits in `collisiontools.cpp`).
+- `hknpBSMaterialProperties` beyond the single-material table — open.
+- The shipped multi-section encoder still needs an **in-game walk test**.
+
+Full feature spec is preserved in the appendix at the bottom of this file;
+validated packfile offsets and test assets live in
+`COLLISION_MANAGER_HANDOFF.md`.
+
+## 5. Block Details — remaining typed editors (READY)
+
+Small, independent, display-layer only, no corruption risk. **Two of the four
+items filed here were already implemented** — see the note below; re-verified
+07-27.
+
+- **Colour swatch + picker** — genuinely open. `ColorEdit`
+  (`valueedit.cpp:710`) is four r/g/b/a spin boxes with no swatch and no picker;
+  `ColorWheel` exists but is used only by `settingspane.cpp`.
+- **Texture path browse + missing-file marking** — genuinely open, zero hits.
+  Resolve against the configured-resources VFS (the NIF Browser's BA2 index is
+  cached, so this is cheap); missing file = red text, thumbnail tooltip via
+  `TexCache`.
+
+**Already done, do not rebuild** (both are upstream NifSkope behaviour that had
+never been checked for):
+
+- ~~String-index derived display~~ — `nifmodel.cpp:1385` resolves
+  `tStringIndex` against the header string table and returns `"<string> [<idx>]"`,
+  with distinct `<invalid string index>` / `<header strings not found>` messages.
+  That *is* "the resolved string beside the raw index".
+- ~~nif.xml tooltips on field labels~~ — `nifmodel.cpp:1512`, `ToolTipRole` on
+  `NameCol`, builds `<p><b>name</b></p><p>description</p>` from
+  `NifItem::text()`, which is the nif.xml description field
+  (`src/data/nifitem.h:111`, `:583`). Block-type rows also get an ancestor list.
+
+Design detail and the **binding visual rules** (flat `Name | Value` language,
+hover-revealed row controls, coloured text not badges): see
+`BLOCK_DETAILS_OVERHAUL_PLAN.md`.
+
+## 6. Block Details — array table (P4)
+
+"Open as table" on fixed-compound arrays (Vertex Data, Triangles, bone
+weights): virtualized, viewport `pickedElems` sync, per-column stats including
+NaN count, CSV export. Designed as the future display layer for the Tier-3
+flattened storage (#3), so the two are worth sequencing together.
+
+## 7. Block Details — whole-file search and revert (P5)
+
+- Whole-file value search: the existing filter box gains a This Block / Whole
+  File scope toggle; results list `block · field · value` rows that jump on
+  click. Deferred/coalesced walk, skips big arrays unless the query is numeric.
+- Recent values per field + "revert to loaded value" (capture original on first
+  edit).
+- Hex viewer.
+
+## 8. Block List — remaining items
+
+Shipped already: search, type chips, category icons, breadcrumb/footer,
+Links-to/Referenced-by peek, foldable header.
+
+Still open: a real per-type **summary column**, and **status badges**.
+(**Drag-to-reparent was considered and rejected** — Set/Clear Parent cover it
+safely. Do not build it.)
+
+## 9. Rigging — leftovers
+
+Verified 2026-07-21 against `src/spells/riggingtools.cpp`.
+
+- **Classic NiSkin backend** (`NiSkinData`/`NiSkinPartition` path for
+  Skyrim LE/SSE) — essentially unstubbed.
+- **`CustomizationRemapNewBonesData`** — open; carries an unresolved
+  leaked-pointer question.
+- **Shader skinned-flag handling** for newly created skins — open.
+- **In-game FaceGen validation** — a manual production check, not code.
+- *Persistent skeleton reference* and *zero-weight bone pruning* — see #1; they
+  belong to the Skeleton Manager.
+
+## 10. UV editor — cross-mesh operators
+
+Multi-mesh editing shipped (per-shape selection sets, cross-shape picking,
+per-shape undo). Operators (merge / mirror / unwrap / pack), pins and hide
+remain **active-mesh-only by design**; extending them across meshes is scope
+expansion, not a gap.
+
+Also deferred from the UV work: 3D-viewport seam marking (Ctrl+E) and Follow
+Active Quads. **Proportional editing was explicitly declined — keep it that way.**
+
+## 11. Animation / Timeline — 3 remaining gaps
+
+**`TIMELINE_PLAN.md`'s 43 unticked boxes are all implemented** (verified by code
+sweep 2026-07-21: key inspector, drag+snap, tangent handles, CSV round-trip,
+lint, rubber-band multi-select, mute/lock, frames@fps, normalize, summary row,
+preview-range band, easing presets, settings persistence). That file is history,
+not backlog.
+
+Genuinely open:
+- **NiPSys (particle) controllers** are excluded from the Setup Controllers spell.
+- **Rename sync** is lint's guided fix, not an automatic on-rename hook.
+- **XYZ ↔ quaternion rotation conversion** is deliberately excluded from
+  interpolation-type switching.
+
+## 12. Rendering / engine
+
+Rewritten 07-27 — this section said "future/disabled" while most of it shipped.
+Plan and risk register: `RENDERER_MATCH_PLAN.md`.
+
+**SHIPPED:**
+- **Regression guard** — `WW_RENDER_SHOT` + `tools/render_regression/capture.ps1`,
+  7 baselines, camera / scene clock / `showRefraction` / `showParticles` all
+  pinned (an unpinned harness silently guards nothing — and the window size has
+  to be pinned too, `WW_RENDER_SIZE`, or every compare returns "size mismatch").
+- **FO4 spec/gloss on the editor's BRDF** (07-27a) — GGX + Smith + Schlick,
+  `_s.R`→F0 at the dielectric 0.04, specular no longer gated on `hasSpecularMap`,
+  energy conservation `(1-F)`. Channel assignment (`g`=gloss, `s`=spec) already
+  matched the measured calibration.
+- **`.pbrm` reader** (07-27b) — `src/io/pbrmfile.{h,cpp}`, Minimal Standard
+  slice, fail-closed, CLI `pbrm` / `pbrm-resolve`.
+- **Material resolution + auto-replace toggle** (07-27c), **`pbrm_default`
+  program and the live mode** (07-27d), **three lighting modes** (07-27e).
+
+**PARKED:** PBR mode and the auto-replace toggle — see §0. This is the whole
+reason §12 is still open.
+
+**Still future:** subsurface scattering. Genuinely not started.
+
+**Unverified, needs a real asset:**
+- `texAspect` resolution — `getTextureInfo( shaderProp->fileName( 0 ) )` may not
+  match the cache key. Unproven; needs an 8:1 texture.
+- A shape actually rendering *as* PBR — needs a `.pbrm` folder added under
+  Settings ▸ Resources.
+
+**Lightning leftovers** (07-26d shipped the controller-accurate rewrite):
+mutation cadence is hardcoded at 1/24 s and amplitude decay at 0.5. Both are
+guesses that looked right on screen; neither has been compared side-by-side with
+the effect in game. Three *other* interpretations were disproven by rendering
+and reverted — subdivisions-as-recursion-depth, Length-as-branch-length, and the
+`Animate Arc Offset` re-reading. Do not re-try those without new evidence.
+
+## 13. CLI follow-ups
+
+Headless batch mode shipped 2026-07-21e (`src/nifcli.cpp`, docs in `CLI.md`):
+`spells / info / list / dump / get / set / cast`, verified end to end. Open
+follow-ups, roughly in value order:
+
+- ~~**Parameterise Setup Controllers.**~~ **DONE 2026-07-21f** — logic moved to
+  `AnimSetup::setupControllers()` (`src/spells/animationsetup.h`), dialog and
+  CLI are both callers, exposed as `anim-setup`. Verified end to end; the
+  generated graph passes `Animation/Fix Invalid AV Object Refs` unchanged.
+  **GUI verification of the dialog is pending.** The same split is available
+  for the other dialog-driven animation spells if they are ever wanted
+  headless: Remove From Animation, Duplicate Sequence, Scale Sequence Times,
+  Bake B-Spline To Keys.
+- **Keyframe I/O from the CLI** — write key arrays from CSV/JSON. The data path
+  is plain model arrays and the timeline's CSV round-trip already proves it.
+  Pairs naturally with the item above and with the existing Animation lint
+  spell, which can verify the result in the same run.
+- **Port the `WW_*_TEST` harnesses onto it.** **There are 22, not eight** — the
+  count in this file was frozen at 07-21 while 14 more were added (the whole
+  `WW_POSE*` family, `WW_MERGEARCH`, `WW_OSPOSE`, `WW_CREATESKIN`, `WW_RENDER*`,
+  `WW_PERF`, `WW_UI_SHOT*`). They hand-roll load → act → verify → quit in
+  `nifskope_ui.cpp`; most of that is now CLI calls plus a script. Still the
+  single biggest available reduction in that file's bulk — and now a
+  medium-sized job rather than a small one. Note the GL-dependent ones
+  (`WW_RENDER*`, `WW_POSEDRAW`, `WW_UI_SHOT*`) cannot move: `-no-gui` has no
+  context, and `-platform offscreen` crashes on context creation (exit 139).
+- **JSON output** (`--json` on `info`/`list`/`dump`/`get`) for machine
+  consumption. Only worth doing once something actually consumes it.
+- **MCP server** — deferred on purpose. A CLI is already drivable from an agent
+  shell, which is most of the value. MCP earns its keep only for driving a
+  *live* NifSkope, which means extending `IPCsocket::execCommand`
+  (`main.cpp:235`, currently a five-line `if` understanding one command) into a
+  real protocol. Decide after living with the CLI.
+
+One CLI gotcha worth keeping here: a **running** NifSkope swallows filename
+arguments over the UDP IPC handoff and exits 0, so a probe run silently opens the
+file in the live session and your harness never fires. Always pass
+`--port <unused>` when scripting.
+
+## 14. Repo hygiene — NEW 07-27
+
+- **`src/collisiontools.cpp` is a committed orphan.** It is *not* in
+  `NifSkope.pro`; the live file is `src/spells/collisiontools.cpp` (2391 lines,
+  Jul 26) and the orphan is the pre-move copy (2372 lines, Jul 11, last touched
+  by `d5765c4`). Editing the wrong one compiles clean and changes nothing —
+  exactly the kind of silent trap that costs an afternoon. Delete it, or move it
+  under a `attic/` path that is obviously not built. It is the **only** such
+  orphan: an exact-path diff of the `.pro` against `find src -name '*.cpp'`
+  turned up nothing else.
+- **~54 files uncommitted** across 07-25..07-27 (skin, lightning, spec/gloss,
+  the whole PBRM stack, the regression harness). Committing has never been
+  authorised in-session; the working agreement in `CURRENT_STATUS.md` still
+  applies.
+
+## 15. Viewport — Separate By Material / By Loose Parts — NEW 07-27
+
+`glview.cpp:7241`: the Separate menu offers **Selection** (works), **By
+Material** and **By Loose Parts**, the latter two `setEnabled( false )` with the
+comment *"not implemented yet (Blender parity later)"*. Never filed here. Small,
+self-contained, and the existing `separateSelection()` plus the FO4
+skin/segment-aware path from 07-19e is most of the machinery.
+
+Not to be confused with `glview.cpp:15032` **Clear Parent Inverse**, which is
+disabled *permanently and correctly* — NIF scene objects store no Blender-style
+parent-inverse matrix. That one is in the declined list, not the backlog.
+
+---
+
+## Verified SHIPPED — do not rebuild
+
+Each of these was listed as open in some plan doc and is not. Confirmed against
+the code on 2026-07-21, extended 2026-07-27.
+
+| feature | evidence |
+|---|---|
+| Mirror editing (X) | `GLView::mirrorEditing`, `mirrorPairCache`, context-menu toggle |
+| Checker deselect | `GLView::checkerDeselect` + redo panel, W ▸ Specials |
+| Repeat Last (Shift+R) | `GLView::repeatLastOperator`, `viewport.repeat_last` |
+| F9 panel at cursor | `viewport.panel_to_cursor` |
+| Rip (V) / Split (Y) | `glview.cpp` "Split (Y) / Rip (V)", in-place undo |
+| Bevel (Ctrl+B) | `GLView::bevelSelection` — needs **GUI testing**, not code |
+| Rest-pose display | `Node::viewTrans`/`worldTrans` → `restWorldTrans()` |
+| Euler rotation editing | `valueedit.cpp` `mEuler` |
+| Tris to Quads (Alt+J) | `GLView::trisToQuads`, works from any select mode |
+| Entire timeline v2 checklist | see #11 |
+| Stock **Vertex Flags** spell is correct | tested + disproven landmine, `WW_CHANGES 2026-07-21a` |
+| Pose mirror / paste-flipped | `PoseMirrorButton`, `ogl->poseMirrorBone()` — `posetools.cpp:192`, `:491` |
+| String-index derived display | `nifmodel.cpp:1385` → `"<string> [<idx>]"` — **stock** |
+| nif.xml tooltips on field labels | `nifmodel.cpp:1512` `ToolTipRole`/`NameCol` ← `NifItem::text()` — **stock** |
+| Proportional editing (O / Shift+O) | `glview.cpp:184`, 8 Blender falloff curves, self-test at `:6327` — **the decline was reversed** |
+| NifItem slab pool (perf T3 batch 1) | `nifitem.h:300` + `nifitem.cpp` — the 07-27 sweep first mis-read this as unbuilt |
+| Multi-section collision encoder | `hknpencode.cpp:207` — spatial-slab partitioning, cap is now **4096 sections** |
+
+## Explicitly declined — do not implement
+
+- ~~**Proportional editing** (Blender O)~~ — **this decline was reversed.** The
+  user later asked for it and it shipped in 07-22i (all 8 Blender falloff
+  curves). The stale entry survived here for five days. Left visible on purpose:
+  a decline is a snapshot of one conversation, not a permanent law, and this file
+  has to be re-read against the change log rather than trusted.
+- **Drag-to-reparent** in the Block List — Set/Clear Parent cover it safely.
+- **Curated sections / header card** (Block Details P1) — the user chose "keep
+  the existing tree, improve it in place" instead.
+- **Loop Cut "Even" and "Correct UVs"** — deliberately not carried.
+- Draw sorting (T2.13) and particle frustum culling (T2.14) — see #3.
+- **Clear Parent Inverse** (`glview.cpp:15032`) — not a gap. NIF scene objects
+  store no Blender-style parent-inverse matrix, so the action is permanently
+  disabled with a tooltip saying so.
+- **Clean-room rewrite for legal independence** — asked and answered 2026-07-26:
+  clean-room requires never having read the original, which is already false.
+  WW Edition stays an acknowledged BSD-3 derivative. Do not re-open.
+
+## Awaiting verification (not implementation work)
+
+**The working agreement changed on 07-22 and again on 07-26; the old line here
+("the agent does not run GUI sessions") is wrong.** Current rules:
+
+- The **agent** verifies GUI behaviour itself, via the `WW_*_TEST` harnesses and
+  the CLI — not by handing over a checklist.
+- **No interactive GUI launches while the user is working** (07-26). Screenshot
+  harnesses are fine; `SetForegroundWindow` never is — it is refused from a
+  background process anyway, and one attempt captured the user's Blender window
+  instead of NifSkope. Always `--port <unused>`.
+- The **user** owns in-game validation. That is the one thing no harness covers.
+
+**Outstanding, no automated coverage:**
+- **Bevel** — highest risk, still has no harness (`bevelSelection` is reachable
+  only from the key dispatcher and the context menu). Test on a copy.
+- The 07-20d..o batches (flag dialog, Block Details batch 1 + diff/Reference
+  column, viewport batch, Loop Cut v1→v3), 07-21b pinned fields, performance
+  batches 1–3.
+
+**Needs the game, not a harness:**
+- Multi-section compiled collision — an in-game walk test.
+- Lightning cadence + decay (§12).
+- FaceGen output from the rigging tools.
+
+---
+
+## 2026-07-27 verification record
+
+What was actually checked, so the next sweep can trust or re-test it rather than
+guess. **Confirmed still open** (grep evidence, all zero-hit unless noted):
+Skeleton Manager (`plannedWorkspaces`), prop staging, colour swatch/picker
+(`ColorEdit` is spin boxes), texture browse, array table, hex viewer, whole-file
+search, Block List summary column + badges, classic `NiSkinData` backend (a lone
+`TBD` comment at `riggingtools.cpp:302`), `CustomizationRemapNewBonesData`,
+shader skinned-flag, NiPSys controllers (`controllerOptions` covers
+BSEffectShader / BSLightingShader / NiAlphaProperty / NiLight / NiAVObject only),
+rename-sync-is-a-guided-fix (`isNameMismatch` in `runLint`, `timelineedit.cpp:1563`),
+XYZ↔quaternion conversion, perf 15c flattened storage, per-triangle face
+materials, `--json`, keyframe CLI I/O.
+
+**Not re-verified** — carried forward on the 07-21 sweep's word: the individual
+07-20d..o GUI batches, the `TIMELINE_PLAN.md` 43-item sweep, the Blender-batch
+SHIPPED table rows above, and the `PERFORMANCE_PLAN.md` measurements behind the
+15c/16 deferral. If any of those matter to a decision, re-check before relying
+on them.
+
+---
+---
+
+# APPENDIX — Collision Manager feature spec
+
+Preserved verbatim; this is the only copy. Technical handoff (validated
+packfile offsets, PyNifly corrections, test assets, phasing, gotchas) is in
+`COLLISION_MANAGER_HANDOFF.md`; the interactive UI mockup is
+`docs/collision_manager_mockup.html`.
 
 ## Collision Manager — CONCEPT (2026-07-09, supersedes "Collision workflow" 07-08)
 
@@ -524,94 +757,3 @@ writers, per-triangle material painting, FileConvert and in-game validation.
 - **P4 heavy formats**: compressed-mesh encoder, compounds/instances,
   dynamic props with computed inertia, materials, multi-section meshes
 
-## Blender feature batch (agreed 2026-07-08)
-
-### Mirror editing (X-mirror)
-Blender's "Mirror Editing" checkbox: edit-mode transforms applied to a vertex
-also apply (X-negated) to its mirror partner across the object's X axis.
-Build a mirror-pair vertex map on entering edit mode (position match with a
-small tolerance); unpaired verts move normally. Toggle lives in the redo /
-snap panel area. Great for armor meshes.
-
-### Checker deselect
-Deselect every Nth element of the current selection (order = walk along
-connectivity from the active element, Blender-ish). Redo panel with
-Nth/offset DragSpinBoxes.
-
-### Repeat Last (Shift+R)
-Re-run the last operator with its stored parameters (transform, merge,
-select-linked, box deselect... the redo-panel state already stores them).
-
-### F9 — reopen redo panel at cursor
-F9 pops the current redo panel next to the mouse cursor (it lives at the
-viewport's bottom-left otherwise).
-
-### Smooth Vertices — DONE (W ▸ Smooth Vertices…, redo panel)
-Laplacian smooth on the selected verts (average with edge neighbors),
-factor + iterations in a redo panel. Low-risk vertex rewrite; good for
-fixing lumpy geometry.
-
-### Rip (V) and Split (Y) — STILL OPEN in the 3D viewport (UV editor's Y = UV rip only)
-Split (Y): duplicate the selected verts and reassign the selected faces to
-the copies, detaching them in place (no new block — unlike Separate).
-Rip (V): split along the selected edge path and enter a move modal on the
-ripped side. Shares Separate's vertex-array machinery.
-
-### Extrude (E) — DONE (07-15, incl. vertex/edge extrude + in-place undo)
-Duplicate the selected boundary verts, bridge triangles between original and
-copy, then enter a move modal on the copies. Normals/UVs on the new side
-walls need care. Medium-high effort.
-
-### UV editing overhaul (HUGE undertaking) — DONE (full editor: LSCM/pins, layout tools, sticky seams, multi-mesh; UV_EDITOR_PLAN.md)
-A proper UV editing workspace, roughly in stages:
-1. **UV viewer dock**: draw the edited mesh's UV layout (triangles in UV
-   space) with the base texture underneath; sync selection with the 3D view.
-2. **UV editing**: move/rotate/scale selected UVs with the same modal G/R/S +
-   redo-panel machinery; snap/pin support; write back into the packed
-   BSTriShape vertex data (HalfVector2 UV) undoably.
-3. **Unwrap operators** (stretch goal): mark seams on edges, LSCM-style
-   unwrap or at least planar/box projection per selection.
-Ties into the Materials/Textures workspace idea (#8). Should get its own
-plan document before starting.
-
-## Proportional editing (Blender O key)
-Falloff-weighted vertex transforms in edit mode: moving/rotating/scaling picked
-elements also affects nearby unselected vertices, weighted by distance inside
-an adjustable falloff radius (mouse wheel resizes during the modal). Falloff
-curves: smooth / sphere / linear / constant. Needs: falloff radius state +
-wheel handling inside element modals, weight computation in
-gizmoUpdateElement(), circle indicator drawn around the pivot.
-
-## Animation Manager visual overhaul (deferred 2026-07-11)
-
-Keep the current animation tools working, but reorganize the workspace before
-adding more features:
-
-1. Channel hierarchy on the left and a scalable key canvas on the right, with
-   Blender-style Summary and per-channel display modes.
-2. Compact transport, current-frame and playback-range controls across the
-   top; clear playhead and frame labels in the canvas.
-3. Filters for Selected, Visible, Transform, Visibility and Material tracks.
-4. Distinct key colours for translation, rotation, scale and animation events.
-5. Box-select, duplicate, move, scale and snap keys directly in the canvas;
-   frame the selected keys on demand.
-6. Interpolation/easing controls and a collapsible exact-value key inspector.
-7. Markers and named animation events on their own visible lane.
-8. Warning badges for broken targets, empty sequences and overlapping keys.
-
-This is intentionally backlog-only until the Material workspace pass is
-stable; do not remove or rename the existing Animation workspace meanwhile.
-
-## Feedback batch (2026-07-06) - implemented, in-app verify pending
-All 6 items done (transform-gizmo depth scaling, origin dot selection colours,
-edge gradient in lines.geom/drawline.glsl, free-camera keyboard grab +
-hover-entry, Ctrl-pick / Shift-path-select, operator panel axis+orientation
-combos with hide-on-reselect). Notes for verification:
-- Free camera now enters on Shift+F whenever the pointer hovers the viewport
-  (no click needed) and grabs the keyboard while flying.
-- Edit mode: Ctrl+LMB = extend/toggle element, Shift+LMB = shortest-path
-  select from the active element (BFS; falls back to plain extend across
-  shapes/element types or disconnected geometry).
-- Operator panel: Axis combo shows for Rotate, Orientation for Move/Rotate;
-  a stale gesture greys the panel instead of hiding it; panel hides when a
-  different object becomes active.

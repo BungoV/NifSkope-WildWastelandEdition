@@ -1,7 +1,23 @@
 # Wild Wasteland NifSkope — Current Status
 
-Updated: **2026-07-20** — branch `feature/timeline` @ `8323dc9`, build green
-(exe 2026-07-19 21:38), all headless harnesses passing.
+Updated: **2026-07-21** — branch `feature/timeline` @ `f1d7932` (Loop Cut v3),
+build green, all headless harnesses passing.
+
+Since the 07-20 revision of this doc: the 07-20d..o batches landed (generic flag
+dialog + copy/paste, Block Details batch 1 and its diff/Reference-column
+follow-ups, the viewport batch, Loop Cut v1→v3). On 07-21: the outstanding
+"Vertex Flags model landmine" was tested and **disproven**
+(`WW_CHANGES 2026-07-21a`), and **pinned fields** shipped in Block Details
+(`WW_CHANGES 2026-07-21b`, harness `WW_PINNED_TEST`).
+
+**Doc hygiene, 07-21.** Three plans were found to overstate what is open, and
+have been corrected: `TO_BE_IMPLEMENTED.md` listed six Blender-batch items
+(Mirror editing, Checker deselect, Repeat Last, F9, Rip, Split) that were all
+implemented; `BLOCK_DETAILS_OVERHAUL_PLAN.md`'s phasing predated the decision to
+drop curated sections and did not reflect that P3 had shipped; and the Vertex
+Flags landmine was an untested conjecture. **Standing rule: verify against the
+code before building anything a plan lists as open** — the `viewport.*` shortcut
+registry at the top of `glview.cpp` is the fastest check for viewport features.
 
 This is the short handoff document. `WW_CHANGES.md` remains the detailed change
 history, `BONE_WEIGHT_TRANSFER_PLAN.md` describes the transfer design,
@@ -11,11 +27,16 @@ rigging evidence.
 
 ## Working agreement
 
-- The user performs live GUI and game debugging. The agent should change/read
-  code, reason about it on paper, and run proportionate builds or non-GUI tests
-  only.
-- Do **not** launch NifSkope, Blender, or another GUI unless the user explicitly
-  changes that instruction.
+- **CHANGED 2026-07-22 (user: "Do it yourself please, I'm busy").** The agent
+  now performs its **own GUI verification** instead of handing the user a test
+  checklist. Drive the real app from an env-gated `WW_*_TEST` harness and assert
+  programmatically — prefer numeric state (model values, `Node::bounds()`, block
+  counts) over screenshots, with `grabFramebuffer` pixel diffs as corroboration.
+  **`grabFramebuffer` does not repaint** — pump `ogl->update()` +
+  `processEvents()` twice first or you diff a stale frame.
+- The user still validates **in-game** behaviour and anything needing their real
+  assets (armour sets, skeletons, load order). Escalate those.
+- *(superseded: "the user performs live GUI debugging; do not launch NifSkope".)*
 - Keep subagent use low; do not delegate unless the user explicitly asks.
 - Production repository: `E:\Projects\ClaudeNifskope`
 - The correct binary is always the one we build here:
@@ -41,10 +62,13 @@ Everything below is built, headlessly verified, and committed through
   unskinned meshes (caught by the automated gauntlet, not the GUI). Now builds
   skin blocks at block level, serializes, byte-patches desc/DataSize/records,
   and reloads through the loader. Full gauntlet green, including a donor
-  transfer run on its own output. Model landmine documented in
-  `WW_CHANGES.md 2026-07-18b`: any spell doing `set<BSVertexDesc>` +
-  `updateArraySize` on an unchanged vertex count is suspect (stock Vertex
-  Flags spell included).
+  transfer run on its own output. The "model landmine" that entry generalised
+  from — any spell doing `set<BSVertexDesc>` + `updateArraySize` on an
+  unchanged vertex count is suspect, stock Vertex Flags included — was a
+  **conjecture, and was DISPROVEN on 2026-07-21** (`WW_CHANGES 2026-07-21a`,
+  harness `WW_VERTEXFLAGS_TEST`). Create Skin's bug was specific to
+  *creating* arrays that had 0 children until the deferred cascade; flipping
+  a live/dead bit on already-materialised fields is safe.
 - **07-18** — clone-freeze fix (`loadIndex` populates with signals live; wrap
   in Loading state), 65,535-vertex cap in Duplicate/Join,
   duplicate-into-new-shape offer at the cap, Blender X delete in object
@@ -136,7 +160,11 @@ creates no new seams (phase 4).
 
 ## Deferred/future work
 
-- Skeleton Manager and Pose Manager workspaces are placeholders.
+**As of 2026-07-21 this section is no longer the backlog.** Everything left to
+implement — including the Skeleton Manager and Pose Manager workspaces, which
+used to appear only here and were therefore invisible to any backlog review —
+now lives in **`TO_BE_IMPLEMENTED.md`**, the single consolidated list. Keep
+future deferrals there, not here.
 - Game-accurate lighting, PBR channel support, and subsurface scattering remain
   future/disabled.
 - Fully skinning an unskinned target: DONE 07-18 (Create Skin, rewritten to

@@ -9,7 +9,20 @@
 > remaining list-side items (summary column, badges, drag-to-reparent —
 > the latter recommended against in v2).
 
-**Status:** Backlog / design notes. **Not being implemented yet** (agreed 2026-07-12).
+> **BACKLOG MOVED — 2026-07-21.** This file is **superseded design notes**. What
+> is left to implement lives in **`TO_BE_IMPLEMENTED.md`**; Block Details design
+> detail lives in `BLOCK_DETAILS_OVERHAUL_PLAN.md`.
+
+**Status (corrected 2026-07-21):** the "not being implemented yet" note below is
+left over from 2026-07-12 and is **wrong** — most of the Details half and much
+of the List half shipped between 07-20d and 07-21b. Treat this file as
+historical design notes for the Block **LIST** side; for Block **DETAILS** read
+`BLOCK_DETAILS_OVERHAUL_PLAN.md`, whose phasing table carries the verified
+per-item status. Note also that the Blender-familiar direction asserted below
+was later overruled for Details: the binding rule is NifSkope's own flat
+`Name | Value` visual language (see that plan's "Visual language rules").
+
+~~**Status:** Backlog / design notes. **Not being implemented yet** (agreed 2026-07-12).~~
 **Direction:** **Blender-familiar** — lean into the N-panel / icon / drag-reparent
 interaction model rather than only bolting polish onto the classic
 `Name | Value` trees. (A conservative "classic + additive polish" variant was

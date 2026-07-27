@@ -1,5 +1,11 @@
 # Collision Manager — Implementation Handoff
 
+> **BACKLOG MOVED — 2026-07-21.** What is left to *build* is tracked in
+> **`TO_BE_IMPLEMENTED.md`** (§4 Collision Manager P4, with the full feature
+> spec preserved in its appendix). This file stays the **technical handoff** —
+> validated packfile offsets, PyNifly corrections, test assets, gotchas — and is
+> still required reading before touching collision code.
+
 Self-contained brief for whoever (human or AI) builds the Collision Manager
 in this NifSkope fork. Everything here was validated during the 2026-07
 reverse-engineering sessions; nothing below is guesswork unless marked.

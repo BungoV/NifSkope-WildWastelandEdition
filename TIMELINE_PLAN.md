@@ -4,8 +4,23 @@ Working copy: `E:\Projects\ClaudeNifskope` (fo76utils/nifskope develop + custom 
 Build: MSYS2 UCRT64 shell launched from PowerShell (`$env:MSYSTEM='UCRT64'; $env:CHERE_INVOKING='1'; & C:\msys64\usr\bin\bash.exe -lc "qmake6 && make -j 8"`).
 Test files: `E:\Projects\Fallout 4 Mods\mods\X01Tesla\meshes\actors\powerarmor\x01\*_Tesla_VFX.nif` (autoLoop sequence, 11 lanes, 339 keys).
 
+> **BACKLOG MOVED — 2026-07-21.** This file is **history only**. The single
+> authoritative list of what is left to implement is **`TO_BE_IMPLEMENTED.md`**.
+>
+> **The `[ ]` boxes below are WRONG — every one of them shipped in timeline v2
+> and nobody ticked them.** Verified by code sweep 2026-07-21 across
+> `timeline.cpp` / `timelineedit.cpp` / `timelineviews.cpp`: key inspector,
+> drag+snap, tangent handles, CSV round-trip, lint, rubber-band multi-select,
+> mute/lock per lane, frames@fps, normalize, summary row, preview-range band,
+> easing presets and QSettings persistence are all present. Treat the list as a
+> record of what v2 set out to do, not as work remaining.
+>
+> The only genuinely open animation items — NiPSys controllers excluded from the
+> Setup Controllers spell, rename-sync being lint's guided fix rather than an
+> automatic hook, and XYZ↔quaternion conversion — are in the backlog.
+
 ## Status legend
-[x] done in v1 (2026-07-03) · [ ] to build
+[x] done in v1 (2026-07-03) · [ ] planned for v2 — **all shipped, see banner**
 
 ## v1 (shipped)
 - [x] Timeline dock: lanes per controller/interpolator, keyframe diamonds, playhead sync, click-to-select both ways

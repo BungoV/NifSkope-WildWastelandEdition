@@ -1,5 +1,1417 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27g — Backlog re-verified against the code (docs only, no code change)
+
+`TO_BE_IMPLEMENTED.md` was last checked on 07-21 and had drifted over five
+shipping days. Verified claim by claim; **five stale, six missing entirely.**
+
+**Stale — filed as open, actually done:**
+- **Pose mirror / paste-flipped poses** — `PoseMirrorButton` +
+  `ogl->poseMirrorBone()` (`posetools.cpp:192`, `:491`). 07-22i even said
+  "Pose-bone mirror already existed"; the backlog was never updated.
+- **String-index derived display** — `nifmodel.cpp:1385` already returns
+  `"<string> [<idx>]"` with distinct invalid-index messages. **Stock NifSkope.**
+- **nif.xml tooltips on field labels** — `nifmodel.cpp:1512`, `ToolTipRole` on
+  `NameCol`, from `NifItem::text()` (= the nif.xml description,
+  `src/data/nifitem.h:111`). **Stock NifSkope.** So two of the four "ready to
+  build" Block Details editors were never work at all.
+- **"Proportional editing — explicitly declined"** — reversed by the user and
+  shipped in 07-22i with all 8 Blender falloff curves. The decline sat in the
+  do-not-implement list for five days after the feature existed.
+- **"Eight `WW_*_TEST` harnesses"** — there are **22**. The CLI-port item was
+  sized against a number frozen at 07-21.
+
+**Missing entirely:**
+- **`src/collisiontools.cpp` is a committed orphan** — not in `NifSkope.pro`;
+  the live file is `src/spells/collisiontools.cpp`. Editing the orphan compiles
+  clean and does nothing. Found by diffing the `.pro`'s exact paths against
+  `find src -name '*.cpp'`; matching on basename hides it, and my first attempt
+  did exactly that and reported "no orphans".
+- **Separate ▸ By Material / By Loose Parts** — disabled at `glview.cpp:7241`,
+  *"not implemented yet (Blender parity later)"*, never filed.
+- Four **Pose Manager refinements** deferred in 07-22i and never carried across:
+  pose-mode bone proportional, topology-based mirror pairing, the weight overlay
+  drawing at bind positions, and non-destructive posing being a mode-boundary
+  guarantee rather than a display overlay.
+- §12 **Rendering** said "future/disabled" while spec/gloss, the `.pbrm` reader,
+  resolution, the shader and the mode all shipped over 07-27a..e.
+- The **refraction fixture guards nothing** (`RENDERER_MATCH_PLAN §0`) — worth
+  saying plainly in the backlog, since §1/§2 were built anyway despite the plan
+  saying not to until it was resolved.
+- **Repo state**: ~54 files uncommitted across 07-25..07-27.
+
+**Corrections:** Skeleton Manager entry is `nifskope_ui.cpp:6137`, not ~L4747.
+The collision cap is 4096 *sections* of ≤255 verts/tris each — the old
+"255-section cap lifted" conflated the two. "Nothing built" still sat in the Pose
+Manager section four days after the dock landed.
+
+**Also corrected an error of my own mid-sweep:** I first reported the NifItem
+slab pool as unbuilt, having grepped `nifmodel.cpp` and `nifitem.h` but not
+`nifitem.cpp`. It shipped. Filed as lesson 5 in the file's own how-to-use list,
+along with the basename-vs-path trap.
+
+The "Awaiting GUI verification" section was rewritten: its opening claim ("the
+agent does not run GUI sessions") was superseded on 07-22 (agent verifies via
+harnesses) and 07-26 (no interactive launches while the user is working). A new
+**verification record** at the end of the file distinguishes what this sweep
+actually re-tested from what it carried forward on the 07-21 sweep's word.
+
+## 2026-07-27f — PBR parked: modes and toggle greyed out
+
+At the user's call, until the empty-frame bug in 07-27e is fixed:
+
+- **PBR** and **Legacy and PBR** are greyed out, labelled "(unfinished)", with a
+  tooltip saying why. **Legacy** stays enabled and is the active mode.
+- **Auto-replace** is greyed out and unchecked too — substituting a material that
+  nothing can draw would only hide the legacy one.
+- **Gated at the accessors, not just in the UI:** `pbrmFeatureEnabled` in
+  `glproperty.cpp` makes `pbrmMode()` return Legacy and `pbrmAutoReplaceEnabled()`
+  return false regardless of what is stored. A stale QSettings value, a settings
+  restore or a future caller therefore cannot switch it on behind the greyed-out
+  menu. **Flip that one constant and re-enable the two menu entries to resume.**
+
+Verified: with `Settings/Render/PBRM Mode` still set to PBR in the registry, the
+render is a full frame (96.8 KB) rather than the 5.2 KB empty one — the gate holds
+against stored state. Regression set unchanged (3 identical, 4 expected spec/gloss
+diffs).
+
+Everything from 07-27b–e stays in the tree — reader, resolution, `pbrm-resolve`,
+the shader and the program routing are all still there and still compile. Only the
+user-facing switches are off.
+
+## 2026-07-27e — Three lighting modes; PBR mode draws nothing (OPEN)
+
+Shading menu, per the user's spec. Exactly one of three, plus an independent
+checkbox below:
+
+| mode | behaviour |
+|---|---|
+| **Legacy** | spec/gloss only; a resolved PBRM is ignored |
+| **PBR** | PBR only — *every* shape through `pbrm_default`; shapes with no PBRM are driven from their legacy material (rough = 1 − smoothness, metal 0, F0 0.04) so the scene sits under one BRDF |
+| **Legacy and PBR** | per shape: PBR where a PBRM resolved, spec/gloss elsewhere; PBR always overrides legacy when available |
+
+Persisted as `Settings/Render/PBRM Mode` (enum `PbrmLightingMode`, default Legacy).
+**Auto-replace** stays separate and independent — it governs `.bgsm`/`.bgem` →
+same-name `.pbrm` substitution only, and is not part of the mode group.
+
+**Mode plumbing verified** on `ACDuctConnector01.nif` (no PBRM available):
+Legacy `f2ee399cb5`, **Legacy-and-PBR byte-identical to Legacy** (correctly falls
+through when nothing resolved), PBR distinct. Renders are deterministic — mode 0
+twice gives the same hash — so those comparisons mean what they say.
+
+### OPEN: PBR mode renders an empty frame
+
+In PBR mode the shape does not draw at all (5.2 KB frame vs ~49 KB legacy). The
+failing branch is specifically the **legacy-derived fallback** — PBR mode applied
+to a shape with no PBRM. The PBRM branch proper is untested, because nothing
+resolves through this profile's configured resources.
+
+Eliminated, so do not re-check these:
+
+- **Shader compiles and links.** `.prog`s link at startup; no compile error, no
+  program info-log output.
+- **No GL errors logged**, and the frame is produced (harness writes a PNG).
+- **Per-draw GL state** — blend/`alphaFlags`/`alphaThreshold` via
+  `AlphaProperty::glProperty`, depth test/func/mask, polygon mode — replicated
+  from the tail of `setupProgramCE1`. Added; did not fix it.
+- **Cubemap completeness** — the fallback was `cube_sk` (Skyrim's
+  `bleakfallscube_e.dds`), absent from FO4 archives, leaving an *incomplete*
+  cubemap bound to a sampler the shader references, which can invalidate a draw.
+  Now picks `cube_fo4` by BS version; warning gone, still empty. Worth keeping
+  regardless — that fallback was simply wrong for FO4.
+- **Uniform block binding** — `globalUniforms`/`skinningUniforms` are bound
+  generically at link time for any program declaring them, so `pbrm_default` gets
+  them automatically.
+
+### What three RenderDoc captures established (2026-07-27)
+
+Captures at `%TEMP%\RenderDoc\NifSkope_2026.07.26_23.24.45_frame{504,527,691}.rdc`,
+analysed with `rdc-cli`. `frame504` is Legacy (bound samplers `BaseMap CubeMap
+EnvironmentMap GlowMap GreyscaleMap NormalMap RefractionSrc SpecularMap` =
+`fo4_default.frag`); `frame527` is PBR (`BaseMap CubeMap EmissiveMap NormalMap
+RmaosMap` = `pbrm_default.frag`); `frame691` has no indexed draws.
+
+**Confirmed working:** the mode routing, program selection and texture binding.
+`pbrm_default` is bound on 7 indexed draws, and `glDrawElements` with 272
+triangles is genuinely issued at EID 87. Blend is disabled with write mask 15, so
+blending is not eating it. Effect-shader shapes (the rings, the lightning preview)
+still render correctly in PBR mode — only `BSLightingShaderProperty` shapes vanish.
+In the PBR render target the **grid is continuous** where the geometry should be,
+so nothing is being occluded: fragments never land.
+
+**Two rdc-cli avenues are dead ends on this capture, don't retry them:**
+`debug vertex` reports every input as `-107374176.0` (`0xCCCCCCCC`) and output
+`0.0` — but it reports *exactly the same* for the **working legacy draw**, so it
+is a replay artifact, not evidence (this cost a wrong conclusion until the control
+was run). `pixel` history refuses with "MSAA pixel history not supported".
+
+**Eliminated by experiment:** per-draw blend/depth state; the cubemap fallback
+(was Skyrim's `cube_sk`, absent from FO4 — genuinely wrong, now version-picked,
+did not fix this); and unconditional base-alpha-as-opacity, which *was* a real bug
+— the spec's `overrideOpacity` was being ignored, so a legacy diffuse map with
+zero alpha would discard every fragment. Fixed via a derived `OpacityTexture`
+feature bit. Still empty afterwards, so that was not the cause either.
+
+**Next step is the qrenderdoc GUI**, which can do what the CLI cannot: select
+EID 87, **Mesh Viewer → VS Out** to see whether clip-space positions are sane
+(that single view splits "vertex stage broken" from "fragment stage broken"), and
+if positions are fine, right-click a covered pixel → **Debug Pixel** to watch the
+discard. Everything cheaper than that has been tried.
+
+**Default is Legacy and the regression set is unchanged with it**, so this is
+inert for normal use — but PBR mode is not usable yet and should not be described
+as working.
+
+## 2026-07-27d — PBR renders: `pbrm_default` program + the mode is live
+
+`res/shaders/pbrm_default.frag` + `.prog`, `Renderer::setupProgramPBRM()`, and the
+**PBR: Roughness / Metallic** action is no longer a disabled placeholder.
+
+BRDF is the editor's, same port as the FO4 path but with the metal term FO4
+cannot have: `f0 = mix( dielectric, base, metal )`, `diff = (1-F)(1-metal)base/PI`.
+Feature bits go to the shader verbatim, so a clear bit means "use the constant" —
+the shader never guesses whether a channel is real, it just honours the override
+semantics the reader already resolved. Normal Z is always reconstructed, never
+read from B, because B is height when the material says so.
+
+- **The vertex stage is `fo4_default.vert` as-is.** It already supplies every
+  varying this pass needs; a private copy would only drift out of step.
+- **`.prog` has no conditions.** Whether a shape uses this depends on a runtime
+  material resolution and a UI mode, neither of which a `.prog` check can express
+  (they evaluate NIF data). `setupProgram()` selects it by name **before the hint
+  path**, so flipping the mode cannot leave a shape on a cached program; an empty
+  condition list keeps it out of the automatic scan.
+- **Textures bound by explicit path**, not `uniSampler` — that resolves slots out
+  of the shader property's texture list, and a PBRM's paths live in the material
+  document. A slot that is off falls back to a neutral, not magenta: off is a
+  legitimate authoring state, not an error.
+- AO is applied to ambient and env, not to the direct lobe — occlusion describes
+  what the surface cannot see of the environment, and putting it on direct light
+  double-darkens contact shadows. Env reflection is `f0`-scaled split-sum
+  **without** the BRDF LUT, which over-darkens grazing angles on rough metals:
+  an honest approximation, not the editor's split-sum.
+- Tonemap is the same Hable curve the FO4 path uses, so a PBRM material and a
+  BGSM material in one scene are graded alike instead of one looking washed out.
+
+**Also fixed: log spam.** Same-name discovery probed with `getResourceFile`,
+which warns "not found in archives" on a miss — and a miss is the *normal* case,
+so every BGSM in every scene emitted a warning on every load. Now probed quietly
+with `findResourceFile` first. Verified 0 warnings where there had been one per
+material.
+
+**Verified:**
+- The shader **compiles and links** — `.prog` files link at startup, so a GLSL
+  error surfaces whether or not a shape uses the program. Clean.
+- Resolution runs live in the renderer: before the quiet-probe fix the log showed
+  it deriving `basehumanfemaleskinhead.pbrm` from the head's `.bgsm` and probing
+  the VFS, which is same-name discovery working end to end.
+- **The regression set is unchanged with the mode off** — identical pixel counts
+  and max deltas to the 07-27a comparison (5,926 / 33,730 / 44,424 / 33,730), so
+  the PBR wiring is inert until switched on.
+
+**Not verified: a shape actually rendering as PBR.** Nothing reachable through
+this profile's configured resources has a `.pbrm` — `pbrm-resolve` derives the
+right candidate for every material and the lookup runs, but the PBR mod folder is
+not a configured resource path, and neither is the unpacked corpus (NIFs there are
+opened by path while textures come from the real install's archives). Add the
+folder holding the `.pbrm` files under Settings ▸ Resources and it will adopt;
+until something resolves, the mode has nothing to draw differently.
+
+## 2026-07-27c — `.pbrm` material resolution + auto-replace toggle
+
+`BSShaderLightingProperty::resolvePbrm()` (called at the end of `setMaterial`)
+resolves a PBRM two ways, priority order mattering:
+
+1. **Direct link** — the material name ends in `.pbrm`. **Unconditional**: the
+   asset asked for it explicitly.
+2. **Same-name discovery** — a `.bgsm`/`.bgem` with a `foo.pbrm` beside it, only
+   while auto-replace is on.
+
+Reads through `nif->getResourceFile( data, path, "materials", "" )` — the same VFS
+call `Material::openFile` uses — so a PBRM inside a BA2 resolves exactly like a
+BGSM does. A discovery miss is the normal case and is silent; a malformed PBRM
+leaves the BGSM in charge; an unsupported-but-valid one sets `pbrmUnsupported` and
+**fails closed** rather than quietly rendering the BGSM as if nothing were wrong.
+Lives on the base class so `.bgem` effect materials resolve the same way.
+
+**Toggle:** Shading menu ▸ *Auto-replace BGSM/BGEM with .pbrm*, persisted as
+`Settings/Render/PBRM Auto Replace` (default on) and cached into a file-scope
+accessor (`setPbrmAutoReplace`/`pbrmAutoReplaceEnabled`) so resolution never
+touches QSettings per property. It is **not** in the workflow radio group — it is
+independent, and it governs discovery only. Toggling rebuilds the scene, since
+materials resolve when a property is built.
+
+Free functions rather than a static member on purpose: the member would have to
+sit in a public section of `BSShaderLightingProperty`, and inserting an access
+specifier mid-class silently changes the access of every member after it — the
+same trap that bit `glview.h` three times in the 07-22i batch.
+
+**Verified** with a second new CLI command, `nifskope-cli pbrm-resolve <file.nif>`,
+which reports the route and outcome per shader property. On the PBR mod's
+`x01_torso.nif`: 6 shader properties, all six deriving the correct same-name
+candidate (`x01_torso.bgsm` → `materials\actors\powerarmor\x01\x01_torso.pbrm`),
+lookups running through the VFS. They report *not found* because that mod folder
+is not a configured resource path in this profile — the derivation itself is
+provably right: block 14's derived
+`materials\actors\powerarmor\x01\PBRSpheres.pbrm` matches
+`mods\PBR\Materials\actors\powerarmor\x01\PBRSpheres.pbrm` exactly. Add the mod
+folder to the configured resources and it adopts.
+
+Note `pbrm-resolve` restates the resolution rule rather than calling
+`BSShaderLightingProperty`, which lives in the GL layer that `-no-gui` never
+builds. The rule is four lines; keep the two copies in step.
+
+**Still not rendering.** Resolution populates `pbrm`/`pbrmValid` on the property
+and nothing consumes them yet. Remaining: `pbrm_default.{vert,frag,prog}` with the
+editor's PBR core (the GGX/Smith half is already in `fo4_default.frag`), renderer
+texture binding for BaseColor/Normal/RMAOS/Emissive, and connecting the disabled
+**PBR: Roughness / Metallic** action.
+
+## 2026-07-27b — `.pbrm` reader (PBR, step 1 of 2)
+
+`src/io/pbrmfile.{h,cpp}` reads PBRM v5, scoped to the spec's own **"Minimal
+Standard runtime slice"** — shader `Standard` plus the four Primary UV sockets.
+Spec: `PBRMaterialEditorQt/docs/PBRM-v5.md`.
+
+- Envelope: `PBRM` magic, version 5 (4 accepted), uint32 payload size that must
+  consume the rest of the file **exactly** — truncation and trailing bytes are
+  both hard errors — 64 MiB cap.
+- **Fails closed**, as the spec demands: an unknown shader family or a
+  `requirements` entry this build does not provide leaves the document *valid*
+  but unrenderable (`ok` false, `unsupported` true). It is never coerced to
+  `Standard` and never partially rendered. This build provides
+  `standard.primaryUv` v1.
+- Override semantics: a missing or unusable texture forces its positive
+  `override*` on so the constant applies — **except `overridePorosity`**, the
+  documented exemption, because an absent porosity source has a meaningful
+  derived value. RMAOS alpha is F0 only while `alphaCarries` is `Dielectric F0`.
+- Path contract: `/`→`\`, drop leading `.\`, collapse separators, lowercase,
+  leading `textures\` optional; drive-qualified, UNC, root-qualified and
+  parent-traversal paths are rejected — which disables that slot with a
+  diagnostic rather than failing the whole envelope. Rejection happens *before*
+  collapsing so a bad shape cannot normalise into an accepted one. The authored
+  string is never rewritten.
+- Feature mask derived, not serialised, using the spec's bit assignments.
+
+**Verified against a real material** via a new CLI command, `nifskope-cli pbrm
+<file.pbrm>` (exit 0 ok / 1 parse error / 3 unsupported, so scripts can tell them
+apart). On `PBRSpheres.pbrm`: envelope v5, `Standard`, features `0x7b`
+(BaseColor+Normal+Rmaos+Roughness+Metallic+AO), paths normalising as specified,
+emissive slot correctly disabled, and `overrideF0 = 1` with alpha carrying
+Dielectric F0 — matching what the editor's own UI shows for that material.
+
+**Not done yet — step 2:** nothing renders from this. Still needed are material
+resolution from the NIF (`nifextfiles.cpp`), a `pbrm_default.{vert,frag,prog}`
+carrying the editor's PBR core, and enabling the reserved
+**PBR: Roughness / Metallic** entry in the shading menu (`nifskope_ui.cpp` ~5648,
+currently a disabled placeholder with no connection).
+
+Note: `NifSkope.pro` needed a `qmake6` re-run for the new source to enter the
+build.
+
+## 2026-07-27a — FO4 spec/gloss lighting on the material editor's BRDF
+
+First half of the renderer match (`RENDERER_MATCH_PLAN.md` §1). The FO4 lighting
+shader now uses the PBR Material Editor's specular BRDF, ported rather than
+approximated — `D_GGX`/`G1` in `res/shaders/fo4_default.frag` are the editor's
+own functions:
+
+    spec = D_GGX( NoH, a ) * G1( NoL, k ) * G1( NoV, k ) * F / (4 NoL NoV)
+    a = rough^2      k = (rough+1)^2 / 8      rough = 1 - smoothness
+
+What changed, and why each was wrong:
+
+- **F0 was hardcoded to 0.2** — about 5x too reflective for a dielectric. Now
+  0.04, the editor's dielectric default. FO4 encodes **no metallicity**, so `_s.R`
+  stays what it is authored as, a specular *mask*, and never becomes a metalness
+  channel. Applied to the ambient Fresnel rim term too, which had the same 0.2.
+- **Normalized-Phong Torrance-Sparrow** (`exp2( smoothness * 10 + 1 )`) replaced
+  by GGX + Smith. `TorranceSparrow`/`VisibDiv` are left in the file, unused, for
+  reference.
+- **Specular was gated on `hasSpecularMap`**, so a material with only the scalar
+  Smoothness / Specular Strength authored rendered completely matte. Ungated.
+- **No energy conservation**: the diffuse term now carries `(1 - F)`, so light
+  taken by the specular lobe is not also counted as diffuse. The lobe shape stays
+  Oren-Nayar rather than the editor's Lambert — it is roughness-aware and the
+  rest of the FO4 path is tuned against it. Swapping it is a separate decision.
+
+Channel semantics were already correct and are unchanged: G is gloss, R is the
+specular mask, and a flat white `_s.G` falls back to the material scalar.
+`fresnelSchlick` still honours the authored **Fresnel Power** rather than
+hardwiring `^5` — that field exists in FO4 and the editor has no equivalent.
+Not ported: the editor's `multiScatter` energy compensation, which needs a BRDF
+LUT that NifSkope has no equivalent for.
+
+**Verified by the render-regression set, which is the point of having built it:**
+`particles_mist`, `particles_glow` and `glass_shader` are **byte-identical** — the
+particle simulation and effect-shader paths are untouched — while only
+lighting-shader surfaces moved (`lit_setdressing` 44k px at max channel delta 22,
+`lit_head` 33k px, `glass_visor` 5.9k px). That is exactly the intended blast
+radius.
+
+**Two harness defects found while doing it, both fixed:**
+
+- **The guard was silently not guarding.** Nothing pinned the window size, so the
+  framebuffer followed whatever geometry the session restored and every
+  comparison came back "size mismatch" rather than passing or failing. Now pinned
+  to 1280x800, overridable with `WW_RENDER_SIZE=WxH`.
+- **Shader-only edits do not deploy.** `copyDirs` in `NifSkope_functions.pri`
+  hangs off `QMAKE_POST_LINK`, so `res/shaders` is copied to `release/shaders`
+  only when the exe **relinks** — editing just a `.frag` changes nothing that
+  make considers a dependency, and the old shader keeps running. Copy manually or
+  force a relink.
+
+To isolate the change honestly, the baselines were captured with
+`git show HEAD:res/shaders/fo4_default.frag` installed, then the new shader
+dropped in and compared — same binary on both sides, so the diff is the shader
+and nothing else.
+
+## 2026-07-26d — Procedural lightning reads the controller it was given
+
+`BSProceduralLightningController` preview (added 07-06) ignored three authored
+fields and misread a fourth. Measured against `X01_Torso_Tesla_VFX.nif` block 36
+(Subdivisions 7, Num Branches 2, Num Branches Variation 1, Length 32, Length
+Variation 0, Width 4, Child Width Mult 0.5, Arc Offset 12.5).
+
+- ~~**Subdivisions is a recursion depth, not a segment count.**~~ **WRONG —
+  tried, disproven, reverted.** Reading it as a depth (2^7 = 128 segments) makes
+  each quad 0.2 units long on a bolt that is 4 units wide, i.e. 20x wider than
+  long; consecutive quads then fan out as separate blades rather than a beam.
+  Rendering the same file with Width forced to 20 made it unmistakable — a spray
+  of loose rectangles. The original `Subdivisions + 1` rounded up to a power of
+  two (8 segments here) is right. Kept, with the reasoning recorded so it does
+  not get "fixed" again.
+- **Num Branches Variation** was unread; the branch count was pinned to Num
+  Branches. Now `Num Branches ± Variation`, re-rolled each mutation.
+- ~~**Length / Length Variation** drive branch length.~~ **WRONG — tried,
+  disproven, reverted.** Length is 32 on bolts that span 25.3 units, so branches
+  came out *longer than the bolt itself* and shot off in directions unrelated to
+  the end node (user: "why does the lightning extend into directions other than
+  the end node?"). Branch length is back to a fraction of the main bolt
+  (`0.2..0.45 ×`). Length most likely sets the main bolt length for controllers
+  with no `_Start`/`_End` pair, where there is no node distance to span;
+  `Child Width Mult 0.5` agrees that children are subordinate. Both fields are
+  still read, just not used for this.
+
+Verified correct, do not re-investigate: Generation/Mutation are
+`NiBlendBoolInterpolator` stubs (blocks 37/38), so reading the real bool keys
+from the sequences' Controlled Blocks — not the controller's own interpolator
+links — is right; `_Start`/`_End` node resolution; BGEM tint and UV scroll.
+
+Follow-up in the same batch closed the rest:
+
+- **Interpolators 3–9 are now read** (`NiFloatInterpolator` → `NiFloatData`) and
+  evaluated per frame into `eff*` values that feed generation; a change in a
+  shape parameter forces a rebuild even when the bolt is not mutating. Width
+  animates without a rebuild. `NiBlendFloatInterpolator` stubs are **skipped on
+  purpose** — like Generation/Mutation their real keys live in the sequences, and
+  with no asset here that uses one, guessing would animate the bolt wrongly
+  rather than leave it static.
+- **Interpolator ID partitioning bug.** Any Controlled Block whose ID was not
+  `Mutation` fell into `genKeys`, so a sequence-driven *parameter* curve (Width,
+  Arc Offset, …) would have been read as the Generation flag and switched the
+  whole bolt on and off. Now only an empty ID or `Generation` counts as
+  Generation — empty is how the shieldtesla sequences author it, which is why
+  this file worked by accident.
+- **Amplitude decay 0.55 → 0.5**, the classic midpoint-displacement halving. At
+  the old 3 effective levels the difference barely showed; at the correct 7 it
+  compounds into a visibly too-noisy bolt.
+
+**Deliberately unchanged: `Animate Arc Offset` still gates re-mutation.** On
+reflection that is a defensible reading of the field — re-randomising the arc
+offsets over time *is* animating them — and the alternative (oscillating the
+offset continuously) is invented behaviour with nothing to verify it against.
+The mutation cadence stays a hardcoded 1/24 s for the same reason.
+
+**Rigs without a `_Start`/`_End` pair now draw.** `updateTime` bailed when it
+could not find a `*_Start` ancestor, so any bolt not following the
+shieldtesla/edison_pa naming convention rendered **nothing at all**. When there is
+no pair, the bolt is emitted from the target along its local **+Y** for `Length`.
++Y is the authored axis on the rigs that *do* have a pair (shieldtesla's End sits
+at local `(0, +25, 0)` from its Start), and this is the reading of `Length` that
+makes sense — it is redundant when two nodes already define the span, which is
+why using it as a branch length was wrong.
+
+**Sequence-driven parameter curves.** Interpolators 3–9 only resolved as direct
+`NiFloatInterpolator`s. When the controller holds `NiBlendFloatInterpolator`
+stubs — as Generation/Mutation do — the real keys live in the sequences'
+Controlled Blocks, so each parameter now has its own bucket keyed by Interpolator
+ID (matched case- and space-insensitively against the controller's field names;
+unrecognised IDs are dropped, not guessed). A direct curve still wins.
+
+**Recursive branching.** Branches now fork: `drawPreview` builds a world polyline
+per bolt, parents before children, and a child roots on its parent's *jittered*
+path taking its frame from the parent's **tangent** there — so a branch-of-a-branch
+nests off the strand it grew from instead of being laid out in the main bolt's
+frame. `Child Width Mult` compounds per level, which is presumably why the field
+is a multiplier; about half of level-1 branches fork and depth stops at 2.
+
+**Correction to the determinism work above:** seeding from an incrementing
+mutation counter was wrong — it made the bolt depend on how many times
+`regenerate()` happened to run before the frame was observed, which varies with
+frame timing, and two runs of the same frame disagreed. Seeding from the
+**quantised time** (`time × 24`) fixes it: verified three runs of the same frame
+byte-identical, and t=2.0 still differs from t=1.0 so it animates.
+
+**Tiling aspect comes from the texture.** `texAspect` was hardcoded to 8.0; it
+now reads the bound texture's dimensions via the existing public
+`TexCache::getTextureInfo()` and uses `height / width`, falling back to 8.0.
+**Unconfirmed on this asset:** the render is byte-identical to before, which is
+consistent with the beam sheet genuinely being 256x2048 (exactly 8:1, as the old
+comment claimed) but is equally consistent with the lookup returning null and
+falling back. Distinguishing the two needs one probe of what
+`getTextureInfo( shaderProp->fileName( 0 ) )` actually returns — the name is a
+material-resolved path, so it may not be the cache key. Do that before trusting
+this on a non-8:1 texture.
+
+**Bolt generation is deterministic.** Every `random()` call in generation is now
+`tlBoltRandom()` (xorshift32), re-seeded per mutation from
+`(block number, mutation index)`. Previously the global RNG made each rebuild
+unique, so scrubbing the timeline backwards drew a *different* bolt and the
+render-regression harness could not pixel-compare lightning at all. Verified: the
+same file/time/sequence rendered twice is now byte-identical (matching MD5) —
+impossible before. Zero-state guard included, since xorshift cannot escape 0.
+
+**Ribbon UVs: arc-length parameterised, whole-tile wrap.** The subdivision fix
+exposed a latent bug — V was derived from `t`, the parameter along the straight
+Start→End *axis*, not from distance along the ribbon. That only survived because
+the old 8-segment bolt was nearly straight, so `t` ≈ arc length. At 128 segments
+the jagged path is far longer than the axis, so one span of texture smeared over
+the whole zigzag (reported as "giga stretched"), and because each segment took V
+straight from `t`, lateral jumps stretched V unevenly so the tiles never lined up
+("not one UV strip, not seamless").
+
+V now comes from accumulated arc length along the world polyline, and the tile
+count is `round( totalLength / (width × aspect) )` — a whole number, so the strip
+wraps seamlessly instead of ending mid-texture. The tip fade moved onto the same
+normalised arc position, so neither tiling nor fade depends on how jagged the
+bolt is. `bLen` survives only as the degenerate-length fallback.
+
+**Branches jagged in the wrong plane.** `boltPoint` displaced every bolt along
+the MAIN bolt's `v`/`w` axes, so a branch heading along `v` had its lateral
+offset pushed down its own direction: it folded back through itself and read as
+disconnected spikes rather than a continuous bolt (user: "the geometry of bolts
+does not actually connect to each other"). Each bolt now gets an orthonormal
+frame perpendicular to its own direction (`frameFor`), which is what the
+midpoint displacement assumed all along — the main bolt was correct only because
+its frame *is* `v`/`w`. Invisible at 8 segments and short branches; obvious once
+subdivision and authored Length made branches long.
+
+**Arc Offset was compounding, and the ribbon was flipping.** Measured: block 82
+(`LightningBolt_01_End`) is a child of 81, so the bolt spans its local offset —
+`|(2.43, 25.0, -2.90)| ≈ 25.3` units — while Arc Offset 12.5 was fed in as the
+FIRST level's amplitude and then accumulated down the recursion
+(12.5 + 6.25 + 3.125 + … ≈ 2 × Arc Offset). Lateral wander could therefore equal
+the entire bolt length, so the path doubled back on itself continuously. Two
+symptoms from one cause: it cannot read as a bolt spanning two points, and
+`cross( camZ, d )` **flips sign** at every reversal, twisting the strip into
+bowties that pinch to zero width — which is what "the bolts do not connect to
+each other" looked like.
+
+Arc Offset is now treated as the maximum excursion from the straight line: the
+starting amplitude is divided by the geometric series so the accumulated
+displacement sums to Arc Offset. And the ribbon carries its previous side
+forward (`dot( perp, prev ) < 0 → negate`) so the winding stays consistent
+through a reversal.
+
+Exact engine parity remains unverified: everything here is derived from the NIF
+field semantics and standard midpoint-displacement lightning, not from the game's
+algorithm. If it still reads wrong beside the game, the decay constant, the
+mutation cadence and `texAspect` (the assumed 8:1 beam sheet) are the knobs.
+
+## 2026-07-26c — Play implies animation enabled (reported as "all animations broken")
+
+User report: no animation plays, in any file. **Not a code regression** — the
+cause was a persisted setting, `GLView/Enable Animations` = `false`, i.e. the
+**View ▸ Animations** toggle (`aAnimate`). `restoreUi()` applies it after the
+`toggled` connect is established in `initToolBars()`, so it really does reach
+`GLView::updateAnimationState`, clearing `AnimEnabled` and setting
+`scene->animate = false`. Both effects together match the report exactly:
+`advanceGears()` stops advancing time *and* controllers stop being evaluated, so
+the scene looks frozen rather than merely unplaying.
+
+What made it undiagnosable rather than merely wrong: **every play path was a
+silent no-op** while the toggle was off. The Timeline dock's transport and Space
+in the viewport were both wrapped in `if ( ui->aAnimate->isChecked() )` and did
+nothing, with no message; triggering `aAnimPlay` from the menu set `AnimPlay` on
+an `animState` that still lacked `AnimEnabled`. One stray click in a menu
+disabled playback permanently across sessions, with nothing to find.
+
+Fix: **Play now implies animation enabled.** A lambda on `aAnimPlay::triggered`
+checks `aAnimate` first, connected *before* the `updateAnimationState` slot so
+`AnimEnabled` is set by the time `AnimPlay` arrives. The two `aAnimate` gates at
+the call sites are gone, so the dock button and Space can no longer silently do
+nothing.
+
+Diagnosed entirely from the CLI, the registry and the source — the user was
+working in Blender, so no GUI launches (see the note in 07-26b about a running
+instance swallowing launches over IPC).
+
+**Second cause, same report: the default sequence is the dead one.** FO4 VFX
+files ship two sequences — a one-shot `autoPlay` and the real `autoLoop`.
+In `X01_Torso_Tesla_VFX.nif`: `autoPlay` is Start 0.0 / **Stop 0.0333333** /
+CycleType 2 (CLAMP), `autoLoop` is Start 0.0 / Stop 4.93333 / CycleType 0 (LOOP).
+With `autoPlay` selected, Play advances one tick, exceeds the stop time, resets
+and clears `AnimPlay` — one frame, then stop, which looks exactly like nothing
+happening. `Scene` picks `animGroups.first()` (glscene.cpp:277), i.e. **block
+order**, so these files open on the one-shot every time.
+
+Confirmed sound while chasing this, so don't re-investigate: the
+NiControllerManager path is fine — `Node::findChild` is recursive (nesting is
+not a problem), the controlled blocks carry valid interpolator/controller refs
+into the `NiMultiTargetTransformController`, and `Scene::setSequence` propagates
+to it.
+
+**Still open (offered, not built):** default to the longest or a CYCLE_LOOP
+sequence instead of `animGroups.first()`, and say something in the status bar
+when a sequence completes instantly instead of silently popping the play button.
+
+## 2026-07-26a — Skin: the PBR Material Editor's palette
+
+First step toward merging the **PBR Material Editor** (`PBRMaterialEditorQt`) into
+NifSkope — planned for next month, renderer included. The two tools now share one
+visual identity so the merge is a code move, not a restyle. **Skin only this
+round: palette, surfaces, control styling. No layout change, no widget
+restructuring** (the material editor's sidebar-navigator + framed-section
+structure is deliberately deferred until the merge, when all the pages are known).
+
+Two edits carry it:
+
+- **`defaultsDark[6]`** (`nifskope_ui.cpp`) is now the material editor's palette:
+  base `#303236`, alt `#2d3034`, text `#e6e8eb`, highlight `#3d6f9f`, highlight
+  text white, bright text `#f0a54a`. Was 60/60/60 grey with a `#cccccc`
+  highlight and red bright-text.
+- **`res/style.qss`** rewritten in that language — panel/bar/card surfaces, view
+  and header plates, inputs with focus borders, flat buttons, dock titles,
+  splitters, scrollbars, tabs, group boxes, menus. The toolbar toggles' radial
+  gradients are gone in favour of the editor's flat accent fill.
+
+**`${...}` skin variables, not literals.** `loadTheme()` already substituted
+`${theme}`/`${rgb}` into the sheet; it now also substitutes a 21-entry
+`skinVars[]` table with a dark and a light column. One stylesheet serves both
+themes — hardcoding the dark hexes would have left the light theme as dark
+widgets on a light window. Verified both: light theme renders light surfaces with
+dark text throughout.
+
+**Palette migration (the thing that would otherwise have made this invisible).**
+The six colour keys under `Settings/Theme/` are *persisted* — `setTheme()` writes
+them and the General pane round-trips them — so on any install that has run
+before, the stored values **outrank** `defaultsDark[]` and a new default palette
+never appears. `loadTheme()` now refreshes the keys once per
+`themePaletteVersion` (currently 2). **Bump it whenever the defaults change.**
+
+Deliberately not styled, each for a reason recorded in the sheet's header
+comment: fonts (a `font-family` in QSS outranks `setFont()` and would silently
+kill the Settings ▸ General view-font picker), `QWidget` as a blanket selector
+(it fills custom-painted widgets — GL container, timeline views), and `::item`
+colours plus checkbox `::indicator` images (the palette already carries
+Highlight/HighlightedText, and the item delegates paint their own foregrounds —
+link blue, diff grey, pinned star — so leaving both alone means nothing fights
+over them; Fusion draws a palette-correct tick without needing a check image).
+
+Verified by screen capture of the real window (dark and light), not
+`QWidget::grab()` — **`grab()` returns white for the GL viewport** because the
+native surface isn't in the widget backing store, which makes an offscreen shot
+look like a broken skin. `-platform offscreen` is worse: it crashes on GL context
+creation (exit 139), so the `WW_UI_SHOT` comment recommending it is stale for any
+run that has to show the viewport.
+
+### 07-26b — the rest of it (same batch, user: "you have not changed the color everywhere")
+
+The global sheet only reached widgets Qt styles. Two classes of surface were
+still on the old greys, and both are now on the skin:
+
+**The GL viewport** — the largest surface in the window. `cfg.background`
+defaulted to a neutral `QColor(46,46,46)` which read cold beside the
+blue-charcoal chrome; it now defaults to the skin's `viewport` colour
+(`#2b2d31`, a step darker than the chrome so the model still reads as content).
+Its stored key `Settings/Render/Colors/Background` is a *Render* setting with its
+own persistence, so the palette migration now removes that override too —
+otherwise the largest surface stays off-skin forever. **`themePaletteVersion` is
+3**: revision 2 had already been written by the 07-26a binary, so the viewport
+change needed its own revision to fire at all. Grid/Highlight/Wireframe colours
+are untouched (independent settings).
+
+**The per-widget stylesheets** — ~40 hardcoded hexes across seven files. The skin
+table now lives at the top of `nifskope_ui.cpp` and is exposed to C++ as
+**`wwSkinColor( "name" )`** (`src/wwskin.h`), returning the current theme's
+column, so a sheet built in code follows Dark/Light like `style.qss` does.
+Converted: the Block List breadcrumb/footer and diff banner, both DragSpinBoxes,
+the gizmo/operator/box-select redo panels, the collision operator panel and
+create-shape toggles and budget/preview labels, the UV operator panel, the Pose
+Manager folder label, the shading channel toggles, the toolbar separators
+(`#7a7a7a` → `border`; they were the brightest thing in the toolbar), and the
+mode / Panels / Workspaces selectors — those three were **three copies of the
+same greys** and are now one `wwBoxedButtonQss()`.
+
+Four new entries carry semantics the QSS didn't need: `accentText`, `accentBg`
+(the amber collision toggle), `danger` (invalid/error text), `viewport`.
+
+**The flags dialog got smaller, not re-parameterised.** `wwFlagListDialog`
+hardcoded an entire theme — dialog, inputs, buttons, header sections, tree — all
+of which the global sheet now provides, and all of which was overriding it. Only
+the 26px flag rows and their hover are dialog-specific, so that is all that is
+left. Same idea applies wherever else a dock re-states the default surfaces.
+
+Remaining literals are deliberate: `selection-color: #ffffff` (white on the
+selection fill, correct in both themes) and uvtools' `"#FF393939"` placeholder
+*texture* colour, which is image data, not chrome.
+
+**Note:** `src/collisiontools.cpp` is a stale duplicate of
+`src/spells/collisiontools.cpp` — identical colour lines, and **only the
+`spells/` copy is in `NifSkope.pro`**. The un-built copy was left alone.
+
+Verification note: `SetForegroundWindow` from a background process is refused by
+Windows' foreground lock, so a screen capture of the window can silently grab
+whatever app is actually in front — the first attempt captured Blender. Either
+`PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)` (misses alpha-blended GL passes)
+or the harnesses' own `ogl->grabFramebuffer()` (true GL frame) is the right tool;
+if using a screen grab, assert `GetForegroundWindow() == hwnd` before trusting
+the pixels.
+
+## 2026-07-22l — Load skeleton from a game archive (reuses the NIF Browser)
+
+The Pose Manager's **Load skeleton** button is now a menu with **From file…** and
+**From game archive…**. The archive path reuses the existing NIF Browser rather
+than adding a new archive UI: it opens a modal picker backed by the **same
+`bsaProxyModel`** (with a private filter proxy chained on top so filtering there
+doesn't disturb the dock's own view), and extracts the chosen NIF's bytes with
+the browser's own **`extractConfiguredNifBytes`** — the exact path the NIF
+Browser uses to open an archived NIF. No unpack-to-disk needed.
+
+Supporting changes:
+- **`nifMergeData(target, bytes, label, dedupe, result)`** — merges a NIF held in
+  memory. `nifMergeFile` and `nifMergeData` now both funnel through one internal
+  `mergeDonor()` splice, so the file and archive paths are identical apart from
+  where the donor bytes come from.
+- **`NifSkope::pickNifFromBrowser()`** — the modal picker (public), and
+  **`populateConfiguredNifBrowserNow()`** — the tree rebuild minus the
+  dock-hidden deferral gate, so the picker gets a populated tree even when the
+  NIF Browser dock is closed. (The public slot `populateConfiguredNifBrowser()`
+  keeps its no-arg signature — a default-arg `bool` broke its Qt `connect()`s.)
+
+Verified by `WW_MERGEARCH_TEST`: the "From game archive" menu action exists;
+`nifMergeData` merging the current NIF into itself matches `nifMergeFile` exactly
+(same blocksAdded / nodesReused / nodesAdded) and undoes cleanly; and
+`pickNifFromBrowser` opens and cancels without hanging. The archive extraction
+itself is the NIF Browser's already-proven path; end-to-end needs configured game
+archives (user-validated with real BSAs/BA2s).
+
+## 2026-07-22k — NifSkope Library folder in Settings (General → NifSkope Library)
+
+Generalised the pose-library folder into a reusable **NifSkope library** root, so
+future features can share one configurable location. **Settings → General →
+NifSkope Library** has a "Library folder" field with a **Browse…** button. The
+Pose Manager stores its poses in the library's **`Poses`** subfolder; future
+features get their own subfolders under the same root, so nothing collides.
+
+The settings field and the dock's Folder… button write the **same** key —
+`Settings/Library/Library Folder` (the humanized form of the `libraryFolder`
+line-edit object name, persisted by the General pane's generic read/write
+machinery). Leaving it empty falls back to `Documents/NifSkope` (poses →
+`Documents/NifSkope/Poses`). The dock's folder row now shows the library root's
+name, with the actual Poses path in its tooltip.
+
+Changing the folder in Settings and clicking Apply **live-updates** an open Pose
+Manager dock (it listens to the dialog's `saveSettings` signal and re-lists).
+
+Verified by `WW_POSESETTINGS_TEST` (settings tab + line edit + Browse exist; Apply
+persists to exactly `Settings/Library/Library Folder`; the dock label updates to
+the same root on Apply) and `WW_POSELIB_TEST` (save → `<root>/Poses` → list →
+Apply → Delete round-trip through the real dock, against the new key).
+
+## 2026-07-22j — Pose library is a folder of files
+
+The Pose library section of the Pose Manager is now backed by a **folder on
+disk** instead of poses buried inside the NIF. Default is
+`Documents/NifSkope Poses` (falls back to the home dir if there's no Documents
+location); the folder is created on first use. A **Folder…** button picks a
+different one, remembered in `QSettings` under `Pose/LibraryFolder`, and a grey
+label shows the current folder's name (full path on hover).
+
+The library list **keeps its selection across refreshes** — the list rebuilds on
+every model edit (a bone pose fires the undo-stack signal), and it now re-selects
+the same file by path afterwards instead of clearing, so a chosen pose stays
+selected while you work. (Found while verifying: without this the harness's
+Apply/Delete hit a null selection.)
+
+The library list shows the `*.xml` pose files in that folder (base name shown,
+absolute path carried in `UserRole`, sorted by name). **Save current…** prompts
+for a name, sanitises it for a filename, and writes an Outfit Studio pose XML
+into the folder. **Apply** (or double-click) imports the selected file with the
+Blend strength. **Delete** removes the file (with a confirm). Import/Export pose
+dialogs default to the library folder too. Because the files are plain OS pose
+XML, they interoperate with BodySlide/Outfit Studio and can be shared between
+projects — nothing is stored in the model.
+
+Verified end-to-end by `WW_POSELIB_TEST`: the `QSettings` folder override
+persists; a bone is posed and Saved into the folder; nudging the dock's bone
+search re-lists the folder and the saved pose appears; selecting it and clicking
+the dock's real **Apply** button reproduces the posed bone rotation
+(matrix diff ~0); clicking **Delete** removes the file. Also confirmed by
+screenshot: dropping the three PA sample poses in the folder lists all three
+("69 bone(s), 3 pose file(s)").
+
+## 2026-07-22i — Pose Manager batch: weights, hover name, multi-select, pin, non-destructive, proportional editing, mirror axis
+
+Large batch (user-requested, worked autonomously; all verified by harness/screenshot).
+
+**Hover bone name** — the bone under the cursor is always labelled (below the
+joint), even with the global Names toggle off.
+
+**Search bar at the top** of the dock (was under the Bones heading).
+
+**Multi-select with Block-List colours** — the bone list is ExtendedSelection
+and two-way-synced with the viewport (guarded against a feedback loop); the
+active bone shows orange (#FF9D00) text, other selected bones a blue row, exactly
+like the Block List. Shift/Ctrl-click in the viewport accumulates a multi-bone
+selection and G/R/S transforms them together (the object gizmo already handles
+`objSelection`).
+
+**Weight-influence overlay** (Weights toggle) — highlights the vertices the
+hovered/selected bone drives, heat-coloured by weight (5 buckets, blue→red),
+rebuilt only when the inspected bone changes so a 38k-vert mesh draws in a few
+point batches. Verified: bone 14 → 79 influenced vertices. NOTE: drawn at BIND
+positions (shape world transform × vertex) — exact for an unposed mesh, may lag
+the deformed surface once bones are posed (a refinement, not a bug).
+
+**Pin bones** — Pin/Unpin locks the selected bone(s): excluded from gizmo
+transforms in pose mode (skipped in `addNode`), shown pale grey with a 🔒 marker
+in the list. Unpin all clears them.
+
+**Non-destructive posing** (default on) — leaving Pose Mode restores the real
+bone nodes to the originals captured on entry (`poseResetBone(-1,7)`), so the
+saved NIF is never left altered; the pose persists via a pose file / the library.
+"Bake to bones" opts out (commits + re-captures rest). `poseBaked` guards it.
+NOTE: this is the mode-boundary guarantee; a display-overlay version (nodes never
+touched even transiently) would be a larger rearchitecture — flagged for the user.
+
+**Proportional editing (edit mode)** — Blender's O. A vertex transform spreads
+to unselected vertices within a radius by a falloff curve. All 8 curves ported
+from Blender (Smooth/Sphere/Root/Inverse Square/Sharp/Linear/Constant/Random),
+`O` toggles, `Shift+O` cycles the curve, context-menu entry. Implemented by
+extending the existing follower-vertex pattern (same mechanism as X-mirror): a
+`falloff` field on `ElemVert`, neighbours gathered in `gizmoBeginElement` within
+the auto/explicit radius, and the three transform loops scale by falloff (move ×,
+rotate by angle×falloff, scale interpolates toward 1). **Crucially a no-op when
+off** — falloff 1.0 gives identical math, so normal transforms are unchanged
+(all pose harnesses still pass). Verified: 256 neighbours gathered with a
+distance-decreasing falloff. Auto radius = 25% of the shape's bounds.
+(Reverses the earlier "proportional editing declined — do NOT implement" note.)
+**Deferred: pose-mode bone proportional** — the object-gizmo path is more
+intricate (parent-space) and I won't ship an unverified transform-path change;
+the falloff infra is shared, so it's a bounded follow-up.
+
+**Mirror editing axis choice** — the edit-mode X-mirror generalised to X/Y/Z
+(Blender mirror axis): `mirrorAxis` + a context-menu submenu (Enabled + axis
+radio), cache invalidated on axis change, both the pairing and the follower
+generalised to negate the chosen component. Pose-bone mirror already existed
+(`poseMirrorBone`). Topology-based pairing deferred (position pairing works for
+symmetric meshes).
+
+Harness `WW_POSEEXTRAS_TEST` covers the weight overlay + proportional gather;
+`WW_POSEDRAW/OSPOSE/POSE/POSEDOCK` all still PASS (transform path unregressed).
+
+## 2026-07-22h — OS pose XML: rotation is a VECTOR, not Euler (checked the source, fixed)
+
+The 07-22g Outfit Studio import/export got the rotation math WRONG, and checking
+Outfit Studio's actual source (`ousnius/BodySlide-and-Outfit-Studio`,
+`src/components/PoseData.cpp`) proved it: a pose's `rotX/rotY/rotZ` is a
+**rotation VECTOR** (axis × angle, Rodrigues) passed to `nifly::RotVecToMat`, not
+three Euler angles. The 07-22g code used `Matrix::fromEuler` — which happens to
+agree only for single-axis rotations (a finger curl `(0,0,1.69)` equals
+`Rz(1.69)`), so it looked fine on finger-heavy poses but was wrong for any
+multi-axis bone (HEAD, RArm_UpperArm...). The round-trip test couldn't catch it
+because it used `fromEuler` in both directions — self-consistent, wrong transform.
+
+**This is exactly why the 07-22g caveat said "the round-trip proves the
+encoding-inverse, not cross-tool parity — verify visually." Checking the source
+resolved it properly instead.**
+
+Fix: `osRotVecToMat` / `osRotMatToVec` in animationsetup.cpp are **verbatim ports
+of nifly's `RotVecToMat` / `RotMatToVec`**. Confirmed nifly's `Matrix3` and
+NifSkope's `Matrix` use the IDENTICAL convention — `m[row][col]`, applied `M*v`,
+row-major (checked `nifly/include/Object3d.hpp` `operator*` and NifSkope
+`niftypes.h:1005`) — so the ported formula produces **bit-identical rotations to
+Outfit Studio**, with no handedness/transpose guessing. Import uses
+`base * osRotVecToMat(v)` (local post-multiply — a finger curl about the bone's
+own axis, the correct pose semantics), export uses `osRotMatToVec(rest⁻¹·cur)`.
+
+**Verified**: `WW_OSPOSE_TEST` round-trip now compares the bone ROTATION MATRIX
+(representation-independent) — diff 4.5e-07. Importing the real `PAActionPose.xml`
+and re-exporting reproduces the multi-axis HEAD bone
+(`0.26999998,-0.02,0.039999999` → `...,0.039999988`) to float precision, and now
+the underlying matrix is the correct one.
+
+**Remaining (low-risk) assumption for a user visual check**: the pose delta is
+applied as `rest * delta` (bone-local). This is the standard and is what makes a
+finger curl work about its own axis, but only a look at a known PA pose on a real
+PA body fully confirms the composition side; if off, it's a one-line swap in
+`applyOutfitStudioPose`. The euler-vs-rotvec question — the real risk — is now
+resolved.
+
+## 2026-07-22g — Pose Manager: load skeleton, multi-select, depth fade, Outfit Studio pose XML
+
+Four additions to Pose Mode.
+
+**Load skeleton from file** (dock button): a QFileDialog → `nifMergeFile` (the
+same de-dup merge as CLI `merge`), so a `skeleton.nif` or another armour piece
+comes in with same-named bones SHARED. Reports bones shared / added; warns if 0
+matched (pieces won't pose as one rig).
+
+**Multi-select + transform together**: pose-mode click passes Shift/Ctrl to
+`objectSelectClick`, so it accumulates a multi-bone selection — and the object
+gizmo already transforms all of `objSelection`, so G/R/S moves/rotates/scales
+every selected bone at once. The dock bone list is ExtendedSelection and
+two-way-syncs with the viewport (guarded against a feedback loop). Verified:
+2 Shift-clicks → 2 selected.
+
+**Depth fade**: bones are drawn brightest near the camera, dim far away
+(camera-space Z across the drawn set, near=1.0 → far=0.35 on colour + alpha, and
+a slightly larger near joint dot). Selected/hover bones ignore depth so they
+stay clear. Makes a dense cluster far easier to read and pick.
+
+**Outfit Studio pose XML** (BodySlide `.xml`) — import and export, dock buttons
++ CLI `pose --import-os` / `--export-os`. The format (from real PA pose samples
+the user supplied): `<PoseData><Pose name><Bone name rotX/Y/Z transX/Y/Z/></Pose>`,
+where rotations are **Euler radians** and everything is a **delta from rest** —
+only posed bones are listed, names are the FO4 skeleton NiNode names.
+`AnimSetup::applyOutfitStudioPose` / `writeOutfitStudioPose`: import composes
+`target = base * fromEuler(delta)` (local post-multiply, `base` = the rest
+captured on pose-mode entry, or the current bind pose standalone); export writes
+`base.inverted() * cur` → `toEuler`, only for bones that actually moved, sorted
+by name to match OS. Export rest is keyed by BLOCK (not name) so same-named
+bones can't diff against the wrong node — a bug the first name-keyed version hit
+(`LArm_Collarbone_skin` exported a bogus delta).
+
+**Verified**: `WW_OSPOSE_TEST` round-trips a posed bone through export→reset→
+import to 6e-08. And decisively — importing the user's real `PAActionPose.xml`
+and re-exporting reproduces the source: HEAD `0.26999998,-0.02,0.04` →
+`0.26999995,-0.019999998,0.040000007` (float-exact). All prior pose/pinned
+harnesses still PASS.
+
+**Honest caveat (in the docs, needs a user check)**: the round-trip proves the
+import↔export is a faithful inverse of OS's *encoding*, but not that NifSkope's
+`fromEuler` axis order matches Outfit Studio's when applied to a real skeleton.
+If a known PA pose looks twisted on a real PA body, the fix is the Euler
+order/compose side (a localized change in `applyOutfitStudioPose`). Only a
+visual check on a real PA skeleton (user has these) can confirm cross-tool
+parity. CLI export standalone diffs against the current pose (rest == current →
+writes nothing) unless it follows `--import-os` in the same run; OS export is
+primarily a GUI action, where pose mode captures the rest on entry.
+
+## 2026-07-22f — Pose Mode: viewport skeleton, click-to-pose, reset, labels, filter, X-mirror
+
+The Pose Manager grew from a bone LIST into a real viewport posing tool. New
+**Pose Mode** — a viewport mode alongside Object / Edit / the paint modes,
+listed in the mode dropdown and activated by the Pose workspace (like the paint
+docks drive their modes). GLView members `poseMode` + friends; `posetools.cpp`
+dock rebuilt around it.
+
+**Draw** (`GLView::drawPoseSkeleton`): every skinned-shape bone is drawn as a
+short capped shape from its head toward its tail (mean of child origins, or
+local +Y for a leaf), with a joint dot, plus dim dashed parent-relationship
+lines — Blender's bone + relationship-line display. The tail length is capped to
+a characteristic bone size (median nearest-neighbour distance × 0.6), so a bone
+parented to a far-off root doesn't stretch across the screen; the first cut did
+exactly that and looked like spaghetti.
+
+**Pick** (`poseBoneAt` + a branch in mouseReleaseEvent): a click resolves the
+nearest bone segment in screen space and selects that node, so the existing
+G/R/S poses it. Hover highlights the bone under the cursor. Picking and drawing
+share `poseBoneTail`, so what you see is what you click.
+
+**Reset** (`poseResetBone`): bone transforms are snapshotted on entering pose
+mode = the "rest". Reset bone / Reset all restore it, with a channel selector
+(All / Rotation / Location / Scale — Blender's Alt+R/G/S). Snapshot-undoable.
+
+**Labels + filter**: bone-name labels in the viewport (QPainter overlay), a
+relationship-line toggle, and a filter (All / Deforming / Face sculpt =
+`skin_bone_*`). On the 68-bone facial rig, Face-sculpt + Names turns 70 bones of
+clutter into a clean labelled set of the sculpt handles.
+
+**X-mirror** (`poseMirrorBone`): copies a bone's pose to its L/R counterpart,
+mirrored across X. Mirrors the source's motion RELATIVE TO ITS REST and applies
+that mirrored delta relative to the counterpart's rest (Mx·R·Mx, translation.x
+negated), so it works on rigs that are symmetric in motion. `riggingFlipBoneName`
+gained the FO4 facial `_L_`/`_R_` INFIX pattern (it only had prefix/suffix/Left-
+Right) — a strict improvement that also helps weight-paint mirror.
+
+**Verified** by `WW_POSEDRAW_TEST` (log `ww_posedraw_test.log`, framebuffer +
+screenshot): 70 bones drawn, overlay changes ~9.5k px, `poseBoneAt` resolves a
+bone at its own drawn position, a synthetic click selects it, reset returns a
+posed bone to rest (delta 0), and mirroring `skin_bone_L_Cheek` moves
+`skin_bone_R_Cheek` symmetrically. `WW_POSE_TEST` / `WW_POSEDOCK_TEST` /
+`WW_POSEHIER_TEST` / `WW_PINNED_TEST` all still PASS.
+
+**Bugs found and fixed along the way**:
+- **HiDPI pick offset**: `poseBoneAt`'s pick radius multiplied by
+  `devicePixelRatioF()`, but `worldToScreen` works in LOGICAL pixels (uses
+  `width()`/`height()`), same space as the event position — so the dpr factor
+  was wrong. Dropped it. (The symptom only showed via a synthetic click that
+  also had a dpr conversion error; both are now logical-space.)
+- **Reset wrote zeros**: the first `poseResetBone` built the new value with
+  `nv = oldVal; nv.set(value, model, item)` and it came out `(0,0,0)`. Rather
+  than chase the `NifValue::set` subtlety, switched to the known-good
+  `nifSnapshotOp` + `model->set<T>` path used everywhere else in glview.cpp.
+- **modelChanged refresh**: entering pose mode during dock init (empty model)
+  left a stale/empty bone list; `GLView::modelChanged` now re-runs
+  `refreshPoseBones` (and captures rest if none yet) so a reload repopulates it.
+
+`WW_UI_SHOT` gained `WW_UI_SHOT_DOCK=<objectName>` and `WW_UI_SHOT_POSE=1` to
+open a dock / enter pose mode before the grab.
+
+## 2026-07-22e — Verified: bone-by-bone posing is usable (hierarchy + cumulative)
+
+`WW_POSE_TEST` proved a bone moves the mesh; this proves the two properties that
+make posing bone-by-bone *practical* rather than tedious. New harness
+`WW_POSEHIER_TEST` (log `release/ww_posehier_test.log`):
+
+- **Hierarchy** — rotating a bone's ANCESTOR carries the bone and its skinned
+  armour along (shoulder→arm→hand). Proven by composing each bone's world
+  transform from the model and confirming a child bone's world position moves
+  when only an ancestor is rotated. (On the flat facial-rig fixture the only
+  ancestor is the root; a real body `skeleton.nif` has the deep spine/limb
+  chains, where this is what lets you pose a whole arm from the shoulder.)
+- **Cumulative** — transforming several bones stacks into one pose rather than
+  overwriting: three bones rotated in turn each further moved the skinned bounds
+  (3 of 3).
+
+No code change to the engine — this is characterisation of existing behaviour,
+kept as a regression guard.
+
+## 2026-07-22d — Pose Manager dock + pose blending
+
+The Pose Manager workspace, finishing the two backlog entries (#2) that used to
+be a disabled menu placeholder. It is presentation over the shared pose API from
+07-22c, so there is little new model-layer risk.
+
+**Blending** first, in `AnimSetup::applyPose( nif, name, blend, error )`: `blend`
+< 1 interpolates each bone from its current transform toward the pose
+(translation/scale lerp, rotation `Quat::slerp`) — Blender's pose-strength
+slider. Verified numerically: with a bone at the origin and a pose at Z=91.2848,
+`--blend 0.5` lands it at Z=45.6424 (exactly half) and `--blend 1.0` at the full
+value. `readPose()` was factored out so both apply and the dock read a pose the
+same way. CLI gains `pose --apply NAME --blend F`.
+
+**The dock** (`src/posetools.cpp`, `tlCreatePoseManagerDock`): a bone list that
+drives block-list/viewport selection (click a bone, then G/R/S poses it — the
+practical form of "bone picking"; clickable 3D bones are Skeleton Manager work),
+plus a pose library with Save current / Apply / Delete and the blend slider.
+Flat NifSkope visual language, no web-app chrome. Delete hands the sequence to
+the existing `Block/Remove Branch` spell rather than open-coding block removal.
+Enabled as the 8th workspace (Workspaces ▸ Pose); the "Pose Manager (Planned)"
+placeholder is gone, added to both the workspace and mutual-exclusion manager
+lists.
+
+**Verified** by `WW_POSEDOCK_TEST`: dock found, bone list populated 69 rows,
+"Save current" (auto-answering the name dialog) added a pose to the library AND
+created a real `DockPose` sequence in the model, then Apply at 50% ran. A
+`WW_UI_SHOT` capture confirms the layout renders correctly. `WW_POSE_TEST` and
+`WW_PINNED_TEST` still PASS.
+
+Also: `WW_UI_SHOT` now honours `WW_UI_SHOT_DOCK=<objectName>` to open a dock
+before the grab, so any dock can be screenshot for verification.
+
+## 2026-07-22c — Pose library (`pose`), and a silent-corruption fix in `set`
+
+The last gap in the load-screen workflow. Poses are stored exactly as
+`SKELETON_AND_POSE_PLAN.md` §B.1 specified — **a `NiControllerSequence` with one
+key per bone at t=0**, the NIF equivalent of a Blender Action holding a single
+frame — so they live in the file, appear in the Timeline, and export like any
+other animation. No new format was invented.
+
+New API in `AnimSetup` (`src/spells/animationsetup.h`), so the dialog, a future
+Pose Manager dock and the CLI all share one implementation:
+
+- `poseBoneNodes()` — every node some skinned shape is bound to.
+- `savePose()` — capture the current bone transforms into a named sequence.
+- `applyPose()` — write a pose's t=0 transforms back onto the bone nodes.
+
+CLI: `pose <file> --list | --save NAME | --apply NAME -o OUT`.
+
+Key writing follows `NiKeyframeData`'s real layout: `Translations` and `Scales`
+are `KeyGroup`s, but rotation is **not** — `Num Rotation Keys` + `Rotation Type`
+gate a `Quaternion Keys` array, and the type must not be 4 (XYZ) or that array
+is conditioned out. The interpolator's own `Transform` is filled as well as the
+keys, so a one-key pose is unambiguous to any reader; `applyPose` prefers the
+first key and falls back to `Transform`.
+
+**Verified** on the merged file: 69 bones detected, `--save TPose` created the
+sequence and it listed back; then `set` moved the `Chest` bone to
+(99, 42, 7) and `--apply TPose` restored it to exactly
+`X 0.000024 Y 0.539375 Z 91.284805` — the original, to the last digit.
+
+### Silent-corruption fix in `set` (found by that test)
+
+Passing `-v "X 99.0 Y 42.0 Z 7.0"` **wrote zeros and reported success.**
+`Vector3::fromString` (`niftypes.cpp:91`) splits on **commas**, and on a
+mismatch it simply `return`s, leaving the default-constructed all-zero value —
+while `NifValue::setFromString` still returns `true`. Every compound type
+behaves this way.
+
+`set` now validates the component count and numeric parse for the vector /
+quaternion / colour families *before* writing, and refuses with the expected
+format instead of silently zeroing a field:
+
+```
+error: Vector3 takes 3 comma-separated numbers, e.g. -v "0.0,0.0,0.0"  (got: X 99.0 Y 42.0 Z 7.0)
+```
+
+Worth remembering beyond the CLI: **`setFromString` returning true does not mean
+the string was understood.** Any code path that accepts user text for a compound
+value needs its own shape check.
+
+## 2026-07-22b — Posing already works: verified, Pose Manager scope cut
+
+Before building Part B of `SKELETON_AND_POSE_PLAN.md`, checked whether posing
+needed building at all. **It does not.** `Shape::updateBoneTransforms()`
+(`glshape.cpp:110`) derives each bone matrix from
+`bone->localTrans( skeletonRoot )` — the **live** node transform, not a baked
+bind pose — and `BSShape::transformShapes()` re-runs it whenever the scene
+transform is dirty. Combined with block-list selection resolving any
+`NiAVObject` (so G/R/S already transforms a bone node), **selecting a bone and
+rotating it poses the mesh today, with no new feature.**
+
+New harness `WW_POSE_TEST=1` (log `release/ww_pose_test.log`) proves it on the
+merged file from 07-22a, and proves the merge's de-duplication in the same run:
+
+```
+2 skinned shape(s) in the scene
+posing bone block 1 'Chest'
+skinned bounds delta: 6.71363          before c(-0.004,1.76,118.33) r14.38
+                                       after  c(-0.006,3.83,115.39) r17.50
+framebuffer pixels changed: 7938
+  shape 73 'BaseFemaleHead_faceBones:0' uses the bone, moved 6.71363
+  shape 81 'skin_bone_C_Adam'sApple'    uses the bone, moved 6.33418
+pieces bound to that bone: 2, pieces that moved: 2
+after restore, bounds delta vs original: 0
+PASS
+```
+
+Three independent signals: the skinned **bounds** move (the maths saw it), the
+**framebuffer** changes (it reaches the screen), and restoring the bone returns
+the delta to **exactly 0** (so it was the edit, not frame noise). The
+per-shape check is the one that matters for an armour set — *both* merged
+pieces follow the shared bone, by different amounts because they are weighted
+differently. Had merge's node de-duplication failed, the second piece would have
+been bound to a private copy and stayed put.
+
+`Shape::boneTransforms` and `boundSphere` are protected; the public
+`Node::bounds()` is recomputed by `updateBoneTransforms()` from the same live
+matrices, so it is the right observable from outside.
+
+**Consequence for the plan:** Pose Manager Part B loses its largest item. What
+remains is the *library* — capture the current bone transforms as a one-key
+`NiControllerSequence`, then list / apply / blend / mirror — plus viewport
+convenience (picking bones in the viewport rather than the block list). The
+posing engine is done.
+
+**Working agreement changed** (user, 2026-07-22): *"Do it yourself please, I'm
+busy."* The agent now performs its own GUI verification via harnesses rather
+than handing the user a test checklist. `CURRENT_STATUS.md` updated.
+
+## 2026-07-22a — Merge NIFs into one poseable file (`merge`)
+
+Requested for the load-screen workflow: open an armour piece, bring in the rest
+of the set and a `skeleton.nif`, then pose the whole thing as one rig. Merging
+was the missing first step. New `src/nifmerge.{h,cpp}` + CLI `merge`.
+
+The splice recipe is the proven one from
+`spCollisionManager::importDonorCollision` (collect branch → `saveIndex` each
+block → `insertNiBlock` + `loadAndMapLinks` through a donor→target block map).
+**The addition is de-duplication by node name**, and it is the whole point of
+the feature: a naive splice gives every piece its own private copy of the bones
+it is skinned to, which renders fine but cannot be posed — moving "Chest" would
+mean moving five copies. Mapping a donor `NiNode` onto the target's same-named
+node makes the link-remap re-point every skin's `Bones` array at the shared
+bones **for free**, with no skin-specific code.
+
+Only `NiNode`s de-duplicate; shapes always import (two pieces may legitimately
+share a shape name). Imported blocks whose donor parent de-duplicated away are
+explicitly re-parented via `blockLink`, since the surviving parent's `Children`
+array lives in the target and knows nothing about the newcomer.
+
+**A bare `skeleton.nif` is just NiNodes, so loading a skeleton is the same
+command.** Worth stating because `Rigging ▸ Import Donor Bone Nodes...` cannot
+do it — that spell requires the donor to contain *skinned shapes*, and a
+skeleton file has no meshes at all.
+
+**Verified** on two skinned FO4 fixtures: 9 nodes reused by name + 1 new node
+added; the merged shape's skin `Bones` resolve to blocks 1/2/3/8/9/10/11 — the
+*target's* originals — plus 80, the one genuinely new bone; Skeleton Root → 0;
+geometry preserved at 1689 verts / 3230 tris; and `verify_join.py` **PASSES** on
+the result, so skin counts are consistent and every per-vertex bone index is in
+range (the Join-era corruption check).
+
+**Perf note applied up front:** the merge is a bulk load into a live model, so
+it wraps the splice in `setState(Loading)` + `holdUpdates`. `loadAndMapLinks`
+does not suppress signals for you and `holdUpdates` alone does not stop per-leaf
+`dataChanged` — only the model state does. Without it a 38k-vertex piece would
+look like a hang.
+
+Reported counts make a silent failure loud: if **0 nodes are reused** the pieces
+do not share a skeleton and posing as one rig will not work, so the command says
+so explicitly.
+
+## 2026-07-21f — Animation rigging from the CLI (`anim-setup`)
+
+Backlog §13's top item. **Setup Controllers is no longer dialog-bound**: its
+implementation moved out of `spSetupControllers::cast` into
+`AnimSetup::setupControllers()` behind the new `src/spells/animationsetup.h`,
+with the dialog as one caller and the CLI as another. The block-graph work was
+always GUI-free — controller + interpolator + data, ControlledBlock in a
+sequence, `NiDefaultAVObjectPalette` entry, manager/palette created if missing —
+only the parameter entry was stuck behind a modal.
+
+`CtlrKind` / `CtlrOption` and the per-block-type controller table moved to the
+header as `AnimSetup::controllerOptions()`, so the CLI offers exactly the same
+set the dialog does rather than a parallel list that could drift.
+
+**One behavioural improvement fell out of the split:** the core resolves the
+target sequence **by NAME**. The dialog passed a combo *index*, which is
+meaningless to any caller that never saw the combo.
+
+New command:
+
+```
+anim-setup <file> -b N --list
+anim-setup <file> -b N --controller TYPE [--controller TYPE ...]
+      [--sequence NAME] [--new-sequence] [--standalone]
+      [--effect-var 0..9] [--int-var N] -o OUT
+```
+
+**Verified end to end** on `donor.nif` (details in `CLI.md`): rigging a
+NiTransformController into a new `autoLoop` on an unrigged file takes it 80 → 87
+blocks with exactly the right scaffolding (`NiControllerManager`,
+`NiControllerSequence`, `NiDefaultAVObjectPalette`,
+`NiMultiTargetTransformController`, `NiTextKeyExtraData`, +1 interpolator/data
+pair); the ControlledBlock points at interpolator 85 and controller 81; the
+palette entry carries the node name and resolves to block 0; adding a second
+node by sequence name takes controlled blocks 1 → 2 and palette objs 1 → 2; an
+unknown sequence name errors with exit 1. Independent check:
+`Animation/Fix Invalid AV Object Refs` is a **no-op** on the result (file hash
+unchanged), so the generated refs are valid by the project's own validator.
+
+Regression: `WW_PINNED_TEST` and `WW_VERTEXFLAGS_TEST` both still PASS.
+**GUI verification of the Setup Controllers dialog is pending** — it now routes
+through the shared core, and only the user can exercise the modal.
+
+## 2026-07-21e — Headless CLI (`NifSkope -no-gui`)
+
+Batch mode for the same binary, filling the `// Future command line batch tools
+here` slot upstream left in `main.cpp`. New `src/nifcli.{h,cpp}`, wrapper
+`release/nifskope-cli.cmd`, full docs in **`CLI.md`**.
+
+Commands: `spells` (list the 195 registered spells by `"Page/Name"`, tagged
+instant/constant), `info`, `list`, `dump`, `get`, `set`, `cast`. Field paths are
+`/`-separated with numeric segments indexing arrays —
+`-f "Bone List/0/Bounding Sphere/Radius"`, the same convention as the Block
+Details sticky state and pinned fields.
+
+**Verified end to end** on `tests/rigging/fixtures/donor.nif`: `get` reads
+1689 verts; `set` writes Flags 14→15 and a reload of the saved file reads 15;
+`cast "Mesh/Update Bounds"` recalculates bone[0] radius 4.89446→4.75802 and
+changes the file hash; non-applicable targets and bad paths error with exit 1.
+
+**Scope, and it is a hard boundary.** Spells and model edits work — which
+covers animation rigging (controllers, sequences, interpolators, keyframe
+arrays, palette entries), skinning, bounds, sanitising. The viewport modelling
+tools (extrude, loop cut, knife, join, separate, bevel) do NOT: they live on
+`GLView`, need picked-element state and a GL context, and are GUI-bound by
+architecture, not by omission.
+
+**Three things that bit during the build, all recorded in `CLI.md`:**
+- `Game::GameManager::get()` is deliberately NOT initialised — its scan builds a
+  `QProgressDialog` (`gamemanager.cpp:150`), fatal without a `QApplication`.
+  Nothing in the model layer needs it.
+- The exe is linked `-subsystem,windows`, so it has **no console** and neither
+  shell waits for it: a bare `> out.txt` returns before the work happens and
+  leaves an empty file. Handled by `AttachConsole(ATTACH_PARENT_PROCESS)` (only
+  when not already redirected, so pipes still work) plus the `start /b /wait`
+  wrapper. Piping in PowerShell also forces the wait.
+- `dump` filters rows by `evalVersion`/`evalCondition` like the GUI's row
+  hiding. Without it a `BSVertexData` row prints BOTH precision variants of
+  `Vertex` — the live one and a zeroed dead one — and a healthy mesh reads as
+  corrupt.
+
+**Testing trap worth knowing** (cost a false "the spell did nothing"): on a
+*skinned* shape `spUpdateBounds` writes a ZERO bounding sphere on the block by
+design (`mesh.cpp:2032` — `calculateBoneBounds` succeeds so the vertex branch is
+skipped), because FO4 keeps real bounds per bone in `BSSkin::BoneData`. Reading
+`Bounding Sphere/Radius` shows 0 before and after and looks like a no-op; the
+evidence is in `BoneData`.
+
+**Follow-up worth taking:** the eight `WW_*_TEST` harnesses each hand-roll
+load → act → verify → quit in `nifskope_ui.cpp`. Most of that is now expressible
+as CLI calls plus a script, which would shrink that file substantially.
+
+## 2026-07-21d — One backlog: seven plan docs consolidated
+
+Doc-only, no code. `TO_BE_IMPLEMENTED.md` is now **THE backlog** — a single
+verified inventory of everything left, replacing seven documents that each
+independently claimed to know what was open and several of which were wrong.
+
+**Why.** Over 07-21 a single review turned up **nine** stale claims across
+these files, in both directions: six Blender-batch items marked open that were
+fully implemented; rest-pose display marked open when it had shipped; a "model
+landmine" that was an untested conjecture and proved false; and — the largest —
+**all 43 of `TIMELINE_PLAN.md`'s unticked boxes, every one of which shipped in
+timeline v2**. Plus the converse failure: Skeleton Manager and Pose Manager,
+the two biggest un-started features, appeared in *no* backlog file at all.
+
+**Structure.** The new file leads with usage rules (verify against code; the
+code is the only complete inventory; disabled UI entries are load-bearing
+backlog), a summary table of all 12 open areas by size, then a section each —
+ordered Skeleton Manager, Pose Manager, Performance 15c+16, Collision P4, the
+Block Details / Block List / rigging / UV / animation / rendering remainders.
+It closes with three lists that stop the failure recurring: **Verified SHIPPED
+— do not rebuild**, **Explicitly declined — do not implement**, and **Awaiting
+GUI verification (not implementation work)**. 674 lines → 485.
+
+**Nothing was lost.** The Collision Manager feature spec existed only in
+`TO_BE_IMPLEMENTED.md`, so it is preserved verbatim in that file's appendix.
+The seven plan docs stay on disk as **design detail / history**, each now
+carrying a banner that points at the backlog and warns against trusting its own
+status claims. `TIMELINE_PLAN.md`'s banner states outright that its `[ ]` boxes
+are wrong. `COLLISION_MANAGER_HANDOFF.md` keeps its role as required technical
+reading. `WW_CHANGES.md` (history) and `CURRENT_STATUS.md` (handoff) keep
+theirs; the latter's "Deferred/future work" list is explicitly retired as a
+backlog location.
+
+## 2026-07-21c — Backlog: the two missing workspaces, and a doc-scope lesson
+
+Doc-only. **Skeleton Manager and Pose Manager** — reserved as disabled
+workspace entries since the workspace batch (`nifskope_ui.cpp` ~L4747) — were
+recorded ONLY in `CURRENT_STATUS.md`'s "Deferred/future work" list and were
+missing from `TO_BE_IMPLEMENTED.md` entirely. A backlog review driven by the
+backlog file therefore missed the two largest un-started features in the
+project. Both now have real entries there, including the observation that the
+open "independent persistent skeleton reference" rigging item is really a
+Skeleton Manager prerequisite, and that Pose Manager depends on Skeleton
+Manager (building it first would duplicate the bone-transform machinery).
+
+Also corrected: **Rest-pose display in edit mode** was still listed as open
+("`Scene::restPoseBlock` already stored" — implying no consumer). It shipped:
+`Node::viewTrans`/`worldTrans` return `restWorldTrans()` for the edited shape
+(`glnode.cpp:337/353`, five writers in `glview.cpp`). That is the 8th stale
+backlog claim found on 07-21.
+
+**Lesson, worth more than the entries:** 07-21a established "verify against the
+code before building what a plan lists as open." This adds the converse —
+**a doc can be wrong by omission, and the code is the only complete inventory.**
+The disabled/planned UI entries (`setEnabled(false)` workspace actions, greyed
+menu items) are load-bearing backlog that no markdown file listed.
+
+## 2026-07-21b — Block Details: pinned fields
+
+`BLOCK_DETAILS_OVERHAUL_PLAN.md` §4's pinned fields, built on the "improve the
+existing tree in place" decision rather than the curated-sections concept.
+
+Star the handful of fields you actually tune on a block type, then filter down
+to just those on every block of that type: select block, scrub, next block.
+
+- **Pin / Unpin Field** in the Block Details context menu. Offered for any field
+  under a block, not only leaves — starring a whole compound (a Bounding Sphere,
+  say) is a legitimate thing to want.
+- **Per block TYPE, stored as a field PATH** — `NifSkope::wwFieldPath` reuses the
+  sticky-expansion convention (`'\x1f'`-joined; array elements identify by row,
+  everything else by name), so a pin set on one `BSLightingShaderProperty`
+  resolves on every other one. Item pointers and row numbers would not survive
+  the block switch, which is the entire point of the feature.
+- **★ marker** on the pinned row's Name cell (`PIN_QSTRING` in nifmodel.cpp) —
+  a marker, not a badge, per the binding visual rules.
+- **★ toggle** beside the details filter shows only pinned rows: flat,
+  auto-raise, matching the Block List header buttons. It reuses the proven
+  `NifTreeView` keep-set (`setDetailsFilter`) rather than inventing a second
+  hiding mechanism — the keep set is the pinned rows, their subtrees (a pinned
+  compound must expand) and their ancestors. With text also typed, the search
+  narrows *within* the pinned set.
+- **Persisted** under `QSettings` `BlockDetails/PinnedFields` (type → sorted
+  path list), loaded at dock construction.
+- `NifModel::pinnedItems` holds only the CURRENT block's resolved items,
+  recomputed on every block switch — the same window-owned pattern as
+  `diffItems`/`selHighlight`; the model just serves it per-role.
+
+**Harness** `WW_PINNED_TEST=1` (log `release/ww_pinned_test.log`): pins a field
+on block A, asserts the pin follows to block B of the same type, that the star
+reaches the Name column's display text, that the filter leaves exactly the
+pinned row visible, that unpinning undoes all of it, and that a settings
+save/load round trip preserves the pin. Green on `donor.nif` (NiNode ▸ Flags:
+11 top-level rows → 1).
+
+**Harness gotcha (cost one false failure).** `NifTreeView::isRowHidden(int row,
+const QModelIndex & index)` marks `row` `[[maybe_unused]]` and reads
+`index.internalPointer()` — it expects the ROW'S OWN index, not `(row, parent)`
+as the QTreeView signature it shadows implies. Asking it `(r, blockRoot)`
+reports on the block row itself and reads "everything hidden". To check what the
+user actually sees, call the base explicitly: `tree->QTreeView::isRowHidden(r,
+parent)`.
+
+## 2026-07-21a — Vertex Flags landmine: tested, DISPROVEN (no code change)
+
+`WW_CHANGES 2026-07-18b` closed the Create Skin corruption with a warning that
+*"any spell doing `set<BSVertexDesc>` + `updateArraySize` on an unchanged vertex
+count is suspect — incl. the stock Vertex Flags spell (flags.cpp)"*. That
+warning propagated into `CURRENT_STATUS.md` and `TO_BE_IMPLEMENTED.md` and has
+sat there since as an open data-corruption risk. **It was a conjecture and was
+never tested. It is now tested, and it is wrong: the stock Vertex Flags spell
+is correct.**
+
+**New harness** `WW_VERTEXFLAGS_TEST` (nifskope_ui.cpp) + verifier
+`tools/vertexflags_test/` (README has the full recipe). It casts the REAL spell
+through `NifSkope::castSpell` — the path the Block Details context menu uses —
+with a timer ticking its modal checkbox dialog, so the whole shipping path runs
+including the `getVertexPositions`/`setVertexPositions` round trip.
+
+Two independent layers: in-model (row layout matches the new desc, and every
+vertex position survives), and on-disk — the verifier does not trust the model
+that wrote the file, instead asserting against the header's **Block Sizes**
+table that `saved − original block size == numVerts × (new stride − old stride)`.
+Had the rows been left in the old layout, that delta would be 0.
+
+**Gauntlet, all green** on `tests/rigging/fixtures/donor.nif` (FO4 bs130,
+1689 verts, half precision, skinned, no colours):
+
+| case | toggle             | stride | block size    | result |
+|------|--------------------|--------|---------------|--------|
+| A    | Colors ON          | 32→36  | 73828→80584   | PASS   |
+| B    | Full Precision ON  | 32→40  | 73828→87340   | PASS   |
+| C    | Colors OFF         | 36→32  | 80584→73828   | PASS   |
+| D    | Full Precision OFF | 40→32  | 87340→73828   | PASS   |
+
+0 of 1689 positions moved in every case, and **both round-trips (A→C, B→D)
+reproduce the input file byte for byte** (SHA-256 identical, 108,302 B).
+
+**Why the early return is harmless here.** `updateArraySizeImpl` does bail on an
+unchanged count (`nifmodel.cpp:626`), but it is not the rows that need
+rebuilding — the row *count* genuinely does not change. Every `BSVertexData`
+field variant is already materialised as a `NifItem` in every row; the
+`#ARG#`-gated conditions only decide which are live. Writing `Vertex Desc`
+re-evaluates them (the `Vertex Data` array's `arg="Vertex Desc #RSH# 44"` names
+the field, so `invalidateDependentConditions` reaches it) and the serialiser
+writes the new layout. The spell also carries positions across a precision
+change by discriminating on `valueType()` rather than by name — the correct
+handling of the two `Vertex` variants.
+
+The Create Skin bug was a genuinely different failure: it *created* skin arrays
+that had zero children until the deferred cascade at `holdUpdates(false)`, not
+flip a live/dead bit on already-materialised fields. **Do not "fix" the Vertex
+Flags spell.**
+
+**Harness gotcha worth keeping.** The probe that reads the row layout back is
+subject to the very hazard under test: `"Vertex"` names BOTH precision variants,
+so `getIndex(row0, "Vertex").isValid()` is true either way. The first cut of
+this harness reported a false FAIL for exactly that reason. The Full Precision
+probe now asks the live item for its `valueType()`; only the Colors probe can
+lean on a unique name. Harnesses also now leave an app-owned dialog answerer
+running past their own scope, so a save-changes prompt on quit cannot strand the
+process (the earlier version hung after logging its verdict).
+
+**Scope tested:** FO4 `bs130` `BSSubIndexTriShape`. Not exercised: SSE `bs100`
+(the `NiSkinPartition` mirror branch at flags.cpp:1531) and `BSDynamicTriShape`
+(`MakeDynamic`). Those paths remain unverified, not known-bad.
+
 ## 2026-07-20o — Loop Cut v3: single-vertex edge cut on tris, full adjust panel, edge-mode A
 
 - **Plain triangles: single-vertex cut (Blender)** — when the hovered edge

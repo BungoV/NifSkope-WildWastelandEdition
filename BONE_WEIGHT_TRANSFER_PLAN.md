@@ -1,5 +1,12 @@
 # Bone & Weight Transfer — Implementation Plan
 
+> **BACKLOG MOVED — 2026-07-21.** This file is **design detail / history only**.
+> The single authoritative list of what is left to implement is
+> **`TO_BE_IMPLEMENTED.md`**. Do not record open work here and do not trust any
+> status claim below: this file's own claims have been wrong in both directions
+> before, which is exactly why the backlog was consolidated into one place.
+
+
 Transfer skinning (bone bindings **and** per-vertex weights) from a donor mesh onto a
 target mesh inside NifSkope, in-place, with no DCC round-trip. Primary use case: rig a
 piece of outfit/armor/headgear to a human skeleton by borrowing the skinning of a donor

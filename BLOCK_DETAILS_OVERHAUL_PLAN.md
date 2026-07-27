@@ -1,5 +1,12 @@
 # Block Details Overhaul v2 — CONCEPT (2026-07-20)
 
+> **BACKLOG MOVED — 2026-07-21.** This file is **design detail / history only**.
+> The single authoritative list of what is left to implement is
+> **`TO_BE_IMPLEMENTED.md`**. Do not record open work here and do not trust any
+> status claim below: this file's own claims have been wrong in both directions
+> before, which is exactly why the backlog was consolidated into one place.
+
+
 Focused successor to the Details half of `BLOCK_LIST_DETAILS_OVERHAUL.md`
 (2026-07-12). Much of that doc's top-6 has since shipped: block-list
 search/icons/chips, the Links/Referenced-by peek, the Block Details field
@@ -199,14 +206,37 @@ so version-gated fields never render (same rules as the tree's row hiding).
 
 ## Phasing
 
-1. **P1 — Header card + curated sections** for the top-5 types + the typed
-   **link editor** (jump/pick/new). The biggest daily-use win; everything
-   else hangs off this shell.
+> **STATUS 2026-07-21 — verified against the code, not against this doc.**
+> The numbering below is partly overtaken by events: the user chose *"keep the
+> existing tree, improve it in place"* over the curated-sections shell, so
+> **P1 was deliberately not built** and later phases landed without it.
+>
+> | item | state |
+> |---|---|
+> | Curated sections / header card (P1) | **not built, by decision** |
+> | Link jump / pick (P1's link editor) | shipped 07-20f |
+> | Inline flag decode + Edit… dialog | shipped 07-20d/f |
+> | DragSpinBox scrub on every numeric editor | shipped 07-20g |
+> | Euler rotation editing | **already existed** (`valueedit.cpp` `mEuler`) |
+> | Field copy/paste + paste-to-many (P3) | shipped 07-20f |
+> | Diff vs reference + Reference column (P3) | shipped 07-20f/g/h |
+> | **Pinned fields (P2)** | **shipped 07-21b** |
+> | Colour swatch, texture browse+missing, string-index display, nif.xml tooltips | open |
+> | Array table (P4) | open |
+> | Whole-file search, recent values/revert, hex viewer (P5) | open |
+>
+> Check the code before building anything listed here.
+
+1. ~~**P1 — Header card + curated sections**~~ — superseded; the in-place
+   improvements above were taken instead.
 2. **P2 — Field editors**: scrub/sliders, Euler rotation, color swatch,
    texture browse+missing, string-index derived display; **pinned fields**.
-3. **P3 — Generalized copy/paste + multi-block paste + Diff mode.**
-4. **P4 — Array table** (virtualized, viewport sync, stats, CSV).
-5. **P5 — Whole-file search, recent values/revert, hex viewer.**
+   *Scrub, Euler and pinned fields done; colour swatch, texture browse,
+   string-index display and nif.xml tooltips still open.*
+3. **P3 — Generalized copy/paste + multi-block paste + Diff mode.** *Done.*
+4. **P4 — Array table** (virtualized, viewport sync, stats, CSV). *Open.*
+5. **P5 — Whole-file search, recent values/revert, hex viewer.** *Open.*
 
-Each phase ships behind the Curated/Raw toggle, so Raw is always the escape
-hatch and nothing regresses power users.
+The Curated/Raw toggle the phases were meant to ship behind never materialised
+(P1 was dropped); everything above is an in-place improvement to the one tree,
+so Raw *is* the view and nothing regresses power users.
