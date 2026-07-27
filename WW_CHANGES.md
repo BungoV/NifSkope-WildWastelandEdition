@@ -46,6 +46,20 @@ rest translation**. The remaining 48 differ by small authored offsets (a knee
 6 mm out, the human head 29 mm) — a joint's rotation centre need not sit exactly
 on the bone origin.
 
+### Encoder readiness, audited rather than assumed
+
+By class, **99.5% of ragdoll packfile bytes are now read** (1,094,944 of
+1,100,864 across the 35 vanilla ragdolls). The remaining 0.5% is three small
+classes, and they are not equally hard: `hkpPositionConstraintMotor` (35 objects)
+and `hkRefCountedProperties` (53) have **exactly one distinct byte pattern each**
+across the whole corpus — Bethesda presets an encoder can emit verbatim — while
+`hknpShapeMassProperties` has **43 distinct patterns in 53 objects** and is real
+per-shape data that must be decoded or recomputed.
+
+All three appear exactly 53 times, one for one with `hknpConvexPolytopeShape`:
+capsule and sphere mass properties are analytic, so only polytopes carry
+precomputed ones. Details in TO_BE_IMPLEMENTED item 6.
+
 ## 2026-07-28a — Ragdoll joint limits decode: the atom chain
 
 The piece the previous entry deliberately left undone. A constraint object is a

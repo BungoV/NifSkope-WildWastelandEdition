@@ -344,6 +344,24 @@ order; each is independently verifiable against a vanilla file:
    directly reusable — the ragdoll root uses the same `hkArray` layout at the same
    offsets. Validate by round-trip on all 35 ragdolls.
 
+   **The decode is 99.5% of packfile bytes by class** (audited 07-28b). What is
+   left, and what the encoder must do about it:
+
+   - `hkpPositionConstraintMotor` — 35 objects, **1 distinct byte pattern** across
+     every vanilla ragdoll, shared by all of a ragdoll's joints (98 pointers to the
+     one object on the brahmin). A Bethesda preset: type 1 (POSITION), minForce
+     -1e6, maxForce 100, tau 0.8, damping 1.0, recovery 5.0 / 0.2. **Emit verbatim.**
+   - `hkRefCountedProperties` — 53 objects, **1 distinct byte pattern**. Also emit
+     verbatim; there is nothing per-shape in it to author.
+   - `hknpShapeMassProperties` — 53 objects but **43 distinct**, so this one is real
+     per-shape data (`hkCompressedMassProperties`: centre of mass, inertia and
+     major-axis space as `hkHalf` vectors, then mass and volume). It must be decoded
+     or recomputed, not copied.
+
+   All three appear exactly 53 times, matching `hknpConvexPolytopeShape` one for
+   one — capsule and sphere mass properties are analytic, so only polytopes carry
+   precomputed ones. A ragdoll of capsules alone needs none of this.
+
    Watch the constraint frames: `HknpConstraint::rotA/pivotA` is the **child**
    side and `rotB/pivotB` the **parent** side (measured, see WW_CHANGES 07-28b) —
    they were documented the wrong way round until then, and swapping them on write
