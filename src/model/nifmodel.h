@@ -93,6 +93,19 @@ public:
 	// BaseModel
 
 	void clear() override final;
+	/*! Reset to an empty document at an EXPLICIT version, ignoring
+	 * Settings/Nif/Startup Defaults.
+	 *
+	 * clear() takes its versions from those settings, and the BS version is the
+	 * one that matters most — it conditions the layout of whole blocks, most
+	 * visibly BSTriShape's vertex data. Setting the header field afterwards is not
+	 * enough, because the cached copy getBSVersion() and every version condition
+	 * read is only refreshed by clear() and by loading a header. So a caller that
+	 * wants a document for a specific game needs this rather than clear().
+	 *
+	 * Returns false if the BS version did not take.
+	 */
+	bool createNew( quint32 fileVersion, int userVersion, int bsVersion );
 	//! Check if a Starfield model uses internal geometry data, and optionally convert meshes. Returns true on success.
 	bool checkInternalGeometry( const QModelIndex & blockIndex );
 	bool load( QIODevice & device, const char* fileName = nullptr ) override final;

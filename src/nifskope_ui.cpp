@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifskope.h"
+#include "starterscene.h"
 #include "ui_nifskope.h"
 
 #include "glview.h"
@@ -413,6 +414,28 @@ static QString wwBoxedButtonQss( const QString & padding )
 
 
 //! @file nifskope_ui.cpp UI logic for %NifSkope's main window.
+
+/*! Should a window with no file open on the starter cube?
+ *
+ * Off for any harness run: every WW_* test expects the empty document it always
+ * got, and a cube would change block numbers under all of them. Same guard
+ * saveUi() uses, for the same reason.
+ */
+static bool startupCubeWanted()
+{
+	// WW_STARTER_SHOT is the harness FOR this path, so it is the one WW_ variable
+	// that must not switch it off.
+	if ( !qEnvironmentVariableIsSet( "WW_STARTER_SHOT" ) ) {
+		const QStringList envKeys = QProcessEnvironment::systemEnvironment().keys();
+		for ( const QString & key : envKeys ) {
+			if ( key.startsWith( QLatin1String( "WW_" ) ) )
+				return false;
+		}
+	}
+	QSettings settings;
+	return settings.value( QStringLiteral( "Settings/Nif/Startup Defaults/New Document Cube" ),
+						   true ).toBool();
+}
 
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
@@ -3788,6 +3811,66 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 	if ( !fname.isEmpty() ) {
 		skope->loadFile( fname );
+	} else if ( !background && startupCubeWanted() ) {
+		// Blender opens on a cube rather than on nothing, and this editor has the
+		// same problem an empty document has: nowhere to click. Add Primitive
+		// itself refuses without an existing BSTriShape, since it clones one for
+		// its vertex layout and material.
+		NifModel * nif = skope->getNifModel();
+		QString error;
+		if ( nif && nifCreateStarterScene( nif, STARTER_CUBE_SIZE, &error ) ) {
+			// the starting state, not an edit: an untouched window must not ask
+			// about saving on close
+			if ( nif->undoStack ) {
+				nif->undoStack->clear();
+				nif->undoStack->setClean();
+			}
+			// Everything that reacts to a document arriving hangs off
+			// completeLoading, and building the model directly skips all of it —
+			// which showed up as the cube drawing unshaded black where the same
+			// file, opened normally, draws in the viewport's no-texture magenta.
+			// An empty file name is the truthful argument: there is no file.
+			QString noFile;
+			emit skope->completeLoading( true, noFile );
+			if ( skope->ogl ) {
+				skope->ogl->updateScene();
+				skope->ogl->frameAll();
+			}
+			// WW_STARTER_SHOT=<png>: prove the document startup builds actually
+			// renders, then quit. The startup path cannot be checked any other way
+			// without leaving a window up.
+			const QString starterShot = qEnvironmentVariable( "WW_STARTER_SHOT" );
+			if ( !starterShot.isEmpty() && skope->ogl ) {
+				QTimer::singleShot( 0, skope, [skope, starterShot, nif]() {
+					QFile logf( QApplication::applicationDirPath() + "/ww_starter_test.log" );
+					if ( logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+						QTextStream log( &logf );
+						log << "blocks " << nif->getBlockCount()
+							<< "  version " << nif->getVersion()
+							<< "  user " << nif->getUserVersion()
+							<< "  bs " << nif->getBSVersion() << "\n";
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							log << "  [" << b << "] " << nif->itemName( nif->getBlockIndex( b ) )
+								<< " '" << nif->get<QString>( nif->getBlockIndex( b ), "Name" ) << "'\n";
+						log << "clean " << ( nif->undoStack ? int( nif->undoStack->isClean() ) : -1 ) << "\n";
+						logf.close();
+					}
+					skope->ogl->setOrientation( GLView::ViewFront, true );
+					// same line-path warm-up the skeleton shot needs (07-17 defect)
+					skope->ogl->indexAt( QPointF( skope->ogl->width() * 0.5,
+												   skope->ogl->height() * 0.5 ) );
+					qApp->processEvents();
+					for ( int i = 0; i < 3; i++ ) {
+						skope->ogl->update();
+						qApp->processEvents();
+					}
+					skope->ogl->grabFramebuffer().save( starterShot );
+					QTimer::singleShot( 0, qApp, &QApplication::quit );
+				} );
+			}
+		} else if ( !error.isEmpty() ) {
+			qWarning() << "starter scene:" << error;
+		}
 	}
 	if ( primary ) {
 		skope->setGeometry( primary->geometry() );

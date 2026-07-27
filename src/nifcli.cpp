@@ -17,6 +17,7 @@ See the LICENSE.md file for the full license text.
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
 #include "skeletontools.h"
+#include "starterscene.h"
 #include "gl/hknpdecode.h"
 
 #include <cmath>
@@ -468,6 +469,27 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 		}
 	}
 	return 0;
+}
+
+/*! Write the document NifSkope opens with when no file was given.
+ *
+ * Same builder as the GUI startup path, so this is how that document gets
+ * checked without a window.
+ */
+int cmdNew( const QString & outFile, float size )
+{
+	NifModel nif;
+	QString error;
+	if ( !nifCreateStarterScene( &nif, size > 0.0f ? size : STARTER_CUBE_SIZE, &error ) ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+	out() << "version  " << nif.getVersion()
+		  << "  user " << nif.getUserVersion()
+		  << "  bs " << nif.getBSVersion() << Qt::endl;
+	for ( int b = 0; b < nif.getBlockCount(); b++ )
+		out() << "  " << blockLabel( &nif, b ) << Qt::endl;
+	return saveNif( nif, outFile ) ? 0 : 1;
 }
 
 int cmdSkeleton( const QString & file, bool validateOnly )
@@ -1166,6 +1188,9 @@ int usage()
 	out() << "NifSkope headless batch mode\n\n"
 		  << "  NifSkope -no-gui <command> [options]\n\n"
 		  << "Commands:\n"
+		  << "  new -o OUT [--size N]                   write the starter document: a\n"
+		  << "                                          Fallout 4 scene with one cube\n"
+		  << "                                          (N defaults to 2 m in FO4 units)\n"
 		  << "  spells [pattern]                        list spells addressable by name\n"
 		  << "  info <file>                             version, block count, per-type tally\n"
 		  << "  list <file> [-t <type>]                 block list, optionally filtered\n"
@@ -1240,6 +1265,7 @@ int nifskopeCliMain( const QStringList & args )
 	QStringList controllers, adds;
 	QString saveName, applyName, importOs, exportOs;
 	float blend = 1.0f;
+	float cubeSize = STARTER_CUBE_SIZE;
 	bool noDedupe = false;
 	int block = -1, depth = 2, maxRows = 40;
 	int effectVar = -1, intVar = -1;
@@ -1274,6 +1300,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--save" ) ) saveName = next();
 		else if ( t == QLatin1String( "--apply" ) ) applyName = next();
 		else if ( t == QLatin1String( "--blend" ) ) blend = next().toFloat();
+		else if ( t == QLatin1String( "--size" ) ) cubeSize = next().toFloat();
 		else if ( t == QLatin1String( "--import-os" ) ) importOs = QDir::current().filePath( next() );
 		else if ( t == QLatin1String( "--export-os" ) ) exportOs = QDir::current().filePath( next() );
 		else if ( t.startsWith( QLatin1Char( '-' ) ) ) {
@@ -1285,6 +1312,14 @@ int nifskopeCliMain( const QStringList & args )
 		} else {
 			pattern = t;
 		}
+	}
+
+	if ( cmd == QLatin1String( "new" ) ) {
+		if ( !initModelLayer() ) { err().flush(); return 1; }
+		const int rc = cmdNew( outFile, cubeSize );
+		out().flush();
+		err().flush();
+		return rc;
 	}
 
 	if ( cmd == QLatin1String( "spells" ) ) {

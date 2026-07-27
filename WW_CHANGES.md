@@ -1,5 +1,81 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27q — NifSkope opens on a cube, like Blender
+
+Launching with no file gave an empty document, which is nowhere to click: most of
+what this editor does needs a shape to do it to. **Add Primitive itself refuses
+without one** — it clones an existing `BSTriShape` for its vertex layout and
+material — so an empty document could not even make its own first shape.
+
+Now a window with no file opens on a minimal Fallout 4 scene: `NiNode` "Scene
+Root" holding a `BSTriShape` "Cube" with its own `BSLightingShaderProperty` and
+`BSShaderTextureSet`. Version 20.2.0.7 / user 12 / **BS 130**.
+
+`NifModel::createNew( fileVersion, userVersion, bsVersion )` is new and is what
+makes the BS version stick. `clear()` takes its versions from
+`Settings/Nif/Startup Defaults`, whose BS default is **100 (Skyrim SE)**, and
+setting the header field afterwards is not enough — the cached copy that
+`getBSVersion()` and every version condition read is only refreshed by `clear()`
+and by loading a header, and `cacheBSVersion()` is protected. BS version
+conditions whole block layouts, most visibly `BSTriShape`'s vertex data, so a
+document built at BS 100 would have had the wrong vertex rows.
+
+### Size: 2 metres, not 1 unit
+
+`STARTER_CUBE_SIZE = 2.0f * 69.99125f` — Blender's default cube in FO4 units,
+from the same Havok-metre constant the collision decoder is validated against
+(`hknpdecode.h`, `glnode.cpp`), rather than a number picked to look right.
+
+Deliberately **not** the viewport's Add Primitive default of 1.0. That one is
+dropped at the 3D cursor into a scene that already has something in it, with Size
+live in the operator panel. A document containing nothing else has to be visible
+on its own, and at 1.0 it is not: `GLView::frameAll()` snaps any scene whose
+radius is below the unit scale to a 1024-unit sphere, so a 1-unit cube stays
+sub-pixel however the camera is framed. Measured — at 1.0 the viewport is empty,
+at 100 the cube fills a third of it.
+
+### Guards
+
+- **background windows** — session/workspace tabs and `promoteBackgroundDocument()`
+  load into their window immediately, so a cube would be built only to be thrown
+  away.
+- **`WW_*` environment** — every harness keeps the empty document it expects; a
+  cube would shift block numbers under all of them. Same guard `saveUi()` uses.
+  `WW_STARTER_SHOT` is exempt, being the harness for this path.
+- **`Settings/Nif/Startup Defaults/New Document Cube`**, default true. Set it to
+  false to get the old empty document back without a rebuild — worth knowing,
+  since a fault on the startup path would otherwise leave nowhere to click.
+
+The undo stack is cleared and marked clean afterwards: the cube is the document's
+starting state, not an edit, so closing an untouched window must not ask about
+saving (`clean 1` in the harness log confirms it).
+
+Building the model directly also skips everything that reacts to a document
+arriving, which showed up as the cube drawing with a stale camera. It now emits
+`completeLoading` and calls `updateScene()` / `frameAll()`.
+
+### Verified
+
+`new -o OUT [--size N]` writes the same document the GUI opens with, so this is
+checkable without a window: 4 blocks, 20.2.0.7 / 12 / 130, 24 verts, 12 tris,
+Data Size 744 = 24x28 + 12x6, bounding radius 121.228 = sqrt(3)/2 x 139.98, and
+**load + save is byte-identical at 1316 bytes**. `WW_STARTER_SHOT=<png>` then
+confirmed the GUI path renders it and exits 0.
+
+**Loose end:** the startup cube draws unshaded black, where the same document
+opened from disk draws in the viewport's no-texture magenta — a loaded file has a
+folder for texture lookup to fail against, a document that was never on disk has
+none. Both are "no material"; only the appearance differs. Not chased further
+because each build is currently a machine-stability risk (see below).
+
+**Not run:** the 7-image render-regression set. It launches a NifSkope per image
+and the machine hard-crashed three times today under sustained build load
+(Kernel-Power 41, no bugcheck, no WHEA, no TDR — the signature of a power or
+thermal cutout, not a driver fault). Builds are now `-j2`. The corpus passes a
+file on the command line and sets `WW_RENDER_SHOT`, so the cube path is
+double-guarded off for it and cannot change those pixels; run it to confirm when
+the machine is trusted again.
+
 ## 2026-07-27p — `hknpRagdollData` decodes: ragdoll bodies are real, not inferred
 
 Supersedes the positional inference in 27o (below), which stays only as a

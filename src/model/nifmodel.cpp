@@ -435,6 +435,35 @@ void NifModel::clear()
 	gameResources = &( Game::GameManager::getNIFResources( this ) );
 }
 
+bool NifModel::createNew( quint32 fileVersion, int userVersion, int bsVersion )
+{
+	// clear() has already applied the startup defaults; redo the version part of
+	// it with the caller's values. cacheBSVersion at the end is the load-bearing
+	// call - without it getBSVersion() keeps reporting the default and every
+	// version-conditioned row stays laid out for the wrong game.
+	clear();
+
+	NifItem * header = getHeaderItem();
+	if ( !header )
+		return false;
+
+	version = fileVersion;
+	if ( NifItem * headerVer = getItem( header, "Version" ) )
+		headerVer->setFileVersionValue( version );
+
+	QString headerString( ( version <= 0x0A000100 )
+		? "NetImmerse File Format, Version " : "Gamebryo File Format, Version " );
+	headerString += version2string( version );
+	set<QString>( header, "Header String", headerString );
+
+	set<int>( getItem( header, "User Version", false ), userVersion );
+	set<int>( getItem( header, "BS Header\\BS Version", false ), bsVersion );
+	invalidateItemConditions( header );
+	cacheBSVersion( header );
+
+	return getBSVersion() == quint32( bsVersion );
+}
+
 
 /*
  *  header functions
