@@ -45,6 +45,35 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //! @file nifproxymodel.cpp NifProxyItem
 
+QIcon wwNodeCategoryIcon()
+{
+	/* A quiet category mark, not a status light - the stock orange resource dot
+	 * read as the latter.
+	 *
+	 * The colour is the skin's text colour rather than a literal grey. It used to
+	 * be a hardcoded #D6D6D2, which matched nothing else and, worse, did not
+	 * follow the theme: on the light skin a near-white dot on a near-white row is
+	 * invisible. Cached per colour so a theme switch rebuilds it instead of
+	 * serving the old pixmap forever.
+	 */
+	const QString dotColor = wwSkinColor( "text" );
+	static QString cachedColor;
+	static QIcon nodeDot;
+	if ( nodeDot.isNull() || cachedColor != dotColor ) {
+		QPixmap pm( 16, 16 );
+		pm.fill( Qt::transparent );
+		QPainter p( &pm );
+		p.setRenderHint( QPainter::Antialiasing, true );
+		p.setPen( Qt::NoPen );
+		p.setBrush( QColor( dotColor ) );
+		p.drawEllipse( QRectF( 4.5, 4.5, 7.0, 7.0 ) );
+		p.end();
+		nodeDot = QIcon( pm );
+		cachedColor = dotColor;
+	}
+	return nodeDot;
+}
+
 //! Compact semantic icons for top-level NIF blocks.  These are supplied by
 //! the proxy rather than NifModel so Block Details remains a data editor and
 //! only the Block List receives category decoration.
@@ -73,33 +102,8 @@ static QIcon blockListCategoryIcon( const NifModel * nif, const QModelIndex & so
 		|| type.contains( QStringLiteral( "TriShape" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Mesh" ), Qt::CaseInsensitive ) )
 		return QIcon( QStringLiteral( ":/btn/blockGeometry" ) );
-	if ( nif->blockInherits( block, "NiNode" ) ) {
-		/* A quiet category mark, not a status light - the stock orange resource
-		 * dot read as the latter.
-		 *
-		 * The colour is the skin's text colour rather than a literal grey. It used
-		 * to be a hardcoded #D6D6D2, which matched nothing else and, worse, did
-		 * not follow the theme: on the light skin a near-white dot on a near-white
-		 * row is invisible. Cached per colour so a theme switch rebuilds it
-		 * instead of serving the old pixmap forever.
-		 */
-		const QString dotColor = wwSkinColor( "text" );
-		static QString cachedColor;
-		static QIcon nodeDot;
-		if ( nodeDot.isNull() || cachedColor != dotColor ) {
-			QPixmap pm( 16, 16 );
-			pm.fill( Qt::transparent );
-			QPainter p( &pm );
-			p.setRenderHint( QPainter::Antialiasing, true );
-			p.setPen( Qt::NoPen );
-			p.setBrush( QColor( dotColor ) );
-			p.drawEllipse( QRectF( 4.5, 4.5, 7.0, 7.0 ) );
-			p.end();
-			nodeDot = QIcon( pm );
-			cachedColor = dotColor;
-		}
-		return nodeDot;
-	}
+	if ( nif->blockInherits( block, "NiNode" ) )
+		return wwNodeCategoryIcon();
 	if ( type.contains( QStringLiteral( "Texture" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Image" ), Qt::CaseInsensitive ) )
 		return QIcon( QStringLiteral( ":/btn/blockTexture" ) );

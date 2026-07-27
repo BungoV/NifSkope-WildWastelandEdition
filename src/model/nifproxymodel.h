@@ -33,7 +33,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef NIFPROXYMODEL_H
 #define NIFPROXYMODEL_H
 
-#include <QAbstractItemModel> // Inherited
+#include <QAbstractItemModel>
+#include <QIcon> // Inherited
 #include <QList>
 #include <QModelIndex>
 #include <QVariant>
@@ -43,6 +44,14 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 class NifModel;
 class NifProxyItem;
+
+/*! The Block List's mark for scene nodes: a quiet dot in the skin's text colour.
+ *
+ * Shared so the tree row and the "Scene nodes" filter chip are literally the same
+ * icon. They used to be a themed dot and :/btn/blockNode respectively, which is
+ * one category drawn two ways.
+ */
+QIcon wwNodeCategoryIcon();
 
 class NifProxyModel final : public QAbstractItemModel
 {

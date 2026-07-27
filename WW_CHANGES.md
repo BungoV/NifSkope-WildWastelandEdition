@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27y — The Scene nodes filter chip uses the node dot
+
+The Block List drew one category two ways: the tree row had the themed dot while
+the "Scene nodes" filter chip still used `:/btn/blockNode`.
+
+Factored the dot into `wwNodeCategoryIcon()` and pointed both at it, rather than
+copying the drawing into the chip — same function, so they cannot drift.
+
+Scope is deliberately just this one category. The earlier attempt to tint *every*
+Block List icon (27w) was reverted: the ask was to make the node mark match the
+skin, not to strip the colour out of the whole list. Geometry, material, texture,
+collision, particles, light, camera, skin, animation and extra data keep their
+stock art in both the tree and the chip row.
+
 ## 2026-07-27x — Animation transport on the View toolbar
 
 Play/pause, sequence, loop, more, and a mini timeline, at the head of the View

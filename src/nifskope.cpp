@@ -714,7 +714,9 @@ NifSkope::NifSkope( bool background )
 	const QList<BlockFilterDef> blockFilterDefs = {
 		{ 0, tr( "All blocks" ), QString() },
 		{ 1, tr( "Geometry" ), QStringLiteral( ":/btn/blockGeometry" ) },
-		{ 2, tr( "Scene nodes" ), QStringLiteral( ":/btn/blockNode" ) },
+		// icon supplied below by wwNodeCategoryIcon(), so the chip and the tree
+		// row show the same mark for this category
+		{ 2, tr( "Scene nodes" ), QString() },
 		{ 3, tr( "Skinning and bones" ), QStringLiteral( ":/btn/skinned" ) },
 		{ 4, tr( "Materials, shaders, and textures" ), QStringLiteral( ":/btn/blockMaterial" ) },
 		{ 5, tr( "Collision" ), QStringLiteral( ":/btn/showCollision" ) },
@@ -726,7 +728,8 @@ NifSkope::NifSkope( bool background )
 		button->setAutoRaise( true );
 		button->setCheckable( true );
 		button->setToolTip( def.name );
-		if ( def.icon.isEmpty() ) button->setText( tr( "All" ) );
+		if ( def.id == 2 ) button->setIcon( wwNodeCategoryIcon() );
+		else if ( def.icon.isEmpty() ) button->setText( tr( "All" ) );
 		else button->setIcon( QIcon( def.icon ) );
 		button->setChecked( def.id == 0 );
 		blockListFilterGroup->addButton( button, def.id );
