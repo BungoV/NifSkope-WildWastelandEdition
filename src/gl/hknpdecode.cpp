@@ -532,7 +532,20 @@ HknpSystem hknpDecode( const QByteArray & data )
 				HknpConstraint jc;
 				jc.childBody = int( r.u32( e + 0x08 ) );
 				jc.parentBody = int( r.u32( e + 0x0c ) );
-				jc.kind = objClass.value( global.value( e, -1 ) );
+				const qsizetype cd = global.value( e, -1 );
+				jc.kind = objClass.value( cd );
+				// Only the hkp* constraint datas share this prologue.
+				// hknpBreakableConstraintData wraps one and lays out differently, so
+				// reading +0x30 there would produce a plausible-looking wrong frame.
+				if ( cd >= 0 && jc.kind.startsWith( QLatin1String( "hkp" ) ) ) {
+					for ( int k = 0; k < 3; k++ ) {
+						jc.rotA[k] = r.vec3( cd + 0x30 + qsizetype( k ) * 16 );
+						jc.rotB[k] = r.vec3( cd + 0x70 + qsizetype( k ) * 16 );
+					}
+					jc.pivotA = r.vec3( cd + 0x30 + 48 );
+					jc.pivotB = r.vec3( cd + 0x70 + 48 );
+					jc.hasFrames = true;
+				}
 				sys.constraints.append( jc );
 			}
 		}

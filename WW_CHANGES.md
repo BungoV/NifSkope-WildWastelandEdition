@@ -1,5 +1,35 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27af — Ragdoll joint frames decode
+
+Each constraint carries two `hkTransform`s — `+0x30` for the parent side, `+0x70`
+for the child — four `hkVector4` apiece: three basis rows then the pivot. Now on
+`HknpConstraint`, and `collision` prints the child-side pivot per joint.
+
+**Checked before being written, not after.** A 4x4 read at a correct offset has an
+orthonormal basis with determinant +1; bytes at a wrong one essentially never do.
+Across all 35 vanilla ragdolls, **1514 of 1518** constraint frames pass. The four
+that fail are all `hknpBreakableConstraintData` — a different wrapper class my
+filter caught by name — so the hkp* classes are **1514/1514**, and the decoder
+now skips non-`hkp` classes rather than misreading them. 755 of 757 joints decode
+frames; the 2 without are those breakable wrappers.
+
+A second, independent sign the offset is right: the brahmin's `RLeg1` pivot reads
+`(-0.000, 0.000, -0.302)` and `LLeg1` reads `(0.000, -0.000, 0.302)` — exact ±Z
+mirrors for mirror-symmetric bones.
+
+### Still missing: the angular limits
+
+They sit in the Havok **atom chain** after the frames. Each atom begins with a u16
+type and carries **no size field**, so walking it needs a type→size table.
+Observed on the brahmin: `0x05`→16, `0x0e`→16, `0x0f`→32, `0x10`→32,
+`0x11`→16, `0x12`→40, `0x13`→96, `0x17`→16 — inferred from **two** objects,
+which is not enough to build on. Deliberately not implemented on that basis;
+today already produced two bugs from plausible-looking wrong reads.
+
+Values a correct decode should recover: tail-base twist ±0.087266 rad (±5°), cone
+0.69813 (40°), knee hinge -0.2618..0.69813 (-15°..40°).
+
 ## 2026-07-27ae — The ragdoll joint graph decodes
 
 `hknpRagdollData`'s array at `+0x50` is the constraint binding table — 0x18 bytes

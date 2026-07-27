@@ -310,10 +310,22 @@ order; each is independently verifiable against a vanilla file:
    nearest *embodied* ancestor (bodiless intermediates like `LNeckHub` skipped) —
    and all 35 vanilla ragdolls decode, 757 joints of which 237 are hinges.
 
-   **Still to do: the constraint PAYLOADS.** `hkpRagdollConstraintData`,
-   `hkpLimitedHingeConstraintData` and `hkpPositionConstraintMotor` objects hold
-   the pivots, axes and angular limits, and none of that is read yet. An encoder
-   needs them — the graph alone would re-emit joints with no limits.
+   **Joint FRAMES also done 07-27af**: `hkTransform` at constraint `+0x30`
+   (parent side) and `+0x70` (child side), three basis rows then the pivot, on
+   `HknpConstraint::rotA/rotB/pivotA/pivotB`. 755 of 757 joints decode frames; the
+   2 that do not are `hknpBreakableConstraintData`, a wrapper with its own layout
+   that is deliberately skipped rather than misread.
+
+   **Still to do: the angular LIMITS.** They live in the Havok atom chain after
+   the frames — `hkpRagdollConstraintData` runs setupStabilization / ragdollMotors
+   / angFriction / twistLimit / coneLimit / planesLimit / ballSocket, and
+   `hkpLimitedHingeConstraintData` a different chain. Each atom starts with a u16
+   type but carries **no size field**, so walking needs a type→size table. Sizes
+   observed on the brahmin so far: `0x05`→16, `0x0e`→16, `0x0f`→32, `0x10`→32,
+   `0x11`→16, `0x12`→40, `0x13`→96, `0x17`→16. Two samples is not enough to
+   trust that table — gather more before building on it. Sample values that
+   should survive any decode: a brahmin tail-base twist of ±0.087266 rad (±5°),
+   cone 0.69813 (40°), and a knee hinge of -0.2618..0.69813 (-15°..40°).
 5. **`hkaSkeleton`** — the ragdoll's own copy of the skeleton.
 6. Only then the encoder. The array machinery in `hknpEncodeCompressedMesh` is
    directly reusable — the ragdoll root uses the same `hkArray` layout at the same

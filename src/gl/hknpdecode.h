@@ -115,6 +115,19 @@ struct HknpConstraint
 	int parentBody = -1;
 	//! Havok class name, e.g. hkpRagdollConstraintData / hkpLimitedHingeConstraintData
 	QString kind;
+
+	/*! The joint's frame in each body's space: a rotation basis and a pivot.
+	 *
+	 * hkTransform at constraint +0x30 (parent side) and +0x70 (child side), four
+	 * hkVector4 each - three basis rows then the pivot. Confirmed by checking
+	 * every constraint in all 35 vanilla ragdolls: 1514 of 1514 hkp* frames are
+	 * orthonormal with determinant +1, which bytes at a wrong offset are not. The
+	 * four that fail are hknpBreakableConstraintData, a different wrapper class
+	 * with its own layout, and are skipped rather than decoded.
+	 */
+	bool hasFrames = false;
+	Vector3 rotA[3], rotB[3];
+	Vector3 pivotA, pivotB;
 };
 
 //! A decoded bhkPhysicsSystem blob

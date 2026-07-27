@@ -465,11 +465,17 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 				return QString( "body %1" ).arg( body );
 			};
 			for ( const HknpConstraint & jc : sys.constraints ) {
+				QString pivots;
+				if ( jc.hasFrames ) {
+					pivots = QString( "  pivot %1 %2 %3" )
+						.arg( jc.pivotB[0], 0, 'f', 3 ).arg( jc.pivotB[1], 0, 'f', 3 )
+						.arg( jc.pivotB[2], 0, 'f', 3 );
+				}
 				out() << QString( "  %1 %2 %3" )
 							.arg( nodeFor( jc.childBody ), -34 )
 							.arg( nodeFor( jc.parentBody ), -34 )
 							.arg( jc.kind )
-					  << Qt::endl;
+					  << pivots << Qt::endl;
 			}
 		}
 		out() << QString( "  %1 %2 %3 %4" ).arg( "shape", -6 ).arg( "class", -34 )
