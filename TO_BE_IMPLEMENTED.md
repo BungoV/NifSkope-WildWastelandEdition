@@ -367,6 +367,35 @@ order; each is independently verifiable against a vanilla file:
    ragdolls, so an encoder emits identity of length `bones`. Shape entries at
    `+0x60` are 8 bytes of nothing but a global fixup to the shape.
 
+   **Shape encoding is a fixed template** (measured 07-28c across all 801 vanilla
+   capsules and spheres). A `hknpCapsuleShape` is not a primitive: it is a full
+   convex polytope *plus* the two exact end points, and every vanilla one has the
+   same topology — **8 verts, 8 planes, 6 faces, 24 indices, 432 bytes**, with the
+   index table and the face table **byte-identical across all 778**:
+
+   ```
+   faces   00 00 04 04  04 00 04 04  08 00 04 04  0c 00 04 04  10 00 04 04  14 00 04 04
+   indices 07 06 02 03  03 02 00 01  07 05 04 06  01 00 04 05  01 05 07 03  02 06 04 00
+   ```
+
+   So both tables are constants an encoder embeds verbatim. What varies is only
+   the geometry, and it is a **square-section box around the capsule axis** — all
+   8 hull verts are equidistant from the A–B segment in all 778, so the corners
+   are `±margin` perpendicular to the axis at each end. `convexRadius` (`+0x14`)
+   is the capsule radius minus that margin; margin runs 0.000125 to 0.0186 with
+   70 distinct values, so it is per-capsule and must be carried, not defaulted.
+
+   Layout: `+0x14` convexRadius, `+0x18` a constant `0.08693` (shared with
+   spheres), `+0x30` vertex relArray, `+0x40`/`+0x44`/`+0x48` plane / face / index
+   relArrays, `+0x50` and `+0x60` the exact end points (`hkVector4`, w = 1), then
+   verts from `+0x70`. Each hull vert's w encodes its own index in the low
+   mantissa bits of 0.5.
+
+   `hknpSphereShape` is far simpler: **128 bytes, 4 identical verts** (SIMD
+   padding) from `+0x40`, radius in `convexRadius`, no plane/face/index arrays at
+   all — which is exactly why reading those three fields on a sphere returns
+   vertex bytes, the bug fixed in 07-27ad.
+
    **Class name hashes** for the encoder's `classNames` table, read out of the
    vanilla files and identical across all 35: `hkaSkeleton` `0xfec1cedb`,
    `hknpRagdollData` `0xdc8f20ab`, `hknpCapsuleShape` `0x60a75f4c`,

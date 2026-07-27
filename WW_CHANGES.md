@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28d — Shape encoding is a fixed template
+
+A `hknpCapsuleShape` is not a primitive. It is a full convex polytope *plus* the
+two exact end points — which is why the decoder recovers its radius from the hull
+rather than reading it. The question for the encoder was whether that hull has to
+be generated in general, and it does not: across all **778** vanilla capsules the
+topology is identical — 8 verts, 8 planes, 6 faces, 24 indices, 432 bytes — and
+the index table and face table are **byte-identical in all 778**. Both are
+constants to embed verbatim.
+
+Only the geometry varies, and it is a square-section box around the capsule axis:
+all 8 hull verts are equidistant from the A–B segment in all 778, so the corners
+are `±margin` perpendicular to the axis at each end. The margin is genuinely
+per-capsule (0.000125 to 0.0186, 70 distinct values) and must be carried rather
+than defaulted; `convexRadius` is the capsule radius minus it.
+
+`hknpSphereShape` is 128 bytes with 4 identical SIMD-padded verts and no plane,
+face or index arrays at all — which is precisely why reading those three fields
+on a sphere returns vertex bytes, the bug fixed in 07-27ad.
+
+Layouts in TO_BE_IMPLEMENTED item 6. With this the encoder's remaining unknown
+is only `hknpShapeMassProperties`, which capsule-and-sphere ragdolls do not use.
+
 ## 2026-07-28c — The ragdoll root's full layout, and the class hashes
 
 Groundwork for the encoder: every member of `hknpRagdollData`, not just the ones
