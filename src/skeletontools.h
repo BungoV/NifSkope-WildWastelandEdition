@@ -136,6 +136,20 @@ bool skeletonReparent( NifModel * nif, int block, int newParent, bool keepTransf
 //! positions (Blender's dissolve). Refuses on the root.
 bool skeletonDissolve( NifModel * nif, int block, QString * error );
 
+/*! Mirror a bone (optionally its whole subtree) to the opposite side.
+ *
+ * The mirror is named flip(name), placed at the world transform reflected across
+ * the YZ plane, and parented under the mirror of the source's parent when one
+ * exists. Rotation is mirrored by conjugation (M R M) so the result stays a
+ * PROPER rotation — negating a single column would give a left-handed basis and
+ * animation would rotate the wrong way.
+ *
+ * updateExisting = false is Duplicate Mirrored (refuses if the target exists);
+ * true is Symmetrize (overwrites it).
+ */
+int skeletonMirrorBone( NifModel * nif, int block, bool wholeSubtree, bool updateExisting,
+						QString * error );
+
 //! Remove a bone and everything under it.
 bool skeletonDeleteSubtree( NifModel * nif, int block, QString * error );
 

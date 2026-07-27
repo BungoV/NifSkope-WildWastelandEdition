@@ -496,6 +496,59 @@ int cmdSkeletonSelfTest( const QString & file )
 		}
 	}
 
+	// --- mirror: X negated, and STILL A PROPER ROTATION ---------------------
+	// The determinant check is the point. Mirroring by negating one column of the
+	// rotation would give det = -1 — a left-handed basis — and the mirrored bone
+	// would animate the wrong way round. Conjugation (M R M) must keep det = +1.
+	{
+		int sided = -1;
+		for ( const SkeletonBoneInfo & b : skeletonAnalyse( &nif ).bones ) {
+			if ( b.name.isEmpty() || b.parent < 0 )
+				continue;
+			if ( skeletonFlipBoneName( b.name ) != b.name ) {
+				sided = b.block;
+				break;
+			}
+		}
+		if ( sided < 0 ) {
+			out() << "mirror     skipped, no L/R-named bone in this file" << Qt::endl;
+		} else {
+			const QString srcName = nif.get<QString>( nif.getBlockIndex( sided ), "Name" );
+			const Transform srcWorld = skeletonWorldTransform( &nif, sided );
+			QString me;
+			const int mirrored = skeletonMirrorBone( &nif, sided, false, true, &me );
+			if ( mirrored < 0 ) {
+				fails << "mirror failed: " + me;
+			} else {
+				const QString dstName = nif.get<QString>( nif.getBlockIndex( mirrored ), "Name" );
+				if ( dstName != skeletonFlipBoneName( srcName ) )
+					fails << QString( "mirror named the bone %1, expected %2" )
+						.arg( dstName, skeletonFlipBoneName( srcName ) );
+
+				const Transform dstWorld = skeletonWorldTransform( &nif, mirrored );
+				const float dx = std::fabs( dstWorld.translation[0] + srcWorld.translation[0] );
+				const float dy = std::fabs( dstWorld.translation[1] - srcWorld.translation[1] );
+				const float dz = std::fabs( dstWorld.translation[2] - srcWorld.translation[2] );
+
+				const Matrix & m = dstWorld.rotation;
+				const float det =
+					  m( 0, 0 ) * ( m( 1, 1 ) * m( 2, 2 ) - m( 1, 2 ) * m( 2, 1 ) )
+					- m( 0, 1 ) * ( m( 1, 0 ) * m( 2, 2 ) - m( 1, 2 ) * m( 2, 0 ) )
+					+ m( 0, 2 ) * ( m( 1, 0 ) * m( 2, 1 ) - m( 1, 1 ) * m( 2, 0 ) );
+
+				out() << "mirror     " << srcName << " -> " << dstName
+					  << "  dX " << dx << " dY " << dy << " dZ " << dz
+					  << "  det " << det << Qt::endl;
+				if ( dx > 0.01f )
+					fails << QString( "mirror did not negate X (off by %1)" ).arg( dx );
+				if ( dy > 0.01f || dz > 0.01f )
+					fails << QString( "mirror moved Y/Z (%1, %2)" ).arg( dy ).arg( dz );
+				if ( std::fabs( det - 1.0f ) > 0.01f )
+					fails << QString( "mirrored rotation is improper, det = %1 (expected +1)" ).arg( det );
+			}
+		}
+	}
+
 	// --- reparent refuses a cycle -------------------------------------------
 	if ( skeletonReparent( &nif, leafParent, leaf, true, &e ) )
 		fails << "reparent allowed a cycle (parent under its own descendant)";

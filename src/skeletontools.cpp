@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include <QCheckBox>
 #include <QInputDialog>
 #include <QMenu>
+#include <QShortcut>
 #include <QMessageBox>
 #include <QDockWidget>
 #include <QHBoxLayout>
@@ -655,6 +656,16 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			? QObject::tr( "Rename to %1" ).arg( flipped )
 			: QObject::tr( "This bone has no L/R side in its name" ) );
 		QAction * aAdd = menu.addAction( QObject::tr( "Add Child Bone (Extrude)" ) );
+		QAction * aBatch = menu.addAction( QObject::tr( "Batch Rename..." ) );
+		aBatch->setToolTip( QObject::tr( "Find and replace across every selected bone" ) );
+		aBatch->setEnabled( !sel.isEmpty() );
+		menu.addSeparator();
+		QAction * aDup = menu.addAction( QObject::tr( "Duplicate Mirrored" ) );
+		aDup->setEnabled( flipped != primaryName );
+		QAction * aSym = menu.addAction( QObject::tr( "Symmetrize (overwrite other side)" ) );
+		aSym->setEnabled( flipped != primaryName );
+		QAction * aSymTree = menu.addAction( QObject::tr( "Symmetrize Subtree" ) );
+		aSymTree->setEnabled( flipped != primaryName );
 		menu.addSeparator();
 		QAction * aParentKeep = menu.addAction( QObject::tr( "Parent to Active — Keep Transform" ) );
 		QAction * aParentOffset = menu.addAction( QObject::tr( "Parent to Active — Keep Offset" ) );
@@ -783,6 +794,48 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			nifSnapshotOp( model, QObject::tr( "Add child bone" ), [&]() {
 				skeletonAddChildBone( model, primary, name, boneLength );
 			} );
+			refresh();
+			return;
+		}
+		if ( chosen == aBatch ) {
+			bool ok = false;
+			const QString spec = QInputDialog::getText( panel, QObject::tr( "Batch rename" ),
+				QObject::tr( "Replace text across %1 selected bone(s).\nEnter  find=replace" )
+					.arg( sel.size() ),
+				QLineEdit::Normal, QString(), &ok );
+			if ( !ok || !spec.contains( QLatin1Char( '=' ) ) )
+				return;
+			const QString findText = spec.section( QLatin1Char( '=' ), 0, 0 );
+			const QString replText = spec.section( QLatin1Char( '=' ), 1 );
+			if ( findText.isEmpty() )
+				return;
+			int changed = 0;
+			nifSnapshotOp( model, QObject::tr( "Batch rename bones" ), [&]() {
+				for ( int b : sel ) {
+					const QString old = model->get<QString>( model->getBlockIndex( b ), "Name" );
+					if ( !old.contains( findText ) )
+						continue;
+					QString nn = old;
+					nn.replace( findText, replText );
+					if ( nn != old && skeletonRenameBone( model, b, nn, &err ) )
+						changed++;
+				}
+			} );
+			refresh();
+			if ( changed < 1 )
+				QMessageBox::information( panel, QObject::tr( "Batch rename" ),
+					QObject::tr( "No selected bone contained '%1'." ).arg( findText ) );
+			return;
+		}
+		if ( chosen == aDup || chosen == aSym || chosen == aSymTree ) {
+			const bool overwrite = ( chosen != aDup );
+			const bool subtree = ( chosen == aSymTree );
+			nifSnapshotOp( model, chosen == aDup ? QObject::tr( "Duplicate mirrored" )
+												 : QObject::tr( "Symmetrize" ), [&]() {
+				skeletonMirrorBone( model, primary, subtree, overwrite, &err );
+			} );
+			if ( !err.isEmpty() )
+				QMessageBox::warning( panel, QObject::tr( "Mirror failed" ), err );
 			refresh();
 			return;
 		}
@@ -939,6 +992,56 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 				refresh();
 			} );
 	}
+
+	// Ctrl+P — Blender's Set Parent. Opens the same two-way choice Blender does
+	// rather than picking one silently, because Keep Transform vs Keep Offset is
+	// exactly where a careless reparent deforms a rig. Scoped to the tree widget so
+	// it cannot shadow anything global.
+	auto * parentShortcut = new QShortcut( QKeySequence( Qt::CTRL | Qt::Key_P ), tree );
+	parentShortcut->setContext( Qt::WidgetWithChildrenShortcut );
+	QObject::connect( parentShortcut, &QShortcut::activated, panel, [=]() mutable {
+		NifModel * model = skope ? skope->getNifModel() : nif;
+		if ( !model )
+			return;
+		const QList<int> sel = selectedBlocks();
+		if ( sel.size() < 2 ) {
+			QMessageBox::information( panel, QObject::tr( "Set Parent" ),
+				QObject::tr( "Select the bones to move, then Ctrl-click the new parent last." ) );
+			return;
+		}
+		const int newParent = sel.last();
+
+		QMenu m;
+		m.addSection( QObject::tr( "Set Parent to %1" )
+			.arg( model->get<QString>( model->getBlockIndex( newParent ), "Name" ) ) );
+		QAction * keep = m.addAction( QObject::tr( "Keep Transform" ) );
+		QAction * offset = m.addAction( QObject::tr( "Keep Offset" ) );
+		QAction * chosen = m.exec( QCursor::pos() );
+		if ( chosen != keep && chosen != offset )
+			return;
+
+		if ( skeletonFileHasRagdoll( model )
+			&& QMessageBox::warning( panel, QObject::tr( "Ragdoll will be stale" ),
+				QObject::tr( "Reparenting %1 bone(s).\n\nThis file has a bhkRagdollSystem, which "
+					"NifSkope can read but not rebuild, so its physics will no longer match the "
+					"skeleton.\n\nProceed anyway?" ).arg( sel.size() - 1 ),
+				QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) != QMessageBox::Yes )
+			return;
+
+		QString err;
+		nifSnapshotOp( model, QObject::tr( "Parent bones" ), [&]() {
+			for ( int b : sel ) {
+				if ( b == newParent )
+					continue;
+				QString e;
+				if ( !skeletonReparent( model, b, newParent, chosen == keep, &e ) && err.isEmpty() )
+					err = e;
+			}
+		} );
+		if ( !err.isEmpty() )
+			QMessageBox::warning( panel, QObject::tr( "Parent failed" ), err );
+		refresh();
+	} );
 
 	// The armature draws while this dock is up and stops when it is put away, so
 	// the viewport is never left with bones over a mesh the user moved on from.

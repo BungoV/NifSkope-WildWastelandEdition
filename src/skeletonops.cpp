@@ -428,6 +428,159 @@ bool skeletonDissolve( NifModel * nif, int block, QString * error )
 	return true;
 }
 
+//! Find a node by name; -1 when absent or ambiguous is irrelevant (first wins).
+static int skelFindByName( const NifModel * nif, const QString & name )
+{
+	if ( name.isEmpty() )
+		return -1;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex idx = nif->getBlockIndex( b );
+		if ( idx.isValid() && nif->blockInherits( idx, "NiAVObject" )
+			&& nif->get<QString>( idx, "Name" ) == name )
+			return b;
+	}
+	return -1;
+}
+
+/*! Mirror a world transform across the YZ plane (negate X).
+ *
+ * translation: X negated.
+ *
+ * rotation: M * R * M with M = diag(-1,1,1). Conjugating rather than simply
+ * negating a column is what keeps the result a PROPER rotation — det(M R M) =
+ * det(M)^2 det(R) = det(R), because det(M) = -1 squares away. Negating one column
+ * instead would give an improper (reflected) basis, which is a mirrored bone whose
+ * axes are left-handed: animation applied to it would rotate the wrong way.
+ *
+ * NIF bones have no roll, so there is nothing further to correct.
+ */
+static Transform skelMirrorWorld( const Transform & w )
+{
+	Transform out = w;
+	out.translation[0] = -w.translation[0];
+	// M * R * M negates the off-diagonal terms that mix X with Y/Z, and leaves
+	// the rest — written out rather than doing two matrix products.
+	for ( int i = 0; i < 3; i++ ) {
+		for ( int j = 0; j < 3; j++ ) {
+			const bool flipI = ( i == 0 );
+			const bool flipJ = ( j == 0 );
+			out.rotation( i, j ) = ( flipI != flipJ ) ? -w.rotation( i, j ) : w.rotation( i, j );
+		}
+	}
+	out.scale = w.scale;
+	return out;
+}
+
+/*! One bone's mirror: create or update the node named flip(name), placed at the
+ * mirrored world transform, parented under the mirror of this bone's parent.
+ *
+ * Returns the mirrored block, or -1 with an error.
+ */
+static int skelMirrorOne( NifModel * nif, int block, bool updateExisting, QString * error )
+{
+	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return -1; };
+	QModelIndex iSrc = nif->getBlockIndex( block );
+	if ( !iSrc.isValid() )
+		return fail( QCoreApplication::translate( "skeleton", "invalid bone" ) );
+
+	const QString name = nif->get<QString>( iSrc, "Name" );
+	const QString mirrorName = skeletonFlipBoneName( name );
+	if ( mirrorName == name )
+		return fail( QCoreApplication::translate( "skeleton",
+			"'%1' has no L/R side in its name, so it has no mirror" ).arg( name ) );
+
+	// The mirror belongs under the mirror of this bone's parent when that exists,
+	// otherwise under the same parent (a midline parent like Spine stays put).
+	const int srcParent = nif->getParent( block );
+	int dstParent = srcParent;
+	if ( srcParent >= 0 ) {
+		const QString pName = nif->get<QString>( nif->getBlockIndex( srcParent ), "Name" );
+		const QString pMirror = skeletonFlipBoneName( pName );
+		if ( pMirror != pName ) {
+			const int found = skelFindByName( nif, pMirror );
+			if ( found >= 0 )
+				dstParent = found;
+		}
+	}
+	if ( dstParent < 0 )
+		return fail( QCoreApplication::translate( "skeleton", "no parent to attach the mirror to" ) );
+
+	const Transform mirroredWorld = skelMirrorWorld( skeletonWorldTransform( nif, block ) );
+
+	int dst = skelFindByName( nif, mirrorName );
+	if ( dst >= 0 && !updateExisting )
+		return fail( QCoreApplication::translate( "skeleton",
+			"'%1' already exists — use Symmetrize to overwrite it" ).arg( mirrorName ) );
+
+	if ( dst < 0 ) {
+		QModelIndex iNew = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+		if ( !iNew.isValid() )
+			return fail( QCoreApplication::translate( "skeleton", "could not create the mirrored bone" ) );
+		dst = nif->getBlockNumber( iNew );
+		nif->set<QString>( iNew, "Name", mirrorName );
+		nif->set<float>( iNew, "Scale", 1.0f );
+		QList<int> kids;
+		QModelIndex iCh = nif->getIndex( nif->getBlockIndex( dstParent ), "Children" );
+		for ( int r = 0; r < nif->rowCount( iCh ); r++ )
+			kids << nif->getLink( nif->getIndex( iCh, r ) );
+		kids << dst;
+		if ( QModelIndex iNum = nif->getIndex( nif->getBlockIndex( dstParent ), "Num Children" ); iNum.isValid() )
+			nif->set<int>( iNum, kids.size() );
+		nif->updateArraySize( nif->getIndex( nif->getBlockIndex( dstParent ), "Children" ) );
+		QModelIndex iCh2 = nif->getIndex( nif->getBlockIndex( dstParent ), "Children" );
+		for ( int i = 0; i < kids.size(); i++ )
+			nif->setLink( nif->getIndex( iCh2, i ), kids.at( i ) );
+	} else {
+		// Existing mirror: move it under the right parent first, without trying to
+		// preserve its world position — the mirrored transform written below is the
+		// whole point.
+		QString e;
+		if ( nif->getParent( dst ) != dstParent && !skeletonReparent( nif, dst, dstParent, false, &e ) )
+			return fail( e );
+	}
+
+	// local = inverse(parentWorld) * mirroredWorld
+	const Transform parentWorld = skeletonWorldTransform( nif, dstParent );
+	const Transform local = parentWorld.inverted() * mirroredWorld;
+	local.writeBack( nif, nif->getBlockIndex( dst ) );
+	return dst;
+}
+
+int skeletonMirrorBone( NifModel * nif, int block, bool wholeSubtree, bool updateExisting,
+						QString * error )
+{
+	if ( !nif || block < 0 ) {
+		if ( error )
+			*error = QCoreApplication::translate( "skeleton", "invalid bone" );
+		return -1;
+	}
+
+	// Breadth-first so a parent's mirror exists before its children look for it.
+	QList<int> queue;
+	queue << block;
+	int firstResult = -1;
+	QString firstError;
+	while ( !queue.isEmpty() ) {
+		const int b = queue.takeFirst();
+		QString e;
+		const int made = skelMirrorOne( nif, b, updateExisting, &e );
+		if ( made < 0 ) {
+			if ( firstError.isEmpty() )
+				firstError = e;
+		} else if ( firstResult < 0 ) {
+			firstResult = made;
+		}
+		if ( wholeSubtree ) {
+			for ( int c : nif->getChildLinks( b ) )
+				if ( c >= 0 )
+					queue << c;
+		}
+	}
+	if ( firstResult < 0 && error )
+		*error = firstError;
+	return firstResult;
+}
+
 bool skeletonDeleteSubtree( NifModel * nif, int block, QString * error )
 {
 	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return false; };
