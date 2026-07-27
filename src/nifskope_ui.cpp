@@ -5079,8 +5079,8 @@ void NifSkope::initDockWidgets()
 	// dotted drag grips read as sliders and wasted row width, so group
 	// boundaries are drawn by the thin 2px separator line instead
 	for ( QToolBar * tb : { ui->tFile, ui->tRender, ui->tMode, ui->tView, ui->tLOD } ) {
-		QSize is = tb->iconSize();
-		tb->setIconSize( QSize( is.width() * 3 / 4, is.height() * 3 / 4 ) );
+		// no setIconSize here: setToolbarSize() runs later from restoreUi() and
+		// overwrites whatever this set, so a second opinion here only confuses
 		tb->setMovable( false );
 		tb->setStyleSheet( QStringLiteral(
 			"QToolBar::separator { background: %1; width: 2px; height: 2px; margin: 4px 6px; }" )
@@ -7460,7 +7460,7 @@ void NifSkope::loadTheme()
 		a[theme]->setChecked( true );
 	}
 
-	toolbarSize = ToolbarSize( settings.value( "Settings/Theme/Large Icons", ToolbarLarge ).toBool() );
+	toolbarSize = ToolbarSize( settings.value( "Settings/Theme/Large Icons", ToolbarSmall ).toBool() );
 
 	//setThemeActions();
 	setToolbarSize();
@@ -7623,9 +7623,18 @@ void NifSkope::setThemeActions()
 
 void NifSkope::setToolbarSize()
 {
+	/* 36px was the "large" icon size and it is the DEFAULT, which is why
+	 * flattening the buttons barely changed how big the top bar looked: the
+	 * chrome went but the glyphs stayed enormous. Blender's header icons sit
+	 * around 16px, and 36 is more than twice that.
+	 *
+	 * Small is 16 to match. Large stays available for high-DPI and accessibility
+	 * but comes down to 24, which is still generous - the old 36 made a single
+	 * row of ~15 controls taller than the menu bar and the tab bar combined.
+	 */
 	QSize size = {16, 16};
 	if ( toolbarSize == ToolbarLarge )
-		size = {36, 36};
+		size = {24, 24};
 
 	for ( QObject * o : children() ) {
 		auto tb = qobject_cast<QToolBar *>(o);

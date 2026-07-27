@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27ab — The top bar was still 36px icons
+
+Flattening the buttons (27z) removed the chrome but the bar still looked the
+same size, and the reason is that it was: **`setToolbarSize()`'s "large" value is
+36px and large is the DEFAULT.** The glyphs, not the boxes, were setting the
+height. Blender's header icons sit around 16.
+
+- Small is 16 to match Blender.
+- Large comes down 36 → 24. Still generous, still there for high-DPI and
+  accessibility, but 36 made one row of ~15 controls taller than the menu bar and
+  the tab bar put together.
+- The **default** is now Small. Installs with `Settings/Theme/Large Icons`
+  already written keep their choice and simply get the saner 24.
+- Dropped the construction-time `iconSize * 3 / 4` shrink: `setToolbarSize()`
+  runs afterwards from `restoreUi()` and overwrote it anyway, so it was a second
+  opinion that never applied and only misled.
+
+Worth noting for anyone reading 27z: the flattening was still worth doing — it
+is what freed ~115px of width — but it was answering the wrong half of the
+question on its own.
+
 ## 2026-07-27aa — Slimmer Block List and Block Details
 
 **Block List: eight filter chips → one dropdown.** They were already mutually
