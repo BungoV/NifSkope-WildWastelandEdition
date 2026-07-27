@@ -50,11 +50,64 @@ Also checked and *not* a bug: the harness looked unpinned (`vp=395x517` rather
 than 1280×800), but `nifskope_ui.cpp:3269` pins the *window* to 1280×800 and
 395×517 is just the GL viewport's share of it once the docks take their space.
 
-Diagnostics kept, all inert unless their env var is set. Note two of them
-deliberately *change* rendering when enabled, so they are debug switches, not
-probes: `WW_GRID_NODEPTH` (disables depth test) and `WW_GRID_RED` (forces red,
-8 px). `WW_GRID_PROBE` only logs, to `ww_grid_probe.log` beside the exe, capped at
-40 lines.
+Diagnostics kept, all inert unless their env var is set (verified: regression set
+7/7 identical with them compiled in). Note two of them deliberately *change*
+rendering when enabled, so they are debug switches, not probes: `WW_GRID_NODEPTH`
+(disables depth test) and `WW_GRID_RED` (forces red, 8 px). `WW_GRID_PROBE` only
+logs, to `ww_grid_probe.log` beside the exe, capped at 40 lines.
+
+### Round 2, same day — five more eliminations and two wrong turns
+
+Kept going. Everything below is measured, not reasoned.
+
+**Also eliminated:**
+- **Render-target mismatch.** Every `paintGL` frame and every line draw reports
+  `drawFbo=0`/`readFbo=0`, and the grab reads FBO 0. Same buffer. This had been
+  the leading hypothesis at the end of round 1; it is wrong.
+- **The uniform block.** `viewportDimensions` reads `0,0,395,517` and
+  `projectionMatrix` is a sane perspective matrix *at the grid draw*. So the
+  NaN-from-zero-viewport theory below is disproven.
+- **Clipping / camera.** Reproducing the shader's near-plane test on the CPU for
+  the first grid line: `zw0=2325.6`, `zw1=-1772.9`, world origin `zwMid=276.3`.
+  One endpoint in front, one behind — exactly the case `drawLine()` clips and
+  emits. `mvTrans=(30.06, ~0, -139.09)`, a sane camera.
+- **Silent driver rejection.** `glGetError()` immediately after the draw is clean.
+  Worth stating because release builds compile out the *only* glGetError loop in
+  the paint path (`glview.cpp` guards it with `#ifndef QT_NO_DEBUG`), so a
+  rejected draw would otherwise be invisible.
+- **Primitive/stage mismatch.** `drawLines` defaults to `GL_LINES`, matching
+  `layout( lines ) in` in lines.geom; `.geom` files are mapped to
+  `GL_GEOMETRY_SHADER` (glcontext.cpp:870) and `lines.geom` deploys. The program
+  links (the draw proceeds), so the geometry stage is present.
+- **Not a framing artifact.** Forced red in a *top* view — where the Z=0 grid
+  faces the camera and must fill the frame — still yields `redPx=0`.
+
+So: a draw with the correct program, a content-addressed VAO, sane matrices
+producing in-frustum clip coordinates, depth disabled, opaque red at 8 px, no GL
+error, correct primitive type and a linked geometry stage — produces **zero
+fragments**. That is the state of knowledge. Still open.
+
+**Wrong turn 1 — a "harmless" fix that broke all seven baselines.** Added a
+per-frame `setViewport( 0, 0, pixelWidth, pixelHeight )` to `paintGL`, believing
+the block was zero. It moved the viewport (pixelWidth/pixelHeight need not match
+the viewport a given frame draws with — `indexAt()` sets its own for the pick
+render, and DPR differs) and changed every baseline. Reverted, with a DO-NOT
+comment left at the site so the next person does not retry it.
+
+**Wrong turn 2 — I blamed the harness for my own stale deploy.** After reverting
+`drawline.glsl` the diffs persisted, and I concluded the harness was polluted by
+persisted view state, "confirmed" by the two mismatched hashes noted earlier in
+the session. Both claims were wrong. A pristine-tree run is **7/7 identical**, so
+the harness is reproducible, and the harness pins the view to `ViewFront`
+regardless of persisted state (`nifskope_ui.cpp:3285`). The real cause: reverting
+only a shader changes no `.cpp`, so `make` relinks nothing, so `QMAKE_POST_LINK`
+never re-copies `res/shaders/` — `release/shaders/drawline.glsl` kept the modified
+version. **This project's own notes already document that trap and I walked into
+it.** Lesson, again: after a shader-only revert, force a relink (touch a `.cpp`)
+and confirm the deployed copy, or verify with `grep` against `release/shaders/`.
+
+Consequence worth keeping: the `drawline.glsl` NaN guard is **not** a safe no-op —
+it materially changed output — so it is reverted rather than kept as hardening.
 
 ## 2026-07-27h — Refraction was dead for every BGSM-backed FO4 mesh (fixed)
 

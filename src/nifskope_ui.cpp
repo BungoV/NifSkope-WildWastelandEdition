@@ -3316,6 +3316,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						qApp->processEvents();
 					}
 					skope->ogl->grabFramebuffer().save( out );
+					// TEMP DIAGNOSTIC (WW_GRID_PROBE): bracket the grab so the log
+					// shows which paintGL frames precede it, and whether any grid
+					// draw belongs to the frame actually captured.
+					if ( qEnvironmentVariableIsSet( "WW_GRID_PROBE" ) ) {
+						QFile pf( QApplication::applicationDirPath() + "/ww_grid_probe.log" );
+						if ( pf.open( QIODevice::Append | QIODevice::Text ) )
+							QTextStream( &pf ) << ">> GRAB done (image saved) <<\n";
+					}
 				}
 				qApp->quit();
 			} );

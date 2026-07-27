@@ -1580,6 +1580,27 @@ void GLView::paintGL()
 
 	updatePending = 0;
 
+	// TEMP DIAGNOSTIC (WW_GRID_PROBE): mark each frame and the framebuffer it
+	// targets, so the drawLines entries in the same log can be attributed to a
+	// frame — and so it is visible whether the frame that actually gets presented
+	// or grabbed contains any grid draw at all. See WW_CHANGES 2026-07-27i.
+	{
+		static const bool wwGridProbe = qEnvironmentVariableIsSet( "WW_GRID_PROBE" );
+		static int wwFrame = 0;
+		if ( wwGridProbe && wwFrame < 40 ) [[unlikely]] {
+			wwFrame++;
+			GLint probeFbo = 0;
+			glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &probeFbo );
+			QFile pf( QCoreApplication::applicationDirPath() + "/ww_grid_probe.log" );
+			if ( pf.open( QIODevice::Append | QIODevice::Text ) )
+				QTextStream( &pf ) << "== paintGL frame " << wwFrame
+					<< " drawFbo=" << probeFbo
+					<< " size=" << width() << "x" << height()
+					<< " disabled=" << int( isDisabled )
+					<< " haveRenderer=" << int( scene->haveRenderer() ) << " ==\n";
+		}
+	}
+
 	glDisable( GL_FRAMEBUFFER_SRGB );
 	glDepthMask( GL_TRUE );
 
@@ -1588,6 +1609,16 @@ void GLView::paintGL()
 		glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
 		return;
 	}
+
+	// DO NOT add a per-frame scene->renderer->setViewport( 0, 0, pixelWidth,
+	// pixelHeight ) here. Tried 2026-07-27 as "harmless hardening" for the startup
+	// grid/axes defect and REVERTED: it changed all seven render-regression
+	// baselines, because pixelWidth/pixelHeight do not necessarily equal the
+	// viewport this frame is actually being drawn with (indexAt() sets its own for
+	// the pick render, and DPR scaling differs), so forcing them every frame moves
+	// the viewport. It also fixed nothing — viewportDimensions in globalUniforms
+	// measured as correctly populated (0,0,395,517, sane projectionMatrix) at the
+	// grid draw, so the zero-viewport/NaN theory was wrong. See WW_CHANGES 07-27i.
 
 	// Clear Viewport
 	if ( scene->hasVisMode(Scene::VisSilhouette) ) {
@@ -3099,6 +3130,34 @@ void GLView::paintGL()
 		avgTime += frameTimes[i];
 	std::fprintf( stderr, "Average frame time = %.2f ms\n", avgTime );
 #endif
+
+	// TEMP DIAGNOSTIC (WW_GRID_RED): count forced-red pixels at the very end of the
+	// frame, to pair with the same count taken immediately after each line draw in
+	// Scene::drawLines. red>0 after the draw but 0 here means something later in
+	// the frame overwrites the grid; 0 in both means it never rasterized.
+	{
+		static const bool wwRedCount = qEnvironmentVariableIsSet( "WW_GRID_RED" );
+		static int wwEndFrame = 0;
+		if ( wwRedCount && wwEndFrame < 12 ) [[unlikely]] {
+			wwEndFrame++;
+			GLint vp[4] = { 0, 0, 0, 0 };
+			glGetIntegerv( GL_VIEWPORT, vp );
+			const int w = std::min( vp[2], 2048 ), h = std::min( vp[3], 2048 );
+			if ( w > 0 && h > 0 ) {
+				std::vector< unsigned char > px( size_t( w ) * size_t( h ) * 4 );
+				glReadPixels( vp[0], vp[1], w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data() );
+				size_t red = 0;
+				for ( size_t i = 0; i + 3 < px.size(); i += 4 ) {
+					if ( px[i] > 200 && px[i + 1] < 60 && px[i + 2] < 60 )
+						red++;
+				}
+				QFile pf( QCoreApplication::applicationDirPath() + "/ww_grid_probe.log" );
+				if ( pf.open( QIODevice::Append | QIODevice::Text ) )
+					QTextStream( &pf ) << "== endFrame " << wwEndFrame
+						<< " redPx=" << qulonglong( red ) << " ==\n";
+			}
+		}
+	}
 
 	// drain the post-compile corrective repaints (see glview.h)
 	if ( postCompileRepaints > 0 ) {

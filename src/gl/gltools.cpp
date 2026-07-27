@@ -554,6 +554,9 @@ void Scene::drawLines( const Vector3 * positions, size_t numVerts, const FloatVe
 			glGetIntegerv( GL_CURRENT_PROGRAM, &gpuProg );
 			glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &gpuVao );
 			const GLint mvLoc = context->fn->glGetUniformLocation( GLuint( gpuProg ), "modelViewMatrix" );
+			GLint drawFbo = 0, readFbo = 0;
+			glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo );
+			glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &readFbo );
 			GLint depthFunc = 0, vp[4] = { 0, 0, 0, 0 };
 			GLboolean depthTest = glIsEnabled( GL_DEPTH_TEST ), depthMask = 0;
 			glGetIntegerv( GL_DEPTH_FUNC, &depthFunc );
@@ -577,6 +580,7 @@ void Scene::drawLines( const Vector3 * positions, size_t numVerts, const FloatVe
 			QFile f( QCoreApplication::applicationDirPath() + "/ww_grid_probe.log" );
 			if ( f.open( QIODevice::Append | QIODevice::Text ) )
 				QTextStream( &f ) << "[drawLines #" << wwGridProbeCount
+					<< " drawFbo=" << drawFbo << " readFbo=" << readFbo
 					<< " verts=" << numVerts
 					<< " gpuProg=" << gpuProg << " expected=" << prog->id
 					<< ( GLuint( gpuProg ) == prog->id ? " MATCH" : " ***MISMATCH***" )
@@ -592,15 +596,89 @@ void Scene::drawLines( const Vector3 * positions, size_t numVerts, const FloatVe
 					// extent of the first line. A ±1024 grid must cross a view
 					// framed on a ~100-unit prop, so an in-range extent with a
 					// zero alpha means invisible-not-absent.
+					// The uniform BLOCK contents — the blind spot that stalled 07-17.
+					// glGetIntegerv(GL_VIEWPORT) is always right; these are what
+					// drawline.glsl and lines.geom actually read.
+					<< " ubVp=" << context->globalUniforms->viewportDimensions[0]
+					<< "," << context->globalUniforms->viewportDimensions[1]
+					<< "," << context->globalUniforms->viewportDimensions[2]
+					<< "," << context->globalUniforms->viewportDimensions[3]
+					<< " ubProj0=" << context->globalUniforms->projectionMatrix[0][0]
+					<< " ubProj11=" << context->globalUniforms->projectionMatrix[2][2]
+					<< " ubProj32=" << context->globalUniforms->projectionMatrix[3][2]
 					<< " vcAlpha=" << ( colors ? colors[0][3] : -1.0f )
 					<< " glColAlpha=" << currentGLColor[3]
 					<< " p0=(" << positions[0][0] << "," << positions[0][1] << "," << positions[0][2] << ")"
 					<< " p1=(" << positions[1][0] << "," << positions[1][1] << "," << positions[1][2] << ")"
-					<< "]\n";
+					// Reproduce the shader's near-plane test on the CPU. lines.vert
+					// does gl_Position = modelViewMatrix * v, then lines.geom does
+					// p = projectionMatrix * that, and drawLine() RETURNS EARLY
+					// (emitting nothing) when both endpoints have z+w <= 0. If these
+					// come out non-positive for every line, the geometry is simply
+					// being clipped and nothing about the GL state is at fault.
+					<< " mvTrans=(" << ( *currentModelViewMatrix ).data()[12]
+					<< "," << ( *currentModelViewMatrix ).data()[13]
+					<< "," << ( *currentModelViewMatrix ).data()[14] << ")";
+				{
+					const float * mv = ( *currentModelViewMatrix ).data();
+					const float * pr = &( context->globalUniforms->projectionMatrix[0][0] );
+					auto clipZW = [&]( const Vector3 & w ) {
+						float v[4];
+						for ( int r = 0; r < 4; r++ ) {
+							v[r] = mv[r] * w[0] + mv[4 + r] * w[1] + mv[8 + r] * w[2] + mv[12 + r];
+						}
+						float cz = pr[2] * v[0] + pr[6] * v[1] + pr[10] * v[2] + pr[14] * v[3];
+						float cw = pr[3] * v[0] + pr[7] * v[1] + pr[11] * v[2] + pr[15] * v[3];
+						return cz + cw;
+					};
+					QTextStream( &f ) << " zw0=" << clipZW( positions[0] )
+						<< " zw1=" << clipZW( positions[1] )
+						<< " zwMid=" << clipZW( Vector3( 0.0f, 0.0f, 0.0f ) ) << "]\n";
+				}
 		}
 	}
 
 	context->fn->glDrawArrays( GLenum( elementMode ), 0, GLsizei( numVerts ) );
+
+	// TEMP DIAGNOSTIC (WW_GRID_RED): read the colour buffer straight back and count
+	// the forced-red pixels. This is the measurement that separates "the draw never
+	// rasterized" (count 0 here) from "something later overwrote it" (count > 0
+	// here but 0 at end of frame — see the matching probe in paintGL).
+	if ( !selecting ) [[unlikely]] {
+		static const bool wwRedCount = qEnvironmentVariableIsSet( "WW_GRID_RED" );
+		static int wwRedCountCalls = 0;
+		if ( wwRedCount && wwRedCountCalls < 14 ) {
+			wwRedCountCalls++;
+			// glGetError right after the draw. Release builds compile out the only
+			// glGetError loop in the paint path (glview.cpp guards it with
+			// #ifndef QT_NO_DEBUG), so a draw rejected outright by the driver is
+			// completely silent here — which is exactly how a draw can look
+			// perfectly set up and produce no fragments.
+			const GLenum drawErr = glGetError();
+			if ( drawErr != GL_NO_ERROR ) {
+				QFile ef( QCoreApplication::applicationDirPath() + "/ww_grid_probe.log" );
+				if ( ef.open( QIODevice::Append | QIODevice::Text ) )
+					QTextStream( &ef ) << "    *** GL ERROR after draw: 0x"
+						<< QString::number( drawErr, 16 ) << " ***\n";
+			}
+			GLint vp[4] = { 0, 0, 0, 0 };
+			glGetIntegerv( GL_VIEWPORT, vp );
+			const int w = std::min( vp[2], 2048 ), h = std::min( vp[3], 2048 );
+			if ( w > 0 && h > 0 ) {
+				std::vector< unsigned char > px( size_t( w ) * size_t( h ) * 4 );
+				glReadPixels( vp[0], vp[1], w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data() );
+				size_t red = 0;
+				for ( size_t i = 0; i + 3 < px.size(); i += 4 ) {
+					if ( px[i] > 200 && px[i + 1] < 60 && px[i + 2] < 60 )
+						red++;
+				}
+				QFile f( QCoreApplication::applicationDirPath() + "/ww_grid_probe.log" );
+				if ( f.open( QIODevice::Append | QIODevice::Text ) )
+					QTextStream( &f ) << "    afterDraw #" << wwRedCountCalls
+						<< " redPx=" << qulonglong( red ) << "\n";
+			}
+		}
+	}
 }
 
 void Scene::drawLineStrip( const Vector3 * positions, size_t numVerts, const FloatVector4 * colors )
