@@ -65,7 +65,7 @@ bottom.
 | # | area | size | state |
 |---|---|---|---|
 | 0 | **Renderer: PBR draws empty frames** | medium | **parked behind one constant** — hottest open bug |
-| 1 | **Skeleton Manager** workspace | large | not started — biggest open feature |
+| 1 | **Skeleton Manager** workspace | large | **phase 1 SHIPPED 07-27j** (read-only); phases 2-4 open |
 | 2 | **Pose Manager** workspace | large | **SHIPPED 07-22d..l**; prop staging + 4 refinements deferred |
 | 3 | Performance 15c + 16 (flattened storage + off-thread parse) | large | deferred as one joint project, prereqs listed |
 | 4 | Collision Manager P4 | medium | partly **blocked** (compound/instance) |
@@ -125,13 +125,33 @@ placement.
 
 ---
 
-## 1. Skeleton Manager workspace — NOT STARTED
+## 1. Skeleton Manager workspace — PHASE 1 SHIPPED 2026-07-27j
 
-Reserved as a **disabled** workspace menu entry — `plannedWorkspaces` in
-`nifskope_ui.cpp:6137` ("Skeleton Manager (Planned)"), below the six implemented
-workspaces (Timeline, Material, Collision, Rigging, Vertex Paint, UV). No dock is
-created — deliberately, so persisted workspace indexes do not shift when it
-lands. (Verified 07-27; the entry moved from ~L4747 as the file grew.)
+**Shipped (phase 1, read-only):** `src/skeletontools.{h,cpp}` +
+`Workspaces ▸ Skeleton`. Hierarchy tree, deforming/unused/not-a-bone
+classification, per-bone shapes/verts/weight, filters, search, selection sync,
+rest-pose toggle, and the two free validation findings (dangling skin bones,
+duplicate names). CLI `skeleton <file> [--validate]`, exit 1 on findings.
+Verified by `WW_SKELETON_TEST` plus an independent weight cross-check (summed
+weight 1688.98 vs 1689 vertices). Writes nothing.
+
+The workspace is appended LAST in the managers list on purpose: the persisted
+`UI/Workspace` index is positional, so inserting earlier would reopen a
+different workspace for every existing user.
+
+**Still open here:**
+- **Phase 2 — validation + prune.** The remaining checks, then
+  `Prune unused bones`, which must remap every vertex's bone indices (the Join
+  bug in reverse; `WW_CHANGES 2026-07-19b` applies exactly). Also add
+  `--prune-unused` to the CLI. Note the *Unused* filter still has no positive
+  test case: a 40-mesh sweep of vanilla FO4 armour found zero unused bones, so
+  phase 2 needs a constructed fixture.
+- **Phase 3 — bone transform + rebind.** The genuinely risky part (§A.3):
+  every transform edit must recompute the affected inverse-bind transforms in
+  the same undo step, or the mesh tears. Ships only behind the Create Skin
+  gauntlet's must-not-move check.
+- **Phase 4 — persistent skeleton reference slot**, then octahedral viewport
+  bone display.
 
 **Design: `SKELETON_AND_POSE_PLAN.md`** (2026-07-21) — Blender-grounded
 (Armature Edit Mode), with the rebind hazard, phasing and CLI surface worked out.

@@ -232,6 +232,7 @@ HEADERS += \
 	src/nifmerge.h \
 	src/nifskope.h \
 	src/shortcutregistry.h \
+	src/skeletontools.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
 	src/spellbook.h \
@@ -359,6 +360,7 @@ SOURCES += \
 	src/posetools.cpp \
 	src/nifskope_ui.cpp \
 	src/shortcutregistry.cpp \
+	src/skeletontools.cpp \
 	src/uvtools.cpp \
 	src/spellbook.cpp \
 	src/version.cpp \

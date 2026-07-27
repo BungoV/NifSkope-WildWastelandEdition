@@ -16,6 +16,7 @@ See the LICENSE.md file for the full license text.
 #include "spellbook.h"
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
+#include "skeletontools.h"
 #include "spells/animationsetup.h"
 #include "io/pbrmfile.h"
 
@@ -326,6 +327,73 @@ int cmdPbrmResolve( const QString & file )
 	}
 
 	out() << shaders << " shader properties, " << adopted << " would adopt a pbrm" << Qt::endl;
+	return 0;
+}
+
+/*! `skeleton <file> [--validate]` - SKELETON_AND_POSE_PLAN.md A.8.
+ *
+ * Shares skeletonAnalyse() with the Skeleton Manager dock, so the two can never
+ * disagree about which nodes are bones or how much of the skin each one drives.
+ *
+ * `--validate` exits non-zero when a finding fires, which is the real payoff: it
+ * makes this usable as a pre-export gate in a build script. Read-only - phase 1
+ * writes nothing, so the plan's `--prune-unused` is deliberately absent until
+ * phase 2 lands together with its bone-index remap tests.
+ */
+int cmdSkeleton( const QString & file, bool validateOnly )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	const SkeletonReport report = skeletonAnalyse( &nif );
+
+	if ( !validateOnly ) {
+		out() << "file    " << file << Qt::endl;
+		out() << "root    "
+			  << ( report.rootBlock >= 0
+					? QString( "%1 [%2]" )
+						.arg( nif.get<QString>( nif.getBlockIndex( report.rootBlock ), "Name" ) )
+						.arg( report.rootBlock )
+					: QStringLiteral( "<none>" ) )
+			  << Qt::endl;
+		out() << "shapes  " << report.skinnedShapes << " skinned" << Qt::endl;
+		out() << QString( "%1  %2 %3 %4" )
+					.arg( "bone", -44 ).arg( "shapes", 7 ).arg( "verts", 8 ).arg( "weight", 10 )
+			  << Qt::endl;
+
+		for ( const SkeletonBoneInfo & b : report.bones ) {
+			// Two spaces per level: the hierarchy has to stay legible in a
+			// terminal without box-drawing characters.
+			const QString name = QString( b.depth * 2, QLatin1Char( ' ' ) )
+				+ ( b.name.isEmpty() ? QStringLiteral( "<unnamed>" ) : b.name );
+			QString tag;
+			if ( b.isNotABone() )
+				tag = QStringLiteral( "   (not a bone)" );
+			else if ( b.isUnusedBone() )
+				tag = QStringLiteral( "   UNUSED" );
+			out() << QString( "%1  %2 %3 %4" )
+						.arg( name, -44 )
+						.arg( b.shapes, 7 )
+						.arg( b.verts, 8 )
+						.arg( QString::number( b.weight, 'f', 2 ), 10 )
+				  << tag << Qt::endl;
+		}
+		out() << Qt::endl;
+	}
+
+	const int problems = report.danglingSkinBones.size() + report.duplicateNames.size();
+	out() << report.bones.size() << " node(s), "
+		  << ( report.deformingCount() + report.unusedCount() ) << " bone(s), "
+		  << report.deformingCount() << " deforming, "
+		  << report.unusedCount() << " unused" << Qt::endl;
+	for ( const QString & d : report.danglingSkinBones )
+		out() << "  ! " << d << Qt::endl;
+	for ( const QString & n : report.duplicateNames )
+		out() << "  ! duplicate node name '" << n << "'" << Qt::endl;
+
+	if ( validateOnly )
+		return problems > 0 ? 1 : 0;
 	return 0;
 }
 
@@ -789,6 +857,9 @@ int usage()
 		  << "                                          merge NIFs into one; NiNodes with\n"
 		  << "                                          matching names are SHARED, so the\n"
 		  << "                                          pieces pose as one skeleton\n"
+		  << "  skeleton <file>                         skeleton tree, which nodes are\n"
+		  << "                                          bones, and per-bone influence\n"
+		  << "  skeleton <file> --validate              findings only; exit 1 if any fire\n"
 		  << "  pose <file> --list                      bones and existing poses\n"
 		  << "  pose <file> --save NAME -o OUT          capture the current bone\n"
 		  << "                                          transforms as a pose\n"
@@ -843,6 +914,7 @@ int nifskopeCliMain( const QStringList & args )
 	int block = -1, depth = 2, maxRows = 40;
 	int effectVar = -1, intVar = -1;
 	bool showAll = false, newSequence = false, standalone = false, listOnly = false;
+	bool validateOnly = false;
 	for ( int i = 0; i < a.size(); i++ ) {
 		const QString & t = a.at( i );
 		auto next = [&]() -> QString { return ( i + 1 < a.size() ) ? a.at( ++i ) : QString(); };
@@ -862,6 +934,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--effect-var" ) ) effectVar = next().toInt();
 		else if ( t == QLatin1String( "--int-var" ) ) intVar = next().toInt();
 		else if ( t == QLatin1String( "--list" ) ) listOnly = true;
+		else if ( t == QLatin1String( "--validate" ) ) validateOnly = true;
 		else if ( t == QLatin1String( "--add" ) ) adds << QDir::current().filePath( next() );
 		else if ( t == QLatin1String( "--no-dedupe" ) ) noDedupe = true;
 		else if ( t == QLatin1String( "--save" ) ) saveName = next();
@@ -923,6 +996,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdMerge( file, adds, noDedupe, outFile );
 	else if ( cmd == QLatin1String( "pose" ) )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
+	else if ( cmd == QLatin1String( "skeleton" ) )
+		rc = cmdSkeleton( file, validateOnly );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

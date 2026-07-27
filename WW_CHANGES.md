@@ -1,5 +1,75 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27j — Skeleton Manager workspace, phase 1 (read-only)
+
+Backlog item #1, the largest un-started feature, per `SKELETON_AND_POSE_PLAN.md`
+§A.7 phase 1: **read-only**. Hierarchy, bone classification, per-bone influence,
+selection sync, rest-pose toggle. It writes nothing, which is why it goes first —
+the dangerous part (§A.3 bone transforms with inverse-bind rebinding) waits for
+its gauntlet.
+
+**`src/skeletontools.{h,cpp}`** — `skeletonAnalyse()` is deliberately independent
+of the dock so the CLI and the UI can never disagree about which nodes are bones.
+It handles both skin backends: FO4 `BSSkin::Instance` with per-vertex
+`Bone Weights`/`Bone Indices`, and classic `NiSkinInstance` + `NiSkinData` with
+per-bone `Vertex Weights`. Influence comes from the vertex data, never from the
+bone list, because a bone being *listed* says nothing about whether anything is
+bound to it — which is exactly the unused-bone case the dock exists to surface.
+
+Classification: **deforming** (moves vertices), **unused** (listed by a skin but
+no vertex uses it — prunable, shown in `textBright`), **not a bone** (no skin
+references it at all — a camera or attach point, shown in `textMuted`). Colours
+come only from `skinVars` via `wwSkinColor()`.
+
+Two validation findings come free because the pass has to detect them anyway:
+dangling skin bones (a `Bones` entry that resolves to no block — real corruption,
+the game looks it up by index and finds nothing) and duplicate node names (every
+tool here looks bones up by name, so duplicates are ambiguous).
+
+**Dock** — `Workspaces ▸ Skeleton`, appended LAST because the persisted
+`UI/Workspace` index maps positionally onto the managers list; inserting anywhere
+else would silently reopen a different workspace for every existing user. The
+"Skeleton Manager (Planned)" placeholder is gone.
+
+**CLI** (§A.8) — `skeleton <file>` prints the tree with influence; `--validate`
+prints findings only and **exits 1 if any fire**, which is the real payoff: a
+pre-export gate for a build script. `--prune-unused` is deliberately absent until
+phase 2 ships with its bone-index remap tests.
+
+**Verification.** `WW_SKELETON_TEST` drives the dock and checks every filter and
+the search against `skeletonAnalyse()` — PASS on the FO4 faceBones head: 70
+nodes, 68 bones, 68 deforming, 0 unused, and the filters return 70/68/68/0.
+Independently, the CLI's summed weight is **1688.98 against 1689 vertices** —
+0.02 of float drift across 6254 influences, which confirms the weight reading
+rather than just the plumbing. 68 bones also matches the count recorded in the
+FO4 CustomizationRemap reference notes. A non-skinned mesh reports 1 node / 0
+bones without complaint.
+
+**Honest gap:** the *Unused* filter has no positive test case. A 40-mesh sweep of
+vanilla FO4 armour found zero unused bones — vanilla exports are clean — so the
+filter is only shown returning 0 correctly. Its classification feeds the verified
+counts, but a file that actually has an unused bone has not been through it.
+
+### Two harness problems found on the way, both fixed
+
+**The dock shrank the viewport and broke every baseline.** A new `QDockWidget`
+parented to the main window shows at startup, so the GL viewport lost space and
+all seven baselines became "size mismatch". Fixed the dock (register with a dock
+area, then `hide()`, as the UV Editor dock already did).
+
+**But the deeper problem was the harness.** Pinning the *window* to 1280×800 is
+not enough — the GL viewport gets whatever the docks leave it, so any change to
+the persisted dock layout silently resizes the framebuffer. The Skeleton dock
+moved it from 517 to 695 px tall. The harness now hides every dock before
+rendering, so the framebuffer depends only on `WW_RENDER_SIZE`. Baselines re-cut
+once (they are also now much larger — `lit_head` 50 KB → 95 KB — because the
+scene gets the whole window). Verified stable: 7/7 identical on two consecutive
+compares.
+
+Noted for the future: `particles_mist` renders differently on the **first** run
+after a rebuild (27,945 bytes cold vs 7,868 warm) and is stable thereafter. So
+re-baseline warm, and do not trust a single cold comparison of that case.
+
 ## 2026-07-27i — Startup grid/axes: NOT FIXED, but four theories killed and a headless repro found
 
 Re-opened the 07-17 defect (grid + origin axes invisible until the first

@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "shortcutregistry.h"
 #include "spellbook.h"
 #include "wwskin.h"
+#include "skeletontools.h"
 
 #include <QScopeGuard>
 #include "version.h"
@@ -1744,6 +1745,125 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	// TEST HARNESS (WW_SKELETON_TEST=1): the Skeleton Manager dock renders what
+	// skeletonAnalyse() reports. The numbers themselves are proven separately and
+	// independently by the CLI (`skeleton <file>`), whose summed weight matches the
+	// vertex count to rounding; this checks the UI layer on top of them - that the
+	// tree populates, that each filter narrows the way its tooltip claims, and that
+	// search filters. Read-only, so it cannot damage the file it opens.
+	// Log: release/ww_skeleton_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SKELETON_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_skeleton_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+
+				auto countRows = []( QTreeWidget * t ) {
+					int n = 0;
+					std::function<void( QTreeWidgetItem * )> walk = [&]( QTreeWidgetItem * it ) {
+						n++;
+						for ( int i = 0; i < it->childCount(); i++ )
+							walk( it->child( i ) );
+					};
+					for ( int i = 0; i < t->topLevelItemCount(); i++ )
+						walk( t->topLevelItem( i ) );
+					return n;
+				};
+
+				do {
+					if ( !ok || !nif ) { fails << "load failed"; break; }
+					QDockWidget * dock = skope->findChild<QDockWidget *>( QStringLiteral( "SkeletonManagerDock" ) );
+					if ( !dock ) { fails << "SkeletonManagerDock not found"; break; }
+					dock->show();
+					dock->raise();
+					qApp->processEvents();
+
+					auto * tree = dock->findChild<QTreeWidget *>( QStringLiteral( "SkeletonTree" ) );
+					auto * search = dock->findChild<QLineEdit *>( QStringLiteral( "SkeletonSearch" ) );
+					auto * footer = dock->findChild<QLabel *>( QStringLiteral( "SkeletonFooter" ) );
+					if ( !tree || !search || !footer ) { fails << "dock widgets missing"; break; }
+
+					// ground truth, straight from the shared analysis
+					const SkeletonReport report = skeletonAnalyse( nif );
+					const int bones = report.deformingCount() + report.unusedCount();
+					log << "analyse: " << report.bones.size() << " nodes, " << bones << " bones, "
+						<< report.deformingCount() << " deforming, " << report.unusedCount()
+						<< " unused, " << report.skinnedShapes << " skinned shape(s)\n";
+
+					const int allRows = countRows( tree );
+					log << "All filter rows: " << allRows << "\n";
+					if ( allRows != report.bones.size() )
+						fails << QString( "All filter shows %1 rows, analyse reports %2 nodes" )
+							.arg( allRows ).arg( report.bones.size() );
+
+					// each filter button, in the order they were created
+					auto clickFilter = [dock]( int i ) {
+						auto * b = dock->findChild<QToolButton *>( QStringLiteral( "SkeletonFilter%1" ).arg( i ) );
+						if ( b )
+							b->click();
+						qApp->processEvents();
+						return b != nullptr;
+					};
+
+					if ( !clickFilter( 1 ) ) { fails << "Bones filter button missing"; break; }
+					const int boneRows = countRows( tree );
+					log << "Bones filter rows: " << boneRows << "\n";
+					if ( boneRows != bones )
+						fails << QString( "Bones filter shows %1, expected %2" ).arg( boneRows ).arg( bones );
+
+					if ( !clickFilter( 2 ) ) { fails << "Deforming filter button missing"; break; }
+					const int deformRows = countRows( tree );
+					log << "Deforming filter rows: " << deformRows << "\n";
+					if ( deformRows != report.deformingCount() )
+						fails << QString( "Deforming filter shows %1, expected %2" )
+							.arg( deformRows ).arg( report.deformingCount() );
+
+					if ( !clickFilter( 3 ) ) { fails << "Unused filter button missing"; break; }
+					const int unusedRows = countRows( tree );
+					log << "Unused filter rows: " << unusedRows << "\n";
+					if ( unusedRows != report.unusedCount() )
+						fails << QString( "Unused filter shows %1, expected %2" )
+							.arg( unusedRows ).arg( report.unusedCount() );
+
+					// search, back on the All filter
+					clickFilter( 0 );
+					QString needle;
+					for ( const SkeletonBoneInfo & b : report.bones ) {
+						if ( b.name.size() >= 4 ) { needle = b.name.left( 4 ); break; }
+					}
+					if ( !needle.isEmpty() ) {
+						int expected = 0;
+						for ( const SkeletonBoneInfo & b : report.bones )
+							if ( b.name.contains( needle, Qt::CaseInsensitive ) )
+								expected++;
+						search->setText( needle );
+						qApp->processEvents();
+						const int found = countRows( tree );
+						log << "search '" << needle << "': " << found << " rows, expected " << expected << "\n";
+						if ( found != expected )
+							fails << QString( "search '%1' shows %2, expected %3" )
+								.arg( needle ).arg( found ).arg( expected );
+						search->clear();
+						qApp->processEvents();
+					}
+
+					log << "footer: " << footer->text() << "\n";
+					if ( footer->text().isEmpty() )
+						fails << "footer empty";
+				} while ( false );
+
+				log << ( fails.isEmpty() ? "PASS" : "FAIL: " + fails.join( "; " ) ) << "\n";
+				log.flush();
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	// TEST HARNESS (WW_POSEDRAW_TEST=1): Pose Mode draws the skeleton and picks
 	// bones. grab() can't see the native GL child (airspace), so this uses
 	// grabFramebuffer + a pixel diff to confirm the skeleton overlay appears,
@@ -3277,6 +3397,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 					skope->showNormal();
 					skope->resize( rw, rh );
+					// Hide every dock. Pinning the WINDOW size is not enough: the GL
+					// viewport gets whatever the docks leave it, so any change to the
+					// persisted dock layout silently resizes the framebuffer and every
+					// baseline turns into "size mismatch". Adding the Skeleton Manager
+					// dock did exactly that (517 -> 695 px tall). Hiding them makes the
+					// framebuffer depend only on WW_RENDER_SIZE, and hands the guard the
+					// whole window for scene pixels.
+					for ( QDockWidget * dw : skope->findChildren<QDockWidget *>() )
+						dw->hide();
 					qApp->processEvents();
 				}
 
@@ -6072,11 +6201,21 @@ void NifSkope::initDockWidgets()
 	QDockWidget * dPoseMgr = tlCreatePoseManagerDock( nif, this, ogl );
 	dPoseMgr->toggleViewAction()->setText( tr( "Pose Manager" ) );
 
+	// Skeleton Manager: the skeleton tree, which nodes are actually bones, how
+	// much of the skin each one drives, and the rest-pose toggle. Read-only —
+	// phase 1 of SKELETON_AND_POSE_PLAN.md §A.7. Appended LAST on purpose: the
+	// persisted UI/Workspace index maps positionally onto the managers list, so
+	// inserting anywhere else would silently reopen a different workspace for
+	// every existing user.
+	extern QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
+	QDockWidget * dSkeletonMgr = tlCreateSkeletonManagerDock( nif, this, ogl );
+	dSkeletonMgr->toggleViewAction()->setText( tr( "Skeleton Manager" ) );
+
 	// These docks occupy one manager/workspace slot. Keep the policy on
 	// the docks themselves so the planned Blender-style workspace selector can
 	// later activate a role instead of knowing about each concrete manager.
 	const QList<QDockWidget *> workspaceManagers = {
-		dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr
+		dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr, dSkeletonMgr
 	};
 	for ( QDockWidget * manager : workspaceManagers )
 		manager->setProperty( "workspaceRole", QStringLiteral( "manager" ) );
@@ -6128,7 +6267,8 @@ void NifSkope::initDockWidgets()
 		workspaceGroup->setExclusive( true );
 		const QStringList workspaceNames = {
 			tr( "Default" ), tr( "Animation" ), tr( "Materials" ), tr( "Collision" ),
-			tr( "Rigging" ), tr( "Vertex Paint" ), tr( "UV Editing" ), tr( "Pose" )
+			tr( "Rigging" ), tr( "Vertex Paint" ), tr( "UV Editing" ), tr( "Pose" ),
+				tr( "Skeleton" )
 		};
 		QList<QAction *> workspaceActions;
 		for ( const QString & name : workspaceNames ) {
@@ -6137,22 +6277,12 @@ void NifSkope::initDockWidgets()
 			workspaceGroup->addAction( action );
 			workspaceActions.append( action );
 		}
-		workspaceMenu->addSeparator();
-		struct PlannedWorkspace {
-			QString name;
-			QString description;
-		};
-		const QList<PlannedWorkspace> plannedWorkspaces = {
-			{ tr( "Skeleton Manager (Planned)" ),
-				tr( "Future skeleton hierarchy, rest-pose, bone transform, and validation workspace" ) }
-		};
-		for ( const PlannedWorkspace & planned : plannedWorkspaces ) {
-			QAction * action = workspaceMenu->addAction( planned.name );
-			action->setEnabled( false );
-			action->setToolTip( planned.description );
-		}
-		const QList<QDockWidget *> managers = {
-			dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr
+		// The "Skeleton Manager (Planned)" placeholder that used to sit below a
+			// separator here is gone: the workspace exists now (read-only phase 1 of
+			// SKELETON_AND_POSE_PLAN.md A.7). No planned entries remain, so the
+			// separator went with it.
+			const QList<QDockWidget *> managers = {
+			dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr, dSkeletonMgr
 		};
 		auto activateWorkspace = [this, managers, workspaceActions]( int workspace ) {
 			workspace = std::clamp( workspace, 0, int( managers.size() ) );

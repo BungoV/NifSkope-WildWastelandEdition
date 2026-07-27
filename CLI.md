@@ -18,6 +18,8 @@ info <file>                             version, block count, per-type tally
 list <file> [-t <type>]                 block list, optionally filtered
 dump <file> -b N [-f PATH] [-d DEPTH] [-n MAX] [--all]
 get  <file> -b N -f PATH
+skeleton <file>                         skeleton tree + per-bone influence
+skeleton <file> --validate              findings only; exit 1 if any fire
 set  <file> -b N -f PATH -v VALUE -o OUT
 cast <file> -s "Page/Name" [-b N] [-f PATH] -o OUT
 
