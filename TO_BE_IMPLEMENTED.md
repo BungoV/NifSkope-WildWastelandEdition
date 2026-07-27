@@ -503,6 +503,33 @@ the `tau` factor already decoded on every limit.
 
 Phases, each testable before the next:
 
+**STATUS 07-28f: phase 1 started, solver NOT yet correct — do not build on it.**
+`src/physics/ragdollsim.{h,cpp}` and `NifSkope -no-gui simulate <file>` exist and
+build. What is established:
+
+- The **rest pose is exact**: worst ball-socket separation at step 0 is `1e-6`,
+  which independently confirms the `hkaSkeleton` decode, bone-index == body-index,
+  and that the joint pivots are in bone space.
+- `dyn_inertia +0x20` holds **inverse inertia, not inertia** — `+0x04` beside it
+  is plainly inverse mass (0.2, 0.05, 1.0 → 5, 20, 1 kg), and the same reading
+  makes the tensor physical (5 kg pelvis, 4.16 → I = 0.24, radius ≈ 0.22 m; read
+  as inertia it implies a 0.9 m pelvis). **`HknpBodyPhys::inertia` is therefore
+  misnamed** and `hknpencode.cpp`'s `dynamicInertia()` writes true inertia into
+  that slot — latent, invisible so far only because it writes static bodies.
+- The harness measures the failure rather than hiding it, which is its whole point.
+
+**The open bug: the solver injects energy.** A ragdoll pinned at the root should
+settle; instead energy scales with substep count — 25k / 456k / 3.96M at 8 / 32 /
+96 substeps, i.e. like `1/h^2`. That is the signature of a persistent constraint
+violation being re-corrected every substep, since a fixed positional correction
+turns into a velocity of `d/h`.
+
+Bisected with `--no-limits`: **ball sockets alone show it too** (31k → 776k), so
+the angular limits are not the cause and the fault is in the positional solve or
+the velocity write-back. A pure ball-socket tree is a solved problem, so this is a
+bug, not tuning. Worst joint separation sits near 0.5 m and never closes, so start
+by instrumenting a single two-body joint rather than the full 38-joint chain.
+
 1. **Solver core, headless.** `src/physics/`: bodies (mass, diagonal inertia,
    pose, velocities), substepped XPBD integrator, ball-socket joints, and the
    angular limits from `HknpConstraint` (twist / cone / plane / limited hinge).

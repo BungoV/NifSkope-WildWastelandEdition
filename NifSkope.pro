@@ -174,6 +174,7 @@ HEADERS += \
 	src/gl/gltex.h \
 	src/gl/gltools.h \
 	src/gl/hknpdecode.h \
+	src/physics/ragdollsim.h \
 	src/gl/hknpencode.h \
 	src/gl/icontrollable.h \
 	src/gl/renderer.h \
@@ -272,6 +273,7 @@ SOURCES += \
 	src/gl/gltexloaders.cpp \
 	src/gl/gltools.cpp \
 	src/gl/hknpdecode.cpp \
+	src/physics/ragdollsim.cpp \
 	src/gl/hknpencode.cpp \
 	src/gl/renderer.cpp \
 	src/io/materialfile.cpp \

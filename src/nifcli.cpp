@@ -19,6 +19,7 @@ See the LICENSE.md file for the full license text.
 #include "skeletontools.h"
 #include "starterscene.h"
 #include "gl/hknpdecode.h"
+#include "physics/ragdollsim.h"
 
 #include <cmath>
 #include "spells/animationsetup.h"
@@ -357,6 +358,81 @@ int cmdPbrmResolve( const QString & file )
  * shapes survive but their bone association does not, and anything presenting
  * them as *bone* collision has to rebuild it some other way.
  */
+/*! Run the ragdoll solver headlessly and report whether it stayed sane.
+ *
+ * Stability is the whole question for a ragdoll solver, and it is not something
+ * to judge by looking at a viewport: jitter and slow joint drift are invisible
+ * until they are catastrophic. So this reports kinetic energy (blow-up shows as
+ * energy climbing instead of settling), the worst ball-socket separation (joint
+ * drift) and the peak speed, and exits non-zero if anything diverged.
+ */
+int cmdSimulate( const QString & file, int steps, int substeps, bool noLimits, bool verbose )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	int simulated = 0, failed = 0;
+	for ( qint32 b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex iSys = nif.getBlockIndex( b );
+		if ( !nif.blockInherits( iSys, "bhkPhysicsSystem" )
+			&& !nif.blockInherits( iSys, "bhkRagdollSystem" ) )
+			continue;
+		const HknpSystem sys = hknpDecode( nif.get<QByteArray>( iSys, "Binary Data" ) );
+		if ( !sys.valid || sys.constraints.isEmpty() )
+			continue;
+
+		RagdollSim sim;
+		QString error;
+		if ( !sim.build( sys, &error ) ) {
+			out() << "system " << b << ": " << error << Qt::endl;
+			failed++;
+			continue;
+		}
+		// hold the root so the ragdoll hangs rather than falling out of the
+		// world -- what we are testing is the joints, not gravity
+		sim.angularLimits = !noLimits;
+		sim.setPinned( 0, true );
+
+		const SimStats before = sim.stats();
+		out() << Qt::endl << "system " << b << "   " << sim.bodies().size()
+			  << " bodies, " << sim.joints().size() << " joints" << Qt::endl;
+		out() << QString( "  %1 %2 %3 %4" ).arg( "step", -8 ).arg( "energy", 12 )
+					.arg( "maxJointErr", 13 ).arg( "maxSpeed", 11 ) << Qt::endl;
+		out() << QString( "  %1 %2 %3 %4" ).arg( 0, -8 ).arg( before.energy, 12, 'f', 5 )
+					.arg( before.maxJointError, 13, 'f', 6 ).arg( before.maxSpeed, 11, 'f', 4 )
+			  << Qt::endl;
+
+		SimStats st;
+		for ( int i = 0; i < steps; i++ ) {
+			sim.step( 1.0f / 60.0f, substeps );
+			st = sim.stats();
+			if ( verbose || i == steps / 4 || i == steps / 2 || i == steps - 1 ) {
+				out() << QString( "  %1 %2 %3 %4" ).arg( i + 1, -8 )
+							.arg( st.energy, 12, 'f', 5 ).arg( st.maxJointError, 13, 'f', 6 )
+							.arg( st.maxSpeed, 11, 'f', 4 ) << Qt::endl;
+			}
+			if ( st.diverged )
+				break;
+		}
+		simulated++;
+		if ( st.diverged ) {
+			out() << "  DIVERGED" << Qt::endl;
+			failed++;
+		} else {
+			out() << "  settled: energy " << QString::number( st.energy, 'f', 5 )
+				  << ", worst joint separation " << QString::number( st.maxJointError, 'f', 6 )
+				  << Qt::endl;
+		}
+	}
+
+	if ( !simulated ) {
+		out() << "no jointed collision system to simulate in " << file << Qt::endl;
+		return 1;
+	}
+	return failed ? 1 : 0;
+}
+
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
 {
 	NifModel nif;
@@ -1282,6 +1358,8 @@ int usage()
 		  << "  skeleton <file>                         skeleton tree, which nodes are\n"
 		  << "                                          bones, and per-bone influence\n"
 		  << "  skeleton <file> --validate              findings only; exit 1 if any fire\n"
+		  << "  simulate <file> [--steps N] [-v]        run the ragdoll solver headless and\n"
+		  << "                                          report energy, joint drift, speed\n"
 		  << "  collision <file>                        collision inventory: node -> body ->\n"
 		  << "                                          system bindings, and what the hknp\n"
 		  << "                                          decode found in each packfile\n"
@@ -1337,6 +1415,10 @@ int nifskopeCliMain( const QStringList & args )
 	QStringList controllers, adds;
 	QString saveName, applyName, importOs, exportOs;
 	float blend = 1.0f;
+	int steps = 0;
+	int substeps = 0;
+	bool noLimits = false;
+	bool verboseSim = false;
 	float cubeSize = STARTER_CUBE_SIZE;
 	bool noDedupe = false;
 	int block = -1, depth = 2, maxRows = 40;
@@ -1372,6 +1454,10 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--save" ) ) saveName = next();
 		else if ( t == QLatin1String( "--apply" ) ) applyName = next();
 		else if ( t == QLatin1String( "--blend" ) ) blend = next().toFloat();
+		else if ( t == QLatin1String( "--steps" ) ) steps = next().toInt();
+		else if ( t == QLatin1String( "--substeps" ) ) substeps = next().toInt();
+		else if ( t == QLatin1String( "--no-limits" ) ) noLimits = true;
+		else if ( t == QLatin1String( "-v" ) ) verboseSim = true;
 		else if ( t == QLatin1String( "--size" ) ) cubeSize = next().toFloat();
 		else if ( t == QLatin1String( "--import-os" ) ) importOs = QDir::current().filePath( next() );
 		else if ( t == QLatin1String( "--export-os" ) ) exportOs = QDir::current().filePath( next() );
@@ -1437,6 +1523,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdMerge( file, adds, noDedupe, outFile );
 	else if ( cmd == QLatin1String( "pose" ) )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
+	else if ( cmd == QLatin1String( "simulate" ) )
+		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8, noLimits, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
 		rc = cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
