@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28e — How Fallout 4 cloth collision works (investigation, no code)
+
+Documentation only — nothing in the app reads this yet. Recorded because it is
+expensive to rediscover and it drops straight into the existing `collision` CLI,
+whose `--extract` already pulls the blob out verbatim.
+
+`BSClothExtraData` is a Havok **Cloth (`hcl`)** packfile, the same container and
+version as collision but with a **0x50 file header instead of 0x40** — which is
+exactly why the collision parser desyncs on it. Section headers have to be found
+by name, not offset.
+
+Cloth collides against a small set of named capsules, one `hclCollidable` each:
+an `hkTransform`, a shape pointer, and an inline `Collidable_<Bone>NNN` name. The
+PrewarDress uses five — both thighs, both calves, the spine — mirrored L/R.
+
+`hclTaperedCapsuleShape` is the interesting one, a cone frustum with no ragdoll
+equivalent. Only `(A, B, radiusA, radiusB)` is authored; the rest of the object is
+precomputed SIMD scratch. Verified rather than assumed: across 40 cloth meshes and
+43 tapered capsules, the length, apex distance, apex position, cos and sin² all
+reproduce **43 of 43** from those four values, the apex landing exactly on
+`A - (rA*L/(rB-rA)) * axis`. One taper sign disagrees, most likely a reversed
+`rB < rA` case.
+
+Two traps recorded in TO_BE_IMPLEMENTED 4b: cloth is in **game units** where
+ragdoll collision is in **Havok metres** (~70x apart), and the cloth `hkaSkeleton`
+**keeps all 277 bone names** where ragdoll packfiles strip every one to null.
+
 ## 2026-07-28d — Shape encoding is a fixed template
 
 A `hknpCapsuleShape` is not a primitive. It is a full convex polytope *plus* the

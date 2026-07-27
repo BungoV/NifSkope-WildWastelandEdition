@@ -441,6 +441,47 @@ Full feature spec is preserved in the appendix at the bottom of this file;
 validated packfile offsets and test assets live in
 `COLLISION_MANAGER_HANDOFF.md`.
 
+### 4b. Cloth collision — DECODED 07-28e, not surfaced — NEW
+
+Reverse-engineered but **no code written**: nothing in the app reads this yet. It
+would slot into the existing `collision` CLI, since `--extract` already pulls the
+blob out verbatim.
+
+`BSClothExtraData` holds a Havok **Cloth (`hcl`)** packfile — the same container
+and version as collision (`hk_2014.1.0-r1`) but with a **0x50 file header where
+`bhkPhysicsSystem` writes 0x40**, so section headers are not at a fixed offset.
+Find them by searching for `__classnames__` rather than assuming, or the parse
+desyncs. 24 classes; the collision-relevant ones are `hclCollidable`,
+`hclCapsuleShape`, `hclTaperedCapsuleShape` and `hkaSkeleton`.
+
+**`hclCollidable`** (176 bytes) is an `hkTransform` at `+0x20` (three basis rows,
+translation at `+0x50`), a float `0.01` at `+0x84`, a shape pointer at `+0x88`
+(global fixup) and an inline name following the convention
+`Collidable_<Bone>NNN`. Sets are small — the PrewarDress collides against five:
+both thighs, both calves and the spine, with L/R positions mirrored to `±6.62`.
+
+**`hclCapsuleShape`** (96 bytes): A `+0x20`, B `+0x30`, unit axis `+0x40`,
+**radius** `+0x50` — radius, *not* length (a torso one is 1.7 long by 9.9 radius).
+
+**`hclTaperedCapsuleShape`** (176 bytes) is a cone frustum with no ragdoll
+equivalent. Only four values are authored — A `+0x20`, B `+0x30`, and
+`[radiusA, radiusB, length, apexDistance]` at `+0x90`. Everything else is
+precomputed SIMD scratch and reproduces exactly from those: cone apex position
+`+0x40` = `A - (rA*L/(rB-rA)) * axis`, unit axis `+0x50`, `|B-A|` broadcast
+`+0x60`, apex distance broadcast `+0x70`, `-sin(taper)` `+0x80`, and
+`[cos, ?, sin, sin^2]` at `+0xa0`.
+
+Checked over 40 cloth meshes / 43 tapered capsules: length, apex distance, apex
+position, cos and sin² each reproduce **43 of 43**. One shape's taper sign
+disagrees, most likely `rB < rA` (a reversed taper) which the `-sin` reading does
+not cover — resolve that before writing an encoder.
+
+**Two traps.** Cloth is in **game units** (the spine collidable sits at z=68.91,
+about hip height) while ragdoll collision is in **Havok metres** (0.7455); confuse
+them and everything is ~70x wrong. And unlike ragdolls, the cloth `hkaSkeleton`
+**keeps its bone names** — all 277 of them — so cloth data is self-describing
+where ragdoll data is not.
+
 ## 5. Block Details — remaining typed editors (READY)
 
 Small, independent, display-layer only, no corruption risk. **Two of the four
