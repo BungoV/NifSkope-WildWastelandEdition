@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27w — Block List category icons follow the skin
+
+27t recoloured only the `NiNode` dot and left the other eleven as stock resource
+art, which was half a job. Those are saturated: `block-geometry.png` is a blue
+square overlapping an **orange** one, `block-material.png` a blue/purple sphere,
+`skinned.png` a red/purple bone. Beside a grey dot they read as status lights
+rather than as quiet category marks.
+
+All eleven now go through `wwTintedBlockIcon()`, which recolours to
+`wwSkinColor( "text" )` with `CompositionMode_SourceIn` — the colour lands only
+where the source had alpha, so the silhouette survives and the shapes still tell
+the categories apart. Only the clashing colour goes. Cached per
+(resource, colour) and cleared on a theme change, like the dot.
+
+Verified by measurement rather than by eye: across the `BSTriShape` row's icon the
+maximum channel spread is **7**, which is the panel's own background gradient.
+Monochrome.
+
+Not run: the render regression. It guards the renderer, and `nifproxymodel.cpp`
+is a Block List decoration that no draw path touches.
+
 ## 2026-07-27v — Block Details was bound to the empty model at startup
 
 Reported: no block details, whatever is selected. **A regression from 27q**, mine.

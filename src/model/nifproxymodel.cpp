@@ -38,12 +38,49 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QVector>
 #include <QDebug>
+#include <QHash>
 #include <QIcon>
 #include <QPainter>
 #include <QPixmap>
 
 
 //! @file nifproxymodel.cpp NifProxyItem
+
+/*! A resource icon recoloured to the skin's text colour, alpha preserved.
+ *
+ * The stock block icons are saturated - block-geometry is a blue square over an
+ * ORANGE one, block-material a blue/purple sphere, skinned a red/purple bone.
+ * Beside the grey NiNode dot they read as status lights rather than as quiet
+ * category marks. Tinting keeps the shapes, so the categories are still
+ * distinguishable, and drops the colour that clashed.
+ *
+ * SourceIn paints the colour only where the source had alpha, which is what
+ * preserves the silhouette. Cached per (resource, colour) so a theme switch
+ * rebuilds rather than serving the old pixmap forever - the same reason the dot
+ * below caches on its colour.
+ */
+static QIcon wwTintedBlockIcon( const QString & resource )
+{
+	const QString tint = wwSkinColor( "text" );
+	static QHash<QString, QIcon> cache;
+	static QString cachedTint;
+	if ( cachedTint != tint ) {
+		cache.clear();
+		cachedTint = tint;
+	}
+	auto it = cache.constFind( resource );
+	if ( it != cache.constEnd() )
+		return *it;
+
+	QPixmap pm( QIcon( resource ).pixmap( 16, 16 ) );
+	if ( !pm.isNull() ) {
+		QPainter p( &pm );
+		p.setCompositionMode( QPainter::CompositionMode_SourceIn );
+		p.fillRect( pm.rect(), QColor( tint ) );
+		p.end();
+	}
+	return *cache.insert( resource, QIcon( pm ) );
+}
 
 //! Compact semantic icons for top-level NIF blocks.  These are supplied by
 //! the proxy rather than NifModel so Block Details remains a data editor and
@@ -57,22 +94,22 @@ static QIcon blockListCategoryIcon( const NifModel * nif, const QModelIndex & so
 	const QString type = nif->itemName( block );
 	if ( type.startsWith( QStringLiteral( "bhk" ) )
 		|| type.contains( QStringLiteral( "Collision" ), Qt::CaseInsensitive ) )
-		return QIcon( QStringLiteral( ":/btn/showCollision" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/showCollision" ) );
 	if ( type.contains( QStringLiteral( "Particle" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Emitter" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Modifier" ), Qt::CaseInsensitive ) )
-		return QIcon( QStringLiteral( ":/btn/blockParticles" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/blockParticles" ) );
 	if ( nif->blockInherits( block, "NiLight" ) )
-		return QIcon( QStringLiteral( ":/btn/bulb" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/bulb" ) );
 	if ( nif->blockInherits( block, "NiCamera" ) )
-		return QIcon( QStringLiteral( ":/btn/blockCamera" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/blockCamera" ) );
 	if ( type.contains( QStringLiteral( "Skin" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Bone" ), Qt::CaseInsensitive ) )
-		return QIcon( QStringLiteral( ":/btn/skinned" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/skinned" ) );
 	if ( nif->blockInherits( block, "NiGeometry" )
 		|| type.contains( QStringLiteral( "TriShape" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Mesh" ), Qt::CaseInsensitive ) )
-		return QIcon( QStringLiteral( ":/btn/blockGeometry" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/blockGeometry" ) );
 	if ( nif->blockInherits( block, "NiNode" ) ) {
 		/* A quiet category mark, not a status light - the stock orange resource
 		 * dot read as the latter.
@@ -102,21 +139,21 @@ static QIcon blockListCategoryIcon( const NifModel * nif, const QModelIndex & so
 	}
 	if ( type.contains( QStringLiteral( "Texture" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Image" ), Qt::CaseInsensitive ) )
-		return QIcon( QStringLiteral( ":/btn/blockTexture" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/blockTexture" ) );
 	if ( nif->blockInherits( block, "NiProperty" )
 		|| type.contains( QStringLiteral( "Shader" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Material" ), Qt::CaseInsensitive ) )
-		return QIcon( QStringLiteral( ":/btn/blockMaterial" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/blockMaterial" ) );
 	if ( nif->blockInherits( block, "NiTimeController" )
 		|| type.contains( QStringLiteral( "Controller" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Interpolator" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Sequence" ), Qt::CaseInsensitive )
 		|| type.contains( QStringLiteral( "Keyframe" ), Qt::CaseInsensitive ) )
-		return QIcon( QStringLiteral( ":/btn/blockAnimation" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/blockAnimation" ) );
 	if ( nif->blockInherits( block, "NiExtraData" )
 		|| type.contains( QStringLiteral( "ExtraData" ), Qt::CaseInsensitive ) )
-		return QIcon( QStringLiteral( ":/btn/blockExtraData" ) );
-	return QIcon( QStringLiteral( ":/btn/selectObject" ) );
+		return wwTintedBlockIcon( QStringLiteral( ":/btn/blockExtraData" ) );
+	return wwTintedBlockIcon( QStringLiteral( ":/btn/selectObject" ) );
 }
 
 static QString blockListSummary( const NifModel * nif, const QModelIndex & source )
