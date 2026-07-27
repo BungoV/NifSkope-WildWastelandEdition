@@ -34,34 +34,72 @@ creation (exit 139).
 **Baselines captured (7):** `particles_mist`, `particles_glow`, `glass_visor`,
 `glass_shader`, `refraction_fixed`, `lit_setdressing`, `lit_head`.
 
-### OPEN — the refraction case does not engage
+### RESOLVED 2026-07-27 — it was a real renderer bug, not a fixture problem
 
-`tests/render/refraction_fixture.nif` (donor.nif with `SLSF1_Refraction` and
-Refraction Strength 0.8 set via the CLI) renders **byte-identical to the
-unmodified head** — same MD5. So `doRefraction` is false and that baseline is
-currently guarding nothing. Ruled out so far:
+**Root cause.** `BSLightingShaderProperty::updateParams` assigns `hasRefraction`
+**only inside the `} else { // m == nullptr` branch** (`glproperty.cpp:1513`) —
+i.e. only when the shape has no valid BGSM/BGEM. When a material *is* present,
+which is nearly every FO4 mesh, `hasRefraction` kept `resetParams()`'s `false`
+and the NIF's `SLSF1_Refraction` bit was never consulted at all. The
+screen-space refraction preview had therefore been dead for all material-backed
+FO4 content since it shipped on 07-06.
 
-- the flag *is* in the file — CLI `get` returns `2151712259`, and `& 32768` is set;
-- `flags1` comes straight from the NIF for `bsVersion < 151`
-  (`BSShaderLightingProperty::setFlags1`) — no BGSM override;
-- `scene->showRefraction` is forced true by the harness;
-- the branch (`renderer.cpp` ~810) is **not** version-gated;
-- `Scene::grabRefractionSource()` only fails on a null renderer or an empty viewport.
+Fixed by reading it in the material branch too:
 
-Leading hypotheses, in order:
-1. **FO4 bit semantics.** NifSkope's `ShaderFlags::SLSF1_Refraction = 1 << 15`
-   is Skyrim's layout (note the `// 15!` comment in glproperty.h) applied to
-   FO4's `Fallout4ShaderPropertyFlags1`. Confirm bit 15 is what FO4 actually
-   uses, and confirm against a **vanilla** asset that already has it rather than
-   a synthesized one.
-2. **Pass ordering.** The comment says the shape "draws in the second pass, so
-   the framebuffer already holds the scene behind it" — an opaque shape may not
-   reach that setup. If so the fixture needs alpha blending enabled too.
+```cpp
+hasRefraction = m->bRefraction || hasSF1( ShaderFlags::SLSF1_Refraction );
+refractionStrength = m->bRefraction ? m->fRefractionPower
+                                   : nif->get<float>( iSPData, "Refraction Strength" );
+```
 
-**Do not start §1 or §2 until this is resolved** — it is the exact thing the
-change is supposed to not break. A vanilla FO4 asset with the flag set is the
-better fixture; find one by scanning the corpus for the bit rather than
-authoring it.
+**Why OR and not "the material wins".** nif.xml says the FO4 flags are "mostly
+overridden if Name is a path to a BGSM/BGEM file", so material-wins looks right —
+and it is wrong. Measured over the corpus: of **6899** vanilla FO4 materials
+under `Data\Materials`, **zero** set `bRefraction` (9 set `bRefractionFalloff`,
+which is its own curiosity). Reading the material alone leaves the feature dead
+for all vanilla content, so the NIF bit has to keep counting. Offsets for that
+scan were validated first, by confirming every boolean field decodes as strictly
+`{0,1}` while `iAlphaTestRef` shows a real range (37–200) — a misaligned read
+cannot produce that.
+
+**Hypothesis 1 was wrong.** FO4 bit 15 *is* `Refraction`: nif.xml
+`Fallout4ShaderPropertyFlags1` line 7015. Skyrim's layout and FO4's agree here,
+so `SLSF1_Refraction = 1 << 15` was never the problem. (Bit 2 is
+`Temp_Refraction` and bit 16 `Fire_Refraction`, neither of which this path uses.)
+
+### The thing that made this so confusing
+
+`fo4_default.frag:383` ends the refraction branch with `color.rgb = bg; color.a = 1.0;`
+— the shape is replaced wholesale by the framebuffer behind it. Over a
+**featureless background a refracting shape is therefore invisible**, not
+distorted. So the fix's first visible effect was the mesh *vanishing*, which
+reads exactly like a catastrophic regression. It is correct behaviour with
+nothing behind the shape to refract.
+
+### Current fixture, and what it does and does not catch
+
+`tests/render/refraction_fixture.nif` is now **`CA-PowerArmorVisorGlass01.nif`
+with `SLSF1_Refraction` set and Refraction Strength 0.8 on block 5**, replacing
+the old donor.nif-based one. That makes it an A/B pair with the `glass_visor`
+case, which is the *same mesh with the flag off*:
+
+| case | flag | renders |
+|---|---|---|
+| `glass_visor` | off | the bright white visor glass |
+| `refraction_fixed` | on | the visor replaced by the background behind it |
+
+Any regression that stops refraction engaging flips `refraction_fixed` back to
+looking like `glass_visor`, and the difference is attributable to exactly one
+flag on one block. That is a real guard, and strictly better than the old
+fixture which was byte-identical to its own control.
+
+**It cannot distinguish "refracting correctly" from "shape culled entirely"** —
+both give a background-coloured frame. Closing that needs non-uniform geometry
+*behind* the refracting shape. A `merge` of the visor onto donor.nif was tried
+and is not enough on its own: the two land at unrelated scales and positions and
+never overlap, so it needs deliberate transform placement. Small, bounded, and
+worth doing before trusting this case to prove distortion rather than mere
+engagement.
 
 ---
 

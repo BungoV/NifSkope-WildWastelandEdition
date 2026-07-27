@@ -114,8 +114,14 @@ foreach ($c in $corpus) {
 }
 
 Write-Host ""
+# The @() around each filter is load-bearing. Where-Object returning exactly ONE
+# hashtable hands back the hashtable itself, not a 1-element array, and .Count on
+# a Hashtable is its KEY count — so a single DIFF row reported "diff=4" (name,
+# status, pixels, max) and a single OK row would report "ok=2". The totals only
+# looked correct while every status happened to match more than one case, which
+# is why this went unnoticed until 07-27.
 Write-Host ("mode={0}  ok={1} diff={2} failed={3} missing={4}" -f $Mode,
-    ($results | Where-Object { $_.status -eq 'ok' }).Count,
-    ($results | Where-Object { $_.status -eq 'diff' }).Count,
-    ($results | Where-Object { $_.status -in @('no-output','size-mismatch') }).Count,
-    ($results | Where-Object { $_.status -in @('missing','no-baseline') }).Count)
+    @($results | Where-Object { $_.status -eq 'ok' }).Count,
+    @($results | Where-Object { $_.status -eq 'diff' }).Count,
+    @($results | Where-Object { $_.status -in @('no-output','size-mismatch') }).Count,
+    @($results | Where-Object { $_.status -in @('missing','no-baseline') }).Count)

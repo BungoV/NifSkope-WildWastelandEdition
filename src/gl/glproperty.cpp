@@ -1505,6 +1505,23 @@ void BSLightingShaderProperty::updateParams( const NifModel * nif )
 		useEnvironmentMask = hasEnvironmentMap && !m->bGlowmap && !m->textureList[5].isEmpty();
 		environmentReflection = m->fEnvironmentMappingMaskScale;
 
+		// Refraction. This branch never set it, so the screen-space refraction
+		// preview (2026-07-06) could not engage on any FO4 mesh whose shader
+		// property names a BGSM/BGEM — which is nearly all of them.
+		// hasRefraction stayed at resetParams()'s false and the shape drew as if
+		// the flag were absent.
+		//
+		// The material is OR'd with the NIF flag rather than replacing it, even
+		// though nif.xml says the FO4 flags are "mostly overridden if Name is a
+		// path to a BGSM/BGEM file". Measured, 2026-07-27: of the 6899 vanilla
+		// FO4 materials under Data\Materials, **zero** set bRefraction (9 set
+		// bRefractionFalloff, which is its own oddity). Reading the material
+		// alone would therefore leave refraction dead for all vanilla content —
+		// the NIF bit is the only place FO4 ever actually expresses it.
+		hasRefraction = m->bRefraction || hasSF1( ShaderFlags::SLSF1_Refraction );
+		refractionStrength = m->bRefraction ? m->fRefractionPower
+		                                   : nif->get<float>( iSPData, "Refraction Strength" );
+
 		if ( hasSoftlight )
 			lightingEffect1 = m->fSubsurfaceLightingRolloff;
 

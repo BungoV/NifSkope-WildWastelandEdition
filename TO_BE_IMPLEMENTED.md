@@ -105,20 +105,23 @@ evidence.
 To resume: flip the constant and re-enable the two greyed menu entries. Full
 findings in `WW_CHANGES.md 2026-07-27e`.
 
-### Also open, and it guards the thing PBR must not break
+### Refraction guard — FIXED 07-27g, one bounded follow-up left
 
-`RENDERER_MATCH_PLAN.md §0`: `tests/render/refraction_fixture.nif` renders
-**byte-identical** to the unmodified head, so `doRefraction` is never true and
-that baseline currently guards nothing. Ruled out: the flag is in the file, no
-BGSM override, `showRefraction` forced true, branch not version-gated. Leading
-hypothesis: `SLSF1_Refraction = 1 << 15` is Skyrim's bit layout applied to FO4's
-flags. Better fixture = a **vanilla** FO4 asset found by scanning the corpus for
-the bit.
+The "fixture guards nothing" symptom turned out to be a **real renderer bug**:
+`hasRefraction` was only ever assigned in `updateParams`'s no-material branch, so
+refraction could not engage on any FO4 mesh backed by a BGSM/BGEM — nearly all of
+them — and had been dead since the feature shipped on 07-06. Fixed, and the
+fixture rebuilt as an A/B pair against `glass_visor` (same mesh, flag off). Full
+account, including why the material is OR'd with the NIF flag rather than
+replacing it (0 of 6899 vanilla FO4 materials set `bRefraction`), in
+`RENDERER_MATCH_PLAN.md §0`.
 
-The plan said don't touch §1/§2 until this is resolved. Both were built anyway
-(07-27a..e). The regression set stayed clean throughout, so it likely cost
-nothing — but refraction is the exact thing the change was supposed to not
-break, and it is still unguarded.
+**Still open, small:** the fixture proves refraction *engages*, not that it
+*distorts* — a refracting shape over a featureless background is invisible rather
+than warped, so "refracting" and "shape culled" look identical. Needs geometry
+placed behind the refracting shape. A plain `merge` is not enough (the pieces
+land at unrelated scales and never overlap); it needs deliberate transform
+placement.
 
 ---
 

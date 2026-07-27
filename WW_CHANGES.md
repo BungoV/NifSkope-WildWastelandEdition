@@ -1,5 +1,61 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27h — Refraction was dead for every BGSM-backed FO4 mesh (fixed)
+
+Chasing "the refraction regression fixture guards nothing" found a real renderer
+bug rather than a bad fixture.
+
+**Root cause.** `BSLightingShaderProperty::updateParams` assigns `hasRefraction`
+only inside the `} else { // m == nullptr` branch — when the shape has *no* valid
+BGSM/BGEM. With a material present, which is nearly every FO4 mesh, it kept
+`resetParams()`'s `false` and the NIF's `SLSF1_Refraction` bit was never read.
+The screen-space refraction preview had been dead for all material-backed FO4
+content since it shipped on 07-06. Now read in the material branch too.
+
+**The material is OR'd with the NIF flag, not preferred over it.** nif.xml says
+FO4 flags are "mostly overridden if Name is a path to a BGSM/BGEM file", which
+argues for material-wins — and measurement kills that: of **6899** vanilla FO4
+materials under `Data\Materials`, **zero** set `bRefraction`. Material-only would
+leave the feature dead for all vanilla content. Offsets were validated before
+trusting that zero: every boolean field decodes as strictly {0,1} while
+`iAlphaTestRef` shows a real range (37–200), which a misaligned read cannot do.
+
+**Wrong first attempt, corrected.** The first version read the material alone,
+on the strength of the nif.xml comment. The corpus scan is what showed it was
+backwards.
+
+**Hypothesis 1 from RENDERER_MATCH_PLAN §0 is disproven.** FO4 bit 15 *is*
+`Refraction` (nif.xml:7015); Skyrim's and FO4's layouts agree, so
+`SLSF1_Refraction = 1 << 15` was never the problem.
+
+**Why the symptom was so misleading.** `fo4_default.frag:383` ends with
+`color.rgb = bg`, replacing the shape with the framebuffer behind it. Over a
+featureless background a refracting shape is **invisible, not distorted** — so
+the fix's first visible effect was the mesh vanishing, which reads as a
+catastrophic regression. I mistook the vanishing head for proof the fix worked
+("the bytes differ"), then for proof it was broken; it was neither. Only looking
+at the pixels settled it.
+
+**Fixture rebuilt.** `tests/render/refraction_fixture.nif` is now
+`CA-PowerArmorVisorGlass01.nif` with the flag and Refraction Strength 0.8 set on
+block 5 — an A/B pair with the `glass_visor` case, which is the same mesh with
+the flag off. Any regression that stops refraction engaging flips it back to
+looking like its own control. **Known limit:** it proves refraction *engages*,
+not that it *distorts*; that needs geometry behind the shape, and a plain `merge`
+does not do it (the pieces land at unrelated scales and never overlap).
+
+**Harness counter bug, also fixed.** `capture.ps1`'s summary used
+`($results | Where-Object {...}).Count`. When exactly one case matches,
+Where-Object returns the hashtable itself rather than a 1-element array, and
+`.Count` on a Hashtable is its *key* count — so a single DIFF row printed
+"diff=4" (name, status, pixels, max). The totals only looked right while every
+status matched more than one case, which is why yesterday's "ok=3 diff=4" passed
+unquestioned. Wrapped each filter in `@()`.
+
+**Baselines re-cut** at this commit, so the set is 7/7 identical instead of
+carrying four permanent expected-diffs from the 07-27a spec/gloss change. A guard
+that always prints four diffs is a guard nobody reads.
+
 ## 2026-07-27g — Backlog re-verified against the code (docs only, no code change)
 
 `TO_BE_IMPLEMENTED.md` was last checked on 07-21 and had drifted over five
