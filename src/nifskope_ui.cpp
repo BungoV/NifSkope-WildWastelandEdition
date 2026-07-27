@@ -393,22 +393,34 @@ QString wwSkinColor( const char * name )
 	return QString();
 }
 
-/*! The boxed toolbar-selector look: the viewport mode dropdown, the mode row's
- * menu buttons, and the Panels / Workspaces selectors. One definition so the
- * sites cannot drift apart — they were three copies of the same greys.
+/*! The toolbar-selector look: the viewport mode dropdown, the mode row's menu
+ * buttons, and the Panels / Workspaces selectors. One definition so the sites
+ * cannot drift apart — they were three copies of the same greys.
+ *
+ * FLAT, in the style of Blender's header: no border and no background plate
+ * until the pointer is on it. A top bar with ~15 controls, each drawn in its own
+ * bordered box, spends most of its width on chrome and reads as fifteen separate
+ * things competing for attention; without the boxes the glyphs and labels carry
+ * it, and the row shrinks by roughly a third. Hover and checked still give plain
+ * feedback, which is all the boxes were really providing.
+ *
+ * Not weight 600 either — bold labels on every control is the same problem in
+ * type.
  */
 static QString wwBoxedButtonQss( const QString & padding )
 {
 	return QStringLiteral(
-		"QToolButton { padding: %1; border: 1px solid %2; border-radius: 4px;"
-		" background: %3; color: %4; font-weight: 600; }"
-		"QToolButton:hover { background: %5; border-color: %6; color: %7; }"
-		"QToolButton:pressed, QToolButton::menu-button:pressed { background: %8; }"
+		"QToolButton { padding: %1; border: 1px solid transparent; border-radius: 3px;"
+		" background: transparent; color: %2; }"
+		"QToolButton:hover { background: %3; color: %4; }"
+		"QToolButton:pressed, QToolButton::menu-button:pressed { background: %5; }"
+		"QToolButton:checked { background: %5; }"
+		"QToolButton:disabled { color: %6; }"
 		"QToolButton::menu-indicator { subcontrol-position: right center;"
 		" subcontrol-origin: padding; }" )
-		.arg( padding, wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "text" ),
-			  wwSkinColor( "bgBtnHover" ), wwSkinColor( "focus" ), wwSkinColor( "textBright" ),
-			  wwSkinColor( "bgBtnDown" ) );
+		.arg( padding, wwSkinColor( "text" ), wwSkinColor( "bgBtnHover" ),
+			  wwSkinColor( "textBright" ), wwSkinColor( "bgBtnDown" ),
+			  wwSkinColor( "textMuted" ) );
 }
 
 
@@ -5095,9 +5107,8 @@ void NifSkope::initDockWidgets()
 		modeButton->setObjectName( QStringLiteral( "ViewportModeButton" ) );
 		modeButton->setPopupMode( QToolButton::InstantPopup );
 		modeButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
-		modeButton->setMinimumWidth( 118 );
 		modeButton->setAutoRaise( false );
-		modeButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "4px 10px" ) ) );
+		modeButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
 		modeButton->setToolTip( tr( "Viewport interaction mode. Tab toggles Object Mode and the last non-object mode." ) );
 
 		QMenu * modeMenu = new QMenu( modeButton );
@@ -5246,7 +5257,7 @@ void NifSkope::initDockWidgets()
 			btn->setAutoRaise( false );
 			// boxed like the Panels / Workspaces selectors (slimmer padding:
 			// up to eight of these share the row)
-			btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 9px" ) ) );
+			btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
 			QMenu * menu = new QMenu( btn );
 			connect( menu, &QMenu::aboutToShow, this, [this, menu, populate]() {
 				menu->clear();
@@ -6566,9 +6577,8 @@ void NifSkope::initDockWidgets()
 		btn->setText( tr( "Panels" ) );
 		btn->setIcon( tlMakeIcon( QStringLiteral( "panel" ), QColor( 228, 228, 232 ) ) );
 		btn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
-		btn->setMinimumWidth( 96 );
 		btn->setAutoRaise( false );
-		btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "4px 10px" ) ) );
+		btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
 		btn->setToolTip( tr( "Show/hide panels" ) );
 		QMenu * m = new QMenu( btn );
 		for ( QDockWidget * dw : { dList, dTree, dHeader, dBrowser, dInsp, dKfm, dRefr } ) {
@@ -6583,7 +6593,6 @@ void NifSkope::initDockWidgets()
 		workspaces->setText( tr( "Workspaces" ) );
 		workspaces->setIcon( tlMakeIcon( QStringLiteral( "workspace" ), QColor( 228, 228, 232 ) ) );
 		workspaces->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
-		workspaces->setMinimumWidth( 118 );
 		workspaces->setAutoRaise( false );
 		workspaces->setStyleSheet( btn->styleSheet() );
 		workspaces->setToolTip( tr( "Switch the active task workspace" ) );
@@ -7610,7 +7619,7 @@ void NifSkope::setThemeActions()
 
 void NifSkope::setToolbarSize()
 {
-	QSize size = {18, 18};
+	QSize size = {16, 16};
 	if ( toolbarSize == ToolbarLarge )
 		size = {36, 36};
 
