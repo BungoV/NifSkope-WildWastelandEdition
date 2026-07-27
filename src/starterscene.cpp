@@ -106,6 +106,10 @@ bool nifCreateStarterScene( NifModel * nif, float size, QString * error )
 	nif->set<QString>( iShape, "Name", QStringLiteral( "Cube" ) );
 	nif->set<quint32>( iShape, "Flags", 14 );
 	nif->set<float>( iShape, "Scale", 1.0f );
+	// Sitting ON the grid rather than half-sunk through it. The mesh stays
+	// symmetric about its own origin, so the node - and the pivot every transform
+	// tool uses - is at the cube's centre; only the node is lifted.
+	nif->set<Vector3>( iShape, "Translation", Vector3( 0.0f, 0.0f, size * 0.5f ) );
 
 	/* Full-precision vertices with UV, normal and tangent: 28 bytes a vertex.
 	 * Same descriptor the collision proxy shape uses (collisiontools.cpp), which

@@ -1,5 +1,80 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27t — Fallout 4 by default, cube on the grid, themed node dot
+
+Three reported items; two fixed, one **still open and honestly unresolved**.
+
+### Fallout 4 is the default now
+
+Two separate places had it wrong:
+
+- **`NifModel::createNew()` left the document on the wrong game.** It calls
+  `clear()`, which resolves `gameResources` from the bsVersion it has *at that
+  moment* — the startup default — and then changed the version without
+  re-resolving. `GameManager` keys the resource set off the model's version, so a
+  document created as Fallout 4 kept whichever game the default implied and every
+  texture and material lookup it made went to the wrong game for the rest of its
+  life. Now re-resolves after setting the version.
+- **The startup default itself was BS 100 (Skyrim SE).** This fork is a Fallout 4
+  tool, so a new document should be one without being asked. Now 130. Only
+  affects users who never set `Settings/Nif/Startup Defaults/User Version 2`.
+
+### The cube sits on the grid
+
+`Translation` is now `(0, 0, size/2)`, so it rests on the XY plane instead of
+being half-sunk through it. The mesh stays symmetric about its own origin, so the
+node — and the pivot every transform tool uses — remains at the cube's centre;
+only the node is lifted. Verified: `Z = 69.991249`, exactly half of the
+139.9825-unit cube.
+
+### The Block List node dot follows the theme
+
+`blockListCategoryIcon()` drew the `NiNode` dot with a hardcoded
+`QColor( 214, 214, 210 )`. That matched nothing else in the palette and, worse,
+ignored the theme — a near-white dot on a near-white row is invisible on the
+light skin. Now `wwSkinColor( "text" )`, per the skin rule that colours come from
+`skinVars[]` and never from literals. Cached per colour so a theme switch
+rebuilds the pixmap instead of serving the old one forever.
+
+### STILL OPEN: the startup cube renders black
+
+The same document renders **grey when loaded from a file and black at startup**,
+and I could not find the cause. What the captures rule out — all read at the cube
+draw, in the grabbed frame, in both runs:
+
+| checked | startup (black) | loaded (grey) |
+|---|---|---|
+| BaseMap texel | `80 80 80 FF` | `80 80 80 FF` |
+| NormalMap texel | `80 80 FF FF` | `80 80 FF FF` |
+| shader program | vs 123 / ps 122 | vs 123 / ps 122 |
+| light diffuse / ambient | white / white | white / white |
+| `toneMapScale` | 0.2364 | 0.2364 |
+| PS `$Globals` (26 vars) | all sane, `alpha` 1 | — |
+| VS `vertexColorOverride` | `1,1,1,1` | — |
+| vertex input declarations | identical | identical |
+
+`rdc rt 132` confirms the colour target is already black immediately after the
+cube draw, so the fragment shader really is outputting black from inputs that
+look correct.
+
+Two dead ends worth recording so they are not repeated:
+
+- **`rdc debug pixel` is unusable here**, exactly like `rdc debug vertex`: every
+  input reads `-107374176.0`, which is `0xCCCCCCCC` as a float. The backlog
+  already warned about this for the vertex path; it applies to the pixel path too.
+- **`bsshape.cpp:90` fills the vertex-colour array with BLACK** for shapes whose
+  descriptor has no `VA_COLOR`, and the capture shows `vertexColor` *is* a used,
+  bound attribute. White is the multiplicative identity and black is the identity
+  for nothing, so this looked like the answer. **It is not** — changing it to
+  white left the cube black. Reverted rather than shipped, since it changes
+  rendering for every uncoloured shape and fixed nothing observable. Still looks
+  wrong; worth revisiting with evidence rather than on a hunch.
+
+The next thing to try is a capture **diff** of the two runs across all state
+rather than the hand-picked fields above — `rdc diff` exists and was not used.
+
+Render regression 7/7 identical.
+
 ## 2026-07-27s — Starter cube: neutral grey, and two inside-out faces
 
 Reported against `bc4656a`: the startup cube looked wrong and was pure black.

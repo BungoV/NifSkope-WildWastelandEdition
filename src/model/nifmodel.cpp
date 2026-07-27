@@ -291,7 +291,10 @@ void NifModel::updateSettings()
 
 	cfg.startupVersion = settings.value( "Version", "20.2.0.7" ).toString();
 	cfg.userVersion = settings.value( "User Version", "12" ).toInt();
-	cfg.userVersion2 = settings.value( "User Version 2", "100" ).toInt();
+	// 130 = Fallout 4. This fork is a Fallout 4 tool, so a new document should be
+	// one without being asked; 100 (Skyrim SE) was upstream's default. Only
+	// affects users who never set it explicitly.
+	cfg.userVersion2 = settings.value( "User Version 2", "130" ).toInt();
 
 	settings.endGroup();
 }
@@ -460,6 +463,17 @@ bool NifModel::createNew( quint32 fileVersion, int userVersion, int bsVersion )
 	set<int>( getItem( header, "BS Header\\BS Version", false ), bsVersion );
 	invalidateItemConditions( header );
 	cacheBSVersion( header );
+
+	/* Re-resolve the game resources for the version we just set.
+	 *
+	 * clear() already did this once, but from the bsVersion the STARTUP DEFAULTS
+	 * gave it, and GameManager keys the resource set off the model's version. So
+	 * without this a document created here as Fallout 4 keeps whichever game the
+	 * default implied - Skyrim SE at BS 100 - and every texture and material
+	 * lookup it makes for the rest of its life goes to the wrong game.
+	 */
+	Game::GameManager::removeNIFResourcePath( this );
+	gameResources = &( Game::GameManager::getNIFResources( this ) );
 
 	return getBSVersion() == quint32( bsVersion );
 }
