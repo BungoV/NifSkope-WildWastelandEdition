@@ -16,3 +16,10 @@ ww_*.log
 ww_*.png
 qmake_*.log
 build_run.log
+
+# packaged builds — 227 MB of zips as of 2026-07-27, regenerate with package.ps1
+dist/
+
+# render-regression scratch: baseline/ IS tracked (it is the guard), current/ is
+# per-run output and would churn on every capture
+tools/render_regression/current/
