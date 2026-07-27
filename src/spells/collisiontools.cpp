@@ -972,9 +972,14 @@ private:
 		quint32 mat = 0, collLayer = 1;
 		int nv = 0, nt = 0;
 		QString shape = sys.valid ? compiledShapeSummary( sys, bodyId, &mat, &nv, &nt ) : tr( "Invalid packfile" );
-		float m = sys.dynamic ? sys.mass : 0.0f;
-		if ( int( bodyId ) < sys.bodyPhys.size() )
+		float m = 0.0f;
+		if ( int( bodyId ) < sys.bodyPhys.size() ) {
 			collLayer = sys.bodyPhys.at( int( bodyId ) ).layer;
+			// this body's own mass, not the system's first body's
+			m = sys.dynamic ? sys.bodyPhys.at( int( bodyId ) ).mass : 0.0f;
+		} else if ( sys.dynamic ) {
+			m = sys.mass;
+		}
 
 		auto * item = new CollisionTreeItem( tree );
 		item->setText( 0, nodeName( node ) );
@@ -1196,14 +1201,15 @@ private:
 			const QByteArray systemBytes = nif->get<QByteArray>( system, "Binary Data" );
 			const HknpSystem & sys = hknpDecodeCached( systemBytes );
 			HknpBodyPhys phys = int( bodyId ) < sys.bodyPhys.size() ? sys.bodyPhys.at( int( bodyId ) ) : HknpBodyPhys();
-			mass->setValue( sys.mass );
+			// per-body: on a ragdoll every bone has its own mass and damping
+			mass->setValue( phys.mass );
 			friction->setValue( phys.friction );
 			restitution->setValue( phys.restitution );
 			selectComboValue( layer, phys.layer );
-			linearDamping->setValue( sys.linDamping );
-			angularDamping->setValue( sys.angDamping );
-			maxLinearVelocity->setValue( sys.maxLinVelocity );
-			maxAngularVelocity->setValue( sys.maxAngVelocity );
+			linearDamping->setValue( phys.linDamping );
+			angularDamping->setValue( phys.angDamping );
+			maxLinearVelocity->setValue( phys.maxLinVelocity );
+			maxAngularVelocity->setValue( phys.maxAngVelocity );
 			selectComboValue( motionSystem, phys.hasMotion ? 3u : 5u );
 			selectComboValue( qualityType, phys.hasMotion ? 4u : 0u );
 			selectComboValue( solverDeactivation, phys.hasMotion ? 2u : 1u );
@@ -1212,7 +1218,7 @@ private:
 			collisionWithinGroup->setChecked( !( phys.filterFlags & 0x40u ) ); wind->setChecked( false );
 			filterGroup->setValue( phys.filterGroup );
 			centerX->setValue( phys.com[0] ); centerY->setValue( phys.com[1] ); centerZ->setValue( phys.com[2] );
-			inertiaX->setValue( sys.inertia[0] ); inertiaY->setValue( sys.inertia[1] ); inertiaZ->setValue( sys.inertia[2] );
+			inertiaX->setValue( phys.inertia[0] ); inertiaY->setValue( phys.inertia[1] ); inertiaZ->setValue( phys.inertia[2] );
 			penetrationDepth->setValue( 0.15 );
 			quint32 materialValue = 0;
 			int shapeIndex = item->data( 0, ShapeIndexRole ).toInt();

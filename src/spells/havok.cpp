@@ -1853,11 +1853,14 @@ public:
 				}
 				nif->set<float>( iInfo, "Friction", phys.friction );
 				nif->set<float>( iInfo, "Restitution", phys.restitution );
-				nif->set<float>( iInfo, "Linear Damping", sys.linDamping );
-				nif->set<float>( iInfo, "Angular Damping", sys.angDamping );
-				nif->set<float>( iInfo, "Gravity Factor", sys.gravityFactor );
-				nif->set<float>( iInfo, "Max Linear Velocity", sys.maxLinVelocity );
-				nif->set<float>( iInfo, "Max Angular Velocity", sys.maxAngVelocity );
+				// per-body, not per-system: a ragdoll's bones carry different
+				// masses and damping, and taking the system scalars gave every
+				// bone bone 0's values
+				nif->set<float>( iInfo, "Linear Damping", phys.linDamping );
+				nif->set<float>( iInfo, "Angular Damping", phys.angDamping );
+				nif->set<float>( iInfo, "Gravity Factor", phys.gravityFactor );
+				nif->set<float>( iInfo, "Max Linear Velocity", phys.maxLinVelocity );
+				nif->set<float>( iInfo, "Max Angular Velocity", phys.maxAngVelocity );
 				nif->set<float>( iInfo, "Penetration Depth", 0.15f );
 				nif->set<float>( iInfo, "Time Factor", 1.0f );
 				nif->set<quint32>( iInfo, "Collision Response", 1 );	// SIMPLE_CONTACT
@@ -1868,12 +1871,12 @@ public:
 				nif->set<quint32>( iInfo, "Motion System", dyn ? 3u : 5u );
 				nif->set<quint32>( iInfo, "Solver Deactivation", dyn ? 2u : 1u );
 				nif->set<quint32>( iInfo, "Quality Type", dyn ? 4u : 0u );
-				nif->set<float>( iInfo, "Mass", dyn ? sys.mass : 0.0f );
+				nif->set<float>( iInfo, "Mass", dyn ? phys.mass : 0.0f );
 				QModelIndex iInertia = nif->getIndex( iInfo, "Inertia Tensor" );
 				if ( dyn && iInertia.isValid() ) {
-					nif->set<float>( iInertia, "m11", sys.inertia[0] );
-					nif->set<float>( iInertia, "m22", sys.inertia[1] );
-					nif->set<float>( iInertia, "m33", sys.inertia[2] );
+					nif->set<float>( iInertia, "m11", phys.inertia[0] );
+					nif->set<float>( iInertia, "m22", phys.inertia[1] );
+					nif->set<float>( iInertia, "m33", phys.inertia[2] );
 				}
 				if ( dyn ) {
 					// identity-rotation dynamic bodies store the center of

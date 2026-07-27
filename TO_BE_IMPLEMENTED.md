@@ -275,12 +275,11 @@ order; each is independently verifiable against a vanilla file:
    vanilla ragdolls now decode their bodies. Its remaining unread arrays are
    `+0x50` (38 entries on 39 bones — the constraint bindings, see 3) and `+0x80`
    (39 entries, unidentified).
-2. **Per-body mass / inertia / damping.** `HknpSystem` keeps these as scalars read
-   from array element 0, which was fine when a system meant one body. A ragdoll has
-   39, so every decompiled bone gets bone 0's mass (brahmin: all 39 get Mass 5).
-   The arrays are already located — `dyn_motion` at root `+0x20`, `dyn_inertia` at
-   `+0x30`, both 39 entries — so this is moving three fields into `HknpBodyPhys`
-   and reading them per index. Smallest remaining item; do it first.
+2. ~~**Per-body mass / inertia / damping.**~~ **DONE 07-27p.** Now on
+   `HknpBodyPhys`. Strides: `dyn_motion` `0x40`, `dyn_inertia` `0x70`, both measured
+   twice (brahmin ragdoll and a 15-body Halloween banner). Indexed by the **motion
+   index** at `cinfo +0x0c`, not the body index — that distinction is load-bearing,
+   see the 07-27p entry. The arrays carry their own counts at `+0x28` / `+0x38`.
 3. **`hknpSphereShape` synthesis** — still reported in `unknownShapes` (it is
    *accepted* by `decodeLeaf` but `decodeConvexLike` returns no verts), so
    Deathclaw's sphere draws as nothing. No longer breaks attribution, just loses

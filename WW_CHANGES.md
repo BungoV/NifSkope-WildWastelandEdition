@@ -24,15 +24,39 @@ dynamic, layer 8** (was: 0 bodies, static, layer 1 by fallback), and a decompile
 bone body carries Mass 5, Friction 0.30, Motion System 3, Quality 4 — where before
 it got Mass 0, Friction 0.5, Motion System 5.
 
-Two things this exposes, both recorded in TO_BE_IMPLEMENTED §4a rather than
-guessed at:
+One thing this exposes is recorded in TO_BE_IMPLEMENTED §4a rather than guessed
+at: **`hknpRagdollData +0x50` holds 38 entries on a 39-bone ragdoll** — one per
+non-root bone. That is the constraint binding array (38 bindings share 24 distinct
+constraint objects at 0x18 bytes each), and it is the lead for decoding the joints.
 
-- **`HknpSystem` holds mass / inertia / damping as scalars**, read from array
-  element 0. That was fine when a system meant one body; a ragdoll has 39, so
-  every decompiled bone currently gets bone 0's mass. Needs per-body fields.
-- **`hknpRagdollData +0x50` holds 38 entries on a 39-bone ragdoll** — one per
-  non-root bone. That is the constraint binding array, and it is the lead for
-  decoding the joints (24 distinct constraint objects shared across 38 bindings).
+### Per-body mass / inertia / damping
+
+`HknpSystem` held these as scalars read from array element 0, which was right when
+a system meant one body. A ragdoll has one per bone, so every decompiled bone got
+bone 0's values. They now live on `HknpBodyPhys`, seeded from the system scalars
+when the arrays are absent so callers never have to test.
+
+Two things had to be measured rather than assumed, and the second was a mistake
+caught only because it was checked:
+
+- **Strides.** `dyn_inertia` is `0x70` and `dyn_motion` is `0x40` — the only
+  candidates of 0x30/0x40/0x50/0x60/0x70/0x80 that read 39 plausible entries on the
+  brahmin. A 15-body Halloween banner agrees independently (896/14 = 0x40,
+  1568/14 = 0x70). Note the encoder writes a 0x40-byte `dynamicInertia` block; that
+  stays byte-validated for single-body output, where stride is irrelevant.
+- **The index.** `cinfo +0x0c` is the body's **motion index** into those arrays, not
+  its own index — the same field `hasMotion` already tested against `0x7fffffff`.
+  Indexing by body index is wrong in a way that looks plausible: it gave the
+  brahmin 4 kg toes, 5 kg ears and a 1 kg head. By motion index both limbs taper
+  **5 → 3 → 1 → 1** from thigh to toe and from upper arm to palm, and the 20 kg
+  lands on Spine4. The arrays also carry their own counts (`+0x28`, `+0x38`) which
+  need not equal the body count — the banner has 15 bodies and 14 dynamic entries,
+  one being its anchor — and testing the motion index against those covers both
+  that and the static case.
+
+Verified after: 35/35 ragdolls decode bodies from the packfile, 72/72 physics
+meshes unchanged, skeleton selftest passes, and a decompiled brahmin carries
+distinct per-bone masses (Pelvis 5, Tail1 4, Sack 4, Spine4 20, RLeg2 3).
 
 ## 2026-07-27o — Per-bone ragdoll collision: attribution recovered, Bone column, sync
 

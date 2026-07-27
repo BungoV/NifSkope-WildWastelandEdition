@@ -76,6 +76,22 @@ struct HknpBodyPhys
 	float friction = 0.5f;      //!< body_props +0x12 (truncated float16)
 	float restitution = 0.4f;   //!< body_props +0x16 (truncated float16)
 	Vector3 com;                //!< cinfo +0x30 (center of mass for dynamic)
+
+	/* Per-body dynamics. A ragdoll has one entry per bone in the root's
+	 * dyn_motion (+0x20, stride 0x40) and dyn_inertia (+0x30, stride 0x70)
+	 * arrays; a single-body physics system has one of each, which is why these
+	 * lived on HknpSystem as scalars until ragdolls decoded. Always populated -
+	 * seeded from the system values when the arrays are absent - so callers can
+	 * read them without checking.
+	 */
+	float mass = 0.0f;                  //!< 1 / (dyn_inertia +0x04)
+	float density = 0.0f;               //!< dyn_inertia +0x08
+	Vector3 inertia;                    //!< dyn_inertia +0x20/24/28 (diagonal)
+	float gravityFactor = 1.0f;         //!< dyn_motion +0x08
+	float maxLinVelocity = 104.375f;    //!< dyn_motion +0x10
+	float maxAngVelocity = 31.57f;      //!< dyn_motion +0x14
+	float linDamping = 0.1f;            //!< dyn_motion +0x18
+	float angDamping = 0.05f;           //!< dyn_motion +0x1C
 };
 
 //! A decoded bhkPhysicsSystem blob
@@ -88,6 +104,8 @@ struct HknpSystem
 	//! dyn_motion / dyn_inertia arrays present (PSD +0x20 / +0x30): the
 	//! system simulates dynamically (props); statics lack both arrays
 	bool dynamic = false;
+	//! The following are the FIRST body's values. Kept because callers outside the
+	//! collision paths read them; anything per-body should use HknpBodyPhys.
 	float mass = 0.0f;          //!< 1 / (dyn_inertia +0x04); 0 for statics
 	float density = 0.0f;       //!< dyn_inertia +0x08 (mass / collision volume)
 	Vector3 inertia;            //!< dyn_inertia +0x20/24/28 (diagonal)

@@ -528,6 +528,50 @@ HknpSystem hknpDecode( const QByteArray & data )
 			if ( phys.layer == 0 )
 				phys.layer = ( sys.dynamic && phys.hasMotion ) ? 10u : 1u;
 			phys.com = r.vec3( c + 0x30 );
+			/* Per-body dynamics.
+			 *
+			 * cinfo +0x0c is the body's MOTION INDEX into dyn_motion /
+			 * dyn_inertia, not its own index - 0x7fffffff means static, which is
+			 * what hasMotion above tests. Indexing by the body index instead is
+			 * wrong in a way that looks plausible: on the brahmin it gives 4 kg
+			 * toes, 5 kg ears and a 1 kg head, where the motion index tapers both
+			 * limbs 5 -> 3 -> 1 -> 1 from thigh to toe and from upper arm to palm,
+			 * and puts the 20 kg on Spine4.
+			 *
+			 * The arrays carry their OWN counts (+0x28, +0x38), which need not
+			 * equal the body count - a 15-body Halloween banner has 14 dynamic
+			 * entries because one body anchors it. Testing the motion index
+			 * against those counts covers that and the static case together.
+			 *
+			 * Strides measured, not assumed: 0x70 for dyn_inertia and 0x40 for
+			 * dyn_motion are the only candidates that read plausibly on the
+			 * brahmin ragdoll, and the banner agrees independently
+			 * (896 / 14 = 0x40, 1568 / 14 = 0x70).
+			 */
+			const quint32 motionIndex = r.u32( c + 0x0c );
+			phys.mass = sys.mass;
+			phys.density = sys.density;
+			phys.inertia = sys.inertia;
+			phys.gravityFactor = sys.gravityFactor;
+			phys.maxLinVelocity = sys.maxLinVelocity;
+			phys.maxAngVelocity = sys.maxAngVelocity;
+			phys.linDamping = sys.linDamping;
+			phys.angDamping = sys.angDamping;
+			if ( dm >= 0 && motionIndex < r.u32( obj.first + 0x28 ) ) {
+				qsizetype m = dm + qsizetype( motionIndex ) * 0x40;
+				phys.gravityFactor = r.f32( m + 0x08 );
+				phys.maxLinVelocity = r.f32( m + 0x10 );
+				phys.maxAngVelocity = r.f32( m + 0x14 );
+				phys.linDamping = r.f32( m + 0x18 );
+				phys.angDamping = r.f32( m + 0x1c );
+			}
+			if ( di >= 0 && motionIndex < r.u32( obj.first + 0x38 ) ) {
+				qsizetype n = di + qsizetype( motionIndex ) * 0x70;
+				const float invMass = r.f32( n + 0x04 );
+				phys.mass = ( invMass > 1.0e-12f ) ? 1.0f / invMass : 0.0f;
+				phys.density = r.f32( n + 0x08 );
+				phys.inertia = r.vec3( n + 0x20 );
+			}
 			if ( bprops >= 0 ) {
 				qsizetype bp = bprops + qsizetype( i ) * 0x50;
 				phys.friction = truncF16( bp + 0x12 );
