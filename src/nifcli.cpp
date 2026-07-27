@@ -464,18 +464,45 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 				}
 				return QString( "body %1" ).arg( body );
 			};
+			// hkpRagdollConstraintData -> Ragdoll; the wrappers are hknp*, not hkp*
+			auto shortKind = []( const QString & k ) {
+				QString s = k;
+				for ( auto p : { "hknp", "hkp" } )
+					if ( s.startsWith( QLatin1String( p ) ) ) { s = s.mid( int( strlen( p ) ) ); break; }
+				return s.remove( QLatin1String( "ConstraintData" ) );
+			};
+			// limits print in degrees: nobody authors a ragdoll in radians
+			auto limit = []( const HknpAngLimit & l, const char * name ) {
+				if ( !l.present )
+					return QString();
+				const float lo = rad2deg( l.min ), hi = rad2deg( l.max );
+				if ( l.min < -99.0f )   // Havok's "no lower bound" sentinel
+					return QString( "  %1 <%2" ).arg( name ).arg( hi, 0, 'f', 1 );
+				// two vanilla hinges store min/max the wrong way round; show that
+				// rather than folding it into a nonsense "+--0.1"
+				if ( qAbs( lo + hi ) < 0.05f && hi >= 0.0f )
+					return QString( "  %1 +-%2" ).arg( name ).arg( hi, 0, 'f', 1 );
+				return QString( "  %1 %2..%3" ).arg( name )
+					.arg( lo, 0, 'f', 1 ).arg( hi, 0, 'f', 1 );
+			};
 			for ( const HknpConstraint & jc : sys.constraints ) {
-				QString pivots;
+				QString detail;
 				if ( jc.hasFrames ) {
-					pivots = QString( "  pivot %1 %2 %3" )
+					detail = QString( "  pivot %1 %2 %3" )
 						.arg( jc.pivotB[0], 0, 'f', 3 ).arg( jc.pivotB[1], 0, 'f', 3 )
 						.arg( jc.pivotB[2], 0, 'f', 3 );
 				}
+				detail += limit( jc.hinge, "hinge" ) + limit( jc.twist, "twist" )
+					+ limit( jc.cone, "cone" ) + limit( jc.plane, "plane" );
+				if ( jc.motorEnabled )
+					detail += "  motor";
+				if ( jc.breakable )
+					detail += "  breakable";
 				out() << QString( "  %1 %2 %3" )
 							.arg( nodeFor( jc.childBody ), -34 )
 							.arg( nodeFor( jc.parentBody ), -34 )
-							.arg( jc.kind )
-					  << pivots << Qt::endl;
+							.arg( shortKind( jc.kind ), -14 )
+					  << detail << Qt::endl;
 			}
 		}
 		out() << QString( "  %1 %2 %3 %4" ).arg( "shape", -6 ).arg( "class", -34 )

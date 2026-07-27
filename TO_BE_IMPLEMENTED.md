@@ -303,7 +303,8 @@ order; each is independently verifiable against a vanilla file:
    read first now, polytope arrays only after the primitives return. **All 35
    vanilla ragdolls decode with zero undecoded shape classes**, including
    Deathclaw 28/28, `Robot/SkeletonRef` 48/48 and `skeletonSentryBodyPart` 24/24.
-4. **The joints — HALF DONE 07-27ae.** The **binding graph** is decoded and on
+4. ~~**The joints**~~ **DONE — graph 07-27ae, frames 07-27af, limits 07-28a.**
+   The **binding graph** is decoded and on
    `HknpSystem::constraints`: root `+0x50`, 0x18 an entry, constraint pointer at
    `+0x00` (global fixup), child body `+0x08`, parent body `+0x0c`, 8 bytes pad.
    Verified on the brahmin against the skeleton itself — all 38 name a bone and its
@@ -316,16 +317,17 @@ order; each is independently verifiable against a vanilla file:
    2 that do not are `hknpBreakableConstraintData`, a wrapper with its own layout
    that is deliberately skipped rather than misread.
 
-   **Still to do: the angular LIMITS.** They live in the Havok atom chain after
-   the frames — `hkpRagdollConstraintData` runs setupStabilization / ragdollMotors
-   / angFriction / twistLimit / coneLimit / planesLimit / ballSocket, and
-   `hkpLimitedHingeConstraintData` a different chain. Each atom starts with a u16
-   type but carries **no size field**, so walking needs a type→size table. Sizes
-   observed on the brahmin so far: `0x05`→16, `0x0e`→16, `0x0f`→32, `0x10`→32,
-   `0x11`→16, `0x12`→40, `0x13`→96, `0x17`→16. Two samples is not enough to
-   trust that table — gather more before building on it. Sample values that
-   should survive any decode: a brahmin tail-base twist of ±0.087266 rad (±5°),
-   cone 0.69813 (40°), and a knee hinge of -0.2618..0.69813 (-15°..40°).
+   **The angular LIMITS also done 07-28a**, via a validated atom type→size table
+   (`decodeConstraintAtoms`; sizes and evidence in WW_CHANGES 07-28a). All 757
+   constraint objects walk to their exact end, each class with exactly one atom
+   sequence. `HknpConstraint` now carries `twist`/`cone`/`plane`/`hinge`,
+   `friction`, `motorEnabled` and `breakable`; **757 of 757 joints decode limits**,
+   the last two by following the `hknpBreakableConstraintData` wrapper (the
+   Vertibird's doors) to the `hkp*` data inside. The predicted values all came
+   back exactly: brahmin tail-base twist ±5°, cone 40°, knee hinge -15°..40°.
+
+   Two vanilla hinges store min/max transposed (`+5.00/-5.00`, `+0.10/-0.10`);
+   that is the file's own data and is reported, not silently corrected.
 5. **`hkaSkeleton`** — the ragdoll's own copy of the skeleton.
 6. Only then the encoder. The array machinery in `hknpEncodeCompressedMesh` is
    directly reusable — the ragdoll root uses the same `hkArray` layout at the same

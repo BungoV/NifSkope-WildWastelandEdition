@@ -275,6 +275,101 @@ static void decodeConvexLike( Reader & r, qsizetype B, const QString & className
 	}
 }
 
+/*! Walk a constraint object's atom chain, filling in frames, limits and friction.
+ *
+ * The object is a flat run of atoms from +0x20 to its end. Each atom opens with a
+ * u16 type and has no length, so walking needs the sizes below. They are not
+ * guesses: with this table every one of the 757 constraint objects across all 35
+ * vanilla ragdolls walks to its exact end hitting only known types, and each
+ * class yields exactly ONE atom sequence with no variants. A size wrong by even
+ * four bytes desyncs the walk and turns every later type into garbage, so
+ * consuming 757 objects exactly is a strong check rather than a plausible one.
+ *
+ * Corroborating the field offsets separately from the sizes: all 3068 decoded
+ * angles land in [-pi, pi]; the 518 "-100" sentinels are exactly one per ragdoll
+ * constraint, matching the one bound a cone does not have; and the tau factor
+ * takes just two values across 1793 atoms, 0.8 on ragdoll limits and 1.0 on
+ * hinges. Bytes read at a wrong offset do not fall into patterns like that.
+ */
+static void decodeConstraintAtoms( Reader & r, qsizetype cd, qsizetype end, HknpConstraint & jc )
+{
+	enum AtomType
+	{
+		SET_LOCAL_TRANSFORMS = 0x02, BALL_SOCKET = 0x05, TWO_D_ANG = 0x0c,
+		ANG_LIMIT = 0x0e, TWIST_LIMIT = 0x0f, CONE_LIMIT = 0x10,
+		ANG_FRICTION = 0x11, ANG_MOTOR = 0x12, RAGDOLL_MOTOR = 0x13,
+		SETUP_STABILIZATION = 0x17
+	};
+
+	auto atomSize = []( quint16 t ) -> qsizetype {
+		switch ( t ) {
+		case SET_LOCAL_TRANSFORMS: return 144;   // 16 header + two hkTransforms
+		case RAGDOLL_MOTOR:        return 96;
+		case ANG_MOTOR:            return 40;
+		case TWIST_LIMIT:
+		case CONE_LIMIT:           return 32;
+		case BALL_SOCKET:
+		case TWO_D_ANG:
+		case ANG_LIMIT:
+		case ANG_FRICTION:
+		case SETUP_STABILIZATION:  return 16;
+		default:                   return 0;     // unknown: stop, do not guess
+		}
+	};
+
+	// twist/cone put min,max,tau at +0x08; angLimit is packed tighter, at +0x04
+	auto limit = [&r]( qsizetype a, qsizetype off ) {
+		HknpAngLimit l;
+		l.present = true;
+		l.min = r.f32( a + off );
+		l.max = r.f32( a + off + 4 );
+		l.tau = r.f32( a + off + 8 );
+		return l;
+	};
+
+	int cones = 0;
+	// Objects are 16-aligned, so a clean walk can stop short of the next object;
+	// that tail is zero padding, not a further atom.
+	for ( qsizetype a = cd + 0x20; a + 16 <= end && r.ok; ) {
+		const quint16 t = r.u16( a );
+		const qsizetype sz = atomSize( t );
+		if ( t == 0 || sz == 0 )
+			break;
+
+		switch ( t ) {
+		case SET_LOCAL_TRANSFORMS:
+			for ( int k = 0; k < 3; k++ ) {
+				jc.rotA[k] = r.vec3( a + 0x10 + qsizetype( k ) * 16 );
+				jc.rotB[k] = r.vec3( a + 0x50 + qsizetype( k ) * 16 );
+			}
+			jc.pivotA = r.vec3( a + 0x10 + 48 );
+			jc.pivotB = r.vec3( a + 0x50 + 48 );
+			jc.hasFrames = true;
+			break;
+		case TWIST_LIMIT:
+			jc.twist = limit( a, 0x08 );
+			break;
+		case CONE_LIMIT:
+			// the ragdoll writes two: the cone first, then the perpendicular plane
+			( cones++ == 0 ? jc.cone : jc.plane ) = limit( a, 0x08 );
+			break;
+		case ANG_LIMIT:
+			jc.hinge = limit( a, 0x04 );
+			break;
+		case ANG_FRICTION:
+			jc.friction = r.f32( a + 0x08 );   // maxFrictionTorque
+			break;
+		case ANG_MOTOR:
+		case RAGDOLL_MOTOR:
+			jc.motorEnabled = r.u8( a + 0x02 ) != 0;
+			break;
+		default:
+			break;
+		}
+		a += sz;
+	}
+}
+
 static void decodeCompressedMesh( Reader & r, qsizetype B, const QHash<qsizetype, qsizetype> & local,
 									HknpShape & shape )
 {
@@ -532,20 +627,41 @@ HknpSystem hknpDecode( const QByteArray & data )
 				HknpConstraint jc;
 				jc.childBody = int( r.u32( e + 0x08 ) );
 				jc.parentBody = int( r.u32( e + 0x0c ) );
-				const qsizetype cd = global.value( e, -1 );
+				qsizetype cd = global.value( e, -1 );
 				jc.kind = objClass.value( cd );
-				// Only the hkp* constraint datas share this prologue.
-				// hknpBreakableConstraintData wraps one and lays out differently, so
-				// reading +0x30 there would produce a plausible-looking wrong frame.
-				if ( cd >= 0 && jc.kind.startsWith( QLatin1String( "hkp" ) ) ) {
-					for ( int k = 0; k < 3; k++ ) {
-						jc.rotA[k] = r.vec3( cd + 0x30 + qsizetype( k ) * 16 );
-						jc.rotB[k] = r.vec3( cd + 0x70 + qsizetype( k ) * 16 );
+
+				// objects sit back to back, so the next one bounds this one; the
+				// last is bounded by the local fixup table that follows the data
+				auto objEnd = [&]( qsizetype o ) {
+					auto nx = std::upper_bound( objects.cbegin(), objects.cend(), o,
+						[]( qsizetype v, const QPair<qsizetype, QString> & p ) { return v < p.first; } );
+					return ( nx != objects.cend() ) ? nx->first : dataStart + localOff;
+				};
+
+				/* hknpBreakableConstraintData is a wrapper, not a constraint: it holds
+				 * a pointer to the real hkp* data. Both in the corpus point at a
+				 * limited hinge. Rather than hard-code the member offset from two
+				 * samples, take the first pointer in the object that lands on an hkp*
+				 * constraint - the wrapper has no other constraint-typed member.
+				 */
+				if ( cd >= 0 && jc.kind.startsWith( QLatin1String( "hknp" ) ) ) {
+					for ( qsizetype o = cd; o + 8 <= objEnd( cd ); o += 8 ) {
+						const qsizetype in = global.value( o, -1 );
+						const QString ik = objClass.value( in );
+						if ( in >= 0 && ik.startsWith( QLatin1String( "hkp" ) )
+							&& ik.endsWith( QLatin1String( "ConstraintData" ) ) ) {
+							cd = in;
+							jc.kind = ik;
+							jc.breakable = true;
+							break;
+						}
 					}
-					jc.pivotA = r.vec3( cd + 0x30 + 48 );
-					jc.pivotB = r.vec3( cd + 0x70 + 48 );
-					jc.hasFrames = true;
 				}
+
+				// Only the hkp* constraint datas carry the atom chain; anything else
+				// would decode into a plausible-looking wrong frame.
+				if ( cd >= 0 && jc.kind.startsWith( QLatin1String( "hkp" ) ) )
+					decodeConstraintAtoms( r, cd, objEnd( cd ), jc );
 				sys.constraints.append( jc );
 			}
 		}

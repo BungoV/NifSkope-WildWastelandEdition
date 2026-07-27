@@ -106,15 +106,37 @@ struct HknpBodyPhys
  * anatomically too - the 8 hkpLimitedHinge entries are exactly the two knees,
  * two elbows, two wrists and two toes, with ball-and-socket everywhere else.
  *
- * The constraint OBJECTS these point at - pivots, limits, twist axes - are not
- * decoded yet; this is the joint graph, not the joint parameters.
+ * The constraint object itself is a flat run of "atoms" starting at +0x20. Each
+ * atom opens with a u16 type and carries NO size field, so walking the chain
+ * needs a type-to-size table; see decodeConstraintAtoms in the .cpp for how that
+ * table was established and checked.
  */
+
+/*! One angular limit atom, in radians.
+ *
+ * Havok writes -100 as the lower bound of a cone limit to mean "no lower bound",
+ * which is why min is not clamped to [-pi, pi] here.
+ *
+ * Two hinges in the vanilla assets (both in the human skeleton) store min and max
+ * the wrong way round - exactly +5.00/-5.00 and +0.10/-0.10 degrees. That is what
+ * the file says, so it is what this reports; it is not corrected silently.
+ */
+struct HknpAngLimit
+{
+	bool present = false;
+	float min = 0.0f;
+	float max = 0.0f;
+	float tau = 0.0f;   //!< angularLimitsTauFactor: 0.8 on ragdolls, 1.0 on hinges
+};
+
 struct HknpConstraint
 {
 	int childBody = -1;
 	int parentBody = -1;
 	//! Havok class name, e.g. hkpRagdollConstraintData / hkpLimitedHingeConstraintData
 	QString kind;
+	//! reached through an hknpBreakableConstraintData wrapper: the joint can snap
+	bool breakable = false;
 
 	/*! The joint's frame in each body's space: a rotation basis and a pivot.
 	 *
@@ -128,6 +150,16 @@ struct HknpConstraint
 	bool hasFrames = false;
 	Vector3 rotA[3], rotB[3];
 	Vector3 pivotA, pivotB;
+
+	/*! How far the joint may move. Which of these are filled depends on kind:
+	 * a ragdoll constraint has twist + cone + plane, a limited hinge has hinge.
+	 */
+	HknpAngLimit twist;   //!< spin about the bone's own axis
+	HknpAngLimit cone;    //!< how far the bone may swing away from its parent
+	HknpAngLimit plane;   //!< swing limit in the perpendicular plane
+	HknpAngLimit hinge;   //!< the single range of a limited hinge (knee, elbow)
+	float friction = 0.0f;    //!< maxFrictionTorque, resisting rotation
+	bool motorEnabled = false;   //!< a powered joint (keyframed / animation-driven)
 };
 
 //! A decoded bhkPhysicsSystem blob

@@ -1,5 +1,73 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28a — Ragdoll joint limits decode: the atom chain
+
+The piece the previous entry deliberately left undone. A constraint object is a
+flat run of **atoms** from `+0x20` to its end; each opens with a u16 type and
+carries no length, so walking needs a type→size table. That table now exists and
+is checked rather than assumed:
+
+| type | atom | size |
+|---|---|---|
+| `0x02` | `SET_LOCAL_TRANSFORMS` | 144 |
+| `0x05` | `BALL_SOCKET` | 16 |
+| `0x0c` | `2D_ANG` | 16 |
+| `0x0e` | `ANG_LIMIT` | 16 |
+| `0x0f` | `TWIST_LIMIT` | 32 |
+| `0x10` | `CONE_LIMIT` | 32 |
+| `0x11` | `ANG_FRICTION` | 16 |
+| `0x12` | `ANG_MOTOR` | 40 |
+| `0x13` | `RAGDOLL_MOTOR` | 96 |
+| `0x17` | `SETUP_STABILIZATION` | 16 |
+
+`HknpConstraint` gains `twist` / `cone` / `plane` / `hinge` (`HknpAngLimit`:
+min, max, tau), plus `friction`, `motorEnabled` and `breakable`. `collision`
+prints them in degrees — nobody authors a ragdoll in radians.
+
+**Why the table is right, not merely plausible.** A size wrong by even four bytes
+desyncs the walk and turns every later type into garbage. With this table all
+**757 constraint objects across all 35 vanilla ragdolls walk to their exact end**
+hitting only known types, and each class yields exactly **one** atom sequence with
+no variants: ragdolls are `transforms, setupStabilization, ragdollMotor,
+angFriction, twistLimit, coneLimit, coneLimit, ballSocket` (518 of them), hinges
+are `transforms, setupStabilization, angMotor, angFriction, angLimit, 2dAng,
+ballSocket` (239).
+
+The field offsets were then corroborated separately from the sizes:
+
+- all **3068** decoded angles land in `[-pi, pi]`;
+- the **518** `-100` "unlimited" sentinels are exactly one per ragdoll constraint,
+  matching the single bound a cone limit does not have;
+- the tau factor takes just **two** values across 1793 atoms — `0.8` on ragdoll
+  limits, `1.0` on hinges. Bytes at a wrong offset do not fall into a 518/239 split.
+
+End to end, through the shipped CLI rather than the scratch parser: of 224 L/R
+bone pairs, **75% get identical or sub-degree-identical limits** and 83% agree
+within 5°. The brahmin's hips are the nice case — `RLeg1` plane `-28.0..9.0`
+against `LLeg1` `-9.0..28.0`, mirrored *asymmetric* ranges. Nothing in the decoder
+knows about bone names. The 6% that differ by more are all clean authored values
+(Liberty Prime's ankles are `0..90` against `-180..-90`, the same span from a
+different zero), not the `1e38` a bad read produces.
+
+### Breakable wrappers, and the last two joints
+
+`hknpBreakableConstraintData` is a wrapper holding a pointer to the real `hkp*`
+data. The decoder follows it — taking the first pointer in the object that lands
+on an `hkp*ConstraintData` rather than hard-coding the member offset from two
+samples. Both are the **Vertibird's doors**, hinges meant to snap off, with exact
+X-mirror pivots. So joints decoding limits is now **757 of 757**, up from the
+755/757 that decoded frames.
+
+### Two vanilla joints have min/max stored backwards
+
+Both in the human skeleton, at exactly `+5.00/-5.00` and `+0.10/-0.10` degrees —
+the same magnitude constants used correctly elsewhere, just transposed. That is
+what the file says, so it is reported as-is (`hinge 0.1..-0.1`) rather than
+silently swapped.
+
+Vanilla has **no** motorised joints: every motor atom's enabled byte is zero,
+matching the raw bytes. Ragdoll motors are switched on at runtime, not authored.
+
 ## 2026-07-27af — Ragdoll joint frames decode
 
 Each constraint carries two `hkTransform`s — `+0x30` for the parent side, `+0x70`
