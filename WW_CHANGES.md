@@ -164,6 +164,12 @@ So it silently did nothing on every skeleton file, while the single-block
 Decompile (which tests both classes) worked. Both paths now agree via
 `isCompiledSystem()`.
 
+**GUI checks owed.** Build is green and every model-layer claim above was measured
+through the CLI, but the three UI-visible pieces — the Bone column and its
+`moveSection` placement, the `RAGDOLL` state cell, and the two-way selection sync —
+have not been looked at on screen. Deferred deliberately, not forgotten: launching
+NifSkope mid-session steals focus (07-26 rule). Verify on the next GUI pass.
+
 ### New: `collision` CLI command
 
 ```
