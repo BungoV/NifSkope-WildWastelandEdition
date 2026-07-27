@@ -344,6 +344,40 @@ order; each is independently verifiable against a vanilla file:
    directly reusable — the ragdoll root uses the same `hkArray` layout at the same
    offsets. Validate by round-trip on all 35 ragdolls.
 
+   **`hknpRagdollData`'s full root layout** (measured 07-28c; every member, not
+   just the ones the decoder reads). All arrays are `hkArray`: payload pointer
+   patched by a local fixup, count at +8, capacity|0x80000000 at +12.
+
+   | offset | member | stride | count |
+   |---|---|---|---|
+   | `+0x00` | (empty array) | — | 0 |
+   | `+0x10` | body_props | `0x50` | bodies |
+   | `+0x20` | dyn_motion | `0x40` | bodies |
+   | `+0x30` | dyn_inertia | `0x70` | bodies |
+   | `+0x40` | bodyCinfos | `0x60` | bodies |
+   | `+0x50` | constraint bindings | `0x18` | bones − 1 |
+   | `+0x60` | shape entries | `8` | bodies |
+   | `+0x78` | **pointer to `hkaSkeleton`** (global fixup) | — | — |
+   | `+0x80` | bone → body index | `4` | **bones** |
+
+   Two traps in there. The `+0x80` array is counted in **bones, not bodies**, and
+   the two differ — `Robot/SkeletonRef` has 48 collision bodies but 11 ragdoll
+   bones, `skeletonSentryBodyPart` 24 and 9. Reading it at the body count runs off
+   the end into garbage. Its contents are the identity map in **all 35** vanilla
+   ragdolls, so an encoder emits identity of length `bones`. Shape entries at
+   `+0x60` are 8 bytes of nothing but a global fixup to the shape.
+
+   **Class name hashes** for the encoder's `classNames` table, read out of the
+   vanilla files and identical across all 35: `hkaSkeleton` `0xfec1cedb`,
+   `hknpRagdollData` `0xdc8f20ab`, `hknpCapsuleShape` `0x60a75f4c`,
+   `hknpSphereShape` `0x741e9012`, `hknpConvexPolytopeShape` `0x3ce9b3e3`,
+   `hkpRagdollConstraintData` `0xb77d2036`, `hkpLimitedHingeConstraintData`
+   `0x51ea603a`, `hkpPositionConstraintMotor` `0x143dd400`,
+   `hknpShapeMassProperties` `0xe9191728`, `hknpBreakableConstraintData`
+   `0xc40485c7`, `hknpDynamicCompoundShape` `0x4620d11c` / `Data` `0xf33dc3cc`.
+   `hkRefCountedProperties` `0x7c574867` already matches what `hknpencode.cpp`
+   emits today.
+
    **The decode is 99.5% of packfile bytes by class** (audited 07-28b). What is
    left, and what the encoder must do about it:
 

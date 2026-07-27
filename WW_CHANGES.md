@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28c — The ragdoll root's full layout, and the class hashes
+
+Groundwork for the encoder: every member of `hknpRagdollData`, not just the ones
+the decoder reads. Table in TO_BE_IMPLEMENTED item 6. The two new ones are a
+**pointer to `hkaSkeleton` at `+0x78`** (a global fixup, which is how the skeleton
+is reached) and a **bone → body index array at `+0x80`**.
+
+That second one had a trap in it worth recording, because it caught me. Read at
+the body count it looks like an identity map with garbage on the end for two
+ragdolls. It is not: its count lives at `+0x88` and is the **bone** count, and
+bones and bodies are not the same number — `Robot/SkeletonRef` has 48 collision
+bodies but only 11 ragdoll bones, `skeletonSentryBodyPart` 24 and 9. Read at its
+own length it is the identity map in **all 35** vanilla ragdolls with zero
+exceptions. An encoder emits identity of length `bones`; one that assumed
+`bodies` would write past the end of the skeleton on any actor whose collision
+carries loose parts.
+
+Class-name hashes for the encoder's table are now read out of the vanilla files
+rather than guessed — 17 classes, byte-identical across all 35 ragdolls.
+`hkRefCountedProperties` comes back as `0x7c574867`, which is exactly what
+`hknpencode.cpp` already emits, so the existing table and the corpus agree.
+
 ## 2026-07-28b — hkaSkeleton decodes, and the joint frames were labelled backwards
 
 `hkaSkeleton` is a root object of its own beside `hknpRagdollData`, one per
