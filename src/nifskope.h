@@ -407,6 +407,8 @@ private:
 	//! whenever list->setModel() replaces the view's selection model.
 	void wireBlockListSelection();
 	//! Reapply the recursive Block List text filter.
+	//! Apply a Block List category filter by id, and show it on the filter button.
+	void setBlockListQuickFilter( int id );
 	void applyBlockListFilter();
 	//! Reapply the recursive Block Details field-name/value filter.
 	void applyBlockDetailsFilter();
@@ -535,7 +537,8 @@ private:
 	QToolButton * blockListForward = nullptr;
 	QToolButton * blockListPin = nullptr;
 	QToolButton * blockListRelations = nullptr;
-	QButtonGroup * blockListFilterGroup = nullptr;
+	QToolButton * blockListFilterButton = nullptr;
+	QMenu * blockListFilterMenu = nullptr;
 	QLabel * blockListBreadcrumb = nullptr;
 	QLabel * blockListFooter = nullptr;
 	QVector<int> blockListHistory;

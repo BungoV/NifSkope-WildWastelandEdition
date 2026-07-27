@@ -704,12 +704,14 @@ NifSkope::NifSkope( bool background )
 	blockListSearch->setMinimumWidth( 48 );
 	blockNavigation->setMinimumWidth( 1 );
 
-	QWidget * blockFilters = new QWidget( ui->dockWidgetContents_4 );
-	QHBoxLayout * blockFilterLayout = new QHBoxLayout( blockFilters );
-	blockFilterLayout->setContentsMargins( 0, 0, 0, 0 );
-	blockFilterLayout->setSpacing( 1 );
-	blockListFilterGroup = new QButtonGroup( blockFilters );
-	blockListFilterGroup->setExclusive( true );
+	/* One dropdown in the search row, not eight chips in a row of their own.
+	 *
+	 * The chips were already mutually exclusive, which is exactly what a menu
+	 * expresses, and the row they occupied was the third strip of chrome above the
+	 * list - search, chips, breadcrumb - before a single block was visible. The
+	 * button wears the active category's icon, so the current filter stays
+	 * readable at a glance without spending a row on it.
+	 */
 	struct BlockFilterDef { int id; QString name; QString icon; };
 	const QList<BlockFilterDef> blockFilterDefs = {
 		{ 0, tr( "All blocks" ), QString() },
@@ -723,24 +725,27 @@ NifSkope::NifSkope( bool background )
 		{ 6, tr( "Animation and controllers" ), QStringLiteral( ":/btn/blockAnimation" ) },
 		{ 7, tr( "Extra data" ), QStringLiteral( ":/btn/blockExtraData" ) }
 	};
+	blockListFilterButton = new QToolButton( blockNavigation );
+	blockListFilterButton->setPopupMode( QToolButton::InstantPopup );
+	blockListFilterButton->setAutoRaise( true );
+	blockListFilterMenu = new QMenu( blockListFilterButton );
+	blockListFilterButton->setMenu( blockListFilterMenu );
+	QActionGroup * blockFilterActions = new QActionGroup( blockListFilterMenu );
+	blockFilterActions->setExclusive( true );
 	for ( const BlockFilterDef & def : blockFilterDefs ) {
-		QToolButton * button = new QToolButton( blockFilters );
-		button->setAutoRaise( true );
-		button->setCheckable( true );
-		button->setToolTip( def.name );
-		if ( def.id == 2 ) button->setIcon( wwNodeCategoryIcon() );
-		else if ( def.icon.isEmpty() ) button->setText( tr( "All" ) );
-		else button->setIcon( QIcon( def.icon ) );
-		button->setChecked( def.id == 0 );
-		blockListFilterGroup->addButton( button, def.id );
-		blockFilterLayout->addWidget( button );
+		QAction * a = blockListFilterMenu->addAction( def.name );
+		a->setCheckable( true );
+		a->setChecked( def.id == 0 );
+		a->setData( def.id );
+		if ( def.id == 2 ) a->setIcon( wwNodeCategoryIcon() );
+		else if ( !def.icon.isEmpty() ) a->setIcon( QIcon( def.icon ) );
+		blockFilterActions->addAction( a );
 	}
-	blockFilterLayout->addStretch( 1 );
-	// the chip row and the two labels otherwise dictate the dock's minimum
-	// width (8 chips ≈ 200px; the breadcrumb/footer text can be arbitrarily
-	// long) — allow them all to clip so the dock folds
-	blockFilters->setMinimumWidth( 1 );
-	ui->verticalLayout_2->insertWidget( 1, blockFilters );
+	connect( blockFilterActions, &QActionGroup::triggered, this,
+		[this]( QAction * a ) { setBlockListQuickFilter( a->data().toInt() ); } );
+	blockNavigationLayout->addWidget( blockListFilterButton );
+	setBlockListQuickFilter( 0 );
+	// the labels can be arbitrarily long — allow them to clip so the dock folds
 	blockListBreadcrumb = new QLabel( ui->dockWidgetContents_4 );
 	blockListBreadcrumb->setTextInteractionFlags( Qt::TextSelectableByMouse );
 	blockListBreadcrumb->setStyleSheet( QStringLiteral( "color: %1; padding: 1px 2px;" ).arg( wwSkinColor( "textMuted" ) ) );
@@ -752,27 +757,6 @@ NifSkope::NifSkope( bool background )
 	blockListFooter->setMinimumWidth( 1 );
 	ui->verticalLayout_2->addWidget( blockListFooter );
 	connect( blockListSearch, &QLineEdit::textChanged, this, [this]() { applyBlockListFilter(); } );
-	connect( blockListFilterGroup, &QButtonGroup::idClicked, this, [this]( int id ) {
-		blockListQuickFilter = id;
-		// a type chip means "show me those blocks ONLY". Hierarchy mode can't
-		// do that (a tree row can never show without its ancestors), so a chip
-		// temporarily switches the list to the flat list view; All restores
-		// the hierarchy if the chip was what left it.
-		if ( id != 0 ) {
-			if ( list->model() == proxy ) {
-				blockListFilterRestoreHierarchy = true;
-				if ( aList )
-					aList->setChecked( true );
-				setListMode();
-			}
-		} else if ( blockListFilterRestoreHierarchy ) {
-			blockListFilterRestoreHierarchy = false;
-			if ( aHierarchy )
-				aHierarchy->setChecked( true );
-			setListMode();
-		}
-		applyBlockListFilter();
-	} );
 	connect( blockListBack, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( -1 ); } );
 	connect( blockListForward, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( 1 ); } );
 	connect( goToBlockButton, &QToolButton::clicked, this, &NifSkope::goToBlock );
@@ -837,6 +821,32 @@ NifSkope::NifSkope( bool background )
 	tree->header()->resizeSection( NifModel::ValueCol, 250 );
 	// the Reference column only appears while a diff reference is set
 	tree->setColumnHidden( NifModel::WwRefCol, true );
+	/* Type is off by default, and toggled from the header's context menu.
+	 *
+	 * It is a permanent ~90px of width showing things like Ref<NiTimeController>,
+	 * which matters when you are authoring structure and not when you are editing
+	 * values - the common case by a wide margin. Off by default gives Value the
+	 * room; the header right-click is where Qt users already look for column
+	 * visibility, so it costs no chrome to offer it.
+	 */
+	{
+		QSettings cfg;
+		tree->setColumnHidden( NifModel::TypeCol,
+			!cfg.value( QStringLiteral( "BlockDetails/Show Type Column" ), false ).toBool() );
+		tree->header()->setContextMenuPolicy( Qt::CustomContextMenu );
+		connect( tree->header(), &QWidget::customContextMenuRequested, this,
+			[this]( const QPoint & pos ) {
+				QMenu m( this );
+				QAction * a = m.addAction( tr( "Type Column" ) );
+				a->setCheckable( true );
+				a->setChecked( !tree->isColumnHidden( NifModel::TypeCol ) );
+				if ( m.exec( tree->header()->mapToGlobal( pos ) ) != a )
+					return;
+				const bool show = !a->isChecked();
+				tree->setColumnHidden( NifModel::TypeCol, !show );
+				QSettings().setValue( QStringLiteral( "BlockDetails/Show Type Column" ), show );
+			} );
+	}
 	blockDetailsSearch = new QLineEdit( ui->dockWidgetContents_2 );
 	blockDetailsSearch->setClearButtonEnabled( true );
 	blockDetailsSearch->setPlaceholderText( tr( "Filter fields by name or value..." ) );
@@ -1745,6 +1755,44 @@ void NifSkope::wireBlockListSelection()
 	} );
 }
 
+void NifSkope::setBlockListQuickFilter( int id )
+{
+	blockListQuickFilter = id;
+	// a type filter means "show me those blocks ONLY". Hierarchy mode can't do
+	// that (a tree row can never show without its ancestors), so it temporarily
+	// switches the list to the flat list view; All restores the hierarchy if the
+	// filter was what left it.
+	if ( id != 0 ) {
+		if ( list && list->model() == proxy ) {
+			blockListFilterRestoreHierarchy = true;
+			if ( aList )
+				aList->setChecked( true );
+			setListMode();
+		}
+	} else if ( blockListFilterRestoreHierarchy ) {
+		blockListFilterRestoreHierarchy = false;
+		if ( aHierarchy )
+			aHierarchy->setChecked( true );
+		setListMode();
+	}
+	applyBlockListFilter();
+
+	// the button carries which category is active, now that there is no chip row
+	if ( !blockListFilterButton || !blockListFilterMenu )
+		return;
+	for ( QAction * a : blockListFilterMenu->actions() ) {
+		if ( a->data().toInt() != id )
+			continue;
+		a->setChecked( true );
+		const bool isAll = a->icon().isNull();
+		blockListFilterButton->setIcon( a->icon() );
+		blockListFilterButton->setText( isAll ? tr( "All" ) : QString() );
+		blockListFilterButton->setToolButtonStyle(
+			isAll ? Qt::ToolButtonTextOnly : Qt::ToolButtonIconOnly );
+		blockListFilterButton->setToolTip( tr( "Filter: %1" ).arg( a->text() ) );
+	}
+}
+
 void NifSkope::applyBlockListFilter()
 {
 	if ( !list || !proxy || !nif || !blockListSearch ) return;
@@ -2571,8 +2619,7 @@ void NifSkope::goToBlock()
 	}
 	blockListSearch->clear();
 	blockListQuickFilter = 0;
-	if ( blockListFilterGroup && blockListFilterGroup->button( 0 ) )
-		blockListFilterGroup->button( 0 )->setChecked( true );
+	setBlockListQuickFilter( 0 );
 	if ( blockListFilterRestoreHierarchy ) {
 		blockListFilterRestoreHierarchy = false;
 		if ( aHierarchy )

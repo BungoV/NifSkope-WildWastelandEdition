@@ -7363,6 +7363,10 @@ void NifSkope::restoreUi()
 
 	list->header()->restoreState( settings.value( "List Header"_uip ).toByteArray() );
 	tree->header()->restoreState( settings.value( "Tree Header"_uip ).toByteArray() );
+	// after restoreState, which carries its own column visibility and would
+	// otherwise win over the default set at construction
+	tree->setColumnHidden( NifModel::TypeCol,
+		!settings.value( QStringLiteral( "BlockDetails/Show Type Column" ), false ).toBool() );
 	header->header()->restoreState( settings.value( "Header Header"_uip ).toByteArray() );
 	kfmtree->header()->restoreState( settings.value( "Kfmtree Header"_uip ).toByteArray() );
 

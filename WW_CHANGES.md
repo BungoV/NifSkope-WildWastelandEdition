@@ -1,5 +1,31 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27aa — Slimmer Block List and Block Details
+
+**Block List: eight filter chips → one dropdown.** They were already mutually
+exclusive, which is what a menu expresses, and the row they occupied was the
+third strip of chrome above the list — search, chips, breadcrumb — before a
+single block was visible. The button wears the active category's icon, so the
+current filter stays readable without spending a row on it. `QButtonGroup`
+becomes a `QActionGroup`, and the old `idClicked` lambda becomes
+`setBlockListQuickFilter()` so the reset-to-All path shares it.
+
+**Block Details: the Type column is off by default**, toggled from the header's
+context menu. It was a permanent ~90px showing `Ref<NiTimeController>`-style
+text — useful when authoring structure, not when editing values, which is the
+common case by a wide margin. Value gets the room back.
+
+One catch worth recording: setting the column hidden at construction does
+nothing, because `restoreUi()` later calls `tree->header()->restoreState()`,
+which carries its own column visibility and wins. The default has to be applied
+*after* the restore.
+
+**Not done: dropping the `[n]` suffix in the Block List Value column.** I
+suggested it on the belief that it repeats the block number already in the Name
+column, and could not confirm where it is produced — `NifModel::topItemRepr()`
+has exactly that format but feeds item *paths* for diagnostics, not the Value
+column. Left alone rather than changed on a guess.
+
 ## 2026-07-27z — Row icons were pinned to the top of the row, not centred
 
 `NifDelegate::decoRect()` returned `QRect( opt.rect.topLeft(), opt.decorationSize )`
