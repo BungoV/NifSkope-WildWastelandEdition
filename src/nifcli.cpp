@@ -17,6 +17,8 @@ See the LICENSE.md file for the full license text.
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
 #include "skeletontools.h"
+
+#include <cmath>
 #include "spells/animationsetup.h"
 #include "io/pbrmfile.h"
 
@@ -395,6 +397,148 @@ int cmdSkeleton( const QString & file, bool validateOnly )
 	if ( validateOnly )
 		return problems > 0 ? 1 : 0;
 	return 0;
+}
+
+int cmdSkeletonSelfTest( const QString & file )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	QStringList fails;
+	const SkeletonReport before = skeletonAnalyse( &nif );
+	if ( before.bones.size() < 3 ) {
+		err() << "error: need a file with at least 3 nodes" << Qt::endl;
+		return 1;
+	}
+
+	// Pick a leaf bone with no skin weight: the ops must not be tested on
+	// something whose removal would need a vertex bone-index remap.
+	int leaf = -1, leafParent = -1;
+	for ( const SkeletonBoneInfo & b : before.bones ) {
+		if ( b.parent < 0 || b.verts > 0 )
+			continue;
+		if ( nif.getChildLinks( b.block ).isEmpty() ) {
+			leaf = b.block;
+			leafParent = b.parent;
+			break;
+		}
+	}
+	if ( leaf < 0 ) {
+		err() << "error: no unweighted leaf bone to test on" << Qt::endl;
+		return 1;
+	}
+	out() << "test bone  " << nif.get<QString>( nif.getBlockIndex( leaf ), "Name" )
+		  << " [" << leaf << "], parent [" << leafParent << "]" << Qt::endl;
+	out() << "ragdoll    " << ( skeletonFileHasRagdoll( &nif ) ? "present" : "none" ) << Qt::endl;
+
+	// --- reference sweep finds the parent link -------------------------------
+	const QList<SkeletonBoneRef> refs = skeletonBoneRefs( &nif, leaf );
+	bool sawChildLink = false;
+	for ( const SkeletonBoneRef & r : refs )
+		if ( r.what == QLatin1String( "child of" ) && r.block == leafParent )
+			sawChildLink = true;
+	if ( !sawChildLink )
+		fails << "reference sweep missed the parent Children link";
+	out() << "refs       " << refs.size() << Qt::endl;
+
+	// --- rename round-trips, and by-NAME references follow -------------------
+	const QString origName = nif.get<QString>( nif.getBlockIndex( leaf ), "Name" );
+	QString e;
+	if ( !skeletonRenameBone( &nif, leaf, QStringLiteral( "WWSelfTestBone" ), &e ) )
+		fails << "rename failed: " + e;
+	if ( nif.get<QString>( nif.getBlockIndex( leaf ), "Name" ) != QLatin1String( "WWSelfTestBone" ) )
+		fails << "rename did not take";
+	if ( !skeletonRenameBone( &nif, leaf, origName, &e ) )
+		fails << "rename back failed: " + e;
+
+	// --- flip-name is an involution where a side exists ----------------------
+	for ( const char * n : { "LArm1", "RLeg2", "skin_bone_L_Eyelid_Top", "Bone.L", "LeftHand" } ) {
+		const QString a = QString::fromLatin1( n );
+		const QString f = skeletonFlipBoneName( a );
+		if ( f == a )
+			fails << QString( "flip did nothing for %1" ).arg( a );
+		else if ( skeletonFlipBoneName( f ) != a )
+			fails << QString( "flip not reversible: %1 -> %2 -> %3" ).arg( a, f, skeletonFlipBoneName( f ) );
+	}
+	// ...and leaves a midline bone alone
+	if ( skeletonFlipBoneName( QStringLiteral( "Spine1" ) ) != QLatin1String( "Spine1" ) )
+		fails << "flip altered a midline bone (Spine1)";
+
+	// --- extrude adds exactly one child --------------------------------------
+	const int kidsBefore = nif.getChildLinks( leaf ).size();
+	const int added = skeletonAddChildBone( &nif, leaf, QStringLiteral( "WWSelfTestChild" ), 5.0f );
+	if ( added < 0 )
+		fails << "extrude returned -1";
+	else if ( nif.getChildLinks( leaf ).size() != kidsBefore + 1 )
+		fails << "extrude did not attach the new bone";
+
+	// --- THE MUST-NOT-MOVE CHECK --------------------------------------------
+	// Reparent with Keep Transform must leave the bone's world transform where it
+	// was. This is the check the plan demands before any transform work ships; if
+	// it fails, a rig silently deforms.
+	if ( added >= 0 ) {
+		const Transform worldBefore = skeletonWorldTransform( &nif, added );
+		if ( !skeletonReparent( &nif, added, leafParent, true, &e ) ) {
+			fails << "reparent failed: " + e;
+		} else {
+			const Transform worldAfter = skeletonWorldTransform( &nif, added );
+			const float dT = ( worldAfter.translation - worldBefore.translation ).length();
+			float dR = 0.0f;
+			for ( int i = 0; i < 3; i++ )
+				for ( int j = 0; j < 3; j++ )
+					dR = qMax( dR, std::fabs( worldAfter.rotation( i, j ) - worldBefore.rotation( i, j ) ) );
+			out() << "keep-transform drift  translation " << dT << ", rotation " << dR << Qt::endl;
+			if ( dT > 0.01f )
+				fails << QString( "Keep Transform moved the bone by %1 units" ).arg( dT );
+			if ( dR > 0.001f )
+				fails << QString( "Keep Transform rotated the bone by %1" ).arg( dR );
+		}
+	}
+
+	// --- reparent refuses a cycle -------------------------------------------
+	if ( skeletonReparent( &nif, leafParent, leaf, true, &e ) )
+		fails << "reparent allowed a cycle (parent under its own descendant)";
+
+	// --- dissolve adopts children, delete removes the subtree ----------------
+	const int probe = skeletonAddChildBone( &nif, leaf, QStringLiteral( "WWDissolveMe" ), 4.0f );
+	if ( probe >= 0 ) {
+		const int grandchild = skeletonAddChildBone( &nif, probe, QStringLiteral( "WWKeepMe" ), 3.0f );
+		if ( grandchild >= 0 ) {
+			const Transform gcBefore = skeletonWorldTransform( &nif, grandchild );
+			const QString gcName = nif.get<QString>( nif.getBlockIndex( grandchild ), "Name" );
+			if ( !skeletonDissolve( &nif, probe, &e ) ) {
+				fails << "dissolve failed: " + e;
+			} else {
+				// The grandchild must survive, now under `leaf`, and not have moved.
+				int found = -1;
+				for ( int c : nif.getChildLinks( leaf ) )
+					if ( c >= 0 && nif.get<QString>( nif.getBlockIndex( c ), "Name" ) == gcName )
+						found = c;
+				if ( found < 0 ) {
+					fails << "dissolve orphaned the child instead of reparenting it";
+				} else {
+					const float dT = ( skeletonWorldTransform( &nif, found ).translation
+						- gcBefore.translation ).length();
+					out() << "dissolve drift        translation " << dT << Qt::endl;
+					if ( dT > 0.01f )
+						fails << QString( "dissolve moved the adopted child by %1 units" ).arg( dT );
+				}
+			}
+		}
+	}
+
+	const int nodesNow = skeletonAnalyse( &nif ).bones.size();
+	out() << "nodes      " << before.bones.size() << " -> " << nodesNow << Qt::endl;
+
+	if ( fails.isEmpty() ) {
+		out() << "SELFTEST PASS" << Qt::endl;
+		return 0;
+	}
+	for ( const QString & f : fails )
+		out() << "  FAIL " << f << Qt::endl;
+	out() << "SELFTEST FAIL (" << fails.size() << ")" << Qt::endl;
+	return 1;
 }
 
 int cmdInfo( const QString & file )
@@ -915,6 +1059,7 @@ int nifskopeCliMain( const QStringList & args )
 	int effectVar = -1, intVar = -1;
 	bool showAll = false, newSequence = false, standalone = false, listOnly = false;
 	bool validateOnly = false;
+	bool selfTest = false;
 	for ( int i = 0; i < a.size(); i++ ) {
 		const QString & t = a.at( i );
 		auto next = [&]() -> QString { return ( i + 1 < a.size() ) ? a.at( ++i ) : QString(); };
@@ -935,6 +1080,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--int-var" ) ) intVar = next().toInt();
 		else if ( t == QLatin1String( "--list" ) ) listOnly = true;
 		else if ( t == QLatin1String( "--validate" ) ) validateOnly = true;
+		else if ( t == QLatin1String( "--selftest" ) ) selfTest = true;
 		else if ( t == QLatin1String( "--add" ) ) adds << QDir::current().filePath( next() );
 		else if ( t == QLatin1String( "--no-dedupe" ) ) noDedupe = true;
 		else if ( t == QLatin1String( "--save" ) ) saveName = next();
@@ -997,7 +1143,7 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "pose" ) )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
-		rc = cmdSkeleton( file, validateOnly );
+		rc = selfTest ? cmdSkeletonSelfTest( file ) : cmdSkeleton( file, validateOnly );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

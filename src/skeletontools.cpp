@@ -15,7 +15,12 @@ BSD License - see nifskope.h
 #include <functional>
 
 #include <QAction>
+#include "nifsnapshot.h"
+
 #include <QCheckBox>
+#include <QInputDialog>
+#include <QMenu>
+#include <QMessageBox>
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -387,7 +392,10 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 		QObject::tr( "Verts" ), QObject::tr( "Weight" ) } );
 	tree->setRootIsDecorated( true );
 	tree->setUniformRowHeights( true );
-	tree->setSelectionMode( QAbstractItemView::SingleSelection );
+	// Multi-select, so Select Hierarchy / Mirror / Similar and Isolate have
+	// something to act on.
+	tree->setSelectionMode( QAbstractItemView::ExtendedSelection );
+	tree->setContextMenuPolicy( Qt::CustomContextMenu );
 	tree->header()->setStretchLastSection( false );
 	tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
 	for ( int c = 1; c < 4; c++ )
@@ -421,6 +429,13 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 	// guard: selecting a row selects the block, which echoes back as
 	// currentNifIndexChanged and would re-enter refresh().
 	auto * syncing = new bool( false );
+	// Isolate (Blender's `/`): when non-empty, only these bones are shown, in the
+	// tree AND the viewport. Heap-allocated so the lambdas share one set.
+	auto * isolated = new QSet<int>();
+	// Length of a bone created by Extrude, in the parent's local +Y. A fixed
+	// value rather than something derived: the characteristic bone size lives in
+	// GLView and is not exposed, and a new bone is meant to be moved anyway.
+	const float boneLength = 5.0f;
 	panel->setProperty( "skeletonSyncing", false );
 
 	auto currentFilter = [filterButtons]() -> int {
@@ -463,7 +478,10 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 		// Coloured text, not badges — the Block Details visual rule.
 		const QColor colText = QColor::fromString( wwSkinColor( "text" ) );
 		const QColor colMuted = QColor::fromString( wwSkinColor( "textMuted" ) );
-		const QColor colBright = QColor::fromString( wwSkinColor( "textBright" ) );
+		// An unused bone wants an attention colour. This was `textBright`, which
+		// reads as amber from its name but is actually #f2f3f5 — near-white, i.e.
+		// indistinguishable from normal text. `accent` is the palette's orange.
+		const QColor colBright = QColor::fromString( wwSkinColor( "accent" ) );
 
 		QHash<int, QTreeWidgetItem *> itemOf;
 		int shown = 0;
@@ -475,6 +493,8 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			default: break;
 			}
 			if ( !needle.isEmpty() && !b.name.contains( needle, Qt::CaseInsensitive ) )
+				continue;
+			if ( !isolated->isEmpty() && !isolated->contains( b.block ) )
 				continue;
 
 			// Parent the row when its parent is also shown; otherwise promote it
@@ -523,6 +543,9 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			findings->setVisible( true );
 		}
 
+		if ( !isolated->isEmpty() )
+			rootLabel->setText( rootLabel->text()
+				+ QObject::tr( "   —  ISOLATED (%1 bone(s))" ).arg( isolated->size() ) );
 		footer->setText( QObject::tr( "%1 node(s) shown · %2 bone(s), %3 deforming, %4 unused · %5 skinned shape(s)" )
 			.arg( shown )
 			.arg( report.deformingCount() + report.unusedCount() )
@@ -530,6 +553,309 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			.arg( report.unusedCount() )
 			.arg( report.skinnedShapes ) );
 	};
+
+	// ---- selection colouring -------------------------------------------
+	// The Block List convention, which the Pose Manager also follows: the ACTIVE
+	// row is orange text, other selected rows are reddish-orange on the theme's
+	// blue highlight. Colours come from skinVars, and the blue is the palette's
+	// own Highlight rather than a new literal.
+	auto paintSelection = [=]() {
+		const QColor active = QColor::fromString( wwSkinColor( "accentText" ) );
+		const QColor secondary = QColor::fromString( wwSkinColor( "danger" ) );
+		const QColor blue = tree->palette().color( QPalette::Highlight );
+		QTreeWidgetItem * cur = tree->currentItem();
+		std::function<void( QTreeWidgetItem * )> walk = [&]( QTreeWidgetItem * it ) {
+			const bool sel = it->isSelected();
+			for ( int c = 0; c < 4; c++ ) {
+				if ( !sel ) {
+					it->setBackground( c, QBrush() );
+				} else {
+					it->setBackground( c, blue );
+					it->setForeground( c, it == cur ? active : secondary );
+				}
+			}
+			for ( int i = 0; i < it->childCount(); i++ )
+				walk( it->child( i ) );
+		};
+		for ( int i = 0; i < tree->topLevelItemCount(); i++ )
+			walk( tree->topLevelItem( i ) );
+	};
+
+	// ---- helpers used by the menu --------------------------------------
+	auto selectedBlocks = [=]() {
+		QList<int> out;
+		for ( QTreeWidgetItem * it : tree->selectedItems() ) {
+			const int b = it->data( 0, Qt::UserRole ).toInt();
+			if ( b >= 0 && !out.contains( b ) )
+				out << b;
+		}
+		return out;
+	};
+	auto itemForBlock = [=]( int block ) -> QTreeWidgetItem * {
+		std::function<QTreeWidgetItem *( QTreeWidgetItem * )> walk =
+			[&]( QTreeWidgetItem * it ) -> QTreeWidgetItem * {
+			if ( it->data( 0, Qt::UserRole ).toInt() == block )
+				return it;
+			for ( int i = 0; i < it->childCount(); i++ )
+				if ( QTreeWidgetItem * hit = walk( it->child( i ) ) )
+					return hit;
+			return nullptr;
+		};
+		for ( int i = 0; i < tree->topLevelItemCount(); i++ )
+			if ( QTreeWidgetItem * hit = walk( tree->topLevelItem( i ) ) )
+				return hit;
+		return nullptr;
+	};
+	auto selectBlocks = [=]( const QList<int> & blocks, bool additive ) {
+		if ( !additive )
+			tree->clearSelection();
+		for ( int b : blocks ) {
+			if ( QTreeWidgetItem * it = itemForBlock( b ) ) {
+				it->setSelected( true );
+				QTreeWidgetItem * p = it->parent();
+				while ( p ) { p->setExpanded( true ); p = p->parent(); }
+			}
+		}
+	};
+
+	QObject::connect( tree, &QTreeWidget::customContextMenuRequested, panel,
+		[=]( const QPoint & pos ) mutable {
+		NifModel * model = skope ? skope->getNifModel() : nif;
+		if ( !model )
+			return;
+		const QList<int> sel = selectedBlocks();
+		QTreeWidgetItem * under = tree->itemAt( pos );
+		const int primary = under ? under->data( 0, Qt::UserRole ).toInt()
+			: ( sel.isEmpty() ? -1 : sel.first() );
+		if ( primary < 0 )
+			return;
+		const QString primaryName = model->get<QString>( model->getBlockIndex( primary ), "Name" );
+
+		QMenu menu;
+
+		// --- selection (read-only, always safe) ---
+		menu.addSection( QObject::tr( "Select" ) );
+		QAction * aHier = menu.addAction( QObject::tr( "Select Hierarchy" ) );
+		aHier->setToolTip( QObject::tr( "Add this bone's whole subtree to the selection" ) );
+		QAction * aMirror = menu.addAction( QObject::tr( "Select Mirror" ) );
+		QAction * aSimilar = menu.addAction( QObject::tr( "Select Similar" ) );
+		aSimilar->setToolTip( QObject::tr( "Bones in the same family — same name with different trailing digits" ) );
+		menu.addSeparator();
+		QAction * aIsolate = menu.addAction( isolated->isEmpty()
+			? QObject::tr( "Isolate Selected" ) : QObject::tr( "Clear Isolate" ) );
+		aIsolate->setToolTip( QObject::tr( "Show only the selected bones, in the tree and the viewport" ) );
+
+		// --- edits ---
+		menu.addSection( QObject::tr( "Edit" ) );
+		QAction * aRename = menu.addAction( QObject::tr( "Rename..." ) );
+		QAction * aFlip = menu.addAction( QObject::tr( "Flip Name L/R" ) );
+		const QString flipped = skeletonFlipBoneName( primaryName );
+		aFlip->setEnabled( flipped != primaryName );
+		aFlip->setToolTip( flipped != primaryName
+			? QObject::tr( "Rename to %1" ).arg( flipped )
+			: QObject::tr( "This bone has no L/R side in its name" ) );
+		QAction * aAdd = menu.addAction( QObject::tr( "Add Child Bone (Extrude)" ) );
+		menu.addSeparator();
+		QAction * aParentKeep = menu.addAction( QObject::tr( "Parent to Active — Keep Transform" ) );
+		QAction * aParentOffset = menu.addAction( QObject::tr( "Parent to Active — Keep Offset" ) );
+		const bool canParent = ( sel.size() >= 2 );
+		aParentKeep->setEnabled( canParent );
+		aParentOffset->setEnabled( canParent );
+		if ( !canParent ) {
+			const QString why = QObject::tr( "Select the bones to move, then Ctrl-click the new parent last" );
+			aParentKeep->setToolTip( why );
+			aParentOffset->setToolTip( why );
+		}
+		QAction * aClearParent = menu.addAction( QObject::tr( "Clear Parent" ) );
+		menu.addSeparator();
+		QAction * aDissolve = menu.addAction( QObject::tr( "Dissolve" ) );
+		aDissolve->setToolTip( QObject::tr( "Remove this bone; its children are adopted by its parent and do not move" ) );
+		QAction * aDelete = menu.addAction( QObject::tr( "Delete Bone and Children" ) );
+
+		QAction * chosen = menu.exec( tree->viewport()->mapToGlobal( pos ) );
+		if ( !chosen )
+			return;
+
+		// ---- selection actions -----------------------------------------
+		if ( chosen == aHier ) {
+			QList<int> add;
+			QList<int> stack = sel.isEmpty() ? QList<int>{ primary } : sel;
+			while ( !stack.isEmpty() ) {
+				const int b = stack.takeLast();
+				if ( add.contains( b ) )
+					continue;
+				add << b;
+				for ( int c : model->getChildLinks( b ) )
+					if ( c >= 0 )
+						stack << c;
+			}
+			selectBlocks( add, true );
+			paintSelection();
+			return;
+		}
+		if ( chosen == aMirror ) {
+			QList<int> add;
+			for ( int b : ( sel.isEmpty() ? QList<int>{ primary } : sel ) ) {
+				const QString flip = skeletonFlipBoneName(
+					model->get<QString>( model->getBlockIndex( b ), "Name" ) );
+				if ( flip.isEmpty() )
+					continue;
+				for ( int o = 0; o < model->getBlockCount(); o++ ) {
+					if ( model->get<QString>( model->getBlockIndex( o ), "Name" ) == flip )
+						add << o;
+				}
+			}
+			selectBlocks( add, true );
+			paintSelection();
+			return;
+		}
+		if ( chosen == aSimilar ) {
+			QList<int> add;
+			for ( int b : ( sel.isEmpty() ? QList<int>{ primary } : sel ) ) {
+				const QStringList fam = skeletonSimilarNames( model,
+					model->get<QString>( model->getBlockIndex( b ), "Name" ) );
+				for ( int o = 0; o < model->getBlockCount(); o++ ) {
+					if ( fam.contains( model->get<QString>( model->getBlockIndex( o ), "Name" ) ) )
+						add << o;
+				}
+			}
+			selectBlocks( add, true );
+			paintSelection();
+			return;
+		}
+		if ( chosen == aIsolate ) {
+			if ( isolated->isEmpty() ) {
+				for ( int b : ( sel.isEmpty() ? QList<int>{ primary } : sel ) )
+					isolated->insert( b );
+			} else {
+				isolated->clear();
+			}
+			if ( ogl )
+				ogl->setSkeletonIsolated( *isolated );
+			refresh();
+			return;
+		}
+
+		// ---- edits -----------------------------------------------------
+		// Every structural change to a file with a ragdoll leaves that ragdoll
+		// stale: it is a compiled Havok packfile binding bodies to nodes, and
+		// there is no encoder for it. Say so plainly rather than silently
+		// producing a rig whose physics no longer matches its skeleton.
+		auto confirmRagdoll = [&]( const QString & what ) {
+			if ( !skeletonFileHasRagdoll( model ) )
+				return true;
+			return QMessageBox::warning( panel, QObject::tr( "Ragdoll will be stale" ),
+				QObject::tr( "%1\n\nThis file has a bhkRagdollSystem — a compiled Havok "
+					"packfile that binds physics bodies to bone nodes. NifSkope can read it "
+					"but cannot rebuild it, so after this change the ragdoll will no longer "
+					"match the skeleton.\n\nProceed anyway?" ).arg( what ),
+				QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) == QMessageBox::Yes;
+		};
+
+		QString err;
+		if ( chosen == aRename || chosen == aFlip ) {
+			QString newName = flipped;
+			if ( chosen == aRename ) {
+				bool ok = false;
+				newName = QInputDialog::getText( panel, QObject::tr( "Rename bone" ),
+					QObject::tr( "New name for '%1':" ).arg( primaryName ),
+					QLineEdit::Normal, primaryName, &ok );
+				if ( !ok || newName.isEmpty() || newName == primaryName )
+					return;
+			}
+			// Renaming only rewrites by-NAME references; the ragdoll binds by node,
+			// so a rename does not invalidate it. No warning needed here.
+			nifSnapshotOp( model, QObject::tr( "Rename bone" ), [&]() {
+				skeletonRenameBone( model, primary, newName, &err );
+			} );
+			if ( !err.isEmpty() )
+				QMessageBox::warning( panel, QObject::tr( "Rename failed" ), err );
+			refresh();
+			return;
+		}
+		if ( chosen == aAdd ) {
+			bool ok = false;
+			const QString name = QInputDialog::getText( panel, QObject::tr( "Add child bone" ),
+				QObject::tr( "Name for the new bone under '%1':" ).arg( primaryName ),
+				QLineEdit::Normal, primaryName + QStringLiteral( "_new" ), &ok );
+			if ( !ok || name.isEmpty() )
+				return;
+			nifSnapshotOp( model, QObject::tr( "Add child bone" ), [&]() {
+				skeletonAddChildBone( model, primary, name, boneLength );
+			} );
+			refresh();
+			return;
+		}
+		if ( chosen == aParentKeep || chosen == aParentOffset ) {
+			// Blender's convention: the ACTIVE bone (Ctrl-clicked last) is the new
+			// parent, everything else selected becomes its child.
+			const int newParent = sel.last();
+			if ( !confirmRagdoll( QObject::tr( "Reparenting %1 bone(s)." ).arg( sel.size() - 1 ) ) )
+				return;
+			nifSnapshotOp( model, QObject::tr( "Parent bones" ), [&]() {
+				for ( int b : sel ) {
+					if ( b == newParent )
+						continue;
+					QString e;
+					if ( !skeletonReparent( model, b, newParent, chosen == aParentKeep, &e ) && err.isEmpty() )
+						err = e;
+				}
+			} );
+			if ( !err.isEmpty() )
+				QMessageBox::warning( panel, QObject::tr( "Parent failed" ), err );
+			refresh();
+			return;
+		}
+		if ( chosen == aClearParent ) {
+			if ( !confirmRagdoll( QObject::tr( "Unparenting %1." ).arg( primaryName ) ) )
+				return;
+			nifSnapshotOp( model, QObject::tr( "Clear parent" ), [&]() {
+				skeletonReparent( model, primary, -1, true, &err );
+			} );
+			if ( !err.isEmpty() )
+				QMessageBox::warning( panel, QObject::tr( "Clear parent failed" ), err );
+			refresh();
+			return;
+		}
+		if ( chosen == aDissolve || chosen == aDelete ) {
+			const bool isDelete = ( chosen == aDelete );
+			const QString what = isDelete
+				? QObject::tr( "Deleting '%1' and everything under it." ).arg( primaryName )
+				: QObject::tr( "Dissolving '%1'." ).arg( primaryName );
+			// A bone carrying skin weights cannot be removed without remapping
+			// every vertex's bone indices, which is phase 2 work. Refuse instead
+			// of corrupting the mesh.
+			const SkeletonReport rep = skeletonAnalyse( model );
+			for ( const SkeletonBoneInfo & bi : rep.bones ) {
+				if ( bi.block == primary && bi.verts > 0 ) {
+					QMessageBox::warning( panel, QObject::tr( "Bone is in use" ),
+						QObject::tr( "'%1' has %2 vertices weighted to it. Removing it would need "
+							"every vertex's bone indices remapped, which is not implemented yet — "
+							"so this is refused rather than corrupting the mesh." )
+							.arg( primaryName ).arg( bi.verts ) );
+					return;
+				}
+			}
+			if ( QMessageBox::warning( panel, QObject::tr( "Remove bone" ), what
+					+ QObject::tr( "\n\nThis cannot be undone beyond one undo step. Continue?" ),
+					QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) != QMessageBox::Yes )
+				return;
+			if ( !confirmRagdoll( what ) )
+				return;
+			nifSnapshotOp( model, isDelete ? QObject::tr( "Delete bone" ) : QObject::tr( "Dissolve bone" ),
+				[&]() {
+					if ( isDelete )
+						skeletonDeleteSubtree( model, primary, &err );
+					else
+						skeletonDissolve( model, primary, &err );
+				} );
+			if ( !err.isEmpty() )
+				QMessageBox::warning( panel,
+					isDelete ? QObject::tr( "Delete failed" ) : QObject::tr( "Dissolve failed" ), err );
+			refresh();
+			return;
+		}
+	} );
 
 	// selecting a row selects the block, like every other manager
 	QObject::connect( tree, &QTreeWidget::itemSelectionChanged, panel, [=]() {
@@ -545,6 +871,7 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 		*syncing = true;
 		skope->select( model->getBlockIndex( block ) );
 		*syncing = false;
+		paintSelection();
 	} );
 
 	for ( QToolButton * b : filterButtons ) {

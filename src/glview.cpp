@@ -502,6 +502,13 @@ void GLView::setRiggingWeightPaintMode( bool enabled, int targetBlock, int brush
 
 // ---- Pose Mode -------------------------------------------------------------
 
+void GLView::setSkeletonIsolated( const QSet<int> & bones )
+{
+	skeletonIsolated = bones;
+	refreshPoseBones();
+	update();
+}
+
 void GLView::setSkeletonView( bool on )
 {
 	const bool changed = ( skeletonView != on );
@@ -542,6 +549,8 @@ void GLView::refreshPoseBones()
 				continue;
 			nodes.insert( b );
 		}
+		if ( !skeletonIsolated.isEmpty() )
+			nodes.intersect( skeletonIsolated );
 		if ( !nodes.isEmpty() ) {
 			poseBones = nodes.values();
 			std::sort( poseBones.begin(), poseBones.end() );
@@ -593,6 +602,8 @@ void GLView::refreshPoseBones()
 			p = model->getParent( p );
 		}
 	}
+	if ( skeletonView && !skeletonIsolated.isEmpty() )
+		withParents.intersect( skeletonIsolated );
 	poseBones = withParents.values();
 	std::sort( poseBones.begin(), poseBones.end() );
 

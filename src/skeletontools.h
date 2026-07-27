@@ -77,4 +77,66 @@ struct SkeletonReport
  */
 SkeletonReport skeletonAnalyse( const NifModel * nif, float threshold = 0.0001f );
 
+// ---------------------------------------------------------------------------
+// bone operations (src/skeletonops.cpp)
+// ---------------------------------------------------------------------------
+
+class Transform;
+
+//! One place a bone is referenced from. Produced by skeletonBoneRefs().
+struct SkeletonBoneRef
+{
+	QString what;      //!< short kind: "child of", "skin bone", "bone LOD", ...
+	int block = -1;    //!< the referencing block
+	QString detail;    //!< human-readable location, says when it is by NAME
+};
+
+/*! Every reference to a bone: parent Children link, skin `Bones` slots (whose
+ * ORDER is the vertex bone-index mapping), bone-LOD names, controller-sequence
+ * node names, connect-point parents, and its collision object.
+ *
+ * This is the foundation every write operation goes through — a rename or delete
+ * that misses one of these corrupts the file.
+ */
+QList<SkeletonBoneRef> skeletonBoneRefs( const NifModel * nif, int boneBlock );
+
+/*! True when the file carries a `bhkRagdollSystem`.
+ *
+ * That block is a compiled Havok packfile binding physics bodies to nodes.
+ * `hknpdecode` can read it but there is no proven encoder for ragdoll bodies and
+ * constraints, so any structural bone change leaves it stale — callers must warn.
+ */
+bool skeletonFileHasRagdoll( const NifModel * nif );
+
+//! Mirror a bone name across the midline (`_L_`/`_R_`, `.L`/`.R`, `Left`/`Right`,
+//! leading `L`/`R`). Returns it unchanged when the bone has no side.
+QString skeletonFlipBoneName( const QString & name );
+
+//! Names in the same family as this one — same stem, differing only in trailing
+//! digits (LArm1/LArm2/LArm3). Empty when the name has no trailing digits.
+QStringList skeletonSimilarNames( const NifModel * nif, const QString & name );
+
+//! A bone's world transform, from the product of local transforms to the root.
+Transform skeletonWorldTransform( const NifModel * nif, int block );
+
+//! Rename a bone and every by-NAME reference to it (bone LOD, sequences, connect
+//! points). By-link references need no change. Does NOT touch the ragdoll.
+bool skeletonRenameBone( NifModel * nif, int block, const QString & newName, QString * error );
+
+//! Blender's extrude: a new child NiNode offset along the parent's local +Y.
+//! Returns the new block, or -1.
+int skeletonAddChildBone( NifModel * nif, int parentBlock, const QString & name, float length );
+
+//! Move a bone under a new parent. keepTransform preserves its world position by
+//! recomputing the local transform; otherwise the local transform is kept as-is
+//! (Blender's Keep Offset), which moves the bone.
+bool skeletonReparent( NifModel * nif, int block, int newParent, bool keepTransform, QString * error );
+
+//! Remove a bone, its children adopted by its parent at their current world
+//! positions (Blender's dissolve). Refuses on the root.
+bool skeletonDissolve( NifModel * nif, int block, QString * error );
+
+//! Remove a bone and everything under it.
+bool skeletonDeleteSubtree( NifModel * nif, int block, QString * error );
+
 #endif // SKELETONTOOLS_H

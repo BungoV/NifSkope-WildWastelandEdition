@@ -132,6 +132,9 @@ public:
 	bool skeletonViewActive() const { return skeletonView; }
 	//! Bones currently drawn, for the dock's selection sync.
 	QVector<int> skeletonDrawnBones() const { return poseBones; }
+	//! Restrict the drawn armature to these bones (Blender's Isolate). Empty
+	//! means draw everything.
+	void setSkeletonIsolated( const QSet<int> & bones );
 	//! Show bone names beside the bones (toggle).
 	void setPoseShowBoneNames( bool on ) { poseShowBoneNames = on; update(); }
 	//! Show dashed parent-relationship lines (toggle).
@@ -1013,6 +1016,7 @@ public:
 	//! Skeleton Manager armature display. Draws the same bones as Pose Mode but
 	//! octahedral (direction is readable) and without making them drag targets.
 	bool skeletonView = false;
+	QSet<int> skeletonIsolated;            //!< non-empty = draw only these
 	bool poseShowBoneNames = false;
 	bool poseShowRelations = true;        //!< draw parent-relationship lines
 	bool poseShowWeights = false;         //!< highlight the hovered/selected bone's verts

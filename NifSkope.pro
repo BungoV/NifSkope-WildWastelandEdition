@@ -361,6 +361,7 @@ SOURCES += \
 	src/nifskope_ui.cpp \
 	src/shortcutregistry.cpp \
 	src/skeletontools.cpp \
+	src/skeletonops.cpp \
 	src/uvtools.cpp \
 	src/spellbook.cpp \
 	src/version.cpp \
