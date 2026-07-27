@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27ad — hknpSphereShape decodes: every vanilla ragdoll is now complete
+
+A sphere's vertex payload starts at `+0x30 + 0x10`, which **is** `+0x40` — exactly
+where a polytope keeps its plane, face and index relArrays. Those three fields
+were therefore vertex bytes read as counts: on the Deathclaw ragdoll `+0x44` read
+**0x7f20 = 32544 faces**, the shared sanity check tripped, and
+`decodeConvexLike()` returned before the sphere branch below it could ever run.
+Every `hknpSphereShape` decoded to nothing.
+
+Fixed by reading the vertex array first and the polytope-only arrays only after
+the sphere and capsule branches have returned.
+
+**Pass 2 now reports what it drops.** A body whose shape failed to decode
+vanished without a trace — pass 3 records failures in `unknownShapes`, pass 2 did
+not — and that is exactly how this stayed invisible: once 27p made bodies
+resolve, spheres reached pass 2 and stopped being reported at all, so the symptom
+degraded from "not decoded hknpSphereShape" to a silently missing shape.
+
+Across all 35 vanilla FO4 actor ragdolls there are now **zero undecoded shape
+classes**, and 30 have a shape for every body — the other five have *more* shapes
+than bodies, which is the already-documented case of bodies that no collision
+object names.
+
+| | before | after |
+|---|---|---|
+| Deathclaw | 27 shapes / 28 bodies | **28 / 28** |
+| Robot/SkeletonRef | 41 / 48 | **48 / 48** |
+| skeletonSentryBodyPart | 23 / 24 | **24 / 24** |
+
+Deathclaw's sphere reads r = 0.392881, matching the 0.39288 at `+0x14` in the raw
+bytes.
+
+Also closed the GUI check owed since 27o: the Collision Manager on the brahmin
+skeleton lists one row per bone with Bone = "ragdoll bone", Shape = Capsule and
+Layer = Biped (8), over 41 bodies.
+
 ## 2026-07-27ac — One toolbar icon size
 
 The "large" 36px alternative is gone; 16px, matching Blender's header, is the

@@ -295,11 +295,14 @@ order; each is independently verifiable against a vanilla file:
    twice (brahmin ragdoll and a 15-body Halloween banner). Indexed by the **motion
    index** at `cinfo +0x0c`, not the body index — that distinction is load-bearing,
    see the 07-27p entry. The arrays carry their own counts at `+0x28` / `+0x38`.
-3. **`hknpSphereShape` synthesis** — still reported in `unknownShapes` (it is
-   *accepted* by `decodeLeaf` but `decodeConvexLike` returns no verts), so
-   Deathclaw's sphere draws as nothing. No longer breaks attribution, just loses
-   one shape. `Robot/SkeletonRef` and `Robot/skeletonSentryBodyPart` drop more
-   classes and need a look.
+3. ~~**`hknpSphereShape` synthesis.**~~ **DONE 07-27ad.** The plane/face/index
+   relArrays at `+0x40`/`+0x44`/`+0x48` only exist on a polytope; on a sphere the
+   vertex payload starts at `+0x30 + 0x10`, which *is* `+0x40`, so those fields
+   were vertex bytes read as counts (Deathclaw's `+0x44` read 32544 faces) and the
+   shared sanity check returned before the sphere branch could run. Vertices are
+   read first now, polytope arrays only after the primitives return. **All 35
+   vanilla ragdolls decode with zero undecoded shape classes**, including
+   Deathclaw 28/28, `Robot/SkeletonRef` 48/48 and `skeletonSentryBodyPart` 24/24.
 4. **`hkpRagdollConstraintData` / `hkpLimitedHingeConstraintData` /
    `hkpPositionConstraintMotor`** — the joints. Without these a re-emitted ragdoll
    has no joints, which is worse than no button at all. Start from the root `+0x50`
