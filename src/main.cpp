@@ -38,6 +38,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/kfmmodel.h"
 
 #include <QApplication>
+
+#include "rdccapture.h"
 #include <QColorSpace>
 #include <QCommandLineParser>
 #include <QDesktopServices>
@@ -84,6 +86,11 @@ QCoreApplication * createApplication( int &argc, char *argv[] )
 //! The main program
 int main( int argc, char * argv[] )
 {
+	// Before anything creates a GL context: RenderDoc cannot hook a driver it
+	// was loaded after, and Qt makes the viewport's context when GLView is
+	// constructed. No-op unless WW_RDC_FRAMES is set.
+	rdcInit();
+
 	QScopedPointer<QCoreApplication> app( createApplication( argc, argv ) );
 
 	if ( auto a = qobject_cast<QApplication *>(app.data()) ) {

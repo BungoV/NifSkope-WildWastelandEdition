@@ -32,6 +32,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 
+#include "rdccapture.h"
+
 #include "message.h"
 #include "nifskope.h"
 #include "gl/renderer.h"
@@ -1683,6 +1685,21 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 
 void GLView::paintGL()
 {
+	/* RenderDoc capture of THIS context. Frames are numbered per paintGL so a
+	 * capture can be attributed to a frame: the pick render below bumps the same
+	 * counter, and comparing "paint" before it with "paint" after it is what
+	 * isolates the 07-17 line defect. Costs one branch on a static when disarmed.
+	 */
+	static int wwRdcFrame = 0;
+	const bool wwRdcHere = rdcArmed();
+	if ( wwRdcHere ) [[unlikely]]
+		rdcBeginFrame( QStringLiteral( "paint%1" ).arg( ++wwRdcFrame, 3, 10, QLatin1Char( '0' ) ) );
+	struct WwRdcEnd
+	{
+		bool on;
+		~WwRdcEnd() { if ( on ) rdcEndFrame(); }
+	} wwRdcEnd{ wwRdcHere };
+
 #if DEBUG_FRAME_TIME
 	auto	prvTime = std::chrono::steady_clock::now();
 #endif
@@ -3533,6 +3550,17 @@ QModelIndex GLView::indexAt( const QPointF & pos, bool shiftModifier )
 	df << &Scene::drawShapes;
 
 	auto	prvContext = pushGLContext();
+
+	// The pick render is its own render of the same scene, and it is what heals
+	// the line path, so it is worth capturing on its own.
+	const bool wwRdcPick = rdcArmed();
+	if ( wwRdcPick ) [[unlikely]]
+		rdcBeginFrame( QStringLiteral( "pick" ) );
+	struct WwRdcPickEnd
+	{
+		bool on;
+		~WwRdcPickEnd() { if ( on ) rdcEndFrame(); }
+	} wwRdcPickEnd{ wwRdcPick };
 
 	double	p = devicePixelRatioF();
 	int	wp = pixelWidth;

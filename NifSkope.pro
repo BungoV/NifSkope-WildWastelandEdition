@@ -234,6 +234,7 @@ HEADERS += \
 	src/shortcutregistry.h \
 	src/skeletontools.h \
 	src/starterscene.h \
+	src/rdccapture.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
 	src/spellbook.h \
@@ -363,6 +364,7 @@ SOURCES += \
 	src/shortcutregistry.cpp \
 	src/skeletontools.cpp \
 	src/starterscene.cpp \
+	src/rdccapture.cpp \
 	src/skeletonops.cpp \
 	src/uvtools.cpp \
 	src/spellbook.cpp \
