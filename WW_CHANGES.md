@@ -1,5 +1,67 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27k — Blender-style armature rendering in the Skeleton Manager
+
+The headline ask: render the whole skeleton — bones with a visible direction,
+their names, and each bone connected to its parent.
+
+**Octahedral bones** (`GLView::drawOctahedralBone`). Blender's shape: a square
+collar at ~15% of the bone's length with radius ~10%, four edges fanning back to
+the head and four converging on the tail. The taper is the point — it shows which
+way the bone faces, which a plain head-to-tail line cannot. Twelve line segments,
+so it needs no new shader or render state. Used in the Skeleton Manager; Pose Mode
+keeps the plain stick, where bones are drag targets and a dense octahedral cluster
+would fight with picking.
+
+**`skeletonView` mode on GLView** — the armature draws while the Skeleton Manager
+dock is up, without entering Pose Mode. Names are always on there (reading the rig
+is the whole job); Pose Mode keeps them behind its Names toggle. The existing
+dashed parent-relationship lines, depth fade, hover and picking all come along.
+
+**Skeleton files now populate.** `refreshPoseBones()` built its list purely from
+skinned shapes, so a `skeleton.nif` — a file that is nothing *but* bones — drew
+nothing and the dock reported "0 bone(s)". In skeleton view it now falls back to
+the node hierarchy: every non-geometry `NiAVObject` is a bone for display.
+
+Verified on `Brahmin/CharacterAssets/Skeleton.nif`: 50 nodes, 50 bones drawn, and
+the screenshot reads unmistakably as a two-headed brahmin — two neck chains, four
+legs, named joints. `WW_SKELETON_TEST` gained `WW_SKELETON_SHOT=<png>` for this,
+because the render-regression harness hides every dock and so switches the
+skeleton view off.
+
+### The open line-geometry defect blocks this, and characterises it better
+
+The first screenshot showed **names and joint dots but no bones and no
+relationship lines**. That is the 07-17 defect: before the first pick render,
+streaming *line* geometry draws nothing. Sharper than anything from rounds 1–3:
+
+> **Points render. Lines do not.**
+
+`drawPoints` (selection.prog) works while `drawLines` (lines.prog) does not, in
+the same frame, through the same streaming path. Checked and eliminated: it is
+*not* a missing geometry stage — `GL_ATTACHED_SHADERS` on lines.prog reports
+`attached=3 linked=1 [vert(1) GEOM(1) frag(1)]`, all compiled.
+
+Interactively this is invisible to the user: their own screenshot has the grid, so
+lines were already working there — the pick render on their first click had healed
+it. Only a cold frame is affected. `WW_SKELETON_SHOT` therefore runs one
+`indexAt()` first as a **harness warm-up**, clearly not a fix, and with that the
+bones render correctly.
+
+Regression set 7/7 identical (warm). Note again that `particles_mist` differs by
+54,581 px on a cold first run and matches warm — the same effect recorded in
+07-27j, now seen twice.
+
+### Not done from the same request
+
+Asked for in one go, not delivered: multi-select with Block-List colours, pin
+bones, weight overlay, load-skeleton-from-file/archive, the numeric bone transform
+panel, safe bone rename, bone-count/partition-limit warnings, symmetry tools, and
+moving the hierarchy tree into the Pose Manager. Only the rendering and the
+no-skin fix landed. Also visible in the screenshot and still open: **name labels
+overlap badly** in dense regions — Blender declutters by screen distance, and this
+does not yet.
+
 ## 2026-07-27j — Skeleton Manager workspace, phase 1 (read-only)
 
 Backlog item #1, the largest un-started feature, per `SKELETON_AND_POSE_PLAN.md`

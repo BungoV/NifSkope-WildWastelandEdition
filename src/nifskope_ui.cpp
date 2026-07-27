@@ -1851,6 +1851,38 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						qApp->processEvents();
 					}
 
+					// Screenshot of the armature itself. The render-regression harness
+					// cannot serve here: it hides every dock, which switches the skeleton
+					// view back off. WW_SKELETON_SHOT=<png> grabs the viewport with the
+					// dock up, so the octahedral bones, the names and the relationship
+					// lines can actually be looked at rather than assumed.
+					const QString shot = qEnvironmentVariable( "WW_SKELETON_SHOT" );
+					if ( !shot.isEmpty() && skope->ogl ) {
+						skope->ogl->setSkeletonView( true );
+						int viewIdx = qEnvironmentVariableIntValue( "WW_SKELETON_VIEW" );
+						if ( viewIdx <= 0 || viewIdx > int( GLView::ViewWalk ) )
+							viewIdx = int( GLView::ViewFront );
+						skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
+						// Warm up the line path: before the first pick render, streaming
+						// line geometry draws nothing (the open 07-17 defect) while points
+						// still render, so the bones would be missing and only their joint
+						// dots would show. indexAt() runs the pick render, which is what
+						// heals it. Harness-only: this is not a fix for that bug.
+						skope->ogl->indexAt( QPointF( skope->ogl->width() * 0.5,
+													   skope->ogl->height() * 0.5 ) );
+						qApp->processEvents();
+						for ( int i = 0; i < 3; i++ ) {
+							skope->ogl->update();
+							qApp->processEvents();
+						}
+						const int drawn = skope->ogl->skeletonDrawnBones().size();
+						log << "skeletonView=" << int( skope->ogl->skeletonViewActive() )
+							<< " drawnBones=" << drawn << "\n";
+						if ( drawn < 1 )
+							fails << "skeleton view drew no bones";
+						skope->ogl->grabFramebuffer().save( shot );
+					}
+
 					log << "footer: " << footer->text() << "\n";
 					if ( footer->text().isEmpty() )
 						fails << "footer empty";

@@ -554,6 +554,32 @@ void Scene::drawLines( const Vector3 * positions, size_t numVerts, const FloatVe
 			glGetIntegerv( GL_CURRENT_PROGRAM, &gpuProg );
 			glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &gpuVao );
 			const GLint mvLoc = context->fn->glGetUniformLocation( GLuint( gpuProg ), "modelViewMatrix" );
+			// Which pipeline stages does this program actually have? A geometry
+			// shader that failed to compile would leave lines.vert output
+			// unprojected and clip everything away.
+			{
+				GLint attached = 0;
+				context->fn->glGetProgramiv( prog->id, GL_ATTACHED_SHADERS, &attached );
+				GLuint shaderIds[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+				GLsizei got = 0;
+				context->fn->glGetAttachedShaders( prog->id, 8, &got, shaderIds );
+				QString stages;
+				for ( GLsizei i = 0; i < got; i++ ) {
+					GLint type = 0, compiled = 0;
+					context->fn->glGetShaderiv( shaderIds[i], GL_SHADER_TYPE, &type );
+					context->fn->glGetShaderiv( shaderIds[i], GL_COMPILE_STATUS, &compiled );
+					const char * nm = ( type == GL_VERTEX_SHADER ? "vert"
+						: ( type == GL_FRAGMENT_SHADER ? "frag"
+						: ( type == GL_GEOMETRY_SHADER ? "GEOM" : "?" ) ) );
+					stages += QStringLiteral( "%1(%2) " ).arg( nm ).arg( compiled );
+				}
+				GLint linked = 0;
+				context->fn->glGetProgramiv( prog->id, GL_LINK_STATUS, &linked );
+				QFile sf( QCoreApplication::applicationDirPath() + "/ww_grid_probe.log" );
+				if ( sf.open( QIODevice::Append | QIODevice::Text ) )
+					QTextStream( &sf ) << "    stages: attached=" << attached
+						<< " linked=" << linked << " [" << stages << "]\n";
+			}
 			GLint drawFbo = 0, readFbo = 0;
 			glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo );
 			glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &readFbo );

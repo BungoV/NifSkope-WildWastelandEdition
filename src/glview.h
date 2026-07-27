@@ -126,6 +126,12 @@ public:
 	// existing G/R/S transform poses it. No mesh topology is touched.
 	void setPoseMode( bool enabled );
 	bool poseModeActive() const { return poseMode; }
+	//! Skeleton Manager armature display: octahedral bones, names and parent
+	//! relationship lines, without entering Pose Mode.
+	void setSkeletonView( bool on );
+	bool skeletonViewActive() const { return skeletonView; }
+	//! Bones currently drawn, for the dock's selection sync.
+	QVector<int> skeletonDrawnBones() const { return poseBones; }
 	//! Show bone names beside the bones (toggle).
 	void setPoseShowBoneNames( bool on ) { poseShowBoneNames = on; update(); }
 	//! Show dashed parent-relationship lines (toggle).
@@ -1004,6 +1010,9 @@ public:
 
 	// ---- Pose Mode ----
 	bool poseMode = false;
+	//! Skeleton Manager armature display. Draws the same bones as Pose Mode but
+	//! octahedral (direction is readable) and without making them drag targets.
+	bool skeletonView = false;
 	bool poseShowBoneNames = false;
 	bool poseShowRelations = true;        //!< draw parent-relationship lines
 	bool poseShowWeights = false;         //!< highlight the hovered/selected bone's verts
@@ -1034,8 +1043,13 @@ public:
 	void drawPoseWeights();
 	//! Rebuild poseBones from the file's skinned shapes under the active filter.
 	void refreshPoseBones();
+	//! Derive poseBoneSize from the drawn bones' spacing.
+	void refreshPoseBoneSize();
 	//! Draw the skeleton (bones + parenting) — called from paintGL in pose mode.
 	void drawPoseSkeleton();
+	//! Blender's octahedral bone as a 12-segment wireframe, head to tail. The
+	//! taper is what makes the bone's direction visible.
+	void drawOctahedralBone( const Vector3 & head, const Vector3 & tail );
 	//! Screen-space nearest bone to a viewport point; -1 if none within range.
 	int poseBoneAt( const QPointF & pos ) const;
 	//! A bone's tail in world space: its sole child's origin, the mean of several

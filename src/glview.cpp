@@ -502,12 +502,53 @@ void GLView::setRiggingWeightPaintMode( bool enabled, int targetBlock, int brush
 
 // ---- Pose Mode -------------------------------------------------------------
 
+void GLView::setSkeletonView( bool on )
+{
+	const bool changed = ( skeletonView != on );
+	skeletonView = on;
+	// Deliberately NOT a changed-only guard. addDockWidget() briefly marks the
+	// dock visible during construction, before any file is loaded, so the flag can
+	// already be true by the time the user actually opens the workspace — and a
+	// changed-only guard then skipped the rebuild and the armature drew nothing
+	// (drawnBones=0 with skeletonView=1). Turning the view ON always rebuilds,
+	// because the model may have loaded since the flag was last touched.
+	if ( changed || on ) {
+		// The bone set differs between the two modes (skin bones vs every node),
+		// so it is rebuilt on the way in AND on the way out.
+		refreshPoseBones();
+		update();
+	}
+}
+
 void GLView::refreshPoseBones()
 {
 	poseBones.clear();
 	poseHoverBone = -1;
 	if ( !model )
 		return;
+
+	// A skeleton.nif has no skinned shape at all, so the union below comes back
+	// empty and nothing would draw — on a file that is nothing BUT bones. In
+	// skeleton view, fall back to the node hierarchy itself: every NiNode that is
+	// not geometry is a bone as far as display is concerned. (The Skeleton
+	// Manager's own classification does the equivalent — see SkeletonReport.)
+	if ( skeletonView ) {
+		QSet<int> nodes;
+		for ( int b = 0; b < model->getBlockCount(); b++ ) {
+			QModelIndex idx = model->getBlockIndex( b );
+			if ( !model->blockInherits( idx, "NiAVObject" ) )
+				continue;
+			if ( model->blockInherits( idx, "NiTriBasedGeom" ) || model->blockInherits( idx, "BSTriShape" ) )
+				continue;
+			nodes.insert( b );
+		}
+		if ( !nodes.isEmpty() ) {
+			poseBones = nodes.values();
+			std::sort( poseBones.begin(), poseBones.end() );
+			refreshPoseBoneSize();
+			return;
+		}
+	}
 
 	// union of the bones every skinned shape references
 	QSet<int> bones;
@@ -555,32 +596,41 @@ void GLView::refreshPoseBones()
 	poseBones = withParents.values();
 	std::sort( poseBones.begin(), poseBones.end() );
 
-	// Characteristic bone length = median nearest-neighbour distance among the
-	// bones. Facial rigs are a dense cluster of tiny bones; body rigs are
-	// spread out. This makes the drawn bones uniform and readable in either
-	// case, instead of stubs that scale with a far-off parent.
-	if ( scene && poseBones.size() >= 2 ) {
-		QVector<Vector3> pos;
-		pos.reserve( poseBones.size() );
-		for ( int b : poseBones )
-			if ( Node * n = scene->getNode( model, model->getBlockIndex( b ) ) )
-				pos.append( n->worldTrans().translation );
-		QVector<float> nn;
-		for ( int i = 0; i < pos.size(); i++ ) {
-			float best = -1.0f;
-			for ( int j = 0; j < pos.size(); j++ ) {
-				if ( i == j ) continue;
-				float d = ( pos[i] - pos[j] ).length();
-				if ( d > 1e-4f && ( best < 0 || d < best ) )
-					best = d;
-			}
-			if ( best > 0 )
-				nn.append( best );
+	refreshPoseBoneSize();
+}
+
+/*! Characteristic bone length = median nearest-neighbour distance among the drawn
+ * bones. Facial rigs are a dense cluster of tiny bones; body rigs are spread out.
+ * Deriving one length keeps the drawn bones uniform and readable in either case,
+ * instead of stubs that scale with a far-off parent.
+ *
+ * Extracted so the skeleton-view path (which builds poseBones from the node
+ * hierarchy and returns early) sizes its bones the same way.
+ */
+void GLView::refreshPoseBoneSize()
+{
+	if ( !scene || !model || poseBones.size() < 2 )
+		return;
+	QVector<Vector3> pos;
+	pos.reserve( poseBones.size() );
+	for ( int b : poseBones )
+		if ( Node * n = scene->getNode( model, model->getBlockIndex( b ) ) )
+			pos.append( n->worldTrans().translation );
+	QVector<float> nn;
+	for ( int i = 0; i < pos.size(); i++ ) {
+		float best = -1.0f;
+		for ( int j = 0; j < pos.size(); j++ ) {
+			if ( i == j ) continue;
+			float d = ( pos[i] - pos[j] ).length();
+			if ( d > 1e-4f && ( best < 0 || d < best ) )
+				best = d;
 		}
-		if ( !nn.isEmpty() ) {
-			std::sort( nn.begin(), nn.end() );
-			poseBoneSize = qMax( 0.5f, nn.at( nn.size() / 2 ) * 0.6f );
-		}
+		if ( best > 0 )
+			nn.append( best );
+	}
+	if ( !nn.isEmpty() ) {
+		std::sort( nn.begin(), nn.end() );
+		poseBoneSize = qMax( 0.5f, nn.at( nn.size() / 2 ) * 0.6f );
 	}
 }
 
@@ -804,7 +854,7 @@ void GLView::setPoseMode( bool enabled )
 
 int GLView::poseBoneAt( const QPointF & pos ) const
 {
-	if ( !poseMode || poseBones.isEmpty() )
+	if ( ( !poseMode && !skeletonView ) || poseBones.isEmpty() )
 		return -1;
 	// nearest bone segment (head->tail) in screen space, within a pixel radius.
 	// worldToScreen works in LOGICAL pixels (width()/height()), same space as
@@ -953,9 +1003,51 @@ void GLView::drawPoseWeights()
 	glEnable( GL_DEPTH_TEST );
 }
 
+/*! Blender's octahedral bone, as a wireframe from head to tail.
+ *
+ * This is the shape that makes an armature readable: a square "collar" a short
+ * way down from the head, with four edges fanning back to the head and four
+ * converging on the tail. Because the wide end is at the head and it tapers to a
+ * point at the tail, the bone's DIRECTION is visible at a glance — which a plain
+ * head-to-tail line cannot show. Blender's own proportions: the collar sits at
+ * ~15% of the length and its radius is ~10%.
+ *
+ * Drawn as 12 line segments rather than solid geometry, so it works through the
+ * existing streaming line path and needs no new shader or render state.
+ */
+void GLView::drawOctahedralBone( const Vector3 & head, const Vector3 & tail )
+{
+	const Vector3 axis = tail - head;
+	const float len = axis.length();
+	if ( len < 1.0e-5f )
+		return;
+	const Vector3 dir = Vector3( axis ).normalize();
+
+	// Any vector not parallel to dir gives a stable perpendicular frame. Picking
+	// the world axis dir is LEAST aligned with avoids the degenerate cross
+	// product — the same guard the procedural-lightning frames needed.
+	Vector3 up( 0.0f, 0.0f, 1.0f );
+	if ( fabsf( dir[2] ) > 0.9f )
+		up = Vector3( 1.0f, 0.0f, 0.0f );
+	Vector3 x = Vector3::crossproduct( dir, up ).normalize();
+	Vector3 y = Vector3::crossproduct( dir, x ).normalize();
+
+	const float r = len * 0.10f;
+	const Vector3 collar = head + dir * ( len * 0.15f );
+	const Vector3 p[4] = { collar + x * r, collar + y * r, collar - x * r, collar - y * r };
+
+	for ( int i = 0; i < 4; i++ ) {
+		scene->drawLine( head, p[i] );				// fan back to the head
+		scene->drawLine( p[i], p[( i + 1 ) & 3] );	// the collar square
+		scene->drawLine( p[i], tail );				// taper to the tail
+	}
+}
+
 void GLView::drawPoseSkeleton()
 {
-	if ( !poseMode || !model || !scene || poseBones.isEmpty() )
+	// Also runs for the Skeleton Manager, which wants the same armature drawing
+	// without entering Pose Mode (Pose Mode additionally makes bones draggable).
+	if ( ( !poseMode && !skeletonView ) || !model || !scene || poseBones.isEmpty() )
 		return;
 
 	glDisable( GL_DEPTH_TEST );
@@ -1020,7 +1112,13 @@ void GLView::drawPoseSkeleton()
 			scene->setGLColor( 0.55f * f, 0.72f * f, 1.0f * f, 0.35f + 0.6f * t );
 
 		scene->setGLLineWidth( ( isActive ? 2.8f : 1.8f ) * dpr );
-		scene->drawLine( head, tail );
+		// Octahedral in the Skeleton Manager (reading the rig is the whole point
+		// there); a plain stick in Pose Mode, where bones are drag targets and a
+		// dense octahedral cluster gets in the way of picking.
+		if ( skeletonView )
+			drawOctahedralBone( head, tail );
+		else
+			scene->drawLine( head, tail );
 
 		// joint dot at the head — the main click target; nearer dots a touch bigger
 		scene->setGLPointSize( ( isActive ? 9.0f : ( isHover ? 7.0f : ( 4.0f + 2.0f * t ) ) ) * dpr );
@@ -2823,9 +2921,12 @@ void GLView::paintGL()
 		glEnable( GL_DEPTH_TEST );
 	}
 
-	// Pose Mode: bone-influence overlay under the skeleton, then the skeleton
-	if ( poseMode ) {
-		drawPoseWeights();
+	// Pose Mode: bone-influence overlay under the skeleton, then the skeleton.
+	// The Skeleton Manager draws the armature too, but not the weight overlay —
+	// that one belongs to the bone you are actively posing.
+	if ( poseMode || skeletonView ) {
+		if ( poseMode )
+			drawPoseWeights();
 		drawPoseSkeleton();
 	}
 
@@ -2912,7 +3013,7 @@ void GLView::paintGL()
 		// Pose Mode bone name labels. With the Names toggle on, every bone is
 		// labelled; the hovered bone is ALWAYS labelled (a hover tooltip under
 		// the cursor) even when the toggle is off.
-		if ( poseMode && model && !poseBones.isEmpty() ) {
+		if ( ( poseMode || skeletonView ) && model && !poseBones.isEmpty() ) {
 			painter.setRenderHint( QPainter::Antialiasing, true );
 			QFont f = painter.font();
 			f.setPointSizeF( 8.0 );
@@ -2935,7 +3036,11 @@ void GLView::paintGL()
 				painter.setPen( hot ? QColor( 255, 200, 90 ) : QColor( 200, 216, 255 ) );
 				painter.drawText( sp + off, name );
 			};
-			if ( poseShowBoneNames )
+			// Names are always on in the Skeleton Manager: reading the rig is the
+			// entire job there, and an unlabelled armature is a puzzle. Pose Mode
+			// keeps them behind its Names toggle, where they are clutter over a
+			// mesh you are posing.
+			if ( poseShowBoneNames || skeletonView )
 				for ( int b : poseBones )
 					if ( b != poseHoverBone )
 						label( b, false );

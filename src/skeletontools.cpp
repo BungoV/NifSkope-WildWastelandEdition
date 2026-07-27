@@ -613,7 +613,11 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			} );
 	}
 
+	// The armature draws while this dock is up and stops when it is put away, so
+	// the viewport is never left with bones over a mesh the user moved on from.
 	QObject::connect( dock, &QDockWidget::visibilityChanged, panel, [=]( bool visible ) mutable {
+		if ( ogl )
+			ogl->setSkeletonView( visible );
 		if ( visible )
 			refresh();
 	} );
