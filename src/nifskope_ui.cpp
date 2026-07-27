@@ -7460,8 +7460,6 @@ void NifSkope::loadTheme()
 		a[theme]->setChecked( true );
 	}
 
-	toolbarSize = ToolbarSize( settings.value( "Settings/Theme/Large Icons", ToolbarSmall ).toBool() );
-
 	//setThemeActions();
 	setToolbarSize();
 
@@ -7623,18 +7621,16 @@ void NifSkope::setThemeActions()
 
 void NifSkope::setToolbarSize()
 {
-	/* 36px was the "large" icon size and it is the DEFAULT, which is why
-	 * flattening the buttons barely changed how big the top bar looked: the
-	 * chrome went but the glyphs stayed enormous. Blender's header icons sit
-	 * around 16px, and 36 is more than twice that.
+	/* One size: 16px, matching Blender's header.
 	 *
-	 * Small is 16 to match. Large stays available for high-DPI and accessibility
-	 * but comes down to 24, which is still generous - the old 36 made a single
-	 * row of ~15 controls taller than the menu bar and the tab bar combined.
+	 * There used to be a "large" alternative at 36px, and it was the default,
+	 * which is why flattening the buttons barely changed how big the top bar
+	 * looked - the chrome went but the glyphs stayed more than twice Blender's
+	 * size. The option is gone rather than merely re-defaulted: its Settings
+	 * checkbox was never wired to anything (nothing read or wrote `largeIcons`),
+	 * so it was a control that appeared to offer a choice and did not.
 	 */
-	QSize size = {16, 16};
-	if ( toolbarSize == ToolbarLarge )
-		size = {24, 24};
+	const QSize size = {16, 16};
 
 	for ( QObject * o : children() ) {
 		auto tb = qobject_cast<QToolBar *>(o);

@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27ac — One toolbar icon size
+
+The "large" 36px alternative is gone; 16px, matching Blender's header, is the
+only size.
+
+Removed rather than merely re-defaulted, because **its Settings checkbox was
+never wired to anything** — nothing in the codebase read or wrote `largeIcons`,
+and the size came straight from `Settings/Theme/Large Icons` with a hardcoded
+default. It was a control that appeared to offer a choice and did not, which is
+worse than no control. The checkbox, the `ToolbarSize` enum, the `toolbarSize`
+member and the settings read all go with it.
+
+Installs carrying `Large Icons = true` are unaffected in the sense that nothing
+reads it any more — everyone gets 16px.
+
 ## 2026-07-27ab — The top bar was still 36px icons
 
 Flattening the buttons (27z) removed the chrome but the bar still looked the
