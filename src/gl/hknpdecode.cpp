@@ -455,7 +455,24 @@ HknpSystem hknpDecode( const QByteArray & data )
 	};
 	QVector<QPair<qsizetype, BodyT>> bodies;
 	for ( const auto & obj : objects ) {
-		if ( obj.second != QLatin1String( "hknpPhysicsSystemData" ) )
+		// hknpRagdollData is a ragdoll's packfile root and it DERIVES from
+		// hknpPhysicsSystemData: the same array offsets hold at the object base.
+		// Verified on the vanilla brahmin skeleton - +0x10 body_props, +0x20
+		// dyn_motion, +0x30 dyn_inertia, +0x40 bodyCinfos and +0x60 shape entries
+		// all read 39 (its bone count), and every one of the 39 cinfos resolves
+		// through its global fixup to a distinct hknpCapsuleShape in exact index
+		// order, body i -> capsule i.
+		//
+		// Matching only the physics class is why ragdolls decoded 0 bodies and
+		// every capsule came back unattributed. With this, a ragdoll's per-bone
+		// bodies are decoded outright - real filter/motion/friction per bone
+		// rather than the positional inference lower down.
+		//
+		// (Its two extra arrays are not read here: +0x50 holds 38 entries on a
+		// 39-bone ragdoll - one per non-root bone, i.e. the constraint bindings,
+		// which is the lead for decoding the joints - and +0x80 holds 39.)
+		if ( obj.second != QLatin1String( "hknpPhysicsSystemData" )
+			&& obj.second != QLatin1String( "hknpRagdollData" ) )
 			continue;
 		qsizetype cinfos = local.value( obj.first + 0x40, -1 );
 		quint32 nb = r.u32( obj.first + 0x48 );

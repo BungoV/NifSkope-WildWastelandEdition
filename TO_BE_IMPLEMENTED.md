@@ -270,18 +270,30 @@ NifSkope does not decode, so there is nothing to round-trip an encoder against �
 `decode(encode(decode(x))) == decode(x)` is the only usable test. Do these in
 order; each is independently verifiable against a vanilla file:
 
-1. **`hknpRagdollData`** — the packfile root. Decoding its body array is what makes
-   attribution real rather than positional, and it removes the `unknownShapes`
-   gate. Reference: brahmin `Skeleton.nif` block 8, object `@0x0000`.
-2. **`hknpSphereShape` synthesis** — currently reported in `unknownShapes` (it is
-   *accepted* by `decodeLeaf` but `decodeConvexLike` returns no verts). Fixing it
-   alone unblocks Deathclaw; `Robot/SkeletonRef` and
-   `Robot/skeletonSentryBodyPart` drop more classes and need a look.
-3. **`hkpRagdollConstraintData` / `hkpLimitedHingeConstraintData` /
+1. ~~**`hknpRagdollData`** — the packfile root.~~ **DONE 07-27p.** It derives from
+   `hknpPhysicsSystemData`, so matching the class name was the whole fix; all 35
+   vanilla ragdolls now decode their bodies. Its remaining unread arrays are
+   `+0x50` (38 entries on 39 bones — the constraint bindings, see 3) and `+0x80`
+   (39 entries, unidentified).
+2. **Per-body mass / inertia / damping.** `HknpSystem` keeps these as scalars read
+   from array element 0, which was fine when a system meant one body. A ragdoll has
+   39, so every decompiled bone gets bone 0's mass (brahmin: all 39 get Mass 5).
+   The arrays are already located — `dyn_motion` at root `+0x20`, `dyn_inertia` at
+   `+0x30`, both 39 entries — so this is moving three fields into `HknpBodyPhys`
+   and reading them per index. Smallest remaining item; do it first.
+3. **`hknpSphereShape` synthesis** — still reported in `unknownShapes` (it is
+   *accepted* by `decodeLeaf` but `decodeConvexLike` returns no verts), so
+   Deathclaw's sphere draws as nothing. No longer breaks attribution, just loses
+   one shape. `Robot/SkeletonRef` and `Robot/skeletonSentryBodyPart` drop more
+   classes and need a look.
+4. **`hkpRagdollConstraintData` / `hkpLimitedHingeConstraintData` /
    `hkpPositionConstraintMotor`** — the joints. Without these a re-emitted ragdoll
-   has no joints, which is worse than no button at all.
-4. **`hkaSkeleton`** — the ragdoll's own copy of the skeleton.
-5. Only then the encoder, validated by round-trip on all 32 attributing skeletons.
+   has no joints, which is worse than no button at all. Start from the root `+0x50`
+   binding array: 38 bindings share 24 distinct constraint objects.
+5. **`hkaSkeleton`** — the ragdoll's own copy of the skeleton.
+6. Only then the encoder. The array machinery in `hknpEncodeCompressedMesh` is
+   directly reusable — the ragdoll root uses the same `hkArray` layout at the same
+   offsets. Validate by round-trip on all 35 ragdolls.
 
 Working tools for this: `NifSkope -no-gui collision <file>` prints the bindings and
 the decode result; `--extract -b N -o F.bin` writes the raw packfile for

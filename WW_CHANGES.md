@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27p — `hknpRagdollData` decodes: ragdoll bodies are real, not inferred
+
+Supersedes the positional inference in 27o (below), which stays only as a
+fallback. **`hknpRagdollData` derives from `hknpPhysicsSystemData`** — the same
+array offsets hold at the object base, so matching the class name was the entire
+fix. Verified on the brahmin skeleton before changing anything: `+0x10`
+body_props, `+0x20` dyn_motion, `+0x30` dyn_inertia, `+0x40` bodyCinfos and
+`+0x60` shape entries all read **39** (its bone count), and every one of the 39
+cinfos resolves through its global fixup to a distinct `hknpCapsuleShape` **in
+exact index order**, body *i* → capsule *i*. That is also independent
+confirmation of 27o's measured `shape index == body id`.
+
+**All 35** vanilla FO4 actor ragdolls now decode their bodies from the packfile —
+including the three (`Deathclaw`, `Robot/SkeletonRef`,
+`Robot/skeletonSentryBodyPart`) that positional attribution had to refuse, since
+attribution no longer depends on nothing having been dropped. The positional path
+now fires on zero vanilla files; it is kept, gated as before, for a packfile whose
+root is neither class. 72 SetDressing/Architecture meshes re-checked: unchanged.
+
+Per-bone physics is real now rather than defaulted. The brahmin reads **39 bodies,
+dynamic, layer 8** (was: 0 bodies, static, layer 1 by fallback), and a decompiled
+bone body carries Mass 5, Friction 0.30, Motion System 3, Quality 4 — where before
+it got Mass 0, Friction 0.5, Motion System 5.
+
+Two things this exposes, both recorded in TO_BE_IMPLEMENTED §4a rather than
+guessed at:
+
+- **`HknpSystem` holds mass / inertia / damping as scalars**, read from array
+  element 0. That was fine when a system meant one body; a ragdoll has 39, so
+  every decompiled bone currently gets bone 0's mass. Needs per-body fields.
+- **`hknpRagdollData +0x50` holds 38 entries on a 39-bone ragdoll** — one per
+  non-root bone. That is the constraint binding array, and it is the lead for
+  decoding the joints (24 distinct constraint objects shared across 38 bindings).
+
 ## 2026-07-27o — Per-bone ragdoll collision: attribution recovered, Bone column, sync
 
 Follow-on to 27n, which measured that the ragdoll *is* the bone collision but
