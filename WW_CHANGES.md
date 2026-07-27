@@ -109,6 +109,49 @@ and confirm the deployed copy, or verify with `grep` against `release/shaders/`.
 Consequence worth keeping: the `drawline.glsl` NaN guard is **not** a safe no-op —
 it materially changed output — so it is reverted rather than kept as hardening.
 
+### Round 3 — RenderDoc cannot currently see the scene at all
+
+"Take a RenderDoc capture" has been the recommended next step since 07-17. Tried
+it via `rdc-cli` (headless, `E:\Tools\rdc-cli\rdc.cmd`). **It does not work on
+this app as-is, and that is why the recommendation never paid off.**
+
+Every capture, at every frame number tried (3, 7, 12), on both a static prop and
+a continuously-animating particle file, contains the same thing:
+
+```
+1 draw calls (0 indexed, 0 dispatches, 1 clears)
+EID  TYPE  TRIANGLES  INSTANCES
+44   Draw  2          1
+```
+
+Four events total, and that one draw binds a single `textureSampler`. That is
+**Qt compositing a textured fullscreen quad** — two triangles — not NifSkope's
+scene. The 3D work never appears in the capture.
+
+Cause: the viewport is a native child window with its own GL context (which is
+also why `ogl->grabFramebuffer()` is required instead of `skope->grab()`, and why
+the scene reports `drawFbo=0` — FBO 0 *of its own context*). RenderDoc's frame
+boundary follows the presenting surface, so it captures the compositor's swap and
+the scene's rendering falls outside the captured frame. Frame numbering does not
+correspond to `paintGL` calls either: my probe counted 9 `paintGL` frames during
+startup, and RenderDoc frames 3 and 7 both contained only the composite blit.
+
+Also learned: `rdc capture` cannot attach to the `WW_RENDER_SHOT` harness at all
+("failed to connect to target") — the harness renders and calls `qApp->quit()`
+faster than RenderDoc's target-control handshake completes. Capturing needs
+`--keep-alive` against a normally-launched instance.
+
+**So the next step is no longer "capture it in RenderDoc" — it is "make RenderDoc
+able to capture the viewport context".** Options, cheapest first: capture with
+`--trigger` plus `capture-trigger` timed while the viewport is actively
+redrawing; capture a long run and search for the frame whose draw count is more
+than one; or give the harness a hold-open env var so a capture can be triggered
+deliberately at a known point. Until one of those lands, `rdc mesh --stage gs-out`
+— the geometry-shader output that would settle whether the line primitives are
+emitted at all — is unreachable.
+
+Nothing in the tree changed for round 3; the two `.rdc` files are scratch.
+
 ## 2026-07-27h — Refraction was dead for every BGSM-backed FO4 mesh (fixed)
 
 Chasing "the refraction regression fixture guards nothing" found a real renderer
