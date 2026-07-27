@@ -217,10 +217,25 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		}
 	}
 
+	/* Seat EVERY body at its rest pose, not only the ones that carry a shape.
+	 *
+	 * A body with no shape used to keep x = (0,0,0) and pinned = false, so any
+	 * joint touching it was violated by the full distance to the origin, for ever
+	 * -- the solver corrected it every substep and pumped the energy straight into
+	 * the other end. It also has no geometry to simulate, so pin it.
+	 */
+	for ( int i = 0; i <= maxBody; i++ ) {
+		m_bodies[i].bodyId = i;
+		m_bodies[i].x = restPos.value( i );
+		m_bodies[i].q = restRot.value( i );
+		m_bodies[i].pinned = true;      // released below if a shape arrives
+	}
+
 	for ( const HknpShape & s : sys.shapes ) {
 		if ( s.bodyId < 0 || s.bodyId > maxBody )
 			continue;
 		SimBody & b = m_bodies[s.bodyId];
+		b.pinned = false;
 		b.bodyId = s.bodyId;
 		b.primType = s.primType;
 		b.capA = s.capA;
@@ -272,6 +287,58 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 	}
 
 	return true;
+}
+
+void RagdollSim::buildTestPendulum()
+{
+	m_bodies.clear();
+	m_joints.clear();
+
+	SimBody anchor;             // pinned, at the origin
+	anchor.x = Vector3( 0, 0, 0 );
+	anchor.q = Quat( 1, 0, 0, 0 );
+	anchor.pinned = true;
+	anchor.bodyId = 0;
+	m_bodies.append( anchor );
+
+	SimBody bob;                // 1 kg, unit inertia, hanging half a metre down
+	bob.x = Vector3( 0, 0, -0.5f );
+	bob.q = Quat( 1, 0, 0, 0 );
+	bob.invMass = 1.0f;
+	bob.invInertia = Vector3( 1, 1, 1 );
+	bob.bodyId = 1;
+	m_bodies.append( bob );
+
+	SimJoint j;
+	j.a = 1;                    // child
+	j.b = 0;                    // parent
+	j.pivotA = Vector3( 0, 0, 0.5f );   // top of the bob, in its own space
+	j.pivotB = Vector3( 0, 0, 0 );      // the anchor point
+	j.frameA = Quat( 1, 0, 0, 0 );
+	j.frameB = Quat( 1, 0, 0, 0 );
+	m_joints.append( j );
+
+	// nudge it sideways so it actually swings
+	m_bodies[1].v = Vector3( 1.0f, 0, 0 );
+}
+
+float RagdollSim::totalEnergy() const
+{
+	float e = 0.0f;
+	for ( const SimBody & b : m_bodies ) {
+		if ( b.pinned || b.invMass <= 0.0f )
+			continue;
+		const float m = 1.0f / b.invMass;
+		e += 0.5f * m * Vector3::dotproduct( b.v, b.v );
+		// rotational term, with the tensor back in body space
+		const Vector3 wl = qRot( qConj( b.q ), b.w );
+		for ( int k = 0; k < 3; k++ )
+			if ( b.invInertia[k] > 1.0e-9f )
+				e += 0.5f * ( wl[k] * wl[k] ) / b.invInertia[k];
+		// potential, measured against gravity
+		e -= m * Vector3::dotproduct( gravity, b.x );
+	}
+	return e;
 }
 
 void RagdollSim::setPinned( int body, bool pinned )

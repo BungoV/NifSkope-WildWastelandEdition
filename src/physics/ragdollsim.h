@@ -88,6 +88,18 @@ public:
 	//! Move a pinned body directly (the drag handle).
 	void setPosition( int body, const Vector3 & pos );
 
+	/*! Replace the contents with a two-body pendulum of known masses.
+	 *
+	 * A 38-joint ragdoll is the wrong place to debug a solver. This is the
+	 * smallest case that exercises the same code path -- one ball socket, one
+	 * free body, one pinned anchor -- and with damping off its total energy is a
+	 * conserved quantity, so any drift is the solver's own error and nothing else.
+	 */
+	void buildTestPendulum();
+
+	//! Total energy (kinetic + potential). Constant for the pendulum above.
+	float totalEnergy() const;
+
 	SimStats stats() const;
 
 	const QVector<SimBody> & bodies() const { return m_bodies; }

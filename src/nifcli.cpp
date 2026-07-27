@@ -366,8 +366,36 @@ int cmdPbrmResolve( const QString & file )
  * energy climbing instead of settling), the worst ball-socket separation (joint
  * drift) and the peak speed, and exits non-zero if anything diverged.
  */
-int cmdSimulate( const QString & file, int steps, int substeps, bool noLimits, bool verbose )
+int cmdSimulate( const QString & file, int steps, int substeps, bool noLimits, bool selfTest, bool verbose )
 {
+	if ( selfTest || file.isEmpty() ) {
+		// Two bodies, one joint, damping off: total energy is a conserved
+		// quantity, so any drift is the solver's own error and no decode is
+		// involved. A correct solver also drifts LESS as substeps rise.
+		out() << "solver self-test: two-body pendulum, damping off" << Qt::endl;
+		out() << QString( "  %1 %2 %3 %4" ).arg( "substeps", -9 ).arg( "E(0)", 12 )
+					.arg( "E(end)", 12 ).arg( "drift", 10 ) << Qt::endl;
+		int bad = 0;
+		for ( int ss : { 4, 8, 16, 32, 64 } ) {
+			RagdollSim sim;
+			sim.buildTestPendulum();
+			sim.damping = 0.0f;
+			const float e0 = sim.totalEnergy();
+			for ( int i = 0; i < 600; i++ )
+				sim.step( 1.0f / 60.0f, ss );
+			const float e1 = sim.totalEnergy();
+			const float drift = ( e0 != 0.0f ) ? ( e1 - e0 ) / std::fabs( e0 ) : 0.0f;
+			out() << QString( "  %1 %2 %3 %4" ).arg( ss, -9 ).arg( e0, 12, 'f', 5 )
+						.arg( e1, 12, 'f', 5 )
+						.arg( QString::number( drift * 100.0f, 'f', 2 ) + "%", 10 ) << Qt::endl;
+			if ( !std::isfinite( e1 ) || std::fabs( drift ) > 0.05f )
+				bad++;
+		}
+		out() << ( bad ? QString( "  FAIL: energy not conserved (%1 of 5 runs)" ).arg( bad )
+					   : QString( "  ok: energy conserved within 5%" ) ) << Qt::endl;
+		return bad ? 1 : 0;
+	}
+
 	NifModel nif;
 	if ( !loadNif( nif, file ) )
 		return 1;
@@ -1488,7 +1516,8 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 
-	if ( file.isEmpty() ) {
+	// the solver self-test builds its own bodies, so it needs no file
+	if ( file.isEmpty() && !( cmd == QLatin1String( "simulate" ) && selfTest ) ) {
 		err() << "error: '" << cmd << "' needs a <file>" << Qt::endl;
 		err().flush();
 		return 2;
@@ -1524,7 +1553,7 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "pose" ) )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )
-		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8, noLimits, verboseSim );
+		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8, noLimits, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
 		rc = cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )

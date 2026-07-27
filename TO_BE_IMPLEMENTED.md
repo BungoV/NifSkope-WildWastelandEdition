@@ -525,10 +525,32 @@ violation being re-corrected every substep, since a fixed positional correction
 turns into a velocity of `d/h`.
 
 Bisected with `--no-limits`: **ball sockets alone show it too** (31k → 776k), so
-the angular limits are not the cause and the fault is in the positional solve or
-the velocity write-back. A pure ball-socket tree is a solved problem, so this is a
-bug, not tuning. Worst joint separation sits near 0.5 m and never closes, so start
-by instrumenting a single two-body joint rather than the full 38-joint chain.
+the angular limits are not the cause. Worst joint separation sits near 0.5 m and
+never closes.
+
+`simulate --selftest` then isolated the core solver on a two-body pendulum with
+damping off, where total energy is analytically conserved. **The core solver is
+dissipative, not explosive**: it loses ~9%, and the loss *converges* as substeps
+rise (9.42 / 9.26 / 9.16 / 9.11 / 9.09% at 4 / 8 / 16 / 32 / 64). Dissipation is
+safe, and a loss that stops shrinking is a systematic error rather than
+discretisation — worth fixing, but it is **not** the ragdoll bug.
+
+So the fault is specific to the ragdoll build or to multi-joint chains, not to
+`applyPositional`. Seating every body at its rest pose (rather than only the ones
+carrying a shape) was a real bug and is fixed, but did not change the outcome —
+the brahmin's bodies are all shaped. What differs between the healthy pendulum
+and the sick ragdoll, in order of suspicion:
+
+1. **Tree topology.** The pendulum is one joint; the ragdoll has parents with
+   several children (five hang off the brahmin's pelvis). Sequential Gauss-Seidel
+   with one iteration per substep may be over-correcting a shared parent once per
+   child. Test by simulating a 3-body chain, then a 1-parent/2-child fork.
+2. **Inertia magnitudes.** `invInertia` reaches 51–66 on light bodies where the
+   pendulum uses 1. Test the pendulum with `invInertia` 60 to see if it turns
+   explosive.
+3. **The joint frames.** `--no-limits` still applies the ball socket at pivots
+   derived from the decoded frames; a wrong pivot would hold at rest yet fight
+   once moving.
 
 1. **Solver core, headless.** `src/physics/`: bodies (mass, diagonal inertia,
    pose, velocities), substepped XPBD integrator, ball-socket joints, and the
