@@ -1,5 +1,46 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27s — Starter cube: neutral grey, and two inside-out faces
+
+Reported against `bc4656a`: the startup cube looked wrong and was pure black.
+
+**Colour.** It now carries a neutral base map instead of nothing. `"#AARRGGBB"`
+is the renderer's own inline-colour texture syntax — the same one its built-in
+fallbacks use (`white` is `"#FFFFFFFF"` in `renderer.cpp`) — and a texture-set
+slot resolves through the same `bind()` those go through, so this needs no file
+on disk and cannot go missing. Slot 0 is `#FF808080`, slot 1 the flat normal
+`#FFFF8080`, ten slots to match vanilla.
+
+`0x80` is **linear** 0.5, which displays around `0xB8` and lands close to
+Blender's default material. `"#FF808080s"` (the renderer's sRGB suffix, as `gray`
+uses) would mean a perceptual 50% grey instead and reads noticeably darker — a
+one-character change if that is preferred.
+
+**Winding — a real bug, but not the one that was visible.** Each face winds its
+quad CCW in its own `(u, v)` plane, so `u × v` has to *be* the outward normal:
+
+| face | u | v | u × v | normal | |
+|---|---|---|---|---|---|
+| ±Z | X | Y | +Z | +Z | ok |
+| ±Y | X | Z | **−Y** | +Y | **inside out** |
+| ±X | Y | Z | +X | +X | ok |
+
+`X × Z = −Y`, so both ±Y faces were wound backwards. Fixed by swapping to
+`{ 2, 0 }` — `Z × X = +Y`. **The same bug is in `tlMakePrimitive()`**, so Add
+Primitive (Shift+A) has been building cubes with two inverted faces all along;
+fixed in both copies.
+
+Be clear about what this did *not* explain: `bsshape.cpp:419` disables
+`GL_CULL_FACE`, so nothing was ever culled and the viewport looked the same
+either way — confirmed by rendering a pre-fix file and a post-fix file from the
+same camera, both full squares, differing only in colour. It still matters for
+anything that trusts winding (export, normal recalculation), and it is wrong
+arithmetic regardless, but the black-blob appearance was the missing base map.
+
+Verified: geometry read back from the written file — 24 vertices at ±h, 12
+triangles, and the +Y face's first triangle now cross-products to `(0, +4, 0)`.
+Rendered before/after from a pinned camera: magenta-no-texture → neutral grey.
+
 ## 2026-07-27r — The 07-17 line defect is FIXED: a zero viewport in the uniform block
 
 Open since 07-17: the ground grid, origin axes and 3D cursor did not appear until

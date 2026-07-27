@@ -33,7 +33,11 @@ struct StarterVert
 void starterCube( float size, QVector<StarterVert> & verts, QVector<Triangle> & tris )
 {
 	const float h = size * 0.5f;
-	static const int axes[6][2] = { { 0, 1 }, { 0, 1 }, { 0, 2 }, { 0, 2 }, { 1, 2 }, { 1, 2 } };
+	// The +-Y pair is { 2, 0 }, not { 0, 2 }: each face winds CCW in its own
+	// (u, v) plane, so u x v must BE the outward normal. X x Z is -Y, which
+	// wound both Y faces inside out - they were backface-culled and the cube
+	// showed its own interior through the gap. Z x X is +Y.
+	static const int axes[6][2] = { { 0, 1 }, { 0, 1 }, { 2, 0 }, { 2, 0 }, { 1, 2 }, { 1, 2 } };
 	static const int naxis[6] = { 2, 2, 1, 1, 0, 0 };
 	static const float nsign[6] = { 1, -1, 1, -1, 1, -1 };
 	static const float cu[4] = { -1, 1, 1, -1 };
@@ -153,6 +157,27 @@ bool nifCreateStarterScene( NifModel * nif, float size, QString * error )
 	QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
 	QModelIndex iTextures = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
 	nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTextures ) );
+
+	/* A neutral mid-grey base map, Blender's default-material look.
+	 *
+	 * "#AARRGGBB" is the renderer's own inline-colour texture syntax - the same
+	 * one its built-in fallbacks use (`white` is "#FFFFFFFF" in renderer.cpp) -
+	 * and a texture-set slot resolves through the same bind() those go through.
+	 * So this needs no file on disk and cannot go missing.
+	 *
+	 * Slot 0 is diffuse and slot 1 is the normal map; "#FFFF8080" is the flat
+	 * normal the renderer itself defaults to. Ten slots to match vanilla.
+	 *
+	 * 0x80 here is LINEAR 0.5, which displays around 0xB8 and lands close to
+	 * Blender's default material. Append the renderer's sRGB suffix -
+	 * "#FF808080s", as `gray` in renderer.cpp does - to mean a perceptual 50%
+	 * grey instead, which reads noticeably darker.
+	 */
+	nif->set<uint>( iTextures, "Num Textures", 10 );
+	nif->updateArraySize( iTextures, "Textures" );
+	QModelIndex iTexArray = nif->getIndex( iTextures, "Textures" );
+	nif->set<QString>( nif->getIndex( iTexArray, 0 ), QStringLiteral( "#FF808080" ) );
+	nif->set<QString>( nif->getIndex( iTexArray, 1 ), QStringLiteral( "#FFFF8080" ) );
 	nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
 
 	addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );

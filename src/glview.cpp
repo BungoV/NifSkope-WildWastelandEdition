@@ -14521,7 +14521,11 @@ static void tlMakePrimitive( int kind, float size, int segs,
 		quad( 0, 1, 2, 3 );
 	} else if ( kind == 1 ) {
 		// cube: per-face verts for hard normals
-		static const int axes[6][2] = { { 0, 1 }, { 0, 1 }, { 0, 2 }, { 0, 2 }, { 1, 2 }, { 1, 2 } };
+		// The +-Y pair is { 2, 0 }, not { 0, 2 }: each face winds CCW in its own
+		// (u, v) plane, so u x v must BE the outward normal. X x Z is -Y, which
+		// wound both Y faces inside out - they were backface-culled and the cube
+		// showed its own interior through the gap. Z x X is +Y.
+		static const int axes[6][2] = { { 0, 1 }, { 0, 1 }, { 2, 0 }, { 2, 0 }, { 1, 2 }, { 1, 2 } };
 		static const int naxis[6] = { 2, 2, 1, 1, 0, 0 };
 		static const float nsign[6] = { 1, -1, 1, -1, 1, -1 };
 		for ( int f = 0; f < 6; f++ ) {
