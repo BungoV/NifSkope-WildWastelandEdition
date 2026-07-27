@@ -482,6 +482,78 @@ them and everything is ~70x wrong. And unlike ragdolls, the cloth `hkaSkeleton`
 **keeps its bone names** — all 277 of them — so cloth data is self-describing
 where ragdoll data is not.
 
+### 4c. Collision simulation in the viewport — NEW 07-28f, agreed with bungo
+
+The goal, in bungo's words: preview ragdolls and props colliding properly; click a
+bone, hold it and drag to move the ragdoll around by that bone; props the same but
+without bones; and fling objects at static collision to test it.
+
+**Backend: our own solver, decided 07-28.** Bullet 3.25 is in MSYS2 and was
+offered, but `btConeTwistConstraint` is an *approximation* of Havok's twist+cone.
+Since 07-28a decoded Havok's exact limits, a purpose-built solver matches in-game
+behaviour more closely than Bullet would, and keeps the repo dependency-free in
+line with the vendor-under-`lib/` convention.
+
+Method: **XPBD** (extended position-based dynamics, Müller et al., substepped)
+rather than sequential impulses. It is markedly more stable for stiff ragdoll
+joints — blow-up and jitter are the usual failure modes of the alternative — and
+dragging falls out naturally, since moving a body and letting the solver resolve
+is exactly what the formulation does. Constraint compliance also maps cleanly onto
+the `tau` factor already decoded on every limit.
+
+Phases, each testable before the next:
+
+1. **Solver core, headless.** `src/physics/`: bodies (mass, diagonal inertia,
+   pose, velocities), substepped XPBD integrator, ball-socket joints, and the
+   angular limits from `HknpConstraint` (twist / cone / plane / limited hinge).
+   Built straight from a decoded `HknpSystem` — no new file parsing. A `simulate`
+   CLI command runs it with **no GUI** and reports energy, joint drift and
+   penetration, so stability is measured rather than eyeballed. A ragdoll pinned
+   at the root must settle, not explode.
+2. **Collision.** Capsule–capsule, capsule–sphere, sphere–sphere analytically
+   (closest points between segments — exact, no GJK needed for these), plus a
+   ground plane and ragdoll self-collision. CLI asserts no penetration at rest.
+3. **Viewport.** Step in the render loop, draw the simulated pose, play/pause/reset.
+4. **Interaction.** Ray-pick a body under the cursor, drag it with a mouse spring;
+   fling spawned bodies at static collision.
+5. **Static mesh collision.** Capsule vs `hknpCompressedMeshShape` triangles via a
+   BVH over the already-decoded mesh.
+
+Simulation doubles as the encoder's acceptance test: a ragdoll that is compiled
+(4a item 6) and then falls over correctly is far stronger evidence than a byte
+diff, because it exercises masses, inertia, joint frames and limits together.
+
+**Note the units trap.** Ragdoll collision is in Havok metres, cloth in game units
+(~70x apart, see 4b) — the solver works in one space and must convert at the edges.
+
+### 4d. Compile every collision type — NEW 07-28f, agreed with bungo
+
+Goal: write back every collision type, not just compressed meshes. Cloth is
+explicitly deferred. Today `hknpEncodeCompressedMesh` is the *only* encoder and
+the only caller is `collisiontools.cpp`, so everything else is a one-way trip.
+
+Ordered by dependency:
+
+1. **`hknpShapeMassProperties` — the blocker.** 43 distinct patterns in 53
+   objects, so it is real per-shape data (`hkCompressedMassProperties`: centre of
+   mass, inertia and major-axis space as `hkHalf` vectors, then mass and volume).
+   Convex polytopes cannot be written without it. Decode this first.
+2. **Capsule and sphere** — templates already fully specified in 4a: fixed 432 and
+   128 byte objects, constant face/index tables, geometry a box hull around the
+   axis.
+3. **Convex polytope** — needs hull generation, and **qhull is already vendored**
+   under `lib/qhull`, so the machinery is in the repo.
+4. **Compounds** (static and dynamic) — instance arrays, decode side already works.
+5. **Ragdoll** — root layout, `hkaSkeleton` and constraint atom chains, all
+   specified in 4a. Watch the child/parent frame order and the `+0x80` bone-count
+   trap.
+6. **Round-trip validation** over the corpus, plus the simulation test above.
+
+Coverage is only measured for **actor skeletons** (39 files). Architecture,
+SetDressing, SCOL and Landscape are unmeasured, and that is where compressed
+meshes, hulls and compounds actually live — run the corpus stride scan before
+claiming any of this is complete.
+
 ## 5. Block Details — remaining typed editors (READY)
 
 Small, independent, display-layer only, no corruption risk. **Two of the four
