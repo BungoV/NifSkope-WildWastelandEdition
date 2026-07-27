@@ -1,5 +1,34 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27l — Harness runs no longer overwrite the user's dock layout (regression fix)
+
+**Reported:** NifSkope launches with Block List, Block Details, Header and NIF
+Browser all toggled off.
+
+**Cause, mine, from 07-27j.** The `WW_RENDER_SHOT` harness hides every dock so the
+framebuffer size depends only on `WW_RENDER_SIZE`. It then quits — and
+`NifSkope::saveUi()` runs on close, so the hidden-dock layout was written straight
+into `UI/Window State` and became the layout every subsequent normal launch
+restored. The harness change was right; persisting its side effects was not.
+
+**Fix:** `saveUi()` returns early when any `WW_*` environment variable is set. The
+guard is deliberately generic rather than a check for that one variable — this
+session alone made roughly thirty harness launches across a dozen harnesses,
+several of which hide docks, switch modes or resize the window, and none of them
+should leave a trace in the user's settings.
+
+Also cleared the already-polluted `UI/Window State` and `UI/Window Geometry` keys
+so the docks come back without the user having to restore them by hand.
+
+Verified both directions: a harness run no longer writes `Window State`, and a
+normal launch still does.
+
+**Lesson worth keeping:** a test harness that drives the real application shares
+its persisted settings. Anything a harness changes that is saved on exit —
+layout, camera, view mode, workspace, toggles — leaks into the user's next
+session. This is the second such leak today; the first was the render baselines
+moving when the persisted dock layout changed.
+
 ## 2026-07-27k — Blender-style armature rendering in the Skeleton Manager
 
 The headline ask: render the whole skeleton — bones with a visible direction,

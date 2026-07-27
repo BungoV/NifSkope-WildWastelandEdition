@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwskin.h"
 #include "skeletontools.h"
 
+#include <QProcessEnvironment>
 #include <QScopeGuard>
 #include "version.h"
 #include "gl/glscene.h"
@@ -6993,6 +6994,24 @@ void NifSkope::enableUi()
 
 void NifSkope::saveUi() const
 {
+	// Never persist the layout from a harness run.
+	//
+	// The WW_RENDER_SHOT harness hides every dock so the framebuffer size depends
+	// only on WW_RENDER_SIZE (07-27j). It then quit, saveUi() ran, and that
+	// hidden-dock layout BECAME the user's saved layout — NifSkope started with
+	// Block List, Block Details, Header and NIF Browser all gone. Reported
+	// 2026-07-27.
+	//
+	// The guard is deliberately generic rather than a test for that one variable:
+	// this session alone made roughly thirty harness launches across a dozen WW_*
+	// harnesses, several of which hide docks, switch modes or resize the window.
+	// None of them should ever leave a trace in the user's UI settings.
+	const QStringList envKeys = QProcessEnvironment::systemEnvironment().keys();
+	for ( const QString & key : envKeys ) {
+		if ( key.startsWith( QLatin1String( "WW_" ) ) )
+			return;
+	}
+
 	QSettings settings;
 	// TODO: saveState takes a version number which can be incremented between releases if necessary
 	settings.setValue( "Window State"_uip, saveState( 0x073 ) );
