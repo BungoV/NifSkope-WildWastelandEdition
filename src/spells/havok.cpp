@@ -22,6 +22,7 @@
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QMap>
+#include <QApplication>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
@@ -1578,6 +1579,10 @@ public:
 		return iSys.isValid() && nif->get<QByteArray>( iSys, "Binary Data" ).size() > 0x100;
 	}
 
+	//! asked about the ragdoll one-way trip already this cast (Decompile All
+	//! reuses one decoder instance across every system in the file)
+	bool ragdollWarned = false;
+
 	//! Write the decoded Havok material CRC into a shape's HavokMaterial field
 	static void setShapeMaterial( NifModel * nif, const QModelIndex & iShape, quint32 crc )
 	{
@@ -1716,6 +1721,29 @@ public:
 		QModelIndex iSys = systemBlock( nif, index );
 		if ( !iSys.isValid() )
 			return index;
+
+		// A ragdoll decompiles to its per-bone capsules, but nothing can put it
+		// back: the packfile also carries hknpRagdollData, the constraint graph
+		// (hkpRagdollConstraintData / hkpLimitedHingeConstraintData /
+		// hkpPositionConstraintMotor) and an hkaSkeleton, none of which NifSkope
+		// decodes. Say so once, before the destructive part, and default to
+		// Cancel. Once per cast so Decompile All asks a single time.
+		// (-no-gui builds a plain QCoreApplication, where QMessageBox is invalid;
+		// a headless caller named this spell explicitly, so there is nobody to ask)
+		if ( nif->isNiBlock( iSys, "bhkRagdollSystem" ) && !ragdollWarned
+			&& qobject_cast<QApplication *>( QCoreApplication::instance() ) ) {
+			ragdollWarned = true;
+			if ( QMessageBox::warning( nullptr, tr( "Decompile Compiled Collision" ),
+					tr( "This is a ragdoll (bhkRagdollSystem).\n\n"
+						"Its collision capsules decompile into editable per-bone bodies, but "
+						"NifSkope cannot compile a ragdoll back. The joint constraints, the "
+						"constraint motor and the ragdoll's own skeleton copy are not decoded, "
+						"so they would be lost on the way back.\n\n"
+						"Decompile anyway? Keep an unmodified copy of the file." ),
+					QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel )
+				!= QMessageBox::Yes )
+				return index;
+		}
 		HknpSystem sys = hknpDecode( nif->get<QByteArray>( iSys, "Binary Data" ) );
 		if ( !sys.valid ) {
 			QMessageBox::warning( nullptr, tr( "Decompile Compiled Collision" ),
@@ -1917,6 +1945,20 @@ public:
 	QString name() const override final { return Spell::tr( "Decompile All Compiled Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
+	/*! A block whose Binary Data is an hknp packfile.
+	 *
+	 * bhkRagdollSystem has to be here as well as bhkPhysicsSystem: a skeleton's
+	 * per-bone collision lives in a ragdoll system, and matching only the physics
+	 * class made this command silently do nothing on every skeleton file while
+	 * the single-block Decompile (which tests both, havok.cpp systemBlock)
+	 * worked. The two paths must agree on what "compiled collision" means.
+	 */
+	static bool isCompiledSystem( const NifModel * nif, const QModelIndex & iBlock )
+	{
+		return nif->isNiBlock( iBlock, "bhkPhysicsSystem" )
+			|| nif->isNiBlock( iBlock, "bhkRagdollSystem" );
+	}
+
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
 		// offered from the Spells menu, or when right-clicking any compiled
@@ -1924,9 +1966,8 @@ public:
 		if ( index.isValid() && !spDecodeCompiledCollision::systemBlock( nif, index ).isValid() )
 			return false;
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
-			QModelIndex ib = nif->getBlockIndex( b );
-			if ( nif->isNiBlock( ib, "bhkPhysicsSystem" )
-				&& nif->get<QByteArray>( ib, "Binary Data" ).size() > 0x100 )
+			if ( isCompiledSystem( nif, nif->getBlockIndex( b ) )
+				&& nif->get<QByteArray>( nif->getBlockIndex( b ), "Binary Data" ).size() > 0x100 )
 				return true;
 		}
 		return false;
@@ -1942,7 +1983,7 @@ public:
 				again = false;
 				for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 					QModelIndex ib = nif->getBlockIndex( b );
-					if ( nif->isNiBlock( ib, "bhkPhysicsSystem" ) && decoder.isApplicable( nif, ib ) ) {
+					if ( isCompiledSystem( nif, ib ) && decoder.isApplicable( nif, ib ) ) {
 						QModelIndex decoded = decoder.decodeRaw( nif, ib );
 						if ( !result.isValid() && decoded.isValid() ) result = decoded;
 						again = true;

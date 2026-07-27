@@ -1,5 +1,123 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-27o — Per-bone ragdoll collision: attribution recovered, Bone column, sync
+
+Follow-on to 27n, which measured that the ragdoll *is* the bone collision but
+recorded a caveat: the decode "collapsed 41 bhkNPCollisionObjects into 2, with a
+single bhkRigidBody owning a bhkListShape of 39 capsules", so per-bone body
+association looked flattened. **That caveat is now resolved — it was a decoder
+defect, not a property of the format.** Where 27n reports one bhkListShape / one
+bhkRigidBody / one bhkCollisionObject, the correct result is 39 of each.
+
+### The defect
+
+A `bhkRagdollSystem`'s packfile root is **`hknpRagdollData`**, not
+`hknpPhysicsSystemData`. `hknpDecode`'s body scan only understands the latter, so
+on every ragdoll it found **0 bodies** and left all 39 capsules at `bodyId = -1`.
+Three consequences, all measured on the vanilla brahmin skeleton:
+
+- the **viewport** drew all 39 capsules stacked on whichever bone holds Body ID 0
+  (`glnode.cpp` maps `bodyId -1` onto body 0) and nothing on the other 38
+- **Decompile** grouped by `bodyId`, so 39 bones collapsed into one body
+- the **Collision Manager** showed 39 identical rows, each listing all 39 shapes
+
+### Positional attribution
+
+The NIF still names a bone for every body id, and the shapes come out of the
+packfile in body order, so **shape index == body id**. Proven rather than assumed:
+pairing the brahmin's 15 mirrored bones (`LLeg1`/`RLeg1`, `LArm2`/`RArm2`, ...)
+through this mapping matches their capsule radius and length to **0.5%**, where
+the best wrong offset differs by **27% — 52x worse**. Six pairs are bit-identical.
+
+Gated two ways so it can never invent data:
+
+- only when the packfile yielded **no** bodies, so it cannot override real ids
+- only when **`unknownShapes` is empty**. A shape the decoder skipped is a hole in
+  the sequence and every later index is off by one — binding capsules to the wrong
+  bones is worse than leaving them unbound, because wrong looks right.
+
+`HknpSystem::positionalBodies` tells callers the ids are an inference.
+
+Swept all 35 vanilla FO4 actor skeletons that carry a ragdoll: **32 now attribute
+per-bone**. The 3 refused are `Deathclaw` (28 objects, 27 shapes — drops an
+`hknpSphereShape`) and `Robot/SkeletonRef` + `Robot/skeletonSentryBodyPart`. Five
+more (`Turret` 3 objects / 6 shapes, `Vertibird` 11/13, `LibertyPrime` 12/14,
+`RadStag` 31/33, `MirelurkQueen` 59/60) have bodies that no collision object names
+— already a documented case on the physics path — and every object there still
+resolves to exactly one shape.
+
+End-to-end check: decompiling the brahmin ragdoll now yields **39
+bhkCapsuleShape + 39 bhkRigidBody + 39 bhkCollisionObject**, and the capsule radii
+on the first six (0.2529 / 0.0460 / 0.3556 / 0.1241 / 0.2097 / 0.1241) match
+shapes 0-5 — Pelvis, Tail1, SPINE2, RLeg1, Sack, LLeg1 — each on its own node.
+Also swept 72 SetDressing/Architecture meshes with compiled collision: all 72
+still attribute from the packfile body array, so the physics path is untouched.
+
+### There is still no ragdoll encoder, and that is not an encoder task
+
+`hknpEncodeCompressedMesh` writes one body holding one compressed mesh. Emitting a
+ragdoll needs five classes NifSkope does not decode at all. From the brahmin's
+53,920-byte packfile (`tools/hkparse.py` on `collision --extract`):
+
+| class | count | decoded |
+|---|---|---|
+| `hknpRagdollData` | 1 | no — the root, and why no bodies decoded |
+| `hknpCapsuleShape` | 39 | yes |
+| `hkpRagdollConstraintData` | ~20 | no — the joints |
+| `hkpLimitedHingeConstraintData` | ~4 | no — the joints |
+| `hkpPositionConstraintMotor` | 1 | no |
+| `hkaSkeleton` | 1 | no — the ragdoll's own skeleton copy |
+
+An encoder cannot be validated before those decode, because the only usable test
+is `decode(encode(decode(x))) == decode(x)`. Writing one now would emit a file
+that loads with no joints and no ragdoll skeleton. So: **decode first**.
+
+Meanwhile two live one-way trips are now guarded, both default-Cancel:
+
+- **Decompile** a `bhkRagdollSystem` names what will not come back. Once per cast,
+  so Decompile All asks a single time. Skipped headless (`-no-gui` builds a plain
+  `QCoreApplication`, where `QMessageBox` is invalid).
+- **Compile Selected** wrote a single static body as a compressed mesh in a
+  `bhkPhysicsSystem` unconditionally. On a bone that triangulates the capsule and
+  cannot restore the ragdoll; it now says so first.
+
+### Collision Manager
+
+- **Bone column.** Two sources, because the file kinds answer differently: a
+  skinned mesh has a skin, so `skeletonAnalyse()` gives `deforming (N v)` or
+  `unused bone`; a `skeleton.nif` has no skin at all — every node would read "not
+  a bone" — but a `bhkRagdollSystem` existing *is* the statement that these bodies
+  are bone collision, so it reads `ragdoll bone`. Logical column 6 moved beside
+  Node with `moveSection`, which left the 42 literal column indices in this file
+  alone. The State cell now distinguishes `RAGDOLL` from `COMPILED`.
+- **Selection sync with the Skeleton Manager.** Both docks already pushed through
+  `NifSkope::select()`, so the current block is the bus and no direct coupling was
+  needed — the missing half was listening. Each side maps the incoming block into
+  its own terms: the Collision Manager matches a node to the row that owns it, the
+  Skeleton Manager follows a `bhkNPCollisionObject` to its `Target` bone. Both
+  guard the echo.
+- **One decode per packfile.** `addCompiled` called `hknpDecode` per collision
+  object, so a skeleton decoded its 54 kB ragdoll **41 times** to build 41 rows.
+  Now `hknpDecodeCached`, keyed on the data.
+
+### Decompile All accepted only `bhkPhysicsSystem`
+
+So it silently did nothing on every skeleton file, while the single-block
+Decompile (which tests both classes) worked. Both paths now agree via
+`isCompiledSystem()`.
+
+### New: `collision` CLI command
+
+```
+collision <file>                        node -> body -> system bindings, and what
+                                        the hknp decode found in each packfile
+collision <file> --extract -b N -o F    write a system's Binary Data verbatim
+```
+
+The per-shape body id is the column that matters; `--extract` is what lets
+`tools/hkparse.py` read a vanilla packfile without a NIF parser in Python. Every
+measurement above came from it.
+
 ## 2026-07-27n - Bone collision: viewing and editing already work (investigation, no code)
 
 Goal: edit bone collision in the Collision Manager. Measured what already exists

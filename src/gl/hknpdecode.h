@@ -97,6 +97,15 @@ struct HknpSystem
 	float maxAngVelocity = 31.57f;      //!< dyn_motion +0x14
 	float linDamping = 0.1f;            //!< dyn_motion +0x18
 	float angDamping = 0.05f;           //!< dyn_motion +0x1C
+	/*! Shape body ids were assigned POSITIONALLY (shape index = body id)
+	 * because the packfile carried no decodable body array.
+	 *
+	 * True for bhkRagdollSystem, whose root is hknpRagdollData rather than
+	 * hknpPhysicsSystemData. The mapping is sound but it is an inference, so a
+	 * caller that knows how many collision objects reference the system should
+	 * check that count against shapes.size() before relying on it.
+	 */
+	bool positionalBodies = false;
 	//! class names present but not decoded
 	QStringList unknownShapes;
 	bool valid = false;

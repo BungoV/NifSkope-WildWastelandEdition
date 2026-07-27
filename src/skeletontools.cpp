@@ -986,9 +986,26 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 
 	if ( skope ) {
 		QObject::connect( skope, &NifSkope::currentNifIndexChanged, panel,
-			[=]( const QModelIndex & ) mutable {
+			[=]( const QModelIndex & index ) mutable {
 				if ( *syncing )
 					return;
+				// Selecting a collision body in the Collision Manager selects its
+				// bhkNPCollisionObject, which is not a bone and would leave this
+				// tree pointing at nothing. Follow it to the node it targets - the
+				// bone whose collision it is - so the two docks track each other.
+				NifModel * model = skope->getNifModel();
+				if ( model ) {
+					const QModelIndex iBlock = model->getBlockIndex( index );
+					if ( model->blockInherits( iBlock, "bhkNiCollisionObject" )
+						|| model->blockInherits( iBlock, "bhkNPCollisionObject" ) ) {
+						const int target = model->getLink( iBlock, "Target" );
+						if ( model->isValidBlockNumber( target ) ) {
+							*syncing = true;
+							skope->select( model->getBlockIndex( target ) );
+							*syncing = false;
+						}
+					}
+				}
 				refresh();
 			} );
 	}

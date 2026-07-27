@@ -17,6 +17,7 @@ See the LICENSE.md file for the full license text.
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
 #include "skeletontools.h"
+#include "gl/hknpdecode.h"
 
 #include <cmath>
 #include "spells/animationsetup.h"
@@ -24,6 +25,7 @@ See the LICENSE.md file for the full license text.
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QSettings>
 #include <QTextStream>
@@ -342,6 +344,132 @@ int cmdPbrmResolve( const QString & file )
  * writes nothing, so the plan's `--prune-unused` is deliberately absent until
  * phase 2 lands together with its bone-index remap tests.
  */
+/*! Collision inventory, from the same decode the Collision Manager reads.
+ *
+ * Prints the binding chain that matters for compiled collision: node ->
+ * bhkNPCollisionObject -> "Body ID" -> system, then what hknpDecode found in
+ * each system (bodies, shapes, and which body each shape says it belongs to).
+ *
+ * The per-shape body id is the interesting column. A skeleton's ragdoll has one
+ * collision object per bone, so if the shapes come back with distinct body ids
+ * the decode preserves per-bone attribution; if they all come back -1 the
+ * shapes survive but their bone association does not, and anything presenting
+ * them as *bone* collision has to rebuild it some other way.
+ */
+int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	if ( extractBlock >= 0 ) {
+		const QModelIndex iSys = nif.getBlockIndex( extractBlock );
+		const QByteArray bytes = nif.get<QByteArray>( iSys, "Binary Data" );
+		if ( bytes.isEmpty() ) {
+			err() << "error: block " << extractBlock << " has no Binary Data" << Qt::endl;
+			return 1;
+		}
+		if ( outFile.isEmpty() ) {
+			err() << "error: --extract writes; pass -o <out.bin>" << Qt::endl;
+			return 2;
+		}
+		QFile f( outFile );
+		if ( !f.open( QIODevice::WriteOnly ) ) {
+			err() << "error: cannot write " << outFile << Qt::endl;
+			return 1;
+		}
+		f.write( bytes );
+		out() << "wrote " << bytes.size() << " bytes to " << outFile << Qt::endl;
+		return 0;
+	}
+
+	// node bindings, gathered per system so the report groups by packfile
+	QMap<int, QList<QPair<quint32, int>>> refs;   // system -> [(body id, node)]
+	int editable = 0;
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex i = nif.getBlockIndex( b );
+		if ( nif.blockInherits( i, "bhkNPCollisionObject" ) ) {
+			const int target = nif.getLink( i, "Target" );
+			refs[nif.getLink( i, "Data" )].append(
+				{ nif.get<quint32>( i, "Body ID" ),
+				  nif.isValidBlockNumber( target ) ? target : nif.getParent( b ) } );
+		} else if ( nif.blockInherits( i, "bhkCollisionObject" ) ) {
+			editable++;
+		}
+	}
+
+	out() << "file      " << file << Qt::endl;
+	out() << "collision " << refs.size() << " compiled system(s), "
+		  << editable << " editable object(s)" << Qt::endl;
+
+	for ( auto it = refs.constBegin(); it != refs.constEnd(); ++it ) {
+		const QModelIndex iSys = nif.getBlockIndex( it.key() );
+		const QByteArray bytes = nif.get<QByteArray>( iSys, "Binary Data" );
+		const HknpSystem sys = hknpDecode( bytes );
+		out() << Qt::endl
+			  << "system    " << blockLabel( &nif, it.key() ) << "  "
+			  << bytes.size() << " bytes" << Qt::endl;
+		out() << "  objects referencing it   " << it.value().size() << Qt::endl;
+		out() << "  decoded                  " << ( sys.valid ? "ok" : qPrintable( sys.error ) )
+			  << ", " << sys.shapes.size() << " shape(s), "
+			  << sys.bodyPhys.size() << " body/bodies, "
+			  << ( sys.dynamic ? "dynamic" : "static" ) << Qt::endl;
+		if ( !sys.unknownShapes.isEmpty() )
+			out() << "  not decoded              " << sys.unknownShapes.join( QStringLiteral( ", " ) )
+				  << Qt::endl;
+
+		// how many DISTINCT body ids the shapes carry: that is exactly how many
+		// rigid bodies a decompile would produce
+		QSet<int> shapeBodies;
+		int unattributed = 0;
+		for ( const HknpShape & shp : sys.shapes ) {
+			if ( shp.bodyId < 0 )
+				unattributed++;
+			else
+				shapeBodies.insert( shp.bodyId );
+		}
+		out() << "  attribution              "
+			  << ( shapeBodies.isEmpty() ? "none"
+				 : sys.positionalBodies ? "positional (shape index = body id, inferred)"
+				 : "from the packfile body array" ) << Qt::endl;
+		out() << "  shapes attributed to     " << shapeBodies.size() << " distinct body/bodies"
+			  << ( unattributed ? QString( ", %1 unattributed" ).arg( unattributed ) : QString() )
+			  << Qt::endl;
+
+		out() << QString( "  %1 %2 %3 %4" ).arg( "body", -6 ).arg( "node", -34 )
+					.arg( "layer", -6 ).arg( "shapes" ) << Qt::endl;
+		for ( const auto & ref : it.value() ) {
+			int mine = 0;
+			for ( const HknpShape & shp : sys.shapes ) {
+				if ( shp.bodyId >= 0 ? quint32( shp.bodyId ) == ref.first : ref.first == 0 )
+					mine++;
+			}
+			const HknpBodyPhys phys = int( ref.first ) < sys.bodyPhys.size()
+									? sys.bodyPhys.at( int( ref.first ) ) : HknpBodyPhys();
+			out() << QString( "  %1 %2 %3 %4" )
+						.arg( ref.first, -6 )
+						.arg( nif.get<QString>( nif.getBlockIndex( ref.second ), "Name" ), -34 )
+						.arg( phys.layer, -6 ).arg( mine )
+				  << Qt::endl;
+		}
+		out() << QString( "  %1 %2 %3 %4" ).arg( "shape", -6 ).arg( "class", -34 )
+					.arg( "body", -6 ).arg( "geometry" ) << Qt::endl;
+		for ( int i = 0; i < sys.shapes.size(); i++ ) {
+			const HknpShape & shp = sys.shapes.at( i );
+			QString geom = QString( "%1 v / %2 t" ).arg( shp.verts.size() ).arg( shp.tris.size() );
+			if ( shp.primType == 1 )
+				geom = QString( "sphere r %1" ).arg( shp.primRadius );
+			else if ( shp.primType == 2 )
+				geom = QString( "capsule r %1  len %2" ).arg( shp.primRadius )
+						.arg( ( shp.capB - shp.capA ).length() );
+			out() << QString( "  %1 %2 %3 %4" )
+						.arg( i, -6 ).arg( shp.className, -34 ).arg( shp.bodyId, -6 ).arg( geom )
+				  << Qt::endl;
+		}
+	}
+	return 0;
+}
+
 int cmdSkeleton( const QString & file, bool validateOnly )
 {
 	NifModel nif;
@@ -1057,6 +1185,11 @@ int usage()
 		  << "  skeleton <file>                         skeleton tree, which nodes are\n"
 		  << "                                          bones, and per-bone influence\n"
 		  << "  skeleton <file> --validate              findings only; exit 1 if any fire\n"
+		  << "  collision <file>                        collision inventory: node -> body ->\n"
+		  << "                                          system bindings, and what the hknp\n"
+		  << "                                          decode found in each packfile\n"
+		  << "  collision <file> --extract -b N -o F.bin\n"
+		  << "                                          write a system's Binary Data verbatim\n"
 		  << "  pose <file> --list                      bones and existing poses\n"
 		  << "  pose <file> --save NAME -o OUT          capture the current bone\n"
 		  << "                                          transforms as a pose\n"
@@ -1113,6 +1246,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool showAll = false, newSequence = false, standalone = false, listOnly = false;
 	bool validateOnly = false;
 	bool selfTest = false;
+	bool extract = false;
 	for ( int i = 0; i < a.size(); i++ ) {
 		const QString & t = a.at( i );
 		auto next = [&]() -> QString { return ( i + 1 < a.size() ) ? a.at( ++i ) : QString(); };
@@ -1134,6 +1268,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--list" ) ) listOnly = true;
 		else if ( t == QLatin1String( "--validate" ) ) validateOnly = true;
 		else if ( t == QLatin1String( "--selftest" ) ) selfTest = true;
+		else if ( t == QLatin1String( "--extract" ) ) extract = true;
 		else if ( t == QLatin1String( "--add" ) ) adds << QDir::current().filePath( next() );
 		else if ( t == QLatin1String( "--no-dedupe" ) ) noDedupe = true;
 		else if ( t == QLatin1String( "--save" ) ) saveName = next();
@@ -1195,6 +1330,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdMerge( file, adds, noDedupe, outFile );
 	else if ( cmd == QLatin1String( "pose" ) )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
+	else if ( cmd == QLatin1String( "collision" ) )
+		rc = cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
 		rc = selfTest ? cmdSkeletonSelfTest( file ) : cmdSkeleton( file, validateOnly );
 	else if ( cmd == QLatin1String( "anim-setup" ) )

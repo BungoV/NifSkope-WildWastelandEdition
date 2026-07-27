@@ -658,6 +658,40 @@ HknpSystem hknpDecode( const QByteArray & data )
 		}
 	}
 
+	/* Positional body attribution.
+	 *
+	 * A ragdoll packfile has no hknpPhysicsSystemData, so the cinfo scan above
+	 * found no bodies and every shape is still unattributed - which is what
+	 * collapsed a skeleton's per-bone collision into one anonymous list shape and
+	 * made the viewport stack every capsule on one bone. The shapes come out in
+	 * body order, so shape index IS the body id.
+	 *
+	 * Measured on the vanilla brahmin skeleton (39 bones, 39 capsules): pairing
+	 * the 15 mirrored bones (LLeg1/RLeg1, LArm2/RArm2, ...) through this mapping
+	 * matches their capsule radius and length to 0.5%, while the best wrong
+	 * offset differs by 27% - 52x worse. Six of the pairs are bit-identical.
+	 *
+	 * Only fires when the packfile gave us nothing, so it cannot override real
+	 * decoded ids; positionalBodies tells callers the ids are an inference.
+	 *
+	 * Requires unknownShapes to be EMPTY. A shape the decoder skipped is a hole in
+	 * the sequence and every index after it is off by one, which would bind
+	 * capsules to the wrong bones - wrong that looks right. Three vanilla
+	 * skeletons are in that state (Deathclaw drops an hknpSphereShape; Robot and
+	 * skeletonSentryBodyPart drop several), and they stay unattributed, exactly as
+	 * before, until those classes decode.
+	 */
+	if ( sys.bodyPhys.isEmpty() && !sys.shapes.isEmpty() && sys.unknownShapes.isEmpty() ) {
+		bool anyAttributed = false;
+		for ( const HknpShape & shp : sys.shapes )
+			anyAttributed = anyAttributed || shp.bodyId >= 0;
+		if ( !anyAttributed ) {
+			for ( qsizetype i = 0; i < sys.shapes.size(); i++ )
+				sys.shapes[i].bodyId = int( i );
+			sys.positionalBodies = true;
+		}
+	}
+
 	sys.valid = !sys.shapes.isEmpty();
 	if ( !sys.valid && sys.error.isEmpty() )
 		sys.error = QStringLiteral( "no decodable shapes" );

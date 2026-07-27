@@ -2,6 +2,7 @@
 #include "glview.h"
 #include "spellbook.h"
 #include "gl/hknpdecode.h"
+#include "skeletontools.h"
 #include "gl/hknpencode.h"
 #include "model/nifmodel.h"
 #include "data/nifvalue.h"
@@ -273,6 +274,9 @@ private:
 	int previewKind = 0; // 0 convex, 1 mesh/decimate
 	bool updating = false;
 	bool rebuildQueued = false;
+	//! set while this dock is the one driving the selection, so the echo back
+	//! through currentNifIndexChanged does not re-enter and fight the click
+	bool syncingSelection = false;
 	QSet<int> expandedObjects;
 
 	QModelIndex blockIndex( int block ) const
@@ -584,6 +588,45 @@ private:
 		return nif->getParent( nif->getBlockNumber( object ) );
 	}
 
+	/*! What this collision's owner node is, as a bone.
+	 *
+	 * Two independent sources, because the two file kinds answer it differently.
+	 * A skinned mesh has a real skin to consult, so skeletonAnalyse() says
+	 * whether the node deforms anything. A skeleton.nif has no skin at all -
+	 * every node would come back "not a bone" - but its collision hangs off a
+	 * bhkRagdollSystem, and that block existing IS the statement that these
+	 * bodies are the bone collision. Hence the fallback: no skin evidence plus a
+	 * ragdoll system means ragdoll bone.
+	 */
+	QString boneRole( const QHash<int, QString> & boneRoles, int node, int systemBlock ) const
+	{
+		const QString fromSkin = boneRoles.value( node );
+		if ( !fromSkin.isEmpty() )
+			return fromSkin;
+		if ( nif->isNiBlock( blockIndex( systemBlock ), "bhkRagdollSystem" ) )
+			return tr( "ragdoll bone" );
+		return QString();
+	}
+
+	/*! node block -> bone role, for every node some skin actually names.
+	 *
+	 * Built once per rebuild() and passed down: calling skeletonAnalyse() per row
+	 * would re-walk every vertex weight in the file once for each collision body.
+	 */
+	QHash<int, QString> collectBoneRoles() const
+	{
+		QHash<int, QString> roles;
+		const SkeletonReport report = skeletonAnalyse( nif );
+		for ( const SkeletonBoneInfo & b : report.bones ) {
+			if ( b.isNotABone() )
+				continue;
+			roles.insert( b.block, b.verts > 0
+				? tr( "deforming (%1 v)" ).arg( b.verts )
+				: tr( "unused bone" ) );
+		}
+		return roles;
+	}
+
 	QString nodeName( int block ) const
 	{
 		QModelIndex i = blockIndex( block );
@@ -622,6 +665,20 @@ private:
 		if ( shape.isConvex )
 			return tr( "Hull (%1 v)" ).arg( shape.verts.size() );
 		return tr( "Mesh (%1 tri)" ).arg( shape.tris.size() );
+	}
+
+	/*! Fill the Bone cell.
+	 *
+	 * Column 6 is the LOGICAL index; the header moves it next to Node visually
+	 * (see the tree setup). Appending rather than inserting keeps every other
+	 * column index in this file unchanged - there are 42 literal ones.
+	 */
+	void setBoneCell( QTreeWidgetItem * item, const QString & role ) const
+	{
+		if ( role.isEmpty() )
+			return;
+		item->setText( 6, role );
+		item->setForeground( 6, QColor( wwSkinColor( "accentText" ) ) );
 	}
 
 	void setItemRoles( QTreeWidgetItem * item, int objectBlock, int nodeBlock,
@@ -899,7 +956,8 @@ private:
 		totalTris += tris;
 	}
 
-	void addCompiled( int objectBlock, int & totalVerts, int & totalTris, int & totalBytes )
+	void addCompiled( int objectBlock, const QHash<int, QString> & boneRoles,
+		int & totalVerts, int & totalTris, int & totalBytes )
 	{
 		QModelIndex object = blockIndex( objectBlock );
 		int systemBlock = nif->getLink( object, "Data" );
@@ -907,7 +965,10 @@ private:
 		quint32 bodyId = nif->get<quint32>( object, "Body ID" );
 		int node = ownerNode( object );
 		QByteArray bytes = system.isValid() ? nif->get<QByteArray>( system, "Binary Data" ) : QByteArray();
-		HknpSystem sys = hknpDecode( bytes );
+		// A skeleton points every bone's collision object at ONE ragdoll system,
+		// so this ran the full packfile decode once per bone (41x on a brahmin).
+		// The cache is keyed on the data, so shared systems decode once.
+		const HknpSystem & sys = hknpDecodeCached( bytes );
 		quint32 mat = 0, collLayer = 1;
 		int nv = 0, nt = 0;
 		QString shape = sys.valid ? compiledShapeSummary( sys, bodyId, &mat, &nv, &nt ) : tr( "Invalid packfile" );
@@ -922,8 +983,10 @@ private:
 		item->setText( 3, materialText( mat ) );
 		item->setToolTip( 3, materialToolTip( mat ) );
 		item->setText( 4, tr( "%1 kg" ).arg( m, 0, 'f', 1 ) );
-		item->setText( 5, tr( "COMPILED" ) );
+		item->setText( 5, nif->isNiBlock( system, "bhkRagdollSystem" )
+			? tr( "RAGDOLL" ) : tr( "COMPILED" ) );
 		item->setForeground( 5, QColor( 226, 165, 61 ) );
+		setBoneCell( item, boneRole( boneRoles, node, systemBlock ) );
 		setItemRoles( item, objectBlock, node, systemBlock, -1, -1, bodyId, true );
 		item->setToolTip( 1, sys.valid ? QString() : sys.error );
 		if ( nt > 500 || bytes.size() > 128 * 1024 ) {
@@ -959,7 +1022,8 @@ private:
 		totalBytes += bytes.size();
 	}
 
-	void addEditable( int objectBlock, int & totalVerts, int & totalTris )
+	void addEditable( int objectBlock, const QHash<int, QString> & boneRoles,
+		int & totalVerts, int & totalTris )
 	{
 		QModelIndex object = blockIndex( objectBlock );
 		int bodyBlock = nif->getLink( object, "Body" );
@@ -984,6 +1048,7 @@ private:
 		item->setText( 4, tr( "%1 kg" ).arg( m, 0, 'f', 1 ) );
 		item->setText( 5, tr( "EDITABLE" ) );
 		item->setForeground( 5, QColor( 90, 169, 230 ) );
+		setBoneCell( item, boneRole( boneRoles, node, -1 ) );
 		if ( nt > 500 ) {
 			item->setIcon( 1, style()->standardIcon( QStyle::SP_MessageBoxWarning ) );
 			item->setForeground( 1, QColor( 232, 169, 63 ) );
@@ -1004,14 +1069,15 @@ private:
 		tree->clear();
 		int compiled = 0, editable = 0, totalVerts = 0, totalTris = 0, totalBytes = 0;
 		QSet<int> systems;
+		const QHash<int, QString> boneRoles = collectBoneRoles();
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			QModelIndex i = nif->getBlockIndex( b );
 			if ( nif->blockInherits( i, "bhkNPCollisionObject" ) ) {
 				systems.insert( nif->getLink( i, "Data" ) );
-				addCompiled( b, totalVerts, totalTris, totalBytes );
+				addCompiled( b, boneRoles, totalVerts, totalTris, totalBytes );
 				compiled++;
 			} else if ( nif->blockInherits( i, "bhkCollisionObject" ) ) {
-				addEditable( b, totalVerts, totalTris );
+				addEditable( b, boneRoles, totalVerts, totalTris );
 				editable++;
 			}
 		}
@@ -1034,6 +1100,41 @@ private:
 			: QStringLiteral( "QLabel { color:palette(mid); padding:3px; }" ) );
 		updating = false;
 		updateDetails();
+	}
+
+	/*! Highlight the row that speaks for this block, if any.
+	 *
+	 * Matches on the collision object, its shape, and its OWNER NODE - the last
+	 * is the one that makes bone -> collision work, since selecting a bone
+	 * selects a node block that no collision role otherwise mentions. A shape
+	 * child wins over its parent so that clicking a decoded shape block lands on
+	 * the shape row rather than the body row.
+	 */
+	void selectRowForBlock( int block )
+	{
+		if ( block < 0 )
+			return;
+		QTreeWidgetItem * match = nullptr;
+		for ( int r = 0; r < tree->topLevelItemCount() && !match; r++ ) {
+			QTreeWidgetItem * top = tree->topLevelItem( r );
+			for ( int c = 0; c < top->childCount(); c++ ) {
+				QTreeWidgetItem * child = top->child( c );
+				if ( child->data( 0, ShapeBlockRole ).toInt() == block ) { match = child; break; }
+			}
+			if ( match )
+				break;
+			if ( top->data( 0, ObjectBlockRole ).toInt() == block
+				|| top->data( 0, NodeBlockRole ).toInt() == block
+				|| top->data( 0, BodyBlockRole ).toInt() == block
+				|| top->data( 0, ShapeBlockRole ).toInt() == block )
+				match = top;
+		}
+		if ( !match || match == tree->currentItem() )
+			return;
+		syncingSelection = true;
+		tree->setCurrentItem( match );
+		tree->scrollToItem( match );
+		syncingSelection = false;
 	}
 
 	void queueRebuild()
@@ -1089,7 +1190,11 @@ private:
 			int systemBlock = item->data( 0, SystemBlockRole ).toInt();
 			quint32 bodyId = item->data( 0, BodyIdRole ).toUInt();
 			QModelIndex system = blockIndex( systemBlock );
-			HknpSystem sys = hknpDecode( nif->get<QByteArray>( system, "Binary Data" ) );
+			// name the QByteArray: the cached decode keys on the data, and passing a
+			// temporary trips -Wdangling-reference even though the returned
+			// reference points into the cache rather than into the argument
+			const QByteArray systemBytes = nif->get<QByteArray>( system, "Binary Data" );
+			const HknpSystem & sys = hknpDecodeCached( systemBytes );
 			HknpBodyPhys phys = int( bodyId ) < sys.bodyPhys.size() ? sys.bodyPhys.at( int( bodyId ) ) : HknpBodyPhys();
 			mass->setValue( sys.mass );
 			friction->setValue( phys.friction );
@@ -1447,6 +1552,23 @@ private:
 		if ( !body.isValid() || !node.isValid() ) {
 			QMessageBox::warning( this, tr( "Compile Collision" ), tr( "The selected collision has a broken body or target node." ) ); return;
 		}
+		// Compile writes ONE static body as a compressed mesh in a
+		// bhkPhysicsSystem. That is right for world collision and wrong for a
+		// bone: it triangulates the capsule and cannot restore a ragdoll (see the
+		// Decompile warning). Bone collision is exactly where this would be a
+		// one-way trip, so ask first and default to Cancel.
+		const QString role = boneRole( collectBoneRoles(), nodeBlock, -1 );
+		if ( !role.isEmpty()
+			&& QMessageBox::warning( this, tr( "Compile Collision" ),
+				tr( "%1 is a bone (%2).\n\n"
+					"Compile writes a single static body as a triangle mesh in a "
+					"bhkPhysicsSystem. It cannot write bone collision, and it cannot rebuild "
+					"a ragdoll - the joint constraints and the ragdoll skeleton are not "
+					"decoded, so a ragdoll this came from stays lost.\n\n"
+					"Compile anyway?" ).arg( nodeName( nodeBlock ), role ),
+				QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) != QMessageBox::Yes )
+			return;
+
 		CollisionMesh mesh; int rootShape = nif->getLink( body, "Shape" ); appendEditableMesh( rootShape, mesh );
 		HknpEncodeInput input; input.verts.reserve( mesh.verts.size() );
 		for ( const Vector3 & v : mesh.verts ) input.verts.append( v / 69.99125f );
@@ -1861,8 +1983,9 @@ private:
 		root->addWidget( inventoryHeader );
 
 		tree = new QTreeWidget( this );
-		tree->setColumnCount( 6 );
-		tree->setHeaderLabels( { tr( "Node" ), tr( "Shape" ), tr( "Layer" ), tr( "Material" ), tr( "Mass" ), tr( "State" ) } );
+		tree->setColumnCount( 7 );
+		tree->setHeaderLabels( { tr( "Node" ), tr( "Shape" ), tr( "Layer" ), tr( "Material" ),
+			tr( "Mass" ), tr( "State" ), tr( "Bone" ) } );
 		tree->setRootIsDecorated( true );
 		tree->setAlternatingRowColors( true );
 		tree->setSelectionMode( QAbstractItemView::SingleSelection );
@@ -1871,6 +1994,10 @@ private:
 		tree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
 		tree->header()->setSectionResizeMode( 2, QHeaderView::ResizeToContents );
 		tree->header()->setSectionResizeMode( 3, QHeaderView::Stretch );
+		tree->header()->setSectionResizeMode( 6, QHeaderView::ResizeToContents );
+		// Bone is logical column 6 but belongs beside Node; moving the visual
+		// section leaves the 42 literal column indices in this file alone.
+		tree->header()->moveSection( 6, 1 );
 		tree->setMinimumHeight( 150 );
 		tree->setStyleSheet( QStringLiteral(
 			"QTreeWidget::item:selected { background: rgb(74,122,176); color: rgb(255,157,0); }"
@@ -2189,7 +2316,9 @@ private:
 					int block = current->parent() && current->data( 0, ShapeBlockRole ).toInt() >= 0
 						? current->data( 0, ShapeBlockRole ).toInt()
 						: current->data( 0, ObjectBlockRole ).toInt();
+					syncingSelection = true;
 					w->select( blockIndex( block ) );
+					syncingSelection = false;
 				}
 			}
 		} );
@@ -2365,8 +2494,18 @@ private:
 		connect( dock, &QDockWidget::visibilityChanged, this, [this]( bool visible ) {
 			if ( visible ) rebuild(); else clearCollisionPreview();
 		} );
-		if ( auto * window = dynamic_cast<NifSkope *>( mw ) )
+		if ( auto * window = dynamic_cast<NifSkope *>( mw ) ) {
 			connect( window, &NifSkope::completeLoading, this, [this]() { clearCollisionPreview(); } );
+			// Selecting a bone anywhere - Skeleton Manager, block list, viewport -
+			// highlights that bone's collision body here. The bone is the node the
+			// collision object targets, which is already on every row.
+			connect( window, &NifSkope::currentNifIndexChanged, this,
+				[this]( const QModelIndex & index ) {
+					if ( syncingSelection || updating || !dock->isVisible() || !nif )
+						return;
+					selectRowForBlock( nif->getBlockNumber( nif->getBlockIndex( index ) ) );
+				} );
+		}
 	}
 };
 

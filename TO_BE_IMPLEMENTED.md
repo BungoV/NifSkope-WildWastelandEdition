@@ -258,6 +258,38 @@ and single-section output stays byte-identical to the validated writer.
 - `hknpBSMaterialProperties` beyond the single-material table — open.
 - The shipped multi-section encoder still needs an **in-game walk test**.
 
+### 4a. Ragdoll (bone collision) — DECODE FIRST, then the encoder — NEW 07-27o
+
+Viewing and editing per-bone collision **works** as of 07-27o: 32 of the 35
+vanilla FO4 actor ragdolls attribute their capsules per bone, Decompile yields one
+`bhkRigidBody` + `bhkCapsuleShape` per bone, and the Collision Manager lists them
+with a Bone column. What is missing is the way back.
+
+**This is not an encoder task.** A `bhkRagdollSystem` packfile carries five classes
+NifSkope does not decode, so there is nothing to round-trip an encoder against —
+`decode(encode(decode(x))) == decode(x)` is the only usable test. Do these in
+order; each is independently verifiable against a vanilla file:
+
+1. **`hknpRagdollData`** — the packfile root. Decoding its body array is what makes
+   attribution real rather than positional, and it removes the `unknownShapes`
+   gate. Reference: brahmin `Skeleton.nif` block 8, object `@0x0000`.
+2. **`hknpSphereShape` synthesis** — currently reported in `unknownShapes` (it is
+   *accepted* by `decodeLeaf` but `decodeConvexLike` returns no verts). Fixing it
+   alone unblocks Deathclaw; `Robot/SkeletonRef` and
+   `Robot/skeletonSentryBodyPart` drop more classes and need a look.
+3. **`hkpRagdollConstraintData` / `hkpLimitedHingeConstraintData` /
+   `hkpPositionConstraintMotor`** — the joints. Without these a re-emitted ragdoll
+   has no joints, which is worse than no button at all.
+4. **`hkaSkeleton`** — the ragdoll's own copy of the skeleton.
+5. Only then the encoder, validated by round-trip on all 32 attributing skeletons.
+
+Working tools for this: `NifSkope -no-gui collision <file>` prints the bindings and
+the decode result; `--extract -b N -o F.bin` writes the raw packfile for
+`tools/hkparse.py`, which already lists class names, hashes and the object table.
+
+Until 5 lands, Decompile and Compile both warn (default-Cancel) that the trip is
+one-way — do not remove those guards.
+
 Full feature spec is preserved in the appendix at the bottom of this file;
 validated packfile offsets and test assets live in
 `COLLISION_MANAGER_HANDOFF.md`.
