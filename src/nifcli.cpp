@@ -1056,6 +1056,15 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 			else if ( shp.primType == 2 )
 				geom = QString( "capsule r %1  len %2" ).arg( shp.primRadius )
 						.arg( ( shp.capB - shp.capA ).length() );
+			if ( shp.hasMassProps ) {
+				// the physical inertia, with Havok's 1.5 scale undone
+				const Vector3 mi = shp.massInertia();
+				geom += QString( "  vol %1 mass %2 com %3,%4,%5 I %6,%7,%8" )
+					.arg( shp.massVolume, 0, 'f', 6 ).arg( shp.massMass, 0, 'f', 6 )
+					.arg( shp.massCom[0], 0, 'f', 4 ).arg( shp.massCom[1], 0, 'f', 4 )
+					.arg( shp.massCom[2], 0, 'f', 4 )
+					.arg( mi[0], 0, 'g', 4 ).arg( mi[1], 0, 'g', 4 ).arg( mi[2], 0, 'g', 4 );
+			}
 			out() << QString( "  %1 %2 %3 %4" )
 						.arg( i, -6 ).arg( shp.className, -34 ).arg( shp.bodyId, -6 ).arg( geom )
 				  << Qt::endl;

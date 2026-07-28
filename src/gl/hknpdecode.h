@@ -27,6 +27,39 @@ struct HknpShape
 	//! convex only: face planes (nx, ny, nz, d)
 	QVector<Vector4> planes;
 	float convexRadius = 0.0f;
+
+	/*! hknpShapeMassProperties, reached via hkRefCountedProperties at shape+0x20.
+	 *
+	 * Only convex polytopes carry one; capsules and spheres have none at all (the
+	 * brahmin ragdoll, 39 capsules and spheres, has zero of these objects).
+	 *
+	 * The 0x30-byte object is 16 bytes of header then hkCompressedMassProperties:
+	 * a packed centre of mass at +0x10, a packed inertia diagonal at +0x18, an
+	 * 8-byte packed quaternion for the major-axis frame at +0x20, then float
+	 * volume at +0x28 and float mass at +0x2c.
+	 *
+	 * All of it is computed on the shape with its FACE PLANES PUSHED OUT by the
+	 * convex radius -- not on the rounded Minkowski sum of hull and sphere. For a
+	 * box that is exactly the box grown by 2r on each edge, and on the workshop
+	 * turret's 8 polytopes that reproduces the stored volume to 0.000% where the
+	 * Steiner formula for a properly rounded box is out by up to 1.1%. So Havok
+	 * treats the radius as an offset of the support planes, which is also how it
+	 * collides them.
+	 */
+	bool hasMassProps = false;
+	Vector3 massCom;            //!< centre of mass, shape space
+	/*! Inertia diagonal as stored, which is 1.5x the physical inertia.
+	 *
+	 * Measured exactly -- 8 shapes, 24 components, ratio 1.5000 throughout,
+	 * against the axis-aligned inertia of the expanded box at the stored mass. Why
+	 * Havok scales it is not established; that it does is not in doubt, and an
+	 * encoder only needs the factor. massInertia() returns the physical value.
+	 */
+	Vector3 massInertiaRaw;
+	float massVolume = 0.0f;
+	float massMass = 0.0f;      //!< equals the volume in every vanilla case (density 1)
+	//! the physical inertia diagonal, undoing Havok's 1.5 scale
+	Vector3 massInertia() const { return massInertiaRaw / 1.5f; }
 	bool isConvex = false;
 	//! Havok material CRC (u32 at shape+0x18; same value as the legacy
 	//! HavokMaterial enum). 0 = unknown.

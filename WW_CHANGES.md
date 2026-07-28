@@ -1,5 +1,52 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28q — hknpShapeMassProperties decoded (the 4d blocker)
+
+The object that gated the convex-polytope encoder. `simulate`/`collision` now
+report every shape's volume, mass, centre of mass and inertia.
+
+**Layout** (0x30 bytes: 16 of header, then `hkCompressedMassProperties`):
+
+| offset | field |
+|---|---|
+| +0x10 | packed centre of mass |
+| +0x18 | packed inertia diagonal |
+| +0x20 | packed quaternion, major-axis frame (one constant value in every file seen) |
+| +0x28 | float volume |
+| +0x2c | float mass |
+
+**`hkPackedVector3` is three int16 mantissas plus a shared power-of-two exponent**,
+the exponent held in the fourth int16 as `(E + 96) << 7` — low seven bits zero
+throughout. Each component is `i16 / 32768 * 2^E`. Proven by decoding the turret's
+centres of mass and checking them against the same quantity computed from the hull
+geometry: **8 of 8 to within 1e-5 m**. Reading that fourth slot as a half float is
+the obvious guess, gives the right *direction* and a scale wrong by 4x or 16x, and
+is exactly the sort of near-miss that reads as success.
+
+**Three facts an encoder needs, all measured:**
+
+- **Centre of mass is just the hull's centre of mass.** Exact on the turret's
+  boxes and within 0.0004 m on the alien's 252-vertex and 64-vertex hulls.
+- **Volume and inertia are computed with the face planes pushed out by the convex
+  radius**, not on the rounded Minkowski sum. For a box that is the box grown by
+  2r per edge, and it reproduces the stored volume to **0.000%** on all 8 turret
+  shapes; the Steiner formula for a properly rounded box is out by up to 1.1%.
+  Mass equals volume in every vanilla case, so density is 1.
+- **The stored inertia is 1.5x the physical inertia.** Exactly — 8 shapes, 24
+  components, ratio 1.5000 throughout, against the axis-aligned inertia of the
+  expanded box at the stored mass. Why Havok scales it is not established; that it
+  does is not in doubt, and `HknpShape::massInertia()` divides it back out.
+
+Only convex polytopes carry these. The brahmin's 39 capsules and spheres have
+**zero** such objects, which fits 07-28d's finding that a capsule is a fixed
+template.
+
+**Still open for a general encoder:** most vanilla polytopes are boxes (28 of 37
+in a 400-file sample) and those are solved outright. General hulls — the alien
+carries 252- and 64-vertex ones — need the plane-offset polytope built by halfspace
+intersection before their volume and inertia can be computed exactly. Their
+centres of mass already come out right.
+
 ## 2026-07-28p — Inverse inertia, named and encoded correctly
 
 Paying off a debt recorded in 07-28f, before the ragdoll encoder inherits it.

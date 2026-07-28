@@ -100,6 +100,25 @@ struct Reader
 	}
 };
 
+/*! hkPackedVector3: three int16 mantissas plus a shared power-of-two exponent.
+ *
+ * The exponent lives in the fourth int16 as (E + 96) << 7, and its low seven bits
+ * are zero in every vanilla object. Each component is then i16 / 32768 * 2^E.
+ *
+ * Established by decoding the workshop turret's centres of mass and checking them
+ * against the same quantity computed from the hull geometry: 8 of 8 agreed to
+ * within 1e-5 m. Reading the fourth slot as a half float -- the obvious guess --
+ * gives the right DIRECTION and a scale wrong by 4x or 16x, which is exactly the
+ * sort of near-miss that looks like success.
+ */
+static Vector3 packedVector3( Reader & r, qsizetype off )
+{
+	const int E = int( r.u16( off + 6 ) >> 7 ) - 96;
+	const float scale = std::ldexp( 1.0f, E ) / 32768.0f;
+	auto comp = [&]( qsizetype o ) { return float( qint16( r.u16( o ) ) ) * scale; };
+	return Vector3( comp( off ), comp( off + 2 ), comp( off + 4 ) );
+}
+
 //! Fan-triangulate a convex face loop into shape.tris
 static void addFaceFan( HknpShape & shape, const QVector<int> & loop )
 {
@@ -820,6 +839,21 @@ HknpSystem hknpDecode( const QByteArray & data )
 			|| cls == QLatin1String( "hknpSphereShape" )
 			|| cls == QLatin1String( "hknpCapsuleShape" ) ) {
 			decodeConvexLike( r, off, cls, out );
+			/* Mass properties hang off hkRefCountedProperties at shape+0x20,
+			 * which in turn points at the hknpShapeMassProperties at its +0x10 --
+			 * the same two-hop the material properties take.
+			 */
+			if ( qsizetype ref = global.value( off + 0x20, -1 ); ref >= 0 ) {
+				const qsizetype mp = global.value( ref + 0x10, -1 );
+				if ( mp >= 0 && objClass.value( mp )
+					== QLatin1String( "hknpShapeMassProperties" ) ) {
+					out.hasMassProps = true;
+					out.massCom = packedVector3( r, mp + 0x10 );
+					out.massInertiaRaw = packedVector3( r, mp + 0x18 );
+					out.massVolume = r.f32( mp + 0x28 );
+					out.massMass = r.f32( mp + 0x2c );
+				}
+			}
 			return !out.verts.isEmpty();
 		}
 		if ( cls == QLatin1String( "hknpCompressedMeshShape" ) ) {
