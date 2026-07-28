@@ -369,35 +369,60 @@ bool GLView::physicsMousePress( QMouseEvent * event )
 	Vector3 ro, rd;
 	mouseRayWorld( event->position(), ro, rd );
 	// a miss is not consumed, so clicking empty space still orbits the camera
-	return physicsPreview.grab( ro, rd );
+	return physicsPreview.press( ro, rd );
 }
 
 bool GLView::physicsMouseMove( QMouseEvent * event )
 {
-	if ( !physicsPreview.active() || !physicsPreview.grabbing() )
+	if ( !physicsPreview.active() )
 		return false;
 	Vector3 ro, rd;
 	mouseRayWorld( event->position(), ro, rd );
-	physicsPreview.dragTo( ro, rd );
-	return true;
+	return physicsPreview.move( ro, rd );
 }
 
 bool GLView::physicsMouseRelease( QMouseEvent * event )
 {
 	Q_UNUSED( event );
-	if ( !physicsPreview.active() || !physicsPreview.grabbing() )
+	if ( !physicsPreview.active() )
 		return false;
-	physicsPreview.release();
-	return true;
+	return physicsPreview.release();
 }
 
 bool GLView::physicsKeyPress( QKeyEvent * event )
 {
 	if ( !physicsPreview.active() )
 		return false;
+	/* 1..6 pick a tool, the way a paint program numbers its brushes, and the
+	 * rest are the playback controls. Deliberately no modifiers: in this mode the
+	 * hands are on the mouse and these have to be reachable one-handed.
+	 */
 	switch ( event->key() ) {
+	case Qt::Key_1: physicsPreview.setTool( PhysicsPreview::Tool::Drag );  return true;
+	case Qt::Key_2: physicsPreview.setTool( PhysicsPreview::Tool::Throw ); return true;
+	case Qt::Key_3: physicsPreview.setTool( PhysicsPreview::Tool::Shoot ); return true;
+	case Qt::Key_4: physicsPreview.setTool( PhysicsPreview::Tool::Pin );   return true;
+	case Qt::Key_5: physicsPreview.setTool( PhysicsPreview::Tool::Blast ); return true;
+	case Qt::Key_6: physicsPreview.setTool( PhysicsPreview::Tool::Wind );  return true;
 	case Qt::Key_Space:
 		physicsPreview.setPaused( !physicsPreview.paused() );
+		return true;
+	case Qt::Key_Period:
+		// single step, so a pop can be watched a frame at a time. Only meaningful
+		// while paused, and stepping a running sim would just be a stutter.
+		if ( physicsPreview.paused() ) {
+			physicsPreview.setPaused( false );
+			physicsPreview.step( 1.0f / 60.0f );
+			physicsPreview.setPaused( true );
+			setCollisionPreview( physicsPreview.soup() );
+			update();
+		}
+		return true;
+	case Qt::Key_F:
+		physicsPreview.freeze();
+		return true;
+	case Qt::Key_G:
+		physicsPreview.setGravityEnabled( !physicsPreview.gravityEnabled() );
 		return true;
 	case Qt::Key_R:
 		physicsPreview.reset();
@@ -3134,6 +3159,48 @@ void GLView::paintGL()
 		}
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 		QPainter painter( this );
+		/* Physics Sim HUD: the active tool, the state, and the solver's own health.
+		 *
+		 * Every number here is already computed by the step -- SimStats is filled
+		 * whether anyone reads it or not -- so the overlay costs a string format.
+		 * It is worth showing because "the ragdoll looks wrong" and "the solver is
+		 * diverging" look identical in a viewport until you can see maxSpeed.
+		 */
+		if ( physicsPreview.active() && physicsShowStats ) {
+			painter.setRenderHint( QPainter::Antialiasing, true );
+			QFont f = painter.font();
+			f.setPointSizeF( 8.5 );
+			painter.setFont( f );
+			const SimStats st = physicsPreview.stats();
+			QStringList lines;
+			lines << QStringLiteral( "%1%2%3" )
+				.arg( PhysicsPreview::toolName( physicsPreview.tool() ) )
+				.arg( physicsPreview.paused() ? QStringLiteral( "  [paused]" ) : QString() )
+				.arg( physicsPreview.timeScale() < 0.999f
+					? QStringLiteral( "  %1x" ).arg( double( physicsPreview.timeScale() ), 0, 'g', 2 )
+					: QString() );
+			lines << tr( "%1 bodies, %2 joints" ).arg( physicsPreview.bodyCount() )
+						.arg( physicsPreview.jointCount() );
+			lines << tr( "max speed %1 m/s" ).arg( double( st.maxSpeed ), 0, 'f', 2 );
+			lines << tr( "joint error %1 m" ).arg( double( st.maxJointError ), 0, 'f', 4 );
+			lines << tr( "%1 contacts, penetration %2 m" ).arg( st.contacts )
+						.arg( double( st.maxPenetration ), 0, 'f', 4 );
+			if ( !physicsPreview.gravityEnabled() )
+				lines << tr( "gravity off" );
+			if ( st.diverged )
+				lines << tr( "DIVERGED at body %1" ).arg( st.worstBody );
+			int y = 18;
+			for ( const QString & l : std::as_const( lines ) ) {
+				painter.setPen( QColor( 0, 0, 0, 200 ) );
+				painter.drawText( QPointF( 11, y + 1 ), l );
+				// the divergence line is the one that matters, so it is the one that
+				// is not the same colour as everything else
+				painter.setPen( ( st.diverged && l.startsWith( QLatin1String( "DIVERGED" ) ) )
+					? QColor( 255, 120, 110 ) : QColor( 210, 220, 240 ) );
+				painter.drawText( QPointF( 10, y ), l );
+				y += 14;
+			}
+		}
 		// Pose Mode bone name labels. With the Names toggle on, every bone is
 		// labelled; the hovered bone is ALWAYS labelled (a hover tooltip under
 		// the cursor) even when the toggle is off.

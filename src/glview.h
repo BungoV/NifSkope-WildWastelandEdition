@@ -194,6 +194,8 @@ public:
 	void physicsTick( float dt );
 	//! what the viewport is currently drawing as a collision preview
 	const QVector<Vector3> & collisionPreview() const { return collisionPreviewSoup; }
+	bool physicsStatsShown() const { return physicsShowStats; }
+	void setPhysicsStatsShown( bool on ) { physicsShowStats = on; update(); }
 	//! Blender-style mouse mapping: false = select with LMB and place the 3D
 	//! cursor/gizmo with RMB (default); true = swapped (2.7x right-click select).
 	//! Only the click roles swap; drags (orbit / zoom), the select gadgets and
@@ -457,6 +459,7 @@ private:
 	Scene * scene = nullptr;
 	QVector<Vector3> collisionPreviewSoup;
 	PhysicsPreview physicsPreview;
+	bool physicsShowStats = true;
 	//! forward a viewport event to the physics mode; true if it consumed it
 	bool physicsMousePress( QMouseEvent * event );
 	bool physicsMouseMove( QMouseEvent * event );

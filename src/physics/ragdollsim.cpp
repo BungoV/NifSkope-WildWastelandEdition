@@ -929,6 +929,51 @@ void RagdollSim::moveDrag( const Vector3 & target )
 	m_dragTarget = target;
 }
 
+void RagdollSim::applyImpulse( int body, const Vector3 & localPoint, const Vector3 & impulse )
+{
+	if ( body < 0 || body >= m_bodies.size() )
+		return;
+	SimBody & b = m_bodies[body];
+	if ( b.pinned || b.invMass <= 0.0f )
+		return;
+	b.v += impulse * b.invMass;
+	const Vector3 r = qRot( b.q, localPoint );
+	b.w += applyInvInertia( b, Vector3::crossproduct( r, impulse ) );
+}
+
+void RagdollSim::blast( const Vector3 & centre, float radius, float strength )
+{
+	if ( !( radius > 0.0f ) )
+		return;
+	for ( int i = 0; i < m_bodies.size(); i++ ) {
+		SimBody & b = m_bodies[i];
+		if ( b.pinned || b.invMass <= 0.0f )
+			continue;
+		Vector3 d = b.x - centre;
+		const float dist = d.length();
+		if ( dist >= radius )
+			continue;
+		// a body exactly at the centre has no direction to go; push it up rather
+		// than dividing by zero or leaving the one body nearest the blast untouched
+		const Vector3 dir = ( dist > 1.0e-6f ) ? d / dist : Vector3( 0.0f, 0.0f, 1.0f );
+		b.v += dir * ( strength * ( 1.0f - dist / radius ) * b.invMass );
+	}
+}
+
+void RagdollSim::setVelocity( int body, const Vector3 & v )
+{
+	if ( body >= 0 && body < m_bodies.size() )
+		m_bodies[body].v = v;
+}
+
+void RagdollSim::freeze()
+{
+	for ( SimBody & b : m_bodies ) {
+		b.v = Vector3();
+		b.w = Vector3();
+	}
+}
+
 void RagdollSim::clearDrag()
 {
 	m_dragBody = -1;
@@ -1218,6 +1263,8 @@ void RagdollSim::step( float dt, int substeps )
 			if ( b.pinned )
 				continue;
 			b.v += gravity * h;
+			if ( wind.length() > 0.0f )
+				b.v += wind * ( b.invMass * h );
 			// each body's own authored damping, plus whatever the caller added
 			b.v *= std::clamp( 1.0f - ( b.linDamping + damping ) * h, 0.0f, 1.0f );
 			b.w *= std::clamp( 1.0f - ( b.angDamping + damping ) * h, 0.0f, 1.0f );

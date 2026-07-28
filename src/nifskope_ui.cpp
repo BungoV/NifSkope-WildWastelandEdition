@@ -3607,6 +3607,216 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				QApplication::sendEvent( gl, &space );
 				check( !pv.paused(), QStringLiteral( "Space resumed it" ) );
 
+				/* Every tool, through the real event path.
+				 *
+				 * Each is checked by its EFFECT, not by whether the call returned
+				 * true: a tool that consumed the click and did nothing is exactly
+				 * the failure worth catching.
+				 */
+				/* Returns the body the PICKER lands on, not the one aimed at.
+				 *
+				 * A ray toward body b's centre often hits a different body first --
+				 * limbs overlap. Returning b meant the Pin test clicked one body and
+				 * then asserted about another, and reported a toggle that had genuinely
+				 * happened as a failure.
+				 */
+				auto aimAtSomething = [&]( QPointF & sp ) -> int {
+					for ( int b = 0; b < pv.sim().bodies().size(); b++ ) {
+						QPointF p;
+						if ( !gl->worldToScreen( pv.sim().toWorld( b, Vector3() ) * PhysicsPreview::SCALE, p ) )
+							continue;
+						Vector3 ro, rd;
+						gl->mouseRayWorld( p, ro, rd );
+						const SimPick hit = pv.sim().pick( ro / PhysicsPreview::SCALE, rd );
+						if ( hit.hit() ) {
+							sp = p;
+							return hit.body;
+						}
+					}
+					return -1;
+				};
+				auto clickAt = [&]( const QPointF & sp ) {
+					QMouseEvent press( QEvent::MouseButtonPress, sp, gl->mapToGlobal( sp ),
+						gl->selectMouseButton(), gl->selectMouseButton(), Qt::NoModifier );
+					QApplication::sendEvent( gl, &press );
+					QMouseEvent rel( QEvent::MouseButtonRelease, sp, gl->mapToGlobal( sp ),
+						gl->selectMouseButton(), Qt::NoButton, Qt::NoModifier );
+					QApplication::sendEvent( gl, &rel );
+				};
+
+				struct ToolCase { PhysicsPreview::Tool tool; const char * name; };
+				static const ToolCase cases[] = {
+					{ PhysicsPreview::Tool::Shoot, "Shoot" },
+					{ PhysicsPreview::Tool::Blast, "Blast" },
+				};
+				for ( const ToolCase & tc : cases ) {
+					pv.reset();
+					pv.freeze();
+					pv.setTool( tc.tool );
+					QPointF sp;
+					const int target = aimAtSomething( sp );
+					if ( target < 0 ) {
+						check( false, QStringLiteral( "%1: nothing to aim at" ).arg( tc.name ) );
+						continue;
+					}
+					const QVector<Vector3> before = pv.soup();
+					clickAt( sp );
+					// an impulse is velocity, so it only shows up after a step
+					for ( int k = 0; k < 6; k++ )
+						gl->physicsTick( 1.0f / 60.0f );
+					float moved = 0.0f;
+					const QVector<Vector3> after = pv.soup();
+					for ( int i = 0; i < std::min( before.size(), after.size() ); i++ )
+						moved = std::max( moved, ( before.at( i ) - after.at( i ) ).length() );
+					check( moved > 0.001f, QStringLiteral( "%1 moved it %2 game units" )
+						.arg( QLatin1String( tc.name ) ).arg( double( moved ), 0, 'f', 4 ) );
+				}
+
+				// Pin is not motion, so it is checked by the flag it sets
+				{
+					pv.reset();
+					pv.setTool( PhysicsPreview::Tool::Pin );
+					QPointF sp;
+					const int target = aimAtSomething( sp );
+					if ( target >= 0 ) {
+						/* Asserted as a TOGGLE, not as "becomes pinned". The first body
+						 * a ray finds is often the root, which build() has already
+						 * pinned, so clicking it correctly UNpins it -- and a test that
+						 * demanded `pinned == true` failed the tool for behaving right.
+						 */
+						const bool was = pv.sim().bodies().at( target ).pinned;
+						clickAt( sp );
+						check( pv.sim().bodies().at( target ).pinned != was,
+							QStringLiteral( "Pin toggled body %1 (%2 -> %3)" ).arg( target )
+								.arg( was ? QStringLiteral( "pinned" ) : QStringLiteral( "free" ) )
+								.arg( was ? QStringLiteral( "free" ) : QStringLiteral( "pinned" ) ) );
+						clickAt( sp );
+						check( pv.sim().bodies().at( target ).pinned == was,
+							QStringLiteral( "Pin clicked again put it back" ) );
+					} else {
+						check( false, QStringLiteral( "Pin: nothing to aim at" ) );
+					}
+				}
+
+				// Wind is a held force: it acts while the button is down, not after
+				{
+					pv.reset();
+					pv.setTool( PhysicsPreview::Tool::Wind );
+					const QPointF mid( gl->width() / 2.0, gl->height() / 2.0 );
+					QMouseEvent press( QEvent::MouseButtonPress, mid, gl->mapToGlobal( mid ),
+						gl->selectMouseButton(), gl->selectMouseButton(), Qt::NoModifier );
+					QApplication::sendEvent( gl, &press );
+					check( pv.wind().length() > 0.0f, QStringLiteral( "Wind blows while held" ) );
+					QMouseEvent rel( QEvent::MouseButtonRelease, mid, gl->mapToGlobal( mid ),
+						gl->selectMouseButton(), Qt::NoButton, Qt::NoModifier );
+					QApplication::sendEvent( gl, &rel );
+					check( pv.wind().length() == 0.0f, QStringLiteral( "Wind stops on release" ) );
+				}
+
+				/* Throw against Drag on the identical motion.
+				 *
+				 * Comparing the two is the only way to show the throw does
+				 * something a plain release does not: a dragged body is already
+				 * moving at the hand's speed when it is let go, and what Throw
+				 * adds is that the velocity survives the next constraint solve.
+				 */
+				auto dragAndCoast = [&]( PhysicsPreview::Tool t ) -> float {
+					pv.reset();
+					pv.setTool( t );
+					QPointF sp;
+					const int target = aimAtSomething( sp );
+					if ( target < 0 )
+						return -1.0f;
+					QMouseEvent press( QEvent::MouseButtonPress, sp, gl->mapToGlobal( sp ),
+						gl->selectMouseButton(), gl->selectMouseButton(), Qt::NoModifier );
+					QApplication::sendEvent( gl, &press );
+					for ( int i = 1; i <= 12; i++ ) {
+						const QPointF p = sp + QPointF( 14.0 * i, 0.0 );
+						QMouseEvent mv( QEvent::MouseMove, p, gl->mapToGlobal( p ),
+							Qt::NoButton, gl->selectMouseButton(), Qt::NoModifier );
+						QApplication::sendEvent( gl, &mv );
+						gl->physicsTick( 1.0f / 60.0f );
+					}
+					const Vector3 atRelease = pv.sim().toWorld( target, Vector3() );
+					QMouseEvent rel( QEvent::MouseButtonRelease, sp, gl->mapToGlobal( sp ),
+						gl->selectMouseButton(), Qt::NoButton, Qt::NoModifier );
+					QApplication::sendEvent( gl, &rel );
+					for ( int i = 0; i < 15; i++ )
+						gl->physicsTick( 1.0f / 60.0f );
+					return ( pv.sim().toWorld( target, Vector3() ) - atRelease ).length();
+				};
+				const float coastDrag = dragAndCoast( PhysicsPreview::Tool::Drag );
+				const float coastThrow = dragAndCoast( PhysicsPreview::Tool::Throw );
+				check( coastThrow > coastDrag,
+					QStringLiteral( "Throw carries further than Drag (%1 m vs %2 m)" )
+						.arg( double( coastThrow ), 0, 'f', 3 ).arg( double( coastDrag ), 0, 'f', 3 ) );
+
+				// Options
+				pv.setTool( PhysicsPreview::Tool::Drag );
+				/* Gravity measured as FALL, not as total movement.
+				 *
+				 * Two wrong versions came before this one. "With gravity off it barely
+				 * moves" is false because the authored pose has bodies overlapping --
+				 * the brahmin has 18 pairs touching at rest -- and the contact solve
+				 * pushes them apart regardless. Comparing total drift is also false:
+				 * power armour drifts MORE with gravity off (193 against 149), because
+				 * gravity holds it against the floor while the push-apart has nothing
+				 * to settle it.
+				 *
+				 * What the option actually promises is that nothing accelerates
+				 * downward, so the measurement is the drop in mean height and nothing
+				 * else.
+				 */
+				auto dropOverASecond = [&]() -> float {
+					pv.reset();
+					pv.freeze();
+					auto meanZ = [&]() {
+						const QVector<Vector3> s = pv.soup();
+						if ( s.isEmpty() )
+							return 0.0;
+						double z = 0.0;
+						for ( const Vector3 & v : s )
+							z += double( v[2] );
+						return z / double( s.size() );
+					};
+					const double before = meanZ();
+					for ( int i = 0; i < 60; i++ )
+						gl->physicsTick( 1.0f / 60.0f );
+					return float( before - meanZ() );
+				};
+				pv.setGravityEnabled( true );
+				const float dropOn = dropOverASecond();
+				pv.setGravityEnabled( false );
+				const float dropOff = dropOverASecond();
+				check( dropOff < dropOn * 0.5f,
+					QStringLiteral( "gravity off: it does not fall (dropped %1 vs %2 with gravity)" )
+						.arg( double( dropOff ), 0, 'f', 2 ).arg( double( dropOn ), 0, 'f', 2 ) );
+				pv.setGravityEnabled( true );
+
+				pv.reset();
+				pv.freeze();
+				{
+					float speed = 0.0f;
+					for ( const SimBody & sb : pv.sim().bodies() )
+						speed = std::max( speed, sb.v.length() );
+					check( speed == 0.0f, QStringLiteral( "freeze stopped everything" ) );
+				}
+
+				pv.setTimeScale( 0.25f );
+				check( pv.timeScale() > 0.24f && pv.timeScale() < 0.26f,
+					QStringLiteral( "time scale set" ) );
+				pv.setTimeScale( 1.0f );
+				pv.setGroundEnabled( false );
+				check( !pv.groundEnabled(), QStringLiteral( "ground can be turned off" ) );
+				pv.setGroundEnabled( true );
+				pv.setSelfCollision( false );
+				check( !pv.selfCollision(), QStringLiteral( "self-collision can be turned off" ) );
+				pv.setSelfCollision( true );
+				pv.setAngularLimits( false );
+				check( !pv.angularLimits(), QStringLiteral( "angular limits can be turned off" ) );
+				pv.setAngularLimits( true );
+				pv.reset();
+
 				// R resets to the stored pose
 				QKeyEvent rKey( QEvent::KeyPress, Qt::Key_R, Qt::NoModifier );
 				QApplication::sendEvent( gl, &rKey );

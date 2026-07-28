@@ -257,6 +257,38 @@ public:
 	//! Which body is being dragged, or -1.
 	int draggedBody() const { return m_dragBody; }
 
+	/*! Hit one body with an impulse at a point in its own space.
+	 *
+	 * `impulse` is kg*m/s in world space. Applied to the VELOCITIES, not as a
+	 * position correction: an impulse is momentum, and pushing the pose instead
+	 * would put the energy in through the constraint solve and let the joints
+	 * cancel most of it on the same substep. Off-centre hits spin the body,
+	 * which is the whole point of shooting a limb rather than a torso.
+	 */
+	void applyImpulse( int body, const Vector3 & localPoint, const Vector3 & impulse );
+
+	/*! A radial impulse from a point: the grenade.
+	 *
+	 * Falls off linearly to nothing at `radius`, and pushes each body from the
+	 * blast centre through its own centre of mass. `strength` is the impulse a
+	 * body would take at zero distance.
+	 */
+	void blast( const Vector3 & centre, float radius, float strength );
+
+	/*! Stop everything where it is: all velocities to zero.
+	 *
+	 * Not the same as not stepping. A frozen rig still solves its constraints, so
+	 * it holds a settled pose and can still be dragged, pinned or hit -- pausing
+	 * stops time, this stops motion.
+	 */
+	void freeze();
+
+	//! Set one body's linear velocity outright. What Throw uses on release.
+	void setVelocity( int body, const Vector3 & v );
+
+	//! Continuous force on every body, in newtons. Wind, and anything like it.
+	Vector3 wind;
+
 	/*! Replace the contents with a synthetic rig of known masses.
 	 *
 	 * A 38-joint ragdoll is the wrong place to debug a solver. Each of these

@@ -1,5 +1,63 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29n — Physics Sim: six tools and the options
+
+Everything bungo asked for. Six interaction tools and the full option set, all
+driven through the real event path and verified in a window on the second
+monitor: **7 rigs pass 30 of 30 checks each, 2 correctly skipped, 0 failures.**
+
+**Tools** (keys 1-6, one active at a time like a paint tool):
+
+| | |
+|---|---|
+| **Drag** | spring grab, let go where it lies |
+| **Throw** | spring grab, released carrying the hand's velocity |
+| **Shoot** | 12 kg m/s impulse along the view ray, at the point it hits |
+| **Pin** | nail a body in place, click again to free it |
+| **Blast** | radial impulse, 2 m radius, falling off linearly |
+| **Wind** | steady 40 N along the view direction while held |
+
+Shoot, Blast and Throw apply **impulses to velocity**, not corrections to the
+pose. An impulse is momentum; pushing the pose instead would put the energy in
+through the constraint solve and let the joints cancel most of it on the same
+substep. Shoot lands its impulse where the ray hit rather than at the centre of
+mass, which is what makes a shot to a leg twist it.
+
+**Options:** freeze (stop all motion but keep solving, so a settled heap holds),
+single-step (`.` while paused), gravity on/off and strength (`G`), time scale down
+to 0.01x, ground on/off and height, self-collision and angular-limit toggles, and
+a stats overlay. Every number in the overlay was already computed by the step and
+thrown away.
+
+### Three tests that were wrong, not three bugs
+
+Each of these reported a failure against code that was behaving correctly, and
+each was worth fixing properly rather than loosening a threshold:
+
+**Pin "failed" because the test clicked one body and asked about another.** A ray
+aimed at body b's centre often hits a different body first — limbs overlap. The
+helper returns the body the PICKER lands on now.
+
+**Pin also "failed" on the root**, which `build()` has already pinned, so clicking
+it correctly *un*pinned it. Asserted as a toggle now, not as "becomes pinned".
+
+**Gravity-off went through two wrong measurements.** "It should barely move" is
+false: the authored pose has bodies overlapping — the brahmin has 18 pairs
+touching at rest — and the contact solve pushes them apart regardless. Comparing
+total drift is also false, and power armour proved it by drifting *more* with
+gravity off (193 against 149), because gravity holds it against the floor while
+the push-apart has nothing to settle it. What the option promises is that nothing
+accelerates downward, so the measurement is the drop in mean height and nothing
+else.
+
+### Still to come
+
+**Capture pose** — hand the settled ragdoll to the Pose Manager. It is the one
+item from the list not in this change, on purpose: everything here is
+non-destructive, and that one writes to the model, so it gets its own change and
+its own scrutiny. The binding it needs is already understood —
+`worldOf(node) * rest^-1` per `bhkNPCollisionObject`.
+
 ## 2026-07-29m — Physics Sim viewport mode
 
 The mode bungo asked for. It sits alongside Object, Edit and Pose in the mode
