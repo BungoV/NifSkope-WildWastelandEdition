@@ -1,5 +1,43 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28m — The exact angular solve is worse (negative result, reverted)
+
+07-28l predicted the eyebot's remaining 17.2 m/s would fall to solving the angular
+constraint as a 3-vector instead of per-axis. **It does fix the eyebot, and it is
+worse overall.** Reverted; the corpus stays at 36 of 37 settling. Recorded because
+the change is a textbook correction that anyone reading `applyAngular` will propose
+again.
+
+The maths is not in doubt. The relative rotation two bodies pick up from an angular
+impulse `p` is `(Ia^-1 + Ib^-1) p`, so the impulse that removes a correction
+exactly is `p = (Ia^-1 + Ib^-1)^-1 corr` — a 3x3 solve. What the code does instead
+is project onto the correction's own axis,
+`p = n * theta / (n.(Ia^-1 + Ib^-1).n)`, which is a Rayleigh quotient: exact for
+isotropic inertia, and wrong in proportion to the anisotropy, because `I^-1 p` is
+not parallel to `p`.
+
+Measured (parts kits reduced to their real ragdoll, ten seconds, speed at the end):
+
+| | settled | notes |
+|---|---|---|
+| per-axis (kept) | **36 / 37** | eyebot 17.2 m/s, the only failure |
+| exact 3x3 everywhere | 29 / 37 | eyebot fixed; mosquito 420 m/s, mirelurk queen 136, bloatfly 66 |
+| exact 3x3 for lopsided bodies only | 32 / 37 | mosquito still 395 — insects have thin limbs, so they are lopsided too |
+
+**Why exact is worse.** The per-axis projection satisfies the constraint along
+`corr` and leaves a residue perpendicular to it. That residue is not free — it is
+dissipative, and the light-bodied creatures were quietly relying on it. Removing
+it exposes energy the projection had been absorbing. Gating the exact solve on
+anisotropy does not rescue it either, because "lopsided inverse inertia" describes
+a mosquito's leg as readily as an eyebot's antenna: the 50:1 threshold that picks
+out the antennae at 1200:1 also picks up half the insects in the corpus.
+
+So the eyebot's hinges stay unsolved, and the honest description of the remaining
+gap has changed: it is not "the angular solve is approximate" — it is that this
+solver's stability partly rests on that approximation, and replacing it needs a
+real dissipation model rather than a better linear algebra step. That is a bigger
+piece of work than it looked from the outside, and it is one ragdoll out of 37.
+
 ## 2026-07-28l — Two of the three failures were not ragdolls at all
 
 **36 of 37 settle.** The eyebot is the only vanilla ragdoll left that does not

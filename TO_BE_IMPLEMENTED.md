@@ -589,9 +589,15 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    10 deg = 35/37 (worst 10.0), 15 deg = 35/37 (worst 41.3), so FORCED_RAD is 5 deg.
    **Open: 1 real failure** -- the eyebot at 17.2 m/s. No loose bodies, no rest
    violations; seven hinges on antennae with inverse inertia 4417 along their axis
-   vs 3.67 across (ratio 1200). The angular response to a single-axis correction
-   points nowhere near that axis at such anisotropy, so the fix is to solve the
-   angular constraint as a 3-vector rather than per-axis. That is the next job.
+   vs 3.67 across (ratio 1200).
+   **07-28m TRIED AND REVERTED: the exact 3x3 angular solve.** It IS the correct
+   maths and it IS worse -- 29/37 settling against 36, mosquito at 420 m/s. The
+   per-axis projection leaves a residue perpendicular to the correction, that
+   residue is dissipative, and the light creatures depend on it. Gating on
+   anisotropy does not help (50:1 catches insect limbs too; mosquito still 395).
+   So the gap is NOT "the angular solve is approximate" -- this solver's stability
+   partly rests on that approximation, and replacing it needs a real dissipation
+   model, not better linear algebra. Do not re-propose the 3x3 solve on its own.
    (superseded) **Open: 3 still moving** -- Robot/SkeletonRef (9.0 m/s) and sentry (2.8) are
    SELF-COLLISION (SkeletonRef -> 0.11 with `--no-self`); body-body is exact only
    for single capsules/spheres, so compounds are the suspect and exact convex
