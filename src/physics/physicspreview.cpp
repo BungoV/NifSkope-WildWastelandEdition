@@ -78,6 +78,7 @@ void PhysicsPreview::stop()
 	m_sim.clearDrag();
 	m_sim = RagdollSim();
 	m_meshes.clear();
+	m_shots.clear();
 	m_system = HknpSystem();
 	m_active = false;
 	m_paused = false;
@@ -103,6 +104,7 @@ void PhysicsPreview::step( float dt )
 		}
 	}
 	m_sim.step( h );
+	stepShots( h );
 }
 
 void PhysicsPreview::reset()
@@ -137,7 +139,7 @@ bool PhysicsPreview::grab( const Vector3 & rayOrigin, const Vector3 & rayDir )
 	if ( !p.hit() )
 		return false;
 	m_grabDepth = p.distance;
-	m_sim.setDrag( p.body, p.localPoint, p.worldPoint );
+	m_sim.setDrag( p.body, p.localPoint, p.worldPoint, m_settings.grabFirmness );
 	return true;
 }
 
@@ -162,6 +164,32 @@ QVector<Vector3> PhysicsPreview::soup() const
 		const SimBody & b = bodies.at( i );
 		if ( bm.tris.isEmpty() )
 			continue;
+		QVector<Vector3> posed;
+		posed.reserve( bm.verts.size() );
+		for ( const Vector3 & v : bm.verts )
+			posed.append( m_sim.toWorld( i, v ) * SCALE );
+		for ( const Triangle & t : bm.tris ) {
+			out.append( posed.at( t[0] ) );
+			out.append( posed.at( t[1] ) );
+			out.append( posed.at( t[2] ) );
+		}
+	}
+	return out;
+}
+
+QVector<Vector3> PhysicsPreview::limitSoup() const
+{
+	QVector<Vector3> out;
+	if ( !m_active || !m_highlightLimits )
+		return out;
+	const QSet<int> bad = bodiesViolatingLimits();
+	if ( bad.isEmpty() )
+		return out;
+	const QVector<SimBody> & bodies = m_sim.bodies();
+	for ( int i = 0; i < m_meshes.size() && i < bodies.size(); i++ ) {
+		if ( !bad.contains( i ) )
+			continue;
+		const BodyMesh & bm = m_meshes.at( i );
 		QVector<Vector3> posed;
 		posed.reserve( bm.verts.size() );
 		for ( const Vector3 & v : bm.verts )
@@ -257,14 +285,41 @@ bool PhysicsPreview::press( const Vector3 & rayOrigin, const Vector3 & rayDir )
 
 	case Tool::Shoot: {
 		const SimPick p = m_sim.pick( rayOrigin / SCALE, dir );
-		if ( !p.hit() )
+		// a projectile can be fired into thin air; a hitscan shot cannot, since
+		// there is nothing for it to have hit
+		if ( !p.hit() && !m_settings.shootProjectile )
 			return false;
 		/* 12 kg m/s along the ray: about what a heavy pistol round carries, and
 		 * enough to spin a limb without launching a brahmin across the scene.
 		 * Off-centre by construction -- the impulse lands where the ray hit, not
 		 * at the centre of mass, which is what makes a shot to a leg twist it.
 		 */
-		m_sim.applyImpulse( p.body, p.localPoint, dir * 12.0f );
+		if ( m_settings.shootProjectile ) {
+			/* A real round: it travels, drops, and can miss. Started slightly along
+			 * the ray so it does not begin inside the camera, and aimed at where the
+			 * ray hit so a click still goes where it was pointed.
+			 */
+			Shot shot;
+			shot.pos = rayOrigin / SCALE + dir * 0.05f;
+			shot.vel = dir * m_settings.projectileSpeed;
+			shot.radius = m_settings.projectileRadius;
+			shot.mass = m_settings.projectileMass;
+			shot.gravity = m_settings.projectileGravity;
+			shot.flying = true;
+			shot.from = shot.pos * SCALE;
+			shot.to = shot.from;
+			m_shots.append( shot );
+			return true;
+		}
+		m_sim.applyImpulse( p.body, p.localPoint, dir * m_settings.shootImpulse );
+		// a visible trace, because otherwise the only evidence of a shot is the
+		// ragdoll twitching -- which cannot tell a miss from a broken tool
+		Shot trace;
+		trace.from = rayOrigin;
+		trace.to = p.worldPoint * SCALE;
+		trace.hit = true;
+		trace.radius = m_settings.projectileRadius;
+		m_shots.append( trace );
 		return true;
 	}
 
@@ -285,14 +340,14 @@ bool PhysicsPreview::press( const Vector3 & rayOrigin, const Vector3 & rayDir )
 		const SimPick p = m_sim.pick( rayOrigin / SCALE, dir );
 		if ( !p.hit() )
 			return false;
-		m_sim.blast( p.worldPoint, 2.0f, 30.0f );
+		m_sim.blast( p.worldPoint, m_settings.blastRadius, m_settings.blastStrength );
 		return true;
 	}
 
 	case Tool::Wind:
 		m_holding = true;
 		m_holdDir = dir;
-		m_sim.wind = dir * 40.0f;
+		m_sim.wind = dir * m_settings.windStrength;
 		return true;
 	}
 	return false;
@@ -306,7 +361,7 @@ bool PhysicsPreview::move( const Vector3 & rayOrigin, const Vector3 & rayDir )
 		const float len = rayDir.length();
 		if ( len > 1.0e-12f ) {
 			m_holdDir = rayDir / len;
-			m_sim.wind = m_holdDir * 40.0f;
+			m_sim.wind = m_holdDir * m_settings.windStrength;
 		}
 		return true;
 	}
@@ -335,4 +390,92 @@ bool PhysicsPreview::release()
 		m_sim.setVelocity( m_sim.draggedBody(), m_grabVelocity );
 	m_sim.clearDrag();
 	return true;
+}
+
+/*! Advance projectiles and age the traces behind them.
+ *
+ * Collision is a swept test, not a point test: a 60 m/s round covers 1 m in a
+ * 60th of a second, which is most of a limb, so checking only where it ends up
+ * would let it pass through a brahmin without touching it. The sweep reuses the
+ * picker -- the same code the mouse tools aim with -- so a shot can only hit
+ * what a click could have hit.
+ */
+void PhysicsPreview::stepShots( float h )
+{
+	for ( int i = m_shots.size() - 1; i >= 0; i-- ) {
+		Shot & s = m_shots[i];
+		if ( !s.flying ) {
+			s.age += h;
+			if ( s.age > TRACE_FADE )
+				m_shots.remove( i );
+			continue;
+		}
+
+		if ( s.gravity )
+			s.vel += m_sim.gravity * h;
+		const Vector3 next = s.pos + s.vel * h;
+		const Vector3 delta = next - s.pos;
+		const float travelled = delta.length();
+
+		const SimPick p = ( travelled > 1.0e-9f ) ? m_sim.pick( s.pos, delta ) : SimPick();
+		if ( p.hit() && p.distance <= travelled ) {
+			// momentum, so a heavy slow round and a light fast one differ
+			m_sim.applyImpulse( p.body, p.localPoint, ( delta / travelled ) * ( s.mass * s.vel.length() ) );
+			s.to = p.worldPoint * SCALE;
+			s.pos = p.worldPoint;
+			s.flying = false;
+			s.hit = true;
+			s.age = 0.0f;
+			continue;
+		}
+
+		s.pos = next;
+		s.to = s.pos * SCALE;
+		// a round that leaves the neighbourhood is gone: without this they
+		// accumulate for as long as the mode is open
+		if ( m_sim.ground && s.pos[2] < m_sim.groundZ - 1.0f ) {
+			s.flying = false;
+			s.age = 0.0f;
+		}
+	}
+}
+
+QVector<Vector3> PhysicsPreview::groundSoup() const
+{
+	QVector<Vector3> out;
+	if ( !m_active || !m_groundVisible || !m_sim.ground )
+		return out;
+
+	/* Sized from the rig's own footprint, so the surface reads as a floor under
+	 * THIS thing rather than as an arbitrary plane -- a fixed size is a postage
+	 * stamp under Liberty Prime and a runway under a cat.
+	 */
+	Vector3 mn, mx;
+	bool first = true;
+	for ( const SimBody & b : m_sim.bodies() ) {
+		for ( int a = 0; a < 3; a++ ) {
+			if ( first ) {
+				mn = mx = b.x;
+			} else {
+				mn[a] = std::min( mn[a], b.x[a] );
+				mx[a] = std::max( mx[a], b.x[a] );
+			}
+		}
+		first = false;
+	}
+	if ( first )
+		return out;
+
+	const Vector3 mid = ( mn + mx ) * 0.5f;
+	float half = 0.0f;
+	for ( int a = 0; a < 2; a++ )
+		half = std::max( half, ( mx[a] - mn[a] ) * 0.5f );
+	half = std::max( half * 3.0f, 1.0f ) * SCALE;
+
+	const float z = m_sim.groundZ * SCALE;
+	const float cx = mid[0] * SCALE, cy = mid[1] * SCALE;
+	const Vector3 a( cx - half, cy - half, z ), b( cx + half, cy - half, z );
+	const Vector3 c( cx + half, cy + half, z ), d( cx - half, cy + half, z );
+	out << a << b << c << a << c << d;
+	return out;
 }

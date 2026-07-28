@@ -51,6 +51,57 @@ public:
 	//! Human name, for the toolbar and the status line.
 	static QString toolName( Tool t );
 
+	/*! Everything a tool can be tuned by, in one place.
+	 *
+	 * These were hardcoded constants inside the tool handlers, which meant
+	 * selecting Wind gave you a 40 N push and no way to say otherwise. Grouped
+	 * rather than scattered so the panel can show the ones belonging to the
+	 * active tool and hide the rest.
+	 */
+	struct ToolSettings
+	{
+		//! Drag / Throw: how hard the spring holds. (0, 1]; see setDrag.
+		float grabFirmness = 0.9f;
+		//! Shoot: impulse along the ray, kg m/s. 12 is about a heavy pistol round.
+		float shootImpulse = 12.0f;
+		//! Shoot: fire a real projectile that travels, rather than hitting instantly.
+		bool shootProjectile = false;
+		float projectileSpeed = 60.0f;      //!< m/s
+		float projectileMass = 0.05f;       //!< kg
+		float projectileRadius = 0.03f;     //!< m, for drawing and for the hit test
+		bool projectileGravity = true;      //!< let it drop on the way
+		//! Blast: radius in metres and the impulse at the centre.
+		float blastRadius = 2.0f;
+		float blastStrength = 30.0f;
+		//! Wind: force in newtons along the view.
+		float windStrength = 40.0f;
+	};
+	ToolSettings & settings() { return m_settings; }
+	const ToolSettings & settings() const { return m_settings; }
+
+	/*! A shot in flight, or the fading trace of one that already landed.
+	 *
+	 * Both kinds live here so the viewport has one thing to draw. A hitscan shot
+	 * has no travel, so it is recorded as a trace that fades -- without it the
+	 * only evidence a shot happened was the ragdoll twitching, which is not
+	 * enough to tell "I missed" from "the tool is broken".
+	 */
+	struct Shot
+	{
+		Vector3 from, to;           //!< the trace, in GAME units
+		Vector3 pos, vel;           //!< live projectile, in Havok metres
+		float radius = 0.03f;       //!< metres
+		float mass = 0.05f;
+		bool flying = false;        //!< still travelling
+		bool gravity = true;
+		float age = 0.0f;           //!< seconds since it landed, for the fade
+		bool hit = false;           //!< it connected, rather than sailing past
+	};
+	//! Shots in flight and traces still fading. Cleared as they expire.
+	const QVector<Shot> & shots() const { return m_shots; }
+	//! How long a trace stays visible after landing.
+	static constexpr float TRACE_FADE = 0.6f;
+
 	/*! Build from the first jointed collision system in the file.
 	 *
 	 * Returns false and sets `error` when the file has nothing to simulate,
@@ -102,6 +153,9 @@ public:
 	 * drawing it would show a limb as a string of beads.
 	 */
 	QVector<Vector3> soup() const;
+	//! Just the bodies breaking a limit, so the viewport can draw them over the
+	//! rest in a warning colour. Empty unless highlightLimits() is on.
+	QVector<Vector3> limitSoup() const;
 
 	//! How many bodies and joints are being simulated, for a status line.
 	int bodyCount() const { return m_sim.bodies().size(); }
@@ -143,6 +197,23 @@ public:
 	SimStats stats() const { return m_sim.stats(); }
 	//! Bodies whose joints are outside their limits right now, for highlighting.
 	QSet<int> bodiesViolatingLimits() const;
+	//! Draw those bodies in a warning colour. Off by default: on a rig whose
+	//! authored pose already breaks a limit it would be lit up from the start.
+	void setHighlightLimits( bool on ) { m_highlightLimits = on; }
+	bool highlightLimits() const { return m_highlightLimits; }
+
+	//! Put the floor back where start() placed it, under the rig.
+	void resetGroundHeight() { m_sim.groundZ = m_defaultGroundZ; }
+	//! Draw the ground as a solid surface rather than leaving it invisible.
+	void setGroundVisible( bool on ) { m_groundVisible = on; }
+	bool groundVisible() const { return m_groundVisible; }
+	/*! Two triangles covering the floor under the rig, in GAME units.
+	 *
+	 * Sized from the rig rather than fixed, so it is neither a postage stamp
+	 * under Liberty Prime nor a runway under a cat. Empty when the ground is off
+	 * or hidden.
+	 */
+	QVector<Vector3> groundSoup() const;
 
 	RagdollSim & sim() { return m_sim; }
 	const RagdollSim & sim() const { return m_sim; }
@@ -176,6 +247,12 @@ private:
 	//! Wind and Blast need the ray while the button is held
 	bool m_holding = false;
 	Vector3 m_holdDir;
+	ToolSettings m_settings;
+	QVector<Shot> m_shots;
+	bool m_highlightLimits = false;
+	bool m_groundVisible = false;
+	//! advance projectiles and age traces; called from step()
+	void stepShots( float h );
 };
 
 #endif // PHYSICSPREVIEW_H

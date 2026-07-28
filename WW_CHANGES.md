@@ -1,5 +1,58 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29q — visible shots, a real projectile, a floor you can see
+
+**45 of 45 checks on 6 rigs, 1 correctly skipped, 0 failures.**
+
+**Shooting is visible now.** It was an invisible hitscan: the only evidence a shot
+happened was the ragdoll twitching, which cannot tell a miss from a broken tool.
+A hit leaves a tracer and an impact mark that fade over 0.6 s.
+
+**And there is a real projectile.** Optional, and configurable: speed, mass,
+radius, and whether gravity pulls it on the way. It travels — measured, not
+assumed, because a round that teleported to its target would pass every impulse
+check while being exactly the thing the feature exists to avoid. The test fires at
+20 m/s and counts 11 frames in flight before it connects.
+
+Collision is a **swept** test against the segment it covers each frame, not a
+point test at the far end: a 60 m/s round crosses a metre in a 60th of a second,
+which is most of a limb. The sweep reuses the picker the mouse tools aim with, so
+a shot can only hit what a click could have hit.
+
+**The ground draws as a solid surface**, sized from the rig's own footprint so it
+is neither a postage stamp under Liberty Prime nor a runway under a cat. An
+invisible plane that a ragdoll lands on looks like a bug.
+
+**Per-tool parameters**, shown only for the active tool: grab firmness, shoot
+impulse, the projectile's four settings, blast radius and strength, wind strength.
+These were hardcoded — selecting Wind gave you 40 N and no way to say otherwise.
+
+**And the three things built but never wired**: joint-limit highlighting (bodies
+outside their limits draw in red, off by default because a rig whose authored pose
+already breaks a limit would light up from the start), a ground reset to put the
+floor back under the rig, and wind strength.
+
+### The icon was already there
+
+There was a `collision` icon in the set — a wireframe cube — so the one I added
+was unreachable dead code and the button had been showing the old one the whole
+time. Replaced the real one: a cage around a solid body. The cube was two offset
+squares, which at 16 px is indistinguishable from the x-ray icon, also two offset
+squares.
+
+### Two hours lost to a stale build
+
+Adding members to `PhysicsPreview` changes its size, and `GLView` embeds it by
+value — so translation units compiled against the old header disagreed about
+`GLView`'s layout and the app died with an access violation inside Qt. I bisected
+three files before remembering this is a KNOWN failure of these qmake projects and
+the first thing to rule out, not the last.
+
+`make clean` fixed the crash. `make` then kept relinking a stale binary even after
+the sources were touched, because the Makefile's own dependencies were out of date
+— **re-running `qmake6` is the actual fix**, and it is the same note. Twice in one
+session, both already written down.
+
 ## 2026-07-29p — a Collision button on the top bar
 
 The physics-sim controls existed only as keyboard shortcuts, which is fine once

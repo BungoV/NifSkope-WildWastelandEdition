@@ -2334,6 +2334,91 @@ void GLView::paintGL()
 		glDisable( GL_BLEND );
 	}
 
+	/* Physics Sim extras: the floor, and whatever has been shot at it.
+	 *
+	 * Drawn after the preview and with their own colours so they read as separate
+	 * things rather than as more collision. The floor is a plain grey surface --
+	 * an invisible plane that a ragdoll lands on looks like a bug until you can
+	 * see it.
+	 */
+	if ( physicsPreview.active() && !scene->selecting ) {
+		// bodies outside their joint limits, drawn over the rest in red
+		const QVector<Vector3> bad = physicsPreview.limitSoup();
+		if ( !bad.isEmpty() ) {
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+			glDepthMask( GL_FALSE );
+			scene->loadModelViewMatrix( viewTrans );
+			scene->setGLColor( 1.0f, 0.22f, 0.18f, 0.45f );
+			glEnable( GL_POLYGON_OFFSET_FILL );
+			glPolygonOffset( -2.0f, -2.0f );
+			scene->drawTriangles( bad.constData(), size_t( bad.size() ), nullptr, true );
+			glDisable( GL_POLYGON_OFFSET_FILL );
+			glDepthMask( GL_TRUE );
+			glDisable( GL_BLEND );
+		}
+		const QVector<Vector3> ground = physicsPreview.groundSoup();
+		const QVector<PhysicsPreview::Shot> & shots = physicsPreview.shots();
+		if ( !ground.isEmpty() || !shots.isEmpty() ) {
+			const float pxScale = float( devicePixelRatioF() );
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+			scene->loadModelViewMatrix( viewTrans );
+
+			if ( !ground.isEmpty() ) {
+				glDepthMask( GL_FALSE );
+				scene->setGLColor( 0.55f, 0.58f, 0.62f, 0.35f );
+				scene->drawTriangles( ground.constData(), size_t( ground.size() ), nullptr, true );
+				glDepthMask( GL_TRUE );
+				scene->setGLColor( 0.75f, 0.78f, 0.82f, 0.8f );
+				scene->setGLLineWidth( 1.2f * pxScale );
+				scene->drawTriangles( ground.constData(), size_t( ground.size() ), nullptr, false );
+			}
+
+			for ( const PhysicsPreview::Shot & sh : shots ) {
+				// a landed trace fades out; one still in flight stays solid
+				const float fade = sh.flying ? 1.0f
+					: std::max( 0.0f, 1.0f - sh.age / PhysicsPreview::TRACE_FADE );
+				if ( fade <= 0.0f )
+					continue;
+				glDisable( GL_DEPTH_TEST );
+				const QVector<Vector3> line { sh.from, sh.to };
+				scene->setGLColor( 1.0f, 0.95f, 0.55f, 0.85f * fade );
+				scene->setGLLineWidth( 2.0f * pxScale );
+				scene->drawLines( line.constData(), size_t( line.size() ), nullptr );
+				glEnable( GL_DEPTH_TEST );
+
+				// the round itself, or the mark it left
+				const float r = sh.radius * PhysicsPreview::SCALE * ( sh.flying ? 1.0f : 1.6f );
+				const Vector3 c = sh.flying ? ( sh.pos * PhysicsPreview::SCALE ) : sh.to;
+				QVector<Vector3> ball;
+				const int SEG = 10;
+				for ( int a = 0; a < SEG; a++ ) {
+					const float t0 = float( a ) / SEG * 2.0f * float( M_PI );
+					const float t1 = float( a + 1 ) / SEG * 2.0f * float( M_PI );
+					// three rings, so it reads as a ball from any angle without a mesh
+					ball << c + Vector3( std::cos( t0 ) * r, std::sin( t0 ) * r, 0 )
+						 << c + Vector3( std::cos( t1 ) * r, std::sin( t1 ) * r, 0 )
+						 << c + Vector3( std::cos( t0 ) * r, 0, std::sin( t0 ) * r )
+						 << c + Vector3( std::cos( t1 ) * r, 0, std::sin( t1 ) * r )
+						 << c + Vector3( 0, std::cos( t0 ) * r, std::sin( t0 ) * r )
+						 << c + Vector3( 0, std::cos( t1 ) * r, std::sin( t1 ) * r );
+				}
+				if ( sh.flying )
+					scene->setGLColor( 1.0f, 0.9f, 0.4f, 1.0f );
+				else
+					scene->setGLColor( 1.0f, 0.42f, 0.2f, fade );
+				scene->setGLLineWidth( 2.0f * pxScale );
+				scene->drawLines( ball.constData(), size_t( ball.size() ), nullptr );
+			}
+			glDisable( GL_BLEND );
+		}
+	}
+
 	// Flat shading: the textured shapes were skipped, so fill every visible
 	// mesh with a uniform dark grey (Blender wireframe-mode faces). X-ray
 	// makes the fill half-transparent so geometry behind shows through.

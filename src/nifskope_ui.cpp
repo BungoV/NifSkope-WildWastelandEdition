@@ -3728,6 +3728,78 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						.arg( QLatin1String( tc.name ) ).arg( double( moved ), 0, 'f', 4 ) );
 				}
 
+				/* Shooting, both kinds.
+				 *
+				 * The hitscan shot has to leave a visible trace and the physical
+				 * one has to actually travel: a projectile that teleported to its
+				 * target would pass every impulse check while being the thing the
+				 * feature exists to avoid.
+				 */
+				{
+					pv.reset();
+					pv.freeze();
+					pv.setTool( PhysicsPreview::Tool::Shoot );
+					pv.settings().shootProjectile = false;
+					QPointF sp;
+					const int target = aimAtSomething( sp );
+					if ( target >= 0 ) {
+						clickAt( sp );
+						check( !pv.shots().isEmpty(), QStringLiteral( "hitscan leaves a trace" ) );
+						if ( !pv.shots().isEmpty() )
+							check( !pv.shots().first().flying && pv.shots().first().hit,
+								QStringLiteral( "the trace records a hit" ) );
+						// and it fades rather than accumulating for ever
+						for ( int i = 0; i < 60; i++ )
+							gl->physicsTick( 1.0f / 60.0f );
+						check( pv.shots().isEmpty(), QStringLiteral( "the trace fades away" ) );
+
+						pv.reset();
+						pv.freeze();
+						pv.settings().shootProjectile = true;
+						pv.settings().projectileSpeed = 20.0f;
+						pv.settings().projectileGravity = false;
+						const QVector<Vector3> before = pv.soup();
+						clickAt( sp );
+						check( !pv.shots().isEmpty() && pv.shots().first().flying,
+							QStringLiteral( "projectile is in flight" ) );
+						// it should take several frames to arrive, not arrive at once
+						int framesInFlight = 0;
+						for ( int i = 0; i < 120 && !pv.shots().isEmpty()
+								&& pv.shots().first().flying; i++ ) {
+							gl->physicsTick( 1.0f / 60.0f );
+							framesInFlight++;
+						}
+						check( framesInFlight > 1, QStringLiteral( "it travelled (%1 frames)" )
+							.arg( framesInFlight ) );
+						check( !pv.shots().isEmpty() && pv.shots().first().hit,
+							QStringLiteral( "and connected" ) );
+						for ( int i = 0; i < 12; i++ )
+							gl->physicsTick( 1.0f / 60.0f );
+						float moved = 0.0f;
+						const QVector<Vector3> after = pv.soup();
+						for ( int i = 0; i < std::min( before.size(), after.size() ); i++ )
+							moved = std::max( moved, ( before.at( i ) - after.at( i ) ).length() );
+						check( moved > 0.001f, QStringLiteral( "the round moved it %1 game units" )
+							.arg( double( moved ), 0, 'f', 4 ) );
+						pv.settings().shootProjectile = false;
+					} else {
+						check( false, QStringLiteral( "Shoot: nothing to aim at" ) );
+					}
+				}
+
+				// the ground surface, and the limit highlight
+				pv.setGroundVisible( true );
+				check( !pv.groundSoup().isEmpty(), QStringLiteral( "ground draws as a surface" ) );
+				pv.setGroundVisible( false );
+				check( pv.groundSoup().isEmpty(), QStringLiteral( "and can be hidden" ) );
+				pv.setGroundHeight( pv.groundHeight() + 40.0f );
+				pv.resetGroundHeight();
+				check( std::fabs( pv.groundHeight() - pv.defaultGroundHeight() ) < 0.01f,
+					QStringLiteral( "ground resets to under the rig" ) );
+				pv.setHighlightLimits( true );
+				check( pv.highlightLimits(), QStringLiteral( "limit highlight can be turned on" ) );
+				pv.setHighlightLimits( false );
+
 				// Pin is not motion, so it is checked by the flag it sets
 				{
 					pv.reset();
@@ -3886,6 +3958,30 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				gl->update();
 				QApplication::processEvents();
 				gl->grabFramebuffer().save( outPath + QStringLiteral( ".png" ) );
+
+				// the new drawing: floor, a round in flight, and the trace behind it
+				{
+					pv.reset();
+					pv.setGroundVisible( true );
+					pv.setTool( PhysicsPreview::Tool::Shoot );
+					pv.settings().shootProjectile = true;
+					pv.settings().projectileSpeed = 8.0f;
+					pv.settings().projectileRadius = 0.06f;
+					QPointF sp;
+					if ( aimAtSomething( sp ) >= 0 ) {
+						clickAt( sp );
+						// far enough along that the round is not in the camera's face:
+						// a shot 3 frames old is 0.4 m away and fills the viewport
+						for ( int i = 0; i < 60 && !pv.shots().isEmpty()
+								&& pv.shots().first().flying; i++ )
+							gl->physicsTick( 1.0f / 60.0f );
+						gl->update();
+						QApplication::processEvents();
+						gl->grabFramebuffer().save( outPath + QStringLiteral( ".shot.png" ) );
+					}
+					pv.settings().shootProjectile = false;
+				}
+
 				// the panel again, this time with the sim running, so the enabled
 				// state of every control is looked at and not only the idle one
 				if ( QToolButton * cb2 = skope->findChild<QToolButton *>(
@@ -7174,6 +7270,93 @@ void NifSkope::initDockWidgets()
 		}
 		col->addLayout( tools );
 
+		/* Parameters of the ACTIVE tool, and only that tool.
+		 *
+		 * Selecting Wind used to give you a 40 N push with nowhere to say
+		 * otherwise; the same was true of Shoot's impulse and Blast's radius.
+		 * Showing all of them at once would be a wall of spin boxes for settings
+		 * that mostly do not apply, so the row swaps with the tool.
+		 */
+		QWidget * toolParams = new QWidget( panel );
+		QGridLayout * tp = new QGridLayout( toolParams );
+		tp->setContentsMargins( 0, 0, 0, 0 );
+		tp->setSpacing( 4 );
+		int pRow = 0;
+		auto addParam = [&]( const QString & label, QWidget * w ) {
+			QLabel * l = new QLabel( label, toolParams );
+			tp->addWidget( l, pRow, 0 );
+			tp->addWidget( w, pRow++, 1 );
+			return l;
+		};
+
+		QDoubleSpinBox * firmSpin = new QDoubleSpinBox( toolParams );
+		firmSpin->setRange( 0.01, 1.0 );
+		firmSpin->setSingleStep( 0.05 );
+		firmSpin->setDecimals( 2 );
+		firmSpin->setToolTip( tr( "How hard the grab holds. 1 is rigid; lower is springier "
+								  "and lags behind the cursor." ) );
+		QLabel * firmLbl = addParam( tr( "Firmness" ), firmSpin );
+
+		QDoubleSpinBox * impulseSpin = new QDoubleSpinBox( toolParams );
+		impulseSpin->setRange( 0.1, 500.0 );
+		impulseSpin->setSingleStep( 2.0 );
+		impulseSpin->setSuffix( tr( " kg m/s" ) );
+		impulseSpin->setToolTip( tr( "Momentum delivered by a hit. 12 is about a heavy "
+									 "pistol round." ) );
+		QLabel * impulseLbl = addParam( tr( "Impulse" ), impulseSpin );
+
+		QCheckBox * projChk = new QCheckBox( tr( "Physical projectile" ), toolParams );
+		projChk->setToolTip( tr( "Fire a round that travels and drops, instead of hitting "
+								 "instantly. It can miss." ) );
+		tp->addWidget( projChk, pRow++, 0, 1, 2 );
+
+		QDoubleSpinBox * projSpeed = new QDoubleSpinBox( toolParams );
+		projSpeed->setRange( 1.0, 1000.0 );
+		projSpeed->setSingleStep( 5.0 );
+		projSpeed->setSuffix( tr( " m/s" ) );
+		QLabel * projSpeedLbl = addParam( tr( "Speed" ), projSpeed );
+
+		QDoubleSpinBox * projMass = new QDoubleSpinBox( toolParams );
+		projMass->setRange( 0.001, 100.0 );
+		projMass->setDecimals( 3 );
+		projMass->setSingleStep( 0.01 );
+		projMass->setSuffix( tr( " kg" ) );
+		QLabel * projMassLbl = addParam( tr( "Mass" ), projMass );
+
+		QDoubleSpinBox * projRadius = new QDoubleSpinBox( toolParams );
+		projRadius->setRange( 0.005, 2.0 );
+		projRadius->setDecimals( 3 );
+		projRadius->setSingleStep( 0.01 );
+		projRadius->setSuffix( tr( " m" ) );
+		QLabel * projRadiusLbl = addParam( tr( "Radius" ), projRadius );
+
+		QCheckBox * projGrav = new QCheckBox( tr( "Round drops" ), toolParams );
+		projGrav->setToolTip( tr( "Let gravity pull the round on the way, so a long shot "
+								  "lands lower than it was aimed." ) );
+		tp->addWidget( projGrav, pRow++, 0, 1, 2 );
+
+		QDoubleSpinBox * blastRadius = new QDoubleSpinBox( toolParams );
+		blastRadius->setRange( 0.1, 50.0 );
+		blastRadius->setSingleStep( 0.5 );
+		blastRadius->setSuffix( tr( " m" ) );
+		blastRadius->setToolTip( tr( "How far the blast reaches. It falls off to nothing "
+									 "at this distance." ) );
+		QLabel * blastRadiusLbl = addParam( tr( "Radius" ), blastRadius );
+
+		QDoubleSpinBox * blastStrength = new QDoubleSpinBox( toolParams );
+		blastStrength->setRange( 0.1, 2000.0 );
+		blastStrength->setSingleStep( 5.0 );
+		blastStrength->setSuffix( tr( " kg m/s" ) );
+		QLabel * blastStrengthLbl = addParam( tr( "Strength" ), blastStrength );
+
+		QDoubleSpinBox * windStrength = new QDoubleSpinBox( toolParams );
+		windStrength->setRange( 0.1, 5000.0 );
+		windStrength->setSingleStep( 5.0 );
+		windStrength->setSuffix( tr( " N" ) );
+		windStrength->setToolTip( tr( "Force applied along the view while the button is held." ) );
+		QLabel * windLbl = addParam( tr( "Strength" ), windStrength );
+		col->addWidget( toolParams );
+
 		// Playback
 		col->addWidget( heading( tr( "Playback" ) ) );
 		QHBoxLayout * play = new QHBoxLayout();
@@ -7228,6 +7411,15 @@ void NifSkope::initDockWidgets()
 		opts->addWidget( groundChk, oRow, 0 );
 		opts->addWidget( groundSpin, oRow++, 1 );
 
+		QCheckBox * groundVisChk = new QCheckBox( tr( "Show ground" ), panel );
+		groundVisChk->setToolTip( tr( "Draw the floor as a solid surface. An invisible plane "
+									   "that a ragdoll lands on looks like a bug." ) );
+		QPushButton * groundResetBtn = new QPushButton( tr( "Under rig" ), panel );
+		groundResetBtn->setToolTip( tr( "Put the floor back just below the rig, where it "
+										"started." ) );
+		opts->addWidget( groundVisChk, oRow, 0 );
+		opts->addWidget( groundResetBtn, oRow++, 1 );
+
 		QCheckBox * selfChk = new QCheckBox( tr( "Self-collision" ), panel );
 		selfChk->setToolTip( tr( "Let the rig collide with itself, as the file authorises." ) );
 		opts->addWidget( selfChk, oRow++, 0, 1, 2 );
@@ -7236,6 +7428,12 @@ void NifSkope::initDockWidgets()
 		limitsChk->setToolTip( tr( "Honour the joint limits the constraints carry. Turn "
 								   "off to see how much of a pose the limits are holding." ) );
 		opts->addWidget( limitsChk, oRow++, 0, 1, 2 );
+
+		QCheckBox * hiLimitsChk = new QCheckBox( tr( "Highlight joints at their limits" ), panel );
+		hiLimitsChk->setToolTip( tr( "Colour bodies whose joints are outside the range the "
+									 "constraints allow. Off by default, because a rig whose "
+									 "authored pose already breaks a limit lights up from the start." ) );
+		opts->addWidget( hiLimitsChk, oRow++, 0, 1, 2 );
 
 		QCheckBox * statsChk = new QCheckBox( tr( "Stats overlay" ), panel );
 		statsChk->setToolTip( tr( "Speed, joint error, contacts and penetration, drawn over "
@@ -7254,9 +7452,7 @@ void NifSkope::initDockWidgets()
 		 * than holding their own copy, so a keyboard shortcut and a click on the
 		 * same option cannot disagree.
 		 */
-		auto syncCollisionPanel = [this, showChk, runBtn, status, toolGroup, pauseBtn, stepBtn,
-			freezeBtn, resetBtn, gravChk, gravSpin, speedSlider, speedLbl, groundChk,
-			groundSpin, selfChk, limitsChk, statsChk]() {
+		auto syncCollisionPanel = [=, this]() {
 			PhysicsPreview & pv = ogl->physicsSim();
 			const bool on = pv.active();
 			QSignalBlocker bs( showChk );
@@ -7294,6 +7490,45 @@ void NifSkope::initDockWidgets()
 			selfChk->setChecked( pv.selfCollision() );
 			limitsChk->setChecked( pv.angularLimits() );
 			statsChk->setChecked( ogl->physicsStatsShown() );
+			groundVisChk->setChecked( pv.groundVisible() );
+			hiLimitsChk->setChecked( pv.highlightLimits() );
+			groundVisChk->setEnabled( on && pv.groundEnabled() );
+			groundResetBtn->setEnabled( on && pv.groundEnabled() );
+			hiLimitsChk->setEnabled( on );
+
+			// only the active tool's parameters, so the panel is not a wall of spin
+			// boxes for settings that do not apply
+			const PhysicsPreview::ToolSettings & ts = pv.settings();
+			const PhysicsPreview::Tool t = pv.tool();
+			const bool grabby = ( t == PhysicsPreview::Tool::Drag || t == PhysicsPreview::Tool::Throw );
+			const bool shooty = ( t == PhysicsPreview::Tool::Shoot );
+			const bool blasty = ( t == PhysicsPreview::Tool::Blast );
+			const bool windy  = ( t == PhysicsPreview::Tool::Wind );
+			firmSpin->setVisible( grabby );  firmLbl->setVisible( grabby );
+			impulseSpin->setVisible( shooty && !ts.shootProjectile );
+			impulseLbl->setVisible( shooty && !ts.shootProjectile );
+			projChk->setVisible( shooty );
+			for ( QWidget * w : { (QWidget *)projSpeed, (QWidget *)projSpeedLbl, (QWidget *)projMass,
+					(QWidget *)projMassLbl, (QWidget *)projRadius, (QWidget *)projRadiusLbl,
+					(QWidget *)projGrav } )
+				w->setVisible( shooty && ts.shootProjectile );
+			blastRadius->setVisible( blasty );   blastRadiusLbl->setVisible( blasty );
+			blastStrength->setVisible( blasty ); blastStrengthLbl->setVisible( blasty );
+			windStrength->setVisible( windy );   windLbl->setVisible( windy );
+			toolParams->setVisible( on && ( grabby || shooty || blasty || windy ) );
+			QSignalBlocker p0( firmSpin ), p1( impulseSpin ), p2( projChk ), p3( projSpeed );
+			QSignalBlocker p4( projMass ), p5( projRadius ), p6( projGrav ), p7( blastRadius );
+			QSignalBlocker p8( blastStrength ), p9( windStrength );
+			firmSpin->setValue( double( ts.grabFirmness ) );
+			impulseSpin->setValue( double( ts.shootImpulse ) );
+			projChk->setChecked( ts.shootProjectile );
+			projSpeed->setValue( double( ts.projectileSpeed ) );
+			projMass->setValue( double( ts.projectileMass ) );
+			projRadius->setValue( double( ts.projectileRadius ) );
+			projGrav->setChecked( ts.projectileGravity );
+			blastRadius->setValue( double( ts.blastRadius ) );
+			blastStrength->setValue( double( ts.blastStrength ) );
+			windStrength->setValue( double( ts.windStrength ) );
 		};
 
 		connect( showChk, &QCheckBox::toggled, this, [this]( bool on ) {
@@ -7379,6 +7614,52 @@ void NifSkope::initDockWidgets()
 		} );
 		connect( statsChk, &QCheckBox::toggled, this, [this]( bool on ) {
 			ogl->setPhysicsStatsShown( on );
+		} );
+		connect( groundVisChk, &QCheckBox::toggled, this, [this]( bool on ) {
+			ogl->physicsSim().setGroundVisible( on );
+			ogl->update();
+		} );
+		connect( groundResetBtn, &QPushButton::clicked, this,
+			[this, syncCollisionPanel]() {
+				ogl->physicsSim().resetGroundHeight();
+				syncCollisionPanel();
+				ogl->update();
+			} );
+		connect( hiLimitsChk, &QCheckBox::toggled, this, [this]( bool on ) {
+			ogl->physicsSim().setHighlightLimits( on );
+			ogl->update();
+		} );
+		connect( firmSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().grabFirmness = float( v );
+		} );
+		connect( impulseSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().shootImpulse = float( v );
+		} );
+		connect( projChk, &QCheckBox::toggled, this,
+			[this, syncCollisionPanel]( bool on ) {
+				ogl->physicsSim().settings().shootProjectile = on;
+				syncCollisionPanel();
+			} );
+		connect( projSpeed, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().projectileSpeed = float( v );
+		} );
+		connect( projMass, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().projectileMass = float( v );
+		} );
+		connect( projRadius, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().projectileRadius = float( v );
+		} );
+		connect( projGrav, &QCheckBox::toggled, this, [this]( bool on ) {
+			ogl->physicsSim().settings().projectileGravity = on;
+		} );
+		connect( blastRadius, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().blastRadius = float( v );
+		} );
+		connect( blastStrength, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().blastStrength = float( v );
+		} );
+		connect( windStrength, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().windStrength = float( v );
 		} );
 		// the keyboard shortcuts change the same state, so the panel re-reads it
 		// every time it is opened rather than trusting what it last wrote

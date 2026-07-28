@@ -290,17 +290,28 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 			QPointF( 51, 53 ), QPointF( 32, 15 ), QPointF( 13, 34 ), QPointF( 51, 34 ), QPointF( 32, 53 ) } )
 			p.drawRect( QRectF( v.x() - 3.2, v.y() - 3.2, 6.4, 6.4 ) );
 	} else if ( id == QLatin1String( "collision" ) ) {
-		// wireframe cube: collision preview
+		/* A cage around a solid body, which is what collision IS: a hull drawn
+		 * around the thing it stands in for.
+		 *
+		 * It was two offset wireframe squares -- a plain cube, indistinguishable at
+		 * 16 px from the x-ray icon, which is also two offset squares.
+		 */
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 32, 37 ), 10, 10 );
 		p.setBrush( Qt::NoBrush );
-		QPen cp( col, 4.0 );
-		cp.setJoinStyle( Qt::RoundJoin );
-		p.setPen( cp );
-		p.drawRect( QRectF( 10, 22, 32, 32 ) );
-		p.drawRect( QRectF( 22, 10, 32, 32 ) );
-		p.drawLine( QPointF( 10, 22 ), QPointF( 22, 10 ) );
-		p.drawLine( QPointF( 42, 22 ), QPointF( 54, 10 ) );
-		p.drawLine( QPointF( 10, 54 ), QPointF( 22, 42 ) );
-		p.drawLine( QPointF( 42, 54 ), QPointF( 54, 42 ) );
+		QPen cage( col, 4.0 );
+		cage.setJoinStyle( Qt::RoundJoin );
+		p.setPen( cage );
+		QPolygonF hull;
+		hull << QPointF( 32, 7 ) << QPointF( 56, 24 ) << QPointF( 47, 54 )
+			 << QPointF( 17, 54 ) << QPointF( 8, 24 );
+		p.drawPolygon( hull );
+		// two struts, so it reads as a cage rather than as a plain pentagon
+		QPen strut( col, 2.0 );
+		p.setPen( strut );
+		p.drawLine( QPointF( 32, 7 ), QPointF( 17, 54 ) );
+		p.drawLine( QPointF( 32, 7 ), QPointF( 47, 54 ) );
 	} else if ( id == QLatin1String( "view_center" ) ) {
 		// re-center the camera: four corner brackets framing a center dot
 		p.setBrush( Qt::NoBrush );
@@ -420,26 +431,6 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.fillRect( QRectF( 10, 32, 22, 22 ), QColor( 85, 125, 220 ) );
 		p.fillRect( QRectF( 32, 32, 22, 22 ), QColor( 225, 205, 85 ) );
 		p.setClipping( false );
-	} else if ( id == QLatin1String( "collision" ) ) {
-		/* A wireframe hull around a solid body: what collision actually looks like
-		 * in the viewport, which is a cage drawn over the mesh it belongs to.
-		 */
-		p.setPen( Qt::NoPen );
-		p.setBrush( col );
-		p.drawEllipse( QPointF( 32, 36 ), 11, 11 );
-		p.setBrush( Qt::NoBrush );
-		QPen cage( col, 4.0 );
-		cage.setJoinStyle( Qt::RoundJoin );
-		p.setPen( cage );
-		QPolygonF hull;
-		hull << QPointF( 32, 6 ) << QPointF( 56, 22 ) << QPointF( 50, 52 )
-			 << QPointF( 14, 52 ) << QPointF( 8, 22 );
-		p.drawPolygon( hull );
-		// two struts, so it reads as a cage rather than as a plain pentagon
-		QPen strut( col, 2.5 );
-		p.setPen( strut );
-		p.drawLine( QPointF( 32, 6 ), QPointF( 14, 52 ) );
-		p.drawLine( QPointF( 32, 6 ), QPointF( 50, 52 ) );
 	} else if ( id == QLatin1String( "xray" ) ) {
 		// Blender toggle x-ray: two overlapping squares, the back one showing
 		// through the front
