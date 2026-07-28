@@ -979,7 +979,7 @@ int cmdCollisionRoundTrip( const QString & file )
 				pin.faces = shp.faces;
 				pin.faceAngles = shp.faceAngles;
 				pin.convexRadius = shp.convexRadius;
-				pin.materialCRC = shp.materialCRC;
+				pin.materialCRC = shp.shapeMaterialCRC;
 				pin.shapeFlags = shp.shapeFlags;
 				const QByteArray built = hknpEncodeConvexPolytopeShape( pin );
 				if ( !built.isEmpty() && shp.rawOffset + built.size() <= bytes.size() ) {
@@ -992,7 +992,7 @@ int cmdCollisionRoundTrip( const QString & file )
 			// a sphere derives nothing, so it must come back byte for byte
 			if ( shp.primType == 1 && shp.rawOffset >= 0 && shp.rawOffset + 0x80 <= bytes.size() ) {
 				spheres++;
-				if ( hknpEncodeSphereShape( shp.capA, shp.convexRadius, shp.materialCRC )
+				if ( hknpEncodeSphereShape( shp.capA, shp.convexRadius, shp.shapeMaterialCRC )
 					== bytes.mid( shp.rawOffset, 0x80 ) )
 					spheresExact++;
 				continue;
@@ -1009,7 +1009,7 @@ int cmdCollisionRoundTrip( const QString & file )
 			in.capA = shp.capA;
 			in.capB = shp.capB;
 			in.radius = shp.convexRadius;
-			in.materialCRC = shp.materialCRC;
+			in.materialCRC = shp.shapeMaterialCRC;
 			in.padding = shp.corePadding;
 			// bit 1 of the vertex index selects the +u side, so the difference of
 			// the two 4-corner centroids recovers u

@@ -88,9 +88,22 @@ struct HknpShape
 	//! the physical inertia diagonal, undoing Havok's 1.5 scale
 	Vector3 massInertia() const { return massInertiaRaw / 1.5f; }
 	bool isConvex = false;
-	//! Havok material CRC (u32 at shape+0x18; same value as the legacy
-	//! HavokMaterial enum). 0 = unknown.
+	/*! Havok material CRC (u32 at shape+0x18; same value as the legacy
+	 * HavokMaterial enum). 0 = unknown.
+	 *
+	 * This is the EFFECTIVE material: for a convex shape owned by a body that
+	 * names one, the body's material is resolved over the shape's own. That is
+	 * what a user should see, but it is not what the object holds -- see
+	 * shapeMaterialCRC.
+	 */
 	quint32 materialCRC = 0;
+	/*! The material actually stored at shape+0x18, never overwritten.
+	 *
+	 * An encoder has to write this one. Using the resolved value instead is
+	 * invisible on actor skeletons, where the two agree, and wrong on static
+	 * architecture, where they do not.
+	 */
+	quint32 shapeMaterialCRC = 0;
 
 	//! primitive interpretation: 0 generic, 1 sphere, 2 capsule
 	int primType = 0;

@@ -209,6 +209,7 @@ static void decodeConvexLike( Reader & r, qsizetype B, const QString & className
 	shape.shapeFlags = r.u32( B + 0x10 );
 	shape.convexRadius = r.f32( B + 0x14 );
 	shape.materialCRC = r.u32( B + 0x18 );
+	shape.shapeMaterialCRC = shape.materialCRC;	// kept before body resolution
 
 	auto relArray = [&]( qsizetype fieldOff, quint16 & count, qsizetype & payload ) {
 		count = r.u16( fieldOff );

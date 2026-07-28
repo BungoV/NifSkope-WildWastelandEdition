@@ -864,12 +864,21 @@ Ordered by dependency:
 5. **Ragdoll** — root layout, `hkaSkeleton` and constraint atom chains, all
    specified in 4a. Watch the child/parent frame order and the `+0x80` bone-count
    trap.
-6. **Round-trip validation** over the corpus, plus the simulation test above.
+6. **Round-trip validation** over the corpus — DONE 07-28y for the shipped
+   encoders, and it earned its keep: a 700-file stride sample of the full 34,985
+   mesh tree caught 8 polytope failures in exactly the categories the skeletons do
+   not cover. Cause was the encoder writing `materialCRC` (the body-RESOLVED
+   material) instead of `shapeMaterialCRC` (what sits at shape+0x18); the two agree
+   on actor skeletons and differ on static architecture. After the fix: polytopes
+   269/269, spheres 4/4, mass properties 269/269 (245 exact + 24 inert exponent),
+   capsules 78/78 structure. Re-run this whenever an encoder changes —
+   `scratchpad/rt_corpus.py`.
 
-Coverage is only measured for **actor skeletons** (39 files). Architecture,
-SetDressing, SCOL and Landscape are unmeasured, and that is where compressed
-meshes, hulls and compounds actually live — run the corpus stride scan before
-claiming any of this is complete.
+**Standing lesson, earned three times in one session:** a corpus that cannot
+distinguish two hypotheses is not evidence for either. The brahmin's all-axis-aligned
+capsules "confirmed" an AABB core; a small object sample "confirmed" the `+0x20`
+field was constant; the actor skeletons "confirmed" the resolved material was the
+stored one. Each held until the sample widened.
 
 ## 5. Block Details — remaining typed editors (READY)
 

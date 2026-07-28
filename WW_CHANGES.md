@@ -1,5 +1,43 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28y — Testing the encoders outside the data they were built from
+
+Every number so far came from 39 actor skeletons. TO_BE_IMPLEMENTED says plainly
+that Architecture, SetDressing, SCOL and Landscape are unmeasured and are where the
+hulls and compounds actually live, so I ran `--roundtrip` over a **700-file stride
+sample of the whole 34,985-file mesh tree**.
+
+It found a real bug immediately: **8 polytopes failed, in exactly the categories the
+skeletons don't cover** — Architecture, Landscape, SetDressing, Vehicles.
+
+**Cause: the encoder was writing the wrong material.** `HknpShape::materialCRC` is
+the *effective* material — for a convex shape owned by a body that names one, the
+decoder resolves the body's material over the shape's own, which is what a user
+should see. It is not what sits at shape+0x18. On actor skeletons the two agree, so
+the mistake was invisible; on static architecture they differ. The stored value is
+now kept separately as `shapeMaterialCRC` and all three encoders write that.
+
+This is the second time this stretch that a sample too narrow to separate two
+readings quietly confirmed the wrong one — the capsule's AABB-vs-OBB was the first,
+and the `+0x20` "constant" was the third. The pattern is clear enough to state as a
+rule: *a corpus that cannot distinguish two hypotheses is not evidence for either.*
+
+After the fix, over the 700-file sample:
+
+| type | result |
+|---|---|
+| polytopes | **269 / 269 byte-exact** |
+| spheres | **4 / 4 byte-exact** |
+| mass properties | 245 byte-exact + 24 inert-exponent = **269 / 269** |
+| capsules | **78 / 78 structure byte-exact**, worst vertex error 4.8e-07 m |
+
+Actor skeletons re-verified unchanged (68 / 30 / 68 / 819); self-tests green.
+
+Coverage caveat, since it is the whole point of this entry: 114 of the 700 sampled
+files carry an encodable shape, and compressed meshes and compounds are still only
+*decoded*, not written. The sample is a stride, so it is proportional rather than
+exhaustive.
+
 ## 2026-07-28x — The polytope encoder: 68 of 68 byte-exact
 
 `hknpEncodeConvexPolytopeShape`. Every collision object type in the actor skeletons
