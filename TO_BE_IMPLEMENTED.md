@@ -926,11 +926,35 @@ Ordered by dependency:
    is 0.99999994, not 1** on 767 of 804 (only the 37 roots are exactly 1), and the
    header carries four **negative zeros** at +0x54/+0x64/+0x74/+0x84.
 
-   **Still open:** `hknpRagdollData` (the root, with the child/parent frame order and
-   the `+0x80` bone-count trap) and the packfile assembly that binds everything --
-   which is now the real remaining work, since every other object a ragdoll needs can
-   be written. Compounds already proved a writer must emit fixup entries rather than
-   self-contained blobs (see 4d step 4).
+   **`hknpRagdollData` — LAYOUT MEASURED 07-29d, all 37 with zero violations.**
+   Seven hkArrays, each a pointer patched by a LOCAL fixup at `+d`, count at `+d+8`,
+   `count|0x80000000` at `+d+12`; payloads run back to back from +0x90 and the object
+   ends where the last one does. A GLOBAL fixup at +0x78 reaches the `hkaSkeleton`.
+
+   | desc | contents | count | stride | pad |
+   |---|---|---|---|---|
+   | +0x10 | body_props | bodies | 0x50 | - |
+   | +0x20 | dyn_motion | bodies | 0x40 | - |
+   | +0x30 | dyn_inertia | bodies | 0x70 | - |
+   | +0x40 | cinfo | bodies | 0x60 | - |
+   | +0x50 | constraints | **bones - 1** | 0x18 | 16 |
+   | +0x60 | all zero | bodies | 0x08 | 16 |
+   | +0x80 | bone -> body index (identity on all 37) | **bones** | 0x04 | 16 |
+
+   **The `+0x80` bone-count trap, concretely:** most arrays are per-BODY, but +0x80
+   is per-BONE and the constraint count is bones-1, NOT bodies-1. On 34 of 37 the two
+   counts are equal so the difference is invisible; the exceptions are `SkeletonRef`
+   (48 bodies / 11 bones), `skeletonSentryBodyPart` (24/9) and `TurretMountedSkeleton`
+   (5/4) -- parts kits whose extra collision bodies sit outside the ragdoll hierarchy,
+   the same thing the simulator's `looseBodies()` handles.
+
+   **Still open:** an encoder for `hknpRagdollData`, and the packfile assembly that
+   binds everything. These are one job, not two: the root carries 54 global fixups on
+   a mid-sized ragdoll (one per shape, one per constraint, one for the skeleton), so
+   writing it usefully means writing the assembly rather than another standalone
+   object. Compounds already proved a writer must emit fixup entries rather than
+   self-contained blobs (see 4d step 4). Every OTHER object a ragdoll needs already
+   writes.
 6. **Round-trip validation** over the corpus — DONE 07-28y for the shipped
    encoders, and it earned its keep: a 700-file stride sample of the full 34,985
    mesh tree caught 8 polytope failures in exactly the categories the skeletons do

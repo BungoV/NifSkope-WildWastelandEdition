@@ -1,5 +1,48 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29d — hknpRagdollData layout measured; the "+0x80 trap" is now explained
+
+The ragdoll root's layout, **verified on all 37 with zero violations**. No encoder
+for it yet — deliberately, see the end.
+
+Seven hkArrays, each a pointer patched by a LOCAL fixup at `+d`, count at `+d+8`,
+`count|0x80000000` at `+d+12`:
+
+| desc | contents | count | stride | pad |
+|---|---|---|---|---|
+| +0x10 | body_props | bodies | 0x50 | — |
+| +0x20 | dyn_motion | bodies | 0x40 | — |
+| +0x30 | dyn_inertia | bodies | 0x70 | — |
+| +0x40 | cinfo | bodies | 0x60 | — |
+| +0x50 | constraints | **bones − 1** | 0x18 | 16 |
+| +0x60 | all zero | bodies | 0x08 | 16 |
+| +0x80 | bone → body index | **bones** | 0x04 | 16 |
+
+Payloads run back to back from +0x90 and the object ends where the last one does.
+A global fixup at +0x78 reaches the `hkaSkeleton`.
+
+**The "+0x80 bone-count trap" the spec has warned about since 4a is now concrete.**
+Most arrays are per-BODY, but +0x80 is per-BONE and the constraint count is
+**bones − 1, not bodies − 1**. On 34 of 37 ragdolls bones and bodies are equal, so
+the distinction is invisible — and my first verification pass assumed body count
+throughout and reported "3 violations" without saying what they were. The three are
+`SkeletonRef` (48 bodies, 11 bones), `skeletonSentryBodyPart` (24 / 9) and
+`TurretMountedSkeleton` (5 / 4): parts kits whose extra collision bodies sit outside
+the ragdoll hierarchy, which is the same thing the simulator's `looseBodies()`
+already handles. Distinguishing the two counts takes the violations to zero.
+
+That is the fourth time today a corpus has looked uniform because the sample could
+not separate two readings. It is also why the trap was worth a named warning.
+
+The two arrays nobody had identified: +0x80 is the identity map `0..n-1` on all 37,
+and +0x60 is entirely zero.
+
+**No encoder, on purpose.** This object carries 54 global fixups on a mid-sized
+ragdoll — one per shape, one per constraint, one for the skeleton — and writing it
+usefully means writing the packfile assembly around it, not another standalone
+object. That is the next real piece of work, and it now has a fully measured target.
+Every *other* object a ragdoll needs already writes.
+
 ## 2026-07-29c — hkaSkeleton: 37/37 from scratch, after formatted output lied again
 
 `hknpEncodeSkeleton`. **37 / 37 byte-exact, rebuilt entirely from the decoded bones
