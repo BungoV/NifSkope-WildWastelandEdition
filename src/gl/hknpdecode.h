@@ -43,8 +43,16 @@ struct HknpShape
 	 *
 	 * The 0x30-byte object is 16 bytes of header then hkCompressedMassProperties:
 	 * a packed centre of mass at +0x10, a packed inertia diagonal at +0x18, an
-	 * 8-byte packed quaternion for the major-axis frame at +0x20, then float
-	 * volume at +0x28 and float mass at +0x2c.
+	 * 8-byte major-axis frame at +0x20, then float volume at +0x28 and float mass
+	 * at +0x2c.
+	 *
+	 * The +0x20 field was once noted here as "one constant value in every file
+	 * seen". It is not: over 76 vanilla objects it takes 23 distinct values. The
+	 * earlier sample was simply too small, the same way the capsule's core box
+	 * looked like an AABB until tilted capsules turned up. Its packing is NOT
+	 * decoded -- as four int16 over 32768 the norm lands near sqrt(3) rather than
+	 * 1, and the largest component does not reliably saturate -- so it is carried
+	 * as opaque bytes in massMajorAxis rather than guessed at.
 	 *
 	 * All of it is computed on the shape with its FACE PLANES PUSHED OUT by the
 	 * convex radius -- not on the rounded Minkowski sum of hull and sphere. For a
@@ -66,6 +74,10 @@ struct HknpShape
 	Vector3 massInertiaRaw;
 	float massVolume = 0.0f;
 	float massMass = 0.0f;      //!< equals the volume in every vanilla case (density 1)
+	//! the 8 bytes at +0x20 verbatim: the major-axis frame, packing undecoded
+	quint64 massMajorAxis = 0;
+	//! byte offset of the hknpShapeMassProperties object, or -1
+	qsizetype massPropsOffset = -1;
 	//! the physical inertia diagonal, undoing Havok's 1.5 scale
 	Vector3 massInertia() const { return massInertiaRaw / 1.5f; }
 	bool isConvex = false;

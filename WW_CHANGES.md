@@ -1,5 +1,47 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28w — Mass-properties writer, and minHalfAngle identified
+
+Two of the three polytope blockers moved.
+
+**`hknpEncodeShapeMassProperties` is in, with an hkPackedVector3 *writer*** — the
+inverse of the decoder's, and the reusable half of this. `frexp` gives exactly the
+exponent wanted: its mantissa is in [0.5, 1), so every component divided by 2^E
+lands in range without searching for a scale. **68 of 68 vanilla objects round-trip**
+— 64 byte-identical, 4 differing *only* in the exponent of an all-zero vector.
+
+Those 4 are reported as their own category rather than folded into either column.
+A packed vector with three zero mantissas keeps whatever exponent Havok's arithmetic
+landed on (−45 in one vanilla centre of mass, where this writes −96); the decoded
+vector is identical, and the original exponent is genuinely unrecoverable because
+zero mantissas record no magnitude. Calling that a pass would hide a real difference;
+calling it a failure would imply something is wrong.
+
+**`minHalfAngle` is no longer an unknown quantity.** It is the sharpest edge on the
+face — the minimum over the face's edges of the angle to the neighbouring face,
+halved and quantized over 0..90° into a byte:
+
+    byte = round( halfAngle / 90° × 255 )
+
+Correlation 0.9985 over 2120 faces; **67% exact, 87% within 1.** Two refinements
+that mattered: shared edges have to be keyed by vertex *position*, not index, since
+the padded vertex arrays carry duplicates; and all 76 polytopes turn out to be closed
+manifolds, which rules out missing neighbours as the cause of the residual. Taking
+the minimum over *all* faces rather than edge-adjacent ones changes nothing (68.0%
+vs 67.4%), so that is not it either. The remaining error is systematically positive
+— Havok's value is conservatively lower than the true minimum — and the last step is
+not cracked. Semantics known, exact quantization not.
+
+**A correction.** The header claimed the `+0x20` major-axis field was "one constant
+value in every file seen". Over 76 objects it takes **23 distinct values** — the
+earlier sample was simply too small, exactly the way the capsule's core box looked
+like an AABB until tilted capsules turned up. Its packing is not decoded either: as
+four int16 over 32768 the norm sits near √3 rather than 1, and the largest component
+does not reliably saturate. So it is carried as opaque bytes, which is honest, and
+means there is still no defensible default for a *new* polytope.
+
+Capsules 819/819 and spheres 30/30 unchanged; self-tests green.
+
 ## 2026-07-28v — Polytope layout measured; encoder deliberately not started
 
 The convex polytope's layout is now pinned: **76 vanilla polytopes, zero violations**

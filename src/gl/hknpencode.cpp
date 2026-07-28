@@ -497,3 +497,51 @@ QByteArray hknpEncodeSphereShape( const Vector3 & centre, float radius, quint32 
 	}
 	return out;
 }
+
+namespace {
+
+/*! Write an hkPackedVector3: three int16 mantissas over a shared exponent.
+ *
+ * The inverse of hknpdecode's packedVector3. The exponent is chosen so the largest
+ * component fills the int16 range, and is stored in the fourth slot as
+ * (E + 96) << 7 with its low seven bits zero.
+ *
+ * frexp gives exactly the exponent wanted: it returns a mantissa in [0.5, 1), so
+ * every component divided by 2^E lands in (-1, 1) and scales into range without a
+ * separate search. The clamp still matters -- a component just under 1.0 can round
+ * to 32768, which is not an int16.
+ */
+void setPackedVector3( QByteArray & out, qsizetype offset, const Vector3 & v )
+{
+	float largest = 0.0f;
+	for ( int k = 0; k < 3; k++ )
+		largest = std::max( largest, std::fabs( v[k] ) );
+
+	int exponent = 0;
+	if ( largest > 0.0f )
+		std::frexp( largest, &exponent );
+	else
+		exponent = -96;	// the zero vector: any exponent works, pick the low end
+
+	const float scale = std::ldexp( 1.0f, -exponent ) * 32768.0f;
+	for ( int k = 0; k < 3; k++ ) {
+		const int q = std::clamp( int( std::lround( v[k] * scale ) ), -32768, 32767 );
+		setU16( out, offset + k * 2, quint16( qint16( q ) ) );
+	}
+	setU16( out, offset + 6, quint16( ( exponent + 96 ) << 7 ) );
+}
+
+} // namespace
+
+QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Vector3 & inertiaRaw,
+	float volume, float mass, quint64 majorAxis )
+{
+	QByteArray out( 0x30, 0 );	// +0x00..+0x0f is zero in all 76 vanilla objects
+	setPackedVector3( out, 0x10, centreOfMass );
+	setPackedVector3( out, 0x18, inertiaRaw );
+	const quint64 axis = qToLittleEndian( majorAxis );
+	std::memcpy( out.data() + 0x20, &axis, 8 );
+	setFloat( out, 0x28, volume );
+	setFloat( out, 0x2c, mass );
+	return out;
+}

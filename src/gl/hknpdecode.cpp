@@ -887,6 +887,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 					out.massInertiaRaw = packedVector3( r, mp + 0x18 );
 					out.massVolume = r.f32( mp + 0x28 );
 					out.massMass = r.f32( mp + 0x2c );
+					out.massMajorAxis = r.u64( mp + 0x20 );
+					out.massPropsOffset = mp;
 				}
 			}
 			return !out.verts.isEmpty();

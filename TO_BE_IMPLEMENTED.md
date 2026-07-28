@@ -799,20 +799,37 @@ capsule's end points push its own vertices out to +0x70.
 — 2257 of 2296 slots. The other 39 are the multiple-of-4 padding slots, which
 repeat an earlier index.
 
-**Three things still to establish before writing the encoder:**
+**What still stands between this and an encoder** (updated 07-28w):
 
-1. **`minHalfAngle`.** Not a constant: dozens of values across the corpus with no
-   clustering, i.e. a quantized angle. Capsules are the exception at a flat 4. Now
-   preserved through the decode as `HknpShape::faceAngles`, so a round-trip encoder
-   can carry it, but *deriving* it for new geometry needs Havok's quantization.
-2. **Padding contents.** Both the vertex array and the plane array are padded to a
-   multiple of 4, and the spare planes are NOT one sentinel the way a capsule's are
-   — `(0,0,1,0)` in 50 slots, all-zero in 50, something else in 2. Harmless for
-   geometry, fatal for a byte comparison.
-3. **`hknpShapeMassProperties`.** Required (4d step 1); decode is done and the
-   format is in 4a. Writing it needs an hkPackedVector3 *writer* and, for general
-   hulls, the plane-offset volume and inertia by halfspace intersection. Boxes are
-   solved outright and are 28 of 37 in a 400-file sample.
+1. **`minHalfAngle` — semantics SOLVED, exact quantization not.** It is the sharpest
+   edge on the face: the minimum over the face's edges of the angle to the
+   neighbouring face, halved and quantized over 0..90 degrees into a byte,
+   `byte = round(halfAngle / 90 * 255)`. Correlation 0.9985 over 2120 faces, **67%
+   exact and 87% within 1**. Details that mattered: key shared edges by vertex
+   POSITION, not index, since the padded vertex arrays carry duplicates; all 76
+   polytopes are closed manifolds, so missing neighbours are not the cause of the
+   residual; and taking the minimum over all faces instead of edge-adjacent ones
+   changes nothing (68.0% vs 67.4%). The residual is systematically positive —
+   Havok's stored value is conservatively lower than the true minimum. Preserved
+   through the decode as `HknpShape::faceAngles`, so a round trip is unaffected;
+   only synthesis needs the last step.
+2. **Padding contents — still open.** Both the vertex array and the plane array are
+   padded to a multiple of 4, and the spare planes are NOT one sentinel the way a
+   capsule's are — `(0,0,1,0)` in 50 slots, all-zero in 50, something else in 2.
+   Harmless for geometry, fatal for a byte comparison.
+3. ~~**`hknpShapeMassProperties`**~~ — **SHIPPED 07-28w.**
+   `hknpEncodeShapeMassProperties`, with an hkPackedVector3 writer. 68 of 68 vanilla
+   objects round-trip: 64 byte-identical, 4 differing only in the exponent of an
+   all-zero vector, which is inert and unrecoverable (zero mantissas record no
+   magnitude). For NEW geometry the plane-offset volume and inertia by halfspace
+   intersection are still needed; boxes are solved outright and are 28 of 37 in a
+   400-file sample.
+4. **The `+0x20` major-axis frame — NEW blocker, packing undecoded.** Once noted as
+   "one constant value in every file seen"; over 76 objects it takes 23 distinct
+   values. As four int16 over 32768 the norm lands near sqrt(3) rather than 1 and
+   the largest component does not reliably saturate, so it is not four normalized
+   components. Carried verbatim as `HknpShape::massMajorAxis`, which makes a round
+   trip exact but leaves no defensible default for a new polytope.
 
 Reuse `hknpEncodeCapsuleShape` as the model: same convex family, same relArray
 convention, same w tagging, and validate the same way — structure byte-exact,

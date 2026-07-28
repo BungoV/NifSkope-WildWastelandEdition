@@ -83,4 +83,16 @@ QByteArray hknpEncodeCapsuleShape( const HknpCapsuleInput & input );
  */
 QByteArray hknpEncodeSphereShape( const Vector3 & centre, float radius, quint32 materialCRC );
 
+/*! Write one hknpShapeMassProperties object: always 48 bytes.
+ *
+ * Required by every convex polytope. `inertiaRaw` is the value as STORED, which is
+ * 1.5x the physical inertia -- pass `HknpShape::massInertiaRaw`, not massInertia().
+ *
+ * `majorAxis` is the 8-byte frame at +0x20, carried verbatim because its packing is
+ * not decoded (see HknpShape). Pass the value read off an existing shape to rewrite
+ * it; there is no honest default for a new one yet.
+ */
+QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Vector3 & inertiaRaw,
+	float volume, float mass, quint64 majorAxis );
+
 #endif // HKNPENCODE_H

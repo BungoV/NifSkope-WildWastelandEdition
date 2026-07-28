@@ -908,6 +908,7 @@ int cmdCollisionRoundTrip( const QString & file )
 		return 1;
 
 	int total = 0, structOk = 0, fullyExact = 0, spheres = 0, spheresExact = 0;
+	int massProps = 0, massPropsExact = 0, massPropsInert = 0;
 	float worstVert = 0.0f, worstPlane = 0.0f;
 	QMap<int, int> byteHist;   // offset -> how often the structural bytes differed
 
@@ -930,6 +931,41 @@ int cmdCollisionRoundTrip( const QString & file )
 			continue;
 
 		for ( const HknpShape & shp : sys.shapes ) {
+			// mass properties: everything is stored, so this must be byte-exact too
+			if ( shp.hasMassProps && shp.massPropsOffset >= 0
+				&& shp.massPropsOffset + 0x30 <= bytes.size() ) {
+				massProps++;
+				const QByteArray was = bytes.mid( shp.massPropsOffset, 0x30 );
+				const QByteArray now = hknpEncodeShapeMassProperties( shp.massCom,
+					shp.massInertiaRaw, shp.massVolume, shp.massMass, shp.massMajorAxis );
+				if ( now == was ) {
+					massPropsExact++;
+				} else {
+					/* A packed vector whose three mantissas are all zero keeps
+					 * whatever exponent Havok's arithmetic happened to land on --
+					 * one vanilla centre of mass carries -45 where this writes -96.
+					 * The decoded vector is identical either way, and the original
+					 * exponent is genuinely unrecoverable: zero mantissas record no
+					 * magnitude. Counted apart rather than called a pass or a fail.
+					 */
+					bool inert = true;
+					for ( int o = 0; o < 0x30; o++ ) {
+						if ( now.at( o ) == was.at( o ) )
+							continue;
+						const int base = ( o >= 0x10 && o < 0x18 ) ? 0x10
+									   : ( o >= 0x18 && o < 0x20 ) ? 0x18 : -1;
+						if ( base < 0 || o < base + 6 ) {	// not an exponent slot
+							inert = false;
+							break;
+						}
+						for ( int k = 0; k < 6; k++ )
+							if ( was.at( base + k ) != 0 )
+								inert = false;
+					}
+					if ( inert )
+						massPropsInert++;
+				}
+			}
 			// a sphere derives nothing, so it must come back byte for byte
 			if ( shp.primType == 1 && shp.rawOffset >= 0 && shp.rawOffset + 0x80 <= bytes.size() ) {
 				spheres++;
@@ -1003,10 +1039,19 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( spheres )
 		out() << "spheres    " << spheres << "  byte-exact " << spheresExact
 			  << " / " << spheres << Qt::endl;
+	if ( massProps ) {
+		out() << "massprops  " << massProps << "  byte-exact " << massPropsExact
+			  << " / " << massProps;
+		if ( massPropsInert )
+			out() << "  (+" << massPropsInert << " differing only in a zero vector's"
+				  << " inert exponent)";
+		out() << Qt::endl;
+	}
 	out() << "capsules   " << total << Qt::endl;
 	if ( !total ) {
 		out() << "  no capsules to check" << Qt::endl;
-		return ( spheresExact < spheres ) ? 1 : 0;
+		return ( spheresExact < spheres
+			|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 	}
 	out() << "  structure byte-exact   " << structOk << " / " << total << Qt::endl;
 	out() << "  whole object exact     " << fullyExact << " / " << total << Qt::endl;
@@ -1018,7 +1063,8 @@ int cmdCollisionRoundTrip( const QString & file )
 			out() << " +0x" << QString::number( it.key(), 16 ) << "(" << it.value() << ")";
 		out() << Qt::endl;
 	}
-	return ( structOk < total || spheresExact < spheres ) ? 1 : 0;
+	return ( structOk < total || spheresExact < spheres
+		|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 }
 
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
