@@ -716,9 +716,16 @@ vanilla:
 - A capsule whose axis is X permutes: bit0 -> X, bit1 -> Y (0 = low),
   bit2 -> Z (0 = high).
 
-Bit 0 is the capsule's axis in both, so the box is built in a local frame (axis
-plus two perpendiculars) and written out in shape space. Reproducing vanilla
-byte-for-byte needs Elric's rule for choosing those two perpendiculars.
+Bit 0 is the capsule's axis in both, low then high, so the box is built in a local
+frame (axis plus two perpendiculars) and written out in shape space.
+
+**Lead worth testing first.** Writing each case as (u, v, axis) with the sign each
+bit takes: the Z-axis capsule gives (-X, +Y, Z) and the X-axis capsule gives
+(+Y, -Z, X). Both satisfy **u x v = -axis** -- a consistently LEFT-handed frame.
+If that holds across a wider sample, the rule is just "pick the two perpendicular
+world axes in cyclic order after the axis, then flip whichever sign makes the
+triple left-handed", and byte-exactness follows. Two capsules is not a proof;
+check a Y-axis one and some diagonal ones before building on it.
 
 This matters because **the 24-byte index table is a constant** shared by all 778
 capsules: permuting the vertices without permuting the indices describes a
