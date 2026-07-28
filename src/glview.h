@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define GLVIEW_H_INCLUDED
 
 #include "gl/glscene.h"
+#include "physics/physicspreview.h"
 #include "model/nifmodel.h"
 
 #include <QOpenGLWindow> // Inherited
@@ -176,6 +177,23 @@ public:
 	bool segmentPaintBrushActive() const { return segmentPaintMode && segmentPaintBrushEnabled; }
 	float segmentPaintBrushRadius() const { return segmentPaintRadius; }
 	bool editModeActive() const { return editMode; }
+
+	/*! Physics Sim: a viewport mode alongside Object and Edit.
+	 *
+	 * The ragdoll runs live, a drag grabs a bone with a spring, Space pauses and R
+	 * resets. It is a PREVIEW -- nothing it does is written back to the file, so
+	 * leaving the mode puts everything where it was.
+	 */
+	bool setPhysicsSimMode( bool on );
+	bool physicsSimActive() const { return physicsPreview.active(); }
+	PhysicsPreview & physicsSim() { return physicsPreview; }
+	//! advance the preview AND refresh what is drawn; dt comes from advanceGears.
+	//! Public so a harness can drive the real per-frame path rather than stepping
+	//! the solver behind the viewport's back and never noticing the drawn
+	//! geometry had stopped following it.
+	void physicsTick( float dt );
+	//! what the viewport is currently drawing as a collision preview
+	const QVector<Vector3> & collisionPreview() const { return collisionPreviewSoup; }
 	//! Blender-style mouse mapping: false = select with LMB and place the 3D
 	//! cursor/gizmo with RMB (default); true = swapped (2.7x right-click select).
 	//! Only the click roles swap; drags (orbit / zoom), the select gadgets and
@@ -438,6 +456,12 @@ private:
 	NifModel * model;
 	Scene * scene = nullptr;
 	QVector<Vector3> collisionPreviewSoup;
+	PhysicsPreview physicsPreview;
+	//! forward a viewport event to the physics mode; true if it consumed it
+	bool physicsMousePress( QMouseEvent * event );
+	bool physicsMouseMove( QMouseEvent * event );
+	bool physicsMouseRelease( QMouseEvent * event );
+	bool physicsKeyPress( QKeyEvent * event );
 	QVector<Vector3> sessionDocumentPreviewSoup;
 	//! Per-vertex flat-shaded colors for the opaque session preview; computed
 	//! once per soup rebuild from face normals against a fixed light direction.

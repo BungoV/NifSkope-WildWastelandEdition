@@ -465,8 +465,23 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		? ( primary->workspaceRoot ? primary->workspaceRoot : primary ) : skope;
 	if ( !background ) {
 		skope->restoreUi();
-		skope->show();
-		skope->raise();
+		/* WW_WINDOW_AT=x,y: place the window BEFORE showing it, and do not raise.
+		 *
+		 * For running a GUI harness on a second monitor while someone is working on
+		 * the first. Moving it after show() is not the same thing -- the window
+		 * appears on the primary monitor for a frame and then jumps, which is
+		 * exactly the interruption this exists to avoid -- and raise() would take
+		 * focus even once it is out of the way.
+		 */
+		const QString at = qEnvironmentVariable( "WW_WINDOW_AT" );
+		const QStringList xy = at.split( QLatin1Char( ',' ) );
+		if ( xy.size() == 2 ) {
+			skope->move( xy.at( 0 ).toInt(), xy.at( 1 ).toInt() );
+			skope->show();
+		} else {
+			skope->show();
+			skope->raise();
+		}
 	}
 
 	// TEMP DIAGNOSTIC (WW_EXTRUDE_TEST=1, remove when the append-row condition
@@ -3429,6 +3444,196 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* PHYSICS SIM HARNESS (WW_PHYSICS_TEST=<report.txt>): drive the viewport's
+	 * Physics Sim mode through synthesized mouse and key events and report what
+	 * happened, so the mode is verified rather than eyeballed.
+	 *
+	 * It posts REAL QMouseEvents at the GLView rather than calling the preview
+	 * directly. The controller underneath is already covered headlessly by
+	 * `simulate --drag-spring` and the pick self-test; what only a window can
+	 * exercise is the event plumbing -- that a press reaches the picker, that a
+	 * move reaches the drag, that Space and R are not swallowed by another
+	 * binding first. Calling the controller would test the part that is already
+	 * tested and skip the part that is not.
+	 *
+	 * WW_WINDOW_AT=x,y places the window before it is shown, so a run can be put
+	 * on a second monitor and never take focus from what the user is doing.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PHYSICS_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
+			QTimer::singleShot( 2000, skope, [skope]() {
+				QString outPath = qEnvironmentVariable( "WW_PHYSICS_TEST" );
+				if ( outPath.isEmpty() || outPath == QStringLiteral( "1" ) )
+					outPath = QApplication::applicationDirPath() + "/ww_physics_test.txt";
+				QStringList log;
+				int failures = 0;
+				auto check = [&log, &failures]( bool ok, const QString & what ) {
+					log << ( ok ? QStringLiteral( "ok    " ) : QStringLiteral( "FAIL  " ) ) + what;
+					if ( !ok )
+						failures++;
+				};
+
+				GLView * gl = skope->getGLView();
+				PhysicsPreview & pv = gl->physicsSim();
+
+				/* A file with no jointed collision is a SKIP, not a failure.
+				 *
+				 * Refusing is the correct behaviour there -- most NIFs are not ragdolls,
+				 * and CreateABot's skeleton carries two single-body systems and no
+				 * constraints at all. Counting it as failed cascaded one honest refusal
+				 * into nine red lines and would have made a corpus run unreadable.
+				 */
+				if ( !gl->setPhysicsSimMode( true ) ) {
+					log << QStringLiteral( "skip  nothing to simulate in this file" );
+					QFile sf( outPath );
+					if ( sf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+						sf.write( log.join( QChar( '\n' ) ).toUtf8() + '\n' );
+					qApp->quit();
+					return;
+				}
+				check( pv.active(), QStringLiteral( "preview active" ) );
+				check( pv.bodyCount() > 1, QStringLiteral( "bodies: %1" ).arg( pv.bodyCount() ) );
+				check( pv.jointCount() > 0, QStringLiteral( "joints: %1" ).arg( pv.jointCount() ) );
+				const QVector<Vector3> atEntry = pv.soup();
+				check( !atEntry.isEmpty(), QStringLiteral( "geometry: %1 triangles" ).arg( atEntry.size() / 3 ) );
+
+				/* Grab FIRST, in the authored pose.
+				 *
+				 * Testing the grab after letting it fall meant clicking at where the
+				 * bodies used to be: a brahmin drops 4.5 m in the first second, which
+				 * put every one of them out of frame and failed the check for a reason
+				 * that had nothing to do with picking.
+				 */
+				gl->setOrientation( GLView::ViewFront, true );
+				QApplication::processEvents();
+
+				/* Grab a body through the real event path. The target is a body's
+				 * own centre projected to screen, so the click lands on something
+				 * whatever the camera happens to be framing.
+				 */
+				/* Counted in its own pass. Counting inside the grab loop stops at the
+				 * first success, so it reported "1 body on screen" for a ragdoll filling
+				 * the viewport -- a diagnostic that misleads is worse than none.
+				 */
+				int onScreen = 0, rayHits = 0;
+				for ( int b = 0; b < pv.sim().bodies().size(); b++ ) {
+					QPointF sp;
+					if ( !gl->worldToScreen( pv.sim().toWorld( b, Vector3() ) * PhysicsPreview::SCALE, sp )
+						|| sp.x() < 0 || sp.y() < 0 || sp.x() >= gl->width() || sp.y() >= gl->height() )
+						continue;
+					onScreen++;
+					Vector3 ro, rd;
+					gl->mouseRayWorld( sp, ro, rd );
+					if ( pv.sim().pick( ro / PhysicsPreview::SCALE, rd ).hit() )
+						rayHits++;
+				}
+				log << QStringLiteral( "      %1 of %2 body centres on screen, the picker hits %3" )
+					.arg( onScreen ).arg( pv.sim().bodies().size() ).arg( rayHits );
+
+				int grabbed = -1;
+				QPointF grabAt;
+				for ( int b = 0; b < pv.sim().bodies().size() && grabbed < 0; b++ ) {
+					QPointF sp;
+					if ( !gl->worldToScreen( pv.sim().toWorld( b, Vector3() ) * PhysicsPreview::SCALE, sp ) )
+						continue;
+					if ( sp.x() < 0 || sp.y() < 0
+						|| sp.x() >= gl->width() || sp.y() >= gl->height() )
+						continue;
+
+					QMouseEvent press( QEvent::MouseButtonPress, sp, gl->mapToGlobal( sp ),
+						gl->selectMouseButton(), gl->selectMouseButton(), Qt::NoModifier );
+					QApplication::sendEvent( gl, &press );
+					if ( pv.grabbing() ) {
+						grabbed = pv.grabbedBody();
+						grabAt = sp;
+					}
+				}
+				check( grabbed >= 0, QStringLiteral( "a click grabbed body %1" ).arg( grabbed ) );
+
+				if ( grabbed >= 0 ) {
+					const Vector3 before = pv.sim().toWorld( grabbed, Vector3() );
+					// drag 150 px right and up, then let the solver chase it
+					for ( int i = 1; i <= 15; i++ ) {
+						const QPointF p = grabAt + QPointF( 10.0 * i, -6.0 * i );
+						QMouseEvent move( QEvent::MouseMove, p, gl->mapToGlobal( p ),
+							Qt::NoButton, gl->selectMouseButton(), Qt::NoModifier );
+						QApplication::sendEvent( gl, &move );
+						for ( int k = 0; k < 4; k++ )
+							gl->physicsTick( 1.0f / 60.0f );
+					}
+					const float pulled = ( pv.sim().toWorld( grabbed, Vector3() ) - before ).length();
+					check( pulled > 0.005f, QStringLiteral( "the drag moved it %1 m" )
+						.arg( double( pulled ), 0, 'f', 4 ) );
+
+					QMouseEvent rel( QEvent::MouseButtonRelease, grabAt, gl->mapToGlobal( grabAt ),
+						gl->selectMouseButton(), Qt::NoButton, Qt::NoModifier );
+					QApplication::sendEvent( gl, &rel );
+					check( !pv.grabbing(), QStringLiteral( "release let go" ) );
+				}
+
+				/* A second of simulated time through the REAL per-frame path.
+				 *
+				 * The measurement is on what the viewport DRAWS, not on the solver's
+				 * own pose. Stepping the solver directly, which is what this did at
+				 * first, passed every check while the drawn geometry never moved -- the
+				 * preview was pushed once at mode entry and never again, and only
+				 * looking at two identical screenshots caught it.
+				 */
+				const QVector<Vector3> drawnBefore = gl->collisionPreview();
+				for ( int i = 0; i < 60; i++ )
+					gl->physicsTick( 1.0f / 60.0f );
+				const QVector<Vector3> drawnAfter = gl->collisionPreview();
+				float moved = 0.0f;
+				for ( int i = 0; i < std::min( drawnBefore.size(), drawnAfter.size() ); i++ )
+					moved = std::max( moved, ( drawnBefore.at( i ) - drawnAfter.at( i ) ).length() );
+				check( !drawnBefore.isEmpty(), QStringLiteral( "the viewport is drawing it" ) );
+				check( moved > 0.01f, QStringLiteral( "what is DRAWN moves: %1 game units in 1 s" )
+					.arg( double( moved ), 0, 'f', 3 ) );
+				check( moved < 10000.0f, QStringLiteral( "it stayed bounded" ) );
+				// mid-fall, so the images show the viewport actually animating rather
+				// than only the pose it resets to
+				gl->update();
+				QApplication::processEvents();
+				gl->grabFramebuffer().save( outPath + QStringLiteral( ".falling.png" ) );
+
+				// Space pauses: the pose must then stop changing
+				QKeyEvent space( QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier );
+				QApplication::sendEvent( gl, &space );
+				check( pv.paused(), QStringLiteral( "Space paused it" ) );
+				const QVector<Vector3> paused1 = gl->collisionPreview();
+				for ( int i = 0; i < 30; i++ )
+					gl->physicsTick( 1.0f / 60.0f );
+				check( gl->collisionPreview() == paused1, QStringLiteral( "paused really is frozen" ) );
+				QApplication::sendEvent( gl, &space );
+				check( !pv.paused(), QStringLiteral( "Space resumed it" ) );
+
+				// R resets to the stored pose
+				QKeyEvent rKey( QEvent::KeyPress, Qt::Key_R, Qt::NoModifier );
+				QApplication::sendEvent( gl, &rKey );
+				const QVector<Vector3> afterReset = pv.soup();
+				float back = 0.0f;
+				for ( int i = 0; i < std::min( atEntry.size(), afterReset.size() ); i++ )
+					back = std::max( back, ( atEntry.at( i ) - afterReset.at( i ) ).length() );
+				check( back < 1.0e-3f, QStringLiteral( "R restored the start pose (worst %1)" )
+					.arg( double( back ), 0, 'f', 6 ) );
+
+				gl->update();
+				QApplication::processEvents();
+				gl->grabFramebuffer().save( outPath + QStringLiteral( ".png" ) );
+
+				check( gl->setPhysicsSimMode( false ) == false, QStringLiteral( "mode left" ) );
+				check( !pv.active(), QStringLiteral( "preview stopped" ) );
+
+				log << QStringLiteral( "%1 of %2 checks passed" )
+					.arg( log.size() - failures ).arg( log.size() );
+				QFile f( outPath );
+				if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					f.write( log.join( QStringLiteral( "\n" ) ).toUtf8() + "\n" );
+				qApp->quit();
+			} );
+		} );
+	}
+
 	// RENDER REGRESSION BASELINE (WW_RENDER_SHOT=<out.png>): grab the GL
 	// framebuffer for one NIF and quit, so a driver script can walk a corpus and
 	// pixel-diff before/after a shader change. This is the guard for the particle
@@ -5120,16 +5325,20 @@ void NifSkope::initDockWidgets()
 		QAction * vertexPaintMode = modeMenu->addAction( vertexPaintIcon, tr( "Vertex Paint" ) );
 		QAction * weightPaintMode = modeMenu->addAction( weightPaintIcon, tr( "Weight Paint" ) );
 		QAction * segmentPaintMode = modeMenu->addAction( segmentPaintIcon, tr( "Segment Paint" ) );
+		QAction * physicsMode = modeMenu->addAction( objectIcon, tr( "Physics Sim" ) );
 		objectMode->setObjectName( QStringLiteral( "ViewportObjectModeAction" ) );
 		editMode->setObjectName( QStringLiteral( "ViewportEditModeAction" ) );
 		poseMode->setObjectName( QStringLiteral( "ViewportPoseModeAction" ) );
 		vertexPaintMode->setObjectName( QStringLiteral( "ViewportVertexPaintAction" ) );
 		weightPaintMode->setObjectName( QStringLiteral( "ViewportWeightPaintAction" ) );
 		segmentPaintMode->setObjectName( QStringLiteral( "ViewportSegmentPaintAction" ) );
+		physicsMode->setObjectName( QStringLiteral( "ViewportPhysicsSimAction" ) );
+		physicsMode->setToolTip( tr( "Run this file's ragdoll live. Drag a bone to pull it, "
+			"Space pauses, R resets. Nothing is written back." ) );
 		poseMode->setToolTip( tr( "Pose the skeleton: bones are drawn and clickable; click one then G/R/S to pose it." ) );
 		vertexPaintMode->setToolTip( tr( "Paint per-vertex RGB colour or alpha on the active mesh." ) );
 		segmentPaintMode->setToolTip( tr( "Paint binary face membership for FO4 segments and subsegments." ) );
-		for ( QAction * action : { objectMode, editMode, poseMode, vertexPaintMode, weightPaintMode, segmentPaintMode } ) {
+		for ( QAction * action : { objectMode, editMode, poseMode, vertexPaintMode, weightPaintMode, segmentPaintMode, physicsMode } ) {
 			action->setCheckable( true );
 			modeGroup->addAction( action );
 		}
@@ -5141,14 +5350,15 @@ void NifSkope::initDockWidgets()
 			const QFontMetrics fm( modeButton->font() );
 			int wMax = 0;
 			for ( const QString & s : { tr( "Object Mode" ), tr( "Edit Mode" ), tr( "Pose Mode" ),
-					tr( "Vertex Paint" ), tr( "Weight Paint" ), tr( "Segment Paint" ) } )
+					tr( "Vertex Paint" ), tr( "Weight Paint" ), tr( "Segment Paint" ), tr( "Physics Sim" ) } )
 				wMax = std::max( wMax, fm.horizontalAdvance( s ) );
 			// text + icon + paddings/border + menu indicator
 			modeButton->setFixedWidth( wMax + modeButton->iconSize().width() + 46 );
 		}
 
 		auto syncModeButton = [this, modeButton, objectMode, editMode, poseMode, vertexPaintMode,
-			weightPaintMode, segmentPaintMode, objectIcon, editIcon, vertexPaintIcon, weightPaintIcon, segmentPaintIcon]() {
+			weightPaintMode, segmentPaintMode, physicsMode, objectIcon, editIcon, vertexPaintIcon,
+			weightPaintIcon, segmentPaintIcon]() {
 			bool paintingWeights = ogl->riggingWeightPaintModeActive();
 			bool paintingVertices = ogl->vertexPaintModeActive();
 			bool paintingSegments = ogl->segmentPaintModeActive();
@@ -5160,14 +5370,18 @@ void NifSkope::initDockWidgets()
 			QSignalBlocker vertexBlocker( vertexPaintMode );
 			QSignalBlocker weightBlocker( weightPaintMode );
 			QSignalBlocker segmentBlocker( segmentPaintMode );
-			bool anyOther = paintingWeights || paintingVertices || paintingSegments || editing || posing;
+			const bool simulating = ogl->physicsSimActive();
+			QSignalBlocker physicsBlocker( physicsMode );
+			physicsMode->setChecked( simulating );
+			bool anyOther = paintingWeights || paintingVertices || paintingSegments || editing || posing || simulating;
 			objectMode->setChecked( !anyOther );
 			editMode->setChecked( !paintingWeights && !paintingVertices && !paintingSegments && !posing && editing );
 			poseMode->setChecked( posing );
 			vertexPaintMode->setChecked( paintingVertices );
 			weightPaintMode->setChecked( paintingWeights );
 			segmentPaintMode->setChecked( paintingSegments );
-			modeButton->setText( paintingWeights ? QObject::tr( "Weight Paint" )
+			modeButton->setText( simulating ? QObject::tr( "Physics Sim" )
+				: paintingWeights ? QObject::tr( "Weight Paint" )
 				: paintingVertices ? QObject::tr( "Vertex Paint" )
 				: paintingSegments ? QObject::tr( "Segment Paint" )
 				: posing ? QObject::tr( "Pose Mode" )
@@ -5177,6 +5391,7 @@ void NifSkope::initDockWidgets()
 				: ( editing ? editIcon : objectIcon ) );
 		};
 		connect( objectMode, &QAction::triggered, this, [this]() {
+			ogl->setPhysicsSimMode( false );
 			ogl->setRiggingWeightPaintMode( false );
 			ogl->setVertexPaintMode( false );
 			ogl->setSegmentPaintMode( false );
@@ -5184,6 +5399,7 @@ void NifSkope::initDockWidgets()
 			ogl->setEditMode( false );
 		} );
 		connect( editMode, &QAction::triggered, this, [this]() {
+			ogl->setPhysicsSimMode( false );
 			ogl->setRiggingWeightPaintMode( false );
 			ogl->setVertexPaintMode( false );
 			ogl->setSegmentPaintMode( false );
@@ -5196,6 +5412,22 @@ void NifSkope::initDockWidgets()
 			ogl->setSegmentPaintMode( false );
 			ogl->setEditMode( false );
 			ogl->setPoseMode( true );
+		} );
+		connect( physicsMode, &QAction::triggered, this, [this, syncModeButton]() {
+			ogl->setRiggingWeightPaintMode( false );
+			ogl->setVertexPaintMode( false );
+			ogl->setSegmentPaintMode( false );
+			ogl->setPoseMode( false );
+			ogl->setEditMode( false );
+			if ( !ogl->setPhysicsSimMode( true ) ) {
+				// nothing to simulate: say so rather than sitting in a mode that does
+				// nothing, which reads as the feature being broken
+				QMessageBox::information( this, tr( "Physics Sim" ),
+					tr( "This file has no jointed collision to simulate.\n\n"
+						"Physics Sim runs a ragdoll: it needs a bhkRagdollSystem, or a "
+						"physics system whose bodies are joined by constraints." ) );
+			}
+			syncModeButton();
 		} );
 		connect( ogl, &GLView::editModeChanged, this, [this, syncModeButton]( bool enabled ) {
 			if ( enabled && !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()

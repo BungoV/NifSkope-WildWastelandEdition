@@ -1,5 +1,68 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29m — Physics Sim viewport mode
+
+The mode bungo asked for. It sits alongside Object, Edit and Pose in the mode
+menu: the ragdoll runs live, dragging a bone pulls it with a spring, Space
+pauses, R resets, Escape leaves. Nothing is written back to the file, so leaving
+puts everything exactly as it was.
+
+Verified in a real window, on the second monitor, with `WW_PHYSICS_TEST`:
+**7 rigs pass 17 of 17 checks each, 2 correctly skipped, 0 failures.**
+
+### Built to be testable
+
+`PhysicsPreview` owns the sim, the grab and the posed geometry and is GL-free and
+widget-free, so the only part that genuinely needs a window is the event plumbing
+in GLView. The simulated pose goes out through `setCollisionPreview`, the channel
+the collision tools already draw through, so nothing in the render path had to
+learn about ragdolls.
+
+The harness posts **real QMouseEvents and QKeyEvents at the GLView** rather than
+calling the preview directly. The controller underneath is already covered
+headlessly by the drag-spring and pick self-tests; what only a window can exercise
+is that a press reaches the picker, that a move reaches the drag, and that Space
+and R are not swallowed by another binding first. Calling the controller would
+have tested the tested part and skipped the rest.
+
+`WW_WINDOW_AT=x,y` places the window before it is shown and skips `raise()`, so a
+run lands on a second monitor and never takes focus. Moving it after `show()` is
+not the same thing: it appears on the primary monitor for a frame and then jumps,
+which is the interruption the whole arrangement exists to avoid.
+
+### Two bugs only the screenshots caught
+
+**The viewport was not following the simulation.** Every check passed — the pose
+moved 449 units in a second — and the two screenshots were pixel-identical. The
+harness was stepping the solver directly and bypassing the per-frame tick that
+pushes the pose to the preview, so the drawn geometry was whatever mode entry had
+set and never changed again. The checks now measure `GLView::collisionPreview()`,
+what is actually **drawn**, not what the solver thinks.
+
+**The ragdoll fell out of the world.** With that fixed the next screenshot showed
+an empty grid: no ground plane, so a brahmin free-falls 6.4 m in the first second
+and is gone. The preview now puts a floor just under the rig at entry, the same
+placement the headless `simulate` uses, and the shot shows what it should — the
+thing dragged sideways, collapsed, and lying in a heap on the grid.
+
+Neither was visible in a passing test report. Both were obvious in a picture.
+
+### A refusal is not a failure
+
+`CreateABot` and `Robot` carry single-body physics systems with no constraints —
+there is nothing to simulate and refusing is correct. The first harness counted
+that as nine failures, which would have made a corpus run unreadable; it reports a
+skip now, and the mode itself explains the situation in a dialog rather than
+sitting in a mode that does nothing.
+
+### Known rough edge
+
+A ray through a body's centre of mass hits geometry for 30 of the brahmin's 39
+bodies. The other nine have their com outside their own shapes, which is ordinary
+for a curved limb. It affects nothing a user does — they click on the limb, not on
+its centre of mass — and is recorded because the harness reports it and the number
+would otherwise look like a bug later.
+
 ## 2026-07-29k — ray picking, and the identity the viewport will lean on
 
 Second half of the Physics Sim mode's testable part. `RagdollSim::pick` returns

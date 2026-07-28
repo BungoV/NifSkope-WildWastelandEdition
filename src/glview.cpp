@@ -323,6 +323,94 @@ QWidget * GLView::createWindowContainer( QWidget * parent )
 	return graphicsView;
 }
 
+/*! Enter or leave Physics Sim mode.
+ *
+ * The simulated pose is pushed through setCollisionPreview, the same channel the
+ * collision tools already draw through, so nothing in the render path had to
+ * learn about ragdolls. Leaving clears it, which puts the viewport back exactly
+ * as it was -- the mode never touches the model.
+ */
+bool GLView::setPhysicsSimMode( bool on )
+{
+	if ( !on ) {
+		physicsPreview.stop();
+		clearCollisionPreview();
+		update();
+		return false;
+	}
+	if ( physicsPreview.active() )
+		return true;
+
+	QString error;
+	if ( !physicsPreview.start( model, &error ) ) {
+		physicsPreview.stop();
+		return false;
+	}
+	setCollisionPreview( physicsPreview.soup() );
+	update();
+	return true;
+}
+
+void GLView::physicsTick( float dt )
+{
+	if ( !physicsPreview.active() )
+		return;
+	physicsPreview.step( dt );
+	// pushed every tick even while paused: a paused sim still moves when it is
+	// being dragged, and a preview that only refreshed while running would show
+	// the grab doing nothing
+	setCollisionPreview( physicsPreview.soup() );
+}
+
+bool GLView::physicsMousePress( QMouseEvent * event )
+{
+	if ( !physicsPreview.active() || event->button() != selectMouseButton() )
+		return false;
+	Vector3 ro, rd;
+	mouseRayWorld( event->position(), ro, rd );
+	// a miss is not consumed, so clicking empty space still orbits the camera
+	return physicsPreview.grab( ro, rd );
+}
+
+bool GLView::physicsMouseMove( QMouseEvent * event )
+{
+	if ( !physicsPreview.active() || !physicsPreview.grabbing() )
+		return false;
+	Vector3 ro, rd;
+	mouseRayWorld( event->position(), ro, rd );
+	physicsPreview.dragTo( ro, rd );
+	return true;
+}
+
+bool GLView::physicsMouseRelease( QMouseEvent * event )
+{
+	Q_UNUSED( event );
+	if ( !physicsPreview.active() || !physicsPreview.grabbing() )
+		return false;
+	physicsPreview.release();
+	return true;
+}
+
+bool GLView::physicsKeyPress( QKeyEvent * event )
+{
+	if ( !physicsPreview.active() )
+		return false;
+	switch ( event->key() ) {
+	case Qt::Key_Space:
+		physicsPreview.setPaused( !physicsPreview.paused() );
+		return true;
+	case Qt::Key_R:
+		physicsPreview.reset();
+		setCollisionPreview( physicsPreview.soup() );
+		update();
+		return true;
+	case Qt::Key_Escape:
+		setPhysicsSimMode( false );
+		return true;
+	}
+	return false;
+}
+
 void GLView::setCollisionPreview( const QVector<Vector3> & triangleSoup )
 {
 	collisionPreviewSoup = triangleSoup;
@@ -17716,6 +17804,7 @@ void GLView::advanceGears()
 		return;
 
 	dT = std::clamp< float >( dT, 0.0f, 1.0f );
+	physicsTick( dT );
 	if ( ( animState & AnimEnabled ) && ( animState & AnimPlay )
 		&& scene->timeMin() != scene->timeMax() )
 	{
@@ -18272,6 +18361,12 @@ int GLView::convertKeyCode( int n ) const
 
 void GLView::keyPressEvent( QKeyEvent * event )
 {
+	// Physics Sim owns Space, R and Escape while it is running, ahead of every
+	// other binding: they are the whole control surface of the mode
+	if ( physicsKeyPress( event ) ) {
+		event->accept();
+		return;
+	}
 	const Qt::KeyboardModifiers mods = event->modifiers();
 	// rebindable shortcuts: exact key+modifier matching against the registry
 	const auto & shortcuts = ShortcutRegistry::get();
@@ -18804,6 +18899,12 @@ void GLView::mouseDoubleClickEvent( QMouseEvent * )
 
 void GLView::mouseMoveEvent( QMouseEvent * event )
 {
+	// a live grab takes the drag; without a grab the mode is transparent, so the
+	// camera still orbits and the viewport behaves normally
+	if ( physicsMouseMove( event ) ) {
+		event->accept();
+		return;
+	}
 	// Pose Mode hover highlight: light the bone under the cursor
 	if ( poseMode && !gizmoMode ) {
 		int h = poseBoneAt( getQMouseEventPosition( event ) );
@@ -19032,6 +19133,10 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 
 void GLView::mousePressEvent( QMouseEvent * event )
 {
+	if ( physicsMousePress( event ) ) {
+		event->accept();
+		return;
+	}
 	if ( gizmoMode ) {
 		// MMB during a modal transform: smart axis lock - constrain to the
 		// axis whose screen direction best matches the drag so far (Blender)
@@ -19275,6 +19380,10 @@ void GLView::mousePressEvent( QMouseEvent * event )
 
 void GLView::mouseReleaseEvent( QMouseEvent * event )
 {
+	if ( physicsMouseRelease( event ) ) {
+		event->accept();
+		return;
+	}
 	if ( riggingWeightPaintMode && riggingWeightPaintBrushEnabled
 		&& riggingWeightPaintStroke && event->button() == Qt::LeftButton ) {
 		QPointF releasePos = getQMouseEventPosition( event );
