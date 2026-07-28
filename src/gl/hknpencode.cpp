@@ -350,3 +350,115 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	if ( error ) error->clear();
 	return out;
 }
+
+/*! Write one hknpCapsuleShape.
+ *
+ * The object is a fixed 432 bytes and most of it is constant: measured across the
+ * 778 capsules in Fallout 4's actor skeletons, the flag word at +0x10, the four
+ * hkRelArray descriptors, the 24-byte face table, the 24-byte index table and the
+ * two unused plane slots are each ONE distinct value corpus-wide.
+ *
+ * The stored hull is NOT the capsule. It is a small core box, and the real solid
+ * is that box with every support plane pushed out by convexRadius -- the same
+ * offset convention hknpShapeMassProperties uses -- which is why the box is tiny.
+ * The core is an OBB about the segment, padded by radius/99 on all THREE local
+ * axes, so the shape's true perpendicular half-width is radius * (1 + 1/99).
+ * Measured 0.01010091 to 0.01010104 of the radius across the corpus.
+ *
+ * That is an OBB, not an AABB. The distinction is invisible on the brahmin, whose
+ * 39 capsules are all axis-aligned, and it matters: 195 of the 778 are tilted off
+ * the world axes, and the AABB reading misplaces their corners by up to 17 mm,
+ * against 4.8e-07 m worst error for the OBB.
+ *
+ * Local frame, every one of them measured 778 of 778:
+ *   - bit 0 of the vertex index is the capsule axis, set = toward capA
+ *   - bits 1 and 2 are the perpendiculars u and v, with u x v = -e0 (left-handed)
+ *   - face planes run +u, -v, +v, -u, +e0, -e0, which is also what the constant
+ *     index table implies -- derived independently and in agreement
+ *   - planes are (n, d) with n.x + d = 0 on the face
+ */
+QByteArray hknpEncodeCapsuleShape( const HknpCapsuleInput & in )
+{
+	QByteArray out( 0x1b0, 0 );
+
+	setU32( out, 0x10, 0x010001c3u );
+	setFloat( out, 0x14, in.radius );
+	setU32( out, 0x18, in.materialCRC );
+
+	// hkRelArray is a u16 count then a u16 byte offset relative to the field
+	setU16( out, 0x30, 8 );  setU16( out, 0x32, 0x0040 );   // vertices at +0x70
+	setU16( out, 0x40, 8 );  setU16( out, 0x42, 0x00b0 );   // planes   at +0xf0
+	setU16( out, 0x44, 6 );  setU16( out, 0x46, 0x012c );   // faces    at +0x170
+	setU16( out, 0x48, 24 ); setU16( out, 0x4a, 0x0148 );   // indices  at +0x190
+
+	for ( int k = 0; k < 3; k++ ) {
+		setFloat( out, 0x50 + k * 4, in.capA[k] );
+		setFloat( out, 0x60 + k * 4, in.capB[k] );
+	}
+	setFloat( out, 0x5c, 1.0f );
+	setFloat( out, 0x6c, 1.0f );
+
+	const Vector3 ab = in.capB - in.capA;
+	const float length = ab.length();
+	const Vector3 axis = ( length > 1.0e-12f ) ? ab / length : Vector3( 0.0f, 0.0f, 1.0f );
+
+	const Vector3 e0 = -axis;	// bit 0 set points at capA
+	Vector3 e1;
+	if ( in.hasFrame ) {
+		e1 = in.frameU - e0 * Vector3::dotproduct( in.frameU, e0 );
+	} else {
+		// no authored roll to honour, so take the world axis least aligned with
+		// the capsule -- the standard choice, and the best conditioned one
+		int least = 0;
+		for ( int k = 1; k < 3; k++ )
+			if ( std::fabs( e0[k] ) < std::fabs( e0[least] ) ) least = k;
+		Vector3 pick;
+		pick[least] = 1.0f;
+		e1 = pick - e0 * Vector3::dotproduct( pick, e0 );
+	}
+	const float e1len = e1.length();
+	e1 = ( e1len > 1.0e-9f ) ? e1 / e1len : Vector3( 1.0f, 0.0f, 0.0f );
+	const Vector3 e2 = Vector3::crossproduct( axis, e1 );	// gives u x v = -e0
+
+	const float padding = ( in.padding > 0.0f ) ? in.padding : in.radius / 99.0f;
+	const Vector3 center = ( in.capA + in.capB ) * 0.5f;
+	const float halfLength = length * 0.5f + padding;
+
+	for ( int i = 0; i < 8; i++ ) {
+		const Vector3 p = center
+			+ e0 * ( ( i & 1 ) ? halfLength : -halfLength )
+			+ e1 * ( ( i & 2 ) ? padding : -padding )
+			+ e2 * ( ( i & 4 ) ? padding : -padding );
+		for ( int k = 0; k < 3; k++ )
+			setFloat( out, 0x70 + i * 16 + k * 4, p[k] );
+		// w is 0.5 carrying the vertex index in the low mantissa byte
+		setU32( out, 0x70 + i * 16 + 12, 0x3f000000u | quint32( i ) );
+	}
+
+	const Vector3 normal[6] = { e1, -e2, e2, -e1, e0, -e0 };
+	const float extent[6] = { padding, padding, padding, padding, halfLength, halfLength };
+	for ( int p = 0; p < 6; p++ ) {
+		for ( int k = 0; k < 3; k++ )
+			setFloat( out, 0xf0 + p * 16 + k * 4, normal[p][k] );
+		setFloat( out, 0xf0 + p * 16 + 12,
+			-( Vector3::dotproduct( normal[p], center ) + extent[p] ) );
+	}
+	// the array is sized 8; the two spare slots hold -FLT_MAX in every file seen
+	setU32( out, 0xf0 + 6 * 16 + 12, 0xff7fffeeu );
+	setU32( out, 0xf0 + 7 * 16 + 12, 0xff7fffeeu );
+
+	for ( int f = 0; f < 6; f++ ) {
+		setU16( out, 0x170 + f * 4, quint16( f * 4 ) );
+		out[0x170 + f * 4 + 2] = 4;	// vertices in the loop
+		out[0x170 + f * 4 + 3] = 4;	// flags, constant corpus-wide
+	}
+
+	static const quint8 loops[24] = {
+		7, 6, 2, 3,   3, 2, 0, 1,   7, 5, 4, 6,
+		1, 0, 4, 5,   1, 5, 7, 3,   2, 6, 4, 0
+	};
+	for ( int i = 0; i < 24; i++ )
+		out[0x190 + i] = char( loops[i] );
+
+	return out;
+}

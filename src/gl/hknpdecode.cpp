@@ -248,23 +248,56 @@ static void decodeConvexLike( Reader & r, qsizetype B, const QString & className
 			return;
 		}
 	} else if ( className == QLatin1String( "hknpCapsuleShape" ) ) {
-		// exact end points at +0x50 / +0x60; radius = convexRadius plus the
-		// small core hull margin (recovered from the hull verts)
+		/* Exact end points at +0x50 / +0x60, and the core box in the vertex array.
+		 *
+		 * The core is an OBB about the segment padded equally on all three local
+		 * axes, so every corner sits at padding * sqrt(2) off the axis while the
+		 * padding itself -- which is what actually fattens the capsule -- is that
+		 * over sqrt(2). Taking the corner distance directly, as this did until
+		 * 07-28t, over-reads the radius by 0.42%: it measures the diagonal.
+		 *
+		 * Deriving the padding from the geometry rather than from the measured
+		 * radius/99 keeps this honest if a file ever disagrees with the corpus.
+		 */
 		Vector3 a = r.vec3( B + 0x50 );
 		Vector3 b = r.vec3( B + 0x60 );
-		float margin = 0.0f;
 		Vector3 ab = b - a;
 		float abLen2 = Vector3::dotproduct( ab, ab );
+		/* Distance to the axis LINE, deliberately unclamped.
+		 *
+		 * Off the line every corner sits at padding * sqrt(2), one padding in each
+		 * perpendicular direction. Clamping to the segment instead -- which is what
+		 * a closest-point-on-segment helper does by default -- adds the axial
+		 * overshoot, because the box is longer than the segment by one padding at
+		 * each end, and every corner then reads padding * sqrt(3). That is a
+		 * uniform 22% overestimate of the padding, so it is invisible in a ratio
+		 * check and only shows up against the stored geometry.
+		 */
+		float perp = 0.0f;
 		for ( const Vector3 & p : raw ) {
-			float t = ( abLen2 > 1.0e-12f ) ? Vector3::dotproduct( p - a, ab ) / abLen2 : 0.0f;
-			t = std::min( std::max( t, 0.0f ), 1.0f );
-			margin = std::max( margin, ( p - ( a + ab * t ) ).length() );
+			const Vector3 rel = p - a;
+			const float t = ( abLen2 > 1.0e-12f ) ? Vector3::dotproduct( rel, ab ) / abLen2 : 0.0f;
+			perp = std::max( perp, ( rel - ab * t ).length() );
 		}
+		const float padding = perp * 0.70710678f;
 		shape.primType = 2;
 		shape.capA = a;
 		shape.capB = b;
-		shape.primRadius = shape.convexRadius + margin;
-		synthCapsule( shape, a, b, shape.primRadius );
+		/* The solid is not exactly a capsule, so a single radius has to choose.
+		 *
+		 * Its cross-section is the core box's square -- half-width padding in both
+		 * perpendicular directions -- rounded by convexRadius, so the half-width
+		 * runs from convexRadius + padding facing a face to convexRadius +
+		 * padding * sqrt(2) facing a corner. Only 0.42% apart, but a simulator
+		 * wants the bound that never UNDER-states the solid, so take the
+		 * circumscribed one and miss no contacts.
+		 */
+		shape.primRadius = shape.convexRadius + padding * 1.4142136f;
+		shape.coreVerts = raw;
+		shape.corePadding = padding;
+		// the solid also runs one padding past each stored end point
+		Vector3 axis = ( abLen2 > 1.0e-12f ) ? ab / std::sqrt( abLen2 ) : Vector3( 0.0f, 0.0f, 1.0f );
+		synthCapsule( shape, a - axis * padding, b + axis * padding, shape.primRadius );
 		return;
 	}
 
@@ -834,6 +867,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 	// decode one leaf shape object into out; returns false if not a shape
 	auto decodeLeaf = [&]( qsizetype off, const QString & cls, HknpShape & out ) -> bool {
 		out.className = cls;
+		out.rawOffset = off;
 		if ( cls == QLatin1String( "hknpConvexPolytopeShape" )
 			|| cls == QLatin1String( "hknpConvexShape" )
 			|| cls == QLatin1String( "hknpSphereShape" )

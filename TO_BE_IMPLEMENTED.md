@@ -669,21 +669,22 @@ diff, because it exercises masses, inertia, joint frames and limits together.
 **Note the units trap.** Ragdoll collision is in Havok metres, cloth in game units
 (~70x apart, see 4b) — the solver works in one space and must convert at the edges.
 
-### 4d-spec. Capsule encoder — COMPLETE SPEC, measured 07-28q
+### 4d-spec. Capsule encoder — SHIPPED 07-28t
 
-Everything needed to write `hknpEncodeCapsule`. Measured on the brahmin's 39
-capsules; 07-28d had already checked the constant tables across all 778 vanilla
-capsules.
+`hknpEncodeCapsuleShape` is implemented and validated: **819 capsules across 36
+actor skeletons, structure byte-exact on all 819, worst vertex error 9.9e-07 m**
+(`collision <file> --roundtrip`). What follows is the measured format; the
+narrative of what changed is in WW_CHANGES 07-28t.
 
-**Object is always 432 bytes (0x1B0).** Invariant across all 39: size, the four
-flag bytes at +0x10 (`c3 01 00 01`), the 24-byte face table and the 24-byte index
-table are each ONE distinct value.
+**Object is always 432 bytes (0x1B0).** One distinct value corpus-wide: the flag
+word at +0x10 (`c3 01 00 01`), the four hkRelArray descriptors, the 24-byte face
+table, the 24-byte index table, and the two spare plane slots.
 
 | offset | contents |
 |---|---|
 | +0x00 | 16 bytes zero (vtable + refcount, filled by the loader) |
 | +0x10 | `c3 01 00 01` constant |
-| +0x14 | float convexRadius — **this is the capsule radius** |
+| +0x14 | float convexRadius |
 | +0x18 | u32 material CRC |
 | +0x30 | hkRelArray vertices: `08 00 40 00` (count 8, payload +0x70) |
 | +0x40 | hkRelArray planes: `08 00 b0 00` (count 8, payload +0xf0) |
@@ -691,70 +692,61 @@ table are each ONE distinct value.
 | +0x48 | hkRelArray indices: `18 00 48 01` (count 24, payload +0x190) |
 | +0x50 | hkVector4 capA, w = 1.0 |
 | +0x60 | hkVector4 capB, w = 1.0 |
-| +0x70 | 8 hull vertices, hkVector4; **w is 0.5 with the vertex index in the low mantissa byte** (`00 00 00 3f`, `01 00 00 3f`, ...) |
-| +0xf0 | 8 plane slots: 6 real planes (nx,ny,nz,d), then 2 sentinels `00 00 00 00 x3 + ee ff 7f ff` |
+| +0x70 | 8 hull vertices, hkVector4; w = 0.5 with the vertex index in the low mantissa byte (`00 00 00 3f`, `01 00 00 3f`, ...). Slot order equals index order, checked on all 778 |
+| +0xf0 | 8 plane slots: 6 real, then 2 spares holding `00 00 00 00` x3 + `ee ff 7f ff` |
 | +0x170 | face table, 6 x (u16 firstIndex, u8 count=4, u8 flags=4): 0,4,8,12,16,20 |
 | +0x190 | index table, 24 bytes: `07 06 02 03 03 02 00 01 07 05 04 06 01 00 04 05 01 05 07 03 02 06 04 00` |
 
-**The hull is a shrunk core, not the capsule.** The real shape is that box
-Minkowski-summed with a sphere of radius = convexRadius, which is why the box is
-tiny. The rule is simple and exact:
+**The hull is a shrunk core, not the capsule.** The solid is that box with every
+support plane pushed out by convexRadius — the same offset convention
+`hknpShapeMassProperties` uses.
 
-    core box = AABB(capA, capB) padded by R/99 on EVERY axis
+    core = OBB about the segment, padded by `padding` on all THREE local axes
 
-Measured 0.01010101 on all three axes of all 39 capsules -- 1/99 to 8 figures. So
-the true outer radius is `convexRadius * (1 + 1/99)`, i.e. `R * 1.010101`. (An
-earlier note here said 1.014288; that came from measuring to a box CORNER, which
-is the diagonal, not the perpendicular half-width. 1.010101 is the right number.)
+**An OBB, not an AABB.** An earlier revision of this section said AABB; that held
+only because the brahmin's 39 capsules are all axis-aligned. 195 of 778 corpus
+capsules are tilted, where the AABB reading is out by up to **17 mm** against
+4.8e-07 m for the OBB. Do not reintroduce it.
 
-**Open: the vertex and plane ORDER follows the capsule's own frame, not world
-axes.** A byte-exact reconstruction fails on this and only this. Compared against
-vanilla:
+**Local frame**, every line measured 778 of 778, convention *bit set = + side*:
 
-- A capsule whose axis is Z reproduces all 8 vertices exactly with bit0 -> Z,
-  bit1 -> X (0 = high), bit2 -> Y (0 = low).
-- A capsule whose axis is X permutes: bit0 -> X, bit1 -> Y (0 = low),
-  bit2 -> Z (0 = high).
+- bit 0 is the capsule axis, set = toward **capA** (so `e0 = -normalize(capB-capA)`)
+- bits 1 and 2 are the perpendiculars u and v, with **`u x v = -e0`** (left-handed)
+- half-extents: `L/2 + padding` along e0, `padding` on u and v
+- planes run **`+u, -v, +v, -u, +e0, -e0`**, as `(n, d)` with `n.x + d = 0` on the
+  face. Derived independently from the constant index table and from the stored
+  planes; the two agree.
 
-Bit 0 is the capsule's axis in both, low then high, so the box is built in a local
-frame (axis plus two perpendiculars) and written out in shape space.
+**Two inputs are NOT recoverable from (capA, capB, convexRadius).** Measured, not
+assumed — an encoder must take them as optional inputs (see `HknpCapsuleInput`):
 
-**Lead worth testing first.** Writing each case as (u, v, axis) with the sign each
-bit takes: the Z-axis capsule gives (-X, +Y, Z) and the X-axis capsule gives
-(+Y, -Z, X). Both satisfy **u x v = -axis** -- a consistently LEFT-handed frame.
-If that holds across a wider sample, the rule is just "pick the two perpendicular
-world axes in cyclic order after the axis, then flip whichever sign makes the
-triple left-handed", and byte-exactness follows. Two capsules is not a proof;
-check a Y-axis one and some diagonal ones before building on it.
+- **padding.** `padding/convexRadius` sits at 1/99 but scatters **1.6e-5
+  relative** across the corpus, hundreds of ULP, far beyond the rounding of any
+  fixed formula. 1/99 is authoring intent, not the stored relationship: an outer
+  radius split `convexRadius = 0.99*Rout`, `padding = 0.01*Rout` has exactly that
+  ratio. Use `radius/99` only for a NEW capsule.
+- **the roll about the axis.** Capsules whose axes agree exactly always agree on
+  the roll (34 of 34 groups), but capsules whose axes agree to **0.008 degrees**
+  disagree, and no ordering rule (argmin |a_k|, argmax, cyclic) explains the split.
+  It is inherited from the authored primitive. A capsule is rotationally symmetric
+  so any perpendicular is geometrically valid; only byte-exactness needs the
+  original.
 
-This matters because **the 24-byte index table is a constant** shared by all 778
-capsules: permuting the vertices without permuting the indices describes a
-different solid. An encoder therefore has two options, and the second is fine for
-a working file:
+**`primRadius` is a choice, not a measurement.** The solid's cross-section is a
+rounded square, half-width `R + padding` facing a face and `R + padding*sqrt(2)`
+facing a corner. The decoder takes the circumscribed value so it never under-states
+the solid. A/B on the settle corpus: inscribed 33/37 (Liberty Prime 34.2 m/s),
+circumscribed 34/37 (3.11), the old accidental `sqrt(3)` 34/37 (2.95).
 
-1. Work out the perpendicular-basis rule and match vanilla byte-for-byte.
-2. Emit vertices in its own order together with an index table built to match.
-   Geometrically identical, not byte-identical, so validate by decoding the result
-   and comparing GEOMETRY rather than bytes.
+**Trap for anyone measuring the padding:** every corner overhangs the segment
+axially, so a closest-point-on-*segment* helper returns `padding*sqrt(3)`, not the
+perpendicular `padding*sqrt(2)`. It stays a clean constant across the whole corpus,
+so ratio checks pass while the value is 22% too large. Measure against the axis
+LINE, unclamped.
 
-Also note the y components of one capsule differ from a clean +-pad by 2 ULP
-(`00 8d 24 bb` against `02 8d 24 3b`), so even with the right order some values
-carry rounding from whatever order Elric computed them in.
-
-So: build the box in the axis frame, write its 8 corners with the index-tagged w,
-write the 6 face planes, copy the two constant tables verbatim, set radius and
-material, and write capA/capB. Validate by **byte round trip against vanilla
-capsules** — decode one, re-encode from its parameters, diff. That test needs no
-window and no game.
-
-**Spheres:** the brahmin has none, so a vanilla sphere still needs finding before
-its template can be measured the same way. `hknpSphereShape` decodes as one unique
-vertex plus convexRadius (see decodeConvexLike), so expect a similar fixed template.
-
-**Related, not yet acted on:** `primRadius` is decoded as `convexRadius + margin`
-where margin reaches a box *corner*, so it over-reads by about 0.5% (0.04522 stored
-against 0.04613 reported). The exact outer radius is `convexRadius * 1.014288`.
-Small, but it is the number the simulator collides with.
+**Spheres:** still open. The brahmin has none, so a vanilla sphere needs finding
+before its template can be measured. `hknpSphereShape` decodes as one unique vertex
+plus convexRadius, so expect a similar fixed template.
 
 ### 4d. Compile every collision type — NEW 07-28f, agreed with bungo
 
@@ -768,9 +760,10 @@ Ordered by dependency:
    objects, so it is real per-shape data (`hkCompressedMassProperties`: centre of
    mass, inertia and major-axis space as `hkHalf` vectors, then mass and volume).
    Convex polytopes cannot be written without it. Decode this first.
-2. **Capsule and sphere** — templates already fully specified in 4a: fixed 432 and
-   128 byte objects, constant face/index tables, geometry a box hull around the
-   axis.
+2. ~~**Capsule**~~ — SHIPPED 07-28t, see 4d-spec. `hknpEncodeCapsuleShape` plus
+   `collision --roundtrip`: 819 capsules, structure byte-exact on all of them.
+   **Sphere** is still open — no vanilla sphere found yet to measure the template
+   against.
 3. **Convex polytope** — needs hull generation, and **qhull is already vendored**
    under `lib/qhull`, so the machinery is in the repo.
 4. **Compounds** (static and dynamic) — instance arrays, decode side already works.

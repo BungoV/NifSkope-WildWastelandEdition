@@ -1,5 +1,76 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28t — The capsule encoder, and three corrections it forced
+
+`hknpEncodeCapsuleShape` writes the 432-byte object, and `collision <file>
+--roundtrip` re-encodes every capsule in a file and checks it against the bytes it
+came from. Over the 36 actor skeletons that carry them: **819 capsules, structure
+byte-exact on all 819, worst vertex error 9.9e-07 m.**
+
+The test reports two numbers on purpose. *Structure* — header, flag word, the four
+hkRelArray descriptors, both end points, the index-tagged `w` components, the face
+and index tables, the sentinels — must be byte-identical, and that is where a
+misread layout shows up. *Geometry* is a distance, because byte-exactness is not
+reachable: neither the core padding nor the roll about the axis is a function of
+the stored parameters. One number covering both would let a real error hide inside
+float noise.
+
+**Three things yesterday's note got wrong, all caught by measuring rather than by
+reasoning:**
+
+- **The core is an OBB, not an AABB.** 07-28s called it `AABB(capA, capB)` padded
+  by R/99, which is right only because the brahmin's 39 capsules are *all*
+  axis-aligned. Across the corpus 195 of 778 are tilted, and the AABB reading
+  misplaces their corners by up to **17 mm**, against 4.8e-07 m for the OBB. A
+  sample that cannot distinguish two hypotheses will happily confirm the wrong one.
+- **The frame is left-handed after all.** 07-28s recorded `u x v = -axis`, then a
+  fresh script said right-handed and appeared to overturn it. Both were right about
+  their own convention, and it is the convention that matters: with *bit set = +
+  side*, it is `u x v = -e0`, 778 of 778, and bit 0 points toward **capA**.
+- **`primRadius` was inflated by 0.35%, and the recorded reason was wrong too.**
+  The old figure was not `convexRadius * 1.014288` but `1.0175`: the margin came
+  from a closest-point-on-*segment* helper, and because the box overhangs the
+  segment axially, the clamp folded that overshoot into what was meant to be a
+  perpendicular distance — every corner reading `padding * sqrt(3)` instead of
+  `padding * sqrt(2)`.
+
+That last one deserves its own line, because I introduced it *this session* while
+"fixing" the radius, and only the round-trip caught it. The ratio stayed a clean
+constant across all 778 capsules, so every consistency check passed while the value
+was 22% too large.
+
+**What the radius should be is a real question, not a rounding detail.** The solid
+is the core box offset by `convexRadius`, so its cross-section is a rounded
+*square*: half-width `R + padding` facing a face, `R + padding*sqrt(2)` facing a
+corner. One scalar cannot describe that. The circumscribed value never under-states
+the solid, so no contact is missed. Measured A/B on the settle corpus, same command
+throughout: inscribed 33/37 with Liberty Prime at **34.2 m/s**, circumscribed 34/37
+at 3.11, the old accidental `sqrt(3)` 34/37 at 2.95. Liberty Prime moving 3 -> 34
+on a 0.7% radius change says that rig is marginal; the fix for that is a
+dissipation model, not a radius picked to hide it.
+
+**Not reachable, and worth stating plainly.** Byte-exact reconstruction from
+`(capA, capB, convexRadius)` is impossible, and that is measured rather than
+assumed. `padding/radius` sits at 1/99 but scatters **1.6e-5 relative** — hundreds
+of ULP, far beyond any rounding of a fixed formula. The roll is likewise not a
+function of the axis: capsules whose axes agree exactly always agree on the roll
+(34 of 34 groups), but capsules whose axes agree to **0.008 degrees** disagree, and
+no ordering rule (argmin, argmax, cyclic) explains the split. Both are inherited
+from the authored primitive, so the encoder takes them as optional inputs — fed
+back from the decode to preserve a shape, synthesized deterministically for a new
+one.
+
+The 1/99 is itself most likely an artefact of that split: an authored outer radius
+`Rout` divided as `convexRadius = 0.99*Rout` and `padding = 0.01*Rout` has exactly
+that ratio.
+
+Also decoded and now exposed: `HknpShape::coreVerts`, `corePadding` and
+`rawOffset`. Plane order is `+u, -v, +v, -u, +e0, -e0` with `n.x + d = 0` on the
+face — derived independently from the constant index table and from the stored
+planes, agreeing on all 778.
+
+Self-tests green; settle corpus 34/37, unchanged against baseline.
+
 ## 2026-07-28s — Capsule geometry solved; vertex ORDER is what is left
 
 Prototyped the capsule encoder in Python and byte-diffed it against all 39 vanilla

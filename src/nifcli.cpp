@@ -19,9 +19,12 @@ See the LICENSE.md file for the full license text.
 #include "skeletontools.h"
 #include "starterscene.h"
 #include "gl/hknpdecode.h"
+#include "gl/hknpencode.h"
 #include "physics/ragdollsim.h"
 
+#include <bit>
 #include <cmath>
+#include <QtEndian>
 #include "spells/animationsetup.h"
 #include "io/pbrmfile.h"
 
@@ -876,6 +879,135 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 		return 1;
 	}
 	return failed ? 1 : 0;
+}
+
+/*! Re-encode every capsule in the file and check it against the bytes it came from.
+ *
+ * Two different claims get checked, because only one of them CAN be exact.
+ *
+ * Structure is checked byte for byte over the parts an encoder fully determines:
+ * the header and flag word, the four hkRelArray descriptors, both end points, the
+ * index-tagged w components, the face table, the index table and the sentinels.
+ * A geometric comparison cannot see any of that, and it is where a
+ * misunderstanding of the layout would show up.
+ *
+ * Geometry is checked as a distance, because byte-exactness is not achievable
+ * from the decoded parameters. The core padding is not a function of the stored
+ * radius -- across the corpus padding/radius scatters 1.6e-5 relative around
+ * 1/99, hundreds of ULP -- and the roll about the axis is not a function of the
+ * axis either. Both are fed back from the decode so the shape is preserved, but
+ * they are recovered from the corners and that recovery costs a few ULP.
+ *
+ * So: structure must be exact, geometry must be tight. Reporting one number for
+ * both would let a real layout error hide inside float noise.
+ */
+int cmdCollisionRoundTrip( const QString & file )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	int total = 0, structOk = 0, fullyExact = 0;
+	float worstVert = 0.0f, worstPlane = 0.0f;
+	QMap<int, int> byteHist;   // offset -> how often the structural bytes differed
+
+	// the byte ranges an encoder determines outright, so they must match exactly
+	const QVector<QPair<int, int>> structural = {
+		{ 0x00, 0x50 },    // header, flags, radius, material, the four relArrays
+		{ 0x50, 0x20 },    // capA and capB with their w = 1
+		{ 0x170, 0x40 }    // face table and index table
+	};
+
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex i = nif.getBlockIndex( b );
+		if ( !nif.blockInherits( i, "bhkPhysicsSystem" ) && !nif.blockInherits( i, "bhkRagdollSystem" ) )
+			continue;
+		const QByteArray bytes = nif.get<QByteArray>( i, "Binary Data" );
+		if ( bytes.isEmpty() )
+			continue;
+		const HknpSystem sys = hknpDecode( bytes );
+		if ( !sys.valid )
+			continue;
+
+		for ( const HknpShape & shp : sys.shapes ) {
+			if ( shp.primType != 2 || shp.rawOffset < 0 || shp.coreVerts.size() != 8 )
+				continue;
+			const qsizetype at = shp.rawOffset;
+			if ( at + 0x1b0 > bytes.size() )
+				continue;
+			total++;
+			const QByteArray original = bytes.mid( at, 0x1b0 );
+
+			HknpCapsuleInput in;
+			in.capA = shp.capA;
+			in.capB = shp.capB;
+			in.radius = shp.convexRadius;
+			in.materialCRC = shp.materialCRC;
+			in.padding = shp.corePadding;
+			// bit 1 of the vertex index selects the +u side, so the difference of
+			// the two 4-corner centroids recovers u
+			Vector3 hi, lo;
+			for ( int v = 0; v < 8; v++ )
+				( ( v & 2 ) ? hi : lo ) += shp.coreVerts.at( v );
+			in.frameU = hi - lo;
+			in.hasFrame = in.frameU.length() > 1.0e-12f;
+
+			const QByteArray rebuilt = hknpEncodeCapsuleShape( in );
+			if ( rebuilt == original )
+				fullyExact++;
+
+			bool ok = true;
+			for ( const auto & range : structural ) {
+				for ( int o = range.first; o < range.first + range.second; o += 4 ) {
+					if ( qFromLittleEndian<quint32>( original.constData() + o )
+						!= qFromLittleEndian<quint32>( rebuilt.constData() + o ) ) {
+						byteHist[o]++;
+						ok = false;
+					}
+				}
+			}
+			structOk += int( ok );
+
+			auto f32at = []( const QByteArray & b, int o ) {
+				return std::bit_cast<float>( qFromLittleEndian<quint32>( b.constData() + o ) );
+			};
+			for ( int v = 0; v < 8; v++ ) {
+				Vector3 a, c;
+				for ( int k = 0; k < 3; k++ ) {
+					a[k] = f32at( original, 0x70 + v * 16 + k * 4 );
+					c[k] = f32at( rebuilt, 0x70 + v * 16 + k * 4 );
+				}
+				worstVert = std::max( worstVert, ( a - c ).length() );
+			}
+			// planes are (n, d) with n.x + d = 0 on the face, so comparing d at a
+			// unit normal is already a distance
+			for ( int p = 0; p < 6; p++ ) {
+				for ( int k = 0; k < 4; k++ ) {
+					const float d = std::fabs( f32at( original, 0xf0 + p * 16 + k * 4 )
+						- f32at( rebuilt, 0xf0 + p * 16 + k * 4 ) );
+					worstPlane = std::max( worstPlane, d );
+				}
+			}
+		}
+	}
+
+	out() << "file       " << file << Qt::endl;
+	out() << "capsules   " << total << Qt::endl;
+	if ( !total ) {
+		out() << "  nothing to check" << Qt::endl;
+		return 0;
+	}
+	out() << "  structure byte-exact   " << structOk << " / " << total << Qt::endl;
+	out() << "  whole object exact     " << fullyExact << " / " << total << Qt::endl;
+	out() << "  worst vertex error     " << worstVert << " m" << Qt::endl;
+	out() << "  worst plane error      " << worstPlane << Qt::endl;
+	if ( structOk < total ) {
+		out() << "  structural offsets that differed:";
+		for ( auto it = byteHist.constBegin(); it != byteHist.constEnd(); ++it )
+			out() << " +0x" << QString::number( it.key(), 16 ) << "(" << it.value() << ")";
+		out() << Qt::endl;
+	}
+	return structOk < total ? 1 : 0;
 }
 
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
@@ -1819,6 +1951,8 @@ int usage()
 		  << "                                          decode found in each packfile\n"
 		  << "  collision <file> --extract -b N -o F.bin\n"
 		  << "                                          write a system's Binary Data verbatim\n"
+		  << "  collision <file> --roundtrip            re-encode every capsule from its decoded\n"
+		  << "                                          parameters and diff against the original\n"
 		  << "  pose <file> --list                      bones and existing poses\n"
 		  << "  pose <file> --save NAME -o OUT          capture the current bone\n"
 		  << "                                          transforms as a pose\n"
@@ -1885,6 +2019,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool validateOnly = false;
 	bool selfTest = false;
 	bool extract = false;
+	bool roundTrip = false;
 	for ( int i = 0; i < a.size(); i++ ) {
 		const QString & t = a.at( i );
 		auto next = [&]() -> QString { return ( i + 1 < a.size() ) ? a.at( ++i ) : QString(); };
@@ -1907,6 +2042,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--validate" ) ) validateOnly = true;
 		else if ( t == QLatin1String( "--selftest" ) ) selfTest = true;
 		else if ( t == QLatin1String( "--extract" ) ) extract = true;
+		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--add" ) ) adds << QDir::current().filePath( next() );
 		else if ( t == QLatin1String( "--no-dedupe" ) ) noDedupe = true;
 		else if ( t == QLatin1String( "--save" ) ) saveName = next();
@@ -1994,7 +2130,8 @@ int nifskopeCliMain( const QStringList & args )
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
 			dragBody, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
-		rc = cmdCollision( file, extract ? block : -1, outFile );
+		rc = roundTrip ? cmdCollisionRoundTrip( file )
+					   : cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
 		rc = selfTest ? cmdSkeletonSelfTest( file ) : cmdSkeleton( file, validateOnly );
 	else if ( cmd == QLatin1String( "anim-setup" ) )

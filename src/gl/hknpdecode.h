@@ -68,7 +68,39 @@ struct HknpShape
 	//! primitive interpretation: 0 generic, 1 sphere, 2 capsule
 	int primType = 0;
 	Vector3 capA, capB;            //!< capsule end points / sphere center (capA)
-	float primRadius = 0.0f;       //!< sphere / capsule radius (capsule: approx)
+	/*! Sphere / capsule radius: the OUTER radius, the one that collides.
+	 *
+	 * A capsule stores a small core box plus convexRadius, and the solid is that
+	 * box with its support planes pushed out by the radius -- so it is a rounded
+	 * box, not exactly a capsule, and one radius cannot describe it. The
+	 * half-width runs from convexRadius + padding facing a face to
+	 * convexRadius + padding * sqrt(2) facing a corner, 0.42% apart. This takes
+	 * the circumscribed value, which never under-states the solid.
+	 *
+	 * With padding at convexRadius/99 that is convexRadius * 1.014288. Reading it
+	 * as convexRadius * 1.0175 -- which is what the old closest-point-on-SEGMENT
+	 * measurement gave, the clamp folding in the axial overshoot -- inflates every
+	 * capsule by 0.35%.
+	 */
+	float primRadius = 0.0f;
+	/*! Capsules only: the 8 core-box corners exactly as stored, in index order.
+	 *
+	 * Kept because the box carries a roll about the capsule axis that nothing
+	 * else records. A capsule is rotationally symmetric, so the roll is
+	 * geometrically inert, but it is needed to rewrite the shape byte for byte
+	 * and cannot be recovered from (capA, capB, radius) -- see
+	 * HknpCapsuleInput::frameU.
+	 */
+	QVector<Vector3> coreVerts;
+	//! how far the core box is grown past the segment on each local axis, which
+	//! is what makes the solid fatter than convexRadius. Near convexRadius/99,
+	//! but measured per shape -- see HknpCapsuleInput::padding.
+	float corePadding = 0.0f;
+
+	//! byte offset of this shape object within the packfile blob -- absolute, the
+	//! virtual fixups are resolved against __data__ at decode time. Lets a
+	//! re-encode be diffed against the bytes it came from. -1 = unknown.
+	qsizetype rawOffset = -1;
 
 	//! index of the hknpBodyCinfo this shape belongs to (-1 = none). Each
 	//! bhkNPCollisionObject names its body via its "Body ID" field, and the
