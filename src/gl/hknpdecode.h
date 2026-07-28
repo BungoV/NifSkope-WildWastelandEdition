@@ -11,6 +11,7 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QSharedPointer>
 #include <QString>
 #include <QVector>
 
@@ -194,6 +195,25 @@ struct HknpShape
 	QString dataClassName;
 	QByteArray dataRawData;
 	QVector<QPair<qsizetype, qsizetype>> dataLocal;
+	/*! hknpScaledConvexShape only: the shape it wraps.
+	 *
+	 * A 112-byte wrapper with the usual shape header -- flags at +0x10, convex
+	 * radius at +0x14, material at +0x18 -- a pointer to the real shape at +0x30
+	 * and a scale at +0x40. Rare: one packfile in a 403-file stride sample of the
+	 * mesh tree, in a SCOL, and it was the only thing left that could not be
+	 * reassembled.
+	 *
+	 * Held here rather than flattened into HknpSystem::shapes so that nothing else
+	 * has to learn about it. The wrapper's own HknpShape carries the scaled
+	 * geometry for drawing; this carries the subtree a writer has to emit, which
+	 * is the child plus its hkRefCountedProperties and its mass properties.
+	 *
+	 * THE SCALE IS INFERRED. +0x40 holds (0.341, 0.357, 0.341) with 0.5 in the w
+	 * lane, which is the slot and the w-tagging every other hknp object uses for a
+	 * scale, but it has not been checked against a rendered mesh. Writing does not
+	 * depend on it -- the wrapper goes back byte for byte either way.
+	 */
+	QSharedPointer<HknpShape> scaledChild;
 
 	//! index of the hknpBodyCinfo this shape belongs to (-1 = none). Each
 	//! bhkNPCollisionObject names its body via its "Body ID" field, and the

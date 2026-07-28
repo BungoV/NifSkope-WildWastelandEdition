@@ -1229,9 +1229,27 @@ namespace {
  * those two objects are appended straight after the shape, which is where every
  * vanilla file puts them.
  */
+bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs );
+
 bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs )
 {
 	HknpPackObject so;
+	/* The wrapper FIRST. Its own HknpShape carries the scaled geometry of the
+	 * shape it wraps, so it looks like a convex polytope to every test below and
+	 * was silently written as one -- which dropped the wrapper, the child's
+	 * hkRefCountedProperties and its mass properties, three objects out of five.
+	 */
+	if ( shp.scaledChild && !shp.rawData.isEmpty() ) {
+		// the child is emitted straight after, which is where the file keeps it,
+		// and it brings its own properties chain, so this recurses
+		so.className = shp.className;
+		so.bytes = shp.rawData;
+		so.local = shp.rawLocal;
+		const qsizetype at = objs.size();
+		objs.append( so );
+		objs[at].global.append( { 0x30, int( objs.size() ) } );
+		return encodeShapeObject( *shp.scaledChild, objs );
+	}
 	if ( shp.primType == 2 && shp.coreVerts.size() == 8 ) {
 		HknpCapsuleInput in;
 		in.capA = shp.capA; in.capB = shp.capB;

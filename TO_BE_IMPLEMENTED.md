@@ -1007,6 +1007,16 @@ Ordered by dependency:
    **Class hashes come from the file's own `__classnames__`**, so a packfile holding
    a class the built-in table never sampled still rewrites.
 
+   **470 OF 470, NO REFUSALS — 07-29g.** `hknpScaledConvexShape` decodes and
+   writes (a 112-byte wrapper: shape header, child pointer at +0x30, scale at
+   +0x40 -- the scale INFERRED from the slot, not validated against a render), and
+   `Reader::ok` no longer truncates structural loops. That flag is sticky, every
+   `&& r.ok` loop was gated on it, and one out-of-range read was silently dropping
+   the last child of a 12-instance compound from the shape list, the viewport and
+   the body attribution with no error anywhere. It surfaced only because the
+   assembler refuses to write a compound whose child count disagrees with its
+   instance count.
+
    **Still open:** an encoder that DERIVES a compressed mesh from geometry for
    rewriting. `hknpEncodeCompressedMesh` authors a new one and is in-game
    validated; rewriting an existing one carries its bytes, because each section

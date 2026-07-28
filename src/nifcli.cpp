@@ -1184,7 +1184,12 @@ int cmdCollisionRoundTrip( const QString & file, const QString & rebuildTo )
 			 * measured layout rules end to end -- array starts, both paddings, the
 			 * running firstIndex, and the total size.
 			 */
-			if ( shp.primType == 0 && shp.isConvex && shp.rawOffset >= 0
+			/* An hknpScaledConvexShape carries its child's geometry, so it satisfies
+			 * every convex test here while its rawOffset names a 112-byte wrapper.
+			 * Checking it as a polytope compares a polytope against a wrapper; the
+			 * packfile assembly is what covers it.
+			 */
+			if ( shp.primType == 0 && shp.isConvex && shp.rawOffset >= 0 && !shp.scaledChild
 				&& !shp.faces.isEmpty() && shp.faceAngles.size() == shp.faces.size() ) {
 				HknpPolytopeInput pin;
 				pin.verts = shp.verts;

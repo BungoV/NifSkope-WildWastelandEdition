@@ -1,5 +1,63 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29g — 470 of 470, and a sticky flag that was hiding shapes
+
+The last two refusals are gone, and chasing the second one turned up a decode bug
+with far more reach than the assembly. A 714-file stride sample now reassembles
+**470 of 470 packfiles byte-identical, zero refusals, zero structural
+differences** — up from 465 of 465 with two refusals, because the fix recovered
+three systems that had never fully decoded.
+
+### `hknpScaledConvexShape`
+
+A 112-byte wrapper with the usual shape header — flags at +0x10, convex radius at
++0x14, material at +0x18 — a pointer to the real shape at +0x30 and a scale at
++0x40. One packfile in 714, in a SCOL, and it had never decoded at all, so its
+body had no shape and the system rendered nothing.
+
+It now decodes as its child's geometry scaled, and writes as the wrapper followed
+by the child, which brings its own `hkRefCountedProperties` and mass properties
+along — so the encoder recurses rather than repeating that chain.
+
+**The scale is inferred.** +0x40 holds (0.341, 0.357, 0.341) with 0.5 in the w
+lane, which is the slot and the w-tagging every other hknp object uses for one,
+but it has not been checked against a rendered mesh. Writing does not depend on
+it: the wrapper goes back byte for byte either way.
+
+The first attempt wrote the child and dropped the wrapper, its
+`hkRefCountedProperties` and its mass properties — three objects of five — because
+the wrapper's own shape carries the child's geometry and so looked like an
+ordinary convex polytope to every test in the chain. It has to be checked first.
+The same thing then bit the per-shape round-trip, which compared a re-derived
+polytope against the 112-byte wrapper; that check now skips wrappers, since the
+assembly is what covers them.
+
+### `Reader::ok` is sticky, and every structural loop was gated on it
+
+One out-of-range read anywhere leaves the flag false, and every later
+`while ( i < n && r.ok )` stops without saying so. A 12-instance compound on a
+billboard decoded 11 children — the twelfth silently absent from the shape list,
+from the viewport and from the body's attribution, with no error anywhere. It only
+surfaced because the assembler refused to write a compound whose child count did
+not match its instance count.
+
+A child's decode is bounded work; if it reads badly that is its problem and not a
+reason to abandon the children after it. The flag is saved and restored around
+each child now, on every exit from the loop body including both `continue`s. The
+billboard decodes 12 shapes, all attributed.
+
+That is the second time an integrity check earned its keep by refusing rather than
+guessing — the counts had to disagree for anyone to notice.
+
+### A shape with no geometry is still a shape
+
+A compressed mesh that decodes to no triangles used to be dropped outright. Its
+bytes are captured either way, so it is kept now: it draws nothing, exactly as
+before, and it writes.
+
+Per-shape sweep unchanged: no mismatches, polytopes 143/143, compounds 14/14.
+Ragdolls 69/69. Simulator unaffected.
+
 ## 2026-07-29f — physics systems assemble too: 266 of 266 rebuilt byte for byte
 
 `hknpEncodeSystem` and `hknpEncodePhysicsSystemData`. Ragdolls are 37 files; this

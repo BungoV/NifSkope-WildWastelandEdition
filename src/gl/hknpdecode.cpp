@@ -4,6 +4,9 @@
 
 #include <cmath>
 #include <cstring>
+#include <functional>
+
+#include <QScopeGuard>
 
 /* Havok 2014 binary packfile (hk_2014.1.0-r1, 64-bit, little-endian):
    0x40-byte file header, then one 0x40-byte header per section
@@ -953,8 +956,13 @@ HknpSystem hknpDecode( const QByteArray & data )
 		return out;   // table order, deliberately not sorted
 	};
 
-	// decode one leaf shape object into out; returns false if not a shape
-	auto decodeLeaf = [&]( qsizetype off, const QString & cls, HknpShape & out ) -> bool {
+	/* Decode one leaf shape object into out; false if it is not a shape.
+	 *
+	 * std::function rather than auto because hknpScaledConvexShape is a wrapper and
+	 * this has to call itself to decode what it wraps.
+	 */
+	std::function<bool( qsizetype, const QString &, HknpShape & )> decodeLeaf;
+	decodeLeaf = [&]( qsizetype off, const QString & cls, HknpShape & out ) -> bool {
 		out.className = cls;
 		out.rawOffset = off;
 		// the object as stored, so an untouched shape can be written back
@@ -991,6 +999,42 @@ HknpSystem hknpDecode( const QByteArray & data )
 			}
 			return !out.verts.isEmpty();
 		}
+		if ( cls == QLatin1String( "hknpScaledConvexShape" ) ) {
+			// a wrapper: decode what it points at, then scale it. See scaledChild.
+			const qsizetype inner = global.value( off + 0x30, -1 );
+			if ( inner < 0 )
+				return false;
+			auto child = QSharedPointer<HknpShape>::create();
+			if ( !decodeLeaf( inner, objClass.value( inner ), *child ) )
+				return false;
+			consumed.insert( inner );
+			const Vector3 scale = r.vec3( off + 0x40 );
+			const QByteArray wrapper = out.rawData;
+			const QVector<QPair<qsizetype, qsizetype>> wrapperLocal = out.rawLocal;
+			const qsizetype wrapperAt = out.rawOffset;
+			out = *child;
+			out.className = cls;
+			out.rawData = wrapper;
+			out.rawLocal = wrapperLocal;
+			out.rawOffset = wrapperAt;
+			out.scaledChild = child;
+			for ( Vector3 & v : out.verts )
+				v = Vector3( v[0] * scale[0], v[1] * scale[1], v[2] * scale[2] );
+			out.shapeFlags = r.u32( off + 0x10 );
+			out.convexRadius = r.f32( off + 0x14 );
+			out.materialCRC = out.shapeMaterialCRC = r.u32( off + 0x18 );
+			/* Everything the CHILD owns stays with the child object and is emitted
+			 * with it; the wrapper owns none of it. Leaving these set would make the
+			 * writer emit a second copy hanging off the wrapper.
+			 */
+			out.hasMassProps = false;
+			out.massPropsOffset = -1;
+			out.massRawData.clear();
+			out.materialRawData.clear();
+			out.dataRawData.clear();
+			out.dataLocal.clear();
+			return !out.verts.isEmpty();
+		}
 		if ( cls == QLatin1String( "hknpCompressedMeshShape" ) ) {
 			// the geometry lives in the CMSD referenced by the global fixup at
 			// CMS+0x60 (object order in the file is not reliable)
@@ -1023,6 +1067,19 @@ HknpSystem hknpDecode( const QByteArray & data )
 			return !out.tris.isEmpty();
 		}
 		return false;
+	};
+
+	/*! decodeLeaf, but a shape that yields no GEOMETRY is still a shape.
+	 *
+	 * A compressed mesh with no triangles decodes to nothing drawable and used to
+	 * be dropped, which left a 12-instance compound holding 11 children and made
+	 * the whole system unwritable. The bytes are captured either way, so the shape
+	 * is kept: it draws nothing, exactly as before, and it writes.
+	 */
+	auto decodeShapeSlot = [&]( qsizetype off, const QString & cls, HknpShape & out ) -> bool {
+		if ( decodeLeaf( off, cls, out ) )
+			return true;
+		return cls.endsWith( QLatin1String( "Shape" ) ) && !out.rawData.isEmpty();
 	};
 
 	// pass 1: compound shapes — decode each instance with its transform
@@ -1076,14 +1133,23 @@ HknpSystem hknpDecode( const QByteArray & data )
 			comp.instances.append( one );
 		}
 
-		for ( quint32 i = 0; i < numInst && r.ok; i++ ) {
+		/* r.ok is STICKY: one out-of-range read anywhere leaves it false and every
+		 * later `&& r.ok` loop stops early without saying so. That silently dropped
+		 * the last child of a 12-instance compound, which then would not assemble.
+		 * A child's decode is bounded work; if it reads badly, that is its problem
+		 * and not a reason to abandon the children after it.
+		 */
+		for ( quint32 i = 0; i < numInst; i++ ) {
+			// restored on EVERY exit from the body, including the two continues
+			const bool okBefore = r.ok;
+			const QScopeGuard restoreOk( [&r, okBefore] { r.ok = okBefore; } );
 			qsizetype inst = instBase + qsizetype( i ) * 0x80;
 			qsizetype child = global.value( inst + 0x50, -1 );
 			if ( child < 0 )
 				continue;
 			consumed.insert( child );
 			HknpShape shape;
-			if ( !decodeLeaf( child, objClass.value( child ), shape ) )
+			if ( !decodeShapeSlot( child, objClass.value( child ), shape ) )
 				continue;
 			shape.hasTransform = true;
 			for ( int rr = 0; rr < 3; rr++ )
@@ -1107,7 +1173,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 		if ( consumed.contains( bp.first ) )
 			continue;	// compounds were handled in pass 1
 		HknpShape shape;
-		if ( decodeLeaf( bp.first, objClass.value( bp.first ), shape ) ) {
+		if ( decodeShapeSlot( bp.first, objClass.value( bp.first ), shape ) ) {
 			shape.bodyId = bp.second.id;
 			applyResolvedBodyMaterial( shape, shape.bodyId );
 			sys.shapes.append( shape );
