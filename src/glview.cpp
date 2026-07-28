@@ -333,9 +333,12 @@ QWidget * GLView::createWindowContainer( QWidget * parent )
 bool GLView::setPhysicsSimMode( bool on )
 {
 	if ( !on ) {
+		const bool was = physicsPreview.active();
 		physicsPreview.stop();
 		clearCollisionPreview();
 		update();
+		if ( was )
+			emit physicsSimModeChanged( false );
 		return false;
 	}
 	if ( physicsPreview.active() )
@@ -348,6 +351,7 @@ bool GLView::setPhysicsSimMode( bool on )
 	}
 	setCollisionPreview( physicsPreview.soup() );
 	update();
+	emit physicsSimModeChanged( true );
 	return true;
 }
 
@@ -398,12 +402,11 @@ bool GLView::physicsKeyPress( QKeyEvent * event )
 	 * hands are on the mouse and these have to be reachable one-handed.
 	 */
 	switch ( event->key() ) {
-	case Qt::Key_1: physicsPreview.setTool( PhysicsPreview::Tool::Drag );  return true;
-	case Qt::Key_2: physicsPreview.setTool( PhysicsPreview::Tool::Throw ); return true;
-	case Qt::Key_3: physicsPreview.setTool( PhysicsPreview::Tool::Shoot ); return true;
-	case Qt::Key_4: physicsPreview.setTool( PhysicsPreview::Tool::Pin );   return true;
-	case Qt::Key_5: physicsPreview.setTool( PhysicsPreview::Tool::Blast ); return true;
-	case Qt::Key_6: physicsPreview.setTool( PhysicsPreview::Tool::Wind );  return true;
+	case Qt::Key_1: physicsPreview.setTool( PhysicsPreview::Tool::Grab );  return true;
+	case Qt::Key_2: physicsPreview.setTool( PhysicsPreview::Tool::Shoot ); return true;
+	case Qt::Key_3: physicsPreview.setTool( PhysicsPreview::Tool::Pin );   return true;
+	case Qt::Key_4: physicsPreview.setTool( PhysicsPreview::Tool::Blast ); return true;
+	case Qt::Key_5: physicsPreview.setTool( PhysicsPreview::Tool::Wind );  return true;
 	case Qt::Key_Space:
 		physicsPreview.setPaused( !physicsPreview.paused() );
 		return true;
@@ -539,6 +542,12 @@ void GLView::clearRiggingWeightPreview()
 void GLView::setRiggingWeightPaintMode( bool enabled, int targetBlock, int brushMode,
 	float radius, float paintWeight, float strength )
 {
+	/* Physics Sim is exclusive with every other viewport mode, and the rule
+	 * lives here rather than in the mode menu's handlers: two of the six
+	 * already forgot it, which left the sim running underneath Pose Mode.
+	 */
+	if ( enabled && physicsPreview.active() )
+		setPhysicsSimMode( false );
 	if ( enabled && vertexPaintMode )
 		setVertexPaintMode( false );
 	if ( enabled && segmentPaintMode )
@@ -941,6 +950,12 @@ int GLView::poseMirrorBone( int block )
 
 void GLView::setPoseMode( bool enabled )
 {
+	/* Physics Sim is exclusive with every other viewport mode, and the rule
+	 * lives here rather than in the mode menu's handlers: two of the six
+	 * already forgot it, which left the sim running underneath Pose Mode.
+	 */
+	if ( enabled && physicsPreview.active() )
+		setPhysicsSimMode( false );
 	if ( enabled == poseMode )
 		return;
 	if ( enabled ) {
@@ -1267,6 +1282,12 @@ void GLView::setVertexPaintPreviewColors( int targetBlock, const QVector<Color4>
 
 void GLView::setVertexPaintMode( bool enabled, int targetBlock, float radius )
 {
+	/* Physics Sim is exclusive with every other viewport mode, and the rule
+	 * lives here rather than in the mode menu's handlers: two of the six
+	 * already forgot it, which left the sim running underneath Pose Mode.
+	 */
+	if ( enabled && physicsPreview.active() )
+		setPhysicsSimMode( false );
 	if ( enabled && riggingWeightPaintMode )
 		setRiggingWeightPaintMode( false );
 	if ( enabled && segmentPaintMode )
@@ -1362,6 +1383,12 @@ void GLView::setVertexPaintBrushEnabled( bool enabled )
 
 void GLView::setSegmentPaintMode( bool enabled, int targetBlock, float radius )
 {
+	/* Physics Sim is exclusive with every other viewport mode, and the rule
+	 * lives here rather than in the mode menu's handlers: two of the six
+	 * already forgot it, which left the sim running underneath Pose Mode.
+	 */
+	if ( enabled && physicsPreview.active() )
+		setPhysicsSimMode( false );
 	if ( enabled && riggingWeightPaintMode ) setRiggingWeightPaintMode( false );
 	if ( enabled && vertexPaintMode ) setVertexPaintMode( false );
 	if ( enabled && ( !model || !scene || targetBlock < 0 || !shapeForBlock( targetBlock ) ) )
@@ -2322,13 +2349,25 @@ void GLView::paintGL()
 		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 		glDepthMask( GL_FALSE );
 		scene->loadModelViewMatrix( viewTrans );
-		scene->setGLColor( 1.0f, 0.58f, 0.08f, 0.28f );
+		/* While the sim runs the preview is the SCENE, not a proposal, so it is
+		 * drawn like unselected geometry in Edit Mode -- near-black -- and orange is
+		 * reserved for the bone actually being held. Amber everywhere would leave
+		 * nothing to say "this is the one you grabbed".
+		 */
+		const bool simulating = physicsPreview.active();
+		if ( simulating )
+			scene->setGLColor( 0.09f, 0.09f, 0.10f, 0.55f );
+		else
+			scene->setGLColor( 1.0f, 0.58f, 0.08f, 0.28f );
 		glEnable( GL_POLYGON_OFFSET_FILL );
 		glPolygonOffset( -1.0f, -1.0f );
 		scene->drawTriangles( collisionPreviewSoup.constData(), size_t( collisionPreviewSoup.size() ), nullptr, true );
 		glDisable( GL_POLYGON_OFFSET_FILL );
 		glDepthMask( GL_TRUE );
-		scene->setGLColor( 1.0f, 0.72f, 0.16f, 1.0f );
+		if ( simulating )
+			scene->setGLColor( 0.16f, 0.16f, 0.18f, 1.0f );
+		else
+			scene->setGLColor( 1.0f, 0.72f, 0.16f, 1.0f );
 		scene->setGLLineWidth( Settings::lineWidthHighlight );
 		scene->drawTriangles( collisionPreviewSoup.constData(), size_t( collisionPreviewSoup.size() ), nullptr, false );
 		glDisable( GL_BLEND );
@@ -2342,6 +2381,27 @@ void GLView::paintGL()
 	 * see it.
 	 */
 	if ( physicsPreview.active() && !scene->selecting ) {
+		// the bone in hand, in orange over the black rest
+		const QVector<Vector3> held = physicsPreview.grabbedSoup();
+		if ( !held.isEmpty() ) {
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+			glDepthMask( GL_FALSE );
+			scene->loadModelViewMatrix( viewTrans );
+			scene->setGLColor( 1.0f, 0.55f, 0.08f, 0.40f );
+			glEnable( GL_POLYGON_OFFSET_FILL );
+			glPolygonOffset( -2.0f, -2.0f );
+			scene->drawTriangles( held.constData(), size_t( held.size() ), nullptr, true );
+			glDisable( GL_POLYGON_OFFSET_FILL );
+			glDepthMask( GL_TRUE );
+			scene->setGLColor( 1.0f, 0.72f, 0.16f, 1.0f );
+			scene->setGLLineWidth( Settings::lineWidthHighlight );
+			scene->drawTriangles( held.constData(), size_t( held.size() ), nullptr, false );
+			glDisable( GL_BLEND );
+		}
+
 		// bodies outside their joint limits, drawn over the rest in red
 		const QVector<Vector3> bad = physicsPreview.limitSoup();
 		if ( !bad.isEmpty() ) {
@@ -15803,6 +15863,12 @@ bool GLView::isEditableMesh( const QModelIndex & iBlock ) const
 
 void GLView::setEditMode( bool on )
 {
+	/* Physics Sim is exclusive with every other viewport mode, and the rule
+	 * lives here rather than in the mode menu's handlers: two of the six
+	 * already forgot it, which left the sim running underneath Pose Mode.
+	 */
+	if ( on && physicsPreview.active() )
+		setPhysicsSimMode( false );
 	if ( on == editMode )
 		return;
 

@@ -4302,11 +4302,31 @@ void NifSkope::load()
 		return;
 	}
 
+	/* A load is a new scene, so drop whatever mode the last file was being worked
+	 * in and reframe the camera.
+	 *
+	 * Staying in Edit or Pose or Physics Sim across a load leaves the mode pointed
+	 * at blocks that no longer exist, and keeping the old camera frames the new
+	 * file from wherever the last one happened to be looked at -- which on a
+	 * differently sized model is often nowhere near it.
+	 */
+	if ( ogl ) {
+		ogl->setPhysicsSimMode( false );
+		ogl->setRiggingWeightPaintMode( false );
+		ogl->setVertexPaintMode( false );
+		ogl->setSegmentPaintMode( false );
+		ogl->setPoseMode( false );
+		ogl->setEditMode( false );
+	}
+
 	bool loaded = nif->loadFromFile( fname );
 	perfMark( "loadFromFile (views detached)" );
 
 	emit completeLoading( loaded, fname );
 	perfMark( "completeLoading consumers" );
+	// reframe on the new contents, after the scene has been rebuilt
+	if ( loaded && ogl )
+		ogl->setOrientation( ogl->viewState(), true );
 
 	//if ( loaded ) {
 	//	filehash = fileChecksum( fname, QCryptographicHash::Md5 );

@@ -113,7 +113,7 @@ void PhysicsPreview::reset()
 		return;
 	const bool wasPaused = m_paused;
 	const bool ground = m_sim.ground, selfColl = m_sim.selfCollision, angLimits = m_sim.angularLimits;
-	const float groundZ = m_sim.groundZ;
+	const float groundZ = m_sim.groundZ, grip = m_sim.groundFriction;
 	const Vector3 w = m_sim.wind;
 	m_sim.clearDrag();
 	QString err;
@@ -127,6 +127,7 @@ void PhysicsPreview::reset()
 	m_sim.selfCollision = selfColl;
 	m_sim.angularLimits = angLimits;
 	m_sim.wind = w;
+	m_sim.groundFriction = grip;
 	setGravityEnabled( m_gravityOn );
 	m_paused = wasPaused;
 }
@@ -177,6 +178,25 @@ QVector<Vector3> PhysicsPreview::soup() const
 	return out;
 }
 
+QVector<Vector3> PhysicsPreview::grabbedSoup() const
+{
+	QVector<Vector3> out;
+	const int b = m_sim.draggedBody();
+	if ( !m_active || b < 0 || b >= m_meshes.size() )
+		return out;
+	const BodyMesh & bm = m_meshes.at( b );
+	QVector<Vector3> posed;
+	posed.reserve( bm.verts.size() );
+	for ( const Vector3 & v : bm.verts )
+		posed.append( m_sim.toWorld( b, v ) * SCALE );
+	for ( const Triangle & t : bm.tris ) {
+		out.append( posed.at( t[0] ) );
+		out.append( posed.at( t[1] ) );
+		out.append( posed.at( t[2] ) );
+	}
+	return out;
+}
+
 QVector<Vector3> PhysicsPreview::limitSoup() const
 {
 	QVector<Vector3> out;
@@ -206,8 +226,7 @@ QVector<Vector3> PhysicsPreview::limitSoup() const
 QString PhysicsPreview::toolName( Tool t )
 {
 	switch ( t ) {
-	case Tool::Drag:  return QStringLiteral( "Drag" );
-	case Tool::Throw: return QStringLiteral( "Throw" );
+	case Tool::Grab:  return QStringLiteral( "Grab" );
 	case Tool::Shoot: return QStringLiteral( "Shoot" );
 	case Tool::Pin:   return QStringLiteral( "Pin" );
 	case Tool::Blast: return QStringLiteral( "Blast" );
@@ -274,8 +293,7 @@ bool PhysicsPreview::press( const Vector3 & rayOrigin, const Vector3 & rayDir )
 	const Vector3 dir = rayDir / len;
 
 	switch ( m_tool ) {
-	case Tool::Drag:
-	case Tool::Throw:
+	case Tool::Grab:
 		if ( !grab( rayOrigin, rayDir ) )
 			return false;
 		m_lastGrabTarget = m_sim.toWorld( m_sim.draggedBody(), Vector3() );
@@ -380,13 +398,15 @@ bool PhysicsPreview::release()
 	}
 	if ( !grabbing() )
 		return false;
-	/* Throw hands the body the hand's own velocity. The solver derives velocity
-	 * from the position change each substep, so a dragged body is ALREADY moving
-	 * at roughly the hand's speed -- but letting go simply stops driving it, and
-	 * the constraint solve bleeds that off within a frame or two. Setting it
-	 * explicitly is what makes a throw carry.
+	/* Let go carrying the hand's velocity, which makes a release while moving a
+	 * throw and a release while still a drop -- no mode to choose in advance.
+	 *
+	 * The solver derives velocity from the position change each substep, so a
+	 * dragged body is ALREADY moving at roughly the hand's speed; but letting go
+	 * simply stops driving it, and the constraint solve bleeds that off within a
+	 * frame or two. Setting it explicitly is what makes a throw carry.
 	 */
-	if ( m_tool == Tool::Throw && m_sim.draggedBody() >= 0 )
+	if ( m_sim.draggedBody() >= 0 )
 		m_sim.setVelocity( m_sim.draggedBody(), m_grabVelocity );
 	m_sim.clearDrag();
 	return true;

@@ -372,6 +372,13 @@ public:
 	//! Coulomb friction at contacts. Zero makes a ragdoll slide for ever, which
 	//! reads as broken even though it is stable.
 	float friction = 0.5f;
+	/*! Friction against the ground plane, separately from body-on-body.
+	 *
+	 * Separate because a floor is a surface with its own character -- ice, mud,
+	 * concrete -- while body-on-body friction is a property of the ragdoll. 1.0
+	 * is grippy enough that a dropped rig stops where it lands.
+	 */
+	float groundFriction = 1.0f;
 	//! Extra damping per second on top of each body's own authored value.
 	float damping = 0.0f;
 	/*! Gauss-Seidel sweeps per substep.

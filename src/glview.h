@@ -376,6 +376,14 @@ signals:
 	void transformCommitted( int blockNumber );
 	//! Object/Edit mode changed (for the toolbar mode selector)
 	void editModeChanged( bool editing );
+	/*! Physics Sim entered or left.
+	 *
+	 * Every other viewport mode announces itself and the mode button listens.
+	 * This one was added without a signal, so leaving it for Object Mode changed
+	 * nothing the button was watching -- it kept saying "Physics Sim" and the mode
+	 * looked stuck.
+	 */
+	void physicsSimModeChanged( bool simulating );
 	void editDeformedCageChanged( bool enabled );
 	//! Element pick mode changed (0 none, 1 vertex, 2 edge, 3 face)
 	void pickModeChanged( int mode );

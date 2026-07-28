@@ -39,8 +39,14 @@ public:
 	 */
 	enum class Tool
 	{
-		Drag,       //!< spring grab, let go where it lies
-		Throw,      //!< spring grab, let go carrying the hand's velocity
+		/*! Grab a bone with a spring, and let go carrying the motion of the hand.
+		 *
+		 * Drag and Throw used to be separate tools. They were the same gesture with
+		 * one difference at the moment of release, which is not a choice worth
+		 * making in advance: releasing while still is a drop, and releasing while
+		 * moving is a throw. The tool now does whichever the hand was doing.
+		 */
+		Grab,
 		Shoot,      //!< impulse along the view ray at the point it hits
 		Pin,        //!< nail a body in place, click again to free it
 		Blast,      //!< radial impulse centred where the ray hits
@@ -156,6 +162,8 @@ public:
 	//! Just the bodies breaking a limit, so the viewport can draw them over the
 	//! rest in a warning colour. Empty unless highlightLimits() is on.
 	QVector<Vector3> limitSoup() const;
+	//! Just the body being held, so the viewport can show WHICH bone is grabbed.
+	QVector<Vector3> grabbedSoup() const;
 
 	//! How many bodies and joints are being simulated, for a status line.
 	int bodyCount() const { return m_sim.bodies().size(); }
@@ -188,6 +196,11 @@ public:
 	//! Where start() put the floor, so a reset control has something to go back to.
 	float defaultGroundHeight() const { return m_defaultGroundZ * SCALE; }
 
+	/*! Floor grip, 0 (ice) to about 2 (rubber). Separate from the ragdoll's own
+	 * body-on-body friction, because a floor is a surface with its own character.
+	 */
+	void setGroundFriction( float f ) { m_sim.groundFriction = std::max( 0.0f, f ); }
+	float groundFriction() const { return m_sim.groundFriction; }
 	void setSelfCollision( bool on ) { m_sim.selfCollision = on; }
 	bool selfCollision() const { return m_sim.selfCollision; }
 	void setAngularLimits( bool on ) { m_sim.angularLimits = on; }
@@ -234,7 +247,7 @@ private:
 	int m_jointCount = 0;
 	//! distance along the view ray the grab was made at, so dragging keeps depth
 	float m_grabDepth = 0.0f;
-	Tool m_tool = Tool::Drag;
+	Tool m_tool = Tool::Grab;
 	bool m_gravityOn = true;
 	float m_gravityG = 9.81f;
 	float m_timeScale = 1.0f;

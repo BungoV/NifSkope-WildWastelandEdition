@@ -3617,6 +3617,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						for ( int k = 0; k < 4; k++ )
 							gl->physicsTick( 1.0f / 60.0f );
 					}
+					// while still held: the rig black, the bone in hand orange
+					check( !pv.grabbedSoup().isEmpty(),
+						QStringLiteral( "the held bone is drawn apart from the rest" ) );
+					gl->update();
+					QApplication::processEvents();
+					gl->grabFramebuffer().save( outPath + QStringLiteral( ".grab.png" ) );
+
 					const float pulled = ( pv.sim().toWorld( grabbed, Vector3() ) - before ).length();
 					check( pulled > 0.005f, QStringLiteral( "the drag moved it %1 m" )
 						.arg( double( pulled ), 0, 'f', 4 ) );
@@ -3848,7 +3855,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 * moving at the hand's speed when it is let go, and what Throw
 				 * adds is that the velocity survives the next constraint solve.
 				 */
-				auto dragAndCoast = [&]( PhysicsPreview::Tool t ) -> float {
+				auto dragAndCoast = [&]( PhysicsPreview::Tool t, bool movingAtRelease ) -> float {
 					pv.reset();
 					pv.setTool( t );
 					QPointF sp;
@@ -3865,22 +3872,37 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::sendEvent( gl, &mv );
 						gl->physicsTick( 1.0f / 60.0f );
 					}
-					const Vector3 atRelease = pv.sim().toWorld( target, Vector3() );
+					if ( !movingAtRelease ) {
+						// hold still first, so the hand has no velocity to hand over
+						for ( int i = 0; i < 20; i++ )
+							gl->physicsTick( 1.0f / 60.0f );
+					}
 					QMouseEvent rel( QEvent::MouseButtonRelease, sp, gl->mapToGlobal( sp ),
 						gl->selectMouseButton(), Qt::NoButton, Qt::NoModifier );
 					QApplication::sendEvent( gl, &rel );
-					for ( int i = 0; i < 15; i++ )
-						gl->physicsTick( 1.0f / 60.0f );
-					return ( pv.sim().toWorld( target, Vector3() ) - atRelease ).length();
+					/* The speed handed over AT the moment of release.
+					 *
+					 * Measuring how far it then coasts conflates the throw with gravity:
+					 * on the feral ghoul the still-release case travelled further,
+					 * because the bone was left swinging and kept falling. What the tool
+					 * promises is that the hand's velocity survives the release, so that
+					 * is what is measured, before a single step can muddy it.
+					 */
+					return pv.sim().bodies().at( target ).v.length();
 				};
-				const float coastDrag = dragAndCoast( PhysicsPreview::Tool::Drag );
-				const float coastThrow = dragAndCoast( PhysicsPreview::Tool::Throw );
-				check( coastThrow > coastDrag,
-					QStringLiteral( "Throw carries further than Drag (%1 m vs %2 m)" )
-						.arg( double( coastThrow ), 0, 'f', 3 ).arg( double( coastDrag ), 0, 'f', 3 ) );
+				/* A release while MOVING carries; the same tool released while still
+				 * does not. That is the whole of what merging Drag and Throw means, so
+				 * it is what gets measured.
+				 */
+				const float speedMoving = dragAndCoast( PhysicsPreview::Tool::Grab, true );
+				const float speedStill = dragAndCoast( PhysicsPreview::Tool::Grab, false );
+				check( speedMoving > speedStill * 2.0f,
+					QStringLiteral( "released moving it is thrown, released still it drops "
+									"(%1 m/s vs %2 m/s)" )
+						.arg( double( speedMoving ), 0, 'f', 3 ).arg( double( speedStill ), 0, 'f', 3 ) );
 
 				// Options
-				pv.setTool( PhysicsPreview::Tool::Drag );
+				pv.setTool( PhysicsPreview::Tool::Grab );
 				/* Gravity measured as FALL, not as total movement.
 				 *
 				 * Two wrong versions came before this one. "With gravity off it barely
@@ -3995,6 +4017,43 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 				}
 
+
+				/* Every other mode has to be able to take over.
+				 *
+				 * This is the bug bungo hit: Physics Sim was added without the
+				 * change signal every other mode has, so Pose and the paint modes
+				 * never left it and Object/Edit left it without the button noticing.
+				 * Each one is entered from a RUNNING sim, which is the case that broke.
+				 */
+				struct ModeCase { const char * name; std::function<void()> enter; };
+				const ModeCase modes[] = {
+					{ "Edit", [gl]() { gl->setEditMode( true ); } },
+					{ "Pose", [gl]() { gl->setPoseMode( true ); } },
+					{ "Vertex Paint", [gl]() { gl->setVertexPaintMode( true ); } },
+					{ "Segment Paint", [gl]() { gl->setSegmentPaintMode( true ); } },
+				};
+				for ( const ModeCase & mc : modes ) {
+					gl->setPhysicsSimMode( true );
+					if ( !pv.active() )
+						continue;
+					mc.enter();
+					check( !pv.active(), QStringLiteral( "%1 Mode leaves Physics Sim" )
+						.arg( QLatin1String( mc.name ) ) );
+					gl->setEditMode( false );
+					gl->setPoseMode( false );
+					gl->setVertexPaintMode( false );
+					gl->setSegmentPaintMode( false );
+				}
+				// and the signal that keeps the mode button honest
+				{
+					int fired = 0;
+					auto conn = QObject::connect( gl, &GLView::physicsSimModeChanged,
+						gl, [&fired]( bool ) { fired++; } );
+					gl->setPhysicsSimMode( true );
+					gl->setPhysicsSimMode( false );
+					QObject::disconnect( conn );
+					check( fired == 2, QStringLiteral( "entering and leaving each announce it" ) );
+				}
 
 				check( gl->setPhysicsSimMode( false ) == false, QStringLiteral( "mode left" ) );
 				check( !pv.active(), QStringLiteral( "preview stopped" ) );
@@ -5804,6 +5863,12 @@ void NifSkope::initDockWidgets()
 			}
 			syncModeButton();
 		} );
+		connect( ogl, &GLView::physicsSimModeChanged, this,
+			[this, syncModeButton]( bool simulating ) {
+				if ( simulating )
+					lastViewportNonObjectMode = 6;
+				syncModeButton();
+			} );
 		connect( ogl, &GLView::editModeChanged, this, [this, syncModeButton]( bool enabled ) {
 			if ( enabled && !ogl->riggingWeightPaintModeActive() && !ogl->vertexPaintModeActive()
 				&& !ogl->segmentPaintModeActive() )
@@ -7243,18 +7308,17 @@ void NifSkope::initDockWidgets()
 		toolGroup->setExclusive( true );
 		struct ToolEntry { PhysicsPreview::Tool tool; const char * label; const char * tip; };
 		static const ToolEntry toolEntries[] = {
-			{ PhysicsPreview::Tool::Drag,  QT_TR_NOOP( "Drag" ),
-			  QT_TR_NOOP( "Grab a bone with a spring and pull it. (1)" ) },
-			{ PhysicsPreview::Tool::Throw, QT_TR_NOOP( "Throw" ),
-			  QT_TR_NOOP( "Grab and let go carrying the motion of your hand. (2)" ) },
+			{ PhysicsPreview::Tool::Grab,  QT_TR_NOOP( "Grab" ),
+			  QT_TR_NOOP( "Pull a bone with a spring. Let go while moving and it is thrown; "
+						  "let go while still and it drops. (1)" ) },
 			{ PhysicsPreview::Tool::Shoot, QT_TR_NOOP( "Shoot" ),
-			  QT_TR_NOOP( "Hit it with an impulse where you click. Off-centre hits spin it. (3)" ) },
+			  QT_TR_NOOP( "Hit it with an impulse where you click. Off-centre hits spin it. (2)" ) },
 			{ PhysicsPreview::Tool::Pin,   QT_TR_NOOP( "Pin" ),
-			  QT_TR_NOOP( "Nail a bone in place. Click it again to let go. (4)" ) },
+			  QT_TR_NOOP( "Nail a bone in place. Click it again to let go. (3)" ) },
 			{ PhysicsPreview::Tool::Blast, QT_TR_NOOP( "Blast" ),
-			  QT_TR_NOOP( "Radial impulse from the point you click. (5)" ) },
+			  QT_TR_NOOP( "Radial impulse from the point you click. (4)" ) },
 			{ PhysicsPreview::Tool::Wind,  QT_TR_NOOP( "Wind" ),
-			  QT_TR_NOOP( "Steady push along the view while the button is held. (6)" ) },
+			  QT_TR_NOOP( "Steady push along the view while the button is held. (5)" ) },
 		};
 		int tRow = 0, tCol = 0;
 		for ( const ToolEntry & te : toolEntries ) {
@@ -7411,6 +7475,15 @@ void NifSkope::initDockWidgets()
 		opts->addWidget( groundChk, oRow, 0 );
 		opts->addWidget( groundSpin, oRow++, 1 );
 
+		QDoubleSpinBox * gripSpin = new QDoubleSpinBox( panel );
+		gripSpin->setRange( 0.0, 4.0 );
+		gripSpin->setSingleStep( 0.1 );
+		gripSpin->setDecimals( 2 );
+		gripSpin->setToolTip( tr( "How much the floor grips. 0 is ice and the rig slides for "
+								  "ever; 1 stops it where it lands." ) );
+		opts->addWidget( new QLabel( tr( "Floor grip" ), panel ), oRow, 0 );
+		opts->addWidget( gripSpin, oRow++, 1 );
+
 		QCheckBox * groundVisChk = new QCheckBox( tr( "Show ground" ), panel );
 		groundVisChk->setToolTip( tr( "Draw the floor as a solid surface. An invisible plane "
 									   "that a ragdoll lands on looks like a bug." ) );
@@ -7491,6 +7564,9 @@ void NifSkope::initDockWidgets()
 			limitsChk->setChecked( pv.angularLimits() );
 			statsChk->setChecked( ogl->physicsStatsShown() );
 			groundVisChk->setChecked( pv.groundVisible() );
+			QSignalBlocker bg( gripSpin );
+			gripSpin->setValue( double( pv.groundFriction() ) );
+			gripSpin->setEnabled( on && pv.groundEnabled() );
 			hiLimitsChk->setChecked( pv.highlightLimits() );
 			groundVisChk->setEnabled( on && pv.groundEnabled() );
 			groundResetBtn->setEnabled( on && pv.groundEnabled() );
@@ -7500,7 +7576,7 @@ void NifSkope::initDockWidgets()
 			// boxes for settings that do not apply
 			const PhysicsPreview::ToolSettings & ts = pv.settings();
 			const PhysicsPreview::Tool t = pv.tool();
-			const bool grabby = ( t == PhysicsPreview::Tool::Drag || t == PhysicsPreview::Tool::Throw );
+			const bool grabby = ( t == PhysicsPreview::Tool::Grab );
 			const bool shooty = ( t == PhysicsPreview::Tool::Shoot );
 			const bool blasty = ( t == PhysicsPreview::Tool::Blast );
 			const bool windy  = ( t == PhysicsPreview::Tool::Wind );
@@ -7614,6 +7690,9 @@ void NifSkope::initDockWidgets()
 		} );
 		connect( statsChk, &QCheckBox::toggled, this, [this]( bool on ) {
 			ogl->setPhysicsStatsShown( on );
+		} );
+		connect( gripSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().setGroundFriction( float( v ) );
 		} );
 		connect( groundVisChk, &QCheckBox::toggled, this, [this]( bool on ) {
 			ogl->physicsSim().setGroundVisible( on );

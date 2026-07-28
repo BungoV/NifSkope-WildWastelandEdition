@@ -680,6 +680,25 @@ void RagdollSim::solveContacts( float h )
 				staticGround.x = point;
 				applyPositional( A, staticGround, point - A.x, Vector3(),
 					normal * ( d * share ) );
+
+				/* Friction against the FLOOR.
+				 *
+				 * This branch used to `continue` straight past the Coulomb correction
+				 * below, so body-on-body contacts had friction and the ground had
+				 * none: a ragdoll landed and then slid across the floor for ever.
+				 * Shared by the same count as the normal correction, for the same
+				 * reason -- eight vertices on the floor must not brake eight times.
+				 */
+				if ( groundFriction > 0.0f ) {
+					Vector3 rel = A.x - A.xPrev;
+					rel = rel - normal * Vector3::dotproduct( rel, normal );
+					const float slide = rel.length();
+					if ( slide > 1.0e-9f ) {
+						const float take = std::min( slide, groundFriction * d * share );
+						applyPositional( A, staticGround, point - A.x, Vector3(),
+							rel * ( -take / slide ) );
+					}
+				}
 			}
 			continue;
 		}

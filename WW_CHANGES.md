@@ -1,5 +1,60 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29r — the floor grips, Grab is one tool, and Physics Sim lets go
+
+**51 of 51 checks on 6 rigs, 1 correctly skipped, 0 failures.**
+
+### The mode was genuinely stuck, and it was structural
+
+Physics Sim was added as a seventh viewport mode **without the change signal every
+other mode has**. Two consequences, both reported: Pose and the three paint modes
+never left it, so the sim kept running underneath them; and Object and Edit did
+leave it but nothing the mode button watches changed, so the button kept saying
+"Physics Sim" and the mode looked stuck.
+
+Fixed at the root rather than by sprinkling calls: `GLView` emits
+`physicsSimModeChanged`, and **the exclusivity now lives in the mode setters
+themselves** — `setEditMode`, `setPoseMode` and the three paint setters all leave
+Physics Sim when switched on. Two of six call sites had already forgotten it,
+which is exactly the argument for putting the rule where it cannot be forgotten.
+
+Tested by entering all four other modes from a RUNNING sim, which is the case that
+broke.
+
+### The floor had no friction at all
+
+Not a missing setting — a missing branch. The ground contact `continue`d straight
+past the Coulomb correction, so body-on-body contacts had friction and the floor
+had none: a ragdoll landed and slid for ever. Ground friction is applied now,
+shared by the same contact count as the normal correction (eight vertices on the
+floor must not brake eight times), and exposed as **Floor grip**: 0 is ice, 1
+stops a rig where it lands.
+
+### Drag and Throw are one tool
+
+They were the same gesture differing only at the moment of release, which is not a
+choice worth making in advance. **Grab** now does whichever the hand was doing —
+let go while moving and it is thrown, let go while still and it drops.
+
+The test for it was wrong twice over. Comparing how far the bone coasts conflates
+the throw with gravity, and on the feral ghoul the still-release case travelled
+*further* because the bone was left swinging and kept falling. What the tool
+promises is that the hand's velocity survives the release, so that is what is
+measured now, at the moment of release before a step can muddy it.
+
+### The simulation is the scene, so it is drawn like one
+
+While the sim runs the preview is near-black, like unselected geometry in Edit
+Mode, and **orange is reserved for the bone actually in hand**. Amber everywhere
+left nothing to say which one you grabbed.
+
+### Loading a file resets the mode and the camera
+
+Staying in Edit or Pose or Physics Sim across a load points the mode at blocks
+that no longer exist, and keeping the camera frames the new file from wherever the
+last one happened to be looked at — which on a differently sized model is often
+nowhere near it.
+
 ## 2026-07-29q — visible shots, a real projectile, a floor you can see
 
 **45 of 45 checks on 6 rigs, 1 correctly skipped, 0 failures.**
