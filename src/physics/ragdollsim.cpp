@@ -1033,15 +1033,26 @@ bool RagdollSim::solveOneJoint( const SimJoint & j )
 	}
 }
 
-void RagdollSim::solveJoints( float h )
+void RagdollSim::solveJoints( float h, bool reverse )
 {
 	Q_UNUSED( h )
 	/* One pass over every joint, then extra passes only over the joints that are
 	 * still fighting. A near-welded hinge -- the workshop turret's pelvis is
 	 * limited to one degree -- needs several passes to settle where a shoulder
 	 * needs one, and spending them globally is what broke the sentry.
+	 *
+	 * Sweeping FORWARD ONLY, though. Alternating direction each iteration is
+	 * textbook symmetric Gauss-Seidel and propagates a correction both up and down
+	 * a chain instead of one joint per pass, which ought to help anything held at
+	 * an extremity -- and it measures worse: 32 of 37 ragdolls settling against 36,
+	 * with Liberty Prime going from 1.5 m/s to 20.9. It was also not needed. The
+	 * 0.41 m separations that prompted it came from a test that pinned the root AND
+	 * dragged a forearm past the arm's reach, which no solver can satisfy.
 	 */
-	for ( const SimJoint & j : std::as_const( m_joints ) ) {
+	Q_UNUSED( reverse )
+	const int n = m_joints.size();
+	for ( int idx = 0; idx < n; idx++ ) {
+		const SimJoint & j = m_joints.at( idx );
 		for ( int k = 0; k < std::max( 1, stiffIterations ); k++ )
 			if ( !solveOneJoint( j ) )
 				break;
@@ -1073,7 +1084,7 @@ void RagdollSim::step( float dt, int substeps )
 		}
 
 		for ( int it = 0; it < std::max( 1, iterations ); it++ ) {
-			solveJoints( h );
+			solveJoints( h, ( it & 1 ) != 0 );
 			solveContacts( h );
 		}
 

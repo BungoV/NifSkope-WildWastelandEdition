@@ -327,7 +327,7 @@ public:
 	void pinLooseBodies();
 
 private:
-	void solveJoints( float h );
+	void solveJoints( float h, bool reverse );
 	//! one pass over one joint; true if it is still meaningfully violated
 	bool solveOneJoint( const SimJoint & j );
 	//! fill in every body's solverScale from how many joints touch it

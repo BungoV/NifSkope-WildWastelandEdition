@@ -645,8 +645,19 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    this spread per model.
    Remaining for a GUI session (needs on-screen verification, so not done blind):
    the draw override in glnode.cpp's bhkSystem branch, and play/pause/reset.
-4. **Interaction.** Ray-pick a body under the cursor, drag it with a mouse spring;
-   fling spawned bodies at static collision.
+4. **Interaction — scoped with bungo 07-28o: a "Physics Sim" viewport mode.**
+   A mode alongside Object/Edit (Tab), following `setPoseMode` exactly: leave
+   conflicting modes on entry, capture the rest pose, restore it non-destructively
+   on exit, emit a status line. **Runs live on entry; Space pauses/resumes; R
+   resets.** Bone dragging is the one interaction agreed for the first cut —
+   throwing, prop-flinging and click-to-pin were offered and deferred.
+   **The drag MECHANIC is done and verified headlessly** (`simulate --drag N`):
+   184 drags across the corpus, 0 divergences, worst joint separation 4.0 mm. It
+   is `setPinned` + `setPosition`, which XPBD gives for free. Only the mouse-ray
+   plumbing is unverified.
+   Reuse from Pose Mode: `poseBoneAt`-style picking and the gizmo drag loop.
+   Do NOT pin the root while dragging — pinning both ends asks a limb to span
+   further than it reaches, which is unsatisfiable and looks like a solver bug.
 5. **Static mesh collision.** Capsule vs `hknpCompressedMeshShape` triangles via a
    BVH over the already-decoded mesh.
 

@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28o — Bone dragging works, verified without a window
+
+Physics Sim mode will let you grab a ragdoll bone and drag it. The mechanic itself
+is now tested: `simulate --drag <body>` pins a body, sweeps it round a circle at
+the speed a hand moves, and reports whether the ragdoll follows or comes apart.
+
+**184 drags across every ragdoll in the corpus — every fifth body of each — zero
+divergences, worst joint separation 4.0 mm**, and sub-millimetre on everything but
+the sentry parts kit. Dragging the root, a spine link or an extremity all behave.
+
+This is the payoff from choosing XPBD in 07-28f: a drag needs no spring constant
+and nothing to tune. Pin the body, put it where the cursor is, and the solver
+resolves the rest — a pinned body simply has infinite mass for the substep. And
+it needs no window to test, which is the point: only the mouse-ray plumbing is
+left unverified, not the physics.
+
+**The first version of the test was wrong, and worth recording.** It reported
+0.41 m separations, and the instinct was to blame the solver. It pinned the root
+*and* dragged a forearm a quarter of the ragdoll's height — asking the arm to span
+further than an arm reaches. No solver satisfies that; it is a fact about arms. A
+real drag grabs one body and lets the rest dangle, and `--drag` now does that
+(0.41 m becomes 0.00015 m). The lesson is the recurring one this week: when a
+measurement looks like a bug, check what the measurement is asking for.
+
+### Rejected: alternating sweep direction
+
+Joints are stored roughly parents-first, so a forward sweep carries a correction
+from the pelvis outwards in one pass and from a grabbed hand *inwards* one joint
+per pass. Alternating direction each iteration is textbook symmetric Gauss-Seidel
+and should fix that. It measures worse — **32 of 37 settling against 36**, Liberty
+Prime going from 1.5 m/s to 20.9 — and it was not needed once the test was fixed.
+Reverted, and noted in the code so it is not tried a third time.
+
+That is the sixth change this week that was principled, plausible and worse on
+measurement. The corpus keeps earning its keep.
+
 ## 2026-07-28n — The scene bridge, and why it cannot be one transform
 
 Groundwork for drawing the simulated pose (phase 3), done headlessly so the part

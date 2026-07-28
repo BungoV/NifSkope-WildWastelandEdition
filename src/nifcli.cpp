@@ -465,7 +465,7 @@ static void checkSceneBridge( NifModel & nif, const RagdollSim & sim, qint32 sys
 
 int cmdSimulate( const QString & file, int steps, int substeps, int iterations, bool noLimits,
 	const QString & onlyLimit, bool ground, bool noSelf, bool drop, bool jointedOnly,
-	bool selfTest, bool verbose )
+	int dragBody, bool selfTest, bool verbose )
 {
 	if ( selfTest || file.isEmpty() ) {
 		// Two bodies, one joint, damping off: total energy is a conserved
@@ -608,9 +608,16 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 				}
 			}
 		}
-		// --drop lets the whole thing fall; otherwise hold the root so what is
-		// under test is the joints rather than gravity
-		if ( !drop )
+		/* --drop lets the whole thing fall; otherwise hold the root so what is
+		 * under test is the joints rather than gravity.
+		 *
+		 * Dragging holds nothing else. Pinning the root as well as the grabbed
+		 * body asks the chain between them to span whatever distance the drag
+		 * covers, and once that exceeds the limb's reach the joints simply cannot
+		 * be satisfied -- which is a fact about arms, not a solver failure. A real
+		 * drag grabs one body and lets the rest dangle from it.
+		 */
+		if ( !drop && dragBody < 0 )
 			sim.setPinned( 0, true );
 
 		checkSceneBridge( nif, sim, b );
@@ -763,6 +770,35 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 					.arg( before.contacts, 9 ).arg( before.maxPenetration, 11, 'f', 6 )
 			  << Qt::endl;
 
+		/* Dragging a bone, which is what Physics Sim mode is for.
+		 *
+		 * The mechanic is the whole of XPBD's appeal here: pin the body, move it
+		 * where the cursor is, and the solver resolves the rest of the ragdoll
+		 * around it. No spring constant, no tuning, nothing to go unstable -- a
+		 * pinned body simply has infinite mass for the substep.
+		 *
+		 * Testing it needs no window. Sweeping the grabbed body along a circle and
+		 * watching the joints exercises exactly the code the mouse would drive,
+		 * and reports whether the ragdoll follows or comes apart.
+		 */
+		Vector3 dragFrom;
+		float dragR = 0.0f;
+		if ( dragBody >= 0 && dragBody < sim.bodies().size() ) {
+			sim.setPinned( dragBody, true );
+			dragFrom = sim.bodies().at( dragBody ).x;
+			// a quarter of the ragdoll's own height, so the pull is substantial
+			// without being absurd for a cat or a Liberty Prime alike
+			float lo = dragFrom[2], hi = dragFrom[2];
+			for ( const SimBody & sb : sim.bodies() ) {
+				lo = std::min( lo, sb.x[2] );
+				hi = std::max( hi, sb.x[2] );
+			}
+			// a tenth of the ragdoll's height: a firm pull, well inside any limb's reach
+			dragR = std::max( 0.05f, ( hi - lo ) * 0.10f );
+			out() << QString( "  dragging body %1 in a %2 m circle" ).arg( dragBody )
+						.arg( dragR, 0, 'f', 3 ) << Qt::endl;
+		}
+
 		SimStats st;
 		/* Record the first step where the kinetic energy takes off. A blow-up
 		 * always starts at one body: reporting the ragdoll's total tells us it
@@ -771,6 +807,12 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 		SimStats onset;
 		int onsetStep = -1;
 		for ( int i = 0; i < steps; i++ ) {
+			if ( dragR > 0.0f ) {
+				// two seconds a lap, the speed a hand actually moves
+				const float ang = 2.0f * float( M_PI ) * float( i ) / 120.0f;
+				sim.setPosition( dragBody, dragFrom
+					+ Vector3( std::cos( ang ) - 1.0f, std::sin( ang ), 0.0f ) * dragR );
+			}
 			sim.step( 1.0f / 60.0f, substeps );
 			st = sim.stats();
 			// 50 m/s: a hanging ragdoll swings at a few m/s, so this is well
@@ -1823,6 +1865,7 @@ int nifskopeCliMain( const QStringList & args )
 	int iterations = 0;
 	QString onlyLimit;
 	bool useGround = false, noSelf = false, drop = false, jointedOnly = false;
+	int dragBody = -1;
 	bool noLimits = false;
 	bool verboseSim = false;
 	float cubeSize = STARTER_CUBE_SIZE;
@@ -1868,6 +1911,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--no-self" ) ) noSelf = true;
 		else if ( t == QLatin1String( "--drop" ) ) drop = true;
 		else if ( t == QLatin1String( "--jointed-only" ) ) jointedOnly = true;
+		else if ( t == QLatin1String( "--drag" ) ) dragBody = next().toInt();
 		else if ( t == QLatin1String( "--no-limits" ) ) noLimits = true;
 		else if ( t == QLatin1String( "--trace" ) ) verboseSim = true;
 		else if ( t == QLatin1String( "--size" ) ) cubeSize = next().toFloat();
@@ -1939,7 +1983,7 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "simulate" ) )
 		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
-			selfTest, verboseSim );
+			dragBody, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
 		rc = cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
