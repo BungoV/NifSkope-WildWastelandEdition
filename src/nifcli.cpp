@@ -901,7 +901,7 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
  * So: structure must be exact, geometry must be tight. Reporting one number for
  * both would let a real layout error hide inside float noise.
  */
-int cmdCollisionRoundTrip( const QString & file )
+int cmdCollisionRoundTrip( const QString & file, const QString & rebuildTo )
 {
 	NifModel nif;
 	if ( !loadNif( nif, file ) )
@@ -948,6 +948,12 @@ int cmdCollisionRoundTrip( const QString & file )
 		if ( !sys.bones.isEmpty() && !sys.bodyPhys.isEmpty() ) {
 			QString err;
 			const QByteArray built = hknpEncodeRagdoll( sys, &err );
+			if ( !rebuildTo.isEmpty() && !built.isEmpty() ) {
+				// the reassembled bytes, so a mismatch can be diffed and not guessed at
+				QFile f( rebuildTo );
+				if ( f.open( QIODevice::WriteOnly ) )
+					f.write( built );
+			}
 			/* Assembled twice, because the two runs answer different questions.
 			 * With the stored shape bytes in hand this is what NifSkope writes for
 			 * a file whose collision nobody touched, and it has to come back
@@ -956,8 +962,10 @@ int cmdCollisionRoundTrip( const QString & file )
 			 * of the format is genuinely reconstructed rather than copied.
 			 */
 			HknpSystem fresh = sys;
-			for ( HknpShape & s : fresh.shapes )
+			for ( HknpShape & s : fresh.shapes ) {
 				s.rawData.clear();
+				s.massRawData.clear();
+			}
 			const QByteArray derived = hknpEncodeRagdoll( fresh, nullptr );
 			if ( !derived.isEmpty() ) {
 				packsDerived++;
@@ -2286,8 +2294,10 @@ int usage()
 		  << "                                          decode found in each packfile\n"
 		  << "  collision <file> --extract -b N -o F.bin\n"
 		  << "                                          write a system's Binary Data verbatim\n"
-		  << "  collision <file> --roundtrip            re-encode every capsule from its decoded\n"
-		  << "                                          parameters and diff against the original\n"
+		  << "  collision <file> --roundtrip [-o F.bin] re-encode every shape from its decoded\n"
+		  << "                                          parameters, reassemble the whole packfile,\n"
+		  << "                                          diff both against the original, and with\n"
+		  << "                                          -o write the reassembled bytes out\n"
 		  << "  pose <file> --list                      bones and existing poses\n"
 		  << "  pose <file> --save NAME -o OUT          capture the current bone\n"
 		  << "                                          transforms as a pose\n"
@@ -2465,7 +2475,7 @@ int nifskopeCliMain( const QStringList & args )
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
 			dragBody, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
-		rc = roundTrip ? cmdCollisionRoundTrip( file )
+		rc = roundTrip ? cmdCollisionRoundTrip( file, outFile )
 					   : cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
 		rc = selfTest ? cmdSkeletonSelfTest( file ) : cmdSkeleton( file, validateOnly );

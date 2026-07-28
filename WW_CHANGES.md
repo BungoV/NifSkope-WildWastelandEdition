@@ -1,10 +1,9 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
-## 2026-07-29e — the packfile assembly: 32 vanilla ragdolls rebuilt byte for byte
+## 2026-07-29e — the packfile assembly: all 37 vanilla ragdolls rebuilt byte for byte
 
-`hknpEncodeRagdoll` and `hknpBuildPackfile`. **32 of the 37 vanilla ragdolls are
-now decoded and reassembled into files byte-identical to the ones Havok wrote**,
-the other 5 refused cleanly (compound shapes). Zero structural differences.
+`hknpEncodeRagdoll` and `hknpBuildPackfile`. **All 37 vanilla ragdolls are now
+decoded and reassembled into files byte-identical to the ones Havok wrote.**
 
 This is what the nine object encoders were missing. On their own they produce
 bytes nothing can load, and nothing tested the class-name table, the object order,
@@ -69,19 +68,39 @@ capsule's core box is derived from (segment, radius, roll) and cannot survive a
 float round trip — about 750 differing bytes on an 18-capsule ragdoll, worst vertex
 error 1e-06 m. Editing one joint limit should not perturb every capsule in the file.
 
-So `--roundtrip` builds each file both ways. With the stored bytes: **32/32
-byte-exact**. With every shape re-derived: 2/32 byte-exact, and on the other 30
+So `--roundtrip` builds each file both ways. With the stored bytes: **37/37
+byte-exact**. With every shape re-derived: 2/37 byte-exact, and on the other 35
 *every differing byte lands inside a shape object* — none in the root, the
-skeleton, the constraints, the mass properties, the fixup tables or the headers.
-That second number is the honest measure of how much is reconstructed rather than
-copied, and the classification is what proves the assembly itself is right.
+skeleton, the constraints, the fixup tables or the headers. That second number is
+the honest measure of how much is reconstructed rather than copied, and the
+classification is what proved the assembly right before the copies existed.
+
+Mass properties carry their bytes for the same reason: a packed vector whose three
+mantissas are all zero keeps whatever exponent Havok's arithmetic landed on, and
+zero mantissas record no magnitude, so 24 of 269 corpus objects hold a value that
+is genuinely unrecoverable.
+
+### Compounds
+
+The 5 ragdolls whose bodies carry compound shapes went from a clean refusal to
+byte-exact. Three things they needed, none of which the decode kept, because it
+flattens a compound into one shape per instance: the compound's **owning body**;
+its **children** as such (every child carries the same body, so the body alone
+cannot separate them, and the first child would otherwise be taken for the body's
+whole shape); and its `hknpDynamicCompoundShapeData`, which is carried whole — 224
+bytes for 2 instances, 288 for 3, 352 for 4, a dozen non-zero words and no reading
+established for any of them.
+
+Object order around a compound is compound, then children, then the shape data —
+**data last, though its pointer at +0xC0 sits below the child pointers at +0xD0+**,
+the same inversion as the root's skeleton pointer. Its own local fixup at
++0x10 → +0x40 is recorded rather than assumed: carrying an object's bytes and
+dropping its fixups writes a null pointer, which is what the first attempt did.
 
 Corpus sweep unchanged: 700 files, no mismatches, compounds 29/29, polytopes
 269/269, spheres 4/4, capsules 78/78. Simulator unaffected.
 
-**Still open:** ragdolls whose bodies carry compound shapes — 5 of 37 — which need
-the compound's owning body and its `hknpDynamicCompoundShapeData` recorded before
-they can be rebuilt. Compressed meshes still only decode.
+**Still open:** compressed meshes, which still only decode.
 
 ## 2026-07-29d — hknpRagdollData layout measured; the "+0x80 trap" is now explained
 

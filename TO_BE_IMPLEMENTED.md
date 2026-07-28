@@ -875,8 +875,7 @@ Ordered by dependency:
    compounds remain unmeasured -- the 400-file sample found 14 dynamic and zero
    static.
 5. ~~**Ragdoll**~~ — constraint encoders SHIPPED 07-29a, root + packfile assembly
-   SHIPPED 07-29e: 32 of 37 vanilla ragdolls rebuilt byte for byte, 5 refused
-   (compound shapes, see the end of this step).
+   SHIPPED 07-29e: all 37 vanilla ragdolls rebuilt byte for byte.
 
    **The constraint objects are fixed-size templates**, which makes this far
    smaller than it looks. Over 37 ragdoll packfiles: `hkpRagdollConstraintData` 416
@@ -963,13 +962,12 @@ Ordered by dependency:
    ragdolls, which carry no material table; unchecked on physics systems).
 
    **ENCODER + ASSEMBLY SHIPPED 07-29e.** `hknpEncodeRagdollData` and
-   `hknpEncodeRagdoll` / `hknpBuildPackfile`: **32 of 37 vanilla ragdolls decode and
-   reassemble byte-identical to the file Havok wrote**, zero structural differences,
-   5 refused cleanly (compound shapes). With every shape re-derived instead of
-   copied, 2/32 are still byte-exact and on the other 30 every differing byte lands
-   inside a shape object -- a capsule's core box cannot survive a float round trip
-   (worst vertex error 1e-06 m), which is why `HknpShape` now carries `rawData` the
-   way constraints do.
+   `hknpEncodeRagdoll` / `hknpBuildPackfile`: **all 37 vanilla ragdolls decode and
+   reassemble byte-identical to the file Havok wrote**, zero structural differences.
+   With every shape re-derived instead of copied, 2/37 are still byte-exact and on
+   the other 35 every differing byte lands inside a shape object -- a capsule's core
+   box cannot survive a float round trip (worst vertex error 1e-06 m), which is why
+   `HknpShape` now carries `rawData` and `massRawData` the way constraints do.
 
    Packfile-level rules, measured on the same 37: `__classnames__` at 0x100, the
    four `hkClass*` reflection names first and the rest **in order of first use**;
@@ -980,10 +978,15 @@ Ordered by dependency:
    table padded to 16 with 0xff and carrying **no sentinel entry**; a section-header
    name NUL-padded with 0xff in byte 0x13 alone.
 
-   **Still open:** ragdolls whose bodies carry compound shapes (5 of 37). The
-   compound object itself already writes byte-exact, but the assembly needs the
-   compound's owning body and its `hknpDynamicCompoundShapeData` recorded, neither
-   of which the decode keeps -- it flattens a compound into one shape per instance.
+   **Compounds** needed three things the decode did not keep, since it flattens a
+   compound into one shape per instance: the owning body, the children AS children
+   (every child carries the same body, so the body alone cannot separate them), and
+   the `hknpDynamicCompoundShapeData` object, carried whole. Emission order is
+   compound, children, then the data -- data LAST though its pointer at +0xC0 sits
+   below the child pointers, the same inversion as the root's skeleton pointer --
+   and the data object's own local fixup at +0x10 -> +0x40 has to come with it.
+
+   **Still open:** compressed meshes, which still only decode.
 6. **Round-trip validation** over the corpus — DONE 07-28y for the shipped
    encoders, and it earned its keep: a 700-file stride sample of the full 34,985
    mesh tree caught 8 polytope failures in exactly the categories the skeletons do

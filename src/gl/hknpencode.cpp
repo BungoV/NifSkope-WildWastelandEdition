@@ -1226,6 +1226,8 @@ bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs )
 	mp.className = QStringLiteral( "hknpShapeMassProperties" );
 	mp.bytes = hknpEncodeShapeMassProperties( shp.massCom, shp.massInertiaRaw,
 		shp.massVolume, shp.massMass, shp.massMajorAxis );
+	if ( shp.massRawData.size() == mp.bytes.size() )
+		mp.bytes = shp.massRawData;
 	objs.append( mp );
 	return true;
 }
@@ -1237,12 +1239,25 @@ QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
 	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
 	if ( sys.bodyPhys.isEmpty() || sys.bones.isEmpty() )
 		return fail( QStringLiteral( "Not a ragdoll: it has no bodies or no skeleton." ) );
-	if ( !sys.compounds.isEmpty() )
-		return fail( QStringLiteral( "Ragdolls with compound shapes are not assembled yet." ) );
 
-	// one shape per body, and the body it belongs to is the cinfo that names it
+	/* One shape per body. A compound owns several, all carrying that same body, so
+	 * its children have to be taken out of the running before the rest are matched
+	 * up -- otherwise whichever child came first would be taken for the body's
+	 * whole shape and the compound would vanish.
+	 */
+	QVector<const HknpCompound *> compoundFor( sys.bodyPhys.size(), nullptr );
+	QSet<int> isChild;
+	for ( const HknpCompound & c : sys.compounds ) {
+		if ( c.bodyId >= 0 && c.bodyId < compoundFor.size() )
+			compoundFor[c.bodyId] = &c;
+		for ( int ci : c.children )
+			isChild.insert( ci );
+	}
 	QVector<const HknpShape *> byBody( sys.bodyPhys.size(), nullptr );
-	for ( const HknpShape & s : sys.shapes ) {
+	for ( qsizetype k = 0; k < sys.shapes.size(); k++ ) {
+		const HknpShape & s = sys.shapes.at( k );
+		if ( isChild.contains( int( k ) ) )
+			continue;
 		if ( s.bodyId >= 0 && s.bodyId < byBody.size() && !byBody.at( s.bodyId ) )
 			byBody[s.bodyId] = &s;
 	}
@@ -1264,9 +1279,43 @@ QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
 	 */
 	QVector<int> shapeObj( sys.bodyPhys.size(), -1 );
 	for ( qsizetype i = 0; i < byBody.size(); i++ ) {
+		shapeObj[i] = int( objs.size() );
+		/* A compound emits as compound, then its children, then its shape-data
+		 * object -- data LAST even though its pointer at +0xC0 sits below the
+		 * child pointers, the same inversion as the root's skeleton pointer.
+		 */
+		if ( const HknpCompound * comp = compoundFor.at( i ) ) {
+			HknpCompoundFixups cfx;
+			HknpPackObject co;
+			co.className = comp->dynamic ? QStringLiteral( "hknpDynamicCompoundShape" )
+										 : QStringLiteral( "hknpStaticCompoundShape" );
+			co.bytes = hknpEncodeCompoundShape( *comp, &cfx );
+			if ( co.bytes.isEmpty() || cfx.childPointers.size() != comp->children.size() )
+				return fail( QStringLiteral( "Could not write the compound on body %1." ).arg( i ) );
+			co.local.append( { cfx.instanceArrayPointer, cfx.instanceArray } );
+			const int at = int( objs.size() );
+			objs.append( co );
+			for ( qsizetype k = 0; k < comp->children.size(); k++ ) {
+				const int ci = comp->children.at( k );
+				if ( ci < 0 || ci >= sys.shapes.size() )
+					return fail( QStringLiteral( "Compound on body %1 names no child %2." ).arg( i ).arg( k ) );
+				objs[at].global.append( { cfx.childPointers.at( k ), int( objs.size() ) } );
+				if ( !encodeShapeObject( sys.shapes.at( ci ), objs ) )
+					return fail( QStringLiteral( "No encoder for a compound child on body %1 (%2)." )
+						.arg( i ).arg( sys.shapes.at( ci ).className ) );
+			}
+			if ( comp->dataRawData.isEmpty() || comp->dataClassName.isEmpty() )
+				return fail( QStringLiteral( "The compound on body %1 has no shape data." ).arg( i ) );
+			objs[at].global.append( { cfx.shapeDataPointer, int( objs.size() ) } );
+			HknpPackObject cd;
+			cd.className = comp->dataClassName;
+			cd.bytes = comp->dataRawData;
+			cd.local = comp->dataLocal;
+			objs.append( cd );
+			continue;
+		}
 		if ( !byBody.at( i ) )
 			return fail( QStringLiteral( "Body %1 has no shape." ).arg( i ) );
-		shapeObj[i] = int( objs.size() );
 		if ( !encodeShapeObject( *byBody.at( i ), objs ) )
 			return fail( QStringLiteral( "No encoder for the shape on body %1 (%2)." )
 				.arg( i ).arg( byBody.at( i )->className ) );

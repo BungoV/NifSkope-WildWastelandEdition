@@ -85,6 +85,14 @@ struct HknpShape
 	quint64 massMajorAxis = 0;
 	//! byte offset of the hknpShapeMassProperties object, or -1
 	qsizetype massPropsOffset = -1;
+	/*! That object as stored, for the same reason as rawData.
+	 *
+	 * A packed vector whose three mantissas are all zero keeps whatever exponent
+	 * Havok's arithmetic landed on, and zero mantissas record no magnitude, so the
+	 * original is not recoverable -- 24 of 269 corpus objects carry one. Cleared
+	 * by a caller that edited the shape, which then gets the derived value.
+	 */
+	QByteArray massRawData;
 	//! the physical inertia diagonal, undoing Havok's 1.5 scale
 	Vector3 massInertia() const { return massInertiaRaw / 1.5f; }
 	bool isConvex = false;
@@ -438,6 +446,29 @@ struct HknpCompound
 	 * inventing it -- the same treatment as the mass properties' major-axis frame.
 	 */
 	QByteArray headerTail;
+	//! the body whose cinfo names this compound, or -1
+	int bodyId = -1;
+	/*! Indices into HknpSystem::shapes, parallel to instances.
+	 *
+	 * Decoding flattens a compound into one shape per instance, which is what
+	 * drawing and simulation want but loses which shapes belonged to which
+	 * compound. A writer needs it back, and it cannot be recovered from bodyId
+	 * alone: every child of a compound carries the SAME body.
+	 */
+	QVector<int> children;
+	/*! The matching hknpCompoundShapeData object, class name and bytes.
+	 *
+	 * Not decoded -- 224 bytes for 2 instances, 288 for 3, 352 for 4, with only a
+	 * dozen non-zero words and no reading established for any of them. Carried
+	 * whole, the same treatment as the major-axis frame. It is emitted AFTER the
+	 * children even though its pointer at +0xC0 sits below theirs.
+	 */
+	QString dataClassName;
+	QByteArray dataRawData;
+	//! LOCAL fixups inside that object, relative to its start. All 6 in the
+	//! corpus carry exactly one, +0x10 -> +0x40. Recorded rather than assumed:
+	//! carrying the bytes but dropping the fixup writes a null pointer.
+	QVector<QPair<qsizetype, qsizetype>> dataLocal;
 
 	struct Instance
 	{

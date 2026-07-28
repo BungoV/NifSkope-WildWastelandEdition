@@ -943,6 +943,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 					out.massMass = r.f32( mp + 0x2c );
 					out.massMajorAxis = r.u64( mp + 0x20 );
 					out.massPropsOffset = mp;
+					if ( mp + 0x30 <= data.size() )
+						out.massRawData = data.mid( mp, 0x30 );
 				}
 			}
 			return !out.verts.isEmpty();
@@ -997,6 +999,21 @@ HknpSystem hknpDecode( const QByteArray & data )
 		comp.headerTail.resize( 0x60 );
 		for ( int k = 0; k < 0x60; k++ )
 			comp.headerTail[k] = char( r.u8( obj.first + 0x70 + k ) );
+		comp.bodyId = compoundBody ? compoundBody->id : -1;
+		// the shape-data object, carried whole -- see HknpCompound::dataRawData
+		if ( qsizetype cd = global.value( obj.first + 0xc0, -1 ); cd >= 0 ) {
+			auto nx = std::upper_bound( objects.cbegin(), objects.cend(), cd,
+				[]( qsizetype v, const QPair<qsizetype, QString> & p ) { return v < p.first; } );
+			const qsizetype end = ( nx != objects.cend() ) ? nx->first : dataStart + localOff;
+			comp.dataClassName = objClass.value( cd );
+			if ( end > cd && end <= data.size() )
+				comp.dataRawData = data.mid( cd, end - cd );
+			for ( auto it = local.constBegin(); it != local.constEnd(); ++it ) {
+				if ( it.key() >= cd && it.key() < end )
+					comp.dataLocal.append( { it.key() - cd, it.value() - cd } );
+			}
+			std::sort( comp.dataLocal.begin(), comp.dataLocal.end() );
+		}
 		for ( quint32 i = 0; i < numInst && r.ok; i++ ) {
 			const qsizetype inst = instBase + qsizetype( i ) * 0x80;
 			HknpCompound::Instance one;
@@ -1010,7 +1027,6 @@ HknpSystem hknpDecode( const QByteArray & data )
 			one.wPayload[3] = r.u32( inst + 0x3c );
 			comp.instances.append( one );
 		}
-		sys.compounds.append( comp );
 
 		for ( quint32 i = 0; i < numInst && r.ok; i++ ) {
 			qsizetype inst = instBase + qsizetype( i ) * 0x80;
@@ -1031,8 +1047,10 @@ HknpSystem hknpDecode( const QByteArray & data )
 			if ( compoundBody )
 				shape.bodyId = compoundBody->id;
 			applyResolvedBodyMaterial( shape, shape.bodyId );
+			comp.children.append( int( sys.shapes.size() ) );
 			sys.shapes.append( shape );
 		}
+		sys.compounds.append( comp );
 	}
 
 	// pass 2: shapes referenced by bodies, placed by the body transform
