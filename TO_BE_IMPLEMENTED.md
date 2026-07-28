@@ -767,11 +767,12 @@ corpus-wide (measured over 23 spheres).
 at +0x40 — exactly where a polytope's plane descriptor lives. Reading +0x40/+0x44/
 +0x48 as relArrays on a sphere reinterprets vertex floats as counts.
 
-### 4d-spec-polytope. Convex polytope — LAYOUT MEASURED 07-28u, encoder open
+### 4d-spec-polytope. Convex polytope — ENCODER SHIPPED 07-28x
 
-The object layout is settled: measured over **76 vanilla polytopes with zero
-violations** of every rule below. What is *not* settled is three pieces of content,
-listed at the end — that is what stands between this and an encoder.
+`hknpEncodeConvexPolytopeShape`: **68 of 68 byte-exact** over the actor skeletons.
+The layout below was measured over 76 vanilla polytopes with zero violations, and
+the encoder now confirms it end to end. Two items at the bottom remain open, and
+both bite only when synthesizing NEW geometry, not when rewriting existing.
 
 **Variable length.** Everything follows from the counts:
 
@@ -813,10 +814,16 @@ repeat an earlier index.
    Havok's stored value is conservatively lower than the true minimum. Preserved
    through the decode as `HknpShape::faceAngles`, so a round trip is unaffected;
    only synthesis needs the last step.
-2. **Padding contents — still open.** Both the vertex array and the plane array are
-   padded to a multiple of 4, and the spare planes are NOT one sentinel the way a
-   capsule's are — `(0,0,1,0)` in 50 slots, all-zero in 50, something else in 2.
-   Harmless for geometry, fatal for a byte comparison.
+2. ~~**Padding contents**~~ — **CLOSED 07-28x.** The vertex array is padded to a
+   multiple of 4 and **every padding slot duplicates the LAST REAL vertex — its
+   position and its `w` index tag both** (18 of 18 polytopes carrying padding). So
+   the real vertex count is recoverable as `max index in the face loops + 1`, and
+   the encoder needs no extra input. Writing each padding slot's own slot number
+   into its tag — the obvious reading of "w carries the vertex index" — is what
+   made 18 of 68 differ. The plane array is padded to `roundup(nf, 4)` and its
+   spare slots are NOT one sentinel the way a capsule's are: `(0,0,1,0)` in 50
+   slots, all-zero in 50, something else in 2. Preserved through the decode, so a
+   round trip is exact; only NEW geometry needs a rule for them.
 3. ~~**`hknpShapeMassProperties`**~~ — **SHIPPED 07-28w.**
    `hknpEncodeShapeMassProperties`, with an hkPackedVector3 writer. 68 of 68 vanilla
    objects round-trip: 64 byte-identical, 4 differing only in the exponent of an
@@ -850,8 +857,9 @@ Ordered by dependency:
 2. ~~**Capsule**~~ — SHIPPED 07-28t, see 4d-spec. `hknpEncodeCapsuleShape` plus
    `collision --roundtrip`: 819 capsules, structure byte-exact on all of them.
    ~~**Sphere**~~ — SHIPPED 07-28u, see 4d-spec-sphere: 30 of 30 byte-exact.
-3. **Convex polytope** — needs hull generation, and **qhull is already vendored**
-   under `lib/qhull`, so the machinery is in the repo.
+3. ~~**Convex polytope**~~ — encoder SHIPPED 07-28x, see 4d-spec-polytope: 68 of 68
+   byte-exact on a round trip. Generating a hull for NEW geometry still needs
+   qhull, which is already vendored under `lib/qhull`.
 4. **Compounds** (static and dynamic) — instance arrays, decode side already works.
 5. **Ragdoll** — root layout, `hkaSkeleton` and constraint atom chains, all
    specified in 4a. Watch the child/parent frame order and the `+0x80` bone-count

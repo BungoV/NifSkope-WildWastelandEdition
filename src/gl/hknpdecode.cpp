@@ -206,6 +206,7 @@ static void synthCapsule( HknpShape & shape, const Vector3 & a, const Vector3 & 
 static void decodeConvexLike( Reader & r, qsizetype B, const QString & className, HknpShape & shape )
 {
 	shape.isConvex = true;
+	shape.shapeFlags = r.u32( B + 0x10 );
 	shape.convexRadius = r.f32( B + 0x14 );
 	shape.materialCRC = r.u32( B + 0x18 );
 

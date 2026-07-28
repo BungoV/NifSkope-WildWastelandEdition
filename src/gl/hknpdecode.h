@@ -35,6 +35,13 @@ struct HknpShape
 	//! convex only: face planes (nx, ny, nz, d)
 	QVector<Vector4> planes;
 	float convexRadius = 0.0f;
+	/*! the u32 at shape+0x10, one word before the radius.
+	 *
+	 * Looks like a type tag plus flags: `010001c3` on capsules, `01000111` on
+	 * spheres, `01000143` on 74 of 76 polytopes and `01000043` on the other 2.
+	 * Kept so a re-encode can reproduce it rather than assume the common value.
+	 */
+	quint32 shapeFlags = 0;
 
 	/*! hknpShapeMassProperties, reached via hkRefCountedProperties at shape+0x20.
 	 *

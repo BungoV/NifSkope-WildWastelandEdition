@@ -533,6 +533,104 @@ void setPackedVector3( QByteArray & out, qsizetype offset, const Vector3 & v )
 
 } // namespace
 
+/*! Write one hknpConvexPolytopeShape.
+ *
+ * Variable length, unlike the primitives, but the size follows entirely from the
+ * counts. Measured over 76 vanilla polytopes with no exceptions:
+ *
+ *   vertices at +0x50            nv x 16, nv a multiple of 4
+ *   planes    at +0x50 + nv*16   np x 16, np = roundup(nf, 4)
+ *   faces     at planes end      nf x 4, padded to roundup(nf, 4) entries
+ *   indices   at faces end       ni bytes, ni = sum of the face loop lengths
+ *   total                        align16(indices end)
+ *
+ * Note the vertices start at +0x50, not the +0x70 a capsule uses -- a capsule's own
+ * end points at +0x50/+0x60 push its hull out of the way.
+ *
+ * A face entry is (u16 firstIndex, u8 numIndices, u8 minHalfAngle) with firstIndex
+ * the running sum of the counts, which is why the loops are written in order.
+ */
+QByteArray hknpEncodeConvexPolytopeShape( const HknpPolytopeInput & in )
+{
+	const int nf = int( in.faces.size() );
+	if ( nf < 1 || in.faceAngles.size() != nf )
+		return QByteArray();
+
+	auto roundUp = []( int value, int to ) { return ( ( value + to - 1 ) / to ) * to; };
+
+	int ni = 0, highest = -1;
+	for ( const QVector<int> & loop : in.faces ) {
+		if ( loop.size() < 3 || loop.size() > 255 )
+			return QByteArray();
+		for ( int v : loop ) {
+			if ( v < 0 || v >= in.verts.size() )
+				return QByteArray();
+			highest = std::max( highest, v );
+		}
+		ni += int( loop.size() );
+	}
+	if ( ni > 0xffff || highest < 0 )
+		return QByteArray();
+
+	/* Real vertices are the ones the faces actually reference; the array is then
+	 * padded up to a multiple of 4, and each padding slot DUPLICATES the last real
+	 * vertex -- its position and its index tag both. Measured on the 18 vanilla
+	 * polytopes that carry padding, every one of them.
+	 *
+	 * So the real count is recoverable from the loops and needs no extra input:
+	 * writing each padding slot's own slot number into its tag, which is the
+	 * obvious reading of "w carries the vertex index", is what made those 18 differ.
+	 */
+	const int realVerts = highest + 1;
+	const int nv = roundUp( realVerts, 4 );
+	if ( nv > in.verts.size() )
+		return QByteArray();
+	const int np = std::max( roundUp( nf, 4 ), int( in.planes.size() ) );
+	const qsizetype vertsAt = 0x50;
+	const qsizetype planesAt = vertsAt + nv * 16;
+	const qsizetype facesAt = planesAt + np * 16;
+	const qsizetype indicesAt = facesAt + roundUp( nf, 4 ) * 4;
+	const qsizetype size = ( ( indicesAt + ni ) + 15 ) / 16 * 16;
+
+	QByteArray out( size, 0 );
+	setU32( out, 0x10, in.shapeFlags );
+	setFloat( out, 0x14, in.convexRadius );
+	setU32( out, 0x18, in.materialCRC );
+
+	setU16( out, 0x30, quint16( nv ) );  setU16( out, 0x32, quint16( vertsAt - 0x30 ) );
+	setU16( out, 0x40, quint16( np ) );  setU16( out, 0x42, quint16( planesAt - 0x40 ) );
+	setU16( out, 0x44, quint16( nf ) );  setU16( out, 0x46, quint16( facesAt - 0x44 ) );
+	setU16( out, 0x48, quint16( ni ) );  setU16( out, 0x4a, quint16( indicesAt - 0x48 ) );
+
+	for ( int i = 0; i < nv; i++ ) {
+		const int src = std::min( i, realVerts - 1 );	// padding repeats the last real one
+		const Vector3 & v = in.verts.at( src );
+		for ( int k = 0; k < 3; k++ )
+			setFloat( out, vertsAt + i * 16 + k * 4, v[k] );
+		setU32( out, vertsAt + i * 16 + 12, 0x3f000000u | quint32( src & 0xff ) );
+	}
+
+	for ( int p = 0; p < np; p++ ) {
+		if ( p >= in.planes.size() )
+			continue;	// spare slots have no fixed filler; leave them zero
+		const Vector4 & pl = in.planes.at( p );
+		for ( int k = 0; k < 4; k++ )
+			setFloat( out, planesAt + p * 16 + k * 4, pl[k] );
+	}
+
+	int first = 0;
+	for ( int f = 0; f < nf; f++ ) {
+		const QVector<int> & loop = in.faces.at( f );
+		setU16( out, facesAt + f * 4, quint16( first ) );
+		out[facesAt + f * 4 + 2] = char( quint8( loop.size() ) );
+		out[facesAt + f * 4 + 3] = char( in.faceAngles.at( f ) );
+		for ( int k = 0; k < loop.size(); k++ )
+			out[indicesAt + first + k] = char( quint8( loop.at( k ) ) );
+		first += int( loop.size() );
+	}
+	return out;
+}
+
 QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Vector3 & inertiaRaw,
 	float volume, float mass, quint64 majorAxis )
 {

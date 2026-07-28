@@ -95,4 +95,31 @@ QByteArray hknpEncodeSphereShape( const Vector3 & centre, float radius, quint32 
 QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Vector3 & inertiaRaw,
 	float volume, float mass, quint64 majorAxis );
 
+//! Geometry of one hknpConvexPolytopeShape. Variable length, unlike the primitives.
+struct HknpPolytopeInput
+{
+	/*! Hull vertices. Padded to a multiple of 4 by the writer if needed; pass the
+	 * array straight off a decode to keep vanilla's own padding, since the padding
+	 * slots repeat an earlier vertex rather than holding a fixed filler.
+	 */
+	QVector<Vector3> verts;
+	/*! Face planes (nx, ny, nz, d) with n.x + d = 0 on the face. The stored array
+	 * is padded to roundup(faces, 4); pass the spare slots through from a decode,
+	 * as their contents are NOT one sentinel the way a capsule's are.
+	 */
+	QVector<Vector4> planes;
+	QVector<QVector<int>> faces;   //!< face loops, indices into verts
+	//! Havok's per-face minHalfAngle, parallel to faces. It is the sharpest edge on
+	//! the face quantized over 0..90 degrees; pass it through from a decode, since
+	//! deriving it reproduces vanilla exactly only about two thirds of the time.
+	QVector<quint8> faceAngles;
+	float convexRadius = 0.0f;
+	quint32 materialCRC = 0;
+	quint32 shapeFlags = 0x01000143u;   //!< +0x10; 74 of 76 vanilla polytopes
+};
+
+//! Write one hknpConvexPolytopeShape object, no packfile around it. Empty on
+//! invalid input (no faces, a loop under 3 vertices, or an out-of-range index).
+QByteArray hknpEncodeConvexPolytopeShape( const HknpPolytopeInput & input );
+
 #endif // HKNPENCODE_H

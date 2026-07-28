@@ -1,5 +1,42 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28x — The polytope encoder: 68 of 68 byte-exact
+
+`hknpEncodeConvexPolytopeShape`. Every collision object type in the actor skeletons
+now round-trips:
+
+| type | result |
+|---|---|
+| polytopes | **68 / 68 byte-exact** |
+| mass properties | 64 byte-exact + 4 inert-exponent = **68 / 68** |
+| spheres | **30 / 30 byte-exact** |
+| capsules | **819 / 819 structure byte-exact**, worst vertex error 9.9e-07 m |
+
+The round trip turns out to have been *unblocked all along*: 07-28v listed the array
+padding as a blocker, but the decode was already keeping every padded slot — all
+`nv` vertices and all `np` planes, spares included. The only thing genuinely dropped
+was the `+0x10` flag word, now kept as `HknpShape::shapeFlags`. Worth recording,
+because I had filed a blocker against something the code already did.
+
+**The one real find was the vertex padding tag.** At 50/68 I diagnosed the failures
+rather than guessing, and all 18 came from a single cause: I wrote each padding
+slot's own slot number into its `w` index tag, which is the obvious reading of "w
+carries the vertex index". Vanilla instead makes every padding slot a **duplicate of
+the last real vertex — position and tag both**. That is 18 of 18 of the polytopes
+carrying padding, and it means the real vertex count is recoverable from the face
+loops (highest index + 1), so the encoder needs no extra input to reproduce it.
+
+Guessing would have been tempting here and would have cost more: the natural fix —
+carrying the raw `w` bytes through the decode — would have worked, added per-vertex
+state, and hidden the fact that the rule is derivable.
+
+So of the four polytope blockers, **two are closed** (mass properties, padding
+contents) and two remain, and both only bite when synthesizing *new* geometry rather
+than rewriting existing: `minHalfAngle`'s exact quantization (semantics known, 67%
+exact) and the `+0x20` major-axis packing.
+
+Self-tests green.
+
 ## 2026-07-28w — Mass-properties writer, and minHalfAngle identified
 
 Two of the three polytope blockers moved.
