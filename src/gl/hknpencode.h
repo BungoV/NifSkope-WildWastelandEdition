@@ -245,7 +245,8 @@ struct HknpPackObject
  *
  * Returns empty and sets `error` if an object names a class with no known hash.
  */
-QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString * error = nullptr );
+QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString * error = nullptr,
+	const QHash<QString, quint32> & extraHashes = {} );
 
 /*! Where an hknpRagdollData's pointers have to be patched, all relative to the
  * object's start and IN THE ORDER hknpBuildPackfile wants them.
@@ -279,6 +280,29 @@ struct HknpRagdollDataFixups
  * ragdoll hierarchy.
  */
 QByteArray hknpEncodeRagdollData( const HknpSystem & system, HknpRagdollDataFixups * fixups );
+
+/*! Write one hknpPhysicsSystemData: the root of every collision packfile that is
+ * not a ragdoll, which is most of them.
+ *
+ * The ragdoll root DERIVES from this one, so the first six array descriptors are
+ * the same members at the same offsets and the payloads start at +0x90 either
+ * way. What this one lacks is the bone-to-body array at +0x80 and the skeleton
+ * pointer at +0x78; what it gains is nothing. A static system carries only three
+ * of the six -- body_props, cinfo and the shape list -- since dyn_motion and
+ * dyn_inertia exist only when something simulates, and the constraint array only
+ * when something is jointed.
+ *
+ * Reuses HknpRagdollDataFixups: the slots mean the same thing, and the skeleton
+ * pointer is simply left at 0.
+ */
+QByteArray hknpEncodePhysicsSystemData( const HknpSystem & system, HknpRagdollDataFixups * fixups );
+
+/*! Assemble any collision packfile from a decoded system: a ragdoll when it has
+ * bones, a plain physics system otherwise.
+ *
+ * hknpEncodeRagdoll is this with the ragdoll path required.
+ */
+QByteArray hknpEncodeSystem( const HknpSystem & system, QString * error = nullptr );
 
 /*! Assemble a whole ragdoll packfile from a decoded system.
  *

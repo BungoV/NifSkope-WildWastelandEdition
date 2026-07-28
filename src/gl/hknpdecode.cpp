@@ -546,18 +546,31 @@ HknpSystem hknpDecode( const QByteArray & data )
 			qsizetype e = p + 5;
 			while ( e < data.size() && r.u8( e ) != 0 )
 				e++;
-			classNames.insert( p + 5 - cnStart,
-				QString::fromLatin1( reinterpret_cast<const char *>( r.d + p + 5 ), int( e - p - 5 ) ) );
+			const QString cname = QString::fromLatin1(
+				reinterpret_cast<const char *>( r.d + p + 5 ), int( e - p - 5 ) );
+			classNames.insert( p + 5 - cnStart, cname );
+			// the file's own hashes, so a rewrite never has to know one it was not
+			// told -- see HknpSystem::classHashes
+			sys.classHashes.insert( cname, r.u32( p ) );
 			p = e + 1;
 		}
 	}
 
 	// local fixups: intra-section pointer patches (member offset -> payload)
 	QHash<qsizetype, qsizetype> local;
+	/* Table order, not just the mapping. LOCAL fixups follow the same reflection
+	 * walk the globals do -- member declaration order, with an array member's
+	 * payload fixups emitted right after the member itself -- so a compressed
+	 * mesh's section-array fixup sits between its +0x50 and +0x60 members rather
+	 * than after them. Sorting by offset happens to match on every ragdoll and does
+	 * not match here, so an object carried whole has to keep the order it had.
+	 */
+	QVector<QPair<qsizetype, qsizetype>> localOrder;
 	for ( qsizetype p = dataStart + localOff; p + 8 <= dataStart + globalOff && p + 8 <= data.size(); p += 8 ) {
 		qint32 src = qint32( r.u32( p ) ), dst = qint32( r.u32( p + 4 ) );
 		if ( src != -1 )
 			local.insert( dataStart + src, dataStart + dst );
+			localOrder.append( { dataStart + src, dataStart + dst } );
 	}
 
 	// global fixups: pointers to other objects (compound instance -> child)
@@ -694,6 +707,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 		// system simulates dynamically (props); statics lack both
 		qsizetype dm = local.value( obj.first + 0x20, -1 );
 		qsizetype di = local.value( obj.first + 0x30, -1 );
+		sys.motionCount = int( r.u32( obj.first + 0x28 ) );
+		sys.inertiaCount = int( r.u32( obj.first + 0x38 ) );
 		if ( dm >= 0 && r.u32( obj.first + 0x28 ) > 0 ) {
 			sys.dynamic = true;
 			sys.gravityFactor = r.f32( dm + 0x08 );
@@ -781,6 +796,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 			quint32 oldPackedFilter = r.u32( c + 0x1c );
 			if ( oldPackedFilter && ( packedFilter & 0xffU ) <= 1U )
 				packedFilter = oldPackedFilter;
+			phys.packedFilter = packedFilter;
+			phys.hasStoredFilter = true;
 			phys.layer = packedFilter & 0xffU;
 			phys.filterFlags = quint8( ( packedFilter >> 8 ) & 0xffU );
 			phys.filterGroup = quint16( packedFilter >> 16 );
@@ -788,6 +805,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 			if ( materialId < bodyMaterials.size() )
 				phys.materialCRC = bodyMaterials.at( materialId );
 			phys.hasMotion = ( r.u32( c + 0x0c ) != 0x7fffffffu );
+			phys.cinfoFlags = r.u32( c + 0x18 );
 			if ( phys.layer == 0 )
 				phys.layer = ( sys.dynamic && phys.hasMotion ) ? 10u : 1u;
 			phys.position = r.vec3( c + 0x30 );
@@ -840,6 +858,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 				phys.mass = ( invMass > 1.0e-12f ) ? 1.0f / invMass : 0.0f;
 				phys.density = r.f32( n + 0x08 );
 				phys.invInertia = r.vec3( n + 0x20 );
+				phys.inertiaTag = r.u32( n + 0x00 );
+				phys.inertiaScale = r.u32( n + 0x2c );
 				phys.motionCom = r.vec3( n + 0x30 );
 				phys.motionComW = r.u32( n + 0x3c );
 				phys.motionOrientation = Quat( r.f32( n + 0x4c ), r.f32( n + 0x40 ),
@@ -849,6 +869,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 				qsizetype bp = bprops + qsizetype( i ) * 0x50;
 				phys.friction = truncF16( bp + 0x12 );
 				phys.restitution = truncF16( bp + 0x16 );
+				if ( bp + 0x50 <= data.size() )
+					phys.propsRawData = data.mid( bp, 0x50 );
 			}
 			sys.bodyPhys.append( phys );
 			qsizetype shp = global.value( c, -1 );
@@ -876,8 +898,9 @@ HknpSystem hknpDecode( const QByteArray & data )
 		 * the NIF's block order. Recorded as body indices so a writer can restore
 		 * the order without carrying packfile offsets. See HknpSystem::shapeListOrder.
 		 */
-		if ( obj.second == QLatin1String( "hknpRagdollData" ) ) {
-			sys.ragdollRawOffset = obj.first;
+		{
+			sys.rootRawOffset = obj.first;
+			sys.rootClassName = obj.second;
 			if ( qsizetype list = local.value( obj.first + 0x60, -1 ); list >= 0 ) {
 				const quint32 n = r.u32( obj.first + 0x68 );
 				for ( quint32 k = 0; k < n && n <= 4096 && r.ok; k++ ) {
@@ -910,19 +933,34 @@ HknpSystem hknpDecode( const QByteArray & data )
 
 	QSet<qsizetype> consumed;
 
+	/* An object's bytes. Objects sit back to back, so the next one bounds this one
+	 * and the last is bounded by the local fixup table that follows the data. Used
+	 * wherever an object is carried whole rather than decoded.
+	 */
+	auto objectBytes = [&]( qsizetype off ) -> QByteArray {
+		auto nx = std::upper_bound( objects.cbegin(), objects.cend(), off,
+			[]( qsizetype v, const QPair<qsizetype, QString> & p ) { return v < p.first; } );
+		const qsizetype end = ( nx != objects.cend() ) ? nx->first : dataStart + localOff;
+		return ( end > off && end <= data.size() ) ? data.mid( off, end - off ) : QByteArray();
+	};
+	//! LOCAL fixups inside one object, relative to its start
+	auto objectLocal = [&]( qsizetype off, qsizetype len ) {
+		QVector<QPair<qsizetype, qsizetype>> out;
+		for ( const auto & f : std::as_const( localOrder ) ) {
+			if ( f.first >= off && f.first < off + len )
+				out.append( { f.first - off, f.second - off } );
+		}
+		return out;   // table order, deliberately not sorted
+	};
+
 	// decode one leaf shape object into out; returns false if not a shape
 	auto decodeLeaf = [&]( qsizetype off, const QString & cls, HknpShape & out ) -> bool {
 		out.className = cls;
 		out.rawOffset = off;
 		// the object as stored, so an untouched shape can be written back
 		// unchanged rather than re-derived -- see HknpShape::rawData
-		{
-			auto nx = std::upper_bound( objects.cbegin(), objects.cend(), off,
-				[]( qsizetype v, const QPair<qsizetype, QString> & p ) { return v < p.first; } );
-			const qsizetype end = ( nx != objects.cend() ) ? nx->first : dataStart + localOff;
-			if ( end > off && end <= data.size() )
-				out.rawData = data.mid( off, end - off );
-		}
+		out.rawData = objectBytes( off );
+		out.rawLocal = objectLocal( off, out.rawData.size() );
 		if ( cls == QLatin1String( "hknpConvexPolytopeShape" )
 			|| cls == QLatin1String( "hknpConvexShape" )
 			|| cls == QLatin1String( "hknpSphereShape" )
@@ -945,6 +983,10 @@ HknpSystem hknpDecode( const QByteArray & data )
 					out.massPropsOffset = mp;
 					if ( mp + 0x30 <= data.size() )
 						out.massRawData = data.mid( mp, 0x30 );
+				} else if ( mp >= 0 && objClass.value( mp )
+					== QLatin1String( "hknpBSMaterialProperties" ) ) {
+					out.materialRawData = objectBytes( mp );
+					out.materialLocal = objectLocal( mp, out.materialRawData.size() );
 				}
 			}
 			return !out.verts.isEmpty();
@@ -959,6 +1001,20 @@ HknpSystem hknpDecode( const QByteArray & data )
 				return false;
 			consumed.insert( cmsd );
 			out.materialCRC = r.u32( off + 0x18 );
+			out.shapeMaterialCRC = out.materialCRC;
+			// carried whole: the quantization is not reconstructible, see dataRawData
+			out.dataClassName = objClass.value( cmsd );
+			out.dataRawData = objectBytes( cmsd );
+			out.dataLocal = objectLocal( cmsd, out.dataRawData.size() );
+			// a compressed mesh names its material table the same two-hop way a convex
+			// shape names its mass properties
+			if ( qsizetype ref = global.value( off + 0x20, -1 ); ref >= 0 ) {
+				const qsizetype mp = global.value( ref + 0x10, -1 );
+				if ( mp >= 0 && objClass.value( mp ) == QLatin1String( "hknpBSMaterialProperties" ) ) {
+					out.materialRawData = objectBytes( mp );
+					out.materialLocal = objectLocal( mp, out.materialRawData.size() );
+				}
+			}
 			decodeCompressedMesh( r, cmsd, local, out );
 			return !out.tris.isEmpty();
 		}
@@ -1002,17 +1058,9 @@ HknpSystem hknpDecode( const QByteArray & data )
 		comp.bodyId = compoundBody ? compoundBody->id : -1;
 		// the shape-data object, carried whole -- see HknpCompound::dataRawData
 		if ( qsizetype cd = global.value( obj.first + 0xc0, -1 ); cd >= 0 ) {
-			auto nx = std::upper_bound( objects.cbegin(), objects.cend(), cd,
-				[]( qsizetype v, const QPair<qsizetype, QString> & p ) { return v < p.first; } );
-			const qsizetype end = ( nx != objects.cend() ) ? nx->first : dataStart + localOff;
 			comp.dataClassName = objClass.value( cd );
-			if ( end > cd && end <= data.size() )
-				comp.dataRawData = data.mid( cd, end - cd );
-			for ( auto it = local.constBegin(); it != local.constEnd(); ++it ) {
-				if ( it.key() >= cd && it.key() < end )
-					comp.dataLocal.append( { it.key() - cd, it.value() - cd } );
-			}
-			std::sort( comp.dataLocal.begin(), comp.dataLocal.end() );
+			comp.dataRawData = objectBytes( cd );
+			comp.dataLocal = objectLocal( cd, comp.dataRawData.size() );
 		}
 		for ( quint32 i = 0; i < numInst && r.ok; i++ ) {
 			const qsizetype inst = instBase + qsizetype( i ) * 0x80;

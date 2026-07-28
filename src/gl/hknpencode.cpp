@@ -154,9 +154,16 @@ QByteArray dynamicInertia( const HknpEncodeInput & in )
 	return out;
 }
 
-QByteArray refCountedProperties()
+/*! The 32-byte wrapper a shape hangs its mass properties or its material off.
+ *
+ * One local fixup +0x00 -> +0x10, one global at +0x10, and the ONLY thing that
+ * differs between the two flavours is `key`: 0x0000f100 when it points at
+ * hknpShapeMassProperties, 0x0000f601 when it points at hknpBSMaterialProperties.
+ * Measured on 80 corpus objects with no exceptions.
+ */
+QByteArray refCountedProperties( quint32 key = 0x0000f100u )
 {
-	QByteArray out( 0x20, 0 ); setU32( out, 0x08, 1 ); setU32( out, 0x0c, 0x80000001u ); setU32( out, 0x18, 0x0000f100u ); return out;
+	QByteArray out( 0x20, 0 ); setU32( out, 0x08, 1 ); setU32( out, 0x0c, 0x80000001u ); setU32( out, 0x18, key ); return out;
 }
 
 QByteArray materialProperties( quint32 material )
@@ -956,7 +963,8 @@ quint32 classHash( const QString & name )
 
 } // namespace
 
-QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString * error )
+QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString * error,
+	const QHash<QString, quint32> & extraHashes )
 {
 	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
 	if ( objects.isEmpty() )
@@ -972,7 +980,9 @@ QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString *
 	QByteArray cn;
 	QHash<QString, quint32> nameOffset;
 	for ( const QString & name : std::as_const( used ) ) {
-		const quint32 hash = classHash( name );
+		// the file's own table first: it cannot be wrong, and it covers classes the
+		// built-in list has never sampled
+		const quint32 hash = extraHashes.value( name, classHash( name ) );
 		if ( !hash )
 			return fail( QStringLiteral( "No class hash known for %1." ).arg( name ) );
 		nameOffset.insert( name, quint32( cn.size() + 5 ) );
@@ -1005,9 +1015,12 @@ QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString *
 			fx.global.append( { at[i] + quint32( g.source ), 2, at[g.object] } );
 		}
 	}
-	// local ascends by source; virtual already does, being emitted in object
-	// order; global keeps the caller's order, which is the reflection walk
-	std::sort( fx.local.begin(), fx.local.end() );
+	/* No sort. All three tables are written grouped by object in object order and,
+	 * within an object, in member declaration order -- which is offset order only
+	 * when no array payload carries fixups of its own. It does on a compressed mesh,
+	 * where the section array's fixup lands between the +0x50 and +0x60 members.
+	 * Sorting by source matches every ragdoll and no compressed-mesh system.
+	 */
 
 	QByteArray local = fx.localTable(), global = fx.globalTable(), virtuals = fx.virtualTable();
 	quint32 cnStart = 0x100, cnEnd = cnStart + quint32( cn.size() ), dataStart = cnEnd;
@@ -1034,7 +1047,12 @@ QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString *
  * carries; the ones that vary are exactly what HknpBodyPhys models, which is why
  * this can be written from the model rather than from preserved bytes.
  */
-QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups * fixups )
+namespace {
+
+/*! Shared by both packfile roots, which are the same object with the ragdoll
+ * one adding a bone-to-body array at +0x80 and a skeleton pointer at +0x78.
+ */
+QByteArray encodeSystemRoot( const HknpSystem & sys, HknpRagdollDataFixups * fixups, bool ragdoll )
 {
 	const qsizetype nb = sys.bodyPhys.size();
 	const qsizetype nbone = sys.bones.size();
@@ -1047,19 +1065,32 @@ QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups 
 	qsizetype nmotion = 0;
 	for ( const HknpBodyPhys & b : sys.bodyPhys )
 		nmotion = std::max( nmotion, qsizetype( b.motionIndex ) + 1 );
+	/* The two arrays have their OWN counts and they need not agree: one vanilla
+	 * physics system carries an inertia entry with no motion entry, so deriving
+	 * both from the motion index writes an array the file does not have and shifts
+	 * every offset after it. Stored counts win where the decode has them.
+	 */
+	const qsizetype nMotionArr = ( sys.motionCount >= 0 ) ? qsizetype( sys.motionCount ) : nmotion;
+	const qsizetype nInertiaArr = ( sys.inertiaCount >= 0 ) ? qsizetype( sys.inertiaCount ) : nmotion;
 
 	QByteArray props, motions( nmotion * 0x40, 0 ), inertias( nmotion * 0x70, 0 ), cinfos;
 	for ( qsizetype i = 0; i < nb; i++ ) {
 		const HknpBodyPhys & b = sys.bodyPhys.at( i );
 
-		QByteArray p( 0x50, 0 );
-		setU16( p, 0x10, 0xff00 );
+		/* Start from the stored record where there is one and patch the two modelled
+		 * fields in; the constants below are what 37 actor skeletons carry and are
+		 * demonstrably not universal -- see HknpBodyPhys::propsRawData.
+		 */
+		QByteArray p = ( b.propsRawData.size() == 0x50 ) ? b.propsRawData : QByteArray( 0x50, 0 );
+		if ( b.propsRawData.size() != 0x50 ) {
+			setU16( p, 0x10, 0xff00 );
+			setU32( p, 0x18, 0x3d4c0201u ); setU32( p, 0x1c, 0x7f7fffeeu );
+			setFloat( p, 0x20, 1.0f ); setFloat( p, 0x24, 1.0f );
+			setU32( p, 0x38, 0x000040a0u );
+		}
 		setU16( p, 0x12, truncFloat16( b.friction ) );
 		setU16( p, 0x14, truncFloat16( b.friction ) );
 		setU16( p, 0x16, truncFloat16( b.restitution ) );
-		setU32( p, 0x18, 0x3d4c0201u ); setU32( p, 0x1c, 0x7f7fffeeu );
-		setFloat( p, 0x20, 1.0f ); setFloat( p, 0x24, 1.0f );
-		setU32( p, 0x38, 0x000040a0u );
 		props.append( p );
 
 		QByteArray c( 0x60, 0 );
@@ -1072,9 +1103,12 @@ QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups 
 		 * whose shape list is already in body order.
 		 */
 		setU16( c, 0x12, quint16( std::max( sys.shapeListOrder.indexOf( int( i ) ), qsizetype( 0 ) ) ) );
-		setU32( c, 0x14, ( b.layer & 0xffu ) | ( quint32( b.filterFlags ) << 8 )
-			| ( quint32( b.filterGroup ) << 16 ) );
-		setU32( c, 0x18, 0x00010080u );
+		// the stored filter, not the display one: layer 0 is real, and the decode
+		// substitutes 1 or 10 for it so a user sees something useful
+		setU32( c, 0x14, b.hasStoredFilter ? b.packedFilter
+			: ( ( b.layer & 0xffu ) | ( quint32( b.filterFlags ) << 8 )
+				| ( quint32( b.filterGroup ) << 16 ) ) );
+		setU32( c, 0x18, b.cinfoFlags );
 		for ( int a = 0; a < 3; a++ )
 			setFloat( c, 0x30 + a * 4, b.position[a] );
 		setU32( c, 0x3c, b.positionW );
@@ -1098,7 +1132,7 @@ QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups 
 		setU32( motions, m + 0x3c, 0x00000073u );
 
 		const qsizetype n = qsizetype( b.motionIndex ) * 0x70;
-		setU16( inertias, n + 0x00, quint16( b.motionIndex ) ); setU16( inertias, n + 0x02, 1 );
+		setU32( inertias, n + 0x00, b.inertiaTag );
 		setFloat( inertias, n + 0x04, b.mass > 1.0e-12f ? 1.0f / b.mass : 0.0f );
 		setFloat( inertias, n + 0x08, b.density );
 		setU32( inertias, n + 0x0c, 0x5f7ffff0u ); setU32( inertias, n + 0x10, 0x5f7ffff0u );
@@ -1106,7 +1140,7 @@ QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups 
 			setFloat( inertias, n + 0x20 + a * 4, b.invInertia[a] );
 			setFloat( inertias, n + 0x30 + a * 4, b.motionCom[a] );
 		}
-		setFloat( inertias, n + 0x2c, 1.0f );
+		setU32( inertias, n + 0x2c, b.inertiaScale );
 		setU32( inertias, n + 0x3c, b.motionComW );
 		setFloat( inertias, n + 0x40, b.motionOrientation[1] );
 		setFloat( inertias, n + 0x44, b.motionOrientation[2] );
@@ -1128,7 +1162,12 @@ QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups 
 	for ( qsizetype i = 0; i < nbone; i++ )
 		setU32( boneMap, i * 4, quint32( i ) );
 
-	QByteArray out( 0x90, 0 );
+	/* The header is 0x90 on a ragdoll and 0x80 on a physics system -- the ragdoll
+	 * root's extra bone-to-body descriptor at +0x80 is what makes the difference,
+	 * and payloads start immediately after. Measured 6/6 and 50/50. Writing 0x90
+	 * for both leaves a physics system 16 bytes too long with every offset shifted.
+	 */
+	QByteArray out( ragdoll ? 0x90 : 0x80, 0 );
 	auto place = [&]( qsizetype desc, quint32 count, const QByteArray & payload ) {
 		setU32( out, desc + 8, count );
 		setU32( out, desc + 12, count | 0x80000000u );
@@ -1138,26 +1177,48 @@ QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups 
 		return at;
 	};
 	HknpRagdollDataFixups fx;
-	const qsizetype propsAt = place( 0x10, quint32( nb ), props );
-	const qsizetype motionAt = place( 0x20, quint32( nmotion ), motions );
-	const qsizetype inertiaAt = place( 0x30, quint32( nmotion ), inertias );
-	const qsizetype cinfoAt = place( 0x40, quint32( nb ), cinfos );
-	const qsizetype consAt = place( 0x50, quint32( ncon ), cons );
-	const qsizetype listAt = place( 0x60, quint32( sys.shapeListOrder.size() ),
+	/* An EMPTY array leaves its descriptor at raw zero -- count included -- and
+	 * contributes no local fixup and no payload. Writing a count of 0 with a
+	 * pointer to nothing is what a naive loop does, and it is not what a static
+	 * system carries: 152 of the 185 sampled hold only three of the six.
+	 */
+	auto placeIf = [&]( qsizetype desc, qsizetype count, const QByteArray & payload ) -> qsizetype {
+		if ( count <= 0 ) {
+			// an EMPTY array still writes count 0 with the 0x80000000 "does not own
+			// the memory" flag; only the pointer, the fixup and the payload are absent
+			setU32( out, desc + 12, 0x80000000u );
+			return -1;
+		}
+		const qsizetype at = place( desc, quint32( count ), payload );
+		fx.local.append( { desc, at } );
+		return at;
+	};
+	placeIf( 0x10, nb, props );
+	placeIf( 0x20, nMotionArr, motions.left( nMotionArr * 0x40 ) );
+	placeIf( 0x30, nInertiaArr, inertias.left( nInertiaArr * 0x70 ) );
+	const qsizetype cinfoAt = placeIf( 0x40, nb, cinfos );
+	const qsizetype consAt = placeIf( 0x50, ncon, cons );
+	const qsizetype listAt = placeIf( 0x60, sys.shapeListOrder.size(),
 		QByteArray( sys.shapeListOrder.size() * 8, 0 ) );
-	const qsizetype mapAt = place( 0x80, quint32( nbone ), boneMap );
+	if ( ragdoll )
+		placeIf( 0x80, nbone, boneMap );
 
-	fx.local = { { 0x10, propsAt }, { 0x20, motionAt }, { 0x30, inertiaAt },
-		{ 0x40, cinfoAt }, { 0x50, consAt }, { 0x60, listAt }, { 0x80, mapAt } };
-	for ( qsizetype i = 0; i < nb; i++ )
+	for ( qsizetype i = 0; i < nb && cinfoAt >= 0; i++ )
 		fx.bodyShapePointers.append( cinfoAt + i * 0x60 );
-	for ( qsizetype i = 0; i < ncon; i++ )
+	for ( qsizetype i = 0; i < ncon && consAt >= 0; i++ )
 		fx.constraintPointers.append( consAt + i * 0x18 );
-	for ( qsizetype i = 0; i < sys.shapeListOrder.size(); i++ )
+	for ( qsizetype i = 0; i < sys.shapeListOrder.size() && listAt >= 0; i++ )
 		fx.shapeListPointers.append( listAt + i * 8 );
 	if ( fixups )
 		*fixups = fx;
 	return out;
+}
+
+} // namespace
+
+QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups * fixups )
+{
+	return encodeSystemRoot( sys, fixups, true );
 }
 
 namespace {
@@ -1196,6 +1257,15 @@ bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs )
 		pin.materialCRC = shp.shapeMaterialCRC; pin.shapeFlags = shp.shapeFlags;
 		so.className = QStringLiteral( "hknpConvexPolytopeShape" );
 		so.bytes = hknpEncodeConvexPolytopeShape( pin );
+	} else if ( !shp.dataRawData.isEmpty() && !shp.rawData.isEmpty() ) {
+		/* A compressed mesh. There is no derivation to attempt: each section
+		 * quantizes against its own domain and the section partitioning is Havok's,
+		 * so the shape and its data object both go back as they came. The authoring
+		 * writer (hknpEncodeCompressedMesh) builds a NEW one from triangles; that is
+		 * a different job from rewriting an existing file without disturbing it.
+		 */
+		so.className = shp.className;
+		so.bytes = shp.rawData;
 	} else {
 		return false;
 	}
@@ -1206,39 +1276,61 @@ bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs )
 	 * capsule's core box cannot survive a float round trip and there is no reason
 	 * to make it try. A caller that edited the shape clears rawData.
 	 */
-	if ( shp.rawData.size() == so.bytes.size() )
+	if ( shp.rawData.size() == so.bytes.size() ) {
 		so.bytes = shp.rawData;
+		so.local = shp.rawLocal;
+	}
 
 	const qsizetype shapeIndex = objs.size();
 	objs.append( so );
-	if ( !shp.hasMassProps )
-		return true;
 
-	objs[shapeIndex].global.append( { 0x20, int( objs.size() ) } );
-	HknpPackObject rc;
-	rc.className = QStringLiteral( "hkRefCountedProperties" );
-	rc.bytes = refCountedProperties();
-	rc.local.append( { 0x00, 0x10 } );
-	rc.global.append( { 0x10, int( objs.size() ) + 1 } );
-	objs.append( rc );
+	/* What hangs off the shape, in member order: the hkRefCountedProperties at
+	 * +0x20 with either mass properties or a material table under it, then a
+	 * compressed mesh's data object at +0x60.
+	 */
+	if ( shp.hasMassProps || !shp.materialRawData.isEmpty() ) {
+		const bool material = !shp.hasMassProps;
+		objs[shapeIndex].global.append( { 0x20, int( objs.size() ) } );
+		HknpPackObject rc;
+		rc.className = QStringLiteral( "hkRefCountedProperties" );
+		rc.bytes = refCountedProperties( material ? 0x0000f601u : 0x0000f100u );
+		rc.local.append( { 0x00, 0x10 } );
+		rc.global.append( { 0x10, int( objs.size() ) + 1 } );
+		objs.append( rc );
 
-	HknpPackObject mp;
-	mp.className = QStringLiteral( "hknpShapeMassProperties" );
-	mp.bytes = hknpEncodeShapeMassProperties( shp.massCom, shp.massInertiaRaw,
-		shp.massVolume, shp.massMass, shp.massMajorAxis );
-	if ( shp.massRawData.size() == mp.bytes.size() )
-		mp.bytes = shp.massRawData;
-	objs.append( mp );
+		HknpPackObject mp;
+		if ( material ) {
+			mp.className = QStringLiteral( "hknpBSMaterialProperties" );
+			mp.bytes = shp.materialRawData;
+			mp.local = shp.materialLocal;
+		} else {
+			mp.className = QStringLiteral( "hknpShapeMassProperties" );
+			mp.bytes = hknpEncodeShapeMassProperties( shp.massCom, shp.massInertiaRaw,
+				shp.massVolume, shp.massMass, shp.massMajorAxis );
+			if ( shp.massRawData.size() == mp.bytes.size() )
+				mp.bytes = shp.massRawData;
+		}
+		objs.append( mp );
+	}
+	if ( !shp.dataRawData.isEmpty() ) {
+		objs[shapeIndex].global.append( { 0x60, int( objs.size() ) } );
+		HknpPackObject cd;
+		cd.className = shp.dataClassName;
+		cd.bytes = shp.dataRawData;
+		cd.local = shp.dataLocal;
+		objs.append( cd );
+	}
 	return true;
 }
 
 } // namespace
 
-QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
+QByteArray hknpEncodeSystem( const HknpSystem & sys, QString * error )
 {
 	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
-	if ( sys.bodyPhys.isEmpty() || sys.bones.isEmpty() )
-		return fail( QStringLiteral( "Not a ragdoll: it has no bodies or no skeleton." ) );
+	if ( sys.bodyPhys.isEmpty() )
+		return fail( QStringLiteral( "The system has no bodies." ) );
+	const bool ragdoll = !sys.bones.isEmpty();
 
 	/* One shape per body. A compound owns several, all carrying that same body, so
 	 * its children have to be taken out of the running before the rest are matched
@@ -1265,10 +1357,12 @@ QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
 	QVector<HknpPackObject> objs;
 	HknpRagdollDataFixups rfx;
 	HknpPackObject root;
-	root.className = QStringLiteral( "hknpRagdollData" );
-	root.bytes = hknpEncodeRagdollData( sys, &rfx );
+	root.className = ragdoll ? QStringLiteral( "hknpRagdollData" )
+							 : QStringLiteral( "hknpPhysicsSystemData" );
+	root.bytes = ragdoll ? hknpEncodeRagdollData( sys, &rfx )
+						 : hknpEncodePhysicsSystemData( sys, &rfx );
 	if ( root.bytes.isEmpty() )
-		return fail( QStringLiteral( "Could not write the ragdoll root object." ) );
+		return fail( QStringLiteral( "Could not write the system root object." ) );
 	root.local = rfx.local;
 	objs.append( root );
 
@@ -1331,6 +1425,10 @@ QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
 			co.bytes = hknpEncodeRagdollConstraintData( c );
 		else if ( c.kind == QLatin1String( "hkpLimitedHingeConstraintData" ) )
 			co.bytes = hknpEncodeLimitedHingeConstraintData( c );
+		else if ( !c.rawData.isEmpty() )
+			// kinds with no encoder of their own -- hkpBallAndSocketConstraintData
+			// turns up in physics systems -- still rewrite from their stored bytes
+			co.bytes = c.rawData;
 		else
 			return fail( QStringLiteral( "No encoder for constraint kind %1." ).arg( c.kind ) );
 
@@ -1365,16 +1463,19 @@ QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
 		}
 	}
 
-	HknpSkeletonFixups sfx;
-	HknpPackObject sk;
-	sk.className = QStringLiteral( "hkaSkeleton" );
-	sk.bytes = hknpEncodeSkeleton( sys.bones, &sfx );
-	if ( sk.bytes.isEmpty() )
-		return fail( QStringLiteral( "Could not write the ragdoll skeleton." ) );
-	sk.local = { { sfx.parentsPointer, sfx.parents }, { sfx.bonesPointer, sfx.bones },
-		{ sfx.posePointer, sfx.pose } };
-	const int skelObj = int( objs.size() );
-	objs.append( sk );
+	int skelObj = -1;
+	if ( ragdoll ) {
+		HknpSkeletonFixups sfx;
+		HknpPackObject sk;
+		sk.className = QStringLiteral( "hkaSkeleton" );
+		sk.bytes = hknpEncodeSkeleton( sys.bones, &sfx );
+		if ( sk.bytes.isEmpty() )
+			return fail( QStringLiteral( "Could not write the ragdoll skeleton." ) );
+		sk.local = { { sfx.parentsPointer, sfx.parents }, { sfx.bonesPointer, sfx.bones },
+			{ sfx.posePointer, sfx.pose } };
+		skelObj = int( objs.size() );
+		objs.append( sk );
+	}
 
 	// the root's globals in member declaration order, which is what the packfile
 	// writer preserves and what puts the skeleton pointer last
@@ -1389,8 +1490,32 @@ QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
 			return fail( QStringLiteral( "Shape list entry %1 names no body." ).arg( i ) );
 		refs.append( { rfx.shapeListPointers.at( i ), shapeObj.at( body ) } );
 	}
-	refs.append( { rfx.skeletonPointer, skelObj } );
+	if ( skelObj >= 0 )
+		refs.append( { rfx.skeletonPointer, skelObj } );
 	objs[0].global = refs;
 
-	return hknpBuildPackfile( objs, error );
+	return hknpBuildPackfile( objs, error, sys.classHashes );
+}
+
+QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
+{
+	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
+	if ( sys.bones.isEmpty() )
+		return fail( QStringLiteral( "Not a ragdoll: it has no skeleton." ) );
+	return hknpEncodeSystem( sys, error );
+}
+
+/*! Write the root of a plain physics system.
+ *
+ * Same six array members at the same offsets as the ragdoll root -- that root
+ * derives from this one -- and the payloads start at +0x90 either way. A STATIC
+ * system carries only three of the six: dyn_motion and dyn_inertia exist only
+ * when something simulates, the constraint array only when something is jointed,
+ * and an absent array leaves its descriptor at raw zero rather than count 0.
+ * Measured on 185 sampled files: 152 carry {0x10, 0x40, 0x60}, 24 add
+ * {0x20, 0x30}, 7 add {0x30} alone and 2 add {0x50}.
+ */
+QByteArray hknpEncodePhysicsSystemData( const HknpSystem & sys, HknpRagdollDataFixups * fixups )
+{
+	return encodeSystemRoot( sys, fixups, false );
 }

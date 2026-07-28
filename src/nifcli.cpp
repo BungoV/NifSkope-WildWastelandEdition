@@ -945,12 +945,15 @@ int cmdCollisionRoundTrip( const QString & file, const QString & rebuildTo )
 		 * tables and their orderings, and the section headers. Nothing short of a
 		 * byte comparison against the original file tests those.
 		 */
-		if ( !sys.bones.isEmpty() && !sys.bodyPhys.isEmpty() ) {
+		if ( !sys.bodyPhys.isEmpty() ) {
 			QString err;
-			const QByteArray built = hknpEncodeRagdoll( sys, &err );
+			const QByteArray built = hknpEncodeSystem( sys, &err );
 			if ( !rebuildTo.isEmpty() && !built.isEmpty() ) {
-				// the reassembled bytes, so a mismatch can be diffed and not guessed at
-				QFile f( rebuildTo );
+				// the reassembled bytes, so a mismatch can be diffed and not guessed at.
+				// One file per system: a NIF can hold several, and writing them all to
+				// one name leaves only the last, which is how the Gorilla skeleton's
+				// failing static system got diffed against its healthy ragdoll.
+				QFile f( rebuildTo + QStringLiteral( ".%1" ).arg( b ) );
 				if ( f.open( QIODevice::WriteOnly ) )
 					f.write( built );
 			}
@@ -966,7 +969,9 @@ int cmdCollisionRoundTrip( const QString & file, const QString & rebuildTo )
 				s.rawData.clear();
 				s.massRawData.clear();
 			}
-			const QByteArray derived = hknpEncodeRagdoll( fresh, nullptr );
+			for ( HknpBodyPhys & p : fresh.bodyPhys )
+				p.propsRawData.clear();
+			const QByteArray derived = hknpEncodeSystem( fresh, nullptr );
 			if ( !derived.isEmpty() ) {
 				packsDerived++;
 				if ( derived == bytes )
@@ -991,8 +996,8 @@ int cmdCollisionRoundTrip( const QString & file, const QString & rebuildTo )
 				 * outside a leaf whose own encoder already reports the same.
 				 */
 				QMap<qsizetype, QString> objAt;   // offset -> what starts there
-				if ( sys.ragdollRawOffset >= 0 )
-					objAt.insert( sys.ragdollRawOffset, QStringLiteral( "root" ) );
+				if ( sys.rootRawOffset >= 0 )
+					objAt.insert( sys.rootRawOffset, QStringLiteral( "root" ) );
 				if ( sys.skeletonRawOffset >= 0 )
 					objAt.insert( sys.skeletonRawOffset, QStringLiteral( "skeleton" ) );
 				for ( const HknpShape & s : sys.shapes ) {

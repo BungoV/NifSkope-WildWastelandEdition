@@ -10,6 +10,7 @@
 #include "data/niftypes.h"
 
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 #include <QVector>
 
@@ -162,6 +163,37 @@ struct HknpShape
 	 * Same contract as HknpConstraint::rawData.
 	 */
 	QByteArray rawData;
+	/*! LOCAL fixups inside the shape object, relative to its start.
+	 *
+	 * Capsules, spheres, polytopes and mass properties have none -- they address
+	 * their own arrays by hkRelArray, which is a self-relative offset and needs no
+	 * patching. A compressed mesh has two, at +0x68 and +0x80, and their targets
+	 * vary, so they are recorded rather than assumed. hknpBSMaterialProperties has
+	 * one at +0x10 -> +0x20.
+	 *
+	 * Carrying an object's bytes and dropping its fixups writes a null pointer.
+	 */
+	QVector<QPair<qsizetype, qsizetype>> rawLocal;
+	/*! The hknpBSMaterialProperties this shape's hkRefCountedProperties names, when
+	 * it names one rather than mass properties.
+	 *
+	 * A material table, 64 to 224 bytes, not decoded past the CRCs the body
+	 * material lookup already reads. The two flavours of hkRefCountedProperties are
+	 * otherwise identical 32-byte objects differing only in a key at +0x18:
+	 * 0x0000f100 for mass properties, 0x0000f601 for a material.
+	 */
+	QByteArray materialRawData;
+	QVector<QPair<qsizetype, qsizetype>> materialLocal;
+	/*! A compressed mesh's hknpCompressedMeshShapeData, carried whole.
+	 *
+	 * Its geometry decodes, but the quantization does not survive a round trip:
+	 * each section quantizes against its OWN domain and the section partitioning is
+	 * Havok's, not anything the decode records. Same treatment as a compound's
+	 * shape data, and it is what lets a compressed-mesh system be rewritten at all.
+	 */
+	QString dataClassName;
+	QByteArray dataRawData;
+	QVector<QPair<qsizetype, qsizetype>> dataLocal;
 
 	//! index of the hknpBodyCinfo this shape belongs to (-1 = none). Each
 	//! bhkNPCollisionObject names its body via its "Body ID" field, and the
@@ -194,13 +226,38 @@ struct HknpShape
 //! (PyNifly documents 0x110, which only ever fit single-body files).
 struct HknpBodyPhys
 {
+	/*! Layer for DISPLAY, with a useful default substituted when the file stores 0.
+	 *
+	 * A rewrite must not use this: layer 0 is real and means "unidentified", and
+	 * writing the substituted 1 back changes the file. Use packedFilter.
+	 */
 	quint32 layer = 1;          //!< cinfo +0x14 packed Havok Filter (old local writer used +0x1C)
+	/*! cinfo +0x14 exactly as stored, defaults and all. What a writer writes.
+	 *
+	 * `hasStoredFilter` is not redundant: a stored filter of 0 is real -- layer 0
+	 * means "unidentified" and one vanilla road prop carries it -- so zero cannot
+	 * double as "nothing was decoded". Testing the value instead put the display
+	 * default back into the file.
+	 */
+	quint32 packedFilter = 0;
+	bool hasStoredFilter = false;
 	quint8 filterFlags = 0;     //!< packed Havok Filter byte 1
 	quint16 filterGroup = 0;    //!< packed Havok Filter upper 16 bits
 	quint32 materialCRC = 0;    //!< body material ID resolved through hknpBSMaterialProperties
 	bool hasMotion = false;     //!< cinfo +0x0C != 0x7fffffff (dynamic body)
 	float friction = 0.5f;      //!< body_props +0x12 (truncated float16)
 	float restitution = 0.4f;   //!< body_props +0x16 (truncated float16)
+	/*! The body_props record as stored, all 0x50 bytes.
+	 *
+	 * Only friction and restitution are modelled, and across 37 actor skeletons the
+	 * other 18 words never varied -- so they were written as constants, and a
+	 * two-body static prop then turned up carrying 0x0020 at +0x0e and 0xff02 at
+	 * +0x10 where every skeleton has 0 and 0xff00. Rather than chase the next one,
+	 * the record is carried and the modelled fields are patched into it, which is
+	 * the same contract HknpConstraint::rawData has. Cleared by a caller that
+	 * edited the body.
+	 */
+	QByteArray propsRawData;
 	/*! cinfo +0x30: the body's POSITION, not its centre of mass.
 	 *
 	 * Measured on the brahmin ragdoll: all 39 entries equal the bone origin
@@ -222,6 +279,12 @@ struct HknpBodyPhys
 	//! and one of 38 values on the rest, so it is residue rather than a field --
 	//! carried because a rewrite cannot invent it. See HknpConstraint::rawData.
 	quint32 positionW = 0;
+	/*! cinfo +0x18, a small bit field. NOT a constant, and not a function of
+	 * anything modelled here: it reads 0x00010080 on every ragdoll body, 0 on all
+	 * 66 static physics bodies, and splits 9 to 2 between 0x00000080 and 0 on the
+	 * dynamic ones. Recorded rather than derived.
+	 */
+	quint32 cinfoFlags = 0;
 
 	/*! cinfo +0x0c: which dyn_motion / dyn_inertia entry this body uses.
 	 *
@@ -259,6 +322,14 @@ struct HknpBodyPhys
 	 * where hknpMotion keeps one and would sit mid-limb as this does -- but that
 	 * is the reading, not a measurement, so the name says what it is.
 	 */
+	/*! dyn_inertia +0x00 and +0x2c, recorded rather than derived.
+	 *
+	 * On every ragdoll body +0x00 reads (motionIndex, 1) as two u16 and +0x2c reads
+	 * 1.0f, which is what this wrote until an ordinary prop turned up carrying
+	 * 0xffff and 0. Neither is a function of anything else modelled here, and both
+	 * were "constant" only because 37 actor skeletons agreed.
+	 */
+	quint32 inertiaTag = 0x00010000u, inertiaScale = 0x3f800000u;
 	Vector3 motionCom;
 	quint32 motionComW = 0;             //!< dyn_inertia +0x3c, the w lane beside it
 	/*! dyn_inertia +0x40: a unit quaternion, xyzw. Unit to 1e-5 on all 857.
@@ -533,9 +604,30 @@ struct HknpSystem
 	QVector<HknpBone> bones;
 	//! byte offset of the hkaSkeleton object in the packfile blob, or -1
 	qsizetype skeletonRawOffset = -1;
-	//! byte offset of the hknpRagdollData root object, or -1
-	qsizetype ragdollRawOffset = -1;
-	/*! hknpRagdollData +0x60: the ragdoll's shape list, as BODY indices.
+	/*! Every class name in the file's __classnames__ table with its type hash.
+	 *
+	 * The hash function Havok uses is not established here, so a writer that only
+	 * knew a built-in table would refuse any file containing a class it had never
+	 * sampled -- hknpStaticCompoundShape and hkpBallAndSocketConstraintData are
+	 * both real and both rare enough to miss. Taking the hashes off the file being
+	 * rewritten removes the problem instead of enlarging the table, and cannot be
+	 * wrong: they are what the file says.
+	 */
+	QHash<QString, quint32> classHashes;
+	/*! Stored counts of the dyn_motion (+0x28) and dyn_inertia (+0x38) arrays.
+	 *
+	 * NOT the same number and not derivable from the bodies: one vanilla physics
+	 * system carries an inertia entry with no motion entry at all. -1 means the
+	 * array was absent.
+	 */
+	int motionCount = -1, inertiaCount = -1;
+	//! byte offset of the packfile's root object, or -1
+	qsizetype rootRawOffset = -1;
+	//! the root's class: hknpRagdollData for a ragdoll, hknpPhysicsSystemData for
+	//! everything else. A ragdoll's root DERIVES from the other one, which is why
+	//! the first six array descriptors sit at the same offsets in both.
+	QString rootClassName;
+	/*! Root +0x60: the system's shape list, as BODY indices.
 	 *
 	 * It holds the same set of shape pointers as the body cinfos -- a bijection
 	 * on all 37 corpus ragdolls -- but in a different order on 36 of them, so it
@@ -550,6 +642,9 @@ struct HknpSystem
 	 * A depth-first walk of the bone tree reproduces it on 32 of 34, which is
 	 * exactly the kind of near-miss that has been wrong every previous time this
 	 * session. Node order is right for all of them.
+	 *
+	 * Present on physics systems too -- the +0x60 descriptor is in all 185 sampled
+	 * -- where with one body it is simply [0].
 	 */
 	QVector<int> shapeListOrder;
 	bool positionalBodies = false;

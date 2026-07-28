@@ -986,7 +986,31 @@ Ordered by dependency:
    below the child pointers, the same inversion as the root's skeleton pointer --
    and the data object's own local fixup at +0x10 -> +0x40 has to come with it.
 
-   **Still open:** compressed meshes, which still only decode.
+   **PHYSICS SYSTEMS TOO — SHIPPED 07-29f.** `hknpEncodeSystem` /
+   `hknpEncodePhysicsSystemData`: a 403-file stride sample of the mesh tree
+   reassembles **266 of 266 packfiles byte-identical**, zero structural
+   differences, one refusal (a body naming no shape). Ragdolls stay 69/69.
+
+   The two roots are the same object; the ragdoll one adds the +0x80 array and the
+   +0x78 skeleton pointer, which is why its header is 0x90 and the other's is 0x80.
+   An EMPTY array still writes count 0 with the `0x80000000` flag, and dyn_motion /
+   dyn_inertia have independent counts (one prop has inertia and no motion).
+
+   **LOCAL fixups follow the same member-declaration order as globals** -- inside a
+   CompressedMeshShapeData the section array's fixup sits between the +0x50 and
+   +0x60 members. Sorting matched every ragdoll and no compressed-mesh system.
+
+   **Five fields were "constant" only because 37 actor skeletons agreed:**
+   `cinfo+0x18`, `dyn_inertia+0x00` and `+0x2c`, `body_props+0x0e` and `+0x10`. All
+   recorded now, and body_props is carried whole and patched.
+
+   **Class hashes come from the file's own `__classnames__`**, so a packfile holding
+   a class the built-in table never sampled still rewrites.
+
+   **Still open:** an encoder that DERIVES a compressed mesh from geometry for
+   rewriting. `hknpEncodeCompressedMesh` authors a new one and is in-game
+   validated; rewriting an existing one carries its bytes, because each section
+   quantizes against its own domain and the partitioning is Havok's.
 6. **Round-trip validation** over the corpus — DONE 07-28y for the shipped
    encoders, and it earned its keep: a 700-file stride sample of the full 34,985
    mesh tree caught 8 polytope failures in exactly the categories the skeletons do

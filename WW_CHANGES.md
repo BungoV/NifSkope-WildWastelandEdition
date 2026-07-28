@@ -1,5 +1,89 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29f — physics systems assemble too: 266 of 266 rebuilt byte for byte
+
+`hknpEncodeSystem` and `hknpEncodePhysicsSystemData`. Ragdolls are 37 files; this
+root covers everything else — architecture, interiors, set dressing, props. A
+403-file stride sample of the 34,985-file mesh tree now decodes and reassembles
+**266 of 266 packfiles byte-identical to what Havok wrote**, zero structural
+differences, one clean refusal. Ragdolls stay at 69/69 in the same build.
+
+The ragdoll root DERIVES from `hknpPhysicsSystemData`, so most of the work was
+already done. What was not:
+
+- **The header is 0x80, not 0x90.** The ragdoll root's extra bone-to-body
+  descriptor at +0x80 is the whole difference, and payloads start immediately
+  after either way. 50/50 and 6/6.
+- **An empty array still writes `count 0` with the `0x80000000` flag.** Skipping
+  the descriptor entirely leaves three zeroed words a static system does not have.
+- **`dyn_motion` and `dyn_inertia` have independent counts.** One vanilla prop
+  carries an inertia entry and no motion entry at all, so deriving both from the
+  motion index writes an array the file lacks and shifts every offset after it.
+
+### Local fixups follow the same reflection walk as globals
+
+Proved on ragdolls that GLOBAL fixups are emitted in member declaration order
+rather than by offset. The local table is ordered the same way, which a sort
+matched on every ragdoll and on no compressed-mesh system: inside a
+`CompressedMeshShapeData` the section array's own fixup lands between its +0x50
+and +0x60 members, because an array member contributes its payload's fixups where
+the member is declared. So the decode now records table order and the assembler
+does not sort. One rule, three tables, and the earlier agreement was luck.
+
+### Carrying an object's bytes without its fixups writes a null pointer
+
+Written down for the compound shape data last entry, then repeated twice: a
+compressed-mesh shape has two local fixups of its own at +0x68 and +0x80 with
+varying targets, and `hknpBSMaterialProperties` has one at +0x10. Both are now
+recorded per object rather than assumed, as `dataLocal` already was.
+
+### Five fields that were "constant" because 37 actor skeletons agreed
+
+Every one of these was a measured constant in the ragdoll corpus and wrong on
+ordinary props, so all five are now recorded rather than derived:
+
+| field | ragdolls | elsewhere |
+|---|---|---|
+| `cinfo+0x18` | `0x00010080` on all 140 | 0 on all 66 static, and 9-to-2 split on dynamic |
+| `dyn_inertia+0x00` | `(motionIndex, 1)` | `0xffff` |
+| `dyn_inertia+0x2c` | `1.0f` | 0 |
+| `body_props+0x0e` | 0 | `0x0020` |
+| `body_props+0x10` | `0xff00` | `0xff02` |
+
+The last two are why `body_props` is now carried whole and patched, the same
+contract constraints have had since 07-28x — chasing the next word one at a time
+is not a strategy.
+
+### Two decode conveniences that a writer must not persist
+
+`layer` substitutes a useful default when the file stores 0, because 0 means
+"unidentified" and shows the user nothing. Writing that back changes the file, so
+the stored word is kept separately. The first fix used `packedFilter ? ... : ...`
+and still failed on the one road prop whose filter really is 0 — a stored zero is
+not "nothing was decoded", so there is an explicit flag now.
+
+### Hashes come from the file
+
+A writer that only knew a built-in class table refused any packfile containing a
+class it had never sampled, and `hknpStaticCompoundShape` and
+`hkpBallAndSocketConstraintData` are both real and both rare enough that ten
+minutes of corpus scanning did not turn either up. The decode now records the
+file's own `__classnames__` hashes and the assembler prefers them. They cannot be
+wrong, and the built-in table is only needed when authoring something new.
+
+Compressed meshes, their data objects, material tables and constraint kinds with
+no encoder of their own all rewrite from stored bytes. That is not a substitute
+for understanding them; it is what makes an edit to one joint limit leave the rest
+of the file alone.
+
+`--roundtrip -o` now writes one file per system. A NIF can hold several, and
+writing them all to one name leaves only the last — which is how the Gorilla
+skeleton's failing static system got diffed against its healthy ragdoll and
+appeared to pass.
+
+Per-shape sweep unchanged: no mismatches, compounds 27/27, polytopes 193/193.
+Simulator unaffected. One refusal in 266: a system whose body names no shape.
+
 ## 2026-07-29e — the packfile assembly: all 37 vanilla ragdolls rebuilt byte for byte
 
 `hknpEncodeRagdoll` and `hknpBuildPackfile`. **All 37 vanilla ragdolls are now
