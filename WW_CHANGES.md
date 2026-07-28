@@ -1,5 +1,63 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29h — a quarter of all collision meshes were decoding wrong
+
+Auditing the sticky-flag bug found yesterday turned up the thing it was hiding.
+**32 of 127 sampled compressed meshes use shared vertices, and every one of them
+was decoding with an unbounded index.** A SetDressing billboard went from
+565 v / 797 t to 710 v / 1089 t — geometry that was missing from the viewport,
+from the simulator's contacts and from anything reading the decode.
+
+### The sticky flag, everywhere it was
+
+`Reader::ok` is sticky by design, and **every structural loop in the decoder was
+written `while ( i < count && r.ok )`** — seven of them: compressed-mesh sections,
+their primitives, skeleton bones, ragdoll constraint bindings, the root's shape
+list, compound instances and compound children. One out-of-range read anywhere
+silently truncated every list decoded after it.
+
+There is now a `Reader::Scope` that clears `ok` on entry and restores it on exit,
+declared at the top of each per-item loop body. `ok` then means "THIS item read
+cleanly" rather than "nothing has failed since the file was opened", which is also
+what the atom-chain walk actually wants — a bad read there really does invalidate
+the rest of that one chain, and no others.
+
+A separate `everFailed` records that a file had a bad read at all, with the offset
+of the first, and `collision` reports it. The alternative is what used to happen:
+a truncated list, no error, and geometry missing that nobody had reason to look
+for.
+
+### What the flag was hiding
+
+The billboard's first bad read landed at +0x58c08 in a 23,680-byte file — 15x past
+the end, so an offset was being computed from a field read wrong, not an
+off-by-one.
+
+A section's `+0x4c` packs its first shared-vertex index in the high 24 bits. **Its
+low byte is not a shared count.** On all 7 sections of that billboard it equals
+`numPacked` at +0x58 exactly, while the real per-section shared range is the gap
+to the next section's first index. Reading it as a count let section 6 ask for
+index 174+74 of a 178-entry array, walk off the end into the packed-vertex data,
+and take a vertex position as a shared index.
+
+My first attempt at a guard used that low byte, which is why it changed nothing.
+Bounding against each array's OWN count — the hkArray counts at +0x78 and +0x98 —
+is exact and needs no interpretation of the low byte at all.
+
+Both faults compounded: the garbage index put vertices in the wrong place, and the
+`&& r.ok` guard then abandoned the rest of that section's primitives.
+
+### Scope
+
+Multi-section compressed meshes are 29 of 127 in the sample and every one of them
+shares vertices. They are architecture and set dressing — the collision most of
+the game is built from.
+
+Assembly sweep unchanged at 470/470 byte-exact with no refusals, ragdolls 69/69,
+per-shape sweep clean, simulator unaffected. None of those would have caught this:
+the bytes round-trip perfectly either way, because the fault was in reading them,
+not in writing them.
+
 ## 2026-07-29g — 470 of 470, and a sticky flag that was hiding shapes
 
 The last two refusals are gone, and chasing the second one turned up a decode bug

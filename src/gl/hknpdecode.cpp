@@ -46,16 +46,56 @@
 
 namespace {
 
+/*! Bounds-checked reads over the packfile blob.
+ *
+ * `ok` is STICKY on purpose -- a caller wants to know a read failed even if it
+ * only checks later -- and that is exactly what made it dangerous: every
+ * structural loop in this file was written `while ( i < count && r.ok )`, so one
+ * out-of-range read anywhere silently truncated every list decoded after it, with
+ * no error reported. A 12-instance compound came back with 11 children, missing
+ * from the shape list, the viewport and the body attribution alike.
+ *
+ * So a per-item loop body opens a `Reader::Scope`, which restores `ok` on the way
+ * out. A bad read then costs that one item instead of everything after it, and
+ * `everFailed` still records that the file had a bad read at all.
+ */
 struct Reader
 {
 	const quint8 * d;
 	qsizetype n;
 	bool ok = true;
+	bool everFailed = false;   //!< sticky across scopes: reported, never gates a loop
+	qsizetype firstFail = -1;  //!< offset of the first out-of-range read, for the report
+
+	void fail( qsizetype o )
+	{
+		ok = false;
+		if ( !everFailed )
+			firstFail = o;
+		everFailed = true;
+	}
+
+	/*! Confines a read failure to one item. Declare it at the top of a loop body.
+	 *
+	 * Clears `ok` on entry as well as restoring it on exit, so code inside can test
+	 * `ok` to mean "THIS item read cleanly" rather than "nothing has failed since
+	 * the file was opened" -- which is what the atom-chain walk needs, since a bad
+	 * read there really does invalidate the rest of that one chain.
+	 */
+	struct Scope
+	{
+		Reader & r;
+		bool was;
+		explicit Scope( Reader & reader ) : r( reader ), was( reader.ok ) { reader.ok = true; }
+		~Scope() { r.ok = was; }
+		Scope( const Scope & ) = delete;
+		Scope & operator=( const Scope & ) = delete;
+	};
 
 	quint8 u8( qsizetype o )
 	{
 		if ( o < 0 || o >= n ) {
-			ok = false;
+			fail( o );
 			return 0;
 		}
 		return d[o];
@@ -63,7 +103,7 @@ struct Reader
 	quint16 u16( qsizetype o )
 	{
 		if ( o < 0 || o + 2 > n ) {
-			ok = false;
+			fail( o );
 			return 0;
 		}
 		quint16 v;
@@ -73,7 +113,7 @@ struct Reader
 	quint32 u32( qsizetype o )
 	{
 		if ( o < 0 || o + 4 > n ) {
-			ok = false;
+			fail( o );
 			return 0;
 		}
 		quint32 v;
@@ -83,7 +123,7 @@ struct Reader
 	quint64 u64( qsizetype o )
 	{
 		if ( o < 0 || o + 8 > n ) {
-			ok = false;
+			fail( o );
 			return 0;
 		}
 		quint64 v;
@@ -388,6 +428,9 @@ static void decodeConstraintAtoms( Reader & r, qsizetype cd, qsizetype end, Hknp
 	int cones = 0;
 	// Objects are 16-aligned, so a clean walk can stop short of the next object;
 	// that tail is zero padding, not a further atom.
+	// a bad read here invalidates the REST OF THIS CHAIN -- the next atom's offset
+	// comes from this one's type -- but not any other constraint's, hence the scope
+	Reader::Scope chainScope( r );
 	for ( qsizetype a = cd + 0x20; a + 16 <= end && r.ok; ) {
 		const quint16 t = r.u16( a );
 		const qsizetype sz = atomSize( t );
@@ -439,6 +482,8 @@ static void decodeCompressedMesh( Reader & r, qsizetype B, const QHash<qsizetype
 	qsizetype shix = local.value( B + 0x70, -1 );
 	qsizetype pack = local.value( B + 0x80, -1 );
 	qsizetype shar = local.value( B + 0x90, -1 );
+	// the two shared-vertex arrays' own counts, which is what bounds the lookups
+	quint32 nShix = r.u32( B + 0x78 ), nShar = r.u32( B + 0x98 );
 	if ( secp < 0 || prim < 0 || pack < 0 || nsec > 4096 )
 		return;
 
@@ -453,11 +498,23 @@ static void decodeCompressedMesh( Reader & r, qsizetype B, const QHash<qsizetype
 		return idx;
 	};
 
-	for ( quint32 s = 0; s < nsec && r.ok; s++ ) {
+	for ( quint32 s = 0; s < nsec; s++ ) {
+		Reader::Scope sectionScope( r );
 		qsizetype S = secp + qsizetype( s ) * 0x60;
 		Vector3 off = r.vec3( S + 0x30 );
 		Vector3 stp = r.vec3( S + 0x3c );
 		quint32 firstPacked = r.u32( S + 0x48 );
+	/* +0x4c's high 24 bits are the section's first shared index. Its LOW BYTE is
+	 * not a shared count, whatever the field name suggests -- on all 7 sections of
+	 * a SetDressing billboard it equals numPacked at +0x58 exactly, while the real
+	 * per-section shared range is the gap to the next section's firstShared.
+	 *
+	 * Reading it as a count let section 6 ask for index 174+74 of a 178-entry
+	 * array, walk off the end into the packed-vertex data, and take a vertex
+	 * position as a shared index -- which is the read landing 15x past the end of
+	 * the blob that this file reports. Bounding against each array's OWN count is
+	 * exact and needs no interpretation of the low byte at all.
+	 */
 		quint32 firstShared = r.u32( S + 0x4c ) >> 8;
 		quint32 pf = r.u32( S + 0x50 );
 		quint32 firstPrim = pf >> 8, numPrim = pf & 0xFF;
@@ -473,7 +530,12 @@ static void decodeCompressedMesh( Reader & r, qsizetype B, const QHash<qsizetype
 			}
 			if ( shix < 0 || shar < 0 )
 				return -1;
-			quint16 si = r.u16( shix + qsizetype( firstShared + idx - numPacked ) * 2 );
+			const qsizetype k = qsizetype( firstShared ) + idx - qsizetype( numPacked );
+			if ( k < 0 || k >= qsizetype( nShix ) )
+				return -1;
+			quint16 si = r.u16( shix + k * 2 );
+			if ( si >= nShar )
+				return -1;
 			quint64 w = r.u64( shar + qsizetype( si ) * 8 );
 			Vector3 p( gmin[0] + float( w & 0x1FFFFF ) / 2097151.0f * ( gmax[0] - gmin[0] ),
 						gmin[1] + float( ( w >> 21 ) & 0x1FFFFF ) / 2097151.0f * ( gmax[1] - gmin[1] ),
@@ -481,7 +543,8 @@ static void decodeCompressedMesh( Reader & r, qsizetype B, const QHash<qsizetype
 			return addVert( 0x8000000000000000ULL | si, p );
 		};
 
-		for ( quint32 t = 0; t < numPrim && r.ok; t++ ) {
+		for ( quint32 t = 0; t < numPrim; t++ ) {
+			Reader::Scope primScope( r );
 			qsizetype P = prim + qsizetype( firstPrim + t ) * 4;
 			int a = vert( r.u8( P ) ), b = vert( r.u8( P + 1 ) );
 			int c = vert( r.u8( P + 2 ) );
@@ -639,7 +702,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 		if ( par < 0 || n == 0 || n > 4096 )
 			continue;
 		sys.skeletonRawOffset = obj.first;
-		for ( quint32 i = 0; i < n && r.ok; i++ ) {
+		for ( quint32 i = 0; i < n; i++ ) {
+			Reader::Scope boneScope( r );
 			HknpBone b;
 			b.parent = qint16( r.u16( par + qsizetype( i ) * 2 ) );
 			if ( bon >= 0 )
@@ -731,7 +795,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 		 */
 		if ( qsizetype cons = local.value( obj.first + 0x50, -1 ); cons >= 0 ) {
 			const quint32 nc = r.u32( obj.first + 0x58 );
-			for ( quint32 i = 0; i < nc && nc <= 4096 && r.ok; i++ ) {
+			for ( quint32 i = 0; i < nc && nc <= 4096; i++ ) {
+				Reader::Scope constraintScope( r );
 				const qsizetype e = cons + qsizetype( i ) * 0x18;
 				HknpConstraint jc;
 				jc.childBody = int( r.u32( e + 0x08 ) );
@@ -906,7 +971,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 			sys.rootClassName = obj.second;
 			if ( qsizetype list = local.value( obj.first + 0x60, -1 ); list >= 0 ) {
 				const quint32 n = r.u32( obj.first + 0x68 );
-				for ( quint32 k = 0; k < n && n <= 4096 && r.ok; k++ ) {
+				for ( quint32 k = 0; k < n && n <= 4096; k++ ) {
+					Reader::Scope slotScope( r );
 					const qsizetype shp = global.value( list + qsizetype( k ) * 8, -1 );
 					int body = -1;
 					for ( quint32 i = 0; i < nb && body < 0; i++ ) {
@@ -1119,7 +1185,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 			comp.dataRawData = objectBytes( cd );
 			comp.dataLocal = objectLocal( cd, comp.dataRawData.size() );
 		}
-		for ( quint32 i = 0; i < numInst && r.ok; i++ ) {
+		for ( quint32 i = 0; i < numInst; i++ ) {
+			Reader::Scope instanceScope( r );
 			const qsizetype inst = instBase + qsizetype( i ) * 0x80;
 			HknpCompound::Instance one;
 			for ( int rr = 0; rr < 3; rr++ )
@@ -1140,9 +1207,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 		 * and not a reason to abandon the children after it.
 		 */
 		for ( quint32 i = 0; i < numInst; i++ ) {
-			// restored on EVERY exit from the body, including the two continues
-			const bool okBefore = r.ok;
-			const QScopeGuard restoreOk( [&r, okBefore] { r.ok = okBefore; } );
+			Reader::Scope childScope( r );
 			qsizetype inst = instBase + qsizetype( i ) * 0x80;
 			qsizetype child = global.value( inst + 0x50, -1 );
 			if ( child < 0 )
@@ -1241,6 +1306,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 		}
 	}
 
+	sys.readTruncated = r.everFailed;
+	sys.readTruncatedAt = r.firstFail;
 	sys.valid = !sys.shapes.isEmpty();
 	if ( !sys.valid && sys.error.isEmpty() )
 		sys.error = QStringLiteral( "no decodable shapes" );

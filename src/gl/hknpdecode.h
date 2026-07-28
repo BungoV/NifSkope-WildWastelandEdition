@@ -679,6 +679,16 @@ struct HknpSystem
 	//! class names present but not decoded
 	QStringList unknownShapes;
 	bool valid = false;
+	/*! A read went out of range somewhere in this packfile.
+	 *
+	 * Not fatal, and usually not even visible -- a scope confines each one to the
+	 * item that caused it. It is surfaced because the alternative is what used to
+	 * happen: a truncated list, no error, and a shape missing from the viewport
+	 * that nobody had reason to look for.
+	 */
+	bool readTruncated = false;
+	//! offset of the first out-of-range read, or -1
+	qsizetype readTruncatedAt = -1;
 	QString error;
 };
 

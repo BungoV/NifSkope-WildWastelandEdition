@@ -1424,6 +1424,11 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 		if ( !sys.unknownShapes.isEmpty() )
 			out() << "  not decoded              " << sys.unknownShapes.join( QStringLiteral( ", " ) )
 				  << Qt::endl;
+		if ( sys.readTruncated )
+			out() << "  read out of range        first at +0x"
+				  << QString::number( sys.readTruncatedAt, 16 ) << " (blob is "
+				  << bytes.size() << " bytes); each failure is confined to its own item"
+				  << Qt::endl;
 
 		// how many DISTINCT body ids the shapes carry: that is exactly how many
 		// rigid bodies a decompile would produce
