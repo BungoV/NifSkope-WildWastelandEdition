@@ -669,6 +669,59 @@ diff, because it exercises masses, inertia, joint frames and limits together.
 **Note the units trap.** Ragdoll collision is in Havok metres, cloth in game units
 (~70x apart, see 4b) — the solver works in one space and must convert at the edges.
 
+### 4d-spec. Capsule encoder — COMPLETE SPEC, measured 07-28q
+
+Everything needed to write `hknpEncodeCapsule`. Measured on the brahmin's 39
+capsules; 07-28d had already checked the constant tables across all 778 vanilla
+capsules.
+
+**Object is always 432 bytes (0x1B0).** Invariant across all 39: size, the four
+flag bytes at +0x10 (`c3 01 00 01`), the 24-byte face table and the 24-byte index
+table are each ONE distinct value.
+
+| offset | contents |
+|---|---|
+| +0x00 | 16 bytes zero (vtable + refcount, filled by the loader) |
+| +0x10 | `c3 01 00 01` constant |
+| +0x14 | float convexRadius — **this is the capsule radius** |
+| +0x18 | u32 material CRC |
+| +0x30 | hkRelArray vertices: `08 00 40 00` (count 8, payload +0x70) |
+| +0x40 | hkRelArray planes: `08 00 b0 00` (count 8, payload +0xf0) |
+| +0x44 | hkRelArray faces: `06 00 2c 01` (count 6, payload +0x170) |
+| +0x48 | hkRelArray indices: `18 00 48 01` (count 24, payload +0x190) |
+| +0x50 | hkVector4 capA, w = 1.0 |
+| +0x60 | hkVector4 capB, w = 1.0 |
+| +0x70 | 8 hull vertices, hkVector4; **w is 0.5 with the vertex index in the low mantissa byte** (`00 00 00 3f`, `01 00 00 3f`, ...) |
+| +0xf0 | 8 plane slots: 6 real planes (nx,ny,nz,d), then 2 sentinels `00 00 00 00 x3 + ee ff 7f ff` |
+| +0x170 | face table, 6 x (u16 firstIndex, u8 count=4, u8 flags=4): 0,4,8,12,16,20 |
+| +0x190 | index table, 24 bytes: `07 06 02 03 03 02 00 01 07 05 04 06 01 00 04 05 01 05 07 03 02 06 04 00` |
+
+**The hull is a shrunk core, not the capsule.** The real shape is that box
+Minkowski-summed with a sphere of radius = convexRadius, which is why the box is
+tiny. Its dimensions are fixed ratios of the radius, identical to 5 decimal places
+on all 39:
+
+    half-width perpendicular to the axis = R * 0.014288      (= R / 69.99125)
+    half-extent along the axis           = halfLength + R * 0.010101
+
+The perpendicular ratio being exactly the Havok-to-game unit scale is unlikely to
+be coincidence and is worth a thought before hard-coding it.
+
+So: build the box in the axis frame, write its 8 corners with the index-tagged w,
+write the 6 face planes, copy the two constant tables verbatim, set radius and
+material, and write capA/capB. Validate by **byte round trip against vanilla
+capsules** — decode one, re-encode from its parameters, diff. That test needs no
+window and no game.
+
+**Spheres:** the brahmin has none, so a vanilla sphere still needs finding before
+its template can be measured the same way. `hknpSphereShape` decodes as one unique
+vertex plus convexRadius (see decodeConvexLike), so expect a similar fixed template.
+
+**Related, not yet acted on:** `primRadius` is decoded as `convexRadius + margin`
+where margin reaches a box *corner*, so it over-reads by about 0.5% (0.04522 stored
+against 0.04613 reported). The exact outer radius is `convexRadius * 1.014288`.
+Small, but it is the number the simulator collides with.
+
 ### 4d. Compile every collision type — NEW 07-28f, agreed with bungo
 
 Goal: write back every collision type, not just compressed meshes. Cloth is

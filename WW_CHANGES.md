@@ -1,5 +1,38 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28r — The capsule encoder, fully specified
+
+No code yet — the complete byte layout, written into TO_BE_IMPLEMENTED as 4d-spec
+so the encoder is transcription rather than investigation.
+
+Measured on the brahmin's 39 capsules, and every structural field is invariant:
+the object is **always 432 bytes**, the four flag bytes at +0x10 are one value, and
+the 24-byte face table and 24-byte index table are each a single distinct value —
+matching 07-28d's finding across all 778 vanilla capsules. Those are constants to
+embed verbatim.
+
+Two things that were not previously pinned down:
+
+**The value at +0x14 is the capsule radius**, and the 8-vertex hull is a *shrunk
+core*, not the capsule. The real shape is that box Minkowski-summed with a sphere
+of that radius, which is why the box is a sliver. Its dimensions are fixed ratios
+of the radius, identical to five decimal places on all 39:
+
+    half-width perpendicular to the axis = R * 0.014288      (= R / 69.99125)
+    half-extent along the axis           = halfLength + R * 0.010101
+
+That perpendicular ratio is exactly the Havok-to-game unit scale, which is
+unlikely to be coincidence and worth understanding before hard-coding.
+
+**Vertex w carries the vertex index** in the low mantissa byte of 0.5 — `00 00 00
+3f`, `01 00 00 3f`, and so on — which is why the decoder's w handling looked odd.
+
+Noted rather than changed: `primRadius` is decoded as `convexRadius + margin` with
+the margin measured to a box *corner*, so it over-reads by about 0.5% (0.04522
+stored against 0.04613 reported). The exact outer radius is `convexRadius *
+1.014288`. It is the number the simulator collides with, so it is worth fixing, but
+not worth churning a verified corpus for at the end of a session.
+
 ## 2026-07-28q — hknpShapeMassProperties decoded (the 4d blocker)
 
 The object that gated the convex-polytope encoder. `simulate`/`collision` now
