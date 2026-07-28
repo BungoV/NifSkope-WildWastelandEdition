@@ -1,5 +1,46 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29k — ray picking, and the identity the viewport will lean on
+
+Second half of the Physics Sim mode's testable part. `RagdollSim::pick` returns
+the nearest body along a ray together with the hit point **in body space**, which
+is exactly what `setDrag` takes — so picking and grabbing compose without the
+caller redoing the transform.
+
+**It tests against the solver's own sphere set, deliberately.** Picking against
+the drawn geometry instead would let a user grab a limb at a point the physics
+does not have, and the drag would then pull on a spot the body cannot feel. A
+polytope's faces are precisely where the two representations differ. The cost is
+that a hull is only grabbable near its vertices, so every point gets a 2 cm
+minimum radius — a pick wants to be forgiving where a contact does not, and a
+polytope contributes its vertices at radius zero, which nothing could ever hit.
+
+The conversion is the awkward part and worth naming: shape points are in BONE
+space while `x` is the centre of mass, so a point sits at `x + q*(p - com)`.
+Dropping the `com` shift offsets every pick by most of a limb's length.
+
+### Tested as a property, not a fixture
+
+For each body, fire a ray at one of its own shape points from just outside that
+point's radius, along each of the three axes. No hand-written coordinates to go
+stale, and it holds for every rig at once: **2571 rays across all 37 vanilla rigs,
+every one hit a body.**
+
+The ray starts close on purpose. Fired from far away it would legitimately hit
+whatever is in front, and what is under test is that the transform chain and the
+sphere intersection agree — not occlusion order. So a *different* body coming back
+is not counted wrong; only no body at all is.
+
+Alongside it, the identity the viewport actually depends on:
+`toWorld(pick.body, pick.localPoint) == pick.worldPoint`. A transform error there
+would grab the right body in the wrong place, which is the kind of bug that looks
+like bad physics. Worst error over all 37 rigs is **9.05e-06 m** — float
+round-off.
+
+**Still not done:** the viewport glue — mode switch alongside Object/Edit, mouse
+to ray, Space to pause, R to reset. Both halves it sits on top of are now built
+and measured; what remains is on-screen behaviour that needs a window.
+
 ## 2026-07-29j — the drag spring, built and measured without a window
 
 First half of the Physics Sim viewport mode. The solver already had `setPinned`

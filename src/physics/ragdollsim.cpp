@@ -935,6 +935,62 @@ void RagdollSim::clearDrag()
 	m_dragLambda = 0.0f;
 }
 
+Vector3 RagdollSim::toWorld( int body, const Vector3 & localPoint ) const
+{
+	if ( body < 0 || body >= m_bodies.size() )
+		return localPoint;
+	const SimBody & b = m_bodies.at( body );
+	return b.x + qRot( b.q, localPoint );
+}
+
+/*! Nearest body along a ray, against the solver's own sphere set.
+ *
+ * The shape points are in BONE space and x is the centre of mass, so a point
+ * sits at x + q*(p - com) -- the same conversion drawing a capsule needs, and
+ * getting it wrong offsets every pick by the com shift, which on a limb is most
+ * of its length.
+ */
+SimPick RagdollSim::pick( const Vector3 & rayOrigin, const Vector3 & dir ) const
+{
+	SimPick best;
+	const float dl = dir.length();
+	if ( !( dl > 1.0e-12f ) )
+		return best;
+	const Vector3 d = dir / dl;
+
+	for ( int i = 0; i < m_bodies.size(); i++ ) {
+		const SimBody & b = m_bodies.at( i );
+		for ( const SimBody::SimPoint & sp : b.points ) {
+			const Vector3 c = b.x + qRot( b.q, sp.p - b.com );
+			/* A polytope contributes its vertices at radius ZERO, which nothing can
+			 * ever hit. Give every point a floor so a hull is grabbable at all --
+			 * generous on purpose, since a pick wants to be forgiving and a contact
+			 * does not.
+			 */
+			const float r = std::max( sp.r, 0.02f );
+			const Vector3 m = c - rayOrigin;
+			const float tc = Vector3::dotproduct( m, d );
+			const float d2 = Vector3::dotproduct( m, m ) - tc * tc;
+			if ( d2 > r * r )
+				continue;
+			const float thc = std::sqrt( std::max( 0.0f, r * r - d2 ) );
+			// the near root, or the far one when the ray starts inside
+			float t = tc - thc;
+			if ( t < 0.0f )
+				t = tc + thc;
+			if ( t < 0.0f )
+				continue;
+			if ( best.body >= 0 && t >= best.distance )
+				continue;
+			best.body = i;
+			best.distance = t;
+			best.worldPoint = rayOrigin + d * t;
+			best.localPoint = qRot( qConj( b.q ), best.worldPoint - b.x );
+		}
+	}
+	return best;
+}
+
 float RagdollSim::dragError() const
 {
 	if ( m_dragBody < 0 || m_dragBody >= m_bodies.size() )

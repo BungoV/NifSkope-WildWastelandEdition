@@ -190,6 +190,20 @@ struct SimPoseCheck
 	float rotDiffDeg = 0.0f;
 };
 
+/*! What a viewport ray hit: the body, and where, ready to hand to setDrag.
+ *
+ * `localPoint` is in the body's own space, which is what setDrag wants, so
+ * picking and grabbing compose without the caller redoing the transform.
+ */
+struct SimPick
+{
+	int body = -1;
+	Vector3 localPoint;         //!< hit point in body space
+	Vector3 worldPoint;
+	float distance = 0.0f;      //!< along the ray from its origin
+	bool hit() const { return body >= 0; }
+};
+
 class RagdollSim
 {
 public:
@@ -287,6 +301,20 @@ public:
 	float lowestPoint() const;
 	//! Distance from the dragged body's grab point to its target, or 0 if no drag.
 	float dragError() const;
+
+	/*! Nearest body along a ray. `dir` need not be normalised.
+	 *
+	 * Tested against the SAME sphere set the contact solver uses, deliberately.
+	 * Picking against the drawn geometry instead would let a user grab a limb at a
+	 * point the physics does not have -- the drag would then pull on a spot the
+	 * body cannot feel, and a polytope's faces are exactly where the two
+	 * representations differ (see SimBody::points).
+	 */
+	SimPick pick( const Vector3 & rayOrigin, const Vector3 & dir ) const;
+
+	//! World position of a body-space point, which is not just x + p: x is the
+	//! centre of mass and the shape data is in bone space.
+	Vector3 toWorld( int body, const Vector3 & localPoint ) const;
 
 	const QVector<SimBody> & bodies() const { return m_bodies; }
 	const QVector<SimJoint> & joints() const { return m_joints; }

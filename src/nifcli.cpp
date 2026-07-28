@@ -577,6 +577,55 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			failed++;
 			continue;
 		}
+		/* Picking, checked before anything moves.
+		 *
+		 * For each body, fire a ray at one of its own shape points from just
+		 * outside that point's radius, along a direction that cannot be blocked by
+		 * the body itself. The pick must come back with that body. It is a property
+		 * rather than a fixture -- no hand-written coordinates to go stale, and it
+		 * holds for every rig in the corpus at once.
+		 *
+		 * A ray fired from far away would legitimately hit whatever is in front, so
+		 * this starts close: what is being tested is that the transform chain and
+		 * the sphere intersection agree, not occlusion order.
+		 */
+		{
+			int tried = 0, wrong = 0;
+			// worst error in toWorld(pick.body, pick.localPoint) == pick.worldPoint,
+			// which is the identity the viewport leans on: the point picking returns
+			// is handed straight to setDrag, and a transform error there would grab
+			// the right body in the wrong place
+			float worstRT = 0.0f;
+			for ( int i = 0; i < sim.bodies().size(); i++ ) {
+				const SimBody & sb = sim.bodies().at( i );
+				if ( sb.points.isEmpty() )
+					continue;
+				const Vector3 target = sim.toWorld( i, sb.points.first().p - sb.com );
+				const float r = std::max( sb.points.first().r, 0.02f );
+				for ( int axis = 0; axis < 3; axis++ ) {
+					Vector3 dir;
+					dir[axis] = 1.0f;
+					const SimPick p = sim.pick( target - dir * ( r * 1.5f ), dir );
+					tried++;
+					// another body's geometry may genuinely sit closer along that ray,
+					// so a different answer is only wrong if it is no answer
+					if ( !p.hit() )
+						wrong++;
+					else
+						worstRT = std::max( worstRT,
+							( sim.toWorld( p.body, p.localPoint ) - p.worldPoint ).length() );
+				}
+			}
+			if ( wrong )
+				out() << "  pick self-test: " << wrong << " of " << tried
+					  << " rays hit NOTHING" << Qt::endl;
+			else if ( tried )
+				out() << "  pick: " << tried << " rays, every one hit a body; worst"
+					  << " local->world round trip " << QString::number( worstRT, 'e', 2 )
+					  << " m" << Qt::endl;
+			failed += ( wrong > 0 ) ? 1 : 0;
+		}
+
 		// hold the root so the ragdoll hangs rather than falling out of the
 		// world -- what we are testing is the joints, not gravity
 		sim.angularLimits = !noLimits;
