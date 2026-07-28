@@ -4,6 +4,7 @@
 #include "data/niftypes.h"
 #include "gl/hknpdecode.h"
 
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -61,6 +62,12 @@ struct SimBody
 
 	int bodyId = -1;            //!< the decoded body id, for mapping back to nodes
 
+	//! Havok's collision filter, carried so self-collision honours what the file
+	//! actually authorises rather than a guess
+	quint32 layer = 1;
+	quint32 filterGroup = 0;
+	quint8 filterFlags = 0;
+
 	Vector3 xPrev;              //!< XPBD scratch: pose at the start of a substep
 	Quat qPrev;
 };
@@ -80,9 +87,22 @@ struct SimJoint
 	HknpAngLimit twist, cone, plane, hinge;
 };
 
+/*! One overlapping pair, found by the broad phase and re-measured each substep.
+ *
+ * Only the pairing is cached. The geometry is recomputed from the live poses
+ * every substep, because a contact point frozen at the start of a step is wrong
+ * by the end of it and pushes bodies in a direction they have already left.
+ */
+struct SimPair
+{
+	int a = -1, b = -1;         //!< b < 0 means the ground plane
+};
+
 //! Aggregate health of a run, so stability is measured rather than eyeballed.
 struct SimStats
 {
+	float maxPenetration = 0.0f;    //!< deepest overlap left unresolved, world units
+	int contacts = 0;               //!< how many pairs were actually touching
 	float energy = 0.0f;        //!< kinetic, for spotting blow-up
 	float maxJointError = 0.0f; //!< worst ball-socket separation, world units
 	float maxSpeed = 0.0f;
@@ -165,6 +185,24 @@ public:
 
 	//! Metres per second squared, negative Z (Havok space). Settable for tests.
 	Vector3 gravity = Vector3( 0.0f, 0.0f, -9.81f );
+
+	//! Ground plane at this height, off by default so a pinned ragdoll can be
+	//! tested on its joints alone.
+	bool ground = false;
+	float groundZ = 0.0f;
+	/*! Collide the ragdoll's own bodies against each other.
+	 *
+	 * Two exclusions make this usable. Bodies joined by a constraint always
+	 * overlap at the joint and must never be tested. And any pair already
+	 * overlapping in the REST pose is excluded permanently: the authored pose has
+	 * a thigh inside a pelvis in places, and a solver told to separate those would
+	 * tear the ragdoll apart on frame one. Havok expresses the same intent through
+	 * filter groups, which are honoured first where the file sets them.
+	 */
+	bool selfCollision = true;
+	//! Coulomb friction at contacts. Zero makes a ragdoll slide for ever, which
+	//! reads as broken even though it is stable.
+	float friction = 0.5f;
 	//! Velocity damping per second, keeps a settling ragdoll from ringing.
 	float damping = 0.02f;
 	/*! Gauss-Seidel sweeps per substep.
@@ -190,12 +228,27 @@ public:
 	//! practical way to tell which one a misbehaving joint is fighting.
 	bool useTwist = true, useCone = true, usePlane = true, useHinge = true;
 
+	//! Pairs currently in the broad phase, for reporting.
+	const QVector<SimPair> & pairs() const { return m_pairs; }
+	//! Pairs permanently excluded because they already overlap at rest.
+	int restOverlaps() const { return m_restOverlaps; }
+
 private:
 	void solveJoints( float h );
 	//! fill in every body's solverScale from how many joints touch it
 	void rescaleForJointCount();
+	//! decide once which body pairs may ever collide
+	void buildCollisionFilter();
+	//! refresh the broad phase; called once per step, not per substep
+	void collectPairs();
+	void solveContacts( float h );
+
 	QVector<SimBody> m_bodies;
 	QVector<SimJoint> m_joints;
+	QVector<SimPair> m_pairs;
+	//! key = a * m_bodies.size() + b, a < b; membership means "never collide"
+	QSet<int> m_noCollide;
+	int m_restOverlaps = 0;
 };
 
 #endif // RAGDOLLSIM_H

@@ -554,9 +554,20 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    CLI command runs it with **no GUI** and reports energy, joint drift and
    penetration, so stability is measured rather than eyeballed. A ragdoll pinned
    at the root must settle, not explode.
-2. **Collision.** Capsule–capsule, capsule–sphere, sphere–sphere analytically
-   (closest points between segments — exact, no GJK needed for these), plus a
-   ground plane and ragdoll self-collision. CLI asserts no penetration at rest.
+2. **Collision.** DONE 07-28g. Closest-point-between-segments covers all three
+   capsule/sphere pairings exactly; ground plane; self-collision filtered by
+   Havok's filter groups and by a rest-pose overlap test. `--drop`, `--ground`,
+   `--no-self`. Corpus: 37/37 settle, 0 diverge, worst penetration 0.4 mm, worst
+   joint separation 6.9 mm.
+   **Open:** 9 of 37 settle hot (bounded, intact, but too energetic). Two causes,
+   neither isolated — (a) hinge limits on bodies with extreme inertia anisotropy
+   (eyebot antennae: 4417 vs 3.67, and it is perfect with `--no-limits`), and
+   (b) a rest pose that does not satisfy its own joints, which is a DECODE
+   question: the turret starts at 0.67 m ball-socket separation where every
+   healthy ragdoll starts at 1e-6. Chase (b) first — it is measurable statically
+   and needs no solver at all.
+   Convex polytopes still want a proper centroid: the vertex mean is used, which
+   is not the true hull centroid for an unevenly tessellated hull.
 3. **Viewport.** Step in the render loop, draw the simulated pose, play/pause/reset.
 4. **Interaction.** Ray-pick a body under the cursor, drag it with a mouse spring;
    fling spawned bodies at static collision.

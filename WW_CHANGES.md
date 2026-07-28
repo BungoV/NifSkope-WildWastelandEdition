@@ -1,5 +1,58 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28g — Collision: ragdolls now fall over and land
+
+Phase 2 of the simulation work. Ragdolls collide with a ground plane and with
+themselves, and `simulate --drop` lets one fall instead of hanging from its root.
+Across all 37 vanilla ragdolls: **none diverge**, worst penetration anywhere is
+**0.4 mm** and worst ball-socket separation **6.9 mm**.
+
+The narrow phase is one function. Every ragdoll shape is a capsule or a sphere,
+and both are "all points within r of a segment" — a sphere just has a zero-length
+one — so closest-point-between-segments plus a radius comparison covers all three
+pairings exactly. No GJK, no iteration, no tolerance to tune.
+
+Two exclusions make self-collision usable. Jointed bodies always overlap where
+they meet, by construction. And any pair **already overlapping in the rest pose**
+is excluded permanently — the authored pose has a thigh inside a pelvis in
+places, and a solver told to separate those would tear the ragdoll apart on frame
+one (18 such pairs on the brahmin). Havok expresses the same intent with filter
+groups, honoured first where the file sets them.
+
+Broad phase runs once per step rather than per substep: a body moves a fraction
+of a millimetre in a substep, so the candidate set cannot meaningfully change.
+Contact geometry is still recomputed every substep, because a contact point frozen
+at the start of a step pushes bodies in a direction they have already left.
+
+**A third instance of the centre-of-mass bug.** 07-28f fixed it for capsules and
+spheres; every turret, Liberty Prime and every prop is a convex polytope, which
+fell through to a centre of mass of (0,0,0) — the bone origin — and inherited the
+whole parallel-axis error. Averaging the hull vertices took Liberty Prime from
+10,318 units of energy to 209 and halved the corpus-worst joint separation.
+
+Also: correction rotations are capped at 0.2 rad, because the XPBD rotational
+update is the *linearised* quaternion step and feeding it radians does not rotate
+by radians. And the hinge limit now projects its swing axis perpendicular to the
+axle before measuring — the same requirement twist and plane already had.
+
+### Known open: 9 of 37 settle hot
+
+They hold together and stay bounded, but carry more energy than they should. All
+are machines — three turrets, the eyebot, Liberty Prime, a sentry — and there
+are at least two distinct causes, neither yet isolated:
+
+- **Hinges.** The eyebot and radstag are near-perfect with `--no-limits` (1.8 and
+  0.7) and bad with `--only-limit hinge` (7,300 and 10,476). The eyebot has seven
+  antenna hinges where the brahmin has two knees, and antennae carry an inverse
+  inertia of 4417 along their own axis against 3.67 across it. With anisotropy
+  like that the angular response to a correction is nowhere near the correction
+  axis, which is inherent to the single-axis formulation rather than a typo.
+- **A rest pose that does not match the joints.** The turret starts with a
+  ball-socket separation of **0.67 m**, before a single step runs; every healthy
+  ragdoll starts at 1e-6. That is a decode question, not a solver one — the
+  decoded pivots genuinely disagree with the accumulated skeleton rest pose for
+  these models — and it is recorded as such rather than tuned around.
+
 ## 2026-07-28f — The ragdoll solver works
 
 Every vanilla ragdoll now simulates: **37 of 37** actor skeletons that carry a

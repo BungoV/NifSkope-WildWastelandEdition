@@ -89,6 +89,27 @@ inline Vector3 applyInvInertia( const SimBody & b, const Vector3 & v )
 	return qRot( b.q, scaled );
 }
 
+/*! Cap a correction rotation at the angle where the maths stops being valid.
+ *
+ * The XPBD rotational update is the LINEARISED quaternion step q += 0.5*w*q, good
+ * only while w is small; feeding it a couple of radians does not rotate by a
+ * couple of radians, it produces something the renormalisation then has to
+ * rescue. Usually that never arises, but the eyebot's antennae carry an inverse
+ * inertia of 4417 about their own axis against 3.67 across it -- a ratio of 1200
+ * -- so any correction with a component along the thin axis is amplified into
+ * exactly that regime, and the ragdoll leaves at 116 m/s.
+ *
+ * Capping costs nothing real: the sweeps that follow finish whatever this one
+ * left, so a capped correction converges in a few more iterations instead of
+ * diverging in one. 0.2 rad is about 11 degrees.
+ */
+inline Vector3 capRotation( const Vector3 & dtheta )
+{
+	const float MAX = 0.2f;
+	const float m = dtheta.length();
+	return ( m > MAX ) ? dtheta * ( MAX / m ) : dtheta;
+}
+
 //! generalised inverse mass for a correction along n applied at offset r
 inline float genInvMass( const SimBody & b, const Vector3 & r, const Vector3 & n )
 {
@@ -116,12 +137,12 @@ void applyPositional( SimBody & A, SimBody & B, const Vector3 & rA, const Vector
 	if ( !A.pinned ) {
 		A.x += p * ( A.invMass * A.solverScale );
 		const Vector3 t = applyInvInertia( A, Vector3::crossproduct( rA, p ) );
-		A.q = qIntegrate( A.q, t, 1.0f );
+		A.q = qIntegrate( A.q, capRotation( t ), 1.0f );
 	}
 	if ( !B.pinned ) {
 		B.x -= p * ( B.invMass * B.solverScale );
 		const Vector3 t = applyInvInertia( B, Vector3::crossproduct( rB, p ) );
-		B.q = qIntegrate( B.q, -t, 1.0f );
+		B.q = qIntegrate( B.q, capRotation( -t ), 1.0f );
 	}
 }
 
@@ -140,9 +161,9 @@ void applyAngular( SimBody & A, SimBody & B, const Vector3 & corr )
 
 	const Vector3 p = n * ( theta / wSum );
 	if ( !A.pinned )
-		A.q = qIntegrate( A.q, applyInvInertia( A, p ), 1.0f );
+		A.q = qIntegrate( A.q, capRotation( applyInvInertia( A, p ) ), 1.0f );
 	if ( !B.pinned )
-		B.q = qIntegrate( B.q, -applyInvInertia( B, p ), 1.0f );
+		B.q = qIntegrate( B.q, capRotation( -applyInvInertia( B, p ) ), 1.0f );
 }
 
 /*! The two joint frames in world. Column 0 is the twist axis and 1 and 2 the
@@ -200,6 +221,69 @@ bool limitAngle( SimBody & A, SimBody & B, const Vector3 & n, const Vector3 & n1
 	const Vector3 n1r = qRot( rot, n1 );
 	applyAngular( A, B, Vector3::crossproduct( n1r, n2 ) );
 	return true;
+}
+
+/*! Closest points between two segments, Ericson's routine.
+ *
+ * Every shape a ragdoll uses is a capsule or a sphere, and both are "all points
+ * within r of a segment" -- a sphere just has a zero-length one. So the whole
+ * narrow phase is this one function plus a radius comparison: exact, no GJK, no
+ * iteration, no tolerance to tune.
+ */
+void closestPtSegSeg( const Vector3 & p1, const Vector3 & q1,
+	const Vector3 & p2, const Vector3 & q2, Vector3 & c1, Vector3 & c2 )
+{
+	const Vector3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+	const float a = Vector3::dotproduct( d1, d1 );
+	const float e = Vector3::dotproduct( d2, d2 );
+	const float f = Vector3::dotproduct( d2, r );
+	const float EPS = 1.0e-12f;
+	float s = 0.0f, t = 0.0f;
+
+	if ( a <= EPS && e <= EPS ) {           // both degenerate: two spheres
+		c1 = p1;
+		c2 = p2;
+		return;
+	}
+	if ( a <= EPS ) {                        // first degenerate
+		t = std::clamp( f / e, 0.0f, 1.0f );
+	} else {
+		const float c = Vector3::dotproduct( d1, r );
+		if ( e <= EPS ) {                    // second degenerate
+			s = std::clamp( -c / a, 0.0f, 1.0f );
+		} else {
+			const float b = Vector3::dotproduct( d1, d2 );
+			const float denom = a * e - b * b;
+			// parallel segments leave s free; anchor it at zero
+			s = ( denom > EPS ) ? std::clamp( ( b * f - c * e ) / denom, 0.0f, 1.0f ) : 0.0f;
+			t = ( b * s + f ) / e;
+			// t outside the segment means the closest point is an end cap, so
+			// pin t and re-solve s against it
+			if ( t < 0.0f ) {
+				t = 0.0f;
+				s = std::clamp( -c / a, 0.0f, 1.0f );
+			} else if ( t > 1.0f ) {
+				t = 1.0f;
+				s = std::clamp( ( b - c ) / a, 0.0f, 1.0f );
+			}
+		}
+	}
+	c1 = p1 + d1 * s;
+	c2 = p2 + d2 * t;
+}
+
+//! A body's shape in world. capA/capB are in bone space and x is the centre of
+//! mass, so the shape has to be rebased through com on the way out.
+inline void worldSegment( const SimBody & b, Vector3 & p, Vector3 & q )
+{
+	p = b.x + qRot( b.q, b.capA - b.com );
+	q = ( b.primType == 2 ) ? ( b.x + qRot( b.q, b.capB - b.com ) ) : p;
+}
+
+//! Radius of the world-space sphere that bounds the whole shape, for broad phase
+inline float boundRadius( const SimBody & b )
+{
+	return b.radius + ( b.capA - b.capB ).length() * 0.5f;
 }
 
 } // namespace
@@ -297,13 +381,31 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		 * bone-origin tensor the same numbers would imply a 0.30 m capsule on a
 		 * 0.428 m bone, i.e. one that fails to reach its own child joint.
 		 */
-		b.com = ( s.primType == 2 ) ? ( s.capA + s.capB ) / 2.0f : s.capA;
+		/* Capsules give the centroid exactly; a convex hull has to be averaged
+		 * over its vertices. Turrets, Liberty Prime and every prop are polytopes
+		 * rather than capsules, so without this branch they all kept a centre of
+		 * mass of (0,0,0) -- the bone origin -- and inherited the entire
+		 * parallel-axis error this fix exists to remove.
+		 */
+		if ( s.primType == 2 ) {
+			b.com = ( s.capA + s.capB ) / 2.0f;
+		} else if ( s.primType == 1 ) {
+			b.com = s.capA;
+		} else if ( !s.verts.isEmpty() ) {
+			Vector3 sum;
+			for ( const Vector3 & v : s.verts )
+				sum += v;
+			b.com = sum / float( s.verts.size() );
+		}
 		b.restOrigin = restPos.value( s.bodyId );
 		b.x = restPos.value( s.bodyId ) + qRot( restRot.value( s.bodyId ), b.com );
 		b.q = restRot.value( s.bodyId );
 
 		const float mass = phys.mass > 0.0f ? phys.mass : sys.mass;
 		b.invMass = ( mass > 1.0e-6f ) ? 1.0f / mass : 0.0f;
+		b.layer = phys.layer;
+		b.filterGroup = phys.filterGroup;
+		b.filterFlags = phys.filterFlags;
 		/* dyn_inertia +0x20 holds INVERSE inertia, not inertia.
 		 *
 		 * +0x04 alongside it is plainly inverse mass (0.2, 0.05, 1.0 -> 5, 20 and
@@ -359,7 +461,152 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 	}
 
 	rescaleForJointCount();
+	buildCollisionFilter();
 	return true;
+}
+
+void RagdollSim::buildCollisionFilter()
+{
+	m_noCollide.clear();
+	m_restOverlaps = 0;
+	const int n = m_bodies.size();
+	auto key = []( int a, int b, int n ) { return std::min( a, b ) * n + std::max( a, b ); };
+
+	// jointed bodies always overlap where they meet, by construction
+	for ( const SimJoint & j : std::as_const( m_joints ) )
+		if ( j.a >= 0 && j.b >= 0 )
+			m_noCollide.insert( key( j.a, j.b, n ) );
+
+	for ( int i = 0; i < n; i++ ) {
+		for ( int k = i + 1; k < n; k++ ) {
+			if ( m_noCollide.contains( key( i, k, n ) ) )
+				continue;
+			const SimBody & A = m_bodies.at( i );
+			const SimBody & B = m_bodies.at( k );
+
+			/* Havok's own answer first: bit 0x40 of the filter means "do not
+			 * collide inside my group", which is exactly how a ragdoll stops its
+			 * own limbs fighting. Where the file says so, believe it.
+			 */
+			if ( A.filterGroup && A.filterGroup == B.filterGroup
+				&& ( ( A.filterFlags | B.filterFlags ) & 0x40u ) ) {
+				m_noCollide.insert( key( i, k, n ) );
+				continue;
+			}
+
+			/* Otherwise fall back on the pose. The authored rest pose has limbs
+			 * genuinely intersecting -- a thigh inside a pelvis -- and a solver
+			 * asked to separate those would tear the ragdoll apart on the first
+			 * frame. Anything already overlapping at rest was never meant to
+			 * collide.
+			 */
+			Vector3 p1, q1, p2, q2, c1, c2;
+			worldSegment( A, p1, q1 );
+			worldSegment( B, p2, q2 );
+			closestPtSegSeg( p1, q1, p2, q2, c1, c2 );
+			if ( ( c1 - c2 ).length() < A.radius + B.radius ) {
+				m_noCollide.insert( key( i, k, n ) );
+				m_restOverlaps++;
+			}
+		}
+	}
+}
+
+void RagdollSim::collectPairs()
+{
+	m_pairs.clear();
+	const int n = m_bodies.size();
+	auto key = []( int a, int b, int n ) { return std::min( a, b ) * n + std::max( a, b ); };
+
+	if ( ground ) {
+		for ( int i = 0; i < n; i++ )
+			if ( !m_bodies.at( i ).pinned && m_bodies.at( i ).primType )
+				m_pairs.append( { i, -1 } );
+	}
+	if ( !selfCollision )
+		return;
+
+	for ( int i = 0; i < n; i++ ) {
+		const SimBody & A = m_bodies.at( i );
+		if ( !A.primType )
+			continue;
+		for ( int k = i + 1; k < n; k++ ) {
+			const SimBody & B = m_bodies.at( k );
+			if ( !B.primType || ( A.pinned && B.pinned ) )
+				continue;
+			if ( m_noCollide.contains( key( i, k, n ) ) )
+				continue;
+			// cheap bounding-sphere reject before the exact test
+			const float reach = boundRadius( A ) + boundRadius( B );
+			if ( ( A.x - B.x ).squaredLength() > reach * reach )
+				continue;
+			m_pairs.append( { i, k } );
+		}
+	}
+}
+
+void RagdollSim::solveContacts( float h )
+{
+	Q_UNUSED( h )
+	static SimBody staticGround;    // pinned, never written; stands in for the plane
+	staticGround.pinned = true;
+
+	for ( const SimPair & pr : std::as_const( m_pairs ) ) {
+		SimBody & A = m_bodies[pr.a];
+		Vector3 p1, q1;
+		worldSegment( A, p1, q1 );
+
+		Vector3 normal, point;
+		float depth = 0.0f;
+
+		if ( pr.b < 0 ) {
+			/* Ground: test both end caps rather than one deepest point, so a
+			 * capsule lying flat is held level instead of pivoting about whichever
+			 * end happened to be lower.
+			 */
+			for ( int e = 0; e < ( A.primType == 2 ? 2 : 1 ); e++ ) {
+				const Vector3 c = ( e == 0 ) ? p1 : q1;
+				const float d = groundZ + A.radius - c[2];
+				if ( d <= 0.0f )
+					continue;
+				normal = Vector3( 0, 0, 1 );
+				point = Vector3( c[0], c[1], groundZ );
+				staticGround.x = point;
+				applyPositional( A, staticGround, point - A.x, Vector3(), normal * d );
+			}
+			continue;
+		}
+
+		SimBody & B = m_bodies[pr.b];
+		Vector3 p2, q2, c1, c2;
+		worldSegment( B, p2, q2 );
+		closestPtSegSeg( p1, q1, p2, q2, c1, c2 );
+
+		Vector3 sep = c1 - c2;
+		const float dist = sep.length();
+		depth = A.radius + B.radius - dist;
+		if ( depth <= 0.0f )
+			continue;
+		// exactly coincident axes give no normal; push along Z rather than NaN
+		normal = ( dist > 1.0e-6f ) ? ( sep / dist ) : Vector3( 0, 0, 1 );
+		point = ( c1 + c2 ) * 0.5f;
+		applyPositional( A, B, point - A.x, point - B.x, normal * depth );
+
+		/* Coulomb friction, as a tangential position correction bounded by the
+		 * normal one. Without it a ragdoll on the ground slides for ever, which
+		 * looks broken even though it is perfectly stable.
+		 */
+		if ( friction > 0.0f ) {
+			const Vector3 rA = point - A.x, rB = point - B.x;
+			Vector3 rel = ( A.x - A.xPrev ) - ( B.x - B.xPrev );
+			rel = rel - normal * Vector3::dotproduct( rel, normal );
+			const float slide = rel.length();
+			if ( slide > 1.0e-9f ) {
+				const float take = std::min( slide, friction * depth );
+				applyPositional( A, B, rA, rB, rel * ( -take / slide ) );
+			}
+		}
+	}
 }
 
 void RagdollSim::rescaleForJointCount()
@@ -594,10 +841,28 @@ void RagdollSim::solveJoints( float h )
 				}
 			}
 		}
-		// a limited hinge: hold the two axes aligned, then limit the swing about them
+		/* A limited hinge: hold the two axles aligned, then limit the swing about
+		 * them.
+		 *
+		 * a1 must be projected perpendicular to the axle before the angle is
+		 * measured. It is only perpendicular to a0, and a0 equals b0 solely once
+		 * the alignment above has converged -- which it has not, since these axes
+		 * were sampled before it ran. Measuring against an unprojected a1
+		 * therefore mixes the misalignment into the swing reading, and the two
+		 * corrections spend every sweep undoing each other. That is what the
+		 * eyebot's seven antenna hinges were doing: 5,681 units of energy from the
+		 * hinges alone against 0.9 from the plane limits. b1 needs no projection,
+		 * being perpendicular to b0 by construction.
+		 */
 		if ( j.hinge.present && useHinge ) {
 			applyAngular( A, B, Vector3::crossproduct( a0, b0 ) );
-			limitAngle( A, B, b0, a1, b1, j.hinge.min, j.hinge.max );
+			// 0.1, not 1e-6: a nearly cancelling projection is rounding error, and
+			// the same trap as the twist bisector
+			Vector3 n1 = a1 - b0 * Vector3::dotproduct( b0, a1 );
+			if ( n1.length() > 0.1f ) {
+				n1.normalize();
+				limitAngle( A, B, b0, n1, b1, j.hinge.min, j.hinge.max );
+			}
 		}
 	}
 }
@@ -608,6 +873,10 @@ void RagdollSim::step( float dt, int substeps )
 		return;
 	const float h = dt / float( substeps );
 	const float damp = std::clamp( 1.0f - damping * h, 0.0f, 1.0f );
+
+	// broad phase once per step, not per substep: bodies move a fraction of a
+	// millimetre in a substep, so the candidate set cannot meaningfully change
+	collectPairs();
 
 	for ( int s = 0; s < substeps; s++ ) {
 		for ( SimBody & b : m_bodies ) {
@@ -622,8 +891,10 @@ void RagdollSim::step( float dt, int substeps )
 			b.q = qIntegrate( b.q, b.w, h );
 		}
 
-		for ( int it = 0; it < std::max( 1, iterations ); it++ )
+		for ( int it = 0; it < std::max( 1, iterations ); it++ ) {
 			solveJoints( h );
+			solveContacts( h );
+		}
 
 		for ( SimBody & b : m_bodies ) {
 			if ( b.pinned ) {
@@ -696,7 +967,12 @@ QVector<SimLimitCheck> RagdollSim::checkLimits() const
 			c.twistBad = ( c.twist < j.twist.min - tol || c.twist > j.twist.max + tol );
 		}
 		if ( j.hinge.present ) {
-			c.hinge = signedAngle( ax.b0, ax.a1, ax.b1 );
+			// same projection the solver uses, or the report would disagree with it
+			Vector3 n1 = ax.a1 - ax.b0 * Vector3::dotproduct( ax.b0, ax.a1 );
+			if ( n1.length() > 1.0e-6f ) {
+				n1.normalize();
+				c.hinge = signedAngle( ax.b0, n1, ax.b1 );
+			}
 			c.hingeBad = ( c.hinge < j.hinge.min - tol || c.hinge > j.hinge.max + tol );
 		}
 		out.append( c );
@@ -734,6 +1010,33 @@ SimStats RagdollSim::stats() const
 			st.worstJoint = i;
 		}
 	}
+	/* Penetration is measured over the same pairs the solver was given, so the
+	 * report cannot flatter the solver by checking a different set. Recomputed
+	 * from the live poses rather than from whatever the last substep left behind.
+	 */
+	for ( const SimPair & pr : m_pairs ) {
+		const SimBody & A = m_bodies.at( pr.a );
+		Vector3 p1, q1;
+		worldSegment( A, p1, q1 );
+		float depth = 0.0f;
+		if ( pr.b < 0 ) {
+			for ( int e = 0; e < ( A.primType == 2 ? 2 : 1 ); e++ ) {
+				const Vector3 c = ( e == 0 ) ? p1 : q1;
+				depth = std::max( depth, groundZ + A.radius - c[2] );
+			}
+		} else {
+			const SimBody & B = m_bodies.at( pr.b );
+			Vector3 p2, q2, c1, c2;
+			worldSegment( B, p2, q2 );
+			closestPtSegSeg( p1, q1, p2, q2, c1, c2 );
+			depth = A.radius + B.radius - ( c1 - c2 ).length();
+		}
+		if ( depth > 0.0f ) {
+			st.contacts++;
+			st.maxPenetration = std::max( st.maxPenetration, depth );
+		}
+	}
+
 	if ( !std::isfinite( st.maxJointError ) || st.maxSpeed > 1.0e4f )
 		st.diverged = true;
 	return st;

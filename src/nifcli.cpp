@@ -367,7 +367,7 @@ int cmdPbrmResolve( const QString & file )
  * drift) and the peak speed, and exits non-zero if anything diverged.
  */
 int cmdSimulate( const QString & file, int steps, int substeps, int iterations, bool noLimits,
-	const QString & onlyLimit, bool selfTest, bool verbose )
+	const QString & onlyLimit, bool ground, bool noSelf, bool drop, bool selfTest, bool verbose )
 {
 	if ( selfTest || file.isEmpty() ) {
 		// Two bodies, one joint, damping off: total energy is a conserved
@@ -454,6 +454,7 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 		// hold the root so the ragdoll hangs rather than falling out of the
 		// world -- what we are testing is the joints, not gravity
 		sim.angularLimits = !noLimits;
+		sim.selfCollision = !noSelf;
 		if ( iterations > 0 )
 			sim.iterations = iterations;
 		if ( !onlyLimit.isEmpty() ) {
@@ -462,7 +463,23 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			sim.usePlane = ( onlyLimit == QLatin1String( "plane" ) );
 			sim.useHinge = ( onlyLimit == QLatin1String( "hinge" ) );
 		}
-		sim.setPinned( 0, true );
+		if ( ground || drop ) {
+			/* Put the plane just under the lowest body so the ragdoll starts
+			 * clear and falls onto it, rather than starting half buried and
+			 * being shoved out -- the latter tests the push-out code, not the
+			 * collision.
+			 */
+			float lowest = 1.0e30f;
+			for ( const SimBody & sb : sim.bodies() )
+				if ( sb.primType )
+					lowest = std::min( lowest, sb.x[2] - sb.radius );
+			sim.ground = true;
+			sim.groundZ = lowest - 0.25f;
+		}
+		// --drop lets the whole thing fall; otherwise hold the root so what is
+		// under test is the joints rather than gravity
+		if ( !drop )
+			sim.setPinned( 0, true );
 
 		const SimStats before = sim.stats();
 		out() << Qt::endl << "system " << b << "   " << sim.bodies().size()
@@ -522,10 +539,14 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			}
 		}
 
-		out() << QString( "  %1 %2 %3 %4" ).arg( "step", -8 ).arg( "energy", 12 )
-					.arg( "maxJointErr", 13 ).arg( "maxSpeed", 11 ) << Qt::endl;
-		out() << QString( "  %1 %2 %3 %4" ).arg( 0, -8 ).arg( before.energy, 12, 'f', 5 )
+		out() << "  collision pairs excluded as overlapping at rest: "
+			  << sim.restOverlaps() << Qt::endl;
+		out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( "step", -8 ).arg( "energy", 12 )
+					.arg( "maxJointErr", 13 ).arg( "maxSpeed", 11 ).arg( "contacts", 9 )
+					.arg( "maxPenetr", 11 ) << Qt::endl;
+		out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( 0, -8 ).arg( before.energy, 12, 'f', 5 )
 					.arg( before.maxJointError, 13, 'f', 6 ).arg( before.maxSpeed, 11, 'f', 4 )
+					.arg( before.contacts, 9 ).arg( before.maxPenetration, 11, 'f', 6 )
 			  << Qt::endl;
 
 		SimStats st;
@@ -545,9 +566,10 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 				onsetStep = i + 1;
 			}
 			if ( verbose || i == steps / 4 || i == steps / 2 || i == steps - 1 ) {
-				out() << QString( "  %1 %2 %3 %4" ).arg( i + 1, -8 )
+				out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( i + 1, -8 )
 							.arg( st.energy, 12, 'f', 5 ).arg( st.maxJointError, 13, 'f', 6 )
-							.arg( st.maxSpeed, 11, 'f', 4 ) << Qt::endl;
+							.arg( st.maxSpeed, 11, 'f', 4 ).arg( st.contacts, 9 )
+							.arg( st.maxPenetration, 11, 'f', 6 ) << Qt::endl;
 			}
 			if ( st.diverged )
 				break;
@@ -584,7 +606,8 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 		} else {
 			out() << "  settled: energy " << QString::number( st.energy, 'f', 5 )
 				  << ", worst joint separation " << QString::number( st.maxJointError, 'f', 6 )
-				  << Qt::endl;
+				  << ", " << st.contacts << " contacts, worst penetration "
+				  << QString::number( st.maxPenetration, 'f', 6 ) << Qt::endl;
 		}
 	}
 
@@ -1581,6 +1604,7 @@ int nifskopeCliMain( const QStringList & args )
 	int substeps = 0;
 	int iterations = 0;
 	QString onlyLimit;
+	bool useGround = false, noSelf = false, drop = false;
 	bool noLimits = false;
 	bool verboseSim = false;
 	float cubeSize = STARTER_CUBE_SIZE;
@@ -1622,6 +1646,9 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--substeps" ) ) substeps = next().toInt();
 		else if ( t == QLatin1String( "--iterations" ) ) iterations = next().toInt();
 		else if ( t == QLatin1String( "--only-limit" ) ) onlyLimit = next();
+		else if ( t == QLatin1String( "--ground" ) ) useGround = true;
+		else if ( t == QLatin1String( "--no-self" ) ) noSelf = true;
+		else if ( t == QLatin1String( "--drop" ) ) drop = true;
 		else if ( t == QLatin1String( "--no-limits" ) ) noLimits = true;
 		else if ( t == QLatin1String( "--trace" ) ) verboseSim = true;
 		else if ( t == QLatin1String( "--size" ) ) cubeSize = next().toFloat();
@@ -1692,7 +1719,7 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )
 		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
-			iterations, noLimits, onlyLimit, selfTest, verboseSim );
+			iterations, noLimits, onlyLimit, useGround, noSelf, drop, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
 		rc = cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
