@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29a — Ragdoll constraints: the atom chain, and what a rewrite can't invent
+
+`hknpEncodeRagdollConstraintData`. **521 / 521 byte-exact** rewriting from the source
+bytes; **520 / 521** built from the measured template alone.
+
+**The constraint objects are fixed-size templates, which makes the ragdoll far
+smaller than it looked.** Inventory over 37 ragdoll packfiles:
+`hkpRagdollConstraintData` is 416 bytes on all 521, `hkpLimitedHingeConstraintData`
+304 on all 246, `hkpPositionConstraintMotor` 48 with **zero varying words** — a pure
+constant — and `hknpBreakableConstraintData` 48 with one. Only `hkaSkeleton` and
+`hknpRagdollData` scale with bone count.
+
+**The atom chain is one fixed sequence per type**, identical on every instance:
+
+    hkpRagdollConstraintData (521/521, fills 416 exactly)
+      SET_LOCAL_TRANSFORMS(144) SETUP_STABILIZATION(16) RAGDOLL_MOTOR(96)
+      ANG_FRICTION(16) TWIST_LIMIT(32) CONE_LIMIT(32) CONE_LIMIT(32) BALL_SOCKET(16)
+
+    hkpLimitedHingeConstraintData (246/246, + 8 bytes of alignment tail)
+      SET_LOCAL_TRANSFORMS(144) SETUP_STABILIZATION(16) ANG_MOTOR(40)
+      ANG_FRICTION(16) ANG_LIMIT(16) TWO_D_ANG(16) BALL_SOCKET(16)
+
+So the writer emits atoms rather than patching a blob, and the template is built
+from ~15 named constants attached to the atoms they belong to — `RAGDOLL_MOTOR` has
+no varying field anywhere in the corpus, `CONE_LIMIT` carries the -100 sentinel for
+the bound a cone doesn't have, the limits are two floats each.
+
+**Two honesty notes, both about what the test actually proves.**
+
+The 521/521 rewrite starts from `rawData`, so it proves the field *offsets* — write
+a rotation row to the wrong place and the bytes diverge — but the constants come
+along for the ride. So the encoder is run a second time with `rawData` cleared, to
+test what a newly authored constraint would really get. That second number is the
+honest one, and it is what turned up the next finding.
+
+**The w lanes of the rotation basis vectors are SIMD residue, not data.** They hold
+values in [-1, 1] of the same magnitude as the rotation itself, the third row is
+zero almost everywhere, and one vanilla pivot w holds outright garbage
+(`0x98d3b2b5`). Havok ignores them. A freshly authored constraint therefore *cannot*
+be byte-identical to vanilla and does not need to be — 518 of 521 differ in nothing
+else. They are reported as their own category, like the mass properties' inert
+exponent.
+
+The single genuine template miss is one object using the minority flag byte at
++0xb0 and +0x190 (`17000000`/`05000100` against the usual `17000100`/`05000000`).
+
+Everything else re-verified unchanged: compounds 10/10, polytopes 68/68, spheres
+30/30, mass properties 68/68, capsules 819/819. Self-tests green.
+
 ## 2026-07-28z — The compound encoder, and two things that print as constants
 
 `hknpEncodeCompoundShape`, plus `HknpSystem::compounds` — decoding flattens a

@@ -299,6 +299,20 @@ struct HknpConstraint
 	HknpAngLimit hinge;   //!< the single range of a limited hinge (knee, elbow)
 	float friction = 0.0f;    //!< maxFrictionTorque, resisting rotation
 	bool motorEnabled = false;   //!< a powered joint (keyframed / animation-driven)
+
+	//! byte offset of the constraint-data object in the packfile blob, or -1
+	qsizetype rawOffset = -1;
+	/*! The constraint-data object exactly as stored.
+	 *
+	 * Constraint objects are fixed-size templates -- 416 bytes for a ragdoll, 304
+	 * for a limited hinge, one size each across the whole corpus -- and most of
+	 * their content is neither modelled above nor constant. Some of it is not even
+	 * meaningful: one vanilla pivot's w slot holds 0x98d3b2b5, uninitialised
+	 * padding Havok never cleared. Rewriting from the original bytes and
+	 * overwriting only the modelled fields is therefore the only way an edit to a
+	 * limit cannot disturb anything else.
+	 */
+	QByteArray rawData;
 };
 
 /*! One bone of the ragdoll's own skeleton copy (hkaSkeleton).

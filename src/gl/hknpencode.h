@@ -145,4 +145,18 @@ struct HknpCompoundFixups
 QByteArray hknpEncodeCompoundShape( const HknpCompound & compound,
 	HknpCompoundFixups * fixups = nullptr );
 
+/*! Write one hkpRagdollConstraintData: always 416 bytes.
+ *
+ * The object is a fixed atom chain -- SET_LOCAL_TRANSFORMS, SETUP_STABILIZATION,
+ * RAGDOLL_MOTOR, ANG_FRICTION, TWIST_LIMIT, CONE_LIMIT, CONE_LIMIT, BALL_SOCKET --
+ * identical on all 521 in the corpus, filling the 416 bytes exactly.
+ *
+ * If `constraint.rawData` holds the original object the write starts from it and
+ * touches only the modelled fields, so editing a limit disturbs nothing else. That
+ * matters because parts of the object are not modelled and not even meaningful:
+ * one vanilla pivot's w slot is uninitialised padding. Without it, a fresh template
+ * built from the measured constants is used.
+ */
+QByteArray hknpEncodeRagdollConstraintData( const HknpConstraint & constraint );
+
 #endif // HKNPENCODE_H

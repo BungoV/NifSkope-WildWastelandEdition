@@ -697,6 +697,80 @@ QByteArray hknpEncodeCompoundShape( const HknpCompound & compound, HknpCompoundF
 	return out;
 }
 
+/*! A blank hkpRagdollConstraintData: the atom chain with every modelled field zero.
+ *
+ * Built from the measured constants rather than pasted in as a 416-byte blob, so
+ * each value is attached to the atom it belongs to. Everything here is one value
+ * across all 521 corpus objects.
+ */
+static QByteArray ragdollConstraintTemplate()
+{
+	QByteArray out( 0x1a0, 0 );
+	// SET_LOCAL_TRANSFORMS at +0x20: two hkTransforms, pivotA always the origin
+	setU32( out, 0x20, 0x00000002u );
+	// SETUP_STABILIZATION at +0xb0
+	setU32( out, 0xb0, 0x00010017u );
+	setU32( out, 0xb4, 0x7f7fffeeu );
+	setU32( out, 0xb8, 0x7f7fffeeu );
+	setU32( out, 0xbc, 0x5f7ffff0u );
+	// RAGDOLL_MOTOR at +0xc0: no field of it varies anywhere in the corpus
+	setU32( out, 0xc0, 0x00000013u );
+	setFloat( out, 0xd0, 1.0f );
+	setFloat( out, 0xe4, 1.0f );
+	setFloat( out, 0xf8, 1.0f );
+	// ANG_FRICTION at +0x120
+	setU32( out, 0x120, 0x00010011u );
+	setU32( out, 0x124, 0x00000003u );
+	// TWIST_LIMIT at +0x130, tau 0.8
+	setU32( out, 0x130, 0x0001000fu );
+	setU32( out, 0x134, 0x00000001u );
+	setFloat( out, 0x140, 0.8f );
+	// CONE_LIMIT at +0x150: min is the -100 sentinel, the bound a cone does not have
+	setU32( out, 0x150, 0x00010010u );
+	setU32( out, 0x154, 0x00380000u );
+	setFloat( out, 0x158, -100.0f );
+	setFloat( out, 0x160, 0.8f );
+	// the second CONE_LIMIT is the perpendicular plane, and does have both bounds
+	setU32( out, 0x170, 0x00010010u );
+	setU32( out, 0x174, 0x00000101u );
+	setFloat( out, 0x180, 0.8f );
+	// BALL_SOCKET at +0x190
+	setU32( out, 0x190, 0x00000005u );
+	setU32( out, 0x194, 0x00000030u );
+	setU32( out, 0x198, 0x7f7fffeeu );
+	return out;
+}
+
+QByteArray hknpEncodeRagdollConstraintData( const HknpConstraint & c )
+{
+	QByteArray out = ( c.rawData.size() == 0x1a0 ) ? c.rawData : ragdollConstraintTemplate();
+
+	// SET_LOCAL_TRANSFORMS: rotation basis then pivot, child side then parent side
+	for ( int k = 0; k < 3; k++ ) {
+		for ( int a = 0; a < 3; a++ ) {
+			setFloat( out, 0x30 + k * 16 + a * 4, c.rotA[k][a] );
+			setFloat( out, 0x70 + k * 16 + a * 4, c.rotB[k][a] );
+		}
+	}
+	for ( int a = 0; a < 3; a++ ) {
+		setFloat( out, 0x60 + a * 4, c.pivotA[a] );
+		setFloat( out, 0xa0 + a * 4, c.pivotB[a] );
+	}
+
+	setFloat( out, 0x128, c.friction );
+	if ( c.twist.present ) {
+		setFloat( out, 0x138, c.twist.min );
+		setFloat( out, 0x13c, c.twist.max );
+	}
+	if ( c.cone.present )
+		setFloat( out, 0x15c, c.cone.max );	// the cone stores only its upper bound
+	if ( c.plane.present ) {
+		setFloat( out, 0x178, c.plane.min );
+		setFloat( out, 0x17c, c.plane.max );
+	}
+	return out;
+}
+
 QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Vector3 & inertiaRaw,
 	float volume, float mass, quint64 majorAxis )
 {

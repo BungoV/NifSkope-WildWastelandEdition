@@ -910,6 +910,8 @@ int cmdCollisionRoundTrip( const QString & file )
 	int total = 0, structOk = 0, fullyExact = 0, spheres = 0, spheresExact = 0;
 	int massProps = 0, massPropsExact = 0, massPropsInert = 0;
 	int polys = 0, polysExact = 0, comps = 0, compsExact = 0;
+	int rdc = 0, rdcExact = 0, rdcFresh = 0, rdcFreshInert = 0;
+	QSet<int> rdcFreshDiff;
 	float worstVert = 0.0f, worstPlane = 0.0f;
 	QMap<int, int> byteHist;   // offset -> how often the structural bytes differed
 
@@ -930,6 +932,47 @@ int cmdCollisionRoundTrip( const QString & file )
 		const HknpSystem sys = hknpDecode( bytes );
 		if ( !sys.valid )
 			continue;
+
+		// ragdoll constraints: fixed 416-byte atom chains
+		for ( const HknpConstraint & jc : sys.constraints ) {
+			if ( jc.kind != QLatin1String( "hkpRagdollConstraintData" )
+				|| jc.rawOffset < 0 || jc.rawData.size() != 0x1a0 )
+				continue;
+			rdc++;
+			const QByteArray was = bytes.mid( jc.rawOffset, 0x1a0 );
+			if ( hknpEncodeRagdollConstraintData( jc ) == was )
+				rdcExact++;
+			/* Starting from rawData proves the field OFFSETS but not the template:
+			 * the constants come along for the ride. Encode again from scratch to
+			 * test what a newly authored constraint would actually get.
+			 */
+			HknpConstraint fresh = jc;
+			fresh.rawData.clear();
+			const QByteArray built = hknpEncodeRagdollConstraintData( fresh );
+			/* The w lanes of the rotation basis vectors are SIMD residue, not
+			 * data: they hold values in [-1,1] of the same magnitude as the
+			 * rotation itself, the third row is zero almost everywhere, and one
+			 * vanilla pivot w holds outright garbage. Havok ignores them. So a
+			 * freshly authored constraint cannot be byte-identical to vanilla and
+			 * does not need to be -- counted apart rather than called a failure.
+			 */
+			bool inertOnly = true;
+			for ( int o = 0; o < 0x1a0; o += 4 ) {
+				if ( built.mid( o, 4 ) == was.mid( o, 4 ) )
+					continue;
+				const bool wLane = ( o == 0x3c || o == 0x4c || o == 0x5c
+								  || o == 0x6c || o == 0x7c || o == 0x8c
+								  || o == 0x9c || o == 0xac );
+				if ( !wLane ) {
+					inertOnly = false;
+					rdcFreshDiff.insert( o );
+				}
+			}
+			if ( built == was )
+				rdcFresh++;
+			else if ( inertOnly )
+				rdcFreshInert++;
+		}
 
 		/* Compounds: the object, not the flattened children. Its pointer slots are
 		 * raw zero in the file, so the bytes compare directly and the fixups the
@@ -1079,6 +1122,19 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( spheres )
 		out() << "spheres    " << spheres << "  byte-exact " << spheresExact
 			  << " / " << spheres << Qt::endl;
+	if ( rdc ) {
+		out() << "ragdollcon " << rdc << "  byte-exact " << rdcExact << " / " << rdc
+			  << "  (from template alone: " << rdcFresh << " exact, "
+			  << rdcFreshInert << " differing only in inert SIMD w lanes)" << Qt::endl;
+		if ( !rdcFreshDiff.isEmpty() ) {
+			QList<int> offs = rdcFreshDiff.values();
+			std::sort( offs.begin(), offs.end() );
+			out() << "  template misses (NOT w lanes):";
+			for ( int o : offs )
+				out() << " +0x" << QString::number( o, 16 );
+			out() << Qt::endl;
+		}
+	}
 	if ( comps )
 		out() << "compounds  " << comps << "  byte-exact " << compsExact
 			  << " / " << comps << Qt::endl;
@@ -1097,7 +1153,7 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( !total ) {
 		out() << "  no capsules to check" << Qt::endl;
 		return ( spheresExact < spheres || polysExact < polys || compsExact < comps
-			|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
+			|| rdcExact < rdc || massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 	}
 	out() << "  structure byte-exact   " << structOk << " / " << total << Qt::endl;
 	out() << "  whole object exact     " << fullyExact << " / " << total << Qt::endl;
@@ -1110,7 +1166,8 @@ int cmdCollisionRoundTrip( const QString & file )
 		out() << Qt::endl;
 	}
 	return ( structOk < total || spheresExact < spheres || polysExact < polys
-		|| compsExact < comps || massPropsExact + massPropsInert < massProps ) ? 1 : 0;
+		|| compsExact < comps || rdcExact < rdc
+		|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 }
 
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )

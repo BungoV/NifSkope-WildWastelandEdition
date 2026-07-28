@@ -874,9 +874,43 @@ Ordered by dependency:
    payloads behind a printed 0.5, plus a signed zero in row 1. Only static
    compounds remain unmeasured -- the 400-file sample found 14 dynamic and zero
    static.
-5. **Ragdoll** — root layout, `hkaSkeleton` and constraint atom chains, all
-   specified in 4a. Watch the child/parent frame order and the `+0x80` bone-count
-   trap.
+5. **Ragdoll** — constraint encoder SHIPPED 07-29a, the rest open.
+
+   **The constraint objects are fixed-size templates**, which makes this far
+   smaller than it looks. Over 37 ragdoll packfiles: `hkpRagdollConstraintData` 416
+   bytes on all 521, `hkpLimitedHingeConstraintData` 304 on all 246,
+   `hkpPositionConstraintMotor` 48 with ZERO varying words (a pure constant), and
+   `hknpBreakableConstraintData` 48 with one (a break threshold at +0x20). Only
+   `hkaSkeleton` and `hknpRagdollData` scale with bone count.
+
+   **The atom chain is one fixed sequence per type**, identical on every instance:
+
+       hkpRagdollConstraintData (fills 416 exactly)
+         SET_LOCAL_TRANSFORMS(144) SETUP_STABILIZATION(16) RAGDOLL_MOTOR(96)
+         ANG_FRICTION(16) TWIST_LIMIT(32) CONE_LIMIT(32) CONE_LIMIT(32) BALL_SOCKET(16)
+
+       hkpLimitedHingeConstraintData (+ 8 bytes alignment tail)
+         SET_LOCAL_TRANSFORMS(144) SETUP_STABILIZATION(16) ANG_MOTOR(40)
+         ANG_FRICTION(16) ANG_LIMIT(16) TWO_D_ANG(16) BALL_SOCKET(16)
+
+   Field map for the ragdoll type: rotA +0x30/+0x40/+0x50, pivotA +0x60 (zero on all
+   521), rotB +0x70/+0x80/+0x90, pivotB +0xa0; friction +0x128; twist min/max
+   +0x138/+0x13c; cone max +0x15c (min is a -100 sentinel, the bound a cone has
+   not got); plane min/max +0x178/+0x17c. `RAGDOLL_MOTOR` has no varying field
+   anywhere in the corpus.
+
+   **The w lanes of the rotation basis vectors are SIMD residue, not data** --
+   values in [-1,1] of the same magnitude as the rotation, third row zero almost
+   everywhere, and one vanilla pivot w holding outright garbage (0x98d3b2b5). Havok
+   ignores them, so a NEWLY AUTHORED constraint cannot be byte-identical to vanilla
+   and does not need to be. `HknpConstraint::rawData` carries the source object so a
+   rewrite preserves them; from the template alone, 518 of 521 differ in nothing
+   else and one differs in a minority flag byte at +0xb0/+0x190.
+
+   **Still open:** `hkpLimitedHingeConstraintData` (chain known, fields not yet
+   mapped), the two 48-byte trivia, `hkaSkeleton`, `hknpRagdollData` (the root, with
+   the child/parent frame order and the `+0x80` bone-count trap), and the packfile
+   assembly that binds them.
 6. **Round-trip validation** over the corpus — DONE 07-28y for the shipped
    encoders, and it earned its keep: a 700-file stride sample of the full 34,985
    mesh tree caught 8 polytope failures in exactly the categories the skeletons do

@@ -747,8 +747,13 @@ HknpSystem hknpDecode( const QByteArray & data )
 
 				// Only the hkp* constraint datas carry the atom chain; anything else
 				// would decode into a plausible-looking wrong frame.
-				if ( cd >= 0 && jc.kind.startsWith( QLatin1String( "hkp" ) ) )
+				if ( cd >= 0 && jc.kind.startsWith( QLatin1String( "hkp" ) ) ) {
 					decodeConstraintAtoms( r, cd, objEnd( cd ), jc );
+					jc.rawOffset = cd;
+					const qsizetype len = objEnd( cd ) - cd;
+					if ( len > 0 && cd + len <= data.size() )
+						jc.rawData = data.mid( cd, len );
+				}
 				sys.constraints.append( jc );
 			}
 		}
