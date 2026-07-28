@@ -57,6 +57,24 @@ struct SimBody
 	int primType = 0;           //!< 1 sphere, 2 capsule (HknpShape::primType)
 	Vector3 capA, capB;
 	float radius = 0.0f;
+	int shapeCount = 0;         //!< a body may carry several shapes
+
+	/*! Every shape this body carries, reduced to spheres in bone space.
+	 *
+	 * A body is NOT one shape. Liberty Prime's torso is a capsule plus two
+	 * polytopes and the workshop turret's body 1 is four polytopes; keeping only
+	 * the last one, as the first version did, lost most of the machine's geometry
+	 * and left it falling through the floor at terminal velocity while being
+	 * reported as an unstable solver.
+	 *
+	 * A capsule contributes its two end points at its radius, a sphere its centre,
+	 * a polytope its vertices at radius zero. That is exact against a plane and
+	 * for capsule/sphere pairs, and approximate for a polytope's faces -- a
+	 * vertex set has no faces between the vertices. Good enough for ground
+	 * contact, which is what a preview needs; noted rather than hidden.
+	 */
+	struct SimPoint { Vector3 p; float r = 0.0f; };
+	QVector<SimPoint> points;
 	Vector3 com;                //!< centre of mass in bone space, for that conversion
 	Vector3 restOrigin;         //!< the bone origin in world, before that shift
 	//! what cinfo itself says about this body, for checking against the skeleton
@@ -91,6 +109,10 @@ struct SimJoint
 	QString kind;
 	//! true if pivotB had to be derived from the rest pose, see build()
 	bool rebased = false;
+	//! pivotB exactly as the file stored it, kept because the pose reconstruction
+	//! has to use the file's own numbers -- feeding it a rebased pivot would make
+	//! it agree with the rest pose by construction and prove nothing
+	Vector3 pivotBRaw;
 
 	HknpAngLimit twist, cone, plane, hinge;
 };
@@ -140,6 +162,23 @@ struct SimLimitCheck
 	bool any() const { return twistBad || coneBad || planeBad || hingeBad; }
 };
 
+/*! One body's pose as the CONSTRAINTS describe it, against the pose it is in.
+ *
+ * Walking the joint tree from its root, each constraint fully determines where
+ * its child must sit relative to its parent: the two joint frames have to
+ * coincide. So the constraint data alone reconstructs a complete pose, and
+ * comparing that with hkaSkeleton's reference pose answers a question no amount
+ * of solver work can -- whether a ragdoll was authored against a different bind
+ * pose from the one its skeleton stores.
+ */
+struct SimPoseCheck
+{
+	int body = -1;
+	bool placed = false;        //!< false if no constraint chain reaches it
+	float posDiff = 0.0f;       //!< metres from the reference pose
+	float rotDiffDeg = 0.0f;
+};
+
 class RagdollSim
 {
 public:
@@ -186,6 +225,17 @@ public:
 	//! Measure every joint's limits in the current pose, using the solver's own
 	//! axis construction so the two cannot disagree.
 	QVector<SimLimitCheck> checkLimits() const;
+	//! Rebuild every body's pose from the constraint frames alone and report how
+	//! far that lands from the reference pose. See SimPoseCheck.
+	QVector<SimPoseCheck> checkPoseFromJoints() const;
+	/*! World Z of the lowest point of any body's actual geometry.
+	 *
+	 * Callers placing a ground plane need the real extent, not the centre of
+	 * mass: a polytope has no radius to subtract, so estimating from x - radius
+	 * buried every machine in the floor and the solver blew them straight back
+	 * out. Returns 0 if nothing has geometry.
+	 */
+	float lowestPoint() const;
 
 	const QVector<SimBody> & bodies() const { return m_bodies; }
 	const QVector<SimJoint> & joints() const { return m_joints; }

@@ -559,7 +559,19 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    Havok's filter groups and by a rest-pose overlap test. `--drop`, `--ground`,
    `--no-self`. Corpus: 37/37 settle, 0 diverge, worst penetration 0.4 mm, worst
    joint separation 6.9 mm.
-   **Open after 07-28h: 6 of 37 settle hot** (bounded, intact, too energetic) —
+   **07-28i corrected the 07-28g/h diagnosis.** Most of the "hot" machines were
+   FALLING THROUGH THE FLOOR, not unstable: collision handled only capsules and
+   spheres, every machine is a polytope, and free fall looks like rising energy.
+   Compounding it, a body carries several shapes (Liberty Prime: 14 shapes / 12
+   bodies) and the build kept only the last. Both fixed. Measure settling by
+   SPEED, not energy — energy scales with mass.
+   **Open after 07-28i: 4 of 37 genuinely wrong** — eyebot (200 m/s), workshop
+   turret (66), Robot/SkeletonRef (24), radstag (12). 27 of 37 are at rest below
+   1 m/s and 6 more are gently rocking. Body-body collision is still exact only
+   for single capsules/spheres; a compound is a point set with no faces, so
+   polytope-vs-polytope self-collision is NOT handled and is the most likely next
+   cause. Ground contact is exact for both.
+   (superseded) **Open after 07-28h: 6 of 37 settle hot** (bounded, intact, too energetic) —
    eyebot, Liberty Prime, a sentry, three turrets. All machines. Settled so far:
    the rest-pose joint error was constraints shipping with an UNSET parent
    transform (identity rotation, zero pivot, confirmed in the raw bytes); those

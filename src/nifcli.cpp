@@ -427,6 +427,31 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 		out() << Qt::endl
 			  << ( bad ? QString( "  FAIL: energy ran away in %1 run(s)" ).arg( bad )
 					   : QString( "  ok: every rig stayed bounded within 25%" ) ) << Qt::endl;
+
+		/* Contacts dissipate, so energy conservation says nothing about them. The
+		 * property that matters is that a box dropped on the plane comes to rest
+		 * on it: neither sinking through nor being thrown off.
+		 */
+		out() << Qt::endl << "contact self-test: 1 kg box dropped on the plane"
+			  << Qt::endl;
+		int cbad = 0;
+		for ( int ss : subs ) {
+			RagdollSim sim;
+			sim.buildTestCase( QStringLiteral( "box" ) );
+			for ( int i = 0; i < 180; i++ )
+				sim.step( 1.0f / 60.0f, ss );
+			const SimStats st = sim.stats();
+			const bool ok = std::isfinite( st.maxSpeed ) && st.maxSpeed < 0.1f
+				&& st.maxPenetration < 0.001f;
+			out() << QString( "  ss=%1  speed %2 m/s  penetration %3 m  %4" ).arg( ss, -4 )
+						.arg( st.maxSpeed, 8, 'f', 4 ).arg( st.maxPenetration, 9, 'f', 6 )
+						.arg( ok ? "ok" : "FAIL" ) << Qt::endl;
+			if ( !ok )
+				cbad++;
+		}
+		out() << ( cbad ? QString( "  FAIL: the box did not settle in %1 run(s)" ).arg( cbad )
+						: QString( "  ok: the box settles on the plane" ) ) << Qt::endl;
+		bad += cbad;
 		return bad ? 1 : 0;
 	}
 
@@ -469,12 +494,8 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			 * being shoved out -- the latter tests the push-out code, not the
 			 * collision.
 			 */
-			float lowest = 1.0e30f;
-			for ( const SimBody & sb : sim.bodies() )
-				if ( sb.primType )
-					lowest = std::min( lowest, sb.x[2] - sb.radius );
 			sim.ground = true;
-			sim.groundZ = lowest - 0.25f;
+			sim.groundZ = sim.lowestPoint() - 0.25f;
 		}
 		// --drop lets the whole thing fall; otherwise hold the root so what is
 		// under test is the joints rather than gravity
@@ -527,6 +548,31 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			 * the decoded pivots and the body poses disagree, and grouping by
 			 * class name is what shows whether one constraint type is at fault.
 			 */
+			/* Does the constraint data describe a DIFFERENT pose, or no coherent
+			 * pose at all? Reconstructing from the joint frames alone answers it:
+			 * a small spread means the ragdoll was authored against another bind
+			 * pose, a large scattered one means the data is simply inconsistent.
+			 */
+			{
+				const QVector<SimPoseCheck> pc = sim.checkPoseFromJoints();
+				int placed = 0;
+				float worstPos = 0.0f, worstRot = 0.0f, sumPos = 0.0f;
+				for ( const SimPoseCheck & c : pc ) {
+					if ( !c.placed )
+						continue;
+					placed++;
+					sumPos += c.posDiff;
+					worstPos = std::max( worstPos, c.posDiff );
+					worstRot = std::max( worstRot, c.rotDiffDeg );
+				}
+				out() << QString( "  pose rebuilt from the constraints: %1/%2 bodies "
+								  "placed, mean %3 m, worst %4 m / %5 deg" )
+							.arg( placed ).arg( pc.size() )
+							.arg( placed ? sumPos / float( placed ) : 0.0f, 0, 'f', 4 )
+							.arg( worstPos, 0, 'f', 4 ).arg( worstRot, 0, 'f', 1 )
+					  << Qt::endl;
+			}
+
 			int shown = 0;
 			for ( int k = 0; k < sim.joints().size(); k++ ) {
 				const SimJoint & sj = sim.joints().at( k );
@@ -654,7 +700,11 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			out() << "  DIVERGED" << Qt::endl;
 			failed++;
 		} else {
-			out() << "  settled: energy " << QString::number( st.energy, 'f', 5 )
+			// speed, not energy, is the honest settling test: energy scales with
+			// mass, and Liberty Prime massing tens of tonnes reads as a blow-up
+			// next to a cat while moving no faster
+			out() << "  settled: maxSpeed " << QString::number( st.maxSpeed, 'f', 4 )
+				  << ", energy " << QString::number( st.energy, 'f', 5 )
 				  << ", worst joint separation " << QString::number( st.maxJointError, 'f', 6 )
 				  << ", " << st.contacts << " contacts, worst penetration "
 				  << QString::number( st.maxPenetration, 'f', 6 ) << Qt::endl;

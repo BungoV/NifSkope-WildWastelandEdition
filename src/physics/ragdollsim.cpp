@@ -283,7 +283,33 @@ inline void worldSegment( const SimBody & b, Vector3 & p, Vector3 & q )
 //! Radius of the world-space sphere that bounds the whole shape, for broad phase
 inline float boundRadius( const SimBody & b )
 {
-	return b.radius + ( b.capA - b.capB ).length() * 0.5f;
+	float r = 0.0f;
+	for ( const SimBody::SimPoint & sp : b.points )
+		r = std::max( r, ( sp.p - b.com ).length() + sp.r );
+	return r;
+}
+
+//! Does this body have anything to collide with at all?
+inline bool hasGeometry( const SimBody & b )
+{
+	return !b.points.isEmpty();
+}
+
+//! A shape point in world, remembering that x is the centre of mass
+inline Vector3 worldPoint( const SimBody & b, const SimBody::SimPoint & sp )
+{
+	return b.x + qRot( b.q, sp.p - b.com );
+}
+
+/*! Can these two bodies use the exact segment test?
+ *
+ * Only when each is a single capsule or sphere. A compound is a point set with
+ * no faces, and pretending otherwise would let a limb slip between a box's
+ * vertices while reporting no contact.
+ */
+inline bool exactPair( const SimBody & a, const SimBody & b )
+{
+	return a.shapeCount == 1 && b.shapeCount == 1 && a.primType != 0 && b.primType != 0;
 }
 
 } // namespace
@@ -356,10 +382,21 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		SimBody & b = m_bodies[s.bodyId];
 		b.pinned = false;
 		b.bodyId = s.bodyId;
+		b.shapeCount++;
 		b.primType = s.primType;
 		b.capA = s.capA;
 		b.capB = s.capB;
 		b.radius = s.primRadius;
+		// accumulate, never overwrite: several shapes can share one body
+		if ( s.primType == 2 ) {
+			b.points.append( { s.capA, s.primRadius } );
+			b.points.append( { s.capB, s.primRadius } );
+		} else if ( s.primType == 1 ) {
+			b.points.append( { s.capA, s.primRadius } );
+		} else {
+			for ( const Vector3 & v : s.verts )
+				b.points.append( { v, 0.0f } );
+		}
 
 		const HknpBodyPhys phys = sys.bodyPhys.value( s.bodyId );
 		/* Sit the body on its CENTRE OF MASS, not on the bone origin.
@@ -388,16 +425,11 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		 * mass of (0,0,0) -- the bone origin -- and inherited the entire
 		 * parallel-axis error this fix exists to remove.
 		 */
-		if ( s.primType == 2 ) {
-			b.com = ( s.capA + s.capB ) / 2.0f;
-		} else if ( s.primType == 1 ) {
-			b.com = s.capA;
-		} else if ( !s.verts.isEmpty() ) {
-			Vector3 sum;
-			for ( const Vector3 & v : s.verts )
-				sum += v;
-			b.com = sum / float( s.verts.size() );
-		}
+		Vector3 sum;
+		for ( const SimBody::SimPoint & sp : std::as_const( b.points ) )
+			sum += sp.p;
+		if ( !b.points.isEmpty() )
+			b.com = sum / float( b.points.size() );
 		b.restOrigin = restPos.value( s.bodyId );
 		b.cinfoPos = phys.position;
 		b.cinfoRot = phys.orientation;
@@ -448,6 +480,7 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		 */
 		j.frameA = qConj( qFromRows( jc.rotA[0], jc.rotA[1], jc.rotA[2] ) );
 		j.frameB = qConj( qFromRows( jc.rotB[0], jc.rotB[1], jc.rotB[2] ) );
+		j.pivotBRaw = j.pivotB;
 		j.kind = jc.kind;
 		j.twist = jc.twist;
 		j.cone = jc.cone;
@@ -531,6 +564,8 @@ void RagdollSim::buildCollisionFilter()
 			 * frame. Anything already overlapping at rest was never meant to
 			 * collide.
 			 */
+			if ( !exactPair( A, B ) )
+				continue;
 			Vector3 p1, q1, p2, q2, c1, c2;
 			worldSegment( A, p1, q1 );
 			worldSegment( B, p2, q2 );
@@ -551,7 +586,7 @@ void RagdollSim::collectPairs()
 
 	if ( ground ) {
 		for ( int i = 0; i < n; i++ )
-			if ( !m_bodies.at( i ).pinned && m_bodies.at( i ).primType )
+			if ( !m_bodies.at( i ).pinned && hasGeometry( m_bodies.at( i ) ) )
 				m_pairs.append( { i, -1 } );
 	}
 	if ( !selfCollision )
@@ -559,11 +594,11 @@ void RagdollSim::collectPairs()
 
 	for ( int i = 0; i < n; i++ ) {
 		const SimBody & A = m_bodies.at( i );
-		if ( !A.primType )
-			continue;
 		for ( int k = i + 1; k < n; k++ ) {
 			const SimBody & B = m_bodies.at( k );
-			if ( !B.primType || ( A.pinned && B.pinned ) )
+			// body-body is exact only for single capsules and spheres; a compound
+			// is a point set with no faces, so it is left to the ground plane
+			if ( !exactPair( A, B ) || ( A.pinned && B.pinned ) )
 				continue;
 			if ( m_noCollide.contains( key( i, k, n ) ) )
 				continue;
@@ -591,19 +626,34 @@ void RagdollSim::solveContacts( float h )
 		float depth = 0.0f;
 
 		if ( pr.b < 0 ) {
-			/* Ground: test both end caps rather than one deepest point, so a
-			 * capsule lying flat is held level instead of pivoting about whichever
-			 * end happened to be lower.
+			/* Every point below the plane is a contact, not just the deepest one:
+			 * correcting one would let a box teeter on a corner and a capsule
+			 * pivot about whichever end happened to be lower. Against a plane this
+			 * is exact -- no support mapping or clipping needed.
+			 *
+			 * They must be SHARED, though, exactly as several joints on one body
+			 * are. A box landing flat puts eight vertices through the floor, and
+			 * eight full corrections lift it eight times as far as one; the sentry
+			 * left the ground at 24 m/s that way. Counting first and splitting by
+			 * that count is the same remedy as solverScale, applied to contacts.
 			 */
-			for ( int e = 0; e < ( A.primType == 2 ? 2 : 1 ); e++ ) {
-				const Vector3 c = ( e == 0 ) ? p1 : q1;
-				const float d = groundZ + A.radius - c[2];
+			normal = Vector3( 0, 0, 1 );
+			int touching = 0;
+			for ( const SimBody::SimPoint & sp : A.points )
+				if ( groundZ + sp.r - worldPoint( A, sp )[2] > 0.0f )
+					touching++;
+			if ( !touching )
+				continue;
+			const float share = 1.0f / float( touching );
+			for ( const SimBody::SimPoint & sp : A.points ) {
+				const Vector3 c = worldPoint( A, sp );
+				const float d = groundZ + sp.r - c[2];
 				if ( d <= 0.0f )
 					continue;
-				normal = Vector3( 0, 0, 1 );
 				point = Vector3( c[0], c[1], groundZ );
 				staticGround.x = point;
-				applyPositional( A, staticGround, point - A.x, Vector3(), normal * d );
+				applyPositional( A, staticGround, point - A.x, Vector3(),
+					normal * ( d * share ) );
 			}
 			continue;
 		}
@@ -741,6 +791,32 @@ bool RagdollSim::buildTestCase( const QString & name )
 
 		}
 		return done();
+	}
+
+	/* A single box dropped flat onto the plane. Contacts are dissipative, so
+	 * energy is the wrong test here; what must hold is that it comes to REST
+	 * without sinking and without being launched. Eight vertices land at once,
+	 * which is exactly the case that lifted the sentry off the ground at 24 m/s
+	 * when each contact applied a full correction instead of a share.
+	 */
+	if ( name == QLatin1String( "box" ) ) {
+		m_bodies.clear();
+		SimBody b;
+		b.x = Vector3( 0, 0, 1.0f );
+		b.q = Quat( 1, 0, 0, 0 );
+		b.invMass = 1.0f;
+		b.invInertia = Vector3( 6, 6, 6 );     // unit cube, 1 kg
+		b.bodyId = 0;
+		b.shapeCount = 1;
+		b.primType = 0;
+		for ( int i = 0; i < 8; i++ )
+			b.points.append( { Vector3( ( i & 1 ) ? 0.5f : -0.5f, ( i & 2 ) ? 0.5f : -0.5f,
+				( i & 4 ) ? 0.5f : -0.5f ), 0.0f } );
+		m_bodies.append( b );
+		ground = true;
+		groundZ = 0.0f;
+		rescaleForJointCount();
+		return true;
 	}
 
 	if ( name == QLatin1String( "spun" ) ) {
@@ -1011,6 +1087,86 @@ QVector<SimLimitCheck> RagdollSim::checkLimits() const
 	return out;
 }
 
+QVector<SimPoseCheck> RagdollSim::checkPoseFromJoints() const
+{
+	QVector<SimPoseCheck> out( m_bodies.size() );
+	for ( int i = 0; i < m_bodies.size(); i++ )
+		out[i].body = i;
+
+	QVector<Vector3> pos( m_bodies.size() );
+	QVector<Quat> rot( m_bodies.size(), Quat( 1, 0, 0, 0 ) );
+
+	// a root is a body that is nobody's child; seed it from the reference pose so
+	// the comparison measures the SHAPE of the reconstruction, not where it sits
+	QVector<bool> isChild( m_bodies.size(), false );
+	for ( const SimJoint & j : m_joints )
+		if ( j.a >= 0 && j.a < isChild.size() )
+			isChild[j.a] = true;
+	for ( int i = 0; i < m_bodies.size(); i++ ) {
+		if ( isChild.at( i ) )
+			continue;
+		pos[i] = m_bodies.at( i ).x;
+		rot[i] = m_bodies.at( i ).q;
+		out[i].placed = true;
+	}
+
+	/* Place children until nothing more can be placed, propagating POSITION only.
+	 *
+	 * A ball socket pins where the child sits, not how it is turned -- that is
+	 * three free rotational degrees of freedom, which is the entire point of the
+	 * joint. An earlier version of this also derived the child's orientation by
+	 * assuming the two joint frames coincide, i.e. that every joint rests at its
+	 * own zero. Nothing requires that, and it duly reported the deathclaw's pose
+	 * as 0.74 m and 50 degrees out when the deathclaw simulates perfectly. So take
+	 * the orientations from the reference pose -- which cinfo independently
+	 * corroborates to 0.1 degrees -- and let the pivots alone say where bodies go.
+	 *
+	 * Iterating rather than recursing keeps it safe against a binding order that
+	 * lists a child before its parent, and against a cycle.
+	 */
+	for ( int i = 0; i < m_bodies.size(); i++ )
+		rot[i] = m_bodies.at( i ).q;
+	for ( bool progress = true; progress; ) {
+		progress = false;
+		for ( const SimJoint & j : m_joints ) {
+			if ( j.a < 0 || j.b < 0 || out.at( j.a ).placed || !out.at( j.b ).placed )
+				continue;
+			pos[j.a] = pos.at( j.b ) + qRot( rot.at( j.b ), j.pivotBRaw )
+				- qRot( rot.at( j.a ), j.pivotA );
+			out[j.a].placed = true;
+			progress = true;
+		}
+	}
+
+	for ( int i = 0; i < m_bodies.size(); i++ ) {
+		if ( !out.at( i ).placed )
+			continue;
+		const SimBody & b = m_bodies.at( i );
+		out[i].posDiff = ( pos.at( i ) - b.x ).length();
+		const Quat & p = rot.at( i );
+		const float dot = p[0] * b.q[0] + p[1] * b.q[1] + p[2] * b.q[2] + p[3] * b.q[3];
+		out[i].rotDiffDeg = 2.0f * std::acos( std::clamp( std::fabs( dot ), 0.0f, 1.0f ) )
+			* 57.2957795f;
+	}
+	return out;
+}
+
+float RagdollSim::lowestPoint() const
+{
+	float lowest = 0.0f;
+	bool any = false;
+	for ( const SimBody & b : m_bodies ) {
+		if ( !hasGeometry( b ) )
+			continue;
+		float z = b.x[2];
+		for ( const SimBody::SimPoint & sp : b.points )
+			z = std::min( z, worldPoint( b, sp )[2] - sp.r );
+		lowest = any ? std::min( lowest, z ) : z;
+		any = true;
+	}
+	return lowest;
+}
+
 SimStats RagdollSim::stats() const
 {
 	SimStats st;
@@ -1051,10 +1207,8 @@ SimStats RagdollSim::stats() const
 		worldSegment( A, p1, q1 );
 		float depth = 0.0f;
 		if ( pr.b < 0 ) {
-			for ( int e = 0; e < ( A.primType == 2 ? 2 : 1 ); e++ ) {
-				const Vector3 c = ( e == 0 ) ? p1 : q1;
-				depth = std::max( depth, groundZ + A.radius - c[2] );
-			}
+			for ( const SimBody::SimPoint & sp : A.points )
+				depth = std::max( depth, groundZ + sp.r - worldPoint( A, sp )[2] );
 		} else {
 			const SimBody & B = m_bodies.at( pr.b );
 			Vector3 p2, q2, c1, c2;

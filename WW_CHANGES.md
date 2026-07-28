@@ -1,5 +1,64 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28i — A body is not one shape (and the machines were falling, not exploding)
+
+**This corrects 07-28g and 07-28h.** Those entries attributed the machine
+ragdolls' energy to hinge limits and to constraint data authored against a
+different bind pose. That diagnosis was largely wrong. Two ordinary bugs in this
+code accounted for most of it.
+
+**They were in free fall.** The turret's kinetic energy climbed steadily while its
+joint separation stayed at 1e-6 and its contact count stayed at zero — and after
+five seconds its fastest body was doing 48.6 m/s, against 9.81 x 5 = 49. It was
+not unstable. It was falling through the floor at exactly the rate gravity
+predicts, because collision only ever handled capsules and spheres and every
+machine is a convex polytope. Energy climbing is what falling looks like.
+
+**A body carries several shapes, and the build kept only the last.** Liberty
+Prime's decode reports *14 shapes across 12 bodies* and the workshop turret *6
+across 3*; its body 1 alone is four polytopes. The build loop assigned rather than
+accumulated, so most of a machine's geometry was discarded — taking its centre of
+mass with it, which reintroduced the parallel-axis error 07-28f exists to remove.
+A body is now the union of its shapes, reduced to spheres in bone space: a capsule
+contributes both end points at its radius, a sphere its centre, a polytope its
+vertices. That reproduces all three previous cases exactly and generalises.
+
+**Contacts need the same sharing as joints.** A box landing flat puts eight
+vertices through the floor, and eight full corrections lift it eight times as far
+as one — the sentry left the ground at 24 m/s that way. Splitting each body's
+contact correction by its number of touching points is the same remedy as
+`solverScale`, applied to contacts.
+
+Results, measured by **speed** rather than energy — energy scales with mass, and
+Liberty Prime massing tens of tonnes reads as a blow-up next to a cat while moving
+no faster:
+
+| | before | after |
+|---|---|---|
+| Turret (standing) | 83,157 energy | settles, 1.0 |
+| Turret (mounted) | 51,443 | 0.0004 |
+| Liberty Prime | 45.8 m/s (free fall) | 2.2 m/s |
+| Sentry | 24.5 m/s | 2.4 m/s |
+
+Corpus: **27 of 37 at rest** (< 1 m/s after 5 s), 6 still moving gently (1.0-2.4
+m/s, which is a landed ragdoll rocking), **4 genuinely wrong** — eyebot, workshop
+turret, Robot/SkeletonRef, radstag. Nothing diverges; worst penetration anywhere
+is 0.05 mm.
+
+**New: a contact self-test.** `simulate --selftest` now drops a 1 kg box on the
+plane and requires it to come to rest without sinking. It settles at 0.0000 m/s
+with penetration converging as h² (8.8e-5 / 2.2e-5 / 6e-6 / 1e-6 / 0 at 4 / 8 /
+16 / 32 / 64 substeps). Energy conservation says nothing about contacts — they
+dissipate — so this needed its own criterion.
+
+Also corrected: the pose-reconstruction diagnostic added while chasing 07-28h
+asked an invalid question. It derived each child's orientation by assuming the two
+joint frames coincide, i.e. that every joint rests at its own zero. A ball socket
+pins position and leaves all three rotational degrees free, so nothing requires
+that, and it duly reported the deathclaw as 0.74 m and 50° out when the deathclaw
+simulates perfectly. It now propagates position only, taking orientations from the
+reference pose.
+
 ## 2026-07-28h — Why some ragdolls simulate hot: the file, not the solver
 
 Chasing the turret's 0.67 m rest-pose joint error from 07-28g. It is not a decode
