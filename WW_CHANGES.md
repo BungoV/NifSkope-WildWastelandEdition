@@ -1,5 +1,50 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29s — the chain goes taut: a drag can no longer tear a ragdoll open
+
+**All rigs pass, 0 failures.** Two changes, and the second is the interesting one.
+
+### Pin is the right mouse button
+
+It was a tool of its own, which meant nailing a bone down cost a trip to the
+toolbar and back — and it is almost always done *during* a drag, to hold what you
+have. Right-click now pins or unpins whatever it hits, with any tool active, and
+pinned bodies draw in red-orange the way a secondary selection reads in Edit Mode.
+
+### A hand is not infinitely strong
+
+Pull a limb away from a pinned root and the rig came apart: **1.90 m of ball-socket
+separation** on a brahmin, measured. A joint is a point constraint, so any
+separation at all is the rig tearing rather than a chain going taut.
+
+My first diagnosis was wrong. I thought the drag was solved after the joints and so
+got the last word, reordered it, and the number moved from 1.90 m to 1.86 m —
+nothing. The reorder is kept because joints-last is the right order regardless, but
+it was not the fault.
+
+The actual cause: the drag was a near-rigid positional constraint, and simply
+out-pulled joints that are deliberately weakened by mass splitting. No ordering
+fixes that, because the drag re-applies every iteration.
+
+**The fix is to give the hand a finite strength.** The correction the drag applies
+is a position impulse — displacement is `dLambda * invMass`, so `dLambda = F·h²` —
+which means capping the accumulated multiplier caps the force. Once the chain is
+taut the hand pulls at its limit and the whole rig follows.
+
+**1.86 m → 0.0041 m.** Expressed as a multiple of the held body's own weight rather
+than in newtons, so it means the same thing on a 0.2 kg jaw and a Liberty Prime
+torso, and exposed as **Strength** under the Grab tool. 0 removes the limit and
+restores the tearing, which is occasionally what you want to see.
+
+### The throw test was measuring gravity
+
+Comparing the released speed of a bone let go while moving against one let go while
+still failed on the feral ghoul at 1.97 against 1.02 m/s. The "still" case is not
+still: holding for 20 frames lets the rig fall, and most of that 1.02 was honest
+gravity. Gravity contributes nothing along the hand's direction of travel, so the
+measurement is that component now — which is exactly what the throw adds and
+nothing else.
+
 ## 2026-07-29r — the floor grips, Grab is one tool, and Physics Sim lets go
 
 **51 of 51 checks on 6 rigs, 1 correctly skipped, 0 failures.**

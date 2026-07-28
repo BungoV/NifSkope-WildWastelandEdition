@@ -3807,10 +3807,54 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				check( pv.highlightLimits(), QStringLiteral( "limit highlight can be turned on" ) );
 				pv.setHighlightLimits( false );
 
-				// Pin is not motion, so it is checked by the flag it sets
+				/* Pull against a pin and see whether the chain goes TAUT.
+				 *
+				 * This is the complaint: pin one bone, drag another away, and the
+				 * joints stretch instead of the rig reaching the end of its chain
+				 * and following. The measurement is the worst ball-socket
+				 * separation while the drag is at full stretch -- a joint is a
+				 * point constraint, so any separation at all is the rig coming
+				 * apart, and it should stay at solver noise rather than growing
+				 * with how hard you pull.
+				 */
 				{
 					pv.reset();
-					pv.setTool( PhysicsPreview::Tool::Pin );
+					pv.setTool( PhysicsPreview::Tool::Grab );
+					// pin the root, which is what a user pins to hold the rig down
+					pv.sim().setPinned( 0, true );
+					QPointF sp;
+					const int target = aimAtSomething( sp );
+					if ( target >= 0 && target != 0 ) {
+						QMouseEvent press( QEvent::MouseButtonPress, sp, gl->mapToGlobal( sp ),
+							gl->selectMouseButton(), gl->selectMouseButton(), Qt::NoModifier );
+						QApplication::sendEvent( gl, &press );
+						// drag a long way: far past anything the rig can reach
+						float worstSep = 0.0f;
+						for ( int i = 1; i <= 40; i++ ) {
+							const QPointF p = sp + QPointF( 26.0 * i, -10.0 * i );
+							QMouseEvent mv( QEvent::MouseMove, p, gl->mapToGlobal( p ),
+								Qt::NoButton, gl->selectMouseButton(), Qt::NoModifier );
+							QApplication::sendEvent( gl, &mv );
+							gl->physicsTick( 1.0f / 60.0f );
+							worstSep = std::max( worstSep, pv.stats().maxJointError );
+						}
+						log << QStringLiteral( "      worst joint separation while hauling: %1 m" )
+							.arg( double( worstSep ), 0, 'f', 4 );
+						// 2 cm: a joint is a point constraint, so this is generous
+						check( worstSep < 0.02f,
+							QStringLiteral( "the chain goes taut instead of stretching" ) );
+						QMouseEvent rel( QEvent::MouseButtonRelease, sp, gl->mapToGlobal( sp ),
+							gl->selectMouseButton(), Qt::NoButton, Qt::NoModifier );
+						QApplication::sendEvent( gl, &rel );
+					}
+					pv.sim().setPinned( 0, false );
+					pv.reset();
+				}
+
+				// Pinning is the RIGHT button now, and works with any tool active
+				{
+					pv.reset();
+					pv.setTool( PhysicsPreview::Tool::Grab );
 					QPointF sp;
 					const int target = aimAtSomething( sp );
 					if ( target >= 0 ) {
@@ -3820,16 +3864,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * demanded `pinned == true` failed the tool for behaving right.
 						 */
 						const bool was = pv.sim().bodies().at( target ).pinned;
-						clickAt( sp );
+						auto rightClick = [&]() {
+							QMouseEvent pr( QEvent::MouseButtonPress, sp, gl->mapToGlobal( sp ),
+								gl->cursorPlaceButton(), gl->cursorPlaceButton(), Qt::NoModifier );
+							QApplication::sendEvent( gl, &pr );
+						};
+						rightClick();
 						check( pv.sim().bodies().at( target ).pinned != was,
-							QStringLiteral( "Pin toggled body %1 (%2 -> %3)" ).arg( target )
+							QStringLiteral( "right-click pinned body %1 (%2 -> %3)" ).arg( target )
 								.arg( was ? QStringLiteral( "pinned" ) : QStringLiteral( "free" ) )
 								.arg( was ? QStringLiteral( "free" ) : QStringLiteral( "pinned" ) ) );
-						clickAt( sp );
+						check( !pv.pinnedSoup().isEmpty(),
+							QStringLiteral( "pinned bodies draw apart from the rest" ) );
+						gl->update();
+						QApplication::processEvents();
+						gl->grabFramebuffer().save( outPath + QStringLiteral( ".pinned.png" ) );
+						rightClick();
 						check( pv.sim().bodies().at( target ).pinned == was,
-							QStringLiteral( "Pin clicked again put it back" ) );
+							QStringLiteral( "right-click again put it back" ) );
 					} else {
-						check( false, QStringLiteral( "Pin: nothing to aim at" ) );
+						check( false, QStringLiteral( "pin: nothing to aim at" ) );
 					}
 				}
 
@@ -3862,6 +3916,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const int target = aimAtSomething( sp );
 					if ( target < 0 )
 						return -1.0f;
+					const Vector3 startAt = pv.sim().toWorld( target, Vector3() );
 					QMouseEvent press( QEvent::MouseButtonPress, sp, gl->mapToGlobal( sp ),
 						gl->selectMouseButton(), gl->selectMouseButton(), Qt::NoModifier );
 					QApplication::sendEvent( gl, &press );
@@ -3872,6 +3927,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::sendEvent( gl, &mv );
 						gl->physicsTick( 1.0f / 60.0f );
 					}
+					// the direction the hand travelled, so the measurement can ignore
+					// everything gravity is doing at the same time
+					Vector3 axis = pv.sim().toWorld( target, Vector3() ) - startAt;
+					const float axisLen = axis.length();
+					axis = ( axisLen > 1.0e-6f ) ? axis / axisLen : Vector3( 1, 0, 0 );
 					if ( !movingAtRelease ) {
 						// hold still first, so the hand has no velocity to hand over
 						for ( int i = 0; i < 20; i++ )
@@ -3888,7 +3948,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * promises is that the hand's velocity survives the release, so that
 					 * is what is measured, before a single step can muddy it.
 					 */
-					return pv.sim().bodies().at( target ).v.length();
+					/* Along the DRAG axis, not the total speed.
+					 *
+					 * Holding still for 20 frames lets the rig fall, so the "still"
+					 * case leaves the bone at 1 m/s of honest gravity -- on the feral
+					 * ghoul that was most of the thrown speed and the comparison said
+					 * nothing. Gravity contributes nothing along the hand's direction
+					 * of travel, so that component isolates what the throw added.
+					 */
+					return Vector3::dotproduct( pv.sim().bodies().at( target ).v, axis );
 				};
 				/* A release while MOVING carries; the same tool released while still
 				 * does not. That is the whole of what merging Drag and Throw means, so
@@ -3896,9 +3964,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 */
 				const float speedMoving = dragAndCoast( PhysicsPreview::Tool::Grab, true );
 				const float speedStill = dragAndCoast( PhysicsPreview::Tool::Grab, false );
-				check( speedMoving > speedStill * 2.0f,
+				check( speedMoving > speedStill + 0.25f,
 					QStringLiteral( "released moving it is thrown, released still it drops "
-									"(%1 m/s vs %2 m/s)" )
+									"(%1 m/s vs %2 m/s along the drag)" )
 						.arg( double( speedMoving ), 0, 'f', 3 ).arg( double( speedStill ), 0, 'f', 3 ) );
 
 				// Options
@@ -7302,6 +7370,14 @@ void NifSkope::initDockWidgets()
 
 		// Tools
 		col->addWidget( heading( tr( "Tool" ) ) );
+		{
+			QLabel * hint = new QLabel( tr( "Right-click pins a bone in place, with any tool." ), panel );
+			hint->setWordWrap( true );
+			QFont hf = hint->font();
+			hf.setPointSizeF( hf.pointSizeF() - 0.5 );
+			hint->setFont( hf );
+			col->addWidget( hint );
+		}
 		QGridLayout * tools = new QGridLayout();
 		tools->setSpacing( 4 );
 		QButtonGroup * toolGroup = new QButtonGroup( panel );
@@ -7313,12 +7389,10 @@ void NifSkope::initDockWidgets()
 						  "let go while still and it drops. (1)" ) },
 			{ PhysicsPreview::Tool::Shoot, QT_TR_NOOP( "Shoot" ),
 			  QT_TR_NOOP( "Hit it with an impulse where you click. Off-centre hits spin it. (2)" ) },
-			{ PhysicsPreview::Tool::Pin,   QT_TR_NOOP( "Pin" ),
-			  QT_TR_NOOP( "Nail a bone in place. Click it again to let go. (3)" ) },
 			{ PhysicsPreview::Tool::Blast, QT_TR_NOOP( "Blast" ),
-			  QT_TR_NOOP( "Radial impulse from the point you click. (4)" ) },
+			  QT_TR_NOOP( "Radial impulse from the point you click. (3)" ) },
 			{ PhysicsPreview::Tool::Wind,  QT_TR_NOOP( "Wind" ),
-			  QT_TR_NOOP( "Steady push along the view while the button is held. (5)" ) },
+			  QT_TR_NOOP( "Steady push along the view while the button is held. (4)" ) },
 		};
 		int tRow = 0, tCol = 0;
 		for ( const ToolEntry & te : toolEntries ) {
@@ -7360,6 +7434,17 @@ void NifSkope::initDockWidgets()
 		firmSpin->setToolTip( tr( "How hard the grab holds. 1 is rigid; lower is springier "
 								  "and lags behind the cursor." ) );
 		QLabel * firmLbl = addParam( tr( "Firmness" ), firmSpin );
+
+		QDoubleSpinBox * strengthSpin = new QDoubleSpinBox( toolParams );
+		strengthSpin->setRange( 0.0, 500.0 );
+		strengthSpin->setSingleStep( 5.0 );
+		strengthSpin->setDecimals( 1 );
+		strengthSpin->setSuffix( tr( "x weight" ) );
+		strengthSpin->setToolTip( tr( "How hard the hand may pull, against the weight of the "
+									  "bone held. Bounded so a chain goes taut and drags the "
+									  "rig instead of pulling a joint apart. 0 removes the "
+									  "limit." ) );
+		QLabel * strengthLbl = addParam( tr( "Strength" ), strengthSpin );
 
 		QDoubleSpinBox * impulseSpin = new QDoubleSpinBox( toolParams );
 		impulseSpin->setRange( 0.1, 500.0 );
@@ -7581,6 +7666,7 @@ void NifSkope::initDockWidgets()
 			const bool blasty = ( t == PhysicsPreview::Tool::Blast );
 			const bool windy  = ( t == PhysicsPreview::Tool::Wind );
 			firmSpin->setVisible( grabby );  firmLbl->setVisible( grabby );
+			strengthSpin->setVisible( grabby ); strengthLbl->setVisible( grabby );
 			impulseSpin->setVisible( shooty && !ts.shootProjectile );
 			impulseLbl->setVisible( shooty && !ts.shootProjectile );
 			projChk->setVisible( shooty );
@@ -7592,10 +7678,12 @@ void NifSkope::initDockWidgets()
 			blastStrength->setVisible( blasty ); blastStrengthLbl->setVisible( blasty );
 			windStrength->setVisible( windy );   windLbl->setVisible( windy );
 			toolParams->setVisible( on && ( grabby || shooty || blasty || windy ) );
+			QSignalBlocker ps( strengthSpin );
 			QSignalBlocker p0( firmSpin ), p1( impulseSpin ), p2( projChk ), p3( projSpeed );
 			QSignalBlocker p4( projMass ), p5( projRadius ), p6( projGrav ), p7( blastRadius );
 			QSignalBlocker p8( blastStrength ), p9( windStrength );
 			firmSpin->setValue( double( ts.grabFirmness ) );
+			strengthSpin->setValue( double( ts.grabStrength ) );
 			impulseSpin->setValue( double( ts.shootImpulse ) );
 			projChk->setChecked( ts.shootProjectile );
 			projSpeed->setValue( double( ts.projectileSpeed ) );
@@ -7710,6 +7798,10 @@ void NifSkope::initDockWidgets()
 		} );
 		connect( firmSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
 			ogl->physicsSim().settings().grabFirmness = float( v );
+		} );
+		connect( strengthSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().grabStrength = float( v );
+			ogl->physicsSim().sim().dragStrength = float( v );
 		} );
 		connect( impulseSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
 			ogl->physicsSim().settings().shootImpulse = float( v );

@@ -289,6 +289,21 @@ public:
 	//! Continuous force on every body, in newtons. Wind, and anything like it.
 	Vector3 wind;
 
+	/*! How hard the drag may pull, as a multiple of the held body's own weight.
+	 *
+	 * A hand is not infinitely strong, and modelling it as if it were is what let
+	 * a drag tear a rig open: the grab was a near-rigid positional constraint and
+	 * simply out-pulled the joints, leaving 1.9 m of ball-socket separation when
+	 * a brahmin was hauled away from a pinned root. Bounding the force makes the
+	 * chain go TAUT instead -- the hand reaches its limit and the whole rig
+	 * follows, which is what a chain does.
+	 *
+	 * Expressed against the body's own weight rather than in newtons so it means
+	 * the same thing on a 0.2 kg jaw and on a Liberty Prime torso. 0 removes the
+	 * limit and restores the old tearing behaviour.
+	 */
+	float dragStrength = 25.0f;
+
 	/*! Replace the contents with a synthetic rig of known masses.
 	 *
 	 * A 38-joint ragdoll is the wrong place to debug a solver. Each of these

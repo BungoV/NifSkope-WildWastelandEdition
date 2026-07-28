@@ -1099,7 +1099,21 @@ void RagdollSim::solveDrag( float h )
 	 * is how the first version came to lag two thirds of the pull.
 	 */
 	const float alpha = w * ( 1.0f - m_dragFirmness ) / m_dragFirmness;
-	const float dLambda = ( c - alpha * m_dragLambda ) / ( w + alpha );
+	float dLambda = ( c - alpha * m_dragLambda ) / ( w + alpha );
+
+	/* Bounded by what a hand could actually pull with.
+	 *
+	 * The correction this applies is a position impulse: displacement is
+	 * dLambda * invMass, so dLambda = F * h^2 for a force F. Capping the
+	 * ACCUMULATED lambda therefore caps the force, and once the chain is taut the
+	 * hand pulls at its limit and the rig follows as a whole instead of a joint
+	 * opening up. See RagdollSim::dragStrength.
+	 */
+	if ( dragStrength > 0.0f && b.invMass > 0.0f ) {
+		const float maxLambda = dragStrength * ( 1.0f / b.invMass ) * 9.81f * h * h;
+		if ( m_dragLambda + dLambda > maxLambda )
+			dLambda = std::max( 0.0f, maxLambda - m_dragLambda );
+	}
 	m_dragLambda += dLambda;
 
 	/* Applied directly rather than through applyPositional, which is the shared
@@ -1292,9 +1306,17 @@ void RagdollSim::step( float dt, int substeps )
 		}
 
 		m_dragLambda = 0.0f;
+		/* The drag is solved BEFORE the joints, so the joints get the last word.
+		 *
+		 * With it last, a hand hauling a limb away from a pinned root yanked the
+		 * body clear and the joints only got to answer on the next iteration --
+		 * hauling a brahmin left 1.9 m of ball-socket separation, which is the rig
+		 * coming apart rather than a chain going taut. A joint is a point
+		 * constraint; nothing the user does should be able to out-pull it.
+		 */
 		for ( int it = 0; it < std::max( 1, iterations ); it++ ) {
-			solveJoints( h, ( it & 1 ) != 0 );
 			solveDrag( h );
+			solveJoints( h, ( it & 1 ) != 0 );
 			solveContacts( h );
 		}
 

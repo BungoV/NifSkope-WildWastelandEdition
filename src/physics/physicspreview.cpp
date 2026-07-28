@@ -140,6 +140,7 @@ bool PhysicsPreview::grab( const Vector3 & rayOrigin, const Vector3 & rayDir )
 	if ( !p.hit() )
 		return false;
 	m_grabDepth = p.distance;
+	m_sim.dragStrength = m_settings.grabStrength;
 	m_sim.setDrag( p.body, p.localPoint, p.worldPoint, m_settings.grabFirmness );
 	return true;
 }
@@ -165,6 +166,43 @@ QVector<Vector3> PhysicsPreview::soup() const
 		const SimBody & b = bodies.at( i );
 		if ( bm.tris.isEmpty() )
 			continue;
+		QVector<Vector3> posed;
+		posed.reserve( bm.verts.size() );
+		for ( const Vector3 & v : bm.verts )
+			posed.append( m_sim.toWorld( i, v ) * SCALE );
+		for ( const Triangle & t : bm.tris ) {
+			out.append( posed.at( t[0] ) );
+			out.append( posed.at( t[1] ) );
+			out.append( posed.at( t[2] ) );
+		}
+	}
+	return out;
+}
+
+bool PhysicsPreview::togglePin( const Vector3 & rayOrigin, const Vector3 & rayDir )
+{
+	if ( !m_active )
+		return false;
+	const float len = rayDir.length();
+	if ( !( len > 1.0e-12f ) )
+		return false;
+	const SimPick p = m_sim.pick( rayOrigin / SCALE, rayDir / len );
+	if ( !p.hit() )
+		return false;
+	m_sim.setPinned( p.body, !m_sim.bodies().at( p.body ).pinned );
+	return true;
+}
+
+QVector<Vector3> PhysicsPreview::pinnedSoup() const
+{
+	QVector<Vector3> out;
+	if ( !m_active )
+		return out;
+	const QVector<SimBody> & bodies = m_sim.bodies();
+	for ( int i = 0; i < m_meshes.size() && i < bodies.size(); i++ ) {
+		if ( !bodies.at( i ).pinned )
+			continue;
+		const BodyMesh & bm = m_meshes.at( i );
 		QVector<Vector3> posed;
 		posed.reserve( bm.verts.size() );
 		for ( const Vector3 & v : bm.verts )
@@ -228,7 +266,6 @@ QString PhysicsPreview::toolName( Tool t )
 	switch ( t ) {
 	case Tool::Grab:  return QStringLiteral( "Grab" );
 	case Tool::Shoot: return QStringLiteral( "Shoot" );
-	case Tool::Pin:   return QStringLiteral( "Pin" );
 	case Tool::Blast: return QStringLiteral( "Blast" );
 	case Tool::Wind:  return QStringLiteral( "Wind" );
 	}
@@ -338,15 +375,6 @@ bool PhysicsPreview::press( const Vector3 & rayOrigin, const Vector3 & rayDir )
 		trace.hit = true;
 		trace.radius = m_settings.projectileRadius;
 		m_shots.append( trace );
-		return true;
-	}
-
-	case Tool::Pin: {
-		const SimPick p = m_sim.pick( rayOrigin / SCALE, dir );
-		if ( !p.hit() )
-			return false;
-		const bool wasPinned = m_sim.bodies().at( p.body ).pinned;
-		m_sim.setPinned( p.body, !wasPinned );
 		return true;
 	}
 

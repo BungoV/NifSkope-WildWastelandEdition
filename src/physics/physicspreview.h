@@ -48,7 +48,6 @@ public:
 		 */
 		Grab,
 		Shoot,      //!< impulse along the view ray at the point it hits
-		Pin,        //!< nail a body in place, click again to free it
 		Blast,      //!< radial impulse centred where the ray hits
 		Wind        //!< steady force along the view direction while held
 	};
@@ -68,6 +67,9 @@ public:
 	{
 		//! Drag / Throw: how hard the spring holds. (0, 1]; see setDrag.
 		float grabFirmness = 0.9f;
+		//! How hard the hand may pull, as a multiple of the held body's weight.
+		//! 0 removes the limit, and a drag can then tear the rig open.
+		float grabStrength = 25.0f;
 		//! Shoot: impulse along the ray, kg m/s. 12 is about a heavy pistol round.
 		float shootImpulse = 12.0f;
 		//! Shoot: fire a real projectile that travels, rather than hitting instantly.
@@ -132,6 +134,16 @@ public:
 	 * clicking empty space still orbits the camera.
 	 */
 	bool press( const Vector3 & rayOrigin, const Vector3 & rayDir );
+	/*! Right-click: pin or unpin whatever the ray hits, whatever the tool.
+	 *
+	 * Pinning was its own tool, which meant nailing a bone down cost a trip to the
+	 * toolbar and back -- and it is almost always done in the middle of a drag,
+	 * to hold what you have. It is the secondary button now, so it composes with
+	 * every tool instead of replacing one.
+	 */
+	bool togglePin( const Vector3 & rayOrigin, const Vector3 & rayDir );
+	//! Bodies currently nailed in place, for drawing them apart from the rest.
+	QVector<Vector3> pinnedSoup() const;
 	bool move( const Vector3 & rayOrigin, const Vector3 & rayDir );
 	bool release();
 

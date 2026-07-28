@@ -368,9 +368,16 @@ void GLView::physicsTick( float dt )
 
 bool GLView::physicsMousePress( QMouseEvent * event )
 {
-	if ( !physicsPreview.active() || event->button() != selectMouseButton() )
+	if ( !physicsPreview.active() )
 		return false;
 	Vector3 ro, rd;
+	if ( event->button() == cursorPlaceButton() ) {
+		// the secondary button pins, whatever tool is active
+		mouseRayWorld( event->position(), ro, rd );
+		return physicsPreview.togglePin( ro, rd );
+	}
+	if ( event->button() != selectMouseButton() )
+		return false;
 	mouseRayWorld( event->position(), ro, rd );
 	// a miss is not consumed, so clicking empty space still orbits the camera
 	return physicsPreview.press( ro, rd );
@@ -404,9 +411,8 @@ bool GLView::physicsKeyPress( QKeyEvent * event )
 	switch ( event->key() ) {
 	case Qt::Key_1: physicsPreview.setTool( PhysicsPreview::Tool::Grab );  return true;
 	case Qt::Key_2: physicsPreview.setTool( PhysicsPreview::Tool::Shoot ); return true;
-	case Qt::Key_3: physicsPreview.setTool( PhysicsPreview::Tool::Pin );   return true;
-	case Qt::Key_4: physicsPreview.setTool( PhysicsPreview::Tool::Blast ); return true;
-	case Qt::Key_5: physicsPreview.setTool( PhysicsPreview::Tool::Wind );  return true;
+	case Qt::Key_3: physicsPreview.setTool( PhysicsPreview::Tool::Blast ); return true;
+	case Qt::Key_4: physicsPreview.setTool( PhysicsPreview::Tool::Wind );  return true;
 	case Qt::Key_Space:
 		physicsPreview.setPaused( !physicsPreview.paused() );
 		return true;
@@ -2381,6 +2387,29 @@ void GLView::paintGL()
 	 * see it.
 	 */
 	if ( physicsPreview.active() && !scene->selecting ) {
+		/* Pinned bodies in a red-orange, the way a secondary selection reads in
+		 * Edit Mode: related to the thing in hand, distinct from it.
+		 */
+		const QVector<Vector3> nailed = physicsPreview.pinnedSoup();
+		if ( !nailed.isEmpty() ) {
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+			glDepthMask( GL_FALSE );
+			scene->loadModelViewMatrix( viewTrans );
+			scene->setGLColor( 0.85f, 0.28f, 0.10f, 0.35f );
+			glEnable( GL_POLYGON_OFFSET_FILL );
+			glPolygonOffset( -1.5f, -1.5f );
+			scene->drawTriangles( nailed.constData(), size_t( nailed.size() ), nullptr, true );
+			glDisable( GL_POLYGON_OFFSET_FILL );
+			glDepthMask( GL_TRUE );
+			scene->setGLColor( 0.95f, 0.40f, 0.14f, 1.0f );
+			scene->setGLLineWidth( Settings::lineWidthHighlight );
+			scene->drawTriangles( nailed.constData(), size_t( nailed.size() ), nullptr, false );
+			glDisable( GL_BLEND );
+		}
+
 		// the bone in hand, in orange over the black rest
 		const QVector<Vector3> held = physicsPreview.grabbedSoup();
 		if ( !held.isEmpty() ) {
