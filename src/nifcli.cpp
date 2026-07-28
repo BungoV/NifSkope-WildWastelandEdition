@@ -366,6 +366,103 @@ int cmdPbrmResolve( const QString & file )
  * energy climbing instead of settling), the worst ball-socket separation (joint
  * drift) and the peak speed, and exits non-zero if anything diverged.
  */
+/*! How far the NIF's node placement differs from the packfile's rest pose.
+ *
+ * This began as a test of a viewport composition that turned out to be wrong, and
+ * is kept because of what it found. Each body's collision is drawn in its own
+ * node's space, so the renderer's transform for body i is worldTrans(node_i),
+ * while the solver holds that body's rest pose in the ragdoll's own space. It
+ * would be convenient if worldTrans(node_i) * rest_i^-1 came out the same for
+ * every body -- one ragdoll, one scene, one map between them.
+ *
+ * It does not. The brahmin and the human agree to 0.0006 and 0.0003 game units,
+ * but the deathclaw is out by 14.3 and the turret by 47.1 -- and 47.1 game units
+ * is 0.672 Havok metres, exactly the rest-pose pivot error 07-28h measured on that
+ * same turret. Rotations agree everywhere to 1e-5, so it is purely translation.
+ * glnode.cpp already says as much for stair helpers: the node transform is
+ * authoritative for placement and cinfo's position is only a rest pose.
+ *
+ * So there is no single ragdoll-to-scene map, and the viewport must not use one.
+ * The formulation that works is per-body RELATIVE motion:
+ *
+ *     T_draw_i = worldTrans(node_i) * ( rest_i^-1 * sim_i )
+ *
+ * which keeps each body's authoritative placement and applies only how far the
+ * solver has moved it since rest. At rest the bracket is the identity and the
+ * simulated draw is byte-for-byte the static draw -- the property worth having,
+ * and one that holds however far the two disagree.
+ */
+static void checkSceneBridge( NifModel & nif, const RagdollSim & sim, qint32 sysBlock )
+{
+	const float SC = 69.99125f;
+
+	// walk parents to get each node's world transform, as the renderer does
+	auto worldOf = [&nif]( QModelIndex iNode ) {
+		Transform t;
+		for ( QModelIndex i = iNode; i.isValid(); ) {
+			t = Transform( &nif, i ) * t;
+			const qint32 p = nif.getParent( nif.getBlockNumber( i ) );
+			i = ( p >= 0 ) ? nif.getBlockIndex( p ) : QModelIndex();
+		}
+		return t;
+	};
+
+	QVector<Transform> maps;
+	QVector<int> mapBody;
+	for ( qint32 b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex iObj = nif.getBlockIndex( b );
+		if ( !nif.blockInherits( iObj, "bhkNPCollisionObject" ) )
+			continue;
+		if ( nif.getLink( iObj, "Data" ) != sysBlock )
+			continue;
+		const int body = int( nif.get<quint32>( iObj, "Body ID" ) );
+		if ( body < 0 || body >= sim.bodies().size() )
+			continue;
+		const QModelIndex iTarget = nif.getBlockIndex( nif.getLink( iObj, "Target" ) );
+		if ( !iTarget.isValid() )
+			continue;
+		const SimBody & sb = sim.bodies().at( body );
+
+		// rest_i in ragdoll space, scaled to game units so it composes with the node
+		Transform rest;
+		rest.rotation.fromQuat( sb.q );
+		rest.translation = sb.restOrigin * SC;
+
+		// worldTrans(node) * rest^-1
+		Transform inv;
+		inv.rotation = rest.rotation.inverted();
+		inv.translation = -( inv.rotation * rest.translation );
+		maps.append( worldOf( iTarget ) * inv );
+		mapBody.append( body );
+	}
+
+	if ( maps.size() < 2 ) {
+		out() << "  node placement vs rest pose: only " << maps.size()
+			  << " body/node binding(s), nothing to cross-check" << Qt::endl;
+		return;
+	}
+
+	float worstT = 0.0f, worstR = 0.0f;
+	int worstAt = -1;
+	for ( int i = 1; i < maps.size(); i++ ) {
+		const float dt = ( maps.at( i ).translation - maps.at( 0 ).translation ).length();
+		float dr = 0.0f;
+		for ( int r = 0; r < 3; r++ )
+			for ( int c = 0; c < 3; c++ )
+				dr = std::max( dr, std::fabs( maps.at( i ).rotation( r, c )
+					- maps.at( 0 ).rotation( r, c ) ) );
+		if ( dt > worstT || dr > worstR ) {
+			if ( dt > worstT ) worstT = dt;
+			if ( dr > worstR ) worstR = dr;
+			worstAt = mapBody.at( i );
+		}
+	}
+	out() << QString( "  node placement vs packfile rest pose: %1 bindings, spread "
+					  "%2 game units / %3 in rotation (worst body %4)" )
+				.arg( maps.size() ).arg( worstT, 0, 'f', 4 ).arg( worstR, 0, 'f', 5 )
+				.arg( worstAt ) << Qt::endl;
+}
+
 int cmdSimulate( const QString & file, int steps, int substeps, int iterations, bool noLimits,
 	const QString & onlyLimit, bool ground, bool noSelf, bool drop, bool jointedOnly,
 	bool selfTest, bool verbose )
@@ -515,6 +612,8 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 		// under test is the joints rather than gravity
 		if ( !drop )
 			sim.setPinned( 0, true );
+
+		checkSceneBridge( nif, sim, b );
 
 		const SimStats before = sim.stats();
 		out() << Qt::endl << "system " << b << "   " << sim.bodies().size()

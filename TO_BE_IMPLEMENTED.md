@@ -633,6 +633,18 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    Convex polytopes still want a proper centroid: the vertex mean is used, which
    is not the true hull centroid for an unevenly tessellated hull.
 3. **Viewport.** Step in the render loop, draw the simulated pose, play/pause/reset.
+   **07-28n did the bridge, headlessly.** Use PER-BODY RELATIVE motion, never a
+   global ragdoll-to-scene map:
+       T_draw_i = worldTrans(node_i) * ( rest_i^-1 * sim_i )
+   At rest the bracket is the identity, so the simulated draw equals the static
+   draw exactly. A global map is WRONG: node placement and the packfile rest pose
+   disagree on 11 of 37 models -- Vertibird by 341 game units, Robot/SkeletonRef
+   112.7, turrets 21-47, deathclaw 14.3 -- while rotations agree to 1e-5, so it is
+   purely translation. The turret's 47.1 game units is 0.672 Havok metres, the same
+   authoring inconsistency 07-28h found from the packfile side. `simulate` reports
+   this spread per model.
+   Remaining for a GUI session (needs on-screen verification, so not done blind):
+   the draw override in glnode.cpp's bhkSystem branch, and play/pause/reset.
 4. **Interaction.** Ray-pick a body under the cursor, drag it with a mouse spring;
    fling spawned bodies at static collision.
 5. **Static mesh collision.** Capsule vs `hknpCompressedMeshShape` triangles via a

@@ -1,5 +1,53 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28n — The scene bridge, and why it cannot be one transform
+
+Groundwork for drawing the simulated pose (phase 3), done headlessly so the part
+that can be verified is verified before any rendering code exists.
+
+Each body's collision is drawn in its own node's space: the renderer's transform
+for body i is `worldTrans(node_i)`, while the solver holds that body's rest pose in
+the ragdoll's own space. The obvious bridge is to establish one ragdoll-to-scene
+map, `worldTrans(node_i) * rest_i^-1`, which must be identical for every body —
+one ragdoll, one scene.
+
+**It is not.** Measured across the corpus, 11 of 37 models disagree by more than a
+game unit:
+
+| model | spread (game units) |
+|---|---|
+| Vertibird | **341.1** |
+| Robot/SkeletonRef | 112.7 |
+| Robot/sentry | 68.9 |
+| Turret (standing) | 47.1 |
+| Turret (workshop) | 41.1 |
+| Turret (mounted) | 21.8 |
+| Deathclaw | 14.3 |
+| PowerArmor (x3) | 7.1 |
+| MirelurkHunter | 1.5 |
+
+The brahmin and the human agree to 0.0006 and 0.0003, and rotations agree to 1e-5
+*everywhere* — it is purely translation. The turret's 47.1 game units is **0.672
+Havok metres**, which is exactly the rest-pose pivot error 07-28h measured on that
+same turret, so this is the same authoring inconsistency seen from the scene side.
+`glnode.cpp` already says as much for stair helpers: the node transform is
+authoritative for placement, cinfo's position is only a rest pose. This puts a
+number on it across the whole corpus.
+
+**So the viewport must not use a global map.** The formulation that works is
+per-body relative motion:
+
+    T_draw_i = worldTrans(node_i) * ( rest_i^-1 * sim_i )
+
+Each body keeps its authoritative scene placement, and only how far the solver has
+moved it since rest is applied. At rest the bracket is the identity, so the
+simulated draw is byte-for-byte the static draw — the property worth having, and
+one that holds however far the two disagree. A global map would have put the
+Vertibird 341 game units (about 4.9 m) from where it belongs.
+
+`simulate` reports the spread, so a model whose scene and packfile disagree is
+visible before anyone wonders why its ragdoll is offset.
+
 ## 2026-07-28m — The exact angular solve is worse (negative result, reverted)
 
 07-28l predicted the eyebot's remaining 17.2 m/s would fall to solving the angular
