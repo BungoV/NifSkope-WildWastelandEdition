@@ -496,6 +496,19 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			 */
 			sim.ground = true;
 			sim.groundZ = sim.lowestPoint() - 0.25f;
+			if ( verbose ) {
+				out() << QString( "  ground at z %1 (lowest geometry %2)" )
+							.arg( sim.groundZ, 0, 'f', 4 ).arg( sim.lowestPoint(), 0, 'f', 4 )
+					  << Qt::endl;
+				for ( int k = 0; k < sim.bodies().size(); k++ ) {
+					const SimBody & sb = sim.bodies().at( k );
+					out() << QString( "    body %1  shapes %2  points %3  invMass %4  "
+									  "pinned %5  z %6" )
+								.arg( k ).arg( sb.shapeCount ).arg( sb.points.size() )
+								.arg( sb.invMass, 0, 'f', 4 ).arg( sb.pinned ? "yes" : "no" )
+								.arg( sb.x[2], 0, 'f', 3 ) << Qt::endl;
+				}
+			}
 		}
 		// --drop lets the whole thing fall; otherwise hold the root so what is
 		// under test is the joints rather than gravity

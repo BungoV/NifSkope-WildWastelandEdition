@@ -34,6 +34,17 @@ struct SimBody
 	Quat q;                     //!< orientation, w first (NifSkope's Quat order)
 	Vector3 v, w;               //!< linear and angular velocity
 
+	/*! Per-body damping, as the file authors it (dyn_motion +0x18 / +0x1C).
+	 *
+	 * Decoded all along and never used. Havok's own values -- typically 0.1
+	 * linear and 0.05 angular -- are what makes a ragdoll come to rest in game
+	 * instead of swinging for ever, so using them is both more faithful and the
+	 * difference between a settling test that means something and one dominated
+	 * by whatever the ragdoll happened to be doing at the five-second mark.
+	 */
+	float linDamping = 0.1f;
+	float angDamping = 0.05f;
+
 	float invMass = 0.0f;       //!< 0 for a pinned or static body
 	Vector3 invInertia;         //!< diagonal of the inverse inertia, body space
 	bool pinned = false;        //!< held in place (the root, or a dragged bone)
@@ -261,8 +272,8 @@ public:
 	//! Coulomb friction at contacts. Zero makes a ragdoll slide for ever, which
 	//! reads as broken even though it is stable.
 	float friction = 0.5f;
-	//! Velocity damping per second, keeps a settling ragdoll from ringing.
-	float damping = 0.02f;
+	//! Extra damping per second on top of each body's own authored value.
+	float damping = 0.0f;
 	/*! Gauss-Seidel sweeps per substep.
 	 *
 	 * XPBD's usual advice is one sweep and many substeps, which holds while the

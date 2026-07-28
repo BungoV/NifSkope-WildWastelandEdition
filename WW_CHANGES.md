@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28j — Ragdolls settle the way the file says they should
+
+**32 of 37** vanilla ragdolls now come to rest — under 1 m/s after ten seconds of
+falling onto a plane — with nothing diverging and worst penetration 0.04 mm.
+
+**Per-body damping was decoded all along and never used.** `dyn_motion` +0x18 and
++0x1C hold linear and angular damping, typically 0.1 and 0.05, and they are what
+brings a ragdoll to rest in game rather than leaving it swinging. Using them took
+settling from 27-29 to 32 of 37. The synthetic self-test rigs explicitly zero
+them, since their whole purpose is conserved energy.
+
+**The measurement was as much of a problem as the solver.** Speed at exactly the
+five-second mark, on a chaotic falling body, is a noisy number to steer by — and
+several earlier decisions were steered by it. Ten seconds plus real damping gives
+a signal that actually distinguishes "settled" from "still going".
+
+### Two plausible fixes the corpus rejected
+
+Both are recorded because each looks obviously correct and neither is:
+
+- **More solver sweeps.** 16 instead of 4 fixed the workshop turret outright
+  (66 m/s → 0.02) and took the sentry from 8.7 m/s to 75. Net: 25 of 37 settling
+  against 29. Per-model testing said yes; the corpus said no.
+- **Scaling by corrections rather than joints.** `solverScale` divides a body's
+  response by how many joints touch it. Weighting each joint by the corrections it
+  really applies — a hinge aligns the axles *and* bounds the swing, so it is worth
+  three — is strictly more accurate and measures worse: 30 of 37, with the turret
+  going from 60 m/s to 149. Softening that hard leaves each sweep barely
+  correcting, and the residual becomes velocity.
+
+### Still moving: 4
+
+Eyebot (87 m/s), workshop turret (60), Robot/SkeletonRef (9.0), sentry (4.1).
+Liberty Prime at 1.2 m/s is essentially settled. Bisected with `--no-limits`,
+`--no-self` and `--only-limit`:
+
+- **Hinges** — eyebot and workshop turret. The turret is decisive: full run,
+  `--no-self` and `--only-limit hinge` all give *identically* 66.1097, and
+  `--no-limits` gives 0.008. Its Pelvis hinge is limited to ±1°, i.e. welded.
+  This is a convergence problem, not a broken formulation — 16 sweeps fix it — but
+  no global sweep count or scaling rule tried so far fixes it without breaking
+  something else. Per-joint adaptive iteration is the obvious next thing.
+- **Self-collision** — Robot/SkeletonRef goes from 23.6 m/s to 0.11 with
+  `--no-self`. Body-body is still exact only for single capsules and spheres, so
+  compounds are the suspect.
+
+RadStag is off the list: at 0.30 m/s in the full configuration it was fine, and
+the earlier reading came from a stale build.
+
 ## 2026-07-28i — A body is not one shape (and the machines were falling, not exploding)
 
 **This corrects 07-28g and 07-28h.** Those entries attributed the machine

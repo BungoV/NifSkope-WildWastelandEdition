@@ -565,7 +565,19 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    Compounding it, a body carries several shapes (Liberty Prime: 14 shapes / 12
    bodies) and the build kept only the last. Both fixed. Measure settling by
    SPEED, not energy — energy scales with mass.
-   **Open after 07-28i: 4 of 37 genuinely wrong** — eyebot (200 m/s), workshop
+   **07-28j: 32 of 37 settle** (< 1 m/s after 10 s), worst penetration 0.04 mm.
+   Per-body damping (dyn_motion +0x18/+0x1C) was decoded and unused; using it is
+   most of that gain. MEASURE OVER 10 s, NOT 5 — speed at 5 s on a chaotic falling
+   body is too noisy to steer by, and earlier decisions here were steered by it.
+   **Rejected on corpus evidence, do not retry blind:** 16 solver sweeps instead
+   of 4 (fixes the turret, breaks the sentry, 25/37 net) and scaling solverScale
+   by correction count rather than joint count (30/37, turret 60 -> 149 m/s).
+   **Open: 4 still moving** — eyebot (87 m/s) and workshop turret (60), both
+   HINGE, a convergence problem that 16 sweeps fixes locally; Robot/SkeletonRef
+   (9.0) and sentry (4.1), SELF-COLLISION (SkeletonRef drops to 0.11 with
+   `--no-self`). Next: per-joint adaptive iteration for stiff hinges, and exact
+   body-body collision for compounds.
+   (superseded) **Open after 07-28i: 4 of 37 genuinely wrong** — eyebot (200 m/s), workshop
    turret (66), Robot/SkeletonRef (24), radstag (12). 27 of 37 are at rest below
    1 m/s and 6 more are gently rocking. Body-body collision is still exact only
    for single capsules/spheres; a compound is a point set with no faces, so

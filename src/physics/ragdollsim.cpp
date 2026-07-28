@@ -438,6 +438,8 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 
 		const float mass = phys.mass > 0.0f ? phys.mass : sys.mass;
 		b.invMass = ( mass > 1.0e-6f ) ? 1.0f / mass : 0.0f;
+		b.linDamping = std::max( 0.0f, phys.linDamping );
+		b.angDamping = std::max( 0.0f, phys.angDamping );
 		b.layer = phys.layer;
 		b.filterGroup = phys.filterGroup;
 		b.filterFlags = phys.filterFlags;
@@ -692,6 +694,17 @@ void RagdollSim::solveContacts( float h )
 
 void RagdollSim::rescaleForJointCount()
 {
+	/* Scale by JOINT count, and resist the temptation to refine it.
+	 *
+	 * Weighting each joint by how many corrections it actually applies -- a hinge
+	 * aligns the axles and then bounds the swing, so it is worth three, not one --
+	 * sounds strictly better and measures worse: 30 of 37 ragdolls settling
+	 * against 32, with the workshop turret going from 60 m/s to 149. Softening
+	 * that hard leaves each sweep barely correcting, and the residual becomes
+	 * velocity. Raising the global sweep count instead is no better; 16 sweeps
+	 * fixed the turret and took the sentry from 8.7 m/s to 75. Both were tried on
+	 * the full corpus and both were rejected by it.
+	 */
 	for ( SimBody & b : m_bodies )
 		b.solverScale = 0.0f;       // reused as the count, normalised below
 	for ( const SimJoint & j : std::as_const( m_joints ) ) {
@@ -715,6 +728,8 @@ bool RagdollSim::buildTestCase( const QString & name )
 		b.x = pos;
 		b.q = rot;
 		b.invMass = 1.0f;       // 1 kg throughout, so energy is easy to read
+		b.linDamping = 0.0f;    // the rigs test conservation; damping would mask it
+		b.angDamping = 0.0f;
 		b.invInertia = Vector3( invInertia, invInertia, invInertia );
 		b.bodyId = m_bodies.size();
 		m_bodies.append( b );
@@ -805,6 +820,8 @@ bool RagdollSim::buildTestCase( const QString & name )
 		b.x = Vector3( 0, 0, 1.0f );
 		b.q = Quat( 1, 0, 0, 0 );
 		b.invMass = 1.0f;
+		b.linDamping = 0.0f;
+		b.angDamping = 0.0f;
 		b.invInertia = Vector3( 6, 6, 6 );     // unit cube, 1 kg
 		b.bodyId = 0;
 		b.shapeCount = 1;
@@ -979,7 +996,6 @@ void RagdollSim::step( float dt, int substeps )
 	if ( m_bodies.isEmpty() || substeps < 1 )
 		return;
 	const float h = dt / float( substeps );
-	const float damp = std::clamp( 1.0f - damping * h, 0.0f, 1.0f );
 
 	// broad phase once per step, not per substep: bodies move a fraction of a
 	// millimetre in a substep, so the candidate set cannot meaningfully change
@@ -992,8 +1008,9 @@ void RagdollSim::step( float dt, int substeps )
 			if ( b.pinned )
 				continue;
 			b.v += gravity * h;
-			b.v *= damp;
-			b.w *= damp;
+			// each body's own authored damping, plus whatever the caller added
+			b.v *= std::clamp( 1.0f - ( b.linDamping + damping ) * h, 0.0f, 1.0f );
+			b.w *= std::clamp( 1.0f - ( b.angDamping + damping ) * h, 0.0f, 1.0f );
 			b.x += b.v * h;
 			b.q = qIntegrate( b.q, b.w, h );
 		}
