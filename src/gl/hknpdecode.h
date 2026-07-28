@@ -338,6 +338,16 @@ struct HknpBone
 	//! what confirmed the 48-byte hkQsTransform stride.
 	Vector3 translation;
 	Quat rotation;
+	/*! Reference-pose scale. NOT (1,1,1): 767 of the 804 corpus bones carry
+	 * 0.99999994, one ULP below 1, and only the 37 roots carry exactly 1.
+	 *
+	 * A probe printing this as %.4f showed "1.0000" and I recorded it as unity.
+	 * Formatted output has now hidden four separate fields in this format --
+	 * see also HknpCompound::Instance::wPayload.
+	 */
+	Vector3 scale = Vector3( 1, 1, 1 );
+	//! w lanes of the pose's translation and scale, which are not derivable
+	quint32 poseTransW = 0, poseScaleW = 0;
 };
 
 /*! One hknpDynamicCompoundShape / hknpStaticCompoundShape as an OBJECT.
@@ -434,6 +444,8 @@ struct HknpSystem
 	QVector<HknpConstraint> constraints;
 	//! The ragdoll's own skeleton copy, indexed like the bodies. See HknpBone.
 	QVector<HknpBone> bones;
+	//! byte offset of the hkaSkeleton object in the packfile blob, or -1
+	qsizetype skeletonRawOffset = -1;
 	bool positionalBodies = false;
 	/*! The compound shapes as OBJECTS, alongside the flattened child shapes.
 	 *

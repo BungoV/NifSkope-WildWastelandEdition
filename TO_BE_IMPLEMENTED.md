@@ -916,11 +916,21 @@ Ordered by dependency:
    template-alone shortfall is accounted for: the misses are exactly the objects
    carrying the minority flag byte at +0xb0/+0x118 (2 hinges, 1 ragdoll).
 
-   **Still open:** `hkaSkeleton`, `hknpRagdollData` (the root, with the child/parent
-   frame order and the `+0x80` bone-count trap), and the packfile assembly that
-   binds everything -- which is now the real remaining work, since every leaf object
-   a ragdoll needs can be written. Compounds already proved a writer must emit fixup
-   entries rather than self-contained blobs (see 4d step 4).
+   ~~**hkaSkeleton**~~ — SHIPPED 07-29c, **37/37 byte-exact rebuilt from the decoded
+   bones alone**, no preserved template. Zero header; three hkArray descriptors at
+   +0x18/+0x28/+0x38 (pointer, count at +8, `count|0x80000000` at +12); parent
+   indices as hkInt16 at +0x90; bone records at `align16(0x90 + 2n)`, 16 bytes each;
+   reference pose 48 bytes each; total exactly `pose + 48n`. **Bone name pointers are
+   null on all 804** — the ragdoll's copy identifies bones by index, so no string
+   table and no fixups beyond the three array pointers. Two traps: the pose **scale
+   is 0.99999994, not 1** on 767 of 804 (only the 37 roots are exactly 1), and the
+   header carries four **negative zeros** at +0x54/+0x64/+0x74/+0x84.
+
+   **Still open:** `hknpRagdollData` (the root, with the child/parent frame order and
+   the `+0x80` bone-count trap) and the packfile assembly that binds everything --
+   which is now the real remaining work, since every other object a ragdoll needs can
+   be written. Compounds already proved a writer must emit fixup entries rather than
+   self-contained blobs (see 4d step 4).
 6. **Round-trip validation** over the corpus — DONE 07-28y for the shipped
    encoders, and it earned its keep: a 700-file stride sample of the full 34,985
    mesh tree caught 8 polytope failures in exactly the categories the skeletons do

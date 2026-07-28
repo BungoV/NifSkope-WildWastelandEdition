@@ -1,5 +1,51 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29c — hkaSkeleton: 37/37 from scratch, after formatted output lied again
+
+`hknpEncodeSkeleton`. **37 / 37 byte-exact, rebuilt entirely from the decoded bones
+with no source bytes fed back** — the first object here that reconstructs from
+modelled data alone rather than from a preserved template.
+
+Layout, all 37 with no exceptions: a zero header, three hkArray descriptors at
++0x18/+0x28/+0x38 (pointer, count at +8, `count|0x80000000` at +12), parent indices
+as `hkInt16` at +0x90, bone records at `align16(0x90 + 2n)` at 16 bytes each, and the
+reference pose at 48 bytes each. Total exactly `pose + 48n`. **A bone's name pointer
+is null on all 804** — the ragdoll's skeleton copy identifies bones by index and
+carries no strings, so there is no string table and no fixups beyond the three array
+pointers.
+
+**Two things I had recorded wrongly, and one of them is a repeat offence.**
+
+- **The reference-pose scale is not (1,1,1).** 767 of the 804 bones carry
+  **0.99999994**, one ULP below unity; only the 37 roots carry exactly 1. My probe
+  printed it as `%.4f`, saw "1.0000", and I wrote it down as unity — which is
+  precisely the mistake I had documented ninety minutes earlier for the compound's
+  `w` slots, and then made again. Formatted output has now concealed four separate
+  fields in this format: the compound `w` payloads, its negative zero, the
+  mass-properties exponent, and this.
+- **The header region +0x48..+0x8f holds four negative zeros.** An earlier probe
+  scanned only as far as it already understood and reported the header constant. The
+  compound had the same shape of miss at +0x70. Scanning to the end of the object is
+  now the rule, not the exception.
+
+Both are fixed at the source: `HknpBone` gained `scale` and the two pose `w` lanes,
+and the header constants are written explicitly.
+
+Every collision object in a vanilla ragdoll now round-trips:
+
+| object | result |
+|---|---|
+| `hkaSkeleton` | **37 / 37** (from scratch) |
+| `hkpRagdollConstraintData` | 521 / 521 |
+| `hkpLimitedHingeConstraintData` | 246 / 246 |
+| compounds | 10 / 10 |
+| polytopes | 68 / 68 |
+| spheres | 30 / 30 |
+| mass properties | 68 / 68 |
+| capsules | 819 / 819 structure |
+
+Self-tests green. `hknpRagdollData` and the packfile assembly are what remain.
+
 ## 2026-07-29b — The remaining constraint objects; every constraint type now writes
 
 Three more encoders, and with them **every constraint object in a vanilla ragdoll**:

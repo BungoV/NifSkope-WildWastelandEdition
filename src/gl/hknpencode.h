@@ -179,4 +179,27 @@ QByteArray hknpEncodePositionConstraintMotor();
 //! break threshold at +0x20. Only 3 exist in the corpus (two at 0, one at 0.01).
 QByteArray hknpEncodeBreakableConstraintData( float threshold );
 
+//! The three array pointers in an hkaSkeleton, all patched by LOCAL fixups.
+struct HknpSkeletonFixups
+{
+	qsizetype parentsPointer = 0x18, parents = 0x90;
+	qsizetype bonesPointer = 0x28, bones = 0;
+	qsizetype posePointer = 0x38, pose = 0;
+};
+
+/*! Write one hkaSkeleton. Variable length; empty if given no bones.
+ *
+ * Layout verified on all 37 corpus skeletons with no exceptions: a 24-byte zero
+ * header, three hkArray descriptors at +0x18/+0x28/+0x38 (pointer, then count at
+ * +8 and count|0x80000000 at +12), then parent indices as hkInt16 at +0x90, the
+ * bone records at align16(0x90 + 2n) at 16 bytes each, and the reference pose at
+ * 48 bytes each. Total is exactly pose + 48n.
+ *
+ * A bone record's name pointer is null on all 804 corpus bones -- the ragdoll's
+ * skeleton copy identifies bones by index and carries no strings -- so this needs
+ * no string table and no fixups beyond the three array pointers.
+ */
+QByteArray hknpEncodeSkeleton( const QVector<HknpBone> & bones,
+	HknpSkeletonFixups * fixups = nullptr );
+
 #endif // HKNPENCODE_H

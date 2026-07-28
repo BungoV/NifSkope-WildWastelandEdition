@@ -622,6 +622,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 		const quint32 n = r.u32( obj.first + 0x20 );
 		if ( par < 0 || n == 0 || n > 4096 )
 			continue;
+		sys.skeletonRawOffset = obj.first;
 		for ( quint32 i = 0; i < n && r.ok; i++ ) {
 			HknpBone b;
 			b.parent = qint16( r.u16( par + qsizetype( i ) * 2 ) );
@@ -633,6 +634,9 @@ HknpSystem hknpDecode( const QByteArray & data )
 				// Havok stores a quaternion xyzw; NifSkope's Quat is wxyz
 				b.rotation = Quat( r.f32( e + 28 ), r.f32( e + 16 ),
 					r.f32( e + 20 ), r.f32( e + 24 ) );
+				b.scale = r.vec3( e + 32 );
+				b.poseTransW = r.u32( e + 12 );
+				b.poseScaleW = r.u32( e + 44 );
 			}
 			sys.bones.append( b );
 		}

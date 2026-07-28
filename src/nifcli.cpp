@@ -912,6 +912,7 @@ int cmdCollisionRoundTrip( const QString & file )
 	int polys = 0, polysExact = 0, comps = 0, compsExact = 0;
 	int rdc = 0, rdcExact = 0, rdcFresh = 0, rdcFreshInert = 0;
 	int lhc = 0, lhcExact = 0, lhcFresh = 0, lhcFreshInert = 0;
+	int skel = 0, skelExact = 0, skelInert = 0;
 	QSet<int> rdcFreshDiff;
 	float worstVert = 0.0f, worstPlane = 0.0f;
 	QMap<int, int> byteHist;   // offset -> how often the structural bytes differed
@@ -933,6 +934,35 @@ int cmdCollisionRoundTrip( const QString & file )
 		const HknpSystem sys = hknpDecode( bytes );
 		if ( !sys.valid )
 			continue;
+
+		/* hkaSkeleton: rebuilt entirely from the decoded bones, no source bytes fed
+		 * back, so this is a real from-scratch test rather than a rewrite. The
+		 * hkQsTransform w lanes hold SIMD residue as everywhere else in this format.
+		 */
+		if ( sys.skeletonRawOffset >= 0 && !sys.bones.isEmpty() ) {
+			const QByteArray built = hknpEncodeSkeleton( sys.bones );
+			if ( !built.isEmpty() && sys.skeletonRawOffset + built.size() <= bytes.size() ) {
+				skel++;
+				const QByteArray was = bytes.mid( sys.skeletonRawOffset, built.size() );
+				if ( built == was ) {
+					skelExact++;
+				} else {
+					const int n = int( sys.bones.size() );
+					const qsizetype poseAt = ( ( 0x90 + 2 * n ) + 15 ) / 16 * 16 + 16 * n;
+					bool inert = true;
+					for ( int o = 0; o < built.size(); o += 4 ) {
+						if ( built.mid( o, 4 ) == was.mid( o, 4 ) )
+							continue;
+						const qsizetype rel = o - poseAt;
+						const bool wLane = rel >= 0 && ( ( rel % 48 ) == 12 || ( rel % 48 ) == 44 );
+						if ( !wLane )
+							inert = false;
+					}
+					if ( inert )
+						skelInert++;
+				}
+			}
+		}
 
 		// constraint datas: fixed-size atom chains, 416 for a ragdoll and 304 for a hinge
 		for ( const HknpConstraint & jc : sys.constraints ) {
@@ -1147,6 +1177,9 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( spheres )
 		out() << "spheres    " << spheres << "  byte-exact " << spheresExact
 			  << " / " << spheres << Qt::endl;
+	if ( skel )
+		out() << "hkaSkeleton " << skel << "  byte-exact " << skelExact
+			  << ", inert w lanes only " << skelInert << Qt::endl;
 	if ( lhc )
 		out() << "hingecon   " << lhc << "  byte-exact " << lhcExact << " / " << lhc
 			  << "  (from template alone: " << lhcFresh << " exact, "
@@ -1182,7 +1215,7 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( !total ) {
 		out() << "  no capsules to check" << Qt::endl;
 		return ( spheresExact < spheres || polysExact < polys || compsExact < comps
-			|| rdcExact < rdc || lhcExact < lhc
+			|| rdcExact < rdc || lhcExact < lhc || skelExact + skelInert < skel
 			|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 	}
 	out() << "  structure byte-exact   " << structOk << " / " << total << Qt::endl;
@@ -1197,6 +1230,7 @@ int cmdCollisionRoundTrip( const QString & file )
 	}
 	return ( structOk < total || spheresExact < spheres || polysExact < polys
 		|| compsExact < comps || rdcExact < rdc || lhcExact < lhc
+		|| skelExact + skelInert < skel
 		|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 }
 

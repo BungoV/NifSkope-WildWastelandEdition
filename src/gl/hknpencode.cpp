@@ -834,6 +834,61 @@ QByteArray hknpEncodeBreakableConstraintData( float threshold )
 	return out;
 }
 
+QByteArray hknpEncodeSkeleton( const QVector<HknpBone> & bones, HknpSkeletonFixups * fixups )
+{
+	const int n = int( bones.size() );
+	if ( n < 1 || n > 4096 )
+		return QByteArray();
+
+	const qsizetype parentsAt = 0x90;
+	const qsizetype bonesAt = ( ( parentsAt + 2 * n ) + 15 ) / 16 * 16;
+	const qsizetype poseAt = bonesAt + 16 * n;
+	const qsizetype size = poseAt + 48 * n;
+
+	QByteArray out( size, 0 );
+	const qsizetype desc[3] = { 0x18, 0x28, 0x38 };
+	for ( qsizetype d : desc ) {
+		setU32( out, d + 8, quint32( n ) );
+		setU32( out, d + 12, quint32( n ) | 0x80000000u );
+	}
+	/* Four negative zeros in the header, all 37 corpus skeletons.
+	 *
+	 * They sit past the array descriptors, in a region an earlier probe never
+	 * scanned because it stopped at the end of what it already understood. Writing
+	 * plain zero there is a different bit pattern.
+	 */
+	for ( qsizetype o : { 0x54, 0x64, 0x74, 0x84 } )
+		setU32( out, o, 0x80000000u );
+
+	for ( int i = 0; i < n; i++ ) {
+		setU16( out, parentsAt + i * 2, quint16( qint16( bones.at( i ).parent ) ) );
+		// bone record: null name pointer, then lockTranslation
+		setU32( out, bonesAt + i * 16 + 8, bones.at( i ).lockTranslation ? 1u : 0u );
+
+		const qsizetype p = poseAt + qsizetype( i ) * 48;
+		const HknpBone & b = bones.at( i );
+		for ( int k = 0; k < 3; k++ )
+			setFloat( out, p + k * 4, b.translation[k] );
+		// Havok stores the quaternion xyzw; NifSkope's Quat is wxyz
+		setFloat( out, p + 16, b.rotation[1] );
+		setFloat( out, p + 20, b.rotation[2] );
+		setFloat( out, p + 24, b.rotation[3] );
+		setFloat( out, p + 28, b.rotation[0] );
+		// scale is NOT unity: 767 of 804 corpus bones carry 0.99999994
+		for ( int k = 0; k < 3; k++ )
+			setFloat( out, p + 32 + k * 4, b.scale[k] );
+		setU32( out, p + 12, b.poseTransW );
+		setU32( out, p + 44, b.poseScaleW );
+	}
+
+	if ( fixups ) {
+		fixups->parents = parentsAt;
+		fixups->bones = bonesAt;
+		fixups->pose = poseAt;
+	}
+	return out;
+}
+
 QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Vector3 & inertiaRaw,
 	float volume, float mass, quint64 majorAxis )
 {
