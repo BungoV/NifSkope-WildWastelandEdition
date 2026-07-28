@@ -842,11 +842,38 @@ Reuse `hknpEncodeCapsuleShape` as the model: same convex family, same relArray
 convention, same w tagging, and validate the same way — structure byte-exact,
 geometry as a distance.
 
-### 4d. Compile every collision type — NEW 07-28f, agreed with bungo
+### 4d. Compile every collision type — DONE 07-29g (Cloth still deferred)
 
 Goal: write back every collision type, not just compressed meshes. Cloth is
-explicitly deferred. Today `hknpEncodeCompressedMesh` is the *only* encoder and
-the only caller is `collisiontools.cpp`, so everything else is a one-way trip.
+explicitly deferred. When this was written `hknpEncodeCompressedMesh` was the
+*only* encoder and the only caller was `collisiontools.cpp`, so everything else
+was a one-way trip.
+
+**Where it landed.** A 714-file stride sample of the 34,985-file mesh tree decodes
+and reassembles **470 of 470 packfiles byte-identical to what Havok wrote** -- both
+roots, every shape class, every constraint kind -- with zero refusals and zero
+structural differences. All 37 vanilla ragdolls are in that count.
+
+**What "done" means here, precisely.** Objects whose content is fully modelled are
+written from the model: both roots, body records, capsules, spheres, convex
+polytopes, compounds, mass properties, `hkaSkeleton`, ragdoll and limited-hinge
+constraints, the position motor and the breakable wrapper. Objects whose content
+is not reconstructible are written from their stored bytes with their fixups:
+compressed meshes and their data objects, compound shape data, material tables,
+scaled-convex wrappers, and constraint kinds with no encoder of their own. That
+distinction is measured, not asserted -- `--roundtrip` assembles each file twice,
+once with the stored bytes and once with everything re-derived, and reports both.
+
+**Compressed-mesh derivation is deliberately NOT part of this.** Rewriting an
+unedited mesh from decoded geometry would requantize it and change the file for no
+gain; carrying the bytes is strictly better. An EDITED mesh does not want a rewrite
+either -- it wants a fresh one, which is what `hknpEncodeCompressedMesh` already
+does and what the in-game validation covered. There is no third case.
+
+**Verified through the user-facing path**, not just the CLI: decompiling the
+SetDressing billboard yields an editable mesh of 710 vertices and 1089 triangles,
+which is the corrected decode exactly (it was 565 / 797 before the shared-vertex
+bound landed on 07-29h).
 
 Ordered by dependency:
 

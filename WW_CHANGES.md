@@ -1,5 +1,43 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29i — §4d closed, and the fix verified through the path a user takes
+
+The compile-every-collision-type campaign is done, and the shared-vertex fix is
+confirmed end to end rather than only in the CLI.
+
+**Decompiling the SetDressing billboard** — `Havok/Decompile All Compiled
+Collision`, the spell a user actually reaches for — now yields an editable mesh of
+**710 vertices and 1089 triangles**, which is the corrected decode exactly. Before
+yesterday's bound it would have produced 565 / 797, with vertices in the wrong
+places. The file's second, single-section mesh is unchanged at 64 / 32, which is
+the right answer for a mesh that shares nothing.
+
+That is the check that matters: the round-trip sweeps could never have caught the
+shared-vertex bug, because the bytes reassemble perfectly either way. Only
+something that *consumes* the decoded geometry can.
+
+### What §4d being "done" means, precisely
+
+Objects whose content is fully modelled are written from the model — both packfile
+roots, body records, capsules, spheres, convex polytopes, compounds, mass
+properties, `hkaSkeleton`, ragdoll and limited-hinge constraints, the position
+motor, the breakable wrapper. Objects whose content is not reconstructible are
+written from their stored bytes with their fixups — compressed meshes and their
+data objects, compound shape data, material tables, scaled-convex wrappers, and
+constraint kinds with no encoder of their own.
+
+The distinction is measured rather than asserted: `--roundtrip` assembles every
+file twice, once with the stored bytes and once with everything re-derived, and
+reports both numbers.
+
+**Compressed-mesh derivation is deliberately not part of it.** Rewriting an
+unedited mesh from decoded geometry would requantize it and change the file for no
+gain. An edited mesh does not want a rewrite either — it wants a fresh one, which
+is what `hknpEncodeCompressedMesh` already does and what the in-game validation
+covered. There is no third case, so there is nothing left to build here.
+
+Cloth remains deferred, as agreed.
+
 ## 2026-07-29h — a quarter of all collision meshes were decoding wrong
 
 Auditing the sticky-flag bug found yesterday turned up the thing it was hiding.
