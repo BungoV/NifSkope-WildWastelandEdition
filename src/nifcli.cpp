@@ -911,6 +911,7 @@ int cmdCollisionRoundTrip( const QString & file )
 	int massProps = 0, massPropsExact = 0, massPropsInert = 0;
 	int polys = 0, polysExact = 0, comps = 0, compsExact = 0;
 	int rdc = 0, rdcExact = 0, rdcFresh = 0, rdcFreshInert = 0;
+	int lhc = 0, lhcExact = 0, lhcFresh = 0, lhcFreshInert = 0;
 	QSet<int> rdcFreshDiff;
 	float worstVert = 0.0f, worstPlane = 0.0f;
 	QMap<int, int> byteHist;   // offset -> how often the structural bytes differed
@@ -933,8 +934,32 @@ int cmdCollisionRoundTrip( const QString & file )
 		if ( !sys.valid )
 			continue;
 
-		// ragdoll constraints: fixed 416-byte atom chains
+		// constraint datas: fixed-size atom chains, 416 for a ragdoll and 304 for a hinge
 		for ( const HknpConstraint & jc : sys.constraints ) {
+			const bool isHinge = ( jc.kind == QLatin1String( "hkpLimitedHingeConstraintData" ) );
+			if ( isHinge && jc.rawOffset >= 0 && jc.rawData.size() == 0x130 ) {
+				lhc++;
+				const QByteArray hWas = bytes.mid( jc.rawOffset, 0x130 );
+				if ( hknpEncodeLimitedHingeConstraintData( jc ) == hWas )
+					lhcExact++;
+				HknpConstraint hFresh = jc;
+				hFresh.rawData.clear();
+				const QByteArray hBuilt = hknpEncodeLimitedHingeConstraintData( hFresh );
+				bool hInert = true;
+				for ( int o = 0; o < 0x130; o += 4 ) {
+					if ( hBuilt.mid( o, 4 ) == hWas.mid( o, 4 ) )
+						continue;
+					const bool wLane = ( o == 0x3c || o == 0x4c || o == 0x5c || o == 0x6c
+									  || o == 0x7c || o == 0x8c || o == 0x9c || o == 0xac );
+					if ( !wLane )
+						hInert = false;
+				}
+				if ( hBuilt == hWas )
+					lhcFresh++;
+				else if ( hInert )
+					lhcFreshInert++;
+				continue;
+			}
 			if ( jc.kind != QLatin1String( "hkpRagdollConstraintData" )
 				|| jc.rawOffset < 0 || jc.rawData.size() != 0x1a0 )
 				continue;
@@ -1122,6 +1147,10 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( spheres )
 		out() << "spheres    " << spheres << "  byte-exact " << spheresExact
 			  << " / " << spheres << Qt::endl;
+	if ( lhc )
+		out() << "hingecon   " << lhc << "  byte-exact " << lhcExact << " / " << lhc
+			  << "  (from template alone: " << lhcFresh << " exact, "
+			  << lhcFreshInert << " inert w lanes)" << Qt::endl;
 	if ( rdc ) {
 		out() << "ragdollcon " << rdc << "  byte-exact " << rdcExact << " / " << rdc
 			  << "  (from template alone: " << rdcFresh << " exact, "
@@ -1153,7 +1182,8 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( !total ) {
 		out() << "  no capsules to check" << Qt::endl;
 		return ( spheresExact < spheres || polysExact < polys || compsExact < comps
-			|| rdcExact < rdc || massPropsExact + massPropsInert < massProps ) ? 1 : 0;
+			|| rdcExact < rdc || lhcExact < lhc
+			|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 	}
 	out() << "  structure byte-exact   " << structOk << " / " << total << Qt::endl;
 	out() << "  whole object exact     " << fullyExact << " / " << total << Qt::endl;
@@ -1166,7 +1196,7 @@ int cmdCollisionRoundTrip( const QString & file )
 		out() << Qt::endl;
 	}
 	return ( structOk < total || spheresExact < spheres || polysExact < polys
-		|| compsExact < comps || rdcExact < rdc
+		|| compsExact < comps || rdcExact < rdc || lhcExact < lhc
 		|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 }
 

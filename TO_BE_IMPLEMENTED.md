@@ -907,10 +907,20 @@ Ordered by dependency:
    rewrite preserves them; from the template alone, 518 of 521 differ in nothing
    else and one differs in a minority flag byte at +0xb0/+0x190.
 
-   **Still open:** `hkpLimitedHingeConstraintData` (chain known, fields not yet
-   mapped), the two 48-byte trivia, `hkaSkeleton`, `hknpRagdollData` (the root, with
-   the child/parent frame order and the `+0x80` bone-count trap), and the packfile
-   assembly that binds them.
+   **Every constraint object now writes** (07-29b): `hkpLimitedHingeConstraintData`
+   246/246 rewrite (244/246 from template), `hkpPositionConstraintMotor` 37/37 and
+   parameterless -- 48 bytes of which not one word varies -- and
+   `hknpBreakableConstraintData` 3/3, a single break threshold at +0x20. Hinge
+   fields: friction +0xf0, min/max +0xfc/+0x100, tau constant 1.0 where ragdoll
+   limits use 0.8; its pivotA is real, unlike the ragdoll type's. Every
+   template-alone shortfall is accounted for: the misses are exactly the objects
+   carrying the minority flag byte at +0xb0/+0x118 (2 hinges, 1 ragdoll).
+
+   **Still open:** `hkaSkeleton`, `hknpRagdollData` (the root, with the child/parent
+   frame order and the `+0x80` bone-count trap), and the packfile assembly that
+   binds everything -- which is now the real remaining work, since every leaf object
+   a ragdoll needs can be written. Compounds already proved a writer must emit fixup
+   entries rather than self-contained blobs (see 4d step 4).
 6. **Round-trip validation** over the corpus — DONE 07-28y for the shipped
    encoders, and it earned its keep: a 700-file stride sample of the full 34,985
    mesh tree caught 8 polytope failures in exactly the categories the skeletons do

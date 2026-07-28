@@ -159,4 +159,24 @@ QByteArray hknpEncodeCompoundShape( const HknpCompound & compound,
  */
 QByteArray hknpEncodeRagdollConstraintData( const HknpConstraint & constraint );
 
+/*! Write one hkpLimitedHingeConstraintData: always 304 bytes.
+ *
+ * Same treatment as the ragdoll constraint. Its chain is SET_LOCAL_TRANSFORMS,
+ * SETUP_STABILIZATION, ANG_MOTOR, ANG_FRICTION, ANG_LIMIT, TWO_D_ANG, BALL_SOCKET,
+ * identical on all 246 in the corpus, plus 8 bytes of alignment tail. Unlike the
+ * ragdoll type this one has a real pivotA -- hinges sit off the bone origin.
+ */
+QByteArray hknpEncodeLimitedHingeConstraintData( const HknpConstraint & constraint );
+
+/*! Write one hkpPositionConstraintMotor: always 48 bytes, and entirely constant.
+ *
+ * Not one of its 12 words varies across the 37 in the corpus, so there is nothing
+ * to parameterise. Present so a ragdoll writer does not have to carry a literal.
+ */
+QByteArray hknpEncodePositionConstraintMotor();
+
+//! Write one hknpBreakableConstraintData: 48 bytes, everything zero but the
+//! break threshold at +0x20. Only 3 exist in the corpus (two at 0, one at 0.01).
+QByteArray hknpEncodeBreakableConstraintData( float threshold );
+
 #endif // HKNPENCODE_H

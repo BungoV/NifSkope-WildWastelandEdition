@@ -771,6 +771,69 @@ QByteArray hknpEncodeRagdollConstraintData( const HknpConstraint & c )
 	return out;
 }
 
+//! Blank hkpLimitedHingeConstraintData, same construction as the ragdoll template.
+static QByteArray limitedHingeConstraintTemplate()
+{
+	QByteArray out( 0x130, 0 );
+	setU32( out, 0x20, 0x00000002u );	// SET_LOCAL_TRANSFORMS
+	setU32( out, 0xb0, 0x00010017u );	// SETUP_STABILIZATION
+	setU32( out, 0xb4, 0x7f7fffeeu );
+	setU32( out, 0xb8, 0x7f7fffeeu );
+	setU32( out, 0xbc, 0x5f7ffff0u );
+	setU32( out, 0xc0, 0x00000012u );	// ANG_MOTOR: nothing in it varies
+	setU32( out, 0xe8, 0x00010011u );	// ANG_FRICTION
+	setU32( out, 0xec, 0x00000001u );
+	setU32( out, 0xf8, 0x0001000eu );	// ANG_LIMIT, tau 1.0 (ragdoll limits use 0.8)
+	setFloat( out, 0x104, 1.0f );
+	setU32( out, 0x108, 0x0000000cu );	// TWO_D_ANG
+	setU32( out, 0x118, 0x00000005u );	// BALL_SOCKET
+	setU32( out, 0x11c, 0x00000030u );
+	setU32( out, 0x120, 0x7f7fffeeu );
+	return out;	// +0x128..+0x12f is alignment tail, zero throughout
+}
+
+QByteArray hknpEncodeLimitedHingeConstraintData( const HknpConstraint & c )
+{
+	QByteArray out = ( c.rawData.size() == 0x130 ) ? c.rawData : limitedHingeConstraintTemplate();
+
+	for ( int k = 0; k < 3; k++ ) {
+		for ( int a = 0; a < 3; a++ ) {
+			setFloat( out, 0x30 + k * 16 + a * 4, c.rotA[k][a] );
+			setFloat( out, 0x70 + k * 16 + a * 4, c.rotB[k][a] );
+		}
+	}
+	for ( int a = 0; a < 3; a++ ) {
+		setFloat( out, 0x60 + a * 4, c.pivotA[a] );
+		setFloat( out, 0xa0 + a * 4, c.pivotB[a] );
+	}
+	setFloat( out, 0xf0, c.friction );
+	if ( c.hinge.present ) {
+		setFloat( out, 0xfc, c.hinge.min );
+		setFloat( out, 0x100, c.hinge.max );
+	}
+	return out;
+}
+
+QByteArray hknpEncodePositionConstraintMotor()
+{
+	QByteArray out( 0x30, 0 );
+	setU32( out, 0x10, 0x00000001u );
+	setU32( out, 0x18, 0xc9742400u );
+	setFloat( out, 0x1c, 100.0f );
+	setFloat( out, 0x20, 0.8f );
+	setFloat( out, 0x24, 1.0f );
+	setFloat( out, 0x28, 5.0f );
+	setFloat( out, 0x2c, 0.2f );
+	return out;
+}
+
+QByteArray hknpEncodeBreakableConstraintData( float threshold )
+{
+	QByteArray out( 0x30, 0 );
+	setFloat( out, 0x20, threshold );
+	return out;
+}
+
 QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Vector3 & inertiaRaw,
 	float volume, float mass, quint64 majorAxis )
 {

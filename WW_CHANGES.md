@@ -1,5 +1,40 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29b — The remaining constraint objects; every constraint type now writes
+
+Three more encoders, and with them **every constraint object in a vanilla ragdoll**:
+
+| object | result |
+|---|---|
+| `hkpLimitedHingeConstraintData` | **246 / 246** rewrite, 244 / 246 from template alone |
+| `hkpRagdollConstraintData` (07-29a) | 521 / 521 rewrite, 520 / 521 from template |
+| `hkpPositionConstraintMotor` | **37 / 37**, and it takes no parameters at all |
+| `hknpBreakableConstraintData` | **3 / 3**, one float |
+
+The hinge decomposes exactly like the ragdoll type: chain `SET_LOCAL_TRANSFORMS`,
+`SETUP_STABILIZATION`, `ANG_MOTOR`, `ANG_FRICTION`, `ANG_LIMIT`, `TWO_D_ANG`,
+`BALL_SOCKET` plus 8 bytes of alignment tail, with `ANG_MOTOR` and `TWO_D_ANG`
+carrying no varying field anywhere. Fields: friction +0xf0, hinge min/max
++0xfc/+0x100, tau a constant 1.0 (ragdoll limits use 0.8). Unlike the ragdoll type
+its pivotA is real — a hinge sits off the bone origin, where a ragdoll joint is at it.
+
+**Both template-alone shortfalls are fully accounted for**, which is the part worth
+saying: the hinge misses exactly 2 and the ragdoll exactly 1, and those are precisely
+the objects carrying the minority flag byte at +0xb0/+0x118 (`17000000`/`05000100`
+against the usual `17000100`/`05000000`). The measured distribution is 244 / 2 and
+520 / 1. Nothing is unexplained.
+
+`hkpPositionConstraintMotor` is worth a line for being the simplest object in the
+format: 48 bytes, twelve words, **not one of which varies across all 37**. The
+encoder takes no arguments.
+
+The two trivial templates were checked by rebuilding them from the constants as
+written in the C++ and diffing against vanilla — 37/37 and 3/3 — rather than
+assuming the transcription was right, since a mistyped hex word would otherwise sit
+there silently until something loaded it.
+
+Self-tests green; corpus sweep clean, no mismatches.
+
 ## 2026-07-29a — Ragdoll constraints: the atom chain, and what a rewrite can't invent
 
 `hknpEncodeRagdollConstraintData`. **521 / 521 byte-exact** rewriting from the source
