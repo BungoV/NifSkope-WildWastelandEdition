@@ -872,7 +872,7 @@ Ordered by dependency:
    on actor skeletons and differ on static architecture. After the fix: polytopes
    269/269, spheres 4/4, mass properties 269/269 (245 exact + 24 inert exponent),
    capsules 78/78 structure. Re-run this whenever an encoder changes —
-   `scratchpad/rt_corpus.py`.
+   `tools/collision_roundtrip/rt_corpus.py`.
 
 **Standing lesson, earned three times in one session:** a corpus that cannot
 distinguish two hypotheses is not evidence for either. The brahmin's all-axis-aligned

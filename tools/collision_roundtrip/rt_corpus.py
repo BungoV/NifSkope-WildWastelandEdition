@@ -14,12 +14,12 @@ import subprocess
 import sys
 from collections import Counter, defaultdict
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-from hkpack import EXE
-
-ROOT = r"E:\Tools\Fallout 4\DataUnpacked\Data\meshes"
-WANT = int(sys.argv[1]) if len(sys.argv) > 1 else 700
+EXE = os.environ.get( "NIFSKOPE_EXE",
+	os.path.join( os.path.dirname( os.path.dirname( os.path.dirname(
+		os.path.abspath( __file__ ) ) ) ), "release", "NifSkope.exe" ) )
+ROOT = os.environ.get( "FO4_MESHES", os.path.join(
+	"E:" + os.sep, "Tools", "Fallout 4", "DataUnpacked", "Data", "meshes" ) )
+WANT = int( sys.argv[1] ) if len( sys.argv ) > 1 else 700
 
 PAT = {
     "polytopes": re.compile(r"polytopes\s+(\d+)\s+byte-exact (\d+)"),
@@ -69,7 +69,13 @@ def main():
                 seen[key] += int(m.group(1))
                 exact[key] += int(m.group(2))
                 hit = True
-                if int(m.group(2)) < int(m.group(1)):
+                # an all-zero packed vector keeps whatever exponent Havok landed on,
+                # which is inert and unrecoverable -- not a failure
+                shortfall = int(m.group(1)) - int(m.group(2))
+                if key == "massprops":
+                    mi = INERT.search(out)
+                    shortfall -= int(mi.group(1)) if mi else 0
+                if shortfall > 0:
                     bad.append((key, f, m.group(0)))
         mi = INERT.search(out)
         if mi:
