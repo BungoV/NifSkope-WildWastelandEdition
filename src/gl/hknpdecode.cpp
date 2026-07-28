@@ -322,6 +322,7 @@ static void decodeConvexLike( Reader & r, qsizetype B, const QString & className
 			loop.append( r.u8( pi + first + k ) );
 		if ( loop.size() >= 3 ) {
 			shape.faces.append( loop );
+			shape.faceAngles.append( r.u8( pf + f * 4 + 3 ) );
 			addFaceFan( shape, loop );
 		}
 	}

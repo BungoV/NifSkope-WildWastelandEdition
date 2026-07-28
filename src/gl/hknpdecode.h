@@ -24,6 +24,14 @@ struct HknpShape
 	QVector<Triangle> tris;
 	//! convex only: the original face loops (indices into verts)
 	QVector<QVector<int>> faces;
+	/*! convex only: Havok's per-face minHalfAngle byte, parallel to faces.
+	 *
+	 * The 4th byte of each face entry. It is NOT a flags constant -- across the 76
+	 * vanilla polytopes it takes dozens of values with no clustering, which is what
+	 * a quantized angle looks like. Capsules are the exception, where every face
+	 * carries 4. An encoder has to preserve or derive it, so it is kept.
+	 */
+	QVector<quint8> faceAngles;
 	//! convex only: face planes (nx, ny, nz, d)
 	QVector<Vector4> planes;
 	float convexRadius = 0.0f;

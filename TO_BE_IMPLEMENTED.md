@@ -767,6 +767,57 @@ corpus-wide (measured over 23 spheres).
 at +0x40 — exactly where a polytope's plane descriptor lives. Reading +0x40/+0x44/
 +0x48 as relArrays on a sphere reinterprets vertex floats as counts.
 
+### 4d-spec-polytope. Convex polytope — LAYOUT MEASURED 07-28u, encoder open
+
+The object layout is settled: measured over **76 vanilla polytopes with zero
+violations** of every rule below. What is *not* settled is three pieces of content,
+listed at the end — that is what stands between this and an encoder.
+
+**Variable length.** Everything follows from the counts:
+
+| region | at | size |
+|---|---|---|
+| header | +0x00 | 16 bytes zero |
+| flag word | +0x10 | `01000143` (74 of 76) or `01000043` (2). Capsule `010001c3`, sphere `01000111` |
+| convexRadius | +0x14 | float |
+| material CRC | +0x18 | u32 |
+| relArrays | +0x30 verts, +0x40 planes, +0x44 faces, +0x48 indices | u16 count + u16 offset from the field |
+| vertices | +0x50 | `nv` x 16, **nv always a multiple of 4** |
+| planes | +0x50 + nv*16 | `np` x 16, **np = roundup(nf, 4)** |
+| faces | planes end | `nf` x 4, **padded to roundup(nf, 4) entries** |
+| indices | faces end (after that padding) | `ni` x 1 byte |
+| total | | **align16(indices end)** |
+
+Note a polytope's vertices start at **+0x50**, where a capsule keeps capA — the
+capsule's end points push its own vertices out to +0x70.
+
+**Face entry** is `u16 firstIndex, u8 numIndices, u8 minHalfAngle`. Checked on all
+76: `firstIndex` is the running sum of the counts, and the counts sum to exactly
+`ni`. Counts run 3..8, most often 4.
+
+**Vertex w** is 0.5 with the vertex index in the low mantissa byte, as in a capsule
+— 2257 of 2296 slots. The other 39 are the multiple-of-4 padding slots, which
+repeat an earlier index.
+
+**Three things still to establish before writing the encoder:**
+
+1. **`minHalfAngle`.** Not a constant: dozens of values across the corpus with no
+   clustering, i.e. a quantized angle. Capsules are the exception at a flat 4. Now
+   preserved through the decode as `HknpShape::faceAngles`, so a round-trip encoder
+   can carry it, but *deriving* it for new geometry needs Havok's quantization.
+2. **Padding contents.** Both the vertex array and the plane array are padded to a
+   multiple of 4, and the spare planes are NOT one sentinel the way a capsule's are
+   — `(0,0,1,0)` in 50 slots, all-zero in 50, something else in 2. Harmless for
+   geometry, fatal for a byte comparison.
+3. **`hknpShapeMassProperties`.** Required (4d step 1); decode is done and the
+   format is in 4a. Writing it needs an hkPackedVector3 *writer* and, for general
+   hulls, the plane-offset volume and inertia by halfspace intersection. Boxes are
+   solved outright and are 28 of 37 in a 400-file sample.
+
+Reuse `hknpEncodeCapsuleShape` as the model: same convex family, same relArray
+convention, same w tagging, and validate the same way — structure byte-exact,
+geometry as a distance.
+
 ### 4d. Compile every collision type — NEW 07-28f, agreed with bungo
 
 Goal: write back every collision type, not just compressed meshes. Cloth is

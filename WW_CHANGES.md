@@ -1,5 +1,35 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28v — Polytope layout measured; encoder deliberately not started
+
+The convex polytope's layout is now pinned: **76 vanilla polytopes, zero violations**
+of every rule in TO_BE_IMPLEMENTED 4d-spec-polytope. Variable length, but everything
+follows from the counts — vertices at +0x50 (a capsule's end points push its own out
+to +0x70), `nv` always a multiple of 4, `np = roundup(nf, 4)`, the face array padded
+to the same multiple, indices after that padding, total `align16(end)`. Face entries
+are `u16 firstIndex, u8 numIndices, u8 minHalfAngle`, with `firstIndex` the running
+sum and the counts summing to exactly `ni`.
+
+**I stopped there rather than starting the encoder**, because measuring turned up
+three pieces of content that are not yet understood, and an encoder built without
+them would produce files that look right and are not:
+
+- `minHalfAngle` is not a flags constant. It takes dozens of values with no
+  clustering — a quantized angle. Capsules are the exception at a flat 4. It is now
+  preserved through the decode as `HknpShape::faceAngles`, so a round-trip can carry
+  it, but deriving it for *new* geometry needs Havok's quantization rule.
+- The array padding has no single fill. Spare plane slots are `(0,0,1,0)` in 50
+  cases, all-zero in 50, something else in 2 — unlike the capsule's, which is one
+  sentinel corpus-wide. Harmless geometrically, fatal to a byte comparison.
+- `hknpShapeMassProperties` still needs a writer: an hkPackedVector3 encoder, and
+  for general hulls the plane-offset volume and inertia by halfspace intersection.
+
+That is a better place to leave it than a half-built encoder. The layout is the
+expensive part and it is now banked and validated; the remaining three are each a
+self-contained question.
+
+Self-tests green; capsules 819/819 and spheres 30/30 unchanged.
+
 ## 2026-07-28u — The sphere encoder: 30 of 30 byte-exact
 
 `hknpEncodeSphereShape`, and `--roundtrip` now covers spheres too. **30 of 30
