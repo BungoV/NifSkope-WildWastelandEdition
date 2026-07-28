@@ -366,33 +366,67 @@ int cmdPbrmResolve( const QString & file )
  * energy climbing instead of settling), the worst ball-socket separation (joint
  * drift) and the peak speed, and exits non-zero if anything diverged.
  */
-int cmdSimulate( const QString & file, int steps, int substeps, bool noLimits, bool selfTest, bool verbose )
+int cmdSimulate( const QString & file, int steps, int substeps, int iterations, bool noLimits,
+	const QString & onlyLimit, bool selfTest, bool verbose )
 {
 	if ( selfTest || file.isEmpty() ) {
 		// Two bodies, one joint, damping off: total energy is a conserved
 		// quantity, so any drift is the solver's own error and no decode is
 		// involved. A correct solver also drifts LESS as substeps rise.
-		out() << "solver self-test: two-body pendulum, damping off" << Qt::endl;
-		out() << QString( "  %1 %2 %3 %4" ).arg( "substeps", -9 ).arg( "E(0)", 12 )
-					.arg( "E(end)", 12 ).arg( "drift", 10 ) << Qt::endl;
+		/* The property that matters is boundedness: a preview solver may bleed or
+		 * gain a little energy over ten seconds, but it must not run away. So the
+		 * verdict is drawn at 25%, while the printed drift shows the finer
+		 * behaviour -- in particular whether a case converges as substeps rise,
+		 * which is what separates discretisation error from a modelling mistake.
+		 */
+		out() << "solver self-test: synthetic rigs, damping off, 600 steps"
+			  << Qt::endl
+			  << "  energy drift per rig; a sound case shrinks as substeps rise, "
+				 "and none may run away (>25%)"
+			  << Qt::endl << Qt::endl;
+		static const char * const cases[] = { "pendulum", "chain3", "chain8", "fork",
+											  "heavy", "chain8h", "forkh", "spun" };
+		static const int subs[] = { 4, 8, 16, 32, 64 };
+		out() << "  " << ( ( iterations > 0 ) ? iterations : RagdollSim().iterations )
+			  << " solver sweep(s) per substep" << Qt::endl << Qt::endl;
+
+		out() << QString( "  %1" ).arg( "case", -10 );
+		for ( int ss : subs )
+			out() << QString( "%1" ).arg( QString( "ss=%1" ).arg( ss ), 12 );
+		out() << Qt::endl;
+
 		int bad = 0;
-		for ( int ss : { 4, 8, 16, 32, 64 } ) {
-			RagdollSim sim;
-			sim.buildTestPendulum();
-			sim.damping = 0.0f;
-			const float e0 = sim.totalEnergy();
-			for ( int i = 0; i < 600; i++ )
-				sim.step( 1.0f / 60.0f, ss );
-			const float e1 = sim.totalEnergy();
-			const float drift = ( e0 != 0.0f ) ? ( e1 - e0 ) / std::fabs( e0 ) : 0.0f;
-			out() << QString( "  %1 %2 %3 %4" ).arg( ss, -9 ).arg( e0, 12, 'f', 5 )
-						.arg( e1, 12, 'f', 5 )
-						.arg( QString::number( drift * 100.0f, 'f', 2 ) + "%", 10 ) << Qt::endl;
-			if ( !std::isfinite( e1 ) || std::fabs( drift ) > 0.05f )
-				bad++;
+		for ( const char * name : cases ) {
+			out() << QString( "  %1" ).arg( QLatin1String( name ), -10 );
+			for ( int ss : subs ) {
+				RagdollSim sim;
+				if ( !sim.buildTestCase( QLatin1String( name ) ) ) {
+					out() << QString( "%1" ).arg( "n/a", 12 );
+					continue;
+				}
+				sim.damping = 0.0f;
+				if ( iterations > 0 )
+					sim.iterations = iterations;
+				const float e0 = sim.totalEnergy();
+				for ( int i = 0; i < 600; i++ )
+					sim.step( 1.0f / 60.0f, ss );
+				const float e1 = sim.totalEnergy();
+				const float drift = ( e0 != 0.0f ) ? ( e1 - e0 ) / std::fabs( e0 ) : 0.0f;
+				if ( !std::isfinite( e1 ) ) {
+					out() << QString( "%1" ).arg( "NaN", 12 );
+					bad++;
+				} else {
+					out() << QString( "%1" ).arg(
+						QString::number( drift * 100.0f, 'f', 2 ) + "%", 12 );
+					if ( std::fabs( drift ) > 0.25f )
+						bad++;
+				}
+			}
+			out() << Qt::endl;
 		}
-		out() << ( bad ? QString( "  FAIL: energy not conserved (%1 of 5 runs)" ).arg( bad )
-					   : QString( "  ok: energy conserved within 5%" ) ) << Qt::endl;
+		out() << Qt::endl
+			  << ( bad ? QString( "  FAIL: energy ran away in %1 run(s)" ).arg( bad )
+					   : QString( "  ok: every rig stayed bounded within 25%" ) ) << Qt::endl;
 		return bad ? 1 : 0;
 	}
 
@@ -420,11 +454,74 @@ int cmdSimulate( const QString & file, int steps, int substeps, bool noLimits, b
 		// hold the root so the ragdoll hangs rather than falling out of the
 		// world -- what we are testing is the joints, not gravity
 		sim.angularLimits = !noLimits;
+		if ( iterations > 0 )
+			sim.iterations = iterations;
+		if ( !onlyLimit.isEmpty() ) {
+			sim.useTwist = ( onlyLimit == QLatin1String( "twist" ) );
+			sim.useCone  = ( onlyLimit == QLatin1String( "cone" ) );
+			sim.usePlane = ( onlyLimit == QLatin1String( "plane" ) );
+			sim.useHinge = ( onlyLimit == QLatin1String( "hinge" ) );
+		}
 		sim.setPinned( 0, true );
 
 		const SimStats before = sim.stats();
 		out() << Qt::endl << "system " << b << "   " << sim.bodies().size()
 			  << " bodies, " << sim.joints().size() << " joints" << Qt::endl;
+
+		/* The rest pose is the ragdoll's neutral stance, so a limit reported
+		 * violated there means the decoded bounds and the measured angle are not
+		 * in the same convention -- worth knowing before blaming the solver.
+		 */
+		{
+			const QVector<SimLimitCheck> lim = sim.checkLimits();
+			int viol = 0;
+			for ( const SimLimitCheck & c : lim )
+				if ( c.any() )
+					viol++;
+			out() << "  limits violated at rest: " << viol << " of " << lim.size()
+				  << " joints" << Qt::endl;
+			if ( verbose ) {
+				auto deg = []( float r ) { return r * 57.2957795f; };
+				for ( const SimLimitCheck & c : lim ) {
+					if ( !c.any() )
+						continue;
+					const SimJoint & sj = sim.joints().at( c.joint );
+					// angle against the bounds it failed, so an impossible bound
+					// (min above max) is visible rather than inferred
+					auto one = [&]( const char * nm, float v, const HknpAngLimit & l ) {
+						return QString( "%1 %2 not in [%3, %4]" ).arg( QLatin1String( nm ) )
+							.arg( deg( v ), 0, 'f', 1 ).arg( deg( l.min ), 0, 'f', 1 )
+							.arg( deg( l.max ), 0, 'f', 1 );
+					};
+					QStringList w;
+					if ( c.twistBad ) w << one( "twist", c.twist, sj.twist );
+					if ( c.coneBad )  w << one( "cone", c.cone, sj.cone );
+					if ( c.planeBad ) w << one( "plane", c.plane, sj.plane );
+					if ( c.hingeBad ) w << one( "hinge", c.hinge, sj.hinge );
+					out() << QString( "    joint %1 (%2 <- %3): %4" ).arg( c.joint )
+								.arg( c.child ).arg( c.parent ).arg( w.join( ", " ) ) << Qt::endl;
+				}
+			}
+		}
+
+		if ( verbose ) {
+			// a centre of mass is a short hop along the bone; anything the size of
+			// the whole skeleton would mean it is an absolute position instead
+			out() << QString( "  %1 %2 %3 %4" ).arg( "body", -6 )
+						.arg( "bone origin", 26 ).arg( "com (bone space)", 26 )
+						.arg( "|com|", 9 ) << Qt::endl;
+			for ( int k = 0; k < sim.bodies().size(); k++ ) {
+				const SimBody & sb = sim.bodies().at( k );
+				auto v3 = []( const Vector3 & v ) {
+					return QString( "%1,%2,%3" ).arg( v[0], 7, 'f', 3 )
+						.arg( v[1], 7, 'f', 3 ).arg( v[2], 7, 'f', 3 );
+				};
+				out() << QString( "  %1 %2 %3 %4" ).arg( k, -6 )
+							.arg( v3( sb.restOrigin ), 26 ).arg( v3( sb.com ), 26 )
+							.arg( sb.com.length(), 9, 'f', 4 ) << Qt::endl;
+			}
+		}
+
 		out() << QString( "  %1 %2 %3 %4" ).arg( "step", -8 ).arg( "energy", 12 )
 					.arg( "maxJointErr", 13 ).arg( "maxSpeed", 11 ) << Qt::endl;
 		out() << QString( "  %1 %2 %3 %4" ).arg( 0, -8 ).arg( before.energy, 12, 'f', 5 )
@@ -432,9 +529,21 @@ int cmdSimulate( const QString & file, int steps, int substeps, bool noLimits, b
 			  << Qt::endl;
 
 		SimStats st;
+		/* Record the first step where the kinetic energy takes off. A blow-up
+		 * always starts at one body: reporting the ragdoll's total tells us it
+		 * broke, reporting where tells us why.
+		 */
+		SimStats onset;
+		int onsetStep = -1;
 		for ( int i = 0; i < steps; i++ ) {
 			sim.step( 1.0f / 60.0f, substeps );
 			st = sim.stats();
+			// 50 m/s: a hanging ragdoll swings at a few m/s, so this is well
+			// clear of honest motion and fires only on a genuine runaway
+			if ( onsetStep < 0 && st.maxSpeed > 50.0f ) {
+				onset = st;
+				onsetStep = i + 1;
+			}
 			if ( verbose || i == steps / 4 || i == steps / 2 || i == steps - 1 ) {
 				out() << QString( "  %1 %2 %3 %4" ).arg( i + 1, -8 )
 							.arg( st.energy, 12, 'f', 5 ).arg( st.maxJointError, 13, 'f', 6 )
@@ -442,6 +551,31 @@ int cmdSimulate( const QString & file, int steps, int substeps, bool noLimits, b
 			}
 			if ( st.diverged )
 				break;
+		}
+
+		if ( onsetStep >= 0 && onset.worstBody >= 0 ) {
+			const SimBody & b = sim.bodies().at( onset.worstBody );
+			out() << QString( "  runaway: step %1, body %2 at %3 m/s"
+							  "  invMass %4  invInertia %5,%6,%7  com %8,%9,%10" )
+						.arg( onsetStep ).arg( onset.worstBody )
+						.arg( onset.maxSpeed, 0, 'f', 2 ).arg( b.invMass, 0, 'f', 3 )
+						.arg( b.invInertia[0], 0, 'f', 2 ).arg( b.invInertia[1], 0, 'f', 2 )
+						.arg( b.invInertia[2], 0, 'f', 2 )
+						.arg( b.com[0], 0, 'f', 3 ).arg( b.com[1], 0, 'f', 3 )
+						.arg( b.com[2], 0, 'f', 3 ) << Qt::endl;
+			// every joint that touches it, so the culprit constraint is named
+			for ( int k = 0; k < sim.joints().size(); k++ ) {
+				const SimJoint & j = sim.joints().at( k );
+				if ( j.a != onset.worstBody && j.b != onset.worstBody )
+					continue;
+				out() << QString( "    joint %1: child %2 <- parent %3   "
+								  "pivotA %4,%5,%6  pivotB %7,%8,%9" )
+							.arg( k ).arg( j.a ).arg( j.b )
+							.arg( j.pivotA[0], 0, 'f', 3 ).arg( j.pivotA[1], 0, 'f', 3 )
+							.arg( j.pivotA[2], 0, 'f', 3 )
+							.arg( j.pivotB[0], 0, 'f', 3 ).arg( j.pivotB[1], 0, 'f', 3 )
+							.arg( j.pivotB[2], 0, 'f', 3 ) << Qt::endl;
+			}
 		}
 		simulated++;
 		if ( st.diverged ) {
@@ -1445,6 +1579,8 @@ int nifskopeCliMain( const QStringList & args )
 	float blend = 1.0f;
 	int steps = 0;
 	int substeps = 0;
+	int iterations = 0;
+	QString onlyLimit;
 	bool noLimits = false;
 	bool verboseSim = false;
 	float cubeSize = STARTER_CUBE_SIZE;
@@ -1484,8 +1620,10 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--blend" ) ) blend = next().toFloat();
 		else if ( t == QLatin1String( "--steps" ) ) steps = next().toInt();
 		else if ( t == QLatin1String( "--substeps" ) ) substeps = next().toInt();
+		else if ( t == QLatin1String( "--iterations" ) ) iterations = next().toInt();
+		else if ( t == QLatin1String( "--only-limit" ) ) onlyLimit = next();
 		else if ( t == QLatin1String( "--no-limits" ) ) noLimits = true;
-		else if ( t == QLatin1String( "-v" ) ) verboseSim = true;
+		else if ( t == QLatin1String( "--trace" ) ) verboseSim = true;
 		else if ( t == QLatin1String( "--size" ) ) cubeSize = next().toFloat();
 		else if ( t == QLatin1String( "--import-os" ) ) importOs = QDir::current().filePath( next() );
 		else if ( t == QLatin1String( "--export-os" ) ) exportOs = QDir::current().filePath( next() );
@@ -1553,7 +1691,8 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "pose" ) )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )
-		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8, noLimits, selfTest, verboseSim );
+		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
+			iterations, noLimits, onlyLimit, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
 		rc = cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )

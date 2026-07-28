@@ -719,7 +719,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 			phys.hasMotion = ( r.u32( c + 0x0c ) != 0x7fffffffu );
 			if ( phys.layer == 0 )
 				phys.layer = ( sys.dynamic && phys.hasMotion ) ? 10u : 1u;
-			phys.com = r.vec3( c + 0x30 );
+			phys.position = r.vec3( c + 0x30 );
 			/* Per-body dynamics.
 			 *
 			 * cinfo +0x0c is the body's MOTION INDEX into dyn_motion /

@@ -75,7 +75,16 @@ struct HknpBodyPhys
 	bool hasMotion = false;     //!< cinfo +0x0C != 0x7fffffff (dynamic body)
 	float friction = 0.5f;      //!< body_props +0x12 (truncated float16)
 	float restitution = 0.4f;   //!< body_props +0x16 (truncated float16)
-	Vector3 com;                //!< cinfo +0x30 (center of mass for dynamic)
+	/*! cinfo +0x30: the body's POSITION, not its centre of mass.
+	 *
+	 * Measured on the brahmin ragdoll: all 39 entries equal the bone origin
+	 * obtained by accumulating hkaSkeleton's referencePose down the hierarchy, to
+	 * every decimal place printed. Reading it as a centre-of-mass offset puts a
+	 * limb a metre away from its own bone. It doubles as an independent check on
+	 * the skeleton decode, since the two come from unrelated parts of the file
+	 * and agree exactly.
+	 */
+	Vector3 position;
 
 	/* Per-body dynamics. A ragdoll has one entry per bone in the root's
 	 * dyn_motion (+0x20, stride 0x40) and dyn_inertia (+0x30, stride 0x70)

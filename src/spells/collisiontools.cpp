@@ -1217,7 +1217,7 @@ private:
 			keyframed->setChecked( false ); linkedGroup->setChecked( phys.filterFlags & 0x80u );
 			collisionWithinGroup->setChecked( !( phys.filterFlags & 0x40u ) ); wind->setChecked( false );
 			filterGroup->setValue( phys.filterGroup );
-			centerX->setValue( phys.com[0] ); centerY->setValue( phys.com[1] ); centerZ->setValue( phys.com[2] );
+			centerX->setValue( phys.position[0] ); centerY->setValue( phys.position[1] ); centerZ->setValue( phys.position[2] );
 			inertiaX->setValue( phys.inertia[0] ); inertiaY->setValue( phys.inertia[1] ); inertiaZ->setValue( phys.inertia[2] );
 			penetrationDepth->setValue( 0.15 );
 			quint32 materialValue = 0;

@@ -74,12 +74,18 @@ Quat qFromRows( const Vector3 & r0, const Vector3 & r1, const Vector3 & r2 )
 	return qNorm( Quat( ( m10 - m01 ) / s, ( m02 + m20 ) / s, ( m12 + m21 ) / s, 0.25f * s ) );
 }
 
-//! world-space inverse inertia applied to v, for a diagonal body-space tensor
+/*! World-space inverse inertia applied to v, for a diagonal body-space tensor.
+ *
+ * Carries the mass-splitting scale, so every use of it -- both computing a
+ * correction's size and applying it -- is scaled consistently. Scaling only one
+ * of the two would break the constraint solve rather than soften it.
+ */
 inline Vector3 applyInvInertia( const SimBody & b, const Vector3 & v )
 {
 	const Vector3 local = qRot( qConj( b.q ), v );
-	const Vector3 scaled( local[0] * b.invInertia[0], local[1] * b.invInertia[1],
-		local[2] * b.invInertia[2] );
+	const float s = b.solverScale;
+	const Vector3 scaled( local[0] * b.invInertia[0] * s, local[1] * b.invInertia[1] * s,
+		local[2] * b.invInertia[2] * s );
 	return qRot( b.q, scaled );
 }
 
@@ -89,7 +95,7 @@ inline float genInvMass( const SimBody & b, const Vector3 & r, const Vector3 & n
 	if ( b.invMass <= 0.0f && b.invInertia.length() <= 0.0f )
 		return 0.0f;
 	const Vector3 rn = Vector3::crossproduct( r, n );
-	return b.invMass + Vector3::dotproduct( rn, applyInvInertia( b, rn ) );
+	return b.invMass * b.solverScale + Vector3::dotproduct( rn, applyInvInertia( b, rn ) );
 }
 
 //! XPBD positional correction between two bodies at world offsets rA / rB
@@ -108,12 +114,12 @@ void applyPositional( SimBody & A, SimBody & B, const Vector3 & rA, const Vector
 
 	const Vector3 p = n * ( c / wSum );
 	if ( !A.pinned ) {
-		A.x += p * A.invMass;
+		A.x += p * ( A.invMass * A.solverScale );
 		const Vector3 t = applyInvInertia( A, Vector3::crossproduct( rA, p ) );
 		A.q = qIntegrate( A.q, t, 1.0f );
 	}
 	if ( !B.pinned ) {
-		B.x -= p * B.invMass;
+		B.x -= p * ( B.invMass * B.solverScale );
 		const Vector3 t = applyInvInertia( B, Vector3::crossproduct( rB, p ) );
 		B.q = qIntegrate( B.q, -t, 1.0f );
 	}
@@ -139,12 +145,30 @@ void applyAngular( SimBody & A, SimBody & B, const Vector3 & corr )
 		B.q = qIntegrate( B.q, -applyInvInertia( B, p ), 1.0f );
 }
 
-/*! Constrain the angle of n1 about n to [lo, hi], correcting toward the nearer
- *  bound. This is Muller's limitAngle; the branchy bit is unwrapping the signed
- *  angle so a limit that straddles +-pi still behaves.
+/*! The two joint frames in world. Column 0 is the twist axis and 1 and 2 the
+ *  swing axes, matching how the hkTransform rows were decoded.
+ *
+ * Shared by the solver and the limit report on purpose: a report that measured
+ * the angles its own way could disagree with the solver and send us hunting the
+ * wrong thing.
  */
-bool limitAngle( SimBody & A, SimBody & B, const Vector3 & n, const Vector3 & n1,
-	const Vector3 & n2, float lo, float hi )
+struct JointAxes { Vector3 a0, a1, b0, b1, b2; };
+
+JointAxes jointAxes( const SimBody & A, const SimBody & B, const SimJoint & j )
+{
+	const Quat fa = qMul( A.q, j.frameA );
+	const Quat fb = qMul( B.q, j.frameB );
+	JointAxes ax;
+	ax.a0 = qRot( fa, Vector3( 1, 0, 0 ) );
+	ax.a1 = qRot( fa, Vector3( 0, 1, 0 ) );
+	ax.b0 = qRot( fb, Vector3( 1, 0, 0 ) );
+	ax.b1 = qRot( fb, Vector3( 0, 1, 0 ) );
+	ax.b2 = qRot( fb, Vector3( 0, 0, 1 ) );
+	return ax;
+}
+
+//! Signed angle from n1 to n2 measured about n, unwrapped to [-pi, pi].
+float signedAngle( const Vector3 & n, const Vector3 & n1, const Vector3 & n2 )
 {
 	const float PI_F = 3.14159265358979323846f;
 	float phi = std::asin( std::clamp(
@@ -155,7 +179,17 @@ bool limitAngle( SimBody & A, SimBody & B, const Vector3 & n, const Vector3 & n1
 		phi -= 2.0f * PI_F;
 	if ( phi < -PI_F )
 		phi += 2.0f * PI_F;
+	return phi;
+}
 
+/*! Constrain the angle of n1 about n to [lo, hi], correcting toward the nearer
+ *  bound. This is Muller's limitAngle; the fiddly part is the unwrapping above,
+ *  so that a limit straddling +-pi still behaves.
+ */
+bool limitAngle( SimBody & A, SimBody & B, const Vector3 & n, const Vector3 & n1,
+	const Vector3 & n2, float lo, float hi )
+{
+	float phi = signedAngle( n, n1, n2 );
 	if ( phi >= lo && phi <= hi )
 		return false;
 
@@ -241,12 +275,33 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		b.capA = s.capA;
 		b.capB = s.capB;
 		b.radius = s.primRadius;
-		// body origin is the BONE origin, so the joint pivots -- which are given
-		// in bone space -- can be used as they stand
-		b.x = restPos.value( s.bodyId );
-		b.q = restRot.value( s.bodyId );
 
 		const HknpBodyPhys phys = sys.bodyPhys.value( s.bodyId );
+		/* Sit the body on its CENTRE OF MASS, not on the bone origin.
+		 *
+		 * The inertia tensor is expressed about the centre of mass, and a limb
+		 * bone's origin is its joint -- a good 0.2 m away. Treating the two as one
+		 * point applies the tensor about the wrong axis: by the parallel axis
+		 * theorem the true inertia about the bone origin is larger by m*d^2, which
+		 * on the brahmin thigh is a factor of about 27. The solver then
+		 * over-rotates every correction, the far end of the bone whips, and the
+		 * next substep has a bigger violation to fix than the one it just fixed.
+		 * That is a MODELLING error, not a discretisation one, which is precisely
+		 * why more substeps made the blow-up worse instead of better.
+		 *
+		 * The file has no centre-of-mass field to read -- cinfo +0x30 turns out to
+		 * be the body position, equal to the bone origin on all 39 brahmin bodies
+		 * -- so take the shape's own centroid. The decoded tensor corroborates it:
+		 * body 8's I_xx gives a capsule radius of 0.083 m and its I_yy a length of
+		 * 0.59 m, which is the 0.428 m bone plus a radius at each end. Read as a
+		 * bone-origin tensor the same numbers would imply a 0.30 m capsule on a
+		 * 0.428 m bone, i.e. one that fails to reach its own child joint.
+		 */
+		b.com = ( s.primType == 2 ) ? ( s.capA + s.capB ) / 2.0f : s.capA;
+		b.restOrigin = restPos.value( s.bodyId );
+		b.x = restPos.value( s.bodyId ) + qRot( restRot.value( s.bodyId ), b.com );
+		b.q = restRot.value( s.bodyId );
+
 		const float mass = phys.mass > 0.0f ? phys.mass : sys.mass;
 		b.invMass = ( mass > 1.0e-6f ) ? 1.0f / mass : 0.0f;
 		/* dyn_inertia +0x20 holds INVERSE inertia, not inertia.
@@ -273,53 +328,158 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		SimJoint j;
 		j.a = jc.childBody;
 		j.b = jc.parentBody;
-		// already in each body's own space, and our body origin IS the bone
-		// origin, so these are used as they stand
-		j.pivotA = jc.pivotA;
-		j.pivotB = jc.pivotB;
-		j.frameA = qFromRows( jc.rotA[0], jc.rotA[1], jc.rotA[2] );
-		j.frameB = qFromRows( jc.rotB[0], jc.rotB[1], jc.rotB[2] );
+		// the decoded pivots are in bone space, but a body now sits on its centre
+		// of mass, so rebase them onto the same origin the solver rotates about
+		j.pivotA = jc.pivotA - m_bodies.at( jc.childBody ).com;
+		j.pivotB = jc.pivotB - m_bodies.at( jc.parentBody ).com;
+		/* The three decoded hkVector4 are hkRotation's COLUMNS, not its rows.
+		 *
+		 * qFromRows reads them as rows, so it yields the transpose; for a rotation
+		 * that is the inverse, and the conjugate undoes it. Getting this backwards
+		 * is not subtle in its effects but is invisible in the numbers: it left 22
+		 * of the brahmin's 38 joints violating their own limits in the rest pose,
+		 * with cone angles up to 169 degrees, and the solver then fought that
+		 * every substep.
+		 */
+		j.frameA = qConj( qFromRows( jc.rotA[0], jc.rotA[1], jc.rotA[2] ) );
+		j.frameB = qConj( qFromRows( jc.rotB[0], jc.rotB[1], jc.rotB[2] ) );
 		j.twist = jc.twist;
 		j.cone = jc.cone;
 		j.plane = jc.plane;
 		j.hinge = jc.hinge;
+		/* A range stored the wrong way round is not satisfiable by anything, so
+		 * the solver would correct it on every substep for ever. Two vanilla
+		 * hinges are authored that way. std::clamp with lo above hi is undefined
+		 * behaviour besides, so this is not merely tidiness.
+		 */
+		for ( HknpAngLimit * l : { &j.twist, &j.cone, &j.plane, &j.hinge } )
+			if ( l->present && l->min > l->max )
+				std::swap( l->min, l->max );
 		m_joints.append( j );
 	}
 
+	rescaleForJointCount();
 	return true;
 }
 
-void RagdollSim::buildTestPendulum()
+void RagdollSim::rescaleForJointCount()
+{
+	for ( SimBody & b : m_bodies )
+		b.solverScale = 0.0f;       // reused as the count, normalised below
+	for ( const SimJoint & j : std::as_const( m_joints ) ) {
+		if ( j.a >= 0 && j.a < m_bodies.size() )
+			m_bodies[j.a].solverScale += 1.0f;
+		if ( j.b >= 0 && j.b < m_bodies.size() )
+			m_bodies[j.b].solverScale += 1.0f;
+	}
+	for ( SimBody & b : m_bodies )
+		b.solverScale = ( b.solverScale > 1.0f ) ? 1.0f / b.solverScale : 1.0f;
+}
+
+bool RagdollSim::buildTestCase( const QString & name )
 {
 	m_bodies.clear();
 	m_joints.clear();
 
-	SimBody anchor;             // pinned, at the origin
-	anchor.x = Vector3( 0, 0, 0 );
-	anchor.q = Quat( 1, 0, 0, 0 );
+	// every case hangs off a pinned anchor at the origin
+	auto addBody = [this]( const Vector3 & pos, float invInertia, const Quat & rot ) -> int {
+		SimBody b;
+		b.x = pos;
+		b.q = rot;
+		b.invMass = 1.0f;       // 1 kg throughout, so energy is easy to read
+		b.invInertia = Vector3( invInertia, invInertia, invInertia );
+		b.bodyId = m_bodies.size();
+		m_bodies.append( b );
+		return m_bodies.size() - 1;
+	};
+	auto addJoint = [this]( int child, int parent, const Vector3 & pa, const Vector3 & pb ) {
+		SimJoint j;
+		j.a = child;
+		j.b = parent;
+		j.pivotA = pa;
+		j.pivotB = pb;
+		j.frameA = Quat( 1, 0, 0, 0 );
+		j.frameB = Quat( 1, 0, 0, 0 );
+		m_joints.append( j );
+	};
+
+	SimBody anchor;
 	anchor.pinned = true;
 	anchor.bodyId = 0;
 	m_bodies.append( anchor );
 
-	SimBody bob;                // 1 kg, unit inertia, hanging half a metre down
-	bob.x = Vector3( 0, 0, -0.5f );
-	bob.q = Quat( 1, 0, 0, 0 );
-	bob.invMass = 1.0f;
-	bob.invInertia = Vector3( 1, 1, 1 );
-	bob.bodyId = 1;
-	m_bodies.append( bob );
+	/* A chain of n links, each half a metre long, hanging off the anchor. Every
+	 * body's centre of mass sits at its own middle, which is how a real ragdoll
+	 * body is built once the parallel axis correction is in.
+	 */
+	auto chain = [&]( int n, float ii ) {
+		for ( int k = 0; k < n; k++ ) {
+			const int me = addBody( Vector3( 0, 0, -0.25f - 0.5f * k ), ii, Quat( 1, 0, 0, 0 ) );
+			addJoint( me, me - 1, Vector3( 0, 0, 0.25f ),
+				( k == 0 ) ? Vector3( 0, 0, 0 ) : Vector3( 0, 0, -0.25f ) );
+		}
 
-	SimJoint j;
-	j.a = 1;                    // child
-	j.b = 0;                    // parent
-	j.pivotA = Vector3( 0, 0, 0.5f );   // top of the bob, in its own space
-	j.pivotB = Vector3( 0, 0, 0 );      // the anchor point
-	j.frameA = Quat( 1, 0, 0, 0 );
-	j.frameB = Quat( 1, 0, 0, 0 );
-	m_joints.append( j );
+	};
 
-	// nudge it sideways so it actually swings
-	m_bodies[1].v = Vector3( 1.0f, 0, 0 );
+	/* Start every rig spinning rigidly about the anchor.
+	 *
+	 * The obvious initial condition -- shove one body sideways and leave the rest
+	 * at rest -- is not a state the rig can actually be in: a body held at a pivot
+	 * with no angular velocity has no linear velocity either. The solver dutifully
+	 * projects the impossible part away in the first substep, and the energy that
+	 * costs is a fixed amount no matter how fine the substeps are. That looked
+	 * exactly like a substep-independent leak in the solver and was nothing of the
+	 * kind. A rigid rotation about the anchor satisfies every ball socket at the
+	 * velocity level, so energy really is conserved from the first step.
+	 */
+	auto done = [this]() {
+		const Vector3 omega( 0.0f, 1.5f, 0.0f );
+		for ( SimBody & b : m_bodies ) {
+			if ( b.pinned )
+				continue;
+			b.w = omega;
+			b.v = Vector3::crossproduct( omega, b.x );
+		}
+		rescaleForJointCount();
+		return true;
+	};
+
+	if ( name == QLatin1String( "pendulum" ) )   { chain( 1, 1.0f );   return done(); }
+	if ( name == QLatin1String( "heavy" ) )      { chain( 1, 60.0f );  return done(); }
+	if ( name == QLatin1String( "chain3" ) )     { chain( 3, 1.0f );   return done(); }
+	//! a brahmin spine is this deep, and its bodies really do carry these numbers
+	if ( name == QLatin1String( "chain8" ) )     { chain( 8, 1.0f );   return done(); }
+	if ( name == QLatin1String( "chain8h" ) )    { chain( 8, 300.0f ); return done(); }
+
+	if ( name == QLatin1String( "fork" ) || name == QLatin1String( "forkh" ) ) {
+		// one parent, four children -- the brahmin's Spine has exactly that many
+		const float ii = ( name == QLatin1String( "forkh" ) ) ? 300.0f : 1.0f;
+		addBody( Vector3( 0, 0, -0.25f ), ii, Quat( 1, 0, 0, 0 ) );
+		addJoint( 1, 0, Vector3( 0, 0, 0.25f ), Vector3( 0, 0, 0 ) );
+		for ( int k = 0; k < 4; k++ ) {
+			const float off = -0.45f + 0.3f * k;
+			const int me = addBody( Vector3( off, 0, -0.75f ), ii, Quat( 1, 0, 0, 0 ) );
+			addJoint( me, 1, Vector3( 0, 0, 0.25f ), Vector3( off, 0, -0.25f ) );
+
+		}
+		return done();
+	}
+
+	if ( name == QLatin1String( "spun" ) ) {
+		/* Same pendulum, but the bob rests rotated 90 degrees about Y, which maps
+		 * local (x,y,z) to (z,y,-x). The pivot is written in the bob's own space
+		 * and has to come back to (0,0,0.5) in world, so locally it is
+		 * (-0.5,0,0). If the frame maths is wrong this starts violated and never
+		 * recovers.
+		 */
+		const float s = std::sqrt( 0.5f );
+		addBody( Vector3( 0, 0, -0.5f ), 1.0f, Quat( s, 0, s, 0 ) );
+		addJoint( 1, 0, Vector3( -0.5f, 0, 0 ), Vector3( 0, 0, 0 ) );
+
+		return done();
+	}
+
+	return false;
 }
 
 float RagdollSim::totalEnergy() const
@@ -371,40 +531,59 @@ void RagdollSim::solveJoints( float h )
 			continue;
 
 		// --- angular limits ---------------------------------------------------
-		// joint frames in world; column 0 is the twist axis, 1 and 2 the swing
-		// axes, matching how the hkTransform rows were decoded
-		const Quat fa = qMul( A.q, j.frameA );
-		const Quat fb = qMul( B.q, j.frameB );
-		const Vector3 a0 = qRot( fa, Vector3( 1, 0, 0 ) );
-		const Vector3 a1 = qRot( fa, Vector3( 0, 1, 0 ) );
-		const Vector3 b0 = qRot( fb, Vector3( 1, 0, 0 ) );
-		const Vector3 b1 = qRot( fb, Vector3( 0, 1, 0 ) );
-		const Vector3 b2 = qRot( fb, Vector3( 0, 0, 1 ) );
+		const JointAxes ax = jointAxes( A, B, j );
+		const Vector3 a0 = ax.a0, a1 = ax.a1, b0 = ax.b0, b1 = ax.b1, b2 = ax.b2;
 
 		/* Swing (cone) limit: how far the child's twist axis may lean off the
 		 * parent's. The rotation axis is the one perpendicular to both, i.e.
 		 * a0 x b0, whose length is already sin(angle). Havok writes -100 as
 		 * "no lower bound" on a cone, so only max carries information.
 		 */
-		if ( j.cone.present ) {
+		if ( j.cone.present && useCone ) {
 			Vector3 sw = Vector3::crossproduct( a0, b0 );
 			if ( sw.length() > 1.0e-6f ) {
 				sw.normalize();
 				limitAngle( A, B, sw, a0, b0, -j.cone.max, j.cone.max );
 			}
 		}
-		// plane: the perpendicular swing, measured about the parent's third axis
-		if ( j.plane.present )
-			limitAngle( A, B, b2, a0, b0, j.plane.min, j.plane.max );
+		/* Plane limit: how far the child's twist axis may leave the parent's
+		 * plane, whose normal is the parent's plane axis.
+		 *
+		 * The old reading -- the angle from a0 to b0 measured about b2 -- was not a
+		 * well defined signed angle at all, since neither a0 nor b0 is
+		 * perpendicular to b2. It mixed the cone angle into the plane reading and
+		 * the two limits then spent every substep undoing each other: on its own
+		 * this limit took the brahmin to 4.7 million units of energy. Constraining
+		 * the angle between a0 and the normal instead is the same quantity the cone
+		 * limit already handles correctly, only measured against a different axis,
+		 * so it reuses that machinery.
+		 */
+		if ( j.plane.present && usePlane ) {
+			Vector3 pax = Vector3::crossproduct( a0, b1 );
+			if ( pax.length() > 1.0e-6f ) {
+				pax.normalize();
+				// HALF_PI comes from niftypes.h
+				limitAngle( A, B, pax, a0, b1, float( HALF_PI ) - j.plane.max,
+					float( HALF_PI ) - j.plane.min );
+			}
+		}
+		Q_UNUSED( b2 )
 
 		/* Twist about the shared axis. The swing axes MUST be projected
 		 * perpendicular to it first: measuring the angle between un-projected
 		 * axes mixes swing into the twist reading and the two limits then fight
 		 * each other every substep.
 		 */
-		if ( j.twist.present ) {
+		if ( j.twist.present && useTwist ) {
+			/* The twist axis is the bisector of the two frames' own axes, which
+			 * degenerates as they approach opposite. Bail out well before that:
+			 * a bisector recovered from two nearly cancelling vectors is mostly
+			 * rounding error, and twisting about a random axis is a good way to
+			 * launch a limb. 0.1 is a swing of about 168 degrees, far outside any
+			 * cone a ragdoll actually authorises.
+			 */
 			Vector3 n = a0 + b0;
-			if ( n.length() > 1.0e-6f ) {
+			if ( n.length() > 0.1f ) {
 				n.normalize();
 				Vector3 n1 = a1 - n * Vector3::dotproduct( n, a1 );
 				Vector3 n2 = b1 - n * Vector3::dotproduct( n, b1 );
@@ -416,7 +595,7 @@ void RagdollSim::solveJoints( float h )
 			}
 		}
 		// a limited hinge: hold the two axes aligned, then limit the swing about them
-		if ( j.hinge.present ) {
+		if ( j.hinge.present && useHinge ) {
 			applyAngular( A, B, Vector3::crossproduct( a0, b0 ) );
 			limitAngle( A, B, b0, a1, b1, j.hinge.min, j.hinge.max );
 		}
@@ -443,7 +622,8 @@ void RagdollSim::step( float dt, int substeps )
 			b.q = qIntegrate( b.q, b.w, h );
 		}
 
-		solveJoints( h );
+		for ( int it = 0; it < std::max( 1, iterations ); it++ )
+			solveJoints( h );
 
 		for ( SimBody & b : m_bodies ) {
 			if ( b.pinned ) {
@@ -461,26 +641,98 @@ void RagdollSim::step( float dt, int substeps )
 	}
 }
 
+QVector<SimLimitCheck> RagdollSim::checkLimits() const
+{
+	QVector<SimLimitCheck> out;
+	out.reserve( m_joints.size() );
+	for ( int i = 0; i < m_joints.size(); i++ ) {
+		const SimJoint & j = m_joints.at( i );
+		const SimBody & A = m_bodies.at( j.a );
+		const SimBody & B = m_bodies.at( j.b );
+		const JointAxes ax = jointAxes( A, B, j );
+
+		SimLimitCheck c;
+		c.joint = i;
+		c.child = j.a;
+		c.parent = j.b;
+		/* A tenth of a degree of slack, so a twist-locked joint -- bounds of
+		 * exactly [0, 0], which several tail links carry -- is not reported as
+		 * broken every time the measured angle lands on 1e-6 instead of 0. The
+		 * solver itself uses no such slack; this is only about what is worth
+		 * showing someone.
+		 */
+		const float tol = 0.1f / 57.2957795f;
+
+		if ( j.cone.present ) {
+			Vector3 sw = Vector3::crossproduct( ax.a0, ax.b0 );
+			if ( sw.length() > 1.0e-6f ) {
+				sw.normalize();
+				c.cone = signedAngle( sw, ax.a0, ax.b0 );
+			}
+			c.coneBad = ( c.cone < -j.cone.max - tol || c.cone > j.cone.max + tol );
+		}
+		if ( j.plane.present ) {
+			// reported as the angle out of the plane, so it reads the same way
+			// round as the decoded bounds rather than as its complement
+			Vector3 pax = Vector3::crossproduct( ax.a0, ax.b1 );
+			if ( pax.length() > 1.0e-6f ) {
+				pax.normalize();
+				c.plane = float( HALF_PI ) - signedAngle( pax, ax.a0, ax.b1 );
+			}
+			c.planeBad = ( c.plane < j.plane.min - tol || c.plane > j.plane.max + tol );
+		}
+		if ( j.twist.present ) {
+			Vector3 n = ax.a0 + ax.b0;
+			if ( n.length() > 1.0e-6f ) {
+				n.normalize();
+				Vector3 n1 = ax.a1 - n * Vector3::dotproduct( n, ax.a1 );
+				Vector3 n2 = ax.b1 - n * Vector3::dotproduct( n, ax.b1 );
+				if ( n1.length() > 1.0e-6f && n2.length() > 1.0e-6f ) {
+					n1.normalize();
+					n2.normalize();
+					c.twist = signedAngle( n, n1, n2 );
+				}
+			}
+			c.twistBad = ( c.twist < j.twist.min - tol || c.twist > j.twist.max + tol );
+		}
+		if ( j.hinge.present ) {
+			c.hinge = signedAngle( ax.b0, ax.a1, ax.b1 );
+			c.hingeBad = ( c.hinge < j.hinge.min - tol || c.hinge > j.hinge.max + tol );
+		}
+		out.append( c );
+	}
+	return out;
+}
+
 SimStats RagdollSim::stats() const
 {
 	SimStats st;
-	for ( const SimBody & b : m_bodies ) {
+	for ( int i = 0; i < m_bodies.size(); i++ ) {
+		const SimBody & b = m_bodies.at( i );
 		if ( b.pinned || b.invMass <= 0.0f )
 			continue;
 		const float m = 1.0f / b.invMass;
 		const float sp = b.v.length();
 		st.energy += 0.5f * m * sp * sp;
-		st.maxSpeed = std::max( st.maxSpeed, sp );
+		if ( sp > st.maxSpeed || st.worstBody < 0 ) {
+			st.maxSpeed = sp;
+			st.worstBody = i;
+		}
 		if ( !std::isfinite( b.x[0] ) || !std::isfinite( b.x[1] ) || !std::isfinite( b.x[2] )
 			|| !std::isfinite( sp ) )
 			st.diverged = true;
 	}
-	for ( const SimJoint & j : m_joints ) {
+	for ( int i = 0; i < m_joints.size(); i++ ) {
+		const SimJoint & j = m_joints.at( i );
 		const SimBody & A = m_bodies.at( j.a );
 		const SimBody & B = m_bodies.at( j.b );
 		const Vector3 pa = A.x + qRot( A.q, j.pivotA );
 		const Vector3 pb = B.x + qRot( B.q, j.pivotB );
-		st.maxJointError = std::max( st.maxJointError, ( pa - pb ).length() );
+		const float e = ( pa - pb ).length();
+		if ( e > st.maxJointError || st.worstJoint < 0 ) {
+			st.maxJointError = e;
+			st.worstJoint = i;
+		}
 	}
 	if ( !std::isfinite( st.maxJointError ) || st.maxSpeed > 1.0e4f )
 		st.diverged = true;

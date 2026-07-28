@@ -503,54 +503,49 @@ the `tau` factor already decoded on every limit.
 
 Phases, each testable before the next:
 
-**STATUS 07-28f: phase 1 started, solver NOT yet correct — do not build on it.**
-`src/physics/ragdollsim.{h,cpp}` and `NifSkope -no-gui simulate <file>` exist and
-build. What is established:
+**STATUS 07-28f: phase 1 DONE — the solver is correct and can be built on.**
+`src/physics/ragdollsim.{h,cpp}` and `NifSkope -no-gui simulate <file>`.
+**37 of 37** vanilla actor ragdolls settle, none diverge, worst ball-socket
+separation across the corpus **0.4 mm**. Joint error converges as h² (brahmin:
+8.5e-4 / 6.1e-5 / 6e-6 at 8 / 32 / 96 substeps) and total energy is now
+substep-independent, which is the property that was missing. The five faults
+found and fixed are written up in WW_CHANGES 07-28f; the ones that change how the
+data must be *read* are:
 
-- The **rest pose is exact**: worst ball-socket separation at step 0 is `1e-6`,
-  which independently confirms the `hkaSkeleton` decode, bone-index == body-index,
-  and that the joint pivots are in bone space.
-- `dyn_inertia +0x20` holds **inverse inertia, not inertia** — `+0x04` beside it
-  is plainly inverse mass (0.2, 0.05, 1.0 → 5, 20, 1 kg), and the same reading
-  makes the tensor physical (5 kg pelvis, 4.16 → I = 0.24, radius ≈ 0.22 m; read
-  as inertia it implies a 0.9 m pelvis). **`HknpBodyPhys::inertia` is therefore
-  misnamed** and `hknpencode.cpp`'s `dynamicInertia()` writes true inertia into
-  that slot — latent, invisible so far only because it writes static bodies.
-- The harness measures the failure rather than hiding it, which is its whole point.
+- **Bodies sit on the centre of mass, not the bone origin.** The tensor is about
+  the centre of mass and the bone origin is ~0.13 m away, so using the bone origin
+  understates the inertia there by m*d² (~27x on the brahmin thigh). The file has
+  no centre-of-mass field; the shape centroid is the right substitute and the
+  decoded tensor corroborates it.
+- **cinfo +0x30 is the body POSITION** — renamed from `com`. It equals the bone
+  origin accumulated from `hkaSkeleton`'s reference pose on all 39 brahmin bodies,
+  which is also a free cross-check of the skeleton decode.
+- **`hkRotation` stores COLUMNS.** Reading the three decoded vectors as rows
+  transposes every joint frame; it left 22 of 38 joints violating their own limits
+  at rest, with cone angles to 169°. The conjugate fixes it.
+- **The plane limit is the angle out of the parent's plane**, not the a0-to-b0
+  angle about b2 — that older reading is not a well defined signed angle at all,
+  since neither vector is perpendicular to b2.
+- **Four Gauss-Seidel sweeps per substep, plus mass splitting.** A ragdoll's
+  inverse inertia reaches the hundreds, so one sweep diverges on any body carrying
+  several joints. Both numbers are measured, not guessed.
 
-**The open bug: the solver injects energy.** A ragdoll pinned at the root should
-settle; instead energy scales with substep count — 25k / 456k / 3.96M at 8 / 32 /
-96 substeps, i.e. like `1/h^2`. That is the signature of a persistent constraint
-violation being re-corrected every substep, since a fixed positional correction
-turns into a velocity of `d/h`.
+Still true and still worth acting on: `dyn_inertia +0x20` holds **inverse
+inertia, not inertia**, so **`HknpBodyPhys::inertia` is misnamed** and
+`hknpencode.cpp`'s `dynamicInertia()` writes true inertia into that slot — latent,
+invisible so far only because it writes static bodies.
 
-Bisected with `--no-limits`: **ball sockets alone show it too** (31k → 776k), so
-the angular limits are not the cause. Worst joint separation sits near 0.5 m and
-never closes.
+`simulate --selftest` runs eight synthetic rigs whose energy is conserved
+analytically; keep it green. It is what made the above findable, by reproducing
+the ragdoll blow-up in 6 bodies (`forkh`) instead of 39. Note the trap it exposed:
+initial conditions must be a state the rig can actually occupy — a sideways shove
+with no angular velocity is not, and the solver's projection of it looks exactly
+like a substep-independent leak in the solver itself.
 
-`simulate --selftest` then isolated the core solver on a two-body pendulum with
-damping off, where total energy is analytically conserved. **The core solver is
-dissipative, not explosive**: it loses ~9%, and the loss *converges* as substeps
-rise (9.42 / 9.26 / 9.16 / 9.11 / 9.09% at 4 / 8 / 16 / 32 / 64). Dissipation is
-safe, and a loss that stops shrinking is a systematic error rather than
-discretisation — worth fixing, but it is **not** the ragdoll bug.
-
-So the fault is specific to the ragdoll build or to multi-joint chains, not to
-`applyPositional`. Seating every body at its rest pose (rather than only the ones
-carrying a shape) was a real bug and is fixed, but did not change the outcome —
-the brahmin's bodies are all shaped. What differs between the healthy pendulum
-and the sick ragdoll, in order of suspicion:
-
-1. **Tree topology.** The pendulum is one joint; the ragdoll has parents with
-   several children (five hang off the brahmin's pelvis). Sequential Gauss-Seidel
-   with one iteration per substep may be over-correcting a shared parent once per
-   child. Test by simulating a 3-body chain, then a 1-parent/2-child fork.
-2. **Inertia magnitudes.** `invInertia` reaches 51–66 on light bodies where the
-   pendulum uses 1. Test the pendulum with `invInertia` 60 to see if it turns
-   explosive.
-3. **The joint frames.** `--no-limits` still applies the ball socket at pivots
-   derived from the decoded frames; a wrong pivot would hold at rest yet fight
-   once moving.
+Known-imperfect, deliberately not chased: the light-inertia `fork` rig drifts to
+about +10% over 10 s instead of converging to zero. Bounded, no effect on any real
+ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
+`v = dx/h` at small h.
 
 1. **Solver core, headless.** `src/physics/`: bodies (mass, diagonal inertia,
    pose, velocities), substepped XPBD integrator, ball-socket joints, and the

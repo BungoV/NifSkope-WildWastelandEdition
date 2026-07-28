@@ -1879,10 +1879,12 @@ public:
 					nif->set<float>( iInertia, "m33", phys.inertia[2] );
 				}
 				if ( dyn ) {
-					// identity-rotation dynamic bodies store the center of
-					// mass in the cinfo position
+					// cinfo +0x30 is the body position; for a single-body prop
+					// whose shape is authored about the origin that is also
+					// where bhkRigidBody wants its Center. It is NOT a centre of
+					// mass offset -- on a ragdoll it is exactly the bone origin.
 					nif->set<Vector4>( iInfo, "Center",
-						Vector4( phys.com[0], phys.com[1], phys.com[2], 0.0f ) );
+						Vector4( phys.position[0], phys.position[1], phys.position[2], 0.0f ) );
 				}
 			}
 

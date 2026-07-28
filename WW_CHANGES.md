@@ -1,5 +1,79 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28f — The ragdoll solver works
+
+Every vanilla ragdoll now simulates: **37 of 37** actor skeletons that carry a
+jointed collision system settle, none diverge, and the worst ball-socket
+separation anywhere in the corpus is **0.4 mm**. The brahmin went from 741,122
+units of energy to **1.0**, and its joint error now converges as the substep
+count rises — 8.5e-4 / 6.1e-5 / 6e-6 at 8 / 32 / 96 — which is the h² behaviour a
+correct solver is supposed to show. (The four skeletons that do not simulate have
+no ragdoll at all: two first-person rigs, CreateABot and Robot.)
+
+Five separate faults, found by measurement rather than by reading the code:
+
+**Bodies sat on the bone origin instead of the centre of mass.** The inertia
+tensor is expressed about the centre of mass, and a limb bone's origin is its
+joint — 0.13 m away. By the parallel axis theorem that understates the real
+inertia about the bone origin by m*d², a factor of ~27 on the brahmin thigh, so
+every correction over-rotated the bone and whipped its far end. The file has no
+centre-of-mass field, so the shape centroid is used; the decoded tensor confirms
+it, giving body 8 a 0.083 m radius and a 0.59 m length against a 0.428 m bone plus
+a radius at each end.
+
+**cinfo +0x30 is the body POSITION, not a centre of mass** (renamed accordingly).
+All 39 brahmin entries equal the bone origin accumulated from `hkaSkeleton`'s
+reference pose, to every decimal printed — which incidentally re-validates the
+skeleton decode from an unrelated part of the file.
+
+**Joint frames were transposed.** `hkRotation` stores columns; they were read as
+rows. This left **22 of 38** joints violating their own limits in the rest pose,
+with cone angles up to 169°. Conjugating drops that to 2, and both survivors are
+honest: knee hinges limited to [-60°, -20°], which a neutral skeleton is
+legitimately outside.
+
+**The plane limit measured an angle that does not exist.** It took the angle from
+a0 to b0 about b2, but neither is perpendicular to b2, so the reading mixed in the
+cone angle and the two limits undid each other every substep. On its own it drove
+the brahmin to 4.7 million; measured properly as the angle out of the parent's
+plane it settles at 94.
+
+**One Gauss-Seidel sweep per substep is not enough here.** A ragdoll's inverse
+inertia runs into the hundreds, so a correction at one end of a bone swings the
+other end by about half as much again; with five joints on one pelvis the
+round-trip gain exceeds one. Mass splitting plus **four** sweeps fixes it. Both
+numbers are measured on synthetic rigs, not guessed — see below.
+
+Also: limit ranges stored min-above-max are swapped at build (unsatisfiable
+otherwise, and `std::clamp` with lo above hi is undefined behaviour), and the
+twist axis bails out when the two frames approach opposite rather than
+normalising rounding error into a rotation axis.
+
+### The self-test is the reason this was findable
+
+`simulate --selftest` builds eight synthetic rigs whose total energy is a
+conserved quantity, so drift is the solver's own error with no decode involved.
+It earned its keep repeatedly:
+
+- `pendulum` / `chain3` / `chain8` / `fork` / `heavy` / `spun` all stayed
+  bounded while the real ragdoll exploded — which ruled out topology, inertia
+  magnitude and rest rotation as causes, and pointed at the decoded data.
+- `forkh` (a shared parent with a *realistic* inverse inertia) finally reproduced
+  the blow-up in 6 bodies instead of 39: +1,142% energy, worse with more
+  substeps. That is what identified the coupling problem.
+- It then measured the fix: four sweeps take `forkh` to -1.6% and `chain8h` from
+  +20,632% to -0.1%, both converging. Sixteen sweeps buy nothing over four.
+
+One caution recorded honestly: the rigs' first version started with a sideways
+shove and no angular velocity, which is not a state a pinned body can be in. The
+solver projected the impossible part away in the first substep at a cost
+independent of h, and that looked exactly like a substep-independent leak in the
+solver. It was not. The rigs now start as a rigid rotation about the anchor.
+
+New diagnostics: `--iterations`, `--only-limit <twist|cone|plane|hinge>` (which
+is what isolated the plane bug), `--trace`, a rest-pose limit report, and a
+runaway report naming the first body to exceed 50 m/s and the joints on it.
+
 ## 2026-07-28e — How Fallout 4 cloth collision works (investigation, no code)
 
 Documentation only — nothing in the app reads this yet. Recorded because it is

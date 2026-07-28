@@ -37,10 +37,27 @@ struct SimBody
 	Vector3 invInertia;         //!< diagonal of the inverse inertia, body space
 	bool pinned = false;        //!< held in place (the root, or a dragged bone)
 
-	//! shape, copied from the decode so the solver needs no back-reference
+	/*! 1 / (number of joints on this body) -- Mueller's mass splitting.
+	 *
+	 * A body carrying several joints is solved once per joint per sweep, and with
+	 * a real body's inverse inertia each of those corrections rotates it enough to
+	 * disturb its OTHER joints by more than the error just removed. Five joints on
+	 * one pelvis put the round-trip gain above one and the ragdoll flies apart.
+	 * Dividing the body's response by its joint count makes the corrections sum to
+	 * what a single joint would have applied, which pulls the gain back under one.
+	 * Kept separate from invMass/invInertia so the energy report still uses the
+	 * true values.
+	 */
+	float solverScale = 1.0f;
+
+	//! shape, copied from the decode so the solver needs no back-reference.
+	//! capA/capB stay in BONE space; x is the centre of mass, so drawing them
+	//! means x + q*(capA - com).
 	int primType = 0;           //!< 1 sphere, 2 capsule (HknpShape::primType)
 	Vector3 capA, capB;
 	float radius = 0.0f;
+	Vector3 com;                //!< centre of mass in bone space, for that conversion
+	Vector3 restOrigin;         //!< the bone origin in world, before that shift
 
 	int bodyId = -1;            //!< the decoded body id, for mapping back to nodes
 
@@ -71,6 +88,28 @@ struct SimStats
 	float maxSpeed = 0.0f;
 	int steps = 0;
 	bool diverged = false;      //!< a NaN or a runaway appeared
+	//! who is misbehaving -- a blow-up always starts somewhere specific, and
+	//! knowing where turns "the ragdoll exploded" into one joint to look at
+	int worstBody = -1;
+	int worstJoint = -1;
+};
+
+/*! One joint's angular limits measured against the pose it is actually in.
+ *
+ * The rest pose is a ragdoll's neutral stance, so every limit should be
+ * comfortably satisfied there. A limit reported violated at rest means the
+ * decoded bounds and the measured angle are not in the same convention -- and
+ * the solver will then apply a fixed correction on every substep for ever, which
+ * reads out as velocity proportional to 1/h and blows the ragdoll up.
+ */
+struct SimLimitCheck
+{
+	int joint = -1;
+	int child = -1, parent = -1;
+	//! measured angle, radians; NaN where the constraint carries no such limit
+	float twist = 0.0f, cone = 0.0f, plane = 0.0f, hinge = 0.0f;
+	bool twistBad = false, coneBad = false, planeBad = false, hingeBad = false;
+	bool any() const { return twistBad || coneBad || planeBad || hingeBad; }
 };
 
 class RagdollSim
@@ -88,19 +127,37 @@ public:
 	//! Move a pinned body directly (the drag handle).
 	void setPosition( int body, const Vector3 & pos );
 
-	/*! Replace the contents with a two-body pendulum of known masses.
+	/*! Replace the contents with a synthetic rig of known masses.
 	 *
-	 * A 38-joint ragdoll is the wrong place to debug a solver. This is the
-	 * smallest case that exercises the same code path -- one ball socket, one
-	 * free body, one pinned anchor -- and with damping off its total energy is a
-	 * conserved quantity, so any drift is the solver's own error and nothing else.
+	 * A 38-joint ragdoll is the wrong place to debug a solver. Each of these
+	 * exercises the same code path with one property of the real thing changed,
+	 * and with damping off the total energy of every one of them is a conserved
+	 * quantity -- so drift is the solver's own error, with no decode involved.
+	 *
+	 *   pendulum  anchor + one bob. The baseline.
+	 *   chain3    a three-deep chain: does depth alone destabilise it?
+	 *   fork      two children sharing one parent, which is what a ragdoll
+	 *             pelvis looks like and what a single Gauss-Seidel pass might
+	 *             over-correct.
+	 *   heavy     the pendulum with the inverse inertia a real body carries
+	 *             (51-66, against the baseline's 1).
+	 *   spun      the pendulum with a non-identity rest orientation, so the
+	 *             pivot has to be rotated into world -- the one piece of frame
+	 *             maths the baseline never touches.
+	 *
+	 * Returns false for an unknown name.
 	 */
-	void buildTestPendulum();
+	bool buildTestCase( const QString & name );
+	//! The baseline case, kept as its own name because it is the reference.
+	void buildTestPendulum() { buildTestCase( QStringLiteral( "pendulum" ) ); }
 
 	//! Total energy (kinetic + potential). Constant for the pendulum above.
 	float totalEnergy() const;
 
 	SimStats stats() const;
+	//! Measure every joint's limits in the current pose, using the solver's own
+	//! axis construction so the two cannot disagree.
+	QVector<SimLimitCheck> checkLimits() const;
 
 	const QVector<SimBody> & bodies() const { return m_bodies; }
 	const QVector<SimJoint> & joints() const { return m_joints; }
@@ -110,13 +167,33 @@ public:
 	Vector3 gravity = Vector3( 0.0f, 0.0f, -9.81f );
 	//! Velocity damping per second, keeps a settling ragdoll from ringing.
 	float damping = 0.02f;
+	/*! Gauss-Seidel sweeps per substep.
+	 *
+	 * XPBD's usual advice is one sweep and many substeps, which holds while the
+	 * bodies are weakly coupled. A ragdoll limb is not: its inverse inertia runs
+	 * into the hundreds, so a correction at one end of a bone swings the other end
+	 * by about half as much again, and every joint on a shared body fights the
+	 * rest. Mass splitting keeps that under one but leaves each single sweep well
+	 * short of resolved, so the sweeps have to be paid for directly.
+	 *
+	 * Four is measured, not guessed: on the synthetic rigs it takes the shared
+	 * parent case from +1142% energy to -1.6% and the deep heavy chain from
+	 * +20632% to -0.1%, both then converging as substeps rise. Sixteen buys
+	 * nothing over four.
+	 */
+	int iterations = 4;
 	//! Solve the angular limits as well as the ball sockets. Off isolates the
 	//! two halves when a run misbehaves -- a pure ball-socket tree is a solved
 	//! problem, so if that alone is unstable the fault is not in the limits.
 	bool angularLimits = true;
+	//! ...and these isolate the four kinds from each other, which is the only
+	//! practical way to tell which one a misbehaving joint is fighting.
+	bool useTwist = true, useCone = true, usePlane = true, useHinge = true;
 
 private:
 	void solveJoints( float h );
+	//! fill in every body's solverScale from how many joints touch it
+	void rescaleForJointCount();
 	QVector<SimBody> m_bodies;
 	QVector<SimJoint> m_joints;
 };
