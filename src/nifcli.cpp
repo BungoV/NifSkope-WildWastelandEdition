@@ -909,7 +909,7 @@ int cmdCollisionRoundTrip( const QString & file )
 
 	int total = 0, structOk = 0, fullyExact = 0, spheres = 0, spheresExact = 0;
 	int massProps = 0, massPropsExact = 0, massPropsInert = 0;
-	int polys = 0, polysExact = 0;
+	int polys = 0, polysExact = 0, comps = 0, compsExact = 0;
 	float worstVert = 0.0f, worstPlane = 0.0f;
 	QMap<int, int> byteHist;   // offset -> how often the structural bytes differed
 
@@ -930,6 +930,23 @@ int cmdCollisionRoundTrip( const QString & file )
 		const HknpSystem sys = hknpDecode( bytes );
 		if ( !sys.valid )
 			continue;
+
+		/* Compounds: the object, not the flattened children. Its pointer slots are
+		 * raw zero in the file, so the bytes compare directly and the fixups the
+		 * encoder reports are checked against the ones the packfile actually has.
+		 */
+		for ( const HknpCompound & comp : sys.compounds ) {
+			if ( comp.rawOffset < 0 || comp.instances.isEmpty() )
+				continue;
+			HknpCompoundFixups fx;
+			const QByteArray built = hknpEncodeCompoundShape( comp, &fx );
+			if ( built.isEmpty() || comp.rawOffset + built.size() > bytes.size() )
+				continue;
+			comps++;
+			if ( built == bytes.mid( comp.rawOffset, built.size() )
+				&& fx.childPointers.size() == comp.instances.size() )
+				compsExact++;
+		}
 
 		for ( const HknpShape & shp : sys.shapes ) {
 			// mass properties: everything is stored, so this must be byte-exact too
@@ -1062,6 +1079,9 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( spheres )
 		out() << "spheres    " << spheres << "  byte-exact " << spheresExact
 			  << " / " << spheres << Qt::endl;
+	if ( comps )
+		out() << "compounds  " << comps << "  byte-exact " << compsExact
+			  << " / " << comps << Qt::endl;
 	if ( polys )
 		out() << "polytopes  " << polys << "  byte-exact " << polysExact
 			  << " / " << polys << Qt::endl;
@@ -1076,7 +1096,7 @@ int cmdCollisionRoundTrip( const QString & file )
 	out() << "capsules   " << total << Qt::endl;
 	if ( !total ) {
 		out() << "  no capsules to check" << Qt::endl;
-		return ( spheresExact < spheres || polysExact < polys
+		return ( spheresExact < spheres || polysExact < polys || compsExact < comps
 			|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 	}
 	out() << "  structure byte-exact   " << structOk << " / " << total << Qt::endl;
@@ -1090,7 +1110,7 @@ int cmdCollisionRoundTrip( const QString & file )
 		out() << Qt::endl;
 	}
 	return ( structOk < total || spheresExact < spheres || polysExact < polys
-		|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
+		|| compsExact < comps || massPropsExact + massPropsInert < massProps ) ? 1 : 0;
 }
 
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )

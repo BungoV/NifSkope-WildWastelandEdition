@@ -2,6 +2,7 @@
 #define HKNPENCODE_H
 
 #include "data/niftypes.h"
+#include "gl/hknpdecode.h"   // HknpCompound is the writer's input as well as a decode result
 
 #include <QByteArray>
 #include <QString>
@@ -121,5 +122,27 @@ struct HknpPolytopeInput
 //! Write one hknpConvexPolytopeShape object, no packfile around it. Empty on
 //! invalid input (no faces, a loop under 3 vertices, or an out-of-range index).
 QByteArray hknpEncodeConvexPolytopeShape( const HknpPolytopeInput & input );
+
+/*! Where a compound's pointers have to be patched.
+ *
+ * Offsets are relative to the object's own start. Every one of these slots holds
+ * raw zero in the bytes -- verified on all 60 instances in the corpus -- because a
+ * Havok packfile binds pointers through its fixup tables, not through the data. So
+ * unlike the primitives, writing a compound is not finished when the bytes are
+ * written: the caller must add these entries once it knows where the children and
+ * the shape-data object landed.
+ */
+struct HknpCompoundFixups
+{
+	qsizetype instanceArrayPointer = 0x60;   //!< LOCAL fixup -> instanceArray
+	qsizetype instanceArray = 0xD0;          //!< where that fixup points
+	qsizetype shapeDataPointer = 0xC0;       //!< GLOBAL fixup -> the CompoundShapeData
+	QVector<qsizetype> childPointers;        //!< GLOBAL fixup per instance -> its shape
+};
+
+//! Write one compound shape object. Fills `fixups` with the slots the caller must
+//! still patch (see HknpCompoundFixups). Empty on an empty instance list.
+QByteArray hknpEncodeCompoundShape( const HknpCompound & compound,
+	HknpCompoundFixups * fixups = nullptr );
 
 #endif // HKNPENCODE_H

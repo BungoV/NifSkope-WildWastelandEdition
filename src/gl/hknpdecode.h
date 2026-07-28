@@ -326,6 +326,66 @@ struct HknpBone
 	Quat rotation;
 };
 
+/*! One hknpDynamicCompoundShape / hknpStaticCompoundShape as an OBJECT.
+ *
+ * Layout measured over 14 corpus compounds with no exceptions: the object is
+ * `0xD0 + count * 0x80` bytes, the instance hkArray sits at +0x60 (pointer patched
+ * by a LOCAL fixup to +0xD0, count at +0x68, count|0x80000000 at +0x6c), a GLOBAL
+ * fixup at +0xC0 reaches the matching CompoundShapeData, and each 0x80-byte
+ * instance holds three rotation rows, a translation at +0x30, a scale at +0x40 and
+ * a child pointer at +0x50 patched by another GLOBAL fixup.
+ *
+ * Every one of those pointer slots holds RAW ZERO in the file -- checked on all 60
+ * instances. The binding lives entirely in the fixup tables, which is why a
+ * compound cannot be written as a self-contained blob the way a capsule can.
+ */
+struct HknpCompound
+{
+	//! byte offset of the compound object within the packfile blob, or -1
+	qsizetype rawOffset = -1;
+	bool dynamic = true;
+	quint32 shapeFlags = 0;     //!< +0x10; 02020004 / 02030004 / 02040004 seen
+	quint32 materialCRC = 0;    //!< +0x18
+
+	Vector3 aabbMin;            //!< +0x80
+	Vector3 aabbMax;            //!< +0x90
+	/*! +0x70 .. +0xCF verbatim, the AABB included.
+	 *
+	 * Most of this region is NOT understood. A first pass scanned only the header
+	 * up to +0x70 and concluded everything past the instance-array descriptor was
+	 * zero; it is not, and an encoder built on that would have written a compound
+	 * with no bounds. Carried whole so a rewrite reproduces it instead of
+	 * inventing it -- the same treatment as the mass properties' major-axis frame.
+	 */
+	QByteArray headerTail;
+
+	struct Instance
+	{
+		Vector3 rotRows[3] = { Vector3( 1, 0, 0 ), Vector3( 0, 1, 0 ), Vector3( 0, 0, 1 ) };
+		Vector3 trans;
+		Vector3 scale = Vector3( 1, 1, 1 );
+		/*! The w slots of all three rotation rows and of the translation.
+		 *
+		 * None of them is padding. Rows 0 and 2 and the translation hold 0.5 with a
+		 * payload in the low mantissa bits, the way a hull vertex carries its index
+		 * -- observed values run 64/66/70, multiples of 16 up to 1440, and small
+		 * integers, so at least one looks like a byte offset and one like an index.
+		 * Row 1 holds a zero whose SIGN varies: three corpus instances carry
+		 * negative zero.
+		 *
+		 * Both were missed the first time round for the same reason. Printing the
+		 * payload slots as %.3f shows "0.500" and hides the mantissa entirely, and
+		 * negative zero prints as "0.000" and compares equal to 0.0f. Only a byte
+		 * comparison sees either. All four are carried verbatim.
+		 *
+		 * The scale w is not here: it is 0x3f800000 on all 60 corpus instances,
+		 * checked as a bit pattern rather than as a printed float.
+		 */
+		quint32 wPayload[4] = { 0x3f000000u, 0u, 0x3f000000u, 0x3f000000u };
+	};
+	QVector<Instance> instances;
+};
+
 //! A decoded bhkPhysicsSystem blob
 struct HknpSystem
 {
@@ -361,6 +421,14 @@ struct HknpSystem
 	//! The ragdoll's own skeleton copy, indexed like the bodies. See HknpBone.
 	QVector<HknpBone> bones;
 	bool positionalBodies = false;
+	/*! The compound shapes as OBJECTS, alongside the flattened child shapes.
+	 *
+	 * Decoding flattens a compound into one HknpShape per instance, each carrying
+	 * the instance transform, which is what drawing and simulation want. Nothing
+	 * then represents the compound itself, so a writer has nothing to reproduce --
+	 * hence this parallel list.
+	 */
+	QVector<HknpCompound> compounds;
 	//! class names present but not decoded
 	QStringList unknownShapes;
 	bool valid = false;

@@ -860,7 +860,20 @@ Ordered by dependency:
 3. ~~**Convex polytope**~~ — encoder SHIPPED 07-28x, see 4d-spec-polytope: 68 of 68
    byte-exact on a round trip. Generating a hull for NEW geometry still needs
    qhull, which is already vendored under `lib/qhull`.
-4. **Compounds** (static and dynamic) — instance arrays, decode side already works.
+4. ~~**Compounds**~~ — encoder SHIPPED 07-28z. `hknpEncodeCompoundShape`, 29/29
+   byte-exact over the corpus sweep. **The first shape that is not a
+   self-contained blob:** all 60 child-pointer slots hold raw zero, so the binding
+   to children and to the CompoundShapeData lives entirely in the fixup tables, and
+   the encoder returns an `HknpCompoundFixups` naming the slots the caller must
+   patch. Layout: `0xD0 + count*0x80` bytes, instance hkArray at +0x60 (count
+   +0x68, `count|0x80000000` +0x6c, LOCAL fixup -> +0xD0), CompoundShapeData via a
+   GLOBAL fixup at +0xC0, instances at +0xD0 stride 0x80 (3 rotation rows,
+   translation +0x30, scale +0x40, child pointer +0x50). **Still undecoded and
+   therefore carried verbatim:** the header +0x70..+0xCF (holds an AABB at
+   +0x80/+0x90 and more) and the four non-scale `w` slots per instance, which carry
+   payloads behind a printed 0.5, plus a signed zero in row 1. Only static
+   compounds remain unmeasured -- the 400-file sample found 14 dynamic and zero
+   static.
 5. **Ragdoll** — root layout, `hkaSkeleton` and constraint atom chains, all
    specified in 4a. Watch the child/parent frame order and the `+0x80` bone-count
    trap.

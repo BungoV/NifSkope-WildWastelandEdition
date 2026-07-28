@@ -25,6 +25,7 @@ PAT = {
     "polytopes": re.compile(r"polytopes\s+(\d+)\s+byte-exact (\d+)"),
     "spheres": re.compile(r"spheres\s+(\d+)\s+byte-exact (\d+)"),
     "massprops": re.compile(r"massprops\s+(\d+)\s+byte-exact (\d+)"),
+    "compounds": re.compile(r"compounds\s+(\d+)\s+byte-exact (\d+)"),
 }
 CAPS = re.compile(r"capsules\s+(\d+)")
 CAPSOK = re.compile(r"structure byte-exact\s+(\d+)")
@@ -100,7 +101,7 @@ def main():
           % (len(sample), len(files), stride, timeouts))
     print("files carrying an encodable shape: %d\n" % sum(catHit.values()))
     print("%-12s %8s %10s %s" % ("type", "seen", "byte-exact", ""))
-    for k in ("polytopes", "spheres", "massprops", "capsules"):
+    for k in ("compounds", "polytopes", "spheres", "massprops", "capsules"):
         if not seen[k]:
             continue
         note = "  (+%d inert exponent)" % inert if k == "massprops" and inert else ""

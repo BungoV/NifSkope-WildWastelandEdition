@@ -631,6 +631,72 @@ QByteArray hknpEncodeConvexPolytopeShape( const HknpPolytopeInput & in )
 	return out;
 }
 
+/*! Write one compound shape object.
+ *
+ * Measured over 14 corpus compounds, no exceptions: the object is
+ * `0xD0 + count * 0x80` bytes; the instance hkArray sits at +0x60 with the count at
+ * +0x68 and `count | 0x80000000` at +0x6c; instances start at +0xD0 with a 0x80
+ * stride, holding three rotation rows, a translation at +0x30, a scale at +0x40 and
+ * a child pointer at +0x50.
+ *
+ * Two regions are reproduced verbatim rather than computed, because they are not
+ * understood: the header from +0x70 to +0xCF (which holds an AABB and more), and
+ * all four non-scale w slots of each instance, which carry per-instance payloads
+ * rather than the flat 0.5 and 0.0 they print as. See HknpCompound. A first version
+ * of this function wrote both as constants; it produced a compound with no bounds,
+ * and a second still normalised row 1's negative zero away. The byte round trip
+ * caught both -- a float comparison would have called them identical.
+ *
+ * Nothing is written into the pointer slots: they hold raw zero in vanilla and the
+ * fixup tables do the binding. See HknpCompoundFixups.
+ */
+QByteArray hknpEncodeCompoundShape( const HknpCompound & compound, HknpCompoundFixups * fixups )
+{
+	const int count = int( compound.instances.size() );
+	if ( count < 1 || count > 4096 )
+		return QByteArray();
+
+	QByteArray out( 0xD0 + count * 0x80, 0 );
+	setU32( out, 0x10, compound.shapeFlags );
+	setU32( out, 0x18, compound.materialCRC );
+	setU32( out, 0x30, 0xffffffffu );
+	setU32( out, 0x44, 0x80000000u );	// two empty hkArrays before the instances
+	setU32( out, 0x54, 0x80000000u );
+	setU32( out, 0x58, 0xffffffffu );
+	setU32( out, 0x68, quint32( count ) );
+	setU32( out, 0x6c, quint32( count ) | 0x80000000u );
+
+	// +0x70..+0xCF verbatim: bounds and whatever else lives there
+	if ( compound.headerTail.size() == 0x60 )
+		std::memcpy( out.data() + 0x70, compound.headerTail.constData(), 0x60 );
+
+	for ( int i = 0; i < count; i++ ) {
+		const HknpCompound::Instance & one = compound.instances.at( i );
+		const qsizetype at = 0xD0 + qsizetype( i ) * 0x80;
+		for ( int rr = 0; rr < 3; rr++ )
+			for ( int k = 0; k < 3; k++ )
+				setFloat( out, at + rr * 16 + k * 4, one.rotRows[rr][k] );
+		for ( int k = 0; k < 3; k++ ) {
+			setFloat( out, at + 0x30 + k * 4, one.trans[k] );
+			setFloat( out, at + 0x40 + k * 4, one.scale[k] );
+		}
+		// undecoded per-instance payloads, row 1's signed zero among them
+		setU32( out, at + 0x0c, one.wPayload[0] );
+		setU32( out, at + 0x1c, one.wPayload[1] );
+		setU32( out, at + 0x2c, one.wPayload[2] );
+		setU32( out, at + 0x3c, one.wPayload[3] );
+		setFloat( out, at + 0x4c, 1.0f );	// 0x3f800000 on all 60, checked as bits
+		setU32( out, at + 0x58, 0xffffffffu );
+	}
+
+	if ( fixups ) {
+		fixups->childPointers.clear();
+		for ( int i = 0; i < count; i++ )
+			fixups->childPointers.append( 0xD0 + qsizetype( i ) * 0x80 + 0x50 );
+	}
+	return out;
+}
+
 QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Vector3 & inertiaRaw,
 	float volume, float mass, quint64 majorAxis )
 {

@@ -932,6 +932,34 @@ HknpSystem hknpDecode( const QByteArray & data )
 				consumed.insert( o.first );
 		}
 		const BodyT * compoundBody = bodyFor( obj.first );
+
+		// the compound as an object, kept alongside the flattened children so a
+		// writer has something to reproduce
+		HknpCompound comp;
+		comp.rawOffset = obj.first;
+		comp.dynamic = ( obj.second == QLatin1String( "hknpDynamicCompoundShape" ) );
+		comp.shapeFlags = r.u32( obj.first + 0x10 );
+		comp.materialCRC = r.u32( obj.first + 0x18 );
+		comp.aabbMin = r.vec3( obj.first + 0x80 );
+		comp.aabbMax = r.vec3( obj.first + 0x90 );
+		comp.headerTail.resize( 0x60 );
+		for ( int k = 0; k < 0x60; k++ )
+			comp.headerTail[k] = char( r.u8( obj.first + 0x70 + k ) );
+		for ( quint32 i = 0; i < numInst && r.ok; i++ ) {
+			const qsizetype inst = instBase + qsizetype( i ) * 0x80;
+			HknpCompound::Instance one;
+			for ( int rr = 0; rr < 3; rr++ )
+				one.rotRows[rr] = r.vec3( inst + qsizetype( rr ) * 16 );
+			one.trans = r.vec3( inst + 0x30 );
+			one.scale = r.vec3( inst + 0x40 );
+			one.wPayload[0] = r.u32( inst + 0x0c );
+			one.wPayload[1] = r.u32( inst + 0x1c );
+			one.wPayload[2] = r.u32( inst + 0x2c );
+			one.wPayload[3] = r.u32( inst + 0x3c );
+			comp.instances.append( one );
+		}
+		sys.compounds.append( comp );
+
 		for ( quint32 i = 0; i < numInst && r.ok; i++ ) {
 			qsizetype inst = instBase + qsizetype( i ) * 0x80;
 			qsizetype child = global.value( inst + 0x50, -1 );

@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28z — The compound encoder, and two things that print as constants
+
+`hknpEncodeCompoundShape`, plus `HknpSystem::compounds` — decoding flattens a
+compound into one shape per instance, which is what drawing wants, so nothing
+represented the compound itself for a writer to reproduce.
+
+**A compound is the first shape that cannot be written as a self-contained blob.**
+All 60 corpus child-pointer slots hold **raw zero**: the binding to children and to
+the CompoundShapeData lives entirely in the packfile's fixup tables. So the encoder
+returns the bytes *and* an `HknpCompoundFixups` telling the caller which slots it
+must still patch once the children have been placed. That is a real architectural
+difference from the primitives, and it is what a packfile writer will need.
+
+Layout, 14 corpus compounds with no exceptions: `0xD0 + count * 0x80` bytes,
+instance hkArray at +0x60 (count at +0x68, `count | 0x80000000` at +0x6c, pointer
+patched by a LOCAL fixup to +0xD0), CompoundShapeData via a GLOBAL fixup at +0xC0,
+instances at +0xD0 with a 0x80 stride.
+
+**Two fields I called constants were not, and both hid behind their own printed
+form.** The byte round trip caught each; a float comparison would have passed.
+
+- **The header from +0x70 to +0xCF.** My first scan stopped at +0x70 — the end of
+  the instance-array descriptor — and concluded the rest was zero. It holds an
+  **AABB** at +0x80/+0x90 and more besides. An encoder built on that first pass
+  would have written every compound with no bounds.
+- **The instance `w` slots.** I printed them as `%.3f`, saw `0.500` on all 60, and
+  recorded a constant. They are 0.5 with a payload in the low mantissa bits, the
+  way a hull vertex carries its index — values run 64/66/70, multiples of 16 up to
+  1440, and small integers. Then, having fixed that, I wrote `0.0f` into row 1's
+  slot with a comment saying *this one really is a flat zero*; three instances carry
+  **negative zero**, which prints as `0.000` and compares equal to `0.0f`.
+
+Both are now carried verbatim rather than reconstructed, the same treatment the
+mass properties' major-axis frame gets. The AABB is decoded out for use;
+`headerTail` and `wPayload` are honestly labelled undecoded.
+
+Full corpus sweep, 700-file stride over the 34,985-file tree — **no mismatches of
+any type**:
+
+| type | result |
+|---|---|
+| compounds | **29 / 29 byte-exact** |
+| polytopes | **269 / 269 byte-exact** |
+| spheres | **4 / 4 byte-exact** |
+| mass properties | 245 + 24 inert-exponent = **269 / 269** |
+| capsules | **78 / 78 structure byte-exact** |
+
+Actor skeletons: 10 / 68 / 30 / 68 / 819, all clean. Self-tests green.
+
 ## 2026-07-28y — Testing the encoders outside the data they were built from
 
 Every number so far came from 39 actor skeletons. TO_BE_IMPLEMENTED says plainly
