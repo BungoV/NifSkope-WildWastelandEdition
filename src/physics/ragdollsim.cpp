@@ -477,7 +477,7 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		 * made the first run explode.
 		 */
 		for ( int k = 0; k < 3; k++ )
-			b.invInertia[k] = std::max( 0.0f, phys.inertia[k] );
+			b.invInertia[k] = std::max( 0.0f, phys.invInertia[k] );
 		// a body with no mass would be immovable; treat that as static
 		if ( b.invMass <= 0.0f )
 			b.pinned = true;

@@ -1874,9 +1874,17 @@ public:
 				nif->set<float>( iInfo, "Mass", dyn ? phys.mass : 0.0f );
 				QModelIndex iInertia = nif->getIndex( iInfo, "Inertia Tensor" );
 				if ( dyn && iInertia.isValid() ) {
-					nif->set<float>( iInertia, "m11", phys.inertia[0] );
-					nif->set<float>( iInertia, "m22", phys.inertia[1] );
-					nif->set<float>( iInertia, "m33", phys.inertia[2] );
+					/* The packfile stores INVERSE inertia; bhkRigidBody's Inertia
+					 * Tensor means the real thing. Convert, so the field a user
+					 * reads or edits is the quantity it claims to be.
+					 * hknpencode reciprocates on the way back out, leaving the
+					 * byte round trip untouched.
+					 */
+					for ( int k = 0; k < 3; k++ ) {
+						const float ii = phys.invInertia[k];
+						const char * nm = ( k == 0 ) ? "m11" : ( k == 1 ) ? "m22" : "m33";
+						nif->set<float>( iInertia, nm, ( ii > 1.0e-12f ) ? 1.0f / ii : 0.0f );
+					}
 				}
 				if ( dyn ) {
 					// cinfo +0x30 is the body position; for a single-body prop

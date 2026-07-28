@@ -530,10 +530,11 @@ data must be *read* are:
   inverse inertia reaches the hundreds, so one sweep diverges on any body carrying
   several joints. Both numbers are measured, not guessed.
 
-Still true and still worth acting on: `dyn_inertia +0x20` holds **inverse
-inertia, not inertia**, so **`HknpBodyPhys::inertia` is misnamed** and
-`hknpencode.cpp`'s `dynamicInertia()` writes true inertia into that slot — latent,
-invisible so far only because it writes static bodies.
+FIXED 07-28p: `dyn_inertia +0x20` holds **inverse inertia**, the field is now
+`invInertia` on both `HknpBodyPhys` and `HknpSystem`, `dynamicInertia()` inverts
+(including its box fallback, which computed true inertia into an inverse slot), and
+the NIF boundary converts both ways so `bhkRigidBody`'s Inertia Tensor holds the
+real tensor while the byte round trip is unchanged.
 
 `simulate --selftest` runs eight synthetic rigs whose energy is conserved
 analytically; keep it green. It is what made the above findable, by reproducing

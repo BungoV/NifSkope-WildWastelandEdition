@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28p — Inverse inertia, named and encoded correctly
+
+Paying off a debt recorded in 07-28f, before the ragdoll encoder inherits it.
+
+`dyn_inertia +0x20` holds the **inverse** inertia diagonal, not the inertia. The
+field has been called `inertia` since it was decoded; it is now `invInertia`, on
+both `HknpBodyPhys` and `HknpSystem`. The evidence is threefold: +0x04 beside it is
+plainly inverse mass (0.2, 0.05, 1.0 for 5, 20 and 1 kg); the reading makes the
+tensor physical (the brahmin pelvis at 5 kg reads 4.16, giving I = 0.24 and a radius
+near 0.22 m, where the other reading implies a 0.9 m pelvis); and the simulator
+settled it from the far end, since reciprocating it made every ragdoll explode.
+
+**Two genuine bugs followed from the name.**
+
+`hknpencode`'s `dynamicInertia()` wrote the *true* tensor into that slot, and
+computed its box fallback as `mass*(d^2+d^2)/12` — true inertia — straight into an
+inverse field. Both now invert. This path only runs for dynamic bodies, which is
+why nothing has misbehaved: anything written that way would read back with the two
+quantities swapped.
+
+At the NIF boundary the same confusion cancelled out and so hid itself.
+`bhkRigidBody`'s **Inertia Tensor** field means the real tensor, and the decode was
+filling it with the inverse; the encoder read it straight back, so a round trip was
+self-consistent and wrong. Both ends now convert, which leaves the byte round trip
+untouched — invert twice and you are where you started — while making the field a
+user reads or edits mean what it says. The Collision Manager's physics panel shows
+the true tensor for the same reason.
+
+Verified: the solver is unchanged (36 of 37 settling, brahmin 0.91 m/s), and both
+self-tests stay green.
+
 ## 2026-07-28o — Bone dragging works, verified without a window
 
 Physics Sim mode will let you grab a ragdoll bone and drag it. The mechanic itself

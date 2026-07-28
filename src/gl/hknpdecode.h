@@ -102,7 +102,16 @@ struct HknpBodyPhys
 	 */
 	float mass = 0.0f;                  //!< 1 / (dyn_inertia +0x04)
 	float density = 0.0f;               //!< dyn_inertia +0x08
-	Vector3 inertia;                    //!< dyn_inertia +0x20/24/28 (diagonal)
+	/*! dyn_inertia +0x20/24/28: the diagonal of the INVERSE inertia tensor.
+	 *
+	 * Not the inertia, despite the slot's name in every earlier revision of this
+	 * header. +0x04 beside it is plainly inverse mass (0.2, 0.05, 1.0 for 5, 20 and
+	 * 1 kg), and the same reading makes the tensor physical: the brahmin pelvis at
+	 * 5 kg reads 4.16 here, giving I = 0.24 and a radius near 0.22 m. Taken as
+	 * inertia the same number implies a 0.9 m pelvis. The simulator confirmed it
+	 * from the other end -- reciprocating it made every ragdoll explode.
+	 */
+	Vector3 invInertia;
 	float gravityFactor = 1.0f;         //!< dyn_motion +0x08
 	float maxLinVelocity = 104.375f;    //!< dyn_motion +0x10
 	float maxAngVelocity = 31.57f;      //!< dyn_motion +0x14
@@ -226,7 +235,8 @@ struct HknpSystem
 	//! collision paths read them; anything per-body should use HknpBodyPhys.
 	float mass = 0.0f;          //!< 1 / (dyn_inertia +0x04); 0 for statics
 	float density = 0.0f;       //!< dyn_inertia +0x08 (mass / collision volume)
-	Vector3 inertia;            //!< dyn_inertia +0x20/24/28 (diagonal)
+	//! dyn_inertia +0x20/24/28: INVERSE inertia diagonal, see HknpBodyPhys::invInertia
+	Vector3 invInertia;
 	//! dyn_motion values (engine defaults when the array is absent)
 	float gravityFactor = 1.0f;         //!< dyn_motion +0x08
 	float maxLinVelocity = 104.375f;    //!< dyn_motion +0x10

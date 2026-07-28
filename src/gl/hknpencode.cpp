@@ -128,10 +128,21 @@ QByteArray dynamicInertia( const HknpEncodeInput & in )
 	for ( const Triangle & t : in.tris ) volume += double( Vector3::dotproduct( in.verts[t[0]], Vector3::crossproduct( in.verts[t[1]], in.verts[t[2]] ) ) ) / 6.0;
 	setFloat( out, 0x04, 1.0f / mass ); setFloat( out, 0x08, float( mass / std::max( std::fabs( volume ), 1.0e-8 ) ) );
 	setU32( out, 0x0c, 0x5f7ffff0u ); setU32( out, 0x10, 0x5f7ffff0u );
+	/* +0x20 takes INVERSE inertia, matching +0x04's inverse mass.
+	 *
+	 * in.inertia is the true tensor, as bhkRigidBody's Inertia Tensor field
+	 * supplies it, so it is reciprocated here, and the box fallback is computed
+	 * the same way round then inverted. Writing the true tensor into this slot --
+	 * which is what this did until 07-28p -- stores a physically different
+	 * quantity. It stayed invisible because the same wrong convention was used on
+	 * the way in, and because nothing dynamic has been encoded yet.
+	 */
+	auto inv = []( float v ) { return ( v > 1.0e-12f ) ? 1.0f / v : 0.0f; };
 	float ix = in.inertia[0] > 0.0f ? in.inertia[0] : mass * ( d[1] * d[1] + d[2] * d[2] ) / 12.0f;
 	float iy = in.inertia[1] > 0.0f ? in.inertia[1] : mass * ( d[0] * d[0] + d[2] * d[2] ) / 12.0f;
 	float iz = in.inertia[2] > 0.0f ? in.inertia[2] : mass * ( d[0] * d[0] + d[1] * d[1] ) / 12.0f;
-	setFloat( out, 0x20, ix ); setFloat( out, 0x24, iy ); setFloat( out, 0x28, iz ); setFloat( out, 0x2c, 1.0f );
+	setFloat( out, 0x20, inv( ix ) ); setFloat( out, 0x24, inv( iy ) );
+	setFloat( out, 0x28, inv( iz ) ); setFloat( out, 0x2c, 1.0f );
 	return out;
 }
 

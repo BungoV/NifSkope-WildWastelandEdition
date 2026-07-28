@@ -1218,7 +1218,11 @@ private:
 			collisionWithinGroup->setChecked( !( phys.filterFlags & 0x40u ) ); wind->setChecked( false );
 			filterGroup->setValue( phys.filterGroup );
 			centerX->setValue( phys.position[0] ); centerY->setValue( phys.position[1] ); centerZ->setValue( phys.position[2] );
-			inertiaX->setValue( phys.inertia[0] ); inertiaY->setValue( phys.inertia[1] ); inertiaZ->setValue( phys.inertia[2] );
+			// the packfile holds inverse inertia; this field shows the real tensor
+			auto trueI = []( float v ) { return ( v > 1.0e-12f ) ? 1.0f / v : 0.0f; };
+			inertiaX->setValue( trueI( phys.invInertia[0] ) );
+			inertiaY->setValue( trueI( phys.invInertia[1] ) );
+			inertiaZ->setValue( trueI( phys.invInertia[2] ) );
 			penetrationDepth->setValue( 0.15 );
 			quint32 materialValue = 0;
 			int shapeIndex = item->data( 0, ShapeIndexRole ).toInt();

@@ -647,7 +647,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 			float invMass = r.f32( di + 0x04 );
 			sys.mass = ( invMass > 1.0e-12f ) ? 1.0f / invMass : 0.0f;
 			sys.density = r.f32( di + 0x08 );
-			sys.inertia = r.vec3( di + 0x20 );
+			sys.invInertia = r.vec3( di + 0x20 );
 		}
 		/* Ragdoll joints: the array at +0x50, one entry per non-root body.
 		 * Only hknpRagdollData carries it; a physics system leaves it empty.
@@ -746,7 +746,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 			const quint32 motionIndex = r.u32( c + 0x0c );
 			phys.mass = sys.mass;
 			phys.density = sys.density;
-			phys.inertia = sys.inertia;
+			phys.invInertia = sys.invInertia;
 			phys.gravityFactor = sys.gravityFactor;
 			phys.maxLinVelocity = sys.maxLinVelocity;
 			phys.maxAngVelocity = sys.maxAngVelocity;
@@ -765,7 +765,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 				const float invMass = r.f32( n + 0x04 );
 				phys.mass = ( invMass > 1.0e-12f ) ? 1.0f / invMass : 0.0f;
 				phys.density = r.f32( n + 0x08 );
-				phys.inertia = r.vec3( n + 0x20 );
+				phys.invInertia = r.vec3( n + 0x20 );
 			}
 			if ( bprops >= 0 ) {
 				qsizetype bp = bprops + qsizetype( i ) * 0x50;
