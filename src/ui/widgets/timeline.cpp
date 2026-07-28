@@ -420,6 +420,26 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.fillRect( QRectF( 10, 32, 22, 22 ), QColor( 85, 125, 220 ) );
 		p.fillRect( QRectF( 32, 32, 22, 22 ), QColor( 225, 205, 85 ) );
 		p.setClipping( false );
+	} else if ( id == QLatin1String( "collision" ) ) {
+		/* A wireframe hull around a solid body: what collision actually looks like
+		 * in the viewport, which is a cage drawn over the mesh it belongs to.
+		 */
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 32, 36 ), 11, 11 );
+		p.setBrush( Qt::NoBrush );
+		QPen cage( col, 4.0 );
+		cage.setJoinStyle( Qt::RoundJoin );
+		p.setPen( cage );
+		QPolygonF hull;
+		hull << QPointF( 32, 6 ) << QPointF( 56, 22 ) << QPointF( 50, 52 )
+			 << QPointF( 14, 52 ) << QPointF( 8, 22 );
+		p.drawPolygon( hull );
+		// two struts, so it reads as a cage rather than as a plain pentagon
+		QPen strut( col, 2.5 );
+		p.setPen( strut );
+		p.drawLine( QPointF( 32, 6 ), QPointF( 14, 52 ) );
+		p.drawLine( QPointF( 32, 6 ), QPointF( 50, 52 ) );
 	} else if ( id == QLatin1String( "xray" ) ) {
 		// Blender toggle x-ray: two overlapping squares, the back one showing
 		// through the front

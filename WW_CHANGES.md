@@ -1,5 +1,45 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29p — a Collision button on the top bar
+
+The physics-sim controls existed only as keyboard shortcuts, which is fine once
+you know them and invisible until then: nothing told you 5 was Blast, or that the
+ground height could be moved at all. They now live in a **Collision** dropdown on
+the View toolbar, after the animation controls and behind a separator.
+
+**Greyed out when the file has no collision.** Verified both ways: the button is
+enabled on a ragdoll and greyed on `Alien_Body.nif`, which carries no bhk block at
+all. A panel of controls that cannot do anything is worse than one that is plainly
+unavailable.
+
+The panel, top to bottom: **Show collision in viewport**, then Run/Stop with a
+body and joint count, the six tools as a button group, Pause / Step / Freeze /
+Reset, and the options — gravity and its strength, a speed slider, ground and its
+height, self-collision, angular limits, stats overlay. Everything below the
+visibility box is disabled until the sim is running, and Step is live only while
+paused.
+
+**The visibility box drives the EXISTING `aShowCollision` action** rather than
+having a switch of its own. The Render toolbar and the settings dialog already
+toggle that one, and a second copy would let the two disagree about whether
+collision is being drawn. Checked in both directions, because a panel that only
+wrote to the action would go stale the moment the toolbar was used.
+
+Every control reads its state back from `PhysicsPreview` rather than caching it,
+and the panel re-reads on open, so a keyboard shortcut and a click cannot
+disagree.
+
+Also a **collision icon** — a wireframe hull around a solid body, which is what
+collision looks like in the viewport. It was borrowing the gizmo glyph.
+
+**34 of 34 checks on 6 rigs, 1 correctly skipped, 0 failures**, including the
+panel opening, both directions of the visibility sync, and screenshots of the
+panel idle and running.
+
+One harness trap worth recording: `QToolButton::showMenu()` spins its own event
+loop and does not return until the menu is dismissed, so calling it from a test
+simply hangs. `QMenu::popup()` is the non-blocking form.
+
 ## 2026-07-29n — Physics Sim: six tools and the options
 
 Everything bungo asked for. Six interaction tools and the full option set, all

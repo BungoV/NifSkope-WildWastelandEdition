@@ -3476,6 +3476,62 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				GLView * gl = skope->getGLView();
 				PhysicsPreview & pv = gl->physicsSim();
 
+				/* The Collision dropdown, checked BEFORE the sim is entered so a
+				 * file with nothing to simulate still exercises it -- that is the
+				 * case where the button has to be GREY, and skipping out early
+				 * would have left the disabled path untested.
+				 */
+				bool haveCollision = false;
+				if ( NifModel * m = skope->nif ) {
+					for ( qint32 b = 0; b < m->getBlockCount() && !haveCollision; b++ ) {
+						const QModelIndex i = m->getBlockIndex( b );
+						haveCollision = m->blockInherits( i, "bhkCollisionObject" )
+							|| m->blockInherits( i, "bhkNiCollisionObject" )
+							|| m->blockInherits( i, "bhkPhysicsSystem" )
+							|| m->blockInherits( i, "bhkRagdollSystem" );
+					}
+				}
+				if ( QToolButton * cb = skope->findChild<QToolButton *>(
+						QStringLiteral( "ViewCollisionButton" ) ) ) {
+					check( cb->isEnabled() == haveCollision,
+						QStringLiteral( "Collision button %1 (file %2 collision)" )
+							.arg( cb->isEnabled() ? QStringLiteral( "enabled" ) : QStringLiteral( "greyed" ) )
+							.arg( haveCollision ? QStringLiteral( "has" ) : QStringLiteral( "has no" ) ) );
+					/* popup(), not showMenu(): showMenu spins its own event loop and
+					 * does not return until the menu is dismissed, so a harness that
+					 * calls it simply hangs.
+					 */
+					if ( QMenu * cm = cb->menu(); cm && cb->isEnabled() ) {
+						cm->popup( cb->mapToGlobal( QPoint( 0, cb->height() ) ) );
+						QApplication::processEvents();
+						check( cm->isVisible(), QStringLiteral( "Collision panel opened" ) );
+						cm->grab().save( outPath + QStringLiteral( ".panel.png" ) );
+
+						/* The visibility box and View > Show Collision are one setting.
+						 * Checked in both directions: a panel that only wrote to the
+						 * action would go stale the moment the toolbar was used.
+						 */
+						if ( QCheckBox * vis = cm->findChild<QCheckBox *>() ) {
+							const bool was = skope->ui->aShowCollision->isChecked();
+							vis->setChecked( !was );
+							QApplication::processEvents();
+							check( skope->ui->aShowCollision->isChecked() != was,
+								QStringLiteral( "visibility box drives Show Collision" ) );
+							skope->ui->aShowCollision->trigger();
+							QApplication::processEvents();
+							check( vis->isChecked() == skope->ui->aShowCollision->isChecked(),
+								QStringLiteral( "and follows it back" ) );
+							if ( skope->ui->aShowCollision->isChecked() != was )
+								skope->ui->aShowCollision->trigger();
+						}
+						cm->close();
+						QApplication::processEvents();
+					}
+				} else {
+					check( false, QStringLiteral( "Collision button found" ) );
+				}
+
+
 				/* A file with no jointed collision is a SKIP, not a failure.
 				 *
 				 * Refusing is the correct behaviour there -- most NIFs are not ragdolls,
@@ -3830,6 +3886,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				gl->update();
 				QApplication::processEvents();
 				gl->grabFramebuffer().save( outPath + QStringLiteral( ".png" ) );
+				// the panel again, this time with the sim running, so the enabled
+				// state of every control is looked at and not only the idle one
+				if ( QToolButton * cb2 = skope->findChild<QToolButton *>(
+						QStringLiteral( "ViewCollisionButton" ) ) ) {
+					if ( QMenu * cm2 = cb2->menu() ) {
+						cm2->popup( cb2->mapToGlobal( QPoint( 0, cb2->height() ) ) );
+						QApplication::processEvents();
+						cm2->grab().save( outPath + QStringLiteral( ".panel-running.png" ) );
+						cm2->close();
+						QApplication::processEvents();
+					}
+				}
+
 
 				check( gl->setPhysicsSimMode( false ) == false, QStringLiteral( "mode left" ) );
 				check( !pv.active(), QStringLiteral( "preview stopped" ) );
@@ -7008,6 +7077,345 @@ void NifSkope::initDockWidgets()
 		ui->tView->addWidget( animMoreBtn );
 		ui->tView->addWidget( animScrub );
 	}
+
+	/* Collision: the physics-sim controls, folded into one dropdown.
+	 *
+	 * Everything the Physics Sim mode can do is reachable from here. It existed
+	 * as a set of keyboard shortcuts first, which is fine once you know them and
+	 * invisible until then -- there was no way to discover that 5 is Blast or
+	 * that the ground height could be moved at all.
+	 *
+	 * Greyed out when the file has no collision, because a panel of controls that
+	 * cannot do anything is worse than one that is plainly unavailable.
+	 */
+	{
+		ui->tView->addSeparator();
+		QToolButton * colBtn = new QToolButton( this );
+		colBtn->setPopupMode( QToolButton::InstantPopup );
+		colBtn->setText( tr( "Collision" ) );
+		colBtn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+		colBtn->setAutoRaise( false );
+		colBtn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
+		colBtn->setObjectName( QStringLiteral( "ViewCollisionButton" ) );
+
+		QMenu * colMenu = new QMenu( colBtn );
+		QWidget * panel = new QWidget( colMenu );
+		QVBoxLayout * col = new QVBoxLayout( panel );
+		col->setContentsMargins( 10, 8, 10, 8 );
+		col->setSpacing( 6 );
+
+		auto heading = [&panel]( const QString & text ) {
+			QLabel * l = new QLabel( text, panel );
+			QFont f = l->font();
+			f.setBold( true );
+			l->setFont( f );
+			return l;
+		};
+
+		/* Viewport visibility, first, because it is the thing most often wanted.
+		 *
+		 * Driven by the EXISTING aShowCollision action rather than a second switch
+		 * of its own: the Render toolbar and the settings dialog already toggle
+		 * that one, and a duplicate would let the two disagree about whether
+		 * collision is being drawn.
+		 */
+		QCheckBox * showChk = new QCheckBox( tr( "Show collision in viewport" ), panel );
+		showChk->setToolTip( tr( "Draw collision geometry over the scene. The same "
+								 "toggle as View > Show Collision." ) );
+		col->addWidget( showChk );
+		QFrame * showRule = new QFrame( panel );
+		showRule->setFrameShape( QFrame::HLine );
+		showRule->setFrameShadow( QFrame::Sunken );
+		col->addWidget( showRule );
+
+		// Run / stop
+		QPushButton * runBtn = new QPushButton( tr( "Run Physics Sim" ), panel );
+		runBtn->setCheckable( true );
+		runBtn->setToolTip( tr( "Simulate this file's ragdoll live. Nothing is written "
+								"back to the file." ) );
+		col->addWidget( runBtn );
+
+		QLabel * status = new QLabel( panel );
+		status->setWordWrap( true );
+		col->addWidget( status );
+
+		// Tools
+		col->addWidget( heading( tr( "Tool" ) ) );
+		QGridLayout * tools = new QGridLayout();
+		tools->setSpacing( 4 );
+		QButtonGroup * toolGroup = new QButtonGroup( panel );
+		toolGroup->setExclusive( true );
+		struct ToolEntry { PhysicsPreview::Tool tool; const char * label; const char * tip; };
+		static const ToolEntry toolEntries[] = {
+			{ PhysicsPreview::Tool::Drag,  QT_TR_NOOP( "Drag" ),
+			  QT_TR_NOOP( "Grab a bone with a spring and pull it. (1)" ) },
+			{ PhysicsPreview::Tool::Throw, QT_TR_NOOP( "Throw" ),
+			  QT_TR_NOOP( "Grab and let go carrying the motion of your hand. (2)" ) },
+			{ PhysicsPreview::Tool::Shoot, QT_TR_NOOP( "Shoot" ),
+			  QT_TR_NOOP( "Hit it with an impulse where you click. Off-centre hits spin it. (3)" ) },
+			{ PhysicsPreview::Tool::Pin,   QT_TR_NOOP( "Pin" ),
+			  QT_TR_NOOP( "Nail a bone in place. Click it again to let go. (4)" ) },
+			{ PhysicsPreview::Tool::Blast, QT_TR_NOOP( "Blast" ),
+			  QT_TR_NOOP( "Radial impulse from the point you click. (5)" ) },
+			{ PhysicsPreview::Tool::Wind,  QT_TR_NOOP( "Wind" ),
+			  QT_TR_NOOP( "Steady push along the view while the button is held. (6)" ) },
+		};
+		int tRow = 0, tCol = 0;
+		for ( const ToolEntry & te : toolEntries ) {
+			QPushButton * b = new QPushButton( tr( te.label ), panel );
+			b->setCheckable( true );
+			b->setToolTip( tr( te.tip ) );
+			toolGroup->addButton( b, int( te.tool ) );
+			tools->addWidget( b, tRow, tCol );
+			if ( ++tCol == 3 ) {
+				tCol = 0;
+				tRow++;
+			}
+		}
+		col->addLayout( tools );
+
+		// Playback
+		col->addWidget( heading( tr( "Playback" ) ) );
+		QHBoxLayout * play = new QHBoxLayout();
+		play->setSpacing( 4 );
+		QPushButton * pauseBtn = new QPushButton( tr( "Pause" ), panel );
+		pauseBtn->setCheckable( true );
+		pauseBtn->setToolTip( tr( "Stop time. The pose holds exactly where it is. (Space)" ) );
+		QPushButton * stepBtn = new QPushButton( tr( "Step" ), panel );
+		stepBtn->setToolTip( tr( "Advance one frame while paused, to watch a joint "
+								 "a frame at a time. (.)" ) );
+		QPushButton * freezeBtn = new QPushButton( tr( "Freeze" ), panel );
+		freezeBtn->setToolTip( tr( "Stop all motion but keep solving, so a settled heap "
+								   "holds its shape and can still be dragged. (F)" ) );
+		QPushButton * resetBtn = new QPushButton( tr( "Reset" ), panel );
+		resetBtn->setToolTip( tr( "Back to the pose stored in the file. (R)" ) );
+		for ( QPushButton * b : { pauseBtn, stepBtn, freezeBtn, resetBtn } )
+			play->addWidget( b );
+		col->addLayout( play );
+
+		// Options
+		col->addWidget( heading( tr( "Options" ) ) );
+		QGridLayout * opts = new QGridLayout();
+		opts->setSpacing( 4 );
+		int oRow = 0;
+
+		QCheckBox * gravChk = new QCheckBox( tr( "Gravity" ), panel );
+		gravChk->setToolTip( tr( "Turn gravity off to inspect joint limits without "
+								 "everything piling on the floor. (G)" ) );
+		QDoubleSpinBox * gravSpin = new QDoubleSpinBox( panel );
+		gravSpin->setRange( 0.0, 100.0 );
+		gravSpin->setSingleStep( 0.5 );
+		gravSpin->setSuffix( tr( " m/s2" ) );
+		opts->addWidget( gravChk, oRow, 0 );
+		opts->addWidget( gravSpin, oRow++, 1 );
+
+		QLabel * speedLbl = new QLabel( tr( "Speed" ), panel );
+		QSlider * speedSlider = new QSlider( Qt::Horizontal, panel );
+		speedSlider->setRange( 5, 200 );      // 0.05x .. 2.0x
+		speedSlider->setToolTip( tr( "Slow motion, for watching a joint pop. Scales time, "
+									 "not the solver, so accuracy is unchanged." ) );
+		opts->addWidget( speedLbl, oRow, 0 );
+		opts->addWidget( speedSlider, oRow++, 1 );
+
+		QCheckBox * groundChk = new QCheckBox( tr( "Ground" ), panel );
+		groundChk->setToolTip( tr( "A floor to land on. Without it the ragdoll falls out "
+								   "of the scene." ) );
+		QDoubleSpinBox * groundSpin = new QDoubleSpinBox( panel );
+		groundSpin->setRange( -100000.0, 100000.0 );
+		groundSpin->setDecimals( 1 );
+		groundSpin->setSingleStep( 5.0 );
+		groundSpin->setToolTip( tr( "Floor height in game units." ) );
+		opts->addWidget( groundChk, oRow, 0 );
+		opts->addWidget( groundSpin, oRow++, 1 );
+
+		QCheckBox * selfChk = new QCheckBox( tr( "Self-collision" ), panel );
+		selfChk->setToolTip( tr( "Let the rig collide with itself, as the file authorises." ) );
+		opts->addWidget( selfChk, oRow++, 0, 1, 2 );
+
+		QCheckBox * limitsChk = new QCheckBox( tr( "Angular limits" ), panel );
+		limitsChk->setToolTip( tr( "Honour the joint limits the constraints carry. Turn "
+								   "off to see how much of a pose the limits are holding." ) );
+		opts->addWidget( limitsChk, oRow++, 0, 1, 2 );
+
+		QCheckBox * statsChk = new QCheckBox( tr( "Stats overlay" ), panel );
+		statsChk->setToolTip( tr( "Speed, joint error, contacts and penetration, drawn over "
+								  "the viewport. The solver computes these anyway." ) );
+		opts->addWidget( statsChk, oRow++, 0, 1, 2 );
+		col->addLayout( opts );
+
+		QWidgetAction * wa = new QWidgetAction( colMenu );
+		wa->setDefaultWidget( panel );
+		colMenu->addAction( wa );
+		colBtn->setMenu( colMenu );
+
+		/* One place that pushes the preview's state into the widgets.
+		 *
+		 * The controls forward to PhysicsPreview and read back from it rather
+		 * than holding their own copy, so a keyboard shortcut and a click on the
+		 * same option cannot disagree.
+		 */
+		auto syncCollisionPanel = [this, showChk, runBtn, status, toolGroup, pauseBtn, stepBtn,
+			freezeBtn, resetBtn, gravChk, gravSpin, speedSlider, speedLbl, groundChk,
+			groundSpin, selfChk, limitsChk, statsChk]() {
+			PhysicsPreview & pv = ogl->physicsSim();
+			const bool on = pv.active();
+			QSignalBlocker bs( showChk );
+			showChk->setChecked( ui->aShowCollision->isChecked() );
+			QSignalBlocker b0( runBtn ), b1( pauseBtn ), b2( gravChk ), b3( gravSpin );
+			QSignalBlocker b4( speedSlider ), b5( groundChk ), b6( groundSpin );
+			QSignalBlocker b7( selfChk ), b8( limitsChk ), b9( statsChk );
+			runBtn->setChecked( on );
+			runBtn->setText( on ? tr( "Stop Physics Sim" ) : tr( "Run Physics Sim" ) );
+			status->setText( on
+				? tr( "%1 bodies, %2 joints." ).arg( pv.bodyCount() ).arg( pv.jointCount() )
+				: tr( "Not running." ) );
+			for ( QAbstractButton * tb : toolGroup->buttons() )
+				tb->setEnabled( on );
+			if ( QAbstractButton * tb = toolGroup->button( int( pv.tool() ) ) ) {
+				QSignalBlocker bt( tb );
+				tb->setChecked( true );
+			}
+			for ( QWidget * w : { (QWidget *)pauseBtn, (QWidget *)stepBtn, (QWidget *)freezeBtn,
+					(QWidget *)resetBtn, (QWidget *)gravChk, (QWidget *)gravSpin,
+					(QWidget *)speedSlider, (QWidget *)speedLbl, (QWidget *)groundChk,
+					(QWidget *)groundSpin, (QWidget *)selfChk, (QWidget *)limitsChk,
+					(QWidget *)statsChk } )
+				w->setEnabled( on );
+			stepBtn->setEnabled( on && pv.paused() );
+			pauseBtn->setChecked( pv.paused() );
+			gravChk->setChecked( pv.gravityEnabled() );
+			gravSpin->setValue( double( pv.gravityStrength() ) );
+			gravSpin->setEnabled( on && pv.gravityEnabled() );
+			speedSlider->setValue( int( pv.timeScale() * 100.0f ) );
+			speedLbl->setText( tr( "Speed  %1x" ).arg( double( pv.timeScale() ), 0, 'g', 2 ) );
+			groundChk->setChecked( pv.groundEnabled() );
+			groundSpin->setValue( double( pv.groundHeight() ) );
+			groundSpin->setEnabled( on && pv.groundEnabled() );
+			selfChk->setChecked( pv.selfCollision() );
+			limitsChk->setChecked( pv.angularLimits() );
+			statsChk->setChecked( ogl->physicsStatsShown() );
+		};
+
+		connect( showChk, &QCheckBox::toggled, this, [this]( bool on ) {
+			if ( ui->aShowCollision->isChecked() != on )
+				ui->aShowCollision->trigger();
+		} );
+		// and back the other way, so toggling it anywhere else updates the panel
+		connect( ui->aShowCollision, &QAction::toggled, this,
+			[showChk]( bool on ) {
+				QSignalBlocker b( showChk );
+				showChk->setChecked( on );
+			} );
+
+		connect( runBtn, &QPushButton::clicked, this, [this, syncCollisionPanel]( bool want ) {
+			if ( want ) {
+				ogl->setRiggingWeightPaintMode( false );
+				ogl->setVertexPaintMode( false );
+				ogl->setSegmentPaintMode( false );
+				ogl->setPoseMode( false );
+				ogl->setEditMode( false );
+				if ( !ogl->setPhysicsSimMode( true ) )
+					QMessageBox::information( this, tr( "Physics Sim" ),
+						tr( "This file has no jointed collision to simulate.\n\n"
+							"Physics Sim runs a ragdoll: it needs a bhkRagdollSystem, or a "
+							"physics system whose bodies are joined by constraints." ) );
+			} else {
+				ogl->setPhysicsSimMode( false );
+			}
+			syncCollisionPanel();
+		} );
+		connect( toolGroup, &QButtonGroup::idClicked, this,
+			[this, syncCollisionPanel]( int id ) {
+				ogl->physicsSim().setTool( PhysicsPreview::Tool( id ) );
+				syncCollisionPanel();
+			} );
+		connect( pauseBtn, &QPushButton::clicked, this,
+			[this, syncCollisionPanel]( bool on ) {
+				ogl->physicsSim().setPaused( on );
+				syncCollisionPanel();
+			} );
+		connect( stepBtn, &QPushButton::clicked, this, [this]() {
+			PhysicsPreview & pv = ogl->physicsSim();
+			const bool was = pv.paused();
+			pv.setPaused( false );
+			pv.step( 1.0f / 60.0f );
+			pv.setPaused( was );
+			ogl->setCollisionPreview( pv.soup() );
+		} );
+		connect( freezeBtn, &QPushButton::clicked, this, [this]() {
+			ogl->physicsSim().freeze();
+		} );
+		connect( resetBtn, &QPushButton::clicked, this, [this]() {
+			ogl->physicsSim().reset();
+			ogl->setCollisionPreview( ogl->physicsSim().soup() );
+			ogl->update();
+		} );
+		connect( gravChk, &QCheckBox::toggled, this,
+			[this, syncCollisionPanel]( bool on ) {
+				ogl->physicsSim().setGravityEnabled( on );
+				syncCollisionPanel();
+			} );
+		connect( gravSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().setGravityStrength( float( v ) );
+		} );
+		connect( speedSlider, &QSlider::valueChanged, this,
+			[this, speedLbl]( int v ) {
+				ogl->physicsSim().setTimeScale( float( v ) / 100.0f );
+				speedLbl->setText( tr( "Speed  %1x" ).arg( v / 100.0, 0, 'g', 2 ) );
+			} );
+		connect( groundChk, &QCheckBox::toggled, this,
+			[this, syncCollisionPanel]( bool on ) {
+				ogl->physicsSim().setGroundEnabled( on );
+				syncCollisionPanel();
+			} );
+		connect( groundSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().setGroundHeight( float( v ) );
+		} );
+		connect( selfChk, &QCheckBox::toggled, this, [this]( bool on ) {
+			ogl->physicsSim().setSelfCollision( on );
+		} );
+		connect( limitsChk, &QCheckBox::toggled, this, [this]( bool on ) {
+			ogl->physicsSim().setAngularLimits( on );
+		} );
+		connect( statsChk, &QCheckBox::toggled, this, [this]( bool on ) {
+			ogl->setPhysicsStatsShown( on );
+		} );
+		// the keyboard shortcuts change the same state, so the panel re-reads it
+		// every time it is opened rather than trusting what it last wrote
+		connect( colMenu, &QMenu::aboutToShow, this, syncCollisionPanel );
+
+		/* Enabled only when the file HAS collision.
+		 *
+		 * Any bhk collision object counts, not only a jointed one: the button is
+		 * about the file having collision at all, and Run explains for itself
+		 * when there is nothing to simulate.
+		 */
+		auto refreshCollisionBar = [this, colBtn, syncCollisionPanel]() {
+			bool have = false;
+			if ( nif ) {
+				for ( qint32 b = 0; b < nif->getBlockCount() && !have; b++ ) {
+					const QModelIndex i = nif->getBlockIndex( b );
+					have = nif->blockInherits( i, "bhkCollisionObject" )
+						|| nif->blockInherits( i, "bhkNiCollisionObject" )
+						|| nif->blockInherits( i, "bhkPhysicsSystem" )
+						|| nif->blockInherits( i, "bhkRagdollSystem" );
+				}
+			}
+			colBtn->setEnabled( have );
+			colBtn->setToolTip( have
+				? tr( "Collision tools and the live physics preview" )
+				: tr( "This file has no collision" ) );
+			colBtn->setIcon( tlMakeIcon( QStringLiteral( "collision" ),
+				have ? QColor( 228, 228, 232 ) : QColor( 128, 128, 136 ) ) );
+			syncCollisionPanel();
+		};
+		connect( this, &NifSkope::completeLoading, this,
+			[refreshCollisionBar]( bool, QString & ) { refreshCollisionBar(); } );
+		refreshCollisionBar();
+
+		ui->tView->addWidget( colBtn );
+	}
+
 
 	// Regular dock toggles collapse into one dropdown on the View toolbar.
 	// Manager docks live in the adjacent Workspaces menu instead.
