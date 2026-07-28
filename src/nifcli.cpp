@@ -913,6 +913,10 @@ int cmdCollisionRoundTrip( const QString & file )
 	int rdc = 0, rdcExact = 0, rdcFresh = 0, rdcFreshInert = 0;
 	int lhc = 0, lhcExact = 0, lhcFresh = 0, lhcFreshInert = 0;
 	int skel = 0, skelExact = 0, skelInert = 0;
+	int packs = 0, packsExact = 0, packsSkipped = 0, packsLeafOnly = 0, packsDerived = 0, packsDerivedExact = 0;
+	QMap<QString, int> packDiffs;   // object kind -> how many bytes differed in it
+	qsizetype packFirstDiff = -1, packSizeWas = 0, packSizeNow = 0;
+	QString packError;
 	QSet<int> rdcFreshDiff;
 	float worstVert = 0.0f, worstPlane = 0.0f;
 	QMap<int, int> byteHist;   // offset -> how often the structural bytes differed
@@ -934,6 +938,87 @@ int cmdCollisionRoundTrip( const QString & file )
 		const HknpSystem sys = hknpDecode( bytes );
 		if ( !sys.valid )
 			continue;
+
+		/* The whole packfile, reassembled. Every object encoder above proves its own
+		 * bytes; this is the only check that covers what holds them together -- the
+		 * class-name table and its order, where each object lands, all three fixup
+		 * tables and their orderings, and the section headers. Nothing short of a
+		 * byte comparison against the original file tests those.
+		 */
+		if ( !sys.bones.isEmpty() && !sys.bodyPhys.isEmpty() ) {
+			QString err;
+			const QByteArray built = hknpEncodeRagdoll( sys, &err );
+			/* Assembled twice, because the two runs answer different questions.
+			 * With the stored shape bytes in hand this is what NifSkope writes for
+			 * a file whose collision nobody touched, and it has to come back
+			 * identical. With them cleared every shape is re-derived, which is
+			 * what an EDITED shape gets, and whatever survives then says how much
+			 * of the format is genuinely reconstructed rather than copied.
+			 */
+			HknpSystem fresh = sys;
+			for ( HknpShape & s : fresh.shapes )
+				s.rawData.clear();
+			const QByteArray derived = hknpEncodeRagdoll( fresh, nullptr );
+			if ( !derived.isEmpty() ) {
+				packsDerived++;
+				if ( derived == bytes )
+					packsDerivedExact++;
+			}
+			if ( built.isEmpty() ) {
+				// a clean refusal is not a wrong answer: report it, do not fail on it
+				packsSkipped++;
+				if ( packError.isEmpty() )
+					packError = err;
+			} else if ( packs++, built == bytes ) {
+				packsExact++;
+			} else {
+				/* WHERE the differences fall matters more than that there are any.
+				 * A capsule's core box is DERIVED from (capA, capB, radius, roll),
+				 * so it comes back a few ULP off and cannot be bit-exact from the
+				 * model alone -- which is what the per-shape checks below measure.
+				 * What this has to establish is the assembly: object order, where
+				 * each one lands, the class table, the three fixup tables and the
+				 * section headers. So classify every differing byte by the object
+				 * it lands in, and hold it against the assembly only when it lands
+				 * outside a leaf whose own encoder already reports the same.
+				 */
+				QMap<qsizetype, QString> objAt;   // offset -> what starts there
+				if ( sys.ragdollRawOffset >= 0 )
+					objAt.insert( sys.ragdollRawOffset, QStringLiteral( "root" ) );
+				if ( sys.skeletonRawOffset >= 0 )
+					objAt.insert( sys.skeletonRawOffset, QStringLiteral( "skeleton" ) );
+				for ( const HknpShape & s : sys.shapes ) {
+					if ( s.rawOffset >= 0 )
+						objAt.insert( s.rawOffset, QStringLiteral( "shape" ) );
+					if ( s.massPropsOffset >= 0 )
+						objAt.insert( s.massPropsOffset, QStringLiteral( "massprops" ) );
+				}
+				for ( const HknpConstraint & c : sys.constraints ) {
+					if ( c.rawOffset >= 0 )
+						objAt.insert( c.rawOffset, QStringLiteral( "constraint" ) );
+				}
+				bool structural = ( built.size() != bytes.size() );
+				const qsizetype n = std::min( built.size(), bytes.size() );
+				for ( qsizetype o = 0; o < n; o++ ) {
+					if ( built.at( o ) == bytes.at( o ) )
+						continue;
+					auto it = objAt.upperBound( o );
+					const QString where = ( it == objAt.constBegin() )
+						? QStringLiteral( "before any object" ) : ( --it ).value();
+					packDiffs[where]++;
+					if ( where == QLatin1String( "shape" ) || where == QLatin1String( "massprops" ) )
+						continue;
+					structural = true;
+					if ( packFirstDiff < 0 ) {
+						packFirstDiff = o;
+						packSizeWas = bytes.size();
+						packSizeNow = built.size();
+					}
+				}
+				if ( !structural )
+					packsLeafOnly++;
+			}
+		}
 
 		/* hkaSkeleton: rebuilt entirely from the decoded bones, no source bytes fed
 		 * back, so this is a real from-scratch test rather than a rewrite. The
@@ -1174,6 +1259,30 @@ int cmdCollisionRoundTrip( const QString & file )
 	}
 
 	out() << "file       " << file << Qt::endl;
+	if ( packs || packsSkipped ) {
+		out() << "packfile   " << packs << "  byte-exact " << packsExact
+			  << " / " << packs;
+		if ( packsSkipped )
+			out() << "  (" << packsSkipped << " not assembled)";
+		out() << Qt::endl;
+		if ( !packError.isEmpty() )
+			out() << "  not assembled: " << packError << Qt::endl;
+		if ( packsDerived )
+			out() << "  from the model alone (shapes re-derived): byte-exact "
+				  << packsDerivedExact << " / " << packsDerived << Qt::endl;
+		if ( packsLeafOnly )
+			out() << "  +" << packsLeafOnly << " differing only inside leaf objects"
+				  << " (derived bytes, not the assembly)" << Qt::endl;
+		if ( packFirstDiff >= 0 )
+			out() << "  first structural difference at +0x" << QString::number( packFirstDiff, 16 )
+				  << ", size " << packSizeNow << " vs " << packSizeWas << Qt::endl;
+		if ( !packDiffs.isEmpty() ) {
+			out() << "  differing bytes by object:";
+			for ( auto it = packDiffs.constBegin(); it != packDiffs.constEnd(); ++it )
+				out() << " " << it.key() << "=" << it.value();
+			out() << Qt::endl;
+		}
+	}
 	if ( spheres )
 		out() << "spheres    " << spheres << "  byte-exact " << spheresExact
 			  << " / " << spheres << Qt::endl;
@@ -1216,7 +1325,8 @@ int cmdCollisionRoundTrip( const QString & file )
 		out() << "  no capsules to check" << Qt::endl;
 		return ( spheresExact < spheres || polysExact < polys || compsExact < comps
 			|| rdcExact < rdc || lhcExact < lhc || skelExact + skelInert < skel
-			|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
+			|| massPropsExact + massPropsInert < massProps
+			|| packsExact + packsLeafOnly < packs ) ? 1 : 0;
 	}
 	out() << "  structure byte-exact   " << structOk << " / " << total << Qt::endl;
 	out() << "  whole object exact     " << fullyExact << " / " << total << Qt::endl;
@@ -1231,7 +1341,8 @@ int cmdCollisionRoundTrip( const QString & file )
 	return ( structOk < total || spheresExact < spheres || polysExact < polys
 		|| compsExact < comps || rdcExact < rdc || lhcExact < lhc
 		|| skelExact + skelInert < skel
-		|| massPropsExact + massPropsInert < massProps ) ? 1 : 0;
+		|| massPropsExact + massPropsInert < massProps
+		|| packsExact + packsLeafOnly < packs ) ? 1 : 0;
 }
 
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )

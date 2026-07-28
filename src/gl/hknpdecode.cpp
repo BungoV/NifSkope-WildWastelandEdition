@@ -741,6 +741,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 						const QString ik = objClass.value( in );
 						if ( in >= 0 && ik.startsWith( QLatin1String( "hkp" ) )
 							&& ik.endsWith( QLatin1String( "ConstraintData" ) ) ) {
+							jc.breakThreshold = r.f32( cd + 0x20 );
 							cd = in;
 							jc.kind = ik;
 							jc.breakable = true;
@@ -757,6 +758,12 @@ HknpSystem hknpDecode( const QByteArray & data )
 					const qsizetype len = objEnd( cd ) - cd;
 					if ( len > 0 && cd + len <= data.size() )
 						jc.rawData = data.mid( cd, len );
+					// motor pointers, so a rewrite can re-bind them (see motorPointers)
+					for ( qsizetype o = cd; o + 8 <= cd + len; o += 8 ) {
+						if ( objClass.value( global.value( o, -1 ) )
+							== QLatin1String( "hkpPositionConstraintMotor" ) )
+							jc.motorPointers.append( o - cd );
+					}
 				}
 				sys.constraints.append( jc );
 			}
@@ -784,6 +791,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 			if ( phys.layer == 0 )
 				phys.layer = ( sys.dynamic && phys.hasMotion ) ? 10u : 1u;
 			phys.position = r.vec3( c + 0x30 );
+			phys.positionW = r.u32( c + 0x3c );
 			// Havok stores xyzw; NifSkope's Quat is wxyz
 			phys.orientation = Quat( r.f32( c + 0x4c ), r.f32( c + 0x40 ),
 				r.f32( c + 0x44 ), r.f32( c + 0x48 ) );
@@ -808,6 +816,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 			 * (896 / 14 = 0x40, 1568 / 14 = 0x70).
 			 */
 			const quint32 motionIndex = r.u32( c + 0x0c );
+			if ( motionIndex != 0x7fffffffu && motionIndex < 0x40000000u )
+				phys.motionIndex = int( motionIndex );
 			phys.mass = sys.mass;
 			phys.density = sys.density;
 			phys.invInertia = sys.invInertia;
@@ -830,6 +840,10 @@ HknpSystem hknpDecode( const QByteArray & data )
 				phys.mass = ( invMass > 1.0e-12f ) ? 1.0f / invMass : 0.0f;
 				phys.density = r.f32( n + 0x08 );
 				phys.invInertia = r.vec3( n + 0x20 );
+				phys.motionCom = r.vec3( n + 0x30 );
+				phys.motionComW = r.u32( n + 0x3c );
+				phys.motionOrientation = Quat( r.f32( n + 0x4c ), r.f32( n + 0x40 ),
+					r.f32( n + 0x44 ), r.f32( n + 0x48 ) );
 			}
 			if ( bprops >= 0 ) {
 				qsizetype bp = bprops + qsizetype( i ) * 0x50;
@@ -857,6 +871,26 @@ HknpSystem hknpDecode( const QByteArray & data )
 			bt.id = int( i );
 			bodies.append( { shp, bt } );
 		}
+
+		/* The shape list at +0x60: the same shapes the cinfos name, permuted into
+		 * the NIF's block order. Recorded as body indices so a writer can restore
+		 * the order without carrying packfile offsets. See HknpSystem::shapeListOrder.
+		 */
+		if ( obj.second == QLatin1String( "hknpRagdollData" ) ) {
+			sys.ragdollRawOffset = obj.first;
+			if ( qsizetype list = local.value( obj.first + 0x60, -1 ); list >= 0 ) {
+				const quint32 n = r.u32( obj.first + 0x68 );
+				for ( quint32 k = 0; k < n && n <= 4096 && r.ok; k++ ) {
+					const qsizetype shp = global.value( list + qsizetype( k ) * 8, -1 );
+					int body = -1;
+					for ( quint32 i = 0; i < nb && body < 0; i++ ) {
+						if ( global.value( cinfos + qsizetype( i ) * 0x60, -1 ) == shp )
+							body = int( i );
+					}
+					sys.shapeListOrder.append( body );
+				}
+			}
+		}
 	}
 	// NOTE: the cinfo rotation/position is intentionally NOT composed into the
 	// shapes - each body is placed by its referencing NODE's world transform
@@ -880,6 +914,15 @@ HknpSystem hknpDecode( const QByteArray & data )
 	auto decodeLeaf = [&]( qsizetype off, const QString & cls, HknpShape & out ) -> bool {
 		out.className = cls;
 		out.rawOffset = off;
+		// the object as stored, so an untouched shape can be written back
+		// unchanged rather than re-derived -- see HknpShape::rawData
+		{
+			auto nx = std::upper_bound( objects.cbegin(), objects.cend(), off,
+				[]( qsizetype v, const QPair<qsizetype, QString> & p ) { return v < p.first; } );
+			const qsizetype end = ( nx != objects.cend() ) ? nx->first : dataStart + localOff;
+			if ( end > off && end <= data.size() )
+				out.rawData = data.mid( off, end - off );
+		}
 		if ( cls == QLatin1String( "hknpConvexPolytopeShape" )
 			|| cls == QLatin1String( "hknpConvexShape" )
 			|| cls == QLatin1String( "hknpSphereShape" )

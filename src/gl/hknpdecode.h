@@ -141,6 +141,19 @@ struct HknpShape
 	//! virtual fixups are resolved against __data__ at decode time. Lets a
 	//! re-encode be diffed against the bytes it came from. -1 = unknown.
 	qsizetype rawOffset = -1;
+	/*! The shape object exactly as stored, so an UNTOUCHED shape can be written
+	 * back unchanged instead of re-derived.
+	 *
+	 * A capsule's core box is not stored, it is computed from the segment, the
+	 * radius and the roll, and recomputing it lands a few ULP away -- around 750
+	 * differing bytes on an 18-capsule ragdoll, none of them meaning anything
+	 * (worst vertex error 1e-06 m). Editing one joint limit should not perturb
+	 * every capsule in the file, so a writer starts from these bytes.
+	 *
+	 * A caller that HAS edited the shape clears this, and the encoder derives.
+	 * Same contract as HknpConstraint::rawData.
+	 */
+	QByteArray rawData;
 
 	//! index of the hknpBodyCinfo this shape belongs to (-1 = none). Each
 	//! bhkNPCollisionObject names its body via its "Body ID" field, and the
@@ -197,6 +210,18 @@ struct HknpBodyPhys
 	 * unit-norm test in the simulate trace.
 	 */
 	Quat orientation = Quat( 1, 0, 0, 0 );
+	//! cinfo +0x3c: the position's w lane. Zero on 813 of the 857 corpus bodies
+	//! and one of 38 values on the rest, so it is residue rather than a field --
+	//! carried because a rewrite cannot invent it. See HknpConstraint::rawData.
+	quint32 positionW = 0;
+
+	/*! cinfo +0x0c: which dyn_motion / dyn_inertia entry this body uses.
+	 *
+	 * NOT the body's own index -- the arrays are shorter than the body list on
+	 * any ragdoll with static parts, and limbs share motions. 0x7fffffff means
+	 * static, which is what hasMotion reports. -1 here means static too.
+	 */
+	int motionIndex = -1;
 
 	/* Per-body dynamics. A ragdoll has one entry per bone in the root's
 	 * dyn_motion (+0x20, stride 0x40) and dyn_inertia (+0x30, stride 0x70)
@@ -217,6 +242,23 @@ struct HknpBodyPhys
 	 * from the other end -- reciprocating it made every ragdoll explode.
 	 */
 	Vector3 invInertia;
+	/*! dyn_inertia +0x30: a world-space position, and NOT the body's own.
+	 *
+	 * Distinct from cinfo's position on 848 of 857 bodies, by 0.67 m at the
+	 * median. Its magnitude tracks the skeleton's scale (median 0.99, up to 12.9
+	 * on Liberty Prime), so it is a point in the ragdoll's space rather than a
+	 * local offset. The natural reading is the motion's centre of mass, which is
+	 * where hknpMotion keeps one and would sit mid-limb as this does -- but that
+	 * is the reading, not a measurement, so the name says what it is.
+	 */
+	Vector3 motionCom;
+	quint32 motionComW = 0;             //!< dyn_inertia +0x3c, the w lane beside it
+	/*! dyn_inertia +0x40: a unit quaternion, xyzw. Unit to 1e-5 on all 857.
+	 *
+	 * Also not a duplicate of the body's orientation -- it differs bitwise on all
+	 * 857 -- so the motion carries its own frame.
+	 */
+	Quat motionOrientation = Quat( 1, 0, 0, 0 );
 	float gravityFactor = 1.0f;         //!< dyn_motion +0x08
 	float maxLinVelocity = 104.375f;    //!< dyn_motion +0x10
 	float maxAngVelocity = 31.57f;      //!< dyn_motion +0x14
@@ -267,6 +309,10 @@ struct HknpConstraint
 	QString kind;
 	//! reached through an hknpBreakableConstraintData wrapper: the joint can snap
 	bool breakable = false;
+	//! the wrapper's break threshold (+0x20). Only 3 exist in the corpus, two at
+	//! 0 and one at 0.01, so it is decoded rather than defaulted -- writing the
+	//! wrong one silently changes when a joint snaps.
+	float breakThreshold = 0.0f;
 
 	/*! The joint's frame in each body's space: a rotation basis and a pivot.
 	 *
@@ -313,6 +359,16 @@ struct HknpConstraint
 	 * limit cannot disturb anything else.
 	 */
 	QByteArray rawData;
+	/*! Offsets inside the constraint object that hold an hkpPositionConstraintMotor
+	 * pointer, so a rewrite can re-bind them.
+	 *
+	 * A ragdoll constraint has THREE, at +0x100/+0x108/+0x110 -- the twist, plane
+	 * and cone motors of its RAGDOLL_MOTOR atom -- and every one of the 520 points
+	 * at the single motor the whole file shares. A limited hinge has one at +0xd0
+	 * on 244 of 246. The three constraints with none are why this is recorded
+	 * rather than assumed from the kind.
+	 */
+	QVector<qsizetype> motorPointers;
 };
 
 /*! One bone of the ragdoll's own skeleton copy (hkaSkeleton).
@@ -446,6 +502,25 @@ struct HknpSystem
 	QVector<HknpBone> bones;
 	//! byte offset of the hkaSkeleton object in the packfile blob, or -1
 	qsizetype skeletonRawOffset = -1;
+	//! byte offset of the hknpRagdollData root object, or -1
+	qsizetype ragdollRawOffset = -1;
+	/*! hknpRagdollData +0x60: the ragdoll's shape list, as BODY indices.
+	 *
+	 * It holds the same set of shape pointers as the body cinfos -- a bijection
+	 * on all 37 corpus ragdolls -- but in a different order on 36 of them, so it
+	 * is a permutation of the body list and not a copy of it.
+	 *
+	 * The order is the NIF's own: the sequence the bhkNPCollisionObject blocks
+	 * appear in, which matches on 35 of 37 with the other two being parts kits
+	 * whose spare bodies have no node at all. It is therefore NOT derivable from
+	 * the packfile -- a writer inside a NIF has it, a standalone rewrite does not
+	 * -- which is why the decode records it rather than reconstructing it.
+	 *
+	 * A depth-first walk of the bone tree reproduces it on 32 of 34, which is
+	 * exactly the kind of near-miss that has been wrong every previous time this
+	 * session. Node order is right for all of them.
+	 */
+	QVector<int> shapeListOrder;
 	bool positionalBodies = false;
 	/*! The compound shapes as OBJECTS, alongside the flattened child shapes.
 	 *

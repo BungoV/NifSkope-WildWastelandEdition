@@ -874,7 +874,9 @@ Ordered by dependency:
    payloads behind a printed 0.5, plus a signed zero in row 1. Only static
    compounds remain unmeasured -- the 400-file sample found 14 dynamic and zero
    static.
-5. **Ragdoll** — constraint encoder SHIPPED 07-29a, the rest open.
+5. ~~**Ragdoll**~~ — constraint encoders SHIPPED 07-29a, root + packfile assembly
+   SHIPPED 07-29e: 32 of 37 vanilla ragdolls rebuilt byte for byte, 5 refused
+   (compound shapes, see the end of this step).
 
    **The constraint objects are fixed-size templates**, which makes this far
    smaller than it looks. Over 37 ragdoll packfiles: `hkpRagdollConstraintData` 416
@@ -938,7 +940,7 @@ Ordered by dependency:
    | +0x30 | dyn_inertia | bodies | 0x70 | - |
    | +0x40 | cinfo | bodies | 0x60 | - |
    | +0x50 | constraints | **bones - 1** | 0x18 | 16 |
-   | +0x60 | all zero | bodies | 0x08 | 16 |
+   | +0x60 | **shape list, NIF node order** | bodies | 0x08 | 16 |
    | +0x80 | bone -> body index (identity on all 37) | **bones** | 0x04 | 16 |
 
    **The `+0x80` bone-count trap, concretely:** most arrays are per-BODY, but +0x80
@@ -948,13 +950,40 @@ Ordered by dependency:
    (5/4) -- parts kits whose extra collision bodies sit outside the ragdoll hierarchy,
    the same thing the simulator's `looseBodies()` handles.
 
-   **Still open:** an encoder for `hknpRagdollData`, and the packfile assembly that
-   binds everything. These are one job, not two: the root carries 54 global fixups on
-   a mid-sized ragdoll (one per shape, one per constraint, one for the skeleton), so
-   writing it usefully means writing the assembly rather than another standalone
-   object. Compounds already proved a writer must emit fixup entries rather than
-   self-contained blobs (see 4d step 4). Every OTHER object a ragdoll needs already
-   writes.
+   **`+0x60` is NOT "all zero"** -- an earlier revision of this table said it was,
+   because its bytes are. Every slot is patched by a global fixup, so the contents
+   are the ragdoll's shape list: the same set the body cinfos name (a bijection on
+   all 37) in a DIFFERENT order on 36 of them. That order is the NIF's own -- the
+   sequence the `bhkNPCollisionObject` blocks appear in, exact on 35/37, the two
+   others being parts kits whose spare bodies have no node. It is therefore **not
+   derivable from the packfile**; `HknpSystem::shapeListOrder` records it. A
+   depth-first walk of the bone tree matches on 32 of 34, which is a near-miss, not
+   the rule. `cinfo+0x12` is the inverse permutation -- the body's slot in that list
+   -- and NOT the material index the decoder still reads it as (harmless on
+   ragdolls, which carry no material table; unchecked on physics systems).
+
+   **ENCODER + ASSEMBLY SHIPPED 07-29e.** `hknpEncodeRagdollData` and
+   `hknpEncodeRagdoll` / `hknpBuildPackfile`: **32 of 37 vanilla ragdolls decode and
+   reassemble byte-identical to the file Havok wrote**, zero structural differences,
+   5 refused cleanly (compound shapes). With every shape re-derived instead of
+   copied, 2/32 are still byte-exact and on the other 30 every differing byte lands
+   inside a shape object -- a capsule's core box cannot survive a float round trip
+   (worst vertex error 1e-06 m), which is why `HknpShape` now carries `rawData` the
+   way constraints do.
+
+   Packfile-level rules, measured on the same 37: `__classnames__` at 0x100, the
+   four `hkClass*` reflection names first and the rest **in order of first use**;
+   `__types__` empty; objects back to back, each padded to 16, root first and
+   `hkaSkeleton` last; local and virtual fixups ascending by source but **global
+   fixups in member declaration order**, which puts the root's +0x78 skeleton
+   pointer after the fixups for the array whose payload sits at +0x7c0; every fixup
+   table padded to 16 with 0xff and carrying **no sentinel entry**; a section-header
+   name NUL-padded with 0xff in byte 0x13 alone.
+
+   **Still open:** ragdolls whose bodies carry compound shapes (5 of 37). The
+   compound object itself already writes byte-exact, but the assembly needs the
+   compound's owning body and its `hknpDynamicCompoundShapeData` recorded, neither
+   of which the decode keeps -- it flattens a compound into one shape per instance.
 6. **Round-trip validation** over the corpus — DONE 07-28y for the shipped
    encoders, and it earned its keep: a 700-file stride sample of the full 34,985
    mesh tree caught 8 polytope failures in exactly the categories the skeletons do

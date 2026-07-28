@@ -55,26 +55,34 @@ struct Fixups
 	QVector<GlobalFix> global;
 	QVector<VirtualFix> virtuals;
 
+	/* Each table is padded to 16 with 0xff and carries NO sentinel entry -- the
+	 * section header is what bounds it. Verified on all 37 vanilla ragdolls: the
+	 * local table is exactly 8n rounded up to 16, the other two 12n rounded up,
+	 * and every padding byte is 0xff.
+	 *
+	 * This wrote a full 0xffffffff entry instead until 07-29e. That reads the same
+	 * to a parser -- 0xffffffff is the -1 one stops on -- but it is 20 bytes more
+	 * than any vanilla file carries, which is what stopped a reassembled ragdoll
+	 * from matching byte for byte.
+	 */
 	QByteArray localTable() const
 	{
 		QByteArray out; for ( const auto & f : local ) { appendU32( out, f.first ); appendU32( out, f.second ); }
-		appendU32( out, 0xffffffffu ); appendU32( out, 0xffffffffu ); return out;
+		pad( out, 16, char( 0xff ) ); return out;
 	}
 	QByteArray globalTable() const
 	{
 		QByteArray out; for ( const GlobalFix & f : global ) {
 			appendU32( out, f.source ); appendU32( out, f.section ); appendU32( out, f.target );
 		}
-		for ( int i = 0; i < 3; i++ ) appendU32( out, 0xffffffffu );
-		return out;
+		pad( out, 16, char( 0xff ) ); return out;
 	}
 	QByteArray virtualTable() const
 	{
 		QByteArray out; for ( const VirtualFix & f : virtuals ) {
 			appendU32( out, f.object ); appendU32( out, f.section ); appendU32( out, f.name );
 		}
-		for ( int i = 0; i < 3; i++ ) appendU32( out, 0xffffffffu );
-		return out;
+		pad( out, 16, char( 0xff ) ); return out;
 	}
 };
 
@@ -185,8 +193,13 @@ QByteArray classNames( QHash<QString, quint32> & offsets )
 QByteArray sectionHeader( const char * name, quint32 start, quint32 localFix,
 	quint32 globalFix, quint32 virtualFix, quint32 end )
 {
-	QByteArray out( 0x40, 0 ); for ( int i = 0; i < 0x14; i++ ) out[i] = char( 0xff );
-	QByteArray n( name ); std::memcpy( out.data(), n.constData(), std::min( n.size(), qsizetype( 0x13 ) ) ); out[std::min( n.size(), qsizetype( 0x13 ) )] = 0;
+	// the name is NUL-padded through +0x12, with 0xff in +0x13 alone -- true of
+	// all 111 section headers in the corpus. Filling the whole field with 0xff
+	// and terminating after the name, which this did until 07-29e, differs from
+	// vanilla from the first section header onwards.
+	QByteArray out( 0x40, 0 );
+	QByteArray n( name ); std::memcpy( out.data(), n.constData(), std::min( n.size(), qsizetype( 0x13 ) ) );
+	out[0x13] = char( 0xff );
 	setU32( out, 0x14, start ); setU32( out, 0x18, localFix - start ); setU32( out, 0x1c, globalFix - start );
 	setU32( out, 0x20, virtualFix - start ); setU32( out, 0x24, end - start ); setU32( out, 0x28, end - start ); setU32( out, 0x2c, end - start );
 	for ( int i = 0x30; i < 0x40; i++ ) out[i] = char( 0xff );
@@ -900,4 +913,435 @@ QByteArray hknpEncodeShapeMassProperties( const Vector3 & centreOfMass, const Ve
 	setFloat( out, 0x28, volume );
 	setFloat( out, 0x2c, mass );
 	return out;
+}
+
+/* ---------------------------------------------------------------------------
+ * Packfile assembly.
+ *
+ * Everything above writes ONE object, with its pointer slots left at raw zero,
+ * because a Havok packfile binds pointers through its fixup tables rather than
+ * through the data. On their own those bytes cannot be loaded by anything. This
+ * is the part that turns them into a file.
+ * ------------------------------------------------------------------------- */
+
+namespace {
+
+/*! Class name -> its type hash, read off vanilla files rather than computed.
+ *
+ * The hash function Havok uses is not established here, so a name that is not in
+ * this table is an error rather than something to guess at. The four reflection
+ * classes lead every vanilla list and own no object.
+ */
+quint32 classHash( const QString & name )
+{
+	static const ClassEntry entries[] = {
+		{ 0x33d42383u, "hkClass" }, { 0xb0efa719u, "hkClassMember" },
+		{ 0x8a3609cfu, "hkClassEnum" }, { 0xce6f8a6cu, "hkClassEnumItem" },
+		{ 0x7c574867u, "hkRefCountedProperties" }, { 0xfec1cedbu, "hkaSkeleton" },
+		{ 0xc40485c7u, "hknpBreakableConstraintData" }, { 0x60a75f4cu, "hknpCapsuleShape" },
+		{ 0x3ce9b3e3u, "hknpConvexPolytopeShape" }, { 0x4620d11cu, "hknpDynamicCompoundShape" },
+		{ 0xf33dc3ccu, "hknpDynamicCompoundShapeData" }, { 0xb857718bu, "hknpPhysicsSystemData" },
+		{ 0xdc8f20abu, "hknpRagdollData" }, { 0xe9191728u, "hknpShapeMassProperties" },
+		{ 0x741e9012u, "hknpSphereShape" }, { 0x51ea603au, "hkpLimitedHingeConstraintData" },
+		{ 0x143dd400u, "hkpPositionConstraintMotor" }, { 0xb77d2036u, "hkpRagdollConstraintData" },
+		{ 0x5f60d536u, "hknpCompressedMeshShape" }, { 0xa2bdfc59u, "hknpCompressedMeshShapeData" },
+		{ 0xa3e47a9au, "hknpBSMaterialProperties" }
+	};
+	for ( const ClassEntry & e : entries ) {
+		if ( name == QLatin1String( e.name ) )
+			return e.hash;
+	}
+	return 0;
+}
+
+} // namespace
+
+QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString * error )
+{
+	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
+	if ( objects.isEmpty() )
+		return fail( QStringLiteral( "A packfile needs at least a root object." ) );
+
+	// class names: the four reflection classes, then order of first use (37/37)
+	QStringList used = { QStringLiteral( "hkClass" ), QStringLiteral( "hkClassMember" ),
+		QStringLiteral( "hkClassEnum" ), QStringLiteral( "hkClassEnumItem" ) };
+	for ( const HknpPackObject & o : objects ) {
+		if ( !used.contains( o.className ) )
+			used.append( o.className );
+	}
+	QByteArray cn;
+	QHash<QString, quint32> nameOffset;
+	for ( const QString & name : std::as_const( used ) ) {
+		const quint32 hash = classHash( name );
+		if ( !hash )
+			return fail( QStringLiteral( "No class hash known for %1." ).arg( name ) );
+		nameOffset.insert( name, quint32( cn.size() + 5 ) );
+		appendU32( cn, hash );
+		cn.append( char( 0x09 ) );
+		cn.append( name.toLatin1() );
+		cn.append( '\0' );
+	}
+	pad( cn, 16, char( 0xff ) );
+
+	// objects land in the order given, each padded to 16 (every vanilla object is)
+	QVector<quint32> at( objects.size() );
+	QByteArray data;
+	for ( qsizetype i = 0; i < objects.size(); i++ ) {
+		at[i] = quint32( data.size() );
+		data.append( objects.at( i ).bytes );
+		pad( data, 16 );
+	}
+
+	Fixups fx;
+	for ( qsizetype i = 0; i < objects.size(); i++ ) {
+		const HknpPackObject & o = objects.at( i );
+		fx.virtuals.append( { at[i], 0, nameOffset.value( o.className ) } );
+		for ( const auto & l : o.local )
+			fx.local.append( { at[i] + quint32( l.first ), at[i] + quint32( l.second ) } );
+		for ( const HknpPackObject::Ref & g : o.global ) {
+			if ( g.object < 0 || g.object >= objects.size() )
+				return fail( QStringLiteral( "Packfile fixup names object %1 of %2." )
+					.arg( g.object ).arg( objects.size() ) );
+			fx.global.append( { at[i] + quint32( g.source ), 2, at[g.object] } );
+		}
+	}
+	// local ascends by source; virtual already does, being emitted in object
+	// order; global keeps the caller's order, which is the reflection walk
+	std::sort( fx.local.begin(), fx.local.end() );
+
+	QByteArray local = fx.localTable(), global = fx.globalTable(), virtuals = fx.virtualTable();
+	quint32 cnStart = 0x100, cnEnd = cnStart + quint32( cn.size() ), dataStart = cnEnd;
+	quint32 localAbs = dataStart + quint32( data.size() ), globalAbs = localAbs + quint32( local.size() ),
+		virtualAbs = globalAbs + quint32( global.size() );
+	quint32 dataEnd = virtualAbs + quint32( virtuals.size() );
+	QByteArray out = fileHeader( nameOffset.value( objects.first().className ) );
+	out += sectionHeader( "__classnames__", cnStart, cnEnd, cnEnd, cnEnd, cnEnd );
+	out += sectionHeader( "__types__", cnEnd, cnEnd, cnEnd, cnEnd, cnEnd );
+	out += sectionHeader( "__data__", dataStart, localAbs, globalAbs, virtualAbs, dataEnd );
+	out += cn; out += data; out += local; out += global; out += virtuals;
+	if ( error )
+		error->clear();
+	return out;
+}
+
+/*! Write the root object of a ragdoll.
+ *
+ * The header is entirely zero apart from the seven array descriptors -- checked
+ * word by word across all 37 vanilla roots -- so everything interesting is in
+ * the payloads, which run back to back from +0x90 with each padded to 16.
+ *
+ * Field-level constants below are the values every one of the 857 corpus bodies
+ * carries; the ones that vary are exactly what HknpBodyPhys models, which is why
+ * this can be written from the model rather than from preserved bytes.
+ */
+QByteArray hknpEncodeRagdollData( const HknpSystem & sys, HknpRagdollDataFixups * fixups )
+{
+	const qsizetype nb = sys.bodyPhys.size();
+	const qsizetype nbone = sys.bones.size();
+	const qsizetype ncon = sys.constraints.size();
+	if ( nb <= 0 )
+		return QByteArray();
+
+	// dyn_motion / dyn_inertia are indexed by cinfo +0x0c, which is NOT the body
+	// index -- limbs share motions and static bodies have none
+	qsizetype nmotion = 0;
+	for ( const HknpBodyPhys & b : sys.bodyPhys )
+		nmotion = std::max( nmotion, qsizetype( b.motionIndex ) + 1 );
+
+	QByteArray props, motions( nmotion * 0x40, 0 ), inertias( nmotion * 0x70, 0 ), cinfos;
+	for ( qsizetype i = 0; i < nb; i++ ) {
+		const HknpBodyPhys & b = sys.bodyPhys.at( i );
+
+		QByteArray p( 0x50, 0 );
+		setU16( p, 0x10, 0xff00 );
+		setU16( p, 0x12, truncFloat16( b.friction ) );
+		setU16( p, 0x14, truncFloat16( b.friction ) );
+		setU16( p, 0x16, truncFloat16( b.restitution ) );
+		setU32( p, 0x18, 0x3d4c0201u ); setU32( p, 0x1c, 0x7f7fffeeu );
+		setFloat( p, 0x20, 1.0f ); setFloat( p, 0x24, 1.0f );
+		setU32( p, 0x38, 0x000040a0u );
+		props.append( p );
+
+		QByteArray c( 0x60, 0 );
+		setU32( c, 0x08, 0x7fffffffu );
+		setU32( c, 0x0c, b.motionIndex >= 0 ? quint32( b.motionIndex ) : 0x7fffffffu );
+		c[0x10] = char( 0xff );
+		/* +0x12 is the body's slot in the ragdoll's shape list -- the INVERSE of
+		 * shapeListOrder, exact on all 37 -- not the body's own index and not a
+		 * material id. It is the identity on one ragdoll only, which is the one
+		 * whose shape list is already in body order.
+		 */
+		setU16( c, 0x12, quint16( std::max( sys.shapeListOrder.indexOf( int( i ) ), qsizetype( 0 ) ) ) );
+		setU32( c, 0x14, ( b.layer & 0xffu ) | ( quint32( b.filterFlags ) << 8 )
+			| ( quint32( b.filterGroup ) << 16 ) );
+		setU32( c, 0x18, 0x00010080u );
+		for ( int a = 0; a < 3; a++ )
+			setFloat( c, 0x30 + a * 4, b.position[a] );
+		setU32( c, 0x3c, b.positionW );
+		// NifSkope's Quat is wxyz, Havok stores xyzw
+		setFloat( c, 0x40, b.orientation[1] ); setFloat( c, 0x44, b.orientation[2] );
+		setFloat( c, 0x48, b.orientation[3] ); setFloat( c, 0x4c, b.orientation[0] );
+		cinfos.append( c );
+
+		if ( b.motionIndex < 0 || b.motionIndex >= nmotion )
+			continue;
+		const qsizetype m = qsizetype( b.motionIndex ) * 0x40;
+		setFloat( motions, m + 0x08, b.gravityFactor ); setFloat( motions, m + 0x0c, 1.0f );
+		setFloat( motions, m + 0x10, b.maxLinVelocity ); setFloat( motions, m + 0x14, b.maxAngVelocity );
+		setFloat( motions, m + 0x18, b.linDamping ); setFloat( motions, m + 0x1c, b.angDamping );
+		setU32( motions, m + 0x20, 0x3e2e147bu ); setU32( motions, m + 0x24, 0x3efb22d2u );
+		setU32( motions, m + 0x28, 0x3b23d70bu ); setU32( motions, m + 0x2c, 0x3b23d70bu );
+		setFloat( motions, m + 0x30, 1.0f );
+		// +0x34..+0x3f reads like uninitialised tail, but it is the same three
+		// words on all 857 bodies, so it is written rather than zeroed
+		setU32( motions, m + 0x34, 0x999b67ffu ); setU32( motions, m + 0x38, 0x06757304u );
+		setU32( motions, m + 0x3c, 0x00000073u );
+
+		const qsizetype n = qsizetype( b.motionIndex ) * 0x70;
+		setU16( inertias, n + 0x00, quint16( b.motionIndex ) ); setU16( inertias, n + 0x02, 1 );
+		setFloat( inertias, n + 0x04, b.mass > 1.0e-12f ? 1.0f / b.mass : 0.0f );
+		setFloat( inertias, n + 0x08, b.density );
+		setU32( inertias, n + 0x0c, 0x5f7ffff0u ); setU32( inertias, n + 0x10, 0x5f7ffff0u );
+		for ( int a = 0; a < 3; a++ ) {
+			setFloat( inertias, n + 0x20 + a * 4, b.invInertia[a] );
+			setFloat( inertias, n + 0x30 + a * 4, b.motionCom[a] );
+		}
+		setFloat( inertias, n + 0x2c, 1.0f );
+		setU32( inertias, n + 0x3c, b.motionComW );
+		setFloat( inertias, n + 0x40, b.motionOrientation[1] );
+		setFloat( inertias, n + 0x44, b.motionOrientation[2] );
+		setFloat( inertias, n + 0x48, b.motionOrientation[3] );
+		setFloat( inertias, n + 0x4c, b.motionOrientation[0] );
+	}
+
+	QByteArray cons( ncon * 0x18, 0 );
+	for ( qsizetype i = 0; i < ncon; i++ ) {
+		setU32( cons, i * 0x18 + 0x08, quint32( sys.constraints.at( i ).childBody ) );
+		setU32( cons, i * 0x18 + 0x0c, quint32( sys.constraints.at( i ).parentBody ) );
+	}
+
+	/* The bone-to-body map is the identity on all 37, including the three parts
+	 * kits where the counts differ, so it is written rather than carried. It is
+	 * per BONE, not per body -- see the class comment.
+	 */
+	QByteArray boneMap( nbone * 4, 0 );
+	for ( qsizetype i = 0; i < nbone; i++ )
+		setU32( boneMap, i * 4, quint32( i ) );
+
+	QByteArray out( 0x90, 0 );
+	auto place = [&]( qsizetype desc, quint32 count, const QByteArray & payload ) {
+		setU32( out, desc + 8, count );
+		setU32( out, desc + 12, count | 0x80000000u );
+		const qsizetype at = out.size();
+		out.append( payload );
+		pad( out, 16 );
+		return at;
+	};
+	HknpRagdollDataFixups fx;
+	const qsizetype propsAt = place( 0x10, quint32( nb ), props );
+	const qsizetype motionAt = place( 0x20, quint32( nmotion ), motions );
+	const qsizetype inertiaAt = place( 0x30, quint32( nmotion ), inertias );
+	const qsizetype cinfoAt = place( 0x40, quint32( nb ), cinfos );
+	const qsizetype consAt = place( 0x50, quint32( ncon ), cons );
+	const qsizetype listAt = place( 0x60, quint32( sys.shapeListOrder.size() ),
+		QByteArray( sys.shapeListOrder.size() * 8, 0 ) );
+	const qsizetype mapAt = place( 0x80, quint32( nbone ), boneMap );
+
+	fx.local = { { 0x10, propsAt }, { 0x20, motionAt }, { 0x30, inertiaAt },
+		{ 0x40, cinfoAt }, { 0x50, consAt }, { 0x60, listAt }, { 0x80, mapAt } };
+	for ( qsizetype i = 0; i < nb; i++ )
+		fx.bodyShapePointers.append( cinfoAt + i * 0x60 );
+	for ( qsizetype i = 0; i < ncon; i++ )
+		fx.constraintPointers.append( consAt + i * 0x18 );
+	for ( qsizetype i = 0; i < sys.shapeListOrder.size(); i++ )
+		fx.shapeListPointers.append( listAt + i * 8 );
+	if ( fixups )
+		*fixups = fx;
+	return out;
+}
+
+namespace {
+
+/*! One shape as a packfile object. Returns false for a class with no encoder.
+ *
+ * Convex polytopes own an hkRefCountedProperties holding their mass properties;
+ * those two objects are appended straight after the shape, which is where every
+ * vanilla file puts them.
+ */
+bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs )
+{
+	HknpPackObject so;
+	if ( shp.primType == 2 && shp.coreVerts.size() == 8 ) {
+		HknpCapsuleInput in;
+		in.capA = shp.capA; in.capB = shp.capB;
+		in.radius = shp.convexRadius; in.materialCRC = shp.shapeMaterialCRC;
+		in.padding = shp.corePadding;
+		// bit 1 of the vertex index selects the +u side, so the difference of the
+		// two 4-corner centroids recovers the roll the file was written with
+		Vector3 hi, lo;
+		for ( int v = 0; v < 8; v++ )
+			( ( v & 2 ) ? hi : lo ) += shp.coreVerts.at( v );
+		in.frameU = hi - lo;
+		in.hasFrame = in.frameU.length() > 1.0e-12f;
+		so.className = QStringLiteral( "hknpCapsuleShape" );
+		so.bytes = hknpEncodeCapsuleShape( in );
+	} else if ( shp.primType == 1 ) {
+		so.className = QStringLiteral( "hknpSphereShape" );
+		so.bytes = hknpEncodeSphereShape( shp.capA, shp.convexRadius, shp.shapeMaterialCRC );
+	} else if ( shp.isConvex && !shp.faces.isEmpty()
+		&& shp.faceAngles.size() == shp.faces.size() ) {
+		HknpPolytopeInput pin;
+		pin.verts = shp.verts; pin.planes = shp.planes; pin.faces = shp.faces;
+		pin.faceAngles = shp.faceAngles; pin.convexRadius = shp.convexRadius;
+		pin.materialCRC = shp.shapeMaterialCRC; pin.shapeFlags = shp.shapeFlags;
+		so.className = QStringLiteral( "hknpConvexPolytopeShape" );
+		so.bytes = hknpEncodeConvexPolytopeShape( pin );
+	} else {
+		return false;
+	}
+	if ( so.bytes.isEmpty() )
+		return false;
+	/* An untouched shape goes back as it came. The derived bytes above are still
+	 * built, because their SIZE is what says the layout was understood, but a
+	 * capsule's core box cannot survive a float round trip and there is no reason
+	 * to make it try. A caller that edited the shape clears rawData.
+	 */
+	if ( shp.rawData.size() == so.bytes.size() )
+		so.bytes = shp.rawData;
+
+	const qsizetype shapeIndex = objs.size();
+	objs.append( so );
+	if ( !shp.hasMassProps )
+		return true;
+
+	objs[shapeIndex].global.append( { 0x20, int( objs.size() ) } );
+	HknpPackObject rc;
+	rc.className = QStringLiteral( "hkRefCountedProperties" );
+	rc.bytes = refCountedProperties();
+	rc.local.append( { 0x00, 0x10 } );
+	rc.global.append( { 0x10, int( objs.size() ) + 1 } );
+	objs.append( rc );
+
+	HknpPackObject mp;
+	mp.className = QStringLiteral( "hknpShapeMassProperties" );
+	mp.bytes = hknpEncodeShapeMassProperties( shp.massCom, shp.massInertiaRaw,
+		shp.massVolume, shp.massMass, shp.massMajorAxis );
+	objs.append( mp );
+	return true;
+}
+
+} // namespace
+
+QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )
+{
+	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
+	if ( sys.bodyPhys.isEmpty() || sys.bones.isEmpty() )
+		return fail( QStringLiteral( "Not a ragdoll: it has no bodies or no skeleton." ) );
+	if ( !sys.compounds.isEmpty() )
+		return fail( QStringLiteral( "Ragdolls with compound shapes are not assembled yet." ) );
+
+	// one shape per body, and the body it belongs to is the cinfo that names it
+	QVector<const HknpShape *> byBody( sys.bodyPhys.size(), nullptr );
+	for ( const HknpShape & s : sys.shapes ) {
+		if ( s.bodyId >= 0 && s.bodyId < byBody.size() && !byBody.at( s.bodyId ) )
+			byBody[s.bodyId] = &s;
+	}
+
+	QVector<HknpPackObject> objs;
+	HknpRagdollDataFixups rfx;
+	HknpPackObject root;
+	root.className = QStringLiteral( "hknpRagdollData" );
+	root.bytes = hknpEncodeRagdollData( sys, &rfx );
+	if ( root.bytes.isEmpty() )
+		return fail( QStringLiteral( "Could not write the ragdoll root object." ) );
+	root.local = rfx.local;
+	objs.append( root );
+
+	/* Object order is a walk of the root's own references: each body's shape (and
+	 * whatever the shape owns) in body order, then each constraint (and its motor
+	 * the first time one is wanted), then the skeleton last. That reproduces the
+	 * object order of every vanilla ragdoll.
+	 */
+	QVector<int> shapeObj( sys.bodyPhys.size(), -1 );
+	for ( qsizetype i = 0; i < byBody.size(); i++ ) {
+		if ( !byBody.at( i ) )
+			return fail( QStringLiteral( "Body %1 has no shape." ).arg( i ) );
+		shapeObj[i] = int( objs.size() );
+		if ( !encodeShapeObject( *byBody.at( i ), objs ) )
+			return fail( QStringLiteral( "No encoder for the shape on body %1 (%2)." )
+				.arg( i ).arg( byBody.at( i )->className ) );
+	}
+
+	int motorObj = -1;
+	QVector<int> conObj( sys.constraints.size(), -1 );
+	for ( qsizetype i = 0; i < sys.constraints.size(); i++ ) {
+		const HknpConstraint & c = sys.constraints.at( i );
+		HknpPackObject co;
+		co.className = c.kind;
+		if ( c.kind == QLatin1String( "hkpRagdollConstraintData" ) )
+			co.bytes = hknpEncodeRagdollConstraintData( c );
+		else if ( c.kind == QLatin1String( "hkpLimitedHingeConstraintData" ) )
+			co.bytes = hknpEncodeLimitedHingeConstraintData( c );
+		else
+			return fail( QStringLiteral( "No encoder for constraint kind %1." ).arg( c.kind ) );
+
+		/* A breakable joint is the wrapper object, not the constraint: the root
+		 * points at the wrapper and the wrapper points on. Only 3 exist, all with
+		 * the constraint pointer at +0x18.
+		 */
+		if ( c.breakable ) {
+			HknpPackObject wrap;
+			wrap.className = QStringLiteral( "hknpBreakableConstraintData" );
+			wrap.bytes = hknpEncodeBreakableConstraintData( c.breakThreshold );
+			wrap.global.append( { 0x18, int( objs.size() ) + 1 } );
+			conObj[i] = int( objs.size() );
+			objs.append( wrap );
+		} else {
+			conObj[i] = int( objs.size() );
+		}
+
+		const int here = int( objs.size() );
+		if ( !c.motorPointers.isEmpty() ) {
+			const int motor = ( motorObj >= 0 ) ? motorObj : here + 1;
+			for ( qsizetype s : c.motorPointers )
+				co.global.append( { s, motor } );
+		}
+		objs.append( co );
+		if ( !c.motorPointers.isEmpty() && motorObj < 0 ) {
+			HknpPackObject mo;
+			mo.className = QStringLiteral( "hkpPositionConstraintMotor" );
+			mo.bytes = hknpEncodePositionConstraintMotor();
+			motorObj = int( objs.size() );
+			objs.append( mo );
+		}
+	}
+
+	HknpSkeletonFixups sfx;
+	HknpPackObject sk;
+	sk.className = QStringLiteral( "hkaSkeleton" );
+	sk.bytes = hknpEncodeSkeleton( sys.bones, &sfx );
+	if ( sk.bytes.isEmpty() )
+		return fail( QStringLiteral( "Could not write the ragdoll skeleton." ) );
+	sk.local = { { sfx.parentsPointer, sfx.parents }, { sfx.bonesPointer, sfx.bones },
+		{ sfx.posePointer, sfx.pose } };
+	const int skelObj = int( objs.size() );
+	objs.append( sk );
+
+	// the root's globals in member declaration order, which is what the packfile
+	// writer preserves and what puts the skeleton pointer last
+	QVector<HknpPackObject::Ref> refs;
+	for ( qsizetype i = 0; i < rfx.bodyShapePointers.size(); i++ )
+		refs.append( { rfx.bodyShapePointers.at( i ), shapeObj.at( i ) } );
+	for ( qsizetype i = 0; i < rfx.constraintPointers.size(); i++ )
+		refs.append( { rfx.constraintPointers.at( i ), conObj.at( i ) } );
+	for ( qsizetype i = 0; i < rfx.shapeListPointers.size(); i++ ) {
+		const int body = sys.shapeListOrder.value( i, -1 );
+		if ( body < 0 || body >= shapeObj.size() )
+			return fail( QStringLiteral( "Shape list entry %1 names no body." ).arg( i ) );
+		refs.append( { rfx.shapeListPointers.at( i ), shapeObj.at( body ) } );
+	}
+	refs.append( { rfx.skeletonPointer, skelObj } );
+	objs[0].global = refs;
+
+	return hknpBuildPackfile( objs, error );
 }

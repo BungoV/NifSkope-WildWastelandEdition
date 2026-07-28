@@ -202,4 +202,93 @@ struct HknpSkeletonFixups
 QByteArray hknpEncodeSkeleton( const QVector<HknpBone> & bones,
 	HknpSkeletonFixups * fixups = nullptr );
 
+/*! One object on its way into a packfile: its bytes, its class, its pointers.
+ *
+ * Every encoder above returns bytes with its pointer slots left at raw zero,
+ * because a Havok packfile binds pointers through fixup tables rather than
+ * through the data. This is what carries those slots to the assembler.
+ *
+ * Offsets are relative to the object's own start, so an object can be built
+ * before anything knows where it will land.
+ */
+struct HknpPackObject
+{
+	QString className;
+	QByteArray bytes;
+	//! LOCAL fixups: source and target both inside this object
+	QVector<QPair<qsizetype, qsizetype>> local;
+	//! GLOBAL fixups: a source inside this object, pointing at another object
+	struct Ref { qsizetype source; int object; };
+	QVector<Ref> global;
+};
+
+/*! Assemble objects into an hk_2014.1.0-r1 packfile.
+ *
+ * Object 0 is the root -- the file header names its class, and the game loads
+ * that object. Objects land in the order given, each padded to 16.
+ *
+ * The layout rules are measured on the 37 vanilla ragdolls, not assumed:
+ *
+ *  - __classnames__ starts at 0x100, entries are `u32 hash | 0x09 | name | NUL`,
+ *    padded to 16 with 0xff. hkClass, hkClassMember, hkClassEnum and
+ *    hkClassEnumItem always lead -- which is what puts the root's own name at
+ *    offset 75 in every vanilla file -- and the rest follow in ORDER OF FIRST
+ *    USE walking the objects (37/37).
+ *  - __types__ is empty and sits between classnames and data.
+ *  - local and virtual fixups ascend by source. GLOBAL fixups do NOT: they are
+ *    emitted grouped by source object, and within an object in MEMBER
+ *    DECLARATION order, which is not offset order once arrays are involved --
+ *    an array member contributes its payload's fixups where the member is
+ *    declared, so hknpRagdollData's skeleton pointer at +0x78 is written after
+ *    the fixups for the array whose payload sits at +0x7c0. Passing the fixups
+ *    in declaration order is therefore the caller's job; this preserves it.
+ *
+ * Returns empty and sets `error` if an object names a class with no known hash.
+ */
+QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString * error = nullptr );
+
+/*! Where an hknpRagdollData's pointers have to be patched, all relative to the
+ * object's start and IN THE ORDER hknpBuildPackfile wants them.
+ *
+ * The globals are a reflection walk: one per body cinfo, then one per
+ * constraint, then one per shape-list slot, then the skeleton. Emitting them
+ * sorted by offset instead puts the skeleton in the wrong place.
+ */
+struct HknpRagdollDataFixups
+{
+	QVector<QPair<qsizetype, qsizetype>> local;   //!< the seven array descriptors
+	QVector<qsizetype> bodyShapePointers;         //!< cinfo[i] + 0x00, per body
+	QVector<qsizetype> constraintPointers;        //!< constraint entry + 0x00
+	QVector<qsizetype> shapeListPointers;         //!< the +0x60 array, NIF order
+	qsizetype skeletonPointer = 0x78;             //!< written LAST of the globals
+};
+
+/*! Write one hknpRagdollData: the root object of a ragdoll.
+ *
+ * Header is entirely zero apart from seven hkArray descriptors -- at +0x10
+ * body_props, +0x20 dyn_motion, +0x30 dyn_inertia, +0x40 cinfo, +0x50
+ * constraints, +0x60 the shape list and +0x80 bone-to-body -- plus a plain
+ * skeleton pointer at +0x78. Payloads run back to back from +0x90, each padded
+ * to 16, and the object ends where the last one does.
+ *
+ * THE COUNTS ARE NOT ALL THE SAME. Four arrays are per-BODY, the constraint
+ * array is bones-1 and the bone-to-body array is per-BONE. On 34 of the 37
+ * vanilla ragdolls bodies == bones so the difference is invisible; the three
+ * that differ are parts kits (SkeletonRef 48/11, skeletonSentryBodyPart 24/9,
+ * TurretMountedSkeleton 5/4) whose spare collision bodies sit outside the
+ * ragdoll hierarchy.
+ */
+QByteArray hknpEncodeRagdollData( const HknpSystem & system, HknpRagdollDataFixups * fixups );
+
+/*! Assemble a whole ragdoll packfile from a decoded system.
+ *
+ * Writes the root, every shape with its mass properties, every constraint with
+ * its motor, and the skeleton, then binds them. This is what makes the object
+ * encoders usable: on their own they produce bytes nothing can load.
+ *
+ * Returns empty and sets `error` if the system holds a shape class that has no
+ * encoder yet -- notably compressed meshes, which still only decode.
+ */
+QByteArray hknpEncodeRagdoll( const HknpSystem & system, QString * error = nullptr );
+
 #endif // HKNPENCODE_H

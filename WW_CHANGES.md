@@ -1,5 +1,88 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29e — the packfile assembly: 32 vanilla ragdolls rebuilt byte for byte
+
+`hknpEncodeRagdoll` and `hknpBuildPackfile`. **32 of the 37 vanilla ragdolls are
+now decoded and reassembled into files byte-identical to the ones Havok wrote**,
+the other 5 refused cleanly (compound shapes). Zero structural differences.
+
+This is what the nine object encoders were missing. On their own they produce
+bytes nothing can load, and nothing tested the class-name table, the object order,
+the three fixup tables or the section headers, because no single object holds them.
+
+### The layout rules, all measured on 37 files
+
+- `__classnames__` at 0x100, entries `u32 hash | 0x09 | name | NUL`, padded to 16
+  with 0xff. `hkClass`, `hkClassMember`, `hkClassEnum`, `hkClassEnumItem` always
+  lead — which is what puts the root's own name at offset 75 in every vanilla file
+  — and the rest follow in **order of first use** walking `__data__` (37/37).
+- `__types__` empty; objects back to back, each padded to 16; root first,
+  `hkaSkeleton` last.
+- Local and virtual fixups ascend by source. **Global fixups do not** — they are
+  grouped by source object and, within an object, in *member declaration* order.
+  An array member contributes its payload's fixups where the member is declared,
+  so the root's skeleton pointer at +0x78 is written *after* the fixups for the
+  array whose payload sits at +0x7c0. Sorting by offset puts it in the wrong place.
+- Each fixup table is padded to 16 with 0xff and carries **no sentinel entry**.
+  This wrote a full `0xffffffff` entry instead, which reads the same to a parser
+  but is 20 bytes more than any vanilla file — the first thing that stopped a
+  rebuild from matching. A section-header name is likewise NUL-padded with 0xff in
+  byte 0x13 alone, not 0xff-filled.
+
+Those last two live in the shared helpers, so the compressed-mesh writer now
+matches vanilla too. Its output changes by those bytes; a reassembled ragdoll being
+byte-identical to Havok's own file is the strongest evidence available that the new
+form is the right one.
+
+### Three things the corpus said that I had wrong
+
+**`+0x60` is not "entirely zero"** — yesterday's entry says it is. Every one of its
+slots is patched by a global fixup, so the *bytes* are zero and the *contents* are
+the ragdoll's shape list. Reading raw bytes and not the fixup table is the same
+class of miss as reading `%.3f` and not the mantissa.
+
+**Its order is the NIF's, not the ragdoll's.** It holds the same shape set as the
+body cinfos — a bijection on all 37 — but in a different order on 36 of them. The
+order is the sequence the `bhkNPCollisionObject` blocks appear in the NIF, exact on
+35/37 (the two others are parts kits whose spare bodies have no node at all). So it
+is *not derivable from the packfile*: a writer inside a NIF has it, a standalone
+rewrite does not, which is why the decode now records it. A depth-first walk of the
+bone tree reproduces it on 32 of 34 — another near-miss that would have been wrong.
+
+**`cinfo+0x12` is not a material index.** It is the body's slot in that shape list,
+the exact inverse permutation, on all 37. The decoder has been reading it as an
+index into the body-material table; on ragdolls, which carry no such table, that
+resolves to nothing and stays invisible. Flagged, not yet chased on physics systems.
+
+### Nine per-body words that were not modelled
+
+`dyn_inertia +0x30` is a world-space position distinct from the body's own on 848
+of 857 bodies (0.67 m apart at the median, tracking skeleton scale up to 12.9 m on
+Liberty Prime); `+0x40` is a unit quaternion on all 857 and also not the body's
+orientation. `HknpBodyPhys` gains `motionCom` and `motionOrientation`, the two w
+lanes beside them, and `motionIndex`, which was computed and thrown away before.
+
+### Assembled twice, because the two runs answer different questions
+
+Shapes now carry `rawData`, the same contract constraints have had since 07-28x. A
+capsule's core box is derived from (segment, radius, roll) and cannot survive a
+float round trip — about 750 differing bytes on an 18-capsule ragdoll, worst vertex
+error 1e-06 m. Editing one joint limit should not perturb every capsule in the file.
+
+So `--roundtrip` builds each file both ways. With the stored bytes: **32/32
+byte-exact**. With every shape re-derived: 2/32 byte-exact, and on the other 30
+*every differing byte lands inside a shape object* — none in the root, the
+skeleton, the constraints, the mass properties, the fixup tables or the headers.
+That second number is the honest measure of how much is reconstructed rather than
+copied, and the classification is what proves the assembly itself is right.
+
+Corpus sweep unchanged: 700 files, no mismatches, compounds 29/29, polytopes
+269/269, spheres 4/4, capsules 78/78. Simulator unaffected.
+
+**Still open:** ragdolls whose bodies carry compound shapes — 5 of 37 — which need
+the compound's owning body and its `hknpDynamicCompoundShapeData` recorded before
+they can be rebuilt. Compressed meshes still only decode.
+
 ## 2026-07-29d — hknpRagdollData layout measured; the "+0x80 trap" is now explained
 
 The ragdoll root's layout, **verified on all 37 with zero violations**. No encoder
