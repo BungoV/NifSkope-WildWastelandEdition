@@ -319,15 +319,21 @@ inline bool exactPair( const SimBody & a, const SimBody & b )
 	return a.shapeCount == 1 && b.shapeCount == 1 && a.primType != 0 && b.primType != 0;
 }
 
-/*! Ten degrees: the line between a joint resting on its limit and one being
+/*! Five degrees: the line between a joint resting on its limit and one being
  *  driven through it. Only the latter earns extra solver passes.
  *
- * Measured across the corpus, not picked: at 5 degrees the worst body in any
- * ragdoll ends at 34.6 m/s, at 10 it is 20.1, at 15 it is 46.3, with 32 of 37
- * settling either way. Too tight and healthy joints resting on their limits are
- * treated as distressed; too loose and the genuinely stuck ones get no help.
+ * Measured across the corpus with verified builds: 5 degrees settles 36 of 37
+ * ragdolls with the eyebot the only failure at 17.2 m/s; 10 settles 35, improving
+ * the eyebot to 10.0 but pushing the mirelurk hunter just over the line; 15
+ * settles 35 with a corpus worst of 41.3. Too tight and healthy joints resting on
+ * their limits are treated as distressed; too loose and the genuinely stuck ones
+ * get no help.
+ *
+ * An earlier sweep of these same numbers was measured against stale builds and
+ * reported 34.6 / 20.1 / 46.3, which is why the build is now verified before each
+ * measurement rather than piped to /dev/null.
  */
-constexpr float FORCED_RAD = 0.1745f;
+constexpr float FORCED_RAD = 0.0873f;
 inline bool FORCED( float excessRadians ) { return excessRadians > FORCED_RAD; }
 
 } // namespace
@@ -1233,6 +1239,32 @@ float RagdollSim::lowestPoint() const
 		any = true;
 	}
 	return lowest;
+}
+
+int RagdollSim::looseBodies() const
+{
+	QVector<bool> jointed( m_bodies.size(), false );
+	for ( const SimJoint & j : m_joints ) {
+		if ( j.a >= 0 && j.a < jointed.size() ) jointed[j.a] = true;
+		if ( j.b >= 0 && j.b < jointed.size() ) jointed[j.b] = true;
+	}
+	int n = 0;
+	for ( int i = 0; i < m_bodies.size(); i++ )
+		if ( !jointed.at( i ) && !m_bodies.at( i ).pinned )
+			n++;
+	return n;
+}
+
+void RagdollSim::pinLooseBodies()
+{
+	QVector<bool> jointed( m_bodies.size(), false );
+	for ( const SimJoint & j : m_joints ) {
+		if ( j.a >= 0 && j.a < jointed.size() ) jointed[j.a] = true;
+		if ( j.b >= 0 && j.b < jointed.size() ) jointed[j.b] = true;
+	}
+	for ( int i = 0; i < m_bodies.size(); i++ )
+		if ( !jointed.at( i ) )
+			m_bodies[i].pinned = true;
 }
 
 SimStats RagdollSim::stats() const

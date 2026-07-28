@@ -578,7 +578,21 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    -- `limitAngle` returns the excess, and the 10-degree `FORCED_RAD` threshold is
    measured (worst body across the corpus: 34.6 m/s at 5 deg, 20.1 at 10, 46.3 at
    15). Workshop turret fixed, eyebot 87 -> 20 m/s, corpus worst 87 -> 20.
-   **Open: 3 still moving** -- Robot/SkeletonRef (9.0 m/s) and sentry (2.8) are
+   **07-28l: 36 of 37 settle**, worst penetration 0.08 mm. Two of the three
+   remaining failures were NOT RAGDOLLS: Robot/SkeletonRef is 48 bodies with 10
+   joints and 630 of 1128 pairs already overlapping at rest (a parts kit with
+   interchangeable pieces stacked in one place), skeletonSentryBodyPart is 15 of
+   24 unjointed. Pinning unjointed bodies settles both (9.0 -> 0.58, 72.4 ->
+   0.73). `simulate` reports the count; `--jointed-only` pins them. There was no
+   self-collision bug here. Also: the 07-28k threshold sweep was measured against
+   STALE BUILDS -- verified re-measurement gives 5 deg = 36/37 settled (worst 17.2),
+   10 deg = 35/37 (worst 10.0), 15 deg = 35/37 (worst 41.3), so FORCED_RAD is 5 deg.
+   **Open: 1 real failure** -- the eyebot at 17.2 m/s. No loose bodies, no rest
+   violations; seven hinges on antennae with inverse inertia 4417 along their axis
+   vs 3.67 across (ratio 1200). The angular response to a single-axis correction
+   points nowhere near that axis at such anisotropy, so the fix is to solve the
+   angular constraint as a 3-vector rather than per-axis. That is the next job.
+   (superseded) **Open: 3 still moving** -- Robot/SkeletonRef (9.0 m/s) and sentry (2.8) are
    SELF-COLLISION (SkeletonRef -> 0.11 with `--no-self`); body-body is exact only
    for single capsules/spheres, so compounds are the suspect and exact convex
    body-body collision is the next job. Eyebot (20) is the hardest case in the

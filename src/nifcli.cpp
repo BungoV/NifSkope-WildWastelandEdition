@@ -367,7 +367,8 @@ int cmdPbrmResolve( const QString & file )
  * drift) and the peak speed, and exits non-zero if anything diverged.
  */
 int cmdSimulate( const QString & file, int steps, int substeps, int iterations, bool noLimits,
-	const QString & onlyLimit, bool ground, bool noSelf, bool drop, bool selfTest, bool verbose )
+	const QString & onlyLimit, bool ground, bool noSelf, bool drop, bool jointedOnly,
+	bool selfTest, bool verbose )
 {
 	if ( selfTest || file.isEmpty() ) {
 		// Two bodies, one joint, damping off: total energy is a conserved
@@ -645,6 +646,11 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			}
 		}
 
+		if ( sim.looseBodies() )
+			out() << "  bodies no joint touches (a parts kit, not one ragdoll): "
+				  << sim.looseBodies() << " of " << sim.bodies().size() << Qt::endl;
+		if ( jointedOnly )
+			sim.pinLooseBodies();
 		out() << "  collision pairs excluded as overlapping at rest: "
 			  << sim.restOverlaps() << Qt::endl;
 		if ( sim.rebasedJoints() )
@@ -1717,7 +1723,7 @@ int nifskopeCliMain( const QStringList & args )
 	int substeps = 0;
 	int iterations = 0;
 	QString onlyLimit;
-	bool useGround = false, noSelf = false, drop = false;
+	bool useGround = false, noSelf = false, drop = false, jointedOnly = false;
 	bool noLimits = false;
 	bool verboseSim = false;
 	float cubeSize = STARTER_CUBE_SIZE;
@@ -1762,6 +1768,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--ground" ) ) useGround = true;
 		else if ( t == QLatin1String( "--no-self" ) ) noSelf = true;
 		else if ( t == QLatin1String( "--drop" ) ) drop = true;
+		else if ( t == QLatin1String( "--jointed-only" ) ) jointedOnly = true;
 		else if ( t == QLatin1String( "--no-limits" ) ) noLimits = true;
 		else if ( t == QLatin1String( "--trace" ) ) verboseSim = true;
 		else if ( t == QLatin1String( "--size" ) ) cubeSize = next().toFloat();
@@ -1832,7 +1839,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )
 		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
-			iterations, noLimits, onlyLimit, useGround, noSelf, drop, selfTest, verboseSim );
+			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
+			selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
 		rc = cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )

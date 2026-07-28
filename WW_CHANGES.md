@@ -1,5 +1,60 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28l — Two of the three failures were not ragdolls at all
+
+**36 of 37 settle.** The eyebot is the only vanilla ragdoll left that does not
+come to rest, and worst penetration across the corpus is 0.08 mm.
+
+07-28k blamed the last two failures on self-collision, on the strength of
+`--no-self` fixing Robot/SkeletonRef. That was the right observation and the wrong
+conclusion. **Those files are not one ragdoll.** A ragdoll is a tree, so it has
+one fewer joint than it has bodies — and Robot/SkeletonRef has **48 bodies with 10
+joints**, with 630 of its 1128 possible body pairs *already overlapping in the rest
+pose*, because the interchangeable parts are authored stacked in the same space.
+`skeletonSentryBodyPart` says it in the name: 15 of its 24 bodies are unjointed.
+
+Pinning the bodies no joint touches settles both outright:
+
+| | all bodies | actual ragdoll only |
+|---|---|---|
+| Robot/SkeletonRef | 9.0 m/s | **0.58** |
+| Robot/skeletonSentryBodyPart | 72.4 m/s | **0.73** |
+
+So there was never a self-collision bug to find here. Dropping 37 loose,
+mutually interpenetrating spare parts produces a clattering heap, which is what
+the data describes. `simulate` now reports the count — "bodies no joint touches (a
+parts kit, not one ragdoll): 37 of 48" — and `--jointed-only` pins them, so the
+distinction is visible instead of being read as instability. Three files in the
+corpus are kits.
+
+### A stale-build measurement, corrected
+
+The 5°/10°/15° threshold sweep in 07-28k reported corpus-worst speeds of 34.6 /
+20.1 / 46.3 and picked 10°. Those builds were stale — the sweep piped `make` to
+`/dev/null`, so a build that did not run looked like a result. Re-measured with the
+build verified each time:
+
+| threshold | settled | corpus worst |
+|---|---|---|
+| 5° | **36 / 37** | 17.2 m/s |
+| 10° | 35 / 37 | 10.0 m/s |
+| 15° | 35 / 37 | 41.3 m/s |
+
+5° is now the setting: it leaves the eyebot as the single failure, where 10°
+improves the eyebot but pushes the mirelurk hunter just over the line. This is the
+third stale-build trap in this repo; builds are verified before measuring now
+rather than silenced.
+
+### The one real remaining failure
+
+The eyebot, at 17.2 m/s. It has no loose bodies and no rest-pose violations; it is
+simply the corpus's hardest case — seven hinge joints on antennae whose inverse
+inertia is **4417 along their own axis against 3.67 across it**, a ratio of 1200.
+With that anisotropy the angular response to a correction points nowhere near the
+correction axis, which is inherent to the single-axis formulation rather than a
+mistake in it. Fixing it properly means solving the angular constraint as a
+3-vector rather than per-axis.
+
 ## 2026-07-28k — Adaptive solver passes: the stiff hinges converge
 
 The workshop turret is fixed — from 60 m/s to a clean settle — and the eyebot

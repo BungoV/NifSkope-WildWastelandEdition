@@ -312,6 +312,19 @@ public:
 	int restOverlaps() const { return m_restOverlaps; }
 	//! Joints whose parent-side pivot the file left unset, see build().
 	int rebasedJoints() const { return m_rebasedJoints; }
+	/*! Bodies no constraint touches.
+	 *
+	 * A ragdoll is a tree, so it has one fewer joint than it has bodies. A file
+	 * with far fewer is not one ragdoll but a KIT: Robot/SkeletonRef carries 48
+	 * bodies and 10 joints, and 630 of its 1128 possible body pairs already
+	 * overlap in the rest pose, because the interchangeable parts are authored
+	 * stacked in the same space. Dropping that produces a clattering heap, which
+	 * is what the data describes rather than a solver fault -- worth reporting so
+	 * nobody reads it as one.
+	 */
+	int looseBodies() const;
+	//! Pin every body no joint touches, leaving only the actual ragdoll moving.
+	void pinLooseBodies();
 
 private:
 	void solveJoints( float h );
