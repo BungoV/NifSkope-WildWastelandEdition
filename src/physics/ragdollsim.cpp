@@ -293,6 +293,7 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 {
 	m_bodies.clear();
 	m_joints.clear();
+	m_rebasedJoints = 0;
 
 	if ( sys.shapes.isEmpty() ) {
 		if ( error )
@@ -398,6 +399,8 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 			b.com = sum / float( s.verts.size() );
 		}
 		b.restOrigin = restPos.value( s.bodyId );
+		b.cinfoPos = phys.position;
+		b.cinfoRot = phys.orientation;
 		b.x = restPos.value( s.bodyId ) + qRot( restRot.value( s.bodyId ), b.com );
 		b.q = restRot.value( s.bodyId );
 
@@ -445,6 +448,7 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		 */
 		j.frameA = qConj( qFromRows( jc.rotA[0], jc.rotA[1], jc.rotA[2] ) );
 		j.frameB = qConj( qFromRows( jc.rotB[0], jc.rotB[1], jc.rotB[2] ) );
+		j.kind = jc.kind;
 		j.twist = jc.twist;
 		j.cone = jc.cone;
 		j.plane = jc.plane;
@@ -458,6 +462,33 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 			if ( l->present && l->min > l->max )
 				std::swap( l->min, l->max );
 		m_joints.append( j );
+	}
+
+	/* Some constraints ship with their parent-side transform never filled in.
+	 *
+	 * Not a decode fault -- the raw bytes really do hold an identity rotation and
+	 * a zero pivot. The turret's first two joints are like that, and taken at face
+	 * value they assert that a child body's origin coincides with its parent's,
+	 * which in the rest pose is 0.67 m from true. The solver cannot satisfy that
+	 * and spends every substep trying, which is where those models' energy came
+	 * from. Havok fills these in at setup time from the bodies' current transforms
+	 * (setInBodySpace), so deriving the pivot from the rest pose is what the
+	 * engine would have done rather than a fudge.
+	 *
+	 * Only pivots visibly wrong are touched, and the count is reported, so this
+	 * cannot quietly paper over a real decode error later. The FRAMES are left
+	 * alone: they drive the angular limits, and inventing them would change
+	 * authored limit behaviour in a way nothing here can check.
+	 */
+	for ( SimJoint & j : m_joints ) {
+		const SimBody & A = m_bodies.at( j.a );
+		const SimBody & B = m_bodies.at( j.b );
+		const Vector3 worldA = A.x + qRot( A.q, j.pivotA );
+		if ( ( worldA - ( B.x + qRot( B.q, j.pivotB ) ) ).length() <= 0.001f )
+			continue;
+		j.pivotB = qRot( qConj( B.q ), worldA - B.x );
+		j.rebased = true;
+		m_rebasedJoints++;
 	}
 
 	rescaleForJointCount();

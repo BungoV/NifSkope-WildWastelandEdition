@@ -59,6 +59,9 @@ struct SimBody
 	float radius = 0.0f;
 	Vector3 com;                //!< centre of mass in bone space, for that conversion
 	Vector3 restOrigin;         //!< the bone origin in world, before that shift
+	//! what cinfo itself says about this body, for checking against the skeleton
+	Vector3 cinfoPos;
+	Quat cinfoRot = Quat( 1, 0, 0, 0 );
 
 	int bodyId = -1;            //!< the decoded body id, for mapping back to nodes
 
@@ -83,6 +86,11 @@ struct SimJoint
 	int a = -1, b = -1;
 	Vector3 pivotA, pivotB;     //!< joint position in each body's local space
 	Quat frameA, frameB;        //!< joint basis in each body's local space
+	//! Havok class name, kept so a misbehaving joint can be attributed to a
+	//! constraint TYPE rather than just to an index
+	QString kind;
+	//! true if pivotB had to be derived from the rest pose, see build()
+	bool rebased = false;
 
 	HknpAngLimit twist, cone, plane, hinge;
 };
@@ -232,6 +240,8 @@ public:
 	const QVector<SimPair> & pairs() const { return m_pairs; }
 	//! Pairs permanently excluded because they already overlap at rest.
 	int restOverlaps() const { return m_restOverlaps; }
+	//! Joints whose parent-side pivot the file left unset, see build().
+	int rebasedJoints() const { return m_rebasedJoints; }
 
 private:
 	void solveJoints( float h );
@@ -249,6 +259,7 @@ private:
 	//! key = a * m_bodies.size() + b, a < b; membership means "never collide"
 	QSet<int> m_noCollide;
 	int m_restOverlaps = 0;
+	int m_rebasedJoints = 0;
 };
 
 #endif // RAGDOLLSIM_H

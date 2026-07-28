@@ -85,6 +85,13 @@ struct HknpBodyPhys
 	 * and agree exactly.
 	 */
 	Vector3 position;
+	/*! cinfo +0x40: the body's orientation, xyzw as Havok stores it.
+	 *
+	 * Sits directly after the position, which is the usual hknpBodyCinfo layout.
+	 * Whether it really is a quaternion is checked rather than assumed -- see the
+	 * unit-norm test in the simulate trace.
+	 */
+	Quat orientation = Quat( 1, 0, 0, 0 );
 
 	/* Per-body dynamics. A ragdoll has one entry per bone in the root's
 	 * dyn_motion (+0x20, stride 0x40) and dyn_inertia (+0x30, stride 0x70)

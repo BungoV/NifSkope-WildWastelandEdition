@@ -559,13 +559,21 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    Havok's filter groups and by a rest-pose overlap test. `--drop`, `--ground`,
    `--no-self`. Corpus: 37/37 settle, 0 diverge, worst penetration 0.4 mm, worst
    joint separation 6.9 mm.
-   **Open:** 9 of 37 settle hot (bounded, intact, but too energetic). Two causes,
-   neither isolated — (a) hinge limits on bodies with extreme inertia anisotropy
-   (eyebot antennae: 4417 vs 3.67, and it is perfect with `--no-limits`), and
-   (b) a rest pose that does not satisfy its own joints, which is a DECODE
-   question: the turret starts at 0.67 m ball-socket separation where every
-   healthy ragdoll starts at 1e-6. Chase (b) first — it is measurable statically
-   and needs no solver at all.
+   **Open after 07-28h: 6 of 37 settle hot** (bounded, intact, too energetic) —
+   eyebot, Liberty Prime, a sentry, three turrets. All machines. Settled so far:
+   the rest-pose joint error was constraints shipping with an UNSET parent
+   transform (identity rotation, zero pivot, confirmed in the raw bytes); those
+   are now derived from the rest pose as Havok's setInBodySpace would, taking calm
+   from 28 to 31 of 37. Body placement is triple-validated and is NOT the problem:
+   cinfo position equals the accumulated skeleton origin exactly and cinfo
+   orientation matches within 0.1 degrees.
+   **The residual is angular** — rebasing fixes pivots, not frames, and frames
+   drive the limits (eyebot: 1.8 with `--no-limits`, 7,300 with
+   `--only-limit hinge`). Next test, and it is a DATA question not a solver one:
+   are these ragdolls authored in a different bind pose from the one the skeleton
+   stores? Turret joint 2 has a properly authored pivotB of
+   (0.7009, -0.1592, 0.2011) that still misses the rest pose by 0.22 m, which is
+   what that would look like.
    Convex polytopes still want a proper centroid: the vertex mean is used, which
    is not the true hull centroid for an unevenly tessellated hull.
 3. **Viewport.** Step in the render loop, draw the simulated pose, play/pause/reset.

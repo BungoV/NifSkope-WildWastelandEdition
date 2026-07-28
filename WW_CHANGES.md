@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28h — Why some ragdolls simulate hot: the file, not the solver
+
+Chasing the turret's 0.67 m rest-pose joint error from 07-28g. It is not a decode
+bug and not a solver bug. **Some constraints ship with their parent-side
+transform never filled in** — the raw bytes hold an identity rotation and a zero
+pivot, which asserts that a child body's origin coincides with its parent's. On
+the turret that is 0.67 m from true, and the solver spent every substep failing to
+satisfy it.
+
+Reading the packfile directly settled it. Turret joint 1 (`hkpRagdollConstraintData`):
+
+    transformA rows: [1,0,0] [0,1,0] [0,0,1]  pivot [0,0,0]
+    transformB rows: [1,0,0] [0,1,0] [0,0,1]  pivot [0,0,0]
+
+while joint 5, the same class in the same file, carries a real basis and a pivot
+of (0.2876, -0.1219, 0). So it is per-object, not per-type.
+
+Havok fills these in at setup from the bodies' current transforms
+(`setInBodySpace`), so deriving the missing pivot from the rest pose is what the
+engine would have done. Doing that took the corpus from **28 to 31 of 37**
+ragdolls settling calm, and the turret's rest-pose joint error from 0.67 m to
+1.7e-5. 58 joints across the corpus needed it. The count is reported by
+`simulate`, and the frames are deliberately left alone — they drive the angular
+limits, and inventing those would change authored behaviour that nothing here can
+check.
+
+### New: cinfo +0x40 is the body's orientation
+
+Sitting directly after the position at +0x30, and it is a genuine rotation —
+quaternion norm reads **1.00000** on every body of every model tested, with
+non-trivial angles (90°, 117°, 180°, 120°).
+
+That gives the body pose a **triple validation**. cinfo's position equals the bone
+origin accumulated from `hkaSkeleton`'s reference pose *exactly*, and cinfo's
+orientation matches the accumulated rotation to within **0.1°**, on the brahmin,
+the eyebot and the turret alike. Three independent parts of the file agreeing that
+closely means body placement is not where any remaining trouble lives — which is
+precisely what let this hunt move on to the constraints.
+
+### Still hot: 6 of 37, all machines
+
+Eyebot, Liberty Prime, a sentry and three turrets. Two things are now known about
+them and one is not:
+
+- Their constraint data is inconsistent with their reference pose beyond the
+  unset transforms above: turret joint 2 has a properly authored pivotB of
+  (0.7009, -0.1592, 0.2011) and still misses the rest pose by 0.22 m. The bodies
+  are where three sources agree they should be, so it is the constraints that
+  disagree.
+- Rebasing fixes the pivots but not the frames, and the frames drive the limits.
+  The eyebot is at 1.8 units of energy with `--no-limits` and 7,300 with
+  `--only-limit hinge`, so the residual is angular.
+- What is NOT known is whether these ragdolls are simply authored in a different
+  bind pose from the one the skeleton stores. That is the next thing to test, and
+  it is a data question rather than a solver one.
+
+New diagnostic: `simulate --trace` now lists every joint that does not hold in the
+rest pose with its pivots and Havok class name, which is what made all of the
+above visible in one run.
+
 ## 2026-07-28g — Collision: ragdolls now fall over and land
 
 Phase 2 of the simulation work. Ragdolls collide with a ground plane and with

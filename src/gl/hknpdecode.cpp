@@ -720,6 +720,9 @@ HknpSystem hknpDecode( const QByteArray & data )
 			if ( phys.layer == 0 )
 				phys.layer = ( sys.dynamic && phys.hasMotion ) ? 10u : 1u;
 			phys.position = r.vec3( c + 0x30 );
+			// Havok stores xyzw; NifSkope's Quat is wxyz
+			phys.orientation = Quat( r.f32( c + 0x4c ), r.f32( c + 0x40 ),
+				r.f32( c + 0x44 ), r.f32( c + 0x48 ) );
 			/* Per-body dynamics.
 			 *
 			 * cinfo +0x0c is the body's MOTION INDEX into dyn_motion /

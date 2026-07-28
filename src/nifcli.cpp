@@ -522,25 +522,75 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 		}
 
 		if ( verbose ) {
+			/* Which joints do not hold in the rest pose, and what KIND they are.
+			 * A healthy ragdoll starts at 1e-6; anything above a millimetre means
+			 * the decoded pivots and the body poses disagree, and grouping by
+			 * class name is what shows whether one constraint type is at fault.
+			 */
+			int shown = 0;
+			for ( int k = 0; k < sim.joints().size(); k++ ) {
+				const SimJoint & sj = sim.joints().at( k );
+				const SimBody & A = sim.bodies().at( sj.a );
+				const SimBody & B = sim.bodies().at( sj.b );
+				auto rot = []( const Quat & q, const Vector3 & v ) {
+					const Vector3 u( q[1], q[2], q[3] );
+					const Vector3 uv = Vector3::crossproduct( u, v );
+					return v + ( uv * q[0] + Vector3::crossproduct( u, uv ) ) * 2.0f;
+				};
+				const float sep = ( ( A.x + rot( A.q, sj.pivotA ) )
+					- ( B.x + rot( B.q, sj.pivotB ) ) ).length();
+				if ( sep < 0.001f )
+					continue;
+				if ( !shown++ )
+					out() << "  joints not holding at rest:" << Qt::endl;
+				auto p3 = []( const Vector3 & v ) {
+					return QString( "%1,%2,%3" ).arg( v[0], 7, 'f', 3 )
+						.arg( v[1], 7, 'f', 3 ).arg( v[2], 7, 'f', 3 );
+				};
+				// pivots are printed back in BONE space (undoing the centre-of-mass
+				// rebase) so they can be compared against the file directly
+				out() << QString( "    joint %1 (%2 <- %3) sep %4  pivotA %5  pivotB %6  %7" )
+							.arg( k ).arg( sj.a ).arg( sj.b ).arg( sep, 0, 'f', 4 )
+							.arg( p3( sj.pivotA + A.com ) ).arg( p3( sj.pivotB + B.com ) )
+							.arg( sj.kind ) << Qt::endl;
+			}
+
 			// a centre of mass is a short hop along the bone; anything the size of
 			// the whole skeleton would mean it is an absolute position instead
-			out() << QString( "  %1 %2 %3 %4" ).arg( "body", -6 )
-						.arg( "bone origin", 26 ).arg( "com (bone space)", 26 )
-						.arg( "|com|", 9 ) << Qt::endl;
+			out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( "body", -6 )
+						.arg( "bone origin", 26 ).arg( "cinfo position", 26 )
+						.arg( "|posDiff|", 10 ).arg( "quatNorm", 10 ).arg( "rotDiffDeg", 11 )
+				  << Qt::endl;
 			for ( int k = 0; k < sim.bodies().size(); k++ ) {
 				const SimBody & sb = sim.bodies().at( k );
 				auto v3 = []( const Vector3 & v ) {
 					return QString( "%1,%2,%3" ).arg( v[0], 7, 'f', 3 )
 						.arg( v[1], 7, 'f', 3 ).arg( v[2], 7, 'f', 3 );
 				};
-				out() << QString( "  %1 %2 %3 %4" ).arg( k, -6 )
-							.arg( v3( sb.restOrigin ), 26 ).arg( v3( sb.com ), 26 )
-							.arg( sb.com.length(), 9, 'f', 4 ) << Qt::endl;
+				const Quat & cq = sb.cinfoRot;
+				const float qn = std::sqrt( cq[0] * cq[0] + cq[1] * cq[1]
+					+ cq[2] * cq[2] + cq[3] * cq[3] );
+				/* Angle between what cinfo says the body's orientation is and what
+				 * accumulating the skeleton produced. The position agrees exactly
+				 * on every model tested, so if a ragdoll starts with its joints
+				 * violated this is where it has to be coming from.
+				 */
+				const Quat & sq = sb.q;
+				float dot = cq[0] * sq[0] + cq[1] * sq[1] + cq[2] * sq[2] + cq[3] * sq[3];
+				const float rotDiff = 2.0f * std::acos(
+					std::clamp( std::fabs( dot ), 0.0f, 1.0f ) ) * 57.2957795f;
+				out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( k, -6 )
+							.arg( v3( sb.restOrigin ), 26 ).arg( v3( sb.cinfoPos ), 26 )
+							.arg( ( sb.cinfoPos - sb.restOrigin ).length(), 10, 'f', 4 )
+							.arg( qn, 10, 'f', 5 ).arg( rotDiff, 11, 'f', 2 ) << Qt::endl;
 			}
 		}
 
 		out() << "  collision pairs excluded as overlapping at rest: "
 			  << sim.restOverlaps() << Qt::endl;
+		if ( sim.rebasedJoints() )
+			out() << "  joints whose parent pivot the file left unset, derived from "
+				  << "the rest pose: " << sim.rebasedJoints() << Qt::endl;
 		out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( "step", -8 ).arg( "energy", 12 )
 					.arg( "maxJointErr", 13 ).arg( "maxSpeed", 11 ).arg( "contacts", 9 )
 					.arg( "maxPenetr", 11 ) << Qt::endl;
