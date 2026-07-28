@@ -200,10 +200,48 @@ public:
 	//! Advance by dt, split into substeps (XPBD wants many small ones).
 	void step( float dt, int substeps = 8 );
 
-	//! Pin/unpin a body — this is what dragging a bone will use.
+	//! Pin/unpin a body. A pin is INFINITELY stiff: it teleports.
 	void setPinned( int body, bool pinned );
-	//! Move a pinned body directly (the drag handle).
+	//! Move a pinned body directly.
 	void setPosition( int body, const Vector3 & pos );
+
+	/*! Drag a body toward a world point with a soft positional constraint.
+	 *
+	 * This is what the viewport's drag uses, and it is deliberately NOT a pin. A
+	 * pin sets the pose outright, so the hand carries the whole rig rigidly and
+	 * every joint downstream of it gets a step-sized correction it did not ask
+	 * for; the limbs snap rather than swing. A compliant constraint applies a
+	 * finite pull, so the rig lags, swings and settles the way the solver's own
+	 * joints do -- and it goes through the same XPBD path they do, so it cannot
+	 * inject energy the joint solve would not.
+	 *
+	 * `localPoint` is where on the body the hand grabbed, in body space, so
+	 * dragging a limb by its end rotates it rather than translating it.
+	 *
+	 * `firmness` runs (0, 1]: 1 is a rigid attachment (still solved through the
+	 * constraint, so still stable) and smaller is springier. It is DIMENSIONLESS
+	 * on purpose. XPBD's natural parameter is compliance in m/N, which is
+	 * physically meaningful and the wrong knob here: at a fixed compliance the
+	 * same grab that barely moves a 5 kg limb is rigid on a 0.2 kg one, so a drag
+	 * would feel different on every bone and completely different on Liberty
+	 * Prime. Firmness is converted to a compliance per solve using the body's own
+	 * generalised inverse mass, which makes the FEEL constant instead.
+	 *
+	 * Worst tracking lag on the brahmin's body 5 over a 0.138 m circular pull at
+	 * two seconds a lap, as a percentage of the radius:
+	 *
+	 *     1.0 -> 0.0%    0.9 -> 0.5%    0.5 -> 4.9%    0.2 -> 16.6%   0.05 -> 54.6%
+	 *
+	 * The default of 0.9 is a grab that visibly gives without ever feeling loose.
+	 * Every one of those also lands on the target exactly once the pull stops.
+	 */
+	void setDrag( int body, const Vector3 & localPoint, const Vector3 & target,
+		float firmness = 0.9f );
+	//! Move an existing drag's target without disturbing the grab point.
+	void moveDrag( const Vector3 & target );
+	void clearDrag();
+	//! Which body is being dragged, or -1.
+	int draggedBody() const { return m_dragBody; }
 
 	/*! Replace the contents with a synthetic rig of known masses.
 	 *
@@ -247,6 +285,8 @@ public:
 	 * out. Returns 0 if nothing has geometry.
 	 */
 	float lowestPoint() const;
+	//! Distance from the dragged body's grab point to its target, or 0 if no drag.
+	float dragError() const;
 
 	const QVector<SimBody> & bodies() const { return m_bodies; }
 	const QVector<SimJoint> & joints() const { return m_joints; }
@@ -337,6 +377,14 @@ private:
 	//! refresh the broad phase; called once per step, not per substep
 	void collectPairs();
 	void solveContacts( float h );
+	//! the drag spring, solved alongside the joints so it shares their stability
+	void solveDrag( float h );
+
+	int m_dragBody = -1;
+	Vector3 m_dragLocal, m_dragTarget;
+	float m_dragFirmness = 0.9f;
+	//! XPBD's accumulated multiplier, reset at the start of each substep
+	float m_dragLambda = 0.0f;
 
 	QVector<SimBody> m_bodies;
 	QVector<SimJoint> m_joints;

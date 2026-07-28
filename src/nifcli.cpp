@@ -468,7 +468,7 @@ static void checkSceneBridge( NifModel & nif, const RagdollSim & sim, qint32 sys
 
 int cmdSimulate( const QString & file, int steps, int substeps, int iterations, bool noLimits,
 	const QString & onlyLimit, bool ground, bool noSelf, bool drop, bool jointedOnly,
-	int dragBody, bool selfTest, bool verbose )
+	int dragBody, bool dragSpring, float dragFirmness, bool selfTest, bool verbose )
 {
 	if ( selfTest || file.isEmpty() ) {
 		// Two bodies, one joint, damping off: total energy is a conserved
@@ -785,9 +785,10 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 		 * and reports whether the ragdoll follows or comes apart.
 		 */
 		Vector3 dragFrom;
-		float dragR = 0.0f;
+		float dragR = 0.0f, worstDragLag = 0.0f;
 		if ( dragBody >= 0 && dragBody < sim.bodies().size() ) {
-			sim.setPinned( dragBody, true );
+			if ( !dragSpring )
+				sim.setPinned( dragBody, true );
 			dragFrom = sim.bodies().at( dragBody ).x;
 			// a quarter of the ragdoll's own height, so the pull is substantial
 			// without being absurd for a cat or a Liberty Prime alike
@@ -798,8 +799,17 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			}
 			// a tenth of the ragdoll's height: a firm pull, well inside any limb's reach
 			dragR = std::max( 0.05f, ( hi - lo ) * 0.10f );
-			out() << QString( "  dragging body %1 in a %2 m circle" ).arg( dragBody )
-						.arg( dragR, 0, 'f', 3 ) << Qt::endl;
+			/* The spring is grabbed OFF the body's origin. At the origin the lever
+			 * arm is zero, so the correction carries no torque and the one thing a
+			 * mouse drag has to do -- swing the limb it grabbed rather than sliding
+			 * it -- never gets exercised.
+			 */
+			if ( dragSpring )
+				sim.setDrag( dragBody, Vector3( dragR * 0.25f, 0.0f, 0.0f ), dragFrom, dragFirmness );
+			out() << QString( "  dragging body %1 in a %2 m circle by a %3" ).arg( dragBody )
+						.arg( dragR, 0, 'f', 3 )
+						.arg( dragSpring ? QStringLiteral( "spring" ) : QStringLiteral( "hard pin" ) )
+				  << Qt::endl;
 		}
 
 		SimStats st;
@@ -813,10 +823,20 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 			if ( dragR > 0.0f ) {
 				// two seconds a lap, the speed a hand actually moves
 				const float ang = 2.0f * float( M_PI ) * float( i ) / 120.0f;
-				sim.setPosition( dragBody, dragFrom
-					+ Vector3( std::cos( ang ) - 1.0f, std::sin( ang ), 0.0f ) * dragR );
+				const Vector3 target = dragFrom
+					+ Vector3( std::cos( ang ) - 1.0f, std::sin( ang ), 0.0f ) * dragR;
+				if ( dragSpring ) {
+					sim.moveDrag( target );
+				} else {
+					sim.setPosition( dragBody, target );
+				}
 			}
 			sim.step( 1.0f / 60.0f, substeps );
+			// AFTER the step: measured before it, this reads how far the target moved
+			// this frame rather than how well the grab tracked it, and comes out the
+			// same for a rigid grab and a loose one
+			if ( dragSpring && dragR > 0.0f )
+				worstDragLag = std::max( worstDragLag, sim.dragError() );
 			st = sim.stats();
 			// 50 m/s: a hanging ragdoll swings at a few m/s, so this is well
 			// clear of honest motion and fires only on a genuine runaway
@@ -871,6 +891,17 @@ int cmdSimulate( const QString & file, int steps, int substeps, int iterations, 
 				  << ", worst joint separation " << QString::number( st.maxJointError, 'f', 6 )
 				  << ", " << st.contacts << " contacts, worst penetration "
 				  << QString::number( st.maxPenetration, 'f', 6 ) << Qt::endl;
+			if ( dragSpring && dragR > 0.0f ) {
+				// how far the grabbed point ever lagged the hand. A spring is SUPPOSED
+				// to lag -- that is the difference between it and a pin -- so this is a
+				// characterisation, not a pass mark. It only fails if the grab lets go
+				// entirely, which shows up as a lag comparable to the drag radius.
+				out() << "  drag: worst lag " << QString::number( worstDragLag, 'f', 4 )
+					  << " m over a " << QString::number( dragR, 'f', 3 )
+					  << " m pull (" << QString::number( 100.0f * worstDragLag / dragR, 'f', 1 )
+					  << "% of the radius), final "
+					  << QString::number( sim.dragError(), 'f', 4 ) << " m" << Qt::endl;
+			}
 		}
 	}
 
@@ -2369,6 +2400,8 @@ int nifskopeCliMain( const QStringList & args )
 	QString onlyLimit;
 	bool useGround = false, noSelf = false, drop = false, jointedOnly = false;
 	int dragBody = -1;
+	bool dragSpring = false;
+	float dragFirmness = 0.9f;
 	bool noLimits = false;
 	bool verboseSim = false;
 	float cubeSize = STARTER_CUBE_SIZE;
@@ -2417,6 +2450,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--drop" ) ) drop = true;
 		else if ( t == QLatin1String( "--jointed-only" ) ) jointedOnly = true;
 		else if ( t == QLatin1String( "--drag" ) ) dragBody = next().toInt();
+		else if ( t == QLatin1String( "--drag-spring" ) ) dragSpring = true;
+		else if ( t == QLatin1String( "--drag-firmness" ) ) { dragSpring = true; dragFirmness = next().toFloat(); }
 		else if ( t == QLatin1String( "--no-limits" ) ) noLimits = true;
 		else if ( t == QLatin1String( "--trace" ) ) verboseSim = true;
 		else if ( t == QLatin1String( "--size" ) ) cubeSize = next().toFloat();
@@ -2488,7 +2523,7 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "simulate" ) )
 		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
-			dragBody, selfTest, verboseSim );
+			dragBody, dragSpring, dragFirmness, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
 		rc = roundTrip ? cmdCollisionRoundTrip( file, outFile )
 					   : cmdCollision( file, extract ? block : -1, outFile );

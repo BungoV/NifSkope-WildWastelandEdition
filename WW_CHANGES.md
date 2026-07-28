@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29j — the drag spring, built and measured without a window
+
+First half of the Physics Sim viewport mode. The solver already had `setPinned`
+and `setPosition` — its own header called them "what dragging a bone will use" —
+but a pin is the wrong mechanism, and the spring that replaces it is the part that
+can go numerically wrong, so it is the part worth building where it can be
+measured. `simulate --drag N --drag-spring` exercises it headlessly.
+
+**A pin is infinitely stiff: it teleports.** The grabbed body carries the whole rig
+rigidly and every joint downstream gets a step-sized correction it did not ask
+for, so limbs snap rather than swing. `setDrag` adds a compliant positional
+constraint solved alongside the joints, so the rig lags, swings and settles the
+way its own joints do. The grab point is in body space, so dragging a limb by its
+end rotates it instead of sliding it.
+
+### Firmness is dimensionless, and that is the point
+
+XPBD's natural parameter is compliance in m/N. It is physically meaningful and the
+wrong knob here: at a fixed compliance the same grab that barely moves a 5 kg limb
+is rigid on a 0.2 kg one, so a drag would feel different on every bone and
+completely different on Liberty Prime. Firmness runs (0, 1] and is converted to a
+compliance per solve using the body's own generalised inverse mass, which holds the
+FEEL constant instead.
+
+Worst tracking lag on the brahmin's body 5 over a 0.138 m circular pull at two
+seconds a lap, as a percentage of the radius:
+
+| firmness | 1.0 | 0.9 | 0.5 | 0.2 | 0.05 |
+|---|---|---|---|---|---|
+| worst lag | 0.0% | 0.5% | 4.9% | 16.6% | 54.6% |
+
+All of them land on the target exactly once the pull stops. 0.9 is the default: a
+grab that visibly gives without ever feeling loose.
+
+### Three things I got wrong, all caught by measuring
+
+**Reusing the shared helper double-counted the mass.** `applyPositional` performs
+its own 1/w solve, so handing it a `dLambda` that already carries the
+1/(w + alpha) factor divides by the inverse mass twice — a 3x overshoot that put
+the brahmin at 185 m/s and 250,000 J. The first, far too soft, default hid it
+completely by making `dLambda` tiny. The impulse is applied directly now, and the
+comment says why the shared path could not be used.
+
+**A plausible-looking compliance was 70x too soft.** 1e-4 m/N reads like a firm
+grab and lagged 63% of the pull.
+
+**The lag was measured before the step**, which reads how far the target moved that
+frame rather than how well the grab tracked it — it came out identical (25.0%) for
+firmness 1.0 and 0.2, which is what sent me looking. Measured after the step, the
+curve above is monotonic and sensible.
+
+I had also written that firmness table into the header comment *before* measuring
+it, with invented numbers. They are the measured ones now.
+
+37 of 37 vanilla rigs dragged by spring without a blow-up. Solver self-tests still
+green: every rig bounded within 25%, the box still settles on the plane.
+
+**Not done:** the viewport half — mode switch, ray-picking a bone, Space and R. It
+is on-screen behaviour and needs a window, which is bungo's call.
+
 ## 2026-07-29i — §4d closed, and the fix verified through the path a user takes
 
 The compile-every-collision-type campaign is done, and the shared-vertex fix is

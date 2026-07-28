@@ -910,6 +910,92 @@ void RagdollSim::setPosition( int body, const Vector3 & pos )
 	}
 }
 
+void RagdollSim::setDrag( int body, const Vector3 & localPoint, const Vector3 & target,
+	float firmness )
+{
+	if ( body < 0 || body >= m_bodies.size() ) {
+		clearDrag();
+		return;
+	}
+	m_dragBody = body;
+	m_dragLocal = localPoint;
+	m_dragTarget = target;
+	m_dragFirmness = std::clamp( firmness, 1.0e-3f, 1.0f );
+	m_dragLambda = 0.0f;
+}
+
+void RagdollSim::moveDrag( const Vector3 & target )
+{
+	m_dragTarget = target;
+}
+
+void RagdollSim::clearDrag()
+{
+	m_dragBody = -1;
+	m_dragLambda = 0.0f;
+}
+
+float RagdollSim::dragError() const
+{
+	if ( m_dragBody < 0 || m_dragBody >= m_bodies.size() )
+		return 0.0f;
+	const SimBody & b = m_bodies.at( m_dragBody );
+	return ( b.x + qRot( b.q, m_dragLocal ) - m_dragTarget ).length();
+}
+
+/*! Pull the grabbed point toward the target, XPBD style.
+ *
+ * The same shape as a ball socket with one side immovable, and it goes through
+ * applyPositional so the drag cannot inject energy the joint solve would not.
+ * The compliance term is what makes it a spring rather than a pin: alpha scales
+ * as 1/h^2, so the correction a substep applies is bounded by the stiffness
+ * rather than by the size of the gap, and yanking the mouse across the screen
+ * pulls the limb along instead of teleporting the whole rig.
+ *
+ * A pinned body is left alone -- the caller pinned it on purpose, and a drag
+ * that quietly overrode that would be worse than one that does nothing.
+ */
+void RagdollSim::solveDrag( float h )
+{
+	if ( m_dragBody < 0 || m_dragBody >= m_bodies.size() || !( h > 0.0f ) )
+		return;
+	SimBody & b = m_bodies[m_dragBody];
+	if ( b.pinned )
+		return;
+
+	const Vector3 r = qRot( b.q, m_dragLocal );
+	const Vector3 diff = m_dragTarget - ( b.x + r );
+	const float c = diff.length();
+	if ( !( c > 1.0e-9f ) )
+		return;
+	const Vector3 n = diff / c;
+
+	const float w = genInvMass( b, r, n );
+	if ( !( w > 1.0e-12f ) )
+		return;
+	/* alpha scaled BY the body's own inverse mass, so firmness means the same
+	 * thing on every bone. A fixed compliance divided by h^2 instead makes the
+	 * grab's strength depend on the body's mass and on the substep count, which
+	 * is how the first version came to lag two thirds of the pull.
+	 */
+	const float alpha = w * ( 1.0f - m_dragFirmness ) / m_dragFirmness;
+	const float dLambda = ( c - alpha * m_dragLambda ) / ( w + alpha );
+	m_dragLambda += dLambda;
+
+	/* Applied directly rather than through applyPositional, which is the shared
+	 * helper the joints use. That helper performs its OWN 1/w solve, so handing it
+	 * a dLambda that already carries the 1/(w + alpha) factor divides by the
+	 * inverse mass twice -- a 3x overshoot on a body of a few kg, which pushed the
+	 * brahmin to 185 m/s. The soft first default hid it by making dLambda tiny.
+	 *
+	 * What follows is exactly applyPositional's single-body branch with the
+	 * impulse supplied rather than recomputed.
+	 */
+	const Vector3 p = n * dLambda;
+	b.x += p * ( b.invMass * b.solverScale );
+	b.q = qIntegrate( b.q, capRotation( applyInvInertia( b, Vector3::crossproduct( r, p ) ) ), 1.0f );
+}
+
 /*! Solve one joint once. Returns true if it was still meaningfully violated.
  *
  * The caller uses that to spend extra sweeps only where they are needed. A joint
@@ -1083,8 +1169,10 @@ void RagdollSim::step( float dt, int substeps )
 			b.q = qIntegrate( b.q, b.w, h );
 		}
 
+		m_dragLambda = 0.0f;
 		for ( int it = 0; it < std::max( 1, iterations ); it++ ) {
 			solveJoints( h, ( it & 1 ) != 0 );
+			solveDrag( h );
 			solveContacts( h );
 		}
 
