@@ -462,3 +462,38 @@ QByteArray hknpEncodeCapsuleShape( const HknpCapsuleInput & in )
 
 	return out;
 }
+
+/*! Write one hknpSphereShape.
+ *
+ * Measured across the 23 spheres in Fallout 4's actor skeletons: always 128 bytes,
+ * and only three things vary -- the radius at +0x14, the material at +0x18 and the
+ * centre. Everything else is one value corpus-wide.
+ *
+ * A sphere carries NO plane, face or index arrays; the vertex payload starts right
+ * where a polytope's plane descriptor would be, at +0x40. That is the trap the
+ * decoder documents: reading +0x40/+0x44/+0x48 as relArrays on a sphere reinterprets
+ * vertex floats as counts.
+ *
+ * The single vertex is repeated four times for SIMD, and all four carry index 0 in
+ * the w mantissa rather than 0..3 -- they are the same vertex, not four corners.
+ * Unlike a capsule there is no core box, so the solid is exactly a sphere of
+ * convexRadius and nothing needs deriving.
+ */
+QByteArray hknpEncodeSphereShape( const Vector3 & centre, float radius, quint32 materialCRC )
+{
+	QByteArray out( 0x80, 0 );
+
+	setU32( out, 0x10, 0x01000111u );
+	setFloat( out, 0x14, radius );
+	setU32( out, 0x18, materialCRC );
+
+	setU16( out, 0x30, 4 );	// four copies of one vertex
+	setU16( out, 0x32, 0x0010 );	// payload at +0x40
+
+	for ( int i = 0; i < 4; i++ ) {
+		for ( int k = 0; k < 3; k++ )
+			setFloat( out, 0x40 + i * 16 + k * 4, centre[k] );
+		setU32( out, 0x40 + i * 16 + 12, 0x3f000000u );	// 0.5, vertex index 0
+	}
+	return out;
+}

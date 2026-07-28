@@ -76,4 +76,11 @@ struct HknpCapsuleInput
 //! Write one hknpCapsuleShape object: always 432 bytes, no packfile around it.
 QByteArray hknpEncodeCapsuleShape( const HknpCapsuleInput & input );
 
+/*! Write one hknpSphereShape object: always 128 bytes, no packfile around it.
+ *
+ * Nothing here is derived, unlike a capsule -- a sphere stores its centre and its
+ * radius and everything else is constant -- so this reproduces vanilla exactly.
+ */
+QByteArray hknpEncodeSphereShape( const Vector3 & centre, float radius, quint32 materialCRC );
+
 #endif // HKNPENCODE_H

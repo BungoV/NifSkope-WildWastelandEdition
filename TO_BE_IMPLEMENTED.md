@@ -744,9 +744,28 @@ perpendicular `padding*sqrt(2)`. It stays a clean constant across the whole corp
 so ratio checks pass while the value is 22% too large. Measure against the axis
 LINE, unclamped.
 
-**Spheres:** still open. The brahmin has none, so a vanilla sphere needs finding
-before its template can be measured. `hknpSphereShape` decodes as one unique vertex
-plus convexRadius, so expect a similar fixed template.
+### 4d-spec-sphere. Sphere encoder — SHIPPED 07-28u
+
+`hknpEncodeSphereShape`. **30 of 30 byte-exact over the actor skeletons — the whole
+object**, because a sphere derives nothing: no core box, so no padding and no roll.
+
+**Always 128 bytes (0x80).** Only three things vary; everything else is one value
+corpus-wide (measured over 23 spheres).
+
+| offset | contents |
+|---|---|
+| +0x00 | 16 bytes zero |
+| +0x10 | `11 01 00 01` constant (capsule's is `c3 01 00 01`; the low byte looks like a shape-type tag) |
+| +0x14 | float convexRadius — the true radius, there is no core box to add |
+| +0x18 | u32 material CRC |
+| +0x1c..+0x2f | zero |
+| +0x30 | hkRelArray vertices: `04 00 10 00` (count 4, payload +0x40) |
+| +0x34..+0x3f | zero |
+| +0x40 | the centre, repeated 4x for SIMD, w = 0.5 with index **0** in all four — one vertex, not four corners |
+
+**Trap:** a sphere has NO plane, face or index arrays, and the vertex payload starts
+at +0x40 — exactly where a polytope's plane descriptor lives. Reading +0x40/+0x44/
++0x48 as relArrays on a sphere reinterprets vertex floats as counts.
 
 ### 4d. Compile every collision type — NEW 07-28f, agreed with bungo
 
@@ -762,8 +781,7 @@ Ordered by dependency:
    Convex polytopes cannot be written without it. Decode this first.
 2. ~~**Capsule**~~ — SHIPPED 07-28t, see 4d-spec. `hknpEncodeCapsuleShape` plus
    `collision --roundtrip`: 819 capsules, structure byte-exact on all of them.
-   **Sphere** is still open — no vanilla sphere found yet to measure the template
-   against.
+   ~~**Sphere**~~ — SHIPPED 07-28u, see 4d-spec-sphere: 30 of 30 byte-exact.
 3. **Convex polytope** — needs hull generation, and **qhull is already vendored**
    under `lib/qhull`, so the machinery is in the repo.
 4. **Compounds** (static and dynamic) — instance arrays, decode side already works.

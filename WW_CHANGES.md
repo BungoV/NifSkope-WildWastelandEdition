@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28u — The sphere encoder: 30 of 30 byte-exact
+
+`hknpEncodeSphereShape`, and `--roundtrip` now covers spheres too. **30 of 30
+byte-exact — the whole 128-byte object, not just its structure.**
+
+That stronger result is not better work than the capsule's, it is a simpler object.
+A sphere derives *nothing*: it stores a centre and a radius, and every other byte is
+one value corpus-wide. There is no core box, so no padding and no roll — the two
+quantities that make a capsule unreproducible. Where the capsule's spec has to say
+"take these from the decode or synthesize them", the sphere's says nothing at all.
+
+The layout, measured over 23 spheres in the actor skeletons: 128 bytes, flag word
+`11 01 00 01` at +0x10 (the capsule's is `c3 01 00 01`, so the low byte looks like a
+shape-type tag), radius at +0x14, material at +0x18, one vertex array of four
+entries at +0x40. The centre is repeated four times for SIMD and all four carry
+index **0** in the w mantissa, not 0..3 — they are one vertex, not four corners.
+
+Worth flagging for whoever writes the next primitive: a sphere has **no plane, face
+or index arrays**, and its vertex payload begins at +0x40, exactly where a
+polytope's plane descriptor sits. The decoder already documents that trap; the
+encoder now has to respect it in the other direction.
+
+Capsules unchanged at 819 / 819.
+
 ## 2026-07-28t — The capsule encoder, and three corrections it forced
 
 `hknpEncodeCapsuleShape` writes the 432-byte object, and `collision <file>

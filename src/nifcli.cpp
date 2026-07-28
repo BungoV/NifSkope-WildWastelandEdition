@@ -907,7 +907,7 @@ int cmdCollisionRoundTrip( const QString & file )
 	if ( !loadNif( nif, file ) )
 		return 1;
 
-	int total = 0, structOk = 0, fullyExact = 0;
+	int total = 0, structOk = 0, fullyExact = 0, spheres = 0, spheresExact = 0;
 	float worstVert = 0.0f, worstPlane = 0.0f;
 	QMap<int, int> byteHist;   // offset -> how often the structural bytes differed
 
@@ -930,6 +930,14 @@ int cmdCollisionRoundTrip( const QString & file )
 			continue;
 
 		for ( const HknpShape & shp : sys.shapes ) {
+			// a sphere derives nothing, so it must come back byte for byte
+			if ( shp.primType == 1 && shp.rawOffset >= 0 && shp.rawOffset + 0x80 <= bytes.size() ) {
+				spheres++;
+				if ( hknpEncodeSphereShape( shp.capA, shp.convexRadius, shp.materialCRC )
+					== bytes.mid( shp.rawOffset, 0x80 ) )
+					spheresExact++;
+				continue;
+			}
 			if ( shp.primType != 2 || shp.rawOffset < 0 || shp.coreVerts.size() != 8 )
 				continue;
 			const qsizetype at = shp.rawOffset;
@@ -992,10 +1000,13 @@ int cmdCollisionRoundTrip( const QString & file )
 	}
 
 	out() << "file       " << file << Qt::endl;
+	if ( spheres )
+		out() << "spheres    " << spheres << "  byte-exact " << spheresExact
+			  << " / " << spheres << Qt::endl;
 	out() << "capsules   " << total << Qt::endl;
 	if ( !total ) {
-		out() << "  nothing to check" << Qt::endl;
-		return 0;
+		out() << "  no capsules to check" << Qt::endl;
+		return ( spheresExact < spheres ) ? 1 : 0;
 	}
 	out() << "  structure byte-exact   " << structOk << " / " << total << Qt::endl;
 	out() << "  whole object exact     " << fullyExact << " / " << total << Qt::endl;
@@ -1007,7 +1018,7 @@ int cmdCollisionRoundTrip( const QString & file )
 			out() << " +0x" << QString::number( it.key(), 16 ) << "(" << it.value() << ")";
 		out() << Qt::endl;
 	}
-	return structOk < total ? 1 : 0;
+	return ( structOk < total || spheresExact < spheres ) ? 1 : 0;
 }
 
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
