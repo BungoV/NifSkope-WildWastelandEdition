@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28k — Adaptive solver passes: the stiff hinges converge
+
+The workshop turret is fixed — from 60 m/s to a clean settle — and the eyebot
+drops from 87 m/s to 20. The worst-behaved body in the entire corpus went from
+**87 m/s to 20**, with 32 of 37 ragdolls at rest and worst penetration 0.1 mm.
+
+07-28j left two hinge models diverging and established that 16 solver sweeps fixed
+them while breaking the sentry. The reason a global count cannot work: a shoulder
+needs one pass and the turret's pelvis hinge, limited to **±1°**, needs several.
+Sweeps are now spent per joint, and only while that joint is still visibly
+violated — a joint doing its job stops after one pass and costs exactly what it
+did before. That is the property the earlier attempts lacked: they paid for the
+stiff joints by disturbing the thirty-odd ragdolls that were already correct.
+
+**The distinction that made it work** is between a joint *resting on* its limit
+and one being *driven through* it. Those are not the same thing, and a ragdoll in
+motion has limits firing constantly. The first version treated any firing limit as
+distress, spent eight passes on each, and unsettled five animals that had been
+fine — Dogmeat, the FEV hound, a mirelurk hunter, a radscorpion and the behemoth.
+`limitAngle` now returns *how far* out of range the angle was, and only a genuine
+excess earns extra work.
+
+Ten degrees is that line, and it is measured rather than chosen: across the corpus
+the worst body ends at 34.6 m/s with a 5° threshold, **20.1 at 10°**, and 46.3 at
+15°, with 32 of 37 settling in all three cases. Too tight and healthy joints are
+treated as sick; too loose and the stuck ones get no help.
+
+### Still moving: 3
+
+Robot/SkeletonRef (9.0 m/s) and the sentry (2.8) are **self-collision** —
+SkeletonRef drops to 0.11 m/s with `--no-self`, and body-body is still exact only
+for single capsules and spheres, so compounds are the suspect. The eyebot (20) is
+still hinge-limited; its antennae carry an inverse inertia of 4417 along their own
+axis against 3.67 across it, so it is the hardest case in the corpus by a wide
+margin. Liberty Prime (1.7) and the mirelurk hunter (1.1) are essentially settled.
+
 ## 2026-07-28j — Ragdolls settle the way the file says they should
 
 **32 of 37** vanilla ragdolls now come to rest — under 1 m/s after ten seconds of

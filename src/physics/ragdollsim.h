@@ -289,6 +289,15 @@ public:
 	 * nothing over four.
 	 */
 	int iterations = 4;
+	/*! Extra passes spent on a single joint while it is still visibly violated.
+	 *
+	 * Adaptive on purpose. A joint doing its job stops after one pass and costs
+	 * nothing extra, so the ragdolls that already settle are untouched; only the
+	 * stiff ones -- a hinge limited to a degree of travel -- pay for the extra
+	 * work. Raising the GLOBAL sweep count instead was tried and rejected: it
+	 * fixed the workshop turret and took the sentry from 8.7 m/s to 75.
+	 */
+	int stiffIterations = 8;
 	//! Solve the angular limits as well as the ball sockets. Off isolates the
 	//! two halves when a run misbehaves -- a pure ball-socket tree is a solved
 	//! problem, so if that alone is unstable the fault is not in the limits.
@@ -306,6 +315,8 @@ public:
 
 private:
 	void solveJoints( float h );
+	//! one pass over one joint; true if it is still meaningfully violated
+	bool solveOneJoint( const SimJoint & j );
 	//! fill in every body's solverScale from how many joints touch it
 	void rescaleForJointCount();
 	//! decide once which body pairs may ever collide

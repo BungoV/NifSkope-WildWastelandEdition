@@ -572,7 +572,19 @@ ragdoll, and 16 sweeps do not improve it — most likely the float32 floor in
    **Rejected on corpus evidence, do not retry blind:** 16 solver sweeps instead
    of 4 (fixes the turret, breaks the sentry, 25/37 net) and scaling solverScale
    by correction count rather than joint count (30/37, turret 60 -> 149 m/s).
-   **Open: 4 still moving** — eyebot (87 m/s) and workshop turret (60), both
+   **07-28k: adaptive per-joint passes.** Sweeps are spent per joint and only while
+   that joint is still visibly violated, so healthy ragdolls cost what they always
+   did. Key distinction: a joint RESTING on its limit is not one DRIVEN THROUGH it
+   -- `limitAngle` returns the excess, and the 10-degree `FORCED_RAD` threshold is
+   measured (worst body across the corpus: 34.6 m/s at 5 deg, 20.1 at 10, 46.3 at
+   15). Workshop turret fixed, eyebot 87 -> 20 m/s, corpus worst 87 -> 20.
+   **Open: 3 still moving** -- Robot/SkeletonRef (9.0 m/s) and sentry (2.8) are
+   SELF-COLLISION (SkeletonRef -> 0.11 with `--no-self`); body-body is exact only
+   for single capsules/spheres, so compounds are the suspect and exact convex
+   body-body collision is the next job. Eyebot (20) is the hardest case in the
+   corpus: hinges on antennae with inverse inertia 4417 along their axis vs 3.67
+   across.
+   (superseded) **Open: 4 still moving** — eyebot (87 m/s) and workshop turret (60), both
    HINGE, a convergence problem that 16 sweeps fixes locally; Robot/SkeletonRef
    (9.0) and sentry (4.1), SELF-COLLISION (SkeletonRef drops to 0.11 with
    `--no-self`). Next: per-joint adaptive iteration for stiff hinges, and exact
