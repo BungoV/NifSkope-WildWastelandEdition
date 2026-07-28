@@ -698,14 +698,41 @@ table are each ONE distinct value.
 
 **The hull is a shrunk core, not the capsule.** The real shape is that box
 Minkowski-summed with a sphere of radius = convexRadius, which is why the box is
-tiny. Its dimensions are fixed ratios of the radius, identical to 5 decimal places
-on all 39:
+tiny. The rule is simple and exact:
 
-    half-width perpendicular to the axis = R * 0.014288      (= R / 69.99125)
-    half-extent along the axis           = halfLength + R * 0.010101
+    core box = AABB(capA, capB) padded by R/99 on EVERY axis
 
-The perpendicular ratio being exactly the Havok-to-game unit scale is unlikely to
-be coincidence and is worth a thought before hard-coding it.
+Measured 0.01010101 on all three axes of all 39 capsules -- 1/99 to 8 figures. So
+the true outer radius is `convexRadius * (1 + 1/99)`, i.e. `R * 1.010101`. (An
+earlier note here said 1.014288; that came from measuring to a box CORNER, which
+is the diagonal, not the perpendicular half-width. 1.010101 is the right number.)
+
+**Open: the vertex and plane ORDER follows the capsule's own frame, not world
+axes.** A byte-exact reconstruction fails on this and only this. Compared against
+vanilla:
+
+- A capsule whose axis is Z reproduces all 8 vertices exactly with bit0 -> Z,
+  bit1 -> X (0 = high), bit2 -> Y (0 = low).
+- A capsule whose axis is X permutes: bit0 -> X, bit1 -> Y (0 = low),
+  bit2 -> Z (0 = high).
+
+Bit 0 is the capsule's axis in both, so the box is built in a local frame (axis
+plus two perpendiculars) and written out in shape space. Reproducing vanilla
+byte-for-byte needs Elric's rule for choosing those two perpendiculars.
+
+This matters because **the 24-byte index table is a constant** shared by all 778
+capsules: permuting the vertices without permuting the indices describes a
+different solid. An encoder therefore has two options, and the second is fine for
+a working file:
+
+1. Work out the perpendicular-basis rule and match vanilla byte-for-byte.
+2. Emit vertices in its own order together with an index table built to match.
+   Geometrically identical, not byte-identical, so validate by decoding the result
+   and comparing GEOMETRY rather than bytes.
+
+Also note the y components of one capsule differ from a clean +-pad by 2 ULP
+(`00 8d 24 bb` against `02 8d 24 3b`), so even with the right order some values
+carry rounding from whatever order Elric computed them in.
 
 So: build the box in the axis frame, write its 8 corners with the index-tagged w,
 write the 6 face planes, copy the two constant tables verbatim, set radius and

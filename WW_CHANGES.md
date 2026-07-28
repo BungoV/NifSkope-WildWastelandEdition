@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-28s — Capsule geometry solved; vertex ORDER is what is left
+
+Prototyped the capsule encoder in Python and byte-diffed it against all 39 vanilla
+capsules, which is the cheapest place to find out what is still unknown.
+
+**The geometry rule is exact:** the core box is `AABB(capA, capB)` padded by
+**R/99** on every axis — 0.01010101 measured on all three axes of all 39, 1/99 to
+eight figures. That also corrects yesterday's note: the true outer radius is
+`convexRadius * 1.010101`, not 1.014288. The larger figure came from measuring to a
+box *corner*, which is the diagonal rather than the perpendicular half-width. The
+kind of mistake that survives because both numbers look plausible.
+
+**What is left is the ordering.** A capsule whose axis is Z reproduces all eight
+vertices *exactly*; one whose axis is X comes out permuted. In both, bit 0 of the
+vertex index tracks the capsule's own axis — so the box is built in a local frame
+of axis-plus-two-perpendiculars and written into shape space, and matching vanilla
+byte-for-byte needs Elric's rule for picking those perpendiculars.
+
+This is not cosmetic: the 24-byte index table is a **constant** shared by all 778
+vanilla capsules, so permuting vertices without permuting indices describes a
+different solid. An encoder can either recover the basis rule, or emit its own
+vertex order with a matching index table — geometrically identical, not
+byte-identical, and validated by decoding the result and comparing geometry.
+
+Both routes are written into TO_BE_IMPLEMENTED 4d-spec, along with a smaller trap:
+some vertex components differ from a clean +-pad by 2 ULP, so even with the right
+order a few values carry rounding from whatever order Elric computed them in.
+
 ## 2026-07-28r — The capsule encoder, fully specified
 
 No code yet — the complete byte layout, written into TO_BE_IMPLEMENTED as 4d-spec
