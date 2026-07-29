@@ -142,7 +142,7 @@ struct Affine
 
 //! Per-bone `boneWorld * boneBind` for a skinned shape; empty when not skinned.
 QVector<Affine> skinBoneMatrices( const NifModel * nif, const QModelIndex & shape,
-                                  const QHash<int, Transform> & world )
+                                  const QHash<int, Transform> & world, int * unresolved = nullptr )
 {
 	QVector<Affine> out;
 	QModelIndex iSkin = nif->getBlockIndex( nif->getLink( shape, "Skin" ), "BSSkin::Instance" );
@@ -163,8 +163,13 @@ QVector<Affine> skinBoneMatrices( const NifModel * nif, const QModelIndex & shap
 		bind.rotation = nif->get<Matrix>( iBT, "Rotation" );
 		bind.translation = nif->get<Vector3>( iBT, "Translation" );
 		bind.scale = nif->get<float>( iBT, "Scale" );
-		// A bone the file does not actually contain leaves the bind alone, which
-		// is the rest pose — the same fallback updateBoneTransforms makes.
+		/* A bone with no world transform falls back to identity. That used to be
+		 * SILENT, which is the worst behaviour here: the shapes weighted to it go
+		 * somewhere wrong while every other shape stays right, so the output looks
+		 * mostly fine. Counted now, and reported by the caller.
+		 */
+		if ( !world.contains( bones.at( b ) ) && unresolved )
+			( *unresolved )++;
 		const Transform boneWorld = world.value( bones.at( b ), Transform() );
 		out.append( Affine::from( boneWorld * bind ) );
 	}
@@ -178,6 +183,29 @@ QVector<Affine> skinBoneMatrices( const NifModel * nif, const QModelIndex & shap
 bool isGeometry( const NifModel * nif, const QModelIndex & idx )
 {
 	return nif->blockInherits( idx, "BSTriShape" );
+}
+
+/* Vertex records store the same NAMED field at two different precisions, and
+ * nif.xml calls both of them "Vertex" (likewise Normal and Tangent). So a
+ * set<Vector3>() on a half-precision record does nothing and returns false —
+ * which is exactly the bug that shipped: the node translations moved to their
+ * centroids while the vertices stayed where they were, displacing every shape by
+ * its own centroid. Different shapes, different offsets, everything out of place.
+ *
+ * These dispatch on the item's real type, the way spells/transform.cpp has always
+ * done it, and they RETURN whether the write happened so the caller can refuse to
+ * claim success.
+ */
+bool setVec3Field( NifModel * nif, const QModelIndex & iRow, const char * field, const Vector3 & p )
+{
+	NifItem * item = nif->getItem( iRow, field );
+	if ( !item )
+		return false;
+	if ( item->hasValueType( NifValue::tHalfVector3 ) )
+		return nif->set<HalfVector3>( item, HalfVector3( p ) );
+	if ( item->hasValueType( NifValue::tByteVector3 ) )
+		return nif->set<ByteVector3>( item, ByteVector3( p ) );
+	return nif->set<Vector3>( item, p );
 }
 
 //! Recompute the bounding sphere from local vertices — Ritter is overkill for
@@ -276,8 +304,14 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 				continue;
 			}
 
-			const QVector<Affine> bones = skinBoneMatrices( nif, shape, world );
+			int unresolvedBones = 0;
+			const QVector<Affine> bones = skinBoneMatrices( nif, shape, world, &unresolvedBones );
 			const bool skinned = !bones.isEmpty();
+			if ( unresolvedBones > 0 )
+				note( QStringLiteral( "%1: %2 of %3 skin bone(s) have no world transform — those "
+					"vertices fall back to the bind pose and will be in the wrong place" )
+					.arg( nif->get<QString>( shape, "Name" ) )
+					.arg( unresolvedBones ).arg( bones.size() ) );
 			const Affine shapeWorld = Affine::from( world.value( b, Transform() ) );
 
 			QVector<Vector3> pos( nv );
@@ -331,16 +365,18 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 
 			// Write positions and rotate every direction channel by the same
 			// matrix the position used.
+			int posWritten = 0;
 			nif->setState( BaseModel::Processing );
 			for ( int v = 0; v < nv; v++ ) {
 				QModelIndex iVertex = nif->getIndex( iVD, v );
-				nif->set<Vector3>( iVertex, "Vertex", local[v] );
+				if ( setVec3Field( nif, iVertex, "Vertex", local[v] ) )
+					posWritten++;
 
 				const Affine & m = perVertex[v];
-				if ( QModelIndex i = nif->getIndex( iVertex, "Normal" ); i.isValid() )
-					nif->set<Vector3>( i, m.direction( nif->get<Vector3>( i ) ) );
-				if ( QModelIndex i = nif->getIndex( iVertex, "Tangent" ); i.isValid() )
-					nif->set<Vector3>( i, m.direction( nif->get<Vector3>( i ) ) );
+				if ( NifItem * n = nif->getItem( iVertex, "Normal" ) )
+					setVec3Field( nif, iVertex, "Normal", m.direction( nif->get<Vector3>( n ) ) );
+				if ( NifItem * t = nif->getItem( iVertex, "Tangent" ) )
+					setVec3Field( nif, iVertex, "Tangent", m.direction( nif->get<Vector3>( t ) ) );
 				// The bitangent is stored split across three fields of two
 				// different types, so it has to be reassembled to be rotated.
 				QModelIndex bx = nif->getIndex( iVertex, "Bitangent X" );
@@ -355,6 +391,13 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 				}
 			}
 			nif->restoreState();
+
+			// Refuse to report a shape as baked when its positions did not move.
+			// The absence of this check is what let a wholly broken converter ship.
+			if ( posWritten != nv )
+				note( QStringLiteral( "%1: wrote only %2 of %3 vertex position(s) — this shape is "
+					"NOT baked and its geometry no longer matches its node" )
+					.arg( nif->get<QString>( shape, "Name" ) ).arg( posWritten ).arg( nv ) );
 
 			// The node now places the piece, with no rotation — the vanilla shape.
 			nif->set<Vector3>( shape, "Translation", centre );

@@ -133,7 +133,38 @@ sym() {
 sym "X01_ArmLeft:0" "X01_ArmRight:0"
 sym "X01_LegLeft:0" "X01_LegRight:0"
 
-# --- 4. vertices are local -------------------------------------------------
+# --- 4a. THE load-bearing check: bind-pose round-trip ----------------------
+# At bind pose the skin evaluation is a no-op, so node.translation + vertex must
+# reproduce the ORIGINAL world position. This is the check whose absence let a
+# completely broken converter ship: set<Vector3>() on a half-precision "Vertex"
+# field does nothing and returns a false nobody read, so the node translations
+# moved to their centroids while the vertices stayed put. Every shape ended up
+# displaced by its own centroid -- different offsets per shape, everything out of
+# place -- and the old "vertices are local" check below passed anyway, because FO4
+# armour already stores its vertices near the body origin.
+"$EXE" -no-gui loading-screen "$TMP/rig.nif" -o "$TMP/bind.nif" > /dev/null 2>&1
+for name in "X01_Torso:0" "X01_Helmet:0" "X01_ArmLeft:0" "X01_LegRight:0"; do
+	rb="$(blockof "$TMP/rig.nif"  "$name")"
+	bb="$(blockof "$TMP/bind.nif" "$name")"
+	[ -n "$rb" ] && [ -n "$bb" ] || { bad "cannot find $name either side"; continue; }
+	echo "$(field "$TMP/rig.nif" "$rb" "Translation")|$(field "$TMP/rig.nif" "$rb" "Vertex Data/0/Vertex")|$(field "$TMP/bind.nif" "$bb" "Translation")|$(field "$TMP/bind.nif" "$bb" "Vertex Data/0/Vertex")" \
+	| awk -F'|' -v n="$name" '{
+		split($1,a," "); split($2,b," "); split($3,c," "); split($4,d," ");
+		ox=a[2]+b[2]; oy=a[4]+b[4]; oz=a[6]+b[6];
+		nx=c[2]+d[2]; ny=c[4]+d[4]; nz=c[6]+d[6];
+		e=sqrt((ox-nx)^2+(oy-ny)^2+(oz-nz)^2);
+		# 0.05 is generous for half-float rounding and far tighter than any real
+		# displacement, which is tens of units.
+		if (e < 0.05) printf "OK %s (err %.4f)\n", n, e;
+		else printf "BAD %s: world position moved %.3f at bind pose -- (%.3f, %.3f, %.3f) became (%.3f, %.3f, %.3f)\n", n, e, ox,oy,oz, nx,ny,nz;
+	}' > "$TMP/rt.txt"
+	if grep -q '^OK' "$TMP/rt.txt"; then ok; echo "  $(cat "$TMP/rt.txt")"
+	else bad "$(cat "$TMP/rt.txt")"; fi
+done
+
+# --- 4b. vertices are local -------------------------------------------------
+# Kept, but demoted: on its own this proves nothing, since the ORIGINAL vertices
+# already satisfy it. It only rules out a bake that wrote world coordinates.
 # 60 is the bar, and it is set by vanilla rather than by taste: the X-01 screen
 # stores its body vertices at magnitudes around 30 with the node at Z = 111. What
 # must never happen is a vertex carrying the WORLD coordinate, which for a
