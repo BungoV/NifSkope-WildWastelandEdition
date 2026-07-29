@@ -3,9 +3,22 @@
 Turn an assembled, posed rig into a single static NIF the game can use as
 loading-screen art. Design only; nothing here is built yet.
 
+## The pipeline
+
+**Load every NIF → freeze each one at its own sequence and time → merge.**
+
+Freezing per file, before the merge, rather than baking one global *T* after it:
+
+- **each limb's VFX can sit at a different instant**, which is the point;
+- each file is frozen in **its own time space**, so nothing has to reconcile six
+  `NiControllerManager`s that all start at 0 and mean different things;
+- the merge then splices content that is already static — and the merge is the
+  part that is already built and tested;
+- and each file is frozen while it is **loaded and playing on its own**, which is
+  what makes capturing generated geometry (§1d) practical rather than awkward.
+
 Input is what the merge already produces: skeleton first, armour skinned to it,
-effects attached by `AttachT`, a pose applied over the whole thing. Output is one
-file with no skeleton, no skin and no controllers.
+effects attached by `AttachT`, a pose applied over the whole thing.
 
 ---
 
@@ -109,14 +122,27 @@ shape node (translation **and** rotation — we are not bound to vanilla's
 identity-rotation convention, and an exact transform beats a re-derived one), and
 re-centre vertices as above.
 
-### 1c. Controllers → kept
+### 1c. Freeze — the per-file operation
 
-Transform and shader controllers stay live. §0b: 18 vanilla screens move, 13
-animate a shader, one runs a full sequence. Baking them to constants at T would
-throw away something the format supports and Bethesda uses.
+Every X-01 Tesla FX file carries a `NiControllerManager` with **two named
+sequences, `autoPlay` and `autoLoop`** (torso: 44 controlled blocks each; a leg:
+12). So "choose the sequence" is a real choice with real names, not a fiction.
 
-A `--freeze` switch can still evaluate them into their driven fields and delete
-them, for the case where a genuinely motionless still is wanted. Off by default.
+**Freeze( file, sequence, t )**:
+
+1. walk the chosen `NiControllerSequence`'s `Controlled Blocks`;
+2. evaluate each `Interpolator` at *t*;
+3. write the value into what its `Controller Type` says it drives — a shader
+   property field, a node transform, a colour;
+4. delete the controller graph: `NiControllerManager`, both sequences, the
+   controllers, interpolators, `NiFloatData`/`NiTransformData`,
+   `NiTextKeyExtraData`, `NiDefaultAVObjectPalette`.
+
+The file is then a still of that instant, and merges as static content.
+
+**Freezing is a choice, not a requirement.** §0b: 18 vanilla screens move and 13
+animate a shader, so a limb can equally be left live and keep animating in game.
+Per file, per limb — that is the whole point of doing it before the merge.
 
 ### 1d. What the X-01 Tesla FX is actually made of
 
@@ -136,16 +162,21 @@ table when this was framed as freeze-or-drop. What is left to decide is only the
 particle systems and the procedural lightning:
 
 1. **Drop them** — keeps the ribbons animating, loses sparks and arcs, zero risk,
-   zero extra work. *Recommended.*
-2. **Freeze the lightning into effect-shader geometry** — run to T (which
-   `WW_SHOT_TIME` already does), read the generated arc vertices out of the
-   renderer, emit a `BSTriShape` with the same `BSEffectShaderProperty`. This
-   converts the arcs **into** the vanilla idiom rather than out of it, so they
-   keep their glow and can even keep a float controller. Real work, but the
-   result is a file the engine has seen the shape of before.
+   zero extra work.
+2. **Snapshot them into effect-shader geometry** — the file is already loaded and
+   already scrubbed to *t* by the freeze; the arc and the live particles exist in
+   the renderer at that moment. Read the generated vertices out and emit a
+   `BSTriShape` with the same `BSEffectShaderProperty`. This converts them
+   **into** the vanilla idiom rather than out of it, so they keep their glow.
+   *Recommended under the per-file pipeline* — the per-file model is what makes
+   this cheap, because there is exactly one scene, at one time, to read from.
 3. **Ship the particle systems as-is** — no vanilla precedent whatsoever. Not
    recommended, and if tried, it needs an in-game check before anything is built
    on top of it.
+
+Option 2 is also the one that makes "freeze each limb at a chosen moment"
+actually mean what it looks like: without it, the arcs are simply absent whatever
+time you pick.
 
 ### 1e. Stripped outright
 
@@ -169,15 +200,31 @@ everything in game, so it is asserted in the test rather than trusted.
 
 ## 2. Shape of the work
 
-1. **`bakeSceneAt( NifModel *, float t, const BakeOptions & )`** on the model/GL
-   boundary — it needs `Shape::skinVertex`, so it lives where the scene does, and
-   returns a fresh `NifModel` rather than editing in place.
-2. **CLI**: `nifcli bake <file> --time 1.5 --zoom-target HEAD -o out.nif`, so the
-   whole pipeline — merge, pose, bake — is scriptable end to end and testable
-   without a window.
-3. **GUI**: a Pose Manager button (**Bake to loading screen…**), because the pose
-   is the input and that is where the user already is. Asks for time, zoom
-   target, output path.
+**Step 1 — freeze, per document.** The app already has a timeline dock with a
+sequence selector and a playhead. Make a document primary, pick `autoPlay` or
+`autoLoop`, scrub to the frame you want, then in **Loaded NIFs** right-click the
+row → **Freeze animation at current time**. No new dialog: the thing that chooses
+the sequence and the time is the timeline, which is already there and already
+shows you what you are choosing. The row then reads `autoPlay @ 1.50`, so six
+limbs frozen at six different moments is legible at a glance.
+
+**Step 2 — merge.** Already built: select the rows, right-click, Merge into a new
+NIF, skeleton first.
+
+**Step 3 — static-ify the rig** (§1a/1b/1e/1f): evaluate the skin at the pose,
+drop the skeleton and skin blocks, re-centre vertices, add the zoom target.
+
+Underneath:
+
+- **`freezeAnimation( NifModel *, const QString & sequence, float t )`** — pure
+  model work, no GL, except for the §1d snapshot which needs the scene.
+- **`bakeStatic( NifModel *, const BakeOptions & )`** — needs `Shape::skinVertex`,
+  so it lives where the scene does and returns a fresh model.
+- **CLI**: `nifcli freeze <file> --sequence autoPlay --time 1.5 -o out.nif` and
+  `nifcli bake <file> --zoom-target HEAD -o out.nif`, so the whole chain —
+  freeze, merge, pose, bake — is scriptable end to end and testable without a
+  window. That matters here: six freezes at six times is a script, not six trips
+  through a dialog.
 
 ## 3. How it gets verified
 
