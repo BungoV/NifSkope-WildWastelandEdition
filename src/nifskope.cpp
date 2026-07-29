@@ -86,6 +86,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QStyledItemDelegate>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -181,16 +183,42 @@ protected:
 	}
 };
 
+/*! Loaded NIFs row: the name, plus two display toggles at the right edge.
+ *
+ * Solid and ghost are drawn as two small buttons rather than one cycling
+ * control, because the question "is this one solid or see-through" should be
+ * answerable at a glance down a list of six limbs, and a tri-state checkbox
+ * makes you click to find out. Clicking the lit one turns the document off, so
+ * two buttons still cover all three states.
+ */
 class LoadedNifsDelegate final : public QStyledItemDelegate
 {
 public:
 	explicit LoadedNifsDelegate( QObject * parent = nullptr ) : QStyledItemDelegate( parent ) {}
+
+	//! 0 = hidden, 1 = solid, 2 = ghost; -1 when the row is not a document.
+	std::function<int( const QModelIndex & )> displayMode;
+	//! Called with the mode the user clicked; the same mode again means "off".
+	std::function<void( const QModelIndex &, int )> setDisplayMode;
+
+	static constexpr int GlyphW = 20;
+
+	//! Right-edge slots: [0] solid, [1] ghost.
+	static QRect glyphRect( const QRect & row, int slot )
+	{
+		const int size = std::min( GlyphW, row.height() - 2 );
+		const int top = row.top() + ( row.height() - size ) / 2;
+		return QRect( row.right() - ( 2 - slot ) * ( GlyphW + 2 ) - 2, top, size, size );
+	}
 
 	void paint( QPainter * painter, const QStyleOptionViewItem & option,
 		const QModelIndex & index ) const override
 	{
 		QStyleOptionViewItem opt( option );
 		initStyleOption( &opt, index );
+		const int mode = displayMode ? displayMode( index ) : -1;
+		if ( mode >= 0 )		// keep the text clear of the buttons
+			opt.rect.setRight( opt.rect.right() - 2 * ( GlyphW + 2 ) - 4 );
 		const QVariant background = index.data( Qt::BackgroundRole );
 		const QVariant foreground = index.data( Qt::ForegroundRole );
 		if ( background.canConvert<QColor>() ) {
@@ -207,6 +235,48 @@ public:
 		const QWidget * widget = option.widget;
 		QStyle * style = widget ? widget->style() : QApplication::style();
 		style->drawControl( QStyle::CE_ItemViewItem, &opt, painter, widget );
+		if ( mode < 0 )
+			return;
+
+		// filled disc = solid, half disc = see-through; lit when that mode is on
+		painter->save();
+		painter->setRenderHint( QPainter::Antialiasing, true );
+		for ( int slot = 0; slot < 2; slot++ ) {
+			const QRect r = glyphRect( option.rect, slot );
+			const bool on = ( mode == slot + 1 );
+			const QColor ink = on ? QColor( 0xFF, 0x9D, 0x00 ) : QColor( 0x77, 0x7c, 0x84 );
+			painter->setPen( QPen( ink, 1 ) );
+			painter->setBrush( Qt::NoBrush );
+			painter->drawEllipse( r.adjusted( 3, 3, -3, -3 ) );
+			QRectF fill = QRectF( r.adjusted( 3, 3, -3, -3 ) );
+			painter->setPen( Qt::NoPen );
+			painter->setBrush( ink );
+			if ( slot == 0 )
+				painter->drawEllipse( fill );
+			else
+				painter->drawChord( fill, 90 * 16, 180 * 16 );	// left half
+		}
+		painter->restore();
+	}
+
+	bool editorEvent( QEvent * event, QAbstractItemModel *, const QStyleOptionViewItem & option,
+		const QModelIndex & index ) override
+	{
+		if ( event->type() != QEvent::MouseButtonRelease || !setDisplayMode
+			|| !displayMode || displayMode( index ) < 0 )
+			return false;
+		auto * me = static_cast<QMouseEvent *>( event );
+		if ( me->button() != Qt::LeftButton )
+			return false;
+		for ( int slot = 0; slot < 2; slot++ ) {
+			if ( !glyphRect( option.rect, slot ).contains( me->pos() ) )
+				continue;
+			// clicking the mode already on turns the document off
+			const int want = ( displayMode( index ) == slot + 1 ) ? 0 : slot + 1;
+			setDisplayMode( index, want );
+			return true;
+		}
+		return false;
 	}
 };
 
@@ -1039,7 +1109,39 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView = loadedWorkspaceView;
 	loadedNifsView->setObjectName( QStringLiteral( "LoadedNifsView" ) );
 	loadedNifsView->setModel( loadedNifsModel );
-	loadedNifsView->setItemDelegate( new LoadedNifsDelegate( loadedNifsView ) );
+	auto * loadedDelegate = new LoadedNifsDelegate( loadedNifsView );
+	// The two right-edge buttons read and write the same workspace flags the row
+	// menu does, so the menu and the buttons can never disagree.
+	loadedDelegate->displayMode = [this]( const QModelIndex & idx ) {
+		if ( NifSkope * doc = documentFromBrowserIndex( idx ) ) {
+			if ( doc == this )
+				return -1;			// the primary is always drawn; nothing to toggle
+			if ( !doc->sessionPreviewVisible || doc->sessionPreviewUnloaded )
+				return 0;
+			return doc->sessionPreviewGhost ? 2 : 1;
+		}
+		if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( idx ) ) {
+			if ( !bg->selectedInWorkspace() )
+				return 0;
+			return bg->sessionPreviewGhost ? 2 : 1;
+		}
+		return -1;
+	};
+	loadedDelegate->setDisplayMode = [this]( const QModelIndex & idx, int mode ) {
+		if ( NifSkope * doc = documentFromBrowserIndex( idx ); doc && doc != this ) {
+			doc->sessionPreviewVisible = ( mode != 0 );
+			doc->sessionPreviewUnloaded = false;
+			doc->sessionPreviewGhost = ( mode == 2 );
+		} else if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( idx ) ) {
+			bg->sessionPreviewVisible = ( mode != 0 );
+			bg->sessionPreviewUnloaded = false;
+			bg->sessionPreviewGhost = ( mode == 2 );
+		} else {
+			return;
+		}
+		refreshAllDocumentSessions();
+	};
+	loadedNifsView->setItemDelegate( loadedDelegate );
 	loadedNifsView->setRootIsDecorated( false );
 	loadedNifsView->setAlternatingRowColors( false );
 	loadedNifsView->setSelectionMode( QAbstractItemView::ExtendedSelection );
@@ -4068,6 +4170,53 @@ void NifSkope::appendLooseNifsToBrowser( const QString & dataFolder )
 		delete loosePath;
 		delete looseSize;
 	}
+}
+
+/*! Add a loose NIF to Loaded NIFs by path, without going through the browser
+ *  tree. The browser route needs a QModelIndex, which a script or a harness has
+ *  no way to produce; this is the same work with the source named directly.
+ */
+bool NifSkope::addWorkspaceDocumentFromFile( const QString & path )
+{
+	auto * document = new BackgroundNifDocument;
+	document->workspaceRoot = this;
+	if ( !document->nif->loadFromFile( path ) ) {
+		delete document;
+		return false;
+	}
+	document->currentFile = path;
+	document->sessionPreviewVisible = true;
+	document->captureLoadedState();
+	sessionBackgroundDocuments.append( document );
+	refreshAllDocumentSessions();
+	return true;
+}
+
+/*! How a workspace document draws: 0 hidden, 1 solid, 2 semi-transparent. The
+ *  same state the row's two buttons and its menu drive, addressed by position so
+ *  it can be scripted.
+ */
+bool NifSkope::setWorkspaceDisplayMode( int backgroundIndex, int mode )
+{
+	if ( backgroundIndex < 0 || backgroundIndex >= sessionBackgroundDocuments.size() )
+		return false;
+	BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	document->sessionPreviewVisible = ( mode != 0 );
+	document->sessionPreviewUnloaded = false;
+	document->sessionPreviewGhost = ( mode == 2 );
+	refreshAllDocumentSessions();
+	return true;
+}
+
+//! Count of data-only workspace members, for scripting and tests.
+int NifSkope::workspaceDocumentCount() const
+{
+	return int( sessionBackgroundDocuments.size() );
+}
+
+bool NifSkope::grabLoadedNifsView( const QString & path ) const
+{
+	return loadedNifsView && loadedNifsView->grab().save( path );
 }
 
 bool NifSkope::openArchiveFile( const QModelIndex & index, bool newWindow )

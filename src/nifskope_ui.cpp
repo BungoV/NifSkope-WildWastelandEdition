@@ -3126,6 +3126,73 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_WORKSPACE_TEST=a.nif;b.nif): the Loaded NIFs display
+	 * toggles. Adds the given files as workspace documents, sets the first solid
+	 * and the second semi-transparent, and saves two pictures: the list (do the
+	 * row buttons draw, and does the lit one match the state?) and the viewport
+	 * (does the ghost actually render translucent?).
+	 * Log: release/ww_workspace_test.log, ww_workspace_list.png / _view.png.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WORKSPACE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_workspace_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass )
+						fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				auto settle = []( int ms ) {
+					QEventLoop loop;
+					QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+					loop.exec();
+					QApplication::processEvents();
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					const QStringList files =
+						qEnvironmentVariable( "WW_WORKSPACE_TEST" ).split( QLatin1Char( ';' ),
+							Qt::SkipEmptyParts );
+					int added = 0;
+					for ( const QString & f : files )
+						if ( skope->addWorkspaceDocumentFromFile( f ) )
+							added++;
+					log << "added " << added << " of " << files.size() << " workspace document(s)\n";
+					check( "every file joined the workspace", added == files.size() && added > 0 );
+					check( "...and the workspace counts them",
+						skope->workspaceDocumentCount() == added );
+
+					check( "the first draws solid", skope->setWorkspaceDisplayMode( 0, 1 ) );
+					if ( added > 1 )
+						check( "the second draws semi-transparent",
+							skope->setWorkspaceDisplayMode( 1, 2 ) );
+					settle( 1200 );
+
+					const QString listShot =
+						QApplication::applicationDirPath() + "/ww_workspace_list.png";
+					const QString viewShot =
+						QApplication::applicationDirPath() + "/ww_workspace_view.png";
+					check( "the Loaded NIFs list renders", skope->grabLoadedNifsView( listShot ) );
+					check( "the viewport renders", skope->ogl->grabFramebuffer().save( viewShot ) );
+					log << "  " << listShot << "\n  " << viewShot << "\n";
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS\n" : "CHECK: failures above\n" );
+				log << "done\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_REVERT_TEST=<donor.nif>): can a loaded NIF be modified and
 	 * put back exactly, without saving?
 	 *

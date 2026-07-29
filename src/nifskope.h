@@ -361,6 +361,17 @@ private:
 	NifSkope * documentFromBrowserIndex( const QModelIndex & index ) const;
 	BackgroundNifDocument * backgroundDocumentFromBrowserIndex( const QModelIndex & index ) const;
 	void showBackgroundDocumentMenu( BackgroundNifDocument * document, const QPoint & globalPos );
+public:
+	//! Add a loose NIF to Loaded NIFs by path (the browser route needs a
+	//! QModelIndex, which a script has no way to produce).
+	bool addWorkspaceDocumentFromFile( const QString & path );
+	//! How a workspace document draws: 0 hidden, 1 solid, 2 semi-transparent.
+	bool setWorkspaceDisplayMode( int backgroundIndex, int mode );
+	int workspaceDocumentCount() const;
+	//! Render the Loaded NIFs list offscreen to a PNG — the row buttons can only
+	//! be checked by looking at them.
+	bool grabLoadedNifsView( const QString & path ) const;
+private:
 	//! Loaded NIFs, 2+ rows selected: offer to merge them into a new file. The
 	//! FIRST row is the target, so the skeleton goes first and dictates position
 	//! for everything spliced in after it. Nothing loaded is modified.
