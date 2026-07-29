@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 #include "message.h"
+#include "nifmerge.h"
 #include "nifsnapshot.h"
 #include "data/niftypes.h"
 #include "spellbook.h"
@@ -59,6 +60,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QActionGroup>
 #include <QApplication>
 #include <QBuffer>
+#include <QFileDialog>
 #include <QButtonGroup>
 #include <QByteArray>
 #include <QCloseEvent>
@@ -1084,6 +1086,13 @@ NifSkope::NifSkope( bool background )
 	connect( loadedNifsView, &QTreeView::customContextMenuRequested, this,
 		[this]( const QPoint & pos ) {
 			const QModelIndex index = loadedNifsView->indexAt( pos );
+			// Two or more rows selected is a different question from "what do I
+			// want to do with this document" — it is "combine these", so it gets
+			// its own menu rather than a merge item buried in the per-row one.
+			if ( loadedNifsView->selectionModel()->selectedRows().size() > 1 ) {
+				mergeLoadedDocumentsMenu( loadedNifsView->viewport()->mapToGlobal( pos ) );
+				return;
+			}
 			if ( NifSkope * document = documentFromBrowserIndex( index ) )
 				showDocumentMenu( document, loadedNifsView->viewport()->mapToGlobal( pos ) );
 			else if ( BackgroundNifDocument * background = backgroundDocumentFromBrowserIndex( index ) )
@@ -1570,6 +1579,107 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 			QTimer::singleShot( 0, document, &QWidget::close );
 		} else document->close();
 	}
+}
+
+/*! Merge the documents selected in Loaded NIFs into one new file.
+ *
+ * The FIRST selected row is the target and every other is spliced into a copy
+ * of it — so on a rig the skeleton goes first and dictates position for
+ * everything: a bone that exists in both is the skeleton's, and the armour
+ * piece's flat copy of it de-duplicates away. Effects land on the node their
+ * AttachT names.
+ *
+ * Nothing loaded is touched. The merge runs on a fresh model built from the
+ * target's bytes, so a merge that turns out wrong costs a file on disk and not
+ * the documents in the workspace.
+ */
+void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
+{
+	// resolve the selection, in the order the list shows it
+	QList<QPair<QString, NifModel *>> picked;
+	const QModelIndexList rows = loadedNifsView->selectionModel()->selectedRows();
+	for ( const QModelIndex & row : rows ) {
+		if ( NifSkope * doc = documentFromBrowserIndex( row ) )
+			picked.append( { QFileInfo( doc->currentFile ).fileName(), doc->nif } );
+		else if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( row ) )
+			picked.append( { bg->displayName(), bg->nif } );
+	}
+	if ( picked.size() < 2 )
+		return;
+
+	QMenu menu( this );
+	menu.addSection( tr( "%1 documents selected" ).arg( picked.size() ) );
+	QAction * doMerge = menu.addAction( tr( "Merge into a new NIF…" ) );
+	doMerge->setToolTip( tr( "%1 is the target; the rest are spliced into a copy of it" )
+		.arg( picked.first().first ) );
+	menu.setToolTipsVisible( true );
+	if ( menu.exec( globalPos ) != doMerge )
+		return;
+
+	QString out = QFileDialog::getSaveFileName( this, tr( "Save merged NIF" ),
+		QFileInfo( picked.first().second->getFileInfo() ).absolutePath(),
+		tr( "NIF files (*.nif)" ) );
+	if ( out.isEmpty() )
+		return;
+	if ( !out.endsWith( QStringLiteral( ".nif" ), Qt::CaseInsensitive ) )
+		out += QStringLiteral( ".nif" );
+
+	// a copy of the target, through its own serializer, so the live document is
+	// never the thing being edited
+	auto snapshot = []( const NifModel * src, QByteArray & bytes ) {
+		QBuffer buf( &bytes );
+		return buf.open( QIODevice::WriteOnly ) && src->save( buf );
+	};
+	QByteArray targetBytes;
+	NifModel merged;
+	merged.setMessageMode( BaseModel::MSG_TEST );
+	{
+		QBuffer buf( &targetBytes );
+		if ( !snapshot( picked.first().second, targetBytes ) || !buf.open( QIODevice::ReadOnly )
+			|| !merged.load( buf ) ) {
+			QMessageBox::warning( this, tr( "Merge" ),
+				tr( "Could not copy %1 to merge into." ).arg( picked.first().first ) );
+			return;
+		}
+	}
+
+	QStringList report, dupes;
+	int shapes = 0;
+	for ( int i = 1; i < picked.size(); i++ ) {
+		QByteArray bytes;
+		if ( !snapshot( picked.at( i ).second, bytes ) ) {
+			QMessageBox::warning( this, tr( "Merge" ),
+				tr( "Could not read %1." ).arg( picked.at( i ).first ) );
+			return;
+		}
+		NifMergeResult r;
+		if ( !nifMergeData( &merged, bytes, picked.at( i ).first, true, r ) ) {
+			QMessageBox::warning( this, tr( "Merge" ), r.error );
+			return;
+		}
+		shapes += r.shapesAdded;
+		dupes << r.duplicateNames;
+		report << tr( "%1: %2 shape(s), %3 bone(s) shared%4" )
+			.arg( picked.at( i ).first ).arg( r.shapesAdded ).arg( r.nodesReused )
+			.arg( r.attachedTo.isEmpty()
+				? ( r.isEffect ? tr( ", attached to the ROOT — its AttachT names no node" )
+					: QString() )
+				: tr( ", attached to %1" ).arg( r.attachedTo ) );
+	}
+
+	if ( !merged.saveToFile( out ) ) {
+		QMessageBox::warning( this, tr( "Merge" ), tr( "Could not write %1." ).arg( out ) );
+		return;
+	}
+	dupes.removeDuplicates();
+	QString text = tr( "Merged %1 file(s) into %2 — %3 shape(s) added.\n\n%4" )
+		.arg( picked.size() - 1 ).arg( QFileInfo( out ).fileName() ).arg( shapes )
+		.arg( report.join( QLatin1Char( '\n' ) ) );
+	if ( !dupes.isEmpty() )
+		text += tr( "\n\nWARNING: %1 bone name(s) now appear on more than one node "
+			"(%2). Posing will address only one of each." )
+			.arg( dupes.size() ).arg( dupes.mid( 0, 8 ).join( QStringLiteral( ", " ) ) );
+	QMessageBox::information( this, tr( "Merge" ), text );
 }
 
 void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, const QPoint & globalPos )

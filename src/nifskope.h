@@ -361,6 +361,10 @@ private:
 	NifSkope * documentFromBrowserIndex( const QModelIndex & index ) const;
 	BackgroundNifDocument * backgroundDocumentFromBrowserIndex( const QModelIndex & index ) const;
 	void showBackgroundDocumentMenu( BackgroundNifDocument * document, const QPoint & globalPos );
+	//! Loaded NIFs, 2+ rows selected: offer to merge them into a new file. The
+	//! FIRST row is the target, so the skeleton goes first and dictates position
+	//! for everything spliced in after it. Nothing loaded is modified.
+	void mergeLoadedDocumentsMenu( const QPoint & globalPos );
 	//! Attach a real window to a data-only background document: create it hidden,
 	//! reload the NIF from its source, then run the normal primary switch.
 	void promoteBackgroundDocument( BackgroundNifDocument * document );

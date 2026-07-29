@@ -285,6 +285,16 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 	auto syncing = std::make_shared<bool>( false );
 
 	// A refresh needs to survive block-renumbering (save/apply insert or remove
+	/* The ACTIVE pose. A pose is written into the bone transforms, so it survives
+	 * on its own for bones that already exist — but a piece merged in afterwards
+	 * brings bones that were never posed, and the rig would come apart at exactly
+	 * the seam you just added. Remembering which pose is on lets it be re-applied
+	 * over the whole rig after every merge, so "load a pose and it stays loaded"
+	 * holds no matter what arrives later. Cleared only by picking Default (rest).
+	 */
+	auto activePose = std::make_shared<QString>();
+	auto activeBlend = std::make_shared<float>( 1.0f );
+
 	// blocks), so the list carries node NAMES and resolves them per action.
 	auto refresh = [=]() {
 		NifModel * m = skope ? skope->getNifModel() : nif;
@@ -324,18 +334,33 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 		folderLabel->setToolTip( QObject::tr( "Poses stored in: %1" ).arg( folder ) );
 		QDir dir( folder );
 		int nposes = 0;
+		// Default sits above the files and is not one: it is how you turn the
+		// active pose OFF. Without a row for it there is no way back to rest
+		// short of Reset all, which says nothing about the pose still being on.
+		auto * defaultItem = new QListWidgetItem( QObject::tr( "Default (rest pose)" ), poseList );
+		defaultItem->setData( Qt::UserRole, QString() );
+		defaultItem->setForeground( QBrush( QColor( 0x9a, 0x9a, 0xa2 ) ) );
 		for ( const QFileInfo & fi : dir.entryInfoList( { QStringLiteral( "*.xml" ) },
 				QDir::Files, QDir::Name ) ) {
-			auto * it = new QListWidgetItem( fi.completeBaseName(), poseList );
+			const bool isActive = ( fi.absoluteFilePath() == *activePose );
+			auto * it = new QListWidgetItem(
+				isActive ? QStringLiteral( "● " ) + fi.completeBaseName() : fi.completeBaseName(),
+				poseList );
 			it->setData( Qt::UserRole, fi.absoluteFilePath() );
+			if ( isActive )
+				it->setForeground( QBrush( QColor( 0xFF, 0x9D, 0x00 ) ) );
 			if ( !selectedPose.isEmpty() && fi.absoluteFilePath() == selectedPose )
 				poseList->setCurrentItem( it );   // restore the selection by path
 			nposes++;
 		}
+		if ( activePose->isEmpty() )
+			poseList->setCurrentItem( defaultItem );
 
 		status->setText( bones.isEmpty()
 			? QObject::tr( "No skinned geometry — nothing to pose." )
-			: QObject::tr( "%1 bone(s), %2 pose file(s)." ).arg( bones.size() ).arg( nposes ) );
+			: QObject::tr( "%1 bone(s), %2 pose file(s).%3" ).arg( bones.size() ).arg( nposes )
+				.arg( activePose->isEmpty() ? QString()
+					: QObject::tr( " Pose: %1." ).arg( QFileInfo( *activePose ).completeBaseName() ) ) );
 	};
 
 	// resolve a node name to its current block (block numbers shift under edits)
@@ -420,6 +445,18 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 					.arg( r.duplicateNames.size() )
 					.arg( r.duplicateNames.mid( 0, 12 ).join( QStringLiteral( ", " ) )
 						+ ( r.duplicateNames.size() > 12 ? QObject::tr( ", ..." ) : QString() ) ) );
+		/* Put the active pose back over the whole rig. The bones that were
+		 * already here kept it — it lives in their transforms — but everything
+		 * that just arrived is at bind, and a half-posed rig is worse than an
+		 * unposed one. Re-applying costs nothing when nothing new matched.
+		 */
+		if ( ogl && !activePose->isEmpty() ) {
+			QString poseError;
+			const int n = ogl->poseImportOutfitStudio( *activePose, *activeBlend, &poseError );
+			if ( n > 0 )
+				status->setText( status->text() + QObject::tr( " Re-applied pose '%1' over %2 bone(s)." )
+					.arg( QFileInfo( *activePose ).completeBaseName() ).arg( n ) );
+		}
 		refresh();
 	};
 
@@ -582,14 +619,27 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 	auto applyLibraryPose = [=]( QListWidgetItem * sel ) {
 		if ( !ogl || !sel )
 			return;
+		const QString path = sel->data( Qt::UserRole ).toString();
+		// Default (rest): the only way to turn the active pose off
+		if ( path.isEmpty() ) {
+			activePose->clear();
+			ogl->poseResetBone( -1, 7 );		// every channel, every bone
+			status->setText( QObject::tr( "Back to the rest pose." ) );
+			refresh();
+			return;
+		}
 		QString error;
-		const int n = ogl->poseImportOutfitStudio( sel->data( Qt::UserRole ).toString(),
-			blend->value() / 100.0f, &error );
-		if ( n <= 0 )
+		const int n = ogl->poseImportOutfitStudio( path, blend->value() / 100.0f, &error );
+		if ( n <= 0 ) {
 			QMessageBox::warning( panel, QObject::tr( "Apply pose" ), error );
-		else
-			status->setText( QObject::tr( "Applied '%1': %2 bone(s) posed.%3" )
-				.arg( sel->text() ).arg( n ).arg( error.isEmpty() ? QString() : QStringLiteral( " " ) + error ) );
+			return;
+		}
+		*activePose = path;
+		*activeBlend = blend->value() / 100.0f;
+		status->setText( QObject::tr( "Applied '%1': %2 bone(s) posed.%3" )
+			.arg( QFileInfo( path ).completeBaseName() ).arg( n )
+			.arg( error.isEmpty() ? QString() : QStringLiteral( " " ) + error ) );
+		refresh();
 	};
 	QObject::connect( applyBtn, &QPushButton::clicked, panel,
 		[=]() { applyLibraryPose( poseList->currentItem() ); } );
@@ -621,10 +671,14 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 		if ( n <= 0 )
 			QMessageBox::warning( panel, QObject::tr( "Import pose" ), error );
 		else {
+			// an imported pose is the active one too, so it survives later merges
+			*activePose = path;
+			*activeBlend = blend->value() / 100.0f;
 			status->setText( QObject::tr( "Imported %1: %2 bone(s) posed." )
 				.arg( QFileInfo( path ).fileName() ).arg( n ) );
 			if ( !error.isEmpty() )   // partial: some bones not in this skeleton
 				status->setText( status->text() + QStringLiteral( " " ) + error );
+			refresh();
 		}
 	} );
 	QObject::connect( exportOsBtn, &QPushButton::clicked, panel, [=]() {

@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30i — merge from Loaded NIFs, and a pose that stays on
+
+### Select, right-click, merge
+
+Two or more rows selected in the NIF Browser's **Loaded NIFs** list get their own
+context menu: **Merge into a new NIF…**, then a Save As for the output. The
+**first selected row is the target**, so a rig is assembled skeleton-first and
+the skeleton dictates position for everything after it — a bone that exists in
+both is the skeleton's, and an armour piece's flat copy de-duplicates away.
+
+Nothing loaded is modified. The merge runs on a fresh model built from the
+target's own bytes, so a merge that turns out wrong costs a file on disk rather
+than the documents in the workspace. The summary reports, per piece, shapes
+added, bones shared, and where an effect attached — including "the ROOT, its
+AttachT names no node", which is the case that silently goes wrong.
+
+### A pose stays loaded until you pick Default
+
+A pose is written into the bone transforms, so it survives on its own for bones
+that already exist. But a piece merged in **afterwards** brings bones that were
+never posed, and the rig comes apart at exactly the seam you just added.
+
+The Pose Manager tracks the **active** pose and re-applies it over the whole rig
+after every merge. The library list gained a **Default (rest pose)** row above the
+files — the only thing that turns a pose off — and the active pose is marked with
+a dot and the selection orange, so "which pose is on" is answerable by looking.
+
 ## 2026-07-30h — the merge honours AttachT, so ArtObjects land on the limb
 
 An effect NIF's root carries a `NiStringsExtraData` called **`AttachT`** whose
