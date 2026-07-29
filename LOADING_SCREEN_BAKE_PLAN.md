@@ -34,16 +34,50 @@ What that tells us, each point load-bearing:
 |---|---|
 | Every armour piece is a plain **`BSTriShape`** — no `BSSkin::Instance`, no `BoneData` | the skin is **evaluated away**, not carried |
 | **No `NiNode`s except the root and the zoom target** | the entire skeleton is **dropped** |
-| **No controllers of any kind**, no `NiTimeController`, no particle systems | animation is **baked to values or removed** |
+| This file has no controllers | **but see §0b — most do not, some do, and that changes the plan** |
 | Each shape has a **non-zero translation and an identity rotation** | vertices stay near a **local origin**; the node places the piece |
 | Block 4's first vertex is `(4.04, 29.36, -3.28)` while its node sits at `Z = 111.27` | confirms the above — and the values are quantised in 1/256 steps, i.e. **half-float** |
-| A bare `NiNode` named exactly **`LoadingMenuZoomTarget`** | the camera focus point is **part of the file**, and is required |
+| A bare `NiNode` named exactly **`LoadingMenuZoomTarget`** | the camera focus point is part of the file — **optional, see §0b** |
 
 The half-float point is the one that would have bitten us. Baking world-space
 vertices straight into the array puts coordinates around 111.0 into half floats,
 where the step is ~0.0078 units — visible faceting on a helmet. Vanilla avoids it
 by keeping each piece around its own origin. **We must do the same:** per shape,
 translation = the piece's world centroid, vertices = world position − centroid.
+
+## 0b. One file is not a corpus
+
+Generalising from `Armor03PowerArmor8X01.nif` produced two wrong claims. Every
+`.nif` under `meshes/LoadScreenArt` — **173 files** — says this instead:
+
+| block | files | reading |
+|---|---|---|
+| `NiNode` / `BSLightingShaderProperty` / `BSShaderTextureSet` | 173 / 172 / 172 | the floor |
+| `BSTriShape` | 167 | static geometry is the norm |
+| `NiAlphaProperty` | 147 | |
+| **`BSEffectShaderProperty`** | **27** | effect-shader geometry is normal here |
+| `BSSubIndexTriShape` | 24 | segmented shapes survive |
+| **`NiTransformController` / `NiTransformInterpolator`** | **18** | **loading screens MOVE** |
+| `NiFloatInterpolator` / `NiFloatData` | 11 | |
+| **`BSEffectShaderPropertyFloatController`** | **9** | **effect shaders ANIMATE** |
+| `BSLightingShaderPropertyFloatController` | 4 | |
+| `BSEffectShaderPropertyColorController` | 3 | |
+| `NiControllerManager` + `NiControllerSequence` + `NiDefaultAVObjectPalette` | 1 | one carries a whole animation sequence |
+| `bhkPhysicsSystem` / `bhkNPCollisionObject` | 1 | one even has collision |
+| **any `NiPSys*`, `NiParticleSystem`, `BSProceduralLightningController`** | **0** | **never, not once** |
+
+`LoadingMenuZoomTarget` appears in **65 of 173** — a strong convention, not a
+requirement.
+
+So the two corrections:
+
+- **Controllers do not have to be stripped.** "Bake the animation to values at T"
+  was over-fitting to one static file. Transform and shader controllers are
+  ordinary here, and the X-01 Tesla ribbons are made of exactly the blocks 27
+  vanilla screens already use.
+- **Particles genuinely have no precedent.** Zero occurrences in 173 files is not
+  proof the engine refuses them, but it is the whole of the evidence, and betting
+  a loading screen on an untravelled path is a poor trade for a still image.
 
 ---
 
@@ -75,47 +109,61 @@ shape node (translation **and** rotation — we are not bound to vanilla's
 identity-rotation convention, and an exact transform beats a re-derived one), and
 re-centre vertices as above.
 
-### 1c. Controllers → values, then gone
+### 1c. Controllers → kept
 
-`BSLightingShaderPropertyFloatController`, `…ColorController`,
-`BSEffectShaderPropertyFloatController`, `NiTransformController`: evaluate the
-interpolator at time **T**, write the result into the property field the
-controller drives, then remove the controller and its interpolator/data.
+Transform and shader controllers stay live. §0b: 18 vanilla screens move, 13
+animate a shader, one runs a full sequence. Baking them to constants at T would
+throw away something the format supports and Bethesda uses.
 
-This is the bulk of the X-01 Tesla FX — the torso alone carries 26 float
-controllers and 2 colour controllers — and it is entirely mechanical.
+A `--freeze` switch can still evaluate them into their driven fields and delete
+them, for the case where a genuinely motionless still is wanted. Off by default.
 
-### 1d. Particles and procedural lightning → the open decision
+### 1d. What the X-01 Tesla FX is actually made of
 
-`NiPSys*`, `BSPositionData`, `BSPSysScaleModifier`, and
-`BSProceduralLightningController` **cannot be evaluated at T**. They integrate
-frame to frame; there is no closed form for "the state at 1.5 s". Two honest
-options:
+Each effect file is two separable halves, and only one is a problem:
 
-- **Drop them.** Vanilla loading screens contain no particles at all. Cheapest,
-  matches shipping data, loses the arcs.
-- **Freeze them.** Run the scene to T (which `WW_SHOT_TIME` already does), read
-  the generated vertex buffer back out of the renderer, and emit it as a static
-  `BSTriShape` carrying the same `BSEffectShaderProperty`. The arcs become fixed
-  geometry — right for a still image, wrong if the screen is meant to animate.
+| per FX file | blocks | vanilla precedent |
+|---|---|---|
+| `BSTriShape` ×2–5 + `BSEffectShaderProperty` ×3–5 + `BSEffectShaderPropertyFloatController` ×2–4 | the glowing ribbons | **yes — 27 files** |
+| `NiParticleSystem` + `NiPSysData` + 9 `NiPSys*`/`BSPSys*` modifiers + `BSPositionData` | the sparks | **none, 0 of 173** |
+| `BSProceduralLightningController` ×1–3 | the arcs | **none, 0 of 173** |
 
-**This is the decision that needs making before any of it is built.** Everything
-else is determined; this one changes both the work and the result.
+(`x01tesla_helmet_fx.nif` carries none of the three — worth knowing before
+wondering where the helmet glow went.)
+
+So **most of the effect survives untouched and animated**, which was not on the
+table when this was framed as freeze-or-drop. What is left to decide is only the
+particle systems and the procedural lightning:
+
+1. **Drop them** — keeps the ribbons animating, loses sparks and arcs, zero risk,
+   zero extra work. *Recommended.*
+2. **Freeze the lightning into effect-shader geometry** — run to T (which
+   `WW_SHOT_TIME` already does), read the generated arc vertices out of the
+   renderer, emit a `BSTriShape` with the same `BSEffectShaderProperty`. This
+   converts the arcs **into** the vanilla idiom rather than out of it, so they
+   keep their glow and can even keep a float controller. Real work, but the
+   result is a file the engine has seen the shape of before.
+3. **Ship the particle systems as-is** — no vanilla precedent whatsoever. Not
+   recommended, and if tried, it needs an in-game check before anything is built
+   on top of it.
 
 ### 1e. Stripped outright
 
 Skeleton `NiNode`s, `BSConnectPoint::Parents` / `::Children`,
-`NiStringsExtraData 'AttachT'`, `BSBehaviorGraphExtraData`, `BSXFlags`, collision
-(`bhkNPCollisionObject`, `bhkPhysicsSystem`), and any node left with no
-descendants that draw. The reference file has none of these.
+`NiStringsExtraData 'AttachT'`, and any node left with no descendants that draw.
+
+**Not** `BSXFlags` (38 vanilla files have one), **not**
+`BSBehaviorGraphExtraData` (9 have one), **not** collision (one file has both
+`bhkNPCollisionObject` and `bhkPhysicsSystem`). The single reference file lacking
+them proved nothing; the corpus says leave them.
 
 ### 1f. The zoom target
 
-Add one `NiNode` named exactly `LoadingMenuZoomTarget`, no children. Default
-position: the world position of a chosen bone at time T (`HEAD` gives vanilla's
-~Z 140 on a power-armour frame), with an editable offset. Getting the name wrong
-costs nothing visible in NifSkope and everything in game, so it is asserted in
-the test rather than trusted.
+Add one `NiNode` named exactly `LoadingMenuZoomTarget`, no children — optional
+(65 of 173) but worth having. Default position: the world position of a chosen
+bone at time T (`HEAD` gives vanilla's ~Z 140 on a power-armour frame), with an
+editable offset. Getting the name wrong costs nothing visible in NifSkope and
+everything in game, so it is asserted in the test rather than trusted.
 
 ---
 
@@ -133,8 +181,9 @@ the test rather than trusted.
 
 ## 3. How it gets verified
 
-- **Block census against the reference**: 0 skin blocks, 0 controllers, 0
-  `NiNode`s besides root + `LoadingMenuZoomTarget`, every shape a `BSTriShape`.
+- **Block census against the corpus, not against one file**: 0 skin blocks, 0
+  `NiPSys*`, 0 `BSProceduralLightningController`, no `NiNode` left that no shape
+  hangs from. Controllers are *expected*, not forbidden.
 - **Geometry is the same geometry**: every baked vertex must equal
   `skinVertex()` at T to within half-float precision — the same measurement
   `WW_SKELMERGE_TEST` already makes, reused as the acceptance test.
