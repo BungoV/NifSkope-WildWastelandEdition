@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "starterscene.h"
 #include "ui_nifskope.h"
 
+#include "bakegeom.h"
 #include "glview.h"
 #include "nifmerge.h"
 #include "message.h"
@@ -3390,6 +3391,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				do {
 					if ( !ok ) { log << "load failed\n"; break; }
 
+					// Not inherited from the registry: with GLView/Enable Animations
+					// left false by a GUI session, no controller updates and the
+					// capture legitimately finds nothing. See WW_EFFECTBAKE_TEST.
+					skope->ogl->setAnimationEnabled( true );
+					QApplication::processEvents();
+
 					// Stepped, not jumped: particle systems integrate frame to frame,
 					// so the scene has to be walked to the instant.
 					const float want = qEnvironmentVariableIsSet( "WW_BOLTBAKE_TIME" )
@@ -3448,6 +3455,189 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
 				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_EFFECTBAKE_TEST=<out.nif>, WW_EFFECTBAKE_TIME=<seconds>):
+	 * does a captured effect survive being written into a NIF and read back?
+	 *
+	 * Capture was proved separately (WW_BOLTBAKE_TEST). This is the other half,
+	 * and it is where the interesting failures live, because writing FO4 geometry
+	 * has three ways to look successful and be wrong:
+	 *
+	 *   1. Vertex Desc says half precision while the writer sets Vector3. nif.xml
+	 *      names both variants "Vertex", so set<Vector3> does nothing and returns
+	 *      false. The loading-screen converter shipped with exactly this and wrote
+	 *      a file with no vertices in it.
+	 *   2. Data Size and the desc disagree. The model holds the arrays in memory
+	 *      either way, so everything looks right until the file is re-read.
+	 *   3. The arrays never get sized, because a conditional array has no children
+	 *      until the deferred cascade runs.
+	 *
+	 * All three are invisible in the live model and all three are caught by the
+	 * same invariant: SAVE, re-read from disk into a fresh model, and check that
+	 * translation + vertex reproduces the world position that was captured. That
+	 * is the only claim that matters — "the effect is where it looked".
+	 * Log: release/ww_effectbake_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_EFFECTBAKE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_effectbake_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+
+					/* Animation is a PERSISTED user setting, and with it off no
+					 * controller ever updates: there are no bolts and no live
+					 * sprites, so a capture correctly returns nothing. This suite
+					 * went from green to "captured 0" with no code change at all,
+					 * because a GUI session had left GLView/Enable Animations at
+					 * false in the registry. A harness that inherits the user's
+					 * settings is not measuring the code. */
+					skope->ogl->setAnimationEnabled( true );
+					QApplication::processEvents();
+
+					const float want = qEnvironmentVariableIsSet( "WW_EFFECTBAKE_TIME" )
+						? qEnvironmentVariable( "WW_EFFECTBAKE_TIME" ).toFloat() : 2.5f;
+					// Stepped, not jumped: sprite positions integrate frame to frame.
+					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
+						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
+						QApplication::processEvents();
+					}
+					QEventLoop settle;
+					QTimer::singleShot( 300, &settle, &QEventLoop::quit );
+					settle.exec();
+
+					const Vector3 facing( 0.0f, -1.0f, 0.0f );
+					const auto caught = skope->ogl->bakeEffects( skope->getNifModel(), facing );
+					log << "captured " << caught.size() << " effect(s) at t=" << want << "\n";
+					check( "at least one effect was captured", !caught.isEmpty() );
+					if ( caught.isEmpty() )
+						break;
+
+					// What the capture claims, kept for the round-trip comparison.
+					QVector<BakeGeom::Capture> caps;
+					for ( const auto & e : caught ) {
+						BakeGeom::Capture c;
+						c.name = e.name;
+						c.tris = e.tris;
+						c.uvs = e.uvs;
+						c.cols = e.cols;
+						c.tint = e.tint;
+						c.facing = facing;
+						c.shaderProperty = e.shaderProperty;
+						c.alphaProperty = e.alphaProperty;
+						c.fromParticles = e.fromParticles;
+						caps.append( c );
+						log << "  '" << e.name << "' " << ( e.fromParticles ? "sprites" : "arc" )
+							<< ": " << ( e.tris.size() / 3 ) << " tri, "
+							<< ( e.shaderProperty.isValid() ? "has shader" : "NO SHADER" ) << "\n";
+					}
+
+					NifModel * nif = skope->getNifModel();
+					QString err;
+					const BakeGeom::Result r = BakeGeom::write( nif, caps, true, &err );
+					log << "wrote " << r.shapes << " shape(s), " << r.vertices << " vert, "
+						<< r.triangles << " tri, removed " << r.emittersRemoved << " emitter block(s)\n";
+					for ( const QString & n : r.notes )
+						log << "  note: " << n << "\n";
+					check( "every capture became a shape", r.ok && r.shapes == caps.size() );
+					check( "the emitters it replaced were removed", r.emittersRemoved > 0 );
+
+					// Nothing live must be left behind, or a loading screen would
+					// carry both the bake and the emitter it replaces.
+					int leftover = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QString t = nif->itemName( nif->getBlockIndex( b ) );
+						if ( t == QLatin1String( "NiParticleSystem" )
+							|| t == QLatin1String( "BSProceduralLightningController" ) )
+							leftover++;
+					}
+					check( "no emitter blocks remain", leftover == 0 );
+
+					// --- the round trip ---------------------------------------
+					const QString out = qEnvironmentVariable( "WW_EFFECTBAKE_TEST" );
+					check( "the model saved", nif->saveToFile( out ) );
+
+					NifModel back;
+					check( "the saved file re-reads", back.loadFromFile( out ) );
+
+					QVector<QModelIndex> baked;
+					for ( int b = 0; b < back.getBlockCount(); b++ ) {
+						const QModelIndex idx = back.getBlockIndex( b );
+						if ( !back.blockInherits( idx, "BSTriShape" ) )
+							continue;
+						const QString nm = back.get<QString>( idx, "Name" );
+						for ( const auto & c : caps )
+							if ( nm == c.name ) { baked.append( idx ); break; }
+					}
+					check( QStringLiteral( "all %1 baked shape(s) are in the re-read file" )
+						.arg( caps.size() ), baked.size() == caps.size() );
+
+					float worstPos = 0.0f;
+					int sized = 0, shaded = 0;
+					for ( const QModelIndex & idx : baked ) {
+						const QString nm = back.get<QString>( idx, "Name" );
+						const BakeGeom::Capture * src = nullptr;
+						for ( const auto & c : caps )
+							if ( c.name == nm ) { src = &c; break; }
+						if ( !src )
+							continue;
+
+						const quint32 nv = back.get<quint32>( idx, "Num Vertices" );
+						const quint32 nt = back.get<quint32>( idx, "Num Triangles" );
+						const quint32 ds = back.get<quint32>( idx, "Data Size" );
+						const bool hasCol = ( src->cols.size() == src->tris.size() );
+						const quint32 want = nv * ( hasCol ? 32u : 28u ) + nt * 6u;
+						if ( nv == quint32( src->tris.size() ) && nt == nv / 3 && ds == want )
+							sized++;
+						else
+							log << "  '" << nm << "' sizes: nv " << nv << " nt " << nt
+								<< " dataSize " << ds << " (expected " << want << ")\n";
+
+						if ( back.getLink( idx, "Shader Property" ) >= 0 )
+							shaded++;
+
+						// translation + vertex must reproduce the captured world point
+						const Vector3 tr = back.get<Vector3>( idx, "Translation" );
+						QModelIndex iVerts = back.getIndex( idx, "Vertex Data" );
+						const int n = std::min<int>( int( nv ), int( src->tris.size() ) );
+						for ( int i = 0; i < n; i++ ) {
+							QModelIndex iV = back.getIndex( iVerts, i );
+							if ( !iV.isValid() )
+								continue;
+							const Vector3 v = back.get<Vector3>( iV, "Vertex" );
+							worstPos = std::max( worstPos, ( ( tr + v ) - src->tris.at( i ) ).length() );
+						}
+					}
+					log << "worst round-trip position error " << worstPos << " units\n";
+					check( "every shape's desc and Data Size agree", sized == baked.size() );
+					check( "every shape kept a shader property", shaded == baked.size() );
+					// Full precision, so this is exact bar float noise. A half-float
+					// write would land near 0.008; a failed write near the bolt length.
+					check( "the geometry round-trips to where it was captured",
+						baked.size() == caps.size() && worstPos < 0.01f );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				// This harness MODIFIES the model, and quitting with a modified
+				// document raises a save prompt that blocks the process — a
+				// -Wait run then wedges until something kills it.
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
 		} );

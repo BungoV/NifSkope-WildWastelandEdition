@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifskope.h"
 #include "ui_nifskope.h"
 
+#include "bakegeom.h"
 #include "freezeanim.h"
 #include "glview.h"
 #include "loadingscreen.h"
@@ -1936,6 +1937,45 @@ bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName
 		"can be tried before committing to it" ) );
 	form->addWidget( strip );
 
+	/* Particles and procedural lightning are a separate decision from freezing,
+	 * because freezing cannot touch them: their geometry is not in the file at
+	 * all. A sprite is one point the GPU expands into a camera-facing quad; a
+	 * bolt is invented from the clock. There is nothing to write a value into.
+	 *
+	 * So the choice is snapshot the look, leave it running, or drop it.
+	 */
+	bool hasParticles = false, hasLightning = false;
+	const bool anyEffects = BakeGeom::hasEffects( nif, &hasParticles, &hasLightning );
+	const bool live = ogl && ogl->hasLiveScene( nif );
+	QComboBox * fxBox = nullptr;
+	if ( anyEffects ) {
+		auto * fxRow = new QHBoxLayout;
+		fxRow->addWidget( new QLabel( tr( "Effects" ), &dlg ) );
+		fxBox = new QComboBox( &dlg );
+		fxBox->addItem( tr( "Snapshot as static geometry at this time" ) );
+		fxBox->addItem( tr( "Keep the emitters running" ) );
+		fxBox->addItem( tr( "Remove them" ) );
+		fxBox->setToolTip( tr( "This file has %1 particle system(s) and %2 procedural lightning "
+			"controller(s). They generate their geometry every frame, so a still has none of it "
+			"unless it is snapshotted — and a snapshot picks ONE camera facing, because a static "
+			"billboard cannot turn. The facing used is -Y, the front of the figure." )
+			.arg( hasParticles ? 1 : 0 ).arg( hasLightning ? 1 : 0 ) );
+		if ( !live ) {
+			// A bake reads the live scene, not the file. Without one there is
+			// nothing to read, so do not offer it.
+			fxBox->setItemData( 0, false, Qt::UserRole - 1 );
+			fxBox->setCurrentIndex( 1 );
+		}
+		fxRow->addWidget( fxBox, 1 );
+		form->addLayout( fxRow );
+		if ( !live ) {
+			auto * why = new QLabel( tr( "Snapshot needs this document drawn in the workspace — "
+				"its effects only exist while something is rendering them." ), &dlg );
+			why->setWordWrap( true );
+			form->addWidget( why );
+		}
+	}
+
 	// The time box follows the chosen sequence's own range, and starts wherever
 	// the timeline is parked — the moment the user just scrubbed to.
 	auto syncRange = [&]() {
@@ -1960,9 +2000,77 @@ bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName
 	if ( dlg.exec() != QDialog::Accepted )
 		return false;
 
+	const int fxMode = fxBox ? fxBox->currentIndex() : 1;
+	const float when = float( timeBox->value() );
+
+	/* Capture first, write second, freeze last.
+	 *
+	 * The capture reads the LIVE scene, so it has to happen before the freeze
+	 * strips the controllers that generate it. The write has to happen before the
+	 * freeze too, for a duller reason: the captures hold QModelIndexes to the
+	 * shader properties they need copied, and removing blocks moves those.
+	 */
+	QString fxNote;
+	if ( fxMode == 0 && ogl ) {
+		// Sprite positions integrate frame to frame, so the scene is STEPPED to
+		// the chosen instant. Jumping there gives whatever the simulator last
+		// happened to hold. Going backwards means restarting from zero.
+		float from = ogl->sceneTime();
+		if ( from > when )
+			from = 0.0f;
+		for ( float s = from; s < when; s += 1.0f / 30.0f ) {
+			ogl->setSceneTime( std::min( s + 1.0f / 30.0f, when ) );
+			QApplication::processEvents();
+		}
+		ogl->setSceneTime( when );
+		QApplication::processEvents();
+
+		// -Y: a loading screen looks at the front of the figure.
+		const Vector3 facing( 0.0f, -1.0f, 0.0f );
+		QVector<BakeGeom::Capture> caps;
+		for ( const auto & e : ogl->bakeEffects( nif, facing ) ) {
+			BakeGeom::Capture c;
+			c.name = e.name;
+			c.tris = e.tris;
+			c.uvs = e.uvs;
+			c.cols = e.cols;
+			c.tint = e.tint;
+			c.facing = facing;
+			c.shaderProperty = e.shaderProperty;
+			c.alphaProperty = e.alphaProperty;
+			c.fromParticles = e.fromParticles;
+			caps.append( c );
+		}
+
+		if ( caps.isEmpty() ) {
+			fxNote = tr( "Nothing was live to snapshot at %1 s — the emitters were left alone. "
+				"Check that animation is enabled and that the effect has started by then." )
+				.arg( when, 0, 'f', 3 );
+		} else {
+			QString err;
+			const BakeGeom::Result br = BakeGeom::write( nif, caps, true, &err );
+			if ( !br.ok ) {
+				fxNote = tr( "Snapshot failed, emitters left alone: %1" ).arg( err );
+			} else {
+				fxNote = tr( "Snapshotted %1 effect(s) into %2 triangle(s) of static geometry "
+					"and removed %3 emitter block(s). The quads face -Y; they will look wrong "
+					"from any other angle, which is what a still costs." )
+					.arg( br.shapes ).arg( br.triangles ).arg( br.emittersRemoved );
+				for ( const QString & n : br.notes )
+					fxNote += tr( "\n  %1" ).arg( n );
+			}
+		}
+	} else if ( fxMode == 2 ) {
+		const int n = BakeGeom::dropEffects( nif, hasParticles, hasLightning );
+		fxNote = tr( "Removed %1 particle and procedural-lightning block(s)." ).arg( n );
+	} else if ( anyEffects ) {
+		fxNote = tr( "The emitters were left running. 0 of the 173 vanilla loading screens "
+			"contain one, so a converted file may show nothing where the effect was." );
+	}
+
 	QString error;
 	const FreezeAnim::Result r = FreezeAnim::freeze( nif, seqBox->currentText(),
-		float( timeBox->value() ), strip->isChecked(), &error );
+		when, strip->isChecked(), &error );
 	if ( !r.ok ) {
 		QMessageBox::warning( this, tr( "Freeze Animation" ), error );
 		return false;
@@ -1977,6 +2085,8 @@ bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName
 		text += tr( "\n\nLeft alone:\n• %1" ).arg( r.unhandled.join( QStringLiteral( "\n• " ) ) );
 	if ( !r.notes.isEmpty() )
 		text += tr( "\n\nNotes:\n• %1" ).arg( r.notes.join( QStringLiteral( "\n• " ) ) );
+	if ( !fxNote.isEmpty() )
+		text += tr( "\n\nEffects: %1" ).arg( fxNote );
 	QMessageBox::information( this, tr( "Freeze Animation" ), text );
 	return true;
 }

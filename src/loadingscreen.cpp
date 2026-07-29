@@ -523,8 +523,10 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 			if ( particles || lightning )
 				note( QStringLiteral( "dropped %1 particle system(s) and %2 procedural lightning "
 					"controller(s) — 0 of the 173 vanilla loading screens contain either. Their "
-					"geometry is generated at runtime, so keeping the look means snapshotting it "
-					"into an effect-shader mesh, which is not built yet." )
+					"geometry is generated at runtime, so there is nothing in the file to keep. "
+					"To keep the LOOK, run Freeze Animation on the file first with Effects set "
+					"to 'Snapshot as static geometry': that captures the instant as an ordinary "
+					"effect-shader mesh, which then converts like any other shape." )
 					.arg( particles ).arg( lightning ) );
 		}
 

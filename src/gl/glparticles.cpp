@@ -139,6 +139,122 @@ BoundSphere Particles::bounds() const
 	return worldTrans() * sphere | Node::bounds();
 }
 
+Vector2 Particles::spriteUVCell()
+{
+	// Per-particle offsets mean the simulator already chose the cells; then only
+	// the cell SIZE is global.
+	if ( uvOffsets.size() >= verts.size() && !uvOffsets.isEmpty() )
+		return uvCell;
+
+	const NifModel * nif = scene ? scene->nifModel : nullptr;
+	int grid = 0;
+	if ( nif && iData.isValid() && nif->getIndex( iData, "Num Subtexture Offsets" ).isValid() ) {
+		int nSub = nif->get<int>( iData, "Num Subtexture Offsets" );
+		if ( nSub >= 4 )
+			grid = int( std::lround( std::sqrt( double( nSub ) ) ) );
+	}
+	if ( grid < 2 ) {
+		// fall back to an NxN hint in the texture file name (e.g. _4x4)
+		QString srcTex;
+		if ( BSShaderLightingProperty * sp = findProperty<BSShaderLightingProperty>() )
+			srcTex = sp->fileName( 0 );
+		if ( srcTex.isEmpty() && nif && iShaderProp.isValid()
+			&& nif->blockInherits( iShaderProp, "BSEffectShaderProperty" ) ) {
+			srcTex = nif->get<QString>( iShaderProp, "Source Texture" );
+		}
+		QRegularExpressionMatch mm = QRegularExpression( "(\\d+)x(\\d+)" ).match( srcTex );
+		if ( mm.hasMatch() )
+			grid = mm.captured( 1 ).toInt();
+	}
+	if ( grid >= 2 ) {
+		const float sc = 1.0f / float( grid );
+		return Vector2( sc, sc );
+	}
+	return Vector2( 1.0f, 1.0f );
+}
+
+/* The sprite quads as static world-space triangles.
+ *
+ * This mirrors particles.geom corner for corner. The GPU is handed ONE POINT per
+ * particle and expands it in eye space, which is why the sprites always face the
+ * camera and why nothing in the NIF describes their geometry: it does not exist
+ * until the vertex reaches the GPU. A bake has to build it, and pick a facing,
+ * because a still cannot turn.
+ */
+bool Particles::bakeSprites( const Vector3 & viewAxis, QVector<Vector3> & tris,
+                             QVector<Vector2> & uvs, QVector<Color4> & cols )
+{
+	tris.clear();
+	uvs.clear();
+	cols.clear();
+
+	if ( isHidden() || verts.isEmpty() || active < 1 )
+		return false;
+
+	// Only the first `active` are alive — the tail of the array is dead storage
+	// the draw call never reaches, and baking it would scatter stale sprites.
+	const qsizetype n = std::min<qsizetype>( active, verts.size() );
+	if ( n < 1 )
+		return false;
+
+	// particles.geom adds the corner offsets in EYE space, so a bake needs two
+	// world axes standing in for screen right and screen up.
+	Vector3 fwd = viewAxis;
+	if ( fwd.length() < 1.0e-4f )
+		fwd = Vector3( 0.0f, -1.0f, 0.0f );
+	fwd.normalize();
+	Vector3 upRef = ( std::fabs( fwd[2] ) < 0.9f ) ? Vector3( 0.0f, 0.0f, 1.0f )
+	                                               : Vector3( 1.0f, 0.0f, 0.0f );
+	Vector3 right = Vector3::crossproduct( upRef, fwd );
+	right.normalize();
+	Vector3 up = Vector3::crossproduct( fwd, right );
+	up.normalize();
+
+	const Transform & wt = worldTrans();
+	const float baseSize = size * wt.scale;
+	const Vector2 cell = spriteUVCell();
+
+	tris.reserve( n * 6 );
+	uvs.reserve( n * 6 );
+	cols.reserve( n * 6 );
+
+	for ( qsizetype i = 0; i < n; i++ ) {
+		// particleSize defaults to 1 on the GPU when the attribute is absent
+		const float ps = ( sizes.size() > i ) ? sizes.at( i ) : 1.0f;
+		const float s = ps * baseSize;
+		if ( !( s > 0.0f ) )
+			continue;
+
+		const Vector3 c = wt * verts.at( i );
+		const float a = ( angles.size() > i ) ? angles.at( i ) : 0.0f;
+		const float ca = std::cos( a );
+		const float sa = std::sin( a );
+
+		const Vector3 c11 = c + right * ( (  ca - sa ) * s ) + up * ( (  sa + ca ) * s );
+		const Vector3 c01 = c + right * ( ( -ca - sa ) * s ) + up * ( ( -sa + ca ) * s );
+		const Vector3 c10 = c + right * ( (  ca + sa ) * s ) + up * ( (  sa - ca ) * s );
+		const Vector3 c00 = c + right * ( ( -ca + sa ) * s ) + up * ( ( -sa - ca ) * s );
+
+		const Vector2 o = ( uvOffsets.size() > i ) ? uvOffsets.at( i ) : Vector2( 0.0f, 0.0f );
+		const Vector2 u11( o[0] + cell[0], o[1] + cell[1] );
+		const Vector2 u01( o[0],           o[1] + cell[1] );
+		const Vector2 u10( o[0] + cell[0], o[1] );
+		const Vector2 u00( o[0],           o[1] );
+
+		const Color4 col = ( colors.size() > i ) ? colors.at( i )
+		                                        : Color4( 1.0f, 1.0f, 1.0f, 1.0f );
+
+		// the strip 11,01,10,00 as two triangles, keeping GL's winding
+		tris << c11 << c01 << c10;
+		uvs  << u11 << u01 << u10;
+		tris << c10 << c01 << c00;
+		uvs  << u10 << u01 << u00;
+		for ( int k = 0; k < 6; k++ )
+			cols << col;
+	}
+	return !tris.isEmpty();
+}
+
 void Particles::drawShapes( NodeList * secondPass )
 {
 	if ( isHidden() || scene->selecting > (unsigned char) Scene::SelObject || !scene->renderer || !scene->nifModel
@@ -196,28 +312,10 @@ void Particles::drawShapes( NodeList * secondPass )
 		// instead of squashing the whole sheet onto every sprite. When the
 		// simulator supplies per-particle cell offsets, only the cell size goes
 		// through the uniform and the offsets ride a vertex attribute.
-		FloatVector4	puv( 0.0f, 0.0f, 1.0f, 1.0f );
-		if ( uvOffsets.size() >= verts.size() && !uvOffsets.isEmpty() ) {
-			puv = FloatVector4( 0.0f, 0.0f, uvCell[0], uvCell[1] );
-		} else {
-			int	grid = 0;
-			if ( iData.isValid() && scene->nifModel->getIndex( iData, "Num Subtexture Offsets" ).isValid() ) {
-				int nSub = scene->nifModel->get<int>( iData, "Num Subtexture Offsets" );
-				if ( nSub >= 4 )
-					grid = int( std::lround( std::sqrt( double( nSub ) ) ) );
-			}
-			if ( grid < 2 ) {
-				// fall back to an NxN hint in the texture file name (e.g. _4x4)
-				QRegularExpressionMatch mm = QRegularExpression( "(\\d+)x(\\d+)" ).match( srcTex );
-				if ( mm.hasMatch() )
-					grid = mm.captured( 1 ).toInt();
-			}
-			if ( grid >= 2 ) {
-				float sc = 1.0f / float( grid );
-				puv = FloatVector4( 0.0f, 0.0f, sc, sc );
-			}
-		}
-		prog->uni4f( "particleUV", puv );
+		// through spriteUVCell so the bake cannot pick a different cell than the
+		// preview shows
+		const Vector2	cell = spriteUVCell();
+		prog->uni4f( "particleUV", FloatVector4( 0.0f, 0.0f, cell[0], cell[1] ) );
 
 		// setup blending: honour the linked NiAlphaProperty (FO4 electricity is
 		// additive: SRC_ALPHA, ONE), else fall back to additive

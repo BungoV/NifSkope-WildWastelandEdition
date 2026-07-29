@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "message.h"
 #include "nifskope.h"
 #include "gl/controllers.h"
+#include "gl/glparticles.h"
 #include "gl/renderer.h"
 #include "gl/glshape.h"
 #include "gl/gltex.h"
@@ -704,9 +705,11 @@ void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
 	update();
 }
 
-QVector<GLView::BakedArc> GLView::bakeLightningArcs( const Vector3 & viewAxis )
+//! Shared body of the two bakes: one Scene in, captures out.
+static QVector<GLView::BakedEffect> bakeSceneEffects( Scene * scene, const Vector3 & viewAxis,
+	bool wantArcs, bool wantParticles )
 {
-	QVector<BakedArc> out;
+	QVector<GLView::BakedEffect> out;
 	if ( !scene )
 		return out;
 
@@ -715,17 +718,67 @@ QVector<GLView::BakedArc> GLView::bakeLightningArcs( const Vector3 & viewAxis )
 	 * only non-empty mid-frame. Node::procLightning is there whenever the node is.
 	 */
 	for ( Node * node : scene->nodes.list() ) {
-		if ( !node || !node->lightning() )
+		if ( !node )
 			continue;
-		BakedArc arc;
-		arc.tint = Color4( 1.0f, 1.0f, 1.0f, 1.0f );
-		if ( !node->lightning()->bakeRibbon( viewAxis, arc.tris, arc.uvs, arc.tint ) )
-			continue;
-		arc.shaderProperty = node->lightning()->shaderProperty();
-		arc.name = node->getName();
-		out.append( arc );
+
+		if ( wantArcs && node->lightning() ) {
+			GLView::BakedEffect arc;
+			arc.tint = Color4( 1.0f, 1.0f, 1.0f, 1.0f );
+			QVector<FloatVector4> cols;
+			if ( node->lightning()->bakeRibbon( viewAxis, arc.tris, arc.uvs, arc.tint, &cols ) ) {
+				arc.cols.reserve( cols.size() );
+				for ( const FloatVector4 & c : cols )
+					arc.cols.append( Color4( c[0], c[1], c[2], c[3] ) );
+				arc.shaderProperty = node->lightning()->shaderProperty();
+				arc.name = node->getName();
+				out.append( arc );
+			}
+		}
+
+		if ( wantParticles ) {
+			if ( Particles * p = dynamic_cast<Particles *>( node ) ) {
+				GLView::BakedEffect spr;
+				spr.fromParticles = true;
+				spr.tint = Color4( 1.0f, 1.0f, 1.0f, 1.0f );
+				if ( p->bakeSprites( viewAxis, spr.tris, spr.uvs, spr.cols ) ) {
+					spr.shaderProperty = p->shaderProperty();
+					spr.alphaProperty = p->alphaProperty();
+					spr.name = node->getName();
+					out.append( spr );
+				}
+			}
+		}
 	}
 	return out;
+}
+
+QVector<GLView::BakedEffect> GLView::bakeLightningArcs( const Vector3 & viewAxis )
+{
+	return bakeSceneEffects( scene, viewAxis, true, false );
+}
+
+QVector<GLView::BakedEffect> GLView::bakeParticles( const Vector3 & viewAxis )
+{
+	return bakeSceneEffects( scene, viewAxis, false, true );
+}
+
+bool GLView::hasLiveScene( NifModel * model ) const
+{
+	if ( !model )
+		return scene != nullptr;
+	if ( scene && scene->nifModel == model )
+		return true;
+	return workspaceScenes.value( model, nullptr ) != nullptr;
+}
+
+QVector<GLView::BakedEffect> GLView::bakeEffects( NifModel * model, const Vector3 & viewAxis )
+{
+	Scene * sc = nullptr;
+	if ( !model || ( scene && scene->nifModel == model ) )
+		sc = scene;
+	else
+		sc = workspaceScenes.value( model, nullptr );
+	return bakeSceneEffects( sc, viewAxis, true, true );
 }
 
 void GLView::clearWorkspaceScenes()
@@ -1972,6 +2025,18 @@ Scene * GLView::getScene()
 void GLView::updateScene()
 {
 	scene->update( model, QModelIndex() );
+	update();
+}
+
+void GLView::setAnimationEnabled( bool on )
+{
+	if ( on )
+		animState |= AnimEnabled;
+	else
+		animState &= ~AnimEnabled;
+	if ( scene )
+		scene->animate = on;
+	lastTime = std::chrono::steady_clock::now();
 	update();
 }
 

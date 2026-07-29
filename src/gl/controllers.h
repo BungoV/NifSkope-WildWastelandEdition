@@ -438,10 +438,16 @@ public:
 	/*! `viewAxis` pins the billboard: a still cannot turn to face the camera, so
 	 *  the caller decides which way the arc presents its width. */
 	bool bakeRibbon( const Vector3 & viewAxis, QVector<Vector3> & tris,
-	                 QVector<Vector2> & uvs, Color4 & tint )
+	                 QVector<Vector2> & uvs, Color4 & tint,
+	                 QVector<FloatVector4> * colsOut = nullptr )
 	{
 		QVector<FloatVector4> cols;
-		return buildRibbon( viewAxis, tris, cols, uvs, tint );
+		const bool r = buildRibbon( viewAxis, tris, cols, uvs, tint );
+		// The per-vertex colours carry the head/tail fade. Dropping them (as the
+		// first bake did) flattens every bolt to a uniform bar.
+		if ( colsOut )
+			*colsOut = cols;
+		return r;
 	}
 
 	//! The BSEffectShaderProperty the arc draws with, so a bake can reuse it.

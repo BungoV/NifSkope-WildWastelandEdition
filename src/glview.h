@@ -346,14 +346,17 @@ public:
 	 *  then freeze this file there" needs no second guess at the number. */
 	float sceneTime() const { return time; }
 
-	//! One procedural-lightning arc, snapshotted as static world-space geometry.
-	struct BakedArc
+	//! One effect — arc or sprite cloud — snapshotted as static world geometry.
+	struct BakedEffect
 	{
 		QVector<Vector3> tris;   //!< world space, 3 per triangle
 		QVector<Vector2> uvs;    //!< one per vertex of `tris`
+		QVector<Color4> cols;    //!< one per vertex; carries the fade
 		Color4 tint;
-		QModelIndex shaderProperty;   //!< the arc's BSEffectShaderProperty
-		QString name;                 //!< the node the controller drives
+		QModelIndex shaderProperty;   //!< the effect's BSEffectShaderProperty
+		QModelIndex alphaProperty;    //!< its NiAlphaProperty, if it has one
+		QString name;                 //!< the node the geometry came from
+		bool fromParticles = false;   //!< sprite cloud rather than lightning
 	};
 
 	//! Snapshot every procedural-lightning arc in the scene as it looks NOW.
@@ -361,7 +364,30 @@ public:
 	 *  camera, so the caller chooses which way the ribbon presents its width.
 	 *  The arcs are generated deterministically from the scene time, so the same
 	 *  instant always yields the same geometry. */
-	QVector<BakedArc> bakeLightningArcs( const Vector3 & viewAxis );
+	QVector<BakedEffect> bakeLightningArcs( const Vector3 & viewAxis );
+
+	//! Snapshot every particle system in the scene as it looks NOW.
+	/*! Unlike the arcs this is NOT reproducible from the time alone: sprite
+	 *  positions integrate frame to frame, so what comes out depends on how the
+	 *  scene was walked to here. Step, never jump. */
+	QVector<BakedEffect> bakeParticles( const Vector3 & viewAxis );
+
+	//! Both of the above, for one loaded document rather than for the primary.
+	/*! A background document that is visible in the workspace has its own live
+	 *  Scene, stepped with the same time as the primary (see paintGL) — that is
+	 *  what lets "freeze each limb at its own instant" bake effects too. Returns
+	 *  empty when `model` has no live scene, so the caller can say so instead of
+	 *  silently producing nothing. */
+	QVector<BakedEffect> bakeEffects( NifModel * model, const Vector3 & viewAxis );
+
+	//! Whether `model` currently has a live scene a bake could read.
+	bool hasLiveScene( NifModel * model ) const;
+
+	//! Turn animation on or off programmatically.
+	/*! updateAnimationState is a QAction slot: it reads sender()->data() and does
+	 *  nothing at all when called directly. Anything that needs the controllers
+	 *  running without a menu click — a bake, a harness — needs this instead. */
+	void setAnimationEnabled( bool on );
 
 public slots:
 	void update();

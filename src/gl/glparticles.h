@@ -58,7 +58,27 @@ public:
 
 	BoundSphere bounds() const override;
 
+	//! The live sprites as static world-space triangles, for baking to a mesh.
+	/*! Builds exactly what particles.geom builds on the GPU — one screen-aligned
+	 *  quad per live particle — with `viewAxis` standing in for the camera,
+	 *  because static geometry cannot turn to face anyone.
+	 *
+	 *  Positions INTEGRATE frame to frame, so this is only meaningful once the
+	 *  scene has been stepped to the wanted instant. Jumping the timeline there
+	 *  and baking gives whatever the simulator last happened to hold. */
+	bool bakeSprites( const Vector3 & viewAxis, QVector<Vector3> & tris,
+	                  QVector<Vector2> & uvs, QVector<Color4> & cols );
+
+	//! The properties the sprites draw with, so a bake can reuse them.
+	QModelIndex shaderProperty() const { return QModelIndex( iShaderProp ); }
+	QModelIndex alphaProperty() const { return QModelIndex( iAlphaProp ); }
+
 protected:
+	//! Flipbook cell size: the UV scale one sprite covers of an atlas sheet.
+	/*! Shared by the draw path and the bake so the two cannot drift — the same
+	 *  reason buildRibbon was lifted out of drawPreview. */
+	Vector2 spriteUVCell();
+
 	void setController( const NifModel * nif, const QModelIndex & controller ) override;
 	void updateImpl( const NifModel * nif, const QModelIndex & index ) override;
 

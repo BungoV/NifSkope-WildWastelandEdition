@@ -1,5 +1,127 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30q — the other half: effects written into the NIF, and the choice
+
+The capture side landed in 07-30p with an explicit gap: *"NOT built: emitting the
+arcs into the NIF as BSTriShape + a copy of the shader property."* That gap is
+closed, particles are captured too, and the choice the user asked for is in the
+Freeze dialog.
+
+### The choice
+
+**Freeze Animation** already asked for a sequence and a time per file. It now also
+asks what to do with the effects, when the file has any:
+
+| Effects | What happens |
+| --- | --- |
+| Snapshot as static geometry at this time | capture the instant, write it as a `BSTriShape`, remove the emitters |
+| Keep the emitters running | left alone — live particles and live shader animation |
+| Remove them | dropped without a bake |
+
+Snapshot is disabled, with the reason shown, when the document has no live scene:
+a bake reads the **rendered scene**, not the file, so there is genuinely nothing to
+read. A background document visible in the workspace does have one — `paintGL`
+steps every workspace scene with the primary's time — so "freeze each limb at its
+own instant" works for effects too, not just for values.
+
+Order inside the dialog is capture → write → freeze, and it has to be. The capture
+reads the live scene, so it must precede the freeze that strips the controllers
+generating it; the write must precede it too, for a duller reason — the captures
+hold `QModelIndex`es to the shader properties they need copied, and removing blocks
+moves those.
+
+### Particles
+
+`Particles::bakeSprites( viewAxis, tris, uvs, cols )` builds what
+`particles.geom` builds on the GPU, corner for corner: one quad per live particle,
+with its size, flipbook cell, sprite rotation and colour. Only the first `active`
+particles — the tail of the array is dead storage the draw call never reaches, and
+baking it would scatter stale sprites around the model.
+
+The flipbook cell computation was **lifted out of `drawShapes` into
+`spriteUVCell()`** and both paths call it now, for the same reason `buildRibbon`
+was lifted out of `drawPreview`: two copies would drift, and the bake would quietly
+show a different cell than the preview.
+
+Unlike the arcs this is **not reproducible from the time alone.** Sprite positions
+integrate frame to frame, so the scene must be *stepped* to the instant, never
+jumped there. Both the dialog and the harness step at 1/30 s, and going backwards
+restarts from zero.
+
+### Emission
+
+`src/bakegeom.{h,cpp}`. `writeShape` creates one `BSTriShape` under the root:
+world capture → root-local (the root's own transform comes off first) → re-centred
+on its centroid, translation carrying the position, exactly as the loading-screen
+converter does for every other shape.
+
+The vertex layout is the one the OBJ importer has been shipping — full-precision
+position, half UV, byte normal/tangent, byte colour; 28 bytes, or 32 with colours.
+Full precision is deliberate: half floats step ~0.008 units at Z ≈ 111 and these
+are thin ribbons. Vertex colours are not optional either — they carry the head and
+tail fade, and `bakeRibbon` was dropping them, which flattens every bolt to a
+uniform bar. It takes a `cols` out-parameter now.
+
+The shader and alpha properties are **copied**, not shared: the originals hang off
+the emitter, and the emitter is removed in the same operation.
+
+`writeShape` refuses to claim a shape it did not fill. It counts the positions and
+UVs that actually took the value and, if any did not, **removes the block it just
+created** and reports the count. That is the precise failure that shipped in the
+converter three commits ago: `set<Vector3>` on a half-precision "Vertex" doing
+nothing and returning a `false` nobody read.
+
+### Two real bugs, both found by testing rather than reading
+
+**A green suite that depended on the registry.** `WW_BOLTBAKE_TEST` was 9/9 green
+when written and returned *"baked 0 arcs"* when re-run, with no code change in
+between. Cause: a GUI session had left `GLView/Enable Animations` at **false**, and
+with animation off no controller updates — so there are no bolts and no live
+sprites, and the capture correctly finds nothing. A harness that inherits the
+user's settings is not measuring the code. Both harnesses force it on now, which
+needed a new `GLView::setAnimationEnabled( bool )`: `updateAnimationState` is a
+QAction slot that reads `sender()->data()` and does **nothing at all** when called
+directly, which is why the first fix appeared to change nothing.
+
+**A harness that wedged the process.** `WW_EFFECTBAKE_TEST` modifies the model, and
+quitting with a modified document raises a save prompt that blocks — a `-Wait` run
+hangs until something kills it, and `CloseMainWindow` cannot dismiss a modal. It
+clears the undo stack and the modified flag before quitting now.
+
+### Proof
+
+`WW_EFFECTBAKE_TEST`, 10 checks green on the torso effect at t = 2.5: 3 effects
+captured (`BoltGeo_01` 40 tri, `BoltGeo_02` 48 tri, `LightningArcs_VFX` 12 tri of
+sprites), 3 shapes written, 300 vertices, 16 emitter blocks removed, none left
+behind, saved, re-read, sizes and `Data Size` consistent, shader properties kept.
+
+The check that matters is the last: **save, re-read from disk into a fresh model,
+and verify `translation + vertex` reproduces the captured world position.** Worst
+error **5.4 × 10⁻⁵ units**. That one invariant catches all three ways FO4 geometry
+writing looks successful and is wrong — a silent half-precision write, a `Data
+Size` that disagrees with the desc, and arrays that were never sized.
+
+Proven to bite, not assumed to. Writing `Translation` as zero instead of the
+centroid — the same class of bug as the converter's — takes the error to **38.4
+units** and fails that check *while the other nine stay green*. Sizes, desc, save,
+re-read and properties can all be perfect while the geometry is nowhere near where
+it was captured.
+
+`tests/loadingscreen/effect_bake.sh`, 6 checks, carries it to the end: the baked
+file has no emitters left, its shapes survive the loading-screen conversion, and
+they still have triangles in them afterwards.
+
+Regression suites: 21 bake + 6 artobject + 9 merge sweep + 9 boltbake, all green.
+
+### Still not done
+
+The facing is hardcoded to −Y, the front of the figure. That is the right default
+for a loading screen and the result text says so, but a snapshotted billboard is
+wrong from every other angle and there is no control for choosing it.
+
+Baking cannot be done from the CLI. It reads the rendered scene, and `-no-gui` has
+none.
+
 ## 2026-07-30p — the Tesla arcs can be captured (half of it built)
 
 0 of the 173 vanilla loading screens contain a `BSProceduralLightningController`,
