@@ -419,6 +419,11 @@ class ProcLightningController final : public Controller
 	//! bolt no matter how it was reached.
 	void regenerate( float time );
 
+	//! Build the bolt ribbon for a given viewer axis. See the definition: only
+	//! the width expansion is view-dependent, which is what lets a bake reuse it.
+	bool buildRibbon( const Vector3 & viewAxis, QVector<Vector3> & tris,
+	                  QVector<FloatVector4> & cols, QVector<Vector2> & uvs, Color4 & tintOut );
+
 public:
 	ProcLightningController( Node * node, const QModelIndex & index );
 
@@ -428,6 +433,19 @@ public:
 
 	//! Draw the preview bolt; called from Node::drawShapes after the children
 	void drawPreview();
+
+	//! The current bolt as static world-space triangles, for baking to a mesh.
+	/*! `viewAxis` pins the billboard: a still cannot turn to face the camera, so
+	 *  the caller decides which way the arc presents its width. */
+	bool bakeRibbon( const Vector3 & viewAxis, QVector<Vector3> & tris,
+	                 QVector<Vector2> & uvs, Color4 & tint )
+	{
+		QVector<FloatVector4> cols;
+		return buildRibbon( viewAxis, tris, cols, uvs, tint );
+	}
+
+	//! The BSEffectShaderProperty the arc draws with, so a bake can reuse it.
+	QModelIndex shaderProperty() const { return QModelIndex( iShaderProp ); }
 };
 
 

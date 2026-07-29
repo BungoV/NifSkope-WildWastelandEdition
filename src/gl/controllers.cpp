@@ -1754,13 +1754,30 @@ void ProcLightningController::updateTime( float time )
 	visible = true;
 }
 
-void ProcLightningController::drawPreview()
+/* The ribbon geometry, with the billboard axis as a PARAMETER.
+ *
+ * Everything in here is camera-independent except that one axis: regenerate()
+ * produces the bolt polylines in a normalised frame and boltPoint() puts them in
+ * world space using the Start/End nodes. Only the width expansion needs to know
+ * where the viewer is.
+ *
+ * That is what makes a bake possible at all. drawPreview() passes the scene
+ * camera; a bake passes a fixed axis, because static geometry cannot turn to face
+ * anyone.
+ */
+bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vector3> & tris,
+                                           QVector<FloatVector4> & cols, QVector<Vector2> & uvs,
+                                           Color4 & tintOut )
 {
+	tris.clear();
+	cols.clear();
+	uvs.clear();
+
 	if ( !( visible && target && target->scene ) )
-		return;
+		return false;
 	Scene * sc = target->scene;
-	if ( sc->selecting || bolts.isEmpty() )
-		return;
+	if ( bolts.isEmpty() )
+		return false;
 
 	Vector3 A, B;
 	if ( spanNodes ) {
@@ -1778,15 +1795,16 @@ void ProcLightningController::drawPreview()
 	Vector3 axis = B - A;
 	float len = axis.length();
 	if ( len < 1.0e-4f )
-		return;
+		return false;
 	axis = axis * ( 1.0f / len );
 	Vector3 up = ( std::fabs( axis[2] ) < 0.9f ) ? Vector3( 0.0f, 0.0f, 1.0f ) : Vector3( 1.0f, 0.0f, 0.0f );
 	Vector3 v = Vector3::crossproduct( axis, up );
 	v.normalize();
 	Vector3 w = Vector3::crossproduct( axis, v );
 
-	// billboard: expand the strip perpendicular to the camera forward axis
-	Vector3 camZ = sc->view.rotation.inverted() * Vector3( 0.0f, 0.0f, 1.0f );
+	// billboard: expand the strip perpendicular to the viewer's forward axis —
+	// the caller's, so a bake can pin it instead of following the camera
+	const Vector3 & camZ = viewAxis;
 
 	// texture + tint from the controller's effect shader; the BGEM material
 	// (e.g. shieldtesla_lightning_beam_blue.bgem) carries both
@@ -1825,9 +1843,7 @@ void ProcLightningController::drawPreview()
 		fw.normalize();
 	};
 
-	QVector<Vector3> tris;
-	QVector<FloatVector4> cols;
-	QVector<Vector2> uvs;
+	tintOut = tint;
 
 	// beam textures run ALONG V (e.g. shieldtesla_lightning_beam is 256x2048,
 	// tile-V) with the sequences scrolling the shader's V offset; U spans the
@@ -1993,7 +2009,32 @@ void ProcLightningController::drawPreview()
 		addBolt( wpts, tvals, hw, bLen, tint, ( b.parent < 0 ) ? fadeMain : fadeChild );
 	}
 
-	if ( tris.isEmpty() || !sc->renderer )
+	return !tris.isEmpty();
+}
+
+void ProcLightningController::drawPreview()
+{
+	if ( !( visible && target && target->scene ) )
+		return;
+	Scene * sc = target->scene;
+	if ( sc->selecting )
+		return;
+
+	QVector<Vector3> tris;
+	QVector<FloatVector4> cols;
+	QVector<Vector2> uvs;
+	Color4 tint;
+	// the scene camera's forward axis: the preview billboards, a bake does not
+	if ( !buildRibbon( sc->view.rotation.inverted() * Vector3( 0.0f, 0.0f, 1.0f ),
+	                   tris, cols, uvs, tint ) )
+		return;
+
+	BSShaderLightingProperty * shaderProp = nullptr;
+	if ( iShaderProp.isValid() )
+		shaderProp = dynamic_cast<BSShaderLightingProperty *>(
+			sc->getProperty( sc->nifModel, QModelIndex( iShaderProp ) ) );
+
+	if ( !sc->renderer )
 		return;
 
 	auto prog = sc->renderer->useProgram( "boltstrip.prog" );
