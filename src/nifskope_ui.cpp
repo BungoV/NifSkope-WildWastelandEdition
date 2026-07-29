@@ -3126,6 +3126,196 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_SKELMERGE_TEST=<donor.nif>): does Load skeleton break the
+	 * mesh, or only the posing that follows it?
+	 *
+	 * The string-index fix (07-30f) proved the merge was renaming imported bones.
+	 * What it did NOT establish is which half of the reported symptom that caused,
+	 * and a byte-diff argument ("existing blocks are untouched, so the skin cannot
+	 * move") is a proof about the FILE, not about what NifSkope evaluates. This
+	 * measures the evaluated skin instead: Shape::skinVertex for every vertex,
+	 * before and after the merge, which is the thing the user actually looks at.
+	 *
+	 * Then it poses. A bone is resolved by name exactly as the Pose Manager's
+	 * blockForName does — first NiAVObject with that name — rotated, and the set
+	 * of vertices that moved is compared with the same rotation performed before
+	 * the merge. Duplicate bone names would send the rotation elsewhere, so the
+	 * two sets would differ; that is the failure this is looking for.
+	 * Log: release/ww_skelmerge_test.log, screenshot ww_skelmerge_test.png.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SKELMERGE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_skelmerge_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass )
+						fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					const QString donor = qEnvironmentVariable( "WW_SKELMERGE_TEST" );
+					if ( !QFileInfo::exists( donor ) ) { log << "no donor: " << donor << "\n"; break; }
+
+					int sb = -1, best = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) ) {
+							const int nv = nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" );
+							if ( nv > best ) { best = nv; sb = b; }
+						}
+					if ( sb < 0 ) { log << "no BSTriShape\n"; break; }
+
+					// evaluated skin, exactly as the viewport draws it
+					auto skinned = [skope, nif, sb]() {
+						QVector<Vector3> out;
+						Shape * s = skope->ogl->shapeForBlock( sb );
+						if ( !s )
+							return out;
+						s->updateBoneTransforms();
+						QModelIndex iVD = nif->getIndex( nif->getBlockIndex( sb ), "Vertex Data" );
+						for ( int v = 0; v < nif->rowCount( iVD ); v++ )
+							out.append( s->skinVertex( v,
+								nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) ) );
+						return out;
+					};
+					auto movedSet = []( const QVector<Vector3> & a, const QVector<Vector3> & b ) {
+						QSet<int> moved;
+						for ( int i = 0; i < a.size() && i < b.size(); i++ )
+							if ( ( a[i] - b[i] ).length() > 0.01f )
+								moved.insert( i );
+						return moved;
+					};
+					// the Pose Manager's own rule: first NiAVObject with that name
+					auto blockForName = [nif]( const QString & name ) {
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							QModelIndex i = nif->getBlockIndex( b );
+							if ( nif->blockInherits( i, "NiAVObject" )
+								&& nif->get<QString>( i, "Name" ) == name )
+								return b;
+						}
+						return -1;
+					};
+					// rotate a bone 30 degrees about X and report what moved
+					auto poseAndMeasure = [&]( const QString & bone, QSet<int> & moved, float & maxD ) {
+						const int nb = blockForName( bone );
+						moved.clear();
+						maxD = 0.0f;
+						if ( nb < 0 )
+							return -1;
+						const QVector<Vector3> before = skinned();
+						QModelIndex iRot = nif->getIndex( nif->getBlockIndex( nb ), "Rotation" );
+						const Matrix orig = nif->get<Matrix>( iRot );
+						Matrix spin;
+						spin.fromEuler( float( M_PI ) / 6.0f, 0.0f, 0.0f );
+						nif->set<Matrix>( iRot, orig * spin );
+						skope->ogl->update();
+						QApplication::processEvents();
+						const QVector<Vector3> after = skinned();
+						moved = movedSet( before, after );
+						for ( int i : std::as_const( moved ) )
+							maxD = std::max( maxD, ( before[i] - after[i] ).length() );
+						nif->set<Matrix>( iRot, orig );		// put it back
+						skope->ogl->update();
+						QApplication::processEvents();
+						return nb;
+					};
+
+					const QStringList bones = { QStringLiteral( "LArm_ForeArm1" ),
+						QStringLiteral( "LArm_Hand" ), QStringLiteral( "Chest" ) };
+					QHash<QString, QSet<int>> movedBefore;
+					QHash<QString, float> distBefore;
+					for ( const QString & b : bones ) {
+						QSet<int> m; float d = 0.0f;
+						if ( poseAndMeasure( b, m, d ) >= 0 ) {
+							movedBefore.insert( b, m );
+							distBefore.insert( b, d );
+							log << "  pre-merge  " << b << ": " << m.size() << " verts move, max "
+								<< QString::number( d, 'f', 3 ) << "\n";
+						} else {
+							log << "  pre-merge  " << b << ": not in this file\n";
+						}
+					}
+
+					const QVector<Vector3> bindBefore = skinned();
+					log << "shape block " << sb << ", " << bindBefore.size() << " vertices\n";
+
+					NifMergeResult r;
+					const bool merged = nifMergeFile( nif, donor, true, r );
+					log << "merge " << ( merged ? "ok" : "FAILED: " + r.error ) << ": +"
+						<< r.blocksAdded << " blocks, " << r.nodesReused << " reused, "
+						<< r.nodesAdded << " added, " << r.rebased << " rebased, "
+						<< r.duplicateNames.size() << " dupes\n";
+					if ( !merged )
+						break;
+					check( "the merge introduces no duplicate bone names", r.duplicateNames.isEmpty() );
+
+					/* Let the viewport actually rebuild before measuring. A merge is
+					 * a model edit; GLView reacts to it through queued signals and
+					 * GLView::update() only schedules a repaint. Measuring straight
+					 * after the call reads a Shape whose bone list belongs to the
+					 * PREVIOUS scene, which moves vertices for a reason that has
+					 * nothing to do with the merge. Pump until the scene settles.
+					 */
+					auto settle = []( int ms ) {
+						QEventLoop loop;
+						QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+						loop.exec();
+						QApplication::processEvents();
+					};
+					skope->ogl->update();
+					settle( 900 );
+					const QVector<Vector3> bindAfter = skinned();
+					const QSet<int> movedByMerge = movedSet( bindBefore, bindAfter );
+					log << "  vertices moved by the merge alone: " << movedByMerge.size() << "\n";
+					check( "loading a skeleton does not move the mesh", movedByMerge.isEmpty()
+						&& bindAfter.size() == bindBefore.size() );
+
+					for ( const QString & b : bones ) {
+						if ( !movedBefore.contains( b ) )
+							continue;
+						QSet<int> m; float d = 0.0f;
+						poseAndMeasure( b, m, d );
+						log << "  post-merge " << b << ": " << m.size() << " verts move, max "
+							<< QString::number( d, 'f', 3 ) << " (was " << movedBefore.value( b ).size()
+							<< ", max " << QString::number( distBefore.value( b ), 'f', 3 ) << ")\n";
+						/* A SUPERSET, not the same set. Before the merge every bone is
+						 * a flat root child, so rotating one moves only the vertices
+						 * weighted to it. After it, the bone has the skeleton's
+						 * children, and rotating it drags the rest of the limb — which
+						 * is the entire reason for loading a skeleton. What must still
+						 * hold is that the bone drives its OWN vertices, and that it
+						 * has not turned into a transform on the whole mesh.
+						 */
+						check( QStringLiteral( "posing %1 still drives its own vertices" ).arg( b ),
+							m.contains( movedBefore.value( b ) ) );
+						check( QStringLiteral( "...and not the entire mesh" ).arg( b ),
+							m.size() < bindAfter.size() );
+					}
+
+					skope->ogl->update();
+					QApplication::processEvents();
+					const QString shot = QApplication::applicationDirPath() + "/ww_skelmerge_test.png";
+					skope->ogl->grabFramebuffer().save( shot );
+					log << "  screenshot: " << shot << "\n";
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS\n" : "CHECK: failures above\n" );
+				log << "done\n";
+				logf.close();
+				if ( nif && nif->undoStack )
+					nif->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SUMMARY_TEST=1): the Block List's Summary column.
 	 *
 	 * Read back through data() on the real columns, and through the hierarchy

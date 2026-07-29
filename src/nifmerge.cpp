@@ -98,6 +98,69 @@ void applyStrings( NifModel * nif, NifItem * item, const QStringList & in, int &
 	}
 }
 
+//! block -> EVERY block listing it as a child. Normally one; a merge can leave
+//! two, which is exactly the state this file has to notice and repair.
+QHash<int, QList<int>> parentMap( const NifModel * nif )
+{
+	QHash<int, QList<int>> parents;
+	for ( int b = 0; b < nif->getBlockCount(); b++ )
+		for ( int c : nif->getChildLinks( b ) )
+			if ( c >= 0 && !parents[c].contains( b ) )
+				parents[c].append( b );
+	return parents;
+}
+
+//! The single parent of a block, or -1. First listed wins, as the scene does.
+int parentOf( const QHash<int, QList<int>> & parents, int block )
+{
+	const QList<int> p = parents.value( block );
+	return p.isEmpty() ? -1 : p.first();
+}
+
+//! World transform of every NiAVObject, by walking each block up to its root.
+QHash<int, Transform> worldTransforms( const NifModel * nif, const QHash<int, QList<int>> & parents )
+{
+	QHash<int, Transform> world;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex ib = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( ib, "NiAVObject" ) )
+			continue;
+		Transform t;
+		QSet<int> seen;			// a malformed file can loop; do not hang on it
+		for ( int n = b; n >= 0 && !seen.contains( n ); n = parentOf( parents, n ) ) {
+			seen.insert( n );
+			QModelIndex in = nif->getBlockIndex( n );
+			if ( nif->blockInherits( in, "NiAVObject" ) )
+				t = Transform( nif, in ) * t;
+		}
+		world.insert( b, t );
+	}
+	return world;
+}
+
+//! Drop one entry from a node's Children array, keeping Num Children in step.
+void unlinkChild( NifModel * nif, int parentBlock, int childBlock )
+{
+	QModelIndex ip = nif->getBlockIndex( parentBlock );
+	QModelIndex iSize = nif->getIndex( ip, "Num Children" );
+	QModelIndex iArray = nif->getIndex( ip, "Children" );
+	if ( !iSize.isValid() || !iArray.isValid() )
+		return;
+	QVector<qint32> keep;
+	const int n = nif->get<int>( iSize );
+	for ( int c = 0; c < n && c < nif->rowCount( iArray ); c++ ) {
+		const qint32 l = nif->getLink( nif->getIndex( iArray, c ) );
+		if ( l != childBlock )
+			keep.append( l );
+	}
+	if ( keep.size() == n )
+		return;
+	nif->set<int>( iSize, keep.size() );
+	nif->updateArraySize( iArray );
+	for ( int c = 0; c < keep.size(); c++ )
+		nif->setLink( nif->getIndex( iArray, c ), keep.at( c ) );
+}
+
 //! Names carried by more than one NiNode. See NifMergeResult::duplicateNames.
 QStringList duplicateNodeNames( const NifModel * nif )
 {
@@ -142,6 +205,27 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	// carry a duplicate of its own, and that is not this merge's doing.
 	const QStringList dupesBeforeList = duplicateNodeNames( target );
 	const QSet<QString> dupesBefore( dupesBeforeList.constBegin(), dupesBeforeList.constEnd() );
+
+	/* Where every existing node SITS, before anything is spliced in.
+	 *
+	 * An armour or clothing NIF stores its bones flat under the root, each
+	 * carrying that bone's WORLD transform — the game re-parents them onto the
+	 * real skeleton at runtime. A skeleton NIF stores the same bones nested, each
+	 * carrying a LOCAL transform. Merging the two, the skeleton's parent-child
+	 * edges land on the target's flat bones (a donor node's Children remap onto
+	 * the de-duplicated target blocks), so a bone that was a root child becomes a
+	 * grandchild of one — and its world transform is now composed on top of its
+	 * new ancestors' instead of standing alone. That moved 1871 of an outfit's
+	 * 3147 vertices: the reported heap.
+	 *
+	 * The hierarchy is what the merge is FOR, so it stays; what gets fixed is the
+	 * transform. Every pre-existing node is rebased afterwards so its world
+	 * transform is exactly what it was, which leaves the skin untouched and still
+	 * lets a pose propagate down the new chain.
+	 */
+	const QHash<int, QList<int>> preParents = parentMap( target );
+	const QHash<int, Transform> preWorld = worldTransforms( target, preParents );
+	const int preBlockCount = target->getBlockCount();
 
 	// The target root everything lands under.
 	const QList<int> targetRoots = target->getRootLinks();
@@ -290,6 +374,57 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 				result.reparented++;
 			}
 		}
+
+		/* Re-rig. An existing node adopted by an imported one now has two parents
+		 * listed — the old one never let go — so the stale edge is cut first, and
+		 * then the node is rebased onto its new chain so its WORLD transform is
+		 * unchanged. Nodes whose parent did not move are left strictly alone: a
+		 * rewrite that should be a no-op still costs float precision.
+		 */
+		const QHash<int, QList<int>> postParents = parentMap( target );
+		QList<int> rebased;
+		for ( auto it = postParents.constBegin(); it != postParents.constEnd(); it++ ) {
+			const int block = it.key();
+			if ( block >= preBlockCount || !preWorld.contains( block ) )
+				continue;					// imported, or not an NiAVObject
+			// the adoption shows up as a SECOND parent: the old edge is still
+			// there, so comparing "the" parent before and after sees no change
+			const int oldParent = parentOf( preParents, block );
+			int newParent = -1;
+			for ( int p : it.value() )
+				if ( p != oldParent && p >= preBlockCount )
+					newParent = p;
+			if ( newParent < 0 )
+				continue;
+			if ( oldParent >= 0 )
+				unlinkChild( target, oldParent, block );
+			rebased.append( block );
+		}
+		const QHash<int, QList<int>> finalParents = parentMap( target );
+		for ( int block : rebased ) {
+			// Walk up for the new parent chain's world transform. A PRE-EXISTING
+			// ancestor's final world is, by this very pass, exactly what it was
+			// before the merge — so the walk stops there and reads preWorld rather
+			// than the model. That makes each rebase independent of whether its
+			// ancestors have been rewritten yet, and the order stops mattering.
+			Transform parentWorld;
+			QSet<int> seen;
+			for ( int n = parentOf( finalParents, block ); n >= 0 && !seen.contains( n );
+			      n = parentOf( finalParents, n ) ) {
+				seen.insert( n );
+				QModelIndex in = target->getBlockIndex( n );
+				if ( !target->blockInherits( in, "NiAVObject" ) )
+					continue;
+				if ( n < preBlockCount && preWorld.contains( n ) ) {
+					parentWorld = preWorld.value( n ) * parentWorld;
+					break;
+				}
+				parentWorld = Transform( target, in ) * parentWorld;
+			}
+			( parentWorld.inverted() * preWorld.value( block ) )
+				.writeBack( target, target->getBlockIndex( block ) );
+		}
+		result.rebased = rebased.size();
 
 		result.blocksAdded = newBlocks.size();
 		for ( qint32 b : newBlocks ) {

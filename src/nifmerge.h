@@ -37,6 +37,11 @@ struct NifMergeResult
 	int nodesReused    = 0;   //!< donor nodes matched to an existing node by name
 	int nodesAdded     = 0;   //!< donor nodes that had no counterpart
 	int reparented     = 0;   //!< imported blocks linked under an existing node
+	/*! Existing nodes the donor's hierarchy adopted, whose local transform was
+	 *  rewritten so their WORLD transform did not change. Armour and clothing
+	 *  store their bones flat with world transforms; a skeleton stores the same
+	 *  bones nested with local ones, so without this the mesh folds up. */
+	int rebased        = 0;
 	/*! Bone names the merge left on more than one node (excluding any the target
 	 *  already had). A rig binds bones BY NAME — the pose library, mirroring, and
 	 *  this merge's own de-duplication all do — so a repeated name makes one of
