@@ -3363,6 +3363,96 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_BOLTBAKE_TEST=1, WW_BOLTBAKE_TIME=<seconds>): does
+	 * snapshotting the procedural-lightning arc produce real geometry, in a
+	 * sensible place, and the SAME geometry twice for one instant?
+	 *
+	 * The arcs are the visual signature of the Tesla armour, and 0 of the 173
+	 * vanilla loading screens contain a BSProceduralLightningController — a bake
+	 * is the only way to keep them. What makes it possible is that regenerate() is
+	 * seeded from quantised time; but "the generator is deterministic" and "the
+	 * bake reproduces it" are different claims, and this checks the second.
+	 * Log: release/ww_boltbake_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BOLTBAKE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_boltbake_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+
+					// Stepped, not jumped: particle systems integrate frame to frame,
+					// so the scene has to be walked to the instant.
+					const float want = qEnvironmentVariableIsSet( "WW_BOLTBAKE_TIME" )
+						? qEnvironmentVariable( "WW_BOLTBAKE_TIME" ).toFloat() : 2.5f;
+					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
+						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
+						QApplication::processEvents();
+					}
+					QEventLoop settle;
+					QTimer::singleShot( 300, &settle, &QEventLoop::quit );
+					settle.exec();
+
+					// -Y: a loading screen looks at the figure's front, so that is the
+					// direction the ribbons should present their width to.
+					const Vector3 facing( 0.0f, -1.0f, 0.0f );
+					const auto arcs = skope->ogl->bakeLightningArcs( facing );
+					log << "baked " << arcs.size() << " arc(s) at t=" << want << "\n";
+					check( "at least one arc was captured", !arcs.isEmpty() );
+
+					int totalTris = 0;
+					Vector3 bbLo, bbHi;
+					bool haveBB = false;
+					for ( const auto & a : arcs ) {
+						totalTris += a.tris.size() / 3;
+						check( QStringLiteral( "arc '%1' has whole triangles" ).arg( a.name ),
+							a.tris.size() % 3 == 0 && !a.tris.isEmpty() );
+						check( QStringLiteral( "arc '%1' has one UV per vertex" ).arg( a.name ),
+							a.uvs.size() == a.tris.size() );
+						check( QStringLiteral( "arc '%1' names a shader property" ).arg( a.name ),
+							a.shaderProperty.isValid() );
+						for ( const Vector3 & p : a.tris ) {
+							if ( !haveBB ) { bbLo = bbHi = p; haveBB = true; continue; }
+							for ( int i = 0; i < 3; i++ ) {
+								bbLo[i] = std::min( bbLo[i], p[i] );
+								bbHi[i] = std::max( bbHi[i], p[i] );
+							}
+						}
+					}
+					log << "total triangles " << totalTris << "\n";
+					if ( haveBB )
+						log << "world bounds (" << bbLo[0] << ", " << bbLo[1] << ", " << bbLo[2]
+							<< ") .. (" << bbHi[0] << ", " << bbHi[1] << ", " << bbHi[2] << ")\n";
+					// Finite and not collapsed: a degenerate ribbon is the failure mode
+					// that still "produces geometry".
+					const float span = haveBB ? ( bbHi - bbLo ).length() : 0.0f;
+					check( "the baked geometry has real extent",
+						haveBB && span > 1.0f && std::isfinite( span ) );
+
+					// Same instant, second call: must match exactly.
+					const auto again = skope->ogl->bakeLightningArcs( facing );
+					bool same = ( again.size() == arcs.size() );
+					for ( int i = 0; same && i < arcs.size(); i++ )
+						same = ( again.at( i ).tris == arcs.at( i ).tris );
+					check( "baking one instant twice gives identical geometry", same );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SKELMERGE_TEST=<donor.nif>): does Load skeleton break the
 	 * mesh, or only the posing that follows it?
 	 *

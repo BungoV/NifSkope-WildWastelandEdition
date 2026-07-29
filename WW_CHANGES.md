@@ -1,5 +1,66 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30p — the Tesla arcs can be captured (half of it built)
+
+0 of the 173 vanilla loading screens contain a `BSProceduralLightningController`,
+so the X-01 Tesla arcs — the visual signature of that armour — were being dropped
+by the loading-screen convert. They can be kept, and the capture side is now
+built and proven.
+
+### Why it is possible at all
+
+`ProcLightningController::regenerate()` is **seeded from quantised time**, on
+purpose: an earlier version seeded from a mutation counter, which made the bolt
+depend on how many times regenerate happened to run before a frame was observed.
+Keyed on time, the same instant always produces the same bolt.
+
+Confirmed before relying on it: two separate process runs rendering
+`X01_Torso_Tesla_VFX` at t = 2.5 produced **pixel-identical** frames (`C00F0ED6…`).
+
+The geometry is also camera-independent except in one respect. `regenerate()`
+produces polylines in a normalised frame; `boltPoint()` puts them in world space
+from the Start/End nodes. Only the ribbon's **width expansion** billboards against
+the camera.
+
+### The refactor, proven by pixel hash
+
+`drawPreview()`'s geometry construction became
+`buildRibbon( viewAxis, tris, cols, uvs, tint )` — the view axis is a parameter
+now, because a still cannot turn to face anyone and a bake has to pin it.
+`drawPreview()` passes the scene camera and is otherwise unchanged.
+
+That moved ~180 lines whose own comments describe subtle fixes ("this is the
+bolts-do-not-connect break"), so it was verified the only way worth trusting: the
+same file at the same time hashes **identically** before and after.
+
+### Capture
+
+`GLView::bakeLightningArcs( viewAxis )` returns one `BakedArc` per arc —
+world-space triangles, UVs, tint, and the `BSEffectShaderProperty` it draws with.
+Walked off `Scene::nodes`, not `Scene::pendingBolts`: that queue is filled during
+`drawShapes` and cleared at the end of it, so it is only non-empty mid-frame.
+
+`Node::lightning()` is a new public accessor, added inside an **existing** public
+run — a fresh `public:` in that header would flip the access of everything below
+it, which has bitten it before.
+
+New harness `WW_BOLTBAKE_TEST`, 9 checks green on the torso effect at t = 2.5:
+2 arcs, 88 triangles, world bounds (−17.6, −13.1, 28.2)..(13.2, 4.7, 41.1), every
+arc with whole triangles, one UV per vertex, a named shader property, real extent,
+and **identical geometry when baked twice**. That last check matters because "the
+generator is deterministic" and "the bake reproduces it" are different claims.
+
+### What is NOT built
+
+Emitting the captured arcs into the NIF as `BSTriShape` + a copy of the effect
+shader property. That half has to construct FO4 vertex arrays, where the
+desc / `Data Size` / deferred-array landmines live (see 2026-07-18b), so it gets
+its own pass rather than being rushed onto the end of this one.
+
+**Particles stay undoable this way.** Their positions integrate frame to frame —
+they cannot be evaluated at an arbitrary *t* the way a keyed controller can — so
+there is no equivalent of the determinism that makes the arcs bakeable.
+
 ## 2026-07-30o — building a real loading screen found two merge bugs
 
 Ran the finished pipeline for its actual purpose — freeze each X-01 Tesla effect

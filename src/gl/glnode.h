@@ -156,6 +156,13 @@ public:
 
 	Controller * findController( const QString & proptype, const QModelIndex & index );
 
+	//! The procedural-lightning preview on this node, if any.
+	/*! Public read access so a bake can snapshot the arc; the pointer stays owned
+	 *  by the controllers list. Declared inside this EXISTING public run on
+	 *  purpose — a fresh `public:` here would flip the access of everything below
+	 *  it, which has bitten this header before. */
+	class ProcLightningController * lightning() const { return procLightning; }
+
 protected:
 	void setController( const NifModel * nif, const QModelIndex & controller ) override;
 	void updateImpl( const NifModel * nif, const QModelIndex & block ) override;

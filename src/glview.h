@@ -346,6 +346,23 @@ public:
 	 *  then freeze this file there" needs no second guess at the number. */
 	float sceneTime() const { return time; }
 
+	//! One procedural-lightning arc, snapshotted as static world-space geometry.
+	struct BakedArc
+	{
+		QVector<Vector3> tris;   //!< world space, 3 per triangle
+		QVector<Vector2> uvs;    //!< one per vertex of `tris`
+		Color4 tint;
+		QModelIndex shaderProperty;   //!< the arc's BSEffectShaderProperty
+		QString name;                 //!< the node the controller drives
+	};
+
+	//! Snapshot every procedural-lightning arc in the scene as it looks NOW.
+	/*! `viewAxis` pins the billboard — static geometry cannot turn to face the
+	 *  camera, so the caller chooses which way the ribbon presents its width.
+	 *  The arcs are generated deterministically from the scene time, so the same
+	 *  instant always yields the same geometry. */
+	QVector<BakedArc> bakeLightningArcs( const Vector3 & viewAxis );
+
 public slots:
 	void update();
 	void setCurrentIndex( const QModelIndex & );

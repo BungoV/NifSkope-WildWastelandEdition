@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "message.h"
 #include "nifskope.h"
+#include "gl/controllers.h"
 #include "gl/renderer.h"
 #include "gl/glshape.h"
 #include "gl/gltex.h"
@@ -701,6 +702,30 @@ void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
 	// through it.
 	shadeSessionSoup( sessionDocumentGhostSoup, 0.32f, sessionDocumentGhostColors );
 	update();
+}
+
+QVector<GLView::BakedArc> GLView::bakeLightningArcs( const Vector3 & viewAxis )
+{
+	QVector<BakedArc> out;
+	if ( !scene )
+		return out;
+
+	/* Walked off the scene's node list rather than Scene::pendingBolts, because
+	 * that queue is filled during drawShapes and cleared at the end of it — it is
+	 * only non-empty mid-frame. Node::procLightning is there whenever the node is.
+	 */
+	for ( Node * node : scene->nodes.list() ) {
+		if ( !node || !node->lightning() )
+			continue;
+		BakedArc arc;
+		arc.tint = Color4( 1.0f, 1.0f, 1.0f, 1.0f );
+		if ( !node->lightning()->bakeRibbon( viewAxis, arc.tris, arc.uvs, arc.tint ) )
+			continue;
+		arc.shaderProperty = node->lightning()->shaderProperty();
+		arc.name = node->getName();
+		out.append( arc );
+	}
+	return out;
 }
 
 void GLView::clearWorkspaceScenes()
