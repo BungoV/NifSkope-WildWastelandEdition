@@ -166,34 +166,78 @@ static Vector3 packedVector3( Reader & r, qsizetype off )
 static void addFaceFan( HknpShape & shape, const QVector<int> & loop )
 {
 	for ( int k = 1; k + 1 < loop.size(); k++ ) {
-		if ( loop[0] < shape.verts.size() && loop[k] < shape.verts.size() && loop[k+1] < shape.verts.size() )
-			shape.tris.append( Triangle( quint16( loop[0] ), quint16( loop[k] ), quint16( loop[k+1] ) ) );
+		if ( loop[0] >= shape.verts.size() || loop[k] >= shape.verts.size()
+			|| loop[k+1] >= shape.verts.size() )
+			continue;
+		/* Collinear or coincident corners produce a triangle with no area, which
+		 * nothing can hit and nothing can see. A face loop that repeats a vertex
+		 * is not a decode error -- a hull may genuinely have one -- so it is
+		 * dropped here rather than reported.
+		 */
+		const Vector3 e1 = shape.verts.at( loop[k] ) - shape.verts.at( loop[0] );
+		const Vector3 e2 = shape.verts.at( loop[k+1] ) - shape.verts.at( loop[0] );
+		if ( Vector3::crossproduct( e1, e2 ).length() < 1.0e-12f )
+			continue;
+		shape.tris.append( Triangle( quint16( loop[0] ), quint16( loop[k] ), quint16( loop[k+1] ) ) );
 	}
 }
 
-//! Low-res UV sphere for previewing sphere / capsule primitives
+//! index of vertex `s` on a preview ring, wrapping round the seam
+static inline int ringVertex( int ringStart, int s, int seg )
+{
+	return ringStart + ( ( s % seg ) + seg ) % seg;
+}
+
+/*! Low-res UV sphere for previewing sphere / capsule primitives.
+ *
+ * The poles are ONE vertex each, not a ring of twelve coincident ones.
+ *
+ * Built the obvious way -- a full ring at every phi including 0 and pi -- a UV
+ * sphere puts twelve vertices in the same place at each pole, and every triangle
+ * spanning two of them has zero area. That was 24 of 144 triangles per sphere,
+ * drawn, ray-tested and counted against the collision budget while covering
+ * nothing at all.
+ *
+ * They surfaced as picker "misses": a ray aimed at such a triangle's centroid
+ * hits nothing, because there is nothing there. Moller-Trumbore was right and the
+ * geometry was wrong.
+ */
 static void synthSphere( HknpShape & shape, const Vector3 & c, float r )
 {
 	const int SEG = 12, RINGS = 6;
 	shape.verts.clear();
 	shape.tris.clear();
-	for ( int ring = 0; ring <= RINGS; ring++ ) {
-		float phi = float( M_PI ) * float( ring ) / float( RINGS );
+
+	shape.verts.append( c + Vector3( 0, 0, r ) );
+	const int first = int( shape.verts.size() );
+	for ( int ring = 1; ring < RINGS; ring++ ) {
+		const float phi = float( M_PI ) * float( ring ) / float( RINGS );
 		for ( int s = 0; s < SEG; s++ ) {
-			float th = 2.0f * float( M_PI ) * float( s ) / float( SEG );
+			const float th = 2.0f * float( M_PI ) * float( s ) / float( SEG );
 			shape.verts.append( c + Vector3( std::sin( phi ) * std::cos( th ),
-											std::sin( phi ) * std::sin( th ),
-											std::cos( phi ) ) * r );
+											 std::sin( phi ) * std::sin( th ),
+											 std::cos( phi ) ) * r );
 		}
 	}
-	for ( int ring = 0; ring < RINGS; ring++ ) {
+	const int south = int( shape.verts.size() );
+	shape.verts.append( c + Vector3( 0, 0, -r ) );
+
+	for ( int s = 0; s < SEG; s++ )
+		shape.tris.append( Triangle( 0, quint16( ringVertex( first, s, SEG ) ),
+			quint16( ringVertex( first, s + 1, SEG ) ) ) );
+	for ( int ring = 0; ring + 2 < RINGS; ring++ ) {
+		const int lo = first + ring * SEG, hi = lo + SEG;
 		for ( int s = 0; s < SEG; s++ ) {
-			int a = ring * SEG + s, b = ring * SEG + ( s + 1 ) % SEG;
-			int cc = a + SEG, dd = b + SEG;
-			shape.tris.append( Triangle( quint16( a ), quint16( b ), quint16( cc ) ) );
-			shape.tris.append( Triangle( quint16( b ), quint16( dd ), quint16( cc ) ) );
+			const int p0 = ringVertex( lo, s, SEG ), p1 = ringVertex( lo, s + 1, SEG );
+			const int p2 = ringVertex( hi, s, SEG ), p3 = ringVertex( hi, s + 1, SEG );
+			shape.tris.append( Triangle( quint16( p0 ), quint16( p1 ), quint16( p2 ) ) );
+			shape.tris.append( Triangle( quint16( p1 ), quint16( p3 ), quint16( p2 ) ) );
 		}
 	}
+	const int last = first + ( RINGS - 2 ) * SEG;
+	for ( int s = 0; s < SEG; s++ )
+		shape.tris.append( Triangle( quint16( south ), quint16( ringVertex( last, s + 1, SEG ) ),
+			quint16( ringVertex( last, s, SEG ) ) ) );
 }
 
 //! Capsule preview: cylinder body + hemispherical caps around segment a-b
@@ -215,19 +259,25 @@ static void synthCapsule( HknpShape & shape, const Vector3 & a, const Vector3 & 
 	const int SEG = 12, CAP = 3;
 	shape.verts.clear();
 	shape.tris.clear();
-	// rings from bottom cap through the body to the top cap
+	/* The end rings are radius ZERO and collapse to a vertex each, exactly as the
+	 * sphere's poles do -- the loops below therefore stop one short of the cap, and
+	 * the two tips are appended on their own. See synthSphere.
+	 */
 	QVector<float> ringOffs;
 	QVector<float> ringRads;
-	for ( int i = CAP; i >= 0; i-- ) {	// bottom hemisphere (around a)
+	for ( int i = CAP - 1; i >= 0; i-- ) {	// bottom hemisphere (around a)
 		float phi = float( M_PI ) * 0.5f * float( i ) / float( CAP );
 		ringOffs.append( -std::sin( phi ) * r );
 		ringRads.append( std::cos( phi ) * r );
 	}
-	for ( int i = 0; i <= CAP; i++ ) {	// top hemisphere (around b)
+	for ( int i = 0; i < CAP; i++ ) {	// top hemisphere (around b)
 		float phi = float( M_PI ) * 0.5f * float( i ) / float( CAP );
 		ringOffs.append( len + std::sin( phi ) * r );
 		ringRads.append( std::cos( phi ) * r );
 	}
+
+	shape.verts.append( a - axis * r );
+	const int first = int( shape.verts.size() );
 	for ( int ring = 0; ring < ringOffs.size(); ring++ ) {
 		Vector3 c = a + axis * ringOffs[ring];
 		for ( int s = 0; s < SEG; s++ ) {
@@ -235,14 +285,25 @@ static void synthCapsule( HknpShape & shape, const Vector3 & a, const Vector3 & 
 			shape.verts.append( c + ( u * std::cos( th ) + v * std::sin( th ) ) * ringRads[ring] );
 		}
 	}
+	const int top = int( shape.verts.size() );
+	shape.verts.append( b + axis * r );
+
+	for ( int s = 0; s < SEG; s++ )
+		shape.tris.append( Triangle( 0, quint16( ringVertex( first, s + 1, SEG ) ),
+			quint16( ringVertex( first, s, SEG ) ) ) );
 	for ( int ring = 0; ring + 1 < ringOffs.size(); ring++ ) {
+		const int lo = first + ring * SEG, hi = lo + SEG;
 		for ( int s = 0; s < SEG; s++ ) {
-			int p0 = ring * SEG + s, p1 = ring * SEG + ( s + 1 ) % SEG;
-			int p2 = p0 + SEG, p3 = p1 + SEG;
+			const int p0 = ringVertex( lo, s, SEG ), p1 = ringVertex( lo, s + 1, SEG );
+			const int p2 = ringVertex( hi, s, SEG ), p3 = ringVertex( hi, s + 1, SEG );
 			shape.tris.append( Triangle( quint16( p0 ), quint16( p1 ), quint16( p2 ) ) );
 			shape.tris.append( Triangle( quint16( p1 ), quint16( p3 ), quint16( p2 ) ) );
 		}
 	}
+	const int last = first + ( int( ringOffs.size() ) - 1 ) * SEG;
+	for ( int s = 0; s < SEG; s++ )
+		shape.tris.append( Triangle( quint16( top ), quint16( ringVertex( last, s, SEG ) ),
+			quint16( ringVertex( last, s + 1, SEG ) ) ) );
 }
 
 //! hknpConvexPolytopeShape and subclasses (sphere / capsule)

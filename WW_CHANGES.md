@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30a — the zero-area triangles were ours
+
+**39 files, 125,054 preview triangles, 0 degenerate.** Physics harness: 7 rigs,
+647 checks, 0 failures.
+
+The picker sweep turned up 11 to 15 zero-area triangles per rig and I left the
+cause open. It was the decoder.
+
+`synthSphere` built a UV sphere with a full ring of twelve vertices at *every*
+phi including 0 and pi — so each pole was twelve coincident points, and every
+triangle spanning two of them had no area. `synthCapsule` had it at both caps for
+the same reason: its end rings are radius zero. **24 of every 144 triangles per
+sphere or capsule**, drawn, ray-tested and counted against the collision budget
+while covering nothing.
+
+They surfaced as picker "misses" — a ray aimed at such a triangle's centroid hits
+nothing, because there is nothing there. Möller–Trumbore was right and the
+geometry was wrong.
+
+The poles are one vertex each now, with a fan at each cap. The useful geometry is
+identical: the alien skeleton's preview goes from 3308 triangles to 2924, which is
+exactly its 16 capsule bodies × 24. `addFaceFan` drops degenerate output too, since
+a hull may genuinely repeat a corner.
+
+The `collision` CLI reports `preview triangles N, M DEGENERATE` per system, which
+is what the corpus sweep above reads — the guard against this returning, and
+against a hull arriving with a repeated corner.
+
 ## 2026-07-29z — the file's own friction and bounce, and less panel
 
 **7 rigs, 647 checks, 0 failures, 1 correct skip.**

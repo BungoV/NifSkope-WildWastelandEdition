@@ -1528,6 +1528,31 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 			  << ( unattributed ? QString( ", %1 unattributed" ).arg( unattributed ) : QString() )
 			  << Qt::endl;
 
+		/* Zero-area triangles, which nothing can hit, see or collide with.
+		 *
+		 * Reported because they were ours: the sphere and capsule previews put a
+		 * full ring of coincident vertices at each pole, so 24 of every 144
+		 * triangles covered nothing while being drawn, ray-tested and counted
+		 * against the collision budget. A number here is the guard against that
+		 * coming back, and against a hull arriving with a repeated corner.
+		 */
+		int degenerate = 0, totalTris = 0;
+		for ( const HknpShape & shp : sys.shapes ) {
+			for ( const Triangle & t : shp.tris ) {
+				totalTris++;
+				if ( t[0] >= shp.verts.size() || t[1] >= shp.verts.size()
+					|| t[2] >= shp.verts.size() )
+					continue;
+				const Vector3 e1 = shp.verts.at( t[1] ) - shp.verts.at( t[0] );
+				const Vector3 e2 = shp.verts.at( t[2] ) - shp.verts.at( t[0] );
+				if ( Vector3::crossproduct( e1, e2 ).length() < 1.0e-12f )
+					degenerate++;
+			}
+		}
+		out() << "  preview triangles        " << totalTris
+			  << ( degenerate ? QString( ", %1 DEGENERATE" ).arg( degenerate ) : QString() )
+			  << Qt::endl;
+
 		out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( "body", -6 ).arg( "node", -34 )
 					.arg( "layer", -6 ).arg( "shapes", -7 ).arg( "friction", -9 )
 					.arg( "restitution" ) << Qt::endl;
