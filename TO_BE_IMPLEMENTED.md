@@ -78,7 +78,7 @@ bottom.
 | 11 | Animation: 3 remaining gaps | small | the other 43 items are done |
 | 12 | Rendering: spec/gloss **SHIPPED**, PBR **parked**, SSS future | large | see §0 and §12 |
 | 13 | CLI follow-ups (see §13) | small–medium | base CLI shipped 07-21e; harness port is 22 files, not 8 |
-| 14 | Repo hygiene: orphaned source, 54 uncommitted files | small | new 07-27 |
+| 14 | ~~Repo hygiene: orphaned source, 54 uncommitted files~~ | small | **DONE 07-30** — orphan gone, tree clean; verified, not assumed |
 | 15 | ~~Viewport: Separate By Material / By Loose Parts~~ | small | **SHIPPED 07-30c** — By Material was impossible; shipped as By Segment |
 
 ---
@@ -1261,7 +1261,12 @@ arguments over the UDP IPC handoff and exits 0, so a probe run silently opens th
 file in the live session and your harness never fires. Always pass
 `--port <unused>` when scripting.
 
-## 14. Repo hygiene — NEW 07-27
+## 14. Repo hygiene — ~~NEW 07-27~~ DONE 07-30
+
+Both halves closed, checked rather than assumed: `src/collisiontools.cpp` no
+longer exists (the live file is `src/spells/collisiontools.cpp`), and the working
+tree is clean. Original notes below for the record.
+
 
 - **`src/collisiontools.cpp` is a committed orphan.** It is *not* in
   `NifSkope.pro`; the live file is `src/spells/collisiontools.cpp` (2391 lines,
