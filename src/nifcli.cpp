@@ -1528,8 +1528,9 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 			  << ( unattributed ? QString( ", %1 unattributed" ).arg( unattributed ) : QString() )
 			  << Qt::endl;
 
-		out() << QString( "  %1 %2 %3 %4" ).arg( "body", -6 ).arg( "node", -34 )
-					.arg( "layer", -6 ).arg( "shapes" ) << Qt::endl;
+		out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( "body", -6 ).arg( "node", -34 )
+					.arg( "layer", -6 ).arg( "shapes", -7 ).arg( "friction", -9 )
+					.arg( "restitution" ) << Qt::endl;
 		for ( const auto & ref : it.value() ) {
 			int mine = 0;
 			for ( const HknpShape & shp : sys.shapes ) {
@@ -1538,10 +1539,16 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 			}
 			const HknpBodyPhys phys = int( ref.first ) < sys.bodyPhys.size()
 									? sys.bodyPhys.at( int( ref.first ) ) : HknpBodyPhys();
-			out() << QString( "  %1 %2 %3 %4" )
+			/* Friction and restitution too: the solver is about to honour them per
+			 * body, and until now the only place either was visible was the
+			 * Collision Manager's selected-body editor -- one body at a time,
+			 * which is no way to learn what a corpus actually carries.
+			 */
+			out() << QString( "  %1 %2 %3 %4 %5 %6" )
 						.arg( ref.first, -6 )
 						.arg( nif.get<QString>( nif.getBlockIndex( ref.second ), "Name" ), -34 )
-						.arg( phys.layer, -6 ).arg( mine )
+						.arg( phys.layer, -6 ).arg( mine, -7 )
+						.arg( phys.friction, -9, 'f', 3 ).arg( phys.restitution, 0, 'f', 3 )
 				  << Qt::endl;
 		}
 		if ( !sys.bones.isEmpty() ) {

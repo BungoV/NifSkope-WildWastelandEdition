@@ -1,5 +1,86 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29z — the file's own friction and bounce, and less panel
+
+**7 rigs, 647 checks, 0 failures, 1 correct skip.**
+
+### The solver was ignoring what the file said
+
+`HknpBodyPhys` decodes a friction and a restitution **per body** and the Collision
+Manager's selected-body editor edits them. `RagdollSim::build` read neither: every
+contact used one global number, so one panel above the simulator you could set a
+body's friction to 0.9 and watch the sim keep using 0.5.
+
+Measured across 37 actor skeletons before wiring it, because a comment in the
+solver claimed Havok's restitution is 0 on every corpus body, and that justified a
+default:
+
+| | authored values |
+|---|---|
+| friction | 0.50 ×512, 0.30 ×127, 0.40 ×92, 0.60 ×82, 0.70 ×45, 3.00 ×24 |
+| restitution | 0.30 ×284, 0.20 ×263, 0.10 ×115, 0.80 ×74, 0.00 ×71, 0.05 ×48 |
+
+**The claim was never measured and is false** — 71 bodies of some 900 carry 0. Both
+are read per body now, and the panel's controls became **multipliers**: the
+arrangement `damping` has had all along, where the authored number is the truth and
+the global adjusts it. Contacts combine the two bodies' coefficients as a geometric
+mean; a ground contact combines the body's with the floor's own grip, which
+previously ignored the body and slid a friction-3.0 body exactly like a 0.30 one.
+
+Bounce defaults to what the file says rather than to nothing, which is energy
+coming back out of every landing — so the harness gained a settling check. After
+five seconds the fastest body is 0.00–0.01 m/s and nothing diverges.
+
+The collision CLI reports both columns now. The only place either was visible was
+the manager's editor, one body at a time, which is no way to learn what a corpus
+carries.
+
+### Punt is no longer a heavier Shoot
+
+It set an impulse, and an impulse divided by mass is a velocity — so the same click
+launched a 0.2 kg jaw and barely nudged a torso. `RagdollSim::shove` sets the
+**speed**: what you point at leaves at the same rate whatever it weighs, which is
+what a gravity gun feels like and the one thing an impulse cannot do. The spin
+still comes from the offset, so punting a foot still turns the rig.
+
+### Redundancy out
+
+- **The Bodies list is gone.** It showed every body by name with a pin checkbox,
+  one panel below a tree already listing exactly those bodies with bone, shape,
+  layer, material, mass and state. The checkbox moved to the tree; the list went.
+- **The status line** said `bhkRagdollSystem [7]: 18 bodies, 17 joints.` directly
+  above a picker reading `bhkRagdollSystem [7]`. Counts alone now.
+- **The picker only lists simulable systems.** It offered every `bhkPhysicsSystem`,
+  and choosing a jointless one stopped the sim, failed, and said nothing — which is
+  how a panel came to show `[7]` in its status and `[8]` in its picker.
+- **Firmness and Strength** were one idea in two dials. One **Grip** drives both.
+
+### Moved and collapsed
+
+Options was eleven flat rows mixing gravity and the ground — changed while watching
+— with sweeps and substeps, set once. Split into **World** (both panels), **Solver**
+(manager) and a collapsed **Advanced** (manager). "Show the ground" moved beside the
+ground toggle. "Put the floor back under the rig" was a full-width button doing a
+revert; it is a small control on the row it reverts.
+
+**Pause** and **Freeze** are genuinely different and never said which was which.
+They are **Stop time** and **Stop motion**.
+
+### A test that was testing the file
+
+One rig failed "clicking a shape always hits something". The diagnostic named it:
+PowerArmor's `skeleton_female_faceBones`, body 11, triangle 0, **edge 0.000 game
+units**. A zero-area triangle, which Möller–Trumbore correctly rejects — there is no
+surface there to hit. Aiming at it and demanding a hit tested the file, not the
+picker. They turn out to be common rather than freakish: **11 to 15 per rig**.
+Skipped and counted now.
+
+Two dead ends worth naming. Re-running a rig through PowerShell with
+backtick-quoted arguments launched NifSkope with **no file**, so the harness never
+ran and the app sat idle looking like a hang — and a running instance holds
+`release/NifSkope.exe`, so the next link failed and the sweep silently re-ran the
+**old binary**.
+
 ## 2026-07-29y — a bouncing-ball icon, and one tool row instead of two
 
 **7 rigs, 605 checks, 0 failures, 1 correct skip.**

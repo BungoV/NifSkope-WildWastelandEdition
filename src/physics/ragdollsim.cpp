@@ -465,6 +465,8 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		b.invMass = ( mass > 1.0e-6f ) ? 1.0f / mass : 0.0f;
 		b.linDamping = std::max( 0.0f, phys.linDamping );
 		b.angDamping = std::max( 0.0f, phys.angDamping );
+		b.friction = std::max( 0.0f, phys.friction );
+		b.restitution = std::clamp( phys.restitution, 0.0f, 1.0f );
 		b.layer = phys.layer;
 		b.filterGroup = phys.filterGroup;
 		b.filterFlags = phys.filterFlags;
@@ -716,12 +718,21 @@ void RagdollSim::solveContacts( float h, bool record )
 				 * Shared by the same count as the normal correction, for the same
 				 * reason -- eight vertices on the floor must not brake eight times.
 				 */
-				if ( groundFriction > 0.0f ) {
+				/* The floor's grip AND the body's own, combined.
+				 *
+				 * Two surfaces meet at a contact and both carry a coefficient, so
+				 * the usual geometric mean. It was the floor's alone, which meant
+				 * the corpus bodies authored at friction 3.0 slid exactly like the
+				 * ones authored at 0.30.
+				 */
+				const float mu = std::sqrt( std::max( 0.0f, groundFriction ) * A.friction )
+					* frictionScale;
+				if ( mu > 0.0f ) {
 					Vector3 rel = A.x - A.xPrev;
 					rel = rel - normal * Vector3::dotproduct( rel, normal );
 					const float slide = rel.length();
 					if ( slide > 1.0e-9f ) {
-						const float take = std::min( slide, groundFriction * d * share );
+						const float take = std::min( slide, mu * d * share );
 						applyPositional( A, staticGround, point - A.x, Vector3(),
 							rel * ( -take / slide ) );
 					}
@@ -753,13 +764,15 @@ void RagdollSim::solveContacts( float h, bool record )
 		 * normal one. Without it a ragdoll on the ground slides for ever, which
 		 * looks broken even though it is perfectly stable.
 		 */
-		if ( friction > 0.0f ) {
+		// the geometric mean of what the two bodies carry, times the global scale
+		const float mu = std::sqrt( A.friction * B.friction ) * frictionScale;
+		if ( mu > 0.0f ) {
 			const Vector3 rA = point - A.x, rB = point - B.x;
 			Vector3 rel = ( A.x - A.xPrev ) - ( B.x - B.xPrev );
 			rel = rel - normal * Vector3::dotproduct( rel, normal );
 			const float slide = rel.length();
 			if ( slide > 1.0e-9f ) {
-				const float take = std::min( slide, friction * depth );
+				const float take = std::min( slide, mu * depth );
 				applyPositional( A, B, rA, rB, rel * ( -take / slide ) );
 			}
 		}
@@ -1033,6 +1046,10 @@ int RagdollSim::addProp( const Vector3 & pos, const Vector3 & vel, float radius,
 	b.invInertia = Vector3( inv, inv, inv );
 	b.linDamping = 0.05f;
 	b.angDamping = 0.05f;
+	// a thrown ball is not in the file, so it gets a surface of its own: grippy
+	// enough to roll rather than skid, lively enough to be worth throwing
+	b.friction = 0.6f;
+	b.restitution = 0.5f;
 	b.solverScale = 1.0f;       // no joints, so nothing to share a correction with
 	b.layer = 1;
 	m_bodies.append( b );
@@ -1069,6 +1086,25 @@ void RagdollSim::applyImpulse( int body, const Vector3 & localPoint, const Vecto
 	b.v += impulse * b.invMass;
 	const Vector3 r = qRot( b.q, localPoint );
 	b.w += applyInvInertia( b, Vector3::crossproduct( r, impulse ) );
+}
+
+void RagdollSim::shove( int body, const Vector3 & localPoint, const Vector3 & velocity )
+{
+	if ( body < 0 || body >= m_bodies.size() )
+		return;
+	SimBody & b = m_bodies[body];
+	if ( b.pinned || b.invMass <= 0.0f )
+		return;
+	// the linear part is a velocity, set outright
+	b.v = velocity;
+	/* ...and the spin is still an impulse, scaled to the momentum this speed
+	 * represents for THIS body. Dropping the angular part would make a punt to a
+	 * foot and a punt to a chest do the same thing, which is most of what makes
+	 * the tool worth aiming.
+	 */
+	const Vector3 r = qRot( b.q, localPoint );
+	const float mass = 1.0f / b.invMass;
+	b.w += applyInvInertia( b, Vector3::crossproduct( r, velocity * mass ) );
 }
 
 void RagdollSim::blast( const Vector3 & centre, float radius, float strength )
@@ -1319,7 +1355,7 @@ void RagdollSim::solveDragOrientation( float h )
  */
 void RagdollSim::applyRestitution()
 {
-	if ( !( restitution > 0.0f ) )
+	if ( !( restitutionScale > 0.0f ) )
 		return;
 
 	auto bounce = []( SimBody & B, const Vector3 & r, const Vector3 & n, float want ) {
@@ -1349,7 +1385,12 @@ void RagdollSim::applyRestitution()
 			// nothing and walk it off the ground
 			if ( vnPre >= 0.0f )
 				continue;
-			bounce( A, c.rA, c.n, -restitution * vnPre );
+			/* The BODY's bounce, not one number for the scene.
+			 *
+			 * The floor is a synthetic preview surface with no material of its
+			 * own, so a ground contact is the body's coefficient alone.
+			 */
+			bounce( A, c.rA, c.n, -A.restitution * restitutionScale * vnPre );
 			continue;
 		}
 
@@ -1361,7 +1402,9 @@ void RagdollSim::applyRestitution()
 			- ( B.vPre + Vector3::crossproduct( B.wPre, c.rB ) ), c.n );
 		if ( vnPre >= 0.0f )
 			continue;
-		const float want = -restitution * vnPre;
+		// two bodies, two coefficients: the same geometric mean friction uses
+		const float e = std::sqrt( A.restitution * B.restitution ) * restitutionScale;
+		const float want = -e * vnPre;
 		if ( !A.pinned && A.invMass > 0.0f )
 			bounce( A, c.rA, c.n, want );
 		if ( !B.pinned && B.invMass > 0.0f )
@@ -1579,7 +1622,7 @@ void RagdollSim::step( float dt, int substeps )
 			 * cannot re-derive them itself. The first sweep sees the impact as it
 			 * arrived, which is the geometry a bounce should come off.
 			 */
-			solveContacts( h, restitution > 0.0f && it == 0 );
+			solveContacts( h, restitutionScale > 0.0f && it == 0 );
 		}
 
 		for ( SimBody & b : m_bodies ) {

@@ -1106,7 +1106,49 @@ private:
 			? QStringLiteral( "QLabel { color:%1; padding:3px; }" ).arg( wwSkinColor( "accentText" ) )
 			: QStringLiteral( "QLabel { color:palette(mid); padding:3px; }" ) );
 		updating = false;
+		refreshSimPins();
 		updateDetails();
+	}
+
+	/*! Put each body's PIN on its own row in the tree.
+	 *
+	 * The simulator carried a second list of the same bodies purely to hang a
+	 * checkbox off, one panel below a tree that already showed every one of them
+	 * with its bone, shape, layer, material, mass and state. The only thing that
+	 * list added was the checkbox, so the checkbox came here instead.
+	 *
+	 * Only rows belonging to the system actually being simulated get one: the
+	 * others have no body to pin, and a checkbox that does nothing is worse than
+	 * no checkbox.
+	 */
+	void refreshSimPins()
+	{
+		if ( !ogl )
+			return;
+		PhysicsPreview & pv = ogl->physicsSim();
+		const bool live = pv.active();
+		const int sysBlock = pv.systemBlock();
+		// itemChanged fires on every setCheckState below, so the handler has to
+		// be told this is us and not the user
+		const bool wasUpdating = updating;
+		updating = true;
+		for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+			QTreeWidgetItem * item = tree->topLevelItem( i );
+			bool ok = false;
+			const int body = item->data( 0, BodyIdRole ).toInt( &ok );
+			const bool mine = live && ok && item->data( 0, SystemBlockRole ).toInt() == sysBlock
+				&& body >= 0 && body < pv.bodyCount();
+			if ( !mine ) {
+				item->setData( 0, Qt::CheckStateRole, QVariant() );
+				continue;
+			}
+			item->setFlags( item->flags() | Qt::ItemIsUserCheckable );
+			item->setCheckState( 0, pv.sim().bodies().at( body ).pinned
+				? Qt::Checked : Qt::Unchecked );
+			item->setToolTip( 0, tr( "Tick to pin this body where it is. The same pin the "
+									 "right mouse button sets in the viewport." ) );
+		}
+		updating = wasUpdating;
 	}
 
 	/*! Highlight the row that speaks for this block, if any.
@@ -2231,8 +2273,10 @@ private:
 			[this, createGroup]( int id ) {
 				createGroup->setVisible( id == 0 );
 				testPanel->setVisible( id == 1 );
-				if ( id == 1 )
+				if ( id == 1 ) {
 					testPanel->sync();
+					refreshSimPins();
+				}
 				QSettings().setValue( "CollisionManager/BottomSection", id );
 			} );
 		// remembered, because which of the two you want is a property of the job
@@ -2464,6 +2508,27 @@ private:
 			else if ( !NifValue::enumOptionData( materialEnumType() ).o.contains( value ) ) material->setItemText( row, name );
 			material->setCurrentIndex( row );
 		} );
+		/* Ticking a row pins that body. Guarded by `updating`, which
+		 * refreshSimPins() raises while it writes the check states -- without it
+		 * every refresh would read as a user click and toggle what it just set.
+		 */
+		connect( tree, &QTreeWidget::itemChanged, this, [this]( QTreeWidgetItem * item, int column ) {
+			if ( updating || column != 0 || !ogl || !item )
+				return;
+			PhysicsPreview & pv = ogl->physicsSim();
+			bool ok = false;
+			const int body = item->data( 0, BodyIdRole ).toInt( &ok );
+			if ( !ok || !pv.active() || body < 0 || body >= pv.bodyCount() )
+				return;
+			if ( item->data( 0, SystemBlockRole ).toInt() != pv.systemBlock() )
+				return;
+			pv.sim().setPinned( body, item->checkState( 0 ) == Qt::Checked );
+			ogl->update();
+		} );
+		// entering or leaving the mode changes whether the pins mean anything
+		connect( ogl, &GLView::physicsSimModeChanged, this,
+			[this]( bool ) { refreshSimPins(); } );
+
 		connect( tree, &QTreeWidget::itemExpanded, this, [this]( QTreeWidgetItem * item ) {
 			if ( !item->parent() ) expandedObjects.insert( item->data( 0, ObjectBlockRole ).toInt() );
 		} );

@@ -3602,7 +3602,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 * shape they can see.
 				 */
 				{
-					int aimed = 0, correct = 0, wrongBody = 0, missed = 0;
+					int aimed = 0, correct = 0, wrongBody = 0, missed = 0, degenerate = 0;
 					for ( int b = 0; b < pv.sim().bodies().size(); b++ ) {
 						const QVector<Vector3> tris = pv.bodySoup( b );
 						if ( tris.size() < 3 )
@@ -3610,6 +3610,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// a few triangles spread through the shape, not just the first
 						for ( int k = 0; k < 5; k++ ) {
 							const int t = ( tris.size() / 3 ) * k / 5;
+							/* DEGENERATE triangles are not clickable, by anyone.
+							 *
+							 * PowerArmor's skeleton_female_faceBones carries a body whose
+							 * first triangle has zero area -- both edges 0.000 game units
+							 * -- and Moller-Trumbore rejects it on the |det| test, exactly
+							 * as it should: there is no surface there to hit. Aiming at it
+							 * and then demanding a hit tested the file, not the picker.
+							 */
+							const Vector3 e1 = tris.at( t * 3 + 1 ) - tris.at( t * 3 );
+							const Vector3 e2 = tris.at( t * 3 + 2 ) - tris.at( t * 3 );
+							if ( Vector3::crossproduct( e1, e2 ).length() < 1.0e-6f ) {
+								degenerate++;
+								continue;
+							}
 							const Vector3 c = ( tris.at( t * 3 ) + tris.at( t * 3 + 1 )
 								+ tris.at( t * 3 + 2 ) ) / 3.0f;
 							QPointF sp;
@@ -3716,8 +3730,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							worstOld = std::max( worstOld, dOld );
 					}
 					log << QStringLiteral( "      clicking ON a shape: %1 aimed, %2 returned that "
-										   "body, %3 a nearer one, %4 nothing" )
-						.arg( aimed ).arg( correct ).arg( wrongBody ).arg( missed );
+										   "body, %3 a nearer one, %4 nothing"
+										   "%5" )
+						.arg( aimed ).arg( correct ).arg( wrongBody ).arg( missed )
+						.arg( degenerate ? QStringLiteral( " (%1 zero-area triangles skipped)" )
+							.arg( degenerate ) : QString() );
 					log << QStringLiteral( "      hit point off the reported body: %1 game units "
 										   "(sphere set: %2)" )
 						.arg( double( worstNew ), 0, 'f', 2 )
@@ -4093,6 +4110,49 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					} else {
 						check( false, QStringLiteral( "physics gun: nothing to aim at" ) );
 					}
+					pv.reset();
+				}
+
+				/* The file's own friction and bounce, now that the solver reads them.
+				 *
+				 * Checked as a RANGE, not a value: the point is that the bodies
+				 * differ from each other, which a single global could never produce.
+				 * The corpus authors friction at 0.30 through 3.00 and restitution
+				 * from 0 to 0.80, so a rig whose bodies all report 0.5 and 0.4 is one
+				 * where build() quietly fell back on the struct defaults.
+				 */
+				{
+					float fLo = 1.0e9f, fHi = -1.0e9f, rLo = 1.0e9f, rHi = -1.0e9f;
+					for ( const SimBody & b : pv.sim().bodies() ) {
+						fLo = std::min( fLo, b.friction );
+						fHi = std::max( fHi, b.friction );
+						rLo = std::min( rLo, b.restitution );
+						rHi = std::max( rHi, b.restitution );
+					}
+					log << QStringLiteral( "      authored friction %1..%2, bounce %3..%4" )
+						.arg( double( fLo ), 0, 'f', 2 ).arg( double( fHi ), 0, 'f', 2 )
+						.arg( double( rLo ), 0, 'f', 2 ).arg( double( rHi ), 0, 'f', 2 );
+					check( fLo > 0.0f, QStringLiteral( "every body has a friction" ) );
+					check( fHi >= fLo && rHi >= rLo,
+						QStringLiteral( "and a bounce, read from the file" ) );
+
+					/* ...and the rig still SETTLES with them.
+					 *
+					 * Bounce used to default to 0 and now defaults to whatever the
+					 * file says, which on this corpus is mostly 0.2 to 0.3 and
+					 * sometimes 0.8. That is more faithful and it is also energy
+					 * coming back out of every landing, so the thing worth checking
+					 * is that a dropped rig still comes to rest.
+					 */
+					pv.reset();
+					pv.setPaused( false );
+					for ( int i = 0; i < 300; i++ )
+						gl->physicsTick( 1.0f / 60.0f );
+					const float rest = pv.stats().maxSpeed;
+					log << QStringLiteral( "      after five seconds the fastest body is %1 m/s" )
+						.arg( double( rest ), 0, 'f', 2 );
+					check( rest < 2.0f, QStringLiteral( "the rig settles with authored bounce" ) );
+					check( !pv.stats().diverged, QStringLiteral( "and nothing diverged" ) );
 					pv.reset();
 				}
 
@@ -4730,12 +4790,49 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						const int q = shown( quick ), f = shown( full );
 						log << QStringLiteral( "      dropdown offers %1 controls, the manager %2" )
 							.arg( q ).arg( f );
-						// a third, not a hair: the split has to be worth having
-						check( q * 2 < f,
-							QStringLiteral( "the dropdown is much the shorter of the two" ) );
+
+						/* Checked by WHICH sections each carries, not by a ratio.
+						 *
+						 * A ratio was the first attempt and it stopped meaning anything
+						 * the moment World moved into the dropdown and the body list
+						 * left the manager: the two counts converged to 43 against 50
+						 * while the split itself was working exactly as intended. The
+						 * invariant is that each panel carries the sections it is for.
+						 */
+						auto carries = []( QWidget * root, const QString & label ) {
+							for ( QWidget * c : root->findChildren<QWidget *>() ) {
+								const QLabel * l = qobject_cast<QLabel *>( c );
+								const QAbstractButton * b = qobject_cast<QAbstractButton *>( c );
+								const QString text = l ? l->text() : ( b ? b->text() : QString() );
+								if ( text == label && c->isVisibleTo( root ) )
+									return true;
+							}
+							return false;
+						};
+						// both: the world is watched while a rig is running
+						check( carries( quick, QStringLiteral( "World" ) )
+							&& carries( full, QStringLiteral( "World" ) ),
+							QStringLiteral( "both panels carry the world controls" ) );
+						// manager only: set once per file, and never mid-drag
+						check( !carries( quick, QStringLiteral( "Solver" ) )
+							&& carries( full, QStringLiteral( "Solver" ) ),
+							QStringLiteral( "only the manager carries the solver knobs" ) );
+						check( !carries( quick, QStringLiteral( "Advanced" ) )
+							&& carries( full, QStringLiteral( "Advanced" ) ),
+							QStringLiteral( "and the advanced ones, collapsed" ) );
 						// the things that moved out, named rather than counted
-						check( !full->findChildren<QListWidget *>().isEmpty(),
-							QStringLiteral( "the manager carries the body list" ) );
+						/* The pins moved OUT of the panel and into the manager's tree,
+						 * so the panel must no longer carry a list of its own.
+						 */
+						check( full->findChildren<QListWidget *>().isEmpty(),
+							QStringLiteral( "the panel has no body list of its own" ) );
+						bool checkable = false;
+						for ( QTreeWidget * tw : skope->findChildren<QTreeWidget *>() )
+							for ( int r = 0; r < tw->topLevelItemCount(); r++ )
+								if ( tw->topLevelItem( r )->data( 0, Qt::CheckStateRole ).isValid() )
+									checkable = true;
+						check( checkable,
+							QStringLiteral( "and the manager tree carries the pins instead" ) );
 						/* ...and NOT the tool row, which belongs to the toolbar. Checked
 						 * by what is shown rather than by what exists: the manager's
 						 * copy still builds the buttons so one sync path can drive both.

@@ -21,6 +21,7 @@
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <cmath>
@@ -159,24 +160,22 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		return l;
 	};
 
+	/* One dial, not two.
+	 *
+	 * Firmness is the grab's compliance and Strength the cap on how hard it may
+	 * pull, and both answer the same question -- how hard does the hand hold? --
+	 * so they were two ways of asking it that had to be kept consistent by hand.
+	 * Grip drives both: the mapping is chosen so the default of 0.9 lands on the
+	 * firmness and strength the tool already shipped with.
+	 */
 	QDoubleSpinBox * firmSpin = new QDoubleSpinBox( toolParams );
-	firmSpin->setRange( 0.01, 1.0 );
+	firmSpin->setRange( 0.0, 1.0 );
 	firmSpin->setSingleStep( 0.05 );
 	firmSpin->setDecimals( 2 );
-	firmSpin->setToolTip( tr( "How hard the grab holds. 1 is rigid; lower is springier "
-							  "and lags behind the cursor." ) );
-	QLabel * firmLbl = addParam( tr( "Firmness" ), firmSpin );
-
-	QDoubleSpinBox * strengthSpin = new QDoubleSpinBox( toolParams );
-	strengthSpin->setRange( 0.0, 500.0 );
-	strengthSpin->setSingleStep( 5.0 );
-	strengthSpin->setDecimals( 1 );
-	strengthSpin->setSuffix( tr( " x weight" ) );
-	strengthSpin->setToolTip( tr( "How hard the hand may pull, against the weight of the "
-								  "bone held. Bounded so a chain goes taut and drags the "
-								  "rig instead of pulling a joint apart. 0 removes the "
-								  "limit." ) );
-	QLabel * strengthLbl = addParam( tr( "Strength" ), strengthSpin );
+	firmSpin->setToolTip( tr( "How hard the hand holds. 1 is rigid and strong; lower is "
+							  "springier, lags behind the cursor, and gives up sooner "
+							  "rather than dragging the whole rig." ) );
+	QLabel * firmLbl = addParam( tr( "Grip" ), firmSpin );
 
 	QCheckBox * noCollideChk = new QCheckBox( tr( "Held bone ignores the rig" ), toolParams );
 	noCollideChk->setToolTip( tr( "Let the bone in hand pass through the rest of the "
@@ -292,14 +291,20 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	col->addWidget( heading( tr( "Playback" ) ) );
 	QHBoxLayout * play = new QHBoxLayout();
 	play->setSpacing( 4 );
-	QPushButton * pauseBtn = new QPushButton( tr( "Pause" ), this );
+	/* "Pause" and "Freeze" are genuinely different and the names never said how:
+	 * one stops TIME, the other stops MOTION while the solver keeps working, so
+	 * a settled heap holds its shape and can still be dragged. Named for the
+	 * difference rather than for the mechanism.
+	 */
+	QPushButton * pauseBtn = new QPushButton( tr( "Stop time" ), this );
 	pauseBtn->setCheckable( true );
-	pauseBtn->setToolTip( tr( "Stop time. The pose holds exactly where it is. (Space)" ) );
+	pauseBtn->setToolTip( tr( "Freeze the frame: nothing moves and nothing solves, and "
+							  "the pose holds exactly where it is. (Space)" ) );
 	QPushButton * stepBtn = new QPushButton( tr( "Step" ), this );
 	stepBtn->setToolTip( tr( "Advance one frame while paused, to watch a joint "
 							 "a frame at a time. (.)" ) );
-	QPushButton * freezeBtn = new QPushButton( tr( "Freeze" ), this );
-	freezeBtn->setToolTip( tr( "Stop all motion but keep solving, so a settled heap "
+	QPushButton * freezeBtn = new QPushButton( tr( "Stop motion" ), this );
+	freezeBtn->setToolTip( tr( "Take the speed out but keep solving, so a settled heap "
 							   "holds its shape and can still be dragged. (F)" ) );
 	QPushButton * resetBtn = new QPushButton( tr( "Reset" ), this );
 	resetBtn->setToolTip( tr( "Back to the pose stored in the file. (R)" ) );
@@ -353,9 +358,15 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	acts->addWidget( captureBtn );
 	col->addWidget( actsRow );
 
-	// Options
-	QLabel * optionsHead = heading( tr( "Options" ) );
-	col->addWidget( optionsHead );
+	/* World, then Solver, then Advanced -- split by how often a thing is touched.
+	 *
+	 * This was one flat list of eleven rows mixing gravity and the ground, which
+	 * you change while watching a rig, with sweeps and substeps, which you set
+	 * once per file and never look at again. The first group belongs in the
+	 * toolbar dropdown as much as Playback does; the other two do not.
+	 */
+	QLabel * worldHead = heading( tr( "World" ) );
+	col->addWidget( worldHead );
 	QWidget * optsRow = new QWidget( this );
 	QGridLayout * opts = new QGridLayout( optsRow );
 	opts->setContentsMargins( 0, 0, 0, 0 );
@@ -374,31 +385,6 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	opts->addWidget( gravChk, oRow, 0 );
 	opts->addWidget( gravSpin, oRow++, 1 );
 
-	/* Gravity DIRECTION, as a tilt off vertical and a heading round the
-	 * compass. Two angles rather than a vector: nobody wants to normalise a
-	 * triple by hand, and the question being asked is "what does this look like
-	 * on a slope", which is exactly a tilt.
-	 */
-	QDoubleSpinBox * tiltSpin = new QDoubleSpinBox( this );
-	tiltSpin->setRange( 0.0, 90.0 );
-	tiltSpin->setSingleStep( 5.0 );
-	tiltSpin->setDecimals( 1 );
-	tiltSpin->setSuffix( QStringLiteral( "°" ) );
-	tiltSpin->setToolTip( tr( "Tip gravity away from straight down, to see how a rig "
-							  "behaves on a slope without authoring one." ) );
-	opts->addWidget( new QLabel( tr( "Gravity tilt" ), this ), oRow, 0 );
-	opts->addWidget( tiltSpin, oRow++, 1 );
-
-	QDoubleSpinBox * headSpin = new QDoubleSpinBox( this );
-	headSpin->setRange( 0.0, 360.0 );
-	headSpin->setSingleStep( 15.0 );
-	headSpin->setDecimals( 1 );
-	headSpin->setSuffix( QStringLiteral( "°" ) );
-	headSpin->setWrapping( true );
-	headSpin->setToolTip( tr( "Which way the tilt points. No effect while the tilt is 0." ) );
-	opts->addWidget( new QLabel( tr( "Tilt heading" ), this ), oRow, 0 );
-	opts->addWidget( headSpin, oRow++, 1 );
-
 	QLabel * speedLbl = new QLabel( tr( "Speed" ), this );
 	QSlider * speedSlider = new QSlider( Qt::Horizontal, this );
 	speedSlider->setRange( 5, 200 );      // 0.05x .. 2.0x
@@ -409,47 +395,82 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 
 	QCheckBox * groundChk = new QCheckBox( tr( "Ground" ), this );
 	groundChk->setToolTip( tr( "A floor to land on. Without it the ragdoll falls out "
-							   "of the scene." ) );
+							   "of the scene. (H)" ) );
 	QDoubleSpinBox * groundSpin = new QDoubleSpinBox( this );
 	groundSpin->setRange( -100000.0, 100000.0 );
 	groundSpin->setDecimals( 1 );
 	groundSpin->setSingleStep( 5.0 );
 	groundSpin->setSuffix( tr( " units" ) );
 	groundSpin->setToolTip( tr( "Floor height, in game units." ) );
+	/* The reset sits ON the row it resets.
+	 *
+	 * It was a full-width button reading "Put the floor back under the rig" --
+	 * a whole row of panel for an operation that belongs beside the number it
+	 * puts back, which is how every other revert control in this application
+	 * behaves.
+	 */
+	QToolButton * groundResetBtn = new QToolButton( this );
+	groundResetBtn->setText( QStringLiteral( "↺" ) );
+	groundResetBtn->setToolTip( tr( "Put the floor back just below the rig, where it "
+									"started." ) );
+	QWidget * groundCell = new QWidget( this );
+	QHBoxLayout * groundLine = new QHBoxLayout( groundCell );
+	groundLine->setContentsMargins( 0, 0, 0, 0 );
+	groundLine->setSpacing( 2 );
+	groundLine->addWidget( groundSpin, 1 );
+	groundLine->addWidget( groundResetBtn );
 	opts->addWidget( groundChk, oRow, 0 );
-	opts->addWidget( groundSpin, oRow++, 1 );
+	opts->addWidget( groundCell, oRow++, 1 );
 
 	QDoubleSpinBox * gripSpin = new QDoubleSpinBox( this );
 	gripSpin->setRange( 0.0, 4.0 );
 	gripSpin->setSingleStep( 0.1 );
 	gripSpin->setDecimals( 2 );
-	gripSpin->setToolTip( tr( "How much the floor grips. 0 is ice and the rig slides for "
-							  "ever; 1 stops it where it lands." ) );
+	gripSpin->setToolTip( tr( "How much the floor grips, combined with each body's own "
+							  "friction. 0 is ice and the rig slides for ever." ) );
 	opts->addWidget( new QLabel( tr( "Floor grip" ), this ), oRow, 0 );
 	opts->addWidget( gripSpin, oRow++, 1 );
 
-	/* The ragdoll's OWN friction, which is not the floor's.
+	// moved up out of the display checkboxes: a floor you cannot see is the
+	// first thing anyone turning the ground on wants to fix
+	QCheckBox * groundVisChk = new QCheckBox( tr( "Show the ground" ), this );
+	groundVisChk->setToolTip( tr( "Draw the floor as a solid surface. An invisible plane "
+								   "that a ragdoll lands on looks like a bug." ) );
+	opts->addWidget( groundVisChk, oRow++, 0, 1, 2 );
+	col->addWidget( optsRow );
+
+	/* Solver: the file's own numbers, ADJUSTED rather than replaced.
 	 *
-	 * Decoded, solved and adjustable all along, and until now reachable only
-	 * from code. It is why limbs slide against each other rather than catching.
+	 * Every body carries its own friction and bounce and the solver honours them
+	 * now, so these are multipliers -- 1 means "as authored". A global that
+	 * replaced the authored value would quietly discard what the file said, which
+	 * is exactly what the old flat Body friction control did.
 	 */
+	QLabel * solverHead = heading( tr( "Solver" ) );
+	col->addWidget( solverHead );
+	QWidget * solverRow = new QWidget( this );
+	QGridLayout * slv = new QGridLayout( solverRow );
+	slv->setContentsMargins( 0, 0, 0, 0 );
+	slv->setSpacing( 4 );
+	int sRow = 0;
+
 	QDoubleSpinBox * fricSpin = new QDoubleSpinBox( this );
 	fricSpin->setRange( 0.0, 4.0 );
 	fricSpin->setSingleStep( 0.1 );
 	fricSpin->setDecimals( 2 );
-	fricSpin->setToolTip( tr( "Friction between the rig's own bodies, separately from the "
-							  "floor. 0 lets limbs slide over each other freely." ) );
-	opts->addWidget( new QLabel( tr( "Body friction" ), this ), oRow, 0 );
-	opts->addWidget( fricSpin, oRow++, 1 );
+	fricSpin->setToolTip( tr( "Scales the friction each body carries. 1 is the file as "
+							  "authored; 0 lets everything slide freely." ) );
+	slv->addWidget( new QLabel( tr( "Friction x" ), this ), sRow, 0 );
+	slv->addWidget( fricSpin, sRow++, 1 );
 
 	QDoubleSpinBox * bounceSpin = new QDoubleSpinBox( this );
-	bounceSpin->setRange( 0.0, 1.0 );
-	bounceSpin->setSingleStep( 0.05 );
+	bounceSpin->setRange( 0.0, 4.0 );
+	bounceSpin->setSingleStep( 0.1 );
 	bounceSpin->setDecimals( 2 );
-	bounceSpin->setToolTip( tr( "Bounce. 0 keeps a landing dead, which is what Havok's own "
-								"materials say; 1 returns the speed it arrived with." ) );
-	opts->addWidget( new QLabel( tr( "Bounce" ), this ), oRow, 0 );
-	opts->addWidget( bounceSpin, oRow++, 1 );
+	bounceSpin->setToolTip( tr( "Scales the bounce each body carries. 1 is the file as "
+								"authored; 0 makes every landing dead." ) );
+	slv->addWidget( new QLabel( tr( "Bounce x" ), this ), sRow, 0 );
+	slv->addWidget( bounceSpin, sRow++, 1 );
 
 	QDoubleSpinBox * dampSpin = new QDoubleSpinBox( this );
 	dampSpin->setRange( 0.0, 20.0 );
@@ -458,8 +479,56 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	dampSpin->setToolTip( tr( "Extra drag on top of each body's authored damping. Raise it "
 							  "to make a rig settle sooner; 0 leaves the file's own values "
 							  "alone." ) );
-	opts->addWidget( new QLabel( tr( "Damping" ), this ), oRow, 0 );
-	opts->addWidget( dampSpin, oRow++, 1 );
+	slv->addWidget( new QLabel( tr( "Damping +" ), this ), sRow, 0 );
+	slv->addWidget( dampSpin, sRow++, 1 );
+	col->addWidget( solverRow );
+
+	/* Advanced, collapsed. Four rows nobody touches twice in a session, using
+	 * the same disclosure the Collision Manager's own defaults section uses.
+	 */
+	QToolButton * advToggle = new QToolButton( this );
+	advToggle->setText( tr( "Advanced" ) );
+	advToggle->setCheckable( true );
+	advToggle->setArrowType( Qt::RightArrow );
+	advToggle->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+	advToggle->setAutoRaise( true );
+	col->addWidget( advToggle );
+
+	QWidget * advRow = new QWidget( this );
+	QGridLayout * adv = new QGridLayout( advRow );
+	adv->setContentsMargins( 0, 0, 0, 0 );
+	adv->setSpacing( 4 );
+	int aRow = 0;
+	advRow->setVisible( false );
+	connect( advToggle, &QToolButton::toggled, this, [advToggle, advRow]( bool open ) {
+		advToggle->setArrowType( open ? Qt::DownArrow : Qt::RightArrow );
+		advRow->setVisible( open );
+	} );
+
+	/* Gravity DIRECTION, as a tilt off vertical and a heading round the compass.
+	 * Two angles rather than a vector: nobody wants to normalise a triple by
+	 * hand, and the question being asked is "what does this look like on a
+	 * slope", which is exactly a tilt.
+	 */
+	QDoubleSpinBox * tiltSpin = new QDoubleSpinBox( this );
+	tiltSpin->setRange( 0.0, 90.0 );
+	tiltSpin->setSingleStep( 5.0 );
+	tiltSpin->setDecimals( 1 );
+	tiltSpin->setSuffix( QStringLiteral( "°" ) );
+	tiltSpin->setToolTip( tr( "Tip gravity away from straight down, to see how a rig "
+							  "behaves on a slope without authoring one." ) );
+	adv->addWidget( new QLabel( tr( "Gravity tilt" ), this ), aRow, 0 );
+	adv->addWidget( tiltSpin, aRow++, 1 );
+
+	QDoubleSpinBox * headSpin = new QDoubleSpinBox( this );
+	headSpin->setRange( 0.0, 360.0 );
+	headSpin->setSingleStep( 15.0 );
+	headSpin->setDecimals( 1 );
+	headSpin->setSuffix( QStringLiteral( "°" ) );
+	headSpin->setWrapping( true );
+	headSpin->setToolTip( tr( "Which way the tilt points. No effect while the tilt is 0." ) );
+	adv->addWidget( new QLabel( tr( "Tilt heading" ), this ), aRow, 0 );
+	adv->addWidget( headSpin, aRow++, 1 );
 
 	/* Solver cost, exposed because the stats overlay reports joint error and
 	 * until now there was nothing to DO about a bad number.
@@ -468,21 +537,16 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	iterSpin->setRange( 1, 32 );
 	iterSpin->setToolTip( tr( "Constraint sweeps per substep. Four is measured; more buys "
 							  "little on a healthy rig and can rescue a stiff one." ) );
-	opts->addWidget( new QLabel( tr( "Sweeps" ), this ), oRow, 0 );
-	opts->addWidget( iterSpin, oRow++, 1 );
+	adv->addWidget( new QLabel( tr( "Sweeps" ), this ), aRow, 0 );
+	adv->addWidget( iterSpin, aRow++, 1 );
 
 	QSpinBox * subSpin = new QSpinBox( this );
 	subSpin->setRange( 1, 32 );
 	subSpin->setToolTip( tr( "Substeps per frame. The main stability control: raise it if "
 							 "a rig jitters or a joint separates, at a proportional cost." ) );
-	opts->addWidget( new QLabel( tr( "Substeps" ), this ), oRow, 0 );
-	opts->addWidget( subSpin, oRow++, 1 );
-
-	QPushButton * groundResetBtn = new QPushButton( tr( "Put the floor back under the rig" ), this );
-	groundResetBtn->setToolTip( tr( "Return the floor to just below the rig, where it "
-									"started." ) );
-	opts->addWidget( groundResetBtn, oRow++, 0, 1, 2 );
-	col->addWidget( optsRow );
+	adv->addWidget( new QLabel( tr( "Substeps" ), this ), aRow, 0 );
+	adv->addWidget( subSpin, aRow++, 1 );
+	col->addWidget( advRow );
 
 	/* Checkboxes in their own column, not in the label/value grid.
 	 *
@@ -494,9 +558,6 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	QVBoxLayout * flags = new QVBoxLayout( flagsRow );
 	flags->setContentsMargins( 0, 0, 0, 0 );
 	flags->setSpacing( 2 );
-	QCheckBox * groundVisChk = new QCheckBox( tr( "Show the ground" ), this );
-	groundVisChk->setToolTip( tr( "Draw the floor as a solid surface. An invisible plane "
-								   "that a ragdoll lands on looks like a bug." ) );
 	QCheckBox * selfChk = new QCheckBox( tr( "Self-collision" ), this );
 	selfChk->setToolTip( tr( "Let the rig collide with itself, as the file authorises." ) );
 	QCheckBox * limitsChk = new QCheckBox( tr( "Angular limits" ), this );
@@ -509,7 +570,7 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	QCheckBox * statsChk = new QCheckBox( tr( "Stats overlay" ), this );
 	statsChk->setToolTip( tr( "Speed, joint error, contacts and penetration, drawn over "
 							  "the viewport. The solver computes these anyway." ) );
-	for ( QCheckBox * c : { groundVisChk, selfChk, limitsChk, hiLimitsChk, statsChk } )
+	for ( QCheckBox * c : { selfChk, limitsChk, hiLimitsChk, statsChk } )
 		flags->addWidget( c );
 	col->addWidget( flagsRow );
 
@@ -532,21 +593,14 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 							 "answers one question." ) );
 	col->addWidget( presets );
 
-	/* Every body by name, with its pin as a checkbox.
+	/* No body list here.
 	 *
-	 * On a 39-body rig, pinning a named bone meant finding it with the cursor
-	 * and right-clicking the right shape -- which is the picking problem, faced
-	 * again for a job that does not need aiming at all. The names come from the
-	 * NIF's collision objects; the packfile itself has none.
+	 * There was one, showing every body by name with its pin as a checkbox --
+	 * sitting one panel below the Collision Manager's tree, which already lists
+	 * exactly those bodies with their bone, shape, layer, material, mass and
+	 * state. The only thing the list added was the checkbox, so the checkbox
+	 * moved to the tree and the list went (CollisionManagerPanel::refreshSimPins).
 	 */
-	QLabel * bodiesHead = heading( tr( "Bodies" ) );
-	col->addWidget( bodiesHead );
-	QListWidget * bodyList = new QListWidget( this );
-	bodyList->setMaximumHeight( 150 );
-	bodyList->setToolTip( tr( "Tick to pin a bone in place. The same pin the right "
-							  "mouse button sets in the viewport." ) );
-	bodyList->setAlternatingRowColors( true );
-	col->addWidget( bodyList );
 
 	/* The shortcuts, written down.
 	 *
@@ -594,16 +648,13 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		/* Name the system, not just its size. "17 bodies, 16 joints" was true of
 		 * whichever system happened to be first and said nothing about which.
 		 */
-		if ( on ) {
-			const QModelIndex iSys = m_nif ? m_nif->getBlockIndex( pv.systemBlock() ) : QModelIndex();
-			const QString kind = iSys.isValid() ? m_nif->itemName( iSys ) : QString();
-			status->setText( kind.isEmpty()
-				? tr( "%1 bodies, %2 joints." ).arg( pv.bodyCount() ).arg( pv.jointCount() )
-				: tr( "%1 [%2]: %3 bodies, %4 joints." ).arg( kind ).arg( pv.systemBlock() )
-					.arg( pv.bodyCount() ).arg( pv.jointCount() ) );
-		} else {
-			status->setText( tr( "Not running." ) );
-		}
+		/* The COUNTS only. The system's own name goes in the picker below, and
+		 * the Collision Manager says how many systems the file holds two inches
+		 * above -- three places naming the same thing was two too many.
+		 */
+		status->setText( on
+			? tr( "%1 bodies, %2 joints." ).arg( pv.bodyCount() ).arg( pv.jointCount() )
+			: tr( "Not running." ) );
 		for ( QAbstractButton * tb : toolGroup->buttons() )
 			tb->setEnabled( on );
 		if ( QAbstractButton * tb = toolGroup->button( int( pv.tool() ) ) ) {
@@ -659,7 +710,7 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		}
 		for ( QWidget * w : { (QWidget *)fricSpin, (QWidget *)dampSpin, (QWidget *)bounceSpin,
 				(QWidget *)iterSpin, (QWidget *)subSpin, (QWidget *)tiltSpin,
-				(QWidget *)headSpin, (QWidget *)presets, (QWidget *)bodyList,
+				(QWidget *)headSpin, (QWidget *)presets,
 				(QWidget *)unpinBtn, (QWidget *)captureBtn, (QWidget *)recBtn,
 				(QWidget *)scrub, (QWidget *)liveBtn } )
 			w->setEnabled( on );
@@ -678,34 +729,6 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 			scrub->setValue( scrub->maximum() );
 		liveBtn->setEnabled( on && pv.frameIndex() >= 0 );
 
-		/* The body list is REBUILT only when the rig changes, not on every
-		 * sync: it is rebuilt on entering the mode and after a reset, and
-		 * otherwise only its check states are refreshed. Rebuilding a
-		 * 39-row list every time the panel opened would also lose the scroll
-		 * position each time.
-		 */
-		const int want = on ? pv.bodyCount() : 0;
-		if ( bodyList->count() != want ) {
-			QSignalBlocker bl( bodyList );
-			bodyList->clear();
-			for ( int i = 0; i < want; i++ ) {
-				QString nm = pv.bodyName( i );
-				if ( nm.isEmpty() )
-					nm = tr( "body %1" ).arg( i );
-				QListWidgetItem * it = new QListWidgetItem( nm, bodyList );
-				it->setFlags( it->flags() | Qt::ItemIsUserCheckable );
-				it->setData( Qt::UserRole, i );
-			}
-		}
-		{
-			QSignalBlocker bl( bodyList );
-			for ( int i = 0; i < bodyList->count(); i++ ) {
-				QListWidgetItem * it = bodyList->item( i );
-				const int body = it->data( Qt::UserRole ).toInt();
-				it->setCheckState( ( body >= 0 && body < pv.bodyCount()
-					&& pv.sim().bodies().at( body ).pinned ) ? Qt::Checked : Qt::Unchecked );
-			}
-		}
 
 		/* The system picker, only where there is a choice to make. Rebuilt from
 		 * the file each time, because loading a different file changes it.
@@ -716,13 +739,28 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 			if ( m_nif ) {
 				for ( qint32 b = 0; b < m_nif->getBlockCount(); b++ ) {
 					const QModelIndex i = m_nif->getBlockIndex( b );
-					if ( m_nif->blockInherits( i, "bhkPhysicsSystem" )
-						|| m_nif->blockInherits( i, "bhkRagdollSystem" ) )
+					if ( !m_nif->blockInherits( i, "bhkPhysicsSystem" )
+						&& !m_nif->blockInherits( i, "bhkRagdollSystem" ) )
+						continue;
+					// the same test start() applies: a system with no constraints is
+					// furniture, and offering it is offering a dead end
+					const HknpSystem sys = hknpDecode( m_nif->get<QByteArray>( i, "Binary Data" ) );
+					if ( sys.valid && !sys.constraints.isEmpty() )
 						systems << int( b );
 				}
 			}
-			sysCombo->setVisible( systems.size() > 1 );
-			if ( systems.size() > 1 ) {
+			/* Shown whenever anything is running, not only when there is a choice:
+			 * it is the one place that names which system is on screen now that
+			 * the status line carries counts alone.
+			 *
+			 * Only systems that can actually BE simulated are listed. It used to
+			 * offer every bhkPhysicsSystem in the file, and picking a jointless
+			 * one stopped the running sim, failed, and said nothing -- which is
+			 * how a panel came to show bhkRagdollSystem [7] in its status and
+			 * bhkPhysicsSystem [8] in its picker at the same time.
+			 */
+			sysCombo->setVisible( on );
+			if ( on ) {
 				if ( sysCombo->count() != systems.size() ) {
 					sysCombo->clear();
 					for ( int b : systems )
@@ -732,6 +770,7 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 				const int idx = sysCombo->findData( pv.systemBlock() );
 				if ( idx >= 0 )
 					sysCombo->setCurrentIndex( idx );
+				sysCombo->setEnabled( systems.size() > 1 );
 			}
 		}
 
@@ -746,7 +785,6 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		const bool punty  = ( t == PhysicsPreview::Tool::Punt );
 		const bool ballsy = ( t == PhysicsPreview::Tool::Prop );
 		firmSpin->setVisible( grabby );  firmLbl->setVisible( grabby );
-		strengthSpin->setVisible( grabby ); strengthLbl->setVisible( grabby );
 		noCollideChk->setVisible( grabby );
 		puntStrength->setVisible( punty ); puntLbl->setVisible( punty );
 		puntPullChk->setVisible( punty );
@@ -767,7 +805,6 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		windStrength->setVisible( windy );   windLbl->setVisible( windy );
 		// ...but never in the manager, which has no tool row for them to belong to
 		toolParams->setVisible( on && m_mode == Mode::Essentials );
-		QSignalBlocker ps( strengthSpin );
 		QSignalBlocker p0( firmSpin ), p1( impulseSpin ), p2( projChk ), p3( projSpeed );
 		QSignalBlocker p4( projMass ), p5( projRadius ), p6( projGrav ), p7( blastRadius );
 		QSignalBlocker p8( blastStrength ), p9( windStrength );
@@ -779,8 +816,11 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		propRadius->setValue( double( ts.propRadius ) );
 		propMass->setValue( double( ts.propMass ) );
 		propSpeed->setValue( double( ts.propSpeed ) );
-		firmSpin->setValue( double( ts.grabFirmness ) );
-		strengthSpin->setValue( double( ts.grabStrength ) );
+		/* Read BACK through the same mapping the dial writes, so a preset that
+		 * moved firmness shows on the dial instead of leaving it displaying
+		 * whatever it was last set to.
+		 */
+		firmSpin->setValue( double( ( ts.grabFirmness - 0.15f ) / 0.85f ) );
 		impulseSpin->setValue( double( ts.shootImpulse ) );
 		projChk->setChecked( ts.shootProjectile );
 		projSpeed->setValue( double( ts.projectileSpeed ) );
@@ -901,12 +941,18 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		m_ogl->physicsSim().setHighlightLimits( on );
 		m_ogl->update();
 	} );
+	/* Grip drives both halves of the grab.
+	 *
+	 * 0.15 + 0.85g and 3 + 25g, so the default of 0.9 gives firmness 0.915 and
+	 * 25.5 times body weight -- within a hair of the 0.9 and 25 the two separate
+	 * dials shipped with, so the tool feels exactly as it did.
+	 */
 	connect( firmSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
-		m_ogl->physicsSim().settings().grabFirmness = float( v );
-	} );
-	connect( strengthSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
-		m_ogl->physicsSim().settings().grabStrength = float( v );
-		m_ogl->physicsSim().sim().dragStrength = float( v );
+		PhysicsPreview & pv = m_ogl->physicsSim();
+		const float g = float( std::clamp( v, 0.0, 1.0 ) );
+		pv.settings().grabFirmness = 0.15f + 0.85f * g;
+		pv.settings().grabStrength = 3.0f + 25.0f * g;
+		pv.sim().dragStrength = pv.settings().grabStrength;
 	} );
 	connect( impulseSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
 		m_ogl->physicsSim().settings().shootImpulse = float( v );
@@ -1034,18 +1080,6 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		syncCollisionPanel();
 	} );
 
-	connect( bodyList, &QListWidget::itemChanged, this,
-		[this, syncCollisionPanel]( QListWidgetItem * it ) {
-			if ( !it )
-				return;
-			PhysicsPreview & pv = m_ogl->physicsSim();
-			const int body = it->data( Qt::UserRole ).toInt();
-			if ( body >= 0 && body < pv.bodyCount() )
-				pv.sim().setPinned( body, it->checkState() == Qt::Checked );
-			m_ogl->update();
-			syncCollisionPanel();
-		} );
-
 	connect( sysCombo, &QComboBox::activated, this,
 		[this, sysCombo, syncCollisionPanel]( int idx ) {
 			const int block = sysCombo->itemData( idx ).toInt();
@@ -1124,9 +1158,14 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		[this]() { emit openManagerRequested(); } );
 
 	if ( m_mode == Mode::Essentials ) {
-		for ( QWidget * w : { (QWidget *)recRow, (QWidget *)actsRow, (QWidget *)optsRow,
-				(QWidget *)flagsRow, (QWidget *)optionsHead, (QWidget *)bodiesHead,
-				(QWidget *)bodyList, (QWidget *)legend } )
+		/* The dropdown keeps World, because gravity, speed and the floor are
+		 * watched-while-running controls -- gravity has had a keyboard shortcut
+		 * since before this panel existed, which is a fair sign of how often it
+		 * is wanted. Solver and Advanced stay behind in the manager.
+		 */
+		for ( QWidget * w : { (QWidget *)recRow, (QWidget *)actsRow,
+				(QWidget *)solverHead, (QWidget *)solverRow, (QWidget *)advToggle,
+				(QWidget *)advRow, (QWidget *)flagsRow, (QWidget *)legend } )
 			w->hide();
 	} else {
 		openMgr->hide();

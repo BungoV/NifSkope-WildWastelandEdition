@@ -269,7 +269,8 @@ void PhysicsPreview::reset()
 	const bool ground = m_sim.ground, selfColl = m_sim.selfCollision, angLimits = m_sim.angularLimits;
 	const float groundZ = m_sim.groundZ, grip = m_sim.groundFriction;
 	const Vector3 w = m_sim.wind;
-	const float fric = m_sim.friction, damp = m_sim.damping, rest = m_sim.restitution;
+	const float fric = m_sim.frictionScale, damp = m_sim.damping;
+	const float rest = m_sim.restitutionScale;
 	const int iters = m_sim.iterations;
 	const bool noColl = m_sim.dragNoCollide;
 	m_sim.clearDrag();
@@ -295,9 +296,9 @@ void PhysicsPreview::reset()
 	m_sim.angularLimits = angLimits;
 	m_sim.wind = w;
 	m_sim.groundFriction = grip;
-	m_sim.friction = fric;
+	m_sim.frictionScale = fric;
 	m_sim.damping = damp;
-	m_sim.restitution = rest;
+	m_sim.restitutionScale = rest;
 	m_sim.iterations = iters;
 	m_sim.dragNoCollide = noColl;
 	setGravityEnabled( m_gravityOn );
@@ -785,7 +786,7 @@ bool PhysicsPreview::press( const Vector3 & rayOrigin, const Vector3 & rayDir )
 			return false;
 		const Vector3 push = dir * ( m_settings.puntPull ? -m_settings.puntStrength
 			: m_settings.puntStrength );
-		m_sim.applyImpulse( p.body, p.localPoint, push );
+		m_sim.shove( p.body, p.localPoint, push );
 		Shot trace;
 		trace.from = rayOrigin;
 		trace.to = p.worldPoint * SCALE;

@@ -52,10 +52,11 @@ public:
 		Wind,       //!< steady force along the view direction while held
 		/*! Shove a body away along the view ray, or yank it toward the camera.
 		 *
-		 * The gravity gun's other half. Distinct from Shoot, which delivers a small
-		 * impulse where a round would land: this is a heavy directed push meant to
-		 * move something, and it acts along the VIEW rather than along the surface
-		 * it hit, so a punt sends a body away from you rather than into the floor.
+		 * The gravity gun's other half, and it differs from Shoot in the one way
+		 * that matters: it sets a SPEED rather than delivering an impulse, so what
+		 * you point at leaves at the same rate whether it is a jaw or a torso. The
+		 * first version described itself as acting "along the view" as though Shoot
+		 * did not -- both do -- which made it a heavier Shoot and nothing else.
 		 */
 		Punt,
 		/*! Throw a ball into the scene.
@@ -99,8 +100,8 @@ public:
 		float blastStrength = 30.0f;
 		//! Wind: force in newtons along the view.
 		float windStrength = 40.0f;
-		//! Punt: impulse along the view, kg m/s.
-		float puntStrength = 60.0f;
+		//! Punt: the SPEED it leaves at, m/s -- not an impulse. See RagdollSim::shove.
+		float puntStrength = 6.0f;
 		//! Punt: pull toward the camera instead of pushing away.
 		bool puntPull = false;
 
@@ -352,16 +353,20 @@ public:
 	void setAngularLimits( bool on ) { m_sim.angularLimits = on; }
 	bool angularLimits() const { return m_sim.angularLimits; }
 
-	//! The ragdoll's own body-on-body friction, which is not the floor's.
-	void setFriction( float f ) { m_sim.friction = std::max( 0.0f, f ); }
-	float friction() const { return m_sim.friction; }
+	/*! Multiplier on the friction each body carries, which is not the floor's.
+	 *
+	 * A scale, because the file authors a coefficient per body and the solver now
+	 * honours it; this only adjusts them all together. 1 is the file as authored.
+	 */
+	void setFriction( float f ) { m_sim.frictionScale = std::max( 0.0f, f ); }
+	float friction() const { return m_sim.frictionScale; }
 	//! Extra drag per second on top of each body's authored damping. Raise it to
 	//! make a rig settle sooner; 0 leaves the file's own values alone.
 	void setDamping( float d ) { m_sim.damping = std::max( 0.0f, d ); }
 	float damping() const { return m_sim.damping; }
-	//! Bounce, 0 to 1. See RagdollSim::restitution.
-	void setRestitution( float r ) { m_sim.restitution = std::clamp( r, 0.0f, 1.0f ); }
-	float restitution() const { return m_sim.restitution; }
+	//! Multiplier on the bounce each body carries. See RagdollSim::restitutionScale.
+	void setRestitution( float r ) { m_sim.restitutionScale = std::max( 0.0f, r ); }
+	float restitution() const { return m_sim.restitutionScale; }
 	//! Gauss-Seidel sweeps per substep, and substeps per frame. Both trade cost
 	//! for stability; the stats overlay is what says whether they are needed.
 	void setIterations( int n ) { m_sim.iterations = std::clamp( n, 1, 32 ); }

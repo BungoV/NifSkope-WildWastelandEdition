@@ -45,6 +45,18 @@ struct SimBody
 	float linDamping = 0.1f;
 	float angDamping = 0.05f;
 
+	/*! Coulomb friction and bounce, as the FILE authors them (body_props +0x12
+	 * and +0x16).
+	 *
+	 * Decoded all along, editable in the Collision Manager, and ignored by the
+	 * solver, which used one global number for every body. They are not
+	 * decorative: across 37 actor skeletons friction takes at least six distinct
+	 * values (0.30, 0.40, 0.50, 0.60, 0.70, 3.00) and restitution runs from 0 to
+	 * 0.80, so a flat 0.5 threw away most of what the file said.
+	 */
+	float friction = 0.5f;
+	float restitution = 0.4f;
+
 	float invMass = 0.0f;       //!< 0 for a pinned or static body
 	Vector3 invInertia;         //!< diagonal of the inverse inertia, body space
 	bool pinned = false;        //!< held in place (the root, or a dragged bone)
@@ -326,6 +338,19 @@ public:
 	 */
 	void applyImpulse( int body, const Vector3 & localPoint, const Vector3 & impulse );
 
+	/*! Shove a body to a SPEED, whatever it weighs. The gravity gun's punt.
+	 *
+	 * An impulse divided by mass is a velocity, so the same impulse launches a
+	 * 0.2 kg jaw across the scene and barely nudges a Liberty Prime torso -- which
+	 * made Punt a heavier Shoot and nothing more. Setting the speed instead is the
+	 * thing an impulse cannot do, and it is what a gravity gun feels like: what
+	 * you point at goes, and how heavy it is is not your problem.
+	 *
+	 * The spin still comes from the offset, so punting a foot still turns the rig;
+	 * only the linear part is mass-independent.
+	 */
+	void shove( int body, const Vector3 & localPoint, const Vector3 & velocity );
+
 	/*! A radial impulse from a point: the grenade.
 	 *
 	 * Falls off linearly to nothing at `radius`, and pushes each body from the
@@ -448,9 +473,14 @@ public:
 	 * filter groups, which are honoured first where the file sets them.
 	 */
 	bool selfCollision = true;
-	//! Coulomb friction at contacts. Zero makes a ragdoll slide for ever, which
-	//! reads as broken even though it is stable.
-	float friction = 0.5f;
+	/*! Multiplier on the friction the bodies themselves carry.
+	 *
+	 * A scale rather than a value, because the file already says what each body's
+	 * friction is and a global that REPLACED it would silently discard that. The
+	 * same arrangement `damping` has had all along: the authored number is the
+	 * truth and this adjusts it. 1 is the file as authored; 0 is ice.
+	 */
+	float frictionScale = 1.0f;
 	/*! Friction against the ground plane, separately from body-on-body.
 	 *
 	 * Separate because a floor is a surface with its own character -- ice, mud,
@@ -460,18 +490,21 @@ public:
 	float groundFriction = 1.0f;
 	//! Extra damping per second on top of each body's own authored value.
 	float damping = 0.0f;
-	/*! Bounce: 0 keeps a landing dead, 1 returns the speed it arrived with.
+	/*! Multiplier on the bounce the bodies themselves carry.
 	 *
-	 * A separate VELOCITY pass after the position solve, which is where XPBD puts
-	 * restitution and not merely where it is convenient. The position solve has
-	 * already removed the approach by the time the pass runs, so reflecting the
-	 * post-solve velocity would reflect nothing; it uses the speed recorded at the
-	 * start of the substep instead (SimBody::vPre).
+	 * The bounce is a separate VELOCITY pass after the position solve, which is
+	 * where XPBD puts restitution and not merely where it is convenient: the
+	 * position solve has already removed the approach by the time the pass runs,
+	 * so reflecting the post-solve velocity would reflect nothing. It uses the
+	 * speed recorded at the start of the substep instead (SimBody::vPre).
 	 *
-	 * Default 0 because the ragdolls this previews are meant to land and stay
-	 * landed -- Havok's own material restitution is 0 on every corpus body checked.
+	 * This defaulted to 0 on a comment asserting that Havok's own material
+	 * restitution is 0 on every corpus body. That was never measured and is not
+	 * true: across 37 actor skeletons only 71 bodies of some 900 carry 0, against
+	 * 284 at 0.30, 263 at 0.20 and 74 at 0.80. The default is 1 now, meaning "the
+	 * file as authored".
 	 */
-	float restitution = 0.0f;
+	float restitutionScale = 1.0f;
 	/*! Gauss-Seidel sweeps per substep.
 	 *
 	 * XPBD's usual advice is one sweep and many substeps, which holds while the
