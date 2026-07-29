@@ -3126,6 +3126,123 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_REVERT_TEST=<donor.nif>): can a loaded NIF be modified and
+	 * put back exactly, without saving?
+	 *
+	 * This gates the whole workspace idea: if several loaded documents are to be
+	 * posed, synced and frozen as a scratch space, then "undo everything" has to
+	 * mean the bytes are what they were, not merely that the model looks right.
+	 * So every check here compares the SERIALIZED file, not the model state — a
+	 * revert that leaves an extra header string or a grown array is not a revert.
+	 *
+	 * Three edit paths, because they do not share a mechanism: a pose import (the
+	 * thing the user will actually do), a merge (which routes through
+	 * nifSnapshotOp), and a direct set<> (which does not).
+	 * Log: release/ww_revert_test.log.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_REVERT_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 900, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_revert_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass )
+						fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				auto bytes = [nif]() {
+					QByteArray b;
+					QBuffer buf( &b );
+					if ( buf.open( QIODevice::WriteOnly ) )
+						nif->save( buf );
+					return b;
+				};
+				auto undoAll = [nif]() {
+					if ( !nif->undoStack )
+						return;
+					while ( nif->undoStack->canUndo() )
+						nif->undoStack->undo();
+				};
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					const QByteArray loaded = bytes();
+					log << "loaded: " << loaded.size() << " bytes, "
+						<< nif->getBlockCount() << " blocks\n";
+					check( "the primary document has an undo stack", nif->undoStack != nullptr );
+
+					// --- path 1: a pose import, the operation this workflow is for
+					const QString donor = qEnvironmentVariable( "WW_REVERT_TEST" );
+					if ( QFileInfo::exists( donor ) && donor.endsWith( QStringLiteral( ".xml" ) ) ) {
+						QString err;
+						const int n = skope->ogl->poseImportOutfitStudio( donor, 1.0f, &err );
+						log << "pose import: " << n << " bone(s)\n";
+						check( "a pose import changes the file", n > 0 && bytes() != loaded );
+						undoAll();
+						check( "...and undo puts every byte back", bytes() == loaded );
+					}
+
+					// --- path 2: a merge, which routes through nifSnapshotOp
+					if ( QFileInfo::exists( donor ) && donor.endsWith( QStringLiteral( ".nif" ) ) ) {
+						NifMergeResult r;
+						const bool merged = nifMergeFile( nif, donor, true, r );
+						log << "merge: " << ( merged ? "ok" : "failed" ) << ", +"
+							<< r.blocksAdded << " blocks\n";
+						check( "a merge changes the file", merged && bytes() != loaded );
+						undoAll();
+						const QByteArray after = bytes();
+						check( "...and undo puts every byte back", after == loaded );
+						if ( after != loaded )
+							log << "     " << after.size() << " bytes vs " << loaded.size()
+								<< ", " << nif->getBlockCount() << " blocks\n";
+					}
+
+					// --- path 3: a bare set<>, the path with no command behind it
+					{
+						QModelIndex iRoot = nif->getBlockIndex( 0 );
+						const QString was = nif->get<QString>( iRoot, "Name" );
+						nif->set<QString>( iRoot, "Name", was + QStringLiteral( "_scratch" ) );
+						const bool changed = ( bytes() != loaded );
+						undoAll();
+						const bool restored = ( bytes() == loaded );
+						log << "direct set<>: changed=" << changed << " restoredByUndo=" << restored << "\n";
+						check( "a direct set<> is NOT undoable — it needs a command",
+							changed && !restored );
+						/* And putting the value back by hand does NOT restore the
+						 * file. Setting a name allocates a string in the header
+						 * table, and that table only ever GROWS — writing the old
+						 * name back reuses its entry and leaves the new one behind
+						 * as an orphan, so the bytes differ even though every
+						 * value is correct. Revert therefore means undo, never
+						 * manual re-entry; that is the rule this workspace needs.
+						 */
+						nif->set<QString>( iRoot, "Name", was );
+						const bool handRestored = ( bytes() == loaded );
+						log << "     re-entering the old value by hand restored the bytes: "
+							<< handRestored << " (" << bytes().size() << " vs "
+							<< loaded.size() << ")\n";
+						check( "...and re-entering the value by hand does NOT restore them "
+							"(the header string table only grows)", !handRestored );
+					}
+					check( "the document is clean at the end",
+						nif->undoStack && nif->undoStack->isClean() );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS\n" : "CHECK: failures above\n" );
+				log << "done\n";
+				logf.close();
+				if ( nif && nif->undoStack )
+					nif->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SHOT=<out.png>): load, let the scene settle, save the
 	 * viewport, quit. No assertions — some things are only checkable by looking,
 	 * and grabFramebuffer renders offscreen, so this costs no focus and can run
