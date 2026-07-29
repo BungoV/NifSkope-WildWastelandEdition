@@ -231,6 +231,7 @@ HEADERS += \
 	src/freezeanim.h \
 	src/gamemanager.h \
 	src/glview.h \
+	src/loadingscreen.h \
 	src/message.h \
 	src/nifcli.h \
 	src/nifmerge.h \
@@ -362,6 +363,7 @@ SOURCES += \
 	src/freezeanim.cpp \
 	src/gamemanager.cpp \
 	src/glview.cpp \
+	src/loadingscreen.cpp \
 	src/main.cpp \
 	src/message.cpp \
 	src/nifcli.cpp \

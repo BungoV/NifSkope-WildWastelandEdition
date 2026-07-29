@@ -1,5 +1,98 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30m — bake a posed rig into loading-screen art
+
+The last step of the pipeline. In the Loaded NIFs list, 2+ rows selected:
+**Merge and Convert to Loading Screen…** — merge as before, then evaluate the
+skins away, drop the skeleton, and re-centre every shape on its own origin. Also
+`nifcli loading-screen <file> [--no-zoom-target] [--keep-particles] -o OUT`.
+
+New: `src/loadingscreen.{h,cpp}`, `tests/loadingscreen/bake_check.sh`.
+
+Whatever pose the bones are in when it runs is the pose that gets baked. That is
+the whole point of the ordering: assemble, pose, freeze each effect at its own
+moment, **look at it**, then convert.
+
+### The format is not a guess, and one file is not a corpus
+
+`meshes/LoadScreenArt` is 173 files. Every rule below is read off them, not
+inferred from `Armor03PowerArmor8X01.nif` alone:
+
+- Plain `BSTriShape`, no `BSSkin::Instance`, no `BoneData` — **the skin is
+  evaluated away**.
+- No `NiNode`s but the root and an optional `LoadingMenuZoomTarget` (65 of 173) —
+  **the skeleton is dropped**.
+- Non-zero translation, **identity rotation**, vertices near a local origin. Not
+  a style choice: FO4 vertices are half floats, and the step at Z ≈ 111 is
+  ~0.0078 units — enough faceting to see on a helmet. **Per shape, translation =
+  the world centroid, vertices = world − centroid.**
+- Controllers are *not* required to be stripped (18 of 173 move, 13 animate a
+  shader), so freezing stays a separate, optional step.
+- `BSXFlags` (38 files) and `BSBehaviorGraphExtraData` (9) are kept.
+  `BSBoneLODExtraData` and `BSBound` are not — they describe a skeleton there no
+  longer is.
+
+### The evaluation is the renderer's
+
+Same arithmetic as `Shape::skinVertex` — the weighted matrix from
+`vertexSkinMatrix`, normalised by the weight sum. The renderer works in the
+shape's local space and multiplies its world transform back afterwards, which
+cancels, so the vertex wanted here is just
+
+    world = ( Σ wᵢ · boneWorldᵢ · boneBindᵢ ) / Σ wᵢ · v
+
+**Normals, tangents and bitangents are rotated by the same matrix.** Skipping
+that is what makes a bake look correct until you find a curved surface: the
+positions move and the lighting does not follow. The bitangent is stored split
+across three fields of two different types, so it has to be reassembled to be
+rotated at all.
+
+### Two things that only show up downstream
+
+- **Deleting the skeleton orphans a great deal.** Its ragdoll collision, its
+  `BSSkin::Instance`/`BoneData`, every controller that drove a bone — all left
+  with nothing pointing at them, and NifSkope's `rootLinks` cannot tell those
+  from a real root, because it computes "root" as "nothing refers to it". So
+  reachability is walked from the block actually kept, over **Ref links only**: a
+  Ptr is a weak back-reference (`Skeleton Root`, a controller's `Target`) and
+  following those keeps exactly the debris the sweep exists to remove. 39 blocks
+  out instead of 68.
+- **An empty shape and the controller that fills it live or die together.** X-01
+  Tesla's `Bolt_01`/`Bolt_02` are `BSTriShape` with `Num Vertices` 0 and
+  `Vertex Desc` 0 — pure placeholders a `BSProceduralLightningController`
+  generates into at runtime. Dropping the controller and keeping the shape leaves
+  geometry that draws nothing. `--keep-particles` keeps both.
+
+Particles and procedural lightning are dropped by default and **reported**, with
+the count: 0 of 173 vanilla screens contain either. Keeping the look means
+snapshotting their generated geometry into an effect-shader mesh, which is not
+built.
+
+### The test is about where things are
+
+`tests/loadingscreen/bake_check.sh` — 17 checks, green. A skin bake fails in ways
+a block list cannot see, so:
+
+- **Vertex Desc and Data Size move together.** Dropping the Skinned attribute must
+  shrink the stride by exactly 12 bytes per vertex (4 half weights + 4 byte
+  indices) and `Data Size` must equal `stride*verts + 6*tris`. Measured on
+  `X01_Torso:0`: 32 → 20 bytes/vertex, 115820 → 81464. Get this wrong and the
+  file reads back as garbage without necessarily saying so.
+- **Left/right symmetry.** Arms and legs are separate shapes through separate bone
+  chains: baked centroids come back at X = −26.439 / +26.472 and −16.366 /
+  +16.355. Mirrored to 0.03 units is not something a wrong evaluation produces.
+- **A pose is baked, and only where it should be.** Moving `LArm_UpperArm` alone
+  moves the left arm from (−26.44, −4.06, 115.47) to (−18.96, −3.11, 95.44) and
+  leaves the right arm bit-identical.
+- **Vertices are local**, largest sampled 49.7 — vanilla stores body vertices
+  around 30 with the node at Z = 111.
+
+End to end, with three VFX files each frozen at a different instant: 17 skinned
+shapes evaluated, 7 rigid folded, 167 nodes and 338 blocks removed, 59 left.
+
+Not verified in the viewport — headless only, per the standing rule about not
+stealing focus. In-game validation is bungo's.
+
 ## 2026-07-30l — freeze a sequence to a still
 
 Per loaded document, in the Loaded NIFs list: **Freeze Animation…** picks a

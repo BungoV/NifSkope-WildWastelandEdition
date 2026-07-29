@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "freezeanim.h"
 #include "glview.h"
+#include "loadingscreen.h"
 #include "message.h"
 #include "nifmerge.h"
 #include "nifsnapshot.h"
@@ -1792,11 +1793,19 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
 	QAction * doMerge = menu.addAction( tr( "Merge into a new NIF…" ) );
 	doMerge->setToolTip( tr( "%1 is the target; the rest are spliced into a copy of it" )
 		.arg( picked.first().first ) );
+	// The last step of the loading-screen pipeline: merge, then bake the result
+	// flat. Offered here because it is the same selection and the same target.
+	QAction * doScreen = menu.addAction( tr( "Merge and Convert to Loading Screen…" ) );
+	doScreen->setToolTip( tr( "Merge, then evaluate the skins away and drop the skeleton, "
+		"as the vanilla LoadScreenArt files are built" ) );
 	menu.setToolTipsVisible( true );
-	if ( menu.exec( globalPos ) != doMerge )
+	QAction * chosen = menu.exec( globalPos );
+	if ( chosen != doMerge && chosen != doScreen )
 		return;
+	const bool toLoadingScreen = ( chosen == doScreen );
 
-	QString out = QFileDialog::getSaveFileName( this, tr( "Save merged NIF" ),
+	QString out = QFileDialog::getSaveFileName( this,
+		toLoadingScreen ? tr( "Save loading screen NIF" ) : tr( "Save merged NIF" ),
 		QFileInfo( picked.first().second->getFileInfo() ).absolutePath(),
 		tr( "NIF files (*.nif)" ) );
 	if ( out.isEmpty() )
@@ -1847,6 +1856,16 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
 				: tr( ", attached to %1" ).arg( r.attachedTo ) );
 	}
 
+	LoadingScreen::Result screen;
+	if ( toLoadingScreen ) {
+		QString error;
+		screen = LoadingScreen::convert( &merged, true, false, &error );
+		if ( !screen.ok ) {
+			QMessageBox::warning( this, tr( "Loading Screen" ), error );
+			return;
+		}
+	}
+
 	if ( !merged.saveToFile( out ) ) {
 		QMessageBox::warning( this, tr( "Merge" ), tr( "Could not write %1." ).arg( out ) );
 		return;
@@ -1855,6 +1874,14 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
 	QString text = tr( "Merged %1 file(s) into %2 — %3 shape(s) added.\n\n%4" )
 		.arg( picked.size() - 1 ).arg( QFileInfo( out ).fileName() ).arg( shapes )
 		.arg( report.join( QLatin1Char( '\n' ) ) );
+	if ( toLoadingScreen ) {
+		text += tr( "\n\nBaked to loading-screen art: %1 skinned shape(s) evaluated, "
+			"%2 rigid shape(s) folded, %3 node(s) and %4 block(s) removed." )
+			.arg( screen.shapesBaked ).arg( screen.shapesFolded )
+			.arg( screen.nodesRemoved ).arg( screen.blocksRemoved );
+		if ( !screen.notes.isEmpty() )
+			text += tr( "\n\n• %1" ).arg( screen.notes.join( QStringLiteral( "\n• " ) ) );
+	}
 	if ( !dupes.isEmpty() )
 		text += tr( "\n\nWARNING: %1 bone name(s) now appear on more than one node "
 			"(%2). Posing will address only one of each." )

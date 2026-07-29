@@ -13,6 +13,7 @@ See the LICENSE.md file for the full license text.
 
 #include "freezeanim.h"
 #include "gamemanager.h"
+#include "loadingscreen.h"
 #include "nifmerge.h"
 #include "spellbook.h"
 #include "model/kfmmodel.h"
@@ -2369,6 +2370,31 @@ int cmdFreeze( const QString & file, const QString & sequence, float time,
 	return outFile.isEmpty() ? 0 : ( saveNif( nif, outFile ) ? 0 : 1 );
 }
 
+//! Bake a posed, assembled rig into loading-screen art.
+int cmdLoadingScreen( const QString & file, bool noZoomTarget, bool keepParticles,
+					  const QString & outFile )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	QString error;
+	const LoadingScreen::Result r = LoadingScreen::convert( &nif, !noZoomTarget, keepParticles, &error );
+	if ( !r.ok ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+
+	out() << r.shapesBaked << " skinned shape(s) evaluated, "
+		  << r.shapesFolded << " rigid shape(s) folded, "
+		  << r.nodesRemoved << " node(s) and " << r.blocksRemoved << " block(s) removed"
+		  << ( r.zoomTargetAdded ? ", LoadingMenuZoomTarget added" : "" ) << Qt::endl;
+	for ( const QString & n : r.notes )
+		out() << "  note: " << n << Qt::endl;
+
+	return outFile.isEmpty() ? 0 : ( saveNif( nif, outFile ) ? 0 : 1 );
+}
+
 //! Animation rigging: attach controllers and wire them into a sequence.
 /*! The workflow the GUI's "Setup Controllers" dialog drives, addressable by
  *  name so it can be scripted over many nodes. */
@@ -2517,7 +2543,12 @@ int usage()
 		  << "                                          bake the sequence at T seconds into\n"
 		  << "                                          the fields it drives and strip the\n"
 		  << "                                          controller graph (--keep-graph bakes\n"
-		  << "                                          the values but leaves it animating)\n\n"
+		  << "                                          the values but leaves it animating)\n"
+		  << "  loading-screen <file> [--no-zoom-target] [--keep-particles] -o OUT\n"
+		  << "                                          bake the file AS IT IS POSED into\n"
+		  << "                                          loading-screen art: skins evaluated\n"
+		  << "                                          away, skeleton dropped, each shape\n"
+		  << "                                          re-centred on its own origin\n\n"
 		  << "Field paths are '/'-separated; numeric segments index arrays by row,\n"
 		  << "e.g. -f \"Vertex Data/0/Vertex Colors\".\n\n"
 		  << "Scope: spells and model edits only. Viewport modelling tools (extrude,\n"
@@ -2556,6 +2587,7 @@ int nifskopeCliMain( const QStringList & args )
 	float blend = 1.0f;
 	float freezeTime = 0.0f;
 	bool keepGraph = false;
+	bool noZoomTarget = false, keepParticles = false;
 	int steps = 0;
 	int substeps = 0;
 	int iterations = 0;
@@ -2612,6 +2644,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--blend" ) ) blend = next().toFloat();
 		else if ( t == QLatin1String( "--time" ) ) freezeTime = next().toFloat();
 		else if ( t == QLatin1String( "--keep-graph" ) ) keepGraph = true;
+		else if ( t == QLatin1String( "--no-zoom-target" ) ) noZoomTarget = true;
+		else if ( t == QLatin1String( "--keep-particles" ) ) keepParticles = true;
 		else if ( t == QLatin1String( "--steps" ) ) steps = next().toInt();
 		else if ( t == QLatin1String( "--substeps" ) ) substeps = next().toInt();
 		else if ( t == QLatin1String( "--iterations" ) ) iterations = next().toInt();
@@ -2693,6 +2727,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
 	else if ( cmd == QLatin1String( "freeze" ) )
 		rc = cmdFreeze( file, sequence, freezeTime, keepGraph, outFile );
+	else if ( cmd == QLatin1String( "loading-screen" ) )
+		rc = cmdLoadingScreen( file, noZoomTarget, keepParticles, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )
 		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
