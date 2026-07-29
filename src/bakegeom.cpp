@@ -177,8 +177,25 @@ QModelIndex writeShape( NifModel * nif, const Capture & cap, QString * error )
 	if ( !iShape.isValid() )
 		return fail( QStringLiteral( "could not create a BSTriShape" ) );
 
-	nif->set<QString>( iShape, "Name", cap.name.isEmpty()
-		? QStringLiteral( "BakedEffect" ) : cap.name );
+	/* A name nothing else in the file already has.
+	 *
+	 * The capture names come from node names, and an assembled X-01 has four nodes
+	 * called BoltGeo_01 — the effect files share a template. Two shapes with one
+	 * name are indistinguishable to anything that looks them up that way.
+	 */
+	QString name = cap.name.isEmpty() ? QStringLiteral( "BakedEffect" ) : cap.name;
+	{
+		QSet<QString> taken;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			const QModelIndex idx = nif->getBlockIndex( b );
+			if ( nif->getIndex( idx, "Name" ).isValid() )
+				taken.insert( nif->get<QString>( idx, "Name" ) );
+		}
+		const QString base = name;
+		for ( int n = 2; taken.contains( name ); n++ )
+			name = QStringLiteral( "%1_%2" ).arg( base ).arg( n );
+	}
+	nif->set<QString>( iShape, "Name", name );
 	nif->set<Vector3>( iShape, "Translation", centroid );
 	nif->set<float>( iShape, "Scale", 1.0f );
 
@@ -303,8 +320,11 @@ Result write( NifModel * nif, const QVector<Capture> & caps, bool removeEmitters
 			const QModelIndex iShape = writeShape( nif, cap, &err );
 			if ( !iShape.isValid() ) {
 				res.notes << err;
+				// Aligned to the input, so a caller can tell which one failed.
+				res.shapeNames << QString();
 				continue;
 			}
+			res.shapeNames << nif->get<QString>( iShape, "Name" );
 			res.shapes++;
 			res.vertices += int( cap.tris.size() );
 			res.triangles += int( cap.tris.size() / 3 );

@@ -119,6 +119,68 @@ else
 	else bad "$empty surviving effect shape(s) were hollowed out"; fi
 fi
 
+# --- 4. the name-collision case ---------------------------------------------
+#
+# One file has effects with distinct names, so it cannot catch the thing that
+# actually went wrong. Both ARM effect files together can: they are authored from
+# the same template and share 15 of 20 node names, including BoltGeo_01 and
+# LightningArcs_VFX. Writing several shapes under one name made the GUI harness
+# compare a helmet arc against a leg arc and report a 115-unit round-trip error
+# that was not real -- so uniqueness is load-bearing, not tidiness.
+SK="${SK:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/CharacterAssets/skeleton.nif}"
+if [ -f "$SK" ] && [ -f "$X/X01_ArmLeft_Tesla_VFX.nif" ] && [ -f "$X/X01_ArmRight_Tesla_VFX.nif" ]; then
+	echo "both arm effects on one rig (the colliding-name case)"
+	"$EXE" -no-gui merge "$SK" \
+		--add "$X/X01_ArmLeft_Tesla_VFX.nif" --add "$X/X01_ArmRight_Tesla_VFX.nif" \
+		-o "$TMP/arms.nif" > "$TMP/arms.log" 2>&1 || { bad "merge failed"; cat "$TMP/arms.log"; }
+
+	if [ -s "$TMP/arms.nif" ]; then
+		rm -f "$LOG"
+		WW_EFFECTBAKE_TEST="$TMP/arms_baked.nif" WW_EFFECTBAKE_TIME="$TIME" WW_WINDOW_AT="1960,20" \
+			"$EXE" --port 41891 "$TMP/arms.nif" > /dev/null 2>&1
+		if [ ! -f "$LOG" ]; then
+			bad "the GUI harness wrote no log for the arm rig"
+		else
+			sed -n 's/^\(captured\|wrote\|worst\) /  &/p' "$LOG"
+			if grep -q '^PASS' "$LOG"; then ok
+			else
+				bad "the colliding-name case failed:"
+				grep '^  FAIL' "$LOG" | sed 's/^/  /'
+			fi
+		fi
+
+		# Independently of the harness: no two BAKED shapes share a name, and none
+		# collides with a shape that was already there.
+		#
+		# Which are baked is decided by DIFFING against the pre-bake file, not by
+		# guessing from the names. The first version of this check counted every
+		# BSTriShape and failed on shapes the bake never touched: the arm files
+		# carry their own duplicate Bolt_01/Bolt_02/Bolt_03 (0 vertices each, the
+		# empty shapes the controllers targeted) and both name their pulse mesh
+		# X01_ArmRight_Tesla_Pulse -- a naming slip in the source assets. That is a
+		# property of the INPUT, and asserting it here measured nothing.
+		if [ -s "$TMP/arms_baked.nif" ]; then
+			shapenames() { "$EXE" -no-gui list "$1" 2>/dev/null \
+				| grep "BSTriShape" | sed "s/.*'\(.*\)'/\1/" | sort; }
+			shapenames "$TMP/arms.nif" > "$TMP/pre.txt"
+			shapenames "$TMP/arms_baked.nif" > "$TMP/post.txt"
+			new="$(comm -13 "$TMP/pre.txt" "$TMP/post.txt")"
+			total="$(echo "$new" | grep -c .)"
+			uniq_n="$(echo "$new" | sort -u | grep -c .)"
+			if [ "$total" -ge 2 ] && [ "$total" = "$uniq_n" ]; then
+				ok; echo "  $total baked shape name(s), all distinct and none pre-existing"
+			else
+				bad "$total baked shape(s) but $uniq_n distinct name(s)"
+				echo "$new" | sed 's/^/    /'
+			fi
+		else
+			bad "no baked file for the arm rig"
+		fi
+	fi
+else
+	echo "  (skipping the colliding-name case: skeleton or arm effects missing)"
+fi
+
 echo
 echo "checks passed: $pass   failed: $fail"
 [ "$fail" -eq 0 ]

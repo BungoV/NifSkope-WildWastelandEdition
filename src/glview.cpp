@@ -705,6 +705,41 @@ void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
 	update();
 }
 
+/*! A name that says WHICH one, when a rig carries several of the same effect.
+ *
+ * An assembled X-01 has FOUR nodes called BoltGeo_01 and SIX called
+ * LightningArcs_VFX, because the effect files are authored from a shared
+ * template — that name reuse is the same thing that made the merge fuse the two
+ * arms. If the bake writes four shapes with one name, nothing downstream can
+ * tell them apart: not the block list, not a test matching by name.
+ *
+ * Walking up to a distinguishing ancestor beats a numeric suffix, because on a
+ * merged rig that ancestor is the LIMB — 'LArm_ForeArm_Armor_BoltGeo_01' says
+ * where it belongs, 'BoltGeo_01_3' says nothing.
+ */
+static QString qualifiedEffectName( Node * node, QSet<QString> & used )
+{
+	QString name = node->getName();
+	if ( name.isEmpty() )
+		name = QStringLiteral( "Effect" );
+
+	Node * up = node->parentNode();
+	while ( used.contains( name ) && up ) {
+		const QString pn = up->getName();
+		if ( !pn.isEmpty() && !name.startsWith( pn ) )
+			name = pn + QLatin1Char( '_' ) + name;
+		up = up->parentNode();
+	}
+	// Ancestors exhausted and still colliding: count, so the name is at least
+	// unique even when the hierarchy cannot distinguish it.
+	const QString base = name;
+	for ( int n = 2; used.contains( name ); n++ )
+		name = QStringLiteral( "%1_%2" ).arg( base ).arg( n );
+
+	used.insert( name );
+	return name;
+}
+
 //! Shared body of the two bakes: one Scene in, captures out.
 static QVector<GLView::BakedEffect> bakeSceneEffects( Scene * scene, const Vector3 & viewAxis,
 	bool wantArcs, bool wantParticles )
@@ -712,6 +747,7 @@ static QVector<GLView::BakedEffect> bakeSceneEffects( Scene * scene, const Vecto
 	QVector<GLView::BakedEffect> out;
 	if ( !scene )
 		return out;
+	QSet<QString> usedNames;
 
 	/* Walked off the scene's node list rather than Scene::pendingBolts, because
 	 * that queue is filled during drawShapes and cleared at the end of it — it is
@@ -730,7 +766,7 @@ static QVector<GLView::BakedEffect> bakeSceneEffects( Scene * scene, const Vecto
 				for ( const FloatVector4 & c : cols )
 					arc.cols.append( Color4( c[0], c[1], c[2], c[3] ) );
 				arc.shaderProperty = node->lightning()->shaderProperty();
-				arc.name = node->getName();
+				arc.name = qualifiedEffectName( node, usedNames );
 				out.append( arc );
 			}
 		}
@@ -743,7 +779,7 @@ static QVector<GLView::BakedEffect> bakeSceneEffects( Scene * scene, const Vecto
 				if ( p->bakeSprites( viewAxis, spr.tris, spr.uvs, spr.cols ) ) {
 					spr.shaderProperty = p->shaderProperty();
 					spr.alphaProperty = p->alphaProperty();
-					spr.name = node->getName();
+					spr.name = qualifiedEffectName( node, usedNames );
 					out.append( spr );
 				}
 			}

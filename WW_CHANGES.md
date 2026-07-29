@@ -1,5 +1,81 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30r — the loading screen has its arcs, and the pipeline is a script
+
+`tools/make_x01_loadscreen.sh` builds the deliverable end to end, and the shipped
+`X01TeslaLoadScreen.nif` now carries the Tesla effects instead of dropping them:
+62 shapes, **18 of them baked effects**, 0 emitter blocks left.
+
+### The order is the whole point of the script
+
+Doing this by hand gets it wrong in two ways that both produce a file that loads:
+
+**Merge with the effects still LIVE.** The established pipeline freezes each effect
+file and then merges, because a frozen file is what a finished screen wants — that
+is what `tests/merge/artobject_attach.sh` does. But freezing strips the controller
+graph, and the arcs and sprites are generated *by* that graph. Freeze first and
+there is nothing left to snapshot.
+
+**Snapshot on the assembled rig, not per file.** A baked shape is written in the
+space it was captured in. Capture a helmet effect inside its own file and the
+coordinates are helmet-local; the merge would then have to rebase them, and it only
+knows how to rebase `NamedAttach` branches, which a baked shape is not. On the
+assembled rig everything is already in actor space, so no rebase is needed and none
+happens.
+
+### Names have to distinguish, not just label
+
+An assembled X-01 carries **four nodes called `BoltGeo_01` and six called
+`LightningArcs_VFX`** — the effect files are authored from a shared template, the
+same name reuse that once made the merge fuse the two arms.
+
+`qualifiedEffectName` walks up the parent chain and prepends the first
+distinguishing ancestor, falling back to a numeric suffix only when the hierarchy
+cannot tell them apart. On a merged rig that ancestor is the limb, so the shapes
+come out as `RLeg_Calf_Armor2_LightningArcs_VFX` and `NamedAttachHEAD_LightningArcs_VFX`
+rather than six copies of one name. `writeShape` additionally refuses any name a
+block in the file already holds, and `Result::shapeNames` reports what each capture
+was actually written as.
+
+### The 115-unit error that was not there
+
+The first full-rig run failed two checks and reported a **115.44-unit** round-trip
+error. It was the harness: it matched baked shapes to captures **by name**, and with
+four `BoltGeo_01` in the file it was measuring a helmet arc against a leg arc. The
+`Data Size` failure was the same cause — it took `hasCol` from the mismatched
+capture.
+
+Matching by index through `Result::shapeNames` took the error to **2.1 × 10⁻⁶
+units** with all ten checks green. Diagnosed by measurement, not by argument, and
+the fix went into the product as well as the test, because indistinguishable shape
+names are a real defect in a file someone has to edit.
+
+A uniqueness check now runs in the harness every time, and
+`tests/loadingscreen/effect_bake.sh` gained a second stage on **both arm effects
+merged onto one skeleton** — the actual collision case, since one file's effects
+have distinct names and cannot catch this.
+
+That new check was wrong on its first attempt too, and in an instructive way: it
+counted every `BSTriShape` and failed on shapes the bake never touched. The arm
+files carry their own duplicate `Bolt_01`/`Bolt_02`/`Bolt_03` (0 vertices each — the
+empty shapes the controllers targeted) and *both* name their pulse mesh
+`X01_ArmRight_Tesla_Pulse`, which is a slip in the source assets. Asserting that is
+a claim about the input. It diffs the pre-bake and post-bake shape lists now, so
+"which are baked" is established rather than guessed.
+
+### Where everything landed
+
+Fan Z 128.0 (chest), helmet effect 156.4, arm pulses ±26.3 symmetric, leg pulses
+48.7, bolt arcs 132–144 at the chest and arms and 87–91 at the legs, sprite clouds
+47–157. Nothing beyond |X| = 60. Full Z range 0.0 – 156.9, feet to helmet.
+`LoadingMenuZoomTarget` present. `PAFrame01` at Z 79.9.
+
+Still carried, still bungo's call: `Frame.nif` brings `basesuit_reduced` and
+`BaseMaleHands_reduced` — the occupant — which vanilla's X-01 screen does not have.
+
+Suites: 8 effect_bake + 10 effectbake + 9 boltbake + 57 freeze + 21 bake + 6
+artobject + 9 merge sweep, all green.
+
 ## 2026-07-30q — the other half: effects written into the NIF, and the choice
 
 The capture side landed in 07-30p with an explicit gap: *"NOT built: emitting the

@@ -75,6 +75,12 @@ struct Result
 	int triangles = 0;
 	//! Emitter blocks removed once their look was captured.
 	int emittersRemoved = 0;
+	//! The name each capture was actually written under, aligned to the input.
+	/*! Empty where that capture failed. Not always the requested name: an
+	 *  assembled rig carries several effects with the SAME node name, so a
+	 *  collision gets a suffix, and a caller that needs to find its shape again
+	 *  has to be told which name it got. */
+	QStringList shapeNames;
 	//! Anything refused or approximated, said out loud.
 	QStringList notes;
 };

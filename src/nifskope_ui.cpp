@@ -3573,27 +3573,53 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					NifModel back;
 					check( "the saved file re-reads", back.loadFromFile( out ) );
 
-					QVector<QModelIndex> baked;
+					/* Matched by INDEX, through the names write() reports back.
+					 *
+					 * Matching on the capture's own name silently compared the wrong
+					 * pair on an assembled rig, which has four nodes called
+					 * BoltGeo_01 and six called LightningArcs_VFX: it reported a
+					 * 115-unit round-trip error that was really a helmet arc being
+					 * measured against a leg arc. write() uniquifies and tells the
+					 * caller what each capture ended up called.
+					 */
+					QHash<QString, QModelIndex> byName;
 					for ( int b = 0; b < back.getBlockCount(); b++ ) {
 						const QModelIndex idx = back.getBlockIndex( b );
-						if ( !back.blockInherits( idx, "BSTriShape" ) )
+						if ( back.blockInherits( idx, "BSTriShape" ) )
+							byName.insert( back.get<QString>( idx, "Name" ), idx );
+					}
+					QVector<QModelIndex> baked;
+					QVector<const BakeGeom::Capture *> bakedSrc;
+					for ( int i = 0; i < caps.size() && i < r.shapeNames.size(); i++ ) {
+						const QString nm = r.shapeNames.at( i );
+						if ( nm.isEmpty() || !byName.contains( nm ) )
 							continue;
-						const QString nm = back.get<QString>( idx, "Name" );
-						for ( const auto & c : caps )
-							if ( nm == c.name ) { baked.append( idx ); break; }
+						baked.append( byName.value( nm ) );
+						bakedSrc.append( &caps.at( i ) );
 					}
 					check( QStringLiteral( "all %1 baked shape(s) are in the re-read file" )
 						.arg( caps.size() ), baked.size() == caps.size() );
 
+					/* Distinct names, because a rig's effect files share a template.
+					 * An assembled X-01 has four BoltGeo_01 and six
+					 * LightningArcs_VFX; writing four shapes under one name made
+					 * this very suite compare a helmet arc against a leg arc and
+					 * report a 115-unit error that did not exist. Uniqueness is
+					 * what makes matching by name safe at all.
+					 */
+					QSet<QString> distinct;
+					for ( const QString & nm : r.shapeNames )
+						if ( !nm.isEmpty() )
+							distinct.insert( nm );
+					check( QStringLiteral( "the %1 baked shape names are all distinct" )
+						.arg( r.shapes ), distinct.size() == r.shapes );
+
 					float worstPos = 0.0f;
 					int sized = 0, shaded = 0;
-					for ( const QModelIndex & idx : baked ) {
+					for ( int k = 0; k < baked.size(); k++ ) {
+						const QModelIndex idx = baked.at( k );
 						const QString nm = back.get<QString>( idx, "Name" );
-						const BakeGeom::Capture * src = nullptr;
-						for ( const auto & c : caps )
-							if ( c.name == nm ) { src = &c; break; }
-						if ( !src )
-							continue;
+						const BakeGeom::Capture * src = bakedSrc.at( k );
 
 						const quint32 nv = back.get<quint32>( idx, "Num Vertices" );
 						const quint32 nt = back.get<quint32>( idx, "Num Triangles" );
