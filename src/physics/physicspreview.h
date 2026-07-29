@@ -180,6 +180,26 @@ public:
 	 * drawing it would show a limb as a string of beads.
 	 */
 	QVector<Vector3> soup() const;
+	//! One body's posed triangles, world space, game units. Empty if it has none.
+	QVector<Vector3> bodySoup( int body ) const;
+
+	/*! Nearest body along a ray, against the geometry actually DRAWN.
+	 *
+	 * Not RagdollSim::pick, which tests the solver's sphere set. That set is a
+	 * capsule reduced to its two end spheres and a polytope to its bare vertices,
+	 * so clicking the middle of a limb was often nearer some neighbour's sphere
+	 * than to anything belonging to the limb itself: aiming straight at a shape
+	 * returned the WRONG body 107 times in 195 on a brahmin.
+	 *
+	 * The earlier reasoning for using the sphere set -- that a pick should not
+	 * land where the physics has nothing -- does not survive contact with the
+	 * problem. A body is rigid, so every point on it is a real place to apply a
+	 * force, and a picker that disagrees with what is on screen is simply wrong.
+	 *
+	 * Ray in GAME units. Falls back to the sphere set for a body that decoded to
+	 * no drawable triangles, which would otherwise be unclickable.
+	 */
+	SimPick pick( const Vector3 & rayOrigin, const Vector3 & rayDir ) const;
 	//! Just the bodies breaking a limit, so the viewport can draw them over the
 	//! rest in a warning colour. Empty unless highlightLimits() is on.
 	QVector<Vector3> limitSoup() const;

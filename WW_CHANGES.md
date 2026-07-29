@@ -1,5 +1,45 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29v — clicking a collision shape now picks that shape
+
+**All rigs pass, 0 failures.**
+
+Clicking a collision mesh often selected the wrong bone. The picker was testing
+`RagdollSim`'s **sphere set**, not the geometry on screen — a capsule reduced to
+its two end spheres, a polytope to its bare vertices at radius zero (clamped to
+2 cm so it could be hit at all). Click the middle of a limb and the nearest sphere
+was frequently some neighbour's.
+
+It intersects the drawn triangles now. The earlier reasoning for the sphere set —
+that a pick should not land where the physics has nothing — does not survive
+contact with the problem: a body is rigid, so every point on it is a real place to
+apply a force, and a picker that disagrees with what is on screen is simply wrong.
+
+| | hit point off the body it reported |
+|---|---|
+| sphere set | up to **5.08** game units (brahmin), 3.48 (mirelurk king) |
+| drawn triangles | **0.00** on every rig |
+
+### It took four metrics to measure one bug
+
+Worth writing down, because three of them looked reasonable and said nothing.
+
+1. *"Ray at a body's centre hits that body"* — 30 of 39. Suggestive, but a centre of
+   mass often sits outside its own shape, so it conflated two faults.
+2. *"Aim at a triangle on body b, get body b"* — 88 of 195 before, 76 after. Both
+   pickers look equally bad, because a rig's shapes **overlap**: a neighbour
+   genuinely in front is the right answer, and counting it wrong buried the
+   difference.
+3. *"How far is the hit from the nearest triangle centroid"* — 6.20 against 6.86,
+   no signal. Collision hulls have large triangles, so this measured triangle size.
+4. *"How far is the hit from the triangle itself"* — 0.00 against 5.08. The
+   property that was actually broken, and the only one of the four that separates
+   the two implementations.
+
+The first three were not wrong about the code; they were wrong about what to
+measure. A metric that cannot distinguish the fixed case from the broken one is
+worth no more than no metric at all, and it takes longer to admit.
+
 ## 2026-07-29u — the root drags, and freezing works from the hand
 
 **All rigs pass, 0 failures.**

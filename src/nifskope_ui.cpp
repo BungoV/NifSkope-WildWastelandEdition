@@ -3580,11 +3580,143 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					onScreen++;
 					Vector3 ro, rd;
 					gl->mouseRayWorld( sp, ro, rd );
-					if ( pv.sim().pick( ro / PhysicsPreview::SCALE, rd ).hit() )
+					if ( pv.pick( ro, rd ).hit() )
 						rayHits++;
 				}
 				log << QStringLiteral( "      %1 of %2 body centres on screen, the picker hits %3" )
 					.arg( onScreen ).arg( pv.sim().bodies().size() ).arg( rayHits );
+
+				/* Aim at a point that is definitely ON the drawn surface -- the
+				 * centroid of one of the body's own triangles -- and see whether the
+				 * picker returns that body. This is what a user does: they click the
+				 * shape they can see.
+				 */
+				{
+					int aimed = 0, correct = 0, wrongBody = 0, missed = 0;
+					for ( int b = 0; b < pv.sim().bodies().size(); b++ ) {
+						const QVector<Vector3> tris = pv.bodySoup( b );
+						if ( tris.size() < 3 )
+							continue;
+						// a few triangles spread through the shape, not just the first
+						for ( int k = 0; k < 5; k++ ) {
+							const int t = ( tris.size() / 3 ) * k / 5;
+							const Vector3 c = ( tris.at( t * 3 ) + tris.at( t * 3 + 1 )
+								+ tris.at( t * 3 + 2 ) ) / 3.0f;
+							QPointF sp;
+							if ( !gl->worldToScreen( c, sp ) || sp.x() < 0 || sp.y() < 0
+								|| sp.x() >= gl->width() || sp.y() >= gl->height() )
+								continue;
+							Vector3 ro, rd;
+							gl->mouseRayWorld( sp, ro, rd );
+							const SimPick hit = pv.pick( ro, rd );
+							aimed++;
+							if ( !hit.hit() )
+								missed++;
+							else if ( hit.body == b )
+								correct++;
+							else
+								wrongBody++;
+						}
+					}
+					/* "Aimed at body b, got body c" cannot be the measure: a rig's
+					 * shapes overlap heavily, so a neighbour genuinely in front is
+					 * the RIGHT answer, and counting it as wrong made both pickers
+					 * look equally bad and hid the difference between them.
+					 *
+					 * The property that was actually broken is agreement with what
+					 * is DRAWN: whatever body comes back, the point reported must
+					 * lie on that body's surface. The sphere set cannot promise it,
+					 * since its hit is a point on a capsule end-cap that may be
+					 * nowhere near the shape; a triangle pick gives it by
+					 * construction. Both are measured so the difference is shown
+					 * rather than asserted.
+					 */
+					/* Distance to the triangle ITSELF, not to its centroid.
+					 *
+					 * Measuring to centroids was a third failed attempt: collision
+					 * hulls have large triangles, so a point exactly on one sits
+					 * several units from its middle, and the metric reported
+					 * triangle size rather than picker accuracy.
+					 */
+					auto pointToTri = []( const Vector3 & p, const Vector3 & a,
+						const Vector3 & b, const Vector3 & c ) -> float {
+						const Vector3 ab = b - a, ac = c - a, ap = p - a;
+						const float d1 = Vector3::dotproduct( ab, ap );
+						const float d2 = Vector3::dotproduct( ac, ap );
+						if ( d1 <= 0.0f && d2 <= 0.0f )
+							return ( p - a ).length();
+						const Vector3 bp = p - b;
+						const float d3 = Vector3::dotproduct( ab, bp );
+						const float d4 = Vector3::dotproduct( ac, bp );
+						if ( d3 >= 0.0f && d4 <= d3 )
+							return ( p - b ).length();
+						const Vector3 cp = p - c;
+						const float d5 = Vector3::dotproduct( ab, cp );
+						const float d6 = Vector3::dotproduct( ac, cp );
+						if ( d6 >= 0.0f && d5 <= d6 )
+							return ( p - c ).length();
+						const float vc = d1 * d4 - d3 * d2;
+						if ( vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f )
+							return ( p - ( a + ab * ( d1 / ( d1 - d3 ) ) ) ).length();
+						const float vb = d5 * d2 - d1 * d6;
+						if ( vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f )
+							return ( p - ( a + ac * ( d2 / ( d2 - d6 ) ) ) ).length();
+						const float va = d3 * d6 - d5 * d4;
+						if ( va <= 0.0f && ( d4 - d3 ) >= 0.0f && ( d5 - d6 ) >= 0.0f ) {
+							const float w2 = ( d4 - d3 ) / ( ( d4 - d3 ) + ( d5 - d6 ) );
+							return ( p - ( b + ( c - b ) * w2 ) ).length();
+						}
+						const float denom = 1.0f / ( va + vb + vc );
+						return ( p - ( a + ab * ( vb * denom ) + ac * ( vc * denom ) ) ).length();
+					};
+					auto offSurface = [&]( const SimPick & hit ) -> float {
+						if ( !hit.hit() )
+							return -1.0f;
+						const QVector<Vector3> tri = pv.bodySoup( hit.body );
+						if ( tri.size() < 3 )
+							return -1.0f;
+						float best = 1.0e9f;
+						const Vector3 w = hit.worldPoint * PhysicsPreview::SCALE;
+						for ( int t = 0; t + 2 < tri.size(); t += 3 )
+							best = std::min( best, pointToTri( w, tri.at( t ),
+								tri.at( t + 1 ), tri.at( t + 2 ) ) );
+						return best;
+					};
+					float worstNew = 0.0f, worstOld = 0.0f;
+					int compared = 0;
+					for ( int b = 0; b < pv.sim().bodies().size(); b++ ) {
+						const QVector<Vector3> tris = pv.bodySoup( b );
+						if ( tris.size() < 3 )
+							continue;
+						const Vector3 c = ( tris.at( 0 ) + tris.at( 1 ) + tris.at( 2 ) ) / 3.0f;
+						QPointF sp;
+						if ( !gl->worldToScreen( c, sp ) || sp.x() < 0 || sp.y() < 0
+							|| sp.x() >= gl->width() || sp.y() >= gl->height() )
+							continue;
+						Vector3 ro, rd;
+						gl->mouseRayWorld( sp, ro, rd );
+						const float dNew = offSurface( pv.pick( ro, rd ) );
+						const float dOld = offSurface(
+							pv.sim().pick( ro / PhysicsPreview::SCALE, rd ) );
+						if ( dNew >= 0.0f ) {
+							worstNew = std::max( worstNew, dNew );
+							compared++;
+						}
+						if ( dOld >= 0.0f )
+							worstOld = std::max( worstOld, dOld );
+					}
+					log << QStringLiteral( "      clicking ON a shape: %1 aimed, %2 returned that "
+										   "body, %3 a nearer one, %4 nothing" )
+						.arg( aimed ).arg( correct ).arg( wrongBody ).arg( missed );
+					log << QStringLiteral( "      hit point off the reported body: %1 game units "
+										   "(sphere set: %2)" )
+						.arg( double( worstNew ), 0, 'f', 2 )
+						.arg( double( worstOld ), 0, 'f', 2 );
+					check( compared > 0 && worstNew < worstOld,
+						QStringLiteral( "the pick lands on the body it reports" ) );
+					check( missed == 0,
+						QStringLiteral( "clicking a shape always hits something" ) );
+				}
 
 				int grabbed = -1;
 				QPointF grabAt;
@@ -3713,7 +3845,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							continue;
 						Vector3 ro, rd;
 						gl->mouseRayWorld( p, ro, rd );
-						const SimPick hit = pv.sim().pick( ro / PhysicsPreview::SCALE, rd );
+						const SimPick hit = pv.pick( ro, rd );
 						if ( hit.hit() ) {
 							sp = p;
 							return hit.body;

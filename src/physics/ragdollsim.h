@@ -365,6 +365,8 @@ public:
 	//! World position of a body-space point, which is not just x + p: x is the
 	//! centre of mass and the shape data is in bone space.
 	Vector3 toWorld( int body, const Vector3 & localPoint ) const;
+	//! Inverse of toWorld: a world point in the body's own space.
+	Vector3 toLocal( int body, const Vector3 & worldPoint ) const;
 
 	const QVector<SimBody> & bodies() const { return m_bodies; }
 	const QVector<SimJoint> & joints() const { return m_joints; }

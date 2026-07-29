@@ -158,7 +158,7 @@ bool PhysicsPreview::grab( const Vector3 & rayOrigin, const Vector3 & rayDir )
 {
 	if ( !m_active )
 		return false;
-	const SimPick p = m_sim.pick( rayOrigin / SCALE, rayDir );
+	const SimPick p = pick( rayOrigin, rayDir );
 	if ( !p.hit() )
 		return false;
 	m_grabDepth = p.distance;
@@ -232,7 +232,7 @@ bool PhysicsPreview::togglePin( const Vector3 & rayOrigin, const Vector3 & rayDi
 	const float len = rayDir.length();
 	if ( !( len > 1.0e-12f ) )
 		return false;
-	const SimPick p = m_sim.pick( rayOrigin / SCALE, rayDir / len );
+	const SimPick p = pick( rayOrigin, rayDir );
 	if ( !p.hit() )
 		return false;
 	m_sim.setPinned( p.body, !m_sim.bodies().at( p.body ).pinned );
@@ -258,6 +258,80 @@ QVector<Vector3> PhysicsPreview::pinnedSoup() const
 			out.append( posed.at( t[1] ) );
 			out.append( posed.at( t[2] ) );
 		}
+	}
+	return out;
+}
+
+SimPick PhysicsPreview::pick( const Vector3 & rayOrigin, const Vector3 & rayDir ) const
+{
+	SimPick best;
+	if ( !m_active )
+		return best;
+	const float dl = rayDir.length();
+	if ( !( dl > 1.0e-12f ) )
+		return best;
+	const Vector3 d = rayDir / dl;
+	const Vector3 o = rayOrigin / SCALE;   // the meshes are posed in metres
+
+	// Moller-Trumbore against every body's posed triangles
+	const QVector<SimBody> & bodies = m_sim.bodies();
+	bool anyGeometry = false;
+	for ( int i = 0; i < m_meshes.size() && i < bodies.size(); i++ ) {
+		const BodyMesh & bm = m_meshes.at( i );
+		if ( bm.tris.isEmpty() )
+			continue;
+		anyGeometry = true;
+		QVector<Vector3> posed;
+		posed.reserve( bm.verts.size() );
+		for ( const Vector3 & v : bm.verts )
+			posed.append( m_sim.toWorld( i, v ) );
+		for ( const Triangle & t : bm.tris ) {
+			const Vector3 & a = posed.at( t[0] );
+			const Vector3 e1 = posed.at( t[1] ) - a, e2 = posed.at( t[2] ) - a;
+			const Vector3 pv = Vector3::crossproduct( d, e2 );
+			const float det = Vector3::dotproduct( e1, pv );
+			// two-sided: collision hulls are drawn from both faces and a click from
+			// inside one must still land on it
+			if ( std::fabs( det ) < 1.0e-12f )
+				continue;
+			const float inv = 1.0f / det;
+			const Vector3 tv = o - a;
+			const float u = Vector3::dotproduct( tv, pv ) * inv;
+			if ( u < 0.0f || u > 1.0f )
+				continue;
+			const Vector3 qv = Vector3::crossproduct( tv, e1 );
+			const float v = Vector3::dotproduct( d, qv ) * inv;
+			if ( v < 0.0f || u + v > 1.0f )
+				continue;
+			const float dist = Vector3::dotproduct( e2, qv ) * inv;
+			if ( dist < 0.0f || ( best.body >= 0 && dist >= best.distance ) )
+				continue;
+			best.body = i;
+			best.distance = dist;
+			best.worldPoint = o + d * dist;
+			best.localPoint = m_sim.toLocal( i, best.worldPoint );
+		}
+	}
+	// a rig whose shapes all decoded to nothing drawable still has to be usable
+	if ( !best.hit() && !anyGeometry )
+		return m_sim.pick( o, d );
+	return best;
+}
+
+QVector<Vector3> PhysicsPreview::bodySoup( int body ) const
+{
+	QVector<Vector3> out;
+	if ( !m_active || body < 0 || body >= m_meshes.size() )
+		return out;
+	const BodyMesh & bm = m_meshes.at( body );
+	QVector<Vector3> posed;
+	posed.reserve( bm.verts.size() );
+	for ( const Vector3 & v : bm.verts )
+		posed.append( m_sim.toWorld( body, v ) * SCALE );
+	for ( const Triangle & t : bm.tris ) {
+		out.append( posed.at( t[0] ) );
+		out.append( posed.at( t[1] ) );
+		out.append( posed.at( t[2] ) );
 	}
 	return out;
 }
@@ -385,7 +459,7 @@ bool PhysicsPreview::press( const Vector3 & rayOrigin, const Vector3 & rayDir )
 		return true;
 
 	case Tool::Shoot: {
-		const SimPick p = m_sim.pick( rayOrigin / SCALE, dir );
+		const SimPick p = pick( rayOrigin, dir );
 		// a projectile can be fired into thin air; a hitscan shot cannot, since
 		// there is nothing for it to have hit
 		if ( !p.hit() && !m_settings.shootProjectile )
@@ -429,7 +503,7 @@ bool PhysicsPreview::press( const Vector3 & rayOrigin, const Vector3 & rayDir )
 		 * -- a blast that did nothing because the aim was slightly off would just
 		 * look broken. 2 m radius, 30 kg m/s at the centre.
 		 */
-		const SimPick p = m_sim.pick( rayOrigin / SCALE, dir );
+		const SimPick p = pick( rayOrigin, dir );
 		if ( !p.hit() )
 			return false;
 		m_sim.blast( p.worldPoint, m_settings.blastRadius, m_settings.blastStrength );

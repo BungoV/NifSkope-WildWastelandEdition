@@ -1022,6 +1022,14 @@ Vector3 RagdollSim::toWorld( int body, const Vector3 & localPoint ) const
  * getting it wrong offsets every pick by the com shift, which on a limb is most
  * of its length.
  */
+Vector3 RagdollSim::toLocal( int body, const Vector3 & worldPoint ) const
+{
+	if ( body < 0 || body >= m_bodies.size() )
+		return worldPoint;
+	const SimBody & b = m_bodies.at( body );
+	return qRot( qConj( b.q ), worldPoint - b.x );
+}
+
 SimPick RagdollSim::pick( const Vector3 & rayOrigin, const Vector3 & dir ) const
 {
 	SimPick best;
