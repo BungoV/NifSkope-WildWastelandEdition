@@ -410,6 +410,16 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 			QMessageBox::information( panel, QObject::tr( "Load skeleton" ),
 				QObject::tr( "No bones matched by name, so the merged pieces do not share a "
 					"skeleton — posing them as one rig will not work." ) );
+		// A rig binds bones by NAME, so a repeated name silently sends a pose to
+		// the wrong node and the rig folds up. It should never happen; say so
+		// loudly if it does, because the symptom names no cause.
+		else if ( !r.duplicateNames.isEmpty() )
+			QMessageBox::warning( panel, QObject::tr( "Load skeleton" ),
+				QObject::tr( "%1 bone name(s) now appear on more than one node:\n\n%2\n\n"
+					"Posing will address only one of each pair. Undo the merge." )
+					.arg( r.duplicateNames.size() )
+					.arg( r.duplicateNames.mid( 0, 12 ).join( QStringLiteral( ", " ) )
+						+ ( r.duplicateNames.size() > 12 ? QObject::tr( ", ..." ) : QString() ) ) );
 		refresh();
 	};
 

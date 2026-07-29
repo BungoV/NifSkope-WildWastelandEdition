@@ -53,6 +53,71 @@ QHash<QString, int> namedNodes( const NifModel * nif )
 	return byName;
 }
 
+/*! Collect every header-string value in an item subtree, in traversal order.
+ *
+ *  From NIF 20.1.0.3 on, names and file paths are stored as an INDEX into the
+ *  file's own header string table, not as text. A spliced block carries that
+ *  index verbatim, and the target's table is a DIFFERENT table — donor index 36
+ *  and target index 36 are two unrelated strings. Left alone, every imported node
+ *  arrives wearing some existing node's name: merging a skeleton into an outfit
+ *  produced a second "LArm_UpperTwist2_skin", a "LLeg_Toe1" parented under a
+ *  forearm, and a bone list that no longer described the rig.
+ *
+ *  Both sides walk the same block type loaded from the same bytes, so the two
+ *  traversals reach the same leaves in the same order and a plain sequence
+ *  carries the strings across. (moveAllNiBlocks solves this with
+ *  NifModel::updateStrings, which cannot be reused here: it addresses the target
+ *  item through the DONOR item's pointer, which only works when blocks are moved
+ *  rather than re-created.)
+ */
+void collectStrings( const NifModel * nif, const NifItem * item, QStringList & out )
+{
+	if ( !item )
+		return;
+	if ( item->childCount() > 0 ) {
+		for ( int i = 0; i < item->childCount(); i++ )
+			collectStrings( nif, item->child( i ), out );
+	} else if ( item->valueType() == NifValue::tStringIndex ) {
+		out.append( nif->resolveString( item ) );
+	}
+}
+
+//! Replay collectStrings' sequence into the freshly imported block, allocating
+//! each string in the TARGET's table.
+void applyStrings( NifModel * nif, NifItem * item, const QStringList & in, int & pos )
+{
+	if ( !item )
+		return;
+	if ( item->childCount() > 0 ) {
+		for ( int i = 0; i < item->childCount(); i++ )
+			applyStrings( nif, item->child( i ), in, pos );
+	} else if ( item->valueType() == NifValue::tStringIndex ) {
+		if ( pos < in.size() )
+			nif->assignString( item, in.at( pos ), false );
+		pos++;
+	}
+}
+
+//! Names carried by more than one NiNode. See NifMergeResult::duplicateNames.
+QStringList duplicateNodeNames( const NifModel * nif )
+{
+	QHash<QString, int> seen;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->isNiBlock( i, "NiNode" ) )
+			continue;
+		const QString name = nif->get<QString>( i, "Name" );
+		if ( !name.isEmpty() )
+			seen[name]++;
+	}
+	QStringList dupes;
+	for ( auto it = seen.constBegin(); it != seen.constEnd(); it++ )
+		if ( it.value() > 1 )
+			dupes << it.key();
+	dupes.sort();
+	return dupes;
+}
+
 } // namespace
 
 //! Merge an already-loaded \a donor model into \a target. Both nifMergeFile and
@@ -72,6 +137,11 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	if ( donor.getBSVersion() != target->getBSVersion() )
 		return fail( QStringLiteral( "%1 is BS version %2, target is %3" )
 			.arg( donorLabel ).arg( donor.getBSVersion() ).arg( target->getBSVersion() ) );
+
+	// Only names the merge INTRODUCES are worth reporting; a target may already
+	// carry a duplicate of its own, and that is not this merge's doing.
+	const QStringList dupesBeforeList = duplicateNodeNames( target );
+	const QSet<QString> dupesBefore( dupesBeforeList.constBegin(), dupesBeforeList.constEnd() );
 
 	// The target root everything lands under.
 	const QList<int> targetRoots = target->getRootLinks();
@@ -123,8 +193,10 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	for ( int i = 0; i < toImport.size(); i++ )
 		map.insert( toImport.at( i ), base + i );
 
-	// Serialize the blocks to import.
+	// Serialize the blocks to import, and capture their header strings alongside:
+	// the bytes carry string INDICES, which mean nothing in the target's table.
 	QByteArray blob;
+	QList<QStringList> stringsPerBlock;
 	QBuffer writeBuf( &blob );
 	writeBuf.open( QIODevice::WriteOnly );
 	QDataStream out( &writeBuf );
@@ -133,6 +205,9 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 		QModelIndex iB = donor.getBlockIndex( b );
 		out << donor.itemName( iB );
 		donor.saveIndex( writeBuf, iB );
+		QStringList strs;
+		collectStrings( &donor, donor.getItem( iB ), strs );
+		stringsPerBlock.append( strs );
 	}
 	writeBuf.close();
 
@@ -192,6 +267,16 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 		if ( !innerError.isEmpty() )
 			return;
 
+		// Re-allocate every header string in the target's own table. Done after
+		// restoreState, because assignString is an ordinary edit and wants the
+		// model out of Loading, and before the parenting below so the newcomers
+		// are already correctly named if anything reports on them.
+		for ( int i = 0; i < newBlocks.size() && i < stringsPerBlock.size(); i++ ) {
+			int pos = 0;
+			applyStrings( target, target->getItem( target->getBlockIndex( newBlocks.at( i ) ) ),
+				stringsPerBlock.at( i ), pos );
+		}
+
 		// Parent the newcomers. blockLink appends to the right array for the
 		// block type and keeps Num Children in step.
 		for ( int i = 0; i < toImport.size() && i < newBlocks.size(); i++ ) {
@@ -218,6 +303,10 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 		return fail( innerError );
 	if ( result.blocksAdded == 0 )
 		return fail( QStringLiteral( "nothing was merged" ) );
+
+	for ( const QString & d : duplicateNodeNames( target ) )
+		if ( !dupesBefore.contains( d ) )
+			result.duplicateNames << d;
 	return true;
 }
 

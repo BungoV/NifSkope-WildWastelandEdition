@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #define NIFMERGE_H
 
 #include <QString>
+#include <QStringList>
 #include <QByteArray>
 
 class NifModel;
@@ -36,6 +37,13 @@ struct NifMergeResult
 	int nodesReused    = 0;   //!< donor nodes matched to an existing node by name
 	int nodesAdded     = 0;   //!< donor nodes that had no counterpart
 	int reparented     = 0;   //!< imported blocks linked under an existing node
+	/*! Bone names the merge left on more than one node (excluding any the target
+	 *  already had). A rig binds bones BY NAME — the pose library, mirroring, and
+	 *  this merge's own de-duplication all do — so a repeated name makes one of
+	 *  the two nodes unreachable and sends whatever addressed it to the other. It
+	 *  should always be empty; it is reported because when it is not, the symptom
+	 *  (a rig that poses into a heap) says nothing about the cause. */
+	QStringList duplicateNames;
 	QString error;            //!< set when the merge returns false
 };
 

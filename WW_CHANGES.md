@@ -1,5 +1,58 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30f — Load skeleton was renaming the bones it imported
+
+**BUG FIX.** Reported against an InstituteWorksuit outfit: load the human
+skeleton in the Pose Manager and the rig folds into a heap.
+
+### A NIF stores names as an index into its own string table
+
+From NIF 20.1.0.3 on, node names and file paths are not text in the block — they
+are an **index into the file's own header string table**. `mergeDonor` spliced
+donor blocks with `saveIndex` / `loadAndMapLinks`, which remaps *block links* and
+leaves everything else byte-for-byte. So every imported node arrived carrying the
+donor's raw index, resolved against the **target's** table: donor index 36 and
+target index 36 are two unrelated strings.
+
+Measured on outfit + `skeleton.nif`: **32 bone names ended up on two nodes each.**
+The imported hierarchy read
+
+```
+LArm_Collarbone → LArm_UpperTwist2_skin → LArm_ForeArm1 → LLeg_Toe1 → …
+```
+
+A rig binds bones **by name** — the pose library, mirroring, and this merge's own
+de-duplication all do — so a pose aimed at `LArm_Hand` reached whichever of the
+two nodes was found first. That is the heap.
+
+Fixed by carrying the strings across explicitly: each donor block's header-string
+values are collected in traversal order at serialize time and re-allocated in the
+target's table after load. (`NifModel::updateStrings`, which `moveAllNiBlocks`
+uses for the same problem, cannot be reused — it addresses the target item
+through the *donor* item's pointer, which only works when blocks are moved rather
+than re-created.)
+
+### Why no test caught it
+
+The merge's only automated coverage was `WW_MERGEARCH_TEST`, which merges a NIF
+**into itself** to compare the file and in-memory paths. A file shares its own
+string table, so that test could not have seen this — every index was already
+correct. The blind spot was structural, not an oversight in the assertions.
+
+`tests/merge/skeleton_merge_sweep.sh` covers the real case now: **9 pairs across
+clothing, armour, a head, faceBones, two creature skeletons and an unskinned
+weapon**, asserting that the merged node-name set is exactly the union of the two
+inputs' (minus the donor root, which is deliberately not imported), that no name
+repeats, and that the target shape's bone bindings are untouched. All 9 pass; all
+of the skinned ones failed before the fix.
+
+### And it now says so if it ever happens again
+
+`NifMergeResult` carries `duplicateNames`. The Pose Manager raises a warning
+naming them, and `nifcli merge` prints either `no duplicate bone names
+introduced` or the list. The symptom — a rig that poses into a heap — says
+nothing at all about the cause, so the cause is reported directly.
+
 ## 2026-07-30e — the Block List says what a block IS
 
 **16 checks, 0 failures** (`WW_SUMMARY_TEST`), plus a rendered screenshot.

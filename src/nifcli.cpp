@@ -2195,6 +2195,7 @@ int cmdMerge( const QString & file, const QStringList & adds, bool noDedupe,
 	if ( !loadNif( nif, file ) )
 		return 1;
 
+	QStringList allDupes;
 	int totalShapes = 0, totalReused = 0;
 	for ( const QString & add : adds ) {
 		NifMergeResult r;
@@ -2208,12 +2209,27 @@ int cmdMerge( const QString & file, const QStringList & adds, bool noDedupe,
 			.arg( r.nodesAdded ).arg( r.nodesReused ).arg( r.reparented ) << Qt::endl;
 		totalShapes += r.shapesAdded;
 		totalReused += r.nodesReused;
+		allDupes << r.duplicateNames;
 	}
 	out() << "total: " << totalShapes << " shape(s) added, "
 		  << totalReused << " node(s) shared with the target" << Qt::endl;
 	if ( totalReused == 0 && !noDedupe )
 		out() << "note: no nodes matched by name — the merged pieces do NOT share a\n"
 			  << "      skeleton, so posing them as one rig will not work." << Qt::endl;
+
+	// A rig binds bones by NAME, so a repeated name silently sends a pose to the
+	// wrong node. It should never happen; it is reported either way, because the
+	// symptom (a rig that poses into a heap) says nothing about the cause.
+	allDupes.removeDuplicates();
+	allDupes.sort();
+	if ( allDupes.isEmpty() ) {
+		out() << "no duplicate bone names introduced" << Qt::endl;
+	} else {
+		out() << "WARNING: the merge introduced " << allDupes.size()
+			  << " duplicate bone name(s); posing will address the wrong node:" << Qt::endl;
+		out() << "  " << allDupes.mid( 0, 12 ).join( QStringLiteral( ", " ) )
+			  << ( allDupes.size() > 12 ? QStringLiteral( ", ..." ) : QString() ) << Qt::endl;
+	}
 	return saveNif( nif, outFile ) ? 0 : 1;
 }
 
