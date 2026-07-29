@@ -1,5 +1,95 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30o — building a real loading screen found two merge bugs
+
+Ran the finished pipeline for its actual purpose — freeze each X-01 Tesla effect
+at its own instant, merge skeleton + armour + Tesla hardware + effects, apply
+`PAStandGeneric`, convert — and the first output was a scattered cloud of
+fragments. Three things were wrong, one of them mine to begin with.
+
+New test: `tests/merge/artobject_attach.sh` (5 checks, green).
+Deliverable: `mods/X01Tesla/meshes/LoadScreenArt/X01TeslaLoadScreen.nif`.
+
+### The `_Tesla` files are a hardware layer, not a variant (my mistake)
+
+`X01_Torso_Tesla.nif` has **2 shapes** (coil + glow); `X01_Torso.nif` has **6**
+(plate, decals, fan cover, cap). They stack in game. Merging only the `_Tesla`
+files gave a figure made entirely of latches and coils with no armour. Nothing to
+fix in the code — the input set was wrong, and the render said so immediately.
+
+### `NamedAttach<NodeName>`: effects place themselves
+
+An ArtObject's top-level children are named for their destination, and the merge
+now reads it. The X-01 set, off the files:
+
+    torso   NamedAttachTank_Armor, NamedAttachRoot
+    arm     NamedAttachL_Pauldron, NamedAttachRoot, NamedAttachLArm_ForeArm_Armor
+    helmet  NamedAttachHEAD
+
+This matters because **one file carries effects for several nodes** — the arm has
+a pauldron arc and a forearm arc — which `AttachT` cannot express, since it names
+one place for the whole file. All six Tesla effects now land correctly with no
+`--attach` at all; before, three of them fell to the root.
+
+### Bug 1: name-dedupe fused the two arms together
+
+`X01_ArmLeft_Tesla_VFX` and `X01_ArmRight_Tesla_VFX` have 20 nodes each and
+**15 of the names are identical** — `LightningBolt_01`, `BoltGeo_01`,
+`LightningArcs_VFX`... They are copies of one template. De-duplicating NiNodes by
+name — the thing that lets merged armour share a skeleton — mapped the right
+arm's effect nodes onto the left arm's, and its geometry landed at X = −117 and
+−156 with the arms at ±25.
+
+Fix: **an ArtObject's internal nodes stay private.** Only a genuine bone still
+fuses. Scoped to effect files on purpose — a first attempt gated dedupe on
+bone-reachability for *every* donor and broke 4 of the 9 merge-sweep cases,
+because FO4 armour stores its bones FLAT: `Chest` is present in an arm file
+without the arm being skinned to it, so a reachability rule duplicates it.
+
+`NifMergeResult::privateNames` reports what was deliberately duplicated.
+
+### Bug 2: those branches are in ACTOR space
+
+`NamedAttachR_Pauldron` sits at (20.96, −7.33, 126.14) — a shoulder position on
+the actor, not an offset from the shoulder. Hanging it under its bone applies the
+bone's world transform again, and because arm bones carry a large rotation the
+piece is *flung*, not merely doubled.
+
+Fix: rebase, `newLocal = nodeWorld⁻¹ · local`, so the branch keeps the world
+position the file gave it.
+
+**And not universally** — that overcorrected first. A file whose `AttachT` already
+names a node is authored node-local (`X01_LegLeft_Tesla_VFX`'s tops are
+(−0.61, −15.44, 17.71) and similar, offsets from the calf). Rebasing those drove
+the helmet effect from Z = 156 down to **Z = 5, at the ankles**. So `AttachT`
+naming a node is the signal for authoring space, and only files that name nothing
+get rebased. The helmet has *both* conventions, which is what exposed it.
+
+### Converter: compact what the removals hollow out
+
+`removeNiBlock` rewrites a link to a deleted block as −1 but leaves the array
+entry, so a root that carried the skeleton's extra data came out with
+`Num Extra Data List = 31` and 30 of them −1. Now compacted. Also one `BSXFlags`
+instead of one per merged file (five, here) — every vanilla screen that has one
+has exactly one.
+
+### Two render misreads, again
+
+The output has a grey dome floating above it. I called it a displaced helmet, then
+a bounding artefact, and measured neither claim first — no shape in the file
+reaches above Z = 166. It is **NifSkope's own light-position marker**: rendering
+the same file from the left view leaves the dome at the same *screen* position
+while the model turns 90°, and the vanilla X-01 screen shows none because its
+different bounds radius puts the marker out of frame.
+
+Likewise the head reads as "helmet missing" at this zoom. It is not: the helmet
+node sits at Z = 142.4 with radius 17.35, spanning Z 126–161 centred on X ≈ 0 —
+a correctly placed, correctly sized X-01 helmet.
+
+Third and fourth time this week that eyeballing a render produced a wrong
+conclusion. The rule earned: **measure the geometry before naming what is wrong
+with a picture.**
+
 ## 2026-07-30n — workspace documents render for real (07-30k was wrong)
 
 **Correction to 07-30k.** That entry said the per-document `Scene` path "still

@@ -171,6 +171,44 @@ void unlinkChild( NifModel * nif, int parentBlock, int childBlock )
  *  rather than in the mesh. So an empty return means "this file does not say",
  *  not "attach at the root" — the caller has to decide, and be told.
  */
+//! Where a single top-level donor branch says it belongs; -1 when it does not say.
+/*! Bethesda's ArtObjects name their destination in the BRANCH, not only in
+ *  AttachT: a top-level child called `NamedAttach<NodeName>` is the group of
+ *  effects meant to hang on the skeleton node `<NodeName>`, and `NamedAttachRoot`
+ *  means the actor root. Read off the six X-01 Tesla files, whose roots have
+ *  exactly these children and nothing else:
+ *
+ *      torso  NamedAttachTank_Armor, NamedAttachRoot
+ *      arm    NamedAttachL_Pauldron, NamedAttachRoot, NamedAttachLArm_ForeArm_Armor
+ *      helmet NamedAttachHEAD
+ *
+ *  This matters because one file can carry effects for SEVERAL nodes — the arm
+ *  has a pauldron arc and a forearm arc — and hanging the whole file on one node
+ *  puts the forearm arc on the shoulder. AttachT can only ever name one place,
+ *  so it cannot express that; the branch names can.
+ *
+ *  A name that matches no node in the target is ignored rather than treated as
+ *  an error: the branch then falls back to whatever the file-level AttachT or
+ *  --attach decided, which is the old behaviour.
+ */
+int namedAttachNode( const NifModel & donor, int donorTop,
+                     const QHash<QString, int> & targetByName, int targetRoot )
+{
+	QModelIndex iTop = donor.getBlockIndex( donorTop );
+	if ( !donor.blockInherits( iTop, "NiAVObject" ) )
+		return -1;
+	const QString name = donor.get<QString>( iTop, "Name" );
+	static const QLatin1String prefix( "NamedAttach" );
+	if ( !name.startsWith( prefix ) )
+		return -1;
+
+	const QString wanted = name.mid( prefix.size() );
+	if ( wanted.isEmpty() || wanted == QLatin1String( "Root" ) )
+		return targetRoot;
+	auto it = targetByName.constFind( wanted );
+	return it == targetByName.constEnd() ? -1 : *it;
+}
+
 QString attachNodeName( const NifModel & donor, bool * isEffect = nullptr )
 {
 	if ( isEffect )
@@ -198,6 +236,58 @@ QString attachNodeName( const NifModel & donor, bool * isEffect = nullptr )
 		}
 	}
 	return QString();
+}
+
+//! Node names that act as SKELETON in this file: every node some skin binds to,
+//! plus every ancestor of one.
+/*! De-duplicating NiNodes by name is what lets several merged pieces pose as one
+ *  rig — but applied to every node it is actively destructive, because effect
+ *  files are authored from a shared template and reuse the same internal names.
+ *  Measured: `X01_ArmLeft_Tesla_VFX` and `X01_ArmRight_Tesla_VFX` have 20 nodes
+ *  each and **15 of the names are identical** — `LightningBolt_01`, `BoltGeo_01`,
+ *  `LightningArcs_VFX`... Fusing those hangs the right arm's effects off the left
+ *  arm's nodes, and the geometry lands over a hundred units away.
+ *
+ *  A bone is the one node kind that MUST be shared: two pieces skinned to
+ *  "LArm_UpperArm" have to end up on one node or posing moves only one of them.
+ *  Nothing else has to be, and the ancestor chain comes along because a bone is
+ *  useless without the nodes that position it.
+ *
+ *  Both sides are consulted by the caller: the donor's bones cover armour merged
+ *  into a skeleton, the target's cover a skeleton merged into an outfit.
+ */
+QSet<QString> skeletonNodeNames( const NifModel * nif )
+{
+	QSet<QString> names;
+	if ( !nif )
+		return names;
+
+	const QHash<int, QList<int>> parents = parentMap( nif );
+	QList<int> boneBlocks;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex idx = nif->getBlockIndex( b );
+		if ( !idx.isValid() )
+			continue;
+		// Both skin flavours name their bones in a "Bones" link array: FO4's
+		// BSSkin::Instance and the older NiSkinInstance.
+		for ( const qint32 bone : nif->getLinkArray( idx, "Bones" ) )
+			if ( bone >= 0 )
+				boneBlocks.append( bone );
+	}
+
+	QSet<int> seen;
+	while ( !boneBlocks.isEmpty() ) {
+		const int b = boneBlocks.takeLast();
+		if ( b < 0 || seen.contains( b ) )
+			continue;
+		seen << b;
+		const QString name = nif->get<QString>( nif->getBlockIndex( b ), "Name" );
+		if ( !name.isEmpty() )
+			names << name;
+		for ( int p : parents.value( b ) )
+			boneBlocks.append( p );
+	}
+	return names;
 }
 
 //! Names carried by more than one NiNode. See NifMergeResult::duplicateNames.
@@ -309,8 +399,28 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 
 	// De-duplication: a donor NiNode whose name already exists in the target
 	// maps onto that block and is NOT imported. This is what makes several
-	// merged pieces share one skeleton.
+	// merged pieces share one skeleton — and it is restricted to nodes that
+	// ACT as skeleton, because effect files reuse internal node names wholesale
+	// and fusing those puts one limb's effects on another's. See
+	// skeletonNodeNames.
 	const QHash<QString, int> existing = dedupeByName ? byName : QHash<QString, int>();
+	/* An ArtObject's internal nodes stay PRIVATE. Effect files are authored from
+	 * a shared template and reuse names wholesale — X01_ArmLeft_Tesla_VFX and
+	 * X01_ArmRight_Tesla_VFX have 20 nodes each and 15 of the names are identical
+	 * (LightningBolt_01, BoltGeo_01, LightningArcs_VFX...). Fusing those hangs the
+	 * right arm's effects off the left arm's nodes, and the geometry lands over a
+	 * hundred units away from the limb it belongs to.
+	 *
+	 * Only effect files are treated this way. Armour, skeletons and props keep
+	 * the plain name-dedupe, which several sweep cases depend on: an FO4 armour
+	 * piece stores its bones FLAT, so "Chest" is present in the file without the
+	 * arm being skinned to it, and a bone-reachability rule would wrongly
+	 * duplicate it. What an effect file still shares is a genuine bone — if it
+	 * skins to one, it must land on the same node as everything else.
+	 */
+	QSet<QString> shareable;
+	if ( dedupeByName && result.isEffect )
+		shareable = skeletonNodeNames( &donor ) | skeletonNodeNames( target );
 	QMap<qint32, qint32> map;      // donor block -> target block
 	QList<qint32> toImport;
 	for ( qint32 b : branch ) {
@@ -318,15 +428,19 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 		if ( donor.isNiBlock( iB, "NiNode" ) ) {
 			const QString name = donor.get<QString>( iB, "Name" );
 			auto it = existing.constFind( name );
-			if ( !name.isEmpty() && it != existing.constEnd() ) {
+			const bool known = !name.isEmpty() && it != existing.constEnd();
+			if ( known && ( !result.isEffect || shareable.contains( name ) ) ) {
 				map.insert( b, *it );      // reuse the target's node
 				result.nodesReused++;
 				continue;
 			}
+			if ( known )
+				result.privateNames.append( name );
 			result.nodesAdded++;
 		}
 		toImport.append( b );
 	}
+	result.privateNames.removeDuplicates();
 
 	// Imported blocks land at the end, in order, so their numbers are known
 	// before the write and every link can be remapped in one pass.
@@ -355,12 +469,38 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	// Which imported blocks need linking under an existing target node: any
 	// whose donor parent de-duplicated away (its Children array lives in the
 	// target and knows nothing about the newcomer). Donor tops attach to the
-	// target root.
+	// target root, unless the branch names its own destination.
 	QHash<qint32, qint32> attachTo;   // donor block -> target parent block
 	const QSet<qint32> importedSet( toImport.constBegin(), toImport.constEnd() );
+	QHash<qint32, qint32> namedAttachParent;   // donor top -> target node it named
 	for ( qint32 b : toImport ) {
 		if ( donorTops.contains( b ) ) {
-			attachTo.insert( b, attachBlock );
+			const int named = namedAttachNode( donor, b, byName, targetRoot );
+			attachTo.insert( b, named >= 0 ? named : attachBlock );
+			/* Rebase ONLY when the file's own AttachT named nothing. That is the
+			 * signal for which space the branch is authored in, and the X-01 Tesla
+			 * set has one file of each kind:
+			 *
+			 *   helmet  AttachT says NamedNode&HEAD  -> node-local, and it ALSO has
+			 *           a NamedAttachHEAD branch. Rebasing it drove the pulse from
+			 *           the head down to Z = 5, at the ankles.
+			 *   torso   AttachT says only MultiTechnique -> the destination lives in
+			 *   arms    the ESP's ARTO record, the branch is in actor space, rebase.
+			 *
+			 * An --attach override does not change the authoring space, so it is
+			 * `declared` that is consulted here and not attachRequested.
+			 */
+			if ( named >= 0 && named != targetRoot && declared.isEmpty() )
+				namedAttachParent.insert( b, named );
+			if ( named >= 0 ) {
+				// The root is called after the file it came from ("skeleton.nif"),
+				// which reads as a node name and is not one worth reporting.
+				const QString line = ( named == targetRoot )
+					? QStringLiteral( "the root" )
+					: target->get<QString>( target->getBlockIndex( named ), "Name" );
+				if ( !result.namedAttachments.contains( line ) )
+					result.namedAttachments.append( line );
+			}
 			continue;
 		}
 		const int dParent = donor.getParent( b );
@@ -430,6 +570,38 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 				blockLink( target, iParent, iChild );
 				result.reparented++;
 			}
+		}
+
+		/* A NamedAttach branch is authored in ACTOR space, not in the space of the
+		 * node it names. Measured on X01_ArmRight_Tesla_VFX:
+		 *
+		 *     NamedAttachR_Pauldron            translation (20.96, -7.33, 126.14)
+		 *     NamedAttachRArm_ForeArm_Armor    translation (35.36, -8.90, 103.57)
+		 *
+		 * Those are shoulder- and elbow-height positions on the actor, not offsets
+		 * from the shoulder. Hanging such a branch straight under its bone applies
+		 * the bone's world transform on top, and because arm bones carry a large
+		 * rotation the piece does not merely double its offset — it is flung. The
+		 * X-01 Tesla arm pulse landed at X = -117 and -156 with the arms at +-25.
+		 *
+		 * So the branch is rebased onto the node: newLocal = nodeWorld^-1 * local,
+		 * which leaves its WORLD position exactly where the file put it.
+		 *
+		 * The AttachT path is deliberately NOT rebased. Those files are authored
+		 * node-local — X01_LegLeft_Tesla_VFX's tops sit at (-0.61, -15.44, 17.71)
+		 * and the like, offsets from the calf — and rebasing them would break what
+		 * currently works.
+		 */
+		for ( int i = 0; i < toImport.size() && i < newBlocks.size(); i++ ) {
+			auto it = namedAttachParent.constFind( toImport.at( i ) );
+			if ( it == namedAttachParent.constEnd() || !preWorld.contains( *it ) )
+				continue;
+			QModelIndex iChild = target->getBlockIndex( newBlocks.at( i ) );
+			if ( !iChild.isValid() || !Transform::canConstruct( target, iChild ) )
+				continue;
+			const Transform local( target, iChild );
+			( preWorld.value( *it ).inverted() * local ).writeBack( target, iChild );
+			result.namedRebased++;
 		}
 
 		/* Re-rig. An existing node adopted by an imported one now has two parents

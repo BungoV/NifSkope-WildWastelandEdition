@@ -2212,9 +2212,12 @@ int cmdMerge( const QString & file, const QStringList & adds, const QStringList 
 			.arg( r.nodesAdded ).arg( r.nodesReused ).arg( r.reparented ).arg( r.rebased ) << Qt::endl;
 		// where an effect landed is the whole question for an ArtObject, so it is
 		// always stated -- including "the root", which is usually not what is wanted
+		if ( !r.namedAttachments.isEmpty() )
+			out() << "  branches attached by name to "
+				  << r.namedAttachments.join( QStringLiteral( ", " ) ) << Qt::endl;
 		if ( !r.attachedTo.isEmpty() )
 			out() << "  attached to " << r.attachedTo << Qt::endl;
-		else if ( r.isEffect )
+		else if ( r.isEffect && r.namedAttachments.isEmpty() )
 			out() << "  attached to the ROOT: this file's AttachT names no node "
 					 "(its ARTO record in the ESP does). Use --attach <node>." << Qt::endl;
 		totalShapes += r.shapesAdded;

@@ -400,6 +400,21 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 				"a runtime controller generated their geometry, and that controller is gone" )
 				.arg( emptyShapes.size() ) );
 		}
+		// One BSXFlags and one BSBehaviorGraphExtraData, not one per merged file.
+		// A merge of twelve pieces brings twelve; every vanilla loading screen that
+		// has them has exactly one.
+		QSet<QString> keptOnce;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex idx = nif->getBlockIndex( b );
+			if ( !nif->blockInherits( idx, { "BSXFlags", "BSBehaviorGraphExtraData" } ) )
+				continue;
+			const QString type = nif->itemName( idx );
+			if ( keptOnce.contains( type ) )
+				doomed << b;
+			else
+				keptOnce << type;
+		}
+
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			// Shapes are kept — except the empty ones already condemned above.
 			if ( b == rootBlock || ( shapes.contains( b ) && !doomed.contains( b ) ) )
@@ -407,6 +422,8 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 			QModelIndex idx = nif->getBlockIndex( b );
 			if ( !idx.isValid() )
 				continue;
+			if ( doomed.contains( b ) )
+				continue;      // already condemned (empty shape, duplicate extra data)
 
 			// The skeleton, and anything that only existed to hold it together.
 			if ( nif->blockInherits( idx, "NiNode" )
@@ -550,6 +567,33 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 				res.nodesRemoved++;
 			nif->removeNiBlock( b );
 			res.blocksRemoved++;
+		}
+
+		// --- 6. compact the link arrays the removals hollowed out --------------
+		// removeNiBlock rewrites a link to a deleted block as -1 but leaves the
+		// ARRAY ENTRY behind, so a root that carried the skeleton's extra data ends
+		// up with "Num Extra Data List = 31" and 30 of them -1. It loads, but it is
+		// debris, and nothing in the corpus looks like that.
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex idx = nif->getBlockIndex( b );
+			if ( !idx.isValid() )
+				continue;
+			for ( const auto & field : { std::pair<const char *, const char *>{ "Extra Data List", "Num Extra Data List" },
+			                             { "Children", "Num Children" } } ) {
+				QModelIndex iArr = nif->getIndex( idx, field.first );
+				if ( !iArr.isValid() )
+					continue;
+				QList<qint32> kept;
+				for ( const qint32 l : nif->getLinkArray( iArr ) )
+					if ( l >= 0 )
+						kept.append( l );
+				if ( kept.size() == nif->rowCount( iArr ) )
+					continue;
+				nif->set<uint>( idx, field.second, quint32( kept.size() ) );
+				nif->updateArraySize( iArr );
+				for ( int i = 0; i < kept.size(); i++ )
+					nif->setLink( nif->getIndex( iArr, i ), kept.at( i ) );
+			}
 		}
 	} );
 

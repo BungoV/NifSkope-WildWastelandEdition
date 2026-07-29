@@ -1848,12 +1848,16 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
 		}
 		shapes += r.shapesAdded;
 		dupes << r.duplicateNames;
+		QString where;
+		if ( !r.namedAttachments.isEmpty() )
+			where = tr( ", branches attached by name to %1" )
+				.arg( r.namedAttachments.join( QStringLiteral( ", " ) ) );
+		else if ( !r.attachedTo.isEmpty() )
+			where = tr( ", attached to %1" ).arg( r.attachedTo );
+		else if ( r.isEffect )
+			where = tr( ", attached to the ROOT — its AttachT names no node" );
 		report << tr( "%1: %2 shape(s), %3 bone(s) shared%4" )
-			.arg( picked.at( i ).first ).arg( r.shapesAdded ).arg( r.nodesReused )
-			.arg( r.attachedTo.isEmpty()
-				? ( r.isEffect ? tr( ", attached to the ROOT — its AttachT names no node" )
-					: QString() )
-				: tr( ", attached to %1" ).arg( r.attachedTo ) );
+			.arg( picked.at( i ).first ).arg( r.shapesAdded ).arg( r.nodesReused ).arg( where );
 	}
 
 	LoadingScreen::Result screen;

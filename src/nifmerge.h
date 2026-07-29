@@ -57,6 +57,23 @@ struct NifMergeResult
 	QString attachRequested;
 	//! The node it was actually parented under; empty means the target's root.
 	QString attachedTo;
+	/*! Nodes that individual top-level branches named for themselves, via the
+	 *  `NamedAttach<NodeName>` convention. One donor can populate several — the
+	 *  X-01 Tesla arm carries a pauldron arc and a forearm arc — which is exactly
+	 *  what AttachT cannot express, since it names one place for the whole file.
+	 *  Non-empty means those branches ignored attachRequested and went where they
+	 *  said they belong. */
+	QStringList namedAttachments;
+	/*! Node names the target already had that were imported again anyway, because
+	 *  neither side uses them as a bone. Effect files are authored from a shared
+	 *  template and reuse names like `LightningBolt_01`; fusing those would hang
+	 *  one limb's effects off another's. Non-empty is normal and healthy — it is
+	 *  reported because it is the one place the merge deliberately creates a
+	 *  duplicate name. */
+	QStringList privateNames;
+	//! NamedAttach branches whose local transform was rebased onto the node they
+	//! named, because those branches are authored in actor space.
+	int namedRebased = 0;
 	//! The donor carries an "AttachT" extra data, i.e. it is an ArtObject —
 	//! true even when that data names no node, which is the case worth warning
 	//! about, because such an effect silently lands at the origin.
