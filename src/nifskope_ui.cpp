@@ -3126,6 +3126,33 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_SHOT=<out.png>): load, let the scene settle, save the
+	 * viewport, quit. No assertions — some things are only checkable by looking,
+	 * and grabFramebuffer renders offscreen, so this costs no focus and can run
+	 * while someone else is using the machine. WW_SHOT_VIEW=front|left|top picks
+	 * the camera; the default is whatever the file opens with.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SHOT" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				if ( ok ) {
+					const QString view = qEnvironmentVariable( "WW_SHOT_VIEW" );
+					if ( view == QLatin1String( "front" ) )
+						skope->ui->aViewFront->trigger();
+					else if ( view == QLatin1String( "left" ) )
+						skope->ui->aViewLeft->trigger();
+					else if ( view == QLatin1String( "top" ) )
+						skope->ui->aViewTop->trigger();
+					QEventLoop loop;
+					QTimer::singleShot( 700, &loop, &QEventLoop::quit );
+					loop.exec();
+					skope->ogl->grabFramebuffer().save( qEnvironmentVariable( "WW_SHOT" ) );
+				}
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SKELMERGE_TEST=<donor.nif>): does Load skeleton break the
 	 * mesh, or only the posing that follows it?
 	 *

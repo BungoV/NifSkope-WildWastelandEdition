@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30g — Load skeleton was folding the mesh up, and Outfit Studio poses on X-01
+
+**Two bug fixes and a feature test.** See 07-30f for the first fix (string
+indices); this is the second, larger one, plus the pose-import verification.
+
+### The mesh really was moving, and my proof that it could not was wrong
+
+07-30f ended with *"the mesh can't move: existing blocks are byte-identical
+except one appended Children entry."* That is a proof about the **file**, not
+about what NifSkope **evaluates**. `WW_SKELMERGE_TEST` measures the evaluated
+skin instead — `Shape::skinVertex` for every vertex, before and after — and
+reported **1871 of an outfit's 3147 vertices moving**.
+
+Armour and clothing store their bones **flat** under the root, each carrying that
+bone's **world** transform; the game re-parents them onto the real skeleton at
+runtime. A skeleton NIF stores the same bones **nested** with **local**
+transforms. Merging the two, the skeleton's parent-child edges land on the
+target's flat bones, so `LArm_ForeArm1` stops being a root child and becomes a
+grandchild of `LArm_Collarbone` *while still carrying its world transform* — and
+is then composed on top of its new ancestors. The old edge was never cut either,
+so the node had two parents at once.
+
+The hierarchy is what the merge is **for**, so it stays; the transform is what
+gets repaired. The stale edge is cut and each adopted node is rebased so its
+world transform is exactly what it was: `local = newParentWorld⁻¹ × oldWorld`.
+33 nodes on the reported outfit; **0 vertices moved**.
+
+Two harness assertions then failed, and both were mine: *"posing LArm_ForeArm1
+moves the same vertices"* (86 before, 331 after). Of course not — before the
+merge every bone is a flat root child, so rotating one moves only its own
+vertices; after it, the bone has the skeleton's children and drags the limb.
+That is the entire point. The checks now assert a **superset**, and that the bone
+has not become a transform on the whole mesh.
+
+### Outfit Studio pose import, on the full X-01 rig
+
+Requested test: all six X-01 Tesla parts on the power-armour skeleton, then the
+three Outfit Studio pose XMLs.
+
+| step | result |
+|---|---|
+| skeleton + helmet/torso/2 arms/2 legs | **28 shapes**, 29 bones shared, **0 duplicate names** |
+| `PAActionPose.xml` | 48 bones posed, **0 not in this skeleton** |
+| `PAGunOneHanded.xml` | 47 posed, 0 missing |
+| `PAStandGeneric.xml` | 40 posed, 0 missing |
+
+All three render correctly — the armour bends at its joints and holds together.
+
+**Worth knowing:** these parts carry no hand mesh, so **32 of the posed bones
+(both hands and all 30 fingers) move nothing visible**. The remaining pose is
+fully effective: 12 bones drive geometry directly and the rest (spine,
+collarbones, twist) propagate into bones that do.
+
+### WW_SHOT
+
+`WW_SHOT=<out.png>` loads a file, lets the scene settle, saves the viewport and
+quits; `WW_SHOT_VIEW=front|left|top` picks the camera. Some things are only
+checkable by looking, and `grabFramebuffer` renders offscreen — no window is
+raised and no focus is taken, so it can run while the machine is in use.
+
 ## 2026-07-30f — Load skeleton was renaming the bones it imported
 
 **BUG FIX.** Reported against an InstituteWorksuit outfit: load the human
