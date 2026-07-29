@@ -32,22 +32,26 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "valueedit.h"
 
+#include "ui/widgets/colorwheel.h"
 #include "ui/widgets/floatedit.h"
 
 #include <QLabel>   // Inherited
 #include <QSpinBox> // Inherited
+#include <QAbstractButton>
 #include <QAction>
 #include <QDoubleSpinBox>
 #include <QFrame>
 #include <QLayout>
 #include <QLineEdit>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QResizeEvent>
 #include <QScrollBar>
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QToolButton>
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <utility>
@@ -668,6 +672,78 @@ void ValueEdit::resizeEvent( QResizeEvent * )
 	resizeEditor();
 }
 
+namespace
+{
+
+/*! The colour itself, drawn as a button that opens the picker.
+ *
+ *  Alpha is drawn over a checkerboard rather than over the widget background:
+ *  a 50%-alpha black otherwise looks like a mid grey, which is a different
+ *  colour, not a translucent one.
+ *
+ *  A channel above 1.0 has no on-screen representation at all, so an HDR colour
+ *  is drawn at its normalised hue with a bright cap along the top edge to say
+ *  the value is off-scale rather than quietly showing a clamped lie.
+ */
+class ColorSwatchButton final : public QAbstractButton
+{
+public:
+	explicit ColorSwatchButton( QWidget * parent = nullptr ) : QAbstractButton( parent )
+	{
+		setCursor( Qt::PointingHandCursor );
+		setFocusPolicy( Qt::NoFocus );
+	}
+
+	void setSwatch( const Color4 & c, bool withAlpha )
+	{
+		col = c;
+		showAlpha = withAlpha;
+		update();
+	}
+
+	QSize sizeHint() const override { return QSize( 34, 18 ); }
+	QSize minimumSizeHint() const override { return QSize( 22, 14 ); }
+
+protected:
+	void paintEvent( QPaintEvent * ) override
+	{
+		QPainter p( this );
+		const QRect box = rect().adjusted( 1, 1, -2, -2 );
+		if ( box.width() <= 0 || box.height() <= 0 )
+			return;
+
+		const float peak = std::max( { col[0], col[1], col[2], 1.0f } );
+		QColor shown = QColor::fromRgbF( qBound( 0.0f, col[0] / peak, 1.0f ),
+			qBound( 0.0f, col[1] / peak, 1.0f ), qBound( 0.0f, col[2] / peak, 1.0f ) );
+
+		if ( showAlpha && col[3] < 0.999f ) {
+			const int sq = std::max( 3, box.height() / 3 );
+			p.save();
+			p.setClipRect( box );
+			for ( int y = box.top(); y < box.bottom(); y += sq )
+				for ( int x = box.left(); x < box.right(); x += sq )
+					p.fillRect( QRect( x, y, sq, sq ),
+						( ( ( x - box.left() ) / sq + ( y - box.top() ) / sq ) % 2 )
+							? QColor( 0x60, 0x60, 0x60 ) : QColor( 0x9a, 0x9a, 0x9a ) );
+			p.restore();
+			shown.setAlphaF( qBound( 0.0f, col[3], 1.0f ) );
+		}
+		p.fillRect( box, shown );
+		if ( peak > 1.0f )
+			p.fillRect( QRect( box.left(), box.top(), box.width(), 2 ), QColor( 0xff, 0xf0, 0xc0 ) );
+
+		p.setPen( QPen( palette().color( isDown() ? QPalette::Highlight : QPalette::Mid ), 1 ) );
+		p.setBrush( Qt::NoBrush );
+		p.drawRect( box );
+	}
+
+private:
+	Color4 col{ 1.0f, 1.0f, 1.0f, 1.0f };
+	bool showAlpha = true;
+};
+
+} // namespace
+
 ColorEdit::ColorEdit( QWidget * parent ) : ValueEdit( parent )
 {
 	QHBoxLayout * lay = new QHBoxLayout;
@@ -677,6 +753,13 @@ ColorEdit::ColorEdit( QWidget * parent ) : ValueEdit( parent )
 
 	// Cast QDoubleSpinBox slot
 	auto dsbValueChanged = static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged);
+
+	// The swatch leads: it is what the row is FOR, and the four numbers behind it
+	// are how you say it exactly.
+	swatch = new ColorSwatchButton( this );
+	swatch->setToolTip( tr( "Click to pick a colour" ) );
+	lay->addWidget( swatch, 3 );
+	connect( swatch, &QAbstractButton::clicked, this, &ColorEdit::pickColor );
 
 	lay->addWidget( new CenterLabel( "R" ), 1 );
 	lay->addWidget( r = new QDoubleSpinBox, 5 );
@@ -705,6 +788,7 @@ ColorEdit::ColorEdit( QWidget * parent ) : ValueEdit( parent )
 
 	setting = false;
 	setFocusProxy( r );
+	updateSwatch();
 }
 
 void ColorEdit::setColor4( const Color4 & v )
@@ -715,6 +799,7 @@ void ColorEdit::setColor4( const Color4 & v )
 	b->setValue( v[2] );
 	a->setValue( v[3] ); a->setVisible( true ); al->setVisible( true );
 	setting = false;
+	updateSwatch();
 }
 
 void ColorEdit::setColor3( const Color3 & v )
@@ -725,12 +810,54 @@ void ColorEdit::setColor3( const Color3 & v )
 	b->setValue( v[2] );
 	a->setValue( 1.0 ); a->setHidden( true ); al->setHidden( true );
 	setting = false;
+	updateSwatch();
 }
 
 void ColorEdit::sltChanged()
 {
+	updateSwatch();
 	if ( !setting )
 		emit sigEdited();
+}
+
+void ColorEdit::updateSwatch()
+{
+	// static_cast, not qobject_cast: the swatch is declared as QAbstractButton so
+	// the header need not see this file-local class, and it is the only thing ever
+	// assigned there. (A qobject_cast would need a Q_OBJECT macro and a moc run for
+	// a class with no signals or slots of its own.)
+	static_cast<ColorSwatchButton *>( swatch )->setSwatch( getColor4(), !a->isHidden() );
+}
+
+void ColorEdit::pickColor()
+{
+	const bool withAlpha = !a->isHidden();
+	const Color4 cur = getColor4();
+
+	/* ColorWheel::choose returns an HDR colour UNTOUCHED -- it has no way to show
+	 * a channel above 1.0 -- so on an emissive colour the button would be a silent
+	 * no-op, which is worse than not having it. The intensity is factored out, the
+	 * hue is picked on the 0..1 wheel, and the factor is multiplied back in, so the
+	 * picker edits the colour and leaves the brightness where the file had it.
+	 */
+	const float peak = std::max( { cur[0], cur[1], cur[2], 1.0f } );
+	const Color4 norm( cur[0] / peak, cur[1] / peak, cur[2] / peak,
+		qBound( 0.0f, cur[3], 1.0f ) );
+
+	Color4 picked = withAlpha ? ColorWheel::choose( norm, this )
+		: Color4( ColorWheel::choose( Color3( norm ), this ), cur[3] );
+	if ( picked == norm )
+		return;		// cancelled
+
+	setting = true;
+	r->setValue( picked[0] * peak );
+	g->setValue( picked[1] * peak );
+	b->setValue( picked[2] * peak );
+	if ( withAlpha )
+		a->setValue( picked[3] );
+	setting = false;
+	updateSwatch();
+	emit sigEdited();
 }
 
 Color4 ColorEdit::getColor4() const

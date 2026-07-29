@@ -45,6 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //! \file valueedit.h ValueEdit and other widgets
 
+class QAbstractButton;
 class QAction;
 class QDoubleSpinBox;
 class QLabel;
@@ -169,8 +170,15 @@ protected slots:
 	void sltChanged();
 
 private:
+	//! Repaint the swatch from the spin boxes (they are the value; the swatch
+	//! only ever reflects them).
+	void updateSwatch();
+	//! Open the colour picker on the swatch's colour and write the result back.
+	void pickColor();
+
 	QDoubleSpinBox * r, * g, * b, * a;
 	QLabel * al;
+	QAbstractButton * swatch;
 	bool setting;
 };
 

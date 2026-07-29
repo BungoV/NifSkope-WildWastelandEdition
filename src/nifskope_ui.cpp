@@ -62,6 +62,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/refrbrowser.h"
 #include "ui/widgets/inspect.h"
 #include "ui/widgets/timeline.h"
+#include "ui/widgets/valueedit.h"
 #include "ui/widgets/xmlcheck.h"
 #include "ui/about_dialog.h"
 #include "ui/settingsdialog.h"
@@ -3120,6 +3121,217 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						btn->click();
 				} );
 				quitDriver->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_TEXCOLOR_TEST=1): the two Block Details typed editors.
+	 *
+	 * Texture paths: NifModel::texturePathInfo drives both the Value column's
+	 * colour and its tooltip, so the two cannot disagree — the harness reads them
+	 * back through data() exactly as the delegate does, rather than calling the
+	 * helper directly. A path is then MANGLED in place: whatever the machine's
+	 * configured resources happen to contain, a garbage path must resolve nowhere
+	 * and must go red, which makes the negative case machine-independent. Whether
+	 * the ORIGINAL paths resolve depends on whether FO4's data is configured here,
+	 * so that check reports a skip rather than a failure when nothing resolves.
+	 *
+	 * Colour: a real ColorEdit is built and driven. The swatch's job is to open
+	 * the picker, so the click is made with a timer waiting to dismiss the modal
+	 * dialog — that proves the wiring end to end. What it cannot prove is the HDR
+	 * scale round trip, which needs a colour CHANGED inside the dialog.
+	 * Log: release/ww_texcolor_test.log.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_TEXCOLOR_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_texcolor_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				int checks = 0, fails = 0, skips = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass )
+						fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				auto skip = [&]( const QString & what, const QString & why ) {
+					skips++;
+					log << "  skip " << what << " — " << why << "\n";
+				};
+				auto isRed = [nif]( const QModelIndex & idx ) {
+					const QVariant fg = nif->data( idx, Qt::ForegroundRole );
+					return fg.canConvert<QColor>() && fg.value<QColor>().red() > 200
+						&& fg.value<QColor>().green() < 160;
+				};
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+
+					// ---- texture paths ----
+					QModelIndex iSet;
+					for ( int b = 0; b < nif->getBlockCount() && !iSet.isValid(); b++ )
+						if ( nif->isNiBlock( nif->getBlockIndex( b ), "BSShaderTextureSet" ) )
+							iSet = nif->getBlockIndex( b );
+					if ( !iSet.isValid() ) {
+						log << "no BSShaderTextureSet in this file\n";
+					} else {
+						QModelIndex iTex = nif->getIndex( iSet, "Textures" );
+						const int n = nif->rowCount( iTex );
+						int filled = 0, resolved = 0, firstFilled = -1;
+						for ( int s = 0; s < n; s++ ) {
+							const QString path = nif->get<QString>( nif->getIndex( iTex, s ) );
+							if ( path.trimmed().isEmpty() )
+								continue;
+							filled++;
+							if ( firstFilled < 0 )
+								firstFilled = s;
+							QString p, r;
+							if ( nif->texturePathInfo( nif->getItem( nif->getIndex( iTex, s ) ), p, r ) && !r.isEmpty() )
+								resolved++;
+							log << "  slot " << s << ": " << path << ( r.isEmpty() ? "  [missing]" : "  [found]" ) << "\n";
+						}
+						log << "texture set block " << nif->getBlockNumber( iSet ) << ": "
+							<< n << " slots, " << filled << " filled, " << resolved << " resolve\n";
+						check( "every slot is recognised as a texture path", [&]() {
+							for ( int s = 0; s < n; s++ ) {
+								QString p, r;
+								if ( !nif->texturePathInfo( nif->getItem( nif->getIndex( iTex, s ) ), p, r ) )
+									return false;
+							}
+							return n > 0;
+						}() );
+						if ( firstFilled < 0 ) {
+							skip( "mangled path goes red", "every slot is empty" );
+						} else {
+							const QModelIndex iVal = nif->getIndex( iTex, firstFilled ).sibling( firstFilled, NifModel::ValueCol );
+							const QString orig = nif->get<QString>( nif->getIndex( iTex, firstFilled ) );
+							const bool origRed = isRed( iVal );
+							const QString origTip = nif->data( iVal, Qt::ToolTipRole ).toString();
+
+							nif->set<QString>( nif->getIndex( iTex, firstFilled ),
+								QStringLiteral( "textures\\ww_no_such_texture_9f3a.dds" ) );
+							check( "a path that resolves nowhere is drawn red", isRed( iVal ) );
+							check( "...and says so in its tooltip",
+								nif->data( iVal, Qt::ToolTipRole ).toString().contains( QStringLiteral( "Not found" ) ) );
+
+							nif->set<QString>( nif->getIndex( iTex, firstFilled ),
+								QStringLiteral( "" ) );
+							check( "an EMPTY slot is not marked broken", !isRed( iVal ) );
+							check( "...and reads as an empty slot",
+								nif->data( iVal, Qt::ToolTipRole ).toString().contains( QStringLiteral( "Empty" ) ) );
+
+							nif->set<QString>( nif->getIndex( iTex, firstFilled ), orig );
+							if ( resolved > 0 && !origRed ) {
+								check( "a resolvable path is left alone", !isRed( iVal ) );
+								check( "...and its tooltip names the file",
+									nif->data( iVal, Qt::ToolTipRole ).toString().contains( orig.section( '\\', -1 ) ) );
+							} else {
+								skip( "resolvable path is left alone",
+									QStringLiteral( "no configured resources on this machine" ) );
+							}
+							check( "restoring the path restores the marking",
+								isRed( iVal ) == origRed );
+							check( "...and the tooltip", nif->data( iVal, Qt::ToolTipRole ).toString() == origTip );
+						}
+					}
+					// a plain string field must NOT be treated as a texture path —
+					// and, retyped as one, must read its value out of the HEADER
+					// STRING TABLE rather than off the item. That second branch is
+					// what a Fallout 3 / Skyrim NiSourceTexture "File Name" takes,
+					// and no file on this machine has one, so it is reached here by
+					// retyping a NiFixedString field in place and putting it back.
+					{
+						QModelIndex iNode;
+						for ( int b = 0; b < nif->getBlockCount() && !iNode.isValid(); b++ )
+							if ( nif->getIndex( nif->getBlockIndex( b ), "Name" ).isValid() )
+								iNode = nif->getIndex( nif->getBlockIndex( b ), "Name" );
+						if ( !iNode.isValid() ) {
+							skip( "a plain string is not a texture path", "no named block" );
+						} else {
+							QString p, r;
+							check( "a block Name is not a texture path",
+								!nif->texturePathInfo( nif->getItem( iNode ), p, r ) );
+							check( "...so it is never marked red", !isRed( iNode ) );
+
+							NifItem * nameItem = nif->getItem( iNode );
+							const QString wasType = nameItem->strType();
+							const QString expect = nif->get<QString>( iNode );
+							if ( nameItem->valueType() != NifValue::tStringIndex || expect.isEmpty() ) {
+								skip( "FilePath reads the header string table",
+									QStringLiteral( "no string-indexed name in this file" ) );
+							} else {
+								nameItem->setStrType( QStringLiteral( "FilePath" ) );
+								QString fp, fr;
+								const bool got = nif->texturePathInfo( nameItem, fp, fr );
+								nameItem->setStrType( wasType );
+								check( "a FilePath field is a texture path", got );
+								check( "...and its value comes from the header string table", fp == expect );
+								check( "...and a node name resolves to no texture", fr.isEmpty() );
+							}
+						}
+					}
+
+					// ---- colour swatch ----
+					{
+						ColorEdit * ce = new ColorEdit( skope );
+						ce->setColor4( Color4( 0.25f, 0.5f, 0.75f, 0.5f ) );
+						const Color4 got = ce->getColor4();
+						check( "ColorEdit round-trips a Color4",
+							std::abs( got[0] - 0.25f ) < 1e-3f && std::abs( got[1] - 0.5f ) < 1e-3f
+							&& std::abs( got[2] - 0.75f ) < 1e-3f && std::abs( got[3] - 0.5f ) < 1e-3f );
+
+						QList<QAbstractButton *> btns = ce->findChildren<QAbstractButton *>();
+						check( "the editor has exactly one swatch button", btns.size() == 1 );
+						if ( !btns.isEmpty() ) {
+							QAbstractButton * sw = btns.first();
+							// HDR: the swatch must accept a channel above 1.0 without
+							// clamping the VALUE (only its drawn colour is normalised)
+							ce->setColor4( Color4( 4.0f, 2.0f, 1.0f, 1.0f ) );
+							const Color4 hdr = ce->getColor4();
+							check( "an HDR colour survives the swatch",
+								std::abs( hdr[0] - 4.0f ) < 1e-3f && std::abs( hdr[1] - 2.0f ) < 1e-3f );
+
+							ce->setColor3( Color3( 1.0f, 0.0f, 0.0f ) );
+							check( "setColor3 hides the alpha box",
+								ce->findChildren<QDoubleSpinBox *>().size() == 4
+								&& ce->findChildren<QDoubleSpinBox *>().at( 3 )->isHidden() );
+
+							// clicking must open the picker: dismiss whatever modal
+							// dialog appears and confirm one appeared at all
+							auto sawDialog = std::make_shared<bool>( false );
+							QTimer driver;
+							QObject::connect( &driver, &QTimer::timeout, skope, [sawDialog]() {
+								if ( QWidget * w = QApplication::activeModalWidget() ) {
+									*sawDialog = true;
+									if ( auto * d = qobject_cast<QDialog *>( w ) )
+										d->reject();
+									else
+										w->close();
+								}
+							} );
+							driver.start( 120 );
+							sw->click();
+							driver.stop();
+							check( "clicking the swatch opens the colour picker", *sawDialog );
+							const Color3 after = ce->getColor3();
+							check( "dismissing it leaves the colour alone",
+								std::abs( after[0] - 1.0f ) < 1e-3f && std::abs( after[1] ) < 1e-3f );
+						}
+						delete ce;
+					}
+				} while ( false );
+				log << checks << " checks, " << fails << " failures, " << skips << " skips\n";
+				log << ( fails == 0 ? "PASS\n" : "CHECK: failures above\n" );
+				log << "done\n";
+				logf.close();
+				// leave the file as it was found, so no save prompt blocks the quit
+				if ( nif && nif->undoStack ) {
+					nif->undoStack->setClean();
+				}
+				skope->setWindowModified( false );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
 		} );

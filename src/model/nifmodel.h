@@ -807,6 +807,16 @@ public:
 	// or an empty string otherwise.
 	QString findResourceFile( const QString & path, const char * archiveFolder, const char * extension ) const;
 
+	/*! If 'item' is a texture-path field, set 'path' to the string it holds and
+	 *  'resolved' to where that resolves in the configured resources — empty when
+	 *  it resolves nowhere — and return true. False for every other kind of field,
+	 *  with both strings left untouched.
+	 *
+	 *  One call rather than three because the Value column needs the answer for
+	 *  both its colour and its tooltip, and the two must never disagree.
+	 */
+	bool texturePathInfo( const NifItem * item, QString & path, QString & resolved ) const;
+
 	//! Find and load resource file to 'data'. The return value is true on success.
 	inline bool getResourceFile( QByteArray & data, const std::string_view & fullPath ) const
 	{

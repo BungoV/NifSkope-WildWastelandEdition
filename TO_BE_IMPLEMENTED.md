@@ -69,7 +69,7 @@ bottom.
 | 2 | **Pose Manager** workspace | large | **SHIPPED 07-22d..l**; prop staging + 4 refinements deferred |
 | 3 | Performance 15c + 16 (flattened storage + off-thread parse) | large | deferred as one joint project, prereqs listed |
 | 4 | Collision Manager P4 | medium | **unblocked 07-30**; 2 items left, both ready |
-| 5 | Block Details: remaining typed editors | small | **2 of 4 were already done**; 2 remain, ready to build |
+| 5 | ~~Block Details: remaining typed editors~~ | small | **SHIPPED 07-30d** — 3 of the 4 were already done |
 | 6 | Block Details: array table (P4) | medium | not started |
 | 7 | Block Details: whole-file search, recent values/revert, hex viewer (P5) | medium | not started |
 | 8 | Block List: summary column, status badges | small | not started |
@@ -1070,19 +1070,26 @@ capsules "confirmed" an AABB core; a small object sample "confirmed" the `+0x20`
 field was constant; the actor skeletons "confirmed" the resolved material was the
 stored one. Each held until the sample widened.
 
-## 5. Block Details — remaining typed editors (READY)
+## 5. Block Details — remaining typed editors — ~~READY~~ SHIPPED 07-30d
 
-Small, independent, display-layer only, no corruption risk. **Two of the four
-items filed here were already implemented** — see the note below; re-verified
-07-27.
+- **Colour swatch + picker** — done. `ColorEdit` leads with a swatch that opens
+  `ColorWheel::choose`. Alpha over a checkerboard; HDR colours factor their
+  intensity out for the 0..1 wheel and multiply it back, because
+  `ColorWheel::choose( Color4 )` returns its input untouched above 1.0 and the
+  button would otherwise be a silent no-op on exactly the emissive colours people
+  want to edit.
+- **Missing-file marking** — done. `NifModel::texturePathInfo` drives both the
+  Value column's red text and its tooltip from one call, trying the renderer's own
+  extension list in the renderer's order.
+- ~~**Texture path browse**~~ — **was already there.** `spChooseTexture`
+  (`spells/texture.cpp:168`) is an *instant* spell, so every texture row has had a
+  clickable browse icon in its Value column all along. Filed here in error.
 
-- **Colour swatch + picker** — genuinely open. `ColorEdit`
-  (`valueedit.cpp:710`) is four r/g/b/a spin boxes with no swatch and no picker;
-  `ColorWheel` exists but is used only by `settingspane.cpp`.
-- **Texture path browse + missing-file marking** — genuinely open, zero hits.
-  Resolve against the configured-resources VFS (the NIF Browser's BA2 index is
-  cached, so this is cheap); missing file = red text, thumbnail tooltip via
-  `TexCache`.
+*Not done:* the thumbnail-in-tooltip half. `TexCache` binds through GL, so a
+tooltip cannot ask it for a preview. The route is `DDSTexturePreview`
+(`ddspreview.cpp:287`), which decodes to a `QImage` entirely on the CPU — read
+the file, decode small, cache the thumbnail, embed it in the rich-text tooltip as
+a `data:` URI. Feasible and self-contained, but a job of its own.
 
 **Already done, do not rebuild** (both are upstream NifSkope behaviour that had
 never been checked for):

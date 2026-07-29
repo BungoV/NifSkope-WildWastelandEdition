@@ -1,5 +1,75 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30d — a broken texture path now looks broken
+
+**20 checks, 0 failures, 0 skips** (`WW_TEXCOLOR_TEST`).
+
+### The commonest bug in the file had no tell
+
+A texture path that resolves nowhere is the usual reason a mesh renders
+untextured, and Block Details said exactly as much about a broken path as about a
+working one — a string, in the same colour, either way. It is **red** now, with a
+tooltip that names where it looked:
+
+> `textures\Weapons\Foo\bar_d.dds`
+> Not found in the configured resources.
+> Checked textures/ with .dds .tga .png .bmp .nif .texcache
+
+A path that does resolve gets its resolved location instead, and an empty slot
+reads as an empty slot rather than as a missing file — an unused texture slot is
+normal, not a fault.
+
+One method answers both, `NifModel::texturePathInfo`, because the colour and the
+tooltip must never disagree; and it tries the same extensions in the same order
+the renderer does, so the details view cannot call a texture missing that the
+viewport is happily drawing.
+
+**Finding the texture fields at all** is the interesting part. nif.xml types the
+classic slots as `FilePath`, but Bethesda's shader properties give theirs no
+distinguishing type whatsoever — `BSShaderTextureSet`'s entire array is plain
+`SizedString` — so those are recognised by where they sit and what they are
+called, with the name rule left open-ended so a slot added to a later game's
+shader property lights up without a code change. A same-named `Ref` field cannot
+match, because the type gate runs first.
+
+**Browse was already there.** `spChooseTexture` is an *instant* spell, so every
+texture row has had a clickable icon in its Value column the whole time. The
+tracker filed it as missing; it was not.
+
+### The colour row has a colour on it
+
+`ColorEdit` was four spin boxes. It leads with a **swatch that opens the picker** —
+`ColorWheel::choose` already existed and was reachable from the settings pane
+alone. Alpha draws over a checkerboard rather than over the dialog background,
+because a 50%-alpha black otherwise just looks like a mid grey, which is a
+different colour rather than a translucent one.
+
+**HDR would have been a silent no-op.** `ColorWheel::choose( Color4 )` returns its
+input untouched when any channel exceeds 1.0 — it has no way to show one — so on
+an emissive colour the new button would have opened nothing and reported nothing.
+The intensity is factored out, the hue is picked on the 0..1 wheel, and the factor
+is multiplied back in: the picker edits the colour and leaves the brightness where
+the file had it. Off-scale colours draw with a bright cap along the swatch's top
+edge, so a clamped preview never passes itself off as the value.
+
+### Verification
+
+`WW_TEXCOLOR_TEST` reads colour and tooltip back through `data()` exactly as the
+delegate does, rather than calling the helper directly. A path is then **mangled
+in place** — whatever this machine's resources happen to contain, garbage must
+resolve nowhere — which makes the negative case machine-independent; the positive
+one reports a skip instead of a failure where no resources are configured. (Here
+they were: 5 of 5 pistol textures resolve.)
+
+The `FilePath` branch reads the **header string table**, which is what a Fallout 3
+/ Skyrim `NiSourceTexture` takes and no file on this machine has, so the harness
+reaches it by retyping a `NiFixedString` field in place and putting it back —
+an untested branch made tested rather than assumed correct.
+
+The swatch is clicked with a timer waiting to dismiss the modal dialog, which
+proves the wiring end to end. What that cannot prove is the HDR scale round trip,
+which needs a colour *changed* inside the dialog; it is unverified and said so.
+
 ## 2026-07-30c — the two greyed-out Separate entries, and what one of them can never be
 
 `P > By Material` and `P > By Loose Parts` had been `setEnabled( false )` since the

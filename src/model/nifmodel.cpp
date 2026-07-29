@@ -1590,6 +1590,22 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 							return tr( "Reference (%1): %2" ).arg( diffRefBlock ).arg( refText );
 					}
 
+					// where a texture path actually resolves, or that it does not.
+					// Answered before the type switch, because the type alone does
+					// not distinguish a texture slot from any other string.
+					{
+						QString path, resolved;
+						if ( texturePathInfo( item, path, resolved ) ) {
+							if ( path.trimmed().isEmpty() )
+								return tr( "Empty texture slot" );
+							if ( resolved.isEmpty() )
+								return tr( "%1\n\nNot found in the configured resources.\n"
+									"Checked textures/ with .dds .tga .png .bmp .nif .texcache" ).arg( path );
+							return ( resolved == path ) ? path
+								: tr( "%1\n\nResolves to: %2" ).arg( path, resolved );
+						}
+					}
+
 					switch ( item->valueType() ) {
 					case NifValue::tByte:
 					case NifValue::tWord:
@@ -1697,6 +1713,20 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 				SpellPtr spell = SpellBook::instant( this, index );
 				if ( spell )
 					return spell->page() + "/" + spell->name();
+			}
+		}
+		return QVariant();
+	case Qt::ForegroundRole:
+		{
+			// A texture path that resolves to nothing is the commonest reason a
+			// mesh renders untextured, and the details view used to say exactly as
+			// much about a broken path as about a working one. Red is the whole
+			// feature: you can see it without reading it.
+			if ( column == ValueCol ) {
+				QString path, resolved;
+				if ( texturePathInfo( item, path, resolved )
+					&& !path.trimmed().isEmpty() && resolved.isEmpty() )
+					return QColor::fromRgb( 233, 110, 110 );
 			}
 		}
 		return QVariant();
@@ -3286,6 +3316,57 @@ bool NifModel::getResourceFile(
 {
 	std::string	fullPath( Game::GameManager::get_full_path( path, archiveFolder, extension ) );
 	return gameResources->get_file( data, fullPath );
+}
+
+bool NifModel::texturePathInfo( const NifItem * item, QString & path, QString & resolved ) const
+{
+	if ( !item )
+		return false;
+
+	/* nif.xml types the classic slots as FilePath, but Bethesda's shader
+	 * properties give theirs no distinguishing type at all — BSShaderTextureSet's
+	 * whole array is plain SizedString — so those are recognised by where they sit
+	 * and what they are called. The name rule is deliberately open-ended so a slot
+	 * added to a later game's shader property lights up without a code change; a
+	 * same-named Ref field cannot match, because the type gate runs first.
+	 */
+	bool isTexture = item->hasStrType( "FilePath" );
+	if ( !isTexture && item->hasStrType( "SizedString" ) ) {
+		const NifItem * p = item->parent();
+		isTexture = ( p && p->hasName( "Textures" ) )
+			|| item->name().endsWith( QLatin1String( "Texture" ) )
+			|| item->name().startsWith( QLatin1String( "Texture " ) );
+	}
+	if ( !isTexture )
+		return false;
+
+	if ( item->valueType() == NifValue::tStringIndex ) {
+		path.clear();
+		const int idx = item->get<int>();
+		const NifItem * strings = getItem( getHeaderItem(), "Strings" );
+		if ( idx >= 0 && strings && idx < strings->childCount() )
+			if ( const NifItem * s = getItem( strings, idx ) )
+				path = s->get<QString>();
+	} else {
+		path = item->getValueAsString();
+	}
+
+	resolved.clear();
+	if ( path.trimmed().isEmpty() )
+		return true;			// an empty slot is not a broken one
+	// "#RRGGBBAA" is an inline colour, not a file — TexCache::find's own rule
+	if ( path.startsWith( QLatin1Char( '#' ) ) && ( path.length() == 9 || path.length() == 10 ) ) {
+		resolved = path;
+		return true;
+	}
+	// the extensions the renderer itself tries, in its order, so the details view
+	// cannot call a texture missing that the viewport is happily drawing
+	for ( const char * ext : { ".dds", ".tga", ".png", ".bmp", ".nif", ".texcache" } ) {
+		resolved = findResourceFile( path, "textures", ext );
+		if ( !resolved.isEmpty() )
+			break;
+	}
+	return true;
 }
 
 CE2MaterialDB * NifModel::getCE2Materials() const
