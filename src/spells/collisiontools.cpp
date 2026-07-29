@@ -11,6 +11,7 @@
 #include "lib/qhull.h"
 #include "lib/nvtristripwrapper.h"
 #include "spells/blocks.h"
+#include "ui/widgets/physicspanel.h"
 
 #include <QAction>
 #include <QButtonGroup>
@@ -222,6 +223,7 @@ private:
 	QWidget * compiledSummaryWidget = nullptr;
 	QWidget * emptyPhysicsWidget = nullptr;
 	QLabel * compiledSummaryLabel = nullptr;
+	PhysicsSimPanel * testPanel = nullptr;
 	QWidget * advancedSection = nullptr;
 	QWidget * advancedBody = nullptr;
 	QDoubleSpinBox * mass = nullptr;
@@ -2183,7 +2185,62 @@ private:
 		createActions->addWidget( decimateButton );
 		createActions->addWidget( createButton );
 		createLayout->addLayout( createActions, 6, 0, 1, 2 );
+		/* Create and Test share the bottom of the panel, one at a time.
+		 *
+		 * They are the two things you do with collision once you can see it --
+		 * author it, then throw something at it -- and they are never wanted at
+		 * the same moment. Side by side they would each get half the width and the
+		 * panel would be twice as tall as a dock usefully is; stacked, whichever
+		 * one you are not using is scrolled past on every trip. A switch costs one
+		 * row and removes both problems.
+		 */
+		auto * bottomSwitch = new QWidget( this );
+		auto * bottomSwitchLayout = new QHBoxLayout( bottomSwitch );
+		bottomSwitchLayout->setContentsMargins( 0, 0, 0, 0 );
+		bottomSwitchLayout->setSpacing( 0 );
+		auto * bottomGroup = new QButtonGroup( bottomSwitch );
+		bottomGroup->setExclusive( true );
+		for ( int i = 0; i < 2; i++ ) {
+			auto * b = new QToolButton( bottomSwitch );
+			b->setText( i == 0 ? tr( "Create collision" ) : tr( "Test collision" ) );
+			b->setToolTip( i == 0
+				? tr( "Build collision for the selected mesh" )
+				: tr( "Simulate this file's ragdoll: drop it, drag it, shoot at it" ) );
+			b->setCheckable( true );
+			b->setMinimumHeight( 26 );
+			b->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+			bottomGroup->addButton( b, i );
+			bottomSwitchLayout->addWidget( b, 1 );
+		}
+		// the same checked-button styling the shape picker above uses, so two
+		// segmented controls in one panel do not look like different mechanisms
+		bottomSwitch->setStyleSheet( createGroup->styleSheet() );
+		root->addWidget( bottomSwitch );
 		root->addWidget( createGroup );
+
+		/* The simulator, in its full form. The toolbar dropdown carries the same
+		 * class in its Essentials mode -- one implementation in two sizes, so the
+		 * two cannot come to disagree about what a control does.
+		 */
+		testPanel = new PhysicsSimPanel( ogl, nif, PhysicsSimPanel::Mode::Full,
+			nullptr, this );
+		testPanel->setObjectName( QStringLiteral( "CollisionTestPanel" ) );
+		root->addWidget( testPanel );
+
+		connect( bottomGroup, &QButtonGroup::idClicked, this,
+			[this, createGroup]( int id ) {
+				createGroup->setVisible( id == 0 );
+				testPanel->setVisible( id == 1 );
+				if ( id == 1 )
+					testPanel->sync();
+				QSettings().setValue( "CollisionManager/BottomSection", id );
+			} );
+		// remembered, because which of the two you want is a property of the job
+		// you are doing rather than of the session
+		const int bottomSection = QSettings().value( "CollisionManager/BottomSection", 0 ).toInt() == 1 ? 1 : 0;
+		bottomGroup->button( bottomSection )->setChecked( true );
+		createGroup->setVisible( bottomSection == 0 );
+		testPanel->setVisible( bottomSection == 1 );
 
 		physicsGroup = new QGroupBox( tr( "Selected collision properties" ), this );
 		auto * physicsOuter = new QVBoxLayout( physicsGroup );

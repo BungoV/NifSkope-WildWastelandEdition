@@ -212,6 +212,7 @@ HEADERS += \
 	src/ui/widgets/inspect.h \
 	src/ui/widgets/lightingwidget.h \
 	src/ui/widgets/nifcheckboxlist.h \
+	src/ui/widgets/physicspanel.h \
 	src/ui/widgets/nifeditors.h \
 	src/ui/widgets/nifview.h \
 	src/ui/widgets/refrbrowser.h \
@@ -337,6 +338,7 @@ SOURCES += \
 	src/ui/widgets/groupbox.cpp \
 	src/ui/widgets/inspect.cpp \
 	src/ui/widgets/lightingwidget.cpp \
+	src/ui/widgets/physicspanel.cpp \
 	src/ui/widgets/nifcheckboxlist.cpp \
 	src/ui/widgets/nifeditors.cpp \
 	src/ui/widgets/nifview.cpp \

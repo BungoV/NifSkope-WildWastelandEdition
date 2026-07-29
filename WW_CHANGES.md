@@ -1,5 +1,81 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29x — the collision panel splits in two
+
+**7 rigs, 599 checks, 0 failures, 1 correct skip.**
+
+The Collision dropdown had grown to about forty controls behind a scrollbar, in a
+popup that closes the moment you click the viewport you are trying to adjust.
+That is two products under one button: the file's **collision data**, and a
+**live simulator**. Almost all of the bulk was the simulator.
+
+### One class, two sizes
+
+`PhysicsSimPanel` (`src/ui/widgets/physicspanel.h`) is the whole thing as a
+widget, in one of two modes. The alternative — a short panel and a long one —
+is two implementations of the same controls that disagree the first time either
+changes.
+
+The mode selects which **sections** are laid out. Every widget is built either
+way and the ones a mode does not offer are hidden, so the single sync path
+refreshes all of them without asking which host it is in. Measured on the alien
+skeleton: **26 controls in the dropdown against 69 in the manager**, counted by
+what is genuinely on screen.
+
+That count needed care. `isHidden()` is per-widget, so the children of a hidden
+row still report themselves visible and the first version of the check came out
+93 against 97 — a metric that would have passed whatever the split did. It walks
+up to the panel now.
+
+### Where things went
+
+**The toolbar dropdown** keeps what you touch every few seconds: show collision,
+run/stop, the six tools and the active tool's parameters, playback, presets. It
+fits without scrolling, which is the entire point of a dropdown.
+
+**The Collision Manager** gets the rest, and gets it in a dock that stays open
+while you work — the world settings, the solver knobs, the body list, recording,
+and capture.
+
+The separate Collision dock added the day before is gone. It existed because the
+menu covered the viewport, which is a real problem with a better answer than a
+second dock beside the manager that does half of what the manager does.
+
+### Create or Test, one at a time
+
+The manager's bottom section now switches between **Create collision** and
+**Test collision**. They are the two things you do with collision once you can
+see it — author it, then throw something at it — and they are never wanted at
+the same moment. Side by side they would each get half the width; stacked,
+whichever one you are not using is scrolled past on every trip. A switch costs
+one row. Which one you had is remembered, since that is a property of the job
+rather than of the session.
+
+The manager's copy is built with no Show Collision action, so that row hides
+itself rather than sitting a few pixels below the manager's own identical
+checkbox.
+
+### Fighting a QMenu about size, and losing
+
+Worth writing down, because it cost three attempts.
+
+A `QMenu` sizes a `QWidgetAction` to the widget's cached hint and will hand it
+**less** than the layout needs — which does not clip, it draws the rows on top
+of one another. The old panel never showed this because it sat in a scroll area
+with a minimum height, which forced the popup open to that size.
+
+Pinning the panel's minimum to the worst case across all six tools fixed the
+overlap and left a hand's depth of dead space under the shorter tools, because a
+`QVBoxLayout` with slack and nowhere to put it spreads it evenly between the
+rows. A trailing stretch fixed that. Sizing per-tool in `sync()` instead — which
+runs on `aboutToShow`, before the popup is measured — got the height right and
+still came up a row short, because the menu recomputes its own size afterwards
+and wins.
+
+It is back in a scroll area with a floor under it. The popup is that tall
+whatever happens, and a tool whose parameters need more scrolls rather than
+being quietly cut off.
+
 ## 2026-07-29w — the physics gun
 
 **7 rigs, 587 checks, 0 failures, 1 correct skip.**
