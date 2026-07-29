@@ -312,6 +312,19 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 					"vertices fall back to the bind pose and will be in the wrong place" )
 					.arg( nif->get<QString>( shape, "Name" ) )
 					.arg( unresolvedBones ).arg( bones.size() ) );
+			/* A shape with no world transform silently became identity, which put
+			 * the X-01 Tesla fan on the ground: its own local translation is
+			 * (0,0,0) and the ~104 units of height come entirely from its parent
+			 * chain, so losing that chain leaves it at the effect file's origin.
+			 * Same silent default as the bone case just above — and note that
+			 * worldTransforms() walks only "Children" while the reachability sweep
+			 * further down follows every Ref, so a shape can survive the sweep and
+			 * still be missing from the transform walk.
+			 */
+			if ( !world.contains( b ) )
+				note( QStringLiteral( "%1: no world transform from the Children walk — baked as if "
+					"its parents were identity, so it will be in the wrong place" )
+					.arg( nif->get<QString>( shape, "Name" ) ) );
 			const Affine shapeWorld = Affine::from( world.value( b, Transform() ) );
 
 			QVector<Vector3> pos( nv );

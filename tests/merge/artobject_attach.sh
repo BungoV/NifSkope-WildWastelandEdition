@@ -59,7 +59,7 @@ bad() { fail=$((fail+1)); echo "  FAIL: $*"; }
 
 # Freeze the effects first, as the real pipeline does -- a live NiControllerManager
 # is not what gets merged into a loading screen.
-for limb in Helmet ArmLeft ArmRight; do
+for limb in Helmet Torso ArmLeft ArmRight; do
 	"$EXE" -no-gui freeze "$X/X01_${limb}_Tesla_VFX.nif" --sequence autoLoop --time 2.0 \
 		-o "$TMP/${limb}_fx.nif" > /dev/null 2>&1
 	[ -s "$TMP/${limb}_fx.nif" ] || { echo "freeze failed for $limb"; exit 2; }
@@ -69,7 +69,7 @@ echo "merging armour + both arm effects + helmet effect"
 "$EXE" -no-gui merge "$SK" \
 	--add "$X/X01_Helmet.nif"  --add "$X/X01_Torso.nif" \
 	--add "$X/X01_ArmLeft.nif" --add "$X/X01_ArmRight.nif" \
-	--add "$TMP/Helmet_fx.nif" \
+	--add "$TMP/Helmet_fx.nif"  --add "$TMP/Torso_fx.nif" \
 	--add "$TMP/ArmLeft_fx.nif" --add "$TMP/ArmRight_fx.nif" \
 	-o "$TMP/rig.nif" > "$TMP/merge.log" 2>&1 || { echo "merge failed"; cat "$TMP/merge.log"; exit 2; }
 sed -n 's/^  branches attached by name to/  attached by name ->/p' "$TMP/merge.log"
@@ -100,6 +100,18 @@ if [ -s "$TMP/screen.nif" ]; then
 	flung="$(awk '{x=$3; if(x<0)x=-x; if(x>60) print "    " $0}' "$TMP/pos.txt")"
 	if [ -z "$flung" ]; then ok; echo "  no shape beyond |X| = 60"
 	else bad "shape(s) flung away from the body:"; echo "$flung"; fi
+
+	# 3b. the torso fan sits on the CHEST, not on the ground. This is the case the
+	# actor-space rebase got backwards: NamedAttachTank_Armor has an identity
+	# translation (its content is already relative to the chest bone) while the
+	# arm file's NamedAttachR_Pauldron carries an actor-space position. Rebasing
+	# the torso subtracted the bone height and dropped the fan from Z 128 to 24.
+	fz="$(awk '/Torso_Tesla_Fan:0/ {print $7; exit}' "$TMP/pos.txt")"
+	if [ -n "$fz" ]; then
+		if [ "$(echo "$fz" | awk '{print ($1 > 100) ? 1 : 0}')" = "1" ]; then
+			ok; echo "  torso fan at Z = $fz (chest height)"
+		else bad "torso fan at Z = $fz -- a node-local branch was wrongly rebased"; fi
+	fi
 
 	# 3. the helmet effect stayed in its own (node-local) space
 	hz="$(awk '/Helmet.*Pulse/ {print $7; exit}' "$TMP/pos.txt")"

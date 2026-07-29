@@ -490,8 +490,31 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 			 * An --attach override does not change the authoring space, so it is
 			 * `declared` that is consulted here and not attachRequested.
 			 */
-			if ( named >= 0 && named != targetRoot && declared.isEmpty() )
-				namedAttachParent.insert( b, named );
+			/* Rebase only a branch that is actually authored in ACTOR space, and
+			 * decide that from the geometry rather than by file. The two X-01
+			 * conventions sit side by side and MEASURE differently:
+			 *
+			 *   arm    NamedAttachR_Pauldron   translation (20.96, -7.33, 126.14)
+			 *          -- a shoulder POSITION on the actor: actor space, rebase.
+			 *   torso  NamedAttachTank_Armor   translation (0, 0, ~0)
+			 *          -- identity, content already relative to the chest bone:
+			 *             node-local, and rebasing it subtracts the bone's height,
+			 *             which is what dropped the Tesla fan from Z 128 to Z 24.
+			 *
+			 * The discriminator: an actor-space branch's translation is expressed
+			 * in the same frame as the node's world position, so it lands NEAR that
+			 * position. A node-local one does not. Compare the two distances.
+			 */
+			if ( named >= 0 && named != targetRoot && declared.isEmpty()
+			     && preWorld.contains( named ) ) {
+				QModelIndex iTop = donor.getBlockIndex( b );
+				if ( Transform::canConstruct( &donor, iTop ) ) {
+					const Vector3 localT = Transform( &donor, iTop ).translation;
+					const Vector3 nodeT = preWorld.value( named ).translation;
+					if ( ( localT - nodeT ).length() < localT.length() )
+						namedAttachParent.insert( b, named );
+				}
+			}
 			if ( named >= 0 ) {
 				// The root is called after the file it came from ("skeleton.nif"),
 				// which reads as a node name and is not one worth reporting.
