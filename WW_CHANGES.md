@@ -1,5 +1,48 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29y — a bouncing-ball icon, and one tool row instead of two
+
+**7 rigs, 605 checks, 0 failures, 1 correct skip.**
+
+### The icon
+
+A ball bouncing off a floor: what collision is **for**. The cage-around-a-body it
+replaces described the *data* — a hull drawn round a mesh — which is accurate and
+says nothing about what the feature does.
+
+Three marks, so it survives 16 px: a heavy floor, an arc, and a filled ball at the
+top of the rebound. Monochrome like the rest of the set, with the arc a dimmed
+shade of the same colour rather than a second hue.
+
+Drawn twice. The first attempt gave the ball a radius of 8.5 against a full-width
+arc, and at 16 px the curve was the subject and the ball a speck — the ball is the
+thing that says "physics", the arc and the floor only place it.
+
+**The harness photographs the toolbar now.** Icons are drawn in code and nothing
+else here looks at one, which is how the previous collision icon shipped as a
+wireframe cube indistinguishable at 16 px from the x-ray icon beside it.
+
+### One tool row
+
+The manager's Simulation section no longer repeats the tool picker or its
+parameters. Which tool is active, and how hard it hits, is what you change most
+often and reach for from the viewport, so it stays one click away in the top bar.
+Two copies on screen at once was two controls for one setting, each able to show
+the other as out of date for as long as it took a sync to run.
+
+The widgets are still built in both — hidden, not omitted — so the single sync path
+drives either panel without asking which host it is in.
+
+### Renamed
+
+**Create collision** is **Collision Creation**, **Test collision** is **Collision
+Simulation**, on the switch and on the group box it reveals.
+
+The split check had to change with it, and the new one uses `isVisibleTo()` rather
+than `isHidden()`: it is the *row* that gets hidden, and a button inside a hidden
+row still reports itself shown — the same trap that made the first control-count
+check read 93 against 97.
+
 ## 2026-07-29x — the collision panel splits in two
 
 **7 rigs, 599 checks, 0 failures, 1 correct skip.**

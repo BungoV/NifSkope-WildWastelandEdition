@@ -290,28 +290,41 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 			QPointF( 51, 53 ), QPointF( 32, 15 ), QPointF( 13, 34 ), QPointF( 51, 34 ), QPointF( 32, 53 ) } )
 			p.drawRect( QRectF( v.x() - 3.2, v.y() - 3.2, 6.4, 6.4 ) );
 	} else if ( id == QLatin1String( "collision" ) ) {
-		/* A cage around a solid body, which is what collision IS: a hull drawn
-		 * around the thing it stands in for.
+		/* A ball bouncing off a floor: what collision is FOR.
 		 *
-		 * It was two offset wireframe squares -- a plain cube, indistinguishable at
-		 * 16 px from the x-ray icon, which is also two offset squares.
+		 * The cage-around-a-body this replaces described the DATA -- a hull drawn
+		 * round a mesh -- which is accurate and says nothing about what the feature
+		 * does. Three marks, so it survives 16 px: a heavy floor, an arc, and a
+		 * filled ball at the top of the rebound.
+		 *
+		 * Monochrome like the rest of the set. The arc is a dimmed shade of the
+		 * same colour rather than a second hue, so this sits with the other
+		 * toolbar icons instead of being the one coloured thing among them.
+		 */
+		p.setBrush( Qt::NoBrush );
+		QPen arc( col.darker( 210 ), 2.8 );
+		arc.setCapStyle( Qt::RoundCap );
+		p.setPen( arc );
+		QPainterPath bounce;
+		bounce.moveTo( 9, 14 );
+		bounce.quadTo( 18, 44, 26, 50 );    // in, to the floor
+		bounce.quadTo( 34, 42, 39, 30 );    // and out again, tucking under the ball
+		p.drawPath( bounce );
+
+		QPen floor( col, 4.5 );
+		floor.setCapStyle( Qt::RoundCap );
+		p.setPen( floor );
+		p.drawLine( QPointF( 8, 55 ), QPointF( 56, 55 ) );
+
+		/* The ball last and LARGE, over the arc it came up.
+		 *
+		 * The first attempt gave it a radius of 8.5 against a full-width arc, and
+		 * at 16 px the curve was the subject and the ball a speck. The ball is the
+		 * thing that says "physics"; the arc and the floor only place it.
 		 */
 		p.setPen( Qt::NoPen );
 		p.setBrush( col );
-		p.drawEllipse( QPointF( 32, 37 ), 10, 10 );
-		p.setBrush( Qt::NoBrush );
-		QPen cage( col, 4.0 );
-		cage.setJoinStyle( Qt::RoundJoin );
-		p.setPen( cage );
-		QPolygonF hull;
-		hull << QPointF( 32, 7 ) << QPointF( 56, 24 ) << QPointF( 47, 54 )
-			 << QPointF( 17, 54 ) << QPointF( 8, 24 );
-		p.drawPolygon( hull );
-		// two struts, so it reads as a cage rather than as a plain pentagon
-		QPen strut( col, 2.0 );
-		p.setPen( strut );
-		p.drawLine( QPointF( 32, 7 ), QPointF( 17, 54 ) );
-		p.drawLine( QPointF( 32, 7 ), QPointF( 47, 54 ) );
+		p.drawEllipse( QPointF( 44, 24 ), 11, 11 );
 	} else if ( id == QLatin1String( "view_center" ) ) {
 		// re-center the camera: four corner brackets framing a center dot
 		p.setBrush( Qt::NoBrush );

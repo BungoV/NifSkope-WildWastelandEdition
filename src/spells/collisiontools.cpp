@@ -2063,7 +2063,7 @@ private:
 		root->addLayout( browserActions );
 		root->addWidget( separator() );
 
-		auto * createGroup = new QGroupBox( tr( "Create collision" ), this );
+		auto * createGroup = new QGroupBox( tr( "Collision Creation" ), this );
 		auto * createLayout = new QGridLayout( createGroup );
 		sourceLabel = new QLabel( tr( "Select a BSTriShape or NiNode in the viewport/block list" ), createGroup );
 		sourceLabel->setWordWrap( true );
@@ -2202,7 +2202,7 @@ private:
 		bottomGroup->setExclusive( true );
 		for ( int i = 0; i < 2; i++ ) {
 			auto * b = new QToolButton( bottomSwitch );
-			b->setText( i == 0 ? tr( "Create collision" ) : tr( "Test collision" ) );
+			b->setText( i == 0 ? tr( "Collision Creation" ) : tr( "Collision Simulation" ) );
 			b->setToolTip( i == 0
 				? tr( "Build collision for the selected mesh" )
 				: tr( "Simulate this file's ragdoll: drop it, drag it, shoot at it" ) );

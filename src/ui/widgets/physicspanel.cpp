@@ -82,17 +82,27 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	sysCombo->hide();
 	col->addWidget( sysCombo );
 
-	// Tools
-	col->addWidget( heading( tr( "Tool" ) ) );
+	/* Tools, and only in the toolbar.
+	 *
+	 * Which tool is active, and how hard it hits, is the thing you change most
+	 * often and reach for from the viewport -- so it lives one click away in the
+	 * top bar. Repeating the whole row in the manager was two copies of one
+	 * control on screen at once, each able to show the other as out of date for
+	 * as long as it took a sync to run.
+	 */
+	QLabel * toolHead = heading( tr( "Tool" ) );
+	col->addWidget( toolHead );
+	QLabel * toolHint = new QLabel( tr( "Right-click pins a bone in place, with any tool." ), this );
+	toolHint->setWordWrap( true );
 	{
-		QLabel * hint = new QLabel( tr( "Right-click pins a bone in place, with any tool." ), this );
-		hint->setWordWrap( true );
-		QFont hf = hint->font();
+		QFont hf = toolHint->font();
 		hf.setPointSizeF( hf.pointSizeF() - 0.5 );
-		hint->setFont( hf );
-		col->addWidget( hint );
+		toolHint->setFont( hf );
 	}
-	QGridLayout * tools = new QGridLayout();
+	col->addWidget( toolHint );
+	QWidget * toolsRow = new QWidget( this );
+	QGridLayout * tools = new QGridLayout( toolsRow );
+	tools->setContentsMargins( 0, 0, 0, 0 );
 	tools->setSpacing( 4 );
 	QButtonGroup * toolGroup = new QButtonGroup( this );
 	toolGroup->setExclusive( true );
@@ -116,7 +126,7 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	};
 	int tRow = 0, tCol = 0;
 	for ( const ToolEntry & te : toolEntries ) {
-		QPushButton * b = new QPushButton( tr( te.label ), this );
+		QPushButton * b = new QPushButton( tr( te.label ), toolsRow );
 		b->setCheckable( true );
 		b->setToolTip( tr( te.tip ) );
 		toolGroup->addButton( b, int( te.tool ) );
@@ -128,7 +138,7 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 			tRow++;
 		}
 	}
-	col->addLayout( tools );
+	col->addWidget( toolsRow );
 
 	/* Parameters of the ACTIVE tool, and only that tool.
 	 *
@@ -755,7 +765,8 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		blastRadius->setVisible( blasty );   blastRadiusLbl->setVisible( blasty );
 		blastStrength->setVisible( blasty ); blastStrengthLbl->setVisible( blasty );
 		windStrength->setVisible( windy );   windLbl->setVisible( windy );
-		toolParams->setVisible( on );
+		// ...but never in the manager, which has no tool row for them to belong to
+		toolParams->setVisible( on && m_mode == Mode::Essentials );
 		QSignalBlocker ps( strengthSpin );
 		QSignalBlocker p0( firmSpin ), p1( impulseSpin ), p2( projChk ), p3( projSpeed );
 		QSignalBlocker p4( projMass ), p5( projRadius ), p6( projGrav ), p7( blastRadius );
@@ -1119,6 +1130,10 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 			w->hide();
 	} else {
 		openMgr->hide();
+		// the tool row belongs to the toolbar; see above
+		for ( QWidget * w : { (QWidget *)toolHead, (QWidget *)toolHint,
+				(QWidget *)toolsRow, (QWidget *)toolParams } )
+			w->hide();
 	}
 
 	/* The WIDTH is pinned to the worst case across all six tools, measured here

@@ -3499,6 +3499,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QStringLiteral( "Collision button %1 (file %2 collision)" )
 							.arg( cb->isEnabled() ? QStringLiteral( "enabled" ) : QStringLiteral( "greyed" ) )
 							.arg( haveCollision ? QStringLiteral( "has" ) : QStringLiteral( "has no" ) ) );
+					/* The toolbar itself, photographed. Icons are drawn in code and
+					 * nothing else here looks at one -- the previous collision icon
+					 * was a wireframe cube indistinguishable at 16 px from the x-ray
+					 * icon beside it, and that survived because no test ever saw them
+					 * next to each other.
+					 */
+					if ( QWidget * bar = cb->parentWidget() )
+						bar->grab().save( outPath + QStringLiteral( ".toolbar.png" ) );
 					/* popup(), not showMenu(): showMenu spins its own event loop and
 					 * does not return until the menu is dismissed, so a harness that
 					 * calls it simply hangs.
@@ -4728,6 +4736,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// the things that moved out, named rather than counted
 						check( !full->findChildren<QListWidget *>().isEmpty(),
 							QStringLiteral( "the manager carries the body list" ) );
+						/* ...and NOT the tool row, which belongs to the toolbar. Checked
+						 * by what is shown rather than by what exists: the manager's
+						 * copy still builds the buttons so one sync path can drive both.
+						 */
+						bool toolShown = false;
+						for ( QPushButton * b : full->findChildren<QPushButton *>() )
+							// isVisibleTo, not isHidden: the ROW is what gets hidden, and
+							// a button inside a hidden row still reports itself shown
+							if ( b->text() == QStringLiteral( "Grab" ) && b->isVisibleTo( full ) )
+								toolShown = true;
+						check( !toolShown,
+							QStringLiteral( "and does not repeat the tool row" ) );
 
 						PhysicsPreview & pvq = gl->physicsSim();
 						quick->sync();
@@ -4739,9 +4759,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QToolButton * createTab = nullptr;
 					QToolButton * testTab = nullptr;
 					for ( QToolButton * b : skope->findChildren<QToolButton *>() ) {
-						if ( b->text() == QStringLiteral( "Create collision" ) )
+						if ( b->text() == QStringLiteral( "Collision Creation" ) )
 							createTab = b;
-						else if ( b->text() == QStringLiteral( "Test collision" ) )
+						else if ( b->text() == QStringLiteral( "Collision Simulation" ) )
 							testTab = b;
 					}
 					check( createTab && testTab,
@@ -4749,7 +4769,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( createTab && testTab && full ) {
 						QGroupBox * createBox = nullptr;
 						for ( QGroupBox * g : skope->findChildren<QGroupBox *>() )
-							if ( g->title() == QStringLiteral( "Create collision" ) )
+							if ( g->title() == QStringLiteral( "Collision Creation" ) )
 								createBox = g;
 						testTab->click();
 						QApplication::processEvents();
