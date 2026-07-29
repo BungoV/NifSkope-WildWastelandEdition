@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29u — the root drags, and freezing works from the hand
+
+**All rigs pass, 0 failures.**
+
+### The COM could barely be moved
+
+The drag's force limit was measured against **the held body's** weight. That is
+wrong for a hub: pulling the root pulls all 39 bodies, and 25x the weight of one
+of them is nowhere near enough to shift the lot. A limb felt fine, because most of
+what hangs off a limb is the limb — which is why it looked right until the COM was
+tried.
+
+Measured against the whole rig's mass now. That alone widened the worst joint
+separation from 4 mm to 19 mm, so the fix is not to weaken the hand again but to
+**let the joints keep up with it**: a live drag gets three times the solver sweeps,
+because what tears a chain is running out of sweeps, not the force. Only while
+something is held, so an idle rig costs nothing.
+
+**0.0036 m on the brahmin and 0.0012 m on the mirelurk king** — tighter than before
+the hand was strengthened, and the root moves.
+
+### Freezing applies to the bone in hand
+
+Right-click during a drag now freezes or unfreezes **the bone being held**,
+wherever the cursor is pointing. A dragged limb rarely stays under the pointer, so
+asking the ray to agree would freeze a neighbour.
+
+The grab is kept through the toggle, which was a correction: the first version
+dropped it on freeze, and then the second right-click had nothing to unfreeze and
+had to hunt for the bone with the cursor — exactly the aiming problem the feature
+exists to avoid. Freeze to leave a bone where it is, right-click again and the drag
+picks it straight back up. A pinned body ignores the drag, so holding a frozen one
+simply does nothing until it is released.
+
 ## 2026-07-29t — the right button only pins, and the bone in hand says its name
 
 **All rigs pass, 0 failures.** Real bone names came back on every one: `Spine4` on

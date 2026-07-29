@@ -303,6 +303,9 @@ public:
 	 * limit and restores the old tearing behaviour.
 	 */
 	float dragStrength = 25.0f;
+	//! Total mass of every simulated body, cached at build. What the drag limit is
+	//! measured against -- see solveDrag.
+	float totalMass() const { return m_totalMass; }
 
 	/*! Replace the contents with a synthetic rig of known masses.
 	 *
@@ -465,6 +468,7 @@ private:
 	int m_dragBody = -1;
 	Vector3 m_dragLocal, m_dragTarget;
 	float m_dragFirmness = 0.9f;
+	float m_totalMass = 1.0f;
 	//! XPBD's accumulated multiplier, reset at the start of each substep
 	float m_dragLambda = 0.0f;
 

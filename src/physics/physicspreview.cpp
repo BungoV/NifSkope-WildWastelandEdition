@@ -205,6 +205,30 @@ bool PhysicsPreview::togglePin( const Vector3 & rayOrigin, const Vector3 & rayDi
 {
 	if ( !m_active )
 		return false;
+
+	/* While something is held, the pin applies to THAT body, wherever the cursor
+	 * is pointing.
+	 *
+	 * Freezing mid-drag is how you say "leave this one here and let me move the
+	 * next": the hand is already on the bone you mean, and asking the ray to
+	 * agree would freeze whatever happened to be under the cursor -- usually a
+	 * neighbour, since a dragged limb rarely stays under the pointer.
+	 */
+	if ( m_sim.draggedBody() >= 0 ) {
+		/* The grab is KEPT, so this is a toggle you can work while holding: freeze
+		 * to leave a bone where it is, right-click again and the drag picks it
+		 * straight back up. Dropping the grab on freeze meant the second click had
+		 * nothing to unfreeze and had to hunt for the bone with the cursor, which
+		 * is the aiming problem this exists to avoid.
+		 *
+		 * A pinned body ignores the drag, so holding one that is frozen simply does
+		 * nothing until it is let go again.
+		 */
+		const int b = m_sim.draggedBody();
+		m_sim.setPinned( b, !m_sim.bodies().at( b ).pinned );
+		return true;
+	}
+
 	const float len = rayDir.length();
 	if ( !( len > 1.0e-12f ) )
 		return false;

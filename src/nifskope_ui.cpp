@@ -3617,6 +3617,25 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						for ( int k = 0; k < 4; k++ )
 							gl->physicsTick( 1.0f / 60.0f );
 					}
+					/* Right-click while holding freezes the bone IN HAND, not
+					 * whatever the ray finds -- a dragged limb rarely stays under
+					 * the pointer, so aiming would freeze a neighbour.
+					 */
+					{
+						const QPointF away( 5.0, 5.0 );   // deliberately off the rig
+						QMouseEvent rc( QEvent::MouseButtonPress, away, gl->mapToGlobal( away ),
+							gl->cursorPlaceButton(), gl->cursorPlaceButton(), Qt::NoModifier );
+						QApplication::sendEvent( gl, &rc );
+						check( pv.sim().bodies().at( grabbed ).pinned,
+							QStringLiteral( "right-click mid-drag froze the held bone" ) );
+						check( pv.grabbing(), QStringLiteral( "and kept hold of it" ) );
+						QApplication::sendEvent( gl, &rc );
+						check( !pv.sim().bodies().at( grabbed ).pinned,
+							QStringLiteral( "right-click again unfroze it" ) );
+						check( pv.grabbedBody() == grabbed,
+							QStringLiteral( "still the same bone in hand" ) );
+					}
+
 					// while still held: the rig black, the bone in hand orange
 					check( !pv.grabbedSoup().isEmpty(),
 						QStringLiteral( "the held bone is drawn apart from the rest" ) );

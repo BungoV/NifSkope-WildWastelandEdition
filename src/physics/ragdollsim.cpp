@@ -737,6 +737,14 @@ void RagdollSim::solveContacts( float h )
 
 void RagdollSim::rescaleForJointCount()
 {
+	// total simulated mass, for the drag limit. Pinned and static bodies have no
+	// inverse mass and contribute nothing that has to be hauled about.
+	m_totalMass = 0.0f;
+	for ( const SimBody & b : m_bodies )
+		if ( b.invMass > 0.0f )
+			m_totalMass += 1.0f / b.invMass;
+	if ( !( m_totalMass > 0.0f ) )
+		m_totalMass = 1.0f;
 	/* Scale by JOINT count, and resist the temptation to refine it.
 	 *
 	 * Weighting each joint by how many corrections it actually applies -- a hinge
@@ -1110,7 +1118,19 @@ void RagdollSim::solveDrag( float h )
 	 * opening up. See RagdollSim::dragStrength.
 	 */
 	if ( dragStrength > 0.0f && b.invMass > 0.0f ) {
-		const float maxLambda = dragStrength * ( 1.0f / b.invMass ) * 9.81f * h * h;
+		/* Measured against the WHOLE rig's mass, not the held body's.
+		 *
+		 * Against its own weight, dragging the root barely moved: the root is the
+		 * hub, so pulling it pulls all 39 bodies, and 25x the weight of one of them
+		 * is nowhere near enough to shift the lot. A limb, whose neighbours mostly
+		 * hang off it anyway, felt fine -- which is why this looked right until the
+		 * COM was tried.
+		 *
+		 * It stays scale-free either way, and the taut behaviour is unaffected:
+		 * what stops a joint tearing is that the force is FINITE and the joints
+		 * solve after it, not the particular number.
+		 */
+		const float maxLambda = dragStrength * m_totalMass * 9.81f * h * h;
 		if ( m_dragLambda + dLambda > maxLambda )
 			dLambda = std::max( 0.0f, maxLambda - m_dragLambda );
 	}
@@ -1306,6 +1326,16 @@ void RagdollSim::step( float dt, int substeps )
 		}
 
 		m_dragLambda = 0.0f;
+		/* A live drag gets extra joint sweeps.
+		 *
+		 * Letting the hand pull hard enough to shift a whole rig -- which it must,
+		 * or the root cannot be dragged at all -- widened the worst joint
+		 * separation from 4 mm to 19 mm. The answer is not to weaken the hand again
+		 * but to let the joints keep up with it, since what tears a chain is the
+		 * solver running out of sweeps, not the force itself. Only while something
+		 * is actually held, so an idle rig costs nothing.
+		 */
+		const int sweeps = std::max( 1, iterations ) * ( m_dragBody >= 0 ? 3 : 1 );
 		/* The drag is solved BEFORE the joints, so the joints get the last word.
 		 *
 		 * With it last, a hand hauling a limb away from a pinned root yanked the
@@ -1314,7 +1344,7 @@ void RagdollSim::step( float dt, int substeps )
 		 * coming apart rather than a chain going taut. A joint is a point
 		 * constraint; nothing the user does should be able to out-pull it.
 		 */
-		for ( int it = 0; it < std::max( 1, iterations ); it++ ) {
+		for ( int it = 0; it < sweeps; it++ ) {
 			solveDrag( h );
 			solveJoints( h, ( it & 1 ) != 0 );
 			solveContacts( h );
