@@ -11,6 +11,7 @@ See the LICENSE.md file for the full license text.
 
 #include "nifcli.h"
 
+#include "freezeanim.h"
 #include "gamemanager.h"
 #include "nifmerge.h"
 #include "spellbook.h"
@@ -2325,6 +2326,49 @@ int cmdPose( const QString & file, bool listOnly, const QString & saveName,
 	return saveNif( nif, outFile ) ? 0 : 1;
 }
 
+//! Bake a sequence to a still at one time.
+/*! With no --sequence, lists what the file has and each one's range, so picking
+ *  a time is not a guess. */
+int cmdFreeze( const QString & file, const QString & sequence, float time,
+			   bool keepGraph, const QString & outFile )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	if ( sequence.isEmpty() ) {
+		const QStringList seqs = AnimSetup::sequenceNames( &nif );
+		if ( seqs.isEmpty() ) {
+			out() << "no sequences in this file" << Qt::endl;
+			return 0;
+		}
+		out() << "sequences:" << Qt::endl;
+		for ( const QString & s : seqs ) {
+			float a = 0, b = 0;
+			FreezeAnim::sequenceRange( &nif, s, &a, &b );
+			out() << "  " << s << "  " << a << " .. " << b << " s" << Qt::endl;
+		}
+		return 0;
+	}
+
+	QString error;
+	const FreezeAnim::Result r = FreezeAnim::freeze( &nif, sequence, time, !keepGraph, &error );
+	if ( !r.ok ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+
+	out() << "froze '" << sequence << "' at " << time << "s: "
+		  << r.baked << " baked, " << r.skipped << " skipped, "
+		  << r.blocksRemoved << " block(s) removed" << Qt::endl;
+	for ( const QString & u : r.unhandled )
+		out() << "  skipped: " << u << Qt::endl;
+	for ( const QString & n : r.notes )
+		out() << "  note: " << n << Qt::endl;
+
+	return outFile.isEmpty() ? 0 : ( saveNif( nif, outFile ) ? 0 : 1 );
+}
+
 //! Animation rigging: attach controllers and wire them into a sequence.
 /*! The workflow the GUI's "Setup Controllers" dialog drives, addressable by
  *  name so it can be scripted over many nodes. */
@@ -2467,7 +2511,13 @@ int usage()
 		  << "        [--sequence NAME] [--new-sequence] [--standalone]\n"
 		  << "        [--effect-var 0..9] [--int-var N] -o OUT\n"
 		  << "                                          attach controllers and wire them\n"
-		  << "                                          into a NiControllerSequence\n\n"
+		  << "                                          into a NiControllerSequence\n"
+		  << "  freeze <file>                           list sequences and their ranges\n"
+		  << "  freeze <file> --sequence NAME --time T [--keep-graph] -o OUT\n"
+		  << "                                          bake the sequence at T seconds into\n"
+		  << "                                          the fields it drives and strip the\n"
+		  << "                                          controller graph (--keep-graph bakes\n"
+		  << "                                          the values but leaves it animating)\n\n"
 		  << "Field paths are '/'-separated; numeric segments index arrays by row,\n"
 		  << "e.g. -f \"Vertex Data/0/Vertex Colors\".\n\n"
 		  << "Scope: spells and model edits only. Viewport modelling tools (extrude,\n"
@@ -2504,6 +2554,8 @@ int nifskopeCliMain( const QStringList & args )
 	QString pendingAttach;
 	QString saveName, applyName, importOs, exportOs;
 	float blend = 1.0f;
+	float freezeTime = 0.0f;
+	bool keepGraph = false;
 	int steps = 0;
 	int substeps = 0;
 	int iterations = 0;
@@ -2558,6 +2610,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--save" ) ) saveName = next();
 		else if ( t == QLatin1String( "--apply" ) ) applyName = next();
 		else if ( t == QLatin1String( "--blend" ) ) blend = next().toFloat();
+		else if ( t == QLatin1String( "--time" ) ) freezeTime = next().toFloat();
+		else if ( t == QLatin1String( "--keep-graph" ) ) keepGraph = true;
 		else if ( t == QLatin1String( "--steps" ) ) steps = next().toInt();
 		else if ( t == QLatin1String( "--substeps" ) ) substeps = next().toInt();
 		else if ( t == QLatin1String( "--iterations" ) ) iterations = next().toInt();
@@ -2637,6 +2691,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdMerge( file, adds, addAttach, noDedupe, outFile );
 	else if ( cmd == QLatin1String( "pose" ) )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
+	else if ( cmd == QLatin1String( "freeze" ) )
+		rc = cmdFreeze( file, sequence, freezeTime, keepGraph, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )
 		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,

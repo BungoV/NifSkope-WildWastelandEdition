@@ -341,6 +341,11 @@ public:
 
 	QModelIndex indexAt( const QPointF & p, bool shiftModifier = false );
 
+	//! Where the timeline is parked right now.
+	/*! The freeze dialog seeds itself from this, so "scrub until it looks right,
+	 *  then freeze this file there" needs no second guess at the number. */
+	float sceneTime() const { return time; }
+
 public slots:
 	void update();
 	void setCurrentIndex( const QModelIndex & );

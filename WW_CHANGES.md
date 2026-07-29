@@ -1,5 +1,99 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30l — freeze a sequence to a still
+
+Per loaded document, in the Loaded NIFs list: **Freeze Animation…** picks a
+sequence and an instant, writes what every controlled block evaluates to at that
+instant into the field it drives, and removes the controller graph. Also
+`nifcli freeze --sequence NAME --time T [--keep-graph]`, and bare
+`nifcli freeze <file>` to list the sequences with their ranges.
+
+The dialog seeds its time from `GLView::sceneTime()`, so the workflow is scrub
+the timeline until it looks right, then freeze this file there. It runs through
+`nifSnapshotOp`, so a freeze is one Ctrl+Z and a loaded document can still be
+reverted byte-for-byte.
+
+New: `src/freezeanim.{h,cpp}`, `tests/freeze/freeze_sweep.sh`.
+
+### The rule: what freezes is what the viewport shows
+
+Every evaluation mirrors the matching class in `gl/controllers.cpp` — same
+interpolation, same `ctrlTime` mapping, same Controlled Variable switch — and
+writes the result into the NIF field the runtime member was loaded from. A freeze
+that disagreed with the viewport would be worse than none, because the entire
+point is picking a moment by looking at it.
+
+Baked: node transforms (`NiTransformController`, `NiKeyframeController`,
+`NiMultiTargetTransformController`), `BS{Effect,Lighting}ShaderProperty`
+`Float`/`Color` controllers by Controlled Variable, `NiLightDimmerController` →
+`Dimmer`, `NiVisController` → the node's hidden flag,
+`BSNiAlphaPropertyTestRefController` → `Threshold`, `NiAlphaController` →
+material `Alpha`.
+
+### Two idioms for "which block does this controller drive", both in one file
+
+`X01_Torso_Tesla_VFX` has both. `autoPlay` names the controller instance actually
+hanging off the target (light 117 → controller 1). `autoLoop` carries its **own**
+instances (controller 13) attached to nothing at all. `NiTimeController::Target`
+is no help — FO4 leaves it at -1 on the shader property controllers (block 26).
+
+So: walk every block's `Controller`/`Next Controller` chain first, and fall back
+to the row's own `Node Name` + `Property Type`. Where `Property Type` is blank,
+the controller type implies which property it must be. That fallback is what
+takes the torso from 9 rows resolved to 11.
+
+(NifSkope's renderer only does the first half, via `findController`, which is why
+`autoLoop`'s dimmers and orphan effect controllers never animate in the viewport.
+Noted, not fixed here.)
+
+### Two silent lies, found by checking bytes instead of the success count
+
+The first version reported "9 baked" while writing **nothing** for four of them:
+
+- nif.xml declares `TexCoord` as a struct of `u` and `v`, but `NifValue` maps the
+  whole type to `tVector2`. Setting a child row named `"u"` did nothing, and the
+  write helper returned `true` regardless. Now read-modify-write the whole
+  `Vector2`, and every write helper returns what the write actually did.
+- **Three of the shader properties take every parameter from a `.bgem`.** When a
+  material file is set, `setMaterial` builds a `Material` and `updateParams` reads
+  every parameter off *that* — the NIF's own `UV Offset` row is never looked at.
+  Baking into it writes a number nothing reads. These are now **skipped**, naming
+  the material: the frozen value has nowhere to live in this file, and saying so
+  beats a number that does nothing.
+
+Measured proof the float path is right: property 111 (no material), Controlled
+Variable 22 = V_Offset, keys (0, 0.0) → (4.933, −1.0) linear. Frozen at t = 0 /
+1.25 / 2.5 gives `UV Offset.v` = 0.000000 / −0.253395 / −0.506791, against
+hand-computed 0 / −0.253396 / −0.506791.
+
+### What a still may not keep
+
+Stripping removes the sequence machinery **and every controller that drives a
+value** — leaving one behind would animate the baked field away the moment the
+file plays. Controllers that drive a *simulation* stay: a particle system's state
+is a cloud of generated vertices and a procedural arc is a generated ribbon,
+neither is a field, so they cannot be baked and are not competing with anything
+written. Turning those into a still means snapshotting their geometry, which is
+the loading-screen convert's job.
+
+Any controller removed without being baked is **reported**, not swallowed.
+
+### The test checks bytes, not the report
+
+`tests/freeze/freeze_sweep.sh` — 57 checks over 14 file/sequence pairs, all
+green. Invariants: every controlled block is either baked or accounted for out
+loud (`baked + skipped == Num Controlled Blocks`); the frozen file still loads
+with no manager/sequence/palette left; `NiParticleSystem` and
+`BSProceduralLightningController` counts are unchanged.
+
+Invariant 1 is deliberately **global**, not per-sequence. The first draft asserted
+"two times ⇒ two different files" per case and failed on
+`X01_Helmet_Tesla_VFX/autoPlay`, which drives a static `NiTransformInterpolator`
+and two flat curves (0.0 → 0.0, 0.35 → 0.35) — identical bytes is the *correct*
+answer there. That was the harness encoding a wrong expectation, not a bug. What
+must never happen is *every* case being constant, which is what a dead write path
+looks like: 13 time-varying, 1 constant.
+
 ## 2026-07-30k — two Renderers on one context empty the whole frame
 
 Attempting real per-document rendering (a `Scene` per loaded NIF instead of the

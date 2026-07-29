@@ -376,6 +376,10 @@ private:
 	//! FIRST row is the target, so the skeleton goes first and dictates position
 	//! for everything spliced in after it. Nothing loaded is modified.
 	void mergeLoadedDocumentsMenu( const QPoint & globalPos );
+	//! Ask which sequence and which instant, then bake it. Per loaded document, so
+	//! each limb can be frozen at its own moment before anything is merged.
+	//! Returns true when the model was changed.
+	bool freezeDocumentDialog( NifModel * nif, const QString & displayName );
 	//! Attach a real window to a data-only background document: create it hidden,
 	//! reload the NIF from its source, then run the normal primary switch.
 	void promoteBackgroundDocument( BackgroundNifDocument * document );

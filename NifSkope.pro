@@ -228,6 +228,7 @@ HEADERS += \
 	src/xml/nifexpr.h \
 	src/xml/xmlconfig.h \
 	src/bsamodel.h \
+	src/freezeanim.h \
 	src/gamemanager.h \
 	src/glview.h \
 	src/message.h \
@@ -358,6 +359,7 @@ SOURCES += \
 	src/xml/nifexpr.cpp \
 	src/xml/nifxml.cpp \
 	src/bsamodel.cpp \
+	src/freezeanim.cpp \
 	src/gamemanager.cpp \
 	src/glview.cpp \
 	src/main.cpp \

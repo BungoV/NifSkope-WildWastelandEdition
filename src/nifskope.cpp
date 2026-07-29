@@ -33,12 +33,14 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifskope.h"
 #include "ui_nifskope.h"
 
+#include "freezeanim.h"
 #include "glview.h"
 #include "message.h"
 #include "nifmerge.h"
 #include "nifsnapshot.h"
 #include "data/niftypes.h"
 #include "spellbook.h"
+#include "spells/animationsetup.h"
 #include "spells/blocks.h"	// setBlockListSelection for Copy Branch multi-select
 #include "version.h"
 #include "wwskin.h"
@@ -66,8 +68,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QCloseEvent>
 #include <QDebug>
 #include <QDesktopServices>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QSortFilterProxyModel>
 #include <QDir>
 #include <QDirIterator>
@@ -1699,12 +1704,21 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
 	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
 	menu.addSeparator();
+	QAction * freeze = menu.addAction( tr( "Freeze Animation…" ) );
+	freeze->setEnabled( document->nif && !AnimSetup::sequenceNames( document->nif ).isEmpty() );
+	freeze->setToolTip( tr( "Bake one instant of a sequence into the fields it drives" ) );
+	menu.setToolTipsVisible( true );
+	menu.addSeparator();
 	QAction * unload = menu.addAction( tr( "Remove from Loaded NIFs" ) );
 	// The primary's automatic row cannot be removed from its own workspace.
 	unload->setEnabled( document != this );
 	QAction * close = menu.addAction( tr( "Close Document" ) );
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == makePrimary ) activateDocumentTab( index );
+	else if ( chosen == freeze ) {
+		if ( freezeDocumentDialog( document->nif, QFileInfo( document->currentFile ).fileName() ) )
+			refreshAllDocumentSessions();
+	}
 	else if ( chosen == ghost ) {
 		document->sessionPreviewGhost = ghost->isChecked();
 		refreshAllDocumentSessions();
@@ -1848,6 +1862,94 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
 	QMessageBox::information( this, tr( "Merge" ), text );
 }
 
+bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName )
+{
+	if ( !nif )
+		return false;
+
+	const QStringList sequences = AnimSetup::sequenceNames( nif );
+	if ( sequences.isEmpty() ) {
+		QMessageBox::information( this, tr( "Freeze Animation" ),
+			tr( "%1 has no animation sequences to freeze." ).arg( displayName ) );
+		return false;
+	}
+
+	QDialog dlg( this );
+	dlg.setWindowTitle( tr( "Freeze Animation — %1" ).arg( displayName ) );
+	auto * form = new QVBoxLayout( &dlg );
+
+	form->addWidget( new QLabel( tr( "Write what this sequence evaluates to at one instant into the "
+		"fields it drives, then remove the controllers." ), &dlg ) );
+
+	auto * seqRow = new QHBoxLayout;
+	seqRow->addWidget( new QLabel( tr( "Sequence" ), &dlg ) );
+	auto * seqBox = new QComboBox( &dlg );
+	seqBox->addItems( sequences );
+	seqRow->addWidget( seqBox, 1 );
+	form->addLayout( seqRow );
+
+	auto * timeRow = new QHBoxLayout;
+	timeRow->addWidget( new QLabel( tr( "Time" ), &dlg ) );
+	auto * timeBox = new QDoubleSpinBox( &dlg );
+	timeBox->setDecimals( 3 );
+	timeBox->setSingleStep( 0.05 );
+	timeBox->setSuffix( tr( " s" ) );
+	timeRow->addWidget( timeBox, 1 );
+	auto * rangeLabel = new QLabel( &dlg );
+	timeRow->addWidget( rangeLabel );
+	form->addLayout( timeRow );
+
+	auto * strip = new QCheckBox( tr( "Remove the controller graph" ), &dlg );
+	strip->setChecked( true );
+	strip->setToolTip( tr( "Unchecked bakes the values but leaves the file animating, so a time "
+		"can be tried before committing to it" ) );
+	form->addWidget( strip );
+
+	// The time box follows the chosen sequence's own range, and starts wherever
+	// the timeline is parked — the moment the user just scrubbed to.
+	auto syncRange = [&]() {
+		float a = 0, b = 0;
+		FreezeAnim::sequenceRange( nif, seqBox->currentText(), &a, &b );
+		if ( !( b > a ) )
+			b = a;
+		timeBox->setRange( a, b );
+		rangeLabel->setText( tr( "of %1 – %2 s" ).arg( a, 0, 'f', 3 ).arg( b, 0, 'f', 3 ) );
+		const float now = ogl ? ogl->sceneTime() : a;
+		timeBox->setValue( ( now >= a && now <= b ) ? now : a );
+	};
+	syncRange();
+	connect( seqBox, &QComboBox::currentTextChanged, &dlg, [&]( const QString & ) { syncRange(); } );
+
+	auto * buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg );
+	buttons->button( QDialogButtonBox::Ok )->setText( tr( "Freeze" ) );
+	connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );
+	connect( buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
+	form->addWidget( buttons );
+
+	if ( dlg.exec() != QDialog::Accepted )
+		return false;
+
+	QString error;
+	const FreezeAnim::Result r = FreezeAnim::freeze( nif, seqBox->currentText(),
+		float( timeBox->value() ), strip->isChecked(), &error );
+	if ( !r.ok ) {
+		QMessageBox::warning( this, tr( "Freeze Animation" ), error );
+		return false;
+	}
+
+	QString text = tr( "Froze '%1' at %2 s — %3 value(s) written, %4 left alone, %5 block(s) removed." )
+		.arg( seqBox->currentText() ).arg( timeBox->value(), 0, 'f', 3 )
+		.arg( r.baked ).arg( r.skipped ).arg( r.blocksRemoved );
+	// Everything not baked is spelled out. A freeze that quietly did two thirds
+	// of the job would read as a complete one.
+	if ( !r.unhandled.isEmpty() )
+		text += tr( "\n\nLeft alone:\n• %1" ).arg( r.unhandled.join( QStringLiteral( "\n• " ) ) );
+	if ( !r.notes.isEmpty() )
+		text += tr( "\n\nNotes:\n• %1" ).arg( r.notes.join( QStringLiteral( "\n• " ) ) );
+	QMessageBox::information( this, tr( "Freeze Animation" ), text );
+	return true;
+}
+
 void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, const QPoint & globalPos )
 {
 	if ( !document ) return;
@@ -1862,6 +1964,12 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
 	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
+	menu.addSeparator();
+	// Per file, per limb: this is what makes "freeze each part at its own moment,
+	// then merge" a thing you can actually do.
+	QAction * freeze = menu.addAction( tr( "Freeze Animation…" ) );
+	freeze->setEnabled( !AnimSetup::sequenceNames( document->nif ).isEmpty() );
+	freeze->setToolTip( tr( "Bake one instant of a sequence into the fields it drives" ) );
 	menu.addSeparator();
 	// The workspace edits loaded documents in place — posing, syncing, freezing —
 	// so there has to be a way back that is always available and does not depend
@@ -1884,6 +1992,10 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 		else
 			QMessageBox::warning( this, tr( "Revert" ),
 				tr( "Could not re-parse %1's loaded state." ).arg( document->displayName() ) );
+	}
+	else if ( chosen == freeze ) {
+		if ( freezeDocumentDialog( document->nif, document->displayName() ) )
+			refreshAllDocumentSessions();
 	}
 	else if ( chosen == ghost ) {
 		document->sessionPreviewGhost = ghost->isChecked();
