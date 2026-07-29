@@ -330,7 +330,7 @@ QWidget * GLView::createWindowContainer( QWidget * parent )
  * learn about ragdolls. Leaving clears it, which puts the viewport back exactly
  * as it was -- the mode never touches the model.
  */
-bool GLView::setPhysicsSimMode( bool on )
+bool GLView::setPhysicsSimMode( bool on, int systemBlock )
 {
 	if ( !on ) {
 		const bool was = physicsPreview.active();
@@ -341,11 +341,18 @@ bool GLView::setPhysicsSimMode( bool on )
 			emit physicsSimModeChanged( false );
 		return false;
 	}
-	if ( physicsPreview.active() )
-		return true;
+	/* A request for a PARTICULAR system restarts even if one is already running.
+	 * A skeleton file holds several, and picking a different one is a change of
+	 * subject, not a no-op.
+	 */
+	if ( physicsPreview.active() ) {
+		if ( systemBlock < 0 || systemBlock == physicsPreview.systemBlock() )
+			return true;
+		physicsPreview.stop();
+	}
 
 	QString error;
-	if ( !physicsPreview.start( model, &error ) ) {
+	if ( !physicsPreview.start( model, &error, systemBlock ) ) {
 		physicsPreview.stop();
 		return false;
 	}
@@ -398,9 +405,76 @@ bool GLView::physicsMouseMove( QMouseEvent * event )
 	// a held secondary button must not zoom: see physicsMousePress
 	if ( event->buttons() & cursorPlaceButton() )
 		return true;
+
+	/* Ctrl turns what the hand is holding instead of moving it.
+	 *
+	 * The physics gun's other gesture, and it needs a modifier rather than a mode
+	 * because the two are used together -- you drag a limb roughly into place, turn
+	 * it, and nudge it again, all inside one grab. Holding Shift as well snaps to
+	 * 15 degrees.
+	 *
+	 * Ctrl and not Alt: Alt-drag is claimed by the window manager on most desktops
+	 * and never reaches the widget.
+	 */
+	if ( physicsPreview.grabbing() && ( event->modifiers() & Qt::ControlModifier ) ) {
+		const QPointF d = event->position() - physicsRotateLast;
+		physicsRotateLast = event->position();
+		if ( !physicsPreview.grabRotating() ) {
+			// the camera's axes in world space, captured once for the whole gesture
+			// the same inverse the picking ray is built with, so "right" here and
+			// right on screen are the same direction
+			const Matrix inv = viewTransform().rotation.inverted();
+			physicsPreview.beginGrabRotate( inv * Vector3( 1, 0, 0 ),
+				inv * Vector3( 0, 1, 0 ), inv * Vector3( 0, 0, -1 ) );
+			return true;      // the first move only establishes the frame
+		}
+		// a quarter turn across the width of the viewport, which is a comfortable
+		// rate: fine enough to place a hand, fast enough to flip a torso
+		const float perPixel = 1.5708f / float( std::max( 200, width() ) );
+		physicsPreview.addGrabRotate( float( d.x() ) * perPixel, float( d.y() ) * perPixel,
+			0.0f, ( event->modifiers() & Qt::ShiftModifier ) != 0 );
+		return true;
+	}
+	physicsRotateLast = event->position();
+
 	Vector3 ro, rd;
 	mouseRayWorld( event->position(), ro, rd );
 	return physicsPreview.move( ro, rd );
+}
+
+/*! The wheel reels the held body in and out, and rolls it with Ctrl.
+ *
+ * Returns false when nothing is held, so the wheel still zooms the camera the
+ * rest of the time -- taking it away entirely would leave the mode without its
+ * most-used camera control.
+ */
+bool GLView::physicsWheel( QWheelEvent * event )
+{
+	if ( !physicsPreview.active() || !physicsPreview.grabbing() )
+		return false;
+	const float notches = float( event->angleDelta().y() ) / 120.0f;
+	if ( !( std::fabs( notches ) > 1.0e-6f ) )
+		return false;
+
+	if ( event->modifiers() & Qt::ControlModifier ) {
+		if ( !physicsPreview.grabRotating() ) {
+			// the same inverse the picking ray is built with, so "right" here and
+			// right on screen are the same direction
+			const Matrix inv = viewTransform().rotation.inverted();
+			physicsPreview.beginGrabRotate( inv * Vector3( 1, 0, 0 ),
+				inv * Vector3( 0, 1, 0 ), inv * Vector3( 0, 0, -1 ) );
+		}
+		// a notch is 15 degrees, which is the snap increment, so rolling with Shift
+		// held steps cleanly from one detent to the next
+		physicsPreview.addGrabRotate( 0.0f, 0.0f, notches * PhysicsPreview::ROTATE_SNAP,
+			( event->modifiers() & Qt::ShiftModifier ) != 0 );
+		emit gizmoStatus( tr( "Roll" ) );
+		return true;
+	}
+
+	physicsPreview.adjustGrabDepth( notches, ( event->modifiers() & Qt::ShiftModifier ) != 0 );
+	emit gizmoStatus( tr( "Hand at %1" ).arg( double( physicsPreview.grabDepth() ), 0, 'f', 1 ) );
+	return true;
 }
 
 bool GLView::physicsMouseRelease( QMouseEvent * event )
@@ -426,6 +500,20 @@ bool GLView::physicsKeyPress( QKeyEvent * event )
 	case Qt::Key_2: physicsPreview.setTool( PhysicsPreview::Tool::Shoot ); return true;
 	case Qt::Key_3: physicsPreview.setTool( PhysicsPreview::Tool::Blast ); return true;
 	case Qt::Key_4: physicsPreview.setTool( PhysicsPreview::Tool::Wind );  return true;
+	case Qt::Key_5: physicsPreview.setTool( PhysicsPreview::Tool::Punt );  return true;
+	case Qt::Key_6: physicsPreview.setTool( PhysicsPreview::Tool::Prop );  return true;
+	case Qt::Key_U:
+		// release every pin at once. Pins accumulate, and hunting each one down
+		// with the cursor to undo it is the tedium this exists to remove.
+		physicsPreview.unpinAll();
+		emit gizmoStatus( tr( "All pins released" ) );
+		update();
+		return true;
+	case Qt::Key_C:
+		physicsPreview.clearProps();
+		setCollisionPreview( physicsPreview.soup() );
+		update();
+		return true;
 	case Qt::Key_Space:
 		physicsPreview.setPaused( !physicsPreview.paused() );
 		return true;
@@ -456,6 +544,82 @@ bool GLView::physicsKeyPress( QKeyEvent * event )
 		return true;
 	}
 	return false;
+}
+
+/*! Write the simulated pose back to the nodes the bodies are bound to.
+ *
+ * The one thing in this mode that touches the file, and the reason the mode is
+ * more than a toy: dropping a rig, letting it settle and keeping the result is a
+ * pose nobody has to key by hand.
+ *
+ * Each node is moved by the RIGID DIFFERENCE its body underwent since the rest
+ * pose, not set to the body's absolute transform. A body sits at its centre of
+ * mass and a node at its origin, so the two frames differ by a constant offset --
+ * and in a difference that offset cancels, which makes this correct without
+ * having to first establish what the offset is.
+ *
+ * Worlds are read BEFORE anything is written. Node transforms are stored as
+ * locals, so writing a parent changes where its children are; reading every world
+ * up front means each node is placed against the hierarchy as it was, not as the
+ * loop has left it half-way through.
+ *
+ * Returns how many nodes were moved.
+ */
+int GLView::physicsCapturePose()
+{
+	if ( !physicsPreview.active() || !model || !scene )
+		return 0;
+
+	auto worldTransform = [this]( int block ) {
+		const QModelIndex iBlock = model->getBlockIndex( block );
+		if ( Node * node = scene->getNode( model, iBlock ) )
+			return node->worldTrans();
+		Transform local( model, iBlock );
+		const int parent = model->getParent( block );
+		if ( parent >= 0 )
+			if ( Node * parentNode = scene->getNode( model, model->getBlockIndex( parent ) ) )
+				return parentNode->worldTrans() * local;
+		return local;
+	};
+
+	struct Placement { int block; Transform local; };
+	QVector<Placement> writes;
+	const int bodies = physicsPreview.bodyCount();
+	for ( int i = 0; i < bodies; i++ ) {
+		const int block = physicsPreview.bodyNode( i );
+		if ( block < 0 || !model->getBlockIndex( block ).isValid() )
+			continue;
+		Quat dq;
+		Vector3 dt;
+		if ( !physicsPreview.bodyDelta( i, dq, dt ) )
+			continue;
+
+		Transform delta;
+		delta.rotation.fromQuat( dq );
+		delta.translation = dt;
+		delta.scale = 1.0f;
+
+		const Transform world = delta * worldTransform( block );
+		const int parent = model->getParent( block );
+		const Transform parentWorld = ( parent >= 0 ) ? worldTransform( parent ) : Transform();
+		writes.append( { block, parentWorld.inverted() * world } );
+	}
+	if ( writes.isEmpty() )
+		return 0;
+
+	// snapshot undo, as the other structural pose operations use: capturing is
+	// occasional, and being able to take it back is worth more than the reload
+	nifSnapshotOp( model, tr( "Capture simulated pose" ), [&]() {
+		for ( const Placement & p : std::as_const( writes ) ) {
+			const QModelIndex iB = model->getBlockIndex( p.block );
+			if ( !iB.isValid() )
+				continue;
+			Matrix m = p.local.rotation;
+			model->set<Matrix>( iB, "Rotation", m );
+			model->set<Vector3>( iB, "Translation", p.local.translation );
+		}
+	} );
+	return int( writes.size() );
 }
 
 void GLView::setCollisionPreview( const QVector<Vector3> & triangleSoup )
@@ -2444,6 +2608,57 @@ void GLView::paintGL()
 			glDisable( GL_BLEND );
 		}
 
+		/* The beam, and the point on the shape the hand actually has hold of.
+		 *
+		 * Without it the two things the wheel does -- reeling the body in and out,
+		 * and rolling it -- are controls with no visible state: you can feel them
+		 * working but cannot see where the hand is, so a body pushed behind the one
+		 * in front of it simply looks like it stopped responding. Drawn with depth
+		 * testing OFF, deliberately: the whole point is to show where the hand is
+		 * when the hand is behind something.
+		 */
+		Vector3 grip, hand;
+		if ( physicsPreview.grabBeam( grip, hand ) ) {
+			const float pxScale = float( devicePixelRatioF() );
+			glDisable( GL_DEPTH_TEST );
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+			scene->loadModelViewMatrix( viewTrans );
+
+			const QVector<Vector3> beam { grip, hand };
+			// the same orange as the bone in hand, so the two read as one object
+			scene->setGLColor( 1.0f, 0.72f, 0.16f, 0.75f );
+			scene->setGLLineWidth( 1.6f * pxScale );
+			scene->drawLines( beam.constData(), size_t( beam.size() ), nullptr );
+
+			/* A cross at the grip rather than a dot: it is a POINT on a surface, and
+			 * a filled marker large enough to see would hide the very detail you are
+			 * aiming at. Sized from the camera distance so it stays legible at any
+			 * zoom instead of vanishing when you pull back.
+			 */
+			const float s = std::max( 0.4f, cameraDistance() * 0.012f );
+			QVector<Vector3> mark;
+			mark << grip - Vector3( s, 0, 0 ) << grip + Vector3( s, 0, 0 )
+				 << grip - Vector3( 0, s, 0 ) << grip + Vector3( 0, s, 0 )
+				 << grip - Vector3( 0, 0, s ) << grip + Vector3( 0, 0, s );
+			scene->setGLColor( 1.0f, 0.85f, 0.35f, 0.95f );
+			scene->setGLLineWidth( 2.0f * pxScale );
+			scene->drawLines( mark.constData(), size_t( mark.size() ), nullptr );
+
+			// and where the hand is asking it to be, which is not the same place
+			// whenever the rig cannot reach -- that gap IS the chain going taut
+			QVector<Vector3> target;
+			const float t = s * 0.7f;
+			target << hand - Vector3( t, t, 0 ) << hand + Vector3( t, t, 0 )
+				   << hand - Vector3( t, -t, 0 ) << hand + Vector3( t, -t, 0 );
+			scene->setGLColor( 1.0f, 1.0f, 1.0f, 0.6f );
+			scene->setGLLineWidth( 1.2f * pxScale );
+			scene->drawLines( target.constData(), size_t( target.size() ), nullptr );
+
+			glDisable( GL_BLEND );
+			glEnable( GL_DEPTH_TEST );
+		}
+
 		// bodies outside their joint limits, drawn over the rest in red
 		const QVector<Vector3> bad = physicsPreview.limitSoup();
 		if ( !bad.isEmpty() ) {
@@ -3368,6 +3583,24 @@ void GLView::paintGL()
 					: QString() );
 			lines << tr( "%1 bodies, %2 joints" ).arg( physicsPreview.bodyCount() )
 						.arg( physicsPreview.jointCount() );
+			/* Only what is not zero. A line reading "0 pinned, 0 balls, hand 0"
+			 * is three facts that never change, and the overlay is already six
+			 * deep before any of them.
+			 */
+			QStringList extra;
+			if ( physicsPreview.pinnedCount() > 0 )
+				extra << tr( "%1 pinned" ).arg( physicsPreview.pinnedCount() );
+			if ( physicsPreview.propCount() > 0 )
+				extra << tr( "%1 balls" ).arg( physicsPreview.propCount() );
+			if ( physicsPreview.grabbing() )
+				extra << tr( "hand %1" ).arg( double( physicsPreview.grabDepth() ), 0, 'f', 0 );
+			if ( !extra.isEmpty() )
+				lines << extra.join( QStringLiteral( ", " ) );
+			if ( physicsPreview.frameCount() > 0 )
+				lines << ( physicsPreview.frameIndex() >= 0
+					? tr( "frame %1 of %2" ).arg( physicsPreview.frameIndex() + 1 )
+						.arg( physicsPreview.frameCount() )
+					: tr( "recording, %1 frames" ).arg( physicsPreview.frameCount() ) );
 			lines << tr( "max speed %1 m/s" ).arg( double( st.maxSpeed ), 0, 'f', 2 );
 			lines << tr( "joint error %1 m" ).arg( double( st.maxJointError ), 0, 'f', 4 );
 			lines << tr( "%1 contacts, penetration %2 m" ).arg( st.contacts )
@@ -19909,6 +20142,14 @@ void GLView::wheelEvent( QWheelEvent * event )
 		freeCamSpeed *= ( event->angleDelta().y() > 0 ) ? 1.25f : 0.8f;
 		freeCamSpeed = std::min( std::max( freeCamSpeed, 0.05f ), 50.0f );
 		emit gizmoStatus( tr( "Fly speed: %1x (scroll to adjust)" ).arg( double( freeCamSpeed ), 0, 'f', 2 ) );
+		return;
+	}
+
+	// while the physics hand has hold of something the wheel belongs to it: push
+	// and pull along the beam, or roll with Ctrl. It declines when nothing is
+	// held, so the wheel still zooms the rest of the time.
+	if ( physicsWheel( event ) ) {
+		update();
 		return;
 	}
 

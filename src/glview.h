@@ -184,7 +184,10 @@ public:
 	 * resets. It is a PREVIEW -- nothing it does is written back to the file, so
 	 * leaving the mode puts everything where it was.
 	 */
-	bool setPhysicsSimMode( bool on );
+	//! `systemBlock` picks WHICH collision system to simulate; -1 takes the first
+	//! jointed one, which is right for a creature file and arbitrary for a
+	//! skeleton file that carries several.
+	bool setPhysicsSimMode( bool on, int systemBlock = -1 );
 	bool physicsSimActive() const { return physicsPreview.active(); }
 	PhysicsPreview & physicsSim() { return physicsPreview; }
 	//! advance the preview AND refresh what is drawn; dt comes from advanceGears.
@@ -192,6 +195,9 @@ public:
 	//! the solver behind the viewport's back and never noticing the drawn
 	//! geometry had stopped following it.
 	void physicsTick( float dt );
+	//! Write the simulated pose back to the bound nodes; returns how many moved.
+	//! The only thing in this mode that touches the file.
+	int physicsCapturePose();
 	//! what the viewport is currently drawing as a collision preview
 	const QVector<Vector3> & collisionPreview() const { return collisionPreviewSoup; }
 	bool physicsStatsShown() const { return physicsShowStats; }
@@ -473,6 +479,12 @@ private:
 	bool physicsMouseMove( QMouseEvent * event );
 	bool physicsMouseRelease( QMouseEvent * event );
 	bool physicsKeyPress( QKeyEvent * event );
+	//! wheel: reel the held body in or out, or roll it with Ctrl. False when
+	//! nothing is held, so the wheel keeps zooming the camera the rest of the time.
+	bool physicsWheel( QWheelEvent * event );
+	//! where the cursor was on the last move, so a Ctrl-drag has a delta to
+	//! measure -- the rotate gesture is relative and the events are absolute
+	QPointF physicsRotateLast;
 	QVector<Vector3> sessionDocumentPreviewSoup;
 	//! Per-vertex flat-shaded colors for the opaque session preview; computed
 	//! once per soup rebuild from face normals against a fixed light direction.

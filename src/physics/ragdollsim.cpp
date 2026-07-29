@@ -455,6 +455,7 @@ bool RagdollSim::build( const HknpSystem & sys, QString * error )
 		if ( !b.points.isEmpty() )
 			b.com = sum / float( b.points.size() );
 		b.restOrigin = restPos.value( s.bodyId );
+		b.restOrient = restRot.value( s.bodyId );
 		b.cinfoPos = phys.position;
 		b.cinfoRot = phys.orientation;
 		b.x = restPos.value( s.bodyId ) + qRot( restRot.value( s.bodyId ), b.com );
@@ -560,6 +561,10 @@ void RagdollSim::buildCollisionFilter()
 	m_noCollide.clear();
 	m_restOverlaps = 0;
 	const int n = m_bodies.size();
+	// the stride the stored keys are encoded with, frozen here: spawning a prop
+	// grows m_bodies, and re-deriving it from the new size would reinterpret them
+	m_filterStride = n;
+	m_propStart = n;
 	auto key = []( int a, int b, int n ) { return std::min( a, b ) * n + std::max( a, b ); };
 
 	// jointed bodies always overlap where they meet, by construction
@@ -626,7 +631,19 @@ void RagdollSim::collectPairs()
 			// is a point set with no faces, so it is left to the ground plane
 			if ( !exactPair( A, B ) || ( A.pinned && B.pinned ) )
 				continue;
-			if ( m_noCollide.contains( key( i, k, n ) ) )
+			/* The body in hand can be excused from the rig, so a limb that is
+			 * already inside the torso can be pulled back out of it. A prop is
+			 * never excused: it is the thing being thrown AT the rig.
+			 */
+			if ( dragNoCollide && m_dragBody >= 0 && ( i == m_dragBody || k == m_dragBody )
+				&& !A.prop && !B.prop )
+				continue;
+			/* The stored keys use the stride the filter was BUILT with, and a prop
+			 * has no entry in it at all -- looking one up would be reading a key
+			 * that was never written, which can land on another pair's.
+			 */
+			if ( i < m_propStart && k < m_propStart
+				&& m_noCollide.contains( key( i, k, m_filterStride ) ) )
 				continue;
 			// cheap bounding-sphere reject before the exact test
 			const float reach = boundRadius( A ) + boundRadius( B );
@@ -637,11 +654,13 @@ void RagdollSim::collectPairs()
 	}
 }
 
-void RagdollSim::solveContacts( float h )
+void RagdollSim::solveContacts( float h, bool record )
 {
 	Q_UNUSED( h )
 	static SimBody staticGround;    // pinned, never written; stands in for the plane
 	staticGround.pinned = true;
+	if ( record )
+		m_contacts.clear();
 
 	for ( const SimPair & pr : std::as_const( m_pairs ) ) {
 		SimBody & A = m_bodies[pr.a];
@@ -671,12 +690,20 @@ void RagdollSim::solveContacts( float h )
 			if ( !touching )
 				continue;
 			const float share = 1.0f / float( touching );
+			float deepest = 0.0f;
+			Vector3 deepestPoint;
 			for ( const SimBody::SimPoint & sp : A.points ) {
 				const Vector3 c = worldPoint( A, sp );
 				const float d = groundZ + sp.r - c[2];
 				if ( d <= 0.0f )
 					continue;
 				point = Vector3( c[0], c[1], groundZ );
+				// the deepest point is the one that struck; the others are along for
+				// the ride, and a bounce comes off one place rather than off eight
+				if ( d > deepest ) {
+					deepest = d;
+					deepestPoint = point;
+				}
 				staticGround.x = point;
 				applyPositional( A, staticGround, point - A.x, Vector3(),
 					normal * ( d * share ) );
@@ -700,6 +727,8 @@ void RagdollSim::solveContacts( float h )
 					}
 				}
 			}
+			if ( record && deepest > 0.0f )
+				m_contacts.append( { pr.a, -1, deepestPoint - A.x, Vector3(), Vector3( 0, 0, 1 ) } );
 			continue;
 		}
 
@@ -717,6 +746,8 @@ void RagdollSim::solveContacts( float h )
 		normal = ( dist > 1.0e-6f ) ? ( sep / dist ) : Vector3( 0, 0, 1 );
 		point = ( c1 + c2 ) * 0.5f;
 		applyPositional( A, B, point - A.x, point - B.x, normal * depth );
+		if ( record )
+			m_contacts.append( { pr.a, pr.b, point - A.x, point - B.x, normal } );
 
 		/* Coulomb friction, as a tangential position correction bounded by the
 		 * normal one. Without it a ragdoll on the ground slides for ever, which
@@ -956,6 +987,78 @@ void RagdollSim::moveDrag( const Vector3 & target )
 	m_dragTarget = target;
 }
 
+void RagdollSim::setDragOrientation( const Quat & q )
+{
+	m_dragRotate = true;
+	m_dragQ = qNorm( q );
+	m_dragQLambda = 0.0f;
+}
+
+void RagdollSim::clearDragOrientation()
+{
+	m_dragRotate = false;
+	m_dragQLambda = 0.0f;
+}
+
+void RagdollSim::unpinAll()
+{
+	for ( SimBody & b : m_bodies )
+		b.pinned = false;
+}
+
+int RagdollSim::addProp( const Vector3 & pos, const Vector3 & vel, float radius, float mass )
+{
+	if ( !( radius > 0.0f ) || !( mass > 0.0f ) )
+		return -1;
+	SimBody b;
+	b.prop = true;
+	b.x = pos;
+	b.v = vel;
+	b.q = Quat( 1, 0, 0, 0 );
+	b.primType = 1;             // a sphere: capA == capB, so the segment test degenerates
+	b.shapeCount = 1;           // ...and exactPair accepts it against the rig's capsules
+	b.radius = radius;
+	b.capA = b.capB = Vector3();
+	b.com = Vector3();
+	b.restOrigin = pos;
+	b.cinfoPos = pos;
+	b.points.append( { Vector3(), radius } );
+	b.invMass = 1.0f / mass;
+	/* Solid sphere: I = 2/5 m r^2 about every axis, so the inverse is isotropic.
+	 * Written out rather than left at zero -- a body with no inverse inertia cannot
+	 * be spun by an off-centre hit, and a ball that slides without rolling is the
+	 * most obviously wrong thing a physics preview can show.
+	 */
+	const float inv = 1.0f / ( 0.4f * mass * radius * radius );
+	b.invInertia = Vector3( inv, inv, inv );
+	b.linDamping = 0.05f;
+	b.angDamping = 0.05f;
+	b.solverScale = 1.0f;       // no joints, so nothing to share a correction with
+	b.layer = 1;
+	m_bodies.append( b );
+	// the hand's strength is measured against the total mass, so a scene with a
+	// boulder in it must not leave the drag calibrated for the rig alone
+	m_totalMass += mass;
+	return int( m_bodies.size() ) - 1;
+}
+
+void RagdollSim::clearProps()
+{
+	if ( m_propStart <= 0 || m_bodies.size() <= m_propStart )
+		return;
+	// a drag or a pin holding a prop has to go with it, or it would refer to a
+	// body index that no longer exists
+	if ( m_dragBody >= m_propStart )
+		clearDrag();
+	for ( int i = m_propStart; i < m_bodies.size(); i++ )
+		if ( m_bodies.at( i ).invMass > 0.0f )
+			m_totalMass -= 1.0f / m_bodies.at( i ).invMass;
+	m_bodies.resize( m_propStart );
+	if ( !( m_totalMass > 0.0f ) )
+		m_totalMass = 1.0f;
+	m_pairs.clear();
+}
+
 void RagdollSim::applyImpulse( int body, const Vector3 & localPoint, const Vector3 & impulse )
 {
 	if ( body < 0 || body >= m_bodies.size() )
@@ -1005,6 +1108,9 @@ void RagdollSim::clearDrag()
 {
 	m_dragBody = -1;
 	m_dragLambda = 0.0f;
+	// the orientation half goes with it: left set, it would hold the NEXT body
+	// grabbed at the angle the last one was released at
+	clearDragOrientation();
 }
 
 Vector3 RagdollSim::toWorld( int body, const Vector3 & localPoint ) const
@@ -1156,6 +1262,111 @@ void RagdollSim::solveDrag( float h )
 	const Vector3 p = n * dLambda;
 	b.x += p * ( b.invMass * b.solverScale );
 	b.q = qIntegrate( b.q, capRotation( applyInvInertia( b, Vector3::crossproduct( r, p ) ) ), 1.0f );
+}
+
+/*! Turn the held body toward the orientation the hand is asking for.
+ *
+ * The angular twin of solveDrag, and deliberately built the same way: a
+ * compliant XPBD correction scaled by the body's own inverse inertia, so
+ * "firmness" means the same thing on a jaw and on a Liberty Prime torso. One
+ * side is the immovable hand, so there is no second body to share with.
+ *
+ * The correction is the shortest arc from the current pose to the target,
+ * which is what the sign flip is for: a quaternion and its negation are the
+ * same orientation, and taking the difference without choosing between them
+ * makes the hand rotate a bone the long way round about half the time.
+ */
+void RagdollSim::solveDragOrientation( float h )
+{
+	if ( !m_dragRotate || m_dragBody < 0 || m_dragBody >= m_bodies.size() || !( h > 0.0f ) )
+		return;
+	SimBody & b = m_bodies[m_dragBody];
+	if ( b.pinned )
+		return;
+
+	Quat dq = qMul( m_dragQ, qConj( b.q ) );
+	if ( dq[0] < 0.0f )
+		dq = Quat( -dq[0], -dq[1], -dq[2], -dq[3] );
+	const Vector3 axis( dq[1], dq[2], dq[3] );
+	const float s = axis.length();
+	if ( !( s > 1.0e-9f ) )
+		return;
+	const float theta = 2.0f * std::atan2( s, dq[0] );
+	const Vector3 n = axis / s;
+
+	const float w = Vector3::dotproduct( n, applyInvInertia( b, n ) );
+	if ( !( w > 1.0e-12f ) )
+		return;
+	const float alpha = w * ( 1.0f - m_dragFirmness ) / m_dragFirmness;
+	const float dLambda = ( theta - alpha * m_dragQLambda ) / ( w + alpha );
+	m_dragQLambda += dLambda;
+	// capRotation bounds the step to where the linearised quaternion update is
+	// still valid; the sweeps that follow finish whatever this one left
+	b.q = qIntegrate( b.q, capRotation( applyInvInertia( b, n * dLambda ) ), 1.0f );
+}
+
+/*! Put the bounce back, as a velocity pass after the position solve.
+ *
+ * XPBD resolves a contact by moving the body out of the surface, which removes
+ * the approach velocity as a side effect -- every landing is perfectly dead.
+ * Restitution therefore cannot be read off the post-solve state: by then the
+ * body already IS at rest. It uses the speed recorded at the top of the substep
+ * instead, which is the speed it genuinely arrived with.
+ *
+ * Only contacts that were closing get a bounce. A body resting on the floor is
+ * touching it on every substep for ever, and reflecting that would feed it
+ * energy from nothing and walk it off the ground.
+ */
+void RagdollSim::applyRestitution()
+{
+	if ( !( restitution > 0.0f ) )
+		return;
+
+	auto bounce = []( SimBody & B, const Vector3 & r, const Vector3 & n, float want ) {
+		const float have = Vector3::dotproduct( B.v + Vector3::crossproduct( B.w, r ), n );
+		if ( have >= want )
+			return;
+		const float w = genInvMass( B, r, n );
+		if ( !( w > 1.0e-12f ) )
+			return;
+		const Vector3 p = n * ( ( want - have ) / w );
+		B.v += p * ( B.invMass * B.solverScale );
+		B.w += applyInvInertia( B, Vector3::crossproduct( r, p ) );
+	};
+
+	for ( const SimContact & c : std::as_const( m_contacts ) ) {
+		if ( c.a < 0 || c.a >= m_bodies.size() )
+			continue;
+		SimBody & A = m_bodies[c.a];
+
+		if ( c.b < 0 ) {
+			if ( A.pinned || A.invMass <= 0.0f )
+				continue;
+			const float vnPre = Vector3::dotproduct(
+				A.vPre + Vector3::crossproduct( A.wPre, c.rA ), c.n );
+			// only what was closing: a body resting on the floor is in contact on
+			// every substep for ever, and reflecting that would feed it energy from
+			// nothing and walk it off the ground
+			if ( vnPre >= 0.0f )
+				continue;
+			bounce( A, c.rA, c.n, -restitution * vnPre );
+			continue;
+		}
+
+		if ( c.b >= m_bodies.size() )
+			continue;
+		SimBody & B = m_bodies[c.b];
+		const float vnPre = Vector3::dotproduct(
+			( A.vPre + Vector3::crossproduct( A.wPre, c.rA ) )
+			- ( B.vPre + Vector3::crossproduct( B.wPre, c.rB ) ), c.n );
+		if ( vnPre >= 0.0f )
+			continue;
+		const float want = -restitution * vnPre;
+		if ( !A.pinned && A.invMass > 0.0f )
+			bounce( A, c.rA, c.n, want );
+		if ( !B.pinned && B.invMass > 0.0f )
+			bounce( B, c.rB, -c.n, want );
+	}
 }
 
 /*! Solve one joint once. Returns true if it was still meaningfully violated.
@@ -1321,6 +1532,10 @@ void RagdollSim::step( float dt, int substeps )
 		for ( SimBody & b : m_bodies ) {
 			b.xPrev = b.x;
 			b.qPrev = b.q;
+			// before gravity, and before the solve removes it: this is the speed
+			// the body genuinely arrives with, which is what a bounce reflects
+			b.vPre = b.v;
+			b.wPre = b.w;
 			if ( b.pinned )
 				continue;
 			b.v += gravity * h;
@@ -1334,6 +1549,7 @@ void RagdollSim::step( float dt, int substeps )
 		}
 
 		m_dragLambda = 0.0f;
+		m_dragQLambda = 0.0f;
 		/* A live drag gets extra joint sweeps.
 		 *
 		 * Letting the hand pull hard enough to shift a whole rig -- which it must,
@@ -1354,8 +1570,16 @@ void RagdollSim::step( float dt, int substeps )
 		 */
 		for ( int it = 0; it < sweeps; it++ ) {
 			solveDrag( h );
+			solveDragOrientation( h );
 			solveJoints( h, ( it & 1 ) != 0 );
-			solveContacts( h );
+			/* The FIRST sweep keeps its contacts, not the last.
+			 *
+			 * Each sweep removes some of the overlap, so by the last one there is
+			 * usually none left to see -- which is the same reason the velocity pass
+			 * cannot re-derive them itself. The first sweep sees the impact as it
+			 * arrived, which is the geometry a bounce should come off.
+			 */
+			solveContacts( h, restitution > 0.0f && it == 0 );
 		}
 
 		for ( SimBody & b : m_bodies ) {
@@ -1371,6 +1595,9 @@ void RagdollSim::step( float dt, int substeps )
 			om = om * ( 2.0f / h );
 			b.w = ( dq[0] >= 0.0f ) ? om : -om;
 		}
+
+		// after the velocities are back, never before: see applyRestitution
+		applyRestitution();
 	}
 }
 
@@ -1531,7 +1758,9 @@ int RagdollSim::looseBodies() const
 	}
 	int n = 0;
 	for ( int i = 0; i < m_bodies.size(); i++ )
-		if ( !jointed.at( i ) && !m_bodies.at( i ).pinned )
+		// a prop is jointless by definition, and counting it here would report a
+		// clean ragdoll as a kit the moment a ball was thrown at it
+		if ( !jointed.at( i ) && !m_bodies.at( i ).pinned && !m_bodies.at( i ).prop )
 			n++;
 	return n;
 }
@@ -1544,7 +1773,9 @@ void RagdollSim::pinLooseBodies()
 		if ( j.b >= 0 && j.b < jointed.size() ) jointed[j.b] = true;
 	}
 	for ( int i = 0; i < m_bodies.size(); i++ )
-		if ( !jointed.at( i ) )
+		// props excepted, for the same reason: this is for quieting a kit file's
+		// unattached parts, and nailing down the ball you just threw is not that
+		if ( !jointed.at( i ) && !m_bodies.at( i ).prop )
 			m_bodies[i].pinned = true;
 }
 

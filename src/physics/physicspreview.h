@@ -49,7 +49,23 @@ public:
 		Grab,
 		Shoot,      //!< impulse along the view ray at the point it hits
 		Blast,      //!< radial impulse centred where the ray hits
-		Wind        //!< steady force along the view direction while held
+		Wind,       //!< steady force along the view direction while held
+		/*! Shove a body away along the view ray, or yank it toward the camera.
+		 *
+		 * The gravity gun's other half. Distinct from Shoot, which delivers a small
+		 * impulse where a round would land: this is a heavy directed push meant to
+		 * move something, and it acts along the VIEW rather than along the surface
+		 * it hit, so a punt sends a body away from you rather than into the floor.
+		 */
+		Punt,
+		/*! Throw a ball into the scene.
+		 *
+		 * A tool rather than a menu command because it needs an aim: the ball goes
+		 * where the ray points, at the depth of whatever is under the cursor. It
+		 * also puts the ball's size, mass and speed in the same parameter row every
+		 * other tool uses, instead of inventing a second place for settings.
+		 */
+		Prop
 	};
 	void setTool( Tool t );
 	Tool tool() const { return m_tool; }
@@ -83,6 +99,20 @@ public:
 		float blastStrength = 30.0f;
 		//! Wind: force in newtons along the view.
 		float windStrength = 40.0f;
+		//! Punt: impulse along the view, kg m/s.
+		float puntStrength = 60.0f;
+		//! Punt: pull toward the camera instead of pushing away.
+		bool puntPull = false;
+
+		/*! The ball a prop spawns as. Radius in metres, mass in kg.
+		 *
+		 * 0.15 m and 5 kg is a shot put: heavy enough to knock a limb about and
+		 * small enough to see the rig behind it.
+		 */
+		float propRadius = 0.15f;
+		float propMass = 5.0f;
+		//! Throw speed, m/s. 0 drops it where the ray hits.
+		float propSpeed = 8.0f;
 	};
 	ToolSettings & settings() { return m_settings; }
 	const ToolSettings & settings() const { return m_settings; }
@@ -115,9 +145,12 @@ public:
 	 * Returns false and sets `error` when the file has nothing to simulate,
 	 * which is the common case and not a fault -- most NIFs are not ragdolls.
 	 */
-	bool start( const NifModel * nif, QString * error = nullptr );
+	bool start( const NifModel * nif, QString * error = nullptr, int onlyBlock = -1 );
 	void stop();
 	bool active() const { return m_active; }
+	//! Which block the running system came from, so a picker can say which of a
+	//! skeleton file's several is on screen. -1 when nothing is running.
+	int systemBlock() const { return m_systemBlock; }
 
 	//! Advance by dt seconds. Does nothing while paused, so the caller can drive
 	//! it from a plain frame timer without knowing about pause state.
@@ -153,6 +186,19 @@ public:
 	 * bones, so the NIF is the only place they exist.
 	 */
 	QString bodyName( int body ) const { return m_bodyNames.value( body ); }
+	//! The block number of that node, for writing a captured pose back to it.
+	//! -1 when no collision object binds this body to anything.
+	int bodyNode( int body ) const { return m_bodyBlocks.value( body, -1 ); }
+
+	/*! How far a body has MOVED from the pose the file stores: a rigid transform,
+	 * in GAME units, ready to compose with a node's world transform.
+	 *
+	 * A difference rather than an absolute pose, deliberately. Whatever constant
+	 * offset there is between a body's frame and the node's -- and there is one,
+	 * since a body is placed at its centre of mass -- cancels in a difference, so
+	 * this is correct without having to first establish what that offset is.
+	 */
+	bool bodyDelta( int body, Quat & rotation, Vector3 & translation ) const;
 	bool move( const Vector3 & rayOrigin, const Vector3 & rayDir );
 	bool release();
 
@@ -171,6 +217,65 @@ public:
 	bool grabbing() const { return m_sim.draggedBody() >= 0; }
 	//! The body currently held, or -1.
 	int grabbedBody() const { return m_sim.draggedBody(); }
+
+	/*! Reel the held body in or out along the view ray.
+	 *
+	 * The depth was fixed at whatever the grab was made at, which confines a drag
+	 * to a plane parallel to the screen -- so placing a hand in front of a chest
+	 * meant orbiting the camera round to a side view first. `notches` is wheel
+	 * detents, positive to push away.
+	 *
+	 * Multiplicative rather than additive: a fixed step of 10 cm is a crawl across
+	 * a room and a lurch on a rat, whereas a percentage of the current distance
+	 * moves the same fraction of the way there whatever the scale.
+	 */
+	void adjustGrabDepth( float notches, bool fine = false );
+	//! Distance from the eye to the hand, in GAME units, for a readout.
+	float grabDepth() const { return m_grabDepth * SCALE; }
+
+	/*! Turn what the hand is holding.
+	 *
+	 * The rotation frame is captured ONCE, when the gesture starts, and every
+	 * later increment is measured in that frame. Taking the camera's live axes
+	 * each time instead would make an orbit mid-rotate silently redefine which way
+	 * is up, and 15-degree snapping would then quantise against a moving target.
+	 *
+	 * Angles in radians. Pass the camera's right, up and forward in GAME space.
+	 */
+	void beginGrabRotate( const Vector3 & right, const Vector3 & up, const Vector3 & fwd );
+	void addGrabRotate( float dYaw, float dPitch, float dRoll, bool snap = false );
+	//! Give up the orientation hold; the bone is then free to swing again.
+	void clearGrabRotate();
+	bool grabRotating() const { return m_rotating; }
+	//! Snap increment, radians. 15 degrees, as every DCC tool uses.
+	static constexpr float ROTATE_SNAP = 0.2617994f;
+
+	/*! The beam: where the hand has hold, and where it is pulling to.
+	 *
+	 * Both in GAME units. Returns false when nothing is held. Without this the
+	 * depth and rotate controls are invisible -- you can feel them working but
+	 * cannot see where the hand actually is.
+	 */
+	bool grabBeam( Vector3 & gripPoint, Vector3 & handPoint ) const;
+
+	//! Let the held bone pass through the rest of the rig, to untangle a limb
+	//! that self-collision has trapped inside the torso.
+	void setDragNoCollide( bool on ) { m_sim.dragNoCollide = on; }
+	bool dragNoCollide() const { return m_sim.dragNoCollide; }
+
+	//! Release every pin. See RagdollSim::unpinAll.
+	void unpinAll() { m_sim.unpinAll(); }
+	int pinnedCount() const;
+
+	/*! Drop a ball into the scene along the ray, thrown at settings().propSpeed.
+	 *
+	 * Returns its body index, or -1. The prop joins the rig as an ordinary body,
+	 * so it is drawn, picked, grabbed and pinned by exactly the same code -- which
+	 * is why a ball can be caught mid-air and thrown again.
+	 */
+	int spawnProp( const Vector3 & rayOrigin, const Vector3 & rayDir );
+	void clearProps();
+	int propCount() const;
 
 	/*! Posed collision geometry as a world-space triangle soup, in game units,
 	 * ready for GLView::setCollisionPreview.
@@ -247,6 +352,29 @@ public:
 	void setAngularLimits( bool on ) { m_sim.angularLimits = on; }
 	bool angularLimits() const { return m_sim.angularLimits; }
 
+	//! The ragdoll's own body-on-body friction, which is not the floor's.
+	void setFriction( float f ) { m_sim.friction = std::max( 0.0f, f ); }
+	float friction() const { return m_sim.friction; }
+	//! Extra drag per second on top of each body's authored damping. Raise it to
+	//! make a rig settle sooner; 0 leaves the file's own values alone.
+	void setDamping( float d ) { m_sim.damping = std::max( 0.0f, d ); }
+	float damping() const { return m_sim.damping; }
+	//! Bounce, 0 to 1. See RagdollSim::restitution.
+	void setRestitution( float r ) { m_sim.restitution = std::clamp( r, 0.0f, 1.0f ); }
+	float restitution() const { return m_sim.restitution; }
+	//! Gauss-Seidel sweeps per substep, and substeps per frame. Both trade cost
+	//! for stability; the stats overlay is what says whether they are needed.
+	void setIterations( int n ) { m_sim.iterations = std::clamp( n, 1, 32 ); }
+	int iterations() const { return m_sim.iterations; }
+	void setSubsteps( int n ) { m_substeps = std::clamp( n, 1, 32 ); }
+	int substeps() const { return m_substeps; }
+
+	/*! Gravity direction, as a unit vector in solver space. Default is straight
+	 * down. Tilting it is how a slope is tested without authoring one.
+	 */
+	void setGravityDirection( const Vector3 & d );
+	Vector3 gravityDirection() const { return m_gravityDir; }
+
 	//! Live solver health, for the overlay. Cheap: the step already computed it.
 	SimStats stats() const { return m_sim.stats(); }
 	//! Bodies whose joints are outside their limits right now, for highlighting.
@@ -269,6 +397,27 @@ public:
 	 */
 	QVector<Vector3> groundSoup() const;
 
+	/*! Record every stepped pose so it can be scrubbed back through.
+	 *
+	 * A ragdoll settles in about two seconds and the one frame worth keeping goes
+	 * past in a sixtieth of one. Without a recording the only way back to it is to
+	 * reset and try to catch it with the pause key, which is a game of reflexes
+	 * rather than a tool. Capped at RECORD_MAX frames, oldest dropped, so it
+	 * cannot grow without bound while the mode is left open.
+	 */
+	void setRecording( bool on );
+	bool recording() const { return m_recording; }
+	int frameCount() const { return int( m_frames.size() ); }
+	//! Which recorded frame is showing, or -1 when the sim is running live.
+	int frameIndex() const { return m_frameIndex; }
+	//! Show a recorded frame. Pauses, since running on would overwrite it.
+	void seek( int frame );
+	//! Back to live: drop the scrub and let the sim continue from where it is.
+	void resumeLive() { m_frameIndex = -1; }
+	void clearRecording();
+	//! 20 seconds at 60 Hz.
+	static constexpr int RECORD_MAX = 1200;
+
 	RagdollSim & sim() { return m_sim; }
 	const RagdollSim & sim() const { return m_sim; }
 
@@ -280,15 +429,44 @@ private:
 		QVector<Triangle> tris;
 	};
 
+	//! one recorded pose: every body's place and orientation at one instant
+	struct Frame
+	{
+		QVector<Vector3> x;
+		QVector<Quat> q;
+	};
+
 	RagdollSim m_sim;
 	HknpSystem m_system;
 	QVector<BodyMesh> m_meshes;
 	QVector<QString> m_bodyNames;
+	QVector<int> m_bodyBlocks;
 	bool m_active = false;
 	bool m_paused = false;
 	int m_jointCount = 0;
+	int m_systemBlock = -1;
+	//! how many bodies and meshes the FILE supplied, so props can be dropped
+	//! again without taking any of the rig with them
+	int m_rigBodies = 0;
+	int m_substeps = 8;
+	Vector3 m_gravityDir = Vector3( 0.0f, 0.0f, -1.0f );
 	//! distance along the view ray the grab was made at, so dragging keeps depth
 	float m_grabDepth = 0.0f;
+	//! the last ray the hand was moved along, so changing the DEPTH alone still
+	//! moves the body -- the wheel turns with the mouse standing still
+	Vector3 m_lastRayOrigin, m_lastRayDir;
+	//! the rotate gesture: frame captured at the start, angles accumulated in it
+	bool m_rotating = false;
+	Vector3 m_rotRight, m_rotUp, m_rotFwd;
+	Quat m_rotBase = Quat( 1, 0, 0, 0 );
+	float m_rotYaw = 0.0f, m_rotPitch = 0.0f, m_rotRoll = 0.0f;
+	bool m_recording = false;
+	int m_frameIndex = -1;
+	QVector<Frame> m_frames;
+	//! capture the current pose into the recording
+	void recordFrame();
+	//! generate a unit icosphere, so a spawned prop draws and picks like any body
+	static void buildBallMesh( BodyMesh & bm, float radius );
 	Tool m_tool = Tool::Grab;
 	bool m_gravityOn = true;
 	float m_gravityG = 9.81f;

@@ -106,6 +106,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QPushButton>
 #include <QSlider>
 #include <QTabWidget>
+#include <QUndoStack>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSettings>
@@ -3962,6 +3963,386 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				check( pv.highlightLimits(), QStringLiteral( "limit highlight can be turned on" ) );
 				pv.setHighlightLimits( false );
 
+				/* The physics gun: push/pull, turn, and the beam that shows both.
+				 *
+				 * Driven through the real event path -- a synthesized wheel event on
+				 * the widget -- because what was missing was never the arithmetic but
+				 * the WIRING: the depth existed as a member and nothing ever changed
+				 * it, so a test that called adjustGrabDepth directly would have passed
+				 * against the broken build.
+				 */
+				{
+					pv.reset();
+					pv.freeze();
+					pv.setPaused( true );
+					pv.setTool( PhysicsPreview::Tool::Grab );
+					QPointF sp;
+					const int target = aimAtSomething( sp );
+					if ( target >= 0 ) {
+						QMouseEvent press( QEvent::MouseButtonPress, sp, gl->mapToGlobal( sp ),
+							gl->selectMouseButton(), gl->selectMouseButton(), Qt::NoModifier );
+						QApplication::sendEvent( gl, &press );
+						check( pv.grabbing(), QStringLiteral( "grabbed body %1" ).arg( pv.grabbedBody() ) );
+
+						Vector3 grip, hand;
+						check( pv.grabBeam( grip, hand ),
+							QStringLiteral( "the beam has two ends while holding" ) );
+						const float gripOff = ( grip / PhysicsPreview::SCALE
+							- pv.sim().toWorld( pv.grabbedBody(), Vector3() ) ).length();
+						log << QStringLiteral( "      grip sits %1 m from the body centre" )
+							.arg( double( gripOff ), 0, 'f', 3 );
+
+						const float before = pv.grabDepth();
+						QWheelEvent out( sp, gl->mapToGlobal( sp ), QPoint(), QPoint( 0, 120 ),
+							gl->selectMouseButton(), Qt::NoModifier, Qt::NoScrollPhase, false );
+						QApplication::sendEvent( gl, &out );
+						const float pushed = pv.grabDepth();
+
+						/* The hand's TARGET has to follow the depth with the mouse
+						 * standing still, or the wheel appears to do nothing until the
+						 * cursor twitches.
+						 *
+						 * Sampled HERE, between the push and the pull-back. Sampled after
+						 * both, as the first version did, it compares the hand with where
+						 * it started -- and a notch out followed by a notch in is a round
+						 * trip that lands exactly there, so a working push/pull failed the
+						 * check for being reversible.
+						 */
+						Vector3 g2, h2;
+						pv.grabBeam( g2, h2 );
+						check( ( h2 - hand ).length() > 0.5f,
+							QStringLiteral( "the hand moved without the mouse moving" ) );
+						QWheelEvent in( sp, gl->mapToGlobal( sp ), QPoint(), QPoint( 0, -120 ),
+							gl->selectMouseButton(), Qt::NoModifier, Qt::NoScrollPhase, false );
+						QApplication::sendEvent( gl, &in );
+						const float pulled = pv.grabDepth();
+						log << QStringLiteral( "      hand depth %1 -> %2 -> %3 units" )
+							.arg( double( before ), 0, 'f', 1 ).arg( double( pushed ), 0, 'f', 1 )
+							.arg( double( pulled ), 0, 'f', 1 );
+						check( pushed > before * 1.01f,
+							QStringLiteral( "the wheel pushes the hand away" ) );
+						check( pulled < pushed * 0.99f,
+							QStringLiteral( "and pulls it back in" ) );
+
+						// turning: a quarter turn about a fixed axis
+						const Quat q0 = pv.sim().bodies().at( pv.grabbedBody() ).q;
+						pv.beginGrabRotate( Vector3( 1, 0, 0 ), Vector3( 0, 0, 1 ),
+							Vector3( 0, 1, 0 ) );
+						pv.addGrabRotate( 1.5708f, 0.0f, 0.0f, false );
+						check( pv.grabRotating(), QStringLiteral( "the hand is turning" ) );
+						check( pv.sim().draggingOrientation(),
+							QStringLiteral( "and the solver has an orientation target" ) );
+						pv.setPaused( false );
+						for ( int i = 0; i < 40; i++ )
+							gl->physicsTick( 1.0f / 60.0f );
+						const Quat q1 = pv.sim().bodies().at( pv.grabbedBody() ).q;
+						/* |dot| of two unit quaternions is 1 only for the same
+						 * orientation, so this says "it actually turned" without caring
+						 * which of the two equivalent signs each was stored with.
+						 */
+						const float dot = std::fabs( q0[0] * q1[0] + q0[1] * q1[1]
+							+ q0[2] * q1[2] + q0[3] * q1[3] );
+						log << QStringLiteral( "      orientation dot after turning: %1" )
+							.arg( double( dot ), 0, 'f', 4 );
+						check( dot < 0.999f, QStringLiteral( "the held bone turned" ) );
+
+						// snapping quantises the TOTAL, so 20 degrees asked lands on 15
+						pv.beginGrabRotate( Vector3( 1, 0, 0 ), Vector3( 0, 0, 1 ),
+							Vector3( 0, 1, 0 ) );
+						const Quat base = pv.sim().dragOrientation();
+						pv.addGrabRotate( 0.3491f, 0.0f, 0.0f, true );
+						const Quat snapped = pv.sim().dragOrientation();
+						const float sdot = std::min( 1.0f, std::fabs(
+							base[0] * snapped[0] + base[1] * snapped[1]
+							+ base[2] * snapped[2] + base[3] * snapped[3] ) );
+						const float snapDeg = 2.0f * std::acos( sdot ) * 180.0f / float( M_PI );
+						log << QStringLiteral( "      20 degrees snapped to %1" )
+							.arg( double( snapDeg ), 0, 'f', 1 );
+						check( std::fabs( snapDeg - 15.0f ) < 1.0f,
+							QStringLiteral( "Shift snaps the turn to 15 degrees" ) );
+
+						/* No-collide, measured where it acts: the broad phase. With it
+						 * on, no body-on-body pair may involve the held body.
+						 */
+						pv.setDragNoCollide( true );
+						pv.sim().selfCollision = true;
+						gl->physicsTick( 1.0f / 60.0f );
+						int touching = 0;
+						for ( const SimPair & pr : pv.sim().pairs() )
+							if ( pr.b >= 0 && ( pr.a == pv.grabbedBody() || pr.b == pv.grabbedBody() ) )
+								touching++;
+						check( touching == 0,
+							QStringLiteral( "the held bone is excused from self-collision" ) );
+						pv.setDragNoCollide( false );
+
+						QMouseEvent rel( QEvent::MouseButtonRelease, sp, gl->mapToGlobal( sp ),
+							gl->selectMouseButton(), Qt::NoButton, Qt::NoModifier );
+						QApplication::sendEvent( gl, &rel );
+						check( !pv.grabbing(), QStringLiteral( "and lets go" ) );
+						check( !pv.grabBeam( grip, hand ),
+							QStringLiteral( "the beam goes out with the grab" ) );
+					} else {
+						check( false, QStringLiteral( "physics gun: nothing to aim at" ) );
+					}
+					pv.reset();
+				}
+
+				// Unpin all: the way back from a handful of pins
+				{
+					pv.reset();
+					const int n = std::min( 3, pv.bodyCount() );
+					for ( int i = 0; i < n; i++ )
+						pv.sim().setPinned( i, true );
+					check( pv.pinnedCount() >= n,
+						QStringLiteral( "%1 bodies pinned" ).arg( pv.pinnedCount() ) );
+					pv.unpinAll();
+					check( pv.pinnedCount() == 0, QStringLiteral( "unpin all releases them" ) );
+				}
+
+				/* Balls: thrown, simulated, drawn, picked and cleared.
+				 *
+				 * The last two matter as much as the physics. A prop joins the same
+				 * body list the rig uses precisely so drawing, picking, grabbing and
+				 * pinning need no special case, and a ball that could not be clicked
+				 * would mean that had not actually happened.
+				 */
+				{
+					pv.reset();
+					pv.setTool( PhysicsPreview::Tool::Prop );
+					pv.settings().propSpeed = 0.0f;     // dropped, so its path is predictable
+					pv.settings().propRadius = 0.12f;
+					pv.settings().propMass = 4.0f;
+					const int before = pv.bodyCount();
+					const int soupBefore = int( pv.soup().size() );
+					QPointF sp;
+					if ( aimAtSomething( sp ) >= 0 ) {
+						clickAt( sp );
+						check( pv.bodyCount() == before + 1,
+							QStringLiteral( "a ball joins the simulation" ) );
+						check( pv.propCount() == 1, QStringLiteral( "and is counted as a prop" ) );
+						check( int( pv.soup().size() ) > soupBefore,
+							QStringLiteral( "and is drawn" ) );
+
+						const int ball = pv.bodyCount() - 1;
+						check( !pv.bodyName( ball ).isEmpty(),
+							QStringLiteral( "it is named \"%1\"" ).arg( pv.bodyName( ball ) ) );
+						QPointF bp;
+						if ( gl->worldToScreen( pv.sim().toWorld( ball, Vector3() )
+								* PhysicsPreview::SCALE, bp ) ) {
+							Vector3 ro, rd;
+							gl->mouseRayWorld( bp, ro, rd );
+							check( pv.pick( ro, rd ).body == ball,
+								QStringLiteral( "and clicking it picks it" ) );
+						}
+
+						const float z0 = pv.sim().bodies().at( ball ).x[2];
+						pv.setPaused( false );
+						for ( int i = 0; i < 30; i++ )
+							gl->physicsTick( 1.0f / 60.0f );
+						const float z1 = pv.sim().bodies().at( ball ).x[2];
+						log << QStringLiteral( "      the ball fell %1 m in half a second" )
+							.arg( double( z0 - z1 ), 0, 'f', 3 );
+						check( z1 < z0, QStringLiteral( "and it falls" ) );
+
+						pv.clearProps();
+						check( pv.propCount() == 0 && pv.bodyCount() == before,
+							QStringLiteral( "clear balls puts the rig back to %1 bodies" )
+								.arg( before ) );
+					} else {
+						check( false, QStringLiteral( "Ball: nothing to aim at" ) );
+					}
+					pv.reset();
+				}
+
+				/* Bounce, measured as a rebound height.
+				 *
+				 * Placed by hand rather than thrown, because the question is whether
+				 * restitution does anything and that needs a known drop. Dead and
+				 * lively are compared with each other rather than with an absolute, so
+				 * the test does not depend on the drop height or on the rig.
+				 */
+				{
+					auto dropFrom = [&]( float e ) {
+						pv.reset();
+						pv.clearProps();
+						pv.setRestitution( e );
+						pv.sim().ground = true;
+						/* Dropped well to one side of the rig.
+						 *
+						 * Over the origin, as the first version had it, the ball landed on
+						 * the ragdoll rather than on the floor -- so it never reached the
+						 * height the test was watching for and both runs measured a
+						 * rebound of exactly zero, which reads as "restitution does
+						 * nothing" when the ball had simply never hit the ground.
+						 */
+						const float z = pv.sim().groundZ + 1.0f;
+						const int b = pv.sim().addProp( Vector3( 50.0f, 50.0f, z ), Vector3(),
+							0.1f, 1.0f );
+						if ( b < 0 )
+							return 0.0f;
+						pv.setPaused( false );
+						/* Measured from the ball's OWN lowest point rather than from an
+						 * assumed contact height, so it does not depend on where the floor
+						 * is or on the ball's radius.
+						 */
+						float lowest = z, rebound = 0.0f;
+						bool past = false;
+						for ( int i = 0; i < 240; i++ ) {
+							pv.step( 1.0f / 60.0f );
+							const float h = pv.sim().bodies().at( b ).x[2];
+							if ( !past ) {
+								if ( h < lowest )
+									lowest = h;
+								else if ( i > 2 )
+									past = true;
+							}
+							if ( past )
+								rebound = std::max( rebound, h - lowest );
+						}
+						pv.clearProps();
+						return rebound;
+					};
+					const float dead = dropFrom( 0.0f );
+					const float lively = dropFrom( 0.8f );
+					log << QStringLiteral( "      rebound: dead %1 m, lively %2 m" )
+						.arg( double( dead ), 0, 'f', 3 ).arg( double( lively ), 0, 'f', 3 );
+					check( lively > dead + 0.05f,
+						QStringLiteral( "bounce makes a dropped ball come back up" ) );
+					pv.setRestitution( 0.0f );
+					pv.reset();
+				}
+
+				// Punt sends a body along the view, and pulling reverses it
+				{
+					pv.reset();
+					pv.freeze();
+					pv.setTool( PhysicsPreview::Tool::Punt );
+					pv.settings().puntStrength = 80.0f;
+					pv.settings().puntPull = false;
+					QPointF sp;
+					const int target = aimAtSomething( sp );
+					if ( target >= 0 ) {
+						Vector3 ro, rd;
+						gl->mouseRayWorld( sp, ro, rd );
+						rd.normalize();
+						clickAt( sp );
+						const float away = Vector3::dotproduct( pv.sim().bodies().at( target ).v, rd );
+						pv.reset();
+						pv.freeze();
+						pv.settings().puntPull = true;
+						clickAt( sp );
+						const float toward = Vector3::dotproduct( pv.sim().bodies().at( target ).v, rd );
+						log << QStringLiteral( "      punt %1 m/s along the view, pull %2" )
+							.arg( double( away ), 0, 'f', 2 ).arg( double( toward ), 0, 'f', 2 );
+						check( away > 0.01f, QStringLiteral( "punt sends it away" ) );
+						check( toward < -0.01f, QStringLiteral( "and pull brings it back" ) );
+						pv.settings().puntPull = false;
+					} else {
+						check( false, QStringLiteral( "Punt: nothing to aim at" ) );
+					}
+					pv.reset();
+				}
+
+				/* Record and scrub.
+				 *
+				 * Checked by POSE, not by frame count: a recording that stored the
+				 * right number of empty frames would pass a count check and be
+				 * useless. Seeking back to frame 0 has to put the rig where it was.
+				 */
+				{
+					pv.reset();
+					pv.setPaused( false );
+					pv.setRecording( true );
+					const QVector<Vector3> first = pv.soup();
+					for ( int i = 0; i < 45; i++ )
+						gl->physicsTick( 1.0f / 60.0f );
+					check( pv.frameCount() > 30,
+						QStringLiteral( "recorded %1 frames" ).arg( pv.frameCount() ) );
+					const QVector<Vector3> moved = pv.soup();
+					float drift = 0.0f;
+					for ( int i = 0; i < std::min( first.size(), moved.size() ); i++ )
+						drift = std::max( drift, ( first.at( i ) - moved.at( i ) ).length() );
+					check( drift > 0.01f,
+						QStringLiteral( "the rig moved while recording (%1 units)" )
+							.arg( double( drift ), 0, 'f', 3 ) );
+
+					pv.seek( 0 );
+					check( pv.paused(), QStringLiteral( "scrubbing pauses" ) );
+					const QVector<Vector3> back = pv.soup();
+					float err = 0.0f;
+					for ( int i = 0; i < std::min( first.size(), back.size() ); i++ )
+						err = std::max( err, ( first.at( i ) - back.at( i ) ).length() );
+					log << QStringLiteral( "      frame 0 restored to within %1 units" )
+						.arg( double( err ), 0, 'f', 4 );
+					check( err < 0.01f, QStringLiteral( "scrubbing back restores the pose" ) );
+
+					pv.resumeLive();
+					check( pv.frameIndex() < 0, QStringLiteral( "and Live leaves the recording" ) );
+					pv.setRecording( false );
+					pv.clearRecording();
+					check( pv.frameCount() == 0, QStringLiteral( "the recording can be cleared" ) );
+					pv.setPaused( false );
+					pv.reset();
+				}
+
+				/* Capture pose: the one control here that writes to the file.
+				 *
+				 * Checked by reading the node back rather than by trusting the return
+				 * count, since a function that wrote nothing and returned a number
+				 * would pass the weaker test.
+				 */
+				{
+					pv.reset();
+					int probeBlock = -1;
+					for ( int i = 0; i < pv.bodyCount() && probeBlock < 0; i++ )
+						if ( pv.bodyNode( i ) >= 0 && !pv.sim().bodies().at( i ).pinned )
+							probeBlock = pv.bodyNode( i );
+					if ( probeBlock >= 0 && skope->nif ) {
+						const Vector3 wasAt = skope->nif->get<Vector3>(
+							skope->nif->getBlockIndex( probeBlock ), "Translation" );
+						pv.setPaused( false );
+						for ( int i = 0; i < 90; i++ )
+							gl->physicsTick( 1.0f / 60.0f );
+						const int moved = gl->physicsCapturePose();
+						check( moved > 0, QStringLiteral( "captured the pose onto %1 nodes" )
+							.arg( moved ) );
+						const Vector3 nowAt = skope->nif->get<Vector3>(
+							skope->nif->getBlockIndex( probeBlock ), "Translation" );
+						log << QStringLiteral( "      node %1 moved %2 units on capture" )
+							.arg( probeBlock ).arg( double( ( nowAt - wasAt ).length() ), 0, 'f', 3 );
+						check( ( nowAt - wasAt ).length() > 1.0e-4f,
+							QStringLiteral( "and the node really moved" ) );
+
+						/* Undone again, which is both a check and a necessity.
+						 *
+						 * A check because the button's tooltip promises the capture is
+						 * undoable and nothing else here confirms it. A necessity because
+						 * the harness quits when it is done, and a MODIFIED file makes
+						 * that quit raise a save prompt -- a modal dialog with nobody to
+						 * answer it, which hangs the run and leaves an empty report.
+						 */
+						if ( skope->nif->undoStack ) {
+							skope->nif->undoStack->undo();
+							const Vector3 undone = skope->nif->get<Vector3>(
+								skope->nif->getBlockIndex( probeBlock ), "Translation" );
+							check( ( undone - wasAt ).length() < 1.0e-4f,
+								QStringLiteral( "and the capture undoes cleanly" ) );
+							/* ...and the window told, because undoing is not the same as
+							 * being clean: NifSkope prompts on close when EITHER the
+							 * window modified flag or the undo stack's clean index says
+							 * there is something outstanding, and undo() moves the stack
+							 * without touching either. Both, or the quit at the end of
+							 * this run raises a save prompt nobody can answer.
+							 */
+							skope->nif->undoStack->setClean();
+							skope->setWindowModified( false );
+						}
+					} else {
+						log << QStringLiteral( "skip  capture pose: no body is bound to a node" );
+					}
+					pv.reset();
+				}
+
 				/* Pull against a pin and see whether the chain goes TAUT.
 				 *
 				 * This is the complaint: pin one bone, drag another away, and the
@@ -4292,6 +4673,41 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					gl->setPhysicsSimMode( false );
 					QObject::disconnect( conn );
 					check( fired == 2, QStringLiteral( "entering and leaving each announce it" ) );
+				}
+
+				/* Docking, which is the answer to the panel covering the thing it
+				 * adjusts. The same widget moves, so what is checked is that it
+				 * ends up in exactly one place at a time and comes back.
+				 */
+				if ( QDockWidget * cd = skope->findChild<QDockWidget *>(
+						QStringLiteral( "CollisionDock" ) ) ) {
+					check( !cd->isVisible() && !cd->widget(),
+						QStringLiteral( "the collision dock starts empty and hidden" ) );
+					QPushButton * dockIt = nullptr;
+					for ( QPushButton * b : skope->findChildren<QPushButton *>() )
+						if ( b->text().startsWith( QStringLiteral( "Dock this" ) ) )
+							dockIt = b;
+					if ( dockIt ) {
+						dockIt->click();
+						QApplication::processEvents();
+						check( cd->widget() != nullptr && cd->isVisible(),
+							QStringLiteral( "the panel moves into the dock" ) );
+						// and the toolbar button must stop popping an empty menu
+						if ( QToolButton * cb3 = skope->findChild<QToolButton *>(
+								QStringLiteral( "ViewCollisionButton" ) ) )
+							check( cb3->menu() == nullptr,
+								QStringLiteral( "and the toolbar menu stands down" ) );
+						dockIt->click();
+						QApplication::processEvents();
+						check( cd->widget() == nullptr && !cd->isVisible(),
+							QStringLiteral( "and it comes back to the toolbar" ) );
+						if ( QToolButton * cb3 = skope->findChild<QToolButton *>(
+								QStringLiteral( "ViewCollisionButton" ) ) )
+							check( cb3->menu() != nullptr,
+								QStringLiteral( "with its menu restored" ) );
+					} else {
+						check( false, QStringLiteral( "no Dock button found" ) );
+					}
 				}
 
 				check( gl->setPhysicsSimMode( false ) == false, QStringLiteral( "mode left" ) );
@@ -7539,6 +7955,20 @@ void NifSkope::initDockWidgets()
 		status->setWordWrap( true );
 		col->addWidget( status );
 
+		/* Which system, when the file holds more than one.
+		 *
+		 * start() takes the first jointed system it finds, which is right for a
+		 * creature file and arbitrary for a skeleton file carrying several -- and
+		 * there was no way to tell which one you were looking at, let alone choose.
+		 * Hidden entirely when there is only one, since a combo box with a single
+		 * entry is a control that cannot be used.
+		 */
+		QComboBox * sysCombo = new QComboBox( panel );
+		sysCombo->setToolTip( tr( "Which collision system to simulate. Only shown when the "
+								  "file carries more than one." ) );
+		sysCombo->hide();
+		col->addWidget( sysCombo );
+
 		// Tools
 		col->addWidget( heading( tr( "Tool" ) ) );
 		{
@@ -7564,6 +7994,12 @@ void NifSkope::initDockWidgets()
 			  QT_TR_NOOP( "Radial impulse from the point you click. (3)" ) },
 			{ PhysicsPreview::Tool::Wind,  QT_TR_NOOP( "Wind" ),
 			  QT_TR_NOOP( "Steady push along the view while the button is held. (4)" ) },
+			{ PhysicsPreview::Tool::Punt,  QT_TR_NOOP( "Punt" ),
+			  QT_TR_NOOP( "Shove a body away along the view, or yank it toward you. "
+						  "Heavier and more directed than Shoot. (5)" ) },
+			{ PhysicsPreview::Tool::Prop,  QT_TR_NOOP( "Ball" ),
+			  QT_TR_NOOP( "Throw a ball at the rig. The honest test of a collision mesh: "
+						  "does anything actually bounce off it. (6)" ) },
 		};
 		int tRow = 0, tCol = 0;
 		for ( const ToolEntry & te : toolEntries ) {
@@ -7572,6 +8008,8 @@ void NifSkope::initDockWidgets()
 			b->setToolTip( tr( te.tip ) );
 			toolGroup->addButton( b, int( te.tool ) );
 			tools->addWidget( b, tRow, tCol );
+			// six tools, three to a row: two full rows rather than the 3+1 the
+			// four-tool version left, which put Wind on a line by itself
 			if ( ++tCol == 3 ) {
 				tCol = 0;
 				tRow++;
@@ -7610,12 +8048,19 @@ void NifSkope::initDockWidgets()
 		strengthSpin->setRange( 0.0, 500.0 );
 		strengthSpin->setSingleStep( 5.0 );
 		strengthSpin->setDecimals( 1 );
-		strengthSpin->setSuffix( tr( "x weight" ) );
+		strengthSpin->setSuffix( tr( " x weight" ) );
 		strengthSpin->setToolTip( tr( "How hard the hand may pull, against the weight of the "
 									  "bone held. Bounded so a chain goes taut and drags the "
 									  "rig instead of pulling a joint apart. 0 removes the "
 									  "limit." ) );
 		QLabel * strengthLbl = addParam( tr( "Strength" ), strengthSpin );
+
+		QCheckBox * noCollideChk = new QCheckBox( tr( "Held bone ignores the rig" ), toolParams );
+		noCollideChk->setToolTip( tr( "Let the bone in hand pass through the rest of the "
+									  "ragdoll while it is held, so a limb trapped inside "
+									  "the torso can be pulled back out. Only the held bone; "
+									  "everything else still collides." ) );
+		tp->addWidget( noCollideChk, pRow++, 0, 1, 2 );
 
 		QDoubleSpinBox * impulseSpin = new QDoubleSpinBox( toolParams );
 		impulseSpin->setRange( 0.1, 500.0 );
@@ -7675,6 +8120,49 @@ void NifSkope::initDockWidgets()
 		windStrength->setSuffix( tr( " N" ) );
 		windStrength->setToolTip( tr( "Force applied along the view while the button is held." ) );
 		QLabel * windLbl = addParam( tr( "Strength" ), windStrength );
+
+		QDoubleSpinBox * puntStrength = new QDoubleSpinBox( toolParams );
+		puntStrength->setRange( 0.1, 5000.0 );
+		puntStrength->setSingleStep( 10.0 );
+		puntStrength->setSuffix( tr( " kg m/s" ) );
+		puntStrength->setToolTip( tr( "Momentum of the shove, along the view. Applied where "
+									  "you click, so punting a foot spins the rig and punting "
+									  "a chest sends it straight." ) );
+		QLabel * puntLbl = addParam( tr( "Strength" ), puntStrength );
+
+		QCheckBox * puntPullChk = new QCheckBox( tr( "Pull toward the camera" ), toolParams );
+		puntPullChk->setToolTip( tr( "Reverse it: yank the body toward you instead of away." ) );
+		tp->addWidget( puntPullChk, pRow++, 0, 1, 2 );
+
+		QDoubleSpinBox * propRadius = new QDoubleSpinBox( toolParams );
+		propRadius->setRange( 0.01, 5.0 );
+		propRadius->setDecimals( 3 );
+		propRadius->setSingleStep( 0.05 );
+		propRadius->setSuffix( tr( " m" ) );
+		propRadius->setToolTip( tr( "Size of the ball. A ball, not a crate, because the exact "
+									"contact test is segment-to-segment plus a radius -- a box "
+									"would have no faces between its corners and would fall "
+									"through the rig." ) );
+		QLabel * propRadiusLbl = addParam( tr( "Radius" ), propRadius );
+
+		QDoubleSpinBox * propMass = new QDoubleSpinBox( toolParams );
+		propMass->setRange( 0.01, 5000.0 );
+		propMass->setDecimals( 2 );
+		propMass->setSingleStep( 1.0 );
+		propMass->setSuffix( tr( " kg" ) );
+		propMass->setToolTip( tr( "How heavy. 5 kg is a shot put; raise it to bowl a rig over." ) );
+		QLabel * propMassLbl = addParam( tr( "Mass" ), propMass );
+
+		QDoubleSpinBox * propSpeed = new QDoubleSpinBox( toolParams );
+		propSpeed->setRange( 0.0, 200.0 );
+		propSpeed->setSingleStep( 1.0 );
+		propSpeed->setSuffix( tr( " m/s" ) );
+		propSpeed->setToolTip( tr( "Throw speed. 0 drops it where you click." ) );
+		QLabel * propSpeedLbl = addParam( tr( "Speed" ), propSpeed );
+
+		QPushButton * clearPropsBtn = new QPushButton( tr( "Clear balls" ), toolParams );
+		clearPropsBtn->setToolTip( tr( "Remove every ball from the scene. (C)" ) );
+		tp->addWidget( clearPropsBtn, pRow++, 0, 1, 2 );
 		col->addWidget( toolParams );
 
 		// Playback
@@ -7696,6 +8184,48 @@ void NifSkope::initDockWidgets()
 			play->addWidget( b );
 		col->addLayout( play );
 
+		/* Record and scrub.
+		 *
+		 * A ragdoll settles in about two seconds and the one frame worth keeping
+		 * goes past in a sixtieth of one. Without a recording the only way back to
+		 * it is to reset and try to catch it with the pause key, which is a game of
+		 * reflexes rather than a tool.
+		 */
+		QHBoxLayout * rec = new QHBoxLayout();
+		rec->setSpacing( 4 );
+		QPushButton * recBtn = new QPushButton( tr( "Record" ), panel );
+		recBtn->setCheckable( true );
+		recBtn->setToolTip( tr( "Keep every frame as it is simulated, so it can be scrubbed "
+								"back through. Capped at 20 seconds, oldest dropped." ) );
+		QSlider * scrub = new QSlider( Qt::Horizontal, panel );
+		scrub->setToolTip( tr( "Move through the recording. Scrubbing pauses, since running "
+							   "on from a frame you went back to would overwrite the rest." ) );
+		QPushButton * liveBtn = new QPushButton( tr( "Live" ), panel );
+		liveBtn->setToolTip( tr( "Leave the recording and carry on simulating from the pose "
+								 "on screen." ) );
+		rec->addWidget( recBtn );
+		rec->addWidget( scrub, 1 );
+		rec->addWidget( liveBtn );
+		col->addLayout( rec );
+
+		/* Actions that apply to the whole rig at once.
+		 *
+		 * Pins accumulate one right-click at a time and there was no way back from
+		 * four of them short of a full reset; capture is the one control here that
+		 * writes to the file, which is why it says so on the button.
+		 */
+		QHBoxLayout * acts = new QHBoxLayout();
+		acts->setSpacing( 4 );
+		QPushButton * unpinBtn = new QPushButton( tr( "Unpin all" ), panel );
+		unpinBtn->setToolTip( tr( "Release every pinned bone. (U)" ) );
+		QPushButton * captureBtn = new QPushButton( tr( "Capture pose" ), panel );
+		captureBtn->setToolTip( tr( "Write the simulated pose back to the nodes the bodies "
+									"are bound to. This CHANGES the file -- everything else "
+									"in this panel is a preview. Undoable." ) );
+		acts->addWidget( unpinBtn );
+		acts->addWidget( captureBtn );
+		col->addLayout( acts );
+
 		// Options
 		col->addWidget( heading( tr( "Options" ) ) );
 		QGridLayout * opts = new QGridLayout();
@@ -7708,9 +8238,36 @@ void NifSkope::initDockWidgets()
 		QDoubleSpinBox * gravSpin = new QDoubleSpinBox( panel );
 		gravSpin->setRange( 0.0, 100.0 );
 		gravSpin->setSingleStep( 0.5 );
-		gravSpin->setSuffix( tr( " m/s2" ) );
+		// the real superscript, not the ASCII "2" this used to carry: a units
+		// label that reads "m/s2" is a typo everywhere except in source code
+		gravSpin->setSuffix( QStringLiteral( " m/s²" ) );
 		opts->addWidget( gravChk, oRow, 0 );
 		opts->addWidget( gravSpin, oRow++, 1 );
+
+		/* Gravity DIRECTION, as a tilt off vertical and a heading round the
+		 * compass. Two angles rather than a vector: nobody wants to normalise a
+		 * triple by hand, and the question being asked is "what does this look like
+		 * on a slope", which is exactly a tilt.
+		 */
+		QDoubleSpinBox * tiltSpin = new QDoubleSpinBox( panel );
+		tiltSpin->setRange( 0.0, 90.0 );
+		tiltSpin->setSingleStep( 5.0 );
+		tiltSpin->setDecimals( 1 );
+		tiltSpin->setSuffix( QStringLiteral( "°" ) );
+		tiltSpin->setToolTip( tr( "Tip gravity away from straight down, to see how a rig "
+								  "behaves on a slope without authoring one." ) );
+		opts->addWidget( new QLabel( tr( "Gravity tilt" ), panel ), oRow, 0 );
+		opts->addWidget( tiltSpin, oRow++, 1 );
+
+		QDoubleSpinBox * headSpin = new QDoubleSpinBox( panel );
+		headSpin->setRange( 0.0, 360.0 );
+		headSpin->setSingleStep( 15.0 );
+		headSpin->setDecimals( 1 );
+		headSpin->setSuffix( QStringLiteral( "°" ) );
+		headSpin->setWrapping( true );
+		headSpin->setToolTip( tr( "Which way the tilt points. No effect while the tilt is 0." ) );
+		opts->addWidget( new QLabel( tr( "Tilt heading" ), panel ), oRow, 0 );
+		opts->addWidget( headSpin, oRow++, 1 );
 
 		QLabel * speedLbl = new QLabel( tr( "Speed" ), panel );
 		QSlider * speedSlider = new QSlider( Qt::Horizontal, panel );
@@ -7727,7 +8284,8 @@ void NifSkope::initDockWidgets()
 		groundSpin->setRange( -100000.0, 100000.0 );
 		groundSpin->setDecimals( 1 );
 		groundSpin->setSingleStep( 5.0 );
-		groundSpin->setToolTip( tr( "Floor height in game units." ) );
+		groundSpin->setSuffix( tr( " units" ) );
+		groundSpin->setToolTip( tr( "Floor height, in game units." ) );
 		opts->addWidget( groundChk, oRow, 0 );
 		opts->addWidget( groundSpin, oRow++, 1 );
 
@@ -7740,38 +8298,193 @@ void NifSkope::initDockWidgets()
 		opts->addWidget( new QLabel( tr( "Floor grip" ), panel ), oRow, 0 );
 		opts->addWidget( gripSpin, oRow++, 1 );
 
-		QCheckBox * groundVisChk = new QCheckBox( tr( "Show ground" ), panel );
+		/* The ragdoll's OWN friction, which is not the floor's.
+		 *
+		 * Decoded, solved and adjustable all along, and until now reachable only
+		 * from code. It is why limbs slide against each other rather than catching.
+		 */
+		QDoubleSpinBox * fricSpin = new QDoubleSpinBox( panel );
+		fricSpin->setRange( 0.0, 4.0 );
+		fricSpin->setSingleStep( 0.1 );
+		fricSpin->setDecimals( 2 );
+		fricSpin->setToolTip( tr( "Friction between the rig's own bodies, separately from the "
+								  "floor. 0 lets limbs slide over each other freely." ) );
+		opts->addWidget( new QLabel( tr( "Body friction" ), panel ), oRow, 0 );
+		opts->addWidget( fricSpin, oRow++, 1 );
+
+		QDoubleSpinBox * bounceSpin = new QDoubleSpinBox( panel );
+		bounceSpin->setRange( 0.0, 1.0 );
+		bounceSpin->setSingleStep( 0.05 );
+		bounceSpin->setDecimals( 2 );
+		bounceSpin->setToolTip( tr( "Bounce. 0 keeps a landing dead, which is what Havok's own "
+									"materials say; 1 returns the speed it arrived with." ) );
+		opts->addWidget( new QLabel( tr( "Bounce" ), panel ), oRow, 0 );
+		opts->addWidget( bounceSpin, oRow++, 1 );
+
+		QDoubleSpinBox * dampSpin = new QDoubleSpinBox( panel );
+		dampSpin->setRange( 0.0, 20.0 );
+		dampSpin->setSingleStep( 0.1 );
+		dampSpin->setDecimals( 2 );
+		dampSpin->setToolTip( tr( "Extra drag on top of each body's authored damping. Raise it "
+								  "to make a rig settle sooner; 0 leaves the file's own values "
+								  "alone." ) );
+		opts->addWidget( new QLabel( tr( "Damping" ), panel ), oRow, 0 );
+		opts->addWidget( dampSpin, oRow++, 1 );
+
+		/* Solver cost, exposed because the stats overlay reports joint error and
+		 * until now there was nothing to DO about a bad number.
+		 */
+		QSpinBox * iterSpin = new QSpinBox( panel );
+		iterSpin->setRange( 1, 32 );
+		iterSpin->setToolTip( tr( "Constraint sweeps per substep. Four is measured; more buys "
+								  "little on a healthy rig and can rescue a stiff one." ) );
+		opts->addWidget( new QLabel( tr( "Sweeps" ), panel ), oRow, 0 );
+		opts->addWidget( iterSpin, oRow++, 1 );
+
+		QSpinBox * subSpin = new QSpinBox( panel );
+		subSpin->setRange( 1, 32 );
+		subSpin->setToolTip( tr( "Substeps per frame. The main stability control: raise it if "
+								 "a rig jitters or a joint separates, at a proportional cost." ) );
+		opts->addWidget( new QLabel( tr( "Substeps" ), panel ), oRow, 0 );
+		opts->addWidget( subSpin, oRow++, 1 );
+
+		QPushButton * groundResetBtn = new QPushButton( tr( "Put the floor back under the rig" ), panel );
+		groundResetBtn->setToolTip( tr( "Return the floor to just below the rig, where it "
+										"started." ) );
+		opts->addWidget( groundResetBtn, oRow++, 0, 1, 2 );
+		col->addLayout( opts );
+
+		/* Checkboxes in their own column, not in the label/value grid.
+		 *
+		 * Mixed in, they inherited the grid's first-column width and each sat at a
+		 * different indent depending on whether it spanned one cell or two, which
+		 * is what made the old panel look ragged down its left edge.
+		 */
+		QVBoxLayout * flags = new QVBoxLayout();
+		flags->setSpacing( 2 );
+		QCheckBox * groundVisChk = new QCheckBox( tr( "Show the ground" ), panel );
 		groundVisChk->setToolTip( tr( "Draw the floor as a solid surface. An invisible plane "
 									   "that a ragdoll lands on looks like a bug." ) );
-		QPushButton * groundResetBtn = new QPushButton( tr( "Under rig" ), panel );
-		groundResetBtn->setToolTip( tr( "Put the floor back just below the rig, where it "
-										"started." ) );
-		opts->addWidget( groundVisChk, oRow, 0 );
-		opts->addWidget( groundResetBtn, oRow++, 1 );
-
 		QCheckBox * selfChk = new QCheckBox( tr( "Self-collision" ), panel );
 		selfChk->setToolTip( tr( "Let the rig collide with itself, as the file authorises." ) );
-		opts->addWidget( selfChk, oRow++, 0, 1, 2 );
-
 		QCheckBox * limitsChk = new QCheckBox( tr( "Angular limits" ), panel );
 		limitsChk->setToolTip( tr( "Honour the joint limits the constraints carry. Turn "
 								   "off to see how much of a pose the limits are holding." ) );
-		opts->addWidget( limitsChk, oRow++, 0, 1, 2 );
-
 		QCheckBox * hiLimitsChk = new QCheckBox( tr( "Highlight joints at their limits" ), panel );
 		hiLimitsChk->setToolTip( tr( "Colour bodies whose joints are outside the range the "
 									 "constraints allow. Off by default, because a rig whose "
 									 "authored pose already breaks a limit lights up from the start." ) );
-		opts->addWidget( hiLimitsChk, oRow++, 0, 1, 2 );
-
 		QCheckBox * statsChk = new QCheckBox( tr( "Stats overlay" ), panel );
 		statsChk->setToolTip( tr( "Speed, joint error, contacts and penetration, drawn over "
 								  "the viewport. The solver computes these anyway." ) );
-		opts->addWidget( statsChk, oRow++, 0, 1, 2 );
-		col->addLayout( opts );
+		for ( QCheckBox * c : { groundVisChk, selfChk, limitsChk, hiLimitsChk, statsChk } )
+			flags->addWidget( c );
+		col->addLayout( flags );
+
+		/* Presets: several controls at once, for the setups actually reached for.
+		 *
+		 * Every one of these is a combination somebody assembles by hand every time
+		 * -- zero-G to look at joint limits without a pile on the floor, slow motion
+		 * plus record to watch a pop. Setting five controls one at a time to ask one
+		 * question is the friction this removes.
+		 */
+		col->addWidget( heading( tr( "Presets" ) ) );
+		QComboBox * presets = new QComboBox( panel );
+		presets->addItem( tr( "Choose a preset..." ) );
+		presets->addItem( tr( "Zero gravity - inspect joint limits" ) );
+		presets->addItem( tr( "Slow motion - watch a joint pop" ) );
+		presets->addItem( tr( "Drop and settle" ) );
+		presets->addItem( tr( "Ice floor" ) );
+		presets->addItem( tr( "Stiff and stable" ) );
+		presets->setToolTip( tr( "Set several options at once. Each is a combination that "
+								 "answers one question." ) );
+		col->addWidget( presets );
+
+		/* Every body by name, with its pin as a checkbox.
+		 *
+		 * On a 39-body rig, pinning a named bone meant finding it with the cursor
+		 * and right-clicking the right shape -- which is the picking problem, faced
+		 * again for a job that does not need aiming at all. The names come from the
+		 * NIF's collision objects; the packfile itself has none.
+		 */
+		col->addWidget( heading( tr( "Bodies" ) ) );
+		QListWidget * bodyList = new QListWidget( panel );
+		bodyList->setMaximumHeight( 150 );
+		bodyList->setToolTip( tr( "Tick to pin a bone in place. The same pin the right "
+								  "mouse button sets in the viewport." ) );
+		bodyList->setAlternatingRowColors( true );
+		col->addWidget( bodyList );
+
+		/* The shortcuts, written down.
+		 *
+		 * They existed before any of this panel did and were invisible unless you
+		 * already knew them, which is the same complaint that produced the panel.
+		 */
+		QLabel * legend = new QLabel( panel );
+		legend->setText( tr(
+			"<b>1-6</b> tool &nbsp; <b>Space</b> pause &nbsp; <b>.</b> step &nbsp; "
+			"<b>F</b> freeze &nbsp; <b>G</b> gravity &nbsp; <b>R</b> reset<br>"
+			"<b>U</b> unpin all &nbsp; <b>C</b> clear balls &nbsp; <b>Esc</b> leave<br>"
+			"<b>Right-click</b> pin &nbsp; <b>Wheel</b> push/pull &nbsp; "
+			"<b>Ctrl+drag</b> turn &nbsp; <b>Ctrl+wheel</b> roll &nbsp; <b>Shift</b> snap" ) );
+		legend->setWordWrap( true );
+		legend->setTextFormat( Qt::RichText );
+		{
+			QFont lf = legend->font();
+			lf.setPointSizeF( lf.pointSizeF() - 0.5 );
+			legend->setFont( lf );
+			// wwSkinColor keeps this in step with the rest of the theme; a literal
+			// grey here would be the one colour in the panel that ignores the skin
+			legend->setStyleSheet( QStringLiteral( "color: %1;" )
+				.arg( wwSkinColor( "textMuted" ) ) );
+		}
+		col->addWidget( legend );
+
+		/* Docked, the panel stops covering the thing it adjusts.
+		 *
+		 * As a menu it closes the moment you click anywhere else, which includes the
+		 * viewport -- so every option had to be set blind and then verified by
+		 * reopening the menu. The same widget moves into a dock and back; the menu
+		 * is not rebuilt, so nothing can drift between the two.
+		 */
+		QPushButton * dockBtn = new QPushButton( tr( "Dock this panel" ), panel );
+		dockBtn->setToolTip( tr( "Move these controls into a dock, so they stay open while "
+								 "you work in the viewport." ) );
+		col->addWidget( dockBtn );
+
+		/* The panel lives inside a scroll area, and the scroll area is what moves
+		 * between the menu and the dock. Neither container is a QWidgetAction's
+		 * default widget, so neither can end up deleting a widget the other still
+		 * holds -- which is the trap in reparenting a menu's own widget.
+		 */
+		QScrollArea * scroll = new QScrollArea( this );
+		scroll->setWidget( panel );
+		scroll->setWidgetResizable( true );
+		scroll->setFrameShape( QFrame::NoFrame );
+		scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+		/* Tall enough to be worth having, short enough to fit a laptop screen.
+		 *
+		 * The minimum matters as much as the maximum: a scroll area asks for very
+		 * little, so without one the popup came up about half the height it had
+		 * available and left two thirds of the panel behind a scrollbar.
+		 */
+		scroll->setMinimumHeight( 560 );
+		scroll->setMaximumHeight( 680 );
+		scroll->setMinimumWidth( panel->sizeHint().width() + 24 );
+
+		QWidget * host = new QWidget( colMenu );
+		QVBoxLayout * hostLay = new QVBoxLayout( host );
+		hostLay->setContentsMargins( 0, 0, 0, 0 );
+		hostLay->addWidget( scroll );
+
+		QDockWidget * colDock = new QDockWidget( tr( "Collision" ), this );
+		colDock->setObjectName( QStringLiteral( "CollisionDock" ) );
+		colDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+		addDockWidget( Qt::RightDockWidgetArea, colDock );
+		colDock->hide();
 
 		QWidgetAction * wa = new QWidgetAction( colMenu );
-		wa->setDefaultWidget( panel );
+		wa->setDefaultWidget( host );
 		colMenu->addAction( wa );
 		colBtn->setMenu( colMenu );
 
@@ -7791,9 +8504,19 @@ void NifSkope::initDockWidgets()
 			QSignalBlocker b7( selfChk ), b8( limitsChk ), b9( statsChk );
 			runBtn->setChecked( on );
 			runBtn->setText( on ? tr( "Stop Physics Sim" ) : tr( "Run Physics Sim" ) );
-			status->setText( on
-				? tr( "%1 bodies, %2 joints." ).arg( pv.bodyCount() ).arg( pv.jointCount() )
-				: tr( "Not running." ) );
+			/* Name the system, not just its size. "17 bodies, 16 joints" was true of
+			 * whichever system happened to be first and said nothing about which.
+			 */
+			if ( on ) {
+				const QModelIndex iSys = nif ? nif->getBlockIndex( pv.systemBlock() ) : QModelIndex();
+				const QString kind = iSys.isValid() ? nif->itemName( iSys ) : QString();
+				status->setText( kind.isEmpty()
+					? tr( "%1 bodies, %2 joints." ).arg( pv.bodyCount() ).arg( pv.jointCount() )
+					: tr( "%1 [%2]: %3 bodies, %4 joints." ).arg( kind ).arg( pv.systemBlock() )
+						.arg( pv.bodyCount() ).arg( pv.jointCount() ) );
+			} else {
+				status->setText( tr( "Not running." ) );
+			}
 			for ( QAbstractButton * tb : toolGroup->buttons() )
 				tb->setEnabled( on );
 			if ( QAbstractButton * tb = toolGroup->button( int( pv.tool() ) ) ) {
@@ -7828,6 +8551,103 @@ void NifSkope::initDockWidgets()
 			groundResetBtn->setEnabled( on && pv.groundEnabled() );
 			hiLimitsChk->setEnabled( on );
 
+			// the solver knobs, which were all built and none reachable
+			QSignalBlocker bk0( fricSpin ), bk1( dampSpin ), bk2( bounceSpin );
+			QSignalBlocker bk3( iterSpin ), bk4( subSpin ), bk5( tiltSpin ), bk6( headSpin );
+			fricSpin->setValue( double( pv.friction() ) );
+			dampSpin->setValue( double( pv.damping() ) );
+			bounceSpin->setValue( double( pv.restitution() ) );
+			iterSpin->setValue( pv.iterations() );
+			subSpin->setValue( pv.substeps() );
+			/* Read the direction back as the two angles that set it, so the spins
+			 * agree with the state even when a preset was what changed it.
+			 */
+			{
+				const Vector3 g = pv.gravityDirection();
+				const float tilt = std::acos( std::clamp( -g[2], -1.0f, 1.0f ) );
+				tiltSpin->setValue( double( tilt ) * 180.0 / M_PI );
+				if ( std::hypot( g[0], g[1] ) > 1.0e-4f )
+					headSpin->setValue( std::fmod( std::atan2( double( g[1] ), double( g[0] ) )
+						* 180.0 / M_PI + 360.0, 360.0 ) );
+			}
+			for ( QWidget * w : { (QWidget *)fricSpin, (QWidget *)dampSpin, (QWidget *)bounceSpin,
+					(QWidget *)iterSpin, (QWidget *)subSpin, (QWidget *)tiltSpin,
+					(QWidget *)headSpin, (QWidget *)presets, (QWidget *)bodyList,
+					(QWidget *)unpinBtn, (QWidget *)captureBtn, (QWidget *)recBtn,
+					(QWidget *)scrub, (QWidget *)liveBtn } )
+				w->setEnabled( on );
+			tiltSpin->setEnabled( on && pv.gravityEnabled() );
+			headSpin->setEnabled( on && pv.gravityEnabled() && pv.gravityStrength() > 0.0f );
+			unpinBtn->setEnabled( on && pv.pinnedCount() > 0 );
+
+			// recording
+			QSignalBlocker br( recBtn ), bsc( scrub );
+			recBtn->setChecked( pv.recording() );
+			scrub->setEnabled( on && pv.frameCount() > 1 );
+			scrub->setRange( 0, std::max( 0, pv.frameCount() - 1 ) );
+			if ( pv.frameIndex() >= 0 )
+				scrub->setValue( pv.frameIndex() );
+			else
+				scrub->setValue( scrub->maximum() );
+			liveBtn->setEnabled( on && pv.frameIndex() >= 0 );
+
+			/* The body list is REBUILT only when the rig changes, not on every
+			 * sync: it is rebuilt on entering the mode and after a reset, and
+			 * otherwise only its check states are refreshed. Rebuilding a
+			 * 39-row list every time the panel opened would also lose the scroll
+			 * position each time.
+			 */
+			const int want = on ? pv.bodyCount() : 0;
+			if ( bodyList->count() != want ) {
+				QSignalBlocker bl( bodyList );
+				bodyList->clear();
+				for ( int i = 0; i < want; i++ ) {
+					QString nm = pv.bodyName( i );
+					if ( nm.isEmpty() )
+						nm = tr( "body %1" ).arg( i );
+					QListWidgetItem * it = new QListWidgetItem( nm, bodyList );
+					it->setFlags( it->flags() | Qt::ItemIsUserCheckable );
+					it->setData( Qt::UserRole, i );
+				}
+			}
+			{
+				QSignalBlocker bl( bodyList );
+				for ( int i = 0; i < bodyList->count(); i++ ) {
+					QListWidgetItem * it = bodyList->item( i );
+					const int body = it->data( Qt::UserRole ).toInt();
+					it->setCheckState( ( body >= 0 && body < pv.bodyCount()
+						&& pv.sim().bodies().at( body ).pinned ) ? Qt::Checked : Qt::Unchecked );
+				}
+			}
+
+			/* The system picker, only where there is a choice to make. Rebuilt from
+			 * the file each time, because loading a different file changes it.
+			 */
+			{
+				QSignalBlocker bsy( sysCombo );
+				QList<int> systems;
+				if ( nif ) {
+					for ( qint32 b = 0; b < nif->getBlockCount(); b++ ) {
+						const QModelIndex i = nif->getBlockIndex( b );
+						if ( nif->blockInherits( i, "bhkPhysicsSystem" )
+							|| nif->blockInherits( i, "bhkRagdollSystem" ) )
+							systems << int( b );
+					}
+				}
+				sysCombo->setVisible( systems.size() > 1 );
+				if ( systems.size() > 1 ) {
+					if ( sysCombo->count() != systems.size() ) {
+						sysCombo->clear();
+						for ( int b : systems )
+							sysCombo->addItem( tr( "%1 [%2]" )
+								.arg( nif->itemName( nif->getBlockIndex( b ) ) ).arg( b ), b );
+					}
+					const int idx = sysCombo->findData( pv.systemBlock() );
+					if ( idx >= 0 )
+						sysCombo->setCurrentIndex( idx );
+				}
+			}
+
 			// only the active tool's parameters, so the panel is not a wall of spin
 			// boxes for settings that do not apply
 			const PhysicsPreview::ToolSettings & ts = pv.settings();
@@ -7836,8 +8656,18 @@ void NifSkope::initDockWidgets()
 			const bool shooty = ( t == PhysicsPreview::Tool::Shoot );
 			const bool blasty = ( t == PhysicsPreview::Tool::Blast );
 			const bool windy  = ( t == PhysicsPreview::Tool::Wind );
+			const bool punty  = ( t == PhysicsPreview::Tool::Punt );
+			const bool ballsy = ( t == PhysicsPreview::Tool::Prop );
 			firmSpin->setVisible( grabby );  firmLbl->setVisible( grabby );
 			strengthSpin->setVisible( grabby ); strengthLbl->setVisible( grabby );
+			noCollideChk->setVisible( grabby );
+			puntStrength->setVisible( punty ); puntLbl->setVisible( punty );
+			puntPullChk->setVisible( punty );
+			for ( QWidget * w : { (QWidget *)propRadius, (QWidget *)propRadiusLbl,
+					(QWidget *)propMass, (QWidget *)propMassLbl, (QWidget *)propSpeed,
+					(QWidget *)propSpeedLbl, (QWidget *)clearPropsBtn } )
+				w->setVisible( ballsy );
+			clearPropsBtn->setEnabled( pv.propCount() > 0 );
 			impulseSpin->setVisible( shooty && !ts.shootProjectile );
 			impulseLbl->setVisible( shooty && !ts.shootProjectile );
 			projChk->setVisible( shooty );
@@ -7848,11 +8678,19 @@ void NifSkope::initDockWidgets()
 			blastRadius->setVisible( blasty );   blastRadiusLbl->setVisible( blasty );
 			blastStrength->setVisible( blasty ); blastStrengthLbl->setVisible( blasty );
 			windStrength->setVisible( windy );   windLbl->setVisible( windy );
-			toolParams->setVisible( on && ( grabby || shooty || blasty || windy ) );
+			toolParams->setVisible( on );
 			QSignalBlocker ps( strengthSpin );
 			QSignalBlocker p0( firmSpin ), p1( impulseSpin ), p2( projChk ), p3( projSpeed );
 			QSignalBlocker p4( projMass ), p5( projRadius ), p6( projGrav ), p7( blastRadius );
 			QSignalBlocker p8( blastStrength ), p9( windStrength );
+			QSignalBlocker q0( noCollideChk ), q1( puntStrength ), q2( puntPullChk );
+			QSignalBlocker q3( propRadius ), q4( propMass ), q5( propSpeed );
+			noCollideChk->setChecked( pv.dragNoCollide() );
+			puntStrength->setValue( double( ts.puntStrength ) );
+			puntPullChk->setChecked( ts.puntPull );
+			propRadius->setValue( double( ts.propRadius ) );
+			propMass->setValue( double( ts.propMass ) );
+			propSpeed->setValue( double( ts.propSpeed ) );
 			firmSpin->setValue( double( ts.grabFirmness ) );
 			strengthSpin->setValue( double( ts.grabStrength ) );
 			impulseSpin->setValue( double( ts.shootImpulse ) );
@@ -8003,6 +8841,208 @@ void NifSkope::initDockWidgets()
 		connect( windStrength, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
 			ogl->physicsSim().settings().windStrength = float( v );
 		} );
+		connect( noCollideChk, &QCheckBox::toggled, this, [this]( bool on ) {
+			ogl->physicsSim().setDragNoCollide( on );
+		} );
+		connect( puntStrength, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().puntStrength = float( v );
+		} );
+		connect( puntPullChk, &QCheckBox::toggled, this, [this]( bool on ) {
+			ogl->physicsSim().settings().puntPull = on;
+		} );
+		connect( propRadius, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().propRadius = float( v );
+		} );
+		connect( propMass, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().propMass = float( v );
+		} );
+		connect( propSpeed, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().settings().propSpeed = float( v );
+		} );
+		connect( clearPropsBtn, &QPushButton::clicked, this,
+			[this, syncCollisionPanel]() {
+				ogl->physicsSim().clearProps();
+				ogl->setCollisionPreview( ogl->physicsSim().soup() );
+				ogl->update();
+				syncCollisionPanel();
+			} );
+
+		connect( fricSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().setFriction( float( v ) );
+		} );
+		connect( dampSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().setDamping( float( v ) );
+		} );
+		connect( bounceSpin, &QDoubleSpinBox::valueChanged, this, [this]( double v ) {
+			ogl->physicsSim().setRestitution( float( v ) );
+		} );
+		connect( iterSpin, &QSpinBox::valueChanged, this, [this]( int v ) {
+			ogl->physicsSim().setIterations( v );
+		} );
+		connect( subSpin, &QSpinBox::valueChanged, this, [this]( int v ) {
+			ogl->physicsSim().setSubsteps( v );
+		} );
+
+		/* Tilt and heading go in as a direction, which is why they share one
+		 * handler: neither means anything without the other.
+		 */
+		auto applyGravityDir = [this, tiltSpin, headSpin]() {
+			const double tilt = tiltSpin->value() * M_PI / 180.0;
+			const double head = headSpin->value() * M_PI / 180.0;
+			const double s = std::sin( tilt );
+			ogl->physicsSim().setGravityDirection( Vector3( float( s * std::cos( head ) ),
+				float( s * std::sin( head ) ), float( -std::cos( tilt ) ) ) );
+		};
+		connect( tiltSpin, &QDoubleSpinBox::valueChanged, this,
+			[applyGravityDir]( double ) { applyGravityDir(); } );
+		connect( headSpin, &QDoubleSpinBox::valueChanged, this,
+			[applyGravityDir]( double ) { applyGravityDir(); } );
+
+		connect( unpinBtn, &QPushButton::clicked, this, [this, syncCollisionPanel]() {
+			ogl->physicsSim().unpinAll();
+			ogl->update();
+			syncCollisionPanel();
+		} );
+		connect( captureBtn, &QPushButton::clicked, this, [this]() {
+			const int moved = ogl->physicsCapturePose();
+			if ( moved > 0 ) {
+				emit ogl->gizmoStatus( tr( "Captured the simulated pose onto %1 nodes" )
+					.arg( moved ) );
+			} else {
+				QMessageBox::information( this, tr( "Capture pose" ),
+					tr( "Nothing to capture.\n\n"
+						"A pose is written through the bhkNPCollisionObject that binds each "
+						"body to a node. This file's bodies are not bound to any." ) );
+			}
+		} );
+
+		connect( recBtn, &QPushButton::clicked, this,
+			[this, syncCollisionPanel]( bool on ) {
+				ogl->physicsSim().setRecording( on );
+				syncCollisionPanel();
+			} );
+		connect( scrub, &QSlider::valueChanged, this,
+			[this, syncCollisionPanel]( int v ) {
+				PhysicsPreview & pv = ogl->physicsSim();
+				if ( pv.frameCount() < 2 )
+					return;
+				pv.seek( v );
+				ogl->setCollisionPreview( pv.soup() );
+				ogl->update();
+				syncCollisionPanel();
+			} );
+		connect( liveBtn, &QPushButton::clicked, this, [this, syncCollisionPanel]() {
+			PhysicsPreview & pv = ogl->physicsSim();
+			pv.resumeLive();
+			pv.setPaused( false );
+			syncCollisionPanel();
+		} );
+
+		connect( bodyList, &QListWidget::itemChanged, this,
+			[this, syncCollisionPanel]( QListWidgetItem * it ) {
+				if ( !it )
+					return;
+				PhysicsPreview & pv = ogl->physicsSim();
+				const int body = it->data( Qt::UserRole ).toInt();
+				if ( body >= 0 && body < pv.bodyCount() )
+					pv.sim().setPinned( body, it->checkState() == Qt::Checked );
+				ogl->update();
+				syncCollisionPanel();
+			} );
+
+		connect( sysCombo, &QComboBox::activated, this,
+			[this, sysCombo, syncCollisionPanel]( int idx ) {
+				const int block = sysCombo->itemData( idx ).toInt();
+				if ( block >= 0 && ogl->physicsSimActive() )
+					ogl->setPhysicsSimMode( true, block );
+				syncCollisionPanel();
+			} );
+
+		/* Presets set several controls at once and then re-sync, so the panel shows
+		 * what they did rather than leaving the widgets stale.
+		 */
+		connect( presets, &QComboBox::activated, this,
+			[this, presets, syncCollisionPanel]( int idx ) {
+				PhysicsPreview & pv = ogl->physicsSim();
+				switch ( idx ) {
+				case 1:     // zero gravity: look at the joints, not at a heap
+					pv.setGravityEnabled( false );
+					pv.setGroundEnabled( false );
+					pv.setTimeScale( 1.0f );
+					pv.setHighlightLimits( true );
+					break;
+				case 2:     // slow motion: watch a pop, and keep it
+					pv.setTimeScale( 0.15f );
+					pv.setRecording( true );
+					break;
+				case 3:     // drop and settle
+					pv.setGravityEnabled( true );
+					pv.setGravityStrength( 9.81f );
+					pv.setGroundEnabled( true );
+					pv.setGroundVisible( true );
+					pv.resetGroundHeight();
+					pv.setGroundFriction( 1.0f );
+					pv.setDamping( 0.4f );
+					pv.setTimeScale( 1.0f );
+					pv.reset();
+					break;
+				case 4:     // ice
+					pv.setGroundEnabled( true );
+					pv.setGroundFriction( 0.0f );
+					pv.setFriction( 0.0f );
+					break;
+				case 5:     // stiff and stable: buy accuracy with time
+					pv.setIterations( 8 );
+					pv.setSubsteps( 16 );
+					pv.setDamping( 0.2f );
+					break;
+				default:
+					return;
+				}
+				presets->setCurrentIndex( 0 );
+				ogl->setCollisionPreview( pv.soup() );
+				ogl->update();
+				syncCollisionPanel();
+			} );
+
+		/* Docking moves the SAME widget, so nothing can drift between a docked
+		 * panel and a popped-up one -- there is only ever one of it.
+		 */
+		auto setDocked = [=, this]( bool docked ) {
+			if ( docked ) {
+				colMenu->close();
+				colDock->setWidget( scroll );
+				colDock->show();
+				colDock->raise();
+				// InstantPopup would still pop the (now empty) menu, so the button
+				// changes job while the panel is docked
+				colBtn->setMenu( nullptr );
+				colBtn->setPopupMode( QToolButton::DelayedPopup );
+				dockBtn->setText( tr( "Undock, back into the toolbar" ) );
+			} else {
+				colDock->setWidget( nullptr );
+				hostLay->addWidget( scroll );
+				colDock->hide();
+				colBtn->setMenu( colMenu );
+				colBtn->setPopupMode( QToolButton::InstantPopup );
+				dockBtn->setText( tr( "Dock this panel" ) );
+			}
+		};
+		connect( dockBtn, &QPushButton::clicked, this, [setDocked, colDock]() {
+			setDocked( !colDock->isVisible() );
+		} );
+		// while docked the toolbar button toggles the dock instead of popping a menu
+		connect( colBtn, &QToolButton::clicked, this, [colDock]() {
+			if ( colDock->widget() )
+				colDock->setVisible( !colDock->isVisible() );
+		} );
+		// closing the dock by its own X puts the panel back where it came from,
+		// rather than leaving the controls with nowhere to be
+		connect( colDock, &QDockWidget::visibilityChanged, this,
+			[setDocked, colDock]( bool visible ) {
+				if ( !visible && colDock->widget() && !colDock->isFloating() )
+					setDocked( false );
+			} );
 		// the keyboard shortcuts change the same state, so the panel re-reads it
 		// every time it is opened rather than trusting what it last wrote
 		connect( colMenu, &QMenu::aboutToShow, this, syncCollisionPanel );

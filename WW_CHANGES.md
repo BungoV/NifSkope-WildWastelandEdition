@@ -1,5 +1,182 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29w — the physics gun
+
+**7 rigs, 587 checks, 0 failures, 1 correct skip.**
+
+Physics Sim had a hand that could only drag in a plane. This is the rest of the
+gesture set a physics gun actually has, plus the controls the panel was missing.
+
+### Push, pull and turn
+
+`m_grabDepth` was set once when the grab was made and never touched again, so a
+drag was confined to a plane parallel to the screen — placing a hand in front of
+a chest meant orbiting the camera to a side view first. **The wheel now reels the
+held body in and out**, multiplicatively rather than in fixed steps, because 10 cm
+is a crawl across a room and a lurch on a rat while a percentage of the current
+distance moves the same fraction of the way whatever the scale. Shift is a fine
+step.
+
+`setDrag` was a pure point constraint, so a held bone was free to spin about the
+grab: an arm dragged into position arrived at whatever angle the swing left it.
+**Ctrl+drag now turns what the hand holds**, Ctrl+wheel rolls it, Shift snaps to
+15°. It is solved through the same compliant XPBD path as the positional drag and
+with the same firmness, so the two cannot fight, and the joints still get the last
+word.
+
+The rotation frame is captured **once**, when the gesture starts. Taking the
+camera's live axes each time would let an orbit mid-rotate redefine which way is
+up, and snapping would then quantise against a moving target. Snapping applies to
+the accumulated angle, not to each increment — rounding every mouse delta rounds a
+stream of half-degree moves to zero and the bone never turns at all.
+
+**The beam** draws the line from the grip to the hand, a cross at the point on the
+shape the hand actually has hold of, and a marker where the hand is pulling to.
+Without it the two wheel gestures are controls with no visible state: you can feel
+them working but a body pushed behind the one in front of it just looks like it
+stopped responding. The gap between grip and target is the chain going taut, made
+visible.
+
+### Untangling, and getting back out
+
+**The held bone can be excused from self-collision.** Self-collision is what stops
+a thigh entering a pelvis and also what traps a limb already inside one — the
+solver will not let it back out through the surface it is behind. Suspending it
+for the one body in hand is the untangling tool; suspending it globally, the only
+option before, changes every other body at the same time.
+
+**Unpin all** (U). Pins accumulate one right-click at a time and the only way back
+from four of them was a full reset.
+
+### Balls
+
+`RagdollSim::build` only ever made bodies from the decoded file. It can now take
+**loose props**, and the Ball tool throws one along the view ray at a configurable
+size, mass and speed. This is the honest test of a collision mesh: does anything
+actually bounce off it.
+
+A sphere, and the choice is forced rather than lazy. The exact narrow phase is
+segment-to-segment plus a radius, so a sphere collides correctly with every
+capsule and sphere in a rig, while a box is a point set with no faces between its
+corners (`exactPair`) and would be excluded from body-on-body contact altogether.
+A crate that fell through the ragdoll it was thrown at would be worse than no
+crate.
+
+A prop joins the same body list the rig uses, with generated icosphere geometry in
+the same mesh list, so drawing, picking, grabbing and pinning need no special
+case — which is what makes a thrown ball something you can then catch and throw
+again. Two things had to be kept honest: the no-collide filter's keys encode a
+pair as `min * stride + max`, so the stride is frozen at build and props are never
+looked up in it; and `looseBodies()` excludes props, or one ball would report a
+clean ragdoll as a kit.
+
+**Punt** is the gravity gun's other half: a heavy shove along the view, or a yank
+toward the camera. Distinct from Shoot, which delivers a round's impulse where it
+lands; this acts along the *view*, so a punt sends a body away from you rather
+than into the floor.
+
+### Bounce
+
+Restitution is new in the solver, as a velocity pass after the position solve —
+which is where XPBD puts it, and not merely where it was convenient.
+
+It cost two wrong attempts to get there. The position solve exists to remove the
+overlap, so **the contact cannot be found again afterwards**: a ball that has just
+landed is resting exactly on the plane, penetrating by zero, and re-deriving
+contacts there finds none. Recording them on the *last* sweep fails for the same
+reason one level down — the earlier sweeps have already pushed the body out. The
+contacts are recorded on the **first** sweep, which sees the impact as it arrived,
+and the pass reflects the velocity captured at the top of the substep rather than
+the post-solve one, which by then is zero.
+
+| dropped 0.9 m | rebound |
+|---|---|
+| bounce 0 | **0.000 m** |
+| bounce 0.8 | **0.537 m** |
+
+Only contacts that were closing bounce. A body resting on the floor is in contact
+on every substep for ever, and reflecting that would feed it energy from nothing
+and walk it off the ground.
+
+### Record and scrub
+
+A ragdoll settles in about two seconds and the one frame worth keeping goes past
+in a sixtieth of one. The only way back to it was to reset and try to catch it
+with the pause key, which is a game of reflexes rather than a tool. **Record keeps
+every stepped pose** (20 s, oldest dropped) and the scrub slider moves through
+them. Scrubbing pauses — running on from a frame you went back to would overwrite
+the rest of the recording, which is not what going back to look at something
+means.
+
+### Capture pose
+
+The one control here that writes to the file, and the reason the mode is more than
+a toy: drop a rig, let it settle, keep the result.
+
+Each node is moved by the **rigid difference** its body underwent since the rest
+pose, not set to the body's absolute transform. A body sits at its centre of mass
+and a node at its origin, so the two frames differ by a constant offset — and in a
+difference that offset cancels, which makes this correct without first having to
+establish what the offset is. World transforms are read before anything is
+written, because node transforms are stored as locals and writing a parent moves
+its children.
+
+It goes through `nifSnapshotOp`, so it undoes.
+
+### The panel
+
+Everything above is reachable from the Collision dropdown, along with the knobs
+that were built and never exposed:
+
+- **body-on-body friction**, which is not the floor's and is why limbs slid
+  against each other
+- **damping**, the difference between a rig that swings for ever and one that
+  settles
+- **sweeps** and **substeps** — the stats overlay has always reported joint error
+  and there was nothing to *do* about a bad number
+- **gravity direction**, as a tilt and a heading rather than a vector nobody wants
+  to normalise by hand
+
+Plus **presets** (zero-G, slow motion, drop and settle, ice, stiff and stable),
+a **body list** with each bone's pin as a checkbox — on a 39-body rig, pinning a
+named bone meant finding it with the cursor, which is the picking problem faced
+again for a job that needs no aiming at all — a **system picker**, since `start()`
+takes the first jointed system and a skeleton file carries several with no way to
+tell which one you were looking at, and the **shortcut legend**, which existed
+before the panel did and was invisible unless you already knew it.
+
+Layout defects from bungo's screenshot, fixed: gravity read `m/s2` and now reads
+`m/s²`; the tool row wrapped 3+1 leaving Wind alone and is now two rows of three;
+the ground height had no unit; the checkboxes were mixed into the label/value grid
+and each sat at a different indent depending on whether it spanned one cell or
+two, which is what made the left edge look ragged — they have their own column
+now; and the dead "17 bodies, 16 joints." line names the system it is describing.
+
+**And it docks.** As a menu it closed the moment you clicked anywhere else,
+including the viewport, so every option was set blind and verified by reopening
+the menu. The same widget moves into a dock and back — it is never duplicated, so
+the two cannot drift. The scroll area is what moves, never the `QWidgetAction`'s
+own widget, which is the trap in reparenting a menu's contents.
+
+### Two test bugs worth naming
+
+The wheel check compared the hand with where it started — after a notch out *and*
+a notch back in. That is a round trip which lands exactly there, so a working
+push/pull failed for being reversible. It samples between the two now.
+
+The bounce test dropped its ball over the origin, where it landed on the ragdoll
+instead of the floor and never reached the height being watched for. Both runs
+measured a rebound of exactly zero, which reads as "restitution does nothing" when
+the ball had simply never hit the ground. It drops clear of the rig now and
+measures from the ball's own lowest point rather than an assumed contact height.
+
+A third was not a test bug: capture pose leaves the model modified, and NifSkope
+prompts on close when either the window's modified flag or the undo stack's clean
+index says something is outstanding. The harness quit into a modal dialog with
+nobody to answer it and hung with an empty report. It undoes its own capture —
+which is also the only check that the tooltip's promise of undo is true — and
+tells the window so.
+
 ## 2026-07-29v — clicking a collision shape now picks that shape
 
 **All rigs pass, 0 failures.**

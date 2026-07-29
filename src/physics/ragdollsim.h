@@ -88,6 +88,14 @@ struct SimBody
 	QVector<SimPoint> points;
 	Vector3 com;                //!< centre of mass in bone space, for that conversion
 	Vector3 restOrigin;         //!< the bone origin in world, before that shift
+	/*! The orientation restOrigin went with.
+	 *
+	 * Kept because q is live and the rest pose is the reference a captured pose is
+	 * measured AGAINST: the motion to write back to a node is the difference
+	 * between where the body is and where it started, and without this the second
+	 * half of that is gone by the time anyone asks.
+	 */
+	Quat restOrient = Quat( 1, 0, 0, 0 );
 	//! what cinfo itself says about this body, for checking against the skeleton
 	Vector3 cinfoPos;
 	Quat cinfoRot = Quat( 1, 0, 0, 0 );
@@ -102,6 +110,22 @@ struct SimBody
 
 	Vector3 xPrev;              //!< XPBD scratch: pose at the start of a substep
 	Quat qPrev;
+	/*! Velocity at the start of the substep, BEFORE gravity.
+	 *
+	 * What restitution reflects. It cannot be read back off the post-solve
+	 * velocity, because the position solve has by then already removed the
+	 * approach -- a body that hit the floor at 4 m/s is at rest by the time the
+	 * velocity pass runs, so bouncing it needs the speed it arrived with.
+	 */
+	Vector3 vPre, wPre;
+
+	/*! Spawned into the scene rather than decoded from the file.
+	 *
+	 * A prop carries no joints and belongs to no skeleton, so the parts that
+	 * reason about the ragdoll as a tree -- loose-body counting, the rest-pose
+	 * overlap filter -- have to be able to tell the two apart.
+	 */
+	bool prop = false;
 };
 
 /*! One joint: a ball socket plus whichever angular limits the constraint carried.
@@ -257,6 +281,41 @@ public:
 	//! Which body is being dragged, or -1.
 	int draggedBody() const { return m_dragBody; }
 
+	/*! Also hold the held body at an ORIENTATION, not just at a point.
+	 *
+	 * A point constraint alone lets the bone spin freely about the grab, which is
+	 * right for hauling a rig around and useless for placing one: an arm dragged
+	 * into position arrives at whatever angle the swing left it at. With a target
+	 * orientation the hand turns what it holds, which is the difference between
+	 * moving a ragdoll and posing one.
+	 *
+	 * Solved through the same compliant path as the positional drag and with the
+	 * same firmness, so the two cannot fight each other, and the joints still get
+	 * the last word.
+	 */
+	void setDragOrientation( const Quat & q );
+	void clearDragOrientation();
+	bool draggingOrientation() const { return m_dragRotate; }
+	Quat dragOrientation() const { return m_dragQ; }
+	//! Where on the body the hand took hold, in body space, so it can be drawn.
+	Vector3 dragLocal() const { return m_dragLocal; }
+	//! Where the hand is asking that point to be, in world space.
+	Vector3 dragTarget() const { return m_dragTarget; }
+
+	//! Release every pin at once. Pinning is per-body and accumulates, so without
+	//! this the only way back from four nailed-down bones is a full reset.
+	void unpinAll();
+
+	/*! Let the held body pass through the rest of the ragdoll while it is held.
+	 *
+	 * Self-collision is what stops a thigh entering a pelvis, and it is also what
+	 * traps a limb that is already inside one -- the solver will not let it back
+	 * out through the surface it is behind. Suspending it for the ONE body in hand
+	 * is the untangling tool; suspending it globally, which was the only option
+	 * before, changes the behaviour of every other body at the same time.
+	 */
+	bool dragNoCollide = false;
+
 	/*! Hit one body with an impulse at a point in its own space.
 	 *
 	 * `impulse` is kg*m/s in world space. Applied to the VELOCITIES, not as a
@@ -401,6 +460,18 @@ public:
 	float groundFriction = 1.0f;
 	//! Extra damping per second on top of each body's own authored value.
 	float damping = 0.0f;
+	/*! Bounce: 0 keeps a landing dead, 1 returns the speed it arrived with.
+	 *
+	 * A separate VELOCITY pass after the position solve, which is where XPBD puts
+	 * restitution and not merely where it is convenient. The position solve has
+	 * already removed the approach by the time the pass runs, so reflecting the
+	 * post-solve velocity would reflect nothing; it uses the speed recorded at the
+	 * start of the substep instead (SimBody::vPre).
+	 *
+	 * Default 0 because the ragdolls this previews are meant to land and stay
+	 * landed -- Havok's own material restitution is 0 on every corpus body checked.
+	 */
+	float restitution = 0.0f;
 	/*! Gauss-Seidel sweeps per substep.
 	 *
 	 * XPBD's usual advice is one sweep and many substeps, which holds while the
@@ -453,6 +524,23 @@ public:
 	//! Pin every body no joint touches, leaving only the actual ragdoll moving.
 	void pinLooseBodies();
 
+	/*! Drop a loose sphere into the scene. Returns its body index, or -1.
+	 *
+	 * A SPHERE, not a crate, and the choice is forced rather than lazy: the exact
+	 * narrow phase is segment-to-segment plus a radius, so a sphere collides
+	 * correctly with every capsule and sphere in the rig, while a box is a point
+	 * set with no faces between its corners (see exactPair) and would be excluded
+	 * from body-on-body contact altogether. A crate that fell through the ragdoll
+	 * it was thrown at would be worse than no crate.
+	 *
+	 * Props are appended after every decoded body, so an index below propStart()
+	 * is always part of the file and one at or above it never is.
+	 */
+	int addProp( const Vector3 & pos, const Vector3 & vel, float radius, float mass );
+	void clearProps();
+	//! First prop index; equivalently, how many bodies the file itself supplied.
+	int propStart() const { return m_propStart; }
+
 private:
 	void solveJoints( float h, bool reverse );
 	//! one pass over one joint; true if it is still meaningfully violated
@@ -463,9 +551,30 @@ private:
 	void buildCollisionFilter();
 	//! refresh the broad phase; called once per step, not per substep
 	void collectPairs();
-	void solveContacts( float h );
+	/*! `record` keeps the contacts it resolved, for the velocity pass.
+	 *
+	 * They cannot be found again afterwards. The position solve exists precisely
+	 * to remove the overlap, so by the time it has finished there is nothing left
+	 * to detect -- a ball that has just landed is resting exactly ON the plane,
+	 * penetrating it by zero, and re-deriving contacts there finds none. Recorded
+	 * on the last sweep only, since the earlier ones are superseded.
+	 */
+	void solveContacts( float h, bool record = false );
+
+	//! one contact the position solve dealt with, kept for applyRestitution
+	struct SimContact
+	{
+		int a = -1, b = -1;         //!< b < 0 is the ground plane
+		Vector3 rA, rB;             //!< contact point relative to each centre of mass
+		Vector3 n;                  //!< separating normal, pointing away from b
+	};
+	QVector<SimContact> m_contacts;
 	//! the drag spring, solved alongside the joints so it shares their stability
 	void solveDrag( float h );
+	//! the drag's angular half, when the hand is turning what it holds
+	void solveDragOrientation( float h );
+	//! the velocity pass that puts bounce back in, after the position solve
+	void applyRestitution();
 
 	int m_dragBody = -1;
 	Vector3 m_dragLocal, m_dragTarget;
@@ -473,6 +582,17 @@ private:
 	float m_totalMass = 1.0f;
 	//! XPBD's accumulated multiplier, reset at the start of each substep
 	float m_dragLambda = 0.0f;
+	bool m_dragRotate = false;
+	Quat m_dragQ = Quat( 1, 0, 0, 0 );
+	float m_dragQLambda = 0.0f;
+
+	//! how many bodies came from the file; props start here
+	int m_propStart = 0;
+	/*! Body count when the no-collide set was built, since its keys encode a pair
+	 * as min * stride + max. Spawning a prop grows m_bodies, and re-deriving the
+	 * stride from the new size would silently reinterpret every stored key.
+	 */
+	int m_filterStride = 0;
 
 	QVector<SimBody> m_bodies;
 	QVector<SimJoint> m_joints;
