@@ -3146,6 +3146,25 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QEventLoop loop;
 					QTimer::singleShot( 700, &loop, &QEventLoop::quit );
 					loop.exec();
+					/* WW_SHOT_TIME=<seconds>: park the scene clock before grabbing.
+					 * Effects open over time — a Fallout 4 ArtObject at t=0 is
+					 * usually scaled or faded to nothing, so a screenshot of the
+					 * first frame is a screenshot of an empty effect. Stepped in
+					 * small increments rather than jumped, because particle systems
+					 * integrate frame to frame and cannot be evaluated at an
+					 * arbitrary t the way a keyframe controller can.
+					 */
+					if ( qEnvironmentVariableIsSet( "WW_SHOT_TIME" ) ) {
+						const float want = qEnvironmentVariable( "WW_SHOT_TIME" ).toFloat();
+						const float step = 1.0f / 30.0f;
+						for ( float t = 0.0f; t < want; t += step ) {
+							skope->ogl->setSceneTime( std::min( t + step, want ) );
+							QApplication::processEvents();
+						}
+						QEventLoop settle;
+						QTimer::singleShot( 300, &settle, &QEventLoop::quit );
+						settle.exec();
+					}
 					skope->ogl->grabFramebuffer().save( qEnvironmentVariable( "WW_SHOT" ) );
 				}
 				QTimer::singleShot( 0, qApp, &QApplication::quit );

@@ -1,5 +1,53 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30h — the merge honours AttachT, so ArtObjects land on the limb
+
+An effect NIF's root carries a `NiStringsExtraData` called **`AttachT`** whose
+entries are either `NamedNode&<NodeName>` — hang me off that node — or engine
+hints such as `MultiTechnique`, which name nothing. The merge ignored it and put
+every donor branch under the target's root, so a Tesla arc meant for the calf
+imported perfectly and sat at the actor's feet. That reads as "the effect didn't
+import" when in fact it did.
+
+`mergeDonor` reads `AttachT` now and parents the donor's tops under the named
+node, failing loudly (rather than silently landing at the origin) when the target
+has no such node. `nifMergeResult` reports `attachRequested` / `attachedTo`, and
+`isEffect` for a donor that carries `AttachT` **at all** — which is the case
+worth a warning, because those are exactly the effects that vanish to the origin.
+
+**Half of them name nothing**, by design: the X-01 Tesla legs say
+`NamedNode&LLeg_Calf_Armor2`, but its torso, arms and helmet say only
+`MultiTechnique` because their attach node lives in the ESP's ARTO record, not in
+the mesh. So `nifcli merge` gained **`--attach NODE`**, applying to the next
+`--add`; without it the CLI says where the piece went and that it probably wanted
+saying:
+
+```bash
+NifSkope -no-gui merge rig.nif --attach L_Pauldron --add arm_left_fx.nif -o out.nif
+```
+
+All six X-01 Tesla ArtObjects attach correctly this way — legs from their own
+`AttachT`, the other four by override — adding 24 shapes with no duplicate names.
+
+### WW_SHOT_TIME
+
+Effects open over time; a Fallout 4 ArtObject at `t=0` is usually scaled or faded
+to nothing, so a screenshot of the first frame is a screenshot of an empty
+effect. `WW_SHOT_TIME=<seconds>` parks the scene clock before grabbing, stepping
+in 1/30s increments rather than jumping, because particle systems integrate frame
+to frame and cannot be evaluated at an arbitrary *t* the way a keyframe
+controller can. At `t=1.5` the arcs are alive on both pauldrons, the right arm
+and the right leg; at `t=0` only one is.
+
+### A data problem in the source, not in the code
+
+`x01tesla_helmet_fx.nif`'s root node is named **`PA_Edison_RPauldron_VFX`** — the
+same name as `x01tesla_arm_right_fx.nif`'s root. Merged after it, that name
+de-duplicates and the helmet effect folds into the right pauldron's branch: 6
+blocks and 1 shape, against the right arm's 150 and 5. Renaming the helmet
+effect's root in the source is the fix; nothing in the merge can guess that two
+files meant different things by one name.
+
 ## 2026-07-30g — Load skeleton was folding the mesh up, and Outfit Studio poses on X-01
 
 **Two bug fixes and a feature test.** See 07-30f for the first fix (string

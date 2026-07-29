@@ -49,6 +49,18 @@ struct NifMergeResult
 	 *  should always be empty; it is reported because when it is not, the symptom
 	 *  (a rig that poses into a heap) says nothing about the cause. */
 	QStringList duplicateNames;
+	/*! The node the donor asked to hang from — its "AttachT" NiStringsExtraData
+	 *  entry of the form "NamedNode&<name>", or the caller's override. Empty when
+	 *  the file says nothing, which is NOT the same as "the root": Fallout 4
+	 *  effects often carry only engine hints like "MultiTechnique" and take their
+	 *  attach node from the ARTO record in the ESP instead. */
+	QString attachRequested;
+	//! The node it was actually parented under; empty means the target's root.
+	QString attachedTo;
+	//! The donor carries an "AttachT" extra data, i.e. it is an ArtObject —
+	//! true even when that data names no node, which is the case worth warning
+	//! about, because such an effect silently lands at the origin.
+	bool isEffect = false;
 	QString error;            //!< set when the merge returns false
 };
 
@@ -59,10 +71,16 @@ struct NifMergeResult
  * \param dedupeByName Match donor NiNodes to same-named target nodes (default).
  *                     Turn off only to keep a verbatim, independent copy.
  * \param result       Counts and, on failure, the reason.
+ * \param attachTo     Node to hang the donor's branches from, overriding its own
+ *                     "AttachT" request. Needed for the Fallout 4 effects that
+ *                     carry no NamedNode entry because the ESP's ARTO record
+ *                     holds their attach node. Empty = use what the file says,
+ *                     or the target's root if it says nothing.
  * \return true on success.
  */
 bool nifMergeFile( NifModel * target, const QString & donorPath,
-                   bool dedupeByName, NifMergeResult & result );
+                   bool dedupeByName, NifMergeResult & result,
+                   const QString & attachTo = QString() );
 
 //! Merge a NIF held in memory (e.g. bytes extracted from a game archive).
 /*!
@@ -72,6 +90,7 @@ bool nifMergeFile( NifModel * target, const QString & donorPath,
  * \param label Display name for the source (used in messages / the undo step).
  */
 bool nifMergeData( NifModel * target, const QByteArray & data, const QString & label,
-                   bool dedupeByName, NifMergeResult & result );
+                   bool dedupeByName, NifMergeResult & result,
+                   const QString & attachTo = QString() );
 
 #endif // NIFMERGE_H

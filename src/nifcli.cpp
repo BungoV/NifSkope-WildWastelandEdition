@@ -2184,8 +2184,8 @@ int cmdCast( const QString & file, const QString & spellId, int block,
 }
 
 //! Merge other NIFs into this one (armour set + skeleton -> one poseable file).
-int cmdMerge( const QString & file, const QStringList & adds, bool noDedupe,
-			  const QString & outFile )
+int cmdMerge( const QString & file, const QStringList & adds, const QStringList & addAttach,
+			  bool noDedupe, const QString & outFile )
 {
 	if ( adds.isEmpty() ) {
 		err() << "error: --add <file> is required (repeat it for each piece)" << Qt::endl;
@@ -2197,16 +2197,24 @@ int cmdMerge( const QString & file, const QStringList & adds, bool noDedupe,
 
 	QStringList allDupes;
 	int totalShapes = 0, totalReused = 0;
-	for ( const QString & add : adds ) {
+	for ( int i = 0; i < adds.size(); i++ ) {
+		const QString & add = adds.at( i );
 		NifMergeResult r;
-		if ( !nifMergeFile( &nif, add, !noDedupe, r ) ) {
+		if ( !nifMergeFile( &nif, add, !noDedupe, r, addAttach.value( i ) ) ) {
 			err() << "error: " << r.error << Qt::endl;
 			return 1;
 		}
 		out() << QString( "merged %1: +%2 block(s), %3 shape(s), %4 node(s) added, "
-						  "%5 reused by name, %6 re-parented" )
+						  "%5 reused by name, %6 re-parented, %7 rebased" )
 			.arg( QFileInfo( add ).fileName() ).arg( r.blocksAdded ).arg( r.shapesAdded )
-			.arg( r.nodesAdded ).arg( r.nodesReused ).arg( r.reparented ) << Qt::endl;
+			.arg( r.nodesAdded ).arg( r.nodesReused ).arg( r.reparented ).arg( r.rebased ) << Qt::endl;
+		// where an effect landed is the whole question for an ArtObject, so it is
+		// always stated -- including "the root", which is usually not what is wanted
+		if ( !r.attachedTo.isEmpty() )
+			out() << "  attached to " << r.attachedTo << Qt::endl;
+		else if ( r.isEffect )
+			out() << "  attached to the ROOT: this file's AttachT names no node "
+					 "(its ARTO record in the ESP does). Use --attach <node>." << Qt::endl;
 		totalShapes += r.shapesAdded;
 		totalReused += r.nodesReused;
 		allDupes << r.duplicateNames;
@@ -2441,6 +2449,10 @@ int usage()
 		  << "                                          parameters, reassemble the whole packfile,\n"
 		  << "                                          diff both against the original, and with\n"
 		  << "                                          -o write the reassembled bytes out\n"
+		  << "  merge <file> [--attach NODE] --add PIECE.nif [...] -o OUT\n"
+		  << "                                          splice pieces in, sharing bones by\n"
+		  << "                                          name; --attach applies to the next\n"
+		  << "                                          --add and overrides its AttachT\n"
 		  << "  pose <file> --list                      bones and existing poses\n"
 		  << "  pose <file> --save NAME -o OUT          capture the current bone\n"
 		  << "                                          transforms as a pose\n"
@@ -2488,7 +2500,8 @@ int nifskopeCliMain( const QStringList & args )
 
 	// options
 	QString file, path, value, outFile, spellId, type, pattern, sequence;
-	QStringList controllers, adds;
+	QStringList controllers, adds, addAttach;
+	QString pendingAttach;
 	QString saveName, applyName, importOs, exportOs;
 	float blend = 1.0f;
 	int steps = 0;
@@ -2533,7 +2546,14 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--selftest" ) ) selfTest = true;
 		else if ( t == QLatin1String( "--extract" ) ) extract = true;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
-		else if ( t == QLatin1String( "--add" ) ) adds << QDir::current().filePath( next() );
+		// --attach applies to the NEXT --add and then clears, so a command line
+		// reads left to right: --attach L_Pauldron --add arm_fx.nif
+		else if ( t == QLatin1String( "--attach" ) ) pendingAttach = next();
+		else if ( t == QLatin1String( "--add" ) ) {
+			adds << QDir::current().filePath( next() );
+			addAttach << pendingAttach;
+			pendingAttach.clear();
+		}
 		else if ( t == QLatin1String( "--no-dedupe" ) ) noDedupe = true;
 		else if ( t == QLatin1String( "--save" ) ) saveName = next();
 		else if ( t == QLatin1String( "--apply" ) ) applyName = next();
@@ -2614,7 +2634,7 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "cast" ) )
 		rc = cmdCast( file, spellId, block, path, outFile );
 	else if ( cmd == QLatin1String( "merge" ) )
-		rc = cmdMerge( file, adds, noDedupe, outFile );
+		rc = cmdMerge( file, adds, addAttach, noDedupe, outFile );
 	else if ( cmd == QLatin1String( "pose" ) )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )

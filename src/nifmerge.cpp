@@ -161,6 +161,45 @@ void unlinkChild( NifModel * nif, int parentBlock, int childBlock )
 		nif->setLink( nif->getIndex( iArray, c ), keep.at( c ) );
 }
 
+/*! The skeleton node a Fallout 4 effect NIF asks to hang from.
+ *
+ *  An ArtObject's root carries a NiStringsExtraData called "AttachT" whose
+ *  entries are either "NamedNode&<NodeName>" — hang me off that node — or engine
+ *  hints such as "MultiTechnique", which name nothing. The X-01 Tesla legs say
+ *  NamedNode&RLeg_Calf_Armor2; its torso, arms and helmet say only
+ *  MultiTechnique, because their attach node lives in the ARTO record in the ESP
+ *  rather than in the mesh. So an empty return means "this file does not say",
+ *  not "attach at the root" — the caller has to decide, and be told.
+ */
+QString attachNodeName( const NifModel & donor, bool * isEffect = nullptr )
+{
+	if ( isEffect )
+		*isEffect = false;
+	const QList<int> roots = donor.getRootLinks();
+	if ( roots.isEmpty() )
+		return QString();
+	QModelIndex iRoot = donor.getBlockIndex( roots.first() );
+	QModelIndex iList = donor.getIndex( iRoot, "Extra Data List" );
+	for ( int i = 0; i < donor.rowCount( iList ); i++ ) {
+		const int link = donor.getLink( donor.getIndex( iList, i ) );
+		if ( link < 0 )
+			continue;
+		QModelIndex iEx = donor.getBlockIndex( link );
+		if ( !donor.isNiBlock( iEx, "NiStringsExtraData" )
+			|| donor.get<QString>( iEx, "Name" ) != QLatin1String( "AttachT" ) )
+			continue;
+		if ( isEffect )
+			*isEffect = true;			// it IS an ArtObject, whatever it names
+		QModelIndex iData = donor.getIndex( iEx, "Data" );
+		for ( int s = 0; s < donor.rowCount( iData ); s++ ) {
+			const QString v = donor.get<QString>( donor.getIndex( iData, s ) );
+			if ( v.startsWith( QLatin1String( "NamedNode&" ) ) )
+				return v.mid( 10 );
+		}
+	}
+	return QString();
+}
+
 //! Names carried by more than one NiNode. See NifMergeResult::duplicateNames.
 QStringList duplicateNodeNames( const NifModel * nif )
 {
@@ -187,7 +226,8 @@ QStringList duplicateNodeNames( const NifModel * nif )
 //! nifMergeData funnel here so the file and in-memory (archive) paths share one
 //! splice; \a donorLabel names the source in messages and the undo step.
 static bool mergeDonor( NifModel * target, NifModel & donor, const QString & donorLabel,
-                        bool dedupeByName, NifMergeResult & result )
+                        bool dedupeByName, NifMergeResult & result,
+                        const QString & attachOverride = QString() )
 {
 	auto fail = [&result]( const QString & msg ) {
 		result.error = msg;
@@ -233,6 +273,24 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 		return fail( QStringLiteral( "target has no root block" ) );
 	const int targetRoot = targetRoots.first();
 
+	/* ...unless the donor is an effect that names a node to hang from, or the
+	 * caller names one. An ArtObject dropped at the root sits at the origin
+	 * instead of on the limb it belongs to, which looks like the effect "did not
+	 * import" when in fact it imported perfectly and landed at the actor's feet.
+	 */
+	const QHash<QString, int> byName = namedNodes( target );
+	int attachBlock = targetRoot;
+	const QString declared = attachNodeName( donor, &result.isEffect );
+	result.attachRequested = attachOverride.isEmpty() ? declared : attachOverride;
+	if ( !result.attachRequested.isEmpty() ) {
+		auto it = byName.constFind( result.attachRequested );
+		if ( it == byName.constEnd() )
+			return fail( QStringLiteral( "%1 attaches to \"%2\", which this file has no node for" )
+				.arg( donorLabel, result.attachRequested ) );
+		attachBlock = *it;
+		result.attachedTo = result.attachRequested;
+	}
+
 	// Donor top-level branches: the root's children, not the root itself. The
 	// donor root is a per-file wrapper ("Armor_Torso.nif"); importing it would
 	// nest a redundant node under the target root.
@@ -252,8 +310,7 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	// De-duplication: a donor NiNode whose name already exists in the target
 	// maps onto that block and is NOT imported. This is what makes several
 	// merged pieces share one skeleton.
-	const QHash<QString, int> existing = dedupeByName ? namedNodes( target )
-	                                                  : QHash<QString, int>();
+	const QHash<QString, int> existing = dedupeByName ? byName : QHash<QString, int>();
 	QMap<qint32, qint32> map;      // donor block -> target block
 	QList<qint32> toImport;
 	for ( qint32 b : branch ) {
@@ -303,7 +360,7 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	const QSet<qint32> importedSet( toImport.constBegin(), toImport.constEnd() );
 	for ( qint32 b : toImport ) {
 		if ( donorTops.contains( b ) ) {
-			attachTo.insert( b, targetRoot );
+			attachTo.insert( b, attachBlock );
 			continue;
 		}
 		const int dParent = donor.getParent( b );
@@ -446,18 +503,19 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 }
 
 bool nifMergeFile( NifModel * target, const QString & donorPath,
-                   bool dedupeByName, NifMergeResult & result )
+                   bool dedupeByName, NifMergeResult & result, const QString & attachTo )
 {
 	NifModel donor;
 	if ( !donor.loadFromFile( donorPath ) ) {
 		result.error = QStringLiteral( "could not load %1" ).arg( donorPath );
 		return false;
 	}
-	return mergeDonor( target, donor, QFileInfo( donorPath ).fileName(), dedupeByName, result );
+	return mergeDonor( target, donor, QFileInfo( donorPath ).fileName(), dedupeByName,
+		result, attachTo );
 }
 
 bool nifMergeData( NifModel * target, const QByteArray & data, const QString & label,
-                   bool dedupeByName, NifMergeResult & result )
+                   bool dedupeByName, NifMergeResult & result, const QString & attachTo )
 {
 	NifModel donor;
 	QByteArray bytes = data;                 // load() consumes a QIODevice
@@ -468,5 +526,5 @@ bool nifMergeData( NifModel * target, const QByteArray & data, const QString & l
 		return false;
 	}
 	return mergeDonor( target, donor, label.isEmpty() ? QStringLiteral( "NIF" ) : label,
-	                   dedupeByName, result );
+	                   dedupeByName, result, attachTo );
 }
