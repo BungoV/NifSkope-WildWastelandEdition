@@ -3150,10 +3150,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					int data = inst >= 0 ? nif->getLink( nif->getBlockIndex( inst ), "Data" ) : -1;
 					return QPair<int, int>( inst, data );
 				};
+				// numSeg = -1 means "this shape has no segment array at all" (a plain
+				// BSTriShape), which is not a failure — the caller skips the coverage
+				// check rather than treating an absent structure as a broken one.
 				auto segCoverage = [nif]( int block, int & sumPrim, bool & contiguous, int & numSeg ) {
 					QModelIndex iB = nif->getBlockIndex( block );
-					numSeg = nif->get<int>( iB, "Num Segments" );
 					QModelIndex iSeg = nif->getIndex( iB, "Segment" );
+					if ( !iSeg.isValid() ) { numSeg = -1; sumPrim = -1; contiguous = true; return; }
+					numSeg = nif->get<int>( iB, "Num Segments" );
 					QVector<QPair<int, int>> segList;
 					for ( int s = 0; s < nif->rowCount( iSeg ); s++ )
 						segList.append( { int( nif->get<quint32>( nif->getIndex( iSeg, s ), "Start Index" ) ),
@@ -3166,8 +3170,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						expectStart += pr.second * 3; sumPrim += pr.second;
 					}
 				};
+				// -1 means "unskinned", which is not zero weights — an unskinned shape
+				// has no Bone Weights array and would otherwise count every vertex.
 				auto zeroWeights = [nif]( int block ) {
 					int zero = 0;
+					if ( nif->getLink( nif->getBlockIndex( block ), "Skin" ) < 0 )
+						return -1;
 					QModelIndex iVD = nif->getIndex( nif->getBlockIndex( block ), "Vertex Data" );
 					for ( int v = 0; v < nif->rowCount( iVD ); v++ ) {
 						QModelIndex iW = nif->getIndex( nif->getIndex( iVD, v ), "Bone Weights" );
@@ -3182,22 +3190,28 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( !ok || !nif ) { log << "load failed\n"; break; }
 					// WW_SEP_BLOCK targets a specific shape (e.g. a coloured one to
 					// exercise the vertex-colour path); otherwise the largest.
+					// WW_SEP_ANY widens the search from skinned/segmented FO4 meshes to
+					// any BSTriShape — most files people run Separate on are plain ones,
+					// and the skin and segment checks below now skip themselves rather
+					// than failing when the structures are absent.
+					const char * wantType = qEnvironmentVariableIsSet( "WW_SEP_ANY" )
+						? "BSTriShape" : "BSSubIndexTriShape";
 					int sb = -1, sbVerts = -1;
 					if ( qEnvironmentVariableIsSet( "WW_SEP_BLOCK" ) ) {
 						int req = QString::fromLocal8Bit( qgetenv( "WW_SEP_BLOCK" ) ).toInt();
 						if ( req >= 0 && req < nif->getBlockCount()
-							&& nif->blockInherits( nif->getBlockIndex( req ), "BSSubIndexTriShape" ) )
+							&& nif->blockInherits( nif->getBlockIndex( req ), wantType ) )
 							sb = req;
 						else
-							log << "WW_SEP_BLOCK " << req << " is not a BSSubIndexTriShape; using largest\n";
+							log << "WW_SEP_BLOCK " << req << " is not a " << wantType << "; using largest\n";
 					}
 					if ( sb < 0 )
 						for ( int b = 0; b < nif->getBlockCount(); b++ )
-							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSSubIndexTriShape" ) ) {
+							if ( nif->blockInherits( nif->getBlockIndex( b ), wantType ) ) {
 								int nv = nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" );
 								if ( nv > sbVerts ) { sbVerts = nv; sb = b; }
 							}
-					if ( sb < 0 ) { log << "no BSSubIndexTriShape\n"; break; }
+					if ( sb < 0 ) { log << "no " << wantType << "\n"; break; }
 					const int origTris = nif->get<int>( nif->getBlockIndex( sb ), "Num Triangles" );
 					const int origVerts = nif->get<int>( nif->getBlockIndex( sb ), "Num Vertices" );
 					const int origBlocks = nif->getBlockCount();
@@ -3277,76 +3291,140 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< " skin(inst " << srcSkinBefore.first << ", data " << srcSkinBefore.second << ")\n";
 					log.flush();
 
+					// WW_SEP_MODE: 0 = Selection (default), 1 = By Loose Parts, 2 = By
+					// Segment. The last two split N ways, so everything below validates
+					// a LIST of outputs rather than a source/new pair.
+					const int sepMode = qEnvironmentVariableIsSet( "WW_SEP_MODE" )
+						? QString::fromLocal8Bit( qgetenv( "WW_SEP_MODE" ) ).toInt() : 0;
+
 					// build the scene, enter edit mode, select the first half of faces
 					skope->ogl->grabFramebuffer();
 					QSet<int> objSel; objSel.insert( sb );
 					skope->ogl->setObjectSelection( objSel, sb );
 					skope->ogl->setEditMode( true );
-					log << "editMode=" << skope->ogl->editModeActive() << "\n";
-					QVector<GLView::PickedElement> faces;
-					const int half = origTris / 2;
-					for ( int t = 0; t < half; t++ ) {
-						GLView::PickedElement pe;
-						if ( skope->ogl->buildFacePick( sb, t, pe ) )
-							faces.append( pe );
+					log << "editMode=" << skope->ogl->editModeActive() << " sepMode=" << sepMode << "\n";
+					int preview = -1;
+					if ( sepMode == 0 ) {
+						QVector<GLView::PickedElement> faces;
+						const int half = origTris / 2;
+						for ( int t = 0; t < half; t++ ) {
+							GLView::PickedElement pe;
+							if ( skope->ogl->buildFacePick( sb, t, pe ) )
+								faces.append( pe );
+						}
+						log << "selected " << faces.size() << " of " << origTris << " faces\n";
+						log.flush();
+						skope->ogl->setElementSelectionExternal( sb, faces, 3 );
+						skope->ogl->separateSelection();
+					} else {
+						// the P menu shows this count before the click; it must match what
+						// the operator then produces, or the label is lying
+						preview = skope->ogl->separateGroupsPreview( sepMode == 1 );
+						log << "menu preview: +" << preview << " new object(s)\n";
+						log.flush();
+						skope->ogl->separateByGroups( sepMode == 1 );
 					}
-					log << "selected " << faces.size() << " of " << origTris << " faces\n";
-					log.flush();
-					skope->ogl->setElementSelectionExternal( sb, faces, 3 );
-					skope->ogl->separateSelection();
 
-					int nw = -1;
+					QVector<int> outs;			// [0] is the source, then every new shape
+					outs.append( sb );
 					for ( int b = origBlocks; b < nif->getBlockCount(); b++ )
-						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSSubIndexTriShape" ) ) { nw = b; break; }
-					if ( nw < 0 ) { log << "no separated shape produced\n"; break; }
+						if ( nif->blockInherits( nif->getBlockIndex( b ), wantType ) )
+							outs.append( b );
+					if ( outs.size() < 2 ) { log << "no separated shape produced\n"; break; }
+					log << "outputs: " << outs.size() << " shape(s), source + "
+						<< ( outs.size() - 1 ) << " new\n";
 
-					const int srcTris = nif->get<int>( nif->getBlockIndex( sb ), "Num Triangles" );
-					const int newTris = nif->get<int>( nif->getBlockIndex( nw ), "Num Triangles" );
-					const int srcVerts = nif->get<int>( nif->getBlockIndex( sb ), "Num Vertices" );
-					const int newVerts = nif->get<int>( nif->getBlockIndex( nw ), "Num Vertices" );
-					const QPair<int, int> srcSkinAfter = skinData( sb );
-					const QPair<int, int> newSkin = skinData( nw );
-					log << "source now: tris " << srcTris << " verts " << srcVerts
-						<< " skin(inst " << srcSkinAfter.first << ", data " << srcSkinAfter.second << ")\n";
-					log << "new block " << nw << ": tris " << newTris << " verts " << newVerts
-						<< " skin(inst " << newSkin.first << ", data " << newSkin.second << ")\n";
+					const bool srcSkinned = ( srcSkinBefore.first >= 0 );
+					int sumTris = 0;
+					bool skinDistinct = ( skinData( sb ).first == srcSkinBefore.first );
+					bool segOk = true, weightsOk = true, geomOk = true, colorOk = true, trimmed = true;
+					QSet<int> skinInsts, skinDatas;
+					QVector<QSet<QString>> shapePos( outs.size() );	// for the loose-part check
+					for ( int i = 0; i < outs.size(); i++ ) {
+						const int b = outs[i];
+						const int tris = nif->get<int>( nif->getBlockIndex( b ), "Num Triangles" );
+						const QPair<int, int> skin = skinData( b );
+						sumTris += tris;
+						if ( i > 0 && srcSkinned ) {
+							// each split-off shape needs its OWN skin, not a shared one
+							if ( skin.first < 0 || skin.second < 0
+								|| skinInsts.contains( skin.first ) || skinDatas.contains( skin.second ) )
+								skinDistinct = false;
+						}
+						skinInsts.insert( skin.first );
+						skinDatas.insert( skin.second );
 
-					int srcSum, newSum, srcSeg, newSeg; bool srcCont, newCont;
-					segCoverage( sb, srcSum, srcCont, srcSeg );
-					segCoverage( nw, newSum, newCont, newSeg );
-					log << "source segments Num=" << srcSeg << " sumPrim=" << srcSum
-						<< " (expect " << srcTris << ") contiguous=" << srcCont << "\n";
-					log << "new segments Num=" << newSeg << " sumPrim=" << newSum
-						<< " (expect " << newTris << ") contiguous=" << newCont << "\n";
+						int sum, nseg; bool cont;
+						segCoverage( b, sum, cont, nseg );
+						if ( nseg >= 0 && ( sum != tris || !cont || nseg == 0 ) )
+							segOk = false;
+						const int zero = zeroWeights( b );
+						if ( zero > 0 )
+							weightsOk = false;
+						bool g, noOrphan, c; int vc = 0;
+						validateShape( b, g, noOrphan, c, vc );
+						if ( !g || !noOrphan )
+							geomOk = false;
+						if ( !c )
+							colorOk = false;
+						if ( vc >= origVerts )
+							trimmed = false;	// orphan verts should have been dropped
+						{
+							QModelIndex iVD = nif->getIndex( nif->getBlockIndex( b ), "Vertex Data" );
+							for ( int v = 0; v < nif->rowCount( iVD ); v++ )
+								shapePos[i].insert( posKey( nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) ) );
+						}
+						log << ( i ? "  new  " : "  src  " ) << "block " << b << ": tris " << tris
+							<< " verts " << vc << " skin(inst " << skin.first << ", data " << skin.second
+							<< ") segs " << nseg << " sumPrim " << sum << " contiguous " << cont
+							<< " zeroW " << zero << " geomOk " << g << " noOrphan " << noOrphan
+							<< " colorOk " << c << "\n";
+					}
+					const bool trisConserved = ( sumTris == origTris );
+					log << "triangles " << sumTris << " of " << origTris
+						<< ", colours " << ( srcHasColor ? "present" : "n/a" ) << "\n";
 
-					const int srcZero = zeroWeights( sb ), newZero = zeroWeights( nw );
-					log << "zero-weight verts src=" << srcZero << " new=" << newZero << " (expect 0/0)\n";
+					// mode-specific invariant. By Loose Parts means exactly this: no two
+					// output shapes touch, i.e. they share no vertex POSITION. By Segment
+					// means each output carries exactly one non-empty segment.
+					bool modeOk = true;
+					if ( sepMode == 1 ) {
+						for ( int i = 0; i < outs.size() && modeOk; i++ )
+							for ( int j = i + 1; j < outs.size() && modeOk; j++ )
+								for ( const QString & p : std::as_const( shapePos[i] ) )
+									if ( shapePos[j].contains( p ) ) {
+										log << "shapes " << outs[i] << " and " << outs[j]
+											<< " share position " << p << "\n";
+										modeOk = false;
+										break;
+									}
+						log << "disjoint pieces=" << modeOk << " previewMatched="
+							<< ( preview == outs.size() - 1 ) << "\n";
+					} else if ( sepMode == 2 ) {
+						for ( int b : std::as_const( outs ) ) {
+							QModelIndex iSeg = nif->getIndex( nif->getBlockIndex( b ), "Segment" );
+							if ( !iSeg.isValid() )
+								continue;
+							int nonEmpty = 0;
+							for ( int s = 0; s < nif->rowCount( iSeg ); s++ )
+								if ( nif->get<quint32>( nif->getIndex( iSeg, s ), "Num Primitives" ) > 0 )
+									nonEmpty++;
+							if ( nonEmpty != 1 ) {
+								log << "shape " << b << " has " << nonEmpty << " non-empty segments (expect 1)\n";
+								modeOk = false;
+							}
+						}
+						log << "onePerSegment=" << modeOk << " previewMatched="
+							<< ( preview == outs.size() - 1 ) << "\n";
+					}
+					if ( sepMode != 0 && preview != outs.size() - 1 )
+						modeOk = false;
 
-					bool srcGeom, srcNoOrphan, srcColor, newGeom, newNoOrphan, newColor;
-					int srcVC = 0, newVC = 0;
-					validateShape( sb, srcGeom, srcNoOrphan, srcColor, srcVC );
-					validateShape( nw, newGeom, newNoOrphan, newColor, newVC );
-					log << "source: verts " << srcVC << " (orig " << origVerts << ") geomOk " << srcGeom
-						<< " noOrphan " << srcNoOrphan << " colorOk " << srcColor << "\n";
-					log << "new:    verts " << newVC << " geomOk " << newGeom
-						<< " noOrphan " << newNoOrphan << " colorOk " << newColor
-						<< " (colors " << ( srcHasColor ? "present" : "n/a" ) << ")\n";
-
-					const bool skinDistinct = newSkin.first >= 0 && newSkin.first != srcSkinAfter.first
-						&& newSkin.second >= 0 && newSkin.second != srcSkinAfter.second
-						&& srcSkinAfter.first == srcSkinBefore.first;
-					const bool trisConserved = ( srcTris + newTris == origTris );
-					const bool segOk = srcSum == srcTris && newSum == newTris && srcCont && newCont
-						&& srcSeg > 0 && newSeg > 0;
-					const bool weightsOk = srcZero == 0 && newZero == 0;
-					const bool geomOk = srcGeom && newGeom && srcNoOrphan && newNoOrphan;
-					const bool colorOk = srcColor && newColor;
-					const bool trimmed = srcVC < origVerts && newVC < origVerts;	// orphans dropped
 					const bool pass = skinDistinct && trisConserved && segOk && weightsOk
-						&& geomOk && colorOk && trimmed;
+						&& geomOk && colorOk && trimmed && modeOk;
 					log << "skinDistinct=" << skinDistinct << " trisConserved=" << trisConserved
 						<< " segOk=" << segOk << " weightsOk=" << weightsOk << " geomOk=" << geomOk
-						<< " colorOk=" << colorOk << " trimmed=" << trimmed << "\n";
+						<< " colorOk=" << colorOk << " trimmed=" << trimmed << " modeOk=" << modeOk << "\n";
 					log << ( pass ? "PASS\n" : "CHECK: one or more invariants failed\n" );
 
 					if ( qEnvironmentVariableIsSet( "WW_SEP_SAVE" ) ) {
@@ -3367,8 +3445,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						const int uZero = zeroWeights( sb );	// catches the grow-back skin-array landmine
 						const int uBlocks = nif->getBlockCount();
 						const bool undoOk = uTris == origTris && uVerts == origVerts
-							&& uSum == origTris && uCont && uBlocks == origBlocks
-							&& uGeom && uColor && uZero == 0;
+							&& ( uSeg < 0 || ( uSum == origTris && uCont ) ) && uBlocks == origBlocks
+							&& uGeom && uColor && uZero <= 0;
 						log << "after undo: tris " << uTris << " (expect " << origTris << ") verts " << uVerts
 							<< " (expect " << origVerts << ") segSum " << uSum << " contiguous " << uCont
 							<< " blocks " << uBlocks << " geomOk " << uGeom << " colorOk " << uColor

@@ -8055,15 +8055,36 @@ void GLView::showSeparateMenu()
 		return;
 	}
 	AutoCloseMenu m;
+	m.setToolTipsVisible( true );
 	m.addSection( tr( "Separate" ) );
 	QAction * aSel = m.addAction( tr( "Selection" ) );
-	QAction * aMat = m.addAction( tr( "By Material" ) );
-	QAction * aLoose = m.addAction( tr( "By Loose Parts" ) );
-	aMat->setEnabled( false );		// not implemented yet (Blender parity later)
-	aLoose->setEnabled( false );
+	// The count is in the item text because these two act on the WHOLE mesh, not on
+	// the selection: "By Loose Parts" on a seam-heavy mesh can make a lot of objects
+	// and the honest place to say so is before the click, not in the status bar after
+	// it. Zero means the operator would do nothing, so the row is disabled.
+	const int nLoose = separateGroupsPreview( true );
+	const int nSeg = separateGroupsPreview( false );
+	QAction * aLoose = m.addAction( nLoose > 0
+		? tr( "By Loose Parts (+%1)" ).arg( nLoose ) : tr( "By Loose Parts" ) );
+	QAction * aSeg = m.addAction( nSeg > 0
+		? tr( "By Segment (+%1)" ).arg( nSeg ) : tr( "By Segment" ) );
+	aLoose->setEnabled( nLoose > 0 );
+	aSeg->setEnabled( nSeg > 0 );
+	aLoose->setToolTip( nLoose > 0
+		? tr( "Split every edited mesh into its connected pieces, making %1 new object(s)" ).arg( nLoose )
+		: tr( "Every edited mesh is already a single connected piece" ) );
+	aSeg->setToolTip( nSeg > 0
+		? tr( "One new object per Fallout 4 sub-index segment, making %1 new object(s)" ).arg( nSeg )
+		: tr( "Blender separates by material slot; a NIF shape has exactly one shader "
+			"property and its segments carry no material, so segments are the only "
+			"per-face grouping a NIF has — and this mesh has none" ) );
 	QAction * r = m.exec( QCursor::pos() );
 	if ( r == aSel )
 		separateSelection();
+	else if ( r == aLoose )
+		separateByGroups( true );
+	else if ( r == aSeg )
+		separateByGroups( false );
 }
 
 //! Recursively snapshot every leaf value of an item subtree (order matches
@@ -8334,14 +8355,296 @@ static void separateCloneSkin( NifModel * nif, int shapeBlock )
 //! vertices no triangle uses and reindex, so each Separate half is vertex-optimal.
 static void tlCompactVertices( NifModel * nif, const QModelIndex & iShape );
 
+//! Union-find root with path halving.
+static int tlUfFind( QVector<int> & uf, int a )
+{
+	while ( uf[a] != a ) {
+		uf[a] = uf[uf[a]];
+		a = uf[a];
+	}
+	return a;
+}
+
+/*! Group a shape's triangles into connected components — Blender's P > By Loose
+ *  Parts. Returns the component count, or 0 if there is nothing to split.
+ *
+ *  Two triangles are connected when they share a vertex POSITION, not merely a
+ *  vertex index. A NIF splits vertices at every UV and normal seam, so index
+ *  connectivity would shatter one body mesh into dozens of "loose parts" that are
+ *  visibly one piece — the operator would be useless on exactly the meshes people
+ *  run it on. Positions are compared bit-exactly, which is what an exporter writes
+ *  for a seam pair (it duplicates the vertex, it does not recompute it); -0.0 is
+ *  folded onto 0.0 so the two spellings of zero land in the same bucket.
+ *
+ *  Components are numbered in triangle order, so group 0 always contains triangle
+ *  0 and is the one the source shape keeps.
+ */
+static int tlLoosePartGroups( NifModel * nif, const QModelIndex & iShape, QVector<int> & group )
+{
+	QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+	if ( !iTris.isValid() || !nif->getIndex( iShape, "Num Vertices" ).isValid() )
+		return 0;
+	const int numVerts = nif->get<int>( iShape, "Num Vertices" );
+	const int numTris = std::min( nif->get<int>( iShape, "Num Triangles" ), nif->rowCount( iTris ) );
+	if ( numTris <= 0 || numVerts <= 0 )
+		return 0;
+
+	QVector<int> uf( numVerts );
+	for ( int v = 0; v < numVerts; v++ )
+		uf[v] = v;
+	auto unite = [&uf]( int a, int b ) {
+		a = tlUfFind( uf, a );
+		b = tlUfFind( uf, b );
+		if ( a != b )
+			uf[a] = b;
+	};
+
+	// weld coincident positions. Buckets are keyed by a mix of the raw float bits
+	// and confirmed with an exact compare, so a hash collision cannot weld two
+	// vertices that are merely near each other.
+	QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+	if ( iVD.isValid() && nif->rowCount( iVD ) >= numVerts ) {
+		auto bits = []( float f ) {
+			quint32 u;
+			memcpy( &u, &f, sizeof( u ) );
+			return ( u == 0x80000000u ) ? 0u : u;	// -0.0 == 0.0
+		};
+		QVector<Vector3> pos( numVerts );
+		QHash<quint64, QVector<int>> buckets;
+		buckets.reserve( numVerts );
+		for ( int v = 0; v < numVerts; v++ ) {
+			pos[v] = nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" );
+			const quint64 key = ( quint64( bits( pos[v][0] ) ) * 0x9E3779B97F4A7C15ull )
+				^ ( quint64( bits( pos[v][1] ) ) << 21 ) ^ ( quint64( bits( pos[v][2] ) ) << 42 );
+			QVector<int> & bucket = buckets[key];
+			for ( int other : std::as_const( bucket ) ) {
+				if ( pos[other] == pos[v] ) {
+					unite( other, v );
+					break;
+				}
+			}
+			bucket.append( v );
+		}
+	}
+
+	QVector<Triangle> tris( numTris );
+	for ( int t = 0; t < numTris; t++ ) {
+		tris[t] = nif->get<Triangle>( nif->getIndex( iTris, t ) );
+		for ( int k = 1; k < 3; k++ )
+			if ( tris[t][0] < numVerts && tris[t][k] < numVerts )
+				unite( tris[t][0], tris[t][k] );
+	}
+
+	group.fill( 0, numTris );
+	QHash<int, int> dense;
+	for ( int t = 0; t < numTris; t++ ) {
+		const int root = ( tris[t][0] < numVerts ) ? tlUfFind( uf, tris[t][0] ) : -1;
+		auto it = dense.constFind( root );
+		if ( it == dense.constEnd() )
+			it = dense.insert( root, dense.size() );
+		group[t] = it.value();
+	}
+	return dense.size();
+}
+
+/*! Group a shape's triangles by FO4 / SSE sub-index SEGMENT. Returns the count of
+ *  non-empty segments, or 0 if there is nothing to split.
+ *
+ *  This is the P menu's third entry, where Blender has "By Material". A NIF shape
+ *  carries exactly ONE shader property, and the FO4 segment structures carry no
+ *  material field either (BSGeometryPerSegmentSharedData is User Index / Bone ID /
+ *  cut offsets), so per-face material does not exist anywhere in the format and a
+ *  By Material item could never do anything on any file. The segment array IS the
+ *  per-face grouping a NIF has — body parts for a skinned FO4 mesh — so that is
+ *  what the entry separates by.
+ *
+ *  Triangles no segment claims join group 0 and stay with the source.
+ */
+static int tlSegmentGroups( NifModel * nif, const QModelIndex & iShape, QVector<int> & group )
+{
+	QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+	QModelIndex iSeg = nif->getIndex( iShape, "Segment" );
+	if ( !iTris.isValid() || !iSeg.isValid() )
+		return 0;
+	const int numTris = std::min( nif->get<int>( iShape, "Num Triangles" ), nif->rowCount( iTris ) );
+	const int numSeg = nif->rowCount( iSeg );
+	if ( numTris <= 0 || numSeg < 2 )
+		return 0;
+
+	QVector<int> slot( numTris, -1 );
+	for ( int i = 0; i < numSeg; i++ ) {
+		QModelIndex s = nif->getIndex( iSeg, i );
+		const int start = int( nif->get<quint32>( s, "Start Index" ) ) / 3;
+		const int n = int( nif->get<quint32>( s, "Num Primitives" ) );
+		for ( int t = std::max( 0, start ); t < start + n && t < numTris; t++ )
+			if ( slot[t] < 0 )
+				slot[t] = i;
+	}
+
+	group.fill( 0, numTris );
+	QHash<int, int> dense;
+	for ( int t = 0; t < numTris; t++ )
+		if ( slot[t] >= 0 && !dense.contains( slot[t] ) )
+			dense.insert( slot[t], dense.size() );
+	for ( int t = 0; t < numTris; t++ )
+		group[t] = ( slot[t] >= 0 ) ? dense.value( slot[t] ) : 0;
+	return dense.size();
+}
+
+GLView::SeparateResult GLView::separateShapes( const QVector<int> & shapes,
+	const std::function<int( int, QVector<int> & )> & grouper, const QString & opName )
+{
+	SeparateResult res;
+	if ( !model )
+		return res;
+
+	// in-place undo per shape: a pure state-capture command (empty apply)
+	// snapshots the source arrays, then the append command runs the actual
+	// separate — undo removes the clones (+ their null child links) and restores
+	// the source. Everything precomputed so redo closures are deterministic.
+	const bool inPlaceU = ( model->undoStack != nullptr );
+	auto lastNew = std::make_shared<int>( -1 );
+	if ( inPlaceU )
+		model->undoStack->beginMacro( opName );
+	for ( int sb : shapes ) {
+		QModelIndex iShape = model->getBlockIndex( sb );
+		if ( !model->blockInherits( iShape, "BSTriShape" ) )
+			continue;
+		QVector<int> group;
+		const int nGroups = grouper( sb, group );
+		if ( nGroups < 2 || group.isEmpty() )
+			continue;	// one piece, or nothing selected (Blender no-ops)
+
+		// counted here rather than in the closure: the closure re-runs on every
+		// redo, and a running total inside it would double on the second one
+		QVector<int> perGroup( nGroups, 0 );
+		for ( int g : std::as_const( group ) )
+			if ( g >= 0 && g < nGroups )
+				perGroup[g]++;
+		for ( int g = 1; g < nGroups; g++ ) {
+			res.moved += perGroup[g];
+			if ( perGroup[g] > 0 )
+				res.newObjects++;
+		}
+
+		auto parents = std::make_shared<QVector<int>>();
+		auto applySplit = [this, sb, group, nGroups, perGroup, parents, lastNew]() {
+			const int nTris = group.size();
+			// every clone is taken from the UNTRIMMED source, so the source is
+			// trimmed last, after the final clone has copied it
+			for ( int g = 1; g < nGroups; g++ ) {
+				if ( perGroup[g] == 0 )
+					continue;
+				const int nNew = tlCloneShapeWithProps( model, sb );
+				if ( nNew < 0 )
+					continue;
+				const int parentNum = model->getParent( sb );
+				if ( parentNum >= 0 ) {
+					blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
+					parents->append( parentNum );
+				}
+				const QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
+				model->set<QString>( model->getBlockIndex( nNew ), "Name", tlUniqueNodeName( model, nm ) );
+				QVector<bool> mine( nTris );
+				for ( int t = 0; t < nTris; t++ )
+					mine[t] = ( group[t] == g );
+				tlKeepTriangles( model, model->getBlockIndex( nNew ),
+					[&mine]( int t ) { return t < mine.size() && mine[t]; } );
+				// Skinned split (FO4): the clone must not share the original's skin, and
+				// both halves' sub-index segment ranges must be rebuilt for their new
+				// triangle subset (tlKeepTriangles leaves the old ranges stale).
+				separateCloneSkin( model, nNew );
+				separateBuildSegments( model, model->getBlockIndex( nNew ), mine );
+				// vertex-optimal finish: drop the verts each half no longer uses. Done
+				// after the segment rebuild — compaction only reindexes triangle corners,
+				// never triangle order/count, so the triangle-space segment ranges hold.
+				tlCompactVertices( model, model->getBlockIndex( nNew ) );
+				*lastNew = nNew;
+			}
+			QVector<bool> keepSrc( nTris );
+			for ( int t = 0; t < nTris; t++ )
+				keepSrc[t] = ( group[t] == 0 );
+			tlKeepTriangles( model, model->getBlockIndex( sb ),
+				[&keepSrc]( int t ) { return t >= keepSrc.size() || keepSrc[t]; } );
+			separateBuildSegments( model, model->getBlockIndex( sb ), keepSrc );
+			tlCompactVertices( model, model->getBlockIndex( sb ) );
+		};
+		if ( inPlaceU ) {
+			model->undoStack->push( new TlShapeStateCommand( model, iShape,
+				opName, std::function<void()>() ) );
+			model->undoStack->push( new TlBlockAppendCommand( model, opName, applySplit, parents ) );
+		} else {
+			applySplit();
+		}
+	}
+	if ( inPlaceU )
+		model->undoStack->endMacro();
+	res.lastNew = *lastNew;
+	return res;
+}
+
+QVector<int> GLView::separateTargetShapes() const
+{
+	QVector<int> v( editShapeBlocks.begin(), editShapeBlocks.end() );
+	std::sort( v.begin(), v.end() );
+	return v;
+}
+
+void GLView::finishSeparate( const SeparateResult & r )
+{
+	setEditMode( false );
+	pickedElems.clear();
+	if ( r.lastNew >= 0 ) {
+		syncObjectSelection( r.lastNew );
+		emit clicked( model->getBlockIndex( r.lastNew ) );
+	}
+	modelChanged();
+}
+
+int GLView::separateGroupsPreview( bool loose )
+{
+	if ( !model )
+		return 0;
+	int newObjects = 0;
+	for ( int sb : separateTargetShapes() ) {
+		QModelIndex iShape = model->getBlockIndex( sb );
+		if ( !model->blockInherits( iShape, "BSTriShape" ) )
+			continue;
+		QVector<int> group;
+		const int n = loose ? tlLoosePartGroups( model, iShape, group )
+			: tlSegmentGroups( model, iShape, group );
+		if ( n > 1 )
+			newObjects += n - 1;
+	}
+	return newObjects;
+}
+
+void GLView::separateByGroups( bool loose )
+{
+	if ( !model || !editMode )
+		return;
+	auto grouper = [this, loose]( int sb, QVector<int> & group ) {
+		QModelIndex iShape = model->getBlockIndex( sb );
+		return loose ? tlLoosePartGroups( model, iShape, group )
+			: tlSegmentGroups( model, iShape, group );
+	};
+	const SeparateResult r = separateShapes( separateTargetShapes(), grouper,
+		loose ? tr( "Separate by loose parts" ) : tr( "Separate by segment" ) );
+	if ( r.newObjects == 0 ) {
+		emit gizmoStatus( loose ? tr( "Every edited mesh is a single connected piece" )
+			: tr( "No sub-index segments to separate by" ) );
+		return;
+	}
+	finishSeparate( r );
+	emit gizmoStatus( loose
+		? tr( "Separated %n loose part(s) into new objects", nullptr, r.newObjects + 1 )
+		: tr( "Separated %n segment(s) into new objects", nullptr, r.newObjects + 1 ) );
+}
+
 void GLView::separateSelection()
 {
 	if ( !model || !editMode || pickedElems.isEmpty() )
 		return;
-
-	auto edgeKey = []( int a, int b ) {
-		return ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) );
-	};
 
 	QHash<int, QSet<int>> selVerts = pickedVertexRefs();
 	QHash<int, QSet<int>> selFaces;
@@ -8354,100 +8657,42 @@ void GLView::separateSelection()
 		shapeSet.insert( k );
 	for ( int k : selFaces.keys() )
 		shapeSet.insert( k );
-	Q_UNUSED( edgeKey );
+	QVector<int> shapes( shapeSet.begin(), shapeSet.end() );
+	std::sort( shapes.begin(), shapes.end() );
 
-	// in-place undo per shape: a pure state-capture command (empty apply)
-	// snapshots the source arrays, then the append command runs the actual
-	// separate — undo removes the clone (+ its null child link) and restores
-	// the source. Everything precomputed so redo closures are deterministic.
-	const bool inPlaceU = ( model->undoStack != nullptr );
-	auto movedCount = std::make_shared<int>( 0 );
-	auto lastNew = std::make_shared<int>( -1 );
-	if ( inPlaceU )
-		model->undoStack->beginMacro( tr( "Separate selection" ) );
-	for ( int sb : shapeSet ) {
+	// group 1 = the selected triangles (they move to the new shape), group 0 = the
+	// rest (they stay). A face pick selects its triangle outright; a vertex pick
+	// selects a triangle only when it holds all three corners, as Blender does.
+	auto grouper = [this, &selVerts, &selFaces]( int sb, QVector<int> & group ) {
 		QModelIndex iShape = model->getBlockIndex( sb );
-		if ( !model->blockInherits( iShape, "BSTriShape" ) )
-			continue;
 		QModelIndex iTris = model->getIndex( iShape, "Triangles" );
 		if ( !iTris.isValid() )
-			continue;
-		int numTris = model->get<int>( iShape, "Num Triangles" );
+			return 0;
+		const int numTris = std::min( model->get<int>( iShape, "Num Triangles" ),
+			model->rowCount( iTris ) );
 		const QSet<int> & sv = selVerts.value( sb );
 		const QSet<int> & sf = selFaces.value( sb );
-
-		QVector<bool> sep( numTris, false );
+		group.fill( 0, numTris );
 		int sepCount = 0;
-		for ( int t = 0; t < numTris && t < model->rowCount( iTris ); t++ ) {
+		for ( int t = 0; t < numTris; t++ ) {
 			Triangle tri = model->get<Triangle>( model->getIndex( iTris, t ) );
-			bool s = sf.contains( t )
-				|| ( !sv.isEmpty() && sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) );
-			sep[t] = s;
+			const bool s = sf.contains( t ) || ( !sv.isEmpty()
+				&& sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) );
+			group[t] = s ? 1 : 0;
 			if ( s )
 				sepCount++;
 		}
-		if ( sepCount == 0 || sepCount == numTris )
-			continue;	// nothing to split, or everything (Blender no-ops)
+		// nothing to split, or everything (Blender no-ops on both)
+		return ( sepCount == 0 || sepCount == numTris ) ? 0 : 2;
+	};
 
-		auto parents = std::make_shared<QVector<int>>();
-		auto applySep = [this, sb, sep, sepCount, parents, movedCount, lastNew]() {
-			int nNew = tlCloneShapeWithProps( model, sb );
-			if ( nNew < 0 )
-				return;
-			int parentNum = model->getParent( sb );
-			if ( parentNum >= 0 ) {
-				blockLink( model, model->getBlockIndex( parentNum ), model->getBlockIndex( nNew ) );
-				parents->append( parentNum );
-			}
-			QString nm = model->get<QString>( model->getBlockIndex( sb ), "Name" );
-			model->set<QString>( model->getBlockIndex( nNew ), "Name", tlUniqueNodeName( model, nm ) );
-			// new keeps the separated triangles; original keeps the rest
-			tlKeepTriangles( model, model->getBlockIndex( nNew ), [&]( int t ) { return sep[t]; } );
-			tlKeepTriangles( model, model->getBlockIndex( sb ), [&]( int t ) { return !sep[t]; } );
-			// Skinned split (FO4): the clone must not share the original's skin, and
-			// both halves' sub-index segment ranges must be rebuilt for their new
-			// triangle subset (tlKeepTriangles leaves the old ranges stale).
-			separateCloneSkin( model, nNew );
-			QVector<bool> keepSrc( sep.size() );
-			for ( int t = 0; t < sep.size(); t++ )
-				keepSrc[t] = !sep[t];
-			separateBuildSegments( model, model->getBlockIndex( nNew ), sep );
-			separateBuildSegments( model, model->getBlockIndex( sb ), keepSrc );
-			// vertex-optimal finish: drop the verts each half no longer uses. Done
-			// after the segment rebuild — compaction only reindexes triangle corners,
-			// never triangle order/count, so the triangle-space segment ranges hold.
-			tlCompactVertices( model, model->getBlockIndex( nNew ) );
-			tlCompactVertices( model, model->getBlockIndex( sb ) );
-			*movedCount += sepCount;
-			*lastNew = nNew;
-		};
-		if ( inPlaceU ) {
-			model->undoStack->push( new TlShapeStateCommand( model, iShape,
-				tr( "Separate selection" ), std::function<void()>() ) );
-			model->undoStack->push( new TlBlockAppendCommand( model,
-				tr( "Separate selection" ), applySep, parents ) );
-		} else {
-			applySep();
-		}
-	}
-	if ( inPlaceU )
-		model->undoStack->endMacro();
-	int totalMoved = *movedCount;
-	int selectBlock = *lastNew;
-
-	if ( totalMoved == 0 ) {
+	const SeparateResult r = separateShapes( shapes, grouper, tr( "Separate selection" ) );
+	if ( r.moved == 0 ) {
 		emit gizmoStatus( tr( "Nothing to separate (select part of the mesh)" ) );
 		return;
 	}
-
-	setEditMode( false );
-	pickedElems.clear();
-	if ( selectBlock >= 0 ) {
-		syncObjectSelection( selectBlock );
-		emit clicked( model->getBlockIndex( selectBlock ) );
-	}
-	emit gizmoStatus( tr( "Separated %1 triangle(s) into a new object" ).arg( totalMoved ) );
-	modelChanged();
+	finishSeparate( r );
+	emit gizmoStatus( tr( "Separated %1 triangle(s) into a new object" ).arg( r.moved ) );
 }
 
 void GLView::duplicateSelection()

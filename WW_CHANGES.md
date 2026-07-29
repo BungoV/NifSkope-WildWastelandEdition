@@ -1,5 +1,70 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30c — the two greyed-out Separate entries, and what one of them can never be
+
+`P > By Material` and `P > By Loose Parts` had been `setEnabled( false )` since the
+Separate menu was written, with the comment *"not implemented yet (Blender parity
+later)"*. Both now do something — but only one of them is the thing Blender does.
+
+### By Loose Parts connects by POSITION, not by index
+
+Two triangles are one piece when they share a vertex. Done the obvious way — union
+by vertex *index* — a NIF shatters: the format splits vertices at every UV and
+normal seam, so an outfit that is visibly one garment reports thirty "loose parts"
+and the operator is useless on exactly the meshes people run it on. Connectivity is
+taken over vertex **positions**, compared bit-exactly, which is what an exporter
+writes for a seam pair — it duplicates the vertex, it does not recompute it. (`-0.0`
+is folded onto `0.0` so the two spellings of zero land in one bucket, and bucket
+membership is confirmed with an exact compare, so a hash collision can never weld
+two vertices that are merely near each other.)
+
+Verified as the definition rather than as a triangle count: after the split, **no
+two output shapes share a vertex position**. That check is what "loose part" means.
+
+### By Material could never have worked, so it is By Segment
+
+A NIF shape carries exactly one shader property. The FO4 segment structures carry
+no material either — `BSGeometryPerSegmentSharedData` is User Index, Bone ID and
+cut offsets. Per-face material does not exist anywhere in the format, on any file,
+so a By Material item was never a missing implementation; it was a menu row that
+could not have been written. The segment array **is** the per-face grouping a NIF
+has — body parts for a skinned FO4 mesh — so the entry separates by that instead,
+and says so in its tooltip when a mesh has none.
+
+### The count is in the menu, before the click
+
+Both new entries ignore the selection and split the whole mesh, Blender-style, and
+By Loose Parts on a seam-heavy mesh can make a lot of objects. The item reads
+**By Loose Parts (+10)** — the honest place to say so is before the click, not in
+the status bar after it. Zero disables the row, with a tooltip explaining why.
+
+### One N-way core under all three
+
+`separateSelection` was a two-way split with the undo commands, skin cloning,
+segment rebuild and vertex compaction inline. That is now `separateShapes`, taking
+a grouper that returns a per-triangle group id: group 0 stays in the source, every
+other group becomes a sibling. Selection is a grouper returning 2 groups, so all
+three variants share one implementation and cannot drift apart.
+
+**Verified headlessly** (`WW_SEP_TEST`, new `WW_SEP_MODE` 0/1/2 and `WW_SEP_ANY`;
+the harness now validates a LIST of outputs rather than a source/new pair, and
+skips the skin and segment checks on shapes that have neither instead of failing
+them):
+
+| file | mode | result |
+|---|---|---|
+| 1stPersonFemaleVault111Suit (skinned, 5 seg) | Selection | 621 + 621, PASS + UNDO PASS |
+| ” | Loose Parts | +1, disjoint, PASS |
+| ” | Segment | +1, one segment each, PASS |
+| InstituteWorksuit FOutfit (3147 v / 5158 t) | Loose Parts | **+10**, all disjoint, PASS |
+| ” | Segment | **+4** (5 of 7 segments non-empty), PASS |
+| 10mmPistol (unskinned, no segments) | Loose Parts | **+5**, PASS |
+| ” | Selection | 422 + 423, PASS |
+
+Every run: triangles conserved, no orphan verts, distinct skins per output, segment
+ranges contiguous and covering, the menu's preview matching what the operator then
+produced, and undo restoring the source and dropping all 40 appended blocks.
+
 ## 2026-07-30b — one scrubber, and P4 was not blocked after all
 
 **7 rigs, 671 checks, 0 failures, 1 correct skip.**

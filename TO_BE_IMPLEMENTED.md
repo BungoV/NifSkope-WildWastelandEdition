@@ -79,7 +79,7 @@ bottom.
 | 12 | Rendering: spec/gloss **SHIPPED**, PBR **parked**, SSS future | large | see §0 and §12 |
 | 13 | CLI follow-ups (see §13) | small–medium | base CLI shipped 07-21e; harness port is 22 files, not 8 |
 | 14 | Repo hygiene: orphaned source, 54 uncommitted files | small | new 07-27 |
-| 15 | Viewport: Separate By Material / By Loose Parts | small | new 07-27 — disabled placeholders |
+| 15 | ~~Viewport: Separate By Material / By Loose Parts~~ | small | **SHIPPED 07-30c** — By Material was impossible; shipped as By Segment |
 
 ---
 
@@ -1254,13 +1254,23 @@ file in the live session and your harness never fires. Always pass
   authorised in-session; the working agreement in `CURRENT_STATUS.md` still
   applies.
 
-## 15. Viewport — Separate By Material / By Loose Parts — NEW 07-27
+## 15. Viewport — Separate By Material / By Loose Parts — ~~NEW 07-27~~ SHIPPED 07-30c
 
-`glview.cpp:7241`: the Separate menu offers **Selection** (works), **By
-Material** and **By Loose Parts**, the latter two `setEnabled( false )` with the
-comment *"not implemented yet (Blender parity later)"*. Never filed here. Small,
-self-contained, and the existing `separateSelection()` plus the FO4
-skin/segment-aware path from 07-19e is most of the machinery.
+Both greyed-out entries are live. `separateSelection` became `separateShapes`, an
+N-way core taking a grouper that returns a per-triangle group id; group 0 stays in
+the source and each other group becomes a sibling, so Selection, Loose Parts and
+Segment are one implementation.
+
+**By Material was not a missing implementation — it was impossible.** A NIF shape
+carries exactly one shader property, and the FO4 segment structures carry no
+material field either (`BSGeometryPerSegmentSharedData` is User Index / Bone ID /
+cut offsets), so there is no per-face material anywhere in the format, on any file.
+The entry ships as **By Segment**, the only per-face grouping a NIF has. Do not
+re-file By Material.
+
+**By Loose Parts connects by vertex POSITION**, not index — a NIF splits vertices
+at every UV/normal seam, so index connectivity fragments a garment into dozens of
+pieces. Positions compare bit-exactly (`-0.0` folded onto `0.0`).
 
 Not to be confused with `glview.cpp:15032` **Clear Parent Inverse**, which is
 disabled *permanently and correctly* — NIF scene objects store no Blender-style

@@ -812,11 +812,31 @@ private:
 	void mergeVertices( int mode, float threshold = 0.001f );
 
 	// ---- Separate (P) / Join (Ctrl+J) / Duplicate (Shift+D), Blender-style ----
-	//! Edit mode: P menu (Selection only for now)
+	//! Edit mode: P menu (Selection / By Loose Parts / By Segment)
 	void showSeparateMenu();
 	//! Move the selected geometry into a new BSTriShape sibling, preserving
 	//! the vertex data (incl. normals) verbatim so a later Join is seamless
 	void separateSelection();
+	//! Split every edited mesh into its connected pieces (loose = true) or into
+	//! one shape per FO4 / SSE sub-index segment (loose = false). Both ignore the
+	//! element selection and act on the whole mesh, as Blender's variants do.
+	void separateByGroups( bool loose );
+	//! How many NEW shapes separateByGroups( loose ) would produce right now — the
+	//! P menu shows it in the item text, so the count is visible before the click
+	//! rather than after the undo.
+	int separateGroupsPreview( bool loose );
+	//! Outcome of a Separate: triangles moved out of their source shape, shapes
+	//! created, and the last of them (selected afterwards).
+	struct SeparateResult { int moved = 0; int newObjects = 0; int lastNew = -1; };
+	//! Shared core for every Separate variant. grouper( shapeBlock, group ) fills a
+	//! per-triangle group id and returns the group count; group 0 stays in the
+	//! source shape and each other group becomes a new sibling. One undo macro.
+	SeparateResult separateShapes( const QVector<int> & shapes,
+		const std::function<int( int, QVector<int> & )> & grouper, const QString & opName );
+	//! Meshes the whole-mesh Separate variants act on (everything in edit mode).
+	QVector<int> separateTargetShapes() const;
+	//! Leave edit mode and select the newly made shape — shared post-amble.
+	void finishSeparate( const SeparateResult & r );
 	//! Object mode: merge the selected compatible BSTriShapes into the active
 	//! node (verts transformed into its space, triangles reindexed)
 	void joinSelectedObjects();
