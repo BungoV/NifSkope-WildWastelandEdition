@@ -90,7 +90,11 @@ public:
 	int riggingDonorPreviewTriangleCount() const { return riggingDonorPreviewSoup.size() / 3; }
 	//! Read-only geometry from other open NIF documents. It is deliberately a
 	//! separate neutral overlay so Rigging's selected cyan donor remains clear.
-	void setSessionDocumentPreview( const QVector<Vector3> & triangleSoup );
+	//! Workspace preview: \a triangleSoup draws solid, \a ghostSoup draws
+	//! translucent in a second pass. Two soups rather than mixed alpha in one,
+	//! because a translucent triangle must be drawn after what it shows through.
+	void setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
+		const QVector<Vector3> & ghostSoup = QVector<Vector3>() );
 	void clearSessionDocumentPreview();
 	//! Per-corner colour overlay used by the Rigging selected-bone heatmap.
 	void setRiggingWeightPreview( const QVector<Vector3> & triangleSoup,
@@ -496,6 +500,9 @@ private:
 	//! Per-vertex flat-shaded colors for the opaque session preview; computed
 	//! once per soup rebuild from face normals against a fixed light direction.
 	QVector<FloatVector4> sessionDocumentPreviewColors;
+	//! Documents flagged translucent, drawn in a second blended pass.
+	QVector<Vector3> sessionDocumentGhostSoup;
+	QVector<FloatVector4> sessionDocumentGhostColors;
 	QVector<Vector3> riggingDonorPreviewSoup;
 	bool riggingDonorPreviewFilled = true;
 	bool riggingDonorPreviewWireframe = true;

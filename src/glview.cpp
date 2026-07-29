@@ -667,38 +667,50 @@ void GLView::clearRiggingDonorPreview()
 	update();
 }
 
-void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup )
+//! Per-face lambert shading from a fixed world-space light, baked once per
+//! rebuild. A single flat colour would collapse the preview into an unreadable
+//! silhouette; the draw itself stays a plain coloured triangle soup.
+static void shadeSessionSoup( const QVector<Vector3> & soup, float alpha,
+	QVector<FloatVector4> & out )
 {
-	sessionDocumentPreviewSoup = triangleSoup;
-	// The preview is drawn opaque, so a single flat color would collapse into
-	// an unreadable silhouette. Bake simple per-face lambert shading from a
-	// fixed world-space light once per rebuild; the draw itself stays a plain
-	// colored triangle soup.
-	sessionDocumentPreviewColors.clear();
-	sessionDocumentPreviewColors.reserve( sessionDocumentPreviewSoup.size() );
+	out.clear();
+	out.reserve( soup.size() );
 	static const Vector3 lightDir = Vector3( 0.35f, -0.45f, 0.82f ).normalize();
 	const FloatVector4 base( 0.46f, 0.54f, 0.62f, 1.0f );
-	for ( qsizetype i = 0; i + 2 < sessionDocumentPreviewSoup.size(); i += 3 ) {
-		Vector3 normal = Vector3::crossproduct(
-			sessionDocumentPreviewSoup.at( i + 1 ) - sessionDocumentPreviewSoup.at( i ),
-			sessionDocumentPreviewSoup.at( i + 2 ) - sessionDocumentPreviewSoup.at( i ) );
+	for ( qsizetype i = 0; i + 2 < soup.size(); i += 3 ) {
+		Vector3 normal = Vector3::crossproduct( soup.at( i + 1 ) - soup.at( i ),
+			soup.at( i + 2 ) - soup.at( i ) );
 		if ( normal.squaredLength() > 0.0f )
 			normal.normalize();
 		const float shade = 0.45f
 			+ 0.55f * std::fabs( Vector3::dotproduct( normal, lightDir ) );
 		FloatVector4 color = base * shade;
-		color[3] = 1.0f;
-		sessionDocumentPreviewColors << color << color << color;
+		color[3] = alpha;
+		out << color << color << color;
 	}
+}
+
+void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
+	const QVector<Vector3> & ghostSoup )
+{
+	sessionDocumentPreviewSoup = triangleSoup;
+	sessionDocumentGhostSoup = ghostSoup;
+	shadeSessionSoup( sessionDocumentPreviewSoup, 1.0f, sessionDocumentPreviewColors );
+	// 0.32 reads as "there, but not the thing you are working on" — solid enough
+	// to place a limb against, faint enough that the primary stays legible
+	// through it.
+	shadeSessionSoup( sessionDocumentGhostSoup, 0.32f, sessionDocumentGhostColors );
 	update();
 }
 
 void GLView::clearSessionDocumentPreview()
 {
-	if ( sessionDocumentPreviewSoup.isEmpty() )
+	if ( sessionDocumentPreviewSoup.isEmpty() && sessionDocumentGhostSoup.isEmpty() )
 		return;
 	sessionDocumentPreviewSoup.clear();
 	sessionDocumentPreviewColors.clear();
+	sessionDocumentGhostSoup.clear();
+	sessionDocumentGhostColors.clear();
 	update();
 }
 
@@ -2497,6 +2509,30 @@ void GLView::paintGL()
 			size_t( sessionDocumentPreviewSoup.size() ),
 			shaded ? sessionDocumentPreviewColors.constData() : nullptr, true );
 		glDisable( GL_POLYGON_OFFSET_FILL );
+		glDepthFunc( GL_LESS );
+	}
+
+	/* Ghosted documents, in a second pass after the opaque one. Separate rather
+	 * than one buffer with mixed alpha, because a translucent triangle has to be
+	 * drawn after everything it shows through, and there is no ordering within a
+	 * single soup. Depth WRITES are off so ghosts do not hide each other or the
+	 * primary; depth testing stays on so they are still occluded by solid things
+	 * in front of them.
+	 */
+	if ( !sessionDocumentGhostSoup.isEmpty() && !scene->selecting ) {
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+		glDepthMask( GL_FALSE );
+		glEnable( GL_BLEND );
+		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+		scene->loadModelViewMatrix( viewTrans );
+		const bool shaded =
+			sessionDocumentGhostColors.size() == sessionDocumentGhostSoup.size();
+		scene->drawTriangles( sessionDocumentGhostSoup.constData(),
+			size_t( sessionDocumentGhostSoup.size() ),
+			shaded ? sessionDocumentGhostColors.constData() : nullptr, true );
+		glDisable( GL_BLEND );
+		glDepthMask( GL_TRUE );
 		glDepthFunc( GL_LESS );
 	}
 

@@ -440,12 +440,64 @@ public:
 		nif = new NifModel;
 		// Batch background parses must never raise modal message boxes.
 		nif->setMessageMode( BaseModel::MSG_TEST );
+		/* A background document used to be read-only by assumption — no editing
+		 * UI, therefore never dirty. The workspace breaks that: posing, syncing
+		 * and freezing edit every loaded document, and NifModel::undoStack was
+		 * created in exactly one place, NifSkope's constructor, so these had no
+		 * undo at all. One each, owned here since this is not a QObject.
+		 */
+		nif->undoStack = new QUndoStack;
 	}
 
 	~BackgroundNifDocument()
 	{
 		sessionBackgroundDocuments.removeAll( this );
+		delete nif->undoStack;
 		delete nif;
+	}
+
+	//! Remember the bytes as loaded, so there is always a way back that does not
+	//! depend on the source still being reachable, or on every edit having had a
+	//! command behind it.
+	void captureLoadedState()
+	{
+		pristine.clear();
+		QBuffer buf( &pristine );
+		if ( buf.open( QIODevice::WriteOnly ) )
+			nif->save( buf );
+	}
+
+	/*! Put the document back exactly as it was loaded.
+	 *
+	 * Re-parsing the pristine bytes rather than unwinding the undo stack, because
+	 * the two are not equivalent: an edit made without a command has no undo, and
+	 * re-entering a value by hand does not restore the file — the header string
+	 * table only grows, so a name set and set back leaves an orphan behind and
+	 * the bytes differ (measured: 765798 against 765774). Re-parsing cannot have
+	 * that problem.
+	 */
+	bool revertToLoaded()
+	{
+		if ( pristine.isEmpty() )
+			return false;
+		QBuffer buf( &pristine );
+		if ( !buf.open( QIODevice::ReadOnly ) )
+			return false;
+		const bool ok = nif->load( buf );
+		nif->undoStack->clear();
+		return ok;
+	}
+
+	//! true when the model no longer matches the bytes it was loaded from
+	bool isModified() const
+	{
+		if ( pristine.isEmpty() )
+			return false;
+		QByteArray now;
+		QBuffer buf( &now );
+		if ( !buf.open( QIODevice::WriteOnly ) || !nif->save( buf ) )
+			return false;
+		return now != pristine;
 	}
 
 	QString displayName() const
@@ -460,6 +512,8 @@ public:
 	}
 
 	NifModel * nif = nullptr;
+	//! The file exactly as parsed, for revertToLoaded().
+	QByteArray pristine;
 	//! Display path: an absolute loose-file path or a "[Game]/meshes/..." label.
 	QString currentFile;
 	int configuredResourceGame = -1;
@@ -468,6 +522,9 @@ public:
 	NifSkope * workspaceRoot = nullptr;
 	bool sessionPreviewVisible = false;
 	bool sessionPreviewUnloaded = false;
+	//! Draw this one translucent — visible for placing things against, without
+	//! competing with whatever is being worked on.
+	bool sessionPreviewGhost = false;
 };
 
 static const QHash<QString, QString> migrateTo1_2 = {
@@ -1531,6 +1588,10 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	visible->setCheckable( true );
 	visible->setChecked( document->sessionPreviewVisible && !document->sessionPreviewUnloaded );
 	visible->setEnabled( document != this );
+	QAction * ghost = menu.addAction( tr( "Show Semi-Transparent" ) );
+	ghost->setCheckable( true );
+	ghost->setChecked( document->sessionPreviewGhost );
+	ghost->setEnabled( document != this );
 	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
 	isolate->setEnabled( document != this );
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
@@ -1542,7 +1603,10 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	QAction * close = menu.addAction( tr( "Close Document" ) );
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == makePrimary ) activateDocumentTab( index );
-	else if ( chosen == visible ) {
+	else if ( chosen == ghost ) {
+		document->sessionPreviewGhost = ghost->isChecked();
+		refreshAllDocumentSessions();
+	} else if ( chosen == visible ) {
 		document->sessionPreviewVisible = visible->isChecked();
 		document->sessionPreviewUnloaded = false;
 		refreshAllDocumentSessions();
@@ -1690,16 +1754,40 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	QAction * visible = menu.addAction( tr( "Selected / Visible in Workspace" ) );
 	visible->setCheckable( true );
 	visible->setChecked( document->selectedInWorkspace() );
+	QAction * ghost = menu.addAction( tr( "Show Semi-Transparent" ) );
+	ghost->setCheckable( true );
+	ghost->setChecked( document->sessionPreviewGhost );
 	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
 	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
+	menu.addSeparator();
+	// The workspace edits loaded documents in place — posing, syncing, freezing —
+	// so there has to be a way back that is always available and does not depend
+	// on every edit having had an undo command behind it.
+	const bool modified = document->isModified();
+	QAction * revert = menu.addAction( modified
+		? tr( "Revert to Loaded State (modified)" ) : tr( "Revert to Loaded State" ) );
+	revert->setEnabled( modified );
+	revert->setToolTip( tr( "Re-parse the bytes this document was loaded from, discarding every change" ) );
+	menu.setToolTipsVisible( true );
 	menu.addSeparator();
 	// A data-only document exists solely as a workspace member, so removing it
 	// from the Loaded NIFs list and closing it are the same operation.
 	QAction * unload = menu.addAction( tr( "Remove from Loaded NIFs" ) );
 	QAction * close = menu.addAction( tr( "Close Document" ) );
 	QAction * chosen = menu.exec( globalPos );
-	if ( chosen == makePrimary ) promoteBackgroundDocument( document );
+	if ( chosen == revert ) {
+		if ( document->revertToLoaded() )
+			refreshAllDocumentSessions();
+		else
+			QMessageBox::warning( this, tr( "Revert" ),
+				tr( "Could not re-parse %1's loaded state." ).arg( document->displayName() ) );
+	}
+	else if ( chosen == ghost ) {
+		document->sessionPreviewGhost = ghost->isChecked();
+		refreshAllDocumentSessions();
+	}
+	else if ( chosen == makePrimary ) promoteBackgroundDocument( document );
 	else if ( chosen == visible ) {
 		document->sessionPreviewVisible = visible->isChecked();
 		document->sessionPreviewUnloaded = false;
@@ -1784,21 +1872,25 @@ void NifSkope::removeBackgroundDocument( BackgroundNifDocument * document )
 void NifSkope::refreshSessionPreview()
 {
 	if ( !ogl ) return;
-	QVector<Vector3> soup;
+	// two soups: solid, and the ones flagged ghosted. Split here rather than in
+	// the viewport, because "which document is a ghost" is workspace state.
+	QVector<Vector3> soup, ghost;
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
 		if ( !document || document == this || !document->sessionCollectionMember
 			|| !document->sessionPreviewVisible
 			|| document->sessionPreviewUnloaded || document->currentFile.isEmpty() )
 			continue;
-		soup += sessionDocumentTriangleSoup( document->nif );
+		( document->sessionPreviewGhost ? ghost : soup )
+			+= sessionDocumentTriangleSoup( document->nif );
 	}
 	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
 		if ( !document || !document->selectedInWorkspace() || document->currentFile.isEmpty() )
 			continue;
-		soup += sessionDocumentTriangleSoup( document->nif );
+		( document->sessionPreviewGhost ? ghost : soup )
+			+= sessionDocumentTriangleSoup( document->nif );
 	}
-	if ( soup.isEmpty() ) ogl->clearSessionDocumentPreview();
-	else ogl->setSessionDocumentPreview( soup );
+	if ( soup.isEmpty() && ghost.isEmpty() ) ogl->clearSessionDocumentPreview();
+	else ogl->setSessionDocumentPreview( soup, ghost );
 }
 
 void NifSkope::refreshAllDocumentSessions()
@@ -4188,6 +4280,7 @@ void NifSkope::addNifBrowserIndexToLoaded( const QModelIndex & index )
 			tr( "Could not load %1 into the Loaded NIFs workspace." ).arg( path ), 5000 );
 		return;
 	}
+	document->captureLoadedState();
 	sessionBackgroundDocuments.append( document );
 	refreshAllDocumentSessions();
 }

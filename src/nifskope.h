@@ -596,6 +596,9 @@ private:
 	QList<NifSkope *> documentTabWindows;
 	bool sessionPreviewVisible = true;
 	bool sessionPreviewUnloaded = false;
+	//! Draw this one translucent in the workspace preview — see
+	//! BackgroundNifDocument::sessionPreviewGhost.
+	bool sessionPreviewGhost = false;
 	bool sessionCollectionMember = false;
 	bool syncingLoadedNifsSelection = false;
 	NifSkope * workspaceRoot = nullptr;
