@@ -1317,6 +1317,10 @@ private:
 	float animSpeed = 1.0f;
 
 	float Dist;
+public:
+	//! camera distance, so a test can show a gesture did not move the camera
+	float cameraDistance() const { return Dist; }
+private:
 	Vector3 Pos;
 	Vector3 Rot;
 	// The explicit Save/Load View commands are session-only. Keeping the

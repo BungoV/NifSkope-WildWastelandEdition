@@ -34,6 +34,27 @@ bool PhysicsPreview::start( const NifModel * nif, QString * error )
 		 * the shape data is in bone space, so subtracting com here means posing is
 		 * just x + q*v and the shift cannot be forgotten at draw time.
 		 */
+		/* Body -> node name, so a drag can say WHICH bone is in hand.
+		 *
+		 * The binding is the collision object's own: it names a body and targets a
+		 * node. Matched by the system block it points at, because a skeleton file
+		 * holds several systems and the body indices restart in each.
+		 */
+		m_bodyNames.assign( m_sim.bodies().size(), QString() );
+		for ( qint32 c = 0; c < nif->getBlockCount(); c++ ) {
+			const QModelIndex iObj = nif->getBlockIndex( c );
+			if ( !nif->blockInherits( iObj, "bhkNPCollisionObject" ) )
+				continue;
+			if ( nif->getLink( iObj, "Data" ) != b )
+				continue;
+			const int body = int( nif->get<quint32>( iObj, "Body ID" ) );
+			if ( body < 0 || body >= m_bodyNames.size() )
+				continue;
+			const QModelIndex iTarget = nif->getBlockIndex( nif->getLink( iObj, "Target" ) );
+			if ( iTarget.isValid() )
+				m_bodyNames[body] = nif->get<QString>( iTarget, "Name" );
+		}
+
 		m_meshes.resize( m_sim.bodies().size() );
 		for ( const HknpShape & shp : sys.shapes ) {
 			if ( shp.bodyId < 0 || shp.bodyId >= m_meshes.size() || shp.tris.isEmpty() )
@@ -78,6 +99,7 @@ void PhysicsPreview::stop()
 	m_sim.clearDrag();
 	m_sim = RagdollSim();
 	m_meshes.clear();
+	m_bodyNames.clear();
 	m_shots.clear();
 	m_system = HknpSystem();
 	m_active = false;

@@ -144,6 +144,15 @@ public:
 	bool togglePin( const Vector3 & rayOrigin, const Vector3 & rayDir );
 	//! Bodies currently nailed in place, for drawing them apart from the rest.
 	QVector<Vector3> pinnedSoup() const;
+
+	/*! The NIF node a body belongs to, or empty.
+	 *
+	 * Taken from the bhkNPCollisionObject that names the body -- "Body ID" on the
+	 * collision object, "Name" on the node it targets. The packfile itself has no
+	 * names at all: hkaSkeleton's bone name pointers are null on all 804 corpus
+	 * bones, so the NIF is the only place they exist.
+	 */
+	QString bodyName( int body ) const { return m_bodyNames.value( body ); }
 	bool move( const Vector3 & rayOrigin, const Vector3 & rayDir );
 	bool release();
 
@@ -254,6 +263,7 @@ private:
 	RagdollSim m_sim;
 	HknpSystem m_system;
 	QVector<BodyMesh> m_meshes;
+	QVector<QString> m_bodyNames;
 	bool m_active = false;
 	bool m_paused = false;
 	int m_jointCount = 0;

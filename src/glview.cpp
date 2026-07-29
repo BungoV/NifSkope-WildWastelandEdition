@@ -372,9 +372,17 @@ bool GLView::physicsMousePress( QMouseEvent * event )
 		return false;
 	Vector3 ro, rd;
 	if ( event->button() == cursorPlaceButton() ) {
-		// the secondary button pins, whatever tool is active
+		/* In this mode the secondary button does ONE thing: pin.
+		 *
+		 * Consumed whether or not it hits, because everything else that button
+		 * normally does fights with pinning -- a right-drag zooms the camera, and
+		 * a right-click release drops the 3D cursor, so a successful pin also
+		 * moved the cursor and a missed one moved the cursor AND the camera.
+		 * Orbiting is still on the middle button and zooming on the wheel.
+		 */
 		mouseRayWorld( event->position(), ro, rd );
-		return physicsPreview.togglePin( ro, rd );
+		physicsPreview.togglePin( ro, rd );
+		return true;
 	}
 	if ( event->button() != selectMouseButton() )
 		return false;
@@ -387,6 +395,9 @@ bool GLView::physicsMouseMove( QMouseEvent * event )
 {
 	if ( !physicsPreview.active() )
 		return false;
+	// a held secondary button must not zoom: see physicsMousePress
+	if ( event->buttons() & cursorPlaceButton() )
+		return true;
 	Vector3 ro, rd;
 	mouseRayWorld( event->position(), ro, rd );
 	return physicsPreview.move( ro, rd );
@@ -394,9 +405,11 @@ bool GLView::physicsMouseMove( QMouseEvent * event )
 
 bool GLView::physicsMouseRelease( QMouseEvent * event )
 {
-	Q_UNUSED( event );
 	if ( !physicsPreview.active() )
 		return false;
+	// swallow the secondary release so it cannot place the 3D cursor
+	if ( event->button() == cursorPlaceButton() )
+		return true;
 	return physicsPreview.release();
 }
 
@@ -3373,6 +3386,32 @@ void GLView::paintGL()
 					? QColor( 255, 120, 110 ) : QColor( 210, 220, 240 ) );
 				painter.drawText( QPointF( 10, y ), l );
 				y += 14;
+			}
+		}
+		/* The name of the bone being dragged, at the bone.
+		 *
+		 * The packfile carries no names -- hkaSkeleton's are null on every corpus
+		 * bone -- so this comes from the NIF node the collision object targets, and
+		 * it is the only way to know which limb is in hand on a rig of 39.
+		 */
+		if ( physicsPreview.active() && physicsPreview.grabbing() ) {
+			const int held = physicsPreview.grabbedBody();
+			QString name = physicsPreview.bodyName( held );
+			if ( name.isEmpty() )
+				name = tr( "body %1" ).arg( held );
+			QPointF sp;
+			if ( worldToScreen( physicsPreview.sim().toWorld( held, Vector3() )
+					* PhysicsPreview::SCALE, sp ) ) {
+				painter.setRenderHint( QPainter::Antialiasing, true );
+				QFont f = painter.font();
+				f.setPointSizeF( 9.0 );
+				f.setBold( true );
+				painter.setFont( f );
+				const QPointF at = sp + QPointF( 12, -10 );
+				painter.setPen( QColor( 0, 0, 0, 220 ) );
+				painter.drawText( at + QPointF( 1, 1 ), name );
+				painter.setPen( QColor( 255, 184, 70 ) );
+				painter.drawText( at, name );
 			}
 		}
 		// Pose Mode bone name labels. With the Names toggle on, every bone is
@@ -18414,6 +18453,18 @@ void GLView::saveImage()
 
 void GLView::contextMenuEvent( QContextMenuEvent * e )
 {
+	// the secondary button is the pin here, so it must not also open a menu over
+	// the thing that was just pinned
+	if ( physicsPreview.active() ) {
+		e->accept();
+		return;
+	}
+	// the secondary button is the pin in Physics Sim, so it must not also open
+	// a menu over the thing that was just pinned
+	if ( physicsPreview.active() ) {
+		e->accept();
+		return;
+	}
 	// The viewport has no context menu. Mouse clicks are interpreted in
 	// mouseReleaseEvent (select vs place-gizmo, swappable buttons); the
 	// keyboard menu key opens the W quick menu.

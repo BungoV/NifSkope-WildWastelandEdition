@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-29t — the right button only pins, and the bone in hand says its name
+
+**All rigs pass, 0 failures.** Real bone names came back on every one: `Spine4` on
+the brahmin, `SPINE1` on the mirelurk king, `COM` on the humanoids.
+
+### The secondary button was doing three things at once
+
+Pinning was put on right-click last change without checking what that button
+already did. It does plenty: a right-click **release places the 3D cursor**, a
+right-**drag zooms the camera**, and a right-click opens the **context menu**. So a
+successful pin also moved the 3D cursor, and a missed one moved the cursor *and*
+the camera.
+
+In this mode the secondary button now does one thing. The press is consumed
+whether or not it hits anything, the drag is swallowed so it cannot zoom, the
+release is swallowed so it cannot place the cursor, and the context menu is
+suppressed. Orbiting is still the middle button and zooming is still the wheel,
+so nothing was actually lost.
+
+Checked by measuring the camera distance across a right-drag and requiring it not
+to move.
+
+### The bone in hand says what it is
+
+A drag now labels the body it is holding, at the body. On a 39-body rig knowing
+you have *a* limb is not the same as knowing you have that one.
+
+The name has to come from the NIF: the packfile has none at all. `hkaSkeleton`'s
+bone name pointers are null on all 804 corpus bones — the ragdoll's skeleton copy
+identifies bones by index and carries no strings — so the only place a name exists
+is the node each `bhkNPCollisionObject` targets. Matched by the system block the
+collision object points at, because a skeleton file holds several systems and body
+indices restart in each.
+
 ## 2026-07-29s — the chain goes taut: a drag can no longer tear a ragdoll open
 
 **All rigs pass, 0 failures.** Two changes, and the second is the interesting one.

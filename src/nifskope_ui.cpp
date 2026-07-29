@@ -3620,6 +3620,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// while still held: the rig black, the bone in hand orange
 					check( !pv.grabbedSoup().isEmpty(),
 						QStringLiteral( "the held bone is drawn apart from the rest" ) );
+					// the name comes from the NIF, since the packfile carries none
+					check( !pv.bodyName( grabbed ).isEmpty(),
+						QStringLiteral( "the held bone is named: %1" )
+							.arg( pv.bodyName( grabbed ) ) );
 					gl->update();
 					QApplication::processEvents();
 					gl->grabFramebuffer().save( outPath + QStringLiteral( ".grab.png" ) );
@@ -3869,7 +3873,23 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								gl->cursorPlaceButton(), gl->cursorPlaceButton(), Qt::NoModifier );
 							QApplication::sendEvent( gl, &pr );
 						};
+						/* The secondary button must do nothing BUT pin. It normally
+						 * places the 3D cursor on release and zooms on drag, and both
+						 * fought with the pin.
+						 */
+						const float distBefore = gl->cameraDistance();
 						rightClick();
+						{
+							const QPointF p = sp + QPointF( 60, 40 );
+							QMouseEvent mv( QEvent::MouseMove, p, gl->mapToGlobal( p ),
+								gl->cursorPlaceButton(), gl->cursorPlaceButton(), Qt::NoModifier );
+							QApplication::sendEvent( gl, &mv );
+							QMouseEvent rl( QEvent::MouseButtonRelease, p, gl->mapToGlobal( p ),
+								gl->cursorPlaceButton(), Qt::NoButton, Qt::NoModifier );
+							QApplication::sendEvent( gl, &rl );
+						}
+						check( std::fabs( gl->cameraDistance() - distBefore ) < 1.0e-3f,
+							QStringLiteral( "a right-drag does not zoom" ) );
 						check( pv.sim().bodies().at( target ).pinned != was,
 							QStringLiteral( "right-click pinned body %1 (%2 -> %3)" ).arg( target )
 								.arg( was ? QStringLiteral( "pinned" ) : QStringLiteral( "free" ) )
