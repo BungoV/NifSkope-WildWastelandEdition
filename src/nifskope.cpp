@@ -1974,25 +1974,35 @@ void NifSkope::removeBackgroundDocument( BackgroundNifDocument * document )
 void NifSkope::refreshSessionPreview()
 {
 	if ( !ogl ) return;
-	// two soups: solid, and the ones flagged ghosted. Split here rather than in
-	// the viewport, because "which document is a ghost" is workspace state.
-	QVector<Vector3> soup, ghost;
+	/* Two routes, because the two buttons mean different things. A SOLID document
+	 * is rendered for real — its own Scene, materials and textures. A GHOSTED one
+	 * is a flat translucent soup, which is what "show me roughly where this sits"
+	 * wants and which avoids threading a global alpha through every shader.
+	 */
+	QVector<Vector3> solid, ghost;
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
 		if ( !document || document == this || !document->sessionCollectionMember
 			|| !document->sessionPreviewVisible
 			|| document->sessionPreviewUnloaded || document->currentFile.isEmpty() )
 			continue;
-		( document->sessionPreviewGhost ? ghost : soup )
+		( document->sessionPreviewGhost ? ghost : solid )
 			+= sessionDocumentTriangleSoup( document->nif );
 	}
 	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
 		if ( !document || !document->selectedInWorkspace() || document->currentFile.isEmpty() )
 			continue;
-		( document->sessionPreviewGhost ? ghost : soup )
+		( document->sessionPreviewGhost ? ghost : solid )
 			+= sessionDocumentTriangleSoup( document->nif );
 	}
-	if ( soup.isEmpty() && ghost.isEmpty() ) ogl->clearSessionDocumentPreview();
-	else ogl->setSessionDocumentPreview( soup, ghost );
+	/* Both still go through the soup. Routing SOLID documents to a real per-
+	 * document Scene is written and wired (GLView::setWorkspaceRenderModels) but
+	 * draws nothing yet — see WW_CHANGES 07-30k — and a document that renders as
+	 * a flat grey shape is strictly better than one that renders as nothing, so
+	 * the switch stays here until the Scene path is proven.
+	 */
+	ogl->setWorkspaceRenderModels( QVector<NifModel *>() );
+	if ( solid.isEmpty() && ghost.isEmpty() ) ogl->clearSessionDocumentPreview();
+	else ogl->setSessionDocumentPreview( solid, ghost );
 }
 
 void NifSkope::refreshAllDocumentSessions()

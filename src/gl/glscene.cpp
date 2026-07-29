@@ -116,7 +116,9 @@ Scene::Scene( TexCache * texcache, QObject * parent ) :
 
 Scene::~Scene()
 {
-	if ( renderer )
+	// a borrowed renderer belongs to another Scene; deleting it here would take
+	// the primary's shader state down with this document
+	if ( renderer && !rendererBorrowed )
 		delete renderer;
 }
 
@@ -125,6 +127,15 @@ void Scene::setOpenGLContext( QOpenGLContext * context )
 	if ( renderer || !context )
 		return;
 	renderer = new Renderer( context );
+	rendererBorrowed = false;
+}
+
+void Scene::borrowRenderer( Renderer * shared )
+{
+	if ( renderer && !rendererBorrowed )
+		delete renderer;
+	renderer = shared;
+	rendererBorrowed = true;
 }
 
 void Scene::updateShaders()

@@ -694,12 +694,36 @@ void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
 	const QVector<Vector3> & ghostSoup )
 {
 	sessionDocumentPreviewSoup = triangleSoup;
-	sessionDocumentGhostSoup = ghostSoup;
 	shadeSessionSoup( sessionDocumentPreviewSoup, 1.0f, sessionDocumentPreviewColors );
+	sessionDocumentGhostSoup = ghostSoup;
 	// 0.32 reads as "there, but not the thing you are working on" — solid enough
 	// to place a limb against, faint enough that the primary stays legible
 	// through it.
 	shadeSessionSoup( sessionDocumentGhostSoup, 0.32f, sessionDocumentGhostColors );
+	update();
+}
+
+void GLView::clearWorkspaceScenes()
+{
+	qDeleteAll( workspaceScenes );
+	workspaceScenes.clear();
+	workspaceRenderOrder.clear();
+}
+
+void GLView::setWorkspaceRenderModels( const QVector<NifModel *> & models )
+{
+	// drop the Scenes of documents that left the list; a Scene holds compiled
+	// geometry and texture references, so keeping one for a closed document
+	// would be a leak that also pins its textures
+	for ( auto it = workspaceScenes.begin(); it != workspaceScenes.end(); ) {
+		if ( models.contains( it.key() ) ) {
+			it++;
+			continue;
+		}
+		delete it.value();
+		it = workspaceScenes.erase( it );
+	}
+	workspaceRenderOrder = models;
 	update();
 }
 
@@ -2296,6 +2320,42 @@ void GLView::paintGL()
 	// Draw the model
 	glDisable( GL_BLEND );
 	scene->draw();
+
+	/* Workspace documents rendered for real — their own materials, textures and
+	 * shaders, not the flat soup the preview used to be. One Scene each, built
+	 * the first frame the document appears and kept until it leaves the list,
+	 * because make() compiles geometry and is far too expensive per frame.
+	 *
+	 * Skipped entirely while selecting: these are reference geometry, and a
+	 * click must never land on a document that is not the one being edited.
+	 */
+	if ( !workspaceRenderOrder.isEmpty() && !scene->selecting ) {
+		for ( NifModel * wm : std::as_const( workspaceRenderOrder ) ) {
+			if ( !wm || wm->getBlockCount() == 0 )
+				continue;
+			Scene *& ws = workspaceScenes[wm];
+			if ( !ws ) {
+				ws = new Scene( textures );
+				// borrow, never construct: a second Renderer on this context has
+				// its own idea of which shader program is bound, and the two
+				// caches disagreeing empties the WHOLE frame — primary and grid
+				// included. Measured, not theorised.
+				ws->borrowRenderer( scene->renderer );
+				QSettings settings;
+				ws->updateSettings( settings );
+				ws->make( wm );
+			}
+			// mirror the primary's render options so a secondary does not ignore
+			// the lighting, wireframe or backface settings the user just changed
+			ws->options = scene->options;
+			ws->visMode = scene->visMode;
+			ws->selecting = 0;
+			ws->transformDirty = true;
+			ws->transform( viewTrans, time );
+			ws->draw();
+		}
+		glDisable( GL_BLEND );
+	}
 
 	// Selected-bone weight heatmap. Per-corner colours are supplied by the
 	// Rigging Manager, while the viewport owns only an ephemeral triangle soup.

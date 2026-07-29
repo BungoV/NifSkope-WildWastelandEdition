@@ -90,11 +90,17 @@ public:
 	int riggingDonorPreviewTriangleCount() const { return riggingDonorPreviewSoup.size() / 3; }
 	//! Read-only geometry from other open NIF documents. It is deliberately a
 	//! separate neutral overlay so Rigging's selected cyan donor remains clear.
-	//! Workspace preview: \a triangleSoup draws solid, \a ghostSoup draws
-	//! translucent in a second pass. Two soups rather than mixed alpha in one,
+	//! Workspace preview soups: \a triangleSoup opaque, \a ghostSoup translucent
+	//! in a blended pass afterwards. Two soups rather than mixed alpha in one,
 	//! because a translucent triangle must be drawn after what it shows through.
 	void setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
 		const QVector<Vector3> & ghostSoup = QVector<Vector3>() );
+	/*! Workspace SOLIDS: documents to render properly, with their own materials,
+	 *  textures and shaders. One Scene each, built on demand and kept until the
+	 *  model leaves the list; they share this view's TexCache, so a texture used
+	 *  by two documents is loaded once.
+	 */
+	void setWorkspaceRenderModels( const QVector<NifModel *> & models );
 	void clearSessionDocumentPreview();
 	//! Per-corner colour overlay used by the Rigging selected-bone heatmap.
 	void setRiggingWeightPreview( const QVector<Vector3> & triangleSoup,
@@ -503,6 +509,12 @@ private:
 	//! Documents flagged translucent, drawn in a second blended pass.
 	QVector<Vector3> sessionDocumentGhostSoup;
 	QVector<FloatVector4> sessionDocumentGhostColors;
+	//! Fully rendered workspace documents, one Scene per model. Keyed by model
+	//! so a rebuild is only paid when a document joins, not every frame.
+	QVector<NifModel *> workspaceRenderOrder;
+	QHash<NifModel *, class Scene *> workspaceScenes;
+	//! Drop every workspace Scene (on close, or when the list empties).
+	void clearWorkspaceScenes();
 	QVector<Vector3> riggingDonorPreviewSoup;
 	bool riggingDonorPreviewFilled = true;
 	bool riggingDonorPreviewWireframe = true;

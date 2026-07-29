@@ -3167,10 +3167,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...and the workspace counts them",
 						skope->workspaceDocumentCount() == added );
 
-					check( "the first draws solid", skope->setWorkspaceDisplayMode( 0, 1 ) );
-					if ( added > 1 )
-						check( "the second draws semi-transparent",
-							skope->setWorkspaceDisplayMode( 1, 2 ) );
+					// WW_WORKSPACE_MODES=1;2 sets each document's mode explicitly
+					// (0 hidden, 1 solid, 2 ghost); default is first solid, rest ghost
+					const QStringList modes =
+						qEnvironmentVariable( "WW_WORKSPACE_MODES" ).split( QLatin1Char( ';' ),
+							Qt::SkipEmptyParts );
+					for ( int i = 0; i < added; i++ ) {
+						const int m = ( i < modes.size() ) ? modes.at( i ).toInt()
+							: ( i == 0 ? 1 : 2 );
+						check( QStringLiteral( "document %1 set to mode %2" ).arg( i ).arg( m ),
+							skope->setWorkspaceDisplayMode( i, m ) );
+					}
 					settle( 1200 );
 
 					const QString listShot =

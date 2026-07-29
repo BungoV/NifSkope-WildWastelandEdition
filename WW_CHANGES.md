@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30k — two Renderers on one context empty the whole frame
+
+Attempting real per-document rendering (a `Scene` per loaded NIF instead of the
+flat triangle soup) turned the viewport **black** — not the new documents, the
+*whole* frame: primary model, grid, everything.
+
+Cause: `Scene::setOpenGLContext` does `renderer = new Renderer( context )`, so
+every Scene builds its **own** Renderer. A Renderer caches which shader program
+is bound; two of them on one GL context each believe they own that state, neither
+cache matches the driver, and nothing draws. This is the same class of bug as the
+07-2x startup-grid crash — *never let two things with a shortcut cache share one
+GL context* — and the symptom is silence, not a crash.
+
+Fixed with `Scene::borrowRenderer( Renderer * )`: workspace scenes take the
+primary's renderer and their destructor does not delete it.
+
+**That fixed the black frame but the per-document Scenes still draw nothing**, so
+they are **not wired in**. `refreshSessionPreview` still routes both solid and
+ghost documents through the soup, because a document that renders as a flat grey
+shape is strictly better than one that renders as nothing.
+
+`GLView::setWorkspaceRenderModels` and the Scene cache are in place and unused;
+what remains is finding why `make()` + `transform()` + `draw()` on a borrowed
+renderer produces no geometry. Likely the per-frame shader/light setup `paintGL`
+does around the primary's draw, which a second scene never receives.
+
+Verified restored against the known-good picture: solid document opaque grey over
+the primary, ghosted document translucent — pixel-for-pixel the state before the
+attempt. (Two intermediate pistol screenshots looked like regressions and were
+not; the armour was simply off-frame. Checked apples-to-apples before concluding.)
+
 ## 2026-07-30i — merge from Loaded NIFs, and a pose that stays on
 
 ### Select, right-click, merge

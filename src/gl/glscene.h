@@ -65,6 +65,15 @@ public:
 	~Scene();
 
 	void setOpenGLContext( QOpenGLContext * context );
+	/*! Use another Scene's Renderer instead of constructing one.
+	 *
+	 * A Renderer caches which shader program is bound, so TWO of them sharing one
+	 * GL context each believe they own that state and neither cache matches the
+	 * driver. The symptom is not a crash: it is an empty frame, the whole view
+	 * including the primary model and the grid. Workspace scenes therefore borrow
+	 * the primary's renderer, and must not delete it.
+	 */
+	void borrowRenderer( Renderer * shared );
 	inline bool haveRenderer() const
 	{
 		return bool( renderer );
@@ -218,6 +227,8 @@ public:
 
 
 	Renderer * renderer = nullptr;
+	//! true when 'renderer' belongs to another Scene (see borrowRenderer).
+	bool rendererBorrowed = false;
 
 	NodeList nodes;
 	PropertyList properties;
