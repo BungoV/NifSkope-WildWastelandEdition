@@ -3126,6 +3126,193 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_SUMMARY_TEST=1): the Block List's Summary column.
+	 *
+	 * Read back through data() on the real columns, and through the hierarchy
+	 * proxy as well, because the proxy translates its own column numbers into the
+	 * model's and a summary that only works in one of the two list modes is a
+	 * summary that is broken half the time.
+	 *
+	 * The status markers are checked in both directions: a texture path is
+	 * mangled so its OWNING block must go red, then restored so it must go back.
+	 * "unreferenced" is checked as an invariant over the whole file — a vanilla
+	 * NIF has no orphan blocks, so any hit means the root-link exclusion is wrong,
+	 * which is the one way this marker can be spectacularly noisy.
+	 * Log: release/ww_summary_test.log.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SUMMARY_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_summary_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				int checks = 0, fails = 0, skips = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass )
+						fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				auto skip = [&]( const QString & what, const QString & why ) {
+					skips++;
+					log << "  skip " << what << " — " << why << "\n";
+				};
+				auto summaryOf = [nif]( int b ) {
+					return nif->data( nif->getBlockIndex( b ).sibling(
+						nif->getBlockIndex( b ).row(), NifModel::WwSummaryCol ), Qt::DisplayRole ).toString();
+				};
+				auto isRed = [nif]( int b ) {
+					const QVariant fg = nif->data( nif->getBlockIndex( b ).sibling(
+						nif->getBlockIndex( b ).row(), NifModel::WwSummaryCol ), Qt::ForegroundRole );
+					return fg.canConvert<QColor>() && fg.value<QColor>().red() > 200
+						&& fg.value<QColor>().green() < 160;
+				};
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+
+					// ---- the column is where it should be ----
+					const bool listIsProxy = ( skope->list->model() != nif );
+					log << "  tree: " << skope->tree->header()->count() << " sections, summary hidden "
+						<< skope->tree->isColumnHidden( NifModel::WwSummaryCol ) << "\n";
+					log << "  list: " << ( listIsProxy ? "proxy" : "nif" ) << ", "
+						<< skope->list->header()->count() << " sections, summary hidden "
+						<< skope->list->isColumnHidden( listIsProxy ? 2 : int( NifModel::WwSummaryCol ) ) << "\n";
+					check( "Block Details hides the Summary column",
+						skope->tree->isColumnHidden( NifModel::WwSummaryCol ) );
+					check( "the Block List shows it",
+						!skope->list->isColumnHidden( listIsProxy ? 2 : int( NifModel::WwSummaryCol ) ) );
+					check( "the header reads Summary",
+						nif->headerData( NifModel::WwSummaryCol, Qt::Horizontal,
+							Qt::DisplayRole ).toString() == QStringLiteral( "Summary" ) );
+
+					// ---- fields have no summary; blocks do ----
+					{
+						QModelIndex root = nif->getBlockIndex( 0 );
+						QModelIndex field = nif->getIndex( root, 0 );
+						check( "a FIELD row has no summary",
+							!field.isValid() || nif->data( field.sibling( field.row(),
+								NifModel::WwSummaryCol ), Qt::DisplayRole ).toString().isEmpty() );
+					}
+
+					// ---- per-type content ----
+					int shape = -1, texSet = -1, ctrl = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						QModelIndex ib = nif->getBlockIndex( b );
+						if ( shape < 0 && nif->blockInherits( ib, "BSTriShape" ) )
+							shape = b;
+						if ( texSet < 0 && nif->isNiBlock( ib, "BSShaderTextureSet" ) )
+							texSet = b;
+						if ( ctrl < 0 && nif->blockInherits( ib, "NiTimeController" ) )
+							ctrl = b;
+					}
+					if ( shape < 0 ) {
+						skip( "a shape summarises its counts", "no BSTriShape" );
+					} else {
+						const QString s = summaryOf( shape );
+						log << "  shape #" << shape << ": " << s << "\n";
+						check( "a shape summarises its counts",
+							s.contains( QStringLiteral( "tris" ) ) && s.contains( QStringLiteral( "verts" ) ) );
+					}
+					if ( ctrl < 0 ) {
+						skip( "a controller names its target", "no NiTimeController" );
+					} else {
+						const QString s = summaryOf( ctrl );
+						log << "  controller #" << ctrl << ": " << s << "\n";
+						check( "a controller names its target", s.contains( QStringLiteral( "→" ) ) );
+					}
+
+					// ---- status markers, both directions ----
+					if ( texSet < 0 ) {
+						skip( "a mangled path marks its block", "no BSShaderTextureSet" );
+					} else {
+						QModelIndex iTex = nif->getIndex( nif->getBlockIndex( texSet ), "Textures" );
+						int slot = -1;
+						for ( int s = 0; s < nif->rowCount( iTex ) && slot < 0; s++ )
+							if ( !nif->get<QString>( nif->getIndex( iTex, s ) ).trimmed().isEmpty() )
+								slot = s;
+						const QString before = summaryOf( texSet );
+						const bool redBefore = isRed( texSet );
+						log << "  texture set #" << texSet << ": " << before
+							<< ( redBefore ? "   [red]" : "" ) << "\n";
+						if ( slot < 0 ) {
+							skip( "a mangled path marks its block", "every slot is empty" );
+						} else {
+							// both separators, because NIFs mix them and the summary
+							// strips whichever one the file happens to use
+							check( "a texture set names its diffuse",
+								before.contains( nif->get<QString>( nif->getIndex( iTex, slot ) )
+									.section( QLatin1Char( '\\' ), -1 ).section( QLatin1Char( '/' ), -1 ) ) );
+							const QString orig = nif->get<QString>( nif->getIndex( iTex, slot ) );
+							nif->set<QString>( nif->getIndex( iTex, slot ),
+								QStringLiteral( "textures\\ww_no_such_texture_9f3a.dds" ) );
+							check( "a mangled path marks its block red", isRed( texSet ) );
+							check( "...and says which fault it is",
+								summaryOf( texSet ).contains( QStringLiteral( "missing texture" ) ) );
+							nif->set<QString>( nif->getIndex( iTex, slot ), orig );
+							check( "restoring it clears the marker", isRed( texSet ) == redBefore );
+							check( "...and the summary", summaryOf( texSet ) == before );
+						}
+					}
+
+					// ---- unreferenced must be silent on a well-formed file ----
+					{
+						QStringList orphans;
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( summaryOf( b ).contains( QStringLiteral( "unreferenced" ) ) )
+								orphans << QString::number( b );
+						if ( !orphans.isEmpty() )
+							log << "  orphans: " << orphans.join( QStringLiteral( ", " ) ) << "\n";
+						check( "no block in a vanilla file reads as unreferenced", orphans.isEmpty() );
+					}
+
+					// ---- the hierarchy proxy maps its third column ----
+					if ( !skope->proxy ) {
+						skip( "the hierarchy view maps column 2", "no proxy model" );
+					} else {
+						check( "the proxy offers three columns",
+							skope->proxy->columnCount( QModelIndex() ) == 3 );
+						check( "...and its third header is Summary",
+							skope->proxy->headerData( 2, Qt::Horizontal, Qt::DisplayRole )
+								.toString() == QStringLiteral( "Summary" ) );
+						QModelIndex proot = skope->proxy->index( 0, 2, QModelIndex() );
+						check( "...and its third column is the model's summary",
+							proot.isValid()
+							&& skope->proxy->mapTo( proot ).column() == NifModel::WwSummaryCol );
+					}
+
+					// A column that reads correctly through data() can still be two
+					// pixels wide, or off the right edge, on screen. grab() renders
+					// the widget offscreen, so the picture costs nothing and steals
+					// no focus. The sections are squeezed to fit the dock's real
+					// width first — a screenshot of the columns you cannot see is
+					// not evidence about the one you are checking.
+					skope->list->expandAll();
+					skope->list->scrollToTop();
+					{
+						QHeaderView * h = skope->list->header();
+						const int w = skope->list->viewport()->width();
+						h->resizeSection( 0, int( w * 0.34 ) );
+						h->resizeSection( 1, int( w * 0.22 ) );
+						h->resizeSection( 2, w - int( w * 0.34 ) - int( w * 0.22 ) - 4 );
+					}
+					const QString shot = QApplication::applicationDirPath() + "/ww_summary_test.png";
+					check( "the block list renders", skope->list->grab().save( shot ) );
+					log << "  screenshot: " << shot << "\n";
+				} while ( false );
+				log << checks << " checks, " << fails << " failures, " << skips << " skips\n";
+				log << ( fails == 0 ? "PASS\n" : "CHECK: failures above\n" );
+				log << "done\n";
+				logf.close();
+				if ( nif && nif->undoStack )
+					nif->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_TEXCOLOR_TEST=1): the two Block Details typed editors.
 	 *
 	 * Texture paths: NifModel::texturePathInfo drives both the Value column's
@@ -9299,6 +9486,17 @@ void NifSkope::restoreUi()
 	tree->setColumnHidden( NifModel::WwRefCol, true );
 	header->setColumnHidden( NifModel::WwRefCol, true );
 	kfmtree->setColumnHidden( NifModel::WwRefCol, true );
+	// Same for Summary, in the other direction: a restored pre-Summary layout
+	// leaves it visible in the field views, where a per-BLOCK line has nothing to
+	// say, and hidden in the Block List, where it is the entire point. Set after
+	// restoreState (and after setListMode above) because restoreState carries its
+	// own visibility and wins over anything set before it.
+	tree->setColumnHidden( NifModel::WwSummaryCol, true );
+	header->setColumnHidden( NifModel::WwSummaryCol, true );
+	kfmtree->setColumnHidden( NifModel::WwSummaryCol, true );
+	// list mode drives the NifModel directly; hierarchy mode goes through the
+	// 3-column proxy, where the summary is column 2
+	list->setColumnHidden( list->model() == nif ? int( NifModel::WwSummaryCol ) : 2, false );
 
 	auto hideSections = []( NifTreeView * tree, bool hidden ) {
 		tree->header()->setSectionHidden( NifModel::ArgCol, hidden );

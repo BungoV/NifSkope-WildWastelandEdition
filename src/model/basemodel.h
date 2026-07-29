@@ -218,7 +218,11 @@ public:
 		//! Diff-vs-reference (WW): the reference block's value. Hidden
 		//! everywhere except Block Details while a diff reference is set.
 		WwRefCol   = 10,
-		NumColumns = 11,
+		//! Per-type one-line summary (WW): what a block IS rather than what it
+		//! is called. Block List only — Block Details is a data editor and every
+		//! other view here shows fields, not blocks.
+		WwSummaryCol = 11,
+		NumColumns = 12,
 	};
 
 	// QAbstractItemModel

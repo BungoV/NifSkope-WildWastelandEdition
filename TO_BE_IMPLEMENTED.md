@@ -72,7 +72,7 @@ bottom.
 | 5 | ~~Block Details: remaining typed editors~~ | small | **SHIPPED 07-30d** — 3 of the 4 were already done |
 | 6 | Block Details: array table (P4) | medium | not started |
 | 7 | Block Details: whole-file search, recent values/revert, hex viewer (P5) | medium | not started |
-| 8 | Block List: summary column, status badges | small | not started |
+| 8 | ~~Block List: summary column, status badges~~ | small | **SHIPPED 07-30e** — badges are coloured text; "unreferenced" is undecidable |
 | 9 | Rigging leftovers | medium | partly absorbed by #1 |
 | 10 | UV editor: cross-mesh operators | medium | active-mesh-only is current design |
 | 11 | Animation: 3 remaining gaps | small | the other 43 items are done |
@@ -1123,12 +1123,27 @@ flattened storage (#3), so the two are worth sequencing together.
   edit).
 - Hex viewer.
 
-## 8. Block List — remaining items
+## 8. Block List — remaining items — SHIPPED 07-30e
 
 Shipped already: search, type chips, category icons, breadcrumb/footer,
 Links-to/Referenced-by peek, foldable header.
 
-Still open: a real per-type **summary column**, and **status badges**.
+**Summary column** (`WwSummaryCol`, `wwBlockSummary` in `spells/blocks.cpp`):
+per-type one-liners — counts for geometry, target for a controller, diffuse name
+for a texture set, bones for a skin, blob size for a packfile. Shown in both list
+modes (`NifProxyModel` went to three columns); hidden in Block Details and the
+header/kfm trees.
+
+**Status badges** are coloured text in that column, not chips, per the house
+style: `missing texture` (reuses `texturePathInfo`) and `no geometry`.
+
+- ~~**unreferenced**~~ — **cannot be decided in this model. Do not re-file it.**
+  `getParentLinks()` is the Ptr links a block *owns*, not what points at it; the
+  reverse relation is `rootLinks`, which `nifmodel.cpp:2838` builds as "every
+  block nothing refers to" and then writes back over the footer's Roots array. An
+  orphan and a real root are the same thing here. It needs a reverse index the
+  model does not keep — a fine feature, but that one, not this one.
+
 (**Drag-to-reparent was considered and rejected** — Set/Clear Parent cover it
 safely. Do not build it.)
 

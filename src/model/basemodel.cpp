@@ -524,6 +524,8 @@ QVariant BaseModel::headerData( int section, Qt::Orientation orientation, int ro
 			return tr( "Version Condition" );
 		case WwRefCol:
 			return tr( "Reference" );
+		case WwSummaryCol:
+			return tr( "Summary" );
 		default:
 			return QVariant();
 		}

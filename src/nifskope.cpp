@@ -821,6 +821,8 @@ NifSkope::NifSkope( bool background )
 	tree->header()->resizeSection( NifModel::ValueCol, 250 );
 	// the Reference column only appears while a diff reference is set
 	tree->setColumnHidden( NifModel::WwRefCol, true );
+	// Summary is a Block LIST column; Block Details shows fields, not blocks
+	tree->setColumnHidden( NifModel::WwSummaryCol, true );
 	/* Type is off by default, and toggled from the header's context menu.
 	 *
 	 * It is a permanent ~90px of width showing things like Ref<NiTimeController>,
@@ -915,6 +917,7 @@ NifSkope::NifSkope( bool background )
 	header->header()->resizeSection( NifModel::NameCol, 135 );
 	header->header()->resizeSection( NifModel::ValueCol, 250 );
 	header->setColumnHidden( NifModel::WwRefCol, true );
+	header->setColumnHidden( NifModel::WwSummaryCol, true );
 
 	// KFM
 	kfmtree = ui->kfmtree;
@@ -922,6 +925,7 @@ NifSkope::NifSkope( bool background )
 	kfmtree->setItemDelegate( kfm->createDelegate( this ) );
 	kfmtree->installEventFilter( this );
 	kfmtree->setColumnHidden( NifModel::WwRefCol, true );
+	kfmtree->setColumnHidden( NifModel::WwSummaryCol, true );
 
 	// Help Browser
 	refrbrwsr = ui->refrBrowser;
@@ -3126,6 +3130,7 @@ void NifSkope::setListMode()
 			list->setColumnHidden( NifModel::Ver2Col, true );
 			list->setColumnHidden( NifModel::VerCondCol, true );
 			list->setColumnHidden( NifModel::WwRefCol, true );
+			list->setColumnHidden( NifModel::WwSummaryCol, false );
 			head->resizeSection( 0, s0 );
 			head->resizeSection( 1, s1 );
 		}
@@ -3140,9 +3145,10 @@ void NifSkope::setListMode()
 			list->setRootIsDecorated( true );
 			QModelIndex pidx = proxy->mapFrom( idx, QModelIndex() );
 			list->setCurrentIndex( pidx );
-			// proxy model has only two columns (see columnCount in nifproxymodel.h)
+			// proxy model has three columns (see columnCount in nifproxymodel.h)
 			list->setColumnHidden( 0, false );
 			list->setColumnHidden( 1, false );
+			list->setColumnHidden( 2, false );
 			head->resizeSection( 0, s0 );
 			head->resizeSection( 1, s1 );
 		}

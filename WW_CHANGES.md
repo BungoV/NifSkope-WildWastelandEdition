@@ -1,5 +1,73 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30e — the Block List says what a block IS
+
+**16 checks, 0 failures** (`WW_SUMMARY_TEST`), plus a rendered screenshot.
+
+The Block List showed a number, a type and a name. A file is thirty rows of
+`NiNode`, and which one is the mesh, how big it is, what a controller drives and
+which texture a shader set points at were all one click away, thirty times over.
+There is a **Summary** column now:
+
+| block | summary |
+|---|---|
+| `0 NiNode` | 9 children |
+| `2 BSXFlags` | 203 |
+| `3 NiStringExtraData` | WEAPON |
+| `5 NiTransformController` | → WEAPON |
+| `10 BSTriShape` | 600 tris · 576 verts |
+| `11 BSLightingShaderProperty` | 10mmPistol.BGSM |
+| `12 BSShaderTextureSet` | 10mmPistol02_d.dds · +4 more |
+| `3 bhkPhysicsSystem` | 7.0 KB |
+
+Skinned meshes add `· skinned · 5 segments`; skins report their bone count,
+keyframe data its key count. **Zero is never a row** — a skeleton is mostly leaf
+bones, and "0 children" sixty times over buries the counts that matter.
+
+### Badges, as colour rather than as pills
+
+Statuses are red text in the same column, not chips: the house style for a data
+view here is coloured text, and a defect belongs beside the thing it describes.
+`missing texture` reuses `texturePathInfo` from 07-30d; `no geometry` catches a
+shape with no triangles or no vertices.
+
+**There were three, and one was wrong.** An `unreferenced` marker was written,
+and the harness caught it firing on **48 of a vanilla pistol's 57 blocks**.
+`getParentLinks()` holds the Ptr links a block *owns*, not the blocks pointing
+*at* it — and the actual reverse relation, `rootLinks`, is built as "every block
+nothing refers to" and then written back over the footer's Roots array, so in this
+model **an orphan and a legitimate root are the same thing by construction**.
+Deciding it needs a reverse index NifModel does not keep. Removed, with the reason
+recorded next to the two that survived.
+
+### Both list modes, which is where the second bug was
+
+Hierarchy view goes through `NifProxyModel`, which had two columns and translated
+its own column numbers into the model's. It has three now. A summary that worked
+in only one of the two list modes would have been broken half the time, so the
+harness checks the proxy's mapping too.
+
+The third bug was quieter: `restoreState()` on a saved header carries its own
+column visibility and **wins over anything set at construction**, so the column
+came up backwards — visible in Block Details, where a per-block line has nothing
+to say, and hidden in the Block List, where it is the entire point. There was
+already a comment about exactly this for the Reference column; Summary is set back
+on the same line now.
+
+### Verification
+
+`WW_SUMMARY_TEST` reads the column through `data()` on the real column index and
+through the proxy, checks the status markers **in both directions** (mangle a
+path, the owning block must go red; restore it, the marker must go), and asserts
+no block in a vanilla file reads as unreferenced — which is how the wrong marker
+was caught rather than shipped.
+
+It also **grabs the widget offscreen and saves a PNG**, squeezing the sections to
+the dock's real width first: a column that reads correctly through `data()` can
+still be two pixels wide or off the right edge, and a screenshot of the columns
+you *can* see is not evidence about the one you are checking. `grab()` renders
+without showing, so it costs no focus.
+
 ## 2026-07-30d — a broken texture path now looks broken
 
 **20 checks, 0 failures, 0 skips** (`WW_TEXCOLOR_TEST`).

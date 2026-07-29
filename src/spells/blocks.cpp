@@ -1,5 +1,6 @@
 #include "blocks.h"
 #include "mesh.h"
+#include "wwblocksummary.h"
 
 #include <QApplication>
 #include <QBuffer>
@@ -2355,3 +2356,187 @@ public:
 };
 
 REGISTER_SPELL( spReferencedBy )
+
+
+// ---- Block List Summary column (WW) --------------------------------------
+// wwBlockSummary: see src/wwblocksummary.h. It lives here rather than in
+// NifModel because every line of it is per-type block knowledge, which is what
+// this file already is; the model only asks the question and paints the answer.
+
+//! 1234 -> "1234", 12340 -> "12.3k". The exact number matters below ten
+//! thousand (is this shape 8 triangles or 80?); above it, the magnitude does.
+static QString wwCount( qint64 n )
+{
+	if ( n < 10000 )
+		return QString::number( n );
+	if ( n < 10000000 )
+		return QString::asprintf( "%.1fk", double( n ) / 1000.0 );
+	return QString::asprintf( "%.1fM", double( n ) / 1000000.0 );
+}
+
+//! Does any texture path this block OWNS resolve nowhere? Only direct children
+//! and the entries of a "Textures" array are examined — a shader property's
+//! slots and a texture set's array are all that ever hold one — because a full
+//! subtree walk would visit every vertex of a BSTriShape on every repaint.
+static bool wwHasMissingTexture( const NifModel * nif, const QModelIndex & block )
+{
+	auto broken = [nif]( const QModelIndex & idx ) {
+		QString path, resolved;
+		return nif->texturePathInfo( nif->getItem( idx ), path, resolved )
+			&& !path.trimmed().isEmpty() && resolved.isEmpty();
+	};
+	const int n = nif->rowCount( block );
+	for ( int r = 0; r < n; r++ ) {
+		QModelIndex child = nif->getIndex( block, r );
+		if ( !child.isValid() )
+			continue;
+		if ( broken( child ) )
+			return true;
+		if ( nif->itemName( child ) != QLatin1String( "Textures" ) )
+			continue;
+		const int m = nif->rowCount( child );
+		for ( int s = 0; s < m; s++ )
+			if ( broken( nif->getIndex( child, s ) ) )
+				return true;
+	}
+	return false;
+}
+
+QString wwBlockSummary( const NifModel * nif, int block, QString & status )
+{
+	status.clear();
+	if ( !nif || block < 0 )
+		return QString();
+	QModelIndex idx = nif->getBlockIndex( block );
+	if ( !idx.isValid() )
+		return QString();
+
+	const QString type = nif->itemName( idx );
+	QStringList bits;
+
+	// ---- geometry ----
+	if ( nif->blockInherits( idx, "NiGeometry" ) || nif->blockInherits( idx, "BSTriShape" ) ) {
+		// BSTriShape carries its own counts; NiGeometry keeps them in its Data
+		QModelIndex counts = idx;
+		if ( !nif->getIndex( counts, "Num Vertices" ).isValid() ) {
+			const int data = nif->getLink( idx, "Data" );
+			if ( data >= 0 )
+				counts = nif->getBlockIndex( data );
+		}
+		const int verts = nif->getIndex( counts, "Num Vertices" ).isValid()
+			? nif->get<int>( counts, "Num Vertices" ) : 0;
+		const int tris = nif->getIndex( counts, "Num Triangles" ).isValid()
+			? nif->get<int>( counts, "Num Triangles" ) : 0;
+		bits << QObject::tr( "%1 tris" ).arg( wwCount( tris ) )
+			<< QObject::tr( "%1 verts" ).arg( wwCount( verts ) );
+		if ( nif->getLink( idx, "Skin" ) >= 0 || nif->getLink( idx, "Skin Instance" ) >= 0 )
+			bits << QObject::tr( "skinned" );
+		QModelIndex iSeg = nif->getIndex( idx, "Segment" );
+		if ( iSeg.isValid() ) {
+			int nonEmpty = 0;
+			for ( int s = 0; s < nif->rowCount( iSeg ); s++ )
+				if ( nif->get<quint32>( nif->getIndex( iSeg, s ), "Num Primitives" ) > 0 )
+					nonEmpty++;
+			if ( nonEmpty > 0 )
+				bits << QObject::tr( "%1 segments" ).arg( nonEmpty );
+		}
+		if ( tris == 0 || verts == 0 )
+			status = QObject::tr( "no geometry" );
+
+	// ---- texture set ----
+	} else if ( nif->isNiBlock( idx, "BSShaderTextureSet" ) ) {
+		QModelIndex iTex = nif->getIndex( idx, "Textures" );
+		QString first;
+		int filled = 0;
+		for ( int s = 0; s < nif->rowCount( iTex ); s++ ) {
+			const QString p = nif->get<QString>( nif->getIndex( iTex, s ) );
+			if ( p.trimmed().isEmpty() )
+				continue;
+			filled++;
+			if ( first.isEmpty() )
+				first = p.section( QLatin1Char( '\\' ), -1 ).section( QLatin1Char( '/' ), -1 );
+		}
+		if ( !first.isEmpty() )
+			bits << first;
+		if ( filled > 1 )
+			bits << QObject::tr( "+%1 more" ).arg( filled - 1 );
+		if ( filled == 0 )
+			bits << QObject::tr( "empty" );
+
+	// ---- skin ----
+	} else if ( nif->getIndex( idx, "Num Bones" ).isValid() ) {
+		bits << QObject::tr( "%1 bones" ).arg( nif->get<int>( idx, "Num Bones" ) );
+
+	// ---- controllers ----
+	} else if ( nif->blockInherits( idx, "NiTimeController" ) ) {
+		const int target = nif->getLink( idx, "Target" );
+		if ( target >= 0 ) {
+			const QString tn = nif->get<QString>( nif->getBlockIndex( target ), "Name" );
+			bits << ( tn.isEmpty() ? QObject::tr( "→ #%1" ).arg( target )
+				: QObject::tr( "→ %1" ).arg( tn ) );
+		}
+		if ( nif->getIndex( idx, "Stop Time" ).isValid() ) {
+			const float t0 = nif->get<float>( idx, "Start Time" );
+			const float t1 = nif->get<float>( idx, "Stop Time" );
+			if ( t1 > t0 )
+				bits << QObject::tr( "%1–%2 s" )
+					.arg( QString::number( t0, 'g', 3 ), QString::number( t1, 'g', 3 ) );
+		}
+
+	// ---- animation data ----
+	} else if ( nif->getIndex( idx, "Num Keys" ).isValid() ) {
+		bits << QObject::tr( "%1 keys" ).arg( nif->get<int>( idx, "Num Keys" ) );
+
+	// ---- nodes ----
+	} else if ( nif->blockInherits( idx, "NiNode" ) ) {
+		// zero is not worth a row. A skeleton is mostly leaf bones, and "0
+		// children" down sixty rows is noise that buries the counts that matter.
+		const int kids = nif->getIndex( idx, "Num Children" ).isValid()
+			? nif->get<int>( idx, "Num Children" ) : 0;
+		if ( kids > 0 )
+			bits << QObject::tr( "%1 children" ).arg( kids );
+		const int props = nif->getIndex( idx, "Num Properties" ).isValid()
+			? nif->get<int>( idx, "Num Properties" ) : 0;
+		if ( props > 0 )
+			bits << QObject::tr( "%1 properties" ).arg( props );
+
+	// ---- extra data ----
+	} else if ( nif->getIndex( idx, "String Data" ).isValid() ) {
+		bits << nif->get<QString>( idx, "String Data" );
+	} else if ( nif->getIndex( idx, "Integer Data" ).isValid() ) {
+		bits << QString::number( nif->get<int>( idx, "Integer Data" ) );
+
+	// ---- binary blobs (bhkPhysicsSystem's Havok packfile, NiBinaryExtraData):
+	//      the size is the only fact available without decoding the thing ----
+	} else if ( nif->getIndex( idx, "Binary Data" ).isValid() ) {
+		const NifItem * bin = nif->getItem( nif->getIndex( idx, "Binary Data" ) );
+		if ( QByteArray * data = bin ? bin->get<QByteArray *>() : nullptr )
+			bits << QObject::tr( "%1 KB" ).arg( QString::number( data->size() / 1024.0, 'f', 1 ) );
+
+	// ---- shader properties: the material file, when there is one ----
+	} else if ( type.contains( QLatin1String( "Shader" ) ) || type.contains( QLatin1String( "Material" ) ) ) {
+		const QString mat = nif->getIndex( idx, "Name" ).isValid()
+			? nif->get<QString>( idx, "Name" ) : QString();
+		if ( !mat.isEmpty() )
+			bits << mat.section( QLatin1Char( '\\' ), -1 ).section( QLatin1Char( '/' ), -1 );
+	}
+
+	/* ---- statuses, which apply to any block ----
+	 *
+	 * There is exactly one, plus "no geometry" above, and that is deliberate: a
+	 * marker that is sometimes wrong is worse than no marker.
+	 *
+	 * An "unreferenced" marker was written and then removed, because this model
+	 * cannot decide it. getParentLinks() holds the Ptr links a block OWNS, not the
+	 * blocks that point AT it — reading it the other way marked 48 of a vanilla
+	 * pistol's 57 blocks broken. The reverse relation is rootLinks, and NifModel
+	 * builds that as "every block nothing refers to" (nifmodel.cpp:2838), then
+	 * writes it back over the footer's Roots array: an orphan and a legitimate
+	 * root are the same thing here, by construction. Deciding it needs a reverse
+	 * index the model does not keep.
+	 */
+	if ( status.isEmpty() && wwHasMissingTexture( nif, idx ) )
+		status = QObject::tr( "missing texture" );
+
+	return bits.join( QStringLiteral( " · " ) );
+}

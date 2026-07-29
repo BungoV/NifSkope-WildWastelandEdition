@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "xml/xmlconfig.h"
 #include "message.h"
 #include "spellbook.h"
+#include "wwblocksummary.h"
 #include "wwflagsummary.h"
 #include "data/niftypes.h"
 #include "io/nifstream.h"
@@ -1335,6 +1336,40 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 			if ( diffRefBlock >= 0 && diffItems.contains( item ) )
 				return tr( "Block %1's value — drag it onto a Value cell to apply" ).arg( diffRefBlock );
 			return QVariant();
+		default:
+			return QVariant();
+		}
+	}
+
+	/* Block List summary column: what the block IS, and a red marker when it is
+	 * broken. Only top items answer — every other row here is a FIELD, and a
+	 * field has no per-type summary to give.
+	 */
+	if ( column == WwSummaryCol ) {
+		if ( !isTopItem( item ) )
+			return QVariant();
+		const int bn = getBlockNumber( item );
+		if ( bn < 0 )
+			return QVariant();
+		switch ( role ) {
+		case Qt::DisplayRole:
+		case Qt::ToolTipRole:
+			{
+				QString status;
+				QString text = wwBlockSummary( this, bn, status );
+				if ( status.isEmpty() )
+					return text;
+				return text.isEmpty() ? status : ( text + QStringLiteral( "  ·  " ) + status );
+			}
+		case Qt::ForegroundRole:
+			{
+				QString status;
+				wwBlockSummary( this, bn, status );
+				// red for a defect, quiet grey otherwise: the column is context,
+				// not content, and must not compete with the name beside it
+				return status.isEmpty() ? QColor::fromRgb( 154, 154, 154 )
+					: QColor::fromRgb( 233, 110, 110 );
+			}
 		default:
 			return QVariant();
 		}

@@ -532,8 +532,14 @@ QModelIndex NifProxyModel::mapTo( const QModelIndex & idx ) const
 
 	QModelIndex nifidx = nif->getBlockIndex( item->block() );
 
-	if ( nifidx.isValid() )
-		nifidx = nifidx.sibling( nifidx.row(), ( idx.column() ? NifModel::ValueCol : NifModel::NameCol ) );
+	if ( nifidx.isValid() ) {
+		int col = NifModel::NameCol;
+		if ( idx.column() == 1 )
+			col = NifModel::ValueCol;
+		else if ( idx.column() >= 2 )
+			col = NifModel::WwSummaryCol;
+		nifidx = nifidx.sibling( nifidx.row(), col );
+	}
 
 	return nifidx;
 }
@@ -656,10 +662,11 @@ bool NifProxyModel::setData( const QModelIndex & index, const QVariant & v, int 
 
 QVariant NifProxyModel::headerData( int section, Qt::Orientation orient, int role ) const
 {
-	if ( !nif || section < 0 || section > 1 )
+	if ( !nif || section < 0 || section > 2 )
 		return QVariant();
 
-	return nif->headerData( ( section ? NifModel::ValueCol : NifModel::NameCol ), orient, role );
+	static const int cols[3] = { NifModel::NameCol, NifModel::ValueCol, NifModel::WwSummaryCol };
+	return nif->headerData( cols[section], orient, role );
 }
 
 /*
