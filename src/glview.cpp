@@ -2328,6 +2328,12 @@ void GLView::paintGL()
 	 *
 	 * Skipped entirely while selecting: these are reference geometry, and a
 	 * click must never land on a document that is not the one being edited.
+	 *
+	 * No per-scene light or uniform setup is needed. Those live on the shared
+	 * NifSkopeOpenGLContext (`scene->renderer`), not on the Scene, so everything
+	 * paintGL uploaded for the primary above — view transform, lighting, tone
+	 * mapping, scene options — is already in place for these too. All a secondary
+	 * needs is the same viewTrans and time.
 	 */
 	if ( !workspaceRenderOrder.isEmpty() && !scene->selecting ) {
 		for ( NifModel * wm : std::as_const( workspaceRenderOrder ) ) {

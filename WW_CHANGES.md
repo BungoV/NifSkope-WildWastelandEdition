@@ -1,5 +1,49 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30n — workspace documents render for real (07-30k was wrong)
+
+**Correction to 07-30k.** That entry said the per-document `Scene` path "still
+draws nothing" after `borrowRenderer` and left it unwired. That was wrong. It
+draws, it always drew once the two-Renderer bug was fixed, and it is now the
+default for every SOLID workspace document.
+
+The mistake was in the test, not the code. The workspace documents used to judge
+it were the X-01 Tesla **VFX** files: a few small effect ribbons whose root sits
+at the origin, drawn between the feet of a full-height primary. Nothing visibly
+appeared, and "nothing visibly appeared" got written down as "nothing drew".
+Re-run with `rig.nif` — the whole assembled armour — as the secondary against a
+single helmet as primary, and the entire rig renders behind it with its own
+materials, textures and shaders. The probe told the same story before the picture
+did: `roots=1 nodes=164 shapes=17 haveRenderer=1 boundsR=69.1` for the rig, versus
+`boundsR=-0.25` for the VFX file that had looked like a failure.
+
+This is the second time in two days that an off-frame or too-small subject got
+read as a regression. The lesson is the same one as the pistol screenshots:
+**when a render test shows nothing, first prove the subject was in frame and big
+enough to see.**
+
+The lead recorded in 07-30k — "most likely the per-frame shader and light setup
+paintGL does around the primary's draw, which a second scene never receives" —
+was also wrong, and usefully so. Those uniforms live on the shared
+`NifSkopeOpenGLContext` (`scene->renderer`), **not** on the `Scene`. View
+transform, lighting, tone mapping, scene options: all uploaded once for the
+primary and already in place for anything else drawn in the same frame. A
+secondary needs nothing but the same `viewTrans` and `time`.
+
+So `refreshSessionPreview` now routes the two buttons to two genuinely different
+things:
+
+- **Solid** → `GLView::setWorkspaceRenderModels`, one `Scene` per document, built
+  the first frame it appears and kept until it leaves the list (`make()` compiles
+  geometry and is far too expensive per frame). Options and vis mode mirror the
+  primary each frame so a secondary cannot ignore a lighting or wireframe change.
+- **Ghost** → still the flat translucent soup, which is what "roughly where does
+  this sit" wants and which avoids threading a global alpha through every shader.
+
+Verified with no environment flags set: primary `rig.nif`, `X01_Torso_Tesla.nif`
+solid and `X01_Helmet.nif` ghosted — the Tesla fan assembly appears on the chest
+with its own material, and the helmet reads as translucent over the head.
+
 ## 2026-07-30m — bake a posed rig into loading-screen art
 
 The last step of the pipeline. In the Loaded NIFs list, 2+ rows selected:

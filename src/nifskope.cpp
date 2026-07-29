@@ -2119,27 +2119,27 @@ void NifSkope::refreshSessionPreview()
 	 * wants and which avoids threading a global alpha through every shader.
 	 */
 	QVector<Vector3> solid, ghost;
+	QVector<NifModel *> sceneModels;
+	auto addDocument = [&]( NifModel * nif, bool isGhost ) {
+		if ( isGhost )
+			ghost += sessionDocumentTriangleSoup( nif );
+		else
+			sceneModels.append( nif );
+	};
+
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
 		if ( !document || document == this || !document->sessionCollectionMember
 			|| !document->sessionPreviewVisible
 			|| document->sessionPreviewUnloaded || document->currentFile.isEmpty() )
 			continue;
-		( document->sessionPreviewGhost ? ghost : solid )
-			+= sessionDocumentTriangleSoup( document->nif );
+		addDocument( document->nif, document->sessionPreviewGhost );
 	}
 	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
 		if ( !document || !document->selectedInWorkspace() || document->currentFile.isEmpty() )
 			continue;
-		( document->sessionPreviewGhost ? ghost : solid )
-			+= sessionDocumentTriangleSoup( document->nif );
+		addDocument( document->nif, document->sessionPreviewGhost );
 	}
-	/* Both still go through the soup. Routing SOLID documents to a real per-
-	 * document Scene is written and wired (GLView::setWorkspaceRenderModels) but
-	 * draws nothing yet — see WW_CHANGES 07-30k — and a document that renders as
-	 * a flat grey shape is strictly better than one that renders as nothing, so
-	 * the switch stays here until the Scene path is proven.
-	 */
-	ogl->setWorkspaceRenderModels( QVector<NifModel *>() );
+	ogl->setWorkspaceRenderModels( sceneModels );
 	if ( solid.isEmpty() && ghost.isEmpty() ) ogl->clearSessionDocumentPreview();
 	else ogl->setSessionDocumentPreview( solid, ghost );
 }
