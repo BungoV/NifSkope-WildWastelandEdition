@@ -198,6 +198,13 @@ public:
 	//! Write the simulated pose back to the bound nodes; returns how many moved.
 	//! The only thing in this mode that touches the file.
 	int physicsCapturePose();
+	//! The rate a physics recording is captured and scrubbed at.
+	static constexpr float PHYSICS_RECORD_FPS = 60.0f;
+	//! Seconds of physics recording available, 0 when there is none. While this
+	//! is non-zero the timeline dock scrubs the recording instead of the scene.
+	float physicsRecordingRange() const;
+	//! Push the recording's extent to the timeline, as frames accumulate.
+	void refreshPhysicsTimeline();
 	//! what the viewport is currently drawing as a collision preview
 	const QVector<Vector3> & collisionPreview() const { return collisionPreviewSoup; }
 	bool physicsStatsShown() const { return physicsShowStats; }

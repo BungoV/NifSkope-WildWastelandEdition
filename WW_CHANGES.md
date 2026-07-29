@@ -1,5 +1,52 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-30b — one scrubber, and P4 was not blocked after all
+
+**7 rigs, 671 checks, 0 failures, 1 correct skip.**
+
+### The recording moved to the timeline
+
+A physics recording **is** a timeline: a run of poses at a fixed rate, scrubbed
+back and forth to find the frame worth keeping. It had its own slider in the
+Collision Manager while this application already has a timeline dock with a ruler,
+a playhead and a keyframe view — two scrub bars that did not know about each other,
+in a program whose whole point is that one of them is good.
+
+Routed through `GLView::setSceneTime` rather than by teaching `TimelineWidget`
+about physics. The dock already drives that slot and reads `sceneTimeChanged` back
+for its range, so answering on the GLView side hands the timeline the recording
+**with no changes to the widget at all** — and the moment the recording goes, the
+scene answers again. The panel keeps Record and Live; the slider is gone.
+
+Checked through the same slot the playhead uses, rather than by calling `seek()`
+and hoping the two are wired together.
+
+### P4's blocker was stale
+
+`TO_BE_IMPLEMENTED.md` had *Compound / instance encoding — BLOCKED, needs reference
+pairs to validate against.* The §4d encoder campaign supplied exactly that months
+of work ago: every vanilla file is a reference pair, and the assembler writes
+**compounds 27/27 and compound instances and children byte-identical**, inside the
+470/470 byte-exact packfile result. The line survived because nobody came back to
+it after the campaign closed.
+
+Two items genuinely remain — per-triangle face-material painting, and
+`hknpBSMaterialProperties` beyond the single-material table. Both are real features
+wanting design input, so they are sized and left rather than started blind.
+
+### Smaller
+
+Two material pickers sat in one dock with nothing saying which was which. They are
+**Material for new collision** (a default for whatever Create makes next) and
+**Material of this body** (the selected one).
+
+`physicspanel.cpp`'s constructor gave up its two self-contained parts —
+`applyPhysicsPreset` touches no widget at all, and `buildToolButtons` is a table
+and a loop nothing else refers to by name. The remaining ~55 locals are genuinely
+shared with the sync closure and every connect; turning those into members is a
+hundred-symbol rename that would buy navigation at the cost of the thing currently
+passing 671 checks, so it was not done.
+
 ## 2026-07-30a — the zero-area triangles were ours
 
 **39 files, 125,054 preview triangles, 0 degenerate.** Physics harness: 7 rigs,

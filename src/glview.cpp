@@ -337,8 +337,11 @@ bool GLView::setPhysicsSimMode( bool on, int systemBlock )
 		physicsPreview.stop();
 		clearCollisionPreview();
 		update();
-		if ( was )
+		if ( was ) {
+			// the scene gets its ruler back
+			refreshPhysicsTimeline();
 			emit physicsSimModeChanged( false );
+		}
 		return false;
 	}
 	/* A request for a PARTICULAR system restarts even if one is already running.
@@ -358,6 +361,7 @@ bool GLView::setPhysicsSimMode( bool on, int systemBlock )
 	}
 	setCollisionPreview( physicsPreview.soup() );
 	update();
+	refreshPhysicsTimeline();
 	emit physicsSimModeChanged( true );
 	return true;
 }
@@ -366,11 +370,16 @@ void GLView::physicsTick( float dt )
 {
 	if ( !physicsPreview.active() )
 		return;
+	const int before = physicsPreview.frameCount();
 	physicsPreview.step( dt );
 	// pushed every tick even while paused: a paused sim still moves when it is
 	// being dragged, and a preview that only refreshed while running would show
 	// the grab doing nothing
 	setCollisionPreview( physicsPreview.soup() );
+	// the timeline's ruler is the recording's length, so it has to hear about
+	// every frame added -- and about the oldest being dropped at the cap
+	if ( physicsPreview.frameCount() != before )
+		refreshPhysicsTimeline();
 }
 
 bool GLView::physicsMousePress( QMouseEvent * event )
@@ -18266,11 +18275,58 @@ void GLView::setAnimSpeed( float speed )
 	animSpeed = speed;
 }
 
+/*! Scrub the scene, or the physics recording when there is one.
+ *
+ * A physics recording IS a timeline: a run of poses at a fixed rate, scrubbed
+ * back and forth to find the frame worth keeping. It had its own slider in the
+ * Collision Manager while this application already has a timeline dock with a
+ * ruler, a playhead and a keyframe view -- two scrub bars that did not know
+ * about each other, in a program whose whole point is that one of them is good.
+ *
+ * Routed HERE rather than by teaching TimelineWidget about physics. The dock
+ * already drives setSceneTime and reads sceneTimeChanged back for its range, so
+ * answering on this side gives the timeline the recording with no changes to the
+ * widget at all -- and the moment the recording goes, the scene answers again.
+ */
 void GLView::setSceneTime( float t )
 {
+	if ( physicsRecordingRange() > 0.0f ) {
+		physicsPreview.seek( int( std::lround( t * double( PHYSICS_RECORD_FPS ) ) ) );
+		setCollisionPreview( physicsPreview.soup() );
+		time = t;
+		update();
+		emit sceneTimeChanged( time, 0.0f, physicsRecordingRange() );
+		return;
+	}
 	time = t;
 	update();
 	emit sceneTimeChanged( time, scene->timeMin(), scene->timeMax() );
+}
+
+/*! Seconds of physics recording available, or 0 when there is none.
+ *
+ * One frame is not a range -- a ruler from 0 to 0 has nothing to scrub -- so a
+ * recording only takes the timeline over once it has two.
+ */
+float GLView::physicsRecordingRange() const
+{
+	if ( !physicsPreview.active() || physicsPreview.frameCount() < 2 )
+		return 0.0f;
+	return float( physicsPreview.frameCount() - 1 ) / PHYSICS_RECORD_FPS;
+}
+
+/*! Tell the timeline the recording's extent changed.
+ *
+ * Called as frames accumulate and when one is dropped, so the ruler grows with
+ * the recording instead of showing the length it had when the dock last asked.
+ */
+void GLView::refreshPhysicsTimeline()
+{
+	const float range = physicsRecordingRange();
+	if ( range > 0.0f )
+		emit sceneTimeChanged( std::min( time, range ), 0.0f, range );
+	else
+		emit sceneTimeChanged( time, scene->timeMin(), scene->timeMax() );
 }
 
 void GLView::setSceneSequence( const QString & seqname )

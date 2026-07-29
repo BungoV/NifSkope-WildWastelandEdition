@@ -2205,7 +2205,11 @@ private:
 		defaultsToggle->setChecked( createSettings.value( "CollisionManager/Create/DefaultsExpanded", false ).toBool() );
 		defaultsToggle->setArrowType( defaultsToggle->isChecked() ? Qt::DownArrow : Qt::RightArrow );
 		defaultsToggle->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
-		auto * materialLabel = new QLabel( tr( "New collision material" ), createGroup );
+		/* Two material pickers live in this dock and neither said which was which.
+		 * This one is a DEFAULT for whatever Create makes next; the other, in the
+		 * selected-body editor, edits the body you have selected right now.
+		 */
+		auto * materialLabel = new QLabel( tr( "Material for new collision" ), createGroup );
 		auto * materialLineWidget = new QWidget( createGroup );
 		auto * materialLine = new QHBoxLayout( materialLineWidget );
 		materialLine->setContentsMargins( 0, 0, 0, 0 );
@@ -2347,7 +2351,8 @@ private:
 			form->addWidget( new QLabel( rightLabel, physicsGroup ), row, 2 );
 			form->addWidget( right, row, 3 );
 		};
-		addPhysicsRow( 0, tr( "Collision layer" ), layer, tr( "Material" ), materialEditor );
+		addPhysicsRow( 0, tr( "Collision layer" ), layer,
+			tr( "Material of this body" ), materialEditor );
 		addPhysicsRow( 1, tr( "Mass" ), mass, tr( "Motion" ), motionSystem );
 		addPhysicsRow( 2, tr( "Friction" ), friction, tr( "Quality" ), qualityType );
 		addPhysicsRow( 3, tr( "Restitution" ), restitution, tr( "Solver deact." ), solverDeactivation );

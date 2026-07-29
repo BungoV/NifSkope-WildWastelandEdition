@@ -68,7 +68,7 @@ bottom.
 | 1 | **Skeleton Manager** workspace | large | **phase 1 SHIPPED 07-27j** (read-only); phases 2-4 open |
 | 2 | **Pose Manager** workspace | large | **SHIPPED 07-22d..l**; prop staging + 4 refinements deferred |
 | 3 | Performance 15c + 16 (flattened storage + off-thread parse) | large | deferred as one joint project, prereqs listed |
-| 4 | Collision Manager P4 | medium | partly **blocked** (compound/instance) |
+| 4 | Collision Manager P4 | medium | **unblocked 07-30**; 2 items left, both ready |
 | 5 | Block Details: remaining typed editors | small | **2 of 4 were already done**; 2 remain, ready to build |
 | 6 | Block Details: array table (P4) | medium | not started |
 | 7 | Block Details: whole-file search, recent values/revert, hex viewer (P5) | medium | not started |
@@ -267,8 +267,14 @@ holds ≤255 verts/tris — that is the format — and the encoder now partition
 mesh into up to **4096** such sections by spatial slab, with per-section domains,
 and single-section output stays byte-identical to the validated writer.
 
-- **Compound / instance encoding — BLOCKED.** Needs reference pairs to validate
-  against. `COLLISION_MANAGER_HANDOFF.md` is explicit: **do not build blind.**
+- ~~**Compound / instance encoding — BLOCKED.**~~ **UNBLOCKED 07-30, and in fact
+  already done.** The blocker was "needs reference pairs to validate against", and
+  the §4d encoder campaign supplied exactly that: every vanilla file is a reference
+  pair, and the assembler writes **compounds 27/27 and compound instances and
+  children byte-identical** to the originals, inside the 470/470 byte-exact
+  packfile result. `COLLISION_MANAGER_HANDOFF.md`'s "do not build blind" was
+  honoured — it was built against measurements, not guesses. This line survived
+  because nobody came back to it after the campaign closed.
 - Per-triangle face-material painting — open (0 hits in `collisiontools.cpp`).
 - `hknpBSMaterialProperties` beyond the single-material table — open.
 - The shipped multi-section encoder still needs an **in-game walk test**.

@@ -26,6 +26,99 @@
 
 #include <cmath>
 
+/*! Apply one preset. Returns false for the "choose a preset" row.
+ *
+ * Out of the constructor because it is the one part of this panel that touches
+ * no widget at all -- it is a list of solver settings, and reading it inside a
+ * lambda inside a connect inside a thousand-line constructor made it look like
+ * UI code. Every entry is a combination somebody otherwise assembles by hand to
+ * ask one question.
+ */
+/*! The six tool buttons, in a grid, wired into `group`.
+ *
+ * Lifted out for the same reason as the presets: it is a table and a loop over
+ * it, and nothing else in the panel refers to any of the buttons by name. Three
+ * to a row -- two full rows, rather than the 3+1 the four-tool version left,
+ * which put Wind on a line by itself.
+ */
+static QWidget * buildToolButtons( QWidget * parent, QButtonGroup * group )
+{
+	QWidget * row = new QWidget( parent );
+	QGridLayout * grid = new QGridLayout( row );
+	grid->setContentsMargins( 0, 0, 0, 0 );
+	grid->setSpacing( 4 );
+
+	struct ToolEntry { PhysicsPreview::Tool tool; const char * label; const char * tip; };
+	static const ToolEntry toolEntries[] = {
+		{ PhysicsPreview::Tool::Grab,  QT_TR_NOOP( "Grab" ),
+		  QT_TR_NOOP( "Pull a bone with a spring. Let go while moving and it is thrown; "
+					  "let go while still and it drops. (1)" ) },
+		{ PhysicsPreview::Tool::Shoot, QT_TR_NOOP( "Shoot" ),
+		  QT_TR_NOOP( "Hit it with an impulse where you click. Off-centre hits spin it. (2)" ) },
+		{ PhysicsPreview::Tool::Blast, QT_TR_NOOP( "Blast" ),
+		  QT_TR_NOOP( "Radial impulse from the point you click. (3)" ) },
+		{ PhysicsPreview::Tool::Wind,  QT_TR_NOOP( "Wind" ),
+		  QT_TR_NOOP( "Steady push along the view while the button is held. (4)" ) },
+		{ PhysicsPreview::Tool::Punt,  QT_TR_NOOP( "Punt" ),
+		  QT_TR_NOOP( "Shove a body away at a set SPEED, or yank it toward you -- so a "
+					  "jaw and a torso leave at the same rate. (5)" ) },
+		{ PhysicsPreview::Tool::Prop,  QT_TR_NOOP( "Ball" ),
+		  QT_TR_NOOP( "Throw a ball at the rig. The honest test of a collision mesh: "
+					  "does anything actually bounce off it. (6)" ) },
+	};
+	int r = 0, c = 0;
+	for ( const ToolEntry & te : toolEntries ) {
+		QPushButton * b = new QPushButton( QObject::tr( te.label ), row );
+		b->setCheckable( true );
+		b->setToolTip( QObject::tr( te.tip ) );
+		group->addButton( b, int( te.tool ) );
+		grid->addWidget( b, r, c );
+		if ( ++c == 3 ) {
+			c = 0;
+			r++;
+		}
+	}
+	return row;
+}
+
+static bool applyPhysicsPreset( PhysicsPreview & pv, int idx )
+{
+	switch ( idx ) {
+	case 1:     // zero gravity: look at the joints, not at a heap
+		pv.setGravityEnabled( false );
+		pv.setGroundEnabled( false );
+		pv.setTimeScale( 1.0f );
+		pv.setHighlightLimits( true );
+		return true;
+	case 2:     // slow motion: watch a pop, and keep it
+		pv.setTimeScale( 0.15f );
+		pv.setRecording( true );
+		return true;
+	case 3:     // drop and settle
+		pv.setGravityEnabled( true );
+		pv.setGravityStrength( 9.81f );
+		pv.setGroundEnabled( true );
+		pv.setGroundVisible( true );
+		pv.resetGroundHeight();
+		pv.setGroundFriction( 1.0f );
+		pv.setDamping( 0.4f );
+		pv.setTimeScale( 1.0f );
+		pv.reset();
+		return true;
+	case 4:     // ice
+		pv.setGroundEnabled( true );
+		pv.setGroundFriction( 0.0f );
+		pv.setFriction( 0.0f );
+		return true;
+	case 5:     // stiff and stable: buy accuracy with time
+		pv.setIterations( 8 );
+		pv.setSubsteps( 16 );
+		pv.setDamping( 0.2f );
+		return true;
+	}
+	return false;
+}
+
 PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	QAction * showAction, QWidget * parent )
 	: QWidget( parent ), m_ogl( ogl ), m_nif( nif ), m_mode( mode ), m_showAction( showAction )
@@ -101,44 +194,9 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		toolHint->setFont( hf );
 	}
 	col->addWidget( toolHint );
-	QWidget * toolsRow = new QWidget( this );
-	QGridLayout * tools = new QGridLayout( toolsRow );
-	tools->setContentsMargins( 0, 0, 0, 0 );
-	tools->setSpacing( 4 );
 	QButtonGroup * toolGroup = new QButtonGroup( this );
 	toolGroup->setExclusive( true );
-	struct ToolEntry { PhysicsPreview::Tool tool; const char * label; const char * tip; };
-	static const ToolEntry toolEntries[] = {
-		{ PhysicsPreview::Tool::Grab,  QT_TR_NOOP( "Grab" ),
-		  QT_TR_NOOP( "Pull a bone with a spring. Let go while moving and it is thrown; "
-					  "let go while still and it drops. (1)" ) },
-		{ PhysicsPreview::Tool::Shoot, QT_TR_NOOP( "Shoot" ),
-		  QT_TR_NOOP( "Hit it with an impulse where you click. Off-centre hits spin it. (2)" ) },
-		{ PhysicsPreview::Tool::Blast, QT_TR_NOOP( "Blast" ),
-		  QT_TR_NOOP( "Radial impulse from the point you click. (3)" ) },
-		{ PhysicsPreview::Tool::Wind,  QT_TR_NOOP( "Wind" ),
-		  QT_TR_NOOP( "Steady push along the view while the button is held. (4)" ) },
-		{ PhysicsPreview::Tool::Punt,  QT_TR_NOOP( "Punt" ),
-		  QT_TR_NOOP( "Shove a body away along the view, or yank it toward you. "
-					  "Heavier and more directed than Shoot. (5)" ) },
-		{ PhysicsPreview::Tool::Prop,  QT_TR_NOOP( "Ball" ),
-		  QT_TR_NOOP( "Throw a ball at the rig. The honest test of a collision mesh: "
-					  "does anything actually bounce off it. (6)" ) },
-	};
-	int tRow = 0, tCol = 0;
-	for ( const ToolEntry & te : toolEntries ) {
-		QPushButton * b = new QPushButton( tr( te.label ), toolsRow );
-		b->setCheckable( true );
-		b->setToolTip( tr( te.tip ) );
-		toolGroup->addButton( b, int( te.tool ) );
-		tools->addWidget( b, tRow, tCol );
-		// six tools, three to a row: two full rows rather than the 3+1 the
-		// four-tool version left, which put Wind on a line by itself
-		if ( ++tCol == 3 ) {
-			tCol = 0;
-			tRow++;
-		}
-	}
+	QWidget * toolsRow = buildToolButtons( this, toolGroup );
 	col->addWidget( toolsRow );
 
 	/* Parameters of the ACTIVE tool, and only that tool.
@@ -312,12 +370,16 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 		play->addWidget( b );
 	col->addLayout( play );
 
-	/* Record and scrub.
+	/* Record here, SCRUB in the Animation Manager.
 	 *
-	 * A ragdoll settles in about two seconds and the one frame worth keeping
-	 * goes past in a sixtieth of one. Without a recording the only way back to
-	 * it is to reset and try to catch it with the pause key, which is a game of
-	 * reflexes rather than a tool.
+	 * A ragdoll settles in about two seconds and the one frame worth keeping goes
+	 * past in a sixtieth of one, so a recording is what makes it findable. The
+	 * scrubbing belongs to the timeline dock: a recording is a run of poses at a
+	 * fixed rate, which is precisely what that dock already has a ruler and a
+	 * playhead for, and a second slider here was two scrub bars in one program
+	 * that did not know about each other.
+	 *
+	 * Only the toggle and the way back to live are left.
 	 */
 	QWidget * recRow = new QWidget( this );
 	QHBoxLayout * rec = new QHBoxLayout( recRow );
@@ -325,16 +387,17 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	rec->setSpacing( 4 );
 	QPushButton * recBtn = new QPushButton( tr( "Record" ), this );
 	recBtn->setCheckable( true );
-	recBtn->setToolTip( tr( "Keep every frame as it is simulated, so it can be scrubbed "
-							"back through. Capped at 20 seconds, oldest dropped." ) );
-	QSlider * scrub = new QSlider( Qt::Horizontal, this );
-	scrub->setToolTip( tr( "Move through the recording. Scrubbing pauses, since running "
-						   "on from a frame you went back to would overwrite the rest." ) );
+	recBtn->setToolTip( tr( "Keep every frame as it is simulated. Scrub it on the "
+							"Animation Manager's timeline. Capped at 20 seconds, "
+							"oldest dropped." ) );
+	QLabel * recHint = new QLabel( this );
+	recHint->setToolTip( tr( "The recording is scrubbed from the timeline, which has the "
+							 "ruler and the playhead for it." ) );
 	QPushButton * liveBtn = new QPushButton( tr( "Live" ), this );
 	liveBtn->setToolTip( tr( "Leave the recording and carry on simulating from the pose "
 							 "on screen." ) );
 	rec->addWidget( recBtn );
-	rec->addWidget( scrub, 1 );
+	rec->addWidget( recHint, 1 );
 	rec->addWidget( liveBtn );
 	col->addWidget( recRow );
 
@@ -712,21 +775,19 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 				(QWidget *)iterSpin, (QWidget *)subSpin, (QWidget *)tiltSpin,
 				(QWidget *)headSpin, (QWidget *)presets,
 				(QWidget *)unpinBtn, (QWidget *)captureBtn, (QWidget *)recBtn,
-				(QWidget *)scrub, (QWidget *)liveBtn } )
+				(QWidget *)liveBtn } )
 			w->setEnabled( on );
 		tiltSpin->setEnabled( on && pv.gravityEnabled() );
 		headSpin->setEnabled( on && pv.gravityEnabled() && pv.gravityStrength() > 0.0f );
 		unpinBtn->setEnabled( on && pv.pinnedCount() > 0 );
 
 		// recording
-		QSignalBlocker br( recBtn ), bsc( scrub );
+		QSignalBlocker br( recBtn );
 		recBtn->setChecked( pv.recording() );
-		scrub->setEnabled( on && pv.frameCount() > 1 );
-		scrub->setRange( 0, std::max( 0, pv.frameCount() - 1 ) );
-		if ( pv.frameIndex() >= 0 )
-			scrub->setValue( pv.frameIndex() );
-		else
-			scrub->setValue( scrub->maximum() );
+		// says where the scrubbing is, and how much there is to scrub
+		recHint->setText( pv.frameCount() > 1
+			? tr( "%1 frames — scrub on the timeline" ).arg( pv.frameCount() )
+			: ( pv.recording() ? tr( "recording..." ) : QString() ) );
 		liveBtn->setEnabled( on && pv.frameIndex() >= 0 );
 
 
@@ -1063,16 +1124,6 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 			m_ogl->physicsSim().setRecording( on );
 			syncCollisionPanel();
 		} );
-	connect( scrub, &QSlider::valueChanged, this,
-		[this, syncCollisionPanel]( int v ) {
-			PhysicsPreview & pv = m_ogl->physicsSim();
-			if ( pv.frameCount() < 2 )
-				return;
-			pv.seek( v );
-			m_ogl->setCollisionPreview( pv.soup() );
-			m_ogl->update();
-			syncCollisionPanel();
-		} );
 	connect( liveBtn, &QPushButton::clicked, this, [this, syncCollisionPanel]() {
 		PhysicsPreview & pv = m_ogl->physicsSim();
 		pv.resumeLive();
@@ -1088,47 +1139,13 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 			syncCollisionPanel();
 		} );
 
-	/* Presets set several controls at once and then re-sync, so the panel shows
-	 * what they did rather than leaving the widgets stale.
-	 */
+	// presets re-sync afterwards, so the panel shows what they did rather than
+	// leaving every widget they touched displaying its old value
 	connect( presets, &QComboBox::activated, this,
 		[this, presets, syncCollisionPanel]( int idx ) {
 			PhysicsPreview & pv = m_ogl->physicsSim();
-			switch ( idx ) {
-			case 1:     // zero gravity: look at the joints, not at a heap
-				pv.setGravityEnabled( false );
-				pv.setGroundEnabled( false );
-				pv.setTimeScale( 1.0f );
-				pv.setHighlightLimits( true );
-				break;
-			case 2:     // slow motion: watch a pop, and keep it
-				pv.setTimeScale( 0.15f );
-				pv.setRecording( true );
-				break;
-			case 3:     // drop and settle
-				pv.setGravityEnabled( true );
-				pv.setGravityStrength( 9.81f );
-				pv.setGroundEnabled( true );
-				pv.setGroundVisible( true );
-				pv.resetGroundHeight();
-				pv.setGroundFriction( 1.0f );
-				pv.setDamping( 0.4f );
-				pv.setTimeScale( 1.0f );
-				pv.reset();
-				break;
-			case 4:     // ice
-				pv.setGroundEnabled( true );
-				pv.setGroundFriction( 0.0f );
-				pv.setFriction( 0.0f );
-				break;
-			case 5:     // stiff and stable: buy accuracy with time
-				pv.setIterations( 8 );
-				pv.setSubsteps( 16 );
-				pv.setDamping( 0.2f );
-				break;
-			default:
+			if ( !applyPhysicsPreset( pv, idx ) )
 				return;
-			}
 			presets->setCurrentIndex( 0 );
 			m_ogl->setCollisionPreview( pv.soup() );
 			m_ogl->update();

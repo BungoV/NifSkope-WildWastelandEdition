@@ -4335,6 +4335,33 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QStringLiteral( "the rig moved while recording (%1 units)" )
 							.arg( double( drift ), 0, 'f', 3 ) );
 
+					/* The TIMELINE scrubs it, not a slider of the panel's own.
+					 *
+					 * Driven through GLView::setSceneTime, which is the slot the
+					 * timeline dock's playhead is connected to -- so this exercises
+					 * the same path a drag on the ruler takes, rather than calling
+					 * seek() and hoping the two are wired together.
+					 */
+					const float span = gl->physicsRecordingRange();
+					log << QStringLiteral( "      the recording offers the timeline %1 s" )
+						.arg( double( span ), 0, 'f', 2 );
+					check( span > 0.5f,
+						QStringLiteral( "the recording hands the timeline a range" ) );
+					int rangeSeen = -1;
+					float lo = -1.0f, hi = -1.0f;
+					auto conn = QObject::connect( gl, &GLView::sceneTimeChanged, gl,
+						[&rangeSeen, &lo, &hi]( float, float mn, float mx ) {
+							rangeSeen = 1;
+							lo = mn;
+							hi = mx;
+						} );
+					gl->setSceneTime( 0.0f );
+					QObject::disconnect( conn );
+					check( rangeSeen > 0 && lo == 0.0f && std::fabs( hi - span ) < 0.01f,
+						QStringLiteral( "and reports it back as the scene range" ) );
+					check( pv.frameIndex() == 0,
+						QStringLiteral( "scrubbing the timeline seeks the recording" ) );
+
 					pv.seek( 0 );
 					check( pv.paused(), QStringLiteral( "scrubbing pauses" ) );
 					const QVector<Vector3> back = pv.soup();
@@ -4350,6 +4377,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					pv.setRecording( false );
 					pv.clearRecording();
 					check( pv.frameCount() == 0, QStringLiteral( "the recording can be cleared" ) );
+					// ...and the scene gets its own ruler back
+					check( gl->physicsRecordingRange() == 0.0f,
+						QStringLiteral( "and the timeline goes back to the scene" ) );
 					pv.setPaused( false );
 					pv.reset();
 				}
