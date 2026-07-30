@@ -372,6 +372,11 @@ public:
 	 *  and a hidden document keeps whatever see-through setting it had. */
 	int workspaceDisplayMode( int backgroundIndex ) const;
 	int workspaceDocumentCount() const;
+	//! Block count of a workspace document, so a merge into it can be measured.
+	int workspaceBlockCount( int backgroundIndex ) const;
+	//! Splice workspace documents into another one in place (the "Merge Into" menu
+	//! item, addressed by position so it can be scripted).
+	bool mergeWorkspaceDocumentsInto( int targetIndex, const QList<int> & donorIndices );
 	//! Render the Loaded NIFs list offscreen to a PNG — the row buttons can only
 	//! be checked by looking at them.
 	bool grabLoadedNifsView( const QString & path ) const;
@@ -379,7 +384,10 @@ private:
 	//! Loaded NIFs, 2+ rows selected: offer to merge them into a new file. The
 	//! FIRST row is the target, so the skeleton goes first and dictates position
 	//! for everything spliced in after it. Nothing loaded is modified.
-	void mergeLoadedDocumentsMenu( const QPoint & globalPos );
+	//! Multi-row menu. `clicked` names the target the others are spliced into.
+	void mergeLoadedDocumentsMenu( const QPoint & globalPos,
+	                               const QModelIndex & clicked = QModelIndex() );
+	void mergeIntoLoadedDocument( const QList<QPair<QString, class NifModel *>> & picked );
 	//! Ask which sequence and which instant, then bake it. Per loaded document, so
 	//! each limb can be frozen at its own moment before anything is merged.
 	//! Returns true when the model was changed.

@@ -1,5 +1,57 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31b — Merge Into, and proof the merge carries everything
+
+### Merge Into
+
+The multi-row menu only offered **Merge into a new NIF…**, which writes a file and
+leaves every loaded document alone. Added **Merge N Selected Into "<name>"**: the
+others are spliced into the loaded document itself, no save dialog, and the result
+stays in the workspace where you can look at it.
+
+The target is now **the row you right-clicked**. It used to be whichever selected
+row happened to come first, mentioned only in a tooltip — so which file absorbed
+the others depended on selection order you cannot see. Clicking one of several
+selected rows is an unambiguous way to say which, so the clicked row is moved to
+the front for both merge paths.
+
+`nifMergeData` already wraps each donor in its own `nifSnapshotOp`, so undo steps
+back one donor at a time rather than all-or-nothing.
+
+### Does the merge carry everything?
+
+Asked directly, so it was measured rather than asserted:
+`tests/merge/carries_everything.sh` takes a block-type histogram of the target and
+every donor, merges, and requires the arithmetic to hold.
+
+It does. Across three cases — two Tesla effect files, armour plus its hardware
+layer, and the full 15-donor rig — **every single non-`NiNode` type adds up
+exactly**: `NiControllerManager`, `NiControllerSequence`, `NiTextKeyExtraData`,
+`NiDefaultAVObjectPalette`, every interpolator/data pair, all nine `NiPSys*`
+modifier types, `NiParticleSystem`, `NiPSysData`, `BSProceduralLightningController`,
+both shader-property controller types. No losses and no duplicates.
+
+`NiNode` is the one type allowed to shrink, and does: by 2, 14 and 105 across the
+three cases. That is the bone dedupe that lets merged armour share one skeleton
+instead of carrying six copies, not loss.
+
+Counts alone are not enough for sequences — one that survived but got renamed is
+broken, because sequences are addressed by name — so every donor's sequence
+**names** are checked to still be present.
+
+**Proven to bite.** `WW_BREAK=1` throws the merge away and measures the bare target
+instead, which is precisely "the donors did not make it": 43, 9 and 48 block types
+reported lost and 4 and 12 sequence names gone. A green run means something.
+
+### Proof for Merge Into
+
+`WW_WORKSPACE_TEST` 13 → 18 checks with `WW_WORKSPACE_MERGE=1`. The in-place path
+is driven for real, modal summary included (a timer dismisses it), and measured:
+target **132 → 290** blocks, donor **159 → 159**. What that rules out is a merge
+that emptied the donor or edited the wrong one of the two, both of which look
+identical from the dialog. Plus the guards — merging a document that is not there,
+and merging a document into itself, both correctly refuse.
+
 ## 2026-07-31a — Loaded NIFs: selection stops hiding things, and the eye
 
 ### The bug: selection *was* visibility

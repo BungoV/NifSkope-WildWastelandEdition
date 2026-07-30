@@ -3252,6 +3252,49 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						pick( 0 );
 					}
 
+					/* WW_WORKSPACE_MERGE=1: "Merge Into", the in-place path.
+					 *
+					 * The other merge writes a new file and leaves every loaded
+					 * document alone. This one changes a document you have open, so
+					 * what needs proving is that the target GREW by the donor and the
+					 * donor was left untouched — a merge that silently emptied the
+					 * donor, or edited the wrong one of the two, would look the same
+					 * from the dialog.
+					 *
+					 * It ends in a modal summary, so a driver dismisses it; that also
+					 * means the real code path runs, dialog included.
+					 */
+					if ( added >= 2 && qEnvironmentVariableIsSet( "WW_WORKSPACE_MERGE" ) ) {
+						const int targetBefore = skope->workspaceBlockCount( 0 );
+						const int donorBefore = skope->workspaceBlockCount( 1 );
+						auto * dismiss = new QTimer( skope );
+						QObject::connect( dismiss, &QTimer::timeout, skope, []() {
+							if ( auto * mb = qobject_cast<QMessageBox *>(
+									QApplication::activeModalWidget() ) ) {
+								if ( !mb->buttons().isEmpty() )
+									mb->buttons().first()->click();
+							}
+						} );
+						dismiss->start( 100 );
+						const bool merged = skope->mergeWorkspaceDocumentsInto( 0, { 1 } );
+						dismiss->stop();
+						settle( 400 );
+						const int targetAfter = skope->workspaceBlockCount( 0 );
+						const int donorAfter = skope->workspaceBlockCount( 1 );
+						log << "merge into: target " << targetBefore << " -> " << targetAfter
+							<< ", donor " << donorBefore << " -> " << donorAfter << "\n";
+						check( "the in-place merge reported success", merged );
+						check( "the target absorbed the donor", targetAfter > targetBefore );
+						check( "the donor was left alone", donorAfter == donorBefore );
+						// Dedupe means the sum is an upper bound, never a target.
+						check( "the target did not exceed target + donor",
+							targetAfter <= targetBefore + donorBefore );
+						check( "merging into a document that is not there fails",
+							!skope->mergeWorkspaceDocumentsInto( 0, { 99 } ) );
+						check( "merging a document into itself fails",
+							!skope->mergeWorkspaceDocumentsInto( 0, { 0 } ) );
+					}
+
 					const QString listShot =
 						QApplication::applicationDirPath() + "/ww_workspace_list.png";
 					const QString viewShot =

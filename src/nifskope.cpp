@@ -1317,7 +1317,7 @@ NifSkope::NifSkope( bool background )
 			// want to do with this document" — it is "combine these", so it gets
 			// its own menu rather than a merge item buried in the per-row one.
 			if ( loadedNifsView->selectionModel()->selectedRows().size() > 1 ) {
-				mergeLoadedDocumentsMenu( loadedNifsView->viewport()->mapToGlobal( pos ) );
+				mergeLoadedDocumentsMenu( loadedNifsView->viewport()->mapToGlobal( pos ), index );
 				return;
 			}
 			if ( NifSkope * document = documentFromBrowserIndex( index ) )
@@ -1819,7 +1819,71 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
  * target's bytes, so a merge that turns out wrong costs a file on disk and not
  * the documents in the workspace.
  */
-void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
+/*! Splice the rest of the selection into the first one, in the live model.
+ *
+ * The difference from "merge into a new NIF" is that this changes a document you
+ * have loaded, so it must be reversible and it must carry EVERYTHING — animation
+ * controllers, NiControllerSequences, particle systems, the lot. nifMergeData is
+ * the same splice both paths use and it wraps each donor in its own
+ * nifSnapshotOp, so undo steps back one donor at a time.
+ */
+void NifSkope::mergeIntoLoadedDocument( const QList<QPair<QString, NifModel *>> & picked )
+{
+	if ( picked.size() < 2 || !picked.first().second )
+		return;
+	NifModel * target = picked.first().second;
+
+	auto snapshot = []( const NifModel * src, QByteArray & bytes ) {
+		QBuffer buf( &bytes );
+		return buf.open( QIODevice::WriteOnly ) && src->save( buf );
+	};
+
+	QStringList report, dupes;
+	int shapes = 0, done = 0;
+	for ( int i = 1; i < picked.size(); i++ ) {
+		if ( !picked.at( i ).second )
+			continue;
+		QByteArray bytes;
+		if ( !snapshot( picked.at( i ).second, bytes ) ) {
+			QMessageBox::warning( this, tr( "Merge" ),
+				tr( "Could not read %1." ).arg( picked.at( i ).first ) );
+			break;
+		}
+		NifMergeResult r;
+		if ( !nifMergeData( target, bytes, picked.at( i ).first, true, r ) ) {
+			QMessageBox::warning( this, tr( "Merge" ), r.error );
+			break;
+		}
+		done++;
+		shapes += r.shapesAdded;
+		dupes << r.duplicateNames;
+		QString where;
+		if ( !r.namedAttachments.isEmpty() )
+			where = tr( ", branches attached by name to %1" )
+				.arg( r.namedAttachments.join( QStringLiteral( ", " ) ) );
+		else if ( !r.attachedTo.isEmpty() )
+			where = tr( ", attached to %1" ).arg( r.attachedTo );
+		else if ( r.isEffect )
+			where = tr( ", attached to the ROOT — its AttachT names no node" );
+		report << tr( "%1: %2 shape(s), %3 bone(s) shared%4" )
+			.arg( picked.at( i ).first ).arg( r.shapesAdded ).arg( r.nodesReused ).arg( where );
+	}
+
+	refreshAllDocumentSessions();
+	dupes.removeDuplicates();
+	QString text = tr( "Merged %1 of %2 document(s) into the loaded %3 — %4 shape(s) added.\n\n%5" )
+		.arg( done ).arg( picked.size() - 1 ).arg( picked.first().first ).arg( shapes )
+		.arg( report.join( QLatin1Char( '\n' ) ) );
+	text += tr( "\n\n%1 is modified but not saved. Undo steps back one donor at a time." )
+		.arg( picked.first().first );
+	if ( !dupes.isEmpty() )
+		text += tr( "\n\nWARNING: %1 bone name(s) now appear on more than one node "
+			"(%2). Posing will address only one of each." )
+			.arg( dupes.size() ).arg( dupes.mid( 0, 8 ).join( QStringLiteral( ", " ) ) );
+	QMessageBox::information( this, tr( "Merge" ), text );
+}
+
+void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelIndex & clicked )
 {
 	// resolve the selection, in the order the list shows it
 	QList<QPair<QString, NifModel *>> picked;
@@ -1833,11 +1897,38 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
 	if ( picked.size() < 2 )
 		return;
 
+	/* The row you right-clicked is the target.
+	 *
+	 * It used to be whichever selected row happened to come first, mentioned only
+	 * in a tooltip — so which file absorbed the others depended on selection order
+	 * you cannot see. Clicking one of several selected rows is an unambiguous way to
+	 * say which, so the clicked row is moved to the front.
+	 */
+	NifModel * clickedNif = nullptr;
+	if ( NifSkope * doc = documentFromBrowserIndex( clicked ) )
+		clickedNif = doc->nif;
+	else if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( clicked ) )
+		clickedNif = bg->nif;
+	if ( clickedNif ) {
+		for ( int i = 1; i < picked.size(); i++ )
+			if ( picked.at( i ).second == clickedNif ) {
+				picked.move( i, 0 );
+				break;
+			}
+	}
+	const QString targetName = picked.first().first;
+
 	QMenu menu( this );
 	menu.addSection( tr( "%1 documents selected" ).arg( picked.size() ) );
+	// In place first: it is the one that needs no save dialog and leaves the result
+	// loaded, which is what "combine these" usually means in a workspace.
+	QAction * doInPlace = menu.addAction( tr( "Merge %1 Selected Into \"%2\"" )
+		.arg( picked.size() - 1 ).arg( targetName ) );
+	doInPlace->setToolTip( tr( "Splice the others into the loaded %1 itself. One undo step per "
+		"donor; nothing is written to disk until you save it." ).arg( targetName ) );
 	QAction * doMerge = menu.addAction( tr( "Merge into a new NIF…" ) );
-	doMerge->setToolTip( tr( "%1 is the target; the rest are spliced into a copy of it" )
-		.arg( picked.first().first ) );
+	doMerge->setToolTip( tr( "%1 is the target; the rest are spliced into a copy of it, "
+		"leaving every loaded document untouched" ).arg( targetName ) );
 	// The last step of the loading-screen pipeline: merge, then bake the result
 	// flat. Offered here because it is the same selection and the same target.
 	QAction * doScreen = menu.addAction( tr( "Merge and Convert to Loading Screen…" ) );
@@ -1845,6 +1936,10 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos )
 		"as the vanilla LoadScreenArt files are built" ) );
 	menu.setToolTipsVisible( true );
 	QAction * chosen = menu.exec( globalPos );
+	if ( chosen == doInPlace ) {
+		mergeIntoLoadedDocument( picked );
+		return;
+	}
 	if ( chosen != doMerge && chosen != doScreen )
 		return;
 	const bool toLoadingScreen = ( chosen == doScreen );
@@ -4512,6 +4607,39 @@ bool NifSkope::setWorkspaceDisplayMode( int backgroundIndex, int mode )
 	document->sessionPreviewUnloaded = false;
 	document->sessionPreviewGhost = ( mode == 2 );
 	refreshAllDocumentSessions();
+	return true;
+}
+
+int NifSkope::workspaceBlockCount( int backgroundIndex ) const
+{
+	if ( backgroundIndex < 0 || backgroundIndex >= sessionBackgroundDocuments.size() )
+		return -1;
+	const BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	return ( document && document->nif ) ? document->nif->getBlockCount() : -1;
+}
+
+bool NifSkope::mergeWorkspaceDocumentsInto( int targetIndex, const QList<int> & donorIndices )
+{
+	auto at = [this]( int i ) -> BackgroundNifDocument * {
+		return ( i >= 0 && i < sessionBackgroundDocuments.size() )
+			? sessionBackgroundDocuments.at( i ) : nullptr;
+	};
+	BackgroundNifDocument * target = at( targetIndex );
+	if ( !target || !target->nif )
+		return false;
+
+	// Same order the menu builds: target first, donors after.
+	QList<QPair<QString, NifModel *>> picked;
+	picked.append( { target->displayName(), target->nif } );
+	for ( const int i : donorIndices ) {
+		BackgroundNifDocument * donor = at( i );
+		if ( !donor || !donor->nif || donor == target )
+			return false;
+		picked.append( { donor->displayName(), donor->nif } );
+	}
+	if ( picked.size() < 2 )
+		return false;
+	mergeIntoLoadedDocument( picked );
 	return true;
 }
 
