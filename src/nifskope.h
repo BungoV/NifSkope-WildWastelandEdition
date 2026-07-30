@@ -372,8 +372,12 @@ public:
 	 *  and a hidden document keeps whatever see-through setting it had. */
 	int workspaceDisplayMode( int backgroundIndex ) const;
 	int workspaceDocumentCount() const;
+	//! Mark a workspace document as the skeleton the rest snap to; -1 unmarks.
+	bool setWorkspaceSkeletonDocument( int backgroundIndex );
 	//! Block count of a workspace document, so a merge into it can be measured.
 	int workspaceBlockCount( int backgroundIndex ) const;
+	//! The model behind a workspace document, so a test can pose it.
+	NifModel * workspaceDocumentModel( int backgroundIndex ) const;
 	//! Splice workspace documents into another one in place (the "Merge Into" menu
 	//! item, addressed by position so it can be scripted).
 	bool mergeWorkspaceDocumentsInto( int targetIndex, const QList<int> & donorIndices );

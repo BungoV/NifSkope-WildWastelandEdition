@@ -105,14 +105,43 @@ void Shape::updateBoneTransforms()
 	Transform	wtInv = ( !( scene->nifModel && scene->nifModel->getBSVersion() < 100 && partitions.isEmpty() ) ?
 							worldTrans().inverted() : Transform( scene->nifModel, iSkinData ) );
 
+	/* A marked workspace skeleton, if there is one.
+	 *
+	 * Bones are addressed by BLOCK NUMBER in this shape's own file, which is why an
+	 * armour piece opened on its own sits at bind pose: its bone links point at its
+	 * own flat NiNodes and there is no hierarchy above them to pose. Snapping to
+	 * another document's skeleton therefore has to go by NAME, since block numbers
+	 * mean nothing across files.
+	 *
+	 * The whole lookup is skipped when nothing is marked — no name resolution, no
+	 * hashing, no behaviour change.
+	 */
+	const bool snapping = ( scene && !scene->skeletonOverride.isEmpty() && scene->nifModel );
+
 	for ( qsizetype i = 0; i < numBones; i++ ) {
 		const BoneData &	bw = boneData.at( i );
 		Transform	t = wtInv;
 		Node * bone = root ? root->findChild( bw.bone ) : nullptr;
-		if ( !bone )
-			t = t * bw.trans.inverted();
-		else
-			t = t * bone->localTrans( skeletonRoot );
+		bool	snapped = false;
+		if ( snapping ) {
+			const QString	boneName =
+				scene->nifModel->get<QString>( scene->nifModel->getBlockIndex( bw.bone ), "Name" );
+			if ( !boneName.isEmpty() ) {
+				auto it = scene->skeletonOverride.constFind( boneName );
+				if ( it != scene->skeletonOverride.constEnd() ) {
+					// stands in for bone->localTrans( skeletonRoot ): the marked
+					// skeleton's pose for this bone, in its own root's space
+					t = t * it.value();
+					snapped = true;
+				}
+			}
+		}
+		if ( !snapped ) {
+			if ( !bone )
+				t = t * bw.trans.inverted();
+			else
+				t = t * bone->localTrans( skeletonRoot );
+		}
 		boundSphere |= BoundSphere( t * bw.center, t.scale * bw.radius );
 		t = t * bw.trans;
 
@@ -204,6 +233,14 @@ static bool vertexSkinMatrix( const std::vector<FloatVector4> & transforms,
 		for ( int c = 0; c < 4; c++ )
 			out( unsigned( c ), unsigned( r ) ) = rows[r][c] * invWeight;
 	return true;
+}
+
+QString Shape::boneNameAt( int i ) const
+{
+	if ( i < 0 || i >= boneData.size() || !scene || !scene->nifModel )
+		return QString();
+	return scene->nifModel->get<QString>(
+		scene->nifModel->getBlockIndex( boneData.at( i ).bone ), "Name" );
 }
 
 Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const

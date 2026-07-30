@@ -383,6 +383,15 @@ public:
 	//! Whether `model` currently has a live scene a bake could read.
 	bool hasLiveScene( NifModel * model ) const;
 
+	//! Mark one loaded document as THE skeleton the rest snap to; null unmarks.
+	/*! Every other document then evaluates its bones against this one BY NAME,
+	 *  which is how a skinned armour piece stops sitting at bind pose without being
+	 *  merged into anything. Strictly opt-in: until something is marked, every
+	 *  document is transformed exactly as it was before this existed — a file that
+	 *  merely happens to contain a skeleton changes nothing. */
+	void setWorkspaceSkeleton( NifModel * model );
+	NifModel * workspaceSkeleton() const { return workspaceSkeletonModel; }
+
 	//! Turn animation on or off programmatically.
 	/*! updateAnimationState is a QAction slot: it reads sender()->data() and does
 	 *  nothing at all when called directly. Anything that needs the controllers
@@ -561,6 +570,16 @@ private:
 	//! so a rebuild is only paid when a document joins, not every frame.
 	QVector<NifModel *> workspaceRenderOrder;
 	QHash<NifModel *, class Scene *> workspaceScenes;
+	class Scene * workspaceSceneFor( NifModel * model );
+	//! Secondary models edited since their Scene last read them.
+	QSet<NifModel *> workspaceScenesStale;
+	void flushStaleWorkspaceScenes();
+	bool workspaceStaleFlushQueued = false;
+	//! Pose the marked skeleton and give its pose to every scene that snaps to it.
+	void applyWorkspaceSkeleton( const Transform & viewTrans );
+	NifModel * workspaceSkeletonModel = nullptr;
+	//! NaN forces the next push; see applyWorkspaceSkeleton.
+	double workspaceSkeletonFingerprint = 0.0;
 	//! Drop every workspace Scene (on close, or when the list empties).
 	void clearWorkspaceScenes();
 	QVector<Vector3> riggingDonorPreviewSoup;

@@ -125,6 +125,13 @@ public:
 	QVector<TexCoords> coords;
 	//! Triangles
 	QVector<Triangle> triangles;
+
+	//! How many bones drive this shape; 0 means it is not skinned.
+	/*! Declared inside this EXISTING public run on purpose — a fresh public: in
+	 *  this header flips the access of everything below it. */
+	int boneCount() const { return int( boneData.size() ); }
+	//! The name of bone `i` as its own file records it, or empty.
+	QString boneNameAt( int i ) const;
 protected:
 	//! Number of triangles to render at the current level of detail
 	qsizetype lodTriangleCount = 0;

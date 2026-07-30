@@ -3783,6 +3783,206 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_GROUPSKEL_TEST=<skeleton.nif>): marking one loaded NIF as
+	 * THE skeleton makes the others snap to it — and marking nothing changes nothing.
+	 *
+	 * The measurement is the evaluated skin, Shape::skinVertex for every vertex of
+	 * the primary's largest shape, which is what the viewport actually draws. Block
+	 * counts and transforms would not do: bones are addressed by block number inside
+	 * each file, so "snapping" is entirely a question of what the skin evaluates to.
+	 *
+	 * Marking a skeleton that is in the same bind pose as the armour legitimately
+	 * moves almost nothing, so a "did it move" check against a bind-pose skeleton
+	 * would prove nothing either way. The skeleton is therefore POSED — every
+	 * non-root node translated — and the question becomes whether the armour follows.
+	 *
+	 * Both halves matter, and the second is the one the user asked for explicitly:
+	 * with no skeleton marked, a loaded file that happens to contain a skeleton must
+	 * have no effect at all, even while it is being posed.
+	 * Log: release/ww_groupskel_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_GROUPSKEL_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_groupskel_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				auto settle = []( int ms ) {
+					QEventLoop loop;
+					QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+					loop.exec();
+					QApplication::processEvents();
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif ) { log << "no primary model\n"; break; }
+
+					// the primary's biggest skinned shape stands in for the armour
+					int sb = -1, best = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) ) {
+							const int nv = nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" );
+							if ( nv > best ) { best = nv; sb = b; }
+						}
+					if ( sb < 0 ) { log << "no BSTriShape in the primary\n"; break; }
+
+					// A paint is what runs applyWorkspaceSkeleton, so every
+					// measurement has to be taken after one.
+					auto repaint = [skope, &settle]() {
+						skope->ogl->update();
+						QApplication::processEvents();
+						skope->ogl->grabFramebuffer();
+						settle( 120 );
+					};
+					auto skinned = [skope, nif, sb]() {
+						QVector<Vector3> out;
+						Shape * s = skope->ogl->shapeForBlock( sb );
+						if ( !s )
+							return out;
+						s->updateBoneTransforms();
+						QModelIndex iVD = nif->getIndex( nif->getBlockIndex( sb ), "Vertex Data" );
+						for ( int v = 0; v < nif->rowCount( iVD ); v++ )
+							out.append( s->skinVertex( v,
+								nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) ) );
+						return out;
+					};
+					auto movedCount = []( const QVector<Vector3> & a, const QVector<Vector3> & b ) {
+						int n = 0;
+						for ( int i = 0; i < a.size() && i < b.size(); i++ )
+							if ( ( a[i] - b[i] ).length() > 0.01f )
+								n++;
+						return n;
+					};
+
+					const QString skelFile = qEnvironmentVariable( "WW_GROUPSKEL_TEST" );
+					check( "the skeleton joined the workspace",
+						skope->addWorkspaceDocumentFromFile( skelFile ) );
+					NifModel * skel = skope->workspaceDocumentModel( 0 );
+					check( "its model is reachable", skel != nullptr );
+					if ( !skel )
+						break;
+
+					// Move every non-root bone, so any weighted vertex must follow.
+					auto poseSkeleton = [skel]( float dz ) {
+						int n = 0;
+						const QList<int> roots = skel->getRootLinks();
+						const int skelRoot = roots.isEmpty() ? -1 : roots.first();
+						for ( int b = 0; b < skel->getBlockCount(); b++ ) {
+							if ( b == skelRoot )
+								continue;
+							QModelIndex idx = skel->getBlockIndex( b );
+							if ( !skel->blockInherits( idx, "NiNode" ) )
+								continue;
+							QModelIndex iT = skel->getIndex( idx, "Translation" );
+							if ( !iT.isValid() )
+								continue;
+							Vector3 t = skel->get<Vector3>( iT );
+							t[2] += dz;
+							if ( skel->set<Vector3>( iT, t ) )
+								n++;
+						}
+						return n;
+					};
+					// What the primary scene believes one bone's height is.
+					auto overrideZ = [skope]( const QString & bone ) {
+						Scene * ps = skope->ogl->getScene();
+						if ( !ps )
+							return -9999.0f;
+						auto it = ps->skeletonOverride.constFind( bone );
+						return ( it != ps->skeletonOverride.constEnd() )
+							? it.value().translation[2] : -9999.0f;
+					};
+
+					repaint();
+					const QVector<Vector3> before = skinned();
+					log << "measuring " << before.size() << " evaluated vertices\n";
+					check( "the primary has evaluated skin to measure", before.size() > 0 );
+
+					// Mark the skeleton while it is still in its own bind pose. This
+					// SHOULD move almost nothing — the armour's bones and a bind-pose
+					// skeleton agree — so it is logged, not asserted. Asserting
+					// movement here would be asserting that two identical poses differ.
+					check( "the skeleton can be marked", skope->setWorkspaceSkeletonDocument( 0 ) );
+					repaint();
+					const QVector<Vector3> markedBind = skinned();
+					log << "marked, bind pose: " << movedCount( before, markedBind )
+						<< " vertices moved; override has "
+						<< ( skope->ogl->getScene() ? skope->ogl->getScene()->skeletonOverride.size() : 0 )
+						<< " entries, Chest at Z " << overrideZ( QStringLiteral( "Chest" ) ) << "\n";
+					if ( Shape * s = skope->ogl->shapeForBlock( sb ) ) {
+						QStringList hit, miss;
+						Scene * ps = skope->ogl->getScene();
+						for ( int i = 0; i < s->boneCount(); i++ ) {
+							const QString bn = s->boneNameAt( i );
+							( ( ps && ps->skeletonOverride.contains( bn ) ) ? hit : miss )
+								<< ( bn.isEmpty() ? QStringLiteral( "<unnamed>" ) : bn );
+						}
+						log << "  shape bones matched [" << hit.join( QStringLiteral( ", " ) )
+							<< "] missed [" << miss.join( QStringLiteral( ", " ) ) << "]\n";
+						check( "every bone of the shape is present in the marked skeleton",
+							miss.isEmpty() && !hit.isEmpty() );
+					}
+
+					/* Now POSE the marked skeleton. This is the real question: does the
+					 * armour follow a skeleton that moves? A bind-pose comparison
+					 * cannot answer it, because bind and bind are the same.
+					 */
+					log << "posing " << poseSkeleton( 30.0f ) << " skeleton node(s) by +30 Z\n";
+					repaint();
+					const QVector<Vector3> markedPosed = skinned();
+					const int followed = movedCount( markedBind, markedPosed );
+					log << "marked, posed: " << followed << " of " << before.size()
+						<< " vertices followed; Chest now at Z "
+						<< overrideZ( QStringLiteral( "Chest" ) ) << "\n";
+					check( "the armour follows the marked skeleton when it moves",
+						followed > before.size() / 2 );
+
+					// The row has to SAY it is the skeleton, or nothing explains why
+					// every other file moved.
+					const QString skelShot =
+						QApplication::applicationDirPath() + "/ww_groupskel_list.png";
+					check( "the Loaded NIFs list renders with the skeleton marked",
+						skope->grabLoadedNifsView( skelShot ) );
+					log << "  " << skelShot << "\n";
+
+					// Unmark: everything goes back exactly, posed skeleton or not.
+					check( "the skeleton can be unmarked",
+						skope->setWorkspaceSkeletonDocument( -1 ) );
+					repaint();
+					const QVector<Vector3> restored = skinned();
+					const int residue = movedCount( before, restored );
+					log << "unmarked: " << residue << " vertex/vertices differ from the start\n";
+					check( "unmarking restores the original evaluation exactly", residue == 0 );
+
+					/* And with nothing marked, moving the skeleton again must do
+					 * nothing at all — the requirement that a loaded file which merely
+					 * contains a skeleton has no effect until it is marked.
+					 */
+					log << "posing " << poseSkeleton( 25.0f ) << " node(s) again, unmarked\n";
+					repaint();
+					const int strayMoved = movedCount( restored, skinned() );
+					log << "unmarked and posed: " << strayMoved << " vertex/vertices moved\n";
+					check( "posing an UNMARKED skeleton moves nothing", strayMoved == 0 );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SKELMERGE_TEST=<donor.nif>): does Load skeleton break the
 	 * mesh, or only the posing that follows it?
 	 *

@@ -328,6 +328,39 @@ public:
 	}
 };
 
+/*! A small skull, for the row that has been marked as the workspace skeleton.
+ *
+ * Drawn rather than shipped as a resource so it follows the skin's accent colour,
+ * and because it has to read at 16 px: cranium, two deep sockets, a narrow jaw with
+ * a gap in it. Anything more detailed turns to mush at this size.
+ */
+static QIcon skeletonMarkIcon()
+{
+	const int s = 16;
+	QPixmap pm( s, s );
+	pm.fill( Qt::transparent );
+	QPainter p( &pm );
+	p.setRenderHint( QPainter::Antialiasing, true );
+	const QColor ink( wwSkinColor( "accent" ) );
+	p.setPen( Qt::NoPen );
+	p.setBrush( ink );
+
+	// cranium
+	p.drawEllipse( QRectF( 2.0, 1.5, 12.0, 10.0 ) );
+	// jaw, narrower than the cranium so the silhouette reads as a skull
+	p.drawRoundedRect( QRectF( 5.0, 9.5, 6.0, 4.5 ), 1.4, 1.4 );
+
+	// sockets and the tooth gap are punched out, so the glyph works on any row
+	// background
+	p.setCompositionMode( QPainter::CompositionMode_Clear );
+	p.setBrush( Qt::black );
+	p.drawEllipse( QRectF( 4.0, 4.2, 3.6, 3.8 ) );
+	p.drawEllipse( QRectF( 8.4, 4.2, 3.6, 3.8 ) );
+	p.drawRect( QRectF( 7.6, 10.8, 0.9, 3.2 ) );
+	p.end();
+	return QIcon( pm );
+}
+
 static int sessionSceneParent( const NifModel * nif, int block )
 {
 	int found = -1;
@@ -1602,8 +1635,13 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		auto * name = new QStandardItem( document->documentDisplayName() );
 		name->setEditable( false );
 		name->setData( qulonglong( pointer ), NifBrowserDocumentRole );
-		if ( primary ) {
+		// The skull wins over the primary arrow: being the skeleton changes how every
+		// other row evaluates, which is the more consequential fact about this row.
+		if ( ogl && document->nif && ogl->workspaceSkeleton() == document->nif )
+			name->setIcon( skeletonMarkIcon() );
+		else if ( primary )
 			name->setIcon( style()->standardIcon( QStyle::SP_ArrowRight ) );
+		if ( primary ) {
 			name->setBackground( QColor::fromRgb( 74, 122, 176 ) );
 			name->setForeground( QColor::fromRgb( 255, 157, 0 ) );
 		} else if ( visible ) {
@@ -1621,7 +1659,13 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
 		if ( !document ) continue;
 		const bool visible = document->selectedInWorkspace();
+		// A marked skeleton changes how every OTHER row is evaluated, so which one
+		// it is has to be readable without opening a menu.
+		const bool isSkeleton = ( ogl && document->nif
+			&& ogl->workspaceSkeleton() == document->nif );
 		auto * name = new QStandardItem( document->displayName() );
+		if ( isSkeleton )
+			name->setIcon( skeletonMarkIcon() );
 		name->setEditable( false );
 		name->setData( qulonglong( reinterpret_cast<quintptr>( document ) ),
 			NifBrowserBackgroundDocumentRole );
@@ -1745,6 +1789,12 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	ghost->setCheckable( true );
 	ghost->setChecked( document->sessionPreviewGhost );
 	ghost->setEnabled( document != this );
+	QAction * asSkeleton = menu.addAction( tr( "Use as Skeleton for Loaded NIFs" ) );
+	asSkeleton->setCheckable( true );
+	asSkeleton->setChecked( ogl && document->nif && ogl->workspaceSkeleton() == document->nif );
+	asSkeleton->setToolTip( tr( "Every other loaded NIF evaluates its bones against this file, "
+		"by name, so skinned pieces snap onto it instead of sitting at bind pose. Nothing snaps "
+		"until a skeleton is marked; unmark to put everything back." ) );
 	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
 	isolate->setEnabled( document != this );
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
@@ -1761,6 +1811,11 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	QAction * close = menu.addAction( tr( "Close Document" ) );
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == makePrimary ) activateDocumentTab( index );
+	else if ( chosen == asSkeleton ) {
+		if ( ogl )
+			ogl->setWorkspaceSkeleton( asSkeleton->isChecked() ? document->nif : nullptr );
+		refreshAllDocumentSessions();
+	}
 	else if ( chosen == freeze ) {
 		if ( freezeDocumentDialog( document->nif, QFileInfo( document->currentFile ).fileName() ) )
 			refreshAllDocumentSessions();
@@ -2241,6 +2296,12 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	QAction * ghost = menu.addAction( tr( "Show Semi-Transparent" ) );
 	ghost->setCheckable( true );
 	ghost->setChecked( document->sessionPreviewGhost );
+	QAction * asSkeleton = menu.addAction( tr( "Use as Skeleton for Loaded NIFs" ) );
+	asSkeleton->setCheckable( true );
+	asSkeleton->setChecked( ogl && document->nif && ogl->workspaceSkeleton() == document->nif );
+	asSkeleton->setToolTip( tr( "Every other loaded NIF evaluates its bones against this file, "
+		"by name, so skinned pieces snap onto it instead of sitting at bind pose. Nothing snaps "
+		"until a skeleton is marked; unmark to put everything back." ) );
 	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
 	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
@@ -2279,6 +2340,11 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	}
 	else if ( chosen == ghost ) {
 		document->sessionPreviewGhost = ghost->isChecked();
+		refreshAllDocumentSessions();
+	}
+	else if ( chosen == asSkeleton ) {
+		if ( ogl )
+			ogl->setWorkspaceSkeleton( asSkeleton->isChecked() ? document->nif : nullptr );
 		refreshAllDocumentSessions();
 	}
 	else if ( chosen == makePrimary ) promoteBackgroundDocument( document );
@@ -4608,6 +4674,34 @@ bool NifSkope::setWorkspaceDisplayMode( int backgroundIndex, int mode )
 	document->sessionPreviewGhost = ( mode == 2 );
 	refreshAllDocumentSessions();
 	return true;
+}
+
+bool NifSkope::setWorkspaceSkeletonDocument( int backgroundIndex )
+{
+	if ( !ogl )
+		return false;
+	// -1 unmarks, which must always be available even with no documents loaded.
+	if ( backgroundIndex < 0 ) {
+		ogl->setWorkspaceSkeleton( nullptr );
+		refreshAllDocumentSessions();
+		return true;
+	}
+	if ( backgroundIndex >= sessionBackgroundDocuments.size() )
+		return false;
+	BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	if ( !document || !document->nif )
+		return false;
+	ogl->setWorkspaceSkeleton( document->nif );
+	refreshAllDocumentSessions();
+	return true;
+}
+
+NifModel * NifSkope::workspaceDocumentModel( int backgroundIndex ) const
+{
+	if ( backgroundIndex < 0 || backgroundIndex >= sessionBackgroundDocuments.size() )
+		return nullptr;
+	BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	return document ? document->nif : nullptr;
 }
 
 int NifSkope::workspaceBlockCount( int backgroundIndex ) const

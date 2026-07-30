@@ -798,6 +798,203 @@ QVector<GLView::BakedEffect> GLView::bakeParticles( const Vector3 & viewAxis )
 	return bakeSceneEffects( scene, viewAxis, false, true );
 }
 
+/*! The Scene that draws one workspace document, made on first use.
+ *
+ * Lifted out of paintGL's draw loop because a marked skeleton has to be POSED
+ * before any other scene can snap to it, and that means reaching its Scene before
+ * the drawing starts. Both callers share this so the borrow-the-renderer rule
+ * cannot be forgotten in one of them.
+ */
+Scene * GLView::workspaceSceneFor( NifModel * model )
+{
+	if ( !model || model->getBlockCount() == 0 || !scene )
+		return nullptr;
+	Scene *& ws = workspaceScenes[model];
+	if ( !ws ) {
+		/* A secondary's Scene had NO connection to its own model.
+		 *
+		 * The primary is kept current by GLView::dataChanged calling
+		 * Scene::update; a workspace preview was built once by Scene::make and
+		 * never told anything again, so editing a secondary file left its preview
+		 * showing the bytes it was loaded from. Invisible until a marked skeleton
+		 * was posed and 0 of 2863 vertices followed it, because the pose being read
+		 * was the load-time one.
+		 */
+		connect( model, &QAbstractItemModel::dataChanged, this,
+			[this, model]( const QModelIndex &, const QModelIndex & ) {
+				workspaceScenesStale.insert( model );
+				/* Deferred, and never from the draw path.
+				 *
+				 * Rebuilding a secondary Scene from inside paintGL killed the
+				 * process outright — the workspace-merge harness went from 18 green
+				 * checks to a 0-byte log, because the crash happened before
+				 * QTextStream flushed. Coalesced too: a merge emits dataChanged
+				 * hundreds of times and each one would otherwise rebuild the scene.
+				 */
+				if ( !workspaceStaleFlushQueued ) {
+					workspaceStaleFlushQueued = true;
+					QTimer::singleShot( 0, this, &GLView::flushStaleWorkspaceScenes );
+				}
+			} );
+		connect( model, &QObject::destroyed, this, [this, model]() {
+			workspaceScenesStale.remove( model );
+			if ( workspaceSkeletonModel == model )
+				setWorkspaceSkeleton( nullptr );
+		} );
+		ws = new Scene( textures );
+		// borrow, never construct: a second Renderer on this context has its own
+		// idea of which shader program is bound, and the two caches disagreeing
+		// empties the WHOLE frame — primary and grid included. Measured, not
+		// theorised.
+		ws->borrowRenderer( scene->renderer );
+		QSettings settings;
+		ws->updateSettings( settings );
+		ws->make( model );
+	}
+	// mirror the primary's render options so a secondary does not ignore the
+	// lighting, wireframe or backface settings the user just changed
+	ws->options = scene->options;
+	ws->visMode = scene->visMode;
+	ws->selecting = 0;
+	return ws;
+}
+
+/*! Re-read the secondaries whose files were edited, outside the draw path.
+ *
+ * A workspace Scene is built once by Scene::make and, unlike the primary, had
+ * nothing telling it the file had changed — so editing a secondary left its preview
+ * showing the bytes it was loaded from. Invisible until a marked skeleton was posed
+ * and 0 of 2863 vertices followed it, because the pose being read was load-time.
+ */
+void GLView::flushStaleWorkspaceScenes()
+{
+	workspaceStaleFlushQueued = false;
+	if ( workspaceScenesStale.isEmpty() )
+		return;
+	const QSet<NifModel *> stale = workspaceScenesStale;
+	workspaceScenesStale.clear();
+	for ( NifModel * model : stale ) {
+		/* Discarded and rebuilt, not patched.
+		 *
+		 * Scene::update with an invalid index validates and refreshes the nodes it
+		 * ALREADY has; it does not create nodes for blocks that did not exist when
+		 * make() ran. After a merge splices in 158 blocks that leaves the preview
+		 * structurally wrong, and calling it on a spliced model crashed the process
+		 * outright. Dropping the Scene and letting workspaceSceneFor make() a fresh
+		 * one is heavier per edit, but it is correct for structural changes as well
+		 * as for moved bones, and the flush is coalesced to one per event-loop turn.
+		 */
+		if ( Scene * ws = workspaceScenes.take( model ) )
+			delete ws;
+	}
+	// A pose read from a rebuilt scene is a different pose.
+	workspaceSkeletonFingerprint = std::numeric_limits<double>::quiet_NaN();
+	update();
+}
+
+//! Every named node's transform, relative to the skeleton's own root.
+/*! Root-relative rather than world, so a marked file whose root carries an offset
+ *  does not shift everything that snaps to it. First name wins, which is the same
+ *  rule the Pose Manager uses to resolve a bone. */
+static QHash<QString, Transform> skeletonPoseOf( Scene * sc )
+{
+	QHash<QString, Transform> out;
+	if ( !sc )
+		return out;
+	Transform rootInv;
+	if ( !sc->roots.list().isEmpty() ) {
+		if ( Node * r = sc->roots.list().first() )
+			rootInv = r->worldTrans().inverted();
+	}
+	for ( Node * n : sc->nodes.list() ) {
+		if ( !n )
+			continue;
+		const QString name = n->getName();
+		if ( name.isEmpty() || out.contains( name ) )
+			continue;
+		out.insert( name, rootInv * n->worldTrans() );
+	}
+	return out;
+}
+
+/*! Cheap "has the pose moved" signature.
+ *
+ * Without this, marking a skeleton would force a full transform propagation of
+ * every workspace scene on every frame. Summed rather than ordered, so QHash
+ * iteration order cannot affect it.
+ */
+static double skeletonPoseFingerprint( const QHash<QString, Transform> & pose )
+{
+	double f = double( pose.size() );
+	for ( auto it = pose.constBegin(); it != pose.constEnd(); ++it ) {
+		const Transform & t = it.value();
+		const float * r = t.rotation.data();
+		f += double( t.translation[0] ) + double( t.translation[1] ) * 3.0
+		   + double( t.translation[2] ) * 7.0 + double( r[0] ) * 11.0
+		   + double( r[4] ) * 13.0 + double( r[8] ) * 17.0 + double( t.scale ) * 19.0;
+	}
+	return f;
+}
+
+void GLView::setWorkspaceSkeleton( NifModel * model )
+{
+	if ( workspaceSkeletonModel == model )
+		return;
+	workspaceSkeletonModel = model;
+	// Force the next applyWorkspaceSkeleton to push, including the unmark case
+	// where the pose it has to push is "none".
+	workspaceSkeletonFingerprint = std::numeric_limits<double>::quiet_NaN();
+	update();
+}
+
+void GLView::applyWorkspaceSkeleton( const Transform & viewTrans )
+{
+	if ( !scene )
+		return;
+
+	auto pushToEveryOtherScene = [&]( Scene * skip, const QHash<QString, Transform> & pose ) {
+		if ( scene != skip ) {
+			scene->skeletonOverride = pose;
+			scene->transformDirty = true;
+		}
+		for ( auto it = workspaceScenes.begin(); it != workspaceScenes.end(); ++it ) {
+			if ( it.value() && it.value() != skip ) {
+				it.value()->skeletonOverride = pose;
+				it.value()->transformDirty = true;
+			}
+		}
+	};
+
+	// Nothing marked: put everything back, once, then stay out of the way. This is
+	// the opt-in — with no skeleton marked not one transform is computed differently
+	// from before the feature existed.
+	if ( !workspaceSkeletonModel ) {
+		if ( !std::isnan( workspaceSkeletonFingerprint ) )
+			return;
+		pushToEveryOtherScene( nullptr, QHash<QString, Transform>() );
+		workspaceSkeletonFingerprint = 0.0;
+		return;
+	}
+
+	Scene * src = ( scene->nifModel == workspaceSkeletonModel )
+		? scene : workspaceSceneFor( workspaceSkeletonModel );
+	if ( !src )
+		return;
+
+	// The skeleton itself never snaps to anything, and it must be posed before it
+	// can be read.
+	src->skeletonOverride.clear();
+	src->transformDirty = true;
+	src->transform( viewTrans, time );
+
+	const QHash<QString, Transform> pose = skeletonPoseOf( src );
+	const double fingerprint = skeletonPoseFingerprint( pose );
+	if ( std::isnan( workspaceSkeletonFingerprint ) || fingerprint != workspaceSkeletonFingerprint ) {
+		workspaceSkeletonFingerprint = fingerprint;
+		pushToEveryOtherScene( src, pose );
+	}
+}
+
 bool GLView::hasLiveScene( NifModel * model ) const
 {
 	if ( !model )
@@ -2311,6 +2508,9 @@ void GLView::paintGL()
 	// Scene::transform only skips when scene content is untouched).
 	if ( gizmoMode != 0 || elemTransform || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode )
 		scene->transformDirty = true;
+	// Before anything transforms: pose the marked skeleton and hand its pose to
+	// every scene that snaps to it. No-op, and costs one branch, when unmarked.
+	applyWorkspaceSkeleton( viewTrans );
 	scene->transform( viewTrans, time );
 
 	// Setup projection mode
@@ -2463,25 +2663,9 @@ void GLView::paintGL()
 	 */
 	if ( !workspaceRenderOrder.isEmpty() && !scene->selecting ) {
 		for ( NifModel * wm : std::as_const( workspaceRenderOrder ) ) {
-			if ( !wm || wm->getBlockCount() == 0 )
+			Scene * ws = workspaceSceneFor( wm );
+			if ( !ws )
 				continue;
-			Scene *& ws = workspaceScenes[wm];
-			if ( !ws ) {
-				ws = new Scene( textures );
-				// borrow, never construct: a second Renderer on this context has
-				// its own idea of which shader program is bound, and the two
-				// caches disagreeing empties the WHOLE frame — primary and grid
-				// included. Measured, not theorised.
-				ws->borrowRenderer( scene->renderer );
-				QSettings settings;
-				ws->updateSettings( settings );
-				ws->make( wm );
-			}
-			// mirror the primary's render options so a secondary does not ignore
-			// the lighting, wireframe or backface settings the user just changed
-			ws->options = scene->options;
-			ws->visMode = scene->visMode;
-			ws->selecting = 0;
 			ws->transformDirty = true;
 			ws->transform( viewTrans, time );
 			ws->draw();

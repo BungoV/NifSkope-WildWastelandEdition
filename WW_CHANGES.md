@@ -1,5 +1,79 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31c — mark one NIF as the skeleton and the rest snap to it
+
+Right-click any loaded NIF → **Use as Skeleton for Loaded NIFs**. Every other
+document then evaluates its bones against that file **by name**, so a skinned
+armour piece follows it instead of sitting at bind pose. The marked row gets a
+skull in the browser, because a setting that changes how every *other* row is drawn
+has to be visible without opening a menu.
+
+**Strictly opt-in**, as asked: with nothing marked, not one transform is computed
+differently from before the feature existed. A file that merely happens to contain
+a skeleton does nothing at all. The whole lookup — name resolution included — is
+behind one `isEmpty()` check.
+
+### Why by name
+
+Bones are addressed by **block number** inside each file. That is why an armour
+piece opened on its own sits at bind pose: its bone links point at its own flat
+`NiNode`s, with no hierarchy above them to pose. Block numbers mean nothing across
+files, so snapping has to go by name.
+
+`Scene` carries a `QHash<QString, Transform>` of the marked skeleton's pose,
+root-relative so a marked file with an offset root does not shift everything that
+snaps to it. Deliberately a **snapshot, not a pointer** to the skeleton's Scene: a
+Scene reaching into another Scene is the shape of the bug that once emptied whole
+frames, and a value copy cannot dangle when a document closes mid-frame. A cheap
+summed fingerprint decides when to re-push, so marking a skeleton does not force a
+full propagation of every secondary on every frame.
+
+### The bug underneath: secondary previews were never updated at all
+
+The feature appeared to work and moved nothing — 0 of 2863 vertices followed a
+skeleton posed by 146 nodes, with the override present (147 entries) and every one
+of the shape's four bones matched. `Chest` sat at Z 106.332 before and after.
+
+Cause: **a workspace Scene had no connection to its own model.** The primary is kept
+current by `GLView::dataChanged` → `Scene::update`; a secondary was built once by
+`Scene::make` and never told anything again, so editing a secondary left its preview
+showing the bytes it was loaded from. Pre-existing, and invisible until something
+depended on a secondary's live state.
+
+Fixed by connecting each secondary model's `dataChanged`, coalescing to one flush
+per event-loop turn. Two things that had to be got right:
+
+- **Not from the draw path.** Rebuilding a Scene inside `paintGL` killed the process
+  outright — the merge harness went from 18 green checks to a **0-byte log**, because
+  the crash beat `QTextStream`'s flush.
+- **Rebuild, not patch.** `Scene::update` with an invalid index refreshes the nodes
+  it already has; it does not create nodes for blocks that did not exist when
+  `make()` ran. After a merge splices in 158 blocks that leaves the preview
+  structurally wrong, and calling it on a spliced model crashed too. The Scene is
+  dropped and re-made instead.
+
+### Proof
+
+`WW_GROUPSKEL_TEST`, 10 checks green. It measures the **evaluated skin** —
+`Shape::skinVertex` for all 2863 vertices of the primary's largest shape — which is
+what the viewport actually draws; block counts and transforms would not answer the
+question.
+
+Marking a skeleton still in its bind pose moves almost nothing, because the armour's
+bones and a bind-pose skeleton agree — so that is *logged, not asserted*. Asserting
+movement there would be asserting that two identical poses differ. The skeleton is
+posed instead, and then:
+
+| | result |
+| --- | --- |
+| marked, bind pose | 0 moved; 147 override entries; all 4 shape bones matched |
+| marked, posed +30 Z | **2863 of 2863 followed**; `Chest` 106.3 → 166.3 |
+| unmarked | **0** vertices differ from the start — exact restoration |
+| unmarked, posed again | **0** moved — a loaded skeleton does nothing unmarked |
+
+Regressions: 18 workspace + 12 carries-everything + 21 bake + 6 artobject + 9 merge
+sweep, all green.
+
 ## 2026-07-31b — Merge Into, and proof the merge carries everything
 
 ### Merge Into

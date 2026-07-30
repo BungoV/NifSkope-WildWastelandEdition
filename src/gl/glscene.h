@@ -235,6 +235,18 @@ public:
 
 	NodeList roots;
 
+	//! Bone name -> transform relative to a MARKED skeleton's root.
+	/*! Empty unless some loaded document has been marked as the skeleton for the
+	 *  workspace (see GLView::setWorkspaceSkeleton). While it is empty every shape
+	 *  evaluates its own bones exactly as before — that is what makes the feature
+	 *  opt-in rather than a change in how files are drawn.
+	 *
+	 *  Deliberately a snapshot of transforms rather than a pointer to the skeleton's
+	 *  Scene. A Scene reaching into another Scene is the shape of the bug that
+	 *  emptied whole frames once (two Renderers on one context), and a value copy
+	 *  cannot dangle when a document is closed mid-frame. */
+	QHash<QString, Transform> skeletonOverride;
+
 	struct TransformCache
 	{
 		TransformCache();
