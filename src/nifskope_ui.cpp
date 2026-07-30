@@ -3168,6 +3168,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...and the workspace counts them",
 						skope->workspaceDocumentCount() == added );
 
+					/* A document that has just joined must be VISIBLE.
+					 *
+					 * It used to depend on the tree selection, so a file added
+					 * without being clicked was invisible and looked like it had
+					 * failed to load.
+					 */
+					{
+						int hidden = 0;
+						for ( int i = 0; i < added; i++ )
+							if ( skope->workspaceDisplayMode( i ) == 0 )
+								hidden++;
+						check( "every new document starts visible (eye open)", hidden == 0 );
+					}
+
 					// WW_WORKSPACE_MODES=1;2 sets each document's mode explicitly
 					// (0 hidden, 1 solid, 2 ghost); default is first solid, rest ghost
 					const QStringList modes =
@@ -3180,6 +3194,63 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							skope->setWorkspaceDisplayMode( i, m ) );
 					}
 					settle( 1200 );
+
+					/* Selecting rows must not change what is drawn.
+					 *
+					 * Selection used to WRITE sessionPreviewVisible, and
+					 * rebuildLoadedNifsBrowserGroup selected rows back from it, so
+					 * the two were the same thing: clicking a row to aim a menu at it
+					 * hid every other document, and there was no way to say "this
+					 * one" without also changing the viewport.
+					 *
+					 * Record the modes, move the selection about, require them
+					 * unchanged. This is the check that would have caught it.
+					 */
+					QVector<int> before;
+					for ( int i = 0; i < added; i++ )
+						before.append( skope->workspaceDisplayMode( i ) );
+					log << "modes after setup:";
+					for ( const int m : before )
+						log << " " << m;
+					log << "\n";
+
+					auto * view = skope->findChild<QTreeView *>( QStringLiteral( "LoadedNifsView" ) );
+					check( "the Loaded NIFs view is reachable", view != nullptr );
+					if ( view && view->selectionModel() && view->model() ) {
+						auto modesNow = [&]() {
+							QVector<int> now;
+							for ( int i = 0; i < added; i++ )
+								now.append( skope->workspaceDisplayMode( i ) );
+							return now;
+						};
+						const int rows = view->model()->rowCount();
+						auto pick = [&]( int row ) {
+							view->selectionModel()->clearSelection();
+							if ( row >= 0 && row < rows )
+								view->selectionModel()->select( view->model()->index( row, 0 ),
+									QItemSelectionModel::Select | QItemSelectionModel::Rows );
+							settle( 150 );
+						};
+
+						pick( 0 );
+						check( "selecting the first row leaves visibility alone",
+							modesNow() == before );
+						pick( rows - 1 );
+						check( "selecting the last row leaves visibility alone",
+							modesNow() == before );
+						view->selectAll();
+						settle( 150 );
+						check( "selecting every row leaves visibility alone",
+							modesNow() == before );
+						view->selectionModel()->clearSelection();
+						settle( 150 );
+						check( "clearing the selection leaves visibility alone",
+							modesNow() == before );
+						// Leave one row selected so the shot shows a selected row that
+						// is NOT the only visible one — the state that used to be
+						// impossible to reach.
+						pick( 0 );
+					}
 
 					const QString listShot =
 						QApplication::applicationDirPath() + "/ww_workspace_list.png";

@@ -46,6 +46,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "spells/blocks.h"	// setBlockListSelection for Copy Branch multi-select
 #include "version.h"
 #include "wwskin.h"
+
+#include <QPainterPath>
 #include "gl/glscene.h"
 #include "model/kfmmodel.h"
 #include "model/nifmodel.h"
@@ -192,25 +194,34 @@ protected:
 
 /*! Loaded NIFs row: the name, plus two display toggles at the right edge.
  *
- * Solid and ghost are drawn as two small buttons rather than one cycling
- * control, because the question "is this one solid or see-through" should be
- * answerable at a glance down a list of six limbs, and a tri-state checkbox
- * makes you click to find out. Clicking the lit one turns the document off, so
- * two buttons still cover all three states.
+ * The toggles are INDEPENDENT, and used to be a pair of mutually exclusive mode
+ * buttons (solid / ghost, where clicking the lit one meant off). Two problems with
+ * that: a mode pair cannot show "hidden" as a state of its own — it shows as
+ * neither button lit, which reads as broken — and turning a document off forgot
+ * whether it had been ghosted. Visible and ghosted are two separate facts, so
+ * they get a toggle each and ghostness survives being hidden.
+ *
+ * The eye follows Blender's outliner: open means drawn, a closed lid means hidden,
+ * and it starts open. The second glyph has no Blender counterpart — Blender's
+ * outliner offers selectability and render-disable, neither of which applies to a
+ * NIF workspace — so it is a half-filled disc, the conventional opacity glyph, for
+ * "draw this one see-through".
  */
 class LoadedNifsDelegate final : public QStyledItemDelegate
 {
 public:
 	explicit LoadedNifsDelegate( QObject * parent = nullptr ) : QStyledItemDelegate( parent ) {}
 
-	//! 0 = hidden, 1 = solid, 2 = ghost; -1 when the row is not a document.
-	std::function<int( const QModelIndex & )> displayMode;
-	//! Called with the mode the user clicked; the same mode again means "off".
-	std::function<void( const QModelIndex &, int )> setDisplayMode;
+	enum Slot { SlotVisible = 0, SlotGhost = 1 };
+
+	//! Bit 0 = visible, bit 1 = ghost. -1 when the row has nothing to toggle.
+	std::function<int( const QModelIndex & )> displayFlags;
+	//! Flip one flag; the caller decides what that means for the document.
+	std::function<void( const QModelIndex &, int slot )> toggleFlag;
 
 	static constexpr int GlyphW = 20;
 
-	//! Right-edge slots: [0] solid, [1] ghost.
+	//! Right-edge slots: [0] eye, [1] see-through.
 	static QRect glyphRect( const QRect & row, int slot )
 	{
 		const int size = std::min( GlyphW, row.height() - 2 );
@@ -223,8 +234,8 @@ public:
 	{
 		QStyleOptionViewItem opt( option );
 		initStyleOption( &opt, index );
-		const int mode = displayMode ? displayMode( index ) : -1;
-		if ( mode >= 0 )		// keep the text clear of the buttons
+		const int flags = displayFlags ? displayFlags( index ) : -1;
+		if ( flags >= 0 )		// keep the text clear of the buttons
 			opt.rect.setRight( opt.rect.right() - 2 * ( GlyphW + 2 ) - 4 );
 		const QVariant background = index.data( Qt::BackgroundRole );
 		const QVariant foreground = index.data( Qt::ForegroundRole );
@@ -242,35 +253,67 @@ public:
 		const QWidget * widget = option.widget;
 		QStyle * style = widget ? widget->style() : QApplication::style();
 		style->drawControl( QStyle::CE_ItemViewItem, &opt, painter, widget );
-		if ( mode < 0 )
+		if ( flags < 0 )
 			return;
 
-		// filled disc = solid, half disc = see-through; lit when that mode is on
+		const bool visible = ( flags & 0x1 );
+		const bool ghost = ( flags & 0x2 );
+		const QColor lit( wwSkinColor( "accent" ) );
+		const QColor dim( wwSkinColor( "textMuted" ) );
+
 		painter->save();
 		painter->setRenderHint( QPainter::Antialiasing, true );
-		for ( int slot = 0; slot < 2; slot++ ) {
-			const QRect r = glyphRect( option.rect, slot );
-			const bool on = ( mode == slot + 1 );
-			const QColor ink = on ? QColor( 0xFF, 0x9D, 0x00 ) : QColor( 0x77, 0x7c, 0x84 );
-			painter->setPen( QPen( ink, 1 ) );
+
+		// --- the eye ---------------------------------------------------------
+		{
+			const QRectF f = QRectF( glyphRect( option.rect, SlotVisible ) ).adjusted( 2, 2, -2, -2 );
+			const qreal cx = f.center().x(), cy = f.center().y();
+			const qreal hw = f.width() * 0.46, hh = f.height() * 0.30;
+			painter->setPen( QPen( visible ? lit : dim, 1.3 ) );
 			painter->setBrush( Qt::NoBrush );
-			painter->drawEllipse( r.adjusted( 3, 3, -3, -3 ) );
-			QRectF fill = QRectF( r.adjusted( 3, 3, -3, -3 ) );
-			painter->setPen( Qt::NoPen );
-			painter->setBrush( ink );
-			if ( slot == 0 )
-				painter->drawEllipse( fill );
-			else
-				painter->drawChord( fill, 90 * 16, 180 * 16 );	// left half
+			QPainterPath p;
+			if ( visible ) {
+				// almond: two arcs meeting at the corners, with a pupil
+				p.moveTo( cx - hw, cy );
+				p.quadTo( cx, cy - hh * 2.1, cx + hw, cy );
+				p.quadTo( cx, cy + hh * 2.1, cx - hw, cy );
+				painter->drawPath( p );
+				painter->setPen( Qt::NoPen );
+				painter->setBrush( lit );
+				painter->drawEllipse( QPointF( cx, cy ), hh * 0.78, hh * 0.78 );
+			} else {
+				// a shut lid: the lower arc alone, which is unmistakably not an eye
+				p.moveTo( cx - hw, cy - hh * 0.5 );
+				p.quadTo( cx, cy + hh * 1.7, cx + hw, cy - hh * 0.5 );
+				painter->drawPath( p );
+			}
 		}
+
+		// --- see-through -----------------------------------------------------
+		{
+			const QRectF f = QRectF( glyphRect( option.rect, SlotGhost ) ).adjusted( 3, 3, -3, -3 );
+			// Hidden rows cannot be see-through: show the control as inert rather
+			// than lit-but-doing-nothing.
+			const QColor ink = ( ghost && visible ) ? lit : dim;
+			painter->setOpacity( visible ? 1.0 : 0.45 );
+			painter->setPen( QPen( ink, 1.1 ) );
+			painter->setBrush( Qt::NoBrush );
+			painter->drawEllipse( f );
+			if ( ghost ) {
+				painter->setPen( Qt::NoPen );
+				painter->setBrush( ink );
+				painter->drawChord( f, 90 * 16, 180 * 16 );	// left half filled
+			}
+		}
+
 		painter->restore();
 	}
 
 	bool editorEvent( QEvent * event, QAbstractItemModel *, const QStyleOptionViewItem & option,
 		const QModelIndex & index ) override
 	{
-		if ( event->type() != QEvent::MouseButtonRelease || !setDisplayMode
-			|| !displayMode || displayMode( index ) < 0 )
+		if ( event->type() != QEvent::MouseButtonRelease || !toggleFlag
+			|| !displayFlags || displayFlags( index ) < 0 )
 			return false;
 		auto * me = static_cast<QMouseEvent *>( event );
 		if ( me->button() != Qt::LeftButton )
@@ -278,9 +321,7 @@ public:
 		for ( int slot = 0; slot < 2; slot++ ) {
 			if ( !glyphRect( option.rect, slot ).contains( me->pos() ) )
 				continue;
-			// clicking the mode already on turns the document off
-			const int want = ( displayMode( index ) == slot + 1 ) ? 0 : slot + 1;
-			setDisplayMode( index, want );
+			toggleFlag( index, slot );
 			return true;
 		}
 		return false;
@@ -1119,32 +1160,51 @@ NifSkope::NifSkope( bool background )
 	auto * loadedDelegate = new LoadedNifsDelegate( loadedNifsView );
 	// The two right-edge buttons read and write the same workspace flags the row
 	// menu does, so the menu and the buttons can never disagree.
-	loadedDelegate->displayMode = [this]( const QModelIndex & idx ) {
+	loadedDelegate->displayFlags = [this]( const QModelIndex & idx ) {
+		int flags = 0;
 		if ( NifSkope * doc = documentFromBrowserIndex( idx ) ) {
 			if ( doc == this )
 				return -1;			// the primary is always drawn; nothing to toggle
-			if ( !doc->sessionPreviewVisible || doc->sessionPreviewUnloaded )
-				return 0;
-			return doc->sessionPreviewGhost ? 2 : 1;
+			if ( doc->sessionPreviewVisible && !doc->sessionPreviewUnloaded )
+				flags |= 0x1;
+			if ( doc->sessionPreviewGhost )
+				flags |= 0x2;
+			return flags;
 		}
 		if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( idx ) ) {
-			if ( !bg->selectedInWorkspace() )
-				return 0;
-			return bg->sessionPreviewGhost ? 2 : 1;
+			if ( bg->selectedInWorkspace() )
+				flags |= 0x1;
+			if ( bg->sessionPreviewGhost )
+				flags |= 0x2;
+			return flags;
 		}
 		return -1;
 	};
-	loadedDelegate->setDisplayMode = [this]( const QModelIndex & idx, int mode ) {
+	loadedDelegate->toggleFlag = [this]( const QModelIndex & idx, int slot ) {
+		bool * visible = nullptr;
+		bool * ghost = nullptr;
+		bool * unloaded = nullptr;
 		if ( NifSkope * doc = documentFromBrowserIndex( idx ); doc && doc != this ) {
-			doc->sessionPreviewVisible = ( mode != 0 );
-			doc->sessionPreviewUnloaded = false;
-			doc->sessionPreviewGhost = ( mode == 2 );
+			visible = &doc->sessionPreviewVisible;
+			ghost = &doc->sessionPreviewGhost;
+			unloaded = &doc->sessionPreviewUnloaded;
 		} else if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( idx ) ) {
-			bg->sessionPreviewVisible = ( mode != 0 );
-			bg->sessionPreviewUnloaded = false;
-			bg->sessionPreviewGhost = ( mode == 2 );
+			visible = &bg->sessionPreviewVisible;
+			ghost = &bg->sessionPreviewGhost;
+			unloaded = &bg->sessionPreviewUnloaded;
 		} else {
 			return;
+		}
+		if ( slot == LoadedNifsDelegate::SlotVisible ) {
+			*visible = !( *visible && !*unloaded );
+			// "Removed from Loaded NIFs" also reads as invisible; clicking the eye
+			// is an unambiguous request to draw it, so it clears that too.
+			*unloaded = false;
+		} else {
+			// Deliberately does NOT force the row visible. A see-through setting on
+			// a hidden row is a preference that takes effect when it comes back,
+			// which is why the glyph draws inert rather than lit while hidden.
+			*ghost = !*ghost;
 		}
 		refreshAllDocumentSessions();
 	};
@@ -1242,13 +1302,14 @@ NifSkope::NifSkope( bool background )
 				else queueNifBrowserIndexToLoaded( index );
 			}
 		} );
-	connect( loadedNifsView, &QTreeView::doubleClicked, this,
-		[this]( const QModelIndex & index ) {
-			if ( NifSkope * document = documentFromBrowserIndex( index ) )
-				activateDocumentTab( documentTabWindows.indexOf( document ) );
-			else if ( BackgroundNifDocument * background = backgroundDocumentFromBrowserIndex( index ) )
-				promoteBackgroundDocument( background );
-		} );
+	/* No doubleClicked handler, on purpose.
+	 *
+	 * It used to promote the row to primary, which opens that document for editing
+	 * and re-homes the workspace around it. That is a large, disruptive action to
+	 * hang off a gesture people make by accident while picking rows, and it was
+	 * breaking things. "Make Primary / Edit" is the first item in both right-click
+	 * menus, where an action that consequential belongs.
+	 */
 	connect( loadedNifsView, &QTreeView::customContextMenuRequested, this,
 		[this]( const QPoint & pos ) {
 			const QModelIndex index = loadedNifsView->indexAt( pos );
@@ -1551,14 +1612,9 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		}
 		name->setToolTip( primary ? tr( "Primary editable document" )
 			: ( visible
-				? tr( "Selected secondary document; visible and available to workspace tools" )
-				: tr( "Loaded but unselected; not shown or used by workspace tools" ) ) );
+				? tr( "Visible in the workspace and available to workspace tools" )
+				: tr( "Hidden — click the eye to show it" ) ) );
 		loadedNifsModel->appendRow( name );
-		if ( loadedNifsView && visible && !primary ) {
-			const QModelIndex row = loadedNifsModel->index( loadedNifsModel->rowCount() - 1, 0 );
-			loadedNifsView->selectionModel()->select( row,
-				QItemSelectionModel::Select | QItemSelectionModel::Rows );
-		}
 	}
 	// Data-only background documents share the secondary palette; they can never
 	// be the primary row because promotion always goes through a real window.
@@ -1574,14 +1630,9 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 			name->setForeground( QColor::fromRgb( 255, 114, 0 ) );
 		}
 		name->setToolTip( visible
-			? tr( "Selected secondary document; visible and available to workspace tools" )
-			: tr( "Loaded but unselected; not shown or used by workspace tools" ) );
+			? tr( "Visible in the workspace and available to workspace tools" )
+			: tr( "Hidden — click the eye to show it" ) );
 		loadedNifsModel->appendRow( name );
-		if ( loadedNifsView && visible ) {
-			const QModelIndex row = loadedNifsModel->index( loadedNifsModel->rowCount() - 1, 0 );
-			loadedNifsView->selectionModel()->select( row,
-				QItemSelectionModel::Select | QItemSelectionModel::Rows );
-		}
 	}
 	if ( loadedNifsView ) {
 		loadedNifsView->header()->setStretchLastSection( true );
@@ -1590,31 +1641,24 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 	syncingLoadedNifsSelection = false;
 }
 
+/* Selection and visibility are SEPARATE, and used not to be.
+ *
+ * Selecting rows used to set sessionPreviewVisible from the selection, and
+ * rebuildLoadedNifsBrowserGroup used to select rows back from it. That made the
+ * two indistinguishable: clicking a row to aim a menu at it hid everything else,
+ * so there was no way to say "operate on this one" without also changing what the
+ * viewport was showing.
+ *
+ * They answer different questions. Selection is "which rows is the next command
+ * about" — it is what the multi-row merge menu reads. Visibility is "what is
+ * drawn", and it belongs to the row's own eye toggle and nothing else.
+ *
+ * There is deliberately no handler here now. It is kept as a function because the
+ * view is built before its selection model exists, and the call site documents
+ * that the absence is a decision rather than an oversight.
+ */
 void NifSkope::wireLoadedNifsSelection()
 {
-	if ( !loadedNifsView || !loadedNifsView->selectionModel() ) return;
-	connect( loadedNifsView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-		[this]( const QItemSelection &, const QItemSelection & ) {
-			if ( syncingLoadedNifsSelection ) return;
-			QSet<NifSkope *> selected;
-			QSet<BackgroundNifDocument *> selectedBackground;
-			for ( const QModelIndex & row : loadedNifsView->selectionModel()->selectedRows( 0 ) ) {
-				if ( NifSkope * document = documentFromBrowserIndex( row ) ) selected << document;
-				if ( BackgroundNifDocument * document = backgroundDocumentFromBrowserIndex( row ) )
-					selectedBackground << document;
-			}
-			for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
-				if ( !document || !document->sessionCollectionMember ) continue;
-				document->sessionPreviewVisible = ( document == this || selected.contains( document ) );
-				document->sessionPreviewUnloaded = false;
-			}
-			for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
-				if ( !document ) continue;
-				document->sessionPreviewVisible = selectedBackground.contains( document );
-				document->sessionPreviewUnloaded = false;
-			}
-			refreshAllDocumentSessions();
-		} );
 }
 
 void NifSkope::activateDocumentTab( int index )
@@ -4469,6 +4513,16 @@ bool NifSkope::setWorkspaceDisplayMode( int backgroundIndex, int mode )
 	document->sessionPreviewGhost = ( mode == 2 );
 	refreshAllDocumentSessions();
 	return true;
+}
+
+int NifSkope::workspaceDisplayMode( int backgroundIndex ) const
+{
+	if ( backgroundIndex < 0 || backgroundIndex >= sessionBackgroundDocuments.size() )
+		return -1;
+	const BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	if ( !document || !document->selectedInWorkspace() )
+		return 0;
+	return document->sessionPreviewGhost ? 2 : 1;
 }
 
 //! Count of data-only workspace members, for scripting and tests.

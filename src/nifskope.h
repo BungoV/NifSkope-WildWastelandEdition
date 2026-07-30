@@ -367,6 +367,10 @@ public:
 	bool addWorkspaceDocumentFromFile( const QString & path );
 	//! How a workspace document draws: 0 hidden, 1 solid, 2 semi-transparent.
 	bool setWorkspaceDisplayMode( int backgroundIndex, int mode );
+	//! Read that back: 0 hidden, 1 solid, 2 semi-transparent; -1 for a bad index.
+	/*! Visible and see-through are independent flags, so mode 2 means both are on
+	 *  and a hidden document keeps whatever see-through setting it had. */
+	int workspaceDisplayMode( int backgroundIndex ) const;
 	int workspaceDocumentCount() const;
 	//! Render the Loaded NIFs list offscreen to a PNG — the row buttons can only
 	//! be checked by looking at them.

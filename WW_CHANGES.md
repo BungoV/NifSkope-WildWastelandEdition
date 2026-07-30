@@ -1,5 +1,73 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31a — Loaded NIFs: selection stops hiding things, and the eye
+
+### The bug: selection *was* visibility
+
+Selecting a row in Loaded NIFs used to write `sessionPreviewVisible`, and
+`rebuildLoadedNifsBrowserGroup` selected rows back from it. The two were the same
+state under two names, so clicking a row to aim a menu at it **hid every other
+document**, and there was no way to say "operate on this one" without also
+changing what the viewport was showing.
+
+They answer different questions. Selection is "which rows is the next command
+about" — what the multi-row merge menu reads. Visibility is "what is drawn", and it
+belongs to the row's own toggle and nothing else. Both directions of the coupling
+are gone; `wireLoadedNifsSelection` is deliberately empty, with the reason written
+where the handler used to be.
+
+A freshly added document is visible, as it always intended to be — the flag was
+already `true` at construction, and the selection handler was overwriting it on the
+next selection change.
+
+### The toggles are independent now, and one is an eye
+
+They used to be two mutually exclusive **mode** buttons (solid / ghost, where
+clicking the lit one meant off). That cannot represent "hidden" as a state of its
+own — it shows as neither button lit, which reads as broken — and turning a
+document off forgot whether it had been ghosted.
+
+Visible and see-through are two separate facts, so each gets a toggle:
+
+| Glyph | Off | On |
+| --- | --- | --- |
+| Eye | closed lid, muted | open almond with a pupil, accent |
+| Half-disc | outline only, muted | left half filled, accent |
+
+The eye follows Blender's outliner and starts open. The second glyph has **no
+Blender counterpart** — Blender's outliner offers selectability and render-disable,
+neither of which means anything for a NIF workspace — so it stays the conventional
+half-filled opacity disc. Stated as a deliberate divergence.
+
+See-through on a hidden row is a preference that takes effect when the row comes
+back, so toggling it does not force the row visible; the glyph draws at 45% to say
+it is set but currently inert.
+
+Colours come from `wwSkinColor( "accent" )` and `"textMuted"`, replacing two
+hardcoded literals.
+
+### Double-click no longer promotes
+
+Double-clicking a row opened that document as primary and re-homed the workspace
+around it — a large, disruptive action hanging off a gesture people make by
+accident while picking rows, and it was breaking things. The handler is gone;
+**Make Primary / Edit** is already the first item in both right-click menus, which
+is where something that consequential belongs.
+
+### Proof
+
+`WW_WORKSPACE_TEST` extended from 8 to 13 checks, all green. Beyond the existing
+ones it now asserts that every new document starts visible, and — the check that
+would have caught the bug — that selecting the first row, the last row, every row,
+and no rows each leave every document's display mode **identical**. A new
+`workspaceDisplayMode()` getter mirrors the existing setter so this is readable
+without reaching into the delegate.
+
+Verified by looking, too: `ww_workspace_list.png` shows the three states side by
+side — open orange eye with an empty disc (solid), open eye with a half-filled disc
+(see-through), and a closed lid with a dimmed disc (hidden) — with the selected row
+deliberately *not* the only visible one, the state that used to be unreachable.
+
 ## 2026-07-30r — the loading screen has its arcs, and the pipeline is a script
 
 `tools/make_x01_loadscreen.sh` builds the deliverable end to end, and the shipped
