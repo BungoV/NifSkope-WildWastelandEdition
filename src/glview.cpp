@@ -850,6 +850,8 @@ Scene * GLView::workspaceSceneFor( NifModel * model )
 		QSettings settings;
 		ws->updateSettings( settings );
 		ws->make( model );
+		// Baseline for telling a structural edit from a value edit later.
+		workspaceSceneBlockCount.insert( model, model->getBlockCount() );
 	}
 	// mirror the primary's render options so a secondary does not ignore the
 	// lighting, wireframe or backface settings the user just changed
@@ -874,18 +876,36 @@ void GLView::flushStaleWorkspaceScenes()
 	const QSet<NifModel *> stale = workspaceScenesStale;
 	workspaceScenesStale.clear();
 	for ( NifModel * model : stale ) {
-		/* Discarded and rebuilt, not patched.
+		Scene * ws = workspaceScenes.value( model, nullptr );
+		if ( !ws )
+			continue;		// no Scene yet: make() will read the current state
+
+		/* Two kinds of change, two costs.
 		 *
-		 * Scene::update with an invalid index validates and refreshes the nodes it
-		 * ALREADY has; it does not create nodes for blocks that did not exist when
-		 * make() ran. After a merge splices in 158 blocks that leaves the preview
-		 * structurally wrong, and calling it on a spliced model crashed the process
-		 * outright. Dropping the Scene and letting workspaceSceneFor make() a fresh
-		 * one is heavier per edit, but it is correct for structural changes as well
-		 * as for moved bones, and the flush is coalesced to one per event-loop turn.
+		 * Scene::update refreshes the nodes a Scene ALREADY has. It cannot create
+		 * nodes for blocks that did not exist when make() ran, and calling it on a
+		 * model that has just had blocks spliced into it crashed the process — so a
+		 * STRUCTURAL change has to drop the Scene and rebuild.
+		 *
+		 * A value change moves no blocks, which is the case the primary handles with
+		 * Scene::update on every edit. Rebuilding for those too cost 54 ms per edit
+		 * on the FO4 power-armour skeleton, and posing a MARKED skeleton is a
+		 * continuous-edit workflow, so that lands on exactly what the feature invites.
+		 *
+		 * Block count is the discriminator: it catches adding and removing, which is
+		 * every structural edit these previews see. A reorder that preserves the
+		 * count would slip through, so it is not a general-purpose test.
 		 */
-		if ( Scene * ws = workspaceScenes.take( model ) )
+		const int was = workspaceSceneBlockCount.value( model, -1 );
+		const int now = model->getBlockCount();
+		if ( was != now ) {
+			workspaceScenes.remove( model );
+			workspaceSceneBlockCount.remove( model );
 			delete ws;
+			continue;
+		}
+		ws->update( model, QModelIndex() );
+		ws->transformDirty = true;
 	}
 	// A pose read from a rebuilt scene is a different pose.
 	workspaceSkeletonFingerprint = std::numeric_limits<double>::quiet_NaN();
@@ -1018,6 +1038,7 @@ void GLView::clearWorkspaceScenes()
 {
 	qDeleteAll( workspaceScenes );
 	workspaceScenes.clear();
+	workspaceSceneBlockCount.clear();
 	workspaceRenderOrder.clear();
 }
 
@@ -1031,6 +1052,7 @@ void GLView::setWorkspaceRenderModels( const QVector<NifModel *> & models )
 			it++;
 			continue;
 		}
+		workspaceSceneBlockCount.remove( it.key() );
 		delete it.value();
 		it = workspaceScenes.erase( it );
 	}

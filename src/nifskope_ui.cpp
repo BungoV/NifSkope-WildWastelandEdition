@@ -3935,8 +3935,42 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * armour follow a skeleton that moves? A bind-pose comparison
 					 * cannot answer it, because bind and bind are the same.
 					 */
-					log << "posing " << poseSkeleton( 30.0f ) << " skeleton node(s) by +30 Z\n";
+					/* Timed, because posing a MARKED skeleton is a continuous-edit
+					 * workflow and the secondary-scene refresh sits on that path.
+					 * Ten separate edit-and-repaint cycles, which is what dragging a
+					 * bone looks like to the refresh code.
+					 */
+					/* No settle() in the timed loop.
+					 *
+					 * repaint() sleeps 120 ms to let things quiesce, so timing it
+					 * measured that sleep and nothing else — the first attempt read
+					 * "123 ms per edit" of which ~120 was the harness. An edit cycle
+					 * is: change the model, let the deferred refresh run, paint.
+					 */
+					auto editCycle = [skope, &poseSkeleton]() {
+						poseSkeleton( 3.0f );
+						QApplication::processEvents();	// runs the coalesced flush
+						skope->ogl->update();
+						QApplication::processEvents();	// and the paint it scheduled
+					};
+					editCycle();		// warm: first touch builds caches
+					QElapsedTimer poseClock;
+					poseClock.start();
+					for ( int k = 0; k < 10; k++ )
+						editCycle();
+					const qint64 tenCycles = poseClock.elapsed();
 					repaint();
+					log << "10 pose+repaint cycles: " << tenCycles << " ms ("
+						<< ( tenCycles / 10 ) << " ms each)\n";
+					/* 25 ms, not "generous".
+					 *
+					 * Rebuilding the secondary Scene on every edit measured 54 ms here
+					 * and refreshing it in place measures 7. A loose threshold would
+					 * pass both, so it would not be guarding anything — this one fails
+					 * if the structural/value split is ever lost.
+					 */
+					check( "posing a marked skeleton keeps up (< 25 ms per edit)",
+						tenCycles / 10 < 25 );
 					const QVector<Vector3> markedPosed = skinned();
 					const int followed = movedCount( markedBind, markedPosed );
 					log << "marked, posed: " << followed << " of " << before.size()

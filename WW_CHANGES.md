@@ -1,5 +1,42 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31d — secondary refresh: 54 ms → 7 ms per edit
+
+Fixing the stale-preview bug in 07-31c made every edit to a secondary document drop
+and rebuild its whole Scene. That was correct but blunt, and it landed on exactly
+the workflow the new feature invites: **posing a marked skeleton is a
+continuous-edit workflow**, and the refresh sits on that path.
+
+Measured on the FO4 power-armour skeleton as a secondary: **54 ms per edit**, about
+18 fps while dragging.
+
+### Two kinds of change, two costs
+
+`Scene::update` refreshes the nodes a Scene already has. It cannot create nodes for
+blocks that did not exist when `make()` ran, and calling it on a model that has just
+had blocks spliced in **crashed the process** — so a structural change still has to
+drop the Scene and rebuild.
+
+A value change moves no blocks, which is the case the primary has always handled
+with `Scene::update` on every edit. Those take the cheap path now. Block count is
+the discriminator: it catches adding and removing, which is every structural edit
+these previews see. A reorder preserving the count would slip through, so it is not
+offered as a general-purpose test.
+
+**Result: 7 ms per edit, 7.7× faster**, with all 11 group-skeleton checks still
+green — 2863 of 2863 vertices following, exact restoration on unmark.
+
+### The measurement was wrong first
+
+The first number was **123 ms per edit** — and meaningless, because the harness's own
+`repaint()` sleeps 120 ms to let things quiesce, so the timing loop was measuring
+that sleep. Re-timed around a real edit cycle (change the model, let the coalesced
+flush run, paint) with no sleep in it, and with one warm cycle discarded.
+
+The threshold is **25 ms**, deliberately not generous: rebuild-always measured 54 and
+the in-place refresh measures 7, so a loose bound would pass both and guard nothing.
+This one fails if the split is ever lost.
+
 ## 2026-07-31c — mark one NIF as the skeleton and the rest snap to it
 
 Right-click any loaded NIF → **Use as Skeleton for Loaded NIFs**. Every other

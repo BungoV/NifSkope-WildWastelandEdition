@@ -573,6 +573,8 @@ private:
 	class Scene * workspaceSceneFor( NifModel * model );
 	//! Secondary models edited since their Scene last read them.
 	QSet<NifModel *> workspaceScenesStale;
+	//! Block count when each secondary Scene was made; a change means structural.
+	QHash<NifModel *, int> workspaceSceneBlockCount;
 	void flushStaleWorkspaceScenes();
 	bool workspaceStaleFlushQueued = false;
 	//! Pose the marked skeleton and give its pose to every scene that snaps to it.
