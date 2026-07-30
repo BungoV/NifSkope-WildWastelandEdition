@@ -3246,10 +3246,29 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						settle( 150 );
 						check( "clearing the selection leaves visibility alone",
 							modesNow() == before );
-						// Leave one row selected so the shot shows a selected row that
-						// is NOT the only visible one — the state that used to be
-						// impossible to reach.
-						pick( 0 );
+						/* Leave TWO rows selected for the shot.
+						 *
+						 * One selected row cannot show the difference between the
+						 * active member of a selection and the rest of it, which is
+						 * the Block List convention this list now follows: primary
+						 * #FF9D00 on light blue, secondary #FF7200 on dark blue. It
+						 * also shows a selected row that is not the only visible one —
+						 * the state that was unreachable while selection meant
+						 * visibility.
+						 */
+						view->selectionModel()->clearSelection();
+						if ( rows > 1 ) {
+							view->selectionModel()->select(
+								QItemSelection( view->model()->index( rows - 2, 0 ),
+									view->model()->index( rows - 1, 0 ) ),
+								QItemSelectionModel::Select | QItemSelectionModel::Rows );
+							view->selectionModel()->setCurrentIndex(
+								view->model()->index( rows - 2, 0 ),
+								QItemSelectionModel::NoUpdate );
+						}
+						settle( 150 );
+						check( "two rows can be selected at once",
+							view->selectionModel()->selectedRows().size() == 2 );
 					}
 
 					/* WW_WORKSPACE_MERGE=1: "Merge Into", the in-place path.
@@ -3302,6 +3321,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the Loaded NIFs list renders", skope->grabLoadedNifsView( listShot ) );
 					check( "the viewport renders", skope->ogl->grabFramebuffer().save( viewShot ) );
 					log << "  " << listShot << "\n  " << viewShot << "\n";
+
+					/* Removal, last because it empties the workspace.
+					 *
+					 * Same call the X key makes. Selecting every row and removing must
+					 * take the count to zero; a per-row implementation would leave the
+					 * unclicked ones behind, which is what this catches.
+					 */
+					if ( view && view->selectionModel() ) {
+						view->selectAll();
+						settle( 150 );
+						const int before2 = skope->workspaceDocumentCount();
+						const int gone = skope->removeSelectedWorkspaceDocuments();
+						settle( 200 );
+						log << "removal: " << before2 << " documents, " << gone
+							<< " removed, " << skope->workspaceDocumentCount() << " left\n";
+						check( "removing the selection removes every one of them",
+							gone == before2 && skope->workspaceDocumentCount() == 0 );
+					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS\n" : "CHECK: failures above\n" );
@@ -10991,6 +11028,19 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 				if ( !sel.isEmpty() )
 					ogl->deleteBlocksWithConfirm( QVector<int>( sel.constBegin(), sel.constEnd() ) );
 			}
+			return true;
+		}
+		/* Loaded NIFs: X or Delete removes the selected documents.
+		 *
+		 * Same key as the Block List, on a list that behaves like it — multi-select,
+		 * same highlight colours, right-click acting on the selection. Removing a row
+		 * used to be buried in a per-row menu.
+		 */
+		if ( o == loadedNifsView
+			&& ( ke->key() == Qt::Key_X || ke->key() == Qt::Key_Delete )
+			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
+			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
+				removeSelectedWorkspaceDocuments();
 			return true;
 		}
 		// Block List Ctrl+C / Ctrl+V are the Copy Branch / Paste Branch spells

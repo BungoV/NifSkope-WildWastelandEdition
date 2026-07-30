@@ -372,6 +372,20 @@ public:
 	 *  and a hidden document keeps whatever see-through setting it had. */
 	int workspaceDisplayMode( int backgroundIndex ) const;
 	int workspaceDocumentCount() const;
+	//! One selected Loaded NIFs row, whichever kind of document it is.
+	struct WorkspaceTarget
+	{
+		bool * visible;
+		bool * ghost;
+		bool * unloaded;
+		class NifModel * nif;
+		QString name;
+		NifSkope * window;					//!< set for a real document window
+		BackgroundNifDocument * background;	//!< set for a data-only document
+	};
+	QVector<WorkspaceTarget> selectedWorkspaceTargets( const QModelIndex & clicked = QModelIndex() );
+	int removeSelectedWorkspaceDocuments( const QModelIndex & clicked = QModelIndex() );
+
 	//! Mark a workspace document as the skeleton the rest snap to; -1 unmarks.
 	bool setWorkspaceSkeletonDocument( int backgroundIndex );
 	//! Block count of a workspace document, so a merge into it can be measured.
@@ -388,7 +402,9 @@ private:
 	//! Loaded NIFs, 2+ rows selected: offer to merge them into a new file. The
 	//! FIRST row is the target, so the skeleton goes first and dictates position
 	//! for everything spliced in after it. Nothing loaded is modified.
-	//! Multi-row menu. `clicked` names the target the others are spliced into.
+	//! Multi-row menu: bulk display settings for the selection, then the merges.
+	void showSelectionMenu( const QModelIndex & clicked, const QPoint & globalPos );
+	//! Merge menu. `clicked` names the target the others are spliced into.
 	void mergeLoadedDocumentsMenu( const QPoint & globalPos,
 	                               const QModelIndex & clicked = QModelIndex() );
 	void mergeIntoLoadedDocument( const QList<QPair<QString, class NifModel *>> & picked );

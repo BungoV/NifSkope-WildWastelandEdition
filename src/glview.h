@@ -383,6 +383,11 @@ public:
 	//! Whether `model` currently has a live scene a bake could read.
 	bool hasLiveScene( NifModel * model ) const;
 
+	//! The direction the camera is looking, in world space.
+	/*! What a bake needs to pin a billboard so the snapshot faces the viewer it was
+	 *  taken from — the same axis drawPreview passes when the effect is live. */
+	Vector3 viewForwardAxis() const;
+
 	//! Mark one loaded document as THE skeleton the rest snap to; null unmarks.
 	/*! Every other document then evaluates its bones against this one BY NAME,
 	 *  which is how a skinned armour piece stops sitting at bind pose without being

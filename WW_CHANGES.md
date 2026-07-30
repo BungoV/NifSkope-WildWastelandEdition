@@ -1,5 +1,83 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31e — Loaded NIFs behaves like the Block List
+
+### Colour means selected, not visible
+
+The list already used the Block List's exact highlight values — primary `#FF9D00`
+on light blue, secondary `#FF7200` on dark blue — but keyed on **visibility**. So a
+visible row looked permanently selected and there was no way to see what actually
+was selected. Visibility has its own control now; it does not get to colour a row.
+
+Colour follows selection, read straight off `State_Selected` and the view's current
+index rather than plumbed through the model. The primary document keeps its arrow
+and loses its background: the arrow already says which one it is.
+
+### Right-click acts on the selection
+
+Selecting several rows used to offer **only** the merge items, so hiding six limbs
+at once was impossible — you did them one at a time through a menu that silently
+applied to whichever row you happened to click. A multi-row right-click now offers
+Show All, Hide All, Make All See-Through, Make All Solid, Merge…, and Remove, each
+applying to the whole selection.
+
+`selectedWorkspaceTargets()` resolves a selection that can mix real document windows
+with data-only background documents into one list of flag pointers, which is what
+lets a single loop serve every bulk action. The clicked row is included even when
+unselected, so right-clicking a row you have not selected still acts on that row
+rather than on nothing.
+
+### X removes, as in the Block List
+
+`X` or `Delete` in the list removes the selected documents, handled in `eventFilter`
+next to the Block List's identical shortcut. A window is un-enrolled; a data-only
+document is deleted, and if it was the marked skeleton the mark is cleared with it.
+
+### The skull moved into the strip
+
+It was the item icon, left of the name, where it competed with the primary's arrow.
+It is now the first glyph of the right-edge strip, ahead of the eye — **skull, eye,
+see-through**. Its slot is reserved even when nothing is marked so the two real
+toggles stay aligned down the list, and the slot is dead to the mouse, so a stray
+click cannot silently unmark a skeleton. The primary row can show the skull without
+the toggles, since it is always drawn and has no visibility to offer.
+
+### The Untitled row
+
+An empty unsaved primary got a row saying "Untitled" that could not be removed —
+Remove is disabled for the primary — and that is the state NifSkope starts in, so
+the list opened with a row nobody asked for and nothing could clear. It is skipped
+while the primary has no file and no unsaved changes. Content brings it straight
+back, so a scratch document being built up does not vanish.
+
+Keyed on the undo stack rather than a block count, because a starter document may
+legitimately carry blocks and the count would not have told the two apart.
+
+### Facing for baked effects
+
+The snapshot facing was hardcoded to −Y. The Freeze dialog now offers front (−Y),
+behind (+Y), its left, its right, or **whatever the viewport is showing now**, the
+last resolved at bake time from `GLView::viewForwardAxis()` — the same axis
+`drawPreview` passes when the effect is live, so "bake what I am looking at" and the
+preview cannot disagree. The result text names the facing used.
+
+### Proof
+
+`WW_WORKSPACE_TEST` 18 → 20 checks, green, including two rows selected at once and
+"removing the selection removes every one of them" — 2 documents, 2 removed, 0 left.
+A per-row implementation would have left the unclicked ones behind, which is what
+that check exists to catch.
+
+Verified by looking as well: `ww_workspace_list.png` shows an unselected primary with
+its arrow, the active selection member in light blue with `#FF9D00`, and the second
+selected row in dark blue with `#FF7200`; `ww_groupskel_list.png` shows skull → eye →
+see-through in order, on a row that is visible but *not* highlighted.
+
+Regressions: 11 group skeleton + 12 carries-everything + 21 bake + 6 artobject, green.
+
+**Not GUI-verified:** the Facing dropdown itself. It is a modal dialog with no
+harness, so only the code path is exercised.
+
 ## 2026-07-31d — secondary refresh: 54 ms → 7 ms per edit
 
 Fixing the stale-preview bug in 07-31c made every edit to a secondary document drop

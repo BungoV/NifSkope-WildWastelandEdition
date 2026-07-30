@@ -192,6 +192,9 @@ protected:
 	}
 };
 
+//! Defined below; the row delegate draws it in the strip.
+static QIcon skeletonMarkIcon();
+
 /*! Loaded NIFs row: the name, plus two display toggles at the right edge.
  *
  * The toggles are INDEPENDENT, and used to be a pair of mutually exclusive mode
@@ -212,21 +215,26 @@ class LoadedNifsDelegate final : public QStyledItemDelegate
 public:
 	explicit LoadedNifsDelegate( QObject * parent = nullptr ) : QStyledItemDelegate( parent ) {}
 
-	enum Slot { SlotVisible = 0, SlotGhost = 1 };
+	//! Right-edge strip, left to right.
+	/*! The skull is a MARKER, not a toggle — it says which file the others are
+	 *  snapping to. Its slot is reserved even when nothing is marked, so the two
+	 *  real toggles stay aligned down the list instead of shifting sideways when a
+	 *  skeleton is picked. */
+	enum Slot { SlotSkeleton = 0, SlotVisible = 1, SlotGhost = 2 };
+	static constexpr int SlotCount = 3;
 
-	//! Bit 0 = visible, bit 1 = ghost. -1 when the row has nothing to toggle.
+	//! Bit 0 = visible, bit 1 = ghost, bit 2 = marked skeleton. -1 = no toggles.
 	std::function<int( const QModelIndex & )> displayFlags;
 	//! Flip one flag; the caller decides what that means for the document.
 	std::function<void( const QModelIndex &, int slot )> toggleFlag;
 
 	static constexpr int GlyphW = 20;
 
-	//! Right-edge slots: [0] eye, [1] see-through.
 	static QRect glyphRect( const QRect & row, int slot )
 	{
 		const int size = std::min( GlyphW, row.height() - 2 );
 		const int top = row.top() + ( row.height() - size ) / 2;
-		return QRect( row.right() - ( 2 - slot ) * ( GlyphW + 2 ) - 2, top, size, size );
+		return QRect( row.right() - ( SlotCount - slot ) * ( GlyphW + 2 ) - 2, top, size, size );
 	}
 
 	void paint( QPainter * painter, const QStyleOptionViewItem & option,
@@ -236,19 +244,29 @@ public:
 		initStyleOption( &opt, index );
 		const int flags = displayFlags ? displayFlags( index ) : -1;
 		if ( flags >= 0 )		// keep the text clear of the buttons
-			opt.rect.setRight( opt.rect.right() - 2 * ( GlyphW + 2 ) - 4 );
-		const QVariant background = index.data( Qt::BackgroundRole );
-		const QVariant foreground = index.data( Qt::ForegroundRole );
-		if ( background.canConvert<QColor>() ) {
-			opt.backgroundBrush = background.value<QColor>();
-			// The Block List lets its explicit primary/secondary role colours win
-			// over the platform selection brush; mirror that behavior exactly.
+			opt.rect.setRight( opt.rect.right() - SlotCount * ( GlyphW + 2 ) - 4 );
+
+		/* Colour follows SELECTION, exactly as the Block List does.
+		 *
+		 * These are the Block List's own values — primary #FF9D00 on light blue,
+		 * secondary #FF7200 on dark blue — and this list already used them, but keyed
+		 * on VISIBILITY. So a visible row looked permanently selected and there was no
+		 * way to see what was actually selected. Visibility has its own control now;
+		 * it does not get to colour the row.
+		 */
+		const auto * view = qobject_cast<const QAbstractItemView *>( option.widget );
+		const bool selected = ( option.state & QStyle::State_Selected );
+		const bool activeMember = selected && view && view->currentIndex().row() == index.row();
+		if ( selected ) {
+			opt.backgroundBrush = activeMember ? QColor::fromRgb( 74, 122, 176 )
+			                                   : QColor::fromRgb( 43, 66, 95 );
+			const QColor text = activeMember ? QColor::fromRgb( 255, 157, 0 )
+			                                 : QColor::fromRgb( 255, 114, 0 );
+			opt.palette.setColor( QPalette::Text, text );
+			opt.palette.setColor( QPalette::HighlightedText, text );
+			// Let the explicit colours win over the platform selection brush, the
+			// same way the Block List does.
 			opt.state &= ~QStyle::State_Selected;
-		}
-		if ( foreground.canConvert<QColor>() ) {
-			const QColor color = foreground.value<QColor>();
-			opt.palette.setColor( QPalette::Text, color );
-			opt.palette.setColor( QPalette::HighlightedText, color );
 		}
 		const QWidget * widget = option.widget;
 		QStyle * style = widget ? widget->style() : QApplication::style();
@@ -258,14 +276,22 @@ public:
 
 		const bool visible = ( flags & 0x1 );
 		const bool ghost = ( flags & 0x2 );
+		const bool isSkeleton = ( flags & 0x4 );
+		const bool markerOnly = ( flags & 0x8 );
 		const QColor lit( wwSkinColor( "accent" ) );
 		const QColor dim( wwSkinColor( "textMuted" ) );
 
 		painter->save();
 		painter->setRenderHint( QPainter::Antialiasing, true );
 
+		// --- the skeleton marker, ahead of the toggles ------------------------
+		if ( isSkeleton ) {
+			const QRect r = glyphRect( option.rect, SlotSkeleton );
+			skeletonMarkIcon().paint( painter, r.adjusted( 2, 2, -2, -2 ) );
+		}
+
 		// --- the eye ---------------------------------------------------------
-		{
+		if ( !markerOnly ) {
 			const QRectF f = QRectF( glyphRect( option.rect, SlotVisible ) ).adjusted( 2, 2, -2, -2 );
 			const qreal cx = f.center().x(), cy = f.center().y();
 			const qreal hw = f.width() * 0.46, hh = f.height() * 0.30;
@@ -290,7 +316,7 @@ public:
 		}
 
 		// --- see-through -----------------------------------------------------
-		{
+		if ( !markerOnly ) {
 			const QRectF f = QRectF( glyphRect( option.rect, SlotGhost ) ).adjusted( 3, 3, -3, -3 );
 			// Hidden rows cannot be see-through: show the control as inert rather
 			// than lit-but-doing-nothing.
@@ -318,7 +344,9 @@ public:
 		auto * me = static_cast<QMouseEvent *>( event );
 		if ( me->button() != Qt::LeftButton )
 			return false;
-		for ( int slot = 0; slot < 2; slot++ ) {
+		// Only the two real toggles react; the skull is a marker and its slot is
+		// dead to the mouse, so a stray click there cannot silently unmark it.
+		for ( int slot = SlotVisible; slot <= SlotGhost; slot++ ) {
 			if ( !glyphRect( option.rect, slot ).contains( me->pos() ) )
 				continue;
 			toggleFlag( index, slot );
@@ -1195,9 +1223,18 @@ NifSkope::NifSkope( bool background )
 	// menu does, so the menu and the buttons can never disagree.
 	loadedDelegate->displayFlags = [this]( const QModelIndex & idx ) {
 		int flags = 0;
+		auto markSkeleton = [this, &flags]( NifModel * nif ) {
+			if ( ogl && nif && ogl->workspaceSkeleton() == nif )
+				flags |= 0x4;
+		};
 		if ( NifSkope * doc = documentFromBrowserIndex( idx ) ) {
+			// The primary is always drawn, so it has no visibility to toggle — but it
+			// can still be the marked skeleton, and that has to show.
+			markSkeleton( doc->nif );
+			// 0x8: marker only. The primary is always drawn, so it has no visibility
+			// to offer — but it can still BE the marked skeleton, and that has to show.
 			if ( doc == this )
-				return -1;			// the primary is always drawn; nothing to toggle
+				return ( flags & 0x4 ) ? ( flags | 0x8 ) : -1;
 			if ( doc->sessionPreviewVisible && !doc->sessionPreviewUnloaded )
 				flags |= 0x1;
 			if ( doc->sessionPreviewGhost )
@@ -1205,6 +1242,7 @@ NifSkope::NifSkope( bool background )
 			return flags;
 		}
 		if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( idx ) ) {
+			markSkeleton( bg->nif );
 			if ( bg->selectedInWorkspace() )
 				flags |= 0x1;
 			if ( bg->sessionPreviewGhost )
@@ -1252,6 +1290,9 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	loadedNifsView->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	loadedNifsView->setContextMenuPolicy( Qt::CustomContextMenu );
+	// X / Delete removes the selected documents, handled in eventFilter alongside
+	// the Block List's identical shortcut.
+	loadedNifsView->installEventFilter( this );
 	loadedNifsView->setMinimumHeight( 82 );
 	loadedNifsView->header()->setStretchLastSection( true );
 	loadedWorkspaceView->sourceView = bsaView;
@@ -1350,7 +1391,7 @@ NifSkope::NifSkope( bool background )
 			// want to do with this document" — it is "combine these", so it gets
 			// its own menu rather than a merge item buried in the per-row one.
 			if ( loadedNifsView->selectionModel()->selectedRows().size() > 1 ) {
-				mergeLoadedDocumentsMenu( loadedNifsView->viewport()->mapToGlobal( pos ), index );
+				showSelectionMenu( index, loadedNifsView->viewport()->mapToGlobal( pos ) );
 				return;
 			}
 			if ( NifSkope * document = documentFromBrowserIndex( index ) )
@@ -1630,24 +1671,32 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		// when it was never explicitly enrolled, so the marked-primary row and
 		// the viewport always agree about what is being edited.
 		if ( !primary && !document->sessionCollectionMember ) continue;
+		/* An empty, unsaved primary is not worth a row.
+		 *
+		 * The rule above exists so the marked-primary row and the viewport always
+		 * agree about what is being edited — but a document with no file and no
+		 * blocks is not editing anything, so the row said "Untitled" and could not be
+		 * removed, because Remove from Loaded NIFs is disabled for the primary. That
+		 * is the state NifSkope starts in, so the list opened with a row nobody
+		 * asked for and nothing could get rid of.
+		 *
+		 * Content brings it back: a scratch document being built up must not vanish
+		 * just because it has never been saved.
+		 */
+		if ( primary && document->currentFile.isEmpty() && !document->isWindowModified()
+			&& ( !document->nif || document->nif->undoStack->isClean() ) ) {
+			continue;
+		}
 		const quintptr pointer = reinterpret_cast<quintptr>( document );
 		const bool visible = document->sessionPreviewVisible && !document->sessionPreviewUnloaded;
 		auto * name = new QStandardItem( document->documentDisplayName() );
 		name->setEditable( false );
 		name->setData( qulonglong( pointer ), NifBrowserDocumentRole );
-		// The skull wins over the primary arrow: being the skeleton changes how every
-		// other row evaluates, which is the more consequential fact about this row.
-		if ( ogl && document->nif && ogl->workspaceSkeleton() == document->nif )
-			name->setIcon( skeletonMarkIcon() );
-		else if ( primary )
+		// The arrow marks the primary; the skull moved into the toggle strip. Row
+		// COLOUR is selection only now — a visible row used to be painted as though
+		// it were selected, which left no way to see what actually was.
+		if ( primary )
 			name->setIcon( style()->standardIcon( QStyle::SP_ArrowRight ) );
-		if ( primary ) {
-			name->setBackground( QColor::fromRgb( 74, 122, 176 ) );
-			name->setForeground( QColor::fromRgb( 255, 157, 0 ) );
-		} else if ( visible ) {
-			name->setBackground( QColor::fromRgb( 43, 66, 95 ) );
-			name->setForeground( QColor::fromRgb( 255, 114, 0 ) );
-		}
 		name->setToolTip( primary ? tr( "Primary editable document" )
 			: ( visible
 				? tr( "Visible in the workspace and available to workspace tools" )
@@ -1659,20 +1708,10 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
 		if ( !document ) continue;
 		const bool visible = document->selectedInWorkspace();
-		// A marked skeleton changes how every OTHER row is evaluated, so which one
-		// it is has to be readable without opening a menu.
-		const bool isSkeleton = ( ogl && document->nif
-			&& ogl->workspaceSkeleton() == document->nif );
 		auto * name = new QStandardItem( document->displayName() );
-		if ( isSkeleton )
-			name->setIcon( skeletonMarkIcon() );
 		name->setEditable( false );
 		name->setData( qulonglong( reinterpret_cast<quintptr>( document ) ),
 			NifBrowserBackgroundDocumentRole );
-		if ( visible ) {
-			name->setBackground( QColor::fromRgb( 43, 66, 95 ) );
-			name->setForeground( QColor::fromRgb( 255, 114, 0 ) );
-		}
 		name->setToolTip( visible
 			? tr( "Visible in the workspace and available to workspace tools" )
 			: tr( "Hidden — click the eye to show it" ) );
@@ -1938,6 +1977,68 @@ void NifSkope::mergeIntoLoadedDocument( const QList<QPair<QString, NifModel *>> 
 	QMessageBox::information( this, tr( "Merge" ), text );
 }
 
+/*! The menu for a multi-row selection: bulk display settings, then the merges.
+ *
+ * Selecting several rows used to offer ONLY the merge items, so there was no way to
+ * hide or ghost six limbs at once — you had to do them one at a time through a menu
+ * that silently applied to whichever row you happened to click. Every toggle here
+ * applies to the whole selection, which is the point of being able to select.
+ */
+void NifSkope::showSelectionMenu( const QModelIndex & clicked, const QPoint & globalPos )
+{
+	const QVector<WorkspaceTarget> targets = selectedWorkspaceTargets( clicked );
+	if ( targets.isEmpty() ) {
+		mergeLoadedDocumentsMenu( globalPos, clicked );
+		return;
+	}
+
+	int shown = 0, ghosted = 0;
+	for ( const WorkspaceTarget & t : targets ) {
+		if ( *t.visible && !*t.unloaded ) shown++;
+		if ( *t.ghost ) ghosted++;
+	}
+
+	QMenu menu( this );
+	menu.addSection( tr( "%1 documents selected" ).arg( targets.size() ) );
+	QAction * showAll = menu.addAction( tr( "Show All %1" ).arg( targets.size() ) );
+	QAction * hideAll = menu.addAction( tr( "Hide All %1" ).arg( targets.size() ) );
+	QAction * ghostOn = menu.addAction( tr( "Make All See-Through" ) );
+	QAction * ghostOff = menu.addAction( tr( "Make All Solid" ) );
+	ghostOn->setEnabled( ghosted < targets.size() );
+	ghostOff->setEnabled( ghosted > 0 );
+	menu.addSection( tr( "%1 shown, %2 see-through" ).arg( shown ).arg( ghosted ) );
+	QAction * doMerge = menu.addAction( tr( "Merge…" ) );
+	doMerge->setToolTip( tr( "Splice these together, in place or into a new file" ) );
+	menu.setToolTipsVisible( true );
+	menu.addSeparator();
+	QAction * remove = menu.addAction( tr( "Remove %1 from Loaded NIFs\tX" ).arg( targets.size() ) );
+
+	QAction * chosen = menu.exec( globalPos );
+	if ( !chosen )
+		return;
+	if ( chosen == doMerge ) {
+		mergeLoadedDocumentsMenu( globalPos, clicked );
+		return;
+	}
+	if ( chosen == remove ) {
+		removeSelectedWorkspaceDocuments( clicked );
+		return;
+	}
+	for ( const WorkspaceTarget & t : targets ) {
+		if ( chosen == showAll ) {
+			*t.visible = true;
+			*t.unloaded = false;
+		} else if ( chosen == hideAll ) {
+			*t.visible = false;
+		} else if ( chosen == ghostOn ) {
+			*t.ghost = true;
+		} else if ( chosen == ghostOff ) {
+			*t.ghost = false;
+		}
+	}
+	refreshAllDocumentSessions();
+}
+
 void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelIndex & clicked )
 {
 	// resolve the selection, in the order the list shows it
@@ -2142,6 +2243,7 @@ bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName
 	const bool anyEffects = BakeGeom::hasEffects( nif, &hasParticles, &hasLightning );
 	const bool live = ogl && ogl->hasLiveScene( nif );
 	QComboBox * fxBox = nullptr;
+	QComboBox * faceBox = nullptr;
 	if ( anyEffects ) {
 		auto * fxRow = new QHBoxLayout;
 		fxRow->addWidget( new QLabel( tr( "Effects" ), &dlg ) );
@@ -2162,6 +2264,32 @@ bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName
 		}
 		fxRow->addWidget( fxBox, 1 );
 		form->addLayout( fxRow );
+
+		/* Which way the snapshot faces.
+		 *
+		 * A sprite quad and a lightning ribbon are billboards: they exist only as a
+		 * point or a polyline until the GPU expands them towards the camera. Baking
+		 * has to pick one direction and live with it, and the piece will look wrong
+		 * from anywhere else. That is the cost of a still, not a defect — but which
+		 * direction is the caller's decision, and it used to be hardcoded to -Y.
+		 */
+		auto * faceRow = new QHBoxLayout;
+		faceRow->addWidget( new QLabel( tr( "Facing" ), &dlg ) );
+		faceBox = new QComboBox( &dlg );
+		faceBox->addItem( tr( "Front of the figure (-Y)" ), QVector3D( 0.0f, -1.0f, 0.0f ) );
+		faceBox->addItem( tr( "Behind the figure (+Y)" ), QVector3D( 0.0f, 1.0f, 0.0f ) );
+		faceBox->addItem( tr( "Its left (+X)" ), QVector3D( 1.0f, 0.0f, 0.0f ) );
+		faceBox->addItem( tr( "Its right (-X)" ), QVector3D( -1.0f, 0.0f, 0.0f ) );
+		faceBox->addItem( tr( "Whatever the viewport is showing now" ), QVector3D() );
+		faceBox->setToolTip( tr( "A snapshotted billboard cannot turn, so it is only correct "
+			"from one direction. -Y suits a loading screen, which looks at the front. The last "
+			"option uses the camera as it is aimed right now." ) );
+		faceRow->addWidget( faceBox, 1 );
+		form->addLayout( faceRow );
+		// Only the snapshot arm cares.
+		auto syncFacing = [&]() { faceBox->setEnabled( fxBox->currentIndex() == 0 ); };
+		syncFacing();
+		connect( fxBox, &QComboBox::currentIndexChanged, &dlg, [&]( int ) { syncFacing(); } );
 		if ( !live ) {
 			auto * why = new QLabel( tr( "Snapshot needs this document drawn in the workspace — "
 				"its effects only exist while something is rendering them." ), &dlg );
@@ -2219,8 +2347,23 @@ bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName
 		ogl->setSceneTime( when );
 		QApplication::processEvents();
 
-		// -Y: a loading screen looks at the front of the figure.
-		const Vector3 facing( 0.0f, -1.0f, 0.0f );
+		// The direction chosen above. A zero vector is the "use the viewport" entry,
+		// resolved here rather than in the dialog so it is the camera as it stands at
+		// the moment of the bake.
+		Vector3 facing( 0.0f, -1.0f, 0.0f );
+		QString facingName = tr( "the front of the figure (-Y)" );
+		if ( faceBox ) {
+			const QVector3D picked = faceBox->currentData().value<QVector3D>();
+			if ( picked.isNull() ) {
+				facing = ogl->viewForwardAxis();
+				facingName = tr( "the current view (%1, %2, %3)" )
+					.arg( facing[0], 0, 'f', 2 ).arg( facing[1], 0, 'f', 2 )
+					.arg( facing[2], 0, 'f', 2 );
+			} else {
+				facing = Vector3( picked.x(), picked.y(), picked.z() );
+				facingName = faceBox->currentText();
+			}
+		}
 		QVector<BakeGeom::Capture> caps;
 		for ( const auto & e : ogl->bakeEffects( nif, facing ) ) {
 			BakeGeom::Capture c;
@@ -2247,9 +2390,10 @@ bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName
 				fxNote = tr( "Snapshot failed, emitters left alone: %1" ).arg( err );
 			} else {
 				fxNote = tr( "Snapshotted %1 effect(s) into %2 triangle(s) of static geometry "
-					"and removed %3 emitter block(s). The quads face -Y; they will look wrong "
+					"and removed %3 emitter block(s). The quads face %4; they will look wrong "
 					"from any other angle, which is what a still costs." )
-					.arg( br.shapes ).arg( br.triangles ).arg( br.emittersRemoved );
+					.arg( br.shapes ).arg( br.triangles ).arg( br.emittersRemoved )
+					.arg( facingName );
 				for ( const QString & n : br.notes )
 					fxNote += tr( "\n  %1" ).arg( n );
 			}
@@ -4694,6 +4838,77 @@ bool NifSkope::setWorkspaceSkeletonDocument( int backgroundIndex )
 	ogl->setWorkspaceSkeleton( document->nif );
 	refreshAllDocumentSessions();
 	return true;
+}
+
+/*! Every selected row, resolved to the flags a bulk action needs to write.
+ *
+ * Right-click and the X key both operate on the SELECTION, the way the Block List
+ * does, and a selection can mix real document windows with data-only background
+ * documents. Handing both kinds back as the same triple of pointers is what lets
+ * one loop serve show, hide, see-through and remove without caring which is which.
+ *
+ * The clicked row is included even when it is not selected — right-clicking a row
+ * you have not selected should still act on that row rather than on nothing.
+ */
+QVector<NifSkope::WorkspaceTarget> NifSkope::selectedWorkspaceTargets( const QModelIndex & clicked )
+{
+	QVector<WorkspaceTarget> out;
+	QSet<const void *> seen;
+	if ( !loadedNifsView || !loadedNifsView->selectionModel() )
+		return out;
+
+	QModelIndexList rows = loadedNifsView->selectionModel()->selectedRows();
+	if ( clicked.isValid() ) {
+		bool have = false;
+		for ( const QModelIndex & r : rows )
+			if ( r.row() == clicked.row() ) { have = true; break; }
+		if ( !have )
+			rows.prepend( clicked );
+	}
+
+	for ( const QModelIndex & row : rows ) {
+		if ( NifSkope * doc = documentFromBrowserIndex( row ) ) {
+			// The primary has no visibility of its own; it is always drawn.
+			if ( doc == this || seen.contains( doc ) )
+				continue;
+			seen.insert( doc );
+			out.append( { &doc->sessionPreviewVisible, &doc->sessionPreviewGhost,
+				&doc->sessionPreviewUnloaded, doc->nif,
+				QFileInfo( doc->currentFile ).fileName(), doc, nullptr } );
+		} else if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( row ) ) {
+			if ( seen.contains( bg ) )
+				continue;
+			seen.insert( bg );
+			out.append( { &bg->sessionPreviewVisible, &bg->sessionPreviewGhost,
+				&bg->sessionPreviewUnloaded, bg->nif, bg->displayName(), nullptr, bg } );
+		}
+	}
+	return out;
+}
+
+//! Drop the selected documents out of the workspace (X, or the menu's Remove).
+int NifSkope::removeSelectedWorkspaceDocuments( const QModelIndex & clicked )
+{
+	const QVector<WorkspaceTarget> targets = selectedWorkspaceTargets( clicked );
+	int removed = 0;
+	for ( const WorkspaceTarget & t : targets ) {
+		if ( t.window ) {
+			t.window->sessionCollectionMember = false;
+			*t.unloaded = true;
+			*t.visible = false;
+			removed++;
+		} else if ( t.background ) {
+			// A data-only document has no window to keep it alive: it goes for good.
+			if ( ogl && ogl->workspaceSkeleton() == t.background->nif )
+				ogl->setWorkspaceSkeleton( nullptr );
+			sessionBackgroundDocuments.removeOne( t.background );
+			delete t.background;
+			removed++;
+		}
+	}
+	if ( removed )
+		refreshAllDocumentSessions();
+	return removed;
 }
 
 NifModel * NifSkope::workspaceDocumentModel( int backgroundIndex ) const

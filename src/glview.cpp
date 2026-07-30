@@ -1015,6 +1015,15 @@ void GLView::applyWorkspaceSkeleton( const Transform & viewTrans )
 	}
 }
 
+Vector3 GLView::viewForwardAxis() const
+{
+	// Matches ProcLightningController::drawPreview exactly, so "bake what I am
+	// looking at" and the live preview cannot disagree about which way is forward.
+	if ( !scene )
+		return Vector3( 0.0f, -1.0f, 0.0f );
+	return scene->view.rotation.inverted() * Vector3( 0.0f, 0.0f, 1.0f );
+}
+
 bool GLView::hasLiveScene( NifModel * model ) const
 {
 	if ( !model )
