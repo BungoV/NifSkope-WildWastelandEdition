@@ -1221,6 +1221,37 @@ the effect in game. Three *other* interpretations were disproven by rendering
 and reverted — subdivisions-as-recursion-depth, Length-as-branch-length, and the
 `Animate Arc Offset` re-reading. Do not re-try those without new evidence.
 
+**OPEN 2026-07-31 — the X-01 leg arcs run inside the calf.** bungo: they should
+hug the coil. Parked with what is already known, so it is not re-derived:
+
+- The generation rule is settled and shipped (`WW_CHANGES 2026-07-31i`), read out
+  of the 1.10.155 PDB: the bolt runs **from the target's origin, along its local
+  +Y, for `Length`**, and the engine never resolves a node name. That fixed the
+  torso. It did **not** move the legs — it changes direction and length, not the
+  origin.
+- The origin is the `BoltGeo_01` node, and the asset puts it on the calf bone
+  axis, ~5 units in front of the coil, so the bolt runs down *through* the leg
+  and only its ends clear the armour.
+- The merge is not doing it. Proven three ways: the branch's local transforms are
+  byte-identical to `X01_LegRight_Tesla_VFX.nif`'s; `RLeg_Calf_Armor2` has the
+  same transform in the skeleton, the armour and the Tesla hardware; and the leg
+  file's own `X01_LegRight_Tesla_Lightning:0` carries a node transform of exactly
+  minus that bone's translation — a hand-written cancel, i.e. the author knew the
+  file attaches there.
+- **The next measurement, and the one that decides it:** where `BoltGeo_01` ends
+  up *in game* versus in our merge. That separates "the asset is like this" from
+  "something still moves it". Everything cheaper has been done.
+- Decoded but not adopted: the engine's cross-section is **two crossed strips,
+  four verts a ring** (`GetBranchVerts(s) = 4·2ˢ + 4`, `GetBranchTris(s) = 4·2ˢ`,
+  `2ˢ` segments), not a camera-facing ribbon. Ours has mitred joints, arc-length
+  UVs and texture-aspect tiling that the engine's does not — a visual change with
+  no placement benefit.
+- Tools that make this cheap to resume: `WW_SHOT_TEST=<png>` with
+  `WW_SHOT_VIEW=front|back|left|right|top`, `WW_SHOT_TIME`, `WW_SHOT_AT=x,y,z`,
+  `WW_SHOT_DIST`; `WW_BOLT_DEBUG=1` logs each bolt's resolved span to
+  `release/ww_bolt_debug.log`; `nifskope-cli world` prints world transforms so two
+  files can be diffed by name.
+
 ## 13. CLI follow-ups
 
 Headless batch mode shipped 2026-07-21e (`src/nifcli.cpp`, docs in `CLI.md`):
