@@ -1221,6 +1221,20 @@ the effect in game. Three *other* interpretations were disproven by rendering
 and reverted — subdivisions-as-recursion-depth, Length-as-branch-length, and the
 `Animate Arc Offset` re-reading. Do not re-try those without new evidence.
 
+> **Superseded 2026-07-31 — the evidence arrived.** `WW_PDB_COMPARISON.md` §2
+> decodes the engine's generator out of the 1.10.155 PDB. Amplitude decay 0.5 is
+> **correct**. The 1/24 s cadence **does not exist**: `Lightning::Process` holds
+> exactly three float constants (1.0, 0.5, 0.25) and no cadence; the rate comes
+> from interpolator 2 (Mutation), which NifSkope does not read.
+> Subdivisions-as-depth and Length-as-branch-length are **what the engine does**
+> — `GetBranchVerts(s) = (1<<s)*4+4`, and
+> `len = Length*0.5^gen + rand(-1,1)*LengthVar*0.25^gen`. Both were tested before
+> 07-31i fixed the span rule, i.e. against a bolt drawn between the wrong two
+> points, which is why they looked wrong on screen. The displacement shape
+> differs too: the engine applies one random 2-D direction per span under a tent
+> weight `1 - |t-0.5|*2`, not per-axis midpoint noise, and never normalises the
+> amplitude series.
+
 **OPEN 2026-07-31 — the X-01 leg arcs run inside the calf.** bungo: they should
 hug the coil. Parked with what is already known, so it is not re-derived:
 
@@ -1246,6 +1260,12 @@ hug the coil. Parked with what is already known, so it is not re-derived:
   `2ˢ` segments), not a camera-facing ribbon. Ours has mitred joints, arc-length
   UVs and texture-aspect tiling that the engine's does not — a visual change with
   no placement benefit.
+- **Where the PDB answer lives, checked 2026-07-31** (`WW_PDB_COMPARISON.md` §4):
+  not in `BGSAttachTechniquesUtil::ProcessAttachTechniques` — that only reads the
+  `AttachT` `NiStringsExtraData` and dispatches by tag. `BGSNamedNodeAttach::Attach`
+  (`0x172090`) is a three-instruction trampoline into `AttachPolicy::vftable+8`,
+  and the placement transform is inside that policy's virtual. That body is the
+  next RE step if the in-game measurement above is not decisive.
 - Tools that make this cheap to resume: `WW_SHOT_TEST=<png>` with
   `WW_SHOT_VIEW=front|back|left|right|top`, `WW_SHOT_TIME`, `WW_SHOT_AT=x,y,z`,
   `WW_SHOT_DIST`; `WW_BOLT_DEBUG=1` logs each bolt's resolved span to

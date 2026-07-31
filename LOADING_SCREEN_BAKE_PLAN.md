@@ -3,6 +3,19 @@
 Turn an assembled, posed rig into a single static NIF the game can use as
 loading-screen art. Design only; nothing here is built yet.
 
+> **The static premise is confirmed, 2026-07-31.** `WW_PDB_COMPARISON.md` §6
+> decoded `LoadingMenu` out of the 1.10.155 PDB: it never activates a
+> `NiControllerSequence` and never ticks a controller — `InitModel`,
+> `AdvanceMovie`, `Render`, `RotateModel` and `SetForegroundModel` are all clean,
+> and the per-frame work is only spin/pan/zoom from INI settings. The vanilla
+> corpus agrees: of the 173 `meshes/LoadScreenArt` NIFs, **0** have a particle
+> system and **1** has a `NiControllerManager`. So freezing is not a convenience
+> here, it is the only thing that shows — the `--keep-effects` variant, which
+> ships live emitters instead, should not be expected to animate in game.
+>
+> One thing any bake must preserve: `InitModel` frames the model on a node named
+> **`LoadingMenuZoomTarget`**, which 65 of the 173 vanilla screens carry.
+
 ## The pipeline
 
 **Load every NIF → freeze each one at its own sequence and time → merge.**

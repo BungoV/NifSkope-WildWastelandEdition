@@ -1,5 +1,62 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31o — Six guesses checked against the engine
+
+bungo asked for a comparison check on the six areas where the FO4 PDB could
+settle something NifSkope currently guesses. No code changed; the findings are
+in **`WW_PDB_COMPARISON.md`**, one section per area, every claim cited by RVA in
+1.10.155 so it can be re-read rather than re-argued.
+
+1. **Sequence binding differs, and it is the bug class we hit.**
+   `NiControllerSequence::StoreTargets` resolves each Controlled Block through
+   `NiDefaultAVObjectPalette::GetAVObject` — a CRC32 hash map — and that palette
+   is the one **in the file**: `NiControllerManager::LoadBinary` resolves it
+   straight into `+0xC0` and nothing rebuilds it at load. NifSkope uses
+   `Node::findChild`, a pre-order scene search, and ignores the palette entirely
+   for playback. On duplicate names the two disagree by construction: when the
+   engine *does* rebuild a palette it overwrites, so the **last** node in
+   pre-order wins, where `findChild` keeps the **first**.
+
+2. **Lightning: two guesses right, four rules wrong.** Amplitude decay 0.5 is
+   correct, and `Child Width Mult` compounding per generation is correct. The
+   1/24 s cadence does not exist — `Lightning::Process` holds three float
+   constants and none of them is a cadence; the rate is authored in interpolator
+   2 (Mutation), which NifSkope does not read. Subdivisions **is** a recursion
+   depth and branches **do** use the authored `Length`, both of which §12 had
+   recorded as "disproven by rendering" — they were tested before 07-31i fixed
+   the span rule, so against a bolt drawn between the wrong two points. That note
+   is marked superseded.
+
+3. **Particles differ by scope, not by rule.** 16 of the engine's 56 `NiPSys`
+   types appear anywhere in `src/`. Absent: AgeDeath, GrowFade, Position and
+   Spawn — the four that decide whether a particle dies, fades, moves or spawns —
+   plus every collider, all six field modifiers, and the whole emitter-parameter
+   controller family whose fields NifSkope already parses.
+
+4. **`AttachT` is modelled correctly.** `ProcessAttachTechniques` reads exactly
+   the `NiStringsExtraData` we assume. Three more technique tags exist
+   (`HavokGeometry`, `MultiTechnique`, `BGSParticleArrayAttach`), and an attach is
+   dropped unless the object has children or a `NiControllerManager`. It does
+   **not** settle the leg-arc placement: that transform lives behind
+   `AttachPolicy::vftable+8`, one step further in.
+
+5. **The controller flag bits are settled.** All three `glcontroller.cpp` TODOs
+   are answerable from named accessors; bit 6 — "unknown function" — is
+   **ComputeScaledTime**, which decides whether a controller is evaluated at raw
+   or scaled time. `BSXFlags` yields only bit 11, confirming `nif.xml`'s `bLights`.
+
+6. **Loading screens never animate.** `LoadingMenu` activates no sequence and
+   ticks no controller in `InitModel`, `AdvanceMovie`, `Render`, `RotateModel` or
+   `SetForegroundModel`; the per-frame work is spin, pan and zoom from INI
+   settings. The corpus agrees — of 173 vanilla `LoadScreenArt` NIFs, 0 have a
+   particle system and 1 has a controller manager, and neither `autoPlay`,
+   `autoLoop` nor that file's `CharFXOn` appears as a literal in the exe. The
+   live-effects loading screen should not be expected to move.
+   `LOADING_SCREEN_BAKE_PLAN.md` is annotated accordingly: freezing is not a
+   convenience there, it is the only thing that shows. One detail the merge kept
+   by inheritance — `InitModel` frames the model on a node named
+   `LoadingMenuZoomTarget`, which 65 of the 173 carry and ours still has.
+
 ## 2026-07-31n — "(no sequence)" is a choice in the Sequence picker
 
 bungo: *"allow me to select to play animations that are not assigned to
