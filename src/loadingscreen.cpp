@@ -536,6 +536,24 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, bool kee
 				continue;
 			}
 
+			/* ...and a shape whose vertices are all the same point is empty too,
+			 * whatever its vertex count says. X01_LegRight_Tesla_Lightning:0 has 34
+			 * of them, every one (0,0,0), with a Bounding Sphere describing where
+			 * its geometry WOULD be — the same runtime-filled arrangement as the
+			 * `Bolt_0N` shapes, which give themselves away by having no vertices at
+			 * all. Baking one folds a world transform into nothing and writes a
+			 * degenerate shape at the actor's feet with a zeroed bounding sphere,
+			 * which is worse than dropping it: it is invisible, and it is there.
+			 */
+			bool degenerate = true;
+			const Vector3 v0 = nif->get<Vector3>( nif->getIndex( iVD, 0 ), "Vertex" );
+			for ( int v = 1; v < nv && degenerate; v++ )
+				degenerate = ( nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) - v0 ).length() < 1.0e-6f;
+			if ( degenerate ) {
+				emptyShapes << b;
+				continue;
+			}
+
 			int unresolvedBones = 0;
 			const QVector<Affine> bones = skinBoneMatrices( nif, shape, world, &unresolvedBones );
 			const bool skinned = !bones.isEmpty();
