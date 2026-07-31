@@ -89,10 +89,72 @@ bool ControllerManager::update( const NifModel * nif, const QModelIndex & index 
 	return false;
 }
 
+static SeqBind::Stats seqBindStats;
+static bool seqBindMeasuring = false;
+
+SeqBind::Stats SeqBind::stats()
+{
+	return seqBindStats;
+}
+
+void SeqBind::reset()
+{
+	seqBindStats = Stats();
+	// Measuring starts the first time anyone asks, and stays on: the cost is one
+	// extra name search per Controlled Block, paid only in a harness run.
+	seqBindMeasuring = true;
+}
+
+/*! Name -> block number, read out of the manager's `NiDefaultAVObjectPalette`.
+ *
+ *  This is the map the game uses. `NiControllerSequence::StoreTargets`
+ *  (1.10.155 `0x1c14ff0`) resolves every Controlled Block's Node Name with
+ *  `NiDefaultAVObjectPalette::GetAVObject` (`0x1bc1d20`) — a CRC32 hash of the
+ *  name into a table — and never searches the scene graph. The palette it uses
+ *  is the one **in the file**: `NiControllerManager::LoadBinary` (`0x1c0c260`)
+ *  resolves the link straight into the manager and nothing rebuilds it at load.
+ *
+ *  So the file, not the tree, decides which node a name means. That matters
+ *  whenever two nodes share a name — which merged files produce constantly.
+ *  `Node::findChild` returns the FIRST match in pre-order; when the engine does
+ *  rebuild a palette it overwrites (`SetAVObject`, `0x1bc25b0`, calls `SetAt`),
+ *  so the LAST match in the same pre-order wins. Same traversal, opposite
+ *  answer, and nothing in a name search can tell which one the author meant.
+ *
+ *  Empty for a file with no palette, which then falls back to the name search.
+ */
+static QHash<QString, qint32> objectPalette( const NifModel * nif, const QModelIndex & iManager )
+{
+	QHash<QString, qint32> map;
+
+	QModelIndex iPalette = nif->getBlockIndex( nif->getLink( iManager, "Object Palette" ),
+	                                           "NiDefaultAVObjectPalette" );
+	if ( !iPalette.isValid() )
+		return map;
+
+	QModelIndex iObjs = nif->getIndex( iPalette, "Objs" );
+	for ( int r = 0; r < nif->rowCount( iObjs ); r++ ) {
+		QModelIndex iObj = nif->getIndex( iObjs, r );
+		const QString name = nif->get<QString>( iObj, "Name" );
+		if ( name.isEmpty() )
+			continue;
+
+		// A palette row whose Ptr is dead resolves to nothing in the engine too,
+		// so it is not an entry — recording it would only mask the name search.
+		const qint32 link = nif->getLink( iObj, "AV Object" );
+		if ( link >= 0 )
+			map.insert( name, link );
+	}
+
+	return map;
+}
+
 void ControllerManager::setSequence( const QString & seqname )
 {
 	auto nif = NifModel::fromValidIndex(iBlock);
 	if ( nif && target ) {
+		const QHash<QString, qint32> palette = objectPalette( nif, iBlock );
+
 		MultiTargetTransformController * multiTargetTransformer = 0;
 		for ( Controller * c : target->controllers ) {
 			if ( c->typeId() == "NiMultiTargetTransformController" ) {
@@ -161,7 +223,51 @@ void ControllerManager::setSequence( const QString & seqname )
 						var2 = idx.sibling( idx.row(), NifModel::ValueCol ).data( NifSkopeDisplayRole ).toString();
 					}
 
-					Node * node = target->findChild( nodename );
+					/* The palette first, exactly as the engine does. Falling back
+					 * to the name search when a name is absent is a deliberate
+					 * divergence: the engine drops the block silently, but a
+					 * half-written palette is a thing mod files really have, and
+					 * an editor that shows nothing there is less use than one
+					 * that shows the file's intent. `Animation ▸ Fix AV Object
+					 * Palette` is what turns the fallback into a real binding.
+					 */
+					Node * node = nullptr;
+					const auto hit = palette.constFind( nodename );
+
+					if ( hit != palette.constEnd() ) {
+						node = ( target->id() == *hit ) ? target.data()
+						                                : target->findChild( int(*hit) );
+					} else {
+						node = target->findChild( nodename );
+					}
+
+					/* What the two routes would each have picked. `bySearch` is only
+					 * computed to be compared against, and only when someone is
+					 * measuring — a name search per Controlled Block is not free.
+					 */
+					if ( seqBindMeasuring ) {
+						Node * bySearch = ( hit != palette.constEnd() )
+							? target->findChild( nodename ) : node;
+						seqBindStats.rows++;
+						if ( hit != palette.constEnd() )
+							seqBindStats.viaPalette++;
+						if ( node != bySearch )
+							seqBindStats.differs++;
+						if ( !node )
+							seqBindStats.unresolved++;
+
+						if ( qEnvironmentVariableIsSet( "WW_SEQBIND_DEBUG" ) ) {
+							QFile f( QApplication::applicationDirPath() + "/ww_seqbind_debug.log" );
+							if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
+								QTextStream( &f )
+									<< seqname << " row " << r << " \"" << nodename << "\""
+									<< " via " << ( hit != palette.constEnd() ? "palette" : "search" )
+									<< " -> block " << ( node ? node->id() : -1 )
+									<< ", search -> block " << ( bySearch ? bySearch->id() : -1 )
+									<< ( node != bySearch ? "   DIFFERS" : "" ) << "\n";
+							}
+						}
+					}
 
 					if ( !node )
 						continue;

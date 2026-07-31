@@ -66,6 +66,26 @@ public:
 
 	bool active = false;
 
+	/*! Flags bit 4 — play the animation backwards.
+	 *
+	 * `NiTimeController::GetPlayBackwards` (1.10.155 `0x1ba7140`) is
+	 * `(flags >> 4) & 1`. Mirrors the resolved time about the middle of
+	 * [start, stop] after the cycle type has been applied.
+	 */
+	bool playBackwards = false;
+
+	/*! Flags bit 6 — compute scaled time.
+	 *
+	 * The engine calls `NiTimeController::ComputeScaledTime` (`0x1ba6d30`) —
+	 * which is what applies frequency, phase and the cycle type — **only** when
+	 * this bit is set; `BSProceduralLightningController::Update+0x93` shows the
+	 * gate. When it is clear the controller is driven with the time it is handed,
+	 * unscaled. Every one of the 160 controllers sampled across FO4's effects,
+	 * actors, architecture and setdressing meshes has it set, so this changes
+	 * nothing on shipped assets and only honours a file that deliberately clears it.
+	 */
+	bool computeScaledTime = true;
+
 	//! Find the model index of the controller
 	QModelIndex index() const { return iBlock; }
 
@@ -86,6 +106,9 @@ public:
 
 	//! Determine the controller time based on the specified time
 	float ctrlTime( float time ) const;
+
+	//! Resolve an already frequency/phase-scaled time through the cycle type
+	float cycleTime( float time ) const;
 
 	/*! Interpolate given the index of an array
 	 *

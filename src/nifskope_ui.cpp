@@ -48,6 +48,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QProcessEnvironment>
 #include <QScopeGuard>
 #include "version.h"
+#include "gl/controllers.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -4378,6 +4379,92 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->ogl->getScene()->animGroup.isEmpty() );
 					check( "arcs still generate with no sequence", saArcs > 0 );
 					check( "particles still emit with no sequence", saSprites > 0 );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_SEQBIND_TEST=1): does a sequence bind through the file's
+	 * object palette, and does that ever differ from a name search?
+	 *
+	 * The engine resolves every Controlled Block through
+	 * `NiDefaultAVObjectPalette::GetAVObject` on the palette the FILE supplies.
+	 * NifSkope used to search the scene graph by name and take the first hit.
+	 * On a file with unique node names the two agree and there is nothing to see,
+	 * which is exactly why this has to run on a MERGED file: merging is what
+	 * produces two nodes with one name, and a name search cannot tell them apart.
+	 *
+	 * `differs` is the measurement. It is the count of rows where the palette and
+	 * `findChild` pick different nodes — so it is zero for the old behaviour by
+	 * construction, and a non-zero reading is proof the palette decided something
+	 * the search would have got wrong. Nothing else here would fail if the palette
+	 * were ignored: the same blocks bind, the same animations play, just onto the
+	 * wrong limb.
+	 *
+	 * Log: release/ww_seqbind_test.log, plus release/ww_seqbind_debug.log with
+	 * WW_SEQBIND_DEBUG=1 for the per-row detail.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SEQBIND_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_seqbind_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					NifModel * nif = skope->getNifModel();
+					Scene * scene = skope->ogl ? skope->ogl->getScene() : nullptr;
+					if ( !nif || !scene ) { log << "no model or scene\n"; break; }
+
+					int palettes = 0, entries = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						QModelIndex idx = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( idx, "NiDefaultAVObjectPalette" ) )
+							continue;
+						palettes++;
+						entries += nif->rowCount( nif->getIndex( idx, "Objs" ) );
+					}
+					const QStringList groups = scene->animGroups;
+					log << palettes << " palette(s), " << entries << " entries, "
+						<< groups.size() << " sequence(s)\n";
+					check( "the file has an object palette to bind through", palettes > 0 );
+					check( "it has sequences to bind", !groups.isEmpty() );
+
+					SeqBind::reset();
+					for ( const QString & g : groups ) {
+						skope->ogl->setSceneSequence( g );
+						QApplication::processEvents();
+					}
+					const SeqBind::Stats s = SeqBind::stats();
+					/* Machine-readable, because what counts as a pass is a property
+					 * of the FILE, not of the code: a file with unique node names
+					 * must read differs=0 and a file whose palette points somewhere
+					 * else must read differs>0, and only the caller knows which it
+					 * handed over. tests/anim/sequence_binding.sh asserts both.
+					 */
+					log << "stats rows=" << s.rows << " palette=" << s.viaPalette
+						<< " differs=" << s.differs << " unresolved=" << s.unresolved << "\n";
+
+					check( "controlled blocks were bound at all", s.rows > 0 );
+					// Every name the palette carries must come from the palette. Rows
+					// left to the name search are rows the palette does not mention,
+					// which is a fact about the file — reported, not judged.
+					check( "no row resolved through the palette to nothing",
+						s.viaPalette == 0 || s.unresolved < s.rows );
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";

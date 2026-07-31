@@ -44,6 +44,32 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 class Shape;
 class Node;
 
+/*! How the last sequence selections resolved their Controlled Blocks.
+ *
+ *  Binding happens inside `ControllerManager::setSequence` and leaves nothing
+ *  behind that names the node it chose, so "did the file's palette actually
+ *  decide this" is not a question the model or the scene can answer afterwards.
+ *  These counters are the answer, and `differs` is the one that matters: it
+ *  counts rows where the palette and a `findChild` name search disagree, which
+ *  is zero on a file with unique node names and non-zero on exactly the merged
+ *  files that used to mis-bind.
+ */
+namespace SeqBind
+{
+	struct Stats
+	{
+		int rows = 0;        //!< Controlled Blocks seen
+		int viaPalette = 0;  //!< resolved through NiDefaultAVObjectPalette
+		int differs = 0;     //!< palette and the name search picked different nodes
+		int unresolved = 0;  //!< neither route found a node
+	};
+
+	//! Counters accumulated since the last reset()
+	Stats stats();
+	//! Zero the counters
+	void reset();
+}
+
 //! Controller for `NiControllerManager` blocks
 class ControllerManager final : public Controller
 {

@@ -220,10 +220,33 @@ bool Controller::update( const NifModel * nif, const QModelIndex & index )
 		int flags = nif->get<int>( index, "Flags" );
 		active = flags & 0x08;
 		extrapolation = (Extrapolation)( ( flags & 0x06 ) >> 1 );
+		playBackwards = flags & 0x10;
+		computeScaledTime = flags & 0x40;
 
-		// TODO: Bit 4 (16) - Plays entire animation backwards.
-		// TODO: Bit 5 (32) - Generally only set when sequences are present.
-		// TODO: Bit 6 (64) - Always seems to be set on Skyrim NIFs, unknown function.
+		/* The whole word, decoded out of the 1.10.155 PDB from named accessors
+		 * on NiTimeController's flags at +0x10 (see WW_PDB_COMPARISON.md §5):
+		 *
+		 *   bit 0    AnimType         GetAnimType        0x1ba7100
+		 *   bits 1-2 CycleType        GetCycleType       0x1ba7110   -> extrapolation
+		 *   bit 3    Active           SetActive          0x13f0b0    -> active
+		 *   bit 4    PlayBackwards    GetPlayBackwards   0x1ba7140   -> playBackwards
+		 *   bit 5    manager-controlled                              (see below)
+		 *   bit 6    ComputeScaledTime                   0x1ba6d30   -> computeScaledTime
+		 *   bit 7    ForceUpdate      SetForceUpdate     0x1ba7190
+		 *   bit 8    MandatoryUpdate  QMandatoryUpdate   0x1ba4aa0
+		 *
+		 * The four not read here are all about *when the engine bothers to call
+		 * a controller*, which is a question a viewport does not have:
+		 *
+		 * - Bit 0 (AnimType) picks the clock — APP_INIT measures from the moment
+		 *   the controller started rather than from the app clock. The scene time
+		 *   here is already relative, so it would be a no-op.
+		 * - Bit 5 says a NiControllerSequence owns this controller;
+		 *   NiControllerSequence::StoreTargets sets it when it installs a blend
+		 *   interpolator. Selecting a sequence is what does the equivalent here.
+		 * - Bits 7 and 8 (ForceUpdate, MandatoryUpdate) suppress the engine's
+		 *   "the time did not change, skip it" early-out. Nothing is skipped here.
+		 */
 
 		QModelIndex idx = nif->getBlockIndex( nif->getLink( iBlock, "Interpolator" ) );
 
@@ -245,8 +268,28 @@ bool Controller::update( const NifModel * nif, const QModelIndex & index )
 
 float Controller::ctrlTime( float time ) const
 {
-	time = frequency * time + phase;
+	/* Frequency, phase and the cycle type are what ComputeScaledTime does, and
+	 * the engine only calls it when flags bit 6 is set. Clear means "use the
+	 * time you were handed".
+	 */
+	if ( !computeScaledTime )
+		return time;
 
+	const float t = cycleTime( frequency * time + phase );
+
+	/* Bit 4 mirrors about the middle of the interval. Doing it out here rather
+	 * than inside each cycle case keeps one rule for all three: the cycle type
+	 * decides *which* point of [start, stop] this is, and backwards decides
+	 * which end you count that point from.
+	 */
+	if ( playBackwards && stop > start )
+		return start + stop - t;
+
+	return t;
+}
+
+float Controller::cycleTime( float time ) const
+{
 	if ( time >= start && time <= stop )
 		return time;
 

@@ -210,7 +210,58 @@ int namedAttachNode( const NifModel & donor, int donorTop,
 	return it == targetByName.constEnd() ? -1 : *it;
 }
 
-QString attachNodeName( const NifModel & donor, bool * isEffect = nullptr )
+/*! Split one `AttachT` entry into its technique tag and argument.
+ *
+ *  The engine's split is one `strchr(entry, '&')`
+ *  (`BGSAttachTechniquesUtil::ProcessAttachTechniques`, 1.10.155 `0x171a1b`):
+ *  everything before the ampersand is the tag, everything after is the argument,
+ *  handed to the technique verbatim. An entry with no ampersand is all tag and
+ *  no argument — which is why `MultiTechnique` on its own is a valid entry and
+ *  names nothing.
+ *
+ *  Four techniques register themselves, each under a tag string stored next to
+ *  its vtable: `NamedNode`, `HavokGeometry`, `MultiTechnique` and the particle
+ *  array one. Only `NamedNode` takes a node name.
+ */
+static QString attachTag( const QString & entry, QString * arg = nullptr )
+{
+	const int amp = entry.indexOf( QLatin1Char( '&' ) );
+	if ( amp < 0 ) {
+		if ( arg )
+			arg->clear();
+		return entry;
+	}
+	if ( arg )
+		*arg = entry.mid( amp + 1 );
+	return entry.left( amp );
+}
+
+/*! The node name inside a `NamedNode&` argument.
+ *
+ *  Vanilla arguments are usually a bare node name, but not always: FO4 ships
+ *  `NamedNode&C-ArmsTypeA1|0` on the Mr Handy arm assets, and the engine passes
+ *  the whole thing through to `BSUtilities::GetObjectByName` without stripping
+ *  the suffix. No engine code seen strips it, so what `|0` selects is not
+ *  settled here — but a node called `C-ArmsTypeA1|0` does not exist in those
+ *  files either, so matching the argument whole finds nothing at all.
+ *
+ *  Exact first, then without the suffix. That order cannot turn a match into a
+ *  miss, and it is the difference between placing those effects and dropping them.
+ */
+static QString attachNodeArg( const QString & arg, const QHash<QString, int> * known = nullptr )
+{
+	if ( arg.isEmpty() )
+		return arg;
+	if ( known && known->contains( arg ) )
+		return arg;
+	const int bar = arg.indexOf( QLatin1Char( '|' ) );
+	if ( bar > 0 )
+		return arg.left( bar );
+	return arg;
+}
+
+QString attachNodeName( const NifModel & donor, bool * isEffect = nullptr,
+                        const QHash<QString, int> * targetByName = nullptr )
 {
 	if ( isEffect )
 		*isEffect = false;
@@ -231,9 +282,10 @@ QString attachNodeName( const NifModel & donor, bool * isEffect = nullptr )
 			*isEffect = true;			// it IS an ArtObject, whatever it names
 		QModelIndex iData = donor.getIndex( iEx, "Data" );
 		for ( int s = 0; s < donor.rowCount( iData ); s++ ) {
-			const QString v = donor.get<QString>( donor.getIndex( iData, s ) );
-			if ( v.startsWith( QLatin1String( "NamedNode&" ) ) )
-				return v.mid( 10 );
+			QString arg;
+			const QString tag = attachTag( donor.get<QString>( donor.getIndex( iData, s ) ), &arg );
+			if ( tag == QLatin1String( "NamedNode" ) && !arg.isEmpty() )
+				return attachNodeArg( arg, targetByName );
 		}
 	}
 	return QString();
@@ -529,7 +581,7 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	 */
 	const QHash<QString, int> byName = namedNodes( target );
 	int attachBlock = targetRoot;
-	const QString declared = attachNodeName( donor, &result.isEffect );
+	const QString declared = attachNodeName( donor, &result.isEffect, &byName );
 	result.attachRequested = attachOverride.isEmpty() ? declared : attachOverride;
 	if ( !result.attachRequested.isEmpty() ) {
 		auto it = byName.constFind( result.attachRequested );

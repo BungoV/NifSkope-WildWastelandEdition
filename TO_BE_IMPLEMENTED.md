@@ -1260,12 +1260,21 @@ hug the coil. Parked with what is already known, so it is not re-derived:
   `2ˢ` segments), not a camera-facing ribbon. Ours has mitred joints, arc-length
   UVs and texture-aspect tiling that the engine's does not — a visual change with
   no placement benefit.
-- **Where the PDB answer lives, checked 2026-07-31** (`WW_PDB_COMPARISON.md` §4):
-  not in `BGSAttachTechniquesUtil::ProcessAttachTechniques` — that only reads the
-  `AttachT` `NiStringsExtraData` and dispatches by tag. `BGSNamedNodeAttach::Attach`
-  (`0x172090`) is a three-instruction trampoline into `AttachPolicy::vftable+8`,
-  and the placement transform is inside that policy's virtual. That body is the
-  next RE step if the in-game measurement above is not decisive.
+- **ANSWERED 2026-08-01 — the engine applies no transform at all.**
+  `BGSNamedNodeAttach::AttachPolicy::Process` (1.10.155 `0x175710`), reached
+  through `AttachPolicy::vftable+8`, is the whole placement rule and it is four
+  steps: resolve the argument with `BSUtilities::GetObjectByName`, fall back to
+  the root if that finds nothing, `parent->AttachObject( obj, true )`, then
+  `BSShaderUtil::InvalidateRenderPasses`. It is a plain scene-graph re-parent —
+  nothing is offset, aligned or zeroed, so an attached ArtObject sits exactly
+  where its own local transform puts it relative to the named node.
+
+  That closes this question against the merge: our merge does the same thing, and
+  the three proofs above already showed the branch transforms are byte-identical
+  to the donor's. **The arcs run inside the calf because the asset puts
+  `BoltGeo_01` there.** Moving them is an authoring change, not a bug fix — so if
+  bungo still wants them hugging the coil, the honest fix is to edit the node, not
+  to hunt the merge. The in-game measurement is no longer needed to decide it.
 - Tools that make this cheap to resume: `WW_SHOT_TEST=<png>` with
   `WW_SHOT_VIEW=front|back|left|right|top`, `WW_SHOT_TIME`, `WW_SHOT_AT=x,y,z`,
   `WW_SHOT_DIST`; `WW_BOLT_DEBUG=1` logs each bolt's resolved span to

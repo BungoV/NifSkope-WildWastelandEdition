@@ -160,6 +160,54 @@ if [ -s "$TMP/screen.nif" ]; then
 	fi
 fi
 
+# --- 4. an AttachT argument with FO4's "|n" suffix ---------------------------
+#
+# The engine splits an AttachT entry at the first '&' and hands everything after
+# it to the technique verbatim -- BGSAttachTechniquesUtil::ProcessAttachTechniques
+# (1.10.155 0x171a1b) is one strchr and no further parsing. Vanilla ships
+# arguments that carry a trailing "|n": MrHandyArmDest00.nif says
+# NamedNode&C-ArmsTypeA1|0, and no node of that literal name exists in the file.
+#
+# Matching the argument whole therefore finds nothing, and the merge REFUSES the
+# donor outright -- "attaches to X|0, which this file has no node for" -- so the
+# failure is loud rather than silent, but the effect is still dropped. This
+# builds that case out of a leg file whose attach node is known to exist, so a
+# reading here can only be about the suffix.
+LEG="$X/X01_LegRight_Tesla_VFX.nif"
+if [ -f "$LEG" ]; then
+	"$EXE" -no-gui set "$LEG" -b 1 -f "Data/0" -v "NamedNode&RLeg_Calf_Armor2|0" \
+		-o "$TMP/leg_pipe.nif" > /dev/null 2>&1
+	got="$("$EXE" -no-gui get "$TMP/leg_pipe.nif" -b 1 -f "Data/0" 2>/dev/null | tr -d '\r')"
+	if [ "$got" = "NamedNode&RLeg_Calf_Armor2|0" ]; then ok
+	else bad "could not build the |n case (AttachT reads \"$got\")"; fi
+
+	# The control, so the check below cannot pass for the wrong reason: asking for
+	# the literal piped name must be refused. That is precisely what the old parse
+	# did with this file, since it handed the argument over whole.
+	if "$EXE" -no-gui merge "$SK" --attach "RLeg_Calf_Armor2|0" --add "$LEG" \
+		-o "$TMP/lit.nif" > "$TMP/lit.log" 2>&1 \
+		&& [ -s "$TMP/lit.nif" ]; then
+		bad "a node literally named RLeg_Calf_Armor2|0 exists -- this file cannot test the suffix"
+	else
+		ok
+	fi
+
+	if "$EXE" -no-gui merge "$SK" --add "$TMP/leg_pipe.nif" -o "$TMP/pipe.nif" \
+		> "$TMP/pipe.log" 2>&1; then
+		ok
+		# ...and it landed on the calf, not at the root.
+		if grep -q "RLeg_Calf_Armor2" "$TMP/pipe.log"; then ok
+		else bad "merged, but nothing reports attaching to RLeg_Calf_Armor2"; fi
+	else
+		bad "a NamedNode&<node>|0 attach was refused -- the |n suffix is not being stripped"
+		sed -n 's/^error: /    /p' "$TMP/pipe.log" | head -1
+		fail=$((fail+1))
+	fi
+else
+	echo "  (no right-leg VFX file -- no |n case to build)"
+	ok; ok; ok; ok
+fi
+
 echo
 echo "checks passed: $pass   failed: $fail"
 [ "$fail" -eq 0 ]
