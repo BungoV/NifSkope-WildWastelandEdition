@@ -3820,6 +3820,89 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_SHOT_TEST=<out.png>, WW_SHOT_VIEW=front|back|left|right|top,
+	 * WW_SHOT_TIME=<seconds>): render the file from a named side and save it.
+	 *
+	 * The numbers say where an effect IS; they cannot say whether it looks right,
+	 * and the arcs on this armour are on its BACK, which is the one side a default
+	 * view never shows. So: pick a side, step the animation to an instant, paint,
+	 * save. Sized from WW_SHOT_SIZE=<w>x<h> so the image is worth looking at.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SHOT_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				const QString out = qEnvironmentVariable( "WW_SHOT_TEST" );
+				if ( ok ) {
+					skope->ogl->setAnimationEnabled( true );
+					QApplication::processEvents();
+
+					// The camera FIRST. setOrientation recenters and repaints, and a
+					// repaint steps the scene — so moving it after the stepping loop
+					// walks the animation on past the instant that was asked for, and
+					// the first version of this harness saved a frame with no arcs in
+					// it at all.
+					const QString v = qEnvironmentVariable( "WW_SHOT_VIEW" ).toLower();
+					GLView::ViewState vs = GLView::ViewFront;
+					if ( v == QLatin1String( "back" ) )       vs = GLView::ViewBack;
+					else if ( v == QLatin1String( "left" ) )  vs = GLView::ViewLeft;
+					else if ( v == QLatin1String( "right" ) ) vs = GLView::ViewRight;
+					else if ( v == QLatin1String( "top" ) )   vs = GLView::ViewTop;
+					skope->ogl->setOrientation( vs, true );
+					QApplication::processEvents();
+
+					/* Framing, because scale decides what is legible. A bolt is 4
+					 * units wide; on a 160-unit figure that is a hairline, and the
+					 * same effect photographed in its own file — where the camera
+					 * frames 40 units — looks ten times thicker. Two shots of the
+					 * same geometry can therefore disagree about whether anything is
+					 * there. WW_SHOT_AT=x,y,z centres, WW_SHOT_DIST=<units> zooms.
+					 */
+					if ( qEnvironmentVariableIsSet( "WW_SHOT_AT" ) ) {
+						const QStringList xyz = qEnvironmentVariable( "WW_SHOT_AT" ).split( QLatin1Char( ',' ) );
+						if ( xyz.size() == 3 )
+							skope->ogl->setPosition( Vector3( -xyz.at( 0 ).toFloat(),
+							                                 -xyz.at( 1 ).toFloat(),
+							                                 -xyz.at( 2 ).toFloat() ) );
+					}
+					if ( qEnvironmentVariableIsSet( "WW_SHOT_DIST" ) )
+						skope->ogl->setDistance( qEnvironmentVariable( "WW_SHOT_DIST" ).toFloat() );
+					QApplication::processEvents();
+
+					const float want = qEnvironmentVariableIsSet( "WW_SHOT_TIME" )
+						? qEnvironmentVariable( "WW_SHOT_TIME" ).toFloat() : 2.5f;
+					// Stepped, not jumped: sprite positions integrate frame to frame.
+					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
+						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
+						QApplication::processEvents();
+					}
+
+					// grabFramebuffer does NOT repaint: without pumping first it
+					// saves whatever was on screen before the last step.
+					for ( int i = 0; i < 3; i++ ) {
+						skope->ogl->update();
+						QApplication::processEvents();
+					}
+					QEventLoop settle;
+					QTimer::singleShot( 250, &settle, &QEventLoop::quit );
+					settle.exec();
+					// ...and the settle above let the clock run, so the instant is
+					// re-asserted before the grab.
+					skope->ogl->setSceneTime( want );
+					skope->ogl->update();
+					QApplication::processEvents();
+					skope->ogl->update();
+					QApplication::processEvents();
+
+					skope->ogl->grabFramebuffer().save( out );
+				}
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_LIVEFX_TEST=1, WW_LIVEFX_TIME=<seconds>): does a loading
 	 * screen converted with --keep-effects still RUN, and in the right place?
 	 *

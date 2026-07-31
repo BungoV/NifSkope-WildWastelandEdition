@@ -380,6 +380,8 @@ class ProcLightningController final : public Controller
 	QPointer<Node> target;
 	QPointer<Node> startNode;
 	QPointer<Node> endNode;
+	bool spanReported = false;      //!< WW_BOLT_DEBUG reports the resolution once
+	bool ribbonReported = false;    //!< ...and the span it actually drew between
 	QPersistentModelIndex iShaderProp;
 	ParamCurve cSubdiv, cBranches, cBranchVar, cLength, cLengthVar, cWidth, cArc;
 	//! Same seven parameters when the controller holds NiBlendFloatInterpolator

@@ -1,5 +1,71 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31h — six files' animations were all driving one limb's nodes
+
+bungo: *"the two bolts on the torso are not rotated correctly, the start and end
+point, they are meant to go across the rear of the torso plate, not away from
+it."* Correct, and it was the merge, not the convert — the same file measured
+before conversion had it too.
+
+### What the endpoints were doing
+
+The bolt spans were being read from the right nodes: `LightningBolt_01_Start` and
+`_End` resolved by name, both present, both unique. What was wrong was **where
+those nodes were at t = 2.5**. Instrumented:
+
+    ribbon BoltGeo_01  span  A (12.49, -29.93, 138.46)  B (15.47, -26.81, 163.37)
+
+`B` should be `(-12.70, -30.33, 136.32)` — level with `A`, across the plate. It
+was at head height because something else was animating that node.
+
+### One name, six files, first match wins
+
+NifSkope binds a sequence's controlled block with
+`target->findChild( nodename )` — the **first** node of that name in the subtree.
+The merge qualifies colliding effect names (`R_Pauldron_BoltGeo_01`), and it
+rewrites the rows that name them; but a row was matched to its node **through its
+controller's Target**, and the rows that move NODES all point at the file's one
+shared `NiMultiTargetTransformController`, whose Target is the ROOT. So those
+rows resolved to the root, found it unrenamed, and were left naming a node that
+had just been renamed out from under them.
+
+Six files, six rows saying `LightningBolt_01`, all binding to the first file's
+node. Measured on the merged rig: **one node addressed by 10 rows and two more by
+6, where no donor addresses any node more than 4 times.**
+
+The row's NAME is what identifies its node, so the name is consulted first now,
+and the controller is only the tie-breaker for a donor that wore one name twice.
+After: at most 4 rows per node, and the torso spans read
+`A (12.49, -29.93, 138.46) B (-12.70, -30.33, 136.32)` — level, across the back.
+
+### Why it looked like only the torso was broken
+
+Five limbs' endpoints simply stopped being animated, and an un-animated node sits
+in its bind pose, which is exactly where it belongs. Only the sixth — the one
+every row piled onto — visibly moved. A bug that hides in five places out of six
+and shows in one is why the check for it counts **rows per node** rather than
+looking for something out of place.
+
+### Looking at it
+
+`WW_SHOT_TEST=<out.png>` with `WW_SHOT_VIEW=front|back|left|right|top`,
+`WW_SHOT_TIME`, `WW_SHOT_AT=x,y,z` and `WW_SHOT_DIST`. The arcs on this armour
+are on its BACK, which is the one side a default view never shows, and no number
+in the suite says whether the thing looks right.
+
+Two things it had to learn, both of which produced a confident wrong answer
+first: `setOrientation` recenters and repaints, and a repaint STEPS the scene, so
+moving the camera after the stepping loop walks the animation past the instant
+asked for — the first shots came out with no arcs in them at all. And framing
+decides legibility: a bolt is 4 units wide, so on a 160-unit figure it is a
+hairline, while the same effect in its own file — where the camera frames 40
+units — looks ten times thicker. Two shots of identical geometry can disagree
+about whether anything is there.
+
+Regressions: 24 carries-everything (up from 21, with the rows-per-node check),
+15 live effects, 10 artobject, 9 merge sweep, 21 bake, 8 effect bake, 57 freeze,
+9 boltbake.
+
 ## 2026-07-31g — the leg particles were 21 units out, and the check could not see it
 
 bungo, on the file shipped an hour earlier: *"the leg particles are off position and

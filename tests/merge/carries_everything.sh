@@ -73,6 +73,28 @@ attacht_on_root() {
 	echo "$n"
 }
 
+# The most rows any ONE node name is addressed by, over every sequence in the
+# file. Node Names are string indices, and equal strings share an index within a
+# file, so this counts without the CLI having to resolve them.
+#
+# This is the check that catches a merged animation driving the wrong node.
+# NifSkope binds a controlled block with `target->findChild(nodename)` -- FIRST
+# match in the subtree -- so a row whose name was not qualified along with the
+# node it names silently binds to some other limb's node. Measured on the X-01
+# rig: one node addressed by 10 rows and two more by 6, where no donor addresses
+# any node more than 4 times. What that looked like was the torso's bolt
+# endpoints dragged to head height while the other five limbs' endpoints stopped
+# animating at all -- and those five look RIGHT, because their bind pose is where
+# they belong. Only the collision is visible, and only on one limb.
+controlled_max() {
+	local b
+	for b in $("$EXE" -no-gui list "$1" 2>/dev/null \
+		| sed -n 's/^\[\([0-9]*\)\] NiControllerSequence.*/\1/p'); do
+		"$EXE" -no-gui dump "$1" -b "$b" -d 3 -n 8000 2>/dev/null \
+			| sed -n 's/.*Node Name  <string>  = //p'
+	done | sort | uniq -c | sort -rn | head -1 | awk '{print $1+0}'
+}
+
 # Every Controlled Blocks row in the file, summed over its sequences. This is
 # what a fused sequence must not lose.
 controlled() {
@@ -202,6 +224,17 @@ run_case() {
 	have="$(controlled "$TMP/m.nif")"
 	if [ "$have" -ge "$want" ]; then ok; echo "  $have controlled block(s), all $want carried"
 	else bad "$label: $(( want - have )) of $want controlled block(s) lost when sequences fused"; fi
+
+	# ...and no node may end up addressed by more rows than any one donor
+	# addressed it, which is what rows binding to another file's node looks like.
+	local wantMax=0 n
+	for d in "$target" "${donors[@]}"; do
+		n="$(controlled_max "$d")"
+		[ "${n:-0}" -gt "$wantMax" ] && wantMax="$n"
+	done
+	n="$(controlled_max "$TMP/m.nif")"
+	if [ "${n:-0}" -le "$wantMax" ]; then ok; echo "  at most ${n:-0} row(s) per node, as in the donors ($wantMax)"
+	else bad "$label: one node is addressed by $n row(s); no donor addresses one more than $wantMax times -- rows from different files are binding to the same node"; fi
 
 	# Branch-level AttachT: every one survives. File-level: at most one left.
 	local wantBranch=0 t r

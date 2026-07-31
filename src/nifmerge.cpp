@@ -408,19 +408,39 @@ void uniquifyEffectNames( NifModel * nif, const QList<qint32> & imported,
 		QModelIndex iArr = nif->getIndex( idx, "Controlled Blocks" );
 		for ( int r = 0; r < nif->rowCount( iArr ); r++ ) {
 			QModelIndex iRow = nif->getIndex( iArr, r );
+
+			/* The NAME is what identifies the row's node, and the controller link is
+			 * only a shortcut — so the name is consulted first.
+			 *
+			 * Following the controller first was wrong in exactly the case that
+			 * matters most. A row driven by the file's NiMultiTargetTransformController
+			 * — which is every row that moves a NODE, as opposed to animating a
+			 * property — points at that one shared controller, whose Target is the
+			 * ROOT. So the lookup resolved to the root, found it unrenamed, and left
+			 * the row naming a node that had just been renamed out from under it.
+			 *
+			 * What that produced: six merged effect files, each with a row saying
+			 * "LightningBolt_01_End", all resolving through one palette to the FIRST
+			 * file's node. The torso's bolt endpoints were dragged to head height and
+			 * out past the shoulder, and every other limb's endpoints stopped being
+			 * animated at all — which looks fine, because their bind pose is where
+			 * they belong.
+			 */
 			int node = -1;
-			const int ctrl = nif->getLink( iRow, "Controller" );
-			if ( ctrl >= 0 ) {
-				const int target = nif->getLink( nif->getBlockIndex( ctrl ), "Target" );
-				node = nif->blockInherits( nif->getBlockIndex( target ), "NiAVObject" )
-					? target : ownerOfProperty( nif, target );
-			}
-			if ( node < 0 ) {
-				// No controller to follow: the old name identifies the node, as
-				// long as this import only had one block wearing it.
-				const QList<int> was = wasCalled.value( nif->resolveString( iRow, "Node Name" ) );
-				if ( was.size() == 1 )
-					node = was.first();
+			const QList<int> was = wasCalled.value( nif->resolveString( iRow, "Node Name" ) );
+			if ( was.size() == 1 ) {
+				node = was.first();
+			} else if ( !was.isEmpty() ) {
+				// The donor wore that name twice; the controller's target is the only
+				// thing left that can tell the two apart.
+				const int ctrl = nif->getLink( iRow, "Controller" );
+				if ( ctrl >= 0 ) {
+					const int target = nif->getLink( nif->getBlockIndex( ctrl ), "Target" );
+					const int owner = nif->blockInherits( nif->getBlockIndex( target ), "NiAVObject" )
+						? target : ownerOfProperty( nif, target );
+					if ( was.contains( owner ) )
+						node = owner;
+				}
 			}
 			auto it = renamed.constFind( node );
 			if ( it != renamed.constEnd() )

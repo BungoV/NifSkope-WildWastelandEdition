@@ -38,6 +38,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "glview.h"
+
+#include <QApplication>
+#include <QFile>
+#include <QTextStream>
 #include "model/nifmodel.h"
 
 #include <cmath>
@@ -1693,6 +1697,17 @@ void ProcLightningController::updateTime( float time )
 	// Length — which is very likely what Length is for, since it is meaningless
 	// when two nodes already define the span.
 	spanNodes = ( startNode && endNode );
+	if ( !spanReported && qEnvironmentVariableIsSet( "WW_BOLT_DEBUG" ) ) {
+		spanReported = true;
+		QFile f( QApplication::applicationDirPath() + "/ww_bolt_debug.log" );
+		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
+			QTextStream( &f ) << "target " << ( target ? target->name : QStringLiteral( "-" ) )
+				<< "  start " << ( startNode ? startNode->name : QStringLiteral( "NOT FOUND" ) )
+				<< "  end " << ( endNode ? endNode->name : QStringLiteral( "NOT FOUND" ) )
+				<< "  scene nodes " << ( target && target->scene ? target->scene->getNodes().size() : -1 )
+				<< "\n";
+		}
+	}
 	if ( !spanNodes && !( target && boltLength > 0.0f ) )
 		return;
 
@@ -1811,6 +1826,17 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 		A = tt.translation;
 		B = A + tt.rotation * Vector3( 0.0f, effLength, 0.0f );
 	}
+	if ( !ribbonReported && qEnvironmentVariableIsSet( "WW_BOLT_DEBUG" ) ) {
+		ribbonReported = true;
+		QFile f( QApplication::applicationDirPath() + "/ww_bolt_debug.log" );
+		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
+			QTextStream( &f ) << "  ribbon " << ( target ? target->name : QStringLiteral( "-" ) )
+				<< ( spanNodes ? "  span" : "  FALLBACK" )
+				<< "  A (" << A[0] << ", " << A[1] << ", " << A[2] << ")"
+				<< "  B (" << B[0] << ", " << B[1] << ", " << B[2] << ")\n";
+		}
+	}
+
 	Vector3 axis = B - A;
 	float len = axis.length();
 	if ( len < 1.0e-4f )
