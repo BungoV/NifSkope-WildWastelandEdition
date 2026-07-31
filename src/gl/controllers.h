@@ -378,10 +378,7 @@ class ProcLightningController final : public Controller
 	};
 
 	QPointer<Node> target;
-	QPointer<Node> startNode;
-	QPointer<Node> endNode;
-	bool spanReported = false;      //!< WW_BOLT_DEBUG reports the resolution once
-	bool ribbonReported = false;    //!< ...and the span it actually drew between
+	bool ribbonReported = false;    //!< WW_BOLT_DEBUG reports the span drawn, once
 	QPersistentModelIndex iShaderProp;
 	ParamCurve cSubdiv, cBranches, cBranchVar, cLength, cLengthVar, cWidth, cArc;
 	//! Same seven parameters when the controller holds NiBlendFloatInterpolator
@@ -391,7 +388,6 @@ class ProcLightningController final : public Controller
 	QVector<SeqKeys> paramKeys[PCount];
 	//! false when there is no _Start/_End pair and the bolt is emitted along the
 	//! target's own axis for Length instead of spanning two nodes
-	bool spanNodes = false;
 	int subdivisions = 6;
 	int numBranches = 1;
 	int numBranchesVar = 0;
@@ -405,7 +401,6 @@ class ProcLightningController final : public Controller
 	QVector<Bolt> bolts;
 	float lastMutation = -1.0e30f;
 	bool visible = false;
-	bool nodesResolved = false;
 
 	//! Deterministic per-mutation RNG. The global random() made every rebuild
 	//! unique, so scrubbing the timeline backwards produced a DIFFERENT bolt and

@@ -1,5 +1,69 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31i — the bolt rule, read out of the game instead of guessed
+
+bungo asked whether the leaked 1.10.155 PDB would help with the arcs. It did, and
+the first thing it produced was a negative: **the engine never looks up a node
+name anywhere in the procedural-lightning path.**
+
+### What NifSkope was doing
+
+`ProcLightningController` walked up from the controller's target for an ancestor
+whose name ends in `_Start`, chopped that off, appended `End`, searched the whole
+scene for the first node of that name, and stretched the bolt between the two. Its
+own comment called that "rig convention (edison_pa / shieldtesla)" — an honest
+label for a guess.
+
+### What the engine does
+
+`BSProceduralLightningController::Update` → `UpdateGenerationParams` /
+`UpdateProcessParams` / `AddTasklet` / `GetPropertyHolder` →
+`BSProceduralGeometry::Lightning::CreateInstance` / `Process`. Not one of them
+touches a `BSFixedString` or walks the scene. The parameters are the NIF's own
+fields — `GenerationParams::LoadBinary` reads three `u16` (Subdivisions, Branches,
+BranchVar), `ProcessParams::LoadBinary` five floats and three bools (Length,
+LengthVar, Width, ChildWidthMult, ArcOffset, the three fades) — and the controller
+keeps its evaluated copy at `+0x178`, which is exactly what it hands `Process`.
+
+`Process` starts at `NiPoint3::ZERO` and writes, per segment, four vertices:
+
+    X = jag.x ± width      Y = segment * (length / segments)      Z = jag.z ± width
+
+So the bolt runs **from the target's own origin, along its local +Y, for Length**,
+jagging laterally in X and Z. The counts agree: `GetBranchSubdivisions(n) = n-1`,
+`GetBranchVerts(s) = 4·2ˢ + 4`, `GetBranchTris(s) = 4·2ˢ` — 2ˢ segments, four
+verts a ring, i.e. two crossed strips rather than anything camera-facing.
+
+### Checked before believing it
+
+On both `X01_Torso_Tesla_VFX` bolts the target's local +Y points along the
+`_Start`→`_End` line to within a degree; the only disagreement is that the engine
+runs the full 32 units where the node pair spans 25.3. **That is why the guess
+looked right on the torso** — the author aligned the node pair with the axis — and
+why it put the legs somewhere else, since nothing ties those nodes to the axis.
+
+The torso arcs now cross the whole back plate instead of stopping short of it.
+
+### What this does not fix
+
+The leg arcs still run down inside the calf. The rule changed their direction and
+length, not their **origin**, which is the `BoltGeo_01` node — and the asset puts
+that on the bone axis, about 5 units in front of the coil. Nothing in the engine's
+path moves it: the bolt starts where its target node is. So either the leg VFX is
+authored that way and looks the same in game, or the difference is in something
+that has not been measured yet — not in how the bolt is generated.
+
+### Not adopted
+
+The crossed four-vert cross-section. Ours is a mitred, camera-facing ribbon with
+arc-length UVs and texture-aspect tiling, and swapping it is a visual change with
+no placement benefit; it is decoded and written down here rather than done
+half-considered.
+
+Suites: 9 boltbake (determinism survives — the seed is the target's name, not the
+block number), 15 live effects, 8 effect bake, 57 freeze, 24 carries-everything,
+21 bake.
+
 ## 2026-07-31h — six files' animations were all driving one limb's nodes
 
 bungo: *"the two bolts on the torso are not rotated correctly, the start and end

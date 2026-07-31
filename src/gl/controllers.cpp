@@ -1555,7 +1555,6 @@ bool ProcLightningController::update( const NifModel * nif, const QModelIndex & 
 	effArc = arcOffset;
 	effWidth = width;
 
-	nodesResolved = false;	// the scene graph may be mid-rebuild
 	bolts.clear();
 	visible = false;
 
@@ -1670,45 +1669,28 @@ void ProcLightningController::updateTime( float time )
 	if ( !( active && target && target->scene ) )
 		return;
 
-	if ( !nodesResolved ) {
-		nodesResolved = true;
-		startNode = nullptr;
-		endNode = nullptr;
-		// rig convention (edison_pa / shieldtesla): the controller target sits
-		// under "<name>_Start", with a matching "<name>_End" node
-		Node * n = target;
-		while ( n && !n->name.endsWith( QLatin1String( "_Start" ) ) )
-			n = n->parentNode();
-		if ( n ) {
-			startNode = n;
-			QString endName = n->name;
-			endName.chop( 5 );
-			endName += QLatin1String( "End" );
-			for ( Node * cand : target->scene->getNodes() ) {
-				if ( cand && cand->name == endName ) {
-					endNode = cand;
-					break;
-				}
-			}
-		}
-	}
-	// A rig that does not follow the *_Start / *_End convention used to render
-	// NOTHING at all. Fall back to emitting along the target's own axis for
-	// Length — which is very likely what Length is for, since it is meaningless
-	// when two nodes already define the span.
-	spanNodes = ( startNode && endNode );
-	if ( !spanReported && qEnvironmentVariableIsSet( "WW_BOLT_DEBUG" ) ) {
-		spanReported = true;
-		QFile f( QApplication::applicationDirPath() + "/ww_bolt_debug.log" );
-		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
-			QTextStream( &f ) << "target " << ( target ? target->name : QStringLiteral( "-" ) )
-				<< "  start " << ( startNode ? startNode->name : QStringLiteral( "NOT FOUND" ) )
-				<< "  end " << ( endNode ? endNode->name : QStringLiteral( "NOT FOUND" ) )
-				<< "  scene nodes " << ( target && target->scene ? target->scene->getNodes().size() : -1 )
-				<< "\n";
-		}
-	}
-	if ( !spanNodes && !( target && boltLength > 0.0f ) )
+	/* The bolt runs from the TARGET'S OWN ORIGIN along its local +Y, for Length.
+	 *
+	 * This used to hunt for a `<name>_Start` ancestor and a `<name>_End` node of
+	 * the same stem, and stretch the bolt between them — a convention read off the
+	 * shieldtesla and edison_pa rigs, i.e. a guess. The engine does no such thing.
+	 * Walked in the 1.10.155 PDB: BSProceduralLightningController::Update ->
+	 * UpdateGenerationParams / UpdateProcessParams / AddTasklet ->
+	 * BSProceduralGeometry::Lightning::CreateInstance / Process. Not one of them
+	 * touches a BSFixedString or searches the scene; the whole path takes the NIF's
+	 * own fields and writes into the target's geometry. Process starts at
+	 * NiPoint3::ZERO and lays each ring at Y = segment * (length / segments), with
+	 * the four verts of the ring at +-width in X and +-width in Z — so the axis is
+	 * local +Y, the origin is the target, and Length is what Length says.
+	 *
+	 * Checked against the assets before believing it: on both X01_Torso_Tesla_VFX
+	 * bolts the target's local +Y points along the Start->End line to within a
+	 * degree, and the only disagreement is that the engine runs the full 32 units
+	 * where the node pair spans 25.3. That is why the node convention looked right
+	 * on the torso — and why it put the leg bolts somewhere else entirely, since
+	 * nothing ties those nodes to the axis the engine actually uses.
+	 */
+	if ( !( target && boltLength > 0.0f ) )
 		return;
 
 	auto evalKeys = [this, time]( QVector<SeqKeys> & list, bool dflt ) {
@@ -1813,25 +1795,16 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 	if ( bolts.isEmpty() )
 		return false;
 
-	Vector3 A, B;
-	if ( spanNodes ) {
-		A = startNode->worldTrans().translation;
-		B = endNode->worldTrans().translation;
-	} else {
-		// No end node to reach: emit along the target's local +Y for Length.
-		// +Y is the authored bolt axis on the rigs that DO have a pair — the
-		// shieldtesla End sits at local (0, +25, 0) from its Start — so the same
-		// convention is the best available guess for rigs without one.
-		const Transform & tt = target->worldTrans();
-		A = tt.translation;
-		B = A + tt.rotation * Vector3( 0.0f, effLength, 0.0f );
-	}
+	// Target origin, along its local +Y, for Length — the engine's own rule; see
+	// updateTime for how it was read out of the 1.10.155 PDB and checked.
+	const Transform & tt = target->worldTrans();
+	const Vector3 A = tt.translation;
+	const Vector3 B = A + tt.rotation * Vector3( 0.0f, effLength, 0.0f );
 	if ( !ribbonReported && qEnvironmentVariableIsSet( "WW_BOLT_DEBUG" ) ) {
 		ribbonReported = true;
 		QFile f( QApplication::applicationDirPath() + "/ww_bolt_debug.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
 			QTextStream( &f ) << "  ribbon " << ( target ? target->name : QStringLiteral( "-" ) )
-				<< ( spanNodes ? "  span" : "  FALLBACK" )
 				<< "  A (" << A[0] << ", " << A[1] << ", " << A[2] << ")"
 				<< "  B (" << B[0] << ", " << B[1] << ", " << B[2] << ")\n";
 		}
