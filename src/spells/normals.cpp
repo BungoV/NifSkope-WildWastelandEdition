@@ -3,8 +3,14 @@
 #include "lib/nvtristripwrapper.h"
 #include "spells/mesh.h"
 
+#include "nifsnapshot.h"
+#include "skeletontools.h"
+#include "spells/normaltransfer.h"
+
+#include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
+#include <QGridLayout>
 #include <QLabel>
 #include <QLayout>
 #include <QPushButton>
@@ -714,3 +720,159 @@ public:
 
 REGISTER_SPELL( spNormalize )
 
+
+
+// ---------------------------------------------------------------------------
+// Transfer Normals — Blender's Data Transfer ▸ Face Corner Data ▸ Custom Normals
+// ---------------------------------------------------------------------------
+
+/*! Copy one mesh's normals onto another.
+ *
+ * Blender's Data Transfer modifier is the reference, its mapping list included,
+ * because that is the vocabulary anyone doing this already has. Its six Face
+ * Corner mappings are all here and mean what they mean there:
+ *
+ *   Topology                                     index for index
+ *   Nearest Corner and Best Matching Normal      the nearby corner whose normal
+ *                                                already agrees with this one
+ *   Nearest Corner and Best Matching Face Normal the same, judged by FACE normal
+ *   Nearest Corner of Nearest Face               closest face, its nearest corner
+ *   Nearest Face Interpolated                    closest face, barycentric blend
+ *   Projected Face Interpolated                  cast along this vertex's normal
+ *
+ * Two divergences, both forced by the format rather than chosen. A NIF stores ONE
+ * normal per vertex, not one per face corner, so every mapping lands on the
+ * vertex — "corner" here means the corner's vertex. And both meshes are read
+ * through their world transforms, so a donor posed differently from the target
+ * still lines up; Blender leaves that to the object transforms.
+ */
+class spTransferNormals final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Transfer Normals..." ); }
+	QString page() const override final { return Spell::tr( "Mesh" ); }
+
+	static bool isMesh( const NifModel * nif, const QModelIndex & idx )
+	{
+		return nif->blockInherits( idx, "BSTriShape" )
+			|| nif->isNiBlock( idx, { "NiTriShape", "BSLODTriShape" } );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		if ( !nif || !isMesh( nif, nif->getBlockIndex( index ) ) )
+			return false;
+		// something to transfer FROM: at least one other mesh in the file
+		int meshes = 0;
+		for ( int b = 0; b < nif->getBlockCount() && meshes < 2; b++ )
+			if ( isMesh( nif, nif->getBlockIndex( b ) ) )
+				meshes++;
+		return meshes >= 2;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		const int targetBlock = nif->getBlockNumber( index );
+		QModelIndex iTarget = nif->getBlockIndex( targetBlock );
+
+		// --- source, mapping, mix -------------------------------------------
+		QDialog dlg;
+		dlg.setWindowTitle( Spell::tr( "Transfer Normals" ) );
+		QGridLayout * lay = new QGridLayout( &dlg );
+
+		QComboBox * srcBox = new QComboBox( &dlg );
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex iB = nif->getBlockIndex( b );
+			if ( b == targetBlock || !isMesh( nif, iB ) )
+				continue;
+			srcBox->addItem( QStringLiteral( "[%1] %2" ).arg( b )
+				.arg( nif->get<QString>( iB, "Name" ) ), b );
+		}
+		if ( srcBox->count() < 1 ) {
+			QMessageBox::information( nullptr, Spell::tr( "Transfer Normals" ),
+				Spell::tr( "This file has no other mesh to take normals from." ) );
+			return index;
+		}
+
+		QComboBox * mapBox = new QComboBox( &dlg );
+		mapBox->addItem( Spell::tr( "Topology" ) );
+		mapBox->addItem( Spell::tr( "Nearest Corner and Best Matching Normal" ) );
+		mapBox->addItem( Spell::tr( "Nearest Corner and Best Matching Face Normal" ) );
+		mapBox->addItem( Spell::tr( "Nearest Corner of Nearest Face" ) );
+		mapBox->addItem( Spell::tr( "Nearest Face Interpolated" ) );
+		mapBox->addItem( Spell::tr( "Projected Face Interpolated" ) );
+		mapBox->setCurrentIndex( 4 );
+
+		QDoubleSpinBox * mixBox = new QDoubleSpinBox( &dlg );
+		mixBox->setRange( 0.0, 1.0 );
+		mixBox->setSingleStep( 0.05 );
+		mixBox->setValue( 1.0 );
+		mixBox->setToolTip( Spell::tr( "1.0 replaces the normal; lower blends it "
+			"with the one already there" ) );
+
+		lay->addWidget( new QLabel( Spell::tr( "Source" ), &dlg ), 0, 0 );
+		lay->addWidget( srcBox, 0, 1 );
+		lay->addWidget( new QLabel( Spell::tr( "Mapping" ), &dlg ), 1, 0 );
+		lay->addWidget( mapBox, 1, 1 );
+		lay->addWidget( new QLabel( Spell::tr( "Mix Factor" ), &dlg ), 2, 0 );
+		lay->addWidget( mixBox, 2, 1 );
+		QPushButton * ok = new QPushButton( Spell::tr( "Transfer" ), &dlg );
+		QPushButton * cancel = new QPushButton( Spell::tr( "Cancel" ), &dlg );
+		QObject::connect( ok, &QPushButton::clicked, &dlg, &QDialog::accept );
+		QObject::connect( cancel, &QPushButton::clicked, &dlg, &QDialog::reject );
+		lay->addWidget( cancel, 3, 0 );
+		lay->addWidget( ok, 3, 1 );
+		if ( dlg.exec() != QDialog::Accepted )
+			return index;
+
+		const int sourceBlock = srcBox->currentData().toInt();
+		const int mapping = mapBox->currentIndex();
+		const float mix = float( mixBox->value() );
+
+		const NormalTransfer::Mesh src = NormalTransfer::read( nif, sourceBlock );
+		const NormalTransfer::Mesh tgt = NormalTransfer::read( nif, targetBlock );
+		if ( !src.valid() || !tgt.valid() ) {
+			QMessageBox::warning( nullptr, Spell::tr( "Transfer Normals" ),
+				Spell::tr( "One of the two meshes has no normals to read." ) );
+			return index;
+		}
+		if ( mapping == 0 && src.pos.size() != tgt.pos.size() ) {
+			QMessageBox::warning( nullptr, Spell::tr( "Transfer Normals" ),
+				Spell::tr( "Topology mapping needs the same vertex count on both meshes: "
+					"the source has %1, the target %2." )
+					.arg( src.pos.size() ).arg( tgt.pos.size() ) );
+			return index;
+		}
+
+		const QVector<Vector3> result = NormalTransfer::map( src, tgt, mapping, mix );
+
+		// --- write, back in the target's own space --------------------------
+		const Transform tWorld = skeletonWorldTransform( nif, targetBlock );
+		const Matrix toLocal = tWorld.rotation.inverted();
+		int written = 0;
+		nifSnapshotOp( nif, Spell::tr( "Transfer Normals" ), [&]() {
+			QModelIndex iVD = nif->getIndex( iTarget, "Vertex Data" );
+			if ( iVD.isValid() && nif->rowCount( iVD ) > 0 ) {
+				for ( int v = 0; v < result.size() && v < nif->rowCount( iVD ); v++ )
+					if ( nif->set<ByteVector3>( nif->getIndex( iVD, v ), "Normal", toLocal * result.at( v ) ) )
+						written++;
+			} else {
+				QModelIndex iData = nif->getBlockIndex( nif->getLink( iTarget, "Data" ) );
+				QVector<Vector3> norms = nif->getArray<Vector3>( iData, "Normals" );
+				for ( int v = 0; v < norms.size() && v < result.size(); v++ ) {
+					norms[v] = toLocal * result.at( v );
+					written++;
+				}
+				nif->setArray<Vector3>( iData, "Normals", norms );
+			}
+		} );
+
+		QMessageBox::information( nullptr, Spell::tr( "Transfer Normals" ),
+			Spell::tr( "%1 of %2 normal(s) transferred from [%3] using %4." )
+				.arg( written ).arg( tgt.pos.size() ).arg( sourceBlock )
+				.arg( mapBox->currentText() ) );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spTransferNormals )

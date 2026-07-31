@@ -195,6 +195,7 @@ HEADERS += \
 	src/spells/blocks.h \
 	src/spells/mesh.h \
 	src/spells/misc.h \
+	src/spells/normaltransfer.h \
 	src/spells/sanitize.h \
 	src/spells/simplify.h \
 	src/spells/skeleton.h \
@@ -323,6 +324,7 @@ SOURCES += \
 	src/spells/moppcode.cpp \
 	src/spells/morphctrl.cpp \
 	src/spells/normals.cpp \
+	src/spells/normaltransfer.cpp \
 	src/spells/optimize.cpp \
 	src/spells/sanitize.cpp \
 	src/spells/sfmatexport.cpp \

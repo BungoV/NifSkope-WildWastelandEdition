@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31l — Transfer Normals, with Blender's mapping list
+
+**Mesh ▸ Transfer Normals…** copies one mesh's normals onto another. Blender's
+Data Transfer modifier is the reference — bungo asked for it by that screenshot —
+so the mapping list is its Face Corner list, in its order and by its names:
+
+| Mapping | What it does |
+| --- | --- |
+| Topology | index for index; refuses meshes of different vertex counts |
+| Nearest Corner and Best Matching Normal | the corner in that place whose normal already agrees |
+| Nearest Corner and Best Matching Face Normal | the same, judged by face normal |
+| Nearest Corner of Nearest Face | closest face, then its nearest corner |
+| Nearest Face Interpolated | closest face, barycentric blend (the default) |
+| Projected Face Interpolated | cast along this vertex's own normal |
+
+Plus Blender's **Mix Factor**: 1.0 replaces, lower blends with what is there.
+
+Two divergences, both forced by the format rather than chosen. A NIF stores **one
+normal per vertex**, not one per face corner, so every mapping lands on the
+vertex — "corner" here means the corner's vertex. And both meshes are read
+through their **world transforms**, so a donor posed differently from the target
+still lines up; Blender leaves that to the object transforms.
+
+### The dialog is not where the algorithm lives
+
+`src/spells/normaltransfer.{h,cpp}` holds the mapping as a pure function over two
+meshes, and both front ends call it: the spell, and a new CLI verb
+
+```
+nifskope-cli transfer-normals <file> --from N --to M [--mapping 0..5] [--mix F] -o OUT
+```
+
+The verb exists because **a modal dialog cannot be driven headlessly**, and an
+algorithm nobody can run in a test is one nobody should trust. It also reports
+the thing worth reporting — how far each normal actually turned, in degrees —
+because "2046 normals written" is equally true of a transfer that changed
+nothing.
+
+### Proof
+
+`tests/mesh/transfer_normals.sh`, 9 checks green, built on one idea: **a mesh
+transferred onto itself has a known answer.**
+
+- Topology onto itself: **0.0015° average, 0.028° worst** — the identity, with
+  only 8-bit normal quantisation between it and exactly zero.
+- Best Matching Normal onto itself: **0.146° average, 6.98° worst**.
+- Nearest Corner / Nearest Face / Projected: ~1.29° average, and **130° at the
+  worst corner** — which is correct, not broken. A seam is several vertices in
+  one place carrying different normals, and a nearest-anything lookup cannot know
+  which side you meant. That is precisely why Blender offers the "best matching"
+  variants, and a version of them that scored zero here would be quietly doing
+  something else.
+- Mix 0 changes nothing; a cross-mesh transfer writes all 2046; topology refuses
+  196 verts onto 2046 and says why.
+
+Best Matching Normal read **127° worst** before the seam-aware pass went in: the
+nearest-vertex search returns whichever coincident vertex it saw first, so
+judging "best matching" among only that one's faces judges one side of the seam.
+It now considers every corner at that position.
+
 ## 2026-07-31k — Ctrl+N and the Normals menu, and the write that never wrote
 
 **Ctrl+N** recalculates the selected faces' winding outward, **Shift+Ctrl+N**

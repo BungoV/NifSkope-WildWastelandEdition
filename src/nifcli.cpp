@@ -28,6 +28,7 @@ See the LICENSE.md file for the full license text.
 #include <cmath>
 #include <QtEndian>
 #include "spells/animationsetup.h"
+#include "spells/normaltransfer.h"
 #include "io/pbrmfile.h"
 
 #include <QCoreApplication>
@@ -2410,6 +2411,69 @@ int cmdFreeze( const QString & file, const QString & sequence, float time,
 }
 
 //! Bake a posed, assembled rig into loading-screen art.
+/*! Copy one mesh's normals onto another — the Transfer Normals spell without
+ *  its dialog.
+ *
+ *  It exists so the mapping can be checked: a modal dialog cannot be driven
+ *  headlessly, and an algorithm nobody can run in a test is one nobody should
+ *  trust. Scripting it over a folder of meshes is the other half of the reason.
+ */
+int cmdTransferNormals( const QString & file, int fromBlock, int toBlock, int mapping,
+                        float mix, const QString & outFile )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+	if ( fromBlock < 0 || toBlock < 0 ) {
+		err() << "error: --from and --to are required (block numbers)" << Qt::endl;
+		return 1;
+	}
+	if ( mapping < 0 || mapping >= NormalTransfer::MappingCount ) {
+		err() << "error: --mapping must be 0.." << ( NormalTransfer::MappingCount - 1 ) << Qt::endl;
+		return 1;
+	}
+
+	const NormalTransfer::Mesh src = NormalTransfer::read( &nif, fromBlock );
+	const NormalTransfer::Mesh tgt = NormalTransfer::read( &nif, toBlock );
+	if ( !src.valid() ) {
+		err() << "error: block " << fromBlock << " has no normals to read" << Qt::endl;
+		return 1;
+	}
+	if ( !tgt.valid() ) {
+		err() << "error: block " << toBlock << " has no normals to read" << Qt::endl;
+		return 1;
+	}
+	if ( mapping == NormalTransfer::Topology && src.pos.size() != tgt.pos.size() ) {
+		err() << "error: topology mapping needs equal vertex counts (" << src.pos.size()
+			  << " vs " << tgt.pos.size() << ")" << Qt::endl;
+		return 1;
+	}
+
+	const QVector<Vector3> result = NormalTransfer::map( src, tgt, mapping, mix );
+	const int written = NormalTransfer::apply( &nif, toBlock, result );
+
+	// how far each normal actually turned, which is the thing worth reporting:
+	// "500 normals written" is true of a transfer that changed nothing
+	double worst = 0.0, total = 0.0;
+	for ( int v = 0; v < result.size() && v < tgt.nrm.size(); v++ ) {
+		Vector3 a = tgt.nrm.at( v ), b = result.at( v );
+		if ( a.squaredLength() < 1.0e-12f || b.squaredLength() < 1.0e-12f )
+			continue;
+		a.normalize();
+		b.normalize();
+		const double ang = std::acos( std::clamp( double( Vector3::dotproduct( a, b ) ), -1.0, 1.0 ) )
+			* 180.0 / M_PI;
+		worst = std::max( worst, ang );
+		total += ang;
+	}
+	out() << written << " of " << tgt.pos.size() << " normal(s) transferred from block "
+		  << fromBlock << " using " << NormalTransfer::mappingName( mapping ) << Qt::endl;
+	out() << "  turned by " << ( result.isEmpty() ? 0.0 : total / result.size() )
+		  << " deg on average, " << worst << " deg at most" << Qt::endl;
+
+	return outFile.isEmpty() ? 0 : ( saveNif( nif, outFile ) ? 0 : 1 );
+}
+
 int cmdLoadingScreen( const QString & file, bool noZoomTarget, bool keepParticles,
 					  bool keepEffects, const QString & outFile )
 {
@@ -2536,6 +2600,13 @@ int usage()
 		  << "                                          (N defaults to 2 m in FO4 units)\n"
 		  << "  spells [pattern]                        list spells addressable by name\n"
 		  << "  info <file>                             version, block count, per-type tally\n"
+		  << "  transfer-normals <file> --from N --to M [--mapping 0..5] [--mix F] -o OUT\n"
+		  << "                                          copy block N's normals onto block M;\n"
+		  << "                                          mapping is Blender's Data Transfer list:\n"
+		  << "                                          0 topology, 1/2 nearest corner by normal\n"
+		  << "                                          / by face normal, 3 nearest corner of\n"
+		  << "                                          nearest face, 4 nearest face interpolated,\n"
+		  << "                                          5 projected\n"
 		  << "  world <file> [-b N] [-t <type>]         each NiAVObject's WORLD transform,\n"
 		  << "                                          for diffing two files by name\n"
 		  << "  list <file> [-t <type>]                 block list, optionally filtered\n"
@@ -2639,6 +2710,8 @@ int nifskopeCliMain( const QStringList & args )
 	float freezeTime = 0.0f;
 	bool keepGraph = false;
 	bool noZoomTarget = false, keepParticles = false, keepEffects = false;
+	int tnFrom = -1, tnTo = -1, tnMapping = 4;	// 4 = Nearest Face Interpolated
+	float tnMix = 1.0f;
 	int steps = 0;
 	int substeps = 0;
 	int iterations = 0;
@@ -2698,6 +2771,10 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--no-zoom-target" ) ) noZoomTarget = true;
 		else if ( t == QLatin1String( "--keep-particles" ) ) keepParticles = true;
 		else if ( t == QLatin1String( "--keep-effects" ) ) keepEffects = true;
+		else if ( t == QLatin1String( "--from" ) ) tnFrom = next().toInt();
+		else if ( t == QLatin1String( "--to" ) ) tnTo = next().toInt();
+		else if ( t == QLatin1String( "--mapping" ) ) tnMapping = next().toInt();
+		else if ( t == QLatin1String( "--mix" ) ) tnMix = next().toFloat();
 		else if ( t == QLatin1String( "--steps" ) ) steps = next().toInt();
 		else if ( t == QLatin1String( "--substeps" ) ) substeps = next().toInt();
 		else if ( t == QLatin1String( "--iterations" ) ) iterations = next().toInt();
@@ -2781,6 +2858,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdPose( file, listOnly, saveName, applyName, blend, importOs, exportOs, outFile );
 	else if ( cmd == QLatin1String( "freeze" ) )
 		rc = cmdFreeze( file, sequence, freezeTime, keepGraph, outFile );
+	else if ( cmd == QLatin1String( "transfer-normals" ) )
+		rc = cmdTransferNormals( file, tnFrom, tnTo, tnMapping, tnMix, outFile );
 	else if ( cmd == QLatin1String( "loading-screen" ) )
 		rc = cmdLoadingScreen( file, noZoomTarget, keepParticles, keepEffects, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )
