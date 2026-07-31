@@ -10054,8 +10054,11 @@ void NifSkope::initDockWidgets()
 			 * because that preference had been left off; a version of this panel you
 			 * cannot open to look at it would make that worse, not better.
 			 */
+			// "play", not "playback" — that glyph is the Timeline dock's PLAY
+			// BACKWARD button and points left on purpose, which on a button that
+			// just means "animation" reads as rewind.
 			animBtn->setIcon( tlMakeIcon( playing ? QStringLiteral( "pause" )
-													: QStringLiteral( "playback" ),
+													: QStringLiteral( "play" ),
 										  have ? icoCol : icoColOff ) );
 			QString label = sc ? sc->animGroup : QString();
 			if ( !haveGroups )
