@@ -4353,6 +4353,31 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the leg effects are at leg height", haveZ && loZ < 60.0f );
 					check( "the chest and helmet effects are up the body", haveZ && hiZ > 100.0f );
 					check( "nothing was flung sideways", haveZ && maxX < 60.0f );
+
+					/* "(no sequence)" has to still ANIMATE.
+					 *
+					 * It is not a stop button: it drops the sequence's bindings and
+					 * plays what the file does on its own, which for these effects
+					 * is where the particles and arcs live in the first place. A
+					 * version of it that quietly froze everything would look like a
+					 * working feature right up until someone used it.
+					 */
+					skope->ogl->clearSceneSequence();
+					QApplication::processEvents();
+					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
+						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
+						QApplication::processEvents();
+					}
+					const auto standalone = skope->ogl->bakeEffects( nif, facing );
+					int saArcs = 0, saSprites = 0;
+					for ( const auto & e : standalone )
+						( e.fromParticles ? saSprites : saArcs )++;
+					log << "with no sequence: " << saArcs << " arc(s), "
+						<< saSprites << " sprite cloud(s)\n";
+					check( "the scene reports no sequence selected",
+						skope->ogl->getScene()->animGroup.isEmpty() );
+					check( "arcs still generate with no sequence", saArcs > 0 );
+					check( "particles still emit with no sequence", saSprites > 0 );
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -10243,24 +10268,38 @@ void NifSkope::initDockWidgets()
 			const bool have = sc && sc->timeMax() > sc->timeMin();
 			const bool haveGroups = !groups.isEmpty();
 
+			/* "No sequence" is a choice, not an absence.
+			 *
+			 * Plenty of files animate entirely through controllers that no
+			 * NiControllerSequence names — every NiPSys effect in Meshes/Effects
+			 * is like that — and a file can have both, where picking a sequence
+			 * binds its interpolators over the top and hides what the file does on
+			 * its own. So it is the first entry, always, and it is what a file
+			 * with no named sequences offers instead of a greyed-out label.
+			 *
+			 * Carried as an INT, not an empty string: a sequence is allowed to
+			 * have an empty name (the "(unnamed)" rows below), so an empty string
+			 * cannot mean "none" without also meaning one of those.
+			 */
 			*seqGuard = true;
 			seqCombo->clear();
+			seqCombo->addItem( tr( "(no sequence)" ), -1 );
 			for ( const QString & g : groups )
 				seqCombo->addItem( g.isEmpty() ? tr( "(unnamed)" ) : g, g );
 			if ( sc ) {
+				// row 0 is "(no sequence)", so the groups start at 1
 				const int ix = groups.indexOf( sc->animGroup );
-				if ( ix >= 0 )
-					seqCombo->setCurrentIndex( ix );
+				seqCombo->setCurrentIndex( ( ix >= 0 && !sc->animGroup.isNull() ) ? ix + 1 : 0 );
 			}
-			if ( !haveGroups )
-				seqCombo->addItem( tr( "No named sequence" ) );
 			*seqGuard = false;
 
 			// The action-backed buttons take their enabled state from the ACTION,
 			// not the button, so disabling the widget alone left them live.
 			ui->aAnimPlay->setEnabled( have );
 			ui->aAnimLoop->setEnabled( have );
-			seqCombo->setEnabled( haveGroups );
+			// enabled whenever there is anything to animate: "(no sequence)" is a
+			// real choice on a file with no named sequences, which is most effects
+			seqCombo->setEnabled( have );
 			animScrub->setEnabled( have );
 			revBtn->setEnabled( have );
 			speedCombo->setEnabled( have );
@@ -10310,7 +10349,13 @@ void NifSkope::initDockWidgets()
 				if ( *seqGuard || ix < 0 )
 					return;
 				const QVariant g = seqCombo->itemData( ix );
-				if ( g.isValid() )
+				if ( !g.isValid() )
+					return;
+				// int marker = the "(no sequence)" row; a string is a group name,
+				// and an EMPTY string is a legitimately unnamed sequence
+				if ( g.typeId() == QMetaType::Int )
+					ogl->clearSceneSequence();
+				else
 					ogl->setSceneSequence( g.toString() );
 			} );
 		connect( ogl, &GLView::sequencesUpdated, this, refreshAnimPanel );

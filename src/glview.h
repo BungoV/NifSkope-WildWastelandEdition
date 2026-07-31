@@ -416,6 +416,17 @@ public slots:
 	void setAnimSpeed( float speed );
 	float animationSpeed() const { return animSpeed; }
 	void setSceneSequence( const QString & );
+	/*! Play no sequence at all — only what the file animates on its own.
+	 *
+	 *  Not the same as picking an empty name. Selecting a sequence BINDS its
+	 *  interpolators onto the controllers it names, and that binding outlives the
+	 *  selection: asking for a sequence that does not exist leaves the last one's
+	 *  bindings in place. So this rebuilds the controllers from the model, which
+	 *  puts each one back on the interpolator its own block points at — the file
+	 *  as authored, which for every NiPSys effect in Meshes/Effects is the ONLY
+	 *  animation there is.
+	 */
+	void clearSceneSequence();
 	//! Render only the currently selected node's subtree (follows the selection)
 	void setSoloMode( bool );
 	//! Render only the given block's subtree (-1 clears; independent of solo mode)

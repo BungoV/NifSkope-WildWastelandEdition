@@ -19652,6 +19652,28 @@ void GLView::setSceneSequence( const QString & seqname )
 	update();
 }
 
+void GLView::clearSceneSequence()
+{
+	if ( !scene )
+		return;
+	scene->setSequence( QString() );
+	/* The rebuild is the whole operation.
+	 *
+	 * A sequence does not "play": selecting one BINDS its interpolators onto the
+	 * controllers its Controlled Blocks name, and those bindings stay bound.
+	 * Asking for a sequence that does not exist therefore changes nothing, which
+	 * is what made "no sequence" impossible to express until now. Updating every
+	 * node from the model runs Controller::update, which re-reads each
+	 * controller's OWN Interpolator link — the file as authored.
+	 */
+	if ( model )
+		scene->update( model, QModelIndex() );
+	time = scene->timeMin();
+	emit sequenceChanged( QString() );
+	emit sceneTimeChanged( time, scene->timeMin(), scene->timeMax() );
+	update();
+}
+
 // TODO: Multiple user views, ala Recent Files
 void GLView::saveUserView()
 {

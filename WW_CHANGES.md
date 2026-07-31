@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31n — "(no sequence)" is a choice in the Sequence picker
+
+bungo: *"allow me to select to play animations that are not assigned to
+sequences."* The Sequence dropdown listed `Scene::animGroups` and nothing else,
+so a file's standalone controllers — the ones no `NiControllerSequence` names —
+could not be asked for. **(no sequence)** is the first entry now, always.
+
+### Why it needed more than an empty name
+
+A sequence does not "play". Selecting one **binds** its interpolators onto the
+controllers its Controlled Blocks name, and those bindings outlive the selection:
+asking for a sequence that does not exist leaves the last one's bindings exactly
+where they were, so an empty name changed nothing at all.
+
+`GLView::clearSceneSequence()` clears the group and then rebuilds the scene from
+the model, which runs `Controller::update` on every controller and puts each one
+back on the interpolator **its own block** points at — the file as authored. For
+every NiPSys effect under `Meshes/Effects` that is the only animation there is.
+
+Two smaller consequences. The picker is enabled whenever the file has anything to
+animate, rather than only when it has named sequences — a file with none now
+offers the choice instead of a greyed-out "No named sequence" label. And the
+entry carries an **int** marker rather than an empty string, because a sequence
+is allowed to have an empty name (the "(unnamed)" rows), so an empty string
+cannot mean "none" without also meaning one of those.
+
+### Proof
+
+`WW_LIVEFX_TEST` 11 → 14 checks: with no sequence selected the scene reports an
+empty group and the X-01 rig still generates **10 arcs and 6 sprite clouds** —
+the same as with `autoPlay` bound. That check exists because the failure mode
+worth guarding is not "it errors" but "it quietly freezes everything", which
+looks like a working feature until someone uses it.
+
 ## 2026-07-31m — Transfer Normals off the Block List selection
 
 bungo: *"So secondaries can be transferred to primary?"* — meaning the Block
