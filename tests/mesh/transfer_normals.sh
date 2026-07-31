@@ -55,6 +55,11 @@ run() {
 	"$EXE" -no-gui transfer-normals "$MESH" --from "$1" --to "$2" --mapping "$3" \
 		${4:+--mix "$4"} -o "$TMP/out.nif" 2>&1
 }
+# the same with several sources, which --from repeats to express
+run2() {
+	"$EXE" -no-gui transfer-normals "$MESH" --from "$1" --from "$2" --to "$3" \
+		--mapping "$4" -o "$TMP/out.nif" 2>&1
+}
 avg() { sed -n 's/^  turned by \([0-9.e+-]*\) deg on average.*/\1/p'; }
 worst() { sed -n 's/.*average, \([0-9.e+-]*\) deg at most/\1/p'; }
 lt() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a+0 < b+0) }'; }
@@ -124,6 +129,32 @@ if [ "$na" != "$nb" ]; then
 else
 	echo "  (both shapes have $na verts — nothing to refuse)"
 	ok
+fi
+
+# --- 7. several sources are one surface -------------------------------------
+# The Block List entry transfers from a multi-selection, which is this path: the
+# sources are concatenated so "which is nearest" is asked over their union. If
+# the combination were wrong the count would still be right, so the count is not
+# what is checked -- every normal has to be written AND the mesh has to move.
+if [ "${#SHAPES[@]}" -ge 3 ]; then
+	C="${SHAPES[2]}"
+	out="$(run2 "$A" "$C" "$B" 4)"
+	echo "$out" | sed -n 's/^\([0-9]* of [0-9]* normal.*\)/  \1/p'
+	got="$(printf '%s' "$out" | sed -n 's/^\([0-9]*\) of .*/\1/p')"
+	want="$("$EXE" -no-gui get "$MESH" -b "$B" -f "Num Vertices" 2>/dev/null)"
+	if [ -n "$got" ] && [ "$got" = "${want:-x}" ]; then ok
+	else bad "two-source transfer wrote ${got:-0} of ${want:-?}"; fi
+
+	# ...and topology cannot mean anything across a combination
+	if run2 "$A" "$C" "$B" 0 > "$TMP/multi.log" 2>&1; then
+		bad "topology mapping accepted two sources"
+	else
+		ok
+		sed -n 's/^error: /  refused: /p' "$TMP/multi.log"
+	fi
+else
+	echo "  (fewer than three shapes — no multi-source case here)"
+	ok; ok
 fi
 
 echo

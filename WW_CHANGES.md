@@ -1,5 +1,42 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31m — Transfer Normals off the Block List selection
+
+bungo: *"So secondaries can be transferred to primary?"* — meaning the Block
+List's own selection, not one NIF to another. It could not: a spell is handed one
+block and nothing else, so the dialog had to ask which mesh to take from.
+
+Right-click in the Block List with several geometry blocks selected now offers
+**Transfer Normals from N Selected…**. The **secondaries are the source**, the
+**primary — the clicked row — is what gets written**, which is the direction
+asked for and the one the highlight already communicates. Only Mapping and Mix
+are asked for; the selection has already said the rest.
+
+### Several sources are one surface
+
+Not "run it once per source and keep the last". Every mapping here asks which
+source vertex or face is NEAREST, and over a set of meshes that is the answer
+over their union — so the sources are concatenated and asked once. Five armour
+pieces then behave as the one surface they visually are. Topology is the
+exception and is refused outright: index N of a concatenation means nothing.
+
+### The overflow that would have been silent
+
+Combining meshes meant the working copy could no longer index faces with
+`Triangle`'s **quint16**. Five 20k-vertex pieces is 100k vertices, and every
+index past 65535 would have wrapped into another piece's geometry — a wrong
+answer with no error anywhere. The working mesh carries `int` triples now;
+16 bits stays where it belongs, in the file.
+
+`--from` repeats on the CLI for the same reason, which is also how the combining
+gets tested at all.
+
+### Proof
+
+`tests/mesh/transfer_normals.sh` 9 → 11 checks, green: two sources onto a third
+writes all 2046 normals, and topology across two sources is refused with a
+reason.
+
 ## 2026-07-31l — Transfer Normals, with Blender's mapping list
 
 **Mesh ▸ Transfer Normals…** copies one mesh's normals onto another. Blender's

@@ -14,7 +14,7 @@ BSD License - see nifskope.h
 
 #include <cmath>
 
-/*! ile normaltransfer.cpp Copy one mesh's normals onto another.
+/*! @file normaltransfer.cpp Copy one mesh's normals onto another.
  *
  * Blender's Data Transfer modifier is the reference, its mapping list included,
  * because that is the vocabulary anyone doing this already has.
@@ -122,7 +122,8 @@ Mesh read( const NifModel * nif, int block )
 			m.pos[v] = world * nif->get<Vector3>( row, "Vertex" );
 			m.nrm[v] = world.rotation * nif->get<Vector3>( row, "Normal" );
 		}
-		m.tris = nif->getArray<Triangle>( iShape, "Triangles" );
+		for ( const Triangle & t : nif->getArray<Triangle>( iShape, "Triangles" ) )
+			m.tris.append( { int( t[0] ), int( t[1] ), int( t[2] ) } );
 	} else {
 		QModelIndex iData = nif->getBlockIndex( nif->getLink( iShape, "Data" ) );
 		if ( !iData.isValid() )
@@ -137,12 +138,13 @@ Mesh read( const NifModel * nif, int block )
 			m.pos[v] = world * verts.at( v );
 			m.nrm[v] = world.rotation * norms.at( v );
 		}
-		m.tris = nif->getArray<Triangle>( iData, "Triangles" );
+		for ( const Triangle & t : nif->getArray<Triangle>( iData, "Triangles" ) )
+			m.tris.append( { int( t[0] ), int( t[1] ), int( t[2] ) } );
 	}
 
 	m.incident.resize( m.pos.size() );
 	for ( int t = 0; t < m.tris.size(); t++ ) {
-		const Triangle & tr = m.tris.at( t );
+		const auto & tr = m.tris.at( t );
 		for ( int c = 0; c < 3; c++ )
 			if ( tr[c] < m.incident.size() )
 				m.incident[tr[c]].append( t );
@@ -167,7 +169,7 @@ QVector<Vector3> map( const Mesh & src, const Mesh & tgt, int mapping, float mix
 	QVector<Vector3> tgtFaceNormal;
 	if ( mapping == 2 ) {
 		tgtFaceNormal.resize( tgt.pos.size() );
-		for ( const Triangle & tr : tgt.tris ) {
+		for ( const auto & tr : tgt.tris ) {
 			const Vector3 fn = Vector3::crossproduct( tgt.pos.at( tr[1] ) - tgt.pos.at( tr[0] ),
 													  tgt.pos.at( tr[2] ) - tgt.pos.at( tr[0] ) );
 			for ( int c = 0; c < 3; c++ )
@@ -227,7 +229,7 @@ QVector<Vector3> map( const Mesh & src, const Mesh & tgt, int mapping, float mix
 				float bestDot = -2.0f;
 				Vector3 pick = src.nrm.at( nv );
 				for ( int t : faces ) {
-					const Triangle & tr = src.tris.at( t );
+					const auto & tr = src.tris.at( t );
 					const Vector3 fn = Vector3::crossproduct( src.pos.at( tr[1] ) - src.pos.at( tr[0] ),
 															  src.pos.at( tr[2] ) - src.pos.at( tr[0] ) );
 					const float dt = Vector3::dotproduct( fn, tgtFaceNormal.at( v ) );
@@ -248,7 +250,7 @@ QVector<Vector3> map( const Mesh & src, const Mesh & tgt, int mapping, float mix
 				int bt = -1;
 				float bd = 1.0e30f, bbary[3] = { 1, 0, 0 };
 				for ( int t : faces ) {
-					const Triangle & tr = src.tris.at( t );
+					const auto & tr = src.tris.at( t );
 					float bary[3];
 					const Vector3 cpt = closestOnTri( p, src.pos.at( tr[0] ), src.pos.at( tr[1] ),
 													  src.pos.at( tr[2] ), bary );
@@ -266,7 +268,7 @@ QVector<Vector3> map( const Mesh & src, const Mesh & tgt, int mapping, float mix
 					if ( dir.squaredLength() > 1.0e-12f ) {
 						dir.normalize();
 						for ( int t : faces ) {
-							const Triangle & tr = src.tris.at( t );
+							const auto & tr = src.tris.at( t );
 							float tt, bary[3];
 							if ( !rayHitsTri( p, dir, src.pos.at( tr[0] ), src.pos.at( tr[1] ),
 											  src.pos.at( tr[2] ), tt, bary ) )
@@ -281,7 +283,7 @@ QVector<Vector3> map( const Mesh & src, const Mesh & tgt, int mapping, float mix
 				if ( bt < 0 ) {
 					n = src.nrm.at( nv );
 				} else {
-					const Triangle & tr = src.tris.at( bt );
+					const auto & tr = src.tris.at( bt );
 					if ( mapping == 3 ) {
 						int nearest = tr[0];
 						float nd = 1.0e30f;
@@ -314,6 +316,36 @@ QVector<Vector3> map( const Mesh & src, const Mesh & tgt, int mapping, float mix
 	return result;
 }
 
+
+Mesh combine( const QVector<Mesh> & parts )
+{
+	Mesh m;
+	if ( parts.size() == 1 )
+		return parts.first();
+	int verts = 0, tris = 0;
+	for ( const Mesh & p : parts ) {
+		verts += p.pos.size();
+		tris += p.tris.size();
+	}
+	m.pos.reserve( verts );
+	m.nrm.reserve( verts );
+	m.tris.reserve( tris );
+	for ( const Mesh & p : parts ) {
+		const int base = m.pos.size();
+		m.pos += p.pos;
+		m.nrm += p.nrm;
+		for ( const auto & t : p.tris )
+			m.tris.append( { t[0] + base, t[1] + base, t[2] + base } );
+	}
+	m.incident.resize( m.pos.size() );
+	for ( int t = 0; t < m.tris.size(); t++ ) {
+		const auto & tr = m.tris.at( t );
+		for ( int c = 0; c < 3; c++ )
+			if ( tr[c] < m.incident.size() )
+				m.incident[tr[c]].append( t );
+	}
+	return m;
+}
 
 int apply( NifModel * nif, int targetBlock, const QVector<Vector3> & normals )
 {

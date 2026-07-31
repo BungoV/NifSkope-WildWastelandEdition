@@ -2418,14 +2418,14 @@ int cmdFreeze( const QString & file, const QString & sequence, float time,
  *  headlessly, and an algorithm nobody can run in a test is one nobody should
  *  trust. Scripting it over a folder of meshes is the other half of the reason.
  */
-int cmdTransferNormals( const QString & file, int fromBlock, int toBlock, int mapping,
-                        float mix, const QString & outFile )
+int cmdTransferNormals( const QString & file, const QVector<int> & fromBlocks, int toBlock,
+                        int mapping, float mix, const QString & outFile )
 {
 	NifModel nif;
 	if ( !loadNif( nif, file ) )
 		return 1;
-	if ( fromBlock < 0 || toBlock < 0 ) {
-		err() << "error: --from and --to are required (block numbers)" << Qt::endl;
+	if ( fromBlocks.isEmpty() || toBlock < 0 ) {
+		err() << "error: --from and --to are required (block numbers); --from repeats" << Qt::endl;
 		return 1;
 	}
 	if ( mapping < 0 || mapping >= NormalTransfer::MappingCount ) {
@@ -2433,14 +2433,26 @@ int cmdTransferNormals( const QString & file, int fromBlock, int toBlock, int ma
 		return 1;
 	}
 
-	const NormalTransfer::Mesh src = NormalTransfer::read( &nif, fromBlock );
-	const NormalTransfer::Mesh tgt = NormalTransfer::read( &nif, toBlock );
-	if ( !src.valid() ) {
-		err() << "error: block " << fromBlock << " has no normals to read" << Qt::endl;
-		return 1;
+	QVector<NormalTransfer::Mesh> parts;
+	for ( int b : fromBlocks ) {
+		NormalTransfer::Mesh m = NormalTransfer::read( &nif, b );
+		if ( !m.valid() ) {
+			err() << "error: block " << b << " has no normals to read" << Qt::endl;
+			return 1;
+		}
+		parts.append( m );
 	}
+	// several sources are one surface: every mapping asks what is NEAREST, and
+	// over a set of meshes that is the union of them
+	const NormalTransfer::Mesh src = NormalTransfer::combine( parts );
+	const NormalTransfer::Mesh tgt = NormalTransfer::read( &nif, toBlock );
 	if ( !tgt.valid() ) {
 		err() << "error: block " << toBlock << " has no normals to read" << Qt::endl;
+		return 1;
+	}
+	if ( mapping == NormalTransfer::Topology && fromBlocks.size() > 1 ) {
+		err() << "error: topology mapping takes one source; index N of a combination means nothing"
+			  << Qt::endl;
 		return 1;
 	}
 	if ( mapping == NormalTransfer::Topology && src.pos.size() != tgt.pos.size() ) {
@@ -2466,8 +2478,12 @@ int cmdTransferNormals( const QString & file, int fromBlock, int toBlock, int ma
 		worst = std::max( worst, ang );
 		total += ang;
 	}
-	out() << written << " of " << tgt.pos.size() << " normal(s) transferred from block "
-		  << fromBlock << " using " << NormalTransfer::mappingName( mapping ) << Qt::endl;
+	QStringList fromList;
+	for ( int b : fromBlocks )
+		fromList << QString::number( b );
+	out() << written << " of " << tgt.pos.size() << " normal(s) transferred from block(s) "
+		  << fromList.join( QLatin1Char( ',' ) ) << " using "
+		  << NormalTransfer::mappingName( mapping ) << Qt::endl;
 	out() << "  turned by " << ( result.isEmpty() ? 0.0 : total / result.size() )
 		  << " deg on average, " << worst << " deg at most" << Qt::endl;
 
@@ -2710,7 +2726,8 @@ int nifskopeCliMain( const QStringList & args )
 	float freezeTime = 0.0f;
 	bool keepGraph = false;
 	bool noZoomTarget = false, keepParticles = false, keepEffects = false;
-	int tnFrom = -1, tnTo = -1, tnMapping = 4;	// 4 = Nearest Face Interpolated
+	QVector<int> tnFrom;			// --from repeats: several sources are one surface
+	int tnTo = -1, tnMapping = 4;	// 4 = Nearest Face Interpolated
 	float tnMix = 1.0f;
 	int steps = 0;
 	int substeps = 0;
@@ -2771,7 +2788,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--no-zoom-target" ) ) noZoomTarget = true;
 		else if ( t == QLatin1String( "--keep-particles" ) ) keepParticles = true;
 		else if ( t == QLatin1String( "--keep-effects" ) ) keepEffects = true;
-		else if ( t == QLatin1String( "--from" ) ) tnFrom = next().toInt();
+		else if ( t == QLatin1String( "--from" ) ) tnFrom.append( next().toInt() );
 		else if ( t == QLatin1String( "--to" ) ) tnTo = next().toInt();
 		else if ( t == QLatin1String( "--mapping" ) ) tnMapping = next().toInt();
 		else if ( t == QLatin1String( "--mix" ) ) tnMix = next().toFloat();

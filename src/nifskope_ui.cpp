@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
 #include "spellbook.h"
+#include "spells/normaltransfer.h"
 #include "wwskin.h"
 #include "skeletontools.h"
 
@@ -75,6 +76,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QButtonGroup>
 #include <QByteArray>
 #include <QCheckBox>
+#include <QStandardItemModel>
 #include <QClipboard>
 #include <QComboBox>
 #include <QCursor>
@@ -12181,6 +12183,96 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 */
 
 
+void NifSkope::transferNormalsFromSelection( int target, const QVector<int> & sources )
+{
+	if ( !nif || target < 0 || sources.isEmpty() )
+		return;
+
+	// Mapping and mix, and nothing else: the selection already said which meshes
+	QDialog dlg( this );
+	dlg.setWindowTitle( tr( "Transfer Normals" ) );
+	QGridLayout * lay = new QGridLayout( &dlg );
+	QLabel * what = new QLabel( tr( "From %n selected mesh(es) onto '%1'", "", sources.size() )
+		.arg( nif->get<QString>( nif->getBlockIndex( target ), "Name" ) ), &dlg );
+	what->setWordWrap( true );
+	lay->addWidget( what, 0, 0, 1, 2 );
+
+	QComboBox * mapBox = new QComboBox( &dlg );
+	for ( int m = 0; m < NormalTransfer::MappingCount; m++ )
+		mapBox->addItem( NormalTransfer::mappingName( m ) );
+	mapBox->setCurrentIndex( NormalTransfer::NearestFaceInterpolated );
+	// index for index cannot mean anything across a combination of meshes
+	if ( sources.size() > 1 )
+		qobject_cast<QStandardItemModel *>( mapBox->model() )
+			->item( NormalTransfer::Topology )->setEnabled( false );
+
+	QDoubleSpinBox * mixBox = new QDoubleSpinBox( &dlg );
+	mixBox->setRange( 0.0, 1.0 );
+	mixBox->setSingleStep( 0.05 );
+	mixBox->setValue( 1.0 );
+
+	lay->addWidget( new QLabel( tr( "Mapping" ), &dlg ), 1, 0 );
+	lay->addWidget( mapBox, 1, 1 );
+	lay->addWidget( new QLabel( tr( "Mix Factor" ), &dlg ), 2, 0 );
+	lay->addWidget( mixBox, 2, 1 );
+	QPushButton * ok = new QPushButton( tr( "Transfer" ), &dlg );
+	QPushButton * cancel = new QPushButton( tr( "Cancel" ), &dlg );
+	connect( ok, &QPushButton::clicked, &dlg, &QDialog::accept );
+	connect( cancel, &QPushButton::clicked, &dlg, &QDialog::reject );
+	lay->addWidget( cancel, 3, 0 );
+	lay->addWidget( ok, 3, 1 );
+	if ( dlg.exec() != QDialog::Accepted )
+		return;
+
+	const int mapping = mapBox->currentIndex();
+	const float mix = float( mixBox->value() );
+
+	QVector<NormalTransfer::Mesh> parts;
+	for ( int b : sources ) {
+		NormalTransfer::Mesh m = NormalTransfer::read( nif, b );
+		if ( m.valid() )
+			parts.append( m );
+	}
+	const NormalTransfer::Mesh tgt = NormalTransfer::read( nif, target );
+	if ( parts.isEmpty() || !tgt.valid() ) {
+		QMessageBox::warning( this, tr( "Transfer Normals" ),
+			tr( "Nothing to read: the selected meshes carry no normals." ) );
+		return;
+	}
+	const NormalTransfer::Mesh src = NormalTransfer::combine( parts );
+	if ( mapping == NormalTransfer::Topology && src.pos.size() != tgt.pos.size() ) {
+		QMessageBox::warning( this, tr( "Transfer Normals" ),
+			tr( "Topology mapping needs the same vertex count on both sides: "
+				"the source has %1, the target %2." ).arg( src.pos.size() ).arg( tgt.pos.size() ) );
+		return;
+	}
+
+	QApplication::setOverrideCursor( Qt::WaitCursor );
+	const QVector<Vector3> result = NormalTransfer::map( src, tgt, mapping, mix );
+	const int written = NormalTransfer::apply( nif, target, result );
+	QApplication::restoreOverrideCursor();
+
+	// how far they actually turned, because "N written" is equally true of a
+	// transfer that changed nothing
+	double worst = 0.0, total = 0.0;
+	for ( int v = 0; v < result.size() && v < tgt.nrm.size(); v++ ) {
+		Vector3 a = tgt.nrm.at( v ), b = result.at( v );
+		if ( a.squaredLength() < 1.0e-12f || b.squaredLength() < 1.0e-12f )
+			continue;
+		a.normalize();
+		b.normalize();
+		const double ang = std::acos( std::clamp( double( Vector3::dotproduct( a, b ) ), -1.0, 1.0 ) )
+			* 180.0 / M_PI;
+		worst = std::max( worst, ang );
+		total += ang;
+	}
+	QMessageBox::information( this, tr( "Transfer Normals" ),
+		tr( "%1 of %2 normal(s) written using %3.\n\nTurned by %4° on average, %5° at most." )
+			.arg( written ).arg( tgt.pos.size() ).arg( NormalTransfer::mappingName( mapping ) )
+			.arg( result.isEmpty() ? 0.0 : total / result.size(), 0, 'f', 2 )
+			.arg( worst, 0, 'f', 2 ) );
+}
+
 void NifSkope::contextMenu( const QPoint & pos )
 {
 	QModelIndex idx;
@@ -12245,6 +12337,51 @@ void NifSkope::contextMenu( const QPoint & pos )
 			contextBook.insertMenu( anchor, hierarchy );
 		else
 			contextBook.addMenu( hierarchy );
+
+		/* Transfer Normals, off the Block List selection.
+		 *
+		 * The spell of that name asks which mesh to take from, because a spell is
+		 * handed one block and nothing else. Here the selection already says it:
+		 * the SECONDARIES are the source and the PRIMARY — the current, clicked
+		 * row — is what gets written, which is the direction bungo asked for and
+		 * the one the highlight already communicates.
+		 *
+		 * Several sources are combined rather than applied in turn: every mapping
+		 * asks which source vertex or face is nearest, and over a set of meshes
+		 * that is the union of them. Five armour pieces then behave as the one
+		 * surface they visually are.
+		 */
+		QVector<int> selMeshes;
+		int primaryMesh = -1;
+		if ( list->selectionModel() ) {
+			auto isGeom = [this]( int b ) {
+				QModelIndex iB = nif->getBlockIndex( b );
+				return nif->blockInherits( iB, "BSTriShape" )
+					|| nif->isNiBlock( iB, { "NiTriShape", "BSLODTriShape" } );
+			};
+			const int clicked = nif->getBlockNumber( idx );
+			if ( clicked >= 0 && isGeom( clicked ) )
+				primaryMesh = clicked;
+			for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+				QModelIndex bi = pidx;
+				while ( bi.model() && bi.model()->inherits( "NifProxyModel" ) )
+					bi = qobject_cast<const NifProxyModel *>( bi.model() )->mapTo( bi );
+				const int b = nif->getBlockNumber( bi );
+				if ( b >= 0 && b != primaryMesh && isGeom( b ) && !selMeshes.contains( b ) )
+					selMeshes.append( b );
+			}
+		}
+		if ( primaryMesh >= 0 && !selMeshes.isEmpty() ) {
+			contextBook.addSeparator();
+			QAction * aTN = contextBook.addAction(
+				tr( "Transfer Normals from %n Selected…", "", selMeshes.size() ) );
+			aTN->setToolTip( tr( "Take normals from the other selected meshes and write them "
+				"onto this one" ) );
+			const int target = primaryMesh;
+			connect( aTN, &QAction::triggered, this, [this, target, selMeshes]() {
+				transferNormalsFromSelection( target, selMeshes );
+			} );
+		}
 	}
 
 	// WW: field clipboard + diff-vs-reference actions
