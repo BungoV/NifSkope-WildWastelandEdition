@@ -384,14 +384,20 @@ class ProcLightningController final : public Controller
 		int idx = 0;
 	};
 	//! One bolt polyline in the Start->End frame: pts are (t along axis, v, w)
+	/*! One branch of the bolt.
+	 *
+	 *  Every branch runs along the SAME axis — the target's local +Y. The engine
+	 *  has no per-branch direction at all: `Lightning::Process` lays each branch's
+	 *  rings out along +Y from its own origin, and the forking look comes entirely
+	 *  from the displacement. So `pts` is (axial, v, w) in world units, in the one
+	 *  frame the whole bolt shares, with this branch's origin already folded in.
+	 */
 	struct Bolt
 	{
 		QVector<Vector3> pts;
-		int parent = -1;                   // -1 = main bolt, else index into bolts[]
-		float rootT = 0;                   // start param along the PARENT bolt
-		Vector3 dir;                       // direction in the PARENT's frame
-		float lenMul = 1;                  // fraction of the parent's length
-		float widthMul = 1;
+		int parent = -1;                   // -1 = the trunk, else index into bolts[]
+		int gen = 0;                       // 0 = trunk; drives length, width, arc offset
+		float length = 0;                  // this branch's own length, world units
 	};
 
 	//! One of Interpolators 3-9 (Subdivision..Arc Offset): a float curve that
@@ -425,7 +431,9 @@ class ProcLightningController final : public Controller
 	int effSubdiv = 6, effBranches = 1, effBranchVar = 0;
 	float effLength = 0.0f, effLengthVar = 0.0f, effArc = 20.0f, effWidth = 16.0f;
 	QVector<Bolt> bolts;
-	float lastMutation = -1.0e30f;
+	//! last frame's Mutation value, and the key ordinal it came from
+	bool lastMutation = false;
+	quint32 lastTick = 0xffffffffu;
 	bool visible = false;
 
 	//! Deterministic per-mutation RNG. The global random() made every rebuild
@@ -435,12 +443,16 @@ class ProcLightningController final : public Controller
 	quint32 rngSeed = 0;
 	quint32 rngState = 1;
 
-	//! Seeded from the QUANTISED TIME, not a mutation counter: a counter makes
-	//! the bolt depend on how many times regenerate() happened to run before the
-	//! frame was observed, which varies with frame timing and broke
-	//! reproducibility. Keyed on time, the same instant always redraws the same
-	//! bolt no matter how it was reached.
-	void regenerate( float time );
+	//! How many keys of the current sequence's curve are at or before `time`.
+	/*! The bolt's seed, and the reason it is an ordinal rather than a running
+	 *  count of mutations: a count depends on which frames happened to be
+	 *  rendered, so scrubbing backwards would return a different bolt. This is a
+	 *  pure function of time.
+	 */
+	quint32 keyOrdinal( const QVector<SeqKeys> & list, float time ) const;
+
+	//! Rebuild every branch. `tick` seeds the RNG; see keyOrdinal.
+	void regenerate( quint32 tick );
 
 	//! Build the bolt ribbon for a given viewer axis. See the definition: only
 	//! the width expansion is view-dependent, which is what lets a bake reuse it.
