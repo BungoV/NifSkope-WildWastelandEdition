@@ -2090,15 +2090,23 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelI
 	QAction * doScreen = menu.addAction( tr( "Merge and Convert to Loading Screen…" ) );
 	doScreen->setToolTip( tr( "Merge, then evaluate the skins away and drop the skeleton, "
 		"as the vanilla LoadScreenArt files are built" ) );
+	// Same conversion, except the ArtObject branches are left running. Their
+	// geometry does not exist in the file — a particle system and a procedural arc
+	// are generated at runtime — so flattening them keeps nothing.
+	QAction * doLiveScreen = menu.addAction( tr( "Merge and Convert to Loading Screen, Effects Live…" ) );
+	doLiveScreen->setToolTip( tr( "As above, but ArtObject branches keep their nodes, particles "
+		"and controllers, hung off a stub of the bone they attached to so they stay in place. "
+		"No vanilla loading screen carries particles; one carries a controller manager." ) );
 	menu.setToolTipsVisible( true );
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == doInPlace ) {
 		mergeIntoLoadedDocument( picked );
 		return;
 	}
-	if ( chosen != doMerge && chosen != doScreen )
+	if ( chosen != doMerge && chosen != doScreen && chosen != doLiveScreen )
 		return;
-	const bool toLoadingScreen = ( chosen == doScreen );
+	const bool toLoadingScreen = ( chosen == doScreen || chosen == doLiveScreen );
+	const bool keepEffectsLive = ( chosen == doLiveScreen );
 
 	QString out = QFileDialog::getSaveFileName( this,
 		toLoadingScreen ? tr( "Save loading screen NIF" ) : tr( "Save merged NIF" ),
@@ -2159,7 +2167,7 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelI
 	LoadingScreen::Result screen;
 	if ( toLoadingScreen ) {
 		QString error;
-		screen = LoadingScreen::convert( &merged, true, false, &error );
+		screen = LoadingScreen::convert( &merged, true, false, keepEffectsLive, &error );
 		if ( !screen.ok ) {
 			QMessageBox::warning( this, tr( "Loading Screen" ), error );
 			return;
@@ -2179,6 +2187,11 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelI
 			"%2 rigid shape(s) folded, %3 node(s) and %4 block(s) removed." )
 			.arg( screen.shapesBaked ).arg( screen.shapesFolded )
 			.arg( screen.nodesRemoved ).arg( screen.blocksRemoved );
+		if ( screen.effectBranches > 0 )
+			text += tr( "\n%1 effect branch(es) kept live (%2 blocks), on %3." )
+				.arg( screen.effectBranches ).arg( screen.effectBlocks )
+				.arg( screen.attachNodes.isEmpty() ? tr( "the root" )
+				                                   : screen.attachNodes.join( QStringLiteral( ", " ) ) );
 		if ( !screen.notes.isEmpty() )
 			text += tr( "\n\n• %1" ).arg( screen.notes.join( QStringLiteral( "\n• " ) ) );
 	}

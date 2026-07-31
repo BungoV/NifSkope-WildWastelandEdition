@@ -75,12 +75,48 @@ echo "merging armour + both arm effects + helmet effect"
 sed -n 's/^  branches attached by name to/  attached by name ->/p' "$TMP/merge.log"
 
 # --- 1. colliding effect node names stay separate ---------------------------
+# Two arms, two blocks -- and since 2026-07-31f they are also DISTINGUISHABLE:
+# the colliding import is qualified with its attach node (R_Pauldron_BoltGeo_01),
+# because the merged animation graph addresses what it drives BY NAME and cannot
+# hold two palette entries called BoltGeo_01. So the check is "two blocks", the
+# name matched with an optional qualifier, not "the same name twice".
 for name in LightningBolt_01 BoltGeo_01 LightningArcs_VFX; do
-	n="$("$EXE" -no-gui list "$TMP/rig.nif" 2>/dev/null | grep -c "'$name'")"
+	n="$("$EXE" -no-gui list "$TMP/rig.nif" 2>/dev/null | grep -cE "'([A-Za-z0-9_]+_)?$name'")"
 	# One per arm effect. The helmet effect has no lightning nodes.
 	if [ "$n" -ge 2 ]; then ok
 	else bad "only $n node(s) named '$name' -- the two arm effects were fused"; fi
 done
+
+# --- 1b. ...and the file ends up with ONE animation graph -------------------
+# Six ArtObjects bring six NiControllerManagers; 0 of the 34,983 meshes in the
+# FO4 corpus have two. See animgraph.h.
+for type in NiControllerManager NiDefaultAVObjectPalette NiMultiTargetTransformController; do
+	n="$("$EXE" -no-gui info "$TMP/rig.nif" 2>/dev/null | awk -v t="$type" '$1==t {print $2}' | tr -d 'x')"
+	n="${n:-0}"
+	if [ "$n" -le 1 ]; then ok
+	else bad "$n $type(s) survived the merge -- they should have folded into one"; fi
+done
+# Every palette entry has to name exactly one object, or a sequence asking for
+# that name has two answers. Measured against the DONORS' own duplicates rather
+# than against zero: X01_Torso_Tesla_VFX ships a palette with two rows called
+# BoltGeo_02, one of them pointing at the node actually called BoltGeo_01. That
+# is Bethesda's, it is carried verbatim, and the palette -- not the node name --
+# is what the runtime resolves through, so it is not ours to "fix". What must
+# hold is that the MERGE adds none of its own.
+palette_names() {
+	b="$("$EXE" -no-gui list "$1" 2>/dev/null | sed -n 's/^\[\([0-9]*\)\] NiDefaultAVObjectPalette.*/\1/p' | head -1)"
+	[ -n "$b" ] || return 0
+	"$EXE" -no-gui dump "$1" -b "$b" -d 3 -n 4000 2>/dev/null | sed -n 's/.*Name  <SizedString>  = //p'
+}
+palette_names "$TMP/rig.nif" | sort | uniq -d > "$TMP/dupes_after.txt"
+: > "$TMP/dupes_before.txt"
+for limb in Helmet Torso ArmLeft ArmRight; do
+	palette_names "$TMP/${limb}_fx.nif" | sort | uniq -d >> "$TMP/dupes_before.txt"
+done
+sort -u "$TMP/dupes_before.txt" -o "$TMP/dupes_before.txt"
+new="$(comm -23 "$TMP/dupes_after.txt" "$TMP/dupes_before.txt")"
+if [ -z "$new" ]; then ok
+else bad "the merge introduced repeated palette name(s): $(echo "$new" | tr '\n' ' ')"; fi
 
 # --- 2 & 3. bake, then measure where every effect shape ended up ------------
 "$EXE" -no-gui loading-screen "$TMP/rig.nif" -o "$TMP/screen.nif" > /dev/null 2>&1

@@ -16,6 +16,7 @@ release\nifskope-cli.cmd info model.nif
 spells [pattern]                        list spells addressable by name
 info <file>                             version, block count, per-type tally
 list <file> [-t <type>]                 block list, optionally filtered
+world <file> [-b N] [-t <type>]         each NiAVObject's WORLD transform
 dump <file> -b N [-f PATH] [-d DEPTH] [-n MAX] [--all]
 get  <file> -b N -f PATH
 skeleton <file>                         skeleton tree + per-bone influence
@@ -41,6 +42,18 @@ nifskope-cli dump model.nif -b 73 -f "Vertex Data/0"
 row hiding does — `--all` shows them. This matters on `BSVertexData`, where
 both precision variants of `Vertex` exist as items and the dead one reads as
 zeroes; without the filter a healthy mesh looks corrupt.
+
+`world` answers the question a block's own `Translation` cannot: where the thing
+actually is once its parent chain is applied. Printed as translation, the nine
+rotation terms and scale, one line per object, so two files can be diffed by
+name — which is how "the loading-screen convert put the kept effect branches
+exactly where the skeleton had them" is checked (`tests/loadingscreen/
+live_effects.sh`), rather than asserted.
+
+```powershell
+nifskope-cli world rig.nif    | sort > before.txt
+nifskope-cli world screen.nif | sort > after.txt
+```
 
 ## Merging NIFs (`merge`) — building a poseable armour set
 

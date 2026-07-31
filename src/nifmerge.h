@@ -78,6 +78,19 @@ struct NifMergeResult
 	//! true even when that data names no node, which is the case worth warning
 	//! about, because such an effect silently lands at the origin.
 	bool isEffect = false;
+	/*! Imported effect objects whose name was already taken and had to be
+	 *  qualified with their attach node. A sequence addresses what it drives by
+	 *  NAME, so two `LightningBolt_01`s in one file is one of them animating and
+	 *  the other standing still. See uniquifyEffectNames. */
+	int nodesRenamed = 0;
+	//! NiControllerManagers folded into the one on the root. A NIF carries one;
+	//! every merged ArtObject brings another. See animgraph.h.
+	int managersFolded = 0;
+	//! Sequences that already existed by name and were merged into rather than
+	//! added — six ArtObjects each bring an "autoPlay".
+	int sequencesFused = 0;
+	//! The sequences the file ends up with, after the fold.
+	QStringList sequenceNames;
 	QString error;            //!< set when the merge returns false
 };
 

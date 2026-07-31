@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "nifmerge.h"
 
+#include "animgraph.h"
 #include "nifsnapshot.h"
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
@@ -290,6 +291,144 @@ QSet<QString> skeletonNodeNames( const NifModel * nif )
 	return names;
 }
 
+//! The NiAVObject that owns \a prop, or -1. A shader-property controller targets
+//! the PROPERTY, while the sequence row that drives it names the SHAPE.
+int ownerOfProperty( const NifModel * nif, int prop )
+{
+	if ( prop < 0 )
+		return -1;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		QModelIndex idx = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( idx, "NiAVObject" ) )
+			continue;
+		for ( const qint32 c : nif->getChildLinks( b ) )
+			if ( c == prop )
+				return b;
+	}
+	return -1;
+}
+
+/*! Give every imported effect object a name nothing else in the file uses, and
+ *  re-aim the references that named it.
+ *
+ *  Effect files are authored from a shared template: six X-01 Tesla VFX files
+ *  bring six nodes called `LightningBolt_01` and six shapes called `BoltGeo_01`,
+ *  and two of the six duplicate names inside themselves. That was survivable
+ *  while the merge only had to place geometry — each copy hung under its own
+ *  limb, and the pointers were pointers.
+ *
+ *  It stops being survivable the moment the ANIMATION comes too, because a
+ *  sequence addresses what it drives BY NAME, through the manager's object
+ *  palette: one name, one entry, one node. Six `LightningBolt_01`s in one palette
+ *  is five effects driving the helmet's node.
+ *
+ *  So a colliding name is qualified with its first pre-existing ancestor — on a
+ *  merged rig that is the limb it attached to, giving `RLeg_Calf_Armor2_
+ *  LightningBolt_01` — the same rule `qualifiedEffectName` uses when the bake
+ *  writes shapes, so both halves of the pipeline name things the same way.
+ *
+ *  Nothing outside the file addresses these: they are the names the merge already
+ *  reports as private. What DOES address them is rewritten here — the object
+ *  palette by pointer, and each controlled block by way of its controller's
+ *  target, falling back to the old name when the row carries no controller.
+ */
+void uniquifyEffectNames( NifModel * nif, const QList<qint32> & imported,
+                          int preBlockCount, NifMergeResult & result )
+{
+	QSet<QString> used;
+	for ( int b = 0; b < preBlockCount && b < nif->getBlockCount(); b++ ) {
+		QModelIndex idx = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( idx, "NiAVObject" ) )
+			continue;
+		const QString name = nif->get<QString>( idx, "Name" );
+		if ( !name.isEmpty() )
+			used << name;
+	}
+
+	const QHash<int, QList<int>> parents = parentMap( nif );
+	QHash<int, QString> renamed;              // block -> its new name
+	QHash<QString, QList<int>> wasCalled;     // old name -> blocks renamed off it
+
+	for ( const qint32 b : imported ) {
+		QModelIndex idx = nif->getBlockIndex( b );
+		if ( !idx.isValid() || !nif->blockInherits( idx, "NiAVObject" ) )
+			continue;
+		const QString name = nif->get<QString>( idx, "Name" );
+		if ( name.isEmpty() )
+			continue;
+		if ( !used.contains( name ) ) {
+			used << name;
+			continue;
+		}
+
+		// The first ancestor that was already in the file — the attach node.
+		QString prefix;
+		QSet<int> seen;
+		for ( int p = parentOf( parents, b ); p >= 0 && !seen.contains( p );
+		      p = parentOf( parents, p ) ) {
+			seen << p;
+			if ( p < preBlockCount ) {
+				prefix = nif->get<QString>( nif->getBlockIndex( p ), "Name" );
+				break;
+			}
+		}
+		QString candidate = prefix.isEmpty() ? name : prefix + QLatin1Char( '_' ) + name;
+		const QString base = candidate;
+		for ( int n = 2; used.contains( candidate ); n++ )
+			candidate = base + QLatin1Char( '_' ) + QString::number( n );
+
+		nif->set<QString>( idx, "Name", candidate );
+		used << candidate;
+		renamed.insert( b, candidate );
+		wasCalled[name].append( b );
+		result.nodesRenamed++;
+	}
+
+	if ( renamed.isEmpty() )
+		return;
+
+	for ( const qint32 b : imported ) {
+		QModelIndex idx = nif->getBlockIndex( b );
+		if ( !idx.isValid() )
+			continue;
+
+		if ( nif->isNiBlock( idx, "NiDefaultAVObjectPalette" ) ) {
+			QModelIndex iObjs = nif->getIndex( idx, "Objs" );
+			for ( int r = 0; r < nif->rowCount( iObjs ); r++ ) {
+				QModelIndex iRow = nif->getIndex( iObjs, r );
+				auto it = renamed.constFind( nif->getLink( iRow, "AV Object" ) );
+				if ( it != renamed.constEnd() )
+					nif->assignString( iRow, QStringLiteral( "Name" ), *it, false );
+			}
+			continue;
+		}
+
+		if ( !nif->isNiBlock( idx, "NiControllerSequence" ) )
+			continue;
+		QModelIndex iArr = nif->getIndex( idx, "Controlled Blocks" );
+		for ( int r = 0; r < nif->rowCount( iArr ); r++ ) {
+			QModelIndex iRow = nif->getIndex( iArr, r );
+			int node = -1;
+			const int ctrl = nif->getLink( iRow, "Controller" );
+			if ( ctrl >= 0 ) {
+				const int target = nif->getLink( nif->getBlockIndex( ctrl ), "Target" );
+				node = nif->blockInherits( nif->getBlockIndex( target ), "NiAVObject" )
+					? target : ownerOfProperty( nif, target );
+			}
+			if ( node < 0 ) {
+				// No controller to follow: the old name identifies the node, as
+				// long as this import only had one block wearing it.
+				const QList<int> was = wasCalled.value( nif->resolveString( iRow, "Node Name" ) );
+				if ( was.size() == 1 )
+					node = was.first();
+			}
+			auto it = renamed.constFind( node );
+			if ( it != renamed.constEnd() )
+				nif->assignString( iRow, QStringLiteral( "Node Name" ), *it, false );
+		}
+	}
+}
+
 //! Names carried by more than one NiNode. See NifMergeResult::duplicateNames.
 QStringList duplicateNodeNames( const NifModel * nif )
 {
@@ -381,13 +520,46 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 		result.attachedTo = result.attachRequested;
 	}
 
-	// Donor top-level branches: the root's children, not the root itself. The
-	// donor root is a per-file wrapper ("Armor_Torso.nif"); importing it would
-	// nest a redundant node under the target root.
+	/* Donor top-level branches: the root's children, not the root itself. The
+	 * donor root is a per-file wrapper ("Armor_Torso.nif"); importing it would
+	 * nest a redundant node under the target root.
+	 *
+	 * Three of those children describe the FILE rather than anything in it, and
+	 * are skipped when the target already has its own: the root's `AttachT` (where
+	 * this file wants hanging — a question the merge has just answered, and which
+	 * afterwards reads as a claim about whatever node it landed on), `BSXFlags`
+	 * and `BSBehaviorGraphExtraData`. Merging twelve pieces otherwise brings
+	 * twelve of each, and every vanilla file has one.
+	 */
+	bool targetHasBSX = false, targetHasAttachT = false;
+	for ( const qint32 e : target->getLinkArray( target->getBlockIndex( targetRoot ), "Extra Data List" ) ) {
+		if ( e < 0 )
+			continue;
+		QModelIndex iEx = target->getBlockIndex( e );
+		if ( target->blockInherits( iEx, { "BSXFlags", "BSBehaviorGraphExtraData" } ) )
+			targetHasBSX = true;
+		if ( target->isNiBlock( iEx, "NiStringsExtraData" )
+		     && target->get<QString>( iEx, "Name" ) == QLatin1String( "AttachT" ) )
+			targetHasAttachT = true;
+	}
+	// An AttachT that would land on a BONE is worse than redundant: extra data is
+	// linked into whatever node the branch attaches to, so the helmet effect's
+	// "NamedNode&HEAD" ended up ON the HEAD bone, saying that the skeleton's head
+	// is an ArtObject that wants attaching to itself.
+	const bool skipAttachT = targetHasAttachT || attachBlock != targetRoot;
+
 	QList<int> donorTops;
 	for ( int r : donor.getRootLinks() ) {
-		for ( int child : donor.getChildLinks( r ) )
+		for ( int child : donor.getChildLinks( r ) ) {
+			QModelIndex iChild = donor.getBlockIndex( child );
+			if ( targetHasBSX
+			     && donor.blockInherits( iChild, { "BSXFlags", "BSBehaviorGraphExtraData" } ) )
+				continue;
+			if ( skipAttachT && donor.isNiBlock( iChild, "NiStringsExtraData" )
+			     && donor.get<QString>( iChild, "Name" ) == QLatin1String( "AttachT" ) )
+				continue;
 			donorTops.append( child );
+		}
 	}
 	if ( donorTops.isEmpty() )
 		return fail( QStringLiteral( "%1 has nothing under its root" ).arg( donorLabel ) );
@@ -684,6 +856,24 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 				 && !target->isNiBlock( target->getBlockIndex( b ), "NiNode" ) )
 				result.shapesAdded++;
 		}
+
+		/* The animation, last, because both passes renumber or rename blocks and
+		 * every count above is taken from the numbers as spliced.
+		 *
+		 * Names first: the fold merges object palettes BY NAME, so two nodes still
+		 * called LightningBolt_01 would collapse into one palette entry and five
+		 * limbs' sequences would drive the helmet's node.
+		 */
+		if ( result.isEffect )
+			uniquifyEffectNames( target, newBlocks, preBlockCount, result );
+
+		const AnimGraphResult anim = consolidateControllerManagers( target );
+		result.managersFolded = anim.managersFolded;
+		result.sequencesFused = anim.sequencesFused;
+		result.sequenceNames  = anim.sequenceNames;
+		// An object palette entry that resolves to nothing is one the donor
+		// brought: X01_Torso_Tesla_VFX ships one naming a shape it does not have.
+		pruneDeadAnimLinks( target );
 	} );
 
 	if ( !innerError.isEmpty() )

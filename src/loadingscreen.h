@@ -48,6 +48,12 @@ struct Result
 	int nodesRemoved = 0;
 	int blocksRemoved = 0;
 	bool zoomTargetAdded = false;
+	//! Effect branches kept whole and still running (keepEffects).
+	int effectBranches = 0;
+	//! Blocks inside them, which the flatten and the sweep both left alone.
+	int effectBlocks = 0;
+	//! Attach nodes kept as stubs so a branch still sits where its bone was.
+	QStringList attachNodes;
 	//! Anything dropped or left behind, said out loud.
 	QStringList notes;
 };
@@ -64,9 +70,21 @@ struct Result
  *                        have no vanilla precedent whatsoever, so the default
  *                        drops them and says so; this is the override for
  *                        someone who would rather test it than lose the effect.
+ * \param keepEffects     Keep whole ArtObject branches ALIVE — their nodes,
+ *                        controllers, particle systems and the sequences that
+ *                        drive them — instead of flattening them into static
+ *                        geometry. The branch's attach node is kept as a stub
+ *                        carrying its full world transform, so the effect sits
+ *                        exactly where its bone put it once the skeleton is
+ *                        gone. Implies keepParticles for those branches.
+ *
+ *                        Precedent, such as it is: 18 of the 173 vanilla screens
+ *                        animate node transforms and one (CreatureBloatfly.nif)
+ *                        carries a full NiControllerManager and sequence, so the
+ *                        menu does play them. None carries a particle system.
  */
 Result convert( NifModel * nif, bool addZoomTarget = true, bool keepParticles = false,
-                QString * error = nullptr );
+                bool keepEffects = false, QString * error = nullptr );
 
 } // namespace LoadingScreen
 

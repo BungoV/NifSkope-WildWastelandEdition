@@ -1,5 +1,136 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31f — a loading screen whose effects are still running
+
+The merge already carried the animation across: merging `X01_Torso_Tesla_VFX.nif`
+onto the skeleton imports 131 of its 132 blocks — particle system, every PSys
+modifier, the controller manager, both sequences, the object palette, all
+re-pointed. **The loading-screen convert is what killed it.** It deletes every
+NiNode and then sweeps whatever is no longer reachable as a geometry child of the
+root, so the particle systems and every node the sequences drive went with the
+skeleton. `--keep-particles` kept the modifiers and left the `NiParticleSystem`
+itself to the sweep: a file that loads, and does nothing.
+
+`loading-screen --keep-effects` keeps those branches whole instead.
+
+### Where a branch goes once the skeleton is gone
+
+An ArtObject branch is authored relative to the bone it hangs from, and the
+convert deletes that bone. So the bone is **kept as a stub**: same name, its full
+world transform written into its local one, its children cut down to the branch.
+Nothing inside the branch is touched at all — which is the point, because the
+alternative is arithmetic on every node under it, and arithmetic can be subtly
+wrong in a way that "it still renders" will not reveal.
+
+The branch root is found by climbing from a seed — a particle system, a
+procedural-lightning controller, or a node carrying an `AttachT` — up to the
+highest ancestor that is neither the root, nor a bone, nor an ancestor of
+anything rigged. An `AttachT` seen on the way up wins over where the climb
+stopped: it is the file naming its own attachment point. On the X-01 that gives
+13 branches on 8 stubs — `NamedAttachTank_Armor` on `Tank_Armor`,
+`NamedAttachHEAD` on `HEAD`, and for the legs, whose file carries no
+`NamedAttach` nodes at all, the effect's own top-level nodes on
+`RLeg_Calf_Armor2`.
+
+### One animation graph per file
+
+Six merged ArtObjects brought six `NiControllerManager`s, six object palettes,
+six multi-target controllers and twelve sequences sharing two names — and they
+did not even sit on the root: each landed on the node its file attached to, so
+five of them were invisible to anything looking where a manager belongs.
+
+**0 of the 34,983 meshes in the Fallout 4 corpus have two managers.** So the
+merge folds them into one on the root (`src/animgraph.cpp`): sequences that share
+a name are fused rather than renamed, because whatever plays `autoPlay` has to
+drive all six limbs and can only ask for one sequence. Palettes merge by name,
+multi-target extra targets merge by pointer, and every controller chain the fold
+emptied is re-spliced — deleting a block from a chain would otherwise cut it
+there and orphan everything after it.
+
+Result on the full rig: 1 manager, 1 palette, 1 multi-target controller, 2
+sequences — `autoPlay` with 66 controlled blocks and `autoLoop` with 82, which is
+exactly 148, the sum of the six files'.
+
+### Names, because a palette is addressed by name
+
+Six files bring six nodes called `LightningBolt_01` and six shapes called
+`BoltGeo_01`; two of them duplicate names inside themselves. That was survivable
+while the merge only placed geometry — each copy hung under its own limb and the
+pointers were pointers. It stops being survivable the moment one palette has to
+hold them: one name, one entry, one node, and five effects driving the helmet's.
+
+A colliding import is now qualified with its first pre-existing ancestor —
+`RLeg_Calf_Armor2_LightningBolt_01` — the same rule `qualifiedEffectName` uses
+when the bake writes shapes. References follow by pointer: the palette by its
+`AV Object`, each controlled block through its controller's target, falling back
+to the old name only when the row carries no controller. The full-rig merge now
+reports **no duplicate bone names**, where it used to warn about fourteen.
+
+`X01_Torso_Tesla_VFX` ships a palette with two rows called `BoltGeo_02`, one of
+them pointing at the node actually called `BoltGeo_01`. That is Bethesda's, it is
+carried verbatim, and it is not ours to "fix": the palette is what the runtime
+resolves through, so renaming the row would change which node animates. The test
+measures against the donors' own duplicates rather than against zero.
+
+### The file-level extra data stopped travelling
+
+A donor root's `AttachT`, `BSXFlags` and `BSBehaviorGraphExtraData` describe the
+FILE, not anything in it, and extra data is linked into whatever node the branch
+attaches to — so the helmet effect's `NamedNode&HEAD` ended up **on the HEAD
+bone**, saying the skeleton's head is an ArtObject wanting attachment to itself.
+Twelve merged pieces brought twelve `BSXFlags`; the loading-screen converter has
+been deleting eleven of them ever since, which was this mess being cleaned up
+downstream. They are skipped now when the target already has its own.
+
+### Two bugs, both found by measuring rather than reading
+
+**The convert deleted three leg shapes.** The branch climb landed on
+`LLeg_Calf_Armor2` for one seed and on its children for others, and the stub
+rewrite then cut the bone's children down to the seeds — dropping the leg pulse
+and lightning meshes, which are live but are not seeds. They vanished, and with
+them the `Emitter Meshes` pointer of two particle emitters. A dangling emitter
+mesh does not stop an emitter; it **relocates** it. The sprites came out at
+|X| = 90 on a figure 30 wide. Now a stub keeps the children that are live, read
+off the node rather than from the seed list, and nested branch roots are dropped
+in favour of the outer one. |X| back to 46.9.
+
+**The climb swallowed the skeleton.** With only "is it a bone" as the stop
+condition — where "bone" means "some skin's Bones array names it" — a helmet seed
+climbed `NamedAttachHEAD`, `HEAD`, `Neck` and would have taken the whole head,
+because no skin binds to the nodes in between. It stops at anything rigged now,
+and 411 kept blocks became 342.
+
+### Proof
+
+New `tests/loadingscreen/live_effects.sh`, 13 checks green, and it is in two
+halves because the two failures are unrelated:
+
+- **It runs.** The GUI harness `WW_LIVEFX_TEST` loads the converted screen, steps
+  to t = 2.5 and asks the renderer what it produced: **10 arcs and 6 sprite
+  clouds**, world Z 11.9 – 164.4, widest |X| 46.9. No block count can make this
+  claim — a particle system's geometry is not in the file, so every count can be
+  perfect on a file that draws nothing.
+- **It runs where it was.** `world`, a new CLI verb, prints each NiAVObject's
+  world transform so two files can be diffed by name: **75 effect nodes compared,
+  0 moved.** Shapes are deliberately not compared — a flattened one moves by
+  design — and the missing-shape and dangling-emitter checks cover what that
+  leaves.
+
+Regressions: 21 carries-everything (up from 12, with a controlled-block total and
+an AttachT split), 10 artobject, 9 merge sweep, 21 bake, 8 effect bake, 57 freeze.
+The carries-everything self-proof (`WW_BREAK=1`) fails the new check, which is
+what says it has teeth.
+
+### What this is not
+
+**Not validated in game.** The evidence for the approach is 18 of the 173 vanilla
+loading screens animating node transforms and one, `CreatureBloatfly.nif`,
+carrying a full controller manager and sequence — so the menu does step them.
+**No vanilla loading screen contains a particle system or procedural lightning.**
+The bake (`tools/make_x01_loadscreen.sh`, unchanged) remains the path with
+precedent; `--live` builds the same file with the effects running instead, and
+the two are identical up to the merge, so they can be compared directly.
+
 ## 2026-07-31e — Loaded NIFs behaves like the Block List
 
 ### Colour means selected, not visible

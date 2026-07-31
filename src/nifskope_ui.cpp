@@ -3820,6 +3820,126 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_LIVEFX_TEST=1, WW_LIVEFX_TIME=<seconds>): does a loading
+	 * screen converted with --keep-effects still RUN, and in the right place?
+	 *
+	 * Every other check on that conversion reads the file: block counts, palette
+	 * entries, world transforms. All of them can be perfect on a file that draws
+	 * nothing, because a particle system's geometry and a procedural arc's are not
+	 * in the file at all — they exist only once something steps the controllers.
+	 * So this one loads the converted screen, steps time, and asks the RENDERER
+	 * what it produced.
+	 *
+	 * Placement is checked in the same breath, because the failure it guards is
+	 * silent: the convert deletes the skeleton, and an effect branch whose attach
+	 * bone was not carried over collapses to the origin — geometry still generates,
+	 * still has extent, and sits in a heap at the actor's feet. Chest-height and
+	 * leg-height captures in the same file is what says the per-limb stubs worked.
+	 * Log: release/ww_livefx_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_LIVEFX_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_livefx_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif ) { log << "no model\n"; break; }
+
+					// --- what the file carries -------------------------------
+					int psys = 0, lightning = 0, managers = 0, sequences = 0, bones = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QString t = nif->itemName( nif->getBlockIndex( b ) );
+						if ( t == QLatin1String( "NiParticleSystem" ) ) psys++;
+						else if ( t == QLatin1String( "BSProceduralLightningController" ) ) lightning++;
+						else if ( t == QLatin1String( "NiControllerManager" ) ) managers++;
+						else if ( t == QLatin1String( "NiControllerSequence" ) ) sequences++;
+						if ( !nif->getLinkArray( nif->getBlockIndex( b ), "Bones" ).isEmpty() )
+							bones++;
+					}
+					log << psys << " particle system(s), " << lightning << " lightning controller(s), "
+						<< managers << " manager(s), " << sequences << " sequence(s)\n";
+					check( "the converted screen kept its particle systems", psys > 0 );
+					check( "...and its procedural lightning", lightning > 0 );
+					// One graph, on the root. Six merged ArtObjects bring six.
+					check( "exactly one controller manager", managers == 1 );
+					check( "its sequences came with it", sequences > 0 );
+					// The skeleton is what a loading screen does NOT have; keeping
+					// effects must not smuggle it back in.
+					check( "no skin survived the convert", bones == 0 );
+
+					/* Animation is a persisted user setting and the capture reads the
+					 * rendered scene: with it off there are no bolts and no live
+					 * sprites, and every check below would fail for a reason that has
+					 * nothing to do with the code. */
+					skope->ogl->setAnimationEnabled( true );
+					QApplication::processEvents();
+
+					const float want = qEnvironmentVariableIsSet( "WW_LIVEFX_TIME" )
+						? qEnvironmentVariable( "WW_LIVEFX_TIME" ).toFloat() : 2.5f;
+					// Stepped, not jumped: sprite positions integrate frame to frame.
+					for ( float t = 0.0f; t < want; t += 1.0f / 30.0f ) {
+						skope->ogl->setSceneTime( std::min( t + 1.0f / 30.0f, want ) );
+						QApplication::processEvents();
+					}
+					QEventLoop settle;
+					QTimer::singleShot( 300, &settle, &QEventLoop::quit );
+					settle.exec();
+
+					// --- what it actually generated --------------------------
+					const Vector3 facing( 0.0f, -1.0f, 0.0f );
+					const auto caught = skope->ogl->bakeEffects( nif, facing );
+					int arcs = 0, sprites = 0;
+					float loZ = 0.0f, hiZ = 0.0f, maxX = 0.0f;
+					bool haveZ = false;
+					for ( const auto & e : caught ) {
+						( e.fromParticles ? sprites : arcs )++;
+						for ( const Vector3 & p : e.tris ) {
+							if ( !haveZ ) { loZ = hiZ = p[2]; haveZ = true; }
+							loZ = std::min( loZ, p[2] );
+							hiZ = std::max( hiZ, p[2] );
+							maxX = std::max( maxX, std::fabs( p[0] ) );
+						}
+					}
+					log << "generated " << caught.size() << " effect(s) at t=" << want
+						<< ": " << arcs << " arc(s), " << sprites << " sprite cloud(s)\n";
+					if ( haveZ )
+						log << "world Z " << loZ << " .. " << hiZ << ", widest |X| " << maxX << "\n";
+
+					check( "the arcs generate in the converted file", arcs > 0 );
+					check( "the particles emit in the converted file", sprites > 0 );
+
+					/* Placement. A figure is ~160 units tall; an effect branch that
+					 * lost its attach bone lands at the origin, so the tell is not
+					 * "is there geometry" but "is it spread up the body". The X-01
+					 * has arcs at the calves and at the chest, so a file where every
+					 * capture sits below 60 has lost the upper limbs' placement and
+					 * one where none does has lost the legs'. */
+					check( "nothing collapsed to the origin", haveZ && hiZ > 60.0f );
+					check( "the leg effects are at leg height", haveZ && loZ < 60.0f );
+					check( "the chest and helmet effects are up the body", haveZ && hiZ > 100.0f );
+					check( "nothing was flung sideways", haveZ && maxX < 60.0f );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_GROUPSKEL_TEST=<skeleton.nif>): marking one loaded NIF as
 	 * THE skeleton makes the others snap to it — and marking nothing changes nothing.
 	 *

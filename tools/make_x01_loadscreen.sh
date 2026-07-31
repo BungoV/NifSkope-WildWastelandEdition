@@ -25,8 +25,19 @@
 # Step 2 needs the GUI: a bake reads the RENDERED scene, because that is the only
 # place a sprite quad or a lightning ribbon exists. It opens a window briefly.
 #
+# THE OTHER WAY: --live
+#
+# Since 2026-07-31f the convert can keep the ArtObject branches RUNNING instead,
+# on a stub of the bone they hung from (loading-screen --keep-effects). That skips
+# the snapshot entirely -- there is nothing to freeze -- and needs no GUI at all.
+# What it gives up is precedent: no vanilla loading screen contains a particle
+# system, while 18 of the 173 animate node transforms and CreatureBloatfly.nif
+# carries a full controller manager and sequence. Both files are identical up to
+# the merge, so the two can be compared in game directly.
+#
 # USAGE
 #   bash tools/make_x01_loadscreen.sh [time] [outfile]
+#   bash tools/make_x01_loadscreen.sh --live [outfile]
 # Default time 2.5 s. Writes into the X01Tesla mod folder unless told otherwise.
 
 set -u
@@ -35,8 +46,12 @@ EXE="${EXE:-$ROOT/release/NifSkope.exe}"
 SK="${SK:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/CharacterAssets/skeleton.nif}"
 X="${X:-/e/Projects/Fallout 4 Mods/mods/X01Tesla/meshes/actors/powerarmor/x01}"
 CA="${CA:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/CharacterAssets}"
-TIME="${1:-2.5}"
-OUT="${2:-/e/Projects/Fallout 4 Mods/mods/X01Tesla/meshes/LoadScreenArt/X01TeslaLoadScreen.nif}"
+LIVE=0
+if [ "${1:-}" = "--live" ]; then LIVE=1; shift; fi
+TIME="2.5"
+[ "$LIVE" = "0" ] && TIME="${1:-2.5}"
+DEFOUT="/e/Projects/Fallout 4 Mods/mods/X01Tesla/meshes/LoadScreenArt/X01TeslaLoadScreen.nif"
+if [ "$LIVE" = "1" ]; then OUT="${1:-$DEFOUT}"; else OUT="${2:-$DEFOUT}"; fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -60,6 +75,17 @@ echo "1. merging ${#add[@]} donors onto the skeleton (effects live)"
 sed -n 's/^  branches attached by name to/   attached by name ->/p;s/^  \([0-9]* bone name\)/   \1/p' "$TMP/merge.log"
 echo "   $("$EXE" -no-gui info "$TMP/rig.nif" 2>/dev/null | sed -n 's/^blocks *\([0-9]*\)/\1 blocks/p')"
 
+if [ "$LIVE" = "1" ]; then
+
+# --- 2/3. straight to the convert, effects still running --------------------
+echo "2. converting with the effects left live (no snapshot, no GUI)"
+"$EXE" -no-gui loading-screen "$TMP/rig.nif" --keep-effects -o "$TMP/screen.nif" \
+	> "$TMP/conv.log" 2>&1 || { echo "   convert FAILED"; cat "$TMP/conv.log"; exit 1; }
+sed -n 's/^  \([0-9]* effect branch\)/   \1/p' "$TMP/conv.log"
+sed -n 's/^  note: \(BSXFlags[^,]*\)/   \1/p' "$TMP/conv.log"
+
+else
+
 # --- 2. snapshot the effects, in the GUI ------------------------------------
 echo "2. snapshotting effects at t=$TIME (opens a window)"
 LOG="$ROOT/release/ww_effectbake_test.log"
@@ -80,6 +106,8 @@ echo "3. converting to loading-screen art"
 	|| { echo "   convert FAILED"; cat "$TMP/conv.log"; exit 1; }
 sed -n 's/^\(baked\|dropped\|LoadingMenuZoomTarget\)/   &/p' "$TMP/conv.log" | head -6
 
+fi
+
 # --- 4. measure what came out ----------------------------------------------
 echo "4. where everything landed"
 blocks="$("$EXE" -no-gui info "$TMP/screen.nif" 2>/dev/null | sed -n 's/^blocks *\([0-9]*\)/\1/p')"
@@ -95,9 +123,15 @@ for b in $(seq 0 $(( blocks - 1 )) ); do
 		effects=$((effects+1)); printf '   fx  %-34s %s\n' "$nm" "$v" ;;
 	esac
 done
-echo "   $shapes shapes total, $effects of them baked effects"
 left="$(echo "$list" | grep -cE "NiParticleSystem|NiPSys|BSPSys|BSProceduralLightningController")"
-echo "   emitter blocks remaining: $left"
+if [ "$LIVE" = "1" ]; then
+	echo "   $shapes shapes total, $effects of them effect geometry (the rest is generated at runtime)"
+	echo "   emitter blocks kept alive: $left"
+	[ "$left" -gt 0 ] || echo "   WARNING: nothing left to run -- the branches were not kept"
+else
+	echo "   $shapes shapes total, $effects of them baked effects"
+	echo "   emitter blocks remaining: $left"
+fi
 
 # --- 5. ship ----------------------------------------------------------------
 mkdir -p "$(dirname "$OUT")"

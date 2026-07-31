@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "loadingscreen.h"
 
+#include "animgraph.h"
 #include "model/nifmodel.h"
 #include "nifsnapshot.h"
 
@@ -75,6 +76,102 @@ QHash<int, Transform> worldTransforms( const NifModel * nif )
 		}
 	}
 	return world;
+}
+
+// ---------------------------------------------------------------------------
+// live effect branches
+// ---------------------------------------------------------------------------
+
+//! child -> parent over "Children" links, the same edges worldTransforms walks.
+QHash<int, int> childParents( const NifModel * nif )
+{
+	QHash<int, int> parent;
+	for ( int b = 0; b < nif->getBlockCount(); b++ )
+		for ( const qint32 c : nif->getLinkArray( nif->getBlockIndex( b ), "Children" ) )
+			if ( c >= 0 && !parent.contains( c ) )
+				parent.insert( c, b );
+	return parent;
+}
+
+//! Every block some skin binds to. These are the skeleton, whatever they are called.
+QSet<int> skinBones( const NifModel * nif )
+{
+	QSet<int> bones;
+	for ( int b = 0; b < nif->getBlockCount(); b++ )
+		for ( const qint32 bone : nif->getLinkArray( nif->getBlockIndex( b ), "Bones" ) )
+			if ( bone >= 0 )
+				bones << bone;
+	return bones;
+}
+
+//! Everything reachable from \a block by Ref links — the whole branch, including
+//! its properties, controllers, interpolators and data.
+void collectRefs( const NifModel * nif, int block, QSet<int> & out )
+{
+	if ( block < 0 || out.contains( block ) )
+		return;
+	out << block;
+	for ( const int c : nif->getChildLinks( block ) )
+		collectRefs( nif, c, out );
+}
+
+//! Is there anything RIGGED under this block?
+/*! The stop condition for the climb. A branch that swallows a skinned shape
+ *  would carry it past the point where the skeleton is deleted, leaving a skin
+ *  bound to bones that no longer exist — and the climb does reach that far: a
+ *  helmet effect seeded at NamedAttachHEAD walks HEAD, then Neck, and would take
+ *  the whole head with it, because a skin's Bones array names Chest and not
+ *  every node between. */
+bool subtreeIsRigged( const NifModel * nif, int block )
+{
+	QSet<int> sub;
+	collectRefs( nif, block, sub );
+	for ( const int b : std::as_const( sub ) ) {
+		QModelIndex idx = nif->getBlockIndex( b );
+		if ( nif->getLink( idx, "Skin" ) >= 0
+		     || nif->blockInherits( idx, { "NiSkinInstance", "BSSkin::Instance" } ) )
+			return true;
+	}
+	return false;
+}
+
+/*! Does this block, or anything under it, generate something at runtime?
+ *
+ *  Three markers, and each one is a thing that CANNOT be flattened:
+ *
+ *    - `NiParticleSystem` — its geometry does not exist in the file at all.
+ *    - `BSProceduralLightningController` — likewise; it fills an empty shape.
+ *    - an `AttachT` NiStringsExtraData — the ArtObject marker. A `NamedAttach`
+ *      branch carries its own, naming the node it belongs on, so this is the
+ *      file saying "these blocks are an effect" in its own words.
+ *
+ *  Shader-property animation is deliberately NOT a marker: a
+ *  BSEffectShaderPropertyFloatController hangs off the property, follows the
+ *  shape wherever it goes, and keeps animating after the flatten. 13 of the 173
+ *  vanilla screens rely on exactly that.
+ */
+bool hasAttachT( const NifModel * nif, int block )
+{
+	QModelIndex idx = nif->getBlockIndex( block );
+	if ( !idx.isValid() )
+		return false;
+	for ( const qint32 e : nif->getLinkArray( idx, "Extra Data List" ) ) {
+		QModelIndex iEx = nif->getBlockIndex( e );
+		if ( nif->isNiBlock( iEx, "NiStringsExtraData" )
+		     && nif->get<QString>( iEx, "Name" ) == QLatin1String( "AttachT" ) )
+			return true;
+	}
+	return false;
+}
+
+bool isEffectSeed( const NifModel * nif, int block )
+{
+	QModelIndex idx = nif->getBlockIndex( block );
+	if ( !idx.isValid() )
+		return false;
+	if ( nif->blockInherits( idx, { "NiParticleSystem", "BSProceduralLightningController" } ) )
+		return true;
+	return hasAttachT( nif, block );
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +336,8 @@ void writeBounds( NifModel * nif, const QModelIndex & shape, const QVector<Vecto
 namespace LoadingScreen
 {
 
-Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString * error )
+Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, bool keepEffects,
+                QString * error )
 {
 	Result res;
 	if ( !nif ) {
@@ -267,6 +365,101 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 	nifSnapshotOp( nif, QStringLiteral( "Convert to loading screen" ), [&]() {
 
 		const QHash<int, Transform> world = worldTransforms( nif );
+
+		/* --- 0. the branches that stay alive --------------------------------
+		 *
+		 * A particle system's geometry is not in the file and a procedural arc's
+		 * is not either: flattening an effect gives a node with nothing in it.
+		 * The alternative to baking a still (freezeanim.h) is to keep the branch
+		 * exactly as authored and let it run.
+		 *
+		 * A branch is climbed from its seed up to the highest ancestor that is
+		 * neither the root nor a bone, which lands on the node the merge attached
+		 * — `NamedAttachTank_Armor` for the torso, the effect's own top-level
+		 * nodes for the legs, whose file names no NamedAttach at all.
+		 *
+		 * The bone it hung from is then kept as a STUB carrying its full world
+		 * transform. That is the whole placement problem: the branch is authored
+		 * relative to its bone, the skeleton is about to be deleted, and putting
+		 * the bone's world transform on a node of the same name leaves every
+		 * position, rotation and scale under it exactly where it was — with no
+		 * arithmetic applied to the branch itself, so there is nothing to get
+		 * subtly wrong.
+		 */
+		QSet<int> live;                 // every block inside a preserved branch
+		QList<int> liveRoots;           // the branch roots, parents-first order
+		QMap<int, QList<int>> stubs;    // attach node -> the branches under it
+		if ( keepEffects ) {
+			const QHash<int, int> parents = childParents( nif );
+			const QSet<int> bones = skinBones( nif );
+			QSet<int> seen;
+			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+				if ( !isEffectSeed( nif, b ) )
+					continue;
+				// a controller is not in the Children tree; climb from its target
+				int at = b;
+				if ( !nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" ) ) {
+					at = nif->getLink( nif->getBlockIndex( b ), "Target" );
+					if ( at < 0 )
+						continue;
+				}
+				int marked = hasAttachT( nif, at ) ? at : -1;
+				while ( parents.contains( at ) ) {
+					const int p = parents.value( at );
+					// Not past the root, not past a bone, and never far enough to
+					// swallow rigged geometry: the armour has to stay flattenable.
+					if ( p == rootBlock || bones.contains( p ) || subtreeIsRigged( nif, p ) )
+						break;
+					at = p;
+					if ( hasAttachT( nif, at ) )
+						marked = at;
+				}
+				/* An AttachT on the way up beats where the climb happened to stop.
+				 * It is the file saying "the effect starts here" — `NamedAttachHEAD`
+				 * rather than the `Neck` two nodes above it, which the climb reaches
+				 * only because no skin binds to anything in between. Files whose
+				 * branches carry no marker (the X-01 legs) keep the climb's answer,
+				 * which lands on the bone their file-level AttachT names anyway. */
+				if ( marked >= 0 )
+					at = marked;
+				if ( at == rootBlock || seen.contains( at ) )
+					continue;
+				seen << at;
+				liveRoots.append( at );
+				collectRefs( nif, at, live );
+			}
+			/* A root that turned out to sit inside another root's branch is not a
+			 * branch of its own — the outer one already carries it, and treating it
+			 * as one would put its attach node in the stub map, where the stub's
+			 * children get cut down to the roots that named it. That is how the leg
+			 * pulse meshes were deleted: they are live, but they are not seeds, so
+			 * they were not in the list the stub kept. */
+			for ( auto it = liveRoots.begin(); it != liveRoots.end(); ) {
+				bool nested = false;
+				for ( int p = parents.value( *it, -1 ); p >= 0 && !nested;
+				      p = parents.value( p, -1 ) )
+					nested = live.contains( p );
+				it = nested ? liveRoots.erase( it ) : it + 1;
+			}
+			for ( const int r : std::as_const( liveRoots ) )
+				stubs[parents.value( r, rootBlock )].append( r );
+
+			res.effectBranches = liveRoots.size();
+			res.effectBlocks = live.size();
+			// Which branch went where, one line each. Off by default because a full
+			// rig keeps sixteen of them; on when a placement has to be traced.
+			if ( qEnvironmentVariableIsSet( "WW_LIVEFX_DEBUG" ) ) {
+				const QHash<int, int> p2 = childParents( nif );
+				for ( const int r : std::as_const( liveRoots ) ) {
+					const int attach = p2.value( r, rootBlock );
+					note( QStringLiteral( "branch '%1' (%2) on '%3'" )
+						.arg( nif->get<QString>( nif->getBlockIndex( r ), "Name" ),
+						      nif->itemName( nif->getBlockIndex( r ) ),
+						      attach == rootBlock ? QStringLiteral( "the root" )
+						                          : nif->get<QString>( nif->getBlockIndex( attach ), "Name" ) ) );
+				}
+			}
+		}
 
 		// --- 1. every shape becomes static geometry around its own origin ----
 		QList<int> shapes;
@@ -299,6 +492,18 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 			QModelIndex shape = nif->getBlockIndex( b );
 			QModelIndex iVD = nif->getIndex( shape, "Vertex Data" );
 			const int nv = nif->rowCount( iVD );
+
+			/* Inside a live branch: left exactly as authored. Its node chain is
+			 * being kept, so folding the world transform into the vertices would
+			 * apply it a second time. It still has to count towards the bounds,
+			 * or the camera frames the armour and misses the effects. */
+			if ( live.contains( b ) ) {
+				const Affine m = Affine::from( world.value( b, Transform() ) );
+				for ( int v = 0; v < nv; v++ )
+					growBounds( m.point( nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" ) ) );
+				continue;
+			}
+
 			if ( !iVD.isValid() || nv < 1 ) {
 				emptyShapes << b;
 				continue;
@@ -446,10 +651,54 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 		QModelIndex iRoot = nif->getBlockIndex( rootBlock );
 		QList<int> keptChildren;
 		for ( const int b : std::as_const( shapes ) )
-			if ( keepParticles || !emptyShapes.contains( b ) )
+			if ( ( keepParticles || !emptyShapes.contains( b ) ) && !live.contains( b ) )
 				keptChildren.append( b );
 
+		/* The stubs. Each attach node keeps its name and gets its WORLD transform
+		 * as its local one, since the chain that used to place it is being deleted;
+		 * its children are cut down to the branches that asked for it. Anything
+		 * else it carried is skeleton debris — a ragdoll collision object, bone LOD
+		 * extra data — and would otherwise be dragged back in by reachability. */
+		QList<int> keptStubs;
+		for ( auto it = stubs.constBegin(); it != stubs.constEnd(); it++ ) {
+			const int attach = it.key();
+			if ( attach == rootBlock ) {
+				keptChildren.append( it.value() );      // already where it belongs
+				continue;
+			}
+			QModelIndex iAttach = nif->getBlockIndex( attach );
+			if ( !iAttach.isValid() )
+				continue;
+			world.value( attach, Transform() ).writeBack( nif, iAttach );
+			nif->setLink( iAttach, "Collision Object", -1 );
+			if ( QModelIndex iEx = nif->getIndex( iAttach, "Extra Data List" ); iEx.isValid() ) {
+				nif->set<uint>( iAttach, "Num Extra Data List", 0 );
+				nif->updateArraySize( iEx );
+			}
+			// Kept children = the ones that are LIVE, read off the node itself rather
+			// than from the branch list. Everything else it had was flattened and now
+			// hangs from the root, so dropping it here is what stops it being drawn
+			// twice; anything live that is not a branch root — an effect's emitter
+			// mesh, say — would be orphaned by a narrower rule and swept away.
+			if ( QModelIndex iCh = nif->getIndex( iAttach, "Children" ); iCh.isValid() ) {
+				QList<qint32> keep;
+				for ( const qint32 c : nif->getLinkArray( iCh ) )
+					if ( c >= 0 && live.contains( c ) )
+						keep.append( c );
+				nif->set<uint>( iAttach, "Num Children", quint32( keep.size() ) );
+				nif->updateArraySize( iCh );
+				for ( int i = 0; i < keep.size(); i++ )
+					nif->setLink( nif->getIndex( iCh, i ), keep.at( i ) );
+			}
+			keptStubs.append( attach );
+			res.attachNodes << nif->get<QString>( iAttach, "Name" );
+		}
+		keptChildren.append( keptStubs );
+
 		QSet<int> doomed;
+		// emptyShapes cannot contain a live one: a shape in a live branch leaves the
+		// loop above before it is classified, which is what keeps the empty shapes a
+		// procedural arc fills at runtime alive alongside the controller that fills them.
 		if ( !keepParticles && !emptyShapes.isEmpty() ) {
 			doomed += emptyShapes;
 			note( QStringLiteral( "removed %1 empty shape(s) — they hold no vertices of their own; "
@@ -474,6 +723,10 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			// Shapes are kept — except the empty ones already condemned above.
 			if ( b == rootBlock || ( shapes.contains( b ) && !doomed.contains( b ) ) )
+				continue;
+			// A live branch is kept WHOLE: its nodes, its particle systems, its
+			// controllers, and the stub its attach node became.
+			if ( live.contains( b ) || keptStubs.contains( b ) )
 				continue;
 			QModelIndex idx = nif->getBlockIndex( b );
 			if ( !idx.isValid() )
@@ -502,7 +755,7 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 				continue;
 			}
 			// 0 of 173 vanilla loading screens contain any of this.
-			if ( !keepParticles
+			if ( !keepParticles && !keepEffects
 			     && ( nif->blockInherits( idx, { "NiParticleSystem", "NiPSysData", "NiPSysModifier",
 			                                     "NiPSysModifierCtlr", "BSPositionData" } )
 			          || nif->itemName( idx ).startsWith( QLatin1String( "NiPSys" ) )
@@ -605,26 +858,57 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, QString 
 			if ( b < rootBlock )
 				rootNow--;
 
-		QSet<int> live;
+		QSet<int> reachable;
 		QList<int> queue{ rootNow };
 		while ( !queue.isEmpty() ) {
 			const int b = queue.takeFirst();
-			if ( b < 0 || live.contains( b ) )
+			if ( b < 0 || reachable.contains( b ) )
 				continue;
-			live << b;
+			reachable << b;
 			for ( const int c : nif->getChildLinks( b ) )
-				if ( !live.contains( c ) )
+				if ( !reachable.contains( c ) )
 					queue.append( c );
 		}
 		// One descending pass is enough: removing an unreachable block cannot make
-		// another block reachable, so the live set does not need recomputing.
+		// another block reachable, so the set does not need recomputing.
 		for ( int b = nif->getBlockCount() - 1; b >= 0; b-- ) {
-			if ( live.contains( b ) )
+			if ( reachable.contains( b ) )
 				continue;
 			if ( nif->blockInherits( nif->getBlockIndex( b ), "NiNode" ) )
 				res.nodesRemoved++;
 			nif->removeNiBlock( b );
 			res.blocksRemoved++;
+		}
+
+		/* --- 5b. the animation the kept branches need -------------------------
+		 * The manager, its sequences and its palette hang off the root's Controller
+		 * and survive the sweep on their own. What they are left holding is every
+		 * entry that named a bone, because the skeleton is gone — and a palette
+		 * full of holes is what a name lookup walks through.
+		 */
+		if ( keepEffects ) {
+			const int pruned = pruneDeadAnimLinks( nif );
+			if ( pruned > 0 )
+				note( QStringLiteral( "pruned %1 animation reference(s) to blocks the convert "
+					"removed — object palette entries and multi-target targets that named "
+					"skeleton bones" ).arg( pruned ) );
+
+			// BSXFlags bit 0 is Animated. The merged rig inherits the skeleton's 198,
+			// which does not have it; CreatureBloatfly.nif, the one vanilla loading
+			// screen with a controller manager, is 513 — bit 0 set.
+			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+				QModelIndex idx = nif->getBlockIndex( b );
+				if ( !nif->isNiBlock( idx, "BSXFlags" ) )
+					continue;
+				const uint flags = nif->get<uint>( idx, "Integer Data" );
+				if ( !( flags & 1u ) ) {
+					nif->set<uint>( idx, "Integer Data", flags | 1u );
+					note( QStringLiteral( "BSXFlags %1 -> %2: bit 0 (Animated) set, because the "
+						"file now carries effects that have to be stepped" )
+						.arg( flags ).arg( flags | 1u ) );
+				}
+				break;
+			}
 		}
 
 		// --- 6. compact the link arrays the removals hollowed out --------------

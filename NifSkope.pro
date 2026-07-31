@@ -227,6 +227,7 @@ HEADERS += \
 	src/ui/settingspane.h \
 	src/xml/nifexpr.h \
 	src/xml/xmlconfig.h \
+	src/animgraph.h \
 	src/bakegeom.h \
 	src/bsamodel.h \
 	src/freezeanim.h \
@@ -360,6 +361,7 @@ SOURCES += \
 	src/xml/kfmxml.cpp \
 	src/xml/nifexpr.cpp \
 	src/xml/nifxml.cpp \
+	src/animgraph.cpp \
 	src/bakegeom.cpp \
 	src/bsamodel.cpp \
 	src/freezeanim.cpp \

@@ -1973,6 +1973,42 @@ int cmdInfo( const QString & file )
 	return 0;
 }
 
+//! Where every NiAVObject actually IS, once its parent chain is applied.
+/*! Exists because "did this edit move anything" is otherwise unanswerable from
+ *  the CLI: a block's own Translation says nothing when the chain above it
+ *  changed. Printed as translation, the nine rotation terms and scale, so two
+ *  files can be diffed by name — which is what proves a loading-screen convert
+ *  put a kept effect branch exactly where the skeleton had it. */
+int cmdWorld( const QString & file, int block, const QString & typeFilter )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	auto f = []( float v ) { return QString::number( v, 'f', 4 ); };
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		if ( block >= 0 && b != block )
+			continue;
+		QModelIndex idx = nif.getBlockIndex( b );
+		if ( !nif.blockInherits( idx, "NiAVObject" ) )
+			continue;
+		if ( !typeFilter.isEmpty() && !nif.blockInherits( idx, typeFilter ) )
+			continue;
+		const Transform t = skeletonWorldTransform( &nif, b );
+		QStringList rot;
+		for ( int i = 0; i < 3; i++ )
+			for ( int j = 0; j < 3; j++ )
+				rot << f( t.rotation( i, j ) );
+		out() << "[" << b << "] " << nif.itemName( idx )
+			  << " '" << nif.get<QString>( idx, "Name" ) << "'"
+			  << " T=(" << f( t.translation[0] ) << ", " << f( t.translation[1] )
+			  << ", " << f( t.translation[2] ) << ")"
+			  << " R=(" << rot.join( QStringLiteral( " " ) ) << ")"
+			  << " S=" << f( t.scale ) << Qt::endl;
+	}
+	return 0;
+}
+
 int cmdList( const QString & file, const QString & typeFilter )
 {
 	NifModel nif;
@@ -2375,14 +2411,15 @@ int cmdFreeze( const QString & file, const QString & sequence, float time,
 
 //! Bake a posed, assembled rig into loading-screen art.
 int cmdLoadingScreen( const QString & file, bool noZoomTarget, bool keepParticles,
-					  const QString & outFile )
+					  bool keepEffects, const QString & outFile )
 {
 	NifModel nif;
 	if ( !loadNif( nif, file ) )
 		return 1;
 
 	QString error;
-	const LoadingScreen::Result r = LoadingScreen::convert( &nif, !noZoomTarget, keepParticles, &error );
+	const LoadingScreen::Result r = LoadingScreen::convert( &nif, !noZoomTarget, keepParticles,
+		keepEffects, &error );
 	if ( !r.ok ) {
 		err() << "error: " << error << Qt::endl;
 		return 1;
@@ -2392,6 +2429,11 @@ int cmdLoadingScreen( const QString & file, bool noZoomTarget, bool keepParticle
 		  << r.shapesFolded << " rigid shape(s) folded, "
 		  << r.nodesRemoved << " node(s) and " << r.blocksRemoved << " block(s) removed"
 		  << ( r.zoomTargetAdded ? ", LoadingMenuZoomTarget added" : "" ) << Qt::endl;
+	if ( r.effectBranches > 0 )
+		out() << "  " << r.effectBranches << " effect branch(es) kept live, "
+			  << r.effectBlocks << " block(s), attached to "
+			  << ( r.attachNodes.isEmpty() ? QStringLiteral( "the root" )
+			                               : r.attachNodes.join( QStringLiteral( ", " ) ) ) << Qt::endl;
 	for ( const QString & n : r.notes )
 		out() << "  note: " << n << Qt::endl;
 
@@ -2494,6 +2536,8 @@ int usage()
 		  << "                                          (N defaults to 2 m in FO4 units)\n"
 		  << "  spells [pattern]                        list spells addressable by name\n"
 		  << "  info <file>                             version, block count, per-type tally\n"
+		  << "  world <file> [-b N] [-t <type>]         each NiAVObject's WORLD transform,\n"
+		  << "                                          for diffing two files by name\n"
 		  << "  list <file> [-t <type>]                 block list, optionally filtered\n"
 		  << "  dump <file> -b N [-f PATH] [-d DEPTH] [-n MAX] [--all]\n"
 		  << "                                          print a block's fields\n"
@@ -2547,11 +2591,15 @@ int usage()
 		  << "                                          the fields it drives and strip the\n"
 		  << "                                          controller graph (--keep-graph bakes\n"
 		  << "                                          the values but leaves it animating)\n"
-		  << "  loading-screen <file> [--no-zoom-target] [--keep-particles] -o OUT\n"
+		  << "  loading-screen <file> [--no-zoom-target] [--keep-particles]\n"
+		  << "                       [--keep-effects] -o OUT\n"
 		  << "                                          bake the file AS IT IS POSED into\n"
 		  << "                                          loading-screen art: skins evaluated\n"
 		  << "                                          away, skeleton dropped, each shape\n"
-		  << "                                          re-centred on its own origin\n\n"
+		  << "                                          re-centred on its own origin.\n"
+		  << "                                          --keep-effects leaves ArtObject\n"
+		  << "                                          branches running instead, on a stub\n"
+		  << "                                          of the bone they hung from\n\n"
 		  << "Field paths are '/'-separated; numeric segments index arrays by row,\n"
 		  << "e.g. -f \"Vertex Data/0/Vertex Colors\".\n\n"
 		  << "Scope: spells and model edits only. Viewport modelling tools (extrude,\n"
@@ -2590,7 +2638,7 @@ int nifskopeCliMain( const QStringList & args )
 	float blend = 1.0f;
 	float freezeTime = 0.0f;
 	bool keepGraph = false;
-	bool noZoomTarget = false, keepParticles = false;
+	bool noZoomTarget = false, keepParticles = false, keepEffects = false;
 	int steps = 0;
 	int substeps = 0;
 	int iterations = 0;
@@ -2649,6 +2697,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--keep-graph" ) ) keepGraph = true;
 		else if ( t == QLatin1String( "--no-zoom-target" ) ) noZoomTarget = true;
 		else if ( t == QLatin1String( "--keep-particles" ) ) keepParticles = true;
+		else if ( t == QLatin1String( "--keep-effects" ) ) keepEffects = true;
 		else if ( t == QLatin1String( "--steps" ) ) steps = next().toInt();
 		else if ( t == QLatin1String( "--substeps" ) ) substeps = next().toInt();
 		else if ( t == QLatin1String( "--iterations" ) ) iterations = next().toInt();
@@ -2716,6 +2765,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdInfo( file );
 	else if ( cmd == QLatin1String( "list" ) )
 		rc = cmdList( file, type );
+	else if ( cmd == QLatin1String( "world" ) )
+		rc = cmdWorld( file, block, type );
 	else if ( cmd == QLatin1String( "dump" ) )
 		rc = cmdDump( file, block, path, depth, maxRows, showAll );
 	else if ( cmd == QLatin1String( "get" ) )
@@ -2731,7 +2782,7 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "freeze" ) )
 		rc = cmdFreeze( file, sequence, freezeTime, keepGraph, outFile );
 	else if ( cmd == QLatin1String( "loading-screen" ) )
-		rc = cmdLoadingScreen( file, noZoomTarget, keepParticles, outFile );
+		rc = cmdLoadingScreen( file, noZoomTarget, keepParticles, keepEffects, outFile );
 	else if ( cmd == QLatin1String( "simulate" ) )
 		rc = cmdSimulate( file, steps > 0 ? steps : 120, substeps > 0 ? substeps : 8,
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,

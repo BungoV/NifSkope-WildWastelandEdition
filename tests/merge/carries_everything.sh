@@ -55,6 +55,35 @@ seqnames() {
 	"$EXE" -no-gui list "$1" 2>/dev/null | grep "NiControllerSequence" \
 		| sed "s/.*'\(.*\)'.*/\1/" | sort -u
 }
+# AttachT blocks, and how many of them hang off the ROOT.
+# The root's is the FILE's own ("this file attaches to X"); the merge answers that
+# question and does not carry the claim over, or a bone ends up wearing it. The
+# ones on branches say where each PART of an ArtObject belongs, and every one of
+# those has to survive -- the loading-screen convert reads them.
+attacht_total() {
+	"$EXE" -no-gui list "$1" 2>/dev/null | grep -c "NiStringsExtraData 'AttachT'"
+}
+attacht_on_root() {
+	local n=0 e
+	for e in $("$EXE" -no-gui dump "$1" -b 0 -d 1 -n 60 2>/dev/null \
+		| sed -n 's/.*Extra Data List  <Ref>  = \([0-9]*\)/\1/p'); do
+		"$EXE" -no-gui list "$1" 2>/dev/null | grep -q "^\[$e\] NiStringsExtraData 'AttachT'" \
+			&& n=$(( n + 1 ))
+	done
+	echo "$n"
+}
+
+# Every Controlled Blocks row in the file, summed over its sequences. This is
+# what a fused sequence must not lose.
+controlled() {
+	local total=0 b n
+	for b in $("$EXE" -no-gui list "$1" 2>/dev/null \
+		| sed -n 's/^\[\([0-9]*\)\] NiControllerSequence.*/\1/p'); do
+		n="$("$EXE" -no-gui get "$1" -b "$b" -f "Num Controlled Blocks" 2>/dev/null)"
+		total=$(( total + ${n:-0} ))
+	done
+	echo "$total"
+}
 
 # One case: a target plus one or more donors, all of which must survive whole.
 run_case() {
@@ -97,6 +126,36 @@ run_case() {
 			nodedelta=$(( n - m ))
 			continue
 		fi
+		# The animation graph is folded to one on purpose (2026-07-31f): a NIF holds
+		# ONE NiControllerManager and 0 of the 34,983 FO4 meshes hold two, so six
+		# merged ArtObjects cannot keep six. Sequences that share a name are fused
+		# into one rather than dropped -- what has to survive is every sequence NAME
+		# (checked below) and every controlled block (checked below that), which is
+		# a stronger statement about the animation than a block count ever was.
+		case "$t" in
+			NiControllerManager|NiDefaultAVObjectPalette|NiMultiTargetTransformController)
+				if [ "$m" -gt 1 ]; then
+					gained=$(( gained + 1 ))
+					echo "    $m $t(s) -- the fold left more than one"
+				fi
+				continue ;;
+			NiControllerSequence|NiTextKeyExtraData)
+				continue ;;
+			# One per file, as in every vanilla NIF. A merge of twelve pieces brings
+			# twelve; the loading-screen converter used to delete eleven of them
+			# afterwards, which was the merge's mess being cleaned up downstream.
+			BSXFlags|BSBehaviorGraphExtraData)
+				if [ "$m" -gt 1 ]; then
+					gained=$(( gained + 1 ))
+					echo "    $m $t(s) -- one per file is the rule"
+				fi
+				continue ;;
+			# Shrinks by the donors' FILE-level AttachT, which is a statement about
+			# the donor file and not about anything in it. Branch-level ones are
+			# checked separately below, and they must all survive.
+			NiStringsExtraData)
+				continue ;;
+		esac
 		if [ "$m" -lt "$n" ]; then
 			lost=$(( lost + 1 ))
 			echo "    LOST $(( n - m )) of $n  $t"
@@ -129,6 +188,32 @@ run_case() {
 	done
 	if [ "$missing" = "0" ]; then ok; echo "  every sequence name survived"
 	else bad "$label: $missing sequence name(s) lost"; fi
+
+	/bin/true
+	# Fusing two sequences called "autoPlay" is only correct if the rows moved
+	# across. A count of sequence BLOCKS cannot see that -- one surviving block
+	# with the other's rows dropped looks identical -- so the total number of
+	# Controlled Blocks in the file is what gets compared.
+	local want=0 have=0 c
+	for d in "$target" "${donors[@]}"; do
+		c="$(controlled "$d")"
+		want=$(( want + c ))
+	done
+	have="$(controlled "$TMP/m.nif")"
+	if [ "$have" -ge "$want" ]; then ok; echo "  $have controlled block(s), all $want carried"
+	else bad "$label: $(( want - have )) of $want controlled block(s) lost when sequences fused"; fi
+
+	# Branch-level AttachT: every one survives. File-level: at most one left.
+	local wantBranch=0 t r
+	for d in "$target" "${donors[@]}"; do
+		t="$(attacht_total "$d")"; r="$(attacht_on_root "$d")"
+		wantBranch=$(( wantBranch + t - r ))
+	done
+	t="$(attacht_total "$TMP/m.nif")"; r="$(attacht_on_root "$TMP/m.nif")"
+	if [ "$(( t - r ))" -ge "$wantBranch" ]; then ok
+	else bad "$label: $(( wantBranch - t + r )) of $wantBranch branch AttachT lost -- the convert reads those"; fi
+	if [ "$r" -le 1 ]; then ok
+	else bad "$label: $r file-level AttachT on the root, expected at most one"; fi
 }
 
 # Effects: controller managers, sequences, particle modifiers, procedural lightning
