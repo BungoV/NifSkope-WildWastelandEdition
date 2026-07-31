@@ -1,5 +1,50 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31j — animation is one button now
+
+Five widgets in a row — play, sequence, loop, settings, scrub — plus **View ▸
+Animations** in the menu bar. Six places to look for one subject, four of them
+icon-only, and the master switch nowhere near the transport it governs.
+
+One labelled **Animation** button on the View toolbar now, unfolding a panel, in
+the same shape as the Collision button beside it: transport (play, loop,
+reverse), a Time scrub, Sequence and Speed pickers, the **Animations** master
+switch, **Cycle through sequences**, and the Timeline dock. `aAnimate` is gone
+from the View menu — it lives in the panel.
+
+Nothing keeps its own state. The panel drives the existing `aAnimate` /
+`aAnimPlay` / `aAnimLoop` / `aAnimSwitch` actions and `Scene::animGroups`, so it,
+the Timeline dock's transport and Space in the viewport cannot disagree, and it
+re-reads all of it on `aboutToShow` because the keyboard changes the same state
+behind its back.
+
+### What the screenshot could not tell me
+
+The panel photographs fine on an animated file and fine on a static one — the
+difference between enabled and disabled is a few percent of grey, which is
+exactly the kind of thing a picture invites you to guess at. So `WW_SHOT_UI`
+writes a state file next to the image, and it caught the flaw: on a file with
+nothing to animate, **the whole panel went dead** — because disabling the button
+disables the popup with it.
+
+Two of those controls are not about the current file. **Animations** is a stored
+preference (`GLView/Enable Animations`) and the Timeline dock is a dock; a suite
+went from green to "captured 0 arcs" once because that preference had been left
+off, and a panel you cannot open to look at it would make that worse. The button
+stays enabled and only the per-file controls grey out. Measured after: button
+enabled, Play / Loop / Reverse / scrub / Sequence / Speed / Cycle all disabled,
+**Animations** and **Timeline dock** live.
+
+### New harness
+
+`WW_SHOT_UI=<out.png>` photographs the CHROME rather than the scene —
+`grabFramebuffer` returns the GL viewport alone, so it cannot show a toolbar or a
+panel. `QWidget::grab` renders any widget's own tree whether or not it is on
+screen or focused, which is what makes it usable while someone is working on the
+machine. Writes `<out>` (the popup), `<out>.toolbar.png` (the strip) and
+`<out>.state.txt` (enabled-ness, combo contents, check states).
+`WW_SHOT_UI_BTN=<objectName>` points it at a different button.
+
 ## 2026-07-31i — the bolt rule, read out of the game instead of guessed
 
 bungo asked whether the leaked 1.10.155 PDB would help with the arcs. It did, and

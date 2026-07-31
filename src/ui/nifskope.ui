@@ -267,8 +267,6 @@
     <addaction name="menuShow"/>
     <addaction name="mToolbars"/>
     <addaction name="separator"/>
-    <addaction name="aAnimate"/>
-    <addaction name="separator"/>
     <addaction name="menuBlock_List"/>
     <addaction name="menuBlock_Details"/>
    </widget>
