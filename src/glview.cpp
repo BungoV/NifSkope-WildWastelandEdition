@@ -203,6 +203,12 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.split", QObject::tr( "Split" ), catEdit, QKeySequence( Qt::Key_Y ) );
 	r.reg( "viewport.rip", QObject::tr( "Rip" ), catEdit, QKeySequence( Qt::Key_V ) );
 	r.reg( "viewport.bevel", QObject::tr( "Bevel" ), catEdit, QKeySequence( Qt::CTRL | Qt::Key_B ) );
+	r.reg( "viewport.normals_recalc_outside", QObject::tr( "Recalculate Normals Outside" ), catEdit,
+		QKeySequence( Qt::CTRL | Qt::Key_N ) );
+	r.reg( "viewport.normals_recalc_inside", QObject::tr( "Recalculate Normals Inside" ), catEdit,
+		QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_N ) );
+	r.reg( "viewport.normals_menu", QObject::tr( "Normals Menu" ), catEdit,
+		QKeySequence( Qt::ALT | Qt::Key_N ) );
 	r.reg( "viewport.merge", QObject::tr( "Merge Menu" ), catEdit, QKeySequence( Qt::Key_M ) );
 	r.reg( "viewport.separate", QObject::tr( "Separate Menu" ), catEdit, QKeySequence( Qt::Key_P ) );
 	r.reg( "viewport.delete", QObject::tr( "Delete Menu" ), catEdit, QKeySequence( Qt::Key_X ) );
@@ -8217,7 +8223,11 @@ static void tlPushNormalCommands( NifModel * model, const QModelIndex & iShape, 
 				continue;	// tolerate an incomplete row rather than warn per vertex
 			normalFieldRow = nItem->row();
 		}
-		QModelIndex nIdx = model->index( normalFieldRow, 0, row );
+		/* ValueCol, not column 0. NifModel::setData switches on the COLUMN: on
+		 * the name column it renames the item, returns true, and leaves the value
+		 * alone — so a ChangeValueCommand built on a column-0 index pushes, undoes
+		 * and redoes perfectly while writing nothing at all. */
+		QModelIndex nIdx = model->index( normalFieldRow, NifModel::ValueCol, row );
 		const NifItem * item = nIdx.isValid() ? static_cast<const NifItem *>( nIdx.internalPointer() ) : nullptr;
 		if ( !item )
 			continue;
@@ -12279,7 +12289,9 @@ void GLView::flipSelectedFaces()
 		TlCommandBatch batch( model );
 		batch.touch( model->getBlockNumber( iShape ) );
 		for ( int t : std::as_const( faces ) ) {
+			// ValueCol: a command on the name column renames and writes nothing
 			QModelIndex tIdx = model->getIndex( iTris, t );
+			tIdx = tIdx.sibling( tIdx.row(), NifModel::ValueCol );
 			const NifItem * item = tIdx.isValid()
 				? static_cast<const NifItem *>( tIdx.internalPointer() ) : nullptr;
 			if ( !item )
@@ -12297,6 +12309,614 @@ void GLView::flipSelectedFaces()
 	tlPushNormalCommands( model, iShape, touched );
 	modelChanged();
 	emit gizmoStatus( tr( "Flipped %1 face(s)" ).arg( faces.size() ) );
+}
+
+/* Ctrl+N / Shift+Ctrl+N — Recalculate Outside / Inside, as Blender means it.
+ *
+ * Not the same operation as recalcSelectedNormals() below, which re-derives
+ * vertex normals from the winding already there — the thing Blender calls Reset
+ * Vectors. This one decides the WINDING: it makes the selected faces agree with
+ * each other, then turns each connected island so its faces point out.
+ *
+ * Two steps, because they answer different questions:
+ *
+ *   1. CONSISTENCY is local and exact. Two triangles sharing an edge are wound
+ *      the same way exactly when they traverse that edge in OPPOSITE directions,
+ *      so a flood fill across shared edges settles an island with no geometry
+ *      involved at all.
+ *
+ *   2. WHICH WAY IS OUT is global, and on an open surface not strictly
+ *      decidable. For a closed island the signed volume settles it: positive
+ *      means the faces wind counter-clockwise seen from outside. A flat or open
+ *      patch has no meaningful volume, so it falls back to asking whether the
+ *      island's area-weighted normal points away from the mesh's middle. Blender
+ *      ray-casts instead; this agrees on everything closed, which is what the
+ *      corpus is, and is honest about the rest rather than picking at random.
+ */
+void GLView::recalcNormalsSelection( bool inside, bool armPanel )
+{
+	int sb = -1;
+	QSet<int> sv;
+	const char * opName = inside ? "Recalculate Inside" : "Recalculate Outside";
+	if ( !vertexOpTarget( sb, sv, opName ) )
+		return;
+	const QVector<PickedElement> seed = pickedElems;
+	const int undoBase = model->undoStack ? model->undoStack->index() : 0;
+
+	QModelIndex iShape = model->getBlockIndex( sb );
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	if ( !iTris.isValid() || !iVD.isValid() )
+		return;
+	const int numTris = model->get<int>( iShape, "Num Triangles" );
+	const int numVerts = model->get<int>( iShape, "Num Vertices" );
+
+	QVector<Triangle> tris( numTris );
+	for ( int t = 0; t < numTris; t++ )
+		tris[t] = model->get<Triangle>( model->getIndex( iTris, t ) );
+	QVector<Vector3> pos( numVerts );
+	for ( int v = 0; v < numVerts; v++ )
+		pos[v] = model->get<Vector3>( model->getIndex( iVD, v ), "Vertex" );
+
+	auto degenerate = [&tris]( int t ) {
+		const Triangle & x = tris.at( t );
+		return x[0] == x[1] || x[1] == x[2] || x[0] == x[2];
+	};
+
+	// The selection, read the way Flip reads it: explicit face picks, plus any
+	// face all of whose corners are selected.
+	QSet<int> faces;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) )
+		if ( pe.type == 3 && pe.e0 >= 0 && pe.e0 < numTris && !degenerate( pe.e0 ) )
+			faces << pe.e0;
+	for ( int t = 0; t < numTris; t++ ) {
+		if ( degenerate( t ) )
+			continue;
+		const Triangle & tri = tris.at( t );
+		if ( sv.contains( tri[0] ) && sv.contains( tri[1] ) && sv.contains( tri[2] ) )
+			faces << t;
+	}
+	if ( faces.isEmpty() ) {
+		emit gizmoStatus( tr( "%1: select whole faces" ).arg( QLatin1String( opName ) ) );
+		return;
+	}
+
+	// --- 1. consistency: flood fill across shared edges ---------------------
+	auto ekey = []( int a, int b ) {
+		if ( a > b ) std::swap( a, b );
+		return ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+	};
+	QHash<quint64, QVector<int>> edgeFaces;
+	for ( int t : std::as_const( faces ) )
+		for ( int e = 0; e < 3; e++ )
+			edgeFaces[ekey( tris[t][e], tris[t][( e + 1 ) % 3] )].append( t );
+
+	QHash<int, bool> flipped;			// face -> its winding has to invert
+	QHash<int, int> islandOf;
+	QVector<QVector<int>> islands;
+	for ( int t : std::as_const( faces ) ) {
+		if ( islandOf.contains( t ) )
+			continue;
+		const int id = islands.size();
+		islands.append( QVector<int>() );
+		QVector<int> queue{ t };
+		islandOf.insert( t, id );
+		flipped.insert( t, false );
+		while ( !queue.isEmpty() ) {
+			const int f = queue.takeLast();
+			islands[id].append( f );
+			Triangle cur = tris.at( f );			// as it will be wound
+			if ( flipped.value( f ) )
+				std::swap( cur[1], cur[2] );
+			for ( int e = 0; e < 3; e++ ) {
+				const int a = cur[e], b = cur[( e + 1 ) % 3];
+				for ( int g : edgeFaces.value( ekey( a, b ) ) ) {
+					if ( g == f || islandOf.contains( g ) )
+						continue;
+					// a neighbour that traverses this edge the SAME way is wound
+					// against us, and has to turn over
+					const Triangle & other = tris.at( g );
+					bool sameDir = false;
+					for ( int oe = 0; oe < 3 && !sameDir; oe++ )
+						sameDir = ( other[oe] == a && other[( oe + 1 ) % 3] == b );
+					islandOf.insert( g, id );
+					flipped.insert( g, sameDir );
+					queue.append( g );
+				}
+			}
+		}
+	}
+
+	// --- 2. which way is out ------------------------------------------------
+	Vector3 meshCentre;
+	for ( const Vector3 & p : std::as_const( pos ) )
+		meshCentre += p;
+	if ( numVerts > 0 )
+		meshCentre /= float( numVerts );
+
+	int turnedIslands = 0;
+	for ( const QVector<int> & isl : std::as_const( islands ) ) {
+		Vector3 centre;
+		int corners = 0;
+		for ( int f : isl )
+			for ( int c = 0; c < 3; c++ ) {
+				centre += pos.at( tris.at( f )[c] );
+				corners++;
+			}
+		if ( corners > 0 )
+			centre /= float( corners );
+
+		double vol = 0.0;
+		Vector3 areaNormal;
+		for ( int f : isl ) {
+			Triangle tri = tris.at( f );
+			if ( flipped.value( f ) )
+				std::swap( tri[1], tri[2] );
+			const Vector3 a = pos.at( tri[0] ) - centre;
+			const Vector3 b = pos.at( tri[1] ) - centre;
+			const Vector3 c = pos.at( tri[2] ) - centre;
+			vol += double( Vector3::dotproduct( a, Vector3::crossproduct( b, c ) ) ) / 6.0;
+			areaNormal += Vector3::crossproduct( pos.at( tri[1] ) - pos.at( tri[0] ),
+												 pos.at( tri[2] ) - pos.at( tri[0] ) );
+		}
+
+		const bool pointsOut = ( std::fabs( vol ) > 1.0e-4 )
+			? ( vol > 0.0 )
+			: ( Vector3::dotproduct( areaNormal, centre - meshCentre ) >= 0.0f );
+		if ( pointsOut == inside ) {
+			turnedIslands++;
+			for ( int f : isl )
+				flipped[f] = !flipped.value( f );
+		}
+	}
+
+	// --- write ---------------------------------------------------------------
+	ChangeValueCommand::createTransaction();
+	QSet<int> touched;
+	int changed = 0;
+	{
+		TlCommandBatch batch( model );
+		batch.touch( model->getBlockNumber( iShape ) );
+		for ( int t : std::as_const( faces ) ) {
+			for ( int c = 0; c < 3; c++ )
+				touched << tris.at( t )[c];
+			if ( !flipped.value( t ) )
+				continue;
+			QModelIndex tIdx = model->getIndex( iTris, t );
+			tIdx = tIdx.sibling( tIdx.row(), NifModel::ValueCol );
+			const NifItem * item = tIdx.isValid()
+				? static_cast<const NifItem *>( tIdx.internalPointer() ) : nullptr;
+			if ( !item )
+				continue;
+			Triangle tri = tris.at( t );
+			std::swap( tri[1], tri[2] );
+			NifValue oldVal = item->value();
+			NifValue newVal = oldVal;
+			newVal.set<Triangle>( tri, model, item );
+			if ( oldVal == newVal )
+				continue;
+			model->undoStack->push( new ChangeValueCommand( tIdx, oldVal, newVal, tr( "Triangle" ), model ) );
+			changed++;
+		}
+	}
+	// after the winding, not before: the vertex normals are derived from it
+	tlPushNormalCommands( model, iShape, touched );
+	modelChanged();
+
+	emit gizmoStatus( tr( "%1: %2 face(s) in %3 island(s), %4 turned over" )
+		.arg( QLatin1String( opName ) ).arg( faces.size() )
+		.arg( islands.size() ).arg( changed ) );
+	Q_UNUSED( turnedIslands );
+
+	if ( armPanel && model->undoStack ) {
+		// Blender's adjust-last-operation panel: one checkbox, as in Blender
+		lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+			recalcNormalsSelection( ps.value( 0 ).value > 0.5, false );
+		};
+		QVector<TlOpParam> ps( 1 );
+		ps[0].label = tr( "Inside" );
+		ps[0].type = TlOpParam::Bool;
+		ps[0].value = inside ? 1.0 : 0.0;
+		armOperatorPanelEx( tr( "Recalculate Normals" ), ps,
+			model->undoStack->index() - undoBase, seed );
+	}
+	update();
+}
+
+/* Alt+N — the Normals menu, in Blender's order.
+ *
+ * Two of Blender's entries are deliberately absent. Face Strength (Select By /
+ * Set) is an attribute of the Weighted Normal modifier and has nowhere to live
+ * in a NIF; Split is the inverse of Merge and needs vertex duplication, which
+ * Rip (V) already does with the selection semantics people expect. Rotate is
+ * modal in Blender and is Point to Target here, which reaches the same place
+ * with a click instead of a gesture.
+ */
+void GLView::showNormalsMenu()
+{
+	if ( !editMode || pickedElems.isEmpty() ) {
+		emit gizmoStatus( tr( "Normals needs a selection in edit mode" ) );
+		return;
+	}
+	AutoCloseMenu m;
+	m.addSection( tr( "Normals" ) );
+	QAction * aFlip = m.addAction( tr( "Flip" ) );
+	QAction * aOut = m.addAction( tr( "Recalculate Outside" ) );
+	QAction * aIn = m.addAction( tr( "Recalculate Inside" ) );
+	m.addSeparator();
+	QAction * aFromFaces = m.addAction( tr( "Set from Faces" ) );
+	QAction * aTarget = m.addAction( tr( "Point to Target" ) );
+	QAction * aAway = m.addAction( tr( "Point Away from Target" ) );
+	QAction * aMerge = m.addAction( tr( "Merge" ) );
+	QMenu * avg = m.addMenu( tr( "Average" ) );
+	QAction * aAvgArea = avg->addAction( tr( "Face Area" ) );
+	QAction * aAvgAngle = avg->addAction( tr( "Corner Angle" ) );
+	m.addSeparator();
+	QAction * aCopy = m.addAction( tr( "Copy Vector" ) );
+	QAction * aPaste = m.addAction( tr( "Paste Vector" ) );
+	aPaste->setEnabled( normalClipboardValid );
+	QAction * aSmooth = m.addAction( tr( "Smooth Vectors" ) );
+	QAction * aReset = m.addAction( tr( "Reset Vectors" ) );
+
+	QAction * r = m.exec( QCursor::pos() );
+	if ( r == aFlip )              flipSelectedFaces();
+	else if ( r == aOut )          recalcNormalsSelection( false );
+	else if ( r == aIn )           recalcNormalsSelection( true );
+	else if ( r == aFromFaces )    normalsSetFromFaces();
+	else if ( r == aTarget )       normalsPointToTarget( false );
+	else if ( r == aAway )         normalsPointToTarget( true );
+	else if ( r == aMerge )        normalsMergeCoincident();
+	else if ( r == aAvgArea )      normalsAverage( 0 );
+	else if ( r == aAvgAngle )     normalsAverage( 1 );
+	else if ( r == aCopy )         normalsCopyVector();
+	else if ( r == aPaste )        normalsPasteVector();
+	else if ( r == aSmooth )       normalsSmoothVectors();
+	else if ( r == aReset )        recalcSelectedNormals();
+}
+
+/*! Write one normal per vertex through the undo stack.
+ *
+ *  Shared by every Normals-menu operator so they all land as one transaction,
+ *  survive undo the same way, and cannot disagree about how a normal reaches the
+ *  file — which on a BSTriShape is a ByteVector3, not a Vector3.
+ */
+static int tlWriteNormals( NifModel * model, const QModelIndex & iShape,
+	const QHash<int, Vector3> & normals, const QString & opName )
+{
+	if ( !model || !model->undoStack || normals.isEmpty() )
+		return 0;
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	if ( !iVD.isValid() )
+		return 0;
+	int written = 0;
+	TlCommandBatch batch( model );
+	batch.touch( model->getBlockNumber( iShape ) );
+	for ( auto it = normals.constBegin(); it != normals.constEnd(); ++it ) {
+		Vector3 n = it.value();
+		if ( n.squaredLength() < 1.0e-16f )
+			continue;
+		n.normalize();
+		QModelIndex row = model->getIndex( iVD, it.key() );
+		const NifItem * nItem = model->getItem( row, "Normal" );
+		if ( !nItem )
+			continue;
+		QModelIndex nIdx = model->index( nItem->row(), NifModel::ValueCol, row );
+		const NifItem * item = nIdx.isValid()
+			? static_cast<const NifItem *>( nIdx.internalPointer() ) : nullptr;
+		if ( !item )
+			continue;
+		NifValue oldVal = item->value();
+		NifValue newVal = oldVal;
+		newVal.set<ByteVector3>( n, model, item );
+		if ( oldVal == newVal )
+			continue;
+		model->undoStack->push( new ChangeValueCommand( nIdx, oldVal, newVal, opName, model ) );
+		written++;
+	}
+	return written;
+}
+
+//! The selected faces, their corner positions and the current triangle list —
+//! the three things every Normals operator below starts by reading.
+bool GLView::normalsOpContext( int & sb, QSet<int> & sv, QSet<int> & faces,
+	QVector<Triangle> & tris, QVector<Vector3> & pos, const char * opName )
+{
+	if ( !vertexOpTarget( sb, sv, opName ) )
+		return false;
+	QModelIndex iShape = model->getBlockIndex( sb );
+	QModelIndex iTris = model->getIndex( iShape, "Triangles" );
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+	if ( !iTris.isValid() || !iVD.isValid() )
+		return false;
+	const int numTris = model->get<int>( iShape, "Num Triangles" );
+	const int numVerts = model->get<int>( iShape, "Num Vertices" );
+	tris.resize( numTris );
+	for ( int t = 0; t < numTris; t++ )
+		tris[t] = model->get<Triangle>( model->getIndex( iTris, t ) );
+	pos.resize( numVerts );
+	for ( int v = 0; v < numVerts; v++ )
+		pos[v] = model->get<Vector3>( model->getIndex( iVD, v ), "Vertex" );
+	faces.clear();
+	for ( const PickedElement & pe : std::as_const( pickedElems ) )
+		if ( pe.type == 3 && pe.e0 >= 0 && pe.e0 < numTris )
+			faces << pe.e0;
+	for ( int t = 0; t < numTris; t++ ) {
+		const Triangle & x = tris.at( t );
+		if ( x[0] == x[1] || x[1] == x[2] || x[0] == x[2] )
+			continue;
+		if ( sv.contains( x[0] ) && sv.contains( x[1] ) && sv.contains( x[2] ) )
+			faces << t;
+	}
+	return true;
+}
+
+void GLView::normalsSetFromFaces()
+{
+	int sb = -1;
+	QSet<int> sv, faces;
+	QVector<Triangle> tris;
+	QVector<Vector3> pos;
+	if ( !normalsOpContext( sb, sv, faces, tris, pos, "Set from Faces" ) )
+		return;
+	if ( faces.isEmpty() ) {
+		emit gizmoStatus( tr( "Set from Faces: select whole faces" ) );
+		return;
+	}
+	/* A NIF stores ONE normal per vertex, so a vertex shared by several selected
+	 * faces can only end up with one of them. Blender splits the corner there;
+	 * here the faces are averaged instead, which is the same answer whenever the
+	 * corner is not shared and an honest one when it is. Rip (V) first if you
+	 * want the hard edge.
+	 */
+	QHash<int, Vector3> acc;
+	for ( int t : std::as_const( faces ) ) {
+		const Triangle & x = tris.at( t );
+		const Vector3 fn = Vector3::crossproduct( pos.at( x[1] ) - pos.at( x[0] ),
+												  pos.at( x[2] ) - pos.at( x[0] ) );
+		for ( int c = 0; c < 3; c++ )
+			acc[x[c]] += fn;
+	}
+	ChangeValueCommand::createTransaction();
+	const int n = tlWriteNormals( model, model->getBlockIndex( sb ), acc, tr( "Normal" ) );
+	modelChanged();
+	emit gizmoStatus( tr( "Set from Faces: %1 normal(s) from %2 face(s)" ).arg( n ).arg( faces.size() ) );
+	update();
+}
+
+void GLView::normalsPointToTarget( bool invert )
+{
+	int sb = -1;
+	QSet<int> sv, faces;
+	QVector<Triangle> tris;
+	QVector<Vector3> pos;
+	const char * opName = invert ? "Point Away from Target" : "Point to Target";
+	if ( !normalsOpContext( sb, sv, faces, tris, pos, opName ) )
+		return;
+	// the 3D cursor is in world space; the vertices are not. Same conversion the
+	// snap and merge-at-cursor paths use, scale included.
+	Node * shapeNode = shapeForBlock( sb );
+	const Transform wt = shapeNode ? shapeRenderTrans( shapeNode ) : Transform();
+	const float sc = ( wt.scale != 0.0f ) ? wt.scale : 1.0f;
+	const Vector3 targetLocal = wt.rotation.inverted() * ( ( cursorPos - wt.translation ) * ( 1.0f / sc ) );
+	QHash<int, Vector3> acc;
+	for ( int v : std::as_const( sv ) ) {
+		if ( v < 0 || v >= pos.size() )
+			continue;
+		Vector3 d = pos.at( v ) - targetLocal;		// away from the cursor
+		if ( !invert )
+			d = -d;									// ...towards it
+		if ( d.squaredLength() > 1.0e-12f )
+			acc.insert( v, d );
+	}
+	ChangeValueCommand::createTransaction();
+	const int n = tlWriteNormals( model, model->getBlockIndex( sb ), acc, tr( "Normal" ) );
+	modelChanged();
+	emit gizmoStatus( tr( "%1: %2 normal(s)" ).arg( QLatin1String( opName ) ).arg( n ) );
+	update();
+}
+
+void GLView::normalsMergeCoincident()
+{
+	int sb = -1;
+	QSet<int> sv, faces;
+	QVector<Triangle> tris;
+	QVector<Vector3> pos;
+	if ( !normalsOpContext( sb, sv, faces, tris, pos, "Merge Normals" ) )
+		return;
+	QModelIndex iShape = model->getBlockIndex( sb );
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+
+	// group the selected verts by position — a seam is two vertices in the same
+	// place with different normals, which is exactly what shades as a crease
+	QHash<quint64, QVector<int>> byPos;
+	auto key = []( const Vector3 & p ) {
+		auto q = []( float f ) { return qint64( std::llround( double( f ) * 1000.0 ) ); };
+		return quint64( ( q( p[0] ) * 73856093 ) ^ ( q( p[1] ) * 19349663 ) ^ ( q( p[2] ) * 83492791 ) );
+	};
+	for ( int v : std::as_const( sv ) )
+		if ( v >= 0 && v < pos.size() )
+			byPos[key( pos.at( v ) )].append( v );
+
+	QHash<int, Vector3> acc;
+	int groups = 0;
+	for ( auto it = byPos.constBegin(); it != byPos.constEnd(); ++it ) {
+		if ( it.value().size() < 2 )
+			continue;
+		Vector3 sum;
+		for ( int v : it.value() )
+			sum += model->get<Vector3>( model->getIndex( iVD, v ), "Normal" );
+		if ( sum.squaredLength() < 1.0e-16f )
+			continue;
+		groups++;
+		for ( int v : it.value() )
+			acc.insert( v, sum );
+	}
+	ChangeValueCommand::createTransaction();
+	const int n = tlWriteNormals( model, iShape, acc, tr( "Normal" ) );
+	modelChanged();
+	emit gizmoStatus( groups > 0
+		? tr( "Merge Normals: %1 vert(s) across %2 shared position(s)" ).arg( n ).arg( groups )
+		: tr( "Merge Normals: no vertices share a position in the selection" ) );
+	update();
+}
+
+void GLView::normalsAverage( int mode )
+{
+	int sb = -1;
+	QSet<int> sv, faces;
+	QVector<Triangle> tris;
+	QVector<Vector3> pos;
+	const char * opName = ( mode == 1 ) ? "Average Corner Angle" : "Average Face Area";
+	if ( !normalsOpContext( sb, sv, faces, tris, pos, opName ) )
+		return;
+	/* Face area vs corner angle is the whole difference between the two entries.
+	 * An unnormalised cross product IS twice the triangle's area, so leaving it
+	 * unnormalised weights by area; normalising it first and scaling by the
+	 * corner's angle weights by angle instead, which is what stops a fan of
+	 * slivers from dominating a vertex.
+	 */
+	QHash<int, Vector3> acc;
+	for ( int v : std::as_const( sv ) )
+		acc.insert( v, Vector3() );
+	for ( int t = 0; t < tris.size(); t++ ) {
+		const Triangle & x = tris.at( t );
+		if ( x[0] == x[1] || x[1] == x[2] || x[0] == x[2] )
+			continue;
+		Vector3 fn = Vector3::crossproduct( pos.at( x[1] ) - pos.at( x[0] ),
+											pos.at( x[2] ) - pos.at( x[0] ) );
+		if ( mode == 1 && fn.squaredLength() > 1.0e-16f )
+			fn.normalize();
+		for ( int c = 0; c < 3; c++ ) {
+			auto it = acc.find( x[c] );
+			if ( it == acc.end() )
+				continue;
+			float w = 1.0f;
+			if ( mode == 1 ) {
+				Vector3 e1 = pos.at( x[( c + 1 ) % 3] ) - pos.at( x[c] );
+				Vector3 e2 = pos.at( x[( c + 2 ) % 3] ) - pos.at( x[c] );
+				if ( e1.squaredLength() > 1.0e-16f && e2.squaredLength() > 1.0e-16f ) {
+					e1.normalize();
+					e2.normalize();
+					w = std::acos( std::clamp( Vector3::dotproduct( e1, e2 ), -1.0f, 1.0f ) );
+				}
+			}
+			it.value() += fn * w;
+		}
+	}
+	ChangeValueCommand::createTransaction();
+	const int n = tlWriteNormals( model, model->getBlockIndex( sb ), acc, tr( "Normal" ) );
+	modelChanged();
+	emit gizmoStatus( tr( "%1: %2 normal(s)" ).arg( QLatin1String( opName ) ).arg( n ) );
+	update();
+}
+
+void GLView::normalsCopyVector()
+{
+	int sb = -1;
+	QSet<int> sv;
+	if ( !vertexOpTarget( sb, sv, "Copy Vector" ) )
+		return;
+	// the ACTIVE element, as Blender copies from — the last thing picked
+	int v = -1;
+	for ( const PickedElement & pe : std::as_const( pickedElems ) )
+		if ( pe.type == 1 && pe.e0 >= 0 )
+			v = pe.e0;
+	if ( v < 0 )
+		v = *sv.constBegin();
+	QModelIndex iVD = model->getIndex( model->getBlockIndex( sb ), "Vertex Data" );
+	if ( !iVD.isValid() )
+		return;
+	normalClipboard = model->get<Vector3>( model->getIndex( iVD, v ), "Normal" );
+	normalClipboardValid = true;
+	emit gizmoStatus( tr( "Copied normal (%1, %2, %3) from vertex %4" )
+		.arg( normalClipboard[0], 0, 'f', 3 ).arg( normalClipboard[1], 0, 'f', 3 )
+		.arg( normalClipboard[2], 0, 'f', 3 ).arg( v ) );
+}
+
+void GLView::normalsPasteVector()
+{
+	if ( !normalClipboardValid ) {
+		emit gizmoStatus( tr( "Paste Vector: copy a normal first" ) );
+		return;
+	}
+	int sb = -1;
+	QSet<int> sv;
+	if ( !vertexOpTarget( sb, sv, "Paste Vector" ) )
+		return;
+	QHash<int, Vector3> acc;
+	for ( int v : std::as_const( sv ) )
+		acc.insert( v, normalClipboard );
+	ChangeValueCommand::createTransaction();
+	const int n = tlWriteNormals( model, model->getBlockIndex( sb ), acc, tr( "Normal" ) );
+	modelChanged();
+	emit gizmoStatus( tr( "Paste Vector: %1 normal(s)" ).arg( n ) );
+	update();
+}
+
+void GLView::normalsSmoothVectors( float factor, bool armPanel )
+{
+	int sb = -1;
+	QSet<int> sv, faces;
+	QVector<Triangle> tris;
+	QVector<Vector3> pos;
+	if ( !normalsOpContext( sb, sv, faces, tris, pos, "Smooth Vectors" ) )
+		return;
+	const QVector<PickedElement> seed = pickedElems;
+	const int undoBase = model->undoStack ? model->undoStack->index() : 0;
+	QModelIndex iShape = model->getBlockIndex( sb );
+	QModelIndex iVD = model->getIndex( iShape, "Vertex Data" );
+
+	QVector<Vector3> nrm( pos.size() );
+	for ( int v = 0; v < pos.size(); v++ )
+		nrm[v] = model->get<Vector3>( model->getIndex( iVD, v ), "Normal" );
+
+	// neighbours across mesh edges, from the whole mesh: smoothing a selection
+	// against only its own interior would pull its border away from the rest
+	QHash<int, QVector<int>> nbr;
+	for ( const Triangle & x : std::as_const( tris ) ) {
+		for ( int c = 0; c < 3; c++ ) {
+			const int a = x[c], b = x[( c + 1 ) % 3];
+			if ( sv.contains( a ) )
+				nbr[a].append( b );
+			if ( sv.contains( b ) )
+				nbr[b].append( a );
+		}
+	}
+	const float f = std::clamp( factor, 0.0f, 1.0f );
+	QHash<int, Vector3> acc;
+	for ( int v : std::as_const( sv ) ) {
+		const QVector<int> & ns = nbr[v];
+		if ( ns.isEmpty() || v < 0 || v >= nrm.size() )
+			continue;
+		Vector3 avg;
+		for ( int w : ns )
+			avg += nrm.at( w );
+		if ( avg.squaredLength() < 1.0e-16f )
+			continue;
+		avg.normalize();
+		acc.insert( v, nrm.at( v ) * ( 1.0f - f ) + avg * f );
+	}
+	ChangeValueCommand::createTransaction();
+	const int n = tlWriteNormals( model, iShape, acc, tr( "Normal" ) );
+	modelChanged();
+	emit gizmoStatus( tr( "Smooth Vectors: %1 normal(s) at %2" ).arg( n ).arg( f, 0, 'f', 2 ) );
+
+	if ( armPanel && model->undoStack ) {
+		lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+			normalsSmoothVectors( float( ps.value( 0 ).value ), false );
+		};
+		QVector<TlOpParam> ps( 1 );
+		ps[0].label = tr( "Factor" );
+		ps[0].type = TlOpParam::Float;
+		ps[0].value = f;
+		ps[0].mn = 0.0;
+		ps[0].mx = 1.0;
+		ps[0].step = 0.05;
+		ps[0].decimals = 2;
+		armOperatorPanelEx( tr( "Smooth Vectors" ), ps,
+			model->undoStack->index() - undoBase, seed );
+	}
+	update();
 }
 
 void GLView::recalcSelectedNormals()
@@ -20062,6 +20682,20 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		}
 		if ( shortcuts.matches( "viewport.bevel", event->key(), mods ) && editMode ) {
 			bevelSelection();
+			return;
+		}
+		// Normals. Inside is tested FIRST: its sequence is Outside's plus Shift,
+		// and matches() on the Outside binding would otherwise swallow both.
+		if ( shortcuts.matches( "viewport.normals_recalc_inside", event->key(), mods ) && editMode ) {
+			recalcNormalsSelection( true );
+			return;
+		}
+		if ( shortcuts.matches( "viewport.normals_recalc_outside", event->key(), mods ) && editMode ) {
+			recalcNormalsSelection( false );
+			return;
+		}
+		if ( shortcuts.matches( "viewport.normals_menu", event->key(), mods ) && editMode ) {
+			showNormalsMenu();
 			return;
 		}
 		if ( shortcuts.matches( "viewport.select.circle", event->key(), mods ) ) {

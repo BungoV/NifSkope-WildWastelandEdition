@@ -3820,6 +3820,240 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_NORMALS_TEST=1): does Ctrl+N actually turn the faces the
+	 * right way round?
+	 *
+	 * The question has an exact answer, so the test does not look at anything.
+	 * A closed mesh whose faces all wind counter-clockwise seen from outside has
+	 * POSITIVE signed volume; wind them the other way and the same number comes
+	 * out negative. So: vandalise a known fraction of the triangles, run the
+	 * operator, and require the volume to come back positive for Outside and
+	 * negative for Inside — with the mesh otherwise untouched, which the vertex
+	 * count and the triangle multiset check for separately.
+	 *
+	 * "It renders correctly now" would not do: a mesh with every face flipped
+	 * renders perfectly from the inside, and a partially flipped one looks wrong
+	 * only from the angles you did not check.
+	 * Log: release/ww_normals_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_NORMALS_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_normals_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				NifModel * nif = skope->getNifModel();
+				/* Every operator here reports what it did — or why it declined —
+				 * through gizmoStatus, which a harness cannot see. Without this
+				 * the first run of this suite said "nothing changed" four times
+				 * and gave no hint that the operator had refused the selection. */
+				QStringList said;
+				QObject::connect( skope->ogl, &GLView::gizmoStatus, skope,
+					[&said]( const QString & s ) { said << s; } );
+				do {
+					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					int sb = -1;
+					for ( int b = 0; b < nif->getBlockCount() && sb < 0; b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" )
+							 && nif->get<int>( nif->getBlockIndex( b ), "Num Triangles" ) > 50 )
+							sb = b;
+					if ( sb < 0 ) { log << "no BSTriShape\n"; break; }
+					QModelIndex iShape = nif->getBlockIndex( sb );
+					QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+					QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+					const int nT = nif->get<int>( iShape, "Num Triangles" );
+					const int nV = nif->get<int>( iShape, "Num Vertices" );
+					log << "block " << sb << " '" << nif->get<QString>( iShape, "Name" )
+						<< "' " << nV << " verts, " << nT << " tris\n";
+
+					QVector<Vector3> pos( nV );
+					for ( int v = 0; v < nV; v++ )
+						pos[v] = nif->get<Vector3>( nif->getIndex( iVD, v ), "Vertex" );
+					Vector3 centre;
+					for ( const Vector3 & p : std::as_const( pos ) )
+						centre += p;
+					if ( nV )
+						centre /= float( nV );
+
+					auto volume = [&]() {
+						double vol = 0.0;
+						for ( int t = 0; t < nT; t++ ) {
+							const Triangle x = nif->get<Triangle>( nif->getIndex( iTris, t ) );
+							const Vector3 a = pos.at( x[0] ) - centre;
+							const Vector3 b = pos.at( x[1] ) - centre;
+							const Vector3 c = pos.at( x[2] ) - centre;
+							vol += double( Vector3::dotproduct( a, Vector3::crossproduct( b, c ) ) ) / 6.0;
+						}
+						return vol;
+					};
+					// the triangle SET, order and winding ignored — what must not
+					// change no matter how often the operator runs
+					auto triSignature = [&]() {
+						QStringList sig;
+						for ( int t = 0; t < nT; t++ ) {
+							const Triangle x = nif->get<Triangle>( nif->getIndex( iTris, t ) );
+							QList<int> c{ x[0], x[1], x[2] };
+							std::sort( c.begin(), c.end() );
+							sig << QStringLiteral( "%1/%2/%3" ).arg( c[0] ).arg( c[1] ).arg( c[2] );
+						}
+						sig.sort();
+						return sig.join( QLatin1Char( ',' ) );
+					};
+
+					const double vol0 = volume();
+					const QString sig0 = triSignature();
+					log << "as loaded: volume " << vol0 << "\n";
+
+					// --- vandalise: turn over every third triangle -------------
+					nif->undoStack->beginMacro( QStringLiteral( "vandalise" ) );
+					int flipped = 0;
+					for ( int t = 0; t < nT; t += 3 ) {
+						QModelIndex ti = nif->getIndex( iTris, t );
+						Triangle x = nif->get<Triangle>( ti );
+						std::swap( x[1], x[2] );
+						nif->set<Triangle>( ti, x );
+						flipped++;
+					}
+					nif->undoStack->endMacro();
+					const double volBad = volume();
+					log << "after flipping " << flipped << " of " << nT << ": volume " << volBad << "\n";
+					check( "the vandalised mesh really is inconsistent",
+						std::fabs( volBad ) < std::fabs( vol0 ) * 0.9 );
+
+					// --- Recalculate Outside ----------------------------------
+					// The scene has to exist and the shape has to be the current
+					// block before edit mode will take: without this the operator
+					// declines every call with "needs a selection in edit mode",
+					// which is a refusal, not a result.
+					skope->ogl->grabFramebuffer();
+					skope->ogl->getScene()->currentBlock = iShape;
+					skope->ogl->syncObjectSelection( sb );
+					skope->ogl->setEditMode( true );
+					skope->ogl->setPickMode( 4 );		// faces
+					skope->ogl->selectAll( 1 );
+					log << "edit mode: " << skope->ogl->pickedElems.size() << " element(s) picked\n";
+
+					/* Control: the SHIPPED Flip, through the same write path. If
+					 * this does not move the volume either, the fault is in the
+					 * shared idiom or in this harness, not in the new operator —
+					 * a distinction worth one call to find out. */
+					/* The trap this suite exists to catch, asserted directly.
+					 *
+					 * getIndex(parent, row) hands back a COLUMN 0 index, and
+					 * NifModel::setData switches on the column: on the name column it
+					 * renames the item, RETURNS TRUE, and leaves the value alone. So a
+					 * ChangeValueCommand built that way pushes, undoes and redoes
+					 * perfectly while writing nothing — which is how Flip Normals and
+					 * every post-edit normal recompute came to be silently dead.
+					 * If this ever starts writing, the ValueCol dance below is
+					 * unnecessary and someone should be told rather than left guessing.
+					 */
+					{
+						QModelIndex probe = nif->getIndex( iTris, 0 );
+						log << "index column for a triangle row: " << probe.column()
+							<< " (ValueCol is " << int( NifModel::ValueCol ) << ")\n";
+						Triangle before = nif->get<Triangle>( probe );
+						Triangle test = before;
+						std::swap( test[1], test[2] );
+						NifValue nv = nif->getValue( probe );
+						nv.set<Triangle>( test, nif, nif->getItem( probe ) );
+						const bool okSet = nif->setData( probe, nv.toVariant(), Qt::EditRole );
+						Triangle after = nif->get<Triangle>( probe );
+						const bool wrote = ( before[1] != after[1] );
+						log << "direct setData on the name column returned " << int( okSet )
+							<< ", value " << ( wrote ? "changed" : "UNCHANGED" ) << "\n";
+						check( "setData on the name column reports success and writes nothing",
+							okSet && !wrote );
+						if ( wrote )
+							nif->set<Triangle>( probe, before );
+					}
+					const double volBeforeFlip = volume();
+					const int uc0 = nif->undoStack ? nif->undoStack->count() : -1;
+					const int ui0 = nif->undoStack ? nif->undoStack->index() : -1;
+					skope->ogl->flipSelectedFaces();
+					QApplication::processEvents();
+					log << "undo stack: count " << uc0 << " -> "
+						<< ( nif->undoStack ? nif->undoStack->count() : -1 )
+						<< ", index " << ui0 << " -> "
+						<< ( nif->undoStack ? nif->undoStack->index() : -1 )
+						<< ", enabled " << ( nif->undoStack ? int( nif->undoStack->isActive() ) : -1 ) << "\n";
+					const double volAfterFlip = volume();
+					log << "control: Flip took volume " << volBeforeFlip << " -> " << volAfterFlip << "\n";
+					check( "the existing Flip writes through this path",
+						std::fabs( volAfterFlip + volBeforeFlip ) < std::fabs( volBeforeFlip ) * 0.02 );
+					skope->ogl->flipSelectedFaces();		// back
+					QApplication::processEvents();
+					const Triangle t0Before = nif->get<Triangle>( nif->getIndex( iTris, 0 ) );
+					skope->ogl->recalcNormalsSelection( false, false );
+					QApplication::processEvents();
+					const Triangle t0After = nif->get<Triangle>( nif->getIndex( iTris, 0 ) );
+					log << "triangle 0: before (" << t0Before[0] << "," << t0Before[1] << "," << t0Before[2]
+						<< ") after (" << t0After[0] << "," << t0After[1] << "," << t0After[2] << ")\n";
+					const double volOut = volume();
+					log << "after Recalculate Outside: volume " << volOut << "\n";
+					check( "Outside gives a positive volume", volOut > 0.0 );
+					check( "Outside restores the original volume",
+						std::fabs( volOut - std::fabs( vol0 ) ) < std::fabs( vol0 ) * 0.02 );
+					check( "no triangle gained, lost or changed corners", triSignature() == sig0 );
+
+					// running it again must change nothing at all
+					skope->ogl->recalcNormalsSelection( false, false );
+					QApplication::processEvents();
+					check( "running Outside twice is a no-op",
+						std::fabs( volume() - volOut ) < std::fabs( vol0 ) * 1.0e-4 );
+
+					// --- Recalculate Inside -----------------------------------
+					skope->ogl->recalcNormalsSelection( true, false );
+					QApplication::processEvents();
+					const double volIn = volume();
+					log << "after Recalculate Inside: volume " << volIn << "\n";
+					check( "Inside gives a negative volume", volIn < 0.0 );
+					check( "Inside is Outside turned over",
+						std::fabs( volIn + volOut ) < std::fabs( vol0 ) * 0.02 );
+					check( "still no triangle gained or lost", triSignature() == sig0 );
+
+					// --- and the normals followed the winding ------------------
+					skope->ogl->recalcNormalsSelection( false, false );
+					QApplication::processEvents();
+					int agree = 0, tested = 0;
+					for ( int t = 0; t < nT; t += 7 ) {
+						const Triangle x = nif->get<Triangle>( nif->getIndex( iTris, t ) );
+						const Vector3 fn = Vector3::crossproduct( pos.at( x[1] ) - pos.at( x[0] ),
+																  pos.at( x[2] ) - pos.at( x[0] ) );
+						if ( fn.squaredLength() < 1.0e-12f )
+							continue;
+						for ( int c = 0; c < 3; c++ ) {
+							const Vector3 vn = nif->get<Vector3>( nif->getIndex( iVD, x[c] ), "Normal" );
+							tested++;
+							if ( Vector3::dotproduct( fn, vn ) > 0.0f )
+								agree++;
+						}
+					}
+					log << "vertex normals agreeing with their face: " << agree << " of " << tested << "\n";
+					check( "the stored normals point the same way as the winding",
+						tested > 0 && agree > tested * 9 / 10 );
+				} while ( false );
+				log << "status line said:\n";
+				for ( const QString & s : std::as_const( said ) )
+					log << "  \"" << s << "\"\n";
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( nif && nif->undoStack )
+					nif->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SHOT_UI=<out.png>): photograph the CHROME, not the scene.
 	 *
 	 * grabFramebuffer returns the GL viewport alone, so it cannot show a toolbar,

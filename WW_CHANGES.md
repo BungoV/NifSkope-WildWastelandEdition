@@ -1,5 +1,76 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31k — Ctrl+N and the Normals menu, and the write that never wrote
+
+**Ctrl+N** recalculates the selected faces' winding outward, **Shift+Ctrl+N**
+inward, and **Alt+N** opens the Normals menu — Blender's bindings, doing
+Blender's job, with the redo panel carrying the same single `Inside` checkbox
+Blender's does.
+
+### Recalculate is not what was already there
+
+`recalcSelectedNormals` (W menu) re-derives vertex normals from the winding
+already in the file — Blender calls that **Reset Vectors**, and it is now the
+menu entry of that name. Ctrl+N decides the **winding itself**, in two steps
+because they answer different questions:
+
+1. **Consistency is local and exact.** Two triangles sharing an edge agree
+   exactly when they traverse that edge in opposite directions, so a flood fill
+   across shared edges settles an island with no geometry involved.
+2. **Which way is out is global**, and on an open surface not strictly decidable.
+   A closed island's signed volume settles it — positive means counter-clockwise
+   seen from outside. A flat patch has no volume to read, so it falls back to
+   asking whether the island's area-weighted normal points away from the mesh's
+   middle. Blender ray-casts; this agrees on everything closed and is honest
+   about the rest instead of picking at random.
+
+### The menu
+
+Flip · Recalculate Outside · Recalculate Inside · Set from Faces · Point to
+Target · Point Away from Target · Merge · Average ▸ (Face Area / Corner Angle) ·
+Copy Vector · Paste Vector · Smooth Vectors · Reset Vectors.
+
+Deliberate divergences from Blender, since they are the reference: **Face
+Strength** (Select By / Set) is an attribute of the Weighted Normal modifier and
+has nowhere to live in a NIF. **Split** is Merge's inverse and needs vertex
+duplication, which Rip (V) already does with the selection semantics people
+expect. **Rotate** is modal in Blender and is Point to Target here — the same
+destination with a click instead of a gesture. And **Set from Faces** averages
+where Blender splits the corner, because a NIF stores one normal per vertex:
+Rip first if you want the hard edge.
+
+### What the test found: the write that reported success and wrote nothing
+
+The suite vandalises a mesh — turns over every third triangle — and requires the
+signed volume to come back. First run: the operator reported "96 turned over" and
+**the volume did not move**. The control it prompted, running the SHIPPED Flip
+through the same path, did not move either.
+
+`getIndex( parent, row )` hands back a **column 0** index. `NifModel::setData`
+switches on the column: on the name column it renames the item, **returns true**,
+and leaves the value alone. So a `ChangeValueCommand` built that way pushes,
+undoes and redoes perfectly while writing nothing.
+
+Two shipped operators were doing exactly that: **`flipSelectedFaces`** (Flip
+Normals in the W menu) and **`tlPushNormalCommands`**, which is every post-edit
+normal recompute in the viewport — extrude, move, inset. Both fixed, along with
+the two new sites that copied the idiom from them. Four sites; the other eleven
+`ChangeValueCommand` constructions in the tree already used `ValueCol` or the
+`tlVertexValueIndex` helper.
+
+That trap is now a check of its own, asserting that a name-column write reports
+success and does nothing, so the next person to reach for `getIndex` is told
+rather than left guessing.
+
+### Proof
+
+`WW_NORMALS_TEST`, 11 checks green on `X01_Helmet.nif`: volume 502.09 → 170.29
+vandalised → **502.09** after Outside, **−502.09** after Inside, a second Outside
+turning over 0 faces, the triangle multiset unchanged throughout, and **126 of
+126** sampled vertex normals agreeing with their face's winding. The suite also
+logs the status line, which is what turned "nothing changed" from a mystery into
+"the operator declined the selection" in one run.
+
 ## 2026-07-31j — animation is one button now
 
 Five widgets in a row — play, sequence, loop, settings, scrub — plus **View ▸

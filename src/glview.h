@@ -783,6 +783,18 @@ public:
 	// ---- 3D cursor ----
 	Vector3 cursorPos;                  // world space
 	bool showCursor = true;
+
+	// ---- Normals menu (Alt+N) ----
+	//! Copy Vector / Paste Vector hold one normal between invocations, as
+	//! Blender's do. Shape-local, and deliberately not persisted: a normal from
+	//! a file you have since closed is not a thing anyone means to paste.
+	Vector3 normalClipboard;
+	bool normalClipboardValid = false;
+	//! The selection, triangle list and positions every Normals operator reads
+	//! before it starts. False when there is nothing usable to work on, with the
+	//! reason already reported.
+	bool normalsOpContext( int & sb, QSet<int> & sv, QSet<int> & faces,
+		QVector<Triangle> & tris, QVector<Vector3> & pos, const char * opName );
 	//! Place the cursor on the surface under pos (or on the view plane at Dist)
 	void placeCursor( const QPointF & pos );
 	//! Move the selected node so its origin lands on the cursor (undoable)
@@ -886,6 +898,34 @@ private:
 	//! diagonalMode: 0 keep current, 1 beauty (max-min-angle), 2 shortest
 	//! diagonal, 3 longest diagonal — flips rewrite the two triangles.
 	void triangulateSelection( int diagonalMode = 0, bool armPanel = true );
+	/*! Ctrl+N / Shift+Ctrl+N: make the selected faces' winding CONSISTENT and
+	 *  face them out (or in), as Blender's Recalculate Outside/Inside does.
+	 *
+	 *  Distinct from recalcSelectedNormals(), which only re-derives vertex
+	 *  normals from the winding already there — the thing Blender calls Reset
+	 *  Vectors. This one decides the winding itself.
+	 */
+	void recalcNormalsSelection( bool inside = false, bool armPanel = true );
+	//! Alt+N: the Normals menu, at the cursor.
+	void showNormalsMenu();
+	//! Set each selected face's corner normals to that face's own normal —
+	//! Blender's Normals ▸ Set from Faces.
+	void normalsSetFromFaces();
+	//! Point the selected vertices' normals at (or away from) the 3D cursor —
+	//! Blender's Normals ▸ Point to Target.
+	void normalsPointToTarget( bool invert = false );
+	//! Average the normals of selected vertices that share a position, so a
+	//! seam shades as one surface — Blender's Normals ▸ Merge.
+	void normalsMergeCoincident();
+	//! Recompute selected normals weighted by face area or by corner angle —
+	//! Blender's Normals ▸ Average ▸ Face Area / Corner Angle.
+	void normalsAverage( int mode );
+	//! Copy the active vertex's normal / paste it onto the selection —
+	//! Blender's Normals ▸ Copy Vector / Paste Vector.
+	void normalsCopyVector();
+	void normalsPasteVector();
+	//! Blur each selected normal towards its neighbours' average.
+	void normalsSmoothVectors( float factor = 0.5f, bool armPanel = true );
 	//! Universal toolbar visibility commands. In Edit/Weight Paint, isolate the
 	//! selected geometry; in Object Mode, isolate all selected objects.
 	void isolateSelected();
