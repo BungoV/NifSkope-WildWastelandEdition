@@ -3901,13 +3901,51 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					int arcs = 0, sprites = 0;
 					float loZ = 0.0f, hiZ = 0.0f, maxX = 0.0f;
 					bool haveZ = false;
+					/* Per effect, not just in aggregate. Overall bounds are a weak
+					 * witness: a leg effect emitting from the wrong node still lands
+					 * inside the figure's bounding box, and the first version of this
+					 * harness passed on a file whose leg particles were visibly wrong.
+					 * WW_LIVEFX_DUMP writes these to a file so the SAME scene can be
+					 * captured before and after the convert and compared per effect. */
+					QStringList fx;
 					for ( const auto & e : caught ) {
 						( e.fromParticles ? sprites : arcs )++;
+						Vector3 centre, lo, hi;
+						bool have = false;
+						for ( const Vector3 & p : e.tris ) {
+							centre += p;
+							if ( !have ) { lo = hi = p; have = true; continue; }
+							for ( int i = 0; i < 3; i++ ) {
+								lo[i] = std::min( lo[i], p[i] );
+								hi[i] = std::max( hi[i], p[i] );
+							}
+						}
+						if ( !e.tris.isEmpty() )
+							centre /= float( e.tris.size() );
+						auto f = []( float v ) { return QString::number( v, 'f', 3 ); };
+						fx << QStringLiteral( "%1\t%2\t%3\t%4 %5 %6\t%7 %8 %9\t%10 %11 %12" )
+							.arg( e.name, e.fromParticles ? QStringLiteral( "sprites" ) : QStringLiteral( "arc" ) )
+							.arg( e.tris.size() / 3 )
+							.arg( f( centre[0] ), f( centre[1] ), f( centre[2] ) )
+							.arg( f( lo[0] ), f( lo[1] ), f( lo[2] ) )
+							.arg( f( hi[0] ), f( hi[1] ), f( hi[2] ) );
 						for ( const Vector3 & p : e.tris ) {
 							if ( !haveZ ) { loZ = hiZ = p[2]; haveZ = true; }
 							loZ = std::min( loZ, p[2] );
 							hiZ = std::max( hiZ, p[2] );
 							maxX = std::max( maxX, std::fabs( p[0] ) );
+						}
+					}
+					fx.sort();
+					for ( const QString & line : std::as_const( fx ) )
+						log << "  fx " << line << "\n";
+					if ( qEnvironmentVariableIsSet( "WW_LIVEFX_DUMP" ) ) {
+						QFile df( qEnvironmentVariable( "WW_LIVEFX_DUMP" ) );
+						if ( df.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+							QTextStream ds( &df );
+							for ( const QString & line : std::as_const( fx ) )
+								ds << line << "\n";
+							df.close();
 						}
 					}
 					log << "generated " << caught.size() << " effect(s) at t=" << want

@@ -1,5 +1,69 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-07-31g — the leg particles were 21 units out, and the check could not see it
+
+bungo, on the file shipped an hour earlier: *"the leg particles are off position and
+broken. The bolt start and end position is not accurate either."* Both were real.
+Both were invisible to a suite that had just gone green on 13 checks.
+
+### The check was the first thing wrong
+
+`live_effects.sh` measured the effects **in aggregate**: overall Z range, widest
+|X|. A leg effect emitting from the wrong place still lands inside the figure's
+bounding box, so the suite passed. It now captures **both** files with the same
+harness and compares **per named effect** — triangle count, centroid and bounds —
+which is the claim actually being made: *this converts without moving anything*.
+
+The aggregate numbers stay as a cheap net. They are not evidence.
+
+### The leg particles
+
+Four of the six limbs were pixel-identical before and after the convert; the two
+legs moved by (−1.65, −13.55, +16.04). That vector is exactly the change in their
+pulse mesh's node translation — the offset the flatten introduces when it moves a
+shape's vertices into world space and puts the centroid on the node.
+
+The four that were right have their pulse mesh **inside** the effect branch. The
+two that were wrong do not: the leg VFX files carry no `NamedAttach` nodes, so
+their contents hang off the calf bone as siblings, and the mesh was flattened
+while the particle system that emits from it was kept.
+
+`NiPSysMeshEmitter` names that mesh with a **Ptr**, and a Ptr is not a Ref — the
+branch walk never reaches it. So the collection has a second phase now: anything a
+live block points at, which is otherwise flattenable geometry, becomes a branch of
+its own. The leg pulse meshes are kept and placed on the calf stub, and all six
+limbs are identical before and after.
+
+This is the third distinct way the same pointer has failed. Deleting the mesh left
+the emitter with a dangling pointer and the sprites 90 units out (07-31f);
+flattening it moved them 21; only keeping it is right.
+
+### The bolts
+
+Their spans were never wrong — every `_Start`/`_End` node came through the convert
+at an identical world position, and the arcs demonstrably reached them. What
+changed was the **shape**: 40, 48 and 56 triangles where the source had 48, 40 and
+48.
+
+`ProcLightningController` seeded its RNG from **the controller's block number**.
+That is a fact about the file's layout, so every merge, every convert, every
+deleted block silently reshaped every bolt in the file — and nothing about the
+result looked wrong, which is why it survived this long. It seeds from the target
+node's **name** now: stable across renumbering, already unique per limb because
+the merge qualifies effect names, and hashed with an explicit seed so a Qt release
+cannot salt it.
+
+### Proof
+
+`tests/loadingscreen/live_effects.sh` 13 → 15 checks, green, and the two new ones
+are the ones that matter: 16 effects on the rig, 16 on the screen, and **every one
+generates identical geometry in an identical place**. Byte-for-byte on the dump,
+across two separate processes — which also re-proves the generator's determinism,
+since the two files share no block numbers.
+
+Regressions: 9 boltbake, 8 effect bake, 21 bake, 57 freeze, 21 carries-everything,
+10 artobject, 9 merge sweep.
+
 ## 2026-07-31f — a loading screen whose effects are still running
 
 The merge already carried the animation across: merging `X01_Torso_Tesla_VFX.nif`

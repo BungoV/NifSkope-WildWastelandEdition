@@ -156,14 +156,24 @@ done
 if [ "$dangling" = "0" ]; then ok
 else bad "$dangling particle emitter(s) lost the mesh they emit from"; fi
 
-# --- 4. does it RUN? --------------------------------------------------------
+# --- 4. does it RUN, and in the same place as before? -----------------------
 # The only place a particle or an arc exists is the rendered scene, so this half
 # needs the GUI. Off to the side and on its own port, as the other GUI harnesses
 # run: it opens a window for a couple of seconds.
-echo "stepping the converted screen to t=$TIME in the GUI"
+#
+# BOTH files are captured, and the comparison is per effect. Aggregate bounds are
+# a weak witness -- an earlier version of this suite passed on a file whose leg
+# particles were 21 units out of place, because they were still inside the
+# figure's bounding box. What has to hold is that every named effect generates
+# the same geometry in the same place before and after the convert.
+echo "stepping both files to t=$TIME in the GUI"
 rm -f "$LOG"
-WW_LIVEFX_TEST=1 WW_LIVEFX_TIME="$TIME" WW_WINDOW_AT="1960,20" \
-	"$EXE" --port 41893 "$TMP/screen.nif" > /dev/null 2>&1
+WW_LIVEFX_TEST=1 WW_LIVEFX_TIME="$TIME" WW_LIVEFX_DUMP="$TMP/fx_before.txt" \
+	WW_WINDOW_AT="1960,20" "$EXE" --port 41893 "$TMP/rig.nif" > /dev/null 2>&1
+cp -f "$LOG" "$TMP/before.log" 2>/dev/null
+rm -f "$LOG"
+WW_LIVEFX_TEST=1 WW_LIVEFX_TIME="$TIME" WW_LIVEFX_DUMP="$TMP/fx_after.txt" \
+	WW_WINDOW_AT="1960,20" "$EXE" --port 41894 "$TMP/screen.nif" > /dev/null 2>&1
 
 if [ ! -f "$LOG" ]; then
 	bad "the GUI harness wrote no log -- it did not run"
@@ -174,6 +184,23 @@ else
 		bad "the GUI harness failed:"
 		grep '^  FAIL' "$LOG" | sed 's/^/  /'
 	fi
+fi
+
+if [ -s "$TMP/fx_before.txt" ] && [ -s "$TMP/fx_after.txt" ]; then
+	n_before="$(wc -l < "$TMP/fx_before.txt")"
+	n_after="$(wc -l < "$TMP/fx_after.txt")"
+	echo "  $n_before effect(s) on the rig, $n_after on the screen"
+	if [ "$n_before" = "$n_after" ]; then ok
+	else bad "the rig generates $n_before effect(s), the converted screen $n_after"; fi
+	if diff -q "$TMP/fx_before.txt" "$TMP/fx_after.txt" > /dev/null; then
+		ok; echo "  every effect generates identically before and after the convert"
+	else
+		bad "effects moved or changed shape in the convert:"
+		diff "$TMP/fx_before.txt" "$TMP/fx_after.txt" | grep '^[<>]' | head -6 \
+			| awk -F'\t' '{printf "    %s %-40s %s\n", substr($1,1,1), substr($1,3), $4}'
+	fi
+else
+	bad "the harness produced no per-effect dump for one of the two files"
 fi
 
 # --- 5. the old path still behaves ------------------------------------------

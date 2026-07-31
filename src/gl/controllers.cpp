@@ -1521,7 +1521,26 @@ bool ProcLightningController::update( const NifModel * nif, const QModelIndex & 
 		}
 	}
 
-	rngSeed = quint32( nif->getBlockNumber( iBlock ) + 1 );
+	/* Seeded from the TARGET'S NAME, not from the block number.
+	 *
+	 * The block number is a fact about the file's layout, and every operation that
+	 * rewrites layout — a merge, the loading-screen convert, deleting a block —
+	 * silently reshapes every bolt in the file. Measured: the same rig converted to
+	 * a loading screen produced bolts with 40, 48 and 56 triangles where the source
+	 * had 48, 40 and 48, spanning the same nodes with a different jag. Nothing was
+	 * wrong with them, and there was no way to tell that by looking.
+	 *
+	 * A name is what the file itself uses to identify the thing, it survives every
+	 * renumbering, and it is already unique per limb — the merge qualifies effect
+	 * names precisely so a sequence can address them. Falls back to the block
+	 * number when there is no name to hash.
+	 */
+	const QString seedName = nif->get<QString>( nif->getBlockIndex( nif->getLink( iBlock, "Target" ) ), "Name" );
+	// Seed 0 explicitly: qHash's default is deterministic, but the one-argument
+	// form is the one a Qt release could decide to salt, and a bolt that changed
+	// shape from run to run would take the bake's reproducibility with it.
+	rngSeed = seedName.isEmpty() ? quint32( nif->getBlockNumber( iBlock ) + 1 )
+	                             : quint32( qHash( seedName, 0 ) ) | 1u;
 
 	// seed the per-frame values so frame 1 is right even without curves
 	effSubdiv = subdivisions;

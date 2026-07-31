@@ -393,9 +393,20 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, bool kee
 			const QHash<int, int> parents = childParents( nif );
 			const QSet<int> bones = skinBones( nif );
 			QSet<int> seen;
-			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
-				if ( !isEffectSeed( nif, b ) )
-					continue;
+			QList<int> seeds;
+			for ( int b = 0; b < nif->getBlockCount(); b++ )
+				if ( isEffectSeed( nif, b ) )
+					seeds.append( b );
+
+			/* Grown as it is walked. A live block can DEPEND on a block the Ref walk
+			 * never reaches, through a Ptr — a NiPSysMeshEmitter names the mesh it
+			 * emits from that way. Flattening that mesh does not stop the emitter, it
+			 * moves it: the mesh's node takes the world centroid and its vertices are
+			 * re-centred to match, and the leg sprites came out 21 units from where
+			 * they belong, by exactly that offset. So a Ptr into flattenable geometry
+			 * makes that geometry part of the effect, and it is seeded here. */
+			for ( int s = 0; s < seeds.size(); s++ ) {
+				const int b = seeds.at( s );
 				// a controller is not in the Children tree; climb from its target
 				int at = b;
 				if ( !nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" ) ) {
@@ -426,7 +437,23 @@ Result convert( NifModel * nif, bool addZoomTarget, bool keepParticles, bool kee
 					continue;
 				seen << at;
 				liveRoots.append( at );
+				const int before = live.size();
 				collectRefs( nif, at, live );
+
+				// Anything this branch points AT and does not contain becomes a seed
+				// of its own, so it is kept and placed rather than flattened.
+				if ( live.size() != before ) {
+					for ( const int inside : std::as_const( live ) ) {
+						for ( const int dep : nif->getParentLinks( inside ) ) {
+							if ( dep < 0 || dep == rootBlock || live.contains( dep )
+							     || bones.contains( dep ) || seeds.contains( dep ) )
+								continue;
+							if ( nif->blockInherits( nif->getBlockIndex( dep ), "NiAVObject" )
+							     && !subtreeIsRigged( nif, dep ) )
+								seeds.append( dep );
+						}
+					}
+				}
 			}
 			/* A root that turned out to sit inside another root's branch is not a
 			 * branch of its own — the outer one already carries it, and treating it
