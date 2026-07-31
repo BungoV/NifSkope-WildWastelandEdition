@@ -327,6 +327,51 @@ class PSysSimController final : public Controller
 		};
 		QVector<SeqKeys> seqBirth;
 		QVector<SeqKeys> seqVis;
+
+		/*! The `NiPSysModifierFloatCtlr` family, one slot per emitter field they
+		 *  can drive. FO4 ships 51 effect meshes with a Speed controller, 21 with
+		 *  Initial Radius, 6 each with Life Span and Declination — small numbers,
+		 *  but on an effect that uses one, a static Speed is the difference
+		 *  between a jet and a puff.
+		 */
+		enum EmitCurve
+		{
+			CSpeed, CSpeedVar, CDeclination, CDeclinationVar,
+			CPlanar, CPlanarVar, CLifeSpan, CLifeSpanVar, CRadius, CRadiusVar,
+			CCount
+		};
+		QPersistentModelIndex curveKeys[CCount];
+		int curveIdx[CCount] = { 0 };
+		//! Block number of the controller driving each slot, for the manager case:
+		//! its interpolator is then a NiBlendFloatInterpolator stub and the real
+		//! keys live in the sequences, exactly as for BirthRate.
+		int curveCtlr[CCount] = { 0 };
+		QVector<SeqKeys> seqCurve[CCount];
+		//! this frame's values: the authored field, or the curve where there is one
+		float live[CCount] = { 0 };
+	};
+
+	/*! A modifier's Active flag, static or animated.
+	 *
+	 *  `NiPSysModifierActiveCtlr` is in 288 of FO4's 692 effect meshes — the most
+	 *  common thing in this whole area, and it was ignored, so every modifier was
+	 *  permanently on. The static `Active` field was not read either.
+	 */
+	struct ModActive
+	{
+		struct SeqKeys
+		{
+			QString seq;
+			QPersistentModelIndex keys;
+			int idx = 0;
+		};
+
+		QString name;
+		bool active = true;                //!< the modifier's own Active field
+		QPersistentModelIndex keys;        //!< NiBoolData keys of an Active controller
+		int idx = 0;
+		int ctlrBlock = -1;                //!< the Active controller's block number
+		QVector<SeqKeys> seqKeys;          //!< manager rig: the keys live in the sequences
 	};
 
 	QPointer<Particles> target;
@@ -334,6 +379,21 @@ class PSysSimController final : public Controller
 	QVector<SimParticle> parts;
 	int maxParticles = 512;
 	float lastTime = -1.0e30f;
+
+	/*! Every modifier's Active state, by the order they appear in the chain, plus
+	 *  the name each of the flat members below came from — so an Active
+	 *  controller can switch one off without the flat members having to become a
+	 *  per-modifier list.
+	 */
+	QVector<ModActive> modActive;
+	QString gravityName, dragName, colorName, scaleName, rotationName;
+
+	//! Present in the modifier chain at all. The engine does not age a particle
+	//! without a NiPSysAgeDeathModifier, nor move one without a
+	//! NiPSysPositionModifier; both used to be unconditional here, so a system
+	//! that omits either previewed as something the game would not draw. Every
+	//! FO4 particle system ships both, so this is about files NifSkope edits.
+	bool hasAgeDeath = true, hasPosition = true;
 
 	// modifiers
 	bool hasGravity = false;

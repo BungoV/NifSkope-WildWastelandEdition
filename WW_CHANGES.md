@@ -1,5 +1,80 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-01a — Five of the six, fixed
+
+bungo: *"Time to fix 1 2 3 4 and 5."* Area 6 is a fact about the game, not about
+this code, so it stays a note in `LOADING_SCREEN_BAKE_PLAN.md`. Details of each
+rule and its RVA are in `WW_PDB_COMPARISON.md`; what follows is what changed and
+what it was measured against.
+
+**1 — Sequence binding.** `ControllerManager::setSequence` resolves each
+Controlled Block through the manager's `NiDefaultAVObjectPalette` now, and falls
+back to the old name search only for names the palette does not carry. The
+fallback is a deliberate divergence: the engine drops the row, but half-written
+palettes are a thing mod files really have.
+
+Honest scope — across 600 shipped assets the palette and the name search **never**
+disagree, and the one file with duplicate node names does not disagree either. So
+this fixes no vanilla file. It matters for files NifSkope itself produces, where
+merging is what makes two nodes share a name. That made the test the whole
+problem: `tests/anim/sequence_binding.sh` builds the disagreement by rewiring one
+palette `Ptr` in a vanilla file, and `SeqBind::stats().differs` is 0 for the old
+code by construction. Watched it read 0 on a reverted build before believing it.
+
+**2 — Procedural lightning.** Four rules replaced. Subdivisions is a recursion
+depth (2^s segments — the X-01 bolts author 7 and were drawing 32 segments);
+branch counts come from `rand[max(A-B,0), A+B+1)` with A and B halving each
+generation, so depth falls out of the parameters instead of being hardcoded at 2;
+length is `Length*0.5^gen + rand(-1,1)*LengthVar*0.25^gen`; and the displacement
+is one random direction per span under a tent, halving per level and never
+normalised, not per-vertex midpoint noise. Branches have no direction at all —
+they all run along +Y and the forking is the displacement — so the per-bolt
+frames went with them. The 1/24 s cadence was invented: Generation and Mutation
+are bool curves and a change in either is what re-rolls the bolt.
+
+`tests/anim/lightning_shape.sh` asserts the shape in numbers off `WW_BOLT_DEBUG`,
+because two of these had been tried and reverted for looking wrong — against a
+bolt drawn between the wrong two points, which is a fault no screenshot separates
+from a fault in the generator. On the X-01 torso: trunk 128 segments at length
+32, gen 1 at 64/16, gen 2 at 32/8, counts inside 1..3, depth stopping at 2.
+
+**3 — Particle modifiers, and a correction.** The comparison ranked this gap by
+reading the engine's class list and got it wrong. Counting the classes in FO4's
+692 effect meshes instead: `NiPSysGrowFadeModifier` appears in **0** of them, the
+six field modifiers in **0**, `NiPSysMeshUpdateModifier` in **0**, and
+`NiPSysSpawnModifier` in 347 but with `Num Spawn Generations = 0` in 66 of the 67
+sampled. AgeDeath and Position were not missing either — they were hardcoded.
+
+What was actually missing is what appears in **288** files: the whole
+`NiPSysModifierCtlr` family, plus a modifier's own `Active` field, neither of
+which was read. Every modifier ran, permanently, whatever the file said. Both are
+honoured now, along with the emitter parameter curves (Speed 51 files, Initial
+Radius 21, Life Span 6, Declination 6) including the manager case where those
+controllers hold a blend-interpolator stub and the real keys are in the sequences.
+`tests/anim/particle_modifiers.sh` pins the one thing that is cleanly binary:
+switching an emitter's `Active` off must bake **no** particles, where the old code
+baked the same 62 vertices either way. §3 of that test says plainly what is not
+pinned and why, rather than leaving a check that cannot fail.
+
+**4 — `AttachT`.** Split at the first `&` and dispatch on the tag, as
+`ProcessAttachTechniques` does, instead of matching the `NamedNode&` prefix. That
+turned up a real parsing bug: FO4 ships arguments with a `|n` suffix
+(`NamedNode&C-ArmsTypeA1|0`) that match no node, so the merge refused those
+donors outright. Exact match first, then without the suffix.
+
+Also decoded, and it closes the parked leg-arc question:
+`BGSNamedNodeAttach::AttachPolicy::Process` is a plain re-parent with **no
+transform**, falling back to the root when the name does not resolve. The X-01
+arcs run inside the calf because the asset puts `BoltGeo_01` there — an authoring
+change, not a merge bug.
+
+**5 — Controller flags.** Bit 4 is PlayBackwards, bit 6 is ComputeScaledTime —
+the "unknown function" TODO — so `ctrlTime` returns the raw time when bit 6 is
+clear and mirrors about the interval when bit 4 is set. Sampled 160 controllers
+across four asset trees: bit 6 set in all of them, bit 4 in none, so this changes
+nothing shipped. Bits 0, 5, 7 and 8 are documented rather than implemented; all
+four only govern when the engine bothers to call a controller.
+
 ## 2026-07-31o — Six guesses checked against the engine
 
 bungo asked for a comparison check on the six areas where the FO4 PDB could

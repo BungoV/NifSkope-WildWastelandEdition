@@ -11,8 +11,8 @@ for that build come from the Address Library via `f4re.py`.
 |---|------|---------|
 | 1 | Sequence → node binding | **Differs.** The file's object palette is the authority; NifSkope searches the scene graph and ignores it. |
 | 2 | Procedural lightning | **Two guesses confirmed, four rules wrong.** The cadence has no counterpart; three reinterpretations previously rejected on screen are what the engine does. |
-| 3 | NiPSys particles | **Differs by scope.** 16 of 56 types are known to NifSkope; the four that decide whether a particle dies, fades, moves or spawns are all absent. |
-| 4 | `AttachT` | **Correct as far as it goes.** Three more technique tags exist. The placement transform is still not settled. |
+| 3 | NiPSys particles | **Differs by scope** — but not where first claimed; see the correction below. The real gap was `NiPSysModifierActiveCtlr` (288 files) and the `Active` field, both unread. |
+| 4 | `AttachT` | **Correct as far as it goes.** Three more technique tags exist, arguments can carry a `\|n` suffix, and attachment applies **no transform**. |
 | 5 | Controller flag bits | **Settled.** All three `glcontroller.cpp` TODOs are answerable; bit 6 is `ComputeScaledTime`. |
 | 6 | Loading screens | **Negative result.** The menu never activates a sequence and never ticks a controller. |
 
@@ -111,13 +111,26 @@ The whole of `Process` contains exactly **three** float constants: `1.0`, `0.5`,
 ### Confirmed wrong
 
 - **The 1/24 s mutation cadence does not exist.** There is no cadence constant
-  anywhere in `Process`. `BSProceduralLightningController::Update` (`0x1cf5940`)
-  evaluates the nine interpolators, stores **interpolator 2 (Mutation)** at
-  `+0x188`, and passes `newMutation / previousMutation` at `+0x18c` into
-  `Process`; `+0x193` selects mutate (`0`) versus full regenerate (`1`), and a
-  full regenerate happens only when visibility or state changed. `Process` runs
-  **every update while visible**. The rate at which a bolt reshapes is authored,
-  in a curve, and NifSkope reads none of the nine interpolators.
+  anywhere in `Process`. What drives it, from
+  `BSProceduralLightningController::Update` (`0x1cf5940`):
+
+  The nine interpolators land at `+0x128`..`+0x168`, and `ProcessParams` sits at
+  `+0x178`, so `+0x188` is Arc Offset and `+0x190`/`+0x191`/`+0x192` are Fade
+  Main Bolt, Fade Child Bolts and Animate Arc Offset.
+  `UpdateProcessParams` (`0x1cf6390`) evaluates only interpolators 6–9 (Length,
+  Length Var, Width, Arc Offset). Interpolators **1 (Generation)** and
+  **2 (Mutation)** are evaluated as **bools**, cached at `+0x1a0` and `+0x1a1`,
+  and at `0x1cf5bea` a change in either forces a full regenerate. Generation
+  false culls the geometry outright. Otherwise, if `Animate Arc Offset` is set,
+  `Process` runs in mutate mode with `newArcOffset / previousArcOffset` at
+  `+0x18c`, keeping the branch structure.
+
+  So the rate a bolt reshapes at is authored, as a **bool toggle curve**, and
+  every asset gets its own. NifSkope's constant only looked plausible because the
+  shieldtesla Mutation keys are dense.
+
+  *(Corrected 2026-08-01: the first reading of this called `+0x188` the Mutation
+  value. It is Arc Offset — the params struct offsets settle it.)*
 
 - **`Subdivisions` is a recursion depth.** `GetBranchVerts(s) = (1<<s)*4 + 4`
   (`0x1cdc670`) and `GetBranchTris(s) = (1<<s)*4` (`0x1cdc690`): 2^s segments,
@@ -163,42 +176,51 @@ between the wrong two points. This is the new evidence.
 
 ## 3. NiPSys particle simulation
 
-`src/gl/glparticles.cpp:98` calls its own simulator "preview-grade". The gap is
-one of coverage rather than of rule.
+`src/gl/glparticles.cpp:98` calls its own simulator "preview-grade". The engine
+ships **56** `NiPSys*` classes, **28** with an `Update`; NifSkope named **16**.
 
-The engine ships **56** `NiPSys*` classes, **28** of them with an `Update`.
-NifSkope names **16** anywhere in `src/`: `NiPSysData`, `NiPSysModifier`,
-`NiPSysModifierCtlr`, `NiPSysModifierBoolCtlr`, `NiPSysUpdateCtlr`,
-`NiPSysEmitterCtlr`, `NiPSysResetOnLoopCtlr`, `NiPSysEmitter`, plus the four
-emitters (Box, Cylinder, Sphere, Mesh) and four modifiers (Color, Rotation,
-Gravity, Drag).
+> **Corrected 2026-08-01 by counting.** The first version of this section ranked
+> the gap by reading the engine's class list, and named AgeDeath, GrowFade,
+> Position and Spawn as "the four that decide whether a particle dies, fades,
+> moves or spawns". Counting them in FO4's 692 effect meshes says otherwise:
+>
+> | class | effect meshes |
+> |---|---|
+> | `NiPSysModifierActiveCtlr` | **288** |
+> | `NiPSysEmitterSpeedCtlr` | 51 |
+> | `NiPSysEmitterInitialRadiusCtlr` | 21 |
+> | `NiPSysEmitterLifeSpanCtlr` | 6 |
+> | `NiPSysEmitterDeclinationCtlr` | 6 |
+> | `NiPSysPlanarCollider` | 30 |
+> | `NiPSysBombModifier` | 40 |
+> | `NiPSysGrowFadeModifier` | **0** |
+> | the six field modifiers | **0** |
+> | `NiPSysMeshUpdateModifier` | **0** |
+> | `NiPSysSpawnModifier` | 347, but 66 of 67 sampled have `Num Spawn Generations = 0` |
+>
+> So GrowFade, the fields and MeshUpdate would have been dead code in this game,
+> and Spawn spawns nothing. AgeDeath and Position were not missing either — the
+> simulator hardcoded both, which is its own small divergence, since the engine
+> will not age a particle without a `NiPSysAgeDeathModifier` nor move one without
+> a `NiPSysPositionModifier`.
+>
+> What was actually missing is the thing that appears in 288 files: the whole
+> `NiPSysModifierCtlr` family, and a modifier's own `Active` field, neither of
+> which was read at all. Every modifier ran, permanently, whatever the file said.
+> Shipped 2026-08-01 along with the emitter parameter curves — including the
+> manager case, where those controllers hold a `NiBlendFloatInterpolator` stub
+> and the real keys live in the sequences.
 
-Absent, in rough order of how much a viewport would notice:
+Still absent, and now a deliberate choice rather than an oversight: the
+colliders (`NiPSysPlanarCollider` 30 files, `NiPSysSphericalCollider` 3) and
+`NiPSysBombModifier` (40). Those are real usage and would be the next thing worth
+adding; the zero-count classes are not.
 
-- **`NiPSysAgeDeathModifier`** (`0x1c6a2c0`), **`NiPSysGrowFadeModifier`**
-  (`0x1c73d80`), **`NiPSysPositionModifier`** (`0x1c76f20`),
-  **`NiPSysSpawnModifier`** (`0x1c792b0`, with `SpawnParticles` at `0x1c792c0`).
-  These four decide whether a particle dies, fades, moves at all, or spawns
-  children.
-- The whole **emitter-parameter controller family** — `Declination`,
-  `DeclinationVar`, `PlanarAngle`, `PlanarAngleVar`, `Speed`, `LifeSpan`,
-  `InitialRadius`, `InitialRotAngle{,Var}`, `InitialRotSpeed{,Var}`. NifSkope's
-  emitter already carries these fields; nothing animates them.
-- **Colliders** — `NiPSysPlanarCollider` (`0x1c76020`), `NiPSysSphericalCollider`,
-  `NiPSysColliderManager` (`0x1c6d4e0`).
-- **Six field modifiers** — Air, Drag, Gravity, Radial, Turbulence, Vortex, plus
-  their `FieldAttenuation`/`FieldMagnitude`/`FieldMaxDistance` controllers.
-- **`NiPSysBoundUpdateModifier`** (`0x1c6b940`) and
-  **`NiPSysMeshUpdateModifier`** (`0x1c65930`) — bounds and mesh-emitter refresh.
-- `NiPSysBombModifier`, `NiPSysModifierActiveCtlr`, `NiPSysModifierFloatCtlr`.
-
-One detail worth having regardless: `NiPSysMeshEmitter` has six emission
-entry points — `EmitFromVertex` / `EmitFromFace` / `EmitFromEdge` (`0x1c59580`,
+One detail worth having regardless: `NiPSysMeshEmitter` has six emission entry
+points — `EmitFromVertex` / `EmitFromFace` / `EmitFromEdge` (`0x1c59580`,
 `0x1c59590`, `0x1c599a0`) and skinned variants of each (`0x1c59cd0`, `0x1c59df0`,
 `0x1c5a0c0`). The skinned path is why a mesh emitter's placement depends on where
 its emitter mesh actually is, which is the failure the loading-screen merge hit.
-
----
 
 ## 4. `AttachT` and named-node attachment
 
@@ -228,11 +250,28 @@ accepts an attached object only if it has children **or** carries a
 `0x1c0f830`); otherwise the attach is dropped before
 `AddLightsAndAddonNodes`. An empty stub node is not attached.
 
-**What this does *not* settle.** `BGSNamedNodeAttach::Attach` (`0x172090`) is a
-three-instruction trampoline into `AttachPolicy::vftable+8`; the transform is
-inside that policy's virtual, which was not decoded. So the parked question in
-§12 — where the X-01 leg arcs should sit — is **not** answered by these
-functions. It needs the `AttachPolicy` body, which is one more step.
+**The placement rule, decoded 2026-08-01.** `BGSNamedNodeAttach::Attach`
+(`0x172090`) is a trampoline into `AttachPolicy::vftable+8`, which is
+`BGSNamedNodeAttach::AttachPolicy::Process` (`0x175710`). All of it:
+
+```
+if (arg is empty) return false
+target = BSUtilities::GetObjectByName( input->root, arg, true, true )
+parent = target ? target->GetAsNode() : input->root      # unresolved -> the ROOT
+parent->AttachObject( input->object, true )
+BSShaderUtil::InvalidateRenderPasses( input->object )
+```
+
+**No transform is applied.** It is a plain scene-graph re-parent, so an attached
+ArtObject sits exactly where its own local transform puts it relative to the
+named node — and a name that does not resolve attaches to the root rather than
+being dropped. That closes the parked §12 question: our merge does the same
+thing, so the X-01 leg arcs run inside the calf because the asset puts
+`BoltGeo_01` there.
+
+`BSUtilities::GetObjectByName` (`0x1c93970`) resolves through a `BSBoneMap`
+extra-data hash if the root has one, else a `BSFlattenedBoneTree`, else a name
+search. Nothing in it strips the `|n` suffix FO4's own AttachT strings carry.
 
 ---
 

@@ -986,6 +986,9 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	};
 
 	// modifiers
+	modActive.clear();
+	hasAgeDeath = false;
+	hasPosition = false;
 	QModelIndex iMods = nif->getIndex( iPSys, "Modifiers" );
 	for ( int r = 0; r < nif->rowCount( iMods ); r++ ) {
 		QModelIndex iMod = nif->getBlockIndex( nif->getLink( nif->getIndex( iMods, r ) ) );
@@ -993,6 +996,23 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			continue;
 		iExtras.append( iMod );
 		QString mtype = nif->itemName( iMod );
+
+		/* Every modifier's own Active flag. It was never read, so a modifier the
+		 * author had switched off still ran. Recorded by name because that is how
+		 * NiPSysModifierActiveCtlr addresses it, below.
+		 */
+		{
+			ModActive ma;
+			ma.name = nif->resolveString( iMod, "Name" );
+			ma.active = nif->get<bool>( iMod, "Active" );
+			modActive.append( ma );
+		}
+
+		// The two the engine will not do without the modifier present.
+		if ( mtype == QLatin1String( "NiPSysAgeDeathModifier" ) )
+			hasAgeDeath = true;
+		else if ( mtype == QLatin1String( "NiPSysPositionModifier" ) )
+			hasPosition = true;
 
 		if ( nif->blockInherits( iMod, "NiPSysEmitter" ) ) {
 			Emitter e;
@@ -1086,6 +1106,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			emitters.append( e );
 		} else if ( mtype == QLatin1String( "NiPSysGravityModifier" ) ) {
 			hasGravity = true;
+			gravityName = modActive.last().name;
 			gravityDir = nif->get<Vector3>( iMod, "Gravity Axis" );
 			gravityDir.normalize();
 			gravityStrength = nif->get<float>( iMod, "Strength" );
@@ -1097,8 +1118,10 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			}
 		} else if ( mtype == QLatin1String( "NiPSysDragModifier" ) ) {
 			dragPct = nif->get<float>( iMod, "Percentage" );
+			dragName = modActive.last().name;
 		} else if ( mtype == QLatin1String( "BSPSysSimpleColorModifier" ) ) {
 			hasColorMod = true;
+			colorName = modActive.last().name;
 			fadeIn = nif->get<float>( iMod, "Fade In Percent" );
 			fadeOut = nif->get<float>( iMod, "Fade Out Percent" );
 			c1End = nif->get<float>( iMod, "Color 1 End Percent" );
@@ -1110,8 +1133,10 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 				modColors[c] = nif->get<Color4>( nif->getIndex( iCols, c ) );
 		} else if ( mtype == QLatin1String( "BSPSysScaleModifier" ) ) {
 			scaleKeys = nif->getArray<float>( nif->getIndex( iMod, "Scales" ) );
+			scaleName = modActive.last().name;
 		} else if ( mtype == QLatin1String( "NiPSysRotationModifier" ) ) {
 			hasRotation = true;
+			rotationName = modActive.last().name;
 			rotSpeed = nif->get<float>( iMod, "Rotation Speed" );
 			rotSpeedVar = nif->get<float>( iMod, "Rotation Speed Variation" );
 			rotAngle = nif->get<float>( iMod, "Rotation Angle" );
@@ -1170,6 +1195,63 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 					}
 				}
 			}
+		} else if ( nif->blockInherits( iCtlr, "NiPSysModifierCtlr" ) ) {
+			/* The rest of the NiPSysModifierCtlr family, which was ignored
+			 * wholesale. They all name their target modifier the same way, so the
+			 * only difference between them is which field they land on.
+			 *
+			 * Measured across FO4's 692 effect meshes, which is why these and not
+			 * the others: ModifierActive 288, EmitterSpeed 51, InitialRadius 21,
+			 * LifeSpan 6, Declination 6, PlanarAngle 1. The six field modifiers,
+			 * GrowFade and MeshUpdate appear in ZERO of them, so carrying them
+			 * would be dead code; Spawn is in 347 but 66 of the 67 sampled have
+			 * Num Spawn Generations 0, so it spawns nothing.
+			 */
+			const QString ctype = nif->itemName( iCtlr );
+			const QString modName = nif->resolveString( iCtlr, "Modifier Name" );
+			QModelIndex iInterp = nif->getBlockIndex( nif->getLink( iCtlr, "Interpolator" ) );
+			QModelIndex iData = iInterp.isValid()
+				? nif->getBlockIndex( nif->getLink( iInterp, "Data" ) ) : QModelIndex();
+			QPersistentModelIndex keys;
+			if ( iData.isValid() ) {
+				iExtras.append( iInterp );
+				iExtras.append( iData );
+				keys = nif->getIndex( iData, "Data" );
+			}
+
+			if ( ctype == QLatin1String( "NiPSysModifierActiveCtlr" ) ) {
+				for ( ModActive & ma : modActive ) {
+					if ( ma.name != modName )
+						continue;
+					ma.keys = keys;
+					ma.ctlrBlock = nif->getBlockNumber( iCtlr );
+				}
+			} else {
+				static const struct { const char * type; int slot; } emitCurves[] = {
+					{ "NiPSysEmitterSpeedCtlr",          Emitter::CSpeed },
+					{ "NiPSysEmitterDeclinationCtlr",    Emitter::CDeclination },
+					{ "NiPSysEmitterDeclinationVarCtlr", Emitter::CDeclinationVar },
+					{ "NiPSysEmitterPlanarAngleCtlr",    Emitter::CPlanar },
+					{ "NiPSysEmitterPlanarAngleVarCtlr", Emitter::CPlanarVar },
+					{ "NiPSysEmitterLifeSpanCtlr",       Emitter::CLifeSpan },
+					{ "NiPSysEmitterInitialRadiusCtlr",  Emitter::CRadius },
+				};
+				for ( const auto & ec : emitCurves ) {
+					if ( ctype != QLatin1String( ec.type ) )
+						continue;
+					for ( Emitter & e : emitters ) {
+						if ( e.name != modName )
+							continue;
+						e.curveKeys[ec.slot] = keys;
+						// Remembered even when `keys` is valid: a manager rig gives
+						// these controllers a NiBlendFloatInterpolator stub with no
+						// data of its own, and the sequence walk below needs the
+						// block number to find the row that really drives it.
+						e.curveCtlr[ec.slot] = nif->getBlockNumber( iCtlr );
+					}
+					break;
+				}
+			}
 		}
 		iCtlr = nif->getBlockIndex( nif->getLink( iCtlr, "Next Controller" ) );
 	}
@@ -1184,6 +1266,45 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 		for ( int r = 0; r < nif->rowCount( iCB ); r++ ) {
 			QModelIndex iRow = nif->getIndex( iCB, r );
 			qint32 rowCtlr = nif->getLink( iRow, "Controller" );
+
+			/* The same treatment for the parameter controllers and for the
+			 * Active controllers, whose interpolators are blend stubs on a
+			 * manager rig too. Without this an animated Speed silently fell back
+			 * to the authored field on exactly the files that animate it, since
+			 * an effect with sequences is where the stubs come from.
+			 */
+			for ( Emitter & e : emitters ) {
+				for ( int c = 0; c < Emitter::CCount; c++ ) {
+					if ( e.curveCtlr[c] <= 0 || rowCtlr != e.curveCtlr[c] )
+						continue;
+					QModelIndex iI = nif->getBlockIndex( nif->getLink( iRow, "Interpolator" ) );
+					QModelIndex iD = iI.isValid()
+						? nif->getBlockIndex( nif->getLink( iI, "Data" ) ) : QModelIndex();
+					if ( !iD.isValid() )
+						continue;
+					iExtras.append( iSeq );
+					iExtras.append( iI );
+					iExtras.append( iD );
+					Emitter::SeqKeys sk;
+					sk.seq = seqName;
+					sk.keys = nif->getIndex( iD, "Data" );
+					e.seqCurve[c].append( sk );
+				}
+			}
+			for ( ModActive & ma : modActive ) {
+				if ( ma.ctlrBlock <= 0 || rowCtlr != ma.ctlrBlock )
+					continue;
+				QModelIndex iI = nif->getBlockIndex( nif->getLink( iRow, "Interpolator" ) );
+				QModelIndex iD = iI.isValid()
+					? nif->getBlockIndex( nif->getLink( iI, "Data" ) ) : QModelIndex();
+				if ( !iD.isValid() )
+					continue;
+				iExtras.append( iSeq );
+				iExtras.append( iI );
+				iExtras.append( iD );
+				ma.seqKeys.append( { seqName, nif->getIndex( iD, "Data" ), 0 } );
+			}
+
 			for ( Emitter & e : emitters ) {
 				if ( e.ctlrBlock < 0 || rowCtlr != e.ctlrBlock )
 					continue;
@@ -1346,17 +1467,23 @@ void PSysSimController::emitParticle( Emitter & e )
 		p.pos = local;
 	}
 
-	// direction from declination (from +Z) and planar angle
-	float di = e.declination + random( e.declinationVar ) - e.declinationVar * 0.5f;
-	float pa = e.planar + random( e.planarVar ) - e.planarVar * 0.5f;
+	/* Direction from declination (from +Z) and planar angle. Read from `live`,
+	 * not from the authored fields: the NiPSysEmitterSpeedCtlr family animates
+	 * exactly these, and 51 of FO4's effect meshes drive Speed that way.
+	 */
+	const float * lv = e.live;
+	float di = lv[Emitter::CDeclination] + random( lv[Emitter::CDeclinationVar] )
+		- lv[Emitter::CDeclinationVar] * 0.5f;
+	float pa = lv[Emitter::CPlanar] + random( lv[Emitter::CPlanarVar] )
+		- lv[Emitter::CPlanarVar] * 0.5f;
 	Vector3 dir( std::sin( di ) * std::cos( pa ), std::sin( di ) * std::sin( pa ), std::cos( di ) );
 	if ( e.emitNode )
 		dir = pw.rotation.inverted() * ( e.emitNode->worldTrans().rotation * dir );
-	p.vel = dir * ( e.speed + random( e.speedVar ) );
+	p.vel = dir * ( lv[Emitter::CSpeed] + random( lv[Emitter::CSpeedVar] ) );
 
 	p.age = 0;
-	p.lifespan = std::max( e.lifeSpan + random( e.lifeSpanVar ), 0.05f );
-	p.radius = std::max( e.radius + random( e.radiusVar ), 0.01f );
+	p.lifespan = std::max( lv[Emitter::CLifeSpan] + random( lv[Emitter::CLifeSpanVar] ), 0.05f );
+	p.radius = std::max( lv[Emitter::CRadius] + random( lv[Emitter::CRadiusVar] ), 0.01f );
 	p.color = particleColor( e, 0.0f );
 
 	if ( !subtexOffsets.isEmpty() ) {
@@ -1393,25 +1520,68 @@ void PSysSimController::updateTime( float time )
 		return;
 	dt = std::min( dt, 0.25f );
 
+	/* Which modifiers are switched on this frame.
+	 *
+	 * A modifier's own Active field, overridden by a NiPSysModifierActiveCtlr
+	 * when one names it. 288 of FO4's 692 effect meshes carry one of those, and
+	 * every modifier used to run regardless — so a gravity or drag that the
+	 * author switches on partway through an effect was on from the first frame.
+	 */
+	const QString & activeSeq = target->scene->animGroup;
+	auto modIsActive = [this, time, &activeSeq]( const QString & name ) {
+		if ( name.isEmpty() )
+			return true;
+		for ( ModActive & ma : modActive ) {
+			if ( ma.name != name )
+				continue;
+			bool on = ma.active;
+			if ( ma.keys.isValid() ) {
+				interpolate( on, ma.keys, time, ma.idx );
+			} else if ( !ma.seqKeys.isEmpty() ) {
+				ModActive::SeqKeys * sk = &ma.seqKeys[0];
+				for ( auto & c : ma.seqKeys ) {
+					if ( c.seq == activeSeq ) {
+						sk = &c;
+						break;
+					}
+				}
+				if ( sk->keys.isValid() )
+					interpolate( on, sk->keys, time, sk->idx );
+			}
+			return on;
+		}
+		return true;
+	};
+	const bool gravityOn = hasGravity && modIsActive( gravityName );
+	const bool dragOn = dragPct > 0.0f && modIsActive( dragName );
+	const bool rotationOn = hasRotation && modIsActive( rotationName );
+
 	// advance
 	Transform pw = target->worldTrans();
-	Vector3 gLocal = hasGravity ? pw.rotation.inverted() * gravityDir : Vector3();
-	float dragMul = ( dragPct > 0.0f ) ? std::exp( -dragPct * 30.0f * dt ) : 1.0f;
+	Vector3 gLocal = gravityOn ? pw.rotation.inverted() * gravityDir : Vector3();
+	float dragMul = dragOn ? std::exp( -dragPct * 30.0f * dt ) : 1.0f;
 
 	int n = 0;
 	while ( n < parts.size() ) {
 		SimParticle & p = parts[n];
-		p.age += dt;
-		if ( p.age >= p.lifespan ) {
-			parts.remove( n );
-			continue;
+		// Ageing and movement are MODIFIERS in the engine, not laws of the
+		// simulation: without a NiPSysAgeDeathModifier nothing dies, and without
+		// a NiPSysPositionModifier nothing moves. Both were unconditional here.
+		if ( hasAgeDeath ) {
+			p.age += dt;
+			if ( p.age >= p.lifespan ) {
+				parts.remove( n );
+				continue;
+			}
 		}
-		if ( hasGravity )
+		if ( gravityOn )
 			p.vel += gLocal * ( gravityStrength * dt );
-		if ( dragPct > 0.0f )
+		if ( dragOn )
 			p.vel *= dragMul;
-		p.pos += p.vel * dt;
-		p.angle += p.angVel * dt;
+		if ( hasPosition )
+			p.pos += p.vel * dt;
+		if ( rotationOn )
+			p.angle += p.angVel * dt;
 		n++;
 	}
 
@@ -1422,6 +1592,33 @@ void PSysSimController::updateTime( float time )
 		// graph is complete, so the world transform chain is trustworthy
 		if ( !e.emitNode && e.iEmitObj.isValid() )
 			e.emitNode = target->scene->getNode( target->scene->nifModel, QModelIndex( e.iEmitObj ) );
+
+		/* This frame's emitter parameters: the authored field, replaced by the
+		 * NiPSysModifierFloatCtlr curve wherever one names this emitter. Kept
+		 * beside the authored values rather than overwriting them, because an
+		 * emitter is re-read from the model only when the model changes and a
+		 * curve is evaluated on every frame.
+		 */
+		const float authored[Emitter::CCount] = {
+			e.speed, e.speedVar, e.declination, e.declinationVar,
+			e.planar, e.planarVar, e.lifeSpan, e.lifeSpanVar, e.radius, e.radiusVar
+		};
+		for ( int c = 0; c < Emitter::CCount; c++ ) {
+			e.live[c] = authored[c];
+			if ( e.curveKeys[c].isValid() ) {
+				interpolate( e.live[c], e.curveKeys[c], time, e.curveIdx[c] );
+			} else if ( !e.seqCurve[c].isEmpty() ) {
+				Emitter::SeqKeys * sk = &e.seqCurve[c][0];
+				for ( auto & k : e.seqCurve[c] ) {
+					if ( k.seq == curSeq ) {
+						sk = &k;
+						break;
+					}
+				}
+				if ( sk->keys.isValid() )
+					interpolate( e.live[c], sk->keys, time, sk->idx );
+			}
+		}
 
 		float rate = e.birthRate;
 		if ( e.iBirthKeys.isValid() ) {
@@ -1455,6 +1652,12 @@ void PSysSimController::updateTime( float time )
 				interpolate( vis, sk->keys, time, sk->idx );
 		}
 
+		// An emitter is a modifier too, so its own Active field — and any
+		// NiPSysModifierActiveCtlr that names it — gate emission alongside
+		// EmitterActive, which is a different flag on a different controller.
+		if ( !modIsActive( e.name ) )
+			vis = false;
+
 		if ( !( std::isfinite( rate ) && std::fabs( rate ) < 1.0e8f ) )
 			rate = 0.0f;
 		if ( !vis || rate <= 0.0f )
@@ -1470,6 +1673,8 @@ void PSysSimController::updateTime( float time )
 	}
 
 	// hand the state to the renderer
+	const bool colourOn = ( hasColorMod || hasColorGradient ) && modIsActive( colorName );
+	const bool scaleOn = !scaleKeys.isEmpty() && modIsActive( scaleName );
 	int count = parts.size();
 	bool flipbook = !subtexOffsets.isEmpty();
 	target->verts.resize( count );
@@ -1482,8 +1687,8 @@ void PSysSimController::updateTime( float time )
 		float u = p.age / p.lifespan;
 		target->verts[i] = p.pos;
 		Emitter dummy;
-		target->colors[i] = ( hasColorMod || hasColorGradient ) ? particleColor( dummy, u ) : p.color;
-		target->sizes[i] = p.radius * particleScale( u );
+		target->colors[i] = colourOn ? particleColor( dummy, u ) : p.color;
+		target->sizes[i] = scaleOn ? ( p.radius * particleScale( u ) ) : p.radius;
 		if ( flipbook )
 			target->uvOffsets[i] = p.uvOff;
 		if ( hasRotation )
