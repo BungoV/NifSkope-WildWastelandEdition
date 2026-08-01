@@ -1,5 +1,63 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-01d — The Unfuck dialog, audited and rebuilt
+
+An audit of what that dialog was actually offering found two things that made it
+dangerous rather than merely plain, and I had shipped both.
+
+**It armed two spells that should never be armed.** Rows were ticked on by group
+membership, not by the spell's own judgement. `Reorder Blocks` returns
+`sanity() == false` with an upstream comment saying exactly why — *"Prevent this
+from running during auto-sanitize... can really only cause issues with rendering
+and textureset overrides via the CK"* — and it was pre-ticked. So was
+`Fill Blank NiControllerSequence Types`, which stops mid-batch on a modal
+`QInputDialog` **inside the undo snapshot**. Every row now takes its default from
+its own `sanity()`, so a spell added later inherits the right answer for free.
+
+**Two rows could never light up.** `Sort Keys` wants an array row and
+`Check Material` wants a shader block; this dialog always asks with an invalid
+index, because that is what "whole file" means. They sat there permanently grey
+under a tooltip blaming the file. Probing the loaded model for an index that
+would satisfy them was tried first and cannot answer the question — a miss means
+either "wants a selection" or "this file has none of those" — so the two are
+named in the source instead, which is honest about it being a fact of the spell.
+
+Also: `Check Links` reads and logs and changes nothing, yet sat under "these
+change the file". It carries `constant()` now and files under Checks.
+
+**Every row says what it does**, in one line read off the implementation rather
+than the label, because several of these names mislead — `Fix Geometry Data
+Names` never touches a name, it zeroes Group ID; `Reorder Link Arrays` also
+silently drops dead children. A greyed row now gives the real reason ("Fallout 3
+/ New Vegas only") instead of the old "Nothing for this to do in this file",
+which was simply false: these are format gates, not content probes.
+
+**The Checks run when the dialog opens.** They are read-only by definition, so
+this is free of risk, and `setMessageMode(MSG_TEST)` redirects their output into
+a list rather than a popup per finding. Each shows "clean" or "3 found" in the
+danger colour with the detail beneath, and a check that found something ticks
+itself. That is what turns a blind checklist into a report card. Verified both
+ways: clean on stock files, and "1 found" on a file with a deliberately broken
+texture path.
+
+**A run really is one undo step now.** It was not: `spEnforceNameAuthority`
+calls `nifSnapshotOp` itself, so wrapping the batch in another pushed two
+commands and the second Ctrl+Z walked the file *forward* into a half-repaired
+state. `runUnfuck` detaches the undo stack for the duration — every nested
+snapshot becomes a no-op, since `nifSnapshotOp` only pushes when there is a stack
+— and pushes exactly one command at the end. It also compares the before and
+after buffers and pushes **nothing** when nothing changed, so a checks-only run
+no longer marks the document modified and asks to save on close. Header and
+footer updates moved inside the measured region, where they belong.
+
+**Four repairs added**, all opt-in: Update All Bounds (the fix for meshes that
+vanish when the camera moves), Update All Tangent Spaces, Make All Skin
+Partitions, Remove Unused Strings. Deliberately not added: the batch optimisers
+and normal generators, which overwrite authoring intent on meshes that were fine,
+and anything that writes other files on disk. Run order is now explicit rather
+than alphabetical, because string-table compaction has to follow the passes that
+add strings.
+
 ## 2026-08-01c — Unwrap a piece of an island; Unfuck becomes a dialog
 
 **Unwrap Selection In Place.** bungo: *"select uv areas that are already part of

@@ -310,6 +310,14 @@ public:
 	QString name() const override final { return Spell::tr( "Check Links" ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 	bool sanity() const override final { return true; }
+	/* It reads and logs; it writes nothing (see cast below — every branch
+	 * ends in qCCritical or a returned index). `constant()` is how a spell
+	 * says that: it skips the "this cannot be undone" prompt, and it is what
+	 * lets the Unfuck dialog file this under Checks rather than under "these
+	 * change the file", which was untrue. NOT checker(): that would enrol it
+	 * in SpellBook::checkers() and run it on load, a different question.
+	 */
+	bool constant() const override final { return true; }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
