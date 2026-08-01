@@ -1946,7 +1946,7 @@ quint32 ProcLightningController::keyOrdinal( const QVector<SeqKeys> & list, floa
 	return n;
 }
 
-void ProcLightningController::regenerate( quint32 tick )
+void ProcLightningController::regenerate( quint32 tick, quint32 offsetTick )
 {
 	bolts.clear();
 
@@ -1965,8 +1965,22 @@ void ProcLightningController::regenerate( quint32 tick )
 	 */
 	const int rootSubdiv = std::min( std::max( effSubdiv, 0 ), 10 );
 
-	// Re-seeded from (controller, tick). The tick is an ORDINAL, not a time — see
-	// updateTime — so scrubbing back to a moment redraws exactly what was there.
+	/* TWO seeds, because the engine has two kinds of rebuild.
+	 *
+	 * `tick` seeds the branch STRUCTURE — how many branches, how deep, how long.
+	 * That only changes when the file says so, on a Generation or Mutation
+	 * toggle, which is the full-regenerate path at `0x1cf5ce5`.
+	 *
+	 * `offsetTick` seeds the DISPLACEMENT alone. When `Animate Arc Offset` is
+	 * set, the engine re-runs Process every update on the cheaper path at
+	 * `0x1cf5c32`, keeping the branches and re-offsetting them — which is what a
+	 * bolt crawling in place looks like. Feeding both from one seed would put the
+	 * whole tree back in the blender every frame; feeding only the first is what
+	 * left these bolts frozen.
+	 *
+	 * Both are ORDINALS, not times, so scrubbing back to a moment redraws exactly
+	 * what was there.
+	 */
 	rngState = ( rngSeed * 2654435761u ) ^ ( tick * 2246822519u );
 	if ( !rngState )
 		rngState = 1;	// xorshift cannot escape zero
@@ -2018,6 +2032,15 @@ void ProcLightningController::regenerate( quint32 tick )
 	 * too was tried once and reverted for looking wrong, against the same bolt
 	 * drawn between the wrong two points.
 	 */
+	/* The structure is settled; everything from here is per-frame shape. Switch
+	 * the stream over so the branch list above stays put while the offsets move.
+	 */
+	quint32 structState = rngState;
+	rngState = ( rngSeed * 2246822519u ) ^ ( offsetTick * 2654435761u ) ^ ( tick * 40503u );
+	if ( !rngState )
+		rngState = 1;
+	Q_UNUSED( structState );
+
 	bolts.reserve( tree.size() );
 	for ( int i = 0; i < tree.size(); i++ ) {
 		const Info & info = tree.at( i );
@@ -2202,10 +2225,33 @@ void ProcLightningController::updateTime( float time )
 	const bool mutNow = evalKeys( mutKeys, true );
 	const quint32 tick = keyOrdinal( mutKeys, time ) * 977u + keyOrdinal( genKeys, time );
 
-	if ( bolts.isEmpty() || paramsChanged || tick != lastTick || mutNow != lastMutation ) {
+	/* ...and when it wobbles between those re-rolls.
+	 *
+	 * `Animate Arc Offset` is the engine's gate for running Process at all
+	 * between structure changes (`0x1cf5c04`: if the flag is clear it returns
+	 * without touching the geometry). With it set, Process runs EVERY update and
+	 * re-offsets the existing branches. The X-01 bolts set it, and they are
+	 * driven by their own interpolators rather than by a sequence — so
+	 * `mutKeys` and `genKeys` are both empty, the tick above never moves, and
+	 * leaving it there generated each bolt once and froze it. What still blinked
+	 * was the NiVisController on the `_Start` node, which is why this read as
+	 * "only their visibility gets toggled".
+	 *
+	 * The engine's cadence here is "once per rendered frame", which is not a
+	 * function of time and so cannot be reproduced when scrubbing. This quantises
+	 * it. 30 Hz is a PREVIEW CHOICE, not a constant from the engine — there is no
+	 * rate anywhere in Process — chosen because it is the key spacing FO4's own
+	 * effect curves are authored at.
+	 */
+	const quint32 offsetTick = animateArc
+		? quint32( std::max( time, 0.0f ) * kPreviewMutationHz ) : 0u;
+
+	if ( bolts.isEmpty() || paramsChanged || tick != lastTick
+		|| mutNow != lastMutation || offsetTick != lastOffsetTick ) {
 		lastTick = tick;
+		lastOffsetTick = offsetTick;
 		lastMutation = mutNow;
-		regenerate( tick );
+		regenerate( tick, offsetTick );
 	}
 
 	visible = true;

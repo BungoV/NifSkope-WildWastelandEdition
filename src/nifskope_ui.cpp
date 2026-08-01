@@ -9104,14 +9104,17 @@ void NifSkope::initDockWidgets()
 		visibilityButton->setObjectName( QStringLiteral( "ViewportVisibilityButton" ) );
 		visibilityButton->setPopupMode( QToolButton::InstantPopup );
 		visibilityButton->setAutoRaise( true );
-		visibilityButton->setIcon( ui->aShowHidden->icon() );
+		visibilityButton->setIcon( tlMakeIcon( QStringLiteral( "eye_hidden" ),
+			QColor( 228, 228, 232 ) ) );
 		visibilityButton->setToolTip( tr( "Isolate, hide, or restore viewport geometry" ) );
 		QMenu * visibilityMenu = new QMenu( visibilityButton );
 		QAction * isolateSelected = visibilityMenu->addAction( tr( "Isolate Selected Objects" ) );
 		QAction * isolatePrimary = visibilityMenu->addAction( tr( "Isolate Primary Object" ) );
 		QAction * hideSecondary = visibilityMenu->addAction( tr( "Hide Secondary Selected Objects" ) );
 		visibilityMenu->addSeparator();
-		QAction * restoreAll = visibilityMenu->addAction( ui->aShowHidden->icon(), tr( "Restore All Hidden" ) );
+		QAction * restoreAll = visibilityMenu->addAction(
+			tlMakeIcon( QStringLiteral( "eye" ), QColor( 228, 228, 232 ) ),
+			tr( "Restore All Hidden" ) );
 		visibilityButton->setMenu( visibilityMenu );
 
 		connect( visibilityMenu, &QMenu::aboutToShow, this,
@@ -9166,7 +9169,7 @@ void NifSkope::initDockWidgets()
 		QToolButton * btn = new QToolButton( this );
 		btn->setPopupMode( QToolButton::InstantPopup );
 		btn->setToolTip( tr( "Display options" ) );
-		btn->setIcon( ui->aShowNodes->icon() );
+		btn->setIcon( tlMakeIcon( QStringLiteral( "nodes" ), QColor( 228, 228, 232 ) ) );
 		QMenu * m = new QMenu( btn );
 		const QList<QAction *> ds = { ui->aShowCollision, ui->aShowAxes, ui->aShowNodes, ui->aDoSkinning,
 			ui->aShowConstraints, ui->aShowMarkers, ui->aShowHidden };
@@ -10576,7 +10579,8 @@ void NifSkope::initDockWidgets()
 			ui->tView->removeAction( dw->toggleViewAction() );
 		}
 		btn->setMenu( m );
-		ui->tView->addWidget( btn );
+		// Added AFTER the Workspaces button, below — bungo wants Panels to its
+		// right. It is built here because Workspaces copies its stylesheet.
 
 		QToolButton * workspaces = new QToolButton( this );
 		workspaces->setPopupMode( QToolButton::InstantPopup );
@@ -10750,6 +10754,7 @@ void NifSkope::initDockWidgets()
 				} );
 		workspaces->setMenu( workspaceMenu );
 		ui->tView->addWidget( workspaces );
+		ui->tView->addWidget( btn );			// Panels, to the right of Workspaces
 
 		// Keep the menu's active-workspace marker truthful: derive it from which
 		// manager dock is actually visible (a dock closed via its own X, or the
@@ -10798,8 +10803,179 @@ void NifSkope::initMenu()
 		}
 	}
 
-	// Insert SpellBook class before Help
-	ui->menubar->insertMenu( ui->menubar->actions().at( 3 ), book.get() );
+	/* "Unfuck" replaces the Spells menu in the menubar.
+	 *
+	 * bungo: "remove from it whatever is in the select / add / object or other
+	 * top bar buttons, or anything in the right click menu." That is the whole of
+	 * it — right-clicking a block in the Block List or Block Details opens a
+	 * fresh SpellBook with every spell in it, so the menubar copy was a second
+	 * route to things already one click away, and the viewport's Select / Add /
+	 * Object buttons cover the rest.
+	 *
+	 * What that copy was NOT giving anyone is the file-fixing spells, and the
+	 * reason is worth writing down: they all answer `isApplicable` with
+	 * `!index.isValid()` because they act on the whole file rather than on one
+	 * block, and `SpellBook::checkActions` HIDES whatever does not apply to the
+	 * current selection. So the moment you click any block — the first thing
+	 * anyone does — every one of them vanished. They were not missing, they were
+	 * unreachable.
+	 *
+	 * Here they are addressed with an invalid index deliberately, so having a
+	 * block selected cannot take them away again.
+	 */
+	{
+		QMenu * unfuck = new QMenu( tr( "Unfuck" ), this );
+		unfuck->setToolTipsVisible( true );
+		ui->menubar->insertMenu( ui->menubar->actions().at( 3 ), unfuck );
+
+		// Every spell that repairs something about a file: the Sanitize page,
+		// plus anything registered as a sanitizer or a checker and therefore
+		// already trusted to run in the on-save pass.
+		QList<SpellPtr> fixes;
+		for ( SpellPtr s : SpellBook::spells() ) {
+			if ( !s )
+				continue;
+			if ( ( s->page() == Spell::tr( "Sanitize" ) || s->sanity() || s->checker() )
+				&& !fixes.contains( s ) )
+				fixes.append( s );
+		}
+		std::sort( fixes.begin(), fixes.end(),
+			[]( const SpellPtr & a, const SpellPtr & b ) { return a->name() < b->name(); } );
+
+		QSettings cfg;
+		QList<QPair<QAction *, SpellPtr>> fixActions;
+		for ( SpellPtr s : fixes ) {
+			QAction * a = unfuck->addAction( s->name() );
+			a->setCheckable( true );
+			a->setChecked( cfg.value( QStringLiteral( "Unfuck/%1" ).arg( s->name() ), true ).toBool() );
+			connect( a, &QAction::toggled, this, [s]( bool on ) {
+				QSettings().setValue( QStringLiteral( "Unfuck/%1" ).arg( s->name() ), on );
+			} );
+			fixActions.append( qMakePair( a, s ) );
+		}
+
+		unfuck->addSeparator();
+		QAction * allOn = unfuck->addAction( tr( "Check All" ) );
+		QAction * allOff = unfuck->addAction( tr( "Check None" ) );
+		unfuck->addSeparator();
+		QAction * run = unfuck->addAction( tr( "Unfuck This File" ) );
+		QFont runFont = run->font();
+		runFont.setBold( true );
+		run->setFont( runFont );
+
+		connect( allOn, &QAction::triggered, this, [fixActions]() {
+			for ( const auto & p : fixActions ) p.first->setChecked( true );
+		} );
+		connect( allOff, &QAction::triggered, this, [fixActions]() {
+			for ( const auto & p : fixActions ) p.first->setChecked( false );
+		} );
+
+		// Enable state is recomputed as the menu opens, against an INVALID index
+		// — the one these spells actually want — rather than against whatever
+		// happens to be selected. A fix with nothing to do is greyed and says so,
+		// instead of disappearing.
+		connect( unfuck, &QMenu::aboutToShow, this, [this, fixActions, run]() {
+			int usable = 0;
+			for ( const auto & p : fixActions ) {
+				const bool ok = nif && p.second->isApplicable( nif, QModelIndex() );
+				p.first->setEnabled( ok );
+				p.first->setToolTip( ok ? p.second->name()
+					: tr( "%1 has nothing to do in this file" ).arg( p.second->name() ) );
+				if ( ok && p.first->isChecked() )
+					usable++;
+			}
+			run->setEnabled( usable > 0 );
+			run->setText( usable > 0 ? tr( "Unfuck This File (%1)" ).arg( usable )
+			                         : tr( "Unfuck This File" ) );
+		} );
+
+		/* TEST HARNESS (WW_UNFUCK_TEST=1): did the file-fixing spells come back?
+		 *
+		 * The question this answers is not "does the menu exist" but "is anything
+		 * in it reachable", because the fault it was built for is a menu that
+		 * looks populated and greys or hides every entry. So it opens the menu the
+		 * way a click would — emitting aboutToShow, which is what recomputes the
+		 * enable state — WITH a block selected, since selecting a block is exactly
+		 * what used to make these vanish.
+		 * Log: release/ww_unfuck_test.log
+		 */
+		if ( qEnvironmentVariableIsSet( "WW_UNFUCK_TEST" ) ) {
+			QObject::connect( this, &NifSkope::completeLoading, this,
+				[this, unfuck, fixActions, run]( bool ok, QString & ) {
+				QTimer::singleShot( 800, this, [this, unfuck, fixActions, run, ok]() {
+					QFile logf( QApplication::applicationDirPath() + "/ww_unfuck_test.log" );
+					if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+						return;
+					QTextStream log( &logf );
+					int checks = 0, fails = 0;
+					auto check = [&]( const QString & what, bool pass ) {
+						checks++;
+						if ( !pass ) fails++;
+						log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					};
+					do {
+						if ( !ok || !nif ) { log << "load failed\n"; break; }
+
+						// Select a block first. This is the whole point: with an
+						// index selected the old menubar SpellBook hid every one
+						// of these, because they answer isApplicable only for an
+						// invalid index.
+						if ( nif->getBlockCount() > 1 )
+							select( nif->getBlockIndex( 1 ) );
+						QApplication::processEvents();
+
+						emit unfuck->aboutToShow();
+						int enabled = 0;
+						for ( const auto & p : fixActions ) {
+							log << "  fix " << ( p.first->isEnabled() ? "[on ] " : "[off] " )
+								<< p.second->name() << "\n";
+							if ( p.first->isEnabled() )
+								enabled++;
+						}
+						log << fixActions.size() << " fix(es) listed, " << enabled
+							<< " applicable with a block selected\n";
+
+						check( "the Unfuck menu carries the file-fixing spells",
+							fixActions.size() >= 5 );
+						check( "they are reachable with a block selected", enabled > 0 );
+						check( "the run entry is live", run->isEnabled() );
+
+						// ...and the menubar no longer carries a second copy.
+						bool spellsMenu = false;
+						for ( QAction * a : ui->menubar->actions() )
+							if ( a->menu() && a->menu()->title() == QLatin1String( "Spells" ) )
+								spellsMenu = true;
+						check( "the duplicate Spells menu is gone", !spellsMenu );
+					} while ( false );
+					log << checks << " checks, " << fails << " failures\n";
+					log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+					logf.close();
+					QTimer::singleShot( 0, qApp, &QApplication::quit );
+				} );
+			} );
+		}
+
+		connect( run, &QAction::triggered, this, [this, fixActions]() {
+			if ( !nif )
+				return;
+			QStringList done;
+			// One snapshot around the lot, so a run that makes things worse is a
+			// single Ctrl+Z rather than nine of them.
+			nifSnapshotOp( nif, "Unfuck", [&]() {
+				for ( const auto & p : fixActions ) {
+					if ( !p.first->isChecked() || !p.second->isApplicable( nif, QModelIndex() ) )
+						continue;
+					p.second->cast( nif, QModelIndex() );
+					done << p.second->name();
+				}
+			} );
+			nif->invalidateHeaderConditions();
+			nif->updateHeader();
+			Message::info( this, done.isEmpty()
+				? tr( "Nothing to fix." )
+				: tr( "Ran %1 fix(es):\n%2" ).arg( done.size() ).arg( done.join( QStringLiteral( "\n" ) ) ) );
+		} );
+	}
 
 	// Insert Import/Export menus
 	mExport = ui->menuExport;
@@ -10866,6 +11042,19 @@ void NifSkope::initMenu()
 
 	// Lighting Menu
 	auto mLight = lightingWidget();
+
+	// The bulb was the last coloured icon on this row; it comes from tlMakeIcon
+	// now, like everything beside it. The glyph in timeline.cpp records why the
+	// artwork was redrawn rather than desaturated.
+	ui->aLightMenu->setIcon( tlMakeIcon( QStringLiteral( "bulb" ), QColor( 228, 228, 232 ) ) );
+
+	/* Screenshot / Save View, off the bar.
+	 *
+	 * bungo: "we won't use that feature, so hide it from the top bar." Hidden,
+	 * not deleted — `GLView::saveImage` and the Render menu entry both still
+	 * work, so putting it back is one line rather than a resurrection.
+	 */
+	ui->tRender->removeAction( ui->aPrintView );
 
 	// Append Menu to tRender actions
 	for ( auto child : ui->tRender->findChildren<QToolButton *>() ) {

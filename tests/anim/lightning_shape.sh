@@ -151,6 +151,42 @@ echo "  deepest generation: $deep (halving allows at most $maxgen)"
 if [ -n "$deep" ] && [ "$deep" -le "$maxgen" ]; then ok
 else bad "the tree reached generation $deep; halving Num Branches allows at most $maxgen"; fi
 
+# --- 6. the bolt actually moves, and still reproduces ------------------------
+#
+# bungo: "the lightning bolts ... do not actually move now in 3d viewport
+# preview, only their visibility gets toggled." These bolts are driven by their
+# own interpolators rather than by a sequence, so the Generation and Mutation key
+# lists are empty and the structure ordinal never advances -- which generated
+# each bolt once and froze it. What still blinked was the NiVisController on the
+# `_Start` node, which is exactly what "only visibility" looks like.
+#
+# The engine re-runs Process every update when Animate Arc Offset is set,
+# re-offsetting the branches it already has, so the fix is a second seed. Both
+# halves have to hold at once:
+#
+#   two different times must bake DIFFERENT geometry   (it moves)
+#   the same time twice must bake IDENTICAL geometry   (it can still be scrubbed)
+#
+# A per-frame counter would pass the first and fail the second, which is why the
+# ordinal is derived from time rather than counted.
+bake() {
+	rm -f "$2"
+	WW_EFFECTBAKE_TEST="$2" WW_EFFECTBAKE_TIME="$1" 		"$EXE" --port "$PORT" "$(winpath "$FX")" > /dev/null 2>&1
+	[ -s "$2" ] && md5sum "$2" | cut -d' ' -f1 || echo MISSING
+}
+TMP2="$(mktemp -d)"
+h1="$(bake 1.00 "$TMP2/a.nif")"
+h2="$(bake 1.10 "$TMP2/b.nif")"
+h3="$(bake 1.00 "$TMP2/c.nif")"
+rm -rf "$TMP2"
+echo "  bake t=1.00 ${h1:0:8}, t=1.10 ${h2:0:8}, t=1.00 again ${h3:0:8}"
+
+if [ "$h1" != "MISSING" ] && [ "$h1" != "$h2" ]; then ok
+else bad "t=1.00 and t=1.10 baked the same geometry -- the bolt is frozen"; fi
+
+if [ "$h1" = "$h3" ]; then ok
+else bad "the same time baked differently twice -- the bolt can no longer be scrubbed"; fi
+
 echo
 echo "checks passed: $pass   failed: $fail"
 [ "$fail" = "0" ] || exit 1

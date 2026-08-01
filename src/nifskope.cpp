@@ -1098,7 +1098,13 @@ NifSkope::NifSkope( bool background )
 		auto * fl = new QHBoxLayout( filterRow );
 		fl->setContentsMargins( 0, 0, 0, 0 );
 		fl->setSpacing( 2 );
-		fl->addWidget( blockDetailsSearch, 1 );
+		// Stretch 0, with the slack taken by a trailing stretch below, so the
+		// field, the star and the two tree buttons sit as one group on the left.
+		// With the stretch on the field instead, its cell swallows the spare
+		// width and the buttons drift off to the right edge with a hole in the
+		// middle of the row.
+		blockDetailsSearch->setMinimumWidth( 165 );
+		fl->addWidget( blockDetailsSearch, 0 );
 
 		wwLoadPinnedFields();
 		blockDetailsPinFilter = new QToolButton( filterRow );
@@ -1108,6 +1114,31 @@ NifSkope::NifSkope( bool background )
 		blockDetailsPinFilter->setToolTip(
 			tr( "Show only pinned fields.\nRight-click any field to pin it; pins are remembered per block type." ) );
 		fl->addWidget( blockDetailsPinFilter, 0 );
+
+		/* Expand / Collapse move up onto this row, after the star.
+		 *
+		 * They had a QFrame of their own directly under the filter, so the dock
+		 * spent two full rows on one text field and two 20px buttons and the tree
+		 * started that much lower down. Reparenting them here reclaims the second
+		 * row outright. `treeButtonFrame` stays in the .ui but emptied and
+		 * hidden, so the designer file still declares the buttons and every
+		 * existing connection to them is untouched.
+		 *
+		 * The field takes a maximum width to make the room. Without it the
+		 * QLineEdit claims every pixel its stretch allows and the two buttons get
+		 * pushed off the edge of a narrow dock.
+		 */
+		blockDetailsSearch->setMaximumWidth( 220 );
+		for ( QWidget * b : { static_cast<QWidget *>( ui->bExpandAllTree ),
+		                      static_cast<QWidget *>( ui->bCollapseAllTree ) } ) {
+			ui->treeButtonFrameLayout->removeWidget( b );
+			b->setParent( filterRow );
+			fl->addWidget( b, 0 );
+			b->show();
+		}
+		fl->addStretch( 1 );
+		ui->treeButtonFrame->hide();
+
 		ui->verticalLayout->insertWidget( 0, filterRow );
 		connect( blockDetailsPinFilter, &QToolButton::toggled, this, [this]( bool on ) {
 			wwPinnedOnly = on;

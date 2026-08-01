@@ -1,5 +1,64 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-01b — Bolts that move again, and a tidier top bar
+
+**The Tesla bolts were frozen, and that was my fault.** bungo: *"the lightning
+bolts that have start and end nodes in the tesla vfx nifs do not actually move
+now in 3d viewport preview, only their visibility gets toggled."*
+
+Rebuilding the generator on the engine's rules (07-31/08-01a) tied regeneration
+to the Generation and Mutation bool curves, which is right — but only half the
+engine's behaviour. The other half is `Animate Arc Offset`: with it set,
+`Lightning::Process` runs on EVERY update and re-offsets the branches it already
+has (`0x1cf5c04` returns without touching the geometry when the flag is clear).
+I knew about that path and skipped it.
+
+It bites exactly the assets bungo named. Those bolts are driven by their own
+interpolators, not by a sequence, so the key lists this code reads are empty and
+the structure ordinal never advances: each bolt generated once and stayed there.
+What still blinked is a separate `NiVisController` on the `_Start` node — hence
+"only their visibility gets toggled".
+
+`regenerate()` takes two seeds now. `tick` seeds the branch structure and only
+moves when the file says so; `offsetTick` seeds the displacement alone and
+advances while `Animate Arc Offset` is set, so the bolt crawls in place with its
+branches intact — the engine's own split. The 30 Hz quantum is a preview choice,
+labelled as one: the engine has no rate, it just runs per frame, and a frame
+count cannot be scrubbed. `lightning_shape.sh` grows two checks that have to hold
+together — two times must bake *different* geometry, and the same time twice must
+bake *identical* geometry.
+
+**Toolbar icons are monochrome.** The crossed eye, the bulb and the node pair
+were the last colour PNGs on a row of a dozen code-drawn grey buttons.
+Desaturating the artwork was tried first and does not survive the trip: the red
+strike is DARKER than the grey eye it crosses, so luminance buries the one mark
+that carries the meaning, and forcing it brighter fattens its anti-aliased edges
+into a slab. They are `tlMakeIcon` glyphs now, monochrome by construction and
+taking the row's own colour. The original PNGs are untouched.
+
+**Screenshot / Save View is off the top bar** — hidden, not deleted, so the
+Render menu entry and `GLView::saveImage` still work.
+
+**Panels moved to the right of Workspaces.**
+
+**"Unfuck" replaces the Spells menu.** Everything in that menu was already one
+right-click away, since the Block List and Block Details both open a full
+SpellBook. What it was *not* giving anyone is the file-fixing spells, and the
+reason is worth recording: they answer `isApplicable` with `!index.isValid()`
+because they act on the whole file, and `SpellBook::checkActions` **hides**
+whatever does not apply to the current selection — so the moment you clicked any
+block, all of them vanished. They were not missing, they were unreachable.
+
+The new menu lists all 14 of them as checkable entries with their state
+remembered, greys (rather than hides) the ones with nothing to do and says so in
+the tooltip, and runs the checked set inside one snapshot so a bad run is one
+Ctrl+Z. `WW_UNFUCK_TEST` opens the menu *with a block selected* — the state that
+used to empty it — and asserts the entries are reachable: 14 listed, 10 live.
+
+**Block Details gained a row.** The filter field is shorter and the Expand and
+Collapse buttons moved up beside the star, so the frame that used to hold them
+under the filter is empty and hidden and the tree starts that much higher.
+
 ## 2026-08-01a — Five of the six, fixed
 
 bungo: *"Time to fix 1 2 3 4 and 5."* Area 6 is a fact about the game, not about

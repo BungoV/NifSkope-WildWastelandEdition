@@ -639,6 +639,72 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawLine( QPointF( 32, 48 ), QPointF( 32, 56 ) );
 		p.drawLine( QPointF( 8, 32 ), QPointF( 16, 32 ) );
 		p.drawLine( QPointF( 48, 32 ), QPointF( 56, 32 ) );
+
+	/* The three toolbar glyphs that used to come from colour PNGs.
+	 *
+	 * `hidden-disabled.png`, `bulb.png` and `node.png` were the last coloured
+	 * things on that row — a red strike, a yellow bulb, a green-and-blue node
+	 * pair — beside a dozen buttons drawn from here in one grey. Desaturating the
+	 * artwork was tried first and does not survive the trip: the red strike is
+	 * DARKER than the grey eye it crosses, so luminance alone buries the one mark
+	 * that carries the meaning, and forcing it brighter fattens its anti-aliased
+	 * edges into a slab. Drawn here instead they are monochrome by construction
+	 * and take the row's own colour, so there is nothing left to convert.
+	 */
+	} else if ( id == QLatin1String( "eye" ) || id == QLatin1String( "eye_hidden" ) ) {
+		// almond eye with a pupil; the hidden variant adds the strike
+		p.setBrush( Qt::NoBrush );
+		QPen ep( col, 4.5 );
+		ep.setJoinStyle( Qt::RoundJoin );
+		p.setPen( ep );
+		QPainterPath eye;
+		eye.moveTo( 8, 32 );
+		eye.quadTo( 32, 12, 56, 32 );
+		eye.quadTo( 32, 52, 8, 32 );
+		p.drawPath( eye );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 32, 32 ), 8, 8 );
+		if ( id == QLatin1String( "eye_hidden" ) ) {
+			// The strike is drawn in the icon's own colour, but knocked out of
+			// the eye first with a transparent under-stroke, so it reads as a
+			// bar ACROSS the eye rather than a bar lying on top of a smudge.
+			p.setBrush( Qt::NoBrush );
+			QPen cut( Qt::transparent, 12 );
+			cut.setCapStyle( Qt::FlatCap );
+			p.setCompositionMode( QPainter::CompositionMode_Clear );
+			p.setPen( cut );
+			p.drawLine( QPointF( 13, 51 ), QPointF( 51, 13 ) );
+			p.setCompositionMode( QPainter::CompositionMode_SourceOver );
+			QPen sp( col, 6 );
+			sp.setCapStyle( Qt::RoundCap );
+			p.setPen( sp );
+			p.drawLine( QPointF( 14, 50 ), QPointF( 50, 14 ) );
+		}
+	} else if ( id == QLatin1String( "bulb" ) ) {
+		// light bulb: glass envelope over a screw base
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		QPainterPath glass;
+		glass.addEllipse( QPointF( 32, 27 ), 17, 17 );
+		glass.addRect( QRectF( 23, 27, 18, 16 ) );
+		p.drawPath( glass.simplified() );
+		// base: two bands, gapped so it reads as a thread rather than a block
+		p.setBrush( col.darker( 160 ) );
+		p.drawRoundedRect( QRectF( 25, 44, 14, 5 ), 2, 2 );
+		p.drawRoundedRect( QRectF( 26, 51, 12, 5 ), 2, 2 );
+	} else if ( id == QLatin1String( "nodes" ) ) {
+		// three linked nodes: the display-toggle family
+		QPen lp( col, 4 );
+		p.setPen( lp );
+		p.setBrush( Qt::NoBrush );
+		p.drawLine( QPointF( 18, 20 ), QPointF( 40, 42 ) );
+		p.drawLine( QPointF( 46, 20 ), QPointF( 40, 42 ) );
+		p.setPen( QPen( col, 4 ) );
+		for ( QPointF c : { QPointF( 18, 20 ), QPointF( 46, 20 ), QPointF( 40, 44 ) } ) {
+			p.setBrush( Qt::NoBrush );
+			p.drawEllipse( c, 7, 7 );
+		}
 	}
 
 	return QIcon( pm );

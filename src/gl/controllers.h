@@ -494,6 +494,16 @@ class ProcLightningController final : public Controller
 	//! last frame's Mutation value, and the key ordinal it came from
 	bool lastMutation = false;
 	quint32 lastTick = 0xffffffffu;
+	//! last frame's displacement ordinal — see updateTime for why it is separate
+	quint32 lastOffsetTick = 0xffffffffu;
+	/*! How often the bolt re-offsets when `Animate Arc Offset` is set, in Hz.
+	 *
+	 *  A PREVIEW CHOICE, not an engine constant: the engine re-runs Process once
+	 *  per rendered frame and there is no rate anywhere in it. A frame count is
+	 *  not a function of time, so it could not be scrubbed; this quantises it at
+	 *  the spacing FO4's own effect curves are authored at.
+	 */
+	static constexpr float kPreviewMutationHz = 30.0f;
 	bool visible = false;
 
 	//! Deterministic per-mutation RNG. The global random() made every rebuild
@@ -511,8 +521,9 @@ class ProcLightningController final : public Controller
 	 */
 	quint32 keyOrdinal( const QVector<SeqKeys> & list, float time ) const;
 
-	//! Rebuild every branch. `tick` seeds the RNG; see keyOrdinal.
-	void regenerate( quint32 tick );
+	//! Rebuild every branch. `tick` seeds the structure, `offsetTick` the
+	//! displacement alone; see updateTime for why they are separate.
+	void regenerate( quint32 tick, quint32 offsetTick );
 
 	//! Build the bolt ribbon for a given viewer axis. See the definition: only
 	//! the width expansion is view-dependent, which is what lets a bake reuse it.
