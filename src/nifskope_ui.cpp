@@ -4394,6 +4394,93 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_WSFIX_TEST=1): does the Skeleton Manager keep its hands to
+	 * itself while its dock is hidden — and still do its job when shown?
+	 *
+	 * Its selection handler redirects: select a collision object and it follows
+	 * the Target link to the bone that owns it, so the two docks track each
+	 * other. With no visibility guard that ran in EVERY workspace, so clicking a
+	 * body in the Collision Manager was yanked away to a bone, and a full
+	 * skeletonAnalyse() walked the file on every block-list click app-wide.
+	 *
+	 * Both directions have to hold, which is why this does not simply assert
+	 * "nothing happened". A guard that is really a removal would pass the first
+	 * half and silently break the feature; the second half is what tells them
+	 * apart.
+	 * Log: release/ww_wsfix_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WSFIX_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_wsfix_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif ) { log << "no model\n"; break; }
+
+					QDockWidget * skel = skope->findChild<QDockWidget *>(
+						QStringLiteral( "SkeletonManagerDock" ) );
+					if ( !skel ) { log << "no Skeleton Manager dock\n"; break; }
+
+					// A collision object that actually targets a node — without a
+					// Target there is no redirect to observe either way.
+					int body = -1, target = -1;
+					for ( int b = 0; b < nif->getBlockCount() && body < 0; b++ ) {
+						QModelIndex idx = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( idx, "bhkNiCollisionObject" )
+							&& !nif->blockInherits( idx, "bhkNPCollisionObject" ) )
+							continue;
+						const int t = nif->getLink( idx, "Target" );
+						if ( nif->isValidBlockNumber( t ) ) { body = b; target = t; }
+					}
+					log << "collision block " << body << " targets node " << target << "\n";
+					if ( body < 0 ) { log << "no collision object with a Target\n"; break; }
+
+					auto blockOfCurrent = [nif, skope]() {
+						return nif->getBlockNumber( nif->getBlockIndex( skope->currentNifIndex() ) );
+					};
+
+					// --- hidden: hands off ---------------------------------
+					skel->hide();
+					QApplication::processEvents();
+					skope->select( nif->getBlockIndex( body ) );
+					QApplication::processEvents();
+					const int whenHidden = blockOfCurrent();
+					log << "dock hidden, selected " << body << " -> now on " << whenHidden << "\n";
+					check( "a hidden Skeleton dock does not steal the selection",
+						whenHidden == body );
+
+					// --- shown: still follows ------------------------------
+					skel->show();
+					QApplication::processEvents();
+					QEventLoop settle;
+					QTimer::singleShot( 250, &settle, &QEventLoop::quit );
+					settle.exec();
+					skope->select( nif->getBlockIndex( body ) );
+					QApplication::processEvents();
+					const int whenShown = blockOfCurrent();
+					log << "dock shown, selected " << body << " -> now on " << whenShown << "\n";
+					check( "a visible Skeleton dock still follows to the target bone",
+						whenShown == target );
+					skel->hide();
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SEQBIND_TEST=1): does a sequence bind through the file's
 	 * object palette, and does that ever differ from a name search?
 	 *
@@ -9246,12 +9333,19 @@ void NifSkope::initDockWidgets()
 	// display menu and transform controls: Center Viewpoint resets the orbit
 	// pivot, while Frame Selected also fits the active selection in the view.
 	{
-		// Removing the legacy viewpoint actions can leave their old separator at
-		// the end of the toolbar. Do not let it split Display from this related
-		// focus control; the transform-group separator is added after this button.
+		/* Removing the legacy viewpoint actions can leave their old separator
+		 * stranded at the end of the toolbar, so it goes — and then one is added
+		 * back deliberately.
+		 *
+		 * This used to run the display menu and this focus control together on
+		 * the grounds that they are related. bungo wants them divided, and he is
+		 * right: everything else on this row is spaced in equal groups, so one
+		 * pair sitting flush was the odd one out whatever the reasoning.
+		 */
 		while ( !ui->tRender->actions().isEmpty()
 			&& ui->tRender->actions().last()->isSeparator() )
 			ui->tRender->removeAction( ui->tRender->actions().last() );
+		ui->tRender->addSeparator();
 		ui->aViewCenter->setText( tr( "Center Viewpoint" ) );
 		ui->aViewCenter->setIcon( tlMakeIcon( QStringLiteral( "view_center" ), QColor( 228, 228, 232 ) ) );
 		QToolButton * focusButton = new QToolButton( this );

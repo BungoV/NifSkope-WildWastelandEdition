@@ -1332,7 +1332,22 @@ private:
 		if ( !layerIndex.isValid() )
 			return;
 		quint32 value = selected.toUInt();
-		if ( nif->set<quint32>( layerIndex, value ) ) {
+		/* Snapshotted, like every other write in this panel.
+		 *
+		 * NifModel::set does not push an undo command by itself, so these live
+		 * editors were writing straight through the model while Compile, Import
+		 * Donor and Apply Safe Fixes in the same panel all went through
+		 * nifSnapshotOp. Undo therefore looked like it worked and then reverted
+		 * whichever of THOSE ran last, silently keeping the edit made here.
+		 *
+		 * One entry per edit rather than per pixel, because the spins are
+		 * connected to editingFinished and the combos to activation.
+		 */
+		bool ok = false;
+		nifSnapshotOp( nif, tr( "Set collision layer" ), [&]() {
+			ok = nif->set<quint32>( layerIndex, value );
+		} );
+		if ( ok ) {
 			physicsHint->setText( tr( "Collision layer set to %1." ).arg( collisionLayerName( value ) ) );
 			queueRebuild();
 		}
@@ -1352,7 +1367,11 @@ private:
 		if ( !materialIndex.isValid() )
 			return;
 		quint32 value = selected.toUInt();
-		if ( nif->set<quint32>( materialIndex, value ) ) {
+		bool ok = false;			// undoable — see applyLayerSelection
+		nifSnapshotOp( nif, tr( "Set collision material" ), [&]() {
+			ok = nif->set<quint32>( materialIndex, value );
+		} );
+		if ( ok ) {
 			physicsHint->setText( tr( "Material set to %1." ).arg( materialText( value ) ) );
 			queueRebuild();
 		}
@@ -1366,42 +1385,49 @@ private:
 		QModelIndex info = nif->getIndex( body, "Rigid Body Info" );
 		if ( !info.isValid() )
 			return;
-		QModelIndex filter = nif->getIndex( info, "Havok Filter" );
-		nif->set<float>( info, "Mass", float( mass->value() ) );
-		nif->set<float>( info, "Friction", float( friction->value() ) );
-		nif->set<float>( info, "Restitution", float( restitution->value() ) );
-		nif->set<float>( info, "Linear Damping", float( linearDamping->value() ) );
-		nif->set<float>( info, "Angular Damping", float( angularDamping->value() ) );
-		nif->set<float>( info, "Max Linear Velocity", float( maxLinearVelocity->value() ) );
-		nif->set<float>( info, "Max Angular Velocity", float( maxAngularVelocity->value() ) );
-		quint32 motionValue = motionSystem->currentData().toUInt();
-		quint32 qualityValue = qualityType->currentData().toUInt();
-		if ( keyframed->isChecked() ) { motionValue = 6u; qualityValue = 2u; }
-		else if ( motionValue == 6u ) { motionValue = mass->value() > 0.0 ? 3u : 5u; qualityValue = mass->value() > 0.0 ? 4u : 0u; }
-		nif->set<quint32>( info, "Motion System", motionValue );
-		nif->set<quint32>( info, "Quality Type", qualityValue );
-		nif->set<quint32>( info, "Solver Deactivation", solverDeactivation->currentData().toUInt() );
-		nif->set<quint32>( info, "Deactivator Type", deactivatorType->currentData().toUInt() );
-		nif->set<float>( info, "Penetration Depth", float( penetrationDepth->value() ) );
-		nif->set<Vector4>( info, "Center", Vector4( float( centerX->value() ), float( centerY->value() ), float( centerZ->value() ), 0.0f ) );
-		QModelIndex inertia = nif->getIndex( info, "Inertia Tensor" );
-		if ( inertia.isValid() ) {
-			nif->set<float>( inertia, "m11", float( inertiaX->value() ) );
-			nif->set<float>( inertia, "m22", float( inertiaY->value() ) );
-			nif->set<float>( inertia, "m33", float( inertiaZ->value() ) );
-		}
-		quint32 bodyFlags = nif->get<quint32>( body, "Body Flags" );
-		bodyFlags = wind->isChecked() ? ( bodyFlags | 1u ) : ( bodyFlags & ~1u );
-		nif->set<quint32>( body, "Body Flags", bodyFlags );
-		if ( filter.isValid() ) {
-			quint32 flags = nif->get<quint32>( filter, "Flags" ) & ~0xc0u;
-			if ( linkedGroup->isChecked() ) {
-				flags |= 0x80u;
-				if ( !collisionWithinGroup->isChecked() ) flags |= 0x40u;
+		/* Every field below in ONE undo entry — see applyLayerSelection for why
+		 * these needed wrapping at all. One entry for the lot rather than one
+		 * per field, because a single editingFinished can legitimately rewrite
+		 * several of them (keyframed forces Motion System and Quality Type).
+		 */
+		nifSnapshotOp( nif, tr( "Edit rigid body" ), [&]() {
+			QModelIndex filter = nif->getIndex( info, "Havok Filter" );
+			nif->set<float>( info, "Mass", float( mass->value() ) );
+			nif->set<float>( info, "Friction", float( friction->value() ) );
+			nif->set<float>( info, "Restitution", float( restitution->value() ) );
+			nif->set<float>( info, "Linear Damping", float( linearDamping->value() ) );
+			nif->set<float>( info, "Angular Damping", float( angularDamping->value() ) );
+			nif->set<float>( info, "Max Linear Velocity", float( maxLinearVelocity->value() ) );
+			nif->set<float>( info, "Max Angular Velocity", float( maxAngularVelocity->value() ) );
+			quint32 motionValue = motionSystem->currentData().toUInt();
+			quint32 qualityValue = qualityType->currentData().toUInt();
+			if ( keyframed->isChecked() ) { motionValue = 6u; qualityValue = 2u; }
+			else if ( motionValue == 6u ) { motionValue = mass->value() > 0.0 ? 3u : 5u; qualityValue = mass->value() > 0.0 ? 4u : 0u; }
+			nif->set<quint32>( info, "Motion System", motionValue );
+			nif->set<quint32>( info, "Quality Type", qualityValue );
+			nif->set<quint32>( info, "Solver Deactivation", solverDeactivation->currentData().toUInt() );
+			nif->set<quint32>( info, "Deactivator Type", deactivatorType->currentData().toUInt() );
+			nif->set<float>( info, "Penetration Depth", float( penetrationDepth->value() ) );
+			nif->set<Vector4>( info, "Center", Vector4( float( centerX->value() ), float( centerY->value() ), float( centerZ->value() ), 0.0f ) );
+			QModelIndex inertia = nif->getIndex( info, "Inertia Tensor" );
+			if ( inertia.isValid() ) {
+				nif->set<float>( inertia, "m11", float( inertiaX->value() ) );
+				nif->set<float>( inertia, "m22", float( inertiaY->value() ) );
+				nif->set<float>( inertia, "m33", float( inertiaZ->value() ) );
 			}
-			nif->set<quint32>( filter, "Flags", flags );
-			nif->set<quint32>( filter, "Group", quint32( filterGroup->value() ) );
-		}
+			quint32 bodyFlags = nif->get<quint32>( body, "Body Flags" );
+			bodyFlags = wind->isChecked() ? ( bodyFlags | 1u ) : ( bodyFlags & ~1u );
+			nif->set<quint32>( body, "Body Flags", bodyFlags );
+			if ( filter.isValid() ) {
+				quint32 flags = nif->get<quint32>( filter, "Flags" ) & ~0xc0u;
+				if ( linkedGroup->isChecked() ) {
+					flags |= 0x80u;
+					if ( !collisionWithinGroup->isChecked() ) flags |= 0x40u;
+				}
+				nif->set<quint32>( filter, "Flags", flags );
+				nif->set<quint32>( filter, "Group", quint32( filterGroup->value() ) );
+			}
+		} );
 		if ( ogl ) {
 			ogl->flush();
 			ogl->update();

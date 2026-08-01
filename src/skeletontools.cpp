@@ -989,6 +989,23 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			[=]( const QModelIndex & index ) mutable {
 				if ( *syncing )
 					return;
+				/* Do nothing at all while this dock is hidden.
+				 *
+				 * Without this the handler runs in EVERY workspace, and it does
+				 * two things it has no business doing from behind a closed dock:
+				 * it rewrites the global selection below (so clicking a collision
+				 * body in the Collision Manager is yanked to that body's bone,
+				 * with the two docks fighting over one selection), and refresh()
+				 * re-runs skeletonAnalyse() over every block in the file on every
+				 * block-list click anywhere in the app.
+				 *
+				 * The Collision Manager's own handler already guards exactly this
+				 * way (collisiontools.cpp, "!dock->isVisible()"); this one was
+				 * simply missing it. `panel` is the dock's widget, so its
+				 * visibility is the dock's.
+				 */
+				if ( !panel->isVisible() )
+					return;
 				// Selecting a collision body in the Collision Manager selects its
 				// bhkNPCollisionObject, which is not a bone and would leave this
 				// tree pointing at nothing. Follow it to the node it targets - the

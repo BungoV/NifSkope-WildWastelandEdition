@@ -531,7 +531,7 @@ void TimelineWidget::insertKeyAtTime( int lane, float time )
 
 	for ( int c = 0; c < l.channels.count(); c++ ) {
 		const TimelineChannel & ch = l.channels[c];
-		if ( !ch.plottable() || ch.type == TimelineChannel::QuatVal )
+		if ( !ch.plottable() )
 			continue;
 
 		auto keys = readChannelKeys( ch );
@@ -588,6 +588,47 @@ void TimelineWidget::insertKeyAtTime( int lane, float time )
 					bool bv = false;
 					Controller::interpolate( bv, iKeyGroup, time, last );
 					v = bv ? 1.0f : 0.0f;
+				}
+				break;
+			case TimelineChannel::QuatVal:
+				{
+					/* Sampled here rather than through Controller::interpolate,
+					 * which has no Quat specialisation — and that absence, not an
+					 * oversight, is why rotation was excluded from this function
+					 * outright. Excluding it meant I or a double-click on a
+					 * rotation lane produced no key and no message, on the
+					 * most-keyed channel there is, while writeChannelKeys had
+					 * handled quaternion keys correctly all along.
+					 *
+					 * SLERP between the bracketing keys, off the list already read
+					 * above. Nearest-key outside the range, matching how a clamped
+					 * curve reads elsewhere.
+					 */
+					Quat q( 1, 0, 0, 0 );
+					if ( !keys.isEmpty() ) {
+						auto quatAt = []( const TimelineKeyData & k ) {
+							Quat r( 1, 0, 0, 0 );
+							for ( int i = 0; i < 4 && i < k.comps.size(); i++ )
+								r[i] = k.comps.at( i );
+							return r;
+						};
+						int hi = 0;
+						while ( hi < keys.size() && keys.at( hi ).time < time )
+							hi++;
+						if ( hi == 0 ) {
+							q = quatAt( keys.first() );
+						} else if ( hi >= keys.size() ) {
+							q = quatAt( keys.last() );
+						} else {
+							const TimelineKeyData & a = keys.at( hi - 1 );
+							const TimelineKeyData & b = keys.at( hi );
+							const float span = b.time - a.time;
+							const float u = ( span > 1.0e-6f )
+								? std::clamp( ( time - a.time ) / span, 0.0f, 1.0f ) : 0.0f;
+							q = Quat::slerp( u, quatAt( a ), quatAt( b ) );
+						}
+					}
+					v = q[std::clamp( comp, 0, 3 )];
 				}
 				break;
 			default:
