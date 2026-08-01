@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-01e — One row at the top, and three audit fixes
+
+**The menu bar and the tool bar share a row.** Three stacked bands at the top of
+the window (title, menus, tools) are two. The menu bar is reparented into the
+first toolbar as an ordinary widget, so the top toolbar area lays it out on the
+same line as the rest — those toolbars already shared a row with each other, and
+this just adds one more member to it. `setMenuWidget` then takes an empty
+placeholder so the main window stops reserving a band for it.
+
+Order matters and is commented in place: the bar goes into the toolbar *before*
+the main window is told to stop reserving its row, because doing it the other way
+hands QMainWindow a widget it still owns and is about to replace.
+
+*Known limit:* on a window narrow enough that the menus plus every toolbar group
+no longer fit, the row spills into Qt's toolbar extension button rather than
+wrapping. Nothing is lost, but it is a click away.
+
+**Three faults from the workspace audit, each verified before being touched** —
+two of six claims in the earlier Unfuck audit had been subtly overstated, so none
+was taken on trust.
+
+The **Skeleton Manager was stealing the selection from behind a closed dock**.
+Its handler had no visibility guard, so in every workspace selecting a collision
+object was redirected to the bone that owns it — a hidden dock fighting the
+Collision Manager over one selection — and a full `skeletonAnalyse()` walked the
+file on every block-list click anywhere in the app. `WW_WSFIX_TEST` checks both
+directions, because a guard that is really a removal would pass the first half
+and quietly kill the feature: hidden, selecting collision block 7 stays on 7;
+shown, it still follows to target node 6. The bug was reproduced on the old code
+first.
+
+**Collision's live editors wrote with no undo entry** — `applyPhysics` (~20
+fields), `applyLayerSelection` and `applyMaterialSelection` all used bare
+`nif->set<>`, which pushes nothing, while Compile and Import Donor in the same
+panel snapshot correctly. So undo appeared to work and then reverted whichever of
+*those* ran last. All three go through `nifSnapshotOp` now.
+
+**Rotation keys could not be inserted at all.** `insertKeyAtTime` skipped
+quaternion channels, so I or double-click on a rotation lane produced nothing and
+said nothing, on the most-keyed channel there is. The exclusion existed because
+`Controller::interpolate` has no `Quat` specialisation; this adds one, SLERPing
+between the bracketing keys off the list the function already reads.
+
+Verification status, plainly: the Skeleton fix is proven both ways by harness;
+the collision fix is checked statically (no bare `nif->set` survives outside the
+snapshot lambdas) but not exercised at runtime; the rotation fix compiles and the
+sampler is straightforward, but nothing has yet inserted a rotation key and read
+it back. The last two want harnesses.
+
 ## 2026-08-01d — The Unfuck dialog, audited and rebuilt
 
 An audit of what that dialog was actually offering found two things that made it

@@ -11562,6 +11562,42 @@ void NifSkope::initMenu()
 	 */
 	ui->tRender->removeAction( ui->aPrintView );
 
+	/* Menu bar and tool bar share one row.
+	 *
+	 * bungo wants the vertical space back at the top: three stacked rows (title,
+	 * menus, tools) become two. The menu bar is reparented INTO the first
+	 * toolbar as an ordinary widget, so the top toolbar area lays it out on the
+	 * same line as everything else — those toolbars already share a row with
+	 * each other, this just adds one more member to it.
+	 *
+	 * Order matters. The bar is put into the toolbar first, so it belongs to the
+	 * toolbar before the main window is told to stop reserving a row for it;
+	 * doing it the other way round hands QMainWindow a widget it still owns and
+	 * is about to replace, which is how you get a double free.
+	 *
+	 * setMenuWidget takes an empty placeholder rather than nullptr: nullptr
+	 * leaves the previous menu widget in place on some styles, while a widget
+	 * whose sizeHint is zero collapses the row outright.
+	 */
+	if ( ui->menubar ) {
+		QMenuBar * mb = ui->menubar;
+		mb->setSizePolicy( QSizePolicy::Minimum, QSizePolicy::Preferred );
+		// Corner-to-corner background would otherwise paint a plate the width of
+		// the window behind the whole toolbar row.
+		mb->setStyleSheet( QStringLiteral( "QMenuBar { background: transparent; border: 0; }" ) );
+		const QList<QAction *> firstActions = ui->tFile->actions();
+		QAction * before = firstActions.isEmpty() ? nullptr : firstActions.first();
+		if ( before )
+			ui->tFile->insertWidget( before, mb );
+		else
+			ui->tFile->addWidget( mb );
+		setMenuWidget( new QWidget( this ) );
+		// A vertical rule between the menus and the first tool, matching every
+		// other group boundary on the row.
+		if ( before )
+			ui->tFile->insertSeparator( before );
+	}
+
 	/* One bar between groups, not two.
 	 *
 	 * Every toolbar here is assembled by deleting actions out of the designer
