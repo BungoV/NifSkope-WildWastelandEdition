@@ -73,7 +73,7 @@ void BaseModel::logMessage( const QString & message, const QString & details, QM
 	if ( msgMode == MSG_USER ) {
 		Message::append( nullptr, message, details, lvl );
 	} else {
-		testMsg( details );
+		testMsg( details, lvl );
 	}
 }
 
@@ -82,9 +82,16 @@ void BaseModel::logWarning( const QString & details ) const
 	logMessage(tr("Warnings were generated while reading the file."), details);
 }
 
-void BaseModel::testMsg( const QString & m ) const
+void BaseModel::testMsg( const QString & m, QMessageBox::Icon lvl ) const
 {
-	messages.append( TestMessage() << m );
+	// The level maps straight through. Critical is a file that is wrong;
+	// Warning is a file that is suspect; anything else is informational.
+	QtMsgType type = QtWarningMsg;
+	if ( lvl == QMessageBox::Critical )
+		type = QtCriticalMsg;
+	else if ( lvl == QMessageBox::Information || lvl == QMessageBox::NoIcon )
+		type = QtInfoMsg;
+	messages.append( TestMessage( type ) << m );
 }
 
 inline NifItem * indexToItem( const QModelIndex & index )

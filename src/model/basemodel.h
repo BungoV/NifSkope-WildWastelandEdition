@@ -594,7 +594,14 @@ protected:
 	//! A list of test messages
 	mutable QList<TestMessage> messages;
 	//! Handle a test message
-	void testMsg( const QString & m ) const;
+	/*! Record a message for MSG_TEST mode.
+	 *
+	 *  Takes the level because the caller always had one and this used to drop
+	 *  it: logMessage's `lvl` reached the popup path and nothing else, so any
+	 *  UI reading these back could not tell an error from a warning even
+	 *  though TestMessage has carried a QtMsgType all along.
+	 */
+	void testMsg( const QString & m, QMessageBox::Icon lvl = QMessageBox::Warning ) const;
 
 	MsgMode msgMode;
 

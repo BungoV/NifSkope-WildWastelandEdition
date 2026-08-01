@@ -379,6 +379,7 @@ SOURCES += \
 	src/nifskope_ui.cpp \
 	src/shortcutregistry.cpp \
 	src/skeletontools.cpp \
+	src/unfucktools.cpp \
 	src/starterscene.cpp \
 	src/rdccapture.cpp \
 	src/skeletonops.cpp \

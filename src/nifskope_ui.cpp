@@ -4481,6 +4481,98 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_UNFUCKPANEL_TEST=1): does the Unfuck workspace actually
+	 * find, colour and locate the problems in a file?
+	 *
+	 * Four things can each be quietly wrong and none is visible from a
+	 * screenshot: the scan may find nothing, the severity may be flattened (it
+	 * WAS -- BaseModel::testMsg discarded the level until this change, so
+	 * everything would arrive as a warning), the block number may not be parsed
+	 * out of the message, and Go to may not move the selection. All four are
+	 * checked here against a file with a deliberately broken texture path.
+	 * Log: release/ww_unfuckpanel_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_UNFUCKPANEL_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_unfuckpanel_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					QDockWidget * dock = skope->findChild<QDockWidget *>(
+						QStringLiteral( "UnfuckManagerDock" ) );
+					if ( !dock ) { log << "no Unfuck dock\n"; break; }
+					dock->show();
+					QApplication::processEvents();
+					QEventLoop settle;
+					QTimer::singleShot( 400, &settle, &QEventLoop::quit );
+					settle.exec();
+
+					auto * tree = dock->findChild<QTreeWidget *>( QStringLiteral( "UnfuckIssueTree" ) );
+					auto * repairs = dock->findChild<QTreeWidget *>( QStringLiteral( "UnfuckRepairList" ) );
+					auto * status = dock->findChild<QLabel *>( QStringLiteral( "UnfuckStatus" ) );
+					if ( !tree || !repairs ) { log << "panel widgets missing\n"; break; }
+
+					log << "status: " << ( status ? status->text() : QString() ) << "\n";
+					int groups = tree->topLevelItemCount(), findings = 0, located = 0, coloured = 0;
+					const QColor plain( wwSkinColor( "text" ) );
+					for ( int g = 0; g < groups; g++ ) {
+						QTreeWidgetItem * gi = tree->topLevelItem( g );
+						log << "  group " << gi->text( 0 ) << "\n";
+						for ( int c = 0; c < gi->childCount(); c++ ) {
+							QTreeWidgetItem * it = gi->child( c );
+							log << "    " << it->text( 0 ) << "  [" << it->text( 1 ) << "]\n";
+							if ( it->data( 0, int( Qt::UserRole ) + 1 /* unfucktools.cpp BlockRole */ ).toInt() >= 0 ) { findings++; located++; }
+							else if ( !it->text( 1 ).isEmpty() ) findings++;
+							if ( it->foreground( 0 ).color() != plain ) coloured++;
+						}
+					}
+					log << groups << " group(s), " << located << " finding(s) with a block number, "
+						<< coloured << " coloured\n";
+
+					check( "the scan found something", groups > 0 );
+					check( "findings carry the block they point at", located > 0 );
+					check( "severity reached the UI as colour", coloured > 0 );
+					check( "the repair list was built", repairs->topLevelItemCount() > 0 );
+
+					// Go to: click the action column of the first located finding.
+					int before = -1, after = -1;
+					for ( int g = 0; g < groups && after < 0; g++ ) {
+						QTreeWidgetItem * gi = tree->topLevelItem( g );
+						for ( int c = 0; c < gi->childCount(); c++ ) {
+							QTreeWidgetItem * it = gi->child( c );
+							const int b = it->data( 0, int( Qt::UserRole ) + 1 /* unfucktools.cpp BlockRole */ ).toInt();
+							if ( b < 0 )
+								continue;
+							NifModel * m = skope->getNifModel();
+							before = m->getBlockNumber( m->getBlockIndex( skope->currentNifIndex() ) );
+							emit tree->itemClicked( it, 1 );
+							QApplication::processEvents();
+							after = m->getBlockNumber( m->getBlockIndex( skope->currentNifIndex() ) );
+							log << "Go to: block " << before << " -> " << after
+								<< " (wanted " << b << ")\n";
+							check( "Go to selects the offending block", after == b );
+							break;
+						}
+					}
+					dock->hide();
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SEQBIND_TEST=1): does a sequence bind through the file's
 	 * object palette, and does that ever differ from a name search?
 	 *
@@ -10249,8 +10341,22 @@ void NifSkope::initDockWidgets()
 	// These docks occupy one manager/workspace slot. Keep the policy on
 	// the docks themselves so the planned Blender-style workspace selector can
 	// later activate a role instead of knowing about each concrete manager.
+	/* Unfuck is a workspace, not a dialog.
+	 *
+	 * It began as a menu of checkboxes and then a modal dialog, and both had the
+	 * same fault: they asked which repairs to run before saying what was wrong.
+	 * A panel can stay open while you work, which is what makes "go to the block"
+	 * worth having at all — click a finding, look at it, fix it, watch the list
+	 * shrink. Appended last so the stored workspace index of every existing user
+	 * keeps pointing at the same workspace it did before.
+	 */
+	extern QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
+	QDockWidget * dUnfuckMgr = tlCreateUnfuckManagerDock( nif, this, ogl );
+	dUnfuckMgr->toggleViewAction()->setText( tr( "Unfuck" ) );
+
 	const QList<QDockWidget *> workspaceManagers = {
-		dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr, dSkeletonMgr
+		dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
+		dSkeletonMgr, dUnfuckMgr
 	};
 	for ( QDockWidget * manager : workspaceManagers )
 		manager->setProperty( "workspaceRole", QStringLiteral( "manager" ) );
@@ -10693,7 +10799,7 @@ void NifSkope::initDockWidgets()
 		const QStringList workspaceNames = {
 			tr( "Default" ), tr( "Animation" ), tr( "Materials" ), tr( "Collision" ),
 			tr( "Rigging" ), tr( "Vertex Paint" ), tr( "UV Editing" ), tr( "Pose" ),
-				tr( "Skeleton" )
+				tr( "Skeleton" ), tr( "Unfuck" )
 		};
 		QList<QAction *> workspaceActions;
 		for ( const QString & name : workspaceNames ) {
@@ -10707,7 +10813,8 @@ void NifSkope::initDockWidgets()
 			// SKELETON_AND_POSE_PLAN.md A.7). No planned entries remain, so the
 			// separator went with it.
 			const QList<QDockWidget *> managers = {
-			dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr, dSkeletonMgr
+			dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
+			dSkeletonMgr, dUnfuckMgr
 		};
 		auto activateWorkspace = [this, managers, workspaceActions]( int workspace ) {
 			workspace = std::clamp( workspace, 0, int( managers.size() ) );
