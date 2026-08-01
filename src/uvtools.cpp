@@ -726,6 +726,7 @@ public:
 	void pinSelected( bool pin );       // P pin / Alt+P unpin selected verts
 	void invertPins();
 	void unwrapWithPins();              // LSCM over selection honouring pinnedVerts
+	void unwrapSelectionInPlace();      // re-solve a sub-region, pinning the seam to its island
 	void ripSelectedFaces();            // duplicate boundary verts -> free island (Rip/Split)
 	void exportUVLayout();              // render the UV wireframe to a PNG
 
@@ -2658,6 +2659,12 @@ void UVEditorView::showUnwrapMenu( const QPoint & globalPos )
 	UVAutoCloseMenu menu;
 	menu.addSection( tr( "Unwrap" ) );
 	QAction * unwrap = menu.addAction( tr( "Unwrap (Angle Based)…" ) );
+	// Re-solves the selection where it already sits, welded to whatever it was
+	// joined to. See unwrapSelectionInPlace: the seam pins itself, so the rest
+	// of the island is untouched instead of being repacked with it.
+	QAction * inPlace = menu.addAction( tr( "Unwrap Selection In Place" ) );
+	inPlace->setToolTip( tr( "Unwrap only the selected faces, keeping them attached to the "
+		"rest of their island, which does not move." ) );
 	menu.addSeparator();
 	// "…" marks operators that pop the adjust-last-operation panel afterwards
 	// (same convention as the 3D viewport's "By Distance…")
@@ -2669,6 +2676,7 @@ void UVEditorView::showUnwrapMenu( const QPoint & globalPos )
 	QAction * sphere = menu.addAction( tr( "Sphere Projection" ) );
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == unwrap ) unwrapSelection();
+	else if ( chosen == inPlace ) unwrapSelectionInPlace();
 	else if ( chosen == smart ) smartProject( 66.0f );
 	else if ( chosen == project ) projectFromView();
 	else if ( chosen == cube ) projectShape( 0 );
@@ -3744,6 +3752,178 @@ void UVEditorView::unwrapWithPins()
 	}
 	applyUVEditUndoable( edits, tr( "Unwrap (Pinned)" ) );
 	setStatus( tr( "Unwrapped %1 UVs around %2 pins." ).arg( edits.size() ).arg( pins.size() ) );
+}
+
+/*! Unwrap only what is selected, and leave the island it sits in alone.
+ *
+ *  bungo: "you'd select uv areas that are already part of a UV island, and those
+ *  will get unwrapped, but they'll still be connected to the rest of the original
+ *  UV island, which will remain the same."
+ *
+ *  Neither existing operator does this. `unwrapSelection` solves the selection
+ *  and then PACKS every component into 0-1, so the patch comes back somewhere
+ *  else entirely and the seam it shared with the rest of the island is torn.
+ *  `unwrapWithPins` keeps things in place, but only around pins the user placed
+ *  by hand, one vertex at a time.
+ *
+ *  The pins this wants are not a user decision at all — they are a property of
+ *  the selection. A vertex that belongs to a selected face AND to an unselected
+ *  one is on the seam between the part being re-solved and the part that must
+ *  not move, so it is exactly the set that has to stay put. Pin those at the UVs
+ *  they already have and the solver stitches the new patch straight back into
+ *  the untouched remainder.
+ *
+ *  No density rescale and no packing here, deliberately: both are ways of
+ *  choosing a size and a place, and the pins have already chosen both.
+ */
+void UVEditorView::unwrapSelectionInPlace()
+{
+	if ( objectModeView ) {
+		setStatus( tr( "Object Mode is read-only — switch to Edit Mode to unwrap." ) );
+		return;
+	}
+	const UVShapeData * sd = active();
+	if ( !sd || !nif )
+		return;
+
+	// Target faces, by the same rule the other unwrap operators use: the face
+	// selection in face mode, otherwise every face whose corners are all selected.
+	QVector<Triangle> target;
+	QSet<int> inside, outside;
+	for ( int f = 0; f < sd->tris.size(); f++ ) {
+		const Triangle & t = sd->tris.at( f );
+		if ( !faceVisibleUV( f, t ) )
+			continue;
+		const bool inSel = ( selectMode == 3 )
+			? selFaces.contains( f )
+			: ( selVerts.contains( t[0] ) && selVerts.contains( t[1] ) && selVerts.contains( t[2] ) );
+		if ( inSel ) {
+			target << t;
+			inside << t[0] << t[1] << t[2];
+		} else {
+			// Only VISIBLE unselected faces hold the boundary. A hidden face is
+			// not part of the island the user can see, and letting it pin the
+			// seam would freeze an edge for a reason nothing on screen explains.
+			outside << t[0] << t[1] << t[2];
+		}
+	}
+	if ( target.isEmpty() ) {
+		setStatus( tr( "Unwrap in place: select the faces to unwrap first." ) );
+		return;
+	}
+
+	QVector<Vector3> pos;
+	if ( !readShapePositions( nif, *sd, pos ) ) {
+		setStatus( tr( "Unwrap: could not read vertex positions." ) );
+		return;
+	}
+
+	// The seam: selected vertices that an unselected face also uses. Explicit
+	// pins are honoured on top, so P still does what it did.
+	QHash<int, Vector2> pins;
+	int seamCount = 0;
+	for ( int v : std::as_const( inside ) ) {
+		if ( !outside.contains( v ) || v < 0 || v >= sd->uvs.size() )
+			continue;
+		pins.insert( v, sd->uvs.at( v ) );
+		seamCount++;
+	}
+	for ( int v : std::as_const( pinnedVerts ) )
+		if ( v >= 0 && v < sd->uvs.size() )
+			pins.insert( v, sd->uvs.at( v ) );
+
+	// Components, split on the existing vertex splits exactly as the other
+	// unwrap paths do — those splits ARE the seams in the per-vertex NIF model.
+	QHash<int, int> compRoot;
+	std::function<int(int)> findRoot = [&]( int a ) {
+		int r = a;
+		while ( compRoot.value( r, r ) != r )
+			r = compRoot.value( r, r );
+		return r;
+	};
+	for ( const Triangle & t : std::as_const( target ) ) {
+		if ( !compRoot.contains( t[0] ) ) compRoot[t[0]] = t[0];
+		if ( !compRoot.contains( t[1] ) ) compRoot[t[1]] = t[1];
+		if ( !compRoot.contains( t[2] ) ) compRoot[t[2]] = t[2];
+		int r0 = findRoot( t[0] );
+		compRoot[findRoot( t[1] )] = r0;
+		compRoot[findRoot( t[2] )] = findRoot( r0 );
+	}
+	QHash<int, QVector<Triangle>> componentTris;
+	for ( const Triangle & t : std::as_const( target ) )
+		componentTris[findRoot( t[0] )] << t;
+
+	QHash<int, Vector2> edits;
+	int freeComponents = 0;
+	for ( auto it = componentTris.constBegin(); it != componentTris.constEnd(); ++it ) {
+		QSet<int> verts;
+		for ( const Triangle & t : it.value() )
+			verts << t[0] << t[1] << t[2];
+
+		QHash<int, Vector2> compPins;
+		for ( int v : std::as_const( verts ) ) {
+			auto p = pins.constFind( v );
+			if ( p != pins.constEnd() )
+				compPins.insert( v, p.value() );
+		}
+
+		/* A component with fewer than two pins touches nothing that has to stay
+		 * put — the selection took a whole island, or a piece of one joined to
+		 * the rest through a single vertex. The solver's own fallback would
+		 * anchor it at (0,0)-(1,0), which is to say it would fling the patch
+		 * across the atlas: the one thing this operator exists to avoid. Anchor
+		 * it to its OWN current UVs instead, so it is re-solved where it lies.
+		 */
+		if ( compPins.size() < 2 && !verts.isEmpty() ) {
+			int a = *verts.constBegin(), b = a;
+			float best = -1.0f;
+			for ( int v1 : std::as_const( verts ) ) {
+				if ( v1 >= sd->uvs.size() )
+					continue;
+				for ( int v2 : std::as_const( verts ) ) {
+					if ( v2 >= sd->uvs.size() )
+						continue;
+					const Vector2 d = sd->uvs.at( v1 ) - sd->uvs.at( v2 );
+					const float dist = d[0] * d[0] + d[1] * d[1];
+					if ( dist > best ) { best = dist; a = v1; b = v2; }
+				}
+			}
+			if ( a != b && best > 0.0f ) {
+				compPins.insert( a, sd->uvs.at( a ) );
+				compPins.insert( b, sd->uvs.at( b ) );
+				freeComponents++;
+			}
+		}
+
+		QHash<int, Vector2> uv;
+		if ( !lscmSolveComponent( pos, it.value(), uv, &compPins ) )
+			continue;
+		// Pinned vertices are written back unchanged rather than trusted to come
+		// out of the solve identical: they are the contract with the rest of the
+		// island, and a float's worth of drift on a shared corner is a visible
+		// split in the texture.
+		for ( auto uvIt = uv.constBegin(); uvIt != uv.constEnd(); ++uvIt ) {
+			auto pinned = compPins.constFind( uvIt.key() );
+			edits.insert( uvIt.key(), pinned != compPins.constEnd() ? pinned.value() : uvIt.value() );
+		}
+	}
+
+	if ( edits.isEmpty() ) {
+		setStatus( tr( "Unwrap failed (degenerate geometry?)." ) );
+		return;
+	}
+	applyUVEditUndoable( edits, tr( "Unwrap Selection In Place" ) );
+
+	if ( seamCount == 0 )
+		setStatus( tr( "Unwrapped %1 UVs in place. Nothing selected touched an unselected "
+			"face, so this was a plain unwrap held where it already was." ).arg( edits.size() ) );
+	else if ( freeComponents > 0 )
+		setStatus( tr( "Unwrapped %1 UVs in place, welded along %2 shared vertices "
+			"(%3 loose piece(s) held at their own corners)." )
+			.arg( edits.size() ).arg( seamCount ).arg( freeComponents ) );
+	else
+		setStatus( tr( "Unwrapped %1 UVs in place, welded to the rest of the island "
+			"along %2 shared vertices." ).arg( edits.size() ).arg( seamCount ) );
 }
 
 void UVEditorView::exportUVLayout()

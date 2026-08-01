@@ -85,6 +85,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
@@ -10803,177 +10804,317 @@ void NifSkope::initMenu()
 		}
 	}
 
-	/* "Unfuck" replaces the Spells menu in the menubar.
+	/* The Spells menu, kept — with Unfuck at the top of it.
 	 *
-	 * bungo: "remove from it whatever is in the select / add / object or other
-	 * top bar buttons, or anything in the right click menu." That is the whole of
-	 * it — right-clicking a block in the Block List or Block Details opens a
-	 * fresh SpellBook with every spell in it, so the menubar copy was a second
-	 * route to things already one click away, and the viewport's Select / Add /
-	 * Object buttons cover the rest.
+	 * bungo, in two passes: "remove from it whatever is in the select / add /
+	 * object or other top bar buttons, or anything in the right click menu",
+	 * then "keep the spells menu as it was ... with only stuff that's unique to
+	 * the spell menu".
 	 *
-	 * What that copy was NOT giving anyone is the file-fixing spells, and the
-	 * reason is worth writing down: they all answer `isApplicable` with
-	 * `!index.isValid()` because they act on the whole file rather than on one
-	 * block, and `SpellBook::checkActions` HIDES whatever does not apply to the
-	 * current selection. So the moment you click any block — the first thing
-	 * anyone does — every one of them vanished. They were not missing, they were
-	 * unreachable.
+	 * What is unique turns out to be a sharp line rather than a judgement call.
+	 * Right-clicking a block in the Block List or Block Details opens a full
+	 * SpellBook AT THAT INDEX, so every spell that applies to a block is already
+	 * one click away there. The spells that right-click can never reach are the
+	 * ones that answer `isApplicable` only for an INVALID index, because they act
+	 * on the whole file — and those are exactly the ones the menubar copy used to
+	 * hide the moment you selected anything, since `SpellBook::checkActions`
+	 * drops whatever does not apply to the current selection.
 	 *
-	 * Here they are addressed with an invalid index deliberately, so having a
-	 * block selected cannot take them away again.
+	 * So this menu is built by hand from the whole-file spells and never filtered
+	 * against the selection. Everything else stays on right-click, where it was.
 	 */
 	{
-		QMenu * unfuck = new QMenu( tr( "Unfuck" ), this );
-		unfuck->setToolTipsVisible( true );
-		ui->menubar->insertMenu( ui->menubar->actions().at( 3 ), unfuck );
+		QMenu * spellsMenu = new QMenu( tr( "Spells" ), this );
+		spellsMenu->setToolTipsVisible( true );
+		ui->menubar->insertMenu( ui->menubar->actions().at( 3 ), spellsMenu );
 
-		// Every spell that repairs something about a file: the Sanitize page,
-		// plus anything registered as a sanitizer or a checker and therefore
-		// already trusted to run in the on-save pass.
-		QList<SpellPtr> fixes;
+		/* Unfuck: the repair spells, in a dialog of their own.
+		 *
+		 * bungo: "it's meant to open a new container, where you have all the
+		 * related settings, and you can toggle anything, then click ok or cancel."
+		 * A menu of checkable entries was the first attempt and is the wrong
+		 * shape for this: a menu closes on every click, so setting up a run means
+		 * reopening it once per fix, and there is no way to back out of the
+		 * choices you just made. A dialog holds the whole set at once and Cancel
+		 * means something.
+		 *
+		 * Split in two, because these are not the same kind of thing and mixing
+		 * them is what made the first version pop a modal warning on every run. A
+		 * FIX edits the file. A CHECK only reports — `spErrorInvalidPaths` writes
+		 * "'Textures' has a filepath without a file extension" and changes
+		 * nothing — so checks are listed apart and start switched off.
+		 */
+		QAction * unfuck = spellsMenu->addAction( tr( "Unfuck…" ) );
+		QFont unfuckFont = unfuck->font();
+		unfuckFont.setBold( true );
+		unfuck->setFont( unfuckFont );
+		spellsMenu->addSeparator();
+
+		QList<SpellPtr> fixes, checks;
 		for ( SpellPtr s : SpellBook::spells() ) {
 			if ( !s )
 				continue;
-			if ( ( s->page() == Spell::tr( "Sanitize" ) || s->sanity() || s->checker() )
-				&& !fixes.contains( s ) )
-				fixes.append( s );
-		}
-		std::sort( fixes.begin(), fixes.end(),
-			[]( const SpellPtr & a, const SpellPtr & b ) { return a->name() < b->name(); } );
-
-		QSettings cfg;
-		QList<QPair<QAction *, SpellPtr>> fixActions;
-		for ( SpellPtr s : fixes ) {
-			QAction * a = unfuck->addAction( s->name() );
-			a->setCheckable( true );
-			a->setChecked( cfg.value( QStringLiteral( "Unfuck/%1" ).arg( s->name() ), true ).toBool() );
-			connect( a, &QAction::toggled, this, [s]( bool on ) {
-				QSettings().setValue( QStringLiteral( "Unfuck/%1" ).arg( s->name() ), on );
-			} );
-			fixActions.append( qMakePair( a, s ) );
-		}
-
-		unfuck->addSeparator();
-		QAction * allOn = unfuck->addAction( tr( "Check All" ) );
-		QAction * allOff = unfuck->addAction( tr( "Check None" ) );
-		unfuck->addSeparator();
-		QAction * run = unfuck->addAction( tr( "Unfuck This File" ) );
-		QFont runFont = run->font();
-		runFont.setBold( true );
-		run->setFont( runFont );
-
-		connect( allOn, &QAction::triggered, this, [fixActions]() {
-			for ( const auto & p : fixActions ) p.first->setChecked( true );
-		} );
-		connect( allOff, &QAction::triggered, this, [fixActions]() {
-			for ( const auto & p : fixActions ) p.first->setChecked( false );
-		} );
-
-		// Enable state is recomputed as the menu opens, against an INVALID index
-		// — the one these spells actually want — rather than against whatever
-		// happens to be selected. A fix with nothing to do is greyed and says so,
-		// instead of disappearing.
-		connect( unfuck, &QMenu::aboutToShow, this, [this, fixActions, run]() {
-			int usable = 0;
-			for ( const auto & p : fixActions ) {
-				const bool ok = nif && p.second->isApplicable( nif, QModelIndex() );
-				p.first->setEnabled( ok );
-				p.first->setToolTip( ok ? p.second->name()
-					: tr( "%1 has nothing to do in this file" ).arg( p.second->name() ) );
-				if ( ok && p.first->isChecked() )
-					usable++;
+			if ( s->checker() ) {
+				if ( !checks.contains( s ) ) checks.append( s );
+			} else if ( s->page() == Spell::tr( "Sanitize" ) || s->sanity() ) {
+				if ( !fixes.contains( s ) ) fixes.append( s );
 			}
-			run->setEnabled( usable > 0 );
-			run->setText( usable > 0 ? tr( "Unfuck This File (%1)" ).arg( usable )
-			                         : tr( "Unfuck This File" ) );
+		}
+		auto byName = []( const SpellPtr & a, const SpellPtr & b ) { return a->name() < b->name(); };
+		std::sort( fixes.begin(), fixes.end(), byName );
+		std::sort( checks.begin(), checks.end(), byName );
+
+		connect( unfuck, &QAction::triggered, this, [this, fixes, checks]() {
+			if ( !nif ) {
+				Message::info( this, tr( "Open a NIF first." ) );
+				return;
+			}
+
+			QDialog dlg( this );
+			dlg.setWindowTitle( tr( "Unfuck" ) );
+			dlg.setMinimumWidth( 460 );
+			auto * lay = new QVBoxLayout( &dlg );
+
+			auto * intro = new QLabel( tr(
+				"Everything here acts on the whole file. Tick what to run, then OK." ), &dlg );
+			intro->setWordWrap( true );
+			intro->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
+			lay->addWidget( intro );
+
+			QSettings cfg;
+			QList<QPair<QCheckBox *, SpellPtr>> boxes;
+
+			/* Applicability is asked with an INVALID index — the one these spells
+			 * actually want. Asking with the current selection is what used to
+			 * make the whole set vanish from the menubar, since every one of them
+			 * answers isApplicable only when nothing is selected.
+			 *
+			 * A spell with nothing to do here is shown DISABLED rather than
+			 * dropped, so the list is the same shape from file to file and the
+			 * greying is itself the report.
+			 */
+			auto addGroup = [&]( const QString & title, const QString & hint,
+			                     const QList<SpellPtr> & list, bool defaultOn ) {
+				if ( list.isEmpty() )
+					return;
+				auto * box = new QGroupBox( title, &dlg );
+				auto * bl = new QVBoxLayout( box );
+				if ( !hint.isEmpty() ) {
+					auto * h = new QLabel( hint, box );
+					h->setWordWrap( true );
+					h->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
+					bl->addWidget( h );
+				}
+				for ( SpellPtr s : list ) {
+					auto * cb = new QCheckBox( s->name(), box );
+					const bool ok = s->isApplicable( nif, QModelIndex() );
+					cb->setChecked( ok && cfg.value(
+						QStringLiteral( "Unfuck/%1" ).arg( s->name() ), defaultOn ).toBool() );
+					cb->setEnabled( ok );
+					cb->setToolTip( ok ? s->name()
+						: tr( "Nothing for this to do in this file." ) );
+					bl->addWidget( cb );
+					boxes.append( qMakePair( cb, s ) );
+				}
+				lay->addWidget( box );
+			};
+
+			addGroup( tr( "Fixes" ), tr( "These change the file." ), fixes, true );
+			addGroup( tr( "Checks" ),
+				tr( "These only report what they find; they change nothing." ), checks, false );
+
+			auto * buttons = new QDialogButtonBox(
+				QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg );
+			buttons->button( QDialogButtonBox::Ok )->setText( tr( "Unfuck" ) );
+			lay->addWidget( buttons );
+			connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );
+			connect( buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
+
+			auto syncOk = [buttons, &boxes]() {
+				int n = 0;
+				for ( const auto & p : boxes )
+					if ( p.first->isEnabled() && p.first->isChecked() ) n++;
+				buttons->button( QDialogButtonBox::Ok )->setEnabled( n > 0 );
+				buttons->button( QDialogButtonBox::Ok )->setText(
+					n > 0 ? tr( "Unfuck (%1)" ).arg( n ) : tr( "Unfuck" ) );
+			};
+			for ( const auto & p : boxes )
+				connect( p.first, &QCheckBox::toggled, &dlg, [syncOk]() { syncOk(); } );
+			syncOk();
+
+			if ( dlg.exec() != QDialog::Accepted )
+				return;			// Cancel: nothing chosen is remembered, nothing runs
+
+			// The choices outlive the dialog only on OK, so cancelling really is
+			// a way out of a set of toggles rather than a silent commit.
+			QList<SpellPtr> toRun;
+			for ( const auto & p : boxes ) {
+				cfg.setValue( QStringLiteral( "Unfuck/%1" ).arg( p.second->name() ),
+					p.first->isChecked() );
+				if ( p.first->isEnabled() && p.first->isChecked() )
+					toRun.append( p.second );
+			}
+			if ( toRun.isEmpty() )
+				return;
+
+			QStringList done;
+			// One snapshot around the lot, so a run that makes things worse is a
+			// single Ctrl+Z rather than nine of them.
+			nifSnapshotOp( nif, "Unfuck", [&]() {
+				for ( SpellPtr s : toRun ) {
+					if ( !s->isApplicable( nif, QModelIndex() ) )
+						continue;
+					s->cast( nif, QModelIndex() );
+					done << s->name();
+				}
+			} );
+			nif->invalidateHeaderConditions();
+			nif->updateHeader();
+			Message::info( this, done.isEmpty()
+				? tr( "Nothing to do." )
+				: tr( "Ran %1 of them:" ).arg( done.size() )
+					+ QStringLiteral( "\n" ) + done.join( QStringLiteral( "\n" ) ) );
 		} );
 
-		/* TEST HARNESS (WW_UNFUCK_TEST=1): did the file-fixing spells come back?
+		/* TEST HARNESS (WW_UNFUCK_TEST=1): is the Spells menu what it claims, and
+		 * does the dialog open?
 		 *
-		 * The question this answers is not "does the menu exist" but "is anything
-		 * in it reachable", because the fault it was built for is a menu that
-		 * looks populated and greys or hides every entry. So it opens the menu the
-		 * way a click would — emitting aboutToShow, which is what recomputes the
-		 * enable state — WITH a block selected, since selecting a block is exactly
-		 * what used to make these vanish.
-		 * Log: release/ww_unfuck_test.log
+		 * Two things can go wrong here and neither is visible from the code. The
+		 * menu can be structurally right and still EMPTY, because the spells it
+		 * lists are filtered by applicability; and it can quietly fill up with
+		 * block spells again, which is the duplication this was meant to remove.
+		 * So it opens the menu with a BLOCK SELECTED — the state that used to
+		 * empty it — and checks both directions: something is listed, and nothing
+		 * listed wants an index.
+		 *
+		 * The dialog is grabbed rather than driven. It is modal, so exec() would
+		 * block the harness; a timer takes the picture and closes it.
+		 * Log: release/ww_unfuck_test.log, shot: release/ww_unfuck_dialog.png
 		 */
 		if ( qEnvironmentVariableIsSet( "WW_UNFUCK_TEST" ) ) {
 			QObject::connect( this, &NifSkope::completeLoading, this,
-				[this, unfuck, fixActions, run]( bool ok, QString & ) {
-				QTimer::singleShot( 800, this, [this, unfuck, fixActions, run, ok]() {
+				[this, spellsMenu, unfuck, fixes, checks]( bool ok, QString & ) {
+				QTimer::singleShot( 800, this, [this, spellsMenu, unfuck, fixes, checks, ok]() {
 					QFile logf( QApplication::applicationDirPath() + "/ww_unfuck_test.log" );
 					if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 						return;
 					QTextStream log( &logf );
-					int checks = 0, fails = 0;
+					int checksRun = 0, fails = 0;
 					auto check = [&]( const QString & what, bool pass ) {
-						checks++;
+						checksRun++;
 						if ( !pass ) fails++;
 						log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
 					};
 					do {
 						if ( !ok || !nif ) { log << "load failed\n"; break; }
 
-						// Select a block first. This is the whole point: with an
-						// index selected the old menubar SpellBook hid every one
-						// of these, because they answer isApplicable only for an
+						// Select a block. This is the whole point: with an index
+						// selected the old menubar SpellBook hid every whole-file
+						// spell, because they answer isApplicable only for an
 						// invalid index.
 						if ( nif->getBlockCount() > 1 )
 							select( nif->getBlockIndex( 1 ) );
 						QApplication::processEvents();
 
-						emit unfuck->aboutToShow();
-						int enabled = 0;
-						for ( const auto & p : fixActions ) {
-							log << "  fix " << ( p.first->isEnabled() ? "[on ] " : "[off] " )
-								<< p.second->name() << "\n";
-							if ( p.first->isEnabled() )
-								enabled++;
+						emit spellsMenu->aboutToShow();
+						const QList<QAction *> acts = spellsMenu->actions();
+						check( "Unfuck is the first entry in Spells",
+							!acts.isEmpty() && acts.first() == unfuck );
+
+						int pages = 0, listed = 0, wantsIndex = 0;
+						for ( QAction * a : acts ) {
+							if ( !a->menu() )
+								continue;
+							pages++;
+							log << "  page " << a->menu()->title() << ":";
+							for ( QAction * sa : a->menu()->actions() ) {
+								log << " " << sa->text();
+								listed++;
+								// Nothing here may be a block spell: those are on
+								// right-click, which is why they were taken out.
+								SpellPtr sp = SpellBook::lookup( sa->text() );
+								if ( sp && !sp->isApplicable( nif, QModelIndex() ) )
+									wantsIndex++;
+							}
+							log << "\n";
 						}
-						log << fixActions.size() << " fix(es) listed, " << enabled
-							<< " applicable with a block selected\n";
+						log << pages << " page(s), " << listed << " whole-file spell(s), "
+							<< fixes.size() << " fix(es) + " << checks.size()
+							<< " check(s) behind Unfuck\n";
 
-						check( "the Unfuck menu carries the file-fixing spells",
-							fixActions.size() >= 5 );
-						check( "they are reachable with a block selected", enabled > 0 );
-						check( "the run entry is live", run->isEnabled() );
+						check( "the menu still lists whole-file spells", listed > 0 );
+						check( "none of them needs a block selected", wantsIndex == 0 );
+						check( "the repair spells were gathered", fixes.size() + checks.size() >= 5 );
 
-						// ...and the menubar no longer carries a second copy.
-						bool spellsMenu = false;
-						for ( QAction * a : ui->menubar->actions() )
-							if ( a->menu() && a->menu()->title() == QLatin1String( "Spells" ) )
-								spellsMenu = true;
-						check( "the duplicate Spells menu is gone", !spellsMenu );
+						// ...and the dialog opens. Grab it and close it.
+						QTimer::singleShot( 400, this, []() {
+							if ( QWidget * w = QApplication::activeModalWidget() ) {
+								w->grab().save( QApplication::applicationDirPath()
+									+ "/ww_unfuck_dialog.png" );
+								if ( auto * d = qobject_cast<QDialog *>( w ) )
+									d->reject();
+							}
+						} );
+						unfuck->trigger();
+						check( "the dialog opened and was dismissed",
+							QFile::exists( QApplication::applicationDirPath()
+								+ "/ww_unfuck_dialog.png" ) );
 					} while ( false );
-					log << checks << " checks, " << fails << " failures\n";
+					log << checksRun << " checks, " << fails << " failures\n";
 					log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
 					logf.close();
-					QTimer::singleShot( 0, qApp, &QApplication::quit );
+					QTimer::singleShot( 300, qApp, &QApplication::quit );
 				} );
 			} );
 		}
 
-		connect( run, &QAction::triggered, this, [this, fixActions]() {
+		/* ...and the rest of the menu: the whole-file spells, by page.
+		 *
+		 * Rebuilt every time the menu opens rather than filled once, because
+		 * which spells qualify depends on the FILE — a spell offers itself for an
+		 * invalid index or it does not, and that answer changes with the version
+		 * and the contents of whatever is loaded. Rebuilding is also what keeps
+		 * this menu from being filtered against the current selection, which is
+		 * the behaviour that used to empty it.
+		 *
+		 * The repair spells are skipped: they are in Unfuck above, and listing
+		 * them twice in one menu is the duplication this was meant to remove.
+		 */
+		connect( spellsMenu, &QMenu::aboutToShow, this,
+			[this, spellsMenu, unfuck, fixes, checks, byName]() {
+			// drop everything after the Unfuck entry
+			const QList<QAction *> existing = spellsMenu->actions();
+			int keep = 0;
+			for ( int i = 0; i < existing.size(); i++ )
+				if ( existing.at( i ) == unfuck ) { keep = i + 1; break; }
+			for ( int i = existing.size() - 1; i >= keep; i-- )
+				spellsMenu->removeAction( existing.at( i ) );
 			if ( !nif )
 				return;
-			QStringList done;
-			// One snapshot around the lot, so a run that makes things worse is a
-			// single Ctrl+Z rather than nine of them.
-			nifSnapshotOp( nif, "Unfuck", [&]() {
-				for ( const auto & p : fixActions ) {
-					if ( !p.first->isChecked() || !p.second->isApplicable( nif, QModelIndex() ) )
-						continue;
-					p.second->cast( nif, QModelIndex() );
-					done << p.second->name();
+			spellsMenu->addSeparator();
+
+			QMap<QString, QList<SpellPtr>> byPage;
+			for ( SpellPtr s : SpellBook::spells() ) {
+				if ( !s || s->page().isEmpty() || fixes.contains( s ) || checks.contains( s ) )
+					continue;
+				// The whole test: does it offer itself with nothing selected? If
+				// it wants a block, right-clicking that block already has it.
+				if ( s->isApplicable( nif, QModelIndex() ) )
+					byPage[s->page()].append( s );
+			}
+			for ( auto it = byPage.constBegin(); it != byPage.constEnd(); ++it ) {
+				QMenu * page = spellsMenu->addMenu( it.key() );
+				QList<SpellPtr> list = it.value();
+				std::sort( list.begin(), list.end(), byName );
+				for ( SpellPtr sp : list ) {
+					QAction * a = page->addAction( sp->icon(), sp->name() );
+					a->setShortcut( sp->hotkey() );
+					connect( a, &QAction::triggered, this, [this, sp]() {
+						if ( nif && book )
+							book->cast( nif, QModelIndex(), sp );
+					} );
 				}
-			} );
-			nif->invalidateHeaderConditions();
-			nif->updateHeader();
-			Message::info( this, done.isEmpty()
-				? tr( "Nothing to fix." )
-				: tr( "Ran %1 fix(es):\n%2" ).arg( done.size() ).arg( done.join( QStringLiteral( "\n" ) ) ) );
+			}
 		} );
 	}
 
@@ -11055,6 +11196,34 @@ void NifSkope::initMenu()
 	 * work, so putting it back is one line rather than a resurrection.
 	 */
 	ui->tRender->removeAction( ui->aPrintView );
+
+	/* One bar between groups, not two.
+	 *
+	 * Every toolbar here is assembled by deleting actions out of the designer
+	 * file and inserting widgets between what is left, so removing the last
+	 * button of a group strands that group's separator against the next one and
+	 * the row draws a double rule with no space in it. Taking Screenshot out,
+	 * just above, is exactly that case. Collapse runs of separators and drop any
+	 * that end up at either end, on every toolbar, so no future removal has to
+	 * remember to tidy up after itself.
+	 */
+	for ( QToolBar * tb : { ui->tFile, ui->tRender, ui->tMode, ui->tView, ui->tLOD } ) {
+		if ( !tb )
+			continue;
+		bool lastWasSeparator = true;			// leading separators go too
+		const QList<QAction *> acts = tb->actions();
+		for ( QAction * a : acts ) {
+			if ( !a->isSeparator() ) {
+				lastWasSeparator = false;
+				continue;
+			}
+			if ( lastWasSeparator )
+				tb->removeAction( a );
+			lastWasSeparator = true;
+		}
+		while ( !tb->actions().isEmpty() && tb->actions().last()->isSeparator() )
+			tb->removeAction( tb->actions().last() );
+	}
 
 	// Append Menu to tRender actions
 	for ( auto child : ui->tRender->findChildren<QToolButton *>() ) {

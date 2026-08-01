@@ -1,5 +1,61 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-01c — Unwrap a piece of an island; Unfuck becomes a dialog
+
+**Unwrap Selection In Place.** bungo: *"select uv areas that are already part of
+a UV island, and those will get unwrapped, but they'll still be connected to the
+rest of the original UV island, which will remain the same."*
+
+Neither existing operator did that. `unwrapSelection` solves the selection and
+then **packs** every component into 0–1, so the patch lands somewhere else and
+the seam it shared with the island is torn. `unwrapWithPins` stays in place, but
+only around pins placed by hand, one vertex at a time.
+
+The insight is that the pins are not a user decision here — they are a property
+of the selection. A vertex used by a selected face *and* by an unselected one is
+on the seam between the part being re-solved and the part that must not move, so
+that set is exactly what has to stay put. Pin those at the UVs they already have
+and the solver stitches the new patch back into the untouched remainder. No
+density rescale and no packing: both are ways of choosing a size and a place, and
+the pins have already chosen both.
+
+One case needed thought. A component with fewer than two seam pins is touching
+nothing that has to hold still — the selection took a whole island, or a piece
+joined to the rest by a single vertex — and `lscmSolveComponent`'s own fallback
+would anchor it at (0,0)–(1,0), flinging it across the atlas: the exact thing
+this operator exists to avoid. Those are anchored to their **own** current UVs
+instead, so they are re-solved where they already lie. The status line says how
+many pieces that happened to.
+
+**Unfuck is a dialog now, and it stopped shouting.** bungo hit a modal warning —
+*"'Textures' has a filepath without a file extension"* — the first time he ran
+it. That was `spErrorInvalidPaths`, which is a **checker**: it reports and
+changes nothing, so bundling it into "fix everything" was wrong. Fixes and checks
+are separate groups now and checks start switched **off**.
+
+The menu of checkable entries was also the wrong shape: a menu closes on every
+click, so arranging a run meant reopening it once per fix, and there was no way
+to back out. It is a proper container — two groups, a checkbox each, **Unfuck** /
+**Cancel** — and Cancel really cancels, since the choices are only written back
+on OK. Spells with nothing to do in the current file are shown disabled rather
+than dropped, so the list keeps its shape and the greying is itself the report.
+
+**The Spells menu is back, with only what is unique to it.** The line turned out
+to be sharp rather than a judgement call: right-clicking a block opens a full
+SpellBook *at that index*, so every block spell is already one click away there.
+What right-click can never reach is the spells that answer `isApplicable` only
+for an **invalid** index — the whole-file ones — and those are exactly what the
+old menubar copy hid the moment you selected anything. So the menu is rebuilt on
+open from the whole-file spells and never filtered against the selection:
+5 pages, 21 spells, with **Unfuck…** at the top. `WW_UNFUCK_TEST` opens it *with
+a block selected* and checks both directions — something is listed, and nothing
+listed wants an index.
+
+**One separator, not two.** Removing Screenshot stranded its group's rule against
+the next one and drew a double bar. Runs of separators are collapsed on every
+toolbar now, and the ones that end up at either end are dropped, so no future
+removal has to remember to tidy up after itself.
+
 ## 2026-08-01b — Bolts that move again, and a tidier top bar
 
 **The Tesla bolts were frozen, and that was my fault.** bungo: *"the lightning
