@@ -1,5 +1,51 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02d — The Animation dock stops being a second playback engine
+
+**Play did not animate the viewport.** The dock ran a private 16 ms timer that
+advanced its own playhead and emitted `timeChanged` → `GLView::setSceneTime` —
+and `setSceneTime` never touches `scene->animate`, while controller evaluation is
+skipped when that is false. So with *View ▸ Animations* off, Play scrubbed the
+playhead across a **frozen viewport**. `playPauseRequested` was declared, and
+connected, with a comment saying it fixed exactly this, and **nothing in the tree
+emitted it** — confirmed by grep before touching anything: two hits, a
+declaration and a connect.
+
+None of it needed reimplementing, which is the point. GLView's loop already
+handles speed, reverse (as a negative speed), Loop, Switch-sequence and the
+stop-at-the-end case, and `sceneTimeChanged` was *already* wired to the dock's
+`setTime`. So the timer is deleted, `transportToggle` emits the signal that was
+waiting for it, and direction becomes the sign of `animSpeed` — which is what the
+wrap logic reads, so Loop behaves identically in both directions. The buttons now
+follow the application instead of their own clicks.
+
+*The test watches `scene->animate`, not the playhead* — the playhead moved on the
+broken code too, and that was the whole illusion.
+
+**Materials bulk edits: one undo step, and a count that is true.** Replace All
+and Retarget called `setText` per row; each fired the itemChanged handler, which
+snapshots the whole model twice. Two hundred paths meant ~400 full
+serialisations, 200 undo entries, and no way to undo as a unit. The count lied
+too: material-file rows have no field in this NIF to write, so their text changed,
+the write bailed, the next rebuild reverted it — and they were counted anyway.
+
+**Retarget Folder silently did nothing on the files it was for.** It normalises
+its prefix (lowercase, backslashes) and then matched it against the *raw* stored
+path — so a NIF storing `textures/effects/x.dds` never matched `textures\`. The
+separator convention it exists to fix was exactly what stopped it matching.
+
+**Pose lost the bone highlight on every viewport pick**, because `refresh()`
+clears the bone list and only the pose list was being stashed and restored.
+
+**The Block List can delete and rename.** Deleting was reachable only from the
+viewport, so the one widget that can build a multi-selection of blocks had no way
+to delete it.
+
+Two proposed changes were **checked and not made**, because an adversarial pass
+showed each would regress something: hoisting Pose's row colouring into a shared
+helper wipes the grey that marks a pinned bone, and the boxed-button conversion
+in Pose would leave a dead button segment. Both need their own change.
+
 ## 2026-08-02c — Two reported bugs, one Unfuck, and a lot of measuring
 
 **Typing `11.25` into a transform gave `1125`.** The gizmo's numeric entry was
