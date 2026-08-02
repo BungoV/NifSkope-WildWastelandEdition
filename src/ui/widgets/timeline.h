@@ -186,7 +186,9 @@ signals:
 	//! Request the scene sequence to change (name as in Scene::animGroups)
 	void sequenceActivated( const QString & );
 	//! Request animation play/pause toggle
-	void playPauseRequested();
+	//! dir: 1 forward, -1 reverse, 0 stop. The application decides what to do
+	//! with it -- this dock no longer runs its own clock.
+	void playPauseRequested( int dir );
 	//! Request viewport isolation of a block (-1 clears it)
 	void isolateBlock( int blockNumber );
 
@@ -197,6 +199,8 @@ public slots:
 	void refreshLater();
 	//! Scene time update from GLView
 	void setTime( float t, float mn, float mx );
+	//! Reflect the application's playback state on the transport buttons.
+	void setPlayingState( bool playing, bool reverse );
 	//! Highlight the lane / key corresponding to an externally selected index
 	void setCurrentIndex( const QModelIndex & );
 	//! Follow a sequence change made elsewhere (anim toolbar)
@@ -338,7 +342,6 @@ protected:
 	// local transport (drives scene time directly; independent of the anim toolbar)
 	void transportToggle( int dir );
 	void transportStop();
-	QTimer * playTimer = nullptr;
 	int playDir = 0;
 
 	// widgets

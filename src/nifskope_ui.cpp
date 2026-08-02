@@ -4715,6 +4715,97 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_ANIMPLAY_TEST=1): does the Animation dock's Play actually
+	 * animate the viewport?
+	 *
+	 * The dock ran a private 16 ms QTimer that advanced its own playhead and
+	 * emitted timeChanged -> GLView::setSceneTime. setSceneTime never touches
+	 * scene->animate, and IControllable::transform() skips controller evaluation
+	 * when !scene->animate -- so with View > Animations OFF, Play scrubbed the
+	 * playhead across a frozen viewport. The signal added to fix exactly that,
+	 * playPauseRequested, was declared AND connected, and nothing emitted it.
+	 *
+	 * THE DISCRIMINATING CHECK is scene->animate, not the playhead. The playhead
+	 * moved on the broken code too -- that was the whole illusion. So the test
+	 * turns animation OFF first, presses the dock's Play, and requires that the
+	 * renderer is now actually animating.
+	 * Log: release/ww_animplay_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_ANIMPLAY_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_animplay_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					GLView * ogl = skope->getGLView();
+					TimelineWidget * tl = skope->timeline;
+					if ( !ogl || !tl || !ogl->getScene() ) { log << "no view/timeline\n"; break; }
+
+					log << "scene time range " << ogl->getScene()->timeMin()
+						<< " .. " << ogl->getScene()->timeMax() << "\n";
+					if ( ogl->getScene()->timeMin() == ogl->getScene()->timeMax() ) {
+						log << "this file has no animation to play\n";
+						check( "the fixture is animated", false );
+						break;
+					}
+
+					// View > Animations OFF -- the exact state the bug needed
+					if ( skope->ui->aAnimate->isChecked() )
+						skope->ui->aAnimate->trigger();
+					if ( skope->ui->aAnimPlay->isChecked() )
+						skope->ui->aAnimPlay->trigger();
+					QApplication::processEvents();
+					log << "before: aAnimate " << skope->ui->aAnimate->isChecked()
+						<< ", scene->animate " << ogl->getScene()->animate << "\n";
+					check( "animation starts switched off", !ogl->getScene()->animate );
+
+					// press the DOCK's play button, through the real signal
+					tl->transportToggle( 1 );
+					QApplication::processEvents();
+					QEventLoop settle;
+					QTimer::singleShot( 500, &settle, &QEventLoop::quit );
+					settle.exec();
+
+					log << "after Play: aAnimPlay " << skope->ui->aAnimPlay->isChecked()
+						<< ", scene->animate " << ogl->getScene()->animate
+						<< ", anim speed " << ogl->animationSpeed() << "\n";
+					check( "the dock's Play actually animates the viewport",
+						ogl->getScene()->animate );
+					check( "and the application knows it is playing",
+						skope->ui->aAnimPlay->isChecked() );
+
+					// reverse must be the SIGN OF THE SPEED, which is what GLView reads
+					tl->transportToggle( -1 );
+					QApplication::processEvents();
+					log << "after Reverse: anim speed " << ogl->animationSpeed() << "\n";
+					check( "reverse is a negative animation speed", ogl->animationSpeed() < 0.0f );
+
+					tl->transportToggle( 0 );
+					QApplication::processEvents();
+					log << "after Stop: aAnimPlay " << skope->ui->aAnimPlay->isChecked() << "\n";
+					check( "stop stops the application, not just the dock",
+						!skope->ui->aAnimPlay->isChecked() );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_DOCKS_TEST=1): does every manager dock start docked and
 	 * hidden, and does choosing a workspace still open the right one?
 	 *
@@ -9135,10 +9226,40 @@ void NifSkope::initDockWidgets()
 		}
 	} );
 
-	connect( timeline, &TimelineWidget::playPauseRequested, [this]() {
-		// No aAnimate gate: it made the dock's play button do nothing, silently,
-		// whenever View > Animations was off. aAnimPlay now enables it itself.
-		ui->aAnimPlay->trigger();
+	/* The Animation dock's transport, routed into the ONE playback engine.
+	 *
+	 * No aAnimate gate: it made the dock's play button do nothing, silently,
+	 * whenever View > Animations was off. aAnimPlay enables it itself.
+	 *
+	 * Direction is the SIGN OF THE ANIMATION SPEED, which is what GLView's loop
+	 * already understands -- it wraps at whichever end the sign heads for, so Loop
+	 * and Switch behave identically forwards and backwards. The dock used to keep
+	 * a private playDir the renderer never saw.
+	 */
+	connect( timeline, &TimelineWidget::playPauseRequested, this, [this]( int dir ) {
+		if ( dir == 0 ) {
+			if ( ui->aAnimPlay->isChecked() )
+				ui->aAnimPlay->trigger();
+			return;
+		}
+		const float speed = std::fabs( ogl->animationSpeed() );
+		ogl->setAnimSpeed( dir < 0 ? -speed : speed );
+		if ( !ui->aAnimPlay->isChecked() )
+			ui->aAnimPlay->trigger();
+		timeline->setPlayingState( true, dir < 0 );
+	} );
+
+	/* ...and the buttons follow the APPLICATION, not their own clicks.
+	 *
+	 * Space, the menubar's Play, and a sequence ending without Loop all change
+	 * playback without going through this dock. btnPlay's checked state used to
+	 * track only its own clicks, so it drifted out of step with everything else.
+	 */
+	connect( ui->aAnimPlay, &QAction::toggled, timeline, [this]( bool on ) {
+		timeline->setPlayingState( on, ogl->animationSpeed() < 0.0f );
+	} );
+	connect( ogl, &GLView::sequenceStopped, timeline, [this]() {
+		timeline->setPlayingState( false, false );
 	} );
 
 	// Solo / preview-only rendering of the selected node

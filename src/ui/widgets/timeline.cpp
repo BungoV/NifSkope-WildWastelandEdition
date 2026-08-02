@@ -779,25 +779,10 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 		updateViews();
 	} );
 
-	playTimer = new QTimer( this );
-	playTimer->setInterval( 16 );
-	connect( playTimer, &QTimer::timeout, [this]() {
-		float lo = prevRangeOn ? prevStart : tMin;
-		float hi = prevRangeOn ? prevEnd : tMax;
-		if ( hi <= lo ) {
-			transportStop();
-			return;
-		}
-		curTime += playDir * 0.016f;
-		if ( curTime > hi )
-			curTime = lo + ( curTime - hi );
-		else if ( curTime < lo )
-			curTime = hi - ( lo - curTime );
-		emit timeChanged( curTime );
-		if ( followPlayhead )
-			ensurePlayheadVisible();
-		updateViews();
-	} );
+	/* No playback timer. GLView owns the clock -- see transportToggle.
+	 * sceneTimeChanged is connected to setTime() in nifskope_ui.cpp, so the
+	 * playhead follows the renderer rather than racing it.
+	 */
 
 	timeField = new QLineEdit( this );
 	timeField->setMaximumWidth( 70 );
@@ -1007,31 +992,57 @@ void TimelineWidget::showEvent( QShowEvent * event )
 		refreshTimer->start();
 }
 
+/*! Ask the APPLICATION to play. This dock does not run the clock any more.
+ *
+ *  It used to, and that was the bug. A private 16 ms QTimer advanced curTime by
+ *  a hardcoded 0.016f and emitted timeChanged, which reaches
+ *  GLView::setSceneTime — and setSceneTime never touches scene->animate, while
+ *  IControllable::transform() skips controller evaluation when !scene->animate.
+ *  So with View ▸ Animations off, Play scrubbed the playhead across a frozen
+ *  viewport. The signal added to fix exactly that, playPauseRequested, was
+ *  declared AND connected, and nothing ever emitted it.
+ *
+ *  Three more defects came from being a second engine: the timer always wrapped
+ *  regardless of Loop, its fixed delta ignored the animation speed, and reverse
+ *  was a private playDir rather than the negative speed the renderer already
+ *  understands.
+ *
+ *  GLView's own loop handles all of it — speed, reverse, Loop, Switch-sequence,
+ *  and stopping at the end when not looping — and sceneTimeChanged is already
+ *  wired to setTime(), so the playhead follows for free. Emitting the signal is
+ *  the whole fix; setPlayingState() then reflects what actually happened.
+ */
 void TimelineWidget::transportToggle( int dir )
 {
-	if ( playDir == dir ) {
-		transportStop();
-		return;
-	}
-
-	playDir = dir;
-	btnPlay->setChecked( dir == 1 );
-	btnPlayBack->setChecked( dir == -1 );
-	const QColor c( wwSkinColor( "text" ) );
-	btnPlay->setIcon( tlMakeIcon( dir == 1 ? QStringLiteral( "pause" ) : QStringLiteral( "play" ), c ) );
-	btnPlayBack->setIcon( tlMakeIcon( dir == -1 ? QStringLiteral( "pause" ) : QStringLiteral( "playback" ), c ) );
-	playTimer->start();
+	emit playPauseRequested( playDir == dir ? 0 : dir );
 }
 
 void TimelineWidget::transportStop()
 {
-	playDir = 0;
-	playTimer->stop();
-	btnPlay->setChecked( false );
-	btnPlayBack->setChecked( false );
+	if ( playDir != 0 )
+		emit playPauseRequested( 0 );
+	setPlayingState( false, false );
+}
+
+/*! Reflect the application's playback state on the transport buttons.
+ *
+ *  The buttons are no longer the source of truth. Space, the menubar's Play, and
+ *  a sequence finishing without Loop all change playback without touching this
+ *  widget, and btnPlay's checked state used to track only its own clicks — so it
+ *  drifted out of step with the rest of the app the moment playback was started
+ *  or stopped anywhere else.
+ */
+void TimelineWidget::setPlayingState( bool playing, bool reverse )
+{
+	playDir = playing ? ( reverse ? -1 : 1 ) : 0;
+	const QSignalBlocker b1( btnPlay ), b2( btnPlayBack );
+	btnPlay->setChecked( playing && !reverse );
+	btnPlayBack->setChecked( playing && reverse );
 	const QColor c( wwSkinColor( "text" ) );
-	btnPlay->setIcon( tlMakeIcon( QStringLiteral( "play" ), c ) );
-	btnPlayBack->setIcon( tlMakeIcon( QStringLiteral( "playback" ), c ) );
+	btnPlay->setIcon( tlMakeIcon(
+		( playing && !reverse ) ? QStringLiteral( "pause" ) : QStringLiteral( "play" ), c ) );
+	btnPlayBack->setIcon( tlMakeIcon(
+		( playing && reverse ) ? QStringLiteral( "pause" ) : QStringLiteral( "playback" ), c ) );
 }
 
 void TimelineWidget::addAnimActions( QAction * loop, QAction * sw )
