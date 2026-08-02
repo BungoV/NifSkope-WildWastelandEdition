@@ -4858,6 +4858,172 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_CYCLETYPE_TEST=1): does the preview do what the SEQUENCE
+	 * says it does at its end?
+	 *
+	 * NiControllerSequence carries a Cycle Type — CYCLE_LOOP, CYCLE_REVERSE or
+	 * CYCLE_CLAMP — and nothing read it. One session-wide Loop checkbox decided
+	 * for every sequence in every file, it starts unchecked, and saveUi/restoreUi
+	 * have the line that would persist it commented out. So the default preview
+	 * played every clip exactly once whatever it was authored to do, and
+	 * CYCLE_REVERSE had no implementation at all.
+	 *
+	 * THE FIXTURE IS THE POINT. Bloatfly.nif carries CharFXOn (CYCLE_CLAMP) and
+	 * CharFXOnLoop (CYCLE_LOOP) side by side, so one file distinguishes "reads
+	 * the field" from "has a new default": no single setting of one checkbox is
+	 * right for both, and the first two checks below fail on the old code in
+	 * OPPOSITE directions.
+	 *
+	 * CYCLE_REVERSE is injected into Scene::animCycle rather than edited into the
+	 * model, because no stock Fallout 4 mesh uses it and a fixture nobody ships is
+	 * not worth manufacturing when the map IS the interface the transport reads.
+	 * That the map gets its values from the file is what the two checks above it
+	 * measure, on real authored data.
+	 * Log: release/ww_cycletype_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_CYCLETYPE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_cycletype_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; check( "the file loaded", false ); break; }
+					GLView * ogl = skope->getGLView();
+					Scene * sc = ogl ? ogl->getScene() : nullptr;
+					if ( !sc ) { log << "no scene\n"; check( "there is a scene", false ); break; }
+
+					// --- the fixture must carry both kinds ----------------------
+					QString clampSeq, loopSeq;
+					for ( const QString & g : sc->animGroups ) {
+						const int ct = sc->animCycle.value( g, -1 );
+						log << "  sequence '" << g << "' cycle type " << ct << "\n";
+						if ( ct == Scene::CycleClamp && clampSeq.isEmpty() ) clampSeq = g;
+						if ( ct == Scene::CycleLoop && loopSeq.isEmpty() )   loopSeq = g;
+					}
+					check( "the fixture has a CYCLE_CLAMP sequence", !clampSeq.isEmpty() );
+					check( "the fixture has a CYCLE_LOOP sequence too", !loopSeq.isEmpty() );
+					if ( clampSeq.isEmpty() || loopSeq.isEmpty() ) break;
+
+					if ( !skope->ui->aAnimate->isChecked() )
+						skope->ui->aAnimate->trigger();
+					if ( skope->ui->aAnimSwitch->isChecked() )
+						skope->ui->aAnimSwitch->trigger();		// or it walks to the next clip
+
+					// --- the toggle follows the file ---------------------------
+					ogl->setSceneSequence( clampSeq );
+					QApplication::processEvents();
+					log << "after selecting '" << clampSeq << "': Loop "
+						<< skope->ui->aAnimLoop->isChecked() << "\n";
+					check( "a CYCLE_CLAMP sequence does not loop",
+						!skope->ui->aAnimLoop->isChecked() );
+
+					ogl->setSceneSequence( loopSeq );
+					QApplication::processEvents();
+					log << "after selecting '" << loopSeq << "': Loop "
+						<< skope->ui->aAnimLoop->isChecked() << "\n";
+					check( "a CYCLE_LOOP sequence loops",
+						skope->ui->aAnimLoop->isChecked() );
+
+					/* Run the real transport and watch it, rather than asking the
+					 * state what it intends: everything above is a checkbox, and a
+					 * checkbox that nothing reads would pass all of it.
+					 */
+					auto play = [&]( int ms, bool * sawFlip, float * lo, float * hi ) {
+						const float d0 = ogl->animationDirection();
+						if ( sawFlip ) *sawFlip = false;
+						if ( lo ) *lo = 1.0e9f;
+						if ( hi ) *hi = -1.0e9f;
+						if ( !skope->ui->aAnimPlay->isChecked() )
+							skope->ui->aAnimPlay->trigger();
+						QEventLoop loop;
+						QTimer sampler;
+						sampler.setInterval( 10 );
+						QObject::connect( &sampler, &QTimer::timeout, &loop, [&]() {
+							if ( sawFlip && ogl->animationDirection() * d0 < 0.0f )
+								*sawFlip = true;
+							if ( lo ) *lo = std::min( *lo, ogl->sceneTime() );
+							if ( hi ) *hi = std::max( *hi, ogl->sceneTime() );
+						} );
+						sampler.start();
+						QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+						loop.exec();
+					};
+
+					// --- CYCLE_LOOP really keeps playing ------------------------
+					float lo = 0, hi = 0;
+					bool flipped = false;
+					play( 600, &flipped, &lo, &hi );
+					log << "loop seq after 600 ms: still playing "
+						<< skope->ui->aAnimPlay->isChecked() << ", time seen "
+						<< lo << " .. " << hi << ", direction "
+						<< ogl->animationDirection() << "\n";
+					check( "a CYCLE_LOOP sequence is still running after its end",
+						skope->ui->aAnimPlay->isChecked() );
+					check( "and it never runs backwards", !flipped );
+
+					// --- CYCLE_CLAMP stops -------------------------------------
+					if ( skope->ui->aAnimPlay->isChecked() )
+						skope->ui->aAnimPlay->trigger();
+					ogl->setSceneSequence( clampSeq );
+					QApplication::processEvents();
+					play( 600, nullptr, nullptr, nullptr );
+					log << "clamp seq after 600 ms: still playing "
+						<< skope->ui->aAnimPlay->isChecked() << ", time "
+						<< ogl->sceneTime() << " (range " << sc->timeMin()
+						<< " .. " << sc->timeMax() << ")\n";
+					check( "a CYCLE_CLAMP sequence has stopped by itself",
+						!skope->ui->aAnimPlay->isChecked() );
+
+					// --- ticking Loop by hand still overrides it ---------------
+					if ( !skope->ui->aAnimLoop->isChecked() )
+						skope->ui->aAnimLoop->trigger();
+					play( 600, nullptr, nullptr, nullptr );
+					log << "clamp seq with Loop forced on: still playing "
+						<< skope->ui->aAnimPlay->isChecked() << "\n";
+					check( "forcing Loop on overrides the file",
+						skope->ui->aAnimPlay->isChecked() );
+
+					// --- CYCLE_REVERSE ping-pongs ------------------------------
+					if ( skope->ui->aAnimPlay->isChecked() )
+						skope->ui->aAnimPlay->trigger();
+					sc->animCycle[loopSeq] = Scene::CycleReverse;
+					ogl->setSceneSequence( loopSeq );
+					QApplication::processEvents();
+					check( "a CYCLE_REVERSE sequence loops", skope->ui->aAnimLoop->isChecked() );
+					check( "and starts forwards", ogl->animationDirection() > 0.0f );
+
+					flipped = false;
+					play( 600, &flipped, &lo, &hi );
+					log << "reverse seq after 600 ms: flipped " << flipped
+						<< ", time seen " << lo << " .. " << hi
+						<< " (range " << sc->timeMin() << " .. " << sc->timeMax()
+						<< "), direction " << ogl->animationDirection() << "\n";
+					check( "a CYCLE_REVERSE sequence turns round at the end", flipped );
+					check( "and stays inside the sequence while doing it",
+						lo >= sc->timeMin() - 0.001f && hi <= sc->timeMax() + 0.001f );
+
+					if ( skope->ui->aAnimPlay->isChecked() )
+						skope->ui->aAnimPlay->trigger();
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_SELCOLOUR_TEST=1): do the views agree on what a selected
 	 * row looks like?
 	 *
@@ -13505,6 +13671,29 @@ void NifSkope::initToolBars()
 	connect( ogl, &GLView::sequenceStopped, ui->aAnimPlay, &QAction::toggle );
 	connect( ogl, &GLView::sequencesUpdated, [this]() {
 		ui->aAnimSwitch->setVisible( ogl->getScene()->animGroups.count() > 1 );
+	} );
+
+	/* The Loop toggle starts from what the sequence says it does.
+	 *
+	 * NiControllerSequence carries a Cycle Type — LOOP, REVERSE or CLAMP — and
+	 * nothing read it. One session-wide checkbox decided for every sequence in
+	 * every file instead, and it starts UNCHECKED and is not persisted (see
+	 * saveUi/restoreUi, where the line is commented out), so the default preview
+	 * played everything exactly once. Measured over the stock Fallout 4 mesh
+	 * tree — 1,124 files, 3,337 sequences — 2,664 are CYCLE_CLAMP and 673 are
+	 * CYCLE_LOOP, so that default was wrong for 673 of them and right for the
+	 * rest by accident. (None are CYCLE_REVERSE, and none predate the field.)
+	 *
+	 * Set on sequence CHANGE only, never on a refresh, so it follows the file
+	 * without fighting a deliberate tick: override it and the override stands
+	 * for as long as you stay on that sequence.
+	 */
+	connect( ogl, &GLView::sequenceCycleChanged, this, [this]( int cycleType, bool repeats ) {
+		ui->aAnimLoop->setChecked( repeats );		// -> updateAnimationState
+		static const char * const names[] = { "CYCLE_LOOP", "CYCLE_REVERSE", "CYCLE_CLAMP" };
+		const QString ct = ( cycleType >= 0 && cycleType <= 2 )
+			? QString::fromLatin1( names[cycleType] ) : tr( "unknown" );
+		ui->aAnimLoop->setToolTip( tr( "Loop Animation\nThis sequence is authored %1" ).arg( ct ) );
 	} );
 
 	connect ( ogl->scene, &Scene::disableSave, [this]() {

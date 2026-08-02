@@ -68,6 +68,19 @@ bool ControllerManager::update( const NifModel * nif, const QModelIndex & index 
 					if ( !scene->animGroups.contains( name ) ) {
 						scene->animGroups.append( name );
 
+						/* What the sequence says it does at its end.
+						 *
+						 * Recorded here, with the text keys, because this is the only
+						 * walk that knows a sequence by NAME — which is all the
+						 * transport in GLView::advanceGears ever has to go on.
+						 *
+						 * Absent before 10.1.0.106, and the row is genuinely missing
+						 * rather than zero on those files, so an invalid index has to
+						 * mean "not stated" and not CYCLE_LOOP.
+						 */
+						if ( nif->getIndex( iSeq, "Cycle Type" ).isValid() )
+							scene->animCycle[name] = nif->get<int>( iSeq, "Cycle Type" );
+
 						QMap<QString, float> tags = scene->animTags[name];
 
 						QModelIndex iKeys = nif->getBlockIndex( nif->getLink( iSeq, "Text Keys" ), "NiTextKeyExtraData" );

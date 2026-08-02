@@ -1537,6 +1537,20 @@ void TimelineWidget::addSequenceLanes( const QModelIndex & iSeq, bool withHeader
 		header.iSelect = iSeq;
 		QModelIndex iCtrl0 = nif->getIndex( iSeq, "Controlled Blocks" );
 		header.label = QString( "%1  (%2)" ).arg( nif->resolveString( iSeq, "Name" ) ).arg( nif->rowCount( iCtrl0 ) );
+		/* The clip's own end behaviour, on the clip's own row.
+		 *
+		 * A start/stop pair says how LONG the sequence is and nothing about what
+		 * happens when it gets there, which is the question the Loop toggle now
+		 * answers from this field. Spelled out for all three values: shown only
+		 * for the unusual ones, an absent suffix would be indistinguishable from
+		 * a file too old to have the row at all.
+		 */
+		if ( nif->getIndex( iSeq, "Cycle Type" ).isValid() ) {
+			static const char * const cyc[] = { "loop", "ping-pong", "once" };
+			const int ct = nif->get<int>( iSeq, "Cycle Type" );
+			header.label += QStringLiteral( "  · %1" )
+				.arg( ct >= 0 && ct <= 2 ? QLatin1String( cyc[ct] ) : QLatin1String( "?" ) );
+		}
 		header.start = nif->get<float>( iSeq, "Start Time" );
 		header.stop = nif->get<float>( iSeq, "Stop Time" );
 		header.hasCtrlRange = tlSaneTime( header.start ) && tlSaneTime( header.stop ) && header.stop >= header.start;

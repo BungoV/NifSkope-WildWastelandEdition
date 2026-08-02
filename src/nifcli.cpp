@@ -2375,6 +2375,31 @@ int cmdPose( const QString & file, bool listOnly, const QString & saveName,
 //! Bake a sequence to a still at one time.
 /*! With no --sequence, lists what the file has and each one's range, so picking
  *  a time is not a guess. */
+/*! A sequence's authored Cycle Type, by name, for the listing.
+ *
+ *  Worth printing next to the range because it is the other half of "what does
+ *  this clip do": 0..0.1s tells you nothing about whether it then stops, repeats
+ *  or runs back. Missing before 10.1.0.106, where the row genuinely is not
+ *  there.
+ */
+static QString seqCycleName( const NifModel * nif, const QString & seqName )
+{
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex iSeq = nif->getBlockIndex( b, "NiControllerSequence" );
+		if ( !iSeq.isValid() || nif->resolveString( iSeq, "Name" ) != seqName )
+			continue;
+		if ( !nif->getIndex( iSeq, "Cycle Type" ).isValid() )
+			break;
+		switch ( nif->get<int>( iSeq, "Cycle Type" ) ) {
+		case 0:  return QStringLiteral( "CYCLE_LOOP" );
+		case 1:  return QStringLiteral( "CYCLE_REVERSE" );
+		case 2:  return QStringLiteral( "CYCLE_CLAMP" );
+		default: return QStringLiteral( "CYCLE_?" );
+		}
+	}
+	return QStringLiteral( "(no cycle type)" );
+}
+
 int cmdFreeze( const QString & file, const QString & sequence, float time,
 			   bool keepGraph, const QString & outFile )
 {
@@ -2392,7 +2417,8 @@ int cmdFreeze( const QString & file, const QString & sequence, float time,
 		for ( const QString & s : seqs ) {
 			float a = 0, b = 0;
 			FreezeAnim::sequenceRange( &nif, s, &a, &b );
-			out() << "  " << s << "  " << a << " .. " << b << " s" << Qt::endl;
+			out() << "  " << s << "  " << a << " .. " << b << " s"
+				  << "  " << seqCycleName( &nif, s ) << Qt::endl;
 		}
 		return 0;
 	}

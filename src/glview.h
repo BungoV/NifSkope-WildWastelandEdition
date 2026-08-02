@@ -415,6 +415,8 @@ public slots:
 	 */
 	void setAnimSpeed( float speed );
 	float animationSpeed() const { return animSpeed; }
+	//! +1 forwards, -1 after a CYCLE_REVERSE turn; so a test can see the ping-pong
+	float animationDirection() const { return animDir; }
 	void setSceneSequence( const QString & );
 	/*! Play no sequence at all — only what the file animates on its own.
 	 *
@@ -427,6 +429,13 @@ public slots:
 	 *  animation there is.
 	 */
 	void clearSceneSequence();
+	/*! Re-publish the selected sequence's Cycle Type and face playback forwards.
+	 *
+	 *  Call after anything that changes WHICH sequence is selected — including
+	 *  Scene::make, which picks one itself without going through
+	 *  setSceneSequence.
+	 */
+	void announceSequenceCycle();
 	//! Render only the currently selected node's subtree (follows the selection)
 	void setSoloMode( bool );
 	//! Render only the given block's subtree (-1 clears; independent of solo mode)
@@ -525,6 +534,14 @@ signals:
 	void sequenceChanged( const QString & );
 	void sequencesUpdated();
 	void sequencesDisabled( bool );
+
+	/*! The selected sequence's authored Cycle Type (Scene::CycleType), and
+	 *  whether that means "keep playing at the end".
+	 *
+	 *  Emitted whenever the sequence changes, so the Loop toggle can start from
+	 *  what the FILE says rather than from whatever the last sequence left it on.
+	 */
+	void sequenceCycleChanged( int cycleType, bool repeats );
 
 protected:
 	//! Sets up the OpenGL rendering context, defines display lists, etc.
@@ -1498,6 +1515,17 @@ private:
 	std::chrono::steady_clock::time_point lastTime;
 	float time;
 	float animSpeed = 1.0f;
+
+	/*! Which way playback is currently running, as a multiplier on animSpeed.
+	 *
+	 *  Only CYCLE_REVERSE ever flips it: that cycle type ping-pongs, so the
+	 *  direction is playback state, not a setting. Kept apart from animSpeed
+	 *  because animSpeed belongs to the Speed and Reverse controls, and the next
+	 *  time either of those is touched it is rewritten wholesale — a sign flipped
+	 *  into it here would be silently undone, and worse, would leave the Reverse
+	 *  checkbox disagreeing with the direction on screen.
+	 */
+	float animDir = 1.0f;
 
 	float Dist;
 public:

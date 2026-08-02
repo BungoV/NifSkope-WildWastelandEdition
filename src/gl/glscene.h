@@ -285,6 +285,26 @@ public:
 	QStringList animGroups;
 	QMap<QString, QMap<QString, float> > animTags;
 
+	//! nif.xml enum CycleType, as NiControllerSequence stores it.
+	enum CycleType
+	{
+		CycleLoop = 0,
+		CycleReverse = 1,
+		CycleClamp = 2
+	};
+
+	//! Sequence name -> its authored Cycle Type. Populated with animGroups.
+	QMap<QString, int> animCycle;
+
+	/*! What the CURRENT sequence says it does when it reaches its end.
+	 *
+	 *  CycleLoop when there is no sequence selected, which is the honest answer
+	 *  for the loose-controller files ("(no sequence)"): a NiTimeController runs
+	 *  for as long as the scene does, and its own flags decide the rest inside
+	 *  Controller::cycleTime.
+	 */
+	int cycleType() const { return animCycle.value( animGroup, CycleLoop ); }
+
 	//! Block number of the node to render exclusively (-1 = off); see GLView::setSoloMode
 	int soloNode = -1;
 

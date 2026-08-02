@@ -177,6 +177,7 @@ void Scene::clear( [[maybe_unused]] bool flushTextures )
 
 	animGroups.clear();
 	animTags.clear();
+	animCycle.clear();
 
 	//if ( flushTextures )
 	textures->flush();

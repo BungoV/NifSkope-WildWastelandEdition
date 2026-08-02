@@ -2513,6 +2513,9 @@ void GLView::paintGL()
 				time = scene->timeMin();
 
 			emit sequencesUpdated();
+			// Scene::make picks the first sequence itself, so opening a file
+			// selects one without ever passing through setSceneSequence.
+			announceSequenceCycle();
 
 		} else if ( scene->timeMax() == 0 ) {
 			// No Animations in this NIF
@@ -19581,6 +19584,17 @@ void GLView::modelDestroyed()
 void GLView::setAnimSpeed( float speed )
 {
 	animSpeed = speed;
+	// The Reverse control and a ping-pong cannot both own the direction. This is
+	// the explicit one, so it wins outright: asking for -1x mid-ping-pong has to
+	// play backwards, not "the other way from whichever way it happened to be".
+	animDir = 1.0f;
+}
+
+void GLView::announceSequenceCycle()
+{
+	animDir = 1.0f;
+	const int ct = scene ? scene->cycleType() : int( Scene::CycleLoop );
+	emit sequenceCycleChanged( ct, ct != Scene::CycleClamp );
 }
 
 /*! Scrub the scene, or the physics recording when there is one.
@@ -19648,6 +19662,7 @@ void GLView::setSceneSequence( const QString & seqname )
 
 	scene->setSequence( seqname );
 	time = scene->timeMin();
+	announceSequenceCycle();
 	emit sceneTimeChanged( time, scene->timeMin(), scene->timeMax() );
 	update();
 }
@@ -19657,6 +19672,7 @@ void GLView::clearSceneSequence()
 	if ( !scene )
 		return;
 	scene->setSequence( QString() );
+	announceSequenceCycle();
 	/* The rebuild is the whole operation.
 	 *
 	 * A sequence does not "play": selecting one BINDS its interpolators onto the
@@ -19713,13 +19729,13 @@ void GLView::advanceGears()
 	if ( ( animState & AnimEnabled ) && ( animState & AnimPlay )
 		&& scene->timeMin() != scene->timeMax() )
 	{
-		time += dT * animSpeed;
+		time += dT * animSpeed * animDir;
 
 		// Reverse playback is just a negative animSpeed, so BOTH ends need the
 		// wrap logic - a sequence run backwards finishes at timeMin. Written once
 		// and applied to whichever end this direction is heading for, so loop and
 		// cycle cannot behave differently depending on the sign.
-		const bool reverse = ( animSpeed < 0.0f );
+		const bool reverse = ( animSpeed * animDir < 0.0f );
 		const bool finished = reverse ? ( time < scene->timeMin() )
 									  : ( time > scene->timeMax() );
 		const float wrapTo = reverse ? scene->timeMax() : scene->timeMin();
@@ -19732,6 +19748,17 @@ void GLView::advanceGears()
 					ix -= scene->animGroups.count();
 
 				setSceneSequence( scene->animGroups.value( ix ) );
+			} else if ( ( animState & AnimLoop )
+						&& scene->cycleType() == Scene::CycleReverse ) {
+				/* CYCLE_REVERSE ping-pongs: it does not restart, it turns round.
+				 *
+				 * Clamped to the end it just passed rather than wrapped, because
+				 * this end is where the next pass begins. Wrapping here would jump
+				 * the animation the whole length of the sequence and then play it
+				 * in the same direction again, which is CYCLE_LOOP.
+				 */
+				time = reverse ? scene->timeMin() : scene->timeMax();
+				animDir = -animDir;
 			} else if ( animState & AnimLoop ) {
 				time = wrapTo;
 			} else {
