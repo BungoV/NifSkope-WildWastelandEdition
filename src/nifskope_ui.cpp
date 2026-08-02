@@ -5576,6 +5576,135 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_COLLCOMPILED_TEST=1): editing a COMPILED body in place.
+	 *
+	 * hknpEncodeSystem reproduces 810 of 822 stock FO4 packfiles byte for byte
+	 * and was reachable only from the CLI's own round-trip self-test. The one
+	 * production write went through hknpEncodeCompressedMesh, which flattens a
+	 * system to a single static body with one triangle mesh — so changing a
+	 * compiled body's friction meant Decompile, edit, Compile, and losing the
+	 * other bodies, the compounds, the primitives, the constraints and the
+	 * ragdoll skeleton on the way.
+	 *
+	 * The check that matters is the LAST one: one Ctrl+Z has to give back a
+	 * byte-identical packfile. Anything less means the edit path is rewriting
+	 * more than it was asked to, which is exactly the failure that cannot be
+	 * seen by looking at the file in the viewport.
+	 * Log: release/ww_collcompiled_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLCOMPILED_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_collcompiled_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif || !nif->undoStack ) { log << "no model\n"; fails++; checks++; break; }
+
+					int sysBlock = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkPhysicsSystem" ) ) { sysBlock = b; break; }
+					log << "compiled system at block: " << sysBlock << "\n";
+					check( "the fixture has a compiled collision system", sysBlock >= 0 );
+					if ( sysBlock < 0 ) break;
+					const QModelIndex iSys = nif->getBlockIndex( sysBlock );
+					const QByteArray before = nif->get<QByteArray>( iSys, "Binary Data" );
+					log << "packfile is " << before.size() << " bytes\n";
+
+					QDockWidget * dock = skope->findChild<QDockWidget *>(
+						QStringLiteral( "CollisionManagerDock" ) );
+					if ( !dock ) { log << "no dock\n"; fails++; checks++; break; }
+					dock->setFloating( false );
+					dock->show();
+					QApplication::processEvents();
+					auto * tree = dock->findChild<QTreeWidget *>( QStringLiteral( "CollisionInventoryTree" ) );
+					auto * frictionSpin = dock->findChild<QDoubleSpinBox *>( QStringLiteral( "CollisionFrictionSpin" ) );
+					auto * massSpin = dock->findChild<QDoubleSpinBox *>( QStringLiteral( "CollisionMassSpin" ) );
+					if ( !tree || !frictionSpin || !massSpin ) {
+						log << "panel widgets not found\n"; fails++; checks++; break;
+					}
+
+					/* A compiled row is the one where friction is editable and
+					 * mass is not — mass lives in the motion/inertia arrays and
+					 * is not offered, so that pair identifies it without reading
+					 * the panel's private item roles.
+					 */
+					bool found = false;
+					QList<QTreeWidgetItem *> stack;
+					for ( int i = 0; i < tree->topLevelItemCount(); i++ )
+						stack << tree->topLevelItem( i );
+					while ( !stack.isEmpty() && !found ) {
+						QTreeWidgetItem * it = stack.takeFirst();
+						for ( int c = 0; c < it->childCount(); c++ )
+							stack << it->child( c );
+						tree->setCurrentItem( it );
+						QApplication::processEvents();
+						if ( frictionSpin->isEnabled() && !massSpin->isEnabled() )
+							found = true;
+					}
+					log << "a compiled row offering an editable friction: " << found << "\n";
+					check( "a compiled body can be edited without decompiling", found );
+					if ( !found ) break;
+
+					nif->undoStack->setClean();
+					const int base = nif->undoStack->index();
+					const double was = frictionSpin->value();
+					const double want = ( was > 0.6 ) ? 0.25 : 0.75;
+					frictionSpin->setValue( want );
+					QMetaObject::invokeMethod( frictionSpin, "editingFinished" );
+					QApplication::processEvents();
+
+					const QByteArray after = nif->get<QByteArray>( nif->getBlockIndex( sysBlock ), "Binary Data" );
+					log << "friction " << was << " -> " << want << "; packfile "
+						<< before.size() << " -> " << after.size() << " bytes, "
+						<< ( after == before ? "UNCHANGED" : "rewritten" )
+						<< "; undo depth " << base << " -> " << nif->undoStack->index() << "\n";
+					check( "the packfile was rewritten", after != before );
+					check( "...to the same size, so nothing structural moved", after.size() == before.size() );
+					check( "...in exactly one undo step", nif->undoStack->index() == base + 1 );
+
+					const HknpSystem back = hknpDecode( after );
+					float got = -1.0f;
+					if ( back.valid && !back.bodyPhys.isEmpty() ) {
+						// whichever body now carries it; the row's index is private
+						for ( const HknpBodyPhys & p : back.bodyPhys )
+							if ( std::fabs( p.friction - float( want ) ) < 1.0e-2f ) { got = p.friction; break; }
+					}
+					log << "re-decoded friction on some body: " << got << "\n";
+					check( "the new value survives a re-read", got >= 0.0f );
+
+					/* The one that matters. An edit path that rewrites more than
+					 * it was asked to still passes everything above.
+					 */
+					nif->undoStack->undo();
+					QApplication::processEvents();
+					const QByteArray undone = nif->get<QByteArray>( nif->getBlockIndex( sysBlock ), "Binary Data" );
+					int firstDiff = -1;
+					for ( int i = 0; i < std::min( undone.size(), before.size() ); i++ )
+						if ( undone.at( i ) != before.at( i ) ) { firstDiff = i; break; }
+					log << "after undo: " << undone.size() << " bytes, first difference at "
+						<< firstDiff << " (-1 means none)\n";
+					check( "one undo restores the byte-identical packfile", undone == before );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_COLLUNDO_TEST=1): does one edit in the Collision Manager
 	 * make exactly one undo step, and does one Ctrl+Z take it back?
 	 *

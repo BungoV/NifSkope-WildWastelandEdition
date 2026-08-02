@@ -1223,7 +1223,15 @@ private:
 		compileSelectedAction->setEnabled( have && !compiled );
 		primaryCollisionAction->setDefaultAction( compiled ? decompileSelectedAction : compileSelectedAction );
 		primaryCollisionAction->setEnabled( have );
-		physicsEditorBody->setVisible( have && !compiled );
+		/* The editor shows for a COMPILED body too, mostly greyed.
+		 *
+		 * It used to be hidden outright, which said "there is nothing here" when
+		 * what is true is "two of these are editable and the rest are read-outs".
+		 * The greyed rows are worth seeing: several of them are the decode's
+		 * substitutions rather than stored values, and a user comparing a
+		 * compiled body against an editable one has no other way to tell.
+		 */
+		physicsEditorBody->setVisible( have );
 		compiledSummaryWidget->setVisible( have && compiled );
 		emptyPhysicsWidget->setVisible( !have );
 		advancedSection->setVisible( have && !compiled );
@@ -1294,6 +1302,31 @@ private:
 				}
 			}
 			selectComboValue( material, materialValue, materialText( materialValue ) );
+
+			/* Now that the body is decoded, re-enable the two things that are
+			 * really STORED on it. Everything else above stays grey because it
+			 * is a substitution — Motion System and Quality Type come from
+			 * hasMotion, Penetration Depth is the literal 0.15, Keyframed and
+			 * Wind are always false — and writing a substitution back would
+			 * invent data the file never had.
+			 */
+			friction->setEnabled( true );
+			restitution->setEnabled( true );
+			/* The filter only when it is stored. A layer of 0 is real, and the
+			 * decode substitutes 1 or 10 so the row reads usefully; offering
+			 * that substitution as an editable value would write it in.
+			 */
+			const bool storedFilter = phys.hasStoredFilter;
+			layer->setEnabled( storedFilter );
+			linkedGroup->setEnabled( storedFilter );
+			collisionWithinGroup->setEnabled( storedFilter );
+			filterGroup->setEnabled( storedFilter );
+			physicsHint->setText( storedFilter
+				? tr( "Friction, restitution and the collision filter edit this body inside the "
+					"compiled system. Everything else here is read-only." )
+				: tr( "Friction and restitution edit this body inside the compiled system. This "
+					"body stores no collision filter, so the layer shown is a default." ) );
+
 			compiledSummaryLabel->setText( tr( "<b>%1 - %2</b><br>%3 | %4 | %5 | friction %6 | restitution %7" )
 				.arg( item->text( 0 ), item->text( 1 ), item->text( 2 ), materialText( materialValue ), item->text( 4 ) )
 				.arg( phys.friction, 0, 'f', 3 ).arg( phys.restitution, 0, 'f', 3 ) );
@@ -1333,11 +1366,119 @@ private:
 		}
 	}
 
+	/*! Edit a COMPILED body in place, without decompiling it.
+	 *
+	 *  hknpEncodeSystem reproduces 810 of 822 stock FO4 packfiles byte for byte,
+	 *  and until now it was reachable only from the CLI's own round-trip
+	 *  self-test. The one production write went through hknpEncodeCompressedMesh,
+	 *  which flattens a system to a single static body with one triangle mesh —
+	 *  so changing a compiled body's friction meant Decompile, edit, Compile, and
+	 *  losing every other body, the compounds, the primitives, the constraints
+	 *  and the ragdoll skeleton on the way.
+	 *
+	 *  Nothing is decompiled here. The system is decoded, ONE modelled field is
+	 *  changed, and it is encoded again — so every opaque region the decoder
+	 *  carries verbatim goes back exactly as it came.
+	 *
+	 *  ONLY THE FIELDS THAT ARE REALLY STORED. Most of what the compiled display
+	 *  shows is a substitution: Motion System and Quality Type are derived from
+	 *  hasMotion, Penetration Depth is the literal 0.15, Keyframed and Wind are
+	 *  always false. Writing those back would invent data. Friction and
+	 *  restitution are stored (as float16, so an untouched value re-encodes
+	 *  exactly), and the collision filter is stored only when hasStoredFilter —
+	 *  a layer of 0 is real, and the decode substitutes 1 or 10 so the user sees
+	 *  something useful, which must not then be written back as though it were
+	 *  the file's own value.
+	 *
+	 *  THE GUARD IS A BYTE COMPARISON, not a proxy. Before any edit is applied,
+	 *  the untouched decode is re-encoded and compared with the bytes on disk. If
+	 *  the system is one of the twelve that does not reproduce exactly, the edit
+	 *  is refused rather than silently rewriting the other differences too.
+	 */
+	void applyCompiledPhysics()
+	{
+		QTreeWidgetItem * item = tree->currentItem();
+		if ( updating || !item || !item->data( 0, CompiledRole ).toBool() )
+			return;
+		const int systemBlock = item->data( 0, SystemBlockRole ).toInt();
+		const quint32 bodyId = item->data( 0, BodyIdRole ).toUInt();
+		const QModelIndex system = blockIndex( systemBlock );
+		if ( !system.isValid() )
+			return;
+		const QByteArray systemBytes = nif->get<QByteArray>( system, "Binary Data" );
+		HknpSystem sys = hknpDecodeCached( systemBytes );		// a copy: this one gets edited
+		if ( !sys.valid || int( bodyId ) >= sys.bodyPhys.size() )
+			return;
+
+		// does this system reproduce at all? if not, an edit cannot be isolated
+		QString err;
+		const QByteArray probe = hknpEncodeSystem( sys, &err );
+		if ( probe != systemBytes ) {
+			physicsHint->setText( tr( "This system does not re-encode byte-for-byte, so an edit "
+				"cannot be applied without rewriting other differences too." ) );
+			updating = true;
+			updateDetails();		// put the widgets back to what is in the file
+			updating = false;
+			return;
+		}
+
+		HknpBodyPhys & b = sys.bodyPhys[int( bodyId )];
+		const float wantFriction = float( friction->value() );
+		const float wantRestitution = float( restitution->value() );
+		b.friction = wantFriction;
+		b.restitution = wantRestitution;
+		if ( b.hasStoredFilter ) {
+			quint32 packed = b.packedFilter & ~0x000000ffu;
+			const QVariant chosen = layer->currentData();
+			packed |= ( chosen.isValid() ? chosen.toUInt() : b.layer ) & 0xffu;
+			quint32 flags = ( b.packedFilter >> 8 ) & 0xffu;
+			flags &= ~0xc0u;
+			if ( linkedGroup->isChecked() ) {
+				flags |= 0x80u;
+				if ( !collisionWithinGroup->isChecked() )
+					flags |= 0x40u;
+			}
+			packed = ( packed & ~0x0000ff00u ) | ( flags << 8 );
+			packed = ( packed & 0x0000ffffu ) | ( quint32( filterGroup->value() ) << 16 );
+			b.packedFilter = packed;
+		}
+
+		const QByteArray bytes = hknpEncodeSystem( sys, &err );
+		if ( bytes.isEmpty() ) {
+			physicsHint->setText( tr( "The edit could not be encoded: %1" ).arg( err ) );
+			return;
+		}
+		if ( bytes == systemBytes ) {
+			physicsHint->setText( tr( "No change." ) );
+			return;
+		}
+		/* Re-decode and check the field actually landed. The self-check the
+		 * Compile path uses counts triangles, which cannot fail on a physics
+		 * edit; this reads back the value that was asked for.
+		 */
+		const HknpSystem back = hknpDecode( bytes );
+		if ( !back.valid || int( bodyId ) >= back.bodyPhys.size()
+			|| std::fabs( back.bodyPhys.at( int( bodyId ) ).friction - wantFriction ) > 1.0e-2f ) {
+			physicsHint->setText( tr( "The edit did not survive a re-read and was not applied." ) );
+			return;
+		}
+
+		nifSnapshotOp( nif, tr( "Edit compiled collision body" ), [&]() {
+			nif->set<QByteArray>( QModelIndex( system ), "Binary Data", bytes );
+		} );
+		physicsHint->setText( tr( "Body %1 updated in place; the rest of the system is unchanged." )
+			.arg( bodyId ) );
+		queueRebuild();
+	}
+
 	void applyLayerSelection( int row )
 	{
-		if ( updating || row < 0 || !tree->currentItem()
-			|| tree->currentItem()->data( 0, CompiledRole ).toBool() )
+		if ( updating || row < 0 || !tree->currentItem() )
 			return;
+		if ( tree->currentItem()->data( 0, CompiledRole ).toBool() ) {
+			applyCompiledPhysics();
+			return;
+		}
 		QVariant selected = layer->itemData( row );
 		if ( !selected.isValid() )
 			return;
@@ -1395,8 +1536,13 @@ private:
 
 	void applyPhysics()
 	{
-		if ( updating || !tree->currentItem() || tree->currentItem()->data( 0, CompiledRole ).toBool() )
+		if ( updating || !tree->currentItem() )
 			return;
+		// a compiled body is edited in its packfile, not through NIF blocks
+		if ( tree->currentItem()->data( 0, CompiledRole ).toBool() ) {
+			applyCompiledPhysics();
+			return;
+		}
 		QModelIndex body = blockIndex( tree->currentItem()->data( 0, BodyBlockRole ).toInt() );
 		QModelIndex info = nif->getIndex( body, "Rigid Body Info" );
 		if ( !info.isValid() )
@@ -2397,6 +2543,7 @@ private:
 		 */
 		mass->setObjectName( QStringLiteral( "CollisionMassSpin" ) );
 		friction = new QDoubleSpinBox( physicsGroup );
+		friction->setObjectName( QStringLiteral( "CollisionFrictionSpin" ) );
 		friction->setRange( 0.0, 10.0 ); friction->setDecimals( 3 );
 		restitution = new QDoubleSpinBox( physicsGroup );
 		restitution->setRange( 0.0, 1.0 ); restitution->setDecimals( 3 );
