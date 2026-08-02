@@ -1,5 +1,64 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02h — Collision round-trips perfectly, and the encoder is reachable
+
+**839 of 839 packfiles in the 445-file corpus now reproduce byte-identically.**
+Where the session started: 810 exact, 17 refused, 12 differing.
+
+| | exact | refused | differing |
+|---|---|---|---|
+| start | 810 | 17 | 12 |
+| `hknpConvexShape` | 827 | 0 | 12 |
+| inverse mass | 833 | 0 | 6 |
+| fixup reserve | **839** | **0** | **0** |
+
+**The inverse mass.** The file stores an inverse; the decoder made `1/invMass`
+and the encoder wrote `1/mass`. In float32 that is not the identity — three
+values in the corpus come back one ULP out. The stored value is now carried and
+written back whenever mass has not been edited, tested by the decode's own
+expression so it is exact by construction.
+
+**The reserved fixup slots** looked like one per null constraint-motor pointer.
+They are not: corpus-wide that rule is wrong 46 times in 64, and two shipped
+packfiles with identical classes, objects, fixup counts *and* null-pointer
+patterns have different table lengths — the one with **more** nulls reserving
+**less** table. It is a fossil of the source `.hkt`, so the only correct answer
+is to carry the length. Grow-only. 23,448 of the game's 23,454 packfiles already
+sit at the computed minimum, so it is a no-op for everything but the six.
+
+**`cinfo +0x12` is not a material index** — it is the body's slot in the shape
+list, on 178 of 178 multi-body systems. Read as a material index into
+`bodyMaterials`, which *concatenates* every shape's own table, a slot number
+from one shape indexed into another shape's materials: measured on
+`BldgIntUpprStairsL01.nif`, a decompiled convex shape came out with
+`0x7000682E` where its own header says `0x26067D15`.
+
+**Compile Collision is a spell**, so the Collision group is no longer one-way —
+but the real reason is that a private dock member cannot be tested, and that is
+exactly how it came to write layer Static/0/0 into every packfile it produced.
+The hoist had to bring three things with it: a Fallout 4 gate (the dock never
+needed one, because its tree only lists what the file contains), `destructive()`
+with a warning naming what goes, and a selection-safe removal — `spRemoveBranch`
+consults the Block List multi-selection, so from the Block List this would have
+deleted every selected branch inside a snapshot labelled "Compile collision".
+
+**BSXFlags bit 1** is now set whenever collision is created or compiled. Nothing
+ever wrote it, so a mesh could leave this editor with collision the engine
+ignores. Measured: 22,496 of 22,496 collision-bearing stock meshes set it, no
+exceptions. Deliberately never *cleared* — 71 stock meshes ship the bit with no
+collision at all, so a spurious bit is tolerated while clearing one loses intent.
+
+### Two things testing found that reading had not
+
+Writing the BSXFlags block with `set<QString>` named it **"1"**: from 20.2.0.7
+the Name is an index into the header's string table, and a plain string write
+puts the index digits in as the name. It needs `assignString`.
+
+And the harness itself: `get -f "Name"` returns that raw index, so the check had
+to read the resolved name from the block listing instead. The check was run
+against the previous build to confirm it fails there — 8 checks, 1 failure —
+before being accepted as evidence.
+
 ## 2026-08-02g — Collision: the encoder gets a user, and 17 files stop being invisible
 
 An exhaustive round-trip audit over **445 stock FO4 meshes / 839 compiled
