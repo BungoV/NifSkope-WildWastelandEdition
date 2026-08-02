@@ -176,8 +176,8 @@ const IssueClass issueClasses[] = {
 
 	{ "has an absolute filepath",
 	  "Texture path is absolute",
-	  "", "", false,
-	  "No automatic fix — an absolute path will not resolve on another machine; make it relative to the Data folder." },
+	  "Make Asset Paths Relative", "", false,
+	  "Trims the drive and folders in front of every absolute path in the file, back to the textures\\ or materials\\ folder it sits under. A path with no Data folder in it is left alone." },
 
 	{ "cannot have empty filepaths",
 	  "Texture path is empty",

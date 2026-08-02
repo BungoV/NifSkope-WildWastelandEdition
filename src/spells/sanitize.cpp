@@ -1,10 +1,12 @@
 #include "spellbook.h"
 #include "sanitize.h"
 #include "spells/misc.h"
+#include "nifsnapshot.h"
 
 #include <QInputDialog>
 
 #include <algorithm> // std::stable_sort
+#include <functional>
 
 
 // Brief description is deliberately not autolinked to class Spell
@@ -771,6 +773,154 @@ void spErrorInvalidPaths::checkPath( NifModel * nif, const QModelIndex & idx, co
 }
 
 REGISTER_SPELL( spErrorInvalidPaths )
+
+/*! Anchor absolute asset paths back to their Data-relative form.
+ *
+ *  "C:\Users\me\modding\textures\armour\foo.dds" becomes "textures\armour\foo.dds".
+ *  An absolute path resolves on the machine that authored it and nowhere else,
+ *  which is why spErrorInvalidPaths reports it as an error rather than a note.
+ *
+ *  THE ANCHOR RULE, and why it is not the one the archive code uses.
+ *  BA2File::findPrefixLen does the same job, but its component comparison
+ *  (checkDataDirName) compares only as many characters as the component has — so
+ *  "tex" prefix-matches "textures", and "C:\work\tex\foo.dds" would anchor at
+ *  "tex". Reusing it verbatim would inherit that. This matches components
+ *  EXACTLY, and takes the LAST match, so a path containing "textures" twice
+ *  anchors at the innermost one.
+ *
+ *  WHICH FOLDER A FIELD LIVES UNDER. BSLightingShaderProperty's "Name" and "Root
+ *  Material" hold .bgsm/.bgem MATERIAL paths, not textures — the rest of the tree
+ *  resolves those with archiveFolder "materials". A verification pass that
+ *  assumed "textures" would silently decline exactly the FO4 material paths this
+ *  exists for.
+ *
+ *  WHY THERE IS NO VERIFICATION PASS AT ALL. findResourceFile looks like the
+ *  obvious gate and is wrong as one, three times over. Its return value is
+ *  get_full_path's normalisation — lowercased, forward-slashed, and with the
+ *  extension COERCED — so writing it back would store paths in a convention this
+ *  fork does not use and could name a different file from the one probed. It also
+ *  appends the open NIF's own folder to the search paths, so a path that resolves
+ *  only on this machine verifies happily, which is the exact problem being fixed.
+ *  And the first call loads every configured archive from disk.
+ *
+ *  So the anchor is deterministic and consults nothing. A path with no data
+ *  directory in it is LEFT ALONE and counted, rather than guessed at.
+ */
+class spMakePathsRelative final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Make Asset Paths Relative" ); }
+	QString page() const override final { return Spell::tr( "Sanitize" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Trims the drive and folders in front of an absolute asset path, "
+			"back to the textures\\ or materials\\ folder it sits under." );
+	}
+
+	//! Exactly the directories a Bethesda Data folder is allowed to contain.
+	static bool isDataDir( const QString & c )
+	{
+		static const char * const dirs[] = {
+			"geometries", "icons", "interface", "materials", "meshes", "particles",
+			"planetdata", "scripts", "shadersfx", "sound", "strings", "terrain",
+			"textures", "vis"
+		};
+		for ( const char * d : dirs )
+			if ( c.compare( QLatin1String( d ), Qt::CaseInsensitive ) == 0 )
+				return true;
+		return false;
+	}
+
+	//! A drive letter or a UNC prefix. Matches spErrorInvalidPaths' own test.
+	static bool isAbsolutePath( const QString & p )
+	{
+		return ( p.size() > 2 && p.at( 1 ) == QLatin1Char( ':' ) )
+			|| p.startsWith( QLatin1String( "\\\\" ) );
+	}
+
+	/*! The Data-relative form, or empty when there is nothing to anchor to.
+	 *
+	 *  Separators become backslashes, which is what this fork writes elsewhere.
+	 *  Case is left alone: lowercasing an authored path is a change nobody asked
+	 *  for and the engine does not need.
+	 */
+	static QString relativeForm( const QString & path )
+	{
+		QString p = path;
+		p.replace( QLatin1Char( '/' ), QLatin1Char( '\\' ) );
+		const QStringList parts = p.split( QLatin1Char( '\\' ), Qt::SkipEmptyParts );
+		int anchor = -1;
+		for ( int i = 0; i < parts.size() - 1; i++ )	// never the file name itself
+			if ( isDataDir( parts.at( i ) ) )
+				anchor = i;
+		if ( anchor < 0 )
+			return QString();
+		return QStringList( parts.mid( anchor ) ).join( QLatin1Char( '\\' ) );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return nif && !index.isValid() && nif->getBlockCount() > 0;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & ) override final
+	{
+		int fixed = 0, declined = 0;
+		std::function<void( const QModelIndex & )> rewrite = [&]( const QModelIndex & field ) {
+			if ( !field.isValid() )
+				return;
+			if ( nif->isArray( field ) ) {
+				for ( int r = 0; r < nif->rowCount( field ); r++ )
+					rewrite( nif->getIndex( field, r ) );
+				return;
+			}
+			const QString path = nif->get<QString>( field );
+			if ( path.isEmpty() || !isAbsolutePath( path ) )
+				return;
+			const QString rel = relativeForm( path );
+			if ( rel.isEmpty() ) {
+				declined++;			// no data directory in it: nothing to anchor to
+				return;
+			}
+			nif->set<QString>( field, rel );
+			fixed++;
+		};
+
+		nifSnapshotOp( nif, Spell::tr( "Make asset paths relative" ), [&]() {
+			for ( int i = 0; i < nif->getBlockCount(); i++ ) {
+				const QModelIndex b = nif->getBlockIndex( i );
+
+				if ( nif->blockInherits( b, "BSShaderTextureSet" ) )
+					rewrite( nif->getIndex( b, "Textures" ) );
+				if ( nif->blockInherits( b, "BSShaderNoLightingProperty" )
+					|| nif->blockInherits( b, "NiSourceTexture" ) )
+					rewrite( nif->getIndex( b, "File Name" ) );
+				if ( nif->blockInherits( b, "BSLightingShaderProperty" ) ) {
+					// material paths, not textures — see the class comment
+					rewrite( nif->getIndex( b, "Name" ) );
+					rewrite( nif->getIndex( b, "Root Material" ) );
+				}
+				if ( nif->blockInherits( b, "BSEffectShaderProperty" ) ) {
+					static const char * const fields[] = {
+						"Source Texture", "Greyscale Texture", "Env Map Texture",
+						"Normal Texture", "Env Mask Texture"
+					};
+					for ( const char * f : fields )
+						rewrite( nif->getIndex( b, f ) );
+				}
+			}
+		} );
+
+		if ( fixed || declined )
+			nif->logMessage( Spell::tr( "Asset paths" ),
+				Spell::tr( "%1 path(s) made relative; %2 had no Data folder to anchor to." )
+					.arg( fixed ).arg( declined ),
+				declined ? QMessageBox::Warning : QMessageBox::Information );
+		return QModelIndex();
+	}
+};
+
+REGISTER_SPELL( spMakePathsRelative )
 
 bool spWarningEnvironmentMapping::isApplicable(const NifModel * nif, const QModelIndex & index)
 {
