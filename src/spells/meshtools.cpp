@@ -2262,6 +2262,7 @@ class spRenameNodeSynced final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Rename (sync animation)..." ); }
+	QString group() const override { return Spell::tr( "Block" ); }
 	QString page() const override final { return Spell::tr( "Node" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -2322,9 +2323,20 @@ public:
 	QString hint() const override { return Spell::tr( "Rewrites the object palette so its names match the nodes they point at." ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 
-	bool isApplicable( const NifModel * nif, const QModelIndex & ) override final
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
 		if ( !nif )
+			return false;
+		/* Menubar and Unfuck only — both cast with an invalid index.
+		 *
+		 * This did not even name its index parameter, so it answered true on
+		 * every block row in the file, and offered from one block's right-click
+		 * menu to rewrite every name in the object palette. A context menu entry
+		 * that ignores the thing that was right-clicked is how a file gets
+		 * edited by accident; whole-file repairs belong to the Unfuck panel,
+		 * which lists what it is about to change first.
+		 */
+		if ( index.isValid() )
 			return false;
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			if ( nif->blockInherits( nif->getBlockIndex( b ), "NiDefaultAVObjectPalette" ) )

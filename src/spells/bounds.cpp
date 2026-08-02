@@ -15,6 +15,8 @@ class spEditBounds final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Edit" ); }
+	QString group() const override { return QString(); }
+	QString label() const override { return Spell::tr( "Edit Bounds" ); }
 	QString page() const override final { return Spell::tr( "Bounds" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

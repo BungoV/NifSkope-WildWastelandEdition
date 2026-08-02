@@ -287,6 +287,7 @@ class spCombiTris final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Combine Shapes" ); }
+	QString group() const override { return Spell::tr( "Fix" ); }
 	QString page() const override final { return Spell::tr( "Optimize" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

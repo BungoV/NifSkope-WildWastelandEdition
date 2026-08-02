@@ -16,6 +16,7 @@ class spMorphFrameSave final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Save Vertices To Frame" ); }
+	QString group() const override { return QString(); }
 	QString page() const override final { return Spell::tr( "Morph" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

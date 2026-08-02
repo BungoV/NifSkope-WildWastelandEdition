@@ -22,6 +22,8 @@ class spUpdateArray final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update" ); }
+	QString group() const override { return QString(); }
+	QString label() const override { return Spell::tr( "Update Array Size" ); }
 	QString page() const override final { return Spell::tr( "Array" ); }
 	QIcon icon() const override final { return QIcon( ":/img/update" ); }
 	bool instant() const override final { return true; }
@@ -70,6 +72,8 @@ class spUpdateHeader final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update" ); }
+	QString group() const override { return QString(); }
+	QString label() const override { return Spell::tr( "Update Header" ); }
 	QString page() const override final { return Spell::tr( "Header" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -92,6 +96,8 @@ class spUpdateFooter final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update" ); }
+	QString group() const override { return QString(); }
+	QString label() const override { return Spell::tr( "Update Footer" ); }
 	QString page() const override final { return Spell::tr( "Footer" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -141,6 +147,7 @@ class spFileOffset final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "File Offset" ); }
+	QString group() const override { return Spell::tr( "Info" ); }
 	bool constant() const override final { return true; }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -166,6 +173,7 @@ class spExportBinary final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Export Binary" ); }
+	QString group() const override { return Spell::tr( "Import & Export" ); }
 	bool constant() const override final { return true; }
 
 	bool isApplicable( [[maybe_unused]] const NifModel * nif, const QModelIndex & index ) override final
@@ -215,6 +223,7 @@ class spImportBinary final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Import Binary" ); }
+	QString group() const override { return Spell::tr( "Import & Export" ); }
 
 	bool isApplicable( [[maybe_unused]] const NifModel * nif, const QModelIndex & index ) override final
 	{
@@ -389,6 +398,7 @@ class spMoveArrayItemUp final : public spMoveArrayItem
 {
 public:
 	QString name() const override final { return Spell::tr( "Move Up" ); }
+	QString label() const override { return Spell::tr( "Move Row Up" ); }
 	QKeySequence hotkey() const override final { return { Qt::ControlModifier | Qt::Key_Up }; }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -412,6 +422,7 @@ class spMoveArrayItemDown final : public spMoveArrayItem
 {
 public:
 	QString name() const override final { return Spell::tr( "Move Down" ); }
+	QString label() const override { return Spell::tr( "Move Row Down" ); }
 	QKeySequence hotkey() const override final { return { Qt::ControlModifier | Qt::Key_Down }; }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -435,6 +446,7 @@ class spMoveArrayItemTo final : public spMoveArrayItem
 {
 public:
 	QString name() const override final { return Spell::tr( "Move To Row..." ); }
+	QString label() const override { return Spell::tr( "Move Row To…" ); }
 
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
 	{

@@ -96,6 +96,8 @@ class spMaterialEdit final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Material" ); }
+	QString group() const override { return Spell::tr( "Material" ); }
+	QString label() const override { return Spell::tr( "Edit NiMaterialProperty…" ); }
 	QString page() const override final { return Spell::tr( "" ); }
 	bool instant() const override final { return true; }
 	QIcon icon() const override final

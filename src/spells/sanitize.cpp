@@ -955,6 +955,7 @@ class spSortKeyGroup final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Sort Keys" ); }
+	QString group() const override { return Spell::tr( "Fix" ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 
 	struct KeyGroupItem

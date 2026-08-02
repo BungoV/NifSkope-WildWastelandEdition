@@ -39,6 +39,7 @@ class spFaceNormals final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Face Normals" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	static QModelIndex getShapeData( const NifModel * nif, const QModelIndex & index )
@@ -275,6 +276,7 @@ class spFlipNormals final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Flip Normals" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -369,6 +371,7 @@ class spSmoothNormals final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Smooth Normals" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -750,6 +753,7 @@ class spTransferNormals final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Transfer Normals..." ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	static bool isMesh( const NifModel * nif, const QModelIndex & idx )

@@ -12,6 +12,7 @@ class spUpdateCenterRadius final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update Bounding Sphere" ); }
+	QString group() const override { return Spell::tr( "Recompute" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final;
@@ -23,6 +24,7 @@ class spUpdateTrianglesFromSkin final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update Triangles From Skin" ); }
+	QString group() const override { return Spell::tr( "Recompute" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final;
@@ -34,6 +36,7 @@ class spUpdateBounds final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update Bounds" ); }
+	QString group() const override { return Spell::tr( "Recompute" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -55,6 +58,7 @@ class spGenerateMeshlets final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Generate Meshlets and Update Bounds" ); }
+	QString group() const override { return Spell::tr( "Recompute" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -77,6 +81,7 @@ class spRemoveWasteVertices : public Spell
 {
 public:
 	QString name() const override { return Spell::tr( "Remove Unused Vertices" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	static QModelIndex getShape( const NifModel * nif, const QModelIndex & index );

@@ -329,6 +329,7 @@ class spEditShaderFlags final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Shader Flags…" ); }
+	QString group() const override { return Spell::tr( "Flags" ); }
 	QString page() const override final { return Spell::tr( "Shader" ); }
 	QIcon icon() const override final { return QIcon( ":/img/flag" ); }
 	bool constant() const override final { return true; }
@@ -404,6 +405,7 @@ class spEditFlags : public Spell
 {
 public:
 	QString name() const override { return Spell::tr( "Flags" ); }
+	QString group() const override { return Spell::tr( "Flags" ); }
 	bool constant() const override { return true; }
 	bool instant() const override { return true; }
 	QIcon icon() const override { return QIcon( ":/img/flag" ); }
@@ -1438,6 +1440,7 @@ class spEditVertexDesc final : public spEditFlags
 {
 public:
 	QString name() const override final { return Spell::tr( "Vertex Flags" ); }
+	QString group() const override { return Spell::tr( "Flags" ); }
 	bool instant() const override final { return true; }
 	QIcon icon() const override final { return QIcon( ":/img/flag" ); }
 
@@ -1666,6 +1669,7 @@ class spCopyFlagValues final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Copy Flags" ); }
+	QString group() const override { return Spell::tr( "Flags" ); }
 	QIcon icon() const override final { return QIcon( ":/img/flag" ); }
 	bool constant() const override final { return true; }
 	bool instant() const override final { return true; }
@@ -1696,6 +1700,7 @@ class spPasteFlagValues final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Paste Flags" ); }
+	QString group() const override { return Spell::tr( "Flags" ); }
 	QIcon icon() const override final { return QIcon( ":/img/flag" ); }
 	bool instant() const override final { return true; }
 

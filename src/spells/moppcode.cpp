@@ -94,6 +94,7 @@ class spMoppCode final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update MOPP Code" ); }
+	QString group() const override { return Spell::tr( "Recompute" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

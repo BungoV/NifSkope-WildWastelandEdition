@@ -1,7 +1,6 @@
 <RCC>
     <qresource prefix="/res">
         <file>nifskope.png</file>
-        <file>skel.dat</file>
     </qresource>
     <qresource prefix="/img">
         <file alias="update">icon/img_update.png</file>

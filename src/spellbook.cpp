@@ -106,6 +106,21 @@ SpellBook::~SpellBook()
 	books().removeAll( this );
 }
 
+/*! One segment of a Spell::group() path, as a menu title.
+ *
+ *  Qt reads '&' in an action or menu title as the mnemonic marker, so a group
+ *  called "Select & View" would render as "Select  View" with a keyboard
+ *  accelerator on the space. Doubling it displays the character.
+ *
+ *  Applied on both sides of every title comparison in this file, so the group
+ *  strings the spells declare stay literal and only the display is escaped.
+ */
+static QString menuTitleFor( const QString & groupSegment )
+{
+	QString t = groupSegment;
+	return t.replace( QLatin1Char( '&' ), QLatin1String( "&&" ) );
+}
+
 bool Spell::bookConfirmed = false;
 
 void SpellBook::cast( NifModel * nif, const QModelIndex & index, SpellPtr spell )
@@ -211,54 +226,94 @@ void SpellBook::sltIndex( const QModelIndex & index )
 
 void SpellBook::checkActions()
 {
-	checkActions( this, QString() );
+	checkActions( this );
 }
 
-void SpellBook::checkActions( QMenu * menu, const QString & page )
+/*! Enable/disable/hide each entry against the current index.
+ *
+ *  This used to find the spell behind an action by scanning all 200 of them for
+ *  one whose name() matched the action's text AND whose page() matched the
+ *  submenu title. That was a linear search per action per index change, but the
+ *  real problem was that it was AMBIGUOUS: four spells are called "Choose" and
+ *  three are called "Update", and they were kept apart only by living on
+ *  different pages. Two spells sharing a name on one page — which merging pages
+ *  into groups makes easy to do by accident — would each overwrite the other's
+ *  enabled state, and the last one in registration order would win.
+ *
+ *  Map already holds the exact QAction -> Spell relation, built at registration.
+ *  Using it is both faster and unambiguous, and it is what sltSpellTriggered has
+ *  always done to decide which spell an action casts. A menu that only contains
+ *  actions we know nothing about is left alone rather than disabled — SpellBooks
+ *  also host native actions (the Block List's Hierarchy submenu), and those are
+ *  not ours to judge.
+ */
+void SpellBook::checkActions( QMenu * menu )
 {
 	bool menuEnable = false;
+	bool sawSpell = false;
 	for ( QAction * action : menu->actions() ) {
 		if ( action->menu() ) {
-			checkActions( action->menu(), action->menu()->title() );
+			checkActions( action->menu() );
 			menuEnable |= action->menu()->isEnabled();
 			action->setVisible( action->menu()->isEnabled() );
+			sawSpell = true;
 		} else {
-			for ( SpellPtr spell : spells() ) {
-				if ( action->text() == spell->name() && page == spell->page() ) {
-					bool actionEnable = Nif && spell->isApplicable( Nif, Index );
-					action->setVisible( actionEnable );
-					action->setEnabled( actionEnable );
-					menuEnable |= actionEnable;
-				}
-			}
+			auto it = Map.constFind( action );
+			if ( it == Map.constEnd() )
+				continue;
+			sawSpell = true;
+			bool actionEnable = Nif && it.value()->isApplicable( Nif, Index );
+			action->setVisible( actionEnable );
+			action->setEnabled( actionEnable );
+			menuEnable |= actionEnable;
 		}
 	}
-	menu->setEnabled( menuEnable );
+	menu->setEnabled( sawSpell ? menuEnable : true );
 }
 
 void SpellBook::newSpellRegistered( SpellPtr spell )
 {
 	QMenu * menu = nullptr;
 
-	if ( !spell->page().isEmpty() ) {
-		for ( QAction * action : actions() ) {
-			if ( action->menu() && action->menu()->title() == spell->page() ) {
-				menu = action->menu();
+	/* Built from group(), not page(). group() is a '/'-separated PATH, so one
+	 * walk handles both levels: "Material/Textures" finds-or-creates Material,
+	 * then finds-or-creates Textures inside it.
+	 *
+	 * Only Material needs the second level today — the nine legacy
+	 * NiTexturingProperty "Add … Map" spells, which cannot fire on anything
+	 * Bethesda has shipped since Skyrim, and which crowded out the entries that
+	 * can. But the walk costs nothing and the alternative is a second
+	 * special-cased title, which is exactly how the two-page hoist that
+	 * orderGroups replaced got started.
+	 */
+	const QStringList path = spell->group().split( QLatin1Char( '/' ), Qt::SkipEmptyParts );
+	for ( const QString & segment : path ) {
+		const QString title = menuTitleFor( segment );
+		QMenu * parent = menu;
+		QMenu * found = nullptr;
+		for ( QAction * action : ( parent ? parent->actions() : actions() ) ) {
+			if ( action->menu() && action->menu()->title() == title ) {
+				found = action->menu();
 				break;
 			}
 		}
 
-		if ( !menu ) {
-			menu = new QMenu( spell->page(), this );
-			addMenu( menu );
+		if ( !found ) {
+			found = new QMenu( title, parent ? static_cast<QWidget *>( parent )
+											 : static_cast<QWidget *>( this ) );
+			if ( parent )
+				parent->addMenu( found );
+			else
+				addMenu( found );
 		}
+		menu = found;
 	}
 
 	QAction * act;
 	if ( menu )
-		act = menu->addAction( spell->icon(), spell->name() );
+		act = menu->addAction( spell->icon(), spell->label() );
 	else
-		act = addAction( spell->icon(), spell->name() );
+		act = addAction( spell->icon(), spell->label() );
 	act->setShortcut( spell->hotkey() );
 	/* Spell::hint() was declared "Unused?" and had zero overrides tree-wide, while
 	 * the same sentences sat in a static table inside the Unfuck dialog where only
@@ -269,7 +324,7 @@ void SpellBook::newSpellRegistered( SpellPtr spell )
 	act->setToolTip( spell->hint() );
 	Map.insert( act, spell );
 
-	orderPages();
+	orderGroups();
 }
 
 /*! Put the submenus in a DECLARED order rather than in link order.
@@ -285,27 +340,40 @@ void SpellBook::newSpellRegistered( SpellPtr spell )
  *  established relative order, after the named ones, so adding a page does not
  *  require touching this table.
  *
- *  Deliberately ORDER only. Nothing here renames a page or moves a spell between
- *  pages: `page()` is overloaded five ways across this codebase — submenu label,
- *  CLI namespace, Unfuck membership, undo-prompt exemption and the `batch()`
- *  model-signal switch — so changing those strings changes four unrelated
- *  behaviours. Membership is a separate change from ordering, and this is the
- *  ordering half.
+ *  Deliberately ORDER only. Nothing here renames a group or moves a spell
+ *  between groups — that is what Spell::group() is for. This walks whatever
+ *  groups exist and puts the ones it knows about in sequence.
+ *
+ *  Note Spell::tr and not SpellBook's own tr: these titles were produced by
+ *  Spell::group(), whose overrides all wrap their string in Spell::tr, so a
+ *  translated build has to look the title up in the same context it was
+ *  translated in. The two agree in an English build, which is why the version
+ *  this replaced got away with the wrong one.
  */
-void SpellBook::orderPages()
+void SpellBook::orderGroups()
 {
-	static const char * const pageOrder[] = {
-		"Transform", "Block", "Node", "Mesh", "Havok", "Animation",
-		"Material", "Texture", "Shader", "Optimize", "Sanitize", "Error Checking",
+	static const char * const groupOrder[] = {
+		"Block", "Add", "Transform", "Select & View", "Geometry", "Recompute",
+		"Skinning", "Material", "Collision", "Animation", "Flags",
+		"Import & Export", "Fix", "Info",
 	};
 
-	// walk backwards, inserting each named page in front of the one after it, so
+	/* Both passes below have to ask the same question, and when they asked it in
+	 * two hand-written copies they disagreed: one compared the escaped title and
+	 * one the raw group name, so "Import & Export" — the only group with an '&'
+	 * in it — was ordered by the first pass and then left behind by the second.
+	 */
+	auto isGroup = []( const QAction * a, const char * name ) {
+		return a->menu() && a->menu()->title() == menuTitleFor( Spell::tr( name ) );
+	};
+
+	// walk backwards, inserting each named group in front of the one after it, so
 	// a single pass leaves them in the declared sequence
 	QAction * anchor = nullptr;
-	for ( int i = int( std::size( pageOrder ) ) - 1; i >= 0; i-- ) {
+	for ( int i = int( std::size( groupOrder ) ) - 1; i >= 0; i-- ) {
 		QAction * found = nullptr;
 		for ( QAction * a : actions() )
-			if ( a->menu() && a->menu()->title() == tr( pageOrder[i] ) ) { found = a; break; }
+			if ( isGroup( a, groupOrder[i] ) ) { found = a; break; }
 		if ( !found )
 			continue;
 		removeAction( found );
@@ -316,16 +384,16 @@ void SpellBook::orderPages()
 		anchor = found;
 	}
 
-	/* The named pages are now in order but sitting at the BOTTOM, because each
+	/* The named groups are now in order but sitting at the BOTTOM, because each
 	 * removeAction/addAction pair moved them past everything unnamed. One more
 	 * pass lifts the whole run to the front, which is where the structural
 	 * categories belong.
 	 */
 	if ( anchor ) {
 		QList<QAction *> named;
-		for ( const char * name : pageOrder )
+		for ( const char * name : groupOrder )
 			for ( QAction * a : actions() )
-				if ( a->menu() && a->menu()->title() == tr( name ) ) { named.append( a ); break; }
+				if ( isGroup( a, name ) ) { named.append( a ); break; }
 		QAction * first = actions().isEmpty() ? nullptr : actions().first();
 		if ( first && !named.contains( first ) ) {
 			for ( QAction * a : named ) {

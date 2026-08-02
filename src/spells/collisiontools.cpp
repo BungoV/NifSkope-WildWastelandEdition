@@ -2869,6 +2869,7 @@ class spFixCollisionLayer final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Set Collision Layer from Motion" ); }
+	QString group() const override { return Spell::tr( "Fix" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 	QString hint() const override final
 	{
@@ -2922,6 +2923,7 @@ class spRemoveBrokenCollision final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Remove Broken Collision Object" ); }
+	QString group() const override { return Spell::tr( "Fix" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 	QString hint() const override final
 	{

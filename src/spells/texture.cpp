@@ -169,6 +169,8 @@ class spChooseTexture final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Choose" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
+	QString label() const override { return Spell::tr( "Choose Texture…" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 	bool constant() const override final { return true; }
 	bool instant() const override final { return true; }
@@ -305,6 +307,7 @@ class spEditTexCoords final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Edit UV" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 	bool constant() const override final { return true; }
 
@@ -382,6 +385,8 @@ class spAddBaseMap final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Base Texture" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
+	QString label() const override { return Spell::tr( "Add Base Map" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -403,6 +408,7 @@ class spAddDarkMap final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Dark Map" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -424,6 +430,7 @@ class spAddDetailMap final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Detail Map" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -445,6 +452,7 @@ class spAddGlowMap final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Glow Map" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -466,6 +474,7 @@ class spAddBumpMap final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Bump Map" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -496,6 +505,7 @@ class spAddDecal0Map final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Decal 0 Map" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -517,6 +527,7 @@ class spAddDecal1Map final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Decal 1 Map" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -538,6 +549,7 @@ class spAddDecal2Map final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Decal 2 Map" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -559,6 +571,7 @@ class spAddDecal3Map final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Decal 3 Map" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -582,6 +595,7 @@ REGISTER_SPELL( spAddDecal3Map )
 class spTextureLayout final : public Spell
 {
 	QString name() const override final { return Spell::tr( "Export UV Layout" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 	bool constant() const override final { return true; }
 
@@ -936,6 +950,8 @@ class spTexInfo final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Info" ); }
+	QString group() const override { return Spell::tr( "Info" ); }
+	QString label() const override { return Spell::tr( "Texture Info" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 	bool constant() const override final { return true; }
 
@@ -1037,6 +1053,8 @@ class spExportTexture final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Export" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
+	QString label() const override { return Spell::tr( "Export Texture…" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 	bool constant() const override final { return true; }
 
@@ -1124,6 +1142,8 @@ class spEmbedTexture final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Embed" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
+	QString label() const override { return Spell::tr( "Embed Texture" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -1335,6 +1355,7 @@ class spEditFlipper final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Edit Flip Controller" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -1406,6 +1427,7 @@ class spTextureFlipper final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Add Flip Controller" ); }
+	QString group() const override { return Spell::tr( "Material/Textures" ); }
 	QString page() const override final { return Spell::tr( "Texture" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

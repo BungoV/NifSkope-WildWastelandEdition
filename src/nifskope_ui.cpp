@@ -46,6 +46,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwskin.h"
 #include "skeletontools.h"
 
+#include <functional>
+
 #include <QProcessEnvironment>
 #include <QScopeGuard>
 #include "version.h"
@@ -5084,6 +5086,218 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
 					n->undoStack->setClean();
 				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_MENUTREE_TEST=1): dump the spell menu a block row builds,
+	 * and hold the new taxonomy to what it claims.
+	 *
+	 * Submenus are created the first time a spell on that group registers, so
+	 * before this the top-level order was an artefact of the order object files
+	 * appear in NifSkope.pro -- and the CONTENTS were an artefact of page(),
+	 * which is also the CLI namespace, the Unfuck membership test and the
+	 * batch() model-signal switch. Reading the diff cannot tell you whether 106
+	 * group() overrides landed on the right spells; only building the menu can.
+	 *
+	 * The three things a reviewer cannot see by reading:
+	 *   - the declared order actually holds (link order no longer decides)
+	 *   - the retired page names are GONE as submenu titles, and the whole-file
+	 *     pages that legitimately survive are HIDDEN on a block row rather than
+	 *     merely inapplicable
+	 *   - no submenu shows two enabled entries with the same label, which is the
+	 *     failure mode of merging pages: four spells are called "Choose" and
+	 *     three "Update", and until now they were kept apart only by living on
+	 *     different pages
+	 * Log: release/ww_menutree_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_MENUTREE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_menutree_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif || nif->getBlockCount() < 1 ) { log << "no model\n"; fails++; checks++; break; }
+
+					// the widest menu in the file: prefer a geometry block
+					int target = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						if ( nif->blockInherits( nif->getBlockIndex( b ),
+								{ "BSGeometry", "BSTriShape", "NiTriBasedGeom" } ) ) { target = b; break; }
+					}
+					const QModelIndex iTarget = nif->getBlockIndex( target );
+					log << "menu built on block [" << target << "] "
+						<< nif->itemName( iTarget ) << "\n\n";
+
+					SpellBook book( nif, iTarget );
+
+					// ---- dump, and collect what the assertions need ----------
+					QStringList topOrder;			// submenu titles, in menu order
+					QStringList hiddenTop;			// ...of those, the ones a block row hides
+					QStringList everyLabel;			// every leaf label anywhere, visible or not
+					QStringList dupes;				// same label twice, both enabled, one menu
+					bool sawTexturesUnderMaterial = false;
+
+					std::function<void( QMenu *, int, const QString & )> walk =
+						[&]( QMenu * m, int depth, const QString & path ) {
+							QHash<QString, int> enabledHere;
+							for ( QAction * a : m->actions() ) {
+								const QString pad( depth * 2, QLatin1Char( ' ' ) );
+								if ( a->menu() ) {
+									/* SpellBook doubles '&' so Qt renders the character
+									 * instead of eating it as a mnemonic marker. Undo
+									 * that here, or every comparison below is against a
+									 * string no spell ever declared -- which is how
+									 * "Import & Export" first went unnoticed.
+									 */
+									QString title = a->menu()->title();
+									title.replace( QLatin1String( "&&" ), QLatin1String( "&" ) );
+									log << pad << "[" << title << "]"
+										<< ( a->menu()->isEnabled() ? "" : "   (hidden here)" ) << "\n";
+									if ( depth == 0 ) {
+										topOrder << title;
+										if ( !a->menu()->isEnabled() )
+											hiddenTop << title;
+									}
+									if ( path == QLatin1String( "Material" )
+										&& title == QLatin1String( "Textures" ) )
+										sawTexturesUnderMaterial = true;
+									walk( a->menu(), depth + 1,
+										path.isEmpty() ? title : path + QLatin1Char( '/' ) + title );
+								} else if ( !a->isSeparator() ) {
+									everyLabel << a->text();
+									log << pad << ( a->isEnabled() ? "  " : "- " ) << a->text() << "\n";
+									if ( a->isEnabled() && ++enabledHere[a->text()] == 2 )
+										dupes << ( path.isEmpty() ? a->text()
+																  : path + QLatin1String( " / " ) + a->text() );
+								}
+							}
+						};
+					log << "---- menu ----\n";
+					walk( &book, 0, QString() );
+					log << "--------------\n\n";
+
+					// ---- 1. the declared order holds ------------------------
+					static const char * const wanted[] = {
+						"Block", "Add", "Transform", "Select & View", "Geometry", "Recompute",
+						"Skinning", "Material", "Collision", "Animation", "Flags",
+						"Import & Export", "Fix", "Info",
+					};
+					QStringList seenOfWanted;
+					for ( const QString & t : topOrder )
+						for ( const char * w : wanted )
+							if ( t == QLatin1String( w ) ) { seenOfWanted << t; break; }
+					QStringList wantedOrder;
+					for ( const char * w : wanted )
+						if ( seenOfWanted.contains( QLatin1String( w ) ) )
+							wantedOrder << QLatin1String( w );
+					log << "declared groups present: " << seenOfWanted.join( ", " ) << "\n";
+					check( "the submenus are in the declared order, not link order",
+						seenOfWanted == wantedOrder );
+					check( "most of the new groups exist", seenOfWanted.size() >= 10 );
+
+					// ---- 2. retired page names are gone as titles -----------
+					static const char * const retired[] = {
+						"Havok", "Node", "Rigging", "Skeleton", "Texture", "Shader",
+						"Color", "Mesh", "Bounds", "Morph", "Header", "Footer",
+						"String Palette", "Array",
+					};
+					QStringList survivors;
+					for ( const char * r : retired )
+						if ( topOrder.contains( QLatin1String( r ) ) )
+							survivors << QLatin1String( r );
+					log << "retired page names still shown as submenus: "
+						<< ( survivors.isEmpty() ? QStringLiteral( "(none)" ) : survivors.join( ", " ) ) << "\n";
+					check( "no retired page name is still a submenu", survivors.isEmpty() );
+
+					/* '/' is the group PATH separator, so a group whose own name
+					 * contains one is silently split in two. "Import / Export"
+					 * built a submenu called "Import " holding a submenu called
+					 * " Export", and every check above still passed, because a
+					 * title nobody is looking for is a title nobody notices.
+					 * A stray space at either end is the visible symptom.
+					 */
+					QStringList ragged;
+					for ( const QString & t : topOrder )
+						if ( t != t.trimmed() )
+							ragged << QStringLiteral( "'%1'" ).arg( t );
+					log << "submenu titles with stray whitespace: "
+						<< ( ragged.isEmpty() ? QStringLiteral( "(none)" ) : ragged.join( ", " ) ) << "\n";
+					check( "no group name was split by the path separator", ragged.isEmpty() );
+
+					/* ---- 3. the whole-file pages survive, but HIDDEN --------
+					 * Batch, Sanitize, Error Checking and Optimize keep their
+					 * page() on purpose -- it is what the CLI addresses them by
+					 * and what the Unfuck dialog selects on. What they must not
+					 * do is appear on a block row, since every one of them casts
+					 * against an invalid index and edits the whole file.
+					 */
+					for ( const char * w : { "Batch", "Sanitize", "Error Checking", "Optimize" } ) {
+						const QString t = QLatin1String( w );
+						if ( !topOrder.contains( t ) )
+							continue;		// nothing left on that page at all
+						check( QStringLiteral( "%1 is hidden on a block row" ).arg( t ),
+							hiddenTop.contains( t ) );
+					}
+
+					// ---- 4. no menu offers the same enabled label twice -----
+					log << "duplicate enabled labels: "
+						<< ( dupes.isEmpty() ? QStringLiteral( "(none)" ) : dupes.join( "; " ) ) << "\n";
+					check( "no submenu offers the same label twice", dupes.isEmpty() );
+
+					// ---- 5. the deletions really happened -------------------
+					static const char * const deleted[] = {
+						"Create Convex Hull Collision", "Create Convex Decomposition Collision",
+						"Create Accurate Mesh Collision", "Fix Bip01", "Scan Bip01",
+					};
+					QStringList undead;
+					for ( const char * d : deleted )
+						if ( everyLabel.contains( QLatin1String( d ) ) )
+							undead << QLatin1String( d );
+					log << "entries that should be gone but are not: "
+						<< ( undead.isEmpty() ? QStringLiteral( "(none)" ) : undead.join( ", " ) ) << "\n";
+					check( "the retired Create/Bip01 entries are gone", undead.isEmpty() );
+
+					// ---- 6. the two whole-file spells stood down ------------
+					for ( const char * n : { "Enforce Node Name Authority",
+											 "Decompile All Compiled Collision" } ) {
+						SpellPtr sp;
+						for ( SpellPtr s : SpellBook::spells() )
+							if ( s->name() == QLatin1String( n ) ) { sp = s; break; }
+						if ( !sp ) { log << "  (no spell named " << n << ")\n"; continue; }
+						// every block, not just the geometry one the menu was built
+						// on -- these two used to answer true on all of them
+						int stillOffers = 0;
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( sp->isApplicable( nif, nif->getBlockIndex( b ) ) )
+								stillOffers++;
+						log << "  " << n << ": applicable on " << stillOffers
+							<< " of " << nif->getBlockCount() << " block rows\n";
+						check( QStringLiteral( "%1 offers itself on no block row" ).arg( QLatin1String( n ) ),
+							stillOffers == 0 );
+					}
+					/* Not checked here: that they still fire from the Spells menu
+					 * with an invalid index. tests/spells/unfuck_panel.sh already
+					 * casts both that way and asserts they change the file, which
+					 * is the half a misplaced guard would break.
+					 */
+
+					// ---- 7. Material nests its legacy texture spells --------
+					check( "Material has a nested Textures submenu", sawTexturesUnderMaterial );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
 		} );

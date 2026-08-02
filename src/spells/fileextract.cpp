@@ -37,6 +37,7 @@ class spResourceFileExtract final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Extract File" ); }
+	QString group() const override { return Spell::tr( "Import & Export" ); }
 	QString page() const override final { return Spell::tr( "" ); }
 	bool constant() const override final { return true; }
 
@@ -409,6 +410,7 @@ class spMeshFileExport final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Convert to External Geometry" ); }
+	QString group() const override { return Spell::tr( "Import & Export" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -542,6 +544,7 @@ class spMeshFileImport final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Convert to Internal Geometry" ); }
+	QString group() const override { return Spell::tr( "Import & Export" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -644,6 +647,8 @@ class spMeshFileSaveAs final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Save As" ); }
+	QString group() const override { return Spell::tr( "Import & Export" ); }
+	QString label() const override { return Spell::tr( "Save As .mesh…" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 	bool constant() const override final { return true; }
 

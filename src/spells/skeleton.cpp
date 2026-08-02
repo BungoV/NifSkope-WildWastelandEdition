@@ -15,7 +15,6 @@
 
 #include <algorithm> // std::sort
 
-#define SKEL_DAT ":/res/skel.dat"
 
 // Brief description is deliberately not autolinked to class Spell
 /*! \file skeleton.cpp
@@ -24,215 +23,20 @@
  * All classes here inherit from the Spell class.
  */
 
-//! A map of bone names to their transforms
-typedef QMap<QString, Transform> TransMap;
-
-//! "Fix" a v4.0.0.2 skeleton
-class spFixSkeleton final : public Spell
-{
-public:
-	QString name() const override final { return Spell::tr( "Fix Bip01" ); }
-	QString page() const override final { return Spell::tr( "Skeleton" ); }
-
-	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
-	{
-		return ( nif->getVersion() == "4.0.0.2" && nif->itemStrType( index ) == "NiBlock" && nif->get<QString>( index, "Name" ) == "Bip01" ); //&& QFile::exists( SKEL_DAT ) );
-	}
-
-	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
-	{
-		QFile file( SKEL_DAT );
-
-		if ( file.open( QIODevice::ReadOnly ) ) {
-			QDataStream stream( &file );
-
-			TransMap local;
-			TransMap world;
-			QString name;
-
-			do {
-				stream >> name;
-
-				if ( !name.isEmpty() ) {
-					Transform t;
-					stream >> t;
-					local.insert( name, t );
-					stream >> t;
-					world.insert( name, t );
-				}
-			} while ( !name.isEmpty() );
-
-			TransMap bones;
-			doBones( nif, index, Transform(), local, bones );
-
-			for ( const auto link : nif->getChildLinks( nif->getBlockNumber( index ) ) ) {
-				QModelIndex iChild = nif->getBlockIndex( link );
-
-				if ( iChild.isValid() ) {
-					if ( nif->itemName( iChild ) == "NiNode" ) {
-						doNodes( nif, iChild, Transform(), world, bones );
-					} else if ( nif->blockInherits( iChild, "NiTriBasedGeom" ) ) {
-						doShape( nif, iChild, Transform(), world, bones );
-					}
-				}
-			}
-
-			nif->reset();
-		}
-
-		return index;
-	}
-
-	void doBones( NifModel * nif, const QModelIndex & index, const Transform & tparent, const TransMap & local, TransMap & bones )
-	{
-		QString name = nif->get<QString>( index, "Name" );
-
-		if ( name.startsWith( "Bip01" ) ) {
-			Transform tlocal( nif, index );
-			bones.insert( name, tparent * tlocal );
-
-			local.value( name ).writeBack( nif, index );
-
-			for ( const auto link : nif->getChildLinks( nif->getBlockNumber( index ) ) ) {
-				QModelIndex iChild = nif->getBlockIndex( link, "NiNode" );
-
-				if ( iChild.isValid() )
-					doBones( nif, iChild, tparent * tlocal, local, bones );
-			}
-		}
-	}
-
-	bool doNodes( NifModel * nif, const QModelIndex & index, const Transform & tparent, const TransMap & world, const TransMap & bones )
-	{
-		bool hasSkinnedChildren = false;
-
-		QString name = nif->get<QString>( index, "Name" );
-
-		if ( !name.startsWith( "Bip01" ) ) {
-			Transform tlocal( nif, index );
-
-			for ( const auto link : nif->getChildLinks( nif->getBlockNumber( index ) ) ) {
-				QModelIndex iChild = nif->getBlockIndex( link );
-
-				if ( iChild.isValid() ) {
-					if ( nif->itemName( iChild ) == "NiNode" ) {
-						hasSkinnedChildren |= doNodes( nif, iChild, tparent * tlocal, world, bones );
-					} else if ( nif->blockInherits( iChild, "NiTriBasedGeom" ) ) {
-						hasSkinnedChildren |= doShape( nif, iChild, tparent * tlocal, world, bones );
-					}
-				}
-			}
-		}
-
-		if ( hasSkinnedChildren ) {
-			Transform().writeBack( nif, index );
-		}
-
-		return hasSkinnedChildren;
-	}
-	bool doShape( NifModel * nif, const QModelIndex & index, const Transform & tparent, const TransMap & world, const TransMap & bones )
-	{
-		QModelIndex iShapeData = nif->getBlockIndex( nif->getLink( index, "Data" ) );
-		QModelIndex iSkinInstance = nif->getBlockIndex( nif->getLink( index, "Skin Instance" ), "NiSkinInstance" );
-
-		if ( !iSkinInstance.isValid() || !iShapeData.isValid() )
-			return false;
-
-		QStringList names;
-		QModelIndex iNames = nif->getIndex( iSkinInstance, "Bones" );
-
-		if ( iNames.isValid() )
-			iNames = nif->getIndex( iNames, "Bones" );
-
-		if ( iNames.isValid() )
-			for ( int n = 0; n < nif->rowCount( iNames ); n++ ) {
-				QModelIndex iBone = nif->getBlockIndex( nif->getLink( nif->getIndex( iNames, n ) ), "NiNode" );
-
-				if ( iBone.isValid() )
-					names.append( nif->get<QString>( iBone, "Name" ) );
-				else
-					names.append( "" );
-			}
-
-
-		QModelIndex iSkinData = nif->getBlockIndex( nif->getLink( iSkinInstance, "Data" ), "NiSkinData" );
-
-		if ( !iSkinData.isValid() )
-			return false;
-
-		QModelIndex iBones = nif->getIndex( iSkinData, "Bone List" );
-
-		if ( !iBones.isValid() )
-			return false;
-
-		Transform t( nif, iSkinData );
-		t = tparent * t;
-		t.writeBack( nif, iSkinData );
-
-		for ( int b = 0; b < nif->rowCount( iBones ) && b < names.count(); b++ ) {
-			QModelIndex iBone = nif->getIndex( iBones, b );
-
-			t = Transform( nif, iBone );
-
-			t.rotation = world.value( names[ b ] ).rotation.inverted() * bones.value( names[ b ] ).rotation * t.rotation;
-			t.translation = world.value( names[ b ] ).rotation.inverted() * bones.value( names[ b ] ).rotation * t.translation;
-
-			t.writeBack( nif, iBone );
-		}
-
-		auto bound = BoundSphere( nif, iShapeData ).apply( tparent );
-		bound.update( nif, iShapeData );
-
-		return true;
-	}
-};
-
-REGISTER_SPELL( spFixSkeleton )
-
-//! Read skeleton data for use in Fix Skeleton
-class spScanSkeleton final : public Spell
-{
-public:
-	QString name() const override final { return Spell::tr( "Scan Bip01" ); }
-	QString page() const override final { return Spell::tr( "Skeleton" ); }
-
-	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
-	{
-		return ( nif->getVersion() == "4.0.0.2" && nif->itemStrType( index ) == "NiBlock" && nif->get<QString>( index, "Name" ) == "Bip01" );
-	}
-
-	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
-	{
-		QFile file( SKEL_DAT );
-
-		if ( file.open( QIODevice::WriteOnly ) ) {
-			QDataStream stream( &file );
-			scan( nif, index, Transform(), stream );
-			stream << QString();
-		}
-
-		return index;
-	}
-
-	void scan( NifModel * nif, const QModelIndex & index, const Transform & tparent, QDataStream & stream )
-	{
-		QString name = nif->get<QString>( index, "Name" );
-
-		if ( name.startsWith( "Bip01" ) ) {
-			Transform local( nif, index );
-			stream << name << local << tparent * local;
-			qDebug() << name;
-			for ( const auto link : nif->getChildLinks( nif->getBlockNumber( index ) ) ) {
-				QModelIndex iChild = nif->getBlockIndex( link, "NiNode" );
-
-				if ( iChild.isValid() )
-					scan( nif, iChild, tparent * local, stream );
-			}
-		}
-	}
-};
-
-//REGISTER_SPELL( spScanSkeleton )
+/* Fix Bip01 and Scan Bip01 lived here, and neither could work.
+ *
+ * Both were gated to NIF version 4.0.0.2 with a root block literally named
+ * "Bip01" — Morrowind — and both read or wrote ":/res/skel.dat", a compiled-in
+ * Qt resource. Fix Bip01 read bone rest poses out of it; Scan Bip01 was the
+ * tool that authored it, and it opened that resource path WriteOnly, which
+ * cannot succeed: Qt resources are read-only at runtime. So the writer could
+ * never produce the data, and its REGISTER_SPELL had been commented out
+ * (skeleton.cpp:235) for as long as the file has been in this repo.
+ *
+ * That left Fix Bip01 as a menu entry consuming a 6KB blob nothing in a
+ * shipping build could regenerate, on a game this fork does not target. The
+ * resource goes with them (res/nifskope.qrc).
+ */
 
 //! Rotate a Triangle
 inline void qRotate( Triangle & t )
@@ -249,6 +53,7 @@ class spSkinPartition final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Make Skin Partition" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & iShape ) override final
@@ -1134,6 +939,7 @@ class spFixBoneBounds final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Fix Bone Bounds" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Skeleton" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -1220,6 +1026,8 @@ class spMirrorSkeleton final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Mirror armature" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
+	QString label() const override { return Spell::tr( "Mirror Armature" ); }
 	QString page() const override final { return Spell::tr( "Skeleton" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

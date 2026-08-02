@@ -21,6 +21,7 @@ class spAttachKf final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Attach .KF" ); }
+	QString group() const override { return Spell::tr( "Import & Export" ); }
 	QString page() const override final { return Spell::tr( "Animation" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -366,6 +367,7 @@ class spFixAVObjectPalette final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Fix Invalid AV Object Refs" ); }
+	QString group() const override { return Spell::tr( "Fix" ); }
 	QString page() const override final { return Spell::tr( "Animation" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

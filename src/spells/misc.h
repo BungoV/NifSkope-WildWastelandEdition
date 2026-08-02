@@ -16,6 +16,8 @@ class spCollapseArray final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Collapse" ); }
+	QString group() const override { return QString(); }
+	QString label() const override { return Spell::tr( "Collapse Array" ); }
 	QString page() const override final { return Spell::tr( "Array" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final;

@@ -803,6 +803,7 @@ class spRiggingListBones final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "List Skin Bones" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool constant() const override final { return true; }
 
@@ -836,6 +837,7 @@ class spRiggingCompareBones final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Compare Bones with Donor..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool constant() const override final { return true; }
 
@@ -906,6 +908,7 @@ class spRiggingPreviewTransfer final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Preview Transfer from Donor..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool constant() const override final { return true; }
 
@@ -1005,6 +1008,7 @@ class spRiggingTransferWeights final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Transfer Weights (existing bones)..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
 
@@ -1260,6 +1264,7 @@ class spRiggingImportBoneNodes final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Import Donor Bone Nodes..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
 
@@ -1561,6 +1566,7 @@ class spRiggingBindExistingNodes final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Bind Donor Bones (existing nodes)..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
 
@@ -2006,6 +2012,7 @@ class spRiggingCreateSkin final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Create Skin (bind to node)..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -2280,6 +2287,7 @@ class spRiggingValidateFO4Skin final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Validate FO4 Skin" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool constant() const override final { return true; }
 
@@ -2533,6 +2541,7 @@ class spRiggingRebindReferenceSkeleton final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Rebind to Reference Skeleton..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
 
@@ -2762,6 +2771,7 @@ class spRiggingGenerateCustomizationRemapData final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Generate CustomizationRemapData" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
 
@@ -2865,6 +2875,7 @@ class spRiggingTransferBonesAndWeights final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Transfer Bones and Weights..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
 

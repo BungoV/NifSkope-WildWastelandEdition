@@ -15,6 +15,8 @@ class spChooseColor final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Choose" ); }
+	QString group() const override { return Spell::tr( "Material" ); }
+	QString label() const override { return Spell::tr( "Choose Color…" ); }
 	QString page() const override final { return Spell::tr( "Color" ); }
 	QIcon icon() const override final { return QIcon( ":/img/color_wheel" ); }
 	bool instant() const override final { return true; }
@@ -51,6 +53,8 @@ class spSetAllColor final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Set All" ); }
+	QString group() const override { return Spell::tr( "Material" ); }
+	QString label() const override { return Spell::tr( "Set All Colors" ); }
 	QString page() const override final { return Spell::tr( "Color" ); }
 	QIcon icon() const override final { return QIcon( ":/img/color_wheel" ); }
 	bool instant() const override final { return true; }

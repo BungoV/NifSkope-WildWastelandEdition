@@ -230,6 +230,7 @@ class spBrowseMaterialPath final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Choose" ); }
+	QString label() const override { return Spell::tr( "Choose Material…" ); }
 	QString page() const override final { return Spell::tr( "Material" ); }
 	QIcon icon() const override final
 	{

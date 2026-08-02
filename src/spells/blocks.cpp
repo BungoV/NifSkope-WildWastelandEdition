@@ -772,6 +772,7 @@ class spAttachProperty final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Attach Property" ); }
+	QString group() const override { return Spell::tr( "Add" ); }
 	QString page() const override final { return Spell::tr( "Node" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -838,6 +839,7 @@ class spAttachNode final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Attach Node" ); }
+	QString group() const override { return Spell::tr( "Add" ); }
 	QString page() const override final { return Spell::tr( "Node" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -997,6 +999,7 @@ class spAttachLight final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Attach Effect" ); }
+	QString group() const override { return Spell::tr( "Add" ); }
 	QString page() const override final { return Spell::tr( "Node" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -1049,6 +1052,7 @@ class spAttachExtraData final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Attach Extra Data" ); }
+	QString group() const override { return Spell::tr( "Add" ); }
 	QString page() const override final { return Spell::tr( "Node" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -1948,6 +1952,7 @@ class spCropToBranch final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Crop To Branch" ); }
+	QString label() const override { return Spell::tr( "Crop File To This Branch…" ); }
 	QString page() const override final { return Spell::tr( "Block" ); }
 
 	bool destructive() const override final { return true; }
@@ -2022,6 +2027,7 @@ class spConvertBlock final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Convert" ); }
+	QString label() const override { return Spell::tr( "Convert Block Type…" ); }
 	QString page() const override final { return Spell::tr( "Block" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -2341,6 +2347,7 @@ class spSortBlockNames final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Sort By Name" ); }
+	QString label() const override { return Spell::tr( "Sort Children By Name" ); }
 	QString page() const override final { return Spell::tr( "Block" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -2400,6 +2407,7 @@ class spAttachParentNode final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Attach Parent Node" ); }
+	QString group() const override { return Spell::tr( "Add" ); }
 	QString page() const override final { return Spell::tr( "Node" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -2458,6 +2466,7 @@ class spReferencedBy final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Referenced By" ); }
+	QString group() const override { return Spell::tr( "Info" ); }
 	QString page() const override final { return Spell::tr( "" ); }
 	bool constant() const override final { return true; }
 

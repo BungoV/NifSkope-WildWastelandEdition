@@ -15,6 +15,7 @@ public:
 	// was "Fix Geometry Data Names", which is what the doc comment claimed it did.
 	// It sets Group ID to 0 and touches no name at all.
 	QString name() const override final { return Spell::tr( "Zero Geometry Group ID" ); }
+	QString group() const override { return Spell::tr( "Fix" ); }
 	QString hint() const override { return Spell::tr( "Zeroes the Group ID on every NiGeometryData block. Fallout 3 / New Vegas only." ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 	bool sanity() const override final { return true; }

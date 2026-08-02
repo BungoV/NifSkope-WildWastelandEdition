@@ -903,6 +903,7 @@ static QModelIndex createFittedCollision( NifModel * nif, const QModelIndex & in
 class ClassName final : public Spell { public: \
 	QString name() const override final { return Spell::tr( DisplayName ); } \
 	QString page() const override final { return Spell::tr( "Havok" ); } \
+	QString group() const override final { return Spell::tr( "Collision" ); } \
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { spCreateCVS s; return s.isApplicable( nif, index ); } \
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final { return createFittedCollision( nif, index, Kind ); } \
 }; REGISTER_SPELL( ClassName )
@@ -911,39 +912,30 @@ DECLARE_FITTED_COLLISION_SPELL( spCreateBoxCollision, "Create Box Collision", Fi
 DECLARE_FITTED_COLLISION_SPELL( spCreateSphereCollision, "Create Sphere Collision", FitSphere )
 DECLARE_FITTED_COLLISION_SPELL( spCreateCapsuleCollision, "Create Capsule Collision", FitCapsule )
 
-class spCreateConvexHullCollision final : public Spell
-{
-public:
-	QString name() const override final { return Spell::tr( "Create Convex Hull Collision" ); }
-	QString page() const override final { return Spell::tr( "Havok" ); }
-	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { spCreateCVS s; return s.isApplicable( nif, index ); }
-	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
-	{
-		QSettings s; s.beginGroup( "Spells/Havok/Create Convex Shapes" ); s.setValue( "Enable CoACD", false ); s.endGroup();
-		spCreateCVS create; return create.cast( nif, index );
-	}
-};
-REGISTER_SPELL( spCreateConvexHullCollision )
-
-class spCreateConvexDecompositionCollision final : public Spell
-{
-public:
-	QString name() const override final { return Spell::tr( "Create Convex Decomposition Collision" ); }
-	QString page() const override final { return Spell::tr( "Havok" ); }
-	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { spCreateCVS s; return s.isApplicable( nif, index ); }
-	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
-	{
-		QSettings s; s.beginGroup( "Spells/Havok/Create Convex Shapes" ); s.setValue( "Enable CoACD", true ); s.endGroup();
-		spCreateCVS create; return create.cast( nif, index );
-	}
-};
-REGISTER_SPELL( spCreateConvexDecompositionCollision )
+/* Create Convex Hull Collision and Create Convex Decomposition Collision used to
+ * live here, and they were not two algorithms — they were one spell with a
+ * checkbox pre-ticked. Each did
+ *
+ *     QSettings s; s.beginGroup( "Spells/Havok/Create Convex Shapes" );
+ *     s.setValue( "Enable CoACD", <false|true> );
+ *
+ * before delegating to spCreateCVS. That write is PERSISTENT. Picking one of
+ * them once silently reconfigured Create Convex Shapes, the Collision Manager's
+ * quick-create, and the other menu entry — for every file thereafter, with
+ * nothing in the UI to show it had happened or how to put it back.
+ *
+ * The choice was already offered honestly: spCreateCVS::settingsDialog has an
+ * "Enable CoACD" checkbox, with the whole CoACD parameter block under it. So the
+ * two entries were a way to set that checkbox without seeing it. Deleting them
+ * removes two of the eight Create rows and costs nothing reachable.
+ */
 
 //! Create an accurate editable triangle-mesh collision from rendered geometry.
 class spCreateAccurateMeshCollision final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Create Accurate Mesh Collision" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -1062,7 +1054,16 @@ public:
 	}
 };
 
-REGISTER_SPELL( spCreateAccurateMeshCollision )
+/* Deliberately NOT registered: reachable through Create Collision… ▸ Accurate
+ * Mesh, which is where the choice belongs. As its own top-level row it was the
+ * third entry in a Collision submenu that already read "Create Collision…",
+ * "Create Convex Shapes" and "Create Accurate Mesh Collision" side by side, two
+ * of which the first one only asks you to pick between.
+ *
+ * spCreateCollision constructs it directly, so the class stays live; only the
+ * duplicate menu row goes.
+ */
+//REGISTER_SPELL( spCreateAccurateMeshCollision )
 
 //! Build temporary world-space collision geometry for the Collision Manager.
 //! kind 0 = convex hull/decomposition, kind 1 = accurate/decimated mesh.
@@ -1174,6 +1175,7 @@ class spCreateCollision final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Create Collision…" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -1212,6 +1214,7 @@ public:
 	// was "A -> B", which named its arrow and not its effect: it recomputes the
 	// B-side pivot and axes from the A side, through both bodies' world transforms
 	QString name() const override final { return Spell::tr( "Recompute B Frame from A" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -1331,6 +1334,7 @@ class spStiffSpringHelper final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Calculate Spring Length" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & idx ) override final
@@ -1374,6 +1378,7 @@ class spPackHavokStrips final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Pack Strips" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & idx ) override final
@@ -1486,6 +1491,7 @@ class spConvertListShape final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Convert to bhkConvexListShape" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & idx ) override final
@@ -1523,6 +1529,7 @@ class spConvertConvexListShape final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Convert to bhkListShape" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & idx ) override final
@@ -1562,6 +1569,7 @@ class spDecodeCompiledCollision final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Decompile Compiled Collision" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	//! Resolve the bhkPhysicsSystem / bhkRagdollSystem from the clicked block
@@ -1958,6 +1966,7 @@ class spDecodeAllCompiledCollision final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Decompile All Compiled Collision" ); }
+	QString group() const override { return Spell::tr( "Collision" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	/*! A block whose Binary Data is an hknp packfile.
@@ -1976,9 +1985,14 @@ public:
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
-		// offered from the Spells menu, or when right-clicking any compiled
-		// collision block (runs on every system in the file either way)
-		if ( index.isValid() && !spDecodeCompiledCollision::systemBlock( nif, index ).isValid() )
+		/* Spells menu only. It used to also accept a clicked compiled-collision
+		 * block, which put a row on that block's context menu that then ignored
+		 * the block entirely and rewrote EVERY system in the file — the one
+		 * thing a context menu promises not to do. The single-block
+		 * Decompile Compiled Collision is right beside it and does what the
+		 * right-click implies.
+		 */
+		if ( index.isValid() )
 			return false;
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			if ( isCompiledSystem( nif, nif->getBlockIndex( b ) )

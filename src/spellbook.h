@@ -67,8 +67,49 @@ public:
 
 	//! Name of spell
 	virtual QString name() const = 0;
+
+	/*! Text of the menu entry, when it should differ from name().
+	 *
+	 *  name() is an IDENTIFIER, not a label, and renaming one is not free:
+	 *  SpellBook::lookup keys on "Page/Name" (so the CLI's -s argument and the
+	 *  Collision Manager's and Rigging dock's castSpell calls break), and a
+	 *  dozen spells build QSettings keys out of page() and name() — the user's
+	 *  last-used texture path lives under "Spells/Texture/Choose/Last Texture
+	 *  Path", the Remove By Id regex under its own name, the whole Simplify
+	 *  dialog under "Spells/Mesh/Simplify".
+	 *
+	 *  Which is why four different spells are all called "Choose" and three are
+	 *  called "Update": they were only ever told apart by sitting on different
+	 *  pages. Merging pages into groups puts them side by side, so the label has
+	 *  to become sayable on its own — and that has to happen without touching
+	 *  the id it was hiding behind.
+	 */
+	virtual QString label() const { return name(); }
 	//! Context sub-menu that the spell appears on
 	virtual QString page() const { return QString(); }
+
+	/*! Which submenu this spell is filed under, as a '/'-separated path.
+	 *
+	 *  Separate from page() because page() is overloaded five ways — submenu
+	 *  label, CLI namespace (nifcli.cpp), Unfuck membership (unfucktools.cpp),
+	 *  the batch() model-signal switch below, and the spell-id syntax that
+	 *  SpellBook::lookup parses as "Page/Name". Editing page() strings to fix
+	 *  the menu would silently rename CLI spell ids, move spells in and out of
+	 *  the Unfuck dialog, and change which casts suppress model signals.
+	 *
+	 *  So page() is frozen as the internal id and group() is what the menu is
+	 *  built from. Defaulting to page() means a spell that is already filed
+	 *  correctly needs no override at all.
+	 *
+	 *  A path nests: "Material/Textures" puts the spell in a Textures submenu
+	 *  inside Material. Returning an empty string puts it at the top level.
+	 *
+	 *  '/' is therefore the separator and CANNOT appear in a group's own name —
+	 *  "Import / Export" produced two submenus called "Import " and " Export",
+	 *  one nested in the other. '&' is fine: SpellBook doubles it so Qt shows the
+	 *  character instead of eating it as a mnemonic marker.
+	 */
+	virtual QString group() const { return page(); }
 	//! Unused?
 	virtual QString hint() const { return QString(); }
 	//! Icon displayed in block view
@@ -215,9 +256,9 @@ protected:
 	QMap<QAction *, SpellPtr> Map;
 
 	void newSpellRegistered( SpellPtr spell );
-	//! Reorder the submenus into the declared page order (see orderPages in the .cpp)
-	void orderPages();
-	void checkActions( QMenu * menu, const QString & page );
+	//! Reorder the submenus into the declared group order (see orderGroups in the .cpp)
+	void orderGroups();
+	void checkActions( QMenu * menu );
 
 private:
 	static QList<SpellBook *> & books();

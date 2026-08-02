@@ -288,6 +288,8 @@ class spEditStringEntries final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Replace Entries" ); }
+	QString group() const override { return Spell::tr( "Animation" ); }
+	QString label() const override { return Spell::tr( "Replace String Entries…" ); }
 	QString page() const override final { return Spell::tr( "String Palette" ); }
 
 	bool instant() const override final { return false; }

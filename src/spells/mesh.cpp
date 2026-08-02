@@ -358,6 +358,7 @@ class spFlipTexCoords final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Flip UV" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -600,6 +601,7 @@ class spFlipAllFaces : public Spell
 {
 public:
 	QString name() const override { return Spell::tr( "Flip Faces" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override
@@ -698,6 +700,7 @@ class spOptimizeVertexCache final : public spFlipAllFaces
 {
 public:
 	QString name() const override final { return Spell::tr( "Optimize Indices" ); }
+	QString group() const override { return Spell::tr( "Recompute" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	void processTriangles( QVector<Triangle> & tris ) override final;
@@ -769,6 +772,7 @@ class spPruneRedundantTriangles final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Prune Triangles" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
@@ -974,6 +978,7 @@ class spRemoveDuplicateVertices final : public spRemoveWasteVertices
 {
 public:
 	QString name() const override final { return Spell::tr( "Remove Duplicate Vertices" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 
 	static void cast_Starfield( NifModel * nif, const QModelIndex & index );
 	static void cast_BSTriShape( NifModel * nif, const QModelIndex & index );
@@ -2344,6 +2349,8 @@ class spChooseMeshFile final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Choose" ); }
+	QString group() const override { return Spell::tr( "Import & Export" ); }
+	QString label() const override { return Spell::tr( "Choose .mesh File…" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & idx ) override final

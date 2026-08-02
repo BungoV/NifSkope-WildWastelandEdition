@@ -20,6 +20,7 @@ class spSimplifySFMesh final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Generate LODs" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 	QString page() const override final { return Spell::tr( "Mesh" ); }
 
 	struct Meshes {
@@ -394,6 +395,7 @@ class spSimplifyBSTriShape final : public spRemoveWasteVertices
 {
 public:
 	QString name() const override final { return Spell::tr( "Simplify" ); }
+	QString group() const override { return Spell::tr( "Geometry" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
