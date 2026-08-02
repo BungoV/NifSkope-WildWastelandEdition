@@ -84,6 +84,20 @@ QByteArray hknpEncodeCapsuleShape( const HknpCapsuleInput & input );
  */
 QByteArray hknpEncodeSphereShape( const Vector3 & centre, float radius, quint32 materialCRC );
 
+/*! Write one hknpConvexShape: the base of the convex family, vertices and nothing else.
+ *
+ * Size is align16( 0x40 + verts * 16 ) -- 128 bytes for 4 vertices, 192 for 8, the
+ * only two counts in Fallout 4. There is no plane, face or index array: the vertex
+ * payload starts at +0x40, which is exactly where a polytope's plane descriptor sits,
+ * and that is the whole difference between the two classes at the byte level.
+ *
+ * Pass the vertex array straight off a decode. Its LENGTH is part of the object's
+ * size, and the eight-vertex objects store each corner of a quad twice, so compacting
+ * it changes the file.
+ */
+QByteArray hknpEncodeConvexShape( const QVector<Vector3> & verts, float convexRadius,
+	quint32 materialCRC, quint32 shapeFlags = 0x01000001u );
+
 /*! Write one hknpShapeMassProperties object: always 48 bytes.
  *
  * Required by every convex polytope. `inertiaRaw` is the value as STORED, which is

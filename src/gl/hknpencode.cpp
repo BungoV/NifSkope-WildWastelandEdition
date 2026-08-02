@@ -518,6 +518,32 @@ QByteArray hknpEncodeSphereShape( const Vector3 & centre, float radius, quint32 
 	return out;
 }
 
+QByteArray hknpEncodeConvexShape( const QVector<Vector3> & verts, float convexRadius,
+	quint32 materialCRC, quint32 shapeFlags )
+{
+	const int nv = int( verts.size() );
+	if ( nv < 1 || nv > 0xffff )
+		return QByteArray();
+
+	const qsizetype vertsAt = 0x40;
+	QByteArray out( ( ( vertsAt + qsizetype( nv ) * 16 ) + 15 ) / 16 * 16, 0 );
+	setU32( out, 0x10, shapeFlags );
+	setFloat( out, 0x14, convexRadius );
+	setU32( out, 0x18, materialCRC );
+	// the vertex hkRelArray, and the only array this class has
+	setU16( out, 0x30, quint16( nv ) );
+	setU16( out, 0x32, quint16( vertsAt - 0x30 ) );
+	for ( int i = 0; i < nv; i++ ) {
+		for ( int k = 0; k < 3; k++ )
+			setFloat( out, vertsAt + i * 16 + k * 4, verts.at( i )[k] );
+		/* w is 0.5 carrying the slot's OWN index. Unlike a polytope there are no
+		 * padding slots and no index is ever repeated -- checked on all 17.
+		 */
+		setU32( out, vertsAt + i * 16 + 12, 0x3f000000u | quint32( i & 0xff ) );
+	}
+	return out;
+}
+
 namespace {
 
 /*! Write an hkPackedVector3: three int16 mantissas over a shared exponent.
@@ -952,7 +978,11 @@ quint32 classHash( const QString & name )
 		{ 0x741e9012u, "hknpSphereShape" }, { 0x51ea603au, "hkpLimitedHingeConstraintData" },
 		{ 0x143dd400u, "hkpPositionConstraintMotor" }, { 0xb77d2036u, "hkpRagdollConstraintData" },
 		{ 0x5f60d536u, "hknpCompressedMeshShape" }, { 0xa2bdfc59u, "hknpCompressedMeshShapeData" },
-		{ 0xa3e47a9au, "hknpBSMaterialProperties" }
+		{ 0xa3e47a9au, "hknpBSMaterialProperties" },
+		// identical in all 17 vanilla __classnames__ tables that hold one. Not
+		// needed to REWRITE a file -- the file's own table wins via extraHashes --
+		// but a newly authored packfile containing one has no other source.
+		{ 0xc8f7c10du, "hknpConvexShape" }
 	};
 	for ( const ClassEntry & e : entries ) {
 		if ( name == QLatin1String( e.name ) )
@@ -1267,6 +1297,24 @@ bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs )
 	} else if ( shp.primType == 1 ) {
 		so.className = QStringLiteral( "hknpSphereShape" );
 		so.bytes = hknpEncodeSphereShape( shp.capA, shp.convexRadius, shp.shapeMaterialCRC );
+	} else if ( shp.className == QLatin1String( "hknpConvexShape" ) && !shp.verts.isEmpty() ) {
+		/* The convex base class: vertices, no faces. Matched by NAME.
+		 *
+		 * It is `isConvex` with an empty face list, so it falls past the polytope
+		 * branch to the refusal at the bottom -- which is what made all 17 vanilla
+		 * systems holding one fail to assemble. Matching on geometry instead would
+		 * be ambiguous with a polytope whose faces failed to decode; the class name
+		 * comes off the packfile's own virtual fixup and cannot be wrong.
+		 *
+		 * Derived rather than carried, because every byte is accounted for and
+		 * nothing goes through arithmetic -- so unlike a capsule there is no ULP
+		 * risk. The derived size equals the stored size on all 17, which means the
+		 * untouched-shape substitution below fires anyway and an unedited file goes
+		 * back byte for byte regardless.
+		 */
+		so.className = shp.className;
+		so.bytes = hknpEncodeConvexShape( shp.verts, shp.convexRadius,
+			shp.shapeMaterialCRC, shp.shapeFlags );
 	} else if ( shp.isConvex && !shp.faces.isEmpty()
 		&& shp.faceAngles.size() == shp.faces.size() ) {
 		HknpPolytopeInput pin;

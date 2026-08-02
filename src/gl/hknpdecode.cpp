@@ -306,7 +306,71 @@ static void synthCapsule( HknpShape & shape, const Vector3 & a, const Vector3 & 
 			quint16( ringVertex( last, s + 1, SEG ) ) ) );
 }
 
-//! hknpConvexPolytopeShape and subclasses (sphere / capsule)
+/*! Triangulate an hknpConvexShape's vertex cloud, so it can be seen.
+ *
+ *  All 17 vanilla objects are planar quads: four distinct positions, best-fit
+ *  plane thickness at most 4.4e-16, and the eight-vertex ones store each corner
+ *  twice. The stored order is a polygon loop when nv is 4 (6 of 6) and is NOT
+ *  when nv is 8 (11 of 11), so the corners are sorted by angle about the
+ *  centroid in the plane rather than taken in file order.
+ *
+ *  Indices refer to shape.verts, which stays exactly as stored -- its LENGTH is
+ *  part of the object's size, so it must not be compacted.
+ *
+ *  Deliberately writes only tris, never faces: a shape with faces is claimed by
+ *  the encoder's polytope branch, which would write a completely different
+ *  object. And a non-planar hknpConvexShape would need a real hull; none exists
+ *  in Fallout 4, so this leaves tris empty rather than guessing.
+ */
+static void synthConvexPolygon( HknpShape & shape )
+{
+	QVector<int> corner;			// first index of each distinct position
+	for ( int i = 0; i < shape.verts.size(); i++ ) {
+		bool seen = false;
+		for ( int k : std::as_const( corner ) )
+			seen = seen || ( shape.verts.at( i ) - shape.verts.at( k ) ).length() < 1.0e-6f;
+		if ( !seen )
+			corner.append( i );
+	}
+	if ( corner.size() < 3 )
+		return;
+
+	const Vector3 & p0 = shape.verts.at( corner.at( 0 ) );
+	Vector3 n;
+	for ( int b = 1; b < corner.size() && n.length() < 1.0e-9f; b++ ) {
+		for ( int c = b + 1; c < corner.size(); c++ ) {
+			const Vector3 cand = Vector3::crossproduct(
+				shape.verts.at( corner.at( b ) ) - p0, shape.verts.at( corner.at( c ) ) - p0 );
+			if ( cand.length() > 1.0e-9f ) { n = cand; break; }
+		}
+	}
+	if ( n.length() < 1.0e-9f )
+		return;						// collinear: no area, nothing to draw
+	n.normalize();
+
+	Vector3 centre;
+	for ( int k : std::as_const( corner ) )
+		centre += shape.verts.at( k );
+	centre /= float( corner.size() );
+	// every corner must lie in that plane, or this is a hull and not a polygon
+	for ( int k : std::as_const( corner ) )
+		if ( std::fabs( Vector3::dotproduct( n, shape.verts.at( k ) - centre ) ) > 1.0e-4f )
+			return;
+
+	Vector3 u = shape.verts.at( corner.at( 0 ) ) - centre;
+	if ( u.length() < 1.0e-9f )
+		return;
+	u.normalize();
+	const Vector3 v = Vector3::crossproduct( n, u );
+	std::sort( corner.begin(), corner.end(), [&]( int a, int b ) {
+		const Vector3 da = shape.verts.at( a ) - centre, db = shape.verts.at( b ) - centre;
+		return std::atan2( Vector3::dotproduct( da, v ), Vector3::dotproduct( da, u ) )
+			 < std::atan2( Vector3::dotproduct( db, v ), Vector3::dotproduct( db, u ) );
+	} );
+	addFaceFan( shape, corner );
+}
+
+//! hknpConvexPolytopeShape and subclasses (sphere / capsule / the convex base)
 static void decodeConvexLike( Reader & r, qsizetype B, const QString & className, HknpShape & shape )
 {
 	shape.isConvex = true;
@@ -404,6 +468,38 @@ static void decodeConvexLike( Reader & r, qsizetype B, const QString & className
 		// the solid also runs one padding past each stored end point
 		Vector3 axis = ( abLen2 > 1.0e-12f ) ? ab / std::sqrt( abLen2 ) : Vector3( 0.0f, 0.0f, 1.0f );
 		synthCapsule( shape, a - axis * padding, b + axis * padding, shape.primRadius );
+		return;
+	} else if ( className == QLatin1String( "hknpConvexShape" ) ) {
+		/* The base of the convex family: a vertex cloud, and nothing else.
+		 *
+		 * Like a sphere, its vertex payload starts at +0x30 + 0x10, which IS +0x40
+		 * -- so the plane / face / index relArrays below read the FIRST VERTEX's
+		 * floats. Across the 17 vanilla objects that gives nf = 5662..52483, the
+		 * shared sanity check returns, and because that return happens BEFORE
+		 * `shape.verts = raw` every hknpConvexShape decoded to 0 verts and 0 tris:
+		 * invisible in the viewport, invisible to any geometry check, and
+		 * unwritable -- encodeShapeObject has no branch for a convex shape with an
+		 * empty face list, so all 17 systems refused to assemble.
+		 *
+		 * Matched by CLASS NAME, not by the descriptor. The tempting data-driven
+		 * test -- "payload offset 0x10 means there are no polytope arrays" -- is
+		 * byte-identical on hknpSphereShape (04 00 10 00), and a sphere whose four
+		 * vertices are not all equal falls out of its own branch above and is
+		 * meant to reach the polytope tail. That would change 114 objects to fix 17.
+		 *
+		 * Measured on all 17: the object is align16( 0x40 + nv * 16 ) bytes, nv is
+		 * 4 or 8, and each vertex w tag is 0x3f000000 | its own slot index with no
+		 * repeats. That last part is NOT the polytope rule -- a polytope's padding
+		 * slots duplicate the last real vertex and its tag -- so the array has no
+		 * padding and nv is the real count.
+		 *
+		 * verts is stored VERBATIM, all nv of them. The eight-vertex objects hold
+		 * each corner of a quad twice; de-duplicating here would make the encoder
+		 * write a 128-byte object where the file has 192, shifting every offset
+		 * after it in the packfile.
+		 */
+		shape.verts = raw;
+		synthConvexPolygon( shape );
 		return;
 	}
 
