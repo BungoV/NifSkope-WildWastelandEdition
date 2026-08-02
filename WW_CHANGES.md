@@ -93,12 +93,54 @@ substitutes a guess when the layer is Unidentified — the write never fires and
 working editor looks broken. And undo depth is `undoStack->index()`, not
 `count()`: a push after an undo truncates the redo tail before adding.
 
-### Not done
+### The rest of the plan
 
-Batch 6 is partial — the Import/Export rows (OBJ, glTF), `Compile Collision` /
-`Check Collision`, and the `Open in <Manager>` row are not built. Batch 7, the
-`WWSpellPalette` command palette, and batch 8's two deferred items are not
-started.
+**Import / Export rows.** Both exporters were already block-scoped and lived
+only in File ▸ Export — `exportObj` prints a message box whose entire job is to
+tell you which block it guessed, `exportGltf` refuses without a selection. Their
+version gates are read off the `ImportExportOption` table rather than reinvented,
+so a menu entry cannot outlive the format support behind it.
+
+**`Open in <Manager>`** — one row, titled from the clicked block's type. Three
+fixed rows would have been the obvious shape and the wrong one: two would always
+be inapplicable, in a menu whose whole problem was length. It `show()`s the dock
+before `select()`ing, because the collision dock's handler returns early while
+hidden.
+
+**The command palette** (`Ctrl+Shift+P`, or the `Search…` row). Deliberately not
+a line edit in the menu: a popup `QMenu` holds a keyboard grab, `keyPressEvent`
+spends every printable key on first-letter jump, a filtered menu cannot expand a
+submenu inline, and the popup cannot re-centre. It walks a live SpellBook's
+`QAction` tree, so the hand-added native actions are searchable for free. The
+group is part of the search key, which is what makes "transform copy" narrow to
+one row when four spells are called Copy. **Inapplicable entries are shown,
+greyed** — that is the whole advantage over filtering, since Batch, Sanitize,
+Optimize and Error Checking vanish from a block row by design. And the top hit is
+auto-highlighted **unless it is destructive**: two keystrokes and a reflexive
+Return must never reach Crop To Branch.
+
+**Batch 8, the two items marked "confirm first".** The four numbered Rigging
+steps leave the menu — the dock numbers and gates them, the flat submenu let you
+run step 4 before step 1. New `Spell::menuHidden()` rather than an `isApplicable`
+gate, because the dock casts them by id with a valid index; the registry is
+untouched, so `castSpell` and the CLI still work.
+
+And the two rename propagation paths turned out **not to be two
+implementations** — the plan deferred merging them because "they are two
+different propagation bodies", and they were identical line for line. That makes
+the merge a no-op, which is precisely why it was worth doing: two identical
+copies is one copy that has not drifted yet.
+
+### Not done, and why
+
+`Compile Collision` and `Check Collision` stay in the dock. Check would be a
+third copy of a walk that already exists twice, and it is whole-file — putting a
+whole-file action on a block row is what this batch removed twice over. Compile
+is genuinely block-scoped and genuinely missing, but `compileSelectedCollision`
+is a hundred-line private member driven by tree-item state, popping three modals,
+deleting the source branch — and it was just found to be writing layer
+Static/0/0 into every packfile it produced. It needs its own harness first.
+`Open in Collision Manager` now puts it one click away.
 
 ## 2026-08-02e — The workspace consistency audit is finished
 

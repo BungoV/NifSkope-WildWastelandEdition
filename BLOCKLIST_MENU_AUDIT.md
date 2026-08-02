@@ -5,7 +5,20 @@ spell it can show, what the rest of the app offers for a selected block), four
 lenses judged it (completeness, redundancy, taxonomy, search), one synthesis.
 Line numbers were re-verified against the tree by the synthesiser.
 
-Nothing here is implemented. This is the plan.
+**STATUS 2026-08-02: implemented, batches 1-8.** Two things in the plan below
+were wrong and the code does not follow them: §4/§5 name
+`GLView::restoreAllHidden`, which does not exist (it is `restoreAllVisibility`,
+and `unhideAll` is the narrower one that leaves a solo'd node hidden), and §2
+claims all six Select & View entries "run off `ogl->objSelection`" — `hideSelected`
+does not, it hides one node, so that entry is labelled "Hide This". §8's premise
+that the two rename paths are "two different propagation bodies" was also wrong;
+they were identical. Not built, with reasons in the commit and WW_CHANGES.md:
+`Compile Collision` and `Check Collision`, which stay in the Collision Manager.
+
+Verified by `tests/spells/menu_taxonomy.sh` (26 checks) and
+`tests/spells/spell_search.sh` (9 checks).
+
+The plan as originally written follows.
 
 # Block List Right‑Click Menu — Overhaul Plan
 
