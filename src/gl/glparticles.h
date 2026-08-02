@@ -69,6 +69,12 @@ public:
 	bool bakeSprites( const Vector3 & viewAxis, QVector<Vector3> & tris,
 	                  QVector<Vector2> & uvs, QVector<Color4> & cols );
 
+	//! Live sprites right now, so a test can hold it against the file's cap.
+	int liveCount() const { return active; }
+
+	//! The per-sprite atlas cell offsets, so a test can watch the flipbook run.
+	const QVector<Vector2> & spriteCells() const { return uvOffsets; }
+
 	//! The properties the sprites draw with, so a bake can reuse them.
 	QModelIndex shaderProperty() const { return QModelIndex( iShaderProp ); }
 	QModelIndex alphaProperty() const { return QModelIndex( iAlphaProp ); }

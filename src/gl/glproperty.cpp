@@ -1203,6 +1203,18 @@ enum
 	BGSM1_G2P,
 	BGSM1_ENV,
 	BGSM20_GLOW = 4,
+	/* Slot 5 really is both, and that is Bethesda's doing, not a typo here.
+	 *
+	 * A BGSM has no environment-mask texture of its own — the mask is the
+	 * smooth/spec map's alpha, scaled by fEnvironmentMappingMaskScale — so slot
+	 * 5 is the glow map by name. But Materials/Weapons/Machete/machete.bgsm
+	 * ships MacheteBlade_m.dds in it with bGlowmap set and environment mapping
+	 * on, and _m is FO4's environment-MASK suffix. Measured over the stock tree:
+	 * 643 BGSMs, 140 with environment mapping and no texture in slot 5, 7 with a
+	 * texture and no environment mapping, and exactly 2 with both. Two files is
+	 * not enough evidence to decide which sampler Bethesda meant, and either
+	 * choice is wrong for one of them, so both readings stay.
+	 */
 	BGSM1_GLOW = 5,
 	BGSM1_ENVMASK = 5,
 	BGSM20_REFLECT,

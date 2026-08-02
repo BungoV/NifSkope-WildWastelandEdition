@@ -54,6 +54,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QScopeGuard>
 #include "version.h"
 #include "gl/controllers.h"
+#include "gl/glparticles.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -4846,6 +4847,228 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "after Stop: aAnimPlay " << skope->ui->aAnimPlay->isChecked() << "\n";
 					check( "stop stops the application, not just the dock",
 						!skope->ui->aAnimPlay->isChecked() );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_SUBTEX_TEST=1): does a texture-atlas flipbook actually
+	 * play?
+	 *
+	 * BSPSysSubTexModifier — "similar to a Flip Controller, this handles particle
+	 * texture animation on a single texture atlas" — was not implemented at all.
+	 * Every particle picked ONE random cell of the sheet at birth and kept it for
+	 * life, so all 302 stock Fallout 4 meshes carrying the modifier showed a
+	 * frozen frame of an animation. A 64-cell explosion sheet exists to be played.
+	 *
+	 * THE DISCRIMINATING MEASUREMENT is how many sprites change cell at once.
+	 * Cells changed on the old code too — particles die and are reborn with a new
+	 * random cell — so "the cells changed" proves nothing. What cannot happen
+	 * without a flipbook is MOST OF THE POPULATION changing cell between two
+	 * samples 20 ms apart while the population size holds steady: that needs half
+	 * the sprites replaced in 20 ms. With the modifier running it happens on
+	 * essentially every sample, because every sprite advances its own playhead.
+	 *
+	 * Cells are compared as a SORTED multiset, not index by index: a particle
+	 * dying removes its slot and shifts every later one, so index-wise comparison
+	 * would report a change for the whole tail on any death.
+	 * Log: release/ww_subtex_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SUBTEX_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_subtex_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; check( "the file loaded", false ); break; }
+					GLView * ogl = skope->getGLView();
+					NifModel * nif = skope->getNifModel();
+					Scene * sc = ogl ? ogl->getScene() : nullptr;
+					if ( !sc || !nif ) { log << "no scene\n"; check( "there is a scene", false ); break; }
+
+					int mods = 0, cells = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						if ( nif->isNiBlock( nif->getBlockIndex( b ), "BSPSysSubTexModifier" ) )
+							mods++;
+						if ( nif->isNiBlock( nif->getBlockIndex( b ), "NiPSysData" ) )
+							cells = std::max( cells,
+								nif->get<int>( nif->getBlockIndex( b ), "Num Subtexture Offsets" ) );
+					}
+					log << "  BSPSysSubTexModifier blocks: " << mods
+						<< ", largest atlas: " << cells << " cells\n";
+					check( "the fixture has a sub-texture modifier", mods > 0 );
+					check( "and an atlas with more than one cell to play", cells > 1 );
+					if ( mods < 1 || cells < 2 ) break;
+
+					if ( !skope->ui->aAnimate->isChecked() )
+						skope->ui->aAnimate->trigger();
+					if ( !skope->ui->aAnimPlay->isChecked() )
+						skope->ui->aAnimPlay->trigger();
+
+					int bigMoves = 0, comparable = 0, mostMoved = 0;
+					QHash<qint32, QVector<float>> prev;
+					QEventLoop loop;
+					QTimer sampler;
+					sampler.setInterval( 20 );
+					QObject::connect( &sampler, &QTimer::timeout, &loop, [&]() {
+						for ( Node * n : sc->getNodes() ) {
+							auto * p = dynamic_cast<Particles *>( n );
+							if ( !p || p->liveCount() < 4 )
+								continue;
+							QVector<float> now;
+							const QVector<Vector2> & cs = p->spriteCells();
+							for ( int i = 0; i < p->liveCount() && i < cs.size(); i++ )
+								now.append( cs.at( i )[0] );
+							std::sort( now.begin(), now.end() );
+							const qint32 b = nif->getBlockNumber( p->index() );
+							const QVector<float> & was = prev[b];
+							if ( was.size() == now.size() && !now.isEmpty() ) {
+								comparable++;
+								int moved = 0;
+								for ( int i = 0; i < now.size(); i++ )
+									if ( std::fabs( now.at( i ) - was.at( i ) ) > 1.0e-6f )
+										moved++;
+								mostMoved = std::max( mostMoved, int( moved * 100 / now.size() ) );
+								if ( moved * 2 > now.size() )
+									bigMoves++;
+							}
+							prev[b] = now;
+						}
+					} );
+					sampler.start();
+					QTimer::singleShot( 3000, &loop, &QEventLoop::quit );
+					loop.exec();
+					if ( skope->ui->aAnimPlay->isChecked() )
+						skope->ui->aAnimPlay->trigger();
+
+					log << "  " << comparable << " comparable samples, " << bigMoves
+						<< " where most of the population changed cell; biggest single move "
+						<< mostMoved << "%\n";
+					check( "there was a steady population to watch", comparable > 10 );
+					check( "the sprites advance through the atlas together", bigMoves > 0 );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_PARTICLECAP_TEST=1): does a particle system simulate the
+	 * number of particles the FILE says it may?
+	 *
+	 * PSysSimController asked the NiParticleSystem for "Num Vertices", and no
+	 * version of that block has ever had one — the count is a NiGeometryData row
+	 * and lives on the DATA block, renamed "BS Max Vertices" for NiPSysData on
+	 * Bethesda 20.2. So the read returned 0 on every file in every game and the
+	 * 512 fallback always won. Measured over the stock Fallout 4 mesh tree, 1,345
+	 * NiPSysData blocks: NOT ONE is 512. 1,287 authorise fewer, 58 more, and the
+	 * smallest is 3.
+	 *
+	 * WHAT MAKES THIS DISCRIMINATING is saturation, not the bound. "Live <= cap"
+	 * would pass on the old code too whenever the emitter is quiet. So the check
+	 * is that the population sits exactly ON the cap: below means the emitter is
+	 * too slow to prove anything, above means the cap is not being read.
+	 * Log: release/ww_particlecap_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_PARTICLECAP_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_particlecap_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; check( "the file loaded", false ); break; }
+					GLView * ogl = skope->getGLView();
+					NifModel * nif = skope->getNifModel();
+					Scene * sc = ogl ? ogl->getScene() : nullptr;
+					if ( !sc || !nif ) { log << "no scene\n"; check( "there is a scene", false ); break; }
+
+					// the cap each particle system authored, straight from the model
+					QHash<qint32, int> capOf;			// NiParticleSystem block -> cap
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QModelIndex iPS = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( iPS, "NiParticleSystem" ) )
+							continue;
+						const QModelIndex iPD = nif->getBlockIndex( nif->getLink( iPS, "Data" ) );
+						int cap = nif->get<int>( iPD, "BS Max Vertices" );
+						if ( cap < 1 )
+							cap = nif->get<int>( iPD, "Num Vertices" );
+						capOf[b] = cap;
+						log << "  particle system [" << b << "] authored cap " << cap << "\n";
+					}
+					check( "the fixture has a particle system", !capOf.isEmpty() );
+					if ( capOf.isEmpty() ) break;
+					const int smallest = *std::min_element( capOf.constBegin(), capOf.constEnd() );
+					check( "and it authorises fewer than the 512 fallback",
+						smallest > 0 && smallest < 512 );
+
+					if ( !skope->ui->aAnimate->isChecked() )
+						skope->ui->aAnimate->trigger();
+					if ( !skope->ui->aAnimPlay->isChecked() )
+						skope->ui->aAnimPlay->trigger();
+
+					// let it fill up, sampling the live population as it goes
+					QHash<qint32, int> peak;
+					QEventLoop loop;
+					QTimer sampler;
+					sampler.setInterval( 20 );
+					QObject::connect( &sampler, &QTimer::timeout, &loop, [&]() {
+						for ( Node * n : sc->getNodes() ) {
+							auto * p = dynamic_cast<Particles *>( n );
+							if ( !p )
+								continue;
+							const qint32 b = nif->getBlockNumber( p->index() );
+							peak[b] = std::max( peak.value( b, 0 ), p->liveCount() );
+						}
+					} );
+					sampler.start();
+					QTimer::singleShot( 3000, &loop, &QEventLoop::quit );
+					loop.exec();
+					if ( skope->ui->aAnimPlay->isChecked() )
+						skope->ui->aAnimPlay->trigger();
+
+					int over = 0, saturated = 0, seen = 0;
+					for ( auto it = capOf.constBegin(); it != capOf.constEnd(); ++it ) {
+						const int live = peak.value( it.key(), -1 );
+						if ( live < 0 )
+							continue;			// no scene node for it
+						seen++;
+						log << "  [" << it.key() << "] cap " << it.value()
+							<< ", peak live " << live << "\n";
+						if ( live > it.value() ) over++;
+						if ( live == it.value() ) saturated++;
+					}
+					check( "the particle systems are in the scene", seen > 0 );
+					check( "none simulated more particles than the file allows", over == 0 );
+					check( "and at least one filled its cap, so the emitter really wanted more",
+						saturated > 0 );
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";

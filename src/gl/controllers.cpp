@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QApplication>
 #include <QFile>
 #include <QTextStream>
+#include <QVarLengthArray>
 #include "model/nifmodel.h"
 
 #include <cmath>
@@ -931,9 +932,8 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 
 	iExtras.clear();
 	emitters.clear();
-	hasGravity = false;
-	gravityStrength = 0;
-	dragPct = 0;
+	gravities.clear();
+	drags.clear();
 	hasColorMod = false;
 	hasColorGradient = false;
 	iColorGradKeys = QModelIndex();
@@ -941,13 +941,35 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	hasRotation = false;
 	rotSpeed = rotSpeedVar = rotAngle = rotAngleVar = 0;
 	rotRandomSign = false;
+	hasSubTex = false;
+	subtexName.clear();
 
 	QModelIndex iPSys = nif->getBlockIndex( nif->getLink( iBlock, "Target" ) );
 	if ( !iPSys.isValid() )
 		return true;
 	iExtras.append( iPSys );
 
-	maxParticles = nif->get<int>( iPSys, "Num Vertices" );
+	QModelIndex iPD = nif->getBlockIndex( nif->getLink( iPSys, "Data" ) );
+	if ( iPD.isValid() )
+		iExtras.append( iPD );
+
+	/* The particle cap the file actually authored.
+	 *
+	 * This asked the NiParticleSystem for "Num Vertices", and no version of that
+	 * block has ever had one: the count is a NiGeometryData row and lives on the
+	 * DATA block. So the read returned 0 on every file in every game and the 512
+	 * fallback always won — a smoke plume authored for 18 particles was previewed
+	 * with up to 512, which is not a slower version of the same effect, it is a
+	 * different one.
+	 *
+	 * On Bethesda 20.2 the row is called "BS Max Vertices": nif.xml renames it
+	 * for NiPSysData alone, because a particle system's vertex arrays have no
+	 * length there and the number means max particles instead. Older streams keep
+	 * the original name on the same block, so both are tried.
+	 */
+	maxParticles = nif->get<int>( iPD, "BS Max Vertices" );
+	if ( maxParticles < 1 )
+		maxParticles = nif->get<int>( iPD, "Num Vertices" );
 	if ( maxParticles < 1 )
 		maxParticles = 512;
 	maxParticles = std::min( maxParticles, 4096 );
@@ -955,13 +977,8 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	// flipbook cells from the particle data block (each particle gets a random
 	// cell of the sprite sheet, e.g. 16 for a 4x4 lightning atlas)
 	subtexOffsets.clear();
-	{
-		QModelIndex iPD = nif->getBlockIndex( nif->getLink( iPSys, "Data" ) );
-		if ( iPD.isValid() ) {
-			iExtras.append( iPD );
-			subtexOffsets = nif->getArray<Vector4>( nif->getIndex( iPD, "Subtexture Offsets" ) );
-		}
-	}
+	if ( iPD.isValid() )
+		subtexOffsets = nif->getArray<Vector4>( nif->getIndex( iPD, "Subtexture Offsets" ) );
 
 	// gather BSPositionData spawn points (object-local space) from a block's
 	// extra data list. Layout (same as the Generate BSPositionData spell and
@@ -1118,20 +1135,34 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 
 			emitters.append( e );
 		} else if ( mtype == QLatin1String( "NiPSysGravityModifier" ) ) {
-			hasGravity = true;
-			gravityName = modActive.last().name;
-			gravityDir = nif->get<Vector3>( iMod, "Gravity Axis" );
-			gravityDir.normalize();
-			gravityStrength = nif->get<float>( iMod, "Strength" );
+			GravityMod g;
+			g.name = modActive.last().name;
+			g.axis = nif->get<Vector3>( iMod, "Gravity Axis" );
+			g.axis.normalize();
+			g.strength = nif->get<float>( iMod, "Strength" );
+			g.spherical = nif->get<int>( iMod, "Force Type" ) == 1;		// FORCE_SPHERICAL
 			QModelIndex iGObj = nif->getBlockIndex( nif->getLink( iMod, "Gravity Object" ) );
 			if ( iGObj.isValid() ) {
-				Node * n = target->scene->getNode( nif, iGObj );
-				if ( n )
-					gravityDir = n->worldTrans().rotation * gravityDir;
+				if ( Node * n = target->scene->getNode( nif, iGObj ) ) {
+					const Transform t = n->worldTrans();
+					g.axis = t.rotation * g.axis;
+					g.origin = t.translation;
+					g.hasOrigin = true;
+				}
 			}
+			gravities.append( g );
 		} else if ( mtype == QLatin1String( "NiPSysDragModifier" ) ) {
-			dragPct = nif->get<float>( iMod, "Percentage" );
-			dragName = modActive.last().name;
+			DragMod d;
+			d.name = modActive.last().name;
+			d.percentage = nif->get<float>( iMod, "Percentage" );
+			d.axis = nif->get<Vector3>( iMod, "Drag Axis" );
+			d.axis.normalize();
+			QModelIndex iDObj = nif->getBlockIndex( nif->getLink( iMod, "Drag Object" ) );
+			if ( iDObj.isValid() ) {
+				if ( Node * n = target->scene->getNode( nif, iDObj ) )
+					d.axis = n->worldTrans().rotation * d.axis;
+			}
+			drags.append( d );
 		} else if ( mtype == QLatin1String( "BSPSysSimpleColorModifier" ) ) {
 			hasColorMod = true;
 			colorName = modActive.last().name;
@@ -1144,6 +1175,16 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			QModelIndex iCols = nif->getIndex( iMod, "Colors" );
 			for ( int c = 0; c < 3 && c < nif->rowCount( iCols ); c++ )
 				modColors[c] = nif->get<Color4>( nif->getIndex( iCols, c ) );
+		} else if ( mtype == QLatin1String( "BSPSysSubTexModifier" ) ) {
+			hasSubTex = true;
+			subtexName = modActive.last().name;
+			stStart      = nif->get<float>( iMod, "Start Frame" );
+			stStartFudge = nif->get<float>( iMod, "Start Frame Fudge" );
+			stEnd        = nif->get<float>( iMod, "End Frame" );
+			stLoopStart  = nif->get<float>( iMod, "Loop Start Frame" );
+			stLoopFudge  = nif->get<float>( iMod, "Loop Start Frame Fudge" );
+			stCount      = nif->get<float>( iMod, "Frame Count" );
+			stCountFudge = nif->get<float>( iMod, "Frame Count Fudge" );
 		} else if ( mtype == QLatin1String( "BSPSysScaleModifier" ) ) {
 			scaleKeys = nif->getArray<float>( nif->getIndex( iMod, "Scales" ) );
 			scaleName = modActive.last().name;
@@ -1398,6 +1439,25 @@ float PSysSimController::particleScale( float u ) const
 	return scaleKeys[i] + ( scaleKeys[i + 1] - scaleKeys[i] ) * t;
 }
 
+Vector2 PSysSimController::subtexCell( float frame ) const
+{
+	if ( subtexOffsets.isEmpty() )
+		return Vector2();
+
+	/* Modulo the REAL cell count, because the frame numbers in the file are not
+	 * about this atlas. End Frame keeps its 63 default on sheets with 4, 8 and
+	 * 16 cells all over the stock tree, and Start Frame Fudge is routinely 64 on
+	 * a 16-cell sheet — indexing straight in would read off the end of the array
+	 * on most files that use the modifier at all.
+	 */
+	const int n = subtexOffsets.size();
+	int i = int( std::floor( frame ) ) % n;
+	if ( i < 0 )
+		i += n;
+	const Vector4 & s = subtexOffsets.at( i );
+	return Vector2( s[0], s[2] );
+}
+
 void PSysSimController::emitParticle( Emitter & e )
 {
 	SimParticle p;
@@ -1500,8 +1560,18 @@ void PSysSimController::emitParticle( Emitter & e )
 	p.color = particleColor( e, 0.0f );
 
 	if ( !subtexOffsets.isEmpty() ) {
-		const Vector4 & s = subtexOffsets.at( std::rand() % subtexOffsets.size() );
-		p.uvOff = Vector2( s[0], s[2] );
+		if ( hasSubTex ) {
+			// Where in the sheet this particle starts, and how fast it plays.
+			// Both are per-particle and fixed at birth: the fudges exist so a
+			// hundred sprites of one explosion are not the same frame.
+			p.frame = stStart + random( stStartFudge );
+			p.frameRate = stCount + random( stCountFudge );
+			p.frameLoop = stLoopStart + random( stLoopFudge );
+			p.uvOff = subtexCell( p.frame );
+		} else {
+			const Vector4 & s = subtexOffsets.at( std::rand() % subtexOffsets.size() );
+			p.uvOff = Vector2( s[0], s[2] );
+		}
 	}
 
 	if ( hasRotation ) {
@@ -1565,14 +1635,57 @@ void PSysSimController::updateTime( float time )
 		}
 		return true;
 	};
-	const bool gravityOn = hasGravity && modIsActive( gravityName );
-	const bool dragOn = dragPct > 0.0f && modIsActive( dragName );
 	const bool rotationOn = hasRotation && modIsActive( rotationName );
+	const bool subtexOn = hasSubTex && !subtexOffsets.isEmpty() && modIsActive( subtexName );
 
 	// advance
 	Transform pw = target->worldTrans();
-	Vector3 gLocal = gravityOn ? pw.rotation.inverted() * gravityDir : Vector3();
-	float dragMul = dragOn ? std::exp( -dragPct * 30.0f * dt ) : 1.0f;
+	const Matrix psysFromWorld = pw.rotation.inverted();
+	const float psysScale = ( pw.scale != 0.0f ) ? pw.scale : 1.0f;
+
+	/* Every ACTIVE gravity, summed.
+	 *
+	 * The planar ones collapse into one constant acceleration, so they are added
+	 * up once here rather than per particle. A spherical one points at its
+	 * gravity object and so depends on where the particle is; those are kept and
+	 * evaluated inside the loop.
+	 */
+	Vector3 gPlanar;
+	QVarLengthArray<QPair<Vector3, float>, 4> gSpherical;	// (origin, strength), psys-local
+	for ( const GravityMod & g : gravities ) {
+		if ( g.strength == 0.0f || !modIsActive( g.name ) )
+			continue;
+		if ( g.spherical && g.hasOrigin ) {
+			gSpherical.append( { psysFromWorld * ( ( g.origin - pw.translation ) / psysScale ),
+								 g.strength } );
+		} else {
+			// A spherical modifier with no gravity object has no centre to pull
+			// towards, so it can only be its axis - which is what the engine's
+			// planar case is.
+			gPlanar += ( psysFromWorld * g.axis ) * g.strength;
+		}
+	}
+	const bool gravityOn = gPlanar.length() > 0.0f || !gSpherical.isEmpty();
+
+	/* Drag, per axis.
+	 *
+	 * FO4 authors anisotropic drag as three modifiers on one system, one per
+	 * axis, and this used to keep only the last and apply it isotropically. The
+	 * damping is now applied along each modifier's own axis: with three equal
+	 * percentages on X, Y and Z that reproduces the old isotropic result
+	 * exactly, and with one modifier it no longer slows the two axes it was
+	 * never pointed at.
+	 */
+	QVarLengthArray<QPair<Vector3, float>, 6> dragAxes;		// (axis, 1 - exp(...)), psys-local
+	for ( const DragMod & d : drags ) {
+		if ( d.percentage <= 0.0f || !modIsActive( d.name ) )
+			continue;
+		Vector3 ax = psysFromWorld * d.axis;
+		if ( ax.length() <= 0.0f )
+			continue;
+		ax.normalize();
+		dragAxes.append( { ax, 1.0f - std::exp( -d.percentage * 30.0f * dt ) } );
+	}
 
 	int n = 0;
 	while ( n < parts.size() ) {
@@ -1587,10 +1700,42 @@ void PSysSimController::updateTime( float time )
 				continue;
 			}
 		}
-		if ( gravityOn )
-			p.vel += gLocal * ( gravityStrength * dt );
-		if ( dragOn )
-			p.vel *= dragMul;
+		if ( gravityOn ) {
+			p.vel += gPlanar * dt;
+			/* Spherical: along the line from the gravity object to the particle,
+			 * OUTWARD for a positive strength.
+			 *
+			 * The sign is inferred. Nothing in the stock tree shows the other
+			 * direction — every gravity modifier sampled across the effects and
+			 * weapons trees, spherical or planar, has a positive strength — so
+			 * what settles it is what they are used for.
+			 * ExplosionBottleCapMine.nif drives its debris with a spherical
+			 * strength of 675, and inward at 675 is not an explosion, it is an
+			 * implosion.
+			 */
+			for ( const auto & s : gSpherical ) {
+				Vector3 d = p.pos - s.first;
+				const float len = d.length();
+				if ( len > 1.0e-4f )
+					p.vel += d * ( s.second * dt / len );
+			}
+		}
+		for ( const auto & d : dragAxes )
+			p.vel -= d.first * ( Vector3::dotproduct( p.vel, d.first ) * d.second );
+		if ( subtexOn ) {
+			p.frame += p.frameRate * dt;
+			// past End Frame it goes back to LOOP START, not to where it began:
+			// the start was randomised per particle and is not where a loop is
+			// meant to restart. A loop with no room in it (End at or before Loop
+			// Start) is a one-shot, so the playhead just holds on the last cell.
+			const float span = stEnd - p.frameLoop;
+			if ( p.frame > stEnd ) {
+				p.frame = ( span > 0.0f )
+					? p.frameLoop + std::fmod( p.frame - p.frameLoop, span )
+					: stEnd;
+			}
+			p.uvOff = subtexCell( p.frame );
+		}
 		if ( hasPosition )
 			p.pos += p.vel * dt;
 		if ( rotationOn )
@@ -2865,6 +3010,11 @@ void LightingFloatController::updateTime( float time )
 	if ( interpolate( val, iData, "Data", ctrlTime( time ), lIdx ) ) {
 		switch ( variable ) {
 		case LightingFloat::Refraction_Strength:
+			// The property carries this and the renderer uses it (glproperty.cpp
+			// loads it from both the block and the BGSM); only the controller
+			// dropped it on the floor. 71 lighting-float controllers in stock
+			// Fallout 4 weapons and effects animate variable 0.
+			target->refractionStrength = val;
 			break;
 		case LightingFloat::Reflection_Strength:
 			target->environmentReflection = val;

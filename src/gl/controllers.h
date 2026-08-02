@@ -285,6 +285,9 @@ class PSysSimController final : public Controller
 		float radius = 1;
 		Color4 color;
 		Vector2 uvOff;                     // flipbook cell (subtexture offset)
+		float frame = 0;                   // BSPSysSubTexModifier playhead, in frames
+		float frameRate = 0;               // its own rate, fudged at birth
+		float frameLoop = 0;               // where its loop restarts, likewise
 		float angle = 0;                   // sprite rotation (radians)
 		float angVel = 0;                  // rotation speed (radians/sec)
 	};
@@ -386,7 +389,7 @@ class PSysSimController final : public Controller
 	 *  per-modifier list.
 	 */
 	QVector<ModActive> modActive;
-	QString gravityName, dragName, colorName, scaleName, rotationName;
+	QString colorName, scaleName, rotationName;
 
 	//! Present in the modifier chain at all. The engine does not age a particle
 	//! without a NiPSysAgeDeathModifier, nor move one without a
@@ -396,10 +399,43 @@ class PSysSimController final : public Controller
 	bool hasAgeDeath = true, hasPosition = true;
 
 	// modifiers
-	bool hasGravity = false;
-	Vector3 gravityDir;
-	float gravityStrength = 0;
-	float dragPct = 0;
+
+	/*! One NiPSysGravityModifier.
+	 *
+	 *  A list, not a flat member, because a particle system may carry several and
+	 *  the last one used to overwrite the rest. Each keeps its own name so a
+	 *  NiPSysModifierActiveCtlr can switch one of them off without taking the
+	 *  others with it.
+	 */
+	struct GravityMod
+	{
+		QString name;
+		Vector3 axis;			//!< world space, gravity object's rotation applied
+		Vector3 origin;			//!< world space; the pull point when spherical
+		float strength = 0;
+		bool spherical = false;	//!< Force Type FORCE_SPHERICAL
+		bool hasOrigin = false;
+	};
+	QVector<GravityMod> gravities;
+
+	/*! One NiPSysDragModifier.
+	 *
+	 *  Also a list, and for a stronger reason than gravity: FO4 authors drag as
+	 *  THREE of these on one system, named (X-Axis), (Y-Axis) and (Z-Axis) at
+	 *  consecutive orders. Measured over 140 stock effect meshes, 944 drag
+	 *  modifiers, EVERY ONE of them axis-labelled and in triples. Keeping only
+	 *  the last kept the Z one and then applied it to all three axes — which is
+	 *  harmless while the three percentages agree and wrong the moment they do
+	 *  not: AttachFXMist01.nif asks for 0.07 / 0.07 / 0.02 and got 0.02 on all
+	 *  three, BubblesSurface01.nif asks for 0.06 / 0.06 / 0.03 and got 0.03.
+	 */
+	struct DragMod
+	{
+		QString name;
+		Vector3 axis;			//!< world space, drag object's rotation applied
+		float percentage = 0;
+	};
+	QVector<DragMod> drags;
 	bool hasColorMod = false;
 	float fadeIn = 0.1f, fadeOut = 0.9f;
 	float c1End = 0, c2Start = 0, c2End = 1, c3Start = 1;
@@ -414,6 +450,33 @@ class PSysSimController final : public Controller
 	bool rotRandomSign = false;
 	//! NiPSysData subtexture offsets (flipbook cells): (offU, sizeU, offV, sizeV)
 	QVector<Vector4> subtexOffsets;
+
+	/*! BSPSysSubTexModifier — "similar to a Flip Controller, this handles
+	 *  particle texture animation on a single texture atlas" (nif.xml).
+	 *
+	 *  Without it a particle keeps ONE random cell of the atlas for its whole
+	 *  life, which is what happened to every one of the 302 stock Fallout 4
+	 *  meshes carrying this modifier: a 64-cell explosion sheet is authored to
+	 *  PLAY, and it showed a single frozen frame of it.
+	 *
+	 *  Frame Count is read as frames per SECOND. That is an inference, not a
+	 *  documented fact — nif.xml describes none of these fields beyond their
+	 *  names. The evidence is that its nif.xml default is 30.0 and the authored
+	 *  values cluster on 30, 35, 40, 45, 50, 60, 100, 120: conventional frame
+	 *  rates, not counts of anything in the file. Nothing here is tied to the
+	 *  atlas size either, because the files are not: End Frame is left at its 63
+	 *  default on sheets with 4, 8 and 16 cells, so the frame index has to be
+	 *  taken modulo the real cell count rather than trusted.
+	 */
+	bool hasSubTex = false;
+	QString subtexName;
+	float stStart = 0, stStartFudge = 0;
+	float stEnd = 0, stLoopStart = 0, stLoopFudge = 0;
+	float stCount = 0, stCountFudge = 0;
+
+	//! The atlas cell a frame index lands on: (offU, offV) of that Subtexture
+	//! Offset, taken modulo the real cell count.
+	Vector2 subtexCell( float frame ) const;
 
 	QList<QPersistentModelIndex> iExtras;
 

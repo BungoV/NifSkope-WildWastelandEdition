@@ -1,5 +1,126 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02i — The preview reads numbers the files were already carrying
+
+Four things the file said and the preview ignored. Each one is a field that has
+been sitting in every stock mesh since 2015.
+
+**Cycle Type.** `NiControllerSequence` says what it does at its end — LOOP,
+REVERSE or CLAMP — and nothing read it. One session-wide Loop checkbox decided
+for every sequence in every file, it starts unchecked, and `saveUi`/`restoreUi`
+have the line that would persist it commented out. So the default preview played
+every clip exactly once, whatever it was authored to do.
+
+| stock FO4 mesh tree | 1,124 files, 3,337 sequences |
+|---|---|
+| CYCLE_CLAMP | 2,664 |
+| CYCLE_LOOP | 673 |
+| CYCLE_REVERSE | 0 |
+| no cycle type at all | 0 |
+
+Selecting a sequence now sets the Loop toggle from the file and faces playback
+forwards; ticking Loop by hand still wins for as long as you stay on that
+sequence. CYCLE_REVERSE ping-pongs, which is new behaviour — at the end it turns
+round rather than wrapping — and its direction lives in its own `animDir`, not
+in the sign of `animSpeed`, which belongs to the Speed and Reverse controls and
+is rewritten wholesale the next time either is touched.
+
+`Bloatfly.nif` is the whole argument in one file: `CharFXOn` is CLAMP and
+`CharFXOnLoop` is LOOP, so no single setting of one checkbox is right for both.
+It also ships `CharFXOffLoop` as CYCLE_CLAMP — the name is not the truth, the
+field is, which is why the harness picks its sequences by cycle type and never
+by name.
+
+**The particle cap: nobody ever got the number they asked for.**
+`PSysSimController` asked the `NiParticleSystem` for `Num Vertices`. No version
+of that block has ever had one — the count is a `NiGeometryData` row and lives on
+the DATA block, renamed `BS Max Vertices` for `NiPSysData` on Bethesda 20.2. The
+read returned 0 on every file in every game and the 512 fallback beneath it
+always won. Over 1,345 stock FO4 `NiPSysData` blocks: **not one is 512.** 1,287
+authorise fewer, 58 more, smallest 3, largest 38,464. A plume authored for 17
+particles previewed with up to 512 — not a busier version of the same effect, a
+different one.
+
+**BSPSysSubTexModifier was not implemented.** Every particle picked one random
+cell of the atlas at birth and held it until it died, so the 302 stock FO4 meshes
+carrying the modifier showed a frozen frame of an animation. Particles now start
+at `Start Frame` (+ fudge), advance at `Frame Count` frames a second (+ fudge),
+and wrap from `End Frame` back to `Loop Start Frame`.
+
+Frame Count as frames-per-*second* is an inference — nif.xml documents none of
+these fields beyond their names. The evidence is that its default is 30.0 and
+the authored values cluster on 30, 35, 40, 45, 50, 60, 100, 120: frame rates,
+not counts of anything in the file. Nothing is tied to the atlas size, because
+the files are not: `End Frame` is left at its 63 default on sheets with 4, 8 and
+16 cells, so the frame index is taken modulo the real cell count rather than
+trusted.
+
+**Refraction Strength** was parsed into a `case … break;`. The property carries
+it and the renderer uses it; only the controller dropped it. 71 lighting-float
+controllers in stock FO4 weapons and effects animate variable 0.
+
+**Drag and gravity were single-slot.** Both kept only the LAST modifier on a
+system and threw the rest away, and drag ignored its `Drag Axis` entirely. FO4
+authors drag as three modifiers per system — measured over 140 stock effect
+meshes, 944 drag modifiers, **every one** named `(X-Axis)`, `(Y-Axis)` or
+`(Z-Axis)` and arriving in triples. Keeping only the Z one and applying it to
+all three axes is harmless while the three percentages agree and wrong the
+moment they do not: `AttachFXMist01.nif` asks for 0.07 / 0.07 / 0.02 and got
+0.02 on everything, `BubblesSurface01.nif` asks for 0.06 / 0.06 / 0.03 and got
+0.03. Damping is now applied along each modifier's own axis, which reproduces
+the old isotropic result exactly when the percentages match.
+
+Gravity accumulates the same way, and `Force Type` is read: `FORCE_SPHERICAL`
+pushes along the line from the gravity object to the particle instead of along a
+fixed axis. Its SIGN is an inference — every gravity modifier sampled has a
+positive strength, so the tree never shows the other direction — settled on what
+they are used for: `ExplosionBottleCapMine.nif` drives its debris with a
+spherical strength of 675, and inward at 675 is an implosion. `Decay` and
+`Turbulence` are still unread; there is no defensible curve for them in nif.xml
+or in the corpus, and guessing one would be worse than leaving them out.
+
+### Three harnesses, each proved to fail without its fix
+
+| | checks | disproof |
+|---|---|---|
+| `tests/spells/cycle_type.sh` | 12 | 3 fail: the LOOP clip does not loop, is not still running past its end, and the REVERSE one never turns round |
+| `tests/spells/particle_cap.sh` | 5 | 1 fails: a system authored for 12 peaks at 15 |
+| `tests/spells/subtex_flipbook.sh` | 4 | 1 fails: 0 samples with most of the population moving, against 83 |
+
+Each disproof neutralised only the new decision and rebuilt, rather than
+trusting that the check would have failed.
+
+The discriminating measurement is the point in all three. For cycle type, checks
+3 and 4 fail in OPPOSITE directions on the old code, so a new default cannot
+pass them — only reading the field can. For the cap, "live ≤ cap" passes on the
+broken code whenever the emitter is quiet, so the check is that the population
+sits exactly ON the cap; `CryoJet01` and most of the effects tree never saturate
+in three seconds and were rejected as fixtures for that reason. For the
+flipbook, cells changed on the broken code too — particles die and are reborn
+with a new random cell — so the check is that MOST OF THE POPULATION changes
+cell between two samples 20 ms apart while the population size holds steady,
+compared as a sorted multiset because a death shifts every later slot.
+
+### Two things measured and deliberately NOT changed
+
+**The `x_` sequence prefix does not mean what the reference says it means.** The
+claim was that `x_` marks a sequence driving shader or emitter properties. In
+`SentryBotFaceLight.nif`, `partA` and `x_partAhead` drive the *same three*
+`BSEffectShaderProperty` controllers — the prefix separates nothing there. It is
+real (292 of 3,337 sequences) and it does correlate with looping (46% CYCLE_LOOP
+against 18% for the rest), but no file in the tree contains both `x_Foo` and
+`Foo`, so it is not even a variant-marker. Modelling it would encode a guess.
+
+**`BGSM1_GLOW = 5` and `BGSM1_ENVMASK = 5` are not a typo.** A BGSM has no
+environment-mask texture — the mask is the smooth/spec map's alpha — so slot 5
+is the glow map by name. But `Materials/Weapons/Machete/machete.bgsm` ships
+`MacheteBlade_m.dds` in it with `bGlowmap` set and environment mapping on, and
+`_m` is FO4's environment-MASK suffix. Of 643 stock BGSMs, 140 have environment
+mapping and nothing in slot 5, 7 have a texture and no environment mapping, and
+exactly **2** have both. Two files cannot decide which sampler Bethesda meant,
+and either choice is wrong for one of them, so both readings stay — now with the
+measurement written next to them.
+
 ## 2026-08-02h — Collision round-trips perfectly, and the encoder is reachable
 
 **839 of 839 packfiles in the 445-file corpus now reproduce byte-identically.**
