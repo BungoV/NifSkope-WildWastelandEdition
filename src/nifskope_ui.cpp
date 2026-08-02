@@ -4621,6 +4621,109 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_GIZMONUM_TEST=1): can a decimal point be typed into a
+	 * modal transform?
+	 *
+	 * bungo: "Cannot type in 11.25 in transform, move, rotate or scale, instead
+	 * 1125 gets typed in." The digits arrived and the '.' did not, because THREE
+	 * separate handlers upstream of GLView's numeric buffer claim a bare period:
+	 * the app-wide filter's frame_selection branch, the same filter's numpad
+	 * branch via handleBlenderNumpad, and physicsKeyPress inside GLView itself.
+	 *
+	 * THE KEYS MUST GO THROUGH QApplication::sendEvent, NOT ogl->keyPressEvent.
+	 * Calling the handler directly skips the application event filter, which is
+	 * where two of the three thefts happen — a harness written that way passes
+	 * on the broken code and proves nothing. That is the single thing this test
+	 * depends on getting right.
+	 *
+	 * Log: release/ww_gizmonum_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_GIZMONUM_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_gizmonum_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					NifModel * nif = skope->getNifModel();
+					GLView * ogl = skope->getGLView();
+					if ( !nif || !ogl ) { log << "no model or view\n"; break; }
+
+					// a node to transform
+					int node = -1;
+					for ( int b = 0; b < nif->getBlockCount() && node < 0; b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" ) )
+							node = b;
+					if ( node < 0 ) { log << "no NiAVObject\n"; break; }
+					skope->select( nif->getBlockIndex( node ) );
+					QApplication::processEvents();
+					log << "selected block " << node << "\n";
+
+					/* The pointer HAS to be inside the viewport, because that is
+					 * the condition the buggy branches test — and it is tested
+					 * against the CONTAINER widget, not the QOpenGLWindow, which
+					 * is what the filter measures with
+					 * graphicsView->rect().contains( mapFromGlobal( QCursor::pos() ) ).
+					 * Park it in the middle of that, or the bug cannot reproduce
+					 * and the test goes green for the wrong reason.
+					 */
+					QWidget * vp = ogl->graphicsView;
+					if ( !vp ) { log << "no viewport container\n"; break; }
+					QCursor::setPos( vp->mapToGlobal( vp->rect().center() ) );
+					QApplication::processEvents();
+					log << "pointer over viewport: "
+						<< vp->rect().contains( vp->mapFromGlobal( QCursor::pos() ) ) << "\n";
+
+					if ( !ogl->startModalTransform( 1 ) ) {
+						log << "startModalTransform refused\n"; break;
+					}
+					QApplication::processEvents();
+					log << "gizmoMode = " << ogl->gizmoMode << "\n";
+					check( "a modal move transform started", ogl->gizmoMode != 0 );
+
+					auto typeKey = [ogl]( int key, const QString & text ) {
+						QKeyEvent press( QEvent::KeyPress, key, Qt::NoModifier, text );
+						QApplication::sendEvent( ogl, &press );
+						QApplication::processEvents();
+					};
+
+					// "11.25", one key at a time, through the real event path
+					typeKey( Qt::Key_1, QStringLiteral( "1" ) );
+					typeKey( Qt::Key_1, QStringLiteral( "1" ) );
+					typeKey( Qt::Key_Period, QStringLiteral( "." ) );
+					typeKey( Qt::Key_2, QStringLiteral( "2" ) );
+					typeKey( Qt::Key_5, QStringLiteral( "5" ) );
+
+					const QString typed = ogl->gizmoNum.value( 0 );
+					log << "gizmoNum[0] = '" << typed << "' (wanted '11.25')\n";
+					check( "the digits reached the transform", typed.contains( QLatin1String( "11" ) ) );
+					check( "the decimal point survived", typed.contains( QLatin1Char( '.' ) ) );
+					check( "the whole number arrived", typed == QLatin1String( "11.25" ) );
+
+					// abandon the transform rather than committing it: this
+					// harness is about the keystrokes, not about moving anything
+					ogl->gizmoEnd( false );
+					QApplication::processEvents();
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_DESTRUCTIVE_TEST=1): is the confirmation on the right
 	 * spells, does it say what is lost, and can it still be turned off?
 	 *
@@ -12959,6 +13062,22 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			|| keyFocus->inherits( "QAbstractSpinBox" ) || keyFocus->inherits( "QComboBox" ) );
 		// rebindable viewport shortcuts (see tlRegisterViewportShortcuts)
 		const auto & vpKeys = ShortcutRegistry::get();
+		/* A modal transform is TYPING, and this filter must not eat its keys.
+		 *
+		 * G/R/S start a Blender-style transform whose numeric entry collects
+		 * digits and a decimal point into GLView's gizmoNum buffer. That buffer
+		 * is behind `if ( gizmoMode )` in GLView::keyPressEvent, which is
+		 * downstream of this application-wide filter — so any branch here that
+		 * claims a bare key claims it first.
+		 *
+		 * "viewport.frame_selection" is bound to a bare period. During a
+		 * transform the pointer is over the viewport by definition and focus is
+		 * not a text widget, so both of its guards pass and '.' was consumed as
+		 * Frame Selection: typing 11.25 produced 1125, with the decimal point and
+		 * nothing else silently dropped. Digits were unaffected, which is exactly
+		 * why it read as "the decimal key does not work".
+		 */
+		const bool modalTransform = ogl && ( ogl->gizmoMode || ogl->elemTransform );
 		// loop cut is modal: Esc cancels, Enter confirms, digits/+/-/Backspace
 		// set the cut count; every other single-key viewport shortcut stays
 		// inert while it is armed
@@ -13007,7 +13126,14 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// Blender numpad navigation is viewport-scoped. Reserve recognized keys
 		// during ShortcutOverride so the legacy QAction shortcuts cannot recenter
 		// the model before the viewport-preserving handler sees the KeyPress.
-		if ( pointerOverViewport && !keyFocusIsTextInput
+		/* Also skipped during a modal transform. ShortcutRegistry::matches masks
+		 * KeypadModifier off, so the numpad decimal key reaches the same
+		 * frame_selection binding as the main-row one — and handleBlenderNumpad
+		 * maps keypad Period/Comma to frameSelected() on its own account. Without
+		 * this guard the numpad decimal is eaten twice over, and the numpad digits
+		 * go to view navigation instead of the number being typed.
+		 */
+		if ( pointerOverViewport && !keyFocusIsTextInput && !modalTransform
 			&& ogl->handleBlenderNumpad( ke->key(), ke->modifiers(), e->type() == QEvent::KeyPress ) ) {
 			if ( e->type() == QEvent::KeyPress ) {
 				QSignalBlocker blocker( ui->aViewPerspective );
@@ -13274,7 +13400,9 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			}
 		}
 		// frame the selection with the pointer over the view (Blender Numpad-.)
-		if ( pointerOverViewport
+		// -- but not while a modal transform is collecting a number; see
+		// modalTransform above
+		if ( pointerOverViewport && !modalTransform
 			&& vpKeys.matches( "viewport.frame_selection", ke->key(), ke->modifiers() ) ) {
 			QWidget * fw = QApplication::focusWidget();
 			bool textInput = fw && ( fw->inherits( "QLineEdit" ) || fw->inherits( "QTextEdit" )

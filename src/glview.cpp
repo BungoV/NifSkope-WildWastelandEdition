@@ -20278,9 +20278,17 @@ int GLView::convertKeyCode( int n ) const
 
 void GLView::keyPressEvent( QKeyEvent * event )
 {
-	// Physics Sim owns Space, R and Escape while it is running, ahead of every
-	// other binding: they are the whole control surface of the mode
-	if ( physicsKeyPress( event ) ) {
+	/* Physics Sim owns Space, R and Escape while it is running, ahead of every
+	 * other binding: they are the whole control surface of the mode.
+	 *
+	 * A modal transform outranks it, and this is the third place a bare '.' was
+	 * taken before the gizmo's numeric buffer could see it: physicsKeyPress
+	 * consumes Key_Period as single-step, and this call sits above the
+	 * `if ( gizmoMode )` block further down. Escape follows the same precedence —
+	 * while G/R/S is collecting a number, Escape cancels the transform, which is
+	 * the more immediate of the two things it could mean.
+	 */
+	if ( !gizmoMode && !elemTransform && physicsKeyPress( event ) ) {
 		event->accept();
 		return;
 	}
