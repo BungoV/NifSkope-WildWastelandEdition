@@ -1996,24 +1996,46 @@ public:
 			if ( !shader.isValid() )
 				continue;
 
-			/* An effect shader that carries its textures inline is NORMAL, and
-			 * saying otherwise is how a linter becomes noise.
+			/* A SHADER WITH NO MATERIAL IS NOT MATERIAL-DRIVEN, and a material
+			 * check has nothing to say about it. Saying it anyway is how a linter
+			 * becomes noise — this rule took three measurements to get right, and
+			 * every one of them contradicted what I expected.
 			 *
-			 * Measured, not assumed: ElectricalExplosionSmall.nif is a shipping
-			 * vanilla FO4 effect mesh that renders correctly, and it contains
-			 * zero ".bgem" strings — all seven of its BSEffectShaderProperty
-			 * blocks drive themselves from Source Texture. Reporting those seven
-			 * as "No BGSM/BGEM material is assigned" is true and useless: a
-			 * healthy stock asset would open with seven warnings.
+			 * 1. ElectricalExplosionSmall.nif, a shipping vanilla FO4 effect mesh,
+			 *    contains zero ".bgem" strings: all seven of its shaders drive
+			 *    themselves from Source Texture. Reporting them would open a
+			 *    healthy asset with seven warnings. So: skip effect shaders that
+			 *    carry an inline texture.
 			 *
-			 * spCheckMaterial keeps reporting it, correctly — there the user
-			 * pointed at one block and asked. Here nobody asked about this block.
-			 * A LIGHTING shader with no .bgsm stays a finding: those do need one.
+			 * 2. Too narrow. BeamSmoky03.nif still raised one, on a shader with no
+			 *    material AND no textures — attached to "EditorMarker121:0", a
+			 *    Creation Kit helper that never renders. Nothing is configured
+			 *    because there is nothing to configure. So: skip effect shaders
+			 *    with no material at all.
+			 *
+			 * 3. Still wrong, and this one killed the assumption underneath.
+			 *    ACDuctMedEnd03.nif raised a WARNING on a BSLightingShaderProperty
+			 *    with no material — and a perfectly good BSShaderTextureSet in the
+			 *    next block. FO4 supports both paths; a lighting shader that names
+			 *    its textures directly is legal and common in vanilla. "Lighting
+			 *    shaders are always material-driven in FO4" was simply false.
+			 *
+			 * What survives is narrow and defensible: a shader with no material is
+			 * skipped, EXCEPT a lighting shader that also has no texture set —
+			 * that one has no way to be textured at all, which is a real defect
+			 * rather than a different authoring style.
+			 *
+			 * spCheckMaterial keeps reporting all of it, correctly: there the user
+			 * pointed at one block and asked about it.
 			 */
-			if ( nif->blockInherits( shader, "BSEffectShaderProperty" )
-				&& tlShaderMaterialPath( nif, shader ).isEmpty()
-				&& !nif->resolveString( shader, "Source Texture" ).isEmpty() )
+			if ( tlShaderMaterialPath( nif, shader ).isEmpty() ) {
+				if ( nif->blockInherits( shader, "BSLightingShaderProperty" )
+					&& !nif->isValidBlockNumber( nif->getLink( shader, "Texture Set" ) ) )
+					nif->logMessage( message(), tr(
+						"[%1] Lighting shader has neither a material nor a texture set." ).arg( b ),
+						QMessageBox::Critical );
 				continue;
+			}
 
 			for ( const QString & issue : tlMaterialIssues( nif, shader ) ) {
 				/* ABSENCE IS A DEFECT. DISAGREEMENT IS BETHESDA'S NORMAL.

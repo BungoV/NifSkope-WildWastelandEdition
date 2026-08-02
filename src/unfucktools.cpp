@@ -204,10 +204,10 @@ const IssueClass issueClasses[] = {
 	  "", "", false,
 	  "No automatic fix — the material asks for a texture that is not in the archives. It renders as the missing-texture placeholder in game." },
 
-	{ "No BGSM/BGEM material is assigned",
-	  "Shader has no material",
+	{ "neither a material nor a texture set",
+	  "Shader has no way to be textured",
 	  "", "", false,
-	  "No automatic fix — assign one in the Material Manager, or with Choose Material." },
+	  "No automatic fix — assign a material in the Material Manager, or give the shader a BSShaderTextureSet." },
 
 	{ "BSShaderTextureSet is missing",
 	  "Texture set missing from a lighting shader",
@@ -233,6 +233,51 @@ const IssueClass issueClasses[] = {
 	  "Material file is unreadable",
 	  "", "", false,
 	  "No automatic fix — the file was found but did not parse. It is truncated, or a version this build does not read." },
+
+	/* From spCheckCollision (collisiontools.cpp). The Collision Manager's own
+	 * Check button offers an "Apply Safe Fixes" pass for the first two of these,
+	 * but it is a member of that dock and ends in a modal, so nothing here can
+	 * reach it — hence no fix names below. Hoisting it is its own piece of work.
+	 */
+	{ "reference is missing",
+	  "Collision points at a block that is not there",
+	  "", "", false,
+	  "No automatic fix here — the Collision Manager's Check button can remove the broken object." },
+
+	{ "Collision layer is Unidentified",
+	  "Collision layer not set",
+	  "", "", false,
+	  "No automatic fix here — the Collision Manager's Check button can infer Static or Props from the motion system." },
+
+	{ "Convex hull has .* vertices",
+	  "Convex hull is over budget",
+	  "", "", false,
+	  "No automatic fix — rebuild it with fewer vertices, or use Create Convex Shapes with a lower ratio." },
+
+	{ "Convex hull is box-shaped",
+	  "Convex hull could be a box",
+	  "", "", false,
+	  "Not a fault — a Box collision would be cheaper for the same shape." },
+
+	{ "non-uniform scale",
+	  "Primitive collision is non-uniformly scaled",
+	  "", "", false,
+	  "No automatic fix — Havok ignores non-uniform scale on box, sphere and capsule shapes, so the collision is not the size it looks." },
+
+	{ "STAIRHELPER",
+	  "Stair helper has no slope",
+	  "", "", false,
+	  "No automatic fix — layer 31 tells the engine to smooth movement over a slope, and this body has only primitives." },
+
+	{ "Visible geometry has no collision",
+	  "Visible geometry without collision",
+	  "", "", false,
+	  "Often correct — effect meshes, editor markers and decoration are meant to be walked through." },
+
+	{ "mixes compiled and editable collision",
+	  "Compiled and editable collision in one file",
+	  "", "", false,
+	  "No automatic fix — finish editing, then compile consistently, or the game and the editor will disagree about what is solid." },
 };
 
 //! Block number embedded in a finding, as "[19] ...". -1 when there is none.

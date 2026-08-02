@@ -66,6 +66,37 @@ bool tlBuildCollisionPreview( NifModel * nif, const QModelIndex & index, int kin
 QModelIndex tlCommitCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
 	float ratio, bool decomposition, float precision, float threshold, int maxHulls );
 
+/*! Block lookup and shape-chain descent, at file scope.
+ *
+ *  These were members of CollisionManagerPanel below, which is the only reason
+ *  the collision lint could not be reached from anywhere else — they are `const`
+ *  and touch nothing but `nif`. Lifted here so the whole-file collision check can
+ *  walk the same shapes the panel does; the panel's own methods forward to them,
+ *  so there is one implementation and not a call site changed.
+ */
+static QModelIndex tlCollBlockIndex( const NifModel * nif, int block )
+{
+	return nif && nif->isValidBlockNumber( block ) ? nif->getBlockIndex( block ) : QModelIndex();
+}
+
+//! The first shape that is not a wrapper: descends Mopp/Transform/List chains.
+static int tlCollFirstLeafShape( const NifModel * nif, int shape, int depth = 0 )
+{
+	if ( !nif || !nif->isValidBlockNumber( shape ) || depth > 12 )
+		return -1;
+	QModelIndex i = tlCollBlockIndex( nif, shape );
+	QString t = nif->itemName( i );
+	if ( t == QLatin1String( "bhkMoppBvTreeShape" )
+		 || t == QLatin1String( "bhkTransformShape" )
+		 || t == QLatin1String( "bhkConvexTransformShape" ) )
+		return tlCollFirstLeafShape( nif, nif->getLink( i, "Shape" ), depth + 1 );
+	if ( t == QLatin1String( "bhkListShape" ) || t == QLatin1String( "bhkConvexListShape" ) ) {
+		QVector<qint32> links = nif->getLinkArray( i, "Sub Shapes" );
+		return links.isEmpty() ? shape : tlCollFirstLeafShape( nif, links.first(), depth + 1 );
+	}
+	return shape;
+}
+
 namespace {
 
 enum CollisionRoles {
@@ -281,10 +312,7 @@ private:
 	bool syncingSelection = false;
 	QSet<int> expandedObjects;
 
-	QModelIndex blockIndex( int block ) const
-	{
-		return nif && nif->isValidBlockNumber( block ) ? nif->getBlockIndex( block ) : QModelIndex();
-	}
+	QModelIndex blockIndex( int block ) const { return tlCollBlockIndex( nif, block ); }
 
 	QString blockType( int block ) const
 	{
@@ -699,19 +727,7 @@ private:
 
 	int firstLeafShape( int shape, int depth = 0 ) const
 	{
-		if ( !nif->isValidBlockNumber( shape ) || depth > 12 )
-			return -1;
-		QModelIndex i = blockIndex( shape );
-		QString t = nif->itemName( i );
-		if ( t == QLatin1String( "bhkMoppBvTreeShape" )
-			 || t == QLatin1String( "bhkTransformShape" )
-			 || t == QLatin1String( "bhkConvexTransformShape" ) )
-			return firstLeafShape( nif->getLink( i, "Shape" ), depth + 1 );
-		if ( t == QLatin1String( "bhkListShape" ) || t == QLatin1String( "bhkConvexListShape" ) ) {
-			QVector<qint32> links = nif->getLinkArray( i, "Sub Shapes" );
-			return links.isEmpty() ? shape : firstLeafShape( links.first(), depth + 1 );
-		}
-		return shape;
+		return tlCollFirstLeafShape( nif, shape, depth );
 	}
 
 	struct CollisionMesh
@@ -2691,3 +2707,150 @@ QDockWidget * tlCreateCollisionManagerDock( NifModel * nif, QMainWindow * mw, GL
 	dock->hide();
 	return dock;
 }
+
+
+/*! The collision lint, whole file, reported through logMessage.
+ *
+ *  The Collision Manager's Check button has done these tests for a while, but it
+ *  ends in a QMessageBox and it counts rather than locates — "3 dangling collision
+ *  reference(s)" tells you the file is wrong and not which block to open. Both
+ *  make it useless to the Unfuck panel, which casts checks with an invalid index,
+ *  drains logMessage, and offers Go to on whatever block a finding names.
+ *
+ *  So this reports ONE FINDING PER BLOCK, with the block number, which is the
+ *  part that had to be rewritten rather than hoisted. The detection is the same
+ *  walk, over the same helpers, now at file scope.
+ *
+ *  SEVERITY IS MEASURED, NOT ASSUMED — see spCheckAllMaterials in meshtools.cpp
+ *  for how that went the first time. A dangling reference is a broken file. A
+ *  box-like hull or an uncollided visible mesh is an observation: effect meshes
+ *  and decorative geometry legitimately have no collision, so reporting those as
+ *  warnings would put amber rows on most of the FO4 effects tree.
+ */
+class spCheckCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Collision Problems" ); }
+	QString page() const override final { return Spell::tr( "Error Checking" ); }
+	bool constant() const override final { return true; }
+	bool checker() const override final { return true; }
+	static QString message() { return Spell::tr( "Collision problems were found." ); }
+
+	// cheap: SpellBook::checkers() is cast per-file by the bulk directory scan
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return !index.isValid() && nif && nif->getBlockCount() > 0;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & ) override final
+	{
+		auto say = [nif]( int b, const QString & what, QMessageBox::Icon lvl ) {
+			nif->logMessage( message(), Spell::tr( "[%1] %2" ).arg( b ).arg( what ), lvl );
+		};
+
+		int compiled = 0, editable = 0;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex i = nif->getBlockIndex( b );
+
+			if ( nif->blockInherits( i, "bhkNPCollisionObject" ) ) {
+				compiled++;
+				if ( !tlCollBlockIndex( nif, nif->getLink( i, "Data" ) ).isValid() )
+					say( b, Spell::tr( "Compiled collision object's Data reference is missing." ),
+						QMessageBox::Critical );
+			} else if ( nif->blockInherits( i, "bhkCollisionObject" ) ) {
+				editable++;
+				const int body = nif->getLink( i, "Body" );
+				const QModelIndex bi = tlCollBlockIndex( nif, body );
+				if ( !bi.isValid() ) {
+					say( b, Spell::tr( "Collision object's Body reference is missing." ),
+						QMessageBox::Critical );
+					continue;			// nothing below can be read without the body
+				}
+
+				const int leaf = tlCollFirstLeafShape( nif, nif->getLink( bi, "Shape" ) );
+				const QModelIndex li = tlCollBlockIndex( nif, leaf );
+				if ( li.isValid() && nif->isNiBlock( li, "bhkConvexVerticesShape" ) ) {
+					const QVector<Vector4> vertices = nif->getArray<Vector4>( li, "Vertices" );
+					if ( vertices.size() > 64 )
+						say( leaf, Spell::tr( "Convex hull has %1 vertices; Havok handles 64 well." )
+							.arg( vertices.size() ), QMessageBox::Warning );
+					if ( vertices.size() >= 8 ) {
+						Vector3 mn( vertices.first()[0], vertices.first()[1], vertices.first()[2] ), mx( mn );
+						for ( const Vector4 & v : vertices )
+							for ( int axis = 0; axis < 3; axis++ ) {
+								mn[axis] = std::min( mn[axis], v[axis] );
+								mx[axis] = std::max( mx[axis], v[axis] );
+							}
+						const float tolerance =
+							std::max( { mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2] } ) * 0.03f + 1.0e-5f;
+						bool boxLike = true;
+						for ( const Vector4 & v : vertices )
+							for ( int axis = 0; axis < 3; axis++ )
+								if ( std::min( std::fabs( v[axis] - mn[axis] ),
+										std::fabs( v[axis] - mx[axis] ) ) > tolerance )
+									boxLike = false;
+						if ( boxLike )
+							say( leaf, Spell::tr( "Convex hull is box-shaped; a Box collision would be cheaper." ),
+								QMessageBox::Information );
+					}
+				}
+
+				const QModelIndex info = nif->getIndex( bi, "Rigid Body Info" );
+				const QModelIndex filter = info.isValid() ? nif->getIndex( info, "Havok Filter" ) : QModelIndex();
+				const quint32 collLayer = filter.isValid() ? nif->get<quint32>( filter, "Layer" ) : 0;
+				if ( filter.isValid() && collLayer == 0 )
+					say( nif->getBlockNumber( bi ),
+						Spell::tr( "Collision layer is Unidentified (0)." ), QMessageBox::Warning );
+				if ( collLayer == 31 && li.isValid()
+					&& ( nif->isNiBlock( li, "bhkBoxShape" ) || nif->isNiBlock( li, "bhkSphereShape" )
+						|| nif->isNiBlock( li, "bhkCapsuleShape" ) ) )
+					say( nif->getBlockNumber( bi ),
+						Spell::tr( "STAIRHELPER body contains no sloped shape." ), QMessageBox::Warning );
+			}
+
+			if ( nif->isNiBlock( i, "bhkTransformShape" ) || nif->isNiBlock( i, "bhkConvexTransformShape" ) ) {
+				const QModelIndex child =
+					tlCollBlockIndex( nif, tlCollFirstLeafShape( nif, nif->getLink( i, "Shape" ) ) );
+				if ( child.isValid() && ( nif->isNiBlock( child, "bhkBoxShape" )
+						|| nif->isNiBlock( child, "bhkSphereShape" )
+						|| nif->isNiBlock( child, "bhkCapsuleShape" ) ) ) {
+					Vector3 trans, scales; Matrix rot;
+					nif->get<Matrix4>( i, "Transform" ).decompose( trans, rot, scales );
+					const float lo = std::min( { std::fabs( scales[0] ), std::fabs( scales[1] ), std::fabs( scales[2] ) } );
+					const float hi = std::max( { std::fabs( scales[0] ), std::fabs( scales[1] ), std::fabs( scales[2] ) } );
+					if ( hi - lo > std::max( 1.0e-4f, hi * 0.001f ) )
+						say( b, Spell::tr( "Primitive collision transform uses non-uniform scale; Havok ignores it." ),
+							QMessageBox::Warning );
+				}
+			}
+
+			if ( nif->blockInherits( i, { "BSGeometry", "BSTriShape", "NiTriBasedGeom" } )
+					&& !( nif->get<quint32>( i, "Flags" ) & 1u ) ) {
+				bool protectedByCollision = false;
+				int owner = nif->getParent( b );
+				for ( int depth = 0; nif->isValidBlockNumber( owner ) && depth < 32;
+						depth++, owner = nif->getParent( owner ) ) {
+					const QModelIndex node = tlCollBlockIndex( nif, owner );
+					if ( nif->blockInherits( node, "NiNode" )
+						&& nif->isValidBlockNumber( nif->getLink( node, "Collision Object" ) ) ) {
+						protectedByCollision = true;
+						break;
+					}
+				}
+				if ( !protectedByCollision )
+					say( b, Spell::tr( "Visible geometry has no collision on its node hierarchy." ),
+						QMessageBox::Information );
+			}
+		}
+
+		// whole-file, so no block to name
+		if ( compiled && editable )
+			nif->logMessage( message(), Spell::tr(
+				"File mixes compiled and editable collision; finish editing, then compile consistently." ),
+				QMessageBox::Warning );
+
+		return QModelIndex();
+	}
+};
+
+REGISTER_SPELL( spCheckCollision )
