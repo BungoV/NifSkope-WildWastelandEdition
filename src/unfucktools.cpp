@@ -241,13 +241,13 @@ const IssueClass issueClasses[] = {
 	 */
 	{ "reference is missing",
 	  "Collision points at a block that is not there",
-	  "", "", false,
-	  "No automatic fix here — the Collision Manager's Check button can remove the broken object." },
+	  "", "Remove Broken Collision Object", true,
+	  "Fixing one deletes that collision object. It collides with nothing as it stands, and Ctrl+Z takes it back." },
 
 	{ "Collision layer is Unidentified",
 	  "Collision layer not set",
-	  "", "", false,
-	  "No automatic fix here — the Collision Manager's Check button can infer Static or Props from the motion system." },
+	  "", "Set Collision Layer from Motion", true,
+	  "Fixing one sets Props for a keyframed body and Static for anything else — the same rule the Collision Manager's Check button uses." },
 
 	{ "Convex hull has .* vertices",
 	  "Convex hull is over budget",

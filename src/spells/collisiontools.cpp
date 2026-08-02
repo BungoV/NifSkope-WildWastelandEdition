@@ -2854,3 +2854,119 @@ public:
 };
 
 REGISTER_SPELL( spCheckCollision )
+
+
+/*! The two repairs the Collision Manager's Check button offers, as spells.
+ *
+ *  They existed only inside CollisionManagerPanel::lintCollision, behind a modal
+ *  whose "Apply Safe Fixes" button applied BOTH to the WHOLE FILE at once. That
+ *  is not something the Unfuck panel can offer against one finding, and it is
+ *  not what a user clicking one row means.
+ *
+ *  Split into two per-block spells, so a finding that names block 12 repairs
+ *  block 12 and nothing else. The whole-file pass in the dock is unchanged.
+ */
+class spFixCollisionLayer final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Set Collision Layer from Motion" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Replaces an Unidentified (0) collision layer with Props for a "
+			"keyframed body, or Static for anything else." );
+	}
+
+	//! The Havok Filter of a body whose layer is Unidentified, or an invalid index.
+	static QModelIndex zeroLayerFilter( const NifModel * nif, const QModelIndex & index )
+	{
+		if ( !nif )
+			return QModelIndex();
+		const QModelIndex body = nif->getBlockIndex( index );
+		if ( !body.isValid() || !nif->blockInherits( body, "bhkRigidBody" ) )
+			return QModelIndex();
+		const QModelIndex info = nif->getIndex( body, "Rigid Body Info" );
+		if ( !info.isValid() )
+			return QModelIndex();
+		const QModelIndex filter = nif->getIndex( info, "Havok Filter" );
+		if ( !filter.isValid() || nif->get<quint32>( filter, "Layer" ) != 0 )
+			return QModelIndex();
+		return filter;
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return zeroLayerFilter( nif, index ).isValid();
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		const QModelIndex filter = zeroLayerFilter( nif, index );
+		if ( !filter.isValid() )
+			return index;
+		/* Motion System 3 is MO_SYS_KEYFRAMED: something the game moves, which
+		 * belongs on Props (10). Everything else is scenery, which is Static (1).
+		 * Same rule the dock's safe-fix pass uses -- this is that code, not a
+		 * second opinion about it.
+		 */
+		const quint32 motion = nif->get<quint32>( filter.parent(), "Motion System" );
+		nifSnapshotOp( nif, Spell::tr( "Set collision layer" ), [&]() {
+			nif->set<quint32>( QModelIndex( filter ), "Layer", motion == 3 ? 10u : 1u );
+		} );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spFixCollisionLayer )
+
+class spRemoveBrokenCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Remove Broken Collision Object" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Deletes a collision object whose Body or Data block is missing. "
+			"It cannot collide with anything as it stands." );
+	}
+
+	/* Destructive, and it says so if cast from a menu. The Unfuck panel's per-row
+	 * button calls cast() directly and therefore does not confirm -- that button
+	 * is labelled with what it does, the row above it names the block, and
+	 * runFixAt snapshots the model so Ctrl+Z takes it back.
+	 */
+	bool destructive() const override final { return true; }
+	QString destructiveWarning( NifModel * nif, const QModelIndex & index ) const override final
+	{
+		return Spell::tr( "Remove collision object [%1]? Its %2 block is missing, so it collides "
+			"with nothing." ).arg( nif->getBlockNumber( index ) )
+			.arg( nif->blockInherits( nif->getBlockIndex( index ), "bhkNPCollisionObject" )
+				? QStringLiteral( "Data" ) : QStringLiteral( "Body" ) );
+	}
+
+	static bool isBroken( const NifModel * nif, const QModelIndex & index )
+	{
+		if ( !nif )
+			return false;
+		const QModelIndex i = nif->getBlockIndex( index );
+		if ( nif->blockInherits( i, "bhkNPCollisionObject" ) )
+			return !nif->isValidBlockNumber( nif->getLink( i, "Data" ) );
+		if ( nif->blockInherits( i, "bhkCollisionObject" ) )
+			return !nif->isValidBlockNumber( nif->getLink( i, "Body" ) );
+		return false;
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return isBroken( nif, index );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		spRemoveBranch remove;
+		remove.castIfApplicable( nif, nif->getBlockIndex( index ) );
+		return QModelIndex();
+	}
+};
+
+REGISTER_SPELL( spRemoveBrokenCollision )

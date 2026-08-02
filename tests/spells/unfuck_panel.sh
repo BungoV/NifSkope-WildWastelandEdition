@@ -160,6 +160,55 @@ else
 	echo "  FAIL: could not write the case 3 fixture"; fails=$((fails+1))
 fi
 
+# --- case 4: a broken collision reference, and its per-row fix ----------------
+#
+# The collision lint reports one finding per block, and two of its findings now
+# carry repairs hoisted out of the Collision Manager's modal "Apply Safe Fixes"
+# pass. This breaks a real compiled collision object's Data link and requires
+# that the panel (a) reports it as an ERROR, not a note -- a collision object
+# pointing at nothing is genuinely broken, unlike most of what the lint says --
+# and (b) that clicking the fix resolves the finding it named.
+#
+# FO4 ships compiled collision throughout, so the layer repair
+# (Set Collision Layer from Motion, which needs an editable bhkRigidBody) is not
+# reachable from this corpus and is NOT covered here. Said plainly rather than
+# left to look covered.
+if [ -n "$STATIC" ] && [ -f "$STATIC" ]; then
+	echo
+	echo "=== case 4: broken collision Data reference ==="
+	COLL="$("$EXE" -no-gui list "$(winpath "$STATIC")" 2>/dev/null \
+		| sed -n 's/^\[\([0-9]*\)\] bhkNPCollisionObject.*/\1/p' | head -1)"
+	if [ -n "$COLL" ]; then
+		"$EXE" -no-gui set "$(winpath "$STATIC")" -b "$COLL" -f "Data" -v "-1" \
+			-o "$(winpath "$TMP/nocoll.nif")" > /dev/null 2>&1
+		if [ -s "$TMP/nocoll.nif" ]; then
+			rm -f "$LOG"
+			WW_UNFUCKPANEL_TEST=1 "$EXE" --port "$((PORT + 3))" \
+				"$(winpath "$TMP/nocoll.nif")" > /dev/null 2>&1
+			clean="$(tr -d '\r' < "$LOG" 2>/dev/null)"
+			printf '%s\n' "$clean" | sed -n '1,4p'
+			printf '%s\n' "$clean" | grep -E "^  (ok|FAIL) " | tail -6
+			grep -q '^PASS' "$LOG" || fails=$((fails+1))
+			if printf '%s' "$clean" | head -1 | grep -q "error"; then
+				echo "  ok   a dangling collision reference is an error, not a note"
+			else
+				echo "  FAIL: expected an error for a dangling collision reference"
+				fails=$((fails+1))
+			fi
+			if printf '%s' "$clean" | grep -q "Remove Broken Collision Object ran"; then
+				echo "  ok   the hoisted collision repair ran from the panel"
+			else
+				echo "  FAIL: the collision repair did not run"
+				fails=$((fails+1))
+			fi
+		else
+			echo "  FAIL: could not write the case 4 fixture"; fails=$((fails+1))
+		fi
+	else
+		echo "  (no bhkNPCollisionObject in the static fixture — skipping)"
+	fi
+fi
+
 echo
 echo "cases failed: $fails"
 [ "$fails" -eq 0 ]
