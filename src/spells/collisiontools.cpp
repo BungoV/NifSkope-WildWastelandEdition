@@ -1843,11 +1843,14 @@ private:
 		const QString role = boneRole( collectBoneRoles(), nodeBlock, -1 );
 		if ( !role.isEmpty()
 			&& QMessageBox::warning( this, tr( "Compile Collision" ),
+				// same correction as the Decompile warning in havok.cpp: the
+				// constraints and skeleton DO decode and re-encode byte for byte.
+				// What is missing is any NIF representation to carry them across.
 				tr( "%1 is a bone (%2).\n\n"
 					"Compile writes a single static body as a triangle mesh in a "
 					"bhkPhysicsSystem. It cannot write bone collision, and it cannot rebuild "
-					"a ragdoll - the joint constraints and the ragdoll skeleton are not "
-					"decoded, so a ragdoll this came from stays lost.\n\n"
+					"a ragdoll - nothing carries the joint constraints or the ragdoll skeleton "
+					"into NIF blocks, so a ragdoll this came from stays lost.\n\n"
 					"Compile anyway?" ).arg( nodeName( nodeBlock ), role ),
 				QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) != QMessageBox::Yes )
 			return;

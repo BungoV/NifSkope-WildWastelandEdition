@@ -1,5 +1,83 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02g — Collision: the encoder gets a user, and 17 files stop being invisible
+
+An exhaustive round-trip audit over **445 stock FO4 meshes / 839 compiled
+systems** (every rare shape and constraint class in the tree, not a sample) found
+the format is no longer the bottleneck: **810 packfiles reassembled
+byte-identical**, 12 differed for two fully-diagnosed reasons, and 17 refused
+with one cause. Two things were the bottleneck, and both are now fixed.
+
+### `hknpConvexShape` decoded to nothing
+
+The base of the convex family is a vertex cloud with no faces, and its vertex
+payload starts at `+0x30 + 0x10` — which **is** `+0x40`, exactly where a
+polytope's plane descriptor sits. So `decodeConvexLike` read the first vertex's
+floats as the plane/face/index counts, got `nf` between 5,662 and 52,483, and
+tripped the sanity guard — which returns one line *before* `shape.verts = raw`.
+Every one decoded to 0 verts and 0 tris: invisible in the viewport, invisible to
+any geometry check, and not reported anywhere. `encodeShapeObject` then had no
+branch for a convex shape with no faces, so all 17 systems refused to assemble.
+
+This is the same aliasing the file already documents for spheres, never applied
+to the base class.
+
+Matched by **class name**, not by the descriptor: the tempting data-driven test
+("payload offset `0x10` means no polytope arrays") is byte-identical on
+`hknpSphereShape`, and a sphere whose four vertices differ is *meant* to reach
+the polytope tail. Keying on bytes would change 114 objects to fix 17. The
+sanity guard itself is untouched — it protects 6,075 polytopes.
+
+Measured on all 17 rather than assumed from one: **eleven have 8 vertices, not
+4**, storing each corner of a quad twice, so the vertices go back verbatim —
+de-duplicating would write 128 bytes where the file holds 192 and shift every
+offset after it.
+
+**Before: 839 packfiles, 810 byte-exact, 17 refused. After: 839, 827, 0.**
+810 + 17 = 827, and the 12 known-differing are still 12.
+
+### The encoder had no user
+
+`hknpEncodeSystem` reproduces those 810 packfiles — bodies, compounds,
+primitives, constraints, ragdoll skeletons — and was reachable **only from the
+CLI's own round-trip self-test**. The one production write went through
+`hknpEncodeCompressedMesh`, which flattens a system to one static body with one
+triangle mesh. So changing a compiled body's friction meant Decompile → edit →
+Compile, and losing everything else on the way.
+
+A compiled body is now edited **in place**: decode, change one modelled field,
+encode again. Nothing is decompiled, so every opaque region goes back as it came.
+
+Only what is genuinely *stored* is editable, and establishing that was most of
+the work — the compiled display is largely substitution (Motion System and
+Quality Type come from `hasMotion`, Penetration Depth is the literal 0.15,
+Keyframed and Wind are always false). Friction and restitution are stored; the
+filter is stored only when `hasStoredFilter`, because a layer of 0 is real and
+the decode substitutes 1 or 10 so the row reads usefully. Offering that
+substitution as editable would write the guess into the file.
+
+The guard before any edit is a byte comparison — the untouched decode is
+re-encoded and checked against disk, and one of the twelve known differing
+systems is refused rather than silently rewritten.
+
+`tests/spells/collision_compiled_edit.sh`, 7 checks. The last is the point:
+**one undo restores the byte-identical packfile.** An edit path that rewrites
+more than it was asked to passes the other six.
+
+### And the reason it all stayed hidden
+
+`decodeShapeSlot` keeps any `*Shape` class that has raw bytes and answers
+"decoded", so a shape contributing no geometry was indistinguishable from one
+that worked. There is now a `geometrylessShapes` report — deliberately separate
+from `unknownShapes`, which doubles as the switch disabling positional body
+attribution. It fires on 14 systems corpus-wide, all compressed meshes decoding
+to zero triangles, and `hknpConvexShape` is correctly absent.
+
+The Decompile and Compile warnings also stated a reason that is no longer true —
+the constraints, motor and skeleton "are not decoded". They decode and re-encode
+byte for byte (742/742 ragdoll constraints, 461/461 limited hinges, 75/75
+skeletons). What is missing is any NIF representation to carry them back.
+
 ## 2026-08-02f — The Block List menu gets a shape, and a harness finds two real bugs
 
 **A taxonomy separate from `page()`.** 46 top-level entries on a block row are

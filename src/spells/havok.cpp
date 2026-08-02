@@ -1744,11 +1744,25 @@ public:
 			&& qobject_cast<QApplication *>( QCoreApplication::instance() ) ) {
 			ragdollWarned = true;
 			if ( QMessageBox::warning( nullptr, tr( "Decompile Compiled Collision" ),
+					/* The warning stands; the REASON it used to give does not.
+					 *
+					 * It said the joint constraints, the motor and the skeleton copy
+					 * "are not decoded". They are, and they re-encode byte for byte —
+					 * 742/742 ragdoll constraints, 461/461 limited hinges and 75/75
+					 * skeletons over the Fallout 4 mesh tree. What is actually lost
+					 * is on the way BACK: Decompile writes no NIF blocks for any of
+					 * them, and Compile builds a single static body from triangles,
+					 * so nothing carries them across.
+					 */
 					tr( "This is a ragdoll (bhkRagdollSystem).\n\n"
 						"Its collision capsules decompile into editable per-bone bodies, but "
 						"NifSkope cannot compile a ragdoll back. The joint constraints, the "
-						"constraint motor and the ragdoll's own skeleton copy are not decoded, "
-						"so they would be lost on the way back.\n\n"
+						"constraint motor and the ragdoll's own skeleton copy decode correctly, "
+						"and nothing writes them into NIF blocks — so Decompile drops them and "
+						"Compile has nothing to rebuild them from.\n\n"
+						"To change a body's friction, restitution or collision filter, edit it "
+						"in place in the Collision Manager instead: that keeps the whole system "
+						"byte for byte.\n\n"
 						"Decompile anyway? Keep an unmodified copy of the file." ),
 					QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel )
 				!= QMessageBox::Yes )
