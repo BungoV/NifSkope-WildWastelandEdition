@@ -5156,8 +5156,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					{
 						QStringList rowMarks;
-						for ( QToolBar * tb : { skope->ui->tFile, skope->ui->tMode,
-												skope->ui->tRender, skope->ui->tLOD,
+						/* PER ROW, and there are two rows now.
+						 *
+						 * This used to concatenate five toolbars into one shape
+						 * string, on the belief that they were a single row. The
+						 * viewport toolbars moved into the footer under the 3D
+						 * view, so that belief is false and the concatenation
+						 * would be nonsense: a legitimate rule at the right end
+						 * of the footer would read as interior, and a legitimate
+						 * boundary at the true end of a row would trip the
+						 * ends-with check. It would have gone green or red for
+						 * reasons unrelated to what it measures.
+						 */
+						for ( QToolBar * tb : { skope->ui->tFile, skope->ui->tLOD,
 												skope->ui->tView } ) {
 							if ( !tb || !tb->isVisible() )
 								continue;
@@ -5181,6 +5192,32 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							!shape.startsWith( QLatin1Char( '|' ) ) );
 						check( "the row does not end with a rule",
 							!shape.endsWith( QLatin1Char( '|' ) ) );
+
+						QStringList footMarks;
+						for ( QToolBar * tb : { skope->ui->tMode, skope->ui->tRender } ) {
+							if ( !tb || !tb->isVisible() )
+								continue;
+							for ( QAction * a : tb->actions() ) {
+								auto * wa = qobject_cast<QWidgetAction *>( a );
+								QWidget * w = wa ? wa->defaultWidget() : nullptr;
+								if ( w && w->objectName() == QLatin1String( "wwGroupPad" ) )
+									continue;
+								if ( !a->isVisible() )
+									continue;
+								footMarks << ( a->isSeparator() ? QStringLiteral( "|" )
+																: QStringLiteral( "x" ) );
+							}
+						}
+						const QString foot = footMarks.join( QString() );
+						log << "footer shape: " << foot << "\n";
+						check( "the viewport footer has controls on it",
+							foot.contains( QLatin1Char( 'x' ) ) );
+						check( "no two footer rules are adjacent",
+							!foot.contains( QStringLiteral( "||" ) ) );
+						check( "the footer does not start with a rule",
+							!foot.startsWith( QLatin1Char( '|' ) ) );
+						check( "the footer does not end with a rule",
+							!foot.endsWith( QLatin1Char( '|' ) ) );
 					}
 
 					// --- every viewport mode draws a DIFFERENT icon --------------
@@ -9984,6 +10021,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// whole window for scene pixels.
 					for ( QDockWidget * dw : skope->findChildren<QDockWidget *>() )
 						dw->hide();
+					/* And the viewport footer, which is NOT a dock.
+					 *
+					 * It sits inside the central widget, directly under the GL
+					 * surface, so it takes its height out of the framebuffer for
+					 * the same reason the docks do - and the loop above cannot
+					 * see it. Left visible it shifts every baseline by the bar's
+					 * height and all seven turn into "size mismatch", which reads
+					 * as a rendering regression rather than a layout change.
+					 */
+					if ( skope->viewportFooter )
+						skope->viewportFooter->hide();
 					qApp->processEvents();
 				}
 
@@ -13966,13 +14014,19 @@ void NifSkope::initMenu()
 	// Disable without NIF loaded
 	ui->mRender->setEnabled( false );
 
-	// Populate Toolbars menu with all enabled toolbars
-	for ( QObject * o : children() ) {
-		QToolBar * tb = qobject_cast<QToolBar *>(o);
-		if ( tb && tb->objectName() != "tFile" ) {
-			// Do not add tFile to the list
+	/* Populate Toolbars with every toolbar, WHEREVER IT LIVES.
+	 *
+	 * findChildren, not children(): the latter walks direct children of the main
+	 * window only, and the mode and render toolbars are reparented into the
+	 * viewport footer, so they would silently drop off this list. That matters
+	 * more than it sounds - this submenu is the only way to bring a hidden
+	 * toolbar back, because QMainWindow's own toggle popup is unreachable here
+	 * (nifskope.cpp sets Qt::NoContextMenu and nothing overrides
+	 * createPopupMenu). Losing the entry makes hiding that bar permanent.
+	 */
+	for ( QToolBar * tb : findChildren<QToolBar *>() ) {
+		if ( tb->objectName() != "tFile" )		// tFile is the menu row itself
 			ui->mToolbars->addAction( tb->toggleViewAction() );
-		}
 	}
 
 	/* The Spells menu, kept — with Unfuck at the top of it.
@@ -15130,8 +15184,59 @@ void NifSkope::restoreUi()
 	 * also what preserves everyone's dock arrangement; throwing that away to fix
 	 * the order of two toolbars is the wrong trade.
 	 */
-	if ( ui->tMode && ui->tRender && toolBarArea( ui->tMode ) == toolBarArea( ui->tRender ) )
-		insertToolBar( ui->tRender, ui->tMode );
+	/* MOVE THE VIEWPORT TOOLBARS INTO THE FOOTER, under the 3D view.
+	 *
+	 * Done here, after restoreState, and not at construction: restoreState
+	 * replays a layout saved by an older build and would drag these two straight
+	 * back into the toolbar area. That is not a hypothesis - the toolbar REORDER
+	 * that used to live on this line failed silently for exactly that reason, the
+	 * constructor being right and the restore overwriting it a moment later.
+	 *
+	 * The QToolBar objects themselves are reused rather than replaced, so every
+	 * addWidget/addAction call site that built them stays valid and, more
+	 * importantly, so does syncViewportMenus - the mode-contextual show/hide
+	 * table works on the QActions those addWidget calls returned, and rebuilding
+	 * the bars would have invalidated all of them.
+	 *
+	 * removeToolBar first: it detaches from the toolbar area AND hides, so the
+	 * show() afterwards is required, not decorative.
+	 */
+	if ( viewportFooter && ui->tMode && ui->tRender ) {
+		auto * footerRow = qobject_cast<QHBoxLayout *>( viewportFooter->layout() );
+		if ( footerRow ) {
+			for ( QToolBar * tb : { ui->tMode, ui->tRender } ) {
+				removeToolBar( tb );
+				tb->setMovable( false );
+				tb->setFloatable( false );
+				tb->setIconSize( QSize( 16, 16 ) );
+				/* A QToolBar reports a tiny minimum because it is BUILT to
+				 * overflow into an extension menu, so a layout will happily
+				 * squeeze it and hide half its buttons behind a chevron. That is
+				 * exactly what happened on the first attempt: Add and Object
+				 * vanished off the end of the mode bar and the whole display
+				 * group off the render bar, silently, with the buttons still
+				 * "there" as far as any code could tell.
+				 *
+				 * Minimum = sizeHint stops the squeeze. Recomputed whenever the
+				 * mode changes the button set, below, because these bars grow and
+				 * shrink by design.
+				 */
+				tb->setSizePolicy( QSizePolicy::Minimum, QSizePolicy::Fixed );
+				tb->show();
+			}
+			/* The mode bar takes its natural width; the render bar takes the
+			 * slack. A stretch ITEM after both was the first attempt and it is
+			 * what caused the squeeze - it claimed all the spare width, leaving
+			 * the toolbars on their minimum, which for a QToolBar is "as small as
+			 * you like, I have a chevron". Giving the slack to a real widget
+			 * instead means neither is starved, and the render bar's own trailing
+			 * space is where the display group would sit if it were right
+			 * aligned.
+			 */
+			footerRow->addWidget( ui->tMode, 0 );
+			footerRow->addWidget( ui->tRender, 1 );
+		}
+	}
 
 	aSanitize->setChecked( settings.value( "File/Auto Sanitize", true ).toBool() );
 
@@ -15426,11 +15531,11 @@ void NifSkope::setToolbarSize()
 	 */
 	const QSize size = {16, 16};
 
-	for ( QObject * o : children() ) {
-		auto tb = qobject_cast<QToolBar *>(o);
-		if ( tb )
-			tb->setIconSize(size);
-	}
+	// findChildren for the same reason as the Toolbars menu above: the viewport
+	// footer's toolbars are not direct children and would keep the default icon
+	// size, so the bottom row would draw at a different scale from the top one.
+	for ( QToolBar * tb : findChildren<QToolBar *>() )
+		tb->setIconSize( size );
 }
 
 void NifSkope::setTheme( nstheme::WindowTheme t )

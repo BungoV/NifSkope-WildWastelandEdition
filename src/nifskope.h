@@ -653,6 +653,20 @@ private:
 	//! The main window
 	GLView * ogl;
 	QWidget * graphicsView;
+
+	/*! The row directly under the 3D view, holding the viewport's own controls.
+	 *
+	 *  Blender's viewport header, flipped to the bottom: the mode selector, the
+	 *  menus that mode governs, the transform widgets, and overlays/shading. The
+	 *  application topbar keeps what is not a viewport control - File, View,
+	 *  Spells, Options, Help, Workspaces - plus the three popups with no Blender
+	 *  counterpart.
+	 *
+	 *  Populated in restoreUi rather than at construction, because the toolbars
+	 *  that move into it must be taken out of the toolbar area AFTER
+	 *  QMainWindow::restoreState has replayed the saved layout.
+	 */
+	QWidget * viewportFooter = nullptr;
 	QTabBar * documentTabs = nullptr;
 	QList<NifSkope *> documentTabWindows;
 	bool sessionPreviewVisible = true;

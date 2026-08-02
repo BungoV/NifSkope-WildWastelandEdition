@@ -1489,8 +1489,44 @@ NifSkope::NifSkope( bool background )
 	// Init Scene and View
 	graphicsView = ogl->createWindowContainer( this );
 
-	// Set central widget and viewport
-	setCentralWidget( graphicsView );
+	/* The central area is the viewport WITH A FOOTER under it.
+	 *
+	 * Blender's 3D viewport carries its own header of editor-level controls -
+	 * mode, the mode's menus, the transform widgets, overlays and shading - kept
+	 * apart from the application topbar, and Blender lets that header sit at the
+	 * top of the viewport or be flipped to the bottom. This fork had all of it
+	 * fused into the window's top row, so a global menu and a transient viewport
+	 * tool sat at one visual level competing for the same eye.
+	 *
+	 * The central widget is a column now: the GL surface, then a footer row. The
+	 * footer is FILLED LATER, in restoreUi, by moving the mode and render
+	 * toolbars into it - after QMainWindow::restoreState has had its say, since
+	 * that replays a saved layout and would otherwise pull them back into the
+	 * toolbar area behind us.
+	 *
+	 * A real QHBoxLayout rather than a run of sibling toolbars in a QMainWindow
+	 * row, which is also what finally makes right-alignment possible: an
+	 * expanding spacer works in a layout this program owns, and did nothing when
+	 * the same controls were spread over five toolbars the main-window layout
+	 * sized independently.
+	 */
+	{
+		QWidget * central = new QWidget( this );
+		central->setObjectName( QStringLiteral( "ViewportCentral" ) );
+		QVBoxLayout * col = new QVBoxLayout( central );
+		col->setContentsMargins( 0, 0, 0, 0 );
+		col->setSpacing( 0 );
+		col->addWidget( graphicsView, 1 );
+
+		viewportFooter = new QWidget( central );
+		viewportFooter->setObjectName( QStringLiteral( "ViewportFooter" ) );
+		QHBoxLayout * footerRow = new QHBoxLayout( viewportFooter );
+		footerRow->setContentsMargins( 0, 0, 0, 0 );
+		footerRow->setSpacing( 0 );
+		col->addWidget( viewportFooter, 0 );
+
+		setCentralWidget( central );
+	}
 
 	setContextMenuPolicy( Qt::NoContextMenu );
 
