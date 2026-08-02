@@ -525,37 +525,11 @@ private:
 	bool committing = false;
 };
 
-static int propagateSceneObjectName( NifModel * nif, int nodeNumber,
-	const QString & oldName, const QString & newName )
-{
-	int fixes = 0;
-	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
-		QModelIndex block = nif->getBlockIndex( b );
-		if ( nif->blockInherits( block, "NiDefaultAVObjectPalette" ) ) {
-			QModelIndex objects = nif->getIndex( block, "Objs" );
-			for ( int row = 0; row < nif->rowCount( objects ); row++ ) {
-				QModelIndex object = nif->index( row, 0, objects );
-				bool matches = nif->getLink( object, "AV Object" ) == nodeNumber;
-				if ( !matches && !oldName.isEmpty() )
-					matches = nif->resolveString( object, "Name" ) == oldName;
-				if ( matches ) {
-					nif->assignString( object, "Name", newName );
-					fixes++;
-				}
-			}
-		} else if ( nif->blockInherits( block, "NiControllerSequence" ) ) {
-			QModelIndex controlled = nif->getIndex( block, "Controlled Blocks" );
-			for ( int row = 0; row < nif->rowCount( controlled ); row++ ) {
-				QModelIndex entry = nif->index( row, 0, controlled );
-				if ( !oldName.isEmpty() && nif->resolveString( entry, "Node Name" ) == oldName ) {
-					nif->assignString( entry, "Node Name", newName );
-					fixes++;
-				}
-			}
-		}
-	}
-	return fixes;
-}
+/* propagateSceneObjectName lived here and was identical, line for line, to
+ * tlPropagateNodeName in meshtools.cpp. Both are now wwPropagateNodeName,
+ * declared in spells/blocks.h — see there for why the palette is matched by
+ * link before name.
+ */
 
 static bool renameSceneObjectInline( NifModel * nif, const QModelIndex & block,
 	const QString & requestedName, QString * error, int * updatedReferences )
@@ -590,7 +564,7 @@ static bool renameSceneObjectInline( NifModel * nif, const QModelIndex & block,
 	int fixes = 0;
 	const bool saved = nifSnapshotOp( nif, QObject::tr( "Rename node to %1" ).arg( newName ), [&]() {
 		nif->assignString( block, "Name", newName );
-		fixes = propagateSceneObjectName( nif, nodeNumber, oldName, newName );
+		fixes = wwPropagateNodeName( nif, nodeNumber, oldName, newName );
 	} );
 	if ( !saved ) {
 		if ( error ) *error = QObject::tr( "The rename could not be added to the undo history." );

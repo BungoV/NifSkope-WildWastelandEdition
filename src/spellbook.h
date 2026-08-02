@@ -158,6 +158,20 @@ public:
 	 *  whatever guard it had.
 	 */
 	static bool confirmedByBook() { return bookConfirmed; }
+	/*! Whether this spell is driven programmatically and should build no menu entry.
+	 *
+	 *  For steps in a workflow that a dock owns. The Rigging Manager numbers and
+	 *  gates its four transfer steps — 1. Generate CustomizationRemapData through
+	 *  4. Transfer Weights — and casts them by id; the flat context submenu
+	 *  offered the same four unnumbered and ungated, so nothing stopped you
+	 *  running step 4 before step 1.
+	 *
+	 *  Registration is unaffected: SpellBook::lookup reads the registry, not the
+	 *  menu, so castSpell( "Rigging/…" ) keeps working. Only the QAction is not
+	 *  created, which also keeps them out of the command palette — correctly,
+	 *  since the palette runs entries in isolation and these are a sequence.
+	 */
+	virtual bool menuHidden() const { return false; }
 	//! Whether the spell shows up in block list instead of a context menu
 	virtual bool instant() const { return false; }
 	//! Whether the spell performs a sanitizing function

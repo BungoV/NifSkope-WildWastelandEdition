@@ -273,6 +273,10 @@ void SpellBook::checkActions( QMenu * menu )
 
 void SpellBook::newSpellRegistered( SpellPtr spell )
 {
+	// a dock's workflow step: registered and castable by id, but no menu entry
+	if ( spell->menuHidden() )
+		return;
+
 	QMenu * menu = nullptr;
 
 	/* Built from group(), not page(). group() is a '/'-separated PATH, so one

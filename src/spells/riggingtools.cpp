@@ -1008,6 +1008,9 @@ class spRiggingTransferWeights final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Transfer Weights (existing bones)..." ); }
+	// step 4 of the Rigging Manager's numbered transfer workflow: the dock
+	// orders and gates these, a flat menu did neither
+	bool menuHidden() const override { return true; }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
@@ -1264,6 +1267,9 @@ class spRiggingImportBoneNodes final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Import Donor Bone Nodes..." ); }
+	// step 2 of the Rigging Manager's numbered transfer workflow: the dock
+	// orders and gates these, a flat menu did neither
+	bool menuHidden() const override { return true; }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
@@ -1566,6 +1572,9 @@ class spRiggingBindExistingNodes final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Bind Donor Bones (existing nodes)..." ); }
+	// step 3 of the Rigging Manager's numbered transfer workflow: the dock
+	// orders and gates these, a flat menu did neither
+	bool menuHidden() const override { return true; }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
@@ -2771,6 +2780,9 @@ class spRiggingGenerateCustomizationRemapData final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Generate CustomizationRemapData" ); }
+	// step 1 of the Rigging Manager's numbered transfer workflow: the dock
+	// orders and gates these, a flat menu did neither
+	bool menuHidden() const override { return true; }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }

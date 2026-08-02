@@ -117,4 +117,23 @@ void delLink( NifModel * nif, const QModelIndex & iParent, QString array, int li
  */
 void blockLink( NifModel * nif, const QModelIndex & index, const QModelIndex & iBlock );
 
+/*! Follow a renamed NiAVObject through everything that refers to it BY NAME.
+ *
+ *  A scene object's name is not just a label: NiDefaultAVObjectPalette entries
+ *  and every NiControllerSequence's Controlled Blocks address nodes by string.
+ *  Rename the node alone and the animation silently stops binding to it.
+ *
+ *  Palette entries are matched by LINK first and only then by old name, because
+ *  the link is authoritative and still works on a palette whose names have
+ *  already drifted. Controlled blocks carry no link, so name is all there is.
+ *
+ *  There were two copies of this — one behind the F2 / double-click editor, one
+ *  behind the Rename (sync animation)… spell — and they were identical
+ *  line-for-line, which is the only reason merging them is a no-op rather than a
+ *  behaviour change. Two identical copies is one copy that has not drifted yet.
+ *
+ *  \return how many references were rewritten.
+ */
+int wwPropagateNodeName( NifModel * nif, int nodeNumber, const QString & oldName, const QString & newName );
+
 #endif // SP_BLOCKS_H

@@ -5392,6 +5392,59 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					} else {
 						log << "(no shader block in this file to test Open in against)\n";
 					}
+
+					/* ---- 11. one rename propagation, not two ----------------
+					 * The F2 editor and the Rename (sync animation)… spell had
+					 * a copy each. They were identical line for line, so the
+					 * merge is a no-op — but "identical" is the claim being
+					 * tested, and the thing that must keep working is that a
+					 * rename follows the node into the object palette AND into
+					 * every controller sequence that addresses it by name.
+					 */
+					int animNode = -1;
+					QString animOld;
+					for ( int b = 0; b < nif->getBlockCount() && animNode < 0; b++ ) {
+						const QModelIndex iSeq = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( iSeq, "NiControllerSequence" ) )
+							continue;
+						const QModelIndex iCB = nif->getIndex( iSeq, "Controlled Blocks" );
+						for ( int r = 0; r < nif->rowCount( iCB ); r++ ) {
+							const QString n = nif->resolveString( nif->index( r, 0, iCB ), "Node Name" );
+							if ( n.isEmpty() )
+								continue;
+							for ( int c = 0; c < nif->getBlockCount(); c++ )
+								if ( nif->blockInherits( nif->getBlockIndex( c ), "NiAVObject" )
+									&& nif->resolveString( nif->getBlockIndex( c ), "Name" ) == n ) {
+									animNode = c;
+									animOld = n;
+									break;
+								}
+							if ( animNode >= 0 )
+								break;
+						}
+					}
+					log << "animated node for the rename check: [" << animNode << "] '" << animOld << "'\n";
+					check( "the file has a node addressed by name from a sequence", animNode >= 0 );
+					if ( animNode >= 0 ) {
+						const QString fresh = animOld + QLatin1String( "_wwRenamed" );
+						const int fixed = wwPropagateNodeName( nif, animNode, animOld, fresh );
+						int seqHits = 0;
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							const QModelIndex iSeq = nif->getBlockIndex( b );
+							if ( !nif->blockInherits( iSeq, "NiControllerSequence" ) )
+								continue;
+							const QModelIndex iCB = nif->getIndex( iSeq, "Controlled Blocks" );
+							for ( int r = 0; r < nif->rowCount( iCB ); r++ )
+								if ( nif->resolveString( nif->index( r, 0, iCB ), "Node Name" ) == fresh )
+									seqHits++;
+						}
+						log << "wwPropagateNodeName rewrote " << fixed << " reference(s); "
+							<< seqHits << " controlled block(s) now name the new node\n";
+						check( "the shared propagation rewrites references", fixed > 0 );
+						check( "...including the controller sequence bindings", seqHits > 0 );
+						// put it back: this harness must not leave the model edited
+						wwPropagateNodeName( nif, animNode, fresh, animOld );
+					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";

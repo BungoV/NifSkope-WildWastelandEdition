@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "spellbook.h"
+#include "spells/blocks.h"
 #include "wwskin.h"
 #include "nifsnapshot.h"
 #include "message.h"
@@ -2225,7 +2226,7 @@ REGISTER_SPELL( spPasteMaterialSetup )
 
 
 //! Propagate a node's name to the object palette and controller-sequence blocks
-static int tlPropagateNodeName( NifModel * nif, int nodeNum, const QString & oldName, const QString & newName )
+int wwPropagateNodeName( NifModel * nif, int nodeNum, const QString & oldName, const QString & newName )
 {
 	int fixes = 0;
 	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
@@ -2303,7 +2304,7 @@ public:
 		int fixes = 0;
 		nifSnapshotOp( nif, Spell::tr( "Rename node to %1" ).arg( newName ), [&]() {
 			nif->assignString( iBlock, "Name", newName );
-			fixes = tlPropagateNodeName( nif, nodeNum, oldName, newName );
+			fixes = wwPropagateNodeName( nif, nodeNum, oldName, newName );
 		} );
 
 		if ( fixes > 0 )
