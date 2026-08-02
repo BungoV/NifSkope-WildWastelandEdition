@@ -1,0 +1,80 @@
+#!/bin/bash
+#
+# The Unfuck workspace — does it find, classify, colour, locate and repair?
+#
+# WHY THIS EXISTS
+#
+# The panel lists what is wrong with the open NIF. Five things can each be
+# quietly wrong and not one of them is visible from a screenshot: the scan can
+# find nothing, the severity can be flattened, the block number can fail to parse
+# out of the message, Go to can fail to move the selection, and a fix button can
+# be present but do nothing at all. That last one is not hypothetical — the
+# Repairs button shipped in one commit doing literally nothing, because
+# SpellBook::lookup matches on page() and every call site passed a bare name.
+#
+# THE FIXTURE HAS TO BE BROKEN ON PURPOSE
+#
+# This is the part worth stating. A stock FO4 effect mesh produces ZERO findings:
+#
+#   $ WW_UNFUCKPANEL_TEST=1 NifSkope ElectricalExplosionSmall.nif
+#   status: No issues found.    (268 blocks)
+#
+# which is not evidence the panel works, and running the harness on a clean file
+# is how you get three red checks that mean nothing. So the fixture is built here
+# rather than assumed: a texture path is rewritten to drop its file extension,
+# which spErrorInvalidPaths reports as an error against a named block.
+#
+# It also says something about coverage. The panel currently runs four checks —
+# three spChecker subclasses plus Check Links by name — so "everything wrong with
+# this file" is bounded by what those four look at, and on real Bethesda assets
+# that is usually nothing.
+#
+# NOTE ON PORTS: NifSkope exits silently if it cannot bind its IPC port, and on
+# this machine UDP above ~49152 is refused. Keep --port below that.
+#
+# USAGE
+#   bash tests/spells/unfuck_panel.sh
+
+set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+EXE="${EXE:-$ROOT/release/NifSkope.exe}"
+SRC="${SRC:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/Effects/ElectricalExplosionSmall.nif}"
+PORT="${PORT:-45893}"
+LOG="$ROOT/release/ww_unfuckpanel_test.log"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+[ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
+[ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
+
+winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
+
+# --- build the broken fixture ----------------------------------------------
+# The first BSEffectShaderProperty in the file, whatever number it happens to be,
+# so this does not rot if the asset is replaced.
+SHADER="$("$EXE" -no-gui list "$(winpath "$SRC")" 2>/dev/null \
+	| sed -n 's/^\[\([0-9]*\)\] BSEffectShaderProperty *$/\1/p' | head -1)"
+[ -n "$SHADER" ] || { echo "no BSEffectShaderProperty in $SRC"; exit 2; }
+
+ORIG="$("$EXE" -no-gui get "$(winpath "$SRC")" -b "$SHADER" -f "Source Texture" 2>/dev/null | tr -d '\r')"
+[ -n "$ORIG" ] || { echo "block $SHADER has no Source Texture"; exit 2; }
+BROKEN="${ORIG%.dds}"
+[ "$BROKEN" != "$ORIG" ] || { echo "Source Texture is not a .dds: $ORIG"; exit 2; }
+
+echo "fixture: block $SHADER Source Texture"
+echo "  '$ORIG'"
+echo "  -> '$BROKEN'   (extension removed, so spErrorInvalidPaths reports it)"
+
+"$EXE" -no-gui set "$(winpath "$SRC")" -b "$SHADER" -f "Source Texture" -v "$BROKEN" \
+	-o "$(winpath "$TMP/broken.nif")" > /dev/null 2>&1
+[ -s "$TMP/broken.nif" ] || { echo "could not write the broken fixture"; exit 2; }
+
+# --- run the panel ----------------------------------------------------------
+rm -f "$LOG"
+WW_UNFUCKPANEL_TEST=1 "$EXE" --port "$PORT" "$(winpath "$TMP/broken.nif")" > /dev/null 2>&1
+
+[ -f "$LOG" ] || { echo "harness produced no log"; exit 1; }
+echo
+cat "$LOG"
+
+grep -q '^PASS' "$LOG"
