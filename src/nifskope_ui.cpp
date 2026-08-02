@@ -5004,22 +5004,40 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						if ( !a->isSeparator() )
 							viewItems << a->text().remove( QLatin1Char( '&' ) );
 					log << "View menu: " << viewItems.join( QStringLiteral( ", " ) ) << "\n";
-					check( "and it is the VIEWPORT one, not the retired dock menu",
+					/* It is BOTH now, and that is the point.
+					 *
+					 * The discriminator used to be "View does not contain
+					 * Toolbars", which separated the viewport menu from the
+					 * retired dock menu. Then the Panels dropdown was folded in
+					 * here, so View legitimately holds Toolbars and the negative
+					 * became false for the right reason. Asserting both halves
+					 * instead: the view directions it was renamed for, and the
+					 * panel toggles it absorbed.
+					 */
+					check( "and it holds the view directions",
 						viewItems.contains( QStringLiteral( "Top" ) )
-						&& viewItems.contains( QStringLiteral( "Front" ) )
-						&& !viewItems.contains( QStringLiteral( "Toolbars" ) ) );
+						&& viewItems.contains( QStringLiteral( "Front" ) ) );
+					check( "and the panel toggles it absorbed",
+						viewItems.contains( QStringLiteral( "Toolbars" ) )
+						&& viewItems.contains( QStringLiteral( "NIF Browser" ) ) );
 					check( "Frame Selected came across from the toolbar glyph",
 						std::any_of( viewItems.cbegin(), viewItems.cend(),
 							[]( const QString & t ) { return t.startsWith( QStringLiteral( "Frame Selected" ) ); } ) );
 
-					// --- the Panels button is findable by name ------------------
-					// it had NO objectName at all, unlike every sibling on the row
-					auto * panelsBtn = skope->findChild<QToolButton *>(
-						QStringLiteral( "ViewPanelsButton" ) );
-					check( "the Panels button can be found by name", panelsBtn != nullptr );
-					if ( !panelsBtn ) break;
-					QMenu * panels = panelsBtn->menu();
-					check( "it has a menu", panels != nullptr );
+					/* --- the panel toggles live in the View menu ---------------
+					 *
+					 * The Panels dropdown is gone: panel toggles are a View-menu
+					 * subject, which is where Blender keeps Sidebar and Tool
+					 * Settings, and a dedicated button for them was one more
+					 * label on a row that had just been trimmed. Everything it
+					 * carried has to still be reachable, which is what the rest
+					 * of this section checks.
+					 */
+					check( "the Panels button is gone from the row",
+						skope->findChild<QToolButton *>(
+							QStringLiteral( "ViewPanelsButton" ) ) == nullptr );
+					QMenu * panels = skope->ui->mRender;
+					check( "the View menu exists to hold them", panels != nullptr );
 					if ( !panels ) break;
 
 					const QStringList top = textsOf( panels );
@@ -5209,8 +5227,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							}
 						}
 						const QString foot = footMarks.join( QString() );
-						log << "footer shape: " << foot << "\n";
-						check( "the viewport footer has controls on it",
+						log << "header shape: " << foot << "\n";
+						check( "the viewport header has controls on it",
 							foot.contains( QLatin1Char( 'x' ) ) );
 						check( "no two footer rules are adjacent",
 							!foot.contains( QStringLiteral( "||" ) ) );
@@ -10021,7 +10039,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// whole window for scene pixels.
 					for ( QDockWidget * dw : skope->findChildren<QDockWidget *>() )
 						dw->hide();
-					/* And the viewport footer, which is NOT a dock.
+					/* And the viewport header, which is NOT a dock.
 					 *
 					 * It sits inside the central widget, directly under the GL
 					 * surface, so it takes its height out of the framebuffer for
@@ -10030,8 +10048,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * height and all seven turn into "size mismatch", which reads
 					 * as a rendering regression rather than a layout change.
 					 */
-					if ( skope->viewportFooter )
-						skope->viewportFooter->hide();
+					if ( skope->viewportHeader )
+						skope->viewportHeader->hide();
 					qApp->processEvents();
 				}
 
@@ -13722,19 +13740,18 @@ void NifSkope::initDockWidgets()
 		 * the controls with no Blender counterpart, gathered at the trailing
 		 * end - and ruling between them said they were three separate things.
 		 */
-		{ QWidget * g = new QWidget( ui->tView ); g->setFixedWidth( 8 );
-		  ui->tView->addWidget( g ); }
-		QToolButton * btn = new QToolButton( this );
-		btn->setPopupMode( QToolButton::InstantPopup );
-		btn->setText( tr( "Panels" ) );
-		btn->setIcon( tlMakeIcon( QStringLiteral( "panel" ), QColor( wwSkinColor( "text" ) ) ) );
-		btn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
-		btn->setAutoRaise( false );
-		btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
-		btn->setToolTip( tr( "Show and hide panels, toolbars, and how the block views display" ) );
-		btn->setObjectName( QStringLiteral( "ViewPanelsButton" ) );
-		QMenu * m = new QMenu( btn );
-		m->setObjectName( QStringLiteral( "ViewPanelsMenu" ) );
+		/* THE PANELS BUTTON IS GONE; all of it is in the View menu.
+		 *
+		 * Panel toggles are a View-menu subject - Blender keeps Sidebar, Tool
+		 * Settings and Adjust Last Operation there - and a dedicated dropdown for
+		 * them was one more labelled button on a row that had just been trimmed
+		 * to the things a viewport actually needs.
+		 *
+		 * The menu it filled is now the View menu itself, so `m` is that menu and
+		 * everything below adds to it unchanged.
+		 */
+		QMenu * m = ui->mRender;
+		m->addSeparator();
 		for ( QDockWidget * dw : { dList, dTree, dHeader, dBrowser, dInsp, dKfm, dRefr } ) {
 			m->addAction( dw->toggleViewAction() );
 			ui->tView->removeAction( dw->toggleViewAction() );
@@ -13782,17 +13799,13 @@ void NifSkope::initDockWidgets()
 		m->addMenu( ui->menuBlock_List );
 		m->addMenu( ui->menuBlock_Details );
 
-		btn->setMenu( m );
-		// Added AFTER the Workspaces button, below — bungo wants Panels to its
-		// right. It is built here because Workspaces copies its stylesheet.
-
 		QToolButton * workspaces = new QToolButton( this );
 		workspaces->setPopupMode( QToolButton::InstantPopup );
 		workspaces->setText( tr( "Workspaces" ) );
 		workspaces->setIcon( tlMakeIcon( QStringLiteral( "workspace" ), QColor( wwSkinColor( "text" ) ) ) );
 		workspaces->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		workspaces->setAutoRaise( false );
-		workspaces->setStyleSheet( btn->styleSheet() );
+		workspaces->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
 		workspaces->setToolTip( tr( "Switch the active task workspace" ) );
 		// Named for the same reason Panels now is: it was the other button on the
 		// row with no objectName, so nothing could find it.
@@ -13974,7 +13987,7 @@ void NifSkope::initDockWidgets()
 		 * where the controls with no Blender counterpart are gathered.
 		 */
 		ui->tFile->addWidget( workspaces );
-		ui->tView->addWidget( btn );			// Panels, trailing group
+
 
 		// Keep the menu's active-workspace marker truthful: derive it from which
 		// manager dock is actually visible (a dock closed via its own X, or the
@@ -15201,9 +15214,9 @@ void NifSkope::restoreUi()
 	 * removeToolBar first: it detaches from the toolbar area AND hides, so the
 	 * show() afterwards is required, not decorative.
 	 */
-	if ( viewportFooter && ui->tMode && ui->tRender ) {
-		auto * footerRow = qobject_cast<QHBoxLayout *>( viewportFooter->layout() );
-		if ( footerRow ) {
+	if ( viewportHeader && ui->tMode && ui->tRender ) {
+		auto * headerRow = qobject_cast<QHBoxLayout *>( viewportHeader->layout() );
+		if ( headerRow ) {
 			for ( QToolBar * tb : { ui->tMode, ui->tRender } ) {
 				removeToolBar( tb );
 				tb->setMovable( false );
@@ -15233,8 +15246,8 @@ void NifSkope::restoreUi()
 			 * space is where the display group would sit if it were right
 			 * aligned.
 			 */
-			footerRow->addWidget( ui->tMode, 0 );
-			footerRow->addWidget( ui->tRender, 1 );
+			headerRow->addWidget( ui->tMode, 0 );
+			headerRow->addWidget( ui->tRender, 1 );
 		}
 	}
 

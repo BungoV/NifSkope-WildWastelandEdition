@@ -666,7 +666,7 @@ private:
 	 *  that move into it must be taken out of the toolbar area AFTER
 	 *  QMainWindow::restoreState has replayed the saved layout.
 	 */
-	QWidget * viewportFooter = nullptr;
+	QWidget * viewportHeader = nullptr;
 	QTabBar * documentTabs = nullptr;
 	QList<NifSkope *> documentTabWindows;
 	bool sessionPreviewVisible = true;

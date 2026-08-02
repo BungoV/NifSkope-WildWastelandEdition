@@ -1498,11 +1498,11 @@ NifSkope::NifSkope( bool background )
 	 * fused into the window's top row, so a global menu and a transient viewport
 	 * tool sat at one visual level competing for the same eye.
 	 *
-	 * The central widget is a column now: the GL surface, then a footer row. The
-	 * footer is FILLED LATER, in restoreUi, by moving the mode and render
-	 * toolbars into it - after QMainWindow::restoreState has had its say, since
-	 * that replays a saved layout and would otherwise pull them back into the
-	 * toolbar area behind us.
+	 * The central widget is a column now: the header row, then the GL surface -
+	 * header ABOVE the view, which is where Blender puts it by default. It is
+	 * FILLED LATER, in restoreUi, by moving the mode and render toolbars into it,
+	 * after QMainWindow::restoreState has had its say, since that replays a saved
+	 * layout and would otherwise pull them back into the toolbar area behind us.
 	 *
 	 * A real QHBoxLayout rather than a run of sibling toolbars in a QMainWindow
 	 * row, which is also what finally makes right-alignment possible: an
@@ -1516,14 +1516,15 @@ NifSkope::NifSkope( bool background )
 		QVBoxLayout * col = new QVBoxLayout( central );
 		col->setContentsMargins( 0, 0, 0, 0 );
 		col->setSpacing( 0 );
-		col->addWidget( graphicsView, 1 );
+		// header FIRST, then the view: Blender's default position for it
+		viewportHeader = new QWidget( central );
+		viewportHeader->setObjectName( QStringLiteral( "ViewportHeader" ) );
+		QHBoxLayout * headerRow = new QHBoxLayout( viewportHeader );
+		headerRow->setContentsMargins( 0, 0, 0, 0 );
+		headerRow->setSpacing( 0 );
+		col->addWidget( viewportHeader, 0 );
 
-		viewportFooter = new QWidget( central );
-		viewportFooter->setObjectName( QStringLiteral( "ViewportFooter" ) );
-		QHBoxLayout * footerRow = new QHBoxLayout( viewportFooter );
-		footerRow->setContentsMargins( 0, 0, 0, 0 );
-		footerRow->setSpacing( 0 );
-		col->addWidget( viewportFooter, 0 );
+		col->addWidget( graphicsView, 1 );
 
 		setCentralWidget( central );
 	}
