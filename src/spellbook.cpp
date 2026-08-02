@@ -269,22 +269,70 @@ void SpellBook::newSpellRegistered( SpellPtr spell )
 	act->setToolTip( spell->hint() );
 	Map.insert( act, spell );
 
-	// Transform and Block are the two structural editing categories. Keep
-	// Block directly below Transform regardless of static spell registration
-	// order, while leaving every other category in its established order.
-	QAction * transformPage = nullptr;
-	QAction * blockPage = nullptr;
-	for ( QAction * pageAction : actions() ) {
-		if ( pageAction->menu() && pageAction->menu()->title() == tr( "Transform" ) ) transformPage = pageAction;
-		else if ( pageAction->menu() && pageAction->menu()->title() == tr( "Block" ) ) blockPage = pageAction;
+	orderPages();
+}
+
+/*! Put the submenus in a DECLARED order rather than in link order.
+ *
+ *  Submenus are created the first time a spell on that page registers, so the
+ *  top-level order of this menu was an artefact of the order the object files
+ *  happen to be listed in NifSkope.pro. Reordering SOURCES silently reordered
+ *  the user's context menu.
+ *
+ *  This replaces a hardcoded special case that did the same thing for exactly
+ *  two pages — hoisting Block to sit directly under Transform — with the same
+ *  remove-then-insert logic walked over a list. Pages not named here keep their
+ *  established relative order, after the named ones, so adding a page does not
+ *  require touching this table.
+ *
+ *  Deliberately ORDER only. Nothing here renames a page or moves a spell between
+ *  pages: `page()` is overloaded five ways across this codebase — submenu label,
+ *  CLI namespace, Unfuck membership, undo-prompt exemption and the `batch()`
+ *  model-signal switch — so changing those strings changes four unrelated
+ *  behaviours. Membership is a separate change from ordering, and this is the
+ *  ordering half.
+ */
+void SpellBook::orderPages()
+{
+	static const char * const pageOrder[] = {
+		"Transform", "Block", "Node", "Mesh", "Havok", "Animation",
+		"Material", "Texture", "Shader", "Optimize", "Sanitize", "Error Checking",
+	};
+
+	// walk backwards, inserting each named page in front of the one after it, so
+	// a single pass leaves them in the declared sequence
+	QAction * anchor = nullptr;
+	for ( int i = int( std::size( pageOrder ) ) - 1; i >= 0; i-- ) {
+		QAction * found = nullptr;
+		for ( QAction * a : actions() )
+			if ( a->menu() && a->menu()->title() == tr( pageOrder[i] ) ) { found = a; break; }
+		if ( !found )
+			continue;
+		removeAction( found );
+		if ( anchor )
+			insertAction( anchor, found );
+		else
+			addAction( found );
+		anchor = found;
 	}
-	if ( transformPage && blockPage ) {
-		QList<QAction *> top = actions();
-		int transformIndex = top.indexOf( transformPage );
-		removeAction( blockPage );
-		top = actions();
-		QAction * before = ( transformIndex + 1 < top.size() ) ? top.at( transformIndex + 1 ) : nullptr;
-		if ( before ) insertAction( before, blockPage ); else addAction( blockPage );
+
+	/* The named pages are now in order but sitting at the BOTTOM, because each
+	 * removeAction/addAction pair moved them past everything unnamed. One more
+	 * pass lifts the whole run to the front, which is where the structural
+	 * categories belong.
+	 */
+	if ( anchor ) {
+		QList<QAction *> named;
+		for ( const char * name : pageOrder )
+			for ( QAction * a : actions() )
+				if ( a->menu() && a->menu()->title() == tr( name ) ) { named.append( a ); break; }
+		QAction * first = actions().isEmpty() ? nullptr : actions().first();
+		if ( first && !named.contains( first ) ) {
+			for ( QAction * a : named ) {
+				removeAction( a );
+				insertAction( first, a );
+			}
+		}
 	}
 }
 

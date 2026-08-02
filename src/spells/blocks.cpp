@@ -1476,20 +1476,30 @@ void setBlockListSelection( const QList<qint32> & blocks )
 	blockListSelection = blocks;
 }
 
-QModelIndex spCopyBranch::cast( NifModel * nif, const QModelIndex & index )
+/*! The blocks a branch spell should actually act on.
+ *
+ *  A spell is handed ONE index by the menu, so without this every branch
+ *  operation silently ignored the rest of a multi-selection. Copy Branch already
+ *  consulted the selection; Remove Branch and Duplicate Branch did not, so
+ *  selecting five nodes and pressing Ctrl+Delete removed one of them and left
+ *  the other four selected and untouched. The menu said "Remove Branch" either
+ *  way, which is the menu lying about its scope.
+ *
+ *  The selection only counts when the clicked block is part of it. Right-clicking
+ *  a block OUTSIDE the current selection is a fresh target, not an addition to
+ *  it, which is how every file manager behaves.
+ */
+QList<qint32> spellSelectionRoots( const NifModel * nif, const QModelIndex & index )
 {
 	const qint32 cur = nif->getBlockNumber( index );
-
-	// If the Block List has several blocks selected and this cast is on one of
-	// them, copy the union of every selected block's branch; otherwise copy just
-	// this one branch (the classic single-block behaviour).
-	QList<qint32> roots;
 	if ( blockListSelection.size() > 1 && blockListSelection.contains( cur ) )
-		roots = blockListSelection;
-	else
-		roots.append( cur );
+		return blockListSelection;
+	return QList<qint32>{ cur };
+}
 
-	copyBlockBranchesToClipboard( nif, roots );
+QModelIndex spCopyBranch::cast( NifModel * nif, const QModelIndex & index )
+{
+	copyBlockBranchesToClipboard( nif, spellSelectionRoots( nif, index ) );
 	return index;
 }
 
@@ -1713,6 +1723,16 @@ REGISTER_SPELL( spPasteBranch2 )
 // definitions for spRemoveBranch moved to blocks.h
 QString spRemoveBranch::destructiveWarning( NifModel * nif, const QModelIndex & index ) const
 {
+	const QList<qint32> roots = spellSelectionRoots( nif, index );
+	if ( roots.size() > 1 ) {
+		int total = 0;
+		for ( qint32 r : roots )
+			total += countOwnedBranch( nif, r );
+		// the count is what makes this decidable, and it is not the number of
+		// rows the user highlighted -- branches bring their children with them
+		return Spell::tr( "Remove %1 selected branches — %2 blocks in all?" )
+			.arg( roots.size() ).arg( total );
+	}
 	const int n = countOwnedBranch( nif, nif->getBlockNumber( index ) );
 	return n > 1
 		? Spell::tr( "Remove %1 and the %2 blocks below it?" )
@@ -1728,9 +1748,24 @@ bool spRemoveBranch::isApplicable( const NifModel * nif, const QModelIndex & iBl
 
 QModelIndex spRemoveBranch::cast( NifModel * nif, const QModelIndex & index )
 {
-	QPersistentModelIndex iBlock = index;
-	removeChildren( nif, iBlock );
-	nif->removeNiBlock( nif->getBlockNumber( iBlock ) );
+	/* Persistent indices for every root BEFORE removing any of them.
+	 *
+	 * Removing a block renumbers everything after it, so a list of block NUMBERS
+	 * collected up front points at the wrong blocks by the second iteration.
+	 * QPersistentModelIndex is what survives that.
+	 */
+	QVector<QPersistentModelIndex> targets;
+	for ( qint32 r : spellSelectionRoots( nif, index ) )
+		if ( nif->isValidBlockNumber( r ) )
+			targets.append( QPersistentModelIndex( nif->getBlockIndex( r ) ) );
+
+	for ( const QPersistentModelIndex & t : targets ) {
+		if ( !t.isValid() )
+			continue;			// already taken as a child of an earlier root
+		QPersistentModelIndex iBlock( t );
+		removeChildren( nif, iBlock );
+		nif->removeNiBlock( nif->getBlockNumber( iBlock ) );
+	}
 	return QModelIndex();
 }
 
@@ -2151,6 +2186,32 @@ bool spDuplicateBranch::isApplicable( const NifModel * nif, const QModelIndex & 
 
 QModelIndex spDuplicateBranch::cast( NifModel * nif, const QModelIndex & index )
 {
+	/* One branch at a time, but every SELECTED branch.
+	 *
+	 * The body below duplicates a single branch through a clipboard round-trip
+	 * and a parent-name map, and generalising it to several roots at once would
+	 * mean rewriting that map. Recursing per root is the same result with no new
+	 * machinery: each duplicate is independent anyway. Persistent indices,
+	 * because each duplication inserts blocks and renumbers what follows.
+	 */
+	const QList<qint32> roots = spellSelectionRoots( nif, index );
+	if ( roots.size() > 1 ) {
+		QVector<QPersistentModelIndex> targets;
+		for ( qint32 r : roots )
+			if ( nif->isValidBlockNumber( r ) )
+				targets.append( QPersistentModelIndex( nif->getBlockIndex( r ) ) );
+		QModelIndex last;
+		for ( const QPersistentModelIndex & t : targets ) {
+			if ( !t.isValid() )
+				continue;
+			// single-root path: spellSelectionRoots returns just this block
+			// because the clicked index is no longer the multi-selection anchor
+			blockListSelection.clear();
+			last = cast( nif, QModelIndex( t ) );
+		}
+		return last;
+	}
+
 	// from spCopyBranch
 	QList<qint32> blocks;
 	populateBlocks( blocks, nif, nif->getBlockNumber( index ) );

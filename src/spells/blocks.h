@@ -83,9 +83,13 @@ public:
 //! onto the clipboard in the branch format that spPasteBranch consumes.
 bool copyBlockBranchesToClipboard( NifModel * nif, const QList<qint32> & roots );
 
-//! Publish the Block List's current multi-selection (block numbers) so the Copy
-//! Branch spell can union every selected block's branch. Call on selection change.
+//! Publish the Block List's current multi-selection (block numbers) so the branch
+//! spells can act on every selected block. Call on selection change.
 void setBlockListSelection( const QList<qint32> & blocks );
+
+//! The blocks a branch spell should act on: the multi-selection when the clicked
+//! block is part of it, otherwise just the clicked block.
+QList<qint32> spellSelectionRoots( const NifModel * nif, const QModelIndex & index );
 
 //! Add a link to the specified block to a link array
 /*!

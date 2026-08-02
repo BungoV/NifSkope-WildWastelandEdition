@@ -215,6 +215,8 @@ protected:
 	QMap<QAction *, SpellPtr> Map;
 
 	void newSpellRegistered( SpellPtr spell );
+	//! Reorder the submenus into the declared page order (see orderPages in the .cpp)
+	void orderPages();
 	void checkActions( QMenu * menu, const QString & page );
 
 private:

@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
 #include "spellbook.h"
+#include "spells/blocks.h"
 #include "spells/normaltransfer.h"
 #include "wwskin.h"
 #include "skeletontools.h"
@@ -4714,6 +4715,92 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_MULTISEL_TEST=1): do the branch spells honour a
+	 * multi-selection, or only the one block they were handed?
+	 *
+	 * A spell receives ONE index from the menu, so a multi-selection reaches it
+	 * only through blockListSelection. Copy Branch consulted it; Remove Branch
+	 * and Duplicate Branch did not -- so selecting five nodes and pressing
+	 * Ctrl+Delete removed one and left the other four selected and untouched,
+	 * under a menu entry that said "Remove Branch" either way.
+	 *
+	 * Two halves, and the second is what stops the fix being a one-way ratchet:
+	 * a multi-selection removes every branch in it, AND a click outside the
+	 * selection still removes only the block clicked. An implementation that
+	 * always used the selection passes the first and destroys work on the second.
+	 * Log: release/ww_multisel_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_MULTISEL_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_multisel_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif ) { log << "no model\n"; break; }
+
+					// childless blocks, so each removal takes exactly one block
+					// and the arithmetic below is exact
+					QList<qint32> leaves;
+					for ( int b = 1; b < nif->getBlockCount() && leaves.size() < 3; b++ )
+						if ( nif->isNiBlock( nif->getBlockIndex( b ) )
+							&& nif->getChildLinks( b ).isEmpty() )
+							leaves.append( b );
+					log << "leaf blocks found: " << leaves.size() << "\n";
+					check( "the file has leaf blocks to remove", leaves.size() >= 3 );
+					if ( leaves.size() < 3 ) break;
+
+					// --- a selection of two: BOTH must go ---------------------
+					const int before = nif->getBlockCount();
+					QList<qint32> pick{ leaves.at( 0 ), leaves.at( 1 ) };
+					setBlockListSelection( pick );
+					spRemoveBranch rm;
+					rm.cast( nif, nif->getBlockIndex( pick.first() ) );
+					QApplication::processEvents();
+					const int afterMulti = nif->getBlockCount();
+					log << "2-block selection removed: " << before << " -> " << afterMulti
+						<< " (wanted " << before - 2 << ")\n";
+					check( "a multi-selection removes every branch in it",
+						afterMulti == before - 2 );
+
+					// --- a click OUTSIDE the selection: only that one ---------
+					QList<qint32> fresh;		// renumbered by the removal above
+					for ( int b = 1; b < nif->getBlockCount() && fresh.size() < 3; b++ )
+						if ( nif->isNiBlock( nif->getBlockIndex( b ) )
+							&& nif->getChildLinks( b ).isEmpty() )
+							fresh.append( b );
+					if ( fresh.size() < 3 ) { log << "not enough leaves left\n"; break; }
+					setBlockListSelection( QList<qint32>{ fresh.at( 0 ), fresh.at( 1 ) } );
+					const int before2 = nif->getBlockCount();
+					rm.cast( nif, nif->getBlockIndex( fresh.at( 2 ) ) );	// not selected
+					QApplication::processEvents();
+					log << "one unselected block removed: " << before2 << " -> "
+						<< nif->getBlockCount() << " (wanted " << before2 - 1 << ")\n";
+					check( "clicking outside the selection removes only that block",
+						nif->getBlockCount() == before2 - 1 );
+
+					setBlockListSelection( QList<qint32>() );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* NOT HARNESSED: the Collision Manager's live editors (WW_COLLUNDO_TEST,
 	 * attempted and removed).
 	 *
@@ -4900,10 +4987,63 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					QWidget * vp = ogl->graphicsView;
 					if ( !vp ) { log << "no viewport container\n"; break; }
-					QCursor::setPos( vp->mapToGlobal( vp->rect().center() ) );
+					/* Retry, and FAIL if it never lands.
+					 *
+					 * A single setPos is not reliable: under load the window may
+					 * not be laid out yet, so mapToGlobal returns a position that
+					 * is not actually over the widget. When that happened the four
+					 * checks below still passed — because with the pointer outside,
+					 * the branch that steals '.' never fires, so even the BROKEN
+					 * build looks fixed. Caught by the shell script's precondition
+					 * grep, which is exactly the kind of green-for-the-wrong-reason
+					 * this run has produced twice now, so the harness asserts it
+					 * itself rather than leaving it to the caller.
+					 */
+					// the window has to be on screen before its coordinates mean
+					// anything: a hidden or unmapped widget maps to a point setPos
+					// then clamps away, and the check silently reads false
+					skope->show();
+					skope->raise();
 					QApplication::processEvents();
-					log << "pointer over viewport: "
-						<< vp->rect().contains( vp->mapFromGlobal( QCursor::pos() ) ) << "\n";
+
+					/* MOVE THE WINDOW TO THE POINTER, not the pointer to the window.
+					 *
+					 * QCursor::setPos is a no-op on Windows when the calling
+					 * process is not the foreground window, and a headless test run
+					 * never is. Measured: setPos(2719,536) left the cursor at
+					 * (611,707) on all ten attempts, so the harness reported
+					 * "pointer over viewport: 0" and — before the check above
+					 * existed — passed all four of its real assertions anyway,
+					 * because with the pointer outside, the branch that steals '.'
+					 * never fires and even a broken build looks fixed.
+					 *
+					 * Repositioning the window needs no foreground rights and is
+					 * exact.
+					 */
+					bool overViewport = false;
+					for ( int attempt = 0; attempt < 10 && !overViewport; attempt++ ) {
+						const QPoint cursor = QCursor::pos();
+						const QPoint centre = vp->mapToGlobal( vp->rect().center() );
+						if ( centre != cursor )
+							skope->move( skope->pos() + ( cursor - centre ) );
+						QApplication::processEvents();
+						overViewport = vp->rect().contains( vp->mapFromGlobal( QCursor::pos() ) );
+						if ( attempt == 0 || !overViewport )
+							log << "  attempt " << attempt << ": viewport " << vp->width() << "x"
+								<< vp->height() << ", cursor (" << cursor.x() << "," << cursor.y()
+								<< "), viewport centre (" << centre.x() << "," << centre.y()
+								<< ") -> over = " << overViewport << "\n";
+						if ( !overViewport ) {
+							QEventLoop wait;
+							QTimer::singleShot( 150, &wait, &QEventLoop::quit );
+							wait.exec();
+						}
+					}
+					log << "pointer over viewport: " << overViewport << "\n";
+					check( "the pointer is over the viewport (or nothing below is tested)",
+						overViewport );
+					if ( !overViewport )
+						break;
 
 					if ( !ogl->startModalTransform( 1 ) ) {
 						log << "startModalTransform refused\n"; break;
@@ -11858,6 +11998,30 @@ void NifSkope::initMenu()
 							SpellBook::lookup( QStringLiteral( "Sanitize/Collapse Link Arrays" ) );
 						check( "SpellBook puts the hint on the menu action",
 							collapse && !wired.isEmpty() && wired == collapse->hint() );
+
+						/* The submenu order is DECLARED, not inherited from link order.
+						 *
+						 * A page's submenu is created the first time a spell on it
+						 * registers, so this menu's top-level order used to be an
+						 * artefact of the order object files appear in NifSkope.pro:
+						 * reordering SOURCES silently reordered the user's context
+						 * menu. Asserting the declared sequence is what stops that
+						 * being reintroduced without a red test.
+						 */
+						QStringList pageTitles;
+						for ( QAction * a : probe.actions() )
+							if ( a->menu() )
+								pageTitles << a->menu()->title();
+						log << "page order: " << pageTitles.join( QStringLiteral( ", " ) ) << "\n";
+						auto ordered = [&]( const char * x, const char * y ) {
+							const int i = pageTitles.indexOf( QLatin1String( x ) );
+							const int j = pageTitles.indexOf( QLatin1String( y ) );
+							return i >= 0 && j >= 0 && i < j;
+						};
+						check( "Transform leads, then Block, then Node",
+							ordered( "Transform", "Block" ) && ordered( "Block", "Node" ) );
+						check( "the checking pages come last",
+							ordered( "Mesh", "Sanitize" ) && ordered( "Sanitize", "Error Checking" ) );
 
 						/* Unfuck opens the WORKSPACE, and there is no longer a second
 						 * one. This used to trigger a modal dialog, screenshot it and
