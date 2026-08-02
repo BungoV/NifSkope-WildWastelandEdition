@@ -11358,40 +11358,8 @@ void NifSkope::initMenu()
 		 * menu too, and is the better long-term home; a table here is a smaller
 		 * blast radius for now and reads identically.
 		 */
-		static const struct { const char * spell; const char * blurb; } unfuckBlurbs[] = {
-			{ "Reorder Link Arrays",
-			  "Sorts each node's children so shapes come last, and drops dead (-1) entries." },
-			{ "Collapse Link Arrays",
-			  "Removes the empty slots left in link arrays after blocks are deleted." },
-			{ "Adjust Texture Sources",
-			  "Rewrites texture paths to the textures\\ convention. On Oblivion it also overwrites authored Format Prefs." },
-			{ "Fix Invalid Block Names",
-			  "Blanks names that are not valid for their block type, and de-duplicates the rest." },
-			{ "Fill Blank NiControllerSequence Types",
-			  "Asks you for a controller type and fills it into every blank one — it stops and waits for input." },
-			{ "Enforce Node Name Authority",
-			  "Rewrites the object palette so its names match the nodes they point at." },
-			{ "Reorder Blocks",
-			  "Renumbers every block in the file. Upstream keeps this out of auto-sanitize: it can break CK texture-set overrides." },
-			{ "Zero Geometry Group ID",
-			  "Zeroes the Group ID on every NiGeometryData block. Fallout 3 / New Vegas only." },
-			{ "Check Links",
-			  "Reports links that point outside the file or at the wrong block type." },
-			{ "None Refs",
-			  "Reports references that are None where the format requires a block." },
-			{ "Invalid Paths",
-			  "Reports texture paths that are absolute, empty, or missing a file extension." },
-			{ "Environment Mapping Flags",
-			  "Reports shader flags that disagree with the environment map actually assigned." },
-			{ "Update All Bounds",
-			  "Recomputes every shape's bounding sphere. Fixes meshes that vanish when the camera moves." },
-			{ "Update All Tangent Spaces",
-			  "Recomputes tangents from positions, UVs and normals, on every shape that already has them." },
-			{ "Remove Unused Strings",
-			  "Compacts the string table. Housekeeping rather than repair — run it last." },
-			{ "Make All Skin Partitions",
-			  "Rebuilds the skin partition of every skinned shape, not only broken ones, at default settings." },
-		};
+		// (the blurb table that used to live here is now Spell::hint() on each spell,
+		// so the right-click menu and the Unfuck panel quote the same sentences)
 
 		/* Run order, which is NOT the display order.
 		 *
@@ -11518,11 +11486,10 @@ void NifSkope::initMenu()
 			};
 			QList<Row> rows;
 
-			auto blurbFor = []( const QString & n ) -> QString {
-				for ( const auto & b : unfuckBlurbs )
-					if ( n == QLatin1String( b.spell ) )
-						return tr( b.blurb );
-				return QString();
+			// straight off the spell now, so this dialog, the right-click menu and
+			// anything else that builds a SpellBook all quote the same sentence
+			auto blurbFor = []( const SpellPtr & sp ) -> QString {
+				return sp ? sp->hint() : QString();
 			};
 
 			/* Why a row is greyed, in the row itself.
@@ -11583,7 +11550,7 @@ void NifSkope::initMenu()
 					rl->addWidget( status, 0, 1 );
 					rl->setColumnStretch( 0, 1 );
 
-					auto * note = new QLabel( ok ? blurbFor( s->name() ) : whyNot( s ), rowW );
+					auto * note = new QLabel( ok ? blurbFor( s ) : whyNot( s ), rowW );
 					note->setWordWrap( true );
 					QFont nf = note->font();
 					nf.setPointSizeF( std::max( nf.pointSizeF() - 1.0, 6.0 ) );
@@ -11767,6 +11734,39 @@ void NifSkope::initMenu()
 						check( "the menu still lists whole-file spells", listed > 0 );
 						check( "none of them needs a block selected", wantsIndex == 0 );
 						check( "the repair spells were gathered", fixes.size() + checks.size() >= 5 );
+
+						/* Spell::hint() reaches a real menu action.
+						 *
+						 * hint() had zero overrides tree-wide and nothing read it,
+						 * while the same sentences sat in a private table in this
+						 * file. Two things can now break independently: a spell can
+						 * lose its hint, or SpellBook can stop copying it onto the
+						 * QAction — and the second is invisible, because a missing
+						 * tooltip looks exactly like a tooltip nobody hovered. So
+						 * this checks the wiring, not only the data.
+						 */
+						int withHints = 0;
+						for ( SpellPtr sp : SpellBook::spells() )
+							if ( sp && !sp->hint().isEmpty() )
+								withHints++;
+						log << withHints << " spell(s) carry a hint\n";
+						check( "spells carry their one-line description", withHints >= 16 );
+
+						SpellBook probe( nif );
+						QString wired;
+						std::function<void( QMenu * )> walk = [&]( QMenu * m ) {
+							for ( QAction * a : m->actions() ) {
+								if ( a->menu() ) { walk( a->menu() ); continue; }
+								if ( a->text() == QLatin1String( "Collapse Link Arrays" ) )
+									wired = a->toolTip();
+							}
+						};
+						walk( &probe );
+						log << "Collapse Link Arrays tooltip: '" << wired << "'\n";
+						SpellPtr collapse =
+							SpellBook::lookup( QStringLiteral( "Sanitize/Collapse Link Arrays" ) );
+						check( "SpellBook puts the hint on the menu action",
+							collapse && !wired.isEmpty() && wired == collapse->hint() );
 
 						// ...and the dialog opens. Grab it and close it.
 						QTimer::singleShot( 500, this, []() {

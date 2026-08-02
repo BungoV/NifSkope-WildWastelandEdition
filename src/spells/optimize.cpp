@@ -557,6 +557,7 @@ class spRemoveUnusedStrings final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Remove Unused Strings" ); }
+	QString hint() const override { return Spell::tr( "Compacts the string table. Housekeeping rather than repair — run it last." ); }
 	QString page() const override final { return Spell::tr( "Optimize" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

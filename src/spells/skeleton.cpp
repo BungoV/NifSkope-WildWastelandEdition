@@ -994,6 +994,7 @@ class spAllSkinPartitions final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Make All Skin Partitions" ); }
+	QString hint() const override { return Spell::tr( "Rebuilds the skin partition of every skinned shape, not only broken ones, at default settings." ); }
 	QString page() const override final { return Spell::tr( "Batch" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

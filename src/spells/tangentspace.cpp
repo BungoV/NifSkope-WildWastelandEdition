@@ -460,6 +460,7 @@ class spAllTangentSpaces final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update All Tangent Spaces" ); }
+	QString hint() const override { return Spell::tr( "Recomputes tangents from positions, UVs and normals, on every shape that already has them." ); }
 	QString page() const override final { return Spell::tr( "Batch" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & idx ) override final

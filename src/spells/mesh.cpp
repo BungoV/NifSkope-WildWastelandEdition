@@ -2068,6 +2068,7 @@ class spUpdateAllBounds final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Update All Bounds" ); }
+	QString hint() const override { return Spell::tr( "Recomputes every shape's bounding sphere. Fixes meshes that vanish when the camera moves." ); }
 	QString page() const override final { return Spell::tr( "Batch" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & idx ) override final

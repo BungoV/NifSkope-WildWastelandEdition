@@ -21,6 +21,7 @@ class spReorderLinks : public Spell
 {
 public:
 	QString name() const override { return Spell::tr( "Reorder Link Arrays" ); }
+	QString hint() const override { return Spell::tr( "Sorts each node's children so shapes come last, and drops dead (-1) entries." ); }
 	QString page() const override { return Spell::tr( "Sanitize" ); }
 	bool sanity() const override { return true; }
 
@@ -98,6 +99,7 @@ class spSanitizeLinkArrays final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Collapse Link Arrays" ); }
+	QString hint() const override { return Spell::tr( "Removes the empty slots left in link arrays after blocks are deleted." ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 	bool sanity() const override final { return true; }
 
@@ -151,6 +153,7 @@ class spAdjustTextureSources final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Adjust Texture Sources" ); }
+	QString hint() const override { return Spell::tr( "Rewrites texture paths to the textures\\ convention. On Oblivion it also overwrites authored Format Prefs." ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 	bool sanity() const override final { return true; }
 
@@ -308,6 +311,7 @@ class spSanityCheckLinks final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Check Links" ); }
+	QString hint() const override { return Spell::tr( "Reports links that point outside the file or at the wrong block type." ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 	bool sanity() const override final { return true; }
 	/* It reads and logs; it writes nothing (see cast below — every branch
@@ -390,6 +394,7 @@ class spFixInvalidNames final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Fix Invalid Block Names" ); }
+	QString hint() const override { return Spell::tr( "Blanks names that are not valid for their block type, and de-duplicates the rest." ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 	bool sanity() const override final { return true; }
 
@@ -559,6 +564,7 @@ class spFillBlankControllerTypes final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Fill Blank NiControllerSequence Types" ); }
+	QString hint() const override { return Spell::tr( "Asks you for a controller type and fills it into every blank one — it stops and waits for input." ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

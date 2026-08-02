@@ -8,6 +8,7 @@ class spSanitizeBlockOrder final : public Spell
 {
 public:
     QString name() const override final { return Spell::tr( "Reorder Blocks" ); }
+    QString hint() const override { return Spell::tr( "Renumbers every block in the file. Upstream keeps this out of auto-sanitize: it can break CK texture-set overrides." ); }
     QString page() const override final { return Spell::tr( "Sanitize" ); }
     // Prevent this from running during auto-sanitize for the time being
     //	Can really only cause issues with rendering and textureset overrides via the CK
@@ -51,6 +52,7 @@ class spErrorNoneRefs : public spChecker
 {
 public:
 	QString name() const override { return Spell::tr( "None Refs" ); }
+	QString hint() const override { return Spell::tr( "Reports references that are None where the format requires a block." ); }
 	QString page() const override final { return Spell::tr( "Error Checking" ); }
 
 	bool isApplicable( const NifModel *, const QModelIndex & index ) override;
@@ -71,6 +73,7 @@ class spErrorInvalidPaths : public spChecker
 {
 public:
 	QString name() const override { return Spell::tr( "Invalid Paths" ); }
+	QString hint() const override { return Spell::tr( "Reports texture paths that are absolute, empty, or missing a file extension." ); }
 	QString page() const override final { return Spell::tr( "Error Checking" ); }
 
 	bool isApplicable( const NifModel *, const QModelIndex & index ) override;
@@ -107,6 +110,7 @@ class spWarningEnvironmentMapping : public spChecker
 {
 public:
 	QString name() const override { return Spell::tr("Environment Mapping Flags"); }
+	QString hint() const override { return Spell::tr( "Reports shader flags that disagree with the environment map actually assigned." ); }
 	QString page() const override final { return Spell::tr("Error Checking"); }
 
 	bool isApplicable(const NifModel *, const QModelIndex & index) override;

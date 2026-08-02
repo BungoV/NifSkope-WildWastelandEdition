@@ -2257,6 +2257,7 @@ class spEnforceNameAuthority final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Enforce Node Name Authority" ); }
+	QString hint() const override { return Spell::tr( "Rewrites the object palette so its names match the nodes they point at." ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & ) override final

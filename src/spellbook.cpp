@@ -260,6 +260,13 @@ void SpellBook::newSpellRegistered( SpellPtr spell )
 	else
 		act = addAction( spell->icon(), spell->name() );
 	act->setShortcut( spell->hotkey() );
+	/* Spell::hint() was declared "Unused?" and had zero overrides tree-wide, while
+	 * the same sentences sat in a static table inside the Unfuck dialog where only
+	 * that dialog could read them. One line here puts them on every menu a
+	 * SpellBook builds — which is now visible, because the Block List's context
+	 * menu calls setToolTipsVisible(true).
+	 */
+	act->setToolTip( spell->hint() );
 	Map.insert( act, spell );
 
 	// Transform and Block are the two structural editing categories. Keep
