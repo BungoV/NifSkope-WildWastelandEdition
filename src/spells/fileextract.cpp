@@ -18,6 +18,7 @@
 #include "model/nifmodel.h"
 #include "io/nifstream.h"
 #include "nifskope.h"
+#include "glview.h"
 
 #ifdef Q_OS_WIN32
 #  include <direct.h>
@@ -990,3 +991,108 @@ QModelIndex spBatchProcessFiles::cast( [[maybe_unused]] NifModel * nif, const QM
 
 REGISTER_SPELL( spBatchProcessFiles )
 
+
+
+/* Block-scoped export and import, from the menu of the block they act on.
+ *
+ * Both exporters were ALREADY block-scoped and lived only in File ▸ Export:
+ * exportObj prints a message box whose entire job is to tell you which block it
+ * guessed, and exportGltf refuses outright without a selection. So the thing
+ * they needed was the selection the Block List already has.
+ *
+ * The version gates are the ones importex.cpp registers them with — .OBJ is
+ * ImportExportOption{ ".OBJ", …, 0, 169 } and glTF is { ".glTF", …, 83 } — read
+ * off the table rather than reinvented, so a menu entry cannot outlive the
+ * format support behind it.
+ */
+void exportObj( const NifModel * nif, const Scene * scene, const QModelIndex & index );
+void exportGltf( const NifModel * nif, const Scene * scene, const QModelIndex & index );
+void importObjAsCollision( NifModel * nif, const QModelIndex & index );
+
+//! The live Scene, or nullptr when there is no viewport (headless, or a harness).
+static const Scene * tlCurrentScene( const NifModel * nif )
+{
+	if ( auto * w = qobject_cast<NifSkope *>( const_cast<NifModel *>( nif )->getWindow() ) )
+		if ( GLView * ogl = w->getGLView() )
+			return ogl->getScene();
+	return nullptr;
+}
+
+class spExportObjBlock final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Export .OBJ…" ); }
+	QString page() const override final { return Spell::tr( "Import & Export" ); }
+	bool constant() const override final { return true; }
+	QString hint() const override final
+	{
+		return Spell::tr( "Write this block, and everything under it, to a Wavefront .obj." );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return nif && nif->getBSVersion() <= 169 && nif->isNiBlock( index );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		exportObj( nif, tlCurrentScene( nif ), index );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spExportObjBlock )
+
+class spExportGltfBlock final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Export .glTF…" ); }
+	QString page() const override final { return Spell::tr( "Import & Export" ); }
+	bool constant() const override final { return true; }
+	QString hint() const override final
+	{
+		return Spell::tr( "Write this node or shape to a .gltf." );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		// exportGltf's own gate, mirrored — it pops a critical box and returns on
+		// anything else, so offering it there would only be a way to be told no
+		return nif && nif->getBSVersion() >= 83
+			&& nif->blockInherits( index, { "NiNode", "BSGeometry", "BSTriShape", "NiTriShape" } );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		exportGltf( nif, tlCurrentScene( nif ), index );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spExportGltfBlock )
+
+class spImportObjCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Import .OBJ as Collision…" ); }
+	QString page() const override final { return Spell::tr( "Import & Export" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Read a Wavefront .obj and attach it to this node as collision geometry." );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		// collision hangs off a node, so this is the one that is NOT offered on a
+		// shape row even though its sibling exporters are
+		return nif && nif->getBSVersion() <= 169 && nif->blockInherits( index, "NiNode" );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		importObjAsCollision( nif, index );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spImportObjCollision )

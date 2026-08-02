@@ -5354,6 +5354,43 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const int svIdx = verbTops.indexOf( QLatin1String( "Select & View" ) );
 					log << "Transform at " << tIdx << ", Select & View at " << svIdx << "\n";
 					check( "Select & View follows Transform", tIdx >= 0 && svIdx == tIdx + 1 );
+
+					/* ---- 10. Open in <Manager>, on a block that has one -----
+					 * One dynamically-titled row, not three fixed ones. On a
+					 * geometry block there is nothing to open, so the row must
+					 * be ABSENT rather than present-and-disabled — checked both
+					 * ways so "never appears" cannot pass as a success.
+					 */
+					int openRows = 0;
+					QString openTitle;
+					for ( QAction * a : verbBook.actions() )
+						if ( !a->menu() && a->text().startsWith( QLatin1String( "Open in " ) ) ) {
+							openRows++;
+							openTitle = a->text();
+						}
+					log << "Open in <Manager> on the geometry block: " << openRows << "\n";
+					check( "no Open in row on a block no dock edits", openRows == 0 );
+
+					int shaderBlock = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "BSShaderProperty" ) ) { shaderBlock = b; break; }
+					if ( shaderBlock >= 0 ) {
+						SpellBook shaderBook( nif, nif->getBlockIndex( shaderBlock ) );
+						skope->buildBlockListMenuExtras( shaderBook, nif->getBlockIndex( shaderBlock ) );
+						openRows = 0;
+						for ( QAction * a : shaderBook.actions() )
+							if ( !a->menu() && a->text().startsWith( QLatin1String( "Open in " ) ) ) {
+								openRows++;
+								openTitle = a->text();
+							}
+						log << "shader block [" << shaderBlock << "] offers: '" << openTitle
+							<< "' (" << openRows << " row(s))\n";
+						check( "a shader block offers exactly one Open in row", openRows == 1 );
+						check( "...and it names the Material Manager",
+							openTitle == QLatin1String( "Open in Material Manager" ) );
+					} else {
+						log << "(no shader block in this file to test Open in against)\n";
+					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -14742,6 +14779,54 @@ void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIn
 	if ( !nif )
 		return;
 	buildBlockListSelectAndView( contextBook, idx );
+
+	/* Open in <Manager> — ONE row, titled from the clicked block's type.
+	 *
+	 * Navigation between the Block List and the manager docks was one-directional:
+	 * both the Collision and Material managers offer "select this in the Block
+	 * List", and nothing went the other way. Three fixed rows would have been the
+	 * obvious shape and the wrong one — two of them would always be inapplicable,
+	 * and the menu is already too long.
+	 *
+	 * show() BEFORE select(): the collision dock's currentNifIndexChanged handler
+	 * returns early while the dock is hidden, so selecting first leaves it open on
+	 * the wrong row.
+	 */
+	if ( const int bn = nif->getBlockNumber( idx ); bn >= 0 ) {
+		struct DockFor { const char * type; const char * objectName; const char * title; };
+		static const DockFor dockFor[] = {
+			{ "bhkSerializable",           "CollisionManagerDock", QT_TR_NOOP( "Collision Manager" ) },
+			{ "bhkNiCollisionObject",      "CollisionManagerDock", QT_TR_NOOP( "Collision Manager" ) },
+			{ "BSShaderProperty",          "MatTexManagerDock",    QT_TR_NOOP( "Material Manager" ) },
+			{ "BSShaderTextureSet",        "MatTexManagerDock",    QT_TR_NOOP( "Material Manager" ) },
+			{ "NiSkinInstance",            "RiggingManagerDock",   QT_TR_NOOP( "Rigging Manager" ) },
+			{ "BSSkin::Instance",          "RiggingManagerDock",   QT_TR_NOOP( "Rigging Manager" ) },
+			{ "NiControllerManager",       "TimelineDock",         QT_TR_NOOP( "Animation" ) },
+			{ "NiControllerSequence",      "TimelineDock",         QT_TR_NOOP( "Animation" ) },
+		};
+		const QModelIndex block = nif->getBlockIndex( bn );
+		for ( const DockFor & d : dockFor ) {
+			if ( !nif->blockInherits( block, d.type ) )
+				continue;
+			const QString objectName = QLatin1String( d.objectName );
+			if ( !findChild<QDockWidget *>( objectName ) )
+				break;			// dock not built in this session
+			QAction * aOpen = contextBook.addAction(
+				tr( "Open in %1" ).arg( tr( d.title ) ) );
+			aOpen->setToolTip( tr( "Show this block in the dock that edits it" ) );
+			connect( aOpen, &QAction::triggered, this,
+				[this, objectName, pidx = QPersistentModelIndex( idx )]() {
+					QDockWidget * dock = findChild<QDockWidget *>( objectName );
+					if ( !dock )
+						return;
+					dock->show();
+					dock->raise();
+					select( QModelIndex( pidx ) );
+				} );
+			break;				// one row, and the first match is the most specific
+		}
+	}
+
 	// the separator goes in afterwards, once it is known that something
 	// followed it — all three of these actions are conditional, and on a
 	// non-block row with no diff reference and an empty field clipboard none
