@@ -1,5 +1,129 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02j — The top bar, rebuilt on Blender's
+
+The row was doing two jobs. Blender keeps an application topbar (File, Edit,
+workspace tabs) apart from the 3D viewport's **own header** — mode, the menus
+that mode governs, the transform widgets, overlays and shading. Here both were
+fused into one strip, so a global menu and a transient viewport tool sat at the
+same visual level competing for the same eye.
+
+```
+app        File · View · Spells · Options · Help │ Workspaces
+                                                 │ Animation · Collision
+viewport   Object Mode │ Select Add Object │ Global ⌖ 🧲 ⋮⋮ │ vert edge face
+           Brush │ Overlays ⧉ wire Shading
+```
+
+The viewport header is a real row above the 3D view, inside the central widget.
+The mode and render toolbars are **moved** into it rather than rebuilt — which
+is the only reason this was tractable, because `syncViewportMenus` drives the
+whole per-mode show/hide table off the `QAction`s that `addWidget` returned, and
+rebuilding would have invalidated every one.
+
+**Done after `restoreState`, not at construction.** `restoreState` replays a
+layout saved by an older build and drags toolbars back into the toolbar area.
+That is not a hypothesis: the toolbar *reorder* attempted earlier the same day
+failed silently for exactly that reason — the constructor was right and the
+restore overwrote it a moment later, with no error and nothing in the diff.
+
+### What moved, and Blender's reason
+
+| | |
+|---|---|
+| `Select / Add / Object` | from the far right to directly after the mode selector. They are mode-scoped verbs, and their position teaches you they follow the mode; they were at the opposite end of the row from the mode that governs them. |
+| Display options → **Overlays** | Blender's name for this exact dropdown, whose contents are already nearly Blender's list. Moved right, beside Shading. |
+| Isolate / Hide / Restore | off their unlabelled struck-through eye and into the **Object** menu, where Blender keeps them (H, Alt+H). They already retexted themselves "Objects"/"Geometry" by mode — already behaving like an Object-menu entry, just not in the menu. |
+| Center / Frame Selected | into the **View** menu. And `Render` was renamed `View`, because that is what it holds: Top, Front, Left, Flip, Perspective, Walk, Load/Save View. Nothing in it renders. |
+| Undo / Redo | off the bar entirely, into Options. Blender has no undo buttons in any header; these held the most valuable spot on the row for a pair nobody clicks twice. |
+| Workspaces | to the menus. Blender keeps workspace tabs in the app topbar — a workspace switches the whole layout, so it is not a viewport control. |
+| **Panels** | deleted as a button; its seven dock toggles, Toolbars and the two block-view display submenus all folded into **View**, which is where Blender keeps panel toggles. |
+| Lighting Options | the bulb was the only control on the row with **no label and no tooltip** — the `.ui` sets both to empty strings. Its sliders moved into Viewport Shading; the widget was *moved*, not rebuilt, so its `Settings/Render/Lighting/*` keys could not drift. |
+
+`Animation` and `Collision` have no Blender counterpart and stay on the app row.
+
+### Spacing
+
+One helper, `wwGroupBreak`: symmetric 7 px either side of the rule. A bare
+`addSeparator` draws a hairline hard against the buttons on both sides, so eight
+of them made a picket fence in which every boundary looked equally important.
+The rule has to be earned — the trailing `Animation`/`Collision` run has none
+inside it, because those are one group and ruling between them said they were
+two.
+
+### Five defects, each caught by a different method
+
+**Photographed.** A double rule between Object and Global, introduced by the
+spacing pass itself: `wwGroupBreak` wraps each rule in spacer widgets, and the
+duplicate-separator cleanup detects adjacency only when *nothing* sits between —
+so it silently stopped working and two meeting groups each kept their boundary.
+The first fix then over-corrected, stripping both sides and leaving no rule at
+all. Leading and trailing are properties of the **row**, not of each toolbar.
+
+**Photographed.** A stretch item after the two header toolbars claimed all the
+spare width and left them on their minimum — which for a `QToolBar` is "as small
+as you like, I have a chevron". Add, Object and the entire display group
+vanished off the ends, silently, with every button still present as far as any
+code could tell.
+
+**Measured on pixels.** The Render menu still carried full-colour resource PNGs.
+Verified by walking every icon in **both** states and failing if any
+non-transparent pixel has R, G, B more than 2 apart: 24 states, none coloured.
+With the pass disabled, 15 of 24 — and `Load View(on)` came back fully saturated
+while its off state was already grey, which is the case a naive fix misses.
+
+**Reasoned from the API.** A harness check that could not fail: it recovered each
+spell with `SpellBook::lookup( action->text() )`, and `lookup` takes a
+`"Page/Name"` id — a bare name makes it search for a spell whose `page()` is
+empty, and every spell in that menu has one. Always null, so the assertion was
+green against an empty set. The `SpellPtr` rides on the action now.
+
+**Found by the recon, before it bit.** Two loops walk `children()` to find
+toolbars — the one that fills `View ▸ Toolbars` and the one that sets 16×16
+icons. A reparented toolbar is not a direct child, so both would have skipped
+the viewport header in silence. The first matters: that submenu is the only way
+to bring a hidden toolbar back, because `QMainWindow`'s own toggle popup is
+unreachable here (`Qt::NoContextMenu`, nothing overrides `createPopupMenu`).
+Losing the entry would have made hiding the header permanent.
+
+### Icons
+
+`NifSkope --icon-sheet FILE.png [filter]` renders every `tlMakeIcon` glyph to a
+labelled contact sheet — each at judging size and again at 16 px, the size it is
+actually used at — and exits before any window or GL context exists, so it runs
+under `-platform offscreen` and takes no focus. The set is drawn with QPainter,
+so there was previously no way to look at an icon short of hunting for its
+button.
+
+That sheet found four defects at once: `mode_pose` and `mode_physics` did not
+exist and were being handed the Object Mode cube, so three of seven menu entries
+were the same picture; the mode *button*'s icon ladder was missing those two
+rungs, which was invisible precisely because of the first bug; and
+`mode_weightpaint` was byte-identical to the plain `brush` glyph.
+
+Six glyphs were then redrawn on Blender's, judged as a set. Two lessons worth
+keeping: an orbit — filled circle inside an ellipse — is an **eye** at 16 px, and
+adding depth so the ring passes in front and behind made it a better orbit and
+still an eye, because at 16 px all that survives is blob-inside-lens. And on the
+bone chain, an outline *brighter* than its own fill averages to mid-grey, so
+"one of three is lit" collapsed into three equal shapes: **size** carries a
+selection through blurring, two dark greys do not.
+
+### Harnesses run off the primary monitor
+
+Running the suites opened NifSkope over the top of whatever was being worked on
+and took the keyboard with it. `WW_WINDOW_AT` already existed for exactly this
+and nothing used it: it moves the window **before** `show()` and skips
+`raise()`. Both halves matter — moving after `show()` flashes it on the primary
+monitor and then jumps, and `raise()` takes focus even once the window is out of
+the way. `tests/spells/_harness.sh` holds the geometry; the ten windowed
+harnesses source it.
+
+`tests/spells/top_bar.sh` is 36 checks. The row-shape assertion reduces each row
+to a string — `x|x|xxx`, `x|xxx|xxxx|xxxx|xxxx` — and fails on `||`, on a leading
+rule and on a trailing rule, which is the double-bar defect *and* its
+over-correction.
+
 ## 2026-08-02i — The preview reads numbers the files were already carrying
 
 Four things the file said and the preview ignored. Each one is a field that has
