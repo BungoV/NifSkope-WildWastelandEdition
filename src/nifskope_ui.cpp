@@ -13836,7 +13836,7 @@ void NifSkope::initMenu()
 						check( "Spells no longer carries an Unfuck entry", !hasUnfuck );
 						check( "and it is not simply empty", !acts.isEmpty() );
 
-						int pages = 0, listed = 0, wantsIndex = 0;
+						int pages = 0, listed = 0, wantsIndex = 0, unresolved = 0;
 						for ( QAction * a : acts ) {
 							if ( !a->menu() )
 								continue;
@@ -13845,17 +13845,34 @@ void NifSkope::initMenu()
 							for ( QAction * sa : a->menu()->actions() ) {
 								log << " " << sa->text();
 								listed++;
-								// Nothing here may be a block spell: those are on
-								// right-click, which is why they were taken out.
-								SpellPtr sp = SpellBook::lookup( sa->text() );
-								if ( sp && !sp->isApplicable( nif, QModelIndex() ) )
+								/* Nothing here may be a block spell: those are on
+								 * right-click, which is why they were taken out.
+								 *
+								 * The SpellPtr comes off the action's data, not
+								 * from SpellBook::lookup( sa->text() ). That call
+								 * returned NULL for every entry - a bare name has
+								 * no "/", so lookup wants a spell whose page() is
+								 * empty, and every spell here has one - which made
+								 * this check incapable of failing.
+								 */
+								const SpellPtr sp = sa->data().value<SpellPtr>();
+								if ( !sp )
+									unresolved++;
+								else if ( !sp->isApplicable( nif, QModelIndex() ) )
 									wantsIndex++;
 							}
 							log << "\n";
 						}
 						log << pages << " page(s), " << listed << " whole-file spell(s)\n";
 
+						log << "unresolved actions: " << unresolved << "\n";
 						check( "the menu still lists whole-file spells", listed > 0 );
+						/* Not vacuous any more. Every action must carry its
+						 * SpellPtr, or the applicability check below is measuring
+						 * an empty set - which is exactly what it did while the
+						 * pointer was recovered by name.
+						 */
+						check( "every entry resolves to a real spell", unresolved == 0 );
 						check( "none of them needs a block selected", wantsIndex == 0 );
 
 
@@ -13911,10 +13928,32 @@ void NifSkope::initMenu()
 							const int j = pageTitles.indexOf( QLatin1String( y ) );
 							return i >= 0 && j >= 0 && i < j;
 						};
-						check( "Transform leads, then Block, then Node",
-							ordered( "Transform", "Block" ) && ordered( "Block", "Node" ) );
-						check( "the checking pages come last",
-							ordered( "Mesh", "Sanitize" ) && ordered( "Sanitize", "Error Checking" ) );
+						/* STALE ASSERTIONS, CORRECTED - these named groups that no
+						 * longer exist.
+						 *
+						 * They were written against the page taxonomy and never
+						 * updated when Spell::group() replaced it: "Node" was
+						 * folded away and "Mesh" became "Geometry", so both
+						 * ordered() calls were comparing against an index of -1
+						 * and failing for a reason that had nothing to do with
+						 * ordering. Two permanently-red checks nobody could act
+						 * on, which is worse than no check - a suite with known
+						 * failures in it stops being read.
+						 *
+						 * Mirrors groupOrder[] in SpellBook::orderGroups. The last
+						 * check is the one with teeth: Error Checking must be the
+						 * final entry, which fails if anything is appended after
+						 * the declared run rather than merely reordered inside it.
+						 */
+						check( "the structural groups lead, in declared order",
+							ordered( "Block", "Add" ) && ordered( "Add", "Transform" )
+							&& ordered( "Transform", "Geometry" ) );
+						check( "the checking groups come last",
+							ordered( "Optimize", "Sanitize" )
+							&& ordered( "Sanitize", "Error Checking" ) );
+						check( "and nothing is appended after them",
+							!pageTitles.isEmpty()
+							&& pageTitles.last() == QLatin1String( "Error Checking" ) );
 
 						/* It is reached from WORKSPACES now, as "Issue Manager".
 						 *
@@ -14008,21 +14047,61 @@ void NifSkope::initMenu()
 			};
 			QMap<QString, QList<SpellPtr>> byPage;
 			for ( SpellPtr s : SpellBook::spells() ) {
-				if ( !s || s->page().isEmpty() || belongsToUnfuck( s ) )
+				if ( !s || belongsToUnfuck( s ) )
+					continue;
+				/* Which heading it files under.
+				 *
+				 * page() first, because that is the frozen id the CLI's -s,
+				 * SpellBook::lookup and the QSettings keys all use, and it must
+				 * not be changed to fix a menu. group() is the newer, purely
+				 * presentational axis, so it is the right fallback for a spell
+				 * whose page() is empty.
+				 *
+				 * Without the fallback, Extract Resource Files was invisible
+				 * here: a whole-file, no-selection export - exactly the profile
+				 * this menu was rebuilt to gather - dropped for no reason beyond
+				 * an empty page() string, and reachable only by right-clicking
+				 * the blank space BELOW the last row of the Block List, which is
+				 * not a discoverable place for a feature to live.
+				 */
+				const QString heading = !s->page().isEmpty() ? s->page() : s->group();
+				if ( heading.isEmpty() )
 					continue;
 				// The whole test: does it offer itself with nothing selected? If
 				// it wants a block, right-clicking that block already has it.
 				if ( s->isApplicable( nif, QModelIndex() ) )
-					byPage[s->page()].append( s );
+					byPage[heading].append( s );
 			}
 			for ( auto it = byPage.constBegin(); it != byPage.constEnd(); ++it ) {
 				QMenu * page = spellsMenu->addMenu( it.key() );
 				QList<SpellPtr> list = it.value();
 				std::sort( list.begin(), list.end(),
-					[]( const SpellPtr & x, const SpellPtr & y ) { return x->name() < y->name(); } );
+					[]( const SpellPtr & x, const SpellPtr & y ) { return x->label() < y->label(); } );
 				for ( SpellPtr sp : list ) {
-					QAction * a = page->addAction( sp->icon(), sp->name() );
+					/* label() and hint(), the same as every other menu.
+					 *
+					 * This used name() and set no tooltip, while SpellBook builds
+					 * its menus from label() and hint() - so a spell whose menu
+					 * text differs from its id read differently here than
+					 * everywhere else (Block/Sort By Name against "Sort Children
+					 * By Name"), and setToolTipsVisible on this menu was
+					 * decorative because nothing ever set a tooltip.
+					 */
+					QAction * a = page->addAction( sp->icon(), sp->label() );
 					a->setShortcut( sp->hotkey() );
+					if ( !sp->hint().isEmpty() )
+						a->setToolTip( sp->hint() );
+					/* The SpellPtr, carried on the action.
+					 *
+					 * The harness used to recover it with SpellBook::lookup on the
+					 * action's text, which cannot work: a bare name has no "/", so
+					 * lookup searches for a spell whose page() is EMPTY, and every
+					 * spell in this menu has a page. It returned null every time,
+					 * so the "none of them needs a block selected" assertion could
+					 * never fail - a green check measuring nothing. Attaching the
+					 * pointer removes the string round-trip entirely.
+					 */
+					a->setData( QVariant::fromValue( sp ) );
 					connect( a, &QAction::triggered, this, [this, sp]() {
 						if ( nif && book )
 							book->cast( nif, QModelIndex(), sp );

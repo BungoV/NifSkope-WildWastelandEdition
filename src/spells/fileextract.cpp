@@ -225,6 +225,19 @@ class spExtractAllResources final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Extract Resource Files" ); }
+	/* Filed where its sibling above already files itself.
+	 *
+	 * page() stays empty, and must: it is the frozen id that SpellBook::lookup,
+	 * the CLI's -s argument and the QSettings keys are all built from. group() is
+	 * the presentational axis, so it is the one to set.
+	 *
+	 * Without it this spell appeared in no menu at all. It is whole-file, needs
+	 * no selection and is constant() - the exact profile the menu bar's Spells
+	 * menu exists to gather - and it was dropped from there purely for having an
+	 * empty page(). The only way to reach it was right-clicking the blank space
+	 * BELOW the last row of the Block List, where the index comes back invalid.
+	 */
+	QString group() const override { return Spell::tr( "Import & Export" ); }
 	QString page() const override final { return Spell::tr( "" ); }
 	bool constant() const override final { return true; }
 

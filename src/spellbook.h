@@ -214,6 +214,16 @@ private:
 
 using SpellPtr = std::shared_ptr<Spell>;
 
+/*! So a QAction can carry the spell it casts, in QAction::setData.
+ *
+ *  The alternative is recovering it from the action's TEXT, which is how the
+ *  Spells menu's harness used to do it and why that check was silently
+ *  measuring nothing: SpellBook::lookup takes a "Page/Name" id, so a bare name
+ *  makes it search for a spell whose page() is empty and it returns null for
+ *  every spell that has one.
+ */
+Q_DECLARE_METATYPE( SpellPtr )
+
 //! Spell menu
 class SpellBook final : public QMenu
 {
