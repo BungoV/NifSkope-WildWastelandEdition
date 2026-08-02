@@ -165,6 +165,7 @@ QPushButton:disabled { background: ${bgWin}; border-color: ${borderDim}; color: 
 
 /* Fix toolbar button spacing */
 #tRender QToolButton#btnRender:enabled,
+#tRender QToolButton[wwRenderBtn="true"]:enabled,
 #tAnim QToolButton:enabled,
 #mLight QAbstractButton {
     padding: 1px 1px;
@@ -177,6 +178,7 @@ QPushButton:disabled { background: ${bgWin}; border-color: ${borderDim}; color: 
    toggles (the old radial gradient was the one thing that still read as
    2.0.dev). */
 #tRender QToolButton#btnRender:enabled:checked,
+#tRender QToolButton[wwRenderBtn="true"]:enabled:checked,
 #tAnim QToolButton:enabled:checked,
 #mLight QAbstractButton:enabled:checked {
     background: rgba(${rgb}, 255);
@@ -185,12 +187,14 @@ QPushButton:disabled { background: ${bgWin}; border-color: ${borderDim}; color: 
 
 /* Hovered toolbar buttons */
 #tRender QToolButton#btnRender:enabled:hover,
+#tRender QToolButton[wwRenderBtn="true"]:enabled:hover,
 #tAnim QToolButton:enabled:hover,
 #mLight QAbstractButton:enabled:hover {
     background: ${bgBtnHover};
     border: 1px solid ${border};
 }
 #tRender QToolButton#btnRender:enabled:checked:hover,
+#tRender QToolButton[wwRenderBtn="true"]:enabled:checked:hover,
 #tAnim QToolButton:enabled:checked:hover,
 #mLight QAbstractButton:enabled:checked:hover {
     background: rgba(${rgb}, 200);

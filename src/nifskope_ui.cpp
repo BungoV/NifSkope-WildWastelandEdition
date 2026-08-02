@@ -80,6 +80,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QBuffer>
 #include <QButtonGroup>
 #include <QByteArray>
 #include <QCheckBox>
@@ -4847,6 +4848,155 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "after Stop: aAnimPlay " << skope->ui->aAnimPlay->isChecked() << "\n";
 					check( "stop stops the application, not just the dock",
 						!skope->ui->aAnimPlay->isChecked() );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_TOPBAR_TEST=1): the top bar after the View menu was folded
+	 * into the Panels button.
+	 *
+	 * The dangerous part of that merge is not the duplicate. `View > Show` listed
+	 * the same seven dock toggles the Panels button already had, so dropping it
+	 * costs nothing. The other three submenus had no home anywhere else, and one
+	 * of them - Toolbars - is the ONLY way to bring back a hidden toolbar, because
+	 * QMainWindow's built-in toggle popup is unreachable here (nifskope.cpp sets
+	 * Qt::NoContextMenu and nothing overrides createPopupMenu). Lose it and hiding
+	 * a toolbar is permanent, with no error and nothing to discover.
+	 *
+	 * The last check is unrelated to the merge and guards the bug this pass
+	 * started from: three of the seven viewport modes were drawing the SAME icon,
+	 * because Pose and Physics Sim had no glyph and were handed Object Mode's. It
+	 * compares the rendered pixels, not the icon names - two QIcons built from
+	 * different names still collide if the drawings are the same, which is exactly
+	 * how `mode_weightpaint` came to be byte-identical to `brush`.
+	 * Log: release/ww_topbar_test.log
+	 */
+	if ( qEnvironmentVariableIsSet( "WW_TOPBAR_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_topbar_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				auto textsOf = []( const QMenu * mn ) {
+					QStringList out;
+					if ( mn )
+						for ( const QAction * a : mn->actions() )
+							if ( !a->isSeparator() )
+								out << a->text().remove( QLatin1Char( '&' ) );
+					return out;
+				};
+				do {
+					// --- the View menu is gone from the menu bar ----------------
+					/* ui->menubar, NOT QMainWindow::menuBar().
+					 *
+					 * This fork moves the QMenuBar into the first toolbar so the
+					 * menus share the top row, and calls setMenuWidget() with an
+					 * empty placeholder. QMainWindow::menuBar() therefore builds a
+					 * brand-new EMPTY menu bar and hands that back - against which
+					 * "the View menu is gone" passes for the wrong reason. That is
+					 * what the File check below is guarding, and it is the reason
+					 * it exists.
+					 */
+					QStringList bar;
+					for ( const QAction * a : skope->ui->menubar->actions() )
+						if ( !a->isSeparator() )
+							bar << a->text().remove( QLatin1Char( '&' ) );
+					log << "menu bar: " << bar.join( QStringLiteral( ", " ) ) << "\n";
+					check( "the menu bar still has File", bar.contains( QStringLiteral( "File" ) ) );
+					check( "the View menu is gone", !bar.contains( QStringLiteral( "View" ) ) );
+
+					// --- the Panels button is findable by name ------------------
+					// it had NO objectName at all, unlike every sibling on the row
+					auto * panelsBtn = skope->findChild<QToolButton *>(
+						QStringLiteral( "ViewPanelsButton" ) );
+					check( "the Panels button can be found by name", panelsBtn != nullptr );
+					if ( !panelsBtn ) break;
+					QMenu * panels = panelsBtn->menu();
+					check( "it has a menu", panels != nullptr );
+					if ( !panels ) break;
+
+					const QStringList top = textsOf( panels );
+					log << "Panels: " << top.join( QStringLiteral( ", " ) ) << "\n";
+
+					// --- everything View used to hold is now in there ------------
+					for ( const char * dock : { "Block List", "Block Details", "Header",
+											    "NIF Browser", "Inspect", "KFM" } )
+						check( QStringLiteral( "Panels lists the %1 dock" ).arg( dock ),
+							top.contains( QLatin1String( dock ) ) );
+
+					QMenu * toolbars = nullptr, * blockList = nullptr, * blockDetails = nullptr;
+					for ( QAction * a : panels->actions() ) {
+						if ( !a->menu() )
+							continue;
+						const QString t = a->text().remove( QLatin1Char( '&' ) );
+						if ( t == QLatin1String( "Toolbars" ) )              toolbars = a->menu();
+						if ( t == QLatin1String( "Block List Display" ) )    blockList = a->menu();
+						if ( t == QLatin1String( "Block Details Display" ) ) blockDetails = a->menu();
+					}
+					check( "Panels carries the Toolbars submenu", toolbars != nullptr );
+					check( "Panels carries the Block List submenu", blockList != nullptr );
+					check( "Panels carries the Block Details submenu", blockDetails != nullptr );
+
+					/* A hidden toolbar must still be recoverable. Not "the submenu
+					 * exists" - the submenu is filled later, in initMenu(), so an
+					 * empty one would pass that and still strand the user.
+					 */
+					const QStringList tbs = textsOf( toolbars );
+					log << "Toolbars: " << tbs.join( QStringLiteral( ", " ) ) << "\n";
+					check( "and it can actually bring a hidden toolbar back", tbs.size() >= 3 );
+					int checkable = 0;
+					if ( toolbars )
+						for ( const QAction * a : toolbars->actions() )
+							if ( a->isCheckable() )
+								checkable++;
+					check( "every toolbar entry is a toggle", toolbars && checkable == tbs.size() );
+
+					log << "Block List: " << textsOf( blockList ).join( QStringLiteral( ", " ) )
+						<< " | Block Details: "
+						<< textsOf( blockDetails ).join( QStringLiteral( ", " ) ) << "\n";
+					check( "the block-view display options came across",
+						textsOf( blockList ).size() >= 2 && textsOf( blockDetails ).size() >= 2 );
+
+					// --- every viewport mode draws a DIFFERENT icon --------------
+					auto * modeBtn = skope->findChild<QToolButton *>(
+						QStringLiteral( "ViewportModeButton" ) );
+					check( "the mode button can be found by name", modeBtn != nullptr );
+					if ( modeBtn && modeBtn->menu() ) {
+						const QList<QAction *> modes = modeBtn->menu()->actions();
+						QList<QByteArray> seen;
+						QStringList dupes;
+						for ( const QAction * a : modes ) {
+							if ( a->isSeparator() )
+								continue;
+							QByteArray raw;
+							QBuffer buf( &raw );
+							buf.open( QIODevice::WriteOnly );
+							a->icon().pixmap( 32, 32 ).toImage().save( &buf, "PNG" );
+							if ( seen.contains( raw ) )
+								dupes << a->text().remove( QLatin1Char( '&' ) );
+							seen.append( raw );
+						}
+						log << "mode entries: " << modes.size() << ", duplicate icons: "
+							<< ( dupes.isEmpty() ? QStringLiteral( "none" )
+											     : dupes.join( QStringLiteral( ", " ) ) ) << "\n";
+						check( "the fixture has every mode to compare", seen.size() >= 7 );
+						check( "no two viewport modes draw the same icon", dupes.isEmpty() );
+					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -11372,15 +11522,20 @@ void NifSkope::initDockWidgets()
 	dInsp->setVisible( false );
 	dKfm->setVisible( false );
 
-	ui->menuShow->addAction(dList->toggleViewAction());
-	ui->menuShow->addAction(dTree->toggleViewAction());
-	ui->menuShow->addAction(dHeader->toggleViewAction());
-	ui->menuShow->addAction(dBrowser->toggleViewAction());
-	ui->menuShow->addAction(dInsp->toggleViewAction());
-	ui->menuShow->addAction(dKfm->toggleViewAction());
-	ui->menuShow->addAction(dRefr->toggleViewAction());
-	// Manager docks are selected from the Workspaces button, not the generic
-	// panel list.
+	/* The View menu is gone; the Panels button is where all of it lives now.
+	 *
+	 * `View > Show` listed these same seven dock toggles - the SAME QAction
+	 * objects the Panels menu adds below, not equivalents - so the two could not
+	 * disagree, and neither could tell you which one you were supposed to use.
+	 * Populating it here as well would only rebuild the door that was removed.
+	 *
+	 * The actions themselves are untouched: each belongs to its dock, so nothing
+	 * is lost by one menu no longer listing them.
+	 *
+	 * Manager docks are selected from the Workspaces button, not the generic
+	 * panel list.
+	 */
+	ui->menubar->removeAction( ui->mView->menuAction() );
 
 	// ---- main toolbar overhaul: smaller icons, merged dropdowns, transform header ----
 
@@ -13163,12 +13318,57 @@ void NifSkope::initDockWidgets()
 		btn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		btn->setAutoRaise( false );
 		btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
-		btn->setToolTip( tr( "Show/hide panels" ) );
+		btn->setToolTip( tr( "Show and hide panels, toolbars, and how the block views display" ) );
+		btn->setObjectName( QStringLiteral( "ViewPanelsButton" ) );
 		QMenu * m = new QMenu( btn );
+		m->setObjectName( QStringLiteral( "ViewPanelsMenu" ) );
 		for ( QDockWidget * dw : { dList, dTree, dHeader, dBrowser, dInsp, dKfm, dRefr } ) {
 			m->addAction( dw->toggleViewAction() );
 			ui->tView->removeAction( dw->toggleViewAction() );
 		}
+
+		/* THE VIEW MENU MOVES IN HERE, AND THEN THE VIEW MENU GOES.
+		 *
+		 * View held four submenus and nothing else. `Show` was the same seven
+		 * dock toggles this button already lists - not equivalent actions, the
+		 * SAME QAction objects - so it was a second door onto one room. The other
+		 * three had no home anywhere else, which is why View could not simply be
+		 * deleted:
+		 *
+		 *   Toolbars       the ONLY way to bring back a hidden toolbar.
+		 *                  QMainWindow's built-in toggle popup is unreachable -
+		 *                  nifskope.cpp sets Qt::NoContextMenu on the window and
+		 *                  nothing overrides createPopupMenu() - so losing this
+		 *                  makes hiding a toolbar permanent.
+		 *   Block List     tree-vs-list display mode for that dock.
+		 *   Block Details  non-applicable rows, and jump to Header.
+		 *
+		 * All three are settings that belong TO a panel, which is what makes this
+		 * button their natural owner rather than a menu-bar entry of their own.
+		 *
+		 * Added as the existing QMenu objects, not copies: a QMenu's menuAction()
+		 * is an ordinary QAction and may appear in more than one menu, so these
+		 * keep working and keep filling themselves wherever else they are
+		 * referenced. It also sidesteps an ordering problem - mToolbars is not
+		 * populated until initMenu() runs, which is after this - because the
+		 * submenu shows whatever it holds at the moment it is opened.
+		 */
+		m->addSeparator();
+		m->addMenu( ui->mToolbars );
+		m->addSeparator();
+		/* Retitled, because in THIS menu the old names are ambiguous.
+		 *
+		 * Under View they read fine - the menu held nothing else. Here they sit
+		 * directly beneath the dock toggles called "Block List" and "Block
+		 * Details", so the same two words appear twice in one popup meaning two
+		 * different things: once "show me that panel", once "how that panel
+		 * displays". The suffix is the smallest thing that separates them.
+		 */
+		ui->menuBlock_List->setTitle( tr( "Block List Display" ) );
+		ui->menuBlock_Details->setTitle( tr( "Block Details Display" ) );
+		m->addMenu( ui->menuBlock_List );
+		m->addMenu( ui->menuBlock_Details );
+
 		btn->setMenu( m );
 		// Added AFTER the Workspaces button, below — bungo wants Panels to its
 		// right. It is built here because Workspaces copies its stylesheet.
@@ -13821,7 +14021,33 @@ void NifSkope::initMenu()
 		if ( child->defaultAction() == ui->aLightMenu ) {
 			setFlyout( child, mLight );
 		} else {
-			child->setObjectName( "btnRender" );
+			/* A STYLE tag, not a name.
+			 *
+			 * This used to assign the objectName "btnRender", which is what
+			 * res/style.qss matched on - and it ran over every tool button in
+			 * tRender, so it silently destroyed the names those buttons had just
+			 * been given: ViewportModeButton, ViewportVisibilityButton,
+			 * ViewportFocusButton and the rest all became "btnRender", six
+			 * widgets sharing one name. Nothing looked them up yet, so nothing
+			 * was broken; the next thing to try findChild<QToolButton *>(
+			 * "ViewportModeButton" ) would have got a null and no explanation.
+			 *
+			 * A dynamic property carries the styling and leaves the name alone.
+			 * The objectName is still set as a FALLBACK for buttons that had none,
+			 * so res/style.qss keeps matching them by either route and no button
+			 * can end up unstyled if the property selector ever misses.
+			 *
+			 * unpolish/polish because a dynamic property set after the widget has
+			 * already been polished does not re-run the style: that is the classic
+			 * way a property selector silently does nothing. Cheap here, and it
+			 * makes the change independent of whether the app-wide stylesheet has
+			 * been applied yet.
+			 */
+			child->setProperty( "wwRenderBtn", true );
+			if ( child->objectName().isEmpty() )
+				child->setObjectName( "btnRender" );
+			child->style()->unpolish( child );
+			child->style()->polish( child );
 		}
 	}
 

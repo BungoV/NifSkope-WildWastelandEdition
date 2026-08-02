@@ -236,19 +236,34 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		chev << QPointF( xBack, 18 ) << QPointF( xTip, 32 ) << QPointF( xBack, 46 );
 		p.drawPolyline( chev );
 	} else if ( id == QLatin1String( "mode_object" ) ) {
-		// solid-ish isometric cube (Object Mode)
+		/* The cube, inside a detached selection outline (Object Mode).
+		 *
+		 * The bare cube said "a mesh"; it did not say "the mesh as a WHOLE
+		 * OBJECT", which is the only thing separating this mode from Edit Mode
+		 * beside it. The outline is the cube's own silhouette pushed out with a
+		 * clear gap - the same halo the viewport draws round a selected object -
+		 * so the pair reads as one shape seen two ways rather than two shapes.
+		 */
 		p.setBrush( Qt::NoBrush );
+		QPen halo( col.darker( 200 ), 2.6 );
+		halo.setJoinStyle( Qt::RoundJoin );
+		p.setPen( halo );
+		QPolygonF outline;
+		outline << QPointF( 32, 6.7 ) << QPointF( 58, 20.0 ) << QPointF( 58, 46.0 )
+				<< QPointF( 32, 59.3 ) << QPointF( 6, 46.0 ) << QPointF( 6, 20.0 );
+		p.drawPolygon( outline );
+
 		QPen op( col, 4.0 );
 		op.setJoinStyle( Qt::RoundJoin );
 		p.setPen( op );
 		QPolygonF top;
-		top << QPointF( 32, 12 ) << QPointF( 52, 23 ) << QPointF( 32, 34 ) << QPointF( 12, 23 );
+		top << QPointF( 32, 15 ) << QPointF( 49, 24.4 ) << QPointF( 32, 33.8 ) << QPointF( 15, 24.4 );
 		p.drawPolygon( top );
-		p.drawLine( QPointF( 12, 23 ), QPointF( 12, 43 ) );
-		p.drawLine( QPointF( 52, 23 ), QPointF( 52, 43 ) );
-		p.drawLine( QPointF( 32, 34 ), QPointF( 32, 54 ) );
-		p.drawLine( QPointF( 12, 43 ), QPointF( 32, 54 ) );
-		p.drawLine( QPointF( 52, 43 ), QPointF( 32, 54 ) );
+		p.drawLine( QPointF( 15, 24.4 ), QPointF( 15, 41.6 ) );
+		p.drawLine( QPointF( 49, 24.4 ), QPointF( 49, 41.6 ) );
+		p.drawLine( QPointF( 32, 33.8 ), QPointF( 32, 51 ) );
+		p.drawLine( QPointF( 15, 41.6 ), QPointF( 32, 51 ) );
+		p.drawLine( QPointF( 49, 41.6 ), QPointF( 32, 51 ) );
 	} else if ( id == QLatin1String( "mode_edit" ) ) {
 		/* The SAME cube as Object Mode, with its vertices exposed (Edit Mode).
 		 *
@@ -336,35 +351,71 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 			p.drawEllipse( bob, 9.0, 9.0 );				// bob
 		}
 	} else if ( id == QLatin1String( "mode_vertexpaint" ) ) {
-		// triangle with per-vertex greyscale dots (Vertex Paint)
+		/* A quad of vertices, each holding a different value, with one still wet
+		 * under a paint drop (Vertex Paint).
+		 *
+		 * The previous drawing was a thin triangle with three tonal dots, which
+		 * said "these vertices have values" and never said anything was being
+		 * PAINTED - and its 3 px outline vanished at 16 px, leaving three
+		 * unexplained dots. Four heavy dots survive the shrink, and the drop
+		 * landing on the bright one supplies the verb. No brush: the brush is
+		 * Weight Paint's, and two brushes side by side in one menu would be the
+		 * mode_object/mode_pose collision all over again.
+		 */
+		p.setPen( QPen( col.darker( 230 ), 3.4 ) );
 		p.setBrush( Qt::NoBrush );
-		QPen vp( col.darker( 160 ), 3.0 );
-		vp.setJoinStyle( Qt::RoundJoin );
-		p.setPen( vp );
-		QPolygonF tri;
-		tri << QPointF( 32, 15 ) << QPointF( 51, 49 ) << QPointF( 13, 49 );
-		p.drawPolygon( tri );
+		p.drawLine( QPointF( 18, 22 ), QPointF( 46, 22 ) );
+		p.drawLine( QPointF( 18, 22 ), QPointF( 18, 48 ) );
+		p.drawLine( QPointF( 46, 22 ), QPointF( 46, 48 ) );
+		p.drawLine( QPointF( 18, 48 ), QPointF( 46, 48 ) );
+
 		p.setPen( Qt::NoPen );
+		p.setBrush( col.darker( 300 ) );
+		p.drawEllipse( QPointF( 18, 48 ), 7.0, 7.0 );
+		p.setBrush( col.darker( 190 ) );
+		p.drawEllipse( QPointF( 46, 48 ), 7.0, 7.0 );
+		p.setBrush( col.darker( 140 ) );
+		p.drawEllipse( QPointF( 18, 22 ), 7.0, 7.0 );
 		p.setBrush( col );
-		p.drawEllipse( QPointF( 32, 15 ), 6.5, 6.5 );
-		p.setBrush( col.darker( 175 ) );
-		p.drawEllipse( QPointF( 51, 49 ), 6.5, 6.5 );
-		p.setBrush( col.darker( 260 ) );
-		p.drawEllipse( QPointF( 13, 49 ), 6.5, 6.5 );
+		p.drawEllipse( QPointF( 46, 22 ), 8.5, 8.5 );		// the one being painted
+
+		QPainterPath drop;									// paint drop falling onto it
+		drop.moveTo( 46, 2 );
+		drop.cubicTo( 52.5, 9.5, 52.5, 13, 46, 15.5 );
+		drop.cubicTo( 39.5, 13, 39.5, 9.5, 46, 2 );
+		p.setBrush( col );
+		p.drawPath( drop );
 	} else if ( id == QLatin1String( "mode_segment" ) ) {
-		// a shape split into greyscale segments (Segment Paint)
-		p.setPen( Qt::NoPen );
-		p.setBrush( col.darker( 240 ) );
-		p.drawRect( QRectF( 15, 18, 11.3, 28 ) );
-		p.setBrush( col.darker( 160 ) );
-		p.drawRect( QRectF( 26.3, 18, 11.3, 28 ) );
-		p.setBrush( col );
-		p.drawRect( QRectF( 37.6, 18, 11.3, 28 ) );
-		p.setBrush( Qt::NoBrush );
-		QPen sp( col, 3.0 );
-		sp.setJoinStyle( Qt::RoundJoin );
-		p.setPen( sp );
-		p.drawRoundedRect( QRectF( 15, 18, 34, 28 ), 3, 3 );
+		/* A bone chain with exactly ONE bone selected (Segment Paint).
+		 *
+		 * The three grey bands this replaces described a striped rectangle, which
+		 * is a picture of nothing in particular. What the mode actually does is
+		 * pick one part of a skinned body and paint faces into it, so the glyph
+		 * is a skeleton with a single segment lit and the rest left dim.
+		 *
+		 * Deliberately a BONE CHAIN and not a figure: mode_pose is already a
+		 * figure, and two humanoids in one seven-entry menu would be the same
+		 * collision this whole pass exists to remove. The chain also carries the
+		 * "one of several" idea that a single silhouette cannot.
+		 */
+		auto bone = [&p]( QPointF a, QPointF b, const QColor & c, bool solid ) {
+			const QPointF d = b - a;
+			const float len = std::sqrt( float( d.x() * d.x() + d.y() * d.y() ) );
+			if ( len <= 0.0f )
+				return;
+			const QPointF u( d.x() / len, d.y() / len );	// along
+			const QPointF n( -u.y(), u.x() );				// across
+			const QPointF waist = a + u * ( len * 0.28f );
+			const float halfW = 5.6f;
+			QPolygonF oct;									// Blender's octahedral bone
+			oct << a << waist + n * halfW << b << waist - n * halfW;
+			p.setPen( solid ? Qt::NoPen : QPen( c, 2.8 ) );
+			p.setBrush( solid ? QBrush( c ) : QBrush( Qt::NoBrush ) );
+			p.drawPolygon( oct );
+		};
+		bone( QPointF( 20, 8 ),  QPointF( 30, 27 ), col.darker( 260 ), false );
+		bone( QPointF( 30, 27 ), QPointF( 34, 46 ), col, true );			// the selected one
+		bone( QPointF( 34, 46 ), QPointF( 46, 60 ), col.darker( 260 ), false );
 	} else if ( id == QLatin1String( "mode_deform" ) ) {
 		// deformation lattice/cage around a blob (Deformed Cage toggle)
 		p.setPen( Qt::NoPen );
