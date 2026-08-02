@@ -12895,7 +12895,15 @@ void NifSkope::initDockWidgets()
 	 */
 	extern QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
 	QDockWidget * dUnfuckMgr = tlCreateUnfuckManagerDock( nif, this, ogl );
-	dUnfuckMgr->toggleViewAction()->setText( tr( "Unfuck" ) );
+	/* The workspace is called Issue Manager; "unfuck" stays a VERB.
+	 *
+	 * It is a list of everything wrong with the file, so the noun should say what
+	 * it holds - and it sits in a dropdown beside Animation, Collision and
+	 * Rigging, which all name their subject. The button inside it still reads
+	 * "Unfuck checked", because that is the action, and no QSettings key anywhere
+	 * in src/ contains the old word, so nothing saved is disturbed by the change.
+	 */
+	dUnfuckMgr->toggleViewAction()->setText( tr( "Issue Manager" ) );
 
 	const QList<QDockWidget *> workspaceManagers = {
 		dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
@@ -13381,13 +13389,17 @@ void NifSkope::initDockWidgets()
 		workspaces->setAutoRaise( false );
 		workspaces->setStyleSheet( btn->styleSheet() );
 		workspaces->setToolTip( tr( "Switch the active task workspace" ) );
+		// Named for the same reason Panels now is: it was the other button on the
+		// row with no objectName, so nothing could find it.
+		workspaces->setObjectName( QStringLiteral( "ViewWorkspacesButton" ) );
 		QMenu * workspaceMenu = new QMenu( workspaces );
+		workspaceMenu->setObjectName( QStringLiteral( "ViewWorkspacesMenu" ) );
 		QActionGroup * workspaceGroup = new QActionGroup( workspaceMenu );
 		workspaceGroup->setExclusive( true );
 		const QStringList workspaceNames = {
 			tr( "Default" ), tr( "Animation" ), tr( "Materials" ), tr( "Collision" ),
 			tr( "Rigging" ), tr( "Vertex Paint" ), tr( "UV Editing" ), tr( "Pose" ),
-				tr( "Skeleton" ), tr( "Unfuck" )
+				tr( "Skeleton" ), tr( "Issue Manager" )
 		};
 		QList<QAction *> workspaceActions;
 		for ( const QString & name : workspaceNames ) {
@@ -13619,35 +13631,22 @@ void NifSkope::initMenu()
 		spellsMenu->setToolTipsVisible( true );
 		ui->menubar->insertMenu( ui->menubar->actions().at( 3 ), spellsMenu );
 
-		/* Unfuck opens the workspace, and there is only one Unfuck now.
+		/* Unfuck is NOT in this menu. It is a workspace.
 		 *
-		 * This used to build a modal dialog of checkboxes here -- ~350 lines of it --
-		 * and it went on doing that after the workspace panel landed, so the app
-		 * carried TWO Unfucks that disagreed: a dialog that asked which repairs to
-		 * run before saying what was wrong, and a panel that lists what is wrong.
-		 * bungo asked for the panel "instead"; this is the instead.
+		 * It was a bolded entry at the top here, from when it was a modal dialog
+		 * this menu owned. It stopped being a dialog and became the Issue Manager
+		 * workspace, reachable from the Workspaces dropdown beside Animation,
+		 * Collision and Rigging - so a menu entry that opens a workspace is the
+		 * same duplication this menu was rebuilt to remove, just pointing the
+		 * other way.
 		 *
-		 * Nothing was dropped in the move. The dialog's three genuine assets went
-		 * into the panel first: its curated run order (repairOrder in
-		 * unfucktools.cpp), its single-snapshot undo across a whole run, and the
-		 * four Batch/Optimize repairs the panel's Sanitize/sanity() rule could not
-		 * see. Its per-spell blurbs became Spell::hint() and its "why is this row
-		 * greyed" text became whyNotApplicable().
+		 * Nothing is lost with it: the workspace is the only Unfuck, and the
+		 * dialog's assets were folded into it long before this - the curated run
+		 * order (repairOrder in unfucktools.cpp), the single-snapshot undo across
+		 * a whole run, the four Batch/Optimize repairs the panel's sanity() rule
+		 * could not see, the per-spell blurbs as Spell::hint(), and the "why is
+		 * this row greyed" text as whyNotApplicable().
 		 */
-		QAction * unfuck = spellsMenu->addAction( tr( "Unfuck" ) );
-		QFont unfuckFont = unfuck->font();
-		unfuckFont.setBold( true );
-		unfuck->setFont( unfuckFont );
-		unfuck->setToolTip( tr( "Everything wrong with this file, as a list" ) );
-		spellsMenu->addSeparator();
-
-		connect( unfuck, &QAction::triggered, this, [this]() {
-			QDockWidget * dock = findChild<QDockWidget *>( QStringLiteral( "UnfuckManagerDock" ) );
-			if ( !dock )
-				return;
-			dock->show();
-			dock->raise();
-		} );
 
 		/* TEST HARNESS (WW_UNFUCK_TEST=1): is the Spells menu what it claims, and
 		 * does the dialog open?
@@ -13666,8 +13665,8 @@ void NifSkope::initMenu()
 		 */
 		if ( qEnvironmentVariableIsSet( "WW_UNFUCK_TEST" ) ) {
 			QObject::connect( this, &NifSkope::completeLoading, this,
-				[this, spellsMenu, unfuck]( bool ok, QString & ) {
-				QTimer::singleShot( 800, this, [this, spellsMenu, unfuck, ok]() {
+				[this, spellsMenu]( bool ok, QString & ) {
+				QTimer::singleShot( 800, this, [this, spellsMenu, ok]() {
 					QFile logf( QApplication::applicationDirPath() + "/ww_unfuck_test.log" );
 					if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 						return;
@@ -13691,8 +13690,18 @@ void NifSkope::initMenu()
 
 						emit spellsMenu->aboutToShow();
 						const QList<QAction *> acts = spellsMenu->actions();
-						check( "Unfuck is the first entry in Spells",
-							!acts.isEmpty() && acts.first() == unfuck );
+						/* Unfuck used to be the bolded first entry here. It is the
+						 * Issue Manager workspace now, and a menu entry that opens
+						 * a workspace is the same duplication this menu exists to
+						 * avoid. Paired with a not-empty check so the assertion
+						 * cannot pass by the menu having nothing in it at all.
+						 */
+						bool hasUnfuck = false;
+						for ( const QAction * a : acts )
+							if ( a->text().remove( QLatin1Char( '&' ) ) == QLatin1String( "Unfuck" ) )
+								hasUnfuck = true;
+						check( "Spells no longer carries an Unfuck entry", !hasUnfuck );
+						check( "and it is not simply empty", !acts.isEmpty() );
 
 						int pages = 0, listed = 0, wantsIndex = 0;
 						for ( QAction * a : acts ) {
@@ -13774,23 +13783,38 @@ void NifSkope::initMenu()
 						check( "the checking pages come last",
 							ordered( "Mesh", "Sanitize" ) && ordered( "Sanitize", "Error Checking" ) );
 
-						/* Unfuck opens the WORKSPACE, and there is no longer a second
-						 * one. This used to trigger a modal dialog, screenshot it and
-						 * dismiss it; the dialog is gone, so the assertion is that the
-						 * action reveals the dock instead. A menu entry that silently
-						 * does nothing is exactly what retiring the dialog could have
-						 * left behind.
+						/* It is reached from WORKSPACES now, as "Issue Manager".
+						 *
+						 * This used to trigger the Spells menu's bolded Unfuck entry and
+						 * assert the dock appeared. That entry is gone - it opened a
+						 * workspace from a spell menu, which is the duplication this menu
+						 * exists to avoid - so the assertion moves to the door that is left.
+						 * Removing one door without checking the remaining one is how a
+						 * feature becomes unreachable in silence.
 						 */
 						QDockWidget * udock =
 							findChild<QDockWidget *>( QStringLiteral( "UnfuckManagerDock" ) );
 						if ( udock )
 							udock->hide();
 						QApplication::processEvents();
-						unfuck->trigger();
+						QAction * issueMgr = nullptr;
+						if ( auto * wsBtn = findChild<QToolButton *>(
+								QStringLiteral( "ViewWorkspacesButton" ) ) ) {
+							if ( QMenu * wsMenu = wsBtn->menu() ) {
+								for ( QAction * a : wsMenu->actions() )
+									if ( a->text().remove( QLatin1Char( '&' ) )
+											== QLatin1String( "Issue Manager" ) )
+										issueMgr = a;
+							}
+						}
+						check( "Workspaces offers Issue Manager", issueMgr != nullptr );
+						if ( issueMgr )
+							issueMgr->trigger();
 						QApplication::processEvents();
-						log << "Unfuck dock visible after trigger: "
+						log << "Issue Manager dock visible after trigger: "
 							<< ( udock && udock->isVisible() ) << "\n";
-						check( "Unfuck opens the workspace dock", udock && udock->isVisible() );
+						check( "the Issue Manager workspace opens its dock",
+							udock && udock->isVisible() );
 						check( "no modal dialog was raised",
 							QApplication::activeModalWidget() == nullptr );
 					} while ( false );
@@ -13811,21 +13835,24 @@ void NifSkope::initMenu()
 		 * this menu from being filtered against the current selection, which is
 		 * the behaviour that used to empty it.
 		 *
-		 * The repair spells are skipped: they are in Unfuck above, and listing
-		 * them twice in one menu is the duplication this was meant to remove.
+		 * The repair spells are skipped: they are the Issue Manager workspace's
+		 * content, and listing them twice is the duplication this was meant to
+		 * remove.
 		 */
 		connect( spellsMenu, &QMenu::aboutToShow, this,
-			[this, spellsMenu, unfuck]() {
-			// drop everything after the Unfuck entry
-			const QList<QAction *> existing = spellsMenu->actions();
-			int keep = 0;
-			for ( int i = 0; i < existing.size(); i++ )
-				if ( existing.at( i ) == unfuck ) { keep = i + 1; break; }
-			for ( int i = existing.size() - 1; i >= keep; i-- )
-				spellsMenu->removeAction( existing.at( i ) );
+			[this, spellsMenu]() {
+			/* Clear the whole menu, not "everything after the Unfuck entry".
+			 *
+			 * That anchor was the bolded Unfuck action; with it gone the menu has
+			 * no permanent head, so every rebuild starts from empty. Written as a
+			 * plain clear rather than a search that can no longer find anything -
+			 * a stale anchor search would have quietly kept the first rebuild's
+			 * contents forever.
+			 */
+			for ( QAction * a : spellsMenu->actions() )
+				spellsMenu->removeAction( a );
 			if ( !nif )
 				return;
-			spellsMenu->addSeparator();
 
 			/* The repair and check spells are skipped: they are the Unfuck
 			 * workspace's content, and listing them twice is the duplication this

@@ -42,6 +42,11 @@
 #   bash tests/spells/particle_cap.sh
 
 set -u
+
+# These harnesses open a real window; keep it off the primary monitor so a
+# suite run never takes focus from whoever is working. See _harness.sh.
+. "$(dirname "$0")/_harness.sh"
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
 # ShockHAndLeft has two systems authored for 12 particles whose emitters both

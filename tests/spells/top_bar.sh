@@ -41,6 +41,11 @@
 #   bash tests/spells/top_bar.sh
 
 set -u
+
+# These harnesses open a real window; keep it off the primary monitor so a
+# suite run never takes focus from whoever is working. See _harness.sh.
+. "$(dirname "$0")/_harness.sh"
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
 SRC="${SRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/35CourtSign/35CourtSign01.nif}"

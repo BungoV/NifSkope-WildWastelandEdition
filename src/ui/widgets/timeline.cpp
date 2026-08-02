@@ -186,24 +186,15 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawLine( QPointF( 32, 48 ), QPointF( 32, 56 ) );
 		p.drawLine( QPointF( 8, 32 ), QPointF( 16, 32 ) );
 		p.drawLine( QPointF( 48, 32 ), QPointF( 56, 32 ) );
-	} else if ( id == QLatin1String( "brush" ) || id == QLatin1String( "mode_weightpaint" ) ) {
-		/* Weight Paint gets the brush ON a weight ramp; plain `brush` gets the
-		 * brush alone.
+	} else if ( id == QLatin1String( "brush" ) ) {
+		/* The plain paintbrush, and ONLY that.
 		 *
-		 * They were the same drawing, so the mode menu offered a bare brush for
-		 * Weight Paint and nothing said which quantity it painted. Blender's
-		 * answer is the blue-to-red weight ramp behind the brush; in greyscale
-		 * that is a dark-to-light bar, which carries the same "this is a scalar
-		 * field" reading without colour.
+		 * This branch used to answer for mode_weightpaint as well, so the two
+		 * were the same drawing. Worse, it sits ABOVE every mode_* branch: a
+		 * mode_weightpaint case added further down would have been unreachable,
+		 * and the icon sheet would have shown the old art with no error anywhere
+		 * to explain why.
 		 */
-		if ( id == QLatin1String( "mode_weightpaint" ) ) {
-			QLinearGradient ramp( 10, 0, 54, 0 );
-			ramp.setColorAt( 0.0, col.darker( 280 ) );
-			ramp.setColorAt( 1.0, col );
-			p.setPen( Qt::NoPen );
-			p.setBrush( ramp );
-			p.drawRoundedRect( QRectF( 10, 44, 44, 10 ), 4, 4 );
-		}
 		// paintbrush: diagonal wooden handle, metal ferrule, tapered bristles
 		p.save();
 		p.translate( 33, 31 );
@@ -236,60 +227,82 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		chev << QPointF( xBack, 18 ) << QPointF( xTip, 32 ) << QPointF( xBack, 46 );
 		p.drawPolyline( chev );
 	} else if ( id == QLatin1String( "mode_object" ) ) {
-		/* The cube, inside a detached selection outline (Object Mode).
+		/* Blender's Object Mode: the object's bounds with a solid handle at each
+		 * corner - deliberately NOT a cube.
 		 *
-		 * The bare cube said "a mesh"; it did not say "the mesh as a WHOLE
-		 * OBJECT", which is the only thing separating this mode from Edit Mode
-		 * beside it. The outline is the cube's own silhouette pushed out with a
-		 * clear gap - the same halo the viewport draws round a selected object -
-		 * so the pair reads as one shape seen two ways rather than two shapes.
+		 * The cube is mesh DATA, and Edit Mode next door is the cube with its
+		 * points showing; drawing a cube here as well makes the two entries the
+		 * same picture, which is the collision this pass exists to remove. What
+		 * separates Object Mode from every other mode is that it addresses the
+		 * whole object as one grabbable thing, and that is exactly what a bounds
+		 * box with corner handles says.
+		 *
+		 * Two things hold it clear of `vert`, which is also a square with marks at
+		 * its corners: this box is half again as large (38 px against 28 px) and
+		 * its handles are heavy SQUARES in the full colour against a dimmed frame,
+		 * where vert's are small round dots in the same tone as its outline. At
+		 * 16 px vert is a tight cluster of pinpricks; this is four fat corners
+		 * that dominate the frame between them.
 		 */
 		p.setBrush( Qt::NoBrush );
-		QPen halo( col.darker( 200 ), 2.6 );
-		halo.setJoinStyle( Qt::RoundJoin );
-		p.setPen( halo );
-		QPolygonF outline;
-		outline << QPointF( 32, 6.7 ) << QPointF( 58, 20.0 ) << QPointF( 58, 46.0 )
-				<< QPointF( 32, 59.3 ) << QPointF( 6, 46.0 ) << QPointF( 6, 20.0 );
-		p.drawPolygon( outline );
+		QPen frame( col.darker( 150 ), 4.5 );
+		frame.setJoinStyle( Qt::MiterJoin );			// a bounds box, so square corners
+		frame.setCapStyle( Qt::FlatCap );
+		p.setPen( frame );
+		p.drawRect( QRectF( 13, 13, 38, 38 ) );
 
-		QPen op( col, 4.0 );
-		op.setJoinStyle( Qt::RoundJoin );
-		p.setPen( op );
-		QPolygonF top;
-		top << QPointF( 32, 15 ) << QPointF( 49, 24.4 ) << QPointF( 32, 33.8 ) << QPointF( 15, 24.4 );
-		p.drawPolygon( top );
-		p.drawLine( QPointF( 15, 24.4 ), QPointF( 15, 41.6 ) );
-		p.drawLine( QPointF( 49, 24.4 ), QPointF( 49, 41.6 ) );
-		p.drawLine( QPointF( 32, 33.8 ), QPointF( 32, 51 ) );
-		p.drawLine( QPointF( 15, 41.6 ), QPointF( 32, 51 ) );
-		p.drawLine( QPointF( 49, 41.6 ), QPointF( 32, 51 ) );
-	} else if ( id == QLatin1String( "mode_edit" ) ) {
-		/* The SAME cube as Object Mode, with its vertices exposed (Edit Mode).
-		 *
-		 * Blender's pairing, and the reason for it: edit mode is not a different
-		 * object, it is the same object with its points showing. A triangle here
-		 * (what this was) shares no shape with the cube beside it, so the two
-		 * read as unrelated tools rather than two views of one thing.
+		/* Handles centred ON the corners, so they overhang the way a transform
+		 * handle does, and 12 px wide - three whole pixels once the icon is 16 px,
+		 * which is what keeps the reading alive after the frame has greyed out.
 		 */
-		p.setBrush( Qt::NoBrush );
-		QPen ep( col, 3.4 );
-		ep.setJoinStyle( Qt::RoundJoin );
-		p.setPen( ep );
-		const QPointF vTop( 32, 12 ), vR( 52, 23 ), vMid( 32, 34 ), vL( 12, 23 );
-		const QPointF vBL( 12, 43 ), vBR( 52, 43 ), vBot( 32, 54 );
-		QPolygonF top;
-		top << vTop << vR << vMid << vL;
-		p.drawPolygon( top );
-		p.drawLine( vL, vBL );
-		p.drawLine( vR, vBR );
-		p.drawLine( vMid, vBot );
-		p.drawLine( vBL, vBot );
-		p.drawLine( vBR, vBot );
 		p.setPen( Qt::NoPen );
 		p.setBrush( col );
-		for ( const QPointF & v : { vTop, vR, vMid, vL, vBL, vBR, vBot } )
-			p.drawRect( QRectF( v.x() - 3.6, v.y() - 3.6, 7.2, 7.2 ) );
+		const float hs = 6.0f;
+		for ( const QPointF & c : { QPointF( 13, 13 ), QPointF( 51, 13 ),
+									QPointF( 13, 51 ), QPointF( 51, 51 ) } )
+			p.drawRect( QRectF( c.x() - hs, c.y() - hs, hs * 2.0f, hs * 2.0f ) );
+	} else if ( id == QLatin1String( "mode_edit" ) ) {
+		/* The SAME box as Object Mode, with its points exposed (Edit Mode).
+		 *
+		 * Blender's pairing, and the reason for it: edit mode is not a different
+		 * object, it is the same object with its vertices showing. So the cage is
+		 * drawn QUIETLY - a dim isometric box - and the vertex handles are the
+		 * loud mark, because the handles are the only thing separating this from
+		 * the Object glyph beside it, and at 16 px a wire is the first thing to
+		 * go. Squares, not dots: that is how the viewport draws a vertex, and it
+		 * keeps this out of the round-dot family (pivot_median, snap_increment,
+		 * nodes, mode_vertexpaint) that already fills the rest of the set.
+		 *
+		 * One handle is oversized rather than brighter. Blender says "selected"
+		 * with orange; a greyscale set that is re-tinted by the caller cannot,
+		 * and a tonal difference between two 2 px blocks is invisible at icon
+		 * size anyway. Size survives the shrink, so size carries it.
+		 */
+		const QPointF eTop( 32, 12 ), eR( 52, 23 ), eMid( 32, 34 ), eL( 12, 23 );
+		const QPointF eBL( 12, 42 ), eBR( 52, 42 ), eBot( 32, 53 );
+
+		p.setBrush( Qt::NoBrush );
+		QPen cage( col.darker( 200 ), 3.4 );
+		cage.setJoinStyle( Qt::RoundJoin );
+		cage.setCapStyle( Qt::RoundCap );
+		p.setPen( cage );
+		QPolygonF lid;
+		lid << eTop << eR << eMid << eL;
+		p.drawPolygon( lid );
+		p.drawLine( eL, eBL );
+		p.drawLine( eR, eBR );
+		p.drawLine( eMid, eBot );
+		p.drawLine( eBL, eBot );
+		p.drawLine( eBR, eBot );
+
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		auto vsq = [&p]( const QPointF & v, float h ) {
+			p.drawRect( QRectF( v.x() - h, v.y() - h, h * 2.0, h * 2.0 ) );
+		};
+		for ( const QPointF & v : { eR, eMid, eL, eBL, eBR, eBot } )
+			vsq( v, 4.7f );
+		vsq( eTop, 6.4f );					// the selected vertex
 	} else if ( id == QLatin1String( "mode_pose" ) ) {
 		/* Blender's armature figure (Pose Mode).
 		 *
@@ -351,86 +364,206 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 			p.drawEllipse( bob, 9.0, 9.0 );				// bob
 		}
 	} else if ( id == QLatin1String( "mode_vertexpaint" ) ) {
-		/* A quad of vertices, each holding a different value, with one still wet
-		 * under a paint drop (Vertex Paint).
+		/* No brush at all: a drop of paint falling onto a chain of vertices, the one
+		 * it is aimed at already bright.
 		 *
-		 * The previous drawing was a thin triangle with three tonal dots, which
-		 * said "these vertices have values" and never said anything was being
-		 * PAINTED - and its 3 px outline vanished at 16 px, leaving three
-		 * unexplained dots. Four heavy dots survive the shrink, and the drop
-		 * landing on the bright one supplies the verb. No brush: the brush is
-		 * Weight Paint's, and two brushes side by side in one menu would be the
-		 * mode_object/mode_pose collision all over again.
+		 * The brush belongs to the standalone `brush` glyph and to Weight Paint, and a
+		 * third brush in the same seven-entry menu is the mode_object/mode_pose
+		 * collision all over again. What is only this mode's is the SUBJECT: values
+		 * that live on discrete points instead of across a surface. So the beads sit
+		 * on their own edge chain, at three unequal sizes and tones, and those tones
+		 * deliberately do NOT ramp - a monotonic dark-to-light run is Weight Paint's
+		 * picture, and the difference between the two modes has to be visible in the
+		 * one channel that survives re-tinting.
+		 *
+		 * The 8 px of clear air under the drop is load-bearing: at 16 px it is the
+		 * 2 px gap that keeps this from collapsing into a single vertical tower.
 		 */
-		p.setPen( QPen( col.darker( 230 ), 3.4 ) );
+		QPen chain( col.darker( 250 ), 2.6 );
+		chain.setCapStyle( Qt::RoundCap );
+		chain.setJoinStyle( Qt::RoundJoin );
+		p.setPen( chain );
 		p.setBrush( Qt::NoBrush );
-		p.drawLine( QPointF( 18, 22 ), QPointF( 46, 22 ) );
-		p.drawLine( QPointF( 18, 22 ), QPointF( 18, 48 ) );
-		p.drawLine( QPointF( 46, 22 ), QPointF( 46, 48 ) );
-		p.drawLine( QPointF( 18, 48 ), QPointF( 46, 48 ) );
+		QPolygonF strip;
+		strip << QPointF( 11, 52 ) << QPointF( 32, 43 ) << QPointF( 53, 52 );
+		p.drawPolyline( strip );
 
 		p.setPen( Qt::NoPen );
-		p.setBrush( col.darker( 300 ) );
-		p.drawEllipse( QPointF( 18, 48 ), 7.0, 7.0 );
-		p.setBrush( col.darker( 190 ) );
-		p.drawEllipse( QPointF( 46, 48 ), 7.0, 7.0 );
-		p.setBrush( col.darker( 140 ) );
-		p.drawEllipse( QPointF( 18, 22 ), 7.0, 7.0 );
-		p.setBrush( col );
-		p.drawEllipse( QPointF( 46, 22 ), 8.5, 8.5 );		// the one being painted
+		p.setBrush( col.darker( 300 ) );							// vertices, each its own value
+		p.drawEllipse( QPointF( 13, 51 ), 6.5, 6.5 );
+		p.setBrush( col.darker( 200 ) );
+		p.drawEllipse( QPointF( 51, 51 ), 6.5, 6.5 );
+		p.setBrush( col );											// the one taking the paint
+		p.drawEllipse( QPointF( 32, 43 ), 8.0, 8.0 );
 
-		QPainterPath drop;									// paint drop falling onto it
-		drop.moveTo( 46, 2 );
-		drop.cubicTo( 52.5, 9.5, 52.5, 13, 46, 15.5 );
-		drop.cubicTo( 39.5, 13, 39.5, 9.5, 46, 2 );
+		QPainterPath drop;											// still in the air
+		drop.moveTo( 32, 6 );
+		drop.cubicTo( 42, 17.5, 42, 23, 32, 27 );
+		drop.cubicTo( 22, 23, 22, 17.5, 32, 6 );
 		p.setBrush( col );
 		p.drawPath( drop );
-	} else if ( id == QLatin1String( "mode_segment" ) ) {
-		/* A bone chain with exactly ONE bone selected (Segment Paint).
+	} else if ( id == QLatin1String( "mode_weightpaint" ) ) {
+		/* A brush pressed onto a surface whose value runs dark to light: this
+		 * mode paints a SCALAR FIELD, not a colour.
 		 *
-		 * The three grey bands this replaces described a striped rectangle, which
-		 * is a picture of nothing in particular. What the mode actually does is
-		 * pick one part of a skinned body and paint faces into it, so the glyph
-		 * is a skeleton with a single segment lit and the rest left dim.
+		 * Blender puts the weight ramp blue-to-red behind the brush. In greyscale
+		 * that ramp becomes dark-to-light and it is then the ONLY thing that
+		 * separates this glyph from Vertex Paint, so the area budget is inverted
+		 * against Blender's: the ramp is the large mark and the brush the small
+		 * one. The drawing this replaces had it the other way round - a full
+		 * canvas paintbrush over a 10 px strip - and at 16 px that is the
+		 * standalone `brush` glyph with a smudge underneath it.
 		 *
-		 * Deliberately a BONE CHAIN and not a figure: mode_pose is already a
-		 * figure, and two humanoids in one seven-entry menu would be the same
-		 * collision this whole pass exists to remove. The chain also carries the
-		 * "one of several" idea that a single silhouette cannot.
+		 * The surface is a plane in perspective, not a swatch, so its silhouette
+		 * cannot be read as `panel`; and it is outlined, because on a dark
+		 * toolbar the zero end of the ramp is nearly the background colour and
+		 * without an edge the plane looks like it begins halfway along.
 		 */
-		auto bone = [&p]( QPointF a, QPointF b, const QColor & c, bool solid ) {
+		QPolygonF plane;
+		plane << QPointF( 15, 30 ) << QPointF( 49, 30 )
+			  << QPointF( 56, 55 ) << QPointF( 8, 55 );
+
+		QLinearGradient ramp( 8, 0, 56, 0 );			// 0 at the left, 1 at the right
+		ramp.setColorAt( 0.0, col.darker( 230 ) );
+		ramp.setColorAt( 0.5, col.darker( 175 ) );
+		ramp.setColorAt( 1.0, col );
+		p.setPen( Qt::NoPen );
+		p.setBrush( ramp );
+		p.drawPolygon( plane );
+
+		QPen rim( col.darker( 140 ), 3.8 );				// keeps the zero end visible
+		rim.setJoinStyle( Qt::RoundJoin );
+		p.setPen( rim );
+		p.setBrush( Qt::NoBrush );
+		p.drawPolygon( plane );
+
+		/* The brush: short, shallower than the 45 degrees of the standalone
+		 * `brush`, tilted the other way, and standing ON the plane over its dark
+		 * end - where a bright tuft has something to contrast against.
+		 */
+		p.save();
+		p.translate( 31.6, 26.0 );
+		p.rotate( 50.0 );
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawRoundedRect( QRectF( -3.0, -16.0, 6.0, 10.0 ), 2.8, 2.8 );	// handle
+		p.setBrush( col.darker( 150 ) );
+		p.drawRoundedRect( QRectF( -5.4, -7.5, 10.8, 6.0 ), 1.5, 1.5 );		// ferrule
+		p.setBrush( col );
+		QPainterPath tuft;													// bristles
+		tuft.moveTo( -5.4, -2.0 );
+		tuft.lineTo( 5.4, -2.0 );
+		tuft.lineTo( 3.0, 11.0 );
+		tuft.quadTo( 0.0, 14.0, -3.0, 11.0 );
+		tuft.closeSubpath();
+		p.drawPath( tuft );
+		p.restore();
+	} else if ( id == QLatin1String( "mode_segment" ) ) {
+		/* A chain of octahedral bones with exactly ONE link lit (Segment Paint).
+		 *
+		 * The mode paints binary face membership: it picks one part of a skinned
+		 * body and puts faces into it. A bone chain with a single bright link says
+		 * both halves of that at once -- "a skeleton", and "THIS one of several" --
+		 * and the second half is a thing no single silhouette can carry, which is
+		 * why one bone alone would not do.
+		 *
+		 * Deliberately a chain and not a figure: mode_pose is already a running
+		 * figure, and two humanoids in a seven-entry menu would be the collision
+		 * this pass exists to remove.
+		 *
+		 * The unpainted links are FILLED in a dark tone rather than left as
+		 * hairlines. At 16 px the two edges of a hollow bone land a pixel apart and
+		 * merge into a grey smear regardless, so hollow-versus-solid is a
+		 * distinction that does not survive the shrink -- tone is, and it is also
+		 * how Blender itself separates a selected bone from its neighbours.
+		 */
+		auto seg = [&p]( QPointF a, QPointF b, float halfW, const QColor & fill, const QColor & edge ) {
 			const QPointF d = b - a;
 			const float len = std::sqrt( float( d.x() * d.x() + d.y() * d.y() ) );
 			if ( len <= 0.0f )
 				return;
-			const QPointF u( d.x() / len, d.y() / len );	// along
-			const QPointF n( -u.y(), u.x() );				// across
-			const QPointF waist = a + u * ( len * 0.28f );
-			const float halfW = 5.6f;
-			QPolygonF oct;									// Blender's octahedral bone
+			const QPointF u( d.x() / len, d.y() / len );		// along the bone
+			const QPointF n( -u.y(), u.x() );				// across it
+			const QPointF waist = a + u * ( len * 0.30f );	// widest a third along
+			QPolygonF oct;									// Blender's octahedron, side-on
 			oct << a << waist + n * halfW << b << waist - n * halfW;
-			p.setPen( solid ? Qt::NoPen : QPen( c, 2.8 ) );
-			p.setBrush( solid ? QBrush( c ) : QBrush( Qt::NoBrush ) );
+			QPen bp( edge, 2.8 );
+			bp.setJoinStyle( Qt::RoundJoin );
+			bp.setCapStyle( Qt::RoundCap );
+			p.setPen( bp );
+			p.setBrush( QBrush( fill ) );
 			p.drawPolygon( oct );
 		};
-		bone( QPointF( 20, 8 ),  QPointF( 30, 27 ), col.darker( 260 ), false );
-		bone( QPointF( 30, 27 ), QPointF( 34, 46 ), col, true );			// the selected one
-		bone( QPointF( 34, 46 ), QPointF( 46, 60 ), col.darker( 260 ), false );
-	} else if ( id == QLatin1String( "mode_deform" ) ) {
-		// deformation lattice/cage around a blob (Deformed Cage toggle)
+
+		const QPointF j0( 19, 9 ), j1( 31, 24 ), j2( 35, 46 ), j3( 47, 57 );
+
+		/* SIZE carries the selection, not tone.
+		 *
+		 * First pass gave the dim links a darker(165) edge over a darker(300)
+		 * fill - an outline BRIGHTER than the body it surrounds. At 16 px that
+		 * edge is a sub-pixel bright rim on a dark shape, which averages to
+		 * mid-grey, and the whole "one of three is lit" hierarchy collapsed into
+		 * three equal kites. Rendered and confirmed on the icon sheet.
+		 *
+		 * So the unpainted links are now a single dark mass - edge and fill
+		 * within one step of each other - and the painted one is nearly twice
+		 * their width. A size difference survives any amount of blurring; a tone
+		 * difference between two dark greys does not.
+		 */
+		const QColor dimFill = col.darker( 300 ), dimEdge = col.darker( 250 );
+
+		seg( j0, j1, 4.6f, dimFill, dimEdge );		// the rest of the chain,
+		seg( j2, j3, 4.6f, dimFill, dimEdge );		// left unpainted
+		seg( j1, j2, 9.2f, col, col );				// the segment being painted
+
+		// joints, so the three links read as ONE chain rather than loose shapes
 		p.setPen( Qt::NoPen );
-		p.setBrush( col.darker( 210 ) );
-		p.drawEllipse( QPointF( 32, 34 ), 9, 9 );
+		p.setBrush( col.darker( 190 ) );
+		p.drawEllipse( j1, 3.4, 3.4 );
+		p.drawEllipse( j2, 3.4, 3.4 );
+	} else if ( id == QLatin1String( "mode_deform" ) ) {
+		/* The cage as a slab BENT out of straight (Blender's simple-deform
+		 * picture), rather than as a frame drawn round something.
+		 *
+		 * This is the hedge for the pinched frame: if a bowed box still reads
+		 * as a box at 16 px, then no box will do, and the answer is to stop
+		 * drawing an enclosure altogether. One thick constant-width stroke
+		 * following an S means the bend IS the silhouette - there is no
+		 * interior to lose - and a sigmoid band is a shape this set does not
+		 * otherwise contain.
+		 *
+		 * The lattice is still there, in the parts that only have to work at
+		 * full size: three dim ribs cutting the slab into cells, and a control
+		 * handle at each of its four corners. The cubic's control points share
+		 * the y of their endpoints, so the tangents at both ends are
+		 * horizontal and the flat caps land as clean vertical end faces.
+		 */
+		QPainterPath spine;
+		spine.moveTo( 11, 45 );
+		spine.cubicTo( 31, 45, 33, 19, 53, 19 );	// passes exactly through 32,32
+
 		p.setBrush( Qt::NoBrush );
-		QPen dp( col, 2.4 );
-		dp.setStyle( Qt::DashLine );
-		p.setPen( dp );
-		p.drawRect( QRectF( 13, 15, 38, 38 ) );
+		QPen slab( col, 13.0 );
+		slab.setCapStyle( Qt::FlatCap );
+		slab.setJoinStyle( Qt::RoundJoin );
+		p.setPen( slab );
+		p.drawPath( spine );
+
+		// ribs, normal to the spine at t = 0.25, 0.5, 0.75, stopped just short
+		// of the slab edge so antialiasing leaves no nubs outside it
+		QPen rib( col.darker( 210 ), 2.6 );
+		rib.setCapStyle( Qt::FlatCap );
+		p.setPen( rib );
+		p.drawLine( QPointF( 19.6, 36.1 ), QPointF( 26.8, 45.8 ) );
+		p.drawLine( QPointF( 27.4, 28.1 ), QPointF( 36.6, 35.9 ) );
+		p.drawLine( QPointF( 37.3, 18.2 ), QPointF( 44.4, 27.9 ) );
+
+		// control handles on the slab's four corners
 		p.setPen( Qt::NoPen );
 		p.setBrush( col );
-		for ( const QPointF & v : { QPointF( 13, 15 ), QPointF( 51, 15 ), QPointF( 13, 53 ),
-			QPointF( 51, 53 ), QPointF( 32, 15 ), QPointF( 13, 34 ), QPointF( 51, 34 ), QPointF( 32, 53 ) } )
-			p.drawRect( QRectF( v.x() - 3.2, v.y() - 3.2, 6.4, 6.4 ) );
+		for ( const QPointF & h : { QPointF( 11, 38.5 ), QPointF( 11, 51.5 ),
+									QPointF( 53, 12.5 ), QPointF( 53, 25.5 ) } )
+			p.drawRoundedRect( QRectF( h.x() - 4.5, h.y() - 4.5, 9, 9 ), 2, 2 );
 	} else if ( id == QLatin1String( "collision" ) ) {
 		/* A ball bouncing off a floor: what collision is FOR.
 		 *
