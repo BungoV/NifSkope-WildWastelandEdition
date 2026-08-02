@@ -8,11 +8,13 @@
  * All classes here inherit from the Spell class.
  */
 
-//! Set the name of the NiGeometryData node to parent name or zero
+//! Zero the Group ID of every NiGeometryData block (Fallout 3 only)
 class spFO3FixShapeDataName final : public Spell
 {
 public:
-	QString name() const override final { return Spell::tr( "Fix Geometry Data Names" ); }
+	// was "Fix Geometry Data Names", which is what the doc comment claimed it did.
+	// It sets Group ID to 0 and touches no name at all.
+	QString name() const override final { return Spell::tr( "Zero Geometry Group ID" ); }
 	QString page() const override final { return Spell::tr( "Sanitize" ); }
 	bool sanity() const override final { return true; }
 

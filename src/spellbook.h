@@ -77,6 +77,46 @@ public:
 	virtual bool constant() const { return false; }
 	//! Whether the spell records its complete mutation in the model undo stack
 	virtual bool undoable() const { return false; }
+
+	/*! Whether casting this spell destroys something the file cannot get back.
+	 *
+	 *  This replaces the old blanket "this action cannot currently be undone"
+	 *  prompt, which fired for nearly every write — `undoable()` is overridden
+	 *  true by six spells in the whole tree — and offered "Do not ask me again".
+	 *  One tick of that box and Crop To Branch, Remove Branch and Apply
+	 *  Transformation all ran silently forever after, which is exactly backwards:
+	 *  the prompt was loudest where it mattered least and absent where it
+	 *  mattered most.
+	 *
+	 *  So the question is asked by the few spells that destroy data, it names
+	 *  what is lost (see destructiveWarning), and it cannot be suppressed.
+	 */
+	virtual bool destructive() const { return false; }
+
+	/*! What a destructive spell is about to take away, in its own words.
+	 *
+	 *  "This cannot be undone" is not information — the user already knows they
+	 *  asked for it, and cannot weigh a cost nobody stated. "Delete 214 of 217
+	 *  blocks?" is a decision. Return empty only if the spell genuinely cannot
+	 *  say more than its own name.
+	 */
+	virtual QString destructiveWarning( NifModel * nif, const QModelIndex & index ) const
+	{
+		Q_UNUSED( nif ); Q_UNUSED( index );
+		return QString();
+	}
+
+	/*! True while a SpellBook cast is running whose destructive confirmation the
+	 *  user has already answered.
+	 *
+	 *  Several of these spells are also used as plain helpers — spRemoveBranch is
+	 *  called from six places in havok.cpp and collisiontools.cpp, spApplyTransformation
+	 *  from Combine Shapes — through `cast()` directly, which never sees a
+	 *  SpellBook. A spell that warns from inside its own `cast()` checks this so
+	 *  the menu path shows one dialog rather than two, while the direct path keeps
+	 *  whatever guard it had.
+	 */
+	static bool confirmedByBook() { return bookConfirmed; }
 	//! Whether the spell shows up in block list instead of a context menu
 	virtual bool instant() const { return false; }
 	//! Whether the spell performs a sanitizing function
@@ -110,6 +150,11 @@ public:
 	 * No spells should reimplement this function.
 	 */
 	static inline QString tr( const char * key, const char * comment = 0 ) { return QCoreApplication::translate( "Spell", key, comment ); }
+
+private:
+	friend class SpellBook;
+	//! Set by SpellBook::cast for the duration of a confirmed cast. See confirmedByBook().
+	static bool bookConfirmed;
 };
 
 using SpellPtr = std::shared_ptr<Spell>;

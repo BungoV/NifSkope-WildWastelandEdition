@@ -535,6 +535,33 @@ static void removeChildren( NifModel * nif, const QPersistentModelIndex & iBlock
 	}
 }
 
+/*! How many blocks a Remove Branch actually takes with it.
+ *
+ *  Mirrors removeChildren's ownership test above rather than counting child
+ *  links: a child whose parent is some other block is shared, survives the
+ *  removal, and counting it would overstate the loss in exactly the files where
+ *  the number matters — a texture set hung off two shapes.
+ */
+static int countOwnedBranch( const NifModel * nif, qint32 block )
+{
+	int n = 1;
+	for ( const auto link : nif->getChildLinks( block ) ) {
+		if ( nif->getParent( link ) == block )
+			n += countOwnedBranch( nif, link );
+	}
+	return n;
+}
+
+//! A block as the destructive warnings name it: "[12] NiNode 'Tesla_Light_03'".
+static QString describeBlock( const NifModel * nif, const QModelIndex & index )
+{
+	const QString name = nif->get<QString>( index, "Name" );
+	QString s = QString( "[%1] %2" ).arg( nif->getBlockNumber( index ) ).arg( nif->itemName( index ) );
+	if ( !name.isEmpty() )
+		s += QString( " '%1'" ).arg( name );
+	return s;
+}
+
 //! Set values in blocks that cannot be handled in nif.xml such as inherited values
 void blockDefaults( NifModel * nif, const QString & type, const QModelIndex & index )
 {
@@ -1064,6 +1091,21 @@ class spRemoveBlock final : public Spell
 public:
 	QString name() const override final { return Spell::tr( "Remove" ); }
 	QString page() const override final { return Spell::tr( "Block" ); }
+
+	bool destructive() const override final { return true; }
+	QString destructiveWarning( NifModel * nif, const QModelIndex & index ) const override final
+	{
+		/* Unlike Remove Branch this leaves the children behind, orphaned — which
+		 * is the part worth saying, because the block list will still show them
+		 * and nothing else will hint that they are now unreachable.
+		 */
+		const int kids = countOwnedBranch( nif, nif->getBlockNumber( index ) ) - 1;
+		QString s = Spell::tr( "Remove %1?" ).arg( describeBlock( nif, index ) );
+		if ( kids > 0 )
+			s += Spell::tr( "\n\nIts %1 child blocks stay in the file with nothing pointing at them. "
+				"Remove Branch deletes them too." ).arg( kids );
+		return s;
+	}
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
@@ -1669,6 +1711,15 @@ public:
 REGISTER_SPELL( spPasteBranch2 )
 
 // definitions for spRemoveBranch moved to blocks.h
+QString spRemoveBranch::destructiveWarning( NifModel * nif, const QModelIndex & index ) const
+{
+	const int n = countOwnedBranch( nif, nif->getBlockNumber( index ) );
+	return n > 1
+		? Spell::tr( "Remove %1 and the %2 blocks below it?" )
+			.arg( describeBlock( nif, index ) ).arg( n - 1 )
+		: Spell::tr( "Remove %1?" ).arg( describeBlock( nif, index ) );
+}
+
 bool spRemoveBranch::isApplicable( const NifModel * nif, const QModelIndex & iBlock )
 {
 	int ix = nif->getBlockNumber( iBlock );
@@ -1691,6 +1742,20 @@ class spFlattenBranch : public Spell
 public:
 	QString name() const override { return Spell::tr( "Flatten Branch" ); }
 	QString page() const override { return Spell::tr( "Block" ); }
+
+	bool destructive() const override { return true; }
+	QString destructiveWarning( NifModel * nif, const QModelIndex & index ) const override
+	{
+		/* No block is deleted, so this reads as harmless — and it is the one in
+		 * the set most likely to be run by accident on the wrong node. What it
+		 * destroys is the hierarchy: the transforms are multiplied into the
+		 * children on the way out, and no operation puts the nesting back.
+		 */
+		return Spell::tr( "Move every child of %1 up to its parent?"
+			"\n\nEach child keeps its world position, because %1's transform is multiplied "
+			"into it on the way out. The nesting itself cannot be restored." )
+			.arg( describeBlock( nif, index ) );
+	}
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override
 	{
@@ -1850,13 +1915,32 @@ public:
 	QString name() const override final { return Spell::tr( "Crop To Branch" ); }
 	QString page() const override final { return Spell::tr( "Block" ); }
 
+	bool destructive() const override final { return true; }
+	QString destructiveWarning( NifModel * nif, const QModelIndex & index ) const override final
+	{
+		/* The one that can empty a file. getBranch appends without deduplicating
+		 * — harmless for the removal loop, which only asks `contains` — so the
+		 * kept set has to be counted through a QSet or the number here is wrong
+		 * on any file that shares a block between two parents.
+		 */
+		const QList<quint32> branch = getBranch( nif, nif->getBlockNumber( index ) );
+		const int kept = QSet<quint32>( branch.cbegin(), branch.cend() ).size();
+		const int total = nif->getBlockCount();
+		return kept > 1
+			? Spell::tr( "Delete %1 of the %2 blocks in this file, keeping only %3 and the %4 "
+				"blocks in its branch?" )
+				.arg( total - kept ).arg( total ).arg( describeBlock( nif, index ) ).arg( kept - 1 )
+			: Spell::tr( "Delete %1 of the %2 blocks in this file, keeping only %3?" )
+				.arg( total - kept ).arg( total ).arg( describeBlock( nif, index ) );
+	}
+
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
 		return nif->isNiBlock( index );
 	}
 
 	// construct list of block numbers of all blocks that are in the link's branch (including link itself)
-	QList<quint32> getBranch( NifModel * nif, quint32 link )
+	QList<quint32> getBranch( NifModel * nif, quint32 link ) const
 	{
 		QList<quint32> branch;
 		// add the link itself
@@ -1907,8 +1991,10 @@ public:
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
-		Q_UNUSED( nif );
-		return index.isValid();
+		// was `index.isValid()`, which put Convert on every field row in Block
+		// Details, where cast() reads itemName as a block type, finds no
+		// inheritance chain, and offers an empty chooser
+		return nif->isNiBlock( index );
 	}
 
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final

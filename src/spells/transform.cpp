@@ -103,6 +103,32 @@ bool spApplyTransformation::isApplicable( const NifModel * nif, const QModelInde
 			|| nif->inherits( itemName, "BSTriShape" ) || nif->inherits( itemName, "BSGeometry" ) );
 }
 
+/*! What Apply is about to bake, including the animated/skinned caveat that used
+ *  to be a second dialog inside cast().
+ *
+ *  Two modals in a row for one click is worse than one, and on these files the
+ *  caveat fires often — a Tesla VFX node has a controller on nearly every branch.
+ *  cast() still asks when it is called directly (Combine Shapes does, in a loop),
+ *  which is why the question there is now conditional on Spell::confirmedByBook().
+ */
+QString spApplyTransformation::destructiveWarning( NifModel * nif, const QModelIndex & index ) const
+{
+	const QString what = nif->inherits( nif->itemName( index ), "NiNode" )
+		? Spell::tr( "Multiply %1's transform into its children and reset it to identity?" )
+		: Spell::tr( "Multiply %1's transform into its vertices and reset it to identity?" );
+	QString s = what.arg( QString( "[%1] %2" ).arg( nif->getBlockNumber( index ) )
+		.arg( nif->get<QString>( index, "Name" ) ) );
+
+	if ( nif->getLink( index, "Controller" ) != -1
+		|| nif->getLink( index, "Skin Instance" ) != -1
+		|| nif->getLink( index, "Skin" ) != -1 )
+	{
+		s += Spell::tr( "\n\nThis block is animated or skinned. Apply most likely will not do what "
+			"you expect: the controller keys and the skin bind stay in the old space." );
+	}
+	return s;
+}
+
 void spApplyTransformation::cast_Starfield( NifModel * nif, const QModelIndex & index )
 {
 	NifItem *	item = nif->getItem( index );
@@ -186,9 +212,12 @@ void spApplyTransformation::cast_Starfield( NifModel * nif, const QModelIndex & 
 
 QModelIndex spApplyTransformation::cast( NifModel * nif, const QModelIndex & index )
 {
-	if ( nif->getLink( index, "Controller" ) != -1
+	// destructiveWarning() already carried this caveat when the cast came through
+	// a SpellBook; asking again would be the second modal for one click
+	if ( !Spell::confirmedByBook()
+		 && ( nif->getLink( index, "Controller" ) != -1
 		 || nif->getLink( index, "Skin Instance" ) != -1
-		 || nif->getLink( index, "Skin" ) != -1 )
+		 || nif->getLink( index, "Skin" ) != -1 ) )
 		if ( QMessageBox::question( nullptr, Spell::tr( "Apply Transformation" ),
 			Spell::tr( "On animated and or skinned nodes Apply Transformation most likely won't work the way you expected it. Try anyway?" ) ) != QMessageBox::Yes )
 		{

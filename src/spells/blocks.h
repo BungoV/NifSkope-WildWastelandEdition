@@ -71,6 +71,9 @@ public:
 	QString page() const override final { return Spell::tr( "Block" ); }
 	QKeySequence hotkey() const override final { return{ QKeySequence( int( Qt::CTRL ) + int( Qt::Key_Delete ) ) }; }
 
+	bool destructive() const override final { return true; }
+	QString destructiveWarning( NifModel * nif, const QModelIndex & index ) const override final;
+
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final;
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final;
 };

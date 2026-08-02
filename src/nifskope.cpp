@@ -1469,7 +1469,8 @@ NifSkope::NifSkope( bool background )
 			select( nif->getBlockIndex( link ) );
 	} );
 	connect( header, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
-	connect( kfmtree, &NifTreeView::customContextMenuRequested, this, &NifSkope::contextMenu );
+	// no kfmtree connect: contextMenu returns immediately for any sender that is
+	// not tree, list or header, so the wire only ever cost a dispatch
 
 	// diff-vs-reference upkeep: edits re-derive the differing rows once per
 	// burst; block insert/remove revalidates the reference; a fresh load

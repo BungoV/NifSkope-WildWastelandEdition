@@ -824,11 +824,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< nif->get<QString>( nif->getBlockIndex( sb ), "Name" ) << "' verts "
 						<< nif->get<int>( nif->getBlockIndex( sb ), "Num Vertices" ) << "\n";
 					log.flush();
-					// deterministic transfer options; suppress the generic
-					// not-undoable confirmation (a CheckableMessageBox the
-					// driver does not know how to answer)
+					// deterministic transfer options
 					QSettings cfg;
-					cfg.setValue( "Settings/Suppress Undoable Confirmation", true );
 					cfg.setValue( "Rigging/MappingMode", 1 );	// Nearest Vertex
 					cfg.setValue( "Rigging/MaxInfluences", 4 );
 
@@ -1237,10 +1234,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( !copied ) { log << "FAIL: copy produced no branch payload\n"; break; }
 
 					// --- PASTE: cast Paste Branch onto a SHAPE (not a node), so the
-					// fallback must slot each root into the nearest NiNode. Suppress
-					// the generic not-undoable confirm the SpellBook would pop. ---
-					QSettings cfg;
-					cfg.setValue( "Settings/Suppress Undoable Confirmation", true );
+					// fallback must slot each root into the nearest NiNode. ---
 					const int origCount = nif->getBlockCount();
 					skope->castSpell( QStringLiteral( "Block/Paste Branch" ),
 						nif->getBlockIndex( roots.first() ) );
@@ -1639,8 +1633,6 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< " (desc flag " << hadFlag << ")\n";
 					log.flush();
 
-					QSettings cfg;
-					cfg.setValue( "Settings/Suppress Undoable Confirmation", true );
 					skope->castSpell( QLatin1String( "Vertex Flags" ), iDesc );
 
 					// re-resolve: the spell may rebuild the block's items
@@ -4621,6 +4613,234 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				 * nobody to answer it, which hung the run. That prompt is correct
 				 * behaviour; it is the harness that has to decline it.
 				 */
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_DESTRUCTIVE_TEST=1): is the confirmation on the right
+	 * spells, does it say what is lost, and can it still be turned off?
+	 *
+	 * The prompt this replaces fired for nearly every write and carried a "Do not
+	 * ask me again" box, so one tick disarmed it for Crop To Branch too. Reading
+	 * the code cannot tell you the new one is any better -- a `destructive()` that
+	 * returns true but is never consulted, or a dialog whose Cancel still lets the
+	 * cast through, both look correct on the page. So all four properties are
+	 * measured against a real cast:
+	 *
+	 *   1. Cancel means cancel        the file is unchanged afterwards
+	 *   2. it names the loss          the text carries the actual block counts,
+	 *                                 which is the whole difference from
+	 *                                 "this action cannot currently be undone"
+	 *   3. it cannot be suppressed    set the old suppression key and it still asks
+	 *   4. and it is not on everything  Move Up, non-destructive, is not to ask at
+	 *                                 all -- the old code prompted for it, so this
+	 *                                 check is what fails on the previous version
+	 *
+	 * The dialog is modal and exec() blocks, so it is answered by a timer started
+	 * before the cast: it polls for the active modal window from inside the nested
+	 * loop, records the text and clicks a button. `sawDialog` staying false is a
+	 * real result, not an absence of evidence -- check 4 depends on it.
+	 * Log: release/ww_destructive_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DESTRUCTIVE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_destructive_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif || nif->getBlockCount() < 3 ) { log << "no usable model\n"; break; }
+
+					/* NOT the root. Cropping to the root keeps the whole file, and
+					 * the first version of this harness did exactly that: the
+					 * dialog truthfully said "Delete 0 of the 268 blocks" and the
+					 * count check failed on a fixture problem rather than a bug.
+					 */
+					int target = -1;
+					const QList<int> roots = nif->getRootLinks();
+					for ( int b = 0; b < nif->getBlockCount() && target < 0; b++ ) {
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "NiAVObject" )
+							&& !roots.contains( b ) )
+							target = b;
+					}
+					if ( target < 0 ) { log << "no non-root NiAVObject\n"; break; }
+					log << "target: block " << target << " "
+						<< nif->itemName( nif->getBlockIndex( target ) ) << "\n";
+
+					/* Answer whatever modal appears while a cast runs.
+					 *
+					 * Deliberately ANY modal dialog, not just a QMessageBox. The
+					 * prompt this change removes was a CheckableMessageBox, which
+					 * is a plain QDialog — a poller that only recognised
+					 * QMessageBox would leave it unanswered, so the old code would
+					 * hang here instead of failing, and "a non-destructive spell
+					 * runs without a prompt" would read as passing right up until
+					 * the run timed out. A check that cannot fail cleanly on the
+					 * code it exists to reject is not a check.
+					 *
+					 * `accept` picks the button by role rather than by text: the
+					 * go-ahead is labelled with the operation ("Crop To Branch"),
+					 * deliberately, so there is no fixed string to match on.
+					 */
+					QString seen, seenClass;
+					bool sawDialog = false;
+					auto answerNextDialog = [&seen, &seenClass, &sawDialog]( bool accept ) {
+						auto * poll = new QTimer;
+						poll->setInterval( 40 );
+						QObject::connect( poll, &QTimer::timeout, poll,
+							[poll, &seen, &seenClass, &sawDialog, accept]() {
+							auto * dlg = qobject_cast<QDialog *>( QApplication::activeModalWidget() );
+							if ( !dlg )
+								return;
+							sawDialog = true;
+							seenClass = QString::fromLatin1( dlg->metaObject()->className() );
+							poll->stop();
+
+							if ( auto * box = qobject_cast<QMessageBox *>( dlg ) ) {
+								seen = box->text();
+								for ( QAbstractButton * b : box->buttons() ) {
+									if ( ( box->buttonRole( b ) == QMessageBox::AcceptRole ) == accept ) {
+										b->click();
+										return;
+									}
+								}
+								box->reject();
+								return;
+							}
+
+							// anything else: read its labels, then take the
+							// button box if it has one
+							QStringList text;
+							for ( QLabel * l : dlg->findChildren<QLabel *>() )
+								if ( !l->text().isEmpty() )
+									text << l->text();
+							seen = text.join( QLatin1Char( ' ' ) );
+							if ( auto * bb = dlg->findChild<QDialogButtonBox *>() ) {
+								if ( QPushButton * b = bb->button( accept
+										? QDialogButtonBox::Yes : QDialogButtonBox::No ) ) {
+									b->click();
+									return;
+								}
+							}
+							if ( accept ) dlg->accept(); else dlg->reject();
+						} );
+						poll->start();
+						return poll;
+					};
+
+					/* Move Up FIRST, because it renumbers.
+					 *
+					 * It ran last in the first version of this harness and shifted
+					 * the block the crop checks had already chosen, so the final
+					 * cast cropped to a different, childless block and deleted 267
+					 * where the dialog had said 0. Both numbers were right about
+					 * the block they were describing; they were describing
+					 * different blocks.
+					 */
+					int mover = -1;
+					for ( int b = nif->getBlockCount() - 1; b > target && mover < 0; b-- )
+						if ( nif->isNiBlock( nif->getBlockIndex( b ) ) )
+							mover = b;
+					if ( mover > 0 ) {
+						const QString wasAt = nif->itemName( nif->getBlockIndex( mover ) );
+						seen.clear(); sawDialog = false;
+						QTimer * p3 = answerNextDialog( true );
+						skope->castSpell( QStringLiteral( "Block/Move Up" ),
+							nif->getBlockIndex( mover ) );
+						QApplication::processEvents();
+						p3->stop(); delete p3;
+						const bool moved = nif->itemName( nif->getBlockIndex( mover - 1 ) ) == wasAt;
+						log << "Move Up on block " << mover << ": dialog seen " << sawDialog
+							<< " " << seenClass << ", block moved " << moved << "\n";
+						check( "a non-destructive spell runs without a prompt", !sawDialog );
+						check( "and it still ran", moved );
+					} else {
+						log << "no block to Move Up\n";
+					}
+
+					const int before = nif->getBlockCount();
+
+					// --- Cancel, and what the text says -------------------------
+					seen.clear(); sawDialog = false;
+					QTimer * p1 = answerNextDialog( false );
+					skope->castSpell( QStringLiteral( "Block/Crop To Branch" ),
+						nif->getBlockIndex( target ) );
+					QApplication::processEvents();
+					p1->stop(); delete p1;
+					log << "cancel path: dialog seen " << sawDialog << ", blocks "
+						<< before << " -> " << nif->getBlockCount() << "\n";
+					log << "  text: " << seen << "\n";
+					check( "Crop To Branch asks before it runs", sawDialog );
+					check( "Cancel leaves the file alone", nif->getBlockCount() == before );
+
+					// the counts are the point: "Delete 214 of the 217 blocks..."
+					static const QRegularExpression counts(
+						QStringLiteral( "Delete (\\d+) of the (\\d+) blocks" ) );
+					const auto m = counts.match( seen );
+					bool named = m.hasMatch() && m.captured( 2 ).toInt() == before
+						&& m.captured( 1 ).toInt() > 0;
+					check( "the question names how much of the file goes", named );
+
+					// --- the old suppression key must not disarm it -------------
+					{
+						QSettings cfg;
+						cfg.setValue( "Settings/Suppress Undoable Confirmation", true );
+					}
+					seen.clear(); sawDialog = false;
+					QTimer * p2 = answerNextDialog( false );
+					skope->castSpell( QStringLiteral( "Block/Crop To Branch" ),
+						nif->getBlockIndex( target ) );
+					QApplication::processEvents();
+					p2->stop(); delete p2;
+					log << "with Suppress Undoable Confirmation set: dialog seen "
+						<< sawDialog << "\n";
+					check( "the confirmation cannot be switched off", sawDialog );
+					{
+						QSettings cfg;
+						cfg.remove( QStringLiteral( "Settings/Suppress Undoable Confirmation" ) );
+					}
+
+					/* The go-ahead, and the strongest check here: the file must
+					 * lose EXACTLY the number the dialog quoted.
+					 *
+					 * "it deleted something" would pass on a warning whose counts
+					 * are off by any amount, and a count that is merely plausible
+					 * is worse than none — it is the number the user weighed the
+					 * decision on.
+					 */
+					seen.clear(); sawDialog = false;
+					const int wasCount = nif->getBlockCount();
+					QTimer * p4 = answerNextDialog( true );
+					skope->castSpell( QStringLiteral( "Block/Crop To Branch" ),
+						nif->getBlockIndex( target ) );
+					QApplication::processEvents();
+					p4->stop(); delete p4;
+					const auto m2 = counts.match( seen );
+					const int promised = m2.hasMatch() ? m2.captured( 1 ).toInt() : -1;
+					const int lost = wasCount - nif->getBlockCount();
+					log << "accept path: blocks " << wasCount << " -> "
+						<< nif->getBlockCount() << " (lost " << lost
+						<< ", dialog promised " << promised << ")\n";
+					check( "the go-ahead button actually casts", lost > 0 );
+					check( "and the file loses exactly what the dialog quoted", lost == promised );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				// this harness really does modify the file; decline the save prompt
 				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
 					n->undoStack->setClean();
 				skope->setWindowModified( false );
@@ -11130,7 +11350,7 @@ void NifSkope::initMenu()
 
 		/* What each one actually does, in one line, read off the implementation
 		 * rather than the label — several of these names are misleading.
-		 * `Fix Geometry Data Names` never touches a name; `Reorder Link Arrays`
+		 * `Zero Geometry Group ID` was `Fix Geometry Data Names` and never touched a name; `Reorder Link Arrays`
 		 * silently drops dead children as well as sorting.
 		 *
 		 * `Spell::hint()` exists for this and is unused across the whole tree.
@@ -11153,8 +11373,8 @@ void NifSkope::initMenu()
 			  "Rewrites the object palette so its names match the nodes they point at." },
 			{ "Reorder Blocks",
 			  "Renumbers every block in the file. Upstream keeps this out of auto-sanitize: it can break CK texture-set overrides." },
-			{ "Fix Geometry Data Names",
-			  "Zeroes the Group ID on geometry data. Despite the name it does not rename anything." },
+			{ "Zero Geometry Group ID",
+			  "Zeroes the Group ID on every NiGeometryData block. Fallout 3 / New Vegas only." },
 			{ "Check Links",
 			  "Reports links that point outside the file or at the wrong block type." },
 			{ "None Refs",
@@ -11186,7 +11406,7 @@ void NifSkope::initMenu()
 		static const char * const unfuckOrder[] = {
 			"Collapse Link Arrays", "Reorder Link Arrays", "Reorder Blocks",
 			"Fix Invalid Block Names", "Enforce Node Name Authority",
-			"Fix Geometry Data Names", "Fill Blank NiControllerSequence Types",
+			"Zero Geometry Group ID", "Fill Blank NiControllerSequence Types",
 			"Adjust Texture Sources",
 			"Update All Bounds", "Update All Tangent Spaces", "Make All Skin Partitions",
 			"Remove Unused Strings",
@@ -11316,7 +11536,7 @@ void NifSkope::initMenu()
 				const QString n = s->name();
 				if ( n == tr( "Reorder Link Arrays" ) || n == tr( "Collapse Link Arrays" ) )
 					return tr( "needs NIF 20.0.0.4 or newer with a Bethesda version" );
-				if ( n == tr( "Fix Geometry Data Names" ) )
+				if ( n == tr( "Zero Geometry Group ID" ) )
 					return tr( "Fallout 3 / New Vegas only" );
 				if ( n == tr( "Adjust Texture Sources" ) )
 					return tr( "only for games below BSVersion 130" );
@@ -13487,7 +13707,12 @@ void NifSkope::contextMenu( const QPoint & pos )
 		}
 	}
 	if ( sender() == list && nif ) {
-		contextBook.addSeparator();
+		// the separator goes in afterwards, once it is known that something
+		// followed it — all three of these actions are conditional, and on a
+		// non-block row with no diff reference and an empty field clipboard none
+		// of them appear, leaving a rule at the bottom of the menu separating
+		// nothing from nothing
+		const int wasCount = contextBook.actions().size();
 		const int bn = nif->getBlockNumber( idx );
 		if ( bn >= 0 && bn != nif->diffRefBlock ) {
 			QAction * aRef = contextBook.addAction( tr( "Set as Diff Reference" ) );
@@ -13523,7 +13748,14 @@ void NifSkope::contextMenu( const QPoint & pos )
 					[this, blocks]() { wwPasteFieldToBlocks( blocks ); } );
 			}
 		}
+		const QList<QAction *> acts = contextBook.actions();
+		if ( acts.size() > wasCount && wasCount > 0 )
+			contextBook.insertSeparator( acts.at( wasCount ) );
 	}
+
+	// four of the actions built above carry a tooltip, and QMenu suppresses them
+	// unless asked; they have been dead text since they were written
+	contextBook.setToolTipsVisible( true );
 
 	if ( !idx.isValid() || nif->flags( idx ) & (Qt::ItemIsEnabled | Qt::ItemIsSelectable) )
 		contextBook.exec( p );

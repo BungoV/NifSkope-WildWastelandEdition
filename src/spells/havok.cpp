@@ -1209,7 +1209,9 @@ REGISTER_SPELL( spCreateCollision )
 class spConstraintHelper final : public Spell
 {
 public:
-	QString name() const override final { return Spell::tr( "A -> B" ); }
+	// was "A -> B", which named its arrow and not its effect: it recomputes the
+	// B-side pivot and axes from the A side, through both bodies' world transforms
+	QString name() const override final { return Spell::tr( "Recompute B Frame from A" ); }
 	QString page() const override final { return Spell::tr( "Havok" ); }
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final

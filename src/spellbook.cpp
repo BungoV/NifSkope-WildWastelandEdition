@@ -32,11 +32,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "spellbook.h"
 
-#include "ui/checkablemessagebox.h"
-
 #include <QCache>
 #include <QDir>
-#include <QSettings>
+#include <QMessageBox>
+#include <QPushButton>
 
 
 
@@ -107,51 +106,74 @@ SpellBook::~SpellBook()
 	books().removeAll( this );
 }
 
+bool Spell::bookConfirmed = false;
+
 void SpellBook::cast( NifModel * nif, const QModelIndex & index, SpellPtr spell )
 {
-	QSettings cfg;
-
-	bool suppressConfirm = cfg.value( "Settings/Suppress Undoable Confirmation", false ).toBool();
-	bool accepted = false;
-
-	QDialogButtonBox::StandardButton response = QDialogButtonBox::Yes;
+	if ( !spell || !spell->isApplicable( nif, index ) )
+		return;
 
 	// Cast non-modifying spells
-	if ( spell && spell->isApplicable( nif, index ) && spell->constant() ) {
+	if ( spell->constant() ) {
 		auto idx = spell->cast( nif, index );
 		emit sigIndex( idx );
 		return;
 	}
 
-	if ( !suppressConfirm && !spell->undoable() && spell->page() != "Array" ) {
-		response = CheckableMessageBox::question( this, "Confirmation", "This action cannot currently be undone. Do you want to continue?", "Do not ask me again", &accepted );
+	/* Only the spells that destroy something ask, and they ask in their own
+	 * words. There is deliberately no "do not ask me again": the whole failure
+	 * of the prompt this replaces was that one tick disarmed it for the six
+	 * operations that can empty a file. See Spell::destructive().
+	 */
+	bool asked = false;
+	if ( spell->destructive() ) {
+		QString what = spell->destructiveWarning( nif, index );
+		if ( what.isEmpty() )
+			what = tr( "%1 destroys data this file cannot get back, and it cannot be undone." )
+				.arg( spell->name() );
 
-		if ( accepted )
-			cfg.setValue( "Settings/Suppress Undoable Confirmation", true );
+		QMessageBox box( QMessageBox::Warning, spell->name(), what, QMessageBox::NoButton, this );
+		// The go-ahead button is labelled with the operation, not "OK" — the one
+		// place a stray Return must not land is on a button whose text is agreement.
+		QPushButton * go = box.addButton( spell->name(), QMessageBox::AcceptRole );
+		box.setDefaultButton( box.addButton( QMessageBox::Cancel ) );	// Enter and Esc back out
+		box.exec();
+		// clickedButton() is null when the dialog is closed by the title bar, so
+		// this tests for consent rather than for refusal
+		if ( box.clickedButton() != go )
+			return;
+		asked = true;
 	}
 
-	if ( (response == QDialogButtonBox::Yes) && spell && spell->isApplicable( nif, index ) ) {
-		bool noSignals = spell->batch();
-		if ( noSignals )
-			nif->setState( BaseModel::Processing );
-		// Cast the spell and return index
-		auto idx = spell->cast( nif, index );
-		if ( noSignals )
-			nif->resetState();
+	// tells a spell that also warns from its own cast() that the question has
+	// already been put to the user on this path
+	struct ConfirmScope
+	{
+		explicit ConfirmScope( bool on ) : was( Spell::bookConfirmed ) { Spell::bookConfirmed = on; }
+		~ConfirmScope() { Spell::bookConfirmed = was; }
+		bool was;
+	} confirmScope( asked );
 
-		// Refresh the header
-		nif->invalidateHeaderConditions();
-		nif->updateHeader();
+	bool noSignals = spell->batch();
+	if ( noSignals )
+		nif->setState( BaseModel::Processing );
+	// Cast the spell and return index
+	auto idx = spell->cast( nif, index );
+	if ( noSignals )
+		nif->resetState();
 
-		if ( nif->getProcessingResult() ) {
-			QModelIndex i = idx;
-			if ( !i.isValid() )
-				i = nif->getRootIndex();
-			emit nif->dataChanged( i, i );
-		}
+	// Refresh the header
+	nif->invalidateHeaderConditions();
+	nif->updateHeader();
 
-		emit sigIndex( idx );
+	if ( nif->getProcessingResult() ) {
+		QModelIndex i = idx;
+		if ( !i.isValid() )
+			i = nif->getRootIndex();
+		emit nif->dataChanged( i, i );
 	}
+
+	emit sigIndex( idx );
 }
 
 void SpellBook::sltSpellTriggered( QAction * action )

@@ -1,5 +1,109 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02b — The confirmation now asks the right spells, in their own words
+
+**The prompt was inverted.** `SpellBook::cast` fired one generic question — *"This
+action cannot currently be undone. Do you want to continue?"* — for nearly every
+write, because `undoable()` is overridden `true` by six spells in the entire tree.
+And it carried a **Do not ask me again** checkbox. So the first time anyone ticked
+that box to get past a routine edit, Crop To Branch, Remove Branch, Remove, Flatten
+Branch and Apply Transformation all went silent too, permanently, in the registry.
+Loudest where it mattered least; absent where it mattered most.
+
+`Spell::destructive()` replaces it. The handful of spells that destroy something
+ask; nothing else asks at all. The question names the loss —
+
+> Delete 267 of the 268 blocks in this file, keeping only \[145] NiNode
+> 'BlastRadiusNode'?
+
+— the go-ahead button is labelled with the operation rather than "OK", Cancel is
+the default so Return and Esc both back out, and **there is no off switch**.
+
+Marked destructive: Crop To Branch, Remove Branch, Remove, Flatten Branch (both),
+Apply Transformation. Each writes its own text. Remove says the children stay
+behind orphaned, which is the part that surprises people. Flatten Branch says the
+nesting cannot be rebuilt — it deletes nothing, so it reads as harmless and is the
+one most likely to be run on the wrong node. Crop To Branch counts through a
+`QSet`, because `getBranch` appends without deduplicating and the raw list
+overstates the kept set on any file that shares a block between two parents.
+
+`Convert` is deliberately **not** marked, against the audit's recommendation: its
+target type is chosen inside `cast()`, so a confirmation before the chooser cannot
+name what is lost and a second one after it would be two modals for one click. The
+chooser is the confirmation.
+
+Apply Transformation had its own animated/skinned warning inside `cast()`. That
+text moved into the destructive question so the menu path shows one dialog, and
+the inner one is now gated on `Spell::confirmedByBook()` — it still fires for the
+direct callers, which is how Combine Shapes reaches it.
+
+**Verified against the code it replaces.** `WW_DESTRUCTIVE_TEST` casts real spells
+and answers the real modal from inside the nested event loop: Cancel leaves the
+file alone, the counts in the text match the file, the old suppression key does
+not disarm it, a non-destructive spell (Move Up) raises **no** dialog and still
+runs, and the accept path loses *exactly* the number quoted. 8 checks green.
+Reverting `SpellBook::cast` to the old prompt fails 5 of the 8 — including, worth
+naming, `blocks 268 -> 1` with the suppression key set and no dialog at all.
+
+The poller answers any modal `QDialog`, not just `QMessageBox`, on purpose: the old
+prompt was a `CheckableMessageBox`, and a `QMessageBox`-only poller would have left
+it unanswered, so the old code would have *hung* rather than failed and "runs
+without a prompt" would have read as passing until the run timed out.
+
+**Block List free wins, from the context-menu audit.** `Convert` was
+`return index.isValid()` — it appeared on every field row in Block Details, where
+`cast()` reads a field name as a block type and offers an empty chooser; gated on
+`isNiBlock` now. The trailing separator in the Block List menu is inserted only
+once something follows it. `setToolTipsVisible(true)`, so the four hand-written
+tooltips in that menu stop being dead text. The `kfmtree` → `contextMenu` connect
+is gone; the slot returns immediately for any sender that is not tree, list or
+header.
+
+Two spells renamed to what they do: `A -> B` → **Recompute B Frame from A** (it
+recomputes the B-side pivot and axes from the A side through both bodies' world
+transforms), and `Fix Geometry Data Names` → **Zero Geometry Group ID** (it sets
+Group ID to 0 and touches no name at all — the old label matched the file's own doc
+comment, and both were wrong).
+
+Full suite after: 54 checks across six harnesses, 0 failures.
+
+## 2026-08-02a — Unfuck grouped by issue class, with a per-row fix
+
+Grouping findings by the spell that reported them was the first design and it was
+wrong, in a way that had already produced a visible error. **One spell emits
+several unrelated problems with different answers.** `spErrorNoneRefs` is the
+proof — it reports both
+
+    'Properties' link array contains 2 None Refs.     <- a hole in an array
+    'Skeleton Root' link is None.                     <- a missing single Ref
+
+The first is repaired exactly by Collapse Link Arrays, which runs `numCollapser`
+over `Properties` and `Extra Data List`, the same two arrays that checker inspects.
+The second is a lone Ref no collapse can touch and nothing in the spell library
+repairs. Filed under one heading, either the fixable half loses its fix or the
+unfixable half gains a button that does nothing to it.
+
+So the panel is now keyed on an `IssueClass` catalogue of six problem *kinds*
+matched by regex, each carrying its own title, whole-file spell, per-row spell and
+caveat. Findings are collected from every check first, then grouped, worst severity
+first, with an "(uncatalogued)" fallback so a checker added later shows up
+ungrouped and without a fix rather than not at all.
+
+**The per-row fix exists, for one class.** The message carries both halves it needs
+— block from `[19]`, array from `'Properties'` — so the array's own index is
+rebuilt and `spCollapseArray` cast on that array alone. Its `isApplicable`
+re-validates, so a wrong reconstruction refuses rather than collapsing something
+else.
+
+**A bug review would not have caught.** `SpellBook::lookup` takes a `"Page/Name"`
+id and, given a bare name, matches only spells whose `page()` is empty. Every
+lookup in the panel passed a bare name, so every one returned null — including the
+**Repairs button, which had been silently doing nothing** while reporting "does not
+apply to this file". It looked entirely correct and was already committed. What
+exposed it was asserting that a fix *resolves its finding* rather than that a
+button exists; the first version of that check passed on a no-op. Replaced with a
+`spellNamed()` resolver that searches by name across pages.
+
 ## 2026-08-01e — One row at the top, and three audit fixes
 
 **The menu bar and the tool bar share a row.** Three stacked bands at the top of
