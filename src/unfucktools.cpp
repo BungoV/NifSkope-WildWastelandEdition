@@ -280,6 +280,76 @@ const IssueClass issueClasses[] = {
 	  "No automatic fix — finish editing, then compile consistently, or the game and the editor will disagree about what is solid." },
 };
 
+/*! Run order for the Repairs section, which is NOT its display order.
+ *
+ *  The rows are listed alphabetically because that is easy to scan, and that
+ *  used to drive execution too — a coin flip that stays harmless only while
+ *  nothing depends on anything. It does: compacting the string table has to come
+ *  after the passes that ADD strings, and derived data (bounds, tangents, skin
+ *  partitions) has to come after the structure it is derived from settles.
+ *
+ *  Alphabetically, "Adjust Texture Sources" runs FIRST. It belongs after the
+ *  structural passes, and that is the misordering a default run actually hits —
+ *  the two spells whose ordering looks most alarming here, Reorder Blocks and
+ *  Enforce Node Name Authority, are both unticked by default because neither
+ *  claims sanity(), so reaching them takes a deliberate click.
+ *
+ *  Anything not listed runs between the structural group and the derived group,
+ *  in whatever order it was gathered.
+ */
+const char * const repairOrder[] = {
+	"Collapse Link Arrays", "Reorder Link Arrays", "Reorder Blocks",
+	"Fix Invalid Block Names", "Enforce Node Name Authority",
+	"Zero Geometry Group ID", "Fill Blank NiControllerSequence Types",
+	"Adjust Texture Sources",
+	"Update All Bounds", "Update All Tangent Spaces", "Make All Skin Partitions",
+	"Remove Unused Strings",
+};
+
+/*! Whole-file repairs that live on other pages and the Sanitize/sanity() rule
+ *  would never gather.
+ *
+ *  Each is a genuine "my file is broken" answer, and each rewrites more than it
+ *  repairs, so none is ticked by default. Deliberately NOT here: the batch
+ *  optimisers and normal generators, which overwrite authoring intent on meshes
+ *  that were fine, and anything that writes other files to disk.
+ */
+const char * const repairExtras[] = {
+	"Update All Bounds", "Update All Tangent Spaces",
+	"Remove Unused Strings", "Make All Skin Partitions",
+};
+
+//! Position in repairOrder, or a middle value for anything unlisted.
+int orderOf( const QString & name )
+{
+	for ( int i = 0; i < int( std::size( repairOrder ) ); i++ )
+		if ( name == QLatin1String( repairOrder[i] ) )
+			return i;
+	return int( std::size( repairOrder ) ) / 2;
+}
+
+/*! Why a repair is greyed out, in its own words.
+ *
+ *  "Nothing for this to do in this file" was the old text and it was not true:
+ *  these are FORMAT gates, not content probes, so the honest answer is which
+ *  format this file is not. Read straight off each isApplicable.
+ */
+QString whyNotApplicable( const NifModel * nif, const QString & name )
+{
+	if ( name == QLatin1String( "Reorder Link Arrays" )
+		|| name == QLatin1String( "Collapse Link Arrays" ) )
+		return QObject::tr( "needs NIF 20.0.0.4 or newer with a Bethesda version" );
+	if ( name == QLatin1String( "Zero Geometry Group ID" ) )
+		return QObject::tr( "Fallout 3 / New Vegas only" );
+	if ( name == QLatin1String( "Adjust Texture Sources" ) )
+		return QObject::tr( "only for games below BSVersion 130" );
+	if ( name == QLatin1String( "Enforce Node Name Authority" ) )
+		return QObject::tr( "this file has no object palette" );
+	if ( nif && nif->getBSVersion() == 0 )
+		return QObject::tr( "not a Bethesda NIF" );
+	return QObject::tr( "does not apply to this file's format" );
+}
+
 //! Block number embedded in a finding, as "[19] ...". -1 when there is none.
 int blockOf( const QString & text )
 {
@@ -769,7 +839,20 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			// in the Issues list above, not here.
 			if ( !sp || sp->checker() || sp->constant() || fixes.contains( sp ) )
 				continue;
-			if ( sp->page() != Spell::tr( "Sanitize" ) && !sp->sanity() )
+			/* The Sanitize page, PLUS four named repairs that live on other pages.
+			 *
+			 * Update All Bounds, Update All Tangent Spaces, Remove Unused Strings
+			 * and Make All Skin Partitions are on the Batch and Optimize pages and
+			 * none of them claims sanity(), so the rule above cannot see them —
+			 * yet each is a genuine answer to "my file is broken" and Update All
+			 * Bounds in particular fixes meshes that vanish as the camera moves.
+			 * They were reachable from the old dialog and nowhere else.
+			 */
+			bool wanted = ( sp->page() == Spell::tr( "Sanitize" ) || sp->sanity() );
+			for ( const char * extra : repairExtras )
+				if ( sp->name() == QLatin1String( extra ) )
+					wanted = true;
+			if ( !wanted )
 				continue;
 			// A spell that wants a selected block cannot run from here at all.
 			if ( sp->name() == QLatin1String( "Sort Keys" ) )
@@ -781,16 +864,119 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		for ( SpellPtr sp : fixes ) {
 			auto * item = new QTreeWidgetItem( repairs );
 			const bool ok = sp->isApplicable( m, QModelIndex() );
-			item->setText( 0, sp->name() );
+			item->setText( 0, ok ? sp->name()
+				: QObject::tr( "%1 — %2" ).arg( sp->name(), whyNotApplicable( m, sp->name() ) ) );
 			item->setData( 0, SpellRole, sp->name() );
+			/* Armed from the spell's OWN sanity() flag, never from the group it
+			 * landed in. Upstream uses that flag to keep dangerous spells out of
+			 * automatic runs and says so in the source — Reorder Blocks renumbers
+			 * every block and carries the comment "can really only cause issues
+			 * with rendering and textureset overrides via the CK" — so ticking by
+			 * group would override a judgement this panel did not make. The four
+			 * extras have no sanity() either, and so arrive unticked, which is
+			 * correct: each rewrites more than it repairs.
+			 */
 			item->setCheckState( 0, ( ok && sp->sanity() ) ? Qt::Checked : Qt::Unchecked );
 			item->setDisabled( !ok );
+			item->setToolTip( 0, sp->hint() );
 			if ( !ok )
 				item->setForeground( 0, QColor( wwSkinColor( "textMuted" ) ) );
 		}
 	};
 
 	QObject::connect( rescan, &QPushButton::clicked, panel, [=]() { scan(); rebuildRepairs(); } );
+
+	/*! Run several repairs as ONE undoable step, in the curated order.
+	 *
+	 *  Two things the previous version got wrong, both inherited from casting
+	 *  runFix in a loop.
+	 *
+	 *  UNDO. Each runFix pushed its own snapshot, so a five-repair run left five
+	 *  commands and Ctrl+Z walked back through half-repaired intermediate states
+	 *  one at a time. A user who ticks five boxes and presses one button has done
+	 *  one thing and expects one undo.
+	 *
+	 *  ORDER. The rows are displayed alphabetically, which put "Adjust Texture
+	 *  Sources" first and "Remove Unused Strings" in the middle — and compacting
+	 *  the string table has to come after everything that adds strings. See
+	 *  repairOrder.
+	 *
+	 *  WHY NOT nifSnapshotOp. Two reasons, both of which only appear once several
+	 *  spells run together. It nests: spEnforceNameAuthority::cast calls
+	 *  nifSnapshotOp itself, so wrapping the batch in another one pushes two
+	 *  commands for one run and the second Ctrl+Z walks the file FORWARD into a
+	 *  half-repaired state. Detaching the undo stack for the duration makes every
+	 *  spell's own snapshot a no-op — nifSnapshotOp only pushes
+	 *  `if ( nif->undoStack )` — leaving exactly one command to push at the end.
+	 *  And it pushes unconditionally: a run that changes nothing would still mark
+	 *  the document modified and ask to save on close.
+	 *
+	 *  Header and footer are updated INSIDE the measured region. They are derived
+	 *  bookkeeping, a wrong root list is a real breakage, and refreshing them
+	 *  after the "after" snapshot would leave the undo command describing a file
+	 *  that no longer matches the model.
+	 */
+	auto runFixes = [=]( QStringList names ) {
+		NifModel * m = model();
+		if ( !m || names.isEmpty() )
+			return;
+		std::sort( names.begin(), names.end(),
+			[]( const QString & a, const QString & b ) { return orderOf( a ) < orderOf( b ); } );
+
+		QByteArray before;
+		{
+			QBuffer buf( &before );
+			buf.open( QIODevice::WriteOnly );
+			if ( !m->save( buf ) ) {
+				status->setText( QObject::tr( "Could not snapshot the file; nothing was run." ) );
+				return;
+			}
+		}
+
+		QUndoStack * stack = m->undoStack;
+		m->undoStack = nullptr;					// no nested commands inside the run
+		const BaseModel::MsgMode was = m->getMessageMode();
+		m->setMessageMode( BaseModel::MSG_TEST );
+		m->getMessages();						// drain
+
+		QStringList ran;
+		for ( const QString & n : std::as_const( names ) ) {
+			SpellPtr sp = spellNamed( n );
+			if ( !sp || !sp->isApplicable( m, QModelIndex() ) )
+				continue;
+			sp->cast( m, QModelIndex() );
+			ran << n;
+		}
+
+		m->invalidateHeaderConditions();
+		m->updateHeader();
+		m->updateFooter();
+		m->getMessages();
+		m->setMessageMode( was );
+		m->undoStack = stack;
+
+		QByteArray after;
+		{
+			QBuffer buf( &after );
+			buf.open( QIODevice::WriteOnly );
+			if ( !m->save( buf ) )
+				after = before;					// unreadable: assume unchanged
+		}
+		const bool changed = ( before != after );
+		if ( changed && m->undoStack )
+			m->undoStack->push( new NifSnapshotCommand( m, before, after,
+				QObject::tr( "Unfuck" ) ) );
+
+		scan();
+		/* What happened, not what was attempted. "Ran 6 repairs" does not answer
+		 * "is my file different now", and the byte comparison is the only honest
+		 * answer available without a per-spell probe.
+		 */
+		status->setText( changed
+			? QObject::tr( "Ran %n repair(s); the file changed. Ctrl+Z undoes the whole run. %1",
+				nullptr, ran.size() ).arg( status->text() )
+			: QObject::tr( "Ran %n repair(s); nothing changed.", nullptr, ran.size() ) );
+	};
 
 	QObject::connect( runRepairs, &QPushButton::clicked, panel, [=]() {
 		QStringList picked;
@@ -799,8 +985,7 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			if ( !it->isDisabled() && it->checkState( 0 ) == Qt::Checked )
 				picked << it->data( 0, SpellRole ).toString();
 		}
-		for ( const QString & f : std::as_const( picked ) )
-			runFix( f );
+		runFixes( picked );
 		rebuildRepairs();
 	} );
 

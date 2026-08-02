@@ -4535,6 +4535,33 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "severity reached the UI as colour", coloured > 0 );
 					check( "the repair list was built", repairs->topLevelItemCount() > 0 );
 
+					/* The four repairs that came across from the retired dialog.
+					 *
+					 * Update All Bounds, Update All Tangent Spaces, Remove Unused
+					 * Strings and Make All Skin Partitions live on the Batch and
+					 * Optimize pages and none claims sanity(), so the panel's
+					 * `page()=="Sanitize" || sanity()` rule cannot see them. They
+					 * were reachable from the dialog and nowhere else, so deleting
+					 * it without this would have quietly removed four repairs.
+					 */
+					static const char * const migrated[] = {
+						"Update All Bounds", "Update All Tangent Spaces",
+						"Remove Unused Strings", "Make All Skin Partitions",
+					};
+					int found = 0;
+					QStringList repairNames;
+					for ( int i = 0; i < repairs->topLevelItemCount(); i++ ) {
+						const QString n = repairs->topLevelItem( i )
+							->data( 0, int( Qt::UserRole ) + 2 /* SpellRole */ ).toString();
+						repairNames << n;
+						for ( const char * want : migrated )
+							if ( n == QLatin1String( want ) )
+								found++;
+					}
+					log << "repairs: " << repairNames.join( QStringLiteral( ", " ) ) << "\n";
+					check( "the four Batch/Optimize repairs survived the dialog's removal",
+						found == 4 );
+
 					// Go to: click the action column of the first located finding.
 					int before = -1, after = -1;
 					for ( int g = 0; g < groups && after < 0; g++ ) {
@@ -4599,6 +4626,72 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "the per-row fix resolved the finding it named", !stillThere );
 					} else {
 						log << "no per-row-fixable finding in this file\n";
+					}
+
+					/* SEVERAL REPAIRS, ONE UNDO STEP.
+					 *
+					 * The retired dialog ran its whole selection inside a single
+					 * snapshot; the panel ran runFix in a loop, so five ticked
+					 * boxes left five undo commands and Ctrl+Z walked back through
+					 * half-repaired intermediate states one at a time. Deleting
+					 * the dialog is only safe if that property came across with
+					 * it, and "there is now exactly one command" is not something
+					 * the UI can show.
+					 */
+					if ( NifModel * m = skope->getNifModel(); m && m->undoStack ) {
+						/* Arm everything applicable EXCEPT the one that stops for
+						 * input. `Fill Blank NiControllerSequence Types` opens a
+						 * QInputDialog inside the run, with nobody to answer it —
+						 * the first version of this block ticked it and hung the
+						 * whole harness until it was killed. Its own hint() says
+						 * "it stops and waits for input", which is exactly why it
+						 * is offered unticked to real users too.
+						 */
+						static const char * const stopsForInput[] = {
+							"Fill Blank NiControllerSequence Types",
+						};
+						int armed = 0;
+						for ( int i = 0; i < repairs->topLevelItemCount(); i++ ) {
+							QTreeWidgetItem * it = repairs->topLevelItem( i );
+							if ( it->isDisabled() )
+								continue;
+							bool interactive = false;
+							for ( const char * n : stopsForInput )
+								if ( it->data( 0, int( Qt::UserRole ) + 2 /* SpellRole */ )
+										.toString() == QLatin1String( n ) )
+									interactive = true;
+							if ( interactive ) {
+								it->setCheckState( 0, Qt::Unchecked );
+								continue;
+							}
+							it->setCheckState( 0, Qt::Checked );
+							armed++;
+						}
+						auto * runBtn = dock->findChild<QPushButton *>(
+							QStringLiteral( "UnfuckRunRepairsButton" ) );
+						const int cmdsBefore = m->undoStack->count();
+						const int blocksBefore = m->getBlockCount();
+						log << "arming " << armed << " repair(s), undo commands "
+							<< cmdsBefore << "\n";
+						if ( runBtn && armed >= 2 ) {
+							runBtn->click();
+							QApplication::processEvents();
+							const int pushed = m->undoStack->count() - cmdsBefore;
+							log << "after run: undo commands " << m->undoStack->count()
+								<< " (pushed " << pushed << "), blocks "
+								<< blocksBefore << " -> " << m->getBlockCount() << "\n";
+							check( "a multi-repair run is a single undo step", pushed <= 1 );
+							if ( pushed == 1 ) {
+								m->undoStack->undo();
+								QApplication::processEvents();
+								log << "after undo: blocks " << m->getBlockCount()
+									<< " (wanted " << blocksBefore << ")\n";
+								check( "one Ctrl+Z puts the whole run back",
+									m->getBlockCount() == blocksBefore );
+							}
+						} else {
+							log << "not enough applicable repairs to test batching\n";
+						}
 					}
 
 					dock->hide();
@@ -11505,362 +11598,34 @@ void NifSkope::initMenu()
 		spellsMenu->setToolTipsVisible( true );
 		ui->menubar->insertMenu( ui->menubar->actions().at( 3 ), spellsMenu );
 
-		/* Unfuck: the repair spells, in a dialog of their own.
+		/* Unfuck opens the workspace, and there is only one Unfuck now.
 		 *
-		 * bungo: "it's meant to open a new container, where you have all the
-		 * related settings, and you can toggle anything, then click ok or cancel."
-		 * A menu of checkable entries was the first attempt and is the wrong
-		 * shape: a menu closes on every click, so setting up a run means
-		 * reopening it once per fix, and there is no way to back out of the
-		 * choices you just made.
+		 * This used to build a modal dialog of checkboxes here -- ~350 lines of it --
+		 * and it went on doing that after the workspace panel landed, so the app
+		 * carried TWO Unfucks that disagreed: a dialog that asked which repairs to
+		 * run before saying what was wrong, and a panel that lists what is wrong.
+		 * bungo asked for the panel "instead"; this is the instead.
 		 *
-		 * WHAT EACH ROW IS ALLOWED TO BE
-		 *
-		 * Three rules, and the first two were learned the hard way by auditing
-		 * what the first version actually offered:
-		 *
-		 * 1. It must be able to run here. A spell whose `isApplicable` wants a
-		 *    valid index can never light up, because this dialog always asks with
-		 *    an invalid one — that is the whole point of it. `Sort Keys` and
-		 *    `Check Material` were sitting here permanently grey under a tooltip
-		 *    blaming the file. `wantsIndex` below proves the difference against
-		 *    the loaded file rather than guessing: a spell that says no to an
-		 *    invalid index and yes to a real block wants a block.
-		 *
-		 * 2. It is armed by ITS OWN `sanity()`, never by which group it landed in.
-		 *    Upstream uses that flag to keep dangerous spells out of auto-sanitize
-		 *    and says so — `Reorder Blocks` carries the comment "Can really only
-		 *    cause issues with rendering and textureset overrides via the CK" and
-		 *    returns false. Ticking a whole group on by default overrode that
-		 *    judgement, and armed `Fill Blank NiControllerSequence Types` too,
-		 *    which stops mid-batch on a modal QInputDialog inside the undo
-		 *    snapshot. Both are still offered; neither is pre-ticked.
-		 *
-		 * 3. A row that only reports belongs under Checks. `Check Links` reads
-		 *    the file and logs; it changes nothing, and listing it under "these
-		 *    change the file" was simply untrue.
+		 * Nothing was dropped in the move. The dialog's three genuine assets went
+		 * into the panel first: its curated run order (repairOrder in
+		 * unfucktools.cpp), its single-snapshot undo across a whole run, and the
+		 * four Batch/Optimize repairs the panel's Sanitize/sanity() rule could not
+		 * see. Its per-spell blurbs became Spell::hint() and its "why is this row
+		 * greyed" text became whyNotApplicable().
 		 */
-		QAction * unfuck = spellsMenu->addAction( tr( "Unfuck…" ) );
+		QAction * unfuck = spellsMenu->addAction( tr( "Unfuck" ) );
 		QFont unfuckFont = unfuck->font();
 		unfuckFont.setBold( true );
 		unfuck->setFont( unfuckFont );
+		unfuck->setToolTip( tr( "Everything wrong with this file, as a list" ) );
 		spellsMenu->addSeparator();
 
-		/* What each one actually does, in one line, read off the implementation
-		 * rather than the label — several of these names are misleading.
-		 * `Zero Geometry Group ID` was `Fix Geometry Data Names` and never touched a name; `Reorder Link Arrays`
-		 * silently drops dead children as well as sorting.
-		 *
-		 * `Spell::hint()` exists for this and is unused across the whole tree.
-		 * Overriding it on each spell would put these lines on the right-click
-		 * menu too, and is the better long-term home; a table here is a smaller
-		 * blast radius for now and reads identically.
-		 */
-		// (the blurb table that used to live here is now Spell::hint() on each spell,
-		// so the right-click menu and the Unfuck panel quote the same sentences)
-
-		/* Run order, which is NOT the display order.
-		 *
-		 * The rows are listed alphabetically because that is easy to scan, and it
-		 * used to drive execution too — a coin flip that only stays harmless
-		 * while nothing depends on anything. It does now: compacting the string
-		 * table has to come after the passes that add strings, and derived data
-		 * (bounds, tangents, partitions) has to come after the structure it is
-		 * derived from settles. Anything unlisted runs between the two, in
-		 * whatever order it was gathered.
-		 */
-		static const char * const unfuckOrder[] = {
-			"Collapse Link Arrays", "Reorder Link Arrays", "Reorder Blocks",
-			"Fix Invalid Block Names", "Enforce Node Name Authority",
-			"Zero Geometry Group ID", "Fill Blank NiControllerSequence Types",
-			"Adjust Texture Sources",
-			"Update All Bounds", "Update All Tangent Spaces", "Make All Skin Partitions",
-			"Remove Unused Strings",
-		};
-
-		/* Whole-file repairs that live on other pages and would never be gathered
-		 * by the Sanitize/sanity() rule. Each is a genuine "my file is broken"
-		 * answer; each is opt-in, because each rewrites more than it repairs.
-		 * Deliberately NOT here: the batch optimisers and normal/tangent
-		 * generators, which overwrite authoring intent on meshes that were fine,
-		 * and anything that writes other files on disk.
-		 */
-		static const char * const unfuckExtras[] = {
-			"Update All Bounds", "Update All Tangent Spaces",
-			"Remove Unused Strings", "Make All Skin Partitions",
-		};
-
-		QList<SpellPtr> fixes, checks;
-		{
-			QList<SpellPtr> candidates;
-			for ( SpellPtr s : SpellBook::spells() ) {
-				if ( !s || candidates.contains( s ) )
-					continue;
-				bool wanted = ( s->page() == Spell::tr( "Sanitize" ) || s->sanity() || s->checker() );
-				for ( const char * extra : unfuckExtras )
-					if ( s->name() == QLatin1String( extra ) )
-						wanted = true;
-				if ( wanted )
-					candidates.append( s );
-			}
-			for ( SpellPtr s : candidates ) {
-				// Rule 1: does it want a block? Proven, not assumed — ask it about
-				// a real one. Only meaningful with a file open, so with none the
-				// list is left whole rather than silently pruned.
-				/* Spells that want a SELECTION, and so can never light up here.
-				 *
-				 * This dialog always asks with an invalid index — that is what
-				 * "whole file" means — so a spell that needs one sits in the list
-				 * permanently grey, under a message blaming the file. Two do:
-				 * `Sort Keys` wants an array row two levels inside a block, and
-				 * `Check Material` wants a shader block.
-				 *
-				 * Named rather than detected, deliberately. Probing the loaded
-				 * file for an index that would satisfy them was tried first and
-				 * cannot answer the question: a miss means either "wants a
-				 * selection" or "this file simply has none of those", and telling
-				 * those apart needs an unbounded walk of every row in the model.
-				 * The property being tested is a fact about the SPELL, so it is
-				 * written down as one. Both remain on right-click, where a
-				 * selection exists.
-				 */
-				static const char * const needsSelection[] = { "Sort Keys", "Check Material" };
-				bool wantsIndex = false;
-				for ( const char * n : needsSelection )
-					if ( s->name() == QLatin1String( n ) )
-						wantsIndex = true;
-				if ( wantsIndex )
-					continue;
-				// Rule 3: reports only -> Checks.
-				if ( s->checker() || s->constant() )
-					checks.append( s );
-				else
-					fixes.append( s );
-			}
-		}
-		auto byName = []( const SpellPtr & a, const SpellPtr & b ) { return a->name() < b->name(); };
-		std::sort( fixes.begin(), fixes.end(), byName );
-		std::sort( checks.begin(), checks.end(), byName );
-
-		connect( unfuck, &QAction::triggered, this, [this, fixes, checks]() {
-			if ( !nif ) {
-				Message::info( this, tr( "Open a NIF first." ) );
+		connect( unfuck, &QAction::triggered, this, [this]() {
+			QDockWidget * dock = findChild<QDockWidget *>( QStringLiteral( "UnfuckManagerDock" ) );
+			if ( !dock )
 				return;
-			}
-
-			QDialog dlg( this );
-			dlg.setObjectName( QStringLiteral( "UnfuckDialog" ) );
-			dlg.setWindowTitle( tr( "Unfuck" ) );
-			dlg.resize( 520, 460 );
-			auto * outer = new QVBoxLayout( &dlg );
-			outer->setContentsMargins( 10, 10, 10, 8 );
-			outer->setSpacing( 7 );
-
-			auto * intro = new QLabel( tr(
-				"Everything here acts on the whole file. Tick what to run, then Unfuck." ), &dlg );
-			intro->setWordWrap( true );
-			intro->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
-			outer->addWidget( intro );
-
-			// The list scrolls: the roster grows as repairs are added, and a
-			// dialog that grows past the screen is worse than one that scrolls.
-			auto * scroll = new QScrollArea( &dlg );
-			scroll->setWidgetResizable( true );
-			scroll->setFrameShape( QFrame::NoFrame );
-			auto * body = new QWidget( scroll );
-			auto * lay = new QVBoxLayout( body );
-			lay->setContentsMargins( 0, 0, 0, 0 );
-			lay->setSpacing( 7 );
-			scroll->setWidget( body );
-			outer->addWidget( scroll, 1 );
-
-			QSettings cfg;
-			struct Row
-			{
-				QCheckBox * box;
-				QLabel * note;
-				QLabel * status;
-				SpellPtr spell;
-			};
-			QList<Row> rows;
-
-			// straight off the spell now, so this dialog, the right-click menu and
-			// anything else that builds a SpellBook all quote the same sentence
-			auto blurbFor = []( const SpellPtr & sp ) -> QString {
-				return sp ? sp->hint() : QString();
-			};
-
-			/* Why a row is greyed, in the row itself.
-			 *
-			 * The old text said "Nothing for this to do in this file", which was
-			 * not true — these conditions are FORMAT gates, not content probes, so
-			 * the honest answer is which format this file is not. Read straight
-			 * off each isApplicable.
-			 */
-			auto whyNot = [this]( const SpellPtr & s ) -> QString {
-				const QString n = s->name();
-				if ( n == tr( "Reorder Link Arrays" ) || n == tr( "Collapse Link Arrays" ) )
-					return tr( "needs NIF 20.0.0.4 or newer with a Bethesda version" );
-				if ( n == tr( "Zero Geometry Group ID" ) )
-					return tr( "Fallout 3 / New Vegas only" );
-				if ( n == tr( "Adjust Texture Sources" ) )
-					return tr( "only for games below BSVersion 130" );
-				if ( n == tr( "Enforce Node Name Authority" ) )
-					return tr( "this file has no object palette" );
-				if ( nif && nif->getBSVersion() == 0 )
-					return tr( "not a Bethesda NIF" );
-				return tr( "does not apply to this file's format" );
-			};
-
-			auto addGroup = [&]( const QString & title, const QString & hint,
-			                     const QList<SpellPtr> & list ) {
-				if ( list.isEmpty() )
-					return;
-				auto * group = new QGroupBox( title, body );
-				auto * gl = new QVBoxLayout( group );
-				gl->setSpacing( 6 );
-				if ( !hint.isEmpty() ) {
-					auto * h = new QLabel( hint, group );
-					h->setWordWrap( true );
-					h->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
-					gl->addWidget( h );
-				}
-				for ( SpellPtr s : list ) {
-					const bool ok = s->isApplicable( nif, QModelIndex() );
-
-					auto * rowW = new QWidget( group );
-					auto * rl = new QGridLayout( rowW );
-					rl->setContentsMargins( 0, 0, 0, 0 );
-					rl->setHorizontalSpacing( 6 );
-					rl->setVerticalSpacing( 0 );
-
-					auto * cb = new QCheckBox( s->name(), rowW );
-					cb->setObjectName( QStringLiteral( "unfuck.%1" ).arg( s->name() ) );
-					// Rule 2: the spell's own judgement, not the group's.
-					cb->setChecked( ok && cfg.value(
-						QStringLiteral( "Unfuck/%1" ).arg( s->name() ), s->sanity() ).toBool() );
-					cb->setEnabled( ok );
-					rl->addWidget( cb, 0, 0 );
-
-					auto * status = new QLabel( rowW );
-					status->setAlignment( Qt::AlignRight | Qt::AlignVCenter );
-					status->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
-					rl->addWidget( status, 0, 1 );
-					rl->setColumnStretch( 0, 1 );
-
-					auto * note = new QLabel( ok ? blurbFor( s ) : whyNot( s ), rowW );
-					note->setWordWrap( true );
-					QFont nf = note->font();
-					nf.setPointSizeF( std::max( nf.pointSizeF() - 1.0, 6.0 ) );
-					note->setFont( nf );
-					note->setStyleSheet( QStringLiteral( "color: %1; margin-left: 18px;" )
-						.arg( wwSkinColor( "textMuted" ) ) );
-					rl->addWidget( note, 1, 0, 1, 2 );
-
-					gl->addWidget( rowW );
-					rows.append( Row{ cb, note, status, s } );
-				}
-				lay->addWidget( group );
-			};
-
-			addGroup( tr( "Fixes" ), tr( "These change the file." ), fixes );
-			addGroup( tr( "Checks" ),
-				tr( "These only report what they find; they change nothing." ), checks );
-			lay->addStretch( 1 );
-
-			auto * footer = new QLabel( tr(
-				"A run is a single undo step — Ctrl+Z puts the file back as it was." ), &dlg );
-			footer->setWordWrap( true );
-			footer->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
-			outer->addWidget( footer );
-
-			auto * buttons = new QDialogButtonBox(
-				QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg );
-			buttons->button( QDialogButtonBox::Ok )->setText( tr( "Unfuck" ) );
-			outer->addWidget( buttons );
-			connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );
-			connect( buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
-
-			auto syncOk = [buttons, &rows]() {
-				int n = 0;
-				for ( const Row & r : rows )
-					if ( r.box->isEnabled() && r.box->isChecked() ) n++;
-				buttons->button( QDialogButtonBox::Ok )->setEnabled( n > 0 );
-				buttons->button( QDialogButtonBox::Ok )->setText(
-					n > 0 ? tr( "Unfuck (%1)" ).arg( n ) : tr( "Unfuck" ) );
-			};
-			for ( const Row & r : rows )
-				connect( r.box, &QCheckBox::toggled, &dlg, [syncOk]() { syncOk(); } );
-			syncOk();
-
-			/* Run the checks as the dialog opens, and say what they found.
-			 *
-			 * This is what turns a blind checklist into a report card, and it is
-			 * free of risk precisely because a check is read-only by definition —
-			 * that is the rule that put it in this group. Their output normally
-			 * goes to a popup per distinct message; MSG_TEST redirects it into a
-			 * list this can drain and count instead.
-			 *
-			 * Deferred to the event loop so the dialog paints first: these walk
-			 * every block, which is not free on a large file.
-			 */
-			QTimer::singleShot( 0, &dlg, [this, &rows, syncOk]() {
-				const BaseModel::MsgMode was = nif->getMessageMode();
-				nif->setMessageMode( BaseModel::MSG_TEST );
-				for ( const Row & r : rows ) {
-					if ( !r.box->isEnabled() || !( r.spell->checker() || r.spell->constant() ) )
-						continue;
-					nif->getMessages();					// drain anything pending
-					r.spell->cast( nif, QModelIndex() );
-					const QList<TestMessage> found = nif->getMessages();
-					if ( found.isEmpty() ) {
-						r.status->setText( tr( "clean" ) );
-						r.box->setChecked( false );
-					} else {
-						r.status->setText( tr( "%1 found" ).arg( found.size() ) );
-						r.status->setStyleSheet( QStringLiteral( "color: %1;" )
-							.arg( wwSkinColor( "danger" ) ) );
-						QStringList detail;
-						for ( const TestMessage & m : found )
-							detail << QString( m );
-						r.status->setToolTip( detail.join( QStringLiteral( "\n" ) ) );
-						r.note->setText( detail.value( 0 ) );
-						// A check that found something is worth running for its
-						// report; one that found nothing is noise.
-						r.box->setChecked( true );
-					}
-				}
-				nif->setMessageMode( was );
-				syncOk();
-			} );
-
-			if ( dlg.exec() != QDialog::Accepted )
-				return;			// Cancel: nothing is remembered, nothing runs
-
-			// The choices outlive the dialog only on OK, so cancelling really is a
-			// way out of a set of toggles rather than a silent commit.
-			QList<SpellPtr> toRun;
-			for ( const Row & r : rows ) {
-				cfg.setValue( QStringLiteral( "Unfuck/%1" ).arg( r.spell->name() ),
-					r.box->isChecked() );
-				if ( r.box->isEnabled() && r.box->isChecked() )
-					toRun.append( r.spell );
-			}
-			if ( toRun.isEmpty() )
-				return;
-
-			// Dependency order, not the alphabetical display order — see unfuckOrder.
-			std::stable_sort( toRun.begin(), toRun.end(), []( const SpellPtr & a, const SpellPtr & b ) {
-				auto rank = []( const SpellPtr & s ) {
-					for ( int i = 0; i < int( std::size( unfuckOrder ) ); i++ )
-						if ( s->name() == QLatin1String( unfuckOrder[i] ) )
-							return i;
-					return int( std::size( unfuckOrder ) ) / 2;		// unlisted: the middle
-				};
-				return rank( a ) < rank( b );
-			} );
-
-			runUnfuck( toRun );
+			dock->show();
+			dock->raise();
 		} );
 
 		/* TEST HARNESS (WW_UNFUCK_TEST=1): is the Spells menu what it claims, and
@@ -11880,8 +11645,8 @@ void NifSkope::initMenu()
 		 */
 		if ( qEnvironmentVariableIsSet( "WW_UNFUCK_TEST" ) ) {
 			QObject::connect( this, &NifSkope::completeLoading, this,
-				[this, spellsMenu, unfuck, fixes, checks]( bool ok, QString & ) {
-				QTimer::singleShot( 800, this, [this, spellsMenu, unfuck, fixes, checks, ok]() {
+				[this, spellsMenu, unfuck]( bool ok, QString & ) {
+				QTimer::singleShot( 800, this, [this, spellsMenu, unfuck, ok]() {
 					QFile logf( QApplication::applicationDirPath() + "/ww_unfuck_test.log" );
 					if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 						return;
@@ -11925,13 +11690,11 @@ void NifSkope::initMenu()
 							}
 							log << "\n";
 						}
-						log << pages << " page(s), " << listed << " whole-file spell(s), "
-							<< fixes.size() << " fix(es) + " << checks.size()
-							<< " check(s) behind Unfuck\n";
+						log << pages << " page(s), " << listed << " whole-file spell(s)\n";
 
 						check( "the menu still lists whole-file spells", listed > 0 );
 						check( "none of them needs a block selected", wantsIndex == 0 );
-						check( "the repair spells were gathered", fixes.size() + checks.size() >= 5 );
+
 
 						/* Spell::hint() reaches a real menu action.
 						 *
@@ -11966,45 +11729,25 @@ void NifSkope::initMenu()
 						check( "SpellBook puts the hint on the menu action",
 							collapse && !wired.isEmpty() && wired == collapse->hint() );
 
-						// ...and the dialog opens. Grab it and close it.
-						QTimer::singleShot( 500, this, []() {
-							QWidget * w = QApplication::activeModalWidget();
-							if ( !w )
-								return;
-							// Scroll to the Checks group before the grab: the counts
-							// the on-open pass writes are the point of the picture,
-							// and they start below the fold.
-							if ( qEnvironmentVariableIsSet( "WW_UNFUCK_BOTTOM" ) ) {
-								for ( QScrollArea * sa : w->findChildren<QScrollArea *>() )
-									sa->verticalScrollBar()->setValue(
-										sa->verticalScrollBar()->maximum() );
-								QApplication::processEvents();
-							}
-							w->grab().save( QApplication::applicationDirPath()
-								+ "/ww_unfuck_dialog.png" );
-							// Walk the live rows. Counting what was GATHERED is not
-							// the same question as what the user is offered, and the
-							// two permanently-grey rows that survived the first
-							// version are exactly the gap between them.
-							QFile rf( QApplication::applicationDirPath() + "/ww_unfuck_rows.log" );
-							if ( rf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
-								QTextStream rs( &rf );
-								for ( QCheckBox * cb : w->findChildren<QCheckBox *>() ) {
-									if ( !cb->objectName().startsWith( QLatin1String( "unfuck." ) ) )
-										continue;
-									rs << ( cb->isEnabled() ? "live " : "grey " )
-									   << ( cb->isChecked() ? "[x] " : "[ ] " )
-									   << cb->text() << "\n";
-								}
-								rf.close();
-							}
-							if ( auto * d = qobject_cast<QDialog *>( w ) )
-								d->reject();
-						} );
+						/* Unfuck opens the WORKSPACE, and there is no longer a second
+						 * one. This used to trigger a modal dialog, screenshot it and
+						 * dismiss it; the dialog is gone, so the assertion is that the
+						 * action reveals the dock instead. A menu entry that silently
+						 * does nothing is exactly what retiring the dialog could have
+						 * left behind.
+						 */
+						QDockWidget * udock =
+							findChild<QDockWidget *>( QStringLiteral( "UnfuckManagerDock" ) );
+						if ( udock )
+							udock->hide();
+						QApplication::processEvents();
 						unfuck->trigger();
-						check( "the dialog opened and was dismissed",
-							QFile::exists( QApplication::applicationDirPath()
-								+ "/ww_unfuck_dialog.png" ) );
+						QApplication::processEvents();
+						log << "Unfuck dock visible after trigger: "
+							<< ( udock && udock->isVisible() ) << "\n";
+						check( "Unfuck opens the workspace dock", udock && udock->isVisible() );
+						check( "no modal dialog was raised",
+							QApplication::activeModalWidget() == nullptr );
 					} while ( false );
 					log << checksRun << " checks, " << fails << " failures\n";
 					log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -12027,7 +11770,7 @@ void NifSkope::initMenu()
 		 * them twice in one menu is the duplication this was meant to remove.
 		 */
 		connect( spellsMenu, &QMenu::aboutToShow, this,
-			[this, spellsMenu, unfuck, fixes, checks, byName]() {
+			[this, spellsMenu, unfuck]() {
 			// drop everything after the Unfuck entry
 			const QList<QAction *> existing = spellsMenu->actions();
 			int keep = 0;
@@ -12039,9 +11782,28 @@ void NifSkope::initMenu()
 				return;
 			spellsMenu->addSeparator();
 
+			/* The repair and check spells are skipped: they are the Unfuck
+			 * workspace's content, and listing them twice is the duplication this
+			 * menu was rebuilt to remove. The rule matches the panel's own -- see
+			 * rebuildRepairs and checkSpells in unfucktools.cpp -- rather than a
+			 * captured copy of a list the dialog used to build, so the two cannot
+			 * drift apart.
+			 */
+			static const char * const unfuckExtras[] = {
+				"Update All Bounds", "Update All Tangent Spaces",
+				"Remove Unused Strings", "Make All Skin Partitions",
+			};
+			auto belongsToUnfuck = []( const SpellPtr & s ) {
+				if ( s->checker() || s->page() == Spell::tr( "Sanitize" ) || s->sanity() )
+					return true;
+				for ( const char * e : unfuckExtras )
+					if ( s->name() == QLatin1String( e ) )
+						return true;
+				return false;
+			};
 			QMap<QString, QList<SpellPtr>> byPage;
 			for ( SpellPtr s : SpellBook::spells() ) {
-				if ( !s || s->page().isEmpty() || fixes.contains( s ) || checks.contains( s ) )
+				if ( !s || s->page().isEmpty() || belongsToUnfuck( s ) )
 					continue;
 				// The whole test: does it offer itself with nothing selected? If
 				// it wants a block, right-clicking that block already has it.
@@ -12051,7 +11813,8 @@ void NifSkope::initMenu()
 			for ( auto it = byPage.constBegin(); it != byPage.constEnd(); ++it ) {
 				QMenu * page = spellsMenu->addMenu( it.key() );
 				QList<SpellPtr> list = it.value();
-				std::sort( list.begin(), list.end(), byName );
+				std::sort( list.begin(), list.end(),
+					[]( const SpellPtr & x, const SpellPtr & y ) { return x->name() < y->name(); } );
 				for ( SpellPtr sp : list ) {
 					QAction * a = page->addAction( sp->icon(), sp->name() );
 					a->setShortcut( sp->hotkey() );
@@ -14150,95 +13913,3 @@ void NifSkope::on_mTheme_triggered( QAction * action )
 	setTheme( newTheme );
 }
 
-/*! Run a set of whole-file repair spells as ONE undoable step.
- *
- *  `nifSnapshotOp` cannot be used to wrap this, for two reasons that only show
- *  up once several spells run together.
- *
- *  The first is nesting. `spEnforceNameAuthority::cast` calls `nifSnapshotOp`
- *  itself, so wrapping the batch in another one pushes two commands for one run,
- *  and the second Ctrl+Z walks the file FORWARD into a half-repaired state
- *  instead of back. Detaching the undo stack for the duration makes every
- *  spell's own snapshot a no-op — `nifSnapshotOp` only pushes `if (nif->undoStack)`
- *  — and leaves exactly one command to push at the end.
- *
- *  The second is that `nifSnapshotOp` pushes unconditionally. A run of nothing
- *  but Checks changes no bytes, and would still mark the document modified and
- *  ask to save on close. Comparing the two buffers costs nothing here because
- *  both already have to be taken.
- *
- *  Header and footer are updated INSIDE the measured region: they are derived
- *  bookkeeping, a wrong root list is a real breakage, and updating them after
- *  the "after" snapshot would leave the undo command describing a file that no
- *  longer matches the model.
- */
-void NifSkope::runUnfuck( const QList<std::shared_ptr<Spell>> & spells )
-{
-	if ( !nif || spells.isEmpty() )
-		return;
-
-	QByteArray before;
-	{
-		QBuffer buf( &before );
-		buf.open( QIODevice::WriteOnly );
-		if ( !nif->save( buf ) ) {
-			Message::warning( this, tr( "Could not snapshot the file; nothing was run." ) );
-			return;
-		}
-	}
-
-	QStringList ran, reported;
-	QUndoStack * stack = nif->undoStack;
-	nif->undoStack = nullptr;						// see above: no nested commands
-
-	const BaseModel::MsgMode wasMode = nif->getMessageMode();
-	nif->setMessageMode( BaseModel::MSG_TEST );
-	nif->getMessages();								// drain
-
-	for ( SpellPtr s : spells ) {
-		if ( !s || !s->isApplicable( nif, QModelIndex() ) )
-			continue;
-		s->cast( nif, QModelIndex() );
-		ran << s->name();
-		const QList<TestMessage> found = nif->getMessages();
-		for ( const TestMessage & m : found )
-			reported << QStringLiteral( "%1: %2" ).arg( s->name(), QString( m ) );
-	}
-
-	nif->invalidateHeaderConditions();
-	nif->updateHeader();
-	nif->updateFooter();
-
-	nif->setMessageMode( wasMode );
-	nif->undoStack = stack;
-
-	QByteArray after;
-	{
-		QBuffer buf( &after );
-		buf.open( QIODevice::WriteOnly );
-		if ( !nif->save( buf ) )
-			after = before;							// unreadable: assume unchanged
-	}
-
-	const bool changed = ( before != after );
-	if ( changed && nif->undoStack )
-		nif->undoStack->push( new NifSnapshotCommand( nif, before, after, tr( "Unfuck" ) ) );
-
-	/* What actually happened, rather than what was attempted. "Ran 6 fixes" is
-	 * not an answer to "is my file different now", and the byte comparison above
-	 * is the only honest one available without a per-spell probe.
-	 */
-	QString summary = changed
-		? tr( "%1 of %2 changed the file." ).arg( tr( "The run" ) ).arg( ran.size() )
-		: tr( "Nothing changed — the file was already clean." );
-	if ( changed )
-		summary = tr( "Ran %1; the file changed. Ctrl+Z undoes the whole run." ).arg( ran.size() );
-
-	if ( statusBar() )
-		statusBar()->showMessage( summary, 6000 );
-
-	QString detail = ran.join( QStringLiteral( "\n" ) );
-	if ( !reported.isEmpty() )
-		detail += QStringLiteral( "\n\n" ) + reported.join( QStringLiteral( "\n" ) );
-	Message::info( this, summary, detail );
-}

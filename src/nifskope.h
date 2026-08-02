@@ -700,10 +700,8 @@ private:
 	QDockWidget * dRefr;
 	QDockWidget * dInsp;
 	QDockWidget * dBrowser;
-	//! Run a set of whole-file repair spells as one undoable step (the Unfuck
 	//! dialog). Not nifSnapshotOp: some spells snapshot themselves, and a run
 	//! that changes nothing must not dirty the document. See the definition.
-	void runUnfuck( const QList<std::shared_ptr<Spell>> & spells );
 
 	QDockWidget * dTimeline;
 
