@@ -96,6 +96,36 @@ void setBlockListSelection( const QList<qint32> & blocks );
  */
 QList<qint32> blockListSelectionForSpells();
 
+//! BSXFlags bits, named as the flag editor names them (spells/flags.cpp).
+enum BSXFlagBits : quint32
+{
+	BSXF_Animated = 0x001,
+	BSXF_Havok    = 0x002,		//!< "this mesh has collision at all"
+	BSXF_Ragdoll  = 0x004,
+	BSXF_Complex  = 0x008,
+};
+
+/*! Ensure the file's root carries a BSXFlags with at least \a bits set.
+ *
+ *  Measured over the stock Fallout 4 mesh tree: of the 22,496 meshes that carry
+ *  a collision object, 22,496 have a BSXFlags on the ROOT's Extra Data List with
+ *  bit 1 set. No exceptions, in any directory. Bit 1 is what tells the engine the
+ *  mesh has collision, and nothing in NifSkope wrote it — so collision added here
+ *  produced meshes the engine ignores, with no warning anywhere.
+ *
+ *  ORs, never assigns: the other bits are the author's. Idempotent, so a call
+ *  site that fires twice costs nothing.
+ *
+ *  Deliberately does NOT clear the bit when collision is removed. The converse
+ *  does not hold in vanilla — 71 stock meshes ship bit 1 with no collision block
+ *  at all — so a spurious bit is demonstrably tolerated, while clearing one the
+ *  user set by hand loses intent that cannot be recovered.
+ *
+ *  \return true if the model changed.
+ */
+bool wwEnsureRootBSXFlags( NifModel * nif, quint32 bits,
+	quint32 * wasValue = nullptr, quint32 * nowValue = nullptr );
+
 //! The blocks a branch spell should act on: the multi-selection when the clicked
 //! block is part of it, otherwise just the clicked block.
 QList<qint32> spellSelectionRoots( const NifModel * nif, const QModelIndex & index );

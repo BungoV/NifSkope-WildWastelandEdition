@@ -1485,6 +1485,67 @@ QList<qint32> blockListSelectionForSpells()
 	return blockListSelection;
 }
 
+bool wwEnsureRootBSXFlags( NifModel * nif, quint32 bits, quint32 * wasValue, quint32 * nowValue )
+{
+	if ( !nif || !bits )
+		return false;
+	// BSXFlags is a Bethesda block; a file with no BS stream header has no place
+	// to put one and nothing that would read it
+	if ( nif->getBSVersion() == 0 )
+		return false;
+
+	const QList<int> roots = nif->getRootLinks();
+	if ( roots.size() != 1 )		// every stock FO4 mesh has exactly one
+		return false;
+	const QPersistentModelIndex iRoot = nif->getBlockIndex( roots.first() );
+	if ( !iRoot.isValid() || !nif->blockInherits( QModelIndex( iRoot ), "NiAVObject" ) )
+		return false;
+	const QModelIndex iNum = nif->getIndex( QModelIndex( iRoot ), "Num Extra Data List" );
+	const QModelIndex iArr = nif->getIndex( QModelIndex( iRoot ), "Extra Data List" );
+	if ( !iNum.isValid() || !iArr.isValid() )
+		return false;
+
+	/* Only the ROOT's own list counts. SCOL files carry a second BSXFlags on the
+	 * physics-merged sub-node, always valued exactly 2 — but never instead of the
+	 * root's, so finding that one is not a reason to skip this one.
+	 */
+	for ( const qint32 l : nif->getLinkArray( iArr ) ) {
+		const QModelIndex i = nif->getBlockIndex( l );
+		if ( !nif->isNiBlock( i, "BSXFlags" ) )
+			continue;
+		const quint32 flags = nif->get<uint>( i, "Integer Data" );
+		if ( wasValue ) *wasValue = flags;
+		if ( nowValue ) *nowValue = flags | bits;
+		if ( ( flags & bits ) == bits )
+			return false;
+		nif->set<uint>( i, "Integer Data", flags | bits );
+		return true;
+	}
+
+	// Absent: create it directly after the root, where 23,408 of the 24,151
+	// BSXFlags-bearing stock meshes put it.
+	const QModelIndex iNew = nif->insertNiBlock( QStringLiteral( "BSXFlags" ),
+		nif->getBlockNumber( QModelIndex( iRoot ) ) + 1 );
+	if ( !iNew.isValid() )
+		return false;
+	// Sanitize renames any BSXFlags whose Name is not "BSX"; write it correctly
+	// rather than leaving a fix-up for later
+	// assignString, not set<QString>: from 20.2.0.7 the Name is an INDEX into the
+	// header's string table, and setting it as a plain string writes the index
+	// digits as the name — the block came out called "1"
+	nif->assignString( iNew, "Name", QStringLiteral( "BSX" ) );
+	nif->set<uint>( iNew, "Integer Data", bits );
+
+	const int n = nif->get<int>( iNum );
+	nif->set<int>( iNum, n + 1 );
+	nif->updateArraySize( iArr );
+	nif->setLink( nif->getIndex( iArr, n ), nif->getBlockNumber( iNew ) );
+
+	if ( wasValue ) *wasValue = 0;
+	if ( nowValue ) *nowValue = bits;
+	return true;
+}
+
 /*! The blocks a branch spell should actually act on.
  *
  *  A spell is handed ONE index by the menu, so without this every branch

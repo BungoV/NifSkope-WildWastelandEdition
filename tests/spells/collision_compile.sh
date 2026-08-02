@@ -84,6 +84,43 @@ check "the editable collision blocks are gone" "$([ "$left" = "0" ] && echo 1 ||
 np=$("$NS" -no-gui list "$W/c.nif" 2>/dev/null | grep -c "bhkNPCollisionObject")
 check "exactly one compiled collision object replaced them" "$([ "$np" = "1" ] && echo 1 || echo 0)"
 
+# --- BSXFlags: the engine has to be told the mesh has collision --------------
+#
+# Measured over the stock FO4 tree: of the 22,496 meshes carrying a collision
+# object, 22,496 have BSXFlags bit 1 (Havok) on the ROOT. No exceptions, in any
+# directory. Nothing in NifSkope wrote it, so collision created or compiled here
+# produced meshes the engine silently ignores.
+#
+# The fixture has its BSXFlags REMOVED first, so this tests creation and not
+# merely a bit that was already there — and on the previous build it comes back
+# with no BSXFlags block at all.
+bsx=$("$NS" -no-gui list "$W/e.nif" 2>/dev/null | sed -n 's/^\[\([0-9]*\)\] BSXFlags.*/\1/p' | head -1)
+if [ -n "$bsx" ]; then
+	"$NS" -no-gui cast "$W/e.nif" -s "Block/Remove Branch" -b "$bsx" -o "$W/n0.nif" >/dev/null 2>&1
+	# re-derive: Remove Branch renumbered everything after the block it took out,
+	# so the body number captured from e.nif is stale here
+	nbody=$("$NS" -no-gui list "$W/n0.nif" 2>/dev/null | grep -m1 "bhkRigidBody" | tr -d '[]' | cut -d' ' -f1)
+	"$NS" -no-gui set "$W/n0.nif" -b "$nbody" -f "Rigid Body Info/Layer" -v 31 -o "$W/n.nif" >/dev/null 2>&1
+	gone=$("$NS" -no-gui list "$W/n.nif" 2>/dev/null | grep -c BSXFlags)
+	check "the stripped fixture really has no BSXFlags" "$([ "$gone" = "0" ] && echo 1 || echo 0)"
+	nobj=$("$NS" -no-gui list "$W/n.nif" 2>/dev/null | sed -n 's/^\[\([0-9]*\)\] bhkCollisionObject.*/\1/p' | head -1)
+	"$NS" -no-gui cast "$W/n.nif" -s "Havok/Compile Collision" -b "$nobj" -o "$W/b.nif" >/dev/null 2>&1
+	nb=$("$NS" -no-gui list "$W/b.nif" 2>/dev/null | sed -n 's/^\[\([0-9]*\)\] BSXFlags.*/\1/p' | head -1)
+	check "Compile created a BSXFlags block" "$([ -n "$nb" ] && echo 1 || echo 0)"
+	if [ -n "$nb" ]; then
+		val=$("$NS" -no-gui get "$W/b.nif" -b "$nb" -f "Integer Data" 2>/dev/null | tr -d '\r')
+		# the RESOLVED name, from the block listing. `get -f Name` returns the raw
+		# string-table INDEX on 20.2.0.7, so it cannot answer this question
+		nam=$("$NS" -no-gui list "$W/b.nif" 2>/dev/null | grep -m1 BSXFlags | sed "s/.*'\(.*\)'.*/\1/")
+		echo "created BSXFlags: value $val, name '$nam' (bit 1 = Havok)"
+		check "...with bit 1 set" "$([ $(( val & 2 )) -ne 0 ] && echo 1 || echo 0)"
+		# assignString, not set<QString>: writing an indexed string as a plain one
+		# names the block with its own index
+		check "...and named BSX, not a string index" "$([ "$nam" = "BSX" ] && echo 1 || echo 0)"
+		check "...exactly one of them" "$([ "$("$NS" -no-gui list "$W/b.nif" 2>/dev/null | grep -c BSXFlags)" = "1" ] && echo 1 || echo 0)"
+	fi
+fi
+
 echo "$checks checks, $fails failures"
 [ "$fails" = "0" ] && { echo PASS; exit 0; }
 echo FAIL; exit 1

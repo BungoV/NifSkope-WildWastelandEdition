@@ -895,6 +895,21 @@ static QModelIndex createFittedCollision( NifModel * nif, const QModelIndex & in
 	}
 	if ( material ) nif->set<quint32>( materialShape, "Material", material );
 	QModelIndex result = attachCollisionShape( nif, parent, rootShape, index );
+		/* Tell the engine the mesh HAS collision. Measured: 22,496 of the
+		 * 22,496 stock FO4 meshes carrying a collision object set BSXFlags
+		 * bit 1 on the root, with no exceptions — and nothing here wrote it,
+		 * so collision created in NifSkope produced meshes the engine
+		 * silently ignores. insertNiBlock renumbers, hence the persistent index.
+		 */
+		quint32 bsxWas = 0, bsxNow = 0;
+		QPersistentModelIndex keep( result );
+		if ( wwEnsureRootBSXFlags( nif, BSXF_Havok, &bsxWas, &bsxNow ) )
+			Message::append( nullptr, Spell::tr( "Create Collision" ),
+				Spell::tr( "BSXFlags %1 -> %2: bit 1 (Havok) set, because the file now "
+					"carries collision the engine has to be told about" ).arg( bsxWas ).arg( bsxNow ),
+				QMessageBox::Information );
+		result = QModelIndex( keep );
+
 	nif->restoreState(); nif->updateModel();
 	return result;
 }
@@ -1048,6 +1063,21 @@ public:
 		QModelIndex iMopp = nif->insertNiBlock( "bhkMoppBvTreeShape" );
 		nif->setLink( iMopp, "Shape", nif->getBlockNumber( iStrips ) );
 		QModelIndex result = attachCollisionShape( nif, iParent, iMopp, index );
+		/* Tell the engine the mesh HAS collision. Measured: 22,496 of the
+		 * 22,496 stock FO4 meshes carrying a collision object set BSXFlags
+		 * bit 1 on the root, with no exceptions — and nothing here wrote it,
+		 * so collision created in NifSkope produced meshes the engine
+		 * silently ignores. insertNiBlock renumbers, hence the persistent index.
+		 */
+		quint32 bsxWas = 0, bsxNow = 0;
+		QPersistentModelIndex keep( result );
+		if ( wwEnsureRootBSXFlags( nif, BSXF_Havok, &bsxWas, &bsxNow ) )
+			Message::append( nullptr, Spell::tr( "Create Collision" ),
+				Spell::tr( "BSXFlags %1 -> %2: bit 1 (Havok) set, because the file now "
+					"carries collision the engine has to be told about" ).arg( bsxWas ).arg( bsxNow ),
+				QMessageBox::Information );
+		result = QModelIndex( keep );
+
 		nif->restoreState();
 		nif->updateModel();
 		return result;

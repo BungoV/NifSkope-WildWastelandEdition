@@ -2967,6 +2967,9 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 		}
 		if ( target.isValid() && newObject.isValid() )
 			nif->setLink( nif->getIndex( QModelIndex( target ), "Collision Object" ), nif->getBlockNumber( QModelIndex( newObject ) ) );
+		// inside the lambda on purpose: nifSnapshotOp serialises `after` the moment
+		// op() returns, so a write placed below it would be missing from the redo
+		wwEnsureRootBSXFlags( nif, BSXF_Havok );
 	} );
 	// the dock rebuilds itself off the model signals; a spell's caller selects
 	// whatever cast() returns
