@@ -735,6 +735,16 @@ private:
 	QMenu * mExport;
 	QMenu * mImport;
 
+	/*! Isolate / Hide / Restore, kept so the Object verb menu can borrow them.
+	 *
+	 *  These were a struck-through eye on the toolbar. Blender files them under
+	 *  Object > Show/Hide (H, Alt+H), so the menu owns them now and the glyph is
+	 *  gone. The QMenu itself is retained rather than the four QActions because
+	 *  its aboutToShow is what retexts them for the current mode and selection
+	 *  count - borrowing the actions without firing that would show stale text.
+	 */
+	QMenu * mViewportVisibility = nullptr;
+
 	QAction * aRecentFilesSeparator;
 
 	QAction * recentFileActs[NumRecentFiles];

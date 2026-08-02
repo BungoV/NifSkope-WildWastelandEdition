@@ -508,6 +508,34 @@ QIcon wwGreyscaleIcon( const QIcon & icon )
 	return QIcon( QPixmap::fromImage( img ) );
 }
 
+/*! A group boundary on the top row, spaced the way Blender spaces one.
+ *
+ *  Blender's header separates groups with WHITESPACE and no rule at all; this
+ *  fork keeps the rule, so the job here is to give it the room Blender gives a
+ *  gap. A bare addSeparator() draws a hairline hard against the button on either
+ *  side, which reads as a divider between two adjacent things rather than the
+ *  edge of a group - and with eight of them in a row the effect is a picket
+ *  fence, where every boundary looks equally important.
+ *
+ *  Padding on both sides, symmetric, one number everywhere. The rule then has to
+ *  be earned: it goes only where a genuine group ends, which is why the trailing
+ *  Animation / Collision / Panels run has none inside it - those three are one
+ *  group, and ruling between them said they were three.
+ */
+void wwGroupBreak( QToolBar * bar )
+{
+	if ( !bar )
+		return;
+	auto pad = [bar]() {
+		QWidget * gap = new QWidget( bar );
+		gap->setFixedWidth( 7 );
+		bar->addWidget( gap );
+	};
+	pad();
+	bar->addSeparator();
+	pad();
+}
+
 QString wwBoxedButtonQss( const QString & padding )
 {
 	return QStringLiteral(
@@ -4954,7 +4982,31 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							bar << a->text().remove( QLatin1Char( '&' ) );
 					log << "menu bar: " << bar.join( QStringLiteral( ", " ) ) << "\n";
 					check( "the menu bar still has File", bar.contains( QStringLiteral( "File" ) ) );
-					check( "the View menu is gone", !bar.contains( QStringLiteral( "View" ) ) );
+					/* There IS a View menu again, and it is a different animal.
+					 *
+					 * The old one held four submenus of dock and display toggles
+					 * and is gone into the Panels button. The Render menu was then
+					 * renamed View, because that is what it always was - Top,
+					 * Front, Left, Flip, Perspective, Walk, Frame Selected, and
+					 * nothing that renders anything.
+					 *
+					 * So a name check alone would pass on either menu. This looks
+					 * at the CONTENTS: the viewport one has the view directions,
+					 * the retired one had Toolbars and Show.
+					 */
+					check( "the menu bar has a View menu", bar.contains( QStringLiteral( "View" ) ) );
+					QStringList viewItems;
+					for ( const QAction * a : skope->ui->mRender->actions() )
+						if ( !a->isSeparator() )
+							viewItems << a->text().remove( QLatin1Char( '&' ) );
+					log << "View menu: " << viewItems.join( QStringLiteral( ", " ) ) << "\n";
+					check( "and it is the VIEWPORT one, not the retired dock menu",
+						viewItems.contains( QStringLiteral( "Top" ) )
+						&& viewItems.contains( QStringLiteral( "Front" ) )
+						&& !viewItems.contains( QStringLiteral( "Toolbars" ) ) );
+					check( "Frame Selected came across from the toolbar glyph",
+						std::any_of( viewItems.cbegin(), viewItems.cend(),
+							[]( const QString & t ) { return t.startsWith( QStringLiteral( "Frame Selected" ) ); } ) );
 
 					// --- the Panels button is findable by name ------------------
 					// it had NO objectName at all, unlike every sibling on the row
@@ -10475,8 +10527,24 @@ void NifSkope::initActions()
 	//idxForwardAction = indexStack->createRedoAction( this );
 	//idxBackAction = indexStack->createUndoAction( this );
 
-	ui->tFile->addAction( undoAction );
-	ui->tFile->addAction( redoAction );
+	/* Undo and Redo go in a MENU, not on the bar.
+	 *
+	 * Blender has no undo buttons in any header - it is Edit > Undo and Ctrl+Z -
+	 * and these two were holding the most valuable spot on the row, immediately
+	 * right of the menus, for a pair nobody clicks twice. The shortcuts are
+	 * unchanged and are how anyone actually undoes anything.
+	 *
+	 * Options is where they go because Options is this program's Edit menu:
+	 * Settings, Theme, Font. Put at the TOP, above a separator, which is where
+	 * Blender's Edit menu keeps them.
+	 */
+	if ( ui->mOptions ) {
+		QAction * first = ui->mOptions->actions().value( 0 );
+		ui->mOptions->insertAction( first, undoAction );
+		ui->mOptions->insertAction( first, redoAction );
+		if ( first )
+			ui->mOptions->insertSeparator( first );
+	}
 
 	connect( undoAction, &QAction::triggered, [this]( bool ) {
 		ogl->update();
@@ -11850,7 +11918,20 @@ void NifSkope::initDockWidgets()
 		// GLView always starts in object mode; subsequent changes arrive through
 		// the mode signals (including Tab, Esc, RMB, and manager-button changes).
 		syncModeButton();
-		ui->tRender->insertWidget( ui->aSelectObject, modeButton );
+		/* The mode selector heads the MODE toolbar, and that toolbar comes first.
+		 *
+		 * Blender's viewport header is mode selector, then the header menus that
+		 * the mode governs - View, Select, Add, Object - and ours had the mode at
+		 * one end of the row and Select/Add/Object at the other, with every
+		 * transform widget in between. The position is what teaches you the verbs
+		 * follow the mode, and it was saying the opposite.
+		 *
+		 * insertToolBar moves tMode ahead of tRender in the row; the mode button
+		 * then leads tMode, and the separator that tMode adds next divides it
+		 * from the verbs.
+		 */
+		ui->tMode->addWidget( modeButton );
+		insertToolBar( ui->tRender, ui->tMode );
 
 		// Blender-style viewport header menus: Select · Add · Object in object
 		// mode, Select · Mesh · Vertex · Edge · Face in edit mode, Select ·
@@ -11864,7 +11945,7 @@ void NifSkope::initDockWidgets()
 		QToolBar * modeBar = ui->tMode;
 		// thin line where the drag grip used to sit, delimiting the mode menus
 		// from the previous toolbar group
-		modeBar->addSeparator();
+		wwGroupBreak( modeBar );
 
 		// Each button is added with addWidget; the returned QAction is what we
 		// show/hide to collapse the toolbar slot per mode (the same idiom the
@@ -11895,7 +11976,29 @@ void NifSkope::initDockWidgets()
 			* aVertex = nullptr, * aEdge = nullptr, * aFace = nullptr, * aPaint = nullptr;
 		makeMenuButton( tr( "Select" ), &GLView::populateSelectMenu, &aSelect );
 		makeMenuButton( tr( "Add" ), &GLView::populateAddMenu, &aAdd );
-		makeMenuButton( tr( "Object" ), &GLView::populateObjectMenu, &aObject );
+		QToolButton * mbObject = makeMenuButton( tr( "Object" ), &GLView::populateObjectMenu, &aObject );
+
+		/* Show/Hide joins the Object menu, as it does in Blender.
+		 *
+		 * Connected SECOND, after makeMenuButton's own aboutToShow: Qt runs slots
+		 * in connection order, and the first one clears the menu and repopulates
+		 * it, so anything appended earlier would be wiped before it was drawn.
+		 *
+		 * mViewportVisibility->aboutToShow() is emitted by hand because that is
+		 * what retexts these entries for the current mode and selection count -
+		 * "Isolate Selected Objects" against "Isolate Selected Geometry", and the
+		 * live count in "Hide Secondary Selected Objects (3)". Borrowing the
+		 * actions without firing it would show whatever the last mode left.
+		 */
+		if ( mbObject && mbObject->menu() ) {
+			connect( mbObject->menu(), &QMenu::aboutToShow, this, [this, mbObject]() {
+				if ( !mViewportVisibility )
+					return;
+				emit mViewportVisibility->aboutToShow();
+				mbObject->menu()->addSeparator();
+				mbObject->menu()->addActions( mViewportVisibility->actions() );
+			} );
+		}
 		makeMenuButton( tr( "Mesh" ), &GLView::populateMeshMenu, &aMesh );
 		makeMenuButton( tr( "Vertex" ), &GLView::populateVertexMenu, &aVertex );
 		makeMenuButton( tr( "Edge" ), &GLView::populateEdgeMenu, &aEdge );
@@ -11986,7 +12089,20 @@ void NifSkope::initDockWidgets()
 			aSolo->setChecked( false );
 			ogl->restoreAllVisibility();
 		} );
-		ui->tRender->insertWidget( ui->aViewTop, visibilityButton );
+		/* Isolate/Hide/Restore live in the OBJECT menu, not on a glyph.
+		 *
+		 * Blender has no header button for this: it is Object > Show/Hide, on H
+		 * and Alt+H. Ours was an unlabelled struck-through eye - and it was
+		 * already behaving like an Object-menu entry, retexting itself between
+		 * "Objects" and "Geometry" with the mode. It just was not in the menu.
+		 *
+		 * Appended after the menu's own populate step. The verb buttons rebuild
+		 * their menus on aboutToShow, and Qt runs slots in connection order, so
+		 * connecting second is what puts these at the bottom rather than having
+		 * them wiped by the clear().
+		 */
+		visibilityButton->hide();
+		mViewportVisibility = visibilityMenu;
 	}
 
 	// View directions are now driven by the Blender numpad bindings and the 3D
@@ -12003,8 +12119,20 @@ void NifSkope::initDockWidgets()
 	// display toggles collapse into one dropdown button
 	{
 		QToolButton * btn = new QToolButton( this );
+		btn->setObjectName( QStringLiteral( "ViewportOverlaysButton" ) );
 		btn->setPopupMode( QToolButton::InstantPopup );
-		btn->setToolTip( tr( "Display options" ) );
+		/* "Overlays", which is what Blender calls this exact dropdown.
+		 *
+		 * Its contents are nearly Blender's list already - grid, axes, nodes,
+		 * markers, origins, 3D cursor, gizmo - so "Display options" was a vaguer
+		 * word for a thing that has an established name. Labelled as well as
+		 * drawn: it is one of the two dropdowns that belong at the right-hand end
+		 * beside Shading, and that end is where a name is affordable.
+		 */
+		btn->setText( tr( "Overlays" ) );
+		btn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+		btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
+		btn->setToolTip( tr( "What the viewport draws on top of the model" ) );
 		btn->setIcon( tlMakeIcon( QStringLiteral( "nodes" ), QColor( wwSkinColor( "text" ) ) ) );
 		QMenu * m = new QMenu( btn );
 		const QList<QAction *> ds = { ui->aShowCollision, ui->aShowAxes, ui->aShowNodes, ui->aDoSkinning,
@@ -12069,7 +12197,14 @@ void NifSkope::initDockWidgets()
 		}
 
 		btn->setMenu( m );
-		ui->tRender->insertWidget( ui->aShowCollision, btn );
+		/* NOT added to the row here.
+		 *
+		 * It belongs at the right-hand end beside Shading - Blender puts
+		 * Overlays, X-ray and Shading together as the last group of the header -
+		 * and that group is built further down. It is picked up there by
+		 * objectName rather than threaded through as a variable, because these
+		 * two blocks are separate scopes and a member would outlive the need.
+		 */
 		for ( QAction * a : ds )
 			ui->tRender->removeAction( a );
 		ui->tRender->removeAction( aSolo );
@@ -12091,7 +12226,7 @@ void NifSkope::initDockWidgets()
 		while ( !ui->tRender->actions().isEmpty()
 			&& ui->tRender->actions().last()->isSeparator() )
 			ui->tRender->removeAction( ui->tRender->actions().last() );
-		ui->tRender->addSeparator();
+		wwGroupBreak( ui->tRender );
 		ui->aViewCenter->setText( tr( "Center Viewpoint" ) );
 		ui->aViewCenter->setIcon( tlMakeIcon( QStringLiteral( "view_center" ), QColor( wwSkinColor( "text" ) ) ) );
 		QToolButton * focusButton = new QToolButton( this );
@@ -12106,12 +12241,26 @@ void NifSkope::initDockWidgets()
 			tr( "Frame Selected\tNum ." ), this, [this]() { ogl->frameSelected(); } );
 		frameSelectedAction->setToolTip( tr( "Center and zoom the view to fit the active selection" ) );
 		focusButton->setMenu( focusMenu );
-		ui->tRender->addWidget( focusButton );
+
+		/* Center and Frame belong in the VIEW menu, not on a glyph.
+		 *
+		 * Blender puts them there - View > Frame Selected / Frame All - and this
+		 * menu is already Blender's View menu in everything but name: Top, Front,
+		 * Left, Flip, Perspective, Walk, Load View, Save View. Nothing in it
+		 * renders anything, so it is renamed to match what it holds; "Render"
+		 * described this menu before the view directions moved into it.
+		 */
+		focusButton->hide();
+		if ( ui->mRender ) {
+			ui->mRender->setTitle( tr( "&View" ) );
+			ui->mRender->addSeparator();
+			ui->mRender->addAction( frameSelectedAction );
+		}
 	}
 
 	// Blender-style transform header on the freed toolbar space
 	{
-		ui->tRender->addSeparator();
+		wwGroupBreak( ui->tRender );
 
 		// Blender-style dropdowns: a flat button showing the current choice's
 		// icon (and text, where Blender shows text), opening the checkable
@@ -12303,7 +12452,7 @@ void NifSkope::initDockWidgets()
 		}
 
 		// transform-settings cluster ends here (Blender groups these too)
-		ui->tRender->addSeparator();
+		wwGroupBreak( ui->tRender );
 
 		// Blender-style vertex / edge / face select buttons (edit mode)
 		{
@@ -12492,7 +12641,21 @@ void NifSkope::initDockWidgets()
 				} );
 		}
 
-		ui->tRender->addSeparator();
+		/* THE DISPLAY GROUP, at the right-hand end: Overlays, X-ray, Wire,
+		 * Shading - Blender's trailing header group, in Blender's order.
+		 *
+		 * Blender right-aligns this group against the far edge of the header, and
+		 * an expanding spacer here does NOT achieve that: these controls are
+		 * spread over five sibling QToolBars in one QMainWindow row, and the
+		 * main-window layout hands each toolbar its size hint rather than
+		 * distributing the slack, so an Expanding widget inside one of them
+		 * collapses to nothing. Tried, photographed, removed - it was dead weight
+		 * that read as intent. Real right-alignment would mean merging all five
+		 * toolbars into one, which is a bigger change than this ordering pass.
+		 */
+		wwGroupBreak( ui->tRender );
+		if ( auto * overlays = findChild<QToolButton *>( QStringLiteral( "ViewportOverlaysButton" ) ) )
+			ui->tRender->addWidget( overlays );
 
 		// Blender-style X-ray (Alt+Z): combines with any shading mode; sits
 		// left of the shading buttons like Blender's header
@@ -13344,6 +13507,9 @@ void NifSkope::initDockWidgets()
 		connect( animMenu, &QMenu::aboutToShow, this, refreshAnimPanel );
 		refreshAnimPanel();
 
+		// the boundary between the viewport display group and the trailing
+		// group; the only rule this toolbar earns
+		wwGroupBreak( ui->tView );
 		ui->tView->addWidget( animBtn );
 	}
 
@@ -13364,7 +13530,12 @@ void NifSkope::initDockWidgets()
 	 * cannot do anything is worse than one that is plainly unavailable.
 	 */
 	{
-		ui->tView->addSeparator();
+		/* A GAP, not a rule. Animation, Collision and Panels are one group -
+		 * the controls with no Blender counterpart, gathered at the trailing
+		 * end - and ruling between them said they were three separate things.
+		 */
+		{ QWidget * g = new QWidget( ui->tView ); g->setFixedWidth( 8 );
+		  ui->tView->addWidget( g ); }
 		QToolButton * colBtn = new QToolButton( this );
 		colBtn->setPopupMode( QToolButton::InstantPopup );
 		colBtn->setText( tr( "Collision" ) );
@@ -13451,7 +13622,12 @@ void NifSkope::initDockWidgets()
 	// Manager docks live in the adjacent Workspaces menu instead.
 	{
 		// thin line where this toolbar's drag grip used to sit
-		ui->tView->addSeparator();
+		/* A GAP, not a rule. Animation, Collision and Panels are one group -
+		 * the controls with no Blender counterpart, gathered at the trailing
+		 * end - and ruling between them said they were three separate things.
+		 */
+		{ QWidget * g = new QWidget( ui->tView ); g->setFixedWidth( 8 );
+		  ui->tView->addWidget( g ); }
 		QToolButton * btn = new QToolButton( this );
 		btn->setPopupMode( QToolButton::InstantPopup );
 		btn->setText( tr( "Panels" ) );
@@ -13690,8 +13866,19 @@ void NifSkope::initDockWidgets()
 				}
 				} );
 		workspaces->setMenu( workspaceMenu );
-		ui->tView->addWidget( workspaces );
-		ui->tView->addWidget( btn );			// Panels, to the right of Workspaces
+		/* Workspaces joins the MENUS; Panels stays with the trailing group.
+		 *
+		 * Blender keeps its workspace tabs in the app-level topbar beside File
+		 * and Edit, not in the viewport header, and the reason is what they do:
+		 * a workspace switches the whole window layout, so it is not a viewport
+		 * control and should not sit among viewport controls.
+		 *
+		 * Panels is not the same kind of thing - it toggles individual docks -
+		 * so it stays at the trailing end with Animation and Collision, which is
+		 * where the controls with no Blender counterpart are gathered.
+		 */
+		ui->tFile->addWidget( workspaces );
+		ui->tView->addWidget( btn );			// Panels, trailing group
 
 		// Keep the menu's active-workspace marker truthful: derive it from which
 		// manager dock is actually visible (a dock closed via its own X, or the
@@ -13762,7 +13949,16 @@ void NifSkope::initMenu()
 	{
 		QMenu * spellsMenu = new QMenu( tr( "Spells" ), this );
 		spellsMenu->setToolTipsVisible( true );
-		ui->menubar->insertMenu( ui->menubar->actions().at( 3 ), spellsMenu );
+		/* Before Options, by POINTER rather than by index 3.
+		 *
+		 * The index was an artefact of how many menus happened to precede it, so
+		 * removing the old View menu silently slid Spells to the far side of
+		 * Options and the bar read File, View, Options, Spells, Help. Options is
+		 * this program's Edit menu - settings, theme, font, and now undo - and
+		 * belongs next to Help at the end, with the subject menus before it.
+		 */
+		ui->menubar->insertMenu( ui->mOptions ? ui->mOptions->menuAction()
+											  : ui->menubar->actions().value( 2 ), spellsMenu );
 
 		/* Unfuck is NOT in this menu. It is a workspace.
 		 *
@@ -14819,6 +15015,22 @@ void NifSkope::restoreUi()
 	if ( isMaximized() )
 		QApplication::processEvents();
 	restoreState( settings.value( "Window State"_uip ).toByteArray(), 0x073 );
+
+	/* Re-assert the header order AFTER restoreState.
+	 *
+	 * The mode toolbar is put ahead of the render toolbar during construction,
+	 * so the row reads mode, then the verbs the mode governs, then the transform
+	 * widgets - Blender's header order. restoreState replays a layout saved by an
+	 * older build and silently undoes it, which is why the reorder appeared to do
+	 * nothing: the constructor was right and the restore overwrote it a moment
+	 * later, with no error and nothing in the diff to look at.
+	 *
+	 * Applied here rather than bumping the state version, because the version is
+	 * also what preserves everyone's dock arrangement; throwing that away to fix
+	 * the order of two toolbars is the wrong trade.
+	 */
+	if ( ui->tMode && ui->tRender && toolBarArea( ui->tMode ) == toolBarArea( ui->tRender ) )
+		insertToolBar( ui->tRender, ui->tMode );
 
 	aSanitize->setChecked( settings.value( "File/Auto Sanitize", true ).toBool() );
 
