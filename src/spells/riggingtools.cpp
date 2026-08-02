@@ -1,4 +1,5 @@
 #include "spellbook.h"
+#include "wwskin.h"
 #include "blocks.h"
 #include "mesh.h"
 #include "nifsnapshot.h"
@@ -4518,7 +4519,7 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 		"Select a primary mesh and one or more secondary donor meshes in the viewport." ), contextGroup );
 	contextBoneStatus->setObjectName( QStringLiteral( "RiggingContextBoneStatus" ) );
 	contextBoneStatus->setWordWrap( true );
-	contextBoneStatus->setStyleSheet( QStringLiteral( "QLabel { color: palette(mid); }" ) );
+	contextBoneStatus->setStyleSheet( QStringLiteral( "QLabel { color: %1; }" ).arg( wwSkinColor( "textMuted" ) ) );
 	auto * contextActionRow = new QHBoxLayout;
 	contextActionRow->addWidget( contextBoneStatus, 1 );
 	contextActionRow->addWidget( contextBindButton );
@@ -4532,7 +4533,7 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	auto * weightMapStatus = new QLabel( QObject::tr( "Select a skin bone or segment to inspect it." ), panel );
 	weightMapStatus->setObjectName( QStringLiteral( "RiggingWeightHeatmapStatus" ) );
 	weightMapStatus->setWordWrap( true );
-	weightMapStatus->setStyleSheet( QStringLiteral( "QLabel { color: palette(mid); }" ) );
+	weightMapStatus->setStyleSheet( QStringLiteral( "QLabel { color: %1; }" ).arg( wwSkinColor( "textMuted" ) ) );
 	layout->addWidget( weightMapStatus );
 
 	auto * paintGroup = new QGroupBox( QObject::tr( "Manual weight painting" ), panel );
@@ -4589,7 +4590,7 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	auto * paintStatus = new QLabel( QObject::tr( "Select a skin bone, then start painting in the viewport." ), paintGroup );
 	paintStatus->setObjectName( QStringLiteral( "RiggingWeightPaintStatus" ) );
 	paintStatus->setWordWrap( true );
-	paintStatus->setStyleSheet( QStringLiteral( "QLabel { color: palette(mid); }" ) );
+	paintStatus->setStyleSheet( QStringLiteral( "QLabel { color: %1; }" ).arg( wwSkinColor( "textMuted" ) ) );
 	paintLayout->addWidget( paintStatus );
 	layout->addWidget( paintGroup );
 
@@ -4624,7 +4625,7 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 		"Select a receiver segment or subsegment, then paint its binary face membership." ), segmentPaintGroup );
 	segmentPaintStatus->setObjectName( QStringLiteral( "RiggingSegmentPaintStatus" ) );
 	segmentPaintStatus->setWordWrap( true );
-	segmentPaintStatus->setStyleSheet( QStringLiteral( "QLabel { color: palette(mid); }" ) );
+	segmentPaintStatus->setStyleSheet( QStringLiteral( "QLabel { color: %1; }" ).arg( wwSkinColor( "textMuted" ) ) );
 	segmentPaintLayout->addWidget( segmentPaintStatus );
 	layout->addWidget( segmentPaintGroup );
 
@@ -4705,7 +4706,13 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	auto * transferWeights = new QPushButton( QObject::tr( "4. Transfer Weights (existing bones)..." ), advanced );
 	// transfer options: persisted, read by riggingTransfer for EVERY entry
 	// path (atomic flow and direct spells alike)
-	auto * mappingRow = new QHBoxLayout;
+	/* A layout cannot be hidden, only a widget can — which is why the Mapping
+	 * and Max Bones row stayed visible inside the collapsed Advanced box. It
+	 * gets a host widget so it can go with the rest.
+	 */
+	auto * mappingHost = new QWidget( advanced );
+	auto * mappingRow = new QHBoxLayout( mappingHost );
+	mappingRow->setContentsMargins( 0, 0, 0, 0 );
 	mappingRow->addWidget( new QLabel( QObject::tr( "Mapping" ), advanced ) );
 	auto * mappingMode = new QComboBox( advanced );
 	mappingMode->setObjectName( QStringLiteral( "RiggingMappingMode" ) );
@@ -4734,7 +4741,7 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	auto * hint = new QLabel( QObject::tr(
 		"For inspection, repair, and partial files." ), advanced );
 	hint->setWordWrap( true );
-	hint->setStyleSheet( QStringLiteral( "QLabel { color: palette(mid); }" ) );
+	hint->setStyleSheet( QStringLiteral( "QLabel { color: %1; }" ).arg( wwSkinColor( "textMuted" ) ) );
 	advancedLayout->addWidget( hint );
 	advancedLayout->addWidget( createSkin );
 	advancedLayout->addWidget( rebind );
@@ -4742,8 +4749,16 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	advancedLayout->addWidget( importNodes );
 	advancedLayout->addWidget( bindBones );
 	advancedLayout->addWidget( transferWeights );
-	advancedLayout->addLayout( mappingRow );
-	const QList<QWidget *> advancedWidgets = { hint, rebind, generate, importNodes, bindBones, transferWeights };
+	advancedLayout->addWidget( mappingHost );
+	/* Every child of the box, or the collapsed state is a lie.
+	 *
+	 * createSkin and the Mapping/Max Bones row were missing from this list, and
+	 * the group defaults unchecked — so a fresh install showed a COLLAPSED
+	 * "Advanced steps" box with "0. Create Skin (bind to node)…" and a pair of
+	 * combo boxes still sitting inside it.
+	 */
+	const QList<QWidget *> advancedWidgets = { hint, createSkin, rebind, generate,
+		importNodes, bindBones, transferWeights, mappingHost };
 	for ( QWidget * widget : advancedWidgets )
 		widget->setVisible( false );
 	QObject::connect( advanced, &QGroupBox::toggled, panel, [=]( bool expanded ) {
@@ -6455,7 +6470,7 @@ QDockWidget * tlCreateVertexPaintManagerDock( NifModel * nif, QMainWindow * mw, 
 		"LMB paints. Disable the Brush toolbar toggle to select vertices, edges, or faces." ), paintGroup );
 	paintStatus->setObjectName( QStringLiteral( "VertexPaintStatus" ) );
 	paintStatus->setWordWrap( true );
-	paintStatus->setStyleSheet( QStringLiteral( "QLabel { color: palette(mid); }" ) );
+	paintStatus->setStyleSheet( QStringLiteral( "QLabel { color: %1; }" ).arg( wwSkinColor( "textMuted" ) ) );
 	paintLayout->addWidget( paintStatus );
 	layout->addWidget( paintGroup );
 

@@ -1066,5 +1066,14 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 	} );
 
 	dock->setWidget( panel );
+	/* Docked and hidden, like every sibling manager.
+	 *
+	 * This dock was returned neither docked nor hidden, so it opened itself at
+	 * startup with UI/Workspace at 0 — nobody had chosen it. Caught by
+	 * WW_DOCKS_TEST, which was written for the Animation and Pose docks and
+	 * turned this up on its first run.
+	 */
+	mw->addDockWidget( Qt::RightDockWidgetArea, dock );
+	dock->hide();
 	return dock;
 }

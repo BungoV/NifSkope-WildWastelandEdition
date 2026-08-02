@@ -4715,6 +4715,84 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_DOCKS_TEST=1): does every manager dock start docked and
+	 * hidden, and does choosing a workspace still open the right one?
+	 *
+	 * Seven of the eight ended with addDockWidget + hide(). The Animation Manager
+	 * had NEITHER, so a fresh profile opened with it already spread across the
+	 * bottom before any workspace was chosen; the Pose Manager never called
+	 * addDockWidget at all and was returned floating. Both are now like their
+	 * siblings -- and hiding a dock that used to show itself is exactly the kind
+	 * of change that could quietly make a workspace unreachable, which is the
+	 * second half of this test.
+	 * Log: release/ww_docks_test.log
+	 */
+	if ( qEnvironmentVariableIsSet( "WW_DOCKS_TEST" ) ) {
+		QTimer::singleShot( 1500, skope, [skope]() {
+			QFile logf( QApplication::applicationDirPath() + "/ww_docks_test.log" );
+			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+			QTextStream log( &logf );
+			int checks = 0, fails = 0;
+			auto check = [&]( const QString & what, bool pass ) {
+				checks++;
+				if ( !pass ) fails++;
+				log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+			};
+			static const char * const dockNames[] = {
+				"TimelineDock", "MatTexManagerDock", "CollisionManagerDock",
+				"RiggingManagerDock", "UVManagerDock", "PoseManagerDock",
+				"SkeletonManagerDock", "UnfuckManagerDock",
+			};
+			int found = 0, visible = 0, floatingOrOrphan = 0;
+			for ( const char * n : dockNames ) {
+				QDockWidget * d = skope->findChild<QDockWidget *>( QLatin1String( n ) );
+				if ( !d ) { log << "  (no dock named " << n << ")\n"; continue; }
+				found++;
+				const bool docked = !d->isFloating() && d->parentWidget() != nullptr;
+				if ( d->isVisible() ) { visible++; log << "  VISIBLE at startup: " << n << "\n"; }
+				if ( !docked ) { floatingOrOrphan++; log << "  NOT DOCKED: " << n << "\n"; }
+			}
+			log << found << " manager dock(s); " << visible << " visible, "
+				<< floatingOrOrphan << " floating/undocked\n";
+			check( "the manager docks were found", found >= 6 );
+			/* Visibility at startup is NOT this fix's to assert.
+			 *
+			 * Two versions of this check were wrong before that was clear. The
+			 * defect being fixed is at CONSTRUCTION -- a dock that never calls
+			 * addDockWidget or hide() and so arrives floating or already open.
+			 * What the user sees on the next launch is then decided by
+			 * QMainWindow::restoreState replaying the saved window layout, which
+			 * is correct behaviour and will legitimately reopen whatever was open
+			 * last time. Asserting "nothing is visible" fails on a perfectly good
+			 * build the moment someone leaves a panel open.
+			 *
+			 * So the count is logged, and what is CHECKED is the pair of
+			 * properties the constructors actually own: every dock is parented
+			 * into the main window rather than floating, and a hidden one can
+			 * still be opened.
+			 */
+			log << "saved workspace: "
+				<< QSettings().value( QStringLiteral( "UI/Workspace" ), 0 ).toInt() << "\n";
+			check( "all of them are docked, not floating", floatingOrOrphan == 0 );
+
+			// ...and a workspace still opens its dock. Hiding at construction
+			// would be a regression if it made one unreachable.
+			QDockWidget * tl = skope->findChild<QDockWidget *>( QStringLiteral( "TimelineDock" ) );
+			if ( tl ) {
+				tl->setFloating( false );
+				tl->show();
+				QApplication::processEvents();
+				log << "Animation dock shows on demand: " << tl->isVisible() << "\n";
+				check( "a hidden manager dock can still be opened", tl->isVisible() );
+				tl->hide();
+			}
+			log << checks << " checks, " << fails << " failures\n";
+			log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+			logf.close();
+			QTimer::singleShot( 0, qApp, &QApplication::quit );
+		} );
+	}
+
 	/* TEST HARNESS (WW_MULTISEL_TEST=1): do the branch spells honour a
 	 * multi-selection, or only the one block they were handed?
 	 *
@@ -9018,7 +9096,19 @@ void NifSkope::initDockWidgets()
 		b->setFocusPolicy( Qt::NoFocus );
 	timeline->setNif( nif );
 	dTimeline->setWidget( timeline );
+	/* Docked, area-restricted and hidden, like its seven siblings.
+	 *
+	 * It was added with neither setAllowedAreas nor hide(), so a fresh profile
+	 * opened with the Animation Manager already spread across the bottom before
+	 * any workspace was chosen -- and because it accepted all four areas,
+	 * activateWorkspace needed a special case to keep it where it belongs.
+	 * Bottom stays allowed because this one really does live there; the point is
+	 * that the allowance is now declared rather than assumed.
+	 */
+	dTimeline->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea
+		| Qt::RightDockWidgetArea );
 	addDockWidget( Qt::BottomDockWidgetArea, dTimeline );
+	dTimeline->hide();
 
 	connect( timeline, &TimelineWidget::indexSelected, this, &NifSkope::select );
 	connect( timeline, &TimelineWidget::timeChanged, ogl, &GLView::setSceneTime );
@@ -9675,7 +9765,7 @@ void NifSkope::initDockWidgets()
 	// toggles dropdown (duplicate entries confused more than they helped)
 
 	// Blender-style transform orientation / pivot point selectors
-	const QColor icoColHdr( 228, 228, 232 );
+	const QColor icoColHdr( wwSkinColor( "text" ) );
 	QMenu * mOrient = new QMenu( tr( "Transform Orientation" ), this );
 	QActionGroup * grpOrient = new QActionGroup( this );
 	const char * orientNames[4] = {
@@ -9866,7 +9956,7 @@ void NifSkope::initDockWidgets()
 	// Viewport mode selector replaces the two select-mode buttons. Keep
 	// this visually in the same family as the Panels / Workspaces selectors.
 	{
-		const QColor iconColor( 228, 228, 232 );
+		const QColor iconColor( wwSkinColor( "text" ) );
 		// All viewport-mode glyphs are greyscale tlMakeIcon designs so the whole
 		// selector reads as one consistent family (object cube, edit triangle,
 		// vertex-paint dots, weight-paint brush, segment split).
@@ -10124,7 +10214,7 @@ void NifSkope::initDockWidgets()
 		visibilityButton->setPopupMode( QToolButton::InstantPopup );
 		visibilityButton->setAutoRaise( true );
 		visibilityButton->setIcon( tlMakeIcon( QStringLiteral( "eye_hidden" ),
-			QColor( 228, 228, 232 ) ) );
+			QColor( wwSkinColor( "text" ) ) ) );
 		visibilityButton->setToolTip( tr( "Isolate, hide, or restore viewport geometry" ) );
 		QMenu * visibilityMenu = new QMenu( visibilityButton );
 		QAction * isolateSelected = visibilityMenu->addAction( tr( "Isolate Selected Objects" ) );
@@ -10132,7 +10222,7 @@ void NifSkope::initDockWidgets()
 		QAction * hideSecondary = visibilityMenu->addAction( tr( "Hide Secondary Selected Objects" ) );
 		visibilityMenu->addSeparator();
 		QAction * restoreAll = visibilityMenu->addAction(
-			tlMakeIcon( QStringLiteral( "eye" ), QColor( 228, 228, 232 ) ),
+			tlMakeIcon( QStringLiteral( "eye" ), QColor( wwSkinColor( "text" ) ) ),
 			tr( "Restore All Hidden" ) );
 		visibilityButton->setMenu( visibilityMenu );
 
@@ -10188,7 +10278,7 @@ void NifSkope::initDockWidgets()
 		QToolButton * btn = new QToolButton( this );
 		btn->setPopupMode( QToolButton::InstantPopup );
 		btn->setToolTip( tr( "Display options" ) );
-		btn->setIcon( tlMakeIcon( QStringLiteral( "nodes" ), QColor( 228, 228, 232 ) ) );
+		btn->setIcon( tlMakeIcon( QStringLiteral( "nodes" ), QColor( wwSkinColor( "text" ) ) ) );
 		QMenu * m = new QMenu( btn );
 		const QList<QAction *> ds = { ui->aShowCollision, ui->aShowAxes, ui->aShowNodes, ui->aDoSkinning,
 			ui->aShowConstraints, ui->aShowMarkers, ui->aShowHidden };
@@ -10276,7 +10366,7 @@ void NifSkope::initDockWidgets()
 			ui->tRender->removeAction( ui->tRender->actions().last() );
 		ui->tRender->addSeparator();
 		ui->aViewCenter->setText( tr( "Center Viewpoint" ) );
-		ui->aViewCenter->setIcon( tlMakeIcon( QStringLiteral( "view_center" ), QColor( 228, 228, 232 ) ) );
+		ui->aViewCenter->setIcon( tlMakeIcon( QStringLiteral( "view_center" ), QColor( wwSkinColor( "text" ) ) ) );
 		QToolButton * focusButton = new QToolButton( this );
 		focusButton->setObjectName( QStringLiteral( "ViewportFocusButton" ) );
 		focusButton->setPopupMode( QToolButton::InstantPopup );
@@ -10331,7 +10421,7 @@ void NifSkope::initDockWidgets()
 		QToolButton * btnMagnet = new QToolButton( this );
 		btnMagnet->setCheckable( true );
 		btnMagnet->setAutoRaise( true );
-		btnMagnet->setIcon( tlMakeIcon( QStringLiteral( "magnet" ), QColor( 228, 228, 232 ) ) );
+		btnMagnet->setIcon( tlMakeIcon( QStringLiteral( "magnet" ), QColor( wwSkinColor( "text" ) ) ) );
 		btnMagnet->setToolTip( tr( "Snap during transforms without holding Ctrl (Ctrl inverts)" ) );
 		btnMagnet->setChecked( ogl->snapDefaultOn );
 		connect( btnMagnet, &QToolButton::toggled, [this]( bool on ) {
@@ -10490,7 +10580,7 @@ void NifSkope::initDockWidgets()
 
 		// Blender-style vertex / edge / face select buttons (edit mode)
 		{
-			QColor icoCol( 228, 228, 232 );
+			QColor icoCol( wwSkinColor( "text" ) );
 			QToolButton * bVert = new QToolButton( this );
 			QToolButton * bEdge = new QToolButton( this );
 			QToolButton * bFace = new QToolButton( this );
@@ -10531,7 +10621,7 @@ void NifSkope::initDockWidgets()
 			bDeformedCage->setObjectName( QStringLiteral( "ViewportDeformedCageButton" ) );
 			// A greyscale deformation-lattice glyph, distinct from the weight-paint
 			// brush (the old :/btn/skinned icon read as a brush next to "Deformed").
-			bDeformedCage->setIcon( tlMakeIcon( QStringLiteral( "mode_deform" ), QColor( 228, 228, 232 ) ) );
+			bDeformedCage->setIcon( tlMakeIcon( QStringLiteral( "mode_deform" ), QColor( wwSkinColor( "text" ) ) ) );
 			bDeformedCage->setText( tr( "Deformed" ) );
 			bDeformedCage->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 			bDeformedCage->setToolTip( tr( "Deformed Cage: edit the evaluated game/skinned position. Disable for raw bind vertices." ) );
@@ -10565,7 +10655,7 @@ void NifSkope::initDockWidgets()
 			bWeightBrush->setObjectName( QStringLiteral( "ViewportWeightPaintBrushButton" ) );
 			// The actual paint/select toggle: give it the greyscale brush glyph so
 			// it reads as a brush (was the :/btn/skinned icon).
-			bWeightBrush->setIcon( tlMakeIcon( QStringLiteral( "mode_weightpaint" ), QColor( 228, 228, 232 ) ) );
+			bWeightBrush->setIcon( tlMakeIcon( QStringLiteral( "mode_weightpaint" ), QColor( wwSkinColor( "text" ) ) ) );
 			bWeightBrush->setText( tr( "Brush" ) );
 			bWeightBrush->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 			bWeightBrush->setToolTip( tr( "Weight Paint brush. Disable to select vertices, edges, or faces." ) );
@@ -11589,7 +11679,7 @@ void NifSkope::initDockWidgets()
 				? tr( "Collision tools and the live physics preview" )
 				: tr( "This file has no collision" ) );
 			colBtn->setIcon( tlMakeIcon( QStringLiteral( "collision" ),
-				have ? QColor( 228, 228, 232 ) : QColor( 128, 128, 136 ) ) );
+				have ? QColor( wwSkinColor( "text" ) ) : QColor( 128, 128, 136 ) ) );
 			quick->sync();
 		};
 		connect( this, &NifSkope::completeLoading, this,
@@ -11608,7 +11698,7 @@ void NifSkope::initDockWidgets()
 		QToolButton * btn = new QToolButton( this );
 		btn->setPopupMode( QToolButton::InstantPopup );
 		btn->setText( tr( "Panels" ) );
-		btn->setIcon( tlMakeIcon( QStringLiteral( "panel" ), QColor( 228, 228, 232 ) ) );
+		btn->setIcon( tlMakeIcon( QStringLiteral( "panel" ), QColor( wwSkinColor( "text" ) ) ) );
 		btn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		btn->setAutoRaise( false );
 		btn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 6px" ) ) );
@@ -11625,7 +11715,7 @@ void NifSkope::initDockWidgets()
 		QToolButton * workspaces = new QToolButton( this );
 		workspaces->setPopupMode( QToolButton::InstantPopup );
 		workspaces->setText( tr( "Workspaces" ) );
-		workspaces->setIcon( tlMakeIcon( QStringLiteral( "workspace" ), QColor( 228, 228, 232 ) ) );
+		workspaces->setIcon( tlMakeIcon( QStringLiteral( "workspace" ), QColor( wwSkinColor( "text" ) ) ) );
 		workspaces->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		workspaces->setAutoRaise( false );
 		workspaces->setStyleSheet( btn->styleSheet() );
@@ -12190,7 +12280,7 @@ void NifSkope::initMenu()
 	// The bulb was the last coloured icon on this row; it comes from tlMakeIcon
 	// now, like everything beside it. The glyph in timeline.cpp records why the
 	// artwork was redrawn rather than desaturated.
-	ui->aLightMenu->setIcon( tlMakeIcon( QStringLiteral( "bulb" ), QColor( 228, 228, 232 ) ) );
+	ui->aLightMenu->setIcon( tlMakeIcon( QStringLiteral( "bulb" ), QColor( wwSkinColor( "text" ) ) ) );
 
 	/* Screenshot / Save View, off the bar.
 	 *

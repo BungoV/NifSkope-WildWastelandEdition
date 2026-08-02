@@ -1120,7 +1120,7 @@ private:
 		summary->setText( budget );
 		summary->setStyleSheet( overBudget
 			? QStringLiteral( "QLabel { color:%1; padding:3px; }" ).arg( wwSkinColor( "accentText" ) )
-			: QStringLiteral( "QLabel { color:palette(mid); padding:3px; }" ) );
+			: QStringLiteral( "QLabel { color: %1; padding: 3px; }" ).arg( wwSkinColor( "textMuted" ) ) );
 		updating = false;
 		refreshSimPins();
 		updateDetails();
@@ -2464,7 +2464,7 @@ private:
 
 		summary = new QLabel( this );
 		summary->setWordWrap( true );
-		summary->setStyleSheet( QStringLiteral( "QLabel { color: palette(mid); padding: 3px; }" ) );
+		summary->setStyleSheet( QStringLiteral( "QLabel { color: %1; padding: 3px; }" ).arg( wwSkinColor( "textMuted" ) ) );
 		root->addWidget( summary );
 
 		connect( tree, &QTreeWidget::currentItemChanged, this, [this]( QTreeWidgetItem * current ) {

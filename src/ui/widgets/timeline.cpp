@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "timeline.h"
+#include "wwskin.h"
 #include "timeline_p.h"
 
 #include "gl/glcontroller.h"
@@ -716,7 +717,7 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 
 	// fixed light color: the dark UI style leaves QPalette::ButtonText nearly
 	// black, which made the drawn icons invisible on the dark toolbar
-	const QColor icoCol( 228, 228, 232 );
+	const QColor icoCol( wwSkinColor( "text" ) );
 
 	auto mkBtn = [this]( const QString & text, const QString & tip, bool checkable ) {
 		auto b = new QToolButton( this );
@@ -1016,7 +1017,7 @@ void TimelineWidget::transportToggle( int dir )
 	playDir = dir;
 	btnPlay->setChecked( dir == 1 );
 	btnPlayBack->setChecked( dir == -1 );
-	const QColor c( 228, 228, 232 );
+	const QColor c( wwSkinColor( "text" ) );
 	btnPlay->setIcon( tlMakeIcon( dir == 1 ? QStringLiteral( "pause" ) : QStringLiteral( "play" ), c ) );
 	btnPlayBack->setIcon( tlMakeIcon( dir == -1 ? QStringLiteral( "pause" ) : QStringLiteral( "playback" ), c ) );
 	playTimer->start();
@@ -1028,7 +1029,7 @@ void TimelineWidget::transportStop()
 	playTimer->stop();
 	btnPlay->setChecked( false );
 	btnPlayBack->setChecked( false );
-	const QColor c( 228, 228, 232 );
+	const QColor c( wwSkinColor( "text" ) );
 	btnPlay->setIcon( tlMakeIcon( QStringLiteral( "play" ), c ) );
 	btnPlayBack->setIcon( tlMakeIcon( QStringLiteral( "playback" ), c ) );
 }

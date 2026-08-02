@@ -729,5 +729,11 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 
 	refresh();
 	dock->setWidget( panel );
+	/* Docked and hidden, like every sibling. This was returning an UNDOCKED
+	 * QDockWidget; skeletontools.cpp documents the startup bug that same
+	 * omission caused there.
+	 */
+	mw->addDockWidget( Qt::RightDockWidgetArea, dock );
+	dock->hide();
 	return dock;
 }
