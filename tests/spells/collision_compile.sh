@@ -84,6 +84,44 @@ check "the editable collision blocks are gone" "$([ "$left" = "0" ] && echo 1 ||
 np=$("$NS" -no-gui list "$W/c.nif" 2>/dev/null | grep -c "bhkNPCollisionObject")
 check "exactly one compiled collision object replaced them" "$([ "$np" = "1" ] && echo 1 || echo 0)"
 
+# --- the collision comes back the same SIZE ----------------------------------
+#
+# Decompile and Compile are inverses, so decompile -> compile -> decompile must
+# land on the geometry it started from. It did not: Decompile scaled Havok units
+# by havokConst * 10 = 70.0 while every other Havok conversion in the program
+# (gl/gltools.cpp bhkScale, physics/physicspreview.h, the CLI) uses
+# 1/1.42875 * 100 = 69.99125. One codebase, two answers 0.013% apart, so every
+# round trip grew the collision by 1 part in 8,000 - invisible once, and
+# cumulative.
+#
+# Signs and vertex order change through the compile (winding is rebuilt), so the
+# comparison is on the MAGNITUDE of the first vertex. The tolerance is 1e-5
+# relative: float32 noise through two conversions is about 5e-7, and the scale
+# mismatch was 1.25e-4 - 250x the tolerance either way, so this cannot pass by
+# accident or fail by rounding.
+c2=$("$NS" -no-gui list "$W/c.nif" 2>/dev/null | grep -m1 "bhkNPCollisionObject" | tr -d '[]' | cut -d' ' -f1)
+"$NS" -no-gui cast "$W/c.nif" -s "Havok/Decompile Compiled Collision" -b "$c2" -o "$W/d2.nif" >/dev/null 2>&1
+sd1=$("$NS" -no-gui list "$W/f.nif"  2>/dev/null | grep -m1 "hkPackedNiTriStripsData\|NiTriStripsData" | tr -d '[]' | cut -d' ' -f1)
+sd2=$("$NS" -no-gui list "$W/d2.nif" 2>/dev/null | grep -m1 "hkPackedNiTriStripsData\|NiTriStripsData" | tr -d '[]' | cut -d' ' -f1)
+v1=$("$NS" -no-gui get "$W/f.nif"  -b "${sd1:-0}" -f "Vertices/0" 2>/dev/null | tr -d '\r')
+v2=$("$NS" -no-gui get "$W/d2.nif" -b "${sd2:-0}" -f "Vertices/0" 2>/dev/null | tr -d '\r')
+echo "first vertex before: $v1"
+echo "first vertex after : $v2"
+same=$(awk -v a="$v1" -v b="$v2" 'BEGIN{
+	na = split(a, A, " "); nb = split(b, B, " ");
+	if (na < 6 || nb < 6) { print 0; exit }
+	worst = 0;
+	for (i = 2; i <= 6; i += 2) {
+		x = A[i] < 0 ? -A[i] : A[i];
+		y = B[i] < 0 ? -B[i] : B[i];
+		d = x - y; if (d < 0) d = -d;
+		s = x > 1 ? x : 1;
+		if (d / s > worst) worst = d / s;
+	}
+	print (worst < 1e-5) ? 1 : 0
+}')
+check "compile and decompile agree on the collision's size" "${same:-0}"
+
 # --- BSXFlags: the engine has to be told the mesh has collision --------------
 #
 # Measured over the stock FO4 tree: of the 22,496 meshes carrying a collision

@@ -38,8 +38,16 @@
  * All classes here inherit from the Spell class.
  */
 
-//! For Havok coordinate transforms
-static const float havokConst = 7.0f;
+/*! For Havok coordinate transforms: game units per Havok unit.
+ *
+ *  Was a flat 7.0, which made the Fallout 4 factor (this × 10) 70.0 while every
+ *  other place in the program that converts Havok units — gl/gltools.cpp's
+ *  bhkScale, physics/physicspreview.h, the CLI — uses 1/1.42875 × 100 =
+ *  69.99125. One codebase, two answers to the same question, 0.013 % apart:
+ *  small enough that nothing ever looked wrong, and large enough that a shape
+ *  built here and a shape decoded there did not agree to the last bit.
+ */
+static const float havokConst = 1.0f / 1.42875f * 10.0f;
 
 static quint32 collisionCreateMaterial( const NifModel * nif );
 static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigidBody );

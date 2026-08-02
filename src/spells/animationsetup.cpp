@@ -359,6 +359,14 @@ QVector<CtlrOption> controllerOptions( const NifModel * nif, const QModelIndex &
 		if ( nif->blockInherits( iBlock, "NiLight" ) ) {
 			options.append( { "NiLightDimmerController", Spell::tr( "Light dimmer" ), KindFloat, false, false } );
 			options.append( { "NiLightColorController", Spell::tr( "Light color" ), KindColor, false, false } );
+			/* Radius was the one of the three this list left out, while
+			 * spells/blocks.cpp has always been willing to attach it. It cannot
+			 * be FROZEN the way the dimmer can, though: freeze bakes a
+			 * controller by writing its value into the field it drives, and
+			 * nif.xml gives NiPointLight no radius row — the number lives in the
+			 * LIGH form, outside the mesh.
+			 */
+			options.append( { "NiLightRadiusController", Spell::tr( "Light radius" ), KindFloat, false, false } );
 		}
 		options.append( { "NiTransformController", Spell::tr( "Transform (position/rotation/scale)" ), KindTransform, false, false } );
 		options.append( { "NiVisController", Spell::tr( "Visibility (on/off)" ), KindBool, false, false } );

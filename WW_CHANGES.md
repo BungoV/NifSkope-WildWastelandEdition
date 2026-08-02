@@ -101,6 +101,33 @@ with a new random cell — so the check is that MOST OF THE POPULATION changes
 cell between two samples 20 ms apart while the population size holds steady,
 compared as a sorted multiset because a death shifts every later slot.
 
+### Three smaller ones
+
+**Every Havok round trip grew the collision.** `Decompile Compiled Collision`
+scaled by `havokConst * 10 = 70.0` while every other Havok conversion in the
+program — `gl/gltools.cpp`'s `bhkScale`, `physics/physicspreview.h`, the CLI —
+uses `1/1.42875 × 100 = 69.99125`. One codebase, two answers 0.013% apart, so
+decompile → compile → decompile came back 1 part in 8,000 larger, every time,
+cumulatively. `tests/spells/collision_compile.sh` grew a 12th check for it: the
+first vertex's magnitude, before 85.857643 and after 85.857597 (5×10⁻⁷
+relative, float noise through two conversions). On the old constant it comes
+back 85.879066 against 85.868378 — 1.25×10⁻⁴, which is what the check is set to
+catch at 250× either side of its tolerance.
+
+**BSPSysInheritVelocityModifier** (53 stock FO4 meshes) went unread, so a spray
+fired from something moving hung in the air where it was made instead of
+trailing behind. The emitter object's velocity is not in the file, so it is
+differenced from the node's world position between simulation steps; a backward
+scrub now forgets the previous position, because differencing across a jump is
+not a velocity.
+
+**`NiLightRadiusController`** was the one of the three light controllers missing
+from Animation Setup, while `spells/blocks.cpp` has always been willing to
+attach it. It still cannot be *frozen* like the dimmer can: freeze bakes a
+controller by writing its value into the field it drives, and nif.xml gives
+`NiPointLight` no radius row — that number lives in the LIGH form, outside the
+mesh.
+
 ### Two things measured and deliberately NOT changed
 
 **The `x_` sequence prefix does not mean what the reference says it means.** The

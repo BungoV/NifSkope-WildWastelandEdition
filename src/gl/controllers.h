@@ -436,6 +436,32 @@ class PSysSimController final : public Controller
 		float percentage = 0;
 	};
 	QVector<DragMod> drags;
+
+	/*! BSPSysInheritVelocityModifier — new particles are thrown by whatever is
+	 *  carrying the emitter.
+	 *
+	 *  53 stock Fallout 4 meshes use it and nothing read it, so a spray fired
+	 *  from a moving object came out standing still relative to the object
+	 *  instead of trailing behind it.
+	 *
+	 *  The object's velocity is not in the file: it is DIFFERENCED from the
+	 *  node's world position between simulation steps, which is why the previous
+	 *  position is state here. `havePrev` exists so the first step after a load
+	 *  or a backward scrub contributes nothing rather than a velocity measured
+	 *  against a position from before the jump.
+	 */
+	struct InheritVel
+	{
+		QString name;
+		QPersistentModelIndex iObj;
+		float chance = 100.0f;	//!< per cent of new particles that inherit
+		float mult = 0.5f;
+		float variation = 0;
+		Vector3 prevPos;
+		Vector3 vel;			//!< world units per second, this step
+		bool havePrev = false;
+	};
+	QVector<InheritVel> inherits;
 	bool hasColorMod = false;
 	float fadeIn = 0.1f, fadeOut = 0.9f;
 	float c1End = 0, c2Start = 0, c2End = 1, c3Start = 1;

@@ -934,6 +934,7 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	emitters.clear();
 	gravities.clear();
 	drags.clear();
+	inherits.clear();
 	hasColorMod = false;
 	hasColorGradient = false;
 	iColorGradKeys = QModelIndex();
@@ -1175,6 +1176,15 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 			QModelIndex iCols = nif->getIndex( iMod, "Colors" );
 			for ( int c = 0; c < 3 && c < nif->rowCount( iCols ); c++ )
 				modColors[c] = nif->get<Color4>( nif->getIndex( iCols, c ) );
+		} else if ( mtype == QLatin1String( "BSPSysInheritVelocityModifier" ) ) {
+			InheritVel iv;
+			iv.name = modActive.last().name;
+			iv.iObj = nif->getBlockIndex( nif->getLink( iMod, "Inherit Object" ) );
+			iv.chance = nif->get<float>( iMod, "Chance To Inherit" );
+			iv.mult = nif->get<float>( iMod, "Velocity Multiplier" );
+			iv.variation = nif->get<float>( iMod, "Velocity Variation" );
+			if ( iv.iObj.isValid() )
+				inherits.append( iv );
 		} else if ( mtype == QLatin1String( "BSPSysSubTexModifier" ) ) {
 			hasSubTex = true;
 			subtexName = modActive.last().name;
@@ -1554,6 +1564,24 @@ void PSysSimController::emitParticle( Emitter & e )
 		dir = pw.rotation.inverted() * ( e.emitNode->worldTrans().rotation * dir );
 	p.vel = dir * ( lv[Emitter::CSpeed] + random( lv[Emitter::CSpeedVar] ) );
 
+	/* BSPSysInheritVelocityModifier: whatever is carrying the emitter throws the
+	 * particle as well. Applied here and not in the advance step because it is a
+	 * one-off kick at birth, not a force — the particle keeps the emitter's
+	 * motion from the instant it left, which is why a spray from something moving
+	 * trails behind it instead of hanging in the air where it was made.
+	 *
+	 * `vel` is already zero for a modifier that is switched off this frame, so
+	 * there is nothing to test here.
+	 */
+	for ( const InheritVel & iv : inherits ) {
+		if ( iv.vel.length() <= 0.0f )
+			continue;
+		if ( random( 100.0f ) > iv.chance )
+			continue;
+		p.vel += ( pw.rotation.inverted() * iv.vel )
+			* ( ( iv.mult + random( iv.variation ) ) / psc );
+	}
+
 	p.age = 0;
 	p.lifespan = std::max( lv[Emitter::CLifeSpan] + random( lv[Emitter::CLifeSpanVar] ), 0.05f );
 	p.radius = std::max( lv[Emitter::CRadius] + random( lv[Emitter::CRadiusVar] ), 0.01f );
@@ -1595,6 +1623,10 @@ void PSysSimController::updateTime( float time )
 		parts.clear();
 		for ( Emitter & e : emitters )
 			e.accum = 0;
+		// and forget where the inherit-velocity objects were: differencing the
+		// pre-jump position against the post-jump one is not a velocity
+		for ( InheritVel & iv : inherits )
+			iv.havePrev = false;
 		lastTime = time;
 		return;
 	}
@@ -1676,6 +1708,28 @@ void PSysSimController::updateTime( float time )
 	 * exactly, and with one modifier it no longer slows the two axes it was
 	 * never pointed at.
 	 */
+	/* How fast each inherit-velocity object is moving, right now.
+	 *
+	 * Differenced from its world position, because nothing in the file holds a
+	 * velocity. dt is already clamped to (0, 0.25] and a backward scrub restarts
+	 * the simulation above, so this cannot see a jump.
+	 */
+	for ( InheritVel & iv : inherits ) {
+		Node * n = target->scene->getNode( target->scene->nifModel, QModelIndex( iv.iObj ) );
+		// Zeroed rather than skipped when the modifier is switched off, so
+		// emitParticle - which has no view of the Active state - can just add it
+		if ( !n || !modIsActive( iv.name ) ) {
+			iv.vel = Vector3();
+			if ( n )
+				iv.prevPos = n->worldTrans().translation;
+			continue;
+		}
+		const Vector3 now = n->worldTrans().translation;
+		iv.vel = iv.havePrev ? ( now - iv.prevPos ) / dt : Vector3();
+		iv.prevPos = now;
+		iv.havePrev = true;
+	}
+
 	QVarLengthArray<QPair<Vector3, float>, 6> dragAxes;		// (axis, 1 - exp(...)), psys-local
 	for ( const DragMod & d : drags ) {
 		if ( d.percentage <= 0.0f || !modIsActive( d.name ) )
