@@ -50,22 +50,23 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *  used to drop it), and most messages embed the offending block as "[19]",
  *  which is what makes Go to possible.
  *
- *  THE HONEST BIT
+ *  WHAT EACH ROW CAN OFFER
  *
- *  The plan was a Fix button on every finding. Two things killed it, and both
- *  are worth knowing before anyone tries again.
+ *  One finding, one primary action, in the second column:
  *
- *  First, every repair spell acts on the WHOLE FILE — none of them can fix one
- *  occurrence — so a per-finding button could never mean what it appeared to.
+ *    "Fix this one"   the finding names a block and an array, so that array's
+ *                     own index can be rebuilt and a spell cast on it alone.
+ *                     Exactly one class of problem qualifies today.
+ *    "Go to"          otherwise. Double-click does this on any row, including
+ *                     the ones whose column is taken by a fix.
  *
- *  Second, and decisively: reading the spells shows that NONE of the four
- *  checks has an automatic repair at all. See the checkFixes table for the
- *  detail. So the panel is split by what it can honestly offer. Issues are
- *  DIAGNOSIS: what is wrong, how bad, and where — each finding takes you to its
- *  block, and each group says plainly that there is no automatic fix. Repairs
- *  are the whole-file operations that do exist, listed separately because they
- *  are not answers to the findings above them and pretending otherwise would be
- *  the same lie one level up.
+ *  A group carries the whole-file repair for its class, labelled with the name
+ *  of the spell that will run — never "Fix all", which hides the fact that the
+ *  scope is the entire file. Its tooltip states the overreach.
+ *
+ *  Groups whose problem nothing repairs say so, in a muted child row. That
+ *  emptiness is content: it distinguishes "not wired up yet" from "the spell
+ *  library has no answer to this", and three of the six classes are the latter.
  */
 
 #include "nifskope.h"
@@ -107,48 +108,68 @@ enum Roles
 	FixRole,                        //!< name() of the spell that repairs it, or empty
 };
 
-/*! Which repair answers which check.
+/*! One row of the issue catalogue: a KIND of problem, not a spell.
  *
- *  Deliberately a short, explicit table rather than anything clever. The
- *  pairing is a claim about what a spell actually changes, so it has to be made
- *  by a person reading both — matching on words in the names would happily pair
- *  "Check Links" with "Collapse Link Arrays", which do not touch the same thing.
+ *  Grouping by the spell that reported a finding was the first design and it is
+ *  wrong, in a way that produced a real error in this file's previous version.
+ *  One spell emits several unrelated problems with different answers.
+ *  `spErrorNoneRefs` is the proof: it reports
  *
- *  An empty fix is not an oversight: several of these problems have no repair
- *  in the spell library at all, and saying so is more useful than hiding it.
+ *     "'Properties' link array contains 2 None Refs."     <- a hole in an array
+ *     "'Skeleton Root' link is None."                     <- a missing single Ref
+ *
+ *  The first is repaired exactly by Collapse Link Arrays, which runs
+ *  `numCollapser` over Properties and Extra Data List — the same two arrays the
+ *  checker inspects. The second is a lone Ref that no collapse can touch, and
+ *  nothing in the spell library repairs. Filed under one heading, either the
+ *  fixable half loses its fix or the unfixable half gains a button that does
+ *  nothing to it. This table splits them.
+ *
+ *  `perRow` is the honest per-finding fix bungo asked for, and it exists for
+ *  exactly one class: the message carries both the block and the array name, so
+ *  the array's own index can be rebuilt and `spCollapseArray` cast on that one
+ *  array. Its isApplicable re-validates the index, so a wrong reconstruction
+ *  fails closed rather than collapsing the wrong thing.
  */
-struct CheckFix
+struct IssueClass
 {
-	const char * check;
-	const char * fix;          //!< empty when nothing repairs it
-	const char * note;         //!< shown when there is no fix
+	const char * pattern;      //!< matched against the finding text
+	const char * title;        //!< the group heading
+	const char * wholeFile;    //!< spell name that repairs the whole file, or ""
+	const char * perRow;       //!< spell name that repairs this one occurrence, or ""
+	const char * note;         //!< the caveat, or what to do when there is no fix
 };
 
-/* As it turns out: none of them.
- *
- * This table started with `Invalid Paths -> Adjust Texture Sources`, on the
- * strength of the names. Reading that spell says otherwise — it swaps "/" for
- * "\\" in a NiSourceTexture File Name and, on Oblivion only, overwrites three
- * Format Prefs fields. It cannot add a missing extension, does not touch
- * absolute paths, and never looks at BSEffectShaderProperty or
- * BSShaderTextureSet, which is where every Invalid Paths finding on a modern
- * file comes from. A Fix button there would have been a lie on the one row that
- * offered one.
- *
- * The entries stay, empty, because the emptiness is the point: it is the
- * difference between "we have not wired this up" and "the spell library has no
- * answer to this problem", and the panel says which out loud. Fill one in the
- * day a spell genuinely resolves it.
- */
-const CheckFix checkFixes[] = {
-	{ "None Refs", "",
-	  "No automatic fix — the missing block has to be supplied, or the reference cleared by hand." },
-	{ "Invalid Paths", "",
-	  "No automatic fix — a path with no extension or an absolute path has to be corrected by hand, or with Search/Replace Resource Paths." },
-	{ "Environment Mapping Flags", "",
-	  "No automatic fix — the shader flags and the assigned environment map have to be reconciled by hand." },
-	{ "Check Links", "",
-	  "No automatic fix — a link pointing outside the file usually means the block it wanted was deleted." },
+const IssueClass issueClasses[] = {
+	{ "link array contains .* None Refs",
+	  "Holes in a link array",
+	  "Collapse Link Arrays", "Collapse",
+	  "Collapse Link Arrays also collapses Children, Modifiers and Sub Shapes arrays, which this check never inspects." },
+
+	{ "link is None",
+	  "Missing required reference",
+	  "", "",
+	  "No automatic fix — the block it wants has to be supplied, or the field pointed somewhere valid." },
+
+	{ "has a filepath without a file extension",
+	  "Texture path has no extension",
+	  "", "",
+	  "No automatic fix — correct it by hand, or with Search/Replace Resource Paths." },
+
+	{ "has an absolute filepath",
+	  "Texture path is absolute",
+	  "", "",
+	  "No automatic fix — an absolute path will not resolve on another machine; make it relative to the Data folder." },
+
+	{ "cannot have empty filepaths",
+	  "Texture path is empty",
+	  "", "",
+	  "No automatic fix — supply the path or clear the slot properly." },
+
+	{ "Flags lack",
+	  "Shader flags disagree with the environment map",
+	  "", "",
+	  "No automatic fix — reconcile the flags with the map that is actually assigned." },
 };
 
 //! Block number embedded in a finding, as "[19] ...". -1 when there is none.
@@ -278,18 +299,47 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		return out;
 	};
 
-	auto fixFor = []( const QString & check ) -> QPair<QString, QString> {
-		for ( const CheckFix & cf : checkFixes )
-			if ( check == QLatin1String( cf.check ) )
-				// fromUtf8, not fromLatin1: these literals contain em-dashes, and Latin-1
-				// turns each one into three mojibake characters in the panel.
-				return { QString::fromUtf8( cf.fix ), QString::fromUtf8( cf.note ) };
-		return {};
+	/*! The spell called `name`, whatever page it lives on.
+	 *
+	 *  NOT SpellBook::lookup. That takes a "Page/Name" id and, given a bare name,
+	 *  matches only spells whose page() is EMPTY — so `lookup("Collapse")` returns
+	 *  null because its page is "Array", and every paged spell this panel wanted
+	 *  came back null too. The Repairs button silently did nothing for exactly
+	 *  that reason, and reported "does not apply to this file" while doing it.
+	 *  Caught by the harness asserting that a fix RESOLVES its finding rather
+	 *  than merely that a button existed.
+	 *
+	 *  Names are unique enough here, and a miss is handled by the caller.
+	 */
+	auto spellNamed = []( const QString & name ) -> SpellPtr {
+		if ( name.isEmpty() )
+			return nullptr;
+		for ( SpellPtr s : SpellBook::spells() )
+			if ( s && s->name() == name )
+				return s;
+		return nullptr;
 	};
 
 	auto model = [skope, nif]() -> NifModel * {
 		NifModel * m = skope ? skope->getNifModel() : nif;
 		return ( m && m->getBlockCount() > 0 ) ? m : nullptr;
+	};
+
+	//! Which catalogue entry a finding belongs to; -1 when nothing matches.
+	auto classify = []( const QString & text ) {
+		for ( int i = 0; i < int( std::size( issueClasses ) ); i++ ) {
+			const QRegularExpression re( QString::fromUtf8( issueClasses[i].pattern ) );
+			if ( re.match( text ).hasMatch() )
+				return i;
+		}
+		return -1;
+	};
+
+	//! The array name a finding quotes, as in "'Properties' link array ...".
+	auto arrayOf = []( const QString & text ) {
+		static const QRegularExpression re( QStringLiteral( "'([^']+)'" ) );
+		const auto m = re.match( text );
+		return m.hasMatch() ? m.captured( 1 ) : QString();
 	};
 
 	auto scan = [=]() {
@@ -307,6 +357,21 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 
 		int errors = 0, warnings = 0, notes = 0;
 
+		/* Findings are collected from every check FIRST, then grouped by class.
+		 * The two cannot be interleaved: one spell contributes to several groups
+		 * and several spells can contribute to one, which is the whole reason
+		 * this is keyed on the problem rather than on who reported it.
+		 */
+		struct Finding
+		{
+			QString text;
+			QtMsgType type;
+			int block;
+			QString spell;
+			int cls;
+		};
+		QList<Finding> findings;
+
 		const BaseModel::MsgMode was = m->getMessageMode();
 		m->setMessageMode( BaseModel::MSG_TEST );
 		for ( SpellPtr s : checkSpells() ) {
@@ -314,58 +379,109 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 				continue;
 			m->getMessages();						// drain anything pending
 			s->cast( m, QModelIndex() );
-			const QList<TestMessage> found = m->getMessages();
-			if ( found.isEmpty() )
-				continue;
+			for ( const TestMessage & msg : m->getMessages() ) {
+				const QString text = QString( msg );
+				findings.append( Finding{ text, msg.type(), blockOf( text ), s->name(),
+					classify( text ) } );
+			}
+		}
+		m->setMessageMode( was );
+
+		// worst-first, so the thing most likely to break the file is at the top
+		auto rank = []( QtMsgType t ) {
+			return ( t == QtCriticalMsg || t == QtFatalMsg ) ? 0 : ( t == QtWarningMsg ? 1 : 2 );
+		};
+
+		QList<int> order;								// class ids, first-seen order
+		QHash<int, QList<int>> byClass;					// class id -> finding indices
+		for ( int i = 0; i < findings.size(); i++ ) {
+			const int c = findings.at( i ).cls;
+			if ( !byClass.contains( c ) )
+				order.append( c );
+			byClass[c].append( i );
+		}
+		std::sort( order.begin(), order.end(), [&]( int a, int b ) {
+			auto worstOf = [&]( int c ) {
+				int w = 2;
+				for ( int i : byClass.value( c ) )
+					w = std::min( w, rank( findings.at( i ).type ) );
+				return w;
+			};
+			return worstOf( a ) < worstOf( b );
+		} );
+
+		for ( int c : std::as_const( order ) ) {
+			const QList<int> & idx = byClass.value( c );
+			const bool known = ( c >= 0 );
 
 			auto * group = new QTreeWidgetItem( tree );
-			group->setText( 0, QObject::tr( "%1 — %n issue(s)", nullptr, found.size() ).arg( s->name() ) );
-			group->setData( 0, SpellRole, s->name() );
+			/* An unmatched finding still gets a home, keyed on the spell that
+			 * reported it. A checker added later therefore shows up without
+			 * anyone having to remember to extend the catalogue — it just shows
+			 * up ungrouped and without a fix, which is the safe default.
+			 */
+			const QString title = known
+				? QString::fromUtf8( issueClasses[c].title )
+				: QObject::tr( "%1 (uncatalogued)" ).arg( findings.at( idx.first() ).spell );
+			group->setText( 0, QObject::tr( "%1 — %n", nullptr, idx.size() ).arg( title ) );
 			QFont gf = group->font( 0 );
 			gf.setBold( true );
 			group->setFont( 0, gf );
 
-			// The group takes the worst severity of its children, so a collapsed
-			// list still shows where the real problems are.
 			QtMsgType worst = QtInfoMsg;
-			for ( const TestMessage & msg : found ) {
-				const QString text = QString( msg );
+			for ( int i : idx ) {
+				const Finding & f = findings.at( i );
 				auto * item = new QTreeWidgetItem( group );
-				item->setText( 0, text );
-				item->setData( 0, BlockRole, blockOf( text ) );
-				item->setData( 0, SpellRole, s->name() );
+				item->setText( 0, f.text );
+				item->setData( 0, BlockRole, f.block );
+				item->setData( 0, SpellRole, f.spell );
 
-				QColor c = plain;
-				if ( msg.type() == QtCriticalMsg || msg.type() == QtFatalMsg ) {
-					c = danger; errors++;
+				QColor col = plain;
+				if ( f.type == QtCriticalMsg || f.type == QtFatalMsg ) {
+					col = danger; errors++;
 					worst = QtCriticalMsg;
-				} else if ( msg.type() == QtWarningMsg ) {
-					c = warn; warnings++;
+				} else if ( f.type == QtWarningMsg ) {
+					col = warn; warnings++;
 					if ( worst != QtCriticalMsg ) worst = QtWarningMsg;
 				} else {
 					notes++;
 				}
-				item->setForeground( 0, c );
+				// All columns, or the action cell stays default-coloured on a red row.
+				item->setForeground( 0, col );
+				item->setForeground( 1, col );
 
-				if ( blockOf( text ) >= 0 )
+				/* The per-row fix, where the catalogue says one exists. The text
+				 * carries both halves — block from "[19]", array from "'Properties'"
+				 * — so the array's own index can be rebuilt and the spell cast on
+				 * that one array rather than on the file.
+				 */
+				const QString perRow = known ? QString::fromUtf8( issueClasses[c].perRow ) : QString();
+				if ( !perRow.isEmpty() && f.block >= 0 && !arrayOf( f.text ).isEmpty() ) {
+					item->setData( 0, FixRole, perRow );
+					item->setText( 1, QObject::tr( "Fix this one" ) );
+				} else if ( f.block >= 0 ) {
 					item->setText( 1, QObject::tr( "Go to" ) );
+				}
 			}
 			group->setForeground( 0, worst == QtCriticalMsg ? danger
 				: worst == QtWarningMsg ? warn : plain );
 
-			const auto fx = fixFor( s->name() );
-			group->setData( 0, FixRole, fx.first );
-			if ( !fx.first.isEmpty() ) {
-				group->setText( 1, QObject::tr( "Fix all" ) );
-			} else if ( !fx.second.isEmpty() ) {
+			const QString wholeFile = known ? QString::fromUtf8( issueClasses[c].wholeFile ) : QString();
+			group->setData( 0, FixRole, wholeFile );
+			if ( !wholeFile.isEmpty() ) {
+				// Named for the spell that runs, never "Fix all" — the label has to
+				// say what it will do to the rest of the file.
+				group->setText( 1, wholeFile );
+				group->setToolTip( 1, QString::fromUtf8( issueClasses[c].note ) );
+			}
+			if ( known && *issueClasses[c].note ) {
 				auto * note = new QTreeWidgetItem( group );
-				note->setText( 0, fx.second );
+				note->setText( 0, QString::fromUtf8( issueClasses[c].note ) );
 				note->setForeground( 0, muted );
 				note->setData( 0, BlockRole, -1 );
 			}
 			group->setExpanded( true );
 		}
-		m->setMessageMode( was );
 
 		if ( tree->topLevelItemCount() == 0 ) {
 			status->setText( QObject::tr( "No issues found." ) );
@@ -389,11 +505,63 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 	// ---------------------------------------------------------------------
 
 	//! Run one repair, in a single undo step, then re-scan so the list shrinks.
+	/*! Cast a spell on ONE index, in a single undo step, then re-scan.
+	 *
+	 *  The per-finding fix bungo asked for, and the only one the spell library
+	 *  can honestly support: the finding names its block and its array, so the
+	 *  array's own index is reconstructible and `spCollapseArray` can be cast on
+	 *  exactly that array. isApplicable re-validates it, so a wrong
+	 *  reconstruction refuses instead of collapsing something else.
+	 */
+	auto runFixAt = [=]( const QString & fixName, const QModelIndex & target ) {
+		NifModel * m = model();
+		SpellPtr fix = spellNamed( fixName );
+		if ( !m || !fix || !target.isValid() )
+			return false;
+		if ( !fix->isApplicable( m, target ) ) {
+			status->setText( QObject::tr(
+				"%1 will not run here — the field this finding names is not the array it expected." )
+				.arg( fixName ) );
+			return false;
+		}
+		QByteArray before;
+		{
+			QBuffer buf( &before );
+			buf.open( QIODevice::WriteOnly );
+			if ( !m->save( buf ) )
+				return false;
+		}
+		QUndoStack * stack = m->undoStack;
+		m->undoStack = nullptr;
+		fix->cast( m, target );
+		m->undoStack = stack;
+
+		QByteArray after;
+		{
+			QBuffer buf( &after );
+			buf.open( QIODevice::WriteOnly );
+			if ( !m->save( buf ) )
+				after = before;
+		}
+		const bool changed = ( before != after );
+		if ( changed && m->undoStack )
+			m->undoStack->push( new NifSnapshotCommand( m, before, after, fixName ) );
+		/* Re-scan immediately, and not only for the feedback: collapsing an array
+		 * shifts every later row of it, so any index cached from the previous scan
+		 * now points at the wrong thing.
+		 */
+		scan();
+		status->setText( changed
+			? QObject::tr( "%1 ran. Ctrl+Z undoes it." ).arg( fixName )
+			: QObject::tr( "%1 changed nothing." ).arg( fixName ) );
+		return changed;
+	};
+
 	auto runFix = [=]( const QString & fixName ) {
 		NifModel * m = model();
 		if ( !m || fixName.isEmpty() )
 			return;
-		SpellPtr fix = SpellBook::lookup( fixName );
+		SpellPtr fix = spellNamed( fixName );
 		if ( !fix || !fix->isApplicable( m, QModelIndex() ) ) {
 			status->setText( QObject::tr( "%1 does not apply to this file." ).arg( fixName ) );
 			return;
@@ -515,11 +683,20 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		[=]( QTreeWidgetItem * item, int column ) {
 		if ( column != 1 || item->text( 1 ).isEmpty() )
 			return;
-		if ( item->parent() == nullptr )
-			runFix( item->data( 0, FixRole ).toString() );
-		else if ( skope && item->data( 0, BlockRole ).toInt() >= 0 )
+		const QString fix = item->data( 0, FixRole ).toString();
+		if ( item->parent() == nullptr ) {
+			runFix( fix );					// group: the whole-file repair
+		} else if ( !fix.isEmpty() ) {
+			// Row: rebuild the array's own index from the text and fix just it.
+			NifModel * m = model();
+			const int b = item->data( 0, BlockRole ).toInt();
+			const QString arr = arrayOf( item->text( 0 ) );
+			if ( m && b >= 0 && !arr.isEmpty() )
+				runFixAt( fix, m->getIndex( m->getBlockIndex( b ), arr ) );
+		} else if ( skope && item->data( 0, BlockRole ).toInt() >= 0 ) {
 			skope->select( model() ? model()->getBlockIndex( item->data( 0, BlockRole ).toInt() )
 			                       : QModelIndex() );
+		}
 	} );
 
 	// ...and double-clicking a finding anywhere goes to its block, which is the

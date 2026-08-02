@@ -4554,7 +4554,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								continue;
 							NifModel * m = skope->getNifModel();
 							before = m->getBlockNumber( m->getBlockIndex( skope->currentNifIndex() ) );
-							emit tree->itemClicked( it, 1 );
+							/* Double-click, not the action column.
+							 *
+							 * A row whose action column offers a fix has no "Go to"
+							 * cell to click -- one column, one primary action -- so
+							 * Go to has to remain reachable some other way, and
+							 * double-click anywhere on the row is that way. Testing
+							 * the cell would have quietly stopped covering exactly
+							 * the rows that gained a fix.
+							 */
+							emit tree->itemDoubleClicked( it, 0 );
 							QApplication::processEvents();
 							after = m->getBlockNumber( m->getBlockIndex( skope->currentNifIndex() ) );
 							log << "Go to: block " << before << " -> " << after
@@ -4563,11 +4572,58 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							break;
 						}
 					}
+					/* The per-row fix, end to end.
+					 *
+					 * This is the one action in the panel that claims to repair a
+					 * single finding, so "it is offered" is not the question --
+					 * "does the finding go away" is. Click it, then re-read the
+					 * tree the re-scan rebuilt and confirm that exact row is gone.
+					 */
+					int fixable = 0;
+					QTreeWidgetItem * target = nullptr;
+					QString targetText;
+					for ( int g = 0; g < tree->topLevelItemCount() && !target; g++ ) {
+						QTreeWidgetItem * gi = tree->topLevelItem( g );
+						for ( int c = 0; c < gi->childCount(); c++ ) {
+							QTreeWidgetItem * it = gi->child( c );
+							if ( it->text( 1 ) == QLatin1String( "Fix this one" ) ) {
+								fixable++;
+								if ( !target ) { target = it; targetText = it->text( 0 ); }
+							}
+						}
+					}
+					if ( fixable > 0 ) {
+						log << "fixing: " << targetText << "\n";
+						emit tree->itemClicked( target, 1 );
+						QApplication::processEvents();
+						bool stillThere = false;
+						for ( int g = 0; g < tree->topLevelItemCount(); g++ ) {
+							QTreeWidgetItem * gi = tree->topLevelItem( g );
+							for ( int c = 0; c < gi->childCount(); c++ )
+								if ( gi->child( c )->text( 0 ) == targetText )
+									stillThere = true;
+						}
+						log << "after: " << ( status ? status->text() : QString() ) << "\n";
+						check( "the per-row fix resolved the finding it named", !stillThere );
+					} else {
+						log << "no per-row-fixable finding in this file\n";
+					}
+
 					dock->hide();
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
 				logf.close();
+				/* Mark the document clean before quitting.
+				 *
+				 * This harness now RUNS a repair, so the model really is modified
+				 * and quitting really does raise the unsaved-changes prompt -- with
+				 * nobody to answer it, which hung the run. That prompt is correct
+				 * behaviour; it is the harness that has to decline it.
+				 */
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
 		} );
