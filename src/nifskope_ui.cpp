@@ -472,6 +472,42 @@ QLabel * wwHeading( const QString & text, QWidget * parent )
  * Not weight 600 either — bold labels on every control is the same problem in
  * type.
  */
+/*! Desaturate a resource icon onto the toolbar's grey.
+ *
+ *  The drawn icons (tlMakeIcon) are already one greyscale family; the ones that
+ *  come out of res/ are not, so a handful of full-colour PNGs sit among them
+ *  looking like the only things worth clicking. This is luminance followed by a
+ *  lift toward the bar's light-grey tone, so the result matches the drawn glyphs
+ *  rather than merely being colourless - a straight qGray leaves the darker art
+ *  almost invisible on a dark toolbar.
+ *
+ *  Was a lambda inside the shading-contributions menu, which is where the
+ *  approach was proven. Promoted to file scope so the Render menu can use the
+ *  same pass rather than a second one that drifts from it.
+ *
+ *  Kept at 22 px because that is the size the menus ask for; a QIcon built from
+ *  one pixmap scales down cleanly and these are never drawn larger.
+ */
+QIcon wwGreyscaleIcon( const QIcon & icon )
+{
+	QPixmap pm = icon.pixmap( 22, 22 );
+	if ( pm.isNull() )
+		return icon;
+	QImage img = pm.toImage().convertToFormat( QImage::Format_ARGB32 );
+	for ( int y = 0; y < img.height(); y++ ) {
+		for ( int x = 0; x < img.width(); x++ ) {
+			QColor c = img.pixelColor( x, y );
+			if ( c.alpha() == 0 )
+				continue;
+			// luminance, then lift toward the toolbar's light-grey tone
+			int g = qGray( c.red(), c.green(), c.blue() );
+			g = 70 + g * 160 / 255;
+			img.setPixelColor( x, y, QColor( g, g, g, c.alpha() ) );
+		}
+	}
+	return QIcon( QPixmap::fromImage( img ) );
+}
+
 QString wwBoxedButtonQss( const QString & padding )
 {
 	return QStringLiteral(
@@ -4972,7 +5008,82 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the block-view display options came across",
 						textsOf( blockList ).size() >= 2 && textsOf( blockDetails ).size() >= 2 );
 
-					// --- every viewport mode draws a DIFFERENT icon --------------
+						/* --- the Render menu is greyscale, in BOTH icon states -----
+					 *
+					 * Measured on the pixels, because "I called the conversion"
+					 * is not evidence that the conversion reached the icon the
+					 * menu draws. It checks the On state too: aViewUser and
+					 * aViewPerspective carry a second, more saturated pixmap, and
+					 * converting only the default state leaves the colour to come
+					 * back the moment the toggle is used.
+					 */
+					int coloured = 0, examined = 0;
+					QStringList colouredNames;
+					for ( QAction * a : skope->ui->mRender->actions() ) {
+						if ( a->isSeparator() || a->icon().isNull() )
+							continue;
+						for ( QIcon::State st : { QIcon::Off, QIcon::On } ) {
+							const QPixmap pm = a->icon().pixmap( 22, 22, QIcon::Normal, st );
+							if ( pm.isNull() )
+								continue;
+							examined++;
+							const QImage im = pm.toImage().convertToFormat( QImage::Format_ARGB32 );
+							int worst = 0;
+							for ( int y = 0; y < im.height(); y++ )
+								for ( int x = 0; x < im.width(); x++ ) {
+									const QColor c = im.pixelColor( x, y );
+									if ( c.alpha() == 0 )
+										continue;
+									worst = std::max( { worst,
+										std::abs( c.red() - c.green() ),
+										std::abs( c.green() - c.blue() ) } );
+								}
+							if ( worst > 2 ) {			// 2 to forgive rescaling
+								coloured++;
+								colouredNames << QStringLiteral( "%1(%2) d=%3" )
+									.arg( a->text().remove( QLatin1Char( '&' ) ),
+										  st == QIcon::On ? QStringLiteral( "on" )
+														  : QStringLiteral( "off" ) )
+									.arg( worst );
+							}
+						}
+					}
+					log << "Render icons examined: " << examined << ", still coloured: "
+						<< ( colouredNames.isEmpty() ? QStringLiteral( "none" )
+													 : colouredNames.join( QStringLiteral( ", " ) ) )
+						<< "\n";
+					check( "the Render menu actually has icons to check", examined >= 10 );
+					check( "every Render menu icon is greyscale", coloured == 0 );
+
+					/* --- lighting moved into Viewport Shading -----------------
+					 *
+					 * Both halves are asserted. The bulb is off the toolbar AND
+					 * the sliders are reachable somewhere else - checking only
+					 * the removal would pass just as well if the lighting
+					 * controls had been deleted outright.
+					 */
+					bool bulbOnBar = false;
+					for ( const QAction * a : skope->ui->tRender->actions() )
+						if ( a == skope->ui->aLightMenu )
+							bulbOnBar = true;
+					check( "the unlabelled Lighting bulb is off the toolbar", !bulbOnBar );
+
+					auto * lightPanel = skope->findChild<LightingWidget *>(
+						QStringLiteral( "ShadingLightingPanel" ) );
+					check( "the lighting sliders live in Viewport Shading now",
+						lightPanel != nullptr );
+					if ( lightPanel ) {
+						const int sliders = lightPanel->findChildren<QSlider *>().size();
+						log << "lighting panel sliders: " << sliders << "\n";
+						check( "and all of them came across", sliders >= 7 );
+						// "Do Lighting" is this menu's own Unlit/Shaded choice
+						auto * dup = lightPanel->findChild<QToolButton *>(
+							QStringLiteral( "btnLighting" ) );
+						check( "without a second control for Unlit/Shaded",
+							!dup || dup->isHidden() );
+					}
+
+				// --- every viewport mode draws a DIFFERENT icon --------------
 					auto * modeBtn = skope->findChild<QToolButton *>(
 						QStringLiteral( "ViewportModeButton" ) );
 					check( "the mode button can be found by name", modeBtn != nullptr );
@@ -12527,24 +12638,7 @@ void NifSkope::initDockWidgets()
 		};
 		// The channel mixer reads as one greyscale system; desaturate the few
 		// colorful resource icons so none of them stand out (Blender-like).
-		auto greyscaleIcon = []( const QIcon & icon ) -> QIcon {
-			QPixmap pm = icon.pixmap( 22, 22 );
-			if ( pm.isNull() )
-				return icon;
-			QImage img = pm.toImage().convertToFormat( QImage::Format_ARGB32 );
-			for ( int y = 0; y < img.height(); y++ ) {
-				for ( int x = 0; x < img.width(); x++ ) {
-					QColor c = img.pixelColor( x, y );
-					if ( c.alpha() == 0 )
-						continue;
-					// luminance, then lift toward the toolbar's light-grey tone
-					int g = qGray( c.red(), c.green(), c.blue() );
-					g = 70 + g * 160 / 255;
-					img.setPixelColor( x, y, QColor( g, g, g, c.alpha() ) );
-				}
-			}
-			return QIcon( QPixmap::fromImage( img ) );
-		};
+		auto greyscaleIcon = []( const QIcon & icon ) { return wwGreyscaleIcon( icon ); };
 		const QList<ContributionDef> contributionDefs = {
 			{ tr( "Color" ), tr( "Diffuse" ), tr( "Base colour textures" ), Scene::DoDiffuse, greyscaleIcon( ui->aTextures->icon() ), false },
 			{ tr( "Color" ), tr( "Tint / Greyscale" ), tr( "Greyscale palette and material tint colour" ), Scene::DoMaterialTint, QIcon(), false },
@@ -12675,6 +12769,45 @@ void NifSkope::initDockWidgets()
 		QWidgetAction * effectsWidgetAction = new QWidgetAction( shadeMenu );
 		effectsWidgetAction->setDefaultWidget( effectsPanel );
 		shadeMenu->addAction( effectsWidgetAction );
+
+		/* LIGHTING MOVES IN HERE, AND THE BULB BUTTON GOES.
+		 *
+		 * The bulb was the one control on the whole top row with no label AND no
+		 * tooltip - the .ui sets both to empty strings and leaves only a
+		 * status-bar tip nobody reads - so the way to find the lighting sliders
+		 * was to click an unexplained glyph and see what happened. It also sat
+		 * next to a Shading dropdown that already owned half the same subject.
+		 *
+		 * The WIDGET is moved rather than rebuilt. LightingWidget is already
+		 * built, already wired to GLView's setters, and already persists every
+		 * slider under Settings/Render/Lighting/*; re-authoring seven sliders
+		 * here would mean re-authoring those keys too, and any drift between the
+		 * two would silently lose someone's saved lighting. This popup already
+		 * hosts two arbitrary QWidgets through QWidgetActions, and mLight was
+		 * itself a plain QMenu hosting this exact widget, so nothing new is being
+		 * asked of either side.
+		 *
+		 * "Do Lighting" is NOT carried across: it is the same bit as this menu's
+		 * own Unlit-vs-Shaded choice - applyShadeMode writes Scene::DoLighting
+		 * and force-syncs ui->aLighting - so keeping both would put two controls
+		 * on one state, in one popup, a few rows apart.
+		 */
+		shadeMenu->addSection( tr( "Lighting" ) );
+		{
+			auto * lightPanel = new LightingWidget( ogl, shadeMenu );
+			lightPanel->setObjectName( QStringLiteral( "ShadingLightingPanel" ) );
+			// no setActions(): that is what binds the "Do Lighting" toggle, and
+			// without it the button stays inert, so it is hidden outright below
+			if ( auto * doLighting = lightPanel->findChild<QToolButton *>(
+					QStringLiteral( "btnLighting" ) ) )
+				doLighting->hide();
+			auto * lightWidgetAction = new QWidgetAction( shadeMenu );
+			lightWidgetAction->setDefaultWidget( lightPanel );
+			shadeMenu->addAction( lightWidgetAction );
+			connect( ui->aSaveLighting, &QAction::triggered,
+					 lightPanel, &LightingWidget::saveSettings );
+		}
+
 		shadeButton->setMenu( shadeMenu );
 		ui->tRender->addWidget( shadeButton );
 
@@ -13962,13 +14095,19 @@ void NifSkope::initMenu()
 	updateRecentArchiveActions();
 	updateRecentArchiveFileActions();
 
-	// Lighting Menu
-	auto mLight = lightingWidget();
-
-	// The bulb was the last coloured icon on this row; it comes from tlMakeIcon
-	// now, like everything beside it. The glyph in timeline.cpp records why the
-	// artwork was redrawn rather than desaturated.
-	ui->aLightMenu->setIcon( tlMakeIcon( QStringLiteral( "bulb" ), QColor( wwSkinColor( "text" ) ) ) );
+	/* The Lighting Options bulb is gone from the toolbar.
+	 *
+	 * Its sliders live in the Viewport Shading dropdown now, under a "Lighting"
+	 * section - see the block in initDockWidgets that hosts a LightingWidget
+	 * there. The bulb was the only control on the row carrying no label and no
+	 * tooltip at all, and it duplicated the shading dropdown's subject.
+	 *
+	 * Removed from the toolbar rather than hidden, so the separators either side
+	 * of it collapse with it and the row does not draw a double rule. aLightMenu
+	 * itself is left in the .ui and simply unused: it is a designer object and
+	 * deleting it would churn a generated file for nothing.
+	 */
+	ui->tRender->removeAction( ui->aLightMenu );
 
 	/* Screenshot / Save View, off the bar.
 	 *
@@ -14045,9 +14184,10 @@ void NifSkope::initMenu()
 	// Append Menu to tRender actions
 	for ( auto child : ui->tRender->findChildren<QToolButton *>() ) {
 
-		if ( child->defaultAction() == ui->aLightMenu ) {
-			setFlyout( child, mLight );
-		} else {
+		// The bulb's flyout branch is gone with the bulb: aLightMenu is no longer
+		// on this toolbar, so no child here can match it and every button takes
+		// the style tag below.
+		{
 			/* A STYLE tag, not a name.
 			 *
 			 * This used to assign the objectName "btnRender", which is what
@@ -14090,6 +14230,52 @@ void NifSkope::initMenu()
 	for ( auto a : themes ) {
 		a->setData( i++ );
 		grpTheme->addAction( a );
+	}
+
+	/* GREYSCALE THE RENDER MENU.
+	 *
+	 * Every drawn icon in this application is one greyscale family, and the
+	 * Render menu was the last place still showing full-colour resource PNGs -
+	 * the orange/blue view cubes, the perspective toggle, the active Load View
+	 * marker, Save View, Lighting Only. Sat in a list beside a dozen grey glyphs
+	 * they read as the important entries, which is a claim about them that
+	 * nothing in the menu intends.
+	 *
+	 * Done here because initMenu() runs LAST of the four init passes
+	 * (initActions -> initDockWidgets -> initToolBars -> initMenu, nifskope.cpp),
+	 * so every icon these actions will ever carry is already set - including
+	 * aViewCenter's, which is assigned from tlMakeIcon during the toolbar pass.
+	 * It is also where the precedent sits: the bulb above is greyscaled in this
+	 * same function for the same reason.
+	 *
+	 * Both icon STATES are converted where an action has two. aViewUser and
+	 * aViewPerspective carry separate Off and On pixmaps, and the On ones are the
+	 * most saturated art in the set - converting only the default state would
+	 * have left the colour to reappear the moment the toggle was used, which is
+	 * the sort of thing that survives review and then shows up in a screenshot.
+	 *
+	 * Actions with no icon are skipped by isNull() rather than listed, so this
+	 * does not have to be kept in step with the menu's contents.
+	 */
+	if ( ui->mRender ) {
+		for ( QAction * a : ui->mRender->actions() ) {
+			if ( a->isSeparator() || a->icon().isNull() )
+				continue;
+			const QIcon src = a->icon();
+			QIcon grey;
+			// A single-state icon answers the On query with its Off pixmap, so
+			// this asks for both unconditionally and a one-state action simply
+			// gets the same art in both - which is what it had already.
+			for ( QIcon::State st : { QIcon::Off, QIcon::On } ) {
+				const QPixmap pm = src.pixmap( 22, 22, QIcon::Normal, st );
+				if ( pm.isNull() )
+					continue;
+				grey.addPixmap( wwGreyscaleIcon( QIcon( pm ) ).pixmap( 22, 22 ),
+								QIcon::Normal, st );
+			}
+			if ( !grey.isNull() )
+				a->setIcon( grey );
+		}
 	}
 }
 
@@ -14229,23 +14415,14 @@ void NifSkope::initConnections()
 }
 
 
-QMenu * NifSkope::lightingWidget()
-{
-	QMenu * mLight = new QMenu( this );
-	mLight->setObjectName( "mLight" );
-
-
-	auto lightingWidget = new LightingWidget( ogl, mLight );
-	lightingWidget->setActions( {ui->aLighting} );
-	auto aLightingWidget = new QWidgetAction( mLight );
-	aLightingWidget->setDefaultWidget( lightingWidget );
-
-	mLight->addAction( aLightingWidget );
-
-	connect( ui->aSaveLighting, &QAction::triggered, lightingWidget, &LightingWidget::saveSettings );
-
-	return mLight;
-}
+/* NifSkope::lightingWidget() is gone.
+ *
+ * It built a QMenu wrapping a LightingWidget for the toolbar bulb. The bulb has
+ * been removed and the widget is now hosted directly in the Viewport Shading
+ * popup, so this was a second construction path for the same panel - and two
+ * LightingWidgets would mean two sets of sliders writing the same
+ * Settings/Render/Lighting/* keys, disagreeing whenever one was moved.
+ */
 
 
 QWidget * NifSkope::filePathWidget( QWidget * parent )

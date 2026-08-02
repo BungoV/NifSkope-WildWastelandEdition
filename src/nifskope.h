@@ -530,7 +530,6 @@ private:
 	//! Begin an inline, synced rename for a uniquely named scene object.
 	void renameBlockListIndex( const QModelIndex & index, bool notifyIfUnavailable );
 
-	QMenu * lightingWidget();
 	QWidget * filePathWidget( QWidget * );
 
 	void setViewFont( const QFont & );
