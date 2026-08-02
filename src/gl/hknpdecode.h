@@ -678,6 +678,21 @@ struct HknpSystem
 	QVector<HknpCompound> compounds;
 	//! class names present but not decoded
 	QStringList unknownShapes;
+	/*! Shape classes that were RECOGNISED, kept for their bytes, and produced no
+	 *  geometry at all.
+	 *
+	 *  Separate from unknownShapes on purpose: that list is also the switch that
+	 *  disables positional body attribution, and this is a report, not a
+	 *  capability statement.
+	 *
+	 *  It exists because hknpConvexShape hid here for the life of the decoder. It
+	 *  decoded to 0 verts and 0 tris, which made it invisible in the viewport and
+	 *  to every geometry check, and decodeShapeSlot still answered "decoded" —
+	 *  because it keeps any *Shape class that has raw bytes. The first symptom was
+	 *  17 stock files refusing to re-assemble, several layers away from the cause.
+	 *  A shape that contributes nothing should say so where it happens.
+	 */
+	QStringList geometrylessShapes;
 	bool valid = false;
 	/*! A read went out of range somewhere in this packfile.
 	 *

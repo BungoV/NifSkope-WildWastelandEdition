@@ -1507,6 +1507,11 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 		if ( !sys.unknownShapes.isEmpty() )
 			out() << "  not decoded              " << sys.unknownShapes.join( QStringLiteral( ", " ) )
 				  << Qt::endl;
+		// recognised, carried, and contributing nothing — the state hknpConvexShape
+		// sat in undetected until 17 files refused to re-assemble
+		if ( !sys.geometrylessShapes.isEmpty() )
+			out() << "  no geometry              " << sys.geometrylessShapes.join( QStringLiteral( ", " ) )
+				  << Qt::endl;
 		if ( sys.readTruncated )
 			out() << "  read out of range        first at +0x"
 				  << QString::number( sys.readTruncatedAt, 16 ) << " (blob is "

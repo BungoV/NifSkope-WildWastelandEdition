@@ -1302,7 +1302,17 @@ HknpSystem hknpDecode( const QByteArray & data )
 	auto decodeShapeSlot = [&]( qsizetype off, const QString & cls, HknpShape & out ) -> bool {
 		if ( decodeLeaf( off, cls, out ) )
 			return true;
-		return cls.endsWith( QLatin1String( "Shape" ) ) && !out.rawData.isEmpty();
+		if ( !cls.endsWith( QLatin1String( "Shape" ) ) || out.rawData.isEmpty() )
+			return false;
+		/* Kept for its bytes, but SAY SO. A shape that reaches here contributes no
+		 * geometry: it cannot be drawn, picked, decompiled or edited, and it was
+		 * indistinguishable in every report from one that decoded fine. That is how
+		 * hknpConvexShape stayed hidden -- 0 verts, 0 tris, no error anywhere, and
+		 * a packfile that then refused to assemble with no clue why.
+		 */
+		if ( !sys.geometrylessShapes.contains( cls ) )
+			sys.geometrylessShapes.append( cls );
+		return true;
 	};
 
 	// pass 1: compound shapes — decode each instance with its transform
