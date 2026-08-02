@@ -1383,6 +1383,68 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			} );
 		} );
 
+		/*! Rewrite many paths as ONE undoable edit, and count only what changed.
+		 *
+		 *  Replace All and Retarget Folder used to call setText per row. Every one
+		 *  of those fires the itemChanged handler above, which calls nifSnapshotOp
+		 *  -- and nifSnapshotOp serialises the WHOLE MODEL twice. Two hundred paths
+		 *  meant ~400 full serialisations, 200 undo commands each retaining two
+		 *  copies of the file, and no way to undo the operation as a unit.
+		 *
+		 *  The same panel already does it correctly three times over -- Find
+		 *  Duplicates, Paste Material Setup, Paste Texture Set -- by holding the
+		 *  *applying guard down and writing inside one snapshot. This is that.
+		 *
+		 *  AND THE COUNT USED TO LIE. Rows backed by an invalid QPersistentModelIndex
+		 *  (material-file texture rows, which have no field in this NIF to write)
+		 *  had their text changed, the handler bailed before the model write, the
+		 *  next rebuild reverted the text -- and they were still counted in
+		 *  "N path(s) changed". Only rows whose model value actually moves are
+		 *  counted now, and the untouched ones keep their old text, so nothing
+		 *  appears to have happened where nothing did.
+		 */
+		auto bulkRewritePaths = [nif, tree, rows, applying]
+			( const std::function<QString( const QString & )> & transform ) -> int
+		{
+			struct Pending { QPersistentModelIndex idx; QTreeWidgetItem * item; QString norm; };
+			QVector<Pending> pending;
+
+			for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
+				QTreeWidgetItem * m = tree->topLevelItem( i );
+				for ( int j = -1; j < m->childCount(); j++ ) {
+					QTreeWidgetItem * it = ( j < 0 ) ? m : m->child( j );
+					const QString before = it->text( 2 );
+					const QString after = transform( before );
+					if ( after == before )
+						continue;
+					const int r = it->data( 1, Qt::UserRole ).toInt();
+					if ( r < 0 || r >= rows->size() )
+						continue;
+					QPersistentModelIndex idx = rows->at( r );
+					if ( !idx.isValid() )
+						continue;			// no field here to write; leave the text alone
+					const QString norm = tlNormalizeResourcePath( after );
+					if ( norm == nif->resolveString( QModelIndex( idx ) ) )
+						continue;
+					pending.append( { idx, it, norm } );
+				}
+			}
+			if ( pending.isEmpty() )
+				return 0;
+
+			// one guard, one snapshot, one undo step
+			*applying = true;
+			for ( const Pending & pd : pending )
+				pd.item->setText( 2, pd.norm );
+			*applying = false;
+
+			nifSnapshotOp( nif, QObject::tr( "Edit resource paths" ), [&]() {
+				for ( const Pending & pd : pending )
+					nif->assignString( QModelIndex( pd.idx ), pd.norm );
+			} );
+			return int( pending.size() );
+		};
+
 		// clicking a column reveals the matching block: Material -> containing
 		// shader/texture-set block, Mesh -> owning node, Path -> the string field
 		QObject::connect( tree, &QTreeWidget::itemClicked, panel, [nif, rows, mw]( QTreeWidgetItem * it, int col ) {
@@ -1492,23 +1554,15 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			replaceDlg->show(); replaceDlg->raise(); replaceDlg->activateWindow();
 		} );
 		QObject::connect( btnCloseDlg, &QPushButton::clicked, replaceDlg, &QDialog::hide );
-		QObject::connect( btnReplaceAll, &QPushButton::clicked, replaceDlg, [tree, edFind, edRepl, cbCase, replaceStatus]() {
+		QObject::connect( btnReplaceAll, &QPushButton::clicked, replaceDlg, [edFind, edRepl, cbCase, replaceStatus, bulkRewritePaths]() {
 			QString f = edFind->text();
 			if ( f.isEmpty() )
 				return;
 			QString rep = edRepl->text();
 			Qt::CaseSensitivity cs = cbCase->isChecked() ? Qt::CaseSensitive : Qt::CaseInsensitive;
-			int n = 0;
-			for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
-				QTreeWidgetItem * m = tree->topLevelItem( i );
-				for ( int j = -1; j < m->childCount(); j++ ) {
-					QTreeWidgetItem * it = ( j < 0 ) ? m : m->child( j );
-					if ( it->text( 2 ).contains( f, cs ) ) {
-						it->setText( 2, QString( it->text( 2 ) ).replace( f, rep, cs ) );
-						n++;
-					}
-				}
-			}
+			const int n = bulkRewritePaths( [f, rep, cs]( const QString & path ) {
+				return path.contains( f, cs ) ? QString( path ).replace( f, rep, cs ) : path;
+			} );
 			replaceStatus->setText( QObject::tr( "%1 path(s) changed" ).arg( n ) );
 		} );
 
@@ -1516,7 +1570,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		QObject::connect( edFilter, &QLineEdit::textChanged, panel, applyVis );
 
 		// bulk folder retarget: swap a path prefix everywhere it matches
-		QObject::connect( btnRetarget, &QPushButton::clicked, panel, [tree, panel]() {
+		QObject::connect( btnRetarget, &QPushButton::clicked, panel, [panel, bulkRewritePaths]() {
 			bool ok = false;
 			QString from = QInputDialog::getText( panel, QObject::tr( "Retarget folder" ),
 				QObject::tr( "Replace this folder prefix:" ), QLineEdit::Normal, QString(), &ok );
@@ -1528,17 +1582,10 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 				return;
 			from = tlNormalizeResourcePath( from );
 			to = tlNormalizeResourcePath( to );
-			int n = 0;
-			for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
-				QTreeWidgetItem * m = tree->topLevelItem( i );
-				for ( int j = -1; j < m->childCount(); j++ ) {
-					QTreeWidgetItem * it = ( j < 0 ) ? m : m->child( j );
-					if ( it->text( 2 ).startsWith( from, Qt::CaseInsensitive ) ) {
-						it->setText( 2, to + it->text( 2 ).mid( from.length() ) );
-						n++;
-					}
-				}
-			}
+			const int n = bulkRewritePaths( [from, to]( const QString & path ) {
+				return path.startsWith( from, Qt::CaseInsensitive )
+					? to + path.mid( from.length() ) : path;
+			} );
 			Message::info( panel, QObject::tr( "Retargeted %1 path(s)." ).arg( n ) );
 		} );
 
