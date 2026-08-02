@@ -1,5 +1,85 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02c — Two reported bugs, one Unfuck, and a lot of measuring
+
+**Typing `11.25` into a transform gave `1125`.** The gizmo's numeric entry was
+never at fault — it handles `.` correctly and was written for keypad and
+non-English layouts besides. It simply never received the key. **Three** separate
+handlers upstream claim a bare period, and all three fire during a modal
+transform: the app-wide filter's `frame_selection` branch (bound to a bare `.`,
+whose two guards — pointer over the viewport, focus not a text widget — are
+*necessarily* true during a mouse-driven G/R/S), the same filter's numpad branch,
+and `physicsKeyPress` inside GLView. Digits are bound to nothing, which is exactly
+why it read as "the decimal key is broken" rather than "keys are broken". The
+third site was found by an adversarial pass over the first diagnosis; without it
+`.` is still lost whenever the physics preview runs.
+
+**Loading a nif destroyed a browsed archive tree, and worse.** Browse mode sets
+`currentArchivePath`, which makes `configuredIndexLive` false forever, so the
+cache fast path could never be taken and every load did a full teardown. That
+teardown also clears `currentArchiveNames`, and `openArchiveFileString` returns
+immediately when it is empty — **so the first load out of a browsed archive made
+every other file in it unopenable.** Nothing in the UI shows that. The
+configured "Available NIFs" tree was never affected, which is why the existing
+browser harness passed honestly and a second one was needed rather than a
+sharper look at the first.
+
+**There is one Unfuck now.** ~350 lines of modal dialog are gone and the Spells
+entry opens the workspace. Three things moved across first: the curated run
+order, single-snapshot undo across a whole run, and four Batch/Optimize repairs
+the panel's `Sanitize || sanity()` rule could not see — Update All Bounds among
+them, which is the fix for meshes that vanish as the camera moves.
+
+**The panel can now see materials and collision**, via two new `checker()` spells
+that report through `logMessage` instead of a modal. The severity calibration
+took five rounds of measurement and every one contradicted what I expected:
+vanilla FO4 effect meshes have no materials at all; blank shaders on
+`EditorMarker` geometry have nothing to configure; lighting shaders are *not*
+always material-driven; and NIF-vs-BGSM disagreement is the normal state of
+Bethesda's own assets. The rule that survived is **absence is a defect,
+disagreement is normal** — and the number that matters: **eight stock files, zero
+errors or warnings, every finding a white note.** It started at seven warnings on
+the first file tried.
+
+**Three bugs in the path checker**, found while cataloguing. `P_EMPTY` was
+declared without a value in a flags enum, so `invalid & P_EMPTY` was `& 0` — that
+message had never been reachable, for any caller, since it was written. The loop
+used `return` where `continue` was meant, so the first empty slot in a texture
+array abandoned every slot after it. And `if/else if` between the no-extension
+and absolute tests hid the more serious of the two.
+
+**Absolute paths get a repair.** An adversarial review returned six corrections
+against the first sketch and three became the design: the archive code's own
+anchor rule prefix-matches (`tex` matches `textures`) so it is not reused;
+material paths resolve under `materials`, not `textures`; and there is
+deliberately **no verification pass**, because `findResourceFile` lowercases,
+forward-slashes and coerces the extension, and appends the open NIF's own folder
+to the search path — so it happily verifies a path that only resolves on this
+machine, the exact problem being fixed.
+
+**Block List batches 2 and 3.** Remove Branch and Duplicate Branch now honour a
+multi-selection the way Copy already did — selecting five nodes and pressing
+Ctrl+Delete used to remove one. Submenu order is declared rather than inherited
+from link order in `NifSkope.pro`.
+
+**Workspace consistency.** Every drawn icon was invisible in the Light theme
+(17 hardcoded glyph colours); eight muted hint labels used `palette(mid)`, which
+`loadTheme()` never sets, so they followed no theme at all; Rigging's collapsed
+"Advanced steps" box still showed two of its children; and three docks arrived
+floating or already open.
+
+**Also**: `Spell::hint()` had zero overrides tree-wide and nothing read it, while
+the same sentences sat in a private table — moved onto the spells, so the
+right-click menu shows them too; the rotation-key fix from `2ff7457` is finally
+proven at runtime, on a fixture that had to be *built* because no stock FO4 asset
+has quaternion rotation keys.
+
+*Four harnesses passed for the wrong reason during this run and were caught:* a
+0-check run reporting PASS, a fix button that resolved nothing, a cursor that
+never reached the viewport (`QCursor::setPos` is a no-op from a non-foreground
+process), and a dock assertion that would have let a real defect through. The
+pattern is always a precondition quietly not holding.
+
 ## 2026-08-02b — The confirmation now asks the right spells, in their own words
 
 **The prompt was inverted.** `SpellBook::cast` fired one generic question — *"This
