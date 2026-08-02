@@ -1944,6 +1944,124 @@ public:
 };
 REGISTER_SPELL( spCheckMaterial )
 
+/*! Every shader block's material problems, whole file, reported through logMessage.
+ *
+ *  WHY THIS EXISTS AS A SEPARATE SPELL. `spCheckMaterial` above already knows how
+ *  to find these — but it wants a selected shader block, and it ends in a
+ *  `QMessageBox`. Neither works for the Unfuck panel, which casts its checks with
+ *  an INVALID index and drains `nif->getMessages()`: the selection gate means the
+ *  spell is never applicable during a scan, and a modal raised behind a panel that
+ *  is still building is how that panel hung once already.
+ *
+ *  `tlMaterialIssues` itself opens nothing and writes nothing, so the walk is safe
+ *  to run headless. It is the reporting that had to change, not the checking.
+ *
+ *  COST, STATED PLAINLY. This is the only check in the panel that touches the
+ *  filesystem: each shader block resolves its material path against the loaded
+ *  archives and then extracts and re-parses the .bgsm/.bgem, uncached. That is one
+ *  archive read per shader block — eight on a typical effect mesh, more on a large
+ *  static. Acceptable for a scan the user asked for by opening the panel; it is
+ *  why `isApplicable` gates hard rather than letting the walk decide, because
+ *  `SpellBook::checkers()` is also cast per-file by the bulk directory scan in
+ *  xmlcheck.cpp and by the CLI.
+ *
+ *  WHAT IT CANNOT SEE. When a shader's embedded Material struct has `Is Modified`
+ *  set, `Material::createMaterialData` synthesizes the material bytes from the
+ *  NIF's own fields instead of reading the file. "out of sync" and "TextureSet
+ *  differs" then compare the NIF against itself and can never fire. Those two
+ *  findings are therefore absent-not-clean on a modified material, and no amount
+ *  of walking harder here changes that.
+ */
+class spCheckAllMaterials final : public Spell
+{
+public:
+	QString name() const override final { return tr( "Material Problems" ); }
+	QString page() const override final { return tr( "Error Checking" ); }
+	bool constant() const override final { return true; }
+	bool checker() const override final { return true; }
+	static QString message() { return tr( "Material problems were found." ); }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		// Whole-file only, and only where BGSM/BGEM materials exist at all: below
+		// BSVersion 130 no shader references one, so every block would report
+		// "No BGSM/BGEM material is assigned" and bury a Skyrim file in noise.
+		return !index.isValid() && nif && nif->getBSVersion() >= 130;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & ) override final
+	{
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex shader = tlShaderBlock( nif, nif->getBlockIndex( b ) );
+			if ( !shader.isValid() )
+				continue;
+
+			/* An effect shader that carries its textures inline is NORMAL, and
+			 * saying otherwise is how a linter becomes noise.
+			 *
+			 * Measured, not assumed: ElectricalExplosionSmall.nif is a shipping
+			 * vanilla FO4 effect mesh that renders correctly, and it contains
+			 * zero ".bgem" strings — all seven of its BSEffectShaderProperty
+			 * blocks drive themselves from Source Texture. Reporting those seven
+			 * as "No BGSM/BGEM material is assigned" is true and useless: a
+			 * healthy stock asset would open with seven warnings.
+			 *
+			 * spCheckMaterial keeps reporting it, correctly — there the user
+			 * pointed at one block and asked. Here nobody asked about this block.
+			 * A LIGHTING shader with no .bgsm stays a finding: those do need one.
+			 */
+			if ( nif->blockInherits( shader, "BSEffectShaderProperty" )
+				&& tlShaderMaterialPath( nif, shader ).isEmpty()
+				&& !nif->resolveString( shader, "Source Texture" ).isEmpty() )
+				continue;
+
+			for ( const QString & issue : tlMaterialIssues( nif, shader ) ) {
+				/* ABSENCE IS A DEFECT. DISAGREEMENT IS BETHESDA'S NORMAL.
+				 *
+				 * Measured before deciding, because the obvious reading is wrong.
+				 * Five vanilla FO4 statics sampled at random from SetDressing:
+				 * five of five reported "Shader flags are out of sync", four also
+				 * reported "BSShaderTextureSet differs", one reported
+				 * "BSShaderTextureSet is missing" — and NONE reported a missing
+				 * material or a missing texture.
+				 *
+				 * So the NIF-vs-BGSM comparison is true of essentially every
+				 * shipping asset: the game applies the material at runtime and
+				 * the stored set and flags are a stale fallback it does not mind.
+				 * Reported as warnings, they would put two amber rows on every
+				 * static anyone ever opens, which is how this panel would earn
+				 * the reputation the dialog it replaced had.
+				 *
+				 * They are still worth knowing if you are deliberately keeping a
+				 * NIF and its material in step, so they stay — as notes, in
+				 * plain text, below anything that is actually broken. Drift is
+				 * tested first because "BSShaderTextureSet is missing" would
+				 * otherwise match the absence rule below it.
+				 */
+				static const char * const drift[] = {
+					"BSShaderTextureSet is missing",
+					"BSShaderTextureSet differs",
+					"Shader flags are out of sync",
+				};
+				bool isDrift = false;
+				for ( const char * d : drift )
+					if ( issue.contains( QLatin1String( d ) ) )
+						isDrift = true;
+
+				QMessageBox::Icon lvl = QMessageBox::Warning;
+				if ( isDrift )
+					lvl = QMessageBox::Information;
+				else if ( issue.contains( QLatin1String( "is missing" ) ) )
+					lvl = QMessageBox::Critical;	// the file or texture is not there
+
+				nif->logMessage( message(), tr( "[%1] %2" ).arg( b ).arg( issue ), lvl );
+			}
+		}
+		return QModelIndex();
+	}
+};
+REGISTER_SPELL( spCheckAllMaterials )
+
 class spCompareMaterial final : public Spell
 {
 public:

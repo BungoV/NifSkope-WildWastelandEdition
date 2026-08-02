@@ -39,6 +39,9 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="${EXE:-$ROOT/release/NifSkope.exe}"
 SRC="${SRC:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/Effects/ElectricalExplosionSmall.nif}"
+# A stock static, UNMODIFIED: it exercises the material check and the block-scoped
+# per-row fix, neither of which the effect file above can reach.
+STATIC="${STATIC:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/35CourtSign/35CourtSign01.nif}"
 PORT="${PORT:-45893}"
 LOG="$ROOT/release/ww_unfuckpanel_test.log"
 TMP="$(mktemp -d)"
@@ -46,6 +49,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
+
+fails=0
 
 winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 
@@ -69,12 +74,55 @@ echo "  -> '$BROKEN'   (extension removed, so spErrorInvalidPaths reports it)"
 	-o "$(winpath "$TMP/broken.nif")" > /dev/null 2>&1
 [ -s "$TMP/broken.nif" ] || { echo "could not write the broken fixture"; exit 2; }
 
-# --- run the panel ----------------------------------------------------------
+# --- case 1: the deliberately broken effect file -----------------------------
+echo
+echo "=== case 1: broken texture path ==="
 rm -f "$LOG"
 WW_UNFUCKPANEL_TEST=1 "$EXE" --port "$PORT" "$(winpath "$TMP/broken.nif")" > /dev/null 2>&1
-
 [ -f "$LOG" ] || { echo "harness produced no log"; exit 1; }
-echo
-cat "$LOG"
+tr -d '\r' < "$LOG"
+grep -q '^PASS' "$LOG" || fails=$((fails+1))
 
-grep -q '^PASS' "$LOG"
+# --- case 2: an UNMODIFIED stock static --------------------------------------
+#
+# Two things this proves that case 1 cannot.
+#
+# The material check runs at all: it needs a shader with a real .bgsm, and the
+# effect file above has no material of any kind. And the block-scoped per-row fix
+# works: "Fill BSShaderTextureSet from BGSM" is cast on the shader BLOCK, not on
+# an array inside it, which is a different target-rebuilding path from Collapse.
+#
+# It also pins the severity call. Every vanilla static disagrees with its own
+# material — five of five sampled reported it — so these MUST come out as notes.
+# If this file ever reports an error or a warning, either the severity split
+# broke or the resource paths are not resolving, and both are worth stopping for.
+if [ -f "$STATIC" ]; then
+	echo
+	echo "=== case 2: stock static, unmodified ==="
+	cp "$STATIC" "$TMP/static.nif"
+	rm -f "$LOG"
+	WW_UNFUCKPANEL_TEST=1 "$EXE" --port "$((PORT + 1))" "$(winpath "$TMP/static.nif")" > /dev/null 2>&1
+	if [ -f "$LOG" ]; then
+		tr -d '\r' < "$LOG"
+		grep -q '^PASS' "$LOG" || fails=$((fails+1))
+		status="$(tr -d '\r' < "$LOG" | head -1)"
+		case "$status" in
+			*error*|*warning*)
+				echo "  FAIL: a stock asset must not raise errors or warnings — got: $status"
+				fails=$((fails+1)) ;;
+			*note*)
+				echo "  ok   drift on a stock asset reports as notes, not problems" ;;
+			*)
+				echo "  FAIL: expected notes on a stock static, got: $status"
+				fails=$((fails+1)) ;;
+		esac
+	else
+		echo "  FAIL: no log for case 2"; fails=$((fails+1))
+	fi
+else
+	echo "  (no stock static at $STATIC — skipping the material case)"
+fi
+
+echo
+echo "cases failed: $fails"
+[ "$fails" -eq 0 ]

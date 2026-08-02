@@ -106,6 +106,7 @@ enum Roles
 	BlockRole = Qt::UserRole + 1,   //!< block number a finding points at, or -1
 	SpellRole,                      //!< name() of the check that produced it
 	FixRole,                        //!< name() of the spell that repairs it, or empty
+	FixOnBlockRole,                 //!< IssueClass::perRowOnBlock, carried to the click handler
 };
 
 /*! One row of the issue catalogue: a KIND of problem, not a spell.
@@ -137,39 +138,101 @@ struct IssueClass
 	const char * title;        //!< the group heading
 	const char * wholeFile;    //!< spell name that repairs the whole file, or ""
 	const char * perRow;       //!< spell name that repairs this one occurrence, or ""
+	/*! What `perRow` is cast ON.
+	 *
+	 *  Two different shapes, and getting this wrong is silent. The link-array
+	 *  case needs the ARRAY inside the block — `spCollapseArray` operates on an
+	 *  array index and its isApplicable rejects a block — so the target is
+	 *  rebuilt from the array name the message quotes. The material cases need
+	 *  the BLOCK itself, because `tlShaderBlock` resolves a shader from a block
+	 *  index and there is no array in the message to name.
+	 *
+	 *  This field exists because I first filed both material fixes as `wholeFile`
+	 *  and neither would have run: `spFillShaderTextureSet` and
+	 *  `spSyncShaderMaterial` both gate isApplicable on `tlShaderBlock(...)
+	 *  .isValid()`, which is false for the invalid index a whole-file cast uses.
+	 *  The group button would have reported "does not apply to this file" forever
+	 *  — the same failure as the Repairs button that shipped doing nothing.
+	 */
+	bool perRowOnBlock;        //!< true: cast on the block; false: on the named array
 	const char * note;         //!< the caveat, or what to do when there is no fix
 };
 
 const IssueClass issueClasses[] = {
 	{ "link array contains .* None Refs",
 	  "Holes in a link array",
-	  "Collapse Link Arrays", "Collapse",
+	  "Collapse Link Arrays", "Collapse", false,
 	  "Collapse Link Arrays also collapses Children, Modifiers and Sub Shapes arrays, which this check never inspects." },
 
 	{ "link is None",
 	  "Missing required reference",
-	  "", "",
+	  "", "", false,
 	  "No automatic fix — the block it wants has to be supplied, or the field pointed somewhere valid." },
 
 	{ "has a filepath without a file extension",
 	  "Texture path has no extension",
-	  "", "",
+	  "", "", false,
 	  "No automatic fix — correct it by hand, or with Search/Replace Resource Paths." },
 
 	{ "has an absolute filepath",
 	  "Texture path is absolute",
-	  "", "",
+	  "", "", false,
 	  "No automatic fix — an absolute path will not resolve on another machine; make it relative to the Data folder." },
 
 	{ "cannot have empty filepaths",
 	  "Texture path is empty",
-	  "", "",
+	  "", "", false,
 	  "No automatic fix — supply the path or clear the slot properly." },
 
 	{ "Flags lack",
 	  "Shader flags disagree with the environment map",
-	  "", "",
+	  "", "", false,
 	  "No automatic fix — reconcile the flags with the map that is actually assigned." },
+
+	/* From spCheckAllMaterials (meshtools.cpp). Ordered before the looser
+	 * patterns above would ever reach them; "Texture is missing" has to precede
+	 * any rule that matches "missing" alone, or every material finding lands in
+	 * one heap.
+	 */
+	{ "Material file is missing",
+	  "Material file not found",
+	  "", "", false,
+	  "No automatic fix — the .bgsm/.bgem is not in the loaded archives or the Data folder. Check the path, or that the right game is selected." },
+
+	{ "Texture is missing",
+	  "Texture named by the material not found",
+	  "", "", false,
+	  "No automatic fix — the material asks for a texture that is not in the archives. It renders as the missing-texture placeholder in game." },
+
+	{ "No BGSM/BGEM material is assigned",
+	  "Shader has no material",
+	  "", "", false,
+	  "No automatic fix — assign one in the Material Manager, or with Choose Material." },
+
+	{ "BSShaderTextureSet is missing",
+	  "Texture set missing from a lighting shader",
+	  "", "", false,
+	  "No automatic fix — the material decoded but the shader has no BSShaderTextureSet to compare it against." },
+
+	{ "BSShaderTextureSet differs",
+	  "Texture set disagrees with the material",
+	  "", "Fill BSShaderTextureSet from BGSM", true,
+	  "Normal on vanilla assets. Fixing one rewrites that shader's whole texture set from its material file." },
+
+	{ "Shader flags are out of sync",
+	  "Shader flags disagree with the material file",
+	  "", "", false,
+	  "Normal on vanilla assets — the game applies the material at runtime. Sync Shader Property from BGSM/BGEM will reconcile it, but it asks Safe or Full, so it is not a one-click fix." },
+
+	{ "Material type does not match",
+	  "Material is the wrong kind for the shader",
+	  "", "", false,
+	  "No automatic fix — a lighting shader wants a .bgsm and an effect shader a .bgem; one of the two is wrong." },
+
+	{ "Material file could not be decoded",
+	  "Material file is unreadable",
+	  "", "", false,
+	  "No automatic fix — the file was found but did not parse. It is truncated, or a version this build does not read." },
 };
 
 //! Block number embedded in a finding, as "[19] ...". -1 when there is none.
@@ -232,14 +295,26 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 
 	/* Repairs, kept apart from the findings above on purpose.
 	 *
-	 * These are the whole-file operations that genuinely exist. Not one of them
-	 * answers a finding in the Issues list — see checkFixes — so putting them
-	 * under it, or wiring them to its rows, would suggest a connection that is
-	 * not there. They are things you may want to do to a file, listed as that.
+	 * These are whole-file operations. MOST answer no finding in the Issues list,
+	 * which is why they are not wired to its rows — that would suggest a
+	 * connection that is not there. The exception is Collapse Link Arrays, which
+	 * genuinely is the answer to one issue class and is therefore ALSO offered on
+	 * that group; it appears in both places because it is both things.
+	 *
+	 * (The comment here used to claim none of them answered anything, and the
+	 * label below said so to the user. That stopped being true the moment the
+	 * catalogue gained its first pairing.)
 	 */
 	layout->addWidget( heading( QObject::tr( "Repairs" ), panel ) );
+	/* This used to read "None of these fixes an issue above", which was true when
+	 * the panel had no pairings at all and became false the moment it gained one:
+	 * Collapse Link Arrays is in this list AND is the whole-file fix offered on
+	 * the "Holes in a link array" group. The label was contradicting the panel it
+	 * sits in.
+	 */
 	auto * repairHint = new QLabel( QObject::tr(
-		"Whole-file operations. None of these fixes an issue above." ), panel );
+		"Whole-file operations. Most do not answer any issue above — the ones that do "
+		"are offered on the issue itself." ), panel );
 	repairHint->setWordWrap( true );
 	repairHint->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
 	layout->addWidget( repairHint );
@@ -450,14 +525,22 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 				item->setForeground( 0, col );
 				item->setForeground( 1, col );
 
-				/* The per-row fix, where the catalogue says one exists. The text
-				 * carries both halves — block from "[19]", array from "'Properties'"
-				 * — so the array's own index can be rebuilt and the spell cast on
-				 * that one array rather than on the file.
+				/* The per-row fix, where the catalogue says one exists. Every
+				 * finding names its block as "[19]"; whether that is enough
+				 * depends on what the spell wants to be cast on. An array-scoped
+				 * fix also needs the array name out of "'Properties'", and offering
+				 * the button without it would build an invalid index and fail on
+				 * click rather than being greyed out.
 				 */
 				const QString perRow = known ? QString::fromUtf8( issueClasses[c].perRow ) : QString();
-				if ( !perRow.isEmpty() && f.block >= 0 && !arrayOf( f.text ).isEmpty() ) {
+				// `known` first: c is -1 for an uncatalogued group and indexing
+				// issueClasses with it reads off the front of the array
+				const bool onBlock = known && issueClasses[c].perRowOnBlock;
+				const bool haveTarget = f.block >= 0
+					&& ( onBlock || !arrayOf( f.text ).isEmpty() );
+				if ( !perRow.isEmpty() && haveTarget ) {
 					item->setData( 0, FixRole, perRow );
+					item->setData( 0, FixOnBlockRole, onBlock );
 					item->setText( 1, QObject::tr( "Fix this one" ) );
 				} else if ( f.block >= 0 ) {
 					item->setText( 1, QObject::tr( "Go to" ) );
@@ -534,6 +617,19 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		QUndoStack * stack = m->undoStack;
 		m->undoStack = nullptr;
 		fix->cast( m, target );
+		/* Same refresh runFix does, for the same reason.
+		 *
+		 * Not load-bearing today -- NifModel::save calls updateHeader/updateFooter
+		 * itself before serialising, so the snapshot below is correct either way,
+		 * and spCollapseArray touches nothing that header CONDITIONS depend on.
+		 * It is here so the two repair paths cannot drift: the moment a per-row
+		 * fix is wired for a spell that changes a version or user-version field,
+		 * the cached header conditions would be stale and only this line would
+		 * have caught it.
+		 */
+		m->invalidateHeaderConditions();
+		m->updateHeader();
+		m->updateFooter();
 		m->undoStack = stack;
 
 		QByteArray after;
@@ -687,12 +783,26 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		if ( item->parent() == nullptr ) {
 			runFix( fix );					// group: the whole-file repair
 		} else if ( !fix.isEmpty() ) {
-			// Row: rebuild the array's own index from the text and fix just it.
+			/* Row: rebuild the spell's own target from the message text.
+			 *
+			 * Which index that is depends on the spell, not on the panel --
+			 * see IssueClass::perRowOnBlock. Casting a block-scoped spell on an
+			 * array index (or the reverse) does not crash, it just fails
+			 * isApplicable and reports "will not run here", which reads as a
+			 * broken button rather than a wrong target.
+			 */
 			NifModel * m = model();
 			const int b = item->data( 0, BlockRole ).toInt();
-			const QString arr = arrayOf( item->text( 0 ) );
-			if ( m && b >= 0 && !arr.isEmpty() )
-				runFixAt( fix, m->getIndex( m->getBlockIndex( b ), arr ) );
+			if ( m && b >= 0 ) {
+				const QModelIndex block = m->getBlockIndex( b );
+				if ( item->data( 0, FixOnBlockRole ).toBool() ) {
+					runFixAt( fix, block );
+				} else {
+					const QString arr = arrayOf( item->text( 0 ) );
+					if ( !arr.isEmpty() )
+						runFixAt( fix, m->getIndex( block, arr ) );
+				}
+			}
 		} else if ( skope && item->data( 0, BlockRole ).toInt() >= 0 ) {
 			skope->select( model() ? model()->getBlockIndex( item->data( 0, BlockRole ).toInt() )
 			                       : QModelIndex() );
