@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
 #include "spellbook.h"
+#include "ui/widgets/spellpalette.h"
 #include "spells/blocks.h"
 #include "spells/normaltransfer.h"
 #include "wwskin.h"
@@ -5400,6 +5401,128 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_SPELLSEARCH_TEST=1): the command palette.
+	 *
+	 * Its whole justification over a filtered menu is that it can show what is
+	 * NOT available — Batch, Sanitize, Optimize and Error Checking vanish on a
+	 * block row BY DESIGN, and "Update All Tangent Spaces — Batch — not
+	 * applicable here" answers the question a "no results" row cannot. That, and
+	 * the rule that two keystrokes and Return must never reach Crop To Branch,
+	 * are behaviours no diff can show.
+	 *
+	 * Driven from inside its own modal loop: the driver is scheduled BEFORE
+	 * wwSpellPalette is called, so it fires once exec() is already running.
+	 * Log: release/ww_spellsearch_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SPELLSEARCH_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_spellsearch_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif || nif->getBlockCount() < 1 ) { log << "no model\n"; fails++; checks++; break; }
+
+					int target = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ),
+								{ "BSGeometry", "BSTriShape", "NiTriBasedGeom" } ) ) { target = b; break; }
+					const QModelIndex iTarget = nif->getBlockIndex( target );
+
+					struct Seen {
+						QStringList labels, groups;
+						QVector<bool> enabled;
+						int current = -1;
+					};
+					// one run: type the query, record what it found, then Enter or Esc
+					auto runPalette = [&]( const QString & query, bool accept, Seen & seen ) -> QAction * {
+						SpellBook book( nif, iTarget );
+						skope->buildBlockListMenuExtras( book, iTarget );
+						QTimer::singleShot( 250, skope, [skope, query, accept, &seen]() {
+							QDialog * dlg = skope->findChild<QDialog *>( QStringLiteral( "WWSpellPalette" ) );
+							if ( !dlg )
+								return;
+							auto * edit = dlg->findChild<QLineEdit *>( QStringLiteral( "SpellPaletteSearch" ) );
+							auto * view = dlg->findChild<QTreeView *>( QStringLiteral( "SpellPaletteList" ) );
+							if ( !edit || !view ) { dlg->reject(); return; }
+							edit->setText( query );
+							QApplication::processEvents();
+							QAbstractItemModel * m = view->model();
+							for ( int r = 0; r < m->rowCount() && r < 12; r++ ) {
+								seen.labels << m->index( r, 0 ).data().toString();
+								seen.groups << m->index( r, 1 ).data().toString();
+								seen.enabled << m->index( r, 0 ).data( Qt::UserRole + 2 ).toBool();
+							}
+							seen.current = view->currentIndex().isValid() ? view->currentIndex().row() : -1;
+							if ( accept )
+								dlg->accept();
+							else
+								dlg->reject();
+						} );
+						return wwSpellPalette( skope, book, QString() );
+					};
+
+					// --- 1. a plain query finds its entry and pre-selects it ---
+					Seen s1;
+					QAction * got = runPalette( QStringLiteral( "copy branch" ), true, s1 );
+					log << "query 'copy branch' -> " << s1.labels.join( " | " )
+						<< "   (highlighted row " << s1.current << ")\n";
+					check( "the query finds Copy Branch",
+						!s1.labels.isEmpty() && s1.labels.first() == QLatin1String( "Copy Branch" ) );
+					check( "the top hit is pre-selected", s1.current == 0 );
+					check( "Enter returns the action", got != nullptr );
+
+					// --- 2. the group is searchable, which is what tells the
+					//        four spells called "Copy" apart ------------------
+					Seen s2;
+					runPalette( QStringLiteral( "transform copy" ), false, s2 );
+					log << "query 'transform copy' -> " << s2.labels.join( " | " )
+						<< "   groups: " << s2.groups.join( " | " ) << "\n";
+					check( "a group term narrows the query",
+						!s2.groups.isEmpty() && s2.groups.first() == QLatin1String( "Transform" ) );
+
+					// --- 3. inapplicable entries are SHOWN, and cannot run ----
+					Seen s3;
+					QAction * dead = runPalette( QStringLiteral( "update all tangent" ), true, s3 );
+					log << "query 'update all tangent' -> " << s3.labels.join( " | " )
+						<< "   enabled: " << ( s3.enabled.isEmpty() ? QStringLiteral( "-" )
+							: QString::number( int( s3.enabled.first() ) ) )
+						<< "   (highlighted row " << s3.current << ")\n";
+					check( "a whole-file spell is still findable on a block row", !s3.labels.isEmpty() );
+					check( "...shown as not applicable", !s3.enabled.isEmpty() && !s3.enabled.first() );
+					check( "...and Enter cannot run it", s3.current == -1 && dead == nullptr );
+
+					/* --- 4. a destructive top hit is NOT auto-highlighted -----
+					 * The rule that makes typing into this thing safe. Crop To
+					 * Branch deletes every block outside the clicked branch, and
+					 * two keystrokes plus a reflexive Return must not reach it.
+					 */
+					Seen s4;
+					runPalette( QStringLiteral( "crop" ), false, s4 );
+					log << "query 'crop' -> " << s4.labels.join( " | " )
+						<< "   (highlighted row " << s4.current << ")\n";
+					check( "the destructive entry is found", !s4.labels.isEmpty() );
+					check( "...but nothing is auto-highlighted", s4.current == -1 );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_COLLUNDO_TEST=1): does one edit in the Collision Manager
 	 * make exactly one undo step, and does one Ctrl+Z take it back?
 	 *
@@ -9488,6 +9611,33 @@ void NifSkope::initActions()
 	redoAction->setObjectName( "aRedo" );
 	redoAction->setIcon( QIcon( ":btn/redo" ) );
 	allActions << redoAction;
+
+	/* Ctrl+Shift+P anywhere in the window.
+	 *
+	 * The menu's own Search… row is discoverability; THIS is the speed win — no
+	 * right-click at all, against whichever block the list is on. It builds its
+	 * own SpellBook rather than borrowing the context menu's, because there is no
+	 * context menu open when this fires.
+	 */
+	QAction * paletteAction = new QAction( tr( "Search Spells…" ), this );
+	paletteAction->setObjectName( QStringLiteral( "aSpellPalette" ) );
+	paletteAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+P" ) ) );
+	paletteAction->setShortcutContext( Qt::WindowShortcut );
+	connect( paletteAction, &QAction::triggered, this, [this]() {
+		if ( !nif )
+			return;
+		QModelIndex idx = currentNifIndex();
+		SpellBook book( nif, idx, this, SLOT( select( const QModelIndex & ) ) );
+		buildBlockListMenuExtras( book, idx );
+		const int bn = nif->getBlockNumber( idx );
+		const QString what = bn >= 0
+			? QStringLiteral( "[%1] %2" ).arg( bn ).arg( nif->itemName( nif->getBlockIndex( bn ) ) )
+			: QString();
+		if ( QAction * run = wwSpellPalette( this, book, what ) )
+			run->trigger();
+	} );
+	addAction( paletteAction );
+	allActions << paletteAction;
 
 	// TODO: Back/Forward button in Block List
 	//idxForwardAction = indexStack->createRedoAction( this );
@@ -15141,12 +15291,42 @@ void NifSkope::contextMenu( const QPoint & pos )
 	if ( sender() == list )
 		buildBlockListMenuExtras( contextBook, idx );
 
+	/* Search… — first row, and the palette opens AFTER exec returns.
+	 *
+	 * Not from inside the menu: contextBook is a stack local, and a palette
+	 * opened from a menu handler would outlive the exec() that owns it. So the
+	 * row does nothing but be chosen, exec returns it, and the palette runs down
+	 * here with the book still alive.
+	 */
+	QAction * searchRow = nullptr;
+	if ( sender() == list ) {
+		searchRow = new QAction( tr( "Search…\tCtrl+Shift+P" ), &contextBook );
+		searchRow->setToolTip( tr( "Find any spell or action by name, including the ones "
+			"that do not apply here" ) );
+		QAction * first = contextBook.actions().value( 0 );
+		if ( first ) {
+			contextBook.insertAction( first, searchRow );
+			contextBook.insertSeparator( first );
+		} else {
+			contextBook.addAction( searchRow );
+		}
+	}
+
 	// four of the actions built above carry a tooltip, and QMenu suppresses them
 	// unless asked; they have been dead text since they were written
 	contextBook.setToolTipsVisible( true );
 
-	if ( !idx.isValid() || nif->flags( idx ) & (Qt::ItemIsEnabled | Qt::ItemIsSelectable) )
-		contextBook.exec( p );
+	if ( !idx.isValid() || nif->flags( idx ) & (Qt::ItemIsEnabled | Qt::ItemIsSelectable) ) {
+		QAction * chosen = contextBook.exec( p );
+		if ( chosen && chosen == searchRow ) {
+			const int bn = nif->getBlockNumber( idx );
+			const QString what = bn >= 0
+				? QStringLiteral( "[%1] %2" ).arg( bn ).arg( nif->itemName( nif->getBlockIndex( bn ) ) )
+				: QString();
+			if ( QAction * run = wwSpellPalette( this, contextBook, what ) )
+				run->trigger();
+		}
+	}
 }
 
 void NifSkope::overrideViewFont()

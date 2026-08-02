@@ -224,6 +224,10 @@ public:
 	 */
 	QAction * actionFor( const QString & spellName ) const;
 
+	//! The spell an action casts, or nullptr when it is a native action this book merely hosts.
+	//! The command palette needs it for hint() and destructive().
+	SpellPtr spellFor( QAction * action ) const;
+
 	//! Register spell with appropriate books
 	static void registerSpell( SpellPtr spell );
 

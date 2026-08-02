@@ -412,6 +412,12 @@ QAction * SpellBook::actionFor( const QString & spellName ) const
 	return nullptr;
 }
 
+SpellPtr SpellBook::spellFor( QAction * action ) const
+{
+	auto it = Map.constFind( action );
+	return it == Map.constEnd() ? SpellPtr() : it.value();
+}
+
 void SpellBook::registerSpell( SpellPtr spell )
 {
 	spells().append( spell );

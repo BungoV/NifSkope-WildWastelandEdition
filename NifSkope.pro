@@ -219,6 +219,7 @@ HEADERS += \
 	src/ui/widgets/refrbrowser.h \
 	src/ui/widgets/timeline.h \
 	src/ui/widgets/timeline_p.h \
+	src/ui/widgets/spellpalette.h \
 	src/ui/widgets/uvedit.h \
 	src/ui/widgets/valueedit.h \
 	src/ui/widgets/xmlcheck.h \
@@ -352,6 +353,7 @@ SOURCES += \
 	src/ui/widgets/timeline.cpp \
 	src/ui/widgets/timelineviews.cpp \
 	src/ui/widgets/timelineedit.cpp \
+	src/ui/widgets/spellpalette.cpp \
 	src/ui/widgets/uvedit.cpp \
 	src/ui/widgets/valueedit.cpp \
 	src/ui/widgets/xmlcheck.cpp \
