@@ -163,6 +163,9 @@ class TimelineWidget final : public QWidget
 	friend class TimelineLanesView;
 	friend class TimelineGraphView;
 	friend class TimelineInspector;
+	// so the WW_* GUI harnesses can drive lanes and keys directly, the way
+	// GLView already lets NifSkope reach gizmoMode
+	friend class NifSkope;
 
 public:
 	explicit TimelineWidget( QWidget * parent = nullptr );

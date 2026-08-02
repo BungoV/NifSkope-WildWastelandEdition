@@ -4714,6 +4714,136 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* NOT HARNESSED: the Collision Manager's live editors (WW_COLLUNDO_TEST,
+	 * attempted and removed).
+	 *
+	 * applyPhysics, applyLayerSelection and applyMaterialSelection were fixed in
+	 * 2ff7457 to write through nifSnapshotOp, and that fix is still verified only
+	 * by reading the diff. A harness was written for it and does not work, for a
+	 * reason worth recording so the next attempt does not repeat it:
+	 *
+	 * applyLayerSelection refuses a compiled collision row outright, and FO4 ships
+	 * compiled collision (bhkNPCollisionObject) throughout -- ~300 meshes sampled,
+	 * not one editable bhkRigidBody. Manufacturing one means casting Create Box
+	 * Collision, which needs the GL scene graph (so it cannot be done from the
+	 * CLI) and blocks indefinitely when driven with no one at the keyboard: the
+	 * run times out with a zero-byte log.
+	 *
+	 * What it needs is a fixture from a game that authors editable rigid bodies --
+	 * Skyrim or Oblivion -- rather than more harness code.
+	 */
+
+	/* TEST HARNESS (WW_ROTKEY_TEST=1): can a key be inserted on a rotation lane?
+	 *
+	 * One of the two fixes in 2ff7457 that shipped verified only by reading the
+	 * diff, and the changelog said so at the time: "the rotation fix compiles and
+	 * the sampler is straightforward, but nothing has yet inserted a rotation key
+	 * and read it back."
+	 *
+	 * insertKeyAtTime used to skip QuatVal outright, because Controller::interpolate
+	 * has no Quat specialisation — so I or a double-click on a rotation lane
+	 * produced no key and no message, on the most-keyed channel there is. The fix
+	 * SLERPs between the bracketing keys off the list the function already reads.
+	 *
+	 * The discriminating assertion is the key COUNT: the old code silently did
+	 * nothing, so "one more key exists afterwards" fails on it. The value check is
+	 * secondary and deliberately loose — a SLERP result between two keys must be a
+	 * unit quaternion, which catches an uninitialised or zeroed sample without
+	 * pinning the interpolation to one implementation.
+	 * Log: release/ww_rotkey_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_ROTKEY_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1800, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_rotkey_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; break; }
+					NifModel * nif = skope->getNifModel();
+					TimelineWidget * tl = skope->timeline;
+					if ( !nif || !tl ) { log << "no model or timeline\n"; break; }
+					if ( skope->dTimeline ) { skope->dTimeline->show(); skope->dTimeline->raise(); }
+					QApplication::processEvents();
+					QEventLoop settle;
+					QTimer::singleShot( 600, &settle, &QEventLoop::quit );
+					settle.exec();
+
+					// a lane carrying a quaternion channel with at least two keys
+					int lane = -1, chIdx = -1;
+					for ( int l = 0; l < tl->lanes.size() && lane < 0; l++ ) {
+						const TimelineLane & L = tl->lanes.at( l );
+						for ( int c = 0; c < L.channels.size(); c++ ) {
+							const TimelineChannel & ch = L.channels.at( c );
+							if ( ch.type == TimelineChannel::QuatVal && ch.iKeysArray.isValid()
+								&& nif->rowCount( QModelIndex( ch.iKeysArray ) ) >= 2 ) {
+								lane = l; chIdx = c; break;
+							}
+						}
+					}
+					log << tl->lanes.size() << " lane(s); quaternion lane = " << lane << "\n";
+					check( "the file has a rotation lane to test", lane >= 0 );
+					if ( lane < 0 ) {
+						log << "no NiTransformData rotation keys in this file\n";
+						break;
+					}
+
+					const TimelineChannel & ch = tl->lanes.at( lane ).channels.at( chIdx );
+					QModelIndex keysArr( ch.iKeysArray );
+					const int before = nif->rowCount( keysArr );
+					// midway between the first two keys, so the insert lands
+					// strictly inside the range and has two keys to blend
+					const float t0 = nif->get<float>( nif->getIndex( keysArr, 0 ), "Time" );
+					const float t1 = nif->get<float>( nif->getIndex( keysArr, 1 ), "Time" );
+					const float at = ( t0 + t1 ) * 0.5f;
+					log << "keys " << before << ", inserting at t=" << at
+						<< " (between " << t0 << " and " << t1 << ")\n";
+
+					tl->insertKeyAtTime( lane, at );
+					QApplication::processEvents();
+
+					keysArr = QModelIndex( ch.iKeysArray );
+					const int after = nif->rowCount( keysArr );
+					log << "keys after insert: " << after << "\n";
+					check( "inserting on a rotation lane adds a key", after == before + 1 );
+
+					if ( after == before + 1 ) {
+						// find the row at the inserted time and read its quaternion
+						int row = -1;
+						for ( int r = 0; r < after; r++ ) {
+							const float t = nif->get<float>( nif->getIndex( keysArr, r ), "Time" );
+							if ( std::fabs( t - at ) < 1.0e-4f ) { row = r; break; }
+						}
+						log << "inserted row = " << row << "\n";
+						check( "the new key sits at the requested time", row >= 0 );
+						if ( row >= 0 ) {
+							const Quat q = nif->get<Quat>( nif->getIndex( keysArr, row ), "Value" );
+							const float len = std::sqrt( q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3] );
+							log << "value = (" << q[0] << ", " << q[1] << ", " << q[2] << ", "
+								<< q[3] << "), length " << len << "\n";
+							check( "the sampled rotation is a unit quaternion",
+								std::fabs( len - 1.0f ) < 1.0e-3f );
+						}
+					}
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_GIZMONUM_TEST=1): can a decimal point be typed into a
 	 * modal transform?
 	 *
