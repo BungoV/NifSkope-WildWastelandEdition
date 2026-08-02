@@ -187,6 +187,23 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawLine( QPointF( 8, 32 ), QPointF( 16, 32 ) );
 		p.drawLine( QPointF( 48, 32 ), QPointF( 56, 32 ) );
 	} else if ( id == QLatin1String( "brush" ) || id == QLatin1String( "mode_weightpaint" ) ) {
+		/* Weight Paint gets the brush ON a weight ramp; plain `brush` gets the
+		 * brush alone.
+		 *
+		 * They were the same drawing, so the mode menu offered a bare brush for
+		 * Weight Paint and nothing said which quantity it painted. Blender's
+		 * answer is the blue-to-red weight ramp behind the brush; in greyscale
+		 * that is a dark-to-light bar, which carries the same "this is a scalar
+		 * field" reading without colour.
+		 */
+		if ( id == QLatin1String( "mode_weightpaint" ) ) {
+			QLinearGradient ramp( 10, 0, 54, 0 );
+			ramp.setColorAt( 0.0, col.darker( 280 ) );
+			ramp.setColorAt( 1.0, col );
+			p.setPen( Qt::NoPen );
+			p.setBrush( ramp );
+			p.drawRoundedRect( QRectF( 10, 44, 44, 10 ), 4, 4 );
+		}
 		// paintbrush: diagonal wooden handle, metal ferrule, tapered bristles
 		p.save();
 		p.translate( 33, 31 );
@@ -233,18 +250,91 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		p.drawLine( QPointF( 12, 43 ), QPointF( 32, 54 ) );
 		p.drawLine( QPointF( 52, 43 ), QPointF( 32, 54 ) );
 	} else if ( id == QLatin1String( "mode_edit" ) ) {
-		// wireframe triangle with vertex handles (Edit Mode)
+		/* The SAME cube as Object Mode, with its vertices exposed (Edit Mode).
+		 *
+		 * Blender's pairing, and the reason for it: edit mode is not a different
+		 * object, it is the same object with its points showing. A triangle here
+		 * (what this was) shares no shape with the cube beside it, so the two
+		 * read as unrelated tools rather than two views of one thing.
+		 */
 		p.setBrush( Qt::NoBrush );
-		QPen ep( col, 3.5 );
+		QPen ep( col, 3.4 );
 		ep.setJoinStyle( Qt::RoundJoin );
 		p.setPen( ep );
-		QPolygonF tri;
-		tri << QPointF( 32, 14 ) << QPointF( 52, 50 ) << QPointF( 12, 50 );
-		p.drawPolygon( tri );
+		const QPointF vTop( 32, 12 ), vR( 52, 23 ), vMid( 32, 34 ), vL( 12, 23 );
+		const QPointF vBL( 12, 43 ), vBR( 52, 43 ), vBot( 32, 54 );
+		QPolygonF top;
+		top << vTop << vR << vMid << vL;
+		p.drawPolygon( top );
+		p.drawLine( vL, vBL );
+		p.drawLine( vR, vBR );
+		p.drawLine( vMid, vBot );
+		p.drawLine( vBL, vBot );
+		p.drawLine( vBR, vBot );
 		p.setPen( Qt::NoPen );
 		p.setBrush( col );
-		for ( const QPointF & v : { QPointF( 32, 14 ), QPointF( 52, 50 ), QPointF( 12, 50 ) } )
-			p.drawRect( QRectF( v.x() - 4.5, v.y() - 4.5, 9, 9 ) );
+		for ( const QPointF & v : { vTop, vR, vMid, vL, vBL, vBR, vBot } )
+			p.drawRect( QRectF( v.x() - 3.6, v.y() - 3.6, 7.2, 7.2 ) );
+	} else if ( id == QLatin1String( "mode_pose" ) ) {
+		/* Blender's armature figure (Pose Mode).
+		 *
+		 * Pose Mode had no glyph at all and was handed the Object cube, so three
+		 * of the seven entries in the mode menu — Object, Pose and Physics Sim —
+		 * were the same picture. A single BONE would be more literal, but at
+		 * 16 px an octahedral bone is an ambiguous blob; the figure keeps its
+		 * silhouette down to icon size, which is why Blender uses it too.
+		 */
+		p.setPen( Qt::NoPen );
+		p.setBrush( col );
+		p.drawEllipse( QPointF( 37, 14 ), 7.5, 7.5 );			// head
+		QPen bp( col, 6.5 );
+		bp.setCapStyle( Qt::RoundCap );
+		bp.setJoinStyle( Qt::RoundJoin );
+		p.setPen( bp );
+		p.setBrush( Qt::NoBrush );
+		p.drawLine( QPointF( 35, 25 ), QPointF( 29, 38 ) );		// torso
+		p.drawLine( QPointF( 35, 28 ), QPointF( 50, 32 ) );		// leading arm
+		p.drawLine( QPointF( 33, 27 ), QPointF( 19, 23 ) );		// trailing arm
+		p.drawLine( QPointF( 29, 38 ), QPointF( 39, 51 ) );		// leading leg
+		p.drawLine( QPointF( 29, 38 ), QPointF( 15, 47 ) );		// trailing leg
+	} else if ( id == QLatin1String( "mode_physics" ) ) {
+		/* A body with one orbit round it (Physics Sim), as Blender draws physics.
+		 *
+		 * Also had no glyph and was given the Object cube. The orbit is what
+		 * separates it from every other mode in the list: this is the only one
+		 * where the file MOVES on its own.
+		 */
+		/* A pendulum: anchor, rod, bob, and the arc it swings through.
+		 *
+		 * Two orbit attempts were drawn and rejected on the icon sheet before
+		 * this one. A filled circle inside an ellipse is an EYE — adding depth
+		 * (ring in front on one side, behind on the other) and a satellite made
+		 * it a better orbit and still an eye at 16 px, because at 16 px all that
+		 * survives is blob-inside-lens. The lesson is that the composition has to
+		 * be unambiguous in silhouette, not merely correct in detail.
+		 *
+		 * A pendulum shares no outline with anything else in this set, and it is
+		 * the honest picture of what the mode does: hang the file's ragdoll up
+		 * and let it move under gravity.
+		 */
+		{
+			const QPointF pivot( 32, 13 ), bob( 46, 45 );
+			QPen swing( col.darker( 200 ), 2.6 );		// the path, quietly
+			swing.setCapStyle( Qt::RoundCap );
+			p.setPen( swing );
+			p.setBrush( Qt::NoBrush );
+			p.drawArc( QRectF( pivot.x() - 35, pivot.y() - 35, 70, 70 ), 244 * 16, 52 * 16 );
+
+			QPen rod( col, 4.5 );						// the rod
+			rod.setCapStyle( Qt::RoundCap );
+			p.setPen( rod );
+			p.drawLine( pivot, bob );
+
+			p.setPen( Qt::NoPen );
+			p.setBrush( col );
+			p.drawEllipse( pivot, 4.5, 4.5 );			// anchor
+			p.drawEllipse( bob, 9.0, 9.0 );				// bob
+		}
 	} else if ( id == QLatin1String( "mode_vertexpaint" ) ) {
 		// triangle with per-vertex greyscale dots (Vertex Paint)
 		p.setBrush( Qt::NoBrush );
@@ -709,6 +799,85 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 	}
 
 	return QIcon( pm );
+}
+
+QStringList tlIconNames()
+{
+	/* Grouped the way the drawings are, so a gap is visible as a gap. Hand-kept:
+	 * the if-else chain above cannot be enumerated at runtime, and a name here
+	 * that tlMakeIcon does not know renders as an empty cell on the sheet, which
+	 * is exactly the feedback wanted.
+	 */
+	return {
+		// transport
+		"play", "playback", "pause", "tostart", "toend", "prevkey", "nextkey",
+		"loop", "sequence", "settings",
+		// viewport modes
+		"mode_object", "mode_edit", "mode_pose", "mode_vertexpaint",
+		"mode_weightpaint", "mode_segment", "mode_physics", "mode_deform",
+		// transform helpers
+		"magnet", "target", "gizmo", "origins", "cursor3d", "view_center",
+		"orient_global", "orient_local", "orient_parent", "orient_view",
+		"pivot_origin", "pivot_bounds", "pivot_median", "pivot_cursor",
+		"snap_increment", "normalize", "follow",
+		// element modes
+		"vert", "edge", "face",
+		// shading
+		"shade_wire", "shade_solid", "shade_flat", "shade_material",
+		"shade_normalspec", "shade_vertexcolor", "xray", "bulb",
+		// chrome
+		"chevron_left", "chevron_right", "chevron_down", "check", "panel",
+		"workspace", "eye_hidden", "collision", "nodes", "brush",
+	};
+}
+
+bool tlWriteIconSheet( const QString & path, const QColor & fg, const QColor & bg,
+					   const QString & filter )
+{
+	QStringList names = tlIconNames();
+	if ( !filter.isEmpty() ) {
+		names = names.filter( filter, Qt::CaseInsensitive );
+		if ( names.isEmpty() )
+			return false;
+	}
+
+	/* A small set gets big cells. Judging a drawing needs pixels, and the whole
+	 * point of the filter is to look hard at three or four glyphs at a time.
+	 */
+	const bool zoom = names.size() <= 12;
+	const int cell = zoom ? 220 : 96, pad = 10, label = 22;
+	const int cols = zoom ? std::min( 4, int( names.size() ) ) : 8;
+	const int rows = ( names.size() + cols - 1 ) / cols;
+	const int w = cols * cell + pad * 2;
+	const int h = rows * ( cell + label ) + pad * 2;
+
+	QPixmap sheet( w, h );
+	sheet.fill( bg );
+	QPainter p( &sheet );
+	p.setRenderHint( QPainter::Antialiasing );
+	QFont f = p.font();
+	f.setPixelSize( 11 );
+	p.setFont( f );
+
+	for ( int i = 0; i < names.size(); i++ ) {
+		const int cx = pad + ( i % cols ) * cell;
+		const int cy = pad + ( i / cols ) * ( cell + label );
+
+		/* Each glyph twice: large enough to judge the drawing, and at 16 px,
+		 * which is the size it will actually be used at. An icon that only works
+		 * at 64 px is an icon that does not work.
+		 */
+		const int big = zoom ? cell - 60 : 48;
+		const QIcon ico = tlMakeIcon( names.at( i ), fg );
+		p.drawPixmap( cx + 12, cy + 6, big, big, ico.pixmap( big, big ) );
+		p.drawPixmap( cx + big + 18, cy + big - 10, 16, 16, ico.pixmap( 16, 16 ) );
+
+		p.setPen( fg.darker( 130 ) );
+		p.drawText( QRect( cx, cy + cell - 26, cell, label ),
+			Qt::AlignHCenter | Qt::AlignTop, names.at( i ) );
+	}
+	p.end();
+	return sheet.save( path );
 }
 
 TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )

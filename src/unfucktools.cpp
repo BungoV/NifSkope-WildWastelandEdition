@@ -441,7 +441,7 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 	repairs->setMaximumHeight( 150 );
 	layout->addWidget( repairs );
 
-	auto * runRepairs = new QPushButton( QObject::tr( "Run checked repairs" ), panel );
+	auto * runRepairs = new QPushButton( QObject::tr( "Unfuck checked" ), panel );
 	runRepairs->setObjectName( QStringLiteral( "UnfuckRunRepairsButton" ) );
 	layout->addWidget( runRepairs );
 

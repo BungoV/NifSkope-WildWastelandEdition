@@ -49,6 +49,24 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //! Draw a crisp Blender-style toolbar icon (also used by the main-window toolbar)
 QIcon tlMakeIcon( const QString & id, const QColor & col );
 
+/*! Every icon id tlMakeIcon can draw.
+ *
+ *  Kept beside the drawings so the two cannot drift, and exists so the icon
+ *  sheet (NifSkope --icon-sheet FILE.png) can render all of them. A procedural
+ *  icon set has no folder to look in: without this list the only way to find out
+ *  what glyphs exist is to read a 200-line if-else chain.
+ */
+QStringList tlIconNames();
+
+/*! Render every glyph into one labelled contact sheet.
+ *
+ *  These icons are hand-drawn with QPainter, so the only way to know whether one
+ *  reads at 16 px — or reads as the thing it is meant to be at all — is to look
+ *  at it. Writing an icon and shipping it unseen is guessing.
+ */
+bool tlWriteIconSheet( const QString & path, const QColor & fg, const QColor & bg,
+					   const QString & filter = QString() );
+
 class NifModel;
 
 class QAction;

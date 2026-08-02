@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "data/nifvalue.h"
 #include "model/nifmodel.h"
 #include "model/kfmmodel.h"
+#include "ui/widgets/timeline.h"
 
 #include <QApplication>
 
@@ -106,6 +107,33 @@ int main( int argc, char * argv[] )
 
 		// Must set current directory or this causes issues with several features
 		QDir::setCurrent( qApp->applicationDirPath() );
+
+		/* --icon-sheet FILE.png: render every tlMakeIcon glyph and exit.
+		 *
+		 * The icon set is DRAWN with QPainter, not loaded from files, so there is
+		 * no folder to open and look at. Without this the only way to see whether
+		 * a new glyph reads - or reads as the thing it is supposed to be - is to
+		 * start the program and hunt for the button that carries it. Handled here,
+		 * before any window or GL context exists, so it is cheap and works under
+		 * -platform offscreen.
+		 */
+		{
+			const QStringList iconArgs = a->arguments();
+			const int iconIx = iconArgs.indexOf( QStringLiteral( "--icon-sheet" ) );
+			if ( iconIx >= 0 && iconIx + 1 < iconArgs.size() ) {
+				const QString out = iconArgs.at( iconIx + 1 );
+				// optional third word: draw only the glyphs whose name contains it,
+				// and draw them big enough to judge
+				const QString filter = ( iconIx + 2 < iconArgs.size()
+					&& !iconArgs.at( iconIx + 2 ).startsWith( QLatin1Char( '-' ) ) )
+					? iconArgs.at( iconIx + 2 ) : QString();
+				const bool ok = tlWriteIconSheet( out, QColor( 0xdd, 0xdd, 0xdd ),
+												  QColor( 0x2b, 0x2b, 0x2b ), filter );
+				fprintf( ok ? stdout : stderr, "%s %s\n",
+					ok ? "wrote" : "could not write", qPrintable( out ) );
+				return ok ? 0 : 1;
+			}
+		}
 
 		// Register message handler
 		//qRegisterMetaType<Message>( "Message" );

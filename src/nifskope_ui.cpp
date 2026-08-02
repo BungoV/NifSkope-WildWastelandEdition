@@ -11409,9 +11409,11 @@ void NifSkope::initDockWidgets()
 		// vertex-paint dots, weight-paint brush, segment split).
 		const QIcon objectIcon = tlMakeIcon( QStringLiteral( "mode_object" ), iconColor );
 		const QIcon editIcon = tlMakeIcon( QStringLiteral( "mode_edit" ), iconColor );
+		const QIcon poseIcon = tlMakeIcon( QStringLiteral( "mode_pose" ), iconColor );
 		const QIcon vertexPaintIcon = tlMakeIcon( QStringLiteral( "mode_vertexpaint" ), iconColor );
 		const QIcon weightPaintIcon = tlMakeIcon( QStringLiteral( "mode_weightpaint" ), iconColor );
 		const QIcon segmentPaintIcon = tlMakeIcon( QStringLiteral( "mode_segment" ), iconColor );
+		const QIcon physicsIcon = tlMakeIcon( QStringLiteral( "mode_physics" ), iconColor );
 		QToolButton * modeButton = new QToolButton( this );
 		modeButton->setObjectName( QStringLiteral( "ViewportModeButton" ) );
 		modeButton->setPopupMode( QToolButton::InstantPopup );
@@ -11425,11 +11427,11 @@ void NifSkope::initDockWidgets()
 		modeGroup->setExclusive( true );
 		QAction * objectMode = modeMenu->addAction( objectIcon, tr( "Object Mode" ) );
 		QAction * editMode = modeMenu->addAction( editIcon, tr( "Edit Mode" ) );
-		QAction * poseMode = modeMenu->addAction( objectIcon, tr( "Pose Mode" ) );
+		QAction * poseMode = modeMenu->addAction( poseIcon, tr( "Pose Mode" ) );
 		QAction * vertexPaintMode = modeMenu->addAction( vertexPaintIcon, tr( "Vertex Paint" ) );
 		QAction * weightPaintMode = modeMenu->addAction( weightPaintIcon, tr( "Weight Paint" ) );
 		QAction * segmentPaintMode = modeMenu->addAction( segmentPaintIcon, tr( "Segment Paint" ) );
-		QAction * physicsMode = modeMenu->addAction( objectIcon, tr( "Physics Sim" ) );
+		QAction * physicsMode = modeMenu->addAction( physicsIcon, tr( "Physics Sim" ) );
 		objectMode->setObjectName( QStringLiteral( "ViewportObjectModeAction" ) );
 		editMode->setObjectName( QStringLiteral( "ViewportEditModeAction" ) );
 		poseMode->setObjectName( QStringLiteral( "ViewportPoseModeAction" ) );
@@ -11461,8 +11463,8 @@ void NifSkope::initDockWidgets()
 		}
 
 		auto syncModeButton = [this, modeButton, objectMode, editMode, poseMode, vertexPaintMode,
-			weightPaintMode, segmentPaintMode, physicsMode, objectIcon, editIcon, vertexPaintIcon,
-			weightPaintIcon, segmentPaintIcon]() {
+			weightPaintMode, segmentPaintMode, physicsMode, objectIcon, editIcon, poseIcon,
+			vertexPaintIcon, weightPaintIcon, segmentPaintIcon, physicsIcon]() {
 			bool paintingWeights = ogl->riggingWeightPaintModeActive();
 			bool paintingVertices = ogl->vertexPaintModeActive();
 			bool paintingSegments = ogl->segmentPaintModeActive();
@@ -11490,8 +11492,20 @@ void NifSkope::initDockWidgets()
 				: paintingSegments ? QObject::tr( "Segment Paint" )
 				: posing ? QObject::tr( "Pose Mode" )
 				: ( editing ? QObject::tr( "Edit Mode" ) : QObject::tr( "Object Mode" ) ) );
-			modeButton->setIcon( paintingWeights ? weightPaintIcon
-				: paintingVertices ? vertexPaintIcon : paintingSegments ? segmentPaintIcon
+			/* The same ladder as the label above, in the same order.
+			 *
+			 * It was missing the simulating and posing rungs, so the button said
+			 * "Pose Mode" or "Physics Sim" beside the Object Mode cube. That was
+			 * invisible while Pose and Physics had no glyph of their own and the
+			 * menu handed them the cube as well - three of the seven entries were
+			 * the same picture, so the button was never wrong in a way anyone
+			 * could see.
+			 */
+			modeButton->setIcon( simulating ? physicsIcon
+				: paintingWeights ? weightPaintIcon
+				: paintingVertices ? vertexPaintIcon
+				: paintingSegments ? segmentPaintIcon
+				: posing ? poseIcon
 				: ( editing ? editIcon : objectIcon ) );
 		};
 		connect( objectMode, &QAction::triggered, this, [this]() {
