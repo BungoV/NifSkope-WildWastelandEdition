@@ -1,5 +1,16 @@
 # Workspace consistency audit — 2026-08-01
 
+> **STATUS: all twelve items implemented, 2026-08-02.** 1 and 2 in `2ff7457`;
+> 3, 4, 6 and 10 in `3b66030`; 8 in `9713da9`; 7 in `85ddf93`; 9 in `5355717`;
+> 5 in `a9e1edf`; 11 and 12 in `9f00eba`.
+>
+> Several items were **overstated or wrong** in the plan below and were
+> corrected against the source before being implemented — the line numbers in
+> item 5 and item 12 are off by ~120, item 12's proposed Pose conversion would
+> not have compiled and would have left a dead button segment, and item 9's
+> suggested colour helper would have wiped the pinned-bone marker. Read the
+> commit messages for what was actually done.
+
 Produced by a twelve-agent pass: one reader per manager dock, three
 cross-cutting lenses (visual, interaction, feature parity), one synthesis.
 Every anchor in section 0 was spot-checked against the tree before writing.

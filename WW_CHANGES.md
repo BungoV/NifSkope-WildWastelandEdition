@@ -1,5 +1,48 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02e — The workspace consistency audit is finished
+
+All twelve items are implemented. The last three were the ones about *looking*
+the same, which is where the drift had gone unnoticed longest.
+
+**One selection palette.** Four colours — `#4a7ab0` / `#2b425f` background,
+`#FF9D00` / `#FF7200` text — were hardcoded in **six files** with zero drift
+between them, which is what made them worth naming rather than reconciling. Two
+more views had already drifted, and one badly: **Skeleton took its secondary
+selection from `wwSkinColor("danger")`**, the app's error colour, so a
+multi-selection of bones rendered in the same red that means "missing texture" in
+Materials and "key out of range" in the Timeline. Pose's blue had slipped to
+`#2b3b5c` under a comment claiming it copied the Block List.
+
+The patch had to respect a distinction that is easy to miss: Qt's `:!active`
+means *this view lacks window focus*, while four of the sites use the same two
+colours for *selected, but not the active object of a multi-selection*. A
+stylesheet cannot express the second, so those sites read the variables directly
+and say why. Conflating the two is part of how the values got copied by hand.
+
+*The test is not a grep* — "the literals are gone" would pass on a conversion
+that resolved to the wrong colour. It asserts the emitted sheet carries all four
+resolved values, that a live view took it, and that **no selection colour equals
+the error colour**.
+
+**One heading, one boxed button.** Four heading idioms; scrolling a single
+Collision column passed through three of them. Pose had already factored its
+version into a helper whose comment read *"matching the other manager docks"* —
+from inside an anonymous namespace no other dock could reach, which is exactly
+how four idioms happen.
+
+`wwBoxedButtonQss` was `static`, and `style.qss` scopes its rules to
+`QToolBar QToolButton`, so five dock buttons inherited nothing. The one
+workaround written in its absence made the case by itself: `skelBoxedButtonQss`
+claimed to reproduce the look and did the opposite — a filled plate, a visible
+border and an amber checked state, reinstating precisely the *"fifteen bordered
+boxes competing for attention"* the original's rationale says were removed.
+
+Two corrections from the adversarial pass were load-bearing: Pose's button needed
+**InstantPopup**, not MenuButtonPopup, because it has no `clicked()` connection
+at all — splitting it would have left the main segment dead — and its file had no
+`<QToolButton>` include, so the change as first written would not have compiled.
+
 ## 2026-08-02d — The Animation dock stops being a second playback engine
 
 **Play did not animate the viewport.** The dock ran a private 16 ms timer that
