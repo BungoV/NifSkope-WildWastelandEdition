@@ -320,6 +320,10 @@ protected slots:
 	//! since contextMenu ends in exec() and blocks. See WW_MENUTREE_TEST.
 	void buildBlockListMenuExtras( SpellBook & contextBook, const QModelIndex & idx );
 
+	//! The Select & View submenu. Lives here, not in a spell: five of its six
+	//! entries are private GLView members and GLView befriends NifSkope only.
+	void buildBlockListSelectAndView( SpellBook & contextBook, const QModelIndex & idx );
+
 	//! Block List ▸ Transfer Normals: the other selected meshes are the source,
 	//! \a target is written. Mapping and mix are asked for; the source is the
 	//! selection, so it is not.

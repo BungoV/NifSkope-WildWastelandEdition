@@ -5330,6 +5330,30 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						std::any_of( topFlat.cbegin(), topFlat.cend(), []( const QString & t ) {
 							return t.startsWith( QLatin1String( "Rename" ) ); } ) );
 					check( "Copy Branch was hoisted, not duplicated", copyBranchSeen == 1 );
+
+					// ---- 9. Select & View, and where it sits ----------------
+					QStringList verbTops;
+					QStringList selectViewEntries;
+					for ( QAction * a : verbBook.actions() ) {
+						if ( !a->menu() )
+							continue;
+						QString t = a->menu()->title();
+						t.replace( QLatin1String( "&&" ), QLatin1String( "&" ) );
+						verbTops << t;
+						if ( t == QLatin1String( "Select & View" ) )
+							for ( QAction * s : a->menu()->actions() )
+								if ( !s->isSeparator() )
+									selectViewEntries << s->text();
+					}
+					log << "Select & View entries: "
+						<< ( selectViewEntries.isEmpty() ? QStringLiteral( "(absent)" )
+														 : selectViewEntries.join( ", " ) ) << "\n";
+					check( "Select & View exists", !selectViewEntries.isEmpty() );
+					check( "...with all seven entries", selectViewEntries.size() == 7 );
+					const int tIdx = verbTops.indexOf( QLatin1String( "Transform" ) );
+					const int svIdx = verbTops.indexOf( QLatin1String( "Select & View" ) );
+					log << "Transform at " << tIdx << ", Select & View at " << svIdx << "\n";
+					check( "Select & View follows Transform", tIdx >= 0 && svIdx == tIdx + 1 );
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -14590,10 +14614,134 @@ void NifSkope::transferNormalsFromSelection( int target, const QVector<int> & so
  *
  *  \param book a SpellBook already built against  idx
  */
+/*! Select & View — the six entries that work on the scene, not on the file.
+ *
+ *  Built here rather than as spells because five of the six are private members
+ *  of GLView, and glview.h grants friendship to NifSkope only. A spell can reach
+ *  the GLView pointer but not isolateSelected, restoreAllVisibility or
+ *  joinSelectedObjects.
+ *
+ *  Two entries had to be written from scratch: Select Branch and Select Same
+ *  Type do not exist anywhere in the tree. They are the reason the rest of this
+ *  submenu is worth having — three entries in this menu consume a
+ *  multi-selection and, until now, nothing in it could build one.
+ */
+void NifSkope::buildBlockListSelectAndView( SpellBook & contextBook, const QModelIndex & idx )
+{
+	if ( !nif || !ogl || ogl->editMode )
+		return;
+	const int bn = nif->getBlockNumber( idx );
+	if ( bn < 0 )
+		return;
+
+	auto selectInList = [this]( const QList<int> & blocks ) {
+		if ( !list->selectionModel() )
+			return;
+		list->selectionModel()->clearSelection();
+		for ( int b : blocks ) {
+			QModelIndex src = nif->getBlockIndex( b );
+			if ( !src.isValid() )
+				continue;
+			QModelIndex vis = proxy ? proxy->mapFrom( src, QModelIndex() ) : src;
+			if ( vis.isValid() )
+				list->selectionModel()->select( vis,
+					QItemSelectionModel::Select | QItemSelectionModel::Rows );
+		}
+		// wireBlockListSelection turns the list selection into ogl->objSelection,
+		// so everything below sees it without a second code path
+	};
+
+	QMenu * view = new QMenu( tr( "Select && View" ), &contextBook );
+
+	QAction * aBranch = view->addAction( tr( "Select Branch" ) );
+	aBranch->setToolTip( tr( "Select this block and everything under it" ) );
+	connect( aBranch, &QAction::triggered, this, [this, bn, selectInList]() {
+		QList<int> branch;
+		QList<int> queue{ bn };
+		// breadth-first with a seen set: a NIF is a DAG, not a tree — a shared
+		// texture set under two shapes would otherwise be walked twice, and a
+		// cycle would not terminate at all
+		while ( !queue.isEmpty() ) {
+			const int b = queue.takeFirst();
+			if ( branch.contains( b ) || !nif->isValidBlockNumber( b ) )
+				continue;
+			branch << b;
+			for ( int c : nif->getChildLinks( b ) )
+				queue << c;
+		}
+		selectInList( branch );
+	} );
+
+	QAction * aSame = view->addAction( tr( "Select Same Type" ) );
+	const QString typeName = nif->itemName( nif->getBlockIndex( bn ) );
+	aSame->setToolTip( tr( "Select every %1 in the file" ).arg( typeName ) );
+	connect( aSame, &QAction::triggered, this, [this, typeName, selectInList]() {
+		// exact type, not blockInherits: "same type" answering with every
+		// NiAVObject when you clicked an NiNode is not what the label says
+		QList<int> same;
+		for ( int b = 0; b < nif->getBlockCount(); b++ )
+			if ( nif->itemName( nif->getBlockIndex( b ) ) == typeName )
+				same << b;
+		selectInList( same );
+	} );
+
+	view->addSeparator();
+
+	QAction * aFrame = view->addAction( tr( "Frame in Viewport\tNum ." ) );
+	connect( aFrame, &QAction::triggered, this, [this]() { ogl->frameSelected(); } );
+
+	/* Hide walks up from the CURRENT block to the nearest NiAVObject and hides
+	 * that one node — it does not read objSelection, whatever its name suggests.
+	 * So the label says "This", rather than promising the menu will act on a
+	 * multi-selection it will ignore.
+	 */
+	QAction * aHide = view->addAction( tr( "Hide This\tH" ) );
+	connect( aHide, &QAction::triggered, this, [this]() { ogl->hideSelected(); } );
+
+	QAction * aIsolate = view->addAction( tr( "Isolate Selected\t/" ) );
+	aIsolate->setToolTip( tr( "Hide everything that is not selected" ) );
+	connect( aIsolate, &QAction::triggered, this, [this]() { ogl->isolateSelected(); } );
+
+	// restoreAllVisibility, NOT unhideAll: the latter clears hiddenNodes only and
+	// leaves a solo'd node and any hidden triangles in place, so "Restore All
+	// Hidden" would not restore all hidden things
+	QAction * aRestore = view->addAction( tr( "Restore All Hidden\tAlt+H" ) );
+	connect( aRestore, &QAction::triggered, this, [this]() { ogl->restoreAllVisibility(); } );
+
+	/* Join, with the viewport's own enable condition mirrored rather than
+	 * guessed: joinSelectedObjects returns silently unless there is an active
+	 * object, two or more selected, and the active one is a BSTriShape.
+	 */
+	const bool canJoin = ogl->objSelection.size() >= 2 && ogl->objActive >= 0
+		&& nif->blockInherits( nif->getBlockIndex( ogl->objActive ), "BSTriShape" );
+	view->addSeparator();
+	QAction * aJoin = view->addAction( tr( "Join Selected Shapes\tCtrl+J" ) );
+	aJoin->setEnabled( canJoin );
+	aJoin->setToolTip( canJoin
+		? tr( "Merge the selected shapes into the active one" )
+		: tr( "Select two or more shapes, with a BSTriShape active" ) );
+	connect( aJoin, &QAction::triggered, this, [this]() { ogl->joinSelectedObjects(); } );
+
+	// after Transform, which is where the audit puts it and where the other
+	// scene-facing group already sits
+	QAction * anchor = nullptr;
+	const QList<QAction *> tops = contextBook.actions();
+	for ( int i = 0; i < tops.size(); i++ )
+		if ( tops.at( i )->menu() && tops.at( i )->menu()->title() == Spell::tr( "Transform" ) ) {
+			anchor = ( i + 1 < tops.size() ) ? tops.at( i + 1 ) : nullptr;
+			break;
+		}
+	if ( anchor )
+		contextBook.insertMenu( anchor, view );
+	else
+		contextBook.addMenu( view );
+}
+
 void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIndex & idx )
 {
 	if ( !nif )
 		return;
+	buildBlockListSelectAndView( contextBook, idx );
 	// the separator goes in afterwards, once it is known that something
 	// followed it — all three of these actions are conditional, and on a
 	// non-block row with no diff reference and an empty field clipboard none
