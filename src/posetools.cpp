@@ -412,8 +412,10 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 
 		// colour like the Block List: active = orange text, other selected =
 		// blue row background (the rest cleared)
-		const QColor orange( 0xFF, 0x9D, 0x00 );
-		const QColor blueRow( 0x2b, 0x3b, 0x5c );
+		// the blue here had drifted to #2b3b5c against everyone else's #2b425f,
+		// while the comment above claimed it was copying the Block List
+		const QColor orange = QColor::fromString( wwSkinColor( "selTextActive" ) );
+		const QColor blueRow = QColor::fromString( wwSkinColor( "selBgInactive" ) );
 		QSet<QListWidgetItem *> selSet( sel.constBegin(), sel.constEnd() );
 		for ( int r = 0; r < boneList->count(); r++ ) {
 			QListWidgetItem * it = boneList->item( r );

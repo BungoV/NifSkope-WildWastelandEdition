@@ -258,10 +258,10 @@ public:
 		const bool selected = ( option.state & QStyle::State_Selected );
 		const bool activeMember = selected && view && view->currentIndex().row() == index.row();
 		if ( selected ) {
-			opt.backgroundBrush = activeMember ? QColor::fromRgb( 74, 122, 176 )
-			                                   : QColor::fromRgb( 43, 66, 95 );
-			const QColor text = activeMember ? QColor::fromRgb( 255, 157, 0 )
-			                                 : QColor::fromRgb( 255, 114, 0 );
+			opt.backgroundBrush = activeMember ? QColor::fromString( wwSkinColor( "selBgActive" ) )
+			                                   : QColor::fromString( wwSkinColor( "selBgInactive" ) );
+			const QColor text = activeMember ? QColor::fromString( wwSkinColor( "selTextActive" ) )
+			                                 : QColor::fromString( wwSkinColor( "selTextInactive" ) );
 			opt.palette.setColor( QPalette::Text, text );
 			opt.palette.setColor( QPalette::HighlightedText, text );
 			// Let the explicit colours win over the platform selection brush, the

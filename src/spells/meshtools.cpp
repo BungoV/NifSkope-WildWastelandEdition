@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "spellbook.h"
+#include "wwskin.h"
 #include "nifsnapshot.h"
 #include "message.h"
 
@@ -978,10 +979,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		tree->setMinimumHeight( 150 );
 		tree->setSortingEnabled( true );
 		tree->sortByColumn( 0, Qt::AscendingOrder );
-		// same selection colours the Collision Manager tree uses
-		tree->setStyleSheet( QStringLiteral(
-			"QTreeWidget::item:selected { background: rgb(74,122,176); color: rgb(255,157,0); }"
-			"QTreeWidget::item:selected:!active { background: rgb(43,66,95); color: rgb(255,114,0); }" ) );
+		tree->setStyleSheet( wwSelectionTreeQss() );
 		listLay->addWidget( tree, 1 );
 
 		vSplit->addWidget( listPane );
@@ -1121,8 +1119,15 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 			auto colorItem = [ogl]( QTreeWidgetItem * it, int owner ) {
 				bool sel = ( owner >= 0 && ogl && ogl->objSelection.contains( owner ) );
 				bool act = ( sel && owner == ogl->objActive );
-				QBrush bg = sel ? QBrush( act ? QColor( 74, 122, 176 ) : QColor( 43, 66, 95 ) ) : QBrush();
-				QBrush fg = sel ? QBrush( act ? QColor( 255, 157, 0 ) : QColor( 255, 114, 0 ) ) : QBrush();
+				/* "act" is the ACTIVE object of a multi-selection, not Qt window
+				 * focus -- so this reads the four skin variables directly rather
+				 * than taking wwSelectionTreeQss(), whose `:!active` means the
+				 * other thing. Same palette, different trigger.
+				 */
+				QBrush bg = sel ? QBrush( QColor::fromString( wwSkinColor(
+					act ? "selBgActive" : "selBgInactive" ) ) ) : QBrush();
+				QBrush fg = sel ? QBrush( QColor::fromString( wwSkinColor(
+					act ? "selTextActive" : "selTextInactive" ) ) ) : QBrush();
 				for ( int c = 0; c < 4; c++ ) {
 					it->setBackground( c, bg );
 					it->setForeground( c, fg );

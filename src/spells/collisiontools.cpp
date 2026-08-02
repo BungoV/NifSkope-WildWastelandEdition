@@ -2095,9 +2095,7 @@ private:
 		// section leaves the 42 literal column indices in this file alone.
 		tree->header()->moveSection( 6, 1 );
 		tree->setMinimumHeight( 150 );
-		tree->setStyleSheet( QStringLiteral(
-			"QTreeWidget::item:selected { background: rgb(74,122,176); color: rgb(255,157,0); }"
-			"QTreeWidget::item:selected:!active { background: rgb(43,66,95); color: rgb(255,114,0); }" ) );
+		tree->setStyleSheet( wwSelectionTreeQss() );
 		int sortColumn = std::clamp( settings.value( "CollisionManager/SortColumn", 0 ).toInt(), 0, 5 );
 		Qt::SortOrder initialOrder = settings.value( "CollisionManager/SortOrder", int( Qt::AscendingOrder ) ).toInt()
 			? Qt::DescendingOrder : Qt::AscendingOrder;

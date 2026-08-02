@@ -561,9 +561,16 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 	// blue highlight. Colours come from skinVars, and the blue is the palette's
 	// own Highlight rather than a new literal.
 	auto paintSelection = [=]() {
-		const QColor active = QColor::fromString( wwSkinColor( "accentText" ) );
-		const QColor secondary = QColor::fromString( wwSkinColor( "danger" ) );
-		const QColor blue = tree->palette().color( QPalette::Highlight );
+		/* Was wwSkinColor("danger") for the secondary rows -- the app's ERROR
+		 * colour, so a multi-selection of bones rendered in the same red that
+		 * means "missing texture" in Materials and "key out of range" in the
+		 * Timeline. It also took its background from the palette rather than
+		 * distinguishing active from inactive at all.
+		 */
+		const QColor active = QColor::fromString( wwSkinColor( "selTextActive" ) );
+		const QColor secondary = QColor::fromString( wwSkinColor( "selTextInactive" ) );
+		const QColor blueActive = QColor::fromString( wwSkinColor( "selBgActive" ) );
+		const QColor blueInactive = QColor::fromString( wwSkinColor( "selBgInactive" ) );
 		QTreeWidgetItem * cur = tree->currentItem();
 		std::function<void( QTreeWidgetItem * )> walk = [&]( QTreeWidgetItem * it ) {
 			const bool sel = it->isSelected();
@@ -571,7 +578,7 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 				if ( !sel ) {
 					it->setBackground( c, QBrush() );
 				} else {
-					it->setBackground( c, blue );
+					it->setBackground( c, it == cur ? blueActive : blueInactive );
 					it->setForeground( c, it == cur ? active : secondary );
 				}
 			}

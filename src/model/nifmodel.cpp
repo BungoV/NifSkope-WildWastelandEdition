@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifmodel.h"
+#include "wwskin.h"
 
 #include "xml/xmlconfig.h"
 #include "message.h"
@@ -1285,10 +1286,10 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 			if ( bn >= 0 && selHighlight.contains( bn ) ) {
 				bool active = ( bn == selHighlightActive );
 				if ( role == Qt::BackgroundRole )
-					return active ? QColor::fromRgb(  74, 122, 176 )   // primary light blue
-					              : QColor::fromRgb(  43,  66,  95 );  // secondary dark blue
-				return active ? QColor::fromRgb( 255, 157, 0 )         // primary text #FF9D00
-				              : QColor::fromRgb( 255, 114, 0 );        // secondary text #FF7200
+					return active ? QColor::fromString( wwSkinColor( "selBgActive" ) )
+					              : QColor::fromString( wwSkinColor( "selBgInactive" ) );
+				return active ? QColor::fromString( wwSkinColor( "selTextActive" ) )
+				              : QColor::fromString( wwSkinColor( "selTextInactive" ) );
 			}
 			// viewport-hidden nodes render greyed in the block list (still
 			// fully selectable)

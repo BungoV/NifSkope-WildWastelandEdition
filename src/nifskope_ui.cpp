@@ -387,6 +387,22 @@ static const struct WwSkinVar { const char * name; const char * dark; const char
 	{ "accentBg",     "#40331f", "#f6e6c8" },  // amber toggle plate
 	{ "danger",       "#ff8484", "#c0392b" },  // invalid / error text
 	{ "viewport",     "#2b2d31", "#c8ccd0" },  // GL clear colour (Render settings default)
+	/* Tree/list selection, shared by every view that highlights rows.
+	 *
+	 * These four values were hardcoded identically in six files -- the Block
+	 * List model, the Loaded NIFs delegate, the Collision and Materials tree
+	 * sheets, the Materials recolor pass and the Rigging bone delegate -- with
+	 * zero drift between them, which is what made them worth naming rather than
+	 * reconciling. Two more views had already drifted: Pose to #2b3b5c, and
+	 * Skeleton to wwSkinColor("danger"), so a multi-selected bone rendered in
+	 * the same red that means "missing texture" elsewhere.
+	 *
+	 * "Active" is the primary of a multi-selection, not Qt window focus.
+	 */
+	{ "selBgActive",   "#4a7ab0", "#4a7ab0" },  // primary selected row
+	{ "selBgInactive", "#2b425f", "#b9cbe0" },  // other selected rows
+	{ "selTextActive", "#ff9d00", "#a05a00" },  // text on the primary row
+	{ "selTextInactive", "#ff7200", "#8a4a00" },  // text on the others
 };
 
 //! Which column wwSkinColor() serves. loadTheme() keeps it current; defaults to
@@ -402,6 +418,31 @@ QString wwSkinColor( const char * name )
 
 	qWarning() << "wwSkinColor: unknown skin colour" << name;
 	return QString();
+}
+
+/*! The shared selection look for a QTreeWidget / QTreeView / QListWidget.
+ *
+ *  Two views wrote this sheet out byte-for-byte identically (Collision and
+ *  Materials); four more wrote the same four colours as C++ brushes.
+ *
+ *  A NOTE ON WHAT ":!active" MEANS HERE, because it is not what the C++ sites
+ *  mean. Qt's `:!active` is "this view does not have window focus". The C++
+ *  sites use the same two colours for something different -- "this row is
+ *  selected but is not the ACTIVE object of a multi-selection". A stylesheet
+ *  cannot express that second idea, so those sites read the four variables
+ *  directly rather than taking this sheet. Both readings share one palette; only
+ *  the trigger differs, and conflating them is part of why the values ended up
+ *  repeated by hand in six files.
+ */
+QString wwSelectionTreeQss()
+{
+	return QStringLiteral(
+		"QTreeWidget::item:selected, QTreeView::item:selected, QListWidget::item:selected"
+		" { background: %1; color: %2; }"
+		"QTreeWidget::item:selected:!active, QTreeView::item:selected:!active,"
+		" QListWidget::item:selected:!active { background: %3; color: %4; }" )
+		.arg( wwSkinColor( "selBgActive" ), wwSkinColor( "selTextActive" ),
+			  wwSkinColor( "selBgInactive" ), wwSkinColor( "selTextInactive" ) );
 }
 
 /*! The toolbar-selector look: the viewport mode dropdown, the mode row's menu
@@ -4803,6 +4844,77 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				skope->setWindowModified( false );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_SELCOLOUR_TEST=1): do the views agree on what a selected
+	 * row looks like?
+	 *
+	 * Audit item 5. Four colours were hardcoded identically in six files, and two
+	 * more views had drifted off them -- Pose to #2b3b5c, and Skeleton to
+	 * wwSkinColor("danger"), the app's ERROR colour, so a multi-selected bone
+	 * rendered in the same red that means "missing texture" in Materials and "key
+	 * out of range" in the Timeline.
+	 *
+	 * The check is not "the literals are gone" -- a grep does that, and would pass
+	 * on a conversion that resolved to the wrong colour. It is that the sheet the
+	 * shared helper emits actually CONTAINS the four skin values, and that the
+	 * error colour is not among them. That last clause is what fails if anyone
+	 * points a selection colour back at "danger".
+	 * Log: release/ww_selcolour_test.log
+	 */
+	if ( qEnvironmentVariableIsSet( "WW_SELCOLOUR_TEST" ) ) {
+		QTimer::singleShot( 1200, skope, [skope]() {
+			QFile logf( QApplication::applicationDirPath() + "/ww_selcolour_test.log" );
+			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+			QTextStream log( &logf );
+			int checks = 0, fails = 0;
+			auto check = [&]( const QString & what, bool pass ) {
+				checks++;
+				if ( !pass ) fails++;
+				log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+			};
+
+			const QString bgA = wwSkinColor( "selBgActive" );
+			const QString bgI = wwSkinColor( "selBgInactive" );
+			const QString fgA = wwSkinColor( "selTextActive" );
+			const QString fgI = wwSkinColor( "selTextInactive" );
+			const QString danger = wwSkinColor( "danger" );
+			log << "selBgActive " << bgA << ", selBgInactive " << bgI
+				<< ", selTextActive " << fgA << ", selTextInactive " << fgI
+				<< ", danger " << danger << "\n";
+
+			check( "all four selection colours are defined",
+				!bgA.isEmpty() && !bgI.isEmpty() && !fgA.isEmpty() && !fgI.isEmpty() );
+			check( "active and inactive are actually different",
+				bgA != bgI && fgA != fgI );
+			check( "no selection colour is the error colour",
+				bgA != danger && bgI != danger && fgA != danger && fgI != danger );
+
+			const QString qss = wwSelectionTreeQss();
+			log << "sheet: " << qss << "\n";
+			check( "the shared sheet carries all four",
+				qss.contains( bgA ) && qss.contains( bgI )
+				&& qss.contains( fgA ) && qss.contains( fgI ) );
+
+			/* And a live view really took it. The Collision tree is the one that
+			 * wrote the sheet out by hand, so it is the honest sample.
+			 */
+			QDockWidget * cd = skope->findChild<QDockWidget *>(
+				QStringLiteral( "CollisionManagerDock" ) );
+			QTreeWidget * ctree = cd ? cd->findChild<QTreeWidget *>() : nullptr;
+			if ( ctree ) {
+				const QString sheet = ctree->styleSheet();
+				log << "collision tree sheet: " << sheet.left( 80 ) << "...\n";
+				check( "a real view is using the shared sheet",
+					sheet.contains( bgA ) && !sheet.contains( QLatin1String( "74,122,176" ) ) );
+			} else {
+				log << "no collision tree to sample\n";
+			}
+			log << checks << " checks, " << fails << " failures\n";
+			log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+			logf.close();
+			QTimer::singleShot( 0, qApp, &QApplication::quit );
 		} );
 	}
 

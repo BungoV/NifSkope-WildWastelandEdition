@@ -76,10 +76,12 @@ public:
 			&& current.row() == index.row() && current.parent() == index.parent();
 		styled.state &= ~QStyle::State_HasFocus;
 		if ( selected ) {
-			styled.palette.setColor( QPalette::Highlight,
-				primary ? QColor( 74, 122, 176 ) : QColor( 43, 66, 95 ) );
-			styled.palette.setColor( QPalette::HighlightedText,
-				primary ? QColor( 255, 157, 0 ) : QColor( 255, 114, 0 ) );
+			// "primary" is the active member of a multi-selection, so these read
+			// the skin variables directly -- see the note in wwskin.h
+			styled.palette.setColor( QPalette::Highlight, QColor::fromString(
+				wwSkinColor( primary ? "selBgActive" : "selBgInactive" ) ) );
+			styled.palette.setColor( QPalette::HighlightedText, QColor::fromString(
+				wwSkinColor( primary ? "selTextActive" : "selTextInactive" ) ) );
 		}
 		QStyledItemDelegate::paint( painter, styled, index );
 	}

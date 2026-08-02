@@ -14,7 +14,8 @@
  * "bgCard", "bgInput", "bgBtn", "bgBtnHover", "bgBtnDown", "bgHeader",
  * "border", "borderDim", "borderStrong", "focus", "scroll", "scrollHover",
  * "text", "textMuted", "textBright", "accent", "accentText", "accentBg",
- * "danger".
+ * "danger", "viewport", "selBgActive", "selBgInactive", "selTextActive",
+ * "selTextInactive".
  *
  * An unknown name returns an empty string and warns, which shows up as an
  * ignored CSS declaration rather than a wrong colour.
@@ -24,5 +25,15 @@
  * switch.
  */
 QString wwSkinColor( const char * name );
+
+/*! The shared selection palette for a tree or list view, as a stylesheet.
+ *
+ * Four colours -- selBgActive / selBgInactive / selTextActive /
+ * selTextInactive -- were hardcoded identically in six files before this.
+ * Views that highlight the ACTIVE member of a multi-selection (rather than
+ * Qt's window-focus `:!active`) should read those four names through
+ * wwSkinColor instead; a stylesheet cannot express that distinction.
+ */
+QString wwSelectionTreeQss();
 
 #endif // WWSKIN_H
