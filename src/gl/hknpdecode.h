@@ -707,6 +707,18 @@ struct HknpSystem
 	 *  A shape that contributes nothing should say so where it happens.
 	 */
 	QStringList geometrylessShapes;
+	/*! Byte length of the GLOBAL fixup table as found, because it is not derivable.
+	 *
+	 *  Six vanilla files reserve -1 slots they never fill. It looked like one slot
+	 *  per null constraint-motor pointer, and it is not: corpus-wide that rule is
+	 *  wrong 46 times in 64, and two shipped packfiles with identical classes,
+	 *  objects, fixup counts AND null-pointer patterns have different table
+	 *  lengths. It is a fossil of the source .hkt, not a function of the file.
+	 *
+	 *  0 means unknown; the encoder then computes the minimum, which is what
+	 *  23,448 of 23,454 packfiles in the game already carry.
+	 */
+	quint32 globalFixupBytes = 0;
 	bool valid = false;
 	/*! A read went out of range somewhere in this packfile.
 	 *

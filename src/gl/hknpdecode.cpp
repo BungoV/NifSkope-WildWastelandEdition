@@ -751,6 +751,9 @@ HknpSystem hknpDecode( const QByteArray & data )
 			localOff = r.u32( off + 24 );
 			globalOff = r.u32( off + 28 );
 			virtOff = r.u32( off + 32 );
+			// the SPAN, not the count: a 12-byte pad is indistinguishable from one
+			// more -1 entry, so only the region length is measurable
+			sys.globalFixupBytes = quint32( virtOff - globalOff );
 			expOff = r.u32( off + 36 );
 		}
 	}

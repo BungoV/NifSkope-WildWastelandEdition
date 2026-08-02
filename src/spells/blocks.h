@@ -87,6 +87,15 @@ bool copyBlockBranchesToClipboard( NifModel * nif, const QList<qint32> & roots )
 //! spells can act on every selected block. Call on selection change.
 void setBlockListSelection( const QList<qint32> & blocks );
 
+/*! What setBlockListSelection last published.
+ *
+ *  For a caller that must run a branch spell against exactly one block: the
+ *  branch spells consult this selection through spellSelectionRoots, which is
+ *  right for Ctrl+Delete and wrong for an operation that was asked about one
+ *  thing. Save, clear, cast, restore.
+ */
+QList<qint32> blockListSelectionForSpells();
+
 //! The blocks a branch spell should act on: the multi-selection when the clicked
 //! block is part of it, otherwise just the clicked block.
 QList<qint32> spellSelectionRoots( const NifModel * nif, const QModelIndex & index );

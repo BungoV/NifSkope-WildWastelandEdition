@@ -260,7 +260,7 @@ struct HknpPackObject
  * Returns empty and sets `error` if an object names a class with no known hash.
  */
 QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString * error = nullptr,
-	const QHash<QString, quint32> & extraHashes = {} );
+	const QHash<QString, quint32> & extraHashes = {}, quint32 globalFixupBytes = 0 );
 
 /*! Where an hknpRagdollData's pointers have to be patched, all relative to the
  * object's start and IN THE ORDER hknpBuildPackfile wants them.

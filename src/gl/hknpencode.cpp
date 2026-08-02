@@ -70,12 +70,21 @@ struct Fixups
 		QByteArray out; for ( const auto & f : local ) { appendU32( out, f.first ); appendU32( out, f.second ); }
 		pad( out, 16, char( 0xff ) ); return out;
 	}
-	QByteArray globalTable() const
+	/*! \param reserveBytes vanilla's table length, when it is longer than needed.
+	 *
+	 *  Grow-only: an edited system needing more entries than the original reserved
+	 *  keeps the computed minimum. See HknpSystem::globalFixupBytes for why this
+	 *  cannot be derived from anything in the file.
+	 */
+	QByteArray globalTable( quint32 reserveBytes = 0 ) const
 	{
 		QByteArray out; for ( const GlobalFix & f : global ) {
 			appendU32( out, f.source ); appendU32( out, f.section ); appendU32( out, f.target );
 		}
-		pad( out, 16, char( 0xff ) ); return out;
+		pad( out, 16, char( 0xff ) );
+		while ( quint32( out.size() ) < reserveBytes )
+			out.append( char( 0xff ) );		// the same 0xff the pad already uses
+		return out;
 	}
 	QByteArray virtualTable() const
 	{
@@ -994,7 +1003,7 @@ quint32 classHash( const QString & name )
 } // namespace
 
 QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString * error,
-	const QHash<QString, quint32> & extraHashes )
+	const QHash<QString, quint32> & extraHashes, quint32 globalFixupBytes )
 {
 	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
 	if ( objects.isEmpty() )
@@ -1052,7 +1061,7 @@ QByteArray hknpBuildPackfile( const QVector<HknpPackObject> & objects, QString *
 	 * Sorting by source matches every ragdoll and no compressed-mesh system.
 	 */
 
-	QByteArray local = fx.localTable(), global = fx.globalTable(), virtuals = fx.virtualTable();
+	QByteArray local = fx.localTable(), global = fx.globalTable( globalFixupBytes ), virtuals = fx.virtualTable();
 	quint32 cnStart = 0x100, cnEnd = cnStart + quint32( cn.size() ), dataStart = cnEnd;
 	quint32 localAbs = dataStart + quint32( data.size() ), globalAbs = localAbs + quint32( local.size() ),
 		virtualAbs = globalAbs + quint32( global.size() );
@@ -1570,7 +1579,7 @@ QByteArray hknpEncodeSystem( const HknpSystem & sys, QString * error )
 		refs.append( { rfx.skeletonPointer, skelObj } );
 	objs[0].global = refs;
 
-	return hknpBuildPackfile( objs, error, sys.classHashes );
+	return hknpBuildPackfile( objs, error, sys.classHashes, sys.globalFixupBytes );
 }
 
 QByteArray hknpEncodeRagdoll( const HknpSystem & sys, QString * error )

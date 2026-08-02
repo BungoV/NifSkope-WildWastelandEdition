@@ -1480,6 +1480,11 @@ void setBlockListSelection( const QList<qint32> & blocks )
 	blockListSelection = blocks;
 }
 
+QList<qint32> blockListSelectionForSpells()
+{
+	return blockListSelection;
+}
+
 /*! The blocks a branch spell should actually act on.
  *
  *  A spell is handed ONE index by the menu, so without this every branch

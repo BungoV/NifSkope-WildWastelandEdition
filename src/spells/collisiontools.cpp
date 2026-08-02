@@ -97,6 +97,191 @@ static int tlCollFirstLeafShape( const NifModel * nif, int shape, int depth = 0 
 	return shape;
 }
 
+/* Hoisted out of CollisionManagerPanel so Compile Collision can be a spell.
+ *
+ * Same reason tlCollBlockIndex above was hoisted: being private members of a
+ * dock was the only thing keeping this code unreachable from anywhere else,
+ * and unreachable meant untestable. compileSelectedCollision wrote layer
+ * Static/0/0 into every packfile it produced for as long as it did because
+ * nothing outside a running dock could execute it.
+ *
+ * Every one of these was already const and read only `nif`, so the move is
+ * mechanical; the panel keeps one-line forwarders exactly as it already does
+ * for blockIndex and firstLeafShape.
+ */
+
+QString tlCollBoneRole( const NifModel * nif, const QHash<int, QString> & boneRoles, int node, int systemBlock )
+{
+	const QString fromSkin = boneRoles.value( node );
+	if ( !fromSkin.isEmpty() )
+		return fromSkin;
+	if ( nif->isNiBlock( tlCollBlockIndex( nif, systemBlock ), "bhkRagdollSystem" ) )
+		return QObject::tr( "ragdoll bone" );
+	return QString();
+}
+
+/*! node block -> bone role, for every node some skin actually names.
+ *
+ * Built once per rebuild() and passed down: calling skeletonAnalyse() per row
+ * would re-walk every vertex weight in the file once for each collision body.
+ */
+QHash<int, QString> tlCollBoneRoles( const NifModel * nif )
+{
+	QHash<int, QString> roles;
+	const SkeletonReport report = skeletonAnalyse( nif );
+	for ( const SkeletonBoneInfo & b : report.bones ) {
+		if ( b.isNotABone() )
+			continue;
+		roles.insert( b.block, b.verts > 0
+			? QObject::tr( "deforming (%1 v)" ).arg( b.verts )
+			: QObject::tr( "unused bone" ) );
+	}
+	return roles;
+}
+
+QString tlCollNodeName( const NifModel * nif, int block )
+{
+	QModelIndex i = tlCollBlockIndex( nif, block );
+	if ( !i.isValid() )
+		return QObject::tr( "<orphan>" );
+	QString n = nif->get<QString>( i, "Name" );
+	return n.isEmpty() ? QObject::tr( "Block %1" ).arg( block ) : n;
+}
+
+struct CollisionMesh
+{
+	QVector<Vector3> verts;
+	QVector<Triangle> tris;
+};
+
+void appendMesh( CollisionMesh & out, const QVector<Vector3> & verts,
+	const QVector<Triangle> & tris, const Matrix4 & transform, float scale )
+{
+	if ( verts.isEmpty() || tris.isEmpty() || out.verts.size() + verts.size() > 65535 ) return;
+	quint16 base = quint16( out.verts.size() );
+	for ( const Vector3 & v : verts ) out.verts.append( transform * v * scale );
+	for ( Triangle t : tris ) {
+		if ( t[0] >= verts.size() || t[1] >= verts.size() || t[2] >= verts.size() ) continue;
+		t[0] += base; t[1] += base; t[2] += base; out.tris.append( t );
+	}
+}
+
+QVector<Triangle> boxTriangles()
+{
+	return {
+		{ 0, 2, 1 }, { 1, 2, 3 }, { 4, 5, 6 }, { 5, 7, 6 },
+		{ 0, 1, 4 }, { 1, 5, 4 }, { 2, 6, 3 }, { 3, 6, 7 },
+		{ 0, 4, 2 }, { 2, 4, 6 }, { 1, 3, 5 }, { 3, 7, 5 }
+	};
+}
+
+void appendSphereMesh( CollisionMesh & out, const Vector3 & center, float radius,
+	const Matrix4 & transform, float scale )
+{
+	constexpr int slices = 16, stacks = 8;
+	constexpr float pi = 3.14159265358979323846f;
+	QVector<Vector3> verts;
+	QVector<Triangle> tris;
+	for ( int y = 0; y <= stacks; y++ ) {
+		float phi = -0.5f * pi + pi * float( y ) / float( stacks );
+		float cp = std::cos( phi ), sp = std::sin( phi );
+		for ( int x = 0; x < slices; x++ ) {
+			float a = 2.0f * pi * float( x ) / float( slices );
+			verts.append( center + Vector3( std::cos( a ) * cp, std::sin( a ) * cp, sp ) * radius );
+		}
+	}
+	for ( int y = 0; y < stacks; y++ ) for ( int x = 0; x < slices; x++ ) {
+		quint16 a = quint16( y * slices + x ), b = quint16( y * slices + ( x + 1 ) % slices );
+		quint16 c = quint16( ( y + 1 ) * slices + x ), d = quint16( ( y + 1 ) * slices + ( x + 1 ) % slices );
+		tris.append( Triangle( a, b, c ) ); tris.append( Triangle( b, d, c ) );
+	}
+	appendMesh( out, verts, tris, transform, scale );
+}
+
+void appendCapsuleMesh( CollisionMesh & out, Vector3 a, Vector3 b, float radius,
+	const Matrix4 & transform, float scale )
+{
+	constexpr int slices = 16, hemi = 4;
+	constexpr float pi = 3.14159265358979323846f;
+	Vector3 axis = b - a;
+	if ( axis.length() < 1.0e-6f ) { appendSphereMesh( out, a, radius, transform, scale ); return; }
+	axis.normalize();
+	Vector3 u = Vector3::crossproduct( axis, std::fabs( axis[2] ) < 0.9f ? Vector3( 0, 0, 1 ) : Vector3( 0, 1, 0 ) );
+	u.normalize(); Vector3 v = Vector3::crossproduct( axis, u ); v.normalize();
+	QVector<QPair<Vector3, float>> rings;
+	for ( int i = 0; i <= hemi; i++ ) {
+		float t = -0.5f * pi + 0.5f * pi * float( i ) / float( hemi );
+		rings.append( { a + axis * ( std::sin( t ) * radius ), std::cos( t ) * radius } );
+	}
+	rings.append( { b, radius } );
+	for ( int i = 1; i <= hemi; i++ ) {
+		float t = 0.5f * pi * float( i ) / float( hemi );
+		rings.append( { b + axis * ( std::sin( t ) * radius ), std::cos( t ) * radius } );
+	}
+	QVector<Vector3> verts; QVector<Triangle> tris;
+	for ( const auto & ring : rings ) for ( int s = 0; s < slices; s++ ) {
+		float ang = 2.0f * pi * float( s ) / float( slices );
+		verts.append( ring.first + ( u * std::cos( ang ) + v * std::sin( ang ) ) * ring.second );
+	}
+	for ( int r = 0; r + 1 < rings.size(); r++ ) for ( int s = 0; s < slices; s++ ) {
+		quint16 p0 = quint16( r * slices + s ), p1 = quint16( r * slices + ( s + 1 ) % slices );
+		quint16 p2 = quint16( ( r + 1 ) * slices + s ), p3 = quint16( ( r + 1 ) * slices + ( s + 1 ) % slices );
+		tris.append( Triangle( p0, p1, p2 ) ); tris.append( Triangle( p1, p3, p2 ) );
+	}
+	appendMesh( out, verts, tris, transform, scale );
+}
+
+void tlCollAppendEditableMesh( const NifModel * nif, int shapeBlock, CollisionMesh & out,
+	const Matrix4 & transform = Matrix4(), int depth = 0 )
+{
+	if ( !nif->isValidBlockNumber( shapeBlock ) || depth > 20 ) return;
+	QModelIndex shape = tlCollBlockIndex( nif, shapeBlock );
+	QString type = nif->itemName( shape );
+	if ( type.endsWith( QLatin1String( "ListShape" ) ) ) {
+		for ( qint32 child : nif->getLinkArray( shape, "Sub Shapes" ) ) tlCollAppendEditableMesh( nif, child, out, transform, depth + 1 );
+		return;
+	}
+	if ( type == QLatin1String( "bhkMoppBvTreeShape" ) ) {
+		tlCollAppendEditableMesh( nif, nif->getLink( shape, "Shape" ), out, transform, depth + 1 ); return;
+	}
+	if ( type == QLatin1String( "bhkTransformShape" ) || type == QLatin1String( "bhkConvexTransformShape" ) ) {
+		Matrix4 next( transform ); next.multiply4x3( nif->get<Matrix4>( shape, "Transform" ) );
+		tlCollAppendEditableMesh( nif, nif->getLink( shape, "Shape" ), out, next, depth + 1 ); return;
+	}
+	if ( type == QLatin1String( "bhkBoxShape" ) ) {
+		Vector3 d = nif->get<Vector3>( shape, "Dimensions" ); QVector<Vector3> v;
+		for ( int z = -1; z <= 1; z += 2 ) for ( int y = -1; y <= 1; y += 2 ) for ( int x = -1; x <= 1; x += 2 )
+			v.append( Vector3( d[0] * x, d[1] * y, d[2] * z ) );
+		appendMesh( out, v, boxTriangles(), transform, 69.99125f ); return;
+	}
+	if ( type == QLatin1String( "bhkSphereShape" ) ) {
+		appendSphereMesh( out, Vector3(), nif->get<float>( shape, "Radius" ), transform, 69.99125f ); return;
+	}
+	if ( type == QLatin1String( "bhkCapsuleShape" ) ) {
+		appendCapsuleMesh( out, nif->get<Vector3>( shape, "First Point" ), nif->get<Vector3>( shape, "Second Point" ),
+			nif->get<float>( shape, "Radius" ), transform, 69.99125f ); return;
+	}
+	if ( type == QLatin1String( "bhkConvexVerticesShape" ) ) {
+		QVector<Vector4> vv = nif->getArray<Vector4>( shape, "Vertices" ); QVector<Vector3> v;
+		for ( const Vector4 & p : vv ) v.append( Vector3( p[0], p[1], p[2] ) );
+		QVector<Vector4> hullVerts, hullNorms; QVector<Triangle> tris = compute_convex_hull( v, hullVerts, hullNorms );
+		v.clear(); for ( const Vector4 & p : hullVerts ) v.append( Vector3( p[0], p[1], p[2] ) );
+		appendMesh( out, v, tris, transform, 69.99125f ); return;
+	}
+	if ( type == QLatin1String( "bhkNiTriStripsShape" ) ) {
+		for ( qint32 dataBlock : nif->getLinkArray( shape, "Strips Data" ) ) {
+			QModelIndex data = tlCollBlockIndex( nif, dataBlock ); QVector<Vector3> v = nif->getArray<Vector3>( data, "Vertices" );
+			QVector<QVector<quint16>> strips; QModelIndex points = nif->getIndex( data, "Points" );
+			for ( int r = 0; r < nif->rowCount( points ); r++ ) strips.append( nif->getArray<quint16>( nif->getIndex( points, r ) ) );
+			appendMesh( out, v, triangulate( strips ), transform, 1.0f );
+		}
+	}
+}
+
+//! Compile one editable collision body into an FO4 hknp packfile (defined below the panel)
+QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
+	const QModelIndex & object, bool confirmed );
+
 namespace {
 
 enum CollisionRoles {
@@ -629,42 +814,9 @@ private:
 	 * ragdoll system means ragdoll bone.
 	 */
 	QString boneRole( const QHash<int, QString> & boneRoles, int node, int systemBlock ) const
-	{
-		const QString fromSkin = boneRoles.value( node );
-		if ( !fromSkin.isEmpty() )
-			return fromSkin;
-		if ( nif->isNiBlock( blockIndex( systemBlock ), "bhkRagdollSystem" ) )
-			return tr( "ragdoll bone" );
-		return QString();
-	}
-
-	/*! node block -> bone role, for every node some skin actually names.
-	 *
-	 * Built once per rebuild() and passed down: calling skeletonAnalyse() per row
-	 * would re-walk every vertex weight in the file once for each collision body.
-	 */
-	QHash<int, QString> collectBoneRoles() const
-	{
-		QHash<int, QString> roles;
-		const SkeletonReport report = skeletonAnalyse( nif );
-		for ( const SkeletonBoneInfo & b : report.bones ) {
-			if ( b.isNotABone() )
-				continue;
-			roles.insert( b.block, b.verts > 0
-				? tr( "deforming (%1 v)" ).arg( b.verts )
-				: tr( "unused bone" ) );
-		}
-		return roles;
-	}
-
-	QString nodeName( int block ) const
-	{
-		QModelIndex i = blockIndex( block );
-		if ( !i.isValid() )
-			return tr( "<orphan>" );
-		QString n = nif->get<QString>( i, "Name" );
-		return n.isEmpty() ? tr( "Block %1" ).arg( block ) : n;
-	}
+	{ return tlCollBoneRole( nif, boneRoles, node, systemBlock ); }
+	QHash<int, QString> collectBoneRoles() const { return tlCollBoneRoles( nif ); }
+	QString nodeName( int block ) const { return tlCollNodeName( nif, block ); }
 
 	QString compiledShapeSummary( const HknpSystem & sys, quint32 bodyId,
 		quint32 * material, int * verts, int * tris ) const
@@ -730,133 +882,11 @@ private:
 		return tlCollFirstLeafShape( nif, shape, depth );
 	}
 
-	struct CollisionMesh
-	{
-		QVector<Vector3> verts;
-		QVector<Triangle> tris;
-	};
 
-	static void appendMesh( CollisionMesh & out, const QVector<Vector3> & verts,
-		const QVector<Triangle> & tris, const Matrix4 & transform, float scale )
+	void appendEditableMesh( int shapeBlock, CollisionMesh & out,
+		const Matrix4 & transform = Matrix4(), int depth = 0 ) const
 	{
-		if ( verts.isEmpty() || tris.isEmpty() || out.verts.size() + verts.size() > 65535 ) return;
-		quint16 base = quint16( out.verts.size() );
-		for ( const Vector3 & v : verts ) out.verts.append( transform * v * scale );
-		for ( Triangle t : tris ) {
-			if ( t[0] >= verts.size() || t[1] >= verts.size() || t[2] >= verts.size() ) continue;
-			t[0] += base; t[1] += base; t[2] += base; out.tris.append( t );
-		}
-	}
-
-	static QVector<Triangle> boxTriangles()
-	{
-		return {
-			{ 0, 2, 1 }, { 1, 2, 3 }, { 4, 5, 6 }, { 5, 7, 6 },
-			{ 0, 1, 4 }, { 1, 5, 4 }, { 2, 6, 3 }, { 3, 6, 7 },
-			{ 0, 4, 2 }, { 2, 4, 6 }, { 1, 3, 5 }, { 3, 7, 5 }
-		};
-	}
-
-	static void appendSphereMesh( CollisionMesh & out, const Vector3 & center, float radius,
-		const Matrix4 & transform, float scale )
-	{
-		constexpr int slices = 16, stacks = 8;
-		constexpr float pi = 3.14159265358979323846f;
-		QVector<Vector3> verts;
-		QVector<Triangle> tris;
-		for ( int y = 0; y <= stacks; y++ ) {
-			float phi = -0.5f * pi + pi * float( y ) / float( stacks );
-			float cp = std::cos( phi ), sp = std::sin( phi );
-			for ( int x = 0; x < slices; x++ ) {
-				float a = 2.0f * pi * float( x ) / float( slices );
-				verts.append( center + Vector3( std::cos( a ) * cp, std::sin( a ) * cp, sp ) * radius );
-			}
-		}
-		for ( int y = 0; y < stacks; y++ ) for ( int x = 0; x < slices; x++ ) {
-			quint16 a = quint16( y * slices + x ), b = quint16( y * slices + ( x + 1 ) % slices );
-			quint16 c = quint16( ( y + 1 ) * slices + x ), d = quint16( ( y + 1 ) * slices + ( x + 1 ) % slices );
-			tris.append( Triangle( a, b, c ) ); tris.append( Triangle( b, d, c ) );
-		}
-		appendMesh( out, verts, tris, transform, scale );
-	}
-
-	static void appendCapsuleMesh( CollisionMesh & out, Vector3 a, Vector3 b, float radius,
-		const Matrix4 & transform, float scale )
-	{
-		constexpr int slices = 16, hemi = 4;
-		constexpr float pi = 3.14159265358979323846f;
-		Vector3 axis = b - a;
-		if ( axis.length() < 1.0e-6f ) { appendSphereMesh( out, a, radius, transform, scale ); return; }
-		axis.normalize();
-		Vector3 u = Vector3::crossproduct( axis, std::fabs( axis[2] ) < 0.9f ? Vector3( 0, 0, 1 ) : Vector3( 0, 1, 0 ) );
-		u.normalize(); Vector3 v = Vector3::crossproduct( axis, u ); v.normalize();
-		QVector<QPair<Vector3, float>> rings;
-		for ( int i = 0; i <= hemi; i++ ) {
-			float t = -0.5f * pi + 0.5f * pi * float( i ) / float( hemi );
-			rings.append( { a + axis * ( std::sin( t ) * radius ), std::cos( t ) * radius } );
-		}
-		rings.append( { b, radius } );
-		for ( int i = 1; i <= hemi; i++ ) {
-			float t = 0.5f * pi * float( i ) / float( hemi );
-			rings.append( { b + axis * ( std::sin( t ) * radius ), std::cos( t ) * radius } );
-		}
-		QVector<Vector3> verts; QVector<Triangle> tris;
-		for ( const auto & ring : rings ) for ( int s = 0; s < slices; s++ ) {
-			float ang = 2.0f * pi * float( s ) / float( slices );
-			verts.append( ring.first + ( u * std::cos( ang ) + v * std::sin( ang ) ) * ring.second );
-		}
-		for ( int r = 0; r + 1 < rings.size(); r++ ) for ( int s = 0; s < slices; s++ ) {
-			quint16 p0 = quint16( r * slices + s ), p1 = quint16( r * slices + ( s + 1 ) % slices );
-			quint16 p2 = quint16( ( r + 1 ) * slices + s ), p3 = quint16( ( r + 1 ) * slices + ( s + 1 ) % slices );
-			tris.append( Triangle( p0, p1, p2 ) ); tris.append( Triangle( p1, p3, p2 ) );
-		}
-		appendMesh( out, verts, tris, transform, scale );
-	}
-
-	void appendEditableMesh( int shapeBlock, CollisionMesh & out, const Matrix4 & transform = Matrix4(), int depth = 0 ) const
-	{
-		if ( !nif->isValidBlockNumber( shapeBlock ) || depth > 20 ) return;
-		QModelIndex shape = blockIndex( shapeBlock );
-		QString type = nif->itemName( shape );
-		if ( type.endsWith( QLatin1String( "ListShape" ) ) ) {
-			for ( qint32 child : nif->getLinkArray( shape, "Sub Shapes" ) ) appendEditableMesh( child, out, transform, depth + 1 );
-			return;
-		}
-		if ( type == QLatin1String( "bhkMoppBvTreeShape" ) ) {
-			appendEditableMesh( nif->getLink( shape, "Shape" ), out, transform, depth + 1 ); return;
-		}
-		if ( type == QLatin1String( "bhkTransformShape" ) || type == QLatin1String( "bhkConvexTransformShape" ) ) {
-			Matrix4 next( transform ); next.multiply4x3( nif->get<Matrix4>( shape, "Transform" ) );
-			appendEditableMesh( nif->getLink( shape, "Shape" ), out, next, depth + 1 ); return;
-		}
-		if ( type == QLatin1String( "bhkBoxShape" ) ) {
-			Vector3 d = nif->get<Vector3>( shape, "Dimensions" ); QVector<Vector3> v;
-			for ( int z = -1; z <= 1; z += 2 ) for ( int y = -1; y <= 1; y += 2 ) for ( int x = -1; x <= 1; x += 2 )
-				v.append( Vector3( d[0] * x, d[1] * y, d[2] * z ) );
-			appendMesh( out, v, boxTriangles(), transform, 69.99125f ); return;
-		}
-		if ( type == QLatin1String( "bhkSphereShape" ) ) {
-			appendSphereMesh( out, Vector3(), nif->get<float>( shape, "Radius" ), transform, 69.99125f ); return;
-		}
-		if ( type == QLatin1String( "bhkCapsuleShape" ) ) {
-			appendCapsuleMesh( out, nif->get<Vector3>( shape, "First Point" ), nif->get<Vector3>( shape, "Second Point" ),
-				nif->get<float>( shape, "Radius" ), transform, 69.99125f ); return;
-		}
-		if ( type == QLatin1String( "bhkConvexVerticesShape" ) ) {
-			QVector<Vector4> vv = nif->getArray<Vector4>( shape, "Vertices" ); QVector<Vector3> v;
-			for ( const Vector4 & p : vv ) v.append( Vector3( p[0], p[1], p[2] ) );
-			QVector<Vector4> hullVerts, hullNorms; QVector<Triangle> tris = compute_convex_hull( v, hullVerts, hullNorms );
-			v.clear(); for ( const Vector4 & p : hullVerts ) v.append( Vector3( p[0], p[1], p[2] ) );
-			appendMesh( out, v, tris, transform, 69.99125f ); return;
-		}
-		if ( type == QLatin1String( "bhkNiTriStripsShape" ) ) {
-			for ( qint32 dataBlock : nif->getLinkArray( shape, "Strips Data" ) ) {
-				QModelIndex data = blockIndex( dataBlock ); QVector<Vector3> v = nif->getArray<Vector3>( data, "Vertices" );
-				QVector<QVector<quint16>> strips; QModelIndex points = nif->getIndex( data, "Points" );
-				for ( int r = 0; r < nif->rowCount( points ); r++ ) strips.append( nif->getArray<quint16>( nif->getIndex( points, r ) ) );
-				appendMesh( out, v, triangulate( strips ), transform, 1.0f );
-			}
-		}
+		tlCollAppendEditableMesh( nif, shapeBlock, out, transform, depth );
 	}
 
 	CollisionMesh selectedCollisionMesh() const
@@ -1826,106 +1856,15 @@ private:
 	{
 		QTreeWidgetItem * item = tree->currentItem();
 		if ( !item || item->data( 0, CompiledRole ).toBool() ) {
-			QMessageBox::information( this, tr( "Compile Collision" ), tr( "Select an editable collision body first." ) ); return;
-		}
-		int objectBlock = item->data( 0, ObjectBlockRole ).toInt();
-		int bodyBlock = item->data( 0, BodyBlockRole ).toInt();
-		int nodeBlock = item->data( 0, NodeBlockRole ).toInt();
-		QModelIndex body = blockIndex( bodyBlock ), node = blockIndex( nodeBlock );
-		if ( !body.isValid() || !node.isValid() ) {
-			QMessageBox::warning( this, tr( "Compile Collision" ), tr( "The selected collision has a broken body or target node." ) ); return;
-		}
-		// Compile writes ONE static body as a compressed mesh in a
-		// bhkPhysicsSystem. That is right for world collision and wrong for a
-		// bone: it triangulates the capsule and cannot restore a ragdoll (see the
-		// Decompile warning). Bone collision is exactly where this would be a
-		// one-way trip, so ask first and default to Cancel.
-		const QString role = boneRole( collectBoneRoles(), nodeBlock, -1 );
-		if ( !role.isEmpty()
-			&& QMessageBox::warning( this, tr( "Compile Collision" ),
-				// same correction as the Decompile warning in havok.cpp: the
-				// constraints and skeleton DO decode and re-encode byte for byte.
-				// What is missing is any NIF representation to carry them across.
-				tr( "%1 is a bone (%2).\n\n"
-					"Compile writes a single static body as a triangle mesh in a "
-					"bhkPhysicsSystem. It cannot write bone collision, and it cannot rebuild "
-					"a ragdoll - nothing carries the joint constraints or the ragdoll skeleton "
-					"into NIF blocks, so a ragdoll this came from stays lost.\n\n"
-					"Compile anyway?" ).arg( nodeName( nodeBlock ), role ),
-				QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) != QMessageBox::Yes )
-			return;
-
-		CollisionMesh mesh; int rootShape = nif->getLink( body, "Shape" ); appendEditableMesh( rootShape, mesh );
-		HknpEncodeInput input; input.verts.reserve( mesh.verts.size() );
-		for ( const Vector3 & v : mesh.verts ) input.verts.append( v / 69.99125f );
-		input.tris = mesh.tris;
-		QModelIndex info = nif->getIndex( body, "Rigid Body Info" ); QModelIndex filter = bhkGetHavokFilter( nif, info );
-		quint32 sourceMotion = info.isValid() ? nif->get<quint32>( info, "Motion System" ) : 5u;
-		QStringList unsupported;
-		if ( sourceMotion != 3u && sourceMotion != 5u ) unsupported << tr( "Motion/Keyframed mode %1" ).arg( sourceMotion );
-		quint32 expectedQuality = sourceMotion == 3u ? 4u : 0u, expectedSolver = sourceMotion == 3u ? 2u : 1u;
-		if ( info.isValid() && nif->get<quint32>( info, "Quality Type" ) != expectedQuality ) unsupported << tr( "Quality Type" );
-		if ( info.isValid() && nif->get<quint32>( info, "Solver Deactivation" ) != expectedSolver ) unsupported << tr( "Solver Deactivation" );
-		if ( nif->get<quint32>( body, "Body Flags" ) & 1u ) unsupported << tr( "Wind" );
-		if ( info.isValid() && nif->get<quint32>( info, "Deactivator Type" ) != 1u ) unsupported << tr( "Deactivator Type" );
-		if ( info.isValid() && std::fabs( nif->get<float>( info, "Penetration Depth" ) - 0.15f ) > 1.0e-5f ) unsupported << tr( "Allowed Penetration" );
-		if ( !unsupported.isEmpty() ) {
-			QMessageBox::warning( this, tr( "Compile Collision" ),
-				tr( "These settings are valid on editable collision but their FO4 hknp byte layout is not validated yet, so Compile will not discard them:\n\n%1" )
-					.arg( unsupported.join( QStringLiteral( "\n" ) ) ) );
+			QMessageBox::information( this, tr( "Compile Collision" ),
+				tr( "Select an editable collision body first." ) );
 			return;
 		}
-		input.layer = filter.isValid() ? nif->get<quint32>( filter, "Layer" ) : 1u;
-		input.filterFlags = filter.isValid() ? quint8( nif->get<quint32>( filter, "Flags" ) ) : 0u;
-		input.filterGroup = filter.isValid() ? quint16( nif->get<quint32>( filter, "Group" ) ) : 0u;
-		input.mass = info.isValid() ? nif->get<float>( info, "Mass" ) : 0.0f;
-		input.dynamic = sourceMotion == 3u;
-		input.friction = info.isValid() ? nif->get<float>( info, "Friction" ) : 0.5f;
-		input.restitution = info.isValid() ? nif->get<float>( info, "Restitution" ) : 0.4f;
-		input.gravityFactor = info.isValid() ? nif->get<float>( info, "Gravity Factor" ) : 1.0f;
-		input.maxLinVelocity = info.isValid() ? nif->get<float>( info, "Max Linear Velocity" ) : 104.375f;
-		input.maxAngVelocity = info.isValid() ? nif->get<float>( info, "Max Angular Velocity" ) : 31.57f;
-		input.linDamping = info.isValid() ? nif->get<float>( info, "Linear Damping" ) : 0.1f;
-		input.angDamping = info.isValid() ? nif->get<float>( info, "Angular Damping" ) : 0.05f;
-		if ( info.isValid() ) {
-			Vector4 center = nif->get<Vector4>( info, "Center" ); input.center = Vector3( center[0], center[1], center[2] );
-			QModelIndex inertia = nif->getIndex( info, "Inertia Tensor" );
-			input.inertia = Vector3( nif->get<float>( inertia, "m11" ), nif->get<float>( inertia, "m22" ), nif->get<float>( inertia, "m33" ) );
-		}
-		QModelIndex materialShape = blockIndex( firstLeafShape( rootShape ) );
-		input.materialCRC = materialShape.isValid() ? nif->get<quint32>( materialShape, "Material" ) : 0u;
-		QString error; QByteArray bytes = hknpEncodeCompressedMesh( input, &error );
-		if ( bytes.isEmpty() ) {
-			QMessageBox::warning( this, tr( "Compile Collision" ), error ); return;
-		}
-		HknpSystem roundTrip = hknpDecode( bytes );
-		if ( !roundTrip.valid || roundTrip.shapes.isEmpty() || roundTrip.shapes.first().tris.isEmpty() ) {
-			QMessageBox::critical( this, tr( "Compile Collision" ), tr( "The generated packfile failed NifSkope's round-trip check: %1" ).arg( roundTrip.error ) ); return;
-		}
-		// multi-section files must decode to exactly the input triangles
-		// (section boundaries duplicate verts, so only the tri count is stable)
-		if ( roundTrip.shapes.first().tris.size() != input.tris.size() ) {
-			QMessageBox::critical( this, tr( "Compile Collision" ),
-				tr( "Round-trip triangle count mismatch (%1 encoded, %2 decoded) — the packfile was not written." )
-					.arg( input.tris.size() ).arg( roundTrip.shapes.first().tris.size() ) );
-			return;
-		}
-		QPersistentModelIndex oldObject = blockIndex( objectBlock ), target = node;
-		QPersistentModelIndex newObject, newSystem;
-		nifSnapshotOp( nif, tr( "Compile collision" ), [&, this]() {
-			nif->holdUpdates( true );
-			newSystem = nif->insertNiBlock( "bhkPhysicsSystem" );
-			nif->set<QByteArray>( QModelIndex( newSystem ), "Binary Data", bytes );
-			newObject = nif->insertNiBlock( "bhkNPCollisionObject" );
-			nif->setLink( QModelIndex( newObject ), "Target", nodeBlock );
-			nif->setLink( QModelIndex( newObject ), "Data", nif->getBlockNumber( QModelIndex( newSystem ) ) );
-			nif->set<quint32>( QModelIndex( newObject ), "Body ID", 0u );
-			nif->holdUpdates( false );
-			if ( oldObject.isValid() ) { spRemoveBranch remove; remove.castIfApplicable( nif, QModelIndex( oldObject ) ); }
-			if ( target.isValid() && newObject.isValid() )
-				nif->setLink( nif->getIndex( QModelIndex( target ), "Collision Object" ), nif->getBlockNumber( QModelIndex( newObject ) ) );
-		} );
-		if ( newObject.isValid() ) if ( auto * window = dynamic_cast<NifSkope *>( mw ) ) window->select( QModelIndex( newObject ) );
+		// one implementation, shared with the Compile Collision spell
+		const QModelIndex made = tlCompileCollision( nif, this,
+			blockIndex( item->data( 0, ObjectBlockRole ).toInt() ), false );
+		if ( made.isValid() )
+			if ( auto * window = dynamic_cast<NifSkope *>( mw ) ) window->select( made );
 		queueRebuild();
 	}
 
@@ -2888,6 +2827,152 @@ private:
 
 } // namespace
 
+/*! Compile one editable collision body into an FO4 hknp packfile.
+ *
+ *  Hoisted out of CollisionManagerPanel so it can be a spell. It was reachable
+ *  only from a running dock, which is why it wrote layer Static/0/0 into every
+ *  packfile it produced for as long as it did: nothing could execute it from a
+ *  test.
+ *
+ *  \param object the bhkCollisionObject to compile
+ *  \param confirmed the caller has already put the one-way-trip question to the
+ *                   user, so do not ask again (SpellBook::cast does)
+ *  \return the new bhkNPCollisionObject, or an invalid index if nothing was done
+ */
+QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
+	const QModelIndex & object, bool confirmed )
+{
+	if ( !nif || !nif->blockInherits( object, "bhkCollisionObject" ) )
+		return QModelIndex();
+	const int objectBlock = nif->getBlockNumber( object );
+	const int bodyBlock = nif->getLink( object, "Body" );
+	/* Target first, then the parent -- ownerNode()'s rule, because a collision
+	 * object without a Target belongs to whatever holds it.
+	 */
+	const int nodeBlock = nif->isValidBlockNumber( nif->getLink( object, "Target" ) )
+		? nif->getLink( object, "Target" ) : nif->getParent( objectBlock );
+	QModelIndex body = tlCollBlockIndex( nif, bodyBlock ), node = tlCollBlockIndex( nif, nodeBlock );
+	if ( !body.isValid() || !node.isValid() ) {
+		QMessageBox::warning( parent, QObject::tr( "Compile Collision" ), QObject::tr( "The selected collision has a broken body or target node." ) ); return QModelIndex();
+	}
+	// Compile writes ONE static body as a compressed mesh in a
+	// bhkPhysicsSystem. That is right for world collision and wrong for a
+	// bone: it triangulates the capsule and cannot restore a ragdoll (see the
+	// Decompile warning). Bone collision is exactly where this would be a
+	// one-way trip, so ask first and default to Cancel.
+	/* Skipped when a SpellBook already asked -- destructiveWarning() carries the
+	 * same paragraph, and two dialogs for one decision is what Spell::confirmedByBook
+	 * exists to prevent. Also skipped with no QApplication: -no-gui builds a plain
+	 * QCoreApplication, where a QMessageBox cannot be constructed.
+	 */
+	const QString role = ( confirmed || !qobject_cast<QApplication *>( QCoreApplication::instance() ) )
+		? QString() : tlCollBoneRole( nif, tlCollBoneRoles( nif ), nodeBlock, -1 );
+	if ( !role.isEmpty()
+		&& QMessageBox::warning( parent, QObject::tr( "Compile Collision" ),
+			// same correction as the Decompile warning in havok.cpp: the
+			// constraints and skeleton DO decode and re-encode byte for byte.
+			// What is missing is any NIF representation to carry them across.
+			QObject::tr( "%1 is a bone (%2).\n\n"
+				"Compile writes a single static body as a triangle mesh in a "
+				"bhkPhysicsSystem. It cannot write bone collision, and it cannot rebuild "
+				"a ragdoll - nothing carries the joint constraints or the ragdoll skeleton "
+				"into NIF blocks, so a ragdoll this came from stays lost.\n\n"
+				"Compile anyway?" ).arg( tlCollNodeName( nif, nodeBlock ), role ),
+			QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) != QMessageBox::Yes )
+		return QModelIndex();
+
+	CollisionMesh mesh; int rootShape = nif->getLink( body, "Shape" ); tlCollAppendEditableMesh( nif, rootShape, mesh );
+	HknpEncodeInput input; input.verts.reserve( mesh.verts.size() );
+	for ( const Vector3 & v : mesh.verts ) input.verts.append( v / 69.99125f );
+	input.tris = mesh.tris;
+	QModelIndex info = nif->getIndex( body, "Rigid Body Info" ); QModelIndex filter = bhkGetHavokFilter( nif, info );
+	quint32 sourceMotion = info.isValid() ? nif->get<quint32>( info, "Motion System" ) : 5u;
+	QStringList unsupported;
+	if ( sourceMotion != 3u && sourceMotion != 5u ) unsupported << QObject::tr( "Motion/Keyframed mode %1" ).arg( sourceMotion );
+	quint32 expectedQuality = sourceMotion == 3u ? 4u : 0u, expectedSolver = sourceMotion == 3u ? 2u : 1u;
+	if ( info.isValid() && nif->get<quint32>( info, "Quality Type" ) != expectedQuality ) unsupported << QObject::tr( "Quality Type" );
+	if ( info.isValid() && nif->get<quint32>( info, "Solver Deactivation" ) != expectedSolver ) unsupported << QObject::tr( "Solver Deactivation" );
+	if ( nif->get<quint32>( body, "Body Flags" ) & 1u ) unsupported << QObject::tr( "Wind" );
+	if ( info.isValid() && nif->get<quint32>( info, "Deactivator Type" ) != 1u ) unsupported << QObject::tr( "Deactivator Type" );
+	if ( info.isValid() && std::fabs( nif->get<float>( info, "Penetration Depth" ) - 0.15f ) > 1.0e-5f ) unsupported << QObject::tr( "Allowed Penetration" );
+	if ( !unsupported.isEmpty() ) {
+		QMessageBox::warning( parent, QObject::tr( "Compile Collision" ),
+			QObject::tr( "These settings are valid on editable collision but their FO4 hknp byte layout is not validated yet, so Compile will not discard them:\n\n%1" )
+				.arg( unsupported.join( QStringLiteral( "\n" ) ) ) );
+		return QModelIndex();
+	}
+	input.layer = filter.isValid() ? nif->get<quint32>( filter, "Layer" ) : 1u;
+	input.filterFlags = filter.isValid() ? quint8( nif->get<quint32>( filter, "Flags" ) ) : 0u;
+	input.filterGroup = filter.isValid() ? quint16( nif->get<quint32>( filter, "Group" ) ) : 0u;
+	input.mass = info.isValid() ? nif->get<float>( info, "Mass" ) : 0.0f;
+	input.dynamic = sourceMotion == 3u;
+	input.friction = info.isValid() ? nif->get<float>( info, "Friction" ) : 0.5f;
+	input.restitution = info.isValid() ? nif->get<float>( info, "Restitution" ) : 0.4f;
+	input.gravityFactor = info.isValid() ? nif->get<float>( info, "Gravity Factor" ) : 1.0f;
+	input.maxLinVelocity = info.isValid() ? nif->get<float>( info, "Max Linear Velocity" ) : 104.375f;
+	input.maxAngVelocity = info.isValid() ? nif->get<float>( info, "Max Angular Velocity" ) : 31.57f;
+	input.linDamping = info.isValid() ? nif->get<float>( info, "Linear Damping" ) : 0.1f;
+	input.angDamping = info.isValid() ? nif->get<float>( info, "Angular Damping" ) : 0.05f;
+	if ( info.isValid() ) {
+		Vector4 center = nif->get<Vector4>( info, "Center" ); input.center = Vector3( center[0], center[1], center[2] );
+		QModelIndex inertia = nif->getIndex( info, "Inertia Tensor" );
+		input.inertia = Vector3( nif->get<float>( inertia, "m11" ), nif->get<float>( inertia, "m22" ), nif->get<float>( inertia, "m33" ) );
+	}
+	QModelIndex materialShape = tlCollBlockIndex( nif, tlCollFirstLeafShape( nif, rootShape ) );
+	input.materialCRC = materialShape.isValid() ? nif->get<quint32>( materialShape, "Material" ) : 0u;
+	QString error; QByteArray bytes = hknpEncodeCompressedMesh( input, &error );
+	if ( bytes.isEmpty() ) {
+		QMessageBox::warning( parent, QObject::tr( "Compile Collision" ), error ); return QModelIndex();
+	}
+	HknpSystem roundTrip = hknpDecode( bytes );
+	if ( !roundTrip.valid || roundTrip.shapes.isEmpty() || roundTrip.shapes.first().tris.isEmpty() ) {
+		QMessageBox::critical( parent, QObject::tr( "Compile Collision" ), QObject::tr( "The generated packfile failed NifSkope's round-trip check: %1" ).arg( roundTrip.error ) ); return QModelIndex();
+	}
+	// multi-section files must decode to exactly the input triangles
+	// (section boundaries duplicate verts, so only the tri count is stable)
+	if ( roundTrip.shapes.first().tris.size() != input.tris.size() ) {
+		QMessageBox::critical( parent, QObject::tr( "Compile Collision" ),
+			QObject::tr( "Round-trip triangle count mismatch (%1 encoded, %2 decoded) — the packfile was not written." )
+				.arg( input.tris.size() ).arg( roundTrip.shapes.first().tris.size() ) );
+		return QModelIndex();
+	}
+	QPersistentModelIndex oldObject = tlCollBlockIndex( nif, objectBlock ), target = node;
+	QPersistentModelIndex newObject, newSystem;
+	nifSnapshotOp( nif, QObject::tr( "Compile collision" ), [&]() {
+		nif->holdUpdates( true );
+		newSystem = nif->insertNiBlock( "bhkPhysicsSystem" );
+		nif->set<QByteArray>( QModelIndex( newSystem ), "Binary Data", bytes );
+		newObject = nif->insertNiBlock( "bhkNPCollisionObject" );
+		nif->setLink( QModelIndex( newObject ), "Target", nodeBlock );
+		nif->setLink( QModelIndex( newObject ), "Data", nif->getBlockNumber( QModelIndex( newSystem ) ) );
+		nif->set<quint32>( QModelIndex( newObject ), "Body ID", 0u );
+		nif->holdUpdates( false );
+		/* Remove EXACTLY this branch.
+		 *
+		 * spRemoveBranch::cast consults the published Block List selection
+		 * (spellSelectionRoots in blocks.cpp) and removes every root in it when
+		 * the clicked block is one of several. That is right for Ctrl+Delete and
+		 * catastrophic here: from the Block List, right-clicking one of five
+		 * selected blocks would delete all five branches, silently, inside a
+		 * snapshot labelled "Compile collision". Harmless while this lived in the
+		 * dock, because the dock drives a single-row selection -- so the hoist is
+		 * what makes it reachable, and the hoist has to bring the fix with it.
+		 */
+		if ( oldObject.isValid() ) {
+			const QList<qint32> saved = blockListSelectionForSpells();
+			setBlockListSelection( QList<qint32>() );
+			spRemoveBranch remove;
+			remove.castIfApplicable( nif, QModelIndex( oldObject ) );
+			setBlockListSelection( saved );
+		}
+		if ( target.isValid() && newObject.isValid() )
+			nif->setLink( nif->getIndex( QModelIndex( target ), "Collision Object" ), nif->getBlockNumber( QModelIndex( newObject ) ) );
+	} );
+	// the dock rebuilds itself off the model signals; a spell's caller selects
+	// whatever cast() returns
+	return QModelIndex( newObject );
+}
+
 QDockWidget * tlCreateCollisionManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl )
 {
 	auto * dock = new QDockWidget( QObject::tr( "Collision Manager" ), mw );
@@ -3180,3 +3265,115 @@ public:
 };
 
 REGISTER_SPELL( spRemoveBrokenCollision )
+
+
+/*! Compile Collision, from the Block List rather than only from the dock.
+ *
+ *  Decompile has been a spell for a long time; Compile was a private member of
+ *  CollisionManagerPanel, so the Collision group in the context menu was a
+ *  one-way trip. The stronger reason to move it is that a private dock member
+ *  cannot be tested: this function wrote layer Static/0/0 into every packfile it
+ *  produced for as long as it did, and it survived because nothing outside a
+ *  running dock could execute it.
+ */
+class spCompileCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Compile Collision" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+	QString group() const override final { return Spell::tr( "Collision" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Rewrite this editable collision as a single static body: "
+			"one triangle mesh in a compiled bhkPhysicsSystem." );
+	}
+
+	//! The bhkCollisionObject a click means: the object, its owner node, or its body.
+	static QModelIndex targetObject( const NifModel * nif, const QModelIndex & index )
+	{
+		if ( !nif || !index.isValid() )
+			return QModelIndex();
+		QModelIndex iBlock = nif->getBlockIndex( index );
+		if ( nif->blockInherits( iBlock, "bhkRigidBody" ) ) {
+			const int body = nif->getBlockNumber( iBlock );
+			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+				const QModelIndex i = nif->getBlockIndex( b );
+				if ( nif->blockInherits( i, "bhkCollisionObject" ) && nif->getLink( i, "Body" ) == body )
+					return i;
+			}
+			return QModelIndex();
+		}
+		if ( nif->blockInherits( iBlock, "NiAVObject" ) )
+			iBlock = nif->getBlockIndex( nif->getLink( iBlock, "Collision Object" ) );
+		return nif->blockInherits( iBlock, "bhkCollisionObject" ) ? iBlock : QModelIndex();
+	}
+
+	/* Destroys the editable shapes and cannot be reversed: a box, a sphere or a
+	 * capsule does not come back out of a triangle mesh. The dock's own button
+	 * never had a confirmation for this -- becoming a spell is what gives it one.
+	 */
+	bool destructive() const override final { return true; }
+	QString destructiveWarning( NifModel * nif, const QModelIndex & index ) const override final
+	{
+		const QModelIndex object = targetObject( nif, index );
+		const int objectBlock = nif->getBlockNumber( object );
+		const int nodeBlock = nif->isValidBlockNumber( nif->getLink( object, "Target" ) )
+			? nif->getLink( object, "Target" ) : nif->getParent( objectBlock );
+		QString text = Spell::tr(
+			"Compile the collision on %1 into a single static body: one triangle mesh "
+			"in a bhkPhysicsSystem.\n\n"
+			"This deletes the editable collision under [%2] %3. A box, a sphere or a "
+			"capsule cannot be rebuilt from a triangle mesh, and constraints are not "
+			"written into the packfile at all, so nothing decompiles them back." )
+			.arg( tlCollNodeName( nif, nodeBlock ) )
+			.arg( objectBlock ).arg( nif->itemName( object ) );
+		const QString role = tlCollBoneRole( nif, tlCollBoneRoles( nif ), nodeBlock, -1 );
+		if ( !role.isEmpty() )
+			text += Spell::tr( "\n\n%1 is a bone (%2). Compile cannot write bone collision and "
+				"cannot rebuild a ragdoll: nothing carries the joint constraints or the ragdoll "
+				"skeleton into NIF blocks, so a ragdoll this came from stays lost." )
+				.arg( tlCollNodeName( nif, nodeBlock ), role );
+		return text;
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		/* FALLOUT 4 ONLY. hknpEncodeCompressedMesh writes an hk_2014.1.0-r1
+		 * packfile with FO4 class names into a bhkPhysicsSystem. The dock never
+		 * needed this test, because its tree only lists what the open file
+		 * contains; a Block List entry would offer itself on a Skyrim
+		 * bhkCollisionObject and write FO4 bytes into it.
+		 */
+		if ( !nif || nif->getBSVersion() != 130 )
+			return false;
+		const QModelIndex object = targetObject( nif, index );
+		if ( !object.isValid() || nif->blockInherits( object, "bhkNPCollisionObject" ) )
+			return false;
+		const QModelIndex body = tlCollBlockIndex( nif, nif->getLink( object, "Body" ) );
+		const int objectBlock = nif->getBlockNumber( object );
+		const int nodeBlock = nif->isValidBlockNumber( nif->getLink( object, "Target" ) )
+			? nif->getLink( object, "Target" ) : nif->getParent( objectBlock );
+		if ( !body.isValid() || !tlCollBlockIndex( nif, nodeBlock ).isValid() )
+			return false;
+		/* Structural gate only. Whether the shape yields usable geometry is
+		 * answered by building it, and building a convex hull is far too much
+		 * work for a function that runs for every spell on every right-click.
+		 */
+		const QModelIndex leaf = tlCollBlockIndex( nif,
+			tlCollFirstLeafShape( nif, nif->getLink( body, "Shape" ) ) );
+		return leaf.isValid() && nif->blockInherits( leaf,
+			{ "bhkBoxShape", "bhkSphereShape", "bhkCapsuleShape",
+			  "bhkConvexVerticesShape", "bhkNiTriStripsShape" } );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		// confirmedByBook: SpellBook::cast has already asked, and destructiveWarning
+		// carries the bone paragraph, so the inner gate must not ask a second time
+		const QModelIndex made = tlCompileCollision( nif, nullptr,
+			targetObject( nif, index ), Spell::confirmedByBook() );
+		return made.isValid() ? made : index;
+	}
+};
+
+REGISTER_SPELL( spCompileCollision )
