@@ -7854,6 +7854,101 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_ARCHIVEBROWSE_TEST=<folder>): does loading a nif destroy a
+	 * browsed archive tree?
+	 *
+	 * bungo: "Loading any nif from the nif browser resets the NIF folder tree."
+	 *
+	 * WW_BROWSER_TEST below already covers the CONFIGURED tree, and it passes:
+	 * an unchanged (game, resource paths) signature takes a fast path that reuses
+	 * the tree entirely. That is why this needed a second harness rather than an
+	 * extra assertion — the reported symptom lives in the other mode, which the
+	 * first one never enters.
+	 *
+	 * Browse mode sets currentArchivePath, which makes `configuredIndexLive`
+	 * false forever, so the fast path can never be taken and every load fell
+	 * through to the full teardown. Two things are asserted, and the second is
+	 * the one that matters more: the tree survives, AND currentArchiveNames is
+	 * still populated. The teardown cleared that too, and
+	 * openArchiveFileString() returns immediately when it is empty — so the
+	 * first load from a browsed archive also made every later file in it
+	 * unopenable, which no amount of looking at the tree would have shown.
+	 *
+	 * Log: release/ww_archivebrowse_test.log
+	 */
+	if ( qEnvironmentVariableIsSet( "WW_ARCHIVEBROWSE_TEST" ) ) {
+		const QString browseTarget = qEnvironmentVariable( "WW_ARCHIVEBROWSE_TEST" );
+		QTimer::singleShot( 1500, skope, [skope, browseTarget]() {
+			QFile logf( QApplication::applicationDirPath() + "/ww_archivebrowse_test.log" );
+			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+			QTextStream log( &logf );
+			int checks = 0, fails = 0;
+			auto check = [&]( const QString & what, bool pass ) {
+				checks++;
+				if ( !pass ) fails++;
+				log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+			};
+			do {
+				if ( skope->dBrowser ) { skope->dBrowser->show(); skope->dBrowser->raise(); }
+				QApplication::processEvents();
+
+				log << "browsing: " << browseTarget << "\n";
+				skope->openArchive( browseTarget );
+				QApplication::processEvents();
+
+				QTreeView * view = skope->bsaView;
+				if ( !view || !view->model() ) { log << "no browser view\n"; break; }
+				const int rowsBefore = view->model()->rowCount();
+				const int namesBefore = skope->currentArchiveNames.size();
+				log << "archive path set: " << !skope->currentArchivePath.isEmpty()
+					<< ", top-level rows " << rowsBefore
+					<< ", archive names " << namesBefore << "\n";
+				/* A run that never entered browse mode proves nothing, so it is a
+				 * FAILURE and not a skip. The first version of this harness
+				 * `break`-ed here and reported "0 checks, 0 failures / PASS" --
+				 * a green result from a test that had not run.
+				 */
+				check( "the browse target opened in archive mode",
+					!skope->currentArchivePath.isEmpty() && rowsBefore > 0 );
+				if ( skope->currentArchivePath.isEmpty() || rowsBefore == 0 ) {
+					log << "nothing to test: point WW_ARCHIVEBROWSE_TEST at a Data "
+						   "folder or a .ba2\n";
+					break;
+				}
+
+				// a live handle into the tree: a real rebuild invalidates it
+				QPersistentModelIndex anchor( view->model()->index( 0, 0 ) );
+
+				/* Fire the exact signal a finished load fires. The bug is in the
+				 * handler connected to it, so this is the real path -- and it
+				 * avoids depending on which file happens to be in the archive.
+				 */
+				QString dummy;
+				emit skope->completeLoading( true, dummy );
+				QApplication::processEvents();
+				QEventLoop settle;
+				QTimer::singleShot( 400, &settle, &QEventLoop::quit );
+				settle.exec();
+
+				log << "after load: archive path set: " << !skope->currentArchivePath.isEmpty()
+					<< ", top-level rows " << view->model()->rowCount()
+					<< ", archive names " << skope->currentArchiveNames.size()
+					<< ", anchor still valid " << anchor.isValid() << "\n";
+
+				check( "the browsed tree survives a load", anchor.isValid() );
+				check( "the browser is still in archive mode",
+					!skope->currentArchivePath.isEmpty() );
+				check( "the archive can still be opened from",
+					skope->currentArchiveNames.size() == namesBefore
+					&& !skope->currentArchiveNames.isEmpty() );
+			} while ( false );
+			log << checks << " checks, " << fails << " failures\n";
+			log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+			logf.close();
+			QTimer::singleShot( 0, qApp, &QApplication::quit );
+		} );
+	}
+
 	// TEMP DIAGNOSTIC (WW_BROWSER_TEST=1): confirm the Available-NIFs tree keeps
 	// its expanded folders across the load-triggered repopulate. Expands the first
 	// folder, repopulates (exactly what completeLoading does), and checks the

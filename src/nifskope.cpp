@@ -1547,7 +1547,31 @@ NifSkope::NifSkope( bool background )
 		connect( options, &SettingsDialog::localeChanged, this, &NifSkope::sltLocaleChanged );
 		connect( this, &NifSkope::completeLoading, this,
 			[this]( bool success, const QString & ) {
-				if ( success ) QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
+				if ( !success )
+					return;
+				/* An explicitly opened archive or game folder is the USER'S tree,
+				 * not one we built, and loading a nif out of it must not replace
+				 * it with the configured "Available NIFs" tree.
+				 *
+				 * `configuredIndexLive` in populateConfiguredNifBrowserNow is
+				 * `currentArchive && currentArchivePath.isEmpty()`, so browse mode
+				 * can never take the cheap path — every load fell through to the
+				 * full teardown and rebuilt from the configured resource paths
+				 * instead. And the teardown does more than reset the view: it
+				 * deletes currentArchive and clears currentArchiveNames, after
+				 * which openArchiveFileString returns immediately on its
+				 * `currentArchiveNames.empty()` guard. So the first load from a
+				 * browsed archive also made every later file in it unopenable.
+				 *
+				 * Refresh, the source toggles and a settings change still rebuild:
+				 * those are deliberate gestures. This suppresses only the
+				 * load-triggered one. Guarding inside populateConfiguredNifBrowser
+				 * instead would strand nifBrowserPopulatePending, which is cleared
+				 * only once the real populate runs.
+				 */
+				if ( !currentArchivePath.isEmpty() )
+					return;
+				QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
 			} );
 		connect( qApp, &QApplication::lastWindowClosed, this, &NifSkope::exitRequested );
 	}
@@ -4454,6 +4478,21 @@ void NifSkope::populateConfiguredNifBrowserNow()
 		collectExpanded( bsaModel->invisibleRootItem() );
 	}
 
+	/* Expansion was preserved; where the user was LOOKING was not.
+	 *
+	 * Re-expanding the folders still leaves the view scrolled to the top with no
+	 * current row, so a rebuild that legitimately happens — Refresh, a source
+	 * toggle, or switching to a nif from a different game — still throws away
+	 * the reader's place in a tree that can be thousands of rows long.
+	 */
+	const int scrollWas = bsaView->verticalScrollBar() ? bsaView->verticalScrollBar()->value() : 0;
+	QString currentFolderWas;
+	if ( bsaView->currentIndex().isValid() && bsaView->model() == bsaProxyModel ) {
+		const QModelIndex srcCur = bsaProxyModel->mapToSource( bsaView->currentIndex() );
+		if ( QStandardItem * curItem = bsaModel->itemFromIndex( srcCur ) )
+			currentFolderWas = curItem->data( NifBrowserFolderPathRole ).toString();
+	}
+
 	if ( bsaModel->rowCount() > 0 )
 		bsaModel->removeRows( 0, bsaModel->rowCount() );
 	if ( bsaModel->columnCount() < 3 ) bsaModel->init();
@@ -4574,6 +4613,24 @@ void NifSkope::populateConfiguredNifBrowserNow()
 		const QModelIndex proxyIdx = bsaProxyModel->mapFromSource( it.value()->index() );
 		if ( proxyIdx.isValid() )
 			bsaView->expand( proxyIdx );
+	}
+
+	// ...and put the view back where it was looking. The current row first,
+	// because setting it scrolls; the scrollbar afterwards, deferred, because the
+	// view lays out its new rows asynchronously and a value set now is discarded.
+	if ( !currentFolderWas.isEmpty() ) {
+		auto restored = folders.constFind( currentFolderWas );
+		if ( restored != folders.constEnd() ) {
+			const QModelIndex proxyIdx = bsaProxyModel->mapFromSource( restored.value()->index() );
+			if ( proxyIdx.isValid() )
+				bsaView->setCurrentIndex( proxyIdx );
+		}
+	}
+	if ( scrollWas > 0 ) {
+		QTimer::singleShot( 0, bsaView, [this, scrollWas]() {
+			if ( bsaView && bsaView->verticalScrollBar() )
+				bsaView->verticalScrollBar()->setValue( scrollWas );
+		} );
 	}
 
 	nifBrowserTreeSignature = treeSignature;
