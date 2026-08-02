@@ -526,8 +526,12 @@ void wwGroupBreak( QToolBar * bar )
 {
 	if ( !bar )
 		return;
+	// Named so the duplicate-separator cleanup in initMenu can see past it: two
+	// groups meeting would otherwise contribute a rule each, with a pad between
+	// them stopping the collapse, and the row draws a double bar.
 	auto pad = [bar]() {
 		QWidget * gap = new QWidget( bar );
+		gap->setObjectName( QStringLiteral( "wwGroupPad" ) );
 		gap->setFixedWidth( 7 );
 		bar->addWidget( gap );
 	};
@@ -5135,7 +5139,51 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							!dup || dup->isHidden() );
 					}
 
-				// --- every viewport mode draws a DIFFERENT icon --------------
+					/* --- no double rules anywhere on the row -------------------
+					 *
+					 * wwGroupBreak wraps each rule in two spacer widgets, and
+					 * that silently defeated the duplicate-separator cleanup: it
+					 * only ever saw two rules as adjacent when NOTHING sat between
+					 * them, and now a pad always does. Two groups meeting each
+					 * contributed a boundary, and the row drew a double bar
+					 * between Object and Global.
+					 *
+					 * Checked across the WHOLE ROW rather than per toolbar,
+					 * because that is the unit anyone looks at - and because the
+					 * first fix over-corrected, stripping both sides of the
+					 * tMode/tRender boundary and leaving no rule there at all.
+					 * Leading and trailing are properties of the row.
+					 */
+					{
+						QStringList rowMarks;
+						for ( QToolBar * tb : { skope->ui->tFile, skope->ui->tMode,
+												skope->ui->tRender, skope->ui->tLOD,
+												skope->ui->tView } ) {
+							if ( !tb || !tb->isVisible() )
+								continue;
+							for ( QAction * a : tb->actions() ) {
+								auto * wa = qobject_cast<QWidgetAction *>( a );
+								QWidget * w = wa ? wa->defaultWidget() : nullptr;
+								if ( w && w->objectName() == QLatin1String( "wwGroupPad" ) )
+									continue;			// padding is not a mark
+								if ( !a->isVisible() )
+									continue;
+								rowMarks << ( a->isSeparator() ? QStringLiteral( "|" )
+															   : QStringLiteral( "x" ) );
+							}
+						}
+						const QString shape = rowMarks.join( QString() );
+						log << "row shape: " << shape << "\n";
+						check( "the row has controls on it", shape.contains( QLatin1Char( 'x' ) ) );
+						check( "no two group rules are adjacent",
+							!shape.contains( QStringLiteral( "||" ) ) );
+						check( "the row does not start with a rule",
+							!shape.startsWith( QLatin1Char( '|' ) ) );
+						check( "the row does not end with a rule",
+							!shape.endsWith( QLatin1Char( '|' ) ) );
+					}
+
+					// --- every viewport mode draws a DIFFERENT icon --------------
 					auto * modeBtn = skope->findChild<QToolButton *>(
 						QStringLiteral( "ViewportModeButton" ) );
 					check( "the mode button can be found by name", modeBtn != nullptr );
@@ -14441,19 +14489,72 @@ void NifSkope::initMenu()
 	for ( QToolBar * tb : { ui->tFile, ui->tRender, ui->tMode, ui->tView, ui->tLOD } ) {
 		if ( !tb )
 			continue;
-		bool lastWasSeparator = true;			// leading separators go too
+		/* The group-break PADDING is transparent to this.
+		 *
+		 * wwGroupBreak wraps every rule in two spacer widgets, and that broke
+		 * this cleanup the moment it was introduced: the loop only ever saw two
+		 * separators as adjacent when nothing sat between them, and now a pad
+		 * always does. The result was a visible double rule between Object and
+		 * Global - two groups meeting, each contributing its own boundary, with
+		 * nothing left to collapse them. Photographed, not deduced.
+		 *
+		 * So padding is skipped when deciding adjacency, and removed along with
+		 * the separator it belonged to; otherwise deleting the rule would leave
+		 * its two gaps behind as an unexplained hole.
+		 */
+		auto isPad = []( const QAction * a ) {
+			const QWidget * w = qobject_cast<const QWidgetAction *>( a )
+				? static_cast<const QWidgetAction *>( a )->defaultWidget() : nullptr;
+			return w && w->objectName() == QLatin1String( "wwGroupPad" );
+		};
+		/* Leading and trailing rules are only stripped at the ENDS OF THE ROW.
+		 *
+		 * These five toolbars sit side by side in one row, so "leading" and
+		 * "trailing" are properties of the row, not of each toolbar. Stripping
+		 * them per-toolbar deleted the boundary between tMode and tRender
+		 * entirely - Object and Global ended up with no rule between them at all,
+		 * because tMode's trailing one and tRender's leading one are the SAME
+		 * boundary and both were treated as an edge.
+		 *
+		 * tFile is first in the row and tView last; only those two have real
+		 * edges. Hardcoded because the row order is set deliberately (see the
+		 * insertToolBar in restoreUi) rather than discovered.
+		 */
+		const bool rowStart = ( tb == ui->tFile );
+		const bool rowEnd = ( tb == ui->tView );
+
+		bool lastWasSeparator = rowStart;		// leading rule goes only at the row's start
+		QList<QAction *> pending;				// pads seen since the last real item
 		const QList<QAction *> acts = tb->actions();
 		for ( QAction * a : acts ) {
-			if ( !a->isSeparator() ) {
-				lastWasSeparator = false;
+			if ( isPad( a ) ) {
+				pending << a;
 				continue;
 			}
-			if ( lastWasSeparator )
+			if ( !a->isSeparator() ) {
+				lastWasSeparator = false;
+				pending.clear();
+				continue;
+			}
+			if ( lastWasSeparator ) {
+				for ( QAction * p : pending )
+					tb->removeAction( p );
 				tb->removeAction( a );
+			}
+			pending.clear();
 			lastWasSeparator = true;
 		}
-		while ( !tb->actions().isEmpty() && tb->actions().last()->isSeparator() )
-			tb->removeAction( tb->actions().last() );
+		// trailing run: a rule at the end of the ROW divides it from nothing
+		while ( rowEnd ) {
+			QList<QAction *> tail = tb->actions();
+			int i = tail.size() - 1;
+			while ( i >= 0 && isPad( tail.at( i ) ) )
+				i--;
+			if ( i < 0 || !tail.at( i )->isSeparator() )
+				break;
+			for ( int k = tail.size() - 1; k >= i; k-- )
+				tb->removeAction( tail.at( k ) );
+		}
 	}
 
 	// Append Menu to tRender actions
