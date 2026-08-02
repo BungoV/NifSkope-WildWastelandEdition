@@ -12276,12 +12276,12 @@ void NifSkope::initDockWidgets()
 
 		// Blender-style viewport toggles, moved in from the toolbar
 		m->addSeparator();
-		aShowCursor->setIcon( tlMakeIcon( QStringLiteral( "cursor3d" ), icoColHdr ) );
+		aShowCursor->setIcon( tlMakeIcon( QStringLiteral( "cursor3d" ), icoColHdr, tlAccentColor() ) );
 		mCursor->removeAction( aShowCursor );
 		m->addAction( aShowCursor );
-		aGizmoHandles->setIcon( tlMakeIcon( QStringLiteral( "gizmo" ), icoColHdr ) );
+		aGizmoHandles->setIcon( tlMakeIcon( QStringLiteral( "gizmo" ), icoColHdr, tlAccentColor() ) );
 		m->addAction( aGizmoHandles );
-		QAction * aOrigins = new QAction( tlMakeIcon( QStringLiteral( "origins" ), icoColHdr ), tr( "Show Origins" ), this );
+		QAction * aOrigins = new QAction( tlMakeIcon( QStringLiteral( "origins" ), icoColHdr, tlAccentColor() ), tr( "Show Origins" ), this );
 		aOrigins->setCheckable( true );
 		aOrigins->setChecked( true );
 		aOrigins->setToolTip( tr( "Show origin points of selected nodes and dashed lines to their parents" ) );
@@ -12308,6 +12308,23 @@ void NifSkope::initDockWidgets()
 			persist( aOrigins,      QStringLiteral( "GLView/Display/ShowOrigins" ) );
 			persist( aBillboard,    QStringLiteral( "GLView/Display/Billboards" ) );
 			persist( aOrbitSel,     QStringLiteral( "GLView/Display/OrbitSelection" ) );
+		}
+
+		/* Everything else in here loses its colour.
+		 *
+		 * The .ui contributes resource icons to the Show Collision / Axes /
+		 * Nodes / Markers entries, and colour in an icon is a claim that the
+		 * thing matters more than its neighbours - a menu where several make
+		 * that claim makes none. The drawn glyphs above keep ONE red element
+		 * each, the one the glyph is actually about, which is the treatment
+		 * cursor3d already had and the only exception the set allows.
+		 */
+		for ( QAction * a : m->actions() ) {
+			if ( a->isSeparator() || a->icon().isNull() )
+				continue;
+			if ( a == aShowCursor || a == aGizmoHandles || a == aOrigins )
+				continue;						// these carry the accent on purpose
+			a->setIcon( wwGreyscaleIcon( a->icon() ) );
 		}
 
 		btn->setMenu( m );

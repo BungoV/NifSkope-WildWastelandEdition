@@ -47,7 +47,18 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //! @file timeline.h TimelineWidget, TimelineLanesView, TimelineGraphView, TimelineInspector
 
 //! Draw a crisp Blender-style toolbar icon (also used by the main-window toolbar)
-QIcon tlMakeIcon( const QString & id, const QColor & col );
+/*! Draw a toolbar glyph in  col, optionally with ONE element in  accent.
+ *
+ *  The whole icon set is greyscale on purpose - colour in an icon is a claim
+ *  that the thing matters more than its neighbours, and a row where everything
+ *  makes that claim makes none. The accent is the exception that keeps the rule
+ *  useful: a single element, the one the glyph is actually ABOUT, so the eye
+ *  lands on the 3D cursor's centre rather than on its crosshair arms.
+ *
+ *  Invalid accent (the default) means the focal element is drawn in  col like
+ *  everything else, so every existing call site is unchanged.
+ */
+QIcon tlMakeIcon( const QString & id, const QColor & col, const QColor & accent = QColor() );
 
 /*! Every icon id tlMakeIcon can draw.
  *
@@ -56,6 +67,14 @@ QIcon tlMakeIcon( const QString & id, const QColor & col );
  *  icon set has no folder to look in: without this list the only way to find out
  *  what glyphs exist is to read a 200-line if-else chain.
  */
+/*! The one accent colour the icon set is allowed to use.
+ *
+ *  Blender's 3D-cursor red, which this set already used for that glyph and
+ *  nowhere else. Shared so the accent cannot drift into three near-reds, and so
+ *  a call site can ask for "the highlight" without naming a literal.
+ */
+QColor tlAccentColor();
+
 QStringList tlIconNames();
 
 /*! Render every glyph into one labelled contact sheet.

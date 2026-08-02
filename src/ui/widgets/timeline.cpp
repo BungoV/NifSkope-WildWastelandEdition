@@ -90,9 +90,19 @@ float tlNiceStep( float raw )
  *  TimelineWidget - construction
  */
 
-//! Crisp Blender-style toolbar icons; unicode glyphs render badly in the Windows UI font
-QIcon tlMakeIcon( const QString & id, const QColor & col )
+QColor tlAccentColor()
 {
+	// Blender's 3D-cursor red, which this set already used for that glyph and
+	// nowhere else. One shared value so the accent cannot drift into three
+	// near-reds, and so a call site can ask for "the highlight" by name.
+	return QColor( 214, 66, 66 );
+}
+
+//! Crisp Blender-style toolbar icons; unicode glyphs render badly in the Windows UI font
+QIcon tlMakeIcon( const QString & id, const QColor & col, const QColor & accent )
+{
+	// The ONE element a glyph is about, when the caller asked for a highlight.
+	const QColor hi = accent.isValid() ? accent : col;
 	const int S = 64;
 	QPixmap pm( S, S );
 	pm.fill( Qt::transparent );
@@ -620,7 +630,7 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 	} else if ( id == QLatin1String( "cursor3d" ) ) {
 		// Blender 3D cursor: red/white dashed circle with crosshair ticks
 		p.setBrush( Qt::NoBrush );
-		const QColor red( 214, 66, 66 );
+		const QColor red = accent.isValid() ? accent : tlAccentColor();
 		const float r = 15.0f;
 		for ( int i = 0; i < 8; i++ ) {
 			QPen dp( ( i & 1 ) ? col : red, 6.0 );
@@ -654,9 +664,10 @@ QIcon tlMakeIcon( const QString & id, const QColor & col )
 		arrow( QPointF( 58, 32 ), QPointF( 48, 25 ), QPointF( 48, 39 ) );
 	} else if ( id == QLatin1String( "origins" ) ) {
 		// origin dot with a dashed relationship line to the parent
-		p.setBrush( col );
 		p.setPen( Qt::NoPen );
+		p.setBrush( hi );							// the origin: the glyph's subject
 		p.drawEllipse( QPointF( 20, 46 ), 8, 8 );
+		p.setBrush( col );							// the parent, and the link below
 		p.drawEllipse( QPointF( 48, 16 ), 5, 5 );
 		QPen dp( col, 4 );
 		dp.setStyle( Qt::DotLine );
@@ -1052,7 +1063,8 @@ bool tlWriteIconSheet( const QString & path, const QColor & fg, const QColor & b
 		 * at 64 px is an icon that does not work.
 		 */
 		const int big = zoom ? cell - 60 : 48;
-		const QIcon ico = tlMakeIcon( names.at( i ), fg );
+		// with the accent, so the sheet shows what the menus show
+		const QIcon ico = tlMakeIcon( names.at( i ), fg, tlAccentColor() );
 		p.drawPixmap( cx + 12, cy + 6, big, big, ico.pixmap( big, big ) );
 		p.drawPixmap( cx + big + 18, cy + big - 10, 16, 16, ico.pixmap( 16, 16 ) );
 
