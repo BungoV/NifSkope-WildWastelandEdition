@@ -1163,7 +1163,17 @@ QByteArray encodeSystemRoot( const HknpSystem & sys, HknpRagdollDataFixups * fix
 
 		const qsizetype n = qsizetype( b.motionIndex ) * 0x70;
 		setU32( inertias, n + 0x00, b.inertiaTag );
-		setFloat( inertias, n + 0x04, b.mass > 1.0e-12f ? 1.0f / b.mass : 0.0f );
+		/* The STORED inverse mass when mass has not been edited, because 1/(1/x)
+		 * is not x in float32 — three values in the corpus come back one ULP out,
+		 * which was six systems failing a byte-exact round trip for nothing.
+		 *
+		 * The test is the decode's own expression, so it is exact by construction:
+		 * if mass is still what invMassStored produced, nothing has touched it.
+		 */
+		const bool massUntouched = b.invMassStored > 1.0e-12f
+			&& b.mass == 1.0f / b.invMassStored;
+		setFloat( inertias, n + 0x04, massUntouched ? b.invMassStored
+			: ( b.mass > 1.0e-12f ? 1.0f / b.mass : 0.0f ) );
 		setFloat( inertias, n + 0x08, b.density );
 		setU32( inertias, n + 0x0c, 0x5f7ffff0u ); setU32( inertias, n + 0x10, 0x5f7ffff0u );
 		for ( int a = 0; a < 3; a++ ) {

@@ -1026,9 +1026,24 @@ HknpSystem hknpDecode( const QByteArray & data )
 			phys.layer = packedFilter & 0xffU;
 			phys.filterFlags = quint8( ( packedFilter >> 8 ) & 0xffU );
 			phys.filterGroup = quint16( packedFilter >> 16 );
-			quint16 materialId = r.u16( c + 0x12 );
-			if ( materialId < bodyMaterials.size() )
-				phys.materialCRC = bodyMaterials.at( materialId );
+			/* cinfo +0x12 IS NOT A MATERIAL INDEX. It is the body's slot in the
+			 * root's +0x60 shape list — measured equal to it on 178 of 178
+			 * multi-body systems, and the encoder has been writing it as that for
+			 * 833 byte-exact packfiles.
+			 *
+			 * Read as an index into bodyMaterials it was worse than useless,
+			 * because bodyMaterials is a CONCATENATION of every shape's own
+			 * hknpBSMaterialProperties table: a slot number from one shape indexes
+			 * into another shape's materials. Over the sampled corpus that put an
+			 * index past the end 18 times (harmless, the override was skipped),
+			 * landed on an equal value 7 times, and OVERWROTE a convex shape's own
+			 * material with one belonging to a different shape 5 times.
+			 *
+			 * So nothing resolves a body material here any more, and
+			 * applyResolvedBodyMaterial below leaves each convex shape the CRC in
+			 * its own header. If a per-body material override does exist in this
+			 * format, it is not this field and it has not been found.
+			 */
 			phys.hasMotion = ( r.u32( c + 0x0c ) != 0x7fffffffu );
 			phys.cinfoFlags = r.u32( c + 0x18 );
 			if ( phys.layer == 0 )
@@ -1081,6 +1096,7 @@ HknpSystem hknpDecode( const QByteArray & data )
 				qsizetype n = di + qsizetype( motionIndex ) * 0x70;
 				const float invMass = r.f32( n + 0x04 );
 				phys.mass = ( invMass > 1.0e-12f ) ? 1.0f / invMass : 0.0f;
+				phys.invMassStored = invMass;		// see HknpBodyPhys::invMassStored
 				phys.density = r.f32( n + 0x08 );
 				phys.invInertia = r.vec3( n + 0x20 );
 				phys.inertiaTag = r.u32( n + 0x00 );

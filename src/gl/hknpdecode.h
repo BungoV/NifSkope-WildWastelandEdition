@@ -350,6 +350,20 @@ struct HknpBodyPhys
 	 * were "constant" only because 37 actor skeletons agreed.
 	 */
 	quint32 inertiaTag = 0x00010000u, inertiaScale = 0x3f800000u;
+	/*! dyn_inertia +0x04 exactly as stored, because 1/(1/x) is not x.
+	 *
+	 * The file holds an INVERSE mass; `mass` above is 1/that, and an encoder
+	 * writing 1/mass takes a second reciprocal. In float32 that is not the
+	 * identity — measured over the corpus, 29 of 32 values survive and 3 come
+	 * back one ULP out, e.g. 0x3deede61 -> 0x3deede62 for an inverse mass of
+	 * 0.11663509. One byte, 2^-24 relative, and enough to stop six systems
+	 * round-tripping byte-exactly for no reason at all.
+	 *
+	 * The encoder writes this back whenever `mass` is still the value derived
+	 * from it, and falls back to the reciprocal once mass has been edited — so
+	 * an untouched body is exact and an edited one is still correct.
+	 */
+	float invMassStored = 0.0f;
 	Vector3 motionCom;
 	quint32 motionComW = 0;             //!< dyn_inertia +0x3c, the w lane beside it
 	/*! dyn_inertia +0x40: a unit quaternion, xyzw. Unit to 1e-5 on all 857.
