@@ -5295,6 +5295,41 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					// ---- 7. Material nests its legacy texture spells --------
 					check( "Material has a nested Textures submenu", sawTexturesUnderMaterial );
+
+					/* ---- 8. the verb row ------------------------------------
+					 * Copy/Paste/Duplicate Branch are HOISTED out of Block, not
+					 * copied into the top level, so exactly one of each must
+					 * exist afterwards. A duplicate would look identical in a
+					 * screenshot and leave two entries whose enabled state is
+					 * then checked independently.
+					 */
+					SpellBook verbBook( nif, iTarget );
+					skope->buildBlockListMenuExtras( verbBook, iTarget );
+					int copyBranchSeen = 0;
+					std::function<void( QMenu * )> countAll = [&]( QMenu * m ) {
+						for ( QAction * a : m->actions() ) {
+							if ( a->menu() ) countAll( a->menu() );
+							else if ( a->text() == QLatin1String( "Copy Branch" ) ) copyBranchSeen++;
+						}
+					};
+					countAll( &verbBook );
+					QStringList topFlat;			// leaf labels above the first separator
+					for ( QAction * a : verbBook.actions() ) {
+						if ( a->isSeparator() || a->menu() )
+							break;
+						topFlat << a->text();
+					}
+					log << "verb row: " << ( topFlat.isEmpty() ? QStringLiteral( "(empty)" )
+															   : topFlat.join( ", " ) ) << "\n";
+					log << "'Copy Branch' entries anywhere in the menu: " << copyBranchSeen << "\n";
+					check( "the verb row leads the menu", topFlat.size() >= 2 );
+					check( "Delete is one of the verbs",
+						std::any_of( topFlat.cbegin(), topFlat.cend(), []( const QString & t ) {
+							return t.startsWith( QLatin1String( "Delete " ) ); } ) );
+					check( "Rename is one of the verbs",
+						std::any_of( topFlat.cbegin(), topFlat.cend(), []( const QString & t ) {
+							return t.startsWith( QLatin1String( "Rename" ) ); } ) );
+					check( "Copy Branch was hoisted, not duplicated", copyBranchSeen == 1 );
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -14547,6 +14582,170 @@ void NifSkope::transferNormalsFromSelection( int target, const QVector<int> & so
 			.arg( worst, 0, 'f', 2 ) );
 }
 
+/*! Everything in the Block List's menu that is not a spell.
+ *
+ *  Split out of contextMenu so it can be built without a right-click: the verb
+ *  row and the trailing group are the parts a reader cannot check by eye, and
+ *  contextMenu ends in exec(), which blocks. See WW_MENUTREE_TEST.
+ *
+ *  \param book a SpellBook already built against  idx
+ */
+void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIndex & idx )
+{
+	if ( !nif )
+		return;
+	// the separator goes in afterwards, once it is known that something
+	// followed it — all three of these actions are conditional, and on a
+	// non-block row with no diff reference and an empty field clipboard none
+	// of them appear, leaving a rule at the bottom of the menu separating
+	// nothing from nothing
+	const int wasCount = contextBook.actions().size();
+	const int bn = nif->getBlockNumber( idx );
+
+	if ( bn >= 0 ) {
+		// Pin, against the same store the ★ button above the list writes.
+		// The pin lived entirely on that toolbar: the only menu entry for it
+		// was on the OTHER widget, the Block Details tree, which pins fields.
+		const bool pinned = blockListPins.contains( bn );
+		QAction * aPin = contextBook.addAction( pinned
+			? tr( "Unpin This Block" ) : tr( "Pin This Block" ) );
+		aPin->setToolTip( tr( "Pinned blocks are listed under the ★ button above the "
+			"block list, whatever the filter is showing" ) );
+		connect( aPin, &QAction::triggered, this, [this, bn]() {
+			if ( blockListPins.contains( bn ) )
+				blockListPins.remove( bn );
+			else
+				blockListPins.insert( bn );
+			updateBlockListNavigation( currentNifIndex() );
+		} );
+	}
+	if ( bn >= 0 && bn != nif->diffRefBlock ) {
+		QAction * aRef = contextBook.addAction( tr( "Set as Diff Reference" ) );
+		aRef->setToolTip( tr( "Highlight how any block you select differs from this one" ) );
+		connect( aRef, &QAction::triggered, this,
+			[this, pidx = QPersistentModelIndex( idx )]() { setDiffReference( pidx ); } );
+	}
+	if ( nif->diffRefBlock >= 0 ) {
+		QAction * aClr = contextBook.addAction(
+			tr( "Clear Diff Reference (%1)" ).arg( nif->diffRefBlock ) );
+		connect( aClr, &QAction::triggered, this, [this]() { clearDiffReference(); } );
+	}
+	// Offered until now only when you right-clicked a DIFFERING FIELD, and not
+	// from the list where you choose which block to compare in the first place
+	if ( nif->diffRefBlock >= 0 && !nif->diffRefValues.isEmpty() ) {
+		QAction * aTakeAll = contextBook.addAction(
+			tr( "Take All Reference Values (%1)" ).arg( nif->diffRefValues.size() ) );
+		aTakeAll->setToolTip( tr( "Copy every differing value from the reference block onto this one" ) );
+		connect( aTakeAll, &QAction::triggered, this, [this]() { wwTakeAllReferenceValues(); } );
+	}
+	if ( wwFieldClipboardValid() ) {
+		// paste onto the block-list multi-selection; fall back to the
+		// clicked block when nothing (else) is selected
+		QList<qint32> blocks;
+		if ( list->selectionModel() ) {
+			for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+				if ( pidx.column() != 0 )
+					continue;
+				QModelIndex src = ( pidx.model() == proxy ) ? proxy->mapTo( pidx ) : pidx;
+				int b = nif->getBlockNumber( src );
+				if ( b >= 0 && !blocks.contains( b ) )
+					blocks.append( b );
+			}
+		}
+		if ( blocks.isEmpty() && bn >= 0 )
+			blocks.append( bn );
+		if ( !blocks.isEmpty() ) {
+			QAction * aPaste = contextBook.addAction(
+				tr( "Paste %1 to %2 Block(s)" ).arg( wwFieldClipboardLabel() ).arg( blocks.size() ) );
+			connect( aPaste, &QAction::triggered, this,
+				[this, blocks]() { wwPasteFieldToBlocks( blocks ); } );
+		}
+	}
+	const QList<QAction *> acts = contextBook.actions();
+	if ( acts.size() > wasCount && wasCount > 0 )
+		contextBook.insertSeparator( acts.at( wasCount ) );
+
+	/* THE VERB ROW: the five things done most often, flat and first.
+	 *
+	 * These are the author's own frequency signal — they are where the
+	 * hotkeys are — and every one of them was two levels deep, or in Delete's
+	 * case not on this widget at all. Copy/Paste/Duplicate Branch are HOISTED
+	 * rather than duplicated: the same QAction is moved out of the Block
+	 * submenu, so it keeps its spell, its shortcut and its enabled state, and
+	 * there is still exactly one of each in the menu.
+	 *
+	 * Built last, and inserted at the front, so the trailing separator above
+	 * still lands on the index it was measured against.
+	 */
+	if ( bn >= 0 ) {
+		QList<QAction *> verbs;
+		for ( const char * spellName : { "Copy Branch", "Paste Branch", "Duplicate Branch" } ) {
+			QAction * a = contextBook.actionFor( QLatin1String( spellName ) );
+			if ( !a || !a->isVisible() )
+				continue;		// inapplicable here; leave it where it is
+			// take it out of whichever submenu currently holds it
+			for ( QAction * top : contextBook.actions() )
+				if ( top->menu() && top->menu()->actions().contains( a ) )
+					top->menu()->removeAction( a );
+			verbs << a;
+		}
+
+		QList<qint32> selBlocks;
+		if ( list->selectionModel() ) {
+			for ( const QModelIndex & sidx : list->selectionModel()->selectedIndexes() ) {
+				if ( sidx.column() != 0 )
+					continue;
+				QModelIndex src = ( sidx.model() == proxy ) ? proxy->mapTo( sidx ) : sidx;
+				const int b = nif->getBlockNumber( src );
+				if ( b >= 0 && !selBlocks.contains( b ) )
+					selBlocks.append( b );
+			}
+		}
+		// a right-click outside the selection targets what was clicked
+		if ( !selBlocks.contains( bn ) )
+			selBlocks = QList<qint32>{ bn };
+
+		/* Deleting blocks was reachable only from the viewport's Object ▸
+		 * Delete or the X key — so the one widget that can build a
+		 * multi-selection of blocks had no way to delete it.
+		 * deleteBlocksWithConfirm closes the branch, prunes dangling parents,
+		 * confirms once and pushes ONE undo step, which is what makes it
+		 * worth routing here rather than casting Remove Branch per row.
+		 */
+		QAction * aDel = new QAction(
+			tr( "Delete %n Block(s)", "", int( selBlocks.size() ) ), &contextBook );
+		aDel->setToolTip( tr( "Delete the selected blocks and everything under them, "
+			"in one undoable step" ) );
+		const QVector<int> victims( selBlocks.cbegin(), selBlocks.cend() );
+		connect( aDel, &QAction::triggered, this, [this, victims]() {
+			if ( ogl )
+				ogl->deleteBlocksWithConfirm( victims );
+		} );
+		verbs << aDel;
+
+		// the F2 / double-click path, which had no menu entry at all — the
+		// only discoverable route was a modal spell that does something
+		// subtly different
+		QAction * aRename = new QAction( tr( "Rename…\tF2" ), &contextBook );
+		aRename->setToolTip( tr( "Rename this block, propagating the new name where it is referenced" ) );
+		connect( aRename, &QAction::triggered, this,
+			[this, pidx = QPersistentModelIndex( idx )]() {
+				renameBlockListIndex( QModelIndex( pidx ), true );
+			} );
+		verbs << aRename;
+
+		QAction * before = contextBook.actions().value( 0 );
+		for ( QAction * v : verbs ) {
+			if ( before )
+				contextBook.insertAction( before, v );
+			else
+				contextBook.addAction( v );
+		}
+		if ( before )
+			contextBook.insertSeparator( before );
+	}
+}
+
 void NifSkope::contextMenu( const QPoint & pos )
 {
 	QModelIndex idx;
@@ -14706,99 +14905,8 @@ void NifSkope::contextMenu( const QPoint & pos )
 			}
 		}
 	}
-	if ( sender() == list && nif ) {
-		// the separator goes in afterwards, once it is known that something
-		// followed it — all three of these actions are conditional, and on a
-		// non-block row with no diff reference and an empty field clipboard none
-		// of them appear, leaving a rule at the bottom of the menu separating
-		// nothing from nothing
-		const int wasCount = contextBook.actions().size();
-		const int bn = nif->getBlockNumber( idx );
-
-		/* Delete and Rename, which the Block List has never offered.
-		 *
-		 * Deleting blocks was reachable only from the viewport's Object ▸ Delete
-		 * or the X key — so the one widget that can build a multi-selection of
-		 * blocks had no way to delete it. deleteBlocksWithConfirm closes the
-		 * branch, prunes dangling parents, confirms once and pushes ONE undo step,
-		 * which is what makes it worth routing here rather than casting Remove
-		 * Branch per row.
-		 *
-		 * Rename is the F2 / double-click path. It had no menu entry at all, so
-		 * the only discoverable route was a modal spell that does something
-		 * subtly different.
-		 */
-		if ( bn >= 0 ) {
-			QList<qint32> selBlocks;
-			if ( list->selectionModel() ) {
-				for ( const QModelIndex & sidx : list->selectionModel()->selectedIndexes() ) {
-					if ( sidx.column() != 0 )
-						continue;
-					QModelIndex src = ( sidx.model() == proxy ) ? proxy->mapTo( sidx ) : sidx;
-					const int b = nif->getBlockNumber( src );
-					if ( b >= 0 && !selBlocks.contains( b ) )
-						selBlocks.append( b );
-				}
-			}
-			// a right-click outside the selection targets what was clicked
-			if ( !selBlocks.contains( bn ) )
-				selBlocks = QList<qint32>{ bn };
-
-			QAction * aRename = contextBook.addAction( tr( "Rename…\tF2" ) );
-			aRename->setToolTip( tr( "Rename this block, propagating the new name where it is referenced" ) );
-			connect( aRename, &QAction::triggered, this,
-				[this, pidx = QPersistentModelIndex( idx )]() {
-					renameBlockListIndex( QModelIndex( pidx ), true );
-				} );
-
-			QAction * aDel = contextBook.addAction(
-				tr( "Delete %n Block(s)", "", int( selBlocks.size() ) ) );
-			aDel->setToolTip( tr( "Delete the selected blocks and everything under them, "
-				"in one undoable step" ) );
-			const QVector<int> victims( selBlocks.cbegin(), selBlocks.cend() );
-			connect( aDel, &QAction::triggered, this, [this, victims]() {
-				if ( ogl )
-					ogl->deleteBlocksWithConfirm( victims );
-			} );
-		}
-		if ( bn >= 0 && bn != nif->diffRefBlock ) {
-			QAction * aRef = contextBook.addAction( tr( "Set as Diff Reference" ) );
-			aRef->setToolTip( tr( "Highlight how any block you select differs from this one" ) );
-			connect( aRef, &QAction::triggered, this,
-				[this, pidx = QPersistentModelIndex( idx )]() { setDiffReference( pidx ); } );
-		}
-		if ( nif->diffRefBlock >= 0 ) {
-			QAction * aClr = contextBook.addAction(
-				tr( "Clear Diff Reference (%1)" ).arg( nif->diffRefBlock ) );
-			connect( aClr, &QAction::triggered, this, [this]() { clearDiffReference(); } );
-		}
-		if ( wwFieldClipboardValid() ) {
-			// paste onto the block-list multi-selection; fall back to the
-			// clicked block when nothing (else) is selected
-			QList<qint32> blocks;
-			if ( list->selectionModel() ) {
-				for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
-					if ( pidx.column() != 0 )
-						continue;
-					QModelIndex src = ( pidx.model() == proxy ) ? proxy->mapTo( pidx ) : pidx;
-					int b = nif->getBlockNumber( src );
-					if ( b >= 0 && !blocks.contains( b ) )
-						blocks.append( b );
-				}
-			}
-			if ( blocks.isEmpty() && bn >= 0 )
-				blocks.append( bn );
-			if ( !blocks.isEmpty() ) {
-				QAction * aPaste = contextBook.addAction(
-					tr( "Paste %1 to %2 Block(s)" ).arg( wwFieldClipboardLabel() ).arg( blocks.size() ) );
-				connect( aPaste, &QAction::triggered, this,
-					[this, blocks]() { wwPasteFieldToBlocks( blocks ); } );
-			}
-		}
-		const QList<QAction *> acts = contextBook.actions();
-		if ( acts.size() > wasCount && wasCount > 0 )
-			contextBook.insertSeparator( acts.at( wasCount ) );
-	}
+	if ( sender() == list )
+		buildBlockListMenuExtras( contextBook, idx );
 
 	// four of the actions built above carry a tooltip, and QMenu suppresses them
 	// unless asked; they have been dead text since they were written

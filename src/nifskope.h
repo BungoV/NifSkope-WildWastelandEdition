@@ -315,6 +315,11 @@ protected slots:
 	//! Display a context menu at the specified position
 	void contextMenu( const QPoint & pos );
 
+	//! The Block List menu's non-spell parts: the trailing group and the verb row.
+	//! Separate from contextMenu so a harness can build them without a right-click,
+	//! since contextMenu ends in exec() and blocks. See WW_MENUTREE_TEST.
+	void buildBlockListMenuExtras( SpellBook & contextBook, const QModelIndex & idx );
+
 	//! Block List ▸ Transfer Normals: the other selected meshes are the source,
 	//! \a target is written. Mapping and mix are asked for; the source is the
 	//! selection, so it is not.

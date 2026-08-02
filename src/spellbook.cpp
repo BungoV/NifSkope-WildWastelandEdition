@@ -404,6 +404,14 @@ void SpellBook::orderGroups()
 	}
 }
 
+QAction * SpellBook::actionFor( const QString & spellName ) const
+{
+	for ( auto it = Map.constBegin(); it != Map.constEnd(); ++it )
+		if ( it.value() && it.value()->name() == spellName )
+			return it.key();
+	return nullptr;
+}
+
 void SpellBook::registerSpell( SpellPtr spell )
 {
 	spells().append( spell );

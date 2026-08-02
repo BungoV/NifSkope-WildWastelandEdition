@@ -214,6 +214,16 @@ public:
 	//! From QMenu: Pops up the menu so that the action <i>act</i> will be at the specified global position <i>pos</i>
 	QAction * exec( const QPoint & pos, QAction * act = 0 );
 
+	/*! The action this book built for a named spell, or nullptr.
+	 *
+	 *  For callers that want to move an entry somewhere else — the Block List
+	 *  hoists Copy/Paste/Duplicate Branch out of their submenu into a flat verb
+	 *  row. Reparenting the action keeps it wired to its spell, so the hoisted
+	 *  copy casts and stays enable-checked like any other; matching on the
+	 *  action's TEXT would instead break the moment a label() changed.
+	 */
+	QAction * actionFor( const QString & spellName ) const;
+
 	//! Register spell with appropriate books
 	static void registerSpell( SpellPtr spell );
 
