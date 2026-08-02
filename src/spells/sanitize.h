@@ -77,12 +77,21 @@ public:
 
 	QModelIndex cast( NifModel * nif, const QModelIndex & ) override final;
 
+	/*! Which faults to report. These are tested with `invalid & P_x`, so they
+	 *  have to be BITS — and they were not.
+	 *
+	 *  Declared without values they came out 0, 1, 2, which makes
+	 *  `invalid & P_EMPTY` equal to `invalid & 0`: always false, for every
+	 *  caller, forever. The empty-path message below has never been reachable.
+	 *  P_ABSOLUTE and P_NO_EXT happened to work because 1 and 2 are distinct
+	 *  bits and P_DEFAULT is their OR.
+	 */
 	typedef enum
 	{
-		P_EMPTY,
-		P_ABSOLUTE,
-		P_NO_EXT,
-		P_DEFAULT = (P_ABSOLUTE | P_NO_EXT)
+		P_EMPTY    = 1 << 0,
+		P_ABSOLUTE = 1 << 1,
+		P_NO_EXT   = 1 << 2,
+		P_DEFAULT  = (P_ABSOLUTE | P_NO_EXT)
 	} InvalidPath;
 
 	static QString message()

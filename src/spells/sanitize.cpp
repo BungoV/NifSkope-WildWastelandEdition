@@ -733,15 +733,34 @@ void spErrorInvalidPaths::checkPath( NifModel * nif, const QModelIndex & idx, co
 		paths << nif->get<QString>( iString );
 
 	for ( const auto & path : paths ) {
-		if ( (invalid & P_EMPTY) && path.isEmpty() )
-			nif->logMessage( message(), tr( "[%1] '%2' cannot have empty filepaths." ).arg( i ).arg( name ) );
-		else if ( path.isEmpty() )
-			return;
+		/* `continue`, not `return`.
+		 *
+		 * This walks an ARRAY in the BSShaderTextureSet case, where unused slots
+		 * are normal and common. Returning on the first empty one abandoned every
+		 * remaining slot, so a broken path sitting after an empty slot was never
+		 * looked at.
+		 */
+		if ( path.isEmpty() ) {
+			if ( invalid & P_EMPTY )
+				nif->logMessage( message(),
+					tr( "[%1] '%2' cannot have empty filepaths." ).arg( i ).arg( name ) );
+			continue;
+		}
 
+		/* Two independent questions, not a choice between them.
+		 *
+		 * These were `if / else if`, so a path that is absolute AND has no
+		 * extension — "C:\textures\foo" — reported only the missing extension and
+		 * never the absolute path. Absolute is the more serious of the two: it
+		 * resolves on the machine that authored it and nowhere else.
+		 */
 		if ( (invalid & P_NO_EXT) && !path.contains( '.' ) )
-			nif->logMessage( message(), tr( "[%1] '%2' has a filepath without a file extension." ).arg( i ).arg( name ) );
-		else if ( (invalid & P_ABSOLUTE) && path.size() > 2 && path.at( 1 ) == ':' )
-			nif->logMessage( message(), tr( "[%1] '%2' has an absolute filepath." ).arg( i ).arg( name ) );
+			nif->logMessage( message(),
+				tr( "[%1] '%2' has a filepath without a file extension." ).arg( i ).arg( name ) );
+
+		if ( (invalid & P_ABSOLUTE) && path.size() > 2 && path.at( 1 ) == ':' )
+			nif->logMessage( message(),
+				tr( "[%1] '%2' has an absolute filepath." ).arg( i ).arg( name ) );
 	}
 }
 

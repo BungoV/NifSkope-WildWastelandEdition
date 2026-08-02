@@ -123,6 +123,43 @@ else
 	echo "  (no stock static at $STATIC — skipping the material case)"
 fi
 
+# --- case 3: a path that is BOTH absolute and extensionless -------------------
+#
+# spErrorInvalidPaths tested these two faults with `if / else if`, so a path that
+# had both reported only the missing extension and never the absolute path --
+# and absolute is the more serious of the two, because it resolves on the machine
+# that authored it and nowhere else. Exactly the case that hid the worse fault.
+#
+# Fails on the old code: it produces one finding, not two.
+echo
+echo "=== case 3: absolute AND extensionless ==="
+"$EXE" -no-gui set "$(winpath "$SRC")" -b "$SHADER" -f "Source Texture" \
+	-v 'C:\textures\effects\nowhere' -o "$(winpath "$TMP/both.nif")" > /dev/null 2>&1
+if [ -s "$TMP/both.nif" ]; then
+	rm -f "$LOG"
+	WW_UNFUCKPANEL_TEST=1 "$EXE" --port "$((PORT + 2))" "$(winpath "$TMP/both.nif")" > /dev/null 2>&1
+	if [ -f "$LOG" ]; then
+		clean="$(tr -d '\r' < "$LOG")"
+		printf '%s\n' "$clean" | sed -n '1,8p'
+		if printf '%s' "$clean" | grep -q "has an absolute filepath"; then
+			echo "  ok   the absolute path is reported"
+		else
+			echo "  FAIL: absolute path not reported — the else-if is back"
+			fails=$((fails+1))
+		fi
+		if printf '%s' "$clean" | grep -q "without a file extension"; then
+			echo "  ok   the missing extension is still reported alongside it"
+		else
+			echo "  FAIL: missing extension not reported"
+			fails=$((fails+1))
+		fi
+	else
+		echo "  FAIL: no log for case 3"; fails=$((fails+1))
+	fi
+else
+	echo "  FAIL: could not write the case 3 fixture"; fails=$((fails+1))
+fi
+
 echo
 echo "cases failed: $fails"
 [ "$fails" -eq 0 ]
