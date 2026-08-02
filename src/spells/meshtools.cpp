@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "ui/widgets/filebrowser.h"
 #include "ui/widgets/timeline.h"
 #include "glview.h"
+#include "nifskope.h"
 #include "io/material.h"
 
 #include <QApplication>
@@ -2395,3 +2396,89 @@ public:
 };
 
 REGISTER_SPELL( spEnforceNameAuthority )
+
+
+/*! Edit Material… and Select All Geometry Using This Material.
+ *
+ *  Right-clicking a shape offered six ways to check, compare and copy its
+ *  material and no way to OPEN it. Both of these already existed, as rows in the
+ *  Material Manager's own tree context menu — so the capability was there and
+ *  the block you would want it on was somewhere else.
+ *
+ *  tlOpenMaterialEditor is file-static and takes only (nif, parent, path), so
+ *  nothing needed hoisting; the spell supplies the path from the clicked block
+ *  instead of from a dock row's text column.
+ */
+class spEditMaterialFile final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Edit Material File…" ); }
+	QString page() const override final { return Spell::tr( "Material" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Open this block's .bgsm/.bgem in the material editor." );
+	}
+
+	static QString materialOf( const NifModel * nif, const QModelIndex & index )
+	{
+		const QString path = tlShaderMaterialPath( nif, tlShaderBlock( nif, index ) );
+		// mirrors the dock's own enablement: the row is offered only for a path
+		// that names a material file, not for any shader with a Name
+		return ( path.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
+			|| path.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive ) ) ? path : QString();
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return !materialOf( nif, index ).isEmpty();
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		tlOpenMaterialEditor( nif, nif->getWindow(), materialOf( nif, index ) );
+		// the editor writes a material FILE, never the NIF
+		return index;
+	}
+};
+
+REGISTER_SPELL( spEditMaterialFile )
+
+class spSelectMaterialUsers final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Select All Geometry Using This Material" ); }
+	QString page() const override final { return Spell::tr( "Material" ); }
+	bool constant() const override final { return true; }
+	QString hint() const override final
+	{
+		return Spell::tr( "Select every shape in the file whose shader points at the same material." );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return !tlShaderMaterialPath( nif, tlShaderBlock( nif, index ) ).isEmpty();
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		GLView * ogl = nullptr;
+		if ( auto * w = qobject_cast<NifSkope *>( nif->getWindow() ) )
+			ogl = w->getGLView();
+		if ( !ogl )
+			return index;		// headless, or no viewport to select in
+
+		const QString path = tlShaderMaterialPath( nif, tlShaderBlock( nif, index ) );
+		QSet<int> users;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			QModelIndex linkedShader = nif->getBlockIndex( nif->getLink( nif->getBlockIndex( b ), "Shader Property" ) );
+			if ( linkedShader.isValid() && tlShaderMaterialPath( nif, linkedShader ) == path )
+				users.insert( b );
+		}
+		// same active-block rule as the dock's row: the lowest block number, not
+		// the one clicked, so both routes leave the same selection behind
+		ogl->setObjectSelection( users, users.isEmpty() ? -1 : *users.constBegin() );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spSelectMaterialUsers )

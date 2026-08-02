@@ -1,5 +1,105 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-02f — The Block List menu gets a shape, and a harness finds two real bugs
+
+**A taxonomy separate from `page()`.** 46 top-level entries on a block row are
+now 13 submenus, five flat verbs and a trailing group. This could not be done by
+editing `page()`: that string is also the CLI namespace (`-s "Page/Name"`), the
+id `SpellBook::lookup` parses, the Unfuck dialog's membership test, the switch
+deciding whether a cast suppresses model signals, and the prefix of a dozen
+QSettings keys holding the user's last-used texture path and Simplify settings.
+So `page()` is frozen as the internal id and **`Spell::group()`** is what the
+menu is built from — 106 spells declare one. **`Spell::label()`** is the same
+argument for leaf text: four spells are named "Choose" and three "Update", told
+apart only by living on different pages, and merging pages puts them side by
+side.
+
+`checkActions` no longer scans 200 spells per action looking for a name+page
+match. It uses the `QAction -> Spell` map that already existed — faster, but
+mainly *unambiguous*: two spells sharing a name on one page used to overwrite
+each other's enabled state.
+
+**Three deletions, each an entry that could not do what it said.** Create Convex
+Hull / Convex Decomposition Collision were one spell with a checkbox pre-ticked,
+and each wrote `Enable CoACD` into **persistent** settings — picking one silently
+reconfigured Create Convex Shapes and the Collision Manager for every later file.
+Fix Bip01 read `:/res/skel.dat`; Scan Bip01 was the tool that wrote it and opened
+that Qt resource `WriteOnly`, which cannot succeed, and its registration had been
+commented out for as long as the file has been in the repo. And two whole-file
+spells that ignored their index parameter — `Enforce Node Name Authority` did not
+even name it — appeared on every block row and then rewrote the entire file.
+
+**The verb row.** Copy / Paste / Duplicate Branch, Delete and Rename now lead the
+menu. The three branch spells are *hoisted*, not copied: the same `QAction` moves
+out of the Block submenu and keeps its spell, shortcut and enable checking.
+
+**Select & View**, so the menu can build the multi-selection three of its own
+entries consume. Select Branch and Select Same Type are new code — neither
+existed anywhere in the tree; the only same-type machinery was a filter, which
+hides rows rather than selecting them. Reading the implementations corrected the
+plan three times: there is no `restoreAllHidden` (it is `restoreAllVisibility`,
+and the difference is real — `unhideAll` leaves a solo'd node hidden);
+`hideSelected` does not read `objSelection` despite the name; and Join silently
+no-ops unless a BSTriShape is active with two or more selected, so that condition
+is now on the action's enabled state.
+
+**`Edit Material File…`** and **`Select All Geometry Using This Material`**.
+Right-clicking a shape offered six ways to check, compare and copy a material and
+no way to open it. Both already existed as rows in the Material Manager's own
+tree menu — the capability was there, the block you would want it on was not.
+
+### What the harnesses found that reading could not
+
+`tests/spells/menu_taxonomy.sh` (20 checks) builds a real `SpellBook` and reads
+the menu back. It caught two bugs in its own subject: `/` is the group path
+separator, so **"Import / Export" built a submenu called "Import " holding one
+called " Export"** — and every other check still passed, because a title nobody
+is looking for is a title nobody notices. And Qt eats `&` as a mnemonic marker,
+so the two ordering passes compared different forms of the same title and the one
+group with an `&` was ordered by the first pass and abandoned by the second.
+
+`tests/spells/collision_undo.sh` (12 checks) was previously abandoned as needing
+"a fixture from a game that authors editable rigid bodies — Skyrim or Oblivion",
+since FO4 ships only compiled collision. But the body is already in the file,
+compiled: **Decompile Compiled Collision is a pure data transform and runs
+headless**, so one CLI cast builds the fixture from a stock FO4 mesh. No second
+game required.
+
+It then found two defects:
+
+**`Havok Filter` is a mixin.** `nifxml.cpp` flattens it into its parent, so no
+row of that name exists and `getIndex( info, "Havok Filter" )` returns an invalid
+index on every Skyrim, FO4, FO76 and Starfield file — and invalid parents fail
+*silently*, with `get` returning `T()` and `set` returning false, nothing logged.
+It survives only in `bhkRigidBodyCInfo550_660` (Oblivion, FO3), which is why it
+works on the two oldest games. Eleven sites were wrong: **Compile Collision
+hard-coded layer Static/0/0 into every packfile it wrote**, Decompile decoded the
+layer, flags and group and then discarded all three, the Layer combo could not
+write at all, Create Collision ignored the layer the user picked, and
+`Set Collision Layer from Motion` was never applicable to anything.
+
+**`applyPhysics` read its widgets from inside the snapshot.** `nifSnapshotOp`
+serialises the whole model before running its operation, and that is enough to
+put the panel's editors back to what is still in the file — so a lambda asking
+`mass->value()` got the *old* mass and wrote it straight back. All twenty fields
+did. The edit produced a well-formed undo step containing no change, which is
+worse than not working, because the history says something happened.
+`applyLayerSelection` never had the bug: it takes its value out of the combo
+before opening the snapshot.
+
+The harness got two things wrong first, both worth recording: picking a combo row
+by the *model's* layer can land on the row already showing, because the panel
+substitutes a guess when the layer is Unidentified — the write never fires and a
+working editor looks broken. And undo depth is `undoStack->index()`, not
+`count()`: a push after an undo truncates the redo tail before adding.
+
+### Not done
+
+Batch 6 is partial — the Import/Export rows (OBJ, glTF), `Compile Collision` /
+`Check Collision`, and the `Open in <Manager>` row are not built. Batch 7, the
+`WWSpellPalette` command palette, and batch 8's two deferred items are not
+started.
+
 ## 2026-08-02e — The workspace consistency audit is finished
 
 All twelve items are implemented. The last three were the ones about *looking*
