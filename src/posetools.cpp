@@ -310,6 +310,17 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 		const QString selectedPose = poseList->currentItem()
 			? poseList->currentItem()->data( Qt::UserRole ).toString() : QString();
 
+		/* ...and which BONE was selected, which had no equivalent.
+		 *
+		 * Picking a bone in the viewport emits poseBonePicked and then clicked;
+		 * clicked reaches NifSkope::select -> currentNifIndexChanged -> this
+		 * refresh(), which opens with boneList->clear(). So picking a bone in the
+		 * 3D view un-selected it in the panel, every time. The pose list directly
+		 * above was already stashed and restored by name; the bone list never was.
+		 */
+		const QString selectedBone = boneList->currentItem()
+			? boneList->currentItem()->data( Qt::UserRole ).toString() : QString();
+
 		const QVector<int> bones = AnimSetup::poseBoneNodes( m );
 		const QString filter = boneSearch->text().trimmed();
 		for ( int b : bones ) {
@@ -324,6 +335,8 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 			item->setData( Qt::UserRole, name );	// resolve to a block on click
 			if ( pinned )
 				item->setForeground( QBrush( QColor( 0x9a, 0x9a, 0xa2 ) ) );
+			if ( !selectedBone.isEmpty() && name == selectedBone )
+				boneList->setCurrentItem( item );
 		}
 
 		// library = the .xml pose files in <library>/Poses (base name shown, full

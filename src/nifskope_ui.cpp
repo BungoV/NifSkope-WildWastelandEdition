@@ -14205,6 +14205,53 @@ void NifSkope::contextMenu( const QPoint & pos )
 		// nothing from nothing
 		const int wasCount = contextBook.actions().size();
 		const int bn = nif->getBlockNumber( idx );
+
+		/* Delete and Rename, which the Block List has never offered.
+		 *
+		 * Deleting blocks was reachable only from the viewport's Object ▸ Delete
+		 * or the X key — so the one widget that can build a multi-selection of
+		 * blocks had no way to delete it. deleteBlocksWithConfirm closes the
+		 * branch, prunes dangling parents, confirms once and pushes ONE undo step,
+		 * which is what makes it worth routing here rather than casting Remove
+		 * Branch per row.
+		 *
+		 * Rename is the F2 / double-click path. It had no menu entry at all, so
+		 * the only discoverable route was a modal spell that does something
+		 * subtly different.
+		 */
+		if ( bn >= 0 ) {
+			QList<qint32> selBlocks;
+			if ( list->selectionModel() ) {
+				for ( const QModelIndex & sidx : list->selectionModel()->selectedIndexes() ) {
+					if ( sidx.column() != 0 )
+						continue;
+					QModelIndex src = ( sidx.model() == proxy ) ? proxy->mapTo( sidx ) : sidx;
+					const int b = nif->getBlockNumber( src );
+					if ( b >= 0 && !selBlocks.contains( b ) )
+						selBlocks.append( b );
+				}
+			}
+			// a right-click outside the selection targets what was clicked
+			if ( !selBlocks.contains( bn ) )
+				selBlocks = QList<qint32>{ bn };
+
+			QAction * aRename = contextBook.addAction( tr( "Rename…\tF2" ) );
+			aRename->setToolTip( tr( "Rename this block, propagating the new name where it is referenced" ) );
+			connect( aRename, &QAction::triggered, this,
+				[this, pidx = QPersistentModelIndex( idx )]() {
+					renameBlockListIndex( QModelIndex( pidx ), true );
+				} );
+
+			QAction * aDel = contextBook.addAction(
+				tr( "Delete %n Block(s)", "", int( selBlocks.size() ) ) );
+			aDel->setToolTip( tr( "Delete the selected blocks and everything under them, "
+				"in one undoable step" ) );
+			const QVector<int> victims( selBlocks.cbegin(), selBlocks.cend() );
+			connect( aDel, &QAction::triggered, this, [this, victims]() {
+				if ( ogl )
+					ogl->deleteBlocksWithConfirm( victims );
+			} );
+		}
 		if ( bn >= 0 && bn != nif->diffRefBlock ) {
 			QAction * aRef = contextBook.addAction( tr( "Set as Diff Reference" ) );
 			aRef->setToolTip( tr( "Highlight how any block you select differs from this one" ) );

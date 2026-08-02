@@ -1582,9 +1582,18 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 				return;
 			from = tlNormalizeResourcePath( from );
 			to = tlNormalizeResourcePath( to );
+			/* Match on the NORMALISED path, because `from` was normalised.
+			 *
+			 * The tree displays the raw stored path, and tlNormalizeResourcePath
+			 * lowercases it and turns "/" into "\". `from` and `to` go through
+			 * that two lines above, so a NIF that stores "textures/effects/x.dds"
+			 * never matched a prefix of "textures\" — the retarget silently did
+			 * nothing on exactly the files whose separators needed fixing.
+			 */
 			const int n = bulkRewritePaths( [from, to]( const QString & path ) {
-				return path.startsWith( from, Qt::CaseInsensitive )
-					? to + path.mid( from.length() ) : path;
+				const QString norm = tlNormalizeResourcePath( path );
+				return norm.startsWith( from, Qt::CaseInsensitive )
+					? to + norm.mid( from.length() ) : path;
 			} );
 			Message::info( panel, QObject::tr( "Retargeted %1 path(s)." ).arg( n ) );
 		} );
