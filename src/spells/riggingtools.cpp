@@ -4441,8 +4441,8 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	layout->setContentsMargins( 6, 6, 6, 6 );
 	layout->setSpacing( 5 );
 
-	auto * targetHeading = new QLabel( QObject::tr( "Primary receiver mesh" ), panel );
-	targetHeading->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
+	auto * targetHeading = wwHeading( QObject::tr( "Primary receiver mesh" ), panel );
+
 	layout->addWidget( targetHeading );
 	auto * targetStatus = new QLabel( QObject::tr( "Select a skinned FO4 BSTriShape." ), panel );
 	targetStatus->setWordWrap( true );
@@ -4669,8 +4669,8 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	overlayLayout->addLayout( overlayStyle );
 	layout->addWidget( overlayGroup );
 
-	auto * transferHeading = new QLabel( QObject::tr( "Donor transfer" ), panel );
-	transferHeading->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
+	auto * transferHeading = wwHeading( QObject::tr( "Donor transfer" ), panel );
+
 	layout->addWidget( transferHeading );
 	auto * primary = new QPushButton( QObject::tr( "Transfer Bones and Weights..." ), panel );
 	primary->setObjectName( QStringLiteral( "RiggingTransferButton" ) );
@@ -6417,8 +6417,8 @@ QDockWidget * tlCreateVertexPaintManagerDock( NifModel * nif, QMainWindow * mw, 
 	layout->setContentsMargins( 6, 6, 6, 6 );
 	layout->setSpacing( 5 );
 
-	auto * targetHeading = new QLabel( QObject::tr( "Active paint mesh" ), panel );
-	targetHeading->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
+	auto * targetHeading = wwHeading( QObject::tr( "Active paint mesh" ), panel );
+
 	layout->addWidget( targetHeading );
 	auto * targetStatus = new QLabel( QObject::tr( "Select a BSTriShape." ), panel );
 	targetStatus->setObjectName( QStringLiteral( "VertexPaintTargetStatus" ) );

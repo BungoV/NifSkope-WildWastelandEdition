@@ -96,9 +96,8 @@ namespace
 //! Section-heading label, matching the other manager docks.
 QLabel * heading( const QString & text, QWidget * parent )
 {
-	auto * l = new QLabel( text, parent );
-	l->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
-	return l;
+	// the shared one, so all eight docks cannot drift apart again
+	return wwHeading( text, parent );
 }
 
 enum Roles

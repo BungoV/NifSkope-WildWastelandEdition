@@ -932,6 +932,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		fr2->addWidget( btnRefresh );
 		QToolButton * btnMore = new QToolButton( panel );
 		btnMore->setText( QObject::tr( "More..." ) );
+		btnMore->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 8px" ) ) );
 		btnMore->setPopupMode( QToolButton::InstantPopup );
 		QMenu * moreMenu = new QMenu( btnMore );
 		QAction * retargetAction = moreMenu->addAction( QObject::tr( "Retarget Folder..." ) );
@@ -954,7 +955,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 		listLay->setSpacing( 4 );
 
 		QLabel * inventoryHeader = new QLabel( QObject::tr( "Materials in file" ), listPane );
-		inventoryHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; padding: 4px 2px; }" ) );
+		inventoryHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
 		listLay->addWidget( inventoryHeader );
 
 		// Materials own their textures as native tree children: same expand
@@ -994,7 +995,7 @@ QDockWidget * tlCreateMatTexManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 
 		QHBoxLayout * previewHeaderRow = new QHBoxLayout;
 		QLabel * previewHeader = new QLabel( QObject::tr( "Texture Preview" ), previewContainer );
-		previewHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; padding: 4px 2px; }" ) );
+		previewHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
 		QToolButton * btnDetach = new QToolButton( previewContainer );
 		btnDetach->setText( QObject::tr( "Detach" ) );
 		btnDetach->setToolTip( QObject::tr( "Pop the texture preview out into its own window" ) );

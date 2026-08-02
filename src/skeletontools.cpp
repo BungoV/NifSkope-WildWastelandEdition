@@ -312,23 +312,6 @@ namespace
 
 enum SkelFilter { FilterAll = 0, FilterBones, FilterDeforming, FilterUnused };
 
-/*! Boxed filter-button styling.
- *
- * nifskope_ui.cpp's wwBoxedButtonQss() is `static`, so it cannot be shared;
- * this reproduces the same look from the same source of truth. Every colour
- * comes from skinVars via wwSkinColor() — no literals, per the skin rule.
- */
-QString skelBoxedButtonQss()
-{
-	return QStringLiteral(
-		"QToolButton { background: %1; color: %2; border: 1px solid %3;"
-		" border-radius: 3px; padding: 3px 8px; }"
-		"QToolButton:hover { background: %4; }"
-		"QToolButton:checked { background: %5; color: %6; border-color: %7; }" )
-		.arg( wwSkinColor( "bgBtn" ), wwSkinColor( "text" ), wwSkinColor( "border" ),
-			wwSkinColor( "bgBtnHover" ), wwSkinColor( "accentBg" ),
-			wwSkinColor( "accentText" ), wwSkinColor( "accent" ) );
-}
 
 } // namespace
 
@@ -378,7 +361,9 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 		b->setCheckable( true );
 		b->setChecked( i == FilterAll );
 		b->setAutoRaise( false );
-		b->setStyleSheet( skelBoxedButtonQss() );
+		// the shared look -- skelBoxedButtonQss reinstated the borders the
+		// rationale beside wwBoxedButtonQss says were deliberately removed
+		b->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 8px" ) ) );
 		b->setObjectName( QStringLiteral( "SkeletonFilter%1" ).arg( i ) );
 		filterRow->addWidget( b );
 		filterButtons << b;

@@ -5496,6 +5496,7 @@ QDockWidget * tlCreateUVManagerDock( NifModel * nif, QMainWindow * mw, GLView * 
 	auto * snapMenuButton = new QToolButton( panel );
 	snapMenuButton->setText( QStringLiteral( "▾" ) );
 	snapMenuButton->setPopupMode( QToolButton::InstantPopup );
+	snapMenuButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 8px" ) ) );
 	snapMenuButton->setToolTip( QObject::tr( "Snap settings" ) );
 	auto * snapMenu = new QMenu( snapMenuButton );
 	{
@@ -5581,6 +5582,7 @@ QDockWidget * tlCreateUVManagerDock( NifModel * nif, QMainWindow * mw, GLView * 
 	bar1->addSpacing( 8 );
 	auto * unwrapButton = new QToolButton( panel );
 	unwrapButton->setText( QObject::tr( "Unwrap ▾" ) );
+	unwrapButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 8px" ) ) );
 	unwrapButton->setToolTip( QObject::tr( "Unwrap the selected geometry (U)" ) );
 	QObject::connect( unwrapButton, &QToolButton::clicked, view, [view, unwrapButton]() {
 		view->showUnwrapMenu( unwrapButton->mapToGlobal( QPoint( 0, unwrapButton->height() ) ) );

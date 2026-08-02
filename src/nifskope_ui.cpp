@@ -445,6 +445,13 @@ QString wwSelectionTreeQss()
 			  wwSkinColor( "selBgInactive" ), wwSkinColor( "selTextInactive" ) );
 }
 
+QLabel * wwHeading( const QString & text, QWidget * parent )
+{
+	auto * l = new QLabel( text, parent );
+	l->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
+	return l;
+}
+
 /*! The toolbar-selector look: the viewport mode dropdown, the mode row's menu
  * buttons, and the Panels / Workspaces selectors. One definition so the sites
  * cannot drift apart — they were three copies of the same greys.
@@ -459,7 +466,7 @@ QString wwSelectionTreeQss()
  * Not weight 600 either — bold labels on every control is the same problem in
  * type.
  */
-static QString wwBoxedButtonQss( const QString & padding )
+QString wwBoxedButtonQss( const QString & padding )
 {
 	return QStringLiteral(
 		"QToolButton { padding: %1; border: 1px solid transparent; border-radius: 3px;"

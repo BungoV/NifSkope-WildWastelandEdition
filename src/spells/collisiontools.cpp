@@ -2075,7 +2075,7 @@ private:
 		root->addLayout( display );
 
 		inventoryHeader = new QLabel( tr( "Collision in file" ), this );
-		inventoryHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; padding: 4px 2px; }" ) );
+		inventoryHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
 		root->addWidget( inventoryHeader );
 
 		tree = new QTreeWidget( this );
@@ -2131,6 +2131,7 @@ private:
 		donor->setToolTip( tr( "Copy collision from another NIF onto the selected target node" ) );
 		auto * more = new QToolButton( this );
 		more->setText( tr( "More..." ) );
+		more->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 8px" ) ) );
 		more->setPopupMode( QToolButton::InstantPopup );
 		auto * moreMenu = new QMenu( more );
 		auto * reverseAction = moreMenu->addAction( tr( "Create Editable Mesh Copy" ) );

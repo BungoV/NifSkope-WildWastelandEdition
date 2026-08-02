@@ -26,6 +26,7 @@ BSD License - see nifskope.h
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QToolButton>
 #include <QSlider>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -56,9 +57,8 @@ namespace
 //! Section-heading label, matching the other manager docks.
 QLabel * heading( const QString & text, QWidget * parent )
 {
-	auto * l = new QLabel( text, parent );
-	l->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
-	return l;
+	// the shared one, so all eight docks cannot drift apart again
+	return wwHeading( text, parent );
 }
 
 //! Settings key for the NifSkope library root. Shared with the General →
@@ -126,7 +126,18 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 
 	// bring in a skeleton (or another armour piece) from a file OR a game archive
 	// (the archive path reuses the existing NIF Browser)
-	auto * loadSkelBtn = new QPushButton( QObject::tr( "Load skeleton..." ), panel );
+	/* A QToolButton with InstantPopup, not a QPushButton with setMenu.
+	 *
+	 * A QPushButton cannot take the shared boxed-button sheet at all -- it
+	 * styles QToolButton. And InstantPopup rather than MenuButtonPopup for a
+	 * specific reason: this button has NO clicked() connection, only actions on
+	 * its menu, so splitting it would leave the main segment dead.
+	 */
+	auto * loadSkelBtn = new QToolButton( panel );
+	loadSkelBtn->setText( QObject::tr( "Load skeleton..." ) );
+	loadSkelBtn->setPopupMode( QToolButton::InstantPopup );
+	loadSkelBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
+	loadSkelBtn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 8px" ) ) );
 	loadSkelBtn->setObjectName( QStringLiteral( "PoseLoadSkeletonButton" ) );
 	loadSkelBtn->setToolTip( QObject::tr(
 		"Merge a skeleton (or armour piece) from another NIF — from a file or a "
