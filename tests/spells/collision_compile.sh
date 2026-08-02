@@ -1,0 +1,89 @@
+#!/bin/bash
+#
+# Compile Collision, as a spell, headless.
+#
+# WHY THIS EXISTS
+#
+# compileSelectedCollision was a private member of CollisionManagerPanel, so
+# nothing outside a running dock could execute it. That is how it came to write
+# layer Static / flags 0 / group 0 into every packfile it produced: it read the
+# collision filter through nif->getIndex( info, "Havok Filter" ), which returns
+# an INVALID index on every Fallout 4 file because HavokFilter is a mixin and is
+# flattened into its parent. The three reads fell through to their fallbacks
+# (1u, 0u, 0u) and nobody could see it.
+#
+# The existing self-check inside Compile compares the encoded triangle count
+# with the decoded one. That number is invariant under every physics value the
+# function writes, so it cannot fail on this bug — or on a wrong material, a
+# dropped transform, or a scale error.
+#
+# Compile is now a spell, which is what makes it reachable from the CLI, which
+# is what makes this test possible at all.
+#
+# WHAT IS MEASURED
+#
+#   1. the fixture really has an editable collision object      <- not vacuous
+#   2. the layer really is 31 before compiling                  <- not vacuous
+#   3. Compile produces a bhkPhysicsSystem
+#   4. THE LAYER SURVIVES: the compiled body reads 31
+#   5. the editable collision blocks are gone
+#   6. exactly one compiled collision object replaced them
+#
+# Check 4 is the point. Layer 31 (STAIRHELPER) is chosen deliberately: it is not
+# the 1u fallback the broken code produced, and it is above the low-byte value
+# that the decoder's legacy-offset compatibility path would substitute — so
+# neither a regression nor a decode quirk can make it pass by accident.
+#
+# NOTE ON PORTS: not needed, this is headless — the CLI takes no port.
+#
+# USAGE
+#   bash tests/spells/collision_compile.sh
+
+set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+NS="${EXE:-$ROOT/release/NifSkope.exe}"
+SRC="${SRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/35CourtSign/35CourtSign01.nif}"
+W="$(mktemp -d)"
+trap 'rm -rf "$W"' EXIT
+
+[ -x "$NS" ] || { echo "no NifSkope.exe at $NS"; exit 2; }
+
+checks=0; fails=0
+check() { checks=$((checks+1)); if [ "$2" = "1" ]; then echo "  ok   $1"; else echo "  FAIL $1"; fails=$((fails+1)); fi; }
+
+# --- build an editable fixture from a stock compiled mesh --------------------
+coll=$("$NS" -no-gui list "$SRC" 2>/dev/null | sed -n 's/^\[\([0-9]*\)\] bhkNPCollisionObject.*/\1/p' | head -1)
+[ -n "$coll" ] || { echo "FAIL: $SRC has no compiled collision to decompile"; exit 1; }
+"$NS" -no-gui cast "$SRC" -s "Havok/Decompile Compiled Collision" -b "$coll" -o "$W/e.nif" >/dev/null 2>&1
+
+body=$("$NS" -no-gui list "$W/e.nif" 2>/dev/null | sed -n 's/^\[\([0-9]*\)\] bhkRigidBody.*/\1/p' | head -1)
+obj=$( "$NS" -no-gui list "$W/e.nif" 2>/dev/null | sed -n 's/^\[\([0-9]*\)\] bhkCollisionObject.*/\1/p' | head -1)
+echo "fixture: decompiled [$coll] -> bhkRigidBody [$body], bhkCollisionObject [$obj]"
+check "the fixture has an editable collision object" "$([ -n "$body" ] && [ -n "$obj" ] && echo 1 || echo 0)"
+[ -n "$body" ] && [ -n "$obj" ] || { echo "$checks checks, $((fails)) failures"; echo FAIL; exit 1; }
+
+# STAIRHELPER, deliberately not the 1u the broken code fell back to
+"$NS" -no-gui set "$W/e.nif" -b "$body" -f "Rigid Body Info/Layer" -v 31 -o "$W/f.nif" >/dev/null 2>&1
+was=$("$NS" -no-gui get "$W/f.nif" -b "$body" -f "Rigid Body Info/Layer" 2>/dev/null | tr -d '\r')
+check "the layer is 31 before compiling" "$([ "$was" = "31" ] && echo 1 || echo 0)"
+
+# --- the operation under test -----------------------------------------------
+"$NS" -no-gui cast "$W/f.nif" -s "Havok/Compile Collision" -b "$obj" -o "$W/c.nif" >/dev/null 2>&1
+[ -f "$W/c.nif" ] || { echo "  FAIL Compile produced no file"; echo "$((checks+1)) checks, $((fails+1)) failures"; echo FAIL; exit 1; }
+
+sys=$("$NS" -no-gui list "$W/c.nif" 2>/dev/null | grep -c "bhkPhysicsSystem")
+check "Compile produced a bhkPhysicsSystem" "$([ "$sys" -ge 1 ] && echo 1 || echo 0)"
+
+got=$("$NS" -no-gui collision "$W/c.nif" 2>/dev/null | awk '/body +node/{getline; print $3}')
+echo "compiled body layer: $got (wanted 31; the broken code wrote 1)"
+check "the collision layer survived Compile" "$([ "$got" = "31" ] && echo 1 || echo 0)"
+
+left=$("$NS" -no-gui list "$W/c.nif" 2>/dev/null | grep -cE "bhkCollisionObject|bhkRigidBody|bhkConvexVerticesShape|bhkNiTriStripsShape")
+check "the editable collision blocks are gone" "$([ "$left" = "0" ] && echo 1 || echo 0)"
+
+np=$("$NS" -no-gui list "$W/c.nif" 2>/dev/null | grep -c "bhkNPCollisionObject")
+check "exactly one compiled collision object replaced them" "$([ "$np" = "1" ] && echo 1 || echo 0)"
+
+echo "$checks checks, $fails failures"
+[ "$fails" = "0" ] && { echo PASS; exit 0; }
+echo FAIL; exit 1
