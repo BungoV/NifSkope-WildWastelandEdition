@@ -869,6 +869,34 @@ QModelIndex bhkGetEntity( const NifModel * nif, const QModelIndex & index, const
 	return iEntity;
 }
 
+/*! The index whose children are a collision filter's Layer, Flags and Group.
+ *
+ *  There is usually no row called "Havok Filter" to find. nifxml.cpp lists
+ *  HavokFilter as a MIXIN type, so a bare `<field name="Havok Filter"
+ *  type="HavokFilter"/>` is flattened and its three rows become direct children
+ *  of whatever declared it. The row survives in exactly one place —
+ *  bhkRigidBodyCInfo550_660, used by Oblivion and Fallout 3 — because there the
+ *  field carries since="10.1.0.0", and a mixin with a version condition is not
+ *  flattened.
+ *
+ *  So `nif->getIndex( info, "Havok Filter" )` returns an INVALID index on every
+ *  Skyrim, Fallout 4, Fallout 76 and Starfield file. Invalid parents fail
+ *  silently in this model: getItem returns nullptr before any reportError, so
+ *  NifItem::get gives back T() and NifItem::set returns false, and nothing
+ *  reaches the Messages window. Eleven call sites read a layer of 0 or wrote
+ *  nothing at all, in complete silence.
+ *
+ *  Same shape as bhkGetRBInfo below, which handles the mirror-image problem of a
+ *  field that may sit either on the block or inside Rigid Body Info.
+ */
+QModelIndex bhkGetHavokFilter( const NifModel * nif, const QModelIndex & owner )
+{
+	if ( !nif || !owner.isValid() )
+		return {};
+	const QModelIndex nested = nif->getIndex( owner, "Havok Filter" );
+	return nested.isValid() ? nested : owner;
+}
+
 QModelIndex bhkGetRBInfo( const NifModel * nif, const QModelIndex & index, const QString & name )
 {
 	auto iInfo = nif->getIndex( index, name );

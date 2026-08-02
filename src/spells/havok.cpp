@@ -708,7 +708,7 @@ static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigi
 	const int preset = settings.value( "CollisionManager/Create/Preset", 1 ).toInt();
 	QModelIndex info = nif->getIndex( rigidBody, "Rigid Body Info" );
 	if ( !info.isValid() ) return;
-	QModelIndex filter = nif->getIndex( info, "Havok Filter" );
+	QModelIndex filter = bhkGetHavokFilter( nif, info );
 	if ( filter.isValid() ) nif->set<quint32>( filter, "Layer", quint32( layer ) );
 	if ( preset == 2 ) return;
 	const bool dynamic = ( preset == 1 );
@@ -1445,7 +1445,7 @@ public:
 			QModelIndex iSubShapes = nif->getIndex( iPackedShape, "Sub Shapes" );
 			nif->updateArraySize( iSubShapes );
 			QModelIndex iSubShape = nif->getIndex( iSubShapes, 0 );
-			nif->set<int>( nif->getIndex( iSubShape, "Havok Filter" ), "Layer", 1 );
+			nif->set<int>( bhkGetHavokFilter( nif, iSubShape ), "Layer", 1 );
 			nif->set<int>( iSubShape, "Num Vertices", vertices.count() );
 			nif->set<int>( iSubShape, "Material", nif->get<int>( iShape, "Material" ) );
 		}
@@ -1853,7 +1853,7 @@ public:
 			if ( iInfo.isValid() ) {
 				HknpBodyPhys phys = ( int( bs.first ) < sys.bodyPhys.size() )
 									? sys.bodyPhys.at( int( bs.first ) ) : HknpBodyPhys();
-				QModelIndex iFilter = nif->getIndex( iInfo, "Havok Filter" );
+				QModelIndex iFilter = bhkGetHavokFilter( nif, iInfo );
 				if ( iFilter.isValid() ) {
 					quint32 decodedLayer = phys.layer;
 					if ( decodedLayer == 0 ) decodedLayer = ( sys.dynamic && phys.hasMotion ) ? 10u : 1u;

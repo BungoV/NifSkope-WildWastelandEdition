@@ -1054,7 +1054,7 @@ private:
 		int shapeBlock = body.isValid() ? nif->getLink( body, "Shape" ) : -1;
 		int node = ownerNode( object );
 		QModelIndex info = body.isValid() ? nif->getIndex( body, "Rigid Body Info" ) : QModelIndex();
-		QModelIndex filter = info.isValid() ? nif->getIndex( info, "Havok Filter" ) : QModelIndex();
+		QModelIndex filter = bhkGetHavokFilter( nif, info );
 		quint32 collLayer = filter.isValid() ? nif->get<quint32>( filter, "Layer" ) : 1;
 		float m = info.isValid() ? nif->get<float>( info, "Mass" ) : 0.0f;
 		if ( collLayer == 0 ) collLayer = ( info.isValid() && nif->get<quint32>( info, "Motion System" ) == 3 ) ? 10u : 1u;
@@ -1300,7 +1300,7 @@ private:
 		} else {
 			QModelIndex body = blockIndex( item->data( 0, BodyBlockRole ).toInt() );
 			QModelIndex info = nif->getIndex( body, "Rigid Body Info" );
-			QModelIndex filter = nif->getIndex( info, "Havok Filter" );
+			QModelIndex filter = bhkGetHavokFilter( nif, info );
 			mass->setValue( nif->get<float>( info, "Mass" ) );
 			friction->setValue( nif->get<float>( info, "Friction" ) );
 			restitution->setValue( nif->get<float>( info, "Restitution" ) );
@@ -1343,7 +1343,7 @@ private:
 			return;
 		QModelIndex body = blockIndex( tree->currentItem()->data( 0, BodyBlockRole ).toInt() );
 		QModelIndex info = nif->getIndex( body, "Rigid Body Info" );
-		QModelIndex filter = nif->getIndex( info, "Havok Filter" );
+		QModelIndex filter = bhkGetHavokFilter( nif, info );
 		QModelIndex layerIndex = nif->getIndex( filter, "Layer" );
 		if ( !layerIndex.isValid() )
 			return;
@@ -1401,47 +1401,88 @@ private:
 		QModelIndex info = nif->getIndex( body, "Rigid Body Info" );
 		if ( !info.isValid() )
 			return;
-		/* Every field below in ONE undo entry — see applyLayerSelection for why
-		 * these needed wrapping at all. One entry for the lot rather than one
-		 * per field, because a single editingFinished can legitimately rewrite
+		/* READ EVERY WIDGET FIRST, then write. The values must not be read from
+		 * inside the nifSnapshotOp lambda.
+		 *
+		 * nifSnapshotOp serialises the whole model before running its operation,
+		 * and that pass is enough to put the panel's own editors back to what is
+		 * still in the file — so a lambda that asks `mass->value()` gets the OLD
+		 * mass and writes it straight back. Every field here was doing that. The
+		 * edit produced a perfectly good undo step containing no change at all,
+		 * which is worse than not working, because the undo history says
+		 * something happened.
+		 *
+		 * applyLayerSelection above never had the bug: it takes `quint32 value`
+		 * out of the combo before it opens the snapshot. This is that, for the
+		 * other twenty fields.
+		 *
+		 * Found by tests/spells/collision_undo.sh, which sets the mass spin to
+		 * 3.5 and reads the model back.
+		 */
+		const float wantMass = float( mass->value() );
+		const float wantFriction = float( friction->value() );
+		const float wantRestitution = float( restitution->value() );
+		const float wantLinearDamping = float( linearDamping->value() );
+		const float wantAngularDamping = float( angularDamping->value() );
+		const float wantMaxLinear = float( maxLinearVelocity->value() );
+		const float wantMaxAngular = float( maxAngularVelocity->value() );
+		const float wantPenetration = float( penetrationDepth->value() );
+		const Vector4 wantCenter( float( centerX->value() ), float( centerY->value() ),
+								  float( centerZ->value() ), 0.0f );
+		const float wantInertiaX = float( inertiaX->value() );
+		const float wantInertiaY = float( inertiaY->value() );
+		const float wantInertiaZ = float( inertiaZ->value() );
+		const quint32 wantSolver = solverDeactivation->currentData().toUInt();
+		const quint32 wantDeactivator = deactivatorType->currentData().toUInt();
+		const quint32 wantFilterGroup = quint32( filterGroup->value() );
+		const bool wantWind = wind->isChecked();
+		const bool wantLinkedGroup = linkedGroup->isChecked();
+		const bool wantWithinGroup = collisionWithinGroup->isChecked();
+		quint32 wantMotion = motionSystem->currentData().toUInt();
+		quint32 wantQuality = qualityType->currentData().toUInt();
+		if ( keyframed->isChecked() ) { wantMotion = 6u; wantQuality = 2u; }
+		else if ( wantMotion == 6u ) {
+			wantMotion = wantMass > 0.0f ? 3u : 5u;
+			wantQuality = wantMass > 0.0f ? 4u : 0u;
+		}
+
+		/* Every field in ONE undo entry — see applyLayerSelection for why these
+		 * needed wrapping at all. One entry for the lot rather than one per
+		 * field, because a single editingFinished can legitimately rewrite
 		 * several of them (keyframed forces Motion System and Quality Type).
 		 */
 		nifSnapshotOp( nif, tr( "Edit rigid body" ), [&]() {
-			QModelIndex filter = nif->getIndex( info, "Havok Filter" );
-			nif->set<float>( info, "Mass", float( mass->value() ) );
-			nif->set<float>( info, "Friction", float( friction->value() ) );
-			nif->set<float>( info, "Restitution", float( restitution->value() ) );
-			nif->set<float>( info, "Linear Damping", float( linearDamping->value() ) );
-			nif->set<float>( info, "Angular Damping", float( angularDamping->value() ) );
-			nif->set<float>( info, "Max Linear Velocity", float( maxLinearVelocity->value() ) );
-			nif->set<float>( info, "Max Angular Velocity", float( maxAngularVelocity->value() ) );
-			quint32 motionValue = motionSystem->currentData().toUInt();
-			quint32 qualityValue = qualityType->currentData().toUInt();
-			if ( keyframed->isChecked() ) { motionValue = 6u; qualityValue = 2u; }
-			else if ( motionValue == 6u ) { motionValue = mass->value() > 0.0 ? 3u : 5u; qualityValue = mass->value() > 0.0 ? 4u : 0u; }
-			nif->set<quint32>( info, "Motion System", motionValue );
-			nif->set<quint32>( info, "Quality Type", qualityValue );
-			nif->set<quint32>( info, "Solver Deactivation", solverDeactivation->currentData().toUInt() );
-			nif->set<quint32>( info, "Deactivator Type", deactivatorType->currentData().toUInt() );
-			nif->set<float>( info, "Penetration Depth", float( penetrationDepth->value() ) );
-			nif->set<Vector4>( info, "Center", Vector4( float( centerX->value() ), float( centerY->value() ), float( centerZ->value() ), 0.0f ) );
+			QModelIndex filter = bhkGetHavokFilter( nif, info );
+			nif->set<float>( info, "Mass", wantMass );
+			nif->set<float>( info, "Friction", wantFriction );
+			nif->set<float>( info, "Restitution", wantRestitution );
+			nif->set<float>( info, "Linear Damping", wantLinearDamping );
+			nif->set<float>( info, "Angular Damping", wantAngularDamping );
+			nif->set<float>( info, "Max Linear Velocity", wantMaxLinear );
+			nif->set<float>( info, "Max Angular Velocity", wantMaxAngular );
+			nif->set<quint32>( info, "Motion System", wantMotion );
+			nif->set<quint32>( info, "Quality Type", wantQuality );
+			nif->set<quint32>( info, "Solver Deactivation", wantSolver );
+			nif->set<quint32>( info, "Deactivator Type", wantDeactivator );
+			nif->set<float>( info, "Penetration Depth", wantPenetration );
+			nif->set<Vector4>( info, "Center", wantCenter );
 			QModelIndex inertia = nif->getIndex( info, "Inertia Tensor" );
 			if ( inertia.isValid() ) {
-				nif->set<float>( inertia, "m11", float( inertiaX->value() ) );
-				nif->set<float>( inertia, "m22", float( inertiaY->value() ) );
-				nif->set<float>( inertia, "m33", float( inertiaZ->value() ) );
+				nif->set<float>( inertia, "m11", wantInertiaX );
+				nif->set<float>( inertia, "m22", wantInertiaY );
+				nif->set<float>( inertia, "m33", wantInertiaZ );
 			}
 			quint32 bodyFlags = nif->get<quint32>( body, "Body Flags" );
-			bodyFlags = wind->isChecked() ? ( bodyFlags | 1u ) : ( bodyFlags & ~1u );
+			bodyFlags = wantWind ? ( bodyFlags | 1u ) : ( bodyFlags & ~1u );
 			nif->set<quint32>( body, "Body Flags", bodyFlags );
 			if ( filter.isValid() ) {
 				quint32 flags = nif->get<quint32>( filter, "Flags" ) & ~0xc0u;
-				if ( linkedGroup->isChecked() ) {
+				if ( wantLinkedGroup ) {
 					flags |= 0x80u;
-					if ( !collisionWithinGroup->isChecked() ) flags |= 0x40u;
+					if ( !wantWithinGroup ) flags |= 0x40u;
 				}
 				nif->set<quint32>( filter, "Flags", flags );
-				nif->set<quint32>( filter, "Group", quint32( filterGroup->value() ) );
+				nif->set<quint32>( filter, "Group", wantFilterGroup );
 			}
 		} );
 		if ( ogl ) {
@@ -1669,7 +1710,7 @@ private:
 		HknpEncodeInput input; input.verts.reserve( mesh.verts.size() );
 		for ( const Vector3 & v : mesh.verts ) input.verts.append( v / 69.99125f );
 		input.tris = mesh.tris;
-		QModelIndex info = nif->getIndex( body, "Rigid Body Info" ); QModelIndex filter = nif->getIndex( info, "Havok Filter" );
+		QModelIndex info = nif->getIndex( body, "Rigid Body Info" ); QModelIndex filter = bhkGetHavokFilter( nif, info );
 		quint32 sourceMotion = info.isValid() ? nif->get<quint32>( info, "Motion System" ) : 5u;
 		QStringList unsupported;
 		if ( sourceMotion != 3u && sourceMotion != 5u ) unsupported << tr( "Motion/Keyframed mode %1" ).arg( sourceMotion );
@@ -1777,7 +1818,7 @@ private:
 					}
 				}
 				QModelIndex info = blockIndex( body ).isValid() ? nif->getIndex( blockIndex( body ), "Rigid Body Info" ) : QModelIndex();
-				QModelIndex filter = info.isValid() ? nif->getIndex( info, "Havok Filter" ) : QModelIndex();
+				QModelIndex filter = bhkGetHavokFilter( nif, info );
 				quint32 collLayer = filter.isValid() ? nif->get<quint32>( filter, "Layer" ) : 0;
 				if ( filter.isValid() && collLayer == 0 ) zeroLayerFilters.append( filter );
 				if ( collLayer == 31 && li.isValid() && ( nif->isNiBlock( li, "bhkBoxShape" )
@@ -2079,6 +2120,7 @@ private:
 		root->addWidget( inventoryHeader );
 
 		tree = new QTreeWidget( this );
+		tree->setObjectName( QStringLiteral( "CollisionInventoryTree" ) );
 		tree->setColumnCount( 7 );
 		tree->setHeaderLabels( { tr( "Node" ), tr( "Shape" ), tr( "Layer" ), tr( "Material" ),
 			tr( "Mass" ), tr( "State" ), tr( "Bone" ) } );
@@ -2349,12 +2391,19 @@ private:
 		form->setColumnStretch( 3, 1 );
 		mass = new QDoubleSpinBox( physicsGroup );
 		mass->setRange( 0.0, 1000000.0 ); mass->setDecimals( 3 );
+		/* Named so findChild can reach them. The live editors write through
+		 * nifSnapshotOp and there was no way to verify that from outside this
+		 * class — every control is a private member. See WW_COLLUNDO_TEST.
+		 */
+		mass->setObjectName( QStringLiteral( "CollisionMassSpin" ) );
 		friction = new QDoubleSpinBox( physicsGroup );
 		friction->setRange( 0.0, 10.0 ); friction->setDecimals( 3 );
 		restitution = new QDoubleSpinBox( physicsGroup );
 		restitution->setRange( 0.0, 1.0 ); restitution->setDecimals( 3 );
 		layer = new QComboBox( physicsGroup );
+		layer->setObjectName( QStringLiteral( "CollisionLayerCombo" ) );
 		material = new QComboBox( physicsGroup );
+		material->setObjectName( QStringLiteral( "CollisionMaterialCombo" ) );
 		configureSearchableSelector( layer, tr( "Search collision layers" ) );
 		configureSearchableSelector( material, tr( "Search materials" ) );
 		linearDamping = new QDoubleSpinBox( physicsGroup );
@@ -2795,7 +2844,7 @@ public:
 				}
 
 				const QModelIndex info = nif->getIndex( bi, "Rigid Body Info" );
-				const QModelIndex filter = info.isValid() ? nif->getIndex( info, "Havok Filter" ) : QModelIndex();
+				const QModelIndex filter = bhkGetHavokFilter( nif, info );
 				const quint32 collLayer = filter.isValid() ? nif->get<quint32>( filter, "Layer" ) : 0;
 				if ( filter.isValid() && collLayer == 0 )
 					say( nif->getBlockNumber( bi ),
@@ -2877,8 +2926,17 @@ public:
 			"keyframed body, or Static for anything else." );
 	}
 
-	//! The Havok Filter of a body whose layer is Unidentified, or an invalid index.
-	static QModelIndex zeroLayerFilter( const NifModel * nif, const QModelIndex & index )
+	/*! Rigid Body Info of a body whose collision layer is Unidentified, or invalid.
+	 *
+	 *  Returns the INFO, not the filter, and the caller asks bhkGetHavokFilter
+	 *  for the filter separately. That is not a stylistic choice: on everything
+	 *  from Skyrim on, the filter rows are flattened INTO Rigid Body Info, so the
+	 *  filter index and the info index are the same QModelIndex. The version that
+	 *  returned the filter alone then read Motion System from `filter.parent()`
+	 *  — which is Rigid Body Info when the row is nested, and the bhkRigidBody
+	 *  block itself when it is flattened. Two different fields, silently.
+	 */
+	static QModelIndex zeroLayerInfo( const NifModel * nif, const QModelIndex & index )
 	{
 		if ( !nif )
 			return QModelIndex();
@@ -2888,28 +2946,29 @@ public:
 		const QModelIndex info = nif->getIndex( body, "Rigid Body Info" );
 		if ( !info.isValid() )
 			return QModelIndex();
-		const QModelIndex filter = nif->getIndex( info, "Havok Filter" );
+		const QModelIndex filter = bhkGetHavokFilter( nif, info );
 		if ( !filter.isValid() || nif->get<quint32>( filter, "Layer" ) != 0 )
 			return QModelIndex();
-		return filter;
+		return info;
 	}
 
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
 	{
-		return zeroLayerFilter( nif, index ).isValid();
+		return zeroLayerInfo( nif, index ).isValid();
 	}
 
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
 	{
-		const QModelIndex filter = zeroLayerFilter( nif, index );
-		if ( !filter.isValid() )
+		const QModelIndex info = zeroLayerInfo( nif, index );
+		if ( !info.isValid() )
 			return index;
 		/* Motion System 3 is MO_SYS_KEYFRAMED: something the game moves, which
 		 * belongs on Props (10). Everything else is scenery, which is Static (1).
 		 * Same rule the dock's safe-fix pass uses -- this is that code, not a
 		 * second opinion about it.
 		 */
-		const quint32 motion = nif->get<quint32>( filter.parent(), "Motion System" );
+		const quint32 motion = nif->get<quint32>( info, "Motion System" );
+		const QModelIndex filter = bhkGetHavokFilter( nif, info );
 		nifSnapshotOp( nif, Spell::tr( "Set collision layer" ), [&]() {
 			nif->set<quint32>( QModelIndex( filter ), "Layer", motion == 3 ? 10u : 1u );
 		} );

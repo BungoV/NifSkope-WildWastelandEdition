@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "bakegeom.h"
 #include "glview.h"
 #include "nifmerge.h"
+#include "gl/gltools.h"
 #include "message.h"
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
@@ -5303,24 +5304,199 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* NOT HARNESSED: the Collision Manager's live editors (WW_COLLUNDO_TEST,
-	 * attempted and removed).
+	/* TEST HARNESS (WW_COLLUNDO_TEST=1): does one edit in the Collision Manager
+	 * make exactly one undo step, and does one Ctrl+Z take it back?
 	 *
 	 * applyPhysics, applyLayerSelection and applyMaterialSelection were fixed in
-	 * 2ff7457 to write through nifSnapshotOp, and that fix is still verified only
-	 * by reading the diff. A harness was written for it and does not work, for a
-	 * reason worth recording so the next attempt does not repeat it:
+	 * 2ff7457 to write through nifSnapshotOp, and shipped verified only by reading
+	 * the diff. NifModel::set pushes no undo command by itself, so before that fix
+	 * these live editors wrote straight through the model while Compile and Apply
+	 * Safe Fixes in the same panel went through nifSnapshotOp -- undo appeared to
+	 * work and silently reverted whichever of THOSE ran last, keeping the edit
+	 * made here. That is invisible in a diff and invisible on screen.
 	 *
-	 * applyLayerSelection refuses a compiled collision row outright, and FO4 ships
-	 * compiled collision (bhkNPCollisionObject) throughout -- ~300 meshes sampled,
-	 * not one editable bhkRigidBody. Manufacturing one means casting Create Box
-	 * Collision, which needs the GL scene graph (so it cannot be done from the
-	 * CLI) and blocks indefinitely when driven with no one at the keyboard: the
-	 * run times out with a zero-byte log.
+	 * THE FIXTURE PROBLEM, AND WHY IT IS GONE.  A previous attempt was abandoned
+	 * with the note that this needs "a fixture from a game that authors editable
+	 * rigid bodies -- Skyrim or Oblivion". FO4 ships compiled collision
+	 * (bhkNPCollisionObject) throughout; ~300 meshes were sampled without finding
+	 * one editable bhkRigidBody, and manufacturing one via Create Box Collision
+	 * needs the GL scene graph and blocks on a modal.
 	 *
-	 * What it needs is a fixture from a game that authors editable rigid bodies --
-	 * Skyrim or Oblivion -- rather than more harness code.
+	 * But the file already contains the body -- compiled. Decompile Compiled
+	 * Collision is a pure data transform over the hknp packfile, it needs no
+	 * scene, and it runs headless: one CLI cast turns block [2] bhkNPCollisionObject
+	 * into a real bhkRigidBody + bhkCollisionObject. tests/spells/collision_undo.sh
+	 * builds the fixture that way. No second game required.
+	 *
+	 * Log: release/ww_collundo_test.log
 	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLUNDO_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_collundo_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif || !nif->undoStack ) { log << "no model\n"; fails++; checks++; break; }
+
+					// --- the fixture must really be editable ------------------
+					int bodyBlock = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" ) ) { bodyBlock = b; break; }
+					log << "editable bhkRigidBody at block: " << bodyBlock << "\n";
+					check( "the fixture has an editable rigid body to edit", bodyBlock >= 0 );
+					if ( bodyBlock < 0 ) break;
+
+					auto bodyInfo = [&]() {
+						return nif->getIndex( nif->getBlockIndex( bodyBlock ), "Rigid Body Info" );
+					};
+					auto readLayer = [&]() {
+						return nif->get<quint32>( bhkGetHavokFilter( nif, bodyInfo() ), "Layer" );
+					};
+					auto readMass = [&]() { return nif->get<float>( bodyInfo(), "Mass" ); };
+
+					QDockWidget * dock = skope->findChild<QDockWidget *>(
+						QStringLiteral( "CollisionManagerDock" ) );
+					if ( !dock ) { log << "no Collision Manager dock\n"; fails++; checks++; break; }
+					dock->setFloating( false );
+					dock->show();
+					QApplication::processEvents();
+
+					auto * tree = dock->findChild<QTreeWidget *>( QStringLiteral( "CollisionInventoryTree" ) );
+					auto * layerCombo = dock->findChild<QComboBox *>( QStringLiteral( "CollisionLayerCombo" ) );
+					auto * massSpin = dock->findChild<QDoubleSpinBox *>( QStringLiteral( "CollisionMassSpin" ) );
+					if ( !tree || !layerCombo || !massSpin ) {
+						log << "panel widgets not found (tree/layer/mass)\n"; fails++; checks++; break;
+					}
+
+					/* Select the row that drives this body, and be able to do it
+					 * again: an undo resets the model, the panel rebuilds its tree
+					 * from scratch, and the selection does not survive. The panel's
+					 * item roles are private to collisiontools.cpp, so the row is
+					 * identified by what it DOES — after selecting it, the physics
+					 * editor becomes live.
+					 */
+					auto selectLive = [&]() -> bool {
+						QList<QTreeWidgetItem *> stack;
+						for ( int i = 0; i < tree->topLevelItemCount(); i++ )
+							stack << tree->topLevelItem( i );
+						while ( !stack.isEmpty() ) {
+							QTreeWidgetItem * it = stack.takeFirst();
+							for ( int c = 0; c < it->childCount(); c++ )
+								stack << it->child( c );
+							tree->setCurrentItem( it );
+							QApplication::processEvents();
+							if ( layerCombo->isEnabled() && layerCombo->count() > 0
+								&& massSpin->isEnabled() )
+								return true;
+						}
+						return false;
+					};
+					const bool live = selectLive();
+					log << "inventory rows offering the physics editor: "
+						<< ( live ? "found one" : "none" ) << "\n";
+					check( "an inventory row makes the physics editor live", live );
+					if ( !live ) break;
+
+					/* Depth is undoStack->index(), NOT count(). A push after an undo
+					 * TRUNCATES the redo tail before adding, so count() can stay the
+					 * same across a push that really happened — which is how the
+					 * first version of this harness reported a failure on working
+					 * code. index() is the position, and one edit must advance it by
+					 * exactly one.
+					 */
+					auto depth = [&]() { return nif->undoStack->index(); };
+
+					// --- 1. the layer combo ----------------------------------
+					const quint32 layerBefore = readLayer();
+					/* Pick a row that is not the one already showing. The combo does
+					 * not display the stored layer when it is Unidentified — the
+					 * panel substitutes a guess — so choosing by the MODEL's value
+					 * can land on the row already current, and setCurrentIndex then
+					 * emits nothing and writes nothing. That is what this harness
+					 * first measured, and it looked exactly like a broken editor.
+					 */
+					int wantRow = -1;
+					for ( int r = 0; r < layerCombo->count(); r++ )
+						if ( r != layerCombo->currentIndex() && layerCombo->itemData( r ).isValid()
+							&& layerCombo->itemData( r ).toUInt() != layerBefore ) { wantRow = r; break; }
+					if ( wantRow < 0 ) { log << "no other layer to pick\n"; fails++; checks++; break; }
+					const quint32 layerWanted = layerCombo->itemData( wantRow ).toUInt();
+					const int base = depth();
+					layerCombo->setCurrentIndex( wantRow );
+					QApplication::processEvents();
+					log << "layer " << layerBefore << " -> " << readLayer()
+						<< " (asked for " << layerWanted << "); undo depth "
+						<< base << " -> " << depth() << "\n";
+					check( "changing the layer writes the model", readLayer() == layerWanted );
+					check( "...in exactly one undo step", depth() == base + 1 );
+					nif->undoStack->undo();
+					QApplication::processEvents();
+					log << "after one undo, layer is " << readLayer() << "\n";
+					check( "one undo puts the layer back", readLayer() == layerBefore );
+
+					// --- 2. the mass spin, which goes through applyPhysics ----
+					if ( !selectLive() ) { log << "lost the editable row\n"; fails++; checks++; break; }
+					const float massBefore = readMass();
+					const float massWanted = massBefore + 3.5f;
+					const int base2 = depth();
+					massSpin->setValue( double( massWanted ) );
+					// setValue is not "editing", so the signal the panel listens to
+					// has to be raised explicitly
+					QMetaObject::invokeMethod( massSpin, "editingFinished" );
+					QApplication::processEvents();
+					log << "mass " << massBefore << " -> " << readMass()
+						<< " (asked for " << massWanted << "); undo depth "
+						<< base2 << " -> " << depth() << "\n";
+					check( "editing mass writes the model",
+						std::fabs( readMass() - massWanted ) < 1.0e-3f );
+					check( "...in exactly one undo step", depth() == base2 + 1 );
+					nif->undoStack->undo();
+					QApplication::processEvents();
+					check( "one undo puts the mass back",
+						std::fabs( readMass() - massBefore ) < 1.0e-3f );
+
+					/* --- 3. the repair spell, on the same body ---------------
+					 * Set Collision Layer from Motion is the Unfuck panel's
+					 * per-row fix. It could not fire on any Skyrim-or-later file
+					 * at all until the Havok Filter mixin was handled, so this
+					 * also guards that: an inapplicable spell fails the first
+					 * check here rather than passing quietly.
+					 */
+					nif->set<quint32>( bhkGetHavokFilter( nif, bodyInfo() ), "Layer", 0u );
+					const int base3 = depth();
+					SpellPtr fix = SpellBook::lookup( QStringLiteral( "Havok/Set Collision Layer from Motion" ) );
+					if ( !fix ) { log << "repair spell not found\n"; fails++; checks++; break; }
+					check( "the layer repair applies to a zeroed rigid body",
+						fix->isApplicable( nif, nif->getBlockIndex( bodyBlock ) ) );
+					fix->cast( nif, nif->getBlockIndex( bodyBlock ) );
+					QApplication::processEvents();
+					log << "repair set layer to " << readLayer() << "; undo depth "
+						<< base3 << " -> " << depth() << "\n";
+					check( "the repair chose a real layer", readLayer() != 0 );
+					check( "...in exactly one undo step", depth() == base3 + 1 );
+					nif->undoStack->undo();
+					QApplication::processEvents();
+					check( "one undo puts the zeroed layer back", readLayer() == 0 );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
 
 	/* TEST HARNESS (WW_ROTKEY_TEST=1): can a key be inserted on a rotation lane?
 	 *

@@ -160,6 +160,8 @@ Transform bhkBodyTrans( const NifModel * nif, const QModelIndex & index );
 
 QModelIndex bhkGetEntity( const NifModel * nif, const QModelIndex & index, const QString & name );
 QModelIndex bhkGetRBInfo( const NifModel * nif, const QModelIndex & index, const QString & name );
+//! The index owning a collision filter's Layer/Flags/Group. Usually NOT a "Havok Filter" row: see the .cpp.
+QModelIndex bhkGetHavokFilter( const NifModel * nif, const QModelIndex & owner );
 
 #if 0	// unused function
 inline GLuint glClosestMatch( GLuint * buffer, GLint hits )
