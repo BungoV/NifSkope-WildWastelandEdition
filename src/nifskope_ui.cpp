@@ -979,6 +979,59 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QLatin1String( "Rigging/Create faceBones NIF..." ) );
 					check( "I: the spell is not applicable to the file it produced",
 						sp && !sp->isApplicable( &out, oShape ) );
+
+					/* J/K. NewBonesData is needed exactly when the remap blob
+					 * names a bone index past the end of the bone list. Compute
+					 * that here rather than calling the shipped helper, so this
+					 * is an independent derivation and not the same code
+					 * agreeing with itself.
+					 */
+					auto highestIndex = []( const QByteArray & blob ) {
+						int hi = -1;
+						for ( int off = 0; off + 12 <= blob.size(); off += 12 )
+							for ( int s = 0; s < 4; s++ ) {
+								const quint16 w = quint16( quint8( blob.at( off + s * 2 ) ) )
+									| ( quint16( quint8( blob.at( off + s * 2 + 1 ) ) ) << 8 );
+								if ( w )
+									hi = qMax( hi, int( quint8( blob.at( off + 8 + s ) ) ) );
+							}
+						return hi;
+					};
+					const int outHi = highestIndex( outRemap );
+					log << "output: highest remap index " << outHi
+						<< ", bone list " << outBones.size() << "\n";
+					log.flush();
+					check( "J: every remap index resolves, so no NewBonesData is needed",
+						outHi >= 0 && outHi < outBones.size() );
+
+					/* The donor is a vanilla faceBones mesh whose bone list
+					 * REPLACES the standard bones, so its blob must overrun.
+					 * Without this, J passes on any file at all and proves
+					 * nothing about the append-only pipeline.
+					 */
+					NifModel don;
+					const QString donorPath = QString::fromLocal8Bit( qgetenv( "WW_TEST_DONOR" ) );
+					if ( don.loadFromFile( donorPath ) ) {
+						QModelIndex dShape;
+						QByteArray dRemap;
+						for ( int b = 0; b < don.getBlockCount() && dRemap.isNull(); b++ ) {
+							QModelIndex iB = don.getBlockIndex( b );
+							if ( !don.blockInherits( iB, "BSTriShape" ) )
+								continue;
+							dRemap = remapOf( &don, iB );
+							if ( !dRemap.isNull() )
+								dShape = iB;
+						}
+						const int dBones = dShape.isValid() ? boneNames( &don, dShape ).size() : 0;
+						const int dHi = highestIndex( dRemap );
+						log << "donor:  highest remap index " << dHi
+							<< ", bone list " << dBones << "\n";
+						log.flush();
+						check( "K: ...whereas the vanilla donor's blob DOES overrun its list",
+							dHi >= dBones && dBones > 0 );
+					} else {
+						check( "K: the donor reloaded for comparison", false );
+					}
 				} while ( false );
 
 				log << "\n" << pass << " passed, " << fail << " failed\n";

@@ -3150,6 +3150,249 @@ public:
 
 REGISTER_SPELL( spRiggingGenerateCustomizationRemapData )
 
+// ---------------------------------------------------------------------------
+// CustomizationRemapNewBonesData.
+//
+// Vanilla faceBones assets carry a SECOND binary block beside the remap blob.
+// It exists because Bethesda's faceBones bone list REPLACES the standard bones
+// with sculpt bones, while the remap blob still names standard ones — on
+// BaseFemaleHead the list holds 0..67 and the blob references 68, which is
+// `Neck`. NewBonesData supplies those dropped bones and their transforms.
+//
+// Measured across the vanilla corpus (399 faceBones files):
+//   * record size is exactly 208 bytes
+//   * record count == (highest index the blob uses) - (bones in the list) + 1
+//   * the block is present iff that count >= 1 — exactly 173 of 395 files,
+//     sizes 137x208, 18x416, 5x624, 2x832, 11x1872 (= 208 x 9)
+//
+// Record layout, measured:
+//   0x00  NUL-terminated bone name   (NOT always "Neck" — BigBeard01 says HEAD)
+//   0x18..0x7f  leaked memory, not data. Only 65 of 208 bytes are constant
+//         across 295 records; the rest holds values like 0x77851a05 and
+//         0x000f3748 (Windows DLL and heap addresses), and files exported in
+//         one batch share identical garbage — both base heads carry
+//         `48 37 0f 00`, every BigBeard `30 03 27 00`.
+//   0x80  bounding sphere, 4x float32
+//   0x90  4x4 row-major affine; verified orthonormal, determinant 1.0000
+//
+// Because the middle is uninitialised memory rather than data, a record cannot
+// be synthesised honestly — but it can be COPIED from a donor and still be
+// exactly as meaningful as the original. That is what this does.
+//
+// NOTE the asymmetry with our own pipeline: Create faceBones NIF appends sculpt
+// bones and never drops one, so every index its blob writes stays inside the
+// final list and no NewBonesData is required. Proving that is as useful as
+// writing a block, so this reports it rather than attaching something unneeded.
+// ---------------------------------------------------------------------------
+
+static constexpr int kRemapNewBoneRecord = 208;
+
+//! Highest bone index referenced by a nonzero-weight slot; -1 if the blob is empty.
+static int riggingRemapMaxBoneIndex( const QByteArray & blob )
+{
+	int highest = -1;
+	for ( int off = 0; off + 12 <= blob.size(); off += 12 ) {
+		for ( int slot = 0; slot < 4; slot++ ) {
+			const quint16 weight = quint16( quint8( blob.at( off + slot * 2 ) ) )
+				| ( quint16( quint8( blob.at( off + slot * 2 + 1 ) ) ) << 8 );
+			if ( weight )
+				highest = qMax( highest, int( quint8( blob.at( off + 8 + slot ) ) ) );
+		}
+	}
+	return highest;
+}
+
+//! The named binary extra-data payload attached to a shape, or a null array.
+static QByteArray riggingShapeBinaryExtra( const NifModel * nif, const QModelIndex & shape,
+	const QString & name, QModelIndex * found = nullptr )
+{
+	for ( int link : nif->getChildLinks( nif->getBlockNumber( shape ) ) ) {
+		QModelIndex extra = nif->getBlockIndex( link, "NiBinaryExtraData" );
+		if ( extra.isValid() && nif->get<QString>( extra, "Name" ) == name ) {
+			if ( found )
+				*found = extra;
+			return nif->get<QByteArray>( extra, "Binary Data" );
+		}
+	}
+	return QByteArray();
+}
+
+//! Bone names carried by a NewBonesData payload, one per 208-byte record.
+static QStringList riggingRemapNewBoneNames( const QByteArray & blob )
+{
+	QStringList names;
+	for ( int off = 0; off + kRemapNewBoneRecord <= blob.size(); off += kRemapNewBoneRecord ) {
+		int end = off;
+		while ( end < off + kRemapNewBoneRecord && blob.at( end ) != '\0' )
+			end++;
+		names << QString::fromLatin1( blob.mid( off, end - off ) );
+	}
+	return names;
+}
+
+//! Attach, refresh or report CustomizationRemapNewBonesData on a faceBones shape.
+class spRiggingSyncRemapNewBones final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Sync Remap New Bones" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
+	QString page() const override final { return Spell::tr( "Rigging" ); }
+	bool undoable() const override final { return true; }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return nif && nif->getBSVersion() == 130
+			&& riggingIsSkinnedShape( nif, index )
+			&& !riggingShapeBinaryExtra( nif, index,
+				QStringLiteral( "CustomizationRemapData" ) ).isNull();
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		const QByteArray remap = riggingShapeBinaryExtra( nif, index,
+			QStringLiteral( "CustomizationRemapData" ) );
+		QModelIndex iNew;
+		const QByteArray existing = riggingShapeBinaryExtra( nif, index,
+			QStringLiteral( "CustomizationRemapNewBonesData" ), &iNew );
+
+		const int bones = riggingBoneNames( nif, index ).size();
+		const int highest = riggingRemapMaxBoneIndex( remap );
+		const int required = ( highest >= bones ) ? ( highest - bones + 1 ) : 0;
+		const int present = existing.isNull() ? -1
+			: ( existing.size() / kRemapNewBoneRecord );
+
+		const QString evidence = Spell::tr(
+			"Highest bone index used by the remap blob: %1\nBones in the skin list: %2\n" )
+			.arg( highest ).arg( bones );
+
+		// --- nothing needed ------------------------------------------------
+		if ( required == 0 ) {
+			if ( existing.isNull() ) {
+				QMessageBox::information( nullptr, name(), evidence + Spell::tr(
+					"\nEvery index the remap blob uses resolves inside the bone list, so this mesh "
+					"needs no NewBonesData block and none is attached.\n\n"
+					"Vanilla faceBones meshes need one because their bone list replaces the standard "
+					"bones with sculpt bones, leaving the blob pointing past the end. A mesh built by "
+					"Create faceBones NIF appends instead, so it never drops a bone." ) );
+				return index;
+			}
+			if ( QMessageBox::question( nullptr, name(), evidence + Spell::tr(
+					"\nA NewBonesData block with %1 record(s) is attached, but every index already "
+					"resolves inside the bone list, so nothing reads it.\n\nRemove it?" )
+					.arg( present ) ) != QMessageBox::Yes )
+				return index;
+			QPersistentModelIndex pShape = index, pNew = iNew;
+			bool applied = false;
+			nifSnapshotOp( nif, Spell::tr( "Remove CustomizationRemapNewBonesData" ), [&]() {
+				applied = nif->set<QByteArray>( pNew, "Binary Data", QByteArray() );
+			} );
+			QMessageBox::information( nullptr, name(), applied
+				? Spell::tr( "Cleared the unused NewBonesData payload. Remove the empty "
+					"NiBinaryExtraData block itself with Block ▸ Remove Branch if you want it gone." )
+				: Spell::tr( "Could not clear the payload." ) );
+			return index;
+		}
+
+		// --- already correct -----------------------------------------------
+		if ( present == required ) {
+			QMessageBox::information( nullptr, name(), evidence + Spell::tr(
+				"\n%1 index(es) fall past the bone list, and %1 record(s) are attached "
+				"(%2 bytes). This is consistent.\n\nBones described: %3" )
+				.arg( required ).arg( existing.size() )
+				.arg( riggingRemapNewBoneNames( existing ).join( QStringLiteral( ", " ) ) ) );
+			return index;
+		}
+
+		// --- needs building, from a donor ----------------------------------
+		/* No synthesis. Roughly half of each record is uninitialised memory from
+		 * Bethesda's exporter, so a fabricated one would be a guess dressed as
+		 * data. A donor's record is at least genuinely what the game shipped.
+		 */
+		QMessageBox ask( QMessageBox::Question, name(), evidence + Spell::tr(
+			"\n%1 index(es) fall past the end of the bone list, so this mesh needs %1 "
+			"NewBonesData record(s); it currently has %2.\n\n"
+			"About half of each 208-byte record is uninitialised memory from Bethesda's "
+			"exporter, so records are copied from a donor rather than synthesised. "
+			"Choose a vanilla faceBones NIF to copy from?" )
+			.arg( required ).arg( present < 0 ? 0 : present ),
+			QMessageBox::Yes | QMessageBox::Cancel );
+		ask.setDefaultButton( QMessageBox::Cancel );
+		if ( ask.exec() != QMessageBox::Yes )
+			return index;
+
+		const QString donorFile = riggingChooseDonorFile( nif );
+		if ( donorFile.isEmpty() )
+			return index;
+		NifModel donor;
+		if ( !donor.loadFromFile( donorFile ) ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr( "Could not load the donor NIF." ) );
+			return index;
+		}
+		QByteArray donorBlob;
+		for ( int b = 0; b < donor.getBlockCount() && donorBlob.isNull(); b++ ) {
+			QModelIndex iB = donor.getBlockIndex( b );
+			if ( donor.blockInherits( iB, "BSTriShape" ) )
+				donorBlob = riggingShapeBinaryExtra( &donor, iB,
+					QStringLiteral( "CustomizationRemapNewBonesData" ) );
+		}
+		if ( donorBlob.isNull() || donorBlob.size() < required * kRemapNewBoneRecord ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr(
+				"That donor carries %1 NewBonesData record(s); %2 are needed.\n\n"
+				"Only 173 of 395 vanilla faceBones meshes have this block at all — pick one whose "
+				"remap blob also overruns its bone list, such as BaseMaleHead_faceBones.nif." )
+				.arg( donorBlob.isNull() ? 0 : donorBlob.size() / kRemapNewBoneRecord )
+				.arg( required ) );
+			return index;
+		}
+		const QByteArray blob = donorBlob.left( required * kRemapNewBoneRecord );
+
+		QPersistentModelIndex pShape = index, pNew = iNew;
+		bool applied = true;
+		const bool created = !iNew.isValid();
+		if ( created && !nif->getIndex( index, "Extra Data List" ).isValid() ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "The shape has no attachable Extra Data List." ) );
+			return index;
+		}
+		const bool changed = nifSnapshotOp( nif, created
+			? Spell::tr( "Create CustomizationRemapNewBonesData" )
+			: Spell::tr( "Update CustomizationRemapNewBonesData" ), [&]() {
+			if ( !pNew.isValid() ) {
+				QModelIndex added = nif->insertNiBlock( "NiBinaryExtraData",
+					nif->getBlockNumber( pShape ) + 1 );
+				if ( !added.isValid() ) {
+					applied = false;
+					return;
+				}
+				pNew = added;
+				if ( !addLink( nif, pShape, "Extra Data List", nif->getBlockNumber( pNew ) )
+					|| !nif->set<QString>( pNew, "Name",
+						QStringLiteral( "CustomizationRemapNewBonesData" ) ) ) {
+					applied = false;
+					return;
+				}
+			}
+			applied = nif->set<QByteArray>( pNew, "Binary Data", blob );
+		} );
+		if ( !changed || !applied ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "Could not write the block. Use Undo if a partial one was created." ) );
+			return index;
+		}
+		QMessageBox::information( nullptr, name(), Spell::tr(
+			"%1 CustomizationRemapNewBonesData: %2 record(s), %3 bytes, copied from %4.\n\n"
+			"Bones described: %5\n\n"
+			"The transforms are the donor's. If your bone sits somewhere else, the chargen system "
+			"will place it where the donor's was." )
+			.arg( created ? Spell::tr( "Created" ) : Spell::tr( "Updated" ) )
+			.arg( required ).arg( blob.size() ).arg( riggingDonorDisplayName( donorFile ) )
+			.arg( riggingRemapNewBoneNames( blob ).join( QStringLiteral( ", " ) ) ) );
+		return pNew;
+	}
+};
+
+REGISTER_SPELL( spRiggingSyncRemapNewBones )
+
 //! Complete standard-skeleton to face-bone transfer. The existing step spells
 //! remain independently useful, but this is the normal user path (and the
 //! command the Rigging workspace invokes): choose the donor once, capture the
@@ -3615,15 +3858,9 @@ public:
 			return index;
 		}
 
-		int remapBytes = 0;
-		for ( int link : work.getChildLinks( work.getBlockNumber( workTarget ) ) ) {
-			QModelIndex extra = work.getBlockIndex( link, "NiBinaryExtraData" );
-			if ( extra.isValid()
-				&& work.get<QString>( extra, "Name" ) == QStringLiteral( "CustomizationRemapData" ) ) {
-				remapBytes = work.get<QByteArray>( extra, "Binary Data" ).size();
-				break;
-			}
-		}
+		const QByteArray outRemap = riggingShapeBinaryExtra( &work, workTarget,
+			QStringLiteral( "CustomizationRemapData" ) );
+		const int remapBytes = outRemap.size();
 		const int vertices = work.rowCount( work.getIndex( workTarget, "Vertex Data" ) );
 		if ( remapBytes != vertices * 12 ) {
 			QMessageBox::warning( nullptr, name(),
@@ -3640,21 +3877,33 @@ public:
 			return index;
 		}
 
+		/* Report the NewBonesData situation from the file we just wrote rather
+		 * than warning generically. The block is needed only when the remap
+		 * blob names a bone index past the end of the bone list, which this
+		 * append-only pipeline never produces — but say so with the numbers
+		 * instead of asserting it.
+		 */
+		const int outBones = riggingBoneNames( &work, workTarget ).size();
+		const int highestIdx = riggingRemapMaxBoneIndex( outRemap );
+		const QString newBonesNote = ( highestIdx < outBones )
+			? Spell::tr( "No CustomizationRemapNewBonesData is needed: the highest bone index the "
+				"remap blob uses is %1 and the bone list holds %2, so every index resolves. "
+				"Vanilla meshes need that block because their bone list replaces the standard bones; "
+				"this one appends, so nothing was dropped." ).arg( highestIdx ).arg( outBones )
+			: Spell::tr( "This mesh DOES need CustomizationRemapNewBonesData — index %1 falls past "
+				"the %2-bone list. Run Rigging ▸ Sync Remap New Bones on the written file." )
+				.arg( highestIdx ).arg( outBones );
+
 		QMessageBox done( QMessageBox::Information, name(),
 			Spell::tr( "Wrote %1\n\n"
 				"Face-sculpt bones: %2\nSkin bones: %3 before, %4 after\n"
 				"CustomizationRemapData: %5 bytes over %6 vertices\n\n"
 				"The open file was not modified." )
 				.arg( QDir::toNativeSeparators( outPath ) )
-				.arg( sculptBones ).arg( bonesBefore )
-				.arg( riggingBoneNames( &work, workTarget ).size() )
+				.arg( sculptBones ).arg( bonesBefore ).arg( outBones )
 				.arg( remapBytes ).arg( vertices ) );
-		// Said once, here, rather than buried in a doc: vanilla faceBones assets
-		// carry a second block this does not write. Measured on BaseFemaleHead
-		// and BaseMaleHead, both of which have it.
-		done.setInformativeText(
-			Spell::tr( "Validate in game before shipping. Vanilla faceBones assets also carry a "
-				"CustomizationRemapNewBonesData block, which NifSkope does not yet generate." ) );
+		done.setInformativeText( newBonesNote
+			+ Spell::tr( "\n\nValidate in game before shipping." ) );
 		done.exec();
 		return index;
 	}

@@ -1,5 +1,67 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-03f — CustomizationRemapNewBonesData, decoded and answered
+
+`Rigging ▸ Sync Remap New Bones` closes the gap the faceBones work left open.
+
+### The format
+
+Measured across all 399 vanilla faceBones files:
+
+- record size is exactly **208 bytes**
+- record count == (highest index the remap blob uses) − (bones in the list) + 1
+- the block is present **iff** that count ≥ 1 — exactly **173 of 395**, sizes
+  137×208, 18×416, 5×624, 2×832, 11×1872 (= 208 × 9)
+
+| offset | what |
+|---|---|
+| `0x00` | NUL-terminated bone name — **not always `Neck`**; BigBeard01 says `HEAD` |
+| `0x18`–`0x7f` | leaked memory, not data |
+| `0x80` | bounding sphere, 4× float32 |
+| `0x90` | 4×4 row-major affine — rows unit length, determinant 1.0000 |
+
+Only **65 of 208 bytes are constant** across 295 records. The rest holds values
+like `0x77851a05` and `0x000f3748` — Windows DLL and heap addresses — and files
+exported in one batch share identical garbage: both base heads carry
+`48 37 0f 00`, every BigBeard `30 03 27 00`. So roughly half of each record is
+uninitialised memory from Bethesda's exporter.
+
+**That is why nothing is synthesised.** A fabricated record would be a guess
+dressed as data. Records are copied from a donor instead, which is at least
+genuinely what the game shipped, and the dialog says plainly that the transforms
+are the donor's.
+
+### The more useful answer: our files do not need one
+
+The block exists because Bethesda's faceBones bone list **replaces** the standard
+bones with sculpt bones, leaving the blob pointing past the end. Create faceBones
+NIF **appends** and never drops a bone, so its indices always resolve.
+
+That was a plausible-sounding argument, so it is now measured. Harness checks
+J and K, on the file the spell actually writes:
+
+```
+our output:    highest remap index  9, bone list 69   -> resolves
+vanilla donor: highest remap index 68, bone list 68   -> overruns by exactly 1
+```
+
+K matters more than J. Without it, J would pass on any file whatsoever and prove
+nothing about the pipeline; requiring the donor to *fail* the same test is what
+gives it force. And the donor's overrun of exactly 1 predicts a 208-byte block,
+which is exactly what it ships.
+
+So the success dialog no longer warns vaguely that NifSkope "does not yet
+generate" the block. It reports the two numbers and states whether one is needed
+— and for a mesh built by this pipeline, it is not.
+
+`Sync Remap New Bones` handles the other directions too: a stale block on a mesh
+that no longer needs one can be cleared, a correct one is confirmed with the
+bone names it describes, and a missing one is copied from a donor of the user's
+choosing. It refuses a donor without enough records rather than truncating,
+noting that only 173 of 395 vanilla faceBones meshes carry the block at all.
+
+Harness now 11 checks, all green.
+
 ## 2026-08-03e — Check Face Rig, and two statistics that did not work
 
 `Rigging ▸ Check Face Rig` looks for the one failure a weight transfer can
