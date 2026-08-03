@@ -1,4 +1,5 @@
 #include "ui/widgets/physicspanel.h"
+#include "ui/widgets/wwnumberfield.h"
 
 #include "glview.h"
 #include "model/nifmodel.h"
@@ -1199,6 +1200,14 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	 */
 	col->activate();
 	setMinimumWidth( col->minimumSize().width() );
+
+	/* Every numeric field on this panel gets the one number-field gesture.
+	 * A sweep, after the whole panel is built, because these are hand-made in
+	 * a dozen places; the heading field keeps its wrapping (0..360) because
+	 * the shared field honours QDoubleSpinBox::wrapping, which setValue does
+	 * not, so a drag comes round the seam instead of sticking at it.
+	 */
+	wwMakeScrubFields( this );
 
 	m_sync = syncCollisionPanel;
 	syncCollisionPanel();

@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "message.h"
 #include "nifskope.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "gl/glcontext.hpp"
 #include "gl/gltex.h"
 #include "gl/gltools.h"
@@ -1630,12 +1631,14 @@ ScalingDialog::ScalingDialog( QWidget * parent ) : QDialog( parent )
 
 	grid->addWidget( new QLabel( "X: " ), currentRow, 0, 1, 1 );
 	spinXScale = new QDoubleSpinBox;
+	wwMakeScrubField( spinXScale );
 	spinXScale->setValue( 1.0 );
 	spinXScale->setRange( -MAXSCALE, MAXSCALE );
 	grid->addWidget( spinXScale, currentRow, 1, 1, 1 );
 
 	grid->addWidget( new QLabel( "Y: " ), currentRow, 2, 1, 1 );
 	spinYScale = new QDoubleSpinBox;
+	wwMakeScrubField( spinYScale );
 	spinYScale->setValue( 1.0 );
 	spinYScale->setRange( -MAXSCALE, MAXSCALE );
 	grid->addWidget( spinYScale, currentRow, 3, 1, 1 );
@@ -1653,12 +1656,14 @@ ScalingDialog::ScalingDialog( QWidget * parent ) : QDialog( parent )
 
 	grid->addWidget( new QLabel( "X: " ), currentRow, 0, 1, 1 );
 	spinXMove = new QDoubleSpinBox;
+	wwMakeScrubField( spinXMove );
 	spinXMove->setValue( 0.0 );
 	spinXMove->setRange( -MAXTRANS, MAXTRANS );
 	grid->addWidget( spinXMove, currentRow, 1, 1, 1 );
 
 	grid->addWidget( new QLabel( "Y: " ), currentRow, 2, 1, 1 );
 	spinYMove = new QDoubleSpinBox;
+	wwMakeScrubField( spinYMove );
 	spinYMove->setValue( 0.0 );
 	spinYMove->setRange( -MAXTRANS, MAXTRANS );
 	grid->addWidget( spinYMove, currentRow, 3, 1, 1 );

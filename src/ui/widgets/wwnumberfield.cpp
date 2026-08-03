@@ -447,9 +447,32 @@ void WwNumberField::mousePressEvent( QMouseEvent * e )
  *  Those are excluded at their call sites or by the tests below; this function
  *  only catches the structural cases a bulk sweep would otherwise grab.
  */
+static const char * const WW_NO_SCRUB = "wwNoScrub";
+
+void wwNeverScrub( QWidget * field )
+{
+	if ( !field )
+		return;
+	field->setProperty( WW_NO_SCRUB, true );
+	/* Order-independent on purpose. Several of these fields come out of a
+	 * factory that has already attached the gesture, so marking one only
+	 * matters if the mark also REMOVES what is there — otherwise the exclusion
+	 * reads correct and does nothing, which is the worst of both.
+	 */
+	for ( WwScrub * s : field->findChildren<WwScrub *>() ) {
+		s->cancel();
+		delete s;
+	}
+	for ( WwScrubChrome * c : field->findChildren<WwScrubChrome *>() )
+		delete c;
+	if ( QLineEdit * le = field->findChild<QLineEdit *>() )
+		le->unsetCursor();
+	field->setProperty( WW_SCRUBBED, false );
+}
+
 static bool wwScrubbable( QWidget * w )
 {
-	if ( !w || w->property( WW_SCRUBBED ).toBool() )
+	if ( !w || w->property( WW_SCRUBBED ).toBool() || w->property( WW_NO_SCRUB ).toBool() )
 		return false;
 	if ( auto * s = qobject_cast<QSpinBox *>( w ) ) {
 		// a span this wide has no usable per-pixel step
@@ -465,7 +488,7 @@ static bool wwScrubbable( QWidget * w )
 
 void wwMakeScrubField( QWidget * host, const WwScrubSpec & spec )
 {
-	if ( !host || host->property( WW_SCRUBBED ).toBool() )
+	if ( !host || host->property( WW_SCRUBBED ).toBool() || host->property( WW_NO_SCRUB ).toBool() )
 		return;
 
 	QLineEdit * le = nullptr;

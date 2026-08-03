@@ -1,4 +1,5 @@
 #include "spellbook.h"
+#include "ui/widgets/wwnumberfield.h"
 
 #include "gl/glshape.h"
 #include "gl/gltools.h"
@@ -517,6 +518,7 @@ QDoubleSpinBox * spCreateCVS::addSpinBox( QBoxLayout * parent, const QString & l
 	o->setDecimals( nDigits );
 	o->setSingleStep( std::pow( 10.0, double( 1 - nDigits ) ) );
 	o->setValue( v );
+	wwMakeScrubField( o );
 	hbox->addWidget( new QLabel( l ) );
 	hbox->addWidget( o );
 	return o;
@@ -531,6 +533,7 @@ QSpinBox * spCreateCVS::addSpinBox( QBoxLayout * parent, const QString & l, int 
 	o->setRange( minVal, maxVal );
 	o->setSingleStep( 1 );
 	o->setValue( v );
+	wwMakeScrubField( o );
 	hbox->addWidget( new QLabel( l ) );
 	hbox->addWidget( o );
 	return o;
@@ -604,6 +607,16 @@ bool spCreateCVS::settingsDialog( CoACD & coacd, float & precision, float & radi
 	auto chkApxMode = addComboBox( vbox, Spell::tr( "Approximation Mode" ), coacd.apxMode,
 									{ Spell::tr( "Convex Hull" ), Spell::tr( "Box" ) } );
 	auto spnSeed = addSpinBox( vbox, Spell::tr( "Random Seed" ), coacd.seed, 0, 0x7FFFFFFF );
+
+	/* Three of these are not magnitudes and must not scrub.
+	 * Max Convex Hull and Max Convex Hull Vertex use -1 for "unlimited", so a
+	 * drag across zero silently changes the field's MEANING rather than its
+	 * value; Random Seed is a 2-billion span where no per-pixel step can both
+	 * cross the range and land on a value you wanted.
+	 */
+	wwNeverScrub( spnMaxConvexHull );
+	wwNeverScrub( spnMaxCHVertex );
+	wwNeverScrub( spnSeed );
 
 	addLabel( vbox, QString() );
 

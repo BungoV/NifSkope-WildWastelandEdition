@@ -192,6 +192,14 @@ private:
 	WwScrub * m_scrub = nullptr;
 };
 
+//! Mark a field as never-scrub, so a bulk sweep over its form skips it.
+/*! Use this for anything numeric that is not a QUANTITY: bitmasks, enum
+ *  ordinals, indices into other structures, hashes, sentinel-bearing fields.
+ *  Dragging those walks through values that are individually meaningless and
+ *  each of which is a real write. Call it BEFORE wwMakeScrubFields.
+ */
+void wwNeverScrub( QWidget * field );
+
 //! Give an existing widget the gesture (and, where it can, the chrome).
 /*! Works on any QAbstractSpinBox, on FloatEdit, and on a bare QLineEdit that
  *  holds a number. Safe to call twice — the second call is a no-op.

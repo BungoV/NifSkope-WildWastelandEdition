@@ -2548,6 +2548,36 @@ private:
 		inertiaX = new QDoubleSpinBox( advancedGroup ); inertiaY = new QDoubleSpinBox( advancedGroup ); inertiaZ = new QDoubleSpinBox( advancedGroup );
 		for ( QDoubleSpinBox * spin : { centerX, centerY, centerZ } ) { spin->setRange( -1000000.0, 1000000.0 ); spin->setDecimals( 4 ); }
 		for ( QDoubleSpinBox * spin : { inertiaX, inertiaY, inertiaZ } ) { spin->setRange( 0.0, 1000000000.0 ); spin->setDecimals( 5 ); }
+
+		/* Give every body field the number-field gesture, and a step that suits
+		 * what it measures.
+		 *
+		 * The step is not decoration here: the shared field scrubs by
+		 * singleStep, so a field left at Qt's default 1.0 would move mass by a
+		 * kilo per ten pixels and friction by a whole unit over its 0..10 range.
+		 * Setting it also fixes the arrow clicks and the keyboard arrows, which
+		 * until now stepped by a different amount than the drag did.
+		 */
+		mass->setSingleStep( 1.0 );
+		friction->setSingleStep( 0.01 );
+		restitution->setSingleStep( 0.01 );
+		linearDamping->setSingleStep( 0.01 );
+		angularDamping->setSingleStep( 0.01 );
+		maxLinearVelocity->setSingleStep( 1.0 );
+		maxAngularVelocity->setSingleStep( 1.0 );
+		penetrationDepth->setSingleStep( 0.001 );
+		for ( QDoubleSpinBox * spin : { centerX, centerY, centerZ } )
+			spin->setSingleStep( 0.1 );
+		for ( QDoubleSpinBox * spin : { inertiaX, inertiaY, inertiaZ } )
+			spin->setSingleStep( 100.0 );
+		for ( QDoubleSpinBox * spin : { mass, friction, restitution, linearDamping,
+				angularDamping, maxLinearVelocity, maxAngularVelocity, penetrationDepth,
+				centerX, centerY, centerZ, inertiaX, inertiaY, inertiaZ } )
+			wwMakeScrubField( spin );
+		// Filter group is 16 packed bits, not a quantity: every intermediate
+		// value during a drag would be a real write of a meaningless mask.
+		wwNeverScrub( filterGroup );
+		wwMakeScrubField( previewMaxHulls );
 		auto * centerRow = new QWidget( advancedGroup ); auto * centerLayout = new QHBoxLayout( centerRow ); centerLayout->setContentsMargins( 0, 0, 0, 0 );
 		centerLayout->addWidget( new QLabel( tr( "X" ), centerRow ) ); centerLayout->addWidget( centerX ); centerLayout->addWidget( new QLabel( tr( "Y" ), centerRow ) ); centerLayout->addWidget( centerY ); centerLayout->addWidget( new QLabel( tr( "Z" ), centerRow ) ); centerLayout->addWidget( centerZ );
 		auto * inertiaRow = new QWidget( advancedGroup ); auto * inertiaLayout = new QHBoxLayout( inertiaRow ); inertiaLayout->setContentsMargins( 0, 0, 0, 0 );

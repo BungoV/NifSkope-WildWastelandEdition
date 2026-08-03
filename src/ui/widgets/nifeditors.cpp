@@ -31,6 +31,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifeditors.h"
+#include "ui/widgets/wwnumberfield.h"
+
+#include <QUndoStack>
 
 #include "model/nifmodel.h"
 #include "ui/widgets/colorwheel.h"
@@ -235,6 +238,26 @@ NifFloatEdit::NifFloatEdit( NifModel * n, const QModelIndex & index, float min, 
 	auto dsbValueChanged = static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged);
 
 	connect( spinbox, dsbValueChanged, this, &NifFloatEdit::sltApplyData );
+
+	/* This one writes the model on EVERY valueChanged, and unlike the viewport
+	 * consumers it has no undo merging of its own - so a drag would otherwise
+	 * push one undo entry per pixel. Bracket the gesture in a single macro.
+	 *
+	 * AdaptiveDecimalStepType above is deliberate and stays: it makes the
+	 * keyboard and arrow steps track the value's magnitude, and the scrub reads
+	 * singleStep at press, so the two agree.
+	 */
+	wwMakeScrubField( spinbox );
+	if ( WwScrub * sc = spinbox->findChild<WwScrub *>() ) {
+		connect( sc, &WwScrub::scrubStarted, this, [this]() {
+			if ( nif && nif->undoStack )
+				nif->undoStack->beginMacro( tr( "Edit value" ) );
+		} );
+		connect( sc, &WwScrub::scrubFinished, this, [this]() {
+			if ( nif && nif->undoStack )
+				nif->undoStack->endMacro();
+		} );
+	}
 }
 
 void NifFloatEdit::updateData( NifModel * n )

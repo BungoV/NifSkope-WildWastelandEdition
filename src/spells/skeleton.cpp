@@ -1,6 +1,7 @@
 #include "skeleton.h"
 
 #include "spellbook.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "gl/gltools.h"
 
 #include "lib/nvtristripwrapper.h"
@@ -840,12 +841,14 @@ REGISTER_SPELL( spAllSkinPartitions )
 SkinPartitionDialog::SkinPartitionDialog( int ) : QDialog()
 {
 	spnVert = new QSpinBox( this );
+	wwMakeScrubField( spnVert );
 	spnVert->setMinimum( 1 );
 	spnVert->setMaximum( 8 );
 	spnVert->setValue( 4 );
 	connect( spnVert, static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged), this, &SkinPartitionDialog::changed );
 
 	spnPart = new QSpinBox( this );
+	wwMakeScrubField( spnPart );
 	spnPart->setMinimum( 4 );
 	spnPart->setMaximum( 99 );
 	spnPart->setValue( 18 );

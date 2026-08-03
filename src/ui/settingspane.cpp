@@ -6,6 +6,7 @@
 #include "gamemanager.h"
 
 #include "ui/widgets/colorwheel.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "ui/widgets/floatslider.h"
 #include "ui/settingsdialog.h"
 
@@ -255,6 +256,11 @@ SettingsGeneral::SettingsGeneral( QWidget * parent ) :
 	ui->setupUi( this );
 	SettingsDialog::registerPage( parent, ui->name->text() );
 
+	// Every numeric field on this form gets the one number-field gesture.
+	// A sweep rather than per-widget calls because these come out of setupUi;
+	// wwNeverScrub above marks the ones that must stay type-only.
+	wwMakeScrubFields( this );
+
 	QLocale locale( "en" );
 	QString txtLang = QLocale::languageToString( locale.language() );
 
@@ -412,6 +418,14 @@ SettingsRender::SettingsRender( QWidget * parent ) :
 {
 	ui->setupUi( this );
 	SettingsDialog::registerPage( parent, ui->name->text() );
+	// tone-map and cubemap-background are mode selectors, not magnitudes
+	wwNeverScrub( ui->hdrToneMap );
+	wwNeverScrub( ui->cubeMapBgnd );
+
+	// Every numeric field on this form gets the one number-field gesture.
+	// A sweep rather than per-widget calls because these come out of setupUi;
+	// wwNeverScrub above marks the ones that must stay type-only.
+	wwMakeScrubFields( this );
 
 	connect( ui->btnDetectMSAA, &QPushButton::clicked, this, &SettingsRender::detectMSAAMaxSamples );
 

@@ -1,4 +1,5 @@
 #include "spellbook.h"
+#include "ui/widgets/wwnumberfield.h"
 
 #include "lib/nvtristripwrapper.h"
 #include "spells/mesh.h"
@@ -417,6 +418,8 @@ bool spSmoothNormals::getOptions( float & maxa, float & maxd, bool isSFMesh )
 	dlg.setLayout( grid );
 
 	QDoubleSpinBox * angle = new QDoubleSpinBox;
+	wwMakeScrubField( angle );
+	wwMakeScrubField( angle );
 	angle->setRange( 0, 180 );
 	angle->setValue( 60 );
 	angle->setSingleStep( 5 );
@@ -425,6 +428,8 @@ bool spSmoothNormals::getOptions( float & maxa, float & maxd, bool isSFMesh )
 	grid->addWidget( angle, 0, 1 );
 
 	QDoubleSpinBox * dist = new QDoubleSpinBox;
+	wwMakeScrubField( dist );
+	wwMakeScrubField( dist );
 	dist->setRange( 0, 1 );
 	dist->setDecimals( 4 );
 	if ( !isSFMesh ) {
@@ -808,6 +813,8 @@ public:
 		mapBox->setCurrentIndex( 4 );
 
 		QDoubleSpinBox * mixBox = new QDoubleSpinBox( &dlg );
+		wwMakeScrubField( mixBox );
+		wwMakeScrubField( mixBox );
 		mixBox->setRange( 0.0, 1.0 );
 		mixBox->setSingleStep( 0.05 );
 		mixBox->setValue( 1.0 );

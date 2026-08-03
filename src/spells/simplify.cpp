@@ -1,5 +1,6 @@
 #include "mesh.h"
 #include "gl/gltools.h"
+#include "ui/widgets/wwnumberfield.h"
 
 #include <cfloat>
 #include <unordered_set>
@@ -697,6 +698,7 @@ int SimplifyMeshDialog::exec()
 	setLayout( grid );
 
 	targetCount = new QDoubleSpinBox;
+	wwMakeScrubField( targetCount );
 	targetCount->setRange( 0.001, 1.0 );
 	targetCount->setDecimals( 3 );
 	targetCount->setSingleStep( 0.001 );
@@ -705,6 +707,7 @@ int SimplifyMeshDialog::exec()
 	grid->addWidget( targetCount, 0, 3 );
 
 	maxError = new QDoubleSpinBox;
+	wwMakeScrubField( maxError );
 	maxError->setRange( 0.0001, 0.5 );
 	maxError->setDecimals( 4 );
 	maxError->setSingleStep( 0.0001 );
@@ -713,6 +716,7 @@ int SimplifyMeshDialog::exec()
 	grid->addWidget( maxError, 1, 3 );
 
 	minTriangles = new QDoubleSpinBox;
+	wwMakeScrubField( minTriangles );
 	minTriangles->setRange( 1.0, 100000.0 );
 	minTriangles->setDecimals( 0 );
 	minTriangles->setSingleStep( 1.0 );
@@ -735,6 +739,7 @@ int SimplifyMeshDialog::exec()
 	grid->addWidget( enablePrune, 3, 3 );
 
 	normalWeight = new QDoubleSpinBox;
+	wwMakeScrubField( normalWeight );
 	normalWeight->setRange( 0.0, 100.0 );
 	normalWeight->setDecimals( 3 );
 	normalWeight->setSingleStep( 0.001 );
@@ -743,6 +748,7 @@ int SimplifyMeshDialog::exec()
 	grid->addWidget( normalWeight, 4, 3 );
 
 	uvWeight = new QDoubleSpinBox;
+	wwMakeScrubField( uvWeight );
 	uvWeight->setRange( 0.0, 100.0 );
 	uvWeight->setDecimals( 3 );
 	uvWeight->setSingleStep( 0.001 );
@@ -751,6 +757,7 @@ int SimplifyMeshDialog::exec()
 	grid->addWidget( uvWeight, 5, 3 );
 
 	colorWeight = new QDoubleSpinBox;
+	wwMakeScrubField( colorWeight );
 	colorWeight->setRange( 0.0, 100.0 );
 	colorWeight->setDecimals( 3 );
 	colorWeight->setSingleStep( 0.001 );

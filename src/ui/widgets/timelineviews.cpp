@@ -8,6 +8,7 @@ BSD License - see timeline.h
 #include "timeline_p.h"
 
 #include "model/nifmodel.h"
+#include "ui/widgets/wwnumberfield.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -1720,6 +1721,16 @@ QLineEdit * TimelineInspector::addField( QFormLayout * form, const QString & lab
 		edit->setReadOnly( true );
 	}
 
+	/* These are plain QLineEdits holding numbers, so they get the gesture by
+	 * retro-fit. Read-only ones do not: there is nothing to commit.
+	 *
+	 * It has to happen in the factory rather than at the call sites, because
+	 * rebuild() recreates the whole content widget on every selection change -
+	 * an attach done outside would be thrown away with it.
+	 */
+	if ( !edit->isReadOnly() )
+		wwMakeScrubField( edit, WwScrubSpec{ 0.01, WwScrubSpec::No, false } );
+
 	form->addRow( label, edit );
 	return edit;
 }
@@ -1802,6 +1813,10 @@ void TimelineInspector::rebuild()
 
 					auto fwdEdit = new QLineEdit( QString::number( fv, 'f', 4 ), content );
 					auto bwdEdit = new QLineEdit( QString::number( bv, 'f', 4 ), content );
+					// these two do not go through addField, so a fix applied only
+					// to the factory would miss them
+					for ( QLineEdit * te : { fwdEdit, bwdEdit } )
+						wwMakeScrubField( te, WwScrubSpec{ 0.01, WwScrubSpec::No, false } );
 					QPersistentModelIndex pKey( keyRow );
 					int c2 = cIdx, l2 = lIdx, compCopy = comp;
 

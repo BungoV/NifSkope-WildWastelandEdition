@@ -1,4 +1,5 @@
 #include "spellbook.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "nifsnapshot.h"
 #include "wwskin.h"
 
@@ -1333,6 +1334,10 @@ public:
 		QSpinBox * spn = new QSpinBox;
 		vbox->addWidget( spn );
 		spn->setRange( min, max );
+		// bounded scalars within their packed field, so a drag is meaningful;
+		// the gesture respects isEnabled, which matters because the part-number
+		// box is checkbox-gated below
+		wwMakeScrubField( spn );
 
 		if ( chk ) {
 			QObject::connect( chk, &QCheckBox::toggled, spn, &QSpinBox::setEnabled );

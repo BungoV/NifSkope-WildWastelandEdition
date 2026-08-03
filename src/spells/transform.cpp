@@ -2,6 +2,7 @@
 
 #include "ui/widgets/nifeditors.h"
 #include "gl/gltools.h"
+#include "ui/widgets/wwnumberfield.h"
 
 #include <QApplication>
 #include <QBuffer>
@@ -532,6 +533,7 @@ public:
 
 		for ( int a = 0; a < 3; a++ ) {
 			QDoubleSpinBox * spn = new QDoubleSpinBox;
+			wwMakeScrubField( spn );
 			scale << spn;
 			spn->setValue( 1.0 );
 			spn->setDecimals( 4 );
