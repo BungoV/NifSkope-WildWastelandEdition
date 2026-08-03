@@ -13811,7 +13811,20 @@ void NifSkope::initDockWidgets()
 		lodBtn->setText( tr( "LOD 0" ) );
 		lodBtn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
 		lodBtn->setAutoRaise( false );
-		lodBtn->setStyleSheet( boxQss );
+		/* wwBoxedButtonQss alone, NOT boxQss.
+		 *
+		 * boxQss appends "QToolButton:disabled { border-color: ... }" on top of a
+		 * base rule of "border: 1px solid transparent" - so a DISABLED button
+		 * grows a visible box. LOD is disabled whenever the file has no LODs,
+		 * which is exactly when bungo saw one; Animation and Collision are
+		 * enabled, so theirs never showed. The plain sheet greys the text and
+		 * leaves the border transparent.
+		 *
+		 * Extra right padding: the others carry an icon, which pushes their text
+		 * left and leaves the menu indicator room. A text-only button has the
+		 * arrow sitting against the last character.
+		 */
+		lodBtn->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 18px 3px 8px" ) ) );
 		lodBtn->setObjectName( QStringLiteral( "ViewLodButton" ) );
 		lodBtn->setEnabled( false );		// until a file with LOD meshes loads
 		lodBtn->setToolTip( tr( "This file has no LOD meshes" ) );
@@ -13862,9 +13875,10 @@ void NifSkope::initDockWidgets()
 			}
 		} );
 
+		// the rule that closes the Workspaces group, then LOD directly against
+		// Animation - one group of three viewport dropdowns, not two
+		wwGroupBreak( ui->tView );
 		ui->tView->addWidget( lodBtn );
-		{ QWidget * g = new QWidget( ui->tView ); g->setFixedWidth( 8 );
-		  ui->tView->addWidget( g ); }
 
 		auto * animBtn = new QToolButton( this );
 		animBtn->setPopupMode( QToolButton::InstantPopup );
