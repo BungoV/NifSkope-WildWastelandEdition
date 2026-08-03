@@ -3815,8 +3815,23 @@ void GLView::paintGL()
 				}
 			}
 
-			// --- selected elements, always on top ---
-			glDisable( GL_DEPTH_TEST );
+			/* --- selected elements, on top of their own surface ---
+			 *
+			 * Depth-tested unless X-ray is on, same as the fill above. This block
+			 * covers the face outlines, the selected/active edges and the
+			 * selected/active vertex dots; with the test off they were visible
+			 * through solid geometry, so a selection on the far side of a closed
+			 * mesh drew over the front of it. Blender hides occluded edit-mode
+			 * elements too - X-ray is exactly the toggle that reveals them.
+			 *
+			 * 753af78 turned this off so nearby UNCONNECTED geometry could not
+			 * occlude a selection. What actually keeps a selection on top of its
+			 * own surface is the 0.997 eye-pull applied to every overlay vertex,
+			 * not the missing depth test - which is why the base wireframe below
+			 * draws depth-tested at the same offset and does not z-fight.
+			 */
+			if ( scene->xRay )
+				glDisable( GL_DEPTH_TEST );
 
 			// outline around every filled face: white in edge/face select mode
 			// (Blender), orange in pure vertex mode so the selection still reads
