@@ -155,6 +155,9 @@ public:
 	//! fields are built before the theme loads — so the theme reload must.
 	void restyle();
 
+	//! Hold the host's line edit out of the two arrow gutters.
+	void insetEditor();
+
 protected:
 	bool eventFilter( QObject * o, QEvent * ev ) override;
 	void paintEvent( QPaintEvent * ) override;
@@ -163,6 +166,7 @@ private:
 	QPointer<QWidget> m_host;
 	QPointer<WwScrub> m_scrub;
 	bool m_hover = false;
+	bool m_insetting = false;	//!< re-entry guard: setGeometry raises Resize
 };
 
 //! The number field, for new code.

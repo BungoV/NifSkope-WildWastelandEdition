@@ -313,10 +313,47 @@ WwScrubChrome::WwScrubChrome( QWidget * host, WwScrub * scrub )
 	lower();
 	if ( host ) {
 		host->installEventFilter( this );
+		// Also on the line edit: an event filter runs BEFORE the target's own
+		// handler, so QAbstractSpinBox re-lays its editor immediately after we
+		// inset it. Correcting the editor's OWN Resize/Move is what makes the
+		// inset stick.
+		if ( QLineEdit * le = host->findChild<QLineEdit *>() )
+			le->installEventFilter( this );
 		setGeometry( host->rect() );
+		insetEditor();
 		show();
 	}
 	restyle();
+}
+
+void WwScrubChrome::insetEditor()
+{
+	/* Hold the number out of the two gutters.
+	 *
+	 * Without this the line edit spans the whole widget, so the value paints
+	 * OVER the ‹ › glyphs and - worse - covers the two click zones, which makes
+	 * the arrows purely decorative: a press in the margin lands on the line
+	 * edit and starts a scrub instead of stepping. Both symptoms have one
+	 * cause, and this was simply dropped when the original field was moved out
+	 * of nifskope_ui.cpp into this file.
+	 *
+	 * The std::max matters: a widget narrower than two gutters would otherwise
+	 * get a negative setGeometry width, which is a Qt warning and a nonsense
+	 * layout. Clamped to 0 the field degenerates to two step zones.
+	 */
+	if ( !m_host || m_insetting )
+		return;
+	QLineEdit * le = m_host->findChild<QLineEdit *>();
+	if ( !le )
+		return;
+	const QRect want( WW_ARROW_W, 0,
+		std::max( m_host->width() - 2 * WW_ARROW_W, 0 ), m_host->height() );
+	if ( le->geometry() == want )
+		return;
+	// setGeometry re-enters this through the editor's own Resize/Move
+	m_insetting = true;
+	le->setGeometry( want );
+	m_insetting = false;
 }
 
 void WwScrubChrome::restyle()
@@ -329,21 +366,38 @@ void WwScrubChrome::restyle()
 	 * they stayed dark in the Light theme.
 	 */
 	if ( auto * sb = qobject_cast<QAbstractSpinBox *>( m_host.data() ) ) {
+		/* The :disabled rules are not optional. Setting `color` at all overrides
+		 * the palette's Disabled role, so without them a read-only field paints
+		 * its number in the ordinary colour and reads as editable - which is
+		 * exactly what happened beside the combo boxes in the Collision
+		 * Manager, where a compiled body greys Motion and Quality but the
+		 * numbers stayed bright.
+		 */
 		sb->setStyleSheet( QStringLiteral(
 			"QAbstractSpinBox { background: %1; border: none; border-radius: 3px; color: %2; }"
+			"QAbstractSpinBox:disabled { background: %4; color: %5; }"
 			"QLineEdit { background: transparent; border: none; color: %2;"
-			" selection-background-color: %3; selection-color: #ffffff; }" )
-			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ) ) );
+			" selection-background-color: %3; selection-color: #ffffff; }"
+			"QLineEdit:disabled { background: transparent; color: %5; }" )
+			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ),
+				wwSkinColor( "bgAlt" ), wwSkinColor( "textMuted" ) ) );
 	}
 	update();
 }
 
 bool WwScrubChrome::eventFilter( QObject * o, QEvent * ev )
 {
+	if ( o != m_host ) {
+		// the editor's own layout, corrected after Qt has done it
+		if ( ev->type() == QEvent::Resize || ev->type() == QEvent::Move )
+			insetEditor();
+		return QWidget::eventFilter( o, ev );
+	}
 	if ( o == m_host ) {
 		switch ( ev->type() ) {
 		case QEvent::Resize:
 			setGeometry( m_host->rect() );
+			insetEditor();
 			break;
 		case QEvent::Enter:
 			// hover is tracked on the FRAME, not the line edit: Qt sends no
@@ -373,6 +427,11 @@ void WwScrubChrome::paintEvent( QPaintEvent * )
 		return;
 	QPainter p( this );
 	p.setRenderHint( QPainter::Antialiasing );
+
+	// A disabled field offers nothing: Qt will not deliver it a mouse event, so
+	// drawing the arrows would advertise a control that cannot respond.
+	if ( !m_host->isEnabled() )
+		return;
 
 	const bool scrubbing = m_scrub && m_scrub->isScrubbing();
 	if ( scrubbing ) {

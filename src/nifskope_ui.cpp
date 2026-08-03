@@ -6876,6 +6876,85 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				ve->deleteLater();
 			}
 
+			// ---- E. the number must not sit on top of the arrows -------------
+			//
+			// The gutters only exist if the internal line edit is held out of
+			// them. Without the inset the value paints over the glyphs AND
+			// covers the two click zones, so the arrows become decorative: a
+			// press in the margin lands on the line edit and scrubs instead.
+			{
+				auto * nf = new WwNumberField( skope );
+				// show() and polish first: an unshown widget has never had its
+				// internal layout run, so its editor geometry is meaningless
+				// and the check would be measuring nothing
+				nf->show();
+				nf->ensurePolished();
+				nf->resize( 200, 24 );
+				QApplication::processEvents();
+				QLineEdit * le = nf->findChild<QLineEdit *>();
+				const QRect g = le ? le->geometry() : QRect();
+				log << "E: host is " << nf->width() << "x" << nf->height()
+					<< ", chrome " << nf->findChildren<WwScrubChrome *>().size()
+					<< ", editor " << g.x() << "," << g.y()
+					<< " " << g.width() << "x" << g.height() << "\n";
+				check( "E: the field has its chrome",
+					!nf->findChildren<WwScrubChrome *>().isEmpty() );
+				check( "E: the number is held clear of the left gutter", g.x() == 16 );
+				check( "E: ...and of the right one", g.width() == nf->width() - 32 );
+
+				// and the functional half: a gutter click must STEP, not scrub.
+				// Range and start value are set deliberately: a default
+				// QDoubleSpinBox starts at 0 with minimum 0, so a step DOWN
+				// clamps and the check would fail on correct code.
+				nf->setRange( -100.0, 100.0 );
+				nf->setValue( 10.0 );
+				const double before = nf->value();
+				QMouseEvent gp( QEvent::MouseButtonPress, QPointF( 8, 12 ), QPointF( 508, 512 ),
+					Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+				QApplication::sendEvent( nf, &gp );
+				log << "E: left-gutter click " << before << " -> " << nf->value() << "\n";
+				/* Weaker than it looks, and worth saying so: the event is sent
+				 * straight to the field, so this proves mousePressEvent's
+				 * arithmetic, not that a real click REACHES it. What guarantees
+				 * that is the inset asserted above - without it the line edit
+				 * covers the gutters and swallows the press.
+				 */
+				check( "E: a click in the gutter steps the value down",
+					nf->value() == before - nf->singleStep() );
+				nf->deleteLater();
+			}
+
+			// ---- F. a locked field must look locked --------------------------
+			//
+			// Setting `color` in a stylesheet overrides the palette's Disabled
+			// role, so a read-only field kept painting its number in the
+			// ordinary colour and read as editable - which is what happened in
+			// the Collision Manager, where a compiled body greys Motion and
+			// Quality but the numbers stayed bright. Rendered and compared as
+			// pixels, not asserted about the sheet text: what matters is what
+			// the user sees.
+			{
+				auto * nf = new WwNumberField( skope );
+				nf->resize( 120, 24 );
+				nf->setValue( 42.0 );
+				QApplication::processEvents();
+				const QImage on = nf->grab().toImage();
+				nf->setEnabled( false );
+				QApplication::processEvents();
+				const QImage off = nf->grab().toImage();
+				int differing = 0;
+				if ( !on.isNull() && on.size() == off.size() ) {
+					for ( int y = 0; y < on.height(); y++ )
+						for ( int x = 0; x < on.width(); x++ )
+							if ( on.pixel( x, y ) != off.pixel( x, y ) )
+								differing++;
+				}
+				log << "F: pixels differing, enabled vs disabled: " << differing << "\n";
+				check( "F: a disabled field renders differently from an enabled one",
+					differing > 0 );
+				nf->deleteLater();
+			}
+
 			log << checks << " checks, " << fails << " failures\n";
 			log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
 			logf.close();
