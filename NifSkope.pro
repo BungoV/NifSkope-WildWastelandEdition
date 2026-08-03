@@ -116,6 +116,16 @@ DEFINES += NIFSKOPE_VERSION=\\\"$${VER}\\\"
 	DEFINES += NIFSKOPE_REVISION=\\\"$${REVISION}\\\"
 }
 
+# Wild Wasteland Edition version.
+#
+# Deliberately NOT the same number as VER above. NIFSKOPE_VERSION is the
+# upstream lineage (2.0.dev11) and NifSkope::migrateSettings compares against
+# it to decide which registry keys to carry forward, so it has to keep tracking
+# upstream rather than us. This is the number on the title bar and the About
+# box; bump it here and both follow.
+WW_VER = 0.2
+DEFINES += WW_EDITION_VERSION=\\\"$${WW_VER}\\\"
+
 
 ###############################
 ## OUTPUT DIRECTORIES
@@ -571,9 +581,11 @@ build_pass|!debug_and_release {
 	SED = $$getSed()
 
 	!isEmpty(SED) {
-		# Replace @VERSION@ with number from build/VERSION
-		# Copy build/README.md.in > README.md
-		QMAKE_PRE_LINK += $${SED} -e s/@VERSION@/$${VER}/ $${PWD}/build/README.md.in > $${PWD}/README.md $$nt
+		# README.md is GENERATED - edit build/README.md.in, not README.md, or
+		# the next link silently reverts you.
+		# @VERSION@   -> build/VERSION   (the upstream lineage, 2.0.dev11)
+		# @WWVERSION@ -> WW_VER above    (this fork's edition number)
+		QMAKE_PRE_LINK += $${SED} -e s/@VERSION@/$${VER}/ -e s/@WWVERSION@/$${WW_VER}/ $${PWD}/build/README.md.in > $${PWD}/README.md $$nt
 	}
 
 
@@ -594,11 +606,16 @@ build_pass|!debug_and_release {
 	SHADERS += \
 		res/shaders
 
+	# Shipped alongside the exe, renamed .md -> .txt by copyFiles below.
+	# Paths are repo-relative: the plan/reference docs live under docs/.
 	READMES += \
 		CHANGELOG.md \
 		LICENSE.md \
 		README.md \
-		README_GLTF.md
+		WW_FEATURES.md \
+		docs/README_GLTF.md \
+		docs/TROUBLESHOOTING.md \
+		docs/CLI.md
 
 	copyDirs( $$SHADERS, shaders )
 	#copyDirs( $$LANG, lang )

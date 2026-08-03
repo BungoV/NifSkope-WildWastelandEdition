@@ -7,21 +7,34 @@ AboutDialog::AboutDialog( QWidget * parent )
 
 	setAttribute( Qt::WA_DeleteOnClose );
 
+	/* Both numbers, because they mean different things: WW_EDITION_VERSION is
+	 * this fork's, NIFSKOPE_VERSION is the upstream release it descends from,
+	 * and a bug report needs to name both to be actionable.
+	 */
 #ifdef NIFSKOPE_REVISION
-	this->setWindowTitle( tr( "About NifSkope %1 (revision %2)" ).arg( NIFSKOPE_VERSION, NIFSKOPE_REVISION ) );
+	this->setWindowTitle( tr( "About NifSkope - Wild Wasteland Edition %1 (on NifSkope %2, revision %3)" )
+		.arg( QStringLiteral( WW_EDITION_VERSION ), QStringLiteral( NIFSKOPE_VERSION ),
+			QStringLiteral( NIFSKOPE_REVISION ) ) );
 #else
-	this->setWindowTitle( tr( "About NifSkope %1" ).arg( NIFSKOPE_VERSION ) );
+	this->setWindowTitle( tr( "About NifSkope - Wild Wasteland Edition %1 (on NifSkope %2)" )
+		.arg( QStringLiteral( WW_EDITION_VERSION ), QStringLiteral( NIFSKOPE_VERSION ) ) );
 #endif
 	QString text = tr( R"rhtml(
 	<p>NifSkope is a tool for opening and editing the NetImmerse file format (NIF).</p>
 
+	<p><b>Wild Wasteland Edition</b> is a Fallout 4 focused fork of
+	<a href='https://github.com/fo76utils/nifskope'>fo76utils/nifskope</a>, which is in turn
+	a fork of <a href='https://github.com/niftools/nifskope'>niftools/nifskope</a>.
+	Source, changelog and builds:
+	<a href='https://github.com/bungov/NifSkope-WildWastelandEdition'>github.com/bungov/NifSkope-WildWastelandEdition</a>.</p>
+
 	<p>NifSkope is free software available under a BSD license.
 	The source is available via <a href='https://github.com/niftools/nifskope'>GitHub</a></p>
 
-	<p>The most recent version of NifSkope can be downloaded from the <a href='https://github.com/niftools/nifskope/releases'>
+	<p>The most recent version of upstream NifSkope can be downloaded from the <a href='https://github.com/niftools/nifskope/releases'>
 	official GitHub release page</a>.</p>
 
-	<p>A detailed changelog and the latest developmental builds of NifSkope
+	<p>A detailed changelog and the latest developmental builds of upstream NifSkope
 	<a href='https://github.com/fo76utils/nifskope/releases'>can be found here</a>.</p>
 
 	<p>For the generation of mopp code on Windows builds, NifSkope uses <a href='http://www.havok.com'>Havok(R)</a>:<br>

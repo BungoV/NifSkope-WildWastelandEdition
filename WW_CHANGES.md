@@ -1,6 +1,81 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
-## 2026-08-03b — One number field, and the five it replaced
+## 2026-08-03c — 0.2, and the repository goes public
+
+First public push, as `bungov/NifSkope-WildWastelandEdition`. Nothing about the
+program's behaviour changed; this is the packaging.
+
+### Two version numbers, and why
+
+`WW_VER = 0.2` now lives in `NifSkope.pro` and reaches the code as
+`WW_EDITION_VERSION`. It is deliberately **not** `build/VERSION`, which stays at
+upstream's `2.0.dev11`.
+
+The reason is `applicationName`. It is `"NifSkope " + rawToMajMin(NIFSKOPE_VERSION)`
+— `"NifSkope 2.0"` — and that string is the **QSettings key**. Renaming it to
+carry the edition would silently move every existing user's settings to a path
+nothing reads. `NifSkope::migrateSettings` also compares against
+`NIFSKOPE_VERSION` to decide what to carry forward, so that number has to keep
+tracking upstream rather than us.
+
+So the edition lives on `applicationDisplayName` and the About title, and the
+two numbers are shown together where a bug report would need them:
+*About NifSkope - Wild Wasteland Edition 0.2 (on NifSkope 2.0.dev11, revision …)*.
+Cutting 0.3 is one line in `NifSkope.pro`.
+
+Verified in the linked binary, not just the source: `Wild Wasteland Edition 0.2`
+appears once as UTF-16LE (the `QStringLiteral`), `0.1` not at all.
+
+### README is generated — which the build had to teach me twice
+
+`QMAKE_PRE_LINK` builds `README.md` from `build/README.md.in` by substituting
+`@VERSION@`. Editing `README.md` works right up until the next link, then
+reverts. The rewrite went into the `.in` file, and the rule gained a second
+token, `@WWVERSION@`.
+
+The `READMES` list in the same file then broke the build — it copies docs next
+to the exe, and `README_GLTF.md` had moved to `docs/`. Worth recording because
+the failure came *after* a successful compile and link: `make` reported the exe
+as up to date on the retry and the post-link step never re-ran, so the fix
+needed a forced relink to prove itself. A green incremental `make` is not proof
+that the post-link steps pass.
+
+### The description says Fallout 4 and nothing else
+
+Upstream's README opens with seven games. This one names one. That is a scope
+statement, not a claim of removal — the inherited format support for other games
+is still compiled in, and `WW_FEATURES.md` says so in as many words rather than
+leaving someone to discover it. No work here targets them and nothing here is
+tested against them.
+
+### Two new documents
+
+- **`WW_FEATURES.md`** — everything the fork adds against `upstream-base`
+  (fo76utils `develop` @ `f2587869`), in fourteen sections. The counts are
+  measured, not estimated: 382 commits, `src/` +112,219 / −7,902 over 145 files,
+  57 new source files, spells 158 → 204, 53 rebindable shortcuts, 60 harnesses.
+  It ends with a "Not in this edition" section, because a feature list that only
+  lists wins is a sales page.
+- **`HANDOFF.md`** — replaces `CURRENT_STATUS.md`, which was twelve days stale
+  and described a working agreement that had since been superseded twice. Build
+  commands, layout, the landmines (CRLF files, stale incremental builds, the
+  `QMenu` icon/check column, event-filter ordering, `QToolButton::sizeHint`).
+
+### Repository scrub
+
+- Four inherited GitHub Actions workflows removed, plus `.travis.yml` and
+  `appveyor.yml`. They are fo76utils' release pipeline: they fetch CoACD and
+  NifMopp from *their* releases and push tags. On another account they either
+  fail or publish releases nobody asked for.
+- `.gitmodules` removed. It declared five submodules — qhull, gli, meshoptimizer,
+  kfmxml, nifxml — but **no gitlinks are tracked**; all five are vendored as
+  real files. It was inert, and it told contributors to clone with
+  `--recurse-submodules` for nothing.
+- `out.txt`, `err.txt`, `build_rigging.log`, `tools/link.log` and a committed
+  `tools/test_hkdecode.exe` untracked and gitignored.
+- 22 plan/audit/reference documents moved to `docs/`. Source comments cite them
+  by bare filename, which still resolves — the names are unique.
+
 
 bungo asked for the Move field's behaviour — hover arrows, press and drag the
 number — on every type-in field. The gesture already existed **five times**:

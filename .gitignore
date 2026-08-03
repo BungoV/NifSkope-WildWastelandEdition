@@ -23,3 +23,11 @@ dist/
 # render-regression scratch: baseline/ IS tracked (it is the guard), current/ is
 # per-run output and would churn on every capture
 tools/render_regression/current/
+
+# captured build output that used to be committed by accident
+out.txt
+err.txt
+tools/link.log
+
+# one-off decoder scratch binaries built by hand next to their source
+tools/*.exe

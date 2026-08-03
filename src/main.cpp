@@ -99,10 +99,15 @@ int main( int argc, char * argv[] )
 		a->setOrganizationDomain( "niftools.org" );
 		a->setApplicationName( "NifSkope " + NifSkopeVersion::rawToMajMin( NIFSKOPE_VERSION ) );
 		a->setApplicationVersion( NIFSKOPE_VERSION );
+		/* The display name carries the edition; applicationName deliberately
+		 * does not. applicationName is the QSettings key ("NifSkope 2.0"), so
+		 * renaming it would strand every existing user's settings under a path
+		 * nothing reads any more. WW_EDITION_VERSION comes from NifSkope.pro.
+		 */
 #ifdef NIFSKOPE_REVISION
-		a->setApplicationDisplayName( QStringLiteral( "NifSkope - Wild Wasteland Edition 0.1 (build " ) + NIFSKOPE_REVISION + ", " + __DATE__ + ")" );
+		a->setApplicationDisplayName( QStringLiteral( "NifSkope - Wild Wasteland Edition " WW_EDITION_VERSION " (build " ) + NIFSKOPE_REVISION + ", " + __DATE__ + ")" );
 #else
-		a->setApplicationDisplayName( QStringLiteral( "NifSkope - Wild Wasteland Edition 0.1 (" ) + __DATE__ + ")" );
+		a->setApplicationDisplayName( QStringLiteral( "NifSkope - Wild Wasteland Edition " WW_EDITION_VERSION " (" ) + __DATE__ + ")" );
 #endif
 
 		// Must set current directory or this causes issues with several features
