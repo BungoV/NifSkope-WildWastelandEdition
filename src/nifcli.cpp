@@ -1561,9 +1561,9 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 			  << ( degenerate ? QString( ", %1 DEGENERATE" ).arg( degenerate ) : QString() )
 			  << Qt::endl;
 
-		out() << QString( "  %1 %2 %3 %4 %5 %6" ).arg( "body", -6 ).arg( "node", -34 )
+		out() << QString( "  %1 %2 %3 %4 %5 %6 %7" ).arg( "body", -6 ).arg( "node", -34 )
 					.arg( "layer", -6 ).arg( "shapes", -7 ).arg( "friction", -9 )
-					.arg( "restitution" ) << Qt::endl;
+					.arg( "restitution", -12 ).arg( "material" ) << Qt::endl;
 		for ( const auto & ref : it.value() ) {
 			int mine = 0;
 			for ( const HknpShape & shp : sys.shapes ) {
@@ -1577,11 +1577,13 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 			 * Collision Manager's selected-body editor -- one body at a time,
 			 * which is no way to learn what a corpus actually carries.
 			 */
-			out() << QString( "  %1 %2 %3 %4 %5 %6" )
+			out() << QString( "  %1 %2 %3 %4 %5 %6 %7" )
 						.arg( ref.first, -6 )
 						.arg( nif.get<QString>( nif.getBlockIndex( ref.second ), "Name" ), -34 )
 						.arg( phys.layer, -6 ).arg( mine, -7 )
-						.arg( phys.friction, -9, 'f', 3 ).arg( phys.restitution, 0, 'f', 3 )
+						.arg( phys.friction, -9, 'f', 3 ).arg( phys.restitution, -12, 'f', 3 )
+						.arg( QStringLiteral( "0x%1" )
+							.arg( phys.materialCRC, 8, 16, QLatin1Char( '0' ) ).toUpper() )
 				  << Qt::endl;
 		}
 		if ( !sys.bones.isEmpty() ) {
@@ -1656,8 +1658,8 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 					  << detail << Qt::endl;
 			}
 		}
-		out() << QString( "  %1 %2 %3 %4" ).arg( "shape", -6 ).arg( "class", -34 )
-					.arg( "body", -6 ).arg( "geometry" ) << Qt::endl;
+		out() << QString( "  %1 %2 %3 %4 %5" ).arg( "shape", -6 ).arg( "class", -34 )
+					.arg( "body", -6 ).arg( "material", -12 ).arg( "geometry" ) << Qt::endl;
 		for ( int i = 0; i < sys.shapes.size(); i++ ) {
 			const HknpShape & shp = sys.shapes.at( i );
 			QString geom = QString( "%1 v / %2 t" ).arg( shp.verts.size() ).arg( shp.tris.size() );
@@ -1675,8 +1677,11 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 					.arg( shp.massCom[2], 0, 'f', 4 )
 					.arg( mi[0], 0, 'g', 4 ).arg( mi[1], 0, 'g', 4 ).arg( mi[2], 0, 'g', 4 );
 			}
-			out() << QString( "  %1 %2 %3 %4" )
-						.arg( i, -6 ).arg( shp.className, -34 ).arg( shp.bodyId, -6 ).arg( geom )
+			out() << QString( "  %1 %2 %3 %4 %5" )
+						.arg( i, -6 ).arg( shp.className, -34 ).arg( shp.bodyId, -6 )
+						.arg( QStringLiteral( "0x%1" )
+							.arg( shp.shapeMaterialCRC, 8, 16, QLatin1Char( '0' ) ).toUpper(), -12 )
+						.arg( geom )
 				  << Qt::endl;
 		}
 	}

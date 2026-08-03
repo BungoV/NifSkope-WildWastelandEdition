@@ -308,9 +308,22 @@ static QString basicCollisionLayerName( quint32 layer )
 
 static QString materialCrcText( quint32 crc )
 {
-	if ( !crc ) return QObject::tr( "Unknown" );
+	if ( !crc ) return QObject::tr( "None" );
 	QString hex = QStringLiteral( "%1" ).arg( crc, 8, 16, QLatin1Char( '0' ) ).toUpper();
-	return QObject::tr( "Unknown (0x%1)" ).arg( hex );
+	/* "Unnamed", not "Unknown": this is a perfectly good material ID that
+	 * nif.xml's Fallout4HavokMaterial list has no name for, and calling it
+	 * unknown makes a healthy file look broken.
+	 *
+	 * Measured over 150 FO4 files with compiled collision (architecture,
+	 * SetDressing, Furniture): 250 shape materials, 27 distinct IDs, only 72%
+	 * of which resolve. The most common material in that sample - 0xFCB37EA0,
+	 * 52 uses - is itself unnamed. So this is a hole in the name table, not a
+	 * decode failure: the same scan found the BODY material to be 0 on all 157
+	 * bodies, which is why the shape's own ID is what reaches here.
+	 *
+	 * The + button beside the Material combo names one permanently.
+	 */
+	return QObject::tr( "Unnamed (0x%1)" ).arg( hex );
 }
 
 class CollisionTreeItem final : public QTreeWidgetItem
@@ -627,9 +640,16 @@ private:
 	{
 		const auto & options = NifValue::enumOptionData( materialEnumType() ).o;
 		auto it = options.constFind( crc );
-		QString id = it == options.cend() ? tr( "Unlisted/custom material" ) : it.value().first;
 		QString hex = QStringLiteral( "%1" ).arg( crc, 8, 16, QLatin1Char( '0' ) ).toUpper();
-		return tr( "%1\nCRC: 0x%2 (%3)" ).arg( id, hex ).arg( crc );
+		if ( it == options.cend() ) {
+			// say that the DATA is fine and only the name is missing, and point at
+			// the one control that fixes it
+			return tr( "Unnamed material\nCRC: 0x%1 (%2)\n\n"
+				"A valid material ID that nif.xml has no name for - the collision "
+				"data is fine. Use + beside the Material box to name it." )
+				.arg( hex ).arg( crc );
+		}
+		return tr( "%1\nCRC: 0x%2 (%3)" ).arg( it.value().first, hex ).arg( crc );
 	}
 
 	QString materialText( quint32 crc ) const
@@ -2226,11 +2246,20 @@ private:
 		tree->setAlternatingRowColors( true );
 		tree->setSelectionMode( QAbstractItemView::SingleSelection );
 		tree->setContextMenuPolicy( Qt::CustomContextMenu );
-		tree->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
-		tree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
-		tree->header()->setSectionResizeMode( 2, QHeaderView::ResizeToContents );
-		tree->header()->setSectionResizeMode( 3, QHeaderView::Stretch );
-		tree->header()->setSectionResizeMode( 6, QHeaderView::ResizeToContents );
+		/* Every column sizes to its own text; the view scrolls when the dock is
+		 * narrower than the total.
+		 *
+		 * Material used to be Stretch, which only gets the space the other columns
+		 * leave over - in a docked panel that is nearly nothing, so the material
+		 * name sat permanently clipped to "U...". Mass and State had no mode set
+		 * at all and stayed at the default section width. And since
+		 * ResizeToContents and Stretch both disable interactive resizing, the
+		 * columns could not be dragged wider either - clipped AND frozen.
+		 */
+		for ( int c = 0; c < tree->columnCount(); c++ )
+			tree->header()->setSectionResizeMode( c, QHeaderView::ResizeToContents );
+		// or the last column stretches instead of fitting its text
+		tree->header()->setStretchLastSection( false );
 		// Bone is logical column 6 but belongs beside Node; moving the visual
 		// section leaves the 42 literal column indices in this file alone.
 		tree->header()->moveSection( 6, 1 );
@@ -2685,7 +2714,10 @@ private:
 			if ( !ok || name.isEmpty() ) return;
 			QString valueText = QInputDialog::getText( this, tr( "Add Custom Collision Material" ),
 				tr( "Numeric value (decimal or 0x hexadecimal):" ), QLineEdit::Normal,
-				QStringLiteral( "0x00000000" ), &ok ).trimmed();
+				// the selected body's own value, so naming the material you are looking
+				// at does not mean copying the hex out of the tree by hand
+				QStringLiteral( "0x%1" ).arg( material->currentData().toUInt(),
+					8, 16, QLatin1Char( '0' ) ), &ok ).trimmed();
 			if ( !ok ) return;
 			quint32 value = valueText.toUInt( &ok, 0 );
 			if ( !ok ) {
