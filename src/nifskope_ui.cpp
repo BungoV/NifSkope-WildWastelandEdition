@@ -444,21 +444,29 @@ void wwGroupBreak( QToolBar * bar )
  */
 static QIcon wwTickedIcon( const QIcon & base, bool checked )
 {
-	const int px = 16, gap = 3, tickW = 11;
-	QPixmap pm( px + gap + tickW, px );
+	/* SAME canvas as the source icon - the tick goes in the free space at its
+	 * right, it does not make the icon wider.
+	 *
+	 * The first version built a 30x16 pixmap for a 16x16 slot, so Qt scaled the
+	 * whole thing down to fit and every glyph in the menu came out shrunken.
+	 * The glyphs in here are drawn well inside their box, which is the free
+	 * space this uses.
+	 */
+	const int px = 16;
+	QPixmap pm( px, px );
 	pm.fill( Qt::transparent );
 	QPainter p( &pm );
 	p.setRenderHint( QPainter::Antialiasing );
 	base.paint( &p, QRect( 0, 0, px, px ) );
 	if ( checked ) {
 		QPen pen( QColor( wwSkinColor( "accent" ) ) );
-		pen.setWidthF( 1.7 );
+		pen.setWidthF( 1.6 );
 		pen.setCapStyle( Qt::RoundCap );
 		pen.setJoinStyle( Qt::RoundJoin );
 		p.setPen( pen );
-		const qreal x = px + gap, cy = px * 0.5;
-		p.drawLine( QPointF( x + 0.5, cy + 0.5 ), QPointF( x + 3.5, cy + 3.5 ) );
-		p.drawLine( QPointF( x + 3.5, cy + 3.5 ), QPointF( x + 10.0, cy - 3.5 ) );
+		// bottom-right corner, clear of a centred glyph
+		p.drawLine( QPointF( px - 6.5, px - 5.0 ), QPointF( px - 4.5, px - 2.8 ) );
+		p.drawLine( QPointF( px - 4.5, px - 2.8 ), QPointF( px - 0.8, px - 8.0 ) );
 	}
 	p.end();
 	return QIcon( pm );
@@ -12376,14 +12384,31 @@ void NifSkope::initDockWidgets()
 			 * style, including the indicator, with no magic number to drift.
 			 */
 			const QString saved = modeButton->text();
-			int wMax = 0;
+			modeButton->ensurePolished();
+			const QFontMetrics fm( modeButton->font() );
+			int wHint = 0, wText = 0;
 			for ( const QString & s : { tr( "Object Mode" ), tr( "Edit Mode" ), tr( "Pose Mode" ),
 					tr( "Vertex Paint" ), tr( "Weight Paint" ), tr( "Segment Paint" ), tr( "Physics Sim" ) } ) {
 				modeButton->setText( s );
-				wMax = std::max( wMax, modeButton->sizeHint().width() );
+				wHint = std::max( wHint, modeButton->sizeHint().width() );
+				wText = std::max( wText, fm.horizontalAdvance( s ) );
 			}
 			modeButton->setText( saved );
-			modeButton->setFixedWidth( wMax );
+			/* The LARGER of the two estimates.
+			 *
+			 * sizeHint alone elided the label to "Obje...Mode": QToolButton does
+			 * not fold stylesheet padding into its hint, so on a QSS-styled
+			 * button it under-reports. Font metrics alone was the old form and
+			 * over-reported, leaving a gap before the arrow. Taking the max
+			 * cannot clip, and lands on the tighter number wherever the hint is
+			 * honest.
+			 *
+			 * The 32 covers what the text measurement leaves out: 12 px of QSS
+			 * padding, ~4 px icon-to-text spacing, the 2 px border and the menu
+			 * indicator.
+			 */
+			modeButton->setFixedWidth( std::max( wHint,
+				wText + modeButton->iconSize().width() + 32 ) );
 		}
 
 		auto syncModeButton = [this, modeButton, objectMode, editMode, poseMode, vertexPaintMode,

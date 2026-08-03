@@ -365,7 +365,7 @@ QDockWidget * tlCreateUnfuckManagerDock( NifModel * nif, QMainWindow * mw, GLVie
 	Q_UNUSED( ogl );
 	auto * skope = qobject_cast<NifSkope *>( mw );
 
-	auto * dock = new QDockWidget( QObject::tr( "Unfuck" ), mw );
+	auto * dock = new QDockWidget( QObject::tr( "Issue Manager" ), mw );
 	dock->setObjectName( QStringLiteral( "UnfuckManagerDock" ) );
 	dock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
 
