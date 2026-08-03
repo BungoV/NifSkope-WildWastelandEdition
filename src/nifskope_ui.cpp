@@ -431,58 +431,36 @@ void wwGroupBreak( QToolBar * bar )
 	pad();
 }
 
-/*! An action's own icon with a tick beside it.
+/*! Show a checkable menu item's state in the gap between its icon and its label.
  *
  *  QMenu paints the icon and the check indicator in the SAME column, so a
- *  checkable item that has an icon silently loses its checkmark — which is
- *  every overlay toggle in the Overlays menu. You could see the glyph and not
- *  whether the thing was on.
+ *  checkable item that HAS an icon silently loses its checkmark - which was
+ *  every toggle in the Overlays menu. You could see the glyph and not whether
+ *  the thing was on.
  *
- *  Compositing the tick into the icon is the only way to show both without
- *  writing a QStyle. The base icon is captured once and never re-composited, so
- *  toggling cannot stack ticks.
+ *  The tick goes in the leading run of the TEXT, which is the empty space
+ *  between the icon column and the label. Two earlier attempts put it in the
+ *  icon itself: widening the pixmap made Qt scale the whole icon down to fit the
+ *  slot, and drawing it inside the pixmap put it on top of the glyph. Neither is
+ *  the gap.
+ *
+ *  The base text is captured once, so re-syncing cannot stack prefixes. The
+ *  unchecked prefix is a figure space (U+2007), which is fixed-width, so labels
+ *  stay aligned whichever state they are in.
  */
-static QIcon wwTickedIcon( const QIcon & base, bool checked )
-{
-	/* SAME canvas as the source icon - the tick goes in the free space at its
-	 * right, it does not make the icon wider.
-	 *
-	 * The first version built a 30x16 pixmap for a 16x16 slot, so Qt scaled the
-	 * whole thing down to fit and every glyph in the menu came out shrunken.
-	 * The glyphs in here are drawn well inside their box, which is the free
-	 * space this uses.
-	 */
-	const int px = 16;
-	QPixmap pm( px, px );
-	pm.fill( Qt::transparent );
-	QPainter p( &pm );
-	p.setRenderHint( QPainter::Antialiasing );
-	base.paint( &p, QRect( 0, 0, px, px ) );
-	if ( checked ) {
-		QPen pen( QColor( wwSkinColor( "accent" ) ) );
-		pen.setWidthF( 1.6 );
-		pen.setCapStyle( Qt::RoundCap );
-		pen.setJoinStyle( Qt::RoundJoin );
-		p.setPen( pen );
-		// bottom-right corner, clear of a centred glyph
-		p.drawLine( QPointF( px - 6.5, px - 5.0 ), QPointF( px - 4.5, px - 2.8 ) );
-		p.drawLine( QPointF( px - 4.5, px - 2.8 ), QPointF( px - 0.8, px - 8.0 ) );
-	}
-	p.end();
-	return QIcon( pm );
-}
-
-//! Make a checkable action in `m` show its state even though it has an icon.
 static void wwShowCheckBesideIcon( QAction * a, QMenu * m )
 {
 	if ( !a || !a->isCheckable() || a->icon().isNull() )
-		return;		// no icon: Qt's own checkmark already shows
-	const QIcon base = a->icon();
-	auto sync = [a, base]() { a->setIcon( wwTickedIcon( base, a->isChecked() ) ); };
+		return;		// no icon: Qt's own checkmark already shows, in its own column
+	const QString base = a->text();
+	auto sync = [a, base]() {
+		a->setText( ( a->isChecked() ? QStringLiteral( "✓ " )
+									 : QStringLiteral( "  " ) ) + base );
+	};
 	sync();
 	QObject::connect( a, &QAction::toggled, a, [sync]( bool ) { sync(); } );
-	// also on open: some of these are driven from elsewhere (settings restore,
-	// the visibility menu) and toggled() is not the only way they change
+	// also on open: several of these are driven from elsewhere (the settings
+	// restore, the visibility menu), and toggled() is not the only way they move
 	QObject::connect( m, &QMenu::aboutToShow, a, sync );
 }
 
