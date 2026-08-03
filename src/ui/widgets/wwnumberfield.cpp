@@ -606,6 +606,30 @@ void wwMakeScrubFields( QWidget * root )
 	}
 }
 
+void wwMatchFieldStyle( QWidget * selector )
+{
+	if ( !selector )
+		return;
+	/* Same tokens as WwScrubChrome::restyle, deliberately: if the two ever
+	 * disagree the whole point is lost, so they read from the same names.
+	 * The drop-down button keeps its arrow but loses its frame and its separate
+	 * background, which is what made a combo look like a different species of
+	 * control next to a number field.
+	 */
+	selector->setStyleSheet( QStringLiteral(
+		"QComboBox { background: %1; border: none; border-radius: 3px; color: %2;"
+		" padding-left: 6px; }"
+		"QComboBox:disabled { background: %3; color: %4; }"
+		"QComboBox::drop-down { border: none; width: 16px; }"
+		"QComboBox QAbstractItemView { background: %1; color: %2;"
+		" selection-background-color: %5; selection-color: #ffffff; }"
+		"QComboBox QLineEdit { background: transparent; border: none; color: %2; }"
+		"QComboBox QLineEdit:disabled { color: %4; }" )
+		.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ),
+			wwSkinColor( "bgAlt" ), wwSkinColor( "textMuted" ),
+			wwSkinColor( "bgBtnDown" ) ) );
+}
+
 void wwRestyleScrubFields( QWidget * root )
 {
 	if ( !root )

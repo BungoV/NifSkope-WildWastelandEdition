@@ -222,4 +222,16 @@ void wwMakeScrubFields( QWidget * root );
 //! Re-read theme colours for every scrub field under `root`.
 void wwRestyleScrubFields( QWidget * root );
 
+//! Style a selector so it matches the number fields beside it.
+/*! A QComboBox and a WwNumberField in the same form are the same KIND of thing -
+ *  a value you pick versus a value you type - and they should look it. Qt's
+ *  default combo carries a frame, a native arrow and a different background, so
+ *  a row of them beside a row of number fields reads as two unrelated widget
+ *  sets. This applies the field's own tokens: same well colour, same radius, no
+ *  frame, and the same muted treatment when disabled.
+ *
+ *  Safe on an editable combo; its internal line edit is styled too.
+ */
+void wwMatchFieldStyle( QWidget * selector );
+
 #endif // WWNUMBERFIELD_H

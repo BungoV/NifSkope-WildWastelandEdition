@@ -380,6 +380,8 @@ private:
 	QWidget * advancedSection = nullptr;
 	QWidget * advancedBody = nullptr;
 	QDoubleSpinBox * mass = nullptr;
+	//! held as a member so the compiled/editable sync can grey it with the rest
+	QPushButton * massFromMaterialButton = nullptr;
 	QDoubleSpinBox * friction = nullptr;
 	QDoubleSpinBox * restitution = nullptr;
 	QDoubleSpinBox * linearDamping = nullptr;
@@ -1214,6 +1216,10 @@ private:
 		restitution->setEnabled( have && !compiled );
 		layer->setEnabled( have && !compiled );
 		material->setEnabled( have && !compiled );
+		// it computes and writes MASS, which a compiled body does not store as an
+		// editable value - so it belongs with the read-only set, not offering a
+		// dialog that refuses once the user has filled it in
+		massFromMaterialButton->setEnabled( have && !compiled );
 		const QList<QWidget *> physicsEditors = { linearDamping, angularDamping,
 			maxLinearVelocity, maxAngularVelocity, motionSystem, qualityType, solverDeactivation,
 			deactivatorType, keyframed, linkedGroup, collisionWithinGroup, wind, filterGroup,
@@ -2458,6 +2464,14 @@ private:
 		material->setObjectName( QStringLiteral( "CollisionMaterialCombo" ) );
 		configureSearchableSelector( layer, tr( "Search collision layers" ) );
 		configureSearchableSelector( material, tr( "Search materials" ) );
+		/* The selectors sit in the same grid as the number fields and were
+		 * visibly a different species of control - Qt's frame, its own
+		 * background, a native arrow. Same tokens now, so a row of pickers and a
+		 * row of typed values read as one set.
+		 */
+		for ( QComboBox * c : { layer, material, motionSystem, qualityType,
+				solverDeactivation, deactivatorType } )
+			wwMatchFieldStyle( c );
 		linearDamping = new QDoubleSpinBox( physicsGroup );
 		linearDamping->setRange( 0.0, 100.0 ); linearDamping->setDecimals( 3 );
 		angularDamping = new QDoubleSpinBox( physicsGroup );
@@ -2500,7 +2514,8 @@ private:
 		addPhysicsRow( 3, tr( "Restitution" ), restitution, tr( "Solver deact." ), solverDeactivation );
 		addPhysicsRow( 4, tr( "Lin. damping" ), linearDamping, tr( "Max lin. vel." ), maxLinearVelocity );
 		addPhysicsRow( 5, tr( "Ang. damping" ), angularDamping, tr( "Max ang. vel." ), maxAngularVelocity );
-		auto * massFromMaterial = new QPushButton( tr( "Mass from Material..." ), physicsGroup );
+		auto * massFromMaterial = massFromMaterialButton
+			= new QPushButton( tr( "Mass from Material..." ), physicsGroup );
 		massFromMaterial->setToolTip( tr( "Calculate mass from collision volume and a suggested material density" ) );
 		form->addWidget( massFromMaterial, 6, 0, 1, 4 );
 		form->addWidget( physicsHint, 7, 0, 1, 4 );

@@ -4859,6 +4859,61 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					return out;
 				};
 				do {
+					// --- LOD sits with the viewport controls, not the menus -----
+					/* bungo: "Move LOD out of workspaces ... so after the
+					 * separator. Show the current LOD level in text instead of
+					 * just displaying LOD."
+					 *
+					 * Position is checked by the x order of the toolbars in the
+					 * row, not by the .ui declaration order, because restoreState
+					 * replays a saved layout and the position is re-asserted in
+					 * restoreUi afterwards. Reading geometry is the only way to
+					 * see what the user sees.
+					 */
+					{
+						QToolBar * lod = skope->findChild<QToolBar *>( QStringLiteral( "tLOD" ) );
+						QToolBar * file = skope->findChild<QToolBar *>( QStringLiteral( "tFile" ) );
+						QToolBar * view = skope->findChild<QToolBar *>( QStringLiteral( "tView" ) );
+						check( "the LOD toolbar exists", lod && file && view );
+						if ( lod && file && view ) {
+							// force it visible: it is hidden until a file with LOD
+							// meshes loads, and a hidden bar has no useful geometry
+							const bool wasVis = lod->isVisible();
+							lod->setVisible( true );
+							QApplication::processEvents();
+							const int lx = lod->mapTo( skope, QPoint( 0, 0 ) ).x();
+							const int fx = file->mapTo( skope, QPoint( 0, 0 ) ).x();
+							const int vx = view->mapTo( skope, QPoint( 0, 0 ) ).x();
+							log << "top row x: tFile " << fx << ", tLOD " << lx
+								<< ", tView " << vx << "\n";
+							check( "LOD comes after the Workspaces/menu group", lx > fx );
+							check( "...and immediately before the Animation group", lx < vx );
+
+							// the label must name the level, not just say "LOD"
+							QString labels;
+							for ( QLabel * l : lod->findChildren<QLabel *>() )
+								labels += l->text() + QLatin1Char( '|' );
+							log << "LOD toolbar labels: " << labels << "\n";
+							check( "the LOD label carries the level",
+								labels.contains( QRegularExpression(
+									QStringLiteral( "LOD\\s*\\d" ) ) ) );
+
+							QSlider * sl = lod->findChild<QSlider *>();
+							if ( sl ) {
+								sl->setValue( 2 );
+								QApplication::processEvents();
+								QString after;
+								for ( QLabel * l : lod->findChildren<QLabel *>() )
+									after += l->text() + QLatin1Char( '|' );
+								log << "after moving the slider to 2: " << after << "\n";
+								check( "...and follows the slider",
+									after.contains( QStringLiteral( "LOD 2" ) ) );
+								sl->setValue( 0 );
+							}
+							lod->setVisible( wasVis );
+						}
+					}
+
 					// --- the View menu is gone from the menu bar ----------------
 					/* ui->menubar, NOT QMainWindow::menuBar().
 					 *
@@ -15037,8 +15092,20 @@ void NifSkope::initToolBars()
 		ui->aReload->setDisabled(true);
 	} );
 
-	// LOD Toolbar
+	/* LOD toolbar.
+	 *
+	 * It used to sit inside the Workspaces group, before the row's separator,
+	 * which grouped it with the application menus it has nothing to do with -
+	 * LOD is a viewport display control, so it belongs with Animation and
+	 * Collision on the other side of the rule. And its label read a bare "LOD"
+	 * whatever the slider was set to, so the one thing you wanted from it - the
+	 * level you are looking at - was the one thing it did not say.
+	 */
 	QToolBar * tLOD = ui->tLOD;
+	// The row POSITION is re-asserted in restoreUi, after restoreState - doing it
+	// here would be silently undone, which is the same trap the mode-toolbar
+	// reorder fell into. Only the contents are built here.
+	wwGroupBreak( tLOD );
 
 	//QSettings settings;
 	//int lodLevel = settings.value( "GLView/LOD Level", 0 ).toInt();
@@ -15053,10 +15120,18 @@ void NifSkope::initToolBars()
 	lodSlider->setMaximum( 3 );
 	lodSlider->setValue(0);
 
+	// the label carries the level, so the toolbar answers "which LOD am I
+	// looking at?" without the user having to read a slider handle position
+	QLabel * lodLabel = new QLabel( tr( "LOD %1" ).arg( lodSlider->value() ) );
+	lodLabel->setContentsMargins( 6, 0, 4, 0 );
+	ui->aLODDummy->setVisible( false );	// the bare "LOD" text it used to show
+	tLOD->addWidget( lodLabel );
 	tLOD->addWidget( lodSlider );
 	tLOD->setEnabled( false );
 	tLOD->setVisible( false );
 
+	connect( lodSlider, &QSlider::valueChanged, lodLabel,
+		[lodLabel]( int v ) { lodLabel->setText( tr( "LOD %1" ).arg( v ) ); } );
 	connect( lodSlider, &QSlider::valueChanged, ogl->getScene(), &Scene::updateLodLevel );
 	connect( lodSlider, &QSlider::valueChanged, ogl, &GLView::update_GL );
 	connect( nif, &NifModel::lodSliderChanged, [tLOD]( bool enabled ) { tLOD->setEnabled( enabled ); tLOD->setVisible( enabled ); } );
@@ -15431,6 +15506,21 @@ void NifSkope::restoreUi()
 	 * removeToolBar first: it detaches from the toolbar area AND hides, so the
 	 * show() afterwards is required, not decorative.
 	 */
+	/* LOD belongs with the viewport controls, not the application menus.
+	 *
+	 * It sat inside the Workspaces group, on the leading side of the row's
+	 * separator, which put a viewport display control among the menus. Moving it
+	 * after tView lands it in the trailing group with Animation and Collision.
+	 *
+	 * After restoreState for the same reason everything else in this function is.
+	 */
+	if ( ui->tLOD && ui->tView ) {
+		const bool wasVisible = ui->tLOD->isVisible();
+		removeToolBar( ui->tLOD );		// detaches AND hides
+		insertToolBar( ui->tView, ui->tLOD );
+		ui->tLOD->setVisible( wasVisible );
+	}
+
 	if ( viewportHeader && ui->tMode && ui->tRender ) {
 		auto * headerRow = qobject_cast<QHBoxLayout *>( viewportHeader->layout() );
 		if ( headerRow ) {
