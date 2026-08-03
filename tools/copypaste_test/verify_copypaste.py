@@ -16,7 +16,8 @@ The NiAVObject prefix mirrors tools/createskin_test/verify_createskin.py, which
 is validated on these FO4 (bsver 130) files.
 """
 import struct, sys, os
-sys.path.insert(0, r'E:\Projects\ClaudeNifskope\tools\rigging_prototype')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                '..', 'rigging_prototype'))
 import nifparse
 
 NODE_TYPES = ('NiNode', 'BSFadeNode', 'BSLeafAnimNode', 'BSMultiBoundNode',

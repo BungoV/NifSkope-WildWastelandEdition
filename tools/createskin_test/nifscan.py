@@ -1,6 +1,7 @@
 """Scan NIFs: per BSTriShape-family block report name, verts, tris, skin link."""
 import struct, sys, os, glob
-sys.path.insert(0, r'E:\Projects\ClaudeNifskope\tools\rigging_prototype')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                '..', 'rigging_prototype'))
 import io, contextlib
 import nifparse
 

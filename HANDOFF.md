@@ -34,11 +34,20 @@ without asking.
 Windows, MSYS2 UCRT64. Release:
 
 ```bash
-C:/msys64/usr/bin/bash.exe -c 'cd /e/Projects/ClaudeNifskope && PATH=/ucrt64/bin:/usr/bin:$PATH make -f Makefile.Release -j8'
+C:/msys64/usr/bin/bash.exe -c 'cd /e/Projects/NifskopeWildWastelandEdition && PATH=/ucrt64/bin:/usr/bin:$PATH make -f Makefile.Release -j2'
 ```
 
 Output is `release/NifSkope.exe`. That is always the correct binary; do not test
 against anything else.
+
+**`-j2`, not `-j8`.** This machine has hard-shut-down under sustained all-core
+load — Kernel-Power 41 with no bugcheck, which reads as a power or thermal
+margin problem rather than a software fault.
+
+**The generated `Makefile*` files hold absolute paths.** They are gitignored, so
+a fresh clone is fine, but if the repository folder is ever moved or renamed,
+re-run qmake before building or the old path comes back at you as a
+file-not-found from the middle of a link.
 
 **After changing the include graph or adding data members to a widely-included
 class, re-run qmake before trusting an incremental build:**

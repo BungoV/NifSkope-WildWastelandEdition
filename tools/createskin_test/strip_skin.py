@@ -10,7 +10,8 @@ Surgery on a byte level:
     renumbering needed; the Create Skin spell only checks Skin link < 0)
 """
 import struct, sys, os
-sys.path.insert(0, r'E:\Projects\ClaudeNifskope\tools\rigging_prototype')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                '..', 'rigging_prototype'))
 import io, contextlib
 import nifparse
 

@@ -14,8 +14,9 @@ every BSSubIndexTriShape is internally consistent after the merge:
 Pass an expected merged vertex/triangle count (argv[2],[3]) to also assert the
 biggest shape absorbed everything.
 """
-import struct, sys
-sys.path.insert(0, r'E:\Projects\ClaudeNifskope\tools\rigging_prototype')
+import struct, sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                '..', 'rigging_prototype'))
 import nifparse
 
 VA_SKINNING = 6

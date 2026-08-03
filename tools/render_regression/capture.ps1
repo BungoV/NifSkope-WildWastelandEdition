@@ -18,10 +18,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$exe   = 'E:\Projects\ClaudeNifskope\release\NifSkope.exe'
-$root  = 'E:\Projects\ClaudeNifskope\tools\render_regression'
+# Derived from this script's own location, so renaming the repo folder cannot
+# break it. $fo4 stays absolute - it is a game install, not part of the repo.
+$root  = $PSScriptRoot
+$repo  = Split-Path (Split-Path $root -Parent) -Parent
+$exe   = Join-Path $repo 'release\NifSkope.exe'
 $fo4   = 'E:\Tools\Fallout 4\DataUnpacked\Data'
-$repo  = 'E:\Projects\ClaudeNifskope'
 
 # Corpus: each entry must exercise a distinct renderer path. Keep the reasons
 # written down — a case whose purpose is unclear gets dropped the first time it

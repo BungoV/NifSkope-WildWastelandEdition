@@ -13,8 +13,9 @@ Stage A (unskinned target -> _skinned.nif):
 Stage B (_transferred.nif vs the skinned donor, Nearest Vertex on identical
 geometry): per-vertex {bone: weight} must match the donor's.
 """
-import struct, sys, io, contextlib, math
-sys.path.insert(0, r'E:\Projects\ClaudeNifskope\tools\rigging_prototype')
+import struct, sys, os, io, contextlib, math
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                '..', 'rigging_prototype'))
 import nifparse
 
 SHAPES = ('BSTriShape', 'BSSubIndexTriShape', 'BSMeshLODTriShape')
