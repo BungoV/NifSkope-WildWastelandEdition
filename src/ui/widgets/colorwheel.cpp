@@ -1459,6 +1459,8 @@ ColorLineEdit::ColorLineEdit( QWidget * parent ) : QWidget( parent )
 	color->setMaximumWidth( 60 );
 
 	alpha = new QDoubleSpinBox( this );
+	// it starts hidden, which is why the sweep over this file missed it
+	wwMakeScrubField( alpha );
 	alpha->setDecimals( 4 );
 	alpha->setMinimum( 0.0 );
 	alpha->setMaximum( 1.0 );

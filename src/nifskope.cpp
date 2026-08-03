@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui_nifskope.h"
 
 #include "bakegeom.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "freezeanim.h"
 #include "glview.h"
 #include "loadingscreen.h"
@@ -2298,6 +2299,7 @@ bool NifSkope::freezeDocumentDialog( NifModel * nif, const QString & displayName
 	auto * timeRow = new QHBoxLayout;
 	timeRow->addWidget( new QLabel( tr( "Time" ), &dlg ) );
 	auto * timeBox = new QDoubleSpinBox( &dlg );
+	wwMakeScrubField( timeBox );
 	timeBox->setDecimals( 3 );
 	timeBox->setSingleStep( 0.05 );
 	timeBox->setSuffix( tr( " s" ) );

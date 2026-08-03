@@ -1,5 +1,164 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-03b — One number field, and the five it replaced
+
+bungo asked for the Move field's behaviour — hover arrows, press and drag the
+number — on every type-in field. The gesture already existed **five times**:
+
+| where | class |
+|---|---|
+| `nifskope_ui.cpp:183` | `DragSpinBox` — the original, and the best |
+| `uvtools.cpp:96` | `UVDragSpinBox` |
+| `spells/collisiontools.cpp:345` | `CollisionDragSpinBox` |
+| `ui/widgets/colorwheel.cpp:105` | `ColorDragSpinBox` |
+| `ui/widgets/valueedit.cpp:72` | `WwScrubFilter` |
+
+**The cause was scope, not design.** `DragSpinBox` sat in an anonymous namespace
+inside a `.cpp`, physically unreachable from anywhere else, so every new panel
+wrote its own — and they drifted. `src/wwskin.h` records the same disease and the
+same cure; this is that cure applied to the number field.
+
+All five are deleted. There is one: `src/ui/widgets/wwnumberfield.{h,cpp}`.
+
+### The check came first, deliberately
+
+`tests/spells/scrub_uniform.sh` was committed one commit *before* the fix, so its
+failures are recorded against the unfixed binary rather than asserted afterwards.
+What the old build actually did:
+
+| | before | after |
+|---|---|---|
+| copies of the gesture | **5 files** carry the scrub cursor | 1 |
+| the same `VectorEdit`, two ways | direct **0**, via ValueEdit **0.5** | 5 and 5 |
+| `<float_max>` + a 3 px drag | **`inf`** | `<float_max>` |
+| Move field step *(control)* | 50 px → 5.0 | unchanged |
+
+The `inf` was the real find, and it was not a consistency nit. `FloatEdit` spells
+±`FLT_MAX` as a word; Block Details scaled per-pixel step by magnitude, so on that
+value it was `3.4e38 × 0.005` = **1.7e36 per pixel**. Three pixels of accidental
+drag destroyed the field. Measured, not predicted.
+
+The B row is the control and the one number that must not move: Move X/Y/Z never
+calls `setSingleStep`, so it inherits Qt's 1.0 and scrubs at 0.1 units/px.
+`WwNumberField` deliberately does not call it either.
+
+### Two shells, one mechanism
+
+Neither holds gesture or painting code; both just construct a `WwScrub` and a
+`WwScrubChrome`.
+
+- **`WwNumberField`** — a subclass, because eight viewport key guards test
+  `inherits("QAbstractSpinBox")` to decide whether a keystroke belongs to the 3D
+  view or a text field, because Designer promotion needs a class name, and
+  because `SettingsPane` persistence `qobject_cast`s on `QDoubleSpinBox`.
+- **`wwMakeScrubField`** — a retro-fit, because `FloatEdit` is a `QLineEdit` and
+  whole forms come out of `setupUi`.
+
+The chrome is a child widget rather than a `paintEvent` override, because a
+`QObject` filter cannot paint over what it watches — which is exactly why Block
+Details had no arrows at all, on the largest field population in the program.
+
+### Coverage
+
+~370 value fields. About 55 scrubbed before; the rest now do, except ~60 excluded
+**by design**, each with its reason at the call site: file paths, version strings,
+hex and CRC entry, bitmasks, enum ordinals, indices into other structures, and
+integers with four-billion spans where no per-pixel step can both traverse the
+range and express a value.
+
+The highest-leverage single edit was moving the attach into `VectorEdit` /
+`ColorEdit` / `RotationEdit`'s **own** constructors: 36 fields across Transform
+Edit, Light, Material and Matrix4 were the identical widget, live in Block Details
+and dead everywhere else, decided only by who called `new`.
+
+Steps matter as much as attachment. The field scrubs by `singleStep`, so anything
+left at Qt's default would move mass by a kilo per ten pixels. The collision body
+fields got steps chosen for what they measure — which also fixed their arrow and
+keyboard steps, until now inconsistent with the drag.
+
+### Four things I broke and fixed
+
+1. **The number sat on top of the arrows.** The original held its line edit out of
+   the two gutters in `resizeEvent`; the port dropped it. One omission, two
+   symptoms — the value painted over the glyphs *and* covered the click zones, so
+   the arrows were decorative. The inset now lives in the chrome and corrects the
+   editor's **own** Resize, because a filter runs before the target's handler.
+2. **A locked field did not look locked.** Setting `color` in a stylesheet
+   overrides the palette's Disabled role, so read-only numbers painted bright next
+   to greyed-out combos.
+3. **Move stopped scrubbing.** I added a passthrough so a *focused* field's presses
+   reached the line edit for drag-select — but a plain click focuses the field, so
+   from the first click onward it could never be scrubbed again. Traded the
+   primary interaction for a secondary one, on the field the feature is named
+   after. Always-arm is back; clicking an already-focused field places the caret.
+4. **Selected numbers were blue.** The selection colour was `bgBtnDown` (`#355f86`)
+   and a plain click selects the whole number, so every field the pointer touched
+   came up as a blue block.
+
+### Blender parity
+
+Read the manual's Input Fields page directly. It corrected one thing: Blender's end
+arrows step **once per click**, no auto-repeat — so ours already matched and the
+"gap" named earlier was not one. Four real ones:
+
+- **Esc and RMB cancel a drag.** We had no cancel at all; once you started pulling,
+  the start value was gone and Ctrl+Z was the only way back.
+- **Ctrl snaps to whole steps** — the documented companion to Shift's precision.
+  Only Shift had ever been implemented.
+- **Typed expressions** — `1024/3`, `2^10`, `sqrt(2)`, `pi`, `rad(90)`. A
+  hand-written recursive-descent parser, not QJSEngine: that would drag the QML
+  stack into a widget and would evaluate anything at all, in a field whose contents
+  can come from a file. This grammar has no identifiers beyond its named constants,
+  no assignment, and no reach outside itself.
+- **One drag sets a whole X/Y/Z row.** Recruitment is by sibling and only of fields
+  that already carry the gesture, so a drag wandering off a form cannot grab
+  unrelated widgets. Each recruit moves from its own start value.
+
+Also wired: `wwRestyleScrubFields` was written for theme switching and **never
+called by anything**, so every field kept whichever theme it was born under — and
+they are all built before `loadTheme` runs.
+
+### Selectors, and LOD
+
+The Collision Manager's combos were Qt defaults in a grid of restyled fields — own
+frame, own background, native arrow. `wwMatchFieldStyle` gives them the field's
+tokens, read from the same `wwSkinColor` names so the two cannot drift apart.
+
+Its tree columns were also wrong: Material was `Stretch`, which only gets the space
+the others leave over, so in a docked panel it sat clipped at `U...` — and because
+`Stretch` and `ResizeToContents` both disable dragging, it was clipped **and**
+frozen. Every column sizes to its text now.
+
+**LOD is a dropdown**, beside Animation and Collision. The slider was the wrong
+control twice: it hid its own value behind a handle position, and it vanished
+entirely on a file with no LOD meshes — a control that is *absent* reads as a
+missing feature rather than as "not applicable here". Always present, greyed with a
+tooltip saying why, label naming the level. Level 3 is listed and disabled outside
+Starfield, because `Scene::updateLodLevel` clamps to 2 everywhere else — so on a
+Fallout 4 file a level-3 row would have looked like a choice and silently done what
+level 2 does.
+
+### And the material that was never unknown
+
+bungo asked why a stock body's material read `Unknown (0x26067D15)`. Measured over
+150 FO4 files with compiled collision: **body material is `0` on all 157 bodies**,
+so the shape's own ID is what reaches the UI; of 250 shape materials over 27
+distinct IDs, **only 72% resolve** against nif.xml. The most common material in the
+whole sample — `0xFCB37EA0`, 52 uses — is itself unnamed.
+
+So the decoder reads the right field and nif.xml's list has holes. Calling that
+"Unknown" made a healthy file look broken. It reads `Unnamed` now, and the tooltip
+says the collision data is fine and points at the **+** button that names it.
+
+### Verified
+
+`scrub_uniform` 27 checks, `top_bar` 43, `collision_undo` 12,
+`collision_compiled_edit` 7, `menu_taxonomy` 26.
+
+Checks are chosen for the code path a change reaches, not swept: a blanket run of
+all fourteen harnesses opens a dozen NifSkope windows and returns no information
+about most of them.
+
 ## 2026-08-03a — Bug sweep: 22 confirmed defects, patched
 
 A 38-agent sweep across the whole program raised 28 candidates; 22 survived

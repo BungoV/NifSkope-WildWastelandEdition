@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "timeline.h"
 #include "wwskin.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "timeline_p.h"
 
 #include "gl/glcontroller.h"
@@ -1187,6 +1188,8 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	connect( btnSnap, &QToolButton::toggled, [this]( bool on ) { snapOn = on; } );
 
 	snapTimeBox = new QDoubleSpinBox( this );
+	// chrome off: these are 70-80 px, with no room for two 16 px gutters
+	wwMakeScrubField( snapTimeBox, WwScrubSpec{ 0.0, WwScrubSpec::Auto, false } );
 	snapTimeBox->setRange( 0.001, 10.0 );
 	snapTimeBox->setDecimals( 3 );
 	snapTimeBox->setSingleStep( 0.01 );
@@ -1196,6 +1199,7 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	connect( snapTimeBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), [this]( double v ) { snapTimeStep = (float)v; } );
 
 	snapValueBox = new QDoubleSpinBox( this );
+	wwMakeScrubField( snapValueBox, WwScrubSpec{ 0.0, WwScrubSpec::Auto, false } );
 	snapValueBox->setRange( 0.0001, 1000.0 );
 	snapValueBox->setDecimals( 4 );
 	snapValueBox->setSingleStep( 0.05 );
