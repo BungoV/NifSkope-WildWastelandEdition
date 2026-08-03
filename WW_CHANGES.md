@@ -76,6 +76,25 @@ tested against them.
 - 22 plan/audit/reference documents moved to `docs/`. Source comments cite them
   by bare filename, which still resolves — the names are unique.
 
+### The `.gitattributes` that was doing nothing
+
+It said `*.cpp eol=auto`. **`eol=auto` is not a value git recognises** — the
+valid forms are `text`, `text eol=lf`, `text eol=crlf`, `-text` and
+`text=auto`. So the file had no effect at all, and the five deliberately-CRLF
+files (`glview.cpp`, `nifskope.cpp`, `gl/controllers.cpp`, `spells/havok.cpp`,
+`WW_CHANGES.md`) survived on nothing but `core.autocrlf=false` being set in this
+one clone.
+
+That is fine for a private repository with one clone. It is not fine for a
+public one: Git for Windows defaults `core.autocrlf` to **true**, so the first
+contributor to clone would have had those files rewritten on checkout and their
+first commit would have carried a 33,000-line diff that changes no code — the
+exact failure this project has hit repeatedly from the other direction.
+
+Replaced with `* -text`. Checked before committing that it renormalises nothing:
+the only changed blob is `.gitattributes` itself, and all five files are still
+stored CRLF.
+
 
 bungo asked for the Move field's behaviour — hover arrows, press and drag the
 number — on every type-in field. The gesture already existed **five times**:

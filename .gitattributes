@@ -1,4 +1,14 @@
-*.sh	eol=lf
-*.bat	eol=crlf
-*.cpp	eol=auto
-*.h	eol=auto
+# Nothing here is line-ending normalised. Git stores every file byte for byte,
+# and checks it out byte for byte.
+#
+# This is deliberate, not neglect. Five files in this repository are CRLF and
+# have to stay CRLF: src/glview.cpp, src/nifskope.cpp, src/gl/controllers.cpp,
+# src/spells/havok.cpp and WW_CHANGES.md. Everything else is LF. Without the
+# line below, a clone made with Git for Windows' default core.autocrlf=true
+# rewrites them on checkout, and the next commit is a 33,000-line diff that
+# changes no code.
+#
+# The previous contents of this file were `*.cpp eol=auto` and friends, which
+# is not a value git recognises. It did nothing; the repository only survived
+# on core.autocrlf=false being set locally, which a contributor will not have.
+* -text
