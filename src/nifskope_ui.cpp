@@ -431,37 +431,30 @@ void wwGroupBreak( QToolBar * bar )
 	pad();
 }
 
-/*! Show a checkable menu item's state in the gap between its icon and its label.
+/*! Show a checkable menu item's state as a filled row.
  *
  *  QMenu paints the icon and the check indicator in the SAME column, so a
  *  checkable item that HAS an icon silently loses its checkmark - which was
  *  every toggle in the Overlays menu. You could see the glyph and not whether
  *  the thing was on.
  *
- *  The tick goes in the leading run of the TEXT, which is the empty space
- *  between the icon column and the label. Two earlier attempts put it in the
- *  icon itself: widening the pixmap made Qt scale the whole icon down to fit the
- *  slot, and drawing it inside the pixmap put it on top of the glyph. Neither is
- *  the gap.
+ *  A tick in the label was tried and dropped: it competes with the icon for the
+ *  eye and needs the unchecked rows padded to keep the column straight. A filled
+ *  row says "on" at a glance without adding anything to read, and it reuses the
+ *  same two colours the rest of the program already means "active" with -
+ *  bgBtnDown behind, accent in front.
  *
- *  The base text is captured once, so re-syncing cannot stack prefixes. The
- *  unchecked prefix is a figure space (U+2007), which is fixed-width, so labels
- *  stay aligned whichever state they are in.
+ *  Applied to the MENU rather than per action, so it cannot drift item by item.
  */
-static void wwShowCheckBesideIcon( QAction * a, QMenu * m )
+static void wwStyleCheckedRows( QMenu * m )
 {
-	if ( !a || !a->isCheckable() || a->icon().isNull() )
-		return;		// no icon: Qt's own checkmark already shows, in its own column
-	const QString base = a->text();
-	auto sync = [a, base]() {
-		a->setText( ( a->isChecked() ? QStringLiteral( "✓ " )
-									 : QStringLiteral( "  " ) ) + base );
-	};
-	sync();
-	QObject::connect( a, &QAction::toggled, a, [sync]( bool ) { sync(); } );
-	// also on open: several of these are driven from elsewhere (the settings
-	// restore, the visibility menu), and toggled() is not the only way they move
-	QObject::connect( m, &QMenu::aboutToShow, a, sync );
+	if ( !m )
+		return;
+	m->setStyleSheet( QStringLiteral(
+		"QMenu::item:checked { background: %1; color: %2; }"
+		"QMenu::item:checked:selected { background: %3; color: %2; }" )
+		.arg( wwSkinColor( "bgBtnDown" ), wwSkinColor( "accent" ),
+			wwSkinColor( "selBgActive" ) ) );
 }
 
 QString wwBoxedButtonQss( const QString & padding )
@@ -12772,13 +12765,9 @@ void NifSkope::initDockWidgets()
 		} );
 		m->addAction( aOrigins );
 
-		/* Show the state of every icon-bearing toggle in here.
-		 * Done after the menu is fully populated so nothing is missed, and
-		 * before the settings restore below, whose setChecked calls then drive
-		 * the tick through the toggled() connection.
-		 */
-		for ( QAction * a : m->actions() )
-			wwShowCheckBesideIcon( a, m );
+		// checked rows read as filled, so an icon-bearing toggle still shows
+		// its state even though QMenu gives the checkmark no column of its own
+		wwStyleCheckedRows( m );
 
 		// persist these viewport display toggles between sessions (apply the
 		// saved state now - the apply connections above fire on setChecked).
@@ -16376,7 +16365,17 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 					return true;
 				}
 				if ( !ke->isAutoRepeat() ) {
-					btn->showMenu();
+					/* At the POINTER, as a free-floating menu - not dropped down
+					 * from the header button.
+					 *
+					 * Blender pops these where your hand already is; dropping
+					 * them from the toolbar means looking away from the geometry
+					 * you are working on and travelling back. The button still
+					 * owns the menu (and its aboutToShow still repopulates it),
+					 * this just opens it somewhere else.
+					 */
+					if ( QMenu * menu = btn->menu() )
+						menu->popup( QCursor::pos() );
 					return true;
 				}
 			}
