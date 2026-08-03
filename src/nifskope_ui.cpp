@@ -6955,6 +6955,54 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				nf->deleteLater();
 			}
 
+			// ---- G. a field you have already clicked must still scrub --------
+			//
+			// bungo: "For move and other type of numeric input boxes, I can no
+			// longer left click and hold to move the number down or up."
+			//
+			// A plain click focuses the field. A version of this widget passed
+			// focused presses through to the line edit so drag-select would work
+			// while typing - which silently killed scrubbing on every field the
+			// user had ever clicked, including the Move field the whole feature
+			// is named after. Scrubbing wins; caret placement is preserved
+			// instead, and only drag-select inside a focused field is given up.
+			{
+				auto * nf = new WwNumberField( skope );
+				nf->show();
+				nf->ensurePolished();
+				nf->resize( 200, 24 );
+				nf->setRange( -1000.0, 1000.0 );
+				nf->setValue( 0.0 );
+				QApplication::processEvents();
+
+				// first gesture: click, which focuses and selects
+				scrub( nf, 0 );
+				QApplication::processEvents();
+				QLineEdit * le = nf->findChild<QLineEdit *>();
+				log << "G: after a plain click, editor focus = "
+					<< ( le && le->hasFocus() ? "yes" : "no" ) << "\n";
+
+				// second gesture: the drag that used to stop working
+				const double before = nf->value();
+				scrub( nf, 50 );
+				log << "G: drag on the focused field " << before
+					<< " -> " << nf->value() << "\n";
+				check( "G: a field that already has focus still scrubs",
+					nf->value() != before );
+				check( "G: ...by the same amount as an unfocused one",
+					qAbs( ( nf->value() - before ) - 5.0 ) < 1e-6 );
+
+				// and the caret lands where the click did rather than the whole
+				// number being re-selected under the user
+				scrub( nf, 0 );
+				QApplication::processEvents();
+				log << "G: after a click on the focused field, selection length "
+					<< ( le ? le->selectedText().length() : -1 ) << "\n";
+				check( "G: a click on an already-focused field places the caret",
+					le && le->selectedText().isEmpty() );
+				nf->deleteLater();
+			}
+
 			log << checks << " checks, " << fails << " failures\n";
 			log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
 			logf.close();

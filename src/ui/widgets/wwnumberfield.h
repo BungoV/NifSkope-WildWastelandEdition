@@ -131,7 +131,9 @@ private:
 	QPointer<QLineEdit> m_edit;
 	WwScrubSpec m_spec;
 	bool m_dragging = false, m_moved = false;
+	bool m_pressHadFocus = false;	//!< decides selectAll vs caret placement
 	int m_pressX = 0;
+	int m_pressLocalX = 0;
 	double m_startVal = 0.0;
 };
 

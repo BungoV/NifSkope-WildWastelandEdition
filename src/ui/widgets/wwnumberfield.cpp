@@ -222,13 +222,20 @@ bool WwScrub::eventFilter( QObject * o, QEvent * ev )
 		auto * me = static_cast<QMouseEvent *>( ev );
 		if ( me->button() != Qt::LeftButton )
 			break;
-		/* Once the user has clicked in to type, the field is a text field:
-		 * presses pass straight through so drag-select and caret placement
-		 * work. Every previous copy swallowed them unconditionally, which is
-		 * why you could not select part of a number you were editing.
+		/* The press is ALWAYS armed, even when the field already has focus.
+		 *
+		 * An earlier version passed focused presses through so drag-select
+		 * would work inside a number being edited. That traded the primary
+		 * interaction for a secondary one: a plain click focuses the field, so
+		 * from then on it could not be scrubbed at all until focus moved
+		 * elsewhere - which is exactly what bungo hit on Move. Scrubbing wins.
+		 *
+		 * Caret placement survives: a click with no drag on an already-focused
+		 * field positions the caret instead of re-selecting all (see the
+		 * release branch). Only drag-select inside a focused field is given up.
 		 */
-		if ( m_edit->hasFocus() )
-			break;
+		m_pressHadFocus = m_edit->hasFocus();
+		m_pressLocalX = int( me->position().x() );
 		/* The sentinel is a word, not a quantity. FloatEdit spells +-FLT_MAX as
 		 * "<float_min>"/"<float_max>"; scrubbing from there has no meaning and
 		 * used to overflow the field to inf in three pixels.
@@ -281,8 +288,15 @@ bool WwScrub::eventFilter( QObject * o, QEvent * ev )
 		if ( !m_moved && m_edit ) {
 			// a plain click types. On RELEASE, because at press time it is not
 			// yet knowable whether this becomes a scrub.
-			m_edit->selectAll();
-			m_edit->setFocus();
+			if ( m_pressHadFocus ) {
+				// already editing: put the caret where the click landed rather
+				// than re-selecting the whole number under the user
+				m_edit->setCursorPosition( m_edit->cursorPositionAt(
+					QPoint( m_pressLocalX, m_edit->height() / 2 ) ) );
+			} else {
+				m_edit->selectAll();
+				m_edit->setFocus();
+			}
 		}
 		m_moved = false;
 		if ( m_host )
@@ -559,6 +573,14 @@ void wwMakeScrubField( QWidget * host, const WwScrubSpec & spec )
 		return;
 
 	auto * scrub = new WwScrub( host, le, spec );
+
+	// Centre the number, as the reference field does. Without this every
+	// retro-fitted field (which is most of them) kept Qt's left alignment and
+	// the value sat against the left gutter instead of between the arrows.
+	if ( auto * sb = qobject_cast<QAbstractSpinBox *>( host ) )
+		sb->setAlignment( Qt::AlignCenter );
+	else
+		le->setAlignment( Qt::AlignCenter );
 
 	/* Chrome needs the two gutters, and a retro-fitted host may be too narrow
 	 * to give them up. A spin box also has to lose its native buttons first, or
