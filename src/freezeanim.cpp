@@ -832,13 +832,18 @@ Result freeze( NifModel * nif, const QString & sequence, float time, bool stripG
 			}
 		}
 
-		// Text keys exist only to tag times inside a sequence.
+		// Text keys exist only to tag times inside a sequence. Collect first:
+		// inserting into `doomed` while walking it re-buckets the QHash behind
+		// the live iterator, which can skip or revisit entries.
+		QList<int> textKeys;
 		for ( int b : std::as_const( doomed ) ) {
 			QModelIndex idx = nif->getBlockIndex( b );
 			const int keys = nif->getLink( idx, "Text Keys" );
 			if ( keys >= 0 )
-				doomed << keys;
+				textKeys << keys;
 		}
+		for ( int k : std::as_const( textKeys ) )
+			doomed << k;
 
 		// Sweep anything that the removals leave with nothing pointing at it —
 		// the interpolators and their key data. Repeated because a NiFloatData is

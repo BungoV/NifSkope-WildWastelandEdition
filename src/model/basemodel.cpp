@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QBuffer>
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QTime>
 
 
@@ -588,13 +589,29 @@ bool BaseModel::loadFromFile( const QString & file )
 
 bool BaseModel::saveToFile( const QString & str ) const
 {
-	QFile f( str );
 	QBuffer buf;
-	bool success = false;
-	if ( buf.open( QIODevice::WriteOnly ) && save( buf ) )
-		success = f.open( QIODevice::WriteOnly ) && f.write( buf.data() ) > 0;
+	if ( !buf.open( QIODevice::WriteOnly ) || !save( buf ) )
+		return false;
 
-	return success;
+	// Write to a sibling temp file and rename over the target, so a short write
+	// (disk full, flaky share) cannot destroy the original — opening the target
+	// WriteOnly truncates it before the first byte is written. A partial count
+	// is a failure: `> 0` would report success on a truncated .nif and the
+	// caller (completeSave) would mark the document clean.
+	const QByteArray & data = buf.data();
+	QSaveFile f( str );
+	// MO2's virtual file system and archive overlays can refuse the sibling
+	// temp file; fall back to writing the target directly there rather than
+	// failing a save that used to work.
+	f.setDirectWriteFallback( true );
+	if ( !f.open( QIODevice::WriteOnly ) )
+		return false;
+	if ( f.write( data ) != data.size() ) {
+		f.cancelWriting();
+		return false;
+	}
+
+	return f.commit();
 }
 
 void BaseModel::refreshFileInfo( const QString & f )

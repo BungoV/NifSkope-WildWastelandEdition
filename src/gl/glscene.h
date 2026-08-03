@@ -366,6 +366,16 @@ public:
 
 	BoundSphere bounds() const;
 
+	//! Drop the cached scene bounding sphere.
+	/*! bounds() only counts VISIBLE nodes, but the cache is invalidated solely
+	 *  by Scene::transform(), which early-outs whenever the camera and time are
+	 *  unchanged. Hiding, isolating or un-hiding therefore left every consumer
+	 *  of bounds() (view-all, near/far plane fitting, the grid extent) using the
+	 *  pre-hide extent until the user happened to move the camera. Anything that
+	 *  changes hiddenNodes / soloNode has to call this.
+	 */
+	void invalidateBounds() { sceneBoundsValid = false; }
+
 	float timeMin() const;
 	float timeMax() const;
 signals:

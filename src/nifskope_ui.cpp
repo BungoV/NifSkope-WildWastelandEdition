@@ -8024,7 +8024,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							QString p, r;
 							check( "a block Name is not a texture path",
 								!nif->texturePathInfo( nif->getItem( iNode ), p, r ) );
-							check( "...so it is never marked red", !isRed( iNode ) );
+							// the Value column: NifModel::data only ever returns the
+							// broken-path red for ValueCol, so asking the Name index
+							// (column 0) could never fail whatever the path said
+							check( "...so it is never marked red",
+								!isRed( iNode.sibling( iNode.row(), NifModel::ValueCol ) ) );
 
 							NifItem * nameItem = nif->getItem( iNode );
 							const QString wasType = nameItem->strType();
@@ -15195,6 +15199,7 @@ void NifSkope::saveUi() const
 
 void NifSkope::restoreUi()
 {
+	uiRestored = true;
 	QSettings settings;
 	restoreGeometry( settings.value( "Window Geometry"_uip ).toByteArray() );
 	if ( isMaximized() )

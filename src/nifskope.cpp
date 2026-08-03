@@ -2640,6 +2640,12 @@ void NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
 	// The new window replaces the data-only entry; rebuild this window's tab
 	// bookkeeping so the promoted document can be activated by index.
 	refreshAllDocumentSessions();
+	// The window was built as a background one, so it skipped restoreUi() -
+	// including the viewport-header toolbar move. Do it now that it is about to
+	// become a real, visible document window.
+	if ( !window->uiRestored )
+		window->restoreUi();
+	window->backgroundWorkspaceDocument = false;
 	const int index = documentTabWindows.indexOf( window );
 	if ( index >= 0 )
 		activateDocumentTab( index );
@@ -3828,7 +3834,10 @@ void NifSkope::closeEvent( QCloseEvent * e )
 		return;
 	}
 
-	if ( !backgroundWorkspaceDocument || isVisible() ) saveUi();
+	// uiRestored, not just visibility: a promoted background window is visible
+	// but never ran restoreUi(), so saving here would write its unrestored
+	// default layout over the user's.
+	if ( uiRestored && ( !backgroundWorkspaceDocument || isVisible() ) ) saveUi();
 	if ( !saveConfirm() ) {
 		e->ignore();
 		return;

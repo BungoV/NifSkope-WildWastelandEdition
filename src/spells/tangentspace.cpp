@@ -520,6 +520,12 @@ public:
 		spTangentSpace update;
 
 		for ( int l = 0; l < nif->getBlockCount(); l++ ) {
+			// The block itself. The NiTriShape-filtered lookup below still gates the
+			// legacy flag-setting branch, but the else-branch has to test the REAL
+			// block: testing the filtered (invalid) index always said "not
+			// applicable", so this batch spell did nothing at all on any BSTriShape
+			// file - every Skyrim SE and Fallout 4 mesh.
+			QModelIndex blk = nif->getBlockIndex( l );
 			QModelIndex idx = nif->getBlockIndex( l, "NiTriShape" );
 			if ( idx.isValid() ) {
 				// NiTriShapeData
@@ -536,12 +542,12 @@ public:
 				nif->set<int>( i, 4097 );
 				nif->updateArraySize( iData, "Tangents" );
 				nif->updateArraySize( iData, "Bitangents" );
-			} else if ( !update.isApplicable( nif, idx ) ) {
+			} else if ( !update.isApplicable( nif, blk ) ) {
 				continue;
 			}
 
-			// Add NiTriShape for spTangentSpace
-			blks << idx;
+			// the shape block spTangentSpace works on
+			blks << blk;
 		}
 
 		for ( auto& b : blks )

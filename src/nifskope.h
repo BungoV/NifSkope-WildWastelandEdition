@@ -678,6 +678,10 @@ private:
 	bool syncingLoadedNifsSelection = false;
 	NifSkope * workspaceRoot = nullptr;
 	bool backgroundWorkspaceDocument = false;
+	//! restoreUi() has run on this window. A background window skips it, so a
+	//! promoted one must never saveUi() its unrestored default layout over the
+	//! user's persisted one.
+	bool uiRestored = false;
 	bool closingWorkspaceGroup = false;
 	bool applicationEventFilterInstalled = false;
 	bool configuredNifBrowserPopulated = false;

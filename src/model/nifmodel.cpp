@@ -937,7 +937,11 @@ QMap<qint32, qint32> NifModel::moveAllNiBlocks( NifModel * targetnif, bool updat
 	QMap<qint32, qint32> map;
 
 	beginRemoveRows( QModelIndex(), 1, bcnt );
-	targetnif->beginInsertRows( QModelIndex(), targetnif->getBlockCount(), targetnif->getBlockCount() + bcnt - 1 );
+	// insertChild below puts each donor block at root row childCount()-1 (just
+	// before the footer), i.e. rows getBlockCount()+1 .. getBlockCount()+bcnt.
+	// Announcing the range one row lower left the views' persistent indices
+	// updated against a layout the model never had.
+	targetnif->beginInsertRows( QModelIndex(), targetnif->getBlockCount() + 1, targetnif->getBlockCount() + bcnt );
 
 	for ( int i = 0; i < bcnt; i++ ) {
 		map.insert( i, targetnif->root->insertChild( root->takeChild( 1 ), targetnif->root->childCount() - 1 ) - 1 );

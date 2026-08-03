@@ -716,8 +716,10 @@ static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigi
 	const int preset = settings.value( "CollisionManager/Create/Preset", 1 ).toInt();
 	QModelIndex info = nif->getIndex( rigidBody, "Rigid Body Info" );
 	if ( !info.isValid() ) return;
-	QModelIndex filter = bhkGetHavokFilter( nif, info );
-	if ( filter.isValid() ) nif->set<quint32>( filter, "Layer", quint32( layer ) );
+	// both stored copies of the filter: the block's own flattened one and the
+	// Rigid Body Info copy, or the two disagree and the viewport colours by the
+	// one that was never written
+	bhkSetFilterField( nif, rigidBody, QStringLiteral( "Layer" ), quint32( layer ) );
 	if ( preset == 2 ) return;
 	const bool dynamic = ( preset == 1 );
 	const bool animated = ( preset == 3 );
@@ -1905,13 +1907,14 @@ public:
 			if ( iInfo.isValid() ) {
 				HknpBodyPhys phys = ( int( bs.first ) < sys.bodyPhys.size() )
 									? sys.bodyPhys.at( int( bs.first ) ) : HknpBodyPhys();
-				QModelIndex iFilter = bhkGetHavokFilter( nif, iInfo );
-				if ( iFilter.isValid() ) {
+				{
 					quint32 decodedLayer = phys.layer;
 					if ( decodedLayer == 0 ) decodedLayer = ( sys.dynamic && phys.hasMotion ) ? 10u : 1u;
-					nif->set<quint32>( iFilter, "Layer", decodedLayer );
-					nif->set<quint32>( iFilter, "Flags", phys.filterFlags );
-					nif->set<quint32>( iFilter, "Group", phys.filterGroup );
+					// both stored copies, so a decompiled body does not come out with the
+					// block-level filter left at whatever the template had
+					bhkSetFilterField( nif, iBody, QStringLiteral( "Layer" ), decodedLayer );
+					bhkSetFilterField( nif, iBody, QStringLiteral( "Flags" ), phys.filterFlags );
+					bhkSetFilterField( nif, iBody, QStringLiteral( "Group" ), phys.filterGroup );
 				}
 				nif->set<float>( iInfo, "Friction", phys.friction );
 				nif->set<float>( iInfo, "Restitution", phys.restitution );

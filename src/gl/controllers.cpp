@@ -937,6 +937,9 @@ bool PSysSimController::update( const NifModel * nif, const QModelIndex & index 
 	inherits.clear();
 	hasColorMod = false;
 	hasColorGradient = false;
+	// owned by BSPSysSimpleColorModifier: neutral until one is found
+	fadeIn = 0.0f;
+	fadeOut = 1.0f;
 	iColorGradKeys = QModelIndex();
 	scaleKeys.clear();
 	hasRotation = false;
@@ -1430,7 +1433,12 @@ Color4 PSysSimController::particleColor( const Emitter & e, float u ) const
 			c = modColors[2];
 	}
 	float a = c[3];
-	if ( !hasColorGradient ) {
+	// fadeIn/fadeOut belong to BSPSysSimpleColorModifier. Gating on
+	// !hasColorGradient applied them with their class defaults (0.1 / 0.9)
+	// when no such modifier existed - and emitParticle evaluates the colour
+	// once, at u = 0, where the fade-in factor is exactly zero. Every particle
+	// in such a system was born and stayed fully transparent.
+	if ( hasColorMod && !hasColorGradient ) {
 		if ( fadeIn > 0.0f && u < fadeIn )
 			a *= u / fadeIn;
 		if ( fadeOut < 1.0f && u > fadeOut )

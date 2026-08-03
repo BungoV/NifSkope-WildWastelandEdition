@@ -1532,7 +1532,10 @@ private:
 		 */
 		bool ok = false;
 		nifSnapshotOp( nif, tr( "Set collision layer" ), [&]() {
-			ok = nif->set<quint32>( layerIndex, value );
+			// both copies: the block's own flattened filter as well as the
+			// Rigid Body Info one, or the viewport keeps colouring by the old
+			// layer and the file stores two disagreeing values
+			ok = bhkSetFilterField( nif, body, QStringLiteral( "Layer" ), value ) > 0;
 		} );
 		if ( ok ) {
 			physicsHint->setText( tr( "Collision layer set to %1." ).arg( collisionLayerName( value ) ) );
@@ -1657,8 +1660,9 @@ private:
 					flags |= 0x80u;
 					if ( !wantWithinGroup ) flags |= 0x40u;
 				}
-				nif->set<quint32>( filter, "Flags", flags );
-				nif->set<quint32>( filter, "Group", wantFilterGroup );
+				// both stored copies, same reason as applyLayerSelection
+				bhkSetFilterField( nif, body, QStringLiteral( "Flags" ), flags );
+				bhkSetFilterField( nif, body, QStringLiteral( "Group" ), wantFilterGroup );
 			}
 		} );
 		if ( ogl ) {
@@ -1873,7 +1877,9 @@ private:
 		int dangling = 0, suspiciousHulls = 0, nearBoxes = 0, nonUniformPrimitives = 0;
 		int stairWithoutSlope = 0, visibleWithoutCollision = 0, compiled = 0, editable = 0;
 		QVector<int> danglingObjects;
-		QVector<QPersistentModelIndex> zeroLayerFilters;
+		// block numbers, not filter indices: the repair needs Motion System, which
+		// lives on the body (or its Rigid Body Info), never on the filter row
+		QVector<int> zeroLayerBodies;
 		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 			QModelIndex i = nif->getBlockIndex( b );
 			if ( nif->blockInherits( i, "bhkNPCollisionObject" ) ) {
@@ -1908,7 +1914,7 @@ private:
 				QModelIndex info = blockIndex( body ).isValid() ? nif->getIndex( blockIndex( body ), "Rigid Body Info" ) : QModelIndex();
 				QModelIndex filter = bhkGetHavokFilter( nif, info );
 				quint32 collLayer = filter.isValid() ? nif->get<quint32>( filter, "Layer" ) : 0;
-				if ( filter.isValid() && collLayer == 0 ) zeroLayerFilters.append( filter );
+				if ( filter.isValid() && collLayer == 0 ) zeroLayerBodies.append( body );
 				if ( collLayer == 31 && li.isValid() && ( nif->isNiBlock( li, "bhkBoxShape" )
 						|| nif->isNiBlock( li, "bhkSphereShape" ) || nif->isNiBlock( li, "bhkCapsuleShape" ) ) ) stairWithoutSlope++;
 			}
@@ -1936,7 +1942,7 @@ private:
 		}
 		QStringList findings;
 		if ( dangling ) findings << tr( "%1 dangling collision reference(s) - safe fix: remove the broken collision object" ).arg( dangling );
-		if ( !zeroLayerFilters.isEmpty() ) findings << tr( "%1 collision layer(s) are Unidentified (0) - safe fix: infer Static or Props from motion" ).arg( zeroLayerFilters.size() );
+		if ( !zeroLayerBodies.isEmpty() ) findings << tr( "%1 collision layer(s) are Unidentified (0) - safe fix: infer Static or Props from motion" ).arg( zeroLayerBodies.size() );
 		if ( suspiciousHulls ) findings << tr( "%1 convex hull(s) exceed 64 vertices - optimize the source mesh or rebuild Convex" ).arg( suspiciousHulls );
 		if ( nearBoxes ) findings << tr( "%1 hull(s) are box-like - Box collision would be cheaper" ).arg( nearBoxes );
 		if ( nonUniformPrimitives ) findings << tr( "%1 primitive collision transform(s) use non-uniform scale" ).arg( nonUniformPrimitives );
@@ -1949,12 +1955,16 @@ private:
 		QMessageBox report( QMessageBox::Warning, tr( "Check Collision" ), findings.join( QStringLiteral( "\n\n" ) ), QMessageBox::NoButton, this );
 		auto * fix = report.addButton( tr( "Apply Safe Fixes" ), QMessageBox::AcceptRole );
 		report.addButton( QMessageBox::Close ); report.exec();
-		if ( report.clickedButton() != fix || ( danglingObjects.isEmpty() && zeroLayerFilters.isEmpty() ) ) return;
+		if ( report.clickedButton() != fix || ( danglingObjects.isEmpty() && zeroLayerBodies.isEmpty() ) ) return;
 		nifSnapshotOp( nif, tr( "Fix collision warnings" ), [&, this]() {
-			for ( const QPersistentModelIndex & filter : zeroLayerFilters ) if ( filter.isValid() ) {
-				QModelIndex info = filter.parent();
-				quint32 motion = nif->get<quint32>( info, "Motion System" );
-				nif->set<quint32>( QModelIndex( filter ), "Layer", motion == 3 ? 10u : 1u );
+			for ( int body : zeroLayerBodies ) {
+				QModelIndex iBody = blockIndex( body );
+				if ( !iBody.isValid() ) continue;
+				// Motion System sits on the block or inside Rigid Body Info, never on
+				// the filter row - reading it off filter.parent() always yielded 0, so
+				// this branch could only ever write STATIC, never PROPS
+				quint32 motion = nif->get<quint32>( bhkGetRBInfo( nif, iBody, QStringLiteral( "Motion System" ) ) );
+				bhkSetFilterField( nif, iBody, QStringLiteral( "Layer" ), motion == 3 ? 10u : 1u );
 			}
 			std::sort( danglingObjects.begin(), danglingObjects.end(), std::greater<int>() );
 			for ( int block : danglingObjects ) if ( nif->isValidBlockNumber( block ) ) {
@@ -3206,9 +3216,10 @@ public:
 		 * second opinion about it.
 		 */
 		const quint32 motion = nif->get<quint32>( info, "Motion System" );
-		const QModelIndex filter = bhkGetHavokFilter( nif, info );
+		const QModelIndex body = nif->getBlockIndex( index );
 		nifSnapshotOp( nif, Spell::tr( "Set collision layer" ), [&]() {
-			nif->set<quint32>( QModelIndex( filter ), "Layer", motion == 3 ? 10u : 1u );
+			// both copies of the filter, not just the Rigid Body Info one
+			bhkSetFilterField( nif, body, QStringLiteral( "Layer" ), motion == 3 ? 10u : 1u );
 		} );
 		return index;
 	}

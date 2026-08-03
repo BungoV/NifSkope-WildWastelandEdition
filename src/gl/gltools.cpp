@@ -897,6 +897,35 @@ QModelIndex bhkGetHavokFilter( const NifModel * nif, const QModelIndex & owner )
 	return nested.isValid() ? nested : owner;
 }
 
+/*! Write one HavokFilter field on a bhkWorldObject, covering BOTH stored copies.
+ *
+ *  A bhkRigidBody carries the filter twice: bhkWorldObject's own, flattened onto
+ *  the block, and a copy inside Rigid Body Info. Writing only the Rigid Body Info
+ *  copy — all bhkGetHavokFilter alone reaches, since the nested "Havok Filter"
+ *  row does not exist on FO4 — leaves the two disagreeing, a state no Bethesda
+ *  file is in. NifSkope's own collision colouring reads the block-level one
+ *  (glnode.cpp), so the viewport keeps showing the OLD layer after such an edit.
+ *
+ *  Returns how many copies were written, so a caller can tell a no-such-field
+ *  miss from a real write.
+ */
+int bhkSetFilterField( NifModel * nif, const QModelIndex & iBody, const QString & name, quint32 value )
+{
+	if ( !nif || !iBody.isValid() )
+		return 0;
+	int written = 0;
+	const QModelIndex own = nif->getIndex( bhkGetHavokFilter( nif, iBody ), name );
+	if ( own.isValid() && nif->set<quint32>( own, value ) )
+		written++;
+	const QModelIndex info = nif->getIndex( iBody, "Rigid Body Info" );
+	if ( info.isValid() ) {
+		const QModelIndex copy = nif->getIndex( bhkGetHavokFilter( nif, info ), name );
+		if ( copy.isValid() && copy != own && nif->set<quint32>( copy, value ) )
+			written++;
+	}
+	return written;
+}
+
 QModelIndex bhkGetRBInfo( const NifModel * nif, const QModelIndex & index, const QString & name )
 {
 	auto iInfo = nif->getIndex( index, name );

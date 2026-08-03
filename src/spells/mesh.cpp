@@ -46,13 +46,18 @@ static QModelIndex getTriShapeData( const NifModel * nif, const QModelIndex & in
 {
 	QModelIndex iData = nif->getBlockIndex( index );
 
+	// Resolve the Data link BEFORE the type test. With the test first and the
+	// resolution after, the resolved index was assigned and then discarded by
+	// the unconditional empty return - so this returned invalid for every
+	// NiTriShape / BSLODTriShape, and Flip Faces, Optimize Indices and Prune
+	// Triangles silently vanished from the menu on Oblivion/FO3/Skyrim LE files.
+	if ( nif->isNiBlock( index, { "NiTriShape", "BSLODTriShape" } ) )
+		iData = nif->getBlockIndex( nif->getLink( index, "Data" ) );
+
 	if ( nif->isNiBlock( iData, "NiTriShapeData" )
 		|| ( nif->blockInherits( iData, "BSTriShape" ) && nif->getIndex( iData, "Triangles" ).isValid() ) ) {
 		return iData;
 	}
-
-	if ( nif->isNiBlock( index, { "NiTriShape", "BSLODTriShape" } ) )
-		iData = nif->getBlockIndex( nif->getLink( index, "Data" ) );
 
 	return QModelIndex();
 }
@@ -81,6 +86,12 @@ static void removeWasteVertices( NifModel * nif, const QModelIndex & iData, cons
 
 		QVector<Vector3> norms = nif->getArray<Vector3>( iData, "Normals" );
 		QVector<Color4> colors = nif->getArray<Color4>( iData, "Vertex Colors" );
+		// Tangents/Bitangents are length="Num Vertices" too (nif.xml, cond on
+		// BS Data Flags & 4096). Compact them with everything else — lowering
+		// Num Vertices does not resize them, and saveItem writes whatever rows
+		// they still hold, which desynchronises the stream on the next read.
+		QVector<Vector3> tangents = nif->getArray<Vector3>( iData, "Tangents" );
+		QVector<Vector3> bitangents = nif->getArray<Vector3>( iData, "Bitangents" );
 		QList<QVector<Vector2> > texco;
 		QModelIndex iUVSets = nif->getIndex( iData, "UV Sets" );
 
@@ -95,7 +106,9 @@ static void removeWasteVertices( NifModel * nif, const QModelIndex & iData, cons
 
 		if ( numVerts != nif->get<int>( iData, "Num Vertices" )
 		     || ( norms.count() && norms.count() != numVerts )
-		     || ( colors.count() && colors.count() != numVerts ) )
+		     || ( colors.count() && colors.count() != numVerts )
+		     || ( tangents.count() && tangents.count() != numVerts )
+		     || ( bitangents.count() && bitangents.count() != numVerts ) )
 		{
 			throw QString( Spell::tr( "Vertex array size differs" ) );
 		}
@@ -132,6 +145,8 @@ static void removeWasteVertices( NifModel * nif, const QModelIndex & iData, cons
 		removeFromArray( verts, used );
 		removeFromArray( norms, used );
 		removeFromArray( colors, used );
+		removeFromArray( tangents, used );
+		removeFromArray( bitangents, used );
 
 		for ( int c = 0; c < texco.count(); c++ )
 			removeFromArray( texco[c], used );
@@ -183,6 +198,10 @@ static void removeWasteVertices( NifModel * nif, const QModelIndex & iData, cons
 		nif->setArray<Vector3>( iData, "Normals", norms );
 		nif->updateArraySize( iData, "Vertex Colors" );
 		nif->setArray<Color4>( iData, "Vertex Colors", colors );
+		nif->updateArraySize( iData, "Tangents" );
+		nif->setArray<Vector3>( iData, "Tangents", tangents );
+		nif->updateArraySize( iData, "Bitangents" );
+		nif->setArray<Vector3>( iData, "Bitangents", bitangents );
 
 		for ( int r = 0; r < nif->rowCount( iUVSets ); r++ ) {
 			nif->updateArraySize( nif->getIndex( iUVSets, r ) );
@@ -624,14 +643,77 @@ public:
 		QModelIndex iData = getTriShapeData( nif, index );
 
 		QVector<Triangle> tris = nif->getArray<Triangle>( iData, "Triangles" );
-		processTriangles( tris );
+		// On a segmented FO4 shape the Segment/Sub Segment table addresses
+		// triangles by position in this very array, so a subclass that permutes
+		// (Optimize Indices) would silently re-assign faces to other body-part
+		// slots. Process each range in place instead: the boundaries survive,
+		// so every segment keeps exactly the faces it had.
+		const QVector<QPair<int, int>> ranges = segmentTriangleRanges( nif, iData, tris.count() );
+		if ( ranges.isEmpty() ) {
+			processTriangles( tris );
+		} else {
+			for ( const auto & r : ranges ) {
+				QVector<Triangle> slice = tris.mid( r.first, r.second );
+				processTriangles( slice );
+				for ( int i = 0; i < slice.count() && i < r.second; i++ )
+					tris[r.first + i] = slice.at( i );
+			}
+		}
 		nif->setArray<Triangle>( iData, "Triangles", tris );
 
 		spRemoveWasteVertices::updateBSTriShape( nif, iData );
 
 		return index;
 	}
+
+	//! Triangle ranges (first, count) covered by the shape's segment table —
+	//! finest granularity available (sub-segments where present). Empty when the
+	//! shape has no segments, or when the table does not tile [0, numTris).
+	static QVector<QPair<int, int>> segmentTriangleRanges( const NifModel * nif,
+		const QModelIndex & iShape, int numTris );
 };
+
+QVector<QPair<int, int>> spFlipAllFaces::segmentTriangleRanges( const NifModel * nif,
+	const QModelIndex & iShape, int numTris )
+{
+	QVector<QPair<int, int>> ranges;
+	QModelIndex iSegs = nif->getIndex( iShape, "Segment" );
+	if ( !iSegs.isValid() || numTris < 1 )
+		return ranges;
+
+	for ( int s = 0; s < nif->rowCount( iSegs ); s++ ) {
+		QModelIndex iSeg = nif->getIndex( iSegs, s );
+		QModelIndex iSub = nif->getIndex( iSeg, "Sub Segment" );
+		const int nSub = iSub.isValid() ? nif->rowCount( iSub ) : 0;
+		if ( nSub > 0 ) {
+			for ( int b = 0; b < nSub; b++ ) {
+				QModelIndex i = nif->getIndex( iSub, b );
+				// Start Index counts vertex indices, not triangles
+				ranges.append( { int( nif->get<quint32>( i, "Start Index" ) / 3 ),
+					int( nif->get<quint32>( i, "Num Primitives" ) ) } );
+			}
+		} else {
+			ranges.append( { int( nif->get<quint32>( iSeg, "Start Index" ) / 3 ),
+				int( nif->get<quint32>( iSeg, "Num Primitives" ) ) } );
+		}
+	}
+	if ( ranges.isEmpty() )
+		return ranges;
+
+	// Only trust a table that exactly tiles the triangle array — anything else
+	// is already inconsistent and slicing it would make things worse.
+	std::sort( ranges.begin(), ranges.end() );
+	int next = 0;
+	for ( const auto & r : std::as_const( ranges ) ) {
+		if ( r.first != next || r.second < 0 || r.first + r.second > numTris )
+			return QVector<QPair<int, int>>();
+		next += r.second;
+	}
+	if ( next != numTris )
+		return QVector<QPair<int, int>>();
+
+	return ranges;
+}
 
 void spFlipAllFaces::processTriangles( QVector<Triangle> & tris )
 {

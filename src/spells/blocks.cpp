@@ -1654,7 +1654,9 @@ QModelIndex spPasteBranch::cast( NifModel * nif, const QModelIndex & index )
 						if ( ipm.key() == 0 ) {
 							// Ignore Root
 							blockMap.insert( ipm.key(), 0 );
-						} else if ( block > 0 ) {
+						// getBlockByName returns -1 for "not found", so 0 is a hit -
+						// `> 0` rejected a valid mapping and aborted the whole paste
+						} else if ( block >= 0 ) {
 							blockMap.insert( ipm.key(), block );
 						} else {
 							Message::append( tr( B_ERR ).arg( name() ),
@@ -1682,8 +1684,14 @@ QModelIndex spPasteBranch::cast( NifModel * nif, const QModelIndex & index )
 						QModelIndex block = nif->insertNiBlock( bType, -1 );
 						if ( buffer.pos() <= ( data.size() - 4 ) )
 							spPasteBlock::fixFO76ShaderPropertyName( nif, data.data() + buffer.pos(), block, bType, strings );
-						if ( !nif->loadAndMapLinks( buffer, block, blockMap ) )
+						if ( !nif->loadAndMapLinks( buffer, block, blockMap ) ) {
+							// releasing the hold is not optional: it stays set for
+							// the life of the model, and updateHeader/updateFooter
+							// are no-ops while it is, so every later save would
+							// write these blocks behind a stale header
+							nif->holdUpdates( false );
 							return index;
+						}
 
 						// NiDataStream RTTI arg values
 						if ( nif->checkVersion( 0x14050000, 0 ) && bType == QLatin1String( "NiDataStream" ) ) {
@@ -2391,8 +2399,12 @@ QModelIndex spDuplicateBranch::cast( NifModel * nif, const QModelIndex & index )
 
 			QModelIndex block = nif->insertNiBlock( type, -1 );
 
-			if ( !nif->loadAndMapLinks( buffer, block, blockMap ) )
+			if ( !nif->loadAndMapLinks( buffer, block, blockMap ) ) {
+				// same leak as spPasteBranch: a hold that outlives the spell
+				// silences updateHeader/updateFooter for the rest of the session
+				nif->holdUpdates( false );
 				return index;
+			}
 
 			if ( c == 0 )
 				iRoot = block;

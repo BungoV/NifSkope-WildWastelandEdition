@@ -162,6 +162,9 @@ QModelIndex bhkGetEntity( const NifModel * nif, const QModelIndex & index, const
 QModelIndex bhkGetRBInfo( const NifModel * nif, const QModelIndex & index, const QString & name );
 //! The index owning a collision filter's Layer/Flags/Group. Usually NOT a "Havok Filter" row: see the .cpp.
 QModelIndex bhkGetHavokFilter( const NifModel * nif, const QModelIndex & owner );
+//! Set a filter field (Layer / Flags and Part Number / Group) on BOTH copies a
+//! bhkRigidBody stores it in. Takes the BLOCK index. Returns the number written.
+int bhkSetFilterField( NifModel * nif, const QModelIndex & iBody, const QString & name, quint32 value );
 
 #if 0	// unused function
 inline GLuint glClosestMatch( GLuint * buffer, GLint hits )

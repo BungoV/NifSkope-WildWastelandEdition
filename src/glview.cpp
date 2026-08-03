@@ -5139,6 +5139,7 @@ void GLView::updateSoloNode()
 
 	if ( scene->soloNode != solo ) {
 		scene->soloNode = solo;
+		scene->invalidateBounds();
 		update();
 	}
 }
@@ -5150,6 +5151,7 @@ void GLView::setSoloMode( bool enable )
 
 	if ( !enable && scene->soloNode >= 0 ) {
 		scene->soloNode = -1;
+		scene->invalidateBounds();
 		update();
 	}
 }
@@ -5157,6 +5159,7 @@ void GLView::setSoloMode( bool enable )
 void GLView::setSoloBlock( int blockNumber )
 {
 	scene->soloNode = blockNumber;
+	scene->invalidateBounds();
 	update();
 }
 
@@ -6895,6 +6898,7 @@ void GLView::isolatePrimary()
 	scene->hiddenNodes.clear();
 	updateDimmedBlocks();
 	scene->soloNode = primary;
+	scene->invalidateBounds();
 	emit gizmoStatus( tr( "Isolated primary object %1" ).arg( primary ) );
 	update();
 }
@@ -8567,6 +8571,49 @@ static void tlRestoreValues( NifModel * nif, const QModelIndex & idx, const QVec
 	}
 }
 
+//! Re-tile a BSSubIndexTriShape's segment ranges onto its current triangle
+//! count. Defined further down (it needs blockInherits on the shape); declared
+//! here so the undo commands can call it from redo(). See its definition for why
+//! every triangle-count change has to run it.
+static void tlSyncSegments( NifModel * m, const QModelIndex & iShape );
+
+//! Snapshot/restore of a BSSubIndexTriShape's Segment subtree + Num Primitives.
+//! Any command whose redo() re-tiles the segments has to carry one of these, or
+//! undo puts the triangles back and leaves the slots describing the new layout.
+//! The slot COUNT never changes here, so a value round-trip is enough — no array
+//! resize on undo.
+struct TlSegmentSnapshot
+{
+	void capture( NifModel * nif, const QModelIndex & iShape )
+	{
+		QModelIndex iSeg = nif->getIndex( iShape, "Segment" );
+		if ( iSeg.isValid() ) {
+			has = true;
+			tlCaptureValues( nif, iSeg, state );
+		}
+		if ( nif->getIndex( iShape, "Num Primitives" ).isValid() )
+			numPrim = nif->get<quint32>( iShape, "Num Primitives" );
+	}
+
+	//! caller is already inside setState( Processing )
+	void restore( NifModel * nif, const QModelIndex & iShape ) const
+	{
+		if ( !has )
+			return;
+		QModelIndex iSeg = nif->getIndex( iShape, "Segment" );
+		if ( iSeg.isValid() ) {
+			int pos = 0;
+			tlRestoreValues( nif, iSeg, state, pos );
+		}
+		if ( nif->getIndex( iShape, "Num Primitives" ).isValid() )
+			nif->set<quint32>( iShape, "Num Primitives", numPrim );
+	}
+
+	bool has = false;
+	quint32 numPrim = 0;
+	QVector<NifValue> state;
+};
+
 //! In-place undo for arbitrary single-shape topology rewrites (Loop Cut,
 //! Subdivide, Dissolve, Symmetrize — anything that rewrites triangles or
 //! removes verts): the constructor snapshots the shape's counts + the whole
@@ -8606,8 +8653,13 @@ public:
 
 	void redo() override
 	{
-		if ( QModelIndex( block ).isValid() && apply )
+		if ( QModelIndex( block ).isValid() && apply ) {
 			apply();
+			// the op just changed Num Triangles; the FO4 segment table indexes
+			// that array by position, so it has to follow (idempotent when the
+			// op already rebuilt the ranges exactly, as delete does)
+			tlSyncSegments( nif, QModelIndex( block ) );
+		}
 	}
 
 	void undo() override
@@ -8774,6 +8826,81 @@ static void separateBuildSegments( NifModel * m, const QModelIndex & iShape, con
 	}
 	if ( m->getIndex( iShape, "Num Primitives" ).isValid() )
 		m->set<quint32>( iShape, "Num Primitives", quint32( keptBefore[origTris] ) );
+	m->restoreState();
+	m->dataChanged( iShape, iShape );
+}
+
+//! Re-tile a BSSubIndexTriShape's segment table onto its CURRENT triangle count.
+//!
+//! FO4 addresses triangles by (Start Index, Num Primitives) ranges in
+//! Segment / Sub Segment, so any op that changes Num Triangles has to touch them
+//! too — otherwise a delete leaves slots pointing past the end of the triangle
+//! buffer, and a growing op (extrude, fill, bevel, subdivide, loop cut, knife…)
+//! leaves the appended faces in no dismemberment slot at all. Nothing in the file
+//! flags either state: the counts still agree with themselves.
+//!
+//! Ranges keep their stored order and their size where the budget allows, and the
+//! last one absorbs the remainder, so the table always tiles [0, Num Triangles)
+//! exactly and Num Primitives == Num Triangles. Where the caller knows WHICH
+//! triangles survived, separateBuildSegments above is exact and should be
+//! preferred; this is the fallback for ops that only know the new count, and it
+//! puts new faces in the last slot rather than guessing.
+//!
+//! TlShapeStateCommand snapshots the Segment subtree and Num Primitives, so undo
+//! restores whatever this changed.
+static void tlSyncSegments( NifModel * m, const QModelIndex & iShape )
+{
+	if ( !m->blockInherits( iShape, "BSSubIndexTriShape" ) )
+		return;
+	QModelIndex iSeg = m->getIndex( iShape, "Segment" );
+	if ( !iSeg.isValid() || m->rowCount( iSeg ) < 1 )
+		return;
+	const int nt = m->get<int>( iShape, "Num Triangles" );
+	if ( nt < 0 )
+		return;
+
+	// every range, outermost first, in stored order
+	QVector<QModelIndex> ranges;
+	for ( int i = 0; i < m->rowCount( iSeg ); i++ ) {
+		QModelIndex s = m->getIndex( iSeg, i );
+		ranges.append( s );
+		QModelIndex iSub = m->getIndex( s, "Sub Segment" );
+		for ( int j = 0; j < m->rowCount( iSub ); j++ )
+			ranges.append( m->getIndex( iSub, j ) );
+	}
+
+	m->setState( BaseModel::Processing );
+	// Sub-segments partition their parent segment, so re-tiling the flat list
+	// would double-count. Lay out the segments, then each segment's subs inside
+	// the span their parent just got.
+	int cursor = 0;
+	const int nSeg = m->rowCount( iSeg );
+	for ( int i = 0; i < nSeg; i++ ) {
+		QModelIndex s = m->getIndex( iSeg, i );
+		int n = int( m->get<quint32>( s, "Num Primitives" ) );
+		n = qBound( 0, n, nt - cursor );
+		if ( i == nSeg - 1 )
+			n = nt - cursor;	// last slot absorbs the remainder
+		m->set<quint32>( s, "Start Index", quint32( cursor * 3 ) );
+		m->set<quint32>( s, "Num Primitives", quint32( n ) );
+
+		QModelIndex iSub = m->getIndex( s, "Sub Segment" );
+		const int nSub = m->rowCount( iSub );
+		int sub = cursor;
+		for ( int j = 0; j < nSub; j++ ) {
+			QModelIndex ss = m->getIndex( iSub, j );
+			int sn = int( m->get<quint32>( ss, "Num Primitives" ) );
+			sn = qBound( 0, sn, cursor + n - sub );
+			if ( j == nSub - 1 )
+				sn = cursor + n - sub;
+			m->set<quint32>( ss, "Start Index", quint32( sub * 3 ) );
+			m->set<quint32>( ss, "Num Primitives", quint32( sn ) );
+			sub += sn;
+		}
+		cursor += n;
+	}
+	if ( m->getIndex( iShape, "Num Primitives" ).isValid() )
+		m->set<quint32>( iShape, "Num Primitives", quint32( nt ) );
 	m->restoreState();
 	m->dataChanged( iShape, iShape );
 }
@@ -9216,6 +9343,14 @@ void GLView::duplicateSelection()
 static void tlCopyItemValues( NifModel * nif, const QModelIndex & src, const QModelIndex & dst )
 {
 	int rc = nif->rowCount( src );
+	// A freshly grown BSVertexData row leaves its #ARG#-conditional sub-arrays
+	// (Bone Weights/Bone Indices) 0-length until a deferred cascade. Without
+	// this the recursion below sees a length mismatch, gives up, and writes the
+	// array item's own empty value — silently dropping the skin on every vertex
+	// any op appends. Size the destination first; a no-op when it already
+	// matches, on unskinned shapes, and on plain value leaves.
+	if ( rc > 0 && rc != nif->rowCount( dst ) && nif->isArray( dst ) )
+		nif->updateArraySize( dst );
 	if ( rc > 0 && rc == nif->rowCount( dst ) ) {
 		for ( int r = 0; r < rc; r++ )
 			tlCopyItemValues( nif, nif->getIndex( src, r ), nif->getIndex( dst, r ) );
@@ -9356,6 +9491,7 @@ static void tlDeleteGeometry( NifModel * nif, const QModelIndex & iShape,
 	};
 
 	QVector<Triangle> keptTris;
+	QVector<bool> keepMask( numTris, false );
 	for ( int t = 0; t < numTris; t++ ) {
 		const Triangle & tri = tris.at( t );
 		bool remove;
@@ -9364,8 +9500,10 @@ static void tlDeleteGeometry( NifModel * nif, const QModelIndex & iShape,
 		case 1:	remove = cornersIn( tri ) >= 2; break;	// Edges: a selected edge
 		default:	remove = F.contains( t ) || cornersIn( tri ) == 3; break;	// Faces
 		}
-		if ( !remove )
+		if ( !remove ) {
 			keptTris.append( tri );
+			keepMask[t] = true;
+		}
 	}
 	removedTris += numTris - keptTris.size();
 
@@ -9418,6 +9556,10 @@ static void tlDeleteGeometry( NifModel * nif, const QModelIndex & iShape,
 		}
 		if ( stride > 0 )
 			nif->set<int>( iShape, "Data Size", newN * stride + keptTris.size() * 6 );
+
+		// FO4 segment ranges address triangles by position: without this the
+		// slots keep describing faces the delete just removed
+		separateBuildSegments( nif, iShape, keepMask );
 
 		tlUpdateBounds( nif, iShape );
 	} else {
@@ -11376,12 +11518,15 @@ public:
 			for ( int v : touchedVerts )
 				if ( v >= 0 && v < oldNV )
 					savedNrm.append( { v, nif->get<Vector3>( nif->getIndex( iVD, v ), "Normal" ) } );
+		seg.capture( nif, iShape );
 	}
 
 	void redo() override
 	{
-		if ( QModelIndex( block ).isValid() && apply )
+		if ( QModelIndex( block ).isValid() && apply ) {
 			apply();
+			tlSyncSegments( nif, QModelIndex( block ) );
+		}
 	}
 
 	void undo() override
@@ -11402,6 +11547,7 @@ public:
 				nif->set<ByteVector3>( row, "Normal", sn.second );
 		}
 		nif->set<int>( iShape, "Data Size", oldDataSize );
+		seg.restore( nif, iShape );
 		nif->restoreState();
 		nif->dataChanged( iShape, iShape );
 	}
@@ -11412,6 +11558,7 @@ private:
 	std::function<void()> apply;
 	int oldNV = 0, oldNT = 0, oldDataSize = 0;
 	QVector<QPair<int, Vector3>> savedNrm;
+	TlSegmentSnapshot seg;
 };
 
 //! In-place undo for Extrude (no whole-model snapshot, so no reload flash on
@@ -11454,12 +11601,15 @@ public:
 			if ( hasNormals )
 				savedNrm.append( { v, nif->get<Vector3>( row, "Normal" ) } );
 		}
+		seg.capture( nif, iShape );
 	}
 
 	void redo() override
 	{
-		if ( QModelIndex( block ).isValid() && apply )
+		if ( QModelIndex( block ).isValid() && apply ) {
 			apply();
+			tlSyncSegments( nif, QModelIndex( block ) );
+		}
 	}
 
 	void undo() override
@@ -11492,6 +11642,7 @@ public:
 			nif->set<Vector3>( iBound, "Center", boundCenter );
 			nif->set<float>( iBound, "Radius", boundRadius );
 		}
+		seg.restore( nif, iShape );
 		nif->restoreState();
 		nif->dataChanged( iShape, iShape );
 	}
@@ -11507,6 +11658,7 @@ private:
 	QVector<QPair<int, Triangle>> savedTris;
 	QVector<QPair<int, Vector3>> savedPos;
 	QVector<QPair<int, Vector3>> savedNrm;
+	TlSegmentSnapshot seg;
 };
 
 
@@ -15378,8 +15530,14 @@ static void tlApplyLoopCut( NifModel * model, const QPersistentModelIndex & pSha
 	const int ds = model->get<int>( iS, "Data Size" );
 	const int stride = ( nv > 0 ) ? ( ds - nt * 6 ) / nv : 0;
 	cuts = std::clamp( cuts, 1, 64 );
-	if ( nv + cuts * ringEdges.size() > 0xFFFF )
-		cuts = std::max( 1, int( ( 0xFFFF - nv ) / std::max( ringEdges.size(), qsizetype( 1 ) ) ) );
+	if ( nv + cuts * ringEdges.size() > 0xFFFF ) {
+		cuts = int( ( 0xFFFF - nv ) / std::max( ringEdges.size(), qsizetype( 1 ) ) );
+		// Num Vertices is a ushort: when the budget cannot fund even one cut per
+		// ring edge, refuse rather than floor to 1 and wrap the count and every
+		// new corner index. Same contract as tlApplyEdgeCut/extrude/bevel/rip.
+		if ( cuts < 1 )
+			return;
+	}
 	float f = std::clamp( factor, -1.0f, 1.0f );
 	if ( flipped )
 		f = -f;
@@ -15936,9 +16094,24 @@ void GLView::loopCutConfirmRing()
 	// effective cut count under the 65,535-vert cap (same clamp as the
 	// apply, so the deterministic new-vert indices stay in sync)
 	int cuts = std::clamp( loopCutCuts, 1, 64 );
-	if ( nvBase + cuts * loopCutRingEdges.size() > 0xFFFF )
-		cuts = std::max( 1, int( ( 0xFFFF - nvBase )
-			/ std::max( loopCutRingEdges.size(), qsizetype( 1 ) ) ) );
+	if ( nvBase + cuts * loopCutRingEdges.size() > 0xFFFF ) {
+		cuts = int( ( 0xFFFF - nvBase )
+			/ std::max( loopCutRingEdges.size(), qsizetype( 1 ) ) );
+		if ( cuts < 1 ) {
+			// one cut per ring edge already overruns the ushort Num Vertices;
+			// cancel instead of wrapping the count and the new corner indices
+			loopCutActive = false;
+			loopCutShape = -1;
+			loopCutAdjShape = -1;
+			loopCutTriCache.clear();
+			loopCutAdjCache.clear();
+			unsetCursor();
+			emit gizmoStatus( tr( "Loop Cut cancelled: a %1-edge loop would exceed the 65,535-vertex limit (%2 in use)" )
+				.arg( loopCutRingEdges.size() ).arg( nvBase ) );
+			update();
+			return;
+		}
+	}
 
 	NifModel * mdl = model;
 	const QPersistentModelIndex pShape( iShape );
@@ -19130,6 +19303,11 @@ void GLView::updateDimmedBlocks()
 		}
 	}
 	model->dimmedBlocks = dim;
+	// Scene::bounds() only counts visible nodes but is invalidated solely by
+	// Scene::transform(), which early-outs while the camera is idle - so
+	// without this every hide/unhide kept the pre-hide extent.
+	if ( scene )
+		scene->invalidateBounds();
 	emit hiddenNodesChanged();
 }
 

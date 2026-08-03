@@ -1,5 +1,62 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-03a — Bug sweep: 22 confirmed defects, patched
+
+A 38-agent sweep across the whole program raised 28 candidates; 22 survived
+adversarial refutation and are fixed here. Six were killed by the skeptics and
+are not in this list. Where a fix could be measured from the CLI it was
+**verified by reverting the one file and re-running** — the numbers below are
+what the old code actually produced, not a prediction. `tests/spells/bug_sweep.sh`
+(10 checks, no GUI) keeps them from coming back.
+
+### Corruption
+
+| where | what was wrong |
+|---|---|
+| `basemodel.cpp` `saveToFile` | any non-zero `write()` counted as a complete write, so a short write (disk full, flaky share) reported success and `completeSave` marked the document clean — over a target that `open(WriteOnly)` had already truncated. Now a `QSaveFile` with `setDirectWriteFallback(true)`: full-length write or nothing, and the original survives a failure. The fallback matters here — MO2's VFS can refuse the sibling temp file, and a save that used to work must not start failing. |
+| `glview.cpp` `tlCopyItemValues` | a freshly grown `BSVertexData` row leaves its `#ARG#`-conditional `Bone Weights`/`Bone Indices` 0-length, so the copy hit a length mismatch, gave up, and wrote the array item's own empty value. Join had a local workaround; the other **eight** append sites (Extrude, Inset, Duplicate, Split, Rip, Bevel, Symmetrize, and the lerp/barycentric writers behind Knife / Loop Cut / Subdivide / Bridge) did not, so every vertex they created on a skinned FO4 mesh came out weight-0. Fixed once, in the shared copy, which is where Join's own comment said the problem lived. |
+| `glview.cpp` segments | `Num Triangles` was maintained by every topology op; `Num Primitives` and the per-slot `Segment` ranges by two of them. A delete left slots indexing past the end of the triangle buffer; a grow left the new faces in no dismemberment slot. Delete now rebuilds the ranges **exactly** from its keep mask (`separateBuildSegments`); everything else re-tiles through a new `tlSyncSegments` called from the three undo commands' `redo()`, with a matching `TlSegmentSnapshot` so undo puts the old table back. |
+| `glview.cpp` Loop Cut | the 65,535-vertex recovery floored to `max(1, …)`, so when the budget could not fund one cut per ring edge it proceeded anyway and wrapped both the `ushort` `Num Vertices` and every new corner index. It now refuses, like `tlApplyEdgeCut` and every sibling op already did. |
+| `mesh.cpp` Optimize Indices | **measured:** on `MaleBody.nif` block 59 the permutation left one dismemberment slot holding **0 of its 438** original faces and another 20 of 435 — with every count still agreeing, so nothing flagged the file. Segmented shapes now optimize each range in place: boundaries survive, the optimization still runs. |
+| `mesh.cpp` Remove Unused Vertices | `Tangents`/`Bitangents` are `length="Num Vertices"` but were never compacted, so the arrays outlived the count and `saveItem` wrote them at full length behind a shorter header — desynchronising the stream on the next read. |
+| `blocks.cpp` Paste / Duplicate Branch | `holdUpdates(true)` leaked on the load-failure path. Nothing else clears it, so `updateHeader`/`updateFooter` became permanent no-ops and every later save in that session wrote its blocks behind a stale header. |
+| `skeletontools.cpp` delete bone | the "bone is in use" guard checked the selected bone; the operation removes the whole subtree. A weight-free parent over weighted children — `LArm_UpperArm` above `LArm_UpperArm_skin` — walked straight through. The guard now covers the same set the delete touches, and names the offending descendant. |
+
+### Wrong result
+
+| where | what was wrong |
+|---|---|
+| `obj.cpp` import | over a **selected** BSTriShape — the workflow the dialog advertises — `iData` was bound only for a newly created shape, so the bounds update silently no-op'd and the file kept the previous mesh's Bounding Sphere. |
+| `obj.cpp` face parser | a negative texcoord index adjusted `v` instead of `t`: it corrupted the vertex index and left the texcoord negative. A copy-paste slip between two correct neighbours. |
+| `collisiontools.cpp` Apply Safe Fixes | read `Motion System` off `filter.parent()`, which on every Skyrim-or-later file is the rigid body — no such child. The read always yielded 0, so "infer Static or Props from motion" could only ever infer Static. |
+| `collisiontools.cpp` / `havok.cpp` layer edits | **measured:** `bhkRigidBody` stores the HavokFilter twice and only the `Rigid Body Info` copy was ever written. Casting the layer spell on a body with block-level `Layer 7` / RBInfo `0` left `7/1` — and `glnode.cpp` colours collision by the 7. Now `7/0 → 1/1`, through a shared `bhkSetFilterField` used by all six write sites. |
+| `glscene.cpp` bounds | `bounds()` counts only visible nodes, but the cache is invalidated solely by `transform()`, which early-outs while the camera is idle. Hide / Isolate / Alt+H kept the pre-hide extent. New `Scene::invalidateBounds()`, called from every visibility change. |
+| `glscene.cpp` `clear()` | `hiddenNodes`, `hiddenTris`, `soloNode` and `restPoseBlock` are keyed by **block number** and nothing reset them, so loading a different NIF re-applied the previous document's hide set to whatever blocks carried those numbers. |
+| `nifskope_ui.cpp` / `nifskope.cpp` | a promoted background window never ran `restoreUi()` but did `saveUi()` on close, writing its unrestored default layout over the user's — and its viewport header came up empty. It now restores on promotion, and `saveUi()` is gated on a `uiRestored` flag so a window that never restored can never persist. |
+| `nifmodel.cpp` `moveAllNiBlocks` | announced the insert range one row low (the blocks land before the footer, not at `getBlockCount()`), so every persistent index the views held was updated against a layout the model never had. |
+| `blocks.cpp` Paste Branch | `getBlockByName` returns -1 for "not found", so 0 is a hit — `else if ( block > 0 )` rejected a valid mapping and aborted the whole paste. The sibling in Duplicate Branch already used `>= 0`. |
+| `controllers.cpp` particles | `fadeIn`/`fadeOut` belong to `BSPSysSimpleColorModifier` but were gated on `!hasColorGradient` and never reset, so a system without that modifier applied the class defaults (0.1 / 0.9) — and `emitParticle` evaluates the colour once, at `u = 0`, where fade-in is exactly zero. Every particle was born and stayed fully transparent. |
+| `freezeanim.cpp` `--strip` | inserted into the `doomed` `QSet` while iterating it; `std::as_const` suppresses the detach, not the re-bucketing. Collect first, merge after. |
+
+### Checks that could not fail
+
+| where | what was wrong |
+|---|---|
+| `tangentspace.cpp` | **measured:** "Add Tangent Spaces and Update" tested applicability of a *NiTriShape-filtered* (invalid) index instead of the real block, so it processed nothing on any BSTriShape file — every Skyrim SE and Fallout 4 mesh. Output was **byte-identical** to input (`2ca1eb073323` in, `2ca1eb073323` out). It now changes the file. This spell survived the Unfuck-dialog removal earlier the same day: it was verified *present*, never verified *working*. |
+| `mesh.cpp` `getTriShapeData` | resolved the `NiTriShape` Data link into `iData` and then returned an unconditional empty index, discarding it — so Flip Faces, Optimize Indices and Prune Triangles reported themselves inapplicable on every NiTriShape block (Oblivion / FO3 / Skyrim LE). The two halves were in the wrong order. |
+| `nifskope_ui.cpp` `WW_TEXCOLOR_TEST` | the broken-path red check read column 0, where `NifModel::data` never returns red. It could not fail whatever the path said. It reads `ValueCol` now, matching the sibling check eleven lines above. |
+
+### Verified
+
+`tests/spells/bug_sweep.sh` — 10 checks, CLI only, no window. Three fixes were
+confirmed by reverting their file, rebuilding, and watching the check go red
+first: `mesh.cpp` segments, `tangentspace.cpp` no-op, the collision filter copies.
+
+All twelve existing harnesses still pass: `collision_undo` 12, `collision_compile`
+12, `collision_compiled_edit` 7, `cycle_type` 12, `particle_cap` 5,
+`subtex_flipbook` 4, `top_bar` 36, `menu_taxonomy` 26, `spell_search` 9,
+`destructive_confirm` 8, `relative_paths` 6, `unfuck_panel` 0 failures.
+
 ## 2026-08-02j — The top bar, rebuilt on Blender's
 
 The row was doing two jobs. Blender keeps an application topbar (File, Edit,

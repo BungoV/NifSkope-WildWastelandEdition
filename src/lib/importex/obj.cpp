@@ -907,7 +907,7 @@ void importObjMain( NifModel * nif, const QModelIndex & index, bool collision )
 
 					int t = lst.value( 1 ).toInt();
 					if ( t < 0 )
-						v += otexco.count();
+						t += otexco.count();
 					else
 						t--;
 
@@ -993,14 +993,20 @@ void importObjMain( NifModel * nif, const QModelIndex & index, bool collision )
 				newiShape = true;
 			}
 
+			// BSTriShape holds its own geometry, so the shape IS the data block.
+			// This has to happen for a re-used shape too — importing over the
+			// selected one is the workflow the dialog advertises, and leaving
+			// iData invalid silently drops the Bounding Sphere update below,
+			// keeping the previous mesh's bounds.
+			if ( nif->getBSVersion() >= 100 )
+				iData = iShape;
+
 			if ( newiShape ) {
 				// don't change a name what already exists; // don't add duplicates
 				nif->set<QString>( iShape, "Name", QString( "%1:%2" ).arg( nif->get<QString>( iNode, "Name" ) ).arg( shapecount++ ) );
 				addLink( nif, iNode, "Children", nif->getBlockNumber( iShape ) );
-				if ( nif->getBSVersion() >= 100 ) {
-					iData = iShape;
+				if ( nif->getBSVersion() >= 100 )
 					nif->set<quint32>( iShape, "Flags", 14 );
-				}
 			}
 
 			if ( !omaterials.contains( it.key() ) ) {

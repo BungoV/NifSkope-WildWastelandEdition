@@ -869,15 +869,44 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 				: QObject::tr( "Dissolving '%1'." ).arg( primaryName );
 			// A bone carrying skin weights cannot be removed without remapping
 			// every vertex's bone indices, which is phase 2 work. Refuse instead
-			// of corrupting the mesh.
+			// of corrupting the mesh. Delete takes the whole subtree, so the
+			// guard has to cover the same set the operation touches — a
+			// weight-free parent over weighted children is the common case
+			// (LArm_UpperArm sits above LArm_UpperArm_skin).
 			const SkeletonReport rep = skeletonAnalyse( model );
+			QSet<int> scope;
+			scope << primary;
+			if ( isDelete ) {
+				// bones are reported parent-before-child (depth order), but do not
+				// rely on it: iterate to a fixed point
+				bool grew = true;
+				while ( grew ) {
+					grew = false;
+					for ( const SkeletonBoneInfo & bi : rep.bones ) {
+						if ( bi.block >= 0 && bi.parent >= 0
+							&& scope.contains( bi.parent ) && !scope.contains( bi.block ) )
+						{
+							scope << bi.block;
+							grew = true;
+						}
+					}
+				}
+			}
 			for ( const SkeletonBoneInfo & bi : rep.bones ) {
-				if ( bi.block == primary && bi.verts > 0 ) {
+				if ( scope.contains( bi.block ) && bi.verts > 0 ) {
+					const QString who = bi.name.isEmpty()
+						? QObject::tr( "block %1" ).arg( bi.block ) : bi.name;
 					QMessageBox::warning( panel, QObject::tr( "Bone is in use" ),
-						QObject::tr( "'%1' has %2 vertices weighted to it. Removing it would need "
-							"every vertex's bone indices remapped, which is not implemented yet — "
-							"so this is refused rather than corrupting the mesh." )
-							.arg( primaryName ).arg( bi.verts ) );
+						bi.block == primary
+							? QObject::tr( "'%1' has %2 vertices weighted to it. Removing it would need "
+								"every vertex's bone indices remapped, which is not implemented yet — "
+								"so this is refused rather than corrupting the mesh." )
+								.arg( primaryName ).arg( bi.verts )
+							: QObject::tr( "'%1' is under '%2' and has %3 vertices weighted to it. "
+								"Delete removes the whole subtree, which would need every vertex's "
+								"bone indices remapped — not implemented yet, so this is refused "
+								"rather than corrupting the mesh." )
+								.arg( who ).arg( primaryName ).arg( bi.verts ) );
 					return;
 				}
 			}
