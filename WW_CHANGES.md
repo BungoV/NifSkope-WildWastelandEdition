@@ -76,6 +76,39 @@ tested against them.
 - 22 plan/audit/reference documents moved to `docs/`. Source comments cite them
   by bare filename, which still resolves — the names are unique.
 
+### A downloadable build, and why `release/` is not it
+
+`scripts/package.sh` stages a distributable tree into `dist/` and refuses to
+finish if anything scratch reaches it.
+
+The naive version of this task is "zip `release/`". That directory was **120 MB,
+of which about 100 MB had no business in a download**: 60-odd `ww_*.log` harness
+outputs, 30-odd screenshots, `ls_*.png` loading-screen renders, scratch `.bin`
+files, `RiggingIntegration.exe`, and `NifSkope_backup_pre_details_20260720.exe`
+— a five-week-old build that a user could easily have run by mistake. The
+packaged tree is 116 files, 94 MB staged, **37 MB zipped**.
+
+The file list is derived from the copy rules in `NifSkope.pro` rather than from
+whatever happens to be sitting in `release/`, so it stays right as long as new
+runtime assets are added in both places. The script says so at the top, because
+that coupling is the thing that will rot.
+
+Two things checked before publishing, neither assumed:
+
+- **The baked revision.** `NIFSKOPE_REVISION` arrives as a `-D` on the compile
+  line, and make compares timestamps, not command lines — so after committing,
+  the exe still carried the *previous* hash. `main.cpp` and `about_dialog.cpp`
+  have to be touched or the About box lies about which build it is.
+- **Self-containment.** Ran the packaged CLI with `PATH` cut down to
+  `C:\Windows\system32;C:\Windows`, from the staged directory. It parsed an
+  80-block NIF and exited 0, which proves the exe, every DLL and `nif.xml`
+  resolve out of the folder and not out of the MSYS2 toolchain that built them.
+  (A first attempt appeared to fail with exit −1; that was PowerShell tearing
+  down the pipeline at `Select-Object -First 4`, not the program. Worth
+  re-running before believing an exit code that comes through a truncated pipe.)
+
+Built at `-j2`. This machine has hard-shut-down under sustained all-core load.
+
 ### The `.gitattributes` that was doing nothing
 
 It said `*.cpp eol=auto`. **`eol=auto` is not a value git recognises** — the
