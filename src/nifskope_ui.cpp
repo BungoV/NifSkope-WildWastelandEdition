@@ -12569,6 +12569,8 @@ void NifSkope::initDockWidgets()
 			void (GLView::*populate)( QMenu * ), QAction ** outAct ) -> QToolButton * {
 			QToolButton * btn = new QToolButton( modeBar );
 			btn->setText( title );
+			// named so the Ctrl+V/E/F handler can find the right one
+			btn->setObjectName( QStringLiteral( "ViewportMenu" ) + title );
 			btn->setToolButtonStyle( Qt::ToolButtonTextOnly );
 			btn->setPopupMode( QToolButton::InstantPopup );
 			btn->setFocusPolicy( Qt::NoFocus );
@@ -16360,6 +16362,48 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		const bool keyFocusIsTextInput = keyFocus && ( keyFocus->inherits( "QLineEdit" )
 			|| keyFocus->inherits( "QTextEdit" ) || keyFocus->inherits( "QPlainTextEdit" )
 			|| keyFocus->inherits( "QAbstractSpinBox" ) || keyFocus->inherits( "QComboBox" ) );
+		/* Blender's Ctrl+V / Ctrl+E / Ctrl+F open the Vertex, Edge and Face
+		 * menus. Same three menus sit in the viewport header here, so bind them.
+		 *
+		 * ShortcutOverride is the part that matters. Ctrl+V is already Paste
+		 * Branch, a WindowShortcut QAction, and Qt resolves those in
+		 * QApplication::notify BEFORE any widget filter sees a KeyPress - so a
+		 * KeyPress-only handler would never run for it. Accepting the
+		 * ShortcutOverride tells Qt to deliver the keystroke as an ordinary key
+		 * event instead of firing the action; the KeyPress branch below then
+		 * gets it.
+		 *
+		 * Guarded on edit mode AND the pointer being over the viewport, so
+		 * Ctrl+V keeps pasting a branch everywhere else - including in edit mode
+		 * with the pointer over the block list.
+		 */
+		if ( ogl && ogl->editModeActive() && pointerOverViewport && !keyFocusIsTextInput
+			&& ke->modifiers() == Qt::ControlModifier ) {
+			const char * want = nullptr;
+			switch ( ke->key() ) {
+			case Qt::Key_V: want = "Vertex"; break;
+			case Qt::Key_E: want = "Edge";   break;
+			case Qt::Key_F: want = "Face";   break;
+			default: break;
+			}
+			// Resolve the button FIRST and only claim the key if there is a menu
+			// to open. Claiming it unconditionally would swallow Ctrl+F (and
+			// Paste Branch) in a mode where that menu is not offered, leaving a
+			// keystroke that does nothing at all.
+			auto * btn = want ? findChild<QToolButton *>(
+				QStringLiteral( "ViewportMenu" ) + QLatin1String( want ) ) : nullptr;
+			if ( btn && btn->isVisibleTo( this ) && btn->isEnabled() ) {
+				if ( e->type() == QEvent::ShortcutOverride ) {
+					e->accept();		// deliver it as a key press, not as Paste Branch
+					return true;
+				}
+				if ( !ke->isAutoRepeat() ) {
+					btn->showMenu();
+					return true;
+				}
+			}
+		}
+
 		// rebindable viewport shortcuts (see tlRegisterViewportShortcuts)
 		const auto & vpKeys = ShortcutRegistry::get();
 		/* A modal transform is TYPING, and this filter must not eat its keys.
