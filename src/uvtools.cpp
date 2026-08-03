@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "nifskope.h"
 #include "nifsnapshot.h"
 #include "wwskin.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "gl/glcontext.hpp"
 #include "gl/gltex.h"
 #include "gl/glscene.h"
@@ -89,124 +90,15 @@ private:
 	QTimer m_timer;
 };
 
-//! Blender-style scrubbable number field — an exact clone of the 3D viewport
-//! redo panels' DragSpinBox (nifskope_ui.cpp): hold LMB on the value and drag
-//! left/right to change it (Shift = fine), click to type, hover shows ‹ ›
-//! step arrows, clicks in the side margins step the value.
-class UVDragSpinBox final : public QDoubleSpinBox
-{
-public:
-	explicit UVDragSpinBox( QWidget * parent = nullptr ) : QDoubleSpinBox( parent )
-	{
-		setButtonSymbols( QAbstractSpinBox::NoButtons );	// we draw ‹ › ourselves
-		setAlignment( Qt::AlignCenter );
-		setStyleSheet( QStringLiteral(
-			"QDoubleSpinBox { background: %1; border: none; border-radius: 3px; color: %2; }"
-			"QLineEdit { background: transparent; border: none; color: %2;"
-			" selection-background-color: %3; selection-color: #ffffff; }" )
-			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ) ) );
-		if ( QLineEdit * le = lineEdit() ) {
-			// the spin box's internal line edit gets the mouse events, so drive
-			// the drag from an event filter on it (a subclass override never fires)
-			le->installEventFilter( this );
-			le->setMouseTracking( true );
-			le->setCursor( Qt::SizeHorCursor );
-		}
-	}
-protected:
-	static constexpr int arrowW = 16;
-	void resizeEvent( QResizeEvent * e ) override
-	{
-		QDoubleSpinBox::resizeEvent( e );
-		if ( QLineEdit * le = lineEdit() )	// inset so the ‹ › arrows have room
-			le->setGeometry( arrowW, 0, std::max( width() - 2 * arrowW, 0 ), height() );
-	}
-	void enterEvent( QEnterEvent * e ) override
-	{
-		QDoubleSpinBox::enterEvent( e );
-		m_hover = true;		// hover reveals the ‹ › arrows (Blender)
-		update();
-	}
-	void leaveEvent( QEvent * e ) override
-	{
-		QDoubleSpinBox::leaveEvent( e );
-		m_hover = false;
-		update();
-	}
-	void mousePressEvent( QMouseEvent * e ) override
-	{
-		// clicks in the side margins (outside the inset line edit) step the value
-		if ( e->button() == Qt::LeftButton ) {
-			int x = int( e->position().x() );
-			if ( x < arrowW ) { stepBy( -1 ); Q_EMIT editingFinished(); return; }
-			if ( x > width() - arrowW ) { stepBy( 1 ); Q_EMIT editingFinished(); return; }
-		}
-		QDoubleSpinBox::mousePressEvent( e );
-	}
-	bool eventFilter( QObject * o, QEvent * ev ) override
-	{
-		QLineEdit * le = lineEdit();
-		if ( o == le ) {
-			if ( ev->type() == QEvent::MouseButtonPress ) {
-				auto me = static_cast<QMouseEvent *>( ev );
-				if ( me->button() == Qt::LeftButton ) {
-					m_dragging = true;
-					m_moved = false;
-					m_pressX = int( me->globalPosition().x() );
-					m_startVal = value();
-					return true;	// swallow: don't let the line edit start selecting
-				}
-			} else if ( ev->type() == QEvent::MouseMove && m_dragging ) {
-				auto me = static_cast<QMouseEvent *>( ev );
-				int dx = int( me->globalPosition().x() ) - m_pressX;
-				if ( !m_moved && std::abs( dx ) > 2 ) {
-					m_moved = true;
-					update();	// light up the field while scrubbing (Blender)
-				}
-				if ( m_moved ) {
-					double scale = ( me->modifiers() & Qt::ShiftModifier ) ? 0.01 : 0.1;
-					setValue( m_startVal + double( dx ) * singleStep() * scale );
-				}
-				return true;
-			} else if ( ev->type() == QEvent::MouseButtonRelease && m_dragging ) {
-				m_dragging = false;
-				const bool finishedScrub = m_moved;
-				if ( !m_moved ) {		// a plain click: edit the value
-					le->selectAll();
-					le->setFocus();
-				}
-				m_moved = false;
-				update();
-				if ( finishedScrub )
-					Q_EMIT editingFinished();
-				return true;
-			}
-		}
-		return QDoubleSpinBox::eventFilter( o, ev );
-	}
-	void paintEvent( QPaintEvent * ev ) override
-	{
-		QDoubleSpinBox::paintEvent( ev );
-		QPainter p( this );
-		p.setRenderHint( QPainter::Antialiasing );
-		if ( m_dragging && m_moved ) {
-			// scrub highlight: brighten the well while the value is being dragged
-			p.setPen( Qt::NoPen );
-			p.setBrush( QColor( 255, 255, 255, 45 ) );
-			p.drawRoundedRect( rect().adjusted( 0, 0, -1, -1 ), 3.0, 3.0 );
-		}
-		// ‹ › step arrows only appear under the pointer, and not while typing
-		if ( m_hover && !( lineEdit() && lineEdit()->hasFocus() ) ) {
-			p.setPen( QColor( 230, 230, 230 ) );
-			p.drawText( QRect( 0, 0, arrowW, height() ), Qt::AlignCenter, QStringLiteral( "‹" ) );
-			p.drawText( QRect( width() - arrowW, 0, arrowW, height() ), Qt::AlignCenter, QStringLiteral( "›" ) );
-		}
-	}
-private:
-	bool m_dragging = false, m_moved = false, m_hover = false;
-	int m_pressX = 0;
-	double m_startVal = 0.0;
-};
+/* The Blender number-field gesture used to be reimplemented here as WwNumberField.
+ *
+ * It is now ui/widgets/wwnumberfield.h, shared with every other panel.
+ * It was byte-identical to the original apart from a dropped comment, and
+ * existed only because that original sat in an anonymous namespace inside
+ * nifskope_ui.cpp where nothing else could reach it. Nothing here was ever
+ * UV-specific: the per-operator feel comes from the opSpecs table driving
+ * setSingleStep, which is call-site data and is untouched.
+ */
 
 //! Set a redo panel's title, keeping the ˅ / ˃ collapse marker in sync
 //! (clone of nifskope_ui.cpp's tlSetPanelTitle)
@@ -5753,7 +5645,7 @@ QDockWidget * tlCreateUVManagerDock( NifModel * nif, QMainWindow * mw, GLView * 
 	opOuter->addWidget( opBody );
 
 	QLabel * opLbls[2] = { new QLabel( opBody ), new QLabel( opBody ) };
-	UVDragSpinBox * opVals[2] = { new UVDragSpinBox( opBody ), new UVDragSpinBox( opBody ) };
+	WwNumberField * opVals[2] = { new WwNumberField( opBody ), new WwNumberField( opBody ) };
 	for ( int i = 0; i < 2; i++ ) {
 		opLbls[i]->setAlignment( Qt::AlignRight | Qt::AlignVCenter );
 		opVals[i]->setRange( -1.0e6, 1.0e6 );
@@ -5801,7 +5693,7 @@ QDockWidget * tlCreateUVManagerDock( NifModel * nif, QMainWindow * mw, GLView * 
 		}
 		const UVOpSpec & spec = opSpecs[kind];
 		QLabel * lbls[2] = { opLbl0, opLbl1 };
-		UVDragSpinBox * vals[2] = { opVal0, opVal1 };
+		WwNumberField * vals[2] = { opVal0, opVal1 };
 		for ( QWidget * w : opPanel->findChildren<QWidget *>() )
 			w->setEnabled( true );	// a stale gesture froze them
 		for ( int i = 0; i < 2; i++ ) {
@@ -5836,7 +5728,7 @@ QDockWidget * tlCreateUVManagerDock( NifModel * nif, QMainWindow * mw, GLView * 
 					w->setEnabled( false );
 		}
 	};
-	for ( UVDragSpinBox * sb : opVals )
+	for ( WwNumberField * sb : opVals )
 		QObject::connect( sb, qOverload<double>( &QDoubleSpinBox::valueChanged ), view, applyOpEdit );
 
 	auto refreshUnderlayCombo = [view, underlay]() {

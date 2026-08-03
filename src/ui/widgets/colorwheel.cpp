@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "colorwheel.h"
+#include "ui/widgets/wwnumberfield.h"
 
 #include "spellbook.h"
 #include "data/niftypes.h"
@@ -99,127 +100,15 @@ QString twoColorStops( const QColor & first, const QColor & last )
 		.arg( first.name( QColor::HexRgb ), last.name( QColor::HexRgb ) );
 }
 
-//! Integer counterpart of the transform redo panel's DragSpinBox.  A plain
-//! click selects the value for typing; a horizontal click-drag scrubs it.
-//! Hover-only step arrows and the active scrub highlight mirror that panel.
-class ColorDragSpinBox final : public QSpinBox
-{
-public:
-	explicit ColorDragSpinBox( QWidget * parent = nullptr ) : QSpinBox( parent )
-	{
-		setButtonSymbols( QAbstractSpinBox::NoButtons );
-		setAlignment( Qt::AlignCenter );
-		setStyleSheet( QStringLiteral(
-			"QSpinBox { background: #545454; border: none; border-radius: 3px; color: #e6e6e6; }"
-			"QLineEdit { background: transparent; border: none; color: #e6e6e6;"
-			" selection-background-color: #4772b3; selection-color: #ffffff; }" ) );
-		if ( QLineEdit * editor = lineEdit() ) {
-			editor->installEventFilter( this );
-			editor->setMouseTracking( true );
-			editor->setCursor( Qt::SizeHorCursor );
-		}
-	}
-
-protected:
-	static constexpr int arrowWidth = 16;
-
-	void resizeEvent( QResizeEvent * event ) override
-	{
-		QSpinBox::resizeEvent( event );
-		if ( QLineEdit * editor = lineEdit() )
-			editor->setGeometry( arrowWidth, 0, std::max( width() - 2 * arrowWidth, 0 ), height() );
-	}
-
-	void enterEvent( QEnterEvent * event ) override
-	{
-		QSpinBox::enterEvent( event );
-		hovered = true;
-		update();
-	}
-
-	void leaveEvent( QEvent * event ) override
-	{
-		QSpinBox::leaveEvent( event );
-		hovered = false;
-		update();
-	}
-
-	void mousePressEvent( QMouseEvent * event ) override
-	{
-		if ( event->button() == Qt::LeftButton ) {
-			const int x = int( event->position().x() );
-			if ( x < arrowWidth ) { stepBy( -1 ); Q_EMIT editingFinished(); return; }
-			if ( x > width() - arrowWidth ) { stepBy( 1 ); Q_EMIT editingFinished(); return; }
-		}
-		QSpinBox::mousePressEvent( event );
-	}
-
-	bool eventFilter( QObject * object, QEvent * event ) override
-	{
-		QLineEdit * editor = lineEdit();
-		if ( object == editor ) {
-			if ( event->type() == QEvent::MouseButtonPress ) {
-				auto mouse = static_cast<QMouseEvent *>( event );
-				if ( mouse->button() == Qt::LeftButton ) {
-					dragging = true;
-					moved = false;
-					pressX = int( mouse->globalPosition().x() );
-					startValue = value();
-					return true;
-				}
-			} else if ( event->type() == QEvent::MouseMove && dragging ) {
-				auto mouse = static_cast<QMouseEvent *>( event );
-				const int dx = int( mouse->globalPosition().x() ) - pressX;
-				if ( !moved && std::abs( dx ) > 2 ) {
-					moved = true;
-					update();
-				}
-				if ( moved ) {
-					const double scale = ( mouse->modifiers() & Qt::ShiftModifier ) ? 0.01 : 0.1;
-					setValue( qRound( startValue + double( dx ) * singleStep() * scale ) );
-				}
-				return true;
-			} else if ( event->type() == QEvent::MouseButtonRelease && dragging ) {
-				dragging = false;
-				const bool finishedScrub = moved;
-				if ( !moved ) {
-					editor->selectAll();
-					editor->setFocus();
-				}
-				moved = false;
-				update();
-				if ( finishedScrub )
-					Q_EMIT editingFinished();
-				return true;
-			}
-		}
-		return QSpinBox::eventFilter( object, event );
-	}
-
-	void paintEvent( QPaintEvent * event ) override
-	{
-		QSpinBox::paintEvent( event );
-		QPainter painter( this );
-		painter.setRenderHint( QPainter::Antialiasing );
-		if ( dragging && moved ) {
-			painter.setPen( Qt::NoPen );
-			painter.setBrush( QColor( 255, 255, 255, 45 ) );
-			painter.drawRoundedRect( rect().adjusted( 0, 0, -1, -1 ), 3.0, 3.0 );
-		}
-		if ( hovered && !( dragging && moved ) && !( lineEdit() && lineEdit()->hasFocus() ) ) {
-			painter.setPen( QColor( 230, 230, 230 ) );
-			painter.drawText( QRect( 0, 0, arrowWidth, height() ), Qt::AlignCenter, QStringLiteral( "‹" ) );
-			painter.drawText( QRect( width() - arrowWidth, 0, arrowWidth, height() ), Qt::AlignCenter, QStringLiteral( "›" ) );
-		}
-	}
-
-private:
-	bool dragging = false;
-	bool moved = false;
-	bool hovered = false;
-	int pressX = 0;
-	int startValue = 0;
-};
+/* The Blender number-field gesture used to be reimplemented here as ColorDragSpinBox.
+ *
+ * It is now ui/widgets/wwnumberfield.h, shared with every other panel.
+ * Its one real reason to exist - integer channels, where a QDoubleSpinBox
+ * would print "128.00" - is now a runtime property of the shared field, and
+ * its one deliberate improvement (arrows hidden while scrubbing) became
+ * canonical for everyone. Its three hardcoded hex colours went with it: this
+ * file did not even include wwskin.h, so those stayed dark in the Light theme.
+ */
 
 // On Windows the sampler is a tiny mouse-transparent tooltip that follows the
 // cursor while GetPixel / GetAsyncKeyState read the real desktop globally.
@@ -847,7 +736,8 @@ ColorPickerPanel::ColorPickerPanel( const QColor & color, bool alpha,
 	values->addLayout( hexRow );
 
 	auto makeByteSpin = [this]() {
-		QSpinBox * spin = new ColorDragSpinBox( this );
+		QSpinBox * spin = new QSpinBox( this );
+		wwMakeScrubField( spin );
 		spin->setRange( 0, 255 );
 		spin->setFixedWidth( 72 );
 		return spin;
@@ -863,11 +753,14 @@ ColorPickerPanel::ColorPickerPanel( const QColor & color, bool alpha,
 	QSpinBox * red = makeByteSpin();
 	QSpinBox * green = makeByteSpin();
 	QSpinBox * blue = makeByteSpin();
-	QSpinBox * hue = new ColorDragSpinBox( this );
+	QSpinBox * hue = new QSpinBox( this );
+	wwMakeScrubField( hue );
 	hue->setRange( 0, 359 ); hue->setSuffix( QStringLiteral( "°" ) ); hue->setFixedWidth( 72 );
-	QSpinBox * saturation = new ColorDragSpinBox( this );
+	QSpinBox * saturation = new QSpinBox( this );
+	wwMakeScrubField( saturation );
 	saturation->setRange( 0, 100 ); saturation->setSuffix( QStringLiteral( "%" ) ); saturation->setFixedWidth( 72 );
-	QSpinBox * value = new ColorDragSpinBox( this );
+	QSpinBox * value = new QSpinBox( this );
+	wwMakeScrubField( value );
 	value->setRange( 0, 100 ); value->setSuffix( QStringLiteral( "%" ) ); value->setFixedWidth( 72 );
 	QSpinBox * opacity = makeByteSpin();
 	QSlider * redSlider = makeSlider( 255 );
@@ -1221,7 +1114,8 @@ QColor ColorWheel::choose( const QColor & c, bool alphaEnable, QWidget * parent 
 	values->addLayout( hexRow );
 
 	auto makeByteSpin = [&dlg]() {
-		QSpinBox * spin = new ColorDragSpinBox( &dlg );
+		QSpinBox * spin = new QSpinBox( &dlg );
+		wwMakeScrubField( spin );
 		spin->setRange( 0, 255 );
 		spin->setFixedWidth( 72 );
 		return spin;
@@ -1237,9 +1131,12 @@ QColor ColorWheel::choose( const QColor & c, bool alphaEnable, QWidget * parent 
 	QSpinBox * red = makeByteSpin();
 	QSpinBox * green = makeByteSpin();
 	QSpinBox * blue = makeByteSpin();
-	QSpinBox * hue = new ColorDragSpinBox( &dlg ); hue->setRange( 0, 359 ); hue->setSuffix( QStringLiteral( "°" ) ); hue->setFixedWidth( 72 );
-	QSpinBox * saturation = new ColorDragSpinBox( &dlg ); saturation->setRange( 0, 100 ); saturation->setSuffix( QStringLiteral( "%" ) ); saturation->setFixedWidth( 72 );
-	QSpinBox * value = new ColorDragSpinBox( &dlg ); value->setRange( 0, 100 ); value->setSuffix( QStringLiteral( "%" ) ); value->setFixedWidth( 72 );
+	QSpinBox * hue = new QSpinBox( &dlg ); hue->setRange( 0, 359 ); hue->setSuffix( QStringLiteral( "°" ) ); hue->setFixedWidth( 72 );
+	wwMakeScrubField( hue );
+	QSpinBox * saturation = new QSpinBox( &dlg ); saturation->setRange( 0, 100 ); saturation->setSuffix( QStringLiteral( "%" ) ); saturation->setFixedWidth( 72 );
+	wwMakeScrubField( saturation );
+	QSpinBox * value = new QSpinBox( &dlg ); value->setRange( 0, 100 ); value->setSuffix( QStringLiteral( "%" ) ); value->setFixedWidth( 72 );
+	wwMakeScrubField( value );
 	QSpinBox * opacity = makeByteSpin();
 	QSlider * redSlider = makeSlider( 255 );
 	QSlider * greenSlider = makeSlider( 255 );

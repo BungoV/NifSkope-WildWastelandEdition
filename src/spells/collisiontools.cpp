@@ -1,6 +1,7 @@
 #include "nifskope.h"
 #include "glview.h"
 #include "spellbook.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "gl/hknpdecode.h"
 #include "skeletontools.h"
 #include "gl/hknpencode.h"
@@ -340,91 +341,14 @@ public:
 	}
 };
 
-//! The same Blender-style scrub field used by the transform operator panel:
-//! drag horizontally to change, click to type, hover the edges to step.
-class CollisionDragSpinBox final : public QDoubleSpinBox
-{
-public:
-	explicit CollisionDragSpinBox( QWidget * parent = nullptr ) : QDoubleSpinBox( parent )
-	{
-		setButtonSymbols( QAbstractSpinBox::NoButtons );
-		setAlignment( Qt::AlignCenter );
-		setStyleSheet( QStringLiteral(
-			"QDoubleSpinBox { background:%1; border:none; border-radius:3px; color:%2; }"
-			"QLineEdit { background:transparent; border:none; color:%2;"
-			" selection-background-color:%3; selection-color:white; }" )
-			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ) ) );
-		if ( QLineEdit * edit = lineEdit() ) {
-			edit->installEventFilter( this );
-			edit->setMouseTracking( true );
-			edit->setCursor( Qt::SizeHorCursor );
-		}
-	}
-protected:
-	static constexpr int arrowWidth = 16;
-	void resizeEvent( QResizeEvent * event ) override
-	{
-		QDoubleSpinBox::resizeEvent( event );
-		if ( QLineEdit * edit = lineEdit() )
-			edit->setGeometry( arrowWidth, 0, std::max( width() - 2 * arrowWidth, 0 ), height() );
-	}
-	void enterEvent( QEnterEvent * event ) override { QDoubleSpinBox::enterEvent( event ); hover = true; update(); }
-	void leaveEvent( QEvent * event ) override { QDoubleSpinBox::leaveEvent( event ); hover = false; update(); }
-	void mousePressEvent( QMouseEvent * event ) override
-	{
-		if ( event->button() == Qt::LeftButton ) {
-			int x = int( event->position().x() );
-			if ( x < arrowWidth ) { stepBy( -1 ); return; }
-			if ( x > width() - arrowWidth ) { stepBy( 1 ); return; }
-		}
-		QDoubleSpinBox::mousePressEvent( event );
-	}
-	bool eventFilter( QObject * object, QEvent * event ) override
-	{
-		QLineEdit * edit = lineEdit();
-		if ( object == edit ) {
-			if ( event->type() == QEvent::MouseButtonPress ) {
-				auto * mouse = static_cast<QMouseEvent *>( event );
-				if ( mouse->button() == Qt::LeftButton ) {
-					dragging = true; moved = false; pressX = int( mouse->globalPosition().x() ); startValue = value();
-					return true;
-				}
-			} else if ( event->type() == QEvent::MouseMove && dragging ) {
-				auto * mouse = static_cast<QMouseEvent *>( event );
-				int delta = int( mouse->globalPosition().x() ) - pressX;
-				if ( !moved && std::abs( delta ) > 2 ) { moved = true; update(); }
-				if ( moved ) {
-					double sensitivity = ( mouse->modifiers() & Qt::ShiftModifier ) ? 0.01 : 0.1;
-					setValue( startValue + double( delta ) * singleStep() * sensitivity );
-				}
-				return true;
-			} else if ( event->type() == QEvent::MouseButtonRelease && dragging ) {
-				dragging = false;
-				if ( !moved ) { edit->selectAll(); edit->setFocus(); }
-				moved = false; update(); return true;
-			}
-		}
-		return QDoubleSpinBox::eventFilter( object, event );
-	}
-	void paintEvent( QPaintEvent * event ) override
-	{
-		QDoubleSpinBox::paintEvent( event );
-		QPainter painter( this ); painter.setRenderHint( QPainter::Antialiasing );
-		if ( dragging && moved ) {
-			painter.setPen( Qt::NoPen ); painter.setBrush( QColor( 255, 255, 255, 45 ) );
-			painter.drawRoundedRect( rect().adjusted( 0, 0, -1, -1 ), 3.0, 3.0 );
-		}
-		if ( hover && !( lineEdit() && lineEdit()->hasFocus() ) ) {
-			painter.setPen( QColor( 230, 230, 230 ) );
-			painter.drawText( QRect( 0, 0, arrowWidth, height() ), Qt::AlignCenter, QStringLiteral( "‹" ) );
-			painter.drawText( QRect( width() - arrowWidth, 0, arrowWidth, height() ), Qt::AlignCenter, QStringLiteral( "›" ) );
-		}
-	}
-private:
-	bool dragging = false, moved = false, hover = false;
-	int pressX = 0;
-	double startValue = 0.0;
-};
+/* The Blender number-field gesture used to be reimplemented here as WwNumberField.
+ *
+ * It is now ui/widgets/wwnumberfield.h, shared with every other panel.
+ * Its own comment claimed it was "the same Blender-style scrub field used by
+ * the transform operator panel". It was not: it silently dropped both
+ * editingFinished emissions, so these fields never committed the way the
+ * Move field does. Retiring it restores them.
+ */
 
 class CollisionManagerPanel final : public QWidget
 {
@@ -2085,15 +2009,15 @@ private:
 		previewBody = new QWidget( previewPanel );
 		auto * bodyLayout = new QVBoxLayout( previewBody ); bodyLayout->setContentsMargins( 0, 0, 0, 0 ); bodyLayout->setSpacing( 4 );
 		auto * grid = new QGridLayout; grid->setContentsMargins( 0, 0, 0, 0 ); grid->setHorizontalSpacing( 8 ); grid->setVerticalSpacing( 3 );
-		previewRatio = new CollisionDragSpinBox( previewBody );
+		previewRatio = new WwNumberField( previewBody );
 		previewRatio->setRange( 1.0, 100.0 ); previewRatio->setDecimals( 0 ); previewRatio->setSuffix( QStringLiteral( "%" ) );
 		previewRatio->setSingleStep( 1.0 ); previewRatio->setKeyboardTracking( false ); previewRatio->setMinimumWidth( 150 );
 		previewRatio->setToolTip( tr( "Drag left/right to change the triangle percentage; Shift-drag for fine control" ) );
 		previewMethod = new QComboBox( previewBody ); previewMethod->addItems( { tr( "Single Hull" ), tr( "Decomposition (CoACD)" ) } );
-		previewPrecision = new CollisionDragSpinBox( previewBody );
+		previewPrecision = new WwNumberField( previewBody );
 		previewPrecision->setRange( 0.0, 5.0 ); previewPrecision->setDecimals( 3 ); previewPrecision->setSingleStep( 0.01 ); previewPrecision->setKeyboardTracking( false );
 		previewPrecision->setToolTip( tr( "Drag left/right to change hull precision; Shift-drag for fine control" ) );
-		previewThreshold = new CollisionDragSpinBox( previewBody );
+		previewThreshold = new WwNumberField( previewBody );
 		previewThreshold->setRange( 0.01, 1.0 ); previewThreshold->setDecimals( 3 ); previewThreshold->setSingleStep( 0.01 ); previewThreshold->setKeyboardTracking( false );
 		previewThreshold->setToolTip( tr( "Drag left/right to change the decomposition threshold; Shift-drag for fine control" ) );
 		previewMaxHulls = new QSpinBox( previewBody ); previewMaxHulls->setRange( 1, 256 ); previewMaxHulls->setKeyboardTracking( false );

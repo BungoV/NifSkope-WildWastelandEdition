@@ -72,6 +72,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/inspect.h"
 #include "ui/widgets/timeline.h"
 #include "ui/widgets/valueedit.h"
+#include "ui/widgets/wwnumberfield.h"
 #include "ui/widgets/xmlcheck.h"
 #include "ui/about_dialog.h"
 #include "ui/settingsdialog.h"
@@ -177,124 +178,13 @@ protected:
 	}
 };
 
-//! Blender-style number field: click-drag left/right scrubs the value, a plain
-//! click (no drag) enters edit mode, and the ‹ › arrows shown on hover step it.
-//! No Q_OBJECT (it reuses QDoubleSpinBox::valueChanged) so it stays inline.
-class DragSpinBox final : public QDoubleSpinBox
-{
-public:
-	explicit DragSpinBox( QWidget * parent = nullptr ) : QDoubleSpinBox( parent )
-	{
-		setButtonSymbols( QAbstractSpinBox::NoButtons );	// we draw ‹ › ourselves
-		// Blender number field: dark rounded well, value roughly centered
-		setAlignment( Qt::AlignCenter );
-		setStyleSheet( QStringLiteral(
-			"QDoubleSpinBox { background: %1; border: none; border-radius: 3px; color: %2; }"
-			"QLineEdit { background: transparent; border: none; color: %2;"
-			" selection-background-color: %3; selection-color: #ffffff; }" )
-			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ) ) );
-		if ( QLineEdit * le = lineEdit() ) {
-			// the spin box's internal line edit gets the mouse events, so drive
-			// the drag from an event filter on it (a subclass override never fires)
-			le->installEventFilter( this );
-			le->setMouseTracking( true );
-			le->setCursor( Qt::SizeHorCursor );
-		}
-	}
-protected:
-	static constexpr int arrowW = 16;
-	void resizeEvent( QResizeEvent * e ) override
-	{
-		QDoubleSpinBox::resizeEvent( e );
-		if ( QLineEdit * le = lineEdit() )	// inset so the ‹ › arrows have room
-			le->setGeometry( arrowW, 0, std::max( width() - 2 * arrowW, 0 ), height() );
-	}
-	void enterEvent( QEnterEvent * e ) override
-	{
-		QDoubleSpinBox::enterEvent( e );
-		m_hover = true;		// hover reveals the ‹ › arrows (Blender)
-		update();
-	}
-	void leaveEvent( QEvent * e ) override
-	{
-		QDoubleSpinBox::leaveEvent( e );
-		m_hover = false;
-		update();
-	}
-	void mousePressEvent( QMouseEvent * e ) override
-	{
-		// clicks in the side margins (outside the inset line edit) step the value
-		if ( e->button() == Qt::LeftButton ) {
-			int x = int( e->position().x() );
-			if ( x < arrowW ) { stepBy( -1 ); Q_EMIT editingFinished(); return; }
-			if ( x > width() - arrowW ) { stepBy( 1 ); Q_EMIT editingFinished(); return; }
-		}
-		QDoubleSpinBox::mousePressEvent( e );
-	}
-	bool eventFilter( QObject * o, QEvent * ev ) override
-	{
-		QLineEdit * le = lineEdit();
-		if ( o == le ) {
-			if ( ev->type() == QEvent::MouseButtonPress ) {
-				auto me = static_cast<QMouseEvent *>( ev );
-				if ( me->button() == Qt::LeftButton ) {
-					m_dragging = true;
-					m_moved = false;
-					m_pressX = int( me->globalPosition().x() );
-					m_startVal = value();
-					return true;	// swallow: don't let the line edit start selecting
-				}
-			} else if ( ev->type() == QEvent::MouseMove && m_dragging ) {
-				auto me = static_cast<QMouseEvent *>( ev );
-				int dx = int( me->globalPosition().x() ) - m_pressX;
-				if ( !m_moved && std::abs( dx ) > 2 ) {
-					m_moved = true;
-					update();	// light up the field while scrubbing (Blender)
-				}
-				if ( m_moved ) {
-					double scale = ( me->modifiers() & Qt::ShiftModifier ) ? 0.01 : 0.1;
-					setValue( m_startVal + double( dx ) * singleStep() * scale );
-				}
-				return true;
-			} else if ( ev->type() == QEvent::MouseButtonRelease && m_dragging ) {
-				m_dragging = false;
-				const bool finishedScrub = m_moved;
-				if ( !m_moved ) {		// a plain click: edit the value
-					le->selectAll();
-					le->setFocus();
-				}
-				m_moved = false;
-				update();
-				if ( finishedScrub )
-					Q_EMIT editingFinished();
-				return true;
-			}
-		}
-		return QDoubleSpinBox::eventFilter( o, ev );
-	}
-	void paintEvent( QPaintEvent * ev ) override
-	{
-		QDoubleSpinBox::paintEvent( ev );
-		QPainter p( this );
-		p.setRenderHint( QPainter::Antialiasing );
-		if ( m_dragging && m_moved ) {
-			// scrub highlight: brighten the well while the value is being dragged
-			p.setPen( Qt::NoPen );
-			p.setBrush( QColor( 255, 255, 255, 45 ) );
-			p.drawRoundedRect( rect().adjusted( 0, 0, -1, -1 ), 3.0, 3.0 );
-		}
-		// ‹ › step arrows only appear under the pointer, and not while typing
-		if ( m_hover && !( lineEdit() && lineEdit()->hasFocus() ) ) {
-			p.setPen( QColor( 230, 230, 230 ) );
-			p.drawText( QRect( 0, 0, arrowW, height() ), Qt::AlignCenter, QStringLiteral( "‹" ) );
-			p.drawText( QRect( width() - arrowW, 0, arrowW, height() ), Qt::AlignCenter, QStringLiteral( "›" ) );
-		}
-	}
-private:
-	bool m_dragging = false, m_moved = false, m_hover = false;
-	int m_pressX = 0;
-	double m_startVal = 0.0;
-};
+/* The Blender number field lived here, as WwNumberField.
+ *
+ * It is now ui/widgets/wwnumberfield.h. It was the ORIGINAL and the best of
+ * the five copies, and it was copied four times for one reason: it sat in the
+ * anonymous namespace above, so no other panel could reach it. Moving it out
+ * is the whole fix; everything else is deleting the copies.
+ */
 
 //! Set a redo panel's title, keeping the ˅ / ˃ collapse marker in sync
 static void tlSetPanelTitle( QFrame * panel, QToolButton * title, const QString & text )
@@ -6822,10 +6712,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * separate implementations of that gesture, none reachable from the others
 	 * because the original lives in an anonymous namespace:
 	 *
-	 *   DragSpinBox           nifskope_ui.cpp:183      the reference (Move X/Y/Z)
-	 *   UVDragSpinBox         uvtools.cpp:96
-	 *   CollisionDragSpinBox  spells/collisiontools.cpp:345
-	 *   ColorDragSpinBox      ui/widgets/colorwheel.cpp:105
+	 *   WwNumberField           nifskope_ui.cpp:183      the reference (Move X/Y/Z)
+	 *   UVWwNumberField         uvtools.cpp:96
+	 *   CollisionWwNumberField  spells/collisiontools.cpp:345
+	 *   ColorWwNumberField      ui/widgets/colorwheel.cpp:105
 	 *   WwScrubFilter         ui/widgets/valueedit.cpp:72
 	 *
 	 * THIS FILE IS WRITTEN BEFORE THE FIX, DELIBERATELY. Every check below was
@@ -11314,7 +11204,7 @@ void NifSkope::initDockWidgets()
 		} );
 
 		QLabel * rpLbl0 = new QLabel( rpBody ), * rpLbl1 = new QLabel( rpBody ), * rpLbl2 = new QLabel( rpBody );
-		QDoubleSpinBox * rpVal0 = new DragSpinBox( rpBody ), * rpVal1 = new DragSpinBox( rpBody ), * rpVal2 = new DragSpinBox( rpBody );
+		QDoubleSpinBox * rpVal0 = new WwNumberField( rpBody ), * rpVal1 = new WwNumberField( rpBody ), * rpVal2 = new WwNumberField( rpBody );
 		QLabel * rpLbls[3] = { rpLbl0, rpLbl1, rpLbl2 };
 		QDoubleSpinBox * rpVals[3] = { rpVal0, rpVal1, rpVal2 };
 		for ( int i = 0; i < 3; i++ ) {
@@ -11472,7 +11362,7 @@ void NifSkope::initDockWidgets()
 
 		QLabel * opLbl = new QLabel( opBody );
 		opLbl->setAlignment( Qt::AlignRight | Qt::AlignVCenter );
-		QDoubleSpinBox * opVal = new DragSpinBox( opBody );
+		QDoubleSpinBox * opVal = new WwNumberField( opBody );
 		opVal->setKeyboardTracking( false );
 		opVal->setMinimumWidth( 150 );
 		opl->addWidget( opLbl, 0, 0 );
@@ -11618,7 +11508,7 @@ void NifSkope::initDockWidgets()
 	}
 
 	// Generalized operator redo panel (Redo Panel v2, MODELING_TOOLS_PLAN
-	// F0.a): a typed parameter list — floats/ints as DragSpinBoxes, bools as
+	// F0.a): a typed parameter list — floats/ints as WwNumberFieldes, bools as
 	// checkboxes, enums as dropdowns — driving GLView::reapplyOperatorEx.
 	// First consumer: Extrude Region and Move.
 	{
@@ -11669,7 +11559,7 @@ void NifSkope::initDockWidgets()
 		for ( int i = 0; i < MAXP; i++ ) {
 			QLabel * lb = new QLabel( xpBody );
 			lb->setAlignment( Qt::AlignRight | Qt::AlignVCenter );
-			QDoubleSpinBox * sp = new DragSpinBox( xpBody );
+			QDoubleSpinBox * sp = new WwNumberField( xpBody );
 			sp->setKeyboardTracking( false );
 			sp->setMinimumWidth( 150 );
 			QCheckBox * cb = new QCheckBox( xpBody );
@@ -12720,7 +12610,7 @@ void NifSkope::initDockWidgets()
 				QHBoxLayout * grl = new QHBoxLayout( grow );
 				grl->setContentsMargins( 0, 0, 0, 0 );
 				grl->setSpacing( 2 );
-				QDoubleSpinBox * spGrid = new DragSpinBox( grow );
+				QDoubleSpinBox * spGrid = new WwNumberField( grow );
 				spGrid->setRange( 0.001, 4096.0 );
 				spGrid->setDecimals( 3 );
 				spGrid->setValue( GLView::gizmoSnapStep );
@@ -12741,7 +12631,7 @@ void NifSkope::initDockWidgets()
 			QHBoxLayout * rrl = new QHBoxLayout( rrow );
 			rrl->setContentsMargins( 0, 0, 0, 0 );
 			rrl->setSpacing( 2 );
-			QDoubleSpinBox * spRot = new DragSpinBox( rrow );
+			QDoubleSpinBox * spRot = new WwNumberField( rrow );
 			spRot->setRange( 0.1, 180.0 );
 			spRot->setDecimals( 1 );
 			spRot->setSuffix( QStringLiteral( "°" ) );

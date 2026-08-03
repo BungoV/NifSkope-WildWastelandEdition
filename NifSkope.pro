@@ -222,6 +222,7 @@ HEADERS += \
 	src/ui/widgets/spellpalette.h \
 	src/ui/widgets/uvedit.h \
 	src/ui/widgets/valueedit.h \
+	src/ui/widgets/wwnumberfield.h \
 	src/ui/widgets/xmlcheck.h \
 	src/ui/about_dialog.h \
 	src/ui/checkablemessagebox.h \
@@ -356,6 +357,7 @@ SOURCES += \
 	src/ui/widgets/spellpalette.cpp \
 	src/ui/widgets/uvedit.cpp \
 	src/ui/widgets/valueedit.cpp \
+	src/ui/widgets/wwnumberfield.cpp \
 	src/ui/widgets/xmlcheck.cpp \
 	src/ui/about_dialog.cpp \
 	src/ui/checkablemessagebox.cpp \

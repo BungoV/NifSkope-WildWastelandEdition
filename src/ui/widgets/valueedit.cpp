@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "ui/widgets/colorwheel.h"
 #include "ui/widgets/floatedit.h"
+#include "ui/widgets/wwnumberfield.h"
 
 #include <QLabel>   // Inherited
 #include <QSpinBox> // Inherited
@@ -69,99 +70,14 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace
 {
 
-class WwScrubFilter final : public QObject
-{
-public:
-	WwScrubFilter( QLineEdit * le, std::function<double()> get,
-		std::function<void( double )> set, bool integer )
-		: QObject( le ), target( le ), getVal( get ), setVal( set ), isInt( integer )
-	{
-		le->installEventFilter( this );
-		le->setCursor( Qt::SizeHorCursor );
-	}
-
-protected:
-	bool eventFilter( QObject * o, QEvent * ev ) override
-	{
-		if ( o != target )
-			return QObject::eventFilter( o, ev );
-
-		if ( ev->type() == QEvent::MouseButtonPress ) {
-			auto me = static_cast<QMouseEvent *>( ev );
-			if ( me->button() == Qt::LeftButton ) {
-				dragging = true;
-				moved = false;
-				pressX = int( me->globalPosition().x() );
-				startVal = getVal();
-				return true;	// swallow: don't let the line edit start selecting
-			}
-		} else if ( ev->type() == QEvent::MouseMove && dragging ) {
-			auto me = static_cast<QMouseEvent *>( ev );
-			const int dx = int( me->globalPosition().x() ) - pressX;
-			if ( !moved && std::abs( dx ) > 2 )
-				moved = true;
-			if ( moved ) {
-				// per-pixel step scales with the value's magnitude (Blender)
-				double per = isInt ? 0.1 : std::max( 0.01, std::abs( startVal ) * 0.005 );
-				if ( me->modifiers() & Qt::ShiftModifier )
-					per *= 0.1;
-				const double nv = startVal + double( dx ) * per;
-				setVal( isInt ? double( qRound64( nv ) ) : nv );
-			}
-			return true;
-		} else if ( ev->type() == QEvent::MouseButtonRelease && dragging ) {
-			dragging = false;
-			if ( !moved ) {		// a plain click: edit the value
-				target->selectAll();
-				target->setFocus();
-			}
-			moved = false;
-			return true;
-		}
-
-		return QObject::eventFilter( o, ev );
-	}
-
-private:
-	QLineEdit * target;
-	std::function<double()> getVal;
-	std::function<void( double )> setVal;
-	bool isInt;
-	bool dragging = false, moved = false;
-	int pressX = 0;
-	double startVal = 0.0;
-};
-
-//! Attach scrubbers to every numeric input inside (or being) `root`.
-void wwAttachScrubbers( QWidget * root )
-{
-	QList<FloatEdit *> floats = root->findChildren<FloatEdit *>();
-	if ( auto fe = qobject_cast<FloatEdit *>( root ) )
-		floats << fe;
-	for ( FloatEdit * fe : std::as_const( floats ) ) {
-		new WwScrubFilter( fe,
-			[fe]() { return double( fe->value() ); },
-			[fe]( double v ) { fe->setValue( float( v ) ); }, false );
-	}
-
-	QList<QAbstractSpinBox *> spins = root->findChildren<QAbstractSpinBox *>();
-	if ( auto sb = qobject_cast<QAbstractSpinBox *>( root ) )
-		spins << sb;
-	for ( QAbstractSpinBox * sb : std::as_const( spins ) ) {
-		QLineEdit * le = sb->findChild<QLineEdit *>();
-		if ( !le )
-			continue;
-		if ( auto ds = qobject_cast<QDoubleSpinBox *>( sb ) ) {
-			new WwScrubFilter( le,
-				[ds]() { return ds->value(); },
-				[ds]( double v ) { ds->setValue( v ); }, false );
-		} else if ( auto is = qobject_cast<QSpinBox *>( sb ) ) {
-			new WwScrubFilter( le,
-				[is]() { return double( is->value() ); },
-				[is]( double v ) { is->setValue( int( v ) ); }, true );
-		}
-	}
-}
+/* The Blender number-field gesture used to be reimplemented here.
+ *
+ * It is now ui/widgets/wwnumberfield.h, shared with every other panel. The
+ * copy this replaces also carried a magnitude-scaled step law that turned
+ * FloatEdit's <float_max> sentinel into inf after a three-pixel drag
+ * (3.4e38 * 0.005 = 1.7e36 per pixel); the shared field scales by the
+ * field's own singleStep instead and will not arm on a sentinel at all.
+ */
 
 }
 
@@ -487,7 +403,7 @@ void ValueEdit::setValue( const NifValue & v )
 	// Blender number-field behavior on every numeric input (press-drag
 	// scrubs, click types) — no-op for link/text/enum editors
 	if ( edit )
-		wwAttachScrubbers( edit );
+		wwMakeScrubFields( edit );
 
 	resizeEditor();
 
@@ -789,6 +705,12 @@ ColorEdit::ColorEdit( QWidget * parent ) : ValueEdit( parent )
 	setting = false;
 	setFocusProxy( r );
 	updateSwatch();
+
+	// Same gesture wherever this editor is built. Block Details used to
+	// attach it from ValueEdit while every spell dialog built the identical
+	// widget directly (nifeditors.cpp) and got nothing - the same X/Y/Z row,
+	// live in one place and dead in the other.
+	wwMakeScrubFields( this );
 }
 
 void ColorEdit::setColor4( const Color4 & v )
@@ -911,6 +833,12 @@ VectorEdit::VectorEdit( QWidget * parent ) : ValueEdit( parent )
 
 	setting = false;
 	setFocusProxy( x );
+
+	// Same gesture wherever this editor is built. Block Details used to
+	// attach it from ValueEdit while every spell dialog built the identical
+	// widget directly (nifeditors.cpp) and got nothing - the same X/Y/Z row,
+	// live in one place and dead in the other.
+	wwMakeScrubFields( this );
 }
 
 void VectorEdit::setVector4( const Vector4 & v )
@@ -1025,6 +953,12 @@ RotationEdit::RotationEdit( QWidget * parent ) : ValueEdit( parent ), mode( mAut
 	setFocusProxy( v[0] );
 
 	setupMode();
+
+	// Same gesture wherever this editor is built. Block Details used to
+	// attach it from ValueEdit while every spell dialog built the identical
+	// widget directly (nifeditors.cpp) and got nothing - the same X/Y/Z row,
+	// live in one place and dead in the other.
+	wwMakeScrubFields( this );
 }
 
 void RotationEdit::switchMode()
