@@ -789,6 +789,23 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	glDepthMask( !mesh->depthWrite || mesh->translucent ? GL_FALSE : GL_TRUE );
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
+	/* Two uniforms this path never uploaded.
+	 *
+	 * vertexColorOverride: pbrm_default.frag multiplies by the vertex colour
+	 * like the others, and GL initialises the uniform to 0 - so without this
+	 * a mesh with no real vertex colours is multiplied by the black padding
+	 * array forever. Every sibling path sets it; this one was simply missed.
+	 *
+	 * setUniforms: normalMatrix and modelViewMatrix are PER-PROGRAM uniforms,
+	 * not part of the shared globalUniforms block, so PBR mode was never
+	 * uploading them at all. Latent, and independent of the colour bug.
+	 */
+	mesh->setUniforms( prog );
+	prog->uni4f( "vertexColorOverride",
+		( mesh->hasVertexColors && mesh->colors.size() >= mesh->verts.size()
+			&& scene->hasOption( Scene::DoVertexColors ) )
+			? FloatVector4( 0.0f ) : FloatVector4( 1.0f ) );
+
 	return true;
 }
 
@@ -1375,7 +1392,9 @@ bool Renderer::setupProgramFO3( const NifModel * nif, Program * prog, Shape * me
 		// Do VCs if legacy or if either bslsp or bsesp is set
 		bool	doVCs = ( !bsprop || bsprop->hasSF2(ShaderFlags::SLSF2_Vertex_Colors) || bsprop->bsVersion < 83 );
 
-		if ( !( mesh->colors.size() >= mesh->verts.size() && scene->hasOption(Scene::DoVertexColors) && doVCs ) ) {
+		// same padded-array trap as the fixed-function fallback below
+		if ( !( mesh->hasVertexColors && mesh->colors.size() >= mesh->verts.size()
+			&& scene->hasOption(Scene::DoVertexColors) && doVCs ) ) {
 			vcOverride = FloatVector4( 1.0f );
 			if ( !mesh->hasVertexColors && ( mesh->bslsp && mesh->bslsp->hasVertexColors )
 				&& scene->hasOption(Scene::DoVertexColors) ) {
@@ -1478,7 +1497,21 @@ void Renderer::setupFixedFunction( Shape * mesh )
 	Scene *	scene = mesh->scene;
 
 	FloatVector4	vcOverride( 0.0f );
-	if ( mesh->colors.size() < mesh->verts.size() || !scene->hasOption(Scene::DoVertexColors) )
+	/* hasVertexColors, not colors.size().
+	 *
+	 * BSShape::updateData pads `colors` with OPAQUE BLACK for every vertex
+	 * whether or not the layout has a Vertex Colors field (bsshape.cpp:90),
+	 * and bindShape then binds it unconditionally - so colors.size() is
+	 * ALWAYS >= verts.size() for a BSShape and this test never fires. The
+	 * fragment shader multiplies albedo by that attribute, so a shape which
+	 * reaches this fallback renders BLACK rather than untextured grey.
+	 *
+	 * Measured: SecurityCamera.nif block 3 'SecurityCamera_LensGlass' has
+	 * Shader Property -1, so no FO4 .prog can match it (they all require a
+	 * BSLightingShaderProperty or BSEffectShaderProperty) and it lands here.
+	 */
+	if ( !mesh->hasVertexColors || mesh->colors.size() < mesh->verts.size()
+		|| !scene->hasOption(Scene::DoVertexColors) )
 		vcOverride = FloatVector4( 1.0f );
 
 	VertexColorProperty::glProperty( props.get<VertexColorProperty>(), vcOverride, prog );

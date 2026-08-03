@@ -3713,7 +3713,27 @@ void GLView::paintGL()
 			QVector<Vector3> foutline;	// non-active filled faces (orange outline)
 			QVector<Vector3> aoutline;	// the active/primary face (white outline)
 			if ( !filledTris.isEmpty() ) {
-				glDisable( GL_DEPTH_TEST );
+				/* The FILL is depth-tested unless X-ray is on.
+				 *
+				 * 753af78 turned the depth test off for the fills, the selected
+				 * edges/verts and the outlines together, so nearby unconnected
+				 * geometry could not occlude the selection. That is right for a 1-2 px
+				 * line or dot - a marker you must be able to find. It is wrong for a
+				 * filled surface: a triangle drawn with no depth test reads as
+				 * GEOMETRY, so a selected face on the far side of a closed mesh
+				 * appears in front of the solid shading. Backface culling is off here
+				 * too (Scene::draw disables it), so nothing else stops it either.
+				 *
+				 * This mirrors the wireframe overlay above, which already gets it
+				 * right. The 0.997 eye-pull applied to every overlay vertex keeps a
+				 * front-facing selection on top of its own surface without z-fighting.
+				 *
+				 * NOT glEnable( GL_CULL_FACE ): the fill soup is an arbitrary triangle
+				 * list whose winding follows the NIF, so culling would also drop
+				 * legitimately selected front faces on an inverted-normal mesh.
+				 */
+				if ( scene->xRay )
+					glDisable( GL_DEPTH_TEST );
 				// the active face's quad partner counts as active too: a marked
 				// quad must read as ONE uniformly-lit face, not a light half and
 				// a dark half split along its hidden diagonal (the active fill
