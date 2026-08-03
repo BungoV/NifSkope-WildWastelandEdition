@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QDoubleSpinBox>
 #include <QObject>
+#include <QList>
 #include <QPointer>
 #include <QWidget>
 
@@ -110,6 +111,9 @@ public:
 	//! loses its window, so a latched drag cannot outlive the events feeding it.
 	void cancel();
 
+	//! Abort a drag and put the value back where it started (Esc / RMB).
+	void revert();
+
 signals:
 	//! A drag actually started (past the threshold), and ended. Opt-in, for the
 	//! few call sites that write the model on every valueChanged and have no
@@ -126,6 +130,8 @@ private:
 	bool isIntegral() const;
 	double pixelStep() const;
 	void emitCommit() const;
+	//! Add the field under the pointer to the group this drag is moving.
+	void recruitUnder( const QPoint & globalPos );
 
 	QPointer<QWidget> m_host;
 	QPointer<QLineEdit> m_edit;
@@ -134,6 +140,9 @@ private:
 	bool m_pressHadFocus = false;	//!< decides selectAll vs caret placement
 	int m_pressX = 0;
 	int m_pressLocalX = 0;
+	//! sibling fields a vertical drag has recruited, and their start values
+	QList<QPointer<QWidget>> m_group;
+	QList<double> m_groupStart;
 	double m_startVal = 0.0;
 };
 
@@ -221,6 +230,13 @@ void wwMakeScrubFields( QWidget * root );
 
 //! Re-read theme colours for every scrub field under `root`.
 void wwRestyleScrubFields( QWidget * root );
+
+//! Evaluate an arithmetic expression typed into a number field.
+/*! "1024/3", "2^10", "pi", "sqrt(2)", "rad(90)". Returns false - leaving `out`
+ *  untouched - for a plain number or anything it does not understand, so the
+ *  host's own validator keeps handling those. Exposed for testing.
+ */
+bool wwEvalExpression( const QString & text, double & out );
 
 //! Style a selector so it matches the number fields beside it.
 /*! A QComboBox and a WwNumberField in the same form are the same KIND of thing -

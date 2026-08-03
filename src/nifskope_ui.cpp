@@ -1,4 +1,5 @@
-﻿/***** BEGIN LICENSE BLOCK *****
+﻿#define _USE_MATH_DEFINES
+/***** BEGIN LICENSE BLOCK *****
 
 BSD License
 
@@ -4859,60 +4860,46 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					return out;
 				};
 				do {
-					// --- LOD sits with the viewport controls, not the menus -----
-					/* bungo: "Move LOD out of workspaces ... so after the
-					 * separator. Show the current LOD level in text instead of
-					 * just displaying LOD."
+										// --- LOD is a dropdown, always there, greyed when unusable --
+					/* bungo: "LOD will function as a dropdown menu button, just
+					 * like animation and collision buttons function. It will be
+					 * visible all the time, but greyed out if there's no LODs in
+					 * a nif file."
 					 *
-					 * Position is checked by the x order of the toolbars in the
-					 * row, not by the .ui declaration order, because restoreState
-					 * replays a saved layout and the position is re-asserted in
-					 * restoreUi afterwards. Reading geometry is the only way to
-					 * see what the user sees.
+					 * The old slider hid its own value behind a handle position
+					 * and disappeared entirely on a file without LOD meshes - a
+					 * control that is absent reads as a missing feature, not as
+					 * "not applicable here".
 					 */
 					{
-						QToolBar * lod = skope->findChild<QToolBar *>( QStringLiteral( "tLOD" ) );
-						QToolBar * file = skope->findChild<QToolBar *>( QStringLiteral( "tFile" ) );
-						QToolBar * view = skope->findChild<QToolBar *>( QStringLiteral( "tView" ) );
-						check( "the LOD toolbar exists", lod && file && view );
-						if ( lod && file && view ) {
-							// force it visible: it is hidden until a file with LOD
-							// meshes loads, and a hidden bar has no useful geometry
-							const bool wasVis = lod->isVisible();
-							lod->setVisible( true );
-							QApplication::processEvents();
-							const int lx = lod->mapTo( skope, QPoint( 0, 0 ) ).x();
-							const int fx = file->mapTo( skope, QPoint( 0, 0 ) ).x();
-							const int vx = view->mapTo( skope, QPoint( 0, 0 ) ).x();
-							log << "top row x: tFile " << fx << ", tLOD " << lx
-								<< ", tView " << vx << "\n";
-							check( "LOD comes after the Workspaces/menu group", lx > fx );
-							check( "...and immediately before the Animation group", lx < vx );
-
-							// the label must name the level, not just say "LOD"
-							QString labels;
-							for ( QLabel * l : lod->findChildren<QLabel *>() )
-								labels += l->text() + QLatin1Char( '|' );
-							log << "LOD toolbar labels: " << labels << "\n";
-							check( "the LOD label carries the level",
-								labels.contains( QRegularExpression(
+						auto * lodBtn = skope->findChild<QToolButton *>(
+							QStringLiteral( "ViewLodButton" ) );
+						auto * animBtn = skope->findChild<QToolButton *>(
+							QStringLiteral( "ViewAnimationButton" ) );
+						check( "the LOD button exists", lodBtn != nullptr );
+						check( "the LOD slider toolbar is gone from the row",
+							!skope->findChild<QToolBar *>( QStringLiteral( "tLOD" ) )
+							|| !skope->findChild<QToolBar *>( QStringLiteral( "tLOD" ) )->isVisible() );
+						if ( lodBtn && animBtn ) {
+							log << "LOD button text '" << lodBtn->text()
+								<< "', enabled " << lodBtn->isEnabled()
+								<< ", menu entries "
+								<< ( lodBtn->menu() ? lodBtn->menu()->actions().size() : -1 ) << "\n";
+							check( "the button names the current level",
+								lodBtn->text().contains( QRegularExpression(
 									QStringLiteral( "LOD\\s*\\d" ) ) ) );
-
-							QSlider * sl = lod->findChild<QSlider *>();
-							if ( sl ) {
-								sl->setValue( 2 );
-								QApplication::processEvents();
-								QString after;
-								for ( QLabel * l : lod->findChildren<QLabel *>() )
-									after += l->text() + QLatin1Char( '|' );
-								log << "after moving the slider to 2: " << after << "\n";
-								check( "...and follows the slider",
-									after.contains( QStringLiteral( "LOD 2" ) ) );
-								sl->setValue( 0 );
-							}
-							lod->setVisible( wasVis );
+							check( "it is visible even with no LODs in the file",
+								lodBtn->isVisibleTo( skope ) );
+							check( "...but greyed, because this fixture has none",
+								!lodBtn->isEnabled() );
+							check( "it offers the four levels",
+								lodBtn->menu() && lodBtn->menu()->actions().size() >= 4 );
+							// it sits with Animation and Collision, after the rule
+							check( "it stands beside Animation",
+								lodBtn->parentWidget() == animBtn->parentWidget() );
 						}
 					}
+
 
 					// --- the View menu is gone from the menu bar ----------------
 					/* ui->menubar, NOT QMainWindow::menuBar().
@@ -7055,6 +7042,183 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					<< ( le ? le->selectedText().length() : -1 ) << "\n";
 				check( "G: a click on an already-focused field places the caret",
 					le && le->selectedText().isEmpty() );
+				nf->deleteLater();
+			}
+
+			// ---- H. Esc and RMB cancel a drag --------------------------------
+			//
+			// Blender: "Press Esc or RMB to cancel." Until this landed a drag
+			// could only be committed - once you started pulling, the value you
+			// started from was gone and Ctrl+Z was the only way back.
+			{
+				auto * nf = new WwNumberField( skope );
+				nf->show(); nf->ensurePolished();
+				nf->resize( 200, 24 );
+				nf->setRange( -1000.0, 1000.0 );
+				nf->setValue( 7.0 );
+				QApplication::processEvents();
+				QLineEdit * le = nf->findChild<QLineEdit *>();
+
+				// drag partway, then Esc without releasing
+				const QPointF p0( 60, 12 ), g0( 500, 512 );
+				QMouseEvent press( QEvent::MouseButtonPress, p0, g0,
+					Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+				QApplication::sendEvent( le, &press );
+				QMouseEvent mv( QEvent::MouseMove, p0 + QPointF( 40, 0 ), g0 + QPointF( 40, 0 ),
+					Qt::NoButton, Qt::LeftButton, Qt::NoModifier );
+				QApplication::sendEvent( le, &mv );
+				log << "H: mid-drag the value reads " << nf->value() << " (was 7)\n";
+				check( "H: the drag is actually moving the value", nf->value() != 7.0 );
+				QKeyEvent esc( QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier );
+				QApplication::sendEvent( le, &esc );
+				log << "H: after Esc it reads " << nf->value() << "\n";
+				check( "H: Esc puts the value back where the drag started",
+					qAbs( nf->value() - 7.0 ) < 1e-9 );
+
+				// and RMB does the same
+				nf->setValue( 3.0 );
+				QApplication::sendEvent( le, &press );
+				QApplication::sendEvent( le, &mv );
+				QMouseEvent rmb( QEvent::MouseButtonPress, p0, g0,
+					Qt::RightButton, Qt::RightButton, Qt::NoModifier );
+				QApplication::sendEvent( le, &rmb );
+				log << "H: after RMB it reads " << nf->value() << " (was 3)\n";
+				check( "H: RMB cancels a drag too", qAbs( nf->value() - 3.0 ) < 1e-9 );
+				nf->deleteLater();
+			}
+
+			// ---- I. Ctrl snaps to whole steps --------------------------------
+			//
+			// "Hold Ctrl to snap to the discrete steps while dragging or Shift
+			// for precision input." Only Shift was ever implemented, so half the
+			// documented pair was missing.
+			{
+				auto * nf = new WwNumberField( skope );
+				nf->show(); nf->ensurePolished();
+				nf->resize( 200, 24 );
+				nf->setRange( -1000.0, 1000.0 );
+				nf->setDecimals( 4 );
+				nf->setValue( 0.0 );
+				QApplication::processEvents();
+
+				scrub( nf, 37 );                       // 37 px -> 3.7 unsnapped
+				const double free = nf->value();
+				nf->setValue( 0.0 );
+				scrub( nf, 37, Qt::ControlModifier );  // -> 4.0 snapped
+				const double snapped = nf->value();
+				log << "I: 37 px free = " << free << ", with Ctrl = " << snapped << "\n";
+				check( "I: an unsnapped drag lands off a step", qAbs( free - qRound( free ) ) > 1e-6 );
+				check( "I: Ctrl snaps it to a whole step", qAbs( snapped - qRound( snapped ) ) < 1e-9 );
+				nf->deleteLater();
+			}
+
+			// ---- J. typed expressions ----------------------------------------
+			//
+			// "You can enter mathematical expressions into any number field...
+			// Even constants like pi or functions like sqrt(2) may be used."
+			{
+				struct { const char * in; double want; bool valid; } cases[] = {
+					{ "3*2",        6.0,                true  },
+					{ "10/5+4",     6.0,                true  },
+					{ "1024/3",     341.3333333333,     true  },
+					{ "2^10",       1024.0,             true  },
+					{ "pi",         M_PI,               true  },
+					{ "sqrt(2)",    1.4142135624,       true  },
+					{ "rad(90)",    M_PI / 2.0,         true  },
+					{ "-(3+4)*2",  -14.0,               true  },
+					{ "42",         0.0,                false },  // plain number: host handles it
+					{ "1/0",        0.0,                false },  // refused, not inf
+					{ "system(rm)", 0.0,                false },  // no identifiers beyond the named set
+					{ "3+",         0.0,                false },
+				};
+				int good = 0, total = 0;
+				for ( const auto & c : cases ) {
+					total++;
+					double got = 0.0;
+					const bool did = wwEvalExpression( QString::fromLatin1( c.in ), got );
+					const bool pass = ( did == c.valid )
+						&& ( !c.valid || qAbs( got - c.want ) < 1e-6 );
+					if ( pass ) good++;
+					else log << "J: '" << c.in << "' -> evaluated=" << did
+							 << " value=" << got << " (wanted " << c.valid << " / " << c.want << ")\n";
+				}
+				log << "J: expression cases " << good << "/" << total << "\n";
+				check( "J: expressions, constants and refusals all behave", good == total );
+			}
+
+			// ---- K. one drag can set a whole X/Y/Z row -----------------------
+			//
+			// Blender: "You can edit multiple number fields at once by pressing
+			// down LMB on the first field, and then dragging vertically over the
+			// fields you want to edit." Recruitment is by SIBLING, so a drag that
+			// wanders off the form cannot grab unrelated fields.
+			{
+				auto * row = new QWidget( skope );
+				row->setGeometry( 40, 300, 240, 90 );
+				auto * fx = new WwNumberField( row );
+				auto * fy = new WwNumberField( row );
+				for ( WwNumberField * f : { fx, fy } ) {
+					f->setRange( -1000.0, 1000.0 );
+					f->setValue( 0.0 );
+				}
+				fx->setGeometry( 0, 0, 200, 24 );
+				fy->setGeometry( 0, 30, 200, 24 );
+				row->show();
+				QApplication::processEvents();
+
+				QLineEdit * le = fx->findChild<QLineEdit *>();
+				const QPoint gx = fx->mapToGlobal( QPoint( 100, 12 ) );
+				const QPoint gy = fy->mapToGlobal( QPoint( 100, 12 ) );
+				log << "K: X at global " << gx.x() << "," << gx.y()
+					<< "   Y at " << gy.x() << "," << gy.y() << "\n";
+
+				QMouseEvent press( QEvent::MouseButtonPress, QPointF( 100, 12 ), QPointF( gx ),
+					Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+				QApplication::sendEvent( le, &press );
+				// vertical first: recruit Y
+				QMouseEvent down( QEvent::MouseMove, QPointF( 100, 42 ), QPointF( gy ),
+					Qt::NoButton, Qt::LeftButton, Qt::NoModifier );
+				QApplication::sendEvent( le, &down );
+				// then horizontal: move everything recruited
+				QMouseEvent side( QEvent::MouseMove, QPointF( 150, 42 ),
+					QPointF( gy + QPoint( 50, 0 ) ),
+					Qt::NoButton, Qt::LeftButton, Qt::NoModifier );
+				QApplication::sendEvent( le, &side );
+				QMouseEvent rel( QEvent::MouseButtonRelease, QPointF( 150, 42 ),
+					QPointF( gy + QPoint( 50, 0 ) ),
+					Qt::LeftButton, Qt::NoButton, Qt::NoModifier );
+				QApplication::sendEvent( le, &rel );
+
+				log << "K: after the drag X = " << fx->value() << ", Y = " << fy->value() << "\n";
+				check( "K: the field under the press moved", fx->value() != 0.0 );
+				check( "K: ...and so did the one dragged over", fy->value() != 0.0 );
+				check( "K: ...by the same amount",
+					qAbs( fx->value() - fy->value() ) < 1e-6 );
+				row->deleteLater();
+			}
+
+			// ---- L. a theme reload restyles the fields ------------------------
+			//
+			// The field's stylesheet is built from wwSkinColor at CONSTRUCTION,
+			// which happens before loadTheme runs. wwRestyleScrubFields existed
+			// to fix that and was never called by anything - so this checks the
+			// WIRING, not the function: clear a field's sheet, ask the app to
+			// reload its theme, and see whether the field got it back.
+			{
+				auto * nf = new WwNumberField( skope );
+				nf->show(); nf->ensurePolished();
+				nf->resize( 120, 24 );
+				QApplication::processEvents();
+				check( "L: the field carries a skin-built stylesheet",
+					!nf->styleSheet().isEmpty() );
+
+				nf->setStyleSheet( QString() );		// as if it had never been styled
+				NifSkope::reloadTheme();
+				QApplication::processEvents();
+				log << "L: after reloadTheme the sheet is "
+					<< ( nf->styleSheet().isEmpty() ? "still empty" : "restored" ) << "\n";
+				check( "L: a theme reload reaches the number fields",
+					!nf->styleSheet().isEmpty() );
 				nf->deleteLater();
 			}
 
@@ -13630,6 +13794,78 @@ void NifSkope::initDockWidgets()
 			+ QStringLiteral( "QToolButton:disabled { color:%1; border-color:%2; }" )
 				.arg( wwSkinColor( "textMuted" ), wwSkinColor( "borderDim" ) );
 
+		/* LOD: a dropdown beside Animation and Collision, not a slider.
+		 *
+		 * The slider was the wrong control twice over. It hid its own value -
+		 * you read a handle position and guessed - and it vanished entirely on a
+		 * file with no LOD meshes, so the control you were looking for was not
+		 * missing, it was absent, which is worse. It also sat in the Workspaces
+		 * group, among the application menus, when it is a viewport display
+		 * setting like the two buttons it now stands beside.
+		 *
+		 * Always present, greyed when the file has nothing to switch between,
+		 * and the button itself says which level you are on.
+		 */
+		QToolButton * lodBtn = new QToolButton( this );
+		lodBtn->setPopupMode( QToolButton::InstantPopup );
+		lodBtn->setText( tr( "LOD 0" ) );
+		lodBtn->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+		lodBtn->setAutoRaise( false );
+		lodBtn->setStyleSheet( boxQss );
+		lodBtn->setObjectName( QStringLiteral( "ViewLodButton" ) );
+		lodBtn->setEnabled( false );		// until a file with LOD meshes loads
+		lodBtn->setToolTip( tr( "This file has no LOD meshes" ) );
+
+		QMenu * lodMenu = new QMenu( lodBtn );
+		lodBtn->setMenu( lodMenu );
+
+		auto * lodGroup = new QActionGroup( lodMenu );
+		lodGroup->setExclusive( true );
+		/* Four entries, but level 3 only means anything in Starfield:
+		 * Scene::updateLodLevel clamps to 2 for every other game, so on a
+		 * Fallout 4 file a level-3 row would look like a choice and silently do
+		 * what level 2 does. It is listed and disabled instead of hidden, so the
+		 * ceiling is visible rather than mysterious.
+		 */
+		for ( int lvl = 0; lvl <= 3; lvl++ ) {
+			QAction * a = lodMenu->addAction( tr( "LOD %1" ).arg( lvl ) );
+			a->setCheckable( true );
+			a->setChecked( lvl == 0 );
+			a->setData( lvl );
+			lodGroup->addAction( a );
+			connect( a, &QAction::triggered, this, [this, lodBtn, lvl]() {
+				ogl->getScene()->updateLodLevel( lvl );
+				ogl->update();
+				lodBtn->setText( tr( "LOD %1" ).arg( lvl ) );
+			} );
+		}
+		lodMenu->addSeparator();
+		QAction * lodNote = lodMenu->addAction( tr( "Level 3 is Starfield only" ) );
+		lodNote->setEnabled( false );
+
+		/* The enable signal fires from the shape classes as they build, once per
+		 * LOD shape found, so it arrives repeatedly and only ever with true. The
+		 * false case has to come from somewhere else - a fresh load - which is
+		 * why the button is reset in enableUi rather than trusted to a signal.
+		 */
+		connect( nif, &NifModel::lodSliderChanged, lodBtn, [this, lodBtn, lodMenu]( bool enabled ) {
+			lodBtn->setEnabled( enabled );
+			lodBtn->setToolTip( enabled
+				? tr( "Which level of detail the viewport draws" )
+				: tr( "This file has no LOD meshes" ) );
+			const bool starfield =
+				Game::GameManager::get_game( nif ) == Game::STARFIELD;
+			const QList<QAction *> acts = lodMenu->actions();
+			for ( QAction * a : acts ) {
+				if ( a->data().isValid() && a->data().toInt() == 3 )
+					a->setEnabled( starfield );
+			}
+		} );
+
+		ui->tView->addWidget( lodBtn );
+		{ QWidget * g = new QWidget( ui->tView ); g->setFixedWidth( 8 );
+		  ui->tView->addWidget( g ); }
+
 		auto * animBtn = new QToolButton( this );
 		animBtn->setPopupMode( QToolButton::InstantPopup );
 		animBtn->setText( tr( "Animation" ) );
@@ -15102,39 +15338,17 @@ void NifSkope::initToolBars()
 	 * level you are looking at - was the one thing it did not say.
 	 */
 	QToolBar * tLOD = ui->tLOD;
-	// The row POSITION is re-asserted in restoreUi, after restoreState - doing it
-	// here would be silently undone, which is the same trap the mode-toolbar
-	// reorder fell into. Only the contents are built here.
-	wwGroupBreak( tLOD );
-
-	//QSettings settings;
-	//int lodLevel = settings.value( "GLView/LOD Level", 0 ).toInt();
-	//settings.setValue( "GLView/LOD Level", lodLevel );
-
-	QSlider * lodSlider = new QSlider( Qt::Horizontal );
-	lodSlider->setFocusPolicy( Qt::StrongFocus );
-	lodSlider->setTickPosition( QSlider::TicksBelow );
-	lodSlider->setTickInterval( 1 );
-	lodSlider->setSingleStep( 1 );
-	lodSlider->setMinimum( 0 );
-	lodSlider->setMaximum( 3 );
-	lodSlider->setValue(0);
-
-	// the label carries the level, so the toolbar answers "which LOD am I
-	// looking at?" without the user having to read a slider handle position
-	QLabel * lodLabel = new QLabel( tr( "LOD %1" ).arg( lodSlider->value() ) );
-	lodLabel->setContentsMargins( 6, 0, 4, 0 );
-	ui->aLODDummy->setVisible( false );	// the bare "LOD" text it used to show
-	tLOD->addWidget( lodLabel );
-	tLOD->addWidget( lodSlider );
-	tLOD->setEnabled( false );
+	/* The old LOD slider lived here.
+	 *
+	 * It is now a dropdown button beside Animation and Collision, built in
+	 * initViewMenus with them. The toolbar itself is kept but emptied and
+	 * hidden: it is named in four other places (the toolbar loops, the
+	 * visibility menu, restoreUi) and removing it would touch all of them for
+	 * no gain.
+	 */
+	ui->aLODDummy->setVisible( false );
 	tLOD->setVisible( false );
-
-	connect( lodSlider, &QSlider::valueChanged, lodLabel,
-		[lodLabel]( int v ) { lodLabel->setText( tr( "LOD %1" ).arg( v ) ); } );
-	connect( lodSlider, &QSlider::valueChanged, ogl->getScene(), &Scene::updateLodLevel );
-	connect( lodSlider, &QSlider::valueChanged, ogl, &GLView::update_GL );
-	connect( nif, &NifModel::lodSliderChanged, [tLOD]( bool enabled ) { tLOD->setEnabled( enabled ); tLOD->setVisible( enabled ); } );
+	tLOD->setEnabled( false );
 }
 
 void NifSkope::initConnections()
@@ -15506,21 +15720,6 @@ void NifSkope::restoreUi()
 	 * removeToolBar first: it detaches from the toolbar area AND hides, so the
 	 * show() afterwards is required, not decorative.
 	 */
-	/* LOD belongs with the viewport controls, not the application menus.
-	 *
-	 * It sat inside the Workspaces group, on the leading side of the row's
-	 * separator, which put a viewport display control among the menus. Moving it
-	 * after tView lands it in the trailing group with Animation and Collision.
-	 *
-	 * After restoreState for the same reason everything else in this function is.
-	 */
-	if ( ui->tLOD && ui->tView ) {
-		const bool wasVisible = ui->tLOD->isVisible();
-		removeToolBar( ui->tLOD );		// detaches AND hides
-		insertToolBar( ui->tView, ui->tLOD );
-		ui->tLOD->setVisible( wasVisible );
-	}
-
 	if ( viewportHeader && ui->tMode && ui->tRender ) {
 		auto * headerRow = qobject_cast<QHBoxLayout *>( viewportHeader->layout() );
 		if ( headerRow ) {
@@ -15661,6 +15860,13 @@ void NifSkope::reloadTheme()
 		NifSkope * win = qobject_cast<NifSkope *>(widget);
 		if ( win ) {
 			win->loadTheme();
+			/* Number fields and the selectors beside them carry their own
+			 * stylesheet, built from wwSkinColor at construction - which is
+			 * BEFORE loadTheme runs. Without this they keep whichever theme they
+			 * were born under while the rest of the window switches, so a light
+			 * theme comes up with dark wells in every panel.
+			 */
+			wwRestyleScrubFields( win );
 		}
 	}
 }

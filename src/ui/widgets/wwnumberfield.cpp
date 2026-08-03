@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 /***** BEGIN LICENSE BLOCK *****
 
 BSD License
@@ -37,6 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QAbstractSpinBox>
 #include <QApplication>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QMouseEvent>
@@ -54,6 +56,199 @@ static constexpr int WW_ARROW_W = 16;
 //! that contains a hand-built field cannot install it twice.
 static const char * const WW_SCRUBBED = "wwScrubbed";
 
+/*! Evaluate a typed arithmetic expression in a number field.
+ *
+ *  Blender: "You can enter mathematical expressions into any number field. For
+ *  example, enter 3*2 or 10/5+4 instead of 6. Even constants like pi (3.142) or
+ *  functions like sqrt(2) may be used."
+ *
+ *  It earns its place in a NIF editor rather than being Blender cosplay: half
+ *  the numbers in this program are derived - a UV coordinate as 1/3, a bone
+ *  weight as 1-0.35, a radius as 128/2 - and typing the arithmetic beats
+ *  reaching for a calculator and pasting a rounded result back.
+ *
+ *  A hand-written recursive descent parser, not a dependency and not QJSEngine:
+ *  QJSEngine would pull the whole QML stack into a widget, and it would happily
+ *  evaluate anything at all, in a field whose contents can come from a file.
+ *  This grammar has no identifiers beyond the named constants and functions
+ *  below, no assignment, and no way to reach anything outside itself.
+ *
+ *      expr   := term   (('+' | '-') term)*
+ *      term   := factor (('*' | '/' | '%') factor)*
+ *      factor := unary ('^' factor)?          -- right associative
+ *      unary  := ('+' | '-')* primary
+ *      primary:= number | 'pi' | 'e' | fn '(' expr ')' | '(' expr ')'
+ *
+ *  Returns false and leaves `out` untouched on anything it does not understand,
+ *  so a plain number - or a malformed one - falls through to the host's own
+ *  validator exactly as before.
+ */
+namespace {
+
+struct WwExprParser
+{
+	QString s;
+	int i = 0;
+	bool ok = true;
+
+	void skip() { while ( i < s.size() && s.at( i ).isSpace() ) i++; }
+
+	bool eat( QChar c )
+	{
+		skip();
+		if ( i < s.size() && s.at( i ) == c ) { i++; return true; }
+		return false;
+	}
+
+	//! case-insensitive word match, only when not followed by more word chars
+	bool eatWord( const char * w )
+	{
+		skip();
+		const QString word = QString::fromLatin1( w );
+		if ( s.mid( i, word.size() ).compare( word, Qt::CaseInsensitive ) != 0 )
+			return false;
+		const int after = i + word.size();
+		if ( after < s.size() && ( s.at( after ).isLetterOrNumber() || s.at( after ) == QLatin1Char( '_' ) ) )
+			return false;
+		i = after;
+		return true;
+	}
+
+	double primary()
+	{
+		skip();
+		if ( eat( QLatin1Char( '(' ) ) ) {
+			const double v = expr();
+			if ( !eat( QLatin1Char( ')' ) ) ) ok = false;
+			return v;
+		}
+		// named constants
+		if ( eatWord( "pi" ) )  return M_PI;
+		if ( eatWord( "tau" ) ) return 2.0 * M_PI;
+		if ( eatWord( "e" ) )   return M_E;
+
+		// single-argument functions
+		struct Fn { const char * name; double ( *f )( double ); };
+		static const Fn fns[] = {
+			{ "sqrt",  [] ( double x ) { return std::sqrt( x ); } },
+			{ "abs",   [] ( double x ) { return std::fabs( x ); } },
+			{ "floor", [] ( double x ) { return std::floor( x ); } },
+			{ "ceil",  [] ( double x ) { return std::ceil( x ); } },
+			{ "round", [] ( double x ) { return std::round( x ); } },
+			{ "sin",   [] ( double x ) { return std::sin( x ); } },
+			{ "cos",   [] ( double x ) { return std::cos( x ); } },
+			{ "tan",   [] ( double x ) { return std::tan( x ); } },
+			{ "log",   [] ( double x ) { return std::log( x ); } },
+			{ "exp",   [] ( double x ) { return std::exp( x ); } },
+			// degrees/radians, because rotation fields are the ones people do
+			// arithmetic on most and the two units are always in play
+			{ "rad",   [] ( double x ) { return x * M_PI / 180.0; } },
+			{ "deg",   [] ( double x ) { return x * 180.0 / M_PI; } },
+		};
+		for ( const Fn & fn : fns ) {
+			const int save = i;
+			if ( eatWord( fn.name ) ) {
+				if ( !eat( QLatin1Char( '(' ) ) ) { i = save; break; }
+				const double v = fn.f( expr() );
+				if ( !eat( QLatin1Char( ')' ) ) ) ok = false;
+				return v;
+			}
+		}
+
+		// a number; accept both '.' and the locale's decimal point
+		const int start = i;
+		while ( i < s.size() && ( s.at( i ).isDigit() || s.at( i ) == QLatin1Char( '.' ) ) )
+			i++;
+		if ( i > start && i < s.size() && ( s.at( i ) == QLatin1Char( 'e' ) || s.at( i ) == QLatin1Char( 'E' ) ) ) {
+			const int save = i;
+			i++;
+			if ( i < s.size() && ( s.at( i ) == QLatin1Char( '+' ) || s.at( i ) == QLatin1Char( '-' ) ) )
+				i++;
+			if ( i < s.size() && s.at( i ).isDigit() )
+				while ( i < s.size() && s.at( i ).isDigit() ) i++;
+			else
+				i = save;
+		}
+		if ( i == start ) { ok = false; return 0.0; }
+		bool numOk = false;
+		const double v = s.mid( start, i - start ).toDouble( &numOk );
+		if ( !numOk ) ok = false;
+		return v;
+	}
+
+	double unary()
+	{
+		skip();
+		if ( eat( QLatin1Char( '-' ) ) ) return -unary();
+		if ( eat( QLatin1Char( '+' ) ) ) return unary();
+		return primary();
+	}
+
+	double factor()
+	{
+		const double base = unary();
+		skip();
+		if ( eat( QLatin1Char( '^' ) ) )
+			return std::pow( base, factor() );		// right associative
+		return base;
+	}
+
+	double term()
+	{
+		double v = factor();
+		for ( ;; ) {
+			skip();
+			if ( eat( QLatin1Char( '*' ) ) )        v *= factor();
+			else if ( eat( QLatin1Char( '/' ) ) ) {
+				const double d = factor();
+				if ( d == 0.0 ) { ok = false; return 0.0; }
+				v /= d;
+			} else if ( eat( QLatin1Char( '%' ) ) ) {
+				const double d = factor();
+				if ( d == 0.0 ) { ok = false; return 0.0; }
+				v = std::fmod( v, d );
+			} else break;
+		}
+		return v;
+	}
+
+	double expr()
+	{
+		double v = term();
+		for ( ;; ) {
+			skip();
+			if ( eat( QLatin1Char( '+' ) ) )      v += term();
+			else if ( eat( QLatin1Char( '-' ) ) ) v -= term();
+			else break;
+		}
+		return v;
+	}
+};
+
+} // namespace
+
+bool wwEvalExpression( const QString & text, double & out )
+{
+	const QString t = text.trimmed();
+	if ( t.isEmpty() )
+		return false;
+	// a bare number is not an expression: let the host's own validator have it,
+	// so locale decimal separators and prefixes/suffixes keep working
+	bool plain = false;
+	t.toDouble( &plain );
+	if ( plain )
+		return false;
+
+	WwExprParser p;
+	p.s = t;
+	const double v = p.expr();
+	p.skip();
+	if ( !p.ok || p.i != t.size() || !std::isfinite( v ) )
+		return false;
+	out = v;
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // WwScrub — the gesture
 // ---------------------------------------------------------------------------
@@ -65,6 +260,18 @@ WwScrub::WwScrub( QWidget * host, QLineEdit * edit, const WwScrubSpec & spec )
 		return;
 	edit->installEventFilter( this );
 	edit->setMouseTracking( true );
+	/* Expressions. Rewriting the text on editingFinished - before the host
+	 * parses it - is what lets "1024/3" reach a plain QDoubleSpinBox without
+	 * overriding validate()/valueFromText(), which a retro-fitted host does not
+	 * let us do at all.
+	 */
+	QObject::connect( edit, &QLineEdit::editingFinished, this, [this]() {
+		if ( !m_edit )
+			return;
+		double v = 0.0;
+		if ( wwEvalExpression( m_edit->text(), v ) )
+			m_edit->setText( QString::number( v, 'g', 10 ) );
+	} );
 	// THE ONLY Qt::SizeHorCursor IN src/. tests/spells/scrub_uniform.sh counts
 	// them, and that count is the check that guards against a sixth copy.
 	edit->setCursor( Qt::SizeHorCursor );
@@ -73,6 +280,62 @@ WwScrub::WwScrub( QWidget * host, QLineEdit * edit, const WwScrubSpec & spec )
 		// a gesture must not outlive the events that drive it
 		host->installEventFilter( this );
 	}
+}
+
+void WwScrub::recruitUnder( const QPoint & globalPos )
+{
+	/* Only siblings in the same parent, and only ones that already carry the
+	 * gesture: an X/Y/Z row, not "whatever happens to be under the pointer".
+	 * That keeps a drag that wanders off a form from grabbing unrelated fields.
+	 */
+	if ( !m_host || !m_host->parentWidget() )
+		return;
+	QWidget * over = QApplication::widgetAt( globalPos );
+	if ( !over )
+		return;
+	// the pointer is over a line edit; the field is its parent
+	QWidget * field = over;
+	while ( field && !field->property( WW_SCRUBBED ).toBool() )
+		field = field->parentWidget();
+	if ( !field || field == m_host )
+		return;
+	if ( field->parentWidget() != m_host->parentWidget() )
+		return;
+	if ( m_group.contains( field ) )
+		return;
+	double v = 0.0;
+	if ( auto * d = qobject_cast<QDoubleSpinBox *>( field ) )      v = d->value();
+	else if ( auto * sp = qobject_cast<QSpinBox *>( field ) )      v = sp->value();
+	else return;
+	m_group.append( field );
+	m_groupStart.append( v );
+}
+
+void WwScrub::revert()
+{
+	// put the value back where the gesture started and end it without
+	// committing: an aborted drag must leave no trace, including no
+	// editingFinished, or a consumer records the discarded value
+	if ( !m_dragging )
+		return;
+	const bool wasScrubbing = m_moved;
+	if ( wasScrubbing ) {
+		setHostValue( m_startVal );
+		for ( int k = 0; k < m_group.size(); k++ ) {
+			QWidget * w = m_group.at( k );
+			if ( auto * d = qobject_cast<QDoubleSpinBox *>( w ) )
+				d->setValue( m_groupStart.at( k ) );
+			else if ( auto * sp = qobject_cast<QSpinBox *>( w ) )
+				sp->setValue( int( qRound64( m_groupStart.at( k ) ) ) );
+		}
+	}
+	m_group.clear();
+	m_groupStart.clear();
+	m_dragging = m_moved = false;
+	if ( m_host )
+		m_host->update();
+	if ( wasScrubbing )
+		emit scrubFinished();
 }
 
 void WwScrub::cancel()
@@ -220,6 +483,10 @@ bool WwScrub::eventFilter( QObject * o, QEvent * ev )
 	switch ( ev->type() ) {
 	case QEvent::MouseButtonPress: {
 		auto * me = static_cast<QMouseEvent *>( ev );
+		if ( m_dragging && me->button() == Qt::RightButton ) {
+			revert();		// Blender cancels a drag with RMB as well as Esc
+			return true;
+		}
 		if ( me->button() != Qt::LeftButton )
 			break;
 		/* The press is ALWAYS armed, even when the field already has focus.
@@ -246,6 +513,8 @@ bool WwScrub::eventFilter( QObject * o, QEvent * ev )
 		}
 		m_dragging = true;
 		m_moved = false;
+		m_group.clear();
+		m_groupStart.clear();
 		// GLOBAL x: the redo panel repositions itself under the pointer, so a
 		// local x would jump when it moves
 		m_pressX = int( me->globalPosition().x() );
@@ -255,6 +524,18 @@ bool WwScrub::eventFilter( QObject * o, QEvent * ev )
 	case QEvent::MouseButtonDblClick:
 		// word-select inside a focused field must keep working
 		break;
+	case QEvent::KeyPress: {
+		// Esc during a drag reverts to the value the gesture started from.
+		// Blender: "Press Esc or RMB to cancel." Until now a drag could only be
+		// committed - once you had started pulling, the old value was gone.
+		if ( !m_dragging )
+			break;
+		if ( static_cast<QKeyEvent *>( ev )->key() == Qt::Key_Escape ) {
+			revert();
+			return true;
+		}
+		break;
+	}
 	case QEvent::MouseMove: {
 		if ( !m_dragging )
 			break;
@@ -268,6 +549,18 @@ bool WwScrub::eventFilter( QObject * o, QEvent * ev )
 				m_host->update();
 			emit scrubStarted();
 		}
+		/* Blender: "You can edit multiple number fields at once by pressing down
+		 * LMB on the first field, and then dragging vertically over the fields
+		 * you want to edit." The X/Y/Z row is what this is for - set all three
+		 * without three separate drags.
+		 *
+		 * Vertical motion recruits; horizontal motion then drives everything
+		 * recruited. A field joins with its OWN start value, so each keeps its
+		 * own offset rather than all snapping to the first one's number.
+		 */
+		if ( !m_moved || !m_group.isEmpty() )
+			recruitUnder( me->globalPosition().toPoint() );
+
 		if ( m_moved ) {
 			/* ABSOLUTE from the press, never incremental. Drag out 100 px and
 			 * back and the exact start value returns with no float drift, and a
@@ -275,7 +568,29 @@ bool WwScrub::eventFilter( QObject * o, QEvent * ev )
 			 * having eaten the overshoot.
 			 */
 			const double scale = ( me->modifiers() & Qt::ShiftModifier ) ? 0.01 : 0.1;
-			setHostValue( m_startVal + double( dx ) * pixelStep() * scale );
+			double v = m_startVal + double( dx ) * pixelStep() * scale;
+			/* Ctrl snaps to whole steps, the documented companion to Shift's
+			 * precision ("Hold Ctrl to snap to the discrete steps while dragging
+			 * or Shift for precision input"). We had only ever implemented
+			 * Shift, so half the pair was missing.
+			 */
+			if ( me->modifiers() & Qt::ControlModifier ) {
+				const double step = pixelStep() > 0.0 ? pixelStep() : 1.0;
+				v = std::round( v / step ) * step;
+			}
+			setHostValue( v );
+			// everything the drag recruited moves by the same delta, from its own
+			// starting point
+			const double delta = v - m_startVal;
+			for ( int k = 0; k < m_group.size(); k++ ) {
+				QWidget * w = m_group.at( k );
+				if ( !w )
+					continue;
+				if ( auto * d = qobject_cast<QDoubleSpinBox *>( w ) )
+					d->setValue( m_groupStart.at( k ) + delta );
+				else if ( auto * sp = qobject_cast<QSpinBox *>( w ) )
+					sp->setValue( int( qRound64( m_groupStart.at( k ) + delta ) ) );
+			}
 		}
 		return true;
 	}
@@ -303,8 +618,16 @@ bool WwScrub::eventFilter( QObject * o, QEvent * ev )
 			m_host->update();
 		if ( finishedScrub ) {
 			emitCommit();
+			// each recruited field commits through its own signal, or its
+			// consumer never learns the value moved
+			for ( QWidget * w : std::as_const( m_group ) ) {
+				if ( auto * sb = qobject_cast<QAbstractSpinBox *>( w ) )
+					emit sb->editingFinished();
+			}
 			emit scrubFinished();
 		}
+		m_group.clear();
+		m_groupStart.clear();
 		return true;
 	}
 	default:
@@ -391,10 +714,18 @@ void WwScrubChrome::restyle()
 			"QAbstractSpinBox { background: %1; border: none; border-radius: 3px; color: %2; }"
 			"QAbstractSpinBox:disabled { background: %4; color: %5; }"
 			"QLineEdit { background: transparent; border: none; color: %2;"
-			" selection-background-color: %3; selection-color: #ffffff; }"
+			" selection-background-color: %3; selection-color: %6; }"
 			"QLineEdit:disabled { background: transparent; color: %5; }" )
-			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ), wwSkinColor( "bgBtnDown" ),
-				wwSkinColor( "bgAlt" ), wwSkinColor( "textMuted" ) ) );
+			.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ),
+				/* NOT bgBtnDown. That is #355f86, a saturated blue, and because a
+				 * plain click selects the whole number, every field the pointer
+				 * touched came up as a blue block - a selection highlight loud
+				 * enough to read as a state the field was in. A click-to-type
+				 * selection should say "typing replaces this", quietly.
+				 */
+				wwSkinColor( "bgBtnHover" ),
+				wwSkinColor( "bgAlt" ), wwSkinColor( "textMuted" ),
+				wwSkinColor( "textBright" ) ) );
 	}
 	update();
 }
@@ -627,7 +958,8 @@ void wwMatchFieldStyle( QWidget * selector )
 		"QComboBox QLineEdit:disabled { color: %4; }" )
 		.arg( wwSkinColor( "bgInput" ), wwSkinColor( "text" ),
 			wwSkinColor( "bgAlt" ), wwSkinColor( "textMuted" ),
-			wwSkinColor( "bgBtnDown" ) ) );
+			// same quiet highlight as the number fields, not the blue
+			wwSkinColor( "bgBtnHover" ) ) );
 }
 
 void wwRestyleScrubFields( QWidget * root )
@@ -637,4 +969,11 @@ void wwRestyleScrubFields( QWidget * root )
 	const QList<WwScrubChrome *> chrome = root->findChildren<WwScrubChrome *>();
 	for ( WwScrubChrome * c : chrome )
 		c->restyle();
+	// the selectors were styled to match, so they have to follow the theme too
+	// or the family splits in half on a theme switch
+	for ( QComboBox * c : root->findChildren<QComboBox *>() ) {
+		if ( !c->styleSheet().contains( QLatin1String( "QComboBox::drop-down" ) ) )
+			continue;		// not one of ours; leave it alone
+		wwMatchFieldStyle( c );
+	}
 }
