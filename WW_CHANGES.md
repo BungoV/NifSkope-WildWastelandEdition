@@ -1,5 +1,74 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-03e — Check Face Rig, and two statistics that did not work
+
+`Rigging ▸ Check Face Rig` looks for the one failure a weight transfer can
+produce that every existing check passes: **a vertex holding the wrong bone
+index**. Its weight record stays perfectly well formed — weights sum to 1, no
+repeated index, no empty slot — so `Validate FO4 Skin` sees nothing. What breaks
+is geometry: a face bone drives a small patch of skin, so a mis-indexed vertex
+sits far from that patch and tears across the face when the bone moves.
+
+### Two wrong statistics, both caught by measuring
+
+**First attempt — "further than 4x this bone's own median".** Measured over 19
+vanilla faceBones meshes it flagged **six of them**, Hair17 alone with 16
+strays, while missing 1 and 3 deliberately mis-indexed vertices entirely. Hair
+and hat rigs legitimately drive scattered vertices, so any fixed multiple is
+tuned to whichever mesh happened to be open when it was picked. A check that
+fires on a third of healthy files trains you to ignore it.
+
+**Second attempt — "median influence 3x the donor's".** Correct instinct (compare
+against the donor, since the same bone on two heads governs the same patch, and
+a naturally sprawling hairline bone sprawls on both), wrong statistic. It was
+built, compiled, and then measured:
+
+| mis-indexed vertices | median-3x | beyond-donor-max |
+|---:|---:|---:|
+| 0 | 0 | 0 |
+| 1 | 0 | 0 |
+| 3 | 0 | 1 |
+| 10 | 0 | 8 |
+| 30 | 0 | 27 |
+| 100 | **0** | 78 |
+
+**Zero at every level.** The median is robust to outliers, and a handful of
+outliers is the entire thing being looked for. It would have shipped as a check
+that never fires — which looks identical to a clean bill of health.
+
+### What shipped
+
+For each sculpt bone shared with the donor, count target vertices reaching
+further from the bone than *any* of the donor's do, +25% for honest proportion
+differences between two faces. No magic multiplier: the threshold comes from the
+donor.
+
+Residual false-positive rate is stated in the dialog rather than hidden — a
+healthy **male** head measured against the **female** donor yields about seven,
+and an unrelated beard against the same donor yields **zero** across 46 shared
+bones. So the number is a magnitude to read, not a boolean. Without a donor the
+spell says outright that it is a profile and not a verdict.
+
+### Where it lives
+
+Beside `Validate FO4 Skin` on the Rigging page for now. It belongs in a **Face**
+workspace with the expression preview and `.tri` morph sliders, and moves there
+when that dock is built — shipping half a workspace to give it a nicer home
+would have meant verifying neither.
+
+### While measuring: FO4 faces use three systems, not two
+
+`.tri` files are `FRTRI003`. `BaseFemaleHead.tri` holds **50 morphs** —
+`Pucker`, `LSmile`, `RFrown`, `RJaw`, `UprLipFunnel`, `StickyLips` — the talking
+and expression shapes. `BaseFemaleHeadChargen.tri` holds a separate **41** —
+`EyesFeature1..10`, `LipFeature1..8`, `Overbite`, `Underbite`.
+
+So sculpt sliders are bone-driven (`skin_bone_*` + CustomizationRemapData),
+while **talking and emotes are morph-driven and touch no bones at all**. A
+talking preview would therefore look perfect on a faceBones mesh rigged
+completely wrong, which is why the bone check above drives bones instead.
+Morph vertex counts match the *normal* head (1689), not the faceBones one.
+
 ## 2026-08-03d — Create faceBones NIF
 
 `Rigging ▸ Create faceBones NIF...` builds a `_faceBones` sibling from a mesh
