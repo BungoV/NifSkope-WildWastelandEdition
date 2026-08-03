@@ -10,6 +10,7 @@
 #include "model/nifmodel.h"
 
 #include <QApplication>
+#include <QBuffer>
 #include <QCoreApplication>
 #include <QCheckBox>
 #include <QElapsedTimer>
@@ -48,6 +49,7 @@
 #include <QTimer>
 #include <QTemporaryFile>
 #include <QTreeWidget>
+#include <QUndoStack>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -3177,6 +3179,219 @@ public:
 };
 
 REGISTER_SPELL( spRiggingTransferBonesAndWeights )
+
+// ---------------------------------------------------------------------------
+// Build a _faceBones sibling from a standard-rigged mesh.
+//
+// The transformation itself is Transfer Bones and Weights with a faceBones
+// donor - that spell already generates the RemapData snapshot FIRST when the
+// donor carries sculpt bones, imports and binds the skin_bone_* nodes, and
+// rolls back as a unit on failure. What it does not do is produce a separate
+// file: it edits in place, so making a faceBones variant meant transferring,
+// Save As, then undoing to recover the original.
+//
+// This runs the same transfer against a serialized COPY and writes the result
+// out. The open document is never mutated, which is what makes a wrong donor
+// free - the transfer can be run, judged and thrown away without an Undo or a
+// reload.
+// ---------------------------------------------------------------------------
+
+//! Create a _faceBones.nif from a shape rigged to the standard skeleton.
+class spRiggingCreateFaceBonesNif final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Create faceBones NIF..." ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
+	QString page() const override final { return Spell::tr( "Rigging" ); }
+	//! Writes a new file; the open document is not touched, so there is
+	//! nothing to undo.
+	bool undoable() const override final { return false; }
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		if ( !nif || nif->getBSVersion() != 130
+			|| !riggingIsSkinnedShape( nif, index )
+			|| !nif->isNiBlock( riggingSkinInstance( nif, index ), "BSSkin::Instance" )
+			|| !nif->getIndex( index, "Vertex Data" ).isValid() )
+			return false;
+		// Already sculpt-bound: this mesh IS a faceBones mesh, and its
+		// standard-skeleton binding is gone. Offering to build another from it
+		// would snapshot sculpt weights as though they were the animation
+		// skeleton's, which is the one thing RemapData must never contain.
+		for ( const QString & bone : riggingBoneNames( nif, index ) )
+			if ( bone.startsWith( QStringLiteral( "skin_bone_" ), Qt::CaseInsensitive ) )
+				return false;
+		return true;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		if ( riggingWorkflow.active )
+			return index;
+
+		// Default to the sibling name Bethesda's own assets use:
+		// BaseFemaleHead.nif -> BaseFemaleHead_faceBones.nif
+		const QString sourcePath = nif->getFileInfo().absoluteFilePath();
+		QString suggested;
+		if ( !sourcePath.isEmpty() ) {
+			const QFileInfo info( sourcePath );
+			suggested = info.absolutePath() + QLatin1Char( '/' )
+				+ info.completeBaseName() + QStringLiteral( "_faceBones.nif" );
+		}
+		// TEST SEAM (WW_FACEBONES_TEST harness), matching WW_TEST_DONOR above:
+		// getSaveFileName is a native dialog, so no QTimer can drive it.
+		const QByteArray envOut = qgetenv( "WW_TEST_FACEBONES_OUT" );
+		const QString outPath = envOut.isEmpty()
+			? QFileDialog::getSaveFileName( nullptr,
+				Spell::tr( "Save faceBones NIF As" ), suggested,
+				Spell::tr( "NIF files (*.nif)" ) )
+			: QString::fromLocal8Bit( envOut );
+		if ( outPath.isEmpty() )
+			return index;
+		if ( !sourcePath.isEmpty()
+			&& QFileInfo( outPath ).absoluteFilePath() == QFileInfo( sourcePath ).absoluteFilePath() ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "That is the file you are converting. The standard-skeleton original has to "
+					"survive: it is the only thing the RemapData snapshot can be regenerated from." ) );
+			return index;
+		}
+
+		QByteArray original;
+		{
+			QBuffer buffer( &original );
+			if ( !buffer.open( QIODevice::WriteOnly ) || !nif->save( buffer ) ) {
+				QMessageBox::warning( nullptr, name(), Spell::tr( "Could not copy the current file." ) );
+				return index;
+			}
+		}
+		NifModel work;
+		{
+			QBuffer buffer;
+			buffer.setData( original );
+			if ( !buffer.open( QIODevice::ReadOnly ) || !work.load( buffer ) ) {
+				QMessageBox::warning( nullptr, name(), Spell::tr( "Could not reopen the copied file." ) );
+				return index;
+			}
+		}
+
+		const int targetBlock = nif->getBlockNumber( index );
+		QModelIndex workTarget = work.getBlockIndex( targetBlock );
+		if ( !workTarget.isValid() ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "The selected shape could not be located in the copy." ) );
+			return index;
+		}
+		const int bonesBefore = riggingBoneNames( &work, workTarget ).size();
+
+		// Re-serialize the COPY rather than reusing `original` as the baseline:
+		// a load/save round trip may reorder the string table, so comparing
+		// against the source bytes could report a change that never happened.
+		QByteArray before;
+		auto capture = [&work]( QByteArray & out ) {
+			out.clear();
+			QBuffer buffer( &out );
+			return buffer.open( QIODevice::WriteOnly ) && work.save( buffer );
+		};
+		if ( !capture( before ) ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr( "Could not read back the copy." ) );
+			return index;
+		}
+
+		/* The transfer spell pushes exactly one Undo command, so the copy needs
+		 * a stack to push onto - it asserts nothing about whose stack it is.
+		 * Discarded with the model.
+		 */
+		QUndoStack workStack;
+		work.undoStack = &workStack;
+		// Donor choice, space validation, the snap-quality report, the ordered
+		// four steps and rollback-on-failure all live in there already.
+		spRiggingTransferBonesAndWeights transfer;
+		transfer.cast( &work, workTarget );
+		work.undoStack = nullptr;
+
+		QByteArray after;
+		if ( !capture( after ) ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr( "Could not read back the transferred copy." ) );
+			return index;
+		}
+		// Cancelling the donor chooser, the shape chooser or the confirmation
+		// all land here having changed nothing. That is not an error and does
+		// not deserve a second dialog on the way out.
+		if ( after == before )
+			return index;
+
+		workTarget = work.getBlockIndex( targetBlock );
+		if ( !workTarget.isValid() ) {
+			QMessageBox::warning( nullptr, name(), Spell::tr( "The shape was lost during the transfer." ) );
+			return index;
+		}
+
+		/* Judge the RESULT, not the stated intent. A donor rigged to the
+		 * ordinary skeleton produces a perfectly good transfer that simply is
+		 * not a faceBones mesh, and writing that under a _faceBones name would
+		 * be a lie the game finds later. Costs nothing to refuse: the file on
+		 * disk was never opened and the document was never touched.
+		 */
+		int sculptBones = 0;
+		for ( const QString & bone : riggingBoneNames( &work, workTarget ) )
+			if ( bone.startsWith( QStringLiteral( "skin_bone_" ), Qt::CaseInsensitive ) )
+				sculptBones++;
+		if ( sculptBones == 0 ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "That donor contributed no skin_bone_* face-sculpt bones, so the result is not "
+					"a faceBones mesh. Nothing was written and the open file is unchanged.\n\n"
+					"Pick a donor that already has them - BaseFemaleHead_faceBones.nif or "
+					"BaseMaleHead_faceBones.nif for human heads, or the matching _faceBones asset "
+					"for a creature." ) );
+			return index;
+		}
+
+		int remapBytes = 0;
+		for ( int link : work.getChildLinks( work.getBlockNumber( workTarget ) ) ) {
+			QModelIndex extra = work.getBlockIndex( link, "NiBinaryExtraData" );
+			if ( extra.isValid()
+				&& work.get<QString>( extra, "Name" ) == QStringLiteral( "CustomizationRemapData" ) ) {
+				remapBytes = work.get<QByteArray>( extra, "Binary Data" ).size();
+				break;
+			}
+		}
+		const int vertices = work.rowCount( work.getIndex( workTarget, "Vertex Data" ) );
+		if ( remapBytes != vertices * 12 ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "The result carries %1 bytes of CustomizationRemapData; %2 vertices need %3. "
+					"Without a complete snapshot the mesh cannot map back to the animation skeleton, "
+					"so nothing was written." )
+					.arg( remapBytes ).arg( vertices ).arg( vertices * 12 ) );
+			return index;
+		}
+
+		if ( !work.saveToFile( outPath ) ) {
+			QMessageBox::warning( nullptr, name(),
+				Spell::tr( "Could not write \"%1\"." ).arg( QDir::toNativeSeparators( outPath ) ) );
+			return index;
+		}
+
+		QMessageBox done( QMessageBox::Information, name(),
+			Spell::tr( "Wrote %1\n\n"
+				"Face-sculpt bones: %2\nSkin bones: %3 before, %4 after\n"
+				"CustomizationRemapData: %5 bytes over %6 vertices\n\n"
+				"The open file was not modified." )
+				.arg( QDir::toNativeSeparators( outPath ) )
+				.arg( sculptBones ).arg( bonesBefore )
+				.arg( riggingBoneNames( &work, workTarget ).size() )
+				.arg( remapBytes ).arg( vertices ) );
+		// Said once, here, rather than buried in a doc: vanilla faceBones assets
+		// carry a second block this does not write. Measured on BaseFemaleHead
+		// and BaseMaleHead, both of which have it.
+		done.setInformativeText(
+			Spell::tr( "Validate in game before shipping. Vanilla faceBones assets also carry a "
+				"CustomizationRemapNewBonesData block, which NifSkope does not yet generate." ) );
+		done.exec();
+		return index;
+	}
+};
+
+REGISTER_SPELL( spRiggingCreateFaceBonesNif )
 
 // ---------------------------------------------------------------------------
 // Manual FO4 weight painting. Brush sampling lives in GLView; these helpers

@@ -1,5 +1,92 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-03d — Create faceBones NIF
+
+`Rigging ▸ Create faceBones NIF...` builds a `_faceBones` sibling from a mesh
+rigged to the standard skeleton. Pick the donor — `BaseFemaleHead_faceBones.nif`,
+`BaseMaleHead_faceBones.nif`, or a creature's — and it writes
+`<name>_faceBones.nif` next to the original.
+
+### It is a wrapper, deliberately
+
+The transformation already existed and was already tested: Transfer Bones and
+Weights with a faceBones donor generates the RemapData snapshot **first** when
+the donor carries sculpt bones, then imports and binds the `skin_bone_*` nodes
+and transfers weights, rolling back as a unit on failure. Reimplementing any of
+that would have been the wrong kind of new code.
+
+What it could not do is produce a *separate file*. It edits in place, so making
+a faceBones variant meant transfer → Save As → Undo to get the original back.
+This runs the same spell against a serialized copy and writes the result out.
+
+The copy is not just tidiness. **It makes a wrong donor free.** Pick a
+standard-rigged mesh by mistake and the transfer runs, gets judged, and is
+discarded — no Undo, no reload, and no file on disk. So the spell checks the
+*result* rather than the user's intent: no `skin_bone_*` bones in the output
+means it is not a faceBones mesh, and it refuses to write one under that name.
+
+### The check that needed a harness
+
+`tests/rigging/facebones.sh`, `WW_FACEBONES_TEST`, 9 checks, all green.
+
+Eight of them are ordinary. The ninth is the reason the file exists:
+
+> **G: RemapData equals the SOURCE's standard skinning**
+> **H: ...and is NOT the output's own sculpt skinning**
+
+Generate the snapshot *after* the transfer instead of before and you get a blob
+of exactly the right length, structurally valid, that passes every other check
+here and looks perfect in every view NifSkope has — and is exactly wrong, because
+it records the sculpt weights instead of the animation skeleton's, which is the
+one thing RemapData exists to carry. Ordering is the whole correctness argument,
+and ordering is what survives a refactor by luck.
+
+H is there because G alone can pass vacuously: if the transfer silently did
+nothing, the output's skinning would equal the source's and both comparisons
+would agree. Requiring them to **disagree** is what gives G its teeth.
+
+Measured on `BaseFemaleHead.nif` → 10 bones becomes 69, 59 of them sculpt bones,
+**RemapData 20268 bytes** — the same size as the blob Bethesda ships in
+`BaseFemaleHead_faceBones.nif`, which `tools/rigging_prototype/encode_test.py`
+independently reproduces byte-for-byte.
+
+### Two test seams, for the same reason as the first one
+
+`WW_TEST_FACEBONES_OUT` joins the existing `WW_TEST_DONOR`. Both bypass **native**
+file dialogs, which no `QTimer` can drive — the driver can accept a `QInputDialog`
+and click through a `QMessageBox`, but `getSaveFileName` is the OS's window.
+
+### The harness hung, and it was the documented trap
+
+First run: 9/9 in the log, then exit 124 from `timeout`. The scoped `QTimer`
+driving the modals dies with the lambda, and the save-on-quit prompt appears
+*after* it — so `quit()` opened a dialog with nobody left to answer. Handed over
+to an app-owned answerer that outlives the scope and deliberately never touches
+the log stream, since that and its `QFile` are already gone by then. Clean exit
+in 43 s.
+
+### Known gap, stated in the UI rather than buried here
+
+Vanilla faceBones assets carry **two** extra-data blocks:
+
+```
+NiBinaryExtraData -> 'CustomizationRemapData'
+NiBinaryExtraData -> 'CustomizationRemapNewBonesData'
+```
+
+Confirmed present on both `BaseFemaleHead_faceBones.nif` and
+`BaseMaleHead_faceBones.nif`. NifSkope writes the first and has **no handling of
+the second anywhere in `src/`**.
+
+It exists because Bethesda's faceBones bone list *omits* `Neck` while the blob
+still references it, at index 68, past the end of the list — `NewBonesData`
+supplies those dropped bones and their transforms. This pipeline is append-only
+and never drops a bone, so every index it writes stays inside the final bone
+list, which suggests it may not need the block to be self-consistent. But
+"self-consistent" and "what the engine expects" are different claims and only
+the second one matters. The success dialog says so and tells the user to
+validate in game.
+
 ## 2026-08-03c — 0.2, and the repository goes public
 
 First public push, as `bungov/NifSkope-WildWastelandEdition`. Nothing about the

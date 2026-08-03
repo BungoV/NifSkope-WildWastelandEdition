@@ -788,6 +788,229 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_FACEBONES_TEST=1): cast the real
+	 * "Rigging/Create faceBones NIF..." spell through NifSkope::castSpell, with
+	 * WW_TEST_DONOR supplying the faceBones donor and WW_TEST_FACEBONES_OUT the
+	 * output path (both are native dialogs no timer can drive).
+	 *
+	 * The assertions are on the FILE the spell wrote and on the source document
+	 * being untouched - which is the whole claim of this spell over running the
+	 * transfer in place. The load-bearing one is the last: the RemapData in the
+	 * output must equal the SOURCE's packed standard-skeleton skinning, not the
+	 * sculpt weights the output now carries. Get that backwards and the file
+	 * still looks structurally perfect while being exactly wrong.
+	 *
+	 * Writes ww_facebones_test.log next to the exe and quits.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_FACEBONES_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
+			QTimer::singleShot( 500, skope, [skope, ok, fname]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_facebones_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				int pass = 0, fail = 0;
+				auto check = [&log, &pass, &fail]( const QString & what, bool cond ) {
+					log << ( cond ? "PASS  " : "FAIL  " ) << what << "\n";
+					log.flush();
+					if ( cond ) pass++; else fail++;
+				};
+				NifModel * nif = skope->getNifModel();
+
+				QTimer driver;
+				QObject::connect( &driver, &QTimer::timeout, skope, [&log]() {
+					QWidget * w = QApplication::activeModalWidget();
+					if ( !w || qobject_cast<QProgressDialog *>( w ) )
+						return;
+					if ( auto * in = qobject_cast<QInputDialog *>( w ) ) {
+						log << "  dialog [" << in->windowTitle() << "] accepted\n";
+						log.flush();
+						in->accept();
+						return;
+					}
+					if ( auto * mb = qobject_cast<QMessageBox *>( w ) ) {
+						QAbstractButton * btn = mb->button( QMessageBox::Yes );
+						if ( !btn ) btn = mb->button( QMessageBox::Ok );
+						if ( !btn && !mb->buttons().isEmpty() ) btn = mb->buttons().first();
+						log << "  messagebox [" << mb->windowTitle() << "]: "
+							<< QString( mb->text() ).replace( '\n', ' ' ).left( 240 ) << "\n";
+						log.flush();
+						if ( btn ) btn->click();
+						return;
+					}
+				} );
+				driver.start( 250 );
+
+				// bone names of a shape, read straight off BSSkin::Instance
+				auto boneNames = []( NifModel * m, const QModelIndex & shape ) {
+					QStringList names;
+					QModelIndex inst = m->getBlockIndex( m->getLink( shape, "Skin" ), "BSSkin::Instance" );
+					QModelIndex bones = m->getIndex( inst, "Bones" );
+					for ( int i = 0; i < m->rowCount( bones ); i++ )
+						names << m->get<QString>(
+							m->getBlockIndex( m->getLink( m->getIndex( bones, i ) ) ), "Name" );
+					return names;
+				};
+				// the 12-byte-per-vertex packing riggingCustomizationRemapBlob emits
+				auto packSkin = []( NifModel * m, const QModelIndex & shape ) {
+					QByteArray blob;
+					QModelIndex vd = m->getIndex( shape, "Vertex Data" );
+					for ( int i = 0; i < m->rowCount( vd ); i++ ) {
+						QModelIndex v = m->getIndex( vd, i );
+						QModelIndex iw = m->getIndex( v, "Bone Weights" );
+						QModelIndex ii = m->getIndex( v, "Bone Indices" );
+						char rec[12] = {};
+						for ( int s = 0; s < 4; s++ ) {
+							quint16 h = std::bit_cast<quint16>(
+								qfloat16( m->get<float>( m->getIndex( iw, s ) ) ) );
+							rec[s * 2] = char( h & 0xff );
+							rec[s * 2 + 1] = char( h >> 8 );
+							rec[8 + s] = char( h != 0
+								? m->get<quint8>( m->getIndex( ii, s ) ) : 0 );
+						}
+						blob.append( rec, sizeof( rec ) );
+					}
+					return blob;
+				};
+				auto remapOf = []( NifModel * m, const QModelIndex & shape ) {
+					for ( int link : m->getChildLinks( m->getBlockNumber( shape ) ) ) {
+						QModelIndex e = m->getBlockIndex( link, "NiBinaryExtraData" );
+						if ( e.isValid() && m->get<QString>( e, "Name" )
+								== QStringLiteral( "CustomizationRemapData" ) )
+							return m->get<QByteArray>( e, "Binary Data" );
+					}
+					return QByteArray();
+				};
+
+				const QString outPath = QString::fromLocal8Bit(
+					qgetenv( "WW_TEST_FACEBONES_OUT" ) );
+				do {
+					if ( !ok || !nif ) { check( "the source file loaded", false ); break; }
+					if ( outPath.isEmpty() ) {
+						check( "WW_TEST_FACEBONES_OUT is set", false );
+						break;
+					}
+					QFile::remove( outPath );
+
+					int sb = -1;
+					for ( int b = 0; b < nif->getBlockCount() && sb < 0; b++ ) {
+						QModelIndex iB = nif->getBlockIndex( b );
+						if ( nif->blockInherits( iB, "BSTriShape" )
+							&& nif->getIndex( iB, "Vertex Data" ).isValid()
+							&& nif->getLink( iB, "Skin" ) >= 0 ) {
+							bool sculpt = false;
+							for ( const QString & n : boneNames( nif, iB ) )
+								sculpt = sculpt || n.startsWith( QLatin1String( "skin_bone_" ),
+									Qt::CaseInsensitive );
+							if ( !sculpt ) sb = b;
+						}
+					}
+					if ( sb < 0 ) { check( "found a standard-rigged skinned shape", false ); break; }
+					QPersistentModelIndex pShape( nif->getBlockIndex( sb ) );
+					log << "target: block " << sb << " '"
+						<< nif->get<QString>( pShape, "Name" ) << "', "
+						<< nif->rowCount( nif->getIndex( pShape, "Vertex Data" ) ) << " verts, "
+						<< boneNames( nif, pShape ).size() << " bones\n";
+					log << "donor:  " << QString::fromLocal8Bit( qgetenv( "WW_TEST_DONOR" ) ) << "\n";
+					log << "out:    " << outPath << "\n\n";
+					log.flush();
+
+					const QByteArray sourceSkin = packSkin( nif, pShape );
+					QByteArray sourceBefore;
+					{
+						QBuffer b( &sourceBefore );
+						b.open( QIODevice::WriteOnly );
+						nif->save( b );
+					}
+
+					QSettings cfg;
+					cfg.setValue( "Rigging/MappingMode", 1 );	// Nearest Vertex, deterministic
+					cfg.setValue( "Rigging/MaxInfluences", 4 );
+
+					skope->castSpell( QLatin1String( "Rigging/Create faceBones NIF..." ), pShape );
+
+					// A. the open document is not touched
+					QByteArray sourceAfter;
+					{
+						QBuffer b( &sourceAfter );
+						b.open( QIODevice::WriteOnly );
+						nif->save( b );
+					}
+					check( "A: the open document is byte-identical afterwards",
+						sourceAfter == sourceBefore );
+
+					// B. the file got written
+					check( "B: the faceBones file exists", QFile::exists( outPath ) );
+					if ( !QFile::exists( outPath ) ) break;
+
+					NifModel out;
+					check( "C: the written file reloads", out.loadFromFile( outPath ) );
+					QModelIndex oShape = out.getBlockIndex( sb );
+					check( "D: the shape is at the same block number", oShape.isValid() );
+					if ( !oShape.isValid() ) break;
+
+					const QStringList outBones = boneNames( &out, oShape );
+					int sculptCount = 0;
+					for ( const QString & n : outBones )
+						if ( n.startsWith( QLatin1String( "skin_bone_" ), Qt::CaseInsensitive ) )
+							sculptCount++;
+					log << "output bones: " << outBones.size() << ", of which sculpt: "
+						<< sculptCount << "\n";
+					log.flush();
+					check( "E: the output carries skin_bone_* face-sculpt bones", sculptCount > 0 );
+
+					const int nv = out.rowCount( out.getIndex( oShape, "Vertex Data" ) );
+					const QByteArray outRemap = remapOf( &out, oShape );
+					check( "F: RemapData is 12 bytes per vertex",
+						outRemap.size() == nv * 12 );
+
+					/* G. THE one that matters. The blob has to be the SOURCE's
+					 * standard-skeleton skinning. If the spell had snapshotted
+					 * after the transfer it would equal the output's own sculpt
+					 * weights instead - structurally valid, semantically ruinous.
+					 */
+					check( "G: RemapData equals the SOURCE's standard skinning",
+						outRemap == sourceSkin );
+					check( "H: ...and is NOT the output's own sculpt skinning",
+						outRemap != packSkin( &out, oShape ) );
+
+					// I. the spell refuses to run on its own output
+					SpellPtr sp = SpellBook::lookup(
+						QLatin1String( "Rigging/Create faceBones NIF..." ) );
+					check( "I: the spell is not applicable to the file it produced",
+						sp && !sp->isApplicable( &out, oShape ) );
+				} while ( false );
+
+				log << "\n" << pass << " passed, " << fail << " failed\n";
+				log.flush();
+				driver.stop();
+				logf.close();
+
+				/* The scoped driver above dies with this lambda, and the
+				 * save-on-quit prompt appears AFTER it — so quit() opens a modal
+				 * with nobody left to answer it and the process hangs until it is
+				 * killed. (Which is what happened: 9/9 in the log, exit 124 from
+				 * timeout.) Hand over to an app-owned answerer that outlives this
+				 * scope. It deliberately does not touch `log`: that stream and its
+				 * QFile are both gone by the time it fires.
+				 */
+				auto * closer = new QTimer( qApp );
+				QObject::connect( closer, &QTimer::timeout, qApp, []() {
+					QWidget * w = QApplication::activeModalWidget();
+					if ( auto * mb = qobject_cast<QMessageBox *>( w ) ) {
+						QAbstractButton * btn = mb->button( QMessageBox::Discard );
+						if ( !btn ) btn = mb->button( QMessageBox::No );
+						if ( !btn ) btn = mb->button( QMessageBox::Ok );
+						if ( !btn && !mb->buttons().isEmpty() ) btn = mb->buttons().last();
+						if ( btn ) btn->click();
+					}
+				} );
+				closer->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	// TEMP TEST HARNESS (WW_CREATESKIN_TEST=1): after the file loads, cast the
 	// real "Create Skin (bind to node)" spell on the first unskinned BSTriShape
 	// through NifSkope::castSpell — the exact path the menu and workspace
