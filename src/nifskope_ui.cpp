@@ -6815,6 +6815,184 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_SCRUB_TEST=1): do all number fields scrub the same way?
+	 *
+	 * bungo asked for the Move field's behaviour -- hover arrows, press-drag the
+	 * number -- on every type-in field in the program. An audit found FIVE
+	 * separate implementations of that gesture, none reachable from the others
+	 * because the original lives in an anonymous namespace:
+	 *
+	 *   DragSpinBox           nifskope_ui.cpp:183      the reference (Move X/Y/Z)
+	 *   UVDragSpinBox         uvtools.cpp:96
+	 *   CollisionDragSpinBox  spells/collisiontools.cpp:345
+	 *   ColorDragSpinBox      ui/widgets/colorwheel.cpp:105
+	 *   WwScrubFilter         ui/widgets/valueedit.cpp:72
+	 *
+	 * THIS FILE IS WRITTEN BEFORE THE FIX, DELIBERATELY. Every check below was
+	 * run against the unfixed binary first and its failure recorded, because a
+	 * consistency harness written after the fact cannot tell you it would have
+	 * caught anything. The recorded "before" numbers are in the commit message.
+	 *
+	 * The widgets are constructed here rather than driven through their real
+	 * dialogs on purpose: Transform Edit and Light are modal (exec() blocks the
+	 * harness), and what is being measured is the WIDGET's behaviour, which is
+	 * the same object either way. The two construction paths below are exactly
+	 * the two the app uses -- ui/widgets/nifeditors.cpp:311 builds a bare
+	 * VectorEdit, ui/widgets/valueedit.cpp:489 builds one and then attaches the
+	 * scrub filter -- so the divergence they expose is the real one.
+	 *
+	 * MOUSE EVENTS GO THROUGH QApplication::sendEvent TO THE LINE EDIT, with
+	 * globalPosition set. The gesture is implemented as an event filter on the
+	 * spin box's internal QLineEdit (nifskope_ui.cpp:196) and reads only
+	 * globalPosition (:249), so synthetic globals are sufficient and no real
+	 * pointer is moved -- this must never take the cursor away from whoever is
+	 * working. Never QTest::mouseMove, never QCursor::setPos.
+	 *
+	 * Log: release/ww_scrub_test.log
+	 */
+	if ( qEnvironmentVariableIsSet( "WW_SCRUB_TEST" ) ) {
+		QTimer::singleShot( 1200, skope, [skope]() {
+			QFile logf( QApplication::applicationDirPath() + "/ww_scrub_test.log" );
+			if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+			QTextStream log( &logf );
+			int checks = 0, fails = 0;
+			auto check = [&]( const QString & what, bool pass ) {
+				checks++;
+				if ( !pass ) fails++;
+				log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+			};
+
+			/* One scrub gesture on a widget's internal line edit.
+			 *
+			 * Returns false if the widget had no line edit to drive, so a check
+			 * can tell "the gesture did nothing" from "there was nothing to
+			 * drive" -- the precondition that stops a missing widget reading as
+			 * a passing test.
+			 */
+			auto scrub = []( QWidget * host, int dx, Qt::KeyboardModifiers mods = Qt::NoModifier ) -> bool {
+				QLineEdit * le = host ? host->findChild<QLineEdit *>() : nullptr;
+				if ( !le )
+					le = qobject_cast<QLineEdit *>( host );
+				if ( !le )
+					return false;
+				const QPointF start( 20, 6 );
+				const QPointF gStart( 500, 500 );
+				QMouseEvent press( QEvent::MouseButtonPress, start, gStart,
+					Qt::LeftButton, Qt::LeftButton, mods );
+				QApplication::sendEvent( le, &press );
+				// several moves, as a real drag delivers: the threshold latches
+				// on the first one past 2 px and the rest map absolutely
+				for ( int step = 1; step <= 4; step++ ) {
+					const qreal f = qreal( step ) / 4.0;
+					QMouseEvent move( QEvent::MouseMove, start + QPointF( dx * f, 0 ),
+						gStart + QPointF( dx * f, 0 ), Qt::NoButton, Qt::LeftButton, mods );
+					QApplication::sendEvent( le, &move );
+				}
+				QMouseEvent rel( QEvent::MouseButtonRelease, start + QPointF( dx, 0 ),
+					gStart + QPointF( dx, 0 ), Qt::LeftButton, Qt::NoButton, mods );
+				QApplication::sendEvent( le, &rel );
+				return true;
+			};
+
+			// ---- A. the same widget, built two ways -------------------------
+			//
+			// VectorEdit is what X/Y/Z rows are made of. Block Details builds it
+			// through ValueEdit, which attaches the scrub; every spell dialog
+			// builds it directly (nifeditors.cpp:311) and gets nothing. Same
+			// class, same row, different feel, depending only on who called new.
+			{
+				VectorEdit * direct = new VectorEdit( skope );
+				direct->setVector3( Vector3( 0, 0, 0 ) );
+				QDoubleSpinBox * dsb = direct->findChild<QDoubleSpinBox *>();
+				check( "A: the directly-built VectorEdit has a spin box to drive", dsb != nullptr );
+				double before = dsb ? dsb->value() : 0.0;
+				bool driven = scrub( dsb, 50 );
+				double after = dsb ? dsb->value() : 0.0;
+				check( "A: ...and a line edit to send the gesture to", driven );
+				log << "A: direct VectorEdit  " << before << " -> " << after
+					<< "  (delta " << ( after - before ) << ")\n";
+				check( "A: dragging a spell-dialog X field changes it", driven && after != before );
+				direct->deleteLater();
+
+				ValueEdit * ve = new ValueEdit( skope );
+				NifValue nv( NifValue::tVector3 );
+				nv.set<Vector3>( Vector3( 0, 0, 0 ), nullptr, nullptr );
+				ve->setValue( nv );
+				QDoubleSpinBox * vdsb = ve->findChild<QDoubleSpinBox *>();
+				double vbefore = vdsb ? vdsb->value() : 0.0;
+				scrub( vdsb, 50 );
+				double vafter = vdsb ? vdsb->value() : 0.0;
+				log << "A: ValueEdit VectorEdit  " << vbefore << " -> " << vafter
+					<< "  (delta " << ( vafter - vbefore ) << ")\n";
+				check( "A: the Block Details X field does change (control)",
+					vdsb && vafter != vbefore );
+				// the point of the check: identical widget, opposite behaviour
+				check( "A: both construction paths behave the same",
+					dsb && vdsb && ( after != before ) == ( vafter != vbefore ) );
+				ve->deleteLater();
+			}
+
+			// ---- B. the reference field's step law ---------------------------
+			//
+			// Move X/Y/Z never calls setSingleStep, so it inherits Qt's default
+			// 1.0 and scrubs at 0.1 units/px. This is the one number in the
+			// whole exercise that must not move; it is asserted numerically so
+			// a shared widget that "helpfully" sets a step is caught.
+			{
+				QDoubleSpinBox * ref = nullptr;
+				const QList<QDoubleSpinBox *> all = skope->findChildren<QDoubleSpinBox *>();
+				for ( QDoubleSpinBox * s : all ) {
+					if ( s->decimals() == 4 && s->maximum() >= 1.0e6 ) { ref = s; break; }
+				}
+				if ( !ref ) {
+					log << "B: skip - the gizmo panel is not built until a transform starts\n";
+				} else {
+					log << "B: reference field singleStep " << ref->singleStep() << "\n";
+					check( "B: the Move field's step is still Qt's default 1.0",
+						qAbs( ref->singleStep() - 1.0 ) < 1e-9 );
+					const double b0 = ref->value();
+					scrub( ref, 50 );
+					log << "B: 50 px -> delta " << ( ref->value() - b0 ) << " (want 5)\n";
+					check( "B: 50 px moves the Move field by 5.0",
+						qAbs( ( ref->value() - b0 ) - 5.0 ) < 1e-6 );
+				}
+			}
+
+			// ---- C. the sentinel ---------------------------------------------
+			//
+			// FloatEdit spells +-FLT_MAX as "<float_max>" (floatedit.cpp:123).
+			// The Block Details step law scales per-pixel step by magnitude
+			// (valueedit.cpp:105), so on that value it is 3.4e38 * 0.005 =
+			// 1.7e36 PER PIXEL. Three pixels of accidental drag replaces a
+			// meaningful sentinel with garbage.
+			{
+				ValueEdit * ve = new ValueEdit( skope );
+				NifValue nv( NifValue::tFloat );
+				nv.set<float>( FLT_MAX, nullptr, nullptr );
+				ve->setValue( nv );
+				FloatEdit * fe = ve->findChild<FloatEdit *>();
+				if ( !fe )
+					fe = qobject_cast<FloatEdit *>( ve->focusProxy() );
+				if ( !fe ) {
+					log << "C: skip - no FloatEdit built for tFloat\n";
+				} else {
+					const QString shown = fe->text();
+					log << "C: field shows '" << shown << "'\n";
+					scrub( fe, 3 );
+					log << "C: after a 3 px drag it shows '" << fe->text() << "'\n";
+					check( "C: a 3 px drag does not destroy the float_max sentinel",
+						fe->text() == shown );
+				}
+				ve->deleteLater();
+			}
+
+			log << checks << " checks, " << fails << " failures\n";
+			log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+			logf.close();
+			QTimer::singleShot( 0, qApp, &QApplication::quit );
+		} );
+	}
+
 	/* TEST HARNESS (WW_GIZMONUM_TEST=1): can a decimal point be typed into a
 	 * modal transform?
 	 *
