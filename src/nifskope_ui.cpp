@@ -431,6 +431,53 @@ void wwGroupBreak( QToolBar * bar )
 	pad();
 }
 
+/*! An action's own icon with a tick beside it.
+ *
+ *  QMenu paints the icon and the check indicator in the SAME column, so a
+ *  checkable item that has an icon silently loses its checkmark — which is
+ *  every overlay toggle in the Overlays menu. You could see the glyph and not
+ *  whether the thing was on.
+ *
+ *  Compositing the tick into the icon is the only way to show both without
+ *  writing a QStyle. The base icon is captured once and never re-composited, so
+ *  toggling cannot stack ticks.
+ */
+static QIcon wwTickedIcon( const QIcon & base, bool checked )
+{
+	const int px = 16, gap = 3, tickW = 11;
+	QPixmap pm( px + gap + tickW, px );
+	pm.fill( Qt::transparent );
+	QPainter p( &pm );
+	p.setRenderHint( QPainter::Antialiasing );
+	base.paint( &p, QRect( 0, 0, px, px ) );
+	if ( checked ) {
+		QPen pen( QColor( wwSkinColor( "accent" ) ) );
+		pen.setWidthF( 1.7 );
+		pen.setCapStyle( Qt::RoundCap );
+		pen.setJoinStyle( Qt::RoundJoin );
+		p.setPen( pen );
+		const qreal x = px + gap, cy = px * 0.5;
+		p.drawLine( QPointF( x + 0.5, cy + 0.5 ), QPointF( x + 3.5, cy + 3.5 ) );
+		p.drawLine( QPointF( x + 3.5, cy + 3.5 ), QPointF( x + 10.0, cy - 3.5 ) );
+	}
+	p.end();
+	return QIcon( pm );
+}
+
+//! Make a checkable action in `m` show its state even though it has an icon.
+static void wwShowCheckBesideIcon( QAction * a, QMenu * m )
+{
+	if ( !a || !a->isCheckable() || a->icon().isNull() )
+		return;		// no icon: Qt's own checkmark already shows
+	const QIcon base = a->icon();
+	auto sync = [a, base]() { a->setIcon( wwTickedIcon( base, a->isChecked() ) ); };
+	sync();
+	QObject::connect( a, &QAction::toggled, a, [sync]( bool ) { sync(); } );
+	// also on open: some of these are driven from elsewhere (settings restore,
+	// the visibility menu) and toggled() is not the only way they change
+	QObject::connect( m, &QMenu::aboutToShow, a, sync );
+}
+
 QString wwBoxedButtonQss( const QString & padding )
 {
 	return QStringLiteral(
@@ -12319,13 +12366,24 @@ void NifSkope::initDockWidgets()
 		// constant width across every mode label, so the toolbar row doesn't
 		// shift when the mode changes
 		{
-			const QFontMetrics fm( modeButton->font() );
+			/* Wide enough for the longest label and not a pixel more.
+			 *
+			 * The old form measured the TEXT with QFontMetrics and then added a
+			 * hand-tuned 46 px for icon, padding, border and the menu
+			 * indicator - which overshot, leaving a visible gap between the end
+			 * of the text and the arrow. Setting each label in turn and asking
+			 * the button for its own sizeHint gets the real figure from the
+			 * style, including the indicator, with no magic number to drift.
+			 */
+			const QString saved = modeButton->text();
 			int wMax = 0;
 			for ( const QString & s : { tr( "Object Mode" ), tr( "Edit Mode" ), tr( "Pose Mode" ),
-					tr( "Vertex Paint" ), tr( "Weight Paint" ), tr( "Segment Paint" ), tr( "Physics Sim" ) } )
-				wMax = std::max( wMax, fm.horizontalAdvance( s ) );
-			// text + icon + paddings/border + menu indicator
-			modeButton->setFixedWidth( wMax + modeButton->iconSize().width() + 46 );
+					tr( "Vertex Paint" ), tr( "Weight Paint" ), tr( "Segment Paint" ), tr( "Physics Sim" ) } ) {
+				modeButton->setText( s );
+				wMax = std::max( wMax, modeButton->sizeHint().width() );
+			}
+			modeButton->setText( saved );
+			modeButton->setFixedWidth( wMax );
 		}
 
 		auto syncModeButton = [this, modeButton, objectMode, editMode, poseMode, vertexPaintMode,
@@ -12709,6 +12767,14 @@ void NifSkope::initDockWidgets()
 		} );
 		m->addAction( aOrigins );
 
+		/* Show the state of every icon-bearing toggle in here.
+		 * Done after the menu is fully populated so nothing is missed, and
+		 * before the settings restore below, whose setChecked calls then drive
+		 * the tick through the toggled() connection.
+		 */
+		for ( QAction * a : m->actions() )
+			wwShowCheckBesideIcon( a, m );
+
 		// persist these viewport display toggles between sessions (apply the
 		// saved state now - the apply connections above fire on setChecked).
 		// Particle rendering lives in the lighting menu, persisted there.
@@ -13047,8 +13113,11 @@ void NifSkope::initDockWidgets()
 			// A greyscale deformation-lattice glyph, distinct from the weight-paint
 			// brush (the old :/btn/skinned icon read as a brush next to "Deformed").
 			bDeformedCage->setIcon( tlMakeIcon( QStringLiteral( "mode_deform" ), QColor( wwSkinColor( "text" ) ) ) );
-			bDeformedCage->setText( tr( "Deformed" ) );
-			bDeformedCage->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+			/* Icon only. The label cost a lot of header width for a toggle whose
+			 * glyph already says what it is, and the header is the row that runs
+			 * out of room first. The tooltip carries the full explanation.
+			 */
+			bDeformedCage->setToolButtonStyle( Qt::ToolButtonIconOnly );
 			bDeformedCage->setToolTip( tr( "Deformed Cage: edit the evaluated game/skinned position. Disable for raw bind vertices." ) );
 			bDeformedCage->setCheckable( true );
 			bDeformedCage->setAutoRaise( true );
@@ -13081,8 +13150,8 @@ void NifSkope::initDockWidgets()
 			// The actual paint/select toggle: give it the greyscale brush glyph so
 			// it reads as a brush (was the :/btn/skinned icon).
 			bWeightBrush->setIcon( tlMakeIcon( QStringLiteral( "mode_weightpaint" ), QColor( wwSkinColor( "text" ) ) ) );
-			bWeightBrush->setText( tr( "Brush" ) );
-			bWeightBrush->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+			// icon only, same reasoning as the Deformed toggle above
+			bWeightBrush->setToolButtonStyle( Qt::ToolButtonIconOnly );
 			bWeightBrush->setToolTip( tr( "Weight Paint brush. Disable to select vertices, edges, or faces." ) );
 			bWeightBrush->setCheckable( true );
 			bWeightBrush->setAutoRaise( true );
@@ -14028,7 +14097,7 @@ void NifSkope::initDockWidgets()
 		auto * seqGuard = new bool( false );
 		auto refreshAnimPanel = [this, animBtn, seqCombo, seqGuard, animScrub, playBtn,
 								 loopBtn, revBtn, speedCombo, enableChk, cycleChk,
-								 icoCol, icoColOff]() {
+								 icoCol, icoColOff, boxQss]() {
 			Scene * sc = ogl->getScene();
 			const QStringList groups = sc ? sc->animGroups : QStringList();
 			/* Animatable is a TIME RANGE, not a sequence list.
@@ -14118,6 +14187,20 @@ void NifSkope::initDockWidgets()
 			animBtn->setToolTip( have ? tr( "Animation — %1%2" )
 											.arg( label, playing ? tr( ", playing" ) : QString() )
 									  : tr( "This file has nothing to animate" ) );
+			/* Grey the TEXT too, not just the glyph.
+			 *
+			 * The button deliberately stays ENABLED with nothing to animate,
+			 * because its popup holds two things that are not about this file -
+			 * the stored "Animations" preference and the Timeline dock - and
+			 * disabling the button would take those with it. But it was still
+			 * painting its label at full strength beside a greyed-out LOD and
+			 * Collision, so it read as the one live control in the group.
+			 * Matching their colour costs nothing and the tooltip already says
+			 * why it is dim.
+			 */
+			animBtn->setStyleSheet( have ? boxQss
+				: boxQss + QStringLiteral( "QToolButton { color:%1; }" )
+					.arg( wwSkinColor( "textMuted" ) ) );
 		};
 		connect( seqCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this,
 			[this, seqCombo, seqGuard]( int ix ) {
@@ -14142,9 +14225,8 @@ void NifSkope::initDockWidgets()
 		connect( animMenu, &QMenu::aboutToShow, this, refreshAnimPanel );
 		refreshAnimPanel();
 
-		// the boundary between the viewport display group and the trailing
-		// group; the only rule this toolbar earns
-		wwGroupBreak( ui->tView );
+		// No rule here: LOD now leads this group, and the boundary it needs is
+		// the one before LOD. A second rule made LOD look like its own group.
 		ui->tView->addWidget( animBtn );
 	}
 
