@@ -8571,11 +8571,11 @@ static void tlRestoreValues( NifModel * nif, const QModelIndex & idx, const QVec
 	}
 }
 
-//! Re-tile a BSSubIndexTriShape's segment ranges onto its current triangle
-//! count. Defined further down (it needs blockInherits on the shape); declared
-//! here so the undo commands can call it from redo(). See its definition for why
-//! every triangle-count change has to run it.
-static void tlSyncSegments( NifModel * m, const QModelIndex & iShape );
+//! Follow a triangle-count change through a BSSubIndexTriShape's segment ranges.
+//! Defined further down (it needs blockInherits on the shape); declared here so
+//! the undo commands can call it from redo(). A NO-OP when the count is
+//! unchanged, which is load-bearing - see the definition.
+static void tlSyncSegments( NifModel * m, const QModelIndex & iShape, int oldNT );
 
 //! Snapshot/restore of a BSSubIndexTriShape's Segment subtree + Num Primitives.
 //! Any command whose redo() re-tiles the segments has to carry one of these, or
@@ -8655,12 +8655,18 @@ public:
 	{
 		if ( QModelIndex( block ).isValid() && apply ) {
 			apply();
-			// the op just changed Num Triangles; the FO4 segment table indexes
-			// that array by position, so it has to follow (idempotent when the
-			// op already rebuilt the ranges exactly, as delete does)
-			tlSyncSegments( nif, QModelIndex( block ) );
+			// The op just changed Num Triangles and the FO4 segment table indexes
+			// that array by position, so the ranges have to follow. UNLESS the op
+			// already rebuilt them exactly from a keep mask (Delete, Separate) -
+			// the fallback would then run over a correct table and wreck it.
+			if ( !segExact )
+				tlSyncSegments( nif, QModelIndex( block ), oldNT );
 		}
 	}
+
+	//! The op rebuilt the segment ranges itself, exactly (from a keep mask).
+	//! Set right after construction; redo() then leaves the table alone.
+	bool segExact = false;
 
 	void undo() override
 	{
@@ -8830,25 +8836,39 @@ static void separateBuildSegments( NifModel * m, const QModelIndex & iShape, con
 	m->dataChanged( iShape, iShape );
 }
 
-//! Re-tile a BSSubIndexTriShape's segment table onto its CURRENT triangle count.
+//! Follow a change in triangle count through a BSSubIndexTriShape's segment table.
 //!
 //! FO4 addresses triangles by (Start Index, Num Primitives) ranges in
 //! Segment / Sub Segment, so any op that changes Num Triangles has to touch them
-//! too — otherwise a delete leaves slots pointing past the end of the triangle
-//! buffer, and a growing op (extrude, fill, bevel, subdivide, loop cut, knife…)
-//! leaves the appended faces in no dismemberment slot at all. Nothing in the file
-//! flags either state: the counts still agree with themselves.
+//! too - otherwise a delete leaves slots indexing past the end of the triangle
+//! buffer, and a growing op leaves the appended faces in no dismemberment slot
+//! at all. Nothing in the file flags either state: the counts still agree with
+//! themselves.
 //!
-//! Ranges keep their stored order and their size where the budget allows, and the
-//! last one absorbs the remainder, so the table always tiles [0, Num Triangles)
-//! exactly and Num Primitives == Num Triangles. Where the caller knows WHICH
-//! triangles survived, separateBuildSegments above is exact and should be
-//! preferred; this is the fallback for ops that only know the new count, and it
-//! puts new faces in the last slot rather than guessing.
+//! This is the FALLBACK, for ops that know only the new count. Where the caller
+//! knows WHICH triangles survived, separateBuildSegments above is exact and must
+//! be preferred - and such a caller sets segExact so this never runs over its
+//! result.
+//!
+//! The rule is deliberately minimal: a range whose end sat exactly at the OLD
+//! end of the triangle array follows the new end; every other range is left
+//! alone, then clamped into [0, nt). Appended faces land in whatever slot
+//! covered the tail, removed ones come off it, and NOTHING ELSE MOVES.
+//!
+//! That minimality is the point. The first version laid every range out
+//! sequentially with "the last sub absorbs the remainder", on the assumption
+//! that sub-segments partition their parent. THEY DO NOT: shipped FO4 files
+//! leave parent-only gaps. Clothes/Courser/CourserF.nif block 158 segment 4
+//! spans 668 triangles from index 4443 while its five sub-segments cover 657
+//! starting at 4476 - an 11-triangle gap at the head. The sequential layout
+//! closed that gap even when the triangle count had not changed at all, which
+//! made this destructive to run at all, and made it destroy the exact table
+//! Delete had just built. Being a no-op when nothing changed is a correctness
+//! requirement here, not an optimisation.
 //!
 //! TlShapeStateCommand snapshots the Segment subtree and Num Primitives, so undo
 //! restores whatever this changed.
-static void tlSyncSegments( NifModel * m, const QModelIndex & iShape )
+static void tlSyncSegments( NifModel * m, const QModelIndex & iShape, int oldNT )
 {
 	if ( !m->blockInherits( iShape, "BSSubIndexTriShape" ) )
 		return;
@@ -8856,48 +8876,27 @@ static void tlSyncSegments( NifModel * m, const QModelIndex & iShape )
 	if ( !iSeg.isValid() || m->rowCount( iSeg ) < 1 )
 		return;
 	const int nt = m->get<int>( iShape, "Num Triangles" );
-	if ( nt < 0 )
-		return;
+	if ( nt < 0 || oldNT < 0 || nt == oldNT )
+		return;	// nothing changed: touch nothing
 
-	// every range, outermost first, in stored order
-	QVector<QModelIndex> ranges;
-	for ( int i = 0; i < m->rowCount( iSeg ); i++ ) {
-		QModelIndex s = m->getIndex( iSeg, i );
-		ranges.append( s );
-		QModelIndex iSub = m->getIndex( s, "Sub Segment" );
-		for ( int j = 0; j < m->rowCount( iSub ); j++ )
-			ranges.append( m->getIndex( iSub, j ) );
-	}
+	auto follow = [&]( const QModelIndex & range ) {
+		int s = int( m->get<quint32>( range, "Start Index" ) ) / 3;
+		int n = int( m->get<quint32>( range, "Num Primitives" ) );
+		if ( n > 0 && s + n == oldNT )
+			n = nt - s;		// this range covered the tail, so it follows the tail
+		s = qBound( 0, s, nt );
+		n = qBound( 0, n, nt - s );
+		m->set<quint32>( range, "Start Index", quint32( s * 3 ) );
+		m->set<quint32>( range, "Num Primitives", quint32( n ) );
+	};
 
 	m->setState( BaseModel::Processing );
-	// Sub-segments partition their parent segment, so re-tiling the flat list
-	// would double-count. Lay out the segments, then each segment's subs inside
-	// the span their parent just got.
-	int cursor = 0;
-	const int nSeg = m->rowCount( iSeg );
-	for ( int i = 0; i < nSeg; i++ ) {
+	for ( int i = 0; i < m->rowCount( iSeg ); i++ ) {
 		QModelIndex s = m->getIndex( iSeg, i );
-		int n = int( m->get<quint32>( s, "Num Primitives" ) );
-		n = qBound( 0, n, nt - cursor );
-		if ( i == nSeg - 1 )
-			n = nt - cursor;	// last slot absorbs the remainder
-		m->set<quint32>( s, "Start Index", quint32( cursor * 3 ) );
-		m->set<quint32>( s, "Num Primitives", quint32( n ) );
-
+		follow( s );
 		QModelIndex iSub = m->getIndex( s, "Sub Segment" );
-		const int nSub = m->rowCount( iSub );
-		int sub = cursor;
-		for ( int j = 0; j < nSub; j++ ) {
-			QModelIndex ss = m->getIndex( iSub, j );
-			int sn = int( m->get<quint32>( ss, "Num Primitives" ) );
-			sn = qBound( 0, sn, cursor + n - sub );
-			if ( j == nSub - 1 )
-				sn = cursor + n - sub;
-			m->set<quint32>( ss, "Start Index", quint32( sub * 3 ) );
-			m->set<quint32>( ss, "Num Primitives", quint32( sn ) );
-			sub += sn;
-		}
-		cursor += n;
+		for ( int j = 0; j < m->rowCount( iSub ); j++ )
+			follow( m->getIndex( iSub, j ) );
 	}
 	if ( m->getIndex( iShape, "Num Primitives" ).isValid() )
 		m->set<quint32>( iShape, "Num Primitives", quint32( nt ) );
@@ -9153,8 +9152,14 @@ GLView::SeparateResult GLView::separateShapes( const QVector<int> & shapes,
 			tlCompactVertices( model, model->getBlockIndex( sb ) );
 		};
 		if ( inPlaceU ) {
-			model->undoStack->push( new TlShapeStateCommand( model, iShape,
-				opName, std::function<void()>() ) );
+			{
+				// applySplit (below) rebuilds both halves' ranges exactly via
+				// separateBuildSegments; this command only snapshots for undo
+				auto * cmd = new TlShapeStateCommand( model, iShape,
+					opName, std::function<void()>() );
+				cmd->segExact = true;
+				model->undoStack->push( cmd );
+			}
 			model->undoStack->push( new TlBlockAppendCommand( model, opName, applySplit, parents ) );
 		} else {
 			applySplit();
@@ -9685,8 +9690,13 @@ void GLView::deleteGeometry( int mode )
 				model->restoreState();
 				model->dataChanged( QModelIndex( iS ), QModelIndex( iS ) );
 			};
-			model->undoStack->push(
-				new TlShapeStateCommand( model, iShape, tr( "Delete" ), applyDel ) );
+			{
+				// tlDeleteGeometry rebuilds the segment ranges exactly from its keep
+				// mask, so redo() must not run the count-only fallback over the result
+				auto * cmd = new TlShapeStateCommand( model, iShape, tr( "Delete" ), applyDel );
+				cmd->segExact = true;
+				model->undoStack->push( cmd );
+			}
 		}
 		model->undoStack->endMacro();
 		removedTris = *remT;
@@ -11525,7 +11535,7 @@ public:
 	{
 		if ( QModelIndex( block ).isValid() && apply ) {
 			apply();
-			tlSyncSegments( nif, QModelIndex( block ) );
+			tlSyncSegments( nif, QModelIndex( block ), oldNT );
 		}
 	}
 
@@ -11608,7 +11618,7 @@ public:
 	{
 		if ( QModelIndex( block ).isValid() && apply ) {
 			apply();
-			tlSyncSegments( nif, QModelIndex( block ) );
+			tlSyncSegments( nif, QModelIndex( block ), plan.oldNT );
 		}
 	}
 
