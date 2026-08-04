@@ -1,5 +1,118 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05 — Three shapes selected, three collision bodies
+
+bungo selected three meshes, pressed **Create Collision**, and got one body. The
+report was "I want to turn them all into separate collision objects, not one and
+the same one."
+
+A spell is handed **one** index. Create is reached from a context menu and from
+the Collision Manager's button, and both hand it the current block — so the
+other two selected shapes were not merged into that body, they were simply
+never looked at. Nothing said so: the panel reported one body afterwards, and
+one body is what the file had. This is the same defect `spellSelectionRoots` was
+written for when Remove Branch and Duplicate Branch silently ignored a
+multi-selection; the create spells just never consulted it.
+
+### Where a second body can go
+
+A `NiAVObject` holds exactly **one** `Collision Object`, so three shapes under
+one root cannot carry three bodies there — a second create replaces the first,
+or absorbs it into a `bhkListShape`, which is one body wearing three shapes.
+Each body needs a target of its own.
+
+A `BSTriShape` has the field, so it looks like the obvious target. It is not
+what the game does. Measured over 489 sampled stock FO4 meshes carrying compiled
+collision, resolving every collision object's `Target`:
+
+```
+625 bodies   ->  625 NiNode
+                   0 BSTriShape
+```
+
+No exceptions, and 40 of those files carry more than one body. What they do
+instead is wrap: `NCA1x1StairsCorner01` hangs its second body on a `NiNode`
+`'Point003'` holding the shape, and `BunIntElevatorOut01` gives each moving door
+leaf the same treatment so the animation has a node to drive. Both put the
+transform on the node and leave the shape at identity — node `'Door'` carries
+the offset, shape `'Door:12'` sits at zero.
+
+So `collisionAttachNode()` follows that: a shape sharing its parent with others
+gets a `NiNode` inserted between it and that parent, named after it, carrying
+its transform and its flags, with the shape reset to identity beneath. Flags are
+copied rather than invented, which matches the static case exactly (`Point003`
+and its shape are both `14`); the `0x80` the elevator's nodes carry comes with
+being animated, which is the author's to add.
+
+**A shape already alone under its parent is not wrapped** — that parent already
+is its own node. So selecting three shapes that each live under their own node
+produces three bodies and no new blocks, and a single selection behaves exactly
+as it always has.
+
+### Two things that would have made it wrong
+
+**Gathering after moving.** A `Node`'s id is assigned when the Scene builds it
+and does not follow the renumbering an insert causes. Creating the first body
+inserts blocks, so gathering the third shape's mesh afterwards would read it
+through a stale id and quietly return the wrong triangles. Every source is
+gathered before that source is touched, and `collisionSourceSpace()` answers
+with `node->id()` — the id of the Node it is about to read — rather than
+computing a block number that may already be stale. The selection is held as
+persistent indices for the same reason.
+
+**Applying the transform twice.** Handing the new node the shape's transform
+without clearing the shape's own doubles every wrapped shape's offset from the
+root. Invisible on a file where the shapes sit at zero, which is most of them.
+
+### Measured
+
+`tests/spells/collision_per_shape.sh` (`WW_COLLPERSHAPE_TEST`), on
+`ArcadeShootGalleryBase01.nif` — a stock mesh whose root has three `BSTriShape`
+children and no collision of its own. It runs three times. The **control** is the
+same binary with the block-list selection never published, which is the path the
+old code took on every run:
+
+```
+--- control: no selection published
+collision objects created: 1
+  ok   CONTROL: with no selection published, one shape makes one body
+--- three shapes selected, menu spell (Box)
+collision objects created: 3
+  ok   three selected shapes make three collision objects
+  ok   each body targets a different node
+  ok   every body targets a NiNode, never a shape
+  ok   each new node holds exactly the shape it was made from
+  ok   wrapping left every shape where it was in the world
+--- three shapes selected, preview commit (Mesh)
+collision objects created: 3
+  ok   ... the same six
+```
+
+Both entry points, because they are different ones: Box goes in as a menu spell,
+while the Manager's **Mesh** and **Convex** buttons open the preview and Apply
+calls `tlCommitCollisionPreview`. Mesh is the mode this was reported from.
+
+One body against three, same binary and same fixture, is what makes the count a
+measurement rather than an assertion — and it cannot be satisfied by a
+`bhkListShape` either, which is what turning "Replace" off would have produced.
+Check 6 is the doubled transform. Check 4 is the corpus result held as an
+invariant.
+
+The fixture has to be one with **no** existing collision. `attachCollisionShape`
+refuses to add editable shapes to a node that already carries compiled
+collision, and it refuses on a modal — the first fixture tried had a compiled
+body on the root, and the control, which targets the root, hung on that dialog
+instead of measuring anything. The multi-shape run never hit it, because every
+body was going onto a node that had just been created. Worth knowing: on a mesh
+that already has compiled collision, per-shape create works where whole-mesh
+create stops and asks you to decompile first.
+
+Applies to all five shape kinds (Box, Sphere, Capsule, Convex, Mesh) and to the
+context-menu entries as well as the Collision Manager button, because the loop
+sits in the spells rather than in the panel. The Manager's preview follows the
+same rule, so what it draws is the set of bodies Apply is about to write, not
+one of them.
+
 ## 2026-08-04a — The four rigging steps come back to the menu
 
 bungo reported spells missing, naming *Generate CustomizationRemapData*. It was

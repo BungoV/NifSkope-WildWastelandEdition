@@ -52,6 +52,46 @@ static const float havokConst = 1.0f / 1.42875f * 10.0f;
 
 static quint32 collisionCreateMaterial( const NifModel * nif );
 static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigidBody );
+static int collisionSourceSpace( const NifModel * nif, const QModelIndex & index,
+	const Node * node, bool ownNode );
+static QModelIndex collisionAttachNode( NifModel * nif, const QModelIndex & index, bool ownNode );
+
+/*! Run a collision create over every block the block list has selected.
+ *
+ *  A spell is handed one index, so selecting three shapes and pressing Create
+ *  made one body out of whichever of them was current and silently ignored the
+ *  other two. Each selected block now gets a body of its own, which is the only
+ *  thing selecting several of them can reasonably mean.
+ *
+ *  \a createOne is told whether it is one of several, because that is what
+ *  decides where the body hangs -- see collisionAttachNode.
+ *
+ *  Persistent indices: creating the first body inserts blocks, which renumbers
+ *  the ones the rest of the selection was found at.
+ */
+template <typename CreateOne>
+static QModelIndex castCollisionOverSelection( NifModel * nif, const QModelIndex & index, CreateOne createOne )
+{
+	const QList<qint32> roots = spellSelectionRoots( nif, index );
+	if ( roots.size() < 2 )
+		return createOne( nif, index, false );
+
+	QList<QPersistentModelIndex> sources;
+	for ( const qint32 block : roots ) {
+		const QModelIndex source = nif->getBlockIndex( block );
+		if ( source.isValid() )
+			sources.append( QPersistentModelIndex( source ) );
+	}
+	QModelIndex result = index;
+	for ( const QPersistentModelIndex & source : sources ) {
+		if ( !source.isValid() )
+			continue;
+		const QModelIndex made = createOne( nif, QModelIndex( source ), true );
+		if ( made.isValid() )
+			result = made;
+	}
+	return result;
+}
 
 //! Creates a convex hull using Qhull
 class spCreateCVS final : public Spell
@@ -113,13 +153,15 @@ public:
 
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
 	{
+		return castCollisionOverSelection( nif, index,
+			[this]( NifModel * model, const QModelIndex & source, bool ownNode ) {
+				return castOne( model, source, ownNode );
+			} );
+	}
+
+	QModelIndex castOne( NifModel * nif, const QModelIndex & index, bool ownNode )
+	{
 		QModelIndex	iBlock = nif->getBlockIndex( index );
-		QModelIndex	iParent = iBlock;
-		if ( !nif->blockInherits( iParent, "NiNode" ) ) {
-			iParent = nif->getBlockIndex( nif->getParent( iBlock ) );
-			if ( !( iParent.isValid() && nif->blockInherits( iParent, "NiNode" ) ) )
-				return index;
-		}
 		QVector<MeshData>	meshes;
 		{
 			Scene * scene = nullptr;
@@ -129,8 +171,13 @@ public:
 			}
 			if ( !scene || !scene->renderer )
 				return index;
-			if ( auto node = scene->getNode( nif, iBlock ); node )
-				getShapeData( meshes, nif, node, nif->getBlockNumber( iParent ) );
+			const Node * node = scene->getNode( nif, iBlock );
+			if ( !node )
+				return index;
+			const int space = collisionSourceSpace( nif, iBlock, node, ownNode );
+			if ( space < 0 )
+				return index;
+			getShapeData( meshes, nif, node, space );
 		}
 		if ( meshes.isEmpty() )
 			return index;
@@ -187,6 +234,11 @@ public:
 
 		if ( enableCoACD )
 			createConvexShapes( meshes, coacd );
+
+		// after the last read of the scene, because this can insert a node
+		const QModelIndex iParent = collisionAttachNode( nif, iBlock, ownNode );
+		if ( !iParent.isValid() )
+			return index;
 
 		if ( meshes.size() > 1 )
 			nif->setState( BaseModel::Processing );
@@ -798,24 +850,115 @@ static QModelIndex attachCollisionShape( NifModel * nif, const QModelIndex & par
 	return rigidBody;
 }
 
-static bool gatherCollisionMesh( NifModel * nif, const QModelIndex & index,
-	QModelIndex & parentNode, spCreateCVS::MeshData & mesh )
+/*! The space a source mesh's vertices are gathered in, as a scene node id.
+ *
+ *  Normally the enclosing NiNode, because that is the block that ends up
+ *  carrying the body. For one body per shape it is the shape's own space:
+ *  collisionAttachNode is about to give that shape a node holding exactly its
+ *  transform, so the two are the same numbers.
+ *
+ *  It answers with the Node's own id rather than a block number because
+ *  creating an earlier body in the same run inserts blocks, and a Node's id is
+ *  assigned when the Scene builds it and does not follow a renumber. Asking the
+ *  Node we are about to read is correct whether or not that has happened.
+ */
+static int collisionSourceSpace( const NifModel * nif, const QModelIndex & index,
+	const Node * node, bool ownNode )
+{
+	if ( !node )
+		return -1;
+	const QModelIndex block = nif->getBlockIndex( index );
+	if ( ownNode && !nif->blockInherits( block, "NiNode" ) )
+		return node->id();
+	if ( nif->blockInherits( block, "NiNode" ) )
+		return nif->getBlockNumber( block );
+	const QModelIndex parent = nif->getBlockIndex( nif->getParent( nif->getBlockNumber( block ) ) );
+	if ( !( parent.isValid() && nif->blockInherits( parent, "NiNode" ) ) )
+		return -1;
+	return nif->getBlockNumber( parent );
+}
+
+/*! The node a new collision object hangs off, creating one where this shape
+ *  needs its own.
+ *
+ *  A NiAVObject holds exactly ONE Collision Object, so shapes that share a
+ *  parent cannot become separate bodies on it: the second create replaces the
+ *  first, or absorbs it into a bhkListShape, which is one body wearing several
+ *  shapes and not several bodies. With \a ownNode each such shape gets a NiNode
+ *  inserted between it and its parent, and the body goes there.
+ *
+ *  A BSTriShape has a Collision Object field of its own and it is never the
+ *  answer. Measured over 489 stock Fallout 4 meshes carrying compiled
+ *  collision: 625 of 625 bodies target a NiNode, none a shape. Wrapping is what
+ *  stock does instead -- NCA1x1StairsCorner01 hangs its second body on a NiNode
+ *  'Point003' holding the shape, and BunIntElevatorOut01 gives each moving door
+ *  leaf the same treatment so the animation has a node to drive.
+ *
+ *  The transform moves up to the new node and the shape drops to identity,
+ *  which is those files exactly (node 'Door' carries the offset, shape
+ *  'Door:12' sits at zero) and leaves the rendered result where it was. Copying
+ *  the shape's Flags rather than inventing a value follows the static case,
+ *  where wrapper and shape agree (Point003 and its shape are both 14); the 0x80
+ *  the elevator's nodes carry comes with being animated, which is the user's to
+ *  add.
+ */
+static QModelIndex collisionAttachNode( NifModel * nif, const QModelIndex & index, bool ownNode )
+{
+	const QModelIndex block = nif->getBlockIndex( index );
+	if ( nif->blockInherits( block, "NiNode" ) )
+		return block;
+	const int blockNumber = nif->getBlockNumber( block );
+	QPersistentModelIndex parent = nif->getBlockIndex( nif->getParent( blockNumber ) );
+	if ( !( parent.isValid() && nif->blockInherits( QModelIndex( parent ), "NiNode" ) ) )
+		return QModelIndex();
+	const QVector<qint32> siblings = nif->getLinkArray( QModelIndex( parent ), "Children" );
+	const int row = siblings.indexOf( blockNumber );
+	/* Alone under its parent, that parent already is its own node; not reached
+	 * through Children, there is no link to redirect and nowhere to put one.
+	 */
+	if ( !ownNode || siblings.size() < 2 || row < 0 )
+		return QModelIndex( parent );
+
+	const QString name = nif->get<QString>( block, "Name" );
+	const quint32 flags = nif->get<quint32>( block, "Flags" );
+	const Transform local( nif, block );
+	/* Inserting AT the shape's number pushes the shape, and every block after
+	 * it, down one row -- the arithmetic Attach Parent Node uses. adjustLinks
+	 * has already repointed the parent's Children entry at the moved shape, so
+	 * the entry is overwritten rather than added to.
+	 */
+	const QModelIndex node = nif->insertNiBlock( QStringLiteral( "NiNode" ), blockNumber );
+	if ( !node.isValid() )
+		return QModelIndex( parent );
+	nif->assignString( node, "Name", name, false );
+	nif->set<quint32>( node, "Flags", flags );
+	local.writeBack( nif, node );
+	nif->setLink( nif->getIndex( nif->getIndex( QModelIndex( parent ), "Children" ), row ), blockNumber );
+	addLink( nif, node, "Children", blockNumber + 1 );
+	// the node carries the transform now; leaving it on the shape applies it twice
+	Transform().writeBack( nif, nif->getBlockIndex( blockNumber + 1 ) );
+	return node;
+}
+
+static bool gatherCollisionMesh( NifModel * nif, const QModelIndex & index, bool ownNode,
+	QModelIndex & sourceNode, spCreateCVS::MeshData & mesh )
 {
 	QModelIndex block = nif->getBlockIndex( index );
-	parentNode = block;
-	if ( !nif->blockInherits( parentNode, "NiNode" ) ) {
-		parentNode = nif->getBlockIndex( nif->getParent( block ) );
-		if ( !( parentNode.isValid() && nif->blockInherits( parentNode, "NiNode" ) ) )
-			return false;
-	}
 	Scene * scene = nullptr;
 	if ( NifSkope * w = dynamic_cast<NifSkope *>( nif->getWindow() ); w ) {
 		if ( GLView * ogl = w->getGLView(); ogl ) scene = ogl->getScene();
 	}
 	if ( !scene || !scene->renderer ) return false;
+	const Node * node = scene->getNode( nif, block );
+	const int space = collisionSourceSpace( nif, block, node, ownNode );
+	if ( space < 0 ) return false;
+	/* The block whose space the mesh is in, for callers that need to place it:
+	 * the shape itself per shape, the enclosing NiNode otherwise.
+	 */
+	sourceNode = ownNode && !nif->blockInherits( block, "NiNode" )
+		? block : nif->getBlockIndex( space );
 	QVector<spCreateCVS::MeshData> meshes;
-	if ( const Node * node = scene->getNode( nif, block ); node )
-		spCreateCVS::getShapeData( meshes, nif, node, nif->getBlockNumber( parentNode ) );
+	spCreateCVS::getShapeData( meshes, nif, node, space );
 	if ( meshes.isEmpty() ) return false;
 	mesh = meshes.first();
 	mesh.removeDuplicateVertices();
@@ -859,11 +1002,19 @@ static void collisionPcaBasis( const QVector<Vector3> & points, Vector3 & center
 
 enum FittedCollisionType { FitBox, FitSphere, FitCapsule };
 
-static QModelIndex createFittedCollision( NifModel * nif, const QModelIndex & index, FittedCollisionType kind )
+static QModelIndex createFittedCollision( NifModel * nif, const QModelIndex & index,
+	FittedCollisionType kind, bool ownNode )
 {
-	QModelIndex parent;
+	QModelIndex sourceNode;
 	spCreateCVS::MeshData mesh;
-	if ( !gatherCollisionMesh( nif, index, parent, mesh ) ) return index;
+	if ( !gatherCollisionMesh( nif, index, ownNode, sourceNode, mesh ) ) return index;
+	/* Before any shape blocks exist, because this can insert a node and
+	 * renumber them -- and after the last read of the scene, which the gather
+	 * above was.
+	 */
+	const QPersistentModelIndex source = nif->getBlockIndex( index );
+	const QModelIndex parent = collisionAttachNode( nif, index, ownNode );
+	if ( !parent.isValid() ) return QModelIndex( source );
 	Vector3 center, axes[3];
 	collisionPcaBasis( mesh.verts, center, axes );
 	const quint32 material = collisionCreateMaterial( nif );
@@ -917,7 +1068,7 @@ static QModelIndex createFittedCollision( NifModel * nif, const QModelIndex & in
 		nif->set<float>( rootShape, "Radius", radius ); nif->set<float>( rootShape, "Radius 1", radius ); nif->set<float>( rootShape, "Radius 2", radius );
 	}
 	if ( material ) nif->set<quint32>( materialShape, "Material", material );
-	QModelIndex result = attachCollisionShape( nif, parent, rootShape, index );
+	QModelIndex result = attachCollisionShape( nif, parent, rootShape, QModelIndex( source ) );
 		/* Tell the engine the mesh HAS collision. Measured: 22,496 of the
 		 * 22,496 stock FO4 meshes carrying a collision object set BSXFlags
 		 * bit 1 on the root, with no exceptions — and nothing here wrote it,
@@ -943,7 +1094,9 @@ class ClassName final : public Spell { public: \
 	QString page() const override final { return Spell::tr( "Havok" ); } \
 	QString group() const override final { return Spell::tr( "Collision" ); } \
 	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final { spCreateCVS s; return s.isApplicable( nif, index ); } \
-	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final { return createFittedCollision( nif, index, Kind ); } \
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final { \
+		return castCollisionOverSelection( nif, index, \
+			[]( NifModel * m, const QModelIndex & i, bool ownNode ) { return createFittedCollision( m, i, Kind, ownNode ); } ); } \
 }; REGISTER_SPELL( ClassName )
 
 DECLARE_FITTED_COLLISION_SPELL( spCreateBoxCollision, "Create Box Collision", FitBox )
@@ -984,13 +1137,15 @@ public:
 
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
 	{
+		return castCollisionOverSelection( nif, index,
+			[this]( NifModel * model, const QModelIndex & source, bool ownNode ) {
+				return castOne( model, source, ownNode );
+			} );
+	}
+
+	QModelIndex castOne( NifModel * nif, const QModelIndex & index, bool ownNode )
+	{
 		QModelIndex iBlock = nif->getBlockIndex( index );
-		QModelIndex iParent = iBlock;
-		if ( !nif->blockInherits( iParent, "NiNode" ) ) {
-			iParent = nif->getBlockIndex( nif->getParent( iBlock ) );
-			if ( !( iParent.isValid() && nif->blockInherits( iParent, "NiNode" ) ) )
-				return index;
-		}
 
 		Scene * scene = nullptr;
 		if ( NifSkope * w = dynamic_cast<NifSkope *>( nif->getWindow() ); w ) {
@@ -1001,8 +1156,11 @@ public:
 			return index;
 
 		QVector<spCreateCVS::MeshData> meshes;
-		if ( const Node * node = scene->getNode( nif, iBlock ); node )
-			spCreateCVS::getShapeData( meshes, nif, node, nif->getBlockNumber( iParent ) );
+		const Node * node = scene->getNode( nif, iBlock );
+		const int space = collisionSourceSpace( nif, iBlock, node, ownNode );
+		if ( space < 0 )
+			return index;
+		spCreateCVS::getShapeData( meshes, nif, node, space );
 		if ( meshes.isEmpty() )
 			return index;
 		auto & mesh = meshes.first();
@@ -1028,6 +1186,14 @@ public:
 				tr( "Accurate mesh collision is limited to 65,535 vertices. Decimate the geometry first." ) );
 			return index;
 		}
+
+		/* Before any collision blocks exist, because this can insert a node and
+		 * renumber them -- and after the last read of the scene above.
+		 */
+		const QPersistentModelIndex source = nif->getBlockIndex( index );
+		const QModelIndex iParent = collisionAttachNode( nif, iBlock, ownNode );
+		if ( !iParent.isValid() )
+			return QModelIndex( source );
 
 		nif->setState( BaseModel::Processing );
 		QModelIndex iData = nif->insertNiBlock( "NiTriStripsData" );
@@ -1085,7 +1251,7 @@ public:
 			nif->set<quint32>( iStrips, "Material", material );
 		QModelIndex iMopp = nif->insertNiBlock( "bhkMoppBvTreeShape" );
 		nif->setLink( iMopp, "Shape", nif->getBlockNumber( iStrips ) );
-		QModelIndex result = attachCollisionShape( nif, iParent, iMopp, index );
+		QModelIndex result = attachCollisionShape( nif, iParent, iMopp, QModelIndex( source ) );
 		/* Tell the engine the mesh HAS collision. Measured: 22,496 of the
 		 * 22,496 stock FO4 meshes carrying a collision object set BSXFlags
 		 * bit 1 on the root, with no exceptions — and nothing here wrote it,
@@ -1118,17 +1284,16 @@ public:
  */
 //REGISTER_SPELL( spCreateAccurateMeshCollision )
 
-//! Build temporary world-space collision geometry for the Collision Manager.
+//! Append one source's world-space preview geometry to \a triangleSoup.
 //! kind 0 = convex hull/decomposition, kind 1 = accurate/decimated mesh.
-bool tlBuildCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
+static bool buildOneCollisionPreview( NifModel * nif, const QModelIndex & index, int kind, bool ownNode,
 	float ratio, bool decomposition, float precision, float threshold, int maxHulls,
-	QVector<Vector3> & triangleSoup, QString & statistics )
+	QVector<Vector3> & triangleSoup, int & hullCount, QString & statistics )
 {
-	triangleSoup.clear();
-	statistics.clear();
+	const qsizetype soupWas = triangleSoup.size();
 	QModelIndex parent;
 	spCreateCVS::MeshData mesh;
-	if ( !gatherCollisionMesh( nif, index, parent, mesh ) || mesh.indices.size() < 3 ) {
+	if ( !gatherCollisionMesh( nif, index, ownNode, parent, mesh ) || mesh.indices.size() < 3 ) {
 		statistics = Spell::tr( "Select a BSTriShape or NiNode with rendered geometry." );
 		return false;
 	}
@@ -1161,7 +1326,6 @@ bool tlBuildCollisionPreview( NifModel * nif, const QModelIndex & index, int kin
 		triangleSoup.append( world * ( c * scale ) );
 	};
 
-	int hullCount = 0;
 	if ( kind == 1 ) {
 		for ( qsizetype i = 0; i + 2 < mesh.indices.size(); i += 3 ) {
 			unsigned int a = mesh.indices.at( i ), b = mesh.indices.at( i + 1 ), c = mesh.indices.at( i + 2 );
@@ -1190,13 +1354,44 @@ bool tlBuildCollisionPreview( NifModel * nif, const QModelIndex & index, int kin
 			}
 		}
 	}
-	if ( triangleSoup.isEmpty() ) {
+	if ( triangleSoup.size() == soupWas ) {
 		statistics = Spell::tr( "No preview geometry could be generated with these settings." );
 		return false;
 	}
-	statistics = kind == 1
+	return true;
+}
+
+/*! Build the Collision Manager's preview of what Create would make.
+ *
+ *  Over the whole block-list selection, and by the same rule the create spells
+ *  use, so the preview is of the bodies Apply is going to write rather than of
+ *  one of them.
+ */
+bool tlBuildCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
+	float ratio, bool decomposition, float precision, float threshold, int maxHulls,
+	QVector<Vector3> & triangleSoup, QString & statistics )
+{
+	triangleSoup.clear();
+	statistics.clear();
+	const QList<qint32> roots = spellSelectionRoots( nif, index );
+	const bool ownNode = roots.size() > 1;
+	int hullCount = 0, bodies = 0;
+	QString failure;
+	for ( const qint32 block : roots ) {
+		const QModelIndex source = nif->getBlockIndex( block );
+		if ( source.isValid() && buildOneCollisionPreview( nif, source, kind, ownNode, ratio,
+				decomposition, precision, threshold, maxHulls, triangleSoup, hullCount, failure ) )
+			bodies++;
+	}
+	if ( bodies < 1 ) {
+		statistics = failure.isEmpty()
+			? Spell::tr( "Select a BSTriShape or NiNode with rendered geometry." ) : failure;
+		return false;
+	}
+	const QString count = bodies > 1 ? Spell::tr( "%1 bodies  -  " ).arg( bodies ) : QString();
+	statistics = count + ( kind == 1
 		? Spell::tr( "%1 triangles  -  %2% of source" ).arg( triangleSoup.size() / 3 ).arg( int( ratio * 100.0f + 0.5f ) )
-		: Spell::tr( "%1 hull(s)  -  %2 preview triangles" ).arg( hullCount ).arg( triangleSoup.size() / 3 );
+		: Spell::tr( "%1 hull(s)  -  %2 preview triangles" ).arg( hullCount ).arg( triangleSoup.size() / 3 ) );
 	return true;
 }
 

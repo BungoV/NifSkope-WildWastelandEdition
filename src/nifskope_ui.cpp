@@ -6938,6 +6938,181 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	//! Defined in spells/havok.cpp; what the Collision Manager's preview Apply calls.
+	//! Declared here for WW_COLLPERSHAPE_TEST, the same way collisiontools.cpp does.
+	extern QModelIndex tlCommitCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
+		float ratio, bool decomposition, float precision, float threshold, int maxHulls );
+
+	/* TEST HARNESS (WW_COLLPERSHAPE_TEST=1): three shapes selected, three bodies?
+	 *
+	 * Create Collision is handed ONE index by the menu and by the Collision
+	 * Manager's button, so selecting three shapes and pressing it made a single
+	 * body out of whichever of them happened to be current and ignored the other
+	 * two. Nothing said so: the panel reported "1 body" afterwards and that is
+	 * what the file had.
+	 *
+	 * THE DISCRIMINATING NUMBER IS THE COUNT. Three selected shapes must leave
+	 * three bhkCollisionObjects. The old code leaves one, so check 2 fails on it
+	 * outright rather than passing for the wrong reason -- and it cannot be
+	 * satisfied by a bhkListShape either, which is one body wearing three shapes
+	 * and is what "Replace" off would have produced.
+	 *
+	 * WHY EACH BODY NEEDS ITS OWN NODE. A NiAVObject holds exactly one Collision
+	 * Object, so three shapes under one root cannot carry three bodies there. A
+	 * BSTriShape has the field and is never where stock puts one: over 489
+	 * sampled FO4 meshes, 625 of 625 bodies target a NiNode. So each shape is
+	 * wrapped in a NiNode, which is what NCA1x1StairsCorner01 and
+	 * BunIntElevatorOut01 do. Checks 3-5 hold that shape.
+	 *
+	 * Check 6 is the one that catches the easy mistake in the wrap: hand the new
+	 * node the shape's transform and leave the shape's own alone, and it applies
+	 * twice -- every wrapped shape silently doubles its offset from the root. The
+	 * world transform is recomputed from the model rather than read off the
+	 * Scene, whose node ids are assigned at construction and do not survive the
+	 * renumbering an insert causes.
+	 *
+	 * FIXTURE: any mesh whose root NiNode has three BSTriShape children, which is
+	 * the case the user hits. tests/spells/collision_per_shape.sh passes one.
+	 * Box collision, because it is the create path with no modal on it.
+	 * Log: release/ww_collpershape_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLPERSHAPE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_collpershape_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif ) { log << "no model\n"; fails++; checks++; break; }
+
+					// world transform from the model, so no Scene state is relied on
+					std::function<Transform( int )> worldOf = [&]( int block ) -> Transform {
+						if ( block < 0 ) return Transform();
+						const int parent = nif->getParent( block );
+						return parent < 0 ? Transform( nif, nif->getBlockIndex( block ) )
+							: worldOf( parent ) * Transform( nif, nif->getBlockIndex( block ) );
+					};
+
+					const QList<int> roots = nif->getRootLinks();
+					if ( roots.size() != 1 ) { log << "fixture has no single root\n"; fails++; checks++; break; }
+					QList<qint32> shapes;
+					for ( const qint32 child : nif->getLinkArray( nif->getBlockIndex( roots.first() ), "Children" ) )
+						if ( nif->blockInherits( nif->getBlockIndex( child ), "BSTriShape" ) )
+							shapes.append( child );
+					log << "shape children of the root: " << shapes.size() << "\n";
+					check( "the fixture has three sibling shapes to select", shapes.size() == 3 );
+					if ( shapes.size() != 3 ) break;
+
+					// name and world transform of each, to compare against after
+					QList<QString> names;
+					QList<Vector3> worldWas;
+					for ( const qint32 shape : shapes ) {
+						names.append( nif->get<QString>( nif->getBlockIndex( shape ), "Name" ) );
+						worldWas.append( worldOf( shape ).translation );
+					}
+
+					/* What the block list publishes when three rows are selected.
+					 * The cast index has to be one of them -- a click outside the
+					 * selection is a fresh target, which is spellSelectionRoots' rule.
+					 */
+					/* WW_COLLPERSHAPE_TEST=control is the same binary with the
+					 * selection never published, which is the path the old code
+					 * took for every run: one index in, one body out. It exists so
+					 * that "three bodies" is shown to be discriminating rather than
+					 * assumed to be -- the control must come back with one.
+					 *
+					 * =mesh goes in through the Collision Manager's preview commit
+					 * instead of a menu spell, because that is a different entry
+					 * point into the same loop and it is the one the Mesh button
+					 * uses -- which is the mode this was reported from. Box is the
+					 * menu-spell path, and is also the only create with no modal on
+					 * it, which is what makes it usable with nobody at the keyboard.
+					 */
+					const QString mode = qEnvironmentVariable( "WW_COLLPERSHAPE_TEST" );
+					const bool control = ( mode == QLatin1String( "control" ) );
+					if ( !control )
+						setBlockListSelection( shapes );
+					const QModelIndex castAt = nif->getBlockIndex( shapes.last() );
+					if ( mode == QLatin1String( "mesh" ) ) {
+						// what Apply on the preview panel calls, ratio 1.0 = no decimation
+						tlCommitCollisionPreview( nif, castAt, 1, 1.0f, false, 0.25f, 0.05f, 16 );
+					} else {
+						SpellPtr create = SpellBook::lookup( QStringLiteral( "Havok/Create Box Collision" ) );
+						if ( !create ) { log << "Create Box Collision not found\n"; fails++; checks++; break; }
+						create->cast( nif, castAt );
+					}
+					QApplication::processEvents();
+					setBlockListSelection( QList<qint32>() );
+
+					QList<qint32> objects, targets;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QModelIndex block = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( block, "bhkCollisionObject" ) )
+							continue;
+						objects.append( b );
+						targets.append( nif->getLink( block, "Target" ) );
+					}
+					log << "collision objects created: " << objects.size() << "\n";
+					if ( control ) {
+						check( "CONTROL: with no selection published, one shape makes one body",
+							objects.size() == 1 );
+						break;
+					}
+					check( "three selected shapes make three collision objects", objects.size() == 3 );
+
+					QSet<qint32> distinct( targets.constBegin(), targets.constEnd() );
+					check( "each body targets a different node", distinct.size() == objects.size() );
+
+					bool allNodes = !targets.isEmpty();
+					for ( const qint32 target : targets )
+						if ( !nif->blockInherits( nif->getBlockIndex( target ), "NiNode" ) )
+							allNodes = false;
+					check( "every body targets a NiNode, never a shape", allNodes );
+
+					/* Each target holds exactly the one shape it was made from, and
+					 * that shape is still one of the three we started with -- which
+					 * is what says the wrap moved the shape rather than copying it
+					 * or hanging the body off something unrelated.
+					 */
+					bool wrapped = targets.size() == 3;
+					bool placed = true;
+					for ( const qint32 target : targets ) {
+						const QVector<qint32> kids = nif->getLinkArray( nif->getBlockIndex( target ), "Children" );
+						if ( kids.size() != 1 || !nif->blockInherits( nif->getBlockIndex( kids.first() ), "BSTriShape" ) ) {
+							wrapped = false;
+							continue;
+						}
+						const QModelIndex shape = nif->getBlockIndex( kids.first() );
+						const int at = names.indexOf( nif->get<QString>( shape, "Name" ) );
+						if ( at < 0 ) { wrapped = false; continue; }
+						// the node carries the transform now, so the shape must not
+						if ( Transform( nif, shape ).translation.length() > 1.0e-4f )
+							placed = false;
+						if ( ( worldOf( kids.first() ).translation - worldWas.at( at ) ).length() > 1.0e-3f )
+							placed = false;
+					}
+					check( "each new node holds exactly the shape it was made from", wrapped );
+					check( "wrapping left every shape where it was in the world", placed );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_ROTKEY_TEST=1): can a key be inserted on a rotation lane?
 	 *
 	 * One of the two fixes in 2ff7457 that shipped verified only by reading the
