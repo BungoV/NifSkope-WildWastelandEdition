@@ -26,6 +26,7 @@ See the LICENSE.md file for the full license text.
 
 #include <bit>
 #include <cmath>
+#include <QColor>
 #include <QtEndian>
 #include "spells/animationsetup.h"
 #include "spells/normaltransfer.h"
@@ -2136,6 +2137,59 @@ int cmdSet( const QString & file, int block, const QString & path,
 	// does not match — while setFromString() still reports success. Left
 	// unguarded, `set -f Translation -v "X 1 Y 2 Z 3"` writes zeros and calls it
 	// a win. Validate the shape of the input before letting it through.
+	/* Colours are the exception, and were broken both ways before this.
+	 *
+	 * NifValue::setFromString parses every colour type through QColor(s), so it
+	 * wants "#rrggbb" or a colour name — but the numeric guard below demanded
+	 * comma-separated components. The result was the worst of both: "#ff0000"
+	 * was REJECTED as malformed, while "1,0,0" passed the guard, failed inside
+	 * QColor, and silently wrote BLACK while reporting success. Setting a light
+	 * to red turned it off instead.
+	 *
+	 * Accept both. Components are the natural thing to type for a value that
+	 * prints as three floats in HDR, so they are converted to the form QColor
+	 * actually understands rather than being handed over to fail.
+	 */
+	QString colorText = value;   // colours may be rewritten into QColor form
+	bool isColor = false;
+	switch ( v.type() ) {
+	case NifValue::tColor3:
+	case NifValue::tColor4:
+	case NifValue::tByteColor4:
+	case NifValue::tByteColor4BGRA:
+		isColor = true; break;
+	default:
+		break;
+	}
+	if ( isColor ) {
+		const QStringList parts = value.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+		if ( parts.size() >= 3 ) {
+			float c[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+			bool allNum = true;
+			for ( int i = 0; i < parts.size() && i < 4; i++ ) {
+				bool numOk = false;
+				c[i] = parts.at( i ).trimmed().toFloat( &numOk );
+				allNum = allNum && numOk;
+			}
+			if ( !allNum ) {
+				err() << "error: " << nif.itemStrType( idx )
+					  << " components must be numbers  (got: " << value << ")" << Qt::endl;
+				return 1;
+			}
+			// 0..1 is how these are stored; >1 means someone typed 0..255
+			const float scale = ( c[0] > 1.0f || c[1] > 1.0f || c[2] > 1.0f ) ? ( 1.0f / 255.0f ) : 1.0f;
+			QColor col;
+			col.setRgbF( qBound( 0.0f, c[0] * scale, 1.0f ), qBound( 0.0f, c[1] * scale, 1.0f ),
+				qBound( 0.0f, c[2] * scale, 1.0f ), qBound( 0.0f, c[3], 1.0f ) );
+			colorText = col.name( QColor::HexArgb );
+		} else if ( !QColor::isValidColorName( value ) ) {
+			err() << "error: " << nif.itemStrType( idx )
+				  << " takes \"#rrggbb\", a colour name, or comma-separated components"
+				  << "  (got: " << value << ")" << Qt::endl;
+			return 1;
+		}
+	}
+
 	int wantComponents = 0;
 	switch ( v.type() ) {
 	case NifValue::tVector2:
@@ -2145,15 +2199,12 @@ int cmdSet( const QString & file, int block, const QString & path,
 	case NifValue::tShortVector3:
 	case NifValue::tUshortVector3:
 	case NifValue::tByteVector3:
-	case NifValue::tColor3:
 		wantComponents = 3; break;
 	case NifValue::tVector4:
 	case NifValue::tByteVector4:
 	case NifValue::tUDecVector4:
 	case NifValue::tQuat:
 	case NifValue::tQuatXYZW:
-	case NifValue::tColor4:
-	case NifValue::tByteColor4:
 		wantComponents = 4; break;
 	default:
 		break;
@@ -2177,7 +2228,7 @@ int cmdSet( const QString & file, int block, const QString & path,
 		}
 	}
 
-	if ( !v.setFromString( value, &nif, item ) ) {
+	if ( !v.setFromString( colorText, &nif, item ) ) {
 		err() << "error: cannot parse '" << value << "' as " << nif.itemStrType( idx ) << Qt::endl;
 		return 1;
 	}
