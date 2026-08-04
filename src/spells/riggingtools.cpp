@@ -1010,9 +1010,13 @@ class spRiggingTransferWeights final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Transfer Weights (existing bones)..." ); }
-	// step 4 of the Rigging Manager's numbered transfer workflow: the dock
-	// orders and gates these, a flat menu did neither
-	bool menuHidden() const override { return true; }
+	/* Step 4 of the Rigging Manager's numbered workflow. The dock is still
+	 * the guided path, but hiding these from the menu went too far: the
+	 * concern was only that a flat list makes the ORDER invisible, and
+	 * label() fixes exactly that while name() stays the id, so castSpell
+	 * and any script keep working.
+	 */
+	QString label() const override { return Spell::tr( "4. Transfer Weights (existing bones)..." ); }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
@@ -1269,9 +1273,13 @@ class spRiggingImportBoneNodes final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Import Donor Bone Nodes..." ); }
-	// step 2 of the Rigging Manager's numbered transfer workflow: the dock
-	// orders and gates these, a flat menu did neither
-	bool menuHidden() const override { return true; }
+	/* Step 2 of the Rigging Manager's numbered workflow. The dock is still
+	 * the guided path, but hiding these from the menu went too far: the
+	 * concern was only that a flat list makes the ORDER invisible, and
+	 * label() fixes exactly that while name() stays the id, so castSpell
+	 * and any script keep working.
+	 */
+	QString label() const override { return Spell::tr( "2. Import Donor Bone Nodes..." ); }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
@@ -1574,9 +1582,13 @@ class spRiggingBindExistingNodes final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Bind Donor Bones (existing nodes)..." ); }
-	// step 3 of the Rigging Manager's numbered transfer workflow: the dock
-	// orders and gates these, a flat menu did neither
-	bool menuHidden() const override { return true; }
+	/* Step 3 of the Rigging Manager's numbered workflow. The dock is still
+	 * the guided path, but hiding these from the menu went too far: the
+	 * concern was only that a flat list makes the ORDER invisible, and
+	 * label() fixes exactly that while name() stays the id, so castSpell
+	 * and any script keep working.
+	 */
+	QString label() const override { return Spell::tr( "3. Bind Donor Bones (existing nodes)..." ); }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }
@@ -3051,9 +3063,13 @@ class spRiggingGenerateCustomizationRemapData final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Generate CustomizationRemapData" ); }
-	// step 1 of the Rigging Manager's numbered transfer workflow: the dock
-	// orders and gates these, a flat menu did neither
-	bool menuHidden() const override { return true; }
+	/* Step 1 of the Rigging Manager's numbered workflow. The dock is still
+	 * the guided path, but hiding these from the menu went too far: the
+	 * concern was only that a flat list makes the ORDER invisible, and
+	 * label() fixes exactly that while name() stays the id, so castSpell
+	 * and any script keep working.
+	 */
+	QString label() const override { return Spell::tr( "1. Generate CustomizationRemapData" ); }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	bool undoable() const override final { return true; }

@@ -1,5 +1,59 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-04a — The four rigging steps come back to the menu
+
+bungo reported spells missing, naming *Generate CustomizationRemapData*. It was
+not missing — `3294710` (the menu taxonomy batch) gave it and its three siblings
+`menuHidden()`, so they existed, cast fine, and appeared nowhere you would look
+for them.
+
+The reasoning at the time was sound and the fix was not. A flat context menu
+lets you run step 4 before step 1, and the Rigging Manager's numbered buttons
+order and gate them properly. But the problem was that a flat list makes the
+**order invisible**, and removing the entries does not make the order visible —
+it makes the feature invisible.
+
+`label()` already exists for exactly this: it is the menu text while `name()`
+stays the id. So they are back, numbered:
+
+```
+1. Generate CustomizationRemapData
+2. Import Donor Bone Nodes...
+3. Bind Donor Bones (existing nodes)...
+4. Transfer Weights (existing bones)...
+```
+
+Ids are untouched, so `castSpell( "Rigging/Generate CustomizationRemapData" )`,
+the CLI and `_tools/animate_securitycamera.sh` all keep working. No
+`menuHidden()` remains anywhere in `src/spells/`.
+
+### Audited the whole registry while here
+
+Comparing `REGISTER_SPELL` against `upstream-base` for anything else lost:
+
+- **`spCreateCVS`** — deregistered in `d5765c4`, but **not lost**. The class is
+  the engine behind Create Collision and Create Accurate Mesh Collision
+  (`havok.cpp` 1172–1255 call `spCreateCVS::createConvexShapes` directly). Its
+  own menu entry was superseded, not its code.
+- **`spFixSkeleton` / `spScanSkeleton`** ("Fix Bip01" / "Scan Bip01") — genuinely
+  deleted, in `3294710`, with the reasoning recorded in `skeleton.cpp`: both
+  gated to NIF 4.0.0.2 with a root block named `Bip01` (Morrowind), both bound to
+  `:/res/skel.dat`; the authoring half opened that Qt resource **WriteOnly**,
+  which cannot succeed, so its `REGISTER_SPELL` had been commented out upstream
+  for as long as the file existed. That left Fix Bip01 consuming a 6 KB blob
+  nothing in a shipping build could regenerate, for a game this fork does not
+  target. Still a deletion rather than a deprecation, and recoverable from
+  `upstream-base` if it is ever wanted.
+
+Nothing else differs.
+
+### "Create a decal from a mesh" does not exist here
+
+Searched the current tree and `upstream-base`: the only decal spells are
+**Add Decal 0–3 Map**, which attach decal *texture slots* to a
+`BSShaderTextureSet`, and all four are present and unchanged. No spell has ever
+generated decal geometry from a mesh in this codebase or its parent.
+
 ## 2026-08-03f — CustomizationRemapNewBonesData, decoded and answered
 
 `Rigging ▸ Sync Remap New Bones` closes the gap the faceBones work left open.
