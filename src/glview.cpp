@@ -17535,26 +17535,6 @@ void GLView::createFloatingDecal( float offset )
 					tlSetVertexLocal( model, iNew, vi, pos + normal * offset );
 				}
 			}
-			/* Flag the clone as a decal.
-			 *
-			 * Measured on vanilla AssaultronFrontDecalCGC.nif against a plain
-			 * opaque mesh: the only decal-specific difference in Shader Flags 1
-			 * is bits 26 Decal and 27 Dynamic_Decal. ZBuffer_Write (bit 0) and
-			 * ZBuffer_Test (bit 31) are SET on both - FO4 resolves decal depth
-			 * through these bits, not by disabling depth write, which is the
-			 * opposite of the usual advice.
-			 *
-			 * The material still governs the look; this only stops the new
-			 * shape z-fighting the surface it was lifted off.
-			 */
-			QModelIndex iShader = model->getBlockIndex(
-				model->getLink( iNew, "Shader Property" ), "BSLightingShaderProperty" );
-			if ( iShader.isValid() ) {
-				const quint32 f1 = model->get<quint32>( iShader, "Shader Flags 1" );
-				const quint32 want = f1 | ( 1u << 26 ) | ( 1u << 27 );
-				if ( want != f1 )
-					model->set<quint32>( iShader, "Shader Flags 1", want );
-			}
 			tlUpdateBounds( model, iNew );
 			newBlocks.append( nNew );
 			totalFaces += kept;
@@ -17586,7 +17566,7 @@ void GLView::createFloatingDecal( float offset )
 		lastOpUndoIndex = model->undoStack ? model->undoStack->index() : -1;
 		emit operatorPanel( 3, offset );
 	}
-	emit gizmoStatus( tr( "Created %1 floating decal face(s) in %2 shape(s), Decal flags set - assign the decal material" )
+	emit gizmoStatus( tr( "Created %1 floating decal face(s) in %2 separate shape(s) - assign the new shape its decal material" )
 		.arg( totalFaces ).arg( newBlocks.size() ) );
 }
 
