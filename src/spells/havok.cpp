@@ -805,28 +805,65 @@ static quint32 collisionCreateMaterial( const NifModel * nif )
 	return ok ? value : 0;
 }
 
+QVariantMap tlCollisionPresetDefaults( int preset )
+{
+	// Static and Stairhelper bodies are fixed; Anim Static is keyframed. Prop
+	// keeps the established dynamic/moving defaults.
+	const bool dynamic = ( preset == 1 );
+	const bool animated = ( preset == 3 );
+	QVariantMap d;
+	d[QStringLiteral( "Layer" )] = preset == 0 ? 1 : preset == 1 ? 10
+		: preset == 3 ? 2 : preset == 4 ? 31 : 10;
+	d[QStringLiteral( "MotionSystem" )] = dynamic ? 3u : animated ? 6u : 7u;
+	d[QStringLiteral( "QualityType" )] = dynamic ? 4u : animated ? 2u : 1u;
+	d[QStringLiteral( "SolverDeactivation" )] = dynamic ? 2u : 1u;
+	d[QStringLiteral( "Mass" )] = dynamic ? 10.0f : 0.0f;
+	d[QStringLiteral( "Friction" )] = 0.5f;
+	d[QStringLiteral( "Restitution" )] = 0.4f;
+	// what the bhkRigidBody block template carries; named here so the create
+	// panel can show them rather than leaving four fields mysteriously blank
+	d[QStringLiteral( "LinearDamping" )] = 0.1f;
+	d[QStringLiteral( "AngularDamping" )] = 0.05f;
+	d[QStringLiteral( "MaxLinearVelocity" )] = 104.4f;
+	d[QStringLiteral( "MaxAngularVelocity" )] = 31.57f;
+	return d;
+}
+
+/*! Seed a new body from the create panel.
+ *
+ *  Every value is read from its own setting, with the preset only supplying the
+ *  DEFAULT when that setting has never been written. The preset used to be the
+ *  whole story — a ladder of if-elses in here, with "Custom" meaning "return
+ *  early and leave the block template's values" — so the only way to author a
+ *  body with, say, a different mass was to create it wrong and then fix it in
+ *  the editor below. The panel writes the keys now, and the preset is a button
+ *  that fills them in.
+ */
 static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigidBody )
 {
-	QSettings settings;
-	const int layer = settings.value( "CollisionManager/Create/Layer", 10 ).toInt();
-	const int preset = settings.value( "CollisionManager/Create/Preset", 1 ).toInt();
 	QModelIndex info = nif->getIndex( rigidBody, "Rigid Body Info" );
 	if ( !info.isValid() ) return;
+	QSettings settings;
+	const QVariantMap fallback =
+		tlCollisionPresetDefaults( settings.value( "CollisionManager/Create/Preset", 1 ).toInt() );
+	auto stored = [&]( const QString & key ) {
+		return settings.value( QStringLiteral( "CollisionManager/Create/" ) + key, fallback.value( key ) );
+	};
 	// both stored copies of the filter: the block's own flattened one and the
 	// Rigid Body Info copy, or the two disagree and the viewport colours by the
 	// one that was never written
-	bhkSetFilterField( nif, rigidBody, QStringLiteral( "Layer" ), quint32( layer ) );
-	if ( preset == 2 ) return;
-	const bool dynamic = ( preset == 1 );
-	const bool animated = ( preset == 3 );
-	// Static and Stairhelper bodies are fixed; Anim Static is keyframed. Prop
-	// keeps the established dynamic/moving defaults.
-	nif->set<quint32>( info, "Motion System", dynamic ? 3u : animated ? 6u : 7u );
-	nif->set<quint32>( info, "Quality Type", dynamic ? 4u : animated ? 2u : 1u );
-	nif->set<quint32>( info, "Solver Deactivation", dynamic ? 2u : 1u );
-	nif->set<float>( info, "Mass", dynamic ? 10.0f : 0.0f );
-	nif->set<float>( info, "Friction", 0.5f );
-	nif->set<float>( info, "Restitution", 0.4f );
+	bhkSetFilterField( nif, rigidBody, QStringLiteral( "Layer" ),
+		stored( QStringLiteral( "Layer" ) ).toUInt() );
+	nif->set<quint32>( info, "Motion System", stored( QStringLiteral( "MotionSystem" ) ).toUInt() );
+	nif->set<quint32>( info, "Quality Type", stored( QStringLiteral( "QualityType" ) ).toUInt() );
+	nif->set<quint32>( info, "Solver Deactivation", stored( QStringLiteral( "SolverDeactivation" ) ).toUInt() );
+	nif->set<float>( info, "Mass", stored( QStringLiteral( "Mass" ) ).toFloat() );
+	nif->set<float>( info, "Friction", stored( QStringLiteral( "Friction" ) ).toFloat() );
+	nif->set<float>( info, "Restitution", stored( QStringLiteral( "Restitution" ) ).toFloat() );
+	nif->set<float>( info, "Linear Damping", stored( QStringLiteral( "LinearDamping" ) ).toFloat() );
+	nif->set<float>( info, "Angular Damping", stored( QStringLiteral( "AngularDamping" ) ).toFloat() );
+	nif->set<float>( info, "Max Linear Velocity", stored( QStringLiteral( "MaxLinearVelocity" ) ).toFloat() );
+	nif->set<float>( info, "Max Angular Velocity", stored( QStringLiteral( "MaxAngularVelocity" ) ).toFloat() );
 }
 
 static QModelIndex attachCollisionShape( NifModel * nif, const QModelIndex & parentNode,

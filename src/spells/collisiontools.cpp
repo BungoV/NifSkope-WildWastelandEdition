@@ -67,6 +67,10 @@ bool tlBuildCollisionPreview( NifModel * nif, const QModelIndex & index, int kin
 	QVector<Vector3> & triangleSoup, QString & statistics );
 QModelIndex tlCommitCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
 	float ratio, bool decomposition, float precision, float threshold, int maxHulls );
+//! Defined in havok.cpp: the body values a creation preset stands for, keyed by
+//! the CollisionManager/Create/ setting each is stored under. One definition, so
+//! the panel that shows them and the code that writes them cannot drift apart.
+QVariantMap tlCollisionPresetDefaults( int preset );
 
 /*! Block lookup and shape-chain descent, at file scope.
  *
@@ -412,8 +416,20 @@ private:
 	QAction * decompileSelectedAction = nullptr;
 	QAction * compileSelectedAction = nullptr;
 	QToolButton * createButton = nullptr;
-	QPushButton * decimateButton = nullptr;
 	QFrame * createPopup = nullptr;
+	//! The create popup's copy of the body settings. Named like the editor's
+	//! below it because they are the same eleven fields, seeding instead of editing.
+	QComboBox * createLayerCombo = nullptr;
+	QComboBox * createMotion = nullptr;
+	QComboBox * createQuality = nullptr;
+	QComboBox * createSolver = nullptr;
+	QDoubleSpinBox * createMass = nullptr;
+	QDoubleSpinBox * createFriction = nullptr;
+	QDoubleSpinBox * createRestitution = nullptr;
+	QDoubleSpinBox * createLinDamp = nullptr;
+	QDoubleSpinBox * createAngDamp = nullptr;
+	QDoubleSpinBox * createMaxLinVel = nullptr;
+	QDoubleSpinBox * createMaxAngVel = nullptr;
 	QFrame * previewPanel = nullptr;
 	QWidget * previewBody = nullptr;
 	QComboBox * previewMethod = nullptr;
@@ -701,6 +717,63 @@ private:
 		addEnum( qualityType, QStringLiteral( "hkQualityType" ), QStringLiteral( "MO_QUAL_" ) );
 		addEnum( solverDeactivation, QStringLiteral( "hkSolverDeactivation" ), QStringLiteral( "SOLVER_DEACTIVATION_" ) );
 		addEnum( deactivatorType, QStringLiteral( "hkDeactivatorType" ), QStringLiteral( "DEACTIVATOR_" ) );
+
+		/* The create popup's copies, from the same tables.
+		 *
+		 * They have to be refilled here and not once at construction: the enums
+		 * are version-specific, and the panel is built before a file is loaded —
+		 * which is exactly why this function exists and is called again on
+		 * modelReset. A create-side layer list left at whatever the first guess
+		 * was would offer Skyrim's layers for a Fallout 4 file.
+		 */
+		if ( createLayerCombo && createMotion && createQuality && createSolver ) {
+			QSignalBlocker bcl( createLayerCombo ), bcm( createMotion ),
+				bcq( createQuality ), bcs( createSolver );
+			createLayerCombo->clear(); createMotion->clear();
+			createQuality->clear(); createSolver->clear();
+			for ( int i = 0; i < layer->count(); i++ )
+				createLayerCombo->addItem( layer->itemText( i ), layer->itemData( i ) );
+			addEnum( createMotion, QStringLiteral( "hkMotionType" ), QStringLiteral( "MO_SYS_" ) );
+			addEnum( createQuality, QStringLiteral( "hkQualityType" ), QStringLiteral( "MO_QUAL_" ) );
+			addEnum( createSolver, QStringLiteral( "hkSolverDeactivation" ),
+				QStringLiteral( "SOLVER_DEACTIVATION_" ) );
+		}
+	}
+
+	/*! Fill the create popup's fields from what is stored, preset as the fallback.
+	 *
+	 *  A member and not a lambda in buildUi because it has to run AFTER
+	 *  populatePhysicsEnums has actually filled the combos, and again whenever it
+	 *  refills them. The first version called it during construction, where
+	 *  populatePhysicsEnums returns early — the physics editor it guards on does
+	 *  not exist yet — so every combo was empty, currentData() came back invalid,
+	 *  and the layer written for new collision was 0. Unidentified: the one value
+	 *  the layer repair spell exists to find.
+	 */
+	void loadCreateFields()
+	{
+		if ( !createLayerCombo || !createMotion || !createQuality || !createSolver )
+			return;
+		QSettings s;
+		const QVariantMap d = tlCollisionPresetDefaults(
+			s.value( "CollisionManager/Create/Preset", 1 ).toInt() );
+		auto stored = [&]( const QString & key ) {
+			return s.value( QStringLiteral( "CollisionManager/Create/" ) + key, d.value( key ) );
+		};
+		QSignalBlocker b0( createLayerCombo ), b1( createMotion ), b2( createQuality ),
+			b3( createSolver ), b4( createMass ), b5( createFriction ), b6( createRestitution ),
+			b7( createLinDamp ), b8( createAngDamp ), b9( createMaxLinVel ), b10( createMaxAngVel );
+		selectComboValue( createLayerCombo, stored( QStringLiteral( "Layer" ) ).toUInt() );
+		selectComboValue( createMotion, stored( QStringLiteral( "MotionSystem" ) ).toUInt() );
+		selectComboValue( createQuality, stored( QStringLiteral( "QualityType" ) ).toUInt() );
+		selectComboValue( createSolver, stored( QStringLiteral( "SolverDeactivation" ) ).toUInt() );
+		createMass->setValue( stored( QStringLiteral( "Mass" ) ).toDouble() );
+		createFriction->setValue( stored( QStringLiteral( "Friction" ) ).toDouble() );
+		createRestitution->setValue( stored( QStringLiteral( "Restitution" ) ).toDouble() );
+		createLinDamp->setValue( stored( QStringLiteral( "LinearDamping" ) ).toDouble() );
+		createAngDamp->setValue( stored( QStringLiteral( "AngularDamping" ) ).toDouble() );
+		createMaxLinVel->setValue( stored( QStringLiteral( "MaxLinearVelocity" ) ).toDouble() );
+		createMaxAngVel->setValue( stored( QStringLiteral( "MaxAngularVelocity" ) ).toDouble() );
 	}
 
 	static void selectComboValue( QComboBox * combo, quint32 value, const QString & fallback = QString() )
@@ -2350,49 +2423,131 @@ private:
 		popupForm->setHorizontalSpacing( 8 );
 		popupForm->setVerticalSpacing( 4 );
 		popupForm->setColumnStretch( 1, 1 );
+		popupForm->setColumnStretch( 3, 1 );
 		auto * convexMethod = new QComboBox( createPopup );
 		convexMethod->addItems( { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } );
 		convexMethod->setCurrentIndex( createSettings.value( "CollisionManager/Create/ConvexMethod", 0 ).toInt() );
 		auto * convexMethodLabel = new QLabel( tr( "Convex method" ), createPopup );
+
+		/* Decimation, where the shape that uses it is chosen.
+		 *
+		 * "Optimize Source Mesh…" was a separate button that opened the same
+		 * live preview Mesh already opens, at 50% instead of 100% — one operation
+		 * wearing two names, and the second one sitting next to Create implying
+		 * it did something to the source mesh. It is the triangle percentage the
+		 * new collision is built at, so it belongs in the row of things you set
+		 * before pressing Create.
+		 */
+		auto * ratio = new QSpinBox( createPopup );
+		ratio->setRange( 1, 100 );
+		ratio->setSuffix( QStringLiteral( "%" ) );
+		ratio->setValue( std::clamp( createSettings.value( "CollisionManager/Create/Ratio", 100 ).toInt(), 1, 100 ) );
+		ratio->setToolTip( tr( "Triangles to keep. The live preview opens at this and can be scrubbed further." ) );
+		auto * ratioLabel = new QLabel( tr( "Triangles" ), createPopup );
+
 		preset->setParent( createPopup );
 		preset->show();
 		materialEdit->setParent( createPopup );
 		materialEdit->show();
+		/* Pick one or type one. FO4 takes any material name — collisionCreateMaterial
+		 * hashes an unknown one the way the Bethesda exporter does (lowercase CRC32)
+		 * and remembers it — so the field has to accept text, not only a row.
+		 */
+		materialEdit->setEditable( true );
+		materialEdit->setInsertPolicy( QComboBox::NoInsert );
+		materialEdit->lineEdit()->setPlaceholderText( tr( "Pick a material, or type a name or 0x value" ) );
 		auto * replace = new QCheckBox( tr( "Replace existing shape" ), createPopup );
 		replace->setChecked( createSettings.value( "CollisionManager/Create/Replace", true ).toBool() );
 		replace->setToolTip( tr( "Off combines the new shape with what the body already has" ) );
-		for ( QComboBox * c : { convexMethod, preset, materialEdit } )
+
+		/* And the body settings, which used not to be here at all.
+		 *
+		 * The preset was the only way to reach any of them, so authoring a body
+		 * with a different mass or layer meant creating it wrong and correcting it
+		 * in the editor below. These are the same eleven fields that editor shows;
+		 * the preset now fills them in rather than being the only thing consulted.
+		 */
+		createLayerCombo = new QComboBox( createPopup );
+		createLayerCombo->setObjectName( QStringLiteral( "CollisionCreateLayer" ) );
+		createMotion = new QComboBox( createPopup );
+		createMotion->setObjectName( QStringLiteral( "CollisionCreateMotion" ) );
+		createQuality = new QComboBox( createPopup );
+		createSolver = new QComboBox( createPopup );
+		auto spin = [this]( double lo, double hi, int decimals ) {
+			auto * s = new QDoubleSpinBox( createPopup );
+			s->setRange( lo, hi );
+			s->setDecimals( decimals );
+			s->setKeyboardTracking( false );
+			return s;
+		};
+		createMass = spin( 0.0, 1000000.0, 3 );
+		createFriction = spin( 0.0, 10.0, 3 );
+		createRestitution = spin( 0.0, 1.0, 3 );
+		createLinDamp = spin( 0.0, 100.0, 3 );
+		createAngDamp = spin( 0.0, 100.0, 3 );
+		createMaxLinVel = spin( 0.0, 1000000.0, 2 );
+		createMaxAngVel = spin( 0.0, 1000000.0, 2 );
+
+		for ( QComboBox * c : { convexMethod, preset, materialEdit, createLayerCombo,
+				createMotion, createQuality, createSolver } )
 			wwMatchFieldStyle( c );
-		popupForm->addWidget( convexMethodLabel, 0, 0 );
-		popupForm->addWidget( convexMethod, 0, 1 );
-		popupForm->addWidget( new QLabel( tr( "Preset" ), createPopup ), 1, 0 );
-		popupForm->addWidget( preset, 1, 1 );
-		popupForm->addWidget( new QLabel( tr( "Material" ), createPopup ), 2, 0 );
-		popupForm->addWidget( materialEdit, 2, 1 );
-		popupForm->addWidget( replace, 3, 0, 1, 2 );
+
+		int row = 0;
+		popupForm->addWidget( convexMethodLabel, row, 0 );
+		popupForm->addWidget( convexMethod, row, 1 );
+		popupForm->addWidget( ratioLabel, row, 2 );
+		popupForm->addWidget( ratio, row++, 3 );
+		popupForm->addWidget( new QLabel( tr( "Preset" ), createPopup ), row, 0 );
+		popupForm->addWidget( preset, row, 1 );
+		popupForm->addWidget( new QLabel( tr( "Material" ), createPopup ), row, 2 );
+		popupForm->addWidget( materialEdit, row++, 3 );
+		popupForm->addWidget( new QLabel( tr( "Collision layer" ), createPopup ), row, 0 );
+		popupForm->addWidget( createLayerCombo, row, 1 );
+		popupForm->addWidget( new QLabel( tr( "Motion" ), createPopup ), row, 2 );
+		popupForm->addWidget( createMotion, row++, 3 );
+		popupForm->addWidget( new QLabel( tr( "Mass" ), createPopup ), row, 0 );
+		popupForm->addWidget( createMass, row, 1 );
+		popupForm->addWidget( new QLabel( tr( "Quality" ), createPopup ), row, 2 );
+		popupForm->addWidget( createQuality, row++, 3 );
+		popupForm->addWidget( new QLabel( tr( "Friction" ), createPopup ), row, 0 );
+		popupForm->addWidget( createFriction, row, 1 );
+		popupForm->addWidget( new QLabel( tr( "Solver deact." ), createPopup ), row, 2 );
+		popupForm->addWidget( createSolver, row++, 3 );
+		popupForm->addWidget( new QLabel( tr( "Restitution" ), createPopup ), row, 0 );
+		popupForm->addWidget( createRestitution, row, 1 );
+		popupForm->addWidget( new QLabel( tr( "Max lin. vel." ), createPopup ), row, 2 );
+		popupForm->addWidget( createMaxLinVel, row++, 3 );
+		popupForm->addWidget( new QLabel( tr( "Lin. damping" ), createPopup ), row, 0 );
+		popupForm->addWidget( createLinDamp, row, 1 );
+		popupForm->addWidget( new QLabel( tr( "Max ang. vel." ), createPopup ), row, 2 );
+		popupForm->addWidget( createMaxAngVel, row++, 3 );
+		popupForm->addWidget( new QLabel( tr( "Ang. damping" ), createPopup ), row, 0 );
+		popupForm->addWidget( createAngDamp, row, 1 );
+		popupForm->addWidget( replace, row++, 2, 1, 2 );
 		popupLayout->addLayout( popupForm );
 
 		auto * popupButtons = new QHBoxLayout;
-		decimateButton = new QPushButton( tr( "Optimize Source Mesh…" ), createPopup );
-		decimateButton->setToolTip( tr( "Open the live decimation preview for the selected render mesh" ) );
 		auto * popupCreate = new QPushButton( tr( "Create" ), createPopup );
 		popupCreate->setDefault( true );
-		popupButtons->addWidget( decimateButton );
 		popupButtons->addStretch();
 		popupButtons->addWidget( popupCreate );
 		popupLayout->addLayout( popupButtons );
 
-		// the method line is Convex's alone, and Optimize only means anything for
-		// the two shapes built from triangles
-		auto showForShape = [convexMethod, convexMethodLabel, shapeGroup, this]() {
+		// the method line is Convex's alone; the triangle percentage means
+		// something only for the two shapes built from triangles
+		auto showForShape = [convexMethod, convexMethodLabel, ratio, ratioLabel, shapeGroup]() {
 			const int id = shapeGroup->checkedId();
 			convexMethod->setVisible( id == 3 );
 			convexMethodLabel->setVisible( id == 3 );
-			decimateButton->setVisible( id == 3 || id == 4 );
+			ratio->setVisible( id == 3 || id == 4 );
+			ratioLabel->setVisible( id == 3 || id == 4 );
 		};
+
 		shapeGroup->button( std::clamp(
 			createSettings.value( "CollisionManager/Create/Shape", 3 ).toInt(), 0, 4 ) )->setChecked( true );
 		showForShape();
+		// fields are filled by loadCreateFields() once populatePhysicsEnums has
+		// run for real -- see the call after the physics editor is built
 
 		createLayout->addWidget( createButton, 0, 0, 1, 2 );
 		/* Create and Test share the bottom of the panel, one at a time.
@@ -2535,6 +2690,8 @@ private:
 		solverDeactivation = new QComboBox( physicsGroup );
 		deactivatorType = new QComboBox( physicsGroup );
 		populatePhysicsEnums();
+		// now that the combos have rows, the create popup can show real values
+		loadCreateFields();
 		int dynamicRow = motionSystem->findData( 3 );
 		if ( dynamicRow >= 0 ) motionSystem->setItemText( dynamicRow, tr( "Dynamic (3)" ) );
 		int staticRow = motionSystem->findData( 5 );
@@ -2777,15 +2934,24 @@ private:
 		 * for it to be confirmed by a second control was the panel not believing
 		 * the first one.
 		 */
-		auto saveCreationSettings = [preset, materialEdit, replace, convexMethod, shapeGroup]() {
+		auto saveCreationSettings = [this, preset, materialEdit, replace, convexMethod,
+				shapeGroup, ratio]() {
 			QSettings settings;
 			settings.setValue( "CollisionManager/Create/Shape", std::clamp( shapeGroup->checkedId(), 0, 4 ) );
-			int presetId = preset->currentData().toInt();
-			settings.setValue( "CollisionManager/Create/Preset", presetId );
-			int createLayer = presetId == 0 ? 1 : presetId == 1 ? 10
-				: presetId == 3 ? 2 : presetId == 4 ? 31
-				: settings.value( "CollisionManager/Create/Layer", 10 ).toInt();
-			settings.setValue( "CollisionManager/Create/Layer", createLayer );
+			settings.setValue( "CollisionManager/Create/Ratio", ratio->value() );
+			settings.setValue( "CollisionManager/Create/Preset", preset->currentData().toInt() );
+			// the fields ARE the settings now; the preset only fills them in
+			settings.setValue( "CollisionManager/Create/Layer", createLayerCombo->currentData().toUInt() );
+			settings.setValue( "CollisionManager/Create/MotionSystem", createMotion->currentData().toUInt() );
+			settings.setValue( "CollisionManager/Create/QualityType", createQuality->currentData().toUInt() );
+			settings.setValue( "CollisionManager/Create/SolverDeactivation", createSolver->currentData().toUInt() );
+			settings.setValue( "CollisionManager/Create/Mass", float( createMass->value() ) );
+			settings.setValue( "CollisionManager/Create/Friction", float( createFriction->value() ) );
+			settings.setValue( "CollisionManager/Create/Restitution", float( createRestitution->value() ) );
+			settings.setValue( "CollisionManager/Create/LinearDamping", float( createLinDamp->value() ) );
+			settings.setValue( "CollisionManager/Create/AngularDamping", float( createAngDamp->value() ) );
+			settings.setValue( "CollisionManager/Create/MaxLinearVelocity", float( createMaxLinVel->value() ) );
+			settings.setValue( "CollisionManager/Create/MaxAngularVelocity", float( createMaxAngVel->value() ) );
 			QString materialValue = materialEdit->currentText().trimmed();
 			int materialRow = materialEdit->findText( materialValue, Qt::MatchFixedString );
 			if ( materialRow >= 0 ) materialValue = materialEdit->itemData( materialRow ).toString();
@@ -2800,19 +2966,48 @@ private:
 			[saveCreationSettings, showForShape]( int, bool checked ) {
 				if ( checked ) { showForShape(); saveCreationSettings(); }
 			} );
-		for ( QComboBox * c : { convexMethod, preset, materialEdit } )
+		/* Picking a preset FILLS the fields, then saves what they now say.
+		 *
+		 * In that order, and it matters: the preset is a shortcut for eleven
+		 * values, not a twelfth value that overrides them. Loading first means
+		 * what gets stored is exactly what the panel is showing, so there is no
+		 * arrangement of the two where the file disagrees with the fields.
+		 */
+		connect( preset, qOverload<int>( &QComboBox::currentIndexChanged ), this,
+			[this, saveCreationSettings, preset]( int ) {
+				QSettings().setValue( "CollisionManager/Create/Preset", preset->currentData().toInt() );
+				const QVariantMap d = tlCollisionPresetDefaults( preset->currentData().toInt() );
+				QSettings s;
+				for ( auto it = d.cbegin(); it != d.cend(); ++it )
+					s.setValue( QStringLiteral( "CollisionManager/Create/" ) + it.key(), it.value() );
+				loadCreateFields();
+				saveCreationSettings();
+			} );
+		for ( QComboBox * c : { convexMethod, materialEdit, createLayerCombo, createMotion,
+				createQuality, createSolver } )
 			connect( c, qOverload<int>( &QComboBox::currentIndexChanged ), this,
 				[saveCreationSettings]( int ) { saveCreationSettings(); } );
+		connect( materialEdit, &QComboBox::editTextChanged, this,
+			[saveCreationSettings]( const QString & ) { saveCreationSettings(); } );
+		for ( QDoubleSpinBox * s : { createMass, createFriction, createRestitution, createLinDamp,
+				createAngDamp, createMaxLinVel, createMaxAngVel } )
+			connect( s, &QDoubleSpinBox::editingFinished, this,
+				[saveCreationSettings]() { saveCreationSettings(); } );
+		connect( ratio, qOverload<int>( &QSpinBox::valueChanged ), this,
+			[saveCreationSettings]( int ) { saveCreationSettings(); } );
 		connect( replace, &QCheckBox::toggled, this,
 			[saveCreationSettings]( bool ) { saveCreationSettings(); } );
 
-		auto createCollision = [this, shapeGroup, convexMethod, saveCreationSettings]() {
+		auto createCollision = [this, shapeGroup, convexMethod, ratio, saveCreationSettings]() {
 			saveCreationSettings();
 			if ( createPopup ) createPopup->hide();
 			const int mode = std::clamp( shapeGroup->checkedId(), 0, 4 );
 			const bool decomposition = convexMethod->currentIndex() == 1;
-			if ( mode == 3 ) { showCollisionPreview( 0, 100.0, decomposition ); return; }
-			if ( mode == 4 ) { showCollisionPreview( 1, 100.0 ); return; }
+			// the preview opens at the percentage set here rather than always at
+			// 100, which is what the Optimize button used to be for
+			const double keep = ratio->value();
+			if ( mode == 3 ) { showCollisionPreview( 0, keep, decomposition ); return; }
+			if ( mode == 4 ) { showCollisionPreview( 1, keep ); return; }
 			QString spellId;
 			if ( mode == 0 ) spellId = QStringLiteral( "Havok/Create Box Collision" );
 			else if ( mode == 1 ) spellId = QStringLiteral( "Havok/Create Sphere Collision" );
@@ -2848,10 +3043,6 @@ private:
 			createPopup->raise();
 		} );
 		connect( popupCreate, &QPushButton::clicked, this, [createCollision]() { createCollision(); } );
-		connect( decimateButton, &QPushButton::clicked, this, [this]() {
-			if ( createPopup ) createPopup->hide();
-			showCollisionPreview( 1, 50.0 );
-		} );
 		for ( QDoubleSpinBox * spin : { mass, friction, restitution, linearDamping,
 			angularDamping, maxLinearVelocity, maxAngularVelocity, centerX, centerY, centerZ,
 			inertiaX, inertiaY, inertiaZ, penetrationDepth } )
@@ -2875,6 +3066,7 @@ private:
 			// The manager is constructed before a file is loaded. Rebuild all
 			// version-specific enums now that BS Version is known.
 			populatePhysicsEnums();
+			loadCreateFields();
 			queueRebuild();
 		} );
 		connect( nif, &QAbstractItemModel::rowsInserted, this,

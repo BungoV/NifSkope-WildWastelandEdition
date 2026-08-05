@@ -1,5 +1,74 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05g — The create popup authors the whole body
+
+Three asks: type a material as well as pick one, put the rest of the collision
+settings in the popup, and fold *Optimize Source Mesh* into mesh creation.
+
+### The body settings are on the create side now
+
+The preset used to be the **only** way to reach any of them — a ladder of
+if-elses in `applyCollisionBodySettings`, with "Custom" meaning *return early
+and leave whatever the block template had*. So authoring a body with a chosen
+mass or layer meant creating it wrong and correcting it in the editor below.
+
+The popup now carries the same eleven fields that editor shows — layer, mass,
+motion, friction, quality, restitution, solver deactivation, both dampings, both
+max velocities — and every one is written as its own setting. The preset is a
+button that **fills them in**, not a twelfth value that overrides them; picking
+one loads the fields and then stores what the fields say, in that order, so
+there is no arrangement where the file disagrees with the panel.
+
+`tlCollisionPresetDefaults()` is the single definition of what each preset
+stands for, keyed by the settings each value lives under, shared by the panel
+that shows them and the code that writes them.
+
+### Material: pick one or type one
+
+It is editable again, with a placeholder that says so. FO4 accepts any material
+name — `collisionCreateMaterial` hashes an unknown one the way the Bethesda
+exporter does, lowercase CRC32, and remembers it — so the field has to take
+text, not only a row. It could not while it lived in a `QMenu`.
+
+### Optimize Source Mesh is gone, and is not missed
+
+It opened the same live preview **Mesh** already opens, at 50% instead of 100%:
+one operation wearing two names, with the second sitting beside Create implying
+it did something to the source mesh. It is the triangle percentage the collision
+is built at, so it is a **Triangles %** field beside Convex method, shown for the
+two shapes built from triangles, and the preview opens at whatever it says.
+
+### The bug this found
+
+Layer 0. The popup's combos were being filled by `populatePhysicsEnums()` called
+during construction — where it **returns early**, because it guards on the
+physics editor below, which does not exist yet. Every create combo was empty,
+`currentData()` came back invalid, and new collision was authored at layer 0:
+*Unidentified*, the one value the layer repair spell exists to find. The fill now
+runs after the enums are really populated, and again whenever they are refilled.
+
+### Measured
+
+```
+  ok   the create layer list has real layers in it
+created body: mass 7.5, layer 10
+  ok   the mass typed in the popup is the mass the body gets
+  ok   ...and the layer picked in the popup is the body's layer
+```
+
+7.5 is deliberately a mass no preset produces — Prop gives 10, everything else
+gives 0 — so a body arriving at either is one that ignored the field.
+
+**Both values are set through the FIELDS, never by writing the setting.** The
+first version of the layer check compared the body against
+`CollisionManager/Create/Layer` and passed while both were 0: the broken build
+had already written that 0 into `QSettings`, so the harness read the bug back
+and agreed with it. A check that trusts stored state cannot see a bug that
+poisoned it.
+
+19 checks, run twice back to back. `collision_undo` (12),
+`collision_compiled_edit` (7), `collision_per_shape` (2+8+8).
+
 ## 2026-08-05f — Create Collision opens a popup, not a dropdown
 
 bungo: *"Rename the button to 'Create Collision'. Do not make it a dropdown

@@ -7476,9 +7476,35 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "all five shapes are in the popup", shapes == 5 );
 					const int combos = popup->findChildren<QComboBox *>().size();
 					const int ticks = popup->findChildren<QCheckBox *>().size();
-					log << "popup settings: " << combos << " combo(s), " << ticks << " tick(s)\n";
+					const int numbers = popup->findChildren<QAbstractSpinBox *>().size();
+					log << "popup settings: " << combos << " combo(s), " << ticks
+						<< " tick(s), " << numbers << " number(s)\n";
+					/* Method, preset, material, layer, motion, quality, solver;
+					 * Replace; and mass, friction, restitution, two dampings, two
+					 * max velocities and the triangle percentage.
+					 */
 					check( "and the settings are visible beside them, not nested",
-						combos == 3 && ticks == 1 );	// method, preset, material + Replace
+						combos == 7 && ticks == 1 && numbers == 8 );
+
+					/* The body settings the preset used to be the ONLY way to
+					 * reach. Authoring a body with a different mass or layer meant
+					 * creating it wrong and correcting it in the editor below.
+					 */
+					check( "the body settings are on the create side too",
+						popup->findChildren<QComboBox *>().size() > 3 );
+
+					// pick one OR type one: FO4 hashes an unknown material name
+					auto * mat = popup->findChildren<QComboBox *>().value( 2 );
+					bool typeable = false;
+					for ( QComboBox * c : popup->findChildren<QComboBox *>() )
+						if ( c->isEditable() ) typeable = true;
+					log << "an editable material field: " << typeable << "\n";
+					check( "the material can be typed as well as picked", typeable );
+					Q_UNUSED( mat );
+
+					// Optimize Source Mesh was a second name for the mesh create
+					check( "Optimize Source Mesh is not a separate button",
+						popup->findChildren<QPushButton *>().size() == 1 );	// just Create
 
 					/* Picking a shape has to WRITE it. The spells read
 					 * CollisionManager/Create/Shape, so a popup that only ticked
@@ -7501,6 +7527,63 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const int wrote = QSettings().value( QStringLiteral( "CollisionManager/Create/Shape" ), -1 ).toInt();
 					log << "picking Box wrote Shape=" << wrote << "\n";
 					check( "picking a shape writes the key the spells read", wrote == 0 );
+
+					/* --- the fields reach the body ---------------------------
+					 * The point of putting them here. Before, the preset was the
+					 * only thing consulted and every other value came from the
+					 * block template, so a body could not be authored with a
+					 * chosen mass — you made it wrong and fixed it afterwards.
+					 *
+					 * 7.5 is deliberately a mass no preset produces: Prop gives
+					 * 10 and everything else gives 0, so a body that comes out at
+					 * either of those is one that ignored the field.
+					 */
+					QDoubleSpinBox * massField = nullptr;
+					for ( QDoubleSpinBox * s : popup->findChildren<QDoubleSpinBox *>() )
+						if ( s->maximum() > 100000.0 && s->decimals() == 3 ) { massField = s; break; }
+					auto * layerField = popup->findChild<QComboBox *>(
+						QStringLiteral( "CollisionCreateLayer" ) );
+					if ( !massField || !layerField ) {
+						log << "no mass or layer field in the popup\n"; fails++; checks++; break;
+					}
+					massField->setValue( 7.5 );
+					emit massField->editingFinished();
+					/* Set the layer through the FIELD, not by writing the setting.
+					 * A stored value is exactly what this run must not trust: an
+					 * earlier build wrote Layer=0 into QSettings, and a harness
+					 * that reads it back would agree with the bug and pass.
+					 */
+					const int propRow = layerField->findData( 10u );
+					check( "the create layer list has real layers in it", propRow >= 0 );
+					if ( propRow >= 0 )
+						layerField->setCurrentIndex( propRow );
+					QApplication::processEvents();
+					for ( QPushButton * b : popup->findChildren<QPushButton *>() )
+						if ( b->text() == QLatin1String( "Create" ) ) { b->click(); break; }
+					QApplication::processEvents();
+
+					float bodyMass = -1.0f;
+					quint32 bodyLayer = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QModelIndex block = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( block, "bhkRigidBody" ) )
+							continue;
+						const QModelIndex rbInfo = nif->getIndex( block, "Rigid Body Info" );
+						bodyMass = nif->get<float>( rbInfo, "Mass" );
+						bodyLayer = nif->get<quint32>( bhkGetHavokFilter( nif, rbInfo ), "Layer" );
+						break;
+					}
+					log << "created body: mass " << bodyMass << ", layer " << bodyLayer << "\n";
+					check( "the mass typed in the popup is the mass the body gets",
+						std::fabs( bodyMass - 7.5f ) < 1.0e-3f );
+					/* The layer PICKED, not whatever was stored. Comparing the body
+					 * against the setting passes when both are 0, and 0 is
+					 * Unidentified — which is what came out while the create combos
+					 * were being read before they had any rows in them.
+					 */
+					check( "...and the layer picked in the popup is the body's layer",
+						bodyLayer == 10u );
+
 					popup->hide();
 					QApplication::processEvents();
 
