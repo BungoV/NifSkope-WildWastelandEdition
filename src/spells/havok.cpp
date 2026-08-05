@@ -55,6 +55,8 @@ static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigi
 static int collisionSourceSpace( const NifModel * nif, const QModelIndex & index,
 	const Node * node, bool ownNode );
 static QModelIndex collisionAttachNode( NifModel * nif, const QModelIndex & index, bool ownNode );
+static void collisionConsumeSource( NifModel * nif, const QPersistentModelIndex & source,
+	const QModelIndex & body );
 
 /*! Run a collision create over every block the block list has selected.
  *
@@ -73,6 +75,31 @@ template <typename CreateOne>
 static QModelIndex castCollisionOverSelection( NifModel * nif, const QModelIndex & index, CreateOne createOne )
 {
 	const QList<qint32> roots = spellSelectionRoots( nif, index );
+
+	/* Read the selection, then take it down for the duration.
+	 *
+	 * Creating a body runs spells that are THEMSELVES selection-aware --
+	 * attachCollisionShape drops a replaced shape with spRemoveBranch, and so
+	 * does consuming the source mesh. spRemoveBranch reads spellSelectionRoots
+	 * too, so with three shapes selected the first removal took all three: at
+	 * the block NUMBERS published before any of this ran, which by then pointed
+	 * at whatever had moved into those rows. That cost a wrapper node and the
+	 * body inside it, and left the root with a dangling child link.
+	 *
+	 * The list above is the only read of it this needs. Restored on the way out
+	 * however that happens, because the block list still shows the selection and
+	 * the next spell has to agree with what is on screen.
+	 */
+	struct SelectionScope
+	{
+		explicit SelectionScope( const QList<qint32> & was ) : saved( was )
+		{
+			setBlockListSelection( QList<qint32>() );
+		}
+		~SelectionScope() { setBlockListSelection( saved ); }
+		QList<qint32> saved;
+	} selectionScope( blockListSelectionForSpells() );
+
 	if ( roots.size() < 2 )
 		return createOne( nif, index, false );
 
@@ -236,6 +263,7 @@ public:
 			createConvexShapes( meshes, coacd );
 
 		// after the last read of the scene, because this can insert a node
+		const QPersistentModelIndex source = nif->getBlockIndex( iBlock );
 		const QModelIndex iParent = collisionAttachNode( nif, iBlock, ownNode );
 		if ( !iParent.isValid() )
 			return index;
@@ -408,10 +436,13 @@ public:
 			}
 		}
 
+		QPersistentModelIndex made( rigidBody );
 		if ( meshes.size() > 1 )
 			nif->restoreState();
 
-		return rigidBody;
+		// after restoreState, for the reason given in createFittedCollision
+		collisionConsumeSource( nif, source, QModelIndex( made ) );
+		return QModelIndex( made );
 	}
 };
 
@@ -940,6 +971,51 @@ static QModelIndex collisionAttachNode( NifModel * nif, const QModelIndex & inde
 	return node;
 }
 
+/*! Remove the geometry a body was just made from.
+ *
+ *  Converting a mesh to collision consumes it. It used to leave both, which
+ *  means every conversion shipped a duplicate of the shape that nothing asked
+ *  for -- a rendered mesh sitting inside its own collision hull, which on a
+ *  proxy built for the purpose is pure weight in the file. Wanting it kept is
+ *  the rarer case and it has an obvious answer: duplicate the shape first, and
+ *  convert the copy.
+ *
+ *  Only when the source IS a mesh. A NiNode source converts everything beneath
+ *  it, and emptying a whole branch is a different and much larger action than
+ *  the one asked for; the node is also not itself a mesh.
+ *
+ *  \param body the rigid body that was made. Nothing is removed unless one
+ *              exists -- attachCollisionShape hands back the source untouched
+ *              when it refuses, and that is not a conversion to consume.
+ */
+static void collisionConsumeSource( NifModel * nif, const QPersistentModelIndex & source,
+	const QModelIndex & body )
+{
+	const QModelIndex block( source );
+	if ( !block.isValid() || !nif->blockInherits( body, "bhkRigidBody" ) )
+		return;
+	if ( !nif->blockInherits( block, { "BSGeometry", "BSTriShape", "NiTriBasedGeom" } ) )
+		return;
+	const QPersistentModelIndex parent = nif->getBlockIndex( nif->getParent( nif->getBlockNumber( block ) ) );
+	// the branch, so the shader property and texture set go with it
+	spRemoveBranch().castIfApplicable( nif, block );
+
+	/* And the hole it leaves. Removing a block blanks every link to it rather
+	 * than shortening the arrays that held them, so the node it hung under is
+	 * left saying it has one child and pointing that entry at nothing -- which
+	 * is what the Issue Manager calls a dangling child link.
+	 */
+	if ( !parent.isValid() )
+		return;
+	QVector<qint32> kept;
+	for ( const qint32 child : nif->getLinkArray( QModelIndex( parent ), "Children" ) )
+		if ( nif->isValidBlockNumber( child ) )
+			kept.append( child );
+	nif->set<uint>( QModelIndex( parent ), "Num Children", uint( kept.size() ) );
+	nif->updateArraySize( QModelIndex( parent ), "Children" );
+	nif->setLinkArray( QModelIndex( parent ), "Children", kept );
+}
+
 static bool gatherCollisionMesh( NifModel * nif, const QModelIndex & index, bool ownNode,
 	QModelIndex & sourceNode, spCreateCVS::MeshData & mesh )
 {
@@ -1085,7 +1161,12 @@ static QModelIndex createFittedCollision( NifModel * nif, const QModelIndex & in
 		result = QModelIndex( keep );
 
 	nif->restoreState(); nif->updateModel();
-	return result;
+	// the mesh has become collision; it is not kept as well. AFTER restoreState:
+	// removing blocks inside the batch renumbers without the model announcing it,
+	// so the persistent indices the rest of a multi-shape run is held by go stale
+	// and the second shape is read at the first one's old row.
+	collisionConsumeSource( nif, source, QModelIndex( keep ) );
+	return QModelIndex( keep );
 }
 
 #define DECLARE_FITTED_COLLISION_SPELL( ClassName, DisplayName, Kind ) \
@@ -1269,7 +1350,9 @@ public:
 
 		nif->restoreState();
 		nif->updateModel();
-		return result;
+		// after restoreState, for the reason given in createFittedCollision
+		collisionConsumeSource( nif, source, QModelIndex( keep ) );
+		return QModelIndex( keep );
 	}
 };
 

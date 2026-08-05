@@ -10,15 +10,21 @@ BSD License - see nifskope.h
 #include "wwskin.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QDialog>
+#include <QGuiApplication>
 #include <QHeaderView>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMouseEvent>
+#include <QScreen>
 #include <QStandardItemModel>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 /*! \file spellpalette.cpp The command palette
  *
@@ -62,6 +68,9 @@ void collect( QMenu * menu, const QString & path, SpellBook & book, QVector<Pale
 {
 	for ( QAction * a : menu->actions() ) {
 		if ( a->isSeparator() )
+			continue;
+		// the row that opens this, offering to open it again
+		if ( a->objectName() == QLatin1String( WW_PALETTE_SEARCH_ROW ) )
 			continue;
 		if ( a->menu() ) {
 			QString title = a->menu()->title();
@@ -118,14 +127,15 @@ protected:
 			dialog->accept();
 			return;
 		case Qt::Key_Escape:
-			// clears first, closes only when already empty — the Block List's Esc
-			// behaves the same way, and a search you are mid-way through is not a
-			// thing to lose to one keystroke
-			if ( !text().isEmpty() ) {
-				clear();
-				return;
-			}
-			break;
+			/* Closes, whatever is typed. It used to clear first and close only on
+			 * a second press, on the reasoning that a half-typed search is not a
+			 * thing to lose to one keystroke — but this opens where a menu used to
+			 * and is dismissed like one, and a popup that eats the first Escape
+			 * reads as a popup that will not close. Retyping four characters is
+			 * cheaper than that doubt.
+			 */
+			dialog->reject();
+			return;
 		default:
 			break;
 		}
@@ -137,9 +147,39 @@ private:
 	QDialog * dialog;
 };
 
+/*! Dismiss on a click outside, the way the menu it replaces does.
+ *
+ *  Qt::Popup is what makes this reachable at all: a popup holds the mouse grab,
+ *  so a press anywhere is delivered to the popup widget rather than swallowed by
+ *  the modality that a plain modal dialog imposes. The press is then judged on
+ *  its GLOBAL position, because the grab routes it through whatever widget it
+ *  arrived at and the local coordinates mean nothing.
+ */
+class PaletteDismiss final : public QObject
+{
+public:
+	explicit PaletteDismiss( QDialog * dlg ) : QObject( dlg ), dialog( dlg ) {}
+
+protected:
+	bool eventFilter( QObject *, QEvent * e ) override
+	{
+		if ( e->type() != QEvent::MouseButtonPress )
+			return false;
+		const QPoint at = static_cast<QMouseEvent *>( e )->globalPosition().toPoint();
+		if ( dialog->frameGeometry().contains( at ) )
+			return false;
+		dialog->reject();
+		return true;		// the click that dismisses is spent dismissing
+	}
+
+private:
+	QDialog * dialog;
+};
+
 } // namespace
 
-QAction * wwSpellPalette( QWidget * parent, SpellBook & book, const QString & context )
+QAction * wwSpellPalette( QWidget * parent, SpellBook & book, const QString & context,
+	const QPoint & at )
 {
 	QVector<PaletteRow> rows;
 	collect( &book, QString(), book, rows );
@@ -147,9 +187,15 @@ QAction * wwSpellPalette( QWidget * parent, SpellBook & book, const QString & co
 		return nullptr;
 
 	QDialog dialog( parent );
-	dialog.setWindowFlags( Qt::Dialog | Qt::FramelessWindowHint );
-	dialog.setModal( true );
+	/* A popup, not a modal dialog. It is opened from a right-click and it is
+	 * dismissed the way anything opened from a right-click is: Escape, a click
+	 * outside, a right-click elsewhere. Modality gives none of that -- clicks
+	 * outside are discarded before anything can act on them -- and Qt::Popup
+	 * gives all three, the last two through PaletteDismiss.
+	 */
+	dialog.setWindowFlags( Qt::Popup );
 	dialog.resize( 640, 420 );
+	qApp->installEventFilter( new PaletteDismiss( &dialog ) );
 	// named so WW_SPELLSEARCH_TEST can drive them from inside the modal loop
 	dialog.setObjectName( QStringLiteral( "WWSpellPalette" ) );
 
@@ -265,10 +311,28 @@ QAction * wwSpellPalette( QWidget * parent, SpellBook & book, const QString & co
 	view->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
 	view->header()->setSectionResizeMode( 2, QHeaderView::ResizeToContents );
 
-	if ( parent ) {
-		const QRect g = parent->window()->geometry();
-		dialog.move( g.center() - QPoint( dialog.width() / 2, dialog.height() / 2 ) );
+	/* Where the click was, so it opens where the menu it replaces stood rather
+	 * than in the middle of the window, which is a long way from the row being
+	 * asked about. Clamped to the screen, or a right-click near the bottom edge
+	 * opens 420px of palette off the end of it.
+	 */
+	QRect where( QPoint(), dialog.size() );
+	if ( !at.isNull() ) {
+		where.moveTopLeft( at );
+	} else if ( parent ) {
+		where.moveCenter( parent->window()->geometry().center() );
 	}
+	const QScreen * screen = QGuiApplication::screenAt( at.isNull() ? where.center() : at );
+	if ( !screen )
+		screen = QGuiApplication::primaryScreen();
+	if ( screen ) {
+		const QRect fits = screen->availableGeometry();
+		where.moveLeft( std::min( where.left(), fits.right() - where.width() ) );
+		where.moveTop( std::min( where.top(), fits.bottom() - where.height() ) );
+		where.moveLeft( std::max( where.left(), fits.left() ) );
+		where.moveTop( std::max( where.top(), fits.top() ) );
+	}
+	dialog.move( where.topLeft() );
 	edit->setFocus();
 
 	if ( dialog.exec() != QDialog::Accepted )

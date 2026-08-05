@@ -644,35 +644,6 @@ private:
 		return words.join( QLatin1Char( ' ' ) );
 	}
 
-	static void configureSearchableSelector( QComboBox * combo, const QString & placeholder )
-	{
-		combo->setEditable( true );
-		combo->setInsertPolicy( QComboBox::NoInsert );
-		combo->setMaxVisibleItems( 11 );
-		combo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
-		combo->setMinimumContentsLength( 12 );
-		combo->view()->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
-		combo->lineEdit()->setClearButtonEnabled( true );
-		combo->lineEdit()->setPlaceholderText( placeholder );
-		if ( QCompleter * completer = combo->completer() ) {
-			completer->setCaseSensitivity( Qt::CaseInsensitive );
-			completer->setFilterMode( Qt::MatchContains );
-			completer->setCompletionMode( QCompleter::PopupCompletion );
-			completer->setMaxVisibleItems( 11 );
-			// QComboBox's default completer only replaces the edit text. Explicitly
-			// commit the matching source row so currentData() changes and the
-			// selected physics value is actually written.
-			QObject::connect( completer, qOverload<const QModelIndex &>( &QCompleter::activated ), combo,
-				[combo]( const QModelIndex & index ) {
-					int row = combo->findData( index.data( Qt::UserRole ) );
-					if ( row < 0 )
-						row = combo->findText( index.data( Qt::DisplayRole ).toString(), Qt::MatchExactly );
-					if ( row >= 0 )
-						combo->setCurrentIndex( row );
-				} );
-		}
-	}
-
 	void populatePhysicsEnums()
 	{
 		if ( !layer || !material || !motionSystem || !qualityType || !solverDeactivation || !deactivatorType )
@@ -2462,8 +2433,23 @@ private:
 		layer->setObjectName( QStringLiteral( "CollisionLayerCombo" ) );
 		material = new QComboBox( physicsGroup );
 		material->setObjectName( QStringLiteral( "CollisionMaterialCombo" ) );
-		configureSearchableSelector( layer, tr( "Search collision layers" ) );
-		configureSearchableSelector( material, tr( "Search materials" ) );
+		/* Plain pickers, like Motion and Quality beside them.
+		 *
+		 * These two were editable, for type-to-search over ~57 layers and ~30
+		 * materials. It cost more than it bought. An editable QComboBox draws no
+		 * drop-down arrow under this stylesheet, so the two controls at the top of
+		 * the form did not look like the four below them and did not look
+		 * clickable; the clear button put an X on a field that has no empty state
+		 * -- a body always has a layer; and an unmatched edit left the field
+		 * showing grey placeholder text where the body's actual material should
+		 * be, which reads as "no material" on a body that has one.
+		 *
+		 * Non-editable still type-ahead: Qt jumps to an item on its first letters.
+		 */
+		layer->setMaxVisibleItems( 15 );
+		material->setMaxVisibleItems( 15 );
+		layer->view()->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+		material->view()->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 		/* The selectors sit in the same grid as the number fields and were
 		 * visibly a different species of control - Qt's frame, its own
 		 * background, a native arrow. Same tokens now, so a row of pickers and a
@@ -2489,15 +2475,12 @@ private:
 		if ( dynamicRow >= 0 ) motionSystem->setItemText( dynamicRow, tr( "Dynamic (3)" ) );
 		int staticRow = motionSystem->findData( 5 );
 		if ( staticRow >= 0 ) motionSystem->setItemText( staticRow, tr( "Static (5)" ) );
-		auto * materialEditor = new QWidget( physicsGroup );
-		auto * materialEditorLayout = new QHBoxLayout( materialEditor );
-		materialEditorLayout->setContentsMargins( 0, 0, 0, 0 );
-		materialEditorLayout->setSpacing( 3 );
-		materialEditorLayout->addWidget( material, 1 );
-		auto * addMaterial = new QToolButton( materialEditor );
-		addMaterial->setText( QStringLiteral( "+" ) );
-		addMaterial->setToolTip( tr( "Add a custom material name and numeric value" ) );
-		materialEditorLayout->addWidget( addMaterial );
+		/* The + that named a custom material is gone with it. It was a second way
+		 * to do something the Create group already does: type a name into
+		 * "Material for new collision" and collisionCreateMaterial hashes it the
+		 * way the Bethesda exporter does and remembers it, after which it is in
+		 * this list like any other. One route, on the side that creates things.
+		 */
 		physicsHint = new QLabel( tr( "Physics values appear here." ), physicsGroup );
 		physicsHint->setWordWrap( true );
 		auto addPhysicsRow = [form, this]( int row, const QString & leftLabel, QWidget * left,
@@ -2508,7 +2491,7 @@ private:
 			form->addWidget( right, row, 3 );
 		};
 		addPhysicsRow( 0, tr( "Collision layer" ), layer,
-			tr( "Material of this body" ), materialEditor );
+			tr( "Material of this body" ), material );
 		addPhysicsRow( 1, tr( "Mass" ), mass, tr( "Motion" ), motionSystem );
 		addPhysicsRow( 2, tr( "Friction" ), friction, tr( "Quality" ), qualityType );
 		addPhysicsRow( 3, tr( "Restitution" ), restitution, tr( "Solver deact." ), solverDeactivation );
@@ -2675,33 +2658,6 @@ private:
 				QSettings s; s.setValue( "CollisionManager/Create/Material",
 					QStringLiteral( "0x%1" ).arg( value, 8, 16, QLatin1Char( '0' ) ) );
 			} else if ( chosen == refreshAction ) rebuild();
-		} );
-		connect( addMaterial, &QToolButton::clicked, this, [this]() {
-			bool ok = false;
-			QString name = QInputDialog::getText( this, tr( "Add Custom Collision Material" ),
-				tr( "Material name:" ), QLineEdit::Normal, QString(), &ok ).trimmed();
-			if ( !ok || name.isEmpty() ) return;
-			QString valueText = QInputDialog::getText( this, tr( "Add Custom Collision Material" ),
-				tr( "Numeric value (decimal or 0x hexadecimal):" ), QLineEdit::Normal,
-				// the selected body's own value, so naming the material you are looking
-				// at does not mean copying the hex out of the tree by hand
-				QStringLiteral( "0x%1" ).arg( material->currentData().toUInt(),
-					8, 16, QLatin1Char( '0' ) ), &ok ).trimmed();
-			if ( !ok ) return;
-			quint32 value = valueText.toUInt( &ok, 0 );
-			if ( !ok ) {
-				QMessageBox::warning( this, tr( "Custom Collision Material" ),
-					tr( "'%1' is not a valid 32-bit material value." ).arg( valueText ) );
-				return;
-			}
-			QSettings settings;
-			QVariantMap custom = settings.value( "CollisionManager/CustomMaterials" ).toMap();
-			custom.insert( name, value );
-			settings.setValue( "CollisionManager/CustomMaterials", custom );
-			int row = material->findData( value );
-			if ( row < 0 ) { material->addItem( name, value ); row = material->count() - 1; }
-			else if ( !NifValue::enumOptionData( materialEnumType() ).o.contains( value ) ) material->setItemText( row, name );
-			material->setCurrentIndex( row );
 		} );
 		/* Ticking a row pins that body. Guarded by `updating`, which
 		 * refreshSimPins() raises while it writes the check states -- without it

@@ -1,5 +1,117 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05a — Converting a mesh consumes it; two pickers; the search popup
+
+Four things bungo asked for, and two bugs that turned up underneath them.
+
+### Converting a mesh to collision consumes the mesh
+
+It used to leave both, so every conversion shipped a rendered copy of the shape
+sitting inside its own collision hull — on a proxy built for the purpose, pure
+weight in the file. Wanting it kept is the rarer case and has an obvious answer:
+duplicate the shape and convert the copy.
+
+Only when the source **is** a mesh. A `NiNode` source converts everything
+beneath it, and emptying a whole branch is a much larger action than the one
+asked for; the node is also not itself a mesh. Combined with per-shape bodies
+this is the shape a collision-only file wants: three shapes in, three `NiNode`s
+out, each named for the mesh it replaced, standing where it stood, each carrying
+its own body and nothing else.
+
+### Two bugs found while measuring it
+
+**`spRemoveBranch` reads the block-list selection.** It calls
+`spellSelectionRoots` like any branch spell, so with three shapes selected the
+first consume removed all three — at the block *numbers* published before any of
+this ran, which by then pointed at whatever had moved into those rows. The run
+came out with two bodies instead of three, one wrapper node missing entirely
+with its body inside it, and a dangling child link on the root.
+
+This was already latent in the per-shape change: `attachCollisionShape` drops a
+replaced shape the same way. `castCollisionOverSelection` now reads the
+selection once and takes it down for the run, restoring it on the way out.
+
+**Removing a block does not shorten the arrays that pointed at it.** The link is
+blanked, so the node the mesh hung under kept claiming a child it no longer had.
+Consuming a source now compacts its parent's `Children`.
+
+Both are held by checks: the body count is what the first one broke, and
+"the consumed mesh leaves no dangling child link" is the second.
+
+### Collision layer and Material of this body are plain pickers now
+
+They were editable combo boxes, for type-to-search over ~57 layers and ~30
+materials. It cost more than it bought:
+
+- an editable `QComboBox` draws no drop-down arrow under this stylesheet, so the
+  two controls at the top of the form did not look like the four below them and
+  did not look clickable;
+- the clear button put an **✕** on a field with no empty state — a body always
+  has a layer;
+- an unmatched edit left grey placeholder text where the body's material should
+  be, which reads as "no material" on a body that has one.
+
+Non-editable still type-aheads: Qt jumps to an item on its first letters.
+
+The **+** that named a custom material goes with it. It was a second way to do
+something the Create group already does — type a name into *Material for new
+collision* and `collisionCreateMaterial` hashes it the way the Bethesda exporter
+does (lowercase CRC32) and remembers it, after which it is in this list like any
+other. One route, on the side that creates things.
+
+### The search popup behaves like the menu it replaces
+
+Opened from a right-click and dismissed like anything opened from a right-click:
+**Escape**, a click outside, a right-click elsewhere. It had none of those. It
+was an application-modal dialog, and modality *discards* clicks outside before
+anything can act on them — so it is a `Qt::Popup` now, which holds the mouse
+grab and delivers those presses to the palette, where `PaletteDismiss` judges
+them on their global position.
+
+Escape closed it only when the field was empty. The old reasoning — a half-typed
+search is not a thing to lose to one keystroke — is real but wrong here: a popup
+that eats the first Escape reads as a popup that will not close. Retyping four
+characters is cheaper than that doubt.
+
+It also opens **where the click was**, not in the middle of the window, clamped
+so a right-click near the bottom edge does not put 420px of palette off the end
+of the screen. And it no longer lists **Search…**, the row that opens it — that
+row is an action on the book like any other, so it collected itself.
+
+### Measured
+
+`tests/spells/spell_search.sh`, four new checks on top of the ten it had:
+
+```
+rows labelled 'Search…': unmarked 1, marked 0
+  ok   CONTROL: an unmarked Search row is listed
+  ok   marking it keeps it out of its own list
+  ok   Escape closes it even with a query typed
+  ok   a click outside closes it
+asked for 120,120 -> opened at 120,120
+  ok   it opens at the point it was given
+```
+
+The dismissal checks synthesise the real gesture and record whether *it* closed
+the palette; the fallback `reject()` exists only so a failure is a failed check
+rather than a harness stuck in a modal loop. The Search-row check counts an
+exact label against a control run of the same action without the marker — the
+first version asked whether any row *started with* "Search", which another entry
+also does, and it read as a failure when the skip was working.
+
+`tests/spells/collision_per_shape.sh` gains the consume checks, and
+`collision_undo.sh` and `collision_compiled_edit.sh` were re-run because the two
+pickers they drive are the ones that changed:
+
+```
+  ok   the meshes that became collision are gone
+  ok   each node is named for the shape it replaced
+  ok   ...and stands where that shape stood
+  ok   the consumed mesh leaves no dangling child link
+12 checks, 0 failures      collision_undo
+ 7 checks, 0 failures      collision_compiled_edit
+```
+
 ## 2026-08-05 — Three shapes selected, three collision bodies
 
 bungo selected three meshes, pressed **Create Collision**, and got one body. The

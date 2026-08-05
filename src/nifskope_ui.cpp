@@ -6603,6 +6603,98 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< "   (highlighted row " << s4.current << ")\n";
 					check( "the destructive entry is found", !s4.labels.isEmpty() );
 					check( "...but nothing is auto-highlighted", s4.current == -1 );
+
+					/* --- 5. it does not list the row that opens it ------------
+					 * Search… is an action on the book like every other, so it
+					 * collected itself: an entry inside the search offering to
+					 * open the search. The control is the same action WITHOUT
+					 * the marker objectName, which must still be listed -- or
+					 * this is measuring a spelling rather than the skip.
+					 */
+					auto listsSearchRow = [&]( bool marked ) -> int {
+						SpellBook book( nif, iTarget );
+						skope->buildBlockListMenuExtras( book, iTarget );
+						auto * row = new QAction( tr( "Search…\tCtrl+Shift+P" ), &book );
+						if ( marked )
+							row->setObjectName( QStringLiteral( WW_PALETTE_SEARCH_ROW ) );
+						if ( QAction * first = book.actions().value( 0 ) )
+							book.insertAction( first, row );
+						else
+							book.addAction( row );
+						int found = 0;
+						const QString label = row->text().split( QLatin1Char( '\t' ) ).value( 0 );
+						QTimer::singleShot( 250, skope, [skope, &found, label]() {
+							QDialog * dlg = skope->findChild<QDialog *>( QStringLiteral( "WWSpellPalette" ) );
+							if ( !dlg ) return;
+							auto * view = dlg->findChild<QTreeView *>( QStringLiteral( "SpellPaletteList" ) );
+							if ( view ) {
+								QAbstractItemModel * m = view->model();
+								for ( int r = 0; r < m->rowCount(); r++ )
+									if ( m->index( r, 0 ).data().toString() == label )
+										found++;
+							}
+							dlg->reject();
+						} );
+						wwSpellPalette( skope, book, QString() );
+						return found;
+					};
+					const int listedUnmarked = listsSearchRow( false );
+					const int listedMarked = listsSearchRow( true );
+					log << "rows labelled 'Search…': unmarked " << listedUnmarked
+						<< ", marked " << listedMarked << "\n";
+					check( "CONTROL: an unmarked Search row is listed", listedUnmarked > 0 );
+					check( "marking it keeps it out of its own list",
+						listedMarked == listedUnmarked - 1 );
+
+					/* --- 6. it is dismissed like the menu it replaces ---------
+					 * Escape, and a click outside. Both with a query typed, which
+					 * is the case that used to swallow the first Escape.
+					 *
+					 * The fallback reject() exists so a failure is a failed check
+					 * rather than a harness that hangs in a modal loop forever --
+					 * `closed` records whether the gesture did it or the fallback
+					 * had to.
+					 */
+					auto dismissedBy = [&]( const QString & how, QPoint * openedAt = nullptr ) -> bool {
+						SpellBook book( nif, iTarget );
+						skope->buildBlockListMenuExtras( book, iTarget );
+						bool closed = false;
+						QTimer::singleShot( 250, skope, [skope, how, &closed, openedAt]() {
+							QDialog * dlg = skope->findChild<QDialog *>( QStringLiteral( "WWSpellPalette" ) );
+							if ( !dlg ) return;
+							if ( openedAt )
+								*openedAt = dlg->geometry().topLeft();
+							auto * edit = dlg->findChild<QLineEdit *>( QStringLiteral( "SpellPaletteSearch" ) );
+							if ( edit ) edit->setText( QStringLiteral( "copy" ) );	// mid-search on purpose
+							QApplication::processEvents();
+							if ( how == QLatin1String( "escape" ) ) {
+								QKeyEvent key( QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier );
+								QApplication::sendEvent( edit ? static_cast<QWidget *>( edit ) : dlg, &key );
+							} else {
+								// what a click on the window behind looks like once
+								// the popup grab has routed it to the palette
+								const QPoint out = dlg->frameGeometry().topLeft() - QPoint( 60, 60 );
+								QMouseEvent press( QEvent::MouseButtonPress, QPointF( -60, -60 ),
+									QPointF( out ), QPointF( out ), Qt::LeftButton, Qt::LeftButton,
+									Qt::NoModifier );
+								QApplication::sendEvent( dlg, &press );
+							}
+							QApplication::processEvents();
+							closed = !dlg->isVisible();
+							if ( !closed ) dlg->reject();		// never hang
+						} );
+						wwSpellPalette( skope, book, QString(), openedAt ? QPoint( 120, 120 ) : QPoint() );
+						return closed;
+					};
+					QPoint openedAt;
+					check( "Escape closes it even with a query typed", dismissedBy( QStringLiteral( "escape" ) ) );
+					const bool byClick = dismissedBy( QStringLiteral( "outside" ), &openedAt );
+					check( "a click outside closes it", byClick );
+
+					// --- 7. and it opens where it was asked to ----------------
+					log << "asked for 120,120 -> opened at " << openedAt.x() << "," << openedAt.y() << "\n";
+					check( "it opens at the point it was given",
+						( openedAt - QPoint( 120, 120 ) ).manhattanLength() < 4 );
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -7077,30 +7169,45 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							allNodes = false;
 					check( "every body targets a NiNode, never a shape", allNodes );
 
-					/* Each target holds exactly the one shape it was made from, and
-					 * that shape is still one of the three we started with -- which
-					 * is what says the wrap moved the shape rather than copying it
-					 * or hanging the body off something unrelated.
+					/* The source meshes are CONSUMED. Converting a mesh to collision
+					 * used to leave the mesh as well, which shipped a rendered copy
+					 * of the shape inside its own hull.
 					 */
-					bool wrapped = targets.size() == 3;
-					bool placed = true;
-					for ( const qint32 target : targets ) {
-						const QVector<qint32> kids = nif->getLinkArray( nif->getBlockIndex( target ), "Children" );
-						if ( kids.size() != 1 || !nif->blockInherits( nif->getBlockIndex( kids.first() ), "BSTriShape" ) ) {
-							wrapped = false;
-							continue;
-						}
-						const QModelIndex shape = nif->getBlockIndex( kids.first() );
-						const int at = names.indexOf( nif->get<QString>( shape, "Name" ) );
-						if ( at < 0 ) { wrapped = false; continue; }
-						// the node carries the transform now, so the shape must not
-						if ( Transform( nif, shape ).translation.length() > 1.0e-4f )
-							placed = false;
-						if ( ( worldOf( kids.first() ).translation - worldWas.at( at ) ).length() > 1.0e-3f )
-							placed = false;
+					int survivors = 0;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QModelIndex block = nif->getBlockIndex( b );
+						if ( nif->blockInherits( block, "BSTriShape" )
+							&& names.contains( nif->get<QString>( block, "Name" ) ) )
+							survivors++;
 					}
-					check( "each new node holds exactly the shape it was made from", wrapped );
-					check( "wrapping left every shape where it was in the world", placed );
+					log << "source meshes still in the file: " << survivors << "\n";
+					check( "the meshes that became collision are gone", survivors == 0 );
+
+					/* Each body's node is the shape it replaced: named after it and
+					 * standing where it stood. The position is the check that the
+					 * transform MOVED rather than being copied or dropped -- a node
+					 * left at the origin passes every structural check above and puts
+					 * the collision somewhere the mesh never was.
+					 */
+					bool named = targets.size() == 3;
+					bool placed = true;
+					int dangling = 0;
+					for ( const qint32 target : targets ) {
+						const QModelIndex node = nif->getBlockIndex( target );
+						const int at = names.indexOf( nif->get<QString>( node, "Name" ) );
+						if ( at < 0 ) { named = false; continue; }
+						if ( ( worldOf( target ).translation - worldWas.at( at ) ).length() > 1.0e-3f )
+							placed = false;
+						// removing a block blanks the links to it and leaves the array
+						// as long as it was; the emptied entry has to go with it
+						for ( const qint32 child : nif->getLinkArray( node, "Children" ) )
+							if ( !nif->isValidBlockNumber( child ) )
+								dangling++;
+					}
+					check( "each node is named for the shape it replaced", named );
+					check( "...and stands where that shape stood", placed );
+					log << "dangling child links left behind: " << dangling << "\n";
+					check( "the consumed mesh leaves no dangling child link", dangling == 0 );
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -17955,6 +18062,8 @@ void NifSkope::contextMenu( const QPoint & pos )
 	QAction * searchRow = nullptr;
 	if ( sender() == list ) {
 		searchRow = new QAction( tr( "Search…\tCtrl+Shift+P" ), &contextBook );
+		// so the palette does not list the row that opens it
+		searchRow->setObjectName( QStringLiteral( WW_PALETTE_SEARCH_ROW ) );
 		searchRow->setToolTip( tr( "Find any spell or action by name, including the ones "
 			"that do not apply here" ) );
 		QAction * first = contextBook.actions().value( 0 );
@@ -17977,7 +18086,8 @@ void NifSkope::contextMenu( const QPoint & pos )
 			const QString what = bn >= 0
 				? QStringLiteral( "[%1] %2" ).arg( bn ).arg( nif->itemName( nif->getBlockIndex( bn ) ) )
 				: QString();
-			if ( QAction * run = wwSpellPalette( this, contextBook, what ) )
+			// p, so it opens where the menu it replaces stood
+			if ( QAction * run = wwSpellPalette( this, contextBook, what, p ) )
 				run->trigger();
 		}
 	}
