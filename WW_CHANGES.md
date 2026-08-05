@@ -1,5 +1,85 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05h — The number fields were the wrong species, and four more
+
+bungo spotted it from a screenshot and asked me to guess: **mass, friction,
+restitution, both dampings and both max velocities were plain
+`QDoubleSpinBox`es.** Qt stepper arrows, no drag — six inches above the
+*identical seven fields* in the body editor, which do get `wwMakeScrubField`
+(`collisiontools.cpp:2795`). The same quantity was two different species of
+control depending on which half of the panel you were in. There is one number
+field in this fork and I did not use it.
+
+That is the landmine the handoff names by name: the scrub gesture comes from one
+place, and bypassing it is how the five private copies that got deleted came to
+exist.
+
+### And the "Invalid (0)" it exposed
+
+Motion, Quality and Solver deactivation all read *Invalid (0)*. Zero is the
+`INVALID` member of all three tables — `MO_SYS_INVALID`, `MO_QUAL_INVALID`,
+`SOLVER_DEACTIVATION_INVALID` — so it is never something anyone picked. It is
+what the previous build wrote when it read the create combos before they had any
+rows in them, and it is **sitting in the settings of anyone who ran it**. A
+stored zero for these three is now treated as unset and the preset's value used,
+so the residue heals itself rather than needing the user to know about it.
+
+### Searchable drop-downs
+
+Collision layer is 57 rows and the material list is longer; picking from either
+by scrolling is the slow way to do something you already know the name of.
+Layer, Preset and Material now open a drop-down with a **search box at the top**.
+
+Qt's own answer is an editable combo with a completer, which was tried here and
+removed for good reasons — no drop-down arrow under this stylesheet, a clear
+button on a field with no empty state, and grey placeholder text where the
+current value should be whenever an edit matched nothing. A search box *inside*
+the drop-down leaves the closed field alone.
+
+Material gets a third element between the two: **search box, then "＋ Add a
+custom material…", then the vanilla list.** Naming a new one is a thing you do
+while looking at the list and finding it is not in there. Leaving the value blank
+hashes the name the way the Bethesda exporter does, so a material named here and
+the same name in a BGSM come out identical.
+
+### One column, full names
+
+Two columns fitted more on screen and made every row a guess about which label
+owned which field — and it forced the abbreviations, so "Max ang. vel." sat
+beside "Solver deact." and neither was a phrase anyone says. One field per row,
+whole words: *Motion system*, *Quality type*, *Solver deactivation*, *Linear
+damping*, *Maximum angular velocity*. The shape buttons stay a row, and now
+carry a **Collision Shape** heading.
+
+### Measured
+
+Five new checks in `collision_panel.sh`, 24 total:
+
+```
+number fields left as plain spin boxes: 0
+  ok   the numbers are scrub fields, like every other number
+create enums sitting on INVALID: 0
+  ok   motion is a real motion type, not Invalid (0)
+  ok   the shape row is labelled
+settings grid columns: 2
+  ok   the settings are one per row, not two columns
+combos with a search box: 3
+  ok   layer, preset and material are searchable
+```
+
+`wwMakeScrubField` stamps `wwScrubbed` on what it converts, which is what makes
+"is this the right kind of field" countable rather than only visible — the
+original mistake was invisible to every assertion in the file and took a human
+looking at a screenshot.
+
+`WwSearchCombo` carries a `wwSearchable` property for the same reason: this file
+has no moc pass, so the class declares no `Q_OBJECT` and `metaObject()` still
+reports `QComboBox`. The first version of that check asked `inherits()` and
+counted zero on a working build.
+
+`collision_undo` (12), `collision_compiled_edit` (7), `collision_per_shape`
+(2+8+8).
+
 ## 2026-08-05g — The create popup authors the whole body
 
 Three asks: type a material as well as pick one, put the rest of the collision

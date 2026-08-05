@@ -7506,6 +7506,54 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "Optimize Source Mesh is not a separate button",
 						popup->findChildren<QPushButton *>().size() == 1 );	// just Create
 
+					/* Every number is the fork's scrub field.
+					 * wwMakeScrubField stamps "wwScrubbed" on what it converts,
+					 * so a field that was left as a plain spin box — Qt stepper
+					 * arrows, no drag — is countable rather than only visible.
+					 */
+					int plain = 0;
+					for ( QDoubleSpinBox * s : popup->findChildren<QDoubleSpinBox *>() )
+						if ( !s->property( "wwScrubbed" ).toBool() )
+							plain++;
+					log << "number fields left as plain spin boxes: " << plain << "\n";
+					check( "the numbers are scrub fields, like every other number",
+						plain == 0 );
+
+					/* The three enums that came back Invalid (0).
+					 * Zero is the INVALID member of all three tables, so it can
+					 * only have come from a read of an empty combo — it is never
+					 * something anyone picked.
+					 */
+					int invalidEnums = 0;
+					for ( const char * named : { "CollisionCreateMotion" } )
+						if ( auto * c = popup->findChild<QComboBox *>( QLatin1String( named ) ) )
+							if ( c->currentData().toUInt() == 0 )
+								invalidEnums++;
+					log << "create enums sitting on INVALID: " << invalidEnums << "\n";
+					check( "motion is a real motion type, not Invalid (0)", invalidEnums == 0 );
+
+					// the heading over the shape row, and one column not two
+					bool heading = false;
+					for ( QLabel * l : popup->findChildren<QLabel *>() )
+						if ( l->text() == QLatin1String( "Collision Shape" ) )
+							heading = true;
+					check( "the shape row is labelled", heading );
+					if ( auto * grid = qobject_cast<QGridLayout *>(
+							popup->findChildren<QGridLayout *>().value( 0 ) ) ) {
+						log << "settings grid columns: " << grid->columnCount() << "\n";
+						check( "the settings are one per row, not two columns",
+							grid->columnCount() == 2 );
+					}
+
+					// searchable: layer, preset and material open a popup with a
+					// filter box rather than a bare list
+					int searchable = 0;
+					for ( QComboBox * c : popup->findChildren<QComboBox *>() )
+						if ( c->property( "wwSearchable" ).toBool() )
+							searchable++;
+					log << "combos with a search box: " << searchable << "\n";
+					check( "layer, preset and material are searchable", searchable >= 3 );
+
 					/* Picking a shape has to WRITE it. The spells read
 					 * CollisionManager/Create/Shape, so a popup that only ticked
 					 * its own button would look right and make the wrong shape.

@@ -355,6 +355,177 @@ public:
  * Move field does. Retiring it restores them.
  */
 
+/*! A drop-down with a search box at the top.
+ *
+ *  The collision layer list is 57 rows and the material list is longer; picking
+ *  from either by scrolling is the slow way to do a thing you already know the
+ *  name of. Qt's own answer is an editable combo with a completer, which was
+ *  tried here and removed: it drew no drop-down arrow under this stylesheet, put
+ *  a clear button on a field with no empty state, and showed grey placeholder
+ *  text where the current value should be whenever an edit did not match. A
+ *  search box that lives INSIDE the drop-down leaves the closed field alone.
+ *
+ *  \a extraRow is an optional action under the search box, above the list —
+ *  "add a custom material", which is a thing you do while looking at the list
+ *  and finding it is not in there.
+ *
+ *  No Q_OBJECT: this file has no moc pass, so the callback is a std::function
+ *  rather than a signal, and showPopup/hidePopup are plain virtual overrides.
+ */
+class WwSearchCombo final : public QComboBox
+{
+public:
+	WwSearchCombo( QWidget * parent, const QString & hint )
+		: QComboBox( parent ), placeholder( hint )
+	{
+		// no Q_OBJECT in this file, so metaObject() still says QComboBox and
+		// inherits() cannot see this class. A dynamic property is what anything
+		// outside — the harness, a future restyle pass — can recognise it by.
+		setProperty( "wwSearchable", true );
+	}
+
+	void setExtraRow( const QString & text, const std::function<void()> & run )
+	{
+		extraText = text;
+		extraRun = run;
+	}
+
+	void showPopup() override
+	{
+		build();
+		list->clear();
+		for ( int row = 0; row < count(); row++ ) {
+			auto * item = new QListWidgetItem( itemText( row ), list );
+			item->setData( Qt::UserRole, row );
+			item->setToolTip( itemData( row, Qt::ToolTipRole ).toString() );
+		}
+		find->clear();
+		list->setCurrentRow( std::max( 0, currentIndex() ) );
+
+		QRect where( mapToGlobal( QPoint( 0, height() ) ), QSize( std::max( width(), 260 ), 320 ) );
+		const QScreen * screen = QGuiApplication::screenAt( where.topLeft() );
+		if ( !screen ) screen = QGuiApplication::primaryScreen();
+		if ( screen ) {
+			const QRect fits = screen->availableGeometry();
+			if ( where.bottom() > fits.bottom() )
+				where.moveTop( mapToGlobal( QPoint() ).y() - where.height() );
+			where.moveLeft( std::clamp( where.left(), fits.left(), fits.right() - where.width() ) );
+			where.moveTop( std::clamp( where.top(), fits.top(), fits.bottom() - where.height() ) );
+		}
+		pop->setGeometry( where );
+		pop->show();
+		find->setFocus();
+	}
+
+	void hidePopup() override
+	{
+		if ( pop )
+			pop->hide();
+		QComboBox::hidePopup();
+	}
+
+protected:
+	bool eventFilter( QObject * watched, QEvent * event ) override
+	{
+		if ( watched == pop && event->type() == QEvent::MouseButtonPress ) {
+			const QPoint at = static_cast<QMouseEvent *>( event )->globalPosition().toPoint();
+			if ( !pop->frameGeometry().contains( at ) ) {
+				pop->hide();
+				return true;
+			}
+		}
+		if ( watched == find && event->type() == QEvent::KeyPress ) {
+			auto * key = static_cast<QKeyEvent *>( event );
+			switch ( key->key() ) {
+			case Qt::Key_Escape:
+				pop->hide();
+				return true;
+			case Qt::Key_Up:
+			case Qt::Key_Down:
+			case Qt::Key_PageUp:
+			case Qt::Key_PageDown:
+				// arrows belong to the list even while the box has focus
+				QCoreApplication::sendEvent( list, key );
+				return true;
+			case Qt::Key_Return:
+			case Qt::Key_Enter:
+				choose( list->currentItem() );
+				return true;
+			default:
+				break;
+			}
+		}
+		return QComboBox::eventFilter( watched, event );
+	}
+
+private:
+	void choose( QListWidgetItem * item )
+	{
+		if ( !item || item->isHidden() )
+			return;
+		setCurrentIndex( item->data( Qt::UserRole ).toInt() );
+		pop->hide();
+	}
+
+	void build()
+	{
+		if ( pop )
+			return;
+		pop = new QFrame( this, Qt::Popup );
+		pop->setFrameShape( QFrame::StyledPanel );
+		pop->setStyleSheet( QStringLiteral(
+			"QFrame { background:%1; border:1px solid %2; }"
+			"QListWidget { background:%1; color:%3; border:none; }"
+			"QListWidget::item:selected { background:%4; color:%5; }"
+			"QLineEdit { background:%6; color:%3; border:none; border-radius:3px; padding:3px 6px; }"
+			"QPushButton { background:%6; color:%3; border:none; border-radius:3px; padding:4px; text-align:left; }"
+			"QPushButton:hover { background:%4; }" )
+			.arg( wwSkinColor( "bgCard" ), wwSkinColor( "borderStrong" ), wwSkinColor( "text" ),
+				  wwSkinColor( "bgBtnHover" ), wwSkinColor( "textBright" ), wwSkinColor( "bgInput" ) ) );
+		auto * lay = new QVBoxLayout( pop );
+		lay->setContentsMargins( 6, 6, 6, 6 );
+		lay->setSpacing( 4 );
+		find = new QLineEdit( pop );
+		find->setPlaceholderText( placeholder );
+		find->setClearButtonEnabled( true );
+		lay->addWidget( find );
+		if ( !extraText.isEmpty() ) {
+			auto * extra = new QPushButton( extraText, pop );
+			lay->addWidget( extra );
+			QObject::connect( extra, &QPushButton::clicked, pop, [this]() {
+				pop->hide();
+				if ( extraRun ) extraRun();
+			} );
+		}
+		list = new QListWidget( pop );
+		list->setUniformItemSizes( true );
+		lay->addWidget( list, 1 );
+		QObject::connect( find, &QLineEdit::textChanged, pop, [this]( const QString & text ) {
+			int firstShown = -1;
+			for ( int i = 0; i < list->count(); i++ ) {
+				const bool hit = text.isEmpty()
+					|| list->item( i )->text().contains( text, Qt::CaseInsensitive );
+				list->item( i )->setHidden( !hit );
+				if ( hit && firstShown < 0 )
+					firstShown = i;
+			}
+			// so Return runs the top hit rather than whatever was selected before
+			if ( firstShown >= 0 )
+				list->setCurrentRow( firstShown );
+		} );
+		QObject::connect( list, &QListWidget::itemClicked, pop,
+			[this]( QListWidgetItem * item ) { choose( item ); } );
+		pop->installEventFilter( this );
+		find->installEventFilter( this );
+	}
+
+	QString placeholder, extraText;
+	std::function<void()> extraRun;
+	QFrame * pop = nullptr;
+	QLineEdit * find = nullptr;
+	QListWidget * list = nullptr;
+};
+
 class CollisionManagerPanel final : public QWidget
 {
 public:
@@ -763,10 +934,20 @@ private:
 		QSignalBlocker b0( createLayerCombo ), b1( createMotion ), b2( createQuality ),
 			b3( createSolver ), b4( createMass ), b5( createFriction ), b6( createRestitution ),
 			b7( createLinDamp ), b8( createAngDamp ), b9( createMaxLinVel ), b10( createMaxAngVel );
-		selectComboValue( createLayerCombo, stored( QStringLiteral( "Layer" ) ).toUInt() );
-		selectComboValue( createMotion, stored( QStringLiteral( "MotionSystem" ) ).toUInt() );
-		selectComboValue( createQuality, stored( QStringLiteral( "QualityType" ) ).toUInt() );
-		selectComboValue( createSolver, stored( QStringLiteral( "SolverDeactivation" ) ).toUInt() );
+		/* Zero is INVALID in all three of these tables — MO_SYS_INVALID,
+		 * MO_QUAL_INVALID, SOLVER_DEACTIVATION_INVALID — so it is never something
+		 * anyone chose. It is what got written by the build whose create combos
+		 * were read before they had any rows in them, and it is sitting in the
+		 * settings of everyone who ran it. Treat it as unset and take the preset's.
+		 */
+		auto enumValue = [&]( const QString & key ) {
+			const quint32 v = stored( key ).toUInt();
+			return v ? v : d.value( key ).toUInt();
+		};
+		selectComboValue( createLayerCombo, enumValue( QStringLiteral( "Layer" ) ) );
+		selectComboValue( createMotion, enumValue( QStringLiteral( "MotionSystem" ) ) );
+		selectComboValue( createQuality, enumValue( QStringLiteral( "QualityType" ) ) );
+		selectComboValue( createSolver, enumValue( QStringLiteral( "SolverDeactivation" ) ) );
 		createMass->setValue( stored( QStringLiteral( "Mass" ) ).toDouble() );
 		createFriction->setValue( stored( QStringLiteral( "Friction" ) ).toDouble() );
 		createRestitution->setValue( stored( QStringLiteral( "Restitution" ) ).toDouble() );
@@ -2282,7 +2463,7 @@ private:
 		 * — and rebuilding either as a bare list would be duplicating the loader
 		 * above it.
 		 */
-		auto * preset = new QComboBox( createGroup );
+		auto * preset = new WwSearchCombo( createGroup, tr( "Search presets" ) );
 		// both are reparented into the popup below and shown there
 		// Stable data IDs preserve settings written by the original three-item
 		// list while allowing the authoring-oriented display order below.
@@ -2298,7 +2479,7 @@ private:
 		 * with no layout cell, Qt put it at 0,0 of the group, on top of the
 		 * group's own title.
 		 */
-		auto * materialEdit = new QComboBox( createGroup );
+		auto * materialEdit = new WwSearchCombo( createGroup, tr( "Search materials" ) );
 		materialEdit->setEditable( true );
 		materialEdit->setInsertPolicy( QComboBox::NoInsert );
 		materialEdit->lineEdit()->setPlaceholderText( tr( "Search material name or enter a custom name/CRC" ) );
@@ -2388,6 +2569,9 @@ private:
 		popupLayout->setContentsMargins( 10, 10, 10, 10 );
 		popupLayout->setSpacing( 6 );
 
+		auto * shapeHeading = new QLabel( tr( "Collision Shape" ), createPopup );
+		shapeHeading->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
+		popupLayout->addWidget( shapeHeading );
 		auto * shapeRow = new QHBoxLayout;
 		shapeRow->setSpacing( 4 );
 		auto * shapeGroup = new QButtonGroup( createPopup );
@@ -2423,7 +2607,6 @@ private:
 		popupForm->setHorizontalSpacing( 8 );
 		popupForm->setVerticalSpacing( 4 );
 		popupForm->setColumnStretch( 1, 1 );
-		popupForm->setColumnStretch( 3, 1 );
 		auto * convexMethod = new QComboBox( createPopup );
 		convexMethod->addItems( { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } );
 		convexMethod->setCurrentIndex( createSettings.value( "CollisionManager/Create/ConvexMethod", 0 ).toInt() );
@@ -2449,13 +2632,56 @@ private:
 		preset->show();
 		materialEdit->setParent( createPopup );
 		materialEdit->show();
-		/* Pick one or type one. FO4 takes any material name — collisionCreateMaterial
-		 * hashes an unknown one the way the Bethesda exporter does (lowercase CRC32)
-		 * and remembers it — so the field has to accept text, not only a row.
+		/* Search box, then "add a custom one", then the vanilla list.
+		 *
+		 * FO4 takes any material name — collisionCreateMaterial hashes an unknown
+		 * one the way the Bethesda exporter does, lowercase CRC32, and remembers
+		 * it — so naming a new one has to be reachable. It was an editable combo,
+		 * which cost the drop-down its arrow, put a clear button on a field with
+		 * no empty state, and left grey placeholder text where the current
+		 * material should be whenever the typed text matched nothing. Adding one
+		 * is a thing you do while looking at the list and finding it is not in
+		 * there, so it is a row in the list's own popup.
 		 */
-		materialEdit->setEditable( true );
-		materialEdit->setInsertPolicy( QComboBox::NoInsert );
-		materialEdit->lineEdit()->setPlaceholderText( tr( "Pick a material, or type a name or 0x value" ) );
+		materialEdit->setExtraRow( tr( "+   Add a custom material…" ), [this, materialEdit]() {
+			bool ok = false;
+			const QString name = QInputDialog::getText( this, tr( "Add Custom Collision Material" ),
+				tr( "Material name:" ), QLineEdit::Normal, QString(), &ok ).trimmed();
+			if ( !ok || name.isEmpty() )
+				return;
+			const QString valueText = QInputDialog::getText( this, tr( "Add Custom Collision Material" ),
+				tr( "Numeric value (decimal or 0x hex), or blank to hash the name:" ),
+				QLineEdit::Normal, QString(), &ok ).trimmed();
+			if ( !ok )
+				return;
+			quint32 value = 0;
+			if ( valueText.isEmpty() ) {
+				// the exporter's own rule, so a name typed here and the same name
+				// in a BGSM come out as the same material
+				for ( QChar c : name )
+					hashFunctionCRC32( value, static_cast<unsigned char>( c.toLower().unicode() ) );
+			} else {
+				bool numeric = false;
+				value = valueText.toUInt( &numeric, 0 );
+				if ( !numeric ) {
+					QMessageBox::warning( this, tr( "Custom Collision Material" ),
+						tr( "'%1' is not a valid 32-bit material value." ).arg( valueText ) );
+					return;
+				}
+			}
+			QSettings settings;
+			QVariantMap custom = settings.value( "CollisionManager/CustomMaterials" ).toMap();
+			custom.insert( name, value );
+			settings.setValue( "CollisionManager/CustomMaterials", custom );
+			const QString stored = QStringLiteral( "0x%1" ).arg( value, 8, 16, QLatin1Char( '0' ) );
+			int row = materialEdit->findData( stored );
+			if ( row < 0 ) {
+				materialEdit->addItem( name, stored );
+				row = materialEdit->count() - 1;
+				materialEdit->setItemData( row, value, Qt::UserRole + 1 );
+			}
+			materialEdit->setCurrentIndex( row );
+		} );
 		auto * replace = new QCheckBox( tr( "Replace existing shape" ), createPopup );
 		replace->setChecked( createSettings.value( "CollisionManager/Create/Replace", true ).toBool() );
 		replace->setToolTip( tr( "Off combines the new shape with what the body already has" ) );
@@ -2467,7 +2693,8 @@ private:
 		 * in the editor below. These are the same eleven fields that editor shows;
 		 * the preset now fills them in rather than being the only thing consulted.
 		 */
-		createLayerCombo = new QComboBox( createPopup );
+		auto * createLayerSearch = new WwSearchCombo( createPopup, tr( "Search collision layers" ) );
+		createLayerCombo = createLayerSearch;
 		createLayerCombo->setObjectName( QStringLiteral( "CollisionCreateLayer" ) );
 		createMotion = new QComboBox( createPopup );
 		createMotion->setObjectName( QStringLiteral( "CollisionCreateMotion" ) );
@@ -2488,42 +2715,52 @@ private:
 		createMaxLinVel = spin( 0.0, 1000000.0, 2 );
 		createMaxAngVel = spin( 0.0, 1000000.0, 2 );
 
-		for ( QComboBox * c : { convexMethod, preset, materialEdit, createLayerCombo,
+		/* The Blender scrub field, like every other number in the program.
+		 *
+		 * These were plain QDoubleSpinBoxes with Qt's stepper arrows, six inches
+		 * above the identical seven fields in the body editor — which do get
+		 * wwMakeScrubField — so the same quantity was two different species of
+		 * control depending on which half of the panel you were in. There is one
+		 * number field in this fork and this is it.
+		 */
+		for ( QDoubleSpinBox * s : { createMass, createFriction, createRestitution,
+				createLinDamp, createAngDamp, createMaxLinVel, createMaxAngVel } )
+			wwMakeScrubField( s );
+
+		for ( QComboBox * c : QList<QComboBox *>{ convexMethod, preset, materialEdit, createLayerCombo,
 				createMotion, createQuality, createSolver } )
 			wwMatchFieldStyle( c );
 
+		/* One column, and the labels say the whole word.
+		 *
+		 * Two columns fitted more on screen and made every row a guess about
+		 * which label owned which field — and it forced the abbreviations, so
+		 * "Max ang. vel." sat beside "Solver deact." and neither was a phrase
+		 * anyone says. A popup has the height to spend.
+		 */
 		int row = 0;
+		auto addRow = [&]( const QString & label, QWidget * field ) {
+			popupForm->addWidget( new QLabel( label, createPopup ), row, 0 );
+			popupForm->addWidget( field, row++, 1 );
+		};
 		popupForm->addWidget( convexMethodLabel, row, 0 );
-		popupForm->addWidget( convexMethod, row, 1 );
-		popupForm->addWidget( ratioLabel, row, 2 );
-		popupForm->addWidget( ratio, row++, 3 );
-		popupForm->addWidget( new QLabel( tr( "Preset" ), createPopup ), row, 0 );
-		popupForm->addWidget( preset, row, 1 );
-		popupForm->addWidget( new QLabel( tr( "Material" ), createPopup ), row, 2 );
-		popupForm->addWidget( materialEdit, row++, 3 );
-		popupForm->addWidget( new QLabel( tr( "Collision layer" ), createPopup ), row, 0 );
-		popupForm->addWidget( createLayerCombo, row, 1 );
-		popupForm->addWidget( new QLabel( tr( "Motion" ), createPopup ), row, 2 );
-		popupForm->addWidget( createMotion, row++, 3 );
-		popupForm->addWidget( new QLabel( tr( "Mass" ), createPopup ), row, 0 );
-		popupForm->addWidget( createMass, row, 1 );
-		popupForm->addWidget( new QLabel( tr( "Quality" ), createPopup ), row, 2 );
-		popupForm->addWidget( createQuality, row++, 3 );
-		popupForm->addWidget( new QLabel( tr( "Friction" ), createPopup ), row, 0 );
-		popupForm->addWidget( createFriction, row, 1 );
-		popupForm->addWidget( new QLabel( tr( "Solver deact." ), createPopup ), row, 2 );
-		popupForm->addWidget( createSolver, row++, 3 );
-		popupForm->addWidget( new QLabel( tr( "Restitution" ), createPopup ), row, 0 );
-		popupForm->addWidget( createRestitution, row, 1 );
-		popupForm->addWidget( new QLabel( tr( "Max lin. vel." ), createPopup ), row, 2 );
-		popupForm->addWidget( createMaxLinVel, row++, 3 );
-		popupForm->addWidget( new QLabel( tr( "Lin. damping" ), createPopup ), row, 0 );
-		popupForm->addWidget( createLinDamp, row, 1 );
-		popupForm->addWidget( new QLabel( tr( "Max ang. vel." ), createPopup ), row, 2 );
-		popupForm->addWidget( createMaxAngVel, row++, 3 );
-		popupForm->addWidget( new QLabel( tr( "Ang. damping" ), createPopup ), row, 0 );
-		popupForm->addWidget( createAngDamp, row, 1 );
-		popupForm->addWidget( replace, row++, 2, 1, 2 );
+		popupForm->addWidget( convexMethod, row++, 1 );
+		popupForm->addWidget( ratioLabel, row, 0 );
+		popupForm->addWidget( ratio, row++, 1 );
+		addRow( tr( "Preset" ), preset );
+		addRow( tr( "Material" ), materialEdit );
+		addRow( tr( "Collision layer" ), createLayerCombo );
+		addRow( tr( "Motion system" ), createMotion );
+		addRow( tr( "Quality type" ), createQuality );
+		addRow( tr( "Solver deactivation" ), createSolver );
+		addRow( tr( "Mass" ), createMass );
+		addRow( tr( "Friction" ), createFriction );
+		addRow( tr( "Restitution" ), createRestitution );
+		addRow( tr( "Linear damping" ), createLinDamp );
+		addRow( tr( "Angular damping" ), createAngDamp );
+		addRow( tr( "Maximum linear velocity" ), createMaxLinVel );
+		addRow( tr( "Maximum angular velocity" ), createMaxAngVel );
+		popupForm->addWidget( replace, row++, 0, 1, 2 );
 		popupLayout->addLayout( popupForm );
 
 		auto * popupButtons = new QHBoxLayout;
@@ -2983,12 +3220,13 @@ private:
 				loadCreateFields();
 				saveCreationSettings();
 			} );
-		for ( QComboBox * c : { convexMethod, materialEdit, createLayerCombo, createMotion,
+		for ( QComboBox * c : QList<QComboBox *>{ convexMethod, materialEdit, createLayerCombo, createMotion,
 				createQuality, createSolver } )
 			connect( c, qOverload<int>( &QComboBox::currentIndexChanged ), this,
 				[saveCreationSettings]( int ) { saveCreationSettings(); } );
-		connect( materialEdit, &QComboBox::editTextChanged, this,
-			[saveCreationSettings]( const QString & ) { saveCreationSettings(); } );
+		// no editTextChanged: the field is not editable any more. A custom
+		// material is named through the popup's own "add" row, which appends a
+		// real item and selects it, so currentIndexChanged above carries it.
 		for ( QDoubleSpinBox * s : { createMass, createFriction, createRestitution, createLinDamp,
 				createAngDamp, createMaxLinVel, createMaxAngVel } )
 			connect( s, &QDoubleSpinBox::editingFinished, this,
