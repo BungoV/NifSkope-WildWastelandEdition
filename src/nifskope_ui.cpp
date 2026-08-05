@@ -7449,55 +7449,76 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					dock->show();
 					QApplication::processEvents();
 
-					// --- the creation group is one button ---------------------
-					auto * create = dock->findChild<QToolButton *>( QStringLiteral( "CollisionCreateButton" ) );
-					if ( !create ) { log << "no create button\n"; fails++; checks++; break; }
-					log << "button reads: '" << create->text() << "'\n";
-					check( "the button is the one generic Create Collision",
-						create->text().startsWith( QLatin1String( "Create Collision" ) ) );
-					check( "...and is not a dropdown", create->menu() == nullptr );
-
-					/* The popup opens on click and carries the whole decision at
-					 * once: five shapes and every setting, none of them nested
-					 * behind a submenu.
+					/* --- two buttons, in the order the blocks nest -----------
+					 * The body holds all the physics; a shape holds its material
+					 * and its geometry. One button doing both had to pretend the
+					 * body settings belonged to the shape being made.
 					 */
+					auto * create = dock->findChild<QToolButton *>(
+						QStringLiteral( "CollisionCreateBodyButton" ) );
+					auto * shapeBtn = dock->findChild<QToolButton *>(
+						QStringLiteral( "CollisionCreateShapeButton" ) );
+					if ( !create || !shapeBtn ) { log << "no create buttons\n"; fails++; checks++; break; }
+					log << "buttons: '" << create->text() << "' / '" << shapeBtn->text() << "'\n";
+					check( "there is a Create Collision Body button",
+						create->text().startsWith( QLatin1String( "Create Collision Body" ) ) );
+					check( "...and a Create Collision Shape button",
+						shapeBtn->text().startsWith( QLatin1String( "Create Collision Shape" ) ) );
+					check( "neither is a dropdown",
+						!create->menu() && !shapeBtn->menu() );
+
+					/* The shape button is dead until there is a body to give the
+					 * shape to, and the explanation is on the WRAPPER — a disabled
+					 * widget gets no mouse events, so a tooltip on the button
+					 * itself would never be shown.
+					 */
+					log << "shape button enabled with no body: " << shapeBtn->isEnabled() << "\n";
+					check( "Create Collision Shape is disabled without a body",
+						!shapeBtn->isEnabled() );
+					QWidget * shapeHost = shapeBtn->parentWidget();
+					log << "wrapper tooltip: '" << ( shapeHost ? shapeHost->toolTip() : QString() ) << "'\n";
+					check( "...and something enabled carries the reason",
+						shapeHost && shapeHost->isEnabled()
+						&& shapeHost->toolTip().contains( QLatin1String( "body" ) ) );
+					check( "...which is not on the disabled button, where it would never show",
+						shapeBtn->toolTip().isEmpty() );
+
 					auto * popup = skope->findChild<QFrame *>( QStringLiteral( "CollisionCreatePopup" ) );
-					if ( !popup ) { log << "no create popup\n"; fails++; checks++; break; }
+					auto * shapePop = skope->findChild<QFrame *>( QStringLiteral( "CollisionShapePopup" ) );
+					if ( !popup || !shapePop ) { log << "no popups\n"; fails++; checks++; break; }
 					create->click();
 					QApplication::processEvents();
-					check( "clicking the button opens the popup", popup->isVisible() );
+					check( "clicking the body button opens the body popup", popup->isVisible() );
 
-					const QList<QToolButton *> shapeButtons = popup->findChildren<QToolButton *>();
+					const QList<QToolButton *> shapeButtons = shapePop->findChildren<QToolButton *>();
 					int shapes = 0;
 					QStringList names;
 					for ( QToolButton * b : shapeButtons )
 						if ( b->isCheckable() ) { shapes++; names << b->text(); }
-					log << "popup shapes: " << names.join( QLatin1String( " | " ) ) << "\n";
-					check( "all five shapes are in the popup", shapes == 5 );
-					const int combos = popup->findChildren<QComboBox *>().size();
-					const int ticks = popup->findChildren<QCheckBox *>().size();
-					const int numbers = popup->findChildren<QAbstractSpinBox *>().size();
-					log << "popup settings: " << combos << " combo(s), " << ticks
-						<< " tick(s), " << numbers << " number(s)\n";
-					/* Method, preset, material, layer, motion, quality, solver;
-					 * Replace; and mass, friction, restitution, two dampings, two
-					 * max velocities and the triangle percentage.
-					 */
-					/* Preset, material, layer, motion, quality, solver; Replace;
-					 * and the seven body numbers. Convex method and the triangle
-					 * percentage are NOT here — they belong to the live preview
-					 * that Convex and Mesh open, which is where the geometry they
-					 * change is actually on screen.
-					 */
-					check( "and the settings are visible beside them, not nested",
-						combos == 6 && ticks == 1 && numbers == 7 );
+					log << "shape popup shapes: " << names.join( QLatin1String( " | " ) ) << "\n";
+					check( "all five shapes are in the shape popup", shapes == 5 );
 
-					/* The body settings the preset used to be the ONLY way to
-					 * reach. Authoring a body with a different mass or layer meant
-					 * creating it wrong and correcting it in the editor below.
+					/* THE SPLIT, MEASURED. Everything a shape holds is in the
+					 * shape popup and nothing else is; everything a body holds is
+					 * in the body popup. bhkSphereRepShape carries Material and
+					 * geometry, bhkRigidBodyCInfo carries the physics — so a
+					 * material found on the body side, or a mass on the shape
+					 * side, is the split having quietly come undone.
 					 */
-					check( "the body settings are on the create side too",
-						popup->findChildren<QComboBox *>().size() > 3 );
+					const int bodyCombos = popup->findChildren<QComboBox *>().size();
+					const int bodyNumbers = popup->findChildren<QAbstractSpinBox *>().size();
+					const int shapeCombos = shapePop->findChildren<QComboBox *>().size();
+					const int shapeNumbers = shapePop->findChildren<QAbstractSpinBox *>().size();
+					log << "body popup: " << bodyCombos << " combo(s), " << bodyNumbers
+						<< " number(s); shape popup: " << shapeCombos << " combo(s), "
+						<< shapeNumbers << " number(s)\n";
+					// preset, layer, motion, quality, solver, deactivator; and mass,
+					// friction, restitution, two dampings, two velocities, penetration
+					check( "the body popup holds the physics", bodyCombos == 6 && bodyNumbers == 8 );
+					// material, and Replace; no numbers at all
+					check( "the shape popup holds only what a shape holds",
+						shapeCombos == 1 && shapeNumbers == 0
+						&& shapePop->findChildren<QCheckBox *>().size() == 1 );
 
 					/* --- the material drop-down ------------------------------
 					 * Search box, an "add a custom one" row, and the vanilla
@@ -7507,7 +7528,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * which was itself the bug, because a click on an editable
 					 * combo puts a cursor in the text and opens nothing at all.
 					 */
-					auto * mat = popup->findChild<QComboBox *>(
+					auto * mat = shapePop->findChild<QComboBox *>(
 						QStringLiteral( "CollisionCreateMaterial" ) );
 					if ( !mat ) { log << "no material combo\n"; fails++; checks++; break; }
 					check( "the material field is not a text box", !mat->isEditable() );
@@ -7612,12 +7633,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "create enums sitting on INVALID: " << invalidEnums << "\n";
 					check( "motion is a real motion type, not Invalid (0)", invalidEnums == 0 );
 
-					// the heading over the shape row, and one column not two
-					bool heading = false;
-					for ( QLabel * l : popup->findChildren<QLabel *>() )
+					// each popup says what it makes, and one column not two
+					bool shapeHeading = false, bodyHeading = false;
+					for ( QLabel * l : shapePop->findChildren<QLabel *>() )
 						if ( l->text() == QLatin1String( "Collision Shape" ) )
-							heading = true;
-					check( "the shape row is labelled", heading );
+							shapeHeading = true;
+					for ( QLabel * l : popup->findChildren<QLabel *>() )
+						if ( l->text() == QLatin1String( "Collision Body" ) )
+							bodyHeading = true;
+					check( "both popups are labelled for what they make",
+						shapeHeading && bodyHeading );
 					if ( auto * grid = qobject_cast<QGridLayout *>(
 							popup->findChildren<QGridLayout *>().value( 0 ) ) ) {
 						log << "settings grid columns: " << grid->columnCount() << "\n";
@@ -7625,10 +7650,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							grid->columnCount() == 2 );
 					}
 
-					// searchable: layer, preset and material open a popup with a
-					// filter box rather than a bare list
+					// searchable: layer and preset on the body, material on the shape
 					int searchable = 0;
-					for ( QComboBox * c : popup->findChildren<QComboBox *>() )
+					for ( QComboBox * c : popup->findChildren<QComboBox *>()
+							+ shapePop->findChildren<QComboBox *>() )
 						if ( c->property( "wwSearchable" ).toBool() )
 							searchable++;
 					log << "combos with a search box: " << searchable << "\n";

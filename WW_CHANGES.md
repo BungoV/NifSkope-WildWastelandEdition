@@ -1,5 +1,95 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05m — Body first, then shapes
+
+Four asks, and the last one is a restructure that follows the block layout
+rather than fighting it.
+
+### Create Collision Body, then Create Collision Shape
+
+Only **Material** is genuinely per-shape. `bhkSphereRepShape` carries Material
+and Radius; the box, sphere, capsule and convex blocks add their geometry and
+nothing else. Every physics value —
+
+> Havok Filter (layer), Inertia Tensor, Center, Mass, Linear/Angular Damping,
+> Friction, Restitution, Max Linear/Angular Velocity, Motion System, Deactivator
+> Type, Solver Deactivation, Penetration Depth, Quality Type…
+
+— is in `bhkRigidBodyCInfo`, one block up, shared by every shape hung off it.
+
+So one button did two jobs and had to pretend the body settings belonged to the
+shape being made. With **Replace** off, where the new shape joins an existing
+body's `bhkListShape`, they were a straight lie: the values either did nothing
+or silently overwrote that body's own.
+
+Now:
+
+- **Create Collision Body…** — the object, the body, and all the physics. No
+  shape. It appears as a row in the list. Several meshes selected still means
+  one body each, on a node each.
+- **Create Collision Shape…** — the shape type, its Material, and Replace. It
+  joins the body selected in the list.
+
+The shape button is **disabled until there is a body**, and the reason is on a
+wrapper widget rather than the button: a disabled widget receives no mouse
+events, so Qt never delivers it a `ToolTip` event and `setToolTip` on it shows
+nothing — silently, in exactly the case the explanation exists for. Three dead
+ends get three answers: *Create a collision body first*, *Select a collision
+body in the list above*, and *The selected body is compiled — decompile it to
+add shapes*.
+
+The body popup also gains **Deactivator type** and **Allowed penetration**,
+which were editor-only.
+
+### And three smaller ones
+
+- **Compact drop-downs.** Between four rows and twelve, sized to what is in
+  them. They were briefly as tall as the screen allowed — an overreaction to a
+  list that looked short and was short because it was the wrong game's table.
+- **"Prop (dynamic)" → "Prop"**.
+- **Hover highlight** in the drop-downs, distinct from the current row. Needs
+  `setMouseTracking` on the list and its viewport, or `::item:hover` never
+  matches and the row only lights up while dragging — which is not hovering.
+
+### The crash that was not in this code
+
+Every build of the two-button work segfaulted at startup inside
+`NifSkope::restoreUi`. I bisected it for a long time — stubbed the state
+updater, pulled the wrapper out of the layout, instrumented `buildUi` to
+completion, stashed to a clean baseline and back — and every result pointed at
+new widget code.
+
+It was a **poisoned `UI/Window State` in QSettings**. One early crash saved a
+dock layout that `restoreState` then replayed on every subsequent launch, of any
+build. Clearing that one value made the same binary that had "always crashed"
+pass 35 checks unchanged.
+
+Worth recording as a shape of bug: *a crash that survives reverting the change
+that appears to cause it is not caused by that change*. The baseline appearing
+to run clean was luck about when the bad value was written, and I trusted it.
+
+### Measured
+
+`collision_panel.sh`, 35 checks:
+
+```
+  ok   there is a Create Collision Body button
+  ok   ...and a Create Collision Shape button
+  ok   Create Collision Shape is disabled without a body
+  ok   ...and something enabled carries the reason
+  ok   ...which is not on the disabled button, where it would never show
+  ok   the body popup holds the physics          (6 combos, 8 numbers)
+  ok   the shape popup holds only what a shape holds   (1 combo, 0 numbers)
+  ok   both popups are labelled for what they make
+```
+
+The pair either side of the tooltip is the one worth keeping: the text has to be
+on something **enabled**, and *absent* from the disabled button. A check that
+only asked "is there a tooltip" would pass on the version that shows nothing.
+
+`collision_undo` (12), `collision_compiled_edit` (7), `collision_per_shape`
+(2+8+8).
+
 ## 2026-08-05l — One material table, and it is Fallout 4's
 
 bungo: *"This nifskope is for Fallout 4, the default is Fallout 4, do not show

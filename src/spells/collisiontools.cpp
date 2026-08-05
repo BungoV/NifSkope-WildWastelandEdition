@@ -71,6 +71,10 @@ QModelIndex tlCommitCollisionPreview( NifModel * nif, const QModelIndex & index,
 //! the CollisionManager/Create/ setting each is stored under. One definition, so
 //! the panel that shows them and the code that writes them cannot drift apart.
 QVariantMap tlCollisionPresetDefaults( int preset );
+//! Also havok.cpp: make the collision object and rigid body on a node, no shape.
+QModelIndex tlCreateCollisionBody( NifModel * nif, const QModelIndex & targetNode );
+//! ...and the node such a body belongs on, wrapping the block when it needs one.
+QModelIndex tlCollisionAttachNode( NifModel * nif, const QModelIndex & index, bool ownNode );
 
 /*! Block lookup and shape-chain descent, at file scope.
  *
@@ -407,20 +411,22 @@ public:
 		list->setCurrentRow( std::max( 0, currentIndex() ) );
 		list->scrollToItem( list->currentItem(), QAbstractItemView::PositionAtCenter );
 
-		/* As tall as the screen sensibly allows, not a fixed 320px.
+		/* Sized to what is in it, between four rows and twelve.
 		 *
-		 * Fallout 4 has 157 collision materials. A drop-down that shows fifteen
-		 * of them reads as a drop-down with fifteen entries in it — the scroll
-		 * bar is the only thing saying otherwise, and it is thin and at the edge.
-		 * The list gets whatever the screen has, up to what it actually needs.
+		 * It was briefly as tall as the screen allowed, which was an overreaction
+		 * to a short list that turned out to be the wrong game's table rather
+		 * than a sizing problem. Fifty-seven layers do not need fifty-seven rows
+		 * on screen when there is a search box above them and a scroll bar beside
+		 * them; five presets should not sit in a box built for fifty.
 		 */
 		const QScreen * screen = QGuiApplication::screenAt( mapToGlobal( QPoint() ) );
 		if ( !screen ) screen = QGuiApplication::primaryScreen();
 		const QRect fits = screen ? screen->availableGeometry() : QRect( 0, 0, 1280, 800 );
-		const int wanted = list->sizeHintForRow( 0 ) * std::max( 1, count() ) + 90;
+		const int rowHeight = std::max( 16, list->sizeHintForRow( 0 ) );
+		const int rows = std::clamp( count(), 4, 12 );
 		QRect where( mapToGlobal( QPoint( 0, height() ) ),
 			QSize( std::max( width(), 300 ),
-				std::clamp( wanted, 220, int( fits.height() * 0.8 ) ) ) );
+				std::min( rowHeight * rows + chromeHeight(), int( fits.height() * 0.8 ) ) ) );
 		if ( where.bottom() > fits.bottom() )
 			where.moveTop( mapToGlobal( QPoint() ).y() - where.height() );
 		where.moveLeft( std::clamp( where.left(), fits.left(), fits.right() - where.width() ) );
@@ -472,6 +478,14 @@ protected:
 	}
 
 private:
+	//! Everything in the popup that is not list rows: margins, the search box,
+	//! and the add-a-custom row when there is one.
+	int chromeHeight() const
+	{
+		return 12 + ( find ? find->sizeHint().height() : 24 )
+			+ ( extraText.isEmpty() ? 0 : 30 ) + 8;
+	}
+
 	void choose( QListWidgetItem * item )
 	{
 		if ( !item || item->isHidden() )
@@ -489,6 +503,9 @@ private:
 		pop->setStyleSheet( QStringLiteral(
 			"QFrame { background:%1; border:1px solid %2; }"
 			"QListWidget { background:%1; color:%3; border:none; }"
+			// the row under the cursor lights up, distinct from the current one:
+			// needs setMouseTracking below, or ::item:hover never matches
+			"QListWidget::item:hover { background:%6; color:%5; }"
 			"QListWidget::item:selected { background:%4; color:%5; }"
 			"QLineEdit { background:%6; color:%3; border:none; border-radius:3px; padding:3px 6px; }"
 			"QPushButton { background:%6; color:%3; border:none; border-radius:3px; padding:4px; text-align:left; }"
@@ -512,6 +529,13 @@ private:
 		}
 		list = new QListWidget( pop );
 		list->setUniformItemSizes( true );
+		/* Without this the ::item:hover rule above never matches. An item view
+		 * only gets move events while a button is down unless it is asked to
+		 * track, so the row under the cursor would light up only while dragging
+		 * — which is not hovering.
+		 */
+		list->setMouseTracking( true );
+		list->viewport()->setMouseTracking( true );
 		lay->addWidget( list, 1 );
 		QObject::connect( find, &QLineEdit::textChanged, pop, [this]( const QString & text ) {
 			int firstShown = -1;
@@ -599,8 +623,16 @@ private:
 	QToolButton * primaryCollisionAction = nullptr;
 	QAction * decompileSelectedAction = nullptr;
 	QAction * compileSelectedAction = nullptr;
-	QToolButton * createButton = nullptr;
-	QFrame * createPopup = nullptr;
+	QToolButton * createButton = nullptr;			//!< Create Collision Body
+	QToolButton * createShapeButton = nullptr;		//!< Create Collision Shape
+	//! Wrapper carrying the shape button's tooltip. A disabled widget gets no
+	//! mouse events, so a tooltip on the button itself would never appear —
+	//! which is exactly when the explanation is needed.
+	QWidget * createShapeHost = nullptr;
+	QFrame * createPopup = nullptr;					//!< body settings
+	QFrame * shapePopup = nullptr;					//!< shape type and material
+	QComboBox * createDeactivator = nullptr;
+	QDoubleSpinBox * createPenetration = nullptr;
 	//! The create popup's copy of the body settings. Named like the editor's
 	//! below it because they are the same eleven fields, seeding instead of editing.
 	//! A member, not a buildUi local, because its list is version-specific and
@@ -934,6 +966,12 @@ private:
 			addEnum( createQuality, QStringLiteral( "hkQualityType" ), QStringLiteral( "MO_QUAL_" ) );
 			addEnum( createSolver, QStringLiteral( "hkSolverDeactivation" ),
 				QStringLiteral( "SOLVER_DEACTIVATION_" ) );
+			if ( createDeactivator ) {
+				QSignalBlocker bcd( createDeactivator );
+				createDeactivator->clear();
+				addEnum( createDeactivator, QStringLiteral( "hkDeactivatorType" ),
+					QStringLiteral( "DEACTIVATOR_" ) );
+			}
 		}
 		/* The create-side material list, built here for the same reason.
 		 *
@@ -977,6 +1015,33 @@ private:
 	 *  and the layer written for new collision was 0. Unidentified: the one value
 	 *  the layer repair spell exists to find.
 	 */
+	/*! Create Collision Shape is only reachable once there is a body to give the
+	 *  shape to, and the greyed button has to say which dead end you are at.
+	 *
+	 *  Two different ones with two different answers: no body in the file at all,
+	 *  or bodies exist but none is selected. A single "unavailable" would leave
+	 *  the second case looking like the first.
+	 *
+	 *  The text goes on the WRAPPER. A disabled widget receives no mouse events,
+	 *  so Qt never sends it a ToolTip event and setToolTip on the button itself
+	 *  displays nothing — silently, in exactly the case the explanation is for.
+	 */
+	void updateShapeButtonState()
+	{
+		if ( !createShapeButton || !createShapeHost )
+			return;
+		QTreeWidgetItem * item = tree ? tree->currentItem() : nullptr;
+		const bool anyBody = tree && tree->topLevelItemCount() > 0;
+		const bool compiled = item && item->data( 0, CompiledRole ).toBool();
+		const bool ready = item && !compiled;
+		createShapeButton->setEnabled( ready );
+		createShapeHost->setToolTip( ready
+			? tr( "Add a shape to the selected collision body" )
+			: !anyBody ? tr( "Create a collision body first" )
+			: compiled ? tr( "The selected body is compiled — decompile it to add shapes" )
+			: tr( "Select a collision body in the list above" ) );
+	}
+
 	void loadCreateFields()
 	{
 		if ( !createLayerCombo || !createMotion || !createQuality || !createSolver )
@@ -1034,6 +1099,14 @@ private:
 		createAngDamp->setValue( stored( QStringLiteral( "AngularDamping" ) ).toDouble() );
 		createMaxLinVel->setValue( stored( QStringLiteral( "MaxLinearVelocity" ) ).toDouble() );
 		createMaxAngVel->setValue( stored( QStringLiteral( "MaxAngularVelocity" ) ).toDouble() );
+		if ( createDeactivator ) {
+			QSignalBlocker bd( createDeactivator );
+			selectComboValue( createDeactivator, enumValue( QStringLiteral( "DeactivatorType" ) ) );
+		}
+		if ( createPenetration ) {
+			QSignalBlocker bp( createPenetration );
+			createPenetration->setValue( stored( QStringLiteral( "PenetrationDepth" ) ).toDouble() );
+		}
 	}
 
 	static void selectComboValue( QComboBox * combo, quint32 value, const QString & fallback = QString() )
@@ -1405,6 +1478,8 @@ private:
 		updating = false;
 		refreshSimPins();
 		updateDetails();
+		// the list just changed, so whether a body exists to add a shape to may have
+		updateShapeButtonState();
 	}
 
 	/*! Put each body's PIN on its own row in the tree.
@@ -2551,7 +2626,7 @@ private:
 		// list while allowing the authoring-oriented display order below.
 		preset->addItem( tr( "Static" ), 0 );
 		preset->addItem( tr( "Anim Static" ), 3 );
-		preset->addItem( tr( "Prop (dynamic)" ), 1 );
+		preset->addItem( tr( "Prop" ), 1 );
 		preset->addItem( tr( "Stairhelper" ), 4 );
 		preset->addItem( tr( "Custom" ), 2 );
 		int savedPresetRow = preset->findData( createSettings.value( "CollisionManager/Create/Preset", 1 ).toInt() );
@@ -2607,25 +2682,55 @@ private:
 		 * and click-to-focus through a QWidgetAction is the flakiest interaction
 		 * in Qt. In a plain popup frame it is an ordinary widget again.
 		 */
-		createButton = new QToolButton( createGroup );
-		createButton->setObjectName( QStringLiteral( "CollisionCreateButton" ) );
-		createButton->setText( tr( "Create Collision…" ) );
-		createButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
-		createButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-		createButton->setMinimumHeight( 30 );
-		createButton->setToolTip( tr( "Choose a shape and make collision from the selection" ) );
-		/* Its own style, not wwBoxedButtonQss: that one is for TOOLBAR buttons —
-		 * transparent background, transparent border — so the panel's primary
-		 * action came out as bare text with no button around it.
+		/* TWO BUTTONS, IN THE ORDER THE BLOCKS NEST.
+		 *
+		 * Create Collision Body makes the bhkCollisionObject and bhkRigidBody and
+		 * everything they carry, which is all of the physics. Create Collision
+		 * Shape makes a shape and hands it to a body that already exists. That is
+		 * not an arbitrary split: bhkRigidBodyCInfo holds mass, friction,
+		 * restitution, both dampings, both velocities, motion, quality, solver,
+		 * deactivator, penetration and the layer, and a shape holds its Material,
+		 * its geometry and nothing else. One button doing both had to pretend the
+		 * body settings belonged to the shape being made — and with Replace off,
+		 * where the shape joins an existing body, they were a straight lie.
 		 */
-		createButton->setStyleSheet( QStringLiteral(
+		const QString buttonQss = QStringLiteral(
 			"QToolButton { background:%1; color:%2; border:1px solid %3; border-radius:3px;"
 			" padding:5px 10px; }"
 			"QToolButton:hover { background:%4; color:%5; }"
-			"QToolButton:pressed { background:%6; }" )
+			"QToolButton:pressed { background:%6; }"
+			"QToolButton:disabled { color:%7; border-color:%8; }" )
 			.arg( wwSkinColor( "bgBtn" ), wwSkinColor( "text" ), wwSkinColor( "border" ),
 				  wwSkinColor( "bgBtnHover" ), wwSkinColor( "textBright" ),
-				  wwSkinColor( "bgBtnDown" ) ) );
+				  wwSkinColor( "bgBtnDown" ), wwSkinColor( "textMuted" ), wwSkinColor( "bgAlt" ) );
+
+		createButton = new QToolButton( createGroup );
+		createButton->setObjectName( QStringLiteral( "CollisionCreateBodyButton" ) );
+		createButton->setText( tr( "Create Collision Body…" ) );
+		createButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
+		createButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+		createButton->setMinimumHeight( 30 );
+		createButton->setToolTip( tr( "Make the rigid body and everything it carries. It has no shape until you give it one." ) );
+		createButton->setStyleSheet( buttonQss );
+
+		createShapeButton = new QToolButton( createGroup );
+		createShapeButton->setObjectName( QStringLiteral( "CollisionCreateShapeButton" ) );
+		createShapeButton->setText( tr( "Create Collision Shape…" ) );
+		createShapeButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
+		createShapeButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+		createShapeButton->setMinimumHeight( 30 );
+		createShapeButton->setStyleSheet( buttonQss );
+		/* The tooltip goes on a WRAPPER, not on the button.
+		 *
+		 * A disabled widget receives no mouse events, so Qt never delivers it a
+		 * ToolTip event and setToolTip on it shows nothing at all — which is
+		 * precisely the case this text exists for. The wrapper stays enabled and
+		 * carries the explanation while the button inside it is greyed.
+		 */
+		createShapeHost = new QWidget( createGroup );
+		auto * shapeHostLayout = new QHBoxLayout( createShapeHost );
+		shapeHostLayout->setContentsMargins( 0, 0, 0, 0 );
+		shapeHostLayout->addWidget( createShapeButton );
 
 		createPopup = new QFrame( this, Qt::Popup );
 		createPopup->setObjectName( QStringLiteral( "CollisionCreatePopup" ) );
@@ -2639,12 +2744,34 @@ private:
 		popupLayout->setContentsMargins( 10, 10, 10, 10 );
 		popupLayout->setSpacing( 6 );
 
-		auto * shapeHeading = new QLabel( tr( "Collision Shape" ), createPopup );
+		/* The shape popup, its own frame. Everything a SHAPE holds and nothing
+		 * else: which shape, and its Material. The physics is one block up.
+		 */
+		shapePopup = new QFrame( this, Qt::Popup );
+		shapePopup->setObjectName( QStringLiteral( "CollisionShapePopup" ) );
+		shapePopup->setFrameShape( QFrame::StyledPanel );
+		const QString popupQss = QStringLiteral(
+			"QFrame { background:%1; border:1px solid %2; }"
+			"QLabel { color:%3; background:transparent; }"
+			"QCheckBox { color:%3; background:transparent; }"
+			"QToolButton { border: 1px solid %4; border-radius: 3px; padding: 3px; background: %5; color:%3; }"
+			"QToolButton:hover { background: %6; }"
+			"QToolButton:checked { border-color: %7; color: %8; background: %9; }" )
+			.arg( wwSkinColor( "bgCard" ), wwSkinColor( "borderStrong" ), wwSkinColor( "text" ),
+				  wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
+				  wwSkinColor( "accent" ), wwSkinColor( "accentText" ), wwSkinColor( "accentBg" ) );
+		shapePopup->setStyleSheet( popupQss );
+		createPopup->setStyleSheet( popupQss );
+		auto * shapeLayout = new QVBoxLayout( shapePopup );
+		shapeLayout->setContentsMargins( 10, 10, 10, 10 );
+		shapeLayout->setSpacing( 6 );
+
+		auto * shapeHeading = new QLabel( tr( "Collision Shape" ), shapePopup );
 		shapeHeading->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
-		popupLayout->addWidget( shapeHeading );
+		shapeLayout->addWidget( shapeHeading );
 		auto * shapeRow = new QHBoxLayout;
 		shapeRow->setSpacing( 4 );
-		auto * shapeGroup = new QButtonGroup( createPopup );
+		auto * shapeGroup = new QButtonGroup( shapePopup );
 		shapeGroup->setExclusive( true );
 		const QStringList shapeHints = {
 			tr( "Smallest oriented box around the source" ),
@@ -2654,7 +2781,7 @@ private:
 			tr( "The triangles of the selected meshes, optionally decimated" )
 		};
 		for ( int mode = 0; mode < shapeNames.size(); mode++ ) {
-			auto * b = new QToolButton( createPopup );
+			auto * b = new QToolButton( shapePopup );
 			b->setText( shapeNames.at( mode ) );
 			b->setToolTip( shapeHints.at( mode ) );
 			b->setCheckable( true );
@@ -2663,37 +2790,25 @@ private:
 			shapeGroup->addButton( b, mode );
 			shapeRow->addWidget( b, 1 );
 		}
-		createPopup->setStyleSheet( createPopup->styleSheet() + QStringLiteral(
-			"QToolButton { border: 1px solid %1; border-radius: 3px; padding: 3px; background: %2; color:%6; }"
-			"QToolButton:hover { background: %3; }"
-			"QToolButton:checked { border-color: %4; color: %5; background: %7; }" )
-			.arg( wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
-				  wwSkinColor( "accent" ), wwSkinColor( "accentText" ), wwSkinColor( "text" ),
-				  wwSkinColor( "accentBg" ) ) );
-		popupLayout->addLayout( shapeRow );
+		shapeLayout->addLayout( shapeRow );
 
 		auto * popupForm = new QGridLayout;
 		popupForm->setContentsMargins( 0, 0, 0, 0 );
 		popupForm->setHorizontalSpacing( 8 );
 		popupForm->setVerticalSpacing( 4 );
 		popupForm->setColumnStretch( 1, 1 );
-		/* Convex method and the triangle percentage are NOT here.
+		/* Convex method and the triangle percentage are NOT here: they belong to
+		 * the live preview those two shapes open, which is where the geometry
+		 * they change is on screen.
 		 *
-		 * Both belong to shapes that open the live preview on Create, and the
-		 * preview already carries both — a method combo, a scrubbable Triangles
-		 * field, hull precision, and the decomposition parameters under it, all
-		 * redrawing the actual hull as they change. Setting a percentage in this
-		 * popup meant choosing a number blind, pressing Create, and then being
-		 * shown the same number again next to the geometry it produces. One of
-		 * the two had to go, and the one attached to the picture is the one worth
-		 * keeping.
-		 *
-		 * Box, Sphere and Capsule have no parameters of their own, so for them
-		 * Create still makes the body outright.
+		 * Material goes with the SHAPE, everything else with the BODY. That is
+		 * not a layout preference — bhkSphereRepShape carries Material and the
+		 * geometry, bhkRigidBodyCInfo carries all the physics, so this split is
+		 * the block structure drawn as two panels.
 		 */
 		preset->setParent( createPopup );
 		preset->show();
-		materialEdit->setParent( createPopup );
+		materialEdit->setParent( shapePopup );
 		materialEdit->show();
 		/* Search box, then "add a custom one", then the vanilla list.
 		 *
@@ -2777,6 +2892,10 @@ private:
 		createAngDamp = spin( 0.0, 100.0, 3 );
 		createMaxLinVel = spin( 0.0, 1000000.0, 2 );
 		createMaxAngVel = spin( 0.0, 1000000.0, 2 );
+		// the two the editor had and the create side did not, now that the body
+		// is authored here rather than corrected afterwards
+		createDeactivator = new QComboBox( createPopup );
+		createPenetration = spin( 0.0, 1000.0, 3 );
 
 		/* The Blender scrub field, like every other number in the program.
 		 *
@@ -2787,11 +2906,12 @@ private:
 		 * number field in this fork and this is it.
 		 */
 		for ( QDoubleSpinBox * s : { createMass, createFriction, createRestitution,
-				createLinDamp, createAngDamp, createMaxLinVel, createMaxAngVel } )
+				createLinDamp, createAngDamp, createMaxLinVel, createMaxAngVel,
+				createPenetration } )
 			wwMakeScrubField( s );
 
 		for ( QComboBox * c : QList<QComboBox *>{ preset, materialEdit, createLayerCombo,
-				createMotion, createQuality, createSolver } )
+				createMotion, createQuality, createSolver, createDeactivator } )
 			wwMatchFieldStyle( c );
 
 		/* One column, and the labels say the whole word.
@@ -2801,17 +2921,21 @@ private:
 		 * "Max ang. vel." sat beside "Solver deact." and neither was a phrase
 		 * anyone says. A popup has the height to spend.
 		 */
+		auto * bodyHeading = new QLabel( tr( "Collision Body" ), createPopup );
+		bodyHeading->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
+		popupLayout->addWidget( bodyHeading );
+
 		int row = 0;
 		auto addRow = [&]( const QString & label, QWidget * field ) {
 			popupForm->addWidget( new QLabel( label, createPopup ), row, 0 );
 			popupForm->addWidget( field, row++, 1 );
 		};
 		addRow( tr( "Preset" ), preset );
-		addRow( tr( "Material" ), materialEdit );
 		addRow( tr( "Collision layer" ), createLayerCombo );
 		addRow( tr( "Motion system" ), createMotion );
 		addRow( tr( "Quality type" ), createQuality );
 		addRow( tr( "Solver deactivation" ), createSolver );
+		addRow( tr( "Deactivator type" ), createDeactivator );
 		addRow( tr( "Mass" ), createMass );
 		addRow( tr( "Friction" ), createFriction );
 		addRow( tr( "Restitution" ), createRestitution );
@@ -2819,8 +2943,26 @@ private:
 		addRow( tr( "Angular damping" ), createAngDamp );
 		addRow( tr( "Maximum linear velocity" ), createMaxLinVel );
 		addRow( tr( "Maximum angular velocity" ), createMaxAngVel );
-		popupForm->addWidget( replace, row++, 0, 1, 2 );
+		addRow( tr( "Allowed penetration" ), createPenetration );
 		popupLayout->addLayout( popupForm );
+
+		// Material and Replace are the shape's, so they sit in the shape popup
+		auto * shapeForm = new QGridLayout;
+		shapeForm->setContentsMargins( 0, 0, 0, 0 );
+		shapeForm->setHorizontalSpacing( 8 );
+		shapeForm->setVerticalSpacing( 4 );
+		shapeForm->setColumnStretch( 1, 1 );
+		shapeForm->addWidget( new QLabel( tr( "Material" ), shapePopup ), 0, 0 );
+		shapeForm->addWidget( materialEdit, 0, 1 );
+		shapeForm->addWidget( replace, 1, 0, 1, 2 );
+		shapeLayout->addLayout( shapeForm );
+
+		auto * shapeButtons = new QHBoxLayout;
+		auto * shapeCreate = new QPushButton( tr( "Create" ), shapePopup );
+		shapeCreate->setDefault( true );
+		shapeButtons->addStretch();
+		shapeButtons->addWidget( shapeCreate );
+		shapeLayout->addLayout( shapeButtons );
 
 		auto * popupButtons = new QHBoxLayout;
 		auto * popupCreate = new QPushButton( tr( "Create" ), createPopup );
@@ -2840,6 +2982,7 @@ private:
 		// run for real -- see the call after the physics editor is built
 
 		createLayout->addWidget( createButton, 0, 0, 1, 2 );
+		createLayout->addWidget( createShapeHost, 1, 0, 1, 2 );
 		/* Create and Test share the bottom of the panel, one at a time.
 		 *
 		 * They are the two things you do with collision once you can see it --
@@ -3108,6 +3251,7 @@ private:
 
 		connect( tree, &QTreeWidget::currentItemChanged, this, [this]( QTreeWidgetItem * current ) {
 			updateDetails();
+			updateShapeButtonState();
 			if ( current ) {
 				if ( auto * w = dynamic_cast<NifSkope *>( mw ) ) {
 					int block = current->parent() && current->data( 0, ShapeBlockRole ).toInt() >= 0
@@ -3240,6 +3384,8 @@ private:
 			settings.setValue( "CollisionManager/Create/AngularDamping", float( createAngDamp->value() ) );
 			settings.setValue( "CollisionManager/Create/MaxLinearVelocity", float( createMaxLinVel->value() ) );
 			settings.setValue( "CollisionManager/Create/MaxAngularVelocity", float( createMaxAngVel->value() ) );
+			settings.setValue( "CollisionManager/Create/DeactivatorType", createDeactivator->currentData().toUInt() );
+			settings.setValue( "CollisionManager/Create/PenetrationDepth", float( createPenetration->value() ) );
 			QString materialValue = materialEdit->currentText().trimmed();
 			int materialRow = materialEdit->findText( materialValue, Qt::MatchFixedString );
 			if ( materialRow >= 0 ) materialValue = materialEdit->itemData( materialRow ).toString();
@@ -3272,22 +3418,64 @@ private:
 				saveCreationSettings();
 			} );
 		for ( QComboBox * c : QList<QComboBox *>{ materialEdit, createLayerCombo, createMotion,
-				createQuality, createSolver } )
+				createQuality, createSolver, createDeactivator } )
 			connect( c, qOverload<int>( &QComboBox::currentIndexChanged ), this,
 				[saveCreationSettings]( int ) { saveCreationSettings(); } );
 		// no editTextChanged: the field is not editable any more. A custom
 		// material is named through the popup's own "add" row, which appends a
 		// real item and selects it, so currentIndexChanged above carries it.
 		for ( QDoubleSpinBox * s : { createMass, createFriction, createRestitution, createLinDamp,
-				createAngDamp, createMaxLinVel, createMaxAngVel } )
+				createAngDamp, createMaxLinVel, createMaxAngVel, createPenetration } )
 			connect( s, &QDoubleSpinBox::editingFinished, this,
 				[saveCreationSettings]() { saveCreationSettings(); } );
 		connect( replace, &QCheckBox::toggled, this,
 			[saveCreationSettings]( bool ) { saveCreationSettings(); } );
 
-		auto createCollision = [this, shapeGroup, saveCreationSettings]() {
+		/* Create Collision Body: the object, the body, and every physics value.
+		 *
+		 * One per selected mesh, which is the same rule the shape create follows
+		 * and for the same reason — a NiAVObject holds one Collision Object, so
+		 * two bodies means two nodes.
+		 */
+		auto createBody = [this, saveCreationSettings]() {
 			saveCreationSettings();
 			if ( createPopup ) createPopup->hide();
+			if ( !nif )
+				return;
+			const QModelIndex source = currentSource();
+			QList<QPersistentModelIndex> targets;
+			for ( const qint32 block : spellSelectionRoots( nif, source ) ) {
+				const QModelIndex index = blockIndex( block );
+				if ( index.isValid() )
+					targets.append( QPersistentModelIndex( index ) );
+			}
+			if ( targets.isEmpty() ) {
+				QMessageBox::information( this, tr( "Create Collision Body" ),
+					tr( "Select a node or a mesh to put the body on." ) );
+				return;
+			}
+			const bool ownNode = targets.size() > 1;
+			QModelIndex made;
+			nifSnapshotOp( nif, tr( "Create collision body" ), [&]() {
+				for ( const QPersistentModelIndex & target : targets ) {
+					if ( !target.isValid() )
+						continue;
+					const QModelIndex node = tlCollisionAttachNode( nif, QModelIndex( target ), ownNode );
+					if ( !node.isValid() )
+						continue;
+					const QModelIndex body = tlCreateCollisionBody( nif, node );
+					if ( body.isValid() )
+						made = body;
+				}
+			} );
+			if ( made.isValid() )
+				if ( auto * window = dynamic_cast<NifSkope *>( mw ) ) window->select( made );
+			queueRebuild();
+		};
+
+		auto createCollision = [this, shapeGroup, saveCreationSettings]() {
+			saveCreationSettings();
+			if ( shapePopup ) shapePopup->hide();
 			const int mode = std::clamp( shapeGroup->checkedId(), 0, 4 );
 			/* Convex and Mesh hand off to the live preview, which is where their
 			 * parameters are. It opens at the last percentage and method it was
@@ -3314,27 +3502,31 @@ private:
 		 * place your eyes are not. Same reasoning as the search menu opening
 		 * where the right-click was.
 		 */
-		connect( createButton, &QToolButton::clicked, this, [this]() {
-			if ( !createPopup )
+		auto openPopupUnder = []( QFrame * popup, QWidget * under ) {
+			if ( !popup )
 				return;
-			createPopup->adjustSize();
-			QRect where( createButton->mapToGlobal( QPoint( 0, createButton->height() + 2 ) ),
-				createPopup->sizeHint() );
-			where.setWidth( std::max( where.width(), createButton->width() ) );
+			popup->adjustSize();
+			QRect where( under->mapToGlobal( QPoint( 0, under->height() + 2 ) ), popup->sizeHint() );
+			where.setWidth( std::max( where.width(), under->width() ) );
 			const QScreen * screen = QGuiApplication::screenAt( where.topLeft() );
 			if ( !screen ) screen = QGuiApplication::primaryScreen();
 			if ( screen ) {
 				const QRect fits = screen->availableGeometry();
 				if ( where.bottom() > fits.bottom() )		// no room below: go above
-					where.moveTop( createButton->mapToGlobal( QPoint() ).y() - where.height() - 2 );
+					where.moveTop( under->mapToGlobal( QPoint() ).y() - where.height() - 2 );
 				where.moveLeft( std::clamp( where.left(), fits.left(), fits.right() - where.width() ) );
 				where.moveTop( std::clamp( where.top(), fits.top(), fits.bottom() - where.height() ) );
 			}
-			createPopup->setGeometry( where );
-			createPopup->show();
-			createPopup->raise();
-		} );
-		connect( popupCreate, &QPushButton::clicked, this, [createCollision]() { createCollision(); } );
+			popup->setGeometry( where );
+			popup->show();
+			popup->raise();
+		};
+		connect( createButton, &QToolButton::clicked, this,
+			[this, openPopupUnder]() { openPopupUnder( createPopup, createButton ); } );
+		connect( createShapeButton, &QToolButton::clicked, this,
+			[this, openPopupUnder]() { openPopupUnder( shapePopup, createShapeButton ); } );
+		connect( popupCreate, &QPushButton::clicked, this, [createBody]() { createBody(); } );
+		connect( shapeCreate, &QPushButton::clicked, this, [createCollision]() { createCollision(); } );
 		for ( QDoubleSpinBox * spin : { mass, friction, restitution, linearDamping,
 			angularDamping, maxLinearVelocity, maxAngularVelocity, centerX, centerY, centerZ,
 			inertiaX, inertiaY, inertiaZ, penetrationDepth } )

@@ -833,6 +833,8 @@ QVariantMap tlCollisionPresetDefaults( int preset )
 	d[QStringLiteral( "AngularDamping" )] = 0.05f;
 	d[QStringLiteral( "MaxLinearVelocity" )] = 104.4f;
 	d[QStringLiteral( "MaxAngularVelocity" )] = 31.57f;
+	d[QStringLiteral( "DeactivatorType" )] = 1u;		// DEACTIVATOR_NEVER, the block default
+	d[QStringLiteral( "PenetrationDepth" )] = 0.15f;
 	return d;
 }
 
@@ -871,6 +873,61 @@ static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigi
 	nif->set<float>( info, "Angular Damping", stored( QStringLiteral( "AngularDamping" ) ).toFloat() );
 	nif->set<float>( info, "Max Linear Velocity", stored( QStringLiteral( "MaxLinearVelocity" ) ).toFloat() );
 	nif->set<float>( info, "Max Angular Velocity", stored( QStringLiteral( "MaxAngularVelocity" ) ).toFloat() );
+	nif->set<quint32>( info, "Deactivator Type", stored( QStringLiteral( "DeactivatorType" ) ).toUInt() );
+	nif->set<float>( info, "Penetration Depth", stored( QStringLiteral( "PenetrationDepth" ) ).toFloat() );
+}
+
+/*! Create the collision object and rigid body on \a targetNode, with no shape.
+ *
+ *  THE BODY HOLDS THE PHYSICS. Of everything the panel offers — mass, friction,
+ *  restitution, both dampings, both velocities, motion, quality, solver,
+ *  deactivator, penetration and the layer — every one lives in
+ *  bhkRigidBodyCInfo. A shape carries its Material, its geometry and nothing
+ *  else. So a body can be authored complete before any shape exists, and shapes
+ *  hung off one body necessarily share all of it.
+ *
+ *  Returns the body, existing or new: a NiAVObject holds one Collision Object,
+ *  so making a second where there is one is not a thing that can be done.
+ */
+//! The node a body should go on: the block itself if it is a NiNode, its parent
+//! otherwise, or a wrapper when several shapes each need one. Exported so the
+//! Collision Manager's body create lands where a shape create would have.
+QModelIndex tlCollisionAttachNode( NifModel * nif, const QModelIndex & index, bool ownNode )
+{
+	return collisionAttachNode( nif, index, ownNode );
+}
+
+QModelIndex tlCreateCollisionBody( NifModel * nif, const QModelIndex & targetNode )
+{
+	if ( !nif || !nif->blockInherits( targetNode, "NiAVObject" ) )
+		return QModelIndex();
+	const QModelIndex collisionLink = nif->getIndex( targetNode, "Collision Object" );
+	if ( !collisionLink.isValid() )
+		return QModelIndex();
+	QModelIndex collisionObject = nif->getBlockIndex( nif->getLink( collisionLink ) );
+	if ( collisionObject.isValid() && !nif->blockInherits( collisionObject, "bhkCollisionObject" ) ) {
+		QMessageBox::warning( nullptr, Spell::tr( "Create Collision Body" ),
+			Spell::tr( "This node has compiled collision. Decompile it before adding an editable body." ) );
+		return QModelIndex();
+	}
+	if ( !collisionObject.isValid() ) {
+		collisionObject = nif->insertNiBlock( "bhkCollisionObject" );
+		nif->setLink( collisionLink, nif->getBlockNumber( collisionObject ) );
+		nif->setLink( collisionObject, "Target", nif->getBlockNumber( targetNode ) );
+	}
+	QModelIndex rigidBody = nif->getBlockIndex( nif->getLink( collisionObject, "Body" ) );
+	if ( !rigidBody.isValid() ) {
+		rigidBody = nif->insertNiBlock( "bhkRigidBody" );
+		nif->setLink( collisionObject, "Body", nif->getBlockNumber( rigidBody ) );
+	}
+	applyCollisionBodySettings( nif, rigidBody );
+	/* The same reason a shape create does it: 22,496 of 22,496 stock FO4 meshes
+	 * carrying collision set BSXFlags bit 1, and the engine ignores collision on
+	 * a mesh that does not. A body with no shape yet is still collision.
+	 */
+	const QPersistentModelIndex keep( rigidBody );
+	wwEnsureRootBSXFlags( nif, BSXF_Havok, nullptr, nullptr );
+	return QModelIndex( keep );
 }
 
 static QModelIndex attachCollisionShape( NifModel * nif, const QModelIndex & parentNode,
