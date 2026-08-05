@@ -1,5 +1,42 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05q — The startup view now actually applies
+
+The previous entry shipped the startup view inert and said it worked. It did
+not: NIFs still opened dead-on Front, reported immediately.
+
+**Changing a default does nothing once the value is on disk.** The Render
+settings page writes *every* field, so anyone who has opened it once already has
+`Settings/Render/General/Camera/Startup Direction = 1` stored, and the default
+in the code is never consulted again. The value was sitting in the registry the
+whole time.
+
+It cost three wrong guesses — a hard-coded `ViewFront` in a physics harness,
+`setOrientation( viewState() )` on load, and `restoreUi` ticking the Front
+action — each read carefully and each innocent. What settled it in one run was
+recording the fact instead of inferring it: `WW_CAMERA_LOG=<file>` appends every
+reorientation with its rotation and state, and the first line said
+`ctor Rot=-90,0,180 view=5`. Straight from settings, before anything else ran.
+Kept, because the next camera question will want it.
+
+Fixed by moving the stored value once, only when it is the old default, behind a
+marker so it is a one-shot — choose Front deliberately afterwards and it stays.
+Verified end to end: `ctor Rot=-63.5593, 0, 133.308 view=8`, the stored setting
+reads 6, and the capture is the three-quarter view.
+
+Also: `restoreUi` holds a **second copy** of the same logic against the same key
+with its own default of 1, so on a fresh profile it ticked Front in the View
+menu while the camera was elsewhere. Defaults match now. It knows only the three
+axis directions; User Perspective ticks nothing, which is honest, because the
+camera is then not on an axis.
+
+Two corrections to the previous entry while I am here. `setOrientation( ViewUser )`
+does **not** disturb the existing saved user view — that path goes through
+`saveUserView`/`loadUserView` and `setRotation`, not through here. And
+`setOrientation( ogl->viewState(), true )` after a load, the "reframe on the new
+contents", cannot ever reframe: it passes the current state, hits the
+`state == view` early return, and never recenters. Left alone, noted here.
+
 ## 2026-08-05p — Saved presets, a dock that fits, and Blender's opening view
 
 Five things, all asked for.

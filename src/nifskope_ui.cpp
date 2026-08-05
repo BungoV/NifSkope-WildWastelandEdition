@@ -11938,9 +11938,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// ViewWalk, so the old bound silently rewrote it to Front:
 					// a capture that looked like a passing test of a view it
 					// had never actually used.
-					if ( viewIdx <= 0 || viewIdx > int( GLView::ViewUser ) )
-						viewIdx = int( GLView::ViewFront );
-					skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
+					//
+					// NEGATIVE leaves the camera exactly as startup left it,
+					// which is the only way to photograph the startup view
+					// itself — every other value overrides the thing under
+					// test. Unset is still 0 and still means Front, so the
+					// existing baselines are unaffected.
+					if ( viewIdx >= 0 ) {
+						if ( viewIdx == 0 || viewIdx > int( GLView::ViewUser ) )
+							viewIdx = int( GLView::ViewFront );
+						skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
+					}
 
 					// Force the two Viewport Effects toggles ON. They default to
 					// true in Scene but are overwritten from the persisted menu
@@ -17502,7 +17510,13 @@ void NifSkope::restoreUi()
 
 	const bool isPersp = true;
 	ui->aViewPerspective->setChecked( isPersp );
-	int viewDir = settings.value( "Settings/Render/General/Camera/Startup Direction", 1 ).toInt();
+	// A SECOND COPY of the startup-direction logic, and it must not disagree
+	// with GLView's. Same key, so the default has to match too — left at 1 it
+	// ticked Front in the View menu on a fresh profile while the camera was
+	// somewhere else entirely. It knows only the three axis directions; User
+	// Perspective ticks nothing, which is honest, because the camera is then
+	// not on an axis at all.
+	int viewDir = settings.value( "Settings/Render/General/Camera/Startup Direction", 6 ).toInt();
 	if ( viewDir == 0 )
 		ui->aViewLeft->setChecked( true );
 	else if ( viewDir == 1 )

@@ -159,6 +159,26 @@ private:
  */
 static const Vector3 wwBlenderStartupRotation = { -63.5593f, 0.0f, 133.3081f };
 
+/*! WW_CAMERA_LOG=<file>: append every camera reorientation and who asked.
+ *
+ *  The startup view was being overwritten somewhere between the GLView
+ *  constructor and the first frame, and reading did not find the writer —
+ *  three plausible candidates each turned out not to emit anything. This
+ *  records the fact instead of inferring it.
+ */
+static void wwCameraLog( const char * where, const Vector3 & rot, int state )
+{
+	static const QString path = qEnvironmentVariable( "WW_CAMERA_LOG" );
+	if ( path.isEmpty() )
+		return;
+	QFile f( path );
+	if ( !f.open( QIODevice::Append | QIODevice::Text ) )
+		return;
+	QTextStream ts( &f );
+	ts << where << "  Rot=" << rot[0] << ", " << rot[1] << ", " << rot[2]
+	   << "  view=" << state << "\n";
+}
+
 const Vector3 GLView::viewRotations[6] = {
 	{ 0.0f, 0.0f, 0.0f },		// Top
 	{ 180.0f, 0.0f, 0.0f },		// Bottom
@@ -332,6 +352,7 @@ GLView::GLView( QWindow * p )
 		Rot = viewRotations[i];
 	else if ( view == ViewUser )
 		Rot = wwBlenderStartupRotation;
+	wwCameraLog( "ctor", Rot, int( view ) );
 
 	scene = new Scene( textures );
 	connect( textures, &TexCache::sigRefresh, this, static_cast<void (GLView::*)()>(&GLView::update) );
@@ -2238,6 +2259,24 @@ void GLView::updateSettings()
 	 * is written by index and repointing index 1 would silently move everyone
 	 * who had deliberately chosen Front onto something else.
 	 */
+	/* ONE-TIME MOVE OF THE STORED VALUE.
+	 *
+	 * Changing the default above does nothing for anyone who has opened the
+	 * Render settings page even once: that page writes every field, so
+	 * Startup Direction is already on disk as 1 and the default is never
+	 * consulted again. This shipped once in exactly that state — the code was
+	 * right, the stored value won, and the feature looked inert. The camera log
+	 * is what settled it: `ctor Rot=-90,0,180 view=5`, straight from settings.
+	 *
+	 * So move the stored value, once, and only when it is the OLD default.
+	 * The marker makes it a one-shot: choose Front deliberately afterwards and
+	 * it stays Front forever.
+	 */
+	if ( !settings.value( "General/Camera/Startup Direction Moved To User", false ).toBool() ) {
+		if ( settings.value( "General/Camera/Startup Direction", 6 ).toInt() == 1 )
+			settings.setValue( "General/Camera/Startup Direction", 6 );
+		settings.setValue( "General/Camera/Startup Direction Moved To User", true );
+	}
 	int	z = settings.value( "General/Camera/Startup Direction", 6 ).toInt();
 	static const ViewState	startupDirections[7] = {
 		ViewLeft, ViewFront, ViewTop, ViewRight, ViewBack, ViewBottom, ViewUser
@@ -5120,6 +5159,7 @@ void GLView::flipOrientation()
 
 void GLView::setOrientation( GLView::ViewState state, bool recenter )
 {
+	wwCameraLog( "setOrientation", Rot, int( state ) );
 	if ( state == view )
 		return;
 
