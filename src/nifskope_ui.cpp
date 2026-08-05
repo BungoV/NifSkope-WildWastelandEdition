@@ -7529,6 +7529,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "it lists this game's materials, not the last game's",
 						editorMaterial && mat->count() >= editorMaterial->count()
 						&& mat->count() > 100 );
+
+					/* Named, not just counted. The count check would pass on any
+					 * long list; these are Fallout 4 materials that exist in no
+					 * other game's table, so the list can only be FO4's. The bug
+					 * this catches showed Oblivion's 32 — Stone, Metal, Water,
+					 * all plausible words, with only a tooltip saying OB_HAV_MAT_.
+					 */
+					int fo4Only = 0;
+					for ( const char * name : { "MaterialActorMetalArmoredPower",
+							"MaterialMetalBarrelTrashCanOffice", "MaterialCeramicCoffeeMug" } )
+						if ( mat->findData( QString::fromLatin1( name ) ) >= 0 )
+							fo4Only++;
+					log << "Fallout-4-only materials present: " << fo4Only << " of 3\n";
+					check( "and they are Fallout 4's, by name", fo4Only == 3 );
 					mat->showPopup();
 					QApplication::processEvents();
 					QFrame * matPop = nullptr;

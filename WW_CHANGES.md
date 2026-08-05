@@ -1,5 +1,62 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05k — An unknown BS version means Fallout 4, not Oblivion
+
+The last entry fixed *when* the material list is built. This one fixes *what it
+decides* — and it is the same bug, one level down.
+
+bungo's tooltip said it outright: **`OB_HAV_MAT_STONE`**. Every name in the
+drop-down was Oblivion's, on a document with a BS version of 0. Refreshing the
+list on load could never help, because the list was correct for what the code
+was asking for.
+
+`materialEnumType()` and `layerEnumType()` walk the BS version down and fall off
+the bottom into Oblivion. A BS version of 0 is what you get before a file is
+open **and from a document this program has just made** — a new mesh with a
+Cube, which is exactly what collision gets authored onto. So the panel offered
+Oblivion's 32 materials where Fallout 4 has 157, and nothing on screen said so:
+the names are plausible words. Stone, Metal, Water, Snow, Wood. Only the
+tooltip's `OB_HAV_MAT_` prefix gave it away.
+
+Unknown now means **Fallout 4**. This fork is Fallout 4 only — the handoff says
+so, and the other games' paths are inherited and unmaintained — so the fallback
+is the one game it exists for rather than the oldest row in the table. A genuine
+Oblivion mesh loses its own names here, which is a trade this fork already makes
+everywhere else.
+
+### Measured
+
+The count check from the last entry would not have caught this on a file with no
+BS version, because it compares two lists that are wrong together. So the check
+now names materials that exist in **no other game's table**:
+
+```
+material rows: create 158, editor 158
+  ok   it lists this game's materials, not the last game's
+Fallout-4-only materials present: 3 of 3
+  ok   and they are Fallout 4's, by name
+```
+
+`MaterialActorMetalArmoredPower`, `MaterialMetalBarrelTrashCanOffice`,
+`MaterialCeramicCoffeeMug`. A list containing those three can only be Fallout
+4's; a count can be any long list, and a comparison against a sibling combo can
+be two stale lists agreeing with each other.
+
+**Stated, not proven:** the harness loads a real Fallout 4 file, so it exercises
+the version-130 path. The version-0 fallback is a one-line default and is not
+covered — the harness has no way to open the versionless document that provoked
+this.
+
+29 checks. `collision_undo` (12), `collision_compiled_edit` (7),
+`collision_per_shape` (2+8+8).
+
+### Also: the drop-down is as tall as the screen allows
+
+157 materials behind a fixed 320px popup showed fifteen at a time, and a thin
+scroll bar at the edge is the only thing that said there were more. The list now
+takes what it needs up to 80% of the screen, and the search box says how many
+there are to choose from.
+
 ## 2026-08-05j — The material list was Oblivion's
 
 bungo: *"Material is missing all the material types in Fo4."* It was showing

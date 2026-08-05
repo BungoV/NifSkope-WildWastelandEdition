@@ -400,18 +400,31 @@ public:
 			item->setToolTip( itemData( row, Qt::ToolTipRole ).toString() );
 		}
 		find->clear();
+		// the count, so a list that scrolls does not read as a list that is short
+		find->setPlaceholderText( count() > 0
+			? QObject::tr( "%1  —  %2 to choose from" ).arg( placeholder ).arg( count() )
+			: placeholder );
 		list->setCurrentRow( std::max( 0, currentIndex() ) );
+		list->scrollToItem( list->currentItem(), QAbstractItemView::PositionAtCenter );
 
-		QRect where( mapToGlobal( QPoint( 0, height() ) ), QSize( std::max( width(), 260 ), 320 ) );
-		const QScreen * screen = QGuiApplication::screenAt( where.topLeft() );
+		/* As tall as the screen sensibly allows, not a fixed 320px.
+		 *
+		 * Fallout 4 has 157 collision materials. A drop-down that shows fifteen
+		 * of them reads as a drop-down with fifteen entries in it — the scroll
+		 * bar is the only thing saying otherwise, and it is thin and at the edge.
+		 * The list gets whatever the screen has, up to what it actually needs.
+		 */
+		const QScreen * screen = QGuiApplication::screenAt( mapToGlobal( QPoint() ) );
 		if ( !screen ) screen = QGuiApplication::primaryScreen();
-		if ( screen ) {
-			const QRect fits = screen->availableGeometry();
-			if ( where.bottom() > fits.bottom() )
-				where.moveTop( mapToGlobal( QPoint() ).y() - where.height() );
-			where.moveLeft( std::clamp( where.left(), fits.left(), fits.right() - where.width() ) );
-			where.moveTop( std::clamp( where.top(), fits.top(), fits.bottom() - where.height() ) );
-		}
+		const QRect fits = screen ? screen->availableGeometry() : QRect( 0, 0, 1280, 800 );
+		const int wanted = list->sizeHintForRow( 0 ) * std::max( 1, count() ) + 90;
+		QRect where( mapToGlobal( QPoint( 0, height() ) ),
+			QSize( std::max( width(), 300 ),
+				std::clamp( wanted, 220, int( fits.height() * 0.8 ) ) ) );
+		if ( where.bottom() > fits.bottom() )
+			where.moveTop( mapToGlobal( QPoint() ).y() - where.height() );
+		where.moveLeft( std::clamp( where.left(), fits.left(), fits.right() - where.width() ) );
+		where.moveTop( std::clamp( where.top(), fits.top(), fits.bottom() - where.height() ) );
 		pop->setGeometry( where );
 		pop->show();
 		find->setFocus();
@@ -635,13 +648,28 @@ private:
 		return i.isValid() ? nif->itemName( i ) : QString();
 	}
 
+	/*! Which game's material table to offer.
+	 *
+	 *  AN UNKNOWN VERSION MEANS FALLOUT 4, not Oblivion. A BS version of 0 is
+	 *  what you get before a file is open and from a document this program has
+	 *  just made — and it was answering "Oblivion", so the collision material
+	 *  list was that game's 32 entries where Fallout 4 has 157. Everything the
+	 *  panel offered was wrong and nothing said so: the names are plausible
+	 *  words (Stone, Metal, Water) and only the tooltip's OB_HAV_MAT_ prefix
+	 *  gave it away.
+	 *
+	 *  This fork is Fallout 4 only — the other games' paths are inherited, not
+	 *  maintained — so the fallback is the one game it exists for. A real
+	 *  Oblivion mesh loses its own names here, which is a trade this fork is
+	 *  already making everywhere else.
+	 */
 	QString materialEnumType() const
 	{
 		if ( nif->getBSVersion() >= 170 ) return QStringLiteral( "Fallout76HavokMaterial" );
-		if ( nif->getBSVersion() >= 130 ) return QStringLiteral( "Fallout4HavokMaterial" );
-		if ( nif->getBSVersion() >= 83 ) return QStringLiteral( "SkyrimHavokMaterial" );
+		if ( nif->getBSVersion() >= 83 ) return nif->getBSVersion() >= 130
+			? QStringLiteral( "Fallout4HavokMaterial" ) : QStringLiteral( "SkyrimHavokMaterial" );
 		if ( nif->getBSVersion() > 0 ) return QStringLiteral( "Fallout3HavokMaterial" );
-		return QStringLiteral( "OblivionHavokMaterial" );
+		return QStringLiteral( "Fallout4HavokMaterial" );
 	}
 
 	QVariantMap customMaterials() const
@@ -780,13 +808,15 @@ private:
 		return materialCrcText( crc );
 	}
 
+	//! Same rule as materialEnumType, and for the same reason: unknown means
+	//! Fallout 4 in a Fallout 4 fork, not the oldest game in the table.
 	QString layerEnumType() const
 	{
 		if ( nif->getBSVersion() >= 170 ) return QStringLiteral( "Fallout76Layer" );
-		if ( nif->getBSVersion() >= 130 ) return QStringLiteral( "Fallout4Layer" );
-		if ( nif->getBSVersion() >= 83 ) return QStringLiteral( "SkyrimLayer" );
+		if ( nif->getBSVersion() >= 83 ) return nif->getBSVersion() >= 130
+			? QStringLiteral( "Fallout4Layer" ) : QStringLiteral( "SkyrimLayer" );
 		if ( nif->getBSVersion() > 0 ) return QStringLiteral( "Fallout3Layer" );
-		return QStringLiteral( "OblivionLayer" );
+		return QStringLiteral( "Fallout4Layer" );
 	}
 
 	QString collisionLayerName( quint32 value ) const
