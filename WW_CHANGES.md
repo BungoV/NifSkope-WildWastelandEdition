@@ -1,5 +1,99 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05c — The Collision Manager loses twenty controls
+
+bungo: "How could we simplify this menu? Or declutter it?" Three moves, none of
+which removes a capability.
+
+### Collision Creation: eleven controls become one button
+
+Five shape buttons, a convex-method combo, a preset combo and its save button,
+an expander hiding a material picker and a Replace tick, an Optimize button and
+a Create button — all permanently on screen, in a docked panel that is mostly
+the list above it. Of those, the method line applies to **one** of the five
+shapes, Optimize to two, and the rest are defaults you set once and forget.
+
+Now one split button: click **Create <Shape> Collision** to make one, or open
+its menu to pick a different shape or reach the defaults. The button names the
+shape it will make, so the menu is never needed just to find out what clicking
+does. Picking a shape from the menu makes it, the way an Add menu behaves.
+
+Two things went with it:
+
+- **The save button.** Every menu choice writes through immediately. The state
+  where the panel showed one preset and the next Create used another because
+  nobody pressed save is gone — a menu you ticked is a decision, and asking for
+  it to be confirmed by a second control was the panel not believing the first.
+- **The source hint.** "Select a BSTriShape or NiNode in the viewport/block
+  list" was fixed text that never changed: an instruction, permanently, on a
+  panel you have by then already used.
+
+Material is menu rows rather than the combo in a `QWidgetAction`. A hosted
+widget in a `QMenu` only gets the keys the menu chooses to forward, and
+click-to-focus through one is the flakiest interaction in Qt — the same reason
+the command palette is a dialog and not a menu with a line edit in it. The combo
+survives as the *model* the menu is built from, so the material list with its
+CRC values and tooltips is still loaded in one place.
+
+### The display row moves to Overlays
+
+*Show collision*, *Colour by*, *Solid*, *X-ray*, *Only*, *Labels* are viewport
+state — not one of them changes the file — so they belong with the rest of "what
+the viewport draws on top of the model". They are now **Overlays ▸ Collision
+Display**.
+
+*Show collision* was outright a second face for `ui->aShowCollision`, which sits
+in that same Overlays menu and always has: the dock carried a duplicate of a
+toggle two clicks away, and could not keep it in sync. Same `QSettings` keys
+throughout, so the drawing code reads exactly what it read before.
+
+### Row operations move to the row
+
+*Decompile* / *Compile* / *Import Donor* all act on the row selected in the list
+directly above them, and that list has had a right-click menu offering the same
+operations the whole time — so the buttons were a second way to do what pointing
+at the thing already does, taking a permanent row to do it. *Check Collision* is
+file-wide and stays a button, under **More**, with the other file-wide entries.
+
+Both routes run one implementation: the split button's menu and the row menu are
+built from the same `QAction`s.
+
+### Measured
+
+`tests/spells/collision_panel.sh` (`WW_COLLPANEL_TEST`). A refactor that only
+*moves* things has one failure a build cannot catch — a control lands somewhere
+that no longer writes what the old one wrote, and the settings the create spells
+read quietly stop changing. Nothing on screen says so: the menu ticks, the
+button looks armed, and the next Create makes the shape you picked last week. So
+the checks come in pairs, each removal against where it went:
+
+```
+create menu: Box | Sphere | Capsule | Convex | Mesh | Convex Method | Preset |
+             Material for New Collision | Replace Existing Shape | Optimize…
+  ok   all five shapes are in the one menu
+  ok   so are the settings that used to be rows
+  ok   the button says which shape it will make      ('Create Box Collision')
+  ok   picking a shape writes the key the spells read            (Shape=0)
+  ok   the row-operation buttons are off the panel
+  ok   the display row is off the panel
+  ok   the display controls are in the Overlays menu             (5 entries)
+  ok   a moved display control still writes its key            (ColourBy=2)
+  ok   the inventory tree still offers a row menu
+```
+
+"Gone" on its own would pass for a control that was simply deleted, which is the
+failure this exists to catch.
+
+This harness flushes its log per line, unlike the others. It drives menu entries
+that run operations, and an operation that puts up a modal with nobody at the
+keyboard hangs until the wrapper's timeout kills it — at which point a buffered
+`QTextStream` has written nothing and a zero-byte log says only "something went
+wrong somewhere". It cost two rounds of exactly that to find the fixture had
+compiled collision on its root, which `attachCollisionShape` refuses on a modal.
+
+`collision_undo` (12), `collision_compiled_edit` (7) and `collision_per_shape`
+(2 + 8 + 8) re-run: they drive the panel this rebuilt.
+
 ## 2026-08-05b — Quick Favourites, and Space opens the search menu
 
 Blender's, and it earns its place the same way there: the things one person

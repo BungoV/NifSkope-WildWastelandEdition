@@ -7261,6 +7261,157 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_COLLPANEL_TEST=1): the Collision Manager's declutter.
+	 *
+	 * Eleven controls in the creation group became one split button, six display
+	 * controls moved to the viewport's Overlays menu, and three row operations
+	 * moved to the row's own right-click menu. A refactor that only MOVES things
+	 * has exactly one way to go wrong that a build cannot catch: a control lands
+	 * somewhere that no longer writes what the old one wrote, and the settings
+	 * the spells read quietly stop changing.
+	 *
+	 * So the checks come in pairs. The old widget is gone AND the new route
+	 * still writes the same QSettings key — "gone" on its own would pass on a
+	 * control that was simply deleted, which is the failure this is for.
+	 * Log: release/ww_collpanel_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLPANEL_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_collpanel_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				/* Flushed per line, unlike the other harnesses here.
+				 *
+				 * This one drives menu entries that run operations, and an
+				 * operation that puts up a modal with nobody at the keyboard
+				 * hangs the harness until the wrapper's timeout kills it -- at
+				 * which point a buffered QTextStream has written nothing at all
+				 * and a zero-byte log says only "something went wrong somewhere".
+				 * Flushing turns that into "it got as far as this line".
+				 */
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					// Picking a shape from the menu CREATES one, so the harness has
+					// to be pointing at something it can be created from -- with
+					// nothing selected the spell says so on a modal and the run stops
+					// dead here.
+					if ( nif )
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ),
+									{ "BSGeometry", "BSTriShape", "NiTriBasedGeom" } ) ) {
+								skope->select( nif->getBlockIndex( b ) );
+								break;
+							}
+					QApplication::processEvents();
+					QDockWidget * dock = skope->findChild<QDockWidget *>(
+						QStringLiteral( "CollisionManagerDock" ) );
+					if ( !dock ) { log << "no Collision Manager dock\n"; fails++; checks++; break; }
+					dock->setFloating( false );
+					dock->show();
+					QApplication::processEvents();
+
+					// --- the creation group is one button ---------------------
+					auto * create = dock->findChild<QToolButton *>( QStringLiteral( "CollisionCreateButton" ) );
+					if ( !create || !create->menu() ) {
+						log << "no create split button\n"; fails++; checks++; break;
+					}
+					int shapes = 0, submenus = 0;
+					QStringList rows;
+					for ( QAction * a : create->menu()->actions() ) {
+						if ( a->isSeparator() ) continue;
+						rows << a->text();
+						if ( a->menu() ) submenus++;
+						else if ( a->isCheckable() && !a->data().isNull() ) shapes++;
+					}
+					log << "create menu: " << rows.join( " | " ) << "\n";
+					check( "all five shapes are in the one menu", shapes == 5 );
+					check( "so are the settings that used to be rows",
+						submenus == 3 );		// Convex Method, Preset, Material
+					log << "button reads: '" << create->text() << "'\n";
+					check( "the button says which shape it will make",
+						create->text().contains( QLatin1String( "Create" ) )
+						&& create->text().split( QLatin1Char( ' ' ) ).size() > 2 );
+
+					/* Picking a shape has to WRITE it. The spells read
+					 * CollisionManager/Create/Shape, so a menu that only ticked
+					 * itself would look right and make the wrong shape.
+					 */
+					QSettings().setValue( QStringLiteral( "CollisionManager/Create/Shape" ), 4 );
+					for ( QAction * a : create->menu()->actions() )
+						if ( a->isCheckable() && a->data().toInt() == 0 && !a->menu() ) { a->trigger(); break; }
+					QApplication::processEvents();
+					const int wrote = QSettings().value( QStringLiteral( "CollisionManager/Create/Shape" ), -1 ).toInt();
+					log << "picking Box wrote Shape=" << wrote << "\n";
+					check( "picking a shape writes the key the spells read", wrote == 0 );
+
+					// --- the old controls are gone ----------------------------
+					int oldButtons = 0;
+					for ( QPushButton * b : dock->findChildren<QPushButton *>() )
+						if ( b->text() == QLatin1String( "Check Collision" )
+							|| b->text() == QLatin1String( "Import Donor" )
+							|| b->text().startsWith( QLatin1String( "Optimize Source" ) ) )
+							oldButtons++;
+					int oldDisplay = 0;
+					for ( QCheckBox * c : dock->findChildren<QCheckBox *>() )
+						if ( c->text() == QLatin1String( "Show collision" ) || c->text() == QLatin1String( "Solid" )
+							|| c->text() == QLatin1String( "X-ray" ) || c->text() == QLatin1String( "Only" ) )
+							oldDisplay++;
+					log << "leftover buttons: " << oldButtons << ", leftover display boxes: " << oldDisplay << "\n";
+					check( "the row-operation buttons are off the panel", oldButtons == 0 );
+					check( "the display row is off the panel", oldDisplay == 0 );
+
+					// --- ...and the display controls landed in Overlays -------
+					QMenu * collisionDisplay = nullptr;
+					if ( auto * btn = skope->findChild<QToolButton *>( QStringLiteral( "ViewportOverlaysButton" ) ) )
+						if ( btn->menu() )
+							for ( QAction * a : btn->menu()->actions() )
+								if ( a->menu() && a->text().contains( QLatin1String( "Collision" ) ) )
+									collisionDisplay = a->menu();
+					int moved = collisionDisplay ? collisionDisplay->actions().size() : 0;
+					log << "Overlays > Collision Display entries: " << moved << "\n";
+					check( "the display controls are in the Overlays menu", moved == 5 );
+
+					/* And still write. Colour By is the one with a stored index
+					 * rather than a bool, so it is the one a moved-but-unwired
+					 * control would fail on most quietly.
+					 */
+					if ( collisionDisplay ) {
+						QSettings().setValue( QStringLiteral( "CollisionManager/ColourBy" ), 0 );
+						for ( QAction * a : collisionDisplay->actions() )
+							if ( a->menu() && a->text().contains( QLatin1String( "Colour" ) ) )
+								for ( QAction * opt : a->menu()->actions() )
+									if ( opt->data().toInt() == 2 ) { opt->trigger(); break; }
+						QApplication::processEvents();
+					}
+					const int colour = QSettings().value( QStringLiteral( "CollisionManager/ColourBy" ), -1 ).toInt();
+					log << "picking a colour mode wrote ColourBy=" << colour << "\n";
+					check( "a moved display control still writes its key", colour == 2 );
+
+					// --- the row menu picked up what the buttons did ----------
+					auto * tree = dock->findChild<QTreeWidget *>( QStringLiteral( "CollisionInventoryTree" ) );
+					check( "the inventory tree still offers a row menu",
+						tree && tree->contextMenuPolicy() == Qt::CustomContextMenu );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_COLLPERSHAPE_TEST=1): three shapes selected, three bodies?
 	 *
 	 * Create Collision is handed ONE index by the menu and by the Collision
@@ -13561,6 +13712,67 @@ void NifSkope::initDockWidgets()
 			ui->aShowConstraints, ui->aShowMarkers, ui->aShowHidden };
 		for ( QAction * a : ds )
 			m->addAction( a );
+
+		/* How collision is drawn, beside the toggle for whether it is drawn.
+		 *
+		 * These six were a row across the top of the Collision Manager, which is
+		 * a panel for authoring collision — and not one of them changes the file.
+		 * Show collision there was a second face for ui->aShowCollision, the row
+		 * directly above this one, so the dock carried a duplicate of a toggle it
+		 * could not itself keep in sync. Same QSettings keys, so the drawing code
+		 * reads exactly what it read before.
+		 */
+		{
+			QMenu * cm = m->addMenu( tr( "Collision Display" ) );
+			cm->setToolTipsVisible( true );
+			QSettings cs;
+			auto push = []() {
+				// Scene::draw reads a cached copy — a per-frame QSettings read is a
+				// registry access — so the change has to be pushed to it
+				Scene::refreshCollisionOnlySetting();
+			};
+			auto addToggle = [&]( const QString & label, const QString & key, bool def,
+					const QString & hint ) {
+				QAction * a = cm->addAction( label );
+				a->setCheckable( true );
+				a->setChecked( cs.value( key, def ).toBool() );
+				if ( !hint.isEmpty() )
+					a->setToolTip( hint );
+				connect( a, &QAction::toggled, this, [this, key, push]( bool on ) {
+					QSettings().setValue( key, on );
+					push();
+					if ( ogl ) ogl->update();
+				} );
+			};
+			auto addChoice = [&]( const QString & label, const QString & key, int def,
+					const QStringList & options ) {
+				QMenu * sub = cm->addMenu( label );
+				auto * group = new QActionGroup( sub );
+				group->setExclusive( true );
+				const int now = std::clamp( cs.value( key, def ).toInt(), 0, int( options.size() ) - 1 );
+				for ( int i = 0; i < options.size(); i++ ) {
+					QAction * a = sub->addAction( options.at( i ) );
+					a->setCheckable( true );
+					a->setChecked( i == now );
+					a->setData( i );
+					group->addAction( a );
+				}
+				connect( group, &QActionGroup::triggered, this, [this, key, push]( QAction * a ) {
+					QSettings().setValue( key, a->data().toInt() );
+					push();
+					if ( ogl ) ogl->update();
+				} );
+			};
+			addChoice( tr( "Colour By" ), QStringLiteral( "CollisionManager/ColourBy" ), 0,
+				{ tr( "Material" ), tr( "Layer" ), tr( "State" ), tr( "Type" ) } );
+			addToggle( tr( "Solid" ), QStringLiteral( "CollisionManager/Solid" ), true, QString() );
+			addToggle( tr( "X-ray" ), QStringLiteral( "CollisionManager/XRay" ), false, QString() );
+			addToggle( tr( "Collision Only" ), QStringLiteral( "CollisionManager/CollisionOnly" ), false,
+				tr( "Hide render geometry and show only collision" ) );
+			addChoice( tr( "Labels" ), QStringLiteral( "CollisionManager/Labels" ), 1,
+				{ tr( "Off" ), tr( "Selected" ), tr( "All" ) } );
+		}
+
 		m->addSeparator();
 		m->addAction( aSolo );
 

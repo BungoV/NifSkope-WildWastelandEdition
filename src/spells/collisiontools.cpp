@@ -15,6 +15,7 @@
 #include "ui/widgets/physicspanel.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
@@ -369,7 +370,6 @@ private:
 	QTreeWidget * tree = nullptr;
 	QLabel * summary = nullptr;
 	QLabel * inventoryHeader = nullptr;
-	QLabel * sourceLabel = nullptr;
 	QLabel * physicsHint = nullptr;
 	QGroupBox * physicsGroup = nullptr;
 	QWidget * physicsEditorBody = nullptr;
@@ -411,8 +411,7 @@ private:
 	QToolButton * primaryCollisionAction = nullptr;
 	QAction * decompileSelectedAction = nullptr;
 	QAction * compileSelectedAction = nullptr;
-	QPushButton * createButton = nullptr;
-	QPushButton * decimateButton = nullptr;
+	QToolButton * createButton = nullptr;
 	QFrame * previewPanel = nullptr;
 	QWidget * previewBody = nullptr;
 	QComboBox * previewMethod = nullptr;
@@ -2084,55 +2083,18 @@ private:
 		root->setContentsMargins( 6, 6, 6, 6 );
 		root->setSpacing( 6 );
 
-		auto * display = new QHBoxLayout;
-		auto * showCollision = new QCheckBox( tr( "Show collision" ), this );
-		QAction * showAction = mw ? mw->findChild<QAction *>( QStringLiteral( "aShowCollision" ) ) : nullptr;
-		showCollision->setChecked( !showAction || showAction->isChecked() );
-		connect( showCollision, &QCheckBox::toggled, this, [showAction]( bool on ) {
-			if ( showAction && showAction->isChecked() != on )
-				showAction->trigger();
-		} );
-		auto * colour = new QComboBox( this );
-		colour->addItems( { tr( "Material" ), tr( "Layer" ), tr( "State" ), tr( "Type" ) } );
-		colour->setToolTip( tr( "Collision fill colour mode" ) );
-		auto * solid = new QCheckBox( tr( "Solid" ), this );
-		auto * xray = new QCheckBox( tr( "X-ray" ), this );
-		auto * only = new QCheckBox( tr( "Only" ), this );
-		only->setToolTip( tr( "Hide render geometry and show only collision" ) );
-		auto * labels = new QComboBox( this );
-		labels->addItems( { tr( "Off" ), tr( "Selected" ), tr( "All" ) } );
+		/* The display row moved to the viewport's Overlays menu, where the rest of
+		 * "what the viewport draws on top of the model" already lives.
+		 *
+		 * Show collision / Colour by / Solid / X-ray / Only / Labels are viewport
+		 * state, not collision authoring — none of them change the file. Show
+		 * collision was outright a second face for ui->aShowCollision, which is in
+		 * the Overlays menu and always has been, so the dock carried a duplicate
+		 * of a toggle two clicks away. Six controls and a whole row leave the
+		 * panel, and the settings keys are untouched, so what is stored and what
+		 * reads it are the same as before. See wwBuildCollisionOverlayMenu.
+		 */
 		QSettings settings;
-		colour->setCurrentIndex( settings.value( "CollisionManager/ColourBy", 0 ).toInt() );
-		solid->setChecked( settings.value( "CollisionManager/Solid", true ).toBool() );
-		xray->setChecked( settings.value( "CollisionManager/XRay", false ).toBool() );
-		only->setChecked( settings.value( "CollisionManager/CollisionOnly", false ).toBool() );
-		labels->setCurrentIndex( settings.value( "CollisionManager/Labels", 1 ).toInt() );
-		auto saveDisplay = [this, colour, solid, xray, only, labels]() {
-			QSettings s;
-			s.setValue( "CollisionManager/ColourBy", colour->currentIndex() );
-			s.setValue( "CollisionManager/Solid", solid->isChecked() );
-			s.setValue( "CollisionManager/XRay", xray->isChecked() );
-			s.setValue( "CollisionManager/CollisionOnly", only->isChecked() );
-			s.setValue( "CollisionManager/Labels", labels->currentIndex() );
-			// Scene::draw reads a cached copy (a per-frame QSettings read is a
-			// registry access) — push the change to it.
-			Scene::refreshCollisionOnlySetting();
-			if ( ogl ) ogl->update();
-		};
-		connect( colour, qOverload<int>( &QComboBox::currentIndexChanged ), this, [saveDisplay]( int ) { saveDisplay(); } );
-		connect( solid, &QCheckBox::toggled, this, [saveDisplay]( bool ) { saveDisplay(); } );
-		connect( xray, &QCheckBox::toggled, this, [saveDisplay]( bool ) { saveDisplay(); } );
-		connect( only, &QCheckBox::toggled, this, [saveDisplay]( bool ) { saveDisplay(); } );
-		connect( labels, qOverload<int>( &QComboBox::currentIndexChanged ), this, [saveDisplay]( int ) { saveDisplay(); } );
-		display->addWidget( showCollision );
-		display->addWidget( new QLabel( tr( "Colour by" ), this ) );
-		display->addWidget( colour, 1 );
-		display->addWidget( solid );
-		display->addWidget( xray );
-		display->addWidget( only );
-		display->addWidget( new QLabel( tr( "Labels" ), this ) );
-		display->addWidget( labels );
-		root->addLayout( display );
 
 		inventoryHeader = new QLabel( tr( "Collision in file" ), this );
 		inventoryHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
@@ -2194,23 +2156,32 @@ private:
 		primaryCollisionAction->setMenu( primaryMenu );
 		primaryCollisionAction->setEnabled( false );
 
-		auto * lint = new QPushButton( tr( "Check Collision" ), this );
-		auto * donor = new QPushButton( tr( "Import Donor" ), this );
-		lint->setSizePolicy( QSizePolicy::Maximum, QSizePolicy::Fixed );
-		donor->setSizePolicy( QSizePolicy::Maximum, QSizePolicy::Fixed );
-		donor->setToolTip( tr( "Copy collision from another NIF onto the selected target node" ) );
+		/* Four buttons became one.
+		 *
+		 * Decompile / Compile / Import Donor all act on the row you have selected
+		 * in the list directly above them, and the list has had a right-click menu
+		 * offering the same operations the whole time — so the buttons were a
+		 * second way to do what pointing at the thing already does, taking a
+		 * permanent row to do it. Check Collision is file-wide and stays a button
+		 * with the other file-wide entries under More.
+		 *
+		 * The actions themselves stay: the primary split button's menu is built
+		 * from them, and so is the row menu, so both routes run one implementation.
+		 */
 		auto * more = new QToolButton( this );
 		more->setText( tr( "More..." ) );
 		more->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 8px" ) ) );
 		more->setPopupMode( QToolButton::InstantPopup );
 		auto * moreMenu = new QMenu( more );
+		auto * lintAction = moreMenu->addAction( tr( "Check Collision" ) );
+		lintAction->setToolTip( tr( "Report dangling, suspicious or mis-layered collision across the file" ) );
+		moreMenu->addAction( decompileAllAction );
 		auto * reverseAction = moreMenu->addAction( tr( "Create Editable Mesh Copy" ) );
 		reverseAction->setToolTip( tr( "Create a visible BSTriShape proxy from the selected collision" ) );
 		auto * refreshAction = moreMenu->addAction( tr( "Refresh" ) );
 		more->setMenu( moreMenu );
+		moreMenu->setToolTipsVisible( true );
 		browserActions->addWidget( primaryCollisionAction );
-		browserActions->addWidget( lint );
-		browserActions->addWidget( donor );
 		browserActions->addStretch();
 		browserActions->addWidget( more );
 		root->addLayout( browserActions );
@@ -2218,36 +2189,21 @@ private:
 
 		auto * createGroup = new QGroupBox( tr( "Collision Creation" ), this );
 		auto * createLayout = new QGridLayout( createGroup );
-		sourceLabel = new QLabel( tr( "Select a BSTriShape or NiNode in the viewport/block list" ), createGroup );
-		sourceLabel->setWordWrap( true );
-		auto * shapeButtons = new QHBoxLayout;
-		shapeButtons->setSpacing( 4 );
-		auto * shapeGroup = new QButtonGroup( createGroup );
-		shapeGroup->setExclusive( true );
+		/* The source hint is gone with the row it sat on. It was fixed text that
+		 * never changed — an instruction, permanently, on a panel you have by
+		 * then already used. What is actually selected is now on the button.
+		 */
 		const QStringList shapeNames = {
 			tr( "Box" ), tr( "Sphere" ), tr( "Capsule" ), tr( "Convex" ), tr( "Mesh" )
 		};
-		for ( int mode = 0; mode < shapeNames.size(); mode++ ) {
-			auto * button = new QToolButton( createGroup );
-			button->setText( shapeNames.at( mode ) );
-			button->setCheckable( true );
-			button->setMinimumSize( 55, 30 );
-			button->setToolButtonStyle( Qt::ToolButtonTextOnly );
-			shapeGroup->addButton( button, mode );
-			shapeButtons->addWidget( button, 1 );
-		}
-		shapeGroup->button( 3 )->setChecked( true );
-		auto * convexMethod = new QComboBox( createGroup );
-		convexMethod->addItems( { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } );
-		createGroup->setStyleSheet( QStringLiteral(
-			"QToolButton { border: 1px solid %1; border-radius: 3px; padding: 3px; background: %2; }"
-			"QToolButton:hover { background: %3; }"
-			"QToolButton:checked { border-color: %4; color: %5; background: %6; }" )
-			.arg( wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
-				  wwSkinColor( "accent" ), wwSkinColor( "accentText" ), wwSkinColor( "accentBg" ) ) );
 		QSettings createSettings;
-		convexMethod->setCurrentIndex( createSettings.value( "CollisionManager/Create/ConvexMethod", 0 ).toInt() );
+		/* Kept as MODELS, never shown. Both carry data the menu needs — the
+		 * preset's stable ids, the material list with its CRC values and tooltips
+		 * — and rebuilding either as a bare list would be duplicating the loader
+		 * above it.
+		 */
 		auto * preset = new QComboBox( createGroup );
+		preset->hide();
 		// Stable data IDs preserve settings written by the original three-item
 		// list while allowing the authoring-oriented display order below.
 		preset->addItem( tr( "Static" ), 0 );
@@ -2295,53 +2251,114 @@ private:
 			savedMaterialRow = materialEdit->findData( savedMaterialValue, Qt::UserRole + 1 );
 		if ( savedMaterialRow >= 0 ) materialEdit->setCurrentIndex( savedMaterialRow );
 		else materialEdit->setEditText( savedMaterial );
-		auto * replace = new QCheckBox( tr( "Replace" ), createGroup );
-		replace->setChecked( createSettings.value( "CollisionManager/Create/Replace", true ).toBool() );
-		createButton = new QPushButton( tr( "Create Collision" ), createGroup );
-		decimateButton = new QPushButton( tr( "Optimize Source Mesh..." ), createGroup );
-		decimateButton->setToolTip( tr( "Open the live decimation preview for the selected render mesh" ) );
-		createLayout->addWidget( sourceLabel, 0, 0, 1, 2 );
-		createLayout->addLayout( shapeButtons, 1, 0, 1, 2 );
-		auto * presetLine = new QHBoxLayout;
-		presetLine->addWidget( preset, 1 );
-		presetLine->addWidget( savePreset );
-		auto * convexMethodLabel = new QLabel( tr( "Convex method" ), createGroup );
-		createLayout->addWidget( convexMethodLabel, 2, 0 );
-		createLayout->addWidget( convexMethod, 2, 1 );
-		createLayout->addWidget( new QLabel( tr( "Preset" ), createGroup ), 3, 0 );
-		createLayout->addLayout( presetLine, 3, 1 );
-		auto * defaultsToggle = new QToolButton( createGroup );
-		defaultsToggle->setText( tr( "New collision defaults" ) );
-		defaultsToggle->setCheckable( true );
-		defaultsToggle->setChecked( createSettings.value( "CollisionManager/Create/DefaultsExpanded", false ).toBool() );
-		defaultsToggle->setArrowType( defaultsToggle->isChecked() ? Qt::DownArrow : Qt::RightArrow );
-		defaultsToggle->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
-		/* Two material pickers live in this dock and neither said which was which.
-		 * This one is a DEFAULT for whatever Create makes next; the other, in the
-		 * selected-body editor, edits the body you have selected right now.
+		materialEdit->hide();		// kept as the material MODEL; the menu is the UI
+
+		/* ONE BUTTON, and its menu carries everything that used to be a row.
+		 *
+		 * The group was five shape buttons, a convex-method combo, a preset combo
+		 * and its save button, an expander hiding a material picker and a Replace
+		 * tick, an Optimize button and a Create button — eleven controls, of which
+		 * the method line applies to one shape, Optimize to two, and the rest are
+		 * defaults you set once and forget. All of it was permanently on screen in
+		 * a docked panel that is mostly the list above it.
+		 *
+		 * Now: click Create to make one with the shape you last used, or open the
+		 * menu to pick a different shape and to reach the defaults. The split
+		 * button keeps the common case at one click, which a plain menu button
+		 * would have cost.
 		 */
-		auto * materialLabel = new QLabel( tr( "Material for new collision" ), createGroup );
-		auto * materialLineWidget = new QWidget( createGroup );
-		auto * materialLine = new QHBoxLayout( materialLineWidget );
-		materialLine->setContentsMargins( 0, 0, 0, 0 );
-		materialLine->addWidget( materialEdit, 1 );
-		materialLine->addWidget( replace );
-		createLayout->addWidget( defaultsToggle, 4, 0, 1, 2 );
-		createLayout->addWidget( materialLabel, 5, 0 );
-		createLayout->addWidget( materialLineWidget, 5, 1 );
-		materialLabel->setVisible( defaultsToggle->isChecked() );
-		materialLineWidget->setVisible( defaultsToggle->isChecked() );
-		connect( defaultsToggle, &QToolButton::toggled, this,
-			[defaultsToggle, materialLabel, materialLineWidget]( bool expanded ) {
-				defaultsToggle->setArrowType( expanded ? Qt::DownArrow : Qt::RightArrow );
-				materialLabel->setVisible( expanded );
-				materialLineWidget->setVisible( expanded );
-				QSettings().setValue( "CollisionManager/Create/DefaultsExpanded", expanded );
-			} );
-		auto * createActions = new QHBoxLayout;
-		createActions->addWidget( decimateButton );
-		createActions->addWidget( createButton );
-		createLayout->addLayout( createActions, 6, 0, 1, 2 );
+		createButton = new QToolButton( createGroup );
+		createButton->setObjectName( QStringLiteral( "CollisionCreateButton" ) );
+		createButton->setPopupMode( QToolButton::MenuButtonPopup );
+		createButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
+		createButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+		createButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "5px 10px" ) ) );
+		auto * createMenu = new QMenu( createButton );
+		createMenu->setToolTipsVisible( true );
+
+		auto * shapeActions = new QActionGroup( createMenu );
+		shapeActions->setExclusive( true );
+		const QStringList shapeHints = {
+			tr( "Smallest oriented box around the source" ),
+			tr( "Smallest sphere around the source" ),
+			tr( "Capsule along the source's longest axis" ),
+			tr( "Convex hull, or a decomposition into several" ),
+			tr( "The triangles themselves, optionally decimated" )
+		};
+		for ( int mode = 0; mode < shapeNames.size(); mode++ ) {
+			QAction * pick = createMenu->addAction( shapeNames.at( mode ) );
+			pick->setCheckable( true );
+			pick->setToolTip( shapeHints.at( mode ) );
+			pick->setData( mode );
+			shapeActions->addAction( pick );
+		}
+		createMenu->addSeparator();
+
+		// only ever meant anything for Convex; it lived on a permanent row anyway
+		auto * methodMenu = createMenu->addMenu( tr( "Convex Method" ) );
+		auto * methodActions = new QActionGroup( methodMenu );
+		methodActions->setExclusive( true );
+		for ( const QString & name : { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } ) {
+			QAction * pick = methodMenu->addAction( name );
+			pick->setCheckable( true );
+			pick->setData( methodActions->actions().size() );
+			methodActions->addAction( pick );
+		}
+		auto * presetMenu = createMenu->addMenu( tr( "Preset" ) );
+		auto * presetActions = new QActionGroup( presetMenu );
+		presetActions->setExclusive( true );
+		for ( int row = 0; row < preset->count(); row++ ) {
+			QAction * pick = presetMenu->addAction( preset->itemText( row ) );
+			pick->setCheckable( true );
+			pick->setData( preset->itemData( row ) );
+			presetActions->addAction( pick );
+		}
+		/* Material as rows, not the combo in a QWidgetAction. A hosted widget in a
+		 * QMenu only gets the keys the menu chooses to forward and click-to-focus
+		 * through one is the flakiest interaction in Qt — the same reason the
+		 * command palette is a dialog and not a menu with a line edit in it.
+		 */
+		auto * materialMenu = createMenu->addMenu( tr( "Material for New Collision" ) );
+		auto * materialActions = new QActionGroup( materialMenu );
+		materialActions->setExclusive( true );
+		for ( int row = 0; row < materialEdit->count(); row++ ) {
+			QAction * pick = materialMenu->addAction( materialEdit->itemText( row ) );
+			pick->setCheckable( true );
+			pick->setData( row );
+			materialActions->addAction( pick );
+		}
+		QAction * replaceAction = createMenu->addAction( tr( "Replace Existing Shape" ) );
+		replaceAction->setCheckable( true );
+		replaceAction->setChecked( createSettings.value( "CollisionManager/Create/Replace", true ).toBool() );
+		replaceAction->setToolTip( tr( "Off combines the new shape with what the body already has" ) );
+		createMenu->addSeparator();
+		QAction * decimateAction = createMenu->addAction( tr( "Optimize Source Mesh…" ) );
+		decimateAction->setToolTip( tr( "Open the live decimation preview for the selected render mesh" ) );
+		// no icons on any of these rows, so the checkmark keeps its column and
+		// none of them need the filled-row treatment an icon would force
+		createButton->setMenu( createMenu );
+
+		// the button says which shape it will make, so the menu is never needed
+		// just to find out what clicking will do
+		auto showShape = [this, shapeActions]() {
+			for ( QAction * a : shapeActions->actions() )
+				if ( a->isChecked() )
+					createButton->setText( tr( "Create %1 Collision" ).arg( a->text() ) );
+		};
+		const int savedShape = std::clamp(
+			createSettings.value( "CollisionManager/Create/Shape", 3 ).toInt(), 0, 4 );
+		shapeActions->actions().at( savedShape )->setChecked( true );
+		methodActions->actions().at( std::clamp(
+			createSettings.value( "CollisionManager/Create/ConvexMethod", 0 ).toInt(), 0, 1 ) )->setChecked( true );
+		if ( QAction * p = presetActions->actions().value(
+				std::max( 0, preset->currentIndex() ) ) )
+			p->setChecked( true );
+		if ( QAction * m = materialActions->actions().value(
+				std::max( 0, materialEdit->currentIndex() ) ) )
+			m->setChecked( true );
+		showShape();
+
+		createLayout->addWidget( createButton, 0, 0, 1, 2 );
 		/* Create and Test share the bottom of the panel, one at a time.
 		 *
 		 * They are the two things you do with collision once you can see it --
@@ -2619,6 +2636,10 @@ private:
 			QAction * decompileAllAction = menu.addAction( tr( "Decompile All" ) );
 			QAction * compileAction = menu.addAction( tr( "Compile Selected" ) );
 			compileAction->setEnabled( !compiled );
+			// moved off a permanent button: it targets the row that was clicked,
+			// which is exactly what a row menu is for
+			QAction * importDonor = menu.addAction( tr( "Import Donor..." ) );
+			importDonor->setToolTip( tr( "Copy collision from another NIF onto this target node" ) );
 			menu.addSeparator();
 			QAction * check = menu.addAction( tr( "Check Collision" ) );
 			QAction * makeRenderProxy = menu.addAction( tr( "Create Editable Mesh Copy" ) );
@@ -2638,6 +2659,7 @@ private:
 			else if ( chosen == decompileAllAction )
 				runSpell( QStringLiteral( "Havok/Decompile All Compiled Collision" ), QModelIndex() );
 			else if ( chosen == compileAction ) compileSelectedCollision();
+			else if ( chosen == importDonor ) importDonorCollision();
 			else if ( chosen == check ) lintCollision();
 			else if ( chosen == makeRenderProxy ) collisionToBSTriShape();
 			else if ( chosen == massFromMaterialAction ) calculateMassFromMaterial();
@@ -2697,20 +2719,29 @@ private:
 		connect( compileSelectedAction, &QAction::triggered, this, [this]() { compileSelectedCollision(); } );
 		connect( decompilePhysicsButton, &QPushButton::clicked, decompileSelectedAction, &QAction::trigger );
 		connect( refreshAction, &QAction::triggered, this, [this]() { rebuild(); } );
-		connect( lint, &QPushButton::clicked, this, [this]() { lintCollision(); } );
-		connect( donor, &QPushButton::clicked, this, [this]() { importDonorCollision(); } );
+		connect( lintAction, &QAction::triggered, this, [this]() { lintCollision(); } );
 		connect( reverseAction, &QAction::triggered, this, [this]() { collisionToBSTriShape(); } );
 		connect( massFromMaterial, &QPushButton::clicked, this, [this]() { calculateMassFromMaterial(); } );
-		connect( shapeGroup, &QButtonGroup::idToggled, this,
-			[convexMethod, convexMethodLabel, this]( int id, bool checked ) {
-				if ( checked ) {
-					convexMethod->setVisible( id == 3 );
-					convexMethodLabel->setVisible( id == 3 );
-					decimateButton->setVisible( id == 3 || id == 4 );
-				}
-			} );
-		auto saveCreationSettings = [preset, materialEdit, replace, convexMethod]() {
+		/* Every menu choice writes through immediately.
+		 *
+		 * The save button that used to do this is gone, and with it the state
+		 * where the panel showed one preset and the next Create used another
+		 * because nobody pressed save. A menu you ticked is a decision; asking
+		 * for it to be confirmed by a second control was the panel not believing
+		 * the first one.
+		 */
+		auto saveCreationSettings = [preset, materialEdit, replaceAction, methodActions,
+				presetActions, materialActions, shapeActions]() {
 			QSettings settings;
+			for ( QAction * a : shapeActions->actions() )
+				if ( a->isChecked() )
+					settings.setValue( "CollisionManager/Create/Shape", a->data().toInt() );
+			for ( QAction * a : presetActions->actions() )
+				if ( a->isChecked() )
+					preset->setCurrentIndex( preset->findData( a->data() ) );
+			for ( QAction * a : materialActions->actions() )
+				if ( a->isChecked() )
+					materialEdit->setCurrentIndex( a->data().toInt() );
 			int presetId = preset->currentData().toInt();
 			settings.setValue( "CollisionManager/Create/Preset", presetId );
 			int createLayer = presetId == 0 ? 1 : presetId == 1 ? 10
@@ -2721,25 +2752,45 @@ private:
 			int materialRow = materialEdit->findText( materialValue, Qt::MatchFixedString );
 			if ( materialRow >= 0 ) materialValue = materialEdit->itemData( materialRow ).toString();
 			settings.setValue( "CollisionManager/Create/Material", materialValue );
-			settings.setValue( "CollisionManager/Create/Replace", replace->isChecked() );
-			settings.setValue( "CollisionManager/Create/ConvexMethod", convexMethod->currentIndex() );
+			settings.setValue( "CollisionManager/Create/Replace", replaceAction->isChecked() );
+			int method = 0;
+			for ( QAction * a : methodActions->actions() )
+				if ( a->isChecked() )
+					method = a->data().toInt();
+			settings.setValue( "CollisionManager/Create/ConvexMethod", method );
 			settings.beginGroup( "Spells/Havok/Create Convex Shapes" );
-			settings.setValue( "Replace Shape", replace->isChecked() );
+			settings.setValue( "Replace Shape", replaceAction->isChecked() );
 			settings.endGroup();
 		};
-		connect( savePreset, &QToolButton::clicked, this, [saveCreationSettings]() { saveCreationSettings(); } );
-		connect( createButton, &QPushButton::clicked, this, [this, shapeGroup, convexMethod, saveCreationSettings]() {
+		for ( QActionGroup * group : { shapeActions, methodActions, presetActions, materialActions } )
+			connect( group, &QActionGroup::triggered, this,
+				[saveCreationSettings, showShape]( QAction * ) { saveCreationSettings(); showShape(); } );
+		connect( replaceAction, &QAction::toggled, this,
+			[saveCreationSettings]( bool ) { saveCreationSettings(); } );
+
+		auto createCollision = [this, shapeActions, methodActions, saveCreationSettings]() {
 			saveCreationSettings();
-			int mode = std::clamp( shapeGroup->checkedId(), 0, 4 );
-			if ( mode == 3 ) { showCollisionPreview( 0, 100.0, convexMethod->currentIndex() == 1 ); return; }
+			int mode = 3;
+			for ( QAction * a : shapeActions->actions() )
+				if ( a->isChecked() )
+					mode = a->data().toInt();
+			bool decomposition = false;
+			for ( QAction * a : methodActions->actions() )
+				if ( a->isChecked() )
+					decomposition = a->data().toInt() == 1;
+			if ( mode == 3 ) { showCollisionPreview( 0, 100.0, decomposition ); return; }
 			if ( mode == 4 ) { showCollisionPreview( 1, 100.0 ); return; }
 			QString spellId;
 			if ( mode == 0 ) spellId = QStringLiteral( "Havok/Create Box Collision" );
 			else if ( mode == 1 ) spellId = QStringLiteral( "Havok/Create Sphere Collision" );
 			else if ( mode == 2 ) spellId = QStringLiteral( "Havok/Create Capsule Collision" );
 			runSpell( spellId, currentSource() );
-		} );
-		connect( decimateButton, &QPushButton::clicked, this, [this]() {
+		};
+		connect( createButton, &QToolButton::clicked, this, [createCollision]() { createCollision(); } );
+		// picking a shape from the menu makes it, rather than only arming the button
+		connect( shapeActions, &QActionGroup::triggered, this,
+			[createCollision]( QAction * ) { createCollision(); } );
+		connect( decimateAction, &QAction::triggered, this, [this]() {
 			showCollisionPreview( 1, 50.0 );
 		} );
 		for ( QDoubleSpinBox * spin : { mass, friction, restitution, linearDamping,
