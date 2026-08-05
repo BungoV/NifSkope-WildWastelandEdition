@@ -1092,6 +1092,16 @@ static QModelIndex collisionAttachNode( NifModel * nif, const QModelIndex & inde
 static void collisionConsumeSource( NifModel * nif, const QPersistentModelIndex & source,
 	const QModelIndex & body )
 {
+	/* KEEP THE MESH? Off by default, which is what this has always done.
+	 *
+	 * Converting a mesh to collision consumes it, and the standing advice was
+	 * "duplicate it first if you want it kept" — a footgun a checkbox can just
+	 * remove. Gated here rather than at the call sites because every create
+	 * path funnels through this one function, and a per-caller flag is how you
+	 * end up with two of them that disagree.
+	 */
+	if ( QSettings().value( QStringLiteral( "CollisionManager/Create/KeepMesh" ), false ).toBool() )
+		return;
 	const QModelIndex block( source );
 	if ( !block.isValid() || !nif->blockInherits( body, "bhkRigidBody" ) )
 		return;

@@ -30,10 +30,27 @@ disabled rather than absent, so the menu reads the same either way. `Expand
 Shapes` was dereferencing the row unconditionally while it was there, which that
 early return had been hiding.
 
+### Keep the source mesh
+
+A checkbox in the shape popup, **off** by default, which is what creating
+collision from a mesh has always done — it consumes it, and the standing advice
+was "duplicate it first if you want it kept". That is a footgun a checkbox
+removes.
+
+Gated inside `collisionConsumeSource` (havok.cpp), the one function every create
+path funnels through, rather than at the call sites: a per-caller flag is how
+you end up with two that disagree.
+
+Measured both ways rather than eyeballed, using a check that already existed.
+`collision_per_shape` asserts "the meshes that became collision are gone". With
+the setting off it passes; with it on that exact check **fails**, which is the
+proof the toggle does something — a setting that quietly did nothing would leave
+it passing in both runs.
+
 ### Still to do from the same request
 
-Parent column, re-parenting from the block list, and mesh-to-collision-shape on
-a chosen body are **not** in this entry.
+Parent column, re-parenting from the block list, and a **Mesh to Collision**
+entry on the row menu targeting a chosen body are **not** in this entry.
 
 ## 2026-08-05q — The startup view now actually applies
 

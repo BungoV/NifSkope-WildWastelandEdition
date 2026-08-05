@@ -3072,6 +3072,15 @@ private:
 		auto * replace = new QCheckBox( tr( "Replace existing shape" ), createPopup );
 		replace->setChecked( createSettings.value( "CollisionManager/Create/Replace", true ).toBool() );
 		replace->setToolTip( tr( "Off combines the new shape with what the body already has" ) );
+		/* KEEP THE SOURCE MESH. Off by default, which is the long-standing
+		 * behaviour: creating collision from a mesh consumes it. The advice was
+		 * "duplicate it first if you want it kept", which is a footgun a
+		 * checkbox removes. Read in collisionConsumeSource (havok.cpp), the one
+		 * function every create path funnels through.
+		 */
+		auto * keepMesh = new QCheckBox( tr( "Keep the source mesh" ), createPopup );
+		keepMesh->setChecked( createSettings.value( "CollisionManager/Create/KeepMesh", false ).toBool() );
+		keepMesh->setToolTip( tr( "Off consumes the mesh, turning it into the collision shape" ) );
 
 		/* And the body settings, which used not to be here at all.
 		 *
@@ -3189,6 +3198,7 @@ private:
 		shapeForm->addWidget( new QLabel( tr( "Material" ), shapePopup ), 0, 0 );
 		shapeForm->addWidget( materialEdit, 0, 1 );
 		shapeForm->addWidget( replace, 1, 0, 1, 2 );
+		shapeForm->addWidget( keepMesh, 2, 0, 1, 2 );
 		shapeLayout->addLayout( shapeForm );
 
 		auto * shapeButtons = new QHBoxLayout;
@@ -3635,7 +3645,7 @@ private:
 		 * for it to be confirmed by a second control was the panel not believing
 		 * the first one.
 		 */
-		auto saveCreationSettings = [this, preset, materialEdit, replace, shapeGroup]() {
+		auto saveCreationSettings = [this, preset, materialEdit, replace, keepMesh, shapeGroup]() {
 			QSettings settings;
 			settings.setValue( "CollisionManager/Create/Shape", std::clamp( shapeGroup->checkedId(), 0, 4 ) );
 			// A saved preset carries its NAME here. toInt() on a QString is 0,
@@ -3662,6 +3672,7 @@ private:
 			if ( materialRow >= 0 ) materialValue = materialEdit->itemData( materialRow ).toString();
 			settings.setValue( "CollisionManager/Create/Material", materialValue );
 			settings.setValue( "CollisionManager/Create/Replace", replace->isChecked() );
+			settings.setValue( "CollisionManager/Create/KeepMesh", keepMesh->isChecked() );
 			// ConvexMethod is the preview's now; it writes it on Apply
 			settings.beginGroup( "Spells/Havok/Create Convex Shapes" );
 			settings.setValue( "Replace Shape", replace->isChecked() );
@@ -3794,6 +3805,8 @@ private:
 			connect( s, &QDoubleSpinBox::editingFinished, this,
 				[saveCreationSettings]() { saveCreationSettings(); } );
 		connect( replace, &QCheckBox::toggled, this,
+			[saveCreationSettings]( bool ) { saveCreationSettings(); } );
+		connect( keepMesh, &QCheckBox::toggled, this,
 			[saveCreationSettings]( bool ) { saveCreationSettings(); } );
 
 		/* Create Collision Body: the object, the body, and every physics value.
