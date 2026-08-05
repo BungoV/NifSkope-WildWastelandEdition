@@ -7511,8 +7511,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QStringLiteral( "CollisionCreateMaterial" ) );
 					if ( !mat ) { log << "no material combo\n"; fails++; checks++; break; }
 					check( "the material field is not a text box", !mat->isEditable() );
-					log << "material rows: " << mat->count() << "\n";
-					check( "it lists the vanilla materials", mat->count() > 20 );
+					/* Fallout 4's list, not whichever game's list was current when
+					 * the panel happened to be built.
+					 *
+					 * materialEnumType() reads getBSVersion(), which is 0 before a
+					 * file is opened — and the panel exists first. Filling the
+					 * combo at construction got Oblivion's 32 materials
+					 * permanently, on a Fallout 4 file that has 157. "More than
+					 * 20" passed on exactly that, so the count is checked against
+					 * the OTHER combo, which is refilled on load and is the one
+					 * the editor below has always used.
+					 */
+					auto * editorMaterial = dock->findChild<QComboBox *>(
+						QStringLiteral( "CollisionMaterialCombo" ) );
+					log << "material rows: create " << mat->count()
+						<< ", editor " << ( editorMaterial ? editorMaterial->count() : -1 ) << "\n";
+					check( "it lists this game's materials, not the last game's",
+						editorMaterial && mat->count() >= editorMaterial->count()
+						&& mat->count() > 100 );
 					mat->showPopup();
 					QApplication::processEvents();
 					QFrame * matPop = nullptr;

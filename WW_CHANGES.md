@@ -1,5 +1,45 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05j — The material list was Oblivion's
+
+bungo: *"Material is missing all the material types in Fo4."* It was showing
+**32** materials. Fallout 4 has **157**.
+
+`materialEnumType()` reads `getBSVersion()` to decide which game's table to
+offer, and `getBSVersion()` is **0 before a file is opened** — which returns
+`OblivionHavokMaterial`. The create-side list was filled once, inline in
+`buildUi`, and the panel is constructed before anything is loaded. So it got
+Oblivion's list and kept it for the rest of the session, on every file.
+
+The same shape as the layer combo two entries ago, in the one list that was
+still being built at construction. It is a member now, refilled by
+`populatePhysicsEnums()` — which already runs on `modelReset` for exactly this
+reason — and the stored selection is applied afterwards by `loadCreateFields()`.
+
+The create list keys its items by material **name** where the editor's keys by
+numeric value, because `CollisionManager/Create/Material` stores a name: a
+custom material named in a BGSM has to keep working when nif.xml has never heard
+of it. The two conventions are opposite on purpose and the code now says so.
+
+### Measured
+
+The old check asked for **more than 20 rows**, and 32 is more than 20. It passed
+on the bug for two builds. It compares against the editor's combo now — the one
+that has always been refilled on load — and demands a three-figure list:
+
+```
+material rows: create 159, editor 158
+  ok   it lists this game's materials, not the last game's
+material drop-down: search 1, add-custom 1, rows 159
+```
+
+A threshold picked to be safely below the right answer is a threshold the wrong
+answer can also clear. Checking one list against another that is known to be
+refreshed cannot be satisfied by a stale one.
+
+28 checks. `collision_undo` (12), `collision_compiled_edit` (7),
+`collision_per_shape` (2+8+8).
+
 ## 2026-08-05i — The material field was still a text box
 
 bungo: *"Material type still only type in, no dropdown with vanilla fo4

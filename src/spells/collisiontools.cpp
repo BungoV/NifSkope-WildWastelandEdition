@@ -590,6 +590,9 @@ private:
 	QFrame * createPopup = nullptr;
 	//! The create popup's copy of the body settings. Named like the editor's
 	//! below it because they are the same eleven fields, seeding instead of editing.
+	//! A member, not a buildUi local, because its list is version-specific and
+	//! has to be refilled when a file loads. See populatePhysicsEnums.
+	WwSearchCombo * createMaterialCombo = nullptr;
 	QComboBox * createLayerCombo = nullptr;
 	QComboBox * createMotion = nullptr;
 	QComboBox * createQuality = nullptr;
@@ -909,6 +912,36 @@ private:
 			addEnum( createSolver, QStringLiteral( "hkSolverDeactivation" ),
 				QStringLiteral( "SOLVER_DEACTIVATION_" ) );
 		}
+		/* The create-side material list, built here for the same reason.
+		 *
+		 * It stores the NAME as the item data, where the editor's stores the
+		 * numeric value: CollisionManager/Create/Material holds a name, so that
+		 * a custom material named in a BGSM keeps working when nif.xml has never
+		 * heard of it. The two conventions are opposite on purpose; do not
+		 * "tidy" one into the other.
+		 */
+		if ( createMaterialCombo ) {
+			QSignalBlocker bcmat( createMaterialCombo );
+			createMaterialCombo->clear();
+			for ( int i = 0; i < material->count(); i++ ) {
+				const quint32 value = material->itemData( i ).toUInt();
+				createMaterialCombo->addItem( material->itemText( i ),
+					material->itemData( i, Qt::UserRole + 1 ) );
+				const int row = createMaterialCombo->count() - 1;
+				createMaterialCombo->setItemData( row, value, Qt::UserRole + 1 );
+				createMaterialCombo->setItemData( row, materialToolTip( value ), Qt::ToolTipRole );
+			}
+			const QVariantMap createCustomMaterials = customMaterials();
+			for ( auto it = createCustomMaterials.cbegin(); it != createCustomMaterials.cend(); ++it ) {
+				if ( createMaterialCombo->findData( it.value().toUInt(), Qt::UserRole + 1 ) >= 0 )
+					continue;
+				createMaterialCombo->addItem( it.key(), QStringLiteral( "0x%1" )
+					.arg( it.value().toUInt(), 8, 16, QLatin1Char( '0' ) ) );
+				const int row = createMaterialCombo->count() - 1;
+				createMaterialCombo->setItemData( row, it.value().toUInt(), Qt::UserRole + 1 );
+				createMaterialCombo->setItemData( row, materialToolTip( it.value().toUInt() ), Qt::ToolTipRole );
+			}
+		}
 	}
 
 	/*! Fill the create popup's fields from what is stored, preset as the fallback.
@@ -944,6 +977,29 @@ private:
 			const quint32 v = stored( key ).toUInt();
 			return v ? v : d.value( key ).toUInt();
 		};
+		/* The material, by the name that was stored.
+		 *
+		 * By name and not by value because that is what the setting holds — a
+		 * custom material can outlive nif.xml's knowledge of it. A name matching
+		 * no row is added as one rather than dropped: the field is not a text box
+		 * any more, so there is nowhere else for it to be shown.
+		 */
+		if ( createMaterialCombo ) {
+			QSignalBlocker bmat( createMaterialCombo );
+			const QString name = s.value( "CollisionManager/Create/Material",
+				QStringLiteral( "MaterialMetalSolid" ) ).toString().trimmed();
+			int row = createMaterialCombo->findData( name );
+			bool numeric = false;
+			const quint32 asValue = name.toUInt( &numeric, 0 );
+			if ( row < 0 && numeric )
+				row = createMaterialCombo->findData( asValue, Qt::UserRole + 1 );
+			if ( row < 0 && !name.isEmpty() ) {
+				createMaterialCombo->addItem( name, name );
+				row = createMaterialCombo->count() - 1;
+			}
+			if ( row >= 0 )
+				createMaterialCombo->setCurrentIndex( row );
+		}
 		selectComboValue( createLayerCombo, enumValue( QStringLiteral( "Layer" ) ) );
 		selectComboValue( createMotion, enumValue( QStringLiteral( "MotionSystem" ) ) );
 		selectComboValue( createQuality, enumValue( QStringLiteral( "QualityType" ) ) );
@@ -2493,40 +2549,18 @@ private:
 		 * which is the whole reason the closed field does not need to be a text
 		 * box.
 		 */
-		auto * materialEdit = new WwSearchCombo( createGroup, tr( "Search materials" ) );
-		materialEdit->setObjectName( QStringLiteral( "CollisionCreateMaterial" ) );
-		QMap<QString, QPair<quint32, QString>> createMaterials;
-		const auto & createMaterialOptions = NifValue::enumOptionData( materialEnumType() ).o;
-		for ( auto it = createMaterialOptions.cbegin(); it != createMaterialOptions.cend(); ++it )
-			createMaterials.insert( knownMaterialText( it.key() ), qMakePair( it.key(), it.value().first ) );
-		for ( auto it = createMaterials.cbegin(); it != createMaterials.cend(); ++it ) {
-			materialEdit->addItem( it.key(), it.value().second );
-			int row = materialEdit->count() - 1;
-			materialEdit->setItemData( row, it.value().first, Qt::UserRole + 1 );
-			materialEdit->setItemData( row, materialToolTip( it.value().first ), Qt::ToolTipRole );
-		}
-		const QVariantMap createCustomMaterials = customMaterials();
-		for ( auto it = createCustomMaterials.cbegin(); it != createCustomMaterials.cend(); ++it ) {
-			if ( materialEdit->findData( it.value().toUInt(), Qt::UserRole + 1 ) >= 0 ) continue;
-			materialEdit->addItem( it.key(), QStringLiteral( "0x%1" ).arg( it.value().toUInt(), 8, 16, QLatin1Char( '0' ) ) );
-			int row = materialEdit->count() - 1;
-			materialEdit->setItemData( row, it.value().toUInt(), Qt::UserRole + 1 );
-			materialEdit->setItemData( row, materialToolTip( it.value().toUInt() ), Qt::ToolTipRole );
-		}
-		// no completer: it belongs to a line edit, and there is not one any more
-		QString savedMaterial = createSettings.value( "CollisionManager/Create/Material", "MaterialMetalSolid" ).toString().trimmed();
-		int savedMaterialRow = materialEdit->findData( savedMaterial );
-		bool savedIsNumber = false;
-		quint32 savedMaterialValue = savedMaterial.toUInt( &savedIsNumber, 0 );
-		if ( savedMaterialRow < 0 && savedIsNumber )
-			savedMaterialRow = materialEdit->findData( savedMaterialValue, Qt::UserRole + 1 );
-		// a stored name that matches no row is one this list has lost -- keep it
-		// as a real row rather than as edit text there is no longer a box for
-		if ( savedMaterialRow < 0 && !savedMaterial.isEmpty() ) {
-			materialEdit->addItem( savedMaterial, savedMaterial );
-			savedMaterialRow = materialEdit->count() - 1;
-		}
-		if ( savedMaterialRow >= 0 ) materialEdit->setCurrentIndex( savedMaterialRow );
+		/* Empty here on purpose. The list is FILLED by populatePhysicsEnums.
+		 *
+		 * Which materials exist depends on the game, and materialEnumType() reads
+		 * getBSVersion() — which is 0 while the panel is being built, because the
+		 * panel exists before any file is opened. Filling it here got Oblivion's
+		 * 32 materials, permanently, on a Fallout 4 file with 157. Same shape as
+		 * the layer combo: it is a member so the refill on modelReset can reach
+		 * it, and the stored selection is applied by loadCreateFields afterwards.
+		 */
+		createMaterialCombo = new WwSearchCombo( createGroup, tr( "Search materials" ) );
+		createMaterialCombo->setObjectName( QStringLiteral( "CollisionCreateMaterial" ) );
+		auto * materialEdit = createMaterialCombo;
 		// reparented into the popup below, where it stays a searchable combo
 
 		/* ONE BUTTON, and a popup with everything in it at once.
