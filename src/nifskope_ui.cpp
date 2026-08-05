@@ -7451,37 +7451,58 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					// --- the creation group is one button ---------------------
 					auto * create = dock->findChild<QToolButton *>( QStringLiteral( "CollisionCreateButton" ) );
-					if ( !create || !create->menu() ) {
-						log << "no create split button\n"; fails++; checks++; break;
-					}
-					int shapes = 0, submenus = 0;
-					QStringList rows;
-					for ( QAction * a : create->menu()->actions() ) {
-						if ( a->isSeparator() ) continue;
-						rows << a->text();
-						if ( a->menu() ) submenus++;
-						else if ( a->isCheckable() && !a->data().isNull() ) shapes++;
-					}
-					log << "create menu: " << rows.join( " | " ) << "\n";
-					check( "all five shapes are in the one menu", shapes == 5 );
-					check( "so are the settings that used to be rows",
-						submenus == 3 );		// Convex Method, Preset, Material
+					if ( !create ) { log << "no create button\n"; fails++; checks++; break; }
 					log << "button reads: '" << create->text() << "'\n";
-					check( "the button says which shape it will make",
-						create->text().contains( QLatin1String( "Create" ) )
-						&& create->text().split( QLatin1Char( ' ' ) ).size() > 2 );
+					check( "the button is the one generic Create Collision",
+						create->text().startsWith( QLatin1String( "Create Collision" ) ) );
+					check( "...and is not a dropdown", create->menu() == nullptr );
+
+					/* The popup opens on click and carries the whole decision at
+					 * once: five shapes and every setting, none of them nested
+					 * behind a submenu.
+					 */
+					auto * popup = skope->findChild<QFrame *>( QStringLiteral( "CollisionCreatePopup" ) );
+					if ( !popup ) { log << "no create popup\n"; fails++; checks++; break; }
+					create->click();
+					QApplication::processEvents();
+					check( "clicking the button opens the popup", popup->isVisible() );
+
+					const QList<QToolButton *> shapeButtons = popup->findChildren<QToolButton *>();
+					int shapes = 0;
+					QStringList names;
+					for ( QToolButton * b : shapeButtons )
+						if ( b->isCheckable() ) { shapes++; names << b->text(); }
+					log << "popup shapes: " << names.join( QLatin1String( " | " ) ) << "\n";
+					check( "all five shapes are in the popup", shapes == 5 );
+					const int combos = popup->findChildren<QComboBox *>().size();
+					const int ticks = popup->findChildren<QCheckBox *>().size();
+					log << "popup settings: " << combos << " combo(s), " << ticks << " tick(s)\n";
+					check( "and the settings are visible beside them, not nested",
+						combos == 3 && ticks == 1 );	// method, preset, material + Replace
 
 					/* Picking a shape has to WRITE it. The spells read
-					 * CollisionManager/Create/Shape, so a menu that only ticked
-					 * itself would look right and make the wrong shape.
+					 * CollisionManager/Create/Shape, so a popup that only ticked
+					 * its own button would look right and make the wrong shape.
 					 */
-					QSettings().setValue( QStringLiteral( "CollisionManager/Create/Shape" ), 4 );
-					for ( QAction * a : create->menu()->actions() )
-						if ( a->isCheckable() && a->data().toInt() == 0 && !a->menu() ) { a->trigger(); break; }
+					/* Click something ELSE first. The shape is restored from
+					 * QSettings when the panel is built, so on the second run of
+					 * this harness Box was already the checked button — and
+					 * clicking the checked member of an exclusive group emits
+					 * nothing, writes nothing, and fails a check that passed the
+					 * time before. Force the state being measured.
+					 */
+					for ( QToolButton * b : shapeButtons )
+						if ( b->isCheckable() && b->text() == QLatin1String( "Mesh" ) ) { b->click(); break; }
+					QApplication::processEvents();
+					QSettings().setValue( QStringLiteral( "CollisionManager/Create/Shape" ), -1 );
+					for ( QToolButton * b : shapeButtons )
+						if ( b->isCheckable() && b->text() == QLatin1String( "Box" ) ) { b->click(); break; }
 					QApplication::processEvents();
 					const int wrote = QSettings().value( QStringLiteral( "CollisionManager/Create/Shape" ), -1 ).toInt();
 					log << "picking Box wrote Shape=" << wrote << "\n";
 					check( "picking a shape writes the key the spells read", wrote == 0 );
+					popup->hide();
+					QApplication::processEvents();
 
 					/* --- nothing was left behind unplaced -------------------
 					 * The failure this is for: a widget whose row was deleted
@@ -7531,12 +7552,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "nothing is left parented to the group but unplaced", unplaced == 0 );
 
 					// --- the old controls are gone ----------------------------
+					/* Buttons ON THE PANEL, so children of the popup do not count:
+					 * Optimize Source Mesh is supposed to be in there now, and
+					 * findChildren walks into it because the popup is parented to
+					 * the panel that owns it.
+					 */
 					int oldButtons = 0;
-					for ( QPushButton * b : dock->findChildren<QPushButton *>() )
+					for ( QPushButton * b : dock->findChildren<QPushButton *>() ) {
+						if ( popup->isAncestorOf( b ) )
+							continue;
 						if ( b->text() == QLatin1String( "Check Collision" )
 							|| b->text() == QLatin1String( "Import Donor" )
 							|| b->text().startsWith( QLatin1String( "Optimize Source" ) ) )
 							oldButtons++;
+					}
 					int oldDisplay = 0;
 					for ( QCheckBox * c : dock->findChildren<QCheckBox *>() )
 						if ( c->text() == QLatin1String( "Show collision" ) || c->text() == QLatin1String( "Solid" )

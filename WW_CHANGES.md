@@ -1,5 +1,71 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05f — Create Collision opens a popup, not a dropdown
+
+bungo: *"Rename the button to 'Create Collision'. Do not make it a dropdown
+menu, but a popup one with all the options."* Which is the original request read
+correctly — "have the relevant settings in that menu" meant **all of them, at
+once**, not five submenus.
+
+The split button is gone. One plain **Create Collision…** button opens a popup
+panel holding the whole decision:
+
+```
+[ Box ] [ Sphere ] [ Capsule ] [ Convex ] [ Mesh ]
+Convex method  [ Single Hull (qhull) ▾ ]     (Convex only)
+Preset         [ Prop (dynamic)      ▾ ]
+Material       [ MaterialMetalSolid  ▾ ]
+[x] Replace existing shape
+[ Optimize Source Mesh… ]                    [ Create ]
+```
+
+Nested submenus buried what the permanent group did well and the only thing it
+did well: you could not see the preset and the material at the same time, and
+reading either cost two hovers. A panel shows them together — and none of it is
+on screen unless it was asked for, which was the point of the declutter.
+
+It also gives the **material picker back its search**. In a `QMenu` it had to be
+thirty flat rows, because a combo hosted in a menu only gets the keys the menu
+chooses to forward and click-to-focus through a `QWidgetAction` is the flakiest
+interaction in Qt. In a plain popup frame it is an ordinary widget again.
+
+The popup opens under the button, clamped to the screen and flipping above it
+when there is no room below — not centred on the display, which was the first
+idea. The panel is docked at one edge and the thing being operated on is in the
+viewport beside it, so the middle of the screen is the one place the eyes are
+not. Same reasoning as the search menu opening where the right-click was.
+
+### Measured
+
+`collision_panel.sh` follows the button:
+
+```
+button reads: 'Create Collision…'
+  ok   the button is the one generic Create Collision
+  ok   ...and is not a dropdown
+  ok   clicking the button opens the popup
+popup shapes: Box | Sphere | Capsule | Convex | Mesh
+  ok   all five shapes are in the popup
+popup settings: 3 combo(s), 1 tick(s)
+  ok   and the settings are visible beside them, not nested
+picking Box wrote Shape=0
+  ok   picking a shape writes the key the spells read
+```
+
+Two things the harness caught on itself, both worth recording:
+
+**It counted the popup's own buttons as panel clutter.** `findChildren` walks
+into the popup, because the popup is parented to the panel that owns it — so
+*Optimize Source Mesh*, which is supposed to be in there, read as a leftover.
+The scan skips anything the popup is an ancestor of.
+
+**It passed once and then failed on the next run.** The shape is restored from
+`QSettings` when the panel is built, so the second time round Box was already
+the checked button — and clicking the checked member of an exclusive group emits
+nothing and writes nothing. The harness now clicks Mesh first, so the Box click
+is always a real change. Run twice back to back, both green: that is the
+condition it failed.
+
 ## 2026-08-05e — Three things the declutter broke
 
 bungo, with a screenshot: "We've got an issue." All three are the same kind of

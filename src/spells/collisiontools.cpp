@@ -412,6 +412,8 @@ private:
 	QAction * decompileSelectedAction = nullptr;
 	QAction * compileSelectedAction = nullptr;
 	QToolButton * createButton = nullptr;
+	QPushButton * decimateButton = nullptr;
+	QFrame * createPopup = nullptr;
 	QFrame * previewPanel = nullptr;
 	QWidget * previewBody = nullptr;
 	QComboBox * previewMethod = nullptr;
@@ -2208,7 +2210,7 @@ private:
 		 * above it.
 		 */
 		auto * preset = new QComboBox( createGroup );
-		preset->hide();
+		// both are reparented into the popup below and shown there
 		// Stable data IDs preserve settings written by the original three-item
 		// list while allowing the authoring-oriented display order below.
 		preset->addItem( tr( "Static" ), 0 );
@@ -2258,131 +2260,139 @@ private:
 			savedMaterialRow = materialEdit->findData( savedMaterialValue, Qt::UserRole + 1 );
 		if ( savedMaterialRow >= 0 ) materialEdit->setCurrentIndex( savedMaterialRow );
 		else materialEdit->setEditText( savedMaterial );
-		materialEdit->hide();		// kept as the material MODEL; the menu is the UI
+		// reparented into the popup below, where it stays a searchable combo
 
-		/* ONE BUTTON, and its menu carries everything that used to be a row.
+		/* ONE BUTTON, and a popup with everything in it at once.
 		 *
 		 * The group was five shape buttons, a convex-method combo, a preset combo
 		 * and its save button, an expander hiding a material picker and a Replace
 		 * tick, an Optimize button and a Create button — eleven controls, of which
 		 * the method line applies to one shape, Optimize to two, and the rest are
-		 * defaults you set once and forget. All of it was permanently on screen in
-		 * a docked panel that is mostly the list above it.
+		 * defaults you set once and forget. All of it permanently on screen, in a
+		 * docked panel that is mostly the list above it.
 		 *
-		 * Now: click Create to make one with the shape you last used, or open the
-		 * menu to pick a different shape and to reach the defaults. The split
-		 * button keeps the common case at one click, which a plain menu button
-		 * would have cost.
+		 * A POPUP PANEL, NOT A MENU. The first version put the settings in nested
+		 * submenus off a split button, which buries them: you cannot see the
+		 * preset and the material at the same time, and reading one costs two
+		 * hovers. A panel shows the whole decision at once, which is what the
+		 * permanent group did well and the only thing it did well. Nothing here
+		 * is on screen unless it was asked for.
+		 *
+		 * It is also the only place the material picker can stay searchable — a
+		 * combo inside a QMenu only gets the keys the menu chooses to forward,
+		 * and click-to-focus through a QWidgetAction is the flakiest interaction
+		 * in Qt. In a plain popup frame it is an ordinary widget again.
 		 */
 		createButton = new QToolButton( createGroup );
 		createButton->setObjectName( QStringLiteral( "CollisionCreateButton" ) );
-		createButton->setPopupMode( QToolButton::MenuButtonPopup );
+		createButton->setText( tr( "Create Collision…" ) );
 		createButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
 		createButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
 		createButton->setMinimumHeight( 30 );
-		/* Its own style, not wwBoxedButtonQss.
-		 *
-		 * That one is for toolbar buttons — transparent background, transparent
-		 * border — so the panel's primary action came out as bare text floating
-		 * in the group with no button around it at all. And a MenuButtonPopup
-		 * needs ::menu-button styled explicitly: leave it out and the arrow half
-		 * is drawn by the base style over a stylesheet-painted body, which is the
-		 * detached sliver at the right-hand edge.
+		createButton->setToolTip( tr( "Choose a shape and make collision from the selection" ) );
+		/* Its own style, not wwBoxedButtonQss: that one is for TOOLBAR buttons —
+		 * transparent background, transparent border — so the panel's primary
+		 * action came out as bare text with no button around it.
 		 */
 		createButton->setStyleSheet( QStringLiteral(
 			"QToolButton { background:%1; color:%2; border:1px solid %3; border-radius:3px;"
 			" padding:5px 10px; }"
 			"QToolButton:hover { background:%4; color:%5; }"
-			"QToolButton:pressed { background:%6; }"
-			"QToolButton::menu-button { border:none; border-left:1px solid %3; width:18px; }"
-			"QToolButton::menu-button:hover { background:%4; }" )
+			"QToolButton:pressed { background:%6; }" )
 			.arg( wwSkinColor( "bgBtn" ), wwSkinColor( "text" ), wwSkinColor( "border" ),
 				  wwSkinColor( "bgBtnHover" ), wwSkinColor( "textBright" ),
 				  wwSkinColor( "bgBtnDown" ) ) );
-		auto * createMenu = new QMenu( createButton );
-		createMenu->setToolTipsVisible( true );
 
-		auto * shapeActions = new QActionGroup( createMenu );
-		shapeActions->setExclusive( true );
+		createPopup = new QFrame( this, Qt::Popup );
+		createPopup->setObjectName( QStringLiteral( "CollisionCreatePopup" ) );
+		createPopup->setFrameShape( QFrame::StyledPanel );
+		createPopup->setStyleSheet( QStringLiteral(
+			"QFrame#CollisionCreatePopup { background:%1; border:1px solid %2; }"
+			"QLabel { color:%3; background:transparent; }"
+			"QCheckBox { color:%3; background:transparent; }" )
+			.arg( wwSkinColor( "bgCard" ), wwSkinColor( "borderStrong" ), wwSkinColor( "text" ) ) );
+		auto * popupLayout = new QVBoxLayout( createPopup );
+		popupLayout->setContentsMargins( 10, 10, 10, 10 );
+		popupLayout->setSpacing( 6 );
+
+		auto * shapeRow = new QHBoxLayout;
+		shapeRow->setSpacing( 4 );
+		auto * shapeGroup = new QButtonGroup( createPopup );
+		shapeGroup->setExclusive( true );
 		const QStringList shapeHints = {
 			tr( "Smallest oriented box around the source" ),
 			tr( "Smallest sphere around the source" ),
 			tr( "Capsule along the source's longest axis" ),
 			tr( "Convex hull, or a decomposition into several" ),
-			tr( "The triangles themselves, optionally decimated" )
+			tr( "The triangles of the selected meshes, optionally decimated" )
 		};
 		for ( int mode = 0; mode < shapeNames.size(); mode++ ) {
-			QAction * pick = createMenu->addAction( shapeNames.at( mode ) );
-			pick->setCheckable( true );
-			pick->setToolTip( shapeHints.at( mode ) );
-			pick->setData( mode );
-			shapeActions->addAction( pick );
+			auto * b = new QToolButton( createPopup );
+			b->setText( shapeNames.at( mode ) );
+			b->setToolTip( shapeHints.at( mode ) );
+			b->setCheckable( true );
+			b->setMinimumSize( 58, 30 );
+			b->setToolButtonStyle( Qt::ToolButtonTextOnly );
+			shapeGroup->addButton( b, mode );
+			shapeRow->addWidget( b, 1 );
 		}
-		createMenu->addSeparator();
+		createPopup->setStyleSheet( createPopup->styleSheet() + QStringLiteral(
+			"QToolButton { border: 1px solid %1; border-radius: 3px; padding: 3px; background: %2; color:%6; }"
+			"QToolButton:hover { background: %3; }"
+			"QToolButton:checked { border-color: %4; color: %5; background: %7; }" )
+			.arg( wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
+				  wwSkinColor( "accent" ), wwSkinColor( "accentText" ), wwSkinColor( "text" ),
+				  wwSkinColor( "accentBg" ) ) );
+		popupLayout->addLayout( shapeRow );
 
-		// only ever meant anything for Convex; it lived on a permanent row anyway
-		auto * methodMenu = createMenu->addMenu( tr( "Convex Method" ) );
-		auto * methodActions = new QActionGroup( methodMenu );
-		methodActions->setExclusive( true );
-		for ( const QString & name : { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } ) {
-			QAction * pick = methodMenu->addAction( name );
-			pick->setCheckable( true );
-			pick->setData( methodActions->actions().size() );
-			methodActions->addAction( pick );
-		}
-		auto * presetMenu = createMenu->addMenu( tr( "Preset" ) );
-		auto * presetActions = new QActionGroup( presetMenu );
-		presetActions->setExclusive( true );
-		for ( int row = 0; row < preset->count(); row++ ) {
-			QAction * pick = presetMenu->addAction( preset->itemText( row ) );
-			pick->setCheckable( true );
-			pick->setData( preset->itemData( row ) );
-			presetActions->addAction( pick );
-		}
-		/* Material as rows, not the combo in a QWidgetAction. A hosted widget in a
-		 * QMenu only gets the keys the menu chooses to forward and click-to-focus
-		 * through one is the flakiest interaction in Qt — the same reason the
-		 * command palette is a dialog and not a menu with a line edit in it.
-		 */
-		auto * materialMenu = createMenu->addMenu( tr( "Material for New Collision" ) );
-		auto * materialActions = new QActionGroup( materialMenu );
-		materialActions->setExclusive( true );
-		for ( int row = 0; row < materialEdit->count(); row++ ) {
-			QAction * pick = materialMenu->addAction( materialEdit->itemText( row ) );
-			pick->setCheckable( true );
-			pick->setData( row );
-			materialActions->addAction( pick );
-		}
-		QAction * replaceAction = createMenu->addAction( tr( "Replace Existing Shape" ) );
-		replaceAction->setCheckable( true );
-		replaceAction->setChecked( createSettings.value( "CollisionManager/Create/Replace", true ).toBool() );
-		replaceAction->setToolTip( tr( "Off combines the new shape with what the body already has" ) );
-		createMenu->addSeparator();
-		QAction * decimateAction = createMenu->addAction( tr( "Optimize Source Mesh…" ) );
-		decimateAction->setToolTip( tr( "Open the live decimation preview for the selected render mesh" ) );
-		// no icons on any of these rows, so the checkmark keeps its column and
-		// none of them need the filled-row treatment an icon would force
-		createButton->setMenu( createMenu );
+		auto * popupForm = new QGridLayout;
+		popupForm->setContentsMargins( 0, 0, 0, 0 );
+		popupForm->setHorizontalSpacing( 8 );
+		popupForm->setVerticalSpacing( 4 );
+		popupForm->setColumnStretch( 1, 1 );
+		auto * convexMethod = new QComboBox( createPopup );
+		convexMethod->addItems( { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } );
+		convexMethod->setCurrentIndex( createSettings.value( "CollisionManager/Create/ConvexMethod", 0 ).toInt() );
+		auto * convexMethodLabel = new QLabel( tr( "Convex method" ), createPopup );
+		preset->setParent( createPopup );
+		preset->show();
+		materialEdit->setParent( createPopup );
+		materialEdit->show();
+		auto * replace = new QCheckBox( tr( "Replace existing shape" ), createPopup );
+		replace->setChecked( createSettings.value( "CollisionManager/Create/Replace", true ).toBool() );
+		replace->setToolTip( tr( "Off combines the new shape with what the body already has" ) );
+		for ( QComboBox * c : { convexMethod, preset, materialEdit } )
+			wwMatchFieldStyle( c );
+		popupForm->addWidget( convexMethodLabel, 0, 0 );
+		popupForm->addWidget( convexMethod, 0, 1 );
+		popupForm->addWidget( new QLabel( tr( "Preset" ), createPopup ), 1, 0 );
+		popupForm->addWidget( preset, 1, 1 );
+		popupForm->addWidget( new QLabel( tr( "Material" ), createPopup ), 2, 0 );
+		popupForm->addWidget( materialEdit, 2, 1 );
+		popupForm->addWidget( replace, 3, 0, 1, 2 );
+		popupLayout->addLayout( popupForm );
 
-		// the button says which shape it will make, so the menu is never needed
-		// just to find out what clicking will do
-		auto showShape = [this, shapeActions]() {
-			for ( QAction * a : shapeActions->actions() )
-				if ( a->isChecked() )
-					createButton->setText( tr( "Create %1 Collision" ).arg( a->text() ) );
+		auto * popupButtons = new QHBoxLayout;
+		decimateButton = new QPushButton( tr( "Optimize Source Mesh…" ), createPopup );
+		decimateButton->setToolTip( tr( "Open the live decimation preview for the selected render mesh" ) );
+		auto * popupCreate = new QPushButton( tr( "Create" ), createPopup );
+		popupCreate->setDefault( true );
+		popupButtons->addWidget( decimateButton );
+		popupButtons->addStretch();
+		popupButtons->addWidget( popupCreate );
+		popupLayout->addLayout( popupButtons );
+
+		// the method line is Convex's alone, and Optimize only means anything for
+		// the two shapes built from triangles
+		auto showForShape = [convexMethod, convexMethodLabel, shapeGroup, this]() {
+			const int id = shapeGroup->checkedId();
+			convexMethod->setVisible( id == 3 );
+			convexMethodLabel->setVisible( id == 3 );
+			decimateButton->setVisible( id == 3 || id == 4 );
 		};
-		const int savedShape = std::clamp(
-			createSettings.value( "CollisionManager/Create/Shape", 3 ).toInt(), 0, 4 );
-		shapeActions->actions().at( savedShape )->setChecked( true );
-		methodActions->actions().at( std::clamp(
-			createSettings.value( "CollisionManager/Create/ConvexMethod", 0 ).toInt(), 0, 1 ) )->setChecked( true );
-		if ( QAction * p = presetActions->actions().value(
-				std::max( 0, preset->currentIndex() ) ) )
-			p->setChecked( true );
-		if ( QAction * m = materialActions->actions().value(
-				std::max( 0, materialEdit->currentIndex() ) ) )
-			m->setChecked( true );
-		showShape();
+		shapeGroup->button( std::clamp(
+			createSettings.value( "CollisionManager/Create/Shape", 3 ).toInt(), 0, 4 ) )->setChecked( true );
+		showForShape();
 
 		createLayout->addWidget( createButton, 0, 0, 1, 2 );
 		/* Create and Test share the bottom of the panel, one at a time.
@@ -2767,18 +2777,9 @@ private:
 		 * for it to be confirmed by a second control was the panel not believing
 		 * the first one.
 		 */
-		auto saveCreationSettings = [preset, materialEdit, replaceAction, methodActions,
-				presetActions, materialActions, shapeActions]() {
+		auto saveCreationSettings = [preset, materialEdit, replace, convexMethod, shapeGroup]() {
 			QSettings settings;
-			for ( QAction * a : shapeActions->actions() )
-				if ( a->isChecked() )
-					settings.setValue( "CollisionManager/Create/Shape", a->data().toInt() );
-			for ( QAction * a : presetActions->actions() )
-				if ( a->isChecked() )
-					preset->setCurrentIndex( preset->findData( a->data() ) );
-			for ( QAction * a : materialActions->actions() )
-				if ( a->isChecked() )
-					materialEdit->setCurrentIndex( a->data().toInt() );
+			settings.setValue( "CollisionManager/Create/Shape", std::clamp( shapeGroup->checkedId(), 0, 4 ) );
 			int presetId = preset->currentData().toInt();
 			settings.setValue( "CollisionManager/Create/Preset", presetId );
 			int createLayer = presetId == 0 ? 1 : presetId == 1 ? 10
@@ -2789,32 +2790,27 @@ private:
 			int materialRow = materialEdit->findText( materialValue, Qt::MatchFixedString );
 			if ( materialRow >= 0 ) materialValue = materialEdit->itemData( materialRow ).toString();
 			settings.setValue( "CollisionManager/Create/Material", materialValue );
-			settings.setValue( "CollisionManager/Create/Replace", replaceAction->isChecked() );
-			int method = 0;
-			for ( QAction * a : methodActions->actions() )
-				if ( a->isChecked() )
-					method = a->data().toInt();
-			settings.setValue( "CollisionManager/Create/ConvexMethod", method );
+			settings.setValue( "CollisionManager/Create/Replace", replace->isChecked() );
+			settings.setValue( "CollisionManager/Create/ConvexMethod", convexMethod->currentIndex() );
 			settings.beginGroup( "Spells/Havok/Create Convex Shapes" );
-			settings.setValue( "Replace Shape", replaceAction->isChecked() );
+			settings.setValue( "Replace Shape", replace->isChecked() );
 			settings.endGroup();
 		};
-		for ( QActionGroup * group : { shapeActions, methodActions, presetActions, materialActions } )
-			connect( group, &QActionGroup::triggered, this,
-				[saveCreationSettings, showShape]( QAction * ) { saveCreationSettings(); showShape(); } );
-		connect( replaceAction, &QAction::toggled, this,
+		connect( shapeGroup, &QButtonGroup::idToggled, this,
+			[saveCreationSettings, showForShape]( int, bool checked ) {
+				if ( checked ) { showForShape(); saveCreationSettings(); }
+			} );
+		for ( QComboBox * c : { convexMethod, preset, materialEdit } )
+			connect( c, qOverload<int>( &QComboBox::currentIndexChanged ), this,
+				[saveCreationSettings]( int ) { saveCreationSettings(); } );
+		connect( replace, &QCheckBox::toggled, this,
 			[saveCreationSettings]( bool ) { saveCreationSettings(); } );
 
-		auto createCollision = [this, shapeActions, methodActions, saveCreationSettings]() {
+		auto createCollision = [this, shapeGroup, convexMethod, saveCreationSettings]() {
 			saveCreationSettings();
-			int mode = 3;
-			for ( QAction * a : shapeActions->actions() )
-				if ( a->isChecked() )
-					mode = a->data().toInt();
-			bool decomposition = false;
-			for ( QAction * a : methodActions->actions() )
-				if ( a->isChecked() )
-					decomposition = a->data().toInt() == 1;
+			if ( createPopup ) createPopup->hide();
+			const int mode = std::clamp( shapeGroup->checkedId(), 0, 4 );
+			const bool decomposition = convexMethod->currentIndex() == 1;
 			if ( mode == 3 ) { showCollisionPreview( 0, 100.0, decomposition ); return; }
 			if ( mode == 4 ) { showCollisionPreview( 1, 100.0 ); return; }
 			QString spellId;
@@ -2823,11 +2819,37 @@ private:
 			else if ( mode == 2 ) spellId = QStringLiteral( "Havok/Create Capsule Collision" );
 			runSpell( spellId, currentSource() );
 		};
-		connect( createButton, &QToolButton::clicked, this, [createCollision]() { createCollision(); } );
-		// picking a shape from the menu makes it, rather than only arming the button
-		connect( shapeActions, &QActionGroup::triggered, this,
-			[createCollision]( QAction * ) { createCollision(); } );
-		connect( decimateAction, &QAction::triggered, this, [this]() {
+		/* The button opens the popup, just under itself and clamped to the screen.
+		 *
+		 * Not centred on the display, which was the first idea: the panel is
+		 * docked at one edge and the thing you are about to operate on is in the
+		 * viewport beside it, so a popup in the middle of the screen is the one
+		 * place your eyes are not. Same reasoning as the search menu opening
+		 * where the right-click was.
+		 */
+		connect( createButton, &QToolButton::clicked, this, [this]() {
+			if ( !createPopup )
+				return;
+			createPopup->adjustSize();
+			QRect where( createButton->mapToGlobal( QPoint( 0, createButton->height() + 2 ) ),
+				createPopup->sizeHint() );
+			where.setWidth( std::max( where.width(), createButton->width() ) );
+			const QScreen * screen = QGuiApplication::screenAt( where.topLeft() );
+			if ( !screen ) screen = QGuiApplication::primaryScreen();
+			if ( screen ) {
+				const QRect fits = screen->availableGeometry();
+				if ( where.bottom() > fits.bottom() )		// no room below: go above
+					where.moveTop( createButton->mapToGlobal( QPoint() ).y() - where.height() - 2 );
+				where.moveLeft( std::clamp( where.left(), fits.left(), fits.right() - where.width() ) );
+				where.moveTop( std::clamp( where.top(), fits.top(), fits.bottom() - where.height() ) );
+			}
+			createPopup->setGeometry( where );
+			createPopup->show();
+			createPopup->raise();
+		} );
+		connect( popupCreate, &QPushButton::clicked, this, [createCollision]() { createCollision(); } );
+		connect( decimateButton, &QPushButton::clicked, this, [this]() {
+			if ( createPopup ) createPopup->hide();
 			showCollisionPreview( 1, 50.0 );
 		} );
 		for ( QDoubleSpinBox * spin : { mass, friction, restitution, linearDamping,
