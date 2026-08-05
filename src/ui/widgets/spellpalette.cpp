@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "spellpalette.h"
 
+#include "quickfavourites.h"
 #include "spellbook.h"
 #include "wwskin.h"
 
@@ -18,8 +19,10 @@ BSD License - see nifskope.h
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMouseEvent>
 #include <QScreen>
+#include <QSet>
 #include <QStandardItemModel>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -64,6 +67,13 @@ struct PaletteRow
  *  without registering them as spells, and it is why every row's payload can be
  *  just a QAction.
  */
+QString cleanMenuTitle( QString title )
+{
+	title.replace( QLatin1String( "&&" ), QLatin1String( "&" ) );
+	title.remove( QLatin1Char( '&' ) );		// menu-bar titles carry their accelerator
+	return title;
+}
+
 void collect( QMenu * menu, const QString & path, SpellBook & book, QVector<PaletteRow> & out )
 {
 	for ( QAction * a : menu->actions() ) {
@@ -183,6 +193,30 @@ QAction * wwSpellPalette( QWidget * parent, SpellBook & book, const QString & co
 {
 	QVector<PaletteRow> rows;
 	collect( &book, QString(), book, rows );
+
+	/* And the window's own menus, so this searches what the program can do and
+	 * not only what the spell registry can.
+	 *
+	 * Opened from the viewport, "find the function for this mode" means Edit
+	 * Mode's operators, the paint tools, the transform gizmos -- none of which
+	 * are spells, all of which are menu actions. They carry their own
+	 * availability: a mode's actions are disabled outside it, and the palette
+	 * already sorts what applies above what does not and says which is which.
+	 */
+	if ( parent ) {
+		if ( auto * bar = parent->window()->findChild<QMenuBar *>() ) {
+			QSet<QAction *> already;
+			for ( const PaletteRow & r : rows )
+				already.insert( r.action );
+			QVector<PaletteRow> fromMenus;
+			for ( QAction * top : bar->actions() )
+				if ( top->menu() )
+					collect( top->menu(), cleanMenuTitle( top->menu()->title() ), book, fromMenus );
+			for ( const PaletteRow & r : fromMenus )
+				if ( !already.contains( r.action ) )
+					rows << r;
+		}
+	}
 	if ( rows.isEmpty() )
 		return nullptr;
 
@@ -299,6 +333,36 @@ QAction * wwSpellPalette( QWidget * parent, SpellBook & book, const QString & co
 		}
 		strip->setText( text );
 	};
+
+	/* Right-click a result to pin it, the same gesture as on a menu entry.
+	 *
+	 * This is where you find the thing you did not know the name of, so it is
+	 * also where you decide it is worth keeping — making you find it, close the
+	 * palette, then hunt down the menu it lives in to right-click it there would
+	 * be a strange thing to insist on.
+	 */
+	view->setContextMenuPolicy( Qt::CustomContextMenu );
+	QObject::connect( view, &QTreeView::customContextMenuRequested, &dialog,
+		[&, view]( const QPoint & pos ) {
+			const QModelIndex hit = view->indexAt( pos );
+			if ( !hit.isValid() )
+				return;
+			auto * action = reinterpret_cast<QAction *>(
+				hit.sibling( hit.row(), 0 ).data( Qt::UserRole ).value<quintptr>() );
+			const QString id = wwFavouriteId( &book, action );
+			QMenu offer( &dialog );
+			if ( id.isEmpty() ) {
+				QAction * why = offer.addAction( QObject::tr( "This entry has no name to remember it by" ) );
+				why->setEnabled( false );
+			} else {
+				const bool pinned = wwIsFavourite( id );
+				QAction * toggle = offer.addAction( pinned
+					? QObject::tr( "Remove from Quick Favourites" )
+					: QObject::tr( "Add to Quick Favourites" ) );
+				QObject::connect( toggle, &QAction::triggered, [id]() { wwToggleFavourite( id ); } );
+			}
+			offer.exec( view->viewport()->mapToGlobal( pos ) );
+		} );
 
 	QObject::connect( edit, &QLineEdit::textChanged, &dialog, [&]() { repopulate(); } );
 	QObject::connect( view->selectionModel(), &QItemSelectionModel::currentChanged, &dialog,

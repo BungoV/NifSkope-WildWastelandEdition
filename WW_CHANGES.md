@@ -1,5 +1,102 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05b — Quick Favourites, and Space opens the search menu
+
+Blender's, and it earns its place the same way there: the things one person
+reaches for twenty times an hour are not the things the next person does, and no
+menu layout can be right for both. A pinned list is the user saying which those
+are.
+
+- **Space** in the viewport opens the search menu.
+- **Right-click any menu entry** → *Add to Quick Favourites*. Also on a row in
+  the search menu, which is where you find the thing whose name you did not know
+  and therefore where you decide it is worth keeping.
+- **Q** opens Quick Favourites.
+- Both keys are named actions, so **Options ▸ Shortcuts** lists them and either
+  can be rebound — the pane already collects every named action of the window
+  that carries a sequence.
+
+Animation playback moves off Space to **Shift+Space**, keeping a Space-shaped
+binding rather than being scattered to an unrelated key.
+
+### What a favourite is
+
+An ID, never a pointer. Menus are built per right-click and per selection, so
+the `QAction` a favourite names does not exist between one press of Q and the
+next; it is resolved fresh each time.
+
+```
+spell:Page/Name      resolved through SpellBook::lookup
+action:objectName    found on the main window by name
+```
+
+Anything with neither is **not offerable**, and the right-click says so rather
+than doing nothing — an action built inline for one menu cannot be found again,
+and a favourite that silently does nothing is worse than one never offered.
+
+A favourite that does not apply to the current selection is **left out**, not
+greyed. The list is a shortlist assembled by hand, and padding it with rows that
+cannot run defeats the point of having made it short. The palette greys instead,
+because there the greyed row is the answer to "why is this not in the menu".
+
+### The search menu now searches the program, not the spell registry
+
+Opened from the viewport, "the function for this mode" means Edit Mode's
+operators, the paint tools, the transform gizmos — none of which are spells, all
+of which are menu actions. It collects the window's menu bar as well as the
+book, deduplicated by action. Availability comes for free: a mode's actions are
+disabled outside it, and the palette already sorts what applies above what does
+not and says which is which.
+
+### Two single keys, and why neither is window-wide
+
+A bare Space or Q on a `WindowShortcut` is matched **before** the key reaches
+the focus widget, so binding either one window-wide would eat the space bar and
+the letter Q in every line edit in the program — the material search, the block
+filter, a rename. Both are scoped to the viewport, which is also how Blender's
+per-editor keymaps behave.
+
+That is not sufficient on its own. Two viewport modes already own those keys:
+the physics sim pauses on Space, and the walk camera descends on Q. A QAction
+shortcut still wins over a widget's `keyPressEvent`, so both would have gone
+quiet with nothing on screen to say why. `GLView::viewportClaimsKey` reports
+when a mode owns the key and the window reserves it during `ShortcutOverride`,
+which hands it to the mode as an ordinary keystroke — `ShortcutOverride` only,
+since consuming the `KeyPress` too would swallow the keystroke being protected.
+
+### Measured
+
+`tests/spells/quick_favourites.sh` (`WW_QUICKFAV_TEST`), which forces its own
+store and puts back what it found — favourites live in `QSettings`, so a run
+that inherited a real list would measure that list:
+
+```
+Space=Space Q=Q play=Shift+Space
+  ok   Search is on Space
+  ok   Quick Favourites is on Q
+  ok   playback moved off Space to Shift+Space
+  ok   ...and neither single key is window-wide, which would eat it everywhere
+ids: spell='spell:/Edit String Offset' action='action:aQuickFavourites' anonymous=''
+  ok   a spell is stored by page and name
+  ok   a named action is stored by object name
+  ok   an unnameable action is not offerable
+  ok   pinning stores it
+Q on the collision object -> Decompile Compiled Collision
+  ok   Q lists a pinned spell that applies
+Q on a block it does not apply to -> No favourite applies to this selection
+  ok   a favourite that does not apply is left out, not greyed
+  ok   an empty menu says how to fill it
+  ok   right-clicking a menu entry offers to pin it
+  ok   the search menu finds menu actions, not only spells
+  ok   a search result can be pinned from the palette
+16 checks, 0 failures
+```
+
+The pair either side of "applies" is the one worth keeping: the same pin, two
+selections, listed on one and absent on the other. Asserting the keys *with
+their context* is the other — "Space opens search" passing on its own would not
+have caught a binding that also eats every space bar in the program.
+
 ## 2026-08-05a — Converting a mesh consumes it; two pickers; the search popup
 
 Four things bungo asked for, and two bugs that turned up underneath them.

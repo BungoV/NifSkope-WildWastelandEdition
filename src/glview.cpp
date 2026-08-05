@@ -20469,6 +20469,20 @@ void GLView::focusOutEvent( QFocusEvent * )
 	mouseButtonState = 0;
 }
 
+bool GLView::viewportClaimsKey( int n ) const
+{
+	switch ( n ) {
+	case Qt::Key_Space:
+		// the sim's own transport -- Space pauses, Period steps a frame
+		return physicsPreview.active();
+	case Qt::Key_Q:
+		// camera down while flying, which is the only time the letter is navigation
+		return freeCamera || view == ViewWalk;
+	default:
+		return false;
+	}
+}
+
 int GLView::convertKeyCode( int n ) const
 {
 	switch ( n ) {

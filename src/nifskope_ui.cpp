@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
 #include "spellbook.h"
+#include "ui/widgets/quickfavourites.h"
 #include "ui/widgets/spellpalette.h"
 #include "spells/blocks.h"
 #include "spells/normaltransfer.h"
@@ -7035,6 +7036,231 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	extern QModelIndex tlCommitCollisionPreview( NifModel * nif, const QModelIndex & index, int kind,
 		float ratio, bool decomposition, float precision, float threshold, int maxHulls );
 
+	/* TEST HARNESS (WW_QUICKFAV_TEST=1): Blender's Quick Favourites.
+	 *
+	 * Every part of this is behaviour and none of it is visible in a diff: what
+	 * a favourite is stored AS, whether the store survives, whether Q resolves
+	 * it back to something runnable, and whether an entry that does not apply is
+	 * left out. The last is a choice -- hidden, not greyed -- and check 6 is the
+	 * only thing that says so.
+	 *
+	 * IT FORCES ITS OWN STORE. Favourites live in QSettings, so a run that
+	 * inherited the developer's list would measure that list; every run starts
+	 * from empty and puts back what it found.
+	 *
+	 * The keys are asserted with their CONTEXT, not just their sequence. A bare
+	 * Space or Q on a WindowShortcut is matched before the key reaches the focus
+	 * widget, which would eat the space bar in every line edit in the program --
+	 * so "Space opens search" is only right if it is also scoped to the viewport.
+	 * Log: release/ww_quickfav_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_QUICKFAV_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_quickfav_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				const QStringList restore = wwFavourites();
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif ) { log << "no model\n"; fails++; checks++; break; }
+					QSettings().setValue( QStringLiteral( "QuickFavourites" ), QStringList() );
+
+					// --- 1. the keys, with their scope ------------------------
+					auto named = [skope]( const char * n ) {
+						return skope->findChild<QAction *>( QLatin1String( n ) );
+					};
+					QAction * space = named( "aSpellPaletteSpace" );
+					QAction * quick = named( "aQuickFavourites" );
+					QAction * play = named( "aAnimPlaySpace" );
+					if ( !space || !quick || !play ) {
+						log << "the actions were not created\n"; fails++; checks++; break;
+					}
+					log << "Space=" << space->shortcut().toString()
+						<< " Q=" << quick->shortcut().toString()
+						<< " play=" << play->shortcut().toString() << "\n";
+					check( "Search is on Space", space->shortcut() == QKeySequence( Qt::Key_Space ) );
+					check( "Quick Favourites is on Q", quick->shortcut() == QKeySequence( Qt::Key_Q ) );
+					check( "playback moved off Space to Shift+Space",
+						play->shortcut() == QKeySequence( QStringLiteral( "Shift+Space" ) ) );
+					check( "...and neither single key is window-wide, which would eat it everywhere",
+						space->shortcutContext() == Qt::WidgetWithChildrenShortcut
+						&& quick->shortcutContext() == Qt::WidgetWithChildrenShortcut );
+
+					// --- 2. what a favourite is stored as ---------------------
+					int collObject = -1, someShape = -1;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QModelIndex i = nif->getBlockIndex( b );
+						if ( collObject < 0 && nif->blockInherits( i, "bhkNPCollisionObject" ) ) collObject = b;
+						if ( someShape < 0 && nif->blockInherits( i, "BSTriShape" ) ) someShape = b;
+					}
+					if ( collObject < 0 ) { log << "fixture has no compiled collision\n"; fails++; checks++; break; }
+
+					SpellBook idBook( nif, nif->getBlockIndex( collObject ), skope,
+						SLOT( select( const QModelIndex & ) ) );
+					QAction * spellRow = nullptr;
+					for ( QAction * a : idBook.actions() )
+						if ( idBook.spellFor( a ) ) { spellRow = a; break; }
+					const QString spellId = wwFavouriteId( &idBook, spellRow );
+					const QString actionId = wwFavouriteId( nullptr, named( "aQuickFavourites" ) );
+					QAction anonymous( QStringLiteral( "built inline, never named" ), skope );
+					log << "ids: spell='" << spellId << "' action='" << actionId
+						<< "' anonymous='" << wwFavouriteId( nullptr, &anonymous ) << "'\n";
+					check( "a spell is stored by page and name", spellId.startsWith( QLatin1String( "spell:" ) ) );
+					check( "a named action is stored by object name",
+						actionId == QLatin1String( "action:aQuickFavourites" ) );
+					check( "an unnameable action is not offerable",
+						wwFavouriteId( nullptr, &anonymous ).isEmpty() );
+
+					// --- 3. the store round-trips -----------------------------
+					const QString pin = QStringLiteral( "spell:Havok/Decompile Compiled Collision" );
+					check( "nothing is pinned to start with", !wwIsFavourite( pin ) );
+					wwToggleFavourite( pin );
+					check( "pinning stores it", wwIsFavourite( pin ) );
+
+					/* --- 4/5/6. Q resolves it, against the current selection --
+					 * Same pin, two selections. On the block it applies to it is
+					 * listed; on one it does not, it is GONE rather than greyed,
+					 * which is the behaviour that was chosen and the reason this
+					 * check is a pair.
+					 */
+					auto favouriteRows = [skope]() {
+						QStringList seen;
+						QTimer::singleShot( 250, skope, [skope, &seen]() {
+							for ( QWidget * w : QApplication::topLevelWidgets() ) {
+								auto * m = qobject_cast<QMenu *>( w );
+								if ( !m || !m->isVisible() || m->title() != QObject::tr( "Quick Favourites" ) )
+									continue;
+								for ( QAction * a : m->actions() )
+									seen << ( a->isEnabled() ? a->text() : QStringLiteral( "(disabled) " ) + a->text() );
+								m->close();
+								return;
+							}
+						} );
+						wwShowQuickFavourites( skope, QPoint( 200, 200 ) );
+						return seen;
+					};
+					skope->select( nif->getBlockIndex( collObject ) );
+					QApplication::processEvents();
+					const QStringList onTarget = favouriteRows();
+					log << "Q on the collision object -> " << onTarget.join( " | " ) << "\n";
+					check( "Q lists a pinned spell that applies",
+						onTarget.size() == 1 && !onTarget.first().startsWith( QLatin1String( "(disabled)" ) ) );
+
+					skope->select( nif->getBlockIndex( someShape >= 0 ? someShape : 0 ) );
+					QApplication::processEvents();
+					const QStringList offTarget = favouriteRows();
+					log << "Q on a block it does not apply to -> " << offTarget.join( " | " ) << "\n";
+					check( "a favourite that does not apply is left out, not greyed",
+						offTarget.size() == 1 && offTarget.first().contains( QLatin1String( "No favourite applies" ) ) );
+
+					wwToggleFavourite( pin );
+					check( "unpinning removes it", !wwIsFavourite( pin ) );
+					const QStringList empty = favouriteRows();
+					log << "Q with nothing pinned -> " << empty.join( " | " ) << "\n";
+					check( "an empty menu says how to fill it",
+						empty.size() == 1 && empty.first().contains( QLatin1String( "right-click" ) ) );
+
+					/* --- 7. right-clicking a menu entry offers to pin it ------
+					 * The filter is what makes "favourite from anywhere" true,
+					 * and it hangs off an event Qt otherwise ignores inside a
+					 * QMenu, so nothing else would notice if it stopped firing.
+					 */
+					QMenu probe( skope );
+					QAction * probeRow = probe.addAction( QStringLiteral( "Probe Entry" ) );
+					probeRow->setObjectName( QStringLiteral( "aProbeEntry" ) );
+					probe.setGeometry( 300, 300, 200, 60 );
+					QString offered;
+					QTimer::singleShot( 200, skope, [&probe, probeRow]() {
+						QContextMenuEvent rmb( QContextMenuEvent::Mouse,
+							probe.actionGeometry( probeRow ).center(),
+							probe.mapToGlobal( probe.actionGeometry( probeRow ).center() ) );
+						QApplication::sendEvent( &probe, &rmb );
+					} );
+					QTimer::singleShot( 500, skope, [&offered]() {
+						if ( QWidget * pop = QApplication::activePopupWidget() )
+							if ( auto * m = qobject_cast<QMenu *>( pop ); m && !m->actions().isEmpty() ) {
+								offered = m->actions().first()->text();
+								m->close();
+							}
+					} );
+					QTimer::singleShot( 800, skope, [&probe]() { probe.close(); } );
+					probe.exec( QPoint( 300, 300 ) );
+					log << "right-click on a menu entry offered: '" << offered << "'\n";
+					check( "right-clicking a menu entry offers to pin it",
+						offered.contains( QLatin1String( "Quick Favourites" ) ) );
+
+					/* --- 8. the search menu reaches past the spell registry ---
+					 * "Whatever function is available" includes the modes and the
+					 * viewport, and none of those are spells.
+					 */
+					SpellBook searchBook( nif, nif->getBlockIndex( 0 ), skope,
+						SLOT( select( const QModelIndex & ) ) );
+					int menuRows = 0;
+					QTimer::singleShot( 250, skope, [skope, &menuRows]() {
+						QDialog * dlg = skope->findChild<QDialog *>( QStringLiteral( "WWSpellPalette" ) );
+						if ( !dlg ) return;
+						auto * edit = dlg->findChild<QLineEdit *>( QStringLiteral( "SpellPaletteSearch" ) );
+						auto * view = dlg->findChild<QTreeView *>( QStringLiteral( "SpellPaletteList" ) );
+						if ( edit ) edit->setText( QStringLiteral( "save as" ) );	// a File menu row, never a spell
+						QApplication::processEvents();
+						if ( view ) menuRows = view->model()->rowCount();
+						dlg->reject();
+					} );
+					wwSpellPalette( skope, searchBook, QString() );
+					log << "search for a File-menu action found " << menuRows << " row(s)\n";
+					check( "the search menu finds menu actions, not only spells", menuRows > 0 );
+
+					/* --- 9. and a result can be pinned from there -------------
+					 * The palette is where you find the thing you did not know
+					 * the name of, so it is where you decide it is worth keeping.
+					 */
+					SpellBook pinBook( nif, nif->getBlockIndex( collObject ), skope,
+						SLOT( select( const QModelIndex & ) ) );
+					QString pinnedFromPalette;
+					QTimer::singleShot( 250, skope, [skope, &pinnedFromPalette]() {
+						QDialog * dlg = skope->findChild<QDialog *>( QStringLiteral( "WWSpellPalette" ) );
+						if ( !dlg ) return;
+						auto * view = dlg->findChild<QTreeView *>( QStringLiteral( "SpellPaletteList" ) );
+						if ( view && view->model()->rowCount() > 0 ) {
+							QTimer::singleShot( 150, skope, [&pinnedFromPalette]() {
+								if ( QWidget * pop = QApplication::activePopupWidget() )
+									if ( auto * m = qobject_cast<QMenu *>( pop ); m && !m->actions().isEmpty() ) {
+										pinnedFromPalette = m->actions().first()->text();
+										m->close();
+									}
+							} );
+							QTimer::singleShot( 400, skope, [dlg]() { dlg->reject(); } );
+							emit view->customContextMenuRequested(
+								view->visualRect( view->model()->index( 0, 0 ) ).center() );
+							return;
+						}
+						dlg->reject();
+					} );
+					wwSpellPalette( skope, pinBook, QString() );
+					log << "right-click on a search result offered: '" << pinnedFromPalette << "'\n";
+					check( "a search result can be pinned from the palette",
+						pinnedFromPalette.contains( QLatin1String( "Quick Favourites" ) ) );
+				} while ( false );
+				QSettings().setValue( QStringLiteral( "QuickFavourites" ), restore );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_COLLPERSHAPE_TEST=1): three shapes selected, three bodies?
 	 *
 	 * Create Collision is handed ONE index by the menu and by the Collision
@@ -11623,7 +11849,7 @@ void NifSkope::initActions()
 	paletteAction->setObjectName( QStringLiteral( "aSpellPalette" ) );
 	paletteAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+P" ) ) );
 	paletteAction->setShortcutContext( Qt::WindowShortcut );
-	connect( paletteAction, &QAction::triggered, this, [this]() {
+	auto openPalette = [this]( const QPoint & at ) {
 		if ( !nif )
 			return;
 		QModelIndex idx = currentNifIndex();
@@ -11633,11 +11859,46 @@ void NifSkope::initActions()
 		const QString what = bn >= 0
 			? QStringLiteral( "[%1] %2" ).arg( bn ).arg( nif->itemName( nif->getBlockIndex( bn ) ) )
 			: QString();
-		if ( QAction * run = wwSpellPalette( this, book, what ) )
+		if ( QAction * run = wwSpellPalette( this, book, what, at ) )
 			run->trigger();
-	} );
+	};
+	connect( paletteAction, &QAction::triggered, this, [openPalette]() { openPalette( QPoint() ); } );
 	addAction( paletteAction );
 	allActions << paletteAction;
+
+	/* Space in the viewport, which is Blender's Search.
+	 *
+	 * SCOPED TO THE VIEWPORT, and it has to be. A bare Space on a WindowShortcut
+	 * is matched before the key reaches whatever has focus, so it would eat the
+	 * space bar in every line edit in the window -- the material search, the
+	 * block filter, a rename. Blender's Space is per-editor for the same reason.
+	 * Ctrl+Shift+P stays window-wide for the times focus is elsewhere.
+	 *
+	 * Both are named QActions, so Options ▸ Shortcuts lists them and either can
+	 * be rebound; the pane finds every named action of the window that carries a
+	 * sequence.
+	 */
+	QAction * paletteSpace = new QAction( tr( "Search Menu (viewport)" ), this );
+	paletteSpace->setObjectName( QStringLiteral( "aSpellPaletteSpace" ) );
+	paletteSpace->setShortcut( QKeySequence( Qt::Key_Space ) );
+	paletteSpace->setShortcutContext( Qt::WidgetWithChildrenShortcut );
+	connect( paletteSpace, &QAction::triggered, this, [openPalette]() { openPalette( QCursor::pos() ); } );
+	allActions << paletteSpace;
+
+	// Q, Blender's Quick Favourites. Same viewport scoping and for the same
+	// reason: a bare letter on a WindowShortcut is a letter nobody can type.
+	QAction * favouritesAction = new QAction( tr( "Quick Favourites" ), this );
+	favouritesAction->setObjectName( QStringLiteral( "aQuickFavourites" ) );
+	favouritesAction->setShortcut( QKeySequence( Qt::Key_Q ) );
+	favouritesAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
+	connect( favouritesAction, &QAction::triggered, this, [this]() {
+		wwShowQuickFavourites( this, QCursor::pos() );
+	} );
+	allActions << favouritesAction;
+	// both are added to the viewport where it is built, by object name
+
+	// right-click any menu entry to pin it
+	wwInstallFavouriteMenuFilter( this );
 
 	// TODO: Back/Forward button in Block List
 	//idxForwardAction = indexStack->createRedoAction( this );
@@ -12780,9 +13041,24 @@ void NifSkope::initDockWidgets()
 
 	connect( ogl, &GLView::transformCommitted, timeline, &TimelineWidget::keyNodeTransform );
 
-	// Space in the viewport toggles animation playback
-	QAction * aPlaySpace = new QAction( this );
-	aPlaySpace->setShortcut( QKeySequence( Qt::Key_Space ) );
+	/* The viewport's own keys: Search on Space, Quick Favourites on Q.
+	 *
+	 * Built in initActions so they are named children of the window and the
+	 * Shortcuts pane can rebind them; added here because this is where the
+	 * widget they are scoped to exists.
+	 */
+	for ( const char * named : { "aSpellPaletteSpace", "aQuickFavourites" } )
+		if ( QAction * a = findChild<QAction *>( QLatin1String( named ) ) )
+			graphicsView->addAction( a );
+
+	/* Animation playback moves off Space, which Search now has, to Shift+Space.
+	 * Blender does the same thing when its Spacebar Action is set to anything
+	 * other than Play -- the transport keeps a Space-shaped binding rather than
+	 * being scattered to an unrelated key.
+	 */
+	QAction * aPlaySpace = new QAction( tr( "Play/Pause Animation (viewport)" ), this );
+	aPlaySpace->setObjectName( QStringLiteral( "aAnimPlaySpace" ) );
+	aPlaySpace->setShortcut( QKeySequence( QStringLiteral( "Shift+Space" ) ) );
 	aPlaySpace->setShortcutContext( Qt::WidgetWithChildrenShortcut );
 	graphicsView->addAction( aPlaySpace );
 	connect( aPlaySpace, &QAction::triggered, [this]() {
@@ -16887,6 +17163,21 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		const bool keyFocusIsTextInput = keyFocus && ( keyFocus->inherits( "QLineEdit" )
 			|| keyFocus->inherits( "QTextEdit" ) || keyFocus->inherits( "QPlainTextEdit" )
 			|| keyFocus->inherits( "QAbstractSpinBox" ) || keyFocus->inherits( "QComboBox" ) );
+		/* Give Space and Q back to a viewport mode that owns them.
+		 *
+		 * Both carry a window binding now — Search and Quick Favourites — and a
+		 * QAction shortcut is matched before the key reaches any widget, so the
+		 * physics sim's pause and the walk camera's descend key would go quiet
+		 * with nothing on screen to say why. Reserving the key during
+		 * ShortcutOverride hands it to the mode as an ordinary keystroke. Only
+		 * ShortcutOverride: consuming the KeyPress too would swallow the very
+		 * keystroke this exists to protect.
+		 */
+		if ( e->type() == QEvent::ShortcutOverride && ogl && pointerOverViewport
+			&& !keyFocusIsTextInput && ogl->viewportClaimsKey( ke->key() ) ) {
+			e->accept();
+			return true;
+		}
 		/* Blender's Ctrl+V / Ctrl+E / Ctrl+F open the Vertex, Edge and Face
 		 * menus. Same three menus sit in the viewport header here, so bind them.
 		 *

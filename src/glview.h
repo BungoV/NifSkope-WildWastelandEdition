@@ -304,6 +304,15 @@ public:
 	//! Handle viewport-scoped Blender numpad navigation. When trigger is false,
 	//! only reports whether the key is owned so ShortcutOverride can reserve it.
 	bool handleBlenderNumpad( int key, Qt::KeyboardModifiers modifiers, bool trigger );
+	/*! Whether a viewport mode has already claimed \a key for itself.
+	 *
+	 *  Space and Q carry the Search menu and Quick Favourites, and a QAction
+	 *  shortcut is matched before the key ever reaches this widget — so a mode
+	 *  that uses either letter loses it silently. ShortcutOverride reserves the
+	 *  key back for the mode that owns it, which is what makes both bindings
+	 *  contextual the way Blender's per-editor keymaps are.
+	 */
+	bool viewportClaimsKey( int key ) const;
 	void move( float, float, float );
 	void rotate( float, float, float );
 	void rotateLight( float, float );
