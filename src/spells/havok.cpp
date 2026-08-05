@@ -50,7 +50,7 @@
  */
 static const float havokConst = 1.0f / 1.42875f * 10.0f;
 
-static quint32 collisionCreateMaterial( const NifModel * nif );
+static quint32 collisionCreateMaterial( const NifModel * );
 static void applyCollisionBodySettings( NifModel * nif, const QModelIndex & rigidBody );
 static int collisionSourceSpace( const NifModel * nif, const QModelIndex & index,
 	const Node * node, bool ownNode );
@@ -758,18 +758,23 @@ bool spCreateCVS::settingsDialog( CoACD & coacd, float & precision, float & radi
 	return true;
 }
 
-static quint32 collisionCreateMaterial( const NifModel * nif )
+static quint32 collisionCreateMaterial( const NifModel * )
 {
 	QSettings settings;
 	QString text = settings.value( "CollisionManager/Create/Material", "MaterialMetalSolid" ).toString().trimmed();
 	bool ok = false;
 	quint32 value = text.toUInt( &ok, 0 );
 	if ( !ok ) {
-		QString enumType = nif->getBSVersion() >= 170 ? QStringLiteral( "Fallout76HavokMaterial" )
-			: nif->getBSVersion() >= 130 ? QStringLiteral( "Fallout4HavokMaterial" )
-			: nif->getBSVersion() >= 83 ? QStringLiteral( "SkyrimHavokMaterial" )
-			: nif->getBSVersion() > 0 ? QStringLiteral( "Fallout3HavokMaterial" )
-			: QStringLiteral( "OblivionHavokMaterial" );
+		/* Fallout 4's table, always. This is a Fallout 4 program.
+		 *
+		 * There used to be a ladder here walking the BS version down through
+		 * Fallout 76, Skyrim and Fallout 3 into Oblivion — a second copy of the
+		 * one in collisiontools.cpp, which is how the two came to disagree. On a
+		 * document with no BS version, which is what this program's own new file
+		 * was, the bottom rung won and collision was authored out of Oblivion's
+		 * 32 materials.
+		 */
+		const QString enumType = QStringLiteral( "Fallout4HavokMaterial" );
 		value = NifValue::enumOptionValue( enumType, text, &ok );
 		if ( !ok ) {
 			// Accept the exporter-facing label (Concrete) and migrate the old
@@ -791,9 +796,11 @@ static quint32 collisionCreateMaterial( const NifModel * nif )
 		auto it = custom.constFind( text );
 		if ( it != custom.cend() ) { value = it.value().toUInt(); ok = true; }
 	}
-	if ( !ok && !text.isEmpty() && nif->getBSVersion() >= 130 ) {
-		// Fallout 4/76 permit custom physical-material editor IDs. Match the
-		// Bethesda exporter: lowercase CRC32, initial value 0, no final XOR.
+	// no version gate: Fallout 4 permits custom physical-material editor IDs and
+	// this is a Fallout 4 program, so a typed name hashes whatever the header says
+	if ( !ok && !text.isEmpty() ) {
+		// Match the Bethesda exporter: lowercase CRC32, initial value 0, no
+		// final XOR.
 		std::uint32_t hash = 0;
 		for ( QChar c : text )
 			hashFunctionCRC32( hash, static_cast<unsigned char>( c.toLower().unicode() ) );

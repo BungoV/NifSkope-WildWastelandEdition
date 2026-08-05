@@ -1,5 +1,61 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05l — One material table, and it is Fallout 4's
+
+bungo: *"This nifskope is for Fallout 4, the default is Fallout 4, do not show
+me collision from Oblivion."*
+
+The last entry made **Fallout 4 the fallback** and left the ladder above it. That
+was the wrong shape of fix and this is the right one: there is no ladder. The
+collision material and layer tables are Fallout 4's, unconditionally.
+
+`materialEnumType()` and `layerEnumType()` are one line each now. A Skyrim or
+Oblivion mesh opened here shows Fallout 4 names against its values, which is the
+trade this fork already makes everywhere else — the handoff is explicit that the
+other games are inherited and unmaintained.
+
+### There were two copies of that ladder
+
+`collisionCreateMaterial()` in `havok.cpp` had its own, which is how the panel
+and the code that writes the material could disagree about which game they were
+in. Both are gone.
+
+The same function gated custom-material hashing on `getBSVersion() >= 130`, so
+typing a name on a versionless document silently produced no material at all.
+Fallout 4 permits custom physical-material editor IDs and this is a Fallout 4
+program, so the CRC32 runs whatever the header says.
+
+### The default cube was already Fallout 4
+
+`nifCreateStarterScene` calls `createNew( 0x14020007, 12, 130 )` and the harness
+confirms the new document really is BS version 130. So the cube was never the
+problem — the panel's list had been built while no document existed, when the
+ladder still had an answer for that, and nothing brought it back. With one table
+there is no moment at which the wrong one can be chosen.
+
+### Measured
+
+```
+material rows: create 158, editor 158
+Fallout-4-only materials present: 3 of 3
+  ok   and they are Fallout 4's, by name
+starter cube: BS version 130, material rows 158
+  ok   the new document is a Fallout 4 file
+  ok   ...and its material list is Fallout 4's too
+```
+
+The last two run against the document that provoked this, built into the model
+rather than loaded — the previous checks only ever saw a stock Fallout 4 mesh,
+which is the one case that was never broken.
+
+**They run LAST, and that is not tidiness.** Placed in the middle they replaced
+the model every later check depends on, and the create test came back with no
+rigid body: `mass -1, layer 0`. Two failures that read as the product and were
+the harness eating its own fixture.
+
+31 checks. `collision_undo` (12), `collision_compiled_edit` (7),
+`collision_per_shape` (2+8+8).
+
 ## 2026-08-05k — An unknown BS version means Fallout 4, not Oblivion
 
 The last entry fixed *when* the material list is built. This one fixes *what it

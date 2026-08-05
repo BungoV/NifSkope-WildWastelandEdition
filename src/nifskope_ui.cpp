@@ -7543,6 +7543,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							fo4Only++;
 					log << "Fallout-4-only materials present: " << fo4Only << " of 3\n";
 					check( "and they are Fallout 4's, by name", fo4Only == 3 );
+
 					mat->showPopup();
 					QApplication::processEvents();
 					QFrame * matPop = nullptr;
@@ -7816,6 +7817,34 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					auto * tree = dock->findChild<QTreeWidget *>( QStringLiteral( "CollisionInventoryTree" ) );
 					check( "the inventory tree still offers a row menu",
 						tree && tree->contextMenuPolicy() == Qt::CustomContextMenu );
+
+					/* --- LAST: the document that provoked all of this ---------
+					 * The material list was Oblivion's on the program's own new
+					 * file, so the check has to reach that file and not only the
+					 * stock mesh this harness opens. Build the starter cube into
+					 * this model and ask the same combo again.
+					 *
+					 * At the END, and that is not tidiness: this REPLACES the
+					 * model. Run in the middle it took the loaded mesh out from
+					 * under every check after it, and the create test came back
+					 * with no rigid body at all — two failures that looked like
+					 * the product and were the harness eating its own fixture.
+					 */
+					QString starterError;
+					if ( !nifCreateStarterScene( nif, 32.0f, &starterError ) ) {
+						log << "starter scene failed: " << starterError << "\n";
+						fails++; checks++; break;
+					}
+					QApplication::processEvents();
+					log << "starter cube: BS version " << nif->getBSVersion()
+						<< ", material rows " << mat->count() << "\n";
+					check( "the new document is a Fallout 4 file", nif->getBSVersion() == 130 );
+					int fo4OnStarter = 0;
+					for ( const char * name : { "MaterialActorMetalArmoredPower",
+							"MaterialMetalBarrelTrashCanOffice", "MaterialCeramicCoffeeMug" } )
+						if ( mat->findData( QString::fromLatin1( name ) ) >= 0 )
+							fo4OnStarter++;
+					check( "...and its material list is Fallout 4's too", fo4OnStarter == 3 );
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";

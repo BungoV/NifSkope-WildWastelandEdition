@@ -648,27 +648,25 @@ private:
 		return i.isValid() ? nif->itemName( i ) : QString();
 	}
 
-	/*! Which game's material table to offer.
+	/*! Fallout 4's material table. Not "whichever game the header suggests".
 	 *
-	 *  AN UNKNOWN VERSION MEANS FALLOUT 4, not Oblivion. A BS version of 0 is
-	 *  what you get before a file is open and from a document this program has
-	 *  just made — and it was answering "Oblivion", so the collision material
-	 *  list was that game's 32 entries where Fallout 4 has 157. Everything the
-	 *  panel offered was wrong and nothing said so: the names are plausible
-	 *  words (Stone, Metal, Water) and only the tooltip's OB_HAV_MAT_ prefix
-	 *  gave it away.
+	 *  This was a ladder walking the BS version down through Fallout 76, Skyrim
+	 *  and Fallout 3 into Oblivion. A BS version of 0 — what you get before a
+	 *  file is open, and what this program's own new document had — reached the
+	 *  bottom rung, so collision was authored out of Oblivion's 32 materials
+	 *  where Fallout 4 has 157. Nothing on screen said so: the names are
+	 *  plausible words, Stone and Metal and Water, and only a tooltip's
+	 *  OB_HAV_MAT_ prefix gave it away.
 	 *
-	 *  This fork is Fallout 4 only — the other games' paths are inherited, not
-	 *  maintained — so the fallback is the one game it exists for. A real
-	 *  Oblivion mesh loses its own names here, which is a trade this fork is
-	 *  already making everywhere else.
+	 *  Making the FALLBACK Fallout 4 was not enough and was the wrong shape of
+	 *  fix. This is a Fallout 4 program — the handoff says so, and the other
+	 *  games' paths are inherited and unmaintained — so there is one table and
+	 *  no ladder to fall off. A Skyrim or Oblivion mesh opened here shows
+	 *  Fallout 4 names against its values, which is the trade this fork already
+	 *  makes everywhere else.
 	 */
 	QString materialEnumType() const
 	{
-		if ( nif->getBSVersion() >= 170 ) return QStringLiteral( "Fallout76HavokMaterial" );
-		if ( nif->getBSVersion() >= 83 ) return nif->getBSVersion() >= 130
-			? QStringLiteral( "Fallout4HavokMaterial" ) : QStringLiteral( "SkyrimHavokMaterial" );
-		if ( nif->getBSVersion() > 0 ) return QStringLiteral( "Fallout3HavokMaterial" );
 		return QStringLiteral( "Fallout4HavokMaterial" );
 	}
 
@@ -808,14 +806,9 @@ private:
 		return materialCrcText( crc );
 	}
 
-	//! Same rule as materialEnumType, and for the same reason: unknown means
-	//! Fallout 4 in a Fallout 4 fork, not the oldest game in the table.
+	//! Fallout 4's layers, for the same reason as materialEnumType.
 	QString layerEnumType() const
 	{
-		if ( nif->getBSVersion() >= 170 ) return QStringLiteral( "Fallout76Layer" );
-		if ( nif->getBSVersion() >= 83 ) return nif->getBSVersion() >= 130
-			? QStringLiteral( "Fallout4Layer" ) : QStringLiteral( "SkyrimLayer" );
-		if ( nif->getBSVersion() > 0 ) return QStringLiteral( "Fallout3Layer" );
 		return QStringLiteral( "Fallout4Layer" );
 	}
 
