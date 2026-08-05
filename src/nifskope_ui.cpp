@@ -17321,10 +17321,51 @@ void NifSkope::restoreUi()
 {
 	uiRestored = true;
 	QSettings settings;
-	restoreGeometry( settings.value( "Window Geometry"_uip ).toByteArray() );
-	if ( isMaximized() )
-		QApplication::processEvents();
+	/* STATE FIRST, THEN GEOMETRY — and no processEvents() between them.
+	 *
+	 * Upstream has these the other way round, with
+	 * `if ( isMaximized() ) QApplication::processEvents();` in between. That
+	 * ordering is the "unexplained" startup crash this file has been blamed
+	 * for three times: 0xC0000005 inside Qt6Widgets at launch, cured by
+	 * clearing UI/Window State — which made the saved blob look guilty when it
+	 * never was.
+	 *
+	 * Measured, four ways, holding one variable at a time:
+	 *
+	 *   saved blob   restored geometry   result
+	 *   maximised    maximised           CRASH
+	 *   maximised    normal              fine
+	 *   normal       maximised           fine
+	 *   normal       normal              fine
+	 *
+	 * Only the both-maximised cell dies, and the two blobs are the same 2090
+	 * bytes differing in seven rows of dock sizes — same items, same
+	 * structure. So nothing is corrupt. restoreGeometry() applies the
+	 * maximised flag to a window that has not been shown yet, and
+	 * restoreState() then replays a maximised-sized dock layout against it and
+	 * faults in QLayout::addChildWidget (gdb, symbols resolved off the export
+	 * table).
+	 *
+	 * Doing state first means restoreState() always runs against a plain,
+	 * freshly constructed window — the two cells above that are provably safe
+	 * — and the geometry is applied afterwards, which is the same resize path
+	 * as maximising by hand. Qt's docs suggest geometry first; this is a
+	 * deliberate divergence and the reason is the table.
+	 *
+	 * The processEvents() is dropped rather than moved: createWindow() calls
+	 * restoreUi() before show(), so there was no window for the WM to maximise
+	 * and nothing for the pump to settle.
+	 *
+	 * Why it surfaced now. saveUi() writes whatever state the window is in, so
+	 * the poison needs a maximised window at CLOSE. Before this fork opened
+	 * maximised that took a user maximising by hand — intermittent, and twice
+	 * unreproducible. Since 648cfa2 every clean close armed the next launch,
+	 * which is what made it finally catchable.
+	 *
+	 * Covered by tests/spells/window_state_roundtrip.sh.
+	 */
 	restoreState( settings.value( "Window State"_uip ).toByteArray(), 0x073 );
+	restoreGeometry( settings.value( "Window Geometry"_uip ).toByteArray() );
 
 	/* Re-assert the header order AFTER restoreState.
 	 *

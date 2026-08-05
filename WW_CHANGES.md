@@ -1,5 +1,81 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05o — The window-state crash, found
+
+It was never the saved layout. `restoreUi()` restores state before geometry now,
+and NifSkope survives its own clean close.
+
+### What was actually wrong
+
+Upstream's `restoreUi()` ran `restoreGeometry()` first, then
+`if ( isMaximized() ) QApplication::processEvents();`, then `restoreState()`.
+Restoring a layout saved while **maximised**, into a window `restoreGeometry()`
+had just flagged maximised but that had not been shown yet, faulted
+`0xC0000005` inside `QLayout::addChildWidget`.
+
+Held one variable at a time, four runs:
+
+| saved blob | restored geometry | result |
+|---|---|---|
+| maximised | maximised | **crash** |
+| maximised | normal | fine |
+| normal | maximised | fine |
+| normal | normal | fine |
+
+Only the both-maximised cell dies. The decisive one is row 2: the *same* blob,
+byte for byte, with only the geometry swapped underneath it, restores perfectly.
+The two blobs are both 2090 bytes and differ in seven rows of dock sizes — same
+items, same structure, nothing corrupt. So "clearing `UI/Window State` fixes it"
+was true and completely misleading, and it framed the blob as the culprit for
+three sessions running.
+
+Fix: `restoreState()` first, `restoreGeometry()` second, so the state is always
+replayed against a plain freshly-constructed window — the two rows above that
+are provably safe — and the geometry is applied afterwards, which is the same
+resize path as maximising by hand. Qt's documentation suggests geometry first;
+this is a deliberate divergence and the table is the reason. The
+`processEvents()` is dropped rather than moved: `createWindow()` calls
+`restoreUi()` before `show()`, so there was no window for the WM to maximise and
+nothing for the pump to settle.
+
+### Why it took three sessions
+
+`saveUi()` writes whatever state the window is in, so poisoning the next launch
+needs a maximised window **at close**. Before `648cfa2` that meant a user
+maximising by hand — intermittent, and twice written up as unreproducible. Once
+NifSkope opened maximised, every clean close armed the next launch: open, close,
+open, dead. That is what finally made it catchable, and 648cfa2's own entry,
+which called the cause unexplained, can now be closed.
+
+### How it was pinned down
+
+The `.dmp` files WER kept were gone and nothing here has symbols, so the address
+came from `gdb -batch -ex run -ex bt` and the names from the DLL's own export
+table — nearest export at or below each fault RVA, via `objdump -p`. Frames #0
+and #1 landed in `QLayout::addChildWidget`, which is what pointed at layout
+replay rather than at the bytes.
+
+Also worth keeping: QSettings does not store these as raw binary. It writes the
+UTF-16 string `@ByteArray(<raw>)`, so **payload byte *i* is at blob offset
+`22 + 2i`** and every hex dump of one looks like `XX00 XX00`. That is how the
+geometry got decoded — magic `0x01D9D0CB`, major 3, then `frame(x1,y1,x2,y2)`
+and `normal(x1,y1,x2,y2)` as big-endian `qint32` — and it is what lets a test
+seed a window onto a chosen monitor.
+
+### Covered by
+
+`tests/spells/window_state_roundtrip.sh` — open, close while maximised, open
+again. Cycle 2 is the assertion; it faults on the old ordering and passes on the
+new one. It is the one harness that cannot use `_harness.sh`: `saveUi()` bails
+out on any `WW_*` variable, `WW_WINDOW_AT` is one, so the flag that places the
+window off the primary monitor also disables the write path under test. It seeds
+`UI/Window Geometry` onto the second monitor instead, asserts the window landed
+there before going on, and restores the settings key on exit.
+
+Not fixed, and not new: one dock field jitters about ±25px between runs. Two
+independent closes on the *old* ordering differ in it by the same amount and in
+the same three rows, so it predates this change.
+
 ## 2026-08-05n — Opens maximised, and a flaky check made honest
 
 **NifSkope launches maximised.** This window is a viewport, a block list, a
