@@ -11934,7 +11934,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 				if ( skope->ogl ) {
 					int	viewIdx = qEnvironmentVariableIntValue( "WW_RENDER_VIEW" );
-					if ( viewIdx <= 0 || viewIdx > int( GLView::ViewWalk ) )
+					// ViewUser (the Blender-style startup view) sits past
+					// ViewWalk, so the old bound silently rewrote it to Front:
+					// a capture that looked like a passing test of a view it
+					// had never actually used.
+					if ( viewIdx <= 0 || viewIdx > int( GLView::ViewUser ) )
 						viewIdx = int( GLView::ViewFront );
 					skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
 

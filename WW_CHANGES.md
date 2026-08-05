@@ -1,5 +1,112 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05p — Saved presets, a dock that fits, and Blender's opening view
+
+Five things, all asked for.
+
+### The Collision Manager stops folding
+
+The list has seven columns — Node, Bone, Shape, Layer, Material, Mass, State —
+and nothing claimed any width, so the dock took whatever the main-window layout
+offered. At about 290px that is four columns and a scroll bar, with Material and
+Mass off the end and no sign that they exist.
+
+A minimum, not a resize on show: `restoreState()` replays a saved dock width and
+would put the narrow one straight back. A minimum outranks the replay.
+
+**On the scroll area as well as the panel, and that is the whole trick.** A
+`QScrollArea` with `widgetResizable` does not adopt its child's minimum —
+scrolling is its answer to not having the room. The first attempt set it on the
+panel alone and the dock still squeezed to 80px, which screenshotted identically
+to having changed nothing.
+
+### Custom collision presets
+
+`+` saves what the fields are showing, `−` removes the selected one, and a
+double click renames it in place. They live in the settings under
+`CollisionManager/Presets/<name>`, one group each, holding exactly the keys
+`tlCollisionPresetDefaults()` returns for a built-in — so a saved preset is
+applied by the same three lines that apply a built-in, and no second code path
+can disagree about what a preset means. The key set is taken from that function
+rather than typed out, so a field added to the body later is picked up instead
+of being silently missing.
+
+Keyed by NAME, because a rename has to survive. Built-ins keep their integer ids
+and customs carry a `QString`, and every read tests which it got — including
+`saveCreationSettings`, where `toInt()` on a name is 0, which is Static, and
+would have quietly rewritten the built-in fallback every time a custom was
+picked.
+
+**Why the popup now stays open on a single click.** `itemClicked` fires on mouse
+RELEASE, so a popup that closes there is gone before the second press of a
+double click can arrive — the rename gesture was not awkward, it was
+unreachable. The alternative was delaying every pick by the double-click
+interval to find out whether a second click was coming. Staying open costs one
+Escape and no lag, so: click selects and applies, double click renames, Escape
+or a click outside dismisses. Opt-in, via `setKeepOpen`; layer and material are
+pick-and-go and keep closing.
+
+### Create Collision Body says why it did nothing
+
+It already parented under the block-list selection and already messaged on an
+empty one. What it did not do was speak up when the selection existed but could
+not hold a body: `tlCollisionAttachNode` returned an invalid index, the loop
+skipped the block, and the button appeared to do nothing whatsoever — nothing in
+the panel, the viewport or the block list changed, so the only available reading
+was that the feature was broken. Named by block number rather than counted,
+because "1 block was skipped" does not say which one to fix.
+
+### Create Collision Shape accepts a body from the block list
+
+The gate read this panel's own list and nothing else, so selecting a
+bhkRigidBody in the block list left the button greyed with a tooltip telling you
+to select a body — which is what you had just done. The creation path never had
+the problem; it casts against `currentSource()`, the block list index. Only the
+enable test was wrong, and the two now agree. A body is reached from whichever
+of the three you clicked: the body, its collision object, or the node.
+
+### NIFs open on Blender's view
+
+Startup Direction gains a seventh entry, User Perspective, and it is the
+default. The six before it are axis-aligned, and an axis-aligned start hides the
+thing you opened the file to see — Front is a flat square until you orbit. Kept
+as an addition rather than repointing Front, which would have silently moved
+everyone who chose Front deliberately.
+
+Neither of Blender's numbers transfers as written, and the fork's own
+`viewRotations` table is what says so:
+
+- **X** — Top is 0 in both, but this program's Front is -90 where Blender's is
+  +90, so the tilt off Top is negated: `-63.5593`.
+- **Z** — Blender measures its `46.6919°` from its own front, which is Z 0. Here
+  the ring is Back 0, Right 90, Front 180, Left 270. Carrying `46.6919` across
+  unaltered lands between Back and Right and opens every model showing its back.
+  The value is `133.3081`.
+
+`ViewUser` is a real destination now rather than the label for "somebody
+orbited", and `WW_RENDER_VIEW` accepts it. It could not before: the bound was
+`> ViewWalk`, so asking for index 8 was silently rewritten to Front and produced
+a capture that looked like a passing test of a view it had never used. That is
+exactly the "check satisfied by something other than the fix" trap in HANDOFF,
+and it caught the first attempt at this — the capture looked fine and proved
+nothing.
+
+The world-axis gizmo does not mirror Blender's exactly; matching it would
+require the other 180°, which opens models backwards. Framing matches, which is
+what was asked for.
+
+### Covered by
+
+`collision_panel.sh`, 35 checks, green — including that nothing is left parented
+to the create group without a layout cell, which is the check the new +/− row
+had to satisfy. Dock width and the startup view were each verified by capture
+(`WW_UI_SHOT_DOCK=CollisionManagerDock`, and `WW_RENDER_VIEW=8` on a head mesh
+where front and back are not confusable).
+
+**Not covered:** saving, renaming and removing a preset have no harness yet.
+The storage is exercised only by the create popup building itself. Worth one
+before the feature is relied on.
+
 ## 2026-08-05o — The window-state crash, found
 
 It was never the saved layout. `restoreUi()` restores state before geometry now,

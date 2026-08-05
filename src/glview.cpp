@@ -135,6 +135,30 @@ private:
 //! @file glview.cpp GLView implementation
 
 
+/*! Blender's default user perspective, in this program's Euler convention.
+ *
+ *  Blender starts every scene on the same three-quarter view rather than on an
+ *  axis — you see three faces of a cube and can tell depth from the first
+ *  frame, where Front shows a square that could be anything. Loading a nif
+ *  straight into Front was the same flat square, and the first thing anyone did
+ *  was orbit off it.
+ *
+ *  Blender's own numbers are Euler X 63.5593°, Z 46.6919°. Neither transfers
+ *  as written, and the table below is what says so rather than any guess:
+ *
+ *    X — Top is 0 in both, but this program's Front is -90 where Blender's is
+ *        +90, so the tilt off Top is negated: -63.5593.
+ *
+ *    Z — Blender measures its 46.6919° from ITS front, which is Z 0. Here the
+ *        azimuth ring is Back 0, Right 90, Front 180, Left 270. Blender's
+ *        default looks at the front, right and top faces, so the same view is
+ *        46.6919° round from Front TOWARDS Right: 180 - 46.6919 = 133.3081.
+ *
+ *  Taking Blender's 46.6919 across unaltered lands between Back and Right and
+ *  shows the back of the model, which is what the first attempt at this did.
+ */
+static const Vector3 wwBlenderStartupRotation = { -63.5593f, 0.0f, 133.3081f };
+
 const Vector3 GLView::viewRotations[6] = {
 	{ 0.0f, 0.0f, 0.0f },		// Top
 	{ 180.0f, 0.0f, 0.0f },		// Bottom
@@ -306,6 +330,8 @@ GLView::GLView( QWindow * p )
 	view = cfg.startupDirection;
 	if ( int i = int( view ) - int( ViewTop ); i >= 0 && i <= 5 )
 		Rot = viewRotations[i];
+	else if ( view == ViewUser )
+		Rot = wwBlenderStartupRotation;
 
 	scene = new Scene( textures );
 	connect( textures, &TexCache::sigRefresh, this, static_cast<void (GLView::*)()>(&GLView::update) );
@@ -2201,11 +2227,22 @@ void GLView::updateSettings()
 	cfg.moveSpd = std::clamp( settings.value( "General/Camera/Movement Speed", 350.0f ).toFloat(), 0.0f, 7000.0f );
 	cfg.rotSpd = std::clamp( settings.value( "General/Camera/Rotation Speed", 45.0f ).toFloat(), 15.0f, 1500.0f );
 	cfg.upAxis = UpAxis(settings.value( "General/Up Axis", ZAxis ).toInt());
-	int	z = settings.value( "General/Camera/Startup Direction", 1 ).toInt();
-	static const ViewState	startupDirections[6] = {
-		ViewLeft, ViewFront, ViewTop, ViewRight, ViewBack, ViewBottom
+	/* User Perspective is the DEFAULT now, index 6 — Blender's startup view.
+	 *
+	 * The six before it are all axis-aligned, and an axis-aligned start hides
+	 * the one thing you open a nif to see. Front is a flat square until you
+	 * orbit. Anyone who has used Blender expects the three-quarter view and
+	 * gets it here for the same reason: depth in the first frame.
+	 *
+	 * Kept as a seventh entry rather than replacing Front, because the setting
+	 * is written by index and repointing index 1 would silently move everyone
+	 * who had deliberately chosen Front onto something else.
+	 */
+	int	z = settings.value( "General/Camera/Startup Direction", 6 ).toInt();
+	static const ViewState	startupDirections[7] = {
+		ViewLeft, ViewFront, ViewTop, ViewRight, ViewBack, ViewBottom, ViewUser
 	};
-	cfg.startupDirection = startupDirections[std::clamp< int >( z, 0, 5 )];
+	cfg.startupDirection = startupDirections[std::clamp< int >( z, 0, 6 )];
 	z = settings.value( "General/Camera/Mwheel Zoom Speed", 8 ).toInt();
 	z = std::clamp< int >( z, 0, 16 );
 
@@ -5088,6 +5125,12 @@ void GLView::setOrientation( GLView::ViewState state, bool recenter )
 
 	if ( int i = int( state ) - int( ViewTop ); i >= 0 && i <= 5 ) {
 		Rot = viewRotations[i];
+		update();
+	} else if ( state == ViewUser ) {
+		// ViewUser is a real destination now, not just the label for "somebody
+		// orbited": it is the startup view. Without this the only way into it
+		// was construction, so nothing could ask for it or test it.
+		Rot = wwBlenderStartupRotation;
 		update();
 	}
 

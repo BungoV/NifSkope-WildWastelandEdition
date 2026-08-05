@@ -376,6 +376,65 @@ public:
  *  No Q_OBJECT: this file has no moc pass, so the callback is a std::function
  *  rather than a signal, and showPopup/hidePopup are plain virtual overrides.
  */
+/* CUSTOM COLLISION-BODY PRESETS.
+ *
+ * Kept in NifSkope's own settings under CollisionManager/Presets/<name>, one
+ * group per preset, holding exactly the keys tlCollisionPresetDefaults() hands
+ * back for a built-in. That is the point of the shape: a custom preset is then
+ * applied by the same three lines that apply a built-in one, so there is no
+ * second code path that can disagree about what a preset means.
+ *
+ * Keyed by NAME rather than by an id, because a rename has to survive and an
+ * id would either have to be reassigned or leak into the settings as a stale
+ * number nobody can map back.
+ */
+static QStringList wwCollisionPresetNames()
+{
+	QSettings s;
+	s.beginGroup( QStringLiteral( "CollisionManager/Presets" ) );
+	QStringList names = s.childGroups();
+	names.sort( Qt::CaseInsensitive );
+	return names;
+}
+
+static QVariantMap wwCollisionPresetValues( const QString & name )
+{
+	QSettings s;
+	s.beginGroup( QStringLiteral( "CollisionManager/Presets" ) );
+	s.beginGroup( name );
+	QVariantMap out;
+	for ( const QString & key : s.childKeys() )
+		out[key] = s.value( key );
+	return out;
+}
+
+static void wwCollisionPresetWrite( const QString & name, const QVariantMap & values )
+{
+	QSettings s;
+	s.beginGroup( QStringLiteral( "CollisionManager/Presets" ) );
+	s.beginGroup( name );
+	// clear first: an overwrite must not leave a key the new values do not have
+	s.remove( QString() );
+	for ( auto it = values.cbegin(); it != values.cend(); ++it )
+		s.setValue( it.key(), it.value() );
+}
+
+static void wwCollisionPresetRemove( const QString & name )
+{
+	QSettings s;
+	s.beginGroup( QStringLiteral( "CollisionManager/Presets" ) );
+	s.remove( name );
+}
+
+static void wwCollisionPresetRename( const QString & from, const QString & to )
+{
+	if ( from == to || to.isEmpty() )
+		return;
+	const QVariantMap values = wwCollisionPresetValues( from );
+	wwCollisionPresetRemove( from );
+	wwCollisionPresetWrite( to, values );
+}
+
 class WwSearchCombo final : public QComboBox
 {
 public:
@@ -394,15 +453,43 @@ public:
 		extraRun = run;
 	}
 
+	/*! Leave the popup open when a row is chosen, so the list can be worked on.
+	 *
+	 *  Off everywhere else. A layer or a material is a pick-and-go, and closing
+	 *  is what you want; a preset list you can also rename is a thing you stay
+	 *  in for a moment. Escape, Return or a click outside still close it.
+	 */
+	void setKeepOpen( bool on ) { keepOpen = on; }
+
+	/*! Double-clicking a row \a can accepts renames it in place.
+	 *
+	 *  This only works while setKeepOpen is on, and that is not a coincidence.
+	 *  A single click emits itemClicked on mouse RELEASE, so a popup that
+	 *  closes there is gone before the second press of a double click can
+	 *  arrive — the gesture is unreachable, not merely awkward. Staying open is
+	 *  what makes select-then-rename possible without putting a
+	 *  double-click-interval delay on every ordinary pick.
+	 */
+	void setRenamer( const std::function<bool( int )> & can,
+					 const std::function<void( int, const QString & )> & apply )
+	{
+		canRename = can;
+		applyRename = apply;
+	}
+
 	void showPopup() override
 	{
 		build();
+		// itemChanged fires while filling the list too, and the rename handler
+		// cannot tell that apart from a user committing an edit.
+		populating = true;
 		list->clear();
 		for ( int row = 0; row < count(); row++ ) {
 			auto * item = new QListWidgetItem( itemText( row ), list );
 			item->setData( Qt::UserRole, row );
 			item->setToolTip( itemData( row, Qt::ToolTipRole ).toString() );
 		}
+		populating = false;
 		find->clear();
 		// the count, so a list that scrolls does not read as a list that is short
 		find->setPlaceholderText( count() > 0
@@ -491,7 +578,8 @@ private:
 		if ( !item || item->isHidden() )
 			return;
 		setCurrentIndex( item->data( Qt::UserRole ).toInt() );
-		pop->hide();
+		if ( !keepOpen )
+			pop->hide();
 	}
 
 	void build()
@@ -552,12 +640,51 @@ private:
 		} );
 		QObject::connect( list, &QListWidget::itemClicked, pop,
 			[this]( QListWidgetItem * item ) { choose( item ); } );
+		/* Double click renames, where the owner allows it.
+		 *
+		 * The editable flag is set per edit and taken straight back off, so a
+		 * slow second click on an already-current row cannot start an edit
+		 * nobody asked for — QAbstractItemView opens a persistent editor on
+		 * click for anything carrying ItemIsEditable.
+		 */
+		QObject::connect( list, &QListWidget::itemDoubleClicked, pop,
+			[this]( QListWidgetItem * item ) {
+				if ( !item || !canRename || !canRename( item->data( Qt::UserRole ).toInt() ) )
+					return;
+				item->setFlags( item->flags() | Qt::ItemIsEditable );
+				list->editItem( item );
+			} );
+		QObject::connect( list, &QListWidget::itemChanged, pop,
+			[this]( QListWidgetItem * item ) {
+				if ( populating || renaming || !item || !applyRename )
+					return;
+				item->setFlags( item->flags() & ~Qt::ItemIsEditable );
+				const int row = item->data( Qt::UserRole ).toInt();
+				if ( !canRename || !canRename( row ) )
+					return;
+				const QString name = item->text().trimmed();
+				if ( name.isEmpty() ) {
+					// an empty name is not a rename, it is a lost preset
+					renaming = true;
+					item->setText( itemText( row ) );
+					renaming = false;
+					return;
+				}
+				renaming = true;
+				applyRename( row, name );
+				renaming = false;
+			} );
 		pop->installEventFilter( this );
 		find->installEventFilter( this );
 	}
 
 	QString placeholder, extraText;
 	std::function<void()> extraRun;
+	std::function<bool( int )> canRename;
+	std::function<void( int, const QString & )> applyRename;
+	bool keepOpen = false;
+	bool populating = false;
+	bool renaming = false;
 	QFrame * pop = nullptr;
 	QLineEdit * find = nullptr;
 	QListWidget * list = nullptr;
@@ -1026,6 +1153,37 @@ private:
 	 *  so Qt never sends it a ToolTip event and setToolTip on the button itself
 	 *  displays nothing — silently, in exactly the case the explanation is for.
 	 */
+	/*! The editable body the BLOCK LIST selection stands for, if any.
+	 *
+	 *  A body is reachable from three different selections and all three are
+	 *  things people actually click: the bhkRigidBody itself, the
+	 *  bhkCollisionObject that owns it, or the NiNode the object hangs off.
+	 *  Walk to the body from whichever it is.
+	 *
+	 *  Ends on a bhkRigidBody test rather than trusting the walk, so a compiled
+	 *  or otherwise unexpected body does not come back as editable.
+	 */
+	QModelIndex selectedBlockListBody()
+	{
+		if ( !nif )
+			return QModelIndex();
+		const QModelIndex block = nif->getBlockIndex( currentSource() );
+		if ( !block.isValid() )
+			return QModelIndex();
+		QModelIndex body;
+		if ( nif->blockInherits( block, "bhkRigidBody" ) )
+			body = block;
+		else if ( nif->blockInherits( block, "bhkNiCollisionObject" ) )
+			body = blockIndex( nif->getLink( block, "Body" ) );
+		else if ( nif->blockInherits( block, "NiAVObject" ) ) {
+			const QModelIndex object = blockIndex( nif->getLink( block, "Collision Object" ) );
+			if ( object.isValid() )
+				body = blockIndex( nif->getLink( object, "Body" ) );
+		}
+		return ( body.isValid() && nif->blockInherits( body, "bhkRigidBody" ) )
+			? body : QModelIndex();
+	}
+
 	void updateShapeButtonState()
 	{
 		if ( !createShapeButton || !createShapeHost )
@@ -1033,13 +1191,49 @@ private:
 		QTreeWidgetItem * item = tree ? tree->currentItem() : nullptr;
 		const bool anyBody = tree && tree->topLevelItemCount() > 0;
 		const bool compiled = item && item->data( 0, CompiledRole ).toBool();
-		const bool ready = item && !compiled;
+		/* A BODY PICKED IN THE BLOCK LIST COUNTS TOO.
+		 *
+		 * The gate read this panel's own list and nothing else, so selecting a
+		 * bhkRigidBody in the block list — the obvious way to reach one when
+		 * this dock is not the thing you are looking at — left the button
+		 * greyed out with a tooltip telling you to select a body, which is
+		 * exactly what you had just done.
+		 *
+		 * The creation path never had this problem: it casts the shape spell
+		 * against currentSource(), the block list index. So only the enable
+		 * test was wrong, and the two now agree about what counts.
+		 */
+		const bool fromBlockList = selectedBlockListBody().isValid();
+		const bool ready = ( item && !compiled ) || fromBlockList;
 		createShapeButton->setEnabled( ready );
 		createShapeHost->setToolTip( ready
 			? tr( "Add a shape to the selected collision body" )
 			: !anyBody ? tr( "Create a collision body first" )
 			: compiled ? tr( "The selected body is compiled — decompile it to add shapes" )
-			: tr( "Select a collision body in the list above" ) );
+			: tr( "Select a collision body — here, or in the block list" ) );
+	}
+
+	/*! The body values the create fields are showing, shaped as a preset.
+	 *
+	 *  The KEY SET comes from tlCollisionPresetDefaults rather than being typed
+	 *  out here, so a saved preset always holds exactly what the apply path
+	 *  reads back. Add a field to the body later and presets pick it up instead
+	 *  of silently lacking it.
+	 *
+	 *  Read out of the settings rather than off the widgets because
+	 *  saveCreationSettings has just written them there and it already knows
+	 *  every widget's type. A second transcription is a second thing to get
+	 *  wrong.
+	 */
+	QVariantMap createFieldValues() const
+	{
+		QSettings s;
+		QVariantMap out;
+		const QVariantMap keys = tlCollisionPresetDefaults( 1 );
+		for ( auto it = keys.cbegin(); it != keys.cend(); ++it )
+			out[it.key()] =
+				s.value( QStringLiteral( "CollisionManager/Create/" ) + it.key(), it.value() );
+		return out;
 	}
 
 	void loadCreateFields()
@@ -2629,7 +2823,22 @@ private:
 		preset->addItem( tr( "Prop" ), 1 );
 		preset->addItem( tr( "Stairhelper" ), 4 );
 		preset->addItem( tr( "Custom" ), 2 );
-		int savedPresetRow = preset->findData( createSettings.value( "CollisionManager/Create/Preset", 1 ).toInt() );
+		/* Saved presets after the built-ins, carrying their NAME as item data.
+		 *
+		 * Built-ins carry an int and customs a QString, and every read tests
+		 * which it got. That is what keeps the existing
+		 * CollisionManager/Create/Preset setting meaning exactly what it always
+		 * meant, instead of overloading it with ids that would collide the
+		 * moment two machines saved different presets.
+		 */
+		for ( const QString & name : wwCollisionPresetNames() )
+			preset->addItem( name, name );
+		const QString savedPresetName =
+			createSettings.value( "CollisionManager/Create/PresetName" ).toString();
+		int savedPresetRow = savedPresetName.isEmpty() ? -1 : preset->findData( savedPresetName );
+		if ( savedPresetRow < 0 )
+			savedPresetRow = preset->findData(
+				createSettings.value( "CollisionManager/Create/Preset", 1 ).toInt() );
 		preset->setCurrentIndex( savedPresetRow >= 0 ? savedPresetRow : preset->findData( 1 ) );
 		/* No save button. Every menu choice writes through immediately, so there
 		 * is nothing left for it to do — and left behind as a parented widget
@@ -2930,7 +3139,32 @@ private:
 			popupForm->addWidget( new QLabel( label, createPopup ), row, 0 );
 			popupForm->addWidget( field, row++, 1 );
 		};
-		addRow( tr( "Preset" ), preset );
+		/* PRESET ROW: the menu, then + and −, which is Blender's arrangement.
+		 *
+		 * + saves what the fields below currently say; − removes the saved
+		 * preset that is selected. Built-ins cannot be removed, so − greys out
+		 * on them — and its explanation goes on a WRAPPER, because a disabled
+		 * widget receives no mouse events, Qt never sends it a ToolTip event
+		 * and setToolTip on it shows nothing. Silently, in exactly the case
+		 * where the explanation is the point. Same pattern as createShapeHost.
+		 */
+		auto * presetHost = new QWidget( createPopup );
+		auto * presetRow = new QHBoxLayout( presetHost );
+		presetRow->setContentsMargins( 0, 0, 0, 0 );
+		presetRow->setSpacing( 4 );
+		presetRow->addWidget( preset, 1 );
+		auto * presetAdd = new QToolButton( presetHost );
+		presetAdd->setText( QStringLiteral( "+" ) );
+		presetAdd->setToolTip( tr( "Save these values as a new preset" ) );
+		presetRow->addWidget( presetAdd, 0 );
+		auto * presetRemoveHost = new QWidget( presetHost );
+		auto * presetRemoveLayout = new QHBoxLayout( presetRemoveHost );
+		presetRemoveLayout->setContentsMargins( 0, 0, 0, 0 );
+		auto * presetRemove = new QToolButton( presetRemoveHost );
+		presetRemove->setText( QStringLiteral( "−" ) );
+		presetRemoveLayout->addWidget( presetRemove );
+		presetRow->addWidget( presetRemoveHost, 0 );
+		addRow( tr( "Preset" ), presetHost );
 		addRow( tr( "Collision layer" ), createLayerCombo );
 		addRow( tr( "Motion system" ), createMotion );
 		addRow( tr( "Quality type" ), createQuality );
@@ -3371,7 +3605,11 @@ private:
 		auto saveCreationSettings = [this, preset, materialEdit, replace, shapeGroup]() {
 			QSettings settings;
 			settings.setValue( "CollisionManager/Create/Shape", std::clamp( shapeGroup->checkedId(), 0, 4 ) );
-			settings.setValue( "CollisionManager/Create/Preset", preset->currentData().toInt() );
+			// A saved preset carries its NAME here. toInt() on a QString is 0,
+			// which is Static, so writing it unconditionally would quietly
+			// rewrite the built-in fallback every time a custom was selected.
+			if ( preset->currentData().typeId() != QMetaType::QString )
+				settings.setValue( "CollisionManager/Create/Preset", preset->currentData().toInt() );
 			// the fields ARE the settings now; the preset only fills them in
 			settings.setValue( "CollisionManager/Create/Layer", createLayerCombo->currentData().toUInt() );
 			settings.setValue( "CollisionManager/Create/MotionSystem", createMotion->currentData().toUInt() );
@@ -3407,15 +3645,109 @@ private:
 		 * what gets stored is exactly what the panel is showing, so there is no
 		 * arrangement of the two where the file disagrees with the fields.
 		 */
+		auto updatePresetButtons = [this, preset, presetRemove, presetRemoveHost]() {
+			const bool custom = preset->currentData().typeId() == QMetaType::QString;
+			presetRemove->setEnabled( custom );
+			presetRemoveHost->setToolTip( custom
+				? tr( "Remove the saved preset '%1'" ).arg( preset->currentText() )
+				: tr( "Built-in presets cannot be removed" ) );
+		};
+		updatePresetButtons();
 		connect( preset, qOverload<int>( &QComboBox::currentIndexChanged ), this,
-			[this, saveCreationSettings, preset]( int ) {
-				QSettings().setValue( "CollisionManager/Create/Preset", preset->currentData().toInt() );
-				const QVariantMap d = tlCollisionPresetDefaults( preset->currentData().toInt() );
+			[this, saveCreationSettings, updatePresetButtons, preset]( int ) {
+				/* A saved preset is applied by the SAME three lines as a
+				 * built-in — only where the map comes from differs. That is the
+				 * whole reason presets are stored in this shape.
+				 */
+				const QVariant chosen = preset->currentData();
 				QSettings s;
+				QVariantMap d;
+				if ( chosen.typeId() == QMetaType::QString ) {
+					s.setValue( "CollisionManager/Create/PresetName", chosen.toString() );
+					d = wwCollisionPresetValues( chosen.toString() );
+				} else {
+					s.remove( "CollisionManager/Create/PresetName" );
+					s.setValue( "CollisionManager/Create/Preset", chosen.toInt() );
+					d = tlCollisionPresetDefaults( chosen.toInt() );
+				}
 				for ( auto it = d.cbegin(); it != d.cend(); ++it )
 					s.setValue( QStringLiteral( "CollisionManager/Create/" ) + it.key(), it.value() );
 				loadCreateFields();
 				saveCreationSettings();
+				updatePresetButtons();
+			} );
+		connect( presetAdd, &QToolButton::clicked, this,
+			[this, preset, saveCreationSettings, updatePresetButtons]() {
+				// snapshot what the panel is SHOWING, which needs the fields
+				// flushed to settings first — createFieldValues reads them back
+				saveCreationSettings();
+				bool ok = false;
+				const QString name = QInputDialog::getText( this, tr( "Save Collision Preset" ),
+					tr( "Preset name" ), QLineEdit::Normal,
+					tr( "Preset %1" ).arg( wwCollisionPresetNames().size() + 1 ), &ok ).trimmed();
+				if ( !ok || name.isEmpty() )
+					return;
+				const bool existed = preset->findData( name ) >= 0;
+				if ( !existed && preset->findText( name, Qt::MatchFixedString ) >= 0 ) {
+					QMessageBox::information( this, tr( "Save Collision Preset" ),
+						tr( "'%1' is a built-in preset. Choose another name." ).arg( name ) );
+					return;
+				}
+				if ( existed && QMessageBox::question( this, tr( "Save Collision Preset" ),
+						tr( "Replace the saved preset '%1'?" ).arg( name ) ) != QMessageBox::Yes )
+					return;
+				wwCollisionPresetWrite( name, createFieldValues() );
+				QSettings().setValue( "CollisionManager/Create/PresetName", name );
+				int row = preset->findData( name );
+				if ( row < 0 ) {
+					preset->addItem( name, name );
+					row = preset->count() - 1;
+				}
+				preset->setCurrentIndex( row );
+				updatePresetButtons();
+			} );
+		connect( presetRemove, &QToolButton::clicked, this,
+			[this, preset, updatePresetButtons]() {
+				const QVariant chosen = preset->currentData();
+				if ( chosen.typeId() != QMetaType::QString )
+					return;
+				const QString name = chosen.toString();
+				if ( QMessageBox::question( this, tr( "Remove Collision Preset" ),
+						tr( "Remove the saved preset '%1'?" ).arg( name ) ) != QMessageBox::Yes )
+					return;
+				wwCollisionPresetRemove( name );
+				const int row = preset->findData( name );
+				if ( row >= 0 )
+					preset->removeItem( row );
+				QSettings().remove( "CollisionManager/Create/PresetName" );
+				const int fallback = preset->findData( 1 );
+				preset->setCurrentIndex( fallback >= 0 ? fallback : 0 );
+				updatePresetButtons();
+			} );
+		/* Select on one click, rename on two — and the popup stays open, which
+		 * is what makes the second gesture reachable at all. See setRenamer.
+		 */
+		preset->setKeepOpen( true );
+		preset->setRenamer(
+			[preset]( int row ) {
+				return preset->itemData( row ).typeId() == QMetaType::QString;
+			},
+			[this, preset, updatePresetButtons]( int row, const QString & name ) {
+				const QString from = preset->itemData( row ).toString();
+				if ( from == name )
+					return;
+				if ( preset->findData( name ) >= 0
+					 || preset->findText( name, Qt::MatchFixedString ) >= 0 ) {
+					QMessageBox::information( this, tr( "Rename Collision Preset" ),
+						tr( "'%1' is already taken." ).arg( name ) );
+					return;
+				}
+				wwCollisionPresetRename( from, name );
+				preset->setItemText( row, name );
+				preset->setItemData( row, name );
+				if ( preset->currentIndex() == row )
+					QSettings().setValue( "CollisionManager/Create/PresetName", name );
+				updatePresetButtons();
 			} );
 		for ( QComboBox * c : QList<QComboBox *>{ materialEdit, createLayerCombo, createMotion,
 				createQuality, createSolver, createDeactivator } )
@@ -3456,18 +3788,48 @@ private:
 			}
 			const bool ownNode = targets.size() > 1;
 			QModelIndex made;
+			QList<int> unusable;
 			nifSnapshotOp( nif, tr( "Create collision body" ), [&]() {
 				for ( const QPersistentModelIndex & target : targets ) {
 					if ( !target.isValid() )
 						continue;
 					const QModelIndex node = tlCollisionAttachNode( nif, QModelIndex( target ), ownNode );
-					if ( !node.isValid() )
+					if ( !node.isValid() ) {
+						unusable << nif->getBlockNumber( QModelIndex( target ) );
 						continue;
+					}
 					const QModelIndex body = tlCreateCollisionBody( nif, node );
 					if ( body.isValid() )
 						made = body;
+					else
+						unusable << nif->getBlockNumber( QModelIndex( target ) );
 				}
 			} );
+			/* SAY SO WHEN THE SELECTION CANNOT TAKE ONE.
+			 *
+			 * The empty case above has always had a message. A selection that
+			 * exists but cannot hold a body did not: tlCollisionAttachNode
+			 * returned an invalid index, the loop skipped the block, and the
+			 * button appeared to do nothing at all. Nothing in the panel, the
+			 * viewport or the block list changed, so the only reading available
+			 * was that the feature was broken.
+			 *
+			 * Named by block number rather than counted, because "1 block was
+			 * skipped" does not tell you which of a multi-selection to fix.
+			 */
+			if ( !unusable.isEmpty() ) {
+				QStringList numbers;
+				for ( int block : unusable )
+					numbers << QString::number( block );
+				const QString detail =
+					tr( "Block(s) %1 cannot hold a collision body. A body attaches to a "
+						"NiNode — select a node, or a mesh that sits under one." )
+					.arg( numbers.join( QStringLiteral( ", " ) ) );
+				QMessageBox::information( this, tr( "Create Collision Body" ),
+					made.isValid()
+						? tr( "Part of the selection was skipped.\n\n%1" ).arg( detail )
+						: detail );
+			}
 			if ( made.isValid() )
 				if ( auto * window = dynamic_cast<NifSkope *>( mw ) ) window->select( made );
 			queueRebuild();
@@ -3573,6 +3935,10 @@ private:
 					if ( syncingSelection || updating || !dock->isVisible() || !nif )
 						return;
 					selectRowForBlock( nif->getBlockNumber( nif->getBlockIndex( index ) ) );
+						// Create Collision Shape accepts a body chosen over there now,
+						// so its enable test has to re-run when the BLOCK LIST moves
+						// and not only when this panel's own list does.
+						updateShapeButtonState();
 				} );
 		}
 	}
@@ -3740,7 +4106,33 @@ QDockWidget * tlCreateCollisionManagerDock( NifModel * nif, QMainWindow * mw, GL
 	scroll->setFrameShape( QFrame::NoFrame );
 	scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
 	scroll->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
-	scroll->setWidget( new CollisionManagerPanel( nif, mw, ogl, dock ) );
+	auto * panel = new CollisionManagerPanel( nif, mw, ogl, dock );
+	/* WIDE ENOUGH FOR ITS OWN COLUMNS.
+	 *
+	 * The list has seven — Node, Bone, Shape, Layer, Material, Mass, State —
+	 * and nothing here claimed any width, so the dock opened at whatever the
+	 * main-window layout felt like giving it. Folded to about 290px that is
+	 * Node/Bone/Shape/Layer and a horizontal scroll bar, with Material and Mass
+	 * — two of the ones you actually author — off the end and no sign that they
+	 * exist.
+	 *
+	 * A minimum rather than a resize on show, deliberately: restoreState()
+	 * replays a saved dock width and would put a narrow one straight back,
+	 * which is the same reason the viewport toolbars are moved after the
+	 * restore rather than before it. A minimum outranks the replay.
+	 *
+	 * The dock still widens freely; this only stops it folding.
+	 *
+	 * On the SCROLL AREA as well as the panel, and that is the whole trick: a
+	 * QScrollArea with widgetResizable does not take its child's minimum as its
+	 * own — scrolling is precisely its answer to not having the room — so a
+	 * minimum on the panel alone left the dock free to squeeze to 80px and clip
+	 * it. Measured: the first attempt did exactly that and looked identical to
+	 * having changed nothing.
+	 */
+	panel->setMinimumWidth( 560 );
+	scroll->setMinimumWidth( 560 );
+	scroll->setWidget( panel );
 	dock->setWidget( scroll );
 	mw->addDockWidget( Qt::RightDockWidgetArea, dock );
 	dock->hide();
