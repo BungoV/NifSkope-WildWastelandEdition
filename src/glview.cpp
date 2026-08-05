@@ -174,6 +174,27 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.free_camera", QObject::tr( "Free Camera (Fly / Walk)" ), cat, QKeySequence( Qt::SHIFT | Qt::Key_F ) );
 	r.reg( "viewport.snap_cursor_median", QObject::tr( "Snap 3D Cursor to Selection" ), cat, QKeySequence( Qt::SHIFT | Qt::Key_C ) );
 
+	/* Navigation. The last hard-coded keys in the viewport, and the two most
+	 * worth being able to change: rotating and zooming are what someone arriving
+	 * from another program reaches for first, and they were the only viewport
+	 * keys the shortcuts page could not offer.
+	 */
+	const QString catNav = QObject::tr( "3D Viewport - Navigation" );
+	r.reg( "viewport.nav.rotate_up", QObject::tr( "Rotate View Up" ), catNav, QKeySequence( Qt::Key_Up ) );
+	r.reg( "viewport.nav.rotate_down", QObject::tr( "Rotate View Down" ), catNav, QKeySequence( Qt::Key_Down ) );
+	r.reg( "viewport.nav.rotate_left", QObject::tr( "Rotate View Left" ), catNav, QKeySequence( Qt::Key_Left ) );
+	r.reg( "viewport.nav.rotate_right", QObject::tr( "Rotate View Right" ), catNav, QKeySequence( Qt::Key_Right ) );
+	r.reg( "viewport.nav.zoom_in", QObject::tr( "Zoom In" ), catNav, QKeySequence( Qt::Key_PageUp ) );
+	r.reg( "viewport.nav.zoom_out", QObject::tr( "Zoom Out" ), catNav, QKeySequence( Qt::Key_PageDown ) );
+	// only live in free camera / walk mode, where the letters are not transforms
+	const QString catFly = QObject::tr( "3D Viewport - Fly / Walk" );
+	r.reg( "viewport.nav.move_forward", QObject::tr( "Move Forward" ), catFly, QKeySequence( Qt::Key_W ) );
+	r.reg( "viewport.nav.move_back", QObject::tr( "Move Back" ), catFly, QKeySequence( Qt::Key_S ) );
+	r.reg( "viewport.nav.move_left", QObject::tr( "Move Left" ), catFly, QKeySequence( Qt::Key_A ) );
+	r.reg( "viewport.nav.move_right", QObject::tr( "Move Right" ), catFly, QKeySequence( Qt::Key_D ) );
+	r.reg( "viewport.nav.move_up", QObject::tr( "Move Up" ), catFly, QKeySequence( Qt::Key_E ) );
+	r.reg( "viewport.nav.move_down", QObject::tr( "Move Down" ), catFly, QKeySequence( Qt::Key_Q ) );
+
 	r.reg( "viewport.select.all", QObject::tr( "Select All (toggle)" ), catSel, QKeySequence( Qt::Key_A ) );
 	r.reg( "viewport.select.none", QObject::tr( "Deselect All" ), catSel, QKeySequence( Qt::ALT | Qt::Key_A ) );
 	r.reg( "viewport.select.invert", QObject::tr( "Invert Selection" ), catSel, QKeySequence( Qt::CTRL | Qt::Key_I ) );
@@ -20483,45 +20504,70 @@ bool GLView::viewportClaimsKey( int n ) const
 	}
 }
 
-int GLView::convertKeyCode( int n ) const
+/*! Which navigation action a keystroke is, if any.
+ *
+ *  Through the ShortcutRegistry, so every one of these is rebindable from
+ *  Options ▸ Shortcuts like the forty-odd operators already there. They were the
+ *  last hard-coded keys in the viewport: rotating and zooming, which are the two
+ *  things someone coming from another program most wants to change first, were
+ *  the only ones a user could not touch.
+ *
+ *  \a mods matters now. The old switch read the key alone, so it could not tell
+ *  Up from Ctrl+Up — fine while the bindings were fixed and bare, wrong the
+ *  moment one can be rebound to a combination.
+ */
+int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers ) const
 {
+	const auto & keys = ShortcutRegistry::get();
+	/* \a anyModifiers is the key-RELEASE case, and it is not a shortcut.
+	 *
+	 * These bindings latch a bit in kbdState on press and clear it on release.
+	 * Once one can be rebound to a combination, the release can arrive with the
+	 * modifier already gone — let go of Shift before Up and an exact match never
+	 * fires, the bit is never cleared, and the view rotates by itself until
+	 * something else happens to clear it. So a release matches on the key alone.
+	 */
+	auto bound = [&]( const char * id ) {
+		if ( !anyModifiers )
+			return keys.matches( QLatin1String( id ), n, mods );
+		const QKeySequence ks = keys.seq( QLatin1String( id ) );
+		return ks.count() > 0 && ks[0].key() == n;
+	};
+	static const struct { const char * id; int action; } navigation[] = {
+		{ "viewport.nav.rotate_up",    Key_RotateUp },
+		{ "viewport.nav.rotate_down",  Key_RotateDown },
+		{ "viewport.nav.rotate_left",  Key_RotateLeft },
+		{ "viewport.nav.rotate_right", Key_RotateRight },
+		{ "viewport.nav.zoom_in",      Key_ZoomIn },
+		{ "viewport.nav.zoom_out",     Key_ZoomOut },
+	};
+	for ( const auto & nav : navigation )
+		if ( bound( nav.id ) )
+			return nav.action;
+
+	/* Keyboard camera movement only in free camera / walk mode, so the letters
+	 * stay free for the Blender-style transform shortcuts everywhere else.
+	 */
+	if ( freeCamera || view == ViewWalk ) {
+		static const struct { const char * id; int action; } flying[] = {
+			{ "viewport.nav.move_left",    Key_MoveLeft },
+			{ "viewport.nav.move_right",   Key_MoveRight },
+			{ "viewport.nav.move_forward", Key_MoveForward },
+			{ "viewport.nav.move_back",    Key_MoveBack },
+			{ "viewport.nav.move_down",    Key_MoveDown },
+			{ "viewport.nav.move_up",      Key_MoveUp },
+		};
+		for ( const auto & fly : flying )
+			if ( bound( fly.id ) )
+				return fly.action;
+	}
+
+	/* Not registered, and deliberately. These are the modal transform's own
+	 * keys, read while a drag is running rather than as bindings — rebinding
+	 * them from the shortcuts page would move them out from under the code that
+	 * reads them here.
+	 */
 	switch ( n ) {
-	case Qt::Key_Up:
-		return Key_RotateUp;
-	case Qt::Key_Down:
-		return Key_RotateDown;
-	case Qt::Key_Left:
-		return Key_RotateLeft;
-	case Qt::Key_Right:
-		return Key_RotateRight;
-	case Qt::Key_PageUp:
-		return Key_ZoomIn;
-	case Qt::Key_PageDown:
-		return Key_ZoomOut;
-	case Qt::Key_A:
-	case Qt::Key_D:
-	case Qt::Key_W:
-	case Qt::Key_S:
-	case Qt::Key_Q:
-	case Qt::Key_E:
-		// keyboard camera movement only in free camera / walk mode, so the
-		// letters stay free for the Blender-style transform shortcuts
-		if ( !( freeCamera || view == ViewWalk ) )
-			return -1;
-		switch ( n ) {
-		case Qt::Key_A:
-			return Key_MoveLeft;
-		case Qt::Key_D:
-			return Key_MoveRight;
-		case Qt::Key_W:
-			return Key_MoveForward;
-		case Qt::Key_S:
-			return Key_MoveBack;
-		case Qt::Key_Q:
-			return Key_MoveDown;
-		default:
-			return Key_MoveUp;
-		}
 	case Qt::Key_M:
 		return Key_Update;
 	case Qt::Key_Space:
@@ -20767,7 +20813,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 			setFreeCamera( false );
 			return;
 		}
-		int fk = convertKeyCode( event->key() );
+		int fk = convertKeyCode( event->key(), event->modifiers() );
 		if ( fk >= 0 )
 			kbdState = kbdState | ( 1ULL << fk );
 		return;
@@ -21034,7 +21080,7 @@ void GLView::keyPressEvent( QKeyEvent * event )
 		return;
 	}
 
-	int	k = convertKeyCode( event->key() );
+	int	k = convertKeyCode( event->key(), event->modifiers() );
 	if ( k >= 0 ) {
 		kbdState = kbdState | ( 1ULL << k );
 		if ( k != Key_Shift )
@@ -21081,7 +21127,8 @@ void GLView::keyPressEvent( QKeyEvent * event )
 
 void GLView::keyReleaseEvent( QKeyEvent * event )
 {
-	int	k = convertKeyCode( event->key() );
+	// key alone: a release can arrive after the modifier was already let go
+	int	k = convertKeyCode( event->key(), event->modifiers(), true );
 	if ( k >= 0 ) {
 		kbdState = kbdState & ~( 1ULL << k );
 		if ( k != Key_Shift )

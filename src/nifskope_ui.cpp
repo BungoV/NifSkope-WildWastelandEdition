@@ -94,6 +94,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMimeData>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QThread>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -7255,6 +7256,135 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				logf.close();
 				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
 					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_NAVKEYS_TEST=1): zooming and rotating are rebindable.
+	 *
+	 * They were the last hard-coded keys in the viewport — convertKeyCode was a
+	 * switch on the raw key — so the two things someone arriving from another
+	 * program most wants to change were the only ones Options ▸ Shortcuts could
+	 * not offer.
+	 *
+	 * CHECK 3 IS THE ONE THAT MATTERS. These bindings latch a bit on key press
+	 * and clear it on release, and once a binding can be a COMBINATION the
+	 * release can arrive with the modifier already let go — release Shift before
+	 * Up and an exact match never fires, the bit is never cleared, and the view
+	 * rotates by itself until something else happens to clear it. A press-only
+	 * test passes on that bug; this presses, releases the modifier first, and
+	 * then measures whether the camera is still moving.
+	 *
+	 * It forces its own bindings and puts back what it found: overrides persist
+	 * in QSettings, so a run that inherited real ones would measure those.
+	 * Log: release/ww_navkeys_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_NAVKEYS_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_navkeys_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
+				};
+				auto & keys = ShortcutRegistry::get();
+				const QKeySequence hadZoom = keys.seq( QStringLiteral( "viewport.nav.zoom_in" ) );
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					GLView * view = skope->getGLView();
+					if ( !view ) { log << "no viewport\n"; fails++; checks++; break; }
+
+					// --- 1. they are registered, so the page can list them -----
+					const QStringList wanted = {
+						QStringLiteral( "viewport.nav.rotate_up" ), QStringLiteral( "viewport.nav.rotate_down" ),
+						QStringLiteral( "viewport.nav.rotate_left" ), QStringLiteral( "viewport.nav.rotate_right" ),
+						QStringLiteral( "viewport.nav.zoom_in" ), QStringLiteral( "viewport.nav.zoom_out" ),
+						QStringLiteral( "viewport.nav.move_forward" ), QStringLiteral( "viewport.nav.move_back" ),
+						QStringLiteral( "viewport.nav.move_left" ), QStringLiteral( "viewport.nav.move_right" ),
+						QStringLiteral( "viewport.nav.move_up" ), QStringLiteral( "viewport.nav.move_down" ) };
+					int registered = 0;
+					for ( const QString & id : wanted )
+						if ( keys.entries().contains( id ) )
+							registered++;
+					log << "navigation bindings registered: " << registered << " of " << wanted.size() << "\n";
+					check( "rotate, zoom and the fly keys are all rebindable", registered == wanted.size() );
+					check( "...and zoom still defaults to where it was",
+						keys.seq( QStringLiteral( "viewport.nav.zoom_in" ) ) == QKeySequence( Qt::Key_PageUp ) );
+
+					/* Drive the camera and watch the distance.
+					 *
+					 * The keys latch a bit that advanceGears consumes off a
+					 * QTimer, and its step is REAL ELAPSED TIME — spinning
+					 * processEvents takes microseconds, the timer never fires,
+					 * and nothing moves however many times it is called. So the
+					 * pump burns actual wall clock.
+					 */
+					auto pump = []( int ms ) {
+						QElapsedTimer clock;
+						clock.start();
+						while ( clock.elapsed() < ms ) {
+							QApplication::processEvents( QEventLoop::AllEvents, 10 );
+							QThread::msleep( 5 );
+						}
+					};
+					auto send = [&]( QEvent::Type type, int key, Qt::KeyboardModifiers mods, int ms ) {
+						QKeyEvent e( type, key, mods );
+						QApplication::sendEvent( view, &e );
+						pump( ms );
+					};
+					auto travelled = [&]( int key, Qt::KeyboardModifiers mods ) {
+						const float from = view->orthographicHalfHeight();
+						send( QEvent::KeyPress, key, mods, 250 );
+						const float to = view->orthographicHalfHeight();
+						send( QEvent::KeyRelease, key, mods, 60 );
+						return std::fabs( to - from );
+					};
+
+					/* --- CONTROL, and it is not optional ---------------------
+					 * "The old key stopped zooming" passes trivially if nothing
+					 * in this harness can move the camera at all. Prove the
+					 * default binding moves it BEFORE rebinding anything.
+					 */
+					const float byDefault = travelled( Qt::Key_PageUp, Qt::NoModifier );
+					log << "CONTROL: PageUp on the default binding moved " << byDefault << "\n";
+					check( "CONTROL: the default zoom key moves the camera", byDefault > 0.01f );
+
+					// --- 2. a rebound key zooms, and the old one stops ---------
+					keys.setSeq( QStringLiteral( "viewport.nav.zoom_in" ),
+						QKeySequence( Qt::SHIFT | Qt::Key_Z ) );
+					const float oldKey = travelled( Qt::Key_PageUp, Qt::NoModifier );
+					log << "after rebind, PageUp moved " << oldKey << "\n";
+					check( "the key it was bound to no longer zooms", oldKey <= 0.01f );
+
+					const float newKey = travelled( Qt::Key_Z, Qt::ShiftModifier );
+					log << "the rebound Shift+Z moved " << newKey << "\n";
+					check( "the key it was rebound to zooms", newKey > 0.01f );
+
+					/* --- 3. and letting go stops it ---------------------------
+					 * The modifier is released FIRST, which is the ordinary way
+					 * to let go of Shift+Z and the case an exact-match release
+					 * cannot see.
+					 */
+					send( QEvent::KeyPress, Qt::Key_Z, Qt::ShiftModifier, 150 );
+					send( QEvent::KeyRelease, Qt::Key_Shift, Qt::NoModifier, 30 );
+					send( QEvent::KeyRelease, Qt::Key_Z, Qt::NoModifier, 60 );
+					const float settled = view->orthographicHalfHeight();
+					pump( 250 );
+					const float drift = std::fabs( view->orthographicHalfHeight() - settled );
+					log << "after release with the modifier let go first, drifted " << drift << "\n";
+					check( "letting go stops the camera, modifier released first", drift <= 0.01f );
+				} while ( false );
+				keys.setSeq( QStringLiteral( "viewport.nav.zoom_in" ), hadZoom );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
 				skope->setWindowModified( false );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );

@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05d — Zooming and rotating are rebindable
+
+Asked for by a friend of bungo's, and a fair thing to be missing: `convertKeyCode`
+was a switch on the raw key, so the arrows and PageUp/PageDown were the last
+hard-coded bindings in the viewport. Forty-odd operators were already rebindable
+from **Options ▸ Shortcuts** — the two things someone arriving from another
+program most wants to change were the only ones it could not offer.
+
+Twelve entries now, in two new categories:
+
+| | |
+|---|---|
+| **3D Viewport – Navigation** | Rotate View Up / Down / Left / Right, Zoom In, Zoom Out |
+| **3D Viewport – Fly / Walk** | Move Forward / Back / Left / Right / Up / Down |
+
+Defaults unchanged: arrows, PageUp/PageDown, WASD + Q/E. The fly keys stay
+inert outside free camera and walk view, so the letters remain free for the
+Blender-style transforms everywhere else.
+
+The modal transform's own keys (M, J, K, I, O, Shift) stay hard-coded on
+purpose — they are read while a drag is running rather than looked up as
+bindings, and rebinding them from a settings page would move them out from under
+the code that reads them.
+
+### The bug this introduced, and the check that holds it
+
+These bindings latch a bit in `kbdState` on key press and clear it on release.
+The moment one can be rebound to a **combination**, the release can arrive with
+the modifier already let go — release Shift before Z and an exact match never
+fires, the bit is never cleared, and **the view keeps moving on its own**. So a
+release matches on the key alone, and the harness releases the modifier first
+and then measures whether the camera is still travelling.
+
+### Measured
+
+`tests/spells/nav_keys.sh` (`WW_NAVKEYS_TEST`):
+
+```
+navigation bindings registered: 12 of 12
+  ok   rotate, zoom and the fly keys are all rebindable
+  ok   ...and zoom still defaults to where it was
+CONTROL: PageUp on the default binding moved 147.996
+  ok   CONTROL: the default zoom key moves the camera
+after rebind, PageUp moved 0
+  ok   the key it was bound to no longer zooms
+the rebound Shift+Z moved 69.5806
+  ok   the key it was rebound to zooms
+after release with the modifier let go first, drifted 0
+  ok   letting go stops the camera, modifier released first
+```
+
+**The control is the whole reason this is trustworthy.** The first two attempts
+reported "the old key no longer zooms" and "letting go stops the camera" as
+passes while the camera was not moving at all: the pump spun `processEvents` for
+microseconds and `advanceGears` steps on real elapsed time, and then the
+measurement read `cameraDistance()` when zoom changes `Zoom`, not `Dist`. Two
+green checks, both vacuous, on a feature that had never been exercised. Proving
+the default binding moves the camera *before* rebinding anything is what turned
+them into measurements.
+
 ## 2026-08-05c — The Collision Manager loses twenty controls
 
 bungo: "How could we simplify this menu? Or declutter it?" Three moves, none of

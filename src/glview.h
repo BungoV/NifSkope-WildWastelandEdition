@@ -1612,7 +1612,7 @@ private:
 		Key_TranslateXY = 25
 	};
 
-	int convertKeyCode( int n ) const;
+	int convertKeyCode( int n, Qt::KeyboardModifiers mods = Qt::NoModifier, bool anyModifiers = false ) const;
 	inline bool kbd( int n ) const;
 	void transformItem( float dx, float dy );
 
