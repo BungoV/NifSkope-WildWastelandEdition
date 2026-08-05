@@ -5,8 +5,11 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 [WW_FEATURES.md](WW_FEATURES.md) is what the fork adds, and
 [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog.
 
-Updated **2026-08-05** after the collision-authoring session. Branch `main` at
-`648cfa2`, build green, working tree clean, everything pushed.
+Updated **2026-08-05** after the startup-crash session. Branch `main` at
+`5983a97`, build green, working tree clean, everything pushed.
+
+The headline: **the startup crash is fixed** — `restoreUi()` restores state
+before geometry. It was never the saved layout. See Landmines.
 
 ---
 
@@ -172,6 +175,16 @@ The collision and menu work added six:
 | `spell_search.sh` | the palette: dismissal, positioning, and not listing its own row |
 | `nav_keys.sh` | rotate/zoom rebinding, and that letting go stops the camera |
 | `collision_compiled_edit.sh` | editing a compiled body in place |
+| `window_state_roundtrip.sh` | open, close maximised, open again — the startup crash |
+
+`window_state_roundtrip.sh` is the one harness that **cannot** source
+`_harness.sh`. `saveUi()` deliberately bails out on any `WW_*` variable so
+harness layouts never overwrite the user's, and `WW_WINDOW_AT` is a `WW_*`
+variable — so the flag that places the window off the primary monitor also
+disables the write path the test exists to exercise. It seeds `UI/Window
+Geometry` onto the second monitor instead, asserts the window landed there
+before doing anything else, and restores the settings key on exit. If you write
+another test that needs real settings written, it has the same problem.
 
 `tests/spells/_harness.sh` holds shared setup. 60 flags exist; `grep -rhoE
 'WW_[A-Z_]+_TEST' src/ | sort -u` lists them.
@@ -212,13 +225,27 @@ never sample once after a fixed delay.
 
 ## Landmines
 
-**It will not start? Clear `UI/Window State`.** Under
-`HKCU\Software\NifTools\NifSkope 2.0\UI`. A bad value there crashed every launch
-inside `NifSkope::restoreUi`, survived reverting the code that appeared to cause
-it, and cost most of a session to find. How the value went bad is still
-unexplained — it did not reproduce afterwards. **A crash that survives reverting
-the change that appears to cause it is not caused by that change**; check
-persisted state before bisecting further.
+**It will not start?** This was the long-running one, and it is fixed as of
+`5983a97` — but the lesson it taught is wrong, so read the correction.
+
+Clearing `UI/Window State` under `HKCU\Software\NifTools\NifSkope 2.0\UI` did
+cure it, every time, which is why three sessions treated the saved blob as
+corrupt. It never was. `restoreUi()` restored geometry before state, and
+replaying a layout saved while **maximised** into a window that
+`restoreGeometry()` had just flagged maximised, but that had not been shown yet,
+faulted `0xC0000005` in `QLayout::addChildWidget`. Clearing the key worked
+because an empty blob makes `restoreState()` a no-op — it removed the symptom,
+not the cause. State is restored before geometry now.
+
+**The real lesson: "clearing X fixes it" does not mean X was bad.** Hold one
+variable at a time instead. The same 2090-byte blob crashes under a maximised
+geometry and restores perfectly under a normal one; swapping only the geometry,
+with the blob byte-identical, flips the outcome. That single comparison is what
+broke it open after two sessions of bisecting the wrong thing.
+
+Still true and still worth keeping: **a crash that survives reverting the change
+that appears to cause it is not caused by that change** — check persisted state
+before bisecting further.
 
 **CRLF.** Four sources and one doc are CRLF: `src/glview.cpp`,
 `src/gl/controllers.cpp`, `src/nifskope.cpp`, `src/spells/havok.cpp`,
