@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05e — Three things the declutter broke
+
+bungo, with a screenshot: "We've got an issue." All three are the same kind of
+mistake — deleting a **row** without deleting what was standing in it.
+
+**A save button drawn over the group's title.** `savePreset` was parented to the
+creation group and lived in the preset row. The row went; the widget did not.
+Qt does not complain about a parented widget with no layout cell — it draws it
+at 0,0, which here was on top of the group's own title. It is deleted now:
+every menu choice writes through immediately, so it had nothing left to do.
+
+**The primary button had no button around it.** It was styled with
+`wwBoxedButtonQss`, which is for *toolbar* buttons — transparent background,
+transparent border — so the panel's main action rendered as bare floating text.
+And a `MenuButtonPopup` needs `::menu-button` styled explicitly: without it the
+arrow half is drawn by the base style over a stylesheet-painted body, which is
+the detached sliver that was hanging off the right-hand edge.
+
+**The Creation / Simulation switch lost its selected state.** It borrowed
+`createGroup->styleSheet()`, which existed for the five shape buttons that used
+to be in that group. They went into a menu, the group stopped carrying a
+stylesheet, and the switch quietly lost the orange fill that says which half you
+are on — the one thing a segmented control has to do. It has its own copy now.
+
+The group box also lost its title: it read "Collision Creation" one row under a
+switch already labelled "Collision Creation", and with the group down to a
+single button the frame was most of what was left of it.
+
+### Measured
+
+A new check in `collision_panel.sh`, for the class of bug all three are:
+
+```
+CONTROL: with one planted stray, counted 1
+  ok   CONTROL: an unplaced widget is detected
+visible children of the group with no layout cell: 0
+  ok   nothing is left parented to the group but unplaced
+```
+
+Every visible child of the group must occupy a cell in the group's layout. The
+control plants a stray and confirms it is counted first — "0 unplaced" is also
+what a check that cannot count reports, and this whole session has now produced
+three vacuous green checks that a control caught.
+
+That check would have failed on the build in the screenshot. The other two are
+appearance, which no assertion here reaches; they are stated rather than proven.
+
+`collision_undo` (12) and `collision_per_shape` (2+8+8) re-run.
+
 ## 2026-08-05d — Zooming and rotating are rebindable
 
 Asked for by a friend of bungo's, and a fair thing to be missing: `convertKeyCode`

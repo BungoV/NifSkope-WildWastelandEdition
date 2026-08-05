@@ -2187,7 +2187,12 @@ private:
 		root->addLayout( browserActions );
 		root->addWidget( separator() );
 
-		auto * createGroup = new QGroupBox( tr( "Collision Creation" ), this );
+		/* Untitled, because the switch directly above it already says "Collision
+		 * Creation" — the group repeated the name of the tab that reveals it, one
+		 * row apart, and with the group down to a single button the frame was
+		 * most of what was left of it.
+		 */
+		auto * createGroup = new QGroupBox( this );
 		auto * createLayout = new QGridLayout( createGroup );
 		/* The source hint is gone with the row it sat on. It was fixed text that
 		 * never changed — an instruction, permanently, on a panel you have by
@@ -2213,9 +2218,11 @@ private:
 		preset->addItem( tr( "Custom" ), 2 );
 		int savedPresetRow = preset->findData( createSettings.value( "CollisionManager/Create/Preset", 1 ).toInt() );
 		preset->setCurrentIndex( savedPresetRow >= 0 ? savedPresetRow : preset->findData( 1 ) );
-		auto * savePreset = new QToolButton( createGroup );
-		savePreset->setIcon( style()->standardIcon( QStyle::SP_DialogSaveButton ) );
-		savePreset->setToolTip( tr( "Save these collision creation defaults" ) );
+		/* No save button. Every menu choice writes through immediately, so there
+		 * is nothing left for it to do — and left behind as a parented widget
+		 * with no layout cell, Qt put it at 0,0 of the group, on top of the
+		 * group's own title.
+		 */
 		auto * materialEdit = new QComboBox( createGroup );
 		materialEdit->setEditable( true );
 		materialEdit->setInsertPolicy( QComboBox::NoInsert );
@@ -2272,7 +2279,26 @@ private:
 		createButton->setPopupMode( QToolButton::MenuButtonPopup );
 		createButton->setToolButtonStyle( Qt::ToolButtonTextOnly );
 		createButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-		createButton->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "5px 10px" ) ) );
+		createButton->setMinimumHeight( 30 );
+		/* Its own style, not wwBoxedButtonQss.
+		 *
+		 * That one is for toolbar buttons — transparent background, transparent
+		 * border — so the panel's primary action came out as bare text floating
+		 * in the group with no button around it at all. And a MenuButtonPopup
+		 * needs ::menu-button styled explicitly: leave it out and the arrow half
+		 * is drawn by the base style over a stylesheet-painted body, which is the
+		 * detached sliver at the right-hand edge.
+		 */
+		createButton->setStyleSheet( QStringLiteral(
+			"QToolButton { background:%1; color:%2; border:1px solid %3; border-radius:3px;"
+			" padding:5px 10px; }"
+			"QToolButton:hover { background:%4; color:%5; }"
+			"QToolButton:pressed { background:%6; }"
+			"QToolButton::menu-button { border:none; border-left:1px solid %3; width:18px; }"
+			"QToolButton::menu-button:hover { background:%4; }" )
+			.arg( wwSkinColor( "bgBtn" ), wwSkinColor( "text" ), wwSkinColor( "border" ),
+				  wwSkinColor( "bgBtnHover" ), wwSkinColor( "textBright" ),
+				  wwSkinColor( "bgBtnDown" ) ) );
 		auto * createMenu = new QMenu( createButton );
 		createMenu->setToolTipsVisible( true );
 
@@ -2386,9 +2412,20 @@ private:
 			bottomGroup->addButton( b, i );
 			bottomSwitchLayout->addWidget( b, 1 );
 		}
-		// the same checked-button styling the shape picker above uses, so two
-		// segmented controls in one panel do not look like different mechanisms
-		bottomSwitch->setStyleSheet( createGroup->styleSheet() );
+		/* Its own copy of the segmented-control styling.
+		 *
+		 * It used to borrow createGroup's, which was set for the five shape
+		 * buttons that lived in that group — when they went into a menu the
+		 * group stopped carrying a stylesheet, and this switch silently lost the
+		 * orange fill that says which of the two halves you are on. The one thing
+		 * it must do is show which is selected, and nothing was left doing it.
+		 */
+		bottomSwitch->setStyleSheet( QStringLiteral(
+			"QToolButton { border: 1px solid %1; border-radius: 3px; padding: 3px; background: %2; }"
+			"QToolButton:hover { background: %3; }"
+			"QToolButton:checked { border-color: %4; color: %5; background: %6; }" )
+			.arg( wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
+				  wwSkinColor( "accent" ), wwSkinColor( "accentText" ), wwSkinColor( "accentBg" ) ) );
 		root->addWidget( bottomSwitch );
 		root->addWidget( createGroup );
 

@@ -7483,6 +7483,53 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "picking Box wrote Shape=" << wrote << "\n";
 					check( "picking a shape writes the key the spells read", wrote == 0 );
 
+					/* --- nothing was left behind unplaced -------------------
+					 * The failure this is for: a widget whose row was deleted
+					 * but which is still parented to the group. Qt does not
+					 * complain — it puts it at 0,0, on top of whatever is
+					 * already there, which is how a leftover save button came to
+					 * be drawn over the group's own title. Every visible child of
+					 * the group has to occupy a cell in the group's layout.
+					 */
+					QWidget * group = create->parentWidget();
+					auto countUnplaced = [&]( QStringList & named ) {
+						int n = 0;
+						if ( !group )
+							return n;
+						QLayout * lay = group->layout();
+						for ( QObject * kid : group->children() ) {
+							auto * w = qobject_cast<QWidget *>( kid );
+							if ( !w || w->isHidden() )
+								continue;
+							if ( !lay || lay->indexOf( w ) < 0 ) {
+								n++;
+								named << ( w->objectName().isEmpty()
+									? QString::fromLatin1( w->metaObject()->className() )
+									: w->objectName() );
+							}
+						}
+						return n;
+					};
+					/* Control: put a stray in deliberately and confirm it is
+					 * seen, because "0 unplaced" is what a check that cannot
+					 * count also reports.
+					 */
+					if ( group ) {
+						auto * planted = new QToolButton( group );
+						planted->setObjectName( QStringLiteral( "PlantedStray" ) );
+						planted->show();
+						QStringList caught;
+						const int sawPlanted = countUnplaced( caught );
+						log << "CONTROL: with one planted stray, counted " << sawPlanted << "\n";
+						check( "CONTROL: an unplaced widget is detected", sawPlanted == 1 );
+						delete planted;
+					}
+					QStringList strays;
+					const int unplaced = countUnplaced( strays );
+					log << "visible children of the group with no layout cell: "
+						<< unplaced << " " << strays.join( QLatin1Char( ',' ) ) << "\n";
+					check( "nothing is left parented to the group but unplaced", unplaced == 0 );
+
 					// --- the old controls are gone ----------------------------
 					int oldButtons = 0;
 					for ( QPushButton * b : dock->findChildren<QPushButton *>() )
