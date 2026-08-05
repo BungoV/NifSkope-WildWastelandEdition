@@ -531,7 +531,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			skope->move( xy.at( 0 ).toInt(), xy.at( 1 ).toInt() );
 			skope->show();
 		} else {
-			skope->show();
+			/* Maximised, always.
+			 *
+			 * This window is a viewport, a block list, a details tree and two or
+			 * three docks; at any size a default geometry picks it is cramped, and
+			 * the first thing anyone does is maximise it. restoreGeometry above
+			 * still runs, so un-maximising gives back the size that was last used
+			 * rather than a default one.
+			 *
+			 * Not applied on the WW_WINDOW_AT path: that exists to put a harness
+			 * window on a second monitor without disturbing whoever is working on
+			 * the first, and maximising would undo the placement it just made.
+			 */
+			skope->showMaximized();
 			skope->raise();
 		}
 	}
@@ -7225,25 +7237,43 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					SpellBook pinBook( nif, nif->getBlockIndex( collObject ), skope,
 						SLOT( select( const QModelIndex & ) ) );
+					/* POLLED, not timed.
+					 *
+					 * The first version sampled activePopupWidget() once, 150ms
+					 * after asking for the context menu, and passed or failed
+					 * depending on whether the menu had opened yet — a coin flip
+					 * in the suite, which is worse than no check at all because
+					 * it teaches you to re-run instead of to look. It now waits
+					 * for the popup to exist, up to a deadline.
+					 */
 					QString pinnedFromPalette;
 					QTimer::singleShot( 250, skope, [skope, &pinnedFromPalette]() {
 						QDialog * dlg = skope->findChild<QDialog *>( QStringLiteral( "WWSpellPalette" ) );
 						if ( !dlg ) return;
 						auto * view = dlg->findChild<QTreeView *>( QStringLiteral( "SpellPaletteList" ) );
-						if ( view && view->model()->rowCount() > 0 ) {
-							QTimer::singleShot( 150, skope, [&pinnedFromPalette]() {
+						if ( !view || view->model()->rowCount() < 1 ) { dlg->reject(); return; }
+						/* The context menu runs its own event loop in exec(), so
+						 * the wait has to be armed BEFORE the menu opens — after
+						 * the emit below, nothing here runs until it closes.
+						 */
+						QTimer::singleShot( 0, skope, [&pinnedFromPalette, dlg]() {
+							QElapsedTimer clock;
+							clock.start();
+							while ( clock.elapsed() < 3000 ) {
 								if ( QWidget * pop = QApplication::activePopupWidget() )
-									if ( auto * m = qobject_cast<QMenu *>( pop ); m && !m->actions().isEmpty() ) {
+									if ( auto * m = qobject_cast<QMenu *>( pop );
+										m && !m->actions().isEmpty() ) {
 										pinnedFromPalette = m->actions().first()->text();
 										m->close();
+										break;
 									}
-							} );
-							QTimer::singleShot( 400, skope, [dlg]() { dlg->reject(); } );
-							emit view->customContextMenuRequested(
-								view->visualRect( view->model()->index( 0, 0 ) ).center() );
-							return;
-						}
-						dlg->reject();
+								QApplication::processEvents( QEventLoop::AllEvents, 10 );
+								QThread::msleep( 5 );
+							}
+							dlg->reject();
+						} );
+						emit view->customContextMenuRequested(
+							view->visualRect( view->model()->index( 0, 0 ) ).center() );
 					} );
 					wwSpellPalette( skope, pinBook, QString() );
 					log << "right-click on a search result offered: '" << pinnedFromPalette << "'\n";

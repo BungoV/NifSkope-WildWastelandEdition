@@ -1,5 +1,40 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05n — Opens maximised, and a flaky check made honest
+
+**NifSkope launches maximised.** This window is a viewport, a block list, a
+details tree and two or three docks; at whatever size a default geometry picks
+it is cramped, and the first thing anyone does is maximise it.
+`restoreGeometry` still runs, so un-maximising gives back the size last used
+rather than a default one.
+
+Not applied on the `WW_WINDOW_AT` path — that exists to put a harness window on
+a second monitor without disturbing whoever is working on the first, and
+maximising would undo the placement it just made.
+
+### A check that was a coin flip
+
+`quick_favourites` failed once and passed on the re-run, on the same binary.
+"A search result can be pinned from the palette" sampled
+`QApplication::activePopupWidget()` **once**, 150ms after asking for the context
+menu, and passed or failed depending on whether the menu had opened yet.
+
+That is worse than having no check: a suite that fails intermittently teaches
+you to re-run it rather than to look at it. It polls for the popup now, up to a
+three-second deadline — and the wait is armed *before* the menu opens, because a
+`QMenu::exec` runs its own event loop and nothing queued after the request runs
+until the menu closes. Three consecutive green runs.
+
+### On the window-state crash from the last entry
+
+I could not reproduce the poisoning afterwards: a harness run followed by a
+plain run is clean, and the second monitor the harness places on does exist, so
+neither is the mechanism. What is certain is that clearing `UI/Window State`
+fixed a crash that survived every code change, twice. The cause of the bad value
+is unexplained and recorded as such rather than dressed up.
+
+If NifSkope ever refuses to start, that value is the first thing to clear.
+
 ## 2026-08-05m — Body first, then shapes
 
 Four asks, and the last one is a restructure that follows the block layout
