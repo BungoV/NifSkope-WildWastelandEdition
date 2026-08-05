@@ -7483,8 +7483,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * Replace; and mass, friction, restitution, two dampings, two
 					 * max velocities and the triangle percentage.
 					 */
+					/* Preset, material, layer, motion, quality, solver; Replace;
+					 * and the seven body numbers. Convex method and the triangle
+					 * percentage are NOT here — they belong to the live preview
+					 * that Convex and Mesh open, which is where the geometry they
+					 * change is actually on screen.
+					 */
 					check( "and the settings are visible beside them, not nested",
-						combos == 7 && ticks == 1 && numbers == 8 );
+						combos == 6 && ticks == 1 && numbers == 7 );
 
 					/* The body settings the preset used to be the ONLY way to
 					 * reach. Authoring a body with a different mass or layer meant
@@ -7493,18 +7499,61 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the body settings are on the create side too",
 						popup->findChildren<QComboBox *>().size() > 3 );
 
-					// pick one OR type one: FO4 hashes an unknown material name
-					auto * mat = popup->findChildren<QComboBox *>().value( 2 );
-					bool typeable = false;
-					for ( QComboBox * c : popup->findChildren<QComboBox *>() )
-						if ( c->isEditable() ) typeable = true;
-					log << "an editable material field: " << typeable << "\n";
-					check( "the material can be typed as well as picked", typeable );
-					Q_UNUSED( mat );
+					/* --- the material drop-down ------------------------------
+					 * Search box, an "add a custom one" row, and the vanilla
+					 * list. This has to open the thing and look inside it: the
+					 * previous check asked whether the field was EDITABLE and
+					 * passed for a whole build on a leftover setEditable(true) —
+					 * which was itself the bug, because a click on an editable
+					 * combo puts a cursor in the text and opens nothing at all.
+					 */
+					auto * mat = popup->findChild<QComboBox *>(
+						QStringLiteral( "CollisionCreateMaterial" ) );
+					if ( !mat ) { log << "no material combo\n"; fails++; checks++; break; }
+					check( "the material field is not a text box", !mat->isEditable() );
+					log << "material rows: " << mat->count() << "\n";
+					check( "it lists the vanilla materials", mat->count() > 20 );
+					mat->showPopup();
+					QApplication::processEvents();
+					QFrame * matPop = nullptr;
+					for ( QFrame * f : mat->findChildren<QFrame *>() )
+						if ( f->isVisible() && f->findChild<QListWidget *>() )
+							matPop = f;
+					bool hasSearch = false, hasAddCustom = false;
+					int listed = 0;
+					if ( matPop ) {
+						hasSearch = matPop->findChild<QLineEdit *>() != nullptr;
+						for ( QPushButton * b : matPop->findChildren<QPushButton *>() )
+							if ( b->text().contains( QLatin1String( "custom" ), Qt::CaseInsensitive ) )
+								hasAddCustom = true;
+						if ( auto * l = matPop->findChild<QListWidget *>() )
+							listed = l->count();
+					}
+					log << "material drop-down: search " << hasSearch << ", add-custom "
+						<< hasAddCustom << ", rows " << listed << "\n";
+					check( "the drop-down has a search box", hasSearch );
+					check( "...an add-a-custom-material row", hasAddCustom );
+					check( "...and the materials under it", listed == mat->count() );
+					mat->hidePopup();
+					QApplication::processEvents();
 
-					// Optimize Source Mesh was a second name for the mesh create
-					check( "Optimize Source Mesh is not a separate button",
-						popup->findChildren<QPushButton *>().size() == 1 );	// just Create
+					/* Optimize Source Mesh was a second name for the mesh create,
+					 * so the popup has one button and it says Create. Buttons
+					 * inside a drop-down do not count — the material list carries
+					 * an "add a custom one" row, which is a QPushButton in a
+					 * child popup and has nothing to do with this.
+					 */
+					int panelButtons = 0;
+					for ( QPushButton * b : popup->findChildren<QPushButton *>() ) {
+						bool insideACombo = false;
+						for ( QObject * o = b->parent(); o; o = o->parent() )
+							if ( qobject_cast<QComboBox *>( o ) )
+								insideACombo = true;
+						if ( !insideACombo )
+							panelButtons++;
+					}
+					log << "buttons on the popup itself: " << panelButtons << "\n";
+					check( "Optimize Source Mesh is not a separate button", panelButtons == 1 );
 
 					/* Every number is the fork's scrub field.
 					 * wwMakeScrubField stamps "wwScrubbed" on what it converts,

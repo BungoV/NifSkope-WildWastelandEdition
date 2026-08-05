@@ -2245,7 +2245,10 @@ private:
 		previewRatio->setRange( 1.0, 100.0 ); previewRatio->setDecimals( 0 ); previewRatio->setSuffix( QStringLiteral( "%" ) );
 		previewRatio->setSingleStep( 1.0 ); previewRatio->setKeyboardTracking( false ); previewRatio->setMinimumWidth( 150 );
 		previewRatio->setToolTip( tr( "Drag left/right to change the triangle percentage; Shift-drag for fine control" ) );
-		previewMethod = new QComboBox( previewBody ); previewMethod->addItems( { tr( "Single Hull" ), tr( "Decomposition (CoACD)" ) } );
+		previewMethod = new QComboBox( previewBody ); previewMethod->addItems( { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } );
+		// the same field chrome as the scrub fields it sits between, now that this
+		// panel is where the convex method is chosen rather than a second copy of it
+		wwMatchFieldStyle( previewMethod );
 		previewPrecision = new WwNumberField( previewBody );
 		previewPrecision->setRange( 0.0, 5.0 ); previewPrecision->setDecimals( 3 ); previewPrecision->setSingleStep( 0.01 ); previewPrecision->setKeyboardTracking( false );
 		previewPrecision->setToolTip( tr( "Drag left/right to change hull precision; Shift-drag for fine control" ) );
@@ -2479,10 +2482,19 @@ private:
 		 * with no layout cell, Qt put it at 0,0 of the group, on top of the
 		 * group's own title.
 		 */
+		/* NOT editable, and that was the whole bug.
+		 *
+		 * An editable QComboBox is a line edit with a list behind it: clicking it
+		 * puts a cursor in the text instead of opening anything, so the field
+		 * offered typing and nothing else — no vanilla list, no search box, no
+		 * way to reach "add a custom material". Making it a WwSearchCombo did not
+		 * help while this line survived, because showPopup() is not what a click
+		 * on an editable combo calls. The search box lives in the drop-down now,
+		 * which is the whole reason the closed field does not need to be a text
+		 * box.
+		 */
 		auto * materialEdit = new WwSearchCombo( createGroup, tr( "Search materials" ) );
-		materialEdit->setEditable( true );
-		materialEdit->setInsertPolicy( QComboBox::NoInsert );
-		materialEdit->lineEdit()->setPlaceholderText( tr( "Search material name or enter a custom name/CRC" ) );
+		materialEdit->setObjectName( QStringLiteral( "CollisionCreateMaterial" ) );
 		QMap<QString, QPair<quint32, QString>> createMaterials;
 		const auto & createMaterialOptions = NifValue::enumOptionData( materialEnumType() ).o;
 		for ( auto it = createMaterialOptions.cbegin(); it != createMaterialOptions.cend(); ++it )
@@ -2501,19 +2513,20 @@ private:
 			materialEdit->setItemData( row, it.value().toUInt(), Qt::UserRole + 1 );
 			materialEdit->setItemData( row, materialToolTip( it.value().toUInt() ), Qt::ToolTipRole );
 		}
-		if ( QCompleter * completer = materialEdit->completer() ) {
-			completer->setCaseSensitivity( Qt::CaseInsensitive );
-			completer->setFilterMode( Qt::MatchContains );
-			completer->setCompletionMode( QCompleter::PopupCompletion );
-		}
+		// no completer: it belongs to a line edit, and there is not one any more
 		QString savedMaterial = createSettings.value( "CollisionManager/Create/Material", "MaterialMetalSolid" ).toString().trimmed();
 		int savedMaterialRow = materialEdit->findData( savedMaterial );
 		bool savedIsNumber = false;
 		quint32 savedMaterialValue = savedMaterial.toUInt( &savedIsNumber, 0 );
 		if ( savedMaterialRow < 0 && savedIsNumber )
 			savedMaterialRow = materialEdit->findData( savedMaterialValue, Qt::UserRole + 1 );
+		// a stored name that matches no row is one this list has lost -- keep it
+		// as a real row rather than as edit text there is no longer a box for
+		if ( savedMaterialRow < 0 && !savedMaterial.isEmpty() ) {
+			materialEdit->addItem( savedMaterial, savedMaterial );
+			savedMaterialRow = materialEdit->count() - 1;
+		}
 		if ( savedMaterialRow >= 0 ) materialEdit->setCurrentIndex( savedMaterialRow );
-		else materialEdit->setEditText( savedMaterial );
 		// reparented into the popup below, where it stays a searchable combo
 
 		/* ONE BUTTON, and a popup with everything in it at once.
@@ -2607,27 +2620,20 @@ private:
 		popupForm->setHorizontalSpacing( 8 );
 		popupForm->setVerticalSpacing( 4 );
 		popupForm->setColumnStretch( 1, 1 );
-		auto * convexMethod = new QComboBox( createPopup );
-		convexMethod->addItems( { tr( "Single Hull (qhull)" ), tr( "Decomposition (CoACD)" ) } );
-		convexMethod->setCurrentIndex( createSettings.value( "CollisionManager/Create/ConvexMethod", 0 ).toInt() );
-		auto * convexMethodLabel = new QLabel( tr( "Convex method" ), createPopup );
-
-		/* Decimation, where the shape that uses it is chosen.
+		/* Convex method and the triangle percentage are NOT here.
 		 *
-		 * "Optimize Source Mesh…" was a separate button that opened the same
-		 * live preview Mesh already opens, at 50% instead of 100% — one operation
-		 * wearing two names, and the second one sitting next to Create implying
-		 * it did something to the source mesh. It is the triangle percentage the
-		 * new collision is built at, so it belongs in the row of things you set
-		 * before pressing Create.
+		 * Both belong to shapes that open the live preview on Create, and the
+		 * preview already carries both — a method combo, a scrubbable Triangles
+		 * field, hull precision, and the decomposition parameters under it, all
+		 * redrawing the actual hull as they change. Setting a percentage in this
+		 * popup meant choosing a number blind, pressing Create, and then being
+		 * shown the same number again next to the geometry it produces. One of
+		 * the two had to go, and the one attached to the picture is the one worth
+		 * keeping.
+		 *
+		 * Box, Sphere and Capsule have no parameters of their own, so for them
+		 * Create still makes the body outright.
 		 */
-		auto * ratio = new QSpinBox( createPopup );
-		ratio->setRange( 1, 100 );
-		ratio->setSuffix( QStringLiteral( "%" ) );
-		ratio->setValue( std::clamp( createSettings.value( "CollisionManager/Create/Ratio", 100 ).toInt(), 1, 100 ) );
-		ratio->setToolTip( tr( "Triangles to keep. The live preview opens at this and can be scrubbed further." ) );
-		auto * ratioLabel = new QLabel( tr( "Triangles" ), createPopup );
-
 		preset->setParent( createPopup );
 		preset->show();
 		materialEdit->setParent( createPopup );
@@ -2727,7 +2733,7 @@ private:
 				createLinDamp, createAngDamp, createMaxLinVel, createMaxAngVel } )
 			wwMakeScrubField( s );
 
-		for ( QComboBox * c : QList<QComboBox *>{ convexMethod, preset, materialEdit, createLayerCombo,
+		for ( QComboBox * c : QList<QComboBox *>{ preset, materialEdit, createLayerCombo,
 				createMotion, createQuality, createSolver } )
 			wwMatchFieldStyle( c );
 
@@ -2743,10 +2749,6 @@ private:
 			popupForm->addWidget( new QLabel( label, createPopup ), row, 0 );
 			popupForm->addWidget( field, row++, 1 );
 		};
-		popupForm->addWidget( convexMethodLabel, row, 0 );
-		popupForm->addWidget( convexMethod, row++, 1 );
-		popupForm->addWidget( ratioLabel, row, 0 );
-		popupForm->addWidget( ratio, row++, 1 );
 		addRow( tr( "Preset" ), preset );
 		addRow( tr( "Material" ), materialEdit );
 		addRow( tr( "Collision layer" ), createLayerCombo );
@@ -2770,15 +2772,9 @@ private:
 		popupButtons->addWidget( popupCreate );
 		popupLayout->addLayout( popupButtons );
 
-		// the method line is Convex's alone; the triangle percentage means
-		// something only for the two shapes built from triangles
-		auto showForShape = [convexMethod, convexMethodLabel, ratio, ratioLabel, shapeGroup]() {
-			const int id = shapeGroup->checkedId();
-			convexMethod->setVisible( id == 3 );
-			convexMethodLabel->setVisible( id == 3 );
-			ratio->setVisible( id == 3 || id == 4 );
-			ratioLabel->setVisible( id == 3 || id == 4 );
-		};
+		// nothing left in the form is shape-specific: the two settings that were
+		// have moved to the preview that Convex and Mesh open
+		auto showForShape = []() {};
 
 		shapeGroup->button( std::clamp(
 			createSettings.value( "CollisionManager/Create/Shape", 3 ).toInt(), 0, 4 ) )->setChecked( true );
@@ -3171,11 +3167,9 @@ private:
 		 * for it to be confirmed by a second control was the panel not believing
 		 * the first one.
 		 */
-		auto saveCreationSettings = [this, preset, materialEdit, replace, convexMethod,
-				shapeGroup, ratio]() {
+		auto saveCreationSettings = [this, preset, materialEdit, replace, shapeGroup]() {
 			QSettings settings;
 			settings.setValue( "CollisionManager/Create/Shape", std::clamp( shapeGroup->checkedId(), 0, 4 ) );
-			settings.setValue( "CollisionManager/Create/Ratio", ratio->value() );
 			settings.setValue( "CollisionManager/Create/Preset", preset->currentData().toInt() );
 			// the fields ARE the settings now; the preset only fills them in
 			settings.setValue( "CollisionManager/Create/Layer", createLayerCombo->currentData().toUInt() );
@@ -3194,7 +3188,7 @@ private:
 			if ( materialRow >= 0 ) materialValue = materialEdit->itemData( materialRow ).toString();
 			settings.setValue( "CollisionManager/Create/Material", materialValue );
 			settings.setValue( "CollisionManager/Create/Replace", replace->isChecked() );
-			settings.setValue( "CollisionManager/Create/ConvexMethod", convexMethod->currentIndex() );
+			// ConvexMethod is the preview's now; it writes it on Apply
 			settings.beginGroup( "Spells/Havok/Create Convex Shapes" );
 			settings.setValue( "Replace Shape", replace->isChecked() );
 			settings.endGroup();
@@ -3220,7 +3214,7 @@ private:
 				loadCreateFields();
 				saveCreationSettings();
 			} );
-		for ( QComboBox * c : QList<QComboBox *>{ convexMethod, materialEdit, createLayerCombo, createMotion,
+		for ( QComboBox * c : QList<QComboBox *>{ materialEdit, createLayerCombo, createMotion,
 				createQuality, createSolver } )
 			connect( c, qOverload<int>( &QComboBox::currentIndexChanged ), this,
 				[saveCreationSettings]( int ) { saveCreationSettings(); } );
@@ -3231,19 +3225,22 @@ private:
 				createAngDamp, createMaxLinVel, createMaxAngVel } )
 			connect( s, &QDoubleSpinBox::editingFinished, this,
 				[saveCreationSettings]() { saveCreationSettings(); } );
-		connect( ratio, qOverload<int>( &QSpinBox::valueChanged ), this,
-			[saveCreationSettings]( int ) { saveCreationSettings(); } );
 		connect( replace, &QCheckBox::toggled, this,
 			[saveCreationSettings]( bool ) { saveCreationSettings(); } );
 
-		auto createCollision = [this, shapeGroup, convexMethod, ratio, saveCreationSettings]() {
+		auto createCollision = [this, shapeGroup, saveCreationSettings]() {
 			saveCreationSettings();
 			if ( createPopup ) createPopup->hide();
 			const int mode = std::clamp( shapeGroup->checkedId(), 0, 4 );
-			const bool decomposition = convexMethod->currentIndex() == 1;
-			// the preview opens at the percentage set here rather than always at
-			// 100, which is what the Optimize button used to be for
-			const double keep = ratio->value();
+			/* Convex and Mesh hand off to the live preview, which is where their
+			 * parameters are. It opens at the last percentage and method it was
+			 * left on rather than resetting to a full-density hull every time.
+			 */
+			QSettings previewState;
+			const double keep = std::clamp(
+				previewState.value( "CollisionManager/Preview/Ratio", 1.0 ).toDouble() * 100.0, 1.0, 100.0 );
+			const bool decomposition =
+				previewState.value( "CollisionManager/Preview/Decomposition", false ).toBool();
 			if ( mode == 3 ) { showCollisionPreview( 0, keep, decomposition ); return; }
 			if ( mode == 4 ) { showCollisionPreview( 1, keep ); return; }
 			QString spellId;

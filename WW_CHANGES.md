@@ -1,5 +1,62 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05i — The material field was still a text box
+
+bungo: *"Material type still only type in, no dropdown with vanilla fo4
+materials or search bar, or custom material name."*
+
+`setEditable( true )` at the combo's **creation** site, from the version before
+last. I removed the copy further down and never the original. An editable
+`QComboBox` is a line edit with a list behind it: clicking it puts a cursor in
+the text and opens nothing, so making it a `WwSearchCombo` changed nothing —
+`showPopup()` is not what a click on an editable combo calls. Everything added
+last time was there and unreachable.
+
+Gone, along with the completer that belonged to the line edit. A stored material
+name that matches no row is now added as a real row rather than set as edit text
+there is no longer a box for.
+
+### Convex method and Triangles move to the preview
+
+Both belong to shapes that open the live preview on **Create**, and the preview
+already carries both — method, a scrubbable Triangles field, hull precision and
+the decomposition parameters, all redrawing the actual hull as they change.
+Setting a percentage in the popup meant choosing a number blind, pressing
+Create, and then being shown the same number again next to the geometry it
+produces. The copy attached to the picture is the one worth keeping.
+
+The preview opens at the ratio and method it was last left on rather than
+resetting to a full-density hull every time, and its method combo now takes the
+same field chrome as the scrub fields it sits between. Box, Sphere and Capsule
+have no parameters of their own, so Create still makes those outright.
+
+### Measured
+
+The check that should have caught this asked whether the field was **editable**
+— and passed for a whole build on the leftover `setEditable( true )`, which was
+itself the bug. It opens the drop-down and looks inside now:
+
+```
+  ok   the material field is not a text box
+material rows: 33
+  ok   it lists the vanilla materials
+material drop-down: search 1, add-custom 1, rows 33
+  ok   the drop-down has a search box
+  ok   ...an add-a-custom-material row
+  ok   ...and the materials under it
+```
+
+That is three checks where there was one, and none of them can be satisfied by
+the state that fooled the last one.
+
+One more self-inflicted miss: opening the material drop-down puts an "add a
+custom material" `QPushButton` inside the popup's own child tree, which the
+"Optimize Source Mesh is not a separate button" check counted. It skips buttons
+under a `QComboBox` now — a button in a drop-down is not a button on the panel.
+
+28 checks. `collision_undo` (12), `collision_compiled_edit` (7),
+`collision_per_shape` (2+8+8).
+
 ## 2026-08-05h — The number fields were the wrong species, and four more
 
 bungo spotted it from a screenshot and asked me to guess: **mass, friction,
