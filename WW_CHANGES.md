@@ -1,5 +1,40 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-05r — The second body that did nothing, and creating from the row menu
+
+### "Nothing happens" was accurate
+
+`tlCreateCollisionBody` returns the body **existing or new** — a `NiAVObject`
+holds exactly one Collision Object, so a second one on the same node cannot be
+made. It handed back the body already there, the selection moved to a row that
+was already selected, and the button appeared to do nothing whatsoever. The
+return being *valid* is why the not-usable message added earlier never covered
+it: that one only fires when the node is unusable, and this node was fine.
+
+Asked before the call now, because after it the answer is always yes. Both ways
+out are named, since neither is guessable from a refusal: shapes go on the body
+you already have, and a separate body needs a node of its own.
+
+### Create from the row menu
+
+**Create Collision Body…** and **Create Collision Shape…** are in the Collision
+Manager's right-click menu, at the top, routed through the existing buttons
+rather than a second copy of the create logic — they already position the popup
+and carry the enable rules, and a duplicate is how the popup and the panel came
+to disagree about the preset in the first place.
+
+**The menu no longer bails out on empty space.** It returned early when
+`itemAt()` missed, which made it unreachable in an empty file — the one state
+where creating is the only thing you can do. Everything needing a row is
+disabled rather than absent, so the menu reads the same either way. `Expand
+Shapes` was dereferencing the row unconditionally while it was there, which that
+early return had been hiding.
+
+### Still to do from the same request
+
+Parent column, re-parenting from the block list, and mesh-to-collision-shape on
+a chosen body are **not** in this entry.
+
 ## 2026-08-05q — The startup view now actually applies
 
 The previous entry shipped the startup view inert and said it worked. It did

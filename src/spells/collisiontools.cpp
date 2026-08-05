@@ -3499,33 +3499,66 @@ private:
 		} );
 		connect( tree, &QTreeWidget::customContextMenuRequested, this, [this]( const QPoint & pos ) {
 			QTreeWidgetItem * item = tree->itemAt( pos );
-			if ( !item ) return;
-			tree->setCurrentItem( item );
-			const bool compiled = item->data( 0, CompiledRole ).toBool();
+			/* NO EARLY RETURN ON EMPTY SPACE.
+			 *
+			 * Creating is the first thing you do in an empty file, and an empty
+			 * file is exactly when there is no row to right-click. Bailing out
+			 * when itemAt() missed made the menu unreachable in the one state
+			 * that needs it most. Everything below that needs a row is disabled
+			 * rather than absent, so the menu reads the same either way — and
+			 * `expand` in particular used to dereference item unconditionally.
+			 */
+			if ( item )
+				tree->setCurrentItem( item );
+			const bool compiled = item && item->data( 0, CompiledRole ).toBool();
+			// the row menu can create, so the shape gate has to be current
+			updateShapeButtonState();
 			QMenu menu( this );
+			QAction * newBody = menu.addAction( tr( "Create Collision Body…" ) );
+			newBody->setToolTip( tr( "On the node selected in the block list" ) );
+			QAction * newShape = menu.addAction( tr( "Create Collision Shape…" ) );
+			newShape->setEnabled( createShapeButton && createShapeButton->isEnabled() );
+			menu.addSeparator();
 			QAction * decompile = menu.addAction( tr( "Decompile Selected" ) );
 			decompile->setEnabled( compiled );
 			QAction * decompileAllAction = menu.addAction( tr( "Decompile All" ) );
 			QAction * compileAction = menu.addAction( tr( "Compile Selected" ) );
-			compileAction->setEnabled( !compiled );
+			compileAction->setEnabled( item && !compiled );
 			// moved off a permanent button: it targets the row that was clicked,
 			// which is exactly what a row menu is for
 			QAction * importDonor = menu.addAction( tr( "Import Donor..." ) );
 			importDonor->setToolTip( tr( "Copy collision from another NIF onto this target node" ) );
+			importDonor->setEnabled( item != nullptr );
 			menu.addSeparator();
 			QAction * check = menu.addAction( tr( "Check Collision" ) );
 			QAction * makeRenderProxy = menu.addAction( tr( "Create Editable Mesh Copy" ) );
+			makeRenderProxy->setEnabled( item != nullptr );
 			QAction * massFromMaterialAction = menu.addAction( tr( "Mass from Material..." ) );
-			massFromMaterialAction->setEnabled( !compiled );
-			QAction * expand = menu.addAction( item->isExpanded() ? tr( "Collapse Shapes" ) : tr( "Expand Shapes" ) );
-			expand->setEnabled( item->childCount() > 0 );
+			massFromMaterialAction->setEnabled( item && !compiled );
+			QAction * expand = menu.addAction( item && item->isExpanded()
+				? tr( "Collapse Shapes" ) : tr( "Expand Shapes" ) );
+			expand->setEnabled( item && item->childCount() > 0 );
 			QAction * selectBlock = menu.addAction( tr( "Select in Block List" ) );
+			selectBlock->setEnabled( item != nullptr );
 			menu.addSeparator();
 			QAction * copyMaterial = menu.addAction( tr( "Copy Material Name and Value" ) );
 			QAction * useMaterial = menu.addAction( tr( "Use Material for New Collision" ) );
 			QAction * refreshAction = menu.addAction( tr( "Refresh" ) );
 			QAction * chosen = menu.exec( tree->viewport()->mapToGlobal( pos ) );
-			if ( chosen == decompile )
+			/* Through the BUTTONS, not a second copy of the create logic.
+			 *
+			 * They already open the popup positioned under themselves and carry
+			 * the enable rules, so routing the menu through them keeps exactly
+			 * one authoring path. A duplicate here is how the create popup and
+			 * the panel came to disagree about the preset in the first place.
+			 */
+			if ( chosen == newBody ) {
+				if ( createButton )
+					createButton->click();
+			} else if ( chosen == newShape ) {
+				if ( createShapeButton )
+					createShapeButton->click();
+			} else if ( chosen == decompile )
 				runSpell( QStringLiteral( "Havok/Decompile Compiled Collision" ),
 					blockIndex( item->data( 0, ObjectBlockRole ).toInt() ) );
 			else if ( chosen == decompileAllAction )
@@ -3789,6 +3822,8 @@ private:
 			const bool ownNode = targets.size() > 1;
 			QModelIndex made;
 			QList<int> unusable;
+			QList<int> alreadyHad;
+			int freshBodies = 0;
 			nifSnapshotOp( nif, tr( "Create collision body" ), [&]() {
 				for ( const QPersistentModelIndex & target : targets ) {
 					if ( !target.isValid() )
@@ -3798,13 +3833,47 @@ private:
 						unusable << nif->getBlockNumber( QModelIndex( target ) );
 						continue;
 					}
+					// tlCreateCollisionBody returns the body EXISTING OR NEW, so
+					// this has to be asked before the call or the answer is
+					// always yes. See the alreadyHad message below.
+					const bool had = blockIndex( nif->getLink( node, "Collision Object" ) ).isValid();
 					const QModelIndex body = tlCreateCollisionBody( nif, node );
-					if ( body.isValid() )
+					if ( body.isValid() ) {
 						made = body;
-					else
+						if ( had )
+							alreadyHad << nif->getBlockNumber( node );
+						else
+							freshBodies++;
+					} else {
 						unusable << nif->getBlockNumber( QModelIndex( target ) );
+					}
 				}
 			} );
+			/* THE SECOND BODY THAT LOOKS LIKE A NO-OP.
+			 *
+			 * tlCreateCollisionBody returns the body EXISTING OR NEW: a
+			 * NiAVObject holds exactly one Collision Object, so a second one on
+			 * the same node is not a thing that can be made. It handed back the
+			 * body already there, the selection moved to a row that was already
+			 * selected, and the button appeared to do nothing whatsoever —
+			 * reported, accurately, as "nothing happens". The valid return is
+			 * why the not-usable message below never covered this.
+			 *
+			 * Both ways out get named, because neither is guessable from a
+			 * refusal: shapes go on the body you already have, and a genuinely
+			 * separate body needs a node of its own.
+			 */
+			if ( freshBodies == 0 && !alreadyHad.isEmpty() ) {
+				QStringList numbers;
+				for ( int block : alreadyHad )
+					numbers << QString::number( block );
+				QMessageBox::information( this, tr( "Create Collision Body" ),
+					tr( "Block(s) %1 already have a collision body, and a block can hold "
+						"only one.\n\nTo add geometry to it, use Create Collision Shape on "
+						"that body. For a separate body, put the mesh under its own NiNode "
+						"first." ).arg( numbers.join( QStringLiteral( ", " ) ) ) );
+			}
+
 			/* SAY SO WHEN THE SELECTION CANNOT TAKE ONE.
 			 *
 			 * The empty case above has always had a message. A selection that
