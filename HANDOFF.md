@@ -5,11 +5,39 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 [WW_FEATURES.md](WW_FEATURES.md) is what the fork adds, and
 [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog.
 
-Updated **2026-08-05** after the startup-crash session. Branch `main` at
-`5983a97`, build green, working tree clean, everything pushed.
+Updated **2026-08-05** after the startup-crash and collision-authoring session.
+Branch `main` at `0016f02`, build green, working tree clean, everything pushed.
 
-The headline: **the startup crash is fixed** — `restoreUi()` restores state
-before geometry. It was never the saved layout. See Landmines.
+Two headlines:
+
+- **The startup crash is fixed** — `restoreUi()` restores state before geometry.
+  It was never the saved layout. See Landmines.
+- **NIFs open on Blender's three-quarter view**, the Collision Manager fits its
+  own columns, and collision authoring gained saved presets, a row menu that
+  creates, a Parent column and re-parenting.
+
+### Open, and honest about it
+
+- **Two things have no harness.** Preset save/rename/remove, and
+  `reparentFromBlockList`. The preset "+" goes through a modal
+  `QInputDialog::getText` and re-parenting is only reachable through a
+  `QMenu::exec`, so neither is drivable the way the existing harnesses drive
+  widgets — covering them means exposing the storage helpers and the operation
+  behind test-only entry points first. Re-parenting writes `Children` arrays on
+  two nodes, so it is the one to do first.
+- **Re-parenting keeps the LOCAL transform**, so a body moves in world space
+  when the new parent sits elsewhere. Right for attaching collision to a bone,
+  wrong for tidying a hierarchy. Preserving world position was deliberately not
+  decided.
+- **The title bar reports a stale build.** `NIFSKOPE_REVISION` is baked when
+  qmake runs, not when make does, so the About box and title can name an older
+  commit than the binary. Cosmetic; fix by regenerating on link the way
+  `README.md` already is.
+- Parked from the same conversation, by choice: refit-shape-to-mesh (ranked
+  highest of these), copy/paste physics between bodies, save-preset-from-an-
+  existing-body, change shape type in place, mirror across X, and settling
+  whether several selected meshes should make one `bhkListShape` body instead of
+  several.
 
 ---
 
@@ -176,6 +204,16 @@ The collision and menu work added six:
 | `nav_keys.sh` | rotate/zoom rebinding, and that letting go stops the camera |
 | `collision_compiled_edit.sh` | editing a compiled body in place |
 | `window_state_roundtrip.sh` | open, close maximised, open again — the startup crash |
+
+**Two useful capture levers, both added while chasing things reading was not
+finding.** `WW_CAMERA_LOG=<file>` appends every camera reorientation with its
+rotation and view state — that is what finally located the startup view being
+overwritten, after three carefully-read suspects each turned out innocent. And
+`WW_RENDER_VIEW` now accepts a **negative** value, meaning "leave the camera
+exactly as startup left it", which is the only way to photograph the startup
+view: every other value overrides the thing under test. Its old upper bound was
+`ViewWalk`, so asking for `ViewUser` was silently rewritten to Front and
+produced a capture that looked like a passing test of a view it had never used.
 
 `window_state_roundtrip.sh` is the one harness that **cannot** source
 `_harness.sh`. `saveUi()` deliberately bails out on any `WW_*` variable so
