@@ -1,5 +1,72 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## Block list: Blender-Outliner drag-and-drop and rename (specified 2026-08-05)
+
+User-specified against Blender's Outliner, with screenshots. Not started.
+Investigation is done and is recorded here so it is not re-derived.
+
+### Drag to move
+
+Blender's tooltip is the whole spec: **"Move inside collection (Ctrl to link,
+Shift to parent)"**, shown at the cursor, with the drag ghost reading
+**"objects"** in the plural for a multi-selection and the drop-target row
+highlighted. Multi-select must drag as one payload.
+
+**The one place Blender does not map onto NIF.** Blender has two separate
+things: a *collection* is organisational and never changes an object's world
+transform, while *parenting* is transform-level. A NIF has only `NiNode`
+children, so those two collapse into one operation and the distinction has to
+be re-cast as what happens to the transform:
+
+| gesture | meaning here |
+|---|---|
+| plain drop on a `NiNode` | re-parent, **preserving world position** — compensate the local transform, Blender's move-to-collection semantic of "nothing appears to move" |
+| **Shift** | re-parent keeping the **local** transform, so the block snaps into the new parent's space |
+| **Ctrl** | **link** — add the child link to the new parent and *leave the old one*, so the block has two parents. This is a real NIF capability and the closest thing to Blender's link |
+
+This settles the question left open by `reparentFromBlockList`, which currently
+keeps the local transform unconditionally: that becomes the **Shift** behaviour,
+and plain drop needs the world-preserving variant written.
+
+Refuse and say why when the target cannot take children, when it is the dragged
+block itself, and when it is a descendant of it (cycle).
+
+### Rename
+
+Blender's inline rename: double-click or **F2** turns the row into an editor in
+place with the text selected, Enter commits, Escape cancels.
+
+**This may already be most of the way there.** `buddy()` redirects a block row's
+Value column to that block's `Name` child and `NifModel::setData` follows the
+redirect (`nifmodel.cpp`), and the block list sets **no** `editTriggers`
+anywhere — not in code, not in `nifskope.ui` — so it has Qt's default
+`DoubleClicked | SelectedClicked | EditKeyPressed`. Try it before building
+anything; if it does nothing the fault is the delegate refusing block rows,
+which is far smaller than the feature. Only blocks that *have* a Name field
+should offer it.
+
+### Implementation notes
+
+- **View level, not model level.** `NifModel` has no `mimeData`,
+  `dropMimeData` or `supportedDropActions`, and Qt's row-move semantics do not
+  fit blocks-plus-links — a model-level version would try to move rows. Use a
+  `dropEvent` on the block list.
+- The list runs through a **proxy** and switches between list and hierarchy
+  modes, so the drop index must be mapped back to a block number through
+  whichever model is current.
+- The multi-selection is already published as raw block numbers
+  (`nifskope.cpp`, the `selectionChanged` handler), so multi-drag has a source
+  of truth already.
+- **Hoist the reparent primitive first.** `reparentFromBlockList` in
+  `collisiontools.cpp` already does rebuild-old-`Children`, `addLink`-to-new,
+  cycle check and the four refusals. Share it rather than writing a second one
+  with its own idea of what is legal.
+- Dropping a `BSTriShape` onto the **Collision Manager** is the same payload
+  routed to the mesh→collision path; `collisionConsumeSource` is the single
+  choke point and already honours the keep-mesh toggle.
+
+---
+
 **This is THE backlog.** One file, everything that is left. Consolidated
 2026-07-21 from what used to be seven scattered plan documents, each of which
 independently claimed to know what was open — and several of which were wrong.
