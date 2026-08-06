@@ -47,10 +47,42 @@ the setting off it passes; with it on that exact check **fails**, which is the
 proof the toggle does something — a setting that quietly did nothing would leave
 it passing in both runs.
 
-### Still to do from the same request
+### Parent column, re-parenting, and Mesh to Collision
 
-Parent column, re-parenting from the block list, and a **Mesh to Collision**
-entry on the row menu targeting a chosen body are **not** in this entry.
+The list has a **Parent** column: column 0 is the node that owns the collision
+object, and this is what that node hangs under. Two bodies on identically-named
+nodes were told apart by nothing else, and it is the thing you have to know
+before moving one. Filled in `setItemRoles`, the one call the compiled and
+editable row builders both make, so those two cannot drift.
+
+Eight columns did not fit 560px and the scroll bar came back, so the dock
+minimum is re-measured at 640 rather than nudged.
+
+**Set Parent from Block List** moves the body's node under the block selected
+over there. It refuses four things and says which each time — nothing selected,
+a parent that is not a NiNode, the node itself, and any descendant of it, that
+last one because it would cut the branch out of the file and leave a cycle. The
+old parent's `Children` array is rebuilt rather than blanked, since dropping a
+link leaves `Num Children` still claiming an entry that points at nothing: the
+dangling child link `collisionConsumeSource` already documents.
+
+The **local transform is left alone**, so a body moves in world space when the
+new parent sits somewhere else. Right for attaching collision to a bone, wrong
+for tidying a hierarchy. Preserving world position is a separate decision and is
+deliberately not made here.
+
+**Mesh to Collision…** ticks shape mode 4 and opens the shape popup, so it goes
+through `idToggled` exactly as clicking the Mesh button would — writing the
+setting directly would leave the popup showing the previous shape.
+
+### A check that was counting when it should have been naming
+
+Adding the keep-mesh checkbox failed `the shape popup holds only what a shape
+holds`, which asserted "exactly one checkbox". The rule it defends is real —
+Material is the only shape property in that popup — but the count was standing
+in for it, and would have been satisfied just as well by a body property
+arriving as a checkbox the moment Replace was renamed or moved. It names both
+expected boxes now, and logs them, which is stricter than what it replaced.
 
 ## 2026-08-05q — The startup view now actually applies
 

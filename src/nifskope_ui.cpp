@@ -7546,9 +7546,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// friction, restitution, two dampings, two velocities, penetration
 					check( "the body popup holds the physics", bodyCombos == 6 && bodyNumbers == 8 );
 					// material, and Replace; no numbers at all
+					/* NAMED, not counted. This asserted "exactly one checkbox",
+					 * which a body property arriving as a checkbox would also
+					 * have satisfied the moment Replace was moved or renamed.
+					 * The two that belong here are both create-time behaviour,
+					 * not shape data — Material is the only shape property in
+					 * the popup, and that is what shapeCombos == 1 pins.
+					 */
+					QStringList shapeChecks;
+					for ( QCheckBox * c : shapePop->findChildren<QCheckBox *>() )
+						shapeChecks << c->text();
+					shapeChecks.sort();
+					log << "shape popup checkboxes: "
+						<< shapeChecks.join( QLatin1String( " | " ) ) << "\n";
 					check( "the shape popup holds only what a shape holds",
 						shapeCombos == 1 && shapeNumbers == 0
-						&& shapePop->findChildren<QCheckBox *>().size() == 1 );
+						&& shapeChecks.size() == 2
+						&& shapeChecks.at( 0 ).contains( QLatin1String( "Keep" ) )
+						&& shapeChecks.at( 1 ).contains( QLatin1String( "Replace" ) ) );
 
 					/* --- the material drop-down ------------------------------
 					 * Search box, an "add a custom one" row, and the vanilla

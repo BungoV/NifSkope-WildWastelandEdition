@@ -1184,6 +1184,77 @@ private:
 			? body : QModelIndex();
 	}
 
+	/*! Re-parent this body's node under the block chosen in the BLOCK LIST.
+	 *
+	 *  Refuses four things, each saying which, because a silent no-op is what
+	 *  this panel keeps getting reported for: nothing selected, a parent that
+	 *  is not a NiNode, the node itself, and any descendant of it — that last
+	 *  would cut the branch out of the file and leave a cycle behind.
+	 *
+	 *  The LOCAL transform is left alone, so a body moves in world space when
+	 *  the new parent sits elsewhere. That is right for attaching collision to
+	 *  a bone and wrong for tidying a hierarchy; preserving world position is a
+	 *  separate decision and is deliberately not made here.
+	 */
+	void reparentFromBlockList( QTreeWidgetItem * item )
+	{
+		if ( !nif || !item )
+			return;
+		const int nodeBlock = item->data( 0, NodeBlockRole ).toInt();
+		const QModelIndex node = blockIndex( nodeBlock );
+		const QModelIndex parent = nif->getBlockIndex( currentSource() );
+		if ( !node.isValid() ) {
+			QMessageBox::information( this, tr( "Set Parent" ),
+				tr( "This row has no node to re-parent." ) );
+			return;
+		}
+		if ( !parent.isValid() || !nif->blockInherits( parent, "NiNode" ) ) {
+			QMessageBox::information( this, tr( "Set Parent" ),
+				tr( "Select the new parent in the block list first, and make it a NiNode — "
+					"only a NiNode carries children." ) );
+			return;
+		}
+		const int parentBlock = nif->getBlockNumber( parent );
+		if ( parentBlock == nodeBlock ) {
+			QMessageBox::information( this, tr( "Set Parent" ),
+				tr( "A node cannot be its own parent." ) );
+			return;
+		}
+		for ( int p = parentBlock; p >= 0; p = nif->getParent( p ) ) {
+			if ( p != nodeBlock )
+				continue;
+			QMessageBox::information( this, tr( "Set Parent" ),
+				tr( "Block %1 already sits under this body's own node. Re-parenting onto it "
+					"would cut the branch out of the file." ).arg( parentBlock ) );
+			return;
+		}
+		const int oldParent = nif->getParent( nodeBlock );
+		if ( oldParent == parentBlock ) {
+			QMessageBox::information( this, tr( "Set Parent" ),
+				tr( "Already parented to block %1." ).arg( parentBlock ) );
+			return;
+		}
+		nifSnapshotOp( nif, tr( "Set collision parent" ), [&]() {
+			if ( oldParent >= 0 ) {
+				/* REBUILT, not blanked. Dropping a link leaves Num Children
+				 * still claiming the entry and the entry pointing at nothing,
+				 * which is exactly the dangling child link the Issue Manager
+				 * reports — the same trap collisionConsumeSource documents.
+				 */
+				const QModelIndex from = blockIndex( oldParent );
+				QVector<qint32> kept;
+				for ( const qint32 child : nif->getLinkArray( from, "Children" ) )
+					if ( child != nodeBlock && nif->isValidBlockNumber( child ) )
+						kept.append( child );
+				nif->set<uint>( from, "Num Children", uint( kept.size() ) );
+				nif->updateArraySize( from, "Children" );
+				nif->setLinkArray( from, "Children", kept );
+			}
+			addLink( nif, blockIndex( parentBlock ), "Children", nodeBlock );
+		} );
+		queueRebuild();
+	}
+
 	void updateShapeButtonState()
 	{
 		if ( !createShapeButton || !createShapeHost )
@@ -1336,6 +1407,21 @@ private:
 	QHash<int, QString> collectBoneRoles() const { return tlCollBoneRoles( nif ); }
 	QString nodeName( int block ) const { return tlCollNodeName( nif, block ); }
 
+	/*! What the body's node hangs under.
+	 *
+	 *  Column 0 is the node that owns the collision object; this is that node's
+	 *  scene-graph parent. Two bodies on identically-named nodes are told apart
+	 *  by nothing else in this list, and it is the thing you have to know before
+	 *  re-parenting one.
+	 */
+	QString parentNodeName( int nodeBlock ) const
+	{
+		if ( !nif || nodeBlock < 0 )
+			return QString();
+		const int p = nif->getParent( nodeBlock );
+		return p < 0 ? tr( "— (root)" ) : nodeName( p );
+	}
+
 	QString compiledShapeSummary( const HknpSystem & sys, quint32 bodyId,
 		quint32 * material, int * verts, int * tris ) const
 	{
@@ -1393,6 +1479,15 @@ private:
 		item->setData( 0, BodyIdRole, bodyId );
 		item->setData( 0, CompiledRole, compiled );
 		item->setData( 0, ShapeIndexRole, shapeIndex );
+		/* PARENT, column 7. Set here rather than at the two population sites so
+		 * the compiled and editable paths cannot drift — they already build
+		 * their rows separately and this is the one call both make.
+		 *
+		 * Top-level rows only: a shape row's parent is the body row directly
+		 * above it, which the indentation already says.
+		 */
+		if ( !item->parent() )
+			item->setText( 7, parentNodeName( nodeBlock ) );
 	}
 
 	int firstLeafShape( int shape, int depth = 0 ) const
@@ -2709,9 +2804,9 @@ private:
 
 		tree = new QTreeWidget( this );
 		tree->setObjectName( QStringLiteral( "CollisionInventoryTree" ) );
-		tree->setColumnCount( 7 );
+		tree->setColumnCount( 8 );
 		tree->setHeaderLabels( { tr( "Node" ), tr( "Shape" ), tr( "Layer" ), tr( "Material" ),
-			tr( "Mass" ), tr( "State" ), tr( "Bone" ) } );
+			tr( "Mass" ), tr( "State" ), tr( "Bone" ), tr( "Parent" ) } );
 		tree->setRootIsDecorated( true );
 		tree->setAlternatingRowColors( true );
 		tree->setSelectionMode( QAbstractItemView::SingleSelection );
@@ -3507,7 +3602,8 @@ private:
 				}
 			}
 		} );
-		connect( tree, &QTreeWidget::customContextMenuRequested, this, [this]( const QPoint & pos ) {
+		connect( tree, &QTreeWidget::customContextMenuRequested, this,
+			[this, shapeGroup]( const QPoint & pos ) {
 			QTreeWidgetItem * item = tree->itemAt( pos );
 			/* NO EARLY RETURN ON EMPTY SPACE.
 			 *
@@ -3528,6 +3624,10 @@ private:
 			newBody->setToolTip( tr( "On the node selected in the block list" ) );
 			QAction * newShape = menu.addAction( tr( "Create Collision Shape…" ) );
 			newShape->setEnabled( createShapeButton && createShapeButton->isEnabled() );
+			QAction * meshToColl = menu.addAction( tr( "Mesh to Collision…" ) );
+			meshToColl->setToolTip(
+				tr( "Turn the meshes selected in the block list into collision on this body" ) );
+			meshToColl->setEnabled( createShapeButton && createShapeButton->isEnabled() );
 			menu.addSeparator();
 			QAction * decompile = menu.addAction( tr( "Decompile Selected" ) );
 			decompile->setEnabled( compiled );
@@ -3550,6 +3650,11 @@ private:
 			expand->setEnabled( item && item->childCount() > 0 );
 			QAction * selectBlock = menu.addAction( tr( "Select in Block List" ) );
 			selectBlock->setEnabled( item != nullptr );
+			QAction * setParent = menu.addAction( tr( "Set Parent from Block List" ) );
+			setParent->setToolTip(
+				tr( "Move this body's node under the block selected in the block list" ) );
+			// bodies only: a shape row's parent is the body above it
+			setParent->setEnabled( item && !item->parent() );
 			menu.addSeparator();
 			QAction * copyMaterial = menu.addAction( tr( "Copy Material Name and Value" ) );
 			QAction * useMaterial = menu.addAction( tr( "Use Material for New Collision" ) );
@@ -3568,6 +3673,17 @@ private:
 			} else if ( chosen == newShape ) {
 				if ( createShapeButton )
 					createShapeButton->click();
+			} else if ( chosen == meshToColl ) {
+				// Mesh is shape mode 4. Checking the button drives the same
+				// idToggled path a click on it would, so showForShape() and the
+				// settings write both happen — setting the key directly here
+				// would leave the popup showing the previous shape.
+				if ( QAbstractButton * meshBtn = shapeGroup->button( 4 ) )
+					meshBtn->setChecked( true );
+				if ( createShapeButton )
+					createShapeButton->click();
+			} else if ( chosen == setParent ) {
+				reparentFromBlockList( item );
 			} else if ( chosen == decompile )
 				runSpell( QStringLiteral( "Havok/Decompile Compiled Collision" ),
 					blockIndex( item->data( 0, ObjectBlockRole ).toInt() ) );
@@ -4211,9 +4327,12 @@ QDockWidget * tlCreateCollisionManagerDock( NifModel * nif, QMainWindow * mw, GL
 	 * minimum on the panel alone left the dock free to squeeze to 80px and clip
 	 * it. Measured: the first attempt did exactly that and looked identical to
 	 * having changed nothing.
+	 *
+	 * 560 fitted seven columns exactly; Parent made eight and the scroll bar
+	 * came back, so this is re-measured rather than nudged.
 	 */
-	panel->setMinimumWidth( 560 );
-	scroll->setMinimumWidth( 560 );
+	panel->setMinimumWidth( 640 );
+	scroll->setMinimumWidth( 640 );
 	scroll->setWidget( panel );
 	dock->setWidget( scroll );
 	mw->addDockWidget( Qt::RightDockWidgetArea, dock );
