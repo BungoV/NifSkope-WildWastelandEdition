@@ -2790,9 +2790,37 @@ void NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
 		loaded = loadConfiguredNifIntoDocument( window,
 			document->configuredResourceGame, document->configuredResourcePath );
 	} else {
+		/* HANDED OVER IN MEMORY, NOT RE-READ FROM DISK.
+		 *
+		 * This used to call loadFromFile, which makes "edit this one" a RELOAD:
+		 * every unsaved change in the document being promoted was silently thrown
+		 * away, and a file that had moved or was never on disk in the first place
+		 * failed to promote at all. Nothing about becoming the primary window
+		 * requires re-parsing bytes — the model is already parsed, and it is the
+		 * one the user has been working in.
+		 *
+		 * Serialised to a buffer and loaded back rather than swapping the model
+		 * pointer: the window owns its model and half the UI is wired to that
+		 * instance, so replacing it would mean re-wiring all of it. This copies
+		 * the STATE, including unsaved edits, which is what was being lost.
+		 */
 		QString fname = document->currentFile;
 		emit window->beginLoading();
-		loaded = window->nif->loadFromFile( fname );
+		QByteArray carried;
+		{
+			QBuffer buf( &carried );
+			buf.open( QIODevice::WriteOnly );
+			loaded = document->nif && document->nif->save( buf );
+		}
+		if ( loaded ) {
+			QBuffer buf( &carried );
+			buf.open( QIODevice::ReadOnly );
+			loaded = window->nif->load( buf );
+		}
+		// only if the live model could not be carried at all is the file worth
+		// falling back to; a promote that half-works is worse than either
+		if ( !loaded && !fname.isEmpty() )
+			loaded = window->nif->loadFromFile( fname );
 		if ( loaded ) {
 			window->configuredResourceGame = -1;
 			window->configuredResourcePath.clear();
