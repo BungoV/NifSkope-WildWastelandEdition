@@ -284,9 +284,15 @@ poked directly.
 **There is a live-drag test, and it is the only thing above that boundary.**
 `tests/spells/block_drag_live.ps1` drives the physical mouse at the block list on
 the second monitor and reads `release/ww_drag.log` — which the program writes on
-every drag, with no flag to set. It found in one run what four code-reading fixes
-missed while the harness sat at 44 green. When a drag bug is reported, run that
-first; it takes over the pointer for about three seconds.
+every drag, with no flag to set (`WW_DRAG_LOG=off` disables it, or a path
+overrides it). It found in one run what four code-reading fixes missed while the
+harness sat at 44 green.
+
+**It SEIZES THE POINTER, so it is run by hand, never fired off.** Placement on
+the second monitor keeps a *window* out of the way; the mouse is not per-monitor,
+and clicks land wherever the cursor is dragged. It was once run mid-task and
+disturbed the user's live session. Ask before every run, and if it has already
+answered the question, do not re-run it to confirm.
 
 **And that entry point is exactly how the drag shipped broken.** Driving the drop
 handlers covers everything below `startDrag()` — and `startDrag()` was never

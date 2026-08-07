@@ -1,5 +1,14 @@
 # Drive a REAL mouse drag at NifSkope's block list and read what it resolved to.
 #
+#   *** THIS SEIZES THE PHYSICAL MOUSE. RUN IT YOURSELF, DELIBERATELY. ***
+#
+# It is not a harness you fire off while someone is at the machine. Placing the
+# window on the second monitor keeps a WINDOW out of the way; this takes the
+# input device, which is shared with whatever else is being done on any monitor.
+# It was run once mid-task and dragged things around in the app the user was
+# working in. Ask, every time, and do not re-run it "to confirm" -- if it has
+# already answered the question, report the answer.
+#
 # WHY THIS EXISTS
 #
 # A native drag is the one path no harness can enter. QApplication::notify routes
@@ -23,9 +32,10 @@
 # first child to the gap above the last one and reads the drag log. A working drag
 # ends with a DROP line carrying a position, and "moved 1".
 #
-# IT TAKES OVER THE MOUSE for about three seconds. The window goes on the SECOND
-# monitor (WW_WINDOW_AT), so it never covers the primary screen, but the pointer
-# does move -- do not run it while typing somewhere else.
+# IT TAKES OVER THE MOUSE, now for about fifteen seconds across four drags. The
+# window goes on the SECOND monitor (WW_WINDOW_AT) so it never covers the primary
+# screen -- but the pointer is not per-monitor, and whatever is under it wherever
+# you are working will receive clicks and drags. Do not run it unattended.
 #
 # FIXTURE: four BSTriShape children of one root, built with the CLI:
 #   NifSkope.exe -no-gui new -o E:/dragfx0.nif
@@ -41,7 +51,9 @@ using System;using System.Runtime.InteropServices;
 public class M {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,IntPtr e);
-  public const uint DOWN=0x0002, UP=0x0004;
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk,byte scan,uint f,IntPtr e);
+  public const uint DOWN=0x0002, UP=0x0004, KEYUP=0x0002;
+  public const byte VK_SHIFT=0x10, VK_CONTROL=0x11;
 }
 "@
 
@@ -69,37 +81,78 @@ foreach ($line in Get-Content $log) {
   }
 }
 Write-Output "rows found: $($rows.Keys | Sort-Object)"
-if (-not ($rows.ContainsKey(1) -and $rows.ContainsKey(10))) {
-  Write-Output 'missing the rows to drag between'; $p.CloseMainWindow() | Out-Null; exit 1
+foreach ($need in 0,1,4,7,10) {
+  if (-not $rows.ContainsKey($need)) {
+    Write-Output "missing row $need - is the fixture four meshes under one root?"
+    $p.CloseMainWindow() | Out-Null; exit 1
+  }
+}
+$viewportBottom = 0
+foreach ($line in Get-Content $log) {
+  if ($line -match '^viewport global (-?\d+),(-?\d+) (\d+)x(\d+)$') {
+    $viewportBottom = [int]$Matches[2] + [int]$Matches[4] - 1
+  }
 }
 
-# from the middle of block 1's row, to the TOP portion of block 10's row --
-# which is the gap between 7 and 10, position 3 in a [1,4,7,10] Children array
-$from = @{ x = $rows[1].x + [int]($rows[1].w/3); y = $rows[1].y + [int]($rows[1].h/2) }
-$to   = @{ x = $rows[10].x + [int]($rows[10].w/3); y = $rows[10].y + 3 }
-Write-Output "drag from ($($from.x),$($from.y)) to ($($to.x),$($to.y))"
+function Drag($from, $to, $vk) {
+  # click first: the payload is the selection
+  [M]::SetCursorPos($from.x,$from.y) | Out-Null; Start-Sleep -Milliseconds 350
+  [M]::mouse_event([M]::DOWN,0,0,0,[IntPtr]::Zero); Start-Sleep -Milliseconds 120
+  [M]::mouse_event([M]::UP,0,0,0,[IntPtr]::Zero);   Start-Sleep -Milliseconds 450
 
-# click it first: the payload is the selection
-[M]::SetCursorPos($from.x,$from.y); Start-Sleep -Milliseconds 400
-[M]::mouse_event([M]::DOWN,0,0,0,[IntPtr]::Zero); Start-Sleep -Milliseconds 120
-[M]::mouse_event([M]::UP,0,0,0,[IntPtr]::Zero);   Start-Sleep -Milliseconds 500
-
-# now the drag: press, walk down in steps so the loop sees motion, release
-[M]::SetCursorPos($from.x,$from.y); Start-Sleep -Milliseconds 250
-[M]::mouse_event([M]::DOWN,0,0,0,[IntPtr]::Zero); Start-Sleep -Milliseconds 150
-for ($i=1; $i -le 14; $i++) {
-  $x = [int]($from.x + ($to.x - $from.x) * $i / 14)
-  $y = [int]($from.y + ($to.y - $from.y) * $i / 14)
-  [M]::SetCursorPos($x,$y); Start-Sleep -Milliseconds 60
+  if ($vk) { [M]::keybd_event($vk,0,0,[IntPtr]::Zero); Start-Sleep -Milliseconds 80 }
+  [M]::SetCursorPos($from.x,$from.y) | Out-Null; Start-Sleep -Milliseconds 200
+  [M]::mouse_event([M]::DOWN,0,0,0,[IntPtr]::Zero); Start-Sleep -Milliseconds 150
+  for ($i=1; $i -le 12; $i++) {
+    $x = [int]($from.x + ($to.x - $from.x) * $i / 12)
+    $y = [int]($from.y + ($to.y - $from.y) * $i / 12)
+    [M]::SetCursorPos($x,$y) | Out-Null; Start-Sleep -Milliseconds 55
+  }
+  # settle on the target so the LAST DragMove is the one that matters
+  for ($i=0; $i -lt 5; $i++) { [M]::SetCursorPos($to.x,$to.y + ($i % 2)) | Out-Null; Start-Sleep -Milliseconds 80 }
+  [M]::mouse_event([M]::UP,0,0,0,[IntPtr]::Zero)
+  if ($vk) { [M]::keybd_event($vk,0,[M]::KEYUP,[IntPtr]::Zero) }
+  Start-Sleep -Milliseconds 1000
 }
-# settle exactly on the target so the last DragMove is the one that matters
-for ($i=0; $i -lt 5; $i++) { [M]::SetCursorPos($to.x,$to.y + ($i % 2)); Start-Sleep -Milliseconds 80 }
-[M]::mouse_event([M]::UP,0,0,0,[IntPtr]::Zero)
-Start-Sleep -Milliseconds 1200
+
+function Verdict($name) {
+  # the log holds only the most recent drag, so this reads that one
+  $txt = Get-Content $log -Raw
+  $drop = ($txt -split "`n") | Where-Object { $_ -match '^DROP ' } | Select-Object -Last 1
+  $moved = ($txt -split "`n") | Where-Object { $_ -match '^\s+-> moved' } | Select-Object -Last 1
+  $moves = (($txt -split "`n") | Where-Object { $_ -match '^move at' }).Count
+  if (-not $drop)  { Write-Output ("  FAIL {0}: no DROP reached the list ({1} moves)" -f $name,$moves); return $false }
+  if (-not $moved) { Write-Output ("  FAIL {0}: drop reached the list but nothing was written" -f $name); return $false }
+  Write-Output ("  ok   {0}: {1} moves | {2} | {3}" -f $name,$moves,$drop.Trim(),$moved.Trim())
+  return $true
+}
+
+$mid  = { param($b) @{ x = $rows[$b].x + [int]($rows[$b].w/3); y = $rows[$b].y + [int]($rows[$b].h/2) } }
+$top  = { param($b) @{ x = $rows[$b].x + [int]($rows[$b].w/3); y = $rows[$b].y + 3 } }
+$fails = 0
+
+# 1. reorder: block 1 into the gap above block 10
+if (-not (Verdict 'setup' | Out-Null)) {}
+Drag (& $mid 1) (& $top 10) $null
+if (-not (Verdict 'reorder into a gap')) { $fails++ }
+
+# 2. onto a NiNode: block 4 into the root, which is a re-parent not a reorder
+Drag (& $mid 4) (& $mid 0) $null
+if (-not (Verdict 'onto the root node')) { $fails++ }
+
+# 3. Shift: the same, keeping the local transform
+Drag (& $mid 7) (& $top 4) ([M]::VK_SHIFT)
+if (-not (Verdict 'Shift held')) { $fails++ }
+
+# 4. the empty space below the last row = the end of the list
+$below = @{ x = $rows[1].x + 20; y = $viewportBottom - 6 }
+Drag (& $mid 1) $below $null
+if (-not (Verdict 'the empty space below the rows')) { $fails++ }
 
 $p.CloseMainWindow() | Out-Null
 Start-Sleep -Seconds 2
 if (-not $p.HasExited) { $p.Kill() }
 
-Write-Output '================ LOG ================'
-Get-Content $log
+if ($fails -gt 0) { Write-Output "FAILED ($fails)"; exit 1 }
+Write-Output 'PASS'
+exit 0

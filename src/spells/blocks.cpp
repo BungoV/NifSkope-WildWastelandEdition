@@ -503,6 +503,24 @@ static Transform wwWorldTransform( const NifModel * nif, qint32 block, int guard
 	return parent < 0 ? local : wwWorldTransform( nif, parent, guard - 1 ) * local;
 }
 
+/*! EVERY block whose Children array holds this one, not just the first.
+ *
+ *  NifModel::getParent stops at the lowest-numbered match, which is all a tree
+ *  normally needs — but Link mode deliberately gives a block two parents, and a
+ *  later move that unlinked only one of them left the block still parented in
+ *  two places while reporting that it had moved.
+ */
+static QList<qint32> wwParentsOf( const NifModel * nif, qint32 block )
+{
+	QList<qint32> parents;
+	if ( !nif )
+		return parents;
+	for ( int b = 0; b < nif->getBlockCount(); b++ )
+		if ( nif->getLinkArray( nif->getBlockIndex( b ), "Children" ).contains( block ) )
+			parents.append( b );
+	return parents;
+}
+
 QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode,
 	int position )
 {
@@ -585,6 +603,22 @@ int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newPa
 	if ( moves.isEmpty() )
 		return 0;
 
+	/* SIBLING ORDER, NOT SELECTION ORDER. The blocks land in the order given, and
+	 * the block list gathers them from selectedIndexes(), which reports the order
+	 * the selection was BUILT in — so three siblings dragged together could come
+	 * out shuffled among themselves, each one individually correct. Sorted by
+	 * where they actually sit: parent first, then position in that parent's
+	 * Children.
+	 */
+	std::stable_sort( moves.begin(), moves.end(), [nif]( const Move & a, const Move & b ) {
+		const int pa = nif->getParent( a.block );
+		const int pb = nif->getParent( b.block );
+		if ( pa != pb )
+			return pa < pb;
+		const QVector<qint32> kids = nif->getLinkArray( nif->getBlockIndex( pa ), "Children" );
+		return kids.indexOf( a.block ) < kids.indexOf( b.block );
+	} );
+
 	// The new parent's world is read up front too, and for the same reason: if the
 	// selection contains one of its ancestors, moving that ancestor first would
 	// change what "the parent's space" means half-way through the loop.
@@ -601,30 +635,34 @@ int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newPa
 
 	nifSnapshotOp( nif, what, [&]() {
 		for ( const Move & move : std::as_const( moves ) ) {
-			const int oldParent = nif->getParent( move.block );
-
 			/* REBUILT, not blanked. Dropping a link leaves Num Children still
 			 * claiming the entry and the entry pointing at nothing, which is
 			 * exactly the dangling child link the Issue Manager reports.
 			 *
-			 * Link mode keeps the old parent — that is the whole point of it.
+			 * EVERY old parent, not the first one getParent() happens to find:
+			 * Link mode gives a block two parents on purpose, and unlinking only
+			 * one of them left it parented in two places while reporting a move.
+			 *
+			 * Link mode keeps them all — that is the whole point of it.
 			 */
-			if ( mode != WwReparentMode::Link && oldParent >= 0 ) {
-				const QModelIndex from = nif->getBlockIndex( oldParent );
-				QVector<qint32> kept;
-				for ( const qint32 child : nif->getLinkArray( from, "Children" ) )
-					if ( child != move.block && nif->isValidBlockNumber( child ) )
-						kept.append( child );
-				// a sibling reorder removes from the same array it is about to
-				// insert into, so everything after the hole shifts back one
-				if ( oldParent == newParent && cursor > 0 ) {
-					const int was = int( nif->getLinkArray( from, "Children" ).indexOf( move.block ) );
-					if ( was >= 0 && was < cursor )
-						cursor--;
+			if ( mode != WwReparentMode::Link ) {
+				for ( const qint32 oldParent : wwParentsOf( nif, move.block ) ) {
+					const QModelIndex from = nif->getBlockIndex( oldParent );
+					QVector<qint32> kept;
+					for ( const qint32 child : nif->getLinkArray( from, "Children" ) )
+						if ( child != move.block && nif->isValidBlockNumber( child ) )
+							kept.append( child );
+					// a sibling reorder removes from the same array it is about to
+					// insert into, so everything after the hole shifts back one
+					if ( oldParent == newParent && cursor > 0 ) {
+						const int was = int( nif->getLinkArray( from, "Children" ).indexOf( move.block ) );
+						if ( was >= 0 && was < cursor )
+							cursor--;
+					}
+					nif->set<uint>( from, "Num Children", uint( kept.size() ) );
+					nif->updateArraySize( from, "Children" );
+					nif->setLinkArray( from, "Children", kept );
 				}
-				nif->set<uint>( from, "Num Children", uint( kept.size() ) );
-				nif->updateArraySize( from, "Children" );
-				nif->setLinkArray( from, "Children", kept );
 			}
 
 			const QModelIndex iNew = nif->getBlockIndex( newParent );

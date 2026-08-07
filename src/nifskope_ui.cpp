@@ -8731,6 +8731,54 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& nif->undoStack && nif->undoStack->index() == undoBefore );
 					}
 
+					/* A MOVE UNLINKS EVERY OLD PARENT. Ctrl gives a block two
+					 * parents on purpose, and getParent() stops at the lowest-
+					 * numbered one — so a later plain drag unlinked that one, added
+					 * the new one, and left the block parented in two places while
+					 * reporting a move.
+					 */
+					{
+						// Ctrl first, so the leaf really has two parents
+						if ( !drop( { leaf }, nodeB, Qt::ControlModifier ) ) {
+							log << "the link drop did not resolve\n"; fails++; checks++; break;
+						}
+						check( "after Ctrl the block has two parents",
+							childrenOf( root ).contains( leaf ) && childrenOf( nodeB ).contains( leaf ) );
+						// now MOVE it somewhere else entirely
+						if ( !drop( { leaf }, nodeA, Qt::NoModifier ) ) {
+							log << "the follow-up move did not resolve\n"; fails++; checks++; break;
+						}
+						check( "a move afterwards leaves it with exactly one parent",
+							childrenOf( nodeA ).contains( leaf )
+							&& !childrenOf( root ).contains( leaf )
+							&& !childrenOf( nodeB ).contains( leaf ) );
+						undo();
+						undo();
+						check( "two undos put both links back the way they were",
+							childrenOf( root ).contains( leaf ) && !childrenOf( nodeB ).contains( leaf ) );
+					}
+
+					/* SIBLING ORDER, NOT SELECTION ORDER. A multi-block drop lands
+					 * in the order it is handed, and the block list gathers from
+					 * selectedIndexes(), which reports the order the selection was
+					 * BUILT in. Handing them over backwards must still land them in
+					 * the order they sit.
+					 */
+					{
+						const QVector<qint32> before = childrenOf( root );
+						// deliberately reversed: leaf sits before nodeA
+						if ( !drop( { nodeA, leaf }, nodeB, Qt::NoModifier ) ) {
+							log << "the reversed multi drop did not resolve\n"; fails++; checks++; break;
+						}
+						log << "landed under nodeB: ";
+						for ( const qint32 c : childrenOf( nodeB ) ) log << c << " ";
+						log << "\n";
+						check( "a multi-drop handed over backwards still lands in sibling order",
+							childrenOf( nodeB ) == QVector<qint32>{ leaf, nodeA } );
+						undo();
+						check( "and undoes cleanly", childrenOf( root ) == before );
+					}
+
 					/* A DROP MUST NOT SHUT THE TREE. A QTreeView keeps expansion
 					 * against model indices and the proxy rebuilds wholesale on a
 					 * link change, so every structural edit closed the whole tree —

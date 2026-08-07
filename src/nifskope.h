@@ -566,6 +566,15 @@ private:
 	//! Re-open those branches, plus `alsoOpen` — so a block dropped into a node
 	//! is visible where it landed rather than behind a branch that just shut.
 	void wwRestoreBlockListBranches( const QSet<qint32> & open, qint32 alsoOpen = -1 );
+	/*! Driven by the drag ticker: auto-scroll at the list's edges, and open a
+	 *  branch the pointer rests on.
+	 *
+	 *  On the ticker rather than on DragMove because both are about the pointer
+	 *  NOT moving — holding still at the bottom edge has to keep scrolling, and
+	 *  hovering a closed node has to be timed. DragMove says nothing while the
+	 *  hand is still.
+	 */
+	void wwBlockListDragTick();
 	/*! Write every ON-SCREEN row's GLOBAL rectangle to the drag log, so a real
 	 *  mouse can be driven at them from outside the process — a native drag is
 	 *  the one path no synthetic event can enter.

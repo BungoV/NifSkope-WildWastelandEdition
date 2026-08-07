@@ -3913,6 +3913,18 @@ static QLabel * blockListDragCardName = nullptr;
 static QTimer * blockListDragTicker = nullptr;
 static QElapsedTimer blockListDragHeard;
 
+//! The window whose drag is in flight, and where its pointer was last seen
+//! inside the list. The ticker needs both and is not a member of anything.
+static QPointer<NifSkope> blockListDragOwner;
+static QPoint blockListDragViewportPos;
+static bool blockListDragInside = false;
+//! Hover tracking for auto-expand: which row, and since when.
+static qint32 blockListHoverBlock = -1;
+static QElapsedTimer blockListHoverSince;
+
+//! Defined below, beside the rest of the drop feedback.
+static void wwRepaintDragFeedback( NifTreeView * list );
+
 static void placeBlockListDragCard()
 {
 	if ( !blockListDragCard || !blockListDragCard->isVisible() )
@@ -3933,7 +3945,7 @@ static void placeBlockListDragCard()
 	blockListDragCard->move( QCursor::pos() + QPoint( -sz.width() / 3, -sz.height() - 10 ) );
 }
 
-static void showBlockListDragCard( const QString & hint, const QIcon & icon,
+static void showBlockListDragCard( QWidget * owner, const QString & hint, const QIcon & icon,
 	const QString & type, const QString & name )
 {
 	if ( !blockListDragCard ) {
@@ -3948,7 +3960,9 @@ static void showBlockListDragCard( const QString & hint, const QIcon & icon,
 		 * perfectly legal. Every one of those was reported separately; they are
 		 * one bug.
 		 */
-		auto * card = new QFrame( nullptr, Qt::ToolTip | Qt::FramelessWindowHint
+		// OWNED by the window, so it dies with it. A window flag still makes it a
+		// top-level, so the parent costs nothing and closes the leak.
+		auto * card = new QFrame( owner, Qt::ToolTip | Qt::FramelessWindowHint
 			| Qt::WindowTransparentForInput | Qt::WindowDoesNotAcceptFocus );
 		card->setAttribute( Qt::WA_TransparentForMouseEvents );
 		card->setAttribute( Qt::WA_ShowWithoutActivating );
@@ -4022,47 +4036,76 @@ static void hideBlockListDragCard()
  *  the same answer WW_CAMERA_LOG was to a bug that reading was not finding: have
  *  the program say what it saw, one line per event.
  */
-static void wwDragLog( const QString & line )
+/*! ON BY DEFAULT, beside the executable.
+ *
+ *  It was behind WW_DRAG_LOG=<file>, and the one run that mattered was launched
+ *  by double-clicking the exe — where no shell variable can reach it — so a drag
+ *  was performed and nothing at all was recorded. A diagnostic that needs the
+ *  person reporting the bug to launch the program a particular way is a
+ *  diagnostic that does not run. WW_DRAG_LOG still overrides the path.
+ */
+static QString wwDragLogPath()
 {
-	static QFile * log = nullptr;
-	static bool resolved = false;
-	if ( !resolved ) {
-		resolved = true;
-		/* ON BY DEFAULT, beside the executable.
-		 *
-		 * It was behind WW_DRAG_LOG=<file>, and the one run that mattered was
-		 * launched by double-clicking the exe — where no shell variable can
-		 * reach it — so a drag was performed and nothing at all was recorded.
-		 * A diagnostic that needs the person reporting the bug to launch the
-		 * program a particular way is a diagnostic that does not run.
-		 *
-		 * It is a handful of lines per drag and truncates at each drag start, so
-		 * it cannot grow. WW_DRAG_LOG still overrides the path.
-		 */
-		QString path = qEnvironmentVariable( "WW_DRAG_LOG" );
-		if ( path.isEmpty() )
-			path = QApplication::applicationDirPath() + QStringLiteral( "/ww_drag.log" );
-		log = new QFile( path );
-		if ( !log->open( QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text ) ) {
-			delete log;
-			log = nullptr;
-		}
-	}
-	if ( !log )
-		return;
-	QTextStream out( log );
-	out << line << "\n";
-	out.flush();
-	log->flush();		// a drag that ends in a crash still leaves its trail
+	const QString path = qEnvironmentVariable( "WW_DRAG_LOG" );
+	return path.isEmpty()
+		? QApplication::applicationDirPath() + QStringLiteral( "/ww_drag.log" ) : path;
 }
 
-//! Start a fresh drag log, so the file only ever holds the most recent drag.
+static QFile * wwDragLogFile = nullptr;
+static int wwDragLogLines = 0;
+
+//! Lines one drag may write. A slow drag over a long list is hundreds of moves,
+//! and past the first few dozen they all say the same thing.
+static const int WwDragLogMax = 400;
+
+static void wwDragLog( const QString & line )
+{
+	if ( !wwDragLogFile || wwDragLogLines >= WwDragLogMax )
+		return;
+	QTextStream out( wwDragLogFile );
+	out << line << "\n";
+	out.flush();
+	wwDragLogFile->flush();		// a drag that ends in a crash still leaves its trail
+	if ( ++wwDragLogLines == WwDragLogMax ) {
+		out << "... truncated at " << WwDragLogMax << " lines\n";
+		out.flush();
+		wwDragLogFile->flush();
+	}
+}
+
+/*! Start a fresh log, so the file only ever holds the most recent drag.
+ *
+ *  REOPENED with Truncate rather than removed. It used to QFile::remove() the
+ *  path while this process still held the file open — which on Windows fails
+ *  silently — so the log appended for the lifetime of the session and the
+ *  comment promising it could not grow was simply false. Two drags in one run
+ *  showed two drag-start banners in one file, which was on screen at the time
+ *  and went unread.
+ */
 static void wwDragLogRestart()
 {
-	QString path = qEnvironmentVariable( "WW_DRAG_LOG" );
-	if ( path.isEmpty() )
-		path = QApplication::applicationDirPath() + QStringLiteral( "/ww_drag.log" );
-	QFile::remove( path );
+	// WW_DRAG_LOG=off for anyone who does not want a file appearing beside the
+	// executable. It is a few KB holding one drag, and it is the only window
+	// there is onto a native drag, so it is on unless refused.
+	if ( qEnvironmentVariable( "WW_DRAG_LOG" ).compare( QLatin1String( "off" ),
+		Qt::CaseInsensitive ) == 0 ) {
+		if ( wwDragLogFile ) {
+			delete wwDragLogFile;
+			wwDragLogFile = nullptr;
+		}
+		return;
+	}
+
+	if ( wwDragLogFile ) {
+		wwDragLogFile->close();
+	} else {
+		wwDragLogFile = new QFile( wwDragLogPath() );
+	}
+	wwDragLogLines = 0;
+	if ( !wwDragLogFile->open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) ) {
+		delete wwDragLogFile;
+		wwDragLogFile = nullptr;
+	}
 }
 
 //! Which transform rule the held modifiers ask for.
@@ -4109,10 +4152,15 @@ bool NifSkope::startBlockListDrag()
 
 	blockListDropHint.clear();
 	blockListDragHeard.restart();
+	blockListDragOwner = this;
+	blockListDragInside = false;
+	blockListHoverBlock = -1;
 	if ( !blockListDragTicker ) {
 		blockListDragTicker = new QTimer( qApp );
 		QObject::connect( blockListDragTicker, &QTimer::timeout, qApp, []() {
 			placeBlockListDragCard();
+			if ( blockListDragOwner )
+				blockListDragOwner->wwBlockListDragTick();
 		} );
 	}
 	blockListDragTicker->start( 16 );
@@ -4120,6 +4168,8 @@ bool NifSkope::startBlockListDrag()
 	drag->exec( Qt::MoveAction | Qt::LinkAction, Qt::MoveAction );
 
 	blockListDragTicker->stop();
+	blockListDragOwner = nullptr;
+	blockListDragInside = false;
 
 	// exec() blocks until the drop is over; a drag that ended outside the list
 	// never reaches DragLeave, so everything the drag put on screen comes down
@@ -4284,6 +4334,62 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	return parentBlock;
 }
 
+void NifSkope::wwBlockListDragTick()
+{
+	if ( !list || !nif || !blockListDragInside )
+		return;
+
+	/* AUTO-SCROLL at the edges. Without it a parent scrolled off the list is
+	 * simply unreachable: you abandon the drag, scroll, and start again.
+	 */
+	const QRect vp = list->viewport()->rect();
+	const int margin = 18;
+	if ( QScrollBar * vbar = list->verticalScrollBar() ) {
+		int step = 0;
+		if ( blockListDragViewportPos.y() < vp.top() + margin )
+			step = -qMax( 1, vbar->singleStep() );
+		else if ( blockListDragViewportPos.y() > vp.bottom() - margin )
+			step = qMax( 1, vbar->singleStep() );
+		if ( step != 0 ) {
+			const int was = vbar->value();
+			vbar->setValue( was + step );
+			if ( vbar->value() != was ) {
+				/* The rows moved under a pointer that did not. Anything already
+				 * drawn describes the old layout, so it comes off rather than
+				 * pointing confidently at the wrong gap; the next DragMove — one
+				 * pixel of hand movement — recomputes it.
+				 */
+				setBlockListDropTarget( -1 );
+				list->wwDropLineY = -1;
+				wwRepaintDragFeedback( list );
+				blockListHoverBlock = -1;
+				return;
+			}
+		}
+	}
+
+	/* AUTO-EXPAND. Rest over a closed branch and it opens, so a drop can reach
+	 * inside something that was folded when the drag began — otherwise the only
+	 * way in is to abandon the drag and expand it by hand first.
+	 */
+	const qint32 over = blockListBlockAt( blockListDragViewportPos );
+	if ( over != blockListHoverBlock ) {
+		blockListHoverBlock = over;
+		blockListHoverSince.restart();
+		return;
+	}
+	if ( over < 0 || list->model() != proxy
+		|| !blockListHoverSince.isValid() || blockListHoverSince.elapsed() < 650 )
+		return;
+
+	const QModelIndex row = proxy->mapFromPrimary( nif->getBlockIndex( over ) );
+	if ( row.isValid() && proxy->rowCount( row ) > 0 && !list->isExpanded( row ) ) {
+		list->expand( row );
+		wwRepaintDragFeedback( list );
+	}
+	blockListHoverSince.restart();		// one open per rest, not one per tick
+}
+
 QSet<qint32> NifSkope::wwOpenBlockListBranches() const
 {
 	QSet<qint32> open;
@@ -4337,6 +4443,7 @@ void NifSkope::wwLogBlockListRowGeometry( bool expandFirst )
 	 * changing the thing it is there to measure.
 	 */
 	if ( expandFirst ) {
+		wwDragLogRestart();		// the script's dump opens the log; a drag's appends to it
 		list->expandAll();
 		QApplication::processEvents();
 	}
@@ -4409,6 +4516,7 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		 */
 		hideBlockListDragCard();
 		blockListDropHint.clear();
+		blockListDragInside = false;	// stop auto-scrolling something we have left
 		return false;		// let the view do its own leave handling too
 	}
 
@@ -4421,6 +4529,10 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 
 	int position = -1, lineY = -1, lineFrom = 0;
 	const QPoint at = e->position().toPoint();
+	// the ticker works from this: auto-scroll and auto-expand are both about the
+	// pointer NOT moving, and a DragMove is exactly what stops arriving then
+	blockListDragViewportPos = at;
+	blockListDragInside = ( event->type() != QEvent::Drop );
 	const qint32 target = blockListDropSpot( at, &position, &lineY, &lineFrom );
 	const WwReparentMode mode = blockListDropMode( e->modifiers() );
 
@@ -4496,7 +4608,7 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		const QString name = blocks.size() > 1
 			? QString() : nif->resolveString( iFirst, "Name" );
 		blockListDropHint = hint;
-		showBlockListDragCard( hint, blocks.size() > 1 ? QIcon() : icon, type, name );
+		showBlockListDragCard( this, hint, blocks.size() > 1 ? QIcon() : icon, type, name );
 
 		/* ACCEPT OUR OWN PAYLOAD ALWAYS — even where the drop would do nothing.
 		 *
