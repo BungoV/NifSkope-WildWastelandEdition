@@ -1127,20 +1127,39 @@ protected:
 		 * nothing to move yet when the drop ends: those keep their own body and
 		 * the status bar says so rather than quietly doing something else.
 		 */
-		QSet<qint32> bodiesBefore;
+		/* PERSISTENT INDICES, BECAUSE THE CREATE MOVES THE FURNITURE UNDER US.
+		 *
+		 * Creating collision CONSUMES the source mesh, and removing a block
+		 * renumbers every block after it — so a body number read before the create
+		 * names something else after it. This shipped with plain numbers and the
+		 * harness's body-targeted drop is what found it: the shape was moved into
+		 * whatever had slid into the target's row, bodies that had merely been
+		 * renumbered were taken for newly created ones, and the tidy-up that
+		 * followed carried the new shape off with them. Three bodies in, three
+		 * bodies out, no new shape anywhere — and every count still plausible.
+		 *
+		 * Same reason castCollisionOverSelection holds its selection this way.
+		 */
+		const QPersistentModelIndex target = nif->getBlockIndex( intoBody );
+		QList<QPersistentModelIndex> stood;
 		for ( int b = 0; b < nif->getBlockCount(); b++ )
 			if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" ) )
-				bodiesBefore.insert( b );
+				stood.append( QPersistentModelIndex( nif->getBlockIndex( b ) ) );
 
 		createShapeNow();
 
-		if ( intoBody < 0 || !nif->isValidBlockNumber( intoBody ) )
+		if ( intoBody < 0 || !target.isValid() )
 			return;
-		QList<qint32> made;
+		QSet<qint32> already;
+		for ( const QPersistentModelIndex & body : std::as_const( stood ) )
+			if ( body.isValid() )
+				already.insert( nif->getBlockNumber( QModelIndex( body ) ) );
+		const qint32 into = nif->getBlockNumber( QModelIndex( target ) );
+		QList<QPersistentModelIndex> made;
 		for ( int b = 0; b < nif->getBlockCount(); b++ )
 			if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" )
-				&& !bodiesBefore.contains( b ) && b != intoBody )
-				made.append( b );
+				&& !already.contains( b ) && b != into )
+				made.append( QPersistentModelIndex( nif->getBlockIndex( b ) ) );
 		if ( made.isEmpty() ) {
 			if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
 				bar->showMessage( tr( "The preview decides where that one lands; it will get "
@@ -1149,21 +1168,27 @@ protected:
 		}
 		QString trouble;
 		nifSnapshotOp( nif, tr( "Drop collision into body" ), [&]() {
-			for ( const qint32 body : std::as_const( made ) ) {
-				const qint32 shape = nif->getLink( nif->getBlockIndex( body ), "Shape" );
+			// every number re-read each time round: the move inserts a list block
+			// and the removal below takes a branch out, and both renumber
+			for ( const QPersistentModelIndex & body : std::as_const( made ) ) {
+				if ( !body.isValid() || !target.isValid() )
+					continue;
+				const qint32 shape = nif->getLink( QModelIndex( body ), "Shape" );
 				if ( shape < 0 )
 					continue;
-				const QString refusal = tlMoveCollisionShape( nif, shape, intoBody );
+				const QString refusal = tlMoveCollisionShape( nif, shape,
+					nif->getBlockNumber( QModelIndex( target ) ) );
 				if ( !refusal.isEmpty() ) {
 					trouble = refusal;
 					continue;
 				}
 				// and the body Create made, now holding nothing, goes with its
 				// collision object — the node it hung off is left alone
+				const qint32 emptied = nif->getBlockNumber( QModelIndex( body ) );
 				for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 					const QModelIndex object = nif->getBlockIndex( b );
 					if ( nif->blockInherits( object, "bhkCollisionObject" )
-						&& nif->getLink( object, "Body" ) == body )
+						&& nif->getLink( object, "Body" ) == emptied )
 					{
 						spRemoveBranch().castIfApplicable( nif, object );
 						break;
@@ -1172,14 +1197,17 @@ protected:
 			}
 		} );
 		if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
-			bar->showMessage( trouble.isEmpty()
-				? tr( "Added to %1." ).arg( nif->itemName( nif->getBlockIndex( intoBody ) ) )
+			bar->showMessage( trouble.isEmpty() && target.isValid()
+				? tr( "Added to %1." ).arg( nif->itemName( QModelIndex( target ) ) )
 				: trouble, 5000 );
 		queueRebuild();
 	}
 
+public:
 	//! The body under a point in the PANEL's coordinates, or -1 — the inventory
 	//! is a child of this widget, so a drag over the panel has to be mapped in.
+	//! Public because the drop harness has to be able to ask the aiming device
+	//! itself rather than work the mapping out a second time.
 	qint32 bodyUnderPanelPoint( const QPoint & panelPos ) const
 	{
 		if ( !tree || !tree->viewport()->isVisible() )
@@ -4803,6 +4831,23 @@ bool wwDeliverCollisionDrop( QMainWindow * mw, QEvent * event )
 		return event ? panel->wwDeliverDragEvent( event ) : panel->acceptDrops();
 	}
 	return false;
+}
+
+/*! WW_COLLDROP_TEST: the body under a point in the PANEL's coordinates, or -1.
+ *
+ *  This is the aiming device itself — the one call that decides "into that body"
+ *  rather than "a body of its own" — so a harness has to be able to ask it, and
+ *  ask the PANEL rather than work the mapping out a second time. A harness that
+ *  computed its own answer would agree with a broken panel.
+ */
+qint32 wwCollisionBodyAtPanelPoint( QMainWindow * mw, const QPoint & panelPos )
+{
+	if ( !mw )
+		return -1;
+	for ( QWidget * widget : mw->findChildren<QWidget *>() )
+		if ( auto * panel = dynamic_cast<CollisionManagerPanel *>( widget ) )
+			return panel->bodyUnderPanelPoint( panelPos );
+	return -1;
 }
 
 //! The inventory tree, for a harness that cannot name its type.

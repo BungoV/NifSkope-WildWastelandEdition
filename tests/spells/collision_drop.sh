@@ -20,7 +20,7 @@
 #
 # WHAT IS MEASURED
 #
-#   1. the fixture has two meshes                                <- not vacuous
+#   1. the fixture has four meshes                               <- not vacuous
 #   2. the Collision Manager is accepting drops at all
 #   3. a mesh dragged over it is taken, with the copy action
 #   4. a payload with no mesh in it is refused by ACTION, not by ignoring the
@@ -30,6 +30,15 @@
 #   6. ...and the shape is the type the panel was set to, not a type the drop
 #      chose for itself
 #   7. dropping two meshes makes a body for each
+#   8. dropping one ON a body makes NO new body, and the body that was aimed at
+#      is the one holding one more shape than it did -- measured as the shape of
+#      the whole arrangement (three bodies holding 1,1,1 become 1,1,2), because
+#      the create consumes its source mesh and removing a block renumbers every
+#      block after it, so a check that named the target body by number would be
+#      measuring whatever slid into its place
+#   9. a shape dragged from one body to another moves there, beside what that
+#      body already had, and the body it is already in refuses it
+#  10. and the loop closes: dragged back into the Block List it is geometry again
 #
 # THE SHAPE TYPE IS SEEDED HERE, to Box, and that matters twice. Box is the only
 # create with no popup or preview in front of it, so it is the one that can run
@@ -83,17 +92,19 @@ restore() {
 trap 'restore; rm -rf "$TMP"' EXIT
 ps "Set-ItemProperty -Path '$KEY' -Name 'CollisionManager/Create/Shape' -Value 0 -Type DWord"
 
-# THREE meshes under one root: the starter document with its cube duplicated
-# twice. Three because creating collision CONSUMES the source mesh unless the
-# keep-mesh toggle says otherwise — so the single drop eats one and the pair drop
-# needs two still standing behind it.
+# FOUR meshes under one root: the starter document with its cube duplicated three
+# times. Four because creating collision CONSUMES the source mesh unless the
+# keep-mesh toggle says otherwise — the single drop eats one, the pair drop needs
+# two still standing behind it, and the fourth is what gets dropped ON a body,
+# which needs both a mesh to drop and somewhere already there to aim it.
 "$EXE" -no-gui new -o "$(winpath "$TMP/0.nif")" >/dev/null 2>&1
-"$EXE" -no-gui cast "$(winpath "$TMP/0.nif")" -s "Block/Duplicate Branch" -b 1 \
-	-o "$(winpath "$TMP/1.nif")" >/dev/null 2>&1
-"$EXE" -no-gui cast "$(winpath "$TMP/1.nif")" -s "Block/Duplicate Branch" -b 1 \
-	-o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1
+for n in 1 2 3; do
+	"$EXE" -no-gui cast "$(winpath "$TMP/$((n-1)).nif")" -s "Block/Duplicate Branch" -b 1 \
+		-o "$(winpath "$TMP/$n.nif")" >/dev/null 2>&1
+done
+cp "$TMP/3.nif" "$TMP/fixture.nif" 2>/dev/null
 [ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not build the fixture"; exit 1; }
-echo "fixture: starter document, cube duplicated twice ($(stat -c%s "$TMP/fixture.nif") bytes)"
+echo "fixture: starter document, cube duplicated three times ($(stat -c%s "$TMP/fixture.nif") bytes)"
 
 rm -f "$LOG"
 WW_COLLDROP_TEST=1 "$EXE" --port "$PORT" "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1 &

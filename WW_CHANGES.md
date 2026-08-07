@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07x — The check that was missing, and the bug it found
+
+Yesterday's body-targeted mesh drop shipped without a check of its own: the
+fixture's three meshes were all consumed by the drops before it, so there was
+nothing left to aim at a body with. It has one now — and it failed on the first
+run.
+
+### Dropping a mesh on a body did nothing, and looked fine doing it
+
+Creating collision **consumes the source mesh**, and removing a block renumbers
+every block after it. The drop read the target body's number before running
+Create and used it afterwards, by which time it named something else — a
+`bhkCollisionObject`, as it turned out. So the move was refused, the body Create
+had just made was left standing, and the shape never reached the body you aimed
+at.
+
+Held as `QPersistentModelIndex` now, both the target and the bodies that were
+already there, which is what `castCollisionOverSelection` does a few files over
+and for the same reason. Proven by A/B: with plain numbers the new check reads
+`1,1,1 -> 1,1,1,1` and fails; with persistent ones, `1,1,2`.
+
+### What the check asks
+
+The **shape of the whole arrangement**, not a block number: three bodies holding
+one shape each become three bodies where the one under the pointer holds two. A
+drop that made its own body reads as four holding one each; a drop that did
+nothing reads as three; a drop that joined the wrong body puts the two in the
+wrong place. None of those can pass — and none of them could be told apart by
+counting bodies alone.
+
+`collision_drop.sh` is 30 checks. The fixture is four meshes now, and the fourth
+lives under a node of its own — see the entry in `docs/TO_BE_IMPLEMENTED.md` for
+why that is a finding rather than housekeeping.
+
 ## 2026-08-07w — The loop closes: collision back to geometry, and drops that aim
 
 Two halves of the same gesture set.

@@ -1,5 +1,28 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## Creating collision on a node that already has it REPLACES it — OPEN, 2026-08-07x
+
+Found by the body-targeted drop check, which spent its first runs measuring this
+instead of itself.
+
+Create attaches to the mesh's parent **node**, and a node holds one
+`bhkCollisionObject`. So creating collision from a mesh whose parent already has
+collision hands that node's body a new shape and **drops the old one with
+`spRemoveBranch`** — the previous shape gone, no question asked, nothing in the
+status bar. In the drop harness's fixture, where four cubes shared a root, it read
+as: mesh consumed, no new body, no new shape, every total unchanged, and a shape
+quietly destroyed.
+
+Reached from the **Create button** as much as from the drop — this is
+`attachCollisionShape`'s own behaviour, not the drop's. Left alone because it
+wants a decision rather than a patch: refuse, ask, or add beside what is already
+there (which is `tlMoveCollisionShape`'s job, and now exists). Adding beside is
+probably right and would make Create agree with the drop, but it changes what the
+button has always done, so it is not a thing to slip in while fixing a test.
+
+Worked around in the harness by giving the fourth mesh a node of its own, which is
+also the realistic case — you do not usually stack collision on one node.
+
 ## `block_rename.sh` in list mode HANGS, 7 runs in 10 — OPEN, 2026-08-07t
 
 This is what "the flat list intermittently takes the process down" actually is,

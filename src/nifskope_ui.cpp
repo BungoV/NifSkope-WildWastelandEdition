@@ -8122,6 +8122,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	//! The same for the inventory tree, and the payload one of its rows carries.
 	extern bool wwDeliverCollisionTreeDrag( QMainWindow * mw, QEvent * event );
 	extern QMimeData * wwCollisionShapePayload( QMainWindow * mw, qint32 shape );
+	//! The aiming device a mesh drop uses: which body is under a point in the
+	//! PANEL's own coordinates, asked of the panel rather than worked out again.
+	extern qint32 wwCollisionBodyAtPanelPoint( QMainWindow * mw, const QPoint & panelPos );
 	//! Which rigid body holds a shape, and whether through a list.
 	extern qint32 tlBodyHoldingShape( const NifModel * nif, qint32 shape, qint32 * throughList );
 
@@ -8150,7 +8153,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * WHAT IS MEASURED
 	 *
-	 *   1. the fixture has two meshes                            <- not vacuous
+	 *   1. the fixture has four meshes                           <- not vacuous
 	 *   2. the panel is accepting drops at all -- the flag Qt gates on before any
 	 *      handler runs, and the one thing delivering an event steps over
 	 *   3. a mesh payload is taken, with the copy action
@@ -8160,6 +8163,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *   5. dropping one mesh makes one body
 	 *   6. ...and the shape is the type the panel was set to
 	 *   7. dropping two makes two, one each
+	 *   8. dropping one ON A BODY makes no new body, and that body -- the one
+	 *      aimed at, not merely some body -- holds one more shape than it did
+	 *   9. a shape dragged from one body onto another moves there, into a list
+	 *      beside what was already in it, and the body it is already in refuses it
+	 *  10. and the loop closes: that shape dragged back into the Block List is a
+	 *      BSTriShape again
 	 *
 	 * Log: release/ww_colldrop_test.log
 	 */
@@ -8227,8 +8236,63 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					}
 					log << "meshes " << meshes.size() << ", non-mesh blocks " << others.size()
 						<< ", bodies to begin with " << bodies() << "\n";
-					check( "the fixture has three meshes: the create consumes one per body", meshes.size() >= 3 );
-					if ( meshes.size() < 3 ) break;
+					check( "the fixture has four meshes: the create consumes one per body", meshes.size() >= 4 );
+					if ( meshes.size() < 4 ) break;
+
+					// how many shapes each body holds, smallest first. Every check
+					// about where a shape ended up is asked of this rather than of a
+					// block number: the create consumes its source mesh, removing a
+					// block renumbers every block after it, and a check that tracked
+					// a body by number would be measuring whatever slid into its
+					// place while still reading like a pass.
+					auto shapesOf = [&]( qint32 body ) {
+						const qint32 held = nif->getLink( nif->getBlockIndex( body ), "Shape" );
+						if ( held < 0 )
+							return 0;
+						const QModelIndex idx = nif->getBlockIndex( held );
+						return nif->blockInherits( idx, { "bhkListShape", "bhkConvexListShape" } )
+							? int( nif->getLinkArray( idx, "Sub Shapes" ).size() ) : 1;
+					};
+					auto shapeCounts = [&]() {
+						QList<int> counts;
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" ) )
+								counts << shapesOf( b );
+						std::sort( counts.begin(), counts.end() );
+						return counts;
+					};
+					auto countsText = []( const QList<int> & counts ) {
+						QStringList out;
+						for ( const int n : counts )
+							out << QString::number( n );
+						return out.join( QLatin1Char( ',' ) );
+					};
+
+					/* THE FOURTH MESH GETS A PARENT OF ITS OWN, and this is a finding
+					 * in its own right rather than fixture housekeeping.
+					 *
+					 * Create attaches to the mesh's parent NODE, and a node holds one
+					 * collision object — so a fourth mesh sharing the root with the
+					 * first three has its new collision REPLACE what is already on
+					 * that root, dropping the old shape as it goes. Mesh consumed, no
+					 * new body, no new shape, every total unchanged. That is what this
+					 * check measured first time out, and it is not what it is for; it
+					 * is filed in docs/TO_BE_IMPLEMENTED.md as its own thing, since
+					 * the Create button reaches it too.
+					 */
+					{
+						const QModelIndex home = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+						nif->assignString( home, "Name", QStringLiteral( "FourthHome" ) );
+						const qint32 homeBlock = nif->getBlockNumber( home );
+						const QList<int> rootsNow = nif->getRootLinks();
+						addLink( nif, nif->getBlockIndex( rootsNow.value( 0, 0 ) ), "Children", homeBlock );
+						wwReparentBlocks( nif, { meshes.last() }, homeBlock,
+							WwReparentMode::PreserveWorld );
+						log << "the fourth mesh sits under its own node, block " << homeBlock
+							<< ", so its create has somewhere clean to land\n";
+						check( "...and it really moved there",
+							nif->getParent( meshes.last() ) == homeBlock );
+					}
 
 					check( "the Collision Manager is accepting drops",
 						wwDeliverCollisionDrop( skope, nullptr ) );
@@ -8273,17 +8337,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...and the shape is the type the panel was set to",
 						shapesOfType( "bhkBoxShape" ) == boxesWas + 1 );
 
-					/* TWO AT ONCE MAKE TWO. The remaining mesh plus the one just
-					 * given collision -- a second body on the same mesh is refused
-					 * by the create path, so this drops the untouched mesh twice
-					 * over instead: two DIFFERENT meshes is what one-body-each
-					 * means, and the fixture has exactly two.
+					/* TWO AT ONCE MAKE TWO. Two DIFFERENT meshes is what one-body-each
+					 * means — a second body on the same mesh is refused by the create
+					 * path, so it has to be two of the ones still standing.
+					 *
+					 * EXACTLY two, not every mesh left: the fourth is kept back for
+					 * the body-targeted drop below, which needs a mesh AND somewhere
+					 * to aim it.
 					 */
 					const int beforePair = bodies();
 					{
 						// re-read: creating a body inserts blocks and renumbers
 						QList<qint32> pair;
-						for ( int b = 0; b < nif->getBlockCount(); b++ )
+						for ( int b = 0; b < nif->getBlockCount() && pair.size() < 2; b++ )
 							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
 								pair.append( b );
 						log << "meshes for the pair drop: " << pair.size() << "\n";
@@ -8297,16 +8363,146 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "dropping two meshes makes a body for each",
 						bodies() >= beforePair + 2 );
 
-					/* AND NOW MOVE A SHAPE FROM ONE BODY TO ANOTHER.
-					 *
-					 * Three drops have left three bodies with a shape each, which is
-					 * the arrangement this is about: until now the only way to get a
-					 * shape out of one body and into another was to delete it and
-					 * build a fresh one somewhere else.
-					 */
 					auto * inv = dock->findChild<QTreeWidget *>(
 						QStringLiteral( "CollisionInventoryTree" ) );
 					if ( !inv ) { log << "no inventory tree\n"; fails++; checks++; break; }
+					inv->expandAll();
+					QApplication::processEvents();
+
+					/* AND A MESH DROPPED ON A BODY JOINS THAT BODY.
+					 *
+					 * Create makes a body of its own wherever a mesh lands, so joining
+					 * an existing one is that plus a move — and "plus a move" is the
+					 * kind of addition that can quietly do nothing while every total
+					 * still looks right, because the shapes are identical either way.
+					 * Only where they hang tells the two apart.
+					 *
+					 * So what is asked is the SHAPE OF THE WHOLE ARRANGEMENT: three
+					 * bodies holding one shape each become three bodies where the one
+					 * under the pointer holds two. A drop that made its own body reads
+					 * as four holding one each; a drop that did nothing reads as three;
+					 * a drop that joined the WRONG body reads as three-with-a-two in
+					 * the wrong place. None of those can pass.
+					 */
+					{
+						QTreeWidgetItem * hostRow = nullptr;
+						for ( int i = 0; i < inv->topLevelItemCount() && !hostRow; i++ )
+							if ( inv->topLevelItem( i )->childCount() > 0 )
+								hostRow = inv->topLevelItem( i );
+						qint32 spare = -1;
+						for ( int b = 0; b < nif->getBlockCount() && spare < 0; b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+								spare = b;
+						log << "the fourth mesh is block " << spare << ", and there is "
+							<< ( hostRow ? "a body row to aim at\n" : "NO body row\n" );
+						check( "a mesh was kept back, and there is a body to drop it on",
+							spare >= 0 && hostRow );
+						if ( spare < 0 || !hostRow ) break;
+
+						/* PROVE THE AIM BEFORE MEASURING WHAT IT MOVED. The drop reads
+						 * the pointer in the PANEL's coordinates and maps it into the
+						 * tree itself, so that mapping is the thing under test, and a
+						 * point that misses every row would silently make a new body
+						 * — which is the old behaviour, passing as the new one.
+						 */
+						QWidget * panel = dock->widget();
+						const QPoint onPanel = panel->mapFromGlobal(
+							inv->viewport()->mapToGlobal( inv->visualItemRect( hostRow ).center() ) );
+						const qint32 aimed = wwCollisionBodyAtPanelPoint( skope, onPanel );
+						log << "panel point " << onPanel.x() << "," << onPanel.y()
+							<< " resolves to body " << aimed << "\n";
+						check( "a point over a body row resolves, through the panel, to that body",
+							aimed >= 0 && nif->blockInherits( nif->getBlockIndex( aimed ), "bhkRigidBody" ) );
+						if ( aimed < 0 ) break;
+
+						const QBrush wasBrush = hostRow->background( 0 );
+						{
+							const QMimeData * mime = payloadFor( { spare } );
+							QDragMoveEvent move( onPanel, Qt::CopyAction, mime, Qt::LeftButton,
+								Qt::NoModifier );
+							move.setAccepted( false );
+							wwDeliverCollisionDrop( skope, &move );
+							check( "a mesh held over a body is still taken",
+								move.isAccepted() && move.dropAction() == Qt::CopyAction );
+							check( "...and that body lights up, which is the only way to tell "
+								"'into this one' from 'one of its own' while dragging",
+								hostRow->background( 0 ) != wasBrush );
+							delete mime;
+						}
+
+						/* THE SCENE AGAIN, and this is why the check is here at all.
+						 *
+						 * Whether a mesh may be DROPPED is asked of the file, and that
+						 * is settled. What the drop then runs is the Create path, and
+						 * that still asks the Scene whether the block has vertices —
+						 * so after three creates have rewritten the file out from under
+						 * it, the fourth mesh is a block the renderer has never seen
+						 * and Create quietly does nothing. In the app a frame is drawn
+						 * between one drag and the next; here nothing draws unless it
+						 * is asked to.
+						 */
+						if ( GLView * view = skope->getGLView() ) {
+							for ( int i = 0; i < 2; i++ ) {
+								view->update();
+								QApplication::processEvents();
+							}
+						}
+
+						const int hostHeld = shapesOf( aimed );
+						const QList<int> heldWas = shapeCounts();
+						const int boxesBefore = shapesOfType( "bhkBoxShape" );
+						log << "before the drop: current block "
+							<< nif->getBlockNumber( skope->currentNifIndex() )
+							<< ", the spare's parent " << nif->getParent( spare )
+							<< ", root children " << nif->getLinkArray(
+								nif->getBlockIndex( nif->getParent( spare ) ), "Children" ).size() << "\n";
+						{
+							const QMimeData * mime = payloadFor( { spare } );
+							QDropEvent drop( QPointF( onPanel ), Qt::CopyAction, mime,
+								Qt::LeftButton, Qt::NoModifier );
+							wwDeliverCollisionDrop( skope, &drop );
+							QApplication::processEvents();
+							delete mime;
+						}
+						const QList<int> heldNow = shapeCounts();
+						log << "after the drop the status bar says: \""
+							<< skope->statusBar()->currentMessage() << "\"\n";
+						log << "after the drop: current block "
+							<< nif->getBlockNumber( skope->currentNifIndex() )
+							<< ", meshes left " << [&]() {
+								int n = 0;
+								for ( int b = 0; b < nif->getBlockCount(); b++ )
+									if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+										n++;
+								return n;
+							}() << "\n";
+
+						// the same multiset, with the body that was aimed at holding
+						// one more than it did
+						QList<int> expect = heldWas;
+						expect.removeOne( hostHeld );
+						expect.append( hostHeld + 1 );
+						std::sort( expect.begin(), expect.end() );
+						log << "shapes per body: " << countsText( heldWas ) << " -> "
+							<< countsText( heldNow ) << ", expected " << countsText( expect )
+							<< "; box shapes " << boxesBefore << " -> "
+							<< shapesOfType( "bhkBoxShape" ) << "\n";
+						check( "the drop made a shape at all -- if this is the only failure "
+							"here, Create did nothing and nothing was there to move",
+							shapesOfType( "bhkBoxShape" ) == boxesBefore + 1 );
+						check( "a mesh dropped on a body makes NO new body",
+							heldNow.size() == heldWas.size() );
+						check( "...and the body it was dropped on is the one holding one more",
+							heldNow == expect );
+					}
+
+					/* AND NOW MOVE A SHAPE FROM ONE BODY TO ANOTHER.
+					 *
+					 * Four drops have left three bodies, one of them holding a pair,
+					 * which is the arrangement this is about: until now the only way to
+					 * get a shape out of one body and into another was to delete it and
+					 * build a fresh one somewhere else.
+					 */
 					inv->expandAll();
 					QApplication::processEvents();
 
