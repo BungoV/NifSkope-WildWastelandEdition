@@ -1,5 +1,34 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07n — Unfold only where the block could go, and reach what landed
+
+### The hover opened anything
+
+Auto-expand opened whatever the pointer rested on, including rows that can take
+no children at all — so crossing a list of meshes unfolded every mesh on the way
+past, showing you the inside of somewhere the block cannot go. It asks the same
+verdict the drop uses now, so the two cannot disagree about what is allowed.
+
+### The restore could not reach a landed block
+
+Found reviewing the rest, not reported. `wwRestoreBlockListBranches` descends
+only into branches it is re-opening — so it could not **reach** a landed node
+whose ancestors were not themselves in the set, and an ancestor that the hover
+auto-opened is exactly one that gets folded back and is therefore not in it. Drag
+over a node, into its child, drop: the block landed correctly and was invisible,
+which is the failure that restore exists to prevent. The ancestor chain of the
+landed block counts as open now.
+
+Both fail with their fix disabled.
+
+### Also
+
+- The unparent status message carried no `%1` and was still being `arg()`'d,
+  which warns once per drop and returns the string unchanged.
+- Checked and fine: an unparented block IS added to the footer's `Roots`, so it
+  survives a save rather than becoming unreferenced. That was the one thing in
+  this batch that could have lost data.
+
 ## 2026-08-07m — Dragging a block OUT, and folding back what the hover opened
 
 ### There was no way out

@@ -3945,6 +3945,9 @@ static QElapsedTimer blockListHoverSince;
 //! Branches THIS DRAG opened by hovering. A drag that merely passed over a node
 //! on its way somewhere else used to leave it unfolded for good.
 static QSet<qint32> blockListAutoOpened;
+//! What the drag is carrying, so the hover can ask whether a node would even
+//! accept it before unfolding to show the inside of somewhere it cannot go.
+static QList<qint32> blockListDragBlocks;
 
 //! Defined below, beside the rest of the drop feedback.
 static void wwRepaintDragFeedback( NifTreeView * list );
@@ -4195,6 +4198,7 @@ bool NifSkope::startBlockListDrag()
 	blockListDragTicker->stop();
 	blockListDragOwner = nullptr;
 	blockListDragInside = false;
+	blockListDragBlocks.clear();
 
 	/* Fold back whatever the hover opened. A drop of its own re-opens where the
 	 * block landed (see the deferred restore), so this only closes branches the
@@ -4437,6 +4441,22 @@ void NifSkope::wwBlockListDragTick()
 		|| !blockListHoverSince.isValid() || blockListHoverSince.elapsed() < 650 )
 		return;
 
+	/* ONLY WHERE THE BLOCK COULD ACTUALLY GO. Unfolding a node that would refuse
+	 * the drop shows you the inside of somewhere you cannot put it — and a mesh
+	 * row, which can take no children at all, would open every time the pointer
+	 * crossed it. Asked of the same verdict the drop uses, so the two cannot
+	 * disagree about what is allowed.
+	 */
+	bool welcome = false;
+	for ( const qint32 carried : blockListDragBlocks ) {
+		if ( wwReparentRefusal( nif, carried, over, WwReparentMode::PreserveWorld ).isEmpty() ) {
+			welcome = true;
+			break;
+		}
+	}
+	if ( !welcome )
+		return;
+
 	const QModelIndex row = proxy->mapFromPrimary( nif->getBlockIndex( over ) );
 	if ( row.isValid() && proxy->rowCount( row ) > 0 && !list->isExpanded( row ) ) {
 		list->expand( row );
@@ -4505,11 +4525,24 @@ void NifSkope::wwRestoreBlockListBranches( const QSet<qint32> & open, qint32 als
 	if ( !nif || !list || list->model() != proxy )
 		return;
 
+	/* THE ANCESTORS OF alsoOpen COUNT AS OPEN.
+	 *
+	 * The walk descends only into branches it is re-opening, so it could not
+	 * REACH a landed node whose ancestors were not themselves in the set — and
+	 * after a hover auto-expanded a node, dropped into its child, and the
+	 * auto-expand was folded back, that ancestor was exactly not in the set. The
+	 * block landed correctly and was invisible, which is the failure this whole
+	 * restore exists to prevent.
+	 */
+	QSet<qint32> reach = open;
+	for ( int p = alsoOpen, guard = 256; p >= 0 && guard-- > 0; p = nif->getParent( p ) )
+		reach.insert( p );
+
 	std::function<void( const QModelIndex & )> walk = [&]( const QModelIndex & parent ) {
 		for ( int row = 0; row < proxy->rowCount( parent ); row++ ) {
 			const QModelIndex idx = proxy->index( row, 0, parent );
 			const qint32 block = nif->getBlockNumber( proxy->mapTo( idx ) );
-			if ( block < 0 || !( open.contains( block ) || block == alsoOpen ) )
+			if ( block < 0 || !reach.contains( block ) )
 				continue;
 			list->expand( idx );
 			walk( idx );	// only into what is being re-opened
@@ -4640,6 +4673,9 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	// pointer NOT moving, and a DragMove is exactly what stops arriving then
 	blockListDragViewportPos = at;
 	blockListDragInside = ( event->type() != QEvent::Drop );
+	// from the payload, not from where the drag began, so the hover asks about
+	// what is actually being carried
+	blockListDragBlocks = blocks;
 	const qint32 target = blockListDropSpot( at, &position, &lineY, &lineFrom, &unparent );
 	const WwReparentMode mode = blockListDropMode( e->modifiers() );
 	// -1 means two different things: nothing to aim at, and deliberately nowhere.
@@ -4784,16 +4820,21 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		if ( moved == 0 ) {
 			ui->statusbar->showMessage( refusals.value( 0, tr( "Nothing was moved." ) ), 5000 );
 		} else {
+			/* The unparent message carries no %1 — there is no block it went into
+			 * — so it must not be arg()'d. QString::arg on a string with no
+			 * placeholder warns and returns it unchanged, which is a warning per
+			 * drop for a message that was already correct.
+			 */
 			const QString what = unparent
 				? tr( "Moved %n block(s) out — no parent now.", nullptr, moved )
-				: position >= 0
-				? tr( "Reordered %n block(s) inside block %1.", nullptr, moved )
-				: mode == WwReparentMode::Link
-				? tr( "Linked %n block(s) to block %1, keeping the old parent.", nullptr, moved )
-				: mode == WwReparentMode::KeepLocal
-				? tr( "Moved %n block(s) into block %1, keeping the local transform.", nullptr, moved )
-				: tr( "Moved %n block(s) into block %1.", nullptr, moved );
-			ui->statusbar->showMessage( what.arg( target )
+				: ( position >= 0
+					? tr( "Reordered %n block(s) inside block %1.", nullptr, moved )
+					: mode == WwReparentMode::Link
+					? tr( "Linked %n block(s) to block %1, keeping the old parent.", nullptr, moved )
+					: mode == WwReparentMode::KeepLocal
+					? tr( "Moved %n block(s) into block %1, keeping the local transform.", nullptr, moved )
+					: tr( "Moved %n block(s) into block %1.", nullptr, moved ) ).arg( target );
+			ui->statusbar->showMessage( what
 				+ ( refusals.isEmpty() ? QString() : QStringLiteral( "  " ) + refusals.first() ), 5000 );
 		}
 	}

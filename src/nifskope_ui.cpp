@@ -8629,6 +8629,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							( worldOf( leaf ).translation - worldWas2 ).length() < 1.0e-3f );
 						check( "...and is refused a second time, being already a root",
 							!wwReparentRefusal( nif, leaf, -1, WwReparentMode::PreserveWorld ).isEmpty() );
+						/* AND THE FILE KNOWS IT IS A ROOT. Losing every parent makes
+						 * a block reachable only through the footer's Roots array;
+						 * if that is not updated the block is referenced by nothing
+						 * at all and does not survive a save.
+						 */
+						{
+							const QList<int> roots = nif->getRootLinks();
+							QStringList rs;
+							for ( const int r : roots ) rs << QString::number( r );
+							log << "root links after unparenting: " << rs.join( QStringLiteral( "," ) ) << "\n";
+							check( "...and the file's Roots list names it, so it survives a save",
+								roots.contains( leaf ) );
+						}
 						undo();
 						check( "undo puts it back under the root", childrenOf( root ).contains( leaf ) );
 					}
@@ -8994,6 +9007,66 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "...except the branch the block landed in",
 							list->isExpanded( rowFor( leaf ) ) );
 						list->collapse( rowFor( leaf ) );
+
+						/* AND THE RESTORE MUST REACH IT. The walk descends only into
+						 * branches it is re-opening, so a landed node whose ancestor
+						 * was NOT in the set could not be reached — and an ancestor
+						 * that the hover auto-opened is exactly one that gets folded
+						 * back and so is not in the set. The block landed correctly
+						 * and was invisible.
+						 */
+						list->collapse( rowFor( root ) );
+						QApplication::processEvents();
+						check( "the ancestor is shut to begin with", !list->isExpanded( rowFor( root ) ) );
+						skope->wwRestoreBlockListBranches( QSet<qint32>(), leaf );
+						QApplication::processEvents();
+						check( "restoring a landed block opens its ancestors to reach it",
+							list->isExpanded( rowFor( root ) )
+							&& !list->visualRect( rowFor( leaf ) ).isEmpty() );
+					}
+
+					/* UNFOLD ONLY WHERE THE BLOCK COULD GO. Hovering a node that
+					 * would refuse the drop shows you the inside of somewhere you
+					 * cannot put it, and a mesh row — which takes no children at
+					 * all — opened every time the pointer crossed it.
+					 *
+					 * Driven through a real drag event so the payload is set the way
+					 * the tick reads it, then the hover timer is waited out.
+					 */
+					{
+						auto hoverFor = [&]( qint32 overRow, const QList<qint32> & carried ) {
+							/* The point FIRST, then collapse. rowPos() expands the
+							 * tree to find a row, so collapsing before it just gets
+							 * undone — and both checks below would then be reading a
+							 * row that was open before the hover ever ran.
+							 */
+							const QPoint p = rowPos( overRow );
+							if ( p.x() < 0 )
+								return false;
+							list->collapse( rowFor( overRow ) );
+							QApplication::processEvents();
+							const QMimeData * mime = skope->blockListDragMimeData( carried );
+							QDragMoveEvent mv( p, Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier );
+							list->wwDeliverDragEvent( &mv );
+							skope->wwBlockListDragTick();		// arms the hover timer
+							QThread::msleep( 700 );				// past the rest threshold
+							skope->wwBlockListDragTick();		// and this one may open it
+							QApplication::processEvents();
+							delete mime;
+							return true;
+						};
+
+						if ( !hoverFor( leaf, { nodeA } ) ) {
+							log << "could not hover the mesh row\n"; fails++; checks++; break;
+						}
+						check( "hovering a row that cannot take children does NOT unfold it",
+							!list->isExpanded( rowFor( leaf ) ) );
+
+						if ( !hoverFor( nodeB, { nodeA } ) ) {
+							log << "could not hover the node row\n"; fails++; checks++; break;
+						}
+						check( "hovering a node that WOULD accept it does unfold",
+							list->isExpanded( rowFor( nodeB ) ) );
 					}
 
 					/* THE DRAG LOG MUST NOT TOUCH THE TREE. It dumps every on-screen
