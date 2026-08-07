@@ -622,13 +622,12 @@ void NifTreeView::mousePressEvent( QMouseEvent * event )
 	 * click past the end of the list, so there was no way to have no primary
 	 * selection — and no way for a paste to mean "no parent".
 	 *
-	 * The current index goes too, not just the selection: the two are separate in
-	 * Qt, and leaving a current index behind means the spell book still has a
-	 * block to act on while the list shows nothing selected.
+	 * Handed to the window, which owns the other halves of "selected": the Qt
+	 * selection, the current index, the published block list, and the object
+	 * selection the row colour actually comes from.
 	 */
-	if ( wwBlankClickClearsSelection && selectionModel() && !indexAt( event->pos() ).isValid() ) {
-		selectionModel()->clearSelection();
-		selectionModel()->clearCurrentIndex();
+	if ( wwBlankClicked && !indexAt( event->pos() ).isValid() ) {
+		wwBlankClicked();
 		event->accept();
 		return;
 	}

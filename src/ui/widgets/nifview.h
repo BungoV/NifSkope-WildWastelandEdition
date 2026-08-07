@@ -107,14 +107,19 @@ public:
 	 */
 	std::function<bool( QEvent * )> blockDropEvent;
 
-	/*! Clicking blank space clears the selection (WW, Block List only).
+	/*! Clicked past the last row (WW, Block List only).
 	 *
 	 *  A tree with no way to select nothing has no way to SAY nothing, and the
 	 *  Block List needs to: paste follows the pointer, and "no parent" is a real
-	 *  answer. Off for the field views, where the current row is the thing being
-	 *  edited and losing it on a stray click would be hostile.
+	 *  answer. Unset for the field views, where the current row is the thing
+	 *  being edited and losing it on a stray click would be hostile.
+	 *
+	 *  A hook rather than a bool because deselecting is not the view's business
+	 *  alone: the row COLOUR comes from the object selection, which lives in the
+	 *  3D view, so clearing only what the tree knows about leaves the row looking
+	 *  selected while the status bar says nothing is.
 	 */
-	bool wwBlankClickClearsSelection = false;
+	std::function<void()> wwBlankClicked;
 
 	//! How many drag events the overrides above have been handed. The harness
 	//! reads it to prove the override ran, rather than measuring a hook it

@@ -384,6 +384,21 @@ Still true and still worth keeping: **a crash that survives reverting the change
 that appears to cause it is not caused by that change** — check persisted state
 before bisecting further.
 
+**`NifTreeView::isRowHidden( int, const QModelIndex & )` is not
+`QTreeView::isRowHidden`.** It shadows it with a different meaning: it ignores the
+row number and answers for the item behind the index you passed as the *parent*.
+Asking it whether a row is hidden returns something unrelated — under an invalid
+root it is always false — and a check built on it measures nothing. Use
+`visualRect().isEmpty()`, which is usually the real question anyway.
+
+**"Selected" in the Block List is two things.** Qt's selection and current index,
+and `NifModel::selHighlight` — mirrored from the 3D view's object selection, and
+the one the row's COLOUR comes from. Clearing one leaves the other showing.
+
+**An invalid root index means "show the whole model" to a QTreeView**, not "show
+nothing". Block Details listed every block in the file the first time nothing was
+selected.
+
 **CRLF.** Four sources and one doc are CRLF: `src/glview.cpp`,
 `src/gl/controllers.cpp`, `src/nifskope.cpp`, `src/spells/havok.cpp`,
 `WW_CHANGES.md`. Python text-mode I/O flattens them into a 33,000-line junk

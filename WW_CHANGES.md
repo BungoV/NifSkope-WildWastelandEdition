@@ -1,5 +1,46 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07l — Deselecting only deselected half of it
+
+### The row stayed orange
+
+Clearing the block list's selection cleared Qt's selection and the current index,
+and the row went on looking exactly as selected as before while the status bar
+underneath it read "No block selected". The row COLOUR is
+`NifModel::selHighlight`, mirrored from the **3D view's object selection** — a
+different thing entirely from what a QTreeView calls selected. Four things go
+now: the Qt selection, the current index, the published block list spells read,
+and the object selection.
+
+### Block Details listed the whole file
+
+Mine, from the same change. A `QTreeView` reads an invalid root index as *"show
+the whole model"*, so with no block selected Block Details showed every block in
+the file at once — which is literally what a root of nothing asks for and nothing
+like what it means. It parks on the empty model now, the same one `swapModels()`
+uses while a file loads, with its header and footer rows hidden so the panel
+reads as blank.
+
+**Only the explicit `setRowHidden` does that, and the first version of this
+comment said otherwise.** `refreshRowHiding()` returns early on an invalid root
+index, so the details filter was set and never applied: measured, with the filter
+alone both rows stayed visible. It is still set, so any future re-derivation
+agrees rather than undoing the hide — but it is not what clears the panel.
+
+And a check that it comes BACK: blanking the panel swaps the model and sets a
+filter that hides everything, so selecting a block has to undo both, or this
+would have traded a cosmetic complaint for a Block Details that never shows
+anything again.
+
+### The measurement was broken first
+
+The check read `NifTreeView::isRowHidden( row, parent )`, which **shadows**
+`QTreeView`'s with a different meaning — it ignores the row number and answers
+for the parent item — so under an invalid root it always came back false and the
+check measured nothing. Two rounds of "still 2 visible" were the instrument, not
+the code. It reads `visualRect().isEmpty()` now, which is the claim being made
+anyway: is the row on screen.
+
 ## 2026-08-07k — Paste follows the pointer, and blank space means nothing
 
 ### Clicking blank space deselects

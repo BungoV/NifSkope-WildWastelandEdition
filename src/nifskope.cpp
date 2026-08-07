@@ -899,7 +899,7 @@ NifSkope::NifSkope( bool background )
 	list->setDragDropMode( QAbstractItemView::DragDrop );
 	list->startBlockDrag = [this]() { return startBlockListDrag(); };
 	list->blockDropEvent = [this]( QEvent * e ) { return blockListDragEvent( e ); };
-	list->wwBlankClickClearsSelection = true;
+	list->wwBlankClicked = [this]() { wwClearBlockListSelection(); };
 
 	/* Where the pointer is, asked when a spell runs. Paste follows it: over a row
 	 * it pastes into that row, over the blank space below the rows it pastes with
@@ -4411,6 +4411,37 @@ void NifSkope::wwBlockListDragTick()
 	blockListHoverSince.restart();		// one open per rest, not one per tick
 }
 
+void NifSkope::wwClearBlockListSelection()
+{
+	if ( list && list->selectionModel() ) {
+		list->selectionModel()->clearSelection();
+		list->selectionModel()->clearCurrentIndex();
+	}
+
+	// the published list, so a spell cast from a menu does not still see blocks
+	setBlockListSelection( QList<qint32>() );
+
+	/* The row COLOUR is NifModel::selHighlight, mirrored from the 3D view's
+	 * object selection — not from Qt's selection at all. Clearing only the
+	 * tree's left the row exactly as orange as before while the status bar
+	 * underneath it read "No block selected".
+	 */
+	if ( nif ) {
+		nif->selHighlight.clear();
+		nif->selHighlightActive = -1;
+	}
+	if ( ogl )
+		ogl->setObjectSelection( QSet<int>(), -1 );
+
+	if ( list )
+		list->viewport()->update();
+	if ( tree )
+		tree->viewport()->update();
+
+	// and Block Details has nothing to show
+	select( QModelIndex() );
+}
+
 QSet<qint32> NifSkope::wwOpenBlockListBranches() const
 {
 	QSet<qint32> open;
@@ -4976,7 +5007,49 @@ void NifSkope::select( const QModelIndex & index )
 	}
 	perfMark( "list mapping/setCurrentIndex" );
 
-	if ( sender() != tree ) {
+	/* NOTHING SELECTED MEANS NOTHING TO SHOW.
+	 *
+	 * A QTreeView reads an invalid root index as "show the whole model", so with
+	 * no block selected Block Details listed the ENTIRE file — every block at
+	 * once, which is exactly what a root index of nothing literally asks for and
+	 * nothing like what it means. Swapped to the empty model instead, the same
+	 * one swapModels() parks the views on while a file loads; selecting anything
+	 * swaps it straight back below.
+	 */
+	if ( sender() != tree && !idx.isValid() ) {
+		if ( tree->model() != nifEmpty ) {
+			wwCaptureDetailsState();
+			tree->setModel( nifEmpty );
+		}
+		/* The empty document still carries a header and a footer, so the panel
+		 * read as a small file rather than as nothing. Hidden through the DETAILS
+		 * FILTER with an empty keep-set, not setRowHidden: every hiding
+		 * re-derivation (doItemsLayout, resets, the expansion hook) rewrites row
+		 * visibility from isRowHidden(), which un-hid them again on the next
+		 * layout — measured, two rows still visible.
+		 */
+		/* THE EXPLICIT HIDE IS WHAT DOES IT. Measured both ways: with only the
+		 * details filter both rows stayed visible, because refreshRowHiding()
+		 * returns early on an invalid root index — which is exactly what showing
+		 * a whole model means — so nothing ever applied it.
+		 *
+		 * The filter is set anyway so that any future re-derivation AGREES these
+		 * rows are hidden instead of undoing them; on its own it is not what
+		 * clears the panel today, and saying otherwise was the first version of
+		 * this comment.
+		 */
+		tree->setDetailsFilter( true, QSet<const void *>() );
+		for ( int row = 0; row < nifEmpty->rowCount( QModelIndex() ); row++ )
+			tree->setRowHidden( row, QModelIndex(), true );
+		perfMark( "tree cleared" );
+	} else if ( sender() != tree ) {
+		if ( tree->model() != nif ) {
+			tree->setModel( nif );
+			// lift the blank-panel filter, then let the search box put back
+			// whatever it actually asks for
+			tree->setDetailsFilter( false, QSet<const void *>() );
+			applyBlockDetailsFilter();
+		}
 		if ( dList->isVisible() ) {
 			QModelIndex root = nif->getTopIndex( idx );
 

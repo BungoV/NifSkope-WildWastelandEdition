@@ -8838,6 +8838,65 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							list->selectionModel()->selectedIndexes().isEmpty() );
 						check( "...and the current block with it",
 							!list->selectionModel()->currentIndex().isValid() );
+						/* The row COLOUR comes from selHighlight, mirrored from the
+						 * 3D view's object selection — not from Qt's selection. It
+						 * was left behind, so the row stayed exactly as orange as
+						 * before while the status bar underneath read "No block
+						 * selected".
+						 */
+						check( "...and the row stops being coloured",
+							nif->selHighlight.isEmpty() && nif->selHighlightActive < 0 );
+						check( "...and nothing is published to spells",
+							blockListSelectionForSpells().isEmpty() );
+						/* Block Details showed the WHOLE FILE: a QTreeView reads an
+						 * invalid root index as "show the whole model", which is
+						 * literally what a root of nothing asks for and nothing like
+						 * what it means.
+						 */
+						{
+							QAbstractItemModel * dm = skope->tree->model();
+							const int rows = dm->rowCount( skope->tree->rootIndex() );
+							/* visualRect, not isRowHidden: NifTreeView SHADOWS
+							 * QTreeView::isRowHidden with a different meaning — it
+							 * ignores the row number and answers for the PARENT item
+							 * — so asking it about a row under an invalid root
+							 * always came back false and the check measured nothing.
+							 * A hidden row has an empty rect, which is the thing
+							 * being claimed anyway: is it on screen.
+							 */
+							int visible = 0;
+							QStringList names;
+							for ( int r = 0; r < rows; r++ ) {
+								const QModelIndex row = dm->index( r, 0, skope->tree->rootIndex() );
+								if ( skope->tree->visualRect( row ).isEmpty() )
+									continue;
+								visible++;
+								if ( names.size() < 6 )
+									names << row.data().toString();
+							}
+							log << "Block Details with nothing selected: " << rows << " rows, "
+								<< visible << " visible [" << names.join( QStringLiteral( ", " ) ) << "]\n";
+							check( "...and Block Details shows nothing at all", visible == 0 );
+						}
+
+						/* AND IT COMES BACK. Blanking the panel swaps the model and
+						 * sets a filter that hides everything; selecting a block has
+						 * to undo both, or the deselect fix would have traded a
+						 * cosmetic complaint for a Block Details that never shows
+						 * anything again.
+						 */
+						skope->select( nif->getBlockIndex( nodeB ) );
+						QApplication::processEvents();
+						{
+							QAbstractItemModel * dm = skope->tree->model();
+							int visible = 0;
+							for ( int r = 0; r < dm->rowCount( skope->tree->rootIndex() ); r++ )
+								if ( !skope->tree->visualRect(
+									dm->index( r, 0, skope->tree->rootIndex() ) ).isEmpty() )
+									visible++;
+							log << "Block Details after re-selecting: " << visible << " visible rows\n";
+							check( "selecting a block again brings Block Details back", visible > 0 );
+						}
 
 						/* PASTE. The pointer cannot be moved from here — that is the
 						 * whole reason block_drag_live.ps1 exists — so the probe is

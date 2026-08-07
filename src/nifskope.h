@@ -556,6 +556,15 @@ private:
 	QList<qint32> blockListDragPayload( const QMimeData * mime ) const;
 	//! Highlight (or clear, with -1) the row a drop would land on.
 	void setBlockListDropTarget( qint32 block );
+	/*! Select nothing at all, from a click past the last row.
+	 *
+	 *  Four things have to go, and only the first is the tree's: the Qt
+	 *  selection, the current index, the block list published to spells, and the
+	 *  OBJECT selection — which is where the row's colour comes from, so leaving
+	 *  it behind left the row looking selected while the status bar said nothing
+	 *  was.
+	 */
+	void wwClearBlockListSelection();
 	/*! Which branches are open, BY BLOCK NUMBER.
 	 *
 	 *  A QTreeView keeps expansion against model indices, and the proxy rebuilds
