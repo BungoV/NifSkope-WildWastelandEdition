@@ -1,5 +1,50 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08d — Decimate is a live operator, and window_state_roundtrip runs again
+
+### Decimate, with the ratio on a redo panel
+
+`Ctrl+Shift+D`, or the object menu beside Join. It halves the selection to start
+with and **arms the redo panel**, so the ratio is found by dragging with the
+operation re-running underneath, the way Merge by Distance already worked.
+Decimation was the one operation that made you commit to a number in a modal
+before seeing what it did to the mesh — backwards, for a value whose only honest
+definition is "however much still looks like it".
+
+The simplification itself is the **Simplify dialog's own**, driven headlessly:
+one decimation in the program rather than two that drift apart.
+
+Two of its persisted settings are deliberately overridden on the live path.
+**Min Triangles** and **Max Error** each pin the triangle count no matter what
+ratio is asked for — sensible guards for a modal a human types into once, and
+nonsense for a field being scrubbed. Measured before that was understood: a
+224-triangle sphere asked for half came back with 224, twice.
+
+The check makes its own **UV sphere**, because the fixture's 12-triangle cube has
+nothing redundant in it and a simplifier is right to refuse it — which looked
+exactly like a dead operator for two more runs. It asserts three things, not one:
+the triangles drop, it is a **single** undo step however many shapes were
+selected, and a panel is actually armed. Without the last, this is just Simplify
+with the dialog removed.
+
+### window_state_roundtrip.sh can run again
+
+It had been stopping at its first check with "geometry magic 0xCB — format
+changed", which I filed yesterday as the app storing geometry in QSettings' text
+form. **That was wrong.** The stored blob was correct all along; the harness's own
+PowerShell was not: `-shl` on a **byte** shifts within the byte's width, so
+`0x01 -shl 24` is `0` and every high term of the magic fell off, leaving the last
+byte. `[int]` casts fix it.
+
+Two more of its own faults behind that one: it compared the window's LEFT EDGE
+against the monitor boundary, and `GetWindowRect` includes the invisible resize
+border, so a window genuinely maximised on a monitor starting at 1920 reports
+1912 and was called "on the primary" — it uses the centre now, which no frame
+inset can move across a boundary. And its cleanup ran `reg import` with `2>&1`,
+which in Windows PowerShell wraps a native command's stderr in error records and
+leaves `$?` false, so the suite printed `PASS: 2 cycles` and then `FAILED` on the
+line after.
+
 ## 2026-08-08c — Double-click to edit, and a failed promote stops taking the list with it
 
 **Double-click a row in Loaded NIFs to edit it.** "Make Primary / Edit" existed

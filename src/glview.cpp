@@ -54,6 +54,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/filebrowser.h"
 #include "qt5compat.hpp"
 #include "spells/blocks.h"	// blockLink for Separate / Duplicate
+#include "spells/simplify.h"	// tlSimplifyShapeToRatio for the Decimate operator
 
 #include <memory>
 
@@ -285,6 +286,8 @@ static void tlRegisterViewportShortcuts()
 
 	r.reg( "viewport.add_primitive", QObject::tr( "Add Primitive Menu" ), catObj, QKeySequence( Qt::SHIFT | Qt::Key_A ) );
 	r.reg( "viewport.join", QObject::tr( "Join Selected Objects" ), catObj, QKeySequence( Qt::CTRL | Qt::Key_J ) );
+	r.reg( "viewport.decimate", QObject::tr( "Decimate Selected Objects" ), catObj,
+		QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_D ) );
 	r.reg( "viewport.parent_set", QObject::tr( "Set Parent Menu" ), catObj, QKeySequence( Qt::CTRL | Qt::Key_P ) );
 	r.reg( "viewport.parent_clear", QObject::tr( "Clear Parent Menu" ), catObj, QKeySequence( Qt::ALT | Qt::Key_P ) );
 
@@ -10192,6 +10195,72 @@ bool GLView::reapplyOperator( float param )
 	return true;
 }
 
+/*! Decimate the selected shapes, with a ratio you can scrub afterwards.
+ *
+ *  Every other live operator arms a redo panel — Move, Merge by Distance,
+ *  Extrude, Fill, Bridge, Edge Slide — so the number can be found by dragging
+ *  rather than guessed at in a modal beforehand. Decimation was the one that made
+ *  you decide first and look afterwards, which is exactly backwards for an
+ *  operation whose right value is "however much still looks like the mesh".
+ *
+ *  The simplification itself is the Simplify dialog's, driven headlessly. Two
+ *  implementations of a decimation would drift apart, and that one is the one
+ *  people have been using.
+ */
+void GLView::decimateSelectedObjects( float ratio )
+{
+	if ( !model || editMode || objSelection.isEmpty() )
+		return;
+	QVector<int> shapes;
+	for ( int b : objSelection )
+		if ( model->blockInherits( model->getBlockIndex( b ), "BSTriShape" ) )
+			shapes << b;
+	if ( shapes.isEmpty() ) {
+		emit gizmoStatus( tr( "Decimate: select one or more BSTriShapes" ) );
+		return;
+	}
+
+	int before = 0, after = 0, refused = 0;
+	// ONE undo step for the whole selection, so scrubbing the ratio afterwards
+	// undoes exactly one entry however many shapes were decimated
+	const bool changed = nifSnapshotOp( model, tr( "Decimate" ), [&]() {
+		for ( const int b : std::as_const( shapes ) ) {
+			const QModelIndex iShape = model->getBlockIndex( b );
+			before += model->get<int>( iShape, "Num Triangles" );
+			if ( !tlSimplifyShapeToRatio( model, iShape, double( ratio ) ) )
+				refused++;
+			after += model->get<int>( model->getBlockIndex( b ), "Num Triangles" );
+			tlUpdateBounds( model, model->getBlockIndex( b ) );
+		}
+	} );
+	// a shape the simplifier would not load is worth saying out loud rather than
+	// reporting as "decimated, 224 triangles to 224"
+	if ( refused )
+		emit gizmoStatus( tr( "Decimate: %1 of %2 shape(s) had no geometry the simplifier could load" )
+			.arg( refused ).arg( shapes.size() ) );
+	if ( !changed ) {
+		emit gizmoStatus( tr( "Decimate: nothing was changed" ) );
+		return;
+	}
+	modelChanged();
+
+	lastOpExRerun = [this]( const QVector<TlOpParam> & ps ) {
+		decimateSelectedObjects( float( ps.value( 0 ).value ) );
+	};
+	QVector<TlOpParam> ps( 1 );
+	ps[0].label = tr( "Ratio" );
+	ps[0].type = TlOpParam::Float;
+	ps[0].value = double( ratio );
+	ps[0].mn = 0.001;
+	ps[0].mx = 1.0;
+	ps[0].step = 0.01;
+	ps[0].decimals = 3;
+	armOperatorPanelEx( tr( "Decimate" ), ps, model->undoStack ? 1 : 0, QVector<PickedElement>() );
+
+	emit gizmoStatus( tr( "Decimated %1 shape(s): %2 triangles to %3" )
+		.arg( shapes.size() ).arg( before ).arg( after ) );
+}
+
 void GLView::commitOperatorPreview()
 {
 	if ( lastOpKind != 3 || !model || !model->undoStack
@@ -17196,6 +17265,11 @@ void GLView::populateObjectMenu( QMenu * m )
 		[this]() { duplicateSelection(); } )->setEnabled( hasSel );
 	m->addAction( tr( "Join\tCtrl+J" ), this,
 		[this]() { joinSelectedObjects(); } )->setEnabled( objSelection.size() >= 2 );
+	// half the triangles to start with, then scrub the ratio in the redo panel —
+	// the right value is "however much still looks like the mesh", which is a
+	// thing you find by dragging rather than by typing a number first
+	m->addAction( tr( "Decimate…\tCtrl+Shift+D" ), this,
+		[this]() { decimateSelectedObjects( 0.5f ); } )->setEnabled( hasSel );
 	m->addAction( tr( "Delete\tX" ), this,
 		[this]() { deleteSelectedObjects(); } )->setEnabled( hasSel );
 	QMenu * mPar = m->addMenu( tr( "Parent" ) );
@@ -20999,6 +21073,12 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	// join the selected compatible meshes into the active one (object)
 	if ( shortcuts.matches( "viewport.join", event->key(), mods ) && !editMode && model ) {
 		joinSelectedObjects();
+		return;
+	}
+
+	// decimate the selection, then scrub the ratio in the redo panel
+	if ( shortcuts.matches( "viewport.decimate", event->key(), mods ) && !editMode && model ) {
+		decimateSelectedObjects( 0.5f );
 		return;
 	}
 

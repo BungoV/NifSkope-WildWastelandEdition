@@ -1,40 +1,23 @@
 # NifSkope — WW Edition: To Be Implemented
 
-## `window_state_roundtrip.sh` cannot run: the geometry blob is text — OPEN, 2026-08-08
+## ~~Live decimation has no operator panel~~ — DONE 2026-08-08
 
-The harness patches the saved window geometry in the registry and re-reads it,
-and it refuses at the first step: it expects the raw Qt geometry blob, magic
-`0x01D9D0CB`, and finds `0xCB`.
+**Decimate** is an object-mode operator now: `Ctrl+Shift+D`, or the object menu
+beside Join. It halves the selection to start with and arms the redo panel, so
+the ratio is scrubbed afterwards with the operation re-running underneath — the
+same shape as Merge by Distance.
 
-What is actually stored under `UI\Window Geometry` is **UTF-16 text** beginning
-`@ByteArray(` — QSettings' textual form of a QByteArray — 156 bytes of it. The
-harness's byte arithmetic (`$b[22+2*$i]`, a 2-byte stride) is reading UTF-16
-characters as if they were the blob, which is why the magic comes out as a single
-byte.
+The simplification is the Simplify dialog's own, driven headlessly, so there is
+one decimation in the program and not two that drift. Two of its persisted
+settings are overridden for the live path and it is worth knowing why: **Min
+Triangles** and **Max Error** both pin the triangle count regardless of the ratio
+asked for, which is reasonable for a modal where a human types a number once and
+nonsense for a field being dragged. Measured before that: a 224-triangle sphere
+asked for half came back with 224.
 
-Nothing to do with the code under test: the check runs on registry bytes before
-the application is launched at all, so no C++ change can affect it. Either the
-harness has to decode the `@ByteArray(...)` wrapper before patching, or the app's
-geometry has to be stored raw. The first is smaller and does not change what
-users have saved.
-
-## Live decimation has no operator panel — OPEN, 2026-08-08
-
-Every other live operator arms a Blender-style redo panel through
-`armOperatorPanelEx` — Move, Merge by Distance, Extrude, Fill, Bridge, Edge
-Slide — so the parameter can be scrubbed after the fact with the operation
-re-running underneath. Decimation offers nothing of the kind.
-
-The pieces exist but are not connected to each other. `spSimplifyAllBSTriShapes`
-(fileextract.cpp, upstream) simplifies whole files as a batch spell with no ratio
-exposed, and the Collision Manager's preview decimates to a keep-percentage
-(`CollisionManager/Preview/Ratio`, `showCollisionPreview( 1, keep )`) for
-collision only. Neither is a per-shape operator over the current selection.
-
-**What it needs**: the simplifier reached with a ratio for ONE shape, wrapped as
-an undo macro, then `lastOpExRerun` set and `armOperatorPanelEx( tr( "Decimate" ),
-… )` armed with a Float ratio parameter — the same shape as `mergeVertices`'
-"Merge Distance" panel, which is the closest working model to copy.
+Checked in `block_dragdrop.sh` on a UV sphere the harness makes for the purpose —
+the fixture's 12-triangle cube has nothing redundant to remove and a simplifier
+correctly refuses it, which looked exactly like a broken operator for two runs.
 
 ## ~~The Block List can drag 71 block types of 563~~ — FIXED 2026-08-08
 

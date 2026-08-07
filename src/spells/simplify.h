@@ -56,4 +56,17 @@ public slots:
 	int exec() override;
 };
 
+/*! Simplify one BSTriShape to \a ratio of its triangles, with no dialog.
+ *
+ *  The Simplify dialog already holds all of this — loading the geometry, the
+ *  meshoptimizer call, writing the result back — and the live Decimate operator
+ *  needs exactly that with a number handed to it instead of typed in. Driving the
+ *  dialog in batch mode rather than copying its body is deliberate: two
+ *  implementations of a decimation would drift, and the one in the dialog is the
+ *  one people have been using.
+ *
+ *  \return false when the shape has no usable geometry.
+ */
+bool tlSimplifyShapeToRatio( NifModel * nif, const QModelIndex & shape, double ratio );
+
 #endif

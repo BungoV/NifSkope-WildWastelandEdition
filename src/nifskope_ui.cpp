@@ -10335,6 +10335,63 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "...and again, on a second round trip", bytes() == wasAfter );
 					}
 
+					/* DECIMATE, AND THE RATIO CAN BE SCRUBBED AFTERWARDS.
+					 *
+					 * The operation is the Simplify dialog's, driven headlessly, so
+					 * what is measured here is the OPERATOR: that it reduces the
+					 * triangles of the selected shape, that it is ONE undo step
+					 * however many shapes it touched, and that it leaves a redo panel
+					 * armed — without which it is just Simplify with the dialog taken
+					 * away, and the whole point was scrubbing the number afterwards.
+					 */
+					{
+						/* A SPHERE, NOT THE FIXTURE'S CUBE.
+						 *
+						 * A 12-triangle cube has nothing redundant in it — every edge
+						 * collapse changes the silhouette, so a simplifier correctly
+						 * refuses and returns all 12. Measured, twice, while it looked
+						 * like the operator was doing nothing. Decimation needs a mesh
+						 * with something to spare, and the viewport can make one.
+						 */
+						qint32 mesh = -1;
+						if ( GLView * maker = skope->getGLView() ) {
+							maker->addPrimitive( 3 );	// UV sphere
+							QApplication::processEvents();
+						}
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" )
+								&& nif->get<int>( nif->getBlockIndex( b ), "Num Triangles" ) > 64 )
+								mesh = b;
+						log << "decimation subject: block " << mesh << " with "
+							<< ( mesh >= 0 ? nif->get<int>( nif->getBlockIndex( mesh ), "Num Triangles" ) : 0 )
+							<< " triangles\n";
+						check( "there is a mesh with enough triangles to decimate", mesh >= 0 );
+						if ( mesh >= 0 && skope->getGLView() ) {
+							GLView * view = skope->getGLView();
+							const int trisWas = nif->get<int>( nif->getBlockIndex( mesh ), "Num Triangles" );
+							const int undoWas = nif->undoStack ? nif->undoStack->index() : -1;
+							view->objSelection.clear();
+							view->objSelection.insert( mesh );
+							view->objActive = mesh;
+							int armed = 0;
+							QObject::connect( view, &GLView::operatorPanelEx, skope,
+								[&armed]( const QString &, const QList<GLView::TlOpParam> & ) { armed++; } );
+							view->decimateSelectedObjects( 0.5f );
+							QApplication::processEvents();
+							const int trisNow = nif->get<int>( nif->getBlockIndex( mesh ), "Num Triangles" );
+							log << "decimate: " << trisWas << " triangles -> " << trisNow
+								<< ", undo steps " << undoWas << " -> "
+								<< ( nif->undoStack ? nif->undoStack->index() : -1 )
+								<< ", panels armed " << armed << "\n";
+							check( "decimating halves the triangles, or thereabouts",
+								trisNow < trisWas && trisNow > 0 );
+							check( "...as ONE undo step",
+								nif->undoStack && nif->undoStack->index() == undoWas + 1 );
+							check( "...and it arms a redo panel to scrub the ratio in",
+								armed == 1 );
+						}
+					}
+
 					/* JOIN TWO MESHES FROM THE BLOCK LIST.
 					 *
 					 * Ctrl+J in the viewport has done this for a while; what is new

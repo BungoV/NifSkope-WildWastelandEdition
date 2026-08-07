@@ -829,6 +829,54 @@ QModelIndex spSimplifyBSTriShape::cast( NifModel * nif, const QModelIndex & inde
 	return index;
 }
 
+/*! Simplify one shape to a ratio, headlessly — see the note in simplify.h.
+ *
+ *  A subclass because `targetCount` and friends are protected, and reaching them
+ *  is the whole point: exec() in batch mode builds the fields and returns without
+ *  showing anything, so the ratio can be written straight into the control the
+ *  dialog itself reads.
+ */
+bool tlSimplifyShapeToRatio( NifModel * nif, const QModelIndex & shape, double ratio )
+{
+	struct HeadlessSimplify final : public SimplifyMeshDialog
+	{
+		HeadlessSimplify( NifModel * m, const QModelIndex & i ) : SimplifyMeshDialog( m, i ) {}
+		bool run( double r )
+		{
+			if ( !isValid() )
+				return false;
+			batchMode = true;
+			exec();					// builds the fields, shows nothing
+			if ( !targetCount )
+				return false;
+			targetCount->setValue( std::clamp( r, targetCount->minimum(), targetCount->maximum() ) );
+			/* THE RATIO IS THE INSTRUCTION, so the dialog's persisted floor does
+			 * not get to overrule it. `Min Triangles` is a sensible guard when a
+			 * human is typing a ratio into a modal and might ask for two triangles
+			 * by accident; on the live operator it silently pinned the count and
+			 * made the Ratio field look broken — measured on a 12-triangle cube,
+			 * asked for half, got 12 back.
+			 */
+			if ( minTriangles )
+				minTriangles->setValue( minTriangles->minimum() );
+			/* AND THE ERROR CEILING. meshopt stops collapsing once the next collapse
+			 * would exceed Max Error, so a small persisted value pins the triangle
+			 * count no matter what ratio is asked for — a 224-triangle sphere asked
+			 * for half came back with 224. The live operator's contract is the
+			 * ratio; the ceiling is what a modal offers instead of a ratio.
+			 */
+			if ( maxError )
+				maxError->setValue( maxError->maximum() );
+			updateIndices();		// simplifies and writes the result back
+			return true;
+		}
+	};
+	if ( !nif || !shape.isValid() )
+		return false;
+	HeadlessSimplify dlg( nif, shape );
+	return dlg.run( ratio );
+}
+
 void spSimplifyBSTriShape::cast_batchMode( NifModel * nif, const QModelIndex & index )
 {
 	SimplifyMeshDialog	dlg( nif, index );

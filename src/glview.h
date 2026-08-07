@@ -1010,6 +1010,9 @@ private:
 	//! Object mode: merge the selected compatible BSTriShapes into the active
 	//! node (verts transformed into its space, triangles reindexed)
 	void joinSelectedObjects();
+	//! Object mode: decimate the selected BSTriShapes to a ratio of their
+	//! triangles, arming the redo panel so the ratio can be scrubbed afterwards.
+	void decimateSelectedObjects( float ratio = 0.5f );
 	//! The same join, told what to join rather than reading the viewport's own
 	//! selection — so the Block List can run the identical gesture.
 	void joinObjects( int active, QSet<int> selection );

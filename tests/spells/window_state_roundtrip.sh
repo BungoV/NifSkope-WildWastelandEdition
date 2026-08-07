@@ -72,8 +72,14 @@ try {
   # normal(x1,y1,x2,y2) 24-39, screenNumber 40-43.
   $g = (Get-ItemProperty $K -EA SilentlyContinue)."Window Geometry"
   if (-not $g) { Fail "no Window Geometry to seed from - open NifSkope once first" }
+  # [int] casts are NOT decoration: PowerShell's -shl on a BYTE shifts within the
+  # byte's own width, so 0x01 -shl 24 is 0, not 0x01000000. Every high term fell
+  # off and the magic read back as 0xCB -- the last byte alone -- which was then
+  # reported as "the geometry format changed" and stopped this suite running at
+  # all. The stored blob was correct the whole time.
   function GetI([byte[]]$b, [int]$i) {
-    ($b[22+2*$i] -shl 24) -bor ($b[22+2*($i+1)] -shl 16) -bor ($b[22+2*($i+2)] -shl 8) -bor $b[22+2*($i+3)]
+    ([int]$b[22+2*$i] -shl 24) -bor ([int]$b[22+2*($i+1)] -shl 16) `
+      -bor ([int]$b[22+2*($i+2)] -shl 8) -bor [int]$b[22+2*($i+3)]
   }
   function SetI([byte[]]$b, [int]$i, [int]$v) {
     $b[22+2*$i]     = ($v -shr 24) -band 0xff; $b[22+2*($i+1)] = ($v -shr 16) -band 0xff
@@ -100,11 +106,21 @@ try {
   if ($h -eq [IntPtr]::Zero) { $p.Kill(); Fail "cycle 1 never showed a window" }
   $r = New-Object Drawing.Rectangle
   [RT]::GetWindowRect($h, [ref]$r) | Out-Null
-  if ($r.X -lt $SX) {
+  # GetWindowRect fills a RECT (left, top, RIGHT, BOTTOM) and this is a Rectangle
+  # (X, Y, WIDTH, HEIGHT), so $r.Width is really the right edge. Kept, because the
+  # centre is what this wants and that reads it correctly either way.
+  #
+  # THE CENTRE, NOT THE LEFT EDGE. GetWindowRect includes the invisible resize
+  # border Windows puts around a window -- about 8 px -- so a window genuinely
+  # maximised on a monitor starting at 1920 reports x=1912 and this refused to
+  # continue. Which monitor the window is ON is a question about where its middle
+  # is, and no frame inset can move that across a screen boundary.
+  $cx = [int]((($r.X) + ($r.Width)) / 2)
+  if ($cx -lt $SX) {
     $p.CloseMainWindow() | Out-Null; $p.WaitForExit(15000) | Out-Null
-    Fail "window landed at x=$($r.X), on the PRIMARY monitor - seeding failed, aborted"
+    Fail "window centre at x=$cx, on the PRIMARY monitor - seeding failed, aborted"
   }
-  Write-Output "  cycle 1: window at x=$($r.X) (off-primary, ok)"
+  Write-Output "  cycle 1: window at x=$($r.X), centre $cx (off-primary, ok)"
   $p.CloseMainWindow() | Out-Null
   if (-not $p.WaitForExit(30000)) { $p.Kill(); Fail "cycle 1 would not close" }
   $ws = (Get-ItemProperty $K)."Window State"
@@ -120,7 +136,12 @@ try {
   Write-Output "PASS: 2 cycles, maximised save -> restore"
 }
 finally {
-  reg import $bk 2>&1 | Out-Null
+  # reg writes its success line to STDERR, and in Windows PowerShell "2>&1" on a
+  # native command wraps every stderr line in an ErrorRecord and leaves $? false.
+  # So the restore "failed" on success, the script exited non-zero, and the suite
+  # reported FAILED directly under its own "PASS: 2 cycles" line. cmd swallows it
+  # without PowerShell ever seeing a stream to mangle.
+  cmd /c "reg import ""$bk"" >nul 2>&1"
   Remove-Item $bk -EA SilentlyContinue
 }
 PSEOF
