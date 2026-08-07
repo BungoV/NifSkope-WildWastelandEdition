@@ -8807,6 +8807,84 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::processEvents();
 					}
 
+					/* CLICKING BLANK SPACE DESELECTS, and a paste follows the POINTER.
+					 *
+					 * QTreeView leaves the previous row selected when you click past
+					 * the end of the list, so there was no way to have no primary
+					 * selection — and Ctrl+V parented into whatever happened to be
+					 * selected, wherever you were looking. Over blank space a paste
+					 * now lands with NO parent, as a second root, to be dragged into
+					 * place.
+					 */
+					{
+						const QRect vp = list->viewport()->rect();
+						const QPoint blank( vp.center().x(), vp.bottom() - 3 );
+						check( "the blank point really is past the last row",
+							!list->indexAt( blank ).isValid() );
+
+						list->setCurrentIndex( rowFor( nodeB ) );
+						list->selectionModel()->select( rowFor( nodeB ),
+							QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows );
+						QApplication::processEvents();
+						check( "something is selected to begin with",
+							list->selectionModel()->currentIndex().isValid() );
+
+						QMouseEvent press( QEvent::MouseButtonPress, QPointF( blank ),
+							QPointF( list->viewport()->mapToGlobal( blank ) ),
+							Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+						QApplication::sendEvent( list->viewport(), &press );
+						QApplication::processEvents();
+						check( "clicking blank space clears the selection",
+							list->selectionModel()->selectedIndexes().isEmpty() );
+						check( "...and the current block with it",
+							!list->selectionModel()->currentIndex().isValid() );
+
+						/* PASTE. The pointer cannot be moved from here — that is the
+						 * whole reason block_drag_live.ps1 exists — so the probe is
+						 * driven directly, which is the same call the spell makes.
+						 */
+						const int blocksWas = nif->getBlockCount();
+						setBlockListHoverProbe( []( qint32 & b ) { b = -1; return true; } );
+						SpellPtr copy = SpellBook::lookup( QStringLiteral( "Block/Copy Branch" ) );
+						SpellPtr paste = SpellBook::lookup( QStringLiteral( "Block/Paste Branch" ) );
+						if ( !copy || !paste ) {
+							log << "copy/paste spells not found\n"; fails++; checks++; break;
+						}
+						copy->cast( nif, nif->getBlockIndex( leaf ) );
+						check( "paste is offered with nothing selected",
+							paste->isApplicable( nif, QModelIndex() ) );
+						/* Cast with nodeB as the index — i.e. AS IF it were still
+						 * selected — while the pointer says blank space. That is the
+						 * case reported: something is selected, the pointer is over
+						 * nothing, and the paste must not go into the selection.
+						 * Casting with an invalid index instead would pass on the old
+						 * code too, for the wrong reason.
+						 */
+						const QModelIndex pastedAt = paste->cast( nif, nif->getBlockIndex( nodeB ) );
+						QApplication::processEvents();
+						check( "pasting over blank space adds blocks",
+							nif->getBlockCount() > blocksWas );
+						const qint32 pasted = nif->getBlockNumber( pastedAt );
+						log << "pasted block " << pasted << ", parent "
+							<< nif->getParent( pasted ) << "\n";
+						check( "...and the pasted branch has NO parent",
+							pasted >= 0 && nif->getParent( pasted ) < 0 );
+						check( "...so nothing was hung off the old selection",
+							!childrenOf( nodeB ).contains( pasted ) );
+
+						// and over a ROW it pastes into that row
+						const int beforeRowPaste = nif->getBlockCount();
+						setBlockListHoverProbe( [nodeB]( qint32 & b ) { b = nodeB; return true; } );
+						const QModelIndex intoRow = paste->cast( nif, QModelIndex() );
+						QApplication::processEvents();
+						const qint32 pastedRow = nif->getBlockNumber( intoRow );
+						check( "pasting over a row parents into THAT row",
+							nif->getBlockCount() > beforeRowPaste
+							&& pastedRow >= 0 && nif->getParent( pastedRow ) == nodeB );
+
+						setBlockListHoverProbe( nullptr );	// leave the app as found
+					}
+
 					/* THE DRAG LOG MUST NOT TOUCH THE TREE. It dumps every on-screen
 					 * row at the start of every drag, and it used to expandAll()
 					 * first so the live-drag script could aim at rows — which

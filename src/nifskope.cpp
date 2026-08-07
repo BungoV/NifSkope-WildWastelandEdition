@@ -899,6 +899,27 @@ NifSkope::NifSkope( bool background )
 	list->setDragDropMode( QAbstractItemView::DragDrop );
 	list->startBlockDrag = [this]() { return startBlockListDrag(); };
 	list->blockDropEvent = [this]( QEvent * e ) { return blockListDragEvent( e ); };
+	list->wwBlankClickClearsSelection = true;
+
+	/* Where the pointer is, asked when a spell runs. Paste follows it: over a row
+	 * it pastes into that row, over the blank space below the rows it pastes with
+	 * no parent at all.
+	 *
+	 * Guarded on the ACTIVE window, because every document window registers into
+	 * the same slot and only one of them has the pointer. An inactive window's
+	 * probe declining means the spell falls back to the index it was handed,
+	 * which is the behaviour that was there before.
+	 */
+	setBlockListHoverProbe( [this]( qint32 & block ) {
+		block = -1;
+		if ( !list || !isActiveWindow() || !list->viewport()->isVisible() )
+			return false;
+		const QPoint at = list->viewport()->mapFromGlobal( QCursor::pos() );
+		if ( !list->viewport()->rect().contains( at ) )
+			return false;
+		block = blockListBlockAt( at );
+		return true;
+	} );
 
 	// Compact recursive filter for both hierarchy and flat Block List modes.
 	// Parents stay visible when any descendant matches; search is deliberately

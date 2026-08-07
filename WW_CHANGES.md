@@ -1,5 +1,45 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07k — Paste follows the pointer, and blank space means nothing
+
+### Clicking blank space deselects
+
+A `QTreeView` leaves the previous row selected when you click past the end of the
+list, so the Block List had no way to have **no** primary selection — and
+therefore no way to say "no parent". It clears both the selection and the current
+index now, because those are separate in Qt and leaving a current index behind
+means the spell book still has a block to act on while the list shows nothing
+selected.
+
+Block List only. In the field views the current row is the thing being edited and
+losing it to a stray click would be hostile.
+
+### Paste follows the pointer, not the selection
+
+Ctrl+V parented into whatever happened to be selected, wherever you were
+looking — so pasting next to a branch meant selecting that branch first, and
+pasting a free copy was not possible at all. Now:
+
+| pointer | paste lands |
+|---|---|
+| over a row | into that row |
+| over the blank space below the rows | with **no parent**, as a second root, to be dragged into place |
+| not over the block list at all | exactly as before, on the index the spell was handed |
+
+The pointer is asked for on demand when the spell runs — a probe registered by
+the window, rather than anything watching the mouse. It declines for an inactive
+window, so a second document cannot answer for the one you are in.
+
+`spPasteBranch::isApplicable` accepts an **invalid** index now: it means "paste
+with no parent". That was the one state in which Ctrl+V was simply disabled, so
+clearing the selection and pasting did nothing at all.
+
+The check casts the paste with a block as its index — as if it were still
+selected — while the probe reports blank space, because that is the case
+reported: something is selected, the pointer is over nothing, and the paste must
+not go into the selection. Casting with an invalid index instead passed on the
+old code too, for the wrong reason, and did until it was corrected.
+
 ## 2026-08-07j — Dropping into a node shut the node
 
 A `QTreeView` keeps expansion against **model indices**, and the proxy rebuilds

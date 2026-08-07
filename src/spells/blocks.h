@@ -3,6 +3,8 @@
 
 #include "spellbook.h"
 
+#include <functional>	// the Block List hover probe
+
 
 // Brief description is deliberately not autolinked to class Spell
 /*! \file blocks.h
@@ -129,6 +131,22 @@ bool wwEnsureRootBSXFlags( NifModel * nif, quint32 bits,
 //! The blocks a branch spell should act on: the multi-selection when the clicked
 //! block is part of it, otherwise just the clicked block.
 QList<qint32> spellSelectionRoots( const NifModel * nif, const QModelIndex & index );
+
+/*! Where the pointer is over the Block List, asked at the moment a spell runs.
+ *
+ *  Paste follows the POINTER rather than the selection: over a row it pastes into
+ *  that row, over the blank space below the rows it pastes with no parent at all.
+ *  Asked on demand instead of tracked, so nothing has to watch the mouse.
+ *
+ *  The probe returns false when the pointer is not over the block list — from a
+ *  context menu, from the menu bar, from another window — and the spell then
+ *  falls back to the index it was handed.
+ *
+ *  \param block receives the block under the pointer, or -1 for blank space.
+ *  \return whether the pointer is over the block list at all.
+ */
+void setBlockListHoverProbe( std::function<bool( qint32 & block )> probe );
+bool blockListHoverTarget( qint32 & block );
 
 //! Add a link to the specified block to a link array
 /*!

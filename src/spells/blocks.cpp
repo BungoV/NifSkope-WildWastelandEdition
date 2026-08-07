@@ -1698,6 +1698,21 @@ QList<qint32> blockListSelectionForSpells()
 	return blockListSelection;
 }
 
+// Asked at the moment a spell runs, rather than tracked, so nothing has to watch
+// the mouse to keep it current.
+static std::function<bool( qint32 & )> blockListHoverProbe;
+
+void setBlockListHoverProbe( std::function<bool( qint32 & )> probe )
+{
+	blockListHoverProbe = std::move( probe );
+}
+
+bool blockListHoverTarget( qint32 & block )
+{
+	block = -1;
+	return blockListHoverProbe && blockListHoverProbe( block );
+}
+
 bool wwEnsureRootBSXFlags( NifModel * nif, quint32 bits, quint32 * wasValue, quint32 * nowValue )
 {
 	if ( !nif || !bits )
@@ -1809,7 +1824,12 @@ bool spPasteBranch::isApplicable( const NifModel * nif, const QModelIndex & inde
 
 	const QMimeData * mime = QApplication::clipboard()->mimeData();
 
-	if ( index.isValid() && mime ) {
+	/* An INVALID index is now applicable: it means "paste with no parent", which
+	 * is what the blank space below the block list asks for. It used to be the
+	 * one state in which Ctrl+V was simply disabled, so clearing the selection
+	 * and pasting did nothing at all.
+	 */
+	if ( mime ) {
 		for ( const QString& form : mime->formats() ) {
 			if ( nif->isVersionSupported( nif->version2number( acceptFormat( form, nif ) ) ) )
 				return true;
@@ -1933,17 +1953,37 @@ QModelIndex spPasteBranch::cast( NifModel * nif, const QModelIndex & index )
 					// e.g. Ctrl+V while a shape, not a node, is current — a scene
 					// object would be left orphaned; fall back to the nearest
 					// NiNode ancestor of the target so it still slots in.
+					/* THE POINTER DECIDES, not the selection.
+					 *
+					 * Ctrl+V parented into whatever happened to be selected, wherever
+					 * you were looking — so pasting next to a branch meant selecting
+					 * that branch first, and pasting a free copy was not possible at
+					 * all. Over a row it pastes into that row; over the BLANK SPACE
+					 * below the rows it pastes with no parent, as a second root, to
+					 * be dragged into place.
+					 *
+					 * The probe answers false when the pointer is not over the block
+					 * list — a context menu, the menu bar, another window — and the
+					 * index the spell was handed is used exactly as before.
+					 */
+					QModelIndex target = index;
+					qint32 hovered = -1;
+					if ( blockListHoverTarget( hovered ) )
+						target = hovered >= 0 ? nif->getBlockIndex( hovered ) : QModelIndex();
+
 					const QSet<int> pastedSet( pasted.constBegin(), pasted.constEnd() );
-					QModelIndex iNode = index;
+					QModelIndex iNode = target;
 					while ( iNode.isValid() && !nif->blockInherits( iNode, "NiNode" ) )
 						iNode = nif->getBlockIndex( nif->getParent( iNode ) );
 
 					for ( int nb : std::as_const( pasted ) ) {
 						if ( pastedSet.contains( nif->getParent( nb ) ) )
 							continue;	// not a root — childed by another pasted block
+						if ( !target.isValid() )
+							continue;	// deliberately unparented; nothing to link into
 						QModelIndex iBlock = nif->getBlockIndex( nb );
-						blockLink( nif, index, iBlock );
-						if ( nif->getParent( nb ) < 0 && iNode.isValid() && iNode != index
+						blockLink( nif, target, iBlock );
+						if ( nif->getParent( nb ) < 0 && iNode.isValid() && iNode != target
 							&& nif->blockInherits( iBlock, "NiAVObject" ) )
 							blockLink( nif, iNode, iBlock );	// still orphaned: attach to a node
 					}
