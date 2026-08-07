@@ -8731,6 +8731,34 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& nif->undoStack && nif->undoStack->index() == undoBefore );
 					}
 
+					/* A DROP MUST NOT SHUT THE TREE. A QTreeView keeps expansion
+					 * against model indices and the proxy rebuilds wholesale on a
+					 * link change, so every structural edit closed the whole tree —
+					 * including the node just dropped into, which put the block
+					 * exactly where it could not be seen. Landing somewhere
+					 * invisible is indistinguishable from not landing.
+					 */
+					{
+						list->expandAll();
+						QApplication::processEvents();
+						const QModelIndex nodeBRow = rowFor( nodeB );
+						check( "the target node starts open", list->isExpanded( nodeBRow ) );
+						if ( !drop( { leaf }, nodeB, Qt::NoModifier ) ) {
+							log << "the reveal drop did not resolve\n"; fails++; checks++; break;
+						}
+						// the restore is deferred to after the proxy relays out
+						QApplication::processEvents();
+						QApplication::processEvents();
+						check( "the node dropped into is still open afterwards",
+							list->isExpanded( rowFor( nodeB ) ) );
+						check( "...with the moved block visible inside it",
+							childrenOf( nodeB ).contains( leaf )
+							&& list->visualRect( rowFor( leaf ) ).isValid()
+							&& !list->visualRect( rowFor( leaf ) ).isEmpty() );
+						undo();
+						QApplication::processEvents();
+					}
+
 					/* THE DRAG LOG MUST NOT TOUCH THE TREE. It dumps every on-screen
 					 * row at the start of every drag, and it used to expandAll()
 					 * first so the live-drag script could aim at rows — which

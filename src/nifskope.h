@@ -556,6 +556,16 @@ private:
 	QList<qint32> blockListDragPayload( const QMimeData * mime ) const;
 	//! Highlight (or clear, with -1) the row a drop would land on.
 	void setBlockListDropTarget( qint32 block );
+	/*! Which branches are open, BY BLOCK NUMBER.
+	 *
+	 *  A QTreeView keeps expansion against model indices, and the proxy rebuilds
+	 *  wholesale whenever links change — so any structural edit closes the tree.
+	 *  Block numbers survive that; proxy indices do not.
+	 */
+	QSet<qint32> wwOpenBlockListBranches() const;
+	//! Re-open those branches, plus `alsoOpen` — so a block dropped into a node
+	//! is visible where it landed rather than behind a branch that just shut.
+	void wwRestoreBlockListBranches( const QSet<qint32> & open, qint32 alsoOpen = -1 );
 	/*! Write every ON-SCREEN row's GLOBAL rectangle to the drag log, so a real
 	 *  mouse can be driven at them from outside the process — a native drag is
 	 *  the one path no synthetic event can enter.

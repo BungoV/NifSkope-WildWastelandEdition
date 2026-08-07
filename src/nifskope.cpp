@@ -4284,6 +4284,47 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	return parentBlock;
 }
 
+QSet<qint32> NifSkope::wwOpenBlockListBranches() const
+{
+	QSet<qint32> open;
+	if ( !nif || !list || list->model() != proxy )
+		return open;	// the flat list has nothing to open
+
+	// descends only into branches that are already open, so it costs what is on
+	// screen rather than what is in the file
+	std::function<void( const QModelIndex & )> walk = [&]( const QModelIndex & parent ) {
+		for ( int row = 0; row < proxy->rowCount( parent ); row++ ) {
+			const QModelIndex idx = proxy->index( row, 0, parent );
+			if ( !list->isExpanded( idx ) )
+				continue;
+			const qint32 block = nif->getBlockNumber( proxy->mapTo( idx ) );
+			if ( block >= 0 )
+				open.insert( block );
+			walk( idx );
+		}
+	};
+	walk( QModelIndex() );
+	return open;
+}
+
+void NifSkope::wwRestoreBlockListBranches( const QSet<qint32> & open, qint32 alsoOpen )
+{
+	if ( !nif || !list || list->model() != proxy )
+		return;
+
+	std::function<void( const QModelIndex & )> walk = [&]( const QModelIndex & parent ) {
+		for ( int row = 0; row < proxy->rowCount( parent ); row++ ) {
+			const QModelIndex idx = proxy->index( row, 0, parent );
+			const qint32 block = nif->getBlockNumber( proxy->mapTo( idx ) );
+			if ( block < 0 || !( open.contains( block ) || block == alsoOpen ) )
+				continue;
+			list->expand( idx );
+			walk( idx );	// only into what is being re-opened
+		}
+	};
+	walk( QModelIndex() );
+}
+
 void NifSkope::wwLogBlockListRowGeometry( bool expandFirst )
 {
 	if ( !nif || !list )
@@ -4484,6 +4525,11 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	hideBlockListDragCard();
 	blockListDropHint.clear();
 
+	// captured BEFORE the write: the proxy rebuilds on a link change and takes
+	// the whole tree's expansion with it, so a block dropped into a node ended up
+	// behind a branch that shut the moment it landed
+	const QSet<qint32> openWas = wwOpenBlockListBranches();
+
 	QStringList refusals;
 	const int moved = wwReparentBlocks( nif, blocks, target, mode, &refusals, position );
 	wwDragLog( QStringLiteral( "  -> moved %1, refusals: %2" ).arg( moved )
@@ -4512,11 +4558,19 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		}
 	}
 
-	// re-apply the search/type filter over the rebuilt tree: the moved rows are at
-	// new depths and the proxy has just relaid them out. The rename path defers
-	// the same call for the same reason.
-	if ( moved > 0 )
-		QTimer::singleShot( 0, this, [this]() { applyBlockListFilter(); } );
+	/* Deferred, because the proxy relays itself out after the link change and
+	 * anything done to the view before that is thrown away. Re-open what was
+	 * open, plus the node just dropped into — landing somewhere you cannot see
+	 * is indistinguishable from not landing — then re-apply the search filter,
+	 * since the moved rows are at new depths.
+	 */
+	if ( moved > 0 ) {
+		const qint32 landed = target;
+		QTimer::singleShot( 0, this, [this, openWas, landed]() {
+			wwRestoreBlockListBranches( openWas, landed );
+			applyBlockListFilter();
+		} );
+	}
 	return true;
 }
 

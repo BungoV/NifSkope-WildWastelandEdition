@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07j — Dropping into a node shut the node
+
+A `QTreeView` keeps expansion against **model indices**, and the proxy rebuilds
+wholesale whenever links change — so every structural edit closed the tree,
+including the node just dropped into. The block landed exactly where it could not
+be seen, which is indistinguishable from not landing.
+
+What was open is captured **before** the write, by BLOCK NUMBER (indices do not
+survive the rebuild), and re-opened after the proxy has relaid itself out —
+together with the node dropped into, so the moved block is visible where it went.
+The walk descends only into branches that are open, or that are being re-opened,
+so it costs what is on screen rather than what is in the file.
+
+Removing the re-open fails both new checks: the node is shut afterwards and the
+moved block has no visible row. That is the only reason to believe them.
+
 ## 2026-08-07i — A logger that unfolded the file it was measuring
 
 The drag log dumps every on-screen row's rectangle at the start of each drag, so
