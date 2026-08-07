@@ -1,5 +1,60 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07r — The live drag sweep, and the two ways it lied
+
+`block_drag_live.ps1` had one verified scenario and three written but never run.
+It now drives **seven**, over a scene with three roots and nodes nested two deep:
+into a shut node, into a row that only the drag's own auto-unfold revealed, into
+a second root, a root made a child, out to blank space, onto a mesh row, and the
+root onto its own descendant.
+
+**Six of the seven passed on the first honest run. The drag-and-drop feature came
+out of this unchanged** — every failure in the two runs before it was the
+script's.
+
+### The script could not fail
+
+Every scenario read `if (-not (Verdict '...')) { $fails++ }`, and `Verdict` wrote
+its message with `Write-Output` before returning the bool. The parenthesised call
+captures the **whole** output as the condition, and a two-element array is truthy
+whatever the bool says — so `$fails` could never increment, and the messages
+never reached the console either, having been eaten by the condition. The one
+test that reaches above the native-drag boundary printed PASS no matter what
+happened. It says `Write-Host` now, and returns only the verdict.
+
+### And its fixture had evaporated
+
+It opened `E:\dragfx.nif`, a file built by hand in an earlier session and never
+committed. It was gone, and the run died before touching the mouse. The scene is
+built by the program now (`WW_DRAGFIXTURE`), because the CLI cannot: both
+`Node/Attach Node` and `Node/Attach Parent Node` want a QWidget and die headless.
+
+### Two readings that convicted the program of the script's faults
+
+- **`payload [N]` in the drag log is the block COUNT**, not a block number.
+  Reading it as the identity of what was picked up made every scenario report
+  grabbing block 1 — which is simply how many blocks a one-block drag carries.
+  The identity is in the `=== drag start … first N ===` header.
+- **A refused target never receives a drop event at all.** The handler answers a
+  refusal with `Qt::IgnoreAction`, and Qt then does not deliver the `QDropEvent`,
+  so "no DROP reached the list" is the *correct* outcome for the cycle refusal
+  rather than the failure it reads as. The check now reads the last DragMove —
+  the pointer must have been resting on the illegal target — and that nothing
+  moved. Verified against the recorded log of the run that found it, rather than
+  by taking the mouse again.
+
+One expectation was wrong about the feature rather than the log: a drop on a mesh
+row was written as a refusal, and **a row that cannot take children is all gap**
+— there is nothing to drop inside a mesh, so its whole height reorders. The
+refusal exists; no point on that row can reach it.
+
+### Also
+
+The click that selects the source and the press that starts the drag were 450 ms
+apart, inside Windows' 500 ms double-click time. They were being delivered as a
+double click, which opens the inline rename editor. It is 900 ms and a move away
+and back now.
+
 ## 2026-08-07q — What a drag on a big file actually costs
 
 `wwParentsOf` walks every block in the file, once per block moved, and the

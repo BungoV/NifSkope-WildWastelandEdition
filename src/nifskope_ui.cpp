@@ -9808,6 +9808,73 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* WW_DRAGFIXTURE=<path>: write the scene block_drag_live.ps1 drags around in.
+	 *
+	 * It needs several nodes at root level, nodes nested two deep so a drop has
+	 * something to unfold on the way in, more than one ROOT so a block can be
+	 * dragged out of one and into another, and a mesh to be refused by. None of
+	 * that can be built from the CLI: Node/Attach Node and Node/Attach Parent Node
+	 * both want a QWidget and die headless, and Block/Duplicate Branch can only
+	 * copy what is already there — it does give a second root when applied to one,
+	 * which is the only piece of this the CLI can do.
+	 *
+	 * The live script used to open a file somebody had built by hand at
+	 * E:\dragfx.nif. The next session to reach for it found the file gone and the
+	 * run dead before it started.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DRAGFIXTURE" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				NifModel * nif = skope->getNifModel();
+				const QString out = qEnvironmentVariable( "WW_DRAGFIXTURE" );
+				if ( !ok || !nif ) { qApp->quit(); return; }
+
+				auto node = [&]( const QString & name, qint32 parent ) {
+					const QModelIndex i = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+					nif->assignString( i, "Name", name );
+					const qint32 b = nif->getBlockNumber( i );
+					if ( parent >= 0 )
+						addLink( nif, nif->getBlockIndex( parent ), "Children", b );
+					return b;
+				};
+
+				const QList<int> roots = nif->getRootLinks();
+				const qint32 root = roots.isEmpty() ? 0 : roots.first();
+				node( QStringLiteral( "Alpha" ), root );			// a bare drop target
+				const qint32 beta = node( QStringLiteral( "Beta" ), root );
+				const qint32 betaChild = node( QStringLiteral( "BetaChild" ), beta );
+				node( QStringLiteral( "BetaDeep" ), betaChild );	// two unfolds down
+				node( QStringLiteral( "Gamma" ), root );
+				// and two blocks with NO parent at all: a NIF may have several
+				// roots, and dragging between them is the case with no other cover
+				const qint32 second = node( QStringLiteral( "SecondRoot" ), -1 );
+				node( QStringLiteral( "SecondChild" ), second );
+				node( QStringLiteral( "ThirdRoot" ), -1 );
+
+				QFile f( out );
+				bool saved = false;
+				if ( f.open( QIODevice::WriteOnly ) ) {
+					saved = nif->save( f );
+					f.close();
+				}
+				QFile note( out + QStringLiteral( ".txt" ) );
+				if ( note.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+					QTextStream n( &note );
+					n << ( saved ? "saved" : "FAILED" ) << " " << nif->getBlockCount() << " blocks\n";
+					for ( int b = 0; b < nif->getBlockCount(); b++ )
+						n << b << " " << nif->itemName( nif->getBlockIndex( b ) ) << " \""
+						  << nif->get<QString>( nif->getBlockIndex( b ), "Name" ) << "\" parent "
+						  << nif->getParent( b ) << "\n";
+					note.close();
+				}
+				if ( nif->undoStack )
+					nif->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* WW_DRAG_LOG: dump every row's GLOBAL rectangle once the file is open.
 	 *
 	 * A native drag is the one path no harness can enter — QApplication::notify

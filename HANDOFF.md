@@ -60,9 +60,20 @@ measured and deliberately not done. What is left of them:
    children. The mode is being kept; this is a question of how far to take it,
    not whether.
 
-And the standing one: `block_drag_live.ps1` still has three UNVERIFIED scenarios
-if the run at the end of this session did not clear them — see the note below,
-and ask before running it.
+The live drag script is **cleared**: seven scenarios, six verified green in one
+run and the seventh read out of that run's own log. Two things it taught, both
+worth carrying:
+
+- **A refused target never receives a drop event.** The handler answers with
+  `Qt::IgnoreAction` and Qt withholds the `QDropEvent` entirely, so "no DROP
+  reached the list" is the correct outcome for a refusal, not a failure.
+- **`payload [N]` in the drag log is the block COUNT.** The identity of what was
+  picked up is in the `=== drag start … first N ===` header. Reading the count as
+  a block number had the script convicting the program in two whole runs.
+
+It also could not fail at all until this session — `Write-Output` inside a
+function whose caller wrapped it in `if (-not (…))` put the message *into* the
+condition, and a two-element array is truthy however the verdict came out.
 
 ### Open, and honest about it
 
@@ -298,7 +309,7 @@ And the block-list session added three:
 | `block_dragdrop.sh` | 87 checks: that the drag starts at all, the three modifiers, reorder by the gap, drag-out, every refusal, multi-select as one payload and its ordering, the highlight and the painted insertion line, the drag card, auto-expand and its fold-back, paste following the pointer *in a second window*, blank-click deselect, one undo step. `WW_BLOCKDND_BENCH=<n>` also times a move on a file that size |
 | `block_rename.sh` | 24 per mode, **both modes**: F2 and double-click, that nothing else opens on top, no sideways scroll, Escape, the column asymmetry, the txt icon, and that the name reaches the palette |
 | `block_list_modes.sh` | 8 per mode: that the header's total matches the sections it totals, that every row resolves back to itself through `indexAt`, that a block inserted now is addressable, and that all of it survives switching modes |
-| `block_drag_live.ps1` | **the only thing above the native-drag boundary** — drives the physical mouse. See the warning below. |
+| `block_drag_live.ps1` | **the only thing above the native-drag boundary** — drives the physical mouse across 7 drags: into a shut node, into a row its own auto-unfold revealed, into a second root, a root made a child, out to blank space, a mesh row's all-gap reorder, and a refused cycle. See the warning below. |
 
 All three build their fixture from the starter document (`-no-gui new`), so they
 need no game corpus at all. `block_rename.sh` and `block_list_modes.sh` seed
