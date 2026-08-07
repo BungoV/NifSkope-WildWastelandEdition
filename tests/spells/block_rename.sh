@@ -129,20 +129,25 @@ restore() {
 }
 trap 'restore; rm -rf "$TMP"' EXIT
 
-# BOTH MODES. The list half sat outside the gate while the flat list was reported
-# to take the process down about one run in three -- a check that fails
-# intermittently teaches you to re-run rather than to look. It is back in as of
-# 2026-08-07p, on this evidence: the crash does not reproduce, in 12 runs of this
-# script in list mode against the code before that day's fix and 12 after; the
-# flat list's real fault (nothing in it could be clicked, anywhere) is found,
-# fixed and covered by block_list_modes.sh; and the session that filed the crash
-# lost an hour the same night to heap corruption that turned out to be a stale
-# incremental build.
+# HIERARCHY ONLY by default, and the list half is written and passes 24 of 24 on
+# the runs that finish. It is out of the gate because in list mode this script
+# HANGS 7 runs in 10 -- and a check that fails intermittently teaches you to
+# re-run rather than to look.
 #
-# If it does start dying here: build CLEAN before believing it, and if it still
-# dies, write down what was measured rather than pulling the mode back out.
+# It was briefly back IN the gate on 2026-08-07p, on a claim that the failure did
+# not reproduce in 36 runs. Those runs did pass, and the claim was still wrong:
+# the measurement was "did the log end with done", which cannot tell a crash from
+# a hang. Ruled out since, each with its own run of ten: a stale incremental
+# build, the IPC port, contention with other work, and the inherited
+# GLView/Enable Animations setting (forced off below regardless -- a harness must
+# force the state it measures). The trail is in the backlog under
+# "block_rename.sh in list mode HANGS".
+#
+#   MODES="hierarchy list" bash tests/spells/block_rename.sh
+#
+# runs it anyway, which is how the list half is checked while that is open.
 fails=0
-for mode in ${MODES:-hierarchy list}; do
+for mode in ${MODES:-hierarchy}; do
 	echo "--- $mode mode"
 	seed "$mode"
 	[ "$(ps "(Get-ItemProperty -Path '$KEY' -Name 'List Mode').'List Mode'")" = "$mode" ] \

@@ -94,9 +94,12 @@ harness that fails against the old code. Fault 2 does not reproduce.
    part of 2026-08-07. That claim was measured with an instrument that cannot
    tell a crash from a hang: "did the log say done".
 
-Consequences cleared: `block_rename.sh` runs **both modes** again, 24 checks
-each. New harness `tests/spells/block_list_modes.sh`, 8 checks per mode, drives
-the invariant and what it costs the person using the program.
+New harness `tests/spells/block_list_modes.sh`, 8 checks per mode, drives the
+invariant and what it costs the person using the program — both modes, green.
+
+`block_rename.sh`'s list half is written and passes 24 of 24 on the runs that
+finish, but it stays OUT of the default gate: in list mode that script hangs 7
+runs in 10, which is the open item below. `MODES="hierarchy list"` runs it.
 
 **Still open, small:** drag-and-drop has no coverage in flat list mode. Its code
 branches on the model and is believed correct, and now that the view answers

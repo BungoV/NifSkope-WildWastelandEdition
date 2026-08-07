@@ -312,7 +312,7 @@ And the block-list session added three:
 | harness | covers |
 |---|---|
 | `block_dragdrop.sh` | 87 checks: that the drag starts at all, the three modifiers, reorder by the gap, drag-out, every refusal, multi-select as one payload and its ordering, the highlight and the painted insertion line, the drag card, auto-expand and its fold-back, paste following the pointer *in a second window*, blank-click deselect, one undo step. `WW_BLOCKDND_BENCH=<n>` also times a move on a file that size |
-| `block_rename.sh` | 24 per mode, **both modes**: F2 and double-click, that nothing else opens on top, no sideways scroll, Escape, the column asymmetry, the txt icon, and that the name reaches the palette |
+| `block_rename.sh` | 25 in hierarchy (list mode is out of the gate, see below): F2 and double-click, that nothing else opens on top, no sideways scroll, Escape, the column asymmetry, the txt icon, and that the name reaches the palette |
 | `block_list_modes.sh` | 8 per mode: that the header's total matches the sections it totals, that every row resolves back to itself through `indexAt`, that a block inserted now is addressable, and that all of it survives switching modes |
 | `block_drag_live.ps1` | **the only thing above the native-drag boundary** — drives the physical mouse across 7 drags: into a shut node, into a row its own auto-unfold revealed, into a second root, a root made a child, out to blank space, a mesh row's all-gap reorder, and a refused cycle. See the warning below. |
 
