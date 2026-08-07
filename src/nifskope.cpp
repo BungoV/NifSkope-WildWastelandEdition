@@ -1470,8 +1470,19 @@ NifSkope::NifSkope( bool background )
 	connect( list, &NifTreeView::sigCurrentIndexChanged, this, &NifSkope::select );
 	connect( this, &NifSkope::currentNifIndexChanged, this,
 		[this]( const QModelIndex & index ) {
+			// TEMP DIAGNOSTIC (WW_PERF_TEST): the flat list stops somewhere in here
+			auto note = []( const char * what ) {
+				if ( !qEnvironmentVariableIsSet( "WW_PERF_TEST" ) )
+					return;
+				QFile f( QApplication::applicationDirPath() + "/ww_perf_test.log" );
+				if ( f.open( QIODevice::Append | QIODevice::Text ) )
+					QTextStream( &f ) << "    [currentNifIndexChanged/" << what << "]\n";
+			};
+			note( "enter" );
 			updateBlockListNavigation( index );
+			note( "navigation done" );
 			applyBlockDetailsFilter();
+			note( "details filter done" );
 		} );
 	connect( this, &NifSkope::beginLoading, this, [this]() {
 		blockListHistory.clear();

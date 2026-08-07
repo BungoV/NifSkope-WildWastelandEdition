@@ -8174,6 +8174,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						return nif->getLinkArray( nif->getBlockIndex( block ), "Children" );
 					};
 
+					/* HIERARCHY, OR MEASURE NOTHING.
+					 *
+					 * Reordering, the gap bands and drag-out are hierarchy-only by
+					 * design — the flat list is the file's block order, not anyone's
+					 * children — so in list mode a third of this suite fails for a
+					 * reason that has nothing to do with the code under test. This
+					 * harness seeds no mode, and `List Mode` is persisted: another
+					 * harness that seeds it and is interrupted, or simply a user who
+					 * left the block list in list mode, is enough. It cost two
+					 * separate readings of "5 failures" before this said so out loud.
+					 */
+					if ( list->model() != skope->proxy ) {
+						log << "the block list is in LIST mode; this suite needs hierarchy.\n"
+							<< "Set HKCU\\Software\\NifTools\\NifSkope 2.0\\UI\\List Mode to "
+							<< "\"hierarchy\" and run it again.\n";
+						fails++; checks++; break;
+					}
+
 					const QList<int> roots = nif->getRootLinks();
 					if ( roots.size() != 1 ) { log << "fixture has no single root\n"; fails++; checks++; break; }
 					const qint32 root = roots.first();
@@ -9607,6 +9625,34 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log.flush();
 						check( "the app started in the mode under test", isHierarchy == wantHierarchy );
 						if ( isHierarchy != wantHierarchy ) break;
+
+						/* ANIMATIONS OFF, and this is what the flat list was filed for.
+						 *
+						 * "The flat list intermittently takes the process down" was
+						 * this: with `GLView/Enable Animations` left true in the
+						 * registry — the user's own setting, which this harness
+						 * inherited — the viewport schedules a new frame from inside
+						 * every frame it draws, so a bare processEvents() has a queue
+						 * that never empties and never returns. The run sat there
+						 * until the script's 60-second deadline killed it, which
+						 * reads exactly like a crash from outside: measured 7 of 10,
+						 * against 4-second runs when it did return, with the perf log
+						 * filling with drawGrid pairs the whole time.
+						 *
+						 * It is not heap corruption, it is not the flat list, and it
+						 * is not the program: it is this harness inheriting a setting
+						 * instead of forcing it. Which is the rule in HANDOFF.md, and
+						 * the same setting that broke a green suite once before.
+						 *
+						 * List mode only because select() runs its whole body for a
+						 * NifModel index and returns early for a proxy one, so only
+						 * the flat list reaches the viewport from here at all.
+						 */
+						if ( skope->ui->aAnimate->isChecked() )
+							skope->ui->aAnimate->trigger();
+						QApplication::processEvents();
+						check( mode + ": animations are off, so processEvents can finish",
+							!skope->ui->aAnimate->isChecked() );
 
 						const QString before = nif->resolveString( nif->getBlockIndex( node ), "Name" );
 						list->expandAll();

@@ -1,5 +1,43 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07t — The flat list does not crash. It hangs, and I said otherwise
+
+**Correcting 2026-08-07p**, which stated that the crash filed against list mode
+"does not reproduce in 36 runs". Those 36 runs did pass. The claim was still
+wrong, because the instrument behind it — *did the log end with `done`* — cannot
+tell a crash from a hang, and this is a hang.
+
+It reproduces **7 times in 10**. What that took, and what each step ruled out:
+
+| suspect | measurement | verdict |
+|---|---|---|
+| stale incremental build | `make clean`, full rebuild | 7 of 10 — no |
+| the IPC port, reused per run | unique port per run | 6 of 10 — no |
+| my own builds relinking the exe under it | ran with nothing else going | still fails — no |
+| a crash | Windows event log, and gdb over the whole run | no APPCRASH, **no fault at all** |
+| `GLView/Enable Animations`, inherited | forced off in the harness | 7 of 10 — no |
+
+A passing run takes **4 seconds** and a failing one **63**, which is the script's
+own 60-second deadline: it kills the process and reports that it did not finish,
+which from outside reads exactly like a crash. Hierarchy mode is 4-5 seconds
+every time, across dozens of runs.
+
+Narrowed with the `WW_PERF_TEST` markers, and it moved twice as better traces
+went in: `NifSkope::select()` runs to completion, the slot behind
+`currentNifIndexChanged` reaches its end, and the block is in the harness's own
+bare `QApplication::processEvents()` afterwards — with the perf log filling with
+`drawGrid` pairs for as long as it lasts. A queue that never empties.
+
+**Left open, honestly.** `processEvents( AllEvents, 100 )` would make the harness
+robust and would hide the question; if the viewport really does spin forever
+posting updates then somebody sitting in list mode is burning a core, and that is
+the version of this worth knowing. Written up in the backlog with the markers
+still in place.
+
+Animations are forced off in `block_rename.sh` regardless — a harness must force
+the state it measures, and that is the second time this exact setting has been
+inherited into a measurement.
+
 ## 2026-08-07s — A block in several places, and which one you are dragging
 
 A NIF block may sit under more than one parent — Ctrl-drop makes exactly that,

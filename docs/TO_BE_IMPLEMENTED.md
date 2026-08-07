@@ -1,5 +1,42 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## `block_rename.sh` in list mode HANGS, 7 runs in 10 — OPEN, 2026-08-07t
+
+This is what "the flat list intermittently takes the process down" actually is,
+and it is **not** a crash and **not** heap corruption. What is established:
+
+- **No crash.** Windows logged no APPCRASH event for any of them (the only
+  NifSkope ones on this machine are from 08-05), and running the whole thing
+  under `gdb` catches no fault at all — the process sits there until something
+  kills it. Under gdb it hangs 3 times in 3, which says timing.
+- **It is the harness that stops, not the program.** A passing run takes **4
+  seconds**; a failing one takes **63**, which is the script's own 60-second
+  deadline plus start-up. The script then reports "did not finish", and from
+  outside that is indistinguishable from a crash. That is the instrument the
+  earlier "36 runs, no death" claim was made with, and why it was wrong.
+- **List mode only.** Hierarchy is 4-5 seconds every time, dozens of runs.
+- **Where.** After the F2 shortcut is found and animations are forced off, in the
+  `expandAll` / `setCurrentIndex` / F2 region. `NifSkope::select()` runs to
+  completion — `select/emit currentNifIndexChanged` logs, and the slot behind it
+  reaches "details filter done" — so the block is in the harness's own bare
+  `QApplication::processEvents()` afterwards, with `ww_perf_test.log` filling
+  with `drawGrid` pairs for as long as it lasts. A queue that never empties.
+- **Not the persisted animation setting**, though that was the obvious suspect
+  and `GLView/Enable Animations` was indeed left true. Forcing it off is right on
+  its own merits — a harness must force the state it measures — and it is done
+  now, and it changed nothing: still 7 of 10.
+- **Not a stale incremental build** (7 of 10 on a from-scratch `make clean`
+  build), **not the IPC port** (6 of 10 with a unique port per run), and not
+  contention with anything else running.
+
+**Next**: find what keeps posting into the queue. `processEvents(AllEvents, 100)`
+in the harness would make it robust regardless, but that hides it rather than
+answering it — and if the viewport really does spin forever posting updates then
+a user sitting in list mode is burning a core for nothing, which is the version
+of this that matters. The `WW_PERF_TEST` markers in `select()` and in the
+`currentNifIndexChanged` lambda are in place and are how the above was narrowed;
+add one inside the GL update path next.
+
 ## Every structural edit serialises the whole file twice — MEASURED 2026-08-07p
 
 Found while measuring something else, and it is the bigger number of the two.
@@ -52,15 +89,10 @@ harness that fails against the old code. Fault 2 does not reproduce.
    signals were never the problem (they agree with their own row counts), and
    `setListMode()` **does** re-run `wireBlockListSelection()` — last line but one.
 
-2. **The crash does not reproduce.** 36 runs with no death: 12 of
-   `block_rename.sh` in list mode against the pre-fix code, 12 after, and 12 of
-   the new harness's 10-cycle switching loop (120 model switches with real
-   paints, inserts and removes). Note that the session which filed it lost an
-   hour the same night to heap corruption that turned out to be **a stale
-   incremental build** — its own conclusion, in HANDOFF.md, being that identical
-   source died 6 of 6 incremental against 0 of 12 clean. Left here only as
-   something to re-measure if it is ever seen again: build clean first, then
-   write down what was measured.
+2. **It is not a crash. It is a hang, and it is still open** — see the section
+   below, which supersedes the "does not reproduce" claim this entry carried for
+   part of 2026-08-07. That claim was measured with an instrument that cannot
+   tell a crash from a hang: "did the log say done".
 
 Consequences cleared: `block_rename.sh` runs **both modes** again, 24 checks
 each. New harness `tests/spells/block_list_modes.sh`, 8 checks per mode, drives

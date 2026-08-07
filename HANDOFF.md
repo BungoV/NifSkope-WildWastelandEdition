@@ -16,8 +16,13 @@ Two headlines:
 - **The flat list mode is fixed and kept.** It was worse than filed — *no* row in
   it could be clicked, dropped on or right-clicked, not just newly inserted ones
   — and the cause was `QHeaderView`'s cached total going negative, not anything
-  about the model. The crash filed alongside it does not reproduce in 36 runs.
-  Hierarchy mode was never affected.
+  about the model. Hierarchy mode was never affected.
+- **The thing filed as "the flat list takes the process down" is a HANG, still
+  open.** `block_rename.sh` in list mode stops 7 runs in 10: no crash, no fault
+  under gdb, no APPCRASH event — a passing run is 4 seconds and a failing one is
+  63, which is the script's deadline. Ruled out: stale build, the IPC port, the
+  inherited animation setting, contention. Narrowed to the harness's own bare
+  `processEvents()` after `select()` has fully returned. Backlog has the trail.
 
 ### The Block List, as it now behaves
 
