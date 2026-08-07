@@ -1057,7 +1057,14 @@ protected:
 		}
 		auto * drag = new QDrag( this );
 		drag->setMimeData( shapePayload( shape ) );
-		drag->exec( Qt::MoveAction );
+		/* COPY TOO, or the Block List can never take it. Dropping a shape there
+		 * turns it into a BSTriShape, which the Block List quite rightly answers
+		 * as a Copy — and Qt refuses an action the drag does not support, so with
+		 * the mask at Move alone the loop-closing direction was unreachable by a
+		 * real drag while its checks passed. Move stays the default, which is what
+		 * a shape dragged onto another BODY is.
+		 */
+		drag->exec( Qt::MoveAction | Qt::CopyAction, Qt::MoveAction );
 		clearHighlight();
 	}
 
@@ -1070,11 +1077,30 @@ protected:
 		QTreeWidget::dragLeaveEvent( event );
 	}
 
+	/*! A payload this tree does not understand goes to the PANEL instead.
+	 *
+	 *  The tree is a child widget that accepts drops, so while the pointer is over
+	 *  the body rows Qt delivers to the TREE and not to the panel behind it — and
+	 *  the tree only knows collision-shape payloads. A mesh dragged from the Block
+	 *  List was therefore refused over every body row and accepted only over the
+	 *  panel's bare furniture: the exact inverse of where it needs to land, and
+	 *  with no body highlighting because the panel never saw the drag.
+	 *
+	 *  Set by the panel, which maps the position into its own coordinates and runs
+	 *  the handler it already had.
+	 */
+public:
+	std::function<bool( QEvent *, const QPoint & )> offerToPanel;
+
+protected:
 	void dropEvent( QDropEvent * event ) override final
 	{
 		const qint32 shape = draggedShape( event->mimeData() );
 		const qint32 body = bodyUnder( event->position().toPoint() );
 		clearHighlight();
+		if ( shape < 0 && offerToPanel
+			&& offerToPanel( event, viewport()->mapToGlobal( event->position().toPoint() ) ) )
+			return;
 		if ( shape < 0 || body < 0 || !refusalFor || !refusalFor( shape, body ).isEmpty()
 			|| !moveShapeToBody )
 		{
@@ -1100,6 +1126,11 @@ private:
 	{
 		const qint32 shape = draggedShape( event->mimeData() );
 		if ( shape < 0 ) {
+			// a mesh from the Block List: the panel behind this tree is what takes
+			// those, and it is the one that lights the body under the pointer
+			if ( offerToPanel
+				&& offerToPanel( event, viewport()->mapToGlobal( event->position().toPoint() ) ) )
+				return;
 			event->setDropAction( Qt::IgnoreAction );
 			event->accept();
 			return;
@@ -1342,6 +1373,12 @@ protected:
 	}
 
 public:
+	/*! Is the create hook actually wired? A null one makes every drop accept the
+	 *  payload, say nothing, and do nothing — indistinguishable from a create that
+	 *  ran and produced no collision, which is a whole evening's difference.
+	 */
+	bool hasCreateHook() const { return bool( createShapeNow ); }
+
 	//! The body under a point in the PANEL's coordinates, or -1 — the inventory
 	//! is a child of this widget, so a drag over the panel has to be mapped in.
 	//! Public because the drop harness has to be able to ask the aiming device
@@ -3597,6 +3634,44 @@ private:
 		tree->refusalFor = [this]( qint32 shape, qint32 body ) {
 			return tlMoveCollisionShapeRefusal( nif, shape, body );
 		};
+
+		/* A MESH DRAGGED OVER THE ROWS REACHES THIS PANEL.
+		 *
+		 * The tree covers the body rows and accepts drops, so Qt hands it the drag
+		 * whenever the pointer is over one — and it only understands shape rows.
+		 * A mesh from the Block List was refused over every body and accepted only
+		 * over the panel's bare furniture below the tree, which is the inverse of
+		 * where it has to land, with no body lit because this panel never saw it.
+		 *
+		 * The event is re-made at this widget's coordinates and run through the
+		 * handlers that were already here, so the body targeting and the highlight
+		 * are the same ones, reached from the place the pointer actually is.
+		 */
+		tree->offerToPanel = [this]( QEvent * event, const QPoint & globalPos ) -> bool {
+			const QPointF at( mapFromGlobal( globalPos ) );
+			if ( event->type() == QEvent::Drop ) {
+				auto * from = static_cast<QDropEvent *>( event );
+				QDropEvent here( at, from->possibleActions(), from->mimeData(),
+					from->buttons(), from->modifiers() );
+				dropEvent( &here );
+				if ( !here.isAccepted() )
+					return false;
+				from->setDropAction( here.dropAction() );
+				from->accept();
+				return true;
+			}
+			auto * from = static_cast<QDragMoveEvent *>( event );
+			QDragMoveEvent here( at.toPoint(), from->possibleActions(), from->mimeData(),
+				from->buttons(), from->modifiers() );
+			here.setAccepted( false );
+			offerCollisionDrop( &here );
+			// IgnoreAction means "not mine" — let the tree give its own answer
+			if ( !here.isAccepted() || here.dropAction() == Qt::IgnoreAction )
+				return false;
+			from->setDropAction( here.dropAction() );
+			from->accept();
+			return true;
+		};
 		tree->moveShapeToBody = [this]( qint32 shape, qint32 body ) {
 			QString refusal;
 			nifSnapshotOp( nif, tr( "Move collision shape" ), [&]() {
@@ -5005,6 +5080,17 @@ bool wwDeliverCollisionDrop( QMainWindow * mw, QEvent * event )
  *  ask the PANEL rather than work the mapping out a second time. A harness that
  *  computed its own answer would agree with a broken panel.
  */
+//! WW_COLLDROP_TEST: is the panel's create hook wired? See hasCreateHook.
+bool wwCollisionCreateWired( QMainWindow * mw )
+{
+	if ( !mw )
+		return false;
+	for ( QWidget * widget : mw->findChildren<QWidget *>() )
+		if ( auto * panel = dynamic_cast<CollisionManagerPanel *>( widget ) )
+			return panel->hasCreateHook();
+	return false;
+}
+
 qint32 wwCollisionBodyAtPanelPoint( QMainWindow * mw, const QPoint & panelPos )
 {
 	if ( !mw )

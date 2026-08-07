@@ -521,6 +521,201 @@ static QList<qint32> wwParentsOf( const NifModel * nif, qint32 block )
 	return parents;
 }
 
+/*! Every LINK FIELD anywhere in the file that points at this block.
+ *
+ *  `Children` is how a NiNode owns a scene object, and it is the only ownership
+ *  the drag understood — so a BSLightingShaderProperty, which its shape owns
+ *  through `Shader Property`, was reported as having no parent to leave and
+ *  could not be dragged out. It has an owner; the owner just does not keep it in
+ *  an array called Children. Same for a BSShaderTextureSet under `Texture Set`,
+ *  a controller under `Controller`, extra data in `Extra Data List`.
+ *
+ *  Found by walking the owner's fields rather than from a table of type-to-field
+ *  names: the format has hundreds of these and a table would be wrong the first
+ *  time a version differs. What the file says holds it, holds it.
+ */
+struct WwHolder
+{
+	qint32 owner = -1;
+	QPersistentModelIndex field;	//!< the link cell itself
+	QString array;					//!< the array's name when the cell is inside one
+};
+
+static void wwFindLinkCells( const NifModel * nif, const QModelIndex & parent, qint32 target,
+	qint32 owner, const QString & inArray, QList<WwHolder> & out )
+{
+	for ( int r = 0; r < nif->rowCount( parent ); r++ ) {
+		const QModelIndex cell = nif->index( r, 0, parent );
+		if ( !cell.isValid() )
+			continue;
+		if ( nif->isLink( cell ) && nif->getLink( cell ) == target )
+			out.append( WwHolder{ owner, QPersistentModelIndex( cell ), inArray } );
+		// an array's elements are its children, so remember the array's name on
+		// the way down: detaching from one is a rebuild, not a blanking
+		const QString name = nif->itemName( cell );
+		wwFindLinkCells( nif, cell, target, owner,
+			nif->isArray( cell ) ? name : inArray, out );
+	}
+}
+
+static QList<WwHolder> wwHoldersOf( const NifModel * nif, qint32 block )
+{
+	QList<WwHolder> holders;
+	if ( !nif || !nif->isValidBlockNumber( block ) )
+		return holders;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		if ( b == block )
+			continue;
+		wwFindLinkCells( nif, nif->getBlockIndex( b ), block, b, QString(), holders );
+	}
+	return holders;
+}
+
+/*! Detach \a block from everything that points at it, and say how many.
+ *
+ *  A single Ref is set to none. A cell inside an array is REBUILT out of it,
+ *  never blanked: a blanked entry leaves the count still claiming it and the
+ *  entry pointing at nothing, which is precisely the dangling link the Issue
+ *  Manager reports — the same reason the Children path rebuilds.
+ */
+static int wwDetachHolders( NifModel * nif, qint32 block )
+{
+	int detached = 0;
+	for ( const WwHolder & holder : wwHoldersOf( nif, block ) ) {
+		if ( !holder.field.isValid() )
+			continue;
+		const QModelIndex cell( holder.field );
+		if ( holder.array.isEmpty() ) {
+			nif->setLink( cell, -1 );
+			detached++;
+			continue;
+		}
+		const QModelIndex owner = nif->getBlockIndex( holder.owner );
+		const QModelIndex array = nif->getIndex( owner, holder.array );
+		if ( !array.isValid() )
+			continue;
+		QVector<qint32> kept;
+		for ( const qint32 link : nif->getLinkArray( owner, holder.array ) )
+			if ( link != block && nif->isValidBlockNumber( link ) )
+				kept.append( link );
+		const QString counter = QStringLiteral( "Num " ) + holder.array;
+		if ( nif->getIndex( owner, counter ).isValid() )
+			nif->set<uint>( owner, counter, uint( kept.size() ) );
+		nif->updateArraySize( owner, holder.array );
+		nif->setLinkArray( owner, holder.array, kept );
+		detached++;
+	}
+	return detached;
+}
+
+/*! The link field on \a owner that would take \a block, or an invalid index.
+ *
+ *  Asked of the FORMAT, not of a table: every link cell declares the type it
+ *  accepts (`itemTempl`), and the model knows what inherits what. So a
+ *  BSLightingShaderProperty finds `Shader Property` on a BSTriShape because that
+ *  cell says BSShaderProperty and the block inherits it — and it finds nothing on
+ *  an NiNode, which is the honest answer rather than a refusal that has to name
+ *  every case in advance.
+ *
+ *  A single Ref wins over an array cell when both would take it: dropping a
+ *  shader property on a shape means THAT property, replacing what is there,
+ *  which is what a single-valued field means. \a arrayName comes back set when
+ *  the only home is an array, because joining one is an append and a rebuild
+ *  rather than a write.
+ */
+static QModelIndex wwFieldAccepting( const NifModel * nif, qint32 owner, qint32 block,
+	QString * arrayName )
+{
+	if ( arrayName )
+		arrayName->clear();
+	if ( !nif || !nif->isValidBlockNumber( owner ) || !nif->isValidBlockNumber( block ) )
+		return QModelIndex();
+	const QString type = nif->itemName( nif->getBlockIndex( block ) );
+
+	/* THE MOST SPECIFIC FIELD, NOT THE FIRST ONE THAT WOULD TAKE IT.
+	 *
+	 * Taking the first match put a BSLightingShaderProperty into a BSTriShape's
+	 * `Skin`, because that Ref's declared type is broad enough to accept anything
+	 * and it comes earlier in the block than `Shader Property` does. Measured, in
+	 * exactly those words, by asking the program which field it had chosen.
+	 *
+	 * So candidates are scored and the best wins:
+	 *   0  the field declares this exact type
+	 *   1  the field is HOLDING one of these already — the replace case, and the
+	 *      strongest evidence a field takes something short of naming it
+	 *   2  the field declares an ancestor of it, specific enough to mean something
+	 *   3  the field declares NiObject, which every block inherits and which
+	 *      therefore says nothing at all
+	 * A single-valued field beats an array at the same score: dropping a property
+	 * on a shape means THAT property, not another entry in a list.
+	 */
+	QModelIndex single, inArray;
+	QString arrayFound;
+	int singleScore = 99, arrayScore = 99;
+	std::function<void( const QModelIndex &, const QString & )> walk =
+		[&]( const QModelIndex & parent, const QString & array ) {
+		for ( int r = 0; r < nif->rowCount( parent ); r++ ) {
+			const QModelIndex cell = nif->index( r, 0, parent );
+			if ( !cell.isValid() )
+				continue;
+			if ( nif->isLink( cell ) ) {
+				const QString takes = nif->itemTempl( cell );
+				const qint32 held = nif->getLink( cell );
+				const QString holds = ( held >= 0 && nif->isValidBlockNumber( held ) )
+					? nif->itemName( nif->getBlockIndex( held ) ) : QString();
+				int score = 99;
+				if ( takes == type )
+					score = 0;
+				else if ( !holds.isEmpty() && ( holds == type || nif->inherits( type, holds ) ) )
+					score = 1;
+				else if ( !takes.isEmpty() && takes != QLatin1String( "NiObject" )
+					&& nif->inherits( type, takes ) )
+					score = 2;
+				else if ( !takes.isEmpty() && nif->inherits( type, takes ) )
+					score = 3;
+
+				if ( score < 99 ) {
+					if ( array.isEmpty() ) {
+						if ( score < singleScore ) {
+							singleScore = score;
+							single = cell;
+						}
+					} else if ( score < arrayScore ) {
+						arrayScore = score;
+						inArray = cell;
+						arrayFound = array;
+					}
+				}
+			}
+			walk( cell, nif->isArray( cell ) ? nif->itemName( cell ) : array );
+		}
+	};
+	walk( nif->getBlockIndex( owner ), QString() );
+
+	if ( single.isValid() && singleScore <= arrayScore )
+		return single;
+	if ( inArray.isValid() && arrayName )
+		*arrayName = arrayFound;
+	return inArray.isValid() ? inArray : single;
+}
+
+/*! WW_BLOCKDND_TEST: which field a typed drop would write, as text.
+ *
+ *  So a harness can see the choice rather than only its effect — "the shape's
+ *  Shader Property did not change" does not say whether the wrong field was
+ *  picked, the right one was picked and the write failed, or nothing was found.
+ */
+QString wwFieldAcceptingName( const NifModel * nif, qint32 owner, qint32 block )
+{
+	QString array;
+	const QModelIndex cell = wwFieldAccepting( nif, owner, block, &array );
+	if ( !cell.isValid() )
+		return QStringLiteral( "<none>" );
+	return array.isEmpty()
+		? nif->itemName( cell )
+		: QStringLiteral( "%1[] (array)" ).arg( array );
+}
+
 QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode,
 	int position )
 {
@@ -542,9 +737,34 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
 		if ( mode == WwReparentMode::Link )
 			return QCoreApplication::translate( "Reparent",
 				"Linking needs a parent to link into." );
-		if ( wwParentsOf( nif, block ).isEmpty() )
+		// held by a typed link counts as held: a shader property's owner points at
+		// it through `Shader Property`, and answering "already a root" to that was
+		// simply false
+		if ( wwParentsOf( nif, block ).isEmpty() && wwHoldersOf( nif, block ).isEmpty() )
 			return QCoreApplication::translate( "Reparent",
 				"%1 is already a root — it has no parent to leave." ).arg( nif->itemName( iBlock ) );
+		return QString();
+	}
+
+	/* NOT A SCENE OBJECT? THEN IT GOES IN A FIELD, NOT IN Children.
+	 *
+	 * A BSLightingShaderProperty belongs to its shape through `Shader Property`, a
+	 * BSShaderTextureSet to its property through `Texture Set`. Those are as much
+	 * ownership as an array called Children is, and dropping one on a block that
+	 * has a field for it means exactly what dropping a shape on a node means.
+	 *
+	 * Checked before the NiNode rules below, because those are about Children and
+	 * would refuse every one of these on the way past.
+	 */
+	if ( !nif->blockInherits( iBlock, "NiAVObject" ) ) {
+		if ( block == newParent )
+			return QCoreApplication::translate( "Reparent", "A block cannot be its own parent." );
+		QString array;
+		if ( !wwFieldAccepting( nif, newParent, block, &array ).isValid() )
+			return QCoreApplication::translate( "Reparent",
+				"%1 has no field that takes a %2." )
+				.arg( nif->itemName( iParent.isValid() ? iParent : iBlock ),
+					nif->itemName( iBlock ) );
 		return QString();
 	}
 
@@ -680,6 +900,34 @@ int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newPa
 
 	nifSnapshotOp( nif, what, [&]() {
 		for ( const Move & move : std::as_const( moves ) ) {
+			/* A BLOCK HELD BY A FIELD RATHER THAN BY Children.
+			 *
+			 * Properties, texture sets, controllers, extra data: their owner points
+			 * at them through a named Ref, so leaving one means clearing that Ref
+			 * and joining a new one means writing it. Neither is a Children rebuild,
+			 * and none of the transform work below applies — a property has no
+			 * place in the world to preserve.
+			 *
+			 * Dropped on a block with a single-valued field, it REPLACES what was
+			 * there, which is what a single-valued field means and what dropping a
+			 * shader property on a shape looks like it should do.
+			 */
+			if ( !nif->blockInherits( nif->getBlockIndex( move.block ), "NiAVObject" ) ) {
+				if ( mode != WwReparentMode::Link )
+					wwDetachHolders( nif, move.block );
+				if ( newParent >= 0 ) {
+					QString array;
+					const QModelIndex cell = wwFieldAccepting( nif, newParent, move.block, &array );
+					if ( cell.isValid() ) {
+						if ( array.isEmpty() )
+							nif->setLink( cell, move.block );
+						else
+							addLink( nif, nif->getBlockIndex( newParent ), array, move.block );
+					}
+				}
+				continue;
+			}
+
 			/* REBUILT, not blanked. Dropping a link leaves Num Children still
 			 * claiming the entry and the entry pointing at nothing, which is
 			 * exactly the dangling child link the Issue Manager reports.

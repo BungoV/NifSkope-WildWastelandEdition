@@ -4187,6 +4187,25 @@ static WwReparentMode blockListDropMode( Qt::KeyboardModifiers mods )
 	return WwReparentMode::PreserveWorld;
 }
 
+/*! The drop actions a Block List drag OFFERS, and every target must answer with
+ *  one of them.
+ *
+ *  Qt refuses a drop whose action is not in this mask, before any handler's
+ *  verdict counts — so a target answering CopyAction while this said Move|Link
+ *  got a no-drop cursor and never received a QDropEvent at all. That is what made
+ *  the Collision Manager unreachable by a real mouse drag while its harness,
+ *  which builds events by hand and never negotiates with exec(), passed thirty
+ *  checks over it.
+ *
+ *  Named rather than written inline at the exec() call so a harness can assert
+ *  that what a target answers is something this actually permits. Any new target
+ *  wanting an action outside this mask has to widen it here.
+ */
+Qt::DropActions wwBlockListDragActions()
+{
+	return Qt::MoveAction | Qt::LinkAction | Qt::CopyAction;
+}
+
 bool NifSkope::startBlockListDrag()
 {
 	if ( !nif || !list || !list->selectionModel() )
@@ -4224,6 +4243,8 @@ bool NifSkope::startBlockListDrag()
 
 	// No drag pixmap: the card carries the name, and a second ghost trailing the
 	// cursor alongside it is the same information drawn twice.
+	//
+	// (the action mask this drag offers lives in wwBlockListDragActions, below)
 	auto * drag = new QDrag( list );
 	drag->setMimeData( mime );
 
@@ -4248,7 +4269,22 @@ bool NifSkope::startBlockListDrag()
 	}
 	blockListDragTicker->start( 16 );
 
-	drag->exec( Qt::MoveAction | Qt::LinkAction, Qt::MoveAction );
+	/* COPY IS IN THE MASK, and leaving it out is what made the Collision Manager
+	 * unreachable by a real drag.
+	 *
+	 * Qt will not let a drop happen with an action the drag does not support. The
+	 * Collision Manager answers every mesh it would take with CopyAction — the
+	 * honest verdict, since a mesh dropped there becomes collision rather than
+	 * moving anywhere — and with the mask at Move|Link that verdict was simply not
+	 * permitted: no-drop cursor, and NO QDropEvent delivered at all. The panel's
+	 * whole handler was unreachable.
+	 *
+	 * The harness could not see it because it builds its events by hand and never
+	 * negotiates with exec(), so thirty checks passed over a path no mouse could
+	 * enter. The default action is unchanged, so block-to-block drops behave
+	 * exactly as before.
+	 */
+	drag->exec( wwBlockListDragActions(), Qt::MoveAction );
 
 	blockListDragTicker->stop();
 	blockListDragOwner = nullptr;

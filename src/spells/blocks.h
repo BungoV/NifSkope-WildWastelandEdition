@@ -221,6 +221,10 @@ enum class WwReparentMode
 QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode,
 	int position = -1 );
 
+//! WW_BLOCKDND_TEST: which field a typed drop would write, as text, or "<none>".
+//! So a harness can see the CHOICE and not only its effect.
+QString wwFieldAcceptingName( const NifModel * nif, qint32 owner, qint32 block );
+
 /*! Re-parent blocks under `newParent`, as ONE undo step.
  *
  *  Every world transform is read BEFORE anything is written. Node transforms are

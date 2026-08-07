@@ -8125,6 +8125,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	//! The aiming device a mesh drop uses: which body is under a point in the
 	//! PANEL's own coordinates, asked of the panel rather than worked out again.
 	extern qint32 wwCollisionBodyAtPanelPoint( QMainWindow * mw, const QPoint & panelPos );
+	//! Whether the panel's create hook is wired — a null one does nothing, quietly.
+	extern bool wwCollisionCreateWired( QMainWindow * mw );
 	//! Which rigid body holds a shape, and whether through a list.
 	extern qint32 tlBodyHoldingShape( const NifModel * nif, qint32 shape, qint32 * throughList );
 	//! Merging everything a body holds into one mesh shape, and why it cannot be.
@@ -8303,6 +8305,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					check( "the Collision Manager is accepting drops",
 						wwDeliverCollisionDrop( skope, nullptr ) );
+					/* AND ITS CREATE HOOK IS WIRED. A null hook makes the drop accept
+					 * the payload, say nothing and do nothing — which reads exactly
+					 * like a create that ran and produced no collision. Asked
+					 * separately so the log can tell those two apart on sight.
+					 */
+					check( "...and its create hook is wired", wwCollisionCreateWired( skope ) );
 
 					// what the block list would hand over for those rows
 					auto payloadFor = [&]( const QList<qint32> & blocks ) {
@@ -8338,6 +8346,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::processEvents();
 						delete mime;
 					}
+					// the panel says what it did before it does it; if this is empty the
+					// drop never reached the create at all
+					log << "the panel's own account of the first drop: \""
+						<< skope->statusBar()->currentMessage() << "\"\n";
 					log << "after dropping one mesh: " << bodies() << " bodies, "
 						<< shapesOfType( "bhkBoxShape" ) << " box shapes\n";
 					check( "dropping one mesh makes one body", bodies() == bodiesWas + 1 );
@@ -10067,6 +10079,73 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< " over " << drops << " drops\n";
 					check( "every drop went through the view's drag overrides",
 						drops > 0 && deliveries == drops * 2 );
+
+					/* A PROPERTY AND A TEXTURE SET CAN BE MOVED.
+					 *
+					 * Neither is an NiAVObject, so neither is in anybody's Children —
+					 * their owners point at them through `Shader Property` and
+					 * `Texture Set`. The drag only understood Children, so both were
+					 * immovable, and dragging one to blank space answered "already a
+					 * root", which was false.
+					 *
+					 * Two directions here, and the second is the one that matters: OUT
+					 * (the owner's field is cleared and it really is a root) and ONTO
+					 * ANOTHER SHAPE (the field is written, replacing what was there).
+					 * A drag that only detached would pass a check that just counted
+					 * roots.
+					 */
+					{
+						qint32 texSet = -1, property = -1, otherShape = -1;
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							const QModelIndex idx = nif->getBlockIndex( b );
+							if ( texSet < 0 && nif->blockInherits( idx, "BSShaderTextureSet" ) )
+								texSet = b;
+							if ( property < 0 && nif->blockInherits( idx, "BSLightingShaderProperty" ) )
+								property = b;
+						}
+						// a SECOND shape to move the property onto
+						for ( int b = 0; b < nif->getBlockCount() && otherShape < 0; b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" )
+								&& nif->getLink( nif->getBlockIndex( b ), "Shader Property" ) != property )
+								otherShape = b;
+						log << "texture set " << texSet << ", property " << property
+							<< ", a shape to move it onto: " << otherShape << "\n";
+						check( "the fixture has a property and a texture set",
+							texSet >= 0 && property >= 0 );
+
+						if ( texSet >= 0 && property >= 0 ) {
+							check( "neither is a scene object, which is why they were stuck",
+								!nif->blockInherits( nif->getBlockIndex( texSet ), "NiAVObject" )
+								&& !nif->blockInherits( nif->getBlockIndex( property ), "NiAVObject" ) );
+							check( "dragging a texture set OUT is no longer refused",
+								wwReparentRefusal( nif, texSet, -1,
+									WwReparentMode::PreserveWorld, -1 ).isEmpty() );
+
+							const QPersistentModelIndex pProperty = nif->getBlockIndex( property );
+							wwReparentBlocks( nif, { texSet }, -1, WwReparentMode::PreserveWorld );
+							check( "...and afterwards nothing points at it",
+								nif->getLink( QModelIndex( pProperty ), "Texture Set" ) != texSet );
+
+							if ( otherShape >= 0 ) {
+								const qint32 prop = nif->getBlockNumber( QModelIndex( pProperty ) );
+								log << "the field a drop on shape " << otherShape << " would write: "
+									<< wwFieldAcceptingName( nif, otherShape, prop ) << "\n";
+								const QPersistentModelIndex pShape = nif->getBlockIndex( otherShape );
+								check( "dropping a property on another shape is offered",
+									wwReparentRefusal( nif, prop, otherShape,
+										WwReparentMode::PreserveWorld, -1 ).isEmpty() );
+								wwReparentBlocks( nif, { prop }, otherShape,
+									WwReparentMode::PreserveWorld );
+								log << "the shape's Shader Property is now "
+									<< nif->getLink( QModelIndex( pShape ), "Shader Property" )
+									<< ", the property is block "
+									<< nif->getBlockNumber( QModelIndex( pProperty ) ) << "\n";
+								check( "...and that shape's Shader Property is the one dropped on it",
+									nif->getLink( QModelIndex( pShape ), "Shader Property" )
+										== nif->getBlockNumber( QModelIndex( pProperty ) ) );
+							}
+						}
+					}
 
 					/* CLICKING A CHILD BLOCK SELECTS THAT BLOCK.
 					 *

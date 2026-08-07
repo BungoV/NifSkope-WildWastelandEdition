@@ -1,5 +1,57 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08 — Properties can be dragged, and the Collision Manager can be dropped on
+
+### A mesh dragged into the Collision Manager now lands on the body you aim at
+
+Two faults stacked, and neither could be seen by a harness.
+
+**The action mask.** `drag->exec( Qt::MoveAction | Qt::LinkAction, … )` did not
+include `CopyAction`, and the Collision Manager answers every mesh it would take
+with `CopyAction`. Qt refuses an action the drag does not offer — so the no-drop
+cursor showed and **no `QDropEvent` was delivered at all**. The panel's entire
+handler was unreachable by a mouse. The collision tree's own drag had the mirror
+of it (`exec(Move)` while the Block List answers `Copy`), so the shape-back-to-
+geometry direction was equally dead. The mask is now a named function,
+`wwBlockListDragActions`, so a target's answer can be checked against what the
+drag actually permits.
+
+**The tree covers the bodies.** The inventory tree is a child widget that accepts
+drops, so while the pointer is over a body row Qt delivers to the TREE, not the
+panel behind it — and the tree only understood collision-shape payloads. A mesh
+was refused over every body and accepted only over the panel's bare furniture
+below them: exactly inverted, with no body highlight because the panel never saw
+the drag. The tree now hands payloads it does not understand to the panel at the
+panel's own coordinates, so the body targeting and the highlight are the ones
+that were already written.
+
+### Properties, texture sets and the other 492 block types can be moved
+
+The Block List drag modelled parenting as the `Children` array, so only the 71
+`NiAVObject` types could move. Now a block held by a **typed link** moves too: its
+owner's field is cleared when it is dragged out, and written when it is dropped
+on something that has a field for it — replacing what was there, which is what a
+single-valued field means.
+
+Which field is decided by the FORMAT, not a table: every link cell declares what
+it accepts and the model knows what inherits what. The first attempt took the
+first field that would accept the block and put a shader property into a
+BSTriShape's **`Skin`**, whose declared type is broad enough to take anything and
+which comes earlier in the block. Candidates are scored now — exact type, then
+"already holding one of these", then a meaningful ancestor, then `NiObject`,
+which says nothing — and a single-valued field beats an array at equal score.
+
+### Corrections
+
+`collision_drop.sh` was red for an hour and I chased it through three wrong
+answers — the shape-type setting, monitor placement, qmake configuration. It was
+a **stale binary**: an earlier link had failed with "Permission denied" while a
+NifSkope straggler held the exe, so every hypothesis was tested against a program
+that was not the source. This repository already has that written down as the
+first thing to rule out. It also now has a check for the thing that made the
+symptom so unreadable — whether the panel's create hook is wired at all, since a
+null one accepts the drop, says nothing and does nothing.
+
 ## 2026-08-07zb — 0.3: merge collision shapes, and an audit of what cannot be dragged
 
 ### Merge Shapes into One Mesh

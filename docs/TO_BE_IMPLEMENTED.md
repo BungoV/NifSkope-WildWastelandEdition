@@ -1,6 +1,36 @@
 # NifSkope — WW Edition: To Be Implemented
 
-## The Block List can drag 71 block types of 563 — OPEN, 2026-08-07zb
+## Live decimation has no operator panel — OPEN, 2026-08-08
+
+Every other live operator arms a Blender-style redo panel through
+`armOperatorPanelEx` — Move, Merge by Distance, Extrude, Fill, Bridge, Edge
+Slide — so the parameter can be scrubbed after the fact with the operation
+re-running underneath. Decimation offers nothing of the kind.
+
+The pieces exist but are not connected to each other. `spSimplifyAllBSTriShapes`
+(fileextract.cpp, upstream) simplifies whole files as a batch spell with no ratio
+exposed, and the Collision Manager's preview decimates to a keep-percentage
+(`CollisionManager/Preview/Ratio`, `showCollisionPreview( 1, keep )`) for
+collision only. Neither is a per-shape operator over the current selection.
+
+**What it needs**: the simplifier reached with a ratio for ONE shape, wrapped as
+an undo macro, then `lastOpExRerun` set and `armOperatorPanelEx( tr( "Decimate" ),
+… )` armed with a Float ratio parameter — the same shape as `mergeVertices`'
+"Merge Distance" panel, which is the closest working model to copy.
+
+## ~~The Block List can drag 71 block types of 563~~ — FIXED 2026-08-08
+
+**Blocks held by a typed link move now.** Dragged out, the owner's field is
+cleared; dropped on a block with a field for it, the field is written, replacing
+what was there. The field is chosen by scoring what the format declares rather
+than from a table — see `wwFieldAccepting`, and note the `Skin` trap recorded in
+the change log: taking the FIRST field that would accept a block is wrong,
+because some Refs declare a type broad enough to accept anything.
+
+Checked in `block_dragdrop.sh` with a texture set and a shader property, in both
+directions. What remains of the original entry is below, for the reasoning.
+
+## The Block List can drag 71 block types of 563 — was OPEN, 2026-08-07zb
 
 Found by trying to drag a `BSLightingShaderProperty` out of its parent, which is
 not about those two types at all.
