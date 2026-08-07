@@ -38,27 +38,77 @@ and it is **not** a crash and **not** heap corruption. What is established:
   outside that is indistinguishable from a crash. That is the instrument the
   earlier "36 runs, no death" claim was made with, and why it was wrong.
 - **List mode only.** Hierarchy is 4-5 seconds every time, dozens of runs.
-- **Where.** After the F2 shortcut is found and animations are forced off, in the
-  `expandAll` / `setCurrentIndex` / F2 region. `NifSkope::select()` runs to
-  completion — `select/emit currentNifIndexChanged` logs, and the slot behind it
-  reaches "details filter done" — so the block is in the harness's own bare
-  `QApplication::processEvents()` afterwards, with `ww_perf_test.log` filling
-  with `drawGrid` pairs for as long as it lasts. A queue that never empties.
 - **Not the persisted animation setting**, though that was the obvious suspect
   and `GLView/Enable Animations` was indeed left true. Forcing it off is right on
-  its own merits — a harness must force the state it measures — and it is done
-  now, and it changed nothing: still 7 of 10.
+  its own merits — a harness must force the state it measures — and it changed
+  nothing: **4 of 8** on the current binary with it forced off.
 - **Not a stale incremental build** (7 of 10 on a from-scratch `make clean`
   build), **not the IPC port** (6 of 10 with a unique port per run), and not
   contention with anything else running.
 
-**Next**: find what keeps posting into the queue. `processEvents(AllEvents, 100)`
-in the harness would make it robust regardless, but that hides it rather than
-answering it — and if the viewport really does spin forever posting updates then
-a user sitting in list mode is burning a core for nothing, which is the version
-of this that matters. The `WW_PERF_TEST` markers in `select()` and in the
-`currentNifIndexChanged` lambda are in place and are how the above was narrowed;
-add one inside the GL update path next.
+### Narrowed 2026-08-07x, and two earlier readings withdrawn
+
+The harness now runs a **bounded pump** (`processEvents` with a 4-second
+deadline) at each step, logging what it saw, and each statement around the
+suspect region logs before and after. On a hung run the log stops at a precise
+place, and that place is not where it was thought to be:
+
+- **`expandAll` is not it**: 5 ms, leaving 163 visible rows, every run.
+- **`setCurrentIndex` is not it** either: it logs "returned".
+- **The pump after it never comes back**, though its deadline is four seconds.
+  A deadline is only looked at *between* events, so what this says is that a
+  single event's handler never returns.
+- **Not a repaint storm.** Frames are now COUNTED either side of each pump
+  (`wwGlPaintCount`, in glview.cpp): one or two frames, 0–1 ms of painting.
+  The earlier reading — "`ww_perf_test.log` filling with `drawGrid` pairs, a
+  queue that never empties" — was mostly the instrument. That trace opens and
+  appends to a file **inside every frame**, and it sat under `WW_PERF_TEST`, the
+  flag you reach for when something is slow. It has its own variable now
+  (`WW_GRID_TRACE`), which is the general lesson: never leave a per-frame file
+  write under the flag used to measure slowness.
+- **Not a modal dialog or any other nested event loop.** A 1.5-second watchdog
+  timer, armed before the pump and writing its own file, logs **nothing at all**
+  across a 60-second hang. Timer events are dispatched inside a nested loop and
+  are not dispatched inside a stuck handler, so this rules the nested loop out
+  and rules a genuinely stuck handler in.
+
+**Next**: a stack. That is the one thing never taken — the earlier gdb work asked
+whether it *faulted*, not what it was *doing*. A catcher is written and works
+(`scratchpad/stack_hang.sh`: launch, wait 25 s, attach `gdb -batch -ex "thread
+apply all bt"` if the process is still alive); it simply did not catch a hang in
+four attempts, and 4-in-8 needs more than four. Run it with ten. `-Wl,-s` strips
+the release binary, so expect Qt DLL frames rather than ours — still enough to
+name the widget.
+
+**Not urgent, and worth saying why**: this is reachable only from the harness, at
+a point no user passes through. `setCurrentIndex` returns; the hang is in the
+program's own event processing afterwards, and a user's event loop is not a
+bounded pump — it keeps running, so the same stuck handler would show as one
+unresponsive moment rather than a dead process. It is worth the stack, not worth
+a night.
+
+## ~~Every structural edit serialises the whole file twice~~ — HALVED 2026-08-07x
+
+**The second pass is gone.** `nifSnapshotOp` no longer saves the model after the
+operation: the redo snapshot is taken at the FIRST UNDO instead, because the undo
+stack is LIFO and by the time a command is undone every command pushed after it
+has been undone too — so the model is already holding exactly the state redo has
+to restore. Nothing is given up, and the remaining cost moves off every edit and
+onto a keystroke that was going to rewrite the whole model anyway.
+
+Checked in `block_dragdrop.sh` by comparing the **saved bytes of the whole model**
+across undo and redo, twice round (the first undo is the one that captures, the
+second has to find it already there) — not by looking at the one link that moved,
+because a redo that restored the right parent and lost a transform would pass
+that and fail this.
+
+The four sites that build a `NifSnapshotCommand` by hand (rigging, timeline, two
+in unfucktools) still compute their own "after" and still pay for it. They are
+one-off operations rather than the path every structural edit takes, so they were
+left alone; the lazy constructor is there if they want it.
+
+What remains below is the original measurement, and the first paragraph of it is
+now half true.
 
 ## Every structural edit serialises the whole file twice — MEASURED 2026-08-07p
 

@@ -76,6 +76,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMouseEvent>
 #include <QScreen>
 #include <QTimer>
+#include <QElapsedTimer>
 
 namespace {
 //! A QMenu that cancels itself once the pointer moves well clear of it, so the
@@ -2508,8 +2509,30 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 }
 
 
+/*! How many frames the viewport has painted, and how long in them.
+ *
+ *  A COUNTER, DELIBERATELY, and not the per-frame file write the earlier grid
+ *  diagnostic used: opening and appending a log line inside every frame makes
+ *  painting slow enough to CAUSE the queue-never-drains hang it was brought in to
+ *  explain, so what it measured was mostly itself. Two integers cost nothing and
+ *  can be read either side of the thing under suspicion.
+ */
+static quint64 wwPaintCounter = 0;
+static qint64 wwPaintNanos = 0;
+quint64 wwGlPaintCount() { return wwPaintCounter; }
+qint64 wwGlPaintNanos() { return wwPaintNanos; }
+
 void GLView::paintGL()
 {
+	wwPaintCounter++;
+	QElapsedTimer wwPaintClock;
+	wwPaintClock.start();
+	struct WwPaintTime
+	{
+		QElapsedTimer & clock;
+		~WwPaintTime() { wwPaintNanos += clock.nsecsElapsed(); }
+	} wwPaintTime{ wwPaintClock };
+
 	/* RenderDoc capture of THIS context. Frames are numbered per paintGL so a
 	 * capture can be attributed to a frame: the pick render below bumps the same
 	 * counter, and comparing "paint" before it with "paint" after it is what

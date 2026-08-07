@@ -1279,8 +1279,10 @@ NifSkopeOpenGLContext::ShapeData::ShapeData(
 		f.glBufferData( GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr( elementDataSize ), elementData, GL_STATIC_DRAW );
 	}
 
-	// TEMP DIAGNOSTIC (WW_PERF_TEST): trace small streaming uploads (grid/axes)
-	if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) && dataHash.numVerts <= 100
+	// TEMP DIAGNOSTIC (WW_GRID_TRACE): trace small streaming uploads (grid/axes).
+	// Its own variable for the same reason as drawGrid's: a file write per upload
+	// has no business under the flag reached for when something is slow.
+	if ( qEnvironmentVariableIsSet( "WW_GRID_TRACE" ) && dataHash.numVerts <= 100
 		&& !dataHash.elementBytes ) {
 		QFile df( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
 		if ( df.open( QIODevice::Append | QIODevice::Text ) )

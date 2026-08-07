@@ -548,9 +548,17 @@ void Scene::drawGrid()
 {
 	// Draw the grid
 	NifSkope *	w;
-	// TEMP DIAGNOSTIC (WW_PERF_TEST): why does the grid skip drawing?
-	// (env read hoisted — this runs per frame)
-	static const bool wwPerfTest = qEnvironmentVariableIsSet( "WW_PERF_TEST" );
+	/* TEMP DIAGNOSTIC (WW_GRID_TRACE): why does the grid skip drawing?
+	 *
+	 * ITS OWN VARIABLE, NOT WW_PERF_TEST, and that separation is the finding.
+	 * This opens and appends to a file inside EVERY FRAME — so under the flag you
+	 * reach for when something is slow, it made painting slow enough to be taken
+	 * for the fault itself. "The perf log fills with drawGrid pairs" was read as a
+	 * repaint storm; counting frames instead shows one or two per pump.
+	 *
+	 * (env read hoisted — this runs per frame)
+	 */
+	static const bool wwPerfTest = qEnvironmentVariableIsSet( "WW_GRID_TRACE" );
 	if ( wwPerfTest ) {
 		QFile f( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) )

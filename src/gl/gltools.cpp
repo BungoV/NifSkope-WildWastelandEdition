@@ -1065,8 +1065,9 @@ void Scene::drawGrid( float s /* grid size / 2 */, int lines /* number of lines 
 	size_t	numVerts = ( size_t( lines ) + 1 ) * 4;
 	FloatVector4 *	colors = nullptr;
 	Vector3 *	positions = allocateVertexAttr( numVerts, &colors );
-	// TEMP DIAGNOSTIC (WW_PERF_TEST): why is the startup grid invisible?
-	if ( qEnvironmentVariableIsSet( "WW_PERF_TEST" ) ) {
+	// TEMP DIAGNOSTIC (WW_GRID_TRACE): why is the startup grid invisible?
+	// Its own variable, like drawGrid's — see the note there.
+	if ( qEnvironmentVariableIsSet( "WW_GRID_TRACE" ) ) {
 		QFile f( QCoreApplication::applicationDirPath() + "/ww_perf_test.log" );
 		if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
 			QTextStream ts( &f );

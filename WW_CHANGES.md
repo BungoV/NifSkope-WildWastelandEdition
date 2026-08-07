@@ -1,5 +1,42 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07y — Half the cost of every structural edit, and an instrument that lied
+
+### Undo used to save the whole file twice. Now it saves it once.
+
+Every array resize, block insertion and removal in the program goes through
+`nifSnapshotOp`, which saved the entire NIF before the operation **and again
+after** — 88 ms a time on a 512-block file, 160 on 2012.
+
+The second copy is only ever read by a **redo**, and a redo needs an undo in
+front of it. At that moment the model is already holding exactly the state redo
+has to restore, because the undo stack is LIFO: by the time a command is undone,
+everything pushed after it has been undone too. So the redo snapshot is taken
+there instead. Nothing is given up; the cost moves off every edit and onto a
+keystroke that was going to rewrite the whole model anyway.
+
+Checked by comparing the **saved bytes of the whole model** across undo and redo,
+twice round — a redo that restored the right parent and lost a transform would
+pass the obvious check and fail this one.
+
+### The perf flag was making the program slow
+
+`WW_PERF_TEST` opened and appended to a log file **inside every frame** through
+the grid tracer. That is the flag you reach for when something is slow, so it was
+distorting exactly what it was brought in to measure — and "the log fills with
+`drawGrid` pairs" got read as a repaint storm. Frames are counted now, not
+logged: one or two per step, under a millisecond of painting. The per-frame trace
+has its own variable, `WW_GRID_TRACE`.
+
+### And the list-mode hang is a different thing than it was written up as
+
+Not a repaint storm, and not a modal dialog either — a 1.5-second watchdog timer
+logs nothing at all across a 60-second hang, and timer events *do* run inside a
+nested loop. So it is one event handler that never returns. It is also not the
+animation setting, which was the last writeup's answer: 4 runs in 8 still hang
+with it forced off. Narrowed to a precise statement, filed, and left there — it
+is reachable only from the harness. Details in `docs/TO_BE_IMPLEMENTED.md`.
+
 ## 2026-08-07x — The check that was missing, and the bug it found
 
 Yesterday's body-targeted mesh drop shipped without a check of its own: the

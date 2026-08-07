@@ -8127,6 +8127,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	extern qint32 wwCollisionBodyAtPanelPoint( QMainWindow * mw, const QPoint & panelPos );
 	//! Which rigid body holds a shape, and whether through a list.
 	extern qint32 tlBodyHoldingShape( const NifModel * nif, qint32 shape, qint32 * throughList );
+	//! Defined in glview.cpp: frames painted, and nanoseconds spent painting them.
+	//! A counter rather than a per-frame log line, which distorted what it measured.
+	extern quint64 wwGlPaintCount();
+	extern qint64 wwGlPaintNanos();
 
 	/*! The two item roles the drop harness reads off an inventory row.
 	 *
@@ -10023,6 +10027,59 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< " over " << drops << " drops\n";
 					check( "every drop went through the view's drag overrides",
 						drops > 0 && deliveries == drops * 2 );
+
+					/* UNDO, THEN REDO, AND THE FILE COMES BACK BYTE FOR BYTE.
+					 *
+					 * The redo snapshot is no longer taken when the edit happens. It
+					 * is taken at the FIRST UNDO, because the undo stack is LIFO and
+					 * by then the model is holding exactly the state redo has to
+					 * restore — which halves the cost of every structural edit in the
+					 * program, measured at 88 ms a time on a 512-block file and 160 on
+					 * 2012.
+					 *
+					 * That is the kind of saving nothing notices until a redo comes
+					 * back subtly wrong, so this compares the SAVED BYTES of the whole
+					 * model, not the one link that moved. A redo that restored the
+					 * right parent and lost a transform, a name or a block ordering
+					 * would pass the obvious check and fail this one.
+					 */
+					{
+						auto bytes = [&]() {
+							QByteArray out;
+							QBuffer buf( &out );
+							buf.open( QIODevice::WriteOnly );
+							nif->save( buf );
+							return out;
+						};
+						const qint32 mover = nif->getBlockNumber(
+							nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
+						nif->assignString( nif->getBlockIndex( mover ), "Name",
+							QStringLiteral( "UndoRedoSubject" ) );
+						addLink( nif, nif->getBlockIndex( root ), "Children", mover );
+
+						const QByteArray wasBefore = bytes();
+						wwReparentBlocks( nif, { mover }, nodeB, WwReparentMode::PreserveWorld );
+						const QByteArray wasAfter = bytes();
+						log << "undo/redo subject: block " << mover << ", " << wasBefore.size()
+							<< " bytes before the move, " << wasAfter.size() << " after\n";
+						check( "the move to undo actually changed the file",
+							wasAfter != wasBefore && nif->getParent( mover ) == nodeB );
+
+						nif->undoStack->undo();
+						const QByteArray undone = bytes();
+						check( "undo puts the file back exactly as it was", undone == wasBefore );
+
+						nif->undoStack->redo();
+						const QByteArray redone = bytes();
+						check( "and redo puts it back exactly as the move left it",
+							redone == wasAfter );
+
+						// twice, because the first undo is the one that captures the
+						// redo state and the second has to find it already there
+						nif->undoStack->undo();
+						nif->undoStack->redo();
+						check( "...and again, on a second round trip", bytes() == wasAfter );
+					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -10166,23 +10223,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "the app started in the mode under test", isHierarchy == wantHierarchy );
 						if ( isHierarchy != wantHierarchy ) break;
 
-						/* ANIMATIONS OFF, and this is what the flat list was filed for.
+						/* ANIMATIONS OFF, which is right on its own merits and is NOT
+						 * the fix it was once written up as.
 						 *
-						 * "The flat list intermittently takes the process down" was
-						 * this: with `GLView/Enable Animations` left true in the
-						 * registry — the user's own setting, which this harness
-						 * inherited — the viewport schedules a new frame from inside
-						 * every frame it draws, so a bare processEvents() has a queue
-						 * that never empties and never returns. The run sat there
-						 * until the script's 60-second deadline killed it, which
-						 * reads exactly like a crash from outside: measured 7 of 10,
-						 * against 4-second runs when it did return, with the perf log
-						 * filling with drawGrid pairs the whole time.
-						 *
-						 * It is not heap corruption, it is not the flat list, and it
-						 * is not the program: it is this harness inheriting a setting
-						 * instead of forcing it. Which is the rule in HANDOFF.md, and
-						 * the same setting that broke a green suite once before.
+						 * A harness must force the state it measures rather than
+						 * inherit it, and `GLView/Enable Animations` was indeed left
+						 * true in the registry. But forcing it off changed nothing:
+						 * measured again on the current binary, 4 runs in 6 still did
+						 * not finish, at 64 seconds against 4 for the ones that did.
+						 * The claim that this was the cause is withdrawn; the trail is
+						 * in the backlog under "block_rename.sh in list mode HANGS".
 						 *
 						 * List mode only because select() runs its whole body for a
 						 * NifModel index and returns early for a proxy one, so only
@@ -10191,17 +10241,153 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						if ( skope->ui->aAnimate->isChecked() )
 							skope->ui->aAnimate->trigger();
 						QApplication::processEvents();
-						check( mode + ": animations are off, so processEvents can finish",
-							!skope->ui->aAnimate->isChecked() );
+						check( mode + ": animations are off", !skope->ui->aAnimate->isChecked() );
+
+						/* A BOUNDED PUMP THAT SAYS WHAT IT SAW.
+						 *
+						 * A bare processEvents() returns when the queue is empty, so
+						 * if events are posted faster than they are drained it never
+						 * returns at all — and from outside the script that is
+						 * indistinguishable from a crash, which is exactly the wrong
+						 * turning this was sent down once already.
+						 *
+						 * Bounded, so a hang becomes a report. And it counts FRAMES
+						 * either side, because the two candidate explanations look
+						 * identical from a stopped process and completely different
+						 * here: a repaint storm posting thousands of frames, versus a
+						 * 60 Hz timer whose interval is simply shorter than one pass
+						 * through the queue, which refills it forever without anything
+						 * being wrong per frame.
+						 */
+						/* A WATCHDOG THAT RUNS INSIDE THE HANG.
+						 *
+						 * The pump has a four-second deadline and does not come back
+						 * from it, which leaves exactly two shapes: either one event's
+						 * handler never returns — a plain infinite loop, no events
+						 * dispatched, nothing else can run — or something entered a
+						 * NESTED event loop, a modal dialog being the usual way, and
+						 * the deadline is never even looked at because the pass it
+						 * belongs to never finishes.
+						 *
+						 * A timer tells those apart on its own: timer events are
+						 * dispatched inside a nested loop and are not dispatched inside
+						 * a stuck handler. So if this log has lines in it, it is a
+						 * nested loop and they say what is on screen; if it is empty,
+						 * it is a handler that never returns.
+						 *
+						 * It captures nothing from here and writes its own file, so it
+						 * stays safe if it outlives the scope that armed it.
+						 */
+						QTimer * watchdog = new QTimer( skope );
+						watchdog->setInterval( 1500 );
+						QObject::connect( watchdog, &QTimer::timeout, skope, []() {
+							QFile f( QApplication::applicationDirPath()
+								+ "/ww_blockrename_watchdog.log" );
+							if ( !f.open( QIODevice::Append | QIODevice::Text ) )
+								return;
+							QTextStream ts( &f );
+							QWidget * modal = QApplication::activeModalWidget();
+							QWidget * popup = QApplication::activePopupWidget();
+							ts << "tick: modal="
+								<< ( modal ? modal->metaObject()->className() : "none" )
+								<< " \"" << ( modal ? modal->windowTitle() : QString() ) << "\""
+								<< ", popup=" << ( popup ? popup->metaObject()->className() : "none" )
+								<< ", visible tops:";
+							for ( QWidget * top : QApplication::topLevelWidgets() )
+								if ( top->isVisible() )
+									ts << " " << top->metaObject()->className()
+										<< "(" << top->windowTitle().left( 30 ) << ")";
+							ts << "\n";
+						} );
+						watchdog->start();
+
+						/* AND IT IS PROVEN TO BARK BEFORE ITS SILENCE IS READ AS
+						 * EVIDENCE. An instrument that never fires is silent for the
+						 * same reason a stuck program is, and reading the first as the
+						 * second is how this investigation went wrong twice already.
+						 * So: spin a real event loop for longer than one interval and
+						 * require a line out of it.
+						 */
+						{
+							QFile::remove( QApplication::applicationDirPath()
+								+ "/ww_blockrename_watchdog.log" );
+							QEventLoop spin;
+							QTimer::singleShot( 1800, &spin, &QEventLoop::quit );
+							spin.exec();
+							QFile barked( QApplication::applicationDirPath()
+								+ "/ww_blockrename_watchdog.log" );
+							check( mode + ": the watchdog fires while events are dispatched",
+								barked.exists() && barked.size() > 0 );
+						}
+
+						auto pump = [&]( const char * where ) {
+							const quint64 wasPaints = wwGlPaintCount();
+							const qint64 wasNanos = wwGlPaintNanos();
+							QElapsedTimer t;
+							t.start();
+							QApplication::processEvents( QEventLoop::AllEvents,
+								QDeadlineTimer( 4000 ) );
+							const qint64 took = t.elapsed();
+							const quint64 frames = wwGlPaintCount() - wasPaints;
+							log << "   pump " << where << ": " << took << " ms, " << frames
+								<< " frames (" << ( ( wwGlPaintNanos() - wasNanos ) / 1000000 )
+								<< " ms painting)" << ( took >= 4000 ? "  <- DID NOT DRAIN" : "" )
+								<< "\n";
+							log.flush();
+							return took < 4000;
+						};
 
 						const QString before = nif->resolveString( nif->getBlockIndex( node ), "Name" );
-						list->expandAll();
-						QApplication::processEvents();
 
-						list->setCurrentIndex( rowFor( node, 0 ) );
-						QApplication::processEvents();
+						/* HOW BIG expandAll LEAVES THE VIEW, which is the difference
+						 * between the two modes and the first thing to rule in or out.
+						 *
+						 * The flat list is only flat at the top: every block still has
+						 * its whole field tree under it, so expandAll opens far more
+						 * rows here than the hierarchy of blocks ever does — and
+						 * anything the view then does per visible row (scrolling to
+						 * one, for a start) is paid over all of them.
+						 *
+						 * The count is capped, because a diagnostic that can itself
+						 * take minutes is the mistake this whole trail is made of.
+						 */
+						QElapsedTimer expandClock;
+						expandClock.start();
+						list->expandAll();
+						const qint64 expandMs = expandClock.elapsed();
+						int visibleRows = 0;
+						QElapsedTimer walkClock;
+						walkClock.start();
+						for ( QModelIndex i = list->model()->index( 0, 0 );
+							i.isValid() && walkClock.elapsed() < 2000; i = list->indexBelow( i ) )
+							visibleRows++;
+						log << "   expandAll took " << expandMs << " ms, leaving " << visibleRows
+							<< " visible rows"
+							<< ( walkClock.elapsed() >= 2000 ? " (the count gave up at 2 s)" : "" )
+							<< "\n";
+						log.flush();
+						bool drained = pump( "after expandAll" );
+
+						/* SPLIT, BECAUSE THE PUMP CLEARED setCurrentIndex OF IT.
+						 *
+						 * With the pumps in, a hung run logs "after expandAll" and then
+						 * nothing — so it is not the processEvents afterwards, which
+						 * would have returned at its deadline and said so. It is this
+						 * statement, or the row lookup in front of it, and those are
+						 * different answers: one is the view, the other is the model.
+						 */
+						log << "   resolving the row\n";
+						log.flush();
+						const QModelIndex wantRow = rowFor( node, 0 );
+						log << "   row resolved (valid " << wantRow.isValid() << "), setting current\n";
+						log.flush();
+						list->setCurrentIndex( wantRow );
+						log << "   setCurrentIndex returned\n";
+						log.flush();
+						drained = pump( "after setCurrentIndex" ) && drained;
 						QMetaObject::invokeMethod( f2, "activated" );
-						QApplication::processEvents();
+						drained = pump( "after F2" ) && drained;
+						check( mode + ": the event queue drains", drained );
 						QLineEdit * ed = editor();
 						check( mode + ": F2 opens an inline editor on the row", ed != nullptr );
 						if ( !ed ) break;
