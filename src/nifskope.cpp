@@ -3942,6 +3942,9 @@ static bool blockListDragInside = false;
 //! Hover tracking for auto-expand: which row, and since when.
 static qint32 blockListHoverBlock = -1;
 static QElapsedTimer blockListHoverSince;
+//! Branches THIS DRAG opened by hovering. A drag that merely passed over a node
+//! on its way somewhere else used to leave it unfolded for good.
+static QSet<qint32> blockListAutoOpened;
 
 //! Defined below, beside the rest of the drop feedback.
 static void wwRepaintDragFeedback( NifTreeView * list );
@@ -4176,6 +4179,7 @@ bool NifSkope::startBlockListDrag()
 	blockListDragOwner = this;
 	blockListDragInside = false;
 	blockListHoverBlock = -1;
+	blockListAutoOpened.clear();
 	if ( !blockListDragTicker ) {
 		blockListDragTicker = new QTimer( qApp );
 		QObject::connect( blockListDragTicker, &QTimer::timeout, qApp, []() {
@@ -4191,6 +4195,16 @@ bool NifSkope::startBlockListDrag()
 	blockListDragTicker->stop();
 	blockListDragOwner = nullptr;
 	blockListDragInside = false;
+
+	/* Fold back whatever the hover opened. A drop of its own re-opens where the
+	 * block landed (see the deferred restore), so this only closes branches the
+	 * drag passed OVER — which had been staying open for good, turning a drag
+	 * across a file into a file that is now entirely unfolded.
+	 */
+	if ( !blockListAutoOpened.isEmpty() ) {
+		wwCollapseBlockListBranches( blockListAutoOpened );
+		blockListAutoOpened.clear();
+	}
 
 	// exec() blocks until the drop is over; a drag that ended outside the list
 	// never reaches DragLeave, so everything the drag put on screen comes down
@@ -4251,11 +4265,12 @@ qint32 NifSkope::blockListBlockAt( const QPoint & viewportPos ) const
 }
 
 qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, int * lineY,
-	int * lineFrom ) const
+	int * lineFrom, bool * unparent ) const
 {
 	if ( position ) *position = -1;
 	if ( lineY ) *lineY = -1;
 	if ( lineFrom ) *lineFrom = 0;
+	if ( unparent ) *unparent = false;
 	if ( !nif || !list )
 		return -1;
 
@@ -4269,6 +4284,14 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	 * The last row is found by walking back up from the drop point, which also
 	 * gives the insertion line somewhere to sit.
 	 */
+	/* THE BLANK SPACE MEANS OUT, not "the end of the root's children".
+	 *
+	 * It used to append to the root, which is still INSIDE it — so there was no
+	 * gesture anywhere for lifting a block out of its parent altogether. Outside
+	 * every row means outside every parent, which is the same answer paste gives
+	 * in that space. The end of a sibling list is still reachable: it is the
+	 * bottom half of the last sibling's own row.
+	 */
 	if ( !idx.isValid() && list->model() == proxy ) {
 		QModelIndex lastRow;
 		for ( int y = qMin( viewportPos.y(), list->viewport()->height() - 1 ); y >= 0; y -= 2 ) {
@@ -4276,19 +4299,14 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 			if ( lastRow.isValid() )
 				break;
 		}
-		const QList<int> roots = nif->getRootLinks();
-		const qint32 rootBlock = roots.size() == 1 ? qint32( roots.first() ) : qint32( -1 );
-		const QModelIndex iRoot = nif->getBlockIndex( rootBlock );
-		if ( lastRow.isValid() && iRoot.isValid() && nif->blockInherits( iRoot, "NiNode" )
-			&& nif->getIndex( iRoot, "Children" ).isValid() ) {
+		if ( unparent )
+			*unparent = true;
+		if ( lastRow.isValid() ) {
 			const QRect lr = list->visualRect( lastRow );
-			if ( position )
-				*position = int( nif->getLinkArray( iRoot, "Children" ).size() );
 			if ( lineY )
 				*lineY = lr.bottom();
 			if ( lineFrom )
-				*lineFrom = lr.left();
-			return rootBlock;
+				*lineFrom = 0;		// full width: this is not inside anything
 		}
 		return -1;
 	}
@@ -4328,9 +4346,25 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	if ( list->model() != proxy || !( above || below ) )
 		return blockListBlockAt( viewportPos );
 
+	/* THE GAP BESIDE A TOP-LEVEL ROW MEANS OUT.
+	 *
+	 * A root row has no parent to be inserted into, so this fell back to
+	 * dropping ONTO the row — and a block already inside that root could
+	 * therefore never be dragged out of it, nor above it. There is nowhere
+	 * higher to go than a root, so the gap beside one means no parent at all:
+	 * the block becomes a root of its own. Same answer the blank space gives,
+	 * and the same one paste gives there.
+	 */
 	const QModelIndex parentIdx = idx.parent();
-	if ( !parentIdx.isValid() )
-		return blockListBlockAt( viewportPos );	// a root row has no siblings to sit between
+	if ( !parentIdx.isValid() ) {
+		if ( unparent )
+			*unparent = true;
+		if ( lineY )
+			*lineY = above ? r.top() : r.bottom();
+		if ( lineFrom )
+			*lineFrom = r.left();
+		return -1;
+	}
 	const qint32 parentBlock = nif->getBlockNumber( proxy->mapTo( parentIdx ) );
 	if ( parentBlock < 0 )
 		return blockListBlockAt( viewportPos );
@@ -4406,6 +4440,7 @@ void NifSkope::wwBlockListDragTick()
 	const QModelIndex row = proxy->mapFromPrimary( nif->getBlockIndex( over ) );
 	if ( row.isValid() && proxy->rowCount( row ) > 0 && !list->isExpanded( row ) ) {
 		list->expand( row );
+		blockListAutoOpened.insert( over );	// folded back when the drag is over
 		wwRepaintDragFeedback( list );
 	}
 	blockListHoverSince.restart();		// one open per rest, not one per tick
@@ -4478,6 +4513,25 @@ void NifSkope::wwRestoreBlockListBranches( const QSet<qint32> & open, qint32 als
 				continue;
 			list->expand( idx );
 			walk( idx );	// only into what is being re-opened
+		}
+	};
+	walk( QModelIndex() );
+}
+
+void NifSkope::wwCollapseBlockListBranches( const QSet<qint32> & opened, qint32 except )
+{
+	if ( !nif || !list || list->model() != proxy || opened.isEmpty() )
+		return;
+
+	std::function<void( const QModelIndex & )> walk = [&]( const QModelIndex & parent ) {
+		for ( int row = 0; row < proxy->rowCount( parent ); row++ ) {
+			const QModelIndex idx = proxy->index( row, 0, parent );
+			if ( !list->isExpanded( idx ) )
+				continue;
+			walk( idx );	// innermost first, so collapsing a parent cannot hide one
+			const qint32 block = nif->getBlockNumber( proxy->mapTo( idx ) );
+			if ( block >= 0 && block != except && opened.contains( block ) )
+				list->collapse( idx );
 		}
 	};
 	walk( QModelIndex() );
@@ -4580,13 +4634,17 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		return false;		// not ours — a file drop still reaches the stock path
 
 	int position = -1, lineY = -1, lineFrom = 0;
+	bool unparent = false;
 	const QPoint at = e->position().toPoint();
 	// the ticker works from this: auto-scroll and auto-expand are both about the
 	// pointer NOT moving, and a DragMove is exactly what stops arriving then
 	blockListDragViewportPos = at;
 	blockListDragInside = ( event->type() != QEvent::Drop );
-	const qint32 target = blockListDropSpot( at, &position, &lineY, &lineFrom );
+	const qint32 target = blockListDropSpot( at, &position, &lineY, &lineFrom, &unparent );
 	const WwReparentMode mode = blockListDropMode( e->modifiers() );
+	// -1 means two different things: nothing to aim at, and deliberately nowhere.
+	// Only the second is a drop.
+	const bool nowhere = ( target < 0 && !unparent );
 
 	{
 		const QModelIndex hit = list->indexAt( at );
@@ -4609,7 +4667,12 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	int legal = 0;
 	QString refusal;
 	for ( const qint32 block : blocks ) {
-		const QString why = wwReparentRefusal( nif, block, target, mode, position );
+		// "nowhere to aim at" and "deliberately nowhere" are both target -1; only
+		// the second is a destination, and wwReparentRefusal cannot tell them
+		// apart because from its side they are the same argument
+		const QString why = nowhere
+			? tr( "There is nothing here to drop onto." )
+			: wwReparentRefusal( nif, block, target, mode, position );
 		if ( why.isEmpty() )
 			legal++;
 		else if ( refusal.isEmpty() )
@@ -4619,7 +4682,9 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	if ( event->type() != QEvent::Drop ) {
 		// a reorder shows the line and NOT the row fill: the parent is not what
 		// is being pointed at, the gap is
-		const bool reordering = ( legal > 0 && position >= 0 );
+		// a reorder OR a move-out shows the line and not the row fill: the gap is
+		// what is being pointed at, not any row
+		const bool reordering = ( legal > 0 && ( position >= 0 || unparent ) );
 		list->wwDropLineY = reordering ? lineY : -1;
 		list->wwDropLineFrom = lineFrom;
 		setBlockListDropTarget( ( legal > 0 && !reordering ) ? target : -1 );
@@ -4632,7 +4697,9 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 				? tr( "block %1" ).arg( target )
 				: QStringLiteral( "%1 [%2]" ).arg( name ).arg( target );
 			// Blender's wording, with its two modifiers re-cast for a NIF
-			hint = position >= 0
+			hint = unparent
+				? tr( "Move OUT — no parent, a root of its own" )
+				: position >= 0
 				? tr( "Reorder inside %1, at position %2" ).arg( into ).arg( position + 1 )
 				: mode == WwReparentMode::Link
 				? tr( "Link into %1 — keeps the old parent too" ).arg( into )
@@ -4689,13 +4756,20 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	hideBlockListDragCard();
 	blockListDropHint.clear();
 
-	// captured BEFORE the write: the proxy rebuilds on a link change and takes
-	// the whole tree's expansion with it, so a block dropped into a node ended up
-	// behind a branch that shut the moment it landed
-	const QSet<qint32> openWas = wwOpenBlockListBranches();
+	/* Captured BEFORE the write: the proxy rebuilds on a link change and takes the
+	 * whole tree's expansion with it, so a block dropped into a node ended up
+	 * behind a branch that shut the moment it landed.
+	 *
+	 * MINUS what this drag opened by hovering. Those were not open when the drag
+	 * began and the user never asked for them; re-opening them would make the
+	 * hover-expand permanent by another route.
+	 */
+	const QSet<qint32> openWas = wwOpenBlockListBranches() - blockListAutoOpened;
+	const QSet<qint32> autoOpened = blockListAutoOpened;
 
 	QStringList refusals;
-	const int moved = wwReparentBlocks( nif, blocks, target, mode, &refusals, position );
+	const int moved = nowhere ? 0
+		: wwReparentBlocks( nif, blocks, target, mode, &refusals, position );
 	wwDragLog( QStringLiteral( "  -> moved %1, refusals: %2" ).arg( moved )
 		.arg( refusals.isEmpty() ? QStringLiteral( "none" ) : refusals.join( QStringLiteral( " / " ) ) ) );
 	e->setDropAction( moved > 0
@@ -4710,7 +4784,9 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		if ( moved == 0 ) {
 			ui->statusbar->showMessage( refusals.value( 0, tr( "Nothing was moved." ) ), 5000 );
 		} else {
-			const QString what = position >= 0
+			const QString what = unparent
+				? tr( "Moved %n block(s) out — no parent now.", nullptr, moved )
+				: position >= 0
 				? tr( "Reordered %n block(s) inside block %1.", nullptr, moved )
 				: mode == WwReparentMode::Link
 				? tr( "Linked %n block(s) to block %1, keeping the old parent.", nullptr, moved )
@@ -4730,7 +4806,10 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	 */
 	if ( moved > 0 ) {
 		const qint32 landed = target;
-		QTimer::singleShot( 0, this, [this, openWas, landed]() {
+		QTimer::singleShot( 0, this, [this, openWas, autoOpened, landed]() {
+			// close what the hover opened BEFORE re-opening what the user had
+			// open, so a branch the drag merely passed over does not survive it
+			wwCollapseBlockListBranches( autoOpened, landed );
 			wwRestoreBlockListBranches( openWas, landed );
 			applyBlockListFilter();
 		} );

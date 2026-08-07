@@ -533,6 +533,21 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
 	if ( !iBlock.isValid() )
 		return QCoreApplication::translate( "Reparent", "That row has no block to move." );
 
+	/* NO PARENT AT ALL is a legal destination. Dragging a block OUT of its parent
+	 * had nowhere to go: every drop resolved to some node to go into, so a
+	 * top-level child could not be lifted to a root of its own — and the empty
+	 * space meant "the end of the root's children", which is still inside it.
+	 */
+	if ( newParent < 0 ) {
+		if ( mode == WwReparentMode::Link )
+			return QCoreApplication::translate( "Reparent",
+				"Linking needs a parent to link into." );
+		if ( wwParentsOf( nif, block ).isEmpty() )
+			return QCoreApplication::translate( "Reparent",
+				"%1 is already a root — it has no parent to leave." ).arg( nif->itemName( iBlock ) );
+		return QString();
+	}
+
 	/* ONLY A NiNode CARRIES CHILDREN, and only a NiAVObject can be one. Both
 	 * halves are checked against the file rather than assumed: "Children" is
 	 * looked up as well as the type, because a version without the array would
@@ -665,8 +680,16 @@ int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newPa
 				}
 			}
 
+			/* Unparented on purpose: the links are gone and there is nowhere to
+			 * put it back, which is the whole request. NOT a `continue` — the
+			 * transform still has to be written below, and with no parent the
+			 * compensation is the identity, so PreserveWorld writes the block's
+			 * world transform into its local and it stays exactly where it was.
+			 */
 			const QModelIndex iNew = nif->getBlockIndex( newParent );
-			if ( cursor < 0 ) {
+			if ( newParent < 0 ) {
+				// nothing to link into
+			} else if ( cursor < 0 ) {
 				addLink( nif, iNew, "Children", move.block );
 			} else {
 				QVector<qint32> kids = nif->getLinkArray( iNew, "Children" );

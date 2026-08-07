@@ -1,5 +1,40 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07m — Dragging a block OUT, and folding back what the hover opened
+
+### There was no way out
+
+Every drop resolved to some node to go *into*. A block already under the scene
+root therefore could not be lifted out of it, nor dropped above it — there is
+nothing higher than a root, so the gap beside one fell back to dropping ONTO it,
+which is where the block already was. And the blank space meant "the end of the
+root's children", which is still inside it.
+
+**No parent is a destination now.** The blank space below the rows, and the gap
+beside a top-level row, both mean *out*: the block loses every parent and becomes
+a root of its own. That is the same answer paste gives in that same space, which
+is what made the inconsistency obvious once both existed.
+
+With `PreserveWorld` the compensation against no parent is the identity, so the
+block's world transform is written into its local and it does not move — which is
+what "take it out of there" should mean.
+
+`-1` now means two different things to the drop spot — nothing to aim at, and
+deliberately nowhere — and only the second is a drop. `wwReparentRefusal` cannot
+tell them apart, because from its side they are the same argument, so the caller
+distinguishes them.
+
+### The hover-expand was permanent
+
+Auto-expand opens a branch when the pointer rests on it, so a drop can reach
+inside something folded. It never closed again: a drag that merely passed over a
+node left it open, and crossing a file left the whole file unfolded.
+
+Branches this drag opened are remembered and folded back when it ends — except
+the one the block landed in. They are also subtracted from the "what was open"
+snapshot the post-drop restore uses, or the restore would have re-opened them by
+the other route and made the hover-expand permanent anyway.
+
 ## 2026-08-07l — Deselecting only deselected half of it
 
 ### The row stayed orange

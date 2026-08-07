@@ -551,7 +551,11 @@ private:
 	 *  `lineY` comes back >= 0 for the second case so the view can draw it.
 	 */
 	qint32 blockListDropSpot( const QPoint & viewportPos, int * position, int * lineY = nullptr,
-		int * lineFrom = nullptr ) const;
+		int * lineFrom = nullptr, bool * unparent = nullptr ) const;
+	//! Close branches the drag opened by hovering, so a drag that merely passed
+	//! over a node does not leave it unfolded. `except` survives — it is where
+	//! the block landed.
+	void wwCollapseBlockListBranches( const QSet<qint32> & opened, qint32 except = -1 );
 	//! The block numbers carried by a block-list drag, or empty.
 	QList<qint32> blockListDragPayload( const QMimeData * mime ) const;
 	//! Highlight (or clear, with -1) the row a drop would land on.

@@ -8591,21 +8591,46 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "every gap the block is not already in accepts it", wrongly == 0 );
 					}
 
-					/* THE EMPTY SPACE BELOW THE ROWS. indexAt() answers nothing
-					 * there, so a drop aimed under the last row used to resolve to
-					 * no target at all and be refused — and under the last row is
-					 * exactly where you aim to put something last.
+					/* DRAGGING A BLOCK OUT. The blank space below the rows, and the
+					 * gap beside a TOP-LEVEL row, mean no parent at all — there is
+					 * nowhere higher than a root to go. Before, both resolved to
+					 * somewhere inside the root, so a block could never be lifted
+					 * out of its parent by any gesture.
 					 */
 					{
 						const QRect vp = list->viewport()->rect();
 						const QPoint empty( vp.center().x(), vp.bottom() - 2 );
 						int pos = -1;
-						const qint32 spot = skope->blockListDropSpot( empty, &pos );
+						bool out = false;
+						const qint32 spot = skope->blockListDropSpot( empty, &pos, nullptr, nullptr, &out );
 						log << "empty space at " << empty.x() << "," << empty.y()
-							<< " -> spot " << spot << " position " << pos
+							<< " -> spot " << spot << " position " << pos << " unparent " << out
 							<< " (indexAt valid: " << list->indexAt( empty ).isValid() << ")\n";
-						check( "the empty space below the rows is the end of the root's children",
-							spot == root && pos == int( childrenOf( root ).size() ) );
+						check( "the empty space below the rows means OUT, not inside the root",
+							out && spot < 0 );
+
+						// the gap beside the root row says the same thing
+						bool outTop = false;
+						const QPoint aboveRoot = rowPoint( root, -1 );
+						const qint32 topSpot = aboveRoot.x() < 0 ? 0
+							: skope->blockListDropSpot( aboveRoot, &pos, nullptr, nullptr, &outTop );
+						check( "the gap beside a top-level row means OUT too",
+							aboveRoot.x() >= 0 && outTop && topSpot < 0 );
+
+						// and it actually unparents, without moving the block
+						const Vector3 worldWas2 = worldOf( leaf ).translation;
+						QStringList why;
+						const int out1 = wwReparentBlocks( nif, { leaf }, -1,
+							WwReparentMode::PreserveWorld, &why );
+						check( "a block dropped outside loses every parent",
+							out1 == 1 && nif->getParent( leaf ) < 0
+							&& !childrenOf( root ).contains( leaf ) );
+						check( "...and does not move in the world",
+							( worldOf( leaf ).translation - worldWas2 ).length() < 1.0e-3f );
+						check( "...and is refused a second time, being already a root",
+							!wwReparentRefusal( nif, leaf, -1, WwReparentMode::PreserveWorld ).isEmpty() );
+						undo();
+						check( "undo puts it back under the root", childrenOf( root ).contains( leaf ) );
 					}
 
 					/* EVERY GAP REACHABLE. Weaker than the check above — the row
@@ -8942,6 +8967,33 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& pastedRow >= 0 && nif->getParent( pastedRow ) == nodeB );
 
 						setBlockListHoverProbe( nullptr );	// leave the app as found
+					}
+
+					/* WHAT THE HOVER OPENED, FOLDS BACK. Auto-expand opens a branch
+					 * when the pointer rests on it, so a drop can reach inside
+					 * something that was folded — but a drag that merely passed over
+					 * a node left it unfolded for good, and crossing a file left the
+					 * whole file open.
+					 */
+					{
+						list->collapse( rowFor( leaf ) );
+						QApplication::processEvents();
+						list->expand( rowFor( leaf ) );
+						check( "the hovered branch is open to begin with",
+							list->isExpanded( rowFor( leaf ) ) );
+
+						skope->wwCollapseBlockListBranches( { leaf } );
+						QApplication::processEvents();
+						check( "what the hover opened folds back when the drag ends",
+							!list->isExpanded( rowFor( leaf ) ) );
+
+						// except where the block landed: that one has to stay open
+						list->expand( rowFor( leaf ) );
+						skope->wwCollapseBlockListBranches( { leaf }, leaf );
+						QApplication::processEvents();
+						check( "...except the branch the block landed in",
+							list->isExpanded( rowFor( leaf ) ) );
+						list->collapse( rowFor( leaf ) );
 					}
 
 					/* THE DRAG LOG MUST NOT TOUCH THE TREE. It dumps every on-screen
