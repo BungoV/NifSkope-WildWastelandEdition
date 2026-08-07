@@ -997,6 +997,65 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "I: the spell is not applicable to the file it produced",
 						sp && !sp->isApplicable( &out, oShape ) );
 
+					/* L/M/N. REGENERATING the blob on the sculpt-bound output.
+					 *
+					 * Edit the rigging in a _faceBones.nif and the remap data has to
+					 * be rebuilt — but the standard-skeleton weights it is made of are
+					 * no longer in that file, so it can only come from the base head.
+					 *
+					 * The output already carries the RIGHT blob, so regenerating it
+					 * unchanged would prove nothing. It is wiped to zeros first and
+					 * that wipe is CHECKED, which is the control: without it, a spell
+					 * that did nothing at all would pass N.
+					 */
+					if ( SpellPtr gen = SpellBook::lookup(
+						QLatin1String( "Rigging/Generate CustomizationRemapData" ) ) )
+					{
+						QModelIndex oRemap;
+						for ( int link : out.getChildLinks( out.getBlockNumber( oShape ) ) ) {
+							QModelIndex e = out.getBlockIndex( link, "NiBinaryExtraData" );
+							if ( e.isValid() && out.get<QString>( e, "Name" )
+									== QStringLiteral( "CustomizationRemapData" ) ) {
+								oRemap = e;
+								break;
+							}
+						}
+						out.set<QByteArray>( oRemap, "Binary Data", QByteArray( outRemap.size(), '\0' ) );
+						check( "L: the blob can be wiped, so regenerating it proves something",
+							oRemap.isValid() && remapOf( &out, oShape ) != sourceSkin );
+
+						// with no donor marked there is nothing to rebuild it from
+						NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
+						gen->cast( &out, oShape );
+						check( "M: without a marked face donor it refuses, leaving the blob alone",
+							remapOf( &out, oShape ) != sourceSkin );
+
+						// the base head still has the standard weights: mark it and retry
+						NifModel * base = new NifModel( skope );
+						QFile bf( fname );
+						const bool baseLoaded = bf.open( QIODevice::ReadOnly ) && base->load( bf );
+						bf.close();
+						NifSkope::setWorkspaceFaceDonor( baseLoaded ? base : nullptr,
+							QFileInfo( fname ).fileName() );
+						if ( baseLoaded )
+							gen->cast( &out, oShape );
+						// the byte count of the difference, not just equal/unequal: a blob
+						// of the right SIZE and the wrong contents is the failure mode
+						// worth naming, and it is what this reported first time out
+						const QByteArray got = remapOf( &out, oShape );
+						int differing = 0;
+						for ( int i = 0; i < qMin( got.size(), sourceSkin.size() ); i++ )
+							if ( got.at( i ) != sourceSkin.at( i ) )
+								differing++;
+						log << "regenerated from the marked donor: " << got.size()
+							<< " bytes, source " << sourceSkin.size() << ", "
+							<< differing << " bytes differ\n";
+						log.flush();
+						check( "N: with the base head marked as donor it comes back exactly",
+							baseLoaded && remapOf( &out, oShape ) == sourceSkin );
+						NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
+					}
+
 					/* J/K. NewBonesData is needed exactly when the remap blob
 					 * names a bone index past the end of the bone list. Compute
 					 * that here rather than calling the shipped helper, so this

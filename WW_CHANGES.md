@@ -1,5 +1,44 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08b — A marked face donor, and CustomizationRemapData that can be rebuilt
+
+### Mark the donor once
+
+Right-click a row in **Loaded NIFs → Use as Face Donor for faceBones**. Marked
+files carry a face glyph in the slot the workspace skeleton's skull uses, drawn
+to the same rules. Every rigging step that needs a donor now takes it from the
+mark instead of asking each time, reading the in-memory state so unsaved edits in
+the donor are the ones used. The picker still handles anything unmarked.
+
+### CustomizationRemapData can be regenerated on a _faceBones.nif
+
+Edit the rigging in a `_faceBones.nif` and the remap data needs rebuilding — but
+it *is* the standard-skeleton weights, and those are no longer in that file. So
+it refused, and there was no way forward.
+
+It reads them from the **marked face donor** now: mark the base head, run
+`Generate CustomizationRemapData` on the sculpt-bound shape, and the blob comes
+back. What is checked is what the donor actually holds rather than the role it
+was marked for — a matching shape, not itself sculpt-bound, with the **same
+vertex count**, because the blob is one record per vertex in order and a
+mismatched donor would write one mesh's weights onto another's vertices and
+produce a file that loads, passes every structural check, and deforms wrongly in
+game. Ambiguity is refused with the reason rather than guessed at.
+
+### The checks, and what they caught
+
+Three, and the first exists to make the third mean something: the output's blob
+is **wiped** before regenerating, and the wipe is itself asserted — without that,
+a spell that did nothing would pass. Then: refuses with no donor marked; comes
+back **byte for byte** with the base head marked.
+
+It failed first time out, with a blob of the right size and the wrong contents —
+all zeros, i.e. the wipe untouched. The mark was being discarded the moment it
+was set, because the liveness check scanned the open and selected document lists
+and threw away any model they did not carry. `NifModel` is a `QObject`, so it is
+a `QPointer` now, which answers the question actually being asked — is it still
+alive — with no assumption about where the model is registered.
+
 ## 2026-08-08 — Properties can be dragged, and the Collision Manager can be dropped on
 
 ### A mesh dragged into the Collision Manager now lands on the body you aim at

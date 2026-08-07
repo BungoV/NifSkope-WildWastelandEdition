@@ -3087,6 +3087,80 @@ public:
 REGISTER_SPELL( spRiggingRebindReferenceSkeleton )
 
 //! Generate/update the FO4 CustomizationRemapData skin snapshot on a shape.
+/*! The shape in \a donor that carries \a shape's STANDARD-skeleton skinning.
+ *
+ *  For regenerating CustomizationRemapData on a sculpt-bound mesh: the weights
+ *  have to come from the base head, and this is what decides whether a given
+ *  donor really is that head.
+ *
+ *  MATCHED ON VERTEX COUNT, then narrowed by name. The blob is one record per
+ *  vertex in order, so equal counts is not a nicety — a donor with a different
+ *  count would write one mesh's weights onto another mesh's vertices and produce
+ *  a file that loads, passes every structural check, and deforms wrongly in game.
+ *  The name is used only to choose between several equal-count candidates, since
+ *  a head and its faceBones counterpart normally share it.
+ *
+ *  \return an invalid index and a reason in \a why when there is no honest match.
+ */
+static QModelIndex riggingStandardSkinnedCounterpart( const NifModel * donor, const NifModel * nif,
+	const QModelIndex & shape, QString * why )
+{
+	auto fail = [why]( const QString & reason ) {
+		if ( why )
+			*why = reason;
+		return QModelIndex();
+	};
+	if ( !donor || !nif || donor == nif )
+		return fail( QObject::tr( "The face donor must be a different file from this one." ) );
+
+	const QString wantName = nif->get<QString>( shape, "Name" );
+	const int wantVerts = nif->get<int>( shape, "Num Vertices" );
+	if ( wantVerts <= 0 )
+		return fail( QObject::tr( "This shape has no vertices to map." ) );
+
+	QModelIndex byName, byCount;
+	int candidates = 0, sculptRejected = 0;
+	for ( int b = 0; b < donor->getBlockCount(); b++ ) {
+		const QModelIndex idx = donor->getBlockIndex( b );
+		if ( !riggingIsSkinnedShape( donor, idx )
+			|| donor->get<int>( idx, "Num Vertices" ) != wantVerts )
+			continue;
+		// the donor's own skinning must be the STANDARD one, or it is another
+		// sculpt-rigged file and has nothing this needs
+		bool donorSculpt = false;
+		for ( const QString & bone : riggingBoneNames( donor, idx ) ) {
+			if ( bone.startsWith( QStringLiteral( "skin_bone_" ), Qt::CaseInsensitive ) ) {
+				donorSculpt = true;
+				break;
+			}
+		}
+		if ( donorSculpt ) {
+			sculptRejected++;
+			continue;
+		}
+		candidates++;
+		byCount = idx;
+		if ( donor->get<QString>( idx, "Name" ) == wantName )
+			byName = idx;
+	}
+
+	if ( byName.isValid() )
+		return byName;
+	if ( candidates == 1 )
+		return byCount;
+	if ( candidates > 1 )
+		return fail( QObject::tr( "The face donor has %1 shapes with %2 vertices and none named "
+			"\"%3\", so which one carries this shape's skinning is ambiguous." )
+			.arg( candidates ).arg( wantVerts ).arg( wantName ) );
+	if ( sculptRejected > 0 )
+		return fail( QObject::tr( "The marked face donor is itself bound to face-sculpt bones, so "
+			"it has no standard-skeleton skinning to read. Mark the BASE head instead — the file "
+			"without _faceBones in its name." ) );
+	return fail( QObject::tr( "The face donor has no skinned shape with %1 vertices, so it is not "
+		"this mesh's base head. The blob is one record per vertex, in order, and a mismatched "
+		"donor would write the wrong weights onto every vertex." ).arg( wantVerts ) );
+}
+
 class spRiggingGenerateCustomizationRemapData final : public Spell
 {
 public:
@@ -3111,17 +3185,53 @@ public:
 
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
 	{
+		/* REGENERATION, when the standard skinning is no longer in this file.
+		 *
+		 * CustomizationRemapData is a stored copy of the shape's STANDARD-skeleton
+		 * weights, which is why it cannot be made out of a sculpt-bound mesh: those
+		 * weights are gone from it. That used to be the end of the matter, and it
+		 * left no way to refresh the blob on a _faceBones.nif whose rigging had
+		 * been edited.
+		 *
+		 * It can be made out of the file that still HAS the standard weights — the
+		 * base head — so a marked Face Donor is read for them. What is checked is
+		 * what the donor actually contains, not the role it was marked for: it must
+		 * hold a matching shape that is NOT itself sculpt-bound, with the same
+		 * vertex count, because the blob is per-vertex and a mismatch would write
+		 * one mesh's weights onto another's vertices.
+		 */
+		bool sculptBound = false;
 		for ( const QString & bone : riggingBoneNames( nif, index ) ) {
 			if ( bone.startsWith( QStringLiteral( "skin_bone_" ), Qt::CaseInsensitive ) ) {
-				QMessageBox::warning( nullptr, name(),
-					Spell::tr( "This shape is already bound to face-sculpt bones. "
-						"CustomizationRemapData must be generated from its standard-skeleton skinning "
-						"before sculpt-bone transfer." ) );
-				return index;
+				sculptBound = true;
+				break;
 			}
 		}
+
 		QString error;
-		QByteArray blob = riggingCustomizationRemapBlob( nif, index, &error );
+		QByteArray blob;
+		if ( !sculptBound ) {
+			blob = riggingCustomizationRemapBlob( nif, index, &error );
+		} else {
+			NifModel * donor = NifSkope::workspaceFaceDonor();
+			if ( !donor ) {
+				QMessageBox::warning( nullptr, name(),
+					Spell::tr( "This shape is bound to face-sculpt bones, so its standard-skeleton "
+						"skinning — which is what CustomizationRemapData is — is no longer in this "
+						"file.\n\nTo regenerate it, load the matching base head, right-click it in "
+						"Loaded NIFs and choose \"Use as Face Donor for faceBones\". Its standard "
+						"weights will be read from there." ) );
+				return index;
+			}
+			QString why;
+			const QModelIndex donorShape = riggingStandardSkinnedCounterpart( donor, nif, index, &why );
+			if ( !donorShape.isValid() ) {
+				QMessageBox::warning( nullptr, name(), Spell::tr( "%1\n\nMarked face donor: %2" )
+					.arg( why, NifSkope::workspaceFaceDonorName() ) );
+				return index;
+			}
+			blob = riggingCustomizationRemapBlob( donor, donorShape, &error );
+		}
 		if ( blob.isEmpty() ) {
 			QMessageBox::warning( nullptr, name(), error.isEmpty()
 				? Spell::tr( "Could not encode the shape's skin data." ) : error );

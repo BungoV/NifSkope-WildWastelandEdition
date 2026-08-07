@@ -84,6 +84,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
+#include <QPointer>
 #include <QDropEvent>
 #include <QMimeData>
 #include <QToolTip>
@@ -1761,27 +1762,23 @@ QList<NifSkope *> NifSkope::selectedWorkspaceDocuments()
  *  compared against loaded models and cleared when the model it names goes away.
  *  Nothing is held open on its behalf.
  */
-static NifModel * wwFaceDonorModel = nullptr;
+/* A QPointer, NOT a scan of the document lists.
+ *
+ * The mark has to disappear when the file it names does, and the first attempt
+ * checked that by looking for the model among the open and selected documents —
+ * which quietly threw away any model those lists do not carry, and answered "no
+ * donor is marked" the instant one was. NifModel is a QObject, so a QPointer
+ * nulls itself on destruction with no assumption about where the model is
+ * registered. That is the actual question being asked: is it still alive.
+ */
+static QPointer<NifModel> wwFaceDonorModel;
 static QString wwFaceDonorName;
 
 NifModel * NifSkope::workspaceFaceDonor()
 {
-	// a document can close while it is marked; the mark goes with it rather than
-	// leaving a dangling pointer for the rigging step to hand to a file dialog
-	if ( wwFaceDonorModel ) {
-		bool stillLoaded = false;
-		for ( const auto & entry : NifSkope::selectedWorkspaceModels() )
-			if ( entry.first == wwFaceDonorModel )
-				stillLoaded = true;
-		for ( NifSkope * document : NifSkope::openDocuments() )
-			if ( document && document->nif == wwFaceDonorModel )
-				stillLoaded = true;
-		if ( !stillLoaded ) {
-			wwFaceDonorModel = nullptr;
-			wwFaceDonorName.clear();
-		}
-	}
-	return wwFaceDonorModel;
+	if ( !wwFaceDonorModel )
+		wwFaceDonorName.clear();
+	return wwFaceDonorModel.data();
 }
 
 QString NifSkope::workspaceFaceDonorName()
