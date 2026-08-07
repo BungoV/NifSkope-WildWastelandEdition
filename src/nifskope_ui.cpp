@@ -8731,6 +8731,21 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& nif->undoStack && nif->undoStack->index() == undoBefore );
 					}
 
+					/* THE DRAG LOG MUST NOT TOUCH THE TREE. It dumps every on-screen
+					 * row at the start of every drag, and it used to expandAll()
+					 * first so the live-drag script could aim at rows — which
+					 * unfolded the user's whole file the instant they picked
+					 * anything up. A logger that changes what it measures.
+					 */
+					{
+						list->collapse( rowFor( leaf ) );
+						QApplication::processEvents();
+						check( "the branch is collapsed to begin with", !list->isExpanded( rowFor( leaf ) ) );
+						skope->wwLogBlockListRowGeometry();		// what a drag start does
+						QApplication::processEvents();
+						check( "the drag log does not unfold the tree", !list->isExpanded( rowFor( leaf ) ) );
+					}
+
 					/* Everything above went through the view's own drag overrides,
 					 * two events per drop. If a future change routes the hook some
 					 * other way, or drops one of the four overrides, this is what
@@ -9057,7 +9072,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			if ( !ok )
 				return;
-			QTimer::singleShot( 1200, skope, [skope]() { skope->wwLogBlockListRowGeometry(); } );
+			// expandFirst: the live-drag script needs every row on screen to aim
+			// at, and only ever runs against a fixture nobody is looking at
+			QTimer::singleShot( 1200, skope, [skope]() { skope->wwLogBlockListRowGeometry( true ); } );
 		} );
 	}
 

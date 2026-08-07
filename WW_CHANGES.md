@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07i — A logger that unfolded the file it was measuring
+
+The drag log dumps every on-screen row's rectangle at the start of each drag, so
+a real mouse can be driven at them from outside the process. It called
+`expandAll()` first — which the live-drag script needs, and which meant picking
+anything up unfolded the user's entire file under their hands.
+
+`expandFirst` is a parameter now, false at drag time and true only for the
+script, which runs against a fixture nobody is looking at. The dump is also
+bounded to rows that actually intersect the viewport and no longer descends into
+closed branches: it runs on every drag, and a large file has thousands of rows.
+
+The check collapses a branch, calls the dump, and asserts the branch is still
+collapsed. It fails on the old default, which is the only reason to trust it.
+
 ## 2026-08-07h — The drag was dead before it began
 
 **Ignoring a drag event ends the drag over the widget.** Not one `DragMove`

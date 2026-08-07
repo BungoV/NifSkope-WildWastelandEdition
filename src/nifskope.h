@@ -556,10 +556,15 @@ private:
 	QList<qint32> blockListDragPayload( const QMimeData * mime ) const;
 	//! Highlight (or clear, with -1) the row a drop would land on.
 	void setBlockListDropTarget( qint32 block );
-	//! With WW_DRAG_LOG set, write every visible row's GLOBAL rectangle, so a
-	//! real mouse can be driven at them from outside the process. A native drag
-	//! is the one path no synthetic event can enter.
-	void wwLogBlockListRowGeometry();
+	/*! Write every ON-SCREEN row's GLOBAL rectangle to the drag log, so a real
+	 *  mouse can be driven at them from outside the process — a native drag is
+	 *  the one path no synthetic event can enter.
+	 *
+	 *  `expandFirst` is for the live-drag script alone. It must stay false at
+	 *  drag time: expanding the tree the moment a drag starts unfolds the user's
+	 *  whole file under their hands.
+	 */
+	void wwLogBlockListRowGeometry( bool expandFirst = false );
 	/*! \} */
 
 	QWidget * filePathWidget( QWidget * );

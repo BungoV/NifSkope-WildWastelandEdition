@@ -4284,33 +4284,45 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	return parentBlock;
 }
 
-void NifSkope::wwLogBlockListRowGeometry()
+void NifSkope::wwLogBlockListRowGeometry( bool expandFirst )
 {
 	if ( !nif || !list )
 		return;
 
-	list->expandAll();
-	QApplication::processEvents();
+	/* expandFirst is for the LIVE-DRAG SCRIPT ONLY, which needs every row on
+	 * screen to aim at and runs against a fixture nobody is looking at. The
+	 * drag-start dump must never pass it: expanding the tree the moment a drag
+	 * begins unfolded the user's whole file under their hands, which is a logger
+	 * changing the thing it is there to measure.
+	 */
+	if ( expandFirst ) {
+		list->expandAll();
+		QApplication::processEvents();
+	}
 
+	// only what is on screen: a big file has thousands of rows and this runs at
+	// the start of every drag
+	const QRect vp = list->viewport()->rect();
 	wwDragLog( QStringLiteral( "--- rows (global screen coordinates) ---" ) );
 	std::function<void( const QModelIndex & )> walk = [&]( const QModelIndex & parent ) {
 		QAbstractItemModel * m = list->model();
 		for ( int row = 0; row < m->rowCount( parent ); row++ ) {
 			const QModelIndex idx = m->index( row, 0, parent );
 			const QRect r = list->visualRect( idx );
-			if ( r.isValid() && !r.isEmpty() ) {
+			if ( r.isValid() && !r.isEmpty() && r.intersects( vp ) ) {
 				const QPoint tl = list->viewport()->mapToGlobal( r.topLeft() );
 				const QModelIndex src = ( m == proxy ) ? proxy->mapTo( idx ) : idx;
 				wwDragLog( QStringLiteral( "row block %1 (%2) global %3,%4 %5x%6" )
 					.arg( nif->getBlockNumber( src ) ).arg( nif->itemName( src ) )
 					.arg( tl.x() ).arg( tl.y() ).arg( r.width() ).arg( r.height() ) );
 			}
-			walk( idx );
+			// closed branches have nothing on screen to describe
+			if ( list->isExpanded( idx ) )
+				walk( idx );
 		}
 	};
 	walk( QModelIndex() );
 
-	const QRect vp = list->viewport()->rect();
 	const QPoint vtl = list->viewport()->mapToGlobal( vp.topLeft() );
 	wwDragLog( QStringLiteral( "viewport global %1,%2 %3x%4" )
 		.arg( vtl.x() ).arg( vtl.y() ).arg( vp.width() ).arg( vp.height() ) );
