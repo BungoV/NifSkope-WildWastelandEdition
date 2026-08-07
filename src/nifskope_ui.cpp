@@ -8792,6 +8792,33 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::processEvents();
 						check( mode + ": a block with no scene-object name opens no editor",
 							editor() == nullptr );
+
+						/* Starting a rename must not scroll the list SIDEWAYS.
+						 * scrollTo() ensures visibility on both axes and the name is
+						 * in the right-hand column, so opening the editor dragged the
+						 * whole list across and pushed the block type off the left
+						 * edge — the one thing you need to still see while renaming.
+						 *
+						 * The Name column is widened first so the list genuinely has
+						 * somewhere to scroll: with both columns fitting there is
+						 * nothing to get wrong and this would pass on the broken code.
+						 * That is what the maximum() check is for.
+						 */
+						QScrollBar * hbar = list->horizontalScrollBar();
+						list->header()->resizeSection( 0, list->viewport()->width() );
+						QApplication::processEvents();
+						hbar->setValue( 0 );
+						QApplication::processEvents();
+						check( mode + ": the list can scroll sideways at all", hbar->maximum() > 0 );
+
+						list->setCurrentIndex( rowFor( node, 0 ) );
+						QApplication::processEvents();
+						QMetaObject::invokeMethod( f2, "activated" );
+						QApplication::processEvents();
+						check( mode + ": starting a rename does not scroll the list sideways",
+							hbar->value() == 0 );
+						if ( QLineEdit * open = editor() )
+							sendKey( open, Qt::Key_Escape );
 					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";

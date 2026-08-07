@@ -3805,8 +3805,19 @@ void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUna
 		list->viewport()->findChild<QLineEdit *>( QStringLiteral( "BlockListRenameEdit" ) ) ) )
 		previous->cancel();
 
+	/* VERTICALLY ONLY. scrollTo() ensures visibility on both axes, and the name
+	 * sits in the right-hand column — so starting a rename yanked the whole list
+	 * sideways far enough to push the block type off the left edge, which is the
+	 * one thing you need to still see while renaming. The row does have to be on
+	 * screen; where the list sits horizontally is where the user put it.
+	 */
 	const QModelIndex valueIndex = index.sibling( index.row(), nameColumn );
+	QScrollBar * hbar = list->horizontalScrollBar();
+	const int scrollWas = hbar ? hbar->value() : 0;
 	list->scrollTo( valueIndex );
+	if ( hbar )
+		hbar->setValue( scrollWas );
+
 	QRect cell = list->visualRect( valueIndex );
 	if ( !cell.isValid() || cell.isEmpty() ) return;
 
@@ -3834,6 +3845,10 @@ void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUna
 	editor->show();
 	editor->setFocus( Qt::MouseFocusReason );
 	editor->selectAll();
+	// again after show(): giving a child widget focus inside a scroll area is its
+	// own reason to scroll, so pinning it once before is not enough
+	if ( hbar )
+		hbar->setValue( scrollWas );
 }
 
 /* BLOCK-LIST DRAG-AND-DROP — Blender's Outliner, re-cast for a NIF.

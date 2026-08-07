@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07c — Renaming no longer drags the list sideways
+
+`renameBlockListIndex` called `scrollTo()` to put the row on screen, and
+`scrollTo()` ensures visibility on **both** axes. The name lives in the
+right-hand column, so starting a rename scrolled the list across far enough to
+push the block **type** off the left edge — the one thing you need to still see
+while you are renaming something.
+
+Vertical only now: the row still has to be on screen, but the horizontal
+position is put back where the user had it, once after the scroll and again
+after `show()` (giving a child widget focus inside a scroll area is its own
+reason to scroll).
+
+The check widens the Name column first so the list genuinely has somewhere to
+scroll — with both columns fitting there is nothing to get wrong and it would
+pass on the broken code. Removing the fix fails it; leaving the widening out
+does not.
+
 ## 2026-08-07b — The drag never started, and two things in the way of the name
 
 All three reported against the batch below, within minutes of it landing.

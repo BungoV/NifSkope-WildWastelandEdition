@@ -38,6 +38,15 @@
 #  17. ...and the block carries the new name
 #  18. ...and the palette entry followed it
 #  19. a block with no scene-object name opens no editor
+#  20. the list can scroll sideways at all                     <- not vacuous
+#  21. starting a rename does not scroll the list sideways
+#
+# 21 is another bug report made into a gate: scrollTo() ensures visibility on
+# BOTH axes and the name sits in the right-hand column, so opening the editor
+# dragged the whole list across and pushed the block TYPE off the left edge --
+# the one thing you need to still see while renaming. 20 widens the Name column
+# first so the list genuinely has somewhere to scroll; with both columns fitting
+# there is nothing to get wrong and 21 would pass on the broken code.
 #
 # Checks 12-15 are a bug report made into a gate. Qt's default edit triggers
 # opened the DELEGATE's editor on the same double-click that starts the rename,
