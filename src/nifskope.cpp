@@ -2784,6 +2784,13 @@ void NifSkope::wireBlockListSelection()
 			}
 			setBlockListSelection( selBlocks );
 		}
+		/* WHICH PLACING OF IT. A block under several parents is in the tree once
+		 * per parent, and until now every one of those rows said exactly the same
+		 * thing — so after a drag "moved it", which of them moved was a guess. The
+		 * current row carries "2 of 3"; nothing else does.
+		 */
+		if ( proxy && list->model() == proxy )
+			proxy->wwSetCurrentRow( list->currentIndex() );
 		// 'selecting' is true while NifSkope::select() programmatically drives
 		// the list (e.g. after a viewport click); without this guard the
 		// resulting single-row ClearAndSelect echoed back into the object
@@ -4148,19 +4155,32 @@ bool NifSkope::startBlockListDrag()
 	// Column 0 only: selectedIndexes() reports every column of every selected
 	// row, and selectedRows() can come back empty depending on selection
 	// behaviour — the same reason wireBlockListSelection() filters this way.
-	QList<qint32> blocks;
+	/* THE ROW'S OWN PARENT GOES WITH IT.
+	 *
+	 * A block that sits under several parents appears in the tree once per
+	 * parent, and its block NUMBER cannot say which of those the pointer picked
+	 * up — only the row can. Dragging one of them moves that one and leaves the
+	 * others where they are, so the parent is read here, off the proxy row, and
+	 * carried in the payload.
+	 */
+	QList<qint32> blocks, fromParents;
 	for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
 		if ( pidx.column() != 0 )
 			continue;
 		QModelIndex src = ( pidx.model() == proxy ) ? proxy->mapTo( pidx ) : pidx;
 		const int b = nif->getBlockNumber( src );
-		if ( b >= 0 && !blocks.contains( b ) )
-			blocks.append( b );
+		if ( b < 0 || blocks.contains( b ) )
+			continue;
+		blocks.append( b );
+		qint32 from = -1;
+		if ( pidx.model() == proxy && pidx.parent().isValid() )
+			from = nif->getBlockNumber( proxy->mapTo( pidx.parent() ) );
+		fromParents.append( from );
 	}
 	if ( blocks.isEmpty() )
 		return false;
 
-	QMimeData * mime = blockListDragMimeData( blocks );
+	QMimeData * mime = blockListDragMimeData( blocks, fromParents );
 
 	// No drag pixmap: the card carries the name, and a second ghost trailing the
 	// cursor alongside it is the same information drawn twice.
@@ -4216,26 +4236,36 @@ bool NifSkope::startBlockListDrag()
 	return true;
 }
 
-QMimeData * NifSkope::blockListDragMimeData( const QList<qint32> & blocks ) const
+QMimeData * NifSkope::blockListDragMimeData( const QList<qint32> & blocks,
+	const QList<qint32> & fromParents ) const
 {
 	/* The MODEL POINTER travels with the payload. Two document windows are an
 	 * ordinary thing here, and block 12 in one file is a different block in the
 	 * other — without this, dragging between windows would silently re-parent by
 	 * number onto whatever happened to be at that index.
+	 *
+	 * AND SO DOES THE PARENT THE ROW WAS DRAGGED OUT OF. A block may sit under
+	 * several parents at once, so it appears in the tree several times — and the
+	 * block NUMBER cannot say which of those the pointer picked up. Only the row
+	 * knows, so the row's parent is carried with it: dragging one instance moves
+	 * that one and leaves the others where they are.
 	 */
 	QByteArray payload;
 	{
 		QDataStream ds( &payload, QIODevice::WriteOnly );
-		ds << quint64( quintptr( nif ) ) << blocks;
+		ds << quint64( quintptr( nif ) ) << blocks << fromParents;
 	}
 	auto * mime = new QMimeData;
 	mime->setData( BlockListDragMime, payload );
 	return mime;
 }
 
-QList<qint32> NifSkope::blockListDragPayload( const QMimeData * mime ) const
+QList<qint32> NifSkope::blockListDragPayload( const QMimeData * mime,
+	QList<qint32> * fromParents ) const
 {
 	QList<qint32> blocks;
+	if ( fromParents )
+		fromParents->clear();
 	if ( !nif || !mime || !mime->hasFormat( BlockListDragMime ) )
 		return blocks;
 
@@ -4246,6 +4276,12 @@ QList<qint32> NifSkope::blockListDragPayload( const QMimeData * mime ) const
 	if ( fromModel != quint64( quintptr( nif ) ) )
 		return blocks;		// another window's file; the numbers mean nothing here
 	ds >> blocks;
+	// optional: a payload written before this existed, or one a harness forged
+	QList<qint32> parents;
+	if ( !ds.atEnd() )
+		ds >> parents;
+	if ( fromParents )
+		*fromParents = parents;
 	return blocks;
 }
 
@@ -4721,7 +4757,8 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	// QDragEnterEvent derives from QDragMoveEvent, and QDropEvent is the base of
 	// both, so one cast serves all three.
 	auto * e = static_cast<QDropEvent *>( event );
-	const QList<qint32> blocks = blockListDragPayload( e->mimeData() );
+	QList<qint32> fromParents;
+	const QList<qint32> blocks = blockListDragPayload( e->mimeData(), &fromParents );
 	if ( blocks.isEmpty() )
 		return false;		// not ours — a file drop still reaches the stock path
 
@@ -4864,7 +4901,7 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 
 	QStringList refusals;
 	const int moved = nowhere ? 0
-		: wwReparentBlocks( nif, blocks, target, mode, &refusals, position );
+		: wwReparentBlocks( nif, blocks, target, mode, &refusals, position, fromParents );
 	wwDragLog( QStringLiteral( "  -> moved %1, refusals: %2" ).arg( moved )
 		.arg( refusals.isEmpty() ? QStringLiteral( "none" ) : refusals.join( QStringLiteral( " / " ) ) ) );
 	e->setDropAction( moved > 0

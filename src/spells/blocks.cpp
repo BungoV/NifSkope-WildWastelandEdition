@@ -567,16 +567,42 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
 	if ( block == newParent )
 		return QCoreApplication::translate( "Reparent", "A block cannot be its own parent." );
 
-	// A descendant taking its own ancestor as parent cuts the branch out of the
-	// file and leaves a cycle behind. Walk up from the target, not down from the
-	// block: the chain is short and the guard is the same one as above.
-	int guard = 256;
-	for ( int p = newParent; p >= 0 && guard-- > 0; p = nif->getParent( p ) ) {
-		if ( p != block )
+	/* A descendant taking its own ancestor as parent cuts the branch out of the
+	 * file and leaves a cycle behind. Walk up from the target, not down from the
+	 * block: the way up is much narrower than the way down.
+	 *
+	 * EVERY parent on the way, not the one getParent() answers with. A block may
+	 * legally have more than one — Ctrl-drop makes exactly that, and it is a real
+	 * NIF capability rather than a corruption — and getParent() reports the
+	 * LOWEST-NUMBERED of them. Give a child a second parent that sorts before its
+	 * first, and a walk up through getParent() climbs the wrong chain, finds no
+	 * cycle, and writes one into the file: measured, with the drop ALLOWED.
+	 *
+	 * The seen set is also what makes this terminate on a file that already
+	 * contains a cycle, which is what the old fixed guard of 256 was for.
+	 */
+	/* ONE PASS FOR THE MAP, then the walk is free. This runs on every DragMove —
+	 * the drag card asks it for what to say — so calling wwParentsOf per level
+	 * would re-read every block's Children once for each step of the way up.
+	 */
+	QHash<qint32, QList<qint32>> parentsOf;
+	const int blockCount = nif->getBlockCount();
+	for ( int b = 0; b < blockCount; b++ )
+		for ( const qint32 child : nif->getLinkArray( nif->getBlockIndex( b ), "Children" ) )
+			parentsOf[child].append( b );
+
+	QList<qint32> up{ newParent };
+	QSet<qint32> seen;
+	while ( !up.isEmpty() ) {
+		const qint32 p = up.takeLast();
+		if ( p < 0 || seen.contains( p ) )
 			continue;
-		return QCoreApplication::translate( "Reparent",
-			"Block %1 already sits under this one — re-parenting onto it would cut the "
-			"branch out of the file." ).arg( newParent );
+		seen.insert( p );
+		if ( p == block )
+			return QCoreApplication::translate( "Reparent",
+				"Block %1 already sits under this one — re-parenting onto it would cut the "
+				"branch out of the file." ).arg( newParent );
+		up.append( parentsOf.value( p ) );
 	}
 
 	/* ALREADY A CHILD is only a refusal when nothing was asked for beyond that.
@@ -599,21 +625,25 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
 }
 
 int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newParent,
-	WwReparentMode mode, QStringList * refusals, int position )
+	WwReparentMode mode, QStringList * refusals, int position,
+	const QList<qint32> & fromParents )
 {
 	if ( !nif )
 		return 0;
 
-	struct Move { qint32 block; Transform world; };
+	struct Move { qint32 block; Transform world; qint32 from; };
 	QVector<Move> moves;
-	for ( const qint32 block : blocks ) {
+	for ( int i = 0; i < blocks.size(); i++ ) {
+		const qint32 block = blocks.at( i );
 		const QString refusal = wwReparentRefusal( nif, block, newParent, mode, position );
 		if ( !refusal.isEmpty() ) {
 			if ( refusals )
 				refusals->append( refusal );
 			continue;
 		}
-		moves.append( { block, wwWorldTransform( nif, block ) } );
+		// which of the block's placings this is, when the caller had a row to
+		// read it off; -1 means "the block itself", i.e. all of them
+		moves.append( { block, wwWorldTransform( nif, block ), fromParents.value( i, -1 ) } );
 	}
 	if ( moves.isEmpty() )
 		return 0;
@@ -661,7 +691,21 @@ int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newPa
 			 * Link mode keeps them all — that is the whole point of it.
 			 */
 			if ( mode != WwReparentMode::Link ) {
-				for ( const qint32 oldParent : wwParentsOf( nif, move.block ) ) {
+				/* THE INSTANCE THAT WAS PICKED UP, not every place the block sits.
+				 *
+				 * A block under several parents appears in the tree once per parent,
+				 * and dragging one of those rows moves THAT one — the others are
+				 * other placings of the same block and nothing asked about them.
+				 * `from` is the row's own parent, read off the proxy row at drag
+				 * start and carried in the payload.
+				 *
+				 * When nothing said which instance — a spell, or the Collision
+				 * Manager's Set Parent, neither of which has a row — every parent is
+				 * taken, because a caller with no row means the block itself.
+				 */
+				const QList<qint32> leaving = move.from >= 0
+					? QList<qint32>{ move.from } : wwParentsOf( nif, move.block );
+				for ( const qint32 oldParent : leaving ) {
 					const QModelIndex from = nif->getBlockIndex( oldParent );
 					QVector<qint32> kept;
 					for ( const qint32 child : nif->getLinkArray( from, "Children" ) )

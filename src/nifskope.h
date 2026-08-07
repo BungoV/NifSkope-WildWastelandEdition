@@ -548,7 +548,11 @@ private:
 	bool startBlockListDrag();
 	//! The drag payload for these blocks. Shared with WW_BLOCKDND_TEST, which
 	//! synthesises real drop events rather than a second idea of the format.
-	QMimeData * blockListDragMimeData( const QList<qint32> & blocks ) const;
+	//!  fromParents runs parallel to  blocks: the parent each row was dragged
+	//! out of, so a block that sits under several parents moves the INSTANCE that
+	//! was picked up and leaves its other placings alone. Empty means "not said".
+	QMimeData * blockListDragMimeData( const QList<qint32> & blocks,
+		const QList<qint32> & fromParents = QList<qint32>() ) const;
 	//! DragEnter/DragMove/DragLeave/Drop on the block list's viewport.
 	bool blockListDragEvent( QEvent * event );
 	//! The block number under a viewport point, through whichever model is
@@ -581,7 +585,8 @@ private:
 	//! the block landed.
 	void wwCollapseBlockListBranches( const QSet<qint32> & opened, qint32 except = -1 );
 	//! The block numbers carried by a block-list drag, or empty.
-	QList<qint32> blockListDragPayload( const QMimeData * mime ) const;
+	QList<qint32> blockListDragPayload( const QMimeData * mime,
+		QList<qint32> * fromParents = nullptr ) const;
 	//! Highlight (or clear, with -1) the row a drop would land on.
 	void setBlockListDropTarget( qint32 block );
 	/*! Select nothing at all, from a click past the last row.

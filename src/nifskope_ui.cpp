@@ -9086,6 +9086,204 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "the drag log does not unfold the tree", !list->isExpanded( rowFor( leaf ) ) );
 					}
 
+					/* A CYCLE THROUGH THE OTHER PARENT.
+					 *
+					 * A block may legally have more than one parent — Ctrl-drop makes
+					 * exactly that, and it is a real NIF capability rather than a
+					 * corruption. NifModel::getParent answers with the LOWEST-numbered
+					 * one, so a cycle check that walks up through it climbs one chain
+					 * and never sees the other: give a child a second parent whose
+					 * number is lower than its first, and dropping the first onto the
+					 * child walks child -> low -> nothing, finds no cycle, and writes
+					 * one into the file.
+					 *
+					 * Built here rather than reusing the fixture, because the trap is
+					 * entirely in the block NUMBERS: the second parent has to sort
+					 * before the one being dropped.
+					 */
+					{
+						const qint32 owner = nif->getBlockNumber(
+							nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
+						const qint32 shared = nif->getBlockNumber(
+							nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
+						addLink( nif, nif->getBlockIndex( root ), "Children", owner );
+						addLink( nif, nif->getBlockIndex( owner ), "Children", shared );
+						// the second parent, and it sorts BEFORE owner
+						addLink( nif, nif->getBlockIndex( root ), "Children", shared );
+						QApplication::processEvents();
+
+						log << "two parents: block " << shared << " is under "
+							<< owner << " and " << root << "; getParent says "
+							<< nif->getParent( shared ) << "\n";
+						check( "a block can have two parents at once",
+							childrenOf( owner ).contains( shared )
+							&& childrenOf( root ).contains( shared ) );
+						// not vacuous: the trap only exists when getParent answers with
+						// the OTHER parent, so the walk misses the one that matters
+						check( "...and getParent answers with the lower-numbered one",
+							nif->getParent( shared ) == root && root < owner );
+
+						const QString refusal = wwReparentRefusal( nif, owner, shared,
+							WwReparentMode::PreserveWorld, -1 );
+						log << "dropping " << owner << " onto its own child " << shared
+							<< ": " << ( refusal.isEmpty() ? QStringLiteral( "ALLOWED" ) : refusal ) << "\n";
+						check( "a cycle through the other parent is refused too",
+							!refusal.isEmpty() );
+
+						/* ONE INSTANCE MOVES, THE OTHERS STAY.
+						 *
+						 * A block under two parents is in the tree twice, and dragging
+						 * one of those rows is about THAT row: the other placing is a
+						 * separate thing the gesture said nothing about. The row's own
+						 * parent rides along in the drag payload, since the block
+						 * number cannot say which of them was picked up.
+						 *
+						 * The pair below is discriminating: the same block, the same
+						 * destination, and the only difference is which parent the row
+						 * was dragged out of. One implementation cannot satisfy both.
+						 */
+						QStringList said;
+						wwReparentBlocks( nif, { shared }, nodeB, WwReparentMode::PreserveWorld,
+							&said, -1, { owner } );
+						QApplication::processEvents();
+						check( "dragging one instance moves that one",
+							childrenOf( nodeB ).contains( shared )
+							&& !childrenOf( owner ).contains( shared ) );
+						check( "...and leaves the block's OTHER parent alone",
+							childrenOf( root ).contains( shared ) );
+						nif->undoStack->undo();
+						QApplication::processEvents();
+						check( "...and one undo puts that instance back",
+							childrenOf( owner ).contains( shared )
+							&& childrenOf( root ).contains( shared )
+							&& !childrenOf( nodeB ).contains( shared ) );
+
+						// the other instance, and the other parent is the one that keeps it
+						wwReparentBlocks( nif, { shared }, nodeB, WwReparentMode::PreserveWorld,
+							&said, -1, { root } );
+						QApplication::processEvents();
+						check( "dragging the OTHER instance moves that one instead",
+							childrenOf( nodeB ).contains( shared )
+							&& !childrenOf( root ).contains( shared )
+							&& childrenOf( owner ).contains( shared ) );
+						nif->undoStack->undo();
+						QApplication::processEvents();
+
+						/* AND A CALLER WITH NO ROW STILL MEANS THE BLOCK ITSELF.
+						 * Set Parent in the Collision Manager, and every spell, come
+						 * through here without an instance to name — for them the
+						 * block is the subject, so it leaves every parent it sat in.
+						 */
+						wwReparentBlocks( nif, { shared }, nodeB, WwReparentMode::PreserveWorld, &said );
+						QApplication::processEvents();
+						check( "a caller that names no instance still takes it out of both",
+							childrenOf( nodeB ).contains( shared )
+							&& !childrenOf( owner ).contains( shared )
+							&& !childrenOf( root ).contains( shared ) );
+						nif->undoStack->undo();
+						QApplication::processEvents();
+						check( "...and one undo puts it back in both",
+							childrenOf( owner ).contains( shared )
+							&& childrenOf( root ).contains( shared ) );
+
+						/* AND THE ROW SAYS WHICH PLACING IT IS.
+						 *
+						 * Both rows of a two-parent block carry the same number and
+						 * the same name, so nothing on screen said which one had the
+						 * selection — and after a drag "moved it", which one moved was
+						 * a guess. The CURRENT row reads "1 of 2"; the other one, and
+						 * every block that sits in only one place, reads what it
+						 * always did.
+						 */
+						if ( list->model() == skope->proxy ) {
+							QList<QModelIndex> rows;
+							for ( const QModelIndex & r : { skope->proxy->mapFromPrimary(
+								nif->getBlockIndex( shared ) ) } )
+								if ( r.isValid() ) rows << r;
+							// the other placing, found by walking the two parents' rows
+							for ( const qint32 p : { owner, root } ) {
+								const QModelIndex pr = skope->proxy->mapFromPrimary( nif->getBlockIndex( p ) );
+								for ( int c = 0; c < skope->proxy->rowCount( pr ); c++ ) {
+									const QModelIndex kid = skope->proxy->index( c, 0, pr );
+									if ( nif->getBlockNumber( skope->proxy->mapTo( kid ) ) == shared
+										&& !rows.contains( kid ) )
+										rows << kid;
+								}
+							}
+							int which = 0, total = 0;
+							check( "a block in two places knows it is in two places",
+								rows.size() == 2
+								&& skope->proxy->wwInstanceOf( rows.value( 0 ), which, total )
+								&& total == 2 );
+
+							skope->proxy->wwSetCurrentRow( rows.value( 0 ) );
+							const QString marked = rows.value( 0 ).data( Qt::DisplayRole ).toString();
+							const QString other = rows.value( 1 ).data( Qt::DisplayRole ).toString();
+							log << "current row reads \"" << marked << "\", the other \""
+								<< other << "\"\n";
+							check( "the current row says which placing it is",
+								marked.contains( QStringLiteral( "of 2" ) ) );
+							check( "...and the other row does not",
+								!other.contains( QStringLiteral( "of 2" ) ) );
+
+							// and a block that sits in one place says nothing at all
+							const QModelIndex lone = skope->proxy->mapFromPrimary(
+								nif->getBlockIndex( nodeB ) );
+							skope->proxy->wwSetCurrentRow( lone );
+							check( "a block in one place is not numbered",
+								!skope->proxy->wwInstanceOf( lone, which, total )
+								&& !lone.data( Qt::DisplayRole ).toString().contains( QStringLiteral( " of " ) ) );
+							skope->proxy->wwSetCurrentRow( QModelIndex() );
+						}
+
+						/* MANY CHILDREN, WITH THE BLOCK NUMBERS ALL OVER THE PLACE.
+						 *
+						 * A node's Children array is in link order, which has nothing
+						 * to do with block numbering — any file that has been edited
+						 * for a while has both, in no relation to each other.
+						 * Reordering reads a row's position out of that array rather
+						 * than off its proxy row for exactly this reason, so the check
+						 * is a parent whose children ascend and descend, asked for the
+						 * two ends.
+						 */
+						QVector<qint32> many;
+						for ( int i = 0; i < 6; i++ )
+							many << nif->getBlockNumber( nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
+						const QVector<qint32> scattered = { many[4], many[0], many[5], many[2], many[1], many[3] };
+						nif->set<uint>( nif->getBlockIndex( owner ), "Num Children", uint( scattered.size() ) );
+						nif->updateArraySize( nif->getBlockIndex( owner ), "Children" );
+						nif->setLinkArray( nif->getBlockIndex( owner ), "Children", scattered );
+						QApplication::processEvents();
+						check( "a node can hold six children in no block order",
+							childrenOf( owner ) == scattered );
+
+						auto orderOf = [&]() {
+							QStringList o;
+							for ( const qint32 c : childrenOf( owner ) )
+								o << QString::number( c );
+							return o.join( QLatin1Char( ',' ) );
+						};
+						log << "six children, scattered: " << orderOf() << "\n";
+
+						// the LAST one to the front: the move with the most entries to
+						// shift, and the one an off-by-one shows up in
+						wwReparentBlocks( nif, { scattered.last() }, owner,
+							WwReparentMode::PreserveWorld, nullptr, 0 );
+						QApplication::processEvents();
+						log << "  after moving " << scattered.last() << " to the front: " << orderOf() << "\n";
+						check( "the last of six scattered children can be moved to the front",
+							childrenOf( owner ).size() == scattered.size()
+							&& childrenOf( owner ).first() == scattered.last() );
+
+						// and back to the end, which is position == size
+						wwReparentBlocks( nif, { scattered.last() }, owner,
+							WwReparentMode::PreserveWorld, nullptr, int( scattered.size() ) );
+						QApplication::processEvents();
+						log << "  and back to the end: " << orderOf() << "\n";
+						check( "...and back to the end, losing and duplicating none of them",
+							childrenOf( owner ) == scattered );
+					}
+
 					/* PASTE FOLLOWS THE POINTER IN EVERY WINDOW, not only the last
 					 * one opened.
 					 *

@@ -640,6 +640,42 @@ Qt::ItemFlags NifProxyModel::flags( const QModelIndex & index ) const
 	return nif->flags( mapTo( index ) );
 }
 
+bool NifProxyModel::wwInstanceOf( const QModelIndex & index, int & which, int & total ) const
+{
+	which = 0;
+	total = 0;
+	if ( !nif || !index.isValid() || index.model() != this || !root )
+		return false;
+	auto * item = static_cast<NifProxyItem *>( index.internalPointer() );
+	if ( !item || item->block() < 0 )
+		return false;
+
+	QList<NifProxyItem *> all;
+	root->findAllItems( item->block(), all );
+	if ( all.size() < 2 )
+		return false;			// one place: there is nothing to disambiguate
+	total = int( all.size() );
+	which = int( all.indexOf( item ) ) + 1;
+	return which > 0;
+}
+
+void NifProxyModel::wwSetCurrentRow( const QModelIndex & index )
+{
+	const QModelIndex was = wwCurrentRow;
+	if ( was == index )
+		return;
+	wwCurrentRow = index;
+	// repaint what stopped being current and what started
+	auto ping = [this]( const QModelIndex & i ) {
+		if ( i.isValid() && i.model() == this ) {
+			const QModelIndex c = i.sibling( i.row(), 0 );
+			emit dataChanged( c, c );
+		}
+	};
+	ping( was );
+	ping( index );
+}
+
 QVariant NifProxyModel::data( const QModelIndex & index, int role ) const
 {
 	if ( !( nif && index.isValid() ) )
@@ -648,6 +684,23 @@ QVariant NifProxyModel::data( const QModelIndex & index, int role ) const
 		return blockListCategoryIcon( nif, mapTo( index ) );
 	if ( role == Qt::ToolTipRole )
 		return blockListSummary( nif, mapTo( index ) );
+
+	/* WHICH OF THIS BLOCK'S PLACINGS YOU ARE ON.
+	 *
+	 * Every row of a multiply-parented block carries the same number and the
+	 * same name, so nothing said which one had the selection — and after a drag
+	 * moved "it", which one moved was a guess. Only the current row is marked:
+	 * a number on every duplicated row would be noise on rows nobody asked about.
+	 */
+	if ( role == Qt::DisplayRole && index.column() == 0 && wwCurrentRow.isValid()
+		&& index.row() == wwCurrentRow.row() && index.parent() == wwCurrentRow.parent() )
+	{
+		int which = 0, total = 0;
+		if ( wwInstanceOf( index, which, total ) ) {
+			const QString name = nif->data( mapTo( index ), role ).toString();
+			return QStringLiteral( "%1   %2 of %3" ).arg( name ).arg( which ).arg( total );
+		}
+	}
 
 	return nif->data( mapTo( index ), role );
 }

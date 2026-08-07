@@ -89,6 +89,19 @@ public:
 	//! scene object). Falls back to the first occurrence.
 	QModelIndex mapFromPrimary( const QModelIndex & index ) const;
 
+	/*! The row the Block List has current.
+	 *
+	 *  A block that sits under several parents is in the tree once per parent,
+	 *  and every one of those rows carries the same block number and the same
+	 *  name — so nothing on screen says which of them you are on. The current row
+	 *  says so, as "2 of 3", and only the current one: marking all of them would
+	 *  put a number on rows nobody is asking about.
+	 */
+	void wwSetCurrentRow( const QModelIndex & index );
+	//! Which of this block's placings this row is, and how many there are.
+	//! Returns false when the block sits in only one place, which is nearly all.
+	bool wwInstanceOf( const QModelIndex & index, int & which, int & total ) const;
+
 public slots:
 	void reset();
 
@@ -108,6 +121,8 @@ protected:
 	NifModel * nif;
 
 	NifProxyItem * root;
+
+	QPersistentModelIndex wwCurrentRow;
 };
 
 #endif

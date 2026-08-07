@@ -242,6 +242,7 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
  *  \return how many blocks moved.
  */
 int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newParent,
-	WwReparentMode mode, QStringList * refusals = nullptr, int position = -1 );
+	WwReparentMode mode, QStringList * refusals = nullptr, int position = -1,
+	const QList<qint32> & fromParents = QList<qint32>() );
 
 #endif // SP_BLOCKS_H

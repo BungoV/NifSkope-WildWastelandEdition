@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07s — A block in several places, and which one you are dragging
+
+A NIF block may sit under more than one parent — Ctrl-drop makes exactly that,
+and it is a real capability rather than a corruption. Three things were wrong
+about it, one of them able to corrupt a file.
+
+### A cycle through the other parent was allowed
+
+`NifModel::getParent` answers with the **lowest-numbered** parent, and the cycle
+check walked up through it. Give a child a second parent that sorts before its
+first, and dropping the first onto the child climbs the wrong chain, finds no
+cycle, and writes one into the file. Measured before the fix, in as many words:
+`dropping 6 onto its own child 7: ALLOWED`.
+
+The walk now goes up through **every** parent, from a map built in one pass —
+the refusal is asked on every DragMove, so a per-level `wwParentsOf` would
+re-read the file's whole link structure once per step of the way up. The seen-set
+also makes it terminate on a file that already contains a cycle, which is what
+the old fixed guard of 256 was for.
+
+### Dragging one instance moved all of them
+
+A plain move took the block out of **every** parent it sat in. That was
+deliberate — and wrong, per bungo: the other placings are other placings, and the
+gesture said nothing about them. Only the row knows which one was picked up, so
+the row's parent is read at drag start and carried in the payload beside the
+block numbers.
+
+A caller with no row — the Collision Manager's Set Parent, and every spell —
+still means the block itself and still leaves every parent, which is the only
+thing it can sensibly mean.
+
+### And nothing said which one you were on
+
+Every row of a multiply-parented block carried the same number and the same name,
+so after a drag "moved it" there was no way to tell which. The **current** row now
+reads `13 NiNode   2 of 2`. Only the current one: numbering every duplicated row
+would put a mark on rows nobody asked about.
+
+### Measured
+
+`block_dragdrop.sh` is **103 checks** (was 87). The discriminating pair is the
+same block dropped on the same target twice, differing only in which parent the
+row was dragged out of — one implementation cannot satisfy both. Plus: the cycle
+refusal (which fails against the old walk), a block with six children in
+scrambled block order moved to the front and back to the end without losing or
+duplicating one, and the instance marker appearing on the current row and on
+neither the other row nor a block that sits in one place.
+
 ## 2026-08-07r — The live drag sweep, and the two ways it lied
 
 `block_drag_live.ps1` had one verified scenario and three written but never run.
