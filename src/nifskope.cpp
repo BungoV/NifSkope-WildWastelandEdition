@@ -4028,13 +4028,24 @@ static void wwDragLog( const QString & line )
 	static bool resolved = false;
 	if ( !resolved ) {
 		resolved = true;
-		const QString path = qEnvironmentVariable( "WW_DRAG_LOG" );
-		if ( !path.isEmpty() ) {
-			log = new QFile( path );
-			if ( !log->open( QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text ) ) {
-				delete log;
-				log = nullptr;
-			}
+		/* ON BY DEFAULT, beside the executable.
+		 *
+		 * It was behind WW_DRAG_LOG=<file>, and the one run that mattered was
+		 * launched by double-clicking the exe — where no shell variable can
+		 * reach it — so a drag was performed and nothing at all was recorded.
+		 * A diagnostic that needs the person reporting the bug to launch the
+		 * program a particular way is a diagnostic that does not run.
+		 *
+		 * It is a handful of lines per drag and truncates at each drag start, so
+		 * it cannot grow. WW_DRAG_LOG still overrides the path.
+		 */
+		QString path = qEnvironmentVariable( "WW_DRAG_LOG" );
+		if ( path.isEmpty() )
+			path = QApplication::applicationDirPath() + QStringLiteral( "/ww_drag.log" );
+		log = new QFile( path );
+		if ( !log->open( QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text ) ) {
+			delete log;
+			log = nullptr;
 		}
 	}
 	if ( !log )
@@ -4043,6 +4054,15 @@ static void wwDragLog( const QString & line )
 	out << line << "\n";
 	out.flush();
 	log->flush();		// a drag that ends in a crash still leaves its trail
+}
+
+//! Start a fresh drag log, so the file only ever holds the most recent drag.
+static void wwDragLogRestart()
+{
+	QString path = qEnvironmentVariable( "WW_DRAG_LOG" );
+	if ( path.isEmpty() )
+		path = QApplication::applicationDirPath() + QStringLiteral( "/ww_drag.log" );
+	QFile::remove( path );
 }
 
 //! Which transform rule the held modifiers ask for.
@@ -4082,8 +4102,10 @@ bool NifSkope::startBlockListDrag()
 	auto * drag = new QDrag( list );
 	drag->setMimeData( mime );
 
+	wwDragLogRestart();
 	wwDragLog( QStringLiteral( "=== drag start: %1 block(s), first %2 ===" )
 		.arg( blocks.size() ).arg( blocks.first() ) );
+	wwLogBlockListRowGeometry();
 
 	blockListDropHint.clear();
 	blockListDragHeard.restart();
@@ -4262,6 +4284,39 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	return parentBlock;
 }
 
+void NifSkope::wwLogBlockListRowGeometry()
+{
+	if ( !nif || !list )
+		return;
+
+	list->expandAll();
+	QApplication::processEvents();
+
+	wwDragLog( QStringLiteral( "--- rows (global screen coordinates) ---" ) );
+	std::function<void( const QModelIndex & )> walk = [&]( const QModelIndex & parent ) {
+		QAbstractItemModel * m = list->model();
+		for ( int row = 0; row < m->rowCount( parent ); row++ ) {
+			const QModelIndex idx = m->index( row, 0, parent );
+			const QRect r = list->visualRect( idx );
+			if ( r.isValid() && !r.isEmpty() ) {
+				const QPoint tl = list->viewport()->mapToGlobal( r.topLeft() );
+				const QModelIndex src = ( m == proxy ) ? proxy->mapTo( idx ) : idx;
+				wwDragLog( QStringLiteral( "row block %1 (%2) global %3,%4 %5x%6" )
+					.arg( nif->getBlockNumber( src ) ).arg( nif->itemName( src ) )
+					.arg( tl.x() ).arg( tl.y() ).arg( r.width() ).arg( r.height() ) );
+			}
+			walk( idx );
+		}
+	};
+	walk( QModelIndex() );
+
+	const QRect vp = list->viewport()->rect();
+	const QPoint vtl = list->viewport()->mapToGlobal( vp.topLeft() );
+	wwDragLog( QStringLiteral( "viewport global %1,%2 %3x%4" )
+		.arg( vtl.x() ).arg( vtl.y() ).arg( vp.width() ).arg( vp.height() ) );
+	wwDragLog( QStringLiteral( "--- end rows ---" ) );
+}
+
 void NifSkope::setBlockListDropTarget( qint32 block )
 {
 	if ( !nif || nif->dropTargetBlock == block )
@@ -4390,14 +4445,24 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		blockListDropHint = hint;
 		showBlockListDragCard( hint, blocks.size() > 1 ? QIcon() : icon, type, name );
 
-		if ( legal > 0 ) {
-			e->setDropAction( mode == WwReparentMode::Link ? Qt::LinkAction : Qt::MoveAction );
-			e->accept();
-		} else {
-			// no action = the OS "cannot drop here" cursor, with the reason at it
-			e->setDropAction( Qt::IgnoreAction );
-			e->ignore();
-		}
+		/* ACCEPT OUR OWN PAYLOAD ALWAYS — even where the drop would do nothing.
+		 *
+		 * Ignoring a DragEnter ENDS THE DRAG over this widget: not one DragMove
+		 * follows it. And a drag always begins on the row being dragged, whose
+		 * two neighbouring gaps are precisely the positions that refuse as
+		 * no-ops — so the first event was a refusal, the refusal killed the
+		 * stream, and the gesture was dead before it began. Every "I cannot drop
+		 * between two rows" report was this, and it survived four fixes because
+		 * no harness can enter a native drag loop to see it.
+		 *
+		 * The ACTION is what says "not here": IgnoreAction gives the OS
+		 * no-drop cursor while the event stays accepted, so moves keep arriving
+		 * and the next position gets its own answer. The drop itself is where a
+		 * refusal actually refuses.
+		 */
+		e->setDropAction( legal == 0 ? Qt::IgnoreAction
+			: mode == WwReparentMode::Link ? Qt::LinkAction : Qt::MoveAction );
+		e->accept();
 		return true;
 	}
 

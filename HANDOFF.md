@@ -249,6 +249,14 @@ before launch and puts it back on exit, because the mode is read during window
 construction — and because **switching it at run time is what the flat-list
 fault takes down**.
 
+**Never `ignore()` a drag event you mean to keep receiving.** Ignoring a
+DragEnter or DragMove ends the drag over that widget — not one further event
+arrives — so the first position the pointer happens to be at decides the whole
+gesture. A drag begins on the row being dragged, whose neighbouring gaps refuse
+as no-ops, so the block list's drag was dead before it began and stayed that way
+through four wrong fixes. Accept the event and put the verdict in the drop
+ACTION: `Qt::IgnoreAction` gives the no-drop cursor while the stream stays alive.
+
 **A window that follows the cursor during a drag must be
 `Qt::WindowTransparentForInput`.** Otherwise it takes part in hit-testing, and
 the moment it passes under the pointer the view underneath gets a `DragLeave` and
@@ -272,6 +280,13 @@ handlers are `NifTreeView` overrides and why `wwDeliverDragEvent` exists: a
 harness needs an entry point that begins where Qt's routing ends. The override
 count it reports is the check that the overrides ran, rather than the hook being
 poked directly.
+
+**There is a live-drag test, and it is the only thing above that boundary.**
+`tests/spells/block_drag_live.ps1` drives the physical mouse at the block list on
+the second monitor and reads `release/ww_drag.log` — which the program writes on
+every drag, with no flag to set. It found in one run what four code-reading fixes
+missed while the harness sat at 44 green. When a drag bug is reported, run that
+first; it takes over the pointer for about three seconds.
 
 **And that entry point is exactly how the drag shipped broken.** Driving the drop
 handlers covers everything below `startDrag()` — and `startDrag()` was never

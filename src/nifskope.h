@@ -556,6 +556,10 @@ private:
 	QList<qint32> blockListDragPayload( const QMimeData * mime ) const;
 	//! Highlight (or clear, with -1) the row a drop would land on.
 	void setBlockListDropTarget( qint32 block );
+	//! With WW_DRAG_LOG set, write every visible row's GLOBAL rectangle, so a
+	//! real mouse can be driven at them from outside the process. A native drag
+	//! is the one path no synthetic event can enter.
+	void wwLogBlockListRowGeometry();
 	/*! \} */
 
 	QWidget * filePathWidget( QWidget * );

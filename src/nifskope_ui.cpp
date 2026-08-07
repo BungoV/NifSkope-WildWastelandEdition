@@ -8489,6 +8489,34 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * the row up — an accepted-looking drag onto an illegal target
 					 * is how a silent no-op gets reported as a bug.
 					 */
+					/* A REFUSED HOVER MUST STILL BE ACCEPTED.
+					 *
+					 * Ignoring a drag event ends the drag over the widget — not one
+					 * DragMove follows — and a drag always begins ON the row being
+					 * dragged, whose neighbouring gaps are exactly the positions
+					 * that refuse as no-ops. So the first event was a refusal, the
+					 * refusal killed the stream, and the whole gesture was dead
+					 * before it began: measured on a real drag, one DragEnter and
+					 * then silence.
+					 *
+					 * The event stays accepted and the ACTION carries the verdict.
+					 * This is the check that would have caught it; four fixes went
+					 * past it because a harness cannot enter a native drag loop.
+					 */
+					{
+						const QPoint selfPos = rowPos( nodeB );
+						const QMimeData * mime = skope->blockListDragMimeData( { nodeB } );
+						QDragMoveEvent onSelf( selfPos, Qt::MoveAction, mime, Qt::LeftButton,
+							Qt::NoModifier );
+						onSelf.setAccepted( false );
+						list->wwDeliverDragEvent( &onSelf );
+						check( "a hover the drop would refuse is still ACCEPTED, or the drag dies",
+							onSelf.isAccepted() );
+						check( "...and says so through the action instead",
+							onSelf.dropAction() == Qt::IgnoreAction );
+						delete mime;
+					}
+
 					auto refuses = [&]( const QString & what, const QList<qint32> & blocks, qint32 target ) {
 						const int parentWas = nif->getParent( blocks.first() );
 						const int blocksWas = nif->getBlockCount();
@@ -9015,6 +9043,21 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				skope->setWindowModified( false );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
+		} );
+	}
+
+	/* WW_DRAG_LOG: dump every row's GLOBAL rectangle once the file is open.
+	 *
+	 * A native drag is the one path no harness can enter — QApplication::notify
+	 * routes drag and drop through the drag manager, so nothing synthetic reaches
+	 * the loop. Driving a REAL mouse from outside the process does reach it, and
+	 * to do that something has to say where the rows are on screen.
+	 */
+	if ( !fname.isEmpty() && !qEnvironmentVariable( "WW_DRAG_LOG" ).isEmpty() ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			if ( !ok )
+				return;
+			QTimer::singleShot( 1200, skope, [skope]() { skope->wwLogBlockListRowGeometry(); } );
 		} );
 	}
 

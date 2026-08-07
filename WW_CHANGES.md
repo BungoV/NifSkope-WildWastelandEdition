@@ -1,5 +1,44 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07h — The drag was dead before it began
+
+**Ignoring a drag event ends the drag over the widget.** Not one `DragMove`
+follows it. And a drag always begins **on the row being dragged**, whose two
+neighbouring gaps are precisely the positions that refuse as no-ops — so the
+first event was a refusal, the refusal killed the event stream, and every
+subsequent aim went to a program that had stopped listening.
+
+That is the whole of "I cannot drop between two rows", and it survived **four**
+fixes made by reading code, with `block_dragdrop.sh` sitting at 44 green checks
+the entire time.
+
+Our own payload is accepted always now, wherever the pointer is. The **action**
+carries the verdict — `IgnoreAction` gives the OS no-drop cursor while the event
+stays accepted, so moves keep arriving and the next position gets its own answer.
+The drop is where a refusal actually refuses.
+
+### The thing that found it
+
+`tests/spells/block_drag_live.ps1` drives the **physical mouse** at the block list
+and reads the drag log back. A native drag is the one path no harness can enter —
+`QApplication::notify` routes drag and drop through the drag manager, so nothing
+synthetic reaches the loop — and everything above that boundary had no coverage
+at all. One run: `ENTER … | spot 3 pos -1`, then silence. Afterwards: `ENTER`, 20
+moves, `DROP … spot 0 pos 3 → moved 1, refusals: none`.
+
+The harness gained the check that would have caught it: a hover the drop would
+refuse must still come back **accepted**, and say so through the action instead.
+It takes over the mouse for three seconds and runs on the second monitor.
+
+### And the log is on by default
+
+It was behind `WW_DRAG_LOG=<file>`, and the one run that mattered was launched by
+double-clicking the exe, where no shell variable can reach it — so a drag was
+performed and nothing at all was recorded. It writes to `ww_drag.log` beside the
+executable now, truncated at each drag start so it cannot grow. A diagnostic that
+needs the person reporting the bug to launch the program a particular way is a
+diagnostic that does not run.
+
 ## 2026-08-07g — The end of the list was nowhere
 
 `indexAt()` answers nothing in the empty space below the last row, so a drop
