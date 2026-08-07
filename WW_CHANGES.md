@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07q — What a drag on a big file actually costs
+
+`wwParentsOf` walks every block in the file, once per block moved, and the
+multi-block sort calls `getParent` per comparison. Both are O(blocks) inside a
+loop, and the standing note said to measure before caring. Measured, with
+`WW_BLOCKDND_BENCH=<n>` on `block_dragdrop.sh`:
+
+|  | 512 blocks | 2012 blocks |
+|---|---|---|
+| 1 block, out of a 2000-child parent | 88 ms | 160 ms |
+| 1 block, out of a 3-child parent | 152 ms | 138 ms |
+| 50 blocks | 360 ms | 892 ms |
+
+**The single-block cost does not track the block count at all**, and moving a
+block out of a three-child parent costs the same as out of a two-thousand-child
+one. It is `nifSnapshotOp`: one undo step **serialises the whole file twice**,
+before and after, and every structural edit in the program pays it.
+
+`wwParentsOf` shows up only in the multi-block case — take the single snapshot
+off those runs and it is 5 ms a block at 512 blocks and 15 ms at 2012. So caching
+a parent map would buy the rarest gesture on the largest files about a third of a
+second, and leave the per-block `Children` rebuild, also O(blocks), where it is.
+**Not done, on the numbers.** The snapshot is the bigger fish and is filed as its
+own backlog item rather than being bolted onto a drag.
+
+The bench is part of `block_dragdrop.sh` and off unless asked for: it builds
+thousands of blocks, which is not what the rest of that harness is for.
+
 ## 2026-08-07p — Nothing in the flat Block List could be clicked
 
 Filed as "blocks inserted while the flat list is showing are not addressable".

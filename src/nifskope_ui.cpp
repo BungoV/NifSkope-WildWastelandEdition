@@ -9199,6 +9199,64 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						NifSkope::wwSetHoverProbePos( QPoint(), false );
 					}
 
+					/* WHAT IT COSTS ON A BIG FILE (WW_BLOCKDND_BENCH=<blocks>).
+					 *
+					 * wwParentsOf walks every block in the file looking for the ones
+					 * whose Children hold this one, once per block moved, and the
+					 * multi-block sort calls getParent per comparison. Both are
+					 * O(blocks) inside something that is already a loop, and the
+					 * question is whether that is worth caching a parent map for.
+					 *
+					 * Off by default: it builds thousands of blocks, which is not
+					 * what the rest of this harness is for.
+					 */
+					if ( qEnvironmentVariableIsSet( "WW_BLOCKDND_BENCH" ) ) {
+						const int n = qMax( 100,
+							qEnvironmentVariable( "WW_BLOCKDND_BENCH" ).toInt() );
+						QList<qint32> made;
+						for ( int i = 0; i < n; i++ ) {
+							const qint32 b = nif->getBlockNumber(
+								nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
+							addLink( nif, nif->getBlockIndex( nodeA ), "Children", b );
+							made << b;
+						}
+						log << "bench: " << nif->getBlockCount() << " blocks, "
+							<< childrenOf( nodeA ).size() << " under one node\n";
+						log.flush();
+
+						QElapsedTimer t;
+						t.start();
+						wwReparentBlocks( nif, { made.last() }, nodeB, WwReparentMode::PreserveWorld );
+						const qint64 one = t.elapsed();
+
+						QList<qint32> fifty;
+						for ( int i = 0; i < qMin( 50, made.size() - 1 ); i++ )
+							fifty << made.at( i );
+						t.restart();
+						wwReparentBlocks( nif, fifty, nodeB, WwReparentMode::PreserveWorld );
+						const qint64 many = t.elapsed();
+
+						/* AND THE SAME MOVE OUT OF A SMALL PARENT, on the same file.
+						 * Moving out of the 2000-child node also REBUILDS that
+						 * array, which is the operation's own cost and not the
+						 * walk's; a block whose old parent has three children pays
+						 * the walk and nothing else. The difference is what caching
+						 * a parent map could actually buy.
+						 */
+						const qint32 lone = nif->getBlockNumber(
+							nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
+						addLink( nif, nif->getBlockIndex( root ), "Children", lone );
+						t.restart();
+						wwReparentBlocks( nif, { lone }, nodeB, WwReparentMode::PreserveWorld );
+						const qint64 small = t.elapsed();
+
+						log << "bench: one block out of a 2000-child parent " << one
+							<< " ms, " << fifty.size() << " blocks " << many
+							<< " ms, one block out of a " << childrenOf( root ).size()
+							<< "-child parent " << small << " ms\n";
+						log.flush();
+					}
+
 					/* Everything above went through the view's own drag overrides,
 					 * two events per drop. If a future change routes the hook some
 					 * other way, or drops one of the four overrides, this is what

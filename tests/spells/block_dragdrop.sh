@@ -68,6 +68,26 @@
 # pointer cannot be moved from inside the process. Going back to a per-window
 # probe fails checks 42 and 43.
 #
+# WHAT IT COSTS, and it is not what was suspected:
+#
+#   WW_BLOCKDND_BENCH=2000 bash tests/spells/block_dragdrop.sh
+#
+# builds that many extra blocks under one node and times the move. Measured on
+# this machine, 2026-08-07:
+#
+#              512 blocks   2012 blocks
+#   1 block       88 ms        160 ms      out of a 2000-child parent
+#   1 block      152 ms        138 ms      out of a 3-child parent
+#   50 blocks    360 ms        892 ms
+#
+# The single-block cost does NOT track the block count -- it is nifSnapshotOp,
+# which serialises the whole file TWICE for one undo step, and every structural
+# edit in the program pays it. wwParentsOf, the O(blocks) walk that was suspected
+# and that this was written to measure, only shows up in the multi-block case:
+# take the one snapshot off the 50-block runs and it is 5 ms a block at 512 and
+# 15 at 2012. Caching a parent map would buy the rarest gesture on the largest
+# files about a third of a second. Not done, deliberately.
+#
 # "The line is painted" counts accent-coloured pixels in a grab of the viewport
 # along the line's row. wwDropLineY only says the view was TOLD to draw one, and
 # the whole complaint that produced this feature was that you could not see where

@@ -1,5 +1,34 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## Every structural edit serialises the whole file twice — MEASURED 2026-08-07p
+
+Found while measuring something else, and it is the bigger number of the two.
+`nifSnapshotOp` (`src/nifsnapshot.h`) saves the entire NIF to a `QByteArray`
+before the operation and again after, so **one undo step costs two whole-file
+serialisations**. Every structural edit in the program goes through it.
+
+Measured with `WW_BLOCKDND_BENCH` (see `block_dragdrop.sh`), re-parenting one
+block: **88 ms on a 512-block file, 160 ms on 2012**, and the cost does not track
+what the operation itself touches — moving a block out of a 3-child parent costs
+the same as out of a 2000-child one.
+
+Not acted on. It is a real cost on large files and it is shared by everything, so
+it wants its own decision (a diffing undo command for structural edits, or
+snapshotting only the affected branch) rather than being bolted onto a drag.
+
+## ~~Block list: wwParentsOf is O(blocks) per moved block~~ — MEASURED, NOT WORTH IT
+
+The suspicion was that `wwParentsOf` walking every block, once per block moved,
+plus a sort comparator calling `getParent` per comparison, made a drag slow on a
+large file. Measured: it does not show at all in a single-block drag, which is
+the gesture anyone actually makes — that is the snapshot above. It shows only in
+a multi-block drag, at 5 ms a block on a 512-block file and 15 ms on a 2012-block
+one, so a 50-block drop on a very large file spends about 0.7 s there.
+
+Caching the parent map for the duration of a call would buy the rarest gesture on
+the largest files roughly a third of a second, and would leave the per-block
+`Children` rebuild — also O(blocks) — where it is. Left alone on the numbers.
+
 ## ~~Block list: flat list mode is not sound~~ — FIXED 2026-08-07p
 
 **The mode is kept.** Fault 1 was real, worse than filed, and is fixed, with a

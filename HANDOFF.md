@@ -5,18 +5,19 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 [WW_FEATURES.md](WW_FEATURES.md) is what the fork adds, and
 [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog.
 
-Updated **2026-08-07** after the block-list drag-and-drop session.
-Branch `main` at `a901281`, build green, working tree clean, everything pushed.
+Updated **2026-08-07**, second session, after clearing the block-list follow-ups.
+Build green, working tree clean, everything pushed.
 
 Two headlines:
 
 - **The Block List is a direct-manipulation panel now** — drag to re-parent,
-  reorder and un-parent; paste follows the pointer; a click on blank space
-  selects nothing. Details below.
-- **The flat list mode is not sound** and is the top backlog item. Blocks
-  inserted while it is showing are not addressable, and it intermittently takes
-  the process down. Neither is drag-and-drop's or rename's doing — both were
-  A/B'd out. Hierarchy mode is unaffected.
+  reorder and un-parent; paste follows the pointer *in every window*; a click on
+  blank space selects nothing. Details below.
+- **The flat list mode is fixed and kept.** It was worse than filed — *no* row in
+  it could be clicked, dropped on or right-clicked, not just newly inserted ones
+  — and the cause was `QHeaderView`'s cached total going negative, not anything
+  about the model. The crash filed alongside it does not reproduce in 36 runs.
+  Hierarchy mode was never affected.
 
 ### The Block List, as it now behaves
 
@@ -42,23 +43,26 @@ drag with no flag to set (`WW_DRAG_LOG=off`, or a path, overrides).
 
 ### Where to pick up
 
-Four things, in the order they are worth doing:
+The four things the last handoff listed are all closed — three fixed, one
+measured and deliberately not done. What is left of them:
 
-1. **Multi-window breaks paste-follows-pointer.** Every window registers the
-   hover probe into one slot (`setBlockListHoverProbe`), last one wins, and it
-   declines when its own window is not active — so in a second document paste
-   silently falls back to selection-based. Re-register on window activation.
-2. **The live-drag script covers one scenario, and three more are written but
-   UNVERIFIED.** `tests/spells/block_drag_live.ps1` is the only coverage above
-   the native-drag boundary, where every one of this session's bugs lived. It
-   seizes the mouse — see the warning below — so it needs a deliberate run.
-3. **`wwParentsOf` is O(blocks) per moved block**, and the multi-block sort
-   comparator calls `getParent` per comparison. Invisible on normal files;
-   measure before caring, then cache the parent map for the duration of a call.
-4. **The two list modes have drifted a long way.** Flat list has no reorder, no
-   drag-out and no auto-expand — deliberate, since it is file order rather than
-   anyone's children — but with item 0 (flat list not sound) unresolved it is
-   worth deciding whether that mode is being kept at all.
+1. **Drag-and-drop has no coverage in flat list mode.** Nothing structural is in
+   the way now that the view answers `indexAt` there; `block_dragdrop.sh` seeds
+   no list mode, so it needs the registry dance `block_list_modes.sh` uses. Its
+   code branches on the model and is believed correct, and nothing has driven it.
+2. **Every structural edit serialises the whole file twice.** `nifSnapshotOp`
+   saves the NIF before the operation and again after, for one undo step — 88 ms
+   on a 512-block file, 160 ms on 2012, and it does not track what the operation
+   touches. It is the largest cost in a drag by a wide margin and it is shared by
+   everything, so it wants its own decision. In the backlog.
+3. **The two list modes have drifted.** Flat list has no reorder, no drag-out and
+   no auto-expand — deliberate, since it is file order rather than anyone's
+   children. The mode is being kept; this is a question of how far to take it,
+   not whether.
+
+And the standing one: `block_drag_live.ps1` still has three UNVERIFIED scenarios
+if the run at the end of this session did not clear them — see the note below,
+and ask before running it.
 
 ### Open, and honest about it
 
@@ -291,15 +295,16 @@ And the block-list session added three:
 
 | harness | covers |
 |---|---|
-| `block_dragdrop.sh` | 82 checks: that the drag starts at all, the three modifiers, reorder by the gap, drag-out, every refusal, multi-select as one payload and its ordering, the highlight and the painted insertion line, the drag card, auto-expand and its fold-back, paste following the pointer, blank-click deselect, one undo step |
-| `block_rename.sh` | 24 per mode: F2 and double-click, that nothing else opens on top, no sideways scroll, Escape, the column asymmetry, the txt icon, and that the name reaches the palette |
+| `block_dragdrop.sh` | 87 checks: that the drag starts at all, the three modifiers, reorder by the gap, drag-out, every refusal, multi-select as one payload and its ordering, the highlight and the painted insertion line, the drag card, auto-expand and its fold-back, paste following the pointer *in a second window*, blank-click deselect, one undo step. `WW_BLOCKDND_BENCH=<n>` also times a move on a file that size |
+| `block_rename.sh` | 24 per mode, **both modes**: F2 and double-click, that nothing else opens on top, no sideways scroll, Escape, the column asymmetry, the txt icon, and that the name reaches the palette |
+| `block_list_modes.sh` | 8 per mode: that the header's total matches the sections it totals, that every row resolves back to itself through `indexAt`, that a block inserted now is addressable, and that all of it survives switching modes |
 | `block_drag_live.ps1` | **the only thing above the native-drag boundary** — drives the physical mouse. See the warning below. |
 
-Both build their fixture from the starter document (`-no-gui new`), so they need
-no game corpus at all. `block_rename.sh` seeds `List Mode` into the registry
-before launch and puts it back on exit, because the mode is read during window
-construction — and because **switching it at run time is what the flat-list
-fault takes down**.
+All three build their fixture from the starter document (`-no-gui new`), so they
+need no game corpus at all. `block_rename.sh` and `block_list_modes.sh` seed
+`List Mode` into the registry before launch and put it back on exit, because the
+mode is read during window construction — the app has to *start* in the mode
+under test, and both of them assert that it did rather than assuming.
 
 **Never `ignore()` a drag event you mean to keep receiving.** Ignoring a
 DragEnter or DragMove ends the drag over that widget — not one further event
@@ -435,6 +440,24 @@ broke it open after two sessions of bisecting the wrong thing.
 Still true and still worth keeping: **a crash that survives reverting the change
 that appears to cause it is not caused by that change** — check persisted state
 before bisecting further.
+
+**`QHeaderView` keeps its total by adding and subtracting, and a model change
+desyncs it.** `length` is the sum of the sections, maintained by deltas rather
+than re-derived. Hiding a section subtracts its width and remembers it; changing
+the model gives every remembered width back **without adding it to `length`**.
+Hide them again and each width comes off twice. The Block List hides 9 of the
+NifModel's 12 columns, so after one load `length` was NEGATIVE — and
+`visualIndexAt` returns -1 for anything past it, so `QTreeView::indexAt` had no
+column and returned no index for any point in the view. Nothing in the flat list
+could be clicked, dropped on or right-clicked, and it read as "the rows are
+there but dead".
+
+Two rules follow, and `block_list_modes.sh` guards both: **release the columns
+before changing a view's model and apply them after**
+(`wwReleaseBlockListColumns` / `wwApplyBlockListColumns`), and **a saved header
+blob belongs to a model shape** — restoring one saved against the 3-column proxy
+onto the 12-column NifModel desyncs the total the same way, so each mode keeps
+its own.
 
 **`NifTreeView::isRowHidden( int, const QModelIndex & )` is not
 `QTreeView::isRowHidden`.** It shadows it with a different meaning: it ignores the
