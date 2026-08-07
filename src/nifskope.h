@@ -543,6 +543,15 @@ private:
 	//! The block number under a viewport point, through whichever model is
 	//! current, or -1.
 	qint32 blockListBlockAt( const QPoint & viewportPos ) const;
+	/*! Where a drop at this point would land.
+	 *
+	 *  On a row's middle it re-parents onto that block (`position` -1); near a
+	 *  row's top or bottom edge it inserts into that row's PARENT at that
+	 *  position, which is how a block is dragged up or down among its siblings.
+	 *  `lineY` comes back >= 0 for the second case so the view can draw it.
+	 */
+	qint32 blockListDropSpot( const QPoint & viewportPos, int * position, int * lineY = nullptr,
+		int * lineFrom = nullptr ) const;
 	//! The block numbers carried by a block-list drag, or empty.
 	QList<qint32> blockListDragPayload( const QMimeData * mime ) const;
 	//! Highlight (or clear, with -1) the row a drop would land on.

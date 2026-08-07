@@ -200,7 +200,8 @@ enum class WwReparentMode
  *  Separate from the operation so a drag can ask before the drop, and phrased for
  *  display: a silent no-op is what this kept getting reported for.
  */
-QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode );
+QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode,
+	int position = -1 );
 
 /*! Re-parent blocks under `newParent`, as ONE undo step.
  *
@@ -213,10 +214,16 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
  *  Refused blocks are skipped, not fatal: a mixed multi-selection moves what it
  *  can and reports the rest.
  *
+ *  `position` is where in the new parent's `Children` the blocks land, which is
+ *  how dropping BETWEEN two rows reorders: -1 appends, which is what dropping on
+ *  a row does. It is resolved against the array as the user saw it, so removing
+ *  a block that sat above the insertion point shifts it back by one, and several
+ *  blocks land consecutively in the order given.
+ *
  *  \param refusals if given, receives one line per skipped block.
  *  \return how many blocks moved.
  */
 int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newParent,
-	WwReparentMode mode, QStringList * refusals = nullptr );
+	WwReparentMode mode, QStringList * refusals = nullptr, int position = -1 );
 
 #endif // SP_BLOCKS_H

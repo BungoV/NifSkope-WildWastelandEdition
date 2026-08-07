@@ -1,5 +1,67 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07b — The drag never started, and two things in the way of the name
+
+All three reported against the batch below, within minutes of it landing.
+
+### The drag never started
+
+`QAbstractItemView` refuses to enter `DraggingState` unless the **model** reports
+`Qt::ItemIsDragEnabled` for the pressed index. That flag appeared nowhere in this
+codebase, so `startDrag()` was never called and nothing happened when you dragged
+a row — with every piece below `startDrag` working perfectly. `NifModel::flags`
+now adds it for block rows, which the proxy forwards, so both list modes get it.
+
+**The harness passed 26 of 26 on that.** It drove the drop handlers directly,
+which was the right way to reach code Qt's drag routing hides — and it meant the
+one step that was broken sat entirely outside what was measured. It now checks
+the flag on both models, `dragEnabled` on the view, and puts a real press and
+move through the viewport with the drag hook swapped for a counting one, because
+the production hook ends in `QDrag::exec()` and would block forever with nobody
+at the mouse. Removing the flag again fails three of those checks; that is how
+they were shown to bite rather than assumed to.
+
+### Double-click edited a number
+
+Qt's default edit triggers (`DoubleClicked | SelectedClicked`) opened the
+**delegate's** editor on the same double-click that starts the inline rename, so
+two editors landed on one cell and the delegate's was on top. A block row's Value
+cell buddies to that block's `Name`, which in a Bethesda file is a
+`tStringIndex` — an integer — so what you got was a spin over the raw string
+index. The block list is a block browser, not a field editor, and it has its own
+rename: `NoEditTriggers` now, and a check that every line edit in the viewport
+belongs to the rename editor.
+
+### The txt icon down the whole Value column
+
+`spEditStringIndex` is `instant()` and applicable to every `tStringIndex`, and
+every block row's Value cell buddies to its `Name` — so it matched every single
+row, drew its txt icon in all of them, and a click cast a string-index dialog
+nobody asked for. The Block List's delegate suppresses instant-spell icons now;
+Block Details, where the icon marks the few fields that have one, is untouched.
+The two views already get their own delegate instance, so this needed no new
+plumbing.
+
+### Reorder by dragging
+
+New, asked for at the same time. Dropping in the **gap** between two rows moves
+the block to that position in the parent's `Children` array instead of
+re-parenting onto a row — dragging a block up or down among its siblings. An
+insertion line is drawn at the gap (Qt's own drop indicator is set only inside
+`QAbstractItemView::dragMoveEvent`, which asks `canDropMimeData()` first and so
+never appears here), the row fill is *not* shown, because the gap is what is
+being pointed at, and a drop that lands where the block already is is refused
+rather than pushing an empty undo step.
+
+Hierarchy mode only, and deliberately: the flat list is the file's block order,
+not anyone's children, so a gap there names no position in any array.
+
+`wwReparentBlocks` takes a position now. It is resolved against the array as the
+user saw it — removing a block that sat above the insertion point shifts it back
+by one — and several blocks land consecutively in the order they were dragged.
+
+`block_dragdrop.sh` is 38 checks; `block_rename.sh` 19 per mode.
+
 ## 2026-08-07 — Drag a block onto a node, and the rename that was already there
 
 ### Drag to move

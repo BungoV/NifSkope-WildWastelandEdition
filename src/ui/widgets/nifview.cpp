@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifview.h"
 
 #include "spellbook.h"
+#include "wwskin.h"	// the reorder insertion line's colour
 #include "model/basemodel.h"
 #include "model/nifproxymodel.h"
 #include "model/undocommands.h"
@@ -417,6 +418,20 @@ void NifTreeView::startDrag( Qt::DropActions supportedActions )
 		return;
 
 	QTreeView::startDrag( supportedActions );
+}
+
+void NifTreeView::paintEvent( QPaintEvent * e )
+{
+	QTreeView::paintEvent( e );
+
+	if ( wwDropLineY < 0 )
+		return;
+
+	// indented to where the row's own text starts, so it reads as "between these
+	// two children" rather than as a rule across the whole dock
+	QPainter p( viewport() );
+	p.setPen( QPen( QColor::fromString( wwSkinColor( "accent" ) ), 2 ) );
+	p.drawLine( wwDropLineFrom, wwDropLineY, viewport()->width() - 2, wwDropLineY );
 }
 
 void NifTreeView::wwDeliverDragEvent( QEvent * e )

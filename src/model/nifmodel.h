@@ -218,7 +218,20 @@ public:
 	quint32 getBSVersion() const { return bsVersion; }
 
 	//! Create and return delegate for SpellBook
-	static QAbstractItemDelegate * createDelegate( QObject * parent, SpellBookPtr book );
+	//! hideInstantIcons suppresses the instant-spell icon in the Value column —
+	//! the Block List asks for it, Block Details does not.
+	static QAbstractItemDelegate * createDelegate( QObject * parent, SpellBookPtr book,
+		bool hideInstantIcons = false );
+
+	/*! Block rows can be DRAGGED (the Block List re-parents by dropping them).
+	 *
+	 *  The flag has to be on the model: QAbstractItemView refuses to enter
+	 *  DraggingState without Qt::ItemIsDragEnabled, so startDrag() is never
+	 *  called and the drag silently never begins — which is how the block list's
+	 *  drag-and-drop first shipped doing nothing at all. Harmless in the field
+	 *  views, which leave dragEnabled false.
+	 */
+	Qt::ItemFlags flags( const QModelIndex & index ) const override;
 
 	//! Undo Stack for changes to NifModel
 	QUndoStack * undoStack = nullptr;

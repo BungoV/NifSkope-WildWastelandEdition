@@ -11,7 +11,8 @@ Branch `main`, build green, working tree clean, everything pushed.
 Two headlines:
 
 - **Block-list rows drag onto a `NiNode` to re-parent** — plain drop preserves
-  world position, Shift keeps the local transform, Ctrl links. The primitive is
+  world position, Shift keeps the local transform, Ctrl links, and dropping in
+  the gap between two rows reorders siblings. The primitive is
   `wwReparentBlocks` in `blocks.cpp`, shared with the Collision Manager's Set
   Parent.
 - **The flat list mode is not sound** and is now the top backlog item. Blocks
@@ -239,8 +240,8 @@ And the block-list session added two:
 
 | harness | covers |
 |---|---|
-| `block_dragdrop.sh` | the three modifiers, four refusals, multi-select as one payload, the highlight, one undo step |
-| `block_rename.sh` | F2 and double-click, Escape, the column asymmetry, and that the name reaches the palette |
+| `block_dragdrop.sh` | that the drag starts at all, the three modifiers, four refusals, multi-select as one payload, the highlight, reordering by the gap, one undo step |
+| `block_rename.sh` | F2 and double-click, that nothing else opens on top, Escape, the column asymmetry, and that the name reaches the palette |
 
 Both build their fixture from the starter document (`-no-gui new`), so they need
 no game corpus at all. `block_rename.sh` seeds `List Mode` into the registry
@@ -256,6 +257,16 @@ handlers are `NifTreeView` overrides and why `wwDeliverDragEvent` exists: a
 harness needs an entry point that begins where Qt's routing ends. The override
 count it reports is the check that the overrides ran, rather than the hook being
 poked directly.
+
+**And that entry point is exactly how the drag shipped broken.** Driving the drop
+handlers covers everything below `startDrag()` — and `startDrag()` was never
+called, because `QAbstractItemView` will not enter `DraggingState` unless the
+MODEL reports `Qt::ItemIsDragEnabled`. 26 checks green, feature dead. **When a
+harness has to enter below the top of a mechanism, name what it stepped over and
+cover that separately**: the flags on both models, `dragEnabled()` on the view,
+and a real press-and-move. Swap the drag hook for a counting one first — the
+production hook ends in `QDrag::exec()`, a modal loop that never returns with
+nobody at the mouse.
 
 **Two useful capture levers, both added while chasing things reading was not
 finding.** `WW_CAMERA_LOG=<file>` appends every camera reorientation with its

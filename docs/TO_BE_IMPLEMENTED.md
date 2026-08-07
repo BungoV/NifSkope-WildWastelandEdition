@@ -47,6 +47,19 @@ mode).
 event sent to the viewport reaches no event filter at all. `wwDeliverDragEvent`
 exists so a harness can start where Qt's routing ends.
 
+**And the drag has to be enabled on the MODEL.** `QAbstractItemView` will not
+enter `DraggingState` without `Qt::ItemIsDragEnabled` on the pressed index, so
+`startDrag()` is never called and the whole feature does nothing — which is
+exactly how it first shipped, with a green 26-check harness, because driving the
+drop handlers directly leaves that step outside the measurement.
+
+**Reordering by dragging into the gap between rows shipped 2026-08-07b** (user
+request, same evening): the block moves to that position in the parent's
+`Children` array, with an insertion line, hierarchy mode only. Two block-list
+irritations went with it — double-click opened the delegate's integer editor over
+the inline rename, and `spEditStringIndex`'s txt icon drew down the entire Value
+column.
+
 ### Drag to move
 
 Blender's tooltip is the whole spec: **"Move inside collection (Ctrl to link,

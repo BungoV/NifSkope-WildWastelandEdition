@@ -853,7 +853,18 @@ NifSkope::NifSkope( bool background )
 	list = ui->list;
 	list->setModel( proxy );
 	list->setSortingEnabled( false );
-	list->setItemDelegate( nif->createDelegate( this, book ) );
+	// hideInstantIcons: a block row's Value cell resolves through buddy() to that
+	// block's Name, a tStringIndex in any Bethesda file, so spEditStringIndex
+	// matched every row and drew its txt icon down the whole column
+	list->setItemDelegate( nif->createDelegate( this, book, true ) );
+	/* NO EDIT TRIGGERS. Qt's default DoubleClicked|SelectedClicked opened the
+	 * delegate's editor on the same double-click that starts the inline rename —
+	 * two editors on one cell, and the delegate's is an integer spin over the raw
+	 * string INDEX, which is what "I can only edit the node number" was. Renaming
+	 * here goes through renameBlockListIndex, which edits the resolved string and
+	 * carries it into palettes and controller sequences.
+	 */
+	list->setEditTriggers( QAbstractItemView::NoEditTriggers );
 	list->installEventFilter( this );
 	list->header()->resizeSection( NifModel::NameCol, 250 );
 
@@ -3918,6 +3929,8 @@ bool NifSkope::startBlockListDrag()
 	// exec() blocks until the drop is over; a drag that ended outside the list
 	// never reaches DragLeave, so the highlight is cleared here as well.
 	setBlockListDropTarget( -1 );
+	list->wwDropLineY = -1;
+	list->viewport()->update();
 	QToolTip::hideText();
 	return true;
 }
@@ -3969,6 +3982,59 @@ qint32 NifSkope::blockListBlockAt( const QPoint & viewportPos ) const
 	return nif->getBlockNumber( idx );
 }
 
+qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, int * lineY,
+	int * lineFrom ) const
+{
+	if ( position ) *position = -1;
+	if ( lineY ) *lineY = -1;
+	if ( lineFrom ) *lineFrom = 0;
+	if ( !nif || !list )
+		return -1;
+
+	QModelIndex idx = list->indexAt( viewportPos );
+	if ( !idx.isValid() )
+		return -1;
+	idx = idx.sibling( idx.row(), 0 );
+
+	/* HIERARCHY ONLY. The flat list is the file's block order, not anyone's
+	 * children, so "between these two rows" names no position in any Children
+	 * array — there is nothing there to reorder. Dropping in that mode is always
+	 * an onto-the-row re-parent.
+	 */
+	const QRect r = list->visualRect( idx );
+	const int edge = qBound( 2, r.height() / 4, 6 );
+	const bool above = ( viewportPos.y() - r.top() ) < edge;
+	const bool below = ( r.bottom() - viewportPos.y() ) < edge;
+	if ( list->model() != proxy || !( above || below ) )
+		return blockListBlockAt( viewportPos );
+
+	const QModelIndex parentIdx = idx.parent();
+	if ( !parentIdx.isValid() )
+		return blockListBlockAt( viewportPos );	// a root row has no siblings to sit between
+	const qint32 parentBlock = nif->getBlockNumber( proxy->mapTo( parentIdx ) );
+	if ( parentBlock < 0 )
+		return blockListBlockAt( viewportPos );
+
+	/* The row's position in its parent's CHILDREN, not its proxy row. The proxy
+	 * lists a node's children in link order, so the two agree today — but the
+	 * array is what gets written, and reading it directly means a proxy that ever
+	 * groups or filters rows cannot silently move the wrong entry.
+	 */
+	const qint32 rowBlock = nif->getBlockNumber( proxy->mapTo( idx ) );
+	const QVector<qint32> kids = nif->getLinkArray( nif->getBlockIndex( parentBlock ), "Children" );
+	const int at = int( kids.indexOf( rowBlock ) );
+	if ( at < 0 )
+		return blockListBlockAt( viewportPos );
+
+	if ( position )
+		*position = above ? at : at + 1;
+	if ( lineY )
+		*lineY = above ? r.top() : r.bottom();
+	if ( lineFrom )
+		*lineFrom = r.left();
+	return parentBlock;
+}
+
 void NifSkope::setBlockListDropTarget( qint32 block )
 {
 	if ( !nif || nif->dropTargetBlock == block )
@@ -3985,6 +4051,8 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 
 	if ( event->type() == QEvent::DragLeave ) {
 		setBlockListDropTarget( -1 );
+		list->wwDropLineY = -1;
+		list->viewport()->update();
 		QToolTip::hideText();
 		blockListDropHint.clear();
 		return false;		// let the view do its own leave handling too
@@ -3997,7 +4065,8 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	if ( blocks.isEmpty() )
 		return false;		// not ours — a file drop still reaches the stock path
 
-	const qint32 target = blockListBlockAt( e->position().toPoint() );
+	int position = -1, lineY = -1, lineFrom = 0;
+	const qint32 target = blockListDropSpot( e->position().toPoint(), &position, &lineY, &lineFrom );
 	const WwReparentMode mode = blockListDropMode( e->modifiers() );
 
 	// Ask about every dragged block, so a mixed selection is described by what it
@@ -4005,7 +4074,7 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	int legal = 0;
 	QString refusal;
 	for ( const qint32 block : blocks ) {
-		const QString why = wwReparentRefusal( nif, block, target, mode );
+		const QString why = wwReparentRefusal( nif, block, target, mode, position );
 		if ( why.isEmpty() )
 			legal++;
 		else if ( refusal.isEmpty() )
@@ -4013,7 +4082,13 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	}
 
 	if ( event->type() != QEvent::Drop ) {
-		setBlockListDropTarget( legal > 0 ? target : -1 );
+		// a reorder shows the line and NOT the row fill: the parent is not what
+		// is being pointed at, the gap is
+		const bool reordering = ( legal > 0 && position >= 0 );
+		list->wwDropLineY = reordering ? lineY : -1;
+		list->wwDropLineFrom = lineFrom;
+		setBlockListDropTarget( ( legal > 0 && !reordering ) ? target : -1 );
+		list->viewport()->update();
 
 		QString hint;
 		if ( legal > 0 ) {
@@ -4022,7 +4097,9 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 				? tr( "block %1" ).arg( target )
 				: QStringLiteral( "%1 [%2]" ).arg( name ).arg( target );
 			// Blender's wording, with its two modifiers re-cast for a NIF
-			hint = mode == WwReparentMode::Link
+			hint = position >= 0
+				? tr( "Reorder inside %1, at position %2" ).arg( into ).arg( position + 1 )
+				: mode == WwReparentMode::Link
 				? tr( "Link into %1 — keeps the old parent too" ).arg( into )
 				: mode == WwReparentMode::KeepLocal
 				? tr( "Move into %1, keeping the local transform" ).arg( into )
@@ -4049,11 +4126,13 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	}
 
 	setBlockListDropTarget( -1 );
+	list->wwDropLineY = -1;
+	list->viewport()->update();
 	QToolTip::hideText();
 	blockListDropHint.clear();
 
 	QStringList refusals;
-	const int moved = wwReparentBlocks( nif, blocks, target, mode, &refusals );
+	const int moved = wwReparentBlocks( nif, blocks, target, mode, &refusals, position );
 	e->setDropAction( moved > 0
 		? ( mode == WwReparentMode::Link ? Qt::LinkAction : Qt::MoveAction )
 		: Qt::IgnoreAction );
@@ -4066,7 +4145,9 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		if ( moved == 0 ) {
 			ui->statusbar->showMessage( refusals.value( 0, tr( "Nothing was moved." ) ), 5000 );
 		} else {
-			const QString what = mode == WwReparentMode::Link
+			const QString what = position >= 0
+				? tr( "Reordered %n block(s) inside block %1.", nullptr, moved )
+				: mode == WwReparentMode::Link
 				? tr( "Linked %n block(s) to block %1, keeping the old parent.", nullptr, moved )
 				: mode == WwReparentMode::KeepLocal
 				? tr( "Moved %n block(s) into block %1, keeping the local transform.", nullptr, moved )

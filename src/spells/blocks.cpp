@@ -503,7 +503,8 @@ static Transform wwWorldTransform( const NifModel * nif, qint32 block, int guard
 	return parent < 0 ? local : wwWorldTransform( nif, parent, guard - 1 ) * local;
 }
 
-QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode )
+QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode,
+	int position )
 {
 	if ( !nif )
 		return QCoreApplication::translate( "Reparent", "No file is open." );
@@ -545,15 +546,27 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
 			"branch out of the file." ).arg( newParent );
 	}
 
-	if ( nif->getLinkArray( iParent, "Children" ).contains( block ) )
-		return QCoreApplication::translate( "Reparent", "Already a child of block %1." ).arg( newParent );
+	/* ALREADY A CHILD is only a refusal when nothing was asked for beyond that.
+	 * With a position — a drop BETWEEN two rows — the same parent is the ordinary
+	 * case: it is how a block is moved up or down among its siblings. What is
+	 * refused there is landing back where it already is, because a drag that
+	 * changes nothing should say so rather than push an empty undo step.
+	 */
+	const QVector<qint32> kids = nif->getLinkArray( iParent, "Children" );
+	if ( kids.contains( block ) ) {
+		if ( position < 0 )
+			return QCoreApplication::translate( "Reparent", "Already a child of block %1." ).arg( newParent );
+		const int was = int( kids.indexOf( block ) );
+		if ( position == was || position == was + 1 )
+			return QCoreApplication::translate( "Reparent", "Already in that position." );
+	}
 
 	Q_UNUSED( mode );
 	return QString();
 }
 
 int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newParent,
-	WwReparentMode mode, QStringList * refusals )
+	WwReparentMode mode, QStringList * refusals, int position )
 {
 	if ( !nif )
 		return 0;
@@ -561,7 +574,7 @@ int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newPa
 	struct Move { qint32 block; Transform world; };
 	QVector<Move> moves;
 	for ( const qint32 block : blocks ) {
-		const QString refusal = wwReparentRefusal( nif, block, newParent, mode );
+		const QString refusal = wwReparentRefusal( nif, block, newParent, mode, position );
 		if ( !refusal.isEmpty() ) {
 			if ( refusals )
 				refusals->append( refusal );
@@ -582,6 +595,10 @@ int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newPa
 		? QCoreApplication::translate( "Reparent", "Link to parent" )
 		: QCoreApplication::translate( "Reparent", "Re-parent" );
 
+	// where the next block lands. Walks forward so a multi-block drop keeps the
+	// order it was dragged in.
+	int cursor = position;
+
 	nifSnapshotOp( nif, what, [&]() {
 		for ( const Move & move : std::as_const( moves ) ) {
 			const int oldParent = nif->getParent( move.block );
@@ -598,12 +615,29 @@ int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newPa
 				for ( const qint32 child : nif->getLinkArray( from, "Children" ) )
 					if ( child != move.block && nif->isValidBlockNumber( child ) )
 						kept.append( child );
+				// a sibling reorder removes from the same array it is about to
+				// insert into, so everything after the hole shifts back one
+				if ( oldParent == newParent && cursor > 0 ) {
+					const int was = int( nif->getLinkArray( from, "Children" ).indexOf( move.block ) );
+					if ( was >= 0 && was < cursor )
+						cursor--;
+				}
 				nif->set<uint>( from, "Num Children", uint( kept.size() ) );
 				nif->updateArraySize( from, "Children" );
 				nif->setLinkArray( from, "Children", kept );
 			}
 
-			addLink( nif, nif->getBlockIndex( newParent ), "Children", move.block );
+			const QModelIndex iNew = nif->getBlockIndex( newParent );
+			if ( cursor < 0 ) {
+				addLink( nif, iNew, "Children", move.block );
+			} else {
+				QVector<qint32> kids = nif->getLinkArray( iNew, "Children" );
+				kids.insert( qBound( 0, cursor, int( kids.size() ) ), move.block );
+				nif->set<uint>( iNew, "Num Children", uint( kids.size() ) );
+				nif->updateArraySize( iNew, "Children" );
+				nif->setLinkArray( iNew, "Children", kids );
+				cursor++;
+			}
 
 			/* newLocal = inverse(newParentWorld) * oldWorld. Link mode does not
 			 * touch the transform: a block with two parents has no single world

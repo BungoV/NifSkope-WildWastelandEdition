@@ -153,7 +153,20 @@ class NifDelegate final : public QItemDelegate
 	}
 
 public:
-	NifDelegate( QObject * p, SpellBookPtr sb = 0 ) : QItemDelegate( p ), book( sb )
+	/*! Suppress the instant-spell icon in the Value column (WW).
+	 *
+	 *  The Block List is a block browser, not a field editor: every row's Value
+	 *  cell resolves through buddy() to that block's Name, which in a Bethesda
+	 *  file is a tStringIndex — so spEditStringIndex matched every single row and
+	 *  drew its txt icon down the whole column, with a click on it opening a
+	 *  string-index dialog nobody asked for. Block Details, where the icon marks
+	 *  the few fields that have one, keeps it: the two views are handed their own
+	 *  delegate instance.
+	 */
+	bool noInstantIcons = false;
+
+	NifDelegate( QObject * p, SpellBookPtr sb = 0, bool hideInstantIcons = false )
+		: QItemDelegate( p ), book( sb ), noInstantIcons( hideInstantIcons )
 	{
 	}
 
@@ -351,7 +364,8 @@ public:
 				}
 			}
 
-			if ( static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton
+			if ( !noInstantIcons
+			     && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton
 			     && decoRect( option ).contains( static_cast<QMouseEvent *>(event)->pos() ) )
 			{
 				// Spell Icons in Value column
@@ -445,7 +459,7 @@ public:
 		QString text = index.data( namerole ).toString();
 		QVariant decoration = index.data( Qt::DecorationRole );
 		QString deco = decoration.toString();
-		QString user = index.data( Qt::UserRole ).toString();
+		QString user = noInstantIcons ? QString() : index.data( Qt::UserRole ).toString();
 		QIcon icon = decoration.canConvert<QIcon>() ? qvariant_cast<QIcon>( decoration ) : QIcon();
 
 		if ( !user.isEmpty() ) {
@@ -731,9 +745,14 @@ public:
 	}
 };
 
-QAbstractItemDelegate * NifModel::createDelegate( QObject * parent, SpellBookPtr book )
+QAbstractItemDelegate * NifModel::createDelegate( QObject * parent, SpellBookPtr book,
+	bool hideInstantIcons )
 {
-	return new NifDelegate( parent, book );
+	auto * delegate = new NifDelegate( parent, book, hideInstantIcons );
+	// readable from outside without exporting the class: which view got the
+	// icon-suppressing delegate is the whole claim, and a harness can check it
+	delegate->setProperty( "wwNoInstantIcons", hideInstantIcons );
+	return delegate;
 }
 
 QAbstractItemDelegate * KfmModel::createDelegate( QObject * p )

@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# Block-list drag-and-drop: three modifiers, four refusals, one undo step.
+# Block-list drag-and-drop: does it start, three modifiers, four refusals,
+# reordering by the gap, one undo step.
 #
 # WHY THIS EXISTS
 #
@@ -15,33 +16,51 @@
 # list. Only the viewport shows the difference, and only if you happen to be
 # looking at a parent that is not at the origin.
 #
+# AND THE DRAG HAS TO START AT ALL. The first version of this test drove the drop
+# handlers and passed 26 of 26 while the feature did nothing whatsoever for a real
+# user: QAbstractItemView refuses to enter DraggingState unless the MODEL reports
+# Qt::ItemIsDragEnabled, which nothing in this codebase set, so startDrag() was
+# never called. Checks 2-5 are that hole closed -- the flags on both models, the
+# view's own dragEnabled, and a real press-and-move through the viewport. Removing
+# the flag again fails three of them, which is how they were shown to bite.
+#
 # WHAT IS MEASURED
 #
 #   1. the target node has a non-identity world offset          <- not vacuous
-#   2. the row under the drag is highlighted
-#   3. plain drop re-parents...
-#   4. ...and the block does not move in the world
-#   5. ...which it can only do by rewriting the LOCAL transform
-#   6. the highlight is cleared after the drop
-#   7. undo puts it back
-#   8. Shift drop re-parents...
-#   9. ...keeping the local transform exactly
-#  10. ...so it moves in the world by EXACTLY the parent's offset
-#  11. Ctrl links to the new parent...
-#  12. ...and keeps the old one, so the block has two parents
-#  13. ...and does not touch the transform
-#  14. undo removes the second parent
-#  15-20. dropping on itself, on its own descendant, and on a non-node are each
+#   2. a block row reports itself draggable
+#   3. ...and still does through the proxy
+#   4. the block list has dragging switched on
+#   5. pressing a selected row and moving starts a drag
+#   6. the row under the drag is highlighted
+#   7. plain drop re-parents...
+#   8. ...and the block does not move in the world
+#   9. ...which it can only do by rewriting the LOCAL transform
+#  10. the highlight is cleared after the drop
+#  11. undo puts it back
+#  12. Shift drop re-parents...
+#  13. ...keeping the local transform exactly
+#  14. ...so it moves in the world by EXACTLY the parent's offset
+#  15. Ctrl links to the new parent...
+#  16. ...and keeps the old one, so the block has two parents
+#  17. ...and does not touch the transform
+#  18. undo removes the second parent
+#  19-24. dropping on itself, on its own descendant, and on a non-node are each
 #         refused and each leave the file alone and the row unlit
-#  21-22. a payload carrying another document's model pointer is ignored
-#  23. a multi-selection drags as one payload and all of it lands
-#  24. ...as a single undo step
-#  25. one undo takes the whole multi-drop back
+#  25-26. a payload carrying another document's model pointer is ignored
+#  27. a multi-selection drags as one payload and all of it lands
+#  28. ...as a single undo step
+#  29. one undo takes the whole multi-drop back
+#  30-37. dropping in the GAP between rows reorders instead of re-parenting:
+#         above a sibling, below the last one, the insertion line, no row
+#         highlight, the parent and transform untouched, undo, and a drop that
+#         lands where the block already is being refused rather than pushing an
+#         empty undo step
+#  38. every drop went through the view's own drag overrides
 #
-# Checks 4 and 10 are the discriminating PAIR, on the same two blocks: plain drop
+# Checks 8 and 14 are the discriminating PAIR, on the same two blocks: plain drop
 # must leave the block where it was in the world, Shift drop must move it by
 # exactly the new parent's world offset. One implementation cannot satisfy both,
-# so neither can pass by accident -- and check 5 is what stops "it did not move"
+# so neither can pass by accident -- and check 9 is what stops "it did not move"
 # being satisfied by nothing having happened at all.
 #
 # Check 1 is why the harness sets the offset itself. With an identity target the

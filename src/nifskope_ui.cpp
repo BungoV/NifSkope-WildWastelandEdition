@@ -8210,13 +8210,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the target node has a non-identity world offset", targetOffset.length() > 1.0f );
 					if ( targetOffset.length() <= 1.0f ) break;
 
-					// where a row is, in viewport coordinates
-					auto rowPos = [&]( qint32 block ) -> QPoint {
+					// where a row is, in viewport coordinates. edge: 0 = the middle
+					// (an onto-the-row drop), -1 = just inside the top, +1 = just
+					// inside the bottom (the reorder bands)
+					auto rowFor = [&]( qint32 block ) -> QModelIndex {
 						QModelIndex idx = ( list->model() == skope->proxy )
 							? skope->proxy->mapFromPrimary( nif->getBlockIndex( block ) )
 							: nif->getBlockIndex( block );
+						return idx.isValid() ? idx.sibling( idx.row(), 0 ) : QModelIndex();
+					};
+					auto rowPoint = [&]( qint32 block, int edge ) -> QPoint {
+						QModelIndex idx = rowFor( block );
 						if ( !idx.isValid() ) return QPoint( -1, -1 );
-						idx = idx.sibling( idx.row(), 0 );
 						list->expandAll();
 						/* PositionAtTop, and the result is checked against the
 						 * viewport. visualRect() answers from the layout whether or
@@ -8237,8 +8242,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							log.flush();
 							return QPoint( -1, -1 );
 						}
-						return r.center();
+						if ( edge == 0 )
+							return r.center();
+						// 1px inside the edge, which is inside the reorder band
+						// (qBound(2, h/4, 6) px) for any sane row height
+						return QPoint( r.center().x(), edge < 0 ? r.top() + 1 : r.bottom() - 1 );
 					};
+					auto rowPos = [&]( qint32 block ) { return rowPoint( block, 0 ); };
 
 					// one drag-over plus one drop, exactly as the window sees them.
 					// highlight receives what the move pass lit up, and deliveries
@@ -8288,6 +8298,42 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QApplication::processEvents();
 					};
 
+					/* The same thing aimed at the GAP between two rows, which is
+					 * what reorders. The expected parent and position are passed in
+					 * and checked BEFORE the drop: a reorder that resolved to the
+					 * wrong slot would still produce a legal-looking array, so
+					 * "where did the window think this was going" has to be part of
+					 * the measurement rather than inferred from the result.
+					 */
+					int lastLineY = -1;
+					auto reorder = [&]( const QList<qint32> & blocks, qint32 overRow, int edge,
+						qint32 wantParent, int wantPosition ) -> bool {
+						const QPoint pos = rowPoint( overRow, edge );
+						if ( pos.x() < 0 )
+							return false;
+						int position = -1;
+						const qint32 spot = skope->blockListDropSpot( pos, &position );
+						if ( spot != wantParent || position != wantPosition ) {
+							log << "    [row] the gap at " << pos.x() << "," << pos.y()
+								<< " resolves to parent " << spot << " position " << position
+								<< ", not " << wantParent << "/" << wantPosition << "\n";
+							log.flush();
+							return false;
+						}
+						drops++;
+						const QMimeData * mime = skope->blockListDragMimeData( blocks );
+						const int seenWas = list->wwDragEventsSeen;
+						QDragMoveEvent moveEv( pos, Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier );
+						list->wwDeliverDragEvent( &moveEv );
+						lastLineY = list->wwDropLineY;
+						QDropEvent dropEv( QPointF( pos ), Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier );
+						list->wwDeliverDragEvent( &dropEv );
+						delete mime;
+						QApplication::processEvents();
+						deliveries += list->wwDragEventsSeen - seenWas;
+						return true;
+					};
+
 					/* Kept, not scaffolding: when a check below fails these two say
 					 * WHICH half is wrong -- the primitive's verdict on a move it
 					 * should allow, and whether the payload survives a round trip.
@@ -8301,6 +8347,60 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							<< "'; payload round trip: " << skope->blockListDragPayload( probe ).size()
 							<< " block(s)\n";
 						delete probe;
+					}
+
+					/* 0. DOES THE DRAG EVEN START? Everything below this drives the
+					 * drop handlers, and all of it passed while the feature did
+					 * nothing whatsoever for a real user: QAbstractItemView refuses
+					 * to enter DraggingState unless the model reports
+					 * Qt::ItemIsDragEnabled, which nothing in this codebase set, so
+					 * startDrag() was never called. The flags are checked directly,
+					 * and then a real press-and-move is put through the view.
+					 *
+					 * The hook is swapped for a counting one first: the production
+					 * hook ends in QDrag::exec(), a modal loop that with nobody at
+					 * the mouse would never return. Swapping it keeps everything Qt
+					 * does up to the call inside what is measured, which is the part
+					 * that was broken.
+					 */
+					{
+						const QModelIndex src = nif->getBlockIndex( leaf );
+						check( "a block row reports itself draggable",
+							nif->flags( src ) & Qt::ItemIsDragEnabled );
+						const QModelIndex viaProxy = skope->proxy->mapFromPrimary( src );
+						check( "...and still does through the proxy",
+							viaProxy.isValid() && ( skope->proxy->flags( viaProxy ) & Qt::ItemIsDragEnabled ) );
+						check( "the block list has dragging switched on", list->dragEnabled() );
+
+						int started = 0;
+						auto production = list->startBlockDrag;
+						list->startBlockDrag = [&started]() { started++; return true; };
+
+						const QPoint from = rowPos( leaf );
+						if ( from.x() < 0 ) {
+							log << "could not place the press\n"; fails++; checks++;
+							list->startBlockDrag = production;
+							break;
+						}
+						list->setCurrentIndex( rowFor( leaf ) );
+						list->selectionModel()->select( rowFor( leaf ),
+							QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows );
+						QApplication::processEvents();
+
+						const QPoint to = from + QPoint( 0, QApplication::startDragDistance() * 3 );
+						auto mouse = [&]( QEvent::Type type, const QPoint & at,
+							Qt::MouseButton button, Qt::MouseButtons buttons ) {
+							QMouseEvent ev( type, QPointF( at ), QPointF( list->viewport()->mapToGlobal( at ) ),
+								button, buttons, Qt::NoModifier );
+							QApplication::sendEvent( list->viewport(), &ev );
+							QApplication::processEvents();
+						};
+						mouse( QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton );
+						mouse( QEvent::MouseMove, to, Qt::NoButton, Qt::LeftButton );
+						mouse( QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton );
+
+						list->startBlockDrag = production;
+						check( "pressing a selected row and moving starts a drag", started == 1 );
 					}
 
 					const Vector3 worldWas = worldOf( leaf ).translation;
@@ -8407,6 +8507,52 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					undo();
 					check( "one undo takes the whole multi-drop back",
 						nif->getParent( leaf ) == root && nif->getParent( nodeA ) == root );
+
+					/* 7. REORDER: the same drag aimed at the gap between two rows
+					 * moves a block among its siblings instead of re-parenting it.
+					 * The order in Children is what the file carries and what the
+					 * scene walks, so the check is on the array, not on the view.
+					 */
+					const QVector<qint32> orderWas = childrenOf( root );
+					log << "root children before reorder: ";
+					for ( const qint32 c : orderWas ) log << c << " ";
+					log << "\n";
+					check( "the fixture's root has three children to reorder", orderWas.size() == 3 );
+
+					if ( !reorder( { nodeB }, leaf, -1, root, 0 ) ) {
+						log << "the gap above the first child did not resolve\n"; fails++; checks++; break;
+					}
+					check( "dropping in the gap ABOVE a sibling moves the block to that slot",
+						childrenOf( root ) == QVector<qint32>{ nodeB, leaf, nodeA } );
+					check( "...with an insertion line shown while dragging over the gap", lastLineY >= 0 );
+					check( "...and no highlighted row, because the gap is what is being pointed at",
+						nif->dropTargetBlock == -1 );
+					check( "...leaving the parent and the transform alone",
+						nif->getParent( nodeB ) == root
+						&& ( Transform( nif, nif->getBlockIndex( nodeB ) ).translation
+							- targetOffset ).length() < 1.0e-4f );
+					undo();
+					check( "undo puts the order back", childrenOf( root ) == orderWas );
+
+					// and the other direction: below the last child is the end
+					if ( !reorder( { leaf }, nodeB, 1, root, 3 ) ) {
+						log << "the gap below the last child did not resolve\n"; fails++; checks++; break;
+					}
+					check( "dropping in the gap BELOW the last sibling moves the block to the end",
+						childrenOf( root ) == QVector<qint32>{ nodeA, nodeB, leaf } );
+					undo();
+
+					// a reorder that changes nothing is refused rather than pushing
+					// an empty undo step
+					{
+						const int undoBefore = nif->undoStack ? nif->undoStack->index() : -1;
+						if ( !reorder( { leaf }, leaf, -1, root, 0 ) ) {
+							log << "the no-op gap did not resolve\n"; fails++; checks++; break;
+						}
+						check( "dropping a block back where it already is is refused",
+							childrenOf( root ) == orderWas
+							&& nif->undoStack && nif->undoStack->index() == undoBefore );
+					}
 
 					/* Everything above went through the view's own drag overrides,
 					 * two events per drop. If a future change routes the hook some
@@ -8598,6 +8744,34 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						ed = editor();
 						check( mode + ": double-clicking the name column starts a rename", ed != nullptr );
 						if ( !ed ) break;
+
+						/* AND NOTHING ELSE. Qt's default edit triggers opened the
+						 * delegate's editor on the same double-click, so two editors
+						 * landed on one cell and the delegate's -- an integer over
+						 * the raw string INDEX -- was the one on top. Every line
+						 * edit in the viewport has to be the rename editor, which
+						 * catches a spin box too: QAbstractSpinBox owns one.
+						 */
+						int strangers = 0;
+						for ( QLineEdit * other : list->viewport()->findChildren<QLineEdit *>() )
+							if ( other->objectName() != QStringLiteral( "BlockListRenameEdit" ) )
+								strangers++;
+						check( mode + ": ...and no second editor opens on top of it", strangers == 0 );
+						check( mode + ": ...because the block list has no edit triggers",
+							list->editTriggers() == QAbstractItemView::NoEditTriggers );
+
+						/* The txt icon: spEditStringIndex is instant and applicable
+						 * to every tStringIndex, and a block row's Value cell buddies
+						 * to that block's Name -- so it drew down the whole column.
+						 * Block Details keeps it, which is why this is checked on
+						 * both delegates and not just one.
+						 */
+						check( mode + ": the block list's delegate draws no instant-spell icons",
+							list->itemDelegate()
+							&& list->itemDelegate()->property( "wwNoInstantIcons" ).toBool() );
+						check( mode + ": ...and Block Details still does",
+							skope->tree && skope->tree->itemDelegate()
+							&& !skope->tree->itemDelegate()->property( "wwNoInstantIcons" ).toBool() );
 
 						const QString renamed = QStringLiteral( "WWRenamed_" ) + mode;
 						ed->setText( renamed );

@@ -30,10 +30,23 @@
 #   9. ...and changes nothing
 #  10. double-clicking the TYPE column does not start a rename
 #  11. double-clicking the NAME column does
-#  12. Enter closes the editor
-#  13. ...and the block carries the new name
-#  14. ...and the palette entry followed it
-#  15. a block with no scene-object name opens no editor
+#  12. ...and no second editor opens on top of it
+#  13. ...because the block list has no edit triggers
+#  14. the block list's delegate draws no instant-spell icons
+#  15. ...and Block Details still does
+#  16. Enter closes the editor
+#  17. ...and the block carries the new name
+#  18. ...and the palette entry followed it
+#  19. a block with no scene-object name opens no editor
+#
+# Checks 12-15 are a bug report made into a gate. Qt's default edit triggers
+# opened the DELEGATE's editor on the same double-click that starts the rename,
+# so two editors landed on one cell and the delegate's was on top -- an integer
+# over the raw string INDEX, which is what "I can only edit the node number"
+# was. And spEditStringIndex is instant and applicable to every tStringIndex,
+# so with a block row's Value cell buddying to that block's Name it drew its txt
+# icon down the entire column. 15 is the other half of that: Block Details, where
+# the icon marks the few fields that have one, must keep it.
 #
 # The rename used to return unless the index came from the proxy, so in flat list
 # mode F2 and double-click did nothing at all -- silently, and on the mode a type
@@ -41,7 +54,7 @@
 # different columns (proxy 1, flat ValueCol), which is the kind of thing running
 # one mode hides. Both are runnable here; see MODES below for why only one gates.
 #
-# Check 14 is the discriminating one. 13 passes on a rename that writes the node
+# Check 18 is the discriminating one. 17 passes on a rename that writes the node
 # and nothing else, which is exactly the version that breaks animation.
 #
 # Checks 6 and 7 exist because "an editor appeared" is satisfied by an editor at

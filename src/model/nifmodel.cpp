@@ -1910,6 +1910,18 @@ bool NifModel::removeRows( int iStart, int count, const QModelIndex & parent )
 	return false;
 }
 
+Qt::ItemFlags NifModel::flags( const QModelIndex & index ) const
+{
+	Qt::ItemFlags f = BaseModel::flags( index );
+
+	// every column of a block row, because the view tests the flags of whichever
+	// cell the press landed on
+	if ( ( f & Qt::ItemIsEnabled ) && isNiBlock( getItem( index ) ) )
+		f |= Qt::ItemIsDragEnabled;
+
+	return f;
+}
+
 QModelIndex NifModel::buddy( const QModelIndex & index ) const
 {
 	const NifItem * item = getItem( index );

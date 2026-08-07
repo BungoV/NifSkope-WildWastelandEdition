@@ -127,6 +127,16 @@ public:
 	 */
 	void wwDeliverDragEvent( QEvent * e );
 
+	/*! The insertion line for a reorder drag: viewport y, or -1 for none.
+	 *
+	 *  Drawn here rather than through Qt's drop indicator because that one is set
+	 *  only inside QAbstractItemView::dragMoveEvent, which asks the model
+	 *  canDropMimeData() first — and NifModel does not implement it, so the
+	 *  indicator never appears no matter what the drop does.
+	 */
+	int wwDropLineY = -1;
+	int wwDropLineFrom = 0;
+
 	//! Minimum size
 	QSize minimumSizeHint() const override final { return { 50, 50 }; }
 	//! Default size
@@ -186,6 +196,7 @@ protected slots:
 
 protected:
 	void drawBranches( QPainter * painter, const QRect & rect, const QModelIndex & index ) const override final;
+	void paintEvent( QPaintEvent * e ) override final;
 	void startDrag( Qt::DropActions supportedActions ) override final;
 	void dragEnterEvent( QDragEnterEvent * e ) override final;
 	void dragMoveEvent( QDragMoveEvent * e ) override final;
