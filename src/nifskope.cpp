@@ -3911,6 +3911,12 @@ void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUna
 
 //! The drag payload's format. Private to the block list, so a block row dropped
 //! on the Loaded NIFs dock is not mistaken for a file.
+//! Defined in spells/collisiontools.cpp: what a Collision Manager drag carries,
+//! and the conversion back to geometry. Declared rather than headered for the
+//! same reason tlCommitCollisionPreview is.
+extern qint32 wwCollisionShapeInDrag( QMainWindow * mw, const QMimeData * mime );
+extern QString wwCollisionShapeToMesh( QMainWindow * mw, qint32 shape, qint32 node );
+
 static const QLatin1String BlockListDragMime( "application/x-nifskope-blocklist" );
 
 //! Last hint shown at the cursor, so a mouse move that changes nothing does not
@@ -4294,6 +4300,52 @@ QList<qint32> NifSkope::blockListDragPayload( const QMimeData * mime,
 	if ( fromParents )
 		*fromParents = parents;
 	return blocks;
+}
+
+/*! A collision shape dropped on the Block List, which makes it geometry again.
+ *
+ *  The node under the pointer is where the mesh goes, and it has to be a NiNode
+ *  for the same reason re-parenting does: nothing else carries children. Lit
+ *  through NifModel::dropTargetBlock, exactly as a block drag lights its target,
+ *  so the two gestures look the same while they are happening.
+ *
+ *  Accepted even when it refuses, with the verdict in the ACTION: ignoring a
+ *  drag event ends the drag over the widget and not one further move arrives.
+ */
+bool NifSkope::blockListCollisionDrop( QDropEvent * e, qint32 shape )
+{
+	const QPoint at = e->position().toPoint();
+	const qint32 over = blockListBlockAt( at );
+	const QModelIndex iOver = nif ? nif->getBlockIndex( over ) : QModelIndex();
+	const bool legal = iOver.isValid() && nif->blockInherits( iOver, "NiNode" );
+
+	if ( e->type() != QEvent::Drop ) {
+		setBlockListDropTarget( legal ? over : -1 );
+		if ( ui && ui->statusbar && legal )
+			ui->statusbar->showMessage( tr( "Drop to make a mesh from this collision, under %1." )
+				.arg( nif->itemName( iOver ) ), 2000 );
+		e->setDropAction( legal ? Qt::CopyAction : Qt::IgnoreAction );
+		e->accept();
+		return true;
+	}
+
+	setBlockListDropTarget( -1 );
+	if ( !legal ) {
+		e->setDropAction( Qt::IgnoreAction );
+		e->ignore();
+		return true;
+	}
+	const QString trouble = wwCollisionShapeToMesh( this, shape, over );
+	e->setDropAction( trouble.isEmpty() ? Qt::CopyAction : Qt::IgnoreAction );
+	if ( trouble.isEmpty() )
+		e->accept();
+	else
+		e->ignore();
+	if ( ui && ui->statusbar )
+		ui->statusbar->showMessage( trouble.isEmpty()
+			? tr( "Made a mesh from that collision, under %1." ).arg( nif->itemName( iOver ) )
+			: trouble, 5000 );
+	return true;
 }
 
 qint32 NifSkope::blockListBlockAt( const QPoint & viewportPos ) const
@@ -4768,6 +4820,18 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	// QDragEnterEvent derives from QDragMoveEvent, and QDropEvent is the base of
 	// both, so one cast serves all three.
 	auto * e = static_cast<QDropEvent *>( event );
+
+	/* A COLLISION SHAPE COMING THE OTHER WAY.
+	 *
+	 * A mesh dragged into the Collision Manager becomes collision; the same shape
+	 * dragged back here becomes geometry again, under the node it is dropped on.
+	 * Neither side knows the other's payload format — each reads it through one
+	 * call — so a payload dropped somewhere that does not understand it is still
+	 * ignored rather than half-understood.
+	 */
+	if ( const qint32 shape = wwCollisionShapeInDrag( this, e->mimeData() ); shape >= 0 )
+		return blockListCollisionDrop( e, shape );
+
 	QList<qint32> fromParents;
 	const QList<qint32> blocks = blockListDragPayload( e->mimeData(), &fromParents );
 	if ( blocks.isEmpty() )

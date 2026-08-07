@@ -8391,6 +8391,62 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						delete mime;
 					}
 
+					/* AND THE LOOP CLOSES: that same shape dragged back into the
+					 * Block List becomes geometry again.
+					 *
+					 * The count of BSTriShapes is the measurement and it has to go
+					 * UP — the first drop in this harness consumed a mesh to make
+					 * collision, so a conversion back that produced nothing would
+					 * leave a file that had quietly lost one.
+					 */
+					{
+						NifTreeView * blockList = skope->list;
+						auto meshCount = [&]() {
+							int n = 0;
+							for ( int b = 0; b < nif->getBlockCount(); b++ )
+								if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+									n++;
+							return n;
+						};
+						const int meshesWas = meshCount();
+						const QList<int> rootLinks = nif->getRootLinks();
+						const qint32 rootBlock = rootLinks.isEmpty() ? -1 : rootLinks.first();
+						QModelIndex rootRow = blockList->model() == skope->proxy
+							? skope->proxy->mapFromPrimary( nif->getBlockIndex( rootBlock ) )
+							: nif->getBlockIndex( rootBlock );
+						rootRow = rootRow.sibling( rootRow.row(), 0 );
+						blockList->scrollTo( rootRow, QAbstractItemView::PositionAtTop );
+						QApplication::processEvents();
+						const QPoint onRoot = blockList->visualRect( rootRow ).center();
+						log << "converting shape " << movingShape << " back onto block "
+							<< skope->blockListBlockAt( onRoot ) << ", " << meshesWas
+							<< " meshes before\n";
+						check( "the point aims at the root node",
+							rootBlock >= 0 && skope->blockListBlockAt( onRoot ) == rootBlock );
+
+						QMimeData * mime = wwCollisionShapePayload( skope, movingShape );
+						QDragMoveEvent move( onRoot, Qt::CopyAction, mime, Qt::LeftButton,
+							Qt::NoModifier );
+						move.setAccepted( false );
+						blockList->wwDeliverDragEvent( &move );
+						check( "the Block List offers to take a collision shape",
+							move.isAccepted() && move.dropAction() == Qt::CopyAction );
+						check( "...and lights the node it would land under",
+							nif->dropTargetBlock == rootBlock );
+
+						QDropEvent drop( QPointF( onRoot ), Qt::CopyAction, mime,
+							Qt::LeftButton, Qt::NoModifier );
+						blockList->wwDeliverDragEvent( &drop );
+						QApplication::processEvents();
+						delete mime;
+
+						log << "meshes after converting back: " << meshCount() << "\n";
+						check( "dropping it on the Block List makes a mesh of it",
+							meshCount() == meshesWas + 1 );
+						check( "...and the highlight is cleared afterwards",
+							nif->dropTargetBlock == -1 );
+					}
+
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";

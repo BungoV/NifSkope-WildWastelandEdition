@@ -888,6 +888,14 @@ public:
 		return item && bodyOfRow ? bodyOfRow( item ) : -1;
 	}
 
+	//! Light the body under this viewport point, or nothing. Public so a drag
+	//! over the PANEL — a mesh coming in from the Block List — lights the body it
+	//! would join, the same as a shape dragged within the tree.
+	void wwHighlightBodyAt( const QPoint & viewportPos ) { highlight( itemAt( viewportPos ) ); }
+	void wwClearHighlight() { clearHighlight(); }
+	//! The shape a payload carries, or -1. Public so the Block List can ask.
+	qint32 wwShapeInPayload( const QMimeData * mime ) const { return draggedShape( mime ); }
+
 	QMimeData * shapePayload( qint32 shape ) const
 	{
 		auto * mime = new QMimeData;
@@ -1077,6 +1085,9 @@ protected:
 	void dropEvent( QDropEvent * event ) override final
 	{
 		const QList<qint32> sources = collisionDropSources( event->mimeData() );
+		const qint32 intoBody = bodyUnderPanelPoint( event->position().toPoint() );
+		if ( tree )
+			tree->wwClearHighlight();
 		if ( sources.isEmpty() || !createShapeNow ) {
 			event->ignore();
 			return;
@@ -1103,7 +1114,80 @@ protected:
 				? tr( "Making collision from %1." ).arg( nif->itemName( nif->getBlockIndex( sources.first() ) ) )
 				: tr( "Making collision from %1 blocks, one body each." ).arg( sources.size() ), 5000 );
 
+		/* DROPPED ON A BODY MEANS INTO THAT BODY.
+		 *
+		 * Create makes the mesh a body of its own wherever it lands, so joining an
+		 * existing one is that plus a move: the new shape goes into the body the
+		 * pointer was over and the body Create just made is taken away again. The
+		 * shapes it makes are the same either way — this only decides where they
+		 * hang.
+		 *
+		 * Only for the shapes Create makes outright. Convex and Mesh hand off to
+		 * the live preview, which returns long after this does, so there is
+		 * nothing to move yet when the drop ends: those keep their own body and
+		 * the status bar says so rather than quietly doing something else.
+		 */
+		QSet<qint32> bodiesBefore;
+		for ( int b = 0; b < nif->getBlockCount(); b++ )
+			if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" ) )
+				bodiesBefore.insert( b );
+
 		createShapeNow();
+
+		if ( intoBody < 0 || !nif->isValidBlockNumber( intoBody ) )
+			return;
+		QList<qint32> made;
+		for ( int b = 0; b < nif->getBlockCount(); b++ )
+			if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" )
+				&& !bodiesBefore.contains( b ) && b != intoBody )
+				made.append( b );
+		if ( made.isEmpty() ) {
+			if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
+				bar->showMessage( tr( "The preview decides where that one lands; it will get "
+					"its own body." ), 5000 );
+			return;
+		}
+		QString trouble;
+		nifSnapshotOp( nif, tr( "Drop collision into body" ), [&]() {
+			for ( const qint32 body : std::as_const( made ) ) {
+				const qint32 shape = nif->getLink( nif->getBlockIndex( body ), "Shape" );
+				if ( shape < 0 )
+					continue;
+				const QString refusal = tlMoveCollisionShape( nif, shape, intoBody );
+				if ( !refusal.isEmpty() ) {
+					trouble = refusal;
+					continue;
+				}
+				// and the body Create made, now holding nothing, goes with its
+				// collision object — the node it hung off is left alone
+				for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+					const QModelIndex object = nif->getBlockIndex( b );
+					if ( nif->blockInherits( object, "bhkCollisionObject" )
+						&& nif->getLink( object, "Body" ) == body )
+					{
+						spRemoveBranch().castIfApplicable( nif, object );
+						break;
+					}
+				}
+			}
+		} );
+		if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
+			bar->showMessage( trouble.isEmpty()
+				? tr( "Added to %1." ).arg( nif->itemName( nif->getBlockIndex( intoBody ) ) )
+				: trouble, 5000 );
+		queueRebuild();
+	}
+
+	//! The body under a point in the PANEL's coordinates, or -1 — the inventory
+	//! is a child of this widget, so a drag over the panel has to be mapped in.
+	qint32 bodyUnderPanelPoint( const QPoint & panelPos ) const
+	{
+		if ( !tree || !tree->viewport()->isVisible() )
+			return -1;
+		const QPoint at = tree->viewport()->mapFrom( const_cast<CollisionManagerPanel *>( this ), panelPos );
+		if ( !tree->viewport()->rect().contains( at ) )
+			return -1;
+		return tree->bodyUnder( at );
 	}
 
 private:
@@ -1115,9 +1199,23 @@ private:
 			// accepted, IGNORE action: refusing the event outright ends the drag
 			// over this widget and no further move arrives — the same trap the
 			// block list's own drop handling documents.
+			if ( tree )
+				tree->wwClearHighlight();
 			event->setDropAction( Qt::IgnoreAction );
 			event->accept();
 			return;
+		}
+		/* THE BODY IT WOULD JOIN LIGHTS UP, and nothing lights when the pointer is
+		 * over the panel's own furniture — which is the difference between "into
+		 * that body" and "a body of its own", and there is no other way to tell
+		 * the two apart while dragging.
+		 */
+		if ( tree ) {
+			const QPoint at = tree->viewport()->mapFrom( this, event->position().toPoint() );
+			if ( tree->viewport()->rect().contains( at ) )
+				tree->wwHighlightBodyAt( at );
+			else
+				tree->wwClearHighlight();
 		}
 		event->setDropAction( Qt::CopyAction );
 		event->accept();
@@ -2767,15 +2865,42 @@ private:
 
 	void collisionToBSTriShape()
 	{
-		CollisionMesh mesh = selectedCollisionMesh();
+		convertCollisionToMesh( selectedCollisionMesh(), selectedTargetNode(), true );
+	}
+
+	/*! One shape, back to geometry, under \a targetNode.
+	 *
+	 *  Split out of the menu route so a shape row dragged into the Block List can
+	 *  reach it: the drag names the shape and the node it landed on, where the
+	 *  menu asks the tree what is selected. The making of the mesh is the same
+	 *  either way, which is the point of the split.
+	 *
+	 *  \return the empty string on success, or why not. \a modal is for the menu
+	 *  route, which has a window to put a message box in front of; a drop says it
+	 *  in the status bar instead.
+	 */
+public:
+	QString convertShapeToMesh( qint32 shape, int targetNode )
+	{
+		CollisionMesh mesh;
+		appendEditableMesh( shape, mesh );
+		return convertCollisionToMesh( mesh, targetNode, false );
+	}
+
+private:
+	QString convertCollisionToMesh( CollisionMesh mesh, int targetNode, bool modal )
+	{
 		if ( mesh.verts.size() < 3 || mesh.tris.isEmpty() ) {
-			QMessageBox::information( this, tr( "Collision to BSTriShape" ), tr( "Select a collision row with usable geometry." ) );
-			return;
+			const QString why = tr( "That collision has no usable geometry." );
+			if ( modal )
+				QMessageBox::information( this, tr( "Collision to BSTriShape" ), why );
+			return why;
 		}
-		int targetNode = selectedTargetNode();
 		if ( !nif->isValidBlockNumber( targetNode ) ) {
-			QMessageBox::warning( this, tr( "Collision to BSTriShape" ), tr( "The selected collision has no valid owning node." ) );
-			return;
+			const QString why = tr( "That collision has no node to put the mesh under." );
+			if ( modal )
+				QMessageBox::warning( this, tr( "Collision to BSTriShape" ), why );
+			return why;
 		}
 		QVector<Vector3> normals( mesh.verts.size(), Vector3() );
 		for ( const Triangle & tri : mesh.tris ) {
@@ -2810,6 +2935,7 @@ private:
 		} );
 		if ( created.isValid() ) if ( auto * window = dynamic_cast<NifSkope *>( mw ) ) window->select( QModelIndex( created ) );
 		queueRebuild();
+		return created.isValid() ? QString() : tr( "The mesh could not be written." );
 	}
 
 	static double recommendedDensity( const QString & materialName )
@@ -4708,6 +4834,38 @@ QMimeData * wwCollisionShapePayload( QMainWindow * mw, qint32 shape )
 {
 	CollisionInventoryTree * tree = wwCollisionTree( mw );
 	return tree ? tree->shapePayload( shape ) : nullptr;
+}
+
+/*! The shape a Collision Manager drag is carrying, or -1.
+ *
+ *  So the Block List can take a shape row without knowing the payload's format —
+ *  which stays private to the tree, the same way the block payload's format stays
+ *  private to the Block List. Each side reads the other's only through a call.
+ */
+qint32 wwCollisionShapeInDrag( QMainWindow * mw, const QMimeData * mime )
+{
+	CollisionInventoryTree * tree = wwCollisionTree( mw );
+	return tree ? tree->wwShapeInPayload( mime ) : -1;
+}
+
+/*! Turn that shape into a BSTriShape under \a node — the loop closing.
+ *
+ *  A mesh dragged into the Collision Manager becomes collision; the same shape
+ *  dragged back into the Block List becomes geometry again. Both directions go
+ *  through the code that was already there: the conversion is the Collision
+ *  Manager's own Collision to BSTriShape, told which shape and which node
+ *  instead of asking the tree what is selected.
+ *
+ *  \return the empty string on success, or why not.
+ */
+QString wwCollisionShapeToMesh( QMainWindow * mw, qint32 shape, qint32 node )
+{
+	if ( !mw )
+		return QObject::tr( "No window." );
+	for ( QWidget * widget : mw->findChildren<QWidget *>() )
+		if ( auto * panel = dynamic_cast<CollisionManagerPanel *>( widget ) )
+			return panel->convertShapeToMesh( shape, node );
+	return QObject::tr( "The Collision Manager is not open." );
 }
 
 /*! Compile one editable collision body into an FO4 hknp packfile.

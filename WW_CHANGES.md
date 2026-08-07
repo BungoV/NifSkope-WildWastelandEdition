@@ -1,5 +1,50 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07w — The loop closes: collision back to geometry, and drops that aim
+
+Two halves of the same gesture set.
+
+### A mesh dropped ON a body joins that body
+
+The mesh drop made a body of its own wherever it landed. Now the body under the
+pointer **lights up** as you cross it — the same highlight a shape dragged inside
+the tree gets, and the same one the Block List gives a block — and dropping there
+puts the new shape in that body instead of beside it.
+
+It is Create plus a move: the shapes are identical either way, so the drop only
+decides where they hang. The body Create made is taken away with its collision
+object once its shape has moved out; the node it hung off is left alone.
+
+**Convex and Mesh keep their own body**, and the status bar says so. Those two
+hand off to the live preview, which returns long after the drop does, so there is
+nothing to move yet when the gesture ends. Saying it beats quietly doing
+something else.
+
+### And a collision shape dragged into the Block List becomes a mesh again
+
+Drag a shape row out of the Collision Manager and drop it on a `NiNode`: it comes
+back as a `BSTriShape` under that node. The node lights up on the way, through
+the same `NifModel::dropTargetBlock` a block drag uses, so both gestures look
+alike while they are happening.
+
+The conversion is not new — it is the Collision Manager's own **Collision to
+BSTriShape**, split so it can be told *which* shape and *which* node rather than
+asking the tree what is selected. The menu route still passes the selection.
+
+**Neither side knows the other's payload format.** The block payload stays
+private to the Block List and the shape payload private to the inventory tree;
+each reads the other's through one call. A payload dropped somewhere that does
+not understand it is ignored rather than half-understood, which is what both
+formats were made private for.
+
+### Measured
+
+`collision_drop.sh` is **22 checks**. The last five are the loop closing, and the
+one that matters counts `BSTriShape`s: it must go **up** by one, because the
+first drop in that harness consumed a mesh to make the collision — a conversion
+back that produced nothing would leave a file that had quietly lost a mesh, and a
+check that only asked "did a block appear" would not notice.
+
 ## 2026-08-07v — Move a shape from one collision body to another
 
 Until now the only way to get a shape out of one body and into another was to

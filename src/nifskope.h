@@ -558,6 +558,8 @@ private:
 	//! The block number under a viewport point, through whichever model is
 	//! current, or -1.
 	qint32 blockListBlockAt( const QPoint & viewportPos ) const;
+	//! A collision shape dropped here, which makes it geometry again.
+	bool blockListCollisionDrop( QDropEvent * e, qint32 shape );
 	//! Is this window's block list under that GLOBAL point, and what is there?
 	//! `block` is -1 for the blank space below the rows.
 	bool blockListHoverAt( const QPoint & globalPos, qint32 & block ) const;
