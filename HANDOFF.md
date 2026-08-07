@@ -6,19 +6,59 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog.
 
 Updated **2026-08-07** after the block-list drag-and-drop session.
-Branch `main`, build green, working tree clean, everything pushed.
+Branch `main` at `a901281`, build green, working tree clean, everything pushed.
 
 Two headlines:
 
-- **Block-list rows drag onto a `NiNode` to re-parent** — plain drop preserves
-  world position, Shift keeps the local transform, Ctrl links, and dropping in
-  the gap between two rows reorders siblings. The primitive is
-  `wwReparentBlocks` in `blocks.cpp`, shared with the Collision Manager's Set
-  Parent.
-- **The flat list mode is not sound** and is now the top backlog item. Blocks
+- **The Block List is a direct-manipulation panel now** — drag to re-parent,
+  reorder and un-parent; paste follows the pointer; a click on blank space
+  selects nothing. Details below.
+- **The flat list mode is not sound** and is the top backlog item. Blocks
   inserted while it is showing are not addressable, and it intermittently takes
   the process down. Neither is drag-and-drop's or rename's doing — both were
   A/B'd out. Hierarchy mode is unaffected.
+
+### The Block List, as it now behaves
+
+| gesture | result |
+|---|---|
+| drop **on** a `NiNode` | re-parent into it, **preserving world position** |
+| **Shift** + drop | re-parent keeping the LOCAL transform |
+| **Ctrl** + drop | link — adds the child link and keeps the old parent |
+| drop in the **gap** between two rows | reorder to that position in the parent's `Children` |
+| drop in the **blank space**, or the gap beside a top-level row | **out** — loses every parent, becomes a root of its own |
+| hover a node that would accept the block | it unfolds after ~650ms, and folds back when the drag ends |
+| pointer near the top/bottom edge | the list auto-scrolls |
+| **Ctrl+V** over a row / over blank space | pastes into that row / with no parent |
+| click blank space | selects nothing at all |
+
+A row that **cannot take children is all gap** — there is nothing to drop inside
+a mesh, so its whole height reorders. Only a `NiNode` keeps the
+third/middle/third split.
+
+`wwReparentBlocks` in `blocks.cpp` is the one primitive, shared with the
+Collision Manager's Set Parent. `release/ww_drag.log` records the most recent
+drag with no flag to set (`WW_DRAG_LOG=off`, or a path, overrides).
+
+### Where to pick up
+
+Four things, in the order they are worth doing:
+
+1. **Multi-window breaks paste-follows-pointer.** Every window registers the
+   hover probe into one slot (`setBlockListHoverProbe`), last one wins, and it
+   declines when its own window is not active — so in a second document paste
+   silently falls back to selection-based. Re-register on window activation.
+2. **The live-drag script covers one scenario, and three more are written but
+   UNVERIFIED.** `tests/spells/block_drag_live.ps1` is the only coverage above
+   the native-drag boundary, where every one of this session's bugs lived. It
+   seizes the mouse — see the warning below — so it needs a deliberate run.
+3. **`wwParentsOf` is O(blocks) per moved block**, and the multi-block sort
+   comparator calls `getParent` per comparison. Invisible on normal files;
+   measure before caring, then cache the parent map for the duration of a call.
+4. **The two list modes have drifted a long way.** Flat list has no reorder, no
+   drag-out and no auto-expand — deliberate, since it is file order rather than
+   anyone's children — but with item 0 (flat list not sound) unresolved it is
+   worth deciding whether that mode is being kept at all.
 
 ### Open, and honest about it
 
@@ -58,28 +98,39 @@ Edition **0.2**, on upstream NifSkope 2.0.dev11 (fo76utils `develop` @
 
 ### What the last session changed
 
-All committed, all covered by harnesses, nothing half-landed.
+Fourteen commits, `873e02f`…`a901281`. All committed, harnessed and pushed.
 
-- **Collision authoring, rebuilt around the block structure.** Two buttons in
-  the order the blocks nest: **Create Collision Body…** (the object, the body,
-  and every physics value) and **Create Collision Shape…** (shape type,
-  material, replace), the second disabled until a body row is selected. The
-  reasoning is in [WW_CHANGES.md](WW_CHANGES.md) — only `Material` is per-shape;
-  everything else is in `bhkRigidBodyCInfo`, one block up.
-- **Several selected shapes make several bodies**, each on its own `NiNode`,
-  because a `NiAVObject` holds exactly one `Collision Object`. Measured against
-  the corpus: 625 of 625 stock FO4 bodies target a `NiNode`, none a shape.
-- **Converting a mesh to collision consumes the mesh.** Duplicate it first if
-  you want it kept.
-- **The Collision Manager lost about twenty controls** — display row to
-  **Overlays ▸ Collision Display**, row operations to the list's right-click
-  menu, creation into the two popups.
-- **Quick Favourites** (Blender's): right-click any menu entry or search result
-  to pin it, **Q** to open. **Space** in the viewport opens the search menu;
-  playback moved to **Shift+Space**.
-- **Viewport navigation is rebindable** — rotate, zoom and the fly keys are in
-  Options ▸ Shortcuts like everything else.
-- **NifSkope opens maximised.**
+The feature is in the table above. What is worth carrying forward is *how* it
+went, because the shape of it will repeat:
+
+- **The first version shipped dead, with 26 green checks.** Nothing in this
+  codebase set `Qt::ItemIsDragEnabled`, so `QAbstractItemView` never entered
+  `DraggingState` and `startDrag()` was never called. The harness drove the drop
+  handlers directly — correct, since no synthetic event can enter a native drag
+  loop — which put the one broken step outside everything it measured.
+- **Four more fixes were made by reading code, none of them right**, while the
+  harness climbed to 44 green. What actually found it was
+  `tests/spells/block_drag_live.ps1`, driving the physical mouse: one run, one
+  `DragEnter`, then silence. Ignoring a drag event ends the drag over the widget,
+  and a drag begins on the row being dragged, whose neighbouring gaps refuse as
+  no-ops. Dead before it began.
+- **Rename was already built** (`d5765c4`) and filed in the backlog as not
+  started, because nothing measured it. It had one real gap — proxy-only, so flat
+  list mode did nothing at all.
+- **Three checks were written that passed for the wrong reason** and had to be
+  rewritten: a paste test casting an invalid index, a hover test whose helper
+  re-expanded the row before hovering, and a Block Details test calling
+  `NifTreeView::isRowHidden`, which shadows Qt's with a different meaning. Two of
+  them wasted a build each; the third wasted two.
+
+Everything above is in [WW_CHANGES.md](WW_CHANGES.md) under 2026-08-07 a–n.
+
+### The rule that came out of it
+
+**Ask what your harness enters below, and cover that separately.** Every bug in
+this session lived above the point where the tests started: the drag start, the
+native event loop, the paint during a modal drag. 82 checks below that line and
+zero above it read as thorough and was not.
 
 ### Open, not started
 
@@ -236,12 +287,13 @@ The collision and menu work added six:
 | `collision_compiled_edit.sh` | editing a compiled body in place |
 | `window_state_roundtrip.sh` | open, close maximised, open again — the startup crash |
 
-And the block-list session added two:
+And the block-list session added three:
 
 | harness | covers |
 |---|---|
-| `block_dragdrop.sh` | that the drag starts at all, the three modifiers, four refusals, multi-select as one payload, the highlight, reordering by the gap, one undo step |
-| `block_rename.sh` | F2 and double-click, that nothing else opens on top, Escape, the column asymmetry, and that the name reaches the palette |
+| `block_dragdrop.sh` | 82 checks: that the drag starts at all, the three modifiers, reorder by the gap, drag-out, every refusal, multi-select as one payload and its ordering, the highlight and the painted insertion line, the drag card, auto-expand and its fold-back, paste following the pointer, blank-click deselect, one undo step |
+| `block_rename.sh` | 24 per mode: F2 and double-click, that nothing else opens on top, no sideways scroll, Escape, the column asymmetry, the txt icon, and that the name reaches the palette |
+| `block_drag_live.ps1` | **the only thing above the native-drag boundary** — drives the physical mouse. See the warning below. |
 
 Both build their fixture from the starter document (`-no-gui new`), so they need
 no game corpus at all. `block_rename.sh` seeds `List Mode` into the registry
