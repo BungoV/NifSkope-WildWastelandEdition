@@ -5,8 +5,30 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 [WW_FEATURES.md](WW_FEATURES.md) is what the fork adds, and
 [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog.
 
-Updated **2026-08-07**, second session, after clearing the block-list follow-ups.
-Build green, working tree clean, everything pushed.
+Updated **2026-08-07**, third session. Build green, working tree clean, pushed
+through `f099ec2`.
+
+### This session, and what is open
+
+- **Collision drops aim, and harnessing that found a real bug.** The
+  body-targeted mesh drop had shipped with no check of its own; the check failed
+  on its first run. Creating collision consumes the source mesh, which renumbers
+  blocks, so the drop was moving the shape into whatever had slid into the
+  target's row. Persistent indices now, A/B proven. `collision_drop.sh` 30/0.
+- **Undo costs half what it did.** `nifSnapshotOp` no longer saves the model
+  after the operation — the redo snapshot is taken at the first undo, where the
+  model is already holding exactly that state. 88 ms a time on 512 blocks, 160 on
+  2012, paid by every structural edit in the program.
+- **Clicking a child block selects that block.** A `BSShaderTextureSet` click was
+  promoted to the shape that owns it — right for the viewport, wrong for the
+  list, which then lit the whole branch with the wrong row primary.
+- **Join Selected Shapes** in the Block List's Hierarchy menu: the viewport's own
+  `Ctrl+J` join, told what to join. The right-clicked row is the target.
+- **Next up, both unstarted**: merging *collision* shapes in the Collision
+  Manager (route mapped in `WW_CHANGES.md` 07-07za — collision → geometry → this
+  join → collision, mesh budget checked before the return trip), and
+  `block_drag_live.ps1` has not been run since the multi-parent payload change.
+  It seizes the mouse; ask first, every time.
 
 Two headlines:
 
@@ -18,11 +40,16 @@ Two headlines:
   — and the cause was `QHeaderView`'s cached total going negative, not anything
   about the model. Hierarchy mode was never affected.
 - **The thing filed as "the flat list takes the process down" is a HANG, still
-  open.** `block_rename.sh` in list mode stops 7 runs in 10: no crash, no fault
+  open.** `block_rename.sh` in list mode stops 4 runs in 8: no crash, no fault
   under gdb, no APPCRASH event — a passing run is 4 seconds and a failing one is
-  63, which is the script's deadline. Ruled out: stale build, the IPC port, the
-  inherited animation setting, contention. Narrowed to the harness's own bare
-  `processEvents()` after `select()` has fully returned. Backlog has the trail.
+  63, the script's deadline. Ruled out: stale build, the IPC port, the inherited
+  animation setting, contention — and, as of this session, a repaint storm
+  (frames are counted now: one or two) and any nested event loop or modal (a
+  watchdog timer logs nothing across a 60-second hang, and timers *do* run inside
+  a nested loop). It is **one event handler that never returns**, after
+  `setCurrentIndex`. Next step is a stack, and `scratchpad/stack_hang.sh` takes
+  one — it just needs more than four attempts to catch a 50% event. Harness-only:
+  no user path reaches it.
 
 ### The Block List, as it now behaves
 
