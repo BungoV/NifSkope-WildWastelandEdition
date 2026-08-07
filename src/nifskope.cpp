@@ -4167,6 +4167,38 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 		return -1;
 
 	QModelIndex idx = list->indexAt( viewportPos );
+
+	/* THE EMPTY SPACE BELOW THE ROWS IS THE END OF THE LIST.
+	 *
+	 * indexAt() answers nothing there, so a drop aimed under the last row
+	 * resolved to no target and was refused — and "under the last row" is where
+	 * anyone aims to put something last. It means the end of the root's children.
+	 * The last row is found by walking back up from the drop point, which also
+	 * gives the insertion line somewhere to sit.
+	 */
+	if ( !idx.isValid() && list->model() == proxy ) {
+		QModelIndex lastRow;
+		for ( int y = qMin( viewportPos.y(), list->viewport()->height() - 1 ); y >= 0; y -= 2 ) {
+			lastRow = list->indexAt( QPoint( viewportPos.x(), y ) );
+			if ( lastRow.isValid() )
+				break;
+		}
+		const QList<int> roots = nif->getRootLinks();
+		const qint32 rootBlock = roots.size() == 1 ? qint32( roots.first() ) : qint32( -1 );
+		const QModelIndex iRoot = nif->getBlockIndex( rootBlock );
+		if ( lastRow.isValid() && iRoot.isValid() && nif->blockInherits( iRoot, "NiNode" )
+			&& nif->getIndex( iRoot, "Children" ).isValid() ) {
+			const QRect lr = list->visualRect( lastRow );
+			if ( position )
+				*position = int( nif->getLinkArray( iRoot, "Children" ).size() );
+			if ( lineY )
+				*lineY = lr.bottom();
+			if ( lineFrom )
+				*lineFrom = lr.left();
+			return rootBlock;
+		}
+		return -1;
+	}
 	if ( !idx.isValid() )
 		return -1;
 	idx = idx.sibling( idx.row(), 0 );

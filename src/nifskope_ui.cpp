@@ -8563,6 +8563,23 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "every gap the block is not already in accepts it", wrongly == 0 );
 					}
 
+					/* THE EMPTY SPACE BELOW THE ROWS. indexAt() answers nothing
+					 * there, so a drop aimed under the last row used to resolve to
+					 * no target at all and be refused — and under the last row is
+					 * exactly where you aim to put something last.
+					 */
+					{
+						const QRect vp = list->viewport()->rect();
+						const QPoint empty( vp.center().x(), vp.bottom() - 2 );
+						int pos = -1;
+						const qint32 spot = skope->blockListDropSpot( empty, &pos );
+						log << "empty space at " << empty.x() << "," << empty.y()
+							<< " -> spot " << spot << " position " << pos
+							<< " (indexAt valid: " << list->indexAt( empty ).isValid() << ")\n";
+						check( "the empty space below the rows is the end of the root's children",
+							spot == root && pos == int( childrenOf( root ).size() ) );
+					}
+
 					/* EVERY GAP REACHABLE. Weaker than the check above — the row
 					 * edges produced gaps before this change too — but it is the one
 					 * that states the property the feature is for: three children

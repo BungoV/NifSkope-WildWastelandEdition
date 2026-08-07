@@ -1,5 +1,31 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07g — The end of the list was nowhere
+
+`indexAt()` answers nothing in the empty space below the last row, so a drop
+aimed there resolved to no target at all and was refused — and under the last row
+is exactly where anyone aims to put something last. That space is the **end of
+the root's children** now. The last row is found by walking back up from the drop
+point, which also gives the insertion line somewhere to sit.
+
+The check asserts the resolved position equals the child count, and logs that
+`indexAt` is invalid at that point, so it is on the record that the old code had
+nothing to work with there.
+
+The card is also driven by a **timer** now rather than by drag events. Moved from
+the drag handler it followed the cursor only while events kept arriving, and when
+they stopped it did not lag — it stopped dead somewhere else on screen, still
+asserting a verdict about a row the cursor had left. `QCursor::pos()` is global
+and always current. A hint older than 250ms is retracted rather than carried
+around.
+
+**`WW_DRAG_LOG=<file>`** appends one line per drag event: the position, the row it
+hit and that row's rect, the spot and insert position it resolved to, the payload
+size and modifier mode, then what the drop moved and every refusal. Nothing about
+a native drag is reachable from a harness — no synthetic event enters the loop,
+which is how every one of these bugs walked through 40-odd green checks — so the
+program has to say what it saw.
+
 ## 2026-08-07f — The card was a window, and one bug wearing three hats
 
 ### The card froze, so the verdict froze with it
