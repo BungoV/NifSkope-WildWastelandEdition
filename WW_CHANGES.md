@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07z — Clicking a child block selects that block
+
+Click a `BSShaderTextureSet` in the Block List and the whole shape branch lit up
+with the `BSTriShape` as the **primary** — three rows highlighted, and the wrong
+one of them active. Select the `BSLightingShaderProperty` instead and you got the
+same three rows and the same primary.
+
+The viewport can only draw an `NiAVObject`, so a click on a property or a texture
+set is walked up to the shape that owns it before it reaches the 3D view. That is
+right for the viewport. What was wrong is that the promotion came back round
+through the object-selection mirror and repainted the **list** with it, so the
+list stopped showing what had been clicked and started showing what the viewport
+had been given instead.
+
+The viewport still gets the shape. The list's own highlight now comes from the
+list, and the mirror leaves it alone while that is the direction of travel.
+
+Checked in `block_dragdrop.sh`, and proven by A/B: against the old code the check
+reads `active 9` — the shape — where the texture set is block 11.
+
 ## 2026-08-07y — Half the cost of every structural edit, and an instrument that lied
 
 ### Undo used to save the whole file twice. Now it saves it once.

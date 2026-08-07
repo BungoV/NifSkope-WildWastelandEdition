@@ -2794,6 +2794,29 @@ void NifSkope::wireBlockListSelection()
 					selBlocks.append( b );
 			}
 			setBlockListSelection( selBlocks );
+
+			/* THE ROWS THAT LIGHT UP ARE THE ROWS THAT WERE CLICKED.
+			 *
+			 * The viewport can only draw an NiAVObject, so a click on a property
+			 * or a texture set is walked up to the shape that owns it before it
+			 * goes to the 3D view — toAV, below. That promotion then came back
+			 * round through the object-selection mirror and repainted the LIST
+			 * with it, so clicking a BSShaderTextureSet lit its whole shape branch
+			 * and made the BSTriShape primary. Selecting a child is not selecting
+			 * its parent, and the primary is whatever was clicked.
+			 *
+			 * The viewport still gets the shape. Only the list's own highlight is
+			 * taken from the list, and the mirror leaves it alone while this is
+			 * the direction of travel.
+			 */
+			nif->selHighlight = QSet<int>( selBlocks.begin(), selBlocks.end() );
+			const QModelIndex currentRow = list->selectionModel()->currentIndex();
+			const QModelIndex currentSrc = ( currentRow.model() == proxy )
+				? proxy->mapTo( currentRow ) : currentRow;
+			nif->selHighlightActive = nif->getBlockNumber( currentSrc );
+			list->viewport()->update();
+			if ( tree )
+				tree->viewport()->update();
 		}
 		/* WHICH PLACING OF IT. A block under several parents is in the tree once
 		 * per parent, and until now every one of those rows said exactly the same

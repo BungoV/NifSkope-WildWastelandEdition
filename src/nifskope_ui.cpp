@@ -10028,6 +10028,49 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "every drop went through the view's drag overrides",
 						drops > 0 && deliveries == drops * 2 );
 
+					/* CLICKING A CHILD BLOCK SELECTS THAT BLOCK.
+					 *
+					 * The viewport can only draw an NiAVObject, so a click on a
+					 * property or a texture set is walked up to the shape that owns
+					 * it before it goes to the 3D view. That promotion used to come
+					 * back round and repaint the LIST with it: click a
+					 * BSShaderTextureSet and its whole shape branch lit up with the
+					 * BSTriShape as primary.
+					 *
+					 * The starter document is the exact case — NiNode, BSTriShape,
+					 * BSLightingShaderProperty, BSShaderTextureSet, each the child of
+					 * the last — so the deepest one is what to click, and what must
+					 * come back is IT, not the shape three rows above it.
+					 */
+					{
+						qint32 deepest = -1;
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSShaderTextureSet" ) )
+								deepest = b;
+						qint32 owner = deepest;
+						while ( owner >= 0
+							&& !nif->blockInherits( nif->getBlockIndex( owner ), "NiAVObject" ) )
+							owner = nif->getParent( owner );
+						log << "deepest child block " << deepest << ", the shape that owns it "
+							<< owner << "\n";
+						check( "the fixture has a texture set under a shape, not the shape itself",
+							deepest >= 0 && owner >= 0 && owner != deepest );
+
+						if ( deepest >= 0 && owner >= 0 ) {
+							const QModelIndex row = rowFor( deepest );
+							check( "...and it has a row to click", row.isValid() );
+							list->setCurrentIndex( row );
+							QApplication::processEvents();
+							log << "after clicking it: active " << nif->selHighlightActive
+								<< ", highlighted " << nif->selHighlight.size() << " block(s)\n";
+							check( "clicking a texture set makes IT the primary, not its shape",
+								nif->selHighlightActive == deepest );
+							check( "...and lights that row alone, not the shape's branch",
+								nif->selHighlight.size() == 1
+									&& nif->selHighlight.contains( deepest ) );
+						}
+					}
+
 					/* UNDO, THEN REDO, AND THE FILE COMES BACK BYTE FOR BYTE.
 					 *
 					 * The redo snapshot is no longer taken when the edit happens. It
@@ -15560,12 +15603,23 @@ void NifSkope::initActions()
 		auto perfGuard = qScopeGuard( perfMark );
 		if ( !nif )
 			return;
-		nif->selHighlight = ogl->objSelection;
-		// the active node must always be highlighted, even if a selection-path
-		// race left it out of the set
-		if ( ogl->objActive >= 0 )
-			nif->selHighlight.insert( ogl->objActive );
-		nif->selHighlightActive = ogl->objActive;
+		/* NOT WHILE THE LIST IS THE ONE TALKING.
+		 *
+		 * A click on a property or a texture set is promoted to the NiAVObject
+		 * that owns it before it reaches the viewport, because that is the only
+		 * thing the viewport can draw. Repainting the list from that promotion
+		 * sent it straight back: the shape branch lit up and the BSTriShape
+		 * became primary, whichever child had actually been clicked. The list
+		 * has already set its own highlight from what was clicked.
+		 */
+		if ( !updatingObjFromList ) {
+			nif->selHighlight = ogl->objSelection;
+			// the active node must always be highlighted, even if a selection-path
+			// race left it out of the set
+			if ( ogl->objActive >= 0 )
+				nif->selHighlight.insert( ogl->objActive );
+			nif->selHighlightActive = ogl->objActive;
+		}
 		list->viewport()->update();
 		tree->viewport()->update();
 
