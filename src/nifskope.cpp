@@ -4921,17 +4921,36 @@ void NifSkope::swapModels()
 {
 	// Swap out the models with empty versions while loading the file
 	// This is so that the views do not update while loading the file
+	/* LIKE FOR LIKE, and the columns released across it.
+	 *
+	 * The block list is on the PROXY in hierarchy mode and on the NifModel itself
+	 * in list mode — 3 columns against 12. Swapping unconditionally to the proxy
+	 * therefore changed the column count under the header on every load in list
+	 * mode, and left the list showing the HIERARCHY afterwards until something
+	 * happened to call setListMode() again. Both are fixed by swapping to the
+	 * empty model of the same shape.
+	 *
+	 * The release/apply pair around it is the header's running total: see
+	 * wwReleaseBlockListColumns. A model change hands hidden sections their
+	 * widths back without adding them to `length`, whatever the column count is
+	 * doing.
+	 */
+	const bool listMode = ( list->model() == nif || list->model() == nifEmpty );
+	wwReleaseBlockListColumns();
 	if ( tree->model() == nif ) {
-		list->setModel( proxyEmpty );
+		list->setModel( listMode ? static_cast<QAbstractItemModel *>( nifEmpty )
+			: static_cast<QAbstractItemModel *>( proxyEmpty ) );
 		tree->setModel( nifEmpty );
 		header->setModel( nifEmpty );
 		kfmtree->setModel( kfmEmpty );
 	} else {
-		list->setModel( proxy );
+		list->setModel( listMode ? static_cast<QAbstractItemModel *>( nif )
+			: static_cast<QAbstractItemModel *>( proxy ) );
 		tree->setModel( nif );
 		header->setModel( nif );
 		kfmtree->setModel( kfm );
 	}
+	wwApplyBlockListColumns();
 	// setModel() on the block list created a new selection model; re-wire.
 	wireBlockListSelection();
 	QTimer::singleShot( 0, this, [this]() { applyBlockListFilter(); } );
@@ -5280,6 +5299,46 @@ void NifSkope::select( const QModelIndex & index )
 	perfMark( "emit currentNifIndexChanged" );
 }
 
+/* THE HEADER'S TOTAL IS A RUNNING SUM, AND A MODEL CHANGE DESYNCS IT.
+ *
+ * QHeaderView keeps `length` as the total of its sections, maintained by deltas
+ * rather than re-derived. Hiding a section subtracts its width and remembers it;
+ * changing the model gives every remembered width back — WITHOUT adding it to
+ * `length`. Hide those sections again and each width comes off a second time, so
+ * `length` ends up smaller than the sections it is supposed to total. With 12
+ * columns and 9 of them hidden it went NEGATIVE.
+ *
+ * `QHeaderView::visualIndexAt` returns -1 for any position past `length`, so
+ * every point in the view belonged to no column, `indexAt` answered an invalid
+ * index everywhere, and nothing in the flat Block List could be clicked, dropped
+ * on or right-clicked. It was filed as "inserted blocks are not addressable"
+ * because a new block is the row anyone tests — but no row was addressable,
+ * including the ones that had been there since the file opened.
+ *
+ * So: release the columns before the model changes, apply them after. With
+ * nothing hidden at the moment of the change there is nothing to hand back and
+ * the total stays honest. The other half of this is in saveUi/restoreUi, where
+ * each mode now keeps its own header blob — restoring one saved against 3
+ * columns onto a 12-column header desyncs it the same way.
+ */
+void NifSkope::wwReleaseBlockListColumns()
+{
+	QHeaderView * head = list->header();
+	for ( int c = 0; c < head->count(); c++ )
+		head->setSectionHidden( c, false );
+}
+
+void NifSkope::wwApplyBlockListColumns()
+{
+	// The proxy has three columns and shows all of them (nifproxymodel.h).
+	if ( list->model() != nif && list->model() != nifEmpty )
+		return;
+	for ( const int c : { NifModel::TypeCol, NifModel::ArgCol, NifModel::Arr1Col,
+		NifModel::Arr2Col, NifModel::CondCol, NifModel::Ver1Col, NifModel::Ver2Col,
+		NifModel::VerCondCol, NifModel::WwRefCol } )
+		list->setColumnHidden( c, true );
+}
+
 void NifSkope::setListMode()
 {
 	QModelIndex idx = list->currentIndex();
@@ -5291,22 +5350,12 @@ void NifSkope::setListMode()
 			QHeaderView * head = list->header();
 			int s0 = head->sectionSize( head->logicalIndex( 0 ) );
 			int s1 = head->sectionSize( head->logicalIndex( 1 ) );
+			wwReleaseBlockListColumns();
 			list->setModel( nif );
 			list->setItemsExpandable( false );
 			list->setRootIsDecorated( false );
 			list->setCurrentIndex( proxy->mapTo( idx ) );
-			list->setColumnHidden( NifModel::NameCol, false );
-			list->setColumnHidden( NifModel::TypeCol, true );
-			list->setColumnHidden( NifModel::ValueCol, false );
-			list->setColumnHidden( NifModel::ArgCol, true );
-			list->setColumnHidden( NifModel::Arr1Col, true );
-			list->setColumnHidden( NifModel::Arr2Col, true );
-			list->setColumnHidden( NifModel::CondCol, true );
-			list->setColumnHidden( NifModel::Ver1Col, true );
-			list->setColumnHidden( NifModel::Ver2Col, true );
-			list->setColumnHidden( NifModel::VerCondCol, true );
-			list->setColumnHidden( NifModel::WwRefCol, true );
-			list->setColumnHidden( NifModel::WwSummaryCol, false );
+			wwApplyBlockListColumns();
 			head->resizeSection( 0, s0 );
 			head->resizeSection( 1, s1 );
 		}
@@ -5316,15 +5365,13 @@ void NifSkope::setListMode()
 			QHeaderView * head = list->header();
 			int s0 = head->sectionSize( head->logicalIndex( 0 ) );
 			int s1 = head->sectionSize( head->logicalIndex( 1 ) );
+			wwReleaseBlockListColumns();
 			list->setModel( proxy );
 			list->setItemsExpandable( true );
 			list->setRootIsDecorated( true );
 			QModelIndex pidx = proxy->mapFrom( idx, QModelIndex() );
 			list->setCurrentIndex( pidx );
-			// proxy model has three columns (see columnCount in nifproxymodel.h)
-			list->setColumnHidden( 0, false );
-			list->setColumnHidden( 1, false );
-			list->setColumnHidden( 2, false );
+			wwApplyBlockListColumns();
 			head->resizeSection( 0, s0 );
 			head->resizeSection( 1, s1 );
 		}

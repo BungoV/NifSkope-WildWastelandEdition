@@ -129,18 +129,20 @@ restore() {
 }
 trap 'restore; rm -rf "$TMP"' EXIT
 
-# HIERARCHY ONLY by default. The list-mode fix below IS verified -- 15 of 15
-# checks, repeatedly -- but the flat list mode intermittently takes the whole
-# process down (roughly one run in three) for reasons that are neither this
-# feature's nor rename's: see the backlog. A check that fails intermittently
-# teaches you to re-run rather than to look, so it is not in the gate.
+# BOTH MODES. The list half sat outside the gate while the flat list was reported
+# to take the process down about one run in three -- a check that fails
+# intermittently teaches you to re-run rather than to look. It is back in as of
+# 2026-08-07p, on this evidence: the crash does not reproduce, in 12 runs of this
+# script in list mode against the code before that day's fix and 12 after; the
+# flat list's real fault (nothing in it could be clicked, anywhere) is found,
+# fixed and covered by block_list_modes.sh; and the session that filed the crash
+# lost an hour the same night to heap corruption that turned out to be a stale
+# incremental build.
 #
-#   MODES="hierarchy list" bash tests/spells/block_rename.sh
-#
-# runs it anyway, which is how the list-mode half was verified and how it should
-# be re-checked once the flat list is fixed.
+# If it does start dying here: build CLEAN before believing it, and if it still
+# dies, write down what was measured rather than pulling the mode back out.
 fails=0
-for mode in ${MODES:-hierarchy}; do
+for mode in ${MODES:-hierarchy list}; do
 	echo "--- $mode mode"
 	seed "$mode"
 	[ "$(ps "(Get-ItemProperty -Path '$KEY' -Name 'List Mode').'List Mode'")" = "$mode" ] \

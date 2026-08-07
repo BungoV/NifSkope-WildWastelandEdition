@@ -331,6 +331,17 @@ protected slots:
 
 	//! Set the list mode
 	void setListMode();
+	/*! The block list's columns, either side of a model change.
+	 *
+	 *  Release BEFORE `list->setModel`, apply AFTER. QHeaderView gives a hidden
+	 *  section its width back when the model changes without adding it to the
+	 *  cached `length`, so hiding it again subtracts it twice; `length` goes
+	 *  negative, `visualIndexAt` answers -1 for every position past it, and
+	 *  `indexAt` then finds no column and therefore no row anywhere in the view.
+	 *  \{ */
+	void wwReleaseBlockListColumns();
+	void wwApplyBlockListColumns();
+	/*! \} */
 
 	//! Override the view font
 	void overrideViewFont();

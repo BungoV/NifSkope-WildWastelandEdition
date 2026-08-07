@@ -1,5 +1,87 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07p — Nothing in the flat Block List could be clicked
+
+Filed as "blocks inserted while the flat list is showing are not addressable".
+That was the second-worst reading of it. **No row was addressable** — not the new
+one, not the ones that had been there since the file opened — so in that mode a
+click, a drop and a right-click all landed on nothing, everywhere, always.
+
+The measurement that filed it asked only about the row it had just inserted,
+which cannot tell "this row is broken" from "every row is broken". Asking about
+all of them took one run.
+
+### What it was
+
+`QHeaderView` keeps `length` as the total of its sections, maintained by adding
+and subtracting rather than re-derived. Hiding a section subtracts its width and
+remembers it; **changing the model gives every remembered width back without
+adding it to `length`**. Hide them again and each width comes off twice. The
+Block List hides 9 of the NifModel's 12 columns, so after one file load:
+
+```
+list: after resizeSection   12 sections, 9 hidden, length  628, sections total  628
+swapModels: on entry        12 sections, 0 hidden, length  649, sections total 1549
+list: after all hiding      12 sections, 9 hidden, length -450, sections total  450
+```
+
+`QHeaderView::visualIndexAt` returns -1 for any position past `length`, so with
+it negative every point in the view belonged to no column — measured, at x = 2,
+60, 125, 260 and 400 — and `QTreeView::indexAt` returns no index at all when it
+has no column. Hence: a `visualRect` that draws a row perfectly well and an
+`indexAt` on that same rectangle that answers nothing.
+
+Hierarchy mode never sees it: the proxy has 3 columns and hides none of them.
+
+### The fix, in two halves
+
+- **Release the columns before any model change, apply them after** — with
+  nothing hidden at the moment of the change there is nothing to hand back
+  (`wwReleaseBlockListColumns` / `wwApplyBlockListColumns`).
+- **Each mode keeps its own saved header blob.** A blob saved against the
+  3-column proxy, restored onto the 12-column NifModel, desyncs the total the
+  same way — `restoreState` appends the missing sections and does not add their
+  widths. The pre-split `List Header` key is deliberately not read; one session's
+  column widths is the whole cost.
+
+`swapModels` also now swaps like for like — `nifEmpty` in list mode, not
+`proxyEmpty` — which additionally fixes the list showing the *hierarchy* after
+every load in list mode, until something happened to call `setListMode` again.
+
+### Measured
+
+New harness `tests/spells/block_list_modes.sh`, 8 checks per mode. Against the
+code before the fix: hierarchy 8 of 8 pass, list **5 of 8 fail** — `length -438`
+against a section total of 462, 6 of 6 rows resolving to INVALID, and the
+inserted block reading as -1. After: 8 of 8 in both.
+
+`block_rename.sh`'s list half is back in the gate (24 checks per mode, both
+green), which is what the backlog said to do when this was fixed.
+
+### The crash filed alongside it does not reproduce
+
+The other half of the entry — "roughly one run in three takes the process down"
+— did not happen once in **36 runs**: 12 of `block_rename.sh` in list mode
+against the code before this fix, 12 after, and 12 of the new harness's
+switching loop, which is 120 model switches with real paints, inserts and
+removes between them.
+
+Worth knowing before believing it next time: the session that filed that crash
+lost an hour the same night to heap corruption that turned out to be **a stale
+incremental build** (its own note, in HANDOFF.md: identical source, 6 of 6
+incremental deaths against 0 of 12 clean). Not proven either way. Not
+reproducible today, and the mode is back in the gate rather than out of the
+program.
+
+### Also measured, not acted on
+
+`insertNiBlock` ends its row insertion **before** the block's fields exist —
+`endInsertRows()`, then `insertAncestor` and `insertType`. A new block is
+announced with 0 rows and has 24 a moment later, with no second signal. Nothing
+observed goes wrong because of it (the model's own row signals agree with its row
+counts, 14 of 14 in the harness), but a view that laid that row out on the signal
+cached a child count that was already stale. Filed, not fixed.
+
 ## 2026-08-07o — Paste followed the pointer in one window only
 
 There is **one hover-probe slot for the whole application**, and every document

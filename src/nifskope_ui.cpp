@@ -9514,6 +9514,242 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* MEASUREMENT HARNESS (WW_FLATLIST_TEST=<cycles>): what the flat Block List
+	 * does that the hierarchy one does not.
+	 *
+	 * Two faults are filed against list mode: a block inserted while it is
+	 * showing is not addressable, and switching into it corrupts the heap in
+	 * about four runs of five. This measures both, and it is deliberately a
+	 * MEASUREMENT rather than a pass/fail suite — it reports numbers and lets the
+	 * reading of them be done outside.
+	 *
+	 * The addressability claim is measured TWICE, scrolled and unscrolled,
+	 * because the way it was originally taken cannot tell the fault from the
+	 * documented trap: visualRect() answers from the layout whether or not the
+	 * row is on screen, indexAt() answers only inside the viewport, and a row
+	 * below a short dock produces a plausible rect that resolves to nothing. In
+	 * flat mode every block is a top-level row, so a new one lands further down
+	 * than the same block does in a tree — which is exactly what would make an
+	 * artifact look mode-specific.
+	 *
+	 * Every line is flushed. The point of the switching loop is to take the
+	 * process down, and a buffered log of a crashed process says nothing.
+	 * Log: release/ww_flatlist_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_FLATLIST_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_flatlist_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				NifTreeView * list = skope->list;
+				if ( !ok || !nif || !list ) {
+					log << "load failed\ndone\n"; logf.close(); qApp->quit(); return;
+				}
+
+				auto modeName = [&]() {
+					return list->model() == skope->proxy ? QStringLiteral( "hierarchy" )
+						: QStringLiteral( "list" );
+				};
+				auto say = [&]( const QString & s ) { log << s << "\n"; log.flush(); };
+
+				/* THE SIGNAL WATCHER. A view attached straight to NifModel follows
+				 * every row signal it emits; the proxy rebuilds wholesale on
+				 * xLinksChanged and would not notice a wrong one either way, which
+				 * is the standing suspicion for why only one mode shows this.
+				 *
+				 * What is checked is the claim each signal makes: after
+				 * rowsInserted( parent, first, last ), the parent must have gained
+				 * exactly last - first + 1 rows since rowsAboutToBeInserted said so.
+				 */
+				int pending = 0, mismatches = 0, inserts = 0, removes = 0, resets = 0, layouts = 0;
+				QObject watcher;
+				QObject::connect( nif, &QAbstractItemModel::rowsAboutToBeInserted, &watcher,
+					[&]( const QModelIndex & parent, int, int ) { pending = nif->rowCount( parent ); } );
+				QObject::connect( nif, &QAbstractItemModel::rowsInserted, &watcher,
+					[&]( const QModelIndex & parent, int first, int last ) {
+						inserts++;
+						const int now = nif->rowCount( parent );
+						if ( now != pending + ( last - first + 1 ) ) {
+							mismatches++;
+							log << "  SIGNAL rowsInserted " << first << ".." << last
+								<< " under \"" << nif->itemName( parent ) << "\": "
+								<< pending << " -> " << now << ", claimed +"
+								<< ( last - first + 1 ) << "\n";
+							log.flush();
+						}
+					} );
+				QObject::connect( nif, &QAbstractItemModel::rowsAboutToBeRemoved, &watcher,
+					[&]( const QModelIndex & parent, int, int ) { pending = nif->rowCount( parent ); } );
+				QObject::connect( nif, &QAbstractItemModel::rowsRemoved, &watcher,
+					[&]( const QModelIndex & parent, int first, int last ) {
+						removes++;
+						const int now = nif->rowCount( parent );
+						if ( now != pending - ( last - first + 1 ) ) {
+							mismatches++;
+							log << "  SIGNAL rowsRemoved " << first << ".." << last
+								<< " under \"" << nif->itemName( parent ) << "\": "
+								<< pending << " -> " << now << ", claimed -"
+								<< ( last - first + 1 ) << "\n";
+							log.flush();
+						}
+					} );
+				QObject::connect( nif, &QAbstractItemModel::modelReset, &watcher, [&]() { resets++; } );
+				QObject::connect( nif, &QAbstractItemModel::layoutChanged, &watcher, [&]() { layouts++; } );
+
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
+				};
+
+				say( QStringLiteral( "started in %1 mode, %2 blocks, viewport %3x%4" )
+					.arg( modeName() ).arg( nif->getBlockCount() )
+					.arg( list->viewport()->width() ).arg( list->viewport()->height() ) );
+				/* NOT VACUOUS: the mode is seeded into QSettings before the window
+				 * is built, and if the seed did not take, everything below would
+				 * quietly measure the other mode and pass.
+				 */
+				const bool wantList =
+					qEnvironmentVariable( "WW_FLATLIST_TEST_MODE" ) == QLatin1String( "list" );
+				check( "the app started in the mode under test",
+					( modeName() == QLatin1String( "list" ) ) == wantList );
+
+				/* THE HEADER TOTALS ITS OWN SECTIONS. QHeaderView keeps `length` as
+				 * a running total maintained by deltas, and a model change hands a
+				 * hidden section its width back without adding it in — so hiding it
+				 * again subtracts it twice. With 9 of 12 columns hidden that total
+				 * went NEGATIVE, and visualIndexAt() answers -1 for every position
+				 * past it. This is the invariant; the row check below is what it
+				 * costs the person using the program.
+				 */
+				auto headerTotal = [&]() {
+					QHeaderView * head = list->header();
+					int sum = 0, hidden = 0;
+					for ( int c = 0; c < head->count(); c++ )
+						if ( head->isSectionHidden( c ) )
+							hidden++;
+						else
+							sum += head->sectionSize( c );
+					say( QStringLiteral( "  header: %1 sections, %2 hidden, length %3, sections total %4" )
+						.arg( head->count() ).arg( hidden ).arg( head->length() ).arg( sum ) );
+					return head->length() == sum;
+				};
+
+				/* EVERY ROW, not just the one just inserted. "The inserted row is
+				 * unaddressable" and "no row is addressable" look identical when the
+				 * only row you ask about is the one you inserted — and it was the
+				 * second of those, all along.
+				 *
+				 * Each row is scrolled to the top before being asked about:
+				 * visualRect() answers from the layout whether or not the row is on
+				 * screen while indexAt() answers only inside the viewport, so a row
+				 * below a short dock gives a plausible rect that resolves to nothing
+				 * for a reason that has nothing to do with this.
+				 */
+				auto rowsThatDoNotResolve = [&]( const QString & label ) -> int {
+					say( QStringLiteral( "-- rows, %1 (%2 mode)" ).arg( label, modeName() ) );
+					const QModelIndex viewRoot = list->rootIndex();
+					const int rows = list->model()->rowCount( viewRoot );
+					int bad = 0;
+					for ( int r = 0; r < rows; r++ ) {
+						const QModelIndex idx = list->model()->index( r, 0, viewRoot );
+						list->scrollTo( idx, QAbstractItemView::PositionAtTop );
+						QApplication::processEvents();
+						const QRect rect = list->visualRect( idx );
+						const QModelIndex at = list->indexAt( rect.center() );
+						if ( at.isValid() && at.row() == r )
+							continue;
+						bad++;
+						say( QStringLiteral( "  row %1 \"%2\": rect %3,%4 %5x%6 -> %7" )
+							.arg( r ).arg( idx.data().toString().trimmed() )
+							.arg( rect.x() ).arg( rect.y() ).arg( rect.width() ).arg( rect.height() )
+							.arg( at.isValid() ? QStringLiteral( "row " ) + QString::number( at.row() )
+								: QStringLiteral( "INVALID" ) ) );
+					}
+					say( QStringLiteral( "  %1 of %2 rows do not resolve back to themselves" )
+						.arg( bad ).arg( rows ) );
+					return rows > 0 ? bad : -1;		// -1: there was nothing to measure
+				};
+
+				check( "the header's total matches the sections it totals", headerTotal() );
+				check( "every row in the block list resolves back to itself",
+					rowsThatDoNotResolve( QStringLiteral( "as the app started" ) ) == 0 );
+
+				/* AND A BLOCK INSERTED NOW — how the fault was first reported. It is
+				 * worth its own check because an insert changes the view's layout
+				 * without any of the above happening again, and it asks BY BLOCK
+				 * NUMBER through the same call the drop handlers make, so a row that
+				 * resolves to the wrong block fails here rather than in a drop.
+				 */
+				{
+					const QModelIndex made = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+					const qint32 madeNumber = nif->getBlockNumber( made );
+					QApplication::processEvents();
+					QModelIndex row = list->model() == skope->proxy
+						? skope->proxy->mapFromPrimary( made ) : made;
+					row = row.sibling( row.row(), 0 );
+					list->scrollTo( row, QAbstractItemView::PositionAtTop );
+					QApplication::processEvents();
+					const QRect rect = list->visualRect( row );
+					const qint32 hit = skope->blockListBlockAt( rect.center() );
+					say( QStringLiteral( "inserted block %1: rect %2,%3 %4x%5, the view says %6" )
+						.arg( madeNumber ).arg( rect.x() ).arg( rect.y() )
+						.arg( rect.width() ).arg( rect.height() ).arg( hit ) );
+					check( "a block inserted now is addressable, and is the one inserted",
+						madeNumber >= 0 && hit == madeNumber );
+				}
+
+				/* THEN SWITCH MODES AND COME BACK. Nothing re-derives the header's
+				 * total on a switch, so a mode that breaks it leaves the other one
+				 * broken too — which would make this flat mode's fault only in where
+				 * it starts. Paint for real between the steps: the flat list is the
+				 * only mode that shows the summary column, so data() runs code there
+				 * that the tree never reaches.
+				 */
+				const int cycles = qMax( 2, qEnvironmentVariable( "WW_FLATLIST_TEST" ).toInt() );
+				say( QStringLiteral( "-- %1 switch cycles" ).arg( cycles ) );
+				for ( int c = 0; c < cycles; c++ ) {
+					const bool toList = ( list->model() == skope->proxy );
+					( toList ? skope->aList : skope->aHierarchy )->setChecked( true );
+					skope->setListMode();
+					QApplication::processEvents();
+					list->viewport()->repaint();
+					const QModelIndex made = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+					QApplication::processEvents();
+					list->viewport()->repaint();
+					nif->removeNiBlock( nif->getBlockNumber( made ) );
+					QApplication::processEvents();
+					list->viewport()->repaint();
+				}
+				say( QStringLiteral( "ended in %1 mode, %2 blocks" )
+					.arg( modeName() ).arg( nif->getBlockCount() ) );
+				check( "an even number of switches ends in the mode it started in",
+					( modeName() == QLatin1String( "list" ) ) == wantList );
+				check( "the header's total still matches after switching modes", headerTotal() );
+				check( "every row still resolves after switching modes",
+					rowsThatDoNotResolve( QStringLiteral( "after the switch cycles" ) ) == 0 );
+
+				say( QStringLiteral( "signals: %1 inserts, %2 removes, %3 resets, %4 layoutChanged" )
+					.arg( inserts ).arg( removes ).arg( resets ).arg( layouts ) );
+				check( "the model's row signals agree with its own row counts",
+					inserts > 0 && mismatches == 0 );
+
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\n";
+				log << "done\n";
+				logf.close();
+				if ( nif->undoStack )
+					nif->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* WW_DRAG_LOG: dump every row's GLOBAL rectangle once the file is open.
 	 *
 	 * A native drag is the one path no harness can enter — QApplication::notify
@@ -18746,7 +18982,19 @@ void NifSkope::saveUi() const
 	settings.setValue( "List Mode"_uip, (gListMode->checkedAction() == aList ? "list" : "hierarchy") );
 	settings.setValue( "Show Non-applicable Rows"_uip, aCondition->isChecked() );
 
-	settings.setValue( "List Header"_uip, list->header()->saveState() );
+	/* A HEADER BLOB BELONGS TO A MODEL SHAPE. The Block List runs on the proxy in
+	 * hierarchy mode (3 columns) and on the NifModel in list mode (12), and
+	 * QHeaderView::restoreState given a blob of the wrong shape appends the
+	 * missing sections WITHOUT adding their widths to the `length` it restored
+	 * from the blob. The header's running total then reads smaller than the
+	 * sections it totals — negative, with 9 columns hidden — and since
+	 * visualIndexAt() answers -1 for any position past `length`, indexAt() found
+	 * no column and no row: nothing in the flat list could be clicked at all. So
+	 * each mode keeps its own blob, and neither is ever read into the other.
+	 */
+	settings.setValue( gListMode->checkedAction() == aList
+		? "List Header/list"_uip : "List Header/hierarchy"_uip,
+		list->header()->saveState() );
 	settings.setValue( "Tree Header"_uip, tree->header()->saveState() );
 	settings.setValue( "Header Header"_uip, header->header()->saveState() );
 	settings.setValue( "Kfmtree Header"_uip, kfmtree->header()->saveState() );
@@ -18891,7 +19139,21 @@ void NifSkope::restoreUi()
 
 	aCondition->setChecked( settings.value( "Show Non-applicable Rows"_uip, false ).toBool() );
 
-	list->header()->restoreState( settings.value( "List Header"_uip ).toByteArray() );
+	/* THE BLOB FOR THIS MODE, and nothing if there is not one yet. See the note
+	 * in saveUi: a header blob saved against 3 columns, restored onto 12, leaves
+	 * QHeaderView's `length` smaller than the sections it totals — and a Block
+	 * List whose every point belongs to no column answers no index anywhere, so
+	 * not one row in it can be clicked, dropped on or right-clicked.
+	 *
+	 * The pre-split "List Header" key is deliberately not read: it is the blob of
+	 * whichever mode happened to be showing when the app last closed, which is
+	 * the thing that was wrong. Losing one session's column widths is the whole
+	 * cost of that.
+	 */
+	list->header()->restoreState( settings.value( gListMode->checkedAction() == aList
+		? "List Header/list"_uip : "List Header/hierarchy"_uip ).toByteArray() );
+	// and what the blob does not know: this mode's columns, whatever it restored
+	wwApplyBlockListColumns();
 	tree->header()->restoreState( settings.value( "Tree Header"_uip ).toByteArray() );
 	// after restoreState, which carries its own column visibility and would
 	// otherwise win over the default set at construction

@@ -1,31 +1,52 @@
 # NifSkope — WW Edition: To Be Implemented
 
-## Block list: flat list mode is not sound — NEW 2026-08-07
+## ~~Block list: flat list mode is not sound~~ — FIXED 2026-08-07p
 
-Found while covering the item below. **Neither is caused by drag-and-drop or by
-rename**: both reproduce with the drag-and-drop wiring disabled, and running the
-flat list first dies before any rename has happened.
+**The mode is kept.** Fault 1 was real, worse than filed, and is fixed, with a
+harness that fails against the old code. Fault 2 does not reproduce.
 
-1. **Blocks inserted while the flat list is showing are not addressable.**
-   `visualRect` draws the new row (measured: 0,140 250x20, not hidden) and
-   `indexAt` at that point returns an invalid index — the view's item list is
-   stale against the model. Hierarchy mode is fine. A drop, a click or a
-   right-click on such a row therefore hits nothing.
-2. **The flat list intermittently takes the process down.** Heap corruption,
-   reported by Windows as a freed-block write at a later allocation, so the
-   stack names the allocation and not the culprit. Roughly one run in three when
-   started in list mode; 4 in 5 when switching into it.
+1. ~~Blocks inserted while the flat list is showing are not addressable.~~
+   **No row was addressable** — every row in the view, not only new ones, so a
+   click, a drop and a right-click all hit nothing, anywhere, always. The
+   original measurement asked only about the row it had just inserted, which
+   cannot tell one broken row from every row being broken.
 
-Both are almost certainly the same root cause. Start at whether `NifModel`'s
-block insert emits row signals the flat view can follow — the proxy rebuilds
-wholesale on `xLinksChanged` and would not notice either way, which is exactly
-why only one mode shows it. `setListMode()` also never re-runs
-`wireBlockListSelection()`, though a lost connection would not corrupt anything.
+   `QHeaderView` maintains `length` by deltas; a model change hands a hidden
+   section its width back without adding it in, and hiding it again subtracts it
+   twice. With 9 of 12 columns hidden it went **negative**, and `visualIndexAt`
+   answers -1 for any position past `length`, so `indexAt` had no column and
+   therefore no index. Fixed by releasing the columns before any model change and
+   applying them after, and by giving each mode its own saved header blob. Full
+   account in `WW_CHANGES.md 2026-08-07p`.
 
-Consequences to clear when it is fixed: re-enable the list half of
-`block_rename.sh` (`MODES="hierarchy list"`, already written and passing 15/15
-on the runs that complete), and cover drag-and-drop in that mode — its own code
-branches on the model and is believed correct, but nothing has driven it.
+   Two guesses in the old entry were wrong and are worth not repeating: the model
+   signals were never the problem (they agree with their own row counts), and
+   `setListMode()` **does** re-run `wireBlockListSelection()` — last line but one.
+
+2. **The crash does not reproduce.** 36 runs with no death: 12 of
+   `block_rename.sh` in list mode against the pre-fix code, 12 after, and 12 of
+   the new harness's 10-cycle switching loop (120 model switches with real
+   paints, inserts and removes). Note that the session which filed it lost an
+   hour the same night to heap corruption that turned out to be **a stale
+   incremental build** — its own conclusion, in HANDOFF.md, being that identical
+   source died 6 of 6 incremental against 0 of 12 clean. Left here only as
+   something to re-measure if it is ever seen again: build clean first, then
+   write down what was measured.
+
+Consequences cleared: `block_rename.sh` runs **both modes** again, 24 checks
+each. New harness `tests/spells/block_list_modes.sh`, 8 checks per mode, drives
+the invariant and what it costs the person using the program.
+
+**Still open, small:** drag-and-drop has no coverage in flat list mode. Its code
+branches on the model and is believed correct, and now that the view answers
+`indexAt` there is nothing structural in the way — `block_dragdrop.sh` seeds no
+list mode, so it needs the registry dance `block_list_modes.sh` uses.
+
+**Also open, found while measuring the above:** `NifModel::insertNiBlock` calls
+`endInsertRows()` *before* `insertAncestor`/`insertType` add the block's fields,
+so a new block is announced with 0 rows and has 24 a moment later, with no second
+signal. Nothing observed goes wrong, but a view that laid that row out on the
+signal cached a child count that was already stale.
 
 ## ~~Block list: Blender-Outliner drag-and-drop and rename~~ — SHIPPED 2026-08-07
 
