@@ -249,6 +249,14 @@ before launch and puts it back on exit, because the mode is read during window
 construction — and because **switching it at run time is what the flat-list
 fault takes down**.
 
+**A window that follows the cursor during a drag must be
+`Qt::WindowTransparentForInput`.** Otherwise it takes part in hit-testing, and
+the moment it passes under the pointer the view underneath gets a `DragLeave` and
+stops receiving `DragMove` — so the follower freezes, the drop feedback stops
+updating, and the stale caption it is left showing gets read as the program's
+verdict on wherever the cursor is now. That arrived as three separate bug
+reports: a stuck label, a line that never appeared, and legal drops "refused".
+
 **Anything a drag draws must `repaint()`, not `update()`.** `QDrag::exec()` runs a
 native modal loop; a posted update is coalesced and can sit in the queue until
 the drag ends, so the paint lands after it stops being useful — indistinguishable

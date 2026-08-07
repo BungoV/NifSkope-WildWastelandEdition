@@ -853,10 +853,14 @@ NifSkope::NifSkope( bool background )
 	list = ui->list;
 	list->setModel( proxy );
 	list->setSortingEnabled( false );
-	// hideInstantIcons: a block row's Value cell resolves through buddy() to that
-	// block's Name, a tStringIndex in any Bethesda file, so spEditStringIndex
-	// matched every row and drew its txt icon down the whole column
-	list->setItemDelegate( nif->createDelegate( this, book, true ) );
+	/* A block row's Value cell resolves through buddy() to that block's Name, a
+	 * tStringIndex in any Bethesda file — so spEditStringIndex matched every row
+	 * and drew its txt icon down the whole column, and the model rendered every
+	 * one of them as "Cube [1]", where 1 is the header string-table index. Four
+	 * different blocks sharing a name therefore all showed [1], which reads as an
+	 * id that never updates. Both off here; Block Details keeps both.
+	 */
+	list->setItemDelegate( nif->createDelegate( this, book, true, true ) );
 	/* NO EDIT TRIGGERS. Qt's default DoubleClicked|SelectedClicked opened the
 	 * delegate's editor on the same double-click that starts the inline rename —
 	 * two editors on one cell, and the delegate's is an integer spin over the raw
@@ -3897,7 +3901,22 @@ static void showBlockListDragCard( const QString & hint, const QIcon & icon,
 	const QString & type, const QString & name )
 {
 	if ( !blockListDragCard ) {
-		auto * card = new QFrame( nullptr, Qt::ToolTip | Qt::FramelessWindowHint );
+		/* TRANSPARENT FOR INPUT, and that is not decoration.
+		 *
+		 * The card is a real top-level window travelling with the cursor during a
+		 * native drag loop. Left as an ordinary window it takes part in
+		 * hit-testing, so the moment it passes under the pointer the list gets a
+		 * DragLeave and stops receiving DragMove — at which point the card freezes
+		 * with whatever it last said, the insertion line stops updating, and a
+		 * stale "Already in that position." sits there while you aim somewhere
+		 * perfectly legal. Every one of those was reported separately; they are
+		 * one bug.
+		 */
+		auto * card = new QFrame( nullptr, Qt::ToolTip | Qt::FramelessWindowHint
+			| Qt::WindowTransparentForInput | Qt::WindowDoesNotAcceptFocus );
+		card->setAttribute( Qt::WA_TransparentForMouseEvents );
+		card->setAttribute( Qt::WA_ShowWithoutActivating );
+		card->setFocusPolicy( Qt::NoFocus );
 		card->setObjectName( QStringLiteral( "BlockListDragCard" ) );
 		card->setStyleSheet( QStringLiteral(
 			"QFrame#BlockListDragCard { background: %1; border: 1px solid %2; border-radius: 3px; }"
@@ -4161,8 +4180,12 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		setBlockListDropTarget( -1 );
 		list->wwDropLineY = -1;
 		wwRepaintDragFeedback( list );
-		// the card stays up: the drag is still running, it has just left the list,
-		// and it is what tells you the modifiers are still live
+		/* The card goes DOWN with the leave. It is only moved by DragMove, so
+		 * once the pointer is off the list it would hang wherever it was left —
+		 * a caption sitting still in the middle of the screen, describing a
+		 * target the cursor is nowhere near. Coming back re-shows it.
+		 */
+		hideBlockListDragCard();
 		blockListDropHint.clear();
 		return false;		// let the view do its own leave handling too
 	}

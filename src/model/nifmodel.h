@@ -218,10 +218,14 @@ public:
 	quint32 getBSVersion() const { return bsVersion; }
 
 	//! Create and return delegate for SpellBook
-	//! hideInstantIcons suppresses the instant-spell icon in the Value column —
-	//! the Block List asks for it, Block Details does not.
+	/*! hideInstantIcons suppresses the instant-spell icon in the Value column;
+	 *  plainStringValues renders a tStringIndex as the string alone, without the
+	 *  string-table index. The Block List asks for both — it browses blocks, and
+	 *  a row's Value cell is that block's NAME. Block Details, which edits the
+	 *  field itself, asks for neither.
+	 */
 	static QAbstractItemDelegate * createDelegate( QObject * parent, SpellBookPtr book,
-		bool hideInstantIcons = false );
+		bool hideInstantIcons = false, bool plainStringValues = false );
 
 	/*! Block rows can be DRAGGED (the Block List re-parents by dropping them).
 	 *

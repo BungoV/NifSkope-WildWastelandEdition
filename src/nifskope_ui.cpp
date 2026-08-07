@@ -8537,6 +8537,32 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							!wwReparentRefusal( nif, nodeA, leaf, WwReparentMode::PreserveWorld ).isEmpty() );
 					}
 
+					/* EVERY GAP THE FIRST CHILD IS NOT ALREADY IN MUST BE LEGAL.
+					 *
+					 * Reported: with a root full of meshes, the first child could not
+					 * be moved into the gaps further down the list. Enumerating the
+					 * refusal for every position is what says whether the verdict or
+					 * the aiming is at fault, so the whole ladder is logged.
+					 */
+					{
+						const QVector<qint32> kids = childrenOf( root );
+						const int was = int( kids.indexOf( leaf ) );
+						QStringList ladder;
+						int wrongly = 0;
+						for ( int pos = 0; pos <= kids.size(); pos++ ) {
+							const QString why = wwReparentRefusal( nif, leaf, root,
+								WwReparentMode::PreserveWorld, pos );
+							ladder << QStringLiteral( "%1:%2" ).arg( pos )
+								.arg( why.isEmpty() ? QStringLiteral( "ok" ) : why );
+							const bool noop = ( pos == was || pos == was + 1 );
+							if ( why.isEmpty() == noop )
+								wrongly++;
+						}
+						log << "block " << leaf << " is at index " << was << "; gap verdicts: "
+							<< ladder.join( QStringLiteral( ", " ) ) << "\n";
+						check( "every gap the block is not already in accepts it", wrongly == 0 );
+					}
+
 					/* EVERY GAP REACHABLE. Weaker than the check above — the row
 					 * edges produced gaps before this change too — but it is the one
 					 * that states the property the feature is for: three children
@@ -8878,6 +8904,43 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( mode + ": ...and Block Details still does",
 							skope->tree && skope->tree->itemDelegate()
 							&& !skope->tree->itemDelegate()->property( "wwNoInstantIcons" ).toBool() );
+
+						/* THE STRING-TABLE INDEX IS NOT DRAWN in the Block List. The
+						 * model renders a tStringIndex as "Cube [1]" — the 1 being
+						 * the header string index, which every block sharing that
+						 * name also shows, so it reads as an id that never updates.
+						 *
+						 * Measured on the PIXELS, by painting the same cell with two
+						 * delegates that differ in nothing but this flag. Asserting
+						 * the flag alone would be asserting that a bool was set; the
+						 * question is whether the cell comes out different.
+						 */
+						const QModelIndex valueIdx = rowFor( node, nameCol );
+						const QString modelText = valueIdx.data( NifSkopeDisplayRole ).toString();
+						check( mode + ": the model still renders the string-table index",
+							modelText.contains( QLatin1String( "[" ) ) );
+
+						QStyleOptionViewItem opt;
+						opt.rect = QRect( 0, 0, 220, 20 );
+						opt.font = list->font();
+						opt.state = QStyle::State_Enabled;
+						opt.displayAlignment = Qt::AlignLeft | Qt::AlignVCenter;
+						auto renderWith = [&]( bool plainStrings ) {
+							QScopedPointer<QAbstractItemDelegate> d(
+								NifModel::createDelegate( nullptr, nullptr, true, plainStrings ) );
+							QPixmap pm( opt.rect.size() );
+							pm.fill( Qt::black );
+							QPainter p( &pm );
+							d->paint( &p, opt, valueIdx );
+							p.end();
+							return pm.toImage();
+						};
+						check( mode + ": ...and the block list draws the cell without it",
+							renderWith( true ) != renderWith( false ) );
+						check( mode + ": ...which is the flag the block list actually has",
+							list->itemDelegate()->property( "wwPlainStringValues" ).toBool()
+							&& skope->tree->itemDelegate()
+							&& !skope->tree->itemDelegate()->property( "wwPlainStringValues" ).toBool() );
 
 						const QString renamed = QStringLiteral( "WWRenamed_" ) + mode;
 						ed->setText( renamed );

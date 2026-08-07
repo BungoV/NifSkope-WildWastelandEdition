@@ -165,8 +165,18 @@ public:
 	 */
 	bool noInstantIcons = false;
 
-	NifDelegate( QObject * p, SpellBookPtr sb = 0, bool hideInstantIcons = false )
-		: QItemDelegate( p ), book( sb ), noInstantIcons( hideInstantIcons )
+	/*! Show a tStringIndex as the string alone, without the table index (WW).
+	 *
+	 *  Separate from the icon flag on purpose: they are unrelated concerns that
+	 *  happen to share one caller, and keeping them apart is what lets each be
+	 *  measured without the other.
+	 */
+	bool plainStringValues = false;
+
+	NifDelegate( QObject * p, SpellBookPtr sb = 0, bool hideInstantIcons = false,
+		bool plainStrings = false )
+		: QItemDelegate( p ), book( sb ), noInstantIcons( hideInstantIcons ),
+		  plainStringValues( plainStrings )
 	{
 	}
 
@@ -457,6 +467,34 @@ public:
 		int namerole = (index.isValid() && index.column() == 0) ? Qt::DisplayRole : NifSkopeDisplayRole;
 
 		QString text = index.data( namerole ).toString();
+
+		/* Block List: the Value column IS the block's name, and nothing else.
+		 *
+		 * The model renders a tStringIndex as "Cube [1]", where the number is the
+		 * index into the header's string table — real information in Block
+		 * Details, where you are editing that field. In a list of blocks it reads
+		 * as an id, and since every mesh called "Cube" shares one string it reads
+		 * as an id that is WRONG: four different blocks all showing [1]. Resolved
+		 * through the model rather than trimmed off the end, so a node genuinely
+		 * named "Bone [1]" keeps its name.
+		 */
+		if ( plainStringValues && index.isValid() && index.column() != 0 ) {
+			const QAbstractItemModel * m = index.model();
+			const NifModel * nif = nullptr;
+			QModelIndex src = index;
+			if ( m && m->inherits( "NifModel" ) ) {
+				nif = static_cast<const NifModel *>( m );
+			} else if ( m && m->inherits( "NifProxyModel" ) ) {
+				const NifProxyModel * p = static_cast<const NifProxyModel *>( m );
+				nif = static_cast<const NifModel *>( p->model() );
+				src = p->mapTo( index );
+			}
+			if ( nif && src.isValid() ) {
+				if ( const NifItem * it = nif->getItem( nif->buddy( src ) ) )
+					if ( it->valueType() == NifValue::tStringIndex )
+						text = nif->resolveString( it );
+			}
+		}
 		QVariant decoration = index.data( Qt::DecorationRole );
 		QString deco = decoration.toString();
 		QString user = noInstantIcons ? QString() : index.data( Qt::UserRole ).toString();
@@ -746,12 +784,13 @@ public:
 };
 
 QAbstractItemDelegate * NifModel::createDelegate( QObject * parent, SpellBookPtr book,
-	bool hideInstantIcons )
+	bool hideInstantIcons, bool plainStringValues )
 {
-	auto * delegate = new NifDelegate( parent, book, hideInstantIcons );
-	// readable from outside without exporting the class: which view got the
-	// icon-suppressing delegate is the whole claim, and a harness can check it
+	auto * delegate = new NifDelegate( parent, book, hideInstantIcons, plainStringValues );
+	// readable from outside without exporting the class: which view got which
+	// behaviour is the whole claim, and a harness can check it
 	delegate->setProperty( "wwNoInstantIcons", hideInstantIcons );
+	delegate->setProperty( "wwPlainStringValues", plainStringValues );
 	return delegate;
 }
 

@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07f — The card was a window, and one bug wearing three hats
+
+### The card froze, so the verdict froze with it
+
+Three reports, one cause. The card is a real top-level window travelling with the
+cursor during a **native** drag loop, and as an ordinary window it takes part in
+hit-testing — so the moment it passed under the pointer the block list got a
+`DragLeave` and stopped receiving `DragMove`. From there the card sat still, the
+insertion line stopped updating, and whatever it last said stayed on screen.
+
+Which is why gaps that are perfectly legal looked refused: the card was showing
+**"Already in that position."** from an earlier position of the cursor. The
+refusal logic was right the whole time — the ladder of verdicts for every gap is
+logged by the harness now, and it reads `0:already, 1:already, 2:ok, 3:ok` for a
+block sitting at index 0, exactly as it should.
+
+`Qt::WindowTransparentForInput`, `WA_TransparentForMouseEvents`,
+`WA_ShowWithoutActivating`, no focus. And it hides on `DragLeave`, because it is
+only moved by `DragMove`: off the list it would hang in mid-screen describing a
+target the cursor is nowhere near.
+
+### "The ID number is not being actively updated"
+
+It was never an id. The model renders a `tStringIndex` as `Cube [1]`, where 1 is
+the index into the **header string table** — so four meshes all called "Cube"
+all showed `[1]`, which reads as an id that is both wrong and frozen.
+
+Real information in Block Details, where you are editing that field. Noise in a
+list of blocks, where the Value column is simply the block's name. Resolved
+through the model rather than trimmed off the end, so a node genuinely named
+"Bone [1]" keeps its name.
+
+The check paints the same cell with two delegates differing in nothing but that
+flag and compares the **pixels**. Asserting the flag would only assert that a
+bool was set; the question is whether the cell comes out different.
+
 ## 2026-08-07e — A row you cannot drop into is all gap, and the line you never saw
 
 ### Only the two ends of a list could be aimed at
