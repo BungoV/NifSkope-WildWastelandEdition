@@ -543,6 +543,19 @@ private:
 	//! The block number under a viewport point, through whichever model is
 	//! current, or -1.
 	qint32 blockListBlockAt( const QPoint & viewportPos ) const;
+	//! Is this window's block list under that GLOBAL point, and what is there?
+	//! `block` is -1 for the blank space below the rows.
+	bool blockListHoverAt( const QPoint & globalPos, qint32 & block ) const;
+	//! The same question asked of every open document, which is what the hover
+	//! probe answers. False when no block list is under the point at all.
+	static bool blockListHoverResolve( const QPoint & globalPos, qint32 & block );
+	//! Register the application-wide hover probe. Stateless, so it belongs to no
+	//! window and survives any of them closing.
+	static void installBlockListHoverProbe();
+	//! WW_BLOCKDND_TEST only: answer the probe from this global point instead of
+	//! the real cursor. The one step that harness steps over — the pointer
+	//! cannot be moved from inside the process (see block_drag_live.ps1).
+	static void wwSetHoverProbePos( const QPoint & globalPos, bool enabled );
 	/*! Where a drop at this point would land.
 	 *
 	 *  On a row's middle it re-parents onto that block (`position` -1); near a

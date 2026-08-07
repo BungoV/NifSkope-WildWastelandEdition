@@ -905,21 +905,16 @@ NifSkope::NifSkope( bool background )
 	 * it pastes into that row, over the blank space below the rows it pastes with
 	 * no parent at all.
 	 *
-	 * Guarded on the ACTIVE window, because every document window registers into
-	 * the same slot and only one of them has the pointer. An inactive window's
-	 * probe declining means the spell falls back to the index it was handed,
-	 * which is the behaviour that was there before.
+	 * CAPTURES NOTHING, on purpose. There is one probe slot for the whole
+	 * application and every document window used to register its own `this` into
+	 * it — so the last window opened owned the slot, its probe declined whenever
+	 * it was not the active window, and paste in any OTHER window silently fell
+	 * back to selection-based. (It also left a dead `this` in the slot when that
+	 * window closed.) A stateless probe asks every open document instead, so
+	 * whichever block list is under the pointer answers regardless of the order
+	 * the windows were opened in.
 	 */
-	setBlockListHoverProbe( [this]( qint32 & block ) {
-		block = -1;
-		if ( !list || !isActiveWindow() || !list->viewport()->isVisible() )
-			return false;
-		const QPoint at = list->viewport()->mapFromGlobal( QCursor::pos() );
-		if ( !list->viewport()->rect().contains( at ) )
-			return false;
-		block = blockListBlockAt( at );
-		return true;
-	} );
+	installBlockListHoverProbe();
 
 	// Compact recursive filter for both hierarchy and flat Block List modes.
 	// Parents stay visible when any descendant matches; search is deliberately
@@ -4266,6 +4261,70 @@ qint32 NifSkope::blockListBlockAt( const QPoint & viewportPos ) const
 	if ( idx.model() == proxy )
 		idx = proxy->mapTo( idx );
 	return nif->getBlockNumber( idx );
+}
+
+bool NifSkope::blockListHoverAt( const QPoint & globalPos, qint32 & block ) const
+{
+	block = -1;
+	if ( !list || !list->viewport()->isVisible() )
+		return false;
+	const QPoint at = list->viewport()->mapFromGlobal( globalPos );
+	if ( !list->viewport()->rect().contains( at ) )
+		return false;
+	block = blockListBlockAt( at );
+	return true;
+}
+
+/* THE ACTIVE WINDOW IS ASKED FIRST, and it is only a tie-break.
+ *
+ * Which block list is under the pointer is a question about geometry, and two
+ * windows' block lists are in the same place on screen only when the windows
+ * overlap — where the one in front owns the pointer, and the one in front is
+ * the active one. Asking the active window first and everyone else after is
+ * therefore both the tie-break and the whole of the ordering that matters.
+ *
+ * Deliberately NOT a gate: gating on isActiveWindow() is what the single-slot
+ * version did, and a window that is not active can still legitimately be the
+ * one under the pointer — during a drag between two windows, or when a spell
+ * runs from a menu that took the activation with it.
+ */
+// WW_BLOCKDND_TEST's fabricated pointer position. Nothing but that harness sets
+// it; the probe reads the real cursor otherwise.
+static QPoint wwHoverProbePos;
+static bool wwHoverProbePosSet = false;
+
+void NifSkope::wwSetHoverProbePos( const QPoint & globalPos, bool enabled )
+{
+	wwHoverProbePos = globalPos;
+	wwHoverProbePosSet = enabled;
+}
+
+void NifSkope::installBlockListHoverProbe()
+{
+	setBlockListHoverProbe( []( qint32 & block ) {
+		return NifSkope::blockListHoverResolve(
+			wwHoverProbePosSet ? wwHoverProbePos : QCursor::pos(), block );
+	} );
+}
+
+bool NifSkope::blockListHoverResolve( const QPoint & globalPos, qint32 & block )
+{
+	block = -1;
+	const QList<NifSkope *> documents = NifSkope::openDocuments();
+	NifSkope * active = nullptr;
+	for ( NifSkope * document : documents )
+		if ( document->isActiveWindow() ) {
+			active = document;
+			break;
+		}
+	if ( active && active->blockListHoverAt( globalPos, block ) )
+		return true;
+	for ( NifSkope * document : documents )
+		if ( document != active && document->isVisible()
+			&& document->blockListHoverAt( globalPos, block ) )
+			return true;
+	block = -1;
+	return false;
 }
 
 qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, int * lineY,

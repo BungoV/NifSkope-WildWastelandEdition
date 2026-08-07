@@ -1,5 +1,46 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07o — Paste followed the pointer in one window only
+
+There is **one hover-probe slot for the whole application**, and every document
+window registered its own `this` into it. The last window opened therefore owned
+the slot, and its probe declined whenever that window was not the active one — so
+in any other document, Ctrl+V quietly went back to pasting into the selection.
+Nothing said so; the failure is indistinguishable from the feature not existing.
+And when that window closed, the slot kept a lambda holding its dead `this`,
+which every subsequent paste in every window called through.
+
+The probe captures nothing now. `NifSkope::blockListHoverResolve` asks each open
+document whether the point is over ITS block list, so the answer follows the
+pointer rather than the order the windows were opened in, and it belongs to no
+window that can be destroyed underneath it.
+
+`isActiveWindow()` went from being a gate to being the tie-break. Which list is
+under the pointer is a question about geometry; two lists share a place on screen
+only when their windows overlap, and then the one in front — the active one —
+owns the pointer. As a gate it was also wrong for a legitimate case: a window
+that is not active can still be the one under the pointer.
+
+### Measured
+
+`block_dragdrop.sh` is **87 checks** (was 82). Five are new, and they open a
+second document, place the two windows side by side, and ask the probe from a
+fabricated point: both windows answer, a point over neither is declined, and the
+probe survives one of the windows closing.
+
+Against the pre-fix probe, kept honest by leaving the fabricated-point seam in
+place so only the multi-window defect could fail it: **2 of the 5 fail** — "the
+probe answers for THIS window" (it answered `no`) and "closing the second window
+leaves the probe working". The third, "and for the OTHER window's block list",
+**passes on the broken code too**, and should: the last window opened was exactly
+the one that worked.
+
+That seam — a fabricated cursor position — is the one step of the path the
+harness cannot drive, because the pointer cannot be moved from inside the
+process. The registered slot, both windows' real geometry and the index lookup
+are all the production path. Named here per the rule that came out of the drag
+session: ask what your harness enters below, and say so.
+
 ## 2026-08-07n — Unfold only where the block could go, and reach what landed
 
 ### The hover opened anything

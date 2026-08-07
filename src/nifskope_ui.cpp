@@ -8979,7 +8979,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							nif->getBlockCount() > beforeRowPaste
 							&& pastedRow >= 0 && nif->getParent( pastedRow ) == nodeB );
 
-						setBlockListHoverProbe( nullptr );	// leave the app as found
+						// the production probe back, not nullptr: an empty slot is not
+						// "as found", it is paste with no pointer at all
+						NifSkope::installBlockListHoverProbe();
 					}
 
 					/* WHAT THE HOVER OPENED, FOLDS BACK. Auto-expand opens a branch
@@ -9082,6 +9084,119 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->wwLogBlockListRowGeometry();		// what a drag start does
 						QApplication::processEvents();
 						check( "the drag log does not unfold the tree", !list->isExpanded( rowFor( leaf ) ) );
+					}
+
+					/* PASTE FOLLOWS THE POINTER IN EVERY WINDOW, not only the last
+					 * one opened.
+					 *
+					 * There is ONE probe slot for the whole application, and every
+					 * document window used to register its own `this` into it. The
+					 * last window opened therefore owned the slot, its probe
+					 * declined whenever that window was not the active one, and
+					 * paste in any other document silently fell back to the
+					 * selection — the failure looks exactly like the feature not
+					 * existing. Closing that window left a dead `this` behind.
+					 *
+					 * WHAT THIS STEPS OVER, and it is one step: the cursor read.
+					 * The pointer cannot be moved from inside the process, which is
+					 * the whole reason block_drag_live.ps1 exists, so the probe is
+					 * asked from a fabricated global point. Everything else is the
+					 * production path — the registered slot, both windows' real
+					 * geometry, and the same index lookup a real hover makes.
+					 *
+					 * Last in the harness because it moves and resizes the window.
+					 */
+					{
+						NifSkope * second = NifSkope::createWindow();
+						QApplication::processEvents();
+						if ( !second || !second->list ) {
+							log << "could not open a second document\n"; fails++; checks++; break;
+						}
+
+						/* Side by side on whatever screen this window is on, so the
+						 * two block lists are in DIFFERENT places and a point can
+						 * name one of them. WW_WINDOW_AT puts every window at the
+						 * same spot, which would stack them exactly.
+						 */
+						QScreen * screen = skope->screen();
+						const QRect avail = screen ? screen->availableGeometry()
+							: QRect( 0, 0, 1280, 800 );
+						const int w = qMin( 640, avail.width() / 2 - 30 );
+						const int h = qMin( 560, avail.height() - 60 );
+						skope->setGeometry( avail.x() + 10, avail.y() + 10, w, h );
+						second->setGeometry( avail.x() + 20 + w, avail.y() + 10, w, h );
+						QApplication::processEvents();
+
+						QWidget * vp1 = list->viewport();
+						QWidget * vp2 = second->list->viewport();
+						log << "windows: this at " << skope->geometry().x() << ","
+							<< skope->geometry().y() << ", second at "
+							<< second->geometry().x() << "," << second->geometry().y()
+							<< "; " << NifSkope::openDocuments().size() << " documents\n";
+
+						// a point over THIS window's row for `leaf`...
+						const QPoint p1 = rowPos( leaf );
+						if ( p1.x() < 0 ) {
+							// left open on purpose: quit() does not ask windows to
+							// close, and closing one that has not been made clean
+							// would put a modal save prompt in front of a harness
+							log << "could not place a point on this window's list\n";
+							fails++; checks++; break;
+						}
+						const QPoint g1 = vp1->mapToGlobal( p1 );
+						// ...and one over the SECOND window's list, which the two
+						// windows must disagree about for any of this to mean anything
+						const QPoint g2 = vp2->mapToGlobal( vp2->rect().center() );
+						qint32 ignored = -2;
+						check( "the two block lists are in different places",
+							skope->blockListHoverAt( g1, ignored )
+							&& !skope->blockListHoverAt( g2, ignored )
+							&& second->blockListHoverAt( g2, ignored )
+							&& !second->blockListHoverAt( g1, ignored ) );
+
+						qint32 hovered = -2;
+						NifSkope::wwSetHoverProbePos( g1, true );
+						const bool overThis = blockListHoverTarget( hovered );
+						log << "probe over this window: " << ( overThis ? "yes" : "no" )
+							<< ", block " << hovered << " (leaf is " << leaf << ")\n";
+						check( "with a second document open, the probe answers for THIS window",
+							overThis && hovered == leaf );
+
+						hovered = -2;
+						NifSkope::wwSetHoverProbePos( g2, true );
+						const bool overSecond = blockListHoverTarget( hovered );
+						log << "probe over the second window: "
+							<< ( overSecond ? "yes" : "no" ) << ", block " << hovered << "\n";
+						check( "...and for the OTHER window's block list",
+							overSecond && hovered == second->blockListBlockAt(
+								vp2->mapFromGlobal( g2 ) ) );
+
+						hovered = -2;
+						NifSkope::wwSetHoverProbePos(
+							QPoint( avail.right() - 2, avail.bottom() - 2 ), true );
+						check( "...and declines where neither window is",
+							!blockListHoverTarget( hovered ) && hovered == -1 );
+
+						/* AND IT SURVIVES THAT WINDOW CLOSING. A probe that captured
+						 * the second window's `this` is a dangling pointer the
+						 * moment it goes, and the next paste anywhere calls through
+						 * it.
+						 */
+						// clean first: closeEvent asks saveConfirm(), and a modal
+						// question with nobody to answer it hangs the whole harness
+						if ( NifModel * n2 = second->getNifModel(); n2 && n2->undoStack )
+							n2->undoStack->setClean();
+						second->setWindowModified( false );
+						second->close();
+						QApplication::processEvents();
+						hovered = -2;
+						NifSkope::wwSetHoverProbePos( g1, true );
+						const bool afterClose = blockListHoverTarget( hovered );
+						log << "documents after closing the second: "
+							<< NifSkope::openDocuments().size() << "\n";
+						check( "closing the second window leaves the probe working",
+							afterClose && hovered == leaf );
+						NifSkope::wwSetHoverProbePos( QPoint(), false );
 					}
 
 					/* Everything above went through the view's own drag overrides,

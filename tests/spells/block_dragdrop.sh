@@ -56,6 +56,17 @@
 #         parent and transform untouched, undo, and a drop that lands where the
 #         block already is being refused rather than pushing an empty undo step
 #  40. every drop went through the view's own drag overrides
+#  41-45. WITH A SECOND DOCUMENT OPEN, the hover probe answers for both windows,
+#         declines where neither is, and survives one of them closing
+#
+# THE SECOND WINDOW is where paste-follows-pointer was broken: one probe slot for
+# the whole application, every window registering its own `this` into it, so the
+# last one opened owned the slot and declined unless it was the active window --
+# and paste in any other document fell back to the selection with no sign that it
+# had. The two windows are placed side by side and the probe is asked from a
+# fabricated point, which is the ONE step of the real path this cannot drive: the
+# pointer cannot be moved from inside the process. Going back to a per-window
+# probe fails checks 42 and 43.
 #
 # "The line is painted" counts accent-coloured pixels in a grab of the viewport
 # along the line's row. wwDropLineY only says the view was TOLD to draw one, and
