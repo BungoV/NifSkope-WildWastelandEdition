@@ -1,5 +1,30 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08c — Double-click to edit, and a failed promote stops taking the list with it
+
+**Double-click a row in Loaded NIFs to edit it.** "Make Primary / Edit" existed
+only in the row menu, so the obvious gesture did nothing at all. It runs the same
+two calls the menu does, resolved the same way, and leaves every other loaded
+document as it is — nothing is saved, nothing is reloaded.
+
+**A promote that fails no longer closes the workspace.** The failure path called
+`close()` on a window still flagged `sessionCollectionMember`, and closing a
+workspace member runs the group close, which closes every other member with it —
+one promote that could not load took the whole Loaded NIFs list down. The flag is
+cleared before the window goes, and the window is hidden and deleted rather than
+closed, since it never became visible and `close()` travels the whole close path
+looking for something to confirm.
+
+Together with the reload fix before it, the failure that produced this should now
+be unreachable: promotes no longer read from disk, so the case that failed and
+triggered the cascade does not arise. The guard stays regardless — a cascade this
+expensive should not depend on nothing ever failing.
+
+**Filed, not fixed**: `window_state_roundtrip.sh` cannot run. It expects the raw
+Qt geometry blob and the registry holds QSettings' textual `@ByteArray(...)` form,
+so it refuses before the app is even launched. Details in
+`docs/TO_BE_IMPLEMENTED.md`.
+
 ## 2026-08-08b — A marked face donor, and CustomizationRemapData that can be rebuilt
 
 ### Mark the donor once

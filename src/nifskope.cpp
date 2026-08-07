@@ -1507,6 +1507,26 @@ NifSkope::NifSkope( bool background )
 				showBackgroundDocumentMenu( background, loadedNifsView->viewport()->mapToGlobal( pos ) );
 		} );
 
+	/* DOUBLE-CLICK A ROW TO EDIT IT, which is what double-clicking a list of
+	 * documents means everywhere else and is why it kept being tried here.
+	 *
+	 * "Make Primary / Edit" existed only in the row menu, so the obvious gesture
+	 * did nothing at all. This is the SAME two calls the menu makes, resolved the
+	 * same way, so the two can never come to mean different things — and it leaves
+	 * every other loaded document exactly as it is, saving nothing.
+	 */
+	connect( loadedNifsView, &QAbstractItemView::doubleClicked, this,
+		[this]( const QModelIndex & index ) {
+			if ( NifSkope * document = documentFromBrowserIndex( index ) ) {
+				const int tab = documentTabWindows.indexOf( document );
+				if ( tab >= 0 )
+					activateDocumentTab( tab );
+			} else if ( BackgroundNifDocument * background =
+				backgroundDocumentFromBrowserIndex( index ) ) {
+				promoteBackgroundDocument( background );
+			}
+		} );
+
 	// Empty Model for swapping out before model fill
 	emptyModel = new QStandardItemModel( this );
 
@@ -2829,10 +2849,27 @@ void NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
 		emit window->completeLoading( loaded, fname );
 	}
 	if ( !loaded ) {
+		/* THE FAILED WINDOW GOES, AND NOTHING ELSE DOES.
+		 *
+		 * Closing a window that is still a workspace member runs the group close
+		 * path, which closes EVERY other member with it — so one promote that
+		 * could not load took the whole Loaded NIFs list down. The flag is cleared
+		 * first, which is what makes this window an ordinary one, and
+		 * closingWorkspaceGroup is held false so nothing downstream reads the
+		 * close as "the user is shutting the workspace".
+		 *
+		 * deleteLater rather than close(): the window never became visible, and a
+		 * close() on a hidden window still travels the whole close path looking
+		 * for something to confirm.
+		 */
 		window->sessionCollectionMember = false;
-		window->close();
+		window->closingWorkspaceGroup = false;
+		window->backgroundWorkspaceDocument = false;
+		window->hide();
+		window->deleteLater();
 		statusBar()->showMessage(
-			tr( "Could not reload %1 for editing." ).arg( sourceLabel ), 5000 );
+			tr( "Could not open %1 for editing; the other loaded NIFs are untouched." )
+				.arg( sourceLabel ), 5000 );
 		refreshAllDocumentSessions();
 		return;
 	}

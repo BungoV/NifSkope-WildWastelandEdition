@@ -1,5 +1,23 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## `window_state_roundtrip.sh` cannot run: the geometry blob is text — OPEN, 2026-08-08
+
+The harness patches the saved window geometry in the registry and re-reads it,
+and it refuses at the first step: it expects the raw Qt geometry blob, magic
+`0x01D9D0CB`, and finds `0xCB`.
+
+What is actually stored under `UI\Window Geometry` is **UTF-16 text** beginning
+`@ByteArray(` — QSettings' textual form of a QByteArray — 156 bytes of it. The
+harness's byte arithmetic (`$b[22+2*$i]`, a 2-byte stride) is reading UTF-16
+characters as if they were the blob, which is why the magic comes out as a single
+byte.
+
+Nothing to do with the code under test: the check runs on registry bytes before
+the application is launched at all, so no C++ change can affect it. Either the
+harness has to decode the `@ByteArray(...)` wrapper before patching, or the app's
+geometry has to be stored raw. The first is smaller and does not change what
+users have saved.
+
 ## Live decimation has no operator panel — OPEN, 2026-08-08
 
 Every other live operator arms a Blender-style redo panel through
