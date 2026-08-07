@@ -1,5 +1,46 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07d — An insertion line you can aim at, and Blender's drag card
+
+### The gap was five pixels wide
+
+Reordering worked from the first version, but the band that meant "between these
+two rows" was a quarter of the row height capped at 6px — about five pixels on a
+normal row. The gesture existed and was effectively unreachable. It is a **third**
+of the row now, top and bottom, which is Blender's split: the middle parents, the
+edges reorder.
+
+### The line
+
+Drawn at the gap, indented to where the row's own text starts so it reads as
+"between these two children" rather than as a rule across the dock, with a round
+cap on the left end — a bare hairline gets lost against the row grid. Qt's own
+drop indicator is not an option: it is set inside
+`QAbstractItemView::dragMoveEvent`, which asks `canDropMimeData()` first, and
+`NifModel` does not implement it.
+
+The check counts **accent-coloured pixels in a grab of the viewport** along the
+line's row, because `wwDropLineY` only says the view was told to draw one. 846
+pixels; the difference between a marker the user can see and a variable that got
+set.
+
+### The drag card
+
+Blender's, and for the same reason: the modifier hint and the name of what is
+being moved belong in one place, next to the cursor, and the hint has to follow
+Ctrl and Shift while the drag is in the air. A `QToolTip` cannot — it re-shows
+and fades on every reposition, which reads as shimmering, and it takes no
+styling. The `QDrag` pixmap cannot either: it is snapshotted at `exec()`.
+
+So it is a frameless label that follows the cursor, in the skin's card colours,
+with the hint muted on top and the dragged name bold underneath — the same
+pattern the delegate's reference-drag ghost already uses. The drag pixmap is
+gone with it: the card carries the name, and a second ghost beside it was the
+same information drawn twice.
+
+The card's second line comes from the **payload**, not from where the drag
+started, so it always describes what is actually being carried.
+
 ## 2026-08-07c — Renaming no longer drags the list sideways
 
 `renameBlockListIndex` called `scrollTo()` to put the row on screen, and

@@ -50,12 +50,17 @@
 #  27. a multi-selection drags as one payload and all of it lands
 #  28. ...as a single undo step
 #  29. one undo takes the whole multi-drop back
-#  30-37. dropping in the GAP between rows reorders instead of re-parenting:
-#         above a sibling, below the last one, the insertion line, no row
-#         highlight, the parent and transform untouched, undo, and a drop that
-#         lands where the block already is being refused rather than pushing an
-#         empty undo step
-#  38. every drop went through the view's own drag overrides
+#  30-39. dropping in the GAP between rows reorders instead of re-parenting:
+#         above a sibling, below the last one, the insertion line, that the line
+#         is actually PAINTED, what the drag card says, no row highlight, the
+#         parent and transform untouched, undo, and a drop that lands where the
+#         block already is being refused rather than pushing an empty undo step
+#  40. every drop went through the view's own drag overrides
+#
+# "The line is painted" counts accent-coloured pixels in a grab of the viewport
+# along the line's row. wwDropLineY only says the view was TOLD to draw one, and
+# the whole complaint that produced this feature was that you could not see where
+# the block was going to land.
 #
 # Checks 8 and 14 are the discriminating PAIR, on the same two blocks: plain drop
 # must leave the block where it was in the world, Shift drop must move it by

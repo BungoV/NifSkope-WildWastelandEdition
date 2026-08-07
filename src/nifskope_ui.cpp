@@ -8202,6 +8202,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					Transform placed;
 					placed.translation = Vector3( 100.0f, 20.0f, -5.0f );
 					placed.writeBack( nif, nif->getBlockIndex( nodeB ) );
+					// named, so the drag card's second line is checked against a NAME
+					// rather than the type it falls back to for an unnamed block
+					nif->assignString( nif->getBlockIndex( nodeB ), "Name",
+						QStringLiteral( "WWDropTarget" ) );
 					QApplication::processEvents();
 
 					const Vector3 targetOffset = worldOf( nodeB ).translation;
@@ -8305,7 +8309,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * "where did the window think this was going" has to be part of
 					 * the measurement rather than inferred from the result.
 					 */
-					int lastLineY = -1;
+					int lastLineY = -1, lastLinePixels = 0;
+					QString lastCard;
 					auto reorder = [&]( const QList<qint32> & blocks, qint32 overRow, int edge,
 						qint32 wantParent, int wantPosition ) -> bool {
 						const QPoint pos = rowPoint( overRow, edge );
@@ -8326,6 +8331,32 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QDragMoveEvent moveEv( pos, Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier );
 						list->wwDeliverDragEvent( &moveEv );
 						lastLineY = list->wwDropLineY;
+
+						/* IS THE LINE ACTUALLY DRAWN? wwDropLineY only says the view
+						 * was told to draw one. grab() renders the viewport
+						 * synchronously through the same paintEvent, so counting
+						 * accent-coloured pixels along that row measures the paint
+						 * rather than the intent — the difference between a marker
+						 * the user can see and a variable that got set.
+						 */
+						lastLinePixels = 0;
+						if ( lastLineY >= 0 ) {
+							const QImage shot = list->viewport()->grab().toImage();
+							const QRgb accent = QColor::fromString( wwSkinColor( "accent" ) ).rgb();
+							for ( int y = qMax( 0, lastLineY - 2 );
+								y <= qMin( shot.height() - 1, lastLineY + 2 ); y++ )
+								for ( int x = 0; x < shot.width(); x++ )
+									if ( ( shot.pixel( x, y ) | 0xff000000 ) == ( accent | 0xff000000 ) )
+										lastLinePixels++;
+						}
+
+						// and what the card says while it is up
+						lastCard.clear();
+						for ( QWidget * top : QApplication::topLevelWidgets() )
+							if ( top->objectName() == QLatin1String( "BlockListDragCard" ) && top->isVisible() )
+								if ( auto * card = qobject_cast<QLabel *>( top ) )
+									lastCard = card->text();
+
 						QDropEvent dropEv( QPointF( pos ), Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier );
 						list->wwDeliverDragEvent( &dropEv );
 						delete mime;
@@ -8525,6 +8556,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "dropping in the gap ABOVE a sibling moves the block to that slot",
 						childrenOf( root ) == QVector<qint32>{ nodeB, leaf, nodeA } );
 					check( "...with an insertion line shown while dragging over the gap", lastLineY >= 0 );
+					log << "accent pixels on the line row: " << lastLinePixels << "\n";
+					check( "...and the line is PAINTED, not just recorded", lastLinePixels > 20 );
+					log << "drag card: " << ( lastCard.isEmpty() ? QStringLiteral( "(none)" ) : lastCard ) << "\n";
+					check( "...and the drag card names the gesture and what is being moved",
+						lastCard.contains( QLatin1String( "Reorder" ) )
+						&& lastCard.contains( QLatin1String( "WWDropTarget" ) ) );
 					check( "...and no highlighted row, because the gap is what is being pointed at",
 						nif->dropTargetBlock == -1 );
 					check( "...leaving the parent and the transform alone",

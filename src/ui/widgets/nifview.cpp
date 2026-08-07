@@ -427,11 +427,21 @@ void NifTreeView::paintEvent( QPaintEvent * e )
 	if ( wwDropLineY < 0 )
 		return;
 
-	// indented to where the row's own text starts, so it reads as "between these
-	// two children" rather than as a rule across the whole dock
+	/* Indented to where the row's own text starts, so it reads as "between these
+	 * two children" rather than as a rule across the whole dock — Blender's
+	 * insertion marker does the same. The cap on the left end is what makes it
+	 * read as an insertion point rather than as a separator that was always
+	 * there; a bare hairline gets lost against the row grid.
+	 */
 	QPainter p( viewport() );
-	p.setPen( QPen( QColor::fromString( wwSkinColor( "accent" ) ), 2 ) );
-	p.drawLine( wwDropLineFrom, wwDropLineY, viewport()->width() - 2, wwDropLineY );
+	p.setRenderHint( QPainter::Antialiasing );
+	const QColor accent = QColor::fromString( wwSkinColor( "accent" ) );
+	const int y = qBound( 1, wwDropLineY, viewport()->height() - 2 );
+	p.setPen( QPen( accent, 2 ) );
+	p.drawLine( wwDropLineFrom + 5, y, viewport()->width() - 3, y );
+	p.setPen( Qt::NoPen );
+	p.setBrush( accent );
+	p.drawEllipse( QPoint( wwDropLineFrom + 3, y ), 3, 3 );
 }
 
 void NifTreeView::wwDeliverDragEvent( QEvent * e )

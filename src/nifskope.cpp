@@ -3876,8 +3876,49 @@ void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUna
 static const QLatin1String BlockListDragMime( "application/x-nifskope-blocklist" );
 
 //! Last hint shown at the cursor, so a mouse move that changes nothing does not
-//! re-show the tooltip and make it flicker.
+//! rebuild the card's markup on every pixel.
 static QString blockListDropHint;
+
+/*! The card that follows the cursor during a block drag — Blender's, which
+ *  carries the modifier hint and the name of what is being moved in one place.
+ *
+ *  NOT a QToolTip: a tooltip re-shows and fades on every reposition, which reads
+ *  as shimmering, and it cannot be styled to the skin. NOT the QDrag pixmap
+ *  either — that one is snapshotted at exec() and cannot change, and the hint's
+ *  whole point is that it follows Ctrl and Shift while the drag is in the air.
+ *  The delegate's reference-drag ghost is the same pattern for the same reason.
+ */
+static QPointer<QLabel> blockListDragCard;
+
+static void showBlockListDragCard( const QString & hint, const QString & label )
+{
+	if ( !blockListDragCard ) {
+		auto * card = new QLabel( nullptr, Qt::ToolTip | Qt::FramelessWindowHint );
+		card->setObjectName( QStringLiteral( "BlockListDragCard" ) );
+		card->setTextFormat( Qt::RichText );
+		card->setMargin( 0 );
+		card->setStyleSheet( QStringLiteral(
+			"QLabel { background: %1; border: 1px solid %2; border-radius: 3px; padding: 4px 7px; }" )
+			.arg( wwSkinColor( "bgCard" ), wwSkinColor( "border" ) ) );
+		blockListDragCard = card;
+	}
+
+	blockListDragCard->setText( QStringLiteral(
+		"<div style='color:%1'>%2</div><div style='color:%3'><b>%4</b></div>" )
+		.arg( wwSkinColor( "textMuted" ), hint.toHtmlEscaped(),
+			wwSkinColor( "text" ), label.toHtmlEscaped() ) );
+	blockListDragCard->adjustSize();
+	// below and right of the pointer, the way Blender's sits — far enough not to
+	// cover the row being aimed at
+	blockListDragCard->move( QCursor::pos() + QPoint( 16, 18 ) );
+	blockListDragCard->show();
+}
+
+static void hideBlockListDragCard()
+{
+	if ( blockListDragCard )
+		blockListDragCard->hide();
+}
 
 //! Which transform rule the held modifiers ask for.
 static WwReparentMode blockListDropMode( Qt::KeyboardModifiers mods )
@@ -3911,42 +3952,22 @@ bool NifSkope::startBlockListDrag()
 
 	QMimeData * mime = blockListDragMimeData( blocks );
 
-	// Blender's ghost: the name for one, the plural count for several.
-	const QString label = blocks.size() == 1
-		? nif->itemName( nif->getBlockIndex( blocks.first() ) )
-		: tr( "%1 objects" ).arg( blocks.size() );
-
-	const QFontMetrics fm( list->font() );
-	const QSize text = fm.size( Qt::TextSingleLine, label );
-	QPixmap ghost( text.width() + 16, text.height() + 8 );
-	ghost.fill( Qt::transparent );
-	{
-		QPainter p( &ghost );
-		p.setRenderHint( QPainter::Antialiasing );
-		p.setPen( Qt::NoPen );
-		p.setBrush( QColor::fromString( wwSkinColor( "bgCard" ) ) );
-		p.drawRoundedRect( ghost.rect().adjusted( 0, 0, -1, -1 ), 3, 3 );
-		p.setPen( QColor::fromString( wwSkinColor( "text" ) ) );
-		p.setFont( list->font() );
-		p.drawText( ghost.rect(), Qt::AlignCenter, label );
-	}
-
+	// No drag pixmap: the card carries the name, and a second ghost trailing the
+	// cursor alongside it is the same information drawn twice.
 	auto * drag = new QDrag( list );
 	drag->setMimeData( mime );
-	drag->setPixmap( ghost );
-	// beside the cursor, not under it: the row being pointed at is the thing
-	// the user is aiming with
-	drag->setHotSpot( QPoint( -10, ghost.height() / 2 ) );
 
 	blockListDropHint.clear();
 	drag->exec( Qt::MoveAction | Qt::LinkAction, Qt::MoveAction );
 
 	// exec() blocks until the drop is over; a drag that ended outside the list
-	// never reaches DragLeave, so the highlight is cleared here as well.
+	// never reaches DragLeave, so everything the drag put on screen comes down
+	// here as well.
 	setBlockListDropTarget( -1 );
 	list->wwDropLineY = -1;
 	list->viewport()->update();
-	QToolTip::hideText();
+	hideBlockListDragCard();
+	blockListDropHint.clear();
 	return true;
 }
 
@@ -4016,8 +4037,13 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	 * array — there is nothing there to reorder. Dropping in that mode is always
 	 * an onto-the-row re-parent.
 	 */
+	/* A THIRD of the row, top and bottom, which is Blender's split and is the
+	 * difference between a gesture you can aim and one you cannot. The first
+	 * version used a quarter capped at 6px — about five pixels on a normal row,
+	 * so reordering was there but effectively unreachable.
+	 */
 	const QRect r = list->visualRect( idx );
-	const int edge = qBound( 2, r.height() / 4, 6 );
+	const int edge = qBound( 4, r.height() / 3, 10 );
 	const bool above = ( viewportPos.y() - r.top() ) < edge;
 	const bool below = ( r.bottom() - viewportPos.y() ) < edge;
 	if ( list->model() != proxy || !( above || below ) )
@@ -4068,7 +4094,8 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		setBlockListDropTarget( -1 );
 		list->wwDropLineY = -1;
 		list->viewport()->update();
-		QToolTip::hideText();
+		// the card stays up: the drag is still running, it has just left the list,
+		// and it is what tells you the modifiers are still live
 		blockListDropHint.clear();
 		return false;		// let the view do its own leave handling too
 	}
@@ -4124,10 +4151,17 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		} else {
 			hint = refusal;
 		}
-		if ( hint != blockListDropHint ) {
-			blockListDropHint = hint;
-			QToolTip::showText( QCursor::pos(), hint, list );
-		}
+		/* Blender's second line: the name for one, the plural count for several.
+		 * Derived from the PAYLOAD rather than remembered from where the drag
+		 * started, so the card always describes what is actually being carried —
+		 * and so the harness, which synthesises a payload, sees the real thing.
+		 */
+		const QString first = nif->resolveString( nif->getBlockIndex( blocks.first() ), "Name" );
+		const QString what = blocks.size() > 1
+			? tr( "%1 objects" ).arg( blocks.size() )
+			: first.isEmpty() ? nif->itemName( nif->getBlockIndex( blocks.first() ) ) : first;
+		blockListDropHint = hint;
+		showBlockListDragCard( hint, what );
 
 		if ( legal > 0 ) {
 			e->setDropAction( mode == WwReparentMode::Link ? Qt::LinkAction : Qt::MoveAction );
@@ -4143,7 +4177,7 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	setBlockListDropTarget( -1 );
 	list->wwDropLineY = -1;
 	list->viewport()->update();
-	QToolTip::hideText();
+	hideBlockListDragCard();
 	blockListDropHint.clear();
 
 	QStringList refusals;
