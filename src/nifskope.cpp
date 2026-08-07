@@ -3897,6 +3897,42 @@ static QLabel * blockListDragCardHint = nullptr;
 static QLabel * blockListDragCardIcon = nullptr;
 static QLabel * blockListDragCardName = nullptr;
 
+/*! The card's position is driven by a TIMER, not by DragMove.
+ *
+ *  It was moved from the drag handler, which means it follows the cursor exactly
+ *  as long as drag events keep arriving — and when they stop, for any of the
+ *  several reasons a native drag loop stops sending them, the card does not
+ *  simply lag: it stops dead somewhere else on screen still asserting a verdict
+ *  about a row the cursor left long ago. Reported three times in three different
+ *  words. QCursor::pos() is global and always current, so a tick can place it
+ *  correctly whatever the event routing is doing.
+ *
+ *  The delegate's reference-drag ghost tracks the cursor on a timer for the same
+ *  class of reason: the events you would rather use do not come.
+ */
+static QTimer * blockListDragTicker = nullptr;
+static QElapsedTimer blockListDragHeard;
+
+static void placeBlockListDragCard()
+{
+	if ( !blockListDragCard || !blockListDragCard->isVisible() )
+		return;
+
+	/* AND A STALE VERDICT IS RETRACTED. If no drag event has arrived for a
+	 * moment the hint is no longer about anywhere the cursor is, so it comes off
+	 * rather than being carried around as though it still meant something. What
+	 * is being dragged is still true, so that line stays.
+	 */
+	if ( blockListDragCardHint && blockListDragHeard.isValid()
+		&& blockListDragHeard.elapsed() > 250 && blockListDragCardHint->isVisible() ) {
+		blockListDragCardHint->hide();
+		blockListDragCard->adjustSize();
+	}
+
+	const QSize sz = blockListDragCard->size();
+	blockListDragCard->move( QCursor::pos() + QPoint( -sz.width() / 3, -sz.height() - 10 ) );
+}
+
 static void showBlockListDragCard( const QString & hint, const QIcon & icon,
 	const QString & type, const QString & name )
 {
@@ -3959,22 +3995,54 @@ static void showBlockListDragCard( const QString & hint, const QIcon & icon,
 			.arg( wwSkinColor( "textMuted" ), type.toHtmlEscaped(),
 				wwSkinColor( "text" ), name.toHtmlEscaped() ) );
 
+	blockListDragCardHint->show();
+	blockListDragHeard.restart();
 	blockListDragCard->adjustSize();
 	/* DIRECTLY ABOVE THE POINTER. Below-right put it over the rows underneath the
 	 * cursor — which, when the gesture is "aim at the gap between two of them",
 	 * covers the thing being aimed at. Above and slightly left of centre keeps
 	 * the pointer and the target row clear.
 	 */
-	const QSize sz = blockListDragCard->size();
-	blockListDragCard->move( QCursor::pos() + QPoint( -sz.width() / 3, -sz.height() - 10 ) );
 	blockListDragCard->show();
 	blockListDragCard->raise();
+	placeBlockListDragCard();
 }
 
 static void hideBlockListDragCard()
 {
 	if ( blockListDragCard )
 		blockListDragCard->hide();
+}
+
+/*! WW_DRAG_LOG=<file>: append what every drag event resolved to.
+ *
+ *  Three fixes for "I cannot drop between two rows" have now been made by
+ *  reading code, and the report has not moved. Nothing about a native drag can
+ *  be reproduced in a harness — no synthetic event reaches the loop — so this is
+ *  the same answer WW_CAMERA_LOG was to a bug that reading was not finding: have
+ *  the program say what it saw, one line per event.
+ */
+static void wwDragLog( const QString & line )
+{
+	static QFile * log = nullptr;
+	static bool resolved = false;
+	if ( !resolved ) {
+		resolved = true;
+		const QString path = qEnvironmentVariable( "WW_DRAG_LOG" );
+		if ( !path.isEmpty() ) {
+			log = new QFile( path );
+			if ( !log->open( QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text ) ) {
+				delete log;
+				log = nullptr;
+			}
+		}
+	}
+	if ( !log )
+		return;
+	QTextStream out( log );
+	out << line << "\n";
+	out.flush();
+	log->flush();		// a drag that ends in a crash still leaves its trail
 }
 
 //! Which transform rule the held modifiers ask for.
@@ -4014,8 +4082,22 @@ bool NifSkope::startBlockListDrag()
 	auto * drag = new QDrag( list );
 	drag->setMimeData( mime );
 
+	wwDragLog( QStringLiteral( "=== drag start: %1 block(s), first %2 ===" )
+		.arg( blocks.size() ).arg( blocks.first() ) );
+
 	blockListDropHint.clear();
+	blockListDragHeard.restart();
+	if ( !blockListDragTicker ) {
+		blockListDragTicker = new QTimer( qApp );
+		QObject::connect( blockListDragTicker, &QTimer::timeout, qApp, []() {
+			placeBlockListDragCard();
+		} );
+	}
+	blockListDragTicker->start( 16 );
+
 	drag->exec( Qt::MoveAction | Qt::LinkAction, Qt::MoveAction );
+
+	blockListDragTicker->stop();
 
 	// exec() blocks until the drop is over; a drag that ended outside the list
 	// never reaches DragLeave, so everything the drag put on screen comes down
@@ -4198,8 +4280,25 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		return false;		// not ours — a file drop still reaches the stock path
 
 	int position = -1, lineY = -1, lineFrom = 0;
-	const qint32 target = blockListDropSpot( e->position().toPoint(), &position, &lineY, &lineFrom );
+	const QPoint at = e->position().toPoint();
+	const qint32 target = blockListDropSpot( at, &position, &lineY, &lineFrom );
 	const WwReparentMode mode = blockListDropMode( e->modifiers() );
+
+	{
+		const QModelIndex hit = list->indexAt( at );
+		const QRect hr = hit.isValid() ? list->visualRect( hit ) : QRect();
+		wwDragLog( QStringLiteral(
+			"%1 at %2,%3 | row %4 rect %5..%6 | spot %7 pos %8 | payload %9 | mode %10" )
+			.arg( event->type() == QEvent::Drop ? QStringLiteral( "DROP" )
+				: event->type() == QEvent::DragEnter ? QStringLiteral( "ENTER" )
+				: QStringLiteral( "move" ) )
+			.arg( at.x() ).arg( at.y() )
+			.arg( hit.isValid() ? QString::number( hit.row() ) : QStringLiteral( "-" ) )
+			.arg( hr.top() ).arg( hr.bottom() )
+			.arg( target ).arg( position )
+			.arg( QStringLiteral( "[%1]" ).arg( blocks.size() ) )
+			.arg( int( mode ) ) );
+	}
 
 	// Ask about every dragged block, so a mixed selection is described by what it
 	// CAN do. The first refusal is what gets shown when none of them can.
@@ -4278,6 +4377,8 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 
 	QStringList refusals;
 	const int moved = wwReparentBlocks( nif, blocks, target, mode, &refusals, position );
+	wwDragLog( QStringLiteral( "  -> moved %1, refusals: %2" ).arg( moved )
+		.arg( refusals.isEmpty() ? QStringLiteral( "none" ) : refusals.join( QStringLiteral( " / " ) ) ) );
 	e->setDropAction( moved > 0
 		? ( mode == WwReparentMode::Link ? Qt::LinkAction : Qt::MoveAction )
 		: Qt::IgnoreAction );
