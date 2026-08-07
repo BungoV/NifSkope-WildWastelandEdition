@@ -1,5 +1,57 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07u — Drag a mesh onto the Collision Manager
+
+The last unbuilt line of the Block List drag-and-drop spec: *"dropping a
+BSTriShape onto the Collision Manager is the same payload routed to the
+mesh→collision path"*. It is, and that is all it is — the payload already
+travelled and the panel already knew how to make collision out of a selection,
+so the drop only aims the existing Create at what was dragged.
+
+- It runs **the same call the shape popup's Create runs**, held in a
+  `std::function` the button and the drop share, so the two cannot drift apart.
+- At **the shape type the panel is showing**, not one the drop picked: whatever
+  that popup says it will make is what a drop makes. Convex and Mesh open their
+  preview exactly as they do from the button, so the expensive two keep their
+  confirmation step.
+- **Several meshes make one body each**, which is what
+  `castCollisionOverSelection` already does for a multi-selection.
+- The current block is only re-selected if it has to be — the drag came out of
+  the Block List, so the current row is normally already one of the blocks being
+  dropped, and selecting again would collapse the very multi-selection that makes
+  it one body per mesh.
+
+### The predicate is the FILE, not the scene
+
+The obvious first move was to ask the create spell's own `isApplicable` rather
+than keep a second opinion about what is legal. It refused every mesh. That
+predicate asks the **Scene** whether a block has vertices and triangles, so until
+a frame has been drawn with that mesh in it the answer is no — measured with the
+view, the scene, its renderer and the node itself all present, on a real game
+mesh, and still no.
+
+Which is wrong for a drop quite apart from being untestable: whether a mesh can
+be dropped must not depend on whether the viewport has got round to drawing it,
+or the gesture refuses on a collapsed viewport and on a file that has only just
+opened. It asks the file now — the geometry classes, and vertices and triangles
+above zero, read through the same BSTriShape-or-its-Data split `wwBlockSummary`
+uses. A `NiNode` is deliberately not taken, though the spell would: dropping one
+means every mesh under it, which is a far bigger thing than the gesture looks.
+
+### Measured
+
+`tests/spells/collision_drop.sh`, 7 checks, no game corpus. The one that matters
+is check 2, and it is there because of how the block list's own drag first
+shipped — 26 green checks over a feature that never ran, because the harness
+entered below the one broken step. So: with `setAcceptDrops` turned off, which
+makes the whole thing do nothing whatsoever for a real drag, **six of the seven
+checks still pass and only check 2 fails**. Measured, not asserted.
+
+`NifSkope::blockListDragPayload` is public now. The payload FORMAT stays private
+to the block list — this remains the only way to read it, so a payload dropped
+somewhere that does not understand it is still ignored rather than
+half-understood, which is what the format was made private for.
+
 ## 2026-08-07t — The flat list does not crash. It hangs, and I said otherwise
 
 **Correcting 2026-08-07p**, which stated that the crash filed against list mode

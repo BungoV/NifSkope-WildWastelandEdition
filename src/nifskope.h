@@ -584,9 +584,18 @@ private:
 	//! over a node does not leave it unfolded. `except` survives — it is where
 	//! the block landed.
 	void wwCollapseBlockListBranches( const QSet<qint32> & opened, qint32 except = -1 );
-	//! The block numbers carried by a block-list drag, or empty.
+	/*! The block numbers carried by a block-list drag, or empty.
+	 *
+	 *  PUBLIC because the Collision Manager is a second, legitimate reader: a
+	 *  mesh dragged onto that dock makes collision out of it. The FORMAT stays
+	 *  private to the block list — this is the only way to read it, so a payload
+	 *  dropped somewhere that does not understand it is ignored rather than
+	 *  half-understood, which is what the format was made private for.
+	 */
+public:
 	QList<qint32> blockListDragPayload( const QMimeData * mime,
 		QList<qint32> * fromParents = nullptr ) const;
+private:
 	//! Highlight (or clear, with -1) the row a drop would land on.
 	void setBlockListDropTarget( qint32 block );
 	/*! Select nothing at all, from a click past the last row.

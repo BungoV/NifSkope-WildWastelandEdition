@@ -8115,6 +8115,184 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	//! Defined in spells/collisiontools.cpp; hands a drag event to the Collision
+	//! Manager panel, whose type has no header. Null event asks whether the panel
+	//! is accepting drops at all.
+	extern bool wwDeliverCollisionDrop( QMainWindow * mw, QEvent * event );
+
+	/* TEST HARNESS (WW_COLLDROP_TEST=1): drag a mesh onto the Collision Manager.
+	 *
+	 * The dock is a drop target now: a mesh dragged out of the Block List and
+	 * dropped on it gets collision, at the shape type the panel is showing, one
+	 * body per mesh. This drives the same payload the block list builds.
+	 *
+	 * SHAPE TYPE IS SEEDED TO BOX by the script, and that matters twice: Box is
+	 * the only create with no popup or preview on it, so it is the one usable
+	 * with nobody at the keyboard — and because the drop is supposed to honour
+	 * the panel's own setting rather than a type of its own, "the shape that came
+	 * out is a bhkBoxShape" is what says it did.
+	 *
+	 * WHAT IS MEASURED
+	 *
+	 *   1. the fixture has two meshes                            <- not vacuous
+	 *   2. the panel is accepting drops at all -- the flag Qt gates on before any
+	 *      handler runs, and the one thing delivering an event steps over
+	 *   3. a mesh payload is taken, with the copy action
+	 *   4. a payload with no mesh in it is refused by ACTION, not by ignoring the
+	 *      event: ignoring ends the drag over the widget and no further move
+	 *      arrives, which is the trap the block list documents
+	 *   5. dropping one mesh makes one body
+	 *   6. ...and the shape is the type the panel was set to
+	 *   7. dropping two makes two, one each
+	 *
+	 * Log: release/ww_colldrop_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLDROP_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_colldrop_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					if ( !nif ) { log << "no model\n"; fails++; checks++; break; }
+
+					QDockWidget * dock = skope->findChild<QDockWidget *>(
+						QStringLiteral( "CollisionManagerDock" ) );
+					if ( !dock ) { log << "no collision dock\n"; fails++; checks++; break; }
+					dock->setFloating( false );
+					dock->show();
+					QApplication::processEvents();
+
+					auto bodies = [&]() {
+						int n = 0;
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" ) )
+								n++;
+						return n;
+					};
+					auto shapesOfType = [&]( const char * type ) {
+						int n = 0;
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), type ) )
+								n++;
+						return n;
+					};
+
+					QList<qint32> meshes, others;
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QModelIndex idx = nif->getBlockIndex( b );
+						if ( nif->blockInherits( idx, "BSTriShape" ) )
+							meshes.append( b );
+						else if ( nif->blockInherits( idx, "BSLightingShaderProperty" ) )
+							others.append( b );
+					}
+					/* THE SCENE HAS TO BE BUILT. The create spell's isApplicable asks
+					 * the Scene whether the block actually has vertices and
+					 * triangles, not merely whether its class is right — so with no
+					 * frame drawn it answers no to everything, and every check below
+					 * would pass for the wrong reason. Pump twice: an update on its
+					 * own does not repaint, which this file already knows about
+					 * grabFramebuffer.
+					 */
+					if ( GLView * view = skope->getGLView() ) {
+						for ( int i = 0; i < 2; i++ ) {
+							view->update();
+							QApplication::processEvents();
+						}
+					}
+					log << "meshes " << meshes.size() << ", non-mesh blocks " << others.size()
+						<< ", bodies to begin with " << bodies() << "\n";
+					check( "the fixture has three meshes: the create consumes one per body", meshes.size() >= 3 );
+					if ( meshes.size() < 3 ) break;
+
+					check( "the Collision Manager is accepting drops",
+						wwDeliverCollisionDrop( skope, nullptr ) );
+
+					// what the block list would hand over for those rows
+					auto payloadFor = [&]( const QList<qint32> & blocks ) {
+						return skope->blockListDragMimeData( blocks );
+					};
+					const QPoint at( 10, 10 );
+
+					{
+						const QMimeData * mime = payloadFor( { meshes.first() } );
+						QDragEnterEvent enter( at, Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier );
+						enter.setAccepted( false );
+						const bool reached = wwDeliverCollisionDrop( skope, &enter );
+						check( "a mesh dragged over it is taken",
+							reached && enter.isAccepted() && enter.dropAction() == Qt::CopyAction );
+						delete mime;
+					}
+					{
+						const QMimeData * mime = payloadFor( { others.first() } );
+						QDragEnterEvent enter( at, Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier );
+						enter.setAccepted( false );
+						wwDeliverCollisionDrop( skope, &enter );
+						check( "something that is not a mesh is refused by ACTION, not by ignoring it",
+							enter.isAccepted() && enter.dropAction() == Qt::IgnoreAction );
+						delete mime;
+					}
+
+					const int bodiesWas = bodies();
+					const int boxesWas = shapesOfType( "bhkBoxShape" );
+					{
+						const QMimeData * mime = payloadFor( { meshes.first() } );
+						QDropEvent drop( QPointF( at ), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier );
+						wwDeliverCollisionDrop( skope, &drop );
+						QApplication::processEvents();
+						delete mime;
+					}
+					log << "after dropping one mesh: " << bodies() << " bodies, "
+						<< shapesOfType( "bhkBoxShape" ) << " box shapes\n";
+					check( "dropping one mesh makes one body", bodies() == bodiesWas + 1 );
+					check( "...and the shape is the type the panel was set to",
+						shapesOfType( "bhkBoxShape" ) == boxesWas + 1 );
+
+					/* TWO AT ONCE MAKE TWO. The remaining mesh plus the one just
+					 * given collision -- a second body on the same mesh is refused
+					 * by the create path, so this drops the untouched mesh twice
+					 * over instead: two DIFFERENT meshes is what one-body-each
+					 * means, and the fixture has exactly two.
+					 */
+					const int beforePair = bodies();
+					{
+						// re-read: creating a body inserts blocks and renumbers
+						QList<qint32> pair;
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+								pair.append( b );
+						log << "meshes for the pair drop: " << pair.size() << "\n";
+						const QMimeData * mime = payloadFor( pair );
+						QDropEvent drop( QPointF( at ), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier );
+						wwDeliverCollisionDrop( skope, &drop );
+						QApplication::processEvents();
+						delete mime;
+					}
+					log << "after dropping the pair: " << bodies() << " bodies\n";
+					check( "dropping two meshes makes a body for each",
+						bodies() >= beforePair + 2 );
+
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_BLOCKDND_TEST=1): block-list drag-and-drop.
 	 *
 	 * Drives REAL drag events at the block list's viewport rather than calling

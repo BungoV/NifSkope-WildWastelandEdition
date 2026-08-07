@@ -25,6 +25,9 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QEnterEvent>
 #include <QFormLayout>
 #include <QFrame>
@@ -40,11 +43,13 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QStatusBar>
 #include <QSettings>
 #include <QSet>
 #include <QSignalBlocker>
@@ -696,12 +701,157 @@ public:
 	CollisionManagerPanel( NifModel * model, QMainWindow * window, GLView * view, QDockWidget * owner )
 		: QWidget( owner ), nif( model ), mw( window ), ogl( view ), dock( owner )
 	{
+		// meshes can be dragged in from the Block List; see collisionDropSources
+		setObjectName( QStringLiteral( "CollisionManagerPanel" ) );
+		setAcceptDrops( true );
 		buildUi();
 		connectModel();
 		rebuild();
 	}
 
+	/*! WW_COLLDROP_TEST only: begin where Qt's routing ends.
+	 *
+	 *  QApplication::notify puts drag and drop through the drag manager, so a
+	 *  synthetic drag event reaches neither event() nor any filter — measured at
+	 *  zero on the block list, which is why NifTreeView carries the same hook.
+	 *  What this steps over is `acceptDrops`, the flag Qt gates on before any of
+	 *  it is reached, so that is asked for on its own.
+	 */
+	bool wwDeliverDragEvent( QEvent * event )
+	{
+		switch ( event->type() ) {
+		case QEvent::DragEnter:
+			dragEnterEvent( static_cast<QDragEnterEvent *>( event ) );
+			return true;
+		case QEvent::DragMove:
+			dragMoveEvent( static_cast<QDragMoveEvent *>( event ) );
+			return true;
+		case QEvent::Drop:
+			dropEvent( static_cast<QDropEvent *>( event ) );
+			return true;
+		default:
+			return false;
+		}
+	}
+
+protected:
+	/*! DRAG A MESH IN HERE TO GIVE IT COLLISION.
+	 *
+	 *  The Block List's drag already carries the blocks it picked up, and this
+	 *  panel already knows how to make collision out of a selection — so the drop
+	 *  is only an aiming device: it points the existing Create at what was
+	 *  dragged. It runs the SAME thing the shape popup's Create button runs, at
+	 *  the shape type the panel is showing, which is why a drop is never a
+	 *  surprise: whatever that popup says it will make is what you get. Convex
+	 *  and Mesh still open their preview, so the expensive two keep their
+	 *  confirmation step.
+	 *
+	 *  Several meshes at once make one body EACH, which is what
+	 *  castCollisionOverSelection already does for a multi-selection and what
+	 *  collision_per_shape.sh covers.
+	 */
+	void dragEnterEvent( QDragEnterEvent * event ) override final { offerCollisionDrop( event ); }
+	void dragMoveEvent( QDragMoveEvent * event ) override final { offerCollisionDrop( event ); }
+
+	void dropEvent( QDropEvent * event ) override final
+	{
+		const QList<qint32> sources = collisionDropSources( event->mimeData() );
+		if ( sources.isEmpty() || !createShapeNow ) {
+			event->ignore();
+			return;
+		}
+		event->setDropAction( Qt::CopyAction );
+		event->accept();
+
+		/* THE CURRENT BLOCK ONLY IF IT HAS TO CHANGE. The create path reads
+		 * currentSource(), and the drag came out of the Block List, so the
+		 * current row is normally already one of the blocks being dropped —
+		 * selecting again would collapse the very multi-selection that makes this
+		 * one body per mesh.
+		 */
+		if ( auto * w = dynamic_cast<NifSkope *>( mw ); w && nif ) {
+			const qint32 current = nif->getBlockNumber( w->currentNifIndex() );
+			if ( !sources.contains( current ) )
+				w->select( nif->getBlockIndex( sources.first() ) );
+		}
+		// what the spells read; castCollisionOverSelection restores it on the way out
+		setBlockListSelection( sources );
+
+		if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
+			bar->showMessage( sources.size() == 1
+				? tr( "Making collision from %1." ).arg( nif->itemName( nif->getBlockIndex( sources.first() ) ) )
+				: tr( "Making collision from %1 blocks, one body each." ).arg( sources.size() ), 5000 );
+
+		createShapeNow();
+	}
+
 private:
+	//! Accept only what the create spells would actually take, so the no-drop
+	//! cursor is the honest answer for anything else.
+	void offerCollisionDrop( QDragMoveEvent * event )
+	{
+		if ( collisionDropSources( event->mimeData() ).isEmpty() ) {
+			// accepted, IGNORE action: refusing the event outright ends the drag
+			// over this widget and no further move arrives — the same trap the
+			// block list's own drop handling documents.
+			event->setDropAction( Qt::IgnoreAction );
+			event->accept();
+			return;
+		}
+		event->setDropAction( Qt::CopyAction );
+		event->accept();
+	}
+
+	/*! Has this block geometry to make collision out of? Asked of the FILE.
+	 *
+	 *  NOT the create spell's own `isApplicable`, which was the first thing tried
+	 *  here and is wrong for a drop: it asks the SCENE whether the block has
+	 *  vertices and triangles, so until a frame has been drawn with that mesh in
+	 *  it the answer is no — measured, with the scene, its renderer and the node
+	 *  itself all present and the spell still refusing. Whether a mesh can be
+	 *  dropped must not depend on whether the viewport has got round to it, or
+	 *  the gesture would refuse on a collapsed viewport and on a file that has
+	 *  only just opened.
+	 *
+	 *  A NiNode is deliberately NOT taken, though the spell would: dropping a
+	 *  node means every mesh under it, which is a much bigger thing than the
+	 *  gesture looks and is what the Create button is for.
+	 */
+	bool blockHasGeometry( const QModelIndex & idx ) const
+	{
+		if ( !nif || !idx.isValid() || nif->getBSVersion() == 0 )
+			return false;
+		if ( !nif->blockInherits( idx, { "BSGeometry", "BSTriShape", "NiTriBasedGeom" } ) )
+			return false;
+		// BSTriShape carries its own counts; NiGeometry keeps them in its Data,
+		// which is the same split wwBlockSummary reads them through
+		QModelIndex counts = idx;
+		if ( !nif->getIndex( counts, "Num Vertices" ).isValid() ) {
+			const int data = nif->getLink( idx, "Data" );
+			if ( data < 0 )
+				return false;
+			counts = nif->getBlockIndex( data );
+		}
+		return nif->get<int>( counts, "Num Vertices" ) > 0
+			&& nif->get<int>( counts, "Num Triangles" ) > 0;
+	}
+
+	//! The blocks in a Block List drag that collision can be made from.
+	QList<qint32> collisionDropSources( const QMimeData * mime ) const
+	{
+		QList<qint32> sources;
+		auto * w = dynamic_cast<NifSkope *>( mw );
+		if ( !w || !nif || !mime )
+			return sources;
+		for ( const qint32 block : w->blockListDragPayload( mime ) )
+			if ( blockHasGeometry( nif->getBlockIndex( block ) ) )
+				sources.append( block );
+		return sources;
+	}
+
+	//! The shape popup's Create, so a drop and the button cannot drift apart.
+	std::function<void()> createShapeNow;
+
 	NifModel * nif = nullptr;
 	QMainWindow * mw = nullptr;
 	GLView * ogl = nullptr;
@@ -4061,6 +4211,9 @@ private:
 			[this, openPopupUnder]() { openPopupUnder( shapePopup, createShapeButton ); } );
 		connect( popupCreate, &QPushButton::clicked, this, [createBody]() { createBody(); } );
 		connect( shapeCreate, &QPushButton::clicked, this, [createCollision]() { createCollision(); } );
+		// and a mesh dropped on the panel runs exactly this, so the two cannot
+		// drift apart — see dropEvent
+		createShapeNow = createCollision;
 		for ( QDoubleSpinBox * spin : { mass, friction, restitution, linearDamping,
 			angularDamping, maxLinearVelocity, maxAngularVelocity, centerX, centerY, centerZ,
 			inertiaX, inertiaY, inertiaZ, penetrationDepth } )
@@ -4117,6 +4270,32 @@ private:
 };
 
 } // namespace
+
+/*! WW_COLLDROP_TEST: hand a drag or drop event to the Collision Manager panel.
+ *
+ *  The panel lives in this file with no header, so the harness cannot name its
+ *  type — it hands in the window and this finds it. `dynamic_cast` rather than
+ *  qobject_cast or findChild: the class carries no Q_OBJECT, and both of those
+ *  go through the meta-object.
+ *
+ *  With a null \a event it answers whether the panel is there and accepting
+ *  drops at all. That is the flag Qt gates on before any handler is reached, and
+ *  the one thing a delivered event steps over — a panel with acceptDrops false
+ *  would pass every check below it while doing nothing whatsoever for a real
+ *  drag, which is exactly how the block list's drag first shipped.
+ */
+bool wwDeliverCollisionDrop( QMainWindow * mw, QEvent * event )
+{
+	if ( !mw )
+		return false;
+	for ( QWidget * widget : mw->findChildren<QWidget *>() ) {
+		auto * panel = dynamic_cast<CollisionManagerPanel *>( widget );
+		if ( !panel )
+			continue;
+		return event ? panel->wwDeliverDragEvent( event ) : panel->acceptDrops();
+	}
+	return false;
+}
 
 /*! Compile one editable collision body into an FO4 hknp packfile.
  *
