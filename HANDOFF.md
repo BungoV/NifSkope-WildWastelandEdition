@@ -249,6 +249,13 @@ before launch and puts it back on exit, because the mode is read during window
 construction — and because **switching it at run time is what the flat-list
 fault takes down**.
 
+**Anything a drag draws must `repaint()`, not `update()`.** `QDrag::exec()` runs a
+native modal loop; a posted update is coalesced and can sit in the queue until
+the drag ends, so the paint lands after it stops being useful — indistinguishable
+from never painting at all, and reported that way twice. No harness can catch it
+either: a harness delivers drag events directly and is never inside the loop that
+swallows the paint.
+
 **A drag event cannot be delivered with `QApplication::sendEvent`.**
 `QApplication::notify` routes drag and drop through the drag manager, so a
 synthetic one reaches neither the widget's `event()` nor any event filter —

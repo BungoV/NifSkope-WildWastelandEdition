@@ -1,5 +1,46 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07e — A row you cannot drop into is all gap, and the line you never saw
+
+### Only the two ends of a list could be aimed at
+
+Reported, and the screenshot said it: a list of four `BSTriShape` children of one
+root, and the card reading "BSTriShape cannot take children". **There is nothing
+to drop inside a mesh**, so a mesh row's middle third spent itself refusing —
+which in a list of meshes leaves reorder slots at the two ends and dead pixels
+everywhere in between.
+
+A row that cannot take children is **all gap** now: top half above it, bottom
+half below it. Only a `NiNode` keeps the three-band split, because only a
+`NiNode` has an inside to aim at. Measured on a 20px row: 12 of 20 sampled
+positions offered a gap before, 20 of 20 now.
+
+The primitive still refuses parenting into a non-node. That is not in tension —
+the UI simply never asks it any more.
+
+### The line was drawn into a queue
+
+`QDrag::exec()` runs a **native modal loop**, and a posted `update()` is coalesced
+and can sit there until the drag ends. The insertion line was being painted after
+it stopped being useful, which from the outside is indistinguishable from never
+being painted at all — and that is exactly how it was reported, twice.
+`repaint()` for everything a drag draws.
+
+The harness could not have caught this: it delivers drag events directly, so it
+was never inside the modal loop that swallows the paint.
+
+### The card
+
+Directly above the pointer now, not below-right — below-right covers the rows
+under the cursor, which is precisely what you are aiming at when the gesture is
+"between these two". It carries the block's **own icon** (asked of the list's
+model, so the card and the row cannot disagree), its **type** muted, and its
+**name** bright, which is Blender's layout.
+
+`block_dragdrop.sh` is 42 checks. Two are new and both were shown to fail on the
+old behaviour: every pixel of a non-node row offering a gap, and the card
+carrying icon, type and name.
+
 ## 2026-08-07d — An insertion line you can aim at, and Blender's drag card
 
 ### The gap was five pixels wide

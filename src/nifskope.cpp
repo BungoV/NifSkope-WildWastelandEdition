@@ -3888,30 +3888,68 @@ static QString blockListDropHint;
  *  whole point is that it follows Ctrl and Shift while the drag is in the air.
  *  The delegate's reference-drag ghost is the same pattern for the same reason.
  */
-static QPointer<QLabel> blockListDragCard;
+static QPointer<QFrame> blockListDragCard;
+static QLabel * blockListDragCardHint = nullptr;
+static QLabel * blockListDragCardIcon = nullptr;
+static QLabel * blockListDragCardName = nullptr;
 
-static void showBlockListDragCard( const QString & hint, const QString & label )
+static void showBlockListDragCard( const QString & hint, const QIcon & icon,
+	const QString & type, const QString & name )
 {
 	if ( !blockListDragCard ) {
-		auto * card = new QLabel( nullptr, Qt::ToolTip | Qt::FramelessWindowHint );
+		auto * card = new QFrame( nullptr, Qt::ToolTip | Qt::FramelessWindowHint );
 		card->setObjectName( QStringLiteral( "BlockListDragCard" ) );
-		card->setTextFormat( Qt::RichText );
-		card->setMargin( 0 );
 		card->setStyleSheet( QStringLiteral(
-			"QLabel { background: %1; border: 1px solid %2; border-radius: 3px; padding: 4px 7px; }" )
+			"QFrame#BlockListDragCard { background: %1; border: 1px solid %2; border-radius: 3px; }"
+			"QLabel { background: transparent; border: none; }" )
 			.arg( wwSkinColor( "bgCard" ), wwSkinColor( "border" ) ) );
+
+		auto * rows = new QVBoxLayout( card );
+		rows->setContentsMargins( 7, 5, 8, 5 );
+		rows->setSpacing( 2 );
+
+		blockListDragCardHint = new QLabel( card );
+		blockListDragCardHint->setStyleSheet(
+			QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
+		rows->addWidget( blockListDragCardHint );
+
+		auto * subject = new QHBoxLayout;
+		subject->setContentsMargins( 0, 0, 0, 0 );
+		subject->setSpacing( 5 );
+		blockListDragCardIcon = new QLabel( card );
+		blockListDragCardName = new QLabel( card );
+		blockListDragCardName->setTextFormat( Qt::RichText );
+		subject->addWidget( blockListDragCardIcon );
+		subject->addWidget( blockListDragCardName, 1 );
+		rows->addLayout( subject );
+
 		blockListDragCard = card;
 	}
 
-	blockListDragCard->setText( QStringLiteral(
-		"<div style='color:%1'>%2</div><div style='color:%3'><b>%4</b></div>" )
-		.arg( wwSkinColor( "textMuted" ), hint.toHtmlEscaped(),
-			wwSkinColor( "text" ), label.toHtmlEscaped() ) );
+	blockListDragCardHint->setText( hint );
+	// the list's own icon for the block, so the card and the row it came from
+	// agree about what is being carried
+	const QPixmap pm = icon.isNull() ? QPixmap() : icon.pixmap( 16, 16 );
+	blockListDragCardIcon->setPixmap( pm );
+	blockListDragCardIcon->setVisible( !pm.isNull() );
+	// type muted, name bright: the type is what it IS, the name is which one
+	blockListDragCardName->setText( name.isEmpty()
+		? QStringLiteral( "<span style='color:%1'><b>%2</b></span>" )
+			.arg( wwSkinColor( "text" ), type.toHtmlEscaped() )
+		: QStringLiteral( "<span style='color:%1'>%2</span>&nbsp;&nbsp;<span style='color:%3'><b>%4</b></span>" )
+			.arg( wwSkinColor( "textMuted" ), type.toHtmlEscaped(),
+				wwSkinColor( "text" ), name.toHtmlEscaped() ) );
+
 	blockListDragCard->adjustSize();
-	// below and right of the pointer, the way Blender's sits — far enough not to
-	// cover the row being aimed at
-	blockListDragCard->move( QCursor::pos() + QPoint( 16, 18 ) );
+	/* DIRECTLY ABOVE THE POINTER. Below-right put it over the rows underneath the
+	 * cursor — which, when the gesture is "aim at the gap between two of them",
+	 * covers the thing being aimed at. Above and slightly left of centre keeps
+	 * the pointer and the target row clear.
+	 */
+	const QSize sz = blockListDragCard->size();
+	blockListDragCard->move( QCursor::pos() + QPoint( -sz.width() / 3, -sz.height() - 10 ) );
 	blockListDragCard->show();
+	blockListDragCard->raise();
 }
 
 static void hideBlockListDragCard()
@@ -4042,10 +4080,25 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	 * version used a quarter capped at 6px — about five pixels on a normal row,
 	 * so reordering was there but effectively unreachable.
 	 */
+	/* A ROW THAT CANNOT TAKE CHILDREN IS ALL GAP.
+	 *
+	 * There is nothing to drop INTO a BSTriShape, so its middle band had only one
+	 * thing to say — "BSTriShape cannot take children" — and a list of meshes
+	 * ended up with reorder slots only at its two ends, because every row in
+	 * between spent its middle third refusing. Over such a row the whole height
+	 * reorders: top half above it, bottom half below it. Only a NiNode keeps the
+	 * three-band split, because only a NiNode has an inside to aim at.
+	 */
 	const QRect r = list->visualRect( idx );
-	const int edge = qBound( 4, r.height() / 3, 10 );
+	const qint32 hovered = nif->getBlockNumber(
+		list->model() == proxy ? proxy->mapTo( idx ) : idx );
+	const QModelIndex iHovered = nif->getBlockIndex( hovered );
+	const bool canTakeChildren = iHovered.isValid() && nif->blockInherits( iHovered, "NiNode" )
+		&& nif->getIndex( iHovered, "Children" ).isValid();
+
+	const int edge = canTakeChildren ? qBound( 4, r.height() / 3, 10 ) : ( r.height() + 1 ) / 2;
 	const bool above = ( viewportPos.y() - r.top() ) < edge;
-	const bool below = ( r.bottom() - viewportPos.y() ) < edge;
+	const bool below = !above && ( r.bottom() - viewportPos.y() ) < edge;
 	if ( list->model() != proxy || !( above || below ) )
 		return blockListBlockAt( viewportPos );
 
@@ -4082,7 +4135,21 @@ void NifSkope::setBlockListDropTarget( qint32 block )
 		return;
 	nif->dropTargetBlock = block;
 	if ( list )
-		list->viewport()->update();
+		list->viewport()->repaint();	// see wwRepaintDragFeedback
+}
+
+/*! REPAINT, not update, for anything a drag draws.
+ *
+ *  QDrag::exec() runs a native modal loop. A posted update() is coalesced and
+ *  can sit in the queue until the drag ends, which is a drop marker that appears
+ *  only after you no longer need it — the insertion line looked like it was
+ *  never drawn at all. repaint() paints now, and "now" is the whole point of
+ *  feedback that is meant to follow the cursor.
+ */
+static void wwRepaintDragFeedback( NifTreeView * list )
+{
+	if ( list )
+		list->viewport()->repaint();
 }
 
 bool NifSkope::blockListDragEvent( QEvent * event )
@@ -4093,7 +4160,7 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	if ( event->type() == QEvent::DragLeave ) {
 		setBlockListDropTarget( -1 );
 		list->wwDropLineY = -1;
-		list->viewport()->update();
+		wwRepaintDragFeedback( list );
 		// the card stays up: the drag is still running, it has just left the list,
 		// and it is what tells you the modifiers are still live
 		blockListDropHint.clear();
@@ -4130,7 +4197,7 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		list->wwDropLineY = reordering ? lineY : -1;
 		list->wwDropLineFrom = lineFrom;
 		setBlockListDropTarget( ( legal > 0 && !reordering ) ? target : -1 );
-		list->viewport()->update();
+		wwRepaintDragFeedback( list );
 
 		QString hint;
 		if ( legal > 0 ) {
@@ -4151,17 +4218,23 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 		} else {
 			hint = refusal;
 		}
-		/* Blender's second line: the name for one, the plural count for several.
-		 * Derived from the PAYLOAD rather than remembered from where the drag
-		 * started, so the card always describes what is actually being carried —
+		/* Blender's second line: the icon, the type and the name of what is being
+		 * carried. Derived from the PAYLOAD rather than remembered from where the
+		 * drag started, so the card always describes what is actually in flight —
 		 * and so the harness, which synthesises a payload, sees the real thing.
+		 * The icon is asked of the list's own model, so the card and the row it
+		 * came from cannot disagree.
 		 */
-		const QString first = nif->resolveString( nif->getBlockIndex( blocks.first() ), "Name" );
-		const QString what = blocks.size() > 1
-			? tr( "%1 objects" ).arg( blocks.size() )
-			: first.isEmpty() ? nif->itemName( nif->getBlockIndex( blocks.first() ) ) : first;
+		const QModelIndex iFirst = nif->getBlockIndex( blocks.first() );
+		const QModelIndex rowIdx = proxy->mapFromPrimary( iFirst );
+		const QIcon icon = rowIdx.isValid()
+			? qvariant_cast<QIcon>( proxy->data( rowIdx, Qt::DecorationRole ) ) : QIcon();
+		const QString type = blocks.size() > 1
+			? tr( "%1 blocks" ).arg( blocks.size() ) : nif->itemName( iFirst );
+		const QString name = blocks.size() > 1
+			? QString() : nif->resolveString( iFirst, "Name" );
 		blockListDropHint = hint;
-		showBlockListDragCard( hint, what );
+		showBlockListDragCard( hint, blocks.size() > 1 ? QIcon() : icon, type, name );
 
 		if ( legal > 0 ) {
 			e->setDropAction( mode == WwReparentMode::Link ? Qt::LinkAction : Qt::MoveAction );

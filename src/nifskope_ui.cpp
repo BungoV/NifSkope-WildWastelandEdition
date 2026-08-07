@@ -8311,6 +8311,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					int lastLineY = -1, lastLinePixels = 0;
 					QString lastCard;
+					bool lastCardIcon = false;
 					auto reorder = [&]( const QList<qint32> & blocks, qint32 overRow, int edge,
 						qint32 wantParent, int wantPosition ) -> bool {
 						const QPoint pos = rowPoint( overRow, edge );
@@ -8350,12 +8351,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										lastLinePixels++;
 						}
 
-						// and what the card says while it is up
+						// and what the card says while it is up, including whether it
+						// is carrying the block's icon
 						lastCard.clear();
-						for ( QWidget * top : QApplication::topLevelWidgets() )
-							if ( top->objectName() == QLatin1String( "BlockListDragCard" ) && top->isVisible() )
-								if ( auto * card = qobject_cast<QLabel *>( top ) )
-									lastCard = card->text();
+						lastCardIcon = false;
+						for ( QWidget * top : QApplication::topLevelWidgets() ) {
+							if ( top->objectName() != QLatin1String( "BlockListDragCard" ) || !top->isVisible() )
+								continue;
+							for ( QLabel * piece : top->findChildren<QLabel *>() ) {
+								lastCard += piece->text() + QLatin1Char( ' ' );
+								if ( piece->pixmap().isNull() == false && piece->isVisible() )
+									lastCardIcon = true;
+							}
+						}
 
 						QDropEvent dropEv( QPointF( pos ), Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier );
 						list->wwDeliverDragEvent( &dropEv );
@@ -8495,7 +8503,66 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					};
 					refuses( QStringLiteral( "a block dropped on itself is refused" ), { nodeB }, nodeB );
 					refuses( QStringLiteral( "a node dropped on its own descendant is refused" ), { root }, nodeB );
-					refuses( QStringLiteral( "a block dropped on a non-node is refused" ), { nodeA }, leaf );
+
+					/* A ROW THAT CANNOT TAKE CHILDREN IS ALL GAP, and the primitive
+					 * still refuses parenting into one. Those are not in tension:
+					 * there is nothing to drop INSIDE a BSTriShape, so aiming at one
+					 * can only sensibly mean "next to it". Its middle band used to
+					 * spend itself saying "BSTriShape cannot take children", which
+					 * in a list of meshes left reorder slots at the two ends only —
+					 * the whole row reorders now.
+					 */
+					{
+						// the WHOLE height, not just the edges: sampling the edges
+						// passed before this change too, because the top and bottom
+						// thirds were always gaps. The middle third is what used to
+						// refuse and what the complaint was about.
+						const QPoint anchor = rowPos( leaf );
+						const QRect lr = list->visualRect( rowFor( leaf ) );
+						int samples = 0, gaps = 0;
+						for ( int y = lr.top(); y <= lr.bottom(); y++ ) {
+							const QPoint p( anchor.x(), y );
+							if ( !list->viewport()->rect().contains( p ) )
+								continue;
+							samples++;
+							int pos = -1;
+							if ( skope->blockListDropSpot( p, &pos ) == root && pos >= 0 )
+								gaps++;
+						}
+						log << "row that cannot take children: " << gaps << " of " << samples
+							<< " sampled rows offer a gap\n";
+						check( "every pixel of a row that cannot take children offers a gap",
+							samples > 8 && gaps == samples );
+						check( "...while the primitive still refuses parenting into one",
+							!wwReparentRefusal( nif, nodeA, leaf, WwReparentMode::PreserveWorld ).isEmpty() );
+					}
+
+					/* EVERY GAP REACHABLE. Weaker than the check above — the row
+					 * edges produced gaps before this change too — but it is the one
+					 * that states the property the feature is for: three children
+					 * make four gaps and none of them may be unreachable, whatever
+					 * the banding is changed to next.
+					 */
+					{
+						QSet<int> reachable;
+						for ( const qint32 row : { leaf, nodeA, nodeB } ) {
+							for ( const int edge : { -1, 1 } ) {
+								const QPoint p = rowPoint( row, edge );
+								if ( p.x() < 0 )
+									continue;
+								int pos = -1;
+								if ( skope->blockListDropSpot( p, &pos ) == root && pos >= 0 )
+									reachable.insert( pos );
+							}
+						}
+						QList<int> sorted( reachable.constBegin(), reachable.constEnd() );
+						std::sort( sorted.begin(), sorted.end() );
+						log << "reachable gap positions: ";
+						for ( const int p : sorted ) log << p << " ";
+						log << "\n";
+						check( "every gap between the root's three children can be aimed at",
+							sorted == QList<int>( { 0, 1, 2, 3 } ) );
+					}
 
 					/* 5. a payload from ANOTHER window. The layout is written out by
 					 * hand here on purpose: if the format changes and the guard is
@@ -8559,9 +8626,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "accent pixels on the line row: " << lastLinePixels << "\n";
 					check( "...and the line is PAINTED, not just recorded", lastLinePixels > 20 );
 					log << "drag card: " << ( lastCard.isEmpty() ? QStringLiteral( "(none)" ) : lastCard ) << "\n";
-					check( "...and the drag card names the gesture and what is being moved",
+					check( "...and the drag card names the gesture, the type and the name",
 						lastCard.contains( QLatin1String( "Reorder" ) )
+						&& lastCard.contains( QLatin1String( "NiNode" ) )
 						&& lastCard.contains( QLatin1String( "WWDropTarget" ) ) );
+					check( "...and carries the block's own icon", lastCardIcon );
 					check( "...and no highlighted row, because the gap is what is being pointed at",
 						nif->dropTargetBlock == -1 );
 					check( "...leaving the parent and the transform alone",
