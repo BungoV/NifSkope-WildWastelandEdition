@@ -140,7 +140,7 @@ condition, and a two-element array is truthy however the verdict came out.
 
 ## State
 
-Edition **0.2**, on upstream NifSkope 2.0.dev11 (fo76utils `develop` @
+Edition **0.3**, on upstream NifSkope 2.0.dev11 (fo76utils `develop` @
 `f2587869`).
 
 ### What the last session changed
@@ -265,7 +265,7 @@ not a code error.
 
 | | where | what it is |
 |---|---|---|
-| `WW_VER` | `NifSkope.pro` | this fork's edition number (`0.2`) — title bar, About box |
+| `WW_VER` | `NifSkope.pro` | this fork's edition number (`0.3`) — title bar, About box |
 | `VER` | `build/VERSION` | upstream lineage (`2.0.dev11`) |
 
 `applicationName` stays `"NifSkope 2.0"` because it is the **QSettings key**;

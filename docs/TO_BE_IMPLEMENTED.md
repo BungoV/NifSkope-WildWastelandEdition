@@ -1,5 +1,35 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## The Block List can drag 71 block types of 563 — OPEN, 2026-08-07zb
+
+Found by trying to drag a `BSLightingShaderProperty` out of its parent, which is
+not about those two types at all.
+
+`wwReparentBlocks` models parenting as the **`Children` array**, and only an
+`NiAVObject` can be in one — so those are the only blocks that can move. Counted
+against `nif.xml`: **71 movable, 492 not**. The 492 include every property
+(`BSLightingShaderProperty`, `BSEffectShaderProperty`, `NiAlphaProperty`),
+`BSShaderTextureSet`, every `NiExtraData` (`BSXFlags`, `NiStringExtraData`),
+every `NiTimeController`, `NiSkinInstance`, all the collision blocks, and every
+geometry data block.
+
+**The refusal message is also wrong**, which is the part that reads as a bug
+rather than a limit. `wwParentsOf` only scans `Children` too, so dragging a
+shader property to blank space answers *"is already a root — it has no parent to
+leave"*. It has an owner; the owner points at it through `Shader Property`. The
+refusal for dropping it INTO a node ("is not a scene object") is at least honest.
+
+**What it needs**: typed links. A texture set dropped on a shader property sets
+that property's `Texture Set`; a property dropped on a shape sets its `Shader
+Property`; an extra data dropped on any `NiObjectNET` joins its `Extra Data
+List`. That is a table of (child type → owner field), and the drag consults it
+when `Children` does not apply. `NifModel::getChildLinks` already gives the
+general "what does this block own" relation, which is the other half.
+
+Two cheap things worth doing first, whatever is decided about the feature: make
+`wwParentsOf` tell the truth for blocks held by a typed link, and say *"nothing
+can re-parent a %1 yet"* rather than claiming it is a root.
+
 ## Creating collision on a node that already has it REPLACES it — OPEN, 2026-08-07x
 
 Found by the body-targeted drop check, which spent its first runs measuring this

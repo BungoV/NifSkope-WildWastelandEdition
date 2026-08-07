@@ -434,6 +434,144 @@ void tlCollAppendEditableMesh( const NifModel * nif, int shapeBlock, CollisionMe
 	}
 }
 
+/*! Why the shapes in \a body cannot be merged into one, or the empty string.
+ *
+ *  Separate from the doing, so the menu can grey the entry and say why in a
+ *  tooltip rather than offering something that fails when it is clicked.
+ */
+QString tlMergeBodyShapesRefusal( const NifModel * nif, qint32 body )
+{
+	if ( !nif )
+		return QObject::tr( "No file is open." );
+	const QModelIndex iBody = tlCollBlockIndex( nif, body );
+	if ( !iBody.isValid() || !nif->blockInherits( iBody, "bhkRigidBody" ) )
+		return QObject::tr( "Only a rigid body holds shapes to merge." );
+	const QModelIndex held = tlCollBlockIndex( nif, nif->getLink( iBody, "Shape" ) );
+	if ( !held.isValid() || !nif->blockInherits( held, { "bhkListShape", "bhkConvexListShape" } )
+		|| nif->getLinkArray( held, "Sub Shapes" ).size() < 2 )
+		return QObject::tr( "That body holds one shape; there is nothing to merge it with." );
+	return QString();
+}
+
+/*! Merge every shape in \a body into a single mesh collision shape.
+ *
+ *  A box, a sphere and a mesh in one body are three shapes the engine tests
+ *  separately; merged, they are one. tlCollAppendEditableMesh already walks a
+ *  shape — through lists, through transform wrappers, and turning a box or a
+ *  capsule into triangles on the way — so merging is that walk run over each of
+ *  them into ONE mesh, which is why this needs no round trip through geometry
+ *  and no join. Geometric shapes and mesh shapes merge by exactly the same
+ *  route, because by the time they are appended there is no difference left.
+ *
+ *  The result is a bhkNiTriStripsShape, built the way Create Accurate Mesh
+ *  Collision builds one. No MOPP is generated: that is its own spell, and
+ *  guessing at it here would be a second opinion about something that already
+ *  has an owner.
+ *
+ *  \return the empty string on success, or why not.
+ */
+QString tlMergeBodyShapes( NifModel * nif, qint32 body, int * verticesOut, int * shapesOut )
+{
+	const QString refusal = tlMergeBodyShapesRefusal( nif, body );
+	if ( !refusal.isEmpty() )
+		return refusal;
+
+	const qint32 heldBlock = nif->getLink( nif->getBlockIndex( body ), "Shape" );
+	const QVector<qint32> subs = nif->getLinkArray( tlCollBlockIndex( nif, heldBlock ), "Sub Shapes" );
+
+	CollisionMesh merged;
+	for ( const qint32 sub : subs )
+		tlCollAppendEditableMesh( nif, sub, merged, Matrix4(), 0 );
+	if ( merged.verts.size() < 3 || merged.tris.isEmpty() )
+		return QObject::tr( "Those shapes have no usable geometry between them." );
+	// the mesh collision budget, and it is the vertex INDEX that is 16-bit
+	if ( merged.verts.size() > 65535 )
+		return QObject::tr( "%1 vertices between them: a mesh collision shape holds 65,535." )
+			.arg( merged.verts.size() );
+
+	if ( shapesOut )
+		*shapesOut = subs.size();
+	if ( verticesOut )
+		*verticesOut = merged.verts.size();
+
+	nifSnapshotOp( nif, QObject::tr( "Merge collision shapes" ), [&]() {
+		/* THE BODY AND THE OLD LIST, HELD BEFORE ANYTHING IS INSERTED.
+		 *
+		 * Inserting a block renumbers, and both blocks this has to reach at the end
+		 * were found before the inserting started. As plain numbers they named
+		 * something else by then, and what that did was measured: it pointed the
+		 * wrong body's Shape at a box and left the list it meant to remove exactly
+		 * where it was. The same trap as the body-targeted drop earlier today,
+		 * three functions from here — twice in one file, so it is the file's habit
+		 * and not an accident.
+		 */
+		const QPersistentModelIndex pBody = nif->getBlockIndex( body );
+		const QPersistentModelIndex pOldList = tlCollBlockIndex( nif, heldBlock );
+
+		const int nv = merged.verts.size(), nt = merged.tris.size();
+		QModelIndex iData = nif->insertNiBlock( "NiTriStripsData" );
+		Vector3 centre;
+		for ( const Vector3 & v : merged.verts )
+			centre += v;
+		centre /= float( nv );
+		float radius = 0.0f;
+		for ( const Vector3 & v : merged.verts )
+			radius = std::max( radius, ( v - centre ).length() );
+
+		nif->set<int>( iData, "Num Vertices", nv );
+		nif->set<int>( iData, "Has Vertices", 1 );
+		nif->updateArraySize( iData, "Vertices" );
+		nif->setArray<Vector3>( iData, "Vertices", merged.verts );
+		if ( QModelIndex iBound = nif->getIndex( iData, "Bounding Sphere" ); iBound.isValid() ) {
+			nif->set<Vector3>( iBound, "Center", centre );
+			nif->set<float>( iBound, "Radius", radius );
+		}
+		// one strip per triangle, which is what the create spell writes too
+		nif->set<int>( iData, "Num Triangles", nt );
+		nif->set<int>( iData, "Num Strips", nt );
+		nif->set<int>( iData, "Has Points", 1 );
+		QModelIndex iLengths = nif->getIndex( iData, "Strip Lengths" );
+		QModelIndex iPoints = nif->getIndex( iData, "Points" );
+		if ( iLengths.isValid() && iPoints.isValid() ) {
+			nif->updateArraySize( iLengths );
+			nif->updateArraySize( iPoints );
+			for ( int t = 0; t < nt; t++ ) {
+				nif->set<int>( nif->getIndex( iLengths, t ), 3 );
+				QModelIndex iStrip = nif->getIndex( iPoints, t );
+				nif->updateArraySize( iStrip );
+				const Triangle & tri = merged.tris.at( t );
+				nif->setArray<quint16>( iStrip,
+					{ quint16( tri[0] ), quint16( tri[1] ), quint16( tri[2] ) } );
+			}
+		}
+
+		QModelIndex iStrips = nif->insertNiBlock( "bhkNiTriStripsShape" );
+		nif->set<float>( iStrips, "Radius", 0.1f );
+		nif->set<uint>( iStrips, "Num Strips Data", 1 );
+		nif->updateArraySize( iStrips, "Strips Data" );
+		nif->setLink( nif->getIndex( nif->getIndex( iStrips, "Strips Data" ), 0 ),
+			nif->getBlockNumber( iData ) );
+		nif->set<uint>( iStrips, "Num Filters", 1 );
+		nif->updateArraySize( iStrips, "Filters" );
+
+		/* THE BODY TAKES THE NEW SHAPE FIRST, then the old arrangement goes.
+		 *
+		 * In that order and through persistent indices, because removing a branch
+		 * renumbers everything after it — the lesson the body-targeted drop was
+		 * taught earlier today. Removing the LIST takes its sub-shapes with it,
+		 * which is the whole old arrangement in one call.
+		 */
+		const QPersistentModelIndex pStrips = iStrips;
+		if ( pBody.isValid() )
+			nif->setLink( QModelIndex( pBody ), "Shape",
+				nif->getBlockNumber( QModelIndex( pStrips ) ) );
+		if ( pOldList.isValid() )
+			spRemoveBranch().castIfApplicable( nif, QModelIndex( pOldList ) );
+	} );
+	return QString();
+}
+
+
 //! Compile one editable collision body into an FO4 hknp packfile (defined below the panel)
 QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	const QModelIndex & object, bool confirmed );
@@ -4305,6 +4443,24 @@ private:
 			makeRenderProxy->setEnabled( item != nullptr );
 			QAction * massFromMaterialAction = menu.addAction( tr( "Mass from Material..." ) );
 			massFromMaterialAction->setEnabled( item && !compiled );
+			/* MERGE, on the body that holds them.
+			 *
+			 * A box, a sphere and a mesh in one body are three shapes the engine
+			 * tests separately; merged they are one. Offered on the BODY rather
+			 * than on a shape selection because a body is what owns an
+			 * arrangement — and because the tree is single-select, so "the
+			 * selected shapes" would have been one shape.
+			 */
+			const qint32 mergeBody = item
+				? ( item->parent() ? item->parent() : item )->data( 0, BodyBlockRole ).toInt()
+				: -1;
+			const QString mergeRefusal = tlMergeBodyShapesRefusal( nif, mergeBody );
+			QAction * mergeShapes = menu.addAction( tr( "Merge Shapes into One Mesh" ) );
+			mergeShapes->setEnabled( item && mergeRefusal.isEmpty() );
+			mergeShapes->setToolTip( mergeRefusal.isEmpty()
+				? tr( "Replace everything this body holds with a single mesh shape" )
+				: mergeRefusal );
+
 			QAction * expand = menu.addAction( item && item->isExpanded()
 				? tr( "Collapse Shapes" ) : tr( "Expand Shapes" ) );
 			expand->setEnabled( item && item->childCount() > 0 );
@@ -4354,6 +4510,15 @@ private:
 			else if ( chosen == check ) lintCollision();
 			else if ( chosen == makeRenderProxy ) collisionToBSTriShape();
 			else if ( chosen == massFromMaterialAction ) calculateMassFromMaterial();
+			else if ( chosen == mergeShapes ) {
+				int verts = 0, was = 0;
+				const QString trouble = tlMergeBodyShapes( nif, mergeBody, &verts, &was );
+				if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
+					bar->showMessage( trouble.isEmpty()
+						? tr( "Merged %1 shapes into one mesh, %2 vertices." ).arg( was ).arg( verts )
+						: trouble, 5000 );
+				queueRebuild();
+			}
 			else if ( chosen == expand ) item->setExpanded( !item->isExpanded() );
 			else if ( chosen == selectBlock ) {
 				if ( auto * w = dynamic_cast<NifSkope *>( mw ) ) {

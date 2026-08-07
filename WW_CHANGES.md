@@ -1,5 +1,52 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07zb — 0.3: merge collision shapes, and an audit of what cannot be dragged
+
+### Merge Shapes into One Mesh
+
+Right-click a collision body → **Merge Shapes into One Mesh**. A box, a sphere
+and a mesh in one body are three shapes the engine tests separately; merged, they
+are one `bhkNiTriStripsShape`.
+
+It turned out to need no round trip through geometry and no join.
+`tlCollAppendEditableMesh` already walks a shape — through lists, through
+transform wrappers, turning a box or a capsule into triangles on the way — so
+merging is that walk run over every shape in the body into ONE mesh. Geometric
+shapes and mesh shapes merge by the same route, because by the time they are
+appended there is no difference left between them. The 65,535-vertex budget is
+checked before anything is written, and the entry is greyed with the reason when
+a body holds only one shape.
+
+No MOPP is generated: that is its own spell, and guessing at it here would be a
+second opinion about something that already has an owner.
+
+### The audit: 71 block types of 563 can be dragged
+
+Prompted by not being able to drag a `BSLightingShaderProperty` or a
+`BSShaderTextureSet` out of its parent. That is not those two types — it is
+structural. `wwReparentBlocks` models parenting as the **`Children` array**, and
+only an `NiAVObject` can be in one. Counted against `nif.xml`: **71 movable, 492
+not**. Everything else in the format is immovable — every property, every
+`NiExtraData`, every controller, `NiSkinInstance`, all the collision blocks, all
+the geometry data blocks.
+
+There is a sharper bug inside it: `wwParentsOf` also only scans `Children`, so
+dragging a shader property to blank space refuses with **"is already a root — it
+has no parent to leave"**, which is false. It has an owner; the owner points at
+it through `Shader Property` rather than `Children`.
+
+Not fixed here. Making these movable means teaching the drag **typed links** — a
+texture set dropped on a shader property sets that property's `Texture Set` —
+which is a feature, not a patch. Filed in `docs/TO_BE_IMPLEMENTED.md`.
+
+### A correction
+
+The merge was reported broken and stashed on the strength of a check that held
+the target body as a plain block number across an operation that inserts two
+blocks and removes a branch. It was reading a different body afterwards. The
+feature was correct; the test was not — and the first fix aimed at it, persistent
+indices inside the merge, changed nothing because nothing there was wrong.
+
 ## 2026-08-07za — Join shapes from the Block List
 
 `Ctrl+J` in the 3D view has merged compatible `BSTriShape`s into the active

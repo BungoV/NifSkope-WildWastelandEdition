@@ -8127,6 +8127,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	extern qint32 wwCollisionBodyAtPanelPoint( QMainWindow * mw, const QPoint & panelPos );
 	//! Which rigid body holds a shape, and whether through a list.
 	extern qint32 tlBodyHoldingShape( const NifModel * nif, qint32 shape, qint32 * throughList );
+	//! Merging everything a body holds into one mesh shape, and why it cannot be.
+	extern QString tlMergeBodyShapesRefusal( const NifModel * nif, qint32 body );
+	extern QString tlMergeBodyShapes( NifModel * nif, qint32 body, int * verticesOut, int * shapesOut );
 	//! Defined in glview.cpp: frames painted, and nanoseconds spent painting them.
 	//! A counter rather than a per-frame log line, which distorted what it measured.
 	extern quint64 wwGlPaintCount();
@@ -8577,6 +8580,43 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "dropping it on another body moves it there", holder == intoBody );
 						check( "...and it is beside what that body already had, in a list",
 							through >= 0 );
+					}
+
+					/* AND THE TWO IN THAT BODY MERGE INTO ONE MESH.
+					 *
+					 * The move above has left one body holding a pair, which is the
+					 * arrangement merging is for. What must come out is ONE shape, and
+					 * it must be a mesh — a merge that quietly kept the list, or threw
+					 * one of the two away, satisfies "one shape" on its own.
+					 */
+					{
+						qint32 through = -1;
+						const qint32 holder = tlBodyHoldingShape( nif, movingShape, &through );
+						check( "the merge has a body holding a pair to work on",
+							holder >= 0 && through >= 0 );
+						if ( holder >= 0 && through >= 0 ) {
+							check( "...and it is offered", tlMergeBodyShapesRefusal( nif, holder ).isEmpty() );
+							/* THE BODY, HELD ACROSS THE MERGE. It inserts two blocks and
+							 * removes a branch, so a plain number names something else
+							 * afterwards — and reading the wrong body's Shape is how
+							 * this check first reported the feature broken when what
+							 * was broken was the check.
+							 */
+							const QPersistentModelIndex pHolder = nif->getBlockIndex( holder );
+							int verts = 0, was = 0;
+							const QString trouble = tlMergeBodyShapes( nif, holder, &verts, &was );
+							const qint32 nowHeld = nif->getLink( QModelIndex( pHolder ), "Shape" );
+							const QModelIndex nowIdx = nif->getBlockIndex( nowHeld );
+							log << "merged " << was << " shapes into " << verts << " vertices: "
+								<< ( trouble.isEmpty() ? nif->itemName( nowIdx ) : trouble ) << "\n";
+							check( "merging the pair reports no trouble", trouble.isEmpty() );
+							check( "...leaving one shape, and a mesh one",
+								nif->blockInherits( nowIdx, "bhkNiTriStripsShape" ) );
+							check( "...carrying geometry from both", verts > 0 && was == 2 );
+							check( "...and there is nothing left to merge",
+								!tlMergeBodyShapesRefusal( nif,
+									nif->getBlockNumber( QModelIndex( pHolder ) ) ).isEmpty() );
+						}
 					}
 
 					// and a shape dropped on the body it is already in is refused
