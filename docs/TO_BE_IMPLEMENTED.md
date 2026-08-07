@@ -207,9 +207,15 @@ models put the name in different columns (proxy 1, flat `ValueCol`).
   with its own idea of what is legal.
 - Dropping a `BSTriShape` onto the **Collision Manager** is the same payload
   routed to the mesh→collision path; `collisionConsumeSource` is the single
-  choke point and already honours the keep-mesh toggle. — **NOT DONE**, and the
-  only part of this spec that is not: the payload and the choke point both
-  exist, so it is a `dropEvent` on that dock and nothing else.
+  choke point and already honours the keep-mesh toggle. — **SHIPPED 2026-08-07u**,
+  and it was a `dropEvent` on that dock and nothing else. It runs the same call
+  the shape popup's Create runs, at the shape type the panel is showing, one body
+  per mesh. Covered by `tests/spells/collision_drop.sh`.
+
+  The one thing it could not reuse is the create spell's `isApplicable`: that
+  asks the SCENE whether a block has geometry, so it answers no until a frame has
+  been drawn with that mesh in it. The drop asks the file instead — full account
+  in WW_CHANGES 2026-08-07u.
 
 ---
 
