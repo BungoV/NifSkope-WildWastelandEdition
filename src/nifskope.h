@@ -153,6 +153,17 @@ public:
 	static QList<QPair<NifModel *, QString>> selectedWorkspaceModels();
 	static NifSkope * documentForModel( const NifModel * model );
 
+	/*! The loaded NIF marked as the faceBones donor, or null.
+	 *
+	 *  Marked once from a Loaded NIFs row menu and remembered, the way the
+	 *  workspace skeleton is, so the rigging steps stop asking which file the
+	 *  sculpt bones come from every time they run. The donor is READ, never
+	 *  written to.
+	 */
+	static NifModel * workspaceFaceDonor();
+	static QString workspaceFaceDonorName();
+	static void setWorkspaceFaceDonor( NifModel * model, const QString & displayName );
+
 	static SettingsDialog * getOptions();
 
 	//! List of all supported file extensions

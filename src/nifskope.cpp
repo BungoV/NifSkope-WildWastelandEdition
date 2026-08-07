@@ -198,6 +198,7 @@ protected:
 
 //! Defined below; the row delegate draws it in the strip.
 static QIcon skeletonMarkIcon();
+static QIcon faceDonorMarkIcon();
 
 /*! Loaded NIFs row: the name, plus two display toggles at the right edge.
  *
@@ -282,16 +283,24 @@ public:
 		const bool ghost = ( flags & 0x2 );
 		const bool isSkeleton = ( flags & 0x4 );
 		const bool markerOnly = ( flags & 0x8 );
+		const bool isFaceDonor = ( flags & 0x10 );
 		const QColor lit( wwSkinColor( "accent" ) );
 		const QColor dim( wwSkinColor( "textMuted" ) );
 
 		painter->save();
 		painter->setRenderHint( QPainter::Antialiasing, true );
 
-		// --- the skeleton marker, ahead of the toggles ------------------------
-		if ( isSkeleton ) {
-			const QRect r = glyphRect( option.rect, SlotSkeleton );
-			skeletonMarkIcon().paint( painter, r.adjusted( 2, 2, -2, -2 ) );
+		/* --- the skeleton or face-donor marker, ahead of the toggles ---------
+		 *
+		 * One slot, because a file is one or the other in every workflow this
+		 * serves: the skeleton is what everything else poses against, the face
+		 * donor is where sculpt bones are read from, and those are different
+		 * files. If a file were somehow marked as both, the skull wins — losing
+		 * track of the skeleton is the more confusing of the two.
+		 */
+		if ( isSkeleton || isFaceDonor ) {
+			const QRect r = glyphRect( option.rect, SlotSkeleton ).adjusted( 2, 2, -2, -2 );
+			( isSkeleton ? skeletonMarkIcon() : faceDonorMarkIcon() ).paint( painter, r );
 		}
 
 		// --- the eye ---------------------------------------------------------
@@ -366,6 +375,38 @@ public:
  * and because it has to read at 16 px: cranium, two deep sockets, a narrow jaw with
  * a gap in it. Anything more detailed turns to mush at this size.
  */
+/*! A small face, for the row marked as the faceBones donor.
+ *
+ *  Drawn beside the skull and to the same rules — accent colour, legible at 16 px,
+ *  punched-out features so it reads on any row background. A full oval head rather
+ *  than a cranium-and-jaw, so the two glyphs are not mistaken for each other at a
+ *  glance: the skull is where the bones come from, this is where the FACE bones
+ *  come from, and they are usually different files.
+ */
+static QIcon faceDonorMarkIcon()
+{
+	const int s = 16;
+	QPixmap pm( s, s );
+	pm.fill( Qt::transparent );
+	QPainter p( &pm );
+	p.setRenderHint( QPainter::Antialiasing, true );
+	const QColor ink( wwSkinColor( "accent" ) );
+	p.setPen( Qt::NoPen );
+	p.setBrush( ink );
+
+	// a head: taller than wide, which is what separates it from a plain circle
+	p.drawEllipse( QRectF( 2.5, 1.0, 11.0, 14.0 ) );
+
+	// eyes and a mouth, punched out
+	p.setCompositionMode( QPainter::CompositionMode_Clear );
+	p.setBrush( Qt::black );
+	p.drawEllipse( QRectF( 5.0, 5.0, 2.2, 2.6 ) );
+	p.drawEllipse( QRectF( 8.8, 5.0, 2.2, 2.6 ) );
+	p.drawRoundedRect( QRectF( 5.4, 10.2, 5.2, 1.6 ), 0.8, 0.8 );
+	p.end();
+	return QIcon( pm );
+}
+
 static QIcon skeletonMarkIcon()
 {
 	const int s = 16;
@@ -1287,15 +1328,19 @@ NifSkope::NifSkope( bool background )
 		auto markSkeleton = [this, &flags]( NifModel * nif ) {
 			if ( ogl && nif && ogl->workspaceSkeleton() == nif )
 				flags |= 0x4;
+			// 0x10: the faceBones donor, drawn in the same slot as the skull
+			if ( nif && NifSkope::workspaceFaceDonor() == nif )
+				flags |= 0x10;
 		};
 		if ( NifSkope * doc = documentFromBrowserIndex( idx ) ) {
 			// The primary is always drawn, so it has no visibility to toggle — but it
 			// can still be the marked skeleton, and that has to show.
 			markSkeleton( doc->nif );
 			// 0x8: marker only. The primary is always drawn, so it has no visibility
-			// to offer — but it can still BE the marked skeleton, and that has to show.
+			// to offer — but it can still BE a marked skeleton or face donor, and
+			// that has to show.
 			if ( doc == this )
-				return ( flags & 0x4 ) ? ( flags | 0x8 ) : -1;
+				return ( flags & 0x14 ) ? ( flags | 0x8 ) : -1;
 			if ( doc->sessionPreviewVisible && !doc->sessionPreviewUnloaded )
 				flags |= 0x1;
 			if ( doc->sessionPreviewGhost )
@@ -1710,6 +1755,46 @@ QList<NifSkope *> NifSkope::selectedWorkspaceDocuments()
 	return documents;
 }
 
+/*! The faceBones donor, marked from a Loaded NIFs row and remembered.
+ *
+ *  A raw pointer with no ownership, exactly like the workspace skeleton: it is
+ *  compared against loaded models and cleared when the model it names goes away.
+ *  Nothing is held open on its behalf.
+ */
+static NifModel * wwFaceDonorModel = nullptr;
+static QString wwFaceDonorName;
+
+NifModel * NifSkope::workspaceFaceDonor()
+{
+	// a document can close while it is marked; the mark goes with it rather than
+	// leaving a dangling pointer for the rigging step to hand to a file dialog
+	if ( wwFaceDonorModel ) {
+		bool stillLoaded = false;
+		for ( const auto & entry : NifSkope::selectedWorkspaceModels() )
+			if ( entry.first == wwFaceDonorModel )
+				stillLoaded = true;
+		for ( NifSkope * document : NifSkope::openDocuments() )
+			if ( document && document->nif == wwFaceDonorModel )
+				stillLoaded = true;
+		if ( !stillLoaded ) {
+			wwFaceDonorModel = nullptr;
+			wwFaceDonorName.clear();
+		}
+	}
+	return wwFaceDonorModel;
+}
+
+QString NifSkope::workspaceFaceDonorName()
+{
+	return workspaceFaceDonor() ? wwFaceDonorName : QString();
+}
+
+void NifSkope::setWorkspaceFaceDonor( NifModel * model, const QString & displayName )
+{
+	wwFaceDonorModel = model;
+	wwFaceDonorName = model ? displayName : QString();
+}
+
 QList<QPair<NifModel *, QString>> NifSkope::selectedWorkspaceModels()
 {
 	QList<QPair<NifModel *, QString>> models;
@@ -1968,6 +2053,12 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	asSkeleton->setToolTip( tr( "Every other loaded NIF evaluates its bones against this file, "
 		"by name, so skinned pieces snap onto it instead of sitting at bind pose. Nothing snaps "
 		"until a skeleton is marked; unmark to put everything back." ) );
+	QAction * asFaceDonor = menu.addAction( tr( "Use as Face Donor for faceBones" ) );
+	asFaceDonor->setCheckable( true );
+	asFaceDonor->setChecked( document->nif && NifSkope::workspaceFaceDonor() == document->nif );
+	asFaceDonor->setToolTip( tr( "The rigging steps take their sculpt bones from this file "
+		"without asking each time. Mark the vanilla head's _faceBones.nif; it is read, never "
+		"written to." ) );
 	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
 	isolate->setEnabled( document != this );
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
@@ -1987,6 +2078,11 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	else if ( chosen == asSkeleton ) {
 		if ( ogl )
 			ogl->setWorkspaceSkeleton( asSkeleton->isChecked() ? document->nif : nullptr );
+		refreshAllDocumentSessions();
+	}
+	else if ( chosen == asFaceDonor ) {
+		NifSkope::setWorkspaceFaceDonor( asFaceDonor->isChecked() ? document->nif : nullptr,
+			QFileInfo( document->currentFile ).fileName() );
 		refreshAllDocumentSessions();
 	}
 	else if ( chosen == freeze ) {
@@ -2594,6 +2690,12 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	asSkeleton->setToolTip( tr( "Every other loaded NIF evaluates its bones against this file, "
 		"by name, so skinned pieces snap onto it instead of sitting at bind pose. Nothing snaps "
 		"until a skeleton is marked; unmark to put everything back." ) );
+	QAction * asFaceDonor = menu.addAction( tr( "Use as Face Donor for faceBones" ) );
+	asFaceDonor->setCheckable( true );
+	asFaceDonor->setChecked( document->nif && NifSkope::workspaceFaceDonor() == document->nif );
+	asFaceDonor->setToolTip( tr( "The rigging steps take their sculpt bones from this file "
+		"without asking each time. Mark the vanilla head's _faceBones.nif; it is read, never "
+		"written to." ) );
 	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
 	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
@@ -2637,6 +2739,11 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	else if ( chosen == asSkeleton ) {
 		if ( ogl )
 			ogl->setWorkspaceSkeleton( asSkeleton->isChecked() ? document->nif : nullptr );
+		refreshAllDocumentSessions();
+	}
+	else if ( chosen == asFaceDonor ) {
+		NifSkope::setWorkspaceFaceDonor( asFaceDonor->isChecked() ? document->nif : nullptr,
+			document->displayName() );
 		refreshAllDocumentSessions();
 	}
 	else if ( chosen == makePrimary ) promoteBackgroundDocument( document );

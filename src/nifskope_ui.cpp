@@ -8788,6 +8788,39 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						fails++; checks++; break;
 					}
 
+					/* THE VIEWPORT HAS TO BE TALL ENOUGH TO HAVE EMPTY SPACE IN IT.
+					 *
+					 * Several scenarios aim at the blank area below the last row, which
+					 * is what "drag it out of its parent" means. The block list's height
+					 * comes from the SAVED window layout, so a session that left the dock
+					 * small puts a row under that point instead — measured at a 96-pixel
+					 * viewport, where two checks failed twice running for a reason that
+					 * had nothing to do with dragging and looked exactly like a
+					 * regression. It cost a bisect to find that out.
+					 *
+					 * A harness must force the state it measures rather than inherit it.
+					 * Forced, then ASSERTED, so if the forcing stops working this says so
+					 * instead of the drag checks failing sideways.
+					 */
+					if ( list->viewport()->height() < 240 ) {
+						/* A MINIMUM, not resizeDocks. resizeDocks is a request the
+						 * layout weighs against every other dock in the column, and
+						 * with the saved layout in play it was simply declined —
+						 * measured, at 97 pixels before and 97 after. A minimum height
+						 * the layout has to satisfy is not negotiable.
+						 */
+						skope->resize( qMax( skope->width(), 1280 ), qMax( skope->height(), 900 ) );
+						if ( skope->dList ) {
+							skope->dList->setMinimumHeight( 420 );
+							skope->dList->show();
+						}
+						QApplication::processEvents();
+					}
+					log << "block list viewport: " << list->viewport()->width() << "x"
+						<< list->viewport()->height() << "\n";
+					check( "the block list is tall enough to have blank space below its rows",
+						list->viewport()->height() >= 240 );
+
 					const QList<int> roots = nif->getRootLinks();
 					if ( roots.size() != 1 ) { log << "fixture has no single root\n"; fails++; checks++; break; }
 					const qint32 root = roots.first();

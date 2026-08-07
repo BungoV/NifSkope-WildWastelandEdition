@@ -233,6 +233,34 @@ static QString riggingChooseDonorFile( const NifModel * nif )
 	riggingSessionDonorFile.reset();
 	riggingSessionDonorLabel.clear();
 	NifSkope * receiver = NifSkope::documentForModel( nif );
+
+	/* A MARKED FACE DONOR ANSWERS THIS WITHOUT ASKING.
+	 *
+	 * Marked once from a Loaded NIFs row — "Use as Face Donor for faceBones" —
+	 * and then used by every step that needs sculpt bones, the same way the
+	 * workspace skeleton is marked once and simply applies from then on. The
+	 * picker below still handles everything unmarked.
+	 *
+	 * Captured to a temporary file like the open-document path, because the donor
+	 * is read as a FILE and the marked document may have unsaved edits — which
+	 * are the ones you want.
+	 */
+	if ( NifModel * marked = NifSkope::workspaceFaceDonor();
+		marked && marked != nif && marked->getBlockCount() > 0 )
+	{
+		riggingSessionDonorFile = std::make_unique<QTemporaryFile>(
+			QDir::tempPath() + QStringLiteral( "/nifskope-face-donor-XXXXXX.nif" ) );
+		riggingSessionDonorFile->setAutoRemove( true );
+		if ( riggingSessionDonorFile->open() && marked->save( *riggingSessionDonorFile ) ) {
+			riggingSessionDonorFile->flush();
+			riggingSessionDonorLabel = NifSkope::workspaceFaceDonorName();
+			return riggingSessionDonorFile->fileName();
+		}
+		// falling through to the picker beats failing: the mark is a convenience,
+		// not the only way in
+		riggingSessionDonorFile.reset();
+	}
+
 	// Selected workspace members supply donor geometry whether they are real
 	// windows or data-only background documents; both carry a NifModel and a
 	// display path.

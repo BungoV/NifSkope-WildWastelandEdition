@@ -571,6 +571,29 @@ static QList<WwHolder> wwHoldersOf( const NifModel * nif, qint32 block )
 	return holders;
 }
 
+/*! Is ANYTHING holding this block? Stops at the first one.
+ *
+ *  THE REFUSAL RUNS ON EVERY DRAG-MOVE, and it only ever asked whether the list
+ *  was empty — but it built the whole list to find out, which walks every field
+ *  of every block in the file. For a block with no Children parent, which is
+ *  precisely the case this was added for, that was a full-file scan per mouse
+ *  movement. NifModel::getChildLinks answers the same question per block without
+ *  descending item by item, so the scan stops on the first owner and usually
+ *  never starts.
+ */
+static bool wwHasHolder( const NifModel * nif, qint32 block )
+{
+	if ( !nif || !nif->isValidBlockNumber( block ) )
+		return false;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		if ( b == block )
+			continue;
+		if ( nif->getChildLinks( b ).contains( block ) )
+			return true;
+	}
+	return false;
+}
+
 /*! Detach \a block from everything that points at it, and say how many.
  *
  *  A single Ref is set to none. A cell inside an array is REBUILT out of it,
@@ -740,7 +763,7 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
 		// held by a typed link counts as held: a shader property's owner points at
 		// it through `Shader Property`, and answering "already a root" to that was
 		// simply false
-		if ( wwParentsOf( nif, block ).isEmpty() && wwHoldersOf( nif, block ).isEmpty() )
+		if ( wwParentsOf( nif, block ).isEmpty() && !wwHasHolder( nif, block ) )
 			return QCoreApplication::translate( "Reparent",
 				"%1 is already a root — it has no parent to leave." ).arg( nif->itemName( iBlock ) );
 		return QString();
