@@ -8119,6 +8119,22 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	//! Manager panel, whose type has no header. Null event asks whether the panel
 	//! is accepting drops at all.
 	extern bool wwDeliverCollisionDrop( QMainWindow * mw, QEvent * event );
+	//! The same for the inventory tree, and the payload one of its rows carries.
+	extern bool wwDeliverCollisionTreeDrag( QMainWindow * mw, QEvent * event );
+	extern QMimeData * wwCollisionShapePayload( QMainWindow * mw, qint32 shape );
+	//! Which rigid body holds a shape, and whether through a list.
+	extern qint32 tlBodyHoldingShape( const NifModel * nif, qint32 shape, qint32 * throughList );
+
+	/*! The two item roles the drop harness reads off an inventory row.
+	 *
+	 *  By number, because CollisionRoles is private to collisiontools.cpp's
+	 *  anonymous namespace: it counts up from Qt::UserRole + 1 as Object, Node,
+	 *  System, Body, Shape. If a role is ever inserted ahead of these, the checks
+	 *  that read them fail rather than quietly measuring the wrong field — they
+	 *  assert the values name a shape and a body before using either.
+	 */
+	static constexpr int BodyBlockRoleForTest = Qt::UserRole + 4;
+	static constexpr int ShapeBlockRoleForTest = Qt::UserRole + 5;
 
 	/* TEST HARNESS (WW_COLLDROP_TEST=1): drag a mesh onto the Collision Manager.
 	 *
@@ -8280,6 +8296,100 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "after dropping the pair: " << bodies() << " bodies\n";
 					check( "dropping two meshes makes a body for each",
 						bodies() >= beforePair + 2 );
+
+					/* AND NOW MOVE A SHAPE FROM ONE BODY TO ANOTHER.
+					 *
+					 * Three drops have left three bodies with a shape each, which is
+					 * the arrangement this is about: until now the only way to get a
+					 * shape out of one body and into another was to delete it and
+					 * build a fresh one somewhere else.
+					 */
+					auto * inv = dock->findChild<QTreeWidget *>(
+						QStringLiteral( "CollisionInventoryTree" ) );
+					if ( !inv ) { log << "no inventory tree\n"; fails++; checks++; break; }
+					inv->expandAll();
+					QApplication::processEvents();
+
+					QList<QTreeWidgetItem *> bodyRows;
+					for ( int i = 0; i < inv->topLevelItemCount(); i++ )
+						if ( inv->topLevelItem( i )->childCount() > 0 )
+							bodyRows << inv->topLevelItem( i );
+					log << "inventory: " << inv->topLevelItemCount() << " top rows, "
+						<< bodyRows.size() << " of them with shapes under\n";
+					check( "the inventory shows at least two bodies with a shape each",
+						bodyRows.size() >= 2 );
+					if ( bodyRows.size() < 2 ) break;
+
+					QTreeWidgetItem * shapeRow = bodyRows.at( 0 )->child( 0 );
+					QTreeWidgetItem * targetRow = bodyRows.at( 1 );
+
+					/* THE FLAG QT GATES ON. QAbstractItemView will not enter
+					 * DraggingState without Qt::ItemIsDragEnabled on the pressed
+					 * item, so startDrag is never called and the gesture does
+					 * nothing at all — which is how the Block List's drag first
+					 * shipped, with a green harness over it. Delivering events
+					 * directly steps over exactly this, so it is asked separately.
+					 */
+					check( "a shape row is draggable",
+						shapeRow && ( shapeRow->flags() & Qt::ItemIsDragEnabled ) );
+					check( "...and a body row is not, since a body is what you drop ON",
+						!( targetRow->flags() & Qt::ItemIsDragEnabled ) );
+					check( "the inventory is taking drops",
+						wwDeliverCollisionTreeDrag( skope, nullptr ) );
+
+					const qint32 movingShape = shapeRow->data( 0, ShapeBlockRoleForTest ).toInt();
+					const qint32 intoBody = targetRow->data( 0, BodyBlockRoleForTest ).toInt();
+					log << "moving shape " << movingShape << " into body " << intoBody << "\n";
+					check( "the rows name a shape and a body",
+						movingShape >= 0 && intoBody >= 0 );
+					if ( movingShape < 0 || intoBody < 0 ) break;
+
+					const QPoint onTarget = inv->visualItemRect( targetRow ).center();
+					const QBrush wasBrush = targetRow->background( 0 );
+					{
+						QMimeData * mime = wwCollisionShapePayload( skope, movingShape );
+						QDragMoveEvent move( onTarget, Qt::MoveAction, mime, Qt::LeftButton,
+							Qt::NoModifier );
+						move.setAccepted( false );
+						wwDeliverCollisionTreeDrag( skope, &move );
+						check( "hovering a body that would take it offers the move",
+							move.isAccepted() && move.dropAction() == Qt::MoveAction );
+						check( "...and that body row lights up",
+							targetRow->background( 0 ) != wasBrush );
+						delete mime;
+					}
+
+					{
+						QMimeData * mime = wwCollisionShapePayload( skope, movingShape );
+						QDropEvent drop( QPointF( onTarget ), Qt::MoveAction, mime,
+							Qt::LeftButton, Qt::NoModifier );
+						wwDeliverCollisionTreeDrag( skope, &drop );
+						QApplication::processEvents();
+						delete mime;
+					}
+					{
+						// where it ended up, read from the file rather than the tree
+						qint32 through = -1;
+						const qint32 holder = tlBodyHoldingShape( nif, movingShape, &through );
+						log << "shape " << movingShape << " is now held by body " << holder
+							<< ( through >= 0 ? QStringLiteral( " through list %1" ).arg( through )
+								: QString() ) << "\n";
+						check( "dropping it on another body moves it there", holder == intoBody );
+						check( "...and it is beside what that body already had, in a list",
+							through >= 0 );
+					}
+
+					// and a shape dropped on the body it is already in is refused
+					{
+						QMimeData * mime = wwCollisionShapePayload( skope, movingShape );
+						QDragMoveEvent move( onTarget, Qt::MoveAction, mime, Qt::LeftButton,
+							Qt::NoModifier );
+						move.setAccepted( false );
+						wwDeliverCollisionTreeDrag( skope, &move );
+						check( "the body it is already in refuses it, by ACTION",
+							move.isAccepted() && move.dropAction() == Qt::IgnoreAction );
+						delete mime;
+					}
 
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";

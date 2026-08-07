@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07v — Move a shape from one collision body to another
+
+Until now the only way to get a shape out of one body and into another was to
+delete it and build a fresh one somewhere else. Drag the row: the body it would
+land in lights up while the pointer is over it, the same way the Block List
+lights the row a block would drop into.
+
+`tlMoveCollisionShape` is the operation under it, shared rather than living in
+the drag, so nothing can grow a second idea of what moving a shape means. Both
+ends handle a list — taken out of a `bhkListShape` the entry goes and a list left
+holding one shape stays a list, because that is legal and unwrapping it is a
+second edit nobody asked for; put into a body that already has a shape, a list is
+made if there is not one, which is exactly what Create does with Replace off.
+
+Refused, and refused **by the drop ACTION rather than by ignoring the event**:
+the body it is already in, a row that is not a shape, a target that is not a
+rigid body, and a shape that would end up inside itself (the list a body holds is
+a shape too). Ignoring a drag event ends the drag over the widget and not one
+further move arrives — the trap the Block List's drag died in through four wrong
+fixes — so the event stays accepted and the verdict rides in the action.
+
+### Measured
+
+`collision_drop.sh` is **17 checks** (was 7). The new ones: a shape row is
+draggable and a body row is not, the inventory takes drops, hovering a body that
+would take it offers the move *and lights that row*, the drop moves the shape and
+leaves it beside what the body already had, and the body it is already in refuses
+it.
+
+`Qt::ItemIsDragEnabled` is set in `setItemRoles`, the one call both the compiled
+and editable population paths make, and it is checked on its own — that flag is
+what `QAbstractItemView` gates `startDrag` on, so without it the gesture does
+nothing whatever else is in place. It is also precisely what a harness delivering
+events directly steps over, and how the Block List's drag first shipped: green
+checks over a dead feature.
+
 ## 2026-08-07u — Drag a mesh onto the Collision Manager
 
 The last unbuilt line of the Block List drag-and-drop spec: *"dropping a

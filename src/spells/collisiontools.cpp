@@ -25,6 +25,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QDrag>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -110,6 +111,146 @@ static int tlCollFirstLeafShape( const NifModel * nif, int shape, int depth = 0 
 		return links.isEmpty() ? shape : tlCollFirstLeafShape( nif, links.first(), depth + 1 );
 	}
 	return shape;
+}
+
+/*! Which rigid body holds this shape, and whether through a list.
+ *
+ *  A shape hangs off a body either as its `Shape` outright or as one entry of a
+ *  `bhkListShape`/`bhkConvexListShape` that the body's Shape points at. Both are
+ *  ordinary arrangements, and taking a shape out has to know which it is.
+ */
+qint32 tlBodyHoldingShape( const NifModel * nif, qint32 shape, qint32 * throughList )
+{
+	if ( throughList )
+		*throughList = -1;
+	if ( !nif || !nif->isValidBlockNumber( shape ) )
+		return -1;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex body = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( body, "bhkRigidBody" ) )
+			continue;
+		const qint32 held = nif->getLink( body, "Shape" );
+		if ( held == shape )
+			return b;
+		const QModelIndex list = tlCollBlockIndex( nif, held );
+		if ( list.isValid() && nif->blockInherits( list, { "bhkListShape", "bhkConvexListShape" } )
+			&& nif->getLinkArray( list, "Sub Shapes" ).contains( shape ) )
+		{
+			if ( throughList )
+				*throughList = held;
+			return b;
+		}
+	}
+	return -1;
+}
+
+//! Why this shape cannot go into that body, or empty if it can.
+QString tlMoveCollisionShapeRefusal( const NifModel * nif, qint32 shape, qint32 toBody )
+{
+	if ( !nif )
+		return QObject::tr( "No file is open." );
+	const QModelIndex iShape = tlCollBlockIndex( nif, shape );
+	const QModelIndex iBody = tlCollBlockIndex( nif, toBody );
+	if ( !iShape.isValid() || !nif->blockInherits( iShape, "bhkShape" ) )
+		return QObject::tr( "That row is not a collision shape." );
+	if ( !iBody.isValid() || !nif->blockInherits( iBody, "bhkRigidBody" ) )
+		return QObject::tr( "%1 cannot hold a shape — only a rigid body can." )
+			.arg( nif->itemName( iBody.isValid() ? iBody : iShape ) );
+	if ( tlBodyHoldingShape( nif, shape, nullptr ) == toBody )
+		return QObject::tr( "Already in that body." );
+	/* A SHAPE CANNOT GO INSIDE ITSELF. The list a body holds is a shape too, so
+	 * dragging a bhkListShape onto the body it already serves would ask it to
+	 * become one of its own sub-shapes — and the same for anything under it.
+	 */
+	QVector<qint32> stack{ shape };
+	QSet<qint32> seen;
+	while ( !stack.isEmpty() ) {
+		const qint32 s = stack.takeLast();
+		if ( s < 0 || seen.contains( s ) )
+			continue;
+		seen.insert( s );
+		const QModelIndex i = tlCollBlockIndex( nif, s );
+		for ( const qint32 sub : nif->getLinkArray( i, "Sub Shapes" ) )
+			stack.append( sub );
+		stack.append( nif->getLink( i, "Shape" ) );
+	}
+	if ( seen.contains( nif->getLink( iBody, "Shape" ) ) )
+		return QObject::tr( "That would put the shape inside itself." );
+	return QString();
+}
+
+/*! Move a collision shape out of whatever body holds it and into another.
+ *
+ *  The Collision Manager lists bodies with their shapes under them, and until
+ *  now the only way to get a shape from one body to another was to delete it and
+ *  build another somewhere else. Dragging the row is the obvious gesture, and
+ *  this is the operation under it — shared, so the drag and whatever else wants
+ *  it cannot grow two ideas of what moving a shape means.
+ *
+ *  Both ends handle a list. Taken out of a `bhkListShape` the entry is removed
+ *  and a list left holding one shape is left as a list: that is legal, and
+ *  unwrapping it would be a second edit nobody asked for. Put into a body that
+ *  already has a shape, a list is made if there is not one, which is exactly
+ *  what Create does with Replace off.
+ *
+ *  \return the empty string on success, or why not.
+ */
+QString tlMoveCollisionShape( NifModel * nif, qint32 shape, qint32 toBody )
+{
+	const QString refusal = tlMoveCollisionShapeRefusal( nif, shape, toBody );
+	if ( !refusal.isEmpty() )
+		return refusal;
+
+	qint32 throughList = -1;
+	const qint32 fromBody = tlBodyHoldingShape( nif, shape, &throughList );
+
+	// OUT of the old owner first: a shape briefly in both is a shape the undo
+	// step would have to know about twice
+	if ( fromBody >= 0 ) {
+		if ( throughList >= 0 ) {
+			const QModelIndex list = nif->getBlockIndex( throughList );
+			QVector<qint32> kept;
+			for ( const qint32 sub : nif->getLinkArray( list, "Sub Shapes" ) )
+				if ( sub != shape )
+					kept.append( sub );
+			nif->set<uint>( list, "Num Sub Shapes", uint( kept.size() ) );
+			nif->updateArraySize( list, "Sub Shapes" );
+			nif->setLinkArray( list, "Sub Shapes", kept );
+			if ( nif->getIndex( list, "Filters" ).isValid() ) {
+				nif->set<uint>( list, "Num Filters", uint( kept.size() ) );
+				nif->updateArraySize( list, "Filters" );
+			}
+		} else {
+			nif->setLink( nif->getBlockIndex( fromBody ), "Shape", -1 );
+		}
+	}
+
+	// and INTO the new one, beside whatever is already there
+	const QModelIndex body = nif->getBlockIndex( toBody );
+	const qint32 held = nif->getLink( body, "Shape" );
+	const QModelIndex heldIdx = tlCollBlockIndex( nif, held );
+	if ( !heldIdx.isValid() ) {
+		nif->setLink( body, "Shape", shape );
+		return QString();
+	}
+	QModelIndex list = heldIdx;
+	QVector<qint32> shapes;
+	if ( nif->blockInherits( heldIdx, { "bhkListShape", "bhkConvexListShape" } ) ) {
+		shapes = nif->getLinkArray( heldIdx, "Sub Shapes" );
+	} else {
+		shapes.append( held );
+		list = nif->insertNiBlock( QStringLiteral( "bhkListShape" ) );
+		nif->setLink( body, "Shape", nif->getBlockNumber( list ) );
+	}
+	shapes.append( shape );
+	nif->set<uint>( list, "Num Sub Shapes", uint( shapes.size() ) );
+	nif->updateArraySize( list, "Sub Shapes" );
+	nif->setLinkArray( list, "Sub Shapes", shapes );
+	if ( nif->getIndex( list, "Filters" ).isValid() ) {
+		nif->set<uint>( list, "Num Filters", uint( shapes.size() ) );
+		nif->updateArraySize( list, "Filters" );
+	}
+	return QString();
 }
 
 /* Hoisted out of CollisionManagerPanel so Compile Collision can be a spell.
@@ -695,6 +836,186 @@ private:
 	QListWidget * list = nullptr;
 };
 
+//! The payload a shape row carries. Private to this tree, so a row dropped
+//! anywhere else is ignored rather than half-understood.
+static const QLatin1String CollisionShapeDragMime( "application/x-nifskope-collisionshape" );
+
+/*! The Collision Manager's inventory, and a drop target for its own rows.
+ *
+ *  A body's shapes sit under it, and until now the only way to get a shape from
+ *  one body to another was to delete it and build another. Dragging the row is
+ *  the obvious gesture; the body it would land in lights up while the pointer is
+ *  over it, the same way the Block List lights the row a block would drop into.
+ *
+ *  Everything about WHAT a row is and what moving means is handed in by the
+ *  panel, so this class knows about drags and nothing about collision.
+ */
+class CollisionInventoryTree final : public QTreeWidget
+{
+public:
+	explicit CollisionInventoryTree( QWidget * parent ) : QTreeWidget( parent ) {}
+
+	std::function<qint32( QTreeWidgetItem * )> shapeOfRow;
+	std::function<qint32( QTreeWidgetItem * )> bodyOfRow;
+	std::function<QString( qint32 shape, qint32 body )> refusalFor;
+	std::function<void( qint32 shape, qint32 body )> moveShapeToBody;
+
+	//! WW_COLLDROP_TEST: begin where Qt's routing ends. QApplication::notify puts
+	//! drag events through the drag manager, so a synthetic one reaches neither
+	//! event() nor any filter — measured at zero on the Block List.
+	bool wwDeliverDragEvent( QEvent * event )
+	{
+		switch ( event->type() ) {
+		case QEvent::DragEnter:
+			dragEnterEvent( static_cast<QDragEnterEvent *>( event ) );
+			return true;
+		case QEvent::DragMove:
+			dragMoveEvent( static_cast<QDragMoveEvent *>( event ) );
+			return true;
+		case QEvent::Drop:
+			dropEvent( static_cast<QDropEvent *>( event ) );
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	//! The row a drop at this point would land in, or -1. Shared with the harness
+	//! so what it aims at is what the drop resolves.
+	qint32 bodyUnder( const QPoint & pos ) const
+	{
+		QTreeWidgetItem * item = itemAt( pos );
+		return item && bodyOfRow ? bodyOfRow( item ) : -1;
+	}
+
+	QMimeData * shapePayload( qint32 shape ) const
+	{
+		auto * mime = new QMimeData;
+		QByteArray payload;
+		{
+			QDataStream ds( &payload, QIODevice::WriteOnly );
+			ds << quint64( quintptr( this ) ) << shape;
+		}
+		mime->setData( CollisionShapeDragMime, payload );
+		return mime;
+	}
+
+protected:
+	void startDrag( Qt::DropActions actions ) override final
+	{
+		QTreeWidgetItem * item = currentItem();
+		const qint32 shape = item && shapeOfRow ? shapeOfRow( item ) : -1;
+		if ( shape < 0 || !( item->flags() & Qt::ItemIsDragEnabled ) ) {
+			QTreeWidget::startDrag( actions );
+			return;
+		}
+		auto * drag = new QDrag( this );
+		drag->setMimeData( shapePayload( shape ) );
+		drag->exec( Qt::MoveAction );
+		clearHighlight();
+	}
+
+	void dragEnterEvent( QDragEnterEvent * event ) override final { hover( event ); }
+	void dragMoveEvent( QDragMoveEvent * event ) override final { hover( event ); }
+
+	void dragLeaveEvent( QDragLeaveEvent * event ) override final
+	{
+		clearHighlight();
+		QTreeWidget::dragLeaveEvent( event );
+	}
+
+	void dropEvent( QDropEvent * event ) override final
+	{
+		const qint32 shape = draggedShape( event->mimeData() );
+		const qint32 body = bodyUnder( event->position().toPoint() );
+		clearHighlight();
+		if ( shape < 0 || body < 0 || !refusalFor || !refusalFor( shape, body ).isEmpty()
+			|| !moveShapeToBody )
+		{
+			event->setDropAction( Qt::IgnoreAction );
+			event->ignore();
+			return;
+		}
+		event->setDropAction( Qt::MoveAction );
+		event->accept();
+		moveShapeToBody( shape, body );
+	}
+
+private:
+	/*! Lit while the pointer is over a body that would take it.
+	 *
+	 *  ACCEPTED EVEN WHEN IT REFUSES, with the verdict in the ACTION. Ignoring a
+	 *  drag event ends the drag over the widget and not one further move arrives
+	 *  — so the first position the pointer happens to be at would decide the whole
+	 *  gesture, and a drag begins on the row being dragged, which refuses itself.
+	 *  That is the trap the Block List's drag died in for four wrong fixes.
+	 */
+	void hover( QDragMoveEvent * event )
+	{
+		const qint32 shape = draggedShape( event->mimeData() );
+		if ( shape < 0 ) {
+			event->setDropAction( Qt::IgnoreAction );
+			event->accept();
+			return;
+		}
+		const QPoint pos = event->position().toPoint();
+		const qint32 body = bodyUnder( pos );
+		const bool legal = body >= 0 && refusalFor && refusalFor( shape, body ).isEmpty();
+		highlight( legal ? itemAt( pos ) : nullptr );
+		event->setDropAction( legal ? Qt::MoveAction : Qt::IgnoreAction );
+		event->accept();
+	}
+
+	//! The BODY row, whichever row the pointer is actually on: dropping onto a
+	//! shape means the body holding it, which is what aiming at a group of shapes
+	//! looks like it should mean.
+	void highlight( QTreeWidgetItem * item )
+	{
+		QTreeWidgetItem * row = item;
+		while ( row && row->parent() )
+			row = row->parent();
+		if ( row == highlighted )
+			return;
+		clearHighlight();
+		if ( !row )
+			return;
+		highlighted = row;
+		const QBrush lit( QColor( wwSkinColor( "accent" ) ) );
+		for ( int c = 0; c < columnCount(); c++ ) {
+			highlightWas.append( row->background( c ) );
+			row->setBackground( c, lit );
+		}
+	}
+
+	void clearHighlight()
+	{
+		if ( !highlighted )
+			return;
+		for ( int c = 0; c < columnCount() && c < highlightWas.size(); c++ )
+			highlighted->setBackground( c, highlightWas.at( c ) );
+		highlightWas.clear();
+		highlighted = nullptr;
+	}
+
+	qint32 draggedShape( const QMimeData * mime ) const
+	{
+		if ( !mime || !mime->hasFormat( CollisionShapeDragMime ) )
+			return -1;
+		QByteArray payload = mime->data( CollisionShapeDragMime );
+		QDataStream ds( &payload, QIODevice::ReadOnly );
+		quint64 fromTree = 0;
+		qint32 shape = -1;
+		ds >> fromTree;
+		if ( fromTree != quint64( quintptr( this ) ) )
+			return -1;		// another dock's tree; the numbers mean nothing here
+		ds >> shape;
+		return shape;
+	}
+
+	QTreeWidgetItem * highlighted = nullptr;
+	QList<QBrush> highlightWas;
+};
+
 class CollisionManagerPanel final : public QWidget
 {
 public:
@@ -856,7 +1177,7 @@ private:
 	QMainWindow * mw = nullptr;
 	GLView * ogl = nullptr;
 	QDockWidget * dock = nullptr;
-	QTreeWidget * tree = nullptr;
+	CollisionInventoryTree * tree = nullptr;
 	QLabel * summary = nullptr;
 	QLabel * inventoryHeader = nullptr;
 	QLabel * physicsHint = nullptr;
@@ -1603,6 +1924,21 @@ private:
 		item->setData( 0, BodyIdRole, bodyId );
 		item->setData( 0, CompiledRole, compiled );
 		item->setData( 0, ShapeIndexRole, shapeIndex );
+		/* DRAGGABLE, IF IT IS AN EDITABLE SHAPE ROW.
+		 *
+		 * QAbstractItemView will not enter DraggingState without
+		 * Qt::ItemIsDragEnabled on the pressed item, so startDrag() is never
+		 * called and the gesture does nothing whatever else is in place — which is
+		 * exactly how the Block List's drag first shipped, with a green harness
+		 * over a dead feature. Set here because this is the one call both the
+		 * compiled and the editable population paths make.
+		 *
+		 * Child rows only: a top-level row is the body, and a body is what a shape
+		 * is dropped ON rather than something to drag.
+		 */
+		const bool draggable = !compiled && shapeBlock >= 0 && item->parent();
+		item->setFlags( draggable ? ( item->flags() | Qt::ItemIsDragEnabled )
+			: ( item->flags() & ~Qt::ItemIsDragEnabled ) );
 		/* PARENT, column 7. Set here rather than at the two population sites so
 		 * the compiled and editable paths cannot drift — they already build
 		 * their rows separately and this is the one call both make.
@@ -2926,7 +3262,7 @@ private:
 		inventoryHeader->setStyleSheet( QStringLiteral( "QLabel { font-weight: 600; }" ) );
 		root->addWidget( inventoryHeader );
 
-		tree = new QTreeWidget( this );
+		tree = new CollisionInventoryTree( this );
 		tree->setObjectName( QStringLiteral( "CollisionInventoryTree" ) );
 		tree->setColumnCount( 8 );
 		tree->setHeaderLabels( { tr( "Node" ), tr( "Shape" ), tr( "Layer" ), tr( "Material" ),
@@ -2935,6 +3271,52 @@ private:
 		tree->setAlternatingRowColors( true );
 		tree->setSelectionMode( QAbstractItemView::SingleSelection );
 		tree->setContextMenuPolicy( Qt::CustomContextMenu );
+
+		/* SHAPES MOVE BETWEEN BODIES BY DRAGGING THEM.
+		 *
+		 * setDropIndicatorShown(false) for the same reason the Block List turns it
+		 * off: Qt draws that indicator from QAbstractItemView::dragMoveEvent, which
+		 * these overrides never reach. The lit body row is the feedback.
+		 *
+		 * The tree knows about drags and nothing about collision; what a row IS,
+		 * and what moving one means, is handed in here.
+		 */
+		tree->setDragEnabled( true );
+		tree->viewport()->setAcceptDrops( true );
+		tree->setAcceptDrops( true );
+		tree->setDropIndicatorShown( false );
+		tree->setDragDropMode( QAbstractItemView::DragDrop );
+		tree->shapeOfRow = []( QTreeWidgetItem * item ) -> qint32 {
+			// child rows only: a top-level row is the body
+			if ( !item || !item->parent() )
+				return -1;
+			const QVariant v = item->data( 0, ShapeBlockRole );
+			return v.isValid() ? v.toInt() : -1;
+		};
+		tree->bodyOfRow = []( QTreeWidgetItem * item ) -> qint32 {
+			QTreeWidgetItem * row = item;
+			while ( row && row->parent() )
+				row = row->parent();
+			if ( !row )
+				return -1;
+			const QVariant v = row->data( 0, BodyBlockRole );
+			return v.isValid() ? v.toInt() : -1;
+		};
+		tree->refusalFor = [this]( qint32 shape, qint32 body ) {
+			return tlMoveCollisionShapeRefusal( nif, shape, body );
+		};
+		tree->moveShapeToBody = [this]( qint32 shape, qint32 body ) {
+			QString refusal;
+			nifSnapshotOp( nif, tr( "Move collision shape" ), [&]() {
+				refusal = tlMoveCollisionShape( nif, shape, body );
+			} );
+			if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
+				bar->showMessage( refusal.isEmpty()
+					? tr( "Moved %1 into %2." ).arg( nif->itemName( blockIndex( shape ) ),
+						nif->itemName( blockIndex( body ) ) )
+					: refusal, 5000 );
+			queueRebuild();
+		};
 		/* Every column sizes to its own text; the view scrolls when the dock is
 		 * narrower than the total.
 		 *
@@ -4295,6 +4677,37 @@ bool wwDeliverCollisionDrop( QMainWindow * mw, QEvent * event )
 		return event ? panel->wwDeliverDragEvent( event ) : panel->acceptDrops();
 	}
 	return false;
+}
+
+//! The inventory tree, for a harness that cannot name its type.
+static CollisionInventoryTree * wwCollisionTree( QMainWindow * mw )
+{
+	if ( !mw )
+		return nullptr;
+	for ( QWidget * widget : mw->findChildren<QWidget *>() )
+		if ( auto * tree = dynamic_cast<CollisionInventoryTree *>( widget ) )
+			return tree;
+	return nullptr;
+}
+
+//! WW_COLLDROP_TEST: as wwDeliverCollisionDrop, for the inventory tree. A null
+//! event asks whether it is taking drops at all — the flag Qt gates on, and the
+//! one thing delivering an event directly steps over.
+bool wwDeliverCollisionTreeDrag( QMainWindow * mw, QEvent * event )
+{
+	CollisionInventoryTree * tree = wwCollisionTree( mw );
+	if ( !tree )
+		return false;
+	return event ? tree->wwDeliverDragEvent( event )
+		: ( tree->dragEnabled() && tree->viewport()->acceptDrops() );
+}
+
+//! WW_COLLDROP_TEST: the payload a dragged shape row carries, built by the tree
+//! itself so the harness cannot invent a second idea of the format.
+QMimeData * wwCollisionShapePayload( QMainWindow * mw, qint32 shape )
+{
+	CollisionInventoryTree * tree = wwCollisionTree( mw );
+	return tree ? tree->shapePayload( shape ) : nullptr;
 }
 
 /*! Compile one editable collision body into an FO4 hknp packfile.
