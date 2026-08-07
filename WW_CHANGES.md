@@ -1,5 +1,107 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07 — Drag a block onto a node, and the rename that was already there
+
+### Drag to move
+
+Rows in the Block List drag onto a `NiNode` to re-parent. Blender's Outliner
+tooltip is the whole specification — "Move inside collection (Ctrl to link,
+Shift to parent)" — and the one place it does not map is that Blender has two
+separate things where a NIF has one. A collection is organisational and never
+changes an object's world transform; parenting is transform-level. A NIF has
+only `NiNode` children, so the two collapse into one operation and the
+distinction is re-cast as **what happens to the transform**:
+
+| gesture | meaning |
+|---|---|
+| plain drop | re-parent **preserving world position** — nothing appears to move |
+| **Shift** | re-parent keeping the **local** transform, so the block snaps into the new parent's space |
+| **Ctrl** | **link** — add the child link and leave the old one, so the block has two parents |
+
+A multi-selection drags as one payload, the ghost reads "3 objects", the target
+row lights up in the amber plate, and the hint at the cursor names the other two
+modifiers. Refusals say which: a block on itself, on its own descendant, on
+something that is not a `NiNode`, or where the link already exists.
+
+The operation and every refusal live in `wwReparentBlocks` in `blocks.cpp`,
+hoisted out of the Collision Manager's **Set Parent** rather than written twice.
+That settles the question its own comment left open — Set Parent stays
+`KeepLocal`, which is right for attaching collision to a bone, and the block
+list's plain drop is the world-preserving one. Every world transform is read
+before anything is written, so dragging a parent and its own child in the same
+selection comes out right.
+
+### Three things the drag cost, worth writing down
+
+**A drag event cannot be delivered with `QApplication::sendEvent`.**
+`QApplication::notify` routes drag and drop through the drag manager, so a
+synthetic one reaches neither the widget's `event()` nor any event filter —
+measured at zero, sent to the view and to the viewport both. The first
+implementation put the drop half in an event filter on the viewport and it
+silently did nothing; the handlers are `NifTreeView` overrides now, which is the
+path a real drag takes anyway, and `wwDeliverDragEvent` gives the harness an
+entry point that begins where Qt's routing ends.
+
+**The heap corruption was a stale incremental build**, exactly as the handoff
+warns. Three widely-included headers had gained members; a dozen incremental
+builds later the rename harness was dying half way through with a freed-block
+write. `make clean` after re-running qmake: 25 of 25. That landmine is real, and
+it cost an hour of reading perfectly correct code.
+
+**`make clean` then breaks the build.** qmake writes the `icon_res.o` rule with
+an absolute target path and lists the object with a relative one, so a full
+rebuild stops at "No rule to make target". `windres -i res/icon.rc -o
+GeneratedFiles/.obj/icon_res.o --include-dir=./res` once, then build.
+
+### The rename was not missing
+
+The backlog filed inline rename as not started, with a note to try it first. It
+shipped in `d5765c4`: F2 and double-click, an editor in place, Enter commits,
+Escape cancels, and `wwPropagateNodeName` carries the name into
+`NiDefaultAVObjectPalette` entries and controller sequences. Nothing measured
+it, which is how it came to be filed as absent.
+
+It had a real gap. `renameBlockListIndex` returned unless the index came from
+the proxy, so **in flat list mode F2 and double-click did nothing at all** —
+silently, and on the mode a type filter switches you into automatically. The two
+models do not even agree on which column the name is in: the proxy has three and
+uses 1, the flat list is `NifModel`'s own and uses `ValueCol`. Both are handled
+now.
+
+### Harnesses
+
+`block_dragdrop.sh` — 26 checks. The discriminating pair is plain-vs-Shift on
+the *same* two blocks: plain drop must leave the block where it was in the
+world, Shift must move it by exactly the new parent's offset. One implementation
+cannot satisfy both. A third check catches "it did not move" being satisfied by
+nothing having happened, and the target's offset is set by the harness, because
+with an identity parent the pair measures nothing.
+
+`block_rename.sh` — 15 checks per mode, gating hierarchy. The one that matters
+is the palette entry: renaming the node alone passes every other check and
+silently stops the animation binding to it.
+
+Both build their fixture from the starter document, so neither needs a game
+corpus. The drag one drives real drag events at the view; the rename one fires
+the F2 `QShortcut`'s own signal and the view's `doubleClicked` — and takes the
+shortcut **parented to the list**, because the Rigging dock installs an F2 of
+its own and taking whichever came last drove the wrong widget.
+
+### Filed, not fixed: the flat list mode
+
+Two things found while covering it, neither caused by this change and both
+reproduced with the drag-and-drop wiring disabled:
+
+- **Blocks inserted while the flat list is showing are not addressable.**
+  `visualRect` draws a row at y=140 and `indexAt` at that point returns nothing,
+  so the view's item list is stale against the model. Hierarchy mode is fine.
+- **The flat list intermittently takes the process down** — roughly one run in
+  three, and 4 in 5 when switching into it. Running the flat list first dies
+  before any rename happens, so it is neither rename's nor drag-and-drop's.
+
+Rename in flat list mode is verified, 15 of 15 repeatedly, but not gated:
+`MODES="hierarchy list" bash tests/spells/block_rename.sh` runs it.
+
 ## 2026-08-05r — The second body that did nothing, and creating from the row menu
 
 ### "Nothing happens" was accurate

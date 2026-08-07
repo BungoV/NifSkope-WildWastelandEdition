@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSet>
 #include <data/nifvalue.h>
 
+#include <functional>
 #include <memory>
 #include <utility>
 
@@ -80,6 +81,52 @@ protected:
 	QSet<const void *> detailsFilterKeep;
 
 public:
+	/*! Block-list drag-and-drop (WW): begin the drag instead of QTreeView.
+	 *
+	 *  Set by NifSkope, which is the only object that knows the proxy, the
+	 *  selection and what a row means as a block number. Returning true
+	 *  suppresses the view's own drag; unset (the Block Details tree, the KFM
+	 *  tree) leaves stock behaviour untouched.
+	 *
+	 *  A hook rather than a subclass because `list` is promoted in nifskope.ui,
+	 *  and rather than an event filter because startDrag() is a protected
+	 *  virtual — a filter never sees it.
+	 */
+	std::function<bool()> startBlockDrag;
+
+	/*! The other half: enter/move/leave/drop. Returns true when it consumed the
+	 *  event, so anything that is not a block payload falls through to
+	 *  QTreeView untouched — the Block Details and KFM trees never set this at
+	 *  all and keep stock behaviour exactly.
+	 *
+	 *  This is a view override rather than an event filter on the viewport
+	 *  because a filter never runs for these: an event sent to the viewport with
+	 *  QApplication::sendEvent reaches neither the object nor the application
+	 *  filter, measured. Qt routes viewport drag events to the VIEW's handlers
+	 *  through viewportEvent(), so this is the path a real drag takes anyway.
+	 */
+	std::function<bool( QEvent * )> blockDropEvent;
+
+	//! How many drag events the overrides above have been handed. The harness
+	//! reads it to prove the override ran, rather than measuring a hook it
+	//! called itself.
+	int wwDragEventsSeen = 0;
+
+	/*! Hand a drag event to the same overrides Qt's routing would.
+	 *
+	 *  A drag event CANNOT be delivered with QApplication::sendEvent:
+	 *  QApplication::notify routes drag and drop through the drag manager, so a
+	 *  synthetic one reaches neither the widget's event() nor any event filter.
+	 *  That was measured both ways -- sent to the view and sent to the viewport,
+	 *  the override count stayed at zero and no filter fired -- after an event
+	 *  filter on the viewport was tried first and silently did nothing.
+	 *
+	 *  So a harness needs an entry point that begins where Qt's routing ends.
+	 *  This is it: everything below this line is ours and is covered; the one
+	 *  step above it, viewport -> viewportEvent() -> these overrides, is Qt's.
+	 */
+	void wwDeliverDragEvent( QEvent * e );
+
 	//! Minimum size
 	QSize minimumSizeHint() const override final { return { 50, 50 }; }
 	//! Default size
@@ -139,6 +186,11 @@ protected slots:
 
 protected:
 	void drawBranches( QPainter * painter, const QRect & rect, const QModelIndex & index ) const override final;
+	void startDrag( Qt::DropActions supportedActions ) override final;
+	void dragEnterEvent( QDragEnterEvent * e ) override final;
+	void dragMoveEvent( QDragMoveEvent * e ) override final;
+	void dragLeaveEvent( QDragLeaveEvent * e ) override final;
+	void dropEvent( QDropEvent * e ) override final;
 	void keyPressEvent( QKeyEvent * e ) override final;
 	void mousePressEvent( QMouseEvent * event ) override final;
 	void mouseReleaseEvent( QMouseEvent * event ) override final;

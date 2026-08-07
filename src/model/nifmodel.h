@@ -236,6 +236,11 @@ public:
 	qint32 selHighlightActive = -1;
 	//! Block numbers to grey out in the block list (viewport-hidden nodes)
 	QSet<qint32> dimmedBlocks;
+	//! The row a block-list drag is currently over and could legally be dropped
+	//! on, or -1. Served the same window-owned way as selHighlight, so the
+	//! highlight follows the row through the proxy and through a mode switch
+	//! instead of being painted at a viewport coordinate.
+	qint32 dropTargetBlock = -1;
 
 	//! Diff-vs-reference (WW Edition). While diffRefBlock >= 0, Value cells of
 	//! items in diffItems render in the orange accent, their tooltips show the

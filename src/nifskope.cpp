@@ -81,9 +81,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSortFilterProxyModel>
 #include <QDir>
 #include <QDirIterator>
+#include <QDrag>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
+#include <QMimeData>
+#include <QToolTip>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -860,6 +863,27 @@ NifSkope::NifSkope( bool background )
 	list->setSelectionMode( QAbstractItemView::ExtendedSelection );
 	list->setSelectionBehavior( QAbstractItemView::SelectRows );
 	wireBlockListSelection();
+
+	/* Drag rows onto a NiNode to re-parent (Blender's Outliner). Both halves hang
+	 * off NifTreeView hooks, NOT an event filter: a drag event sent to the
+	 * viewport reaches no filter at all — not the object's, not the
+	 * application's — which cost a build to find out. Qt routes viewport drag
+	 * events to the VIEW's handlers, so overriding those is both the path a real
+	 * drag takes and the one a synthetic event can reach.
+	 *
+	 * setDropIndicatorShown(false) because Qt's indicator is drawn by
+	 * QAbstractItemView::dragMoveEvent, which we never reach: it asks the model
+	 * canDropMimeData() first and NifModel does not implement it. The highlight
+	 * is served through the model instead (NifModel::dropTargetBlock), the same
+	 * way the multi-selection colours are, so it follows the row through the
+	 * proxy and survives a list/hierarchy switch.
+	 */
+	list->setDragEnabled( true );
+	list->setAcceptDrops( true );
+	list->setDropIndicatorShown( false );
+	list->setDragDropMode( QAbstractItemView::DragDrop );
+	list->startBlockDrag = [this]() { return startBlockListDrag(); };
+	list->blockDropEvent = [this]( QEvent * e ) { return blockListDragEvent( e ); };
 
 	// Compact recursive filter for both hierarchy and flat Block List modes.
 	// Parents stay visible when any descendant matches; search is deliberately
@@ -3740,11 +3764,22 @@ void NifSkope::updateBlockListNavigation( const QModelIndex & selection )
 
 void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUnavailable )
 {
-	if ( !nif || !proxy || !index.isValid() || index.model() != proxy ) return;
+	/* BOTH LIST MODES. This used to return unless the index came from the proxy,
+	 * so in flat list mode F2 and double-click did nothing at all — silently, and
+	 * on the mode a type filter switches you into automatically. The name column
+	 * is not the same one in the two models either: the proxy has three columns
+	 * and puts the name in 1, the flat list is NifModel's own and puts it in
+	 * ValueCol.
+	 */
+	if ( !nif || !proxy || !index.isValid() ) return;
+	const bool viaProxy = ( index.model() == proxy );
+	if ( !viaProxy && index.model() != nif ) return;
+	const int nameColumn = viaProxy ? 1 : NifModel::ValueCol;
 	// Mouse activation is intentionally limited to the visible object-name
 	// column. F2 passes notifyIfUnavailable=true and remains row-oriented.
-	if ( !notifyIfUnavailable && index.column() != 1 ) return;
-	QModelIndex block = nif->getBlockIndex( proxy->mapTo( index.sibling( index.row(), 0 ) ) );
+	if ( !notifyIfUnavailable && index.column() != nameColumn ) return;
+	const QModelIndex row = index.sibling( index.row(), 0 );
+	QModelIndex block = nif->getBlockIndex( viaProxy ? proxy->mapTo( row ) : row );
 	const bool renameable = block.isValid() && nif->blockInherits( block, "NiAVObject" )
 		&& nif->getIndex( block, "Name" ).isValid();
 	if ( !renameable ) {
@@ -3759,7 +3794,7 @@ void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUna
 		list->viewport()->findChild<QLineEdit *>( QStringLiteral( "BlockListRenameEdit" ) ) ) )
 		previous->cancel();
 
-	const QModelIndex valueIndex = index.sibling( index.row(), 1 );
+	const QModelIndex valueIndex = index.sibling( index.row(), nameColumn );
 	list->scrollTo( valueIndex );
 	QRect cell = list->visualRect( valueIndex );
 	if ( !cell.isValid() || cell.isEmpty() ) return;
@@ -3788,6 +3823,265 @@ void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUna
 	editor->show();
 	editor->setFocus( Qt::MouseFocusReason );
 	editor->selectAll();
+}
+
+/* BLOCK-LIST DRAG-AND-DROP — Blender's Outliner, re-cast for a NIF.
+ *
+ * Blender's tooltip is the whole specification: "Move inside collection (Ctrl to
+ * link, Shift to parent)". The one place it does not map is that Blender has two
+ * separate things — a collection is organisational and never changes an object's
+ * world transform, parenting is transform-level — where a NIF has only NiNode
+ * children. The two collapse into one operation, so the distinction is re-cast as
+ * what happens to the transform: plain drop preserves world position (nothing
+ * appears to move, Blender's move-to-collection), Shift keeps the local transform
+ * (the block snaps into the new parent's space), Ctrl links without unlinking, so
+ * the block has two parents — a real NIF capability and the closest thing here to
+ * Blender's link.
+ *
+ * VIEW LEVEL, NOT MODEL LEVEL. NifModel has no mimeData/dropMimeData and Qt's
+ * row-move semantics do not fit blocks-plus-links: a model-level version would
+ * try to move rows. The operation and every refusal live in wwReparentBlocks,
+ * shared with the Collision Manager's Set Parent rather than reimplemented with a
+ * second idea of what is legal.
+ */
+
+//! The drag payload's format. Private to the block list, so a block row dropped
+//! on the Loaded NIFs dock is not mistaken for a file.
+static const QLatin1String BlockListDragMime( "application/x-nifskope-blocklist" );
+
+//! Last hint shown at the cursor, so a mouse move that changes nothing does not
+//! re-show the tooltip and make it flicker.
+static QString blockListDropHint;
+
+//! Which transform rule the held modifiers ask for.
+static WwReparentMode blockListDropMode( Qt::KeyboardModifiers mods )
+{
+	if ( mods & Qt::ControlModifier )
+		return WwReparentMode::Link;
+	if ( mods & Qt::ShiftModifier )
+		return WwReparentMode::KeepLocal;
+	return WwReparentMode::PreserveWorld;
+}
+
+bool NifSkope::startBlockListDrag()
+{
+	if ( !nif || !list || !list->selectionModel() )
+		return false;
+
+	// Column 0 only: selectedIndexes() reports every column of every selected
+	// row, and selectedRows() can come back empty depending on selection
+	// behaviour — the same reason wireBlockListSelection() filters this way.
+	QList<qint32> blocks;
+	for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+		if ( pidx.column() != 0 )
+			continue;
+		QModelIndex src = ( pidx.model() == proxy ) ? proxy->mapTo( pidx ) : pidx;
+		const int b = nif->getBlockNumber( src );
+		if ( b >= 0 && !blocks.contains( b ) )
+			blocks.append( b );
+	}
+	if ( blocks.isEmpty() )
+		return false;
+
+	QMimeData * mime = blockListDragMimeData( blocks );
+
+	// Blender's ghost: the name for one, the plural count for several.
+	const QString label = blocks.size() == 1
+		? nif->itemName( nif->getBlockIndex( blocks.first() ) )
+		: tr( "%1 objects" ).arg( blocks.size() );
+
+	const QFontMetrics fm( list->font() );
+	const QSize text = fm.size( Qt::TextSingleLine, label );
+	QPixmap ghost( text.width() + 16, text.height() + 8 );
+	ghost.fill( Qt::transparent );
+	{
+		QPainter p( &ghost );
+		p.setRenderHint( QPainter::Antialiasing );
+		p.setPen( Qt::NoPen );
+		p.setBrush( QColor::fromString( wwSkinColor( "bgCard" ) ) );
+		p.drawRoundedRect( ghost.rect().adjusted( 0, 0, -1, -1 ), 3, 3 );
+		p.setPen( QColor::fromString( wwSkinColor( "text" ) ) );
+		p.setFont( list->font() );
+		p.drawText( ghost.rect(), Qt::AlignCenter, label );
+	}
+
+	auto * drag = new QDrag( list );
+	drag->setMimeData( mime );
+	drag->setPixmap( ghost );
+	// beside the cursor, not under it: the row being pointed at is the thing
+	// the user is aiming with
+	drag->setHotSpot( QPoint( -10, ghost.height() / 2 ) );
+
+	blockListDropHint.clear();
+	drag->exec( Qt::MoveAction | Qt::LinkAction, Qt::MoveAction );
+
+	// exec() blocks until the drop is over; a drag that ended outside the list
+	// never reaches DragLeave, so the highlight is cleared here as well.
+	setBlockListDropTarget( -1 );
+	QToolTip::hideText();
+	return true;
+}
+
+QMimeData * NifSkope::blockListDragMimeData( const QList<qint32> & blocks ) const
+{
+	/* The MODEL POINTER travels with the payload. Two document windows are an
+	 * ordinary thing here, and block 12 in one file is a different block in the
+	 * other — without this, dragging between windows would silently re-parent by
+	 * number onto whatever happened to be at that index.
+	 */
+	QByteArray payload;
+	{
+		QDataStream ds( &payload, QIODevice::WriteOnly );
+		ds << quint64( quintptr( nif ) ) << blocks;
+	}
+	auto * mime = new QMimeData;
+	mime->setData( BlockListDragMime, payload );
+	return mime;
+}
+
+QList<qint32> NifSkope::blockListDragPayload( const QMimeData * mime ) const
+{
+	QList<qint32> blocks;
+	if ( !nif || !mime || !mime->hasFormat( BlockListDragMime ) )
+		return blocks;
+
+	QByteArray payload = mime->data( BlockListDragMime );
+	QDataStream ds( &payload, QIODevice::ReadOnly );
+	quint64 fromModel = 0;
+	ds >> fromModel;
+	if ( fromModel != quint64( quintptr( nif ) ) )
+		return blocks;		// another window's file; the numbers mean nothing here
+	ds >> blocks;
+	return blocks;
+}
+
+qint32 NifSkope::blockListBlockAt( const QPoint & viewportPos ) const
+{
+	if ( !nif || !list )
+		return -1;
+	QModelIndex idx = list->indexAt( viewportPos );
+	if ( !idx.isValid() )
+		return -1;
+	// column 0 is the only one the proxy maps back to a block
+	idx = idx.sibling( idx.row(), 0 );
+	if ( idx.model() == proxy )
+		idx = proxy->mapTo( idx );
+	return nif->getBlockNumber( idx );
+}
+
+void NifSkope::setBlockListDropTarget( qint32 block )
+{
+	if ( !nif || nif->dropTargetBlock == block )
+		return;
+	nif->dropTargetBlock = block;
+	if ( list )
+		list->viewport()->update();
+}
+
+bool NifSkope::blockListDragEvent( QEvent * event )
+{
+	if ( !nif || !list || !event )
+		return false;
+
+	if ( event->type() == QEvent::DragLeave ) {
+		setBlockListDropTarget( -1 );
+		QToolTip::hideText();
+		blockListDropHint.clear();
+		return false;		// let the view do its own leave handling too
+	}
+
+	// QDragEnterEvent derives from QDragMoveEvent, and QDropEvent is the base of
+	// both, so one cast serves all three.
+	auto * e = static_cast<QDropEvent *>( event );
+	const QList<qint32> blocks = blockListDragPayload( e->mimeData() );
+	if ( blocks.isEmpty() )
+		return false;		// not ours — a file drop still reaches the stock path
+
+	const qint32 target = blockListBlockAt( e->position().toPoint() );
+	const WwReparentMode mode = blockListDropMode( e->modifiers() );
+
+	// Ask about every dragged block, so a mixed selection is described by what it
+	// CAN do. The first refusal is what gets shown when none of them can.
+	int legal = 0;
+	QString refusal;
+	for ( const qint32 block : blocks ) {
+		const QString why = wwReparentRefusal( nif, block, target, mode );
+		if ( why.isEmpty() )
+			legal++;
+		else if ( refusal.isEmpty() )
+			refusal = why;
+	}
+
+	if ( event->type() != QEvent::Drop ) {
+		setBlockListDropTarget( legal > 0 ? target : -1 );
+
+		QString hint;
+		if ( legal > 0 ) {
+			const QString name = nif->resolveString( nif->getBlockIndex( target ), "Name" );
+			const QString into = name.isEmpty()
+				? tr( "block %1" ).arg( target )
+				: QStringLiteral( "%1 [%2]" ).arg( name ).arg( target );
+			// Blender's wording, with its two modifiers re-cast for a NIF
+			hint = mode == WwReparentMode::Link
+				? tr( "Link into %1 — keeps the old parent too" ).arg( into )
+				: mode == WwReparentMode::KeepLocal
+				? tr( "Move into %1, keeping the local transform" ).arg( into )
+				: tr( "Move into %1 (Ctrl to link, Shift to keep the local transform)" ).arg( into );
+			if ( legal < blocks.size() )
+				hint += tr( " — %1 of %2" ).arg( legal ).arg( blocks.size() );
+		} else {
+			hint = refusal;
+		}
+		if ( hint != blockListDropHint ) {
+			blockListDropHint = hint;
+			QToolTip::showText( QCursor::pos(), hint, list );
+		}
+
+		if ( legal > 0 ) {
+			e->setDropAction( mode == WwReparentMode::Link ? Qt::LinkAction : Qt::MoveAction );
+			e->accept();
+		} else {
+			// no action = the OS "cannot drop here" cursor, with the reason at it
+			e->setDropAction( Qt::IgnoreAction );
+			e->ignore();
+		}
+		return true;
+	}
+
+	setBlockListDropTarget( -1 );
+	QToolTip::hideText();
+	blockListDropHint.clear();
+
+	QStringList refusals;
+	const int moved = wwReparentBlocks( nif, blocks, target, mode, &refusals );
+	e->setDropAction( moved > 0
+		? ( mode == WwReparentMode::Link ? Qt::LinkAction : Qt::MoveAction )
+		: Qt::IgnoreAction );
+	if ( moved > 0 )
+		e->accept();
+	else
+		e->ignore();
+
+	if ( ui && ui->statusbar ) {
+		if ( moved == 0 ) {
+			ui->statusbar->showMessage( refusals.value( 0, tr( "Nothing was moved." ) ), 5000 );
+		} else {
+			const QString what = mode == WwReparentMode::Link
+				? tr( "Linked %n block(s) to block %1, keeping the old parent.", nullptr, moved )
+				: mode == WwReparentMode::KeepLocal
+				? tr( "Moved %n block(s) into block %1, keeping the local transform.", nullptr, moved )
+				: tr( "Moved %n block(s) into block %1.", nullptr, moved );
+			ui->statusbar->showMessage( what.arg( target )
+				+ ( refusals.isEmpty() ? QString() : QStringLiteral( "  " ) + refusals.first() ), 5000 );
+		}
+	}
+
+	// re-apply the search/type filter over the rebuilt tree: the moved rows are at
+	// new depths and the proxy has just relaid them out. The rename path defers
+	// the same call for the same reason.
+	if ( moved > 0 )
+		QTimer::singleShot( 0, this, [this]() { applyBlockListFilter(); } );
+	return true;
 }
 
 void NifSkope::swapModels()

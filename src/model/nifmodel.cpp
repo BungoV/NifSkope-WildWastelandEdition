@@ -1284,9 +1284,14 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 	// on the original index, before buddy() redirects the Value column to the
 	// block's Name child (which is not a top item and would lose the highlight).
 	if ( ( role == Qt::BackgroundRole || role == Qt::ForegroundRole )
-		&& ( !selHighlight.isEmpty() || !dimmedBlocks.isEmpty() ) ) {
+		&& ( !selHighlight.isEmpty() || !dimmedBlocks.isEmpty() || dropTargetBlock >= 0 ) ) {
 		if ( const NifItem * it = getItem( index ); it && isTopItem( it ) ) {
 			int bn = getBlockNumber( it );
+			// the drop target outranks the selection: a drag can pass over a row
+			// that is itself selected, and "where will this land" is the thing
+			// being asked at that moment
+			if ( bn >= 0 && bn == dropTargetBlock )
+				return QColor::fromString( wwSkinColor( role == Qt::BackgroundRole ? "accentBg" : "accentText" ) );
 			if ( bn >= 0 && selHighlight.contains( bn ) ) {
 				bool active = ( bn == selHighlightActive );
 				if ( role == Qt::BackgroundRole )

@@ -530,6 +530,25 @@ private:
 	//! Begin an inline, synced rename for a uniquely named scene object.
 	void renameBlockListIndex( const QModelIndex & index, bool notifyIfUnavailable );
 
+	/*! Block-list drag-and-drop (Blender's Outliner). Plain drop re-parents
+	 *  preserving world position, Shift keeps the local transform, Ctrl links.
+	 *  \{ */
+	//! Start dragging the block-list selection. False leaves the stock drag.
+	bool startBlockListDrag();
+	//! The drag payload for these blocks. Shared with WW_BLOCKDND_TEST, which
+	//! synthesises real drop events rather than a second idea of the format.
+	QMimeData * blockListDragMimeData( const QList<qint32> & blocks ) const;
+	//! DragEnter/DragMove/DragLeave/Drop on the block list's viewport.
+	bool blockListDragEvent( QEvent * event );
+	//! The block number under a viewport point, through whichever model is
+	//! current, or -1.
+	qint32 blockListBlockAt( const QPoint & viewportPos ) const;
+	//! The block numbers carried by a block-list drag, or empty.
+	QList<qint32> blockListDragPayload( const QMimeData * mime ) const;
+	//! Highlight (or clear, with -1) the row a drop would land on.
+	void setBlockListDropTarget( qint32 block );
+	/*! \} */
+
 	QWidget * filePathWidget( QWidget * );
 
 	void setViewFont( const QFont & );

@@ -404,6 +404,80 @@ QModelIndexList NifTreeView::valueIndexList( const QModelIndexList & rows ) cons
 	return values;
 }
 
+/*! Hand the drag to the block list's own implementation, if one is installed.
+ *
+ *  The stock path asks the model for mimeData(), and neither NifModel nor
+ *  NifProxyModel implements it — so without this the block list simply never
+ *  starts a drag, silently. Qt's row-move semantics would not fit blocks and
+ *  links anyway; the hook builds its own QDrag with block numbers in it.
+ */
+void NifTreeView::startDrag( Qt::DropActions supportedActions )
+{
+	if ( startBlockDrag && startBlockDrag() )
+		return;
+
+	QTreeView::startDrag( supportedActions );
+}
+
+void NifTreeView::wwDeliverDragEvent( QEvent * e )
+{
+	if ( !e )
+		return;
+
+	switch ( e->type() ) {
+	case QEvent::DragEnter:
+		dragEnterEvent( static_cast<QDragEnterEvent *>( e ) );
+		break;
+	case QEvent::DragMove:
+		dragMoveEvent( static_cast<QDragMoveEvent *>( e ) );
+		break;
+	case QEvent::DragLeave:
+		dragLeaveEvent( static_cast<QDragLeaveEvent *>( e ) );
+		break;
+	case QEvent::Drop:
+		dropEvent( static_cast<QDropEvent *>( e ) );
+		break;
+	default:
+		break;
+	}
+}
+
+void NifTreeView::dragEnterEvent( QDragEnterEvent * e )
+{
+	wwDragEventsSeen++;
+	if ( blockDropEvent && blockDropEvent( e ) )
+		return;
+
+	QTreeView::dragEnterEvent( e );
+}
+
+void NifTreeView::dragMoveEvent( QDragMoveEvent * e )
+{
+	wwDragEventsSeen++;
+	if ( blockDropEvent && blockDropEvent( e ) )
+		return;
+
+	QTreeView::dragMoveEvent( e );
+}
+
+void NifTreeView::dragLeaveEvent( QDragLeaveEvent * e )
+{
+	wwDragEventsSeen++;
+	if ( blockDropEvent )
+		blockDropEvent( e );	// always returns false: the view clears its own state too
+
+	QTreeView::dragLeaveEvent( e );
+}
+
+void NifTreeView::dropEvent( QDropEvent * e )
+{
+	wwDragEventsSeen++;
+	if ( blockDropEvent && blockDropEvent( e ) )
+		return;
+
+	QTreeView::dropEvent( e );
+}
+
 void NifTreeView::keyPressEvent( QKeyEvent * e )
 {
 	NifModel * nif = nullptr;

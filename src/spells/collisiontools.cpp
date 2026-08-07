@@ -1186,15 +1186,19 @@ private:
 
 	/*! Re-parent this body's node under the block chosen in the BLOCK LIST.
 	 *
-	 *  Refuses four things, each saying which, because a silent no-op is what
-	 *  this panel keeps getting reported for: nothing selected, a parent that
-	 *  is not a NiNode, the node itself, and any descendant of it — that last
-	 *  would cut the branch out of the file and leave a cycle behind.
+	 *  The operation and its refusals live in wwReparentBlocks (blocks.cpp),
+	 *  shared with the block list's own drag-and-drop. They used to live here,
+	 *  and a second copy with its own idea of what is legal is exactly what that
+	 *  feature would have grown.
 	 *
-	 *  The LOCAL transform is left alone, so a body moves in world space when
-	 *  the new parent sits elsewhere. That is right for attaching collision to
-	 *  a bone and wrong for tidying a hierarchy; preserving world position is a
-	 *  separate decision and is deliberately not made here.
+	 *  KeepLocal: the LOCAL transform is left alone, so a body moves in world
+	 *  space when the new parent sits elsewhere. That is right for attaching
+	 *  collision to a bone — which is what this button is for — and the block
+	 *  list's plain drop is the world-preserving one.
+	 *
+	 *  The two checks kept here are the ones about this panel rather than about
+	 *  the blocks: a row with no node behind it, and nothing picked in the block
+	 *  list to be the parent. Neither is something wwReparentRefusal can see.
 	 */
 	void reparentFromBlockList( QTreeWidgetItem * item )
 	{
@@ -1208,50 +1212,20 @@ private:
 				tr( "This row has no node to re-parent." ) );
 			return;
 		}
-		if ( !parent.isValid() || !nif->blockInherits( parent, "NiNode" ) ) {
+		if ( !parent.isValid() ) {
 			QMessageBox::information( this, tr( "Set Parent" ),
 				tr( "Select the new parent in the block list first, and make it a NiNode — "
 					"only a NiNode carries children." ) );
 			return;
 		}
-		const int parentBlock = nif->getBlockNumber( parent );
-		if ( parentBlock == nodeBlock ) {
+		QStringList refusals;
+		const int moved = wwReparentBlocks( nif, { nodeBlock }, nif->getBlockNumber( parent ),
+			WwReparentMode::KeepLocal, &refusals );
+		if ( moved == 0 ) {
 			QMessageBox::information( this, tr( "Set Parent" ),
-				tr( "A node cannot be its own parent." ) );
+				refusals.value( 0, tr( "Nothing to re-parent." ) ) );
 			return;
 		}
-		for ( int p = parentBlock; p >= 0; p = nif->getParent( p ) ) {
-			if ( p != nodeBlock )
-				continue;
-			QMessageBox::information( this, tr( "Set Parent" ),
-				tr( "Block %1 already sits under this body's own node. Re-parenting onto it "
-					"would cut the branch out of the file." ).arg( parentBlock ) );
-			return;
-		}
-		const int oldParent = nif->getParent( nodeBlock );
-		if ( oldParent == parentBlock ) {
-			QMessageBox::information( this, tr( "Set Parent" ),
-				tr( "Already parented to block %1." ).arg( parentBlock ) );
-			return;
-		}
-		nifSnapshotOp( nif, tr( "Set collision parent" ), [&]() {
-			if ( oldParent >= 0 ) {
-				/* REBUILT, not blanked. Dropping a link leaves Num Children
-				 * still claiming the entry and the entry pointing at nothing,
-				 * which is exactly the dangling child link the Issue Manager
-				 * reports — the same trap collisionConsumeSource documents.
-				 */
-				const QModelIndex from = blockIndex( oldParent );
-				QVector<qint32> kept;
-				for ( const qint32 child : nif->getLinkArray( from, "Children" ) )
-					if ( child != nodeBlock && nif->isValidBlockNumber( child ) )
-						kept.append( child );
-				nif->set<uint>( from, "Num Children", uint( kept.size() ) );
-				nif->updateArraySize( from, "Children" );
-				nif->setLinkArray( from, "Children", kept );
-			}
-			addLink( nif, blockIndex( parentBlock ), "Children", nodeBlock );
-		} );
 		queueRebuild();
 	}
 

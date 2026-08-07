@@ -1,9 +1,51 @@
 # NifSkope — WW Edition: To Be Implemented
 
-## Block list: Blender-Outliner drag-and-drop and rename (specified 2026-08-05)
+## Block list: flat list mode is not sound — NEW 2026-08-07
 
-User-specified against Blender's Outliner, with screenshots. Not started.
-Investigation is done and is recorded here so it is not re-derived.
+Found while covering the item below. **Neither is caused by drag-and-drop or by
+rename**: both reproduce with the drag-and-drop wiring disabled, and running the
+flat list first dies before any rename has happened.
+
+1. **Blocks inserted while the flat list is showing are not addressable.**
+   `visualRect` draws the new row (measured: 0,140 250x20, not hidden) and
+   `indexAt` at that point returns an invalid index — the view's item list is
+   stale against the model. Hierarchy mode is fine. A drop, a click or a
+   right-click on such a row therefore hits nothing.
+2. **The flat list intermittently takes the process down.** Heap corruption,
+   reported by Windows as a freed-block write at a later allocation, so the
+   stack names the allocation and not the culprit. Roughly one run in three when
+   started in list mode; 4 in 5 when switching into it.
+
+Both are almost certainly the same root cause. Start at whether `NifModel`'s
+block insert emits row signals the flat view can follow — the proxy rebuilds
+wholesale on `xLinksChanged` and would not notice either way, which is exactly
+why only one mode shows it. `setListMode()` also never re-runs
+`wireBlockListSelection()`, though a lost connection would not corrupt anything.
+
+Consequences to clear when it is fixed: re-enable the list half of
+`block_rename.sh` (`MODES="hierarchy list"`, already written and passing 15/15
+on the runs that complete), and cover drag-and-drop in that mode — its own code
+branches on the model and is believed correct, but nothing has driven it.
+
+## ~~Block list: Blender-Outliner drag-and-drop and rename~~ — SHIPPED 2026-08-07
+
+Specified 2026-08-05 against Blender's Outliner, with screenshots. **Drag to
+move is built**; **rename turned out to have shipped already** in `d5765c4` and
+is now covered and fixed for flat list mode. The spec is kept below because it
+is what the implementation was measured against.
+
+Shipped: `wwReparentBlocks` in `blocks.cpp` (the primitive, hoisted out of the
+Collision Manager's Set Parent as the notes below asked), the three modifiers,
+multi-select as one payload, the plural ghost, the target highlight through
+`NifModel::dropTargetBlock`, the cursor hint and the four refusals. Covered by
+`tests/spells/block_dragdrop.sh` (26 checks) and `block_rename.sh` (15 per
+mode).
+
+**What the implementation added to the note below:** drop handling had to go on
+`NifTreeView` as view overrides, NOT an event filter and not the model —
+`QApplication::notify` routes drag events through the drag manager, so a drag
+event sent to the viewport reaches no event filter at all. `wwDeliverDragEvent`
+exists so a harness can start where Qt's routing ends.
 
 ### Drag to move
 
@@ -26,24 +68,28 @@ be re-cast as what happens to the transform:
 
 This settles the question left open by `reparentFromBlockList`, which currently
 keeps the local transform unconditionally: that becomes the **Shift** behaviour,
-and plain drop needs the world-preserving variant written.
+and plain drop needs the world-preserving variant written. — *Done as specified;
+Set Parent stays `KeepLocal` deliberately.*
 
 Refuse and say why when the target cannot take children, when it is the dragged
-block itself, and when it is a descendant of it (cycle).
+block itself, and when it is a descendant of it (cycle). — *All four, the fourth
+being a link that already exists.*
 
-### Rename
+### Rename — was already shipped
 
 Blender's inline rename: double-click or **F2** turns the row into an editor in
 place with the text selected, Enter commits, Escape cancels.
 
-**This may already be most of the way there.** `buddy()` redirects a block row's
-Value column to that block's `Name` child and `NifModel::setData` follows the
-redirect (`nifmodel.cpp`), and the block list sets **no** `editTriggers`
-anywhere — not in code, not in `nifskope.ui` — so it has Qt's default
-`DoubleClicked | SelectedClicked | EditKeyPressed`. Try it before building
-anything; if it does nothing the fault is the delegate refusing block rows,
-which is far smaller than the feature. Only blocks that *have* a Name field
-should offer it.
+**It was there all along**, in `d5765c4`: `renameBlockListIndex` +
+`BlockListRenameEdit` in `nifskope.cpp`, with `wwPropagateNodeName` carrying the
+name into `NiDefaultAVObjectPalette` entries and `NiControllerSequence`
+controlled blocks. Nothing measured it, which is how it came to be filed here as
+not started — the guess below about `buddy()` and edit triggers was the wrong
+mechanism for the right conclusion.
+
+The one real gap, now fixed: it returned unless the index came from the proxy,
+so in **flat list mode** F2 and double-click did nothing at all — and the two
+models put the name in different columns (proxy 1, flat `ValueCol`).
 
 ### Implementation notes
 
@@ -63,7 +109,9 @@ should offer it.
   with its own idea of what is legal.
 - Dropping a `BSTriShape` onto the **Collision Manager** is the same payload
   routed to the mesh→collision path; `collisionConsumeSource` is the single
-  choke point and already honours the keep-mesh toggle.
+  choke point and already honours the keep-mesh toggle. — **NOT DONE**, and the
+  only part of this spec that is not: the payload and the choke point both
+  exist, so it is a `dropEvent` on that dock and nothing else.
 
 ---
 

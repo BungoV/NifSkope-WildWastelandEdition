@@ -5,30 +5,39 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 [WW_FEATURES.md](WW_FEATURES.md) is what the fork adds, and
 [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog.
 
-Updated **2026-08-05** after the startup-crash and collision-authoring session.
-Branch `main` at `0016f02`, build green, working tree clean, everything pushed.
+Updated **2026-08-07** after the block-list drag-and-drop session.
+Branch `main`, build green, working tree clean, everything pushed.
 
 Two headlines:
 
-- **The startup crash is fixed** — `restoreUi()` restores state before geometry.
-  It was never the saved layout. See Landmines.
-- **NIFs open on Blender's three-quarter view**, the Collision Manager fits its
-  own columns, and collision authoring gained saved presets, a row menu that
-  creates, a Parent column and re-parenting.
+- **Block-list rows drag onto a `NiNode` to re-parent** — plain drop preserves
+  world position, Shift keeps the local transform, Ctrl links. The primitive is
+  `wwReparentBlocks` in `blocks.cpp`, shared with the Collision Manager's Set
+  Parent.
+- **The flat list mode is not sound** and is now the top backlog item. Blocks
+  inserted while it is showing are not addressable, and it intermittently takes
+  the process down. Neither is drag-and-drop's or rename's doing — both were
+  A/B'd out. Hierarchy mode is unaffected.
 
 ### Open, and honest about it
 
-- **Two things have no harness.** Preset save/rename/remove, and
-  `reparentFromBlockList`. The preset "+" goes through a modal
-  `QInputDialog::getText` and re-parenting is only reachable through a
-  `QMenu::exec`, so neither is drivable the way the existing harnesses drive
-  widgets — covering them means exposing the storage helpers and the operation
-  behind test-only entry points first. Re-parenting writes `Children` arrays on
-  two nodes, so it is the one to do first.
-- **Re-parenting keeps the LOCAL transform**, so a body moves in world space
-  when the new parent sits elsewhere. Right for attaching collision to a bone,
-  wrong for tidying a hierarchy. Preserving world position was deliberately not
-  decided.
+- **Preset save/rename/remove still has no harness.** The "+" goes through a
+  modal `QInputDialog::getText`, so it is not drivable the way the existing
+  harnesses drive widgets; covering it means exposing the storage helpers behind
+  test-only entry points first. Re-parenting, the other half of this note, is
+  covered now — the operation moved into `wwReparentBlocks` and
+  `block_dragdrop.sh` drives it.
+- **Re-parenting has two transform rules now, on purpose.** The block list's
+  plain drop preserves world position; the Collision Manager's **Set Parent**
+  keeps the LOCAL transform, which is right for attaching collision to a bone
+  and is why it was not changed.
+- **`window_state_roundtrip.sh` no longer runs on this machine**, and it fails
+  before launching the binary, so it is currently covering nothing. Two separate
+  environment problems: `Add-Type` cannot write its temp file when PowerShell is
+  launched from MSYS2 bash (run the script from PowerShell instead), and then
+  its geometry-magic guard reads `0xCB` because `-shl` on a `[byte]` truncates
+  in PowerShell 5.1 — `GetI` needs `[int]` casts. Small, but it is the startup
+  crash's only net.
 - **The title bar reports a stale build.** `NIFSKOPE_REVISION` is baked when
   qmake runs, not when make does, so the About box and title can name an older
   commit than the binary. Cosmetic; fix by regenerating on link the way
@@ -129,6 +138,27 @@ stale incremental build before bisecting any access violation or heap
 corruption.** `make clean` first. Identical source has crashed 6/6 incremental
 and 0/12 clean.
 
+**This bit again on 2026-08-07** and cost an hour: three widely-included headers
+gained members, a dozen incremental builds followed, and a harness started dying
+half way through with "Free Heap block modified after it was freed". The code
+was correct. Clean build, 25 of 25. Do the clean build *first*, not after
+reading the diff four times.
+
+**`make clean` breaks the next build**, so know this before you run it: qmake
+writes the `icon_res.o` rule with an absolute target path and lists the object
+with a relative one, so make stops at `No rule to make target
+'GeneratedFiles/.obj/icon_res.o'`. Build it once by hand and carry on:
+
+```bash
+windres -i res/icon.rc -o GeneratedFiles/.obj/icon_res.o --include-dir=./res
+```
+
+**Set a writable temp when building from a sandboxed shell.** `export
+TMPDIR=/tmp TMP=/tmp TEMP=/tmp` — otherwise g++ tries `C:\Windows` for its
+intermediates and fails with "Cannot create temporary file". And piping make to
+`grep`/`tail` hides its exit status: use `set -o pipefail` or check
+`${PIPESTATUS[0]}`, or a failed build reads as a successful one.
+
 Relink can also fail with the exe locked. Kill the straggler and relink; it is
 not a code error.
 
@@ -204,6 +234,28 @@ The collision and menu work added six:
 | `nav_keys.sh` | rotate/zoom rebinding, and that letting go stops the camera |
 | `collision_compiled_edit.sh` | editing a compiled body in place |
 | `window_state_roundtrip.sh` | open, close maximised, open again — the startup crash |
+
+And the block-list session added two:
+
+| harness | covers |
+|---|---|
+| `block_dragdrop.sh` | the three modifiers, four refusals, multi-select as one payload, the highlight, one undo step |
+| `block_rename.sh` | F2 and double-click, Escape, the column asymmetry, and that the name reaches the palette |
+
+Both build their fixture from the starter document (`-no-gui new`), so they need
+no game corpus at all. `block_rename.sh` seeds `List Mode` into the registry
+before launch and puts it back on exit, because the mode is read during window
+construction — and because **switching it at run time is what the flat-list
+fault takes down**.
+
+**A drag event cannot be delivered with `QApplication::sendEvent`.**
+`QApplication::notify` routes drag and drop through the drag manager, so a
+synthetic one reaches neither the widget's `event()` nor any event filter —
+measured at zero, to the view and to the viewport both. That is why the drop
+handlers are `NifTreeView` overrides and why `wwDeliverDragEvent` exists: a
+harness needs an entry point that begins where Qt's routing ends. The override
+count it reports is the check that the overrides ran, rather than the hook being
+poked directly.
 
 **Two useful capture levers, both added while chasing things reading was not
 finding.** `WW_CAMERA_LOG=<file>` appends every camera reorientation with its

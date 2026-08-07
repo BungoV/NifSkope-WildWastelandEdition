@@ -175,4 +175,48 @@ void blockLink( NifModel * nif, const QModelIndex & index, const QModelIndex & i
  */
 int wwPropagateNodeName( NifModel * nif, int nodeNumber, const QString & oldName, const QString & newName );
 
+/*! What a re-parent does to the moved block's transform.
+ *
+ *  A NIF has only NiNode children, so Blender's two separate gestures —
+ *  move-to-collection (organisational, nothing appears to move) and parenting
+ *  (transform-level) — collapse into one operation here, and the distinction has
+ *  to be re-cast as what happens to the transform. That is what these are.
+ */
+enum class WwReparentMode
+{
+	//! Compensate the local transform, so the block stays where it is in the
+	//! world. Blender's move-to-collection semantic.
+	PreserveWorld,
+	//! Leave the local transform alone, so the block snaps into the new parent's
+	//! space. Right for attaching collision to a bone.
+	KeepLocal,
+	//! Add the child link and KEEP the old one, so the block has two parents.
+	//! A real NIF capability, and the closest thing to Blender's link.
+	Link
+};
+
+/*! Why re-parenting `block` under `newParent` is refused — empty if it is legal.
+ *
+ *  Separate from the operation so a drag can ask before the drop, and phrased for
+ *  display: a silent no-op is what this kept getting reported for.
+ */
+QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode );
+
+/*! Re-parent blocks under `newParent`, as ONE undo step.
+ *
+ *  Every world transform is read BEFORE anything is written. Node transforms are
+ *  stored as locals, so writing one parent moves its children — reading up front
+ *  places each block against the hierarchy as it was, not as the loop has left it
+ *  half-way through. That is what makes dragging a parent and its own child in the
+ *  same selection come out right.
+ *
+ *  Refused blocks are skipped, not fatal: a mixed multi-selection moves what it
+ *  can and reports the rest.
+ *
+ *  \param refusals if given, receives one line per skipped block.
+ *  \return how many blocks moved.
+ */
+int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newParent,
+	WwReparentMode mode, QStringList * refusals = nullptr );
+
 #endif // SP_BLOCKS_H

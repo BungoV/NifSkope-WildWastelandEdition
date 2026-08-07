@@ -91,7 +91,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QClipboard>
 #include <QComboBox>
 #include <QCursor>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QMimeData>
+#include <QShortcut>
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QThread>
@@ -8100,6 +8103,522 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...and stands where that shape stood", placed );
 					log << "dangling child links left behind: " << dangling << "\n";
 					check( "the consumed mesh leaves no dangling child link", dangling == 0 );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_BLOCKDND_TEST=1): block-list drag-and-drop.
+	 *
+	 * Drives REAL drag events at the block list's viewport rather than calling
+	 * wwReparentBlocks directly, so what is measured includes the parts that only
+	 * exist in the view: the proxy index mapping, the modifier reading, the
+	 * highlight, and the refusals a drag has to answer before the drop.
+	 *
+	 * THE DISCRIMINATING PAIR is scenarios 1 and 2, on the SAME two blocks. Plain
+	 * drop must leave the block where it is in the world; Shift drop must move it
+	 * by exactly the new parent's world offset. One implementation cannot satisfy
+	 * both, so neither check can pass by accident — and the pair is only
+	 * meaningful if the target's transform is not identity, which is why the
+	 * fixture check on that comes first and the harness sets the offset itself
+	 * rather than hoping a file has one.
+	 *
+	 * The fixture is BUILT here, from two NiNodes inserted into whatever file was
+	 * opened. Stock FO4 statics are almost all a single root NiNode with shape
+	 * children — there is no second node to drop onto — and a test that depends on
+	 * finding a game file with the right shape is a test that stops running.
+	 * tests/spells/block_dragdrop.sh passes the starter document, so the harness
+	 * needs no game corpus at all.
+	 *
+	 * "Prove the control moves before asserting that a change moved it": every
+	 * scenario first resolves its drop point back through the view and refuses to
+	 * measure anything if that does not name the row it aimed at. A visualRect on
+	 * a collapsed or scrolled-away row is empty, and dropping at (0,0) would
+	 * target whatever is at the top of the list while still looking like a pass.
+	 * Log: release/ww_blockdnd_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BLOCKDND_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_blockdnd_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					NifTreeView * list = skope->list;
+					if ( !nif || !list ) { log << "no model or no list\n"; fails++; checks++; break; }
+
+					// world transform from the model: Node::nodeId is assigned when
+					// the Scene builds it and does not survive an insert
+					std::function<Transform( qint32 )> worldOf = [&]( qint32 block ) -> Transform {
+						if ( block < 0 ) return Transform();
+						const int parent = nif->getParent( block );
+						return parent < 0 ? Transform( nif, nif->getBlockIndex( block ) )
+							: worldOf( parent ) * Transform( nif, nif->getBlockIndex( block ) );
+					};
+					auto childrenOf = [&]( qint32 block ) {
+						return nif->getLinkArray( nif->getBlockIndex( block ), "Children" );
+					};
+
+					const QList<int> roots = nif->getRootLinks();
+					if ( roots.size() != 1 ) { log << "fixture has no single root\n"; fails++; checks++; break; }
+					const qint32 root = roots.first();
+
+					// something to move that is NOT a node, so the same block also
+					// serves as the "cannot take children" refusal target
+					qint32 leaf = -1;
+					for ( const qint32 child : childrenOf( root ) ) {
+						const QModelIndex iChild = nif->getBlockIndex( child );
+						if ( nif->blockInherits( iChild, "NiAVObject" ) && !nif->blockInherits( iChild, "NiNode" ) ) {
+							leaf = child;
+							break;
+						}
+					}
+					if ( leaf < 0 ) { log << "fixture root has no non-node child\n"; fails++; checks++; break; }
+
+					/* Two nodes, appended. insertNiBlock( ..., -1 ) puts them after
+					 * the last block, so nothing already read is renumbered.
+					 */
+					const qint32 nodeA = nif->getBlockNumber( nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
+					const qint32 nodeB = nif->getBlockNumber( nif->insertNiBlock( QStringLiteral( "NiNode" ) ) );
+					if ( nodeA < 0 || nodeB < 0 ) { log << "could not insert nodes\n"; fails++; checks++; break; }
+					addLink( nif, nif->getBlockIndex( root ), "Children", nodeA );
+					addLink( nif, nif->getBlockIndex( root ), "Children", nodeB );
+					// the offset that makes the two transform rules differ
+					Transform placed;
+					placed.translation = Vector3( 100.0f, 20.0f, -5.0f );
+					placed.writeBack( nif, nif->getBlockIndex( nodeB ) );
+					QApplication::processEvents();
+
+					const Vector3 targetOffset = worldOf( nodeB ).translation;
+					log << "root " << root << ", leaf " << leaf << ", nodeA " << nodeA
+						<< ", nodeB " << nodeB << " at " << targetOffset.toString() << "\n";
+					check( "the target node has a non-identity world offset", targetOffset.length() > 1.0f );
+					if ( targetOffset.length() <= 1.0f ) break;
+
+					// where a row is, in viewport coordinates
+					auto rowPos = [&]( qint32 block ) -> QPoint {
+						QModelIndex idx = ( list->model() == skope->proxy )
+							? skope->proxy->mapFromPrimary( nif->getBlockIndex( block ) )
+							: nif->getBlockIndex( block );
+						if ( !idx.isValid() ) return QPoint( -1, -1 );
+						idx = idx.sibling( idx.row(), 0 );
+						list->expandAll();
+						/* PositionAtTop, and the result is checked against the
+						 * viewport. visualRect() answers from the layout whether or
+						 * not the row is on screen, while indexAt() answers only
+						 * inside the viewport — so a row laid out below a short dock
+						 * produced a perfectly plausible rect at y=149 that resolved
+						 * to no index at all. Scrolling it to the top is what makes
+						 * the two agree regardless of how tall the dock is.
+						 */
+						list->scrollTo( idx, QAbstractItemView::PositionAtTop );
+						QApplication::processEvents();
+						const QRect r = list->visualRect( idx );
+						if ( !r.isValid() || r.isEmpty() || !list->viewport()->rect().contains( r.center() ) ) {
+							log << "    [row] block " << block << " row " << idx.row()
+								<< " is not inside the viewport (rect " << r.x() << "," << r.y()
+								<< " " << r.width() << "x" << r.height() << ", viewport "
+								<< list->viewport()->width() << "x" << list->viewport()->height() << ")\n";
+							log.flush();
+							return QPoint( -1, -1 );
+						}
+						return r.center();
+					};
+
+					// one drag-over plus one drop, exactly as the window sees them.
+					// highlight receives what the move pass lit up, and deliveries
+					// counts how many of them actually reached the view's overrides.
+					qint32 highlight = -2;
+					int deliveries = 0, drops = 0;
+					auto drop = [&]( const QList<qint32> & blocks, qint32 target,
+						Qt::KeyboardModifiers mods, const QMimeData * forged = nullptr ) -> bool {
+						const QPoint pos = rowPos( target );
+						if ( pos.x() < 0 )
+							return false;
+						// what the window resolves the point to, said out loud: a
+						// mismatch here means a real drop would land on the wrong
+						// block, which is worth more than "the test could not run"
+						const qint32 hit = skope->blockListBlockAt( pos );
+						if ( hit != target ) {
+							log << "    [row] the point " << pos.x() << "," << pos.y()
+								<< " resolves to block " << hit << ", not " << target << "\n";
+							log.flush();
+							return false;
+						}
+						drops++;
+						const QMimeData * mime = forged ? forged : skope->blockListDragMimeData( blocks );
+						/* NOT QApplication::sendEvent. Drag events are routed by
+						 * QApplication::notify through the drag manager, so a
+						 * synthetic one reaches neither the widget's event() nor any
+						 * event filter — measured at zero, to the view and to the
+						 * viewport both. wwDeliverDragEvent starts where Qt's
+						 * routing ends, and the override count below proves the
+						 * override ran rather than the hook being poked directly.
+						 */
+						const int seenWas = list->wwDragEventsSeen;
+						QDragMoveEvent moveEv( pos, Qt::MoveAction, mime, Qt::LeftButton, mods );
+						list->wwDeliverDragEvent( &moveEv );
+						highlight = nif->dropTargetBlock;
+						QDropEvent dropEv( QPointF( pos ), Qt::MoveAction, mime, Qt::LeftButton, mods );
+						list->wwDeliverDragEvent( &dropEv );
+						deliveries += list->wwDragEventsSeen - seenWas;
+						if ( !forged )
+							delete mime;
+						QApplication::processEvents();
+						return true;
+					};
+					auto undo = [&]() {
+						if ( nif->undoStack && nif->undoStack->canUndo() )
+							nif->undoStack->undo();
+						QApplication::processEvents();
+					};
+
+					/* Kept, not scaffolding: when a check below fails these two say
+					 * WHICH half is wrong -- the primitive's verdict on a move it
+					 * should allow, and whether the payload survives a round trip.
+					 * Both are silent from the outside, and chasing the difference
+					 * between them without these cost two builds.
+					 */
+					{
+						const QMimeData * probe = skope->blockListDragMimeData( { leaf } );
+						log << "refusal(leaf -> nodeB): '"
+							<< wwReparentRefusal( nif, leaf, nodeB, WwReparentMode::PreserveWorld )
+							<< "'; payload round trip: " << skope->blockListDragPayload( probe ).size()
+							<< " block(s)\n";
+						delete probe;
+					}
+
+					const Vector3 worldWas = worldOf( leaf ).translation;
+					const Transform localWas( nif, nif->getBlockIndex( leaf ) );
+
+					// 1. plain drop: nothing appears to move
+					if ( !drop( { leaf }, nodeB, Qt::NoModifier ) ) {
+						log << "the drop point did not resolve to nodeB\n"; fails++; checks++; break;
+					}
+					check( "the legal target row is highlighted while dragging over it", highlight == nodeB );
+					check( "plain drop re-parents onto the target", nif->getParent( leaf ) == nodeB );
+					check( "...and the block stays where it was in the world",
+						( worldOf( leaf ).translation - worldWas ).length() < 1.0e-3f );
+					const Transform localNow( nif, nif->getBlockIndex( leaf ) );
+					check( "...which it can only do by compensating the LOCAL transform",
+						( localNow.translation - localWas.translation ).length() > 1.0e-3f );
+					check( "the highlight is cleared once the drop is over", nif->dropTargetBlock == -1 );
+					undo();
+					check( "undo puts it back under the root", nif->getParent( leaf ) == root );
+
+					// 2. the same drop with Shift: the local transform is kept, so it
+					// moves in the world by exactly the new parent's offset
+					if ( !drop( { leaf }, nodeB, Qt::ShiftModifier ) ) {
+						log << "the Shift drop point did not resolve to nodeB\n"; fails++; checks++; break;
+					}
+					check( "Shift drop re-parents onto the target", nif->getParent( leaf ) == nodeB );
+					check( "...keeping the LOCAL transform untouched",
+						( Transform( nif, nif->getBlockIndex( leaf ) ).translation - localWas.translation ).length() < 1.0e-4f );
+					check( "...so it moves in the world by the parent's offset, and not by anything else",
+						( worldOf( leaf ).translation - worldWas - targetOffset ).length() < 1.0e-3f );
+					undo();
+
+					// 3. Ctrl: linked, both parents kept, transform untouched
+					if ( !drop( { leaf }, nodeB, Qt::ControlModifier ) ) {
+						log << "the Ctrl drop point did not resolve to nodeB\n"; fails++; checks++; break;
+					}
+					check( "Ctrl drop adds the child link to the new parent",
+						childrenOf( nodeB ).contains( leaf ) );
+					check( "...and LEAVES the old one, so the block has two parents",
+						childrenOf( root ).contains( leaf ) );
+					check( "...and does not touch the transform",
+						( Transform( nif, nif->getBlockIndex( leaf ) ).translation - localWas.translation ).length() < 1.0e-4f );
+					undo();
+					check( "undo removes the second parent again", !childrenOf( nodeB ).contains( leaf ) );
+
+					/* 4. the refusals. Each must change NOTHING and must not light
+					 * the row up — an accepted-looking drag onto an illegal target
+					 * is how a silent no-op gets reported as a bug.
+					 */
+					auto refuses = [&]( const QString & what, const QList<qint32> & blocks, qint32 target ) {
+						const int parentWas = nif->getParent( blocks.first() );
+						const int blocksWas = nif->getBlockCount();
+						if ( !drop( blocks, target, Qt::NoModifier ) ) {
+							log << "  FAIL " << what << " (the drop point did not resolve)\n";
+							checks++; fails++;
+							return;
+						}
+						check( what, nif->getParent( blocks.first() ) == parentWas
+							&& nif->getBlockCount() == blocksWas );
+						check( QStringLiteral( "...and the row is not highlighted" ), highlight == -1 );
+					};
+					refuses( QStringLiteral( "a block dropped on itself is refused" ), { nodeB }, nodeB );
+					refuses( QStringLiteral( "a node dropped on its own descendant is refused" ), { root }, nodeB );
+					refuses( QStringLiteral( "a block dropped on a non-node is refused" ), { nodeA }, leaf );
+
+					/* 5. a payload from ANOTHER window. The layout is written out by
+					 * hand here on purpose: if the format changes and the guard is
+					 * not updated with it, this fails loudly instead of quietly
+					 * testing nothing.
+					 */
+					QByteArray forgedBytes;
+					{
+						QDataStream ds( &forgedBytes, QIODevice::WriteOnly );
+						ds << quint64( 0xDEADBEEF ) << QList<qint32>{ leaf };
+					}
+					QMimeData forged;
+					forged.setData( QLatin1String( "application/x-nifskope-blocklist" ), forgedBytes );
+					const int parentWas = nif->getParent( leaf );
+					if ( drop( { leaf }, nodeB, Qt::NoModifier, &forged ) ) {
+						check( "a payload from another document's model is ignored",
+							nif->getParent( leaf ) == parentWas );
+						check( "...and does not highlight anything", highlight == -1 );
+					} else {
+						log << "  FAIL the forged drop point did not resolve\n"; checks++; fails++;
+					}
+
+					/* 6. several blocks at once, as ONE undo step.
+					 *
+					 * index(), not count(). Every scenario above undoes itself, so
+					 * the stack is sitting behind its own tail and the next push
+					 * CLEARS that tail -- count() comes back the same or smaller and
+					 * "one more command" fails on correct code. index() advances by
+					 * exactly one per push whatever the tail is doing, which is the
+					 * thing actually being asserted.
+					 */
+					const int undoWas = nif->undoStack ? nif->undoStack->index() : -1;
+					if ( !drop( { leaf, nodeA }, nodeB, Qt::NoModifier ) ) {
+						log << "the multi drop point did not resolve to nodeB\n"; fails++; checks++; break;
+					}
+					check( "a multi-selection drags as one payload and all of it lands",
+						nif->getParent( leaf ) == nodeB && nif->getParent( nodeA ) == nodeB );
+					check( "...and is a single undo step",
+						nif->undoStack && nif->undoStack->index() == undoWas + 1 );
+					undo();
+					check( "one undo takes the whole multi-drop back",
+						nif->getParent( leaf ) == root && nif->getParent( nodeA ) == root );
+
+					/* Everything above went through the view's own drag overrides,
+					 * two events per drop. If a future change routes the hook some
+					 * other way, or drops one of the four overrides, this is what
+					 * notices -- otherwise every check above would keep passing off
+					 * a handler the harness had called directly.
+					 */
+					log << "drag events delivered to the view: " << deliveries
+						<< " over " << drops << " drops\n";
+					check( "every drop went through the view's drag overrides",
+						drops > 0 && deliveries == drops * 2 );
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	/* TEST HARNESS (WW_BLOCKRENAME_TEST=1): the block list's inline rename.
+	 *
+	 * This shipped in d5765c4 and had no coverage, which is how it came to be
+	 * filed in the backlog as not started — the entry even said "try it before
+	 * building anything". It is the half of the Outliner spec that already
+	 * existed, so it gets a harness now rather than a second implementation.
+	 *
+	 * THE CHECK THAT MATTERS is the palette one. A scene object's name is not a
+	 * label: NiDefaultAVObjectPalette entries and NiControllerSequence controlled
+	 * blocks address nodes BY STRING, so renaming the node alone silently stops
+	 * the animation binding to it, with nothing in the file to show for it. The
+	 * fixture builds a palette entry pointing at the node precisely so that a
+	 * rename which forgets wwPropagateNodeName fails here.
+	 *
+	 * Both entry points are fired the way the application wires them — the F2
+	 * QShortcut's own activated signal, and the view's doubleClicked signal —
+	 * rather than by calling renameBlockListIndex directly, so the wiring is part
+	 * of what is measured. The column asymmetry is deliberate and is checked:
+	 * double-click renames from the Value column only, because the Name column is
+	 * the block type and double-clicking it means "expand".
+	 * Log: release/ww_blockrename_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BLOCKRENAME_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1500, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_blockrename_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				// FLUSHED per check. This harness drives a widget that creates and
+				// deletes another widget: when it died half way the log was zero
+				// bytes and said nothing about where, which is a worse failure than
+				// the one being chased.
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * nif = skope->getNifModel();
+					NifTreeView * list = skope->list;
+					if ( !nif || !list ) { log << "no model or no list\n"; fails++; checks++; break; }
+
+					const QList<int> roots = nif->getRootLinks();
+					if ( roots.size() != 1 ) { log << "fixture has no single root\n"; fails++; checks++; break; }
+					const qint32 node = roots.first();
+					const QString nameWas = nif->resolveString( nif->getBlockIndex( node ), "Name" );
+					check( "the fixture's root has a name to change", !nameWas.isEmpty() );
+					if ( nameWas.isEmpty() ) break;
+
+					// a palette entry addressing that node by string, which is what
+					// a rename has to carry with it
+					const QModelIndex palette = nif->insertNiBlock( QStringLiteral( "NiDefaultAVObjectPalette" ) );
+					if ( !palette.isValid() ) { log << "could not insert a palette\n"; fails++; checks++; break; }
+					nif->setLink( palette, "Scene", node );
+					nif->set<uint>( palette, "Num Objs", 1 );
+					nif->updateArraySize( nif->getIndex( palette, "Objs" ) );
+					const QModelIndex entry = nif->index( 0, 0, nif->getIndex( palette, "Objs" ) );
+					nif->assignString( entry, "Name", nameWas );
+					nif->setLink( entry, "AV Object", node );
+					QApplication::processEvents();
+					check( "the fixture's palette entry names the node",
+						nif->resolveString( entry, "Name" ) == nameWas );
+
+					auto rowFor = [&]( qint32 block, int column ) {
+						QModelIndex idx = ( list->model() == skope->proxy )
+							? skope->proxy->mapFromPrimary( nif->getBlockIndex( block ) )
+							: nif->getBlockIndex( block );
+						return idx.isValid() ? idx.sibling( idx.row(), column ) : QModelIndex();
+					};
+					// which column shows the name: the proxy has three and uses 1,
+					// the flat list is NifModel's own and uses ValueCol
+					auto nameColumn = [&]() {
+						return ( list->model() == skope->proxy ) ? 1 : int( NifModel::ValueCol );
+					};
+					auto editor = [&]() {
+						return list->viewport()->findChild<QLineEdit *>( QStringLiteral( "BlockListRenameEdit" ) );
+					};
+					auto sendKey = [&]( QWidget * w, int key ) {
+						QKeyEvent press( QEvent::KeyPress, key, Qt::NoModifier );
+						QApplication::sendEvent( w, &press );
+						QApplication::processEvents();
+					};
+
+					/* F2, through the shortcut the window actually installs. PARENTED
+					 * TO THE LIST, which is not a detail: the Rigging dock's bone
+					 * tree installs an F2 of its own, and taking whichever came last
+					 * out of findChildren fired that one instead — a green-looking
+					 * search that drove the wrong widget.
+					 */
+					QShortcut * f2 = nullptr;
+					for ( QShortcut * sc : skope->findChildren<QShortcut *>() )
+						if ( sc->key() == QKeySequence( Qt::Key_F2 ) && sc->parent() == list )
+							f2 = sc;
+					check( "an F2 shortcut is installed on the block list", f2 != nullptr );
+					if ( !f2 ) break;
+
+					/* ONE MODE PER PROCESS, chosen by WW_BLOCKRENAME_TEST=hierarchy|list
+					 * and seeded into QSettings by the script BEFORE the window is
+					 * built -- so the app STARTS in the mode under test and this
+					 * harness never switches.
+					 *
+					 * It used to run both modes in one process, and that was flaky
+					 * in a way that had nothing to do with rename: switching the
+					 * block list's model corrupts the heap intermittently (4 of 5
+					 * runs, and with this feature's drag-and-drop wiring disabled
+					 * as well, so it is neither this feature's doing nor the
+					 * rename's -- running the flat list FIRST dies on the switch
+					 * before a rename has happened at all). Filed in the backlog.
+					 * A harness that fails intermittently teaches you to re-run
+					 * rather than to look, so it does not do the thing that breaks.
+					 *
+					 * The mode is ASSERTED, not assumed: if the seed did not take,
+					 * this fails instead of quietly measuring the other mode.
+					 */
+					{
+						const bool wantHierarchy =
+							qEnvironmentVariable( "WW_BLOCKRENAME_TEST" ) != QLatin1String( "list" );
+						const bool isHierarchy = ( list->model() == skope->proxy );
+						const QString mode = isHierarchy
+							? QStringLiteral( "hierarchy" ) : QStringLiteral( "list" );
+						const int nameCol = nameColumn();
+						// the column is logged because it is the difference between
+						// the two modes, and it is what the old proxy-only guard hid
+						log << "-- " << mode << " mode, name column " << nameCol << "\n";
+						log.flush();
+						check( "the app started in the mode under test", isHierarchy == wantHierarchy );
+						if ( isHierarchy != wantHierarchy ) break;
+
+						const QString before = nif->resolveString( nif->getBlockIndex( node ), "Name" );
+						list->expandAll();
+						QApplication::processEvents();
+
+						list->setCurrentIndex( rowFor( node, 0 ) );
+						QApplication::processEvents();
+						QMetaObject::invokeMethod( f2, "activated" );
+						QApplication::processEvents();
+						QLineEdit * ed = editor();
+						check( mode + ": F2 opens an inline editor on the row", ed != nullptr );
+						if ( !ed ) break;
+						check( mode + ": ...positioned over the name cell, not at the origin",
+							ed->geometry() == list->visualRect( rowFor( node, nameCol ) ) );
+						check( mode + ": ...holding the current name, selected",
+							ed->text() == before && ed->selectedText() == before );
+
+						// Escape first: cancelling must leave the file alone
+						sendKey( ed, Qt::Key_Escape );
+						check( mode + ": Escape closes the editor", editor() == nullptr );
+						check( mode + ": ...and changes nothing",
+							nif->resolveString( nif->getBlockIndex( node ), "Name" ) == before );
+
+						// double-click on the TYPE column: that one expands, it does
+						// not rename. Column 0 is the type in both models.
+						QMetaObject::invokeMethod( list, "doubleClicked",
+							Q_ARG( QModelIndex, rowFor( node, 0 ) ) );
+						QApplication::processEvents();
+						check( mode + ": double-clicking the type column does NOT start a rename",
+							editor() == nullptr );
+
+						// double-click on the name column: that one renames
+						QMetaObject::invokeMethod( list, "doubleClicked",
+							Q_ARG( QModelIndex, rowFor( node, nameCol ) ) );
+						QApplication::processEvents();
+						ed = editor();
+						check( mode + ": double-clicking the name column starts a rename", ed != nullptr );
+						if ( !ed ) break;
+
+						const QString renamed = QStringLiteral( "WWRenamed_" ) + mode;
+						ed->setText( renamed );
+						sendKey( ed, Qt::Key_Return );
+						check( mode + ": Enter closes the editor", editor() == nullptr );
+						check( mode + ": ...and the block carries the new name",
+							nif->resolveString( nif->getBlockIndex( node ), "Name" ) == renamed );
+						check( mode + ": ...and the palette entry followed it, so animation still binds",
+							nif->resolveString( entry, "Name" ) == renamed );
+
+						/* A block with no Name refuses. The palette block itself is
+						 * one: it inherits NiObject, not NiAVObject. The refusal is a
+						 * status message, so what is measured is that no editor opened.
+						 */
+						list->setCurrentIndex( rowFor( nif->getBlockNumber( palette ), 0 ) );
+						QApplication::processEvents();
+						QMetaObject::invokeMethod( f2, "activated" );
+						QApplication::processEvents();
+						check( mode + ": a block with no scene-object name opens no editor",
+							editor() == nullptr );
+					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";

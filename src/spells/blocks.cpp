@@ -1,6 +1,7 @@
 #include "blocks.h"
 #include "mesh.h"
 #include "wwblocksummary.h"
+#include "nifsnapshot.h"	// wwReparentBlocks is one undo step
 
 #include <QApplication>
 #include <QBuffer>
@@ -478,6 +479,146 @@ void blockLink( NifModel * nif, const QModelIndex & index, const QModelIndex & i
 	} else if ( nif->blockInherits( index, "NiAVObject" ) && nif->blockInherits( iBlock, "NiCollisionObject" ) ) {
 		nif->setLink( index, "Collision Object", nif->getBlockNumber( iBlock ) );
 	}
+}
+
+/*! A block's world transform, from the model alone.
+ *
+ *  Deliberately NOT read off the Scene: Node::nodeId is assigned when the Scene
+ *  builds it and does not survive a renumber, so a scene lookup after a
+ *  structural edit reads through a stale id. The model is the thing being
+ *  written, so it is also the thing to measure against.
+ *
+ *  `guard` bounds the walk. getParent() searches childLinks, and a file that
+ *  already contains a cycle would otherwise hang here rather than being reported.
+ */
+static Transform wwWorldTransform( const NifModel * nif, qint32 block, int guard = 256 )
+{
+	if ( !nif || block < 0 || guard <= 0 )
+		return Transform();
+	const QModelIndex iBlock = nif->getBlockIndex( block );
+	if ( !iBlock.isValid() )
+		return Transform();
+	const Transform local( nif, iBlock );
+	const int parent = nif->getParent( block );
+	return parent < 0 ? local : wwWorldTransform( nif, parent, guard - 1 ) * local;
+}
+
+QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent, WwReparentMode mode )
+{
+	if ( !nif )
+		return QCoreApplication::translate( "Reparent", "No file is open." );
+
+	const QModelIndex iBlock = nif->getBlockIndex( block );
+	const QModelIndex iParent = nif->getBlockIndex( newParent );
+
+	if ( !iBlock.isValid() )
+		return QCoreApplication::translate( "Reparent", "That row has no block to move." );
+
+	/* ONLY A NiNode CARRIES CHILDREN, and only a NiAVObject can be one. Both
+	 * halves are checked against the file rather than assumed: "Children" is
+	 * looked up as well as the type, because a version without the array would
+	 * otherwise take the link silently into nothing.
+	 */
+	if ( !iParent.isValid() || !nif->blockInherits( iParent, "NiNode" )
+		|| !nif->getIndex( iParent, "Children" ).isValid() )
+		return QCoreApplication::translate( "Reparent",
+			"%1 cannot take children — only a NiNode can." )
+			.arg( nif->itemName( iParent.isValid() ? iParent : iBlock ) );
+
+	if ( !nif->blockInherits( iBlock, "NiAVObject" ) )
+		return QCoreApplication::translate( "Reparent",
+			"%1 is not a scene object, so it cannot be a child of a node." )
+			.arg( nif->itemName( iBlock ) );
+
+	if ( block == newParent )
+		return QCoreApplication::translate( "Reparent", "A block cannot be its own parent." );
+
+	// A descendant taking its own ancestor as parent cuts the branch out of the
+	// file and leaves a cycle behind. Walk up from the target, not down from the
+	// block: the chain is short and the guard is the same one as above.
+	int guard = 256;
+	for ( int p = newParent; p >= 0 && guard-- > 0; p = nif->getParent( p ) ) {
+		if ( p != block )
+			continue;
+		return QCoreApplication::translate( "Reparent",
+			"Block %1 already sits under this one — re-parenting onto it would cut the "
+			"branch out of the file." ).arg( newParent );
+	}
+
+	if ( nif->getLinkArray( iParent, "Children" ).contains( block ) )
+		return QCoreApplication::translate( "Reparent", "Already a child of block %1." ).arg( newParent );
+
+	Q_UNUSED( mode );
+	return QString();
+}
+
+int wwReparentBlocks( NifModel * nif, const QList<qint32> & blocks, qint32 newParent,
+	WwReparentMode mode, QStringList * refusals )
+{
+	if ( !nif )
+		return 0;
+
+	struct Move { qint32 block; Transform world; };
+	QVector<Move> moves;
+	for ( const qint32 block : blocks ) {
+		const QString refusal = wwReparentRefusal( nif, block, newParent, mode );
+		if ( !refusal.isEmpty() ) {
+			if ( refusals )
+				refusals->append( refusal );
+			continue;
+		}
+		moves.append( { block, wwWorldTransform( nif, block ) } );
+	}
+	if ( moves.isEmpty() )
+		return 0;
+
+	// The new parent's world is read up front too, and for the same reason: if the
+	// selection contains one of its ancestors, moving that ancestor first would
+	// change what "the parent's space" means half-way through the loop.
+	const Transform parentWorld = wwWorldTransform( nif, newParent );
+	const Transform parentInv = parentWorld.inverted();
+
+	const QString what = mode == WwReparentMode::Link
+		? QCoreApplication::translate( "Reparent", "Link to parent" )
+		: QCoreApplication::translate( "Reparent", "Re-parent" );
+
+	nifSnapshotOp( nif, what, [&]() {
+		for ( const Move & move : std::as_const( moves ) ) {
+			const int oldParent = nif->getParent( move.block );
+
+			/* REBUILT, not blanked. Dropping a link leaves Num Children still
+			 * claiming the entry and the entry pointing at nothing, which is
+			 * exactly the dangling child link the Issue Manager reports.
+			 *
+			 * Link mode keeps the old parent — that is the whole point of it.
+			 */
+			if ( mode != WwReparentMode::Link && oldParent >= 0 ) {
+				const QModelIndex from = nif->getBlockIndex( oldParent );
+				QVector<qint32> kept;
+				for ( const qint32 child : nif->getLinkArray( from, "Children" ) )
+					if ( child != move.block && nif->isValidBlockNumber( child ) )
+						kept.append( child );
+				nif->set<uint>( from, "Num Children", uint( kept.size() ) );
+				nif->updateArraySize( from, "Children" );
+				nif->setLinkArray( from, "Children", kept );
+			}
+
+			addLink( nif, nif->getBlockIndex( newParent ), "Children", move.block );
+
+			/* newLocal = inverse(newParentWorld) * oldWorld. Link mode does not
+			 * touch the transform: a block with two parents has no single world
+			 * position to preserve, so silently rewriting its local would move it
+			 * under the parent it already had.
+			 */
+			if ( mode == WwReparentMode::PreserveWorld ) {
+				const QModelIndex iBlock = nif->getBlockIndex( move.block );
+				if ( Transform::canConstruct( nif, iBlock ) )
+					( parentInv * move.world ).writeBack( nif, iBlock );
+			}
+		}
+	} );
+
+	return moves.size();
 }
 
 //! Helper function for branch paste
