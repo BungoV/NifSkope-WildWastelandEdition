@@ -10487,9 +10487,25 @@ static void joinMergeSegmentsByIndex( NifModel * m, const QModelIndex & iActive,
 
 void GLView::joinSelectedObjects()
 {
-	if ( !model || editMode || objActive < 0 || objSelection.size() < 2 )
+	joinObjects( objActive, objSelection );
+}
+
+/*! Join \a selection into \a active, which must be a BSTriShape.
+ *
+ *  Split out of joinSelectedObjects so the same code can be driven from the
+ *  BLOCK LIST as well as from a viewport selection — the gesture is the same
+ *  one and there must not be two of it. The viewport's own state is where the
+ *  result lands either way: the merged shape becomes the active object, which
+ *  is what you want to be looking at next whichever list you started from.
+ *
+ *  \a selection is taken by value: the tail of this sets the member it is
+ *  usually passed from.
+ */
+void GLView::joinObjects( int active, QSet<int> selection )
+{
+	if ( !model || editMode || active < 0 || selection.size() < 2 )
 		return;
-	QModelIndex iActive = model->getBlockIndex( objActive );
+	QModelIndex iActive = model->getBlockIndex( active );
 	if ( !model->blockInherits( iActive, "BSTriShape" ) ) {
 		emit gizmoStatus( tr( "Join: the active object must be a BSTriShape" ) );
 		return;
@@ -10507,8 +10523,8 @@ void GLView::joinSelectedObjects()
 	// active is skipped (the user should make it the active object instead).
 	QVector<QPair<int, quint16>> sources;	// (block, fillMask)
 	bool richerSkipped = false;
-	for ( int sb : objSelection ) {
-		if ( sb == objActive )
+	for ( int sb : selection ) {
+		if ( sb == active )
 			continue;
 		QModelIndex iS = model->getBlockIndex( sb );
 		if ( !model->blockInherits( iS, "BSTriShape" ) )

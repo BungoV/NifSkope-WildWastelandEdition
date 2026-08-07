@@ -1010,6 +1010,9 @@ private:
 	//! Object mode: merge the selected compatible BSTriShapes into the active
 	//! node (verts transformed into its space, triangles reindexed)
 	void joinSelectedObjects();
+	//! The same join, told what to join rather than reading the viewport's own
+	//! selection — so the Block List can run the identical gesture.
+	void joinObjects( int active, QSet<int> selection );
 	//! Object-mode X (Blender): delete the current object selection after a
 	//! confirmation, whole branch each, as one undo step.
 	void deleteSelectedObjects();

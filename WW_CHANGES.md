@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-07za — Join shapes from the Block List
+
+`Ctrl+J` in the 3D view has merged compatible `BSTriShape`s into the active
+object for a while. There was no way to reach it from the **Block List**, which
+is where you are when you are looking at blocks.
+
+Right-click → **Hierarchy → Join Selected Shapes**. The row you right-clicked is
+the target: everything else merges INTO it and takes its vertex format, which is
+Blender's active-object rule and the one the viewport already follows. Disabled
+with a tooltip that says why — fewer than two meshes selected, or the row you
+right-clicked is not one of them.
+
+It is the **same call**, told what to join instead of reading the viewport's
+selection, so the vertex-format rules, the 65,535-vertex and 256-bone caps and
+the rigging-aware bone remap are the ones that were already there rather than a
+second opinion about any of them.
+
+Checked in `block_dragdrop.sh`: duplicate the cube, join the two, and require
+**both** that the file has one mesh fewer and that the target carries both
+meshes' vertices — 24 + 24 → 48. Either alone would pass for a join that deleted
+the source without appending it, which is the failure worth catching.
+
+**Not yet**: merging collision shapes in the Collision Manager. The route is
+mapped — collision → geometry → this join → collision, which is the loop closed
+in 07-07w run round a circle, with the mesh budget checked before the trip back —
+but it is not built.
+
 ## 2026-08-07z — Clicking a child block selects that block
 
 Click a `BSShaderTextureSet` in the Block List and the whole shape branch lit up

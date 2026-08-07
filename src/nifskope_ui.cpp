@@ -10123,6 +10123,59 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						nif->undoStack->redo();
 						check( "...and again, on a second round trip", bytes() == wasAfter );
 					}
+
+					/* JOIN TWO MESHES FROM THE BLOCK LIST.
+					 *
+					 * Ctrl+J in the viewport has done this for a while; what is new
+					 * is reaching it from the block list, and the whole point of that
+					 * change is that it is the SAME call rather than a second one. So
+					 * what is measured is the join itself running when driven that
+					 * way: one mesh fewer in the file, and the target carrying both
+					 * meshes' vertices.
+					 *
+					 * Both counts, not either: a join that removed the source without
+					 * appending it satisfies the first on its own, and that is the
+					 * failure worth catching — it silently deletes geometry.
+					 */
+					{
+						qint32 cube = -1;
+						for ( int b = 0; b < nif->getBlockCount() && cube < 0; b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+								cube = b;
+						check( "the fixture has a mesh to duplicate and join", cube >= 0 );
+						if ( cube >= 0 ) {
+							if ( SpellPtr dup = SpellBook::lookup( QStringLiteral( "Block/Duplicate Branch" ) ) ) {
+								SpellBook book( nif, nif->getBlockIndex( cube ) );
+								book.cast( nif, nif->getBlockIndex( cube ), dup );
+							}
+							auto meshes = [&]() {
+								QList<int> out;
+								for ( int b = 0; b < nif->getBlockCount(); b++ )
+									if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+										out << b;
+								return out;
+							};
+							const QList<int> two = meshes();
+							check( "...and duplicating it gives a second", two.size() >= 2 );
+							if ( two.size() >= 2 ) {
+								auto verts = [&]( int b ) {
+									return nif->get<int>( nif->getBlockIndex( b ), "Num Vertices" );
+								};
+								const int into = two.at( 0 ), other = two.at( 1 );
+								const int had = verts( into ), brings = verts( other );
+								skope->getGLView()->joinObjects( into, QSet<int>{ into, other } );
+								QApplication::processEvents();
+								const QList<int> left = meshes();
+								log << "join: " << had << " + " << brings << " verts over "
+									<< two.size() << " meshes -> " << left.size() << " meshes, target "
+									<< ( left.isEmpty() ? -1 : verts( left.first() ) ) << " verts\n";
+								check( "joining two meshes leaves one fewer",
+									left.size() == two.size() - 1 );
+								check( "...and the target carries both meshes' vertices",
+									!left.isEmpty() && verts( left.first() ) == had + brings );
+							}
+						}
+					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
@@ -21842,6 +21895,43 @@ void NifSkope::contextMenu( const QPoint & pos )
 			[this]() { ogl->showClearParentMenu(); } );
 		clearParent->setEnabled( hasSceneSelection );
 		clearParent->setToolTip( tr( "Remove the selected scene blocks from their NiNode parents" ) );
+
+		/* JOIN, AND IT IS THE VIEWPORT'S OWN JOIN.
+		 *
+		 * Ctrl+J in the 3D view has merged compatible BSTriShapes into the active
+		 * object for a while; there was simply no way to reach it from the Block
+		 * List, which is where you are when you are looking at blocks. The same
+		 * call, told what to join instead of reading the viewport's selection — so
+		 * the vertex-format rules, the 65,535-vertex and 256-bone caps and the
+		 * rigging-aware bone remap are the ones already there, not a second opinion
+		 * about any of it.
+		 *
+		 * THE ROW YOU RIGHT-CLICKED IS THE TARGET. That is Blender's rule for the
+		 * active object and the one the viewport already follows: everything else
+		 * merges INTO it and takes its vertex format.
+		 */
+		QList<int> joinable;
+		for ( const QModelIndex & pidx : list->selectionModel()->selectedIndexes() ) {
+			if ( pidx.column() != 0 )
+				continue;
+			const QModelIndex src = ( pidx.model() == proxy ) ? proxy->mapTo( pidx ) : pidx;
+			const int b = nif->getBlockNumber( src );
+			if ( b >= 0 && !joinable.contains( b )
+				&& nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+				joinable << b;
+		}
+		const int joinInto = nif->getBlockNumber( idx );
+		QAction * joinShapes = hierarchy->addAction( tr( "Join Selected Shapes" ),
+			[this, joinInto, joinable]() {
+				ogl->joinObjects( joinInto, QSet<int>( joinable.begin(), joinable.end() ) );
+			} );
+		joinShapes->setEnabled( joinable.size() >= 2 && joinable.contains( joinInto ) );
+		joinShapes->setToolTip( joinable.size() < 2
+			? tr( "Select two or more BSTriShapes to join" )
+			: !joinable.contains( joinInto )
+				? tr( "Right-click the shape to merge INTO — it has to be one of the selected meshes" )
+				: tr( "Merge %1 selected meshes into the one right-clicked (Ctrl+J in the viewport)" )
+					.arg( joinable.size() ) );
 
 		// Nest the Hierarchy submenu directly beneath the Block category rather
 		// than pinning it to the top of the menu.
