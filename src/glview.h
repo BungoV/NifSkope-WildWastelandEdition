@@ -1029,13 +1029,14 @@ private:
 	//! The same join, told what to join rather than reading the viewport's own
 	//! selection — so the Block List can run the identical gesture.
 	void joinObjects( int active, QSet<int> selection );
-	//! Object-mode X (Blender): delete the current object selection after a
-	//! confirmation, whole branch each, as one undo step.
-	void deleteSelectedObjects();
-	//! Delete the given blocks and their child branches as one undo step,
-	//! after a Blender-style "Delete selected objects?" confirmation. Shared
-	//! by the object-mode viewport and the Block List. Returns blocks removed.
-	int deleteBlocksWithConfirm( const QVector<int> & blocks );
+	//! Object-mode X / Delete (Blender): delete the current object selection,
+	//! whole branch each, as one undo step. X asks first, Delete does not.
+	void deleteSelectedObjects( bool confirm = true );
+	//! Delete the given blocks and their child branches as one undo step.
+	//! `confirm` puts up the Blender-style "Delete selected objects?" popup:
+	//! the X key and the menus ask, the Delete key does not. Shared by the
+	//! object-mode viewport and the Block List. Returns blocks removed.
+	int deleteBlocks( const QVector<int> & blocks, bool confirm = true );
 	//! Shift+D: duplicate the selection and start a move gesture
 	void duplicateSelection();
 	//! Edit-mode Shift+D: duplicate the picked verts/faces within the mesh

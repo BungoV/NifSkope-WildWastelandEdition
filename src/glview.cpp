@@ -280,6 +280,12 @@ static void tlRegisterViewportShortcuts()
 	r.reg( "viewport.merge", QObject::tr( "Merge Menu" ), catEdit, QKeySequence( Qt::Key_M ) );
 	r.reg( "viewport.separate", QObject::tr( "Separate Menu" ), catEdit, QKeySequence( Qt::Key_P ) );
 	r.reg( "viewport.delete", QObject::tr( "Delete Menu" ), catEdit, QKeySequence( Qt::Key_X ) );
+	// Blender's other delete key: no menu in edit mode, no confirmation in object
+	// mode. Registered rather than hardcoded so it shows on the Shortcuts page
+	// beside the one that asks -- two keys doing deliberately different things is
+	// only useful if both are visible.
+	r.reg( "viewport.delete_now", QObject::tr( "Delete Without Asking" ), catEdit,
+		QKeySequence( Qt::Key_Delete ) );
 	r.reg( "viewport.repeat_last", QObject::tr( "Repeat Last Operator" ), catEdit,
 		QKeySequence( Qt::SHIFT | Qt::Key_R ) );
 	r.reg( "viewport.panel_to_cursor", QObject::tr( "Adjust Panel at Cursor" ), catEdit,
@@ -10946,14 +10952,14 @@ void GLView::joinObjects( int active, QSet<int> selection )
 	modelChanged();
 }
 
-void GLView::deleteSelectedObjects()
+void GLView::deleteSelectedObjects( bool confirm )
 {
 	if ( !model || editMode || objSelection.isEmpty() )
 		return;
-	deleteBlocksWithConfirm( QVector<int>( objSelection.constBegin(), objSelection.constEnd() ) );
+	deleteBlocks( QVector<int>( objSelection.constBegin(), objSelection.constEnd() ), confirm );
 }
 
-int GLView::deleteBlocksWithConfirm( const QVector<int> & blocks )
+int GLView::deleteBlocks( const QVector<int> & blocks, bool confirm )
 {
 	if ( !model )
 		return 0;
@@ -10965,18 +10971,29 @@ int GLView::deleteBlocksWithConfirm( const QVector<int> & blocks )
 	if ( roots.isEmpty() )
 		return 0;
 
-	QMessageBox box( QMessageBox::NoIcon, tr( "Delete" ),
-		tr( "Delete selected objects?" ), QMessageBox::NoButton );
-	QPushButton * del = box.addButton( tr( "Delete" ), QMessageBox::AcceptRole );
-	box.addButton( tr( "Cancel" ), QMessageBox::RejectRole );
-	box.setDefaultButton( del );
-	// Blender-style: frameless and skin-coloured, with Delete accented and under
-	// the pointer, rather than a titled system dialog in the middle of the screen
-	tlStyleConfirmPopup( &box, del );
-	tlPlacePopupAtCursor( &box, del );
-	box.exec();
-	if ( box.clickedButton() != del )
-		return 0;
+	/* ASKING IS THE X KEY'S JOB, not this function's.
+	 *
+	 * Blender splits the two: X puts up "Delete selected objects?" and Delete
+	 * just deletes. Both are one keystroke and both are undoable, so the pair is
+	 * not careless-versus-careful — it is which one you want under your hand.
+	 * Everything that reaches this from a MENU asks, because a menu item that
+	 * looks like every other menu item should not be the one that skips the
+	 * question.
+	 */
+	if ( confirm ) {
+		QMessageBox box( QMessageBox::NoIcon, tr( "Delete" ),
+			tr( "Delete selected objects?" ), QMessageBox::NoButton );
+		QPushButton * del = box.addButton( tr( "Delete" ), QMessageBox::AcceptRole );
+		box.addButton( tr( "Cancel" ), QMessageBox::RejectRole );
+		box.setDefaultButton( del );
+		// Blender-style: frameless and skin-coloured, with Delete in the selection
+		// blue and under the pointer, not a titled system dialog mid-screen
+		tlStyleConfirmPopup( &box, del );
+		tlPlacePopupAtCursor( &box, del );
+		box.exec();
+		if ( box.clickedButton() != del )
+			return 0;
+	}
 
 	// branch closure: each selected block plus every descendant it parents
 	// (matches Remove Branch; shared refs / property blocks are left alone)
@@ -21273,19 +21290,31 @@ void GLView::keyPressEvent( QKeyEvent * event )
 				return;
 		}
 
-		// delete (Blender X / Delete): in edit mode the verts/edges/faces menu;
-		// in object mode the selected objects (with a confirmation). Delete key
-		// is a fixed alternate for both.
-		if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode
-			&& ( shortcuts.matches( "viewport.delete", event->key(), mods )
-				|| ( event->key() == Qt::Key_Delete
-					&& !( mods & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) ) ) {
+		/* DELETE, THE TWO BLENDER KEYS.
+		 *
+		 * X asks — the verts/edges/faces menu in edit mode, the confirmation in
+		 * object mode — and Delete does the obvious thing straight away. They
+		 * were the same key here, both going through the question, which made
+		 * the fast one no faster than the careful one.
+		 *
+		 * The obvious thing in edit mode is whatever the pick mode is FOR: in
+		 * face mode Delete removes faces, and asking which of vertices/edges/
+		 * faces you meant when the mode already says so is the question worth
+		 * skipping. Blender resolves it the same way.
+		 */
+		const bool delAsking = shortcuts.matches( "viewport.delete", event->key(), mods );
+		const bool delNow = shortcuts.matches( "viewport.delete_now", event->key(), mods );
+		if ( ( delAsking || delNow )
+			&& !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode ) {
 			if ( editMode && !pickedElems.isEmpty() ) {
-				showDeleteMenu();
+				if ( delAsking )
+					showDeleteMenu();
+				else
+					deleteGeometry( pickMode == 3 ? 2 : ( pickMode == 2 ? 1 : 0 ) );
 				return;
 			}
 			if ( !editMode && !objSelection.isEmpty() ) {
-				deleteSelectedObjects();
+				deleteSelectedObjects( delAsking );
 				return;
 			}
 		}

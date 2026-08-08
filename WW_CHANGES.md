@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08g — X asks, Delete doesn't
+
+Blender's split, which we had collapsed into one key. **X** is the careful one —
+the verts/edges/faces menu in edit mode, `Delete selected objects?` in object
+mode — and **Delete** does the obvious thing straight away. Both are one
+keystroke, both are one undo step, so this is not careless versus careful; it is
+which one you want under your hand.
+
+In edit mode the obvious thing is whatever the pick mode is **for**: in face mode
+Delete removes faces. Asking which of vertices/edges/faces you meant when the
+mode already says so is exactly the question worth skipping.
+
+The **Block List** splits them the same way, because it is the same gesture on
+the same blocks and only differs by which half of the window you are looking at.
+
+Menus still ask, on both surfaces. A menu item that looks like every other menu
+item should not be the one that skips the question — the Delete **key** is the
+thing you press deliberately.
+
+`Delete Without Asking` is a registered shortcut now rather than a hardcoded
+alternate, so it sits on the Shortcuts page next to `Delete Menu` and can be
+rebound. Two keys doing deliberately different things is only useful if both are
+visible.
+
 ## 2026-08-08f — The confirmation is Blender's size, and selected means blue
 
 ### The delete popup, measured against the thing it copies

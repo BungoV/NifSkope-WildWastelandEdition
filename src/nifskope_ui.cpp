@@ -1439,7 +1439,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 	// TEST HARNESS (WW_DELETE_TEST=1): exercise object-mode multi-delete
 	// headlessly. Object-selects the two smallest BSTriShapes plus (if present)
-	// one whole NiNode branch, runs deleteBlocksWithConfirm with the confirm
+	// one whole NiNode branch, runs deleteBlocks with the confirm
 	// auto-clicked, verifies the branch closure was removed and no dangling -1
 	// child link remains, saves (WW_TEST_SAVE) and quits.
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DELETE_TEST" ) ) {
@@ -1505,9 +1505,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// park the cursor at a known point so the popup-placement
 					// check has a reference (Blender-style at-cursor confirm)
 					QCursor::setPos( 900, 500 );
-					const int removed = skope->ogl->deleteBlocksWithConfirm( targets );
+					const int removed = skope->ogl->deleteBlocks( targets );
 					const int after = nif->getBlockCount();
-					log << "deleteBlocksWithConfirm returned " << removed
+					log << "deleteBlocks returned " << removed
 						<< "; blocks after " << after << " (delta " << ( before - after ) << ")\n";
 					// verify no dangling -1 child link anywhere
 					int dangling = 0;
@@ -10796,7 +10796,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						view->objSelection.insert( leaf );
 						view->objActive = leaf;
 						const int blocksWere = nif->getBlockCount();
-						view->deleteSelectedObjects();
+						/* Through the KEY, not the function it ends up calling.
+						 *
+						 * Which of the two delete keys asks is the whole point of
+						 * this pair, and it is decided in the viewport's key
+						 * handler — calling deleteSelectedObjects( true ) directly
+						 * would pass on a build where X and Delete both reached it
+						 * the same way, which is the state this replaced.
+						 */
+						auto sendKey = [view]( int key ) {
+							QKeyEvent ev( QEvent::KeyPress, key, Qt::NoModifier );
+							QApplication::sendEvent( view, &ev );
+						};
+						sendKey( Qt::Key_X );
 						QApplication::processEvents();
 						poll->stop();
 
@@ -10806,7 +10818,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							<< defaultBtn.width() << "x" << defaultBtn.height() << " at "
 							<< defaultBtn.x() << "," << defaultBtn.y()
 							<< "; pointer at " << pointer.x() << "," << pointer.y() << "\n";
-						check( "the delete confirmation appears at all", sawConfirm );
+						check( "X asks before deleting", sawConfirm );
 						check( "...and cancelling it changes nothing",
 							nif->getBlockCount() == blocksWere );
 						/* COMPACT: four words over two buttons, at Blender's size.
@@ -10838,6 +10850,81 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						else
 							check( "...and lands under the pointer, not offset from it",
 								sawConfirm && defaultBtn.contains( pointer ) );
+
+						/* AND THE DELETE KEY DOES NOT ASK.
+						 *
+						 * Blender's split: X is the careful one, Delete is the fast
+						 * one, and both are one keystroke away from an undo. The
+						 * watcher stays armed and would cancel anything modal that
+						 * appeared — so "no popup" here is a measurement rather than
+						 * an absence of evidence, and a build that asked twice would
+						 * fail on the block count instead.
+						 */
+						bool askedAgain = false;
+						auto * watch = new QTimer( skope );
+						watch->setInterval( 20 );
+						QObject::connect( watch, &QTimer::timeout, skope, [&askedAgain]() {
+							if ( auto * dlg = qobject_cast<QMessageBox *>(
+									QApplication::activeModalWidget() ) ) {
+								askedAgain = true;
+								dlg->reject();
+							}
+						} );
+						watch->start();
+						view->objSelection.clear();
+						view->objSelection.insert( leaf );
+						view->objActive = leaf;
+						sendKey( Qt::Key_Delete );
+						QApplication::processEvents();
+						watch->stop();
+						const int afterDel = nif->getBlockCount();
+						log << "Delete key: blocks " << blocksWere << " -> " << afterDel
+							<< ", confirmation shown: " << ( askedAgain ? "yes" : "no" ) << "\n";
+						check( "Delete deletes without asking", !askedAgain );
+						check( "...and it actually deleted", afterDel < blocksWere );
+						// put the fixture back for the checks that follow
+						if ( afterDel < blocksWere )
+							nif->undoStack->undo();
+						check( "...as one undo step, which puts the block back",
+							nif->getBlockCount() == blocksWere );
+
+						/* AND THE BLOCK LIST SPLITS THEM THE SAME WAY.
+						 *
+						 * It is the same gesture on the same blocks — the only
+						 * difference is which half of the window you are looking at,
+						 * and a delete that asks in one place and not the other is
+						 * worse than either rule on its own. Its handler is a
+						 * separate event filter, so it can drift independently and
+						 * has to be measured independently.
+						 */
+						list->setCurrentIndex( rowFor( leaf ) );
+						list->selectionModel()->select( rowFor( leaf ),
+							QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows );
+						askedAgain = false;
+						watch->start();
+						QKeyEvent listDel( QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier );
+						QApplication::sendEvent( list, &listDel );
+						QApplication::processEvents();
+						watch->stop();
+						log << "Block List Delete: blocks " << blocksWere << " -> "
+							<< nif->getBlockCount() << ", confirmation shown: "
+							<< ( askedAgain ? "yes" : "no" ) << "\n";
+						check( "the Block List's Delete does not ask either",
+							!askedAgain && nif->getBlockCount() < blocksWere );
+						if ( nif->getBlockCount() < blocksWere )
+							nif->undoStack->undo();
+
+						list->setCurrentIndex( rowFor( leaf ) );
+						list->selectionModel()->select( rowFor( leaf ),
+							QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows );
+						askedAgain = false;
+						watch->start();		// cancels whatever it finds
+						QKeyEvent listX( QEvent::KeyPress, Qt::Key_X, Qt::NoModifier );
+						QApplication::sendEvent( list, &listX );
+						QApplication::processEvents();
+						watch->stop();
+						check( "...and its X still does",
+							askedAgain && nif->getBlockCount() == blocksWere );
 					}
 
 					/* DECIMATE, AND THE RATIO CAN BE SCRUBBED AFTERWARDS.
@@ -21587,9 +21674,12 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// createWindowContainer cannot be relied on as the sole recipient of the
 		// second shortcut. Text-input widgets keep their keystrokes.
 		auto ke = static_cast<QKeyEvent *>( e );
-		// Block List: X or Delete removes the selected block(s) and their
-		// branches (Blender-style, with the same "Delete selected objects?"
-		// confirmation as the viewport). Works on a multi-selection.
+		/* Block List: X or Delete removes the selected block(s) and their
+		 * branches, on a multi-selection, exactly as the viewport does — and
+		 * with the viewport's split between the two keys. X puts up "Delete
+		 * selected objects?"; Delete deletes. Same gesture, same undo step,
+		 * whichever half of the window you are looking at.
+		 */
 		if ( o == list && ogl && nif
 			&& ( ke->key() == Qt::Key_X || ke->key() == Qt::Key_Delete )
 			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
@@ -21606,7 +21696,8 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 						sel.insert( b );
 				}
 				if ( !sel.isEmpty() )
-					ogl->deleteBlocksWithConfirm( QVector<int>( sel.constBegin(), sel.constEnd() ) );
+					ogl->deleteBlocks( QVector<int>( sel.constBegin(), sel.constEnd() ),
+						ke->key() == Qt::Key_X );
 			}
 			return true;
 		}
@@ -22614,9 +22705,10 @@ void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIn
 		/* Deleting blocks was reachable only from the viewport's Object ▸
 		 * Delete or the X key — so the one widget that can build a
 		 * multi-selection of blocks had no way to delete it.
-		 * deleteBlocksWithConfirm closes the branch, prunes dangling parents,
-		 * confirms once and pushes ONE undo step, which is what makes it
-		 * worth routing here rather than casting Remove Branch per row.
+		 * deleteBlocks closes the branch, prunes dangling parents, confirms
+		 * once and pushes ONE undo step, which is what makes it worth routing
+		 * here rather than casting Remove Branch per row. From a menu it always
+		 * asks — the Delete KEY is the one that skips the question.
 		 */
 		QAction * aDel = new QAction(
 			tr( "Delete %n Block(s)", "", int( selBlocks.size() ) ), &contextBook );
@@ -22625,7 +22717,7 @@ void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIn
 		const QVector<int> victims( selBlocks.cbegin(), selBlocks.cend() );
 		connect( aDel, &QAction::triggered, this, [this, victims]() {
 			if ( ogl )
-				ogl->deleteBlocksWithConfirm( victims );
+				ogl->deleteBlocks( victims );
 		} );
 		verbs << aDel;
 
