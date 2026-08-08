@@ -9,50 +9,53 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-08**. Edition **0.3.1**. Build green, working tree clean,
-pushed through `8832999`.
+Updated **2026-08-09**. Edition **0.3.1**. Build green, working tree clean,
+pushed through feature commit `63160b4`.
 
 ### This session
 
-One change, closed end to end.
+One change, closed end to end: the NIF Browser and Loaded NIFs are one safe,
+two-way workspace.
 
-- **Create faceBones NIF hands you a loaded NIF, not a file.** It asked for a
-  save path and wrote there, and the Loaded NIFs route had to hand it a
-  *temporary to build into* and read the written file back — so a finished mesh
-  could die at the last step on a filesystem, which is what happened:
-  `Could not write "…\Temp\nifskope-facebones-yhpAji.nif"`. The transfer had
-  already run; there was simply nowhere to put the result.
-- **It goes into Loaded NIFs, unsaved**, under the name it would take
-  (`BaseFemaleHead_faceBones.nif`), and is saved from that row's own **Save As…**.
-  No save dialog, no temporary, nothing on disk unless asked for.
-- **Both routes collapsed into one.** The spell places its own result;
-  `generateFaceBonesInto` only renames what appeared, because it knows the row's
-  path and the spell only knows the model's. The one-shot output-path override
-  (`tlSet/TakeFaceBonesOutputPath`) and the `WW_TEST_FACEBONES_OUT` env var it
-  existed to serve are gone.
-- **`NifSkope::addWorkspaceDocumentFromMemory` is the new entry point**, beside
-  `addWorkspaceDocumentFromFile`. It **parses** the bytes rather than trusting
-  them — a row that cannot be read back is worse than a refusal, because it looks
-  like a result — which is the guarantee the temporary file was there to give. It
-  lands `unsavedInMemory`, because `isModified` compares against bytes loaded from
-  disk and there are none, so without that flag the close path would call it
-  unmodified and drop the only copy without asking.
-  `workspaceForNewDocuments( const NifModel * )` picks the window: the one that
-  owns the model, else the active window, else any.
-- **`tests/rigging/facebones.sh` drives the real two-step user action now** —
-  cast, then Save As on the row it made — and checks the row before writing it:
-  B0 arrived, B1 unsaved, B2 saving writes the file, B3 unsaved clears. Everything
-  downstream reads that file unchanged. **23 passed, 0 failed** on
-  `BaseFemaleHead.nif`.
+- **Drag available `.nif` leaves into Loaded NIFs.** The native browser view
+  freezes the exact rows at drag start; folders cannot drag and a selection
+  change mid-gesture cannot load another file. Dropping the same source twice
+  does not duplicate it.
+- **Drag one Loaded NIF back onto the browser for Save As.** It serialises that
+  row's live in-memory model and always asks where on disk to write, regardless
+  of the folder/archive under the pointer. Cancel/failure changes nothing;
+  success retains and renames the row and clears its unsaved state.
+- **The browser header is one compact row** like the Block List: Search, ★,
+  Sources, Load Selected, Refresh. The screenshot is
+  `release/ww_nifbrowser_test.png`; all four icon tools fit at 400 px.
+- **Available `.nif` favorites are stable and portable.** Stars survive Refresh
+  and temporarily missing resources; ★ combines with text search as AND.
+  They live at `<NifSkope Library>/NIF Browser/Favorites.json`, not QSettings.
+- **The Library persistence rule was audited across the app.** Pose files were
+  already correct. The only other authored non-NIF payloads in QSettings were
+  Collision Manager custom body presets and custom material aliases; they now
+  live under `<Library>/Collision/{Presets,CustomMaterials}.json`, atomically,
+  with one-time migration. UI state and last-used choices remain preferences.
+- **The reported reload/empty-list class was real and multi-causal.** Workspace
+  rows/tabs/previews/deduplication are now root-scoped; promoted children add
+  rows to their real group; Make Primary carries live bytes instead of reloading
+  configured resources; Remove/X/Delete, Revert, Reload and group close warn
+  before discarding; Save As cancel/failure cancels the destructive action; a
+  cancelled close no longer poisons sibling windows. Explicit browser trees
+  survive Pose Manager pickers and loads, and open routes report real failure.
+- **Verified:** release build green; `loaded_nifs.sh` **35/35**;
+  `collision_panel.sh` **38/38**; `archive_browse_survives_load.sh` **4/4**;
+  `facebones.sh` **23 passed, 0 failed**. Compact header screenshot inspected.
 
 ### Open
 
 - **`block_drag_live.ps1` has not been run since the multi-parent payload
   change.** It seizes the mouse; ask first, every time.
+- The NIF Browser harness covers the real view gates, exact captured payloads,
+  both save/load routes and rendered geometry, but no pointer-seizing live mouse
+  script was run.
 - The flat-list **hang** below is still open and still harness-only.
-- Everything else in this file's "Where to pick up" and "Open, and honest about
-  it" sections is carried forward from earlier sessions and was not touched
-  today.
+- Everything else in this file's later sections is carried forward and untouched.
 
 Two headlines:
 
