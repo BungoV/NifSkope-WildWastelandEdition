@@ -8548,23 +8548,50 @@ void tlStyleConfirmPopup( QMessageBox * box, QPushButton * preferred )
 	box->setWindowFlags( ( box->windowFlags() | Qt::FramelessWindowHint )
 		& ~Qt::WindowTitleHint & ~Qt::WindowSystemMenuHint );
 	box->setIcon( QMessageBox::NoIcon );
+	// no title text either: the frame is gone, but QMessageBox still reserves
+	// width for a caption nobody can see, which is half of why it was so wide
+	box->setWindowTitle( QString() );
+	/* AND THE LAYOUT'S OWN MARGINS, which the stylesheet cannot reach.
+	 *
+	 * QMessageBox lays itself out for a dialog with an icon, a caption and room
+	 * to breathe. With the frame and the icon gone that is a lot of empty space
+	 * around four words: Blender's equivalent is a line of text and two small
+	 * buttons, and nothing else.
+	 */
+	if ( QLayout * lay = box->layout() ) {
+		lay->setContentsMargins( 10, 8, 10, 8 );
+		lay->setSpacing( 6 );
+		/* SHRINK TO WHAT IS IN IT. QMessageBox has a minimum width of its own,
+		 * sized for a dialog with an icon and a caption, and it does not care that
+		 * both are gone: measured at 500 px around a question that needed half
+		 * that. SetFixedSize makes the layout's own size hint the answer.
+		 */
+		lay->setSizeConstraint( QLayout::SetFixedSize );
+	}
 	box->setStyleSheet( QStringLiteral(
 		"QMessageBox { background: %1; border: 1px solid %2; }"
-		"QLabel { color: %3; padding: 6px 10px 2px 10px; }"
+		"QLabel { color: %3; padding: 4px 8px 2px 8px; }"
 		"QPushButton { background: %4; color: %3; border: 1px solid %2;"
-		"  border-radius: 3px; padding: 4px 18px; min-width: 64px; }"
+		"  border-radius: 3px; padding: 2px 10px; min-width: 48px; }"
 		"QPushButton:hover { background: %5; }"
 		"QPushButton:pressed { background: %6; }" )
 		.arg( wwSkinColor( "bgCard" ), wwSkinColor( "border" ), wwSkinColor( "text" ),
 			wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ), wwSkinColor( "bgBtnDown" ) ) );
-	// the accented one is the answer Enter gives, which a row of identical grey
-	// buttons cannot say
+	/* THE DEFAULT BUTTON IS THE SELECTION BLUE, not the accent.
+	 *
+	 * `accent` is this skin's orange — it is what the Collision Creation tab and
+	 * the skull glyph use — so accenting the default answer painted Delete orange,
+	 * which reads as a warning colour rather than "this is what Enter does", and
+	 * with `accentText` over it the label looked disabled. Blender highlights the
+	 * default in its selection blue, and `selBgActive` is exactly that colour
+	 * here: the same blue the Block List selects a row with.
+	 */
 	if ( preferred ) {
 		preferred->setStyleSheet( QStringLiteral(
 			"QPushButton { background: %1; color: %2; border: 1px solid %1;"
-			"  border-radius: 3px; padding: 4px 18px; min-width: 64px; font-weight: 600; }"
-			"QPushButton:hover { background: %1; border: 1px solid %3; }" )
-			.arg( wwSkinColor( "accent" ), wwSkinColor( "accentText" ),
+			"  border-radius: 3px; padding: 2px 10px; min-width: 48px; font-weight: 600; }"
+			"QPushButton:hover { border: 1px solid %3; }" )
+			.arg( wwSkinColor( "selBgActive" ), wwSkinColor( "selTextActive" ),
 				wwSkinColor( "textBright" ) ) );
 		preferred->setDefault( true );
 	}

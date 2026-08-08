@@ -12426,16 +12426,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					QString seen, seenClass;
 					bool sawDialog = false;
-					auto answerNextDialog = [&seen, &seenClass, &sawDialog]( bool accept ) {
+					// measured, not eyeballed: "compact, like Blender's" is a size,
+					// and a stylesheet that quietly did nothing would read fine in
+					// the source and be wrong on screen
+					QSize seenSize;
+					bool sawDialogFrameless = false;
+					auto answerNextDialog = [&seen, &seenClass, &sawDialog, &seenSize,
+						&sawDialogFrameless]( bool accept ) {
 						auto * poll = new QTimer;
 						poll->setInterval( 40 );
 						QObject::connect( poll, &QTimer::timeout, poll,
-							[poll, &seen, &seenClass, &sawDialog, accept]() {
+							[poll, &seen, &seenClass, &sawDialog, &seenSize,
+								&sawDialogFrameless, accept]() {
 							auto * dlg = qobject_cast<QDialog *>( QApplication::activeModalWidget() );
 							if ( !dlg )
 								return;
 							sawDialog = true;
 							seenClass = QString::fromLatin1( dlg->metaObject()->className() );
+							seenSize = dlg->size();
+							sawDialogFrameless = ( dlg->windowFlags() & Qt::FramelessWindowHint )
+								&& dlg->windowTitle().isEmpty();
 							poll->stop();
 
 							if ( auto * box = qobject_cast<QMessageBox *>( dlg ) ) {
@@ -12512,7 +12522,23 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << "cancel path: dialog seen " << sawDialog << ", blocks "
 						<< before << " -> " << nif->getBlockCount() << "\n";
 					log << "  text: " << seen << "\n";
+					log << "  size: " << seenSize.width() << "x" << seenSize.height()
+						<< ", class " << seenClass << "\n";
 					check( "Crop To Branch asks before it runs", sawDialog );
+					/* FRAMELESS AND SHORT, which is what was changed — not narrow.
+					 *
+					 * Width follows the TEXT, and this confirmation's text names block
+					 * counts in a full sentence, so Qt lays it out at 500 px and is
+					 * right to. Asserting a narrow box here would be asserting that
+					 * nobody writes a long question. What the Blender-style chrome
+					 * actually removes is the title bar, the icon and the padding
+					 * around them: no frame, and a height that fits a line of text
+					 * over a row of buttons.
+					 */
+					check( "...and the confirmation is frameless, with no title bar",
+						sawDialogFrameless );
+					check( "...and no taller than text over buttons",
+						seenSize.height() > 0 && seenSize.height() <= 110 );
 					check( "Cancel leaves the file alone", nif->getBlockCount() == before );
 
 					// the counts are the point: "Delete 214 of the 217 blocks..."

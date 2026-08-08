@@ -35,6 +35,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QCache>
 #include <QDir>
 #include <QMessageBox>
+
+//! Defined in glview.cpp: Blender-style chrome for a confirmation — frameless,
+//! compact, skin-coloured, with the DEFAULT button accented.
+void tlStyleConfirmPopup( QMessageBox * box, QPushButton * preferred );
 #include <QPushButton>
 
 
@@ -151,7 +155,14 @@ void SpellBook::cast( NifModel * nif, const QModelIndex & index, SpellPtr spell 
 		// The go-ahead button is labelled with the operation, not "OK" — the one
 		// place a stray Return must not land is on a button whose text is agreement.
 		QPushButton * go = box.addButton( spell->name(), QMessageBox::AcceptRole );
-		box.setDefaultButton( box.addButton( QMessageBox::Cancel ) );	// Enter and Esc back out
+		QPushButton * back = box.addButton( QMessageBox::Cancel );
+		box.setDefaultButton( back );	// Enter and Esc back out
+		/* The same chrome as the viewport's confirmations, and CANCEL is the one
+		 * accented — because Cancel is the default here, deliberately. Accenting
+		 * the go-ahead would say Enter runs it, which is the opposite of what this
+		 * dialog is for.
+		 */
+		tlStyleConfirmPopup( &box, back );
 		box.exec();
 		// clickedButton() is null when the dialog is closed by the title bar, so
 		// this tests for consent rather than for refusal
