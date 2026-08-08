@@ -67,6 +67,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QHash>
 #include <QSet>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QGroupBox>
 #include <QImageWriter>
@@ -8559,8 +8560,8 @@ void tlStyleConfirmPopup( QMessageBox * box, QPushButton * preferred )
 	 * buttons, and nothing else.
 	 */
 	if ( QLayout * lay = box->layout() ) {
-		lay->setContentsMargins( 10, 8, 10, 8 );
-		lay->setSpacing( 6 );
+		lay->setContentsMargins( 6, 5, 6, 5 );
+		lay->setSpacing( 4 );
 		/* SHRINK TO WHAT IS IN IT. QMessageBox has a minimum width of its own,
 		 * sized for a dialog with an icon and a caption, and it does not care that
 		 * both are gone: measured at 500 px around a question that needed half
@@ -8568,31 +8569,49 @@ void tlStyleConfirmPopup( QMessageBox * box, QPushButton * preferred )
 		 */
 		lay->setSizeConstraint( QLayout::SetFixedSize );
 	}
+	/* AND THE BUTTON ROW'S MARGINS, which are a second set inside the first.
+	 *
+	 * QDialogButtonBox is laid out for the bottom of a dialog, where a button
+	 * standing clear of the frame is the point. Inside a popup this size it is
+	 * just the outer margin paid twice, and it was most of the height that made
+	 * the thing look like a dialog rather than a question.
+	 */
+	if ( QDialogButtonBox * bb = box->findChild<QDialogButtonBox *>() ) {
+		bb->setCenterButtons( true );
+		if ( QLayout * blay = bb->layout() ) {
+			blay->setContentsMargins( 0, 0, 0, 0 );
+			blay->setSpacing( 4 );
+		}
+	}
 	box->setStyleSheet( QStringLiteral(
 		"QMessageBox { background: %1; border: 1px solid %2; }"
-		"QLabel { color: %3; padding: 4px 8px 2px 8px; }"
+		"QLabel { color: %3; padding: 1px 2px 3px 2px; }"
 		"QPushButton { background: %4; color: %3; border: 1px solid %2;"
-		"  border-radius: 3px; padding: 2px 10px; min-width: 48px; }"
+		"  border-radius: 3px; padding: 1px 8px; min-width: 68px; }"
 		"QPushButton:hover { background: %5; }"
 		"QPushButton:pressed { background: %6; }" )
 		.arg( wwSkinColor( "bgCard" ), wwSkinColor( "border" ), wwSkinColor( "text" ),
 			wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ), wwSkinColor( "bgBtnDown" ) ) );
-	/* THE DEFAULT BUTTON IS THE SELECTION BLUE, not the accent.
+	/* THE DEFAULT BUTTON IS THE SELECTION BLUE WITH WHITE ON IT.
 	 *
-	 * `accent` is this skin's orange — it is what the Collision Creation tab and
-	 * the skull glyph use — so accenting the default answer painted Delete orange,
-	 * which reads as a warning colour rather than "this is what Enter does", and
-	 * with `accentText` over it the label looked disabled. Blender highlights the
+	 * `accent` is this skin's orange — the Collision tabs and the skull glyph use
+	 * it — so accenting the default answer painted Delete orange, which reads as
+	 * a warning rather than "this is what Enter does". Blender highlights the
 	 * default in its selection blue, and `selBgActive` is exactly that colour
 	 * here: the same blue the Block List selects a row with.
+	 *
+	 * The LABEL is `textBright`, not `selTextActive`. That variable is orange —
+	 * it is the colour of text on a selected Block List row, where orange-on-blue
+	 * is how the primary of a multi-selection announces itself — and on a button
+	 * it just looks like a second warning. Blender's is plain white, and the
+	 * blue plate is already saying everything the colour needs to say.
 	 */
 	if ( preferred ) {
 		preferred->setStyleSheet( QStringLiteral(
 			"QPushButton { background: %1; color: %2; border: 1px solid %1;"
-			"  border-radius: 3px; padding: 2px 10px; min-width: 48px; font-weight: 600; }"
-			"QPushButton:hover { border: 1px solid %3; }" )
-			.arg( wwSkinColor( "selBgActive" ), wwSkinColor( "selTextActive" ),
-				wwSkinColor( "textBright" ) ) );
+			"  border-radius: 3px; padding: 1px 8px; min-width: 68px; }"
+			"QPushButton:hover { border: 1px solid %2; }" )
+			.arg( wwSkinColor( "selBgActive" ), wwSkinColor( "textBright" ) ) );
 		preferred->setDefault( true );
 	}
 }
@@ -8607,25 +8626,45 @@ static void tlPlacePopupAtCursor( QWidget * box, QWidget * onCursor )
 	// is unreliable BEFORE show, hence measuring the button after it.
 	box->adjustSize();
 	box->show();
+	// the pointer as it was when the popup opened, not wherever it drifts to
+	// while the placement is being redone below
 	const QPoint cursor = QCursor::pos();
-	const QPoint anchor = ( onCursor && box->isAncestorOf( onCursor ) )
-		? onCursor->mapToGlobal( onCursor->rect().center() )
-		: box->frameGeometry().center();
-	// shift the whole window so the anchor lands on the cursor (delta is
-	// coordinate-system agnostic, sidestepping frame-margin confusion)
-	box->move( box->pos() + ( cursor - anchor ) );
-	// clamp back onto the cursor's screen if an edge pushed it off
-	if ( QScreen * scr = QGuiApplication::screenAt( cursor ) ) {
-		const QRect avail = scr->availableGeometry();
-		const QRect fg = box->frameGeometry();
-		QPoint adj;
-		if ( fg.left() < avail.left() ) adj.setX( avail.left() - fg.left() );
-		else if ( fg.right() > avail.right() ) adj.setX( avail.right() - fg.right() );
-		if ( fg.top() < avail.top() ) adj.setY( avail.top() - fg.top() );
-		else if ( fg.bottom() > avail.bottom() ) adj.setY( avail.bottom() - fg.bottom() );
-		if ( !adj.isNull() )
-			box->move( box->pos() + adj );
-	}
+
+	auto place = [box, onCursor, cursor]() {
+		const QPoint anchor = ( onCursor && box->isAncestorOf( onCursor ) )
+			? onCursor->mapToGlobal( onCursor->rect().center() )
+			: box->frameGeometry().center();
+		// shift the whole window so the anchor lands on the cursor (delta is
+		// coordinate-system agnostic, sidestepping frame-margin confusion)
+		box->move( box->pos() + ( cursor - anchor ) );
+		// clamp back onto the cursor's screen if an edge pushed it off
+		if ( QScreen * scr = QGuiApplication::screenAt( cursor ) ) {
+			const QRect avail = scr->availableGeometry();
+			const QRect fg = box->frameGeometry();
+			QPoint adj;
+			if ( fg.left() < avail.left() ) adj.setX( avail.left() - fg.left() );
+			else if ( fg.right() > avail.right() ) adj.setX( avail.right() - fg.right() );
+			if ( fg.top() < avail.top() ) adj.setY( avail.top() - fg.top() );
+			else if ( fg.bottom() > avail.bottom() ) adj.setY( avail.bottom() - fg.bottom() );
+			if ( !adj.isNull() )
+				box->move( box->pos() + adj );
+		}
+	};
+
+	place();
+	/* AND AGAIN, ONCE THE EVENT LOOP HAS SEEN IT.
+	 *
+	 * show() is not the end of the layout. The stylesheet is polished and
+	 * QMessageBox re-runs its own sizing on the way to the first paint, both
+	 * after show() returns, so the button measured above is not yet the width it
+	 * will be drawn at — measured 46 px out, almost exactly half a button, with
+	 * the pointer landing on the Delete button's left EDGE instead of its middle.
+	 *
+	 * Placing again from inside exec()'s loop measures the geometry that will
+	 * actually be painted. It costs one deferred call and cannot flicker: the
+	 * move is processed before the first paint event, which is queued behind it.
+	 */
+	QTimer::singleShot( 0, box, place );
 }
 
 void GLView::showDeleteMenu()

@@ -4017,12 +4017,14 @@ private:
 			"QFrame { background:%1; border:1px solid %2; }"
 			"QLabel { color:%3; background:transparent; }"
 			"QCheckBox { color:%3; background:transparent; }"
+			// checked is the selection blue with white on it, matching the
+			// Creation/Simulation switch below and the Block List's selected row
 			"QToolButton { border: 1px solid %4; border-radius: 3px; padding: 3px; background: %5; color:%3; }"
 			"QToolButton:hover { background: %6; }"
-			"QToolButton:checked { border-color: %7; color: %8; background: %9; }" )
+			"QToolButton:checked { border-color: %7; color: %8; background: %7; }" )
 			.arg( wwSkinColor( "bgCard" ), wwSkinColor( "borderStrong" ), wwSkinColor( "text" ),
 				  wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
-				  wwSkinColor( "accent" ), wwSkinColor( "accentText" ), wwSkinColor( "accentBg" ) );
+				  wwSkinColor( "selBgActive" ), wwSkinColor( "textBright" ) );
 		shapePopup->setStyleSheet( popupQss );
 		createPopup->setStyleSheet( popupQss );
 		auto * shapeLayout = new QVBoxLayout( shapePopup );
@@ -4313,15 +4315,21 @@ private:
 		 * It used to borrow createGroup's, which was set for the five shape
 		 * buttons that lived in that group — when they went into a menu the
 		 * group stopped carrying a stylesheet, and this switch silently lost the
-		 * orange fill that says which of the two halves you are on. The one thing
-		 * it must do is show which is selected, and nothing was left doing it.
+		 * fill that says which of the two halves you are on. The one thing it
+		 * must do is show which is selected, and nothing was left doing it.
+		 *
+		 * Selected is the selection blue with white on it, not the amber plate:
+		 * orange text on an orange outline reads as a warning — the colour this
+		 * skin uses for invalid material paths and missing textures — when all
+		 * it means is "you are on this tab". Blue is what selection looks like
+		 * everywhere else here, and in Blender.
 		 */
 		bottomSwitch->setStyleSheet( QStringLiteral(
 			"QToolButton { border: 1px solid %1; border-radius: 3px; padding: 3px; background: %2; }"
 			"QToolButton:hover { background: %3; }"
-			"QToolButton:checked { border-color: %4; color: %5; background: %6; }" )
+			"QToolButton:checked { border-color: %4; color: %5; background: %4; }" )
 			.arg( wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
-				  wwSkinColor( "accent" ), wwSkinColor( "accentText" ), wwSkinColor( "accentBg" ) ) );
+				  wwSkinColor( "selBgActive" ), wwSkinColor( "textBright" ) ) );
 		root->addWidget( bottomSwitch );
 		root->addWidget( createGroup );
 

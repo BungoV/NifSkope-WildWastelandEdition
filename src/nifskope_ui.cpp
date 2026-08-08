@@ -7541,6 +7541,46 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					dock->show();
 					QApplication::processEvents();
 
+					/* --- the Creation / Simulation switch, in selection colours ---
+					 *
+					 * It says which half of the panel you are on, and it used to say
+					 * it in the amber plate with orange text — the same orange this
+					 * skin spends on invalid material paths and missing textures, so
+					 * a tab that only means "you are here" was wearing the warning
+					 * colour. Checked is the selection blue with white on it now.
+					 *
+					 * Measured off the PIXELS. A stylesheet that fails to apply —
+					 * which is how this switch lost its fill once already, when the
+					 * group that carried the sheet stopped existing — leaves a widget
+					 * that looks exactly like one nobody ever styled, and no amount
+					 * of asking the button about itself would notice.
+					 */
+					QToolButton * creationTab = nullptr;
+					for ( QToolButton * b : dock->findChildren<QToolButton *>() )
+						if ( b->text() == QStringLiteral( "Collision Creation" ) )
+							creationTab = b;
+					if ( creationTab && creationTab->parentWidget() ) {
+						if ( !creationTab->isChecked() )
+							creationTab->click();
+						QApplication::processEvents();
+						const QPixmap shot = creationTab->parentWidget()->grab();
+						shot.save( QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_collpanel_test.switch.png" ) );
+						const QImage img = shot.toImage();
+						const qreal dpr = shot.devicePixelRatio();
+						const QRect r = creationTab->geometry();
+						// inside the checked half, clear of both border and text
+						const QColor got = img.pixelColor(
+							int( ( r.left() + 6 ) * dpr ), int( r.center().y() * dpr ) );
+						const QColor want = QColor::fromString( wwSkinColor( "selBgActive" ) );
+						log << "checked tab plate: " << got.name()
+							<< ", selection blue is " << want.name() << "\n";
+						check( "the selected half of the switch is the selection blue",
+							qAbs( got.red() - want.red() ) <= 8
+								&& qAbs( got.green() - want.green() ) <= 8
+								&& qAbs( got.blue() - want.blue() ) <= 8 );
+					}
+
 					/* --- two buttons, in the order the blocks nest -----------
 					 * The body holds all the physics; a shape holds its material
 					 * and its geometry. One button doing both had to pretend the
@@ -10705,6 +10745,99 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						nif->undoStack->undo();
 						nif->undoStack->redo();
 						check( "...and again, on a second round trip", bytes() == wasAfter );
+					}
+
+					/* THE DELETE CONFIRMATION, MEASURED WHERE IT ACTUALLY APPEARS.
+					 *
+					 * "Compact, like Blender's" is a size and a position, and both were
+					 * tuned by eye against screenshots — badly, twice. The other
+					 * confirmation check measures Crop To Branch, whose text is a full
+					 * sentence, so it says nothing about this one: four words, two
+					 * buttons, and the popup a user meets most often.
+					 *
+					 * The pointer is read, never moved. Placing it would make the
+					 * position check tidier and would also yank the mouse out of the
+					 * user's hand mid-session, which is not a trade a test gets to make.
+					 */
+					if ( GLView * view = skope->getGLView() ) {
+						const QPoint pointer = QCursor::pos();
+						QSize confirmSize;
+						QRect confirmFrame, defaultBtn;
+						bool sawConfirm = false;
+						auto * poll = new QTimer( skope );
+						poll->setInterval( 30 );
+						QObject::connect( poll, &QTimer::timeout, skope,
+							[&confirmSize, &confirmFrame, &defaultBtn, &sawConfirm, poll]() {
+							auto * dlg = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+							if ( !dlg )
+								return;
+							sawConfirm = true;
+							confirmSize = dlg->size();
+							confirmFrame = dlg->frameGeometry();
+							QAbstractButton * cancel = nullptr;
+							for ( QAbstractButton * b : dlg->buttons() ) {
+								if ( b == dlg->defaultButton() )
+									defaultBtn = QRect( b->mapToGlobal( QPoint() ), b->size() );
+								if ( dlg->buttonRole( b ) == QMessageBox::RejectRole )
+									cancel = b;
+							}
+							// and photographed, because the ask was about how it LOOKS:
+							// a size in a log cannot show orange text on a blue plate
+							dlg->grab().save( QApplication::applicationDirPath()
+								+ QStringLiteral( "/ww_blockdnd_test.confirm.png" ) );
+							poll->stop();
+							if ( cancel )
+								cancel->click();		// measure, change nothing
+							else
+								dlg->reject();
+						} );
+						poll->start();
+						view->objSelection.clear();
+						view->objSelection.insert( leaf );
+						view->objActive = leaf;
+						const int blocksWere = nif->getBlockCount();
+						view->deleteSelectedObjects();
+						QApplication::processEvents();
+						poll->stop();
+
+						log << "delete confirmation: " << confirmSize.width() << "x"
+							<< confirmSize.height() << " at " << confirmFrame.x() << ","
+							<< confirmFrame.y() << "; default button "
+							<< defaultBtn.width() << "x" << defaultBtn.height() << " at "
+							<< defaultBtn.x() << "," << defaultBtn.y()
+							<< "; pointer at " << pointer.x() << "," << pointer.y() << "\n";
+						check( "the delete confirmation appears at all", sawConfirm );
+						check( "...and cancelling it changes nothing",
+							nif->getBlockCount() == blocksWere );
+						/* COMPACT: four words over two buttons, at Blender's size.
+						 *
+						 * Blender's own is 192x56 for this very question, measured off
+						 * the screenshot the ask came with. The Crop confirmation is
+						 * 500x93 because its text is a paragraph; this one has no such
+						 * excuse, so it gets held to roughly what Blender spends.
+						 */
+						check( "...and is compact — four words do not need a dialog",
+							sawConfirm && confirmSize.width() <= 240
+								&& confirmSize.height() <= 70 );
+						/* AND LANDS ON THE POINTER: the default button under the mouse,
+						 * which is what tlPlacePopupAtCursor promises and what makes the
+						 * popup answerable without moving the hand. Frameless windows
+						 * have no frame margin to compensate for, and that arithmetic is
+						 * exactly the kind that drifts unwatched.
+						 *
+						 * Not asserted when the popup had to be clamped to a screen edge
+						 * — the pointer is wherever the user left it, and against a
+						 * corner the promise is unkeepable rather than broken.
+						 */
+						const QScreen * scr = QGuiApplication::screenAt( pointer );
+						const QRect avail = scr ? scr->availableGeometry() : QRect();
+						const bool clamped = !avail.isNull()
+							&& !avail.adjusted( 1, 1, -1, -1 ).contains( confirmFrame );
+						if ( clamped )
+							log << "  (popup clamped to a screen edge; placement not asserted)\n";
+						else
+							check( "...and lands under the pointer, not offset from it",
+								sawConfirm && defaultBtn.contains( pointer ) );
 					}
 
 					/* DECIMATE, AND THE RATIO CAN BE SCRUBBED AFTERWARDS.

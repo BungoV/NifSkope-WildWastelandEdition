@@ -1,5 +1,48 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08f — The confirmation is Blender's size, and selected means blue
+
+### The delete popup, measured against the thing it copies
+
+Blender's "Delete selected objects?" is **192x56** with two small buttons under a
+line of text. Ours was a dialog wearing a popup's clothes. It is **188x63** now:
+the layout margins came down to 6/5, the button row's own margins — a second set
+inside the first, and most of the height — to zero, and the buttons to a single
+pixel of vertical padding.
+
+The default button was **orange text on blue**. `selTextActive` is orange because
+it is the colour of text on a selected Block List row, where orange-on-blue is
+how the primary of a multi-selection announces itself; on a button it just reads
+as a second warning. It is `textBright` now — white, like Blender's.
+
+**And it lands under the pointer again.** `show()` is not the end of the layout:
+the stylesheet is polished and QMessageBox re-runs its own sizing on the way to
+the first paint, both after `show()` returns, so the button was measured before
+it was the width it would be drawn at. The pointer was landing on Delete's left
+**edge** — 46 px out, half a button. The placement now runs again from inside
+`exec()`'s event loop, where the geometry is the one that gets painted.
+
+### Selected halves of a switch are the selection colour
+
+The **Collision Creation / Collision Simulation** switch, and the shape buttons in
+the Create popups, marked the checked half with the amber plate and orange text —
+the same orange this skin spends on invalid material paths and missing textures,
+worn by a tab that only means "you are here". Checked is `selBgActive` with
+`textBright` on it: the blue the Block List selects a row with.
+
+### What now measures it
+
+`block_dragdrop.sh` opens the real delete confirmation, records its size and
+where the default button lands **relative to the pointer as it already is** —
+placing the mouse would make the check tidier and take the mouse out of your hand
+— and photographs it. It cancels, so nothing is deleted, and it says so rather
+than asserting placement when the popup had to clamp to a screen edge.
+
+`collision_panel.sh` samples the **pixels** of the checked half of the switch and
+compares them to `selBgActive`. A stylesheet that fails to apply leaves a widget
+looking exactly like one nobody styled — which is how this switch lost its fill
+once already — and nothing you can ask the button would notice.
+
 ## 2026-08-08e — Loaded NIFs becomes a place you can work
 
 Four things, and together they make the panel a workspace rather than a list of
