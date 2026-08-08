@@ -838,13 +838,44 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				};
 				NifModel * nif = skope->getNifModel();
 
+				/* EVERY DIALOG PHOTOGRAPHED, AND QUOTED WHOLE.
+				 *
+				 * The driver answers each dialog the spell puts up, which is what
+				 * lets this run unattended — and also exactly how a warning goes
+				 * unread. The log line was one sentence truncated at 240 characters,
+				 * informativeText and detailedText were never written down at all,
+				 * and nothing recorded whether the icon was a question or a warning.
+				 * A run could report 14 of 14 with a warning clicked through in the
+				 * middle of it and no trace left.
+				 *
+				 * So: a PNG of each dialog before the button is pressed, the full
+				 * text, and the severity — with warnings and criticals collected for
+				 * a check of their own, because "no warnings appeared" is a claim
+				 * worth making explicitly rather than inferring from silence.
+				 */
+				int dialogShots = 0;
+				QStringList alarming, provoked;
+				/* One step here PROVOKES a warning on purpose — M, the refusal with
+				 * no face donor marked — so the run arms this around that cast and
+				 * the driver files those separately. Without it the check reads
+				 * "a warning appeared" and is right for the wrong reason, every run,
+				 * which is the same as not having it.
+				 */
+				bool warningExpected = false;
+				const QString shotDir = QApplication::applicationDirPath();
 				QTimer driver;
-				QObject::connect( &driver, &QTimer::timeout, skope, [&log]() {
+				QObject::connect( &driver, &QTimer::timeout, skope,
+					[&log, &dialogShots, &alarming, &provoked, &warningExpected, shotDir]() {
 					QWidget * w = QApplication::activeModalWidget();
 					if ( !w || qobject_cast<QProgressDialog *>( w ) )
 						return;
+					const QString shot = QStringLiteral( "ww_facebones_dialog%1.png" )
+						.arg( ++dialogShots, 2, 10, QChar( '0' ) );
+					w->grab().save( shotDir + QLatin1Char( '/' ) + shot );
 					if ( auto * in = qobject_cast<QInputDialog *>( w ) ) {
-						log << "  dialog [" << in->windowTitle() << "] accepted\n";
+						log << "  dialog [" << in->windowTitle() << "]: "
+							<< in->labelText().replace( '\n', ' ' )
+							<< "\n    accepted; " << shot << "\n";
 						log.flush();
 						in->accept();
 						return;
@@ -853,12 +884,35 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						QAbstractButton * btn = mb->button( QMessageBox::Yes );
 						if ( !btn ) btn = mb->button( QMessageBox::Ok );
 						if ( !btn && !mb->buttons().isEmpty() ) btn = mb->buttons().first();
-						log << "  messagebox [" << mb->windowTitle() << "]: "
-							<< QString( mb->text() ).replace( '\n', ' ' ).left( 240 ) << "\n";
+						static const char * const sev[] = { "no icon", "information",
+							"warning", "critical", "question" };
+						const int ic = int( mb->icon() );
+						const QString severity = QString::fromLatin1(
+							( ic >= 0 && ic < 5 ) ? sev[ic] : "unknown" );
+						QString body = mb->text();
+						if ( !mb->informativeText().isEmpty() )
+							body += QLatin1String( "  ||  " ) + mb->informativeText();
+						if ( !mb->detailedText().isEmpty() )
+							body += QLatin1String( "  ||  " ) + mb->detailedText();
+						body.replace( '\n', ' ' );
+						log << "  messagebox (" << severity << ") [" << mb->windowTitle()
+							<< "]: " << body << "\n    answered '"
+							<< ( btn ? btn->text() : QStringLiteral( "(nothing)" ) )
+							<< "'; " << shot << "\n";
 						log.flush();
+						if ( mb->icon() == QMessageBox::Warning
+							|| mb->icon() == QMessageBox::Critical )
+							( warningExpected ? provoked : alarming )
+								<< QStringLiteral( "%1 [%2] %3" ).arg( severity,
+									mb->windowTitle(), body.left( 120 ) );
 						if ( btn ) btn->click();
 						return;
 					}
+					// anything else modal is still worth naming: an unexpected dialog
+					// that nobody answers is how this harness used to hang
+					log << "  modal " << w->metaObject()->className() << " ["
+						<< w->windowTitle() << "]; " << shot << "\n";
+					log.flush();
 				} );
 				driver.start( 250 );
 
@@ -948,7 +1002,48 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					cfg.setValue( "Rigging/MappingMode", 1 );	// Nearest Vertex, deterministic
 					cfg.setValue( "Rigging/MaxInfluences", 4 );
 
+					/* THE WINDOW, BEFORE AND AFTER, and the written file opened.
+					 *
+					 * Everything else here is bytes: blob sizes, bone counts, a
+					 * comparison against a packing this file derives itself. All of
+					 * that can be right while the mesh renders as a shredded mess,
+					 * and none of it would say so. Three pictures cost nothing and
+					 * are the only part of this that a person can check.
+					 */
+					auto stageShot = [skope]( const char * what ) {
+						skope->select( QModelIndex() );
+						qApp->processEvents();
+						if ( skope->ogl ) {
+							skope->ogl->frameAll();
+							for ( int i = 0; i < 3; i++ ) {
+								skope->ogl->update();
+								qApp->processEvents();
+							}
+						}
+						QPixmap pm = skope->grab();
+						/* THE VIEWPORT PAINTED BACK IN.
+						 *
+						 * QWidget::grab() walks the widget tree, and the viewport is
+						 * not in it — GLView is a QOpenGLWindow embedded through
+						 * createWindowContainer, so its native surface is simply
+						 * absent and the middle of the picture comes out black. The
+						 * first run of this looked exactly like a mesh that failed to
+						 * render, which is the wrong thing to spend an hour on.
+						 */
+						if ( skope->ogl && skope->graphicsView ) {
+							const QImage fb = skope->ogl->grabFramebuffer();
+							QPainter p( &pm );
+							p.drawImage( QRect( skope->graphicsView->mapTo( skope, QPoint() ),
+								skope->graphicsView->size() ), fb );
+						}
+						pm.save( QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_facebones_%1.png" )
+							.arg( QLatin1String( what ) ) );
+					};
+					stageShot( "1_source" );
+
 					skope->castSpell( QLatin1String( "Rigging/Create faceBones NIF..." ), pShape );
+					stageShot( "2_after_spell" );
 
 					// A. the open document is not touched
 					QByteArray sourceAfter;
@@ -1030,9 +1125,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 						// with no donor marked there is nothing to rebuild it from
 						NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
+						warningExpected = true;		// this refusal IS a warning, by design
 						gen->cast( &out, oShape );
+						warningExpected = false;
 						check( "M: without a marked face donor it refuses, leaving the blob alone",
 							remapOf( &out, oShape ) != sourceSkin );
+						check( "M2: ...and says so on a warning, not silently",
+							provoked.size() == 1 );
 
 						// the base head still has the standard weights: mark it and retry
 						NifModel * base = new NifModel( skope );
@@ -1112,7 +1211,34 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					} else {
 						check( "K: the donor reloaded for comparison", false );
 					}
+
+					/* AND THE WRITTEN FILE, OPENED IN THE WINDOW.
+					 *
+					 * Last, because it replaces the document every check above was
+					 * about. This is the picture that answers "did it come out
+					 * looking like a hat" — the one question the byte comparisons
+					 * cannot be asked.
+					 */
+					skope->loadFile( outPath );
+					for ( int i = 0; i < 40 && skope->getNifModel()
+						&& skope->getNifModel()->getBlockCount() == 0; i++ )
+						qApp->processEvents();
+					qApp->processEvents();
+					stageShot( "3_output" );
+					log << "opened the output: " << skope->getNifModel()->getBlockCount()
+						<< " blocks\n";
 				} while ( false );
+
+				/* NO WARNING WAS CLICKED PAST. Every dialog is photographed and
+				 * quoted above; this is the one that fails a run rather than
+				 * leaving it to be noticed.
+				 */
+				for ( const QString & a : alarming )
+					log << "  UNEXPECTED: " << a << "\n";
+				check( QStringLiteral( "O: no warning or critical dialog beyond the one provoked" ),
+					alarming.isEmpty() );
+				log << "dialogs photographed: " << dialogShots
+					<< " (warnings provoked on purpose: " << provoked.size() << ")\n";
 
 				log << "\n" << pass << " passed, " << fail << " failed\n";
 				log.flush();
@@ -23060,45 +23186,23 @@ void NifSkope::contextMenu( const QPoint & pos )
 	if ( sender() == list )
 		buildBlockListMenuExtras( contextBook, idx );
 
-	/* Search… — first row, and the palette opens AFTER exec returns.
+	/* NO Search… ROW. It was the first thing in the menu, and the menu is not
+	 * where you look for it: Space opens the palette from anywhere, and so does
+	 * Ctrl+Shift+P. A row that duplicates a key you already have costs a
+	 * separator and the top of the list, which is the most valuable place in a
+	 * menu this long — Copy Branch and Delete are what belong there.
 	 *
-	 * Not from inside the menu: contextBook is a stack local, and a palette
-	 * opened from a menu handler would outlive the exec() that owns it. So the
-	 * row does nothing but be chosen, exec returns it, and the palette runs down
-	 * here with the book still alive.
+	 * The palette itself still knows to keep a row marked WW_PALETTE_SEARCH_ROW
+	 * out of its own results; that rule is tested independently and outlives
+	 * this particular row.
 	 */
-	QAction * searchRow = nullptr;
-	if ( sender() == list ) {
-		searchRow = new QAction( tr( "Search…\tCtrl+Shift+P" ), &contextBook );
-		// so the palette does not list the row that opens it
-		searchRow->setObjectName( QStringLiteral( WW_PALETTE_SEARCH_ROW ) );
-		searchRow->setToolTip( tr( "Find any spell or action by name, including the ones "
-			"that do not apply here" ) );
-		QAction * first = contextBook.actions().value( 0 );
-		if ( first ) {
-			contextBook.insertAction( first, searchRow );
-			contextBook.insertSeparator( first );
-		} else {
-			contextBook.addAction( searchRow );
-		}
-	}
 
 	// four of the actions built above carry a tooltip, and QMenu suppresses them
 	// unless asked; they have been dead text since they were written
 	contextBook.setToolTipsVisible( true );
 
-	if ( !idx.isValid() || nif->flags( idx ) & (Qt::ItemIsEnabled | Qt::ItemIsSelectable) ) {
-		QAction * chosen = contextBook.exec( p );
-		if ( chosen && chosen == searchRow ) {
-			const int bn = nif->getBlockNumber( idx );
-			const QString what = bn >= 0
-				? QStringLiteral( "[%1] %2" ).arg( bn ).arg( nif->itemName( nif->getBlockIndex( bn ) ) )
-				: QString();
-			// p, so it opens where the menu it replaces stood
-			if ( QAction * run = wwSpellPalette( this, contextBook, what, p ) )
-				run->trigger();
-		}
-	}
+	if ( !idx.isValid() || nif->flags( idx ) & (Qt::ItemIsEnabled | Qt::ItemIsSelectable) )
+		contextBook.exec( p );
 }
 
 void NifSkope::overrideViewFont()

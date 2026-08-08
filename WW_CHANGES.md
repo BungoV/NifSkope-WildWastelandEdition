@@ -1,5 +1,60 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08k — No Search row in the block-list menu
+
+It was the first thing in it, and the menu is not where you look for search:
+**Space** opens the palette from anywhere, and so does Ctrl+Shift+P. A row
+duplicating a key you already have was costing a separator and the top of the
+list — the most valuable place in a menu that long. Copy Branch and Delete are
+what belong there.
+
+The palette still keeps a row marked `WW_PALETTE_SEARCH_ROW` out of its own
+results; that rule is tested on its own and outlives this particular row.
+
+### The faceBones harness photographs every step, and quotes every dialog whole
+
+It answers each dialog the spell puts up, which is what lets it run unattended —
+and was also how a warning could go unread. The log line was one sentence cut at
+240 characters; `informativeText` and `detailedText` were never written down, and
+nothing recorded whether the icon was a question or a warning. A run could report
+14 of 14 with a warning clicked through in the middle of it and leave no trace.
+
+Now: a PNG of each dialog before its button is pressed, the full text, the
+severity, and a check that **no warning appeared beyond the one the test provokes
+on purpose** (the refusal with no face donor marked — armed around that one cast,
+so the check is not right for the wrong reason every run).
+
+Three stage pictures too — the source, the source after the spell, and the
+written file opened in the window. The viewport is **composited in**:
+`QWidget::grab()` walks the widget tree and GLView is a `QOpenGLWindow` behind a
+window container, so its surface is simply absent and the middle of the picture
+comes out black. The first run looked exactly like a mesh that had failed to
+render.
+
+The full text also surfaced what the truncation had been hiding: transferring a
+head's face bones onto a hat scores **Geometry match: Poor** — surface snap
+median 15.2%, 95th 33.5%, max 37.6% of donor span. Expected for a hat sitting
+above the skull rather than on it, and worth seeing rather than skipping.
+
+### faceBones and RemapData, re-run on real files
+
+`fhat.nif` given face bones from `BaseFemaleHead_faceBones.nif` — 313 vertices,
+4 skin bones before and 68 after, 59 of them face-sculpt, 3756 bytes of
+CustomizationRemapData. 16 of 16:
+
+* the open document is byte-identical afterwards, and the sibling file reloads
+* RemapData is the **source's standard-skeleton** skinning, not the sculpt
+  weights the output itself now carries — and provably not, since the two are
+  required to disagree
+* wiping the blob and regenerating it from the marked donor gives back all 3756
+  bytes with **0 differing**, and without a marked donor it refuses and leaves
+  the blob alone
+* every remap index in the output resolves against its bone list, so no
+  NewBonesData is needed — whereas the vanilla donor's blob does overrun its own
+
+The rest-pose difference on `Chest` (91.28 apart) is the question, answered once,
+that used to be a flat refusal.
+
 ## 2026-08-08j — The drag card stops changing shape while you aim
 
 Hold the pointer still over a row during a block drag and the card dropped its
