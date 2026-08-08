@@ -1278,6 +1278,46 @@ protected:
 		// what the spells read; castCollisionOverSelection restores it on the way out
 		setBlockListSelection( sources );
 
+		/* NO BODY IN THE FILE? SAY SO, AND OFFER TO MAKE ONE PROPERLY.
+		 *
+		 * Dropping meshes here used to create a body silently, taking layer, mass,
+		 * motion system and the rest from whatever the panel happened to be set to
+		 * — settings a drag says nothing about and that are tedious to correct
+		 * afterwards. When there is no body at all, that is a decision worth
+		 * making on purpose.
+		 *
+		 * The meshes are parked and go in once the body exists, so answering the
+		 * popup finishes the drop rather than replacing it.
+		 */
+		bool anyBody = false;
+		for ( int b = 0; b < nif->getBlockCount() && !anyBody; b++ )
+			if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" ) )
+				anyBody = true;
+		if ( !anyBody ) {
+			const QMessageBox::StandardButton answer = QMessageBox::warning( this,
+				tr( "No collision body" ),
+				tr( "This file has no collision body, and a shape has to live in one.\n\n"
+					"Create a collision body now? Its layer, material and physics are set in "
+					"the panel that opens; the %n mesh(es) you dropped go into it once it "
+					"exists.", "", int( sources.size() ) ),
+				QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Ok );
+			if ( answer != QMessageBox::Ok )
+				return;
+			pendingDropShapes.clear();
+			for ( const qint32 block : sources ) {
+				const QModelIndex idx = nif->getBlockIndex( block );
+				if ( idx.isValid() )
+					pendingDropShapes.append( QPersistentModelIndex( idx ) );
+			}
+			if ( createPopup && createButton ) {
+				createPopup->adjustSize();
+				createPopup->move( createButton->mapToGlobal( QPoint( 0, createButton->height() + 2 ) ) );
+				createPopup->show();
+				createPopup->raise();
+			}
+			return;
+		}
+
 		if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
 			bar->showMessage( sources.size() == 1
 				? tr( "Making collision from %1." ).arg( nif->itemName( nif->getBlockIndex( sources.first() ) ) )
@@ -1473,6 +1513,21 @@ private:
 
 	//! The shape popup's Create, so a drop and the button cannot drift apart.
 	std::function<void()> createShapeNow;
+
+	/* A DROP PARKED UNTIL THERE IS A BODY TO PUT IT IN.
+	 *
+	 * Dropping meshes on a file with no collision body at all used to make one
+	 * silently, with whatever settings the panel happened to hold — layer, mass,
+	 * motion system, all of it decided for you by a gesture that said nothing
+	 * about bodies. The meshes wait here instead while the Create Collision Body
+	 * popup is answered, and go in once it is.
+	 *
+	 * Persistent indices: creating a body inserts blocks and renumbers.
+	 */
+	QList<QPersistentModelIndex> pendingDropShapes;
+	//! True while createBody runs, so hiding its popup can tell "confirmed" from
+	//! "dismissed" and drop a parked drop that was never going to happen.
+	bool creatingBodyNow = false;
 
 	NifModel * nif = nullptr;
 	QMainWindow * mw = nullptr;
@@ -4832,6 +4887,15 @@ private:
 		 * two bodies means two nodes.
 		 */
 		auto createBody = [this, saveCreationSettings]() {
+			/* TAKEN BEFORE THE POPUP HIDES. A drop with nothing to drop onto parks
+			 * its meshes here and opens this popup; hiding the popup is what clears
+			 * a parked drop that was dismissed instead of confirmed, so the claim
+			 * has to happen first or the drop would be thrown away by its own
+			 * Create button.
+			 */
+			const QList<QPersistentModelIndex> parked = pendingDropShapes;
+			pendingDropShapes.clear();
+			creatingBodyNow = true;
 			saveCreationSettings();
 			if ( createPopup ) createPopup->hide();
 			if ( !nif )
@@ -4930,6 +4994,78 @@ private:
 			}
 			if ( made.isValid() )
 				if ( auto * window = dynamic_cast<NifSkope *>( mw ) ) window->select( made );
+			queueRebuild();
+			creatingBodyNow = false;
+
+			/* AND NOW THE DROP THAT WAS WAITING FOR THIS BODY.
+			 *
+			 * The meshes were parked when they were dropped on a file with nothing
+			 * to put them in. The body exists now, so they go through the ordinary
+			 * path: make the shapes, then move each one into the body that was just
+			 * created — which is what dropping ON a body does, and the reason that
+			 * code is shared rather than repeated here.
+			 */
+			if ( parked.isEmpty() || !made.isValid() || !createShapeNow )
+				return;
+			// tlCreateCollisionBody hands back the body, so `made` IS the target
+			const QPersistentModelIndex intoBody = made;
+			QList<qint32> blocks;
+			for ( const QPersistentModelIndex & shape : parked )
+				if ( shape.isValid() )
+					blocks << nif->getBlockNumber( QModelIndex( shape ) );
+			if ( blocks.isEmpty() || !intoBody.isValid() )
+				return;
+
+			if ( auto * window = dynamic_cast<NifSkope *>( mw ) )
+				window->select( nif->getBlockIndex( blocks.first() ) );
+			setBlockListSelection( blocks );
+
+			QSet<qint32> before;
+			for ( int b = 0; b < nif->getBlockCount(); b++ )
+				if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" ) )
+					before.insert( b );
+			QList<QPersistentModelIndex> had;
+			for ( const qint32 b : std::as_const( before ) )
+				had.append( QPersistentModelIndex( nif->getBlockIndex( b ) ) );
+
+			createShapeNow();
+
+			QSet<qint32> stillThere;
+			for ( const QPersistentModelIndex & body : std::as_const( had ) )
+				if ( body.isValid() )
+					stillThere.insert( nif->getBlockNumber( QModelIndex( body ) ) );
+			const qint32 target = nif->getBlockNumber( QModelIndex( intoBody ) );
+			QList<QPersistentModelIndex> spare;
+			for ( int b = 0; b < nif->getBlockCount(); b++ )
+				if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" )
+					&& !stillThere.contains( b ) && b != target )
+					spare.append( QPersistentModelIndex( nif->getBlockIndex( b ) ) );
+
+			nifSnapshotOp( nif, tr( "Drop collision into new body" ), [&]() {
+				for ( const QPersistentModelIndex & body : std::as_const( spare ) ) {
+					if ( !body.isValid() || !intoBody.isValid() )
+						continue;
+					const qint32 shape = nif->getLink( QModelIndex( body ), "Shape" );
+					if ( shape < 0 )
+						continue;
+					if ( !tlMoveCollisionShape( nif, shape,
+						nif->getBlockNumber( QModelIndex( intoBody ) ) ).isEmpty() )
+						continue;
+					const qint32 emptied = nif->getBlockNumber( QModelIndex( body ) );
+					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+						const QModelIndex object = nif->getBlockIndex( b );
+						if ( nif->blockInherits( object, "bhkCollisionObject" )
+							&& nif->getLink( object, "Body" ) == emptied )
+						{
+							spRemoveBranch().castIfApplicable( nif, object );
+							break;
+						}
+					}
+				}
+			} );
+			if ( QStatusBar * bar = mw ? mw->statusBar() : nullptr )
+				bar->showMessage( tr( "Made a body and put %1 dropped mesh(es) in it." )
+					.arg( blocks.size() ), 5000 );
 			queueRebuild();
 		};
 

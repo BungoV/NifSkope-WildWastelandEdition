@@ -8476,6 +8476,35 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							nif->getParent( meshes.last() ) == homeBlock );
 					}
 
+					/* A DRIVER, because a drop onto a file with no body now ASKS.
+					 *
+					 * Dropping meshes used to make a body silently with whatever the
+					 * panel was set to; on an empty file that is a decision worth
+					 * making on purpose, so it prompts and then opens the body popup.
+					 * This suite delivers events directly and has no one at the
+					 * keyboard, so it answers both the way a user would — and that
+					 * makes the new path covered rather than stepped over.
+					 */
+					auto * driver = new QTimer( skope );
+					QObject::connect( driver, &QTimer::timeout, skope, [dock]() {
+						if ( auto * box = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) ) {
+							if ( QAbstractButton * ok = box->button( QMessageBox::Ok ) )
+								ok->click();
+							return;
+						}
+						// the body popup is not modal: find its Create and press it
+						for ( QWidget * w : dock->findChildren<QWidget *>() ) {
+							if ( !w->isVisible() || !w->inherits( "QFrame" ) )
+								continue;
+							for ( QPushButton * b : w->findChildren<QPushButton *>() )
+								if ( b->isVisible() && b->text() == QStringLiteral( "Create" ) ) {
+									b->click();
+									return;
+								}
+						}
+					} );
+					driver->start( 150 );
+
 					check( "the Collision Manager is accepting drops",
 						wwDeliverCollisionDrop( skope, nullptr ) );
 					/* AND ITS CREATE HOOK IS WIRED. A null hook makes the drop accept
@@ -8518,6 +8547,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						wwDeliverCollisionDrop( skope, &drop );
 						QApplication::processEvents();
 						delete mime;
+					}
+					/* WAIT FOR IT. The first drop lands on a file with no body, so it
+					 * prompts, opens the body popup, and finishes when that popup is
+					 * answered — three turns of the event loop, not one call. Checking
+					 * straight after the drop measures the moment before any of it has
+					 * happened.
+					 */
+					{
+						QElapsedTimer waited;
+						waited.start();
+						while ( bodies() == bodiesWas && waited.elapsed() < 4000 )
+							QApplication::processEvents( QEventLoop::AllEvents, QDeadlineTimer( 50 ) );
+						log << "the first drop settled after " << waited.elapsed() << " ms\n";
 					}
 					// the panel says what it did before it does it; if this is empty the
 					// drop never reached the create at all
