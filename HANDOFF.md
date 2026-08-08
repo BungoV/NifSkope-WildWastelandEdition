@@ -5,30 +5,54 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 [WW_FEATURES.md](WW_FEATURES.md) is what the fork adds, and
 [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog.
 
-Updated **2026-08-07**, third session. Build green, working tree clean, pushed
-through `f099ec2`.
+**Working directory:** `E:\Projects\NifskopeWildWastelandEdition`
+(GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
+branch `main`, `origin` is the fork — never push upstream.)
 
-### This session, and what is open
+Updated **2026-08-08**. Edition **0.3.1**. Build green, working tree clean,
+pushed through `8832999`.
 
-- **Collision drops aim, and harnessing that found a real bug.** The
-  body-targeted mesh drop had shipped with no check of its own; the check failed
-  on its first run. Creating collision consumes the source mesh, which renumbers
-  blocks, so the drop was moving the shape into whatever had slid into the
-  target's row. Persistent indices now, A/B proven. `collision_drop.sh` 30/0.
-- **Undo costs half what it did.** `nifSnapshotOp` no longer saves the model
-  after the operation — the redo snapshot is taken at the first undo, where the
-  model is already holding exactly that state. 88 ms a time on 512 blocks, 160 on
-  2012, paid by every structural edit in the program.
-- **Clicking a child block selects that block.** A `BSShaderTextureSet` click was
-  promoted to the shape that owns it — right for the viewport, wrong for the
-  list, which then lit the whole branch with the wrong row primary.
-- **Join Selected Shapes** in the Block List's Hierarchy menu: the viewport's own
-  `Ctrl+J` join, told what to join. The right-clicked row is the target.
-- **Next up, both unstarted**: merging *collision* shapes in the Collision
-  Manager (route mapped in `WW_CHANGES.md` 07-07za — collision → geometry → this
-  join → collision, mesh budget checked before the return trip), and
-  `block_drag_live.ps1` has not been run since the multi-parent payload change.
-  It seizes the mouse; ask first, every time.
+### This session
+
+One change, closed end to end.
+
+- **Create faceBones NIF hands you a loaded NIF, not a file.** It asked for a
+  save path and wrote there, and the Loaded NIFs route had to hand it a
+  *temporary to build into* and read the written file back — so a finished mesh
+  could die at the last step on a filesystem, which is what happened:
+  `Could not write "…\Temp\nifskope-facebones-yhpAji.nif"`. The transfer had
+  already run; there was simply nowhere to put the result.
+- **It goes into Loaded NIFs, unsaved**, under the name it would take
+  (`BaseFemaleHead_faceBones.nif`), and is saved from that row's own **Save As…**.
+  No save dialog, no temporary, nothing on disk unless asked for.
+- **Both routes collapsed into one.** The spell places its own result;
+  `generateFaceBonesInto` only renames what appeared, because it knows the row's
+  path and the spell only knows the model's. The one-shot output-path override
+  (`tlSet/TakeFaceBonesOutputPath`) and the `WW_TEST_FACEBONES_OUT` env var it
+  existed to serve are gone.
+- **`NifSkope::addWorkspaceDocumentFromMemory` is the new entry point**, beside
+  `addWorkspaceDocumentFromFile`. It **parses** the bytes rather than trusting
+  them — a row that cannot be read back is worse than a refusal, because it looks
+  like a result — which is the guarantee the temporary file was there to give. It
+  lands `unsavedInMemory`, because `isModified` compares against bytes loaded from
+  disk and there are none, so without that flag the close path would call it
+  unmodified and drop the only copy without asking.
+  `workspaceForNewDocuments( const NifModel * )` picks the window: the one that
+  owns the model, else the active window, else any.
+- **`tests/rigging/facebones.sh` drives the real two-step user action now** —
+  cast, then Save As on the row it made — and checks the row before writing it:
+  B0 arrived, B1 unsaved, B2 saving writes the file, B3 unsaved clears. Everything
+  downstream reads that file unchanged. **23 passed, 0 failed** on
+  `BaseFemaleHead.nif`.
+
+### Open
+
+- **`block_drag_live.ps1` has not been run since the multi-parent payload
+  change.** It seizes the mouse; ask first, every time.
+- The flat-list **hang** below is still open and still harness-only.
+- Everything else in this file's "Where to pick up" and "Open, and honest about
+  it" sections is carried forward from earlier sessions and was not touched
+  today.
 
 Two headlines:
 
@@ -75,8 +99,11 @@ drag with no flag to set (`WW_DRAG_LOG=off`, or a path, overrides).
 
 ### Where to pick up
 
-The four things the last handoff listed are all closed — three fixed, one
-measured and deliberately not done. What is left of them:
+*(From the 2026-08-07 block-list sessions. Merging collision shapes in the
+Collision Manager, listed here as unstarted, shipped in `WW_CHANGES.md` 08-07zb.)*
+
+The four things that handoff listed are all closed — three fixed, one measured
+and deliberately not done. What is left of them:
 
 1. **Drag-and-drop has no coverage in flat list mode.** Nothing structural is in
    the way now that the view answers `indexAt` there; `block_dragdrop.sh` seeds
