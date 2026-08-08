@@ -146,6 +146,10 @@ public:
 	static QList<NifSkope *> openDocuments();
 	//! Documents explicitly added to the Loaded NIFs workspace and currently selected.
 	static QList<NifSkope *> selectedWorkspaceDocuments();
+	//! Which window a generated document belongs in: the one that owns the model
+	//! it was made from, else the active window, else the first open document.
+	//! Null only when no window exists at all.
+	static NifSkope * workspaceForNewDocuments( const NifModel * from = nullptr );
 	//! Selected workspace members as model/display-path pairs. Unlike
 	//! selectedWorkspaceDocuments() this includes data-only background documents,
 	//! which own a NifModel but no window; tools that only read donor geometry
@@ -439,6 +443,10 @@ public:
 	//! Add a loose NIF to Loaded NIFs by path (the browser route needs a
 	//! QModelIndex, which a script has no way to produce).
 	bool addWorkspaceDocumentFromFile( const QString & path );
+	//! The same for a NIF that exists only in memory — a generated one. It lands
+	//! unsaved, under the name it would take if it were written, and its bytes
+	//! are parsed rather than trusted. False when they do not parse.
+	bool addWorkspaceDocumentFromMemory( const QByteArray & bytes, const QString & displayPath );
 	//! How a workspace document draws: 0 hidden, 1 solid, 2 semi-transparent.
 	bool setWorkspaceDisplayMode( int backgroundIndex, int mode );
 	//! Read that back: 0 hidden, 1 solid, 2 semi-transparent; -1 for a bad index.

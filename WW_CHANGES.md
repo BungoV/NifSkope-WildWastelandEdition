@@ -1,5 +1,44 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08l — Create faceBones NIF hands you a loaded NIF, not a file
+
+It asked for a path and wrote there, and the Loaded NIFs route had to hand it a
+**temporary to build into** and read the written file back. So a finished mesh
+could die at the last step on a filesystem, which is what happened:
+
+> Could not write "C:\Users\bungo\AppData\Local\Temp\nifskope-facebones-yhpAji.nif".
+
+The transfer had already run. The mesh existed. There was simply nowhere to put
+it, and no second chance at it.
+
+A generated file has no natural home anyway — the mesh is what was asked for, and
+where it belongs is a decision for whoever saves it. So the spell now puts the
+result **in Loaded NIFs, unsaved**, carrying the name it would take
+(`BaseFemaleHead_faceBones.nif`), and you save it wherever you want it from the
+row's own **Save As…**. No save dialog on the way in, no temporary, nothing
+written to disk unless you ask for it.
+
+Both routes are now the same route: the spell places its own result, and
+`generateFaceBonesInto` — the right-click-a-row path — only renames what appeared,
+because it knows the row's path and the spell only knows the model's. The one-shot
+output-path override and the `WW_TEST_FACEBONES_OUT` env var it existed to serve
+are gone with it.
+
+`addWorkspaceDocumentFromMemory` is the new entry point, and it **parses** the
+bytes rather than trusting them: a generator hands over what it believes it
+produced, and a row that cannot be read back is worse than a refusal because it
+looks like a result. That is the same guarantee the temporary file was there to
+give, without a filesystem in the way. It lands `unsavedInMemory`, because
+`isModified` compares against the bytes loaded from disk and there are none — so
+without that flag the close path would call it unmodified and drop the only copy
+without asking.
+
+`tests/rigging/facebones.sh` drives the real two-step user action now — cast, then
+Save As on the row it made — and checks the row itself before writing it: **B0** it
+arrived, **B1** it is unsaved, **B2** saving writes the file, **B3** it stops being
+unsaved once written. Everything downstream reads that file exactly as before.
+**23 passed, 0 failed** on `BaseFemaleHead.nif`.
+
 ## 2026-08-08k — No Search row in the block-list menu
 
 It was the first thing in it, and the menu is not where you look for search:

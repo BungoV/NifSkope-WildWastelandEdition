@@ -1919,6 +1919,24 @@ NifSkope * NifSkope::documentForModel( const NifModel * model )
 	return nullptr;
 }
 
+/*! Which window a newly generated document should appear in.
+ *
+ *  The window that owns the model it was made from is the honest answer, and it
+ *  is the one a spell cast on an open document has. It is NOT always available:
+ *  a Loaded NIFs row owns a model and no window at all, and that is exactly the
+ *  case that generates one — so fall back to whichever window is active, then to
+ *  any window, rather than refusing to place the result.
+ */
+NifSkope * NifSkope::workspaceForNewDocuments( const NifModel * from )
+{
+	if ( NifSkope * owner = from ? documentForModel( from ) : nullptr )
+		return owner;
+	if ( auto * active = qobject_cast<NifSkope *>( qApp->activeWindow() ) )
+		return active;
+	const QList<NifSkope *> documents = openDocuments();
+	return documents.isEmpty() ? nullptr : documents.first();
+}
+
 QString NifSkope::documentDisplayName() const
 {
 	QString name = QFileInfo( currentFile ).fileName();
@@ -3014,8 +3032,6 @@ bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
 	return true;
 }
 
-extern void tlSetFaceBonesOutputPath( const QString & path );
-
 /*! Build a faceBones NIF from a loaded document, using the marked face donor.
  *
  *  The other route needs the base head open as the primary document and walks
@@ -3054,33 +3070,25 @@ QString NifSkope::generateFaceBonesInto( BackgroundNifDocument * source )
 	if ( !shape.isValid() )
 		return tr( "%1 has no shape that can be given face bones." ).arg( source->displayName() );
 
-	/* Written to a temporary and loaded back, rather than built in memory: the
-	 * spell's output path is a file, and re-reading what it actually wrote is a
-	 * stronger guarantee than trusting a model handed sideways. The temporary is
-	 * removed either way.
+	/* THE SPELL PLACES ITS OWN RESULT NOW.
+	 *
+	 * This route used to hand it a temporary to build into and load the written
+	 * file back, which put a filesystem between a finished mesh and the list it
+	 * was going into — and when the temporary could not be written, the whole
+	 * thing failed at the last step with the work already done. The spell adds
+	 * the row itself, from the bytes it produced; a new row appearing is how
+	 * this knows it ran.
 	 */
-	QTemporaryFile temp( QDir::tempPath() + QStringLiteral( "/nifskope-facebones-XXXXXX.nif" ) );
-	temp.setAutoRemove( true );
-	if ( !temp.open() )
-		return tr( "Could not make a temporary file to build into." );
-	const QString tempPath = temp.fileName();
-	temp.close();
-
-	tlSetFaceBonesOutputPath( tempPath );
+	const qsizetype before = sessionBackgroundDocuments.size();
 	create->cast( source->nif, shape );
-	// the spell clears the override itself; clearing again costs nothing and
-	// means a spell that returned early cannot leave it armed
-	tlSetFaceBonesOutputPath( QString() );
-
-	if ( QFileInfo( tempPath ).size() <= 0 )
+	if ( sessionBackgroundDocuments.size() <= before )
 		return tr( "Nothing was generated — see the message the rigging step gave." );
-	if ( !addWorkspaceDocumentFromFile( tempPath ) )
-		return tr( "The generated file could not be read back." );
 
-	// name it as it would be saved, and mark it as existing nowhere else
-	if ( BackgroundNifDocument * made = sessionBackgroundDocuments.isEmpty()
-		? nullptr : sessionBackgroundDocuments.last() )
-	{
+	/* Named from the ROW, which the spell cannot do: it names the result after
+	 * the model it was made from, and a row read out of an archive has no file
+	 * path to name it after.
+	 */
+	if ( BackgroundNifDocument * made = sessionBackgroundDocuments.last() ) {
 		const QFileInfo from( source->currentFile );
 		made->currentFile = from.absolutePath().isEmpty()
 			? from.completeBaseName() + QStringLiteral( "_faceBones.nif" )
@@ -3088,6 +3096,8 @@ QString NifSkope::generateFaceBonesInto( BackgroundNifDocument * source )
 				+ from.completeBaseName() + QStringLiteral( "_faceBones.nif" );
 		made->unsavedInMemory = true;
 		made->sessionPreviewVisible = true;
+		// beside the row it was made from, not wherever the spell found a window
+		made->workspaceRoot = this;
 	}
 	refreshAllDocumentSessions();
 	return QString();
@@ -6963,6 +6973,36 @@ bool NifSkope::addWorkspaceDocumentFromFile( const QString & path )
 	document->currentFile = path;
 	document->sessionPreviewVisible = true;
 	document->captureLoadedState();
+	sessionBackgroundDocuments.append( document );
+	refreshAllDocumentSessions();
+	return true;
+}
+
+/*! Add a NIF that exists only in memory to Loaded NIFs — a generated one.
+ *
+ *  The bytes are PARSED, not trusted: a generator hands over what it believes it
+ *  produced, and a row that cannot be read back is worse than a refusal because
+ *  it looks like a result. Loading them here is the same guarantee the temporary
+ *  file this replaced was there to give, without a filesystem in the way.
+ *
+ *  It lands unsaved on purpose. `isModified` compares against the bytes loaded
+ *  from disk and there are none, so without this the close path would decide it
+ *  was unmodified and drop the only copy without asking.
+ */
+bool NifSkope::addWorkspaceDocumentFromMemory( const QByteArray & bytes, const QString & displayPath )
+{
+	auto * document = new BackgroundNifDocument;
+	document->workspaceRoot = this;
+	QBuffer buffer;
+	buffer.setData( bytes );
+	if ( !buffer.open( QIODevice::ReadOnly ) || !document->nif->load( buffer ) ) {
+		delete document;
+		return false;
+	}
+	document->currentFile = displayPath;
+	document->sessionPreviewVisible = true;
+	document->captureLoadedState();
+	document->unsavedInMemory = true;
 	sessionBackgroundDocuments.append( document );
 	refreshAllDocumentSessions();
 	return true;

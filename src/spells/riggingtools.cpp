@@ -213,14 +213,6 @@ static RiggingWorkflowState riggingWorkflow;
 static std::unique_ptr<QTemporaryFile> riggingSessionDonorFile;
 static QString riggingSessionDonorLabel;
 
-/*! Where the next Create faceBones NIF should write, instead of asking.
- *
- *  ONE-SHOT on purpose: taken and cleared by the spell, so a caller that sets it
- *  and then does not run cannot leave a later invocation quietly writing to a
- *  path the user never chose.
- */
-static QString riggingFaceBonesOutPath;
-
 /*! Node names the user has agreed to anchor to despite a rest-pose difference.
  *
  *  SHARED ACROSS THE STEPS, because the pipeline asks the same question twice
@@ -252,18 +244,6 @@ static bool riggingAnchorDespitePose( const QString & nodeName, float delta )
 		return false;
 	riggingAnchorAnyway << nodeName;
 	return true;
-}
-
-void tlSetFaceBonesOutputPath( const QString & path )
-{
-	riggingFaceBonesOutPath = path;
-}
-
-QString tlTakeFaceBonesOutputPath()
-{
-	const QString taken = riggingFaceBonesOutPath;
-	riggingFaceBonesOutPath.clear();
-	return taken;
 }
 
 static QString riggingDonorDisplayName( const QString & fileName )
@@ -3960,7 +3940,7 @@ public:
 	QString name() const override final { return Spell::tr( "Create faceBones NIF..." ); }
 	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
-	//! Writes a new file; the open document is not touched, so there is
+	//! Produces a new document; the open one is not touched, so there is
 	//! nothing to undo.
 	bool undoable() const override final { return false; }
 
@@ -3986,39 +3966,20 @@ public:
 		if ( riggingWorkflow.active )
 			return index;
 
-		// Default to the sibling name Bethesda's own assets use:
-		// BaseFemaleHead.nif -> BaseFemaleHead_faceBones.nif
+		/* THE NAME IT WOULD TAKE, not a place to put it.
+		 *
+		 * Nothing is written here: the result goes into Loaded NIFs unsaved, so
+		 * this is only what the row is called until someone saves it. Default to
+		 * the sibling name Bethesda's own assets use —
+		 * BaseFemaleHead.nif -> BaseFemaleHead_faceBones.nif — so Save As opens
+		 * on the right folder with the right name already filled in.
+		 */
 		const QString sourcePath = nif->getFileInfo().absoluteFilePath();
-		QString suggested;
+		QString suggested = QStringLiteral( "Untitled_faceBones.nif" );
 		if ( !sourcePath.isEmpty() ) {
 			const QFileInfo info( sourcePath );
 			suggested = info.absolutePath() + QLatin1Char( '/' )
 				+ info.completeBaseName() + QStringLiteral( "_faceBones.nif" );
-		}
-		/* WHERE IT GOES, in three ways and in this order.
-		 *
-		 * A caller can name the path outright — that is how "generate one into
-		 * Loaded NIFs" works, writing to a temporary the document is then loaded
-		 * from — then the harness's env var, then asking. The override is one-shot
-		 * so a caller can never leave the next invocation silently writing
-		 * somewhere the user did not choose.
-		 */
-		const QString requested = tlTakeFaceBonesOutputPath();
-		const QByteArray envOut = qgetenv( "WW_TEST_FACEBONES_OUT" );
-		const QString outPath = !requested.isEmpty() ? requested
-			: ( envOut.isEmpty()
-				? QFileDialog::getSaveFileName( nullptr,
-					Spell::tr( "Save faceBones NIF As" ), suggested,
-					Spell::tr( "NIF files (*.nif)" ) )
-				: QString::fromLocal8Bit( envOut ) );
-		if ( outPath.isEmpty() )
-			return index;
-		if ( !sourcePath.isEmpty()
-			&& QFileInfo( outPath ).absoluteFilePath() == QFileInfo( sourcePath ).absoluteFilePath() ) {
-			QMessageBox::warning( nullptr, name(),
-				Spell::tr( "That is the file you are converting. The standard-skeleton original has to "
-					"survive: it is the only thing the RemapData snapshot can be regenerated from." ) );
-			return index;
 		}
 
 		QByteArray original;
@@ -4093,9 +4054,9 @@ public:
 
 		/* Judge the RESULT, not the stated intent. A donor rigged to the
 		 * ordinary skeleton produces a perfectly good transfer that simply is
-		 * not a faceBones mesh, and writing that under a _faceBones name would
-		 * be a lie the game finds later. Costs nothing to refuse: the file on
-		 * disk was never opened and the document was never touched.
+		 * not a faceBones mesh, and handing that over under a _faceBones name
+		 * would be a lie the game finds later. Costs nothing to refuse: the
+		 * result is still only bytes and the document was never touched.
 		 */
 		int sculptBones = 0;
 		for ( const QString & bone : riggingBoneNames( &work, workTarget ) )
@@ -4119,22 +4080,37 @@ public:
 			QMessageBox::warning( nullptr, name(),
 				Spell::tr( "The result carries %1 bytes of CustomizationRemapData; %2 vertices need %3. "
 					"Without a complete snapshot the mesh cannot map back to the animation skeleton, "
-					"so nothing was written." )
+					"so it was thrown away." )
 					.arg( remapBytes ).arg( vertices ).arg( vertices * 12 ) );
 			return index;
 		}
 
-		if ( !work.saveToFile( outPath ) ) {
+		/* INTO LOADED NIFS, NOT ONTO THE DISK.
+		 *
+		 * This used to ask for a path and write there, and the Loaded NIFs route
+		 * had to hand it a temporary to build into and read the result back —
+		 * which is what failed the moment that temporary could not be written,
+		 * with a finished mesh in hand and nowhere to put it.
+		 *
+		 * A generated file has no natural home anyway: the mesh is what was asked
+		 * for, and where it belongs is a decision for whoever saves it. So it
+		 * arrives as a row that can be looked at, rendered, edited and then saved
+		 * wherever it is wanted. `after` is the post-transfer serialization
+		 * already captured above, so there is nothing to write and nothing to
+		 * re-read.
+		 */
+		NifSkope * into = NifSkope::workspaceForNewDocuments( nif );
+		if ( !into || !into->addWorkspaceDocumentFromMemory( after, suggested ) ) {
 			QMessageBox::warning( nullptr, name(),
-				Spell::tr( "Could not write \"%1\"." ).arg( QDir::toNativeSeparators( outPath ) ) );
+				Spell::tr( "The result could not be handed to Loaded NIFs, so it is gone. "
+					"The open file is unchanged." ) );
 			return index;
 		}
 
-		/* Report the NewBonesData situation from the file we just wrote rather
-		 * than warning generically. The block is needed only when the remap
-		 * blob names a bone index past the end of the bone list, which this
-		 * append-only pipeline never produces — but say so with the numbers
-		 * instead of asserting it.
+		/* Report the NewBonesData situation from the result rather than warning
+		 * generically. The block is needed only when the remap blob names a bone
+		 * index past the end of the bone list, which this append-only pipeline
+		 * never produces — but say so with the numbers instead of asserting it.
 		 */
 		const int outBones = riggingBoneNames( &work, workTarget ).size();
 		const int highestIdx = riggingRemapMaxBoneIndex( outRemap );
@@ -4144,15 +4120,16 @@ public:
 				"Vanilla meshes need that block because their bone list replaces the standard bones; "
 				"this one appends, so nothing was dropped." ).arg( highestIdx ).arg( outBones )
 			: Spell::tr( "This mesh DOES need CustomizationRemapNewBonesData — index %1 falls past "
-				"the %2-bone list. Run Rigging ▸ Sync Remap New Bones on the written file." )
+				"the %2-bone list. Run Rigging ▸ Sync Remap New Bones on the new row." )
 				.arg( highestIdx ).arg( outBones );
 
 		QMessageBox done( QMessageBox::Information, name(),
-			Spell::tr( "Wrote %1\n\n"
+			Spell::tr( "%1 is now in Loaded NIFs, unsaved. Right-click it there and choose "
+				"Save As… to put it wherever you want it.\n\n"
 				"Face-sculpt bones: %2\nSkin bones: %3 before, %4 after\n"
 				"CustomizationRemapData: %5 bytes over %6 vertices\n\n"
-				"The open file was not modified." )
-				.arg( QDir::toNativeSeparators( outPath ) )
+				"The open file was not modified, and nothing was written to disk." )
+				.arg( QFileInfo( suggested ).fileName() )
 				.arg( sculptBones ).arg( bonesBefore ).arg( outBones )
 				.arg( remapBytes ).arg( vertices ) );
 		done.setInformativeText( newBonesNote

@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# Create faceBones NIF — build a _faceBones sibling from a standard-rigged head.
+# Create faceBones NIF — build a _faceBones mesh from a standard-rigged head.
 #
 # WHY THIS EXISTS
 #
 # The transformation is Transfer Bones and Weights with a faceBones donor, which
-# was already tested. What is new is that it runs against a COPY and writes a
-# separate file, and that has two claims a compile cannot check:
+# was already tested. What is new is that it runs against a COPY and produces a
+# separate document, and that has two claims a compile cannot check:
 #
 #   * the open document is not modified
 #   * the CustomizationRemapData in the output is the SOURCE's standard-skeleton
@@ -22,6 +22,8 @@
 # WHAT IS MEASURED
 #
 #   A. the open document is byte-identical after the spell runs
+#   B0-B3. the result lands in Loaded NIFs, unsaved, and saving that row writes
+#     the file the rest of this reads — the spell itself writes nothing
 #   B. the faceBones file exists
 #   C. it reloads
 #   D. the shape kept its block number
@@ -62,8 +64,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 
-# Work on a copy: the spell writes a sibling file, and the corpus is read-only
-# by intent.
+# Work on a copy: the harness saves the generated row next to it, and the corpus
+# is read-only by intent.
 cp "$SRC" "$TMP/head.nif"
 OUT="$TMP/head_faceBones.nif"
 

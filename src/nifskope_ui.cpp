@@ -811,15 +811,21 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 	/* TEST HARNESS (WW_FACEBONES_TEST=1): cast the real
 	 * "Rigging/Create faceBones NIF..." spell through NifSkope::castSpell, with
-	 * WW_TEST_DONOR supplying the faceBones donor and WW_TEST_FACEBONES_OUT the
-	 * output path (both are native dialogs no timer can drive).
+	 * WW_TEST_DONOR supplying the faceBones donor (a native dialog no timer can
+	 * drive) and WW_TEST_FACEBONES_OUT naming where THIS FILE saves the result.
 	 *
-	 * The assertions are on the FILE the spell wrote and on the source document
-	 * being untouched - which is the whole claim of this spell over running the
-	 * transfer in place. The load-bearing one is the last: the RemapData in the
-	 * output must equal the SOURCE's packed standard-skeleton skinning, not the
-	 * sculpt weights the output now carries. Get that backwards and the file
-	 * still looks structurally perfect while being exactly wrong.
+	 * The spell writes nothing: it puts the mesh in Loaded NIFs, unsaved, and
+	 * saving it is the user's move. So this drives the same two steps — cast,
+	 * then Save As on the row it made — and everything below reads the file that
+	 * produced. That the row appears, and appears unsaved, is checked before it
+	 * is written, because those are now the spell's actual output.
+	 *
+	 * The rest asserts on that file and on the source document being untouched -
+	 * which is the whole claim of this spell over running the transfer in place.
+	 * The load-bearing one is the last: the RemapData in the output must equal
+	 * the SOURCE's packed standard-skeleton skinning, not the sculpt weights the
+	 * output now carries. Get that backwards and the file still looks
+	 * structurally perfect while being exactly wrong.
 	 *
 	 * Writes ww_facebones_test.log next to the exe and quits.
 	 */
@@ -1042,8 +1048,33 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					};
 					stageShot( "1_source" );
 
+					const int rowsBefore = skope->workspaceDocumentCount();
 					skope->castSpell( QLatin1String( "Rigging/Create faceBones NIF..." ), pShape );
 					stageShot( "2_after_spell" );
+
+					/* THE RESULT IS A ROW, AND THEN A FILE.
+					 *
+					 * The spell hands the mesh to Loaded NIFs and writes nothing,
+					 * so the row IS the output and is checked as one - it has to
+					 * exist, and it has to be marked unsaved, which is what keeps
+					 * the close path from dropping the only copy without asking.
+					 * Saving it is the second half of the same user action, and
+					 * gives B..N below a file to go on reading.
+					 */
+					const int made = skope->workspaceDocumentCount() - 1;
+					check( "B0: the result arrived in Loaded NIFs",
+						made == rowsBefore );
+					if ( made == rowsBefore ) {
+						log << "loaded row " << made << ": "
+							<< skope->workspaceDocumentName( made ) << "\n";
+						log.flush();
+						check( "B1: the row is unsaved - it exists nowhere else yet",
+							skope->workspaceDocumentModified( made ) );
+						check( "B2: saving that row writes the file",
+							skope->saveWorkspaceDocumentTo( made, outPath ) );
+						check( "B3: ...and it stops being unsaved once written",
+							!skope->workspaceDocumentModified( made ) );
+					}
 
 					// A. the open document is not touched
 					QByteArray sourceAfter;
