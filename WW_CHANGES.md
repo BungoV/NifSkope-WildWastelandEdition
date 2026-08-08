@@ -40,7 +40,13 @@ above the skull rather than on it, and worth seeing rather than skipping.
 
 `fhat.nif` given face bones from `BaseFemaleHead_faceBones.nif` — 313 vertices,
 4 skin bones before and 68 after, 59 of them face-sculpt, 3756 bytes of
-CustomizationRemapData. 16 of 16:
+CustomizationRemapData. 17 of 17, including a new check **P**: the blob names
+`0:HEAD, 1:Head_skin, 2:Neck1_skin, 3:Neck_skin` and **no `skin_bone_*` at all**,
+while the shape's live skin binds 68 bones of which 59 are sculpt. That is the
+whole point of the format — the live skinning is the customization rig, the blob
+is how the same vertices map back to the *animation* skeleton — and G and H say
+it in byte comparisons where this says it in bone names, which is the language
+the question actually gets asked in.
 
 * the open document is byte-identical afterwards, and the sibling file reloads
 * RemapData is the **source's standard-skeleton** skinning, not the sculpt

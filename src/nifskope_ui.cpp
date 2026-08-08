@@ -1183,6 +1183,46 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "J: every remap index resolves, so no NewBonesData is needed",
 						outHi >= 0 && outHi < outBones.size() );
 
+					/* WHICH BONES THE BLOB ACTUALLY NAMES, spelled out.
+					 *
+					 * G and H say the blob is the source's skinning and not the
+					 * output's, which is the same claim in the language of byte
+					 * comparisons. This is that claim in the language of the format:
+					 * CustomizationRemapData is how the sculpt-rigged mesh maps BACK
+					 * to the animation skeleton, so every bone it names must be a
+					 * standard one. A skin_bone_* in here would mean the file
+					 * remembers its own face rig as its skeleton binding — valid
+					 * bytes, ruinous meaning, and invisible in every view.
+					 *
+					 * Named rather than counted, because "which bones" is the
+					 * question anyone actually asks of this blob.
+					 */
+					QSet<int> usedIdx;
+					for ( int off = 0; off + 12 <= outRemap.size(); off += 12 )
+						for ( int s = 0; s < 4; s++ ) {
+							const quint16 w = quint16( quint8( outRemap.at( off + s * 2 ) ) )
+								| ( quint16( quint8( outRemap.at( off + s * 2 + 1 ) ) ) << 8 );
+							if ( w )
+								usedIdx.insert( int( quint8( outRemap.at( off + 8 + s ) ) ) );
+						}
+					QStringList usedNames;
+					int sculptInRemap = 0;
+					QList<int> sorted( usedIdx.cbegin(), usedIdx.cend() );
+					std::sort( sorted.begin(), sorted.end() );
+					for ( int i : sorted ) {
+						const QString n = outBones.value( i );
+						usedNames << QStringLiteral( "%1:%2" ).arg( i ).arg( n );
+						if ( n.startsWith( QLatin1String( "skin_bone_" ), Qt::CaseInsensitive ) )
+							sculptInRemap++;
+					}
+					log << "remap names " << sorted.size() << " bone(s): "
+						<< usedNames.join( QStringLiteral( ", " ) ) << "\n"
+						<< "  (the shape's live skin binds " << outBones.size()
+						<< ", of which " << sculptCount << " are skin_bone_*)\n";
+					log.flush();
+					check( "P: the remap blob names no face-sculpt bone — it is the "
+						"standard-skeleton binding", sculptInRemap == 0 );
+
 					/* The donor is a vanilla faceBones mesh whose bone list
 					 * REPLACES the standard bones, so its blob must overrun.
 					 * Without this, J passes on any file at all and proves
