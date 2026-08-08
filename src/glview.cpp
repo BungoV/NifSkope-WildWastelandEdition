@@ -8526,6 +8526,50 @@ void GLView::gizmoEndElement( bool commit )
 //! the dialog out so the child geometry is valid. Clamped to the cursor's
 //! screen so it never opens partly off-screen. Pass onCursor = nullptr to
 //! centre the whole dialog on the cursor instead.
+/*! Make a confirmation look like Blender's, not like a Windows dialog.
+ *
+ *  Blender's confirmations are frameless, sit at the pointer, carry no title bar
+ *  and no icon, and fill the default button with the accent so the answer you are
+ *  about to give is obvious. Ours had a title bar reading "Delete - NifSkope -
+ *  …", a system frame, and two identical grey buttons — three lines of chrome
+ *  around four words of question, and nothing saying which button Enter presses.
+ *
+ *  Still a QMessageBox underneath. It carries the modality, the keyboard handling
+ *  and the Escape behaviour for free, and every driver that looks for one — the
+ *  harnesses included — keeps working. Only the chrome changes.
+ *
+ *  Colours come from the skin, never literals, so it follows the palette like
+ *  everything else.
+ */
+void tlStyleConfirmPopup( QMessageBox * box, QPushButton * preferred )
+{
+	if ( !box )
+		return;
+	box->setWindowFlags( ( box->windowFlags() | Qt::FramelessWindowHint )
+		& ~Qt::WindowTitleHint & ~Qt::WindowSystemMenuHint );
+	box->setIcon( QMessageBox::NoIcon );
+	box->setStyleSheet( QStringLiteral(
+		"QMessageBox { background: %1; border: 1px solid %2; }"
+		"QLabel { color: %3; padding: 6px 10px 2px 10px; }"
+		"QPushButton { background: %4; color: %3; border: 1px solid %2;"
+		"  border-radius: 3px; padding: 4px 18px; min-width: 64px; }"
+		"QPushButton:hover { background: %5; }"
+		"QPushButton:pressed { background: %6; }" )
+		.arg( wwSkinColor( "bgCard" ), wwSkinColor( "border" ), wwSkinColor( "text" ),
+			wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ), wwSkinColor( "bgBtnDown" ) ) );
+	// the accented one is the answer Enter gives, which a row of identical grey
+	// buttons cannot say
+	if ( preferred ) {
+		preferred->setStyleSheet( QStringLiteral(
+			"QPushButton { background: %1; color: %2; border: 1px solid %1;"
+			"  border-radius: 3px; padding: 4px 18px; min-width: 64px; font-weight: 600; }"
+			"QPushButton:hover { background: %1; border: 1px solid %3; }" )
+			.arg( wwSkinColor( "accent" ), wwSkinColor( "accentText" ),
+				wwSkinColor( "textBright" ) ) );
+		preferred->setDefault( true );
+	}
+}
+
 static void tlPlacePopupAtCursor( QWidget * box, QWidget * onCursor )
 {
 	if ( !box )
@@ -10860,7 +10904,9 @@ int GLView::deleteBlocksWithConfirm( const QVector<int> & blocks )
 	QPushButton * del = box.addButton( tr( "Delete" ), QMessageBox::AcceptRole );
 	box.addButton( tr( "Cancel" ), QMessageBox::RejectRole );
 	box.setDefaultButton( del );
-	// Blender-style: open with the Delete button under the pointer
+	// Blender-style: frameless and skin-coloured, with Delete accented and under
+	// the pointer, rather than a titled system dialog in the middle of the screen
+	tlStyleConfirmPopup( &box, del );
 	tlPlacePopupAtCursor( &box, del );
 	box.exec();
 	if ( box.clickedButton() != del )
@@ -11010,6 +11056,9 @@ void GLView::duplicateElements()
 			QPushButton * newShapeBtn = capBox.addButton( tr( "New Shape" ), QMessageBox::AcceptRole );
 			capBox.addButton( tr( "Cancel" ), QMessageBox::RejectRole );
 			capBox.setDefaultButton( newShapeBtn );
+			// the same look as the delete confirmation: these are the pair a user
+			// meets, and one dressed as a system dialog would stand out
+			tlStyleConfirmPopup( &capBox, newShapeBtn );
 			tlPlacePopupAtCursor( &capBox, newShapeBtn );
 			capBox.exec();
 			if ( capBox.clickedButton() != newShapeBtn ) {

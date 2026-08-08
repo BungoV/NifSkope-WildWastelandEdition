@@ -11048,7 +11048,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							QFile::remove( QApplication::applicationDirPath()
 								+ "/ww_blockrename_watchdog.log" );
 							QEventLoop spin;
-							QTimer::singleShot( 1800, &spin, &QEventLoop::quit );
+							// A/B (WW_NO_SPIN): does this 1.8 s of event loop, sitting
+							// right before the region that used to hang, hide the hang?
+							QTimer::singleShot( qEnvironmentVariableIsSet( "WW_NO_SPIN" ) ? 1 : 1800,
+								&spin, &QEventLoop::quit );
 							spin.exec();
 							QFile barked( QApplication::applicationDirPath()
 								+ "/ww_blockrename_watchdog.log" );

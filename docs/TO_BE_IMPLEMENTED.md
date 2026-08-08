@@ -163,10 +163,26 @@ second has to find it already there) — not by looking at the one link that mov
 because a redo that restored the right parent and lost a transform would pass
 that and fail this.
 
-The four sites that build a `NifSnapshotCommand` by hand (rigging, timeline, two
-in unfucktools) still compute their own "after" and still pay for it. They are
-one-off operations rather than the path every structural edit takes, so they were
-left alone; the lazy constructor is there if they want it.
+### The five hand-built sites keep their second snapshot — DO NOT "finish the job"
+
+`NifSnapshotCommand` is also built by hand in five places (rigging, timeline,
+three in unfucktools) and those still serialise twice. This was first written up
+here as unconverted stragglers, with the lazy constructor "there if they want
+it". **That was wrong**, and converting them would remove working guards:
+
+- **Rigging** (`riggingtools.cpp`) — if the "after" serialise fails it *restores
+  the target and warns*. That is failure detection for a transfer that has
+  already rewritten the file.
+- **Timeline** (`timelineedit.cpp`) — a failed serialise aborts the operation
+  rather than recording an undo step it cannot honour.
+- **Unfucktools**, all three — `const bool changed = ( before != after );`. They
+  push an undo step **only if the repair actually changed something**. Without
+  those bytes every no-op repair leaves a junk entry on the undo stack.
+
+So the second serialisation is not overhead in these five: it is paying for
+something, on operations run occasionally rather than dozens of times an hour.
+The hot path — every array resize, insertion and removal, through
+`nifSnapshotOp` — was the one paying twice for nothing, and that is fixed.
 
 What remains below is the original measurement, and the first paragraph of it is
 now half true.
