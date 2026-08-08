@@ -6890,6 +6890,47 @@ bool NifSkope::addWorkspaceDocumentFromFile( const QString & path )
 	return true;
 }
 
+/* THE LOADED NIFS LIST, ADDRESSED BY POSITION.
+ *
+ * Same reason setWorkspaceDisplayMode is here: the panel's state lives in a class
+ * that has no header, so a script — or a harness — cannot ask it anything
+ * directly. These are the questions worth being able to ask about a row.
+ */
+
+QString NifSkope::workspaceDocumentName( int backgroundIndex ) const
+{
+	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	return document ? document->displayName() : QString();
+}
+
+bool NifSkope::workspaceDocumentModified( int backgroundIndex ) const
+{
+	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	return document && document->isModified();
+}
+
+/*! How many times a Scene has been built for this row.
+ *
+ *  NOT "does it have one": asking for a Scene BUILDS one when it is missing, so
+ *  that question is always answered yes and a check asking it passes over a
+ *  destroyed Scene exactly as happily as over a surviving one — measured, with
+ *  the broken code, which is how this replaced it. A rebuild is what destruction
+ *  looks like from outside, so the count is the honest measurement.
+ */
+int NifSkope::workspaceDocumentSceneBuilds( int backgroundIndex )
+{
+	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	if ( !document || !ogl )
+		return -1;
+	ogl->workspaceSceneFor( document->nif );		// build it if it is not there
+	return ogl->workspaceSceneBuildCount( document->nif );
+}
+
+bool NifSkope::openWorkspaceDocumentHere( int backgroundIndex )
+{
+	return openBackgroundDocumentHere( sessionBackgroundDocuments.value( backgroundIndex ) );
+}
+
 /*! How a workspace document draws: 0 hidden, 1 solid, 2 semi-transparent. The
  *  same state the row's two buttons and its menu drive, addressed by position so
  *  it can be scripted.

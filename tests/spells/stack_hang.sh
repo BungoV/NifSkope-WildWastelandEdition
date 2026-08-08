@@ -5,7 +5,7 @@ cd /e/Projects/NifskopeWildWastelandEdition
 SP=/c/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/c80dd4eb-7ceb-431a-a539-4e2af763a7c8/scratchpad
 out="$SP/stack.txt"
 : > "$out"
-for attempt in 1 2 3 4; do
+for attempt in $(seq 1 12); do
 	MODES=list bash tests/spells/block_rename.sh >/dev/null 2>&1 &
 	runner=$!
 	sleep 25

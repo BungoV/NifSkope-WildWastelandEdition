@@ -168,6 +168,18 @@ public:
 	//! Show a loaded NIF in THIS window instead of opening another one; the row
 	//! it came from goes. False if cancelled at the unsaved prompt.
 	bool openBackgroundDocumentHere( BackgroundNifDocument * document );
+
+	/* The Loaded NIFs list addressed by position, for scripts and harnesses —
+	 * the panel's documents live in a class with no header, so there is no other
+	 * way to ask about a row. Same reason setWorkspaceDisplayMode is here.
+	 * (workspaceDocumentCount is declared with the display-mode group below.)
+	 */
+	QString workspaceDocumentName( int backgroundIndex ) const;
+	bool workspaceDocumentModified( int backgroundIndex ) const;
+	//! How many times a Scene has been BUILT for this row — a rebuild is what a
+	//! destroyed Scene looks like, and "does it have one" cannot see that.
+	int workspaceDocumentSceneBuilds( int backgroundIndex );
+	bool openWorkspaceDocumentHere( int backgroundIndex );
 	//! Build a faceBones NIF from a loaded document using the marked face donor,
 	//! and put the result in Loaded NIFs, unsaved. Returns why not, or empty.
 	QString generateFaceBonesInto( BackgroundNifDocument * source );

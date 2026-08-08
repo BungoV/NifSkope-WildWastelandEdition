@@ -221,6 +221,39 @@ static QString riggingSessionDonorLabel;
  */
 static QString riggingFaceBonesOutPath;
 
+/*! Node names the user has agreed to anchor to despite a rest-pose difference.
+ *
+ *  SHARED ACROSS THE STEPS, because the pipeline asks the same question twice
+ *  from two spells — Import Donor Bone Nodes walks the bone paths, Bind Donor
+ *  Bones checks the nodes it is about to bind — and being asked again about
+ *  'Chest' immediately after saying yes reads as the first answer having been
+ *  ignored. Measured on a hat and a head whose roots sit 91 units apart: the
+ *  import went through on the answer and the bind then rolled the whole transfer
+ *  back on its own copy of the same check.
+ *
+ *  By NAME, so it also covers the 59 face bones that share four ancestors.
+ */
+static QSet<QString> riggingAnchorAnyway;
+
+//! Ask about a node whose rest pose differs, once per name. True to carry on.
+static bool riggingAnchorDespitePose( const QString & nodeName, float delta )
+{
+	if ( riggingAnchorAnyway.contains( nodeName ) )
+		return true;
+	const QMessageBox::StandardButton answer = QMessageBox::question( nullptr,
+		QObject::tr( "Rest pose differs" ),
+		QObject::tr( "'%1' exists in both files but sits %2 apart, measured from the skeleton "
+			"root.\n\nAnchor to this file's '%1' and carry on? The imported bones will follow "
+			"this file's skeleton rather than the donor's, which is normally what you want when "
+			"putting face bones on your own mesh." )
+			.arg( nodeName ).arg( QString::number( double( delta ), 'f', 4 ) ),
+		QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Yes );
+	if ( answer != QMessageBox::Yes )
+		return false;
+	riggingAnchorAnyway << nodeName;
+	return true;
+}
+
 void tlSetFaceBonesOutputPath( const QString & path )
 {
 	riggingFaceBonesOutPath = path;
@@ -1433,12 +1466,8 @@ public:
 			if ( !targetBone.isEmpty() ) targetBoundNames << targetBone;
 		int missingBindings = 0;
 		QString preflightError;
-		/* Names the user has agreed to anchor to despite a rest-pose difference.
-		 * Cached by name because the preflight walks the path of EVERY donor bone,
-		 * and 59 face bones share the same handful of ancestors — asked once per
-		 * node, not once per bone that happens to hang below it.
-		 */
-		QSet<QString> anchorAnyway;
+		// see riggingAnchorAnyway: names the user has agreed to anchor to despite
+		// a rest-pose difference, remembered across the steps of one pipeline
 
 		QList<int> orderedSlots( usedSlots.begin(), usedSlots.end() );
 		std::sort( orderedSlots.begin(), orderedSlots.end() );
@@ -1519,22 +1548,11 @@ public:
 					 * mean by "put the face bones on THIS mesh".
 					 */
 					const float delta = riggingTransformDelta( donorPose, targetPose );
-					if ( delta > 0.001f && !anchorAnyway.contains( sourceName ) ) {
-						const QMessageBox::StandardButton answer = QMessageBox::question( nullptr,
-							Spell::tr( "Import Donor Bone Nodes" ),
-							Spell::tr( "'%1' exists in both files but sits %2 apart, measured from the "
-								"skeleton root.\n\nAnchor to this file's '%1' and carry on? The imported "
-								"bones will follow this file's skeleton rather than the donor's, which "
-								"is normally what you want when putting face bones on your own mesh." )
-								.arg( sourceName ).arg( QString::number( double( delta ), 'f', 4 ) ),
-							QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Yes );
-						if ( answer != QMessageBox::Yes ) {
-							preflightError = Spell::tr( "Existing target node '%1' has an incompatible "
-								"root-relative rest pose, %2 apart." )
-								.arg( sourceName ).arg( QString::number( double( delta ), 'f', 4 ) );
-							break;
-						}
-						anchorAnyway << sourceName;
+					if ( delta > 0.001f && !riggingAnchorDespitePose( sourceName, delta ) ) {
+						preflightError = Spell::tr( "Existing target node '%1' has an incompatible "
+							"root-relative rest pose, %2 apart." )
+							.arg( sourceName ).arg( QString::number( double( delta ), 'f', 4 ) );
+						break;
 					}
 					sourceToTarget.insert( current, matches.first() );
 					break;
@@ -1896,10 +1914,22 @@ public:
 				int donorIndex = donorSlot.value( bone );
 				int donorNode = donor.getLink( donor.getIndex( iDonorBones, donorIndex ) );
 				Transform donorWorld, targetWorld;
-				if ( !donorTree.contains( donorNode )
-					|| !riggingNodeWorld( &donor, donorNode, donorRoot, donorWorld )
-					|| !riggingNodeWorld( nif, targetNodes.value( bone ), targetRoot, targetWorld )
-					|| riggingTransformDelta( donorWorld, targetWorld ) > 0.001f )
+				const bool posesRead = donorTree.contains( donorNode )
+					&& riggingNodeWorld( &donor, donorNode, donorRoot, donorWorld )
+					&& riggingNodeWorld( nif, targetNodes.value( bone ), targetRoot, targetWorld );
+				/* THE SAME QUESTION THE IMPORT STEP ASKS, and the same answer.
+				 *
+				 * This had its own copy of the rest-pose check, so a pipeline that
+				 * had just been told to anchor to 'Chest' anyway hit an identical
+				 * refusal here and rolled the whole transfer back — which reads as
+				 * the answer having been ignored, because it was. Measured on a hat
+				 * and a head whose skeleton roots sit 91 units apart.
+				 */
+				const float delta = posesRead
+					? riggingTransformDelta( donorWorld, targetWorld ) : 0.0f;
+				if ( !posesRead )
+					incompatiblePose << bone;
+				else if ( delta > 0.001f && !riggingAnchorDespitePose( bone, delta ) )
 					incompatiblePose << bone;
 				else
 					addNames << bone;

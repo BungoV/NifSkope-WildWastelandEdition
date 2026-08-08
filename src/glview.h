@@ -620,6 +620,16 @@ private:
 	QSet<NifModel *> workspaceScenesStale;
 	//! Block count when each secondary Scene was made; a change means structural.
 	QHash<NifModel *, int> workspaceSceneBlockCount;
+	//! How many times a Scene has been BUILT for a model. A rebuild is what a
+	//! destroyed Scene looks like from outside, and "does it have one" cannot see
+	//! that, because asking builds one.
+	QHash<NifModel *, int> workspaceSceneBuilds;
+public:
+	int workspaceSceneBuildCount( NifModel * model ) const
+	{
+		return workspaceSceneBuilds.value( model );
+	}
+private:
 	void flushStaleWorkspaceScenes();
 	bool workspaceStaleFlushQueued = false;
 	//! Pose the marked skeleton and give its pose to every scene that snaps to it.

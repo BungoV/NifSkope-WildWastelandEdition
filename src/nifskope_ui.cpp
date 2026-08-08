@@ -8240,6 +8240,120 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * Log: release/ww_colldrop_test.log
 	 */
+	/* TEST HARNESS (WW_LOADEDNIFS_TEST=<a nif to add>): the Loaded NIFs panel.
+	 *
+	 * Everything here shipped on a reading of the code and on the other suites not
+	 * regressing, which is not the same as verified — and three features this same
+	 * night shipped green and were broken. These are the two that moved data.
+	 *
+	 * WHAT IS MEASURED
+	 *
+	 *   1. a NIF can be added to the panel from a path             <- not vacuous
+	 *   2. a freshly opened one is NOT marked modified. The workspace POSES loaded
+	 *      documents, so the bytes stop matching the file with nobody having
+	 *      edited anything, and reading that as "modified" painted every row red
+	 *   3. it has a Scene
+	 *   4. GHOSTING KEEPS THE SCENE. Ghosting used to take the document out of the
+	 *      render list, which deleted its Scene, which dropped any mesh posed
+	 *      against it back to bind pose — a display toggle moving geometry in
+	 *      another file. This is the check for that
+	 *   5. opening a row here SWAPS: the list keeps its size, because the document
+	 *      leaving the window takes the place of the one that entered it
+	 *   6. ...and the row that was opened is gone from the list
+	 *   7. ...and the one that left the window is in it, by name
+	 *
+	 * Log: release/ww_loadednifs_test.log
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_LOADEDNIFS_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_loadednifs_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
+				};
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					const QString add = qEnvironmentVariable( "WW_LOADEDNIFS_TEST" );
+					const QString openedHere = QFileInfo( fname ).fileName();
+					log << "primary: " << openedHere << ", adding: "
+						<< QFileInfo( add ).fileName() << "\n";
+
+					const int was = skope->workspaceDocumentCount();
+					check( "a NIF can be added to Loaded NIFs from a path",
+						skope->addWorkspaceDocumentFromFile( add )
+							&& skope->workspaceDocumentCount() == was + 1 );
+					if ( skope->workspaceDocumentCount() != was + 1 ) break;
+					const int row = skope->workspaceDocumentCount() - 1;
+					QApplication::processEvents();
+
+					/* NOT MODIFIED. This is the whole of the red-row regression: the
+					 * workspace poses what it loads, so "the bytes differ from the
+					 * file" is true of everything the moment a scene exists.
+					 */
+					check( "a freshly opened NIF is not marked modified",
+						!skope->workspaceDocumentModified( row ) );
+
+					if ( GLView * view = skope->getGLView() ) {
+						for ( int i = 0; i < 2; i++ ) { view->update(); QApplication::processEvents(); }
+					}
+					/* BUILDS, NOT "has one". Asking for a Scene builds one when it is
+					 * missing, so "does it have a Scene" is answered yes whether the
+					 * old one survived or was destroyed a moment ago — the first
+					 * version of this check passed against the broken code, which is
+					 * how that was found out. A REBUILD is what destruction looks like.
+					 */
+					const int builtBefore = skope->workspaceDocumentSceneBuilds( row );
+					check( "...and it has a Scene", builtBefore >= 1 );
+
+					// 2 = semi-transparent, the same value the row's button writes
+					skope->setWorkspaceDisplayMode( row, 2 );
+					QApplication::processEvents();
+					const int builtAfter = skope->workspaceDocumentSceneBuilds( row );
+					log << "scene builds: " << builtBefore << " -> " << builtAfter
+						<< " across ghosting\n";
+					check( "GHOSTING KEEPS ITS SCENE, so meshes posed against it do not move",
+						builtAfter == builtBefore );
+					skope->setWorkspaceDisplayMode( row, 1 );
+					QApplication::processEvents();
+
+					/* THE SWAP. Opening a row in this window used to delete that row
+					 * and leave the outgoing document nowhere, so the workspace lost
+					 * one every time.
+					 */
+					const QString incoming = skope->workspaceDocumentName( row );
+					const int before = skope->workspaceDocumentCount();
+					const bool opened = skope->openWorkspaceDocumentHere( row );
+					QApplication::processEvents();
+					QStringList after;
+					for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+						after << skope->workspaceDocumentName( i );
+					log << "opened " << incoming << " here: " << before << " row(s) -> "
+						<< after.size() << " [" << after.join( QStringLiteral( ", " ) ) << "]\n";
+					check( "opening a row in this window is a swap, not a loss",
+						opened && after.size() == before );
+					check( "...the row that was opened has left the list",
+						!after.contains( incoming ) );
+					check( "...and the document it displaced is in the list",
+						after.contains( openedHere ) );
+
+				} while ( false );
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLDROP_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
 			QTimer::singleShot( 1500, skope, [skope, ok]() {

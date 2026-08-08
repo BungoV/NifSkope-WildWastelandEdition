@@ -889,6 +889,13 @@ Scene * GLView::workspaceSceneFor( NifModel * model )
 		return nullptr;
 	Scene *& ws = workspaceScenes[model];
 	if ( !ws ) {
+		/* Counted, because "does this document have a Scene" cannot answer the
+		 * question anyone actually has: this function BUILDS one when it is
+		 * missing, so the answer is always yes and a check asking it passes over
+		 * the bug as happily as over the fix. What matters is whether the Scene
+		 * SURVIVED — and a rebuild is exactly what a destroyed one looks like.
+		 */
+		workspaceSceneBuilds[model]++;
 		/* A secondary's Scene had NO connection to its own model.
 		 *
 		 * The primary is kept current by GLView::dataChanged calling
