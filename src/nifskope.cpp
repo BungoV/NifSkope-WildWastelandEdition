@@ -85,6 +85,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QPointer>
+#include <QTemporaryFile>
 #include <QDropEvent>
 #include <QMimeData>
 #include <QToolTip>
@@ -1543,6 +1544,20 @@ NifSkope::NifSkope( bool background )
 				showDocumentMenu( document, loadedNifsView->viewport()->mapToGlobal( pos ) );
 			else if ( BackgroundNifDocument * background = backgroundDocumentFromBrowserIndex( index ) )
 				showBackgroundDocumentMenu( background, loadedNifsView->viewport()->mapToGlobal( pos ) );
+			else {
+				/* NO EARLY RETURN ON EMPTY SPACE. Adding a file is the first thing
+				 * you want from this panel and an empty panel is exactly when there
+				 * is no row to right-click, so bailing out when the click missed
+				 * made the one entry that matters unreachable in the state that
+				 * needs it. Same mistake the Collision Manager's row menu made.
+				 */
+				QMenu menu( this );
+				QAction * add = menu.addAction( tr( "Add NIF to Loaded NIFs…" ) );
+				add->setToolTip( tr( "Load any NIF from disk as a workspace document" ) );
+				menu.setToolTipsVisible( true );
+				if ( menu.exec( loadedNifsView->viewport()->mapToGlobal( pos ) ) == add )
+					addWorkspaceDocumentsFromDialog();
+			}
 		} );
 
 	/* DOUBLE-CLICK A ROW TO EDIT IT, which is what double-clicking a list of
@@ -1555,14 +1570,35 @@ NifSkope::NifSkope( bool background )
 	 */
 	connect( loadedNifsView, &QAbstractItemView::doubleClicked, this,
 		[this]( const QModelIndex & index ) {
+			/* A ROW THAT ALREADY HAS A WINDOW IS SWITCHED TO, NEVER RE-OPENED.
+			 *
+			 * Only the data-only rows — the ones loaded into the panel rather than
+			 * opened as documents — become a window on double-click, because for
+			 * them there is no window yet and making one IS the edit gesture. For
+			 * anything already open, double-click activates the document that
+			 * exists: opening a second window onto the same file is never what the
+			 * gesture meant, and that is what it looked like it was doing.
+			 */
 			if ( NifSkope * document = documentFromBrowserIndex( index ) ) {
 				const int tab = documentTabWindows.indexOf( document );
 				if ( tab >= 0 )
 					activateDocumentTab( tab );
-			} else if ( BackgroundNifDocument * background =
-				backgroundDocumentFromBrowserIndex( index ) ) {
-				promoteBackgroundDocument( background );
+				return;
 			}
+			BackgroundNifDocument * background = backgroundDocumentFromBrowserIndex( index );
+			if ( !background )
+				return;
+			// the same file may already be open as a window; switch to that rather
+			// than promoting a second copy of it
+			for ( NifSkope * open : std::as_const( documentTabWindows ) ) {
+				if ( open && !background->currentFile.isEmpty()
+					&& open->currentFile == background->currentFile )
+				{
+					activateDocumentTab( documentTabWindows.indexOf( open ) );
+					return;
+				}
+			}
+			promoteBackgroundDocument( background );
 		} );
 
 	// Empty Model for swapping out before model fill
@@ -2751,6 +2787,18 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	asFaceDonor->setToolTip( tr( "The rigging steps take their sculpt bones from this file "
 		"without asking each time. Mark the vanilla head's _faceBones.nif; it is read, never "
 		"written to." ) );
+	// mark the donor once, then right-click the head: the whole workflow without
+	// opening either of them as a document
+	QAction * makeFaceBones = menu.addAction( tr( "Generate faceBones NIF from this" ) );
+	makeFaceBones->setEnabled( NifSkope::workspaceFaceDonor()
+		&& NifSkope::workspaceFaceDonor() != document->nif );
+	makeFaceBones->setToolTip( NifSkope::workspaceFaceDonor()
+		? tr( "Build a faceBones NIF from this file using the marked donor. It appears in "
+			"Loaded NIFs unsaved, to be saved wherever you want it." )
+		: tr( "Mark a file as the face donor first" ) );
+	QAction * saveAs = menu.addAction( tr( "Save As…" ) );
+	saveAs->setToolTip( tr( "Write this loaded NIF to a file" ) );
+	QAction * addFiles = menu.addAction( tr( "Add NIF to Loaded NIFs…" ) );
 	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
 	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
 	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
@@ -2801,6 +2849,17 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 			document->displayName() );
 		refreshAllDocumentSessions();
 	}
+	else if ( chosen == makeFaceBones ) {
+		const QString trouble = generateFaceBonesInto( document );
+		if ( !trouble.isEmpty() )
+			QMessageBox::warning( this, tr( "Generate faceBones NIF" ), trouble );
+		else
+			statusBar()->showMessage(
+				tr( "Generated a faceBones NIF from %1 — unsaved, save it where you want it." )
+					.arg( document->displayName() ), 8000 );
+	}
+	else if ( chosen == saveAs ) saveBackgroundDocumentAs( document );
+	else if ( chosen == addFiles ) addWorkspaceDocumentsFromDialog();
 	else if ( chosen == makePrimary ) promoteBackgroundDocument( document );
 	else if ( chosen == visible ) {
 		document->sessionPreviewVisible = visible->isChecked();
@@ -2831,6 +2890,117 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	} else if ( chosen == unload || chosen == close ) {
 		removeBackgroundDocument( document );
 	}
+}
+
+extern void tlSetFaceBonesOutputPath( const QString & path );
+
+/*! Build a faceBones NIF from a loaded document, using the marked face donor.
+ *
+ *  The other route needs the base head open as the primary document and walks
+ *  through the numbered rigging steps. This one is for the case the workspace is
+ *  actually for: several files loaded, one of them marked as the face donor, and
+ *  a base head sitting in the list that wants face bones. Mark the donor once,
+ *  right-click the head, and the result appears beside them.
+ *
+ *  It lands UNSAVED, on purpose. Writing it next to the source without being told
+ *  to is how you end up with generated files scattered through a mod folder; the
+ *  document carries the name it would take and waits to be saved somewhere.
+ *
+ *  \return the empty string on success, or why not.
+ */
+QString NifSkope::generateFaceBonesInto( BackgroundNifDocument * source )
+{
+	if ( !source || !source->nif )
+		return tr( "That row has no model." );
+	if ( !NifSkope::workspaceFaceDonor() )
+		return tr( "No face donor is marked. Right-click the vanilla head's _faceBones.nif "
+			"in Loaded NIFs and choose \"Use as Face Donor for faceBones\" first." );
+	if ( NifSkope::workspaceFaceDonor() == source->nif )
+		return tr( "That row IS the marked face donor. Pick the base head instead." );
+
+	SpellPtr create = SpellBook::lookup( QLatin1String( "Rigging/Create faceBones NIF..." ) );
+	if ( !create )
+		return tr( "The Create faceBones NIF action is unavailable." );
+
+	// the shape it applies to, found in the row's own model
+	QModelIndex shape;
+	for ( int b = 0; b < source->nif->getBlockCount() && !shape.isValid(); b++ ) {
+		const QModelIndex idx = source->nif->getBlockIndex( b );
+		if ( create->isApplicable( source->nif, idx ) )
+			shape = idx;
+	}
+	if ( !shape.isValid() )
+		return tr( "%1 has no shape that can be given face bones." ).arg( source->displayName() );
+
+	/* Written to a temporary and loaded back, rather than built in memory: the
+	 * spell's output path is a file, and re-reading what it actually wrote is a
+	 * stronger guarantee than trusting a model handed sideways. The temporary is
+	 * removed either way.
+	 */
+	QTemporaryFile temp( QDir::tempPath() + QStringLiteral( "/nifskope-facebones-XXXXXX.nif" ) );
+	temp.setAutoRemove( true );
+	if ( !temp.open() )
+		return tr( "Could not make a temporary file to build into." );
+	const QString tempPath = temp.fileName();
+	temp.close();
+
+	tlSetFaceBonesOutputPath( tempPath );
+	create->cast( source->nif, shape );
+	// the spell clears the override itself; clearing again costs nothing and
+	// means a spell that returned early cannot leave it armed
+	tlSetFaceBonesOutputPath( QString() );
+
+	if ( QFileInfo( tempPath ).size() <= 0 )
+		return tr( "Nothing was generated — see the message the rigging step gave." );
+	if ( !addWorkspaceDocumentFromFile( tempPath ) )
+		return tr( "The generated file could not be read back." );
+
+	// name it as it would be saved, and mark it as existing nowhere else
+	if ( BackgroundNifDocument * made = sessionBackgroundDocuments.isEmpty()
+		? nullptr : sessionBackgroundDocuments.last() )
+	{
+		const QFileInfo from( source->currentFile );
+		made->currentFile = from.absolutePath().isEmpty()
+			? from.completeBaseName() + QStringLiteral( "_faceBones.nif" )
+			: from.absolutePath() + QLatin1Char( '/' )
+				+ from.completeBaseName() + QStringLiteral( "_faceBones.nif" );
+		made->unsavedInMemory = true;
+		made->sessionPreviewVisible = true;
+	}
+	refreshAllDocumentSessions();
+	return QString();
+}
+
+/*! Load one or more NIFs from anywhere on disk into Loaded NIFs.
+ *
+ *  The panel could only be filled from the resource browser or by opening a
+ *  document window, so a file sitting in a mod folder — the usual case for a
+ *  donor — had to be opened as a whole window first. Multi-select, because
+ *  gathering a base head and its faceBones counterpart is one trip.
+ *
+ *  \return how many were added; failures are named rather than counted silently.
+ */
+int NifSkope::addWorkspaceDocumentsFromDialog()
+{
+	const QStringList paths = QFileDialog::getOpenFileNames( this,
+		tr( "Add NIFs to Loaded NIFs" ), nif ? nif->getFolder() : QString(),
+		tr( "NIF files (*.nif);;All files (*)" ) );
+	if ( paths.isEmpty() )
+		return 0;
+	int added = 0;
+	QStringList failed;
+	for ( const QString & path : paths ) {
+		if ( addWorkspaceDocumentFromFile( path ) )
+			added++;
+		else
+			failed << QFileInfo( path ).fileName();
+	}
+	if ( !failed.isEmpty() )
+		QMessageBox::warning( this, tr( "Add NIFs" ),
+			tr( "Could not read %1." ).arg( failed.join( QStringLiteral( ", " ) ) ) );
+	if ( added )
+		statusBar()->showMessage( tr( "Added %1 NIF(s) to Loaded NIFs" ).arg( added ), 5000 );
+	return added;
 }
 
 /*! Write a data-only loaded NIF to a file the user picks.

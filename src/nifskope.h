@@ -163,6 +163,11 @@ public:
 	//! Write a data-only loaded NIF to a file the user picks; false if cancelled
 	//! or the write failed. Also what the close prompt calls when you say Save.
 	bool saveBackgroundDocumentAs( BackgroundNifDocument * document );
+	//! Load NIFs from anywhere on disk into Loaded NIFs; returns how many.
+	int addWorkspaceDocumentsFromDialog();
+	//! Build a faceBones NIF from a loaded document using the marked face donor,
+	//! and put the result in Loaded NIFs, unsaved. Returns why not, or empty.
+	QString generateFaceBonesInto( BackgroundNifDocument * source );
 
 	static NifModel * workspaceFaceDonor();
 	static QString workspaceFaceDonorName();

@@ -213,6 +213,26 @@ static RiggingWorkflowState riggingWorkflow;
 static std::unique_ptr<QTemporaryFile> riggingSessionDonorFile;
 static QString riggingSessionDonorLabel;
 
+/*! Where the next Create faceBones NIF should write, instead of asking.
+ *
+ *  ONE-SHOT on purpose: taken and cleared by the spell, so a caller that sets it
+ *  and then does not run cannot leave a later invocation quietly writing to a
+ *  path the user never chose.
+ */
+static QString riggingFaceBonesOutPath;
+
+void tlSetFaceBonesOutputPath( const QString & path )
+{
+	riggingFaceBonesOutPath = path;
+}
+
+QString tlTakeFaceBonesOutputPath()
+{
+	const QString taken = riggingFaceBonesOutPath;
+	riggingFaceBonesOutPath.clear();
+	return taken;
+}
+
 static QString riggingDonorDisplayName( const QString & fileName )
 {
 	if ( riggingSessionDonorFile && fileName == riggingSessionDonorFile->fileName()
@@ -1413,6 +1433,12 @@ public:
 			if ( !targetBone.isEmpty() ) targetBoundNames << targetBone;
 		int missingBindings = 0;
 		QString preflightError;
+		/* Names the user has agreed to anchor to despite a rest-pose difference.
+		 * Cached by name because the preflight walks the path of EVERY donor bone,
+		 * and 59 face bones share the same handful of ancestors — asked once per
+		 * node, not once per bone that happens to hang below it.
+		 */
+		QSet<QString> anchorAnyway;
 
 		QList<int> orderedSlots( usedSlots.begin(), usedSlots.end() );
 		std::sort( orderedSlots.begin(), orderedSlots.end() );
@@ -1469,11 +1495,46 @@ public:
 				}
 				if ( matches.size() == 1 ) {
 					Transform donorPose, targetPose;
-					if ( !riggingNodeWorld( &donor, current, donorRoot, donorPose )
-						|| !riggingNodeWorld( nif, matches.first(), targetRoot, targetPose )
-						|| riggingTransformDelta( donorPose, targetPose ) > 0.001f ) {
-						preflightError = Spell::tr( "Existing target node '%1' has an incompatible root-relative rest pose." ).arg( sourceName );
+					const bool posesRead = riggingNodeWorld( &donor, current, donorRoot, donorPose )
+						&& riggingNodeWorld( nif, matches.first(), targetRoot, targetPose );
+					if ( !posesRead ) {
+						preflightError = Spell::tr( "Rest pose of '%1' could not be read on both sides." )
+							.arg( sourceName );
 						break;
+					}
+					/* A REST POSE THAT DIFFERS IS A QUESTION, NOT A DEAD END.
+					 *
+					 * Anchoring to an existing target node is already what happens
+					 * when the poses agree — the walk stops there and the donor's
+					 * bones hang off the node the target already has. When they
+					 * disagree this refused the entire import, which is right as a
+					 * default (the imported bones will follow the TARGET's pose, not
+					 * the donor's, and on a shared ancestor like Chest that is a real
+					 * difference) and useless as the only option: a headgear mesh
+					 * whose Chest sits a millimetre from the head's could not be
+					 * given face bones at all.
+					 *
+					 * So it says how far apart they are and lets the user decide.
+					 * Anchoring to their own skeleton is usually exactly what they
+					 * mean by "put the face bones on THIS mesh".
+					 */
+					const float delta = riggingTransformDelta( donorPose, targetPose );
+					if ( delta > 0.001f && !anchorAnyway.contains( sourceName ) ) {
+						const QMessageBox::StandardButton answer = QMessageBox::question( nullptr,
+							Spell::tr( "Import Donor Bone Nodes" ),
+							Spell::tr( "'%1' exists in both files but sits %2 apart, measured from the "
+								"skeleton root.\n\nAnchor to this file's '%1' and carry on? The imported "
+								"bones will follow this file's skeleton rather than the donor's, which "
+								"is normally what you want when putting face bones on your own mesh." )
+								.arg( sourceName ).arg( QString::number( double( delta ), 'f', 4 ) ),
+							QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Yes );
+						if ( answer != QMessageBox::Yes ) {
+							preflightError = Spell::tr( "Existing target node '%1' has an incompatible "
+								"root-relative rest pose, %2 apart." )
+								.arg( sourceName ).arg( QString::number( double( delta ), 'f', 4 ) );
+							break;
+						}
+						anchorAnyway << sourceName;
 					}
 					sourceToTarget.insert( current, matches.first() );
 					break;
@@ -3904,14 +3965,22 @@ public:
 			suggested = info.absolutePath() + QLatin1Char( '/' )
 				+ info.completeBaseName() + QStringLiteral( "_faceBones.nif" );
 		}
-		// TEST SEAM (WW_FACEBONES_TEST harness), matching WW_TEST_DONOR above:
-		// getSaveFileName is a native dialog, so no QTimer can drive it.
+		/* WHERE IT GOES, in three ways and in this order.
+		 *
+		 * A caller can name the path outright — that is how "generate one into
+		 * Loaded NIFs" works, writing to a temporary the document is then loaded
+		 * from — then the harness's env var, then asking. The override is one-shot
+		 * so a caller can never leave the next invocation silently writing
+		 * somewhere the user did not choose.
+		 */
+		const QString requested = tlTakeFaceBonesOutputPath();
 		const QByteArray envOut = qgetenv( "WW_TEST_FACEBONES_OUT" );
-		const QString outPath = envOut.isEmpty()
-			? QFileDialog::getSaveFileName( nullptr,
-				Spell::tr( "Save faceBones NIF As" ), suggested,
-				Spell::tr( "NIF files (*.nif)" ) )
-			: QString::fromLocal8Bit( envOut );
+		const QString outPath = !requested.isEmpty() ? requested
+			: ( envOut.isEmpty()
+				? QFileDialog::getSaveFileName( nullptr,
+					Spell::tr( "Save faceBones NIF As" ), suggested,
+					Spell::tr( "NIF files (*.nif)" ) )
+				: QString::fromLocal8Bit( envOut ) );
 		if ( outPath.isEmpty() )
 			return index;
 		if ( !sourcePath.isEmpty()

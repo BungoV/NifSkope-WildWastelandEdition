@@ -1,5 +1,42 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08e — Loaded NIFs becomes a place you can work
+
+Four things, and together they make the panel a workspace rather than a list of
+things already open.
+
+**Add NIF to Loaded NIFs…** — load anything from anywhere on disk, multi-select,
+without opening it as a document window first. On the row menu and on the empty
+panel, because an empty panel is exactly when you need it and there is no row to
+right-click.
+
+**Save As…** on a loaded NIF, which had nowhere to belong while these were only
+read-only copies of files already on disk.
+
+**Generate faceBones NIF from this** — mark the vanilla head's `_faceBones.nif`
+as the face donor once, right-click a base head in the list, and the result
+appears beside them. Neither file has to be opened as a document. It lands
+**unsaved**, carrying the name it would take: writing generated files next to
+their source without being asked is how mod folders fill up with things nobody
+chose to create.
+
+**Double-click** opens only what has no window yet. A row that is already a
+document is switched to, and a data-only row whose file is already open as a
+window switches to that window rather than promoting a second copy of it.
+
+### And the rest-pose refusal is a question now
+
+`Import Donor Bone Nodes` refused the entire import when a node existing in both
+files — `Chest`, typically — sat differently relative to the skeleton root. That
+is the right default, since the imported bones will follow the target's pose
+rather than the donor's, and it was also the only option: a headgear mesh whose
+`Chest` sits a fraction from the head's could not be given face bones at all.
+
+It now says **how far apart they are** and offers to anchor to your file's node
+and carry on, which is normally what "put the face bones on THIS mesh" means. The
+answer is remembered per node name, so 59 face bones sharing four ancestors ask
+four questions rather than fifty-nine.
+
 ## 2026-08-08d — Decimate is a live operator, and window_state_roundtrip runs again
 
 ### Decimate, with the ratio on a redo panel
