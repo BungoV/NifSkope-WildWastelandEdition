@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08i — Block Details fills in again
+
+Selecting a block showed its column headers and nothing under them — 37 rows in
+the model, none of them painted.
+
+Blanking the panel when nothing is selected works by handing the tree a filter
+with an **empty keep set**, which hides everything there is. That filter was
+lifted again only when the tree's model changed, on the assumption that the two
+always move together. They do not: `swapModels()` puts the tree back on the real
+model during a load without knowing a filter was left on it. So a window that had
+no selection and then received a document — the starter cube being exactly that —
+came up with the filter still armed, and every block you clicked showed nothing.
+
+Typing anything into the details filter box and clearing it again was the
+workaround, which is also the clue: the search box owns the same filter.
+
+It is tracked by its own flag now, so selecting a block lifts **that** filter and
+leaves the search box's and the pinned-only toggle's alone.
+
+`starter_reload.sh` grows to 15 checks: rows are painted at all, the search box
+narrows them, it keeps narrowing them across a block switch (the keep set is
+per block), and clearing it gives them all back. Counted by what the view **lays
+out** — a hidden row has an empty `visualRect` — not by `isRowHidden( r, parent )`,
+which ignores `r` and answers for the index handed to it. The obvious call asks
+"is the block itself hidden" once per row; it agreed with this defect by luck,
+which is how a proxy metric earns trust it has not got.
+
 ## 2026-08-08h — Reload gives the starter cube back
 
 An untitled window **is** the starter cube — that is what NifSkope opens on — and

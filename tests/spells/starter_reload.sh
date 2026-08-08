@@ -20,14 +20,29 @@
 #      property / texture set), not just some blocks
 #   3. an untouched window is CLEAN, so closing it does not ask about saving
 #   4. it renders -- the framebuffer grab is not empty
-#   5. reload puts the block count back after an edit
-#   6. ...to the cube, not to an empty document        <- the defect
-#   7. ...and clean again, as a freshly opened window is
+#   5. selecting a block PAINTS ROWS in Block Details  <- the second defect
+#   6. ...the search box narrows them
+#   7. ...and keeps narrowing them across a block switch
+#   8. ...and clearing it gives them all back
+#   9. reload puts the block count back after an edit
+#  10. ...to the cube, not to an empty document        <- the first defect
+#  11. ...and clean again, as a freshly opened window is
 #
-# Check 5 edits the document first. A reload that did nothing whatsoever would
+# Check 9 edits the document first. A reload that did nothing whatsoever would
 # pass a bare "the cube is still there", which is exactly the state this
 # replaced -- the blank window came from the load FAILING, so "did the count
 # change" has to be asked against a count that was deliberately made wrong.
+#
+# BLOCK DETAILS is counted by what the view LAYS OUT -- a hidden row has an empty
+# visualRect -- not by asking NifTreeView::isRowHidden( r, parent ), which ignores
+# r and answers for the index it was handed. The obvious call asks "is the block
+# itself hidden" once per row; it agreed with this defect by luck, which is how a
+# proxy metric earns trust it has not got.
+#
+# Checks 6-8 exist because blanking the panel and searching it are the SAME
+# filter on the same view with different owners: lifting the blank one on
+# selection must not lift the search box's, and the keep set is per block, so it
+# has to survive switching away and back.
 #
 # NOTE ON WW_ VARIABLES: startupCubeWanted() is off for any WW_* environment, so
 # every other harness keeps the empty document it was written against.
@@ -84,6 +99,22 @@ if [ -s "$SHOT" ]; then
 else
 	check 0 "it renders"
 fi
+
+dline=$(grep '^details: ' "$LOG")
+shown=$(printf '%s' "$dline" | sed -n 's/.*, shown \([0-9]*\).*/\1/p')
+check "$([ "${shown:-0}" -gt 0 ] && echo 1 || echo 0)" \
+	"selecting a block paints rows in Block Details (${shown:-none})"
+
+fline=$(grep '^details filter: ' "$LOG")
+match=$(printf '%s' "$fline" | sed -n "s/.*, \([0-9]*\) matching.*/\1/p")
+kept=$(printf '%s' "$fline" | sed -n 's/.*, \([0-9]*\) after switching.*/\1/p')
+back=$(printf '%s' "$fline" | sed -n 's/.*, \([0-9]*\) once cleared.*/\1/p')
+check "$([ "${match:-0}" -gt 0 ] && [ "${match:-0}" -lt "${shown:-0}" ] && echo 1 || echo 0)" \
+	"...and the search box narrows them to ${match:-none} of ${shown:-none}"
+check "$([ "${kept:-0}" = "${match:-x}" ] && echo 1 || echo 0)" \
+	"...and still does after switching block and back (${kept:-none})"
+check "$([ "${back:-0}" = "${shown:-x}" ] && echo 1 || echo 0)" \
+	"...and clearing it gives all ${shown:-none} back"
 
 line=$(grep '^reload: ' "$LOG")
 base=$(printf '%s' "$line" | sed -n 's/^reload: \([0-9]*\) blocks.*/\1/p')

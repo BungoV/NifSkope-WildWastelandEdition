@@ -10849,8 +10849,16 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						const QRect avail = scr ? scr->availableGeometry() : QRect();
 						const bool clamped = !avail.isNull()
 							&& !avail.adjusted( 1, 1, -1, -1 ).contains( confirmFrame );
+						// ...and the pointer is the USER'S pointer, on a machine
+						// they are working on. If it moved between the placement
+						// reading it and this reading it, the two disagree about
+						// where "under the cursor" was and the miss is the test's,
+						// not the code's.
+						const bool moved = QCursor::pos() != pointer;
 						if ( clamped )
 							log << "  (popup clamped to a screen edge; placement not asserted)\n";
+						else if ( moved )
+							log << "  (pointer moved during the check; placement not asserted)\n";
 						else
 							check( "...and lands under the pointer, not offset from it",
 								sawConfirm && defaultBtn.contains( pointer ) );
@@ -16202,6 +16210,85 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						qApp->processEvents();
 					}
 					skope->ogl->grabFramebuffer().save( starterShot );
+
+					/* AND SELECTING A BLOCK FILLS BLOCK DETAILS.
+					 *
+					 * Reported empty on this exact document: the cube selected in
+					 * the Block List, the panel showing its two column headers and
+					 * nothing under them. Everything the panel needs is decided in
+					 * NifSkope::select — which model the tree is on, which block is
+					 * its root, and whether a filter is hiding what is there — so
+					 * all four are logged rather than just the row count, because
+					 * "empty" has four different causes and they need telling apart.
+					 */
+					{
+						const QModelIndex shape = nif->getBlockIndex( 1 );
+						skope->select( shape );
+						qApp->processEvents();
+						NifTreeView * t = skope->tree;
+						const QModelIndex droot = t->rootIndex();
+						const int rows = t->model() ? t->model()->rowCount( droot ) : -1;
+						/* COUNTED BY WHAT IS LAID OUT, not by asking the view which
+						 * rows it hides.
+						 *
+						 * NifTreeView::isRowHidden( r, index ) ignores r and answers
+						 * for the INDEX it was handed — so the obvious
+						 * isRowHidden( r, root ) asks "is the block itself hidden"
+						 * thirty-seven times. It happened to agree with the defect
+						 * here, which is exactly how a proxy metric earns trust it
+						 * has not got. A hidden row has an empty visualRect, and
+						 * that is the same thing the user is reporting: nothing
+						 * painted under the column headers.
+						 */
+						auto painted = [t, nif]() {
+							const QModelIndex root = t->rootIndex();
+							int n = 0;
+							for ( int r = 0; r < t->model()->rowCount( root ); r++ )
+								if ( !t->visualRect( nif->index( r, 0, root ) ).isEmpty() )
+									n++;
+							return n;
+						};
+						const int shown = painted();
+						QFile df( QApplication::applicationDirPath() + "/ww_starter_test.log" );
+						if ( df.open( QIODevice::Append | QIODevice::Text ) ) {
+							QTextStream log( &df );
+							log << "details: model "
+								<< ( t->model() == nif ? "nif" : ( t->model() ? "other" : "none" ) )
+								<< ", root block "
+								<< ( droot.isValid() ? nif->getBlockNumber( droot ) : -1 )
+								<< ", rows " << rows << ", shown " << shown
+								<< ", pinnedOnly " << int( skope->wwPinnedOnly )
+								<< ", filter '"
+								<< ( skope->blockDetailsSearch ? skope->blockDetailsSearch->text()
+									: QString() )
+								<< "', block list dock visible "
+								<< int( skope->dList && skope->dList->isVisible() ) << "\n";
+
+							/* AND THE SEARCH BOX STILL FILTERS.
+							 *
+							 * Blanking the panel and searching it use the SAME
+							 * filter on the same view, for different owners, so
+							 * the one way to get "selecting a block lifts the
+							 * blank filter" wrong is to lift the search box's
+							 * with it. Measured on both sides of a block switch,
+							 * because the keep set is built per block.
+							 */
+							skope->blockDetailsSearch->setText( QStringLiteral( "Vertex" ) );
+							qApp->processEvents();
+							const int filtered = painted();
+							skope->select( nif->getBlockIndex( 0 ) );
+							skope->select( shape );
+							qApp->processEvents();
+							const int afterSwitch = painted();
+							skope->blockDetailsSearch->clear();
+							qApp->processEvents();
+							log << "details filter: " << shown << " rows, " << filtered
+								<< " matching 'Vertex', " << afterSwitch
+								<< " after switching away and back, " << painted()
+								<< " once cleared\n";
+							df.close();
+						}
+					}
 
 					/* AND RELOAD GIVES THE CUBE BACK.
 					 *

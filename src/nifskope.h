@@ -744,6 +744,12 @@ private:
 	//! A Block Details filter is (or just was) active; lets the empty-filter
 	//! case skip the full-block walk that cost ~0.5 s per click on big shapes
 	bool blockDetailsFilterWasActive = false;
+	//! The blank-panel filter is on: an empty keep-set handed to the tree so
+	//! that "nothing selected" shows nothing. Tracked separately from the
+	//! search/pin filters because selecting a block must lift THIS one and
+	//! leave those alone — and because it can outlive the model change that
+	//! used to be taken as proof it was gone.
+	bool wwBlankDetailsFilter = false;
 
 	//! Pinned fields, per block TYPE -> set of field paths (see wwFieldPath).
 	//! Persisted in QSettings under "BlockDetails/PinnedFields".

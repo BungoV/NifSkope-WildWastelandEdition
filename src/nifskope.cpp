@@ -6015,12 +6015,31 @@ void NifSkope::select( const QModelIndex & index )
 		 * this comment.
 		 */
 		tree->setDetailsFilter( true, QSet<const void *>() );
+		wwBlankDetailsFilter = true;
 		for ( int row = 0; row < nifEmpty->rowCount( QModelIndex() ); row++ )
 			tree->setRowHidden( row, QModelIndex(), true );
 		perfMark( "tree cleared" );
 	} else if ( sender() != tree ) {
-		if ( tree->model() != nif ) {
+		const bool modelChanged = ( tree->model() != nif );
+		if ( modelChanged )
 			tree->setModel( nif );
+		/* LIFT THE BLANK-PANEL FILTER WHETHER OR NOT THE MODEL CHANGED.
+		 *
+		 * The empty-selection branch above blanks the panel by handing the view a
+		 * filter with an EMPTY keep set, which hides every row there is. Clearing
+		 * it only when the model changed assumed the two always move together,
+		 * and they do not: swapModels() puts the tree back on `nif` during a load
+		 * without knowing a filter was left on it. So an untouched window that
+		 * had no selection, then got a document, came up with the filter still
+		 * armed — and clicking a block showed its 37 rows with 0 of them visible,
+		 * which is a Block Details panel that looks broken rather than empty.
+		 *
+		 * Tracked by its own flag rather than by clearing unconditionally: the
+		 * search box and the pinned-only toggle set the same filter for their own
+		 * reasons, and selecting a block must not wipe those.
+		 */
+		if ( modelChanged || wwBlankDetailsFilter ) {
+			wwBlankDetailsFilter = false;
 			// lift the blank-panel filter, then let the search box put back
 			// whatever it actually asks for
 			tree->setDetailsFilter( false, QSet<const void *>() );
