@@ -4531,6 +4531,10 @@ static QLabel * blockListDragCardName = nullptr;
  */
 static QTimer * blockListDragTicker = nullptr;
 static QElapsedTimer blockListDragHeard;
+//! Where the pointer was when the card last got a verdict. A drag event only
+//! arrives when the mouse MOVES, so silence on its own says nothing about
+//! whether what the card says is still true — see placeBlockListDragCard.
+static QPoint blockListDragCursorAtVerdict;
 
 //! The window whose drag is in flight, and where its pointer was last seen
 //! inside the list. The ticker needs both and is not a member of anything.
@@ -4549,19 +4553,40 @@ static QList<qint32> blockListDragBlocks;
 
 //! Defined below, beside the rest of the drop feedback.
 static void wwRepaintDragFeedback( NifTreeView * list );
+//! Defined below. The ticker is the one part of a drag no harness can drive, so
+//! what it decides has to be readable after the fact from a real one.
+static void wwDragLog( const QString & line );
 
 static void placeBlockListDragCard()
 {
 	if ( !blockListDragCard || !blockListDragCard->isVisible() )
 		return;
 
-	/* AND A STALE VERDICT IS RETRACTED. If no drag event has arrived for a
-	 * moment the hint is no longer about anywhere the cursor is, so it comes off
-	 * rather than being carried around as though it still meant something. What
-	 * is being dragged is still true, so that line stays.
+	/* AND A STALE VERDICT IS RETRACTED — stale meaning the pointer has MOVED
+	 * away from what the verdict was about, not merely that time has passed.
+	 *
+	 * A drag event arrives only when the mouse moves. Hold it still over a row
+	 * and nothing arrives, which the elapsed time alone reads as "this hint is
+	 * about somewhere the cursor has left" — so the card dropped its hint line
+	 * after a quarter of a second of aiming, shrank, and got it back the instant
+	 * the hand twitched. It changed shape under the pointer while it was being
+	 * aimed, which is the one moment it needs to be still.
+	 *
+	 * A pointer that has not moved is a verdict that is exactly as true as it
+	 * was when it was rendered. Both conditions together are what the comment
+	 * this replaces was actually reaching for: events have stopped AND the
+	 * cursor is somewhere else, which is the case where the drag loop really has
+	 * gone quiet on us. What is being dragged is still true either way, so that
+	 * line stays regardless.
 	 */
-	if ( blockListDragCardHint && blockListDragHeard.isValid()
+	const bool pointerLeftTheVerdict =
+		( QCursor::pos() - blockListDragCursorAtVerdict ).manhattanLength() > 2;
+	if ( blockListDragCardHint && blockListDragHeard.isValid() && pointerLeftTheVerdict
 		&& blockListDragHeard.elapsed() > 250 && blockListDragCardHint->isVisible() ) {
+		wwDragLog( QStringLiteral( "hint retracted: %1 ms since the last verdict, "
+			"pointer %2 px from where it was given" )
+			.arg( blockListDragHeard.elapsed() )
+			.arg( ( QCursor::pos() - blockListDragCursorAtVerdict ).manhattanLength() ) );
 		blockListDragCardHint->hide();
 		blockListDragCard->adjustSize();
 	}
@@ -4636,6 +4661,8 @@ static void showBlockListDragCard( QWidget * owner, const QString & hint, const 
 
 	blockListDragCardHint->show();
 	blockListDragHeard.restart();
+	// what this verdict is about: the retraction above compares against it
+	blockListDragCursorAtVerdict = QCursor::pos();
 	blockListDragCard->adjustSize();
 	/* DIRECTLY ABOVE THE POINTER. Below-right put it over the rows underneath the
 	 * cursor — which, when the gesture is "aim at the gap between two of them",

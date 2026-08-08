@@ -1,5 +1,25 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08j — The drag card stops changing shape while you aim
+
+Hold the pointer still over a row during a block drag and the card dropped its
+verdict line — "Move into Scene Root [0] (Ctrl to link, Shift to keep the local
+transform)" — shrank to just what was being carried, and got the line back the
+moment your hand twitched.
+
+The card retracts a hint it thinks is stale, and it was calling a hint stale when
+no drag event had arrived for 250 ms. **A drag event only arrives when the mouse
+moves.** Hold it still and nothing arrives, though the verdict is exactly as true
+as when it was rendered — so aiming, which is precisely when the card must be
+still, was the one thing that made it flicker.
+
+Stale now means the pointer has **moved away from what the verdict was about**:
+events stopped *and* the cursor is somewhere else, which is the case the
+retraction was written for. When it does fire it says so in the drag log, with
+the elapsed time and how far the pointer went — the ticker is the one part of a
+drag no harness can drive, so what it decides has to be readable afterwards from
+a real one.
+
 ## 2026-08-08i — Block Details fills in again
 
 Selecting a block showed its column headers and nothing under them — 37 rows in
