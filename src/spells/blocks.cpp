@@ -681,6 +681,19 @@ static QModelIndex wwFieldAccepting( const NifModel * nif, qint32 owner, qint32 
 			const QModelIndex cell = nif->index( r, 0, parent );
 			if ( !cell.isValid() )
 				continue;
+			/* ONLY ROWS THIS FILE ACTUALLY HAS.
+			 *
+			 * The item tree carries every field the format defines for a block,
+			 * including the ones excluded by version or by a condition — they are
+			 * present and inert. Walking them offered drops into fields that do not
+			 * exist in the file: measured by the full-format audit, which found
+			 * extra data being offered a home in `Extra Data`, the pre-10.0.1.0
+			 * field, on a Fallout 4 NIF whose real destination is the `Extra Data
+			 * List` array. Writing there would have gone nowhere.
+			 */
+			if ( const NifItem * item = nif->getItem( cell, false );
+				!item || !nif->evalCondition( item ) )
+				continue;
 			if ( nif->isLink( cell ) ) {
 				const QString takes = nif->itemTempl( cell );
 				const qint32 held = nif->getLink( cell );
@@ -713,6 +726,27 @@ static QModelIndex wwFieldAccepting( const NifModel * nif, qint32 owner, qint32 
 						inArray = cell;
 						arrayFound = array;
 					}
+				}
+			}
+			/* AN EMPTY ARRAY IS STILL A DESTINATION.
+			 *
+			 * A link array is walked through its ELEMENTS, and a block that has
+			 * none — every freshly made one, and any file where the list happens to
+			 * be empty — presented no rows to inspect and therefore offered
+			 * nothing. Extra data had nowhere to go in the whole format because of
+			 * it: `Extra Data List` is empty until something is in it, which is
+			 * exactly when you want to drop the first one in. The array's own
+			 * declared element type is what answers it.
+			 */
+			if ( nif->isArray( cell ) && !nif->isLink( cell ) ) {
+				const QString holds = nif->itemTempl( cell );
+				if ( !holds.isEmpty() && holds != QLatin1String( "NiObject" )
+					&& ( holds == type || nif->inherits( type, holds ) )
+					&& arrayScore > 2 )
+				{
+					arrayScore = 2;
+					inArray = cell;
+					arrayFound = nif->itemName( cell );
 				}
 			}
 			walk( cell, nif->isArray( cell ) ? nif->itemName( cell ) : array );

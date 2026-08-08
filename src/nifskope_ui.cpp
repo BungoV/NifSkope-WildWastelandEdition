@@ -8240,6 +8240,97 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *
 	 * Log: release/ww_colldrop_test.log
 	 */
+	/* AUDIT (WW_DROPAUDIT=<report path>): every block type against every other.
+	 *
+	 * The drop table checked in block_dragdrop.sh is six pairs over four types,
+	 * out of 563 in nif.xml. The rule it exercises is general — the format is
+	 * asked what each link field accepts — but "general" is the word the `Skin`
+	 * bug hid behind: that field looked reasonable and offered a BSShaderTextureSet
+	 * a home inside a mesh, and it surfaced only because a check happened to cover
+	 * it. This covers all of them.
+	 *
+	 * One instance of every insertable type goes into a scratch model, then every
+	 * (dragged, target) pair is put through wwCanTakeTypedChild — the same call
+	 * the Block List makes while a drag is in flight, not a copy of its reasoning,
+	 * which would only agree with itself.
+	 *
+	 * FOR THIS FILE'S VERSION. Fields come and go between game versions, so the
+	 * report is true of the NIF it was run on and says which that was.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_DROPAUDIT" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				QFile out( qEnvironmentVariable( "WW_DROPAUDIT" ) );
+				if ( !out.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream rep( &out );
+				NifModel * nif = skope->getNifModel();
+				if ( !ok || !nif ) { rep << "load failed\n"; out.close(); qApp->quit(); return; }
+
+				rep << "drop audit: which block types may be dragged into which\n";
+				rep << "file version: BS " << nif->getBSVersion() << ", user "
+					<< nif->getUserVersion() << "\n\n";
+
+				// one of every type the model will make. Abstract types refuse to
+				// insert and are simply absent from the sweep, which is correct:
+				// they cannot be dragged either.
+				QStringList types = nif->allNiBlocks();
+				types.sort();
+				QList<qint32> made;
+				QStringList skipped;
+				for ( const QString & type : types ) {
+					const QModelIndex idx = nif->insertNiBlock( type );
+					if ( idx.isValid() )
+						made << nif->getBlockNumber( idx );
+					else
+						skipped << type;
+				}
+				rep << "types in this build: " << types.size() << ", instantiated: "
+					<< made.size() << ", not insertable: " << skipped.size() << "\n\n";
+
+				/* THE SWEEP. Every dragged type against every target type, through
+				 * the call the Block List itself makes.
+				 */
+				int offers = 0, pairs = 0;
+				QMap<QString, QStringList> acceptedBy;		// dragged -> "target via field"
+				QElapsedTimer clock;
+				clock.start();
+				for ( const qint32 child : std::as_const( made ) ) {
+					const QString childType = nif->itemName( nif->getBlockIndex( child ) );
+					for ( const qint32 owner : std::as_const( made ) ) {
+						if ( owner == child )
+							continue;
+						pairs++;
+						if ( !wwCanTakeTypedChild( nif, owner, child ) )
+							continue;
+						offers++;
+						acceptedBy[childType] << QStringLiteral( "%1 via %2" )
+							.arg( nif->itemName( nif->getBlockIndex( owner ) ),
+								wwFieldAcceptingName( nif, owner, child ) );
+					}
+				}
+				rep << pairs << " pairs tested in " << clock.elapsed() << " ms, "
+					<< offers << " offered\n";
+				rep << acceptedBy.size() << " types have somewhere to go; "
+					<< ( made.size() - acceptedBy.size() )
+					<< " have nowhere (scene objects included, which use Children)\n\n";
+
+				for ( auto it = acceptedBy.constBegin(); it != acceptedBy.constEnd(); ++it ) {
+					rep << "== " << it.key() << " (" << it.value().size() << " target(s))\n";
+					QStringList where = it.value();
+					where.sort();
+					for ( const QString & line : std::as_const( where ) )
+						rep << "     " << line << "\n";
+				}
+				rep.flush();
+				out.close();
+				if ( nif->undoStack )
+					nif->undoStack->setClean();
+				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_LOADEDNIFS_TEST=<a nif to add>): the Loaded NIFs panel.
 	 *
 	 * Everything here shipped on a reading of the code and on the other suites not
