@@ -1,4 +1,4 @@
-# NifSkope - Wild Wasteland Edition 0.3
+# NifSkope - Wild Wasteland Edition 0.3.1
 
 A NIF editor for **Fallout 4**.
 
