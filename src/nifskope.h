@@ -160,6 +160,10 @@ public:
 	 *  sculpt bones come from every time they run. The donor is READ, never
 	 *  written to.
 	 */
+	//! Write a data-only loaded NIF to a file the user picks; false if cancelled
+	//! or the write failed. Also what the close prompt calls when you say Save.
+	bool saveBackgroundDocumentAs( BackgroundNifDocument * document );
+
 	static NifModel * workspaceFaceDonor();
 	static QString workspaceFaceDonorName();
 	static void setWorkspaceFaceDonor( NifModel * model, const QString & displayName );

@@ -274,6 +274,19 @@ public:
 			// same way the Block List does.
 			opt.state &= ~QStyle::State_Selected;
 		}
+		/* UNSAVED ROWS ARE RED, and it wins over the selection colours.
+		 *
+		 * A loaded NIF can now hold work that is nowhere else — one generated into
+		 * the list has no file behind it at all — and the only thing distinguishing
+		 * it from the read-only copies around it was the answer to a question
+		 * nobody asks until the close prompt. `danger` from the skin, not a literal
+		 * red, so it follows the palette like everything else.
+		 */
+		if ( flags >= 0 && ( flags & 0x20 ) ) {
+			const QColor unsaved( wwSkinColor( "danger" ) );
+			opt.palette.setColor( QPalette::Text, unsaved );
+			opt.palette.setColor( QPalette::HighlightedText, unsaved );
+		}
 		const QWidget * widget = option.widget;
 		QStyle * style = widget ? widget->style() : QApplication::style();
 		style->drawControl( QStyle::CE_ItemViewItem, &opt, painter, widget );
@@ -687,9 +700,29 @@ public:
 		return ok;
 	}
 
-	//! true when the model no longer matches the bytes it was loaded from
+	/*! This document has never been written anywhere — it was made, not loaded.
+	 *
+	 *  A generated faceBones NIF exists only here until someone saves it, and
+	 *  `isModified` cannot see that: it compares against the bytes loaded from
+	 *  disk, and there are none, so it would answer "unmodified" and the close
+	 *  path would delete the thing without asking. Set at creation, cleared by
+	 *  markSaved().
+	 */
+	bool unsavedInMemory = false;
+
+	//! Written somewhere: the current bytes become the new "as loaded" state.
+	void markSaved()
+	{
+		captureLoadedState();
+		unsavedInMemory = false;
+	}
+
+	//! true when the model no longer matches the bytes it was loaded from — or
+	//! was never loaded from any
 	bool isModified() const
 	{
+		if ( unsavedInMemory )
+			return true;
 		if ( pristine.isEmpty() )
 			return false;
 		QByteArray now;
@@ -1354,6 +1387,11 @@ NifSkope::NifSkope( bool background )
 				flags |= 0x1;
 			if ( bg->sessionPreviewGhost )
 				flags |= 0x2;
+			// 0x20: unsaved. isModified() re-serialises the model, so this is not
+			// free — but it runs per visible row of a short list, and the
+			// alternative is a document you cannot tell holds unsaved work
+			if ( bg->isModified() )
+				flags |= 0x20;
 			return flags;
 		}
 		return -1;
@@ -2793,6 +2831,44 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	} else if ( chosen == unload || chosen == close ) {
 		removeBackgroundDocument( document );
 	}
+}
+
+/*! Write a data-only loaded NIF to a file the user picks.
+ *
+ *  These documents used to be nothing but read-only copies of files already on
+ *  disk, so there was nowhere for "save" to belong. Now that one can be generated
+ *  into the list — a faceBones NIF built from a donor, existing nowhere else —
+ *  there has to be a way to put it somewhere, and a close that asks about it has
+ *  to have something to call.
+ *
+ *  \return false when the user cancelled, or the write failed and was reported.
+ *          A false here means "the close should not proceed".
+ */
+bool NifSkope::saveBackgroundDocumentAs( BackgroundNifDocument * document )
+{
+	if ( !document || !document->nif )
+		return false;
+	// its own name if it has one, so a generated _faceBones.nif offers itself
+	// under the name it was generated as rather than as "untitled"
+	QString suggested = document->currentFile;
+	if ( suggested.isEmpty() )
+		suggested = QDir( QDir::homePath() ).filePath( document->displayName() );
+	const QString path = QFileDialog::getSaveFileName( this, tr( "Save %1" ).arg( document->displayName() ),
+		suggested, tr( "NIF files (*.nif)" ) );
+	if ( path.isEmpty() )
+		return false;
+	QFile out( path );
+	if ( !out.open( QIODevice::WriteOnly ) || !document->nif->save( out ) ) {
+		QMessageBox::warning( this, tr( "Save %1" ).arg( document->displayName() ),
+			tr( "Could not write %1." ).arg( path ) );
+		return false;
+	}
+	out.close();
+	document->currentFile = path;
+	document->markSaved();
+	refreshAllDocumentSessions();
+	statusBar()->showMessage( tr( "Saved %1" ).arg( path ), 5000 );
+	return true;
 }
 
 void NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
@@ -5353,15 +5429,49 @@ void NifSkope::closeEvent( QCloseEvent * e )
 		}
 		for ( NifSkope * document : std::as_const( members ) )
 			document->closingWorkspaceGroup = true;
-		for ( NifSkope * document : std::as_const( members ) )
-			document->close();
-		// Data-only members have no window to close and can never hold unsaved
-		// edits; delete the ones owned by this workspace outright. Iterate a
-		// copy because each destructor detaches itself from the session list.
+		/* DATA-ONLY MEMBERS CAN HOLD UNSAVED EDITS NOW, so each one is asked
+		 * about before anything is deleted.
+		 *
+		 * The old comment here said they "can never hold unsaved edits" and
+		 * deleted them outright, which was true while they were only ever loaded
+		 * copies of files on disk. It stopped being true the moment a document
+		 * could be generated into the list — a faceBones NIF made from a donor
+		 * exists nowhere else, and closing the workspace threw it away without a
+		 * word.
+		 *
+		 * Asked one at a time, and Cancel on ANY of them abandons the close with
+		 * the whole workspace intact — the same rule the window members above
+		 * follow.
+		 */
 		const QList<BackgroundNifDocument *> backgroundMembers = sessionBackgroundDocuments;
+		QList<BackgroundNifDocument *> owned;
 		for ( BackgroundNifDocument * document : backgroundMembers )
 			if ( document && ( !document->workspaceRoot || document->workspaceRoot == group ) )
-				delete document;
+				owned << document;
+		for ( BackgroundNifDocument * document : std::as_const( owned ) ) {
+			if ( !document->isModified() )
+				continue;
+			const QMessageBox::StandardButton answer = QMessageBox::question( this,
+				tr( "Unsaved NIF" ),
+				tr( "%1 has unsaved changes and is not on disk anywhere.\n\nSave it before closing?" )
+					.arg( document->displayName() ),
+				QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+				QMessageBox::Save );
+			if ( answer == QMessageBox::Cancel ) {
+				e->ignore();
+				return;
+			}
+			if ( answer == QMessageBox::Save && !saveBackgroundDocumentAs( document ) ) {
+				// a cancelled Save As is a cancelled close, not a silent discard
+				e->ignore();
+				return;
+			}
+		}
+		for ( NifSkope * document : std::as_const( members ) )
+			document->close();
+		// iterate a copy: each destructor detaches itself from the session list
+		for ( BackgroundNifDocument * document : std::as_const( owned ) )
+			delete document;
 	}
 	e->accept();
 }
