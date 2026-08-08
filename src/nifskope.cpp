@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "message.h"
 #include "nifmerge.h"
 #include "nifsnapshot.h"
+#include "starterscene.h"
 #include "data/niftypes.h"
 #include "spellbook.h"
 #include "spells/animationsetup.h"
@@ -7618,6 +7619,46 @@ void NifSkope::load()
 		ogl->setSegmentPaintMode( false );
 		ogl->setPoseMode( false );
 		ogl->setEditMode( false );
+	}
+
+	/* NOTHING ON DISK TO RELOAD: rebuild the starter scene.
+	 *
+	 * An untitled window IS the starter cube — that is what NifSkope opens on —
+	 * and reloading one went looking for a file whose name is the empty string.
+	 * QFileInfo("") makes that the working directory, loadFromFile fails on it,
+	 * and you were left with a blank document and no cube: Reload was the one
+	 * command that could destroy the starter scene without touching a file.
+	 *
+	 * Reload means "throw away my edits and give me the document again", and for
+	 * a document that was never saved, the document again is the cube. Same
+	 * build, same undo-stack reset and same reframe as startup, so a reloaded
+	 * starter is indistinguishable from a freshly opened window — including not
+	 * asking about unsaved changes on close.
+	 *
+	 * When the cube is switched off (the preference, or any WW_* harness run) an
+	 * untitled document is genuinely empty, and reloading gives back an empty
+	 * document rather than a failed load of the working directory.
+	 */
+	if ( currentFile.isEmpty() ) {
+		QString error, noFile;
+		const bool cube = startupCubeWanted();
+		bool built = false;
+		if ( nif ) {
+			nif->clear();
+			built = !cube || nifCreateStarterScene( nif, STARTER_CUBE_SIZE, &error );
+			if ( nif->undoStack ) {
+				nif->undoStack->clear();
+				nif->undoStack->setClean();
+			}
+		}
+		if ( !error.isEmpty() )
+			qWarning() << "starter scene:" << error;
+		emit completeLoading( built, noFile );
+		if ( built && ogl ) {
+			ogl->updateScene();
+			ogl->frameAll();
+		}
+		return;
 	}
 
 	bool loaded = nif->loadFromFile( fname );

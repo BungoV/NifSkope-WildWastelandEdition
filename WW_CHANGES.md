@@ -1,5 +1,30 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-08h — Reload gives the starter cube back
+
+An untitled window **is** the starter cube — that is what NifSkope opens on — and
+reloading one went looking for a file whose name is the empty string. `QFileInfo("")`
+resolves to the working directory, the load fails on it, and you were left with a
+blank window: Reload was the one command in the program that could destroy the
+starter scene without touching anything on disk.
+
+Reload means "throw away my edits and give me the document again", and for a
+document that was never saved, the document again is the cube. Same build, same
+undo-stack reset, same reframe as startup — a reloaded starter is
+indistinguishable from a freshly opened window, including not asking about
+unsaved changes when you close it.
+
+With the cube switched off, an untitled document is genuinely empty, and reload
+gives back an empty document rather than a failed load of the working directory.
+
+New `tests/spells/starter_reload.sh` — 11 checks over the whole starter path:
+that it builds, that it is the scene it should be rather than merely some blocks,
+that an untouched window is clean, that it renders, and that reload restores it.
+It **edits the document first**, because a reload that did nothing at all would
+otherwise pass — the blank window came from the load failing, so the count has to
+be asked against one that was deliberately made wrong. Disabling the fix fails
+exactly two of the eleven.
+
 ## 2026-08-08g — X asks, Delete doesn't
 
 Blender's split, which we had collapsed into one key. **X** is the careful one —

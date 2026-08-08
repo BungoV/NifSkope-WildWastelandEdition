@@ -280,6 +280,11 @@ public slots:
 
 	void enableUi();
 
+	//! Should a window with no file show the starter cube? False for every WW_*
+	//! harness run and when the preference is off. Shared by the startup path and
+	//! by Reload, which on an untitled document rebuilds the same scene.
+	static bool startupCubeWanted();
+
 	void updateSettings();
 
 	//! Select a NIF index

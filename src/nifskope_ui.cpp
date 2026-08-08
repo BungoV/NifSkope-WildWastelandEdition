@@ -487,8 +487,12 @@ QString wwBoxedButtonQss( const QString & padding )
  * Off for any harness run: every WW_* test expects the empty document it always
  * got, and a cube would change block numbers under all of them. Same guard
  * saveUi() uses, for the same reason.
+ *
+ * A member rather than a file static because Reload asks it too — an untitled
+ * document IS this scene, so reloading one rebuilds it, and the two paths have
+ * to agree about whether it exists at all.
  */
-static bool startupCubeWanted()
+bool NifSkope::startupCubeWanted()
 {
 	// WW_STARTER_SHOT is the harness FOR this path, so it is the one WW_ variable
 	// that must not switch it off.
@@ -16198,6 +16202,32 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						qApp->processEvents();
 					}
 					skope->ogl->grabFramebuffer().save( starterShot );
+
+					/* AND RELOAD GIVES THE CUBE BACK.
+					 *
+					 * An untitled document has no file behind it, so Reload used to
+					 * go looking for one named "" and leave a blank window — the one
+					 * command that could destroy the starter scene without touching
+					 * anything on disk. The document is edited first, because a
+					 * reload that did nothing at all would otherwise pass.
+					 */
+					QFile logf2( QApplication::applicationDirPath() + "/ww_starter_test.log" );
+					if ( logf2.open( QIODevice::Append | QIODevice::Text ) ) {
+						QTextStream log( &logf2 );
+						const int baseline = nif->getBlockCount();
+						nif->insertNiBlock( QStringLiteral( "NiNode" ), -1 );
+						const int edited = nif->getBlockCount();
+						skope->reload();
+						for ( int i = 0; i < 8; i++ )
+							qApp->processEvents();
+						log << "reload: " << baseline << " blocks, edited to " << edited
+							<< ", after reload " << nif->getBlockCount() << "\n";
+						log << "reload clean "
+							<< ( nif->undoStack ? int( nif->undoStack->isClean() ) : -1 ) << "\n";
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							log << "  [" << b << "] " << nif->itemName( nif->getBlockIndex( b ) ) << "\n";
+						logf2.close();
+					}
 					QTimer::singleShot( 0, qApp, &QApplication::quit );
 				} );
 			}
