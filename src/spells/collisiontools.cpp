@@ -5482,10 +5482,10 @@ QDockWidget * tlCreateCollisionManagerDock( NifModel * nif, QMainWindow * mw, GL
 	scroll->setObjectName( QStringLiteral( "CollisionManagerScrollArea" ) );
 	scroll->setWidgetResizable( true );
 	scroll->setFrameShape( QFrame::NoFrame );
-	scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	scroll->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	auto * panel = new CollisionManagerPanel( nif, mw, ogl, dock );
-	/* WIDE ENOUGH FOR ITS OWN COLUMNS.
+	/* CONTENT WIDE ENOUGH FOR ITS COLUMNS; DOCK FREE TO FOLD.
 	 *
 	 * The list has seven — Node, Bone, Shape, Layer, Material, Mass, State —
 	 * and nothing here claimed any width, so the dock opened at whatever the
@@ -5494,25 +5494,14 @@ QDockWidget * tlCreateCollisionManagerDock( NifModel * nif, QMainWindow * mw, GL
 	 * — two of the ones you actually author — off the end and no sign that they
 	 * exist.
 	 *
-	 * A minimum rather than a resize on show, deliberately: restoreState()
-	 * replays a saved dock width and would put a narrow one straight back,
-	 * which is the same reason the viewport toolbars are moved after the
-	 * restore rather than before it. A minimum outranks the replay.
-	 *
-	 * The dock still widens freely; this only stops it folding.
-	 *
-	 * On the SCROLL AREA as well as the panel, and that is the whole trick: a
-	 * QScrollArea with widgetResizable does not take its child's minimum as its
-	 * own — scrolling is precisely its answer to not having the room — so a
-	 * minimum on the panel alone left the dock free to squeeze to 80px and clip
-	 * it. Measured: the first attempt did exactly that and looked identical to
-	 * having changed nothing.
+	 * The panel keeps the width that fits those columns, but the scroll area no
+	 * longer inherits it. Folding the dock now reveals its horizontal scrollbar
+	 * instead of forcing the entire main-window dock column to remain 640px wide.
 	 *
 	 * 560 fitted seven columns exactly; Parent made eight and the scroll bar
 	 * came back, so this is re-measured rather than nudged.
 	 */
 	panel->setMinimumWidth( 640 );
-	scroll->setMinimumWidth( 640 );
 	scroll->setWidget( panel );
 	dock->setWidget( scroll );
 	mw->addDockWidget( Qt::RightDockWidgetArea, dock );

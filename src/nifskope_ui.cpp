@@ -132,6 +132,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QScrollBar>
 #include <QScrollArea>
 #include <QSlider>
+#include <QSplitter>
 #include <QTabWidget>
 #include <QUndoStack>
 #include <QVBoxLayout>
@@ -6356,6 +6357,59 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			log << "saved workspace: "
 				<< QSettings().value( QStringLiteral( "UI/Workspace" ), 0 ).toInt() << "\n";
 			check( "all of them are docked, not floating", floatingOrOrphan == 0 );
+			// A saved-open manager on the right must not consume the width range we
+			// are measuring on the left. Its own folding contract is checked below.
+			for ( const char * n : dockNames )
+				if ( QDockWidget * d = skope->findChild<QDockWidget *>( QLatin1String( n ) ) )
+					d->hide();
+			QApplication::processEvents();
+
+			/* DOCKS MUST FOLD AND UNFOLD. ListDock and TreeDock used to impose a
+			 * 400x240 floor on their whole tab groups, including NIF Browser while
+			 * those two docks were not even the active tabs. */
+			check( "core document docks have no hard 400-pixel width floor",
+				skope->dList->minimumWidth() < 400 && skope->dTree->minimumWidth() < 400
+					&& skope->dBrowser->minimumWidth() < 400 );
+			skope->showNormal();
+			skope->resize( 1280, 900 );
+			skope->dBrowser->show();
+			skope->dBrowser->raise();
+			skope->dTree->show();
+			skope->dTree->raise();
+			QApplication::processEvents();
+			skope->resizeDocks( { skope->dBrowser }, { 150 }, Qt::Horizontal );
+			QApplication::processEvents();
+			const int folded = skope->dBrowser->width();
+			skope->resizeDocks( { skope->dBrowser }, { 560 }, Qt::Horizontal );
+			QApplication::processEvents();
+			const int unfolded = skope->dBrowser->width();
+			log << "core dock horizontal range: " << folded << " -> " << unfolded << "\n";
+			check( "the left panel can fold and unfold across a useful range",
+				folded <= 180 && unfolded >= folded + 250 );
+			check( "dock expansion preserves the viewport's usable minimum",
+				skope->graphicsView && skope->graphicsView->width() >= 50 );
+
+			/* Complex manager forms become scrollable at narrow widths rather than
+			 * holding the main window open. UV keeps its genuine 260px render-view
+			 * floor, but no longer adds a redundant 340px dock floor. */
+			QDockWidget * collision = skope->findChild<QDockWidget *>(
+				QStringLiteral( "CollisionManagerDock" ) );
+			QScrollArea * collisionScroll = collision ? collision->findChild<QScrollArea *>(
+				QStringLiteral( "CollisionManagerScrollArea" ) ) : nullptr;
+			check( "Collision Manager folds through an as-needed horizontal scrollbar",
+				collisionScroll && collisionScroll->minimumWidth() < 640
+					&& collisionScroll->horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded );
+			QScrollArea * riggingScroll = skope->findChild<QScrollArea *>(
+				QStringLiteral( "RiggingToolsScrollArea" ) );
+			QScrollArea * vertexScroll = skope->findChild<QScrollArea *>(
+				QStringLiteral( "VertexPaintScrollArea" ) );
+			check( "Rigging and Vertex Paint panels scroll instead of clipping when folded",
+				riggingScroll && vertexScroll
+					&& riggingScroll->horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded
+					&& vertexScroll->horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded );
+			QDockWidget * uv = skope->findChild<QDockWidget *>( QStringLiteral( "UVManagerDock" ) );
+			check( "UV Editor has no redundant 340-pixel dock floor",
+				uv && uv->minimumWidth() < 340 );
 
 			// ...and a workspace still opens its dock. Hiding at construction
 			// would be a regression if it made one unreachable.
@@ -8751,6 +8805,128 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& ( skope->loadedNifsModel->index(
 								skope->loadedNifsModel->rowCount() - 1, 0 ).flags()
 								& Qt::ItemIsDragEnabled ) );
+
+					check( "Loaded NIFs remains in its stable independent browser pane",
+						skope->findChild<QSplitter *>( QStringLiteral( "NifBrowserSplitter" ) ) );
+					check( "Loaded NIFs has its own search field",
+						skope->loadedNifsFilter
+							&& !skope->loadedNifsFilter->placeholderText().isEmpty() );
+					check( "Loaded NIFs exposes an as-needed vertical scrollbar",
+						skope->loadedNifsView->verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded );
+					if ( skope->loadedNifsFilter ) {
+						skope->dBrowser->show();
+						skope->dBrowser->raise();
+						QApplication::processEvents();
+					}
+
+					/* SEARCH HIDES ROWS, NEVER RE-MAPS THEM. Direct row hiding is
+					 * deliberate: drag payload and workspace actions retain exact model
+					 * identity while the query changes. */
+					if ( skope->loadedNifsFilter && skope->loadedNifsModel->rowCount() > 1 ) {
+						const QString query = QFileInfo( add ).fileName();
+						skope->loadedNifsFilter->setText( query );
+						QApplication::processEvents();
+						int shown = 0;
+						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ )
+							if ( !skope->loadedNifsView->isRowHidden( r, QModelIndex() ) ) shown++;
+						check( "Loaded NIF search finds the named row and hides the rest", shown == 1 );
+						skope->loadedNifsFilter->clear();
+						QApplication::processEvents();
+						int hidden = 0;
+						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ )
+							if ( skope->loadedNifsView->isRowHidden( r, QModelIndex() ) ) hidden++;
+						check( "clearing Loaded NIF search restores every row", hidden == 0 );
+					}
+
+					/* PROVE THE SCROLLBAR WITH ENOUGH ROWS, then remove the probes before
+					 * any document action can see them. */
+					{
+						const int realRows = skope->loadedNifsModel->rowCount();
+						for ( int i = 0; i < 40; i++ )
+							skope->loadedNifsModel->appendRow(
+								new QStandardItem( QStringLiteral( "scroll probe %1" ).arg( i ) ) );
+						QApplication::processEvents();
+						check( "many Loaded NIFs produce a working vertical scroll range",
+							skope->loadedNifsView->verticalScrollBar()->maximum() > 0 );
+						skope->loadedNifsModel->removeRows( realRows, 40 );
+					}
+
+					/* ICON-ONLY CLICKS MUST PRESERVE SELECTION. The view consumes the press
+					 * and release itself; otherwise QTreeView selects on press before the
+					 * delegate sees its release, producing the orange/blue row in the bug. */
+					if ( skope->loadedNifsModel->rowCount() > 0 ) {
+						const QModelIndex iconRow = skope->loadedNifsModel->index(
+							skope->loadedNifsModel->rowCount() - 1, 0 );
+						skope->loadedNifsView->scrollTo( iconRow );
+						skope->loadedNifsView->selectionModel()->clear();
+						skope->loadedNifsView->setCurrentIndex( QModelIndex() );
+						skope->setWorkspaceDisplayMode( row, 1 );
+						QApplication::processEvents();
+						const QRect vr = skope->loadedNifsView->visualRect( iconRow );
+						auto clickAt = [&]( const QPoint & p ) {
+							QMouseEvent press( QEvent::MouseButtonPress, QPointF( p ),
+								QPointF( skope->loadedNifsView->viewport()->mapToGlobal( p ) ),
+								Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+							QMouseEvent release( QEvent::MouseButtonRelease, QPointF( p ),
+								QPointF( skope->loadedNifsView->viewport()->mapToGlobal( p ) ),
+								Qt::LeftButton, Qt::NoButton, Qt::NoModifier );
+							QApplication::sendEvent( skope->loadedNifsView->viewport(), &press );
+							QApplication::sendEvent( skope->loadedNifsView->viewport(), &release );
+							QApplication::processEvents();
+						};
+						clickAt( QPoint( vr.right() - 36, vr.center().y() ) );
+						check( "clicking the eye toggles visibility",
+							skope->workspaceDisplayMode( row ) == 0 );
+						check( "clicking the eye does not select or highlight its row",
+							skope->loadedNifsView->selectionModel()->selectedRows().isEmpty()
+								&& !skope->loadedNifsView->currentIndex().isValid() );
+						clickAt( QPoint( vr.right() - 36, vr.center().y() ) );
+						clickAt( QPoint( vr.right() - 14, vr.center().y() ) );
+						check( "clicking the opacity disc toggles transparency",
+							skope->workspaceDisplayMode( row ) == 2 );
+						check( "clicking the opacity disc also preserves selection",
+							skope->loadedNifsView->selectionModel()->selectedRows().isEmpty()
+								&& !skope->loadedNifsView->currentIndex().isValid() );
+						skope->setWorkspaceDisplayMode( row, 1 );
+					}
+
+					/* OPEN THE REAL ROW MENU long enough to inspect and render it. */
+					if ( skope->loadedNifsModel->rowCount() > 0 ) {
+						const QModelIndex menuRow = skope->loadedNifsModel->index(
+							skope->loadedNifsModel->rowCount() - 1, 0 );
+						BackgroundNifDocument * menuDocument =
+							skope->backgroundDocumentFromBrowserIndex( menuRow );
+						QStringList menuTexts;
+						bool skeletonIcon = false, faceIcon = false;
+						QTimer::singleShot( 100, skope, [&]() {
+							if ( auto * menu = qobject_cast<QMenu *>( QApplication::activePopupWidget() ) ) {
+								for ( QAction * action : menu->actions() ) {
+									menuTexts << action->text();
+									if ( action->text().contains( QStringLiteral( "Skeleton" ) ) )
+										skeletonIcon = !action->icon().isNull();
+									if ( action->text().contains( QStringLiteral( "Face Donor" ) ) )
+										faceIcon = !action->icon().isNull();
+								}
+								menu->grab().save( QApplication::applicationDirPath()
+									+ QStringLiteral( "/ww_loadednifs_menu.png" ) );
+								menu->close();
+							}
+						} );
+						if ( menuDocument )
+							skope->showBackgroundDocumentMenu( menuDocument,
+								skope->loadedNifsView->viewport()->mapToGlobal(
+									skope->loadedNifsView->visualRect( menuRow ).center() ) );
+						check( "the skeleton and face-donor menu actions use their row icons",
+							menuDocument && skeletonIcon && faceIcon );
+						check( "the data-only row menu has no duplicate Close action",
+							!menuTexts.contains( QStringLiteral( "Close Document" ) ) );
+						const int skeletonAction = menuTexts.indexOf(
+							QStringLiteral( "Use as Skeleton for Loaded NIFs" ) );
+						const int visibleAction = menuTexts.indexOf(
+							QStringLiteral( "Visible in Workspace" ) );
+						check( "rigging actions precede workspace display actions",
+							skeletonAction >= 0 && visibleAction > skeletonAction );
+					}
 
 					/* TWO INDEPENDENT ROOTS MAY LOAD THE SAME PATH.
 					 * The global lists used to deduplicate across roots, so B could silently
@@ -18187,7 +18363,7 @@ void NifSkope::initDockWidgets()
 	tabifyDockWidget( dList, dHeader );
 	tabifyDockWidget( dHeader, dBrowser );
 
-	// Raise List above Header
+	// Raise the useful startup face of the upper-left tab group.
 	dList->raise();
 
 	// Hide certain docks by default

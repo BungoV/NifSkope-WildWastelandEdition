@@ -254,6 +254,17 @@ protected:
 	}
 };
 
+static constexpr int LoadedNifGlyphWidth = 20;
+static constexpr int LoadedNifGlyphCount = 3;
+
+static QRect loadedNifGlyphRect( const QRect & row, int slot )
+{
+	const int size = std::min( LoadedNifGlyphWidth, row.height() - 2 );
+	const int top = row.top() + ( row.height() - size ) / 2;
+	return QRect( row.right() - ( LoadedNifGlyphCount - slot )
+		* ( LoadedNifGlyphWidth + 2 ) - 2, top, size, size );
+}
+
 class LoadedNifsTreeView final : public QTreeView
 {
 public:
@@ -261,8 +272,48 @@ public:
 	NifBrowserTreeView * sourceView = nullptr;
 	QPersistentModelIndex draggedRow;
 	std::function<void( const QList<QPersistentModelIndex> & )> addBrowserRows;
+	std::function<bool( const QModelIndex & )> hasToggleButtons;
+	std::function<void( const QModelIndex &, int )> toggleButton;
 
 protected:
+	void mousePressEvent( QMouseEvent * event ) override
+	{
+		pressedToggleRow = QPersistentModelIndex();
+		pressedToggleSlot = -1;
+		if ( event->button() == Qt::LeftButton && hasToggleButtons && toggleButton ) {
+			const QModelIndex index = indexAt( event->pos() );
+			if ( index.isValid() && hasToggleButtons( index ) ) {
+				const QRect row = visualRect( index );
+				for ( int slot = 1; slot <= 2; slot++ ) {
+					if ( !loadedNifGlyphRect( row, slot ).contains( event->pos() ) )
+						continue;
+					pressedToggleRow = QPersistentModelIndex( index );
+					pressedToggleSlot = slot;
+					event->accept();
+					return;
+				}
+			}
+		}
+		QTreeView::mousePressEvent( event );
+	}
+
+	void mouseReleaseEvent( QMouseEvent * event ) override
+	{
+		if ( pressedToggleSlot >= 0 ) {
+			const QPersistentModelIndex pressed = pressedToggleRow;
+			const int slot = pressedToggleSlot;
+			pressedToggleRow = QPersistentModelIndex();
+			pressedToggleSlot = -1;
+			if ( event->button() == Qt::LeftButton && pressed.isValid()
+				&& indexAt( event->pos() ) == pressed
+				&& loadedNifGlyphRect( visualRect( pressed ), slot ).contains( event->pos() ) )
+				toggleButton( pressed, slot );
+			event->accept();
+			return;
+		}
+		QTreeView::mouseReleaseEvent( event );
+	}
+
 	void startDrag( Qt::DropActions supportedActions ) override
 	{
 		draggedRow = QPersistentModelIndex();
@@ -305,6 +356,10 @@ protected:
 		}
 		event->ignore();
 	}
+
+private:
+	QPersistentModelIndex pressedToggleRow;
+	int pressedToggleSlot = -1;
 };
 
 //! Defined below; the row delegate draws it in the strip.
@@ -361,13 +416,9 @@ public:
 	//! Flip one flag; the caller decides what that means for the document.
 	std::function<void( const QModelIndex &, int slot )> toggleFlag;
 
-	static constexpr int GlyphW = 20;
-
 	static QRect glyphRect( const QRect & row, int slot )
 	{
-		const int size = std::min( GlyphW, row.height() - 2 );
-		const int top = row.top() + ( row.height() - size ) / 2;
-		return QRect( row.right() - ( SlotCount - slot ) * ( GlyphW + 2 ) - 2, top, size, size );
+		return loadedNifGlyphRect( row, slot );
 	}
 
 	void paint( QPainter * painter, const QStyleOptionViewItem & option,
@@ -377,7 +428,8 @@ public:
 		initStyleOption( &opt, index );
 		const int flags = displayFlags ? displayFlags( index ) : -1;
 		if ( flags >= 0 )		// keep the text clear of the buttons
-			opt.rect.setRight( opt.rect.right() - SlotCount * ( GlyphW + 2 ) - 4 );
+			opt.rect.setRight( opt.rect.right()
+				- LoadedNifGlyphCount * ( LoadedNifGlyphWidth + 2 ) - 4 );
 
 		/* Colour follows SELECTION, exactly as the Block List does.
 		 *
@@ -1348,7 +1400,7 @@ NifSkope::NifSkope( bool background )
 		// With the stretch on the field instead, its cell swallows the spare
 		// width and the buttons drift off to the right edge with a hole in the
 		// middle of the row.
-		blockDetailsSearch->setMinimumWidth( 165 );
+		blockDetailsSearch->setMinimumWidth( 48 );
 		fl->addWidget( blockDetailsSearch, 0 );
 
 		wwLoadPinnedFields();
@@ -1616,6 +1668,11 @@ NifSkope::NifSkope( bool background )
 		}
 		refreshAllDocumentSessions();
 	};
+	loadedWorkspaceView->hasToggleButtons = [loadedDelegate]( const QModelIndex & idx ) {
+		const int flags = loadedDelegate->displayFlags ? loadedDelegate->displayFlags( idx ) : -1;
+		return flags >= 0 && !( flags & 0x8 );
+	};
+	loadedWorkspaceView->toggleButton = loadedDelegate->toggleFlag;
 	loadedNifsView->setItemDelegate( loadedDelegate );
 	loadedNifsView->setRootIsDecorated( false );
 	loadedNifsView->setAlternatingRowColors( false );
@@ -1632,7 +1689,7 @@ NifSkope::NifSkope( bool background )
 	// X / Delete removes the selected documents, handled in eventFilter alongside
 	// the Block List's identical shortcut.
 	loadedNifsView->installEventFilter( this );
-	loadedNifsView->setMinimumHeight( 82 );
+	loadedNifsView->setVerticalScrollMode( QAbstractItemView::ScrollPerPixel );
 	loadedNifsView->header()->setStretchLastSection( true );
 	loadedWorkspaceView->sourceView = browserWorkspaceView;
 	loadedWorkspaceView->addBrowserRows = [this]( const QList<QPersistentModelIndex> & rows ) {
@@ -1644,18 +1701,31 @@ NifSkope::NifSkope( bool background )
 	};
 	wireLoadedNifsSelection();
 
-	// Available resources and loaded documents are related but distinct. Keep
-	// them in resizable upper/lower panes instead of mixing both into one tree.
+	// The search belongs to the Loaded NIFs pane and moves with it.
+	auto * loadedPane = new QWidget( ui->dockWidgetContents_7 );
+	loadedPane->setObjectName( QStringLiteral( "LoadedNifsPane" ) );
+	auto * loadedLayout = new QVBoxLayout( loadedPane );
+	loadedLayout->setContentsMargins( 5, 4, 5, 0 );
+	loadedLayout->setSpacing( 3 );
+	loadedNifsFilter = new QLineEdit( loadedPane );
+	loadedNifsFilter->setObjectName( QStringLiteral( "LoadedNifsFilter" ) );
+	loadedNifsFilter->setPlaceholderText( tr( "Search loaded NIFs…" ) );
+	loadedNifsFilter->setClearButtonEnabled( true );
+	loadedNifsFilter->setMinimumWidth( 48 );
+	loadedLayout->addWidget( loadedNifsFilter );
+	loadedLayout->addWidget( loadedNifsView, 1 );
 	ui->verticalLayout_5->removeWidget( bsaView );
 	auto * browserSplitter = new QSplitter( Qt::Vertical, ui->dockWidgetContents_7 );
 	browserSplitter->setObjectName( QStringLiteral( "NifBrowserSplitter" ) );
 	browserSplitter->setChildrenCollapsible( false );
 	browserSplitter->addWidget( bsaView );
-	browserSplitter->addWidget( loadedNifsView );
+	browserSplitter->addWidget( loadedPane );
 	browserSplitter->setStretchFactor( 0, 5 );
 	browserSplitter->setStretchFactor( 1, 1 );
-	browserSplitter->setSizes( { 420, 120 } );
+	browserSplitter->setSizes( { 420, 140 } );
 	ui->verticalLayout_5->addWidget( browserSplitter );
+	connect( loadedNifsFilter, &QLineEdit::textChanged,
+		this, &NifSkope::applyLoadedNifsFilter );
 	bsaModel->init();
 	bsaProxyModel->setSourceModel( bsaModel );
 	bsaView->setModel( bsaProxyModel );
@@ -2291,7 +2361,24 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		loadedNifsView->header()->setStretchLastSection( true );
 		loadedNifsView->viewport()->update();
 	}
+	// setRowHidden asks QTreeView for live row geometry. During the initial model
+	// rebuild that geometry is still settling, and an empty query has no work to
+	// do anyway. A real active query is reapplied after rebuild as intended.
+	if ( loadedNifsFilter && !loadedNifsFilter->text().trimmed().isEmpty() )
+		applyLoadedNifsFilter();
 	syncingLoadedNifsSelection = false;
+}
+
+void NifSkope::applyLoadedNifsFilter()
+{
+	if ( !loadedNifsView || !loadedNifsModel )
+		return;
+	const QString needle = loadedNifsFilter ? loadedNifsFilter->text().trimmed() : QString();
+	for ( int row = 0; row < loadedNifsModel->rowCount(); row++ ) {
+		const QString name = loadedNifsModel->index( row, 0 ).data( Qt::DisplayRole ).toString();
+		loadedNifsView->setRowHidden( row, QModelIndex(),
+			!needle.isEmpty() && !name.contains( needle, Qt::CaseInsensitive ) );
+	}
 }
 
 /* Selection and visibility are SEPARATE, and used not to be.
@@ -2390,30 +2477,34 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	QMenu menu( this );
 	QAction * makePrimary = menu.addAction( tr( "Make Primary / Edit" ) );
 	makePrimary->setEnabled( document != this );
-	QAction * visible = menu.addAction( tr( "Selected / Visible in Workspace" ) );
-	visible->setCheckable( true );
-	visible->setChecked( document->sessionPreviewVisible && !document->sessionPreviewUnloaded );
-	visible->setEnabled( document != this );
-	QAction * ghost = menu.addAction( tr( "Show Semi-Transparent" ) );
-	ghost->setCheckable( true );
-	ghost->setChecked( document->sessionPreviewGhost );
-	ghost->setEnabled( document != this );
+	menu.addSeparator();
 	QAction * asSkeleton = menu.addAction( tr( "Use as Skeleton for Loaded NIFs" ) );
+	asSkeleton->setIcon( skeletonMarkIcon() );
 	asSkeleton->setCheckable( true );
 	asSkeleton->setChecked( ogl && document->nif && ogl->workspaceSkeleton() == document->nif );
 	asSkeleton->setToolTip( tr( "Every other loaded NIF evaluates its bones against this file, "
 		"by name, so skinned pieces snap onto it instead of sitting at bind pose. Nothing snaps "
 		"until a skeleton is marked; unmark to put everything back." ) );
 	QAction * asFaceDonor = menu.addAction( tr( "Use as Face Donor for faceBones" ) );
+	asFaceDonor->setIcon( faceDonorMarkIcon() );
 	asFaceDonor->setCheckable( true );
 	asFaceDonor->setChecked( document->nif && NifSkope::workspaceFaceDonor() == document->nif );
 	asFaceDonor->setToolTip( tr( "The rigging steps take their sculpt bones from this file "
 		"without asking each time. Mark the vanilla head's _faceBones.nif; it is read, never "
 		"written to." ) );
-	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
+	menu.addSeparator();
+	QAction * visible = menu.addAction( tr( "Visible in Workspace" ) );
+	visible->setCheckable( true );
+	visible->setChecked( document->sessionPreviewVisible && !document->sessionPreviewUnloaded );
+	visible->setEnabled( document != this );
+	QAction * ghost = menu.addAction( tr( "Semi-Transparent in Workspace" ) );
+	ghost->setCheckable( true );
+	ghost->setChecked( document->sessionPreviewGhost );
+	ghost->setEnabled( document != this );
+	QAction * isolate = menu.addAction( tr( "Isolate with Primary" ) );
 	isolate->setEnabled( document != this );
-	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
-	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
+	QAction * showAll = menu.addAction( tr( "Show All Secondary NIFs" ) );
+	QAction * hideAll = menu.addAction( tr( "Hide All Secondary NIFs" ) );
 	menu.addSeparator();
 	QAction * freeze = menu.addAction( tr( "Freeze Animation…" ) );
 	freeze->setEnabled( document->nif && !AnimSetup::sequenceNames( document->nif ).isEmpty() );
@@ -3029,19 +3120,19 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	if ( !document ) return;
 	QMenu menu( this );
 	QAction * makePrimary = menu.addAction( tr( "Make Primary / Edit" ) );
-	QAction * visible = menu.addAction( tr( "Selected / Visible in Workspace" ) );
-	visible->setCheckable( true );
-	visible->setChecked( document->selectedInWorkspace() );
-	QAction * ghost = menu.addAction( tr( "Show Semi-Transparent" ) );
-	ghost->setCheckable( true );
-	ghost->setChecked( document->sessionPreviewGhost );
+	QAction * saveAs = menu.addAction( tr( "Save As…" ) );
+	saveAs->setToolTip( tr( "Write this loaded NIF to a file" ) );
+	QAction * addFiles = menu.addAction( tr( "Add NIF to Loaded NIFs…" ) );
+	menu.addSeparator();
 	QAction * asSkeleton = menu.addAction( tr( "Use as Skeleton for Loaded NIFs" ) );
+	asSkeleton->setIcon( skeletonMarkIcon() );
 	asSkeleton->setCheckable( true );
 	asSkeleton->setChecked( ogl && document->nif && ogl->workspaceSkeleton() == document->nif );
 	asSkeleton->setToolTip( tr( "Every other loaded NIF evaluates its bones against this file, "
 		"by name, so skinned pieces snap onto it instead of sitting at bind pose. Nothing snaps "
 		"until a skeleton is marked; unmark to put everything back." ) );
 	QAction * asFaceDonor = menu.addAction( tr( "Use as Face Donor for faceBones" ) );
+	asFaceDonor->setIcon( faceDonorMarkIcon() );
 	asFaceDonor->setCheckable( true );
 	asFaceDonor->setChecked( document->nif && NifSkope::workspaceFaceDonor() == document->nif );
 	asFaceDonor->setToolTip( tr( "The rigging steps take their sculpt bones from this file "
@@ -3056,12 +3147,16 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 		? tr( "Build a faceBones NIF from this file using the marked donor. It appears in "
 			"Loaded NIFs unsaved, to be saved wherever you want it." )
 		: tr( "Mark a file as the face donor first" ) );
-	QAction * saveAs = menu.addAction( tr( "Save As…" ) );
-	saveAs->setToolTip( tr( "Write this loaded NIF to a file" ) );
-	QAction * addFiles = menu.addAction( tr( "Add NIF to Loaded NIFs…" ) );
-	QAction * isolate = menu.addAction( tr( "Isolate This Secondary with Primary" ) );
-	QAction * showAll = menu.addAction( tr( "Show All Secondary Documents" ) );
-	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Documents" ) );
+	menu.addSeparator();
+	QAction * visible = menu.addAction( tr( "Visible in Workspace" ) );
+	visible->setCheckable( true );
+	visible->setChecked( document->selectedInWorkspace() );
+	QAction * ghost = menu.addAction( tr( "Semi-Transparent in Workspace" ) );
+	ghost->setCheckable( true );
+	ghost->setChecked( document->sessionPreviewGhost );
+	QAction * isolate = menu.addAction( tr( "Isolate with Primary" ) );
+	QAction * showAll = menu.addAction( tr( "Show All Secondary NIFs" ) );
+	QAction * hideAll = menu.addAction( tr( "Hide All Secondary NIFs" ) );
 	menu.addSeparator();
 	// Per file, per limb: this is what makes "freeze each part at its own moment,
 	// then merge" a thing you can actually do.
@@ -3079,10 +3174,9 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	revert->setToolTip( tr( "Re-parse the bytes this document was loaded from, discarding every change" ) );
 	menu.setToolTipsVisible( true );
 	menu.addSeparator();
-	// A data-only document exists solely as a workspace member, so removing it
-	// from the Loaded NIFs list and closing it are the same operation.
+	// A data-only document exists solely as a workspace member, so "Close" would
+	// duplicate this exact operation. Offer the one name that says where it goes.
 	QAction * unload = menu.addAction( tr( "Remove from Loaded NIFs" ) );
-	QAction * close = menu.addAction( tr( "Close Document" ) );
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == revert ) {
 		if ( modified && QMessageBox::warning( this, tr( "Revert Loaded NIF" ),
@@ -3153,7 +3247,7 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
 			}
 		refreshAllDocumentSessions();
-	} else if ( chosen == unload || chosen == close ) {
+	} else if ( chosen == unload ) {
 		removeBackgroundDocument( document );
 	}
 }

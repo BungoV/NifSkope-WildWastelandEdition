@@ -7382,7 +7382,7 @@ QDockWidget * tlCreateRiggingManagerDock( NifModel * nif, QMainWindow * mw, GLVi
 	scroll->setObjectName( QStringLiteral( "RiggingToolsScrollArea" ) );
 	scroll->setWidgetResizable( true );
 	scroll->setFrameShape( QFrame::NoFrame );
-	scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	scroll->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	scroll->setWidget( panel );
 	dock->setWidget( scroll );
@@ -7694,7 +7694,7 @@ QDockWidget * tlCreateVertexPaintManagerDock( NifModel * nif, QMainWindow * mw, 
 	scroll->setObjectName( QStringLiteral( "VertexPaintScrollArea" ) );
 	scroll->setWidgetResizable( true );
 	scroll->setFrameShape( QFrame::NoFrame );
-	scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	scroll->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	scroll->setWidget( panel );
 	dock->setWidget( scroll );

@@ -5828,7 +5828,6 @@ QDockWidget * tlCreateUVManagerDock( NifModel * nif, QMainWindow * mw, GLView * 
 	} );
 
 	dock->setWidget( panel );
-	dock->setMinimumWidth( 340 );
 	mw->addDockWidget( Qt::RightDockWidgetArea, dock );
 	dock->hide();
 	return dock;

@@ -428,6 +428,7 @@ private:
 	void initDocumentSession();
 	void rebuildDocumentTabs();
 	void rebuildLoadedNifsBrowserGroup();
+	void applyLoadedNifsFilter();
 	void wireLoadedNifsSelection();
 	void addNifBrowserIndexToLoaded( const QModelIndex & index );
 	void queueNifBrowserIndexToLoaded( const QModelIndex & index );
@@ -815,8 +816,9 @@ private:
 	QAction * nifBrowserArchivesToggle = nullptr;
 	QAction * nifBrowserLooseToggle = nullptr;
 	QToolButton * nifBrowserFavouritesOnly = nullptr;
-	//! Separate lower pane containing the live multi-NIF session.
+	//! Separate pane containing the live multi-NIF session.
 	QTreeView * loadedNifsView = nullptr;
+	QLineEdit * loadedNifsFilter = nullptr;
 
 	//! This view shows the KFM file, if any.
 	NifTreeView * kfmtree;
