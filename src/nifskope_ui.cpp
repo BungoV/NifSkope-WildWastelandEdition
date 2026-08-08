@@ -10379,6 +10379,80 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "every drop went through the view's drag overrides",
 						drops > 0 && deliveries == drops * 2 );
 
+					/* WHAT MAY GO INTO WHAT: the whole table, not one case.
+					 *
+					 * Asked of blockListDropSpot's own question — does this row have
+					 * an INSIDE to aim at while this block is being carried — because
+					 * that is the layer a real drag meets first and the layer the
+					 * typed-link work did not reach. A property dropped on its shape
+					 * resolved to the gap beside the mesh, so the re-parent that had
+					 * understood typed links since the morning was never asked.
+					 *
+					 * Both directions matter. A table that only said yes would be
+					 * satisfied by "everything accepts everything", which is a worse
+					 * bug than the one being fixed.
+					 */
+					{
+						auto typeOf = [&]( qint32 b ) {
+							return b >= 0 ? nif->itemName( nif->getBlockIndex( b ) ) : QStringLiteral( "-" );
+						};
+						qint32 aNode = -1, aShape = -1, aProp = -1, aTexSet = -1;
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							const QModelIndex idx = nif->getBlockIndex( b );
+							if ( aNode < 0 && nif->blockInherits( idx, "NiNode" ) ) aNode = b;
+							if ( aShape < 0 && nif->blockInherits( idx, "BSTriShape" ) ) aShape = b;
+							if ( aProp < 0 && nif->blockInherits( idx, "BSLightingShaderProperty" ) ) aProp = b;
+							if ( aTexSet < 0 && nif->blockInherits( idx, "BSShaderTextureSet" ) ) aTexSet = b;
+						}
+						log << "audit blocks: node " << aNode << " " << typeOf( aNode )
+							<< ", shape " << aShape << " " << typeOf( aShape )
+							<< ", property " << aProp << " " << typeOf( aProp )
+							<< ", texture set " << aTexSet << " " << typeOf( aTexSet ) << "\n";
+						check( "the fixture has a node, a shape, a property and a texture set",
+							aNode >= 0 && aShape >= 0 && aProp >= 0 && aTexSet >= 0 );
+
+						if ( aNode >= 0 && aShape >= 0 && aProp >= 0 && aTexSet >= 0 ) {
+							struct Rule { qint32 into; qint32 what; bool allowed; const char * why; };
+							const Rule table[] = {
+								{ aShape, aProp,   true,  "a property into its shape (Shader Property)" },
+								{ aProp,  aTexSet, true,  "a texture set into a property (Texture Set)" },
+								{ aShape, aTexSet, false, "a texture set into a SHAPE: no field takes one" },
+								{ aNode,  aProp,   false, "a property into a NiNode: nodes hold children, not properties" },
+								{ aNode,  aTexSet, false, "a texture set into a NiNode" },
+								{ aProp,  aShape,  false, "a SHAPE into a property: scene objects go in Children" },
+							};
+							for ( const Rule & rule : table ) {
+								const bool offered = wwCanTakeTypedChild( nif, rule.into, rule.what );
+								log << "   " << typeOf( rule.what ) << " -> " << typeOf( rule.into )
+									<< ": " << ( offered ? "offered" : "refused" ) << " ("
+									<< ( rule.allowed ? "should be offered" : "should be refused" )
+									<< ") via " << wwFieldAcceptingName( nif, rule.into, rule.what ) << "\n";
+								check( QString::fromLatin1( rule.why ), offered == rule.allowed );
+							}
+							/* And a NiNode still takes a scene object the ordinary way,
+							 * which none of this may have quietly replaced.
+							 *
+							 * A node the shape is NOT already under: the first node and
+							 * the first shape in this file are parent and child, so
+							 * asking about those two answers "already a child of block
+							 * 0" — correct, and no evidence either way about whether
+							 * Children still works.
+							 */
+							qint32 elsewhere = -1;
+							for ( int b = 0; b < nif->getBlockCount() && elsewhere < 0; b++ )
+								if ( nif->blockInherits( nif->getBlockIndex( b ), "NiNode" )
+									&& b != nif->getParent( aShape ) && b != aShape )
+									elsewhere = b;
+							const QString ordinary = elsewhere < 0 ? QStringLiteral( "no spare node" )
+								: wwReparentRefusal( nif, aShape, elsewhere,
+									WwReparentMode::PreserveWorld, -1 );
+							log << "   shape -> node the ordinary way: \""
+								<< ( ordinary.isEmpty() ? QStringLiteral( "allowed" ) : ordinary ) << "\"\n";
+							check( "...and a shape still belongs in a node's Children",
+								ordinary.isEmpty() );
+						}
+					}
+
 					/* A PROPERTY AND A TEXTURE SET CAN BE MOVED.
 					 *
 					 * Neither is an NiAVObject, so neither is in anybody's Children —

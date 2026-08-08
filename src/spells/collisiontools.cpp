@@ -1309,12 +1309,10 @@ protected:
 				if ( idx.isValid() )
 					pendingDropShapes.append( QPersistentModelIndex( idx ) );
 			}
-			if ( createPopup && createButton ) {
-				createPopup->adjustSize();
-				createPopup->move( createButton->mapToGlobal( QPoint( 0, createButton->height() + 2 ) ) );
-				createPopup->show();
-				createPopup->raise();
-			}
+			// the SAME placement the button uses: clamped to the screen, flipped
+			// above when there is no room below. Hand-rolling it here put the panel
+			// half off the bottom with Create under the taskbar.
+			openPopupUnder( createPopup, createButton );
 			return;
 		}
 
@@ -1528,6 +1526,39 @@ private:
 	//! True while createBody runs, so hiding its popup can tell "confirmed" from
 	//! "dismissed" and drop a parked drop that was never going to happen.
 	bool creatingBodyNow = false;
+
+	/*! Open a popup just under the widget that summons it, clamped to the screen.
+	 *
+	 *  Not centred on the display: the panel is docked at one edge and the thing
+	 *  you are about to operate on is in the viewport beside it, so the middle of
+	 *  the screen is the one place your eyes are not.
+	 *
+	 *  A MEMBER, because the mesh drop opens this same popup and the placement it
+	 *  hand-rolled instead put the panel half off the bottom of the screen with
+	 *  the Create button below the taskbar — unreachable, on the one path where
+	 *  the popup is the only way to finish what you started. This clamps, and
+	 *  flips above when there is no room below.
+	 */
+	void openPopupUnder( QFrame * popup, QWidget * under )
+	{
+		if ( !popup || !under )
+			return;
+		popup->adjustSize();
+		QRect where( under->mapToGlobal( QPoint( 0, under->height() + 2 ) ), popup->sizeHint() );
+		where.setWidth( std::max( where.width(), under->width() ) );
+		const QScreen * screen = QGuiApplication::screenAt( where.topLeft() );
+		if ( !screen ) screen = QGuiApplication::primaryScreen();
+		if ( screen ) {
+			const QRect fits = screen->availableGeometry();
+			if ( where.bottom() > fits.bottom() )		// no room below: go above
+				where.moveTop( under->mapToGlobal( QPoint() ).y() - where.height() - 2 );
+			where.moveLeft( std::clamp( where.left(), fits.left(), fits.right() - where.width() ) );
+			where.moveTop( std::clamp( where.top(), fits.top(), fits.bottom() - where.height() ) );
+		}
+		popup->setGeometry( where );
+		popup->show();
+		popup->raise();
+	}
 
 	NifModel * nif = nullptr;
 	QMainWindow * mw = nullptr;
@@ -5098,29 +5129,13 @@ private:
 		 * place your eyes are not. Same reasoning as the search menu opening
 		 * where the right-click was.
 		 */
-		auto openPopupUnder = []( QFrame * popup, QWidget * under ) {
-			if ( !popup )
-				return;
-			popup->adjustSize();
-			QRect where( under->mapToGlobal( QPoint( 0, under->height() + 2 ) ), popup->sizeHint() );
-			where.setWidth( std::max( where.width(), under->width() ) );
-			const QScreen * screen = QGuiApplication::screenAt( where.topLeft() );
-			if ( !screen ) screen = QGuiApplication::primaryScreen();
-			if ( screen ) {
-				const QRect fits = screen->availableGeometry();
-				if ( where.bottom() > fits.bottom() )		// no room below: go above
-					where.moveTop( under->mapToGlobal( QPoint() ).y() - where.height() - 2 );
-				where.moveLeft( std::clamp( where.left(), fits.left(), fits.right() - where.width() ) );
-				where.moveTop( std::clamp( where.top(), fits.top(), fits.bottom() - where.height() ) );
-			}
-			popup->setGeometry( where );
-			popup->show();
-			popup->raise();
-		};
+		// a member now, not a lambda: the mesh drop has to open the same popup and
+		// hand-rolling the placement there put it half off the bottom of the screen
+		// with the Create button out of reach. See openPopupUnder.
 		connect( createButton, &QToolButton::clicked, this,
-			[this, openPopupUnder]() { openPopupUnder( createPopup, createButton ); } );
+			[this]() { openPopupUnder( createPopup, createButton ); } );
 		connect( createShapeButton, &QToolButton::clicked, this,
-			[this, openPopupUnder]() { openPopupUnder( shapePopup, createShapeButton ); } );
+			[this]() { openPopupUnder( shapePopup, createShapeButton ); } );
 		connect( popupCreate, &QPushButton::clicked, this, [createBody]() { createBody(); } );
 		connect( shapeCreate, &QPushButton::clicked, this, [createCollision]() { createCollision(); } );
 		// and a mesh dropped on the panel runs exactly this, so the two cannot

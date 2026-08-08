@@ -5113,8 +5113,25 @@ qint32 NifSkope::blockListDropSpot( const QPoint & viewportPos, int * position, 
 	const qint32 hovered = nif->getBlockNumber(
 		list->model() == proxy ? proxy->mapTo( idx ) : idx );
 	const QModelIndex iHovered = nif->getBlockIndex( hovered );
-	const bool canTakeChildren = iHovered.isValid() && nif->blockInherits( iHovered, "NiNode" )
+	bool canTakeChildren = iHovered.isValid() && nif->blockInherits( iHovered, "NiNode" )
 		&& nif->getIndex( iHovered, "Children" ).isValid();
+
+	/* ...OR CAN TAKE WHAT IS BEING CARRIED, through a named field.
+	 *
+	 * "Can this row take children" is the wrong question while a property or a
+	 * texture set is in flight: those do not live in Children, they live in
+	 * `Shader Property` and `Texture Set`, and a BSTriShape holds one of each. But
+	 * a mesh row answered no, so its whole height was gap, and a shader property
+	 * dropped onto its shape resolved to the space BESIDE the mesh before anything
+	 * asked what was being dragged. The re-parent itself has understood typed
+	 * links since earlier today; it was never reached.
+	 *
+	 * The first block is enough: a multi-drag of mixed types is not something the
+	 * payload can express, and the refusal path names anything the drop then
+	 * cannot place.
+	 */
+	if ( !canTakeChildren && !blockListDragBlocks.isEmpty() )
+		canTakeChildren = wwCanTakeTypedChild( nif, hovered, blockListDragBlocks.first() );
 
 	const int edge = canTakeChildren ? qBound( 4, r.height() / 3, 10 ) : ( r.height() + 1 ) / 2;
 	const bool above = ( viewportPos.y() - r.top() ) < edge;

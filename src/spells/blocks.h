@@ -225,6 +225,10 @@ QString wwReparentRefusal( const NifModel * nif, qint32 block, qint32 newParent,
 //! So a harness can see the CHOICE and not only its effect.
 QString wwFieldAcceptingName( const NifModel * nif, qint32 owner, qint32 block );
 
+//! Can `owner` hold `block` through a named field rather than in Children? What
+//! gives a row an inside to aim at while a non-scene-object is being dragged.
+bool wwCanTakeTypedChild( const NifModel * nif, qint32 owner, qint32 block );
+
 /*! Re-parent blocks under `newParent`, as ONE undo step.
  *
  *  Every world transform is read BEFORE anything is written. Node transforms are

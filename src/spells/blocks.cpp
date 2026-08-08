@@ -694,8 +694,13 @@ static QModelIndex wwFieldAccepting( const NifModel * nif, qint32 owner, qint32 
 				else if ( !takes.isEmpty() && takes != QLatin1String( "NiObject" )
 					&& nif->inherits( type, takes ) )
 					score = 2;
-				else if ( !takes.isEmpty() && nif->inherits( type, takes ) )
-					score = 3;
+				/* NO SCORE 3. A field declaring a type so broad that everything
+				 * inherits it — NiObject, and BSTriShape's `Skin` is one — says
+				 * nothing about what belongs in it, and taking it as permission put
+				 * a BSShaderTextureSet into a mesh's Skin, measured. Where the
+				 * format does not say a field takes this type, the honest answer is
+				 * that it does not, and the drop is refused rather than guessed.
+				 */
 
 				if ( score < 99 ) {
 					if ( array.isEmpty() ) {
@@ -720,6 +725,25 @@ static QModelIndex wwFieldAccepting( const NifModel * nif, qint32 owner, qint32 
 	if ( inArray.isValid() && arrayName )
 		*arrayName = arrayFound;
 	return inArray.isValid() ? inArray : single;
+}
+
+/*! Can \a owner hold \a block through a named field, rather than in Children?
+ *
+ *  The Block List asks this while a drag is in flight, to decide whether a row
+ *  has an INSIDE to aim at. Without it a BSTriShape row is all gap — nothing can
+ *  be dropped into a mesh, so its whole height reorders — and a shader property
+ *  dragged onto its shape could never land, because the drop resolved to the gap
+ *  beside the mesh before anything asked what was being carried.
+ */
+bool wwCanTakeTypedChild( const NifModel * nif, qint32 owner, qint32 block )
+{
+	if ( !nif || !nif->isValidBlockNumber( owner ) || !nif->isValidBlockNumber( block ) )
+		return false;
+	// scene objects belong in Children; this is only about the other 492 types
+	if ( nif->blockInherits( nif->getBlockIndex( block ), "NiAVObject" ) )
+		return false;
+	QString array;
+	return wwFieldAccepting( nif, owner, block, &array ).isValid();
 }
 
 /*! WW_BLOCKDND_TEST: which field a typed drop would write, as text.

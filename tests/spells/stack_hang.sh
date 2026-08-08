@@ -21,4 +21,4 @@ for attempt in $(seq 1 12); do
 	echo "attempt $attempt: finished before 25 s, retrying" >> "$out"
 	wait "$runner" 2>/dev/null
 done
-echo "never hung in 4 attempts" >> "$out"
+echo "never hung in any attempt" >> "$out"
