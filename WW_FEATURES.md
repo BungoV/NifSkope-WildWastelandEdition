@@ -56,6 +56,8 @@ edition:
 - **Collision Manager** workspace: per-shape tree, material naming, layer,
   motion quality, solver, friction and restitution read from the file's own
   bytes; click a shape in the viewport to select its row and back again.
+- Named collision-body presets and custom material aliases are reusable Library
+  files under `<NifSkope Library>/Collision`, not registry-only payloads.
 - **Ragdoll simulation** in the viewport — bodies fall, land and settle
   according to the constraints the file actually declares. Grab and drag a bone;
   the chain goes taut instead of tearing open. Adaptive solver for stiff hinges.
@@ -162,8 +164,13 @@ predecessor:
 
 - **Loaded NIFs** pane beside Available NIFs, with explicit enrolment into a
   combined workspace.
+- Two-way NIF Browser drag: available file → Loaded NIFs; loaded live model →
+  Save As, with the row retained. Available `.nif` files can be starred and
+  filtered; favorites live under the configurable NifSkope Library.
 - A **data-only background document layer**: enrolled files are parsed
   `NifModel`s with no window, dock or GL context. Promotion to primary is lazy.
+- Workspace-root isolation and Save/Discard/Cancel protection for generated or
+  edited in-memory rows, including Reload, Remove, Revert and workspace close.
 - **Merge Into** — merge NIFs into one poseable file, honouring `AttachT` so
   ArtObjects land on the right limb. Verified to carry everything.
 - Combined preview and donor selection across the whole workspace group.

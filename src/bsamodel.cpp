@@ -51,7 +51,15 @@ void BSAModel::init()
 
 Qt::ItemFlags BSAModel::flags( const QModelIndex & index ) const
 {
-	return QStandardItemModel::flags( index ) ^ Qt::ItemIsEditable;
+	Qt::ItemFlags flags = QStandardItemModel::flags( index ) & ~Qt::ItemIsEditable;
+	// A folder is navigation, not a draggable NIF. QStandardItem enables dragging
+	// by default, which let a folder start the same gesture as one of its files;
+	// the Loaded NIFs target then had to discover the empty path and do nothing.
+	const bool isFile = index.isValid()
+		&& !index.sibling( index.row(), 1 ).data( Qt::EditRole ).toString().isEmpty();
+	if ( isFile ) flags |= Qt::ItemIsDragEnabled;
+	else flags &= ~Qt::ItemIsDragEnabled;
+	return flags;
 }
 
 bool BSAModel::fillModel( const BA2File * bsa, const QString & folder )
@@ -134,11 +142,23 @@ void BSAProxyModel::setFiletypes( QStringList types )
 	filetypes = types;
 }
 
+void BSAProxyModel::setFavouriteRole( int role )
+{
+	favouriteRole = role;
+	invalidateFilter();
+}
+
 void BSAProxyModel::setFilterByNameOnly( bool nameOnly )
 {
 	filterByNameOnly = nameOnly;
 
 	setFilterRegularExpression( filterRegularExpression() );
+}
+
+void BSAProxyModel::setFavouritesOnly( bool favouritesOnly )
+{
+	filterFavouritesOnly = favouritesOnly;
+	invalidateFilter();
 }
 
 void BSAProxyModel::resetFilter()
@@ -148,36 +168,43 @@ void BSAProxyModel::resetFilter()
 
 bool BSAProxyModel::filterAcceptsRow( int sourceRow, const QModelIndex & sourceParent ) const
 {
-	if ( !filterRegularExpression().pattern().isEmpty() ) {
+	const bool textFiltering = !filterRegularExpression().pattern().isEmpty();
+	if ( !textFiltering && !filterFavouritesOnly )
+		return QSortFilterProxyModel::filterAcceptsRow( sourceRow, sourceParent );
 
-		QModelIndex sourceIndex0 = sourceModel()->index( sourceRow, 0, sourceParent );
-		QModelIndex sourceIndex1 = sourceModel()->index( sourceRow, 1, sourceParent );
-		if ( sourceIndex0.isValid() ) {
-			// If children match, parent matches
-			int c = sourceModel()->rowCount( sourceIndex0 );
-			for ( int i = 0; i < c; ++i ) {
-				if ( filterAcceptsRow( i, sourceIndex0 ) )
-					return true;
-			}
+	QModelIndex sourceIndex0 = sourceModel()->index( sourceRow, 0, sourceParent );
+	QModelIndex sourceIndex1 = sourceModel()->index( sourceRow, 1, sourceParent );
+	if ( !sourceIndex0.isValid() )
+		return false;
 
-			QString key0 = sourceModel()->data( sourceIndex0, filterRole() ).toString();
-			QString key1 = sourceModel()->data( sourceIndex1, filterRole() ).toString();
-
-			bool typeMatch = true;
-			if ( filetypes.count() ) {
-				typeMatch = false;
-				for ( auto f : filetypes ) {
-					typeMatch |= key1.endsWith( f, Qt::CaseInsensitive );
-				}
-			}
-
-			bool stringMatch = (filterByNameOnly) ? key0.contains( filterRegularExpression() ) : key1.contains( filterRegularExpression() );
-
-			return typeMatch && stringMatch;
-		}
+	// A folder stays only when something below it survives every active filter.
+	const int childCount = sourceModel()->rowCount( sourceIndex0 );
+	for ( int i = 0; i < childCount; ++i ) {
+		if ( filterAcceptsRow( i, sourceIndex0 ) )
+			return true;
 	}
+	if ( childCount > 0 )
+		return false;
 
-	return QSortFilterProxyModel::filterAcceptsRow( sourceRow, sourceParent );
+	if ( filterFavouritesOnly
+		&& ( favouriteRole < 0 || !sourceIndex0.data( favouriteRole ).toBool() ) )
+		return false;
+
+	if ( !textFiltering )
+		return true;
+
+	const QString key0 = sourceModel()->data( sourceIndex0, filterRole() ).toString();
+	const QString key1 = sourceModel()->data( sourceIndex1, filterRole() ).toString();
+	bool typeMatch = true;
+	if ( filetypes.count() ) {
+		typeMatch = false;
+		for ( const QString & f : filetypes )
+			typeMatch |= key1.endsWith( f, Qt::CaseInsensitive );
+	}
+	const bool stringMatch = filterByNameOnly
+		? key0.contains( filterRegularExpression() )
+		: key1.contains( filterRegularExpression() );
+	return typeMatch && stringMatch;
 }
 
 bool BSAProxyModel::lessThan( const QModelIndex & left, const QModelIndex & right ) const

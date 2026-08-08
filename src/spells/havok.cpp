@@ -9,6 +9,7 @@
 #include "nifsnapshot.h"
 #include "spells/blocks.h"
 #include "data/nifvalue.h"
+#include "wwcollisionlibrary.h"
 
 #include "lib/coacd.h"
 #include "libfo76utils/src/common.hpp"
@@ -20,6 +21,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDebug>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QMap>
@@ -804,7 +806,7 @@ static quint32 collisionCreateMaterial( const NifModel * )
 		}
 	}
 	if ( !ok ) {
-		const QVariantMap custom = settings.value( "CollisionManager/CustomMaterials" ).toMap();
+		const QVariantMap custom = WwCollisionLibrary::customMaterials();
 		auto it = custom.constFind( text );
 		if ( it != custom.cend() ) { value = it.value().toUInt(); ok = true; }
 	}
@@ -817,9 +819,12 @@ static quint32 collisionCreateMaterial( const NifModel * )
 		for ( QChar c : text )
 			hashFunctionCRC32( hash, static_cast<unsigned char>( c.toLower().unicode() ) );
 		value = quint32( hash ); ok = true;
-		QVariantMap custom = settings.value( "CollisionManager/CustomMaterials" ).toMap();
+		QVariantMap custom = WwCollisionLibrary::customMaterials();
 		custom.insert( text, value );
-		settings.setValue( "CollisionManager/CustomMaterials", custom );
+		if ( !WwCollisionLibrary::writeCustomMaterials( custom ) )
+			qWarning() << "Could not remember custom collision material in"
+				<< WwLibrary::featureFile( QStringLiteral( "Collision" ),
+					QStringLiteral( "CustomMaterials.json" ) );
 	}
 	return ok ? value : 0;
 }

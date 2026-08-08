@@ -8,6 +8,7 @@
 #include "model/nifmodel.h"
 #include "data/nifvalue.h"
 #include "nifsnapshot.h"
+#include "wwcollisionlibrary.h"
 #include "wwskin.h"
 #include "lib/qhull.h"
 #include "lib/nvtristripwrapper.h"
@@ -660,63 +661,44 @@ public:
  *  No Q_OBJECT: this file has no moc pass, so the callback is a std::function
  *  rather than a signal, and showPopup/hidePopup are plain virtual overrides.
  */
-/* CUSTOM COLLISION-BODY PRESETS.
- *
- * Kept in NifSkope's own settings under CollisionManager/Presets/<name>, one
- * group per preset, holding exactly the keys tlCollisionPresetDefaults() hands
- * back for a built-in. That is the point of the shape: a custom preset is then
- * applied by the same three lines that apply a built-in one, so there is no
- * second code path that can disagree about what a preset means.
- *
- * Keyed by NAME rather than by an id, because a rename has to survive and an
- * id would either have to be reassigned or leak into the settings as a stale
- * number nobody can map back.
- */
+/* CUSTOM COLLISION-BODY PRESETS are authored reusable content, not a window
+ * preference. They live in <NifSkope Library>/Collision/Presets.json; the
+ * helper imports the old CollisionManager/Presets QSettings groups once. */
 static QStringList wwCollisionPresetNames()
 {
-	QSettings s;
-	s.beginGroup( QStringLiteral( "CollisionManager/Presets" ) );
-	QStringList names = s.childGroups();
+	QStringList names = WwCollisionLibrary::presets().keys();
 	names.sort( Qt::CaseInsensitive );
 	return names;
 }
 
 static QVariantMap wwCollisionPresetValues( const QString & name )
 {
-	QSettings s;
-	s.beginGroup( QStringLiteral( "CollisionManager/Presets" ) );
-	s.beginGroup( name );
-	QVariantMap out;
-	for ( const QString & key : s.childKeys() )
-		out[key] = s.value( key );
-	return out;
+	return WwCollisionLibrary::presets().value( name ).toMap();
 }
 
-static void wwCollisionPresetWrite( const QString & name, const QVariantMap & values )
+static bool wwCollisionPresetWrite( const QString & name, const QVariantMap & values )
 {
-	QSettings s;
-	s.beginGroup( QStringLiteral( "CollisionManager/Presets" ) );
-	s.beginGroup( name );
-	// clear first: an overwrite must not leave a key the new values do not have
-	s.remove( QString() );
-	for ( auto it = values.cbegin(); it != values.cend(); ++it )
-		s.setValue( it.key(), it.value() );
+	QVariantMap presets = WwCollisionLibrary::presets();
+	presets.insert( name, values );
+	return WwCollisionLibrary::writePresets( presets );
 }
 
-static void wwCollisionPresetRemove( const QString & name )
+static bool wwCollisionPresetRemove( const QString & name )
 {
-	QSettings s;
-	s.beginGroup( QStringLiteral( "CollisionManager/Presets" ) );
-	s.remove( name );
+	QVariantMap presets = WwCollisionLibrary::presets();
+	presets.remove( name );
+	return WwCollisionLibrary::writePresets( presets );
 }
 
-static void wwCollisionPresetRename( const QString & from, const QString & to )
+static bool wwCollisionPresetRename( const QString & from, const QString & to )
 {
 	if ( from == to || to.isEmpty() )
-		return;
-	const QVariantMap values = wwCollisionPresetValues( from );
-	wwCollisionPresetRemove( from );
-	wwCollisionPresetWrite( to, values );
+		return false;
+	QVariantMap presets = WwCollisionLibrary::presets();
+	const QVariant values = presets.take( from );
+	if ( !values.isValid() ) return false;
+	presets.insert( to, values );
+	return WwCollisionLibrary::writePresets( presets );
 }
 
 class WwSearchCombo final : public QComboBox
@@ -1689,8 +1671,7 @@ private:
 
 	QVariantMap customMaterials() const
 	{
-		QSettings settings;
-		return settings.value( "CollisionManager/CustomMaterials" ).toMap();
+		return WwCollisionLibrary::customMaterials();
 	}
 
 	QString knownMaterialText( quint32 crc ) const
@@ -4112,10 +4093,15 @@ private:
 					return;
 				}
 			}
-			QSettings settings;
-			QVariantMap custom = settings.value( "CollisionManager/CustomMaterials" ).toMap();
+			QVariantMap custom = WwCollisionLibrary::customMaterials();
 			custom.insert( name, value );
-			settings.setValue( "CollisionManager/CustomMaterials", custom );
+			if ( !WwCollisionLibrary::writeCustomMaterials( custom ) ) {
+				QMessageBox::warning( this, tr( "Custom Collision Material" ),
+					tr( "Could not write %1." ).arg( WwLibrary::featureFile(
+						QStringLiteral( "Collision" ),
+						QStringLiteral( "CustomMaterials.json" ) ) ) );
+				return;
+			}
 			const QString stored = QStringLiteral( "0x%1" ).arg( value, 8, 16, QLatin1Char( '0' ) );
 			int row = materialEdit->findData( stored );
 			if ( row < 0 ) {
@@ -4850,7 +4836,12 @@ private:
 				if ( existed && QMessageBox::question( this, tr( "Save Collision Preset" ),
 						tr( "Replace the saved preset '%1'?" ).arg( name ) ) != QMessageBox::Yes )
 					return;
-				wwCollisionPresetWrite( name, createFieldValues() );
+				if ( !wwCollisionPresetWrite( name, createFieldValues() ) ) {
+					QMessageBox::warning( this, tr( "Save Collision Preset" ),
+						tr( "Could not write %1." ).arg( WwLibrary::featureFile(
+							QStringLiteral( "Collision" ), QStringLiteral( "Presets.json" ) ) ) );
+					return;
+				}
 				QSettings().setValue( "CollisionManager/Create/PresetName", name );
 				int row = preset->findData( name );
 				if ( row < 0 ) {
@@ -4869,7 +4860,12 @@ private:
 				if ( QMessageBox::question( this, tr( "Remove Collision Preset" ),
 						tr( "Remove the saved preset '%1'?" ).arg( name ) ) != QMessageBox::Yes )
 					return;
-				wwCollisionPresetRemove( name );
+				if ( !wwCollisionPresetRemove( name ) ) {
+					QMessageBox::warning( this, tr( "Remove Collision Preset" ),
+						tr( "Could not write %1." ).arg( WwLibrary::featureFile(
+							QStringLiteral( "Collision" ), QStringLiteral( "Presets.json" ) ) ) );
+					return;
+				}
 				const int row = preset->findData( name );
 				if ( row >= 0 )
 					preset->removeItem( row );
@@ -4896,7 +4892,12 @@ private:
 						tr( "'%1' is already taken." ).arg( name ) );
 					return;
 				}
-				wwCollisionPresetRename( from, name );
+				if ( !wwCollisionPresetRename( from, name ) ) {
+					QMessageBox::warning( this, tr( "Rename Collision Preset" ),
+						tr( "Could not write %1." ).arg( WwLibrary::featureFile(
+							QStringLiteral( "Collision" ), QStringLiteral( "Presets.json" ) ) ) );
+					return;
+				}
 				preset->setItemText( row, name );
 				preset->setItemData( row, name );
 				if ( preset->currentIndex() == row )

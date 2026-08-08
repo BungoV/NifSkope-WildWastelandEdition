@@ -346,13 +346,13 @@ public slots:
 
 protected slots:
 	void openDlg();
-	void saveAsDlg();
+	bool saveAsDlg();
 
 	void archiveDlg();
 	void archiveFolderDlg();
 
 	void load();
-	void save();
+	bool save();
 
 	void reload();
 
@@ -433,12 +433,25 @@ private:
 	void queueNifBrowserIndexToLoaded( const QModelIndex & index );
 	void processNextNifBrowserLoad();
 	void addNifBrowserSelectionToLoaded();
+	void addNifBrowserRowsToLoaded( const QList<QPersistentModelIndex> & rows );
 	void activateDocumentTab( int index );
 	void showDocumentTabMenu( const QPoint & pos );
 	void showDocumentMenu( NifSkope * document, const QPoint & globalPos );
 	NifSkope * documentFromBrowserIndex( const QModelIndex & index ) const;
 	BackgroundNifDocument * backgroundDocumentFromBrowserIndex( const QModelIndex & index ) const;
 	void showBackgroundDocumentMenu( BackgroundNifDocument * document, const QPoint & globalPos );
+	//! The reverse half of browser -> Loaded NIFs: Save As the dragged loaded row.
+	bool saveDraggedLoadedNifAs( const QModelIndex & row,
+		const QString & pathForTest = QString() );
+	QString nifBrowserFavouriteId( const QModelIndex & index ) const;
+	bool isNifBrowserFavourite( const QModelIndex & index ) const;
+	void toggleNifBrowserFavourite( const QModelIndex & index );
+	void applyNifBrowserFavourites();
+	//! Explicitly destructive workspace actions use this before deleting a row.
+	bool confirmBackgroundDocumentRemoval( BackgroundNifDocument * document );
+	NifSkope * workspaceGroupRoot() const;
+	bool sharesWorkspaceGroup( const NifSkope * document ) const;
+	QList<BackgroundNifDocument *> workspaceBackgroundDocuments() const;
 public:
 	//! Add a loose NIF to Loaded NIFs by path (the browser route needs a
 	//! QModelIndex, which a script has no way to produce).
@@ -494,10 +507,10 @@ private:
 	//! each limb can be frozen at its own moment before anything is merged.
 	//! Returns true when the model was changed.
 	bool freezeDocumentDialog( NifModel * nif, const QString & displayName );
-	//! Attach a real window to a data-only background document: create it hidden,
-	//! reload the NIF from its source, then run the normal primary switch.
+	//! Attach a real window to a data-only background document: carry its live
+	//! in-memory model into a hidden window, then run the normal primary switch.
 	void promoteBackgroundDocument( BackgroundNifDocument * document );
-	void removeBackgroundDocument( BackgroundNifDocument * document );
+	bool removeBackgroundDocument( BackgroundNifDocument * document );
 	//! Locate a configured-resource NIF in the primary's combined archive and
 	//! return its raw bytes plus the "[Game]/path" display path.
 	bool extractConfiguredNifBytes( int gameID, const QString & path,
@@ -507,7 +520,7 @@ private:
 	QString documentDisplayName() const;
 
 	void loadFile( const QString & );
-	void saveFile( const QString & );
+	bool saveFile( const QString & );
 	void checkFile( QFileInfo fInfo, QByteArray filehash );
 
 	void openRecentFile();
@@ -799,8 +812,9 @@ private:
 	NifTreeView * header;
 	//! This view shows the archive browser files.
 	QTreeView * bsaView;
-	QPushButton * nifBrowserArchivesToggle = nullptr;
-	QPushButton * nifBrowserLooseToggle = nullptr;
+	QAction * nifBrowserArchivesToggle = nullptr;
+	QAction * nifBrowserLooseToggle = nullptr;
+	QToolButton * nifBrowserFavouritesOnly = nullptr;
 	//! Separate lower pane containing the live multi-NIF session.
 	QTreeView * loadedNifsView = nullptr;
 

@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui_nifskope.h"
 
 #include "bakegeom.h"
+#include "bsamodel.h"
 #include "glview.h"
 #include "nifmerge.h"
 #include "gl/gltools.h"
@@ -43,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifsnapshot.h"
 #include "shortcutregistry.h"
 #include "spellbook.h"
+#include "wwcollisionlibrary.h"
 #include "ui/widgets/quickfavourites.h"
 #include "ui/widgets/spellpalette.h"
 #include "spells/blocks.h"
@@ -53,6 +55,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 
 #include <QProcessEnvironment>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QScopeGuard>
 #include "version.h"
 #include "gl/controllers.h"
@@ -7770,6 +7774,41 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				};
 				do {
 					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					/* Reusable collision presets/material aliases are authored library
+					 * content. Round-trip them against a throwaway Library root. */
+					QSettings librarySettings;
+					const QString libraryKey = QStringLiteral( "Settings/Library/Library Folder" );
+					const bool hadLibrary = librarySettings.contains( libraryKey );
+					const QVariant oldLibrary = librarySettings.value( libraryKey );
+					const QString collisionLibrary = QDir::temp().filePath(
+						QStringLiteral( "ww-collision-library-%1" )
+							.arg( QCoreApplication::applicationPid() ) );
+					QDir( collisionLibrary ).removeRecursively();
+					librarySettings.setValue( libraryKey, collisionLibrary );
+					QVariantMap presetValues;
+					presetValues.insert( QStringLiteral( "Mass" ), 7.5 );
+					QVariantMap presets;
+					presets.insert( QStringLiteral( "Harness Preset" ), presetValues );
+					QVariantMap materials;
+					materials.insert( QStringLiteral( "HarnessMaterial" ), quint32( 0xfedcba98u ) );
+					const bool wrotePresets = WwCollisionLibrary::writePresets( presets );
+					const bool wroteMaterials = WwCollisionLibrary::writeCustomMaterials( materials );
+					check( "custom collision presets live in the NifSkope Library",
+						wrotePresets
+							&& WwCollisionLibrary::presets().value(
+								QStringLiteral( "Harness Preset" ) ).toMap().value(
+									QStringLiteral( "Mass" ) ).toDouble() == 7.5
+							&& QFileInfo( QDir( collisionLibrary ).filePath(
+								QStringLiteral( "Collision/Presets.json" ) ) ).size() > 0 );
+					check( "custom collision material aliases live there too",
+						wroteMaterials
+							&& WwCollisionLibrary::customMaterials().value(
+								QStringLiteral( "HarnessMaterial" ) ).toUInt() == 0xfedcba98u
+							&& QFileInfo( QDir( collisionLibrary ).filePath(
+								QStringLiteral( "Collision/CustomMaterials.json" ) ) ).size() > 0 );
+					if ( hadLibrary ) librarySettings.setValue( libraryKey, oldLibrary );
+					else librarySettings.remove( libraryKey );
+					QDir( collisionLibrary ).removeRecursively();
 					NifModel * nif = skope->getNifModel();
 					// Picking a shape from the menu CREATES one, so the harness has
 					// to be pointing at something it can be created from -- with
@@ -8672,6 +8711,287 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const int row = skope->workspaceDocumentCount() - 1;
 					QApplication::processEvents();
 
+					/* THE COMPACT HEADER AND BOTH NATIVE-DRAG GATES.
+					 *
+					 * A synthetic QDropEvent cannot pass Qt's native drag manager, so the
+					 * contract is split at that honest boundary: the flags/view modes prove a
+					 * press can become a drag, and addNifBrowserRowsToLoaded plus
+					 * saveDraggedLoadedNifAs drive the exact frozen rows below routing.
+					 */
+					check( "the NIF Browser uses one compact header row",
+						skope->ui->bsaTitleBar->isHidden()
+							&& skope->ui->frame->isVisible()
+							&& skope->ui->bsaFilter->parentWidget() == skope->ui->frame );
+					const QStringList compactNames = {
+						QStringLiteral( "NifBrowserFavouritesOnly" ),
+						QStringLiteral( "NifBrowserSources" ),
+						QStringLiteral( "NifBrowserLoadSelected" ),
+						QStringLiteral( "NifBrowserRefresh" ) };
+					bool compactTools = true;
+					for ( const QString & name : compactNames ) {
+						QToolButton * button = skope->ui->frame->findChild<QToolButton *>( name );
+						compactTools &= button && button->autoRaise() && !button->toolTip().isEmpty()
+							&& button->isVisible() && button->geometry().right() < skope->ui->frame->width()
+							&& ( name == QStringLiteral( "NifBrowserFavouritesOnly" )
+								|| !button->icon().isNull() );
+					}
+					check( "the compact header controls are icon tools with tooltips", compactTools );
+					const QString browserShot = QApplication::applicationDirPath()
+						+ QStringLiteral( "/ww_nifbrowser_test.png" );
+					check( "the compact NIF Browser renders",
+						skope->ui->BrowserDock->grab().save( browserShot ) );
+					check( "both panes expose the two-way copy-drag contract",
+						skope->bsaView->dragEnabled() && skope->bsaView->acceptDrops()
+							&& skope->bsaView->dragDropMode() == QAbstractItemView::DragDrop
+							&& skope->loadedNifsView->dragEnabled()
+							&& skope->loadedNifsView->acceptDrops()
+							&& skope->loadedNifsView->dragDropMode() == QAbstractItemView::DragDrop );
+					check( "a Loaded NIF row is draggable",
+						skope->loadedNifsModel->rowCount() > 0
+							&& ( skope->loadedNifsModel->index(
+								skope->loadedNifsModel->rowCount() - 1, 0 ).flags()
+								& Qt::ItemIsDragEnabled ) );
+
+					/* TWO INDEPENDENT ROOTS MAY LOAD THE SAME PATH.
+					 * The global lists used to deduplicate across roots, so B could silently
+					 * enroll A's model and later watch it disappear when A closed. */
+					{
+						const int localBefore = skope->workspaceDocumentCount();
+						auto * other = new NifSkope( true );
+						other->workspaceRoot = other;
+						const bool otherAdded = other->addWorkspaceDocumentFromFile( add );
+						check( "independent windows own independent Loaded NIF lists",
+							otherAdded && other->workspaceDocumentCount() == 1
+								&& skope->workspaceDocumentCount() == localBefore );
+						check( "the same path in two workspaces is two distinct live models",
+							other->workspaceDocumentModel( 0 )
+								&& other->workspaceDocumentModel( 0 )
+									!= skope->workspaceDocumentModel( row ) );
+						for ( BackgroundNifDocument * document : other->workspaceBackgroundDocuments() )
+							other->removeBackgroundDocument( document );
+						delete other;
+					}
+
+					/* BUILD A DETERMINISTIC LOOSE-FILE TREE from the fixture and drive the
+					 * browser -> Loaded path with the exact persistent row captured at drag
+					 * start. A folder must never start the same gesture. */
+					QDir meshesDir( QFileInfo( add ).absolutePath() );
+					QDir dataDir = meshesDir;
+					dataDir.cdUp();
+					skope->bsaModel->clear();
+					skope->bsaModel->init();
+					skope->appendLooseNifsToBrowser( dataDir.absolutePath() );
+					skope->applyNifBrowserFavourites();
+					if ( skope->bsaProxyModel->sourceModel() != skope->bsaModel )
+						skope->bsaProxyModel->setSourceModel( skope->bsaModel );
+					if ( skope->bsaView->model() != skope->bsaProxyModel )
+						skope->bsaView->setModel( skope->bsaProxyModel );
+					std::function<QStandardItem *( QStandardItem *, const QString & )> findPath;
+					findPath = [&]( QStandardItem * parent, const QString & wanted ) -> QStandardItem * {
+						for ( int r = 0; r < parent->rowCount(); r++ ) {
+							QStandardItem * name = parent->child( r, 0 );
+							QStandardItem * path = parent->child( r, 1 );
+							if ( name && path && QFileInfo( path->text() ).absoluteFilePath().compare(
+								QFileInfo( wanted ).absoluteFilePath(), Qt::CaseInsensitive ) == 0 )
+								return name;
+							if ( name ) if ( QStandardItem * found = findPath( name, wanted ) ) return found;
+						}
+						return nullptr;
+					};
+					const QString browserPath = meshesDir.filePath( QStringLiteral( "browser.nif" ) );
+					QStandardItem * browserItem = findPath(
+						skope->bsaModel->invisibleRootItem(), browserPath );
+					QStandardItem * browserFolder = browserItem ? browserItem->parent() : nullptr;
+					QModelIndex browserSource = browserItem ? browserItem->index() : QModelIndex();
+					QModelIndex browserProxy = browserSource.isValid()
+						? skope->bsaProxyModel->mapFromSource( browserSource ) : QModelIndex();
+					check( "a browser NIF is draggable and its folder is not",
+						browserProxy.isValid() && ( browserProxy.flags() & Qt::ItemIsDragEnabled )
+							&& browserFolder
+							&& !( browserFolder->index().flags() & Qt::ItemIsDragEnabled ) );
+					const int beforeBrowserDrop = skope->workspaceDocumentCount();
+					skope->addNifBrowserRowsToLoaded(
+						{ QPersistentModelIndex( browserProxy ) } );
+					QElapsedTimer browserLoadDeadline;
+					browserLoadDeadline.start();
+					while ( skope->processingWorkspaceLoad
+						&& browserLoadDeadline.elapsed() < 3000 )
+						QApplication::processEvents( QEventLoop::AllEvents, 25 );
+					check( "browser -> Loaded NIFs adds the exact dragged file",
+						skope->workspaceDocumentCount() == beforeBrowserDrop + 1
+							&& skope->workspaceDocumentName(
+								skope->workspaceDocumentCount() - 1 ) == QStringLiteral( "browser.nif" ) );
+					const int afterBrowserDrop = skope->workspaceDocumentCount();
+					skope->addNifBrowserRowsToLoaded(
+						{ QPersistentModelIndex( browserProxy ) } );
+					browserLoadDeadline.restart();
+					while ( skope->processingWorkspaceLoad
+						&& browserLoadDeadline.elapsed() < 3000 )
+						QApplication::processEvents( QEventLoop::AllEvents, 25 );
+					check( "dropping the same browser NIF twice does not duplicate it",
+						skope->workspaceDocumentCount() == afterBrowserDrop );
+
+					/* FAVORITES ARE LIBRARY CONTENT, AN ID, A STAR, AND AN AND-FILTER.
+					 * Point the library root into this run's throwaway fixture, then restore
+					 * only that path preference; no user favorite file is ever opened. */
+					QSettings browserSettings;
+					const QString libraryKey = QStringLiteral( "Settings/Library/Library Folder" );
+					const bool hadLibrary = browserSettings.contains( libraryKey );
+					const QVariant restoreLibrary = browserSettings.value( libraryKey );
+					const QString testLibrary = dataDir.filePath( QStringLiteral( "NifSkopeLibrary" ) );
+					browserSettings.setValue( libraryKey, testLibrary );
+					const QString favoritesFile = QDir( testLibrary ).filePath(
+						QStringLiteral( "NIF Browser/Favorites.json" ) );
+					QFile::remove( favoritesFile );
+					skope->applyNifBrowserFavourites();
+					check( "a folder cannot be favorited",
+						skope->nifBrowserFavouriteId( browserFolder->index() ).isEmpty() );
+					skope->toggleNifBrowserFavourite( browserSource );
+					QFile storedFavorites( favoritesFile );
+					QJsonDocument storedJson;
+					if ( storedFavorites.open( QIODevice::ReadOnly ) )
+						storedJson = QJsonDocument::fromJson( storedFavorites.readAll() );
+					check( "favoriting stores a stable ID and marks the row with a star",
+						skope->isNifBrowserFavourite( browserSource )
+							&& !browserItem->icon().isNull()
+							&& storedJson.isArray() && storedJson.array().size() == 1 );
+					check( "favorites live in the configured NifSkope Library",
+						QFileInfo( favoritesFile ).size() > 0
+							&& QDir::cleanPath( QFileInfo( favoritesFile ).absolutePath() )
+								== QDir::cleanPath( QDir( testLibrary ).filePath(
+									QStringLiteral( "NIF Browser" ) ) ) );
+					auto countProxyFiles = [&]( auto && self, const QModelIndex & parent ) -> int {
+					int count = 0;
+					for ( int r = 0; r < skope->bsaProxyModel->rowCount( parent ); r++ ) {
+						const QModelIndex idx = skope->bsaProxyModel->index( r, 0, parent );
+						if ( !idx.sibling( r, 1 ).data( Qt::EditRole ).toString().isEmpty() ) count++;
+						count += self( self, idx );
+					}
+					return count;
+					};
+					skope->nifBrowserFavouritesOnly->setChecked( true );
+					QApplication::processEvents();
+					check( "the star button finds only favorite NIFs and keeps their folders",
+						countProxyFiles( countProxyFiles, QModelIndex() ) == 1 );
+					skope->bsaProxyModel->setFilterRegularExpression(
+						QRegularExpression( QStringLiteral( "does-not-match" ) ) );
+					check( "favorites-only composes with search as AND",
+						countProxyFiles( countProxyFiles, QModelIndex() ) == 0 );
+					skope->bsaProxyModel->resetFilter();
+					skope->bsaModel->clear();
+					skope->bsaModel->init();
+					skope->appendLooseNifsToBrowser( dataDir.absolutePath() );
+					skope->applyNifBrowserFavourites();
+					browserItem = findPath( skope->bsaModel->invisibleRootItem(), browserPath );
+					check( "a full browser rebuild restores the favorite star",
+						browserItem && skope->isNifBrowserFavourite( browserItem->index() )
+							&& !browserItem->icon().isNull() );
+					skope->nifBrowserFavouritesOnly->setChecked( false );
+					if ( hadLibrary ) browserSettings.setValue( libraryKey, restoreLibrary );
+					else browserSettings.remove( libraryKey );
+
+					/* LOADED -> BROWSER IS SAVE AS, NOT REMOVE. Resolve the exact loaded row,
+					 * write its in-memory bytes, and require the row to stay and become clean. */
+					const int draggedBackground = skope->workspaceDocumentCount() - 1;
+					BackgroundNifDocument * draggedDocument =
+						skope->workspaceBackgroundDocuments().value( draggedBackground );
+					QModelIndex draggedLoadedRow;
+					for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
+						const QModelIndex idx = skope->loadedNifsModel->index( r, 0 );
+						if ( skope->backgroundDocumentFromBrowserIndex( idx ) == draggedDocument ) {
+							draggedLoadedRow = idx;
+							break;
+						}
+					}
+					const QString draggedSave = QDir::tempPath()
+						+ QStringLiteral( "/ww_browser_dragged.nif" );
+					QFile::remove( draggedSave );
+					skope->markWorkspaceDocumentUnsaved( draggedBackground );
+					const int beforeDraggedSave = skope->workspaceDocumentCount();
+					const bool draggedSaved = skope->saveDraggedLoadedNifAs(
+						draggedLoadedRow, draggedSave );
+					check( "Loaded NIFs -> browser writes the dragged in-memory NIF",
+						draggedSaved && QFileInfo( draggedSave ).size() > 0 );
+					check( "Save As retains the row and clears its unsaved state",
+						skope->workspaceDocumentCount() == beforeDraggedSave
+							&& !skope->workspaceDocumentModified( draggedBackground )
+							&& skope->workspaceDocumentName( draggedBackground )
+								== QFileInfo( draggedSave ).fileName() );
+
+					/* REMOVE/DELETE OF THE ONLY COPY MUST ASK, AND CANCEL IS ATOMIC. */
+					skope->markWorkspaceDocumentUnsaved( draggedBackground );
+					bool sawRemovalWarning = false;
+					QTimer::singleShot( 0, skope, [&sawRemovalWarning]() {
+						if ( auto * box = qobject_cast<QMessageBox *>(
+							QApplication::activeModalWidget() ) ) {
+							sawRemovalWarning = box->windowTitle().contains(
+								QStringLiteral( "Unsaved" ) );
+							if ( QAbstractButton * cancel = box->button( QMessageBox::Cancel ) )
+								cancel->click();
+						}
+					} );
+					const bool removedUnsaved = skope->removeBackgroundDocument( draggedDocument );
+					check( "removing the only unsaved copy warns and Cancel keeps it",
+						sawRemovalWarning && !removedUnsaved
+							&& skope->workspaceDocumentCount() == beforeDraggedSave );
+					skope->saveWorkspaceDocumentTo( draggedBackground, draggedSave );
+					QFile::remove( draggedSave );
+
+					/* THE USER-FACING RELOAD IS DESTRUCTIVE AND CANCELLABLE. Programmatic
+					 * reload() below remains available to harnesses/internal refreshes. */
+					const bool suppressedReloadPrompt = skope->cfg.suppressSaveConfirm;
+					skope->cfg.suppressSaveConfirm = false;
+					skope->setWindowModified( true );
+					bool sawReloadWarning = false;
+					QTimer::singleShot( 0, skope, [&sawReloadWarning]() {
+						if ( auto * box = qobject_cast<QMessageBox *>(
+								QApplication::activeModalWidget() ) ) {
+							sawReloadWarning = box->windowTitle().contains(
+								QStringLiteral( "Save Confirmation" ) );
+							if ( QAbstractButton * cancel = box->button( QMessageBox::Cancel ) )
+								cancel->click();
+						}
+					} );
+					skope->ui->aReload->trigger();
+					check( "Reload warns about unsaved work and Cancel preserves it",
+						sawReloadWarning && skope->isWindowModified() );
+					skope->setWindowModified( false );
+					skope->cfg.suppressSaveConfirm = suppressedReloadPrompt;
+
+					/* A PRIMARY RELOAD REBUILDS THE ROW MODEL, NOT THE WORKSPACE. Snapshot
+					 * both object identity and visible row count across the real reload. */
+					QStringList beforeReloadNames;
+					QList<NifModel *> beforeReloadModels;
+					for ( int i = 0; i < skope->workspaceDocumentCount(); i++ ) {
+						beforeReloadNames << skope->workspaceDocumentName( i );
+						beforeReloadModels << skope->workspaceDocumentModel( i );
+					}
+					const int beforeReloadRows = skope->loadedNifsModel->rowCount();
+					QEventLoop reloadLoop;
+					bool reloadFinished = false, reloadSucceeded = false;
+					const QMetaObject::Connection reloadConnection = QObject::connect( skope,
+						&NifSkope::completeLoading, &reloadLoop,
+						[&]( bool success, QString & ) {
+							reloadFinished = true;
+							reloadSucceeded = success;
+							reloadLoop.quit();
+						} );
+					QTimer::singleShot( 3000, &reloadLoop, &QEventLoop::quit );
+					skope->reload();
+					reloadLoop.exec();
+					QObject::disconnect( reloadConnection );
+					QStringList afterReloadNames;
+					QList<NifModel *> afterReloadModels;
+					for ( int i = 0; i < skope->workspaceDocumentCount(); i++ ) {
+						afterReloadNames << skope->workspaceDocumentName( i );
+						afterReloadModels << skope->workspaceDocumentModel( i );
+					}
+					check( "reloading the primary preserves every Loaded NIF",
+						reloadFinished && reloadSucceeded
+							&& afterReloadNames == beforeReloadNames
+							&& afterReloadModels == beforeReloadModels
+							&& skope->loadedNifsModel->rowCount() == beforeReloadRows );
+
 					/* NOT MODIFIED. This is the whole of the red-row regression: the
 					 * workspace poses what it loads, so "the bytes differ from the
 					 * file" is true of everything the moment a scene exists.
@@ -8782,7 +9102,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				skope->setWindowModified( false );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
-		} );
+		}, Qt::SingleShotConnection );
 	}
 
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_COLLDROP_TEST" ) ) {
@@ -21331,17 +21651,18 @@ void NifSkope::onLoadComplete( bool success, QString & fname )
 }
 
 
-void NifSkope::saveAsDlg()
+bool NifSkope::saveAsDlg()
 {
+	QString selectedFilter = fileFilter( nif->getFileInfo().suffix() );
 	QString filename = QFileDialog::getSaveFileName( this, tr( "Save File" ), nif->getFileInfo().absoluteFilePath(),
 		fileFilters( false ),
-		new QString( fileFilter( nif->getFileInfo().suffix() ) )
+		&selectedFilter
 	);
 
 	if ( filename.isEmpty() )
-		return;
+		return false;
 
-	saveFile( filename );
+	return saveFile( filename );
 }
 
 void NifSkope::onSaveBegin()
@@ -21373,8 +21694,10 @@ bool NifSkope::saveConfirm()
 			QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::No );
 
 		if ( response == QMessageBox::Yes ) {
-			saveAsDlg();
-			return true;
+			// Cancelling or failing Save As is a cancelled destructive action. The
+			// caller may be about to replace the model or close the whole workspace;
+			// neither is allowed to continue on a write that never happened.
+			return saveAsDlg();
 		} else if ( response == QMessageBox::No ) {
 			return true;
 		} else if ( response == QMessageBox::Cancel ) {
@@ -23362,6 +23685,11 @@ void NifSkope::on_aLoadXML_triggered()
 
 void NifSkope::on_aReload_triggered()
 {
+	// Reload replaces the entire in-memory model. Treat it like every other
+	// destructive open/close route: Save, Discard, or Cancel before any schema or
+	// document load begins. In particular, cancelling Save As must cancel Reload.
+	if ( !saveConfirm() )
+		return;
 	if ( NifModel::loadXML() ) {
 		reload();
 	}
@@ -23489,4 +23817,3 @@ void NifSkope::on_mTheme_triggered( QAction * action )
 
 	setTheme( newTheme );
 }
-

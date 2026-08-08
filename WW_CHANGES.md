@@ -1,5 +1,72 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09a — NIF Browser drag, favorites, compact header, and no silent resets
+
+The NIF Browser and **Loaded NIFs** are a two-way drag surface now. Drag an
+available `.nif` leaf into Loaded NIFs to add that exact file; folders cannot
+start the gesture. Drag exactly one Loaded NIF back onto the browser and it
+opens **Save As…** for that row's live in-memory model. The drop is copy/save
+semantics: cancelling or failing the write changes nothing, and a successful
+save keeps the row, gives it the chosen path, and clears its unsaved mark.
+
+The browser's two text-heavy rows are one Block-List-style header now: a
+stretching search field, **★ favorites only**, one **Sources** menu (Archives,
+Loose NIFs, Search filenames only), **Load Selected**, and **Refresh**. All four
+tools fit at the dock's tested 400 px width and carry tooltips/accessibility
+names. The real Qt item-view subclasses own both native drag directions and
+freeze the rows at drag start, so changing selection during a gesture cannot
+silently load or save a different NIF.
+
+Any available `.nif` can be starred from its context menu. Favorites are stable
+source identities — configured game + virtual path, loose absolute path, or
+explicit archive + member — rather than display names or model indices, so a
+Refresh/rebuild restores the stars and temporarily unavailable resources can
+return. The ★ filter composes with text search as AND and retains only the
+folders leading to matching files.
+
+Favorites are user-authored library content, not registry preferences. They are
+written atomically as **`<NifSkope Library>/NIF Browser/Favorites.json`**. Changing
+Settings → General → NifSkope Library immediately rebinds an open browser to the
+new root. The same persistence audit found the only two other reusable authored
+payloads still buried in `QSettings`: Collision Manager custom body presets and
+custom material-name/CRC aliases. They now live at
+**`<Library>/Collision/Presets.json`** and **`CustomMaterials.json`**, with a
+one-time import of the old settings values. Selected tools, paths, layouts,
+filters and other genuine preferences stay in `QSettings`; Pose files were
+already correctly stored under `<Library>/Poses`.
+
+The “Loaded NIFs emptied/reloaded” report exposed several independent ownership
+and discard bugs, fixed as one safety boundary:
+
+- every loaded row, tab, preview, duplicate check and positional API is scoped
+  to its actual workspace root; two independent windows may load the same path
+  without sharing or stealing the same background document;
+- rows added/generated after promoting a child window still belong to that
+  workspace root and close with it;
+- Make Primary/Edit always carries the row's live model in memory, including
+  configured archive rows, instead of reloading the archive and dropping edits;
+- Remove/Close/X/Delete and Revert warn before discarding an unsaved data-only
+  row, with Cancel leaving a multi-selection completely intact;
+- Reload now uses the normal Save/Discard/Cancel warning, and choosing Save but
+  cancelling/failing Save As cancels Reload/close/open instead of pretending the
+  save succeeded;
+- cancelling a workspace close no longer leaves sibling windows flagged to
+  bypass their next close warning;
+- Pose Manager's browser picker no longer destroys an explicitly browsed
+  archive/folder tree, configured/archive open now reports actual load failure,
+  and a loose-only browsed Data folder no longer indexes an empty archive-name
+  list when it labels the tree.
+
+`tests/spells/loaded_nifs.sh` builds a three-file `Data/meshes` fixture and drives
+the real browser/load/save/reload paths: compact geometry and icons, both drag
+gates, exact payload, folder rejection, cross-workspace ownership, favorite JSON
+location/star/filter/rebuild, reverse Save As retention, Cancel on destructive
+remove and Reload, and preservation across a real primary reload. **35 checks,
+0 failures.** `tests/spells/collision_panel.sh` adds atomic Library round-trips
+for both Collision JSON files and remains **38 checks, 0 failures**. Adjacent
+regressions remain green: explicit archive browse **4/4** and faceBones
+**23 passed, 0 failed**. The pointer-seizing live drag scripts were not run.
+
 ## 2026-08-08l — Create faceBones NIF hands you a loaded NIF, not a file
 
 It asked for a path and wrote there, and the Loaded NIFs route had to hand it a

@@ -31,7 +31,8 @@
 #   6. ...the row that was opened has left the list
 #   7. ...and the document it displaced is in the list, by name
 #
-# FIXTURE: two starter documents built by the CLI. No game corpus.
+# FIXTURE: three starter documents built by the CLI under a loose Data/meshes
+# tree. No game corpus.
 #
 # USAGE
 #   bash tests/spells/loaded_nifs.sh
@@ -51,17 +52,21 @@ trap 'rm -rf "$TMP"' EXIT
 
 winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 
-# Two DIFFERENT names, because check 7 asks which document ended up in the list
-# and two files called the same thing could not tell a swap from a no-op.
-"$EXE" -no-gui new -o "$(winpath "$TMP/primary.nif")" >/dev/null 2>&1
-"$EXE" -no-gui new -o "$(winpath "$TMP/secondary.nif")" >/dev/null 2>&1
-[ -s "$TMP/primary.nif" ] && [ -s "$TMP/secondary.nif" ] \
+# Different names, because the swap and exact-drag checks must distinguish the
+# document that moved from whichever row happens to be selected later.
+mkdir -p "$TMP/Data/meshes"
+"$EXE" -no-gui new -o "$(winpath "$TMP/Data/meshes/primary.nif")" >/dev/null 2>&1
+"$EXE" -no-gui new -o "$(winpath "$TMP/Data/meshes/secondary.nif")" >/dev/null 2>&1
+"$EXE" -no-gui new -o "$(winpath "$TMP/Data/meshes/browser.nif")" >/dev/null 2>&1
+[ -s "$TMP/Data/meshes/primary.nif" ] \
+	&& [ -s "$TMP/Data/meshes/secondary.nif" ] \
+	&& [ -s "$TMP/Data/meshes/browser.nif" ] \
 	|| { echo "FAIL: could not build the fixture"; exit 1; }
-echo "fixture: two starter documents, primary.nif and secondary.nif"
+echo "fixture: loose Data/meshes tree with primary, secondary, and browser NIFs"
 
 rm -f "$LOG"
-WW_LOADEDNIFS_TEST="$(winpath "$TMP/secondary.nif")" \
-	"$EXE" --port "$PORT" "$(winpath "$TMP/primary.nif")" >/dev/null 2>&1 &
+WW_LOADEDNIFS_TEST="$(winpath "$TMP/Data/meshes/secondary.nif")" \
+	"$EXE" --port "$PORT" "$(winpath "$TMP/Data/meshes/primary.nif")" >/dev/null 2>&1 &
 pid=$!
 for _ in $(seq 1 60); do
 	[ -f "$LOG" ] && grep -q '^done$' "$LOG" 2>/dev/null && break

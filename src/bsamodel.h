@@ -70,11 +70,14 @@ public:
 	BSAProxyModel( QObject * parent = nullptr );
 
 	void setFiletypes( QStringList types );
+	//! Role carried by browser file rows when they are NIF Browser favourites.
+	void setFavouriteRole( int role );
 
 	void resetFilter();
 
 public slots:
 	void setFilterByNameOnly( bool nameOnly );
+	void setFavouritesOnly( bool favouritesOnly );
 
 protected:
 	bool filterAcceptsRow( int sourceRow, const QModelIndex & sourceParent ) const;
@@ -83,6 +86,8 @@ protected:
 private:
 	QStringList filetypes;
 	bool filterByNameOnly = false;
+	bool filterFavouritesOnly = false;
+	int favouriteRole = -1;
 };
 
 #endif

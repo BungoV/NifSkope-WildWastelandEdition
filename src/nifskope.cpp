@@ -47,6 +47,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "spells/animationsetup.h"
 #include "spells/blocks.h"	// setBlockListSelection for Copy Branch multi-select
 #include "version.h"
+#include "wwlibrary.h"
 #include "wwskin.h"
 
 #include <QPainterPath>
@@ -96,6 +97,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QFocusEvent>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
@@ -167,41 +170,163 @@ constexpr int NifBrowserBackgroundDocumentRole = Qt::UserRole + 39;
 constexpr int NifBrowserConfiguredResource = 2;
 constexpr int NifBrowserGameRole = Qt::UserRole + 40;
 constexpr int NifBrowserFolderPathRole = Qt::UserRole + 41;
+constexpr int NifBrowserFavouriteRole = Qt::UserRole + 42;
+
+QString nifBrowserFavoritesPath( bool createFolder = false )
+{
+	return WwLibrary::featureFile( QStringLiteral( "NIF Browser" ),
+		QStringLiteral( "Favorites.json" ), createFolder );
+}
+
+QStringList readNifBrowserFavorites( bool * valid = nullptr )
+{
+	if ( valid ) *valid = true;
+	bool jsonValid = false;
+	const QJsonDocument json = WwLibrary::readJson( QStringLiteral( "NIF Browser" ),
+		QStringLiteral( "Favorites.json" ), &jsonValid );
+	if ( !jsonValid || ( !json.isNull() && !json.isArray() ) ) {
+		if ( valid ) *valid = false;
+		return {};
+	}
+	QStringList favorites;
+	for ( const QJsonValue & value : json.array() )
+		if ( value.isString() && !favorites.contains( value.toString() ) )
+			favorites.append( value.toString() );
+	return favorites;
+}
+
+bool writeNifBrowserFavorites( const QStringList & favorites )
+{
+	QJsonArray values;
+	for ( const QString & favorite : favorites ) values.append( favorite );
+	return WwLibrary::writeJson( QStringLiteral( "NIF Browser" ),
+		QStringLiteral( "Favorites.json" ), QJsonDocument( values ) );
+}
+
+class NifBrowserTreeView final : public QTreeView
+{
+public:
+	explicit NifBrowserTreeView( QWidget * parent = nullptr ) : QTreeView( parent ) {}
+	QTreeView * loadedView = nullptr;
+	QList<QPersistentModelIndex> draggedRows;
+	std::function<bool()> saveDraggedLoadedNif;
+
+protected:
+	void startDrag( Qt::DropActions supportedActions ) override
+	{
+		draggedRows.clear();
+		if ( selectionModel() ) {
+			for ( const QModelIndex & row : selectionModel()->selectedRows( 0 ) ) {
+				const QString path = row.sibling( row.row(), 1 ).data( Qt::EditRole ).toString();
+				if ( !path.isEmpty() && ( model()->flags( row ) & Qt::ItemIsDragEnabled ) )
+					draggedRows.append( QPersistentModelIndex( row ) );
+			}
+		}
+		if ( draggedRows.isEmpty() )
+			return;
+		QTreeView::startDrag( supportedActions );
+		draggedRows.clear();
+	}
+
+	void dragEnterEvent( QDragEnterEvent * event ) override
+	{
+		if ( event->source() == loadedView ) {
+			event->setDropAction( Qt::CopyAction );
+			event->accept();
+		} else event->ignore();
+	}
+
+	void dragMoveEvent( QDragMoveEvent * event ) override
+	{
+		if ( event->source() == loadedView ) {
+			event->setDropAction( Qt::CopyAction );
+			event->accept();
+		} else event->ignore();
+	}
+
+	void dropEvent( QDropEvent * event ) override
+	{
+		if ( event->source() == loadedView && saveDraggedLoadedNif
+			&& saveDraggedLoadedNif() ) {
+			event->setDropAction( Qt::CopyAction );
+			event->accept();
+		} else event->ignore();
+	}
+};
 
 class LoadedNifsTreeView final : public QTreeView
 {
 public:
 	explicit LoadedNifsTreeView( QWidget * parent = nullptr ) : QTreeView( parent ) {}
-	QTreeView * sourceView = nullptr;
-	std::function<void()> addBrowserSelection;
+	NifBrowserTreeView * sourceView = nullptr;
+	QPersistentModelIndex draggedRow;
+	std::function<void( const QList<QPersistentModelIndex> & )> addBrowserRows;
 
 protected:
+	void startDrag( Qt::DropActions supportedActions ) override
+	{
+		draggedRow = QPersistentModelIndex();
+		if ( !selectionModel() ) return;
+		const QModelIndexList rows = selectionModel()->selectedRows( 0 );
+		if ( rows.size() != 1 ) {
+			QToolTip::showText( QCursor::pos(),
+				tr( "Drag one Loaded NIF at a time to save it" ), this );
+			return;
+		}
+		draggedRow = QPersistentModelIndex( rows.first() );
+		QTreeView::startDrag( supportedActions );
+		draggedRow = QPersistentModelIndex();
+	}
+
 	void dragEnterEvent( QDragEnterEvent * event ) override
 	{
-		if ( event->source() == sourceView ) event->acceptProposedAction();
-		else QTreeView::dragEnterEvent( event );
+		if ( event->source() == sourceView && !sourceView->draggedRows.isEmpty() ) {
+			event->setDropAction( Qt::CopyAction );
+			event->accept();
+		} else event->ignore();
 	}
 
 	void dragMoveEvent( QDragMoveEvent * event ) override
 	{
-		if ( event->source() == sourceView ) event->acceptProposedAction();
-		else QTreeView::dragMoveEvent( event );
+		if ( event->source() == sourceView && !sourceView->draggedRows.isEmpty() ) {
+			event->setDropAction( Qt::CopyAction );
+			event->accept();
+		} else event->ignore();
 	}
 
 	void dropEvent( QDropEvent * event ) override
 	{
-		if ( event->source() == sourceView && addBrowserSelection ) {
-			addBrowserSelection();
-			event->acceptProposedAction();
+		if ( event->source() == sourceView && addBrowserRows
+			&& !sourceView->draggedRows.isEmpty() ) {
+			addBrowserRows( sourceView->draggedRows );
+			event->setDropAction( Qt::CopyAction );
+			event->accept();
 			return;
 		}
-		QTreeView::dropEvent( event );
+		event->ignore();
 	}
 };
 
 //! Defined below; the row delegate draws it in the strip.
 static QIcon skeletonMarkIcon();
 static QIcon faceDonorMarkIcon();
+
+static QIcon nifBrowserStarIcon()
+{
+	QPixmap pm( 64, 64 );
+	pm.fill( Qt::transparent );
+	QPainter painter( &pm );
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	painter.setPen( Qt::NoPen );
+	painter.setBrush( QColor( wwSkinColor( "accent" ) ) );
+	QPolygonF star;
+	star << QPointF( 32, 5 ) << QPointF( 39, 24 ) << QPointF( 59, 24 )
+		 << QPointF( 43, 36 ) << QPointF( 49, 58 ) << QPointF( 32, 45 )
+		 << QPointF( 15, 58 ) << QPointF( 21, 36 ) << QPointF( 5, 24 )
+		 << QPointF( 25, 24 );
+	painter.drawPolygon( star );
+	return QIcon( pm );
+}
 
 /*! Loaded NIFs row: the name, plus two display toggles at the right edge.
  *
@@ -1321,48 +1446,100 @@ NifSkope::NifSkope( bool background )
 	refrbrwsr->setNifModel( nif );
 
 	// NIF Browser
-	bsaView = ui->bsaView;
+	/* A real subclass in the native drag path, for the same reason the Block List
+	 * uses NifTreeView overrides: Qt routes item-view drags through protected view
+	 * handlers, not through a useful public signal. Replace Designer's plain view
+	 * before anything is connected to it. */
+	QTreeView * designerBrowserView = ui->bsaView;
+	auto * browserWorkspaceView = new NifBrowserTreeView( designerBrowserView->parentWidget() );
+	browserWorkspaceView->setObjectName( designerBrowserView->objectName() );
+	browserWorkspaceView->setSizePolicy( designerBrowserView->sizePolicy() );
+	browserWorkspaceView->setFrameShape( designerBrowserView->frameShape() );
+	browserWorkspaceView->setAlternatingRowColors( designerBrowserView->alternatingRowColors() );
+	browserWorkspaceView->setIndentation( designerBrowserView->indentation() );
+	browserWorkspaceView->setAnimated( designerBrowserView->isAnimated() );
+	browserWorkspaceView->setAllColumnsShowFocus( designerBrowserView->allColumnsShowFocus() );
+	ui->verticalLayout_5->replaceWidget( designerBrowserView, browserWorkspaceView );
+	ui->bsaView = browserWorkspaceView;
+	designerBrowserView->deleteLater();
+	bsaView = browserWorkspaceView;
 	connect( bsaView, &QTreeView::doubleClicked, this,
 		[this]( const QModelIndex & index ) { openArchiveFile( index ); } );
 	bsaView->setSelectionMode( QAbstractItemView::ExtendedSelection );
 	bsaView->setSelectionBehavior( QAbstractItemView::SelectRows );
 	bsaView->setDragEnabled( true );
-	bsaView->setDragDropMode( QAbstractItemView::DragOnly );
+	bsaView->setAcceptDrops( true );
+	bsaView->setDragDropMode( QAbstractItemView::DragDrop );
 	bsaView->setDefaultDropAction( Qt::CopyAction );
 	bsaView->setContextMenuPolicy( Qt::CustomContextMenu );
-	ui->bsaFilter->setPlaceholderText( tr( "Search available and loaded NIFs..." ) );
-	auto * loadBrowserSelection = new QPushButton( tr( "Load Selected" ), ui->frame );
-	loadBrowserSelection->setToolTip( tr( "Load every selected NIF as a document" ) );
-	ui->horizontalLayout_2->addWidget( loadBrowserSelection );
-	connect( loadBrowserSelection, &QPushButton::clicked,
-		this, &NifSkope::openNifBrowserSelection );
-	auto * refreshBrowser = new QPushButton( tr( "Refresh" ), ui->bsaTitleBar );
-	refreshBrowser->setToolTip( tr( "Reload available NIFs from the resource paths configured in Settings" ) );
-	nifBrowserArchivesToggle = new QPushButton( tr( "Load Archives" ), ui->bsaTitleBar );
+
+	/* ONE COMPACT ROW, matching the Block List above its tree. The old 14px game
+	 * label plus five text buttons used two whole rows before the first file; the
+	 * dock title already says what this is, and every control has a tooltip. */
+	ui->bsaTitleBar->hide();
+	ui->horizontalLayout_2->setSpacing( 2 );
+	ui->bsaFilter->setClearButtonEnabled( true );
+	ui->bsaFilter->setMinimumWidth( 48 );
+	ui->bsaFilter->setPlaceholderText( tr( "Search NIFs..." ) );
+	ui->bsaFilenameOnly->hide();
+	auto compactTool = [this]( const QString & name, const QString & tip ) {
+		auto * button = new QToolButton( ui->frame );
+		button->setObjectName( name );
+		button->setAutoRaise( true );
+		button->setToolTip( tip );
+		button->setAccessibleName( tip );
+		ui->horizontalLayout_2->addWidget( button );
+		return button;
+	};
+	nifBrowserFavouritesOnly = compactTool( QStringLiteral( "NifBrowserFavouritesOnly" ),
+		tr( "Show favorite NIFs only" ) );
+	nifBrowserFavouritesOnly->setCheckable( true );
+	nifBrowserFavouritesOnly->setText( QString::fromUtf8( "\xE2\x98\x85" ) );
+
+	auto * sourcesButton = compactTool( QStringLiteral( "NifBrowserSources" ),
+		tr( "Choose which NIF sources are shown" ) );
+	sourcesButton->setIcon( style()->standardIcon( QStyle::SP_DriveHDIcon ) );
+	sourcesButton->setPopupMode( QToolButton::InstantPopup );
+	auto * sourcesMenu = new QMenu( sourcesButton );
+	nifBrowserArchivesToggle = sourcesMenu->addAction( tr( "Archives" ) );
 	nifBrowserArchivesToggle->setCheckable( true );
 	nifBrowserArchivesToggle->setChecked( true );
-	nifBrowserArchivesToggle->setToolTip( tr( "Show NIFs stored in configured BA2/BSA archives" ) );
-	nifBrowserLooseToggle = new QPushButton( tr( "Load Loose NIFs" ), ui->bsaTitleBar );
+	nifBrowserLooseToggle = sourcesMenu->addAction( tr( "Loose NIFs" ) );
 	nifBrowserLooseToggle->setCheckable( true );
 	nifBrowserLooseToggle->setChecked( true );
-	nifBrowserLooseToggle->setToolTip( tr( "Show loose NIF files from configured mesh folders" ) );
-	ui->bsaTitleBar->layout()->addWidget( nifBrowserArchivesToggle );
-	ui->bsaTitleBar->layout()->addWidget( nifBrowserLooseToggle );
-	ui->bsaTitleBar->layout()->addWidget( refreshBrowser );
-	connect( refreshBrowser, &QPushButton::clicked, this, [this]() {
+	QAction * filenameOnly = sourcesMenu->addAction( tr( "Search filenames only" ) );
+	filenameOnly->setCheckable( true );
+	sourcesButton->setMenu( sourcesMenu );
+
+	auto * loadBrowserSelection = compactTool( QStringLiteral( "NifBrowserLoadSelected" ),
+		tr( "Load every selected NIF as a document" ) );
+	loadBrowserSelection->setIcon( QIcon( QStringLiteral( ":/btn/load" ) ) );
+	loadBrowserSelection->setToolTip( tr( "Load every selected NIF as a document" ) );
+	connect( loadBrowserSelection, &QToolButton::clicked,
+		this, &NifSkope::openNifBrowserSelection );
+	auto * refreshBrowser = compactTool( QStringLiteral( "NifBrowserRefresh" ),
+		tr( "Reload available NIFs from the resource paths configured in Settings" ) );
+	refreshBrowser->setIcon( QIcon( QStringLiteral( ":/img/update" ) ) );
+	refreshBrowser->setToolTip( tr( "Reload available NIFs from the resource paths configured in Settings" ) );
+	connect( refreshBrowser, &QToolButton::clicked, this, [this]() {
 		// Refresh means "re-read the disk" — drop the cached signatures so the
 		// populate below cannot take the unchanged-resources fast path.
 		nifBrowserIndexSignature.clear();
 		nifBrowserTreeSignature.clear();
 		populateConfiguredNifBrowser();
 	} );
-	connect( nifBrowserArchivesToggle, &QPushButton::toggled,
+	connect( nifBrowserArchivesToggle, &QAction::toggled,
 		this, &NifSkope::populateConfiguredNifBrowser );
-	connect( nifBrowserLooseToggle, &QPushButton::toggled,
+	connect( nifBrowserLooseToggle, &QAction::toggled,
 		this, &NifSkope::populateConfiguredNifBrowser );
 
 	bsaModel = new BSAModel( this );
 	bsaProxyModel = new BSAProxyModel( this );
+	bsaProxyModel->setFavouriteRole( NifBrowserFavouriteRole );
+	connect( filenameOnly, &QAction::toggled,
+		bsaProxyModel, &BSAProxyModel::setFilterByNameOnly );
+	connect( nifBrowserFavouritesOnly, &QToolButton::toggled,
+		bsaProxyModel, &BSAProxyModel::setFavouritesOnly );
 	loadedNifsModel = new QStandardItemModel( this );
 	loadedNifsModel->setHorizontalHeaderLabels( { tr( "Loaded NIFs" ) } );
 	auto * loadedWorkspaceView = new LoadedNifsTreeView( ui->dockWidgetContents_7 );
@@ -1444,8 +1621,10 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView->setAlternatingRowColors( false );
 	loadedNifsView->setSelectionMode( QAbstractItemView::ExtendedSelection );
 	loadedNifsView->setSelectionBehavior( QAbstractItemView::SelectRows );
+	loadedNifsView->setDragEnabled( true );
 	loadedNifsView->setAcceptDrops( true );
-	loadedNifsView->setDragDropMode( QAbstractItemView::DropOnly );
+	loadedNifsView->setDragDropMode( QAbstractItemView::DragDrop );
+	loadedNifsView->setDefaultDropAction( Qt::CopyAction );
 	loadedNifsView->setDropIndicatorShown( true );
 	loadedNifsView->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	loadedNifsView->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
@@ -1455,8 +1634,14 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView->installEventFilter( this );
 	loadedNifsView->setMinimumHeight( 82 );
 	loadedNifsView->header()->setStretchLastSection( true );
-	loadedWorkspaceView->sourceView = bsaView;
-	loadedWorkspaceView->addBrowserSelection = [this]() { addNifBrowserSelectionToLoaded(); };
+	loadedWorkspaceView->sourceView = browserWorkspaceView;
+	loadedWorkspaceView->addBrowserRows = [this]( const QList<QPersistentModelIndex> & rows ) {
+		addNifBrowserRowsToLoaded( rows );
+	};
+	browserWorkspaceView->loadedView = loadedWorkspaceView;
+	browserWorkspaceView->saveDraggedLoadedNif = [this, loadedWorkspaceView]() {
+		return saveDraggedLoadedNifAs( loadedWorkspaceView->draggedRow );
+	};
 	wireLoadedNifsSelection();
 
 	// Available resources and loaded documents are related but distinct. Keep
@@ -1503,8 +1688,6 @@ NifSkope::NifSkope( bool background )
 			rebuildLoadedNifsBrowserGroup();
 		}
 	} );
-	connect( ui->bsaFilenameOnly, &QCheckBox::toggled,
-		bsaProxyModel, &BSAProxyModel::setFilterByNameOnly );
 	connect( bsaView, &QTreeView::customContextMenuRequested, this,
 		[this]( const QPoint & pos ) {
 			const QModelIndex index = bsaView->indexAt( pos );
@@ -1528,6 +1711,14 @@ NifSkope::NifSkope( bool background )
 			QAction * add = menu.addAction( useSelection
 				? tr( "Add %1 Selected to Loaded NIFs" ).arg( selectedRows.size() )
 				: tr( "Add to Loaded NIFs" ) );
+			QAction * favourite = nullptr;
+			if ( path.endsWith( QStringLiteral( ".nif" ), Qt::CaseInsensitive ) ) {
+				const bool starred = isNifBrowserFavourite( index );
+				menu.addSeparator();
+				favourite = menu.addAction( starred
+					? tr( "Remove from Favorites" ) : tr( "Add to Favorites" ) );
+				favourite->setIcon( nifBrowserStarIcon() );
+			}
 			QAction * chosen = menu.exec( bsaView->viewport()->mapToGlobal( pos ) );
 			if ( chosen == open ) openArchiveFile( index );
 			else if ( chosen == openNew ) openArchiveFile( index, true );
@@ -1535,6 +1726,7 @@ NifSkope::NifSkope( bool background )
 				if ( useSelection ) addNifBrowserSelectionToLoaded();
 				else queueNifBrowserIndexToLoaded( index );
 			}
+			else if ( chosen == favourite ) toggleNifBrowserFavourite( index );
 		} );
 	/* No doubleClicked handler, on purpose.
 	 *
@@ -1768,6 +1960,12 @@ NifSkope::NifSkope( bool background )
 	initConnections();
 
 	connect( options, &SettingsDialog::saveSettings, this, &NifSkope::updateSettings );
+	connect( options, &SettingsDialog::saveSettings, this, [this]() {
+		// The Library root may have changed. Rebind stars immediately to the
+		// Favorites.json belonging to that root, including in explicit browse mode.
+		applyNifBrowserFavourites();
+		if ( bsaProxyModel ) bsaProxyModel->invalidate();
+	} );
 	// Rebindable QAction shortcuts: apply stored overrides now that every
 	// action exists, and re-apply after each settings save (the Shortcuts
 	// pane writes before this connection runs, so the values are current)
@@ -1857,8 +2055,11 @@ QList<NifSkope *> NifSkope::openDocuments()
 QList<NifSkope *> NifSkope::selectedWorkspaceDocuments()
 {
 	QList<NifSkope *> documents;
+	NifSkope * context = workspaceForNewDocuments();
+	NifSkope * group = context ? context->workspaceGroupRoot() : nullptr;
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
-		if ( document && document->sessionCollectionMember
+		if ( document && ( !group || document->workspaceGroupRoot() == group )
+			&& document->sessionCollectionMember
 			&& document->sessionPreviewVisible && !document->sessionPreviewUnloaded )
 			documents << document;
 	return documents;
@@ -1903,10 +2104,13 @@ void NifSkope::setWorkspaceFaceDonor( NifModel * model, const QString & displayN
 QList<QPair<NifModel *, QString>> NifSkope::selectedWorkspaceModels()
 {
 	QList<QPair<NifModel *, QString>> models;
+	NifSkope * context = workspaceForNewDocuments();
+	NifSkope * group = context ? context->workspaceGroupRoot() : nullptr;
 	for ( NifSkope * document : NifSkope::selectedWorkspaceDocuments() )
 		models << qMakePair( document->nif, document->currentFile );
 	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) )
-		if ( document && document->selectedInWorkspace() )
+		if ( document && ( !group || document->workspaceRoot == group )
+			&& document->selectedInWorkspace() )
 			models << qMakePair( document->nif, document->currentFile );
 	return models;
 }
@@ -1968,6 +2172,26 @@ void NifSkope::initDocumentSession()
 	} );
 }
 
+NifSkope * NifSkope::workspaceGroupRoot() const
+{
+	return workspaceRoot ? workspaceRoot : const_cast<NifSkope *>( this );
+}
+
+bool NifSkope::sharesWorkspaceGroup( const NifSkope * document ) const
+{
+	return document && document->workspaceGroupRoot() == workspaceGroupRoot();
+}
+
+QList<BackgroundNifDocument *> NifSkope::workspaceBackgroundDocuments() const
+{
+	QList<BackgroundNifDocument *> documents;
+	NifSkope * group = workspaceGroupRoot();
+	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) )
+		if ( document && document->workspaceRoot == group )
+			documents.append( document );
+	return documents;
+}
+
 void NifSkope::rebuildDocumentTabs()
 {
 	if ( !documentTabs )
@@ -1978,7 +2202,7 @@ void NifSkope::rebuildDocumentTabs()
 	documentTabWindows.clear();
 	int current = -1;
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
-		if ( !document ) continue;
+		if ( !sharesWorkspaceGroup( document ) ) continue;
 		int tab = documentTabs->addTab( document == this
 			? tr( "Primary: %1" ).arg( document->documentDisplayName() )
 			: document->documentDisplayName() );
@@ -2007,7 +2231,7 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 	syncingLoadedNifsSelection = true;
 	loadedNifsModel->removeRows( 0, loadedNifsModel->rowCount() );
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
-		if ( !document ) continue;
+		if ( !sharesWorkspaceGroup( document ) ) continue;
 		const bool primary = document == this;
 		// The primary document always appears in its own Loaded NIFs list, even
 		// when it was never explicitly enrolled, so the marked-primary row and
@@ -2033,6 +2257,8 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		const bool visible = document->sessionPreviewVisible && !document->sessionPreviewUnloaded;
 		auto * name = new QStandardItem( document->documentDisplayName() );
 		name->setEditable( false );
+		name->setDragEnabled( true );
+		name->setDropEnabled( false );
 		name->setData( qulonglong( pointer ), NifBrowserDocumentRole );
 		// The arrow marks the primary; the skull moved into the toggle strip. Row
 		// COLOUR is selection only now — a visible row used to be painted as though
@@ -2047,11 +2273,13 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 	}
 	// Data-only background documents share the secondary palette; they can never
 	// be the primary row because promotion always goes through a real window.
-	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
+	for ( BackgroundNifDocument * document : workspaceBackgroundDocuments() ) {
 		if ( !document ) continue;
 		const bool visible = document->selectedInWorkspace();
 		auto * name = new QStandardItem( document->displayName() );
 		name->setEditable( false );
+		name->setDragEnabled( true );
+		name->setDropEnabled( false );
 		name->setData( qulonglong( reinterpret_cast<quintptr>( document ) ),
 			NifBrowserBackgroundDocumentRole );
 		name->setToolTip( visible
@@ -2221,20 +2449,20 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 		refreshAllDocumentSessions();
 	} else if ( chosen == isolate ) {
 		for ( NifSkope * other : std::as_const( sessionDocumentWindows ) )
-			if ( other && other != this && other->sessionCollectionMember ) {
+			if ( sharesWorkspaceGroup( other ) && other != this && other->sessionCollectionMember ) {
 				other->sessionPreviewVisible = ( other == document );
 				if ( other == document ) other->sessionPreviewUnloaded = false;
 			}
-		for ( BackgroundNifDocument * other : std::as_const( sessionBackgroundDocuments ) )
+		for ( BackgroundNifDocument * other : workspaceBackgroundDocuments() )
 			if ( other ) other->sessionPreviewVisible = false;
 		refreshAllDocumentSessions();
 	} else if ( chosen == showAll || chosen == hideAll ) {
 		for ( NifSkope * other : std::as_const( sessionDocumentWindows ) )
-			if ( other && other != this && other->sessionCollectionMember ) {
+			if ( sharesWorkspaceGroup( other ) && other != this && other->sessionCollectionMember ) {
 				other->sessionPreviewVisible = ( chosen == showAll );
 				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
 			}
-		for ( BackgroundNifDocument * other : std::as_const( sessionBackgroundDocuments ) )
+		for ( BackgroundNifDocument * other : workspaceBackgroundDocuments() )
 			if ( other ) {
 				other->sessionPreviewVisible = ( chosen == showAll );
 				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
@@ -2857,6 +3085,12 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	QAction * close = menu.addAction( tr( "Close Document" ) );
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == revert ) {
+		if ( modified && QMessageBox::warning( this, tr( "Revert Loaded NIF" ),
+			tr( "Reverting %1 discards every unsaved change in that loaded NIF.\n\n"
+				"This cannot be undone. Continue?" ).arg( document->displayName() ),
+			QMessageBox::Discard | QMessageBox::Cancel,
+			QMessageBox::Cancel ) != QMessageBox::Discard )
+			return;
 		if ( document->revertToLoaded() )
 			refreshAllDocumentSessions();
 		else
@@ -2899,9 +3133,9 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 		refreshAllDocumentSessions();
 	} else if ( chosen == isolate ) {
 		for ( NifSkope * other : std::as_const( sessionDocumentWindows ) )
-			if ( other && other != this && other->sessionCollectionMember )
+			if ( sharesWorkspaceGroup( other ) && other != this && other->sessionCollectionMember )
 				other->sessionPreviewVisible = false;
-		for ( BackgroundNifDocument * other : std::as_const( sessionBackgroundDocuments ) )
+		for ( BackgroundNifDocument * other : workspaceBackgroundDocuments() )
 			if ( other ) {
 				other->sessionPreviewVisible = ( other == document );
 				if ( other == document ) other->sessionPreviewUnloaded = false;
@@ -2909,11 +3143,11 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 		refreshAllDocumentSessions();
 	} else if ( chosen == showAll || chosen == hideAll ) {
 		for ( NifSkope * other : std::as_const( sessionDocumentWindows ) )
-			if ( other && other != this && other->sessionCollectionMember ) {
+			if ( sharesWorkspaceGroup( other ) && other != this && other->sessionCollectionMember ) {
 				other->sessionPreviewVisible = ( chosen == showAll );
 				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
 			}
-		for ( BackgroundNifDocument * other : std::as_const( sessionBackgroundDocuments ) )
+		for ( BackgroundNifDocument * other : workspaceBackgroundDocuments() )
 			if ( other ) {
 				other->sessionPreviewVisible = ( chosen == showAll );
 				if ( chosen == showAll ) other->sessionPreviewUnloaded = false;
@@ -2985,7 +3219,7 @@ bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
 		if ( buf.open( QIODevice::WriteOnly ) && nif->save( buf ) ) {
 			buf.close();
 			auto * parked = new BackgroundNifDocument;
-			parked->workspaceRoot = this;
+			parked->workspaceRoot = workspaceGroupRoot();
 			QBuffer in( &outgoing );
 			if ( in.open( QIODevice::ReadOnly ) && parked->nif->load( in ) ) {
 				parked->currentFile = currentFile;
@@ -3079,16 +3313,17 @@ QString NifSkope::generateFaceBonesInto( BackgroundNifDocument * source )
 	 * the row itself, from the bytes it produced; a new row appearing is how
 	 * this knows it ran.
 	 */
-	const qsizetype before = sessionBackgroundDocuments.size();
+	const qsizetype before = workspaceBackgroundDocuments().size();
 	create->cast( source->nif, shape );
-	if ( sessionBackgroundDocuments.size() <= before )
+	const QList<BackgroundNifDocument *> after = workspaceBackgroundDocuments();
+	if ( after.size() <= before )
 		return tr( "Nothing was generated — see the message the rigging step gave." );
 
 	/* Named from the ROW, which the spell cannot do: it names the result after
 	 * the model it was made from, and a row read out of an archive has no file
 	 * path to name it after.
 	 */
-	if ( BackgroundNifDocument * made = sessionBackgroundDocuments.last() ) {
+	if ( BackgroundNifDocument * made = after.last() ) {
 		const QFileInfo from( source->currentFile );
 		made->currentFile = from.absolutePath().isEmpty()
 			? from.completeBaseName() + QStringLiteral( "_faceBones.nif" )
@@ -3097,7 +3332,7 @@ QString NifSkope::generateFaceBonesInto( BackgroundNifDocument * source )
 		made->unsavedInMemory = true;
 		made->sessionPreviewVisible = true;
 		// beside the row it was made from, not wherever the spell found a window
-		made->workspaceRoot = this;
+		made->workspaceRoot = workspaceGroupRoot();
 	}
 	refreshAllDocumentSessions();
 	return QString();
@@ -3187,59 +3422,82 @@ bool NifSkope::saveBackgroundDocumentTo( BackgroundNifDocument * document, const
 	return true;
 }
 
+/*! Save As the exact Loaded NIF row captured when its drag started.
+ *
+ * Dropping on the browser never means "write into that archive/folder" — archive
+ * rows are not writable, and the requested contract is to choose a destination.
+ * One row only is enforced by LoadedNifsTreeView::startDrag. The row stays in
+ * Loaded NIFs; this is copy/save semantics, not a move out of the workspace.
+ */
+bool NifSkope::saveDraggedLoadedNifAs( const QModelIndex & row,
+	const QString & pathForTest )
+{
+	if ( !row.isValid() || row.model() != loadedNifsModel )
+		return false;
+	if ( BackgroundNifDocument * background = backgroundDocumentFromBrowserIndex( row ) )
+		return pathForTest.isEmpty()
+			? saveBackgroundDocumentAs( background )
+			: saveBackgroundDocumentTo( background, pathForTest );
+
+	NifSkope * document = documentFromBrowserIndex( row );
+	if ( !document || !document->nif )
+		return false;
+	QString path = pathForTest;
+	if ( path.isEmpty() ) {
+		QString suggested = document->nif->getFileInfo().absoluteFilePath();
+		if ( suggested.isEmpty() )
+			suggested = QDir( QDir::homePath() ).filePath( document->documentDisplayName() );
+		path = QFileDialog::getSaveFileName( this,
+			tr( "Save %1" ).arg( document->documentDisplayName() ), suggested,
+			fileFilters( false ) );
+	}
+	return !path.isEmpty() && document->saveFile( path );
+}
+
 void NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
 {
 	if ( !document ) return;
 	// The window starts as a hidden background window so it cannot flash before
 	// its model is ready; activateDocumentTab() performs the visible switch.
 	NifSkope * window = NifSkope::createWindow( QString(), true );
+	window->workspaceRoot = document->workspaceRoot
+		? document->workspaceRoot : workspaceGroupRoot();
 	window->sessionCollectionMember = true;
 	window->sessionPreviewVisible = false;
 	window->sessionPreviewUnloaded = false;
-	bool loaded = false;
 	QString sourceLabel = document->displayName();
-	if ( document->configuredResourceGame >= 0 && !document->configuredResourcePath.isEmpty() ) {
-		loaded = loadConfiguredNifIntoDocument( window,
-			document->configuredResourceGame, document->configuredResourcePath );
-	} else {
-		/* HANDED OVER IN MEMORY, NOT RE-READ FROM DISK.
-		 *
-		 * This used to call loadFromFile, which makes "edit this one" a RELOAD:
-		 * every unsaved change in the document being promoted was silently thrown
-		 * away, and a file that had moved or was never on disk in the first place
-		 * failed to promote at all. Nothing about becoming the primary window
-		 * requires re-parsing bytes — the model is already parsed, and it is the
-		 * one the user has been working in.
-		 *
-		 * Serialised to a buffer and loaded back rather than swapping the model
-		 * pointer: the window owns its model and half the UI is wired to that
-		 * instance, so replacing it would mean re-wiring all of it. This copies
-		 * the STATE, including unsaved edits, which is what was being lost.
-		 */
-		QString fname = document->currentFile;
-		emit window->beginLoading();
-		QByteArray carried;
-		{
-			QBuffer buf( &carried );
-			buf.open( QIODevice::WriteOnly );
+	/* ALWAYS HANDED OVER IN MEMORY, INCLUDING CONFIGURED RESOURCES.
+	 *
+	 * The configured branch used to reload the archive while loose/generated rows
+	 * carried their live model. That made Make Primary / Edit discard poses,
+	 * freezes and other unsaved edits only for archive rows — and it could fail
+	 * outright after explicit browsing replaced the shared archive handle. The
+	 * model already in the row is the source of truth for every route.
+	 */
+	const bool wasUnsaved = document->isModified();
+	QString fname = document->currentFile;
+	emit window->beginLoading();
+	QByteArray carried;
+	bool loaded = false;
+	{
+		QBuffer buf( &carried );
+		if ( buf.open( QIODevice::WriteOnly ) )
 			loaded = document->nif && document->nif->save( buf );
-		}
-		if ( loaded ) {
-			QBuffer buf( &carried );
-			buf.open( QIODevice::ReadOnly );
-			loaded = window->nif->load( buf );
-		}
-		// only if the live model could not be carried at all is the file worth
-		// falling back to; a promote that half-works is worse than either
-		if ( !loaded && !fname.isEmpty() )
-			loaded = window->nif->loadFromFile( fname );
-		if ( loaded ) {
-			window->configuredResourceGame = -1;
-			window->configuredResourcePath.clear();
-			window->setCurrentFile( fname );
-		}
-		emit window->completeLoading( loaded, fname );
 	}
+	if ( loaded ) {
+		QBuffer buf( &carried );
+		if ( buf.open( QIODevice::ReadOnly ) )
+			loaded = window->nif->load( buf );
+		else
+			loaded = false;
+	}
+	if ( loaded ) {
+		window->configuredResourceGame = document->configuredResourceGame;
+		window->configuredResourcePath = document->configuredResourcePath;
+		window->setCurrentFile( fname );
+		window->setWindowModified( wasUnsaved );
+	}
+	emit window->completeLoading( loaded, fname );
 	if ( !loaded ) {
 		/* THE FAILED WINDOW GOES, AND NOTHING ELSE DOES.
 		 *
@@ -3280,12 +3538,28 @@ void NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
 		activateDocumentTab( index );
 }
 
-void NifSkope::removeBackgroundDocument( BackgroundNifDocument * document )
+bool NifSkope::confirmBackgroundDocumentRemoval( BackgroundNifDocument * document )
 {
-	if ( !document ) return;
+	if ( !document ) return false;
+	if ( !document->isModified() ) return true;
+	const QMessageBox::StandardButton answer = QMessageBox::warning( this,
+		tr( "Unsaved Loaded NIF" ),
+		tr( "%1 has unsaved changes. Removing it from Loaded NIFs permanently "
+			"discards its in-memory copy.\n\nSave it first?" ).arg( document->displayName() ),
+		QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+		QMessageBox::Cancel );
+	if ( answer == QMessageBox::Cancel ) return false;
+	if ( answer == QMessageBox::Save ) return saveBackgroundDocumentAs( document );
+	return true;
+}
+
+bool NifSkope::removeBackgroundDocument( BackgroundNifDocument * document )
+{
+	if ( !confirmBackgroundDocumentRemoval( document ) ) return false;
 	// The destructor detaches the document from the session list.
 	delete document;
 	refreshAllDocumentSessions();
+	return true;
 }
 
 void NifSkope::refreshSessionPreview()
@@ -3311,13 +3585,13 @@ void NifSkope::refreshSessionPreview()
 	};
 
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
-		if ( !document || document == this || !document->sessionCollectionMember
+		if ( !sharesWorkspaceGroup( document ) || document == this || !document->sessionCollectionMember
 			|| !document->sessionPreviewVisible
 			|| document->sessionPreviewUnloaded || document->currentFile.isEmpty() )
 			continue;
 		addDocument( document->nif, document->sessionPreviewGhost );
 	}
-	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
+	for ( BackgroundNifDocument * document : workspaceBackgroundDocuments() ) {
 		if ( !document || !document->selectedInWorkspace() || document->currentFile.isEmpty() )
 			continue;
 		addDocument( document->nif, document->sessionPreviewGhost );
@@ -5792,8 +6066,6 @@ void NifSkope::closeEvent( QCloseEvent * e )
 				return;
 			}
 		}
-		for ( NifSkope * document : std::as_const( members ) )
-			document->closingWorkspaceGroup = true;
 		/* DATA-ONLY MEMBERS CAN HOLD UNSAVED EDITS NOW, so each one is asked
 		 * about before anything is deleted.
 		 *
@@ -5832,6 +6104,11 @@ void NifSkope::closeEvent( QCloseEvent * e )
 				return;
 			}
 		}
+		// Only after every Save/Discard/Cancel question has succeeded may member
+		// closes bypass their own group walk. Setting this earlier poisoned the
+		// surviving windows when a later background-row prompt was cancelled.
+		for ( NifSkope * document : std::as_const( members ) )
+			document->closingWorkspaceGroup = true;
 		for ( NifSkope * document : std::as_const( members ) )
 			document->close();
 		// iterate a copy: each destructor detaches itself from the session list
@@ -6667,6 +6944,7 @@ void NifSkope::populateConfiguredNifBrowserNow()
 	}
 	bsaModel->insertRow( 0, { available, new QStandardItem(), new QStandardItem() } );
 	rebuildLoadedNifsBrowserGroup();
+	applyNifBrowserFavourites();
 
 	if ( bsaProxyModel->sourceModel() != bsaModel ) bsaProxyModel->setSourceModel( bsaModel );
 	if ( bsaView->model() != bsaProxyModel ) bsaView->setModel( bsaProxyModel );
@@ -6763,9 +7041,10 @@ bool NifSkope::openConfiguredNif( int game, const QString & path, bool newWindow
 		target = NifSkope::createWindow();
 	else if ( !saveConfirm() )
 		return false;
-	if ( !loadConfiguredNifIntoDocument( target, game, path ) && target != this )
+	const bool loaded = loadConfiguredNifIntoDocument( target, game, path );
+	if ( !loaded && target != this )
 		target->close();
-	return true;
+	return loaded;
 }
 
 bool NifSkope::loadArchivesFromFolder( QString archive )
@@ -6879,6 +7158,7 @@ void NifSkope::openArchive( const QString & archive )
 		bsaView->setColumnWidth( 0, 300 );
 		bsaView->setColumnWidth( 2, 50 );
 		rebuildLoadedNifsBrowserGroup();
+		applyNifBrowserFavourites();
 
 		// Sort proxy after model/view is populated
 		bsaProxyModel->sort( 0, Qt::AscendingOrder );
@@ -6889,7 +7169,8 @@ void NifSkope::openArchive( const QString & archive )
 		bsaProxyModel->resetFilter();
 
 		// Set filename label
-		ui->bsaName->setText( currentArchiveNames.back() );
+		ui->bsaName->setText( currentArchiveNames.empty()
+			? QFileInfo( archive ).fileName() : currentArchiveNames.back() );
 
 		ui->bsaFilter->setEnabled( true );
 		ui->bsaFilenameOnly->setEnabled( true );
@@ -6958,6 +7239,84 @@ void NifSkope::appendLooseNifsToBrowser( const QString & dataFolder )
 	}
 }
 
+/*! Stable identity for an available NIF.
+ *
+ * Model indices are rebuilt on Refresh, display names collide, and configured
+ * archive/loose resources deliberately share one virtual tree. Favorites are
+ * therefore keyed by game + virtual path there, by absolute path for a browsed
+ * loose file, and by archive path + member path in explicit archive mode.
+ */
+QString NifSkope::nifBrowserFavouriteId( const QModelIndex & index ) const
+{
+	if ( !index.isValid() ) return QString();
+	const QModelIndex name = index.sibling( index.row(), 0 );
+	QString path = index.sibling( index.row(), 1 ).data( Qt::EditRole ).toString();
+	if ( path.isEmpty() || !path.endsWith( QStringLiteral( ".nif" ), Qt::CaseInsensitive ) )
+		return QString();
+	path = QDir::fromNativeSeparators( path ).toCaseFolded();
+	const int source = name.data( NifBrowserSourceRole ).toInt();
+	if ( source == NifBrowserConfiguredResource )
+		return QStringLiteral( "configured:%1:%2" )
+			.arg( name.data( NifBrowserGameRole ).toInt() ).arg( path );
+	if ( source == NifBrowserLooseFile )
+		return QStringLiteral( "loose:%1" ).arg(
+			QDir::fromNativeSeparators( QFileInfo( path ).absoluteFilePath() ).toCaseFolded() );
+	if ( !currentArchivePath.isEmpty() )
+		return QStringLiteral( "archive:%1:%2" )
+			.arg( QDir::fromNativeSeparators( QFileInfo( currentArchivePath ).absoluteFilePath() )
+				.toCaseFolded(), path );
+	return QString();
+}
+
+bool NifSkope::isNifBrowserFavourite( const QModelIndex & index ) const
+{
+	const QString id = nifBrowserFavouriteId( index );
+	return !id.isEmpty() && readNifBrowserFavorites().contains( id );
+}
+
+void NifSkope::toggleNifBrowserFavourite( const QModelIndex & index )
+{
+	const QString id = nifBrowserFavouriteId( index );
+	if ( id.isEmpty() ) return;
+	bool valid = false;
+	QStringList favourites = readNifBrowserFavorites( &valid );
+	if ( !valid ) {
+		QMessageBox::warning( this, tr( "NIF Browser Favorites" ),
+			tr( "Could not read %1. It was left untouched." )
+				.arg( nifBrowserFavoritesPath() ) );
+		return;
+	}
+	if ( favourites.contains( id ) ) favourites.removeAll( id );
+	else favourites.append( id );
+	if ( !writeNifBrowserFavorites( favourites ) ) {
+		QMessageBox::warning( this, tr( "NIF Browser Favorites" ),
+			tr( "Could not write %1." ).arg( nifBrowserFavoritesPath() ) );
+		return;
+	}
+	applyNifBrowserFavourites();
+	if ( bsaProxyModel ) bsaProxyModel->invalidate();
+}
+
+void NifSkope::applyNifBrowserFavourites()
+{
+	if ( !bsaModel ) return;
+	const QStringList favourites = readNifBrowserFavorites();
+	const QIcon star = nifBrowserStarIcon();
+	std::function<void( QStandardItem * )> visit = [&]( QStandardItem * parent ) {
+		for ( int row = 0; row < parent->rowCount(); row++ ) {
+			QStandardItem * name = parent->child( row, 0 );
+			if ( !name ) continue;
+			const QModelIndex idx = name->index();
+			const QString id = nifBrowserFavouriteId( idx );
+			const bool favourite = !id.isEmpty() && favourites.contains( id );
+			name->setData( favourite, NifBrowserFavouriteRole );
+			if ( !id.isEmpty() ) name->setIcon( favourite ? star : QIcon() );
+			visit( name );
+		}
+	};
+	visit( bsaModel->invisibleRootItem() );
+}
+
 /*! Add a loose NIF to Loaded NIFs by path, without going through the browser
  *  tree. The browser route needs a QModelIndex, which a script or a harness has
  *  no way to produce; this is the same work with the source named directly.
@@ -6965,7 +7324,7 @@ void NifSkope::appendLooseNifsToBrowser( const QString & dataFolder )
 bool NifSkope::addWorkspaceDocumentFromFile( const QString & path )
 {
 	auto * document = new BackgroundNifDocument;
-	document->workspaceRoot = this;
+	document->workspaceRoot = workspaceGroupRoot();
 	if ( !document->nif->loadFromFile( path ) ) {
 		delete document;
 		return false;
@@ -6992,7 +7351,7 @@ bool NifSkope::addWorkspaceDocumentFromFile( const QString & path )
 bool NifSkope::addWorkspaceDocumentFromMemory( const QByteArray & bytes, const QString & displayPath )
 {
 	auto * document = new BackgroundNifDocument;
-	document->workspaceRoot = this;
+	document->workspaceRoot = workspaceGroupRoot();
 	QBuffer buffer;
 	buffer.setData( bytes );
 	if ( !buffer.open( QIODevice::ReadOnly ) || !document->nif->load( buffer ) ) {
@@ -7017,13 +7376,13 @@ bool NifSkope::addWorkspaceDocumentFromMemory( const QByteArray & bytes, const Q
 
 QString NifSkope::workspaceDocumentName( int backgroundIndex ) const
 {
-	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	BackgroundNifDocument * document = workspaceBackgroundDocuments().value( backgroundIndex );
 	return document ? document->displayName() : QString();
 }
 
 bool NifSkope::workspaceDocumentModified( int backgroundIndex ) const
 {
-	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	BackgroundNifDocument * document = workspaceBackgroundDocuments().value( backgroundIndex );
 	return document && document->isModified();
 }
 
@@ -7037,19 +7396,19 @@ bool NifSkope::workspaceDocumentModified( int backgroundIndex ) const
  */
 bool NifSkope::saveWorkspaceDocumentTo( int backgroundIndex, const QString & path )
 {
-	return saveBackgroundDocumentTo( sessionBackgroundDocuments.value( backgroundIndex ), path );
+	return saveBackgroundDocumentTo( workspaceBackgroundDocuments().value( backgroundIndex ), path );
 }
 
 QString NifSkope::generateFaceBonesFromRow( int backgroundIndex )
 {
-	return generateFaceBonesInto( sessionBackgroundDocuments.value( backgroundIndex ) );
+	return generateFaceBonesInto( workspaceBackgroundDocuments().value( backgroundIndex ) );
 }
 
 //! Mark a row as holding work that is nowhere else. What a generated document is
 //! born as, and what a harness needs so "saving it helped" can mean something.
 bool NifSkope::markWorkspaceDocumentUnsaved( int backgroundIndex )
 {
-	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	BackgroundNifDocument * document = workspaceBackgroundDocuments().value( backgroundIndex );
 	if ( !document )
 		return false;
 	document->unsavedInMemory = true;
@@ -7059,7 +7418,7 @@ bool NifSkope::markWorkspaceDocumentUnsaved( int backgroundIndex )
 
 bool NifSkope::markWorkspaceFaceDonorRow( int backgroundIndex )
 {
-	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	BackgroundNifDocument * document = workspaceBackgroundDocuments().value( backgroundIndex );
 	if ( !document )
 		return false;
 	NifSkope::setWorkspaceFaceDonor( document->nif, document->displayName() );
@@ -7068,7 +7427,7 @@ bool NifSkope::markWorkspaceFaceDonorRow( int backgroundIndex )
 
 int NifSkope::workspaceDocumentSceneBuilds( int backgroundIndex )
 {
-	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	BackgroundNifDocument * document = workspaceBackgroundDocuments().value( backgroundIndex );
 	if ( !document || !ogl )
 		return -1;
 	ogl->workspaceSceneFor( document->nif );		// build it if it is not there
@@ -7077,7 +7436,7 @@ int NifSkope::workspaceDocumentSceneBuilds( int backgroundIndex )
 
 bool NifSkope::openWorkspaceDocumentHere( int backgroundIndex )
 {
-	return openBackgroundDocumentHere( sessionBackgroundDocuments.value( backgroundIndex ) );
+	return openBackgroundDocumentHere( workspaceBackgroundDocuments().value( backgroundIndex ) );
 }
 
 /*! How a workspace document draws: 0 hidden, 1 solid, 2 semi-transparent. The
@@ -7086,9 +7445,10 @@ bool NifSkope::openWorkspaceDocumentHere( int backgroundIndex )
  */
 bool NifSkope::setWorkspaceDisplayMode( int backgroundIndex, int mode )
 {
-	if ( backgroundIndex < 0 || backgroundIndex >= sessionBackgroundDocuments.size() )
+	const QList<BackgroundNifDocument *> documents = workspaceBackgroundDocuments();
+	if ( backgroundIndex < 0 || backgroundIndex >= documents.size() )
 		return false;
-	BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	BackgroundNifDocument * document = documents.at( backgroundIndex );
 	document->sessionPreviewVisible = ( mode != 0 );
 	document->sessionPreviewUnloaded = false;
 	document->sessionPreviewGhost = ( mode == 2 );
@@ -7106,9 +7466,10 @@ bool NifSkope::setWorkspaceSkeletonDocument( int backgroundIndex )
 		refreshAllDocumentSessions();
 		return true;
 	}
-	if ( backgroundIndex >= sessionBackgroundDocuments.size() )
+	const QList<BackgroundNifDocument *> documents = workspaceBackgroundDocuments();
+	if ( backgroundIndex >= documents.size() )
 		return false;
-	BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	BackgroundNifDocument * document = documents.at( backgroundIndex );
 	if ( !document || !document->nif )
 		return false;
 	ogl->setWorkspaceSkeleton( document->nif );
@@ -7166,6 +7527,11 @@ QVector<NifSkope::WorkspaceTarget> NifSkope::selectedWorkspaceTargets( const QMo
 int NifSkope::removeSelectedWorkspaceDocuments( const QModelIndex & clicked )
 {
 	const QVector<WorkspaceTarget> targets = selectedWorkspaceTargets( clicked );
+	// Preflight every destructive row before deleting any. Cancel on the third
+	// row leaves the complete selection intact instead of half-removed.
+	for ( const WorkspaceTarget & t : targets )
+		if ( t.background && !confirmBackgroundDocumentRemoval( t.background ) )
+			return 0;
 	int removed = 0;
 	for ( const WorkspaceTarget & t : targets ) {
 		if ( t.window ) {
@@ -7189,25 +7555,27 @@ int NifSkope::removeSelectedWorkspaceDocuments( const QModelIndex & clicked )
 
 NifModel * NifSkope::workspaceDocumentModel( int backgroundIndex ) const
 {
-	if ( backgroundIndex < 0 || backgroundIndex >= sessionBackgroundDocuments.size() )
+	const QList<BackgroundNifDocument *> documents = workspaceBackgroundDocuments();
+	if ( backgroundIndex < 0 || backgroundIndex >= documents.size() )
 		return nullptr;
-	BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	BackgroundNifDocument * document = documents.at( backgroundIndex );
 	return document ? document->nif : nullptr;
 }
 
 int NifSkope::workspaceBlockCount( int backgroundIndex ) const
 {
-	if ( backgroundIndex < 0 || backgroundIndex >= sessionBackgroundDocuments.size() )
+	const QList<BackgroundNifDocument *> documents = workspaceBackgroundDocuments();
+	if ( backgroundIndex < 0 || backgroundIndex >= documents.size() )
 		return -1;
-	const BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	const BackgroundNifDocument * document = documents.at( backgroundIndex );
 	return ( document && document->nif ) ? document->nif->getBlockCount() : -1;
 }
 
 bool NifSkope::mergeWorkspaceDocumentsInto( int targetIndex, const QList<int> & donorIndices )
 {
-	auto at = [this]( int i ) -> BackgroundNifDocument * {
-		return ( i >= 0 && i < sessionBackgroundDocuments.size() )
-			? sessionBackgroundDocuments.at( i ) : nullptr;
+	const QList<BackgroundNifDocument *> documents = workspaceBackgroundDocuments();
+	auto at = [&documents]( int i ) -> BackgroundNifDocument * {
+		return ( i >= 0 && i < documents.size() ) ? documents.at( i ) : nullptr;
 	};
 	BackgroundNifDocument * target = at( targetIndex );
 	if ( !target || !target->nif )
@@ -7230,9 +7598,10 @@ bool NifSkope::mergeWorkspaceDocumentsInto( int targetIndex, const QList<int> & 
 
 int NifSkope::workspaceDisplayMode( int backgroundIndex ) const
 {
-	if ( backgroundIndex < 0 || backgroundIndex >= sessionBackgroundDocuments.size() )
+	const QList<BackgroundNifDocument *> documents = workspaceBackgroundDocuments();
+	if ( backgroundIndex < 0 || backgroundIndex >= documents.size() )
 		return -1;
-	const BackgroundNifDocument * document = sessionBackgroundDocuments.at( backgroundIndex );
+	const BackgroundNifDocument * document = documents.at( backgroundIndex );
 	if ( !document || !document->selectedInWorkspace() )
 		return 0;
 	return document->sessionPreviewGhost ? 2 : 1;
@@ -7241,7 +7610,7 @@ int NifSkope::workspaceDisplayMode( int backgroundIndex ) const
 //! Count of data-only workspace members, for scripting and tests.
 int NifSkope::workspaceDocumentCount() const
 {
-	return int( sessionBackgroundDocuments.size() );
+	return int( workspaceBackgroundDocuments().size() );
 }
 
 bool NifSkope::grabLoadedNifsView( const QString & path ) const
@@ -7295,8 +7664,11 @@ bool NifSkope::pickNifFromBrowser( QWidget * parent, QByteArray & bytesOut, QStr
 	if ( !bsaModel || !bsaProxyModel )
 		return false;
 
-	// Build the archive/loose tree now, even if the browser dock is hidden.
-	populateConfiguredNifBrowserNow();
+	// Build the configured tree now when that is the browser's current mode. An
+	// explicitly browsed archive/folder is the user's live tree: rebuilding here
+	// used to delete it merely because a rigging picker was opened.
+	if ( currentArchivePath.isEmpty() )
+		populateConfiguredNifBrowserNow();
 	if ( bsaModel->rowCount() == 0 ) {
 		QMessageBox::information( parent, tr( "Load skeleton from archive" ),
 			tr( "No game archives or loose files are available.\n\n"
@@ -7368,6 +7740,21 @@ bool NifSkope::pickNifFromBrowser( QWidget * parent, QByteArray & bytesOut, QStr
 			return false;
 		bytesOut = f.readAll();
 		labelOut = QFileInfo( path ).fileName();
+	} else if ( currentArchive && !currentArchivePath.isEmpty() ) {
+		// Explicit Browse Archive / Browse Game Folder mode. These older BSAModel
+		// rows predate the configured-source role; extract from the archive that
+		// owns the still-visible tree instead of replacing that tree first.
+		const std::string virtualPath = path.toLower().toStdString();
+		if ( !currentArchive->findFile( virtualPath ) )
+			return false;
+		BA2File::UCharArray extracted;
+		const unsigned char * dataPtr = nullptr;
+		const size_t dataSize = currentArchive->extractFile(
+			dataPtr, extracted, virtualPath );
+		bytesOut = QByteArray( reinterpret_cast<const char *>( dataPtr ),
+			qsizetype( dataSize ) );
+		labelOut = QFileInfo( path ).fileName();
+		if ( bytesOut.isEmpty() ) return false;
 	} else {
 		return false;                           // e.g. a Loaded-NIFs row
 	}
@@ -7385,7 +7772,7 @@ void NifSkope::addNifBrowserIndexToLoaded( const QModelIndex & index )
 
 	NifSkope * target = nullptr;
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
-		if ( !document ) continue;
+		if ( !sharesWorkspaceGroup( document ) ) continue;
 		if ( source == NifBrowserConfiguredResource
 			&& document->configuredResourceGame == game
 			&& document->configuredResourcePath.compare( path, Qt::CaseInsensitive ) == 0 ) {
@@ -7410,7 +7797,7 @@ void NifSkope::addNifBrowserIndexToLoaded( const QModelIndex & index )
 	}
 
 	// Already enrolled as a data-only document?
-	for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
+	for ( BackgroundNifDocument * document : workspaceBackgroundDocuments() ) {
 		if ( !document ) continue;
 		const bool matchesConfigured = source == NifBrowserConfiguredResource
 			&& document->configuredResourceGame == game
@@ -7468,8 +7855,21 @@ void NifSkope::addNifBrowserSelectionToLoaded()
 {
 	if ( !bsaView || !bsaView->selectionModel() ) return;
 	const QModelIndexList rows = bsaView->selectionModel()->selectedRows( 0 );
+	QList<QPersistentModelIndex> exactRows;
 	for ( const QModelIndex & row : rows )
+		exactRows.append( QPersistentModelIndex( row ) );
+	addNifBrowserRowsToLoaded( exactRows );
+}
+
+void NifSkope::addNifBrowserRowsToLoaded(
+	const QList<QPersistentModelIndex> & rows )
+{
+	for ( const QPersistentModelIndex & row : rows ) {
+		if ( !row.isValid() ) continue;
+		const QString path = row.sibling( row.row(), 1 ).data( Qt::EditRole ).toString();
+		if ( path.isEmpty() || !( row.flags() & Qt::ItemIsDragEnabled ) ) continue;
 		queueNifBrowserIndexToLoaded( row );
+	}
 }
 
 void NifSkope::queueNifBrowserIndexToLoaded( const QModelIndex & index )
@@ -7506,11 +7906,11 @@ bool NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filep
 	bool confirmReplace )
 {
 	if ( !bsa || currentArchiveNames.empty() )
-		return true;
+		return false;
 	std::string	filePathStr( filepath.toLower().toStdString() );
 	auto	fd = bsa->findFile( filePathStr );
 	if ( !fd )
-		return true;
+		return false;
 
 	// Read data from BSA
 	BA2File::UCharArray	data;
@@ -7523,6 +7923,7 @@ bool NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filep
 	QString path( currentArchiveNames[std::min( size_t(fd->archiveFile), size_t(currentArchiveNames.size() - 1) )] );
 	path = path + "/" + filepath;
 
+	bool loaded = false;
 	if ( buf.open( QBuffer::ReadOnly ) ) {
 		// open in place unless a new window was asked for; unsaved changes
 		// in the current document prompt Save/Discard/Cancel first
@@ -7536,7 +7937,7 @@ bool NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filep
 
 		emit target->beginLoading();
 
-		bool loaded = target->nif->load( buf );
+		loaded = target->nif->load( buf );
 		if ( loaded )
 			target->setCurrentFile( path );
 
@@ -7554,8 +7955,9 @@ bool NifSkope::openArchiveFileString( const BA2File * bsa, const QString & filep
 
 		buf.close();
 		refreshAllDocumentSessions();
+		if ( newWindow && !loaded ) target->close();
 	}
-	return true;
+	return loaded;
 }
 
 
@@ -7611,12 +8013,31 @@ void NifSkope::openFiles( QStringList & files )
 	}
 }
 
-void NifSkope::saveFile( const QString & filename )
+bool NifSkope::saveFile( const QString & filename )
 {
-	configuredResourceGame = -1;
-	configuredResourcePath.clear();
-	setCurrentFile( filename );
-	save();
+	if ( filename.isEmpty() ) return false;
+	emit beginSave();
+	QString fname = QDir::fromNativeSeparators( filename );
+	bool saved = false;
+	if ( fname.endsWith( ".KFM", Qt::CaseInsensitive ) ) {
+		saved = kfm->saveToFile( fname );
+	} else {
+		if ( aSanitize->isChecked() ) {
+			QModelIndex idx = SpellBook::sanitize( nif );
+			if ( idx.isValid() ) select( idx );
+		}
+		saved = nif->saveToFile( fname );
+	}
+	emit completeSave( saved, fname );
+	// Save As is transactional with respect to document identity: a failed write
+	// must not rename the row, clear configured-resource metadata, or add a path
+	// that was never written to Recent Files.
+	if ( saved ) {
+		configuredResourceGame = -1;
+		configuredResourcePath.clear();
+		setCurrentFile( fname );
+	}
+	return saved;
 }
 
 void NifSkope::loadFile( const QString & filename )
@@ -7763,33 +8184,16 @@ void NifSkope::load()
 	//}
 }
 
-void NifSkope::save()
+bool NifSkope::save()
 {
 	// Assure file path is absolute
 	// If not absolute, it is loaded from a BSA
 	QFileInfo curFile( currentFile );
 	if ( !curFile.isAbsolute() ) {
-		saveAsDlg();
-		return;
+		return saveAsDlg();
 	}
 
-	emit beginSave();
-
-	QString fname = currentFile;
-
-	// TODO: This is rather poor in terms of file validation
-
-	if ( fname.endsWith( ".KFM", Qt::CaseInsensitive ) ) {
-		emit completeSave( kfm->saveToFile( fname ), fname );
-	} else {
-		if ( aSanitize->isChecked() ) {
-			QModelIndex idx = SpellBook::sanitize( nif );
-			if ( idx.isValid() )
-				select( idx );
-		}
-
-		emit completeSave( nif->saveToFile( fname ), fname );
-	}
+	return saveFile( currentFile );
 }
 
 
