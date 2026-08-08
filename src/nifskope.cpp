@@ -2929,6 +2929,41 @@ bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
 	QString path = document->currentFile;	// completeLoading takes a QString &
 	const bool wasUnsaved = document->unsavedInMemory || document->isModified();
 
+	/* THE DOCUMENT LEAVING THE WINDOW STAYS IN THE LIST.
+	 *
+	 * This is a swap, not a replacement: the window shows a different file
+	 * afterwards, and the one it was showing has to go somewhere. Dropping it
+	 * meant double-clicking a row removed a document from the workspace — you
+	 * ended up with one fewer than you started with, and if it held unsaved work
+	 * that work went with it.
+	 *
+	 * Captured in memory, so unsaved edits in the outgoing document survive being
+	 * set aside, and it keeps its unsaved status so it stays red and still asks on
+	 * the way out.
+	 */
+	if ( nif && nif->getBlockCount() > 0 ) {
+		QByteArray outgoing;
+		QBuffer buf( &outgoing );
+		if ( buf.open( QIODevice::WriteOnly ) && nif->save( buf ) ) {
+			buf.close();
+			auto * parked = new BackgroundNifDocument;
+			parked->workspaceRoot = this;
+			QBuffer in( &outgoing );
+			if ( in.open( QIODevice::ReadOnly ) && parked->nif->load( in ) ) {
+				parked->currentFile = currentFile;
+				parked->configuredResourceGame = configuredResourceGame;
+				parked->configuredResourcePath = configuredResourcePath;
+				parked->sessionPreviewVisible = true;
+				parked->captureLoadedState();
+				// still unwritten if it was unwritten here
+				parked->unsavedInMemory = isWindowModified();
+				sessionBackgroundDocuments.append( parked );
+			} else {
+				delete parked;
+			}
+		}
+	}
+
 	emit beginLoading();
 	bool loaded = false;
 	{
