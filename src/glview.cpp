@@ -1129,13 +1129,28 @@ void GLView::clearWorkspaceScenes()
 	workspaceRenderOrder.clear();
 }
 
-void GLView::setWorkspaceRenderModels( const QVector<NifModel *> & models )
+/*! \param models  documents to draw, in order
+ *  \param keepScene  documents that must keep a Scene without being drawn
+ *
+ *  THE TWO ARE NOT THE SAME QUESTION, and conflating them moved geometry.
+ *  Ghosting a document renders it as a flat soup instead of a Scene, which took
+ *  it out of `models` and deleted its Scene — and a skinned mesh in ANOTHER
+ *  document resolves its bones against that Scene. So ticking "show
+ *  semi-transparent" on a body dropped the helmet skinned to it back to bind
+ *  pose, floating above the head. A display toggle moved geometry, in a file it
+ *  was not applied to.
+ *
+ *  Scene lifetime is now "is this document still loaded", which is what it always
+ *  meant; the render list is only about drawing.
+ */
+void GLView::setWorkspaceRenderModels( const QVector<NifModel *> & models,
+	const QVector<NifModel *> & keepScene )
 {
-	// drop the Scenes of documents that left the list; a Scene holds compiled
-	// geometry and texture references, so keeping one for a closed document
-	// would be a leak that also pins its textures
+	// drop the Scenes of documents that left the workspace; a Scene holds
+	// compiled geometry and texture references, so keeping one for a closed
+	// document would be a leak that also pins its textures
 	for ( auto it = workspaceScenes.begin(); it != workspaceScenes.end(); ) {
-		if ( models.contains( it.key() ) ) {
+		if ( models.contains( it.key() ) || keepScene.contains( it.key() ) ) {
 			it++;
 			continue;
 		}

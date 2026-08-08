@@ -1589,7 +1589,7 @@ NifSkope::NifSkope( bool background )
 			if ( !background )
 				return;
 			// the same file may already be open as a window; switch to that rather
-			// than promoting a second copy of it
+			// than opening a second copy of it
 			for ( NifSkope * open : std::as_const( documentTabWindows ) ) {
 				if ( open && !background->currentFile.isEmpty()
 					&& open->currentFile == background->currentFile )
@@ -1598,7 +1598,7 @@ NifSkope::NifSkope( bool background )
 					return;
 				}
 			}
-			promoteBackgroundDocument( background );
+			openBackgroundDocumentHere( background );
 		} );
 
 	// Empty Model for swapping out before model fill
@@ -2892,6 +2892,73 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	}
 }
 
+/*! Show a loaded NIF in THIS window, rather than opening another one.
+ *
+ *  "Make Primary / Edit" builds a fresh NifSkope window for the document and
+ *  activates it. That window restores its own UI on the way up, so what you see
+ *  is the whole application appearing again — which is what double-clicking a row
+ *  looked like it was doing, because it was.
+ *
+ *  Double-click means "show me this one", so it happens HERE: the model is
+ *  carried into this window in memory, and the row it came from goes, since the
+ *  document it named is now the one on screen. Nothing is re-read from disk, so
+ *  unsaved work in the row survives the move — including a generated faceBones
+ *  NIF that exists nowhere else.
+ *
+ *  \return false when the user cancelled at the unsaved-changes prompt, or the
+ *          model could not be carried over.
+ */
+bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
+{
+	if ( !document || !document->nif )
+		return false;
+	// this window may be holding edits of its own; it is about to stop showing
+	// them, so the usual question applies before anything moves
+	if ( !saveConfirm() )
+		return false;
+
+	QByteArray carried;
+	{
+		QBuffer buf( &carried );
+		if ( !buf.open( QIODevice::WriteOnly ) || !document->nif->save( buf ) ) {
+			QMessageBox::warning( this, tr( "Open in This Window" ),
+				tr( "%1 could not be carried over." ).arg( document->displayName() ) );
+			return false;
+		}
+	}
+	QString path = document->currentFile;	// completeLoading takes a QString &
+	const bool wasUnsaved = document->unsavedInMemory || document->isModified();
+
+	emit beginLoading();
+	bool loaded = false;
+	{
+		QBuffer buf( &carried );
+		if ( buf.open( QIODevice::ReadOnly ) )
+			loaded = nif->load( buf );
+	}
+	if ( loaded ) {
+		configuredResourceGame = document->configuredResourceGame;
+		configuredResourcePath = document->configuredResourcePath;
+		setCurrentFile( path );
+		/* STILL UNSAVED AFTER THE MOVE. A generated document that had never been
+		 * written is just as unwritten in this window, and setCurrentFile makes it
+		 * look like a file that exists. Marking the window modified is what keeps
+		 * the close prompt honest about it.
+		 */
+		setWindowModified( wasUnsaved );
+	}
+	emit completeLoading( loaded, path );
+	if ( !loaded ) {
+		QMessageBox::warning( this, tr( "Open in This Window" ),
+			tr( "%1 could not be re-read after being carried over." ).arg( document->displayName() ) );
+		return false;
+	}
+
+	delete document;			// its content is what this window now shows
+	refreshAllDocumentSessions();
+	return true;
+}
+
 extern void tlSetFaceBonesOutputPath( const QString & path );
 
 /*! Build a faceBones NIF from a loaded document, using the marked face donor.
@@ -3151,12 +3218,17 @@ void NifSkope::refreshSessionPreview()
 	 * wants and which avoids threading a global alpha through every shader.
 	 */
 	QVector<Vector3> solid, ghost;
-	QVector<NifModel *> sceneModels;
+	QVector<NifModel *> sceneModels, ghostModels;
 	auto addDocument = [&]( NifModel * nif, bool isGhost ) {
-		if ( isGhost )
+		if ( isGhost ) {
 			ghost += sessionDocumentTriangleSoup( nif );
-		else
+			// still loaded, so it still keeps its Scene: a skinned mesh in another
+			// document resolves its bones against it, and losing it drops that mesh
+			// to bind pose — a display toggle moving geometry somewhere else
+			ghostModels.append( nif );
+		} else {
 			sceneModels.append( nif );
+		}
 	};
 
 	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
@@ -3171,7 +3243,7 @@ void NifSkope::refreshSessionPreview()
 			continue;
 		addDocument( document->nif, document->sessionPreviewGhost );
 	}
-	ogl->setWorkspaceRenderModels( sceneModels );
+	ogl->setWorkspaceRenderModels( sceneModels, ghostModels );
 	if ( solid.isEmpty() && ghost.isEmpty() ) ogl->clearSessionDocumentPreview();
 	else ogl->setSessionDocumentPreview( solid, ghost );
 }

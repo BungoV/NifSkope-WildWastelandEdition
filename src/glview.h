@@ -100,7 +100,10 @@ public:
 	 *  model leaves the list; they share this view's TexCache, so a texture used
 	 *  by two documents is loaded once.
 	 */
-	void setWorkspaceRenderModels( const QVector<NifModel *> & models );
+	//! \a models are drawn; \a keepScene are still loaded and keep their Scene
+	//! without being drawn, because other documents pose against it.
+	void setWorkspaceRenderModels( const QVector<NifModel *> & models,
+		const QVector<NifModel *> & keepScene = QVector<NifModel *>() );
 	void clearSessionDocumentPreview();
 	//! Per-corner colour overlay used by the Rigging selected-bone heatmap.
 	void setRiggingWeightPreview( const QVector<Vector3> & triangleSoup,

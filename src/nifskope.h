@@ -165,6 +165,9 @@ public:
 	bool saveBackgroundDocumentAs( BackgroundNifDocument * document );
 	//! Load NIFs from anywhere on disk into Loaded NIFs; returns how many.
 	int addWorkspaceDocumentsFromDialog();
+	//! Show a loaded NIF in THIS window instead of opening another one; the row
+	//! it came from goes. False if cancelled at the unsaved prompt.
+	bool openBackgroundDocumentHere( BackgroundNifDocument * document );
 	//! Build a faceBones NIF from a loaded document using the marked face donor,
 	//! and put the result in Loaded NIFs, unsaved. Returns why not, or empty.
 	QString generateFaceBonesInto( BackgroundNifDocument * source );
