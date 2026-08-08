@@ -718,12 +718,25 @@ public:
 		unsavedInMemory = false;
 	}
 
-	//! true when the model no longer matches the bytes it was loaded from — or
-	//! was never loaded from any
+	/*! true when the USER changed something, or there is no file behind it.
+	 *
+	 *  Bytes alone are not enough, and reading them as "modified" painted every
+	 *  freshly opened NIF red: the workspace POSES loaded documents — that is why
+	 *  they were given undo stacks in the first place — so the model stops
+	 *  matching the file the moment a scene is built, without anybody editing
+	 *  anything.
+	 *
+	 *  So both are required: the undo stack has to be dirty, which is what a user
+	 *  action looks like, AND the bytes have to actually differ, which is what
+	 *  rules out a command that was pushed and undone again. Posing satisfies
+	 *  neither on its own.
+	 */
 	bool isModified() const
 	{
 		if ( unsavedInMemory )
 			return true;
+		if ( !nif || !nif->undoStack || nif->undoStack->isClean() )
+			return false;
 		if ( pristine.isEmpty() )
 			return false;
 		QByteArray now;
@@ -2941,7 +2954,13 @@ bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
 	 * set aside, and it keeps its unsaved status so it stays red and still asks on
 	 * the way out.
 	 */
-	if ( nif && nif->getBlockCount() > 0 ) {
+	/* NOT THE STARTER DOCUMENT. NifSkope opens on an untitled cube, and parking
+	 * that into Loaded NIFs the first time you double-click a row puts a file
+	 * nobody asked for into the list — and, being unwritten, it would be red and
+	 * would ask to be saved on the way out. It has no path because it is not a
+	 * file; that is the test.
+	 */
+	if ( nif && nif->getBlockCount() > 0 && !currentFile.isEmpty() ) {
 		QByteArray outgoing;
 		QBuffer buf( &outgoing );
 		if ( buf.open( QIODevice::WriteOnly ) && nif->save( buf ) ) {
