@@ -10,42 +10,35 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 branch `main`, `origin` is the fork — never push upstream.)
 
 Updated **2026-08-09**. Edition **0.3.1**. Build green, working tree clean,
-pushed through feature commit `63160b4`.
+pushed through feature commit `8ac43c0`.
 
 ### This session
 
-One change, closed end to end: the NIF Browser and Loaded NIFs are one safe,
-two-way workspace.
+One UI pass, closed end to end: Loaded NIF controls are compact, searchable and
+safe to click, and dock columns can fold and unfold again.
 
-- **Drag available `.nif` leaves into Loaded NIFs.** The native browser view
-  freezes the exact rows at drag start; folders cannot drag and a selection
-  change mid-gesture cannot load another file. Dropping the same source twice
-  does not duplicate it.
-- **Drag one Loaded NIF back onto the browser for Save As.** It serialises that
-  row's live in-memory model and always asks where on disk to write, regardless
-  of the folder/archive under the pointer. Cancel/failure changes nothing;
-  success retains and renames the row and clears its unsaved state.
-- **The browser header is one compact row** like the Block List: Search, ★,
-  Sources, Load Selected, Refresh. The screenshot is
-  `release/ww_nifbrowser_test.png`; all four icon tools fit at 400 px.
-- **Available `.nif` favorites are stable and portable.** Stars survive Refresh
-  and temporarily missing resources; ★ combines with text search as AND.
-  They live at `<NifSkope Library>/NIF Browser/Favorites.json`, not QSettings.
-- **The Library persistence rule was audited across the app.** Pose files were
-  already correct. The only other authored non-NIF payloads in QSettings were
-  Collision Manager custom body presets and custom material aliases; they now
-  live under `<Library>/Collision/{Presets,CustomMaterials}.json`, atomically,
-  with one-time migration. UI state and last-used choices remain preferences.
-- **The reported reload/empty-list class was real and multi-causal.** Workspace
-  rows/tabs/previews/deduplication are now root-scoped; promoted children add
-  rows to their real group; Make Primary carries live bytes instead of reloading
-  configured resources; Remove/X/Delete, Revert, Reload and group close warn
-  before discarding; Save As cancel/failure cancels the destructive action; a
-  cancelled close no longer poisons sibling windows. Explicit browser trees
-  survive Pose Manager pickers and loads, and open routes report real failure.
-- **Verified:** release build green; `loaded_nifs.sh` **35/35**;
-  `collision_panel.sh` **38/38**; `archive_browse_survives_load.sh` **4/4**;
-  `facebones.sh` **23 passed, 0 failed**. Compact header screenshot inspected.
+- **Eye and transparency clicks no longer select the row.** The Loaded-NIF view
+  owns the full press/release gesture over those glyphs, so no orange/blue
+  selection flash appears and no drag begins accidentally.
+- **Loaded NIFs has its own search field and real vertical scrolling.** Filtering
+  hides source rows without proxy-remapping their drag/action identity. A
+  40-row harness probe proves the scrollbar gets a non-zero range.
+- **The row menu is grouped by intent.** File actions, rigging, workspace
+  display, tools/revert and removal are separated; skeleton and face-donor use
+  the same skull/face icons as the row; duplicate Close/Remove wording is gone.
+- **The nearly immovable left divider was a hard 400×240 dock minimum.** Those
+  List/Tree dock floors are gone. The tested browser column now travels from
+  164 to 432 px while preserving the viewport's 50 px minimum. Collision,
+  Rigging and Vertex Paint expose horizontal scrollbars when folded; UV no
+  longer adds a redundant 340 px dock floor. Genuine content floors (UV render
+  view and timeline graph/lane) remain.
+- **Loaded NIFs remains in the NIF Browser's lower splitter pane.** Moving the
+  live view into Block Details was prototyped three ways, but each cross-panel
+  reparent produced a reproducible delayed startup SIGSEGV in Qt layout/style
+  code. The proven splitter version survived repeated startup and is what ships.
+- **Verified:** release build green; `loaded_nifs.sh` **48/48**;
+  `WW_DOCKS_TEST` **9/9**; `collision_panel.sh` **38/38**; and
+  `window_state_roundtrip.sh` passed two maximised, second-monitor cycles.
 
 ### Open
 
@@ -54,6 +47,9 @@ two-way workspace.
 - The NIF Browser harness covers the real view gates, exact captured payloads,
   both save/load routes and rendered geometry, but no pointer-seizing live mouse
   script was run.
+- Moving Loaded NIFs into the Block Details tab space remains unshipped pending
+  a lifecycle-safe construction-time layout; do not reparent the live view after
+  either dock has entered Qt's restored layout.
 - The flat-list **hang** below is still open and still harness-only.
 - Everything else in this file's later sections is carried forward and untouched.
 
@@ -149,13 +145,11 @@ condition, and a two-element array is truthy however the verdict came out.
   plain drop preserves world position; the Collision Manager's **Set Parent**
   keeps the LOCAL transform, which is right for attaching collision to a bone
   and is why it was not changed.
-- **`window_state_roundtrip.sh` no longer runs on this machine**, and it fails
-  before launching the binary, so it is currently covering nothing. Two separate
-  environment problems: `Add-Type` cannot write its temp file when PowerShell is
-  launched from MSYS2 bash (run the script from PowerShell instead), and then
-  its geometry-magic guard reads `0xCB` because `-shl` on a `[byte]` truncates
-  in PowerShell 5.1 — `GetI` needs `[int]` casts. Small, but it is the startup
-  crash's only net.
+- **`window_state_roundtrip.sh` runs outside the restricted sandbox.** It needs
+  `Add-Type` temporary writes under `C:\msys64\tmp`; with that permission it is
+  green for two maximised save/restore cycles on the second monitor. A sandbox
+  permission failure before NifSkope launches is environmental, not a product
+  failure.
 - **The title bar reports a stale build.** `NIFSKOPE_REVISION` is baked when
   qmake runs, not when make does, so the About box and title can name an older
   commit than the binary. Cosmetic; fix by regenerating on link the way

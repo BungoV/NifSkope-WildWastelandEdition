@@ -1,5 +1,45 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09b — Loaded-NIF controls and docks that fold again
+
+Clicking the eye or transparency disc in **Loaded NIFs** no longer selects the
+row first. The view now consumes the complete press/release gesture over those
+two glyphs, preserving both the current index and the existing selection. This
+also prevents an icon click from accidentally becoming a row drag.
+
+Loaded NIFs has a compact **Search loaded NIFs…** field and an as-needed vertical
+scrollbar. The filter hides rows directly instead of proxying them, so every
+drag payload and context action retains the exact source-model identity. The
+test adds 40 temporary rows and proves the scrollbar has a real range rather
+than merely checking its policy.
+
+The row menu is grouped into file, rigging, workspace-display, tool/revert and
+removal sections. **Use as Skeleton** carries the same skull shown on the marked
+row; **Use as Face Donor** carries the face icon. Labels are shorter and
+consistent, and a data-only row no longer says both “Remove from Loaded NIFs”
+and “Close Document” for the same operation.
+
+The NIF Browser's almost-fixed divider was not a splitter bug: the tabified
+List and Tree docks each imposed a **400×240 minimum** on the whole left dock
+group. Those dock-level floors are removed. In the live harness the left column
+now travels from **164 to 432 px** while the 3D viewport retains its 50 px
+minimum. A systematic manager-dock audit also removed UV's redundant 340 px
+dock floor and made Collision, Rigging and Vertex Paint horizontally scrollable
+when folded. Genuine content minima remain for views that cannot render usefully
+below them, notably the 260 px UV view and 200 px timeline graph/lane.
+
+Moving Loaded NIFs into the Block Details tab space was tested as a separate
+dock, a nested tab widget, and a stacked designer layout. All three cross-panel
+reparent variants produced the same delayed startup SIGSEGV in Qt widget
+layout/style handling. The stable lower pane inside the NIF Browser therefore
+ships unchanged in ownership, with its new search and scrollbar; relocation is
+left open until it can be constructed safely before dock-state restoration.
+
+Release build green. `loaded_nifs.sh` is **48 checks, 0 failures**; the expanded
+dock harness is **9/9**; `collision_panel.sh` remains **38/38**; and
+`window_state_roundtrip.sh` passes two maximised save/restore cycles on the
+second monitor. The pointer-seizing live drag script was not run.
+
 ## 2026-08-09a — NIF Browser drag, favorites, compact header, and no silent resets
 
 The NIF Browser and **Loaded NIFs** are a two-way drag surface now. Drag an
