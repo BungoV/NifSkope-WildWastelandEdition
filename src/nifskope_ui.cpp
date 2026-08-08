@@ -1248,6 +1248,54 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						log.flush();
 						check( "K: ...whereas the vanilla donor's blob DOES overrun its list",
 							dHi >= dBones && dBones > 0 );
+
+						/* EVERY NiBinaryExtraData IN BOTH FILES, named and sized.
+						 *
+						 * "The faceBones data" is two blocks, not one, and only one of
+						 * them is per-vertex weights: CustomizationRemapData is the
+						 * mapping back to the animation skeleton, and
+						 * CustomizationRemapNewBonesData is the bones that mapping
+						 * needs and the bone list no longer has. Which file carries
+						 * which is the difference between the vanilla pipeline and
+						 * this one, so both are listed side by side rather than
+						 * described.
+						 */
+						auto listBinaryExtras = [&log]( NifModel * m, const char * whose ) {
+							int found = 0;
+							for ( int b = 0; b < m->getBlockCount(); b++ ) {
+								QModelIndex e = m->getBlockIndex( b, "NiBinaryExtraData" );
+								if ( !e.isValid() )
+									continue;
+								found++;
+								log << "  " << whose << " NiBinaryExtraData [" << b << "] '"
+									<< m->get<QString>( e, "Name" ) << "' "
+									<< m->get<QByteArray>( e, "Binary Data" ).size()
+									<< " bytes\n";
+							}
+							if ( !found )
+								log << "  " << whose << " has no NiBinaryExtraData\n";
+							log.flush();
+							return found;
+						};
+						listBinaryExtras( &out, "output" );
+						listBinaryExtras( &don, "donor " );
+						/* The donor needs NewBonesData because its blob overruns; ours
+						 * does not because it appends. Stated as a PAIR, so neither
+						 * half can pass by being true of any file at all.
+						 */
+						auto hasExtra = []( NifModel * m, const char * name ) {
+							for ( int b = 0; b < m->getBlockCount(); b++ ) {
+								QModelIndex e = m->getBlockIndex( b, "NiBinaryExtraData" );
+								if ( e.isValid() && m->get<QString>( e, "Name" )
+										== QLatin1String( name ) )
+									return true;
+							}
+							return false;
+						};
+						check( "Q: the vanilla donor carries CustomizationRemapNewBonesData",
+							hasExtra( &don, "CustomizationRemapNewBonesData" ) );
+						check( "R: ...and the generated file does not need one",
+							!hasExtra( &out, "CustomizationRemapNewBonesData" ) );
 					} else {
 						check( "K: the donor reloaded for comparison", false );
 					}

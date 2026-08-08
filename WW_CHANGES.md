@@ -40,7 +40,21 @@ above the skull rather than on it, and worth seeing rather than skipping.
 
 `fhat.nif` given face bones from `BaseFemaleHead_faceBones.nif` — 313 vertices,
 4 skin bones before and 68 after, 59 of them face-sculpt, 3756 bytes of
-CustomizationRemapData. 17 of 17, including a new check **P**: the blob names
+CustomizationRemapData. 19 of 19, including checks **Q/R** — every
+`NiBinaryExtraData` in both files, named and sized:
+
+```
+output NiBinaryExtraData [8]  'CustomizationRemapData'          3756 bytes
+donor  NiBinaryExtraData [74] 'CustomizationRemapNewBonesData'   208 bytes
+donor  NiBinaryExtraData [75] 'CustomizationRemapData'         20268 bytes
+```
+
+The vanilla donor needs the NewBonesData because its remap blob overruns its own
+bone list (highest index 68, list of 68); the generated file appends rather than
+replaces, so every index resolves and that block is absent. Stated as a pair, so
+neither half can pass by being true of any file at all.
+
+And check **P**: the blob names
 `0:HEAD, 1:Head_skin, 2:Neck1_skin, 3:Neck_skin` and **no `skin_bone_*` at all**,
 while the shape's live skin binds 68 bones of which 59 are sculpt. That is the
 whole point of the format — the live skinning is the customization rig, the blob
