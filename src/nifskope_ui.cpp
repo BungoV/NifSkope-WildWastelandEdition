@@ -8322,6 +8322,57 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					skope->setWorkspaceDisplayMode( row, 1 );
 					QApplication::processEvents();
 
+					/* SAVE AS, minus the dialog.
+					 *
+					 * The file dialog is the one part of this a harness cannot drive
+					 * and the least interesting part of it: what matters is that the
+					 * bytes reach the file, that the row stops being unsaved, and that
+					 * it knows where it lives afterwards. The row is made unsaved
+					 * first — otherwise "it is not unsaved after saving" is true
+					 * before the save as well, and proves nothing.
+					 */
+					{
+						const QString to = QDir::tempPath()
+							+ QStringLiteral( "/ww_loadednifs_saved.nif" );
+						QFile::remove( to );
+						skope->markWorkspaceDocumentUnsaved( row );
+						check( "a row can be marked unsaved, so saving it can be seen to help",
+							skope->workspaceDocumentModified( row ) );
+						const bool wrote = skope->saveWorkspaceDocumentTo( row, to );
+						const qint64 size = QFileInfo( to ).size();
+						log << "saved row to " << to << ": " << size << " bytes\n";
+						check( "Save As writes the file", wrote && size > 0 );
+						check( "...and the row stops being unsaved",
+							!skope->workspaceDocumentModified( row ) );
+						check( "...and it now knows where it lives",
+							skope->workspaceDocumentName( row )
+								== QFileInfo( to ).fileName() );
+						QFile::remove( to );
+					}
+
+					/* GENERATE FACEBONES FROM A ROW, refused without a donor.
+					 *
+					 * The generation itself is covered end to end by facebones.sh on
+					 * real heads. What is checked here is the row-menu route into it:
+					 * that it refuses with a reason when no donor is marked, and that
+					 * marking the row ITSELF is refused too — a file cannot be its own
+					 * face donor, and the message has to say which mistake was made.
+					 */
+					{
+						NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
+						const QString noDonor = skope->generateFaceBonesFromRow( row );
+						log << "generate with no donor marked: \"" << noDonor.left( 60 ) << "\"\n";
+						check( "generating faceBones with no donor marked is refused, with a reason",
+							!noDonor.isEmpty() && noDonor.contains( QStringLiteral( "donor" ) ) );
+						check( "a row can be marked as the face donor",
+							skope->markWorkspaceFaceDonorRow( row ) );
+						const QString itself = skope->generateFaceBonesFromRow( row );
+						log << "generate from the donor itself: \"" << itself.left( 60 ) << "\"\n";
+						check( "...and generating from the donor ITSELF is refused",
+							!itself.isEmpty() );
+						NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
+					}
+
 					/* THE SWAP. Opening a row in this window used to delete that row
 					 * and leave the outgoing document nowhere, so the workspace lost
 					 * one every time.

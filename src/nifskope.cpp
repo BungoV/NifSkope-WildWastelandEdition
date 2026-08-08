@@ -3148,6 +3148,20 @@ bool NifSkope::saveBackgroundDocumentAs( BackgroundNifDocument * document )
 		suggested, tr( "NIF files (*.nif)" ) );
 	if ( path.isEmpty() )
 		return false;
+	return saveBackgroundDocumentTo( document, path );
+}
+
+/*! The writing half of Save As, with the path already chosen.
+ *
+ *  Split out because the dialog is the one part of this a harness cannot drive,
+ *  and it is the least interesting part: what is worth checking is that the bytes
+ *  reach the file, that the row stops being unsaved, and that it now knows where
+ *  it lives.
+ */
+bool NifSkope::saveBackgroundDocumentTo( BackgroundNifDocument * document, const QString & path )
+{
+	if ( !document || !document->nif || path.isEmpty() )
+		return false;
 	QFile out( path );
 	if ( !out.open( QIODevice::WriteOnly ) || !document->nif->save( out ) ) {
 		QMessageBox::warning( this, tr( "Save %1" ).arg( document->displayName() ),
@@ -6917,6 +6931,37 @@ bool NifSkope::workspaceDocumentModified( int backgroundIndex ) const
  *  the broken code, which is how this replaced it. A rebuild is what destruction
  *  looks like from outside, so the count is the honest measurement.
  */
+bool NifSkope::saveWorkspaceDocumentTo( int backgroundIndex, const QString & path )
+{
+	return saveBackgroundDocumentTo( sessionBackgroundDocuments.value( backgroundIndex ), path );
+}
+
+QString NifSkope::generateFaceBonesFromRow( int backgroundIndex )
+{
+	return generateFaceBonesInto( sessionBackgroundDocuments.value( backgroundIndex ) );
+}
+
+//! Mark a row as holding work that is nowhere else. What a generated document is
+//! born as, and what a harness needs so "saving it helped" can mean something.
+bool NifSkope::markWorkspaceDocumentUnsaved( int backgroundIndex )
+{
+	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	if ( !document )
+		return false;
+	document->unsavedInMemory = true;
+	refreshAllDocumentSessions();
+	return true;
+}
+
+bool NifSkope::markWorkspaceFaceDonorRow( int backgroundIndex )
+{
+	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );
+	if ( !document )
+		return false;
+	NifSkope::setWorkspaceFaceDonor( document->nif, document->displayName() );
+	return true;
+}
+
 int NifSkope::workspaceDocumentSceneBuilds( int backgroundIndex )
 {
 	BackgroundNifDocument * document = sessionBackgroundDocuments.value( backgroundIndex );

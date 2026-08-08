@@ -58,6 +58,14 @@ static QModelIndex collisionAttachNode( NifModel * nif, const QModelIndex & inde
 static void collisionConsumeSource( NifModel * nif, const QPersistentModelIndex & source,
 	const QModelIndex & body );
 
+/*! The answer to "replace the shape that is already there?", for one Create.
+ *
+ *  0 add beside, 1 replace, -1 not asked yet. Cleared by
+ *  castCollisionOverSelection, so a Create over three selected meshes asks once
+ *  rather than three times, and the next Create asks again.
+ */
+static int collisionReplaceChoice = -1;
+
 /*! Run a collision create over every block the block list has selected.
  *
  *  A spell is handed one index, so selecting three shapes and pressing Create
@@ -74,6 +82,10 @@ static void collisionConsumeSource( NifModel * nif, const QPersistentModelIndex 
 template <typename CreateOne>
 static QModelIndex castCollisionOverSelection( NifModel * nif, const QModelIndex & index, CreateOne createOne )
 {
+	// one Create, one question about replacing what is already there: three
+	// selected meshes should not ask three times, and the next Create asks again
+	collisionReplaceChoice = -1;
+
 	const QList<qint32> roots = spellSelectionRoots( nif, index );
 
 	/* Read the selection, then take it down for the duration.
@@ -956,7 +968,44 @@ static QModelIndex attachCollisionShape( NifModel * nif, const QModelIndex & par
 
 	QModelIndex shapeLink = nif->getIndex( rigidBody, "Shape" );
 	QPersistentModelIndex oldShape = nif->getBlockIndex( nif->getLink( shapeLink ) );
-	if ( oldShape.isValid() && !replace ) {
+
+	/* REPLACING DESTROYS A SHAPE, SO IT IS ASKED FOR.
+	 *
+	 * `Create/Replace` defaults to true, and true means the shape already on this
+	 * body is deleted with spRemoveBranch — no question, nothing in the status
+	 * bar, and no way to know it happened except noticing the old collision is
+	 * gone. Adding beside it has been available all along, one setting away, which
+	 * nobody finds while wondering where their collision went.
+	 *
+	 * Asked once per Create, defaulting to the answer that keeps both. The setting
+	 * still decides which button is preselected, so anyone who has deliberately
+	 * chosen Replace gets it under the cursor.
+	 */
+	bool addBeside = !replace;
+	if ( oldShape.isValid() && replace ) {
+		if ( collisionReplaceChoice < 0 ) {
+			QMessageBox ask( QMessageBox::Warning, Spell::tr( "Create Collision" ),
+				Spell::tr( "%1 already has a collision shape.\n\nReplacing it DELETES the shape "
+					"that is there now." ).arg( nif->itemName( parentNode ) ) );
+			QPushButton * beside = ask.addButton( Spell::tr( "Add Beside It" ), QMessageBox::AcceptRole );
+			QPushButton * over = ask.addButton( Spell::tr( "Replace It" ), QMessageBox::DestructiveRole );
+			ask.addButton( QMessageBox::Cancel );
+			ask.setDefaultButton( beside );
+			ask.exec();
+			if ( ask.clickedButton() == beside )
+				collisionReplaceChoice = 0;
+			else if ( ask.clickedButton() == over )
+				collisionReplaceChoice = 1;
+			else {
+				// cancelled: the shape just built has nowhere to go
+				spRemoveBranch().castIfApplicable( nif, newShape );
+				return fallback;
+			}
+		}
+		addBeside = ( collisionReplaceChoice == 0 );
+	}
+
+	if ( oldShape.isValid() && addBeside ) {
 		QVector<qint32> shapes;
 		QModelIndex listShape = oldShape;
 		if ( nif->blockInherits( oldShape, "bhkListShape" ) ) {

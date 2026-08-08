@@ -163,6 +163,14 @@ public:
 	//! Write a data-only loaded NIF to a file the user picks; false if cancelled
 	//! or the write failed. Also what the close prompt calls when you say Save.
 	bool saveBackgroundDocumentAs( BackgroundNifDocument * document );
+	//! The writing half of Save As, with the path already chosen — the dialog is
+	//! the one part a harness cannot drive, and the least interesting part.
+	bool saveBackgroundDocumentTo( BackgroundNifDocument * document, const QString & path );
+	bool saveWorkspaceDocumentTo( int backgroundIndex, const QString & path );
+	//! Build a faceBones NIF from a row using the marked donor; "" on success.
+	QString generateFaceBonesFromRow( int backgroundIndex );
+	bool markWorkspaceFaceDonorRow( int backgroundIndex );
+	bool markWorkspaceDocumentUnsaved( int backgroundIndex );
 	//! Load NIFs from anywhere on disk into Loaded NIFs; returns how many.
 	int addWorkspaceDocumentsFromDialog();
 	//! Show a loaded NIF in THIS window instead of opening another one; the row
