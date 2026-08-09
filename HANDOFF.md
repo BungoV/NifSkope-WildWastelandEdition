@@ -28,6 +28,14 @@ only snapshot without proving the import succeeded.
 One structural UI pass, closed end to end: the left editor is now one permanent
 three-mode column instead of four tabified docks.
 
+The compressed-width migration gap is closed. Schema 1 had already saved
+`LeftColumnDock` at Qt’s incidental ~260 px content hint, so the old “new dock”
+400 px initialization no longer ran. Schema 2 now requests **400 px once**,
+after state and geometry replay, then permanently returns width ownership to the
+user. The real schema-1 profile measured **400 px** on launch and retained the
+existing **164 → 432 px** fold/unfold range; the capture was inspected and
+`loaded_nifs.sh` remains **93/93**.
+
 The top **Blocks · Header · NIFs** selector is now a full-width, equal-third
 segmented control in selection blue. It shares its skin-backed geometry with
 Collision Creation / Simulation: only the two outside ends are rounded, and
@@ -191,6 +199,14 @@ function whose caller wrapped it in `if (-not (…))` put the message *into* the
 condition, and a two-element array is truthy however the verdict came out.
 
 ### Open, and honest about it
+
+- **The UV Editor fold assertion is not functional coverage.** Its current
+  `minimumWidth() < 340` check changes with polish/layout timing. A direct
+  `resizeDocks(..., 280)` probe after showing the dock produced **795 px**: the
+  wide header rows still impose a real effective floor despite the old explicit
+  340 px dock minimum being gone. This was discovered while verifying the left
+  editor’s independent 400 px migration and was deliberately not folded into
+  that one-change fix.
 
 - **Preset save/rename/remove still has no harness.** The "+" goes through a
   modal `QInputDialog::getText`, so it is not drivable the way the existing

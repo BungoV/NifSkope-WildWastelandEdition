@@ -144,7 +144,7 @@ try {
   # all four values, then select NIF mode for the restore cycle below.
   $LK = "$K\LeftColumn"
   $ls = Get-ItemProperty $LK -EA SilentlyContinue
-  if (-not $ls -or $ls.LayoutSchema -ne 1) { Fail "cycle 1 wrote no LeftColumn schema" }
+  if (-not $ls -or $ls.LayoutSchema -ne 2) { Fail "cycle 1 wrote no LeftColumn schema" }
   if (-not $ls.BlockSplitter -or -not $ls.NifSplitter) { Fail "cycle 1 wrote no splitter states" }
   Set-ItemProperty -Path $LK -Name Mode -Value 1 -Type DWord
   Write-Output "  cycle 1: left-column schema and both splitter states saved"

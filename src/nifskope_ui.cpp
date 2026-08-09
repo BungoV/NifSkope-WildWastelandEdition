@@ -6409,6 +6409,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					&& !skope->findChild<QDockWidget *>( QStringLiteral( "BrowserDock" ) ) );
 			check( "the left dock has no hard 400-pixel width floor",
 				skope->dLeft && skope->dLeft->minimumWidth() < 400 );
+			const int savedLeftSchema = QSettings().value(
+				QStringLiteral( "UI/LeftColumn/LayoutSchema" ), 0 ).toInt();
+			const int startupLeftWidth = skope->dLeft ? skope->dLeft->width() : 0;
+			log << "left schema " << savedLeftSchema << ", startup width "
+				<< startupLeftWidth << " px\n";
+			check( "legacy/fresh layouts receive the useful 400-pixel starting width once",
+				savedLeftSchema >= 2
+					|| ( skope->dLeft
+						&& skope->dLeft->property( "wwDefaultWidthMigrated" ).toBool()
+						&& startupLeftWidth >= 380 ) );
+			check( "the useful default-width left editor renders",
+				skope->dLeft && skope->dLeft->grab().save(
+					QApplication::applicationDirPath()
+						+ QStringLiteral( "/ww_docks_left_default.png" ) ) );
 			skope->showNormal();
 			skope->resize( 1280, 900 );
 			skope->dLeft->show();
@@ -22590,7 +22604,7 @@ void NifSkope::saveUi() const
 	// left editor. The schema key lets restoreUi migrate one old 0x073 layout.
 	settings.setValue( "Window State"_uip, saveState( 0x074 ) );
 	settings.setValue( "Window Geometry"_uip, saveGeometry() );
-	settings.setValue( "LeftColumn/LayoutSchema"_uip, 1 );
+	settings.setValue( "LeftColumn/LayoutSchema"_uip, 2 );
 	settings.setValue( "LeftColumn/Mode"_uip, int( leftColumnMode ) );
 	if ( blockWorkspaceSplitter )
 		settings.setValue( "LeftColumn/BlockSplitter"_uip,
@@ -22682,24 +22696,36 @@ void NifSkope::restoreUi()
 	 *
 	 * Covered by tests/spells/window_state_roundtrip.sh.
 	 */
-	const bool leftColumnSchema = settings.value(
-		"LeftColumn/LayoutSchema"_uip, 0 ).toInt() >= 1;
+	const int leftColumnSchema = settings.value(
+		"LeftColumn/LayoutSchema"_uip, 0 ).toInt();
+	const bool hasLeftColumnLayout = leftColumnSchema >= 1;
 	const QByteArray windowState = settings.value( "Window State"_uip ).toByteArray();
 	// Existing users get one 0x073 replay so all unrelated manager docks and
 	// toolbars retain their positions. The four obsolete core docks no longer
 	// exist, so their entries are ignored; LeftColumnDock stays at its designed
 	// left position. The next normal close writes a clean 0x074 graph.
-	restoreState( windowState, leftColumnSchema ? 0x074 : 0x073 );
-	if ( !leftColumnSchema && dLeft ) {
+	restoreState( windowState, hasLeftColumnLayout ? 0x074 : 0x073 );
+	if ( !hasLeftColumnLayout && dLeft ) {
 		if ( dockWidgetArea( dLeft ) == Qt::NoDockWidgetArea )
 			addDockWidget( Qt::LeftDockWidgetArea, dLeft );
 		dLeft->show();
-		// The new dock is absent from a 0x073 blob, so QMainWindow otherwise
-		// assigns its minimum (~164 px). Start migrated/fresh windows at the old
-		// useful working width; it remains freely foldable afterwards.
-		resizeDocks( { dLeft }, { 400 }, Qt::Horizontal );
 	}
 	restoreGeometry( settings.value( "Window Geometry"_uip ).toByteArray() );
+	/* Schema 1 saved the new dock at whatever width Qt assigned while replacing
+	 * the four legacy docks — commonly its ~260 px size hint. Because that state
+	 * already contained LeftColumnDock, the fresh/migration 400 px request above
+	 * never ran again and the accidental compact width became the "default".
+	 *
+	 * Schema 2 is a one-shot width migration. Apply it AFTER geometry/state have
+	 * both replayed so neither can overwrite it, then save schema 2 on a normal
+	 * close. From that point on there is no clamp: a width the user deliberately
+	 * chooses, narrow or wide, is restored exactly.
+	 */
+	if ( leftColumnSchema < 2 && dLeft ) {
+		dLeft->show();
+		resizeDocks( { dLeft }, { 400 }, Qt::Horizontal );
+		dLeft->setProperty( "wwDefaultWidthMigrated", true );
+	}
 	const QByteArray blockSplitState = settings.value(
 		"LeftColumn/BlockSplitter"_uip ).toByteArray();
 	const QByteArray nifSplitState = settings.value(
@@ -22720,7 +22746,7 @@ void NifSkope::restoreUi()
 			handle->setAccessibleName( tr( "Resize NIF Browser and Loaded NIFs" ) );
 		}
 	}
-	setLeftColumnMode( leftColumnSchema
+	setLeftColumnMode( hasLeftColumnLayout
 		? LeftColumnMode( settings.value( "LeftColumn/Mode"_uip,
 			int( LeftBlocks ) ).toInt() )
 		: LeftBlocks );

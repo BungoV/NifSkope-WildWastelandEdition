@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09n — Restore a useful left-panel width once
+
+The unified left editor no longer inherits the accidental ~260 px width that
+Qt recorded while the four legacy docks were first replaced. Left-column layout
+schema 2 performs one width migration to **400 px**, after both `restoreState()`
+and `restoreGeometry()` have finished so neither can compress it again. A normal
+close records schema 2; every later launch respects the user’s chosen width,
+including deliberately narrow ones. Fresh profiles take the same path.
+
+The real schema-1 profile opened at exactly **400 px** in the release build, and
+the dock still traverses **164 → 432 px** when explicitly folded and expanded.
+The rendered 400 px capture was inspected. The left-editor integration remains
+green at **93 checks, 0 failures**. The maximized-state round-trip now expects
+schema 2; its embedded PowerShell parses cleanly.
+
 ## 2026-08-09m — Seamless full-width editor mode selector
 
 The left editor’s **Blocks · Header · NIFs** selector now uses the same
