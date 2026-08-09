@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09i — Compact Block Details with explicit empty states
+
+Block Details now uses one full-width **Search fields…** row with only two
+permanent tools: **★ pinned fields only** and an overflow menu. **Expand All**,
+**Collapse All**, and the optional **Type Column** live in that menu instead of
+compressing the search box into the left corner. The pin tooltip reports the
+resolved pin count for the selected block type, and every icon-only control has
+a stable accessible name.
+
+The lower editor now distinguishes three intentional empty states. A Header
+index is no longer mistaken for a block and cannot populate Details with header
+fields; no selection says to select a block; a field query with no result names
+the query; and pinned-only explains when the current type has no pinned fields.
+These messages are passive viewport paint, so they insert no fake model rows and
+cannot intercept selection, editing, link glyphs, or drag events.
+
+Saved column widths and the Type-column preference remain intact, but the old
+section floor is discarded after restore so Block Details folds with the unified
+left column. Editing delegates, link navigation/retargeting, sticky expansion,
+pin persistence and diff/reference behavior are unchanged. The staged release
+build is green and `loaded_nifs.sh` is **74 checks, 0 failures**, with dedicated
+selected, no-selection, and no-match renders.
+
 ## 2026-08-09h — Readable Block List body and navigable context
 
 The Block List now labels its three columns for what that view actually shows:

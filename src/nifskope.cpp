@@ -1506,8 +1506,11 @@ NifSkope::NifSkope( bool background )
 	tree->setItemDelegate( nif->createDelegate( this, book ) );
 	tree->installEventFilter( this );
 	tree->header()->moveSection( 1, 2 );
+	tree->header()->setMinimumSectionSize( 44 );
+	tree->header()->setStretchLastSection( true );
 	tree->header()->resizeSection( NifModel::NameCol, 135 );
 	tree->header()->resizeSection( NifModel::ValueCol, 250 );
+	tree->setMinimumWidth( 1 );
 	// the Reference column only appears while a diff reference is set
 	tree->setColumnHidden( NifModel::WwRefCol, true );
 	// Summary is a Block LIST column; Block Details shows fields, not blocks
@@ -1520,74 +1523,76 @@ NifSkope::NifSkope( bool background )
 	 * room; the header right-click is where Qt users already look for column
 	 * visibility, so it costs no chrome to offer it.
 	 */
+	QAction * blockDetailsTypeColumn = nullptr;
 	{
 		QSettings cfg;
 		tree->setColumnHidden( NifModel::TypeCol,
 			!cfg.value( QStringLiteral( "BlockDetails/Show Type Column" ), false ).toBool() );
+		blockDetailsTypeColumn = new QAction( tr( "Type Column" ), tree );
+		blockDetailsTypeColumn->setObjectName( QStringLiteral( "BlockDetailsTypeColumn" ) );
+		blockDetailsTypeColumn->setCheckable( true );
+		blockDetailsTypeColumn->setChecked( !tree->isColumnHidden( NifModel::TypeCol ) );
+		connect( blockDetailsTypeColumn, &QAction::toggled, this, [this]( bool show ) {
+			tree->setColumnHidden( NifModel::TypeCol, !show );
+			QSettings().setValue( QStringLiteral( "BlockDetails/Show Type Column" ), show );
+		} );
 		tree->header()->setContextMenuPolicy( Qt::CustomContextMenu );
 		connect( tree->header(), &QWidget::customContextMenuRequested, this,
-			[this]( const QPoint & pos ) {
+			[this, blockDetailsTypeColumn]( const QPoint & pos ) {
 				QMenu m( this );
-				QAction * a = m.addAction( tr( "Type Column" ) );
-				a->setCheckable( true );
-				a->setChecked( !tree->isColumnHidden( NifModel::TypeCol ) );
-				if ( m.exec( tree->header()->mapToGlobal( pos ) ) != a )
-					return;
-				const bool show = !a->isChecked();
-				tree->setColumnHidden( NifModel::TypeCol, !show );
-				QSettings().setValue( QStringLiteral( "BlockDetails/Show Type Column" ), show );
+				m.addAction( blockDetailsTypeColumn );
+				m.exec( tree->header()->mapToGlobal( pos ) );
 			} );
 	}
 	blockDetailsSearch = new QLineEdit( ui->dockWidgetContents_2 );
+	blockDetailsSearch->setObjectName( QStringLiteral( "BlockDetailsSearch" ) );
 	blockDetailsSearch->setClearButtonEnabled( true );
-	blockDetailsSearch->setPlaceholderText( tr( "Filter fields by name or value..." ) );
+	blockDetailsSearch->setPlaceholderText( tr( "Search fields…" ) );
 	blockDetailsSearch->setToolTip( tr( "Parents remain visible when a nested field matches. Ctrl+Shift+F focuses this field." ) );
 	// filter row: search field + the pinned-only toggle, flat and auto-raise
 	// like the Block List header buttons
 	{
 		auto * filterRow = new QWidget( ui->dockWidgetContents_2 );
+		filterRow->setObjectName( QStringLiteral( "BlockDetailsToolbar" ) );
 		auto * fl = new QHBoxLayout( filterRow );
 		fl->setContentsMargins( 0, 0, 0, 0 );
 		fl->setSpacing( 2 );
-		// Stretch 0, with the slack taken by a trailing stretch below, so the
-		// field, the star and the two tree buttons sit as one group on the left.
-		// With the stretch on the field instead, its cell swallows the spare
-		// width and the buttons drift off to the right edge with a hole in the
-		// middle of the row.
+		// The search takes the slack; the two permanent tools stay compact at the
+		// right edge, matching the Block List toolbar above it.
 		blockDetailsSearch->setMinimumWidth( 48 );
-		fl->addWidget( blockDetailsSearch, 0 );
+		fl->addWidget( blockDetailsSearch, 1 );
 
 		wwLoadPinnedFields();
 		blockDetailsPinFilter = new QToolButton( filterRow );
+		blockDetailsPinFilter->setObjectName( QStringLiteral( "BlockDetailsPinnedOnly" ) );
 		blockDetailsPinFilter->setText( QString::fromUtf8( "\xe2\x98\x85" ) );	// ★
 		blockDetailsPinFilter->setCheckable( true );
 		blockDetailsPinFilter->setAutoRaise( true );
 		blockDetailsPinFilter->setToolTip(
 			tr( "Show only pinned fields.\nRight-click any field to pin it; pins are remembered per block type." ) );
+		blockDetailsPinFilter->setAccessibleName( tr( "Show pinned fields only" ) );
 		fl->addWidget( blockDetailsPinFilter, 0 );
 
-		/* Expand / Collapse move up onto this row, after the star.
-		 *
-		 * They had a QFrame of their own directly under the filter, so the dock
-		 * spent two full rows on one text field and two 20px buttons and the tree
-		 * started that much lower down. Reparenting them here reclaims the second
-		 * row outright. `treeButtonFrame` stays in the .ui but emptied and
-		 * hidden, so the designer file still declares the buttons and every
-		 * existing connection to them is untouched.
-		 *
-		 * The field takes a maximum width to make the room. Without it the
-		 * QLineEdit claims every pixel its stretch allows and the two buttons get
-		 * pushed off the edge of a narrow dock.
-		 */
-		blockDetailsSearch->setMaximumWidth( 220 );
-		for ( QWidget * b : { static_cast<QWidget *>( ui->bExpandAllTree ),
-		                      static_cast<QWidget *>( ui->bCollapseAllTree ) } ) {
-			ui->treeButtonFrameLayout->removeWidget( b );
-			b->setParent( filterRow );
-			fl->addWidget( b, 0 );
-			b->show();
-		}
-		fl->addStretch( 1 );
+		/* Expand, collapse and the optional Type column are useful, but not
+		 * selection-state indicators. Keep them in one overflow menu instead of
+		 * spending three permanent glyph slots beside a short search field. */
+		auto * detailsOptions = new QToolButton( filterRow );
+		detailsOptions->setObjectName( QStringLiteral( "BlockDetailsOptions" ) );
+		detailsOptions->setText( QString( QChar( 0x22EF ) ) );
+		detailsOptions->setFixedWidth( 22 );
+		detailsOptions->setAutoRaise( true );
+		detailsOptions->setPopupMode( QToolButton::InstantPopup );
+		detailsOptions->setToolTip( tr( "More Block Details actions" ) );
+		detailsOptions->setAccessibleName( tr( "More Block Details actions" ) );
+		auto * detailsOptionsMenu = new QMenu( detailsOptions );
+		QAction * expandAllFields = detailsOptionsMenu->addAction( tr( "Expand All" ) );
+		connect( expandAllFields, &QAction::triggered, ui->bExpandAllTree, &QPushButton::click );
+		QAction * collapseAllFields = detailsOptionsMenu->addAction( tr( "Collapse All" ) );
+		connect( collapseAllFields, &QAction::triggered, ui->bCollapseAllTree, &QPushButton::click );
+		detailsOptionsMenu->addSeparator();
+		detailsOptionsMenu->addAction( blockDetailsTypeColumn );
+		detailsOptions->setMenu( detailsOptionsMenu );
+		fl->addWidget( detailsOptions, 0 );
 		ui->treeButtonFrame->hide();
 
 		ui->verticalLayout->insertWidget( 0, filterRow );
@@ -4085,6 +4090,7 @@ void NifSkope::applyBlockDetailsFilter()
 	if ( terms.isEmpty() && !pinnedOn ) {
 		tree->setDetailsFilter( false, {} );
 		tree->refreshRowHiding();	// back to pure condition/version hiding
+		if ( !wwBlankDetailsFilter ) tree->setEmptyMessage( QString() );
 		return;
 	}
 
@@ -4122,8 +4128,12 @@ void NifSkope::applyBlockDetailsFilter()
 			}
 		}
 		if ( terms.isEmpty() ) {
+			const bool noPinnedFields = keep.isEmpty();
 			tree->setDetailsFilter( true, std::move( keep ) );
 			tree->refreshRowHiding();
+			tree->setEmptyMessage( noPinnedFields
+				? tr( "No pinned fields for this block type.\nRight-click a field to pin it." )
+				: QString() );
 			return;
 		}
 	}
@@ -4171,8 +4181,17 @@ void NifSkope::applyBlockDetailsFilter()
 	walk( tree->rootIndex() );
 	if ( pinnedOn )
 		keep.intersect( pinnedKeep );
+	const bool noMatchingFields = keep.isEmpty();
 	tree->setDetailsFilter( true, std::move( keep ) );
 	tree->refreshRowHiding();
+	if ( noMatchingFields ) {
+		const QString query = blockDetailsSearch->text().simplified();
+		tree->setEmptyMessage( pinnedOn
+			? tr( "No pinned fields match “%1”." ).arg( query )
+			: tr( "No fields match “%1”." ).arg( query ) );
+	} else {
+		tree->setEmptyMessage( QString() );
+	}
 }
 
 // ---- Block Details sticky view state (WW) ---------------------------------
@@ -4289,15 +4308,31 @@ void NifSkope::wwUpdatePinnedItems()
 	if ( !nif )
 		return;
 	nif->pinnedItems.clear();
-	if ( !tree || tree->model() != nif )
+	auto updatePinTip = [this]() {
+		if ( !blockDetailsPinFilter || !nif ) return;
+		const int count = nif->pinnedItems.size();
+		blockDetailsPinFilter->setToolTip( count == 0
+			? tr( "No fields are pinned for this block type.\nRight-click any field to pin it." )
+			: ( count == 1
+				? tr( "Show the 1 pinned field only.\nRight-click any field to change pins." )
+				: tr( "Show the %1 pinned fields only.\nRight-click any field to change pins." )
+					.arg( count ) ) );
+	};
+	if ( !tree || tree->model() != nif ) {
+		updatePinTip();
 		return;
+	}
 	const QModelIndex root = tree->rootIndex();
-	if ( !root.isValid() || !nif->isNiBlock( root ) )
+	if ( !root.isValid() || !nif->isNiBlock( root ) ) {
+		updatePinTip();
 		return;
+	}
 
 	const auto it = wwPinnedFields.constFind( nif->itemName( root ) );
-	if ( it == wwPinnedFields.constEnd() )
+	if ( it == wwPinnedFields.constEnd() ) {
+		updatePinTip();
 		return;
+	}
 	for ( const QString & path : *it ) {
 		QModelIndex idx = wwResolveFieldPath( root, path );
 		if ( idx.isValid() ) {
@@ -4305,6 +4340,7 @@ void NifSkope::wwUpdatePinnedItems()
 				nif->pinnedItems.insert( item );
 		}
 	}
+	updatePinTip();
 }
 
 void NifSkope::wwLoadPinnedFields()
@@ -6627,7 +6663,8 @@ void NifSkope::select( const QModelIndex & index )
 	 * one swapModels() parks the views on while a file loads; selecting anything
 	 * swaps it straight back below.
 	 */
-	if ( sender() != tree && !idx.isValid() ) {
+	const bool hasDetailsBlock = idx.isValid() && nif->getBlockNumber( idx ) >= 0;
+	if ( sender() != tree && !hasDetailsBlock ) {
 		if ( tree->model() != nifEmpty ) {
 			wwCaptureDetailsState();
 			tree->setModel( nifEmpty );
@@ -6653,8 +6690,10 @@ void NifSkope::select( const QModelIndex & index )
 		wwBlankDetailsFilter = true;
 		for ( int row = 0; row < nifEmpty->rowCount( QModelIndex() ); row++ )
 			tree->setRowHidden( row, QModelIndex(), true );
+		tree->setEmptyMessage( tr( "Select a block in the Block List to inspect its fields." ) );
 		perfMark( "tree cleared" );
 	} else if ( sender() != tree ) {
+		tree->setEmptyMessage( QString() );
 		const bool modelChanged = ( tree->model() != nif );
 		if ( modelChanged )
 			tree->setModel( nif );

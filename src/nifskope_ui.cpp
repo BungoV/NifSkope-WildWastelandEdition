@@ -9016,6 +9016,69 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& skope->blockListFooter->text().contains( QStringLiteral( "1 shape" ) )
 							&& !skope->blockListFooter->text().contains( QStringLiteral( "1 shapes" ) ) );
 
+					/* BLOCK DETAILS PRESENTATION. The unified column removed its dock
+					 * title, so its one compact toolbar and deliberate empty states must
+					 * be self-explanatory without changing the editor model or root. */
+					auto * detailsOptions = skope->findChild<QToolButton *>(
+						QStringLiteral( "BlockDetailsOptions" ) );
+					auto * detailsPinnedOnly = skope->findChild<QToolButton *>(
+						QStringLiteral( "BlockDetailsPinnedOnly" ) );
+					QStringList detailsOptionTexts;
+					if ( detailsOptions && detailsOptions->menu() )
+						for ( QAction * action : detailsOptions->menu()->actions() )
+							if ( !action->isSeparator() ) detailsOptionTexts << action->text();
+					check( "Block Details uses one compact search, pin and overflow toolbar",
+						skope->blockDetailsSearch
+							&& skope->blockDetailsSearch->placeholderText()
+								== QStringLiteral( "Search fields…" )
+							&& detailsPinnedOnly && !detailsPinnedOnly->accessibleName().isEmpty()
+							&& detailsOptions && detailsOptionTexts.contains( QStringLiteral( "Expand All" ) )
+							&& detailsOptionTexts.contains( QStringLiteral( "Collapse All" ) )
+							&& detailsOptionTexts.contains( QStringLiteral( "Type Column" ) ) );
+					check( "Block Details columns retain user widths but can fold narrow",
+						skope->tree->minimumWidth() <= 1
+							&& skope->tree->header()->minimumSectionSize() <= 44 );
+
+					skope->select( skope->nif->getHeaderIndex() );
+					QApplication::processEvents();
+					bool noDetailsRowsVisible = skope->tree->model() == skope->nifEmpty;
+					for ( int r = 0; r < skope->tree->model()->rowCount(); r++ )
+						noDetailsRowsVisible &= skope->tree->visualRect(
+							skope->tree->model()->index( r, 0 ) ).isEmpty();
+					check( "a valid Header index is still no Block Details selection",
+						noDetailsRowsVisible && !skope->tree->emptyMessageText().isEmpty() );
+					check( "the no-selection Block Details state renders",
+						skope->dLeft->grab().save( QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_block_details_none.png" ) ) );
+
+					skope->select( skope->nif->getBlockIndex( 1 ) );
+					QApplication::processEvents();
+					const QModelIndex detailsRootBefore = skope->tree->rootIndex();
+					NifModel * detailsModelBefore = skope->nif;
+					check( "the selected Block Details state renders",
+						skope->dLeft->grab().save( QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_block_details_selected.png" ) ) );
+					skope->blockDetailsSearch->setText( QStringLiteral( "no-such-field-ww-probe" ) );
+					QApplication::processEvents();
+					check( "an empty field search explains itself without replacing the block",
+						!skope->tree->emptyMessageText().isEmpty()
+							&& skope->tree->model() == detailsModelBefore
+							&& skope->tree->rootIndex() == detailsRootBefore
+							&& skope->nif->getBlockNumber( skope->currentNifIndex() ) == 1 );
+					check( "the no-match Block Details state renders",
+						skope->dLeft->grab().save( QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_block_details_empty.png" ) ) );
+					skope->blockDetailsSearch->clear();
+					QApplication::processEvents();
+					bool detailsFieldsReturned = false;
+					for ( int r = 0; r < skope->nif->rowCount( skope->tree->rootIndex() ); r++ )
+						detailsFieldsReturned |= !skope->tree->visualRect(
+							skope->nif->index( r, 0, skope->tree->rootIndex() ) ).isEmpty();
+					check( "clearing field search restores the live Details rows",
+						skope->tree->emptyMessageText().isEmpty() && detailsFieldsReturned
+							&& skope->tree->model() == detailsModelBefore
+							&& skope->tree->rootIndex() == detailsRootBefore );
+
 					bool blockSearchMenuShot = false;
 					if ( skope->blockListFilterButton && skope->blockListFilterMenu ) {
 						const QRect available = skope->blockListFilterButton->screen()
@@ -22527,6 +22590,10 @@ void NifSkope::restoreUi()
 	// and what the blob does not know: this mode's columns, whatever it restored
 	wwApplyBlockListColumns();
 	tree->header()->restoreState( settings.value( "Tree Header"_uip ).toByteArray() );
+	// Preserve user widths, but discard the old section floor that kept the
+	// unified left column from folding around Block Details.
+	tree->header()->setMinimumSectionSize( 44 );
+	tree->setMinimumWidth( 1 );
 	// after restoreState, which carries its own column visibility and would
 	// otherwise win over the default set at construction
 	tree->setColumnHidden( NifModel::TypeCol,
