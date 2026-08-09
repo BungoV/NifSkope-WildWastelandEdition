@@ -10,7 +10,7 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 branch `main`, `origin` is the fork — never push upstream.)
 
 Updated **2026-08-09**. Edition **0.3.1**. Build green, working tree clean,
-pushed through selector reorder `24337e4`.
+pushed through left-panel polish `5df0c36`.
 
 ### This session
 
@@ -40,12 +40,28 @@ three-mode column instead of four tabified docks.
   strip of characters along the viewport divider. The mode harness now requires
   exactly one page to be visible and the screenshots were checked again.
 
+- **The selector and both Block panels were compacted and clarified.** Blocks,
+  Header and NIFs use a flat orange-underlined selector with no shortcuts. Block
+  List has one toolbar plus an advanced Filters dropdown, accurate
+  Block/Name/Summary columns, navigable breadcrumbs, cached totals and a clear
+  no-results state. Block Details has one search/pin/overflow row and explicit
+  no-selection, no-match and no-pins states.
+- **Header is now a standalone file inspector.** It shows source identity and
+  NIF/User/Bethesda versions, recursively searches Name/Value/Type without
+  replacing its model/root, exposes copy-summary/path actions, and retains the
+  useful Type column while folding with the unified dock.
+
 - **Eye and transparency clicks no longer select the row.** The Loaded-NIF view
   owns the full press/release gesture over those glyphs, so no orange/blue
   selection flash appears and no drag begins accidentally.
 - **Loaded NIFs has its own search field and real vertical scrolling.** Filtering
   hides source rows without proxy-remapping their drag/action identity. A
   40-row harness probe proves the scrollbar gets a non-zero range.
+- **Loaded NIFs reports its live membership.** Its header says total or
+  shown/total, carries a glyph legend, and row tooltips add source/unsaved state.
+  Empty and no-match states are passive paint. Browser Refresh and filtering are
+  now required to preserve the exact Loaded model pointers and persistent rows.
+  The 4 px vertical splitter stays non-collapsible and keeps both panes reachable.
 - **The row menu is grouped by intent.** File actions, rigging, workspace
   display, tools/revert and removal are separated; skeleton and face-donor use
   the same skull/face icons as the row; duplicate Close/Remove wording is gone.
@@ -55,10 +71,10 @@ three-mode column instead of four tabified docks.
   Rigging and Vertex Paint expose horizontal scrollbars when folded; UV no
   longer adds a redundant 340 px dock floor. Genuine content floors (UV render
   view and timeline graph/lane) remain.
-- **Verified:** release build green; `loaded_nifs.sh` **54/54**;
-  `WW_DOCKS_TEST` **13/13**; `collision_panel.sh` **39/39**; and
-  `window_state_roundtrip.sh` passed two maximised, second-monitor cycles while
-  saving/restoring NIF mode and both splitters.
+- **Verified:** staged release build green; `loaded_nifs.sh` **91/91**;
+  `WW_DOCKS_TEST` **13/13**; `archive_browse_survives_load.sh` **4/4**; and the
+  final populated/no-match screenshots were visually checked. The earlier
+  `collision_panel.sh` **39/39** and two-cycle window-state pass are unchanged.
 
 ### Open
 
@@ -67,6 +83,12 @@ three-mode column instead of four tabified docks.
 - The NIF Browser harness covers the real view gates, exact captured payloads,
   both save/load routes and rendered geometry, but no pointer-seizing live mouse
   script was run.
+- An auxiliary re-run of `window_state_roundtrip.sh` did not reach its restore
+  assertion: both the prior canonical binary and the staged binary stayed open
+  after cycle 1's `CloseMainWindow()`. The script restored the registry profile
+  each time. This did not reproduce in the dock or Loaded-NIF harnesses and is
+  not attributed to the left-panel change; diagnose the close harness separately
+  before claiming a fresh two-cycle pass.
 - The flat-list **hang** below is still open and still harness-only.
 - Everything else in this file's later sections is carried forward and untouched.
 
