@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09d — Inactive Header page stays invisible
+
+The Blocks screenshot contained a thin vertical string of characters along the
+right divider. They were not damaged table columns: they were the inactive
+Header page's Type column painting through. The migration code cleared the old
+dock contents' hidden flags after those widgets had already entered the new
+`QStackedWidget`, overriding the stack's own hidden state.
+
+That visibility reset now happens before the widgets are inserted. Once the
+stack owns them, only `setCurrentIndex` controls visibility. The rendered Blocks,
+NIFs and Header screenshots are clean on a second visual review. The harness
+also requires exactly one page to be visible in every mode, so a correct current
+index can no longer hide this class of overlap. `loaded_nifs.sh` is now **53
+checks, 0 failures** and the dock topology/folding harness remains **13/13**.
+
 ## 2026-08-09c — Three left-editor modes, built as one stable column
 
 The old Block List / Header / NIF Browser dock-tab strip is replaced by one

@@ -10,7 +10,7 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 branch `main`, `origin` is the fork — never push upstream.)
 
 Updated **2026-08-09**. Edition **0.3.1**. Build green, working tree clean,
-pushed through feature commit `55248e5`.
+pushed through paint-through fix `d0a8aad`.
 
 ### This session
 
@@ -31,6 +31,11 @@ three-mode column instead of four tabified docks.
   splitters then persist explicitly under `UI/LeftColumn`.
 - The column still folds from **164 to 432 px** in the harness while preserving
   the viewport's 50 px minimum.
+- **Inactive pages cannot paint through.** The legacy visibility reset now runs
+  before the content widgets enter `QStackedWidget`; doing it afterwards had
+  overridden Header's hidden state and exposed its Type column as a vertical
+  strip of characters along the viewport divider. The mode harness now requires
+  exactly one page to be visible and the screenshots were checked again.
 
 - **Eye and transparency clicks no longer select the row.** The Loaded-NIF view
   owns the full press/release gesture over those glyphs, so no orange/blue
@@ -47,7 +52,7 @@ three-mode column instead of four tabified docks.
   Rigging and Vertex Paint expose horizontal scrollbars when folded; UV no
   longer adds a redundant 340 px dock floor. Genuine content floors (UV render
   view and timeline graph/lane) remain.
-- **Verified:** clean release build green; `loaded_nifs.sh` **52/52**;
+- **Verified:** release build green; `loaded_nifs.sh` **53/53**;
   `WW_DOCKS_TEST` **13/13**; `collision_panel.sh` **39/39**; and
   `window_state_roundtrip.sh` passed two maximised, second-monitor cycles while
   saving/restoring NIF mode and both splitters.
