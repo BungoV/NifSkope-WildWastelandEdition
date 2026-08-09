@@ -1,5 +1,34 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09c — Three left-editor modes, built as one stable column
+
+The old Block List / Header / NIF Browser dock-tab strip is replaced by one
+selector at the very top of the left column: **Blocks**, **NIFs**, **Header**.
+Blocks owns a vertical Block List / Block Details splitter; NIFs owns a vertical
+NIF Browser / Loaded NIFs splitter; Header fills the column by itself. This is
+the requested layout rather than the earlier compromise that left Loaded NIFs
+inside the Browser's old dock.
+
+The implementation is structural. Before saved dock state is restored, the
+four legacy dock shells surrender their content widgets and are deleted. One
+permanent `LeftColumnDock` then owns three fixed `QStackedWidget` pages for the
+window's lifetime. Switching modes never reparents a live view, replaces a
+model, reloads a NIF, or rebuilds Loaded NIFs. Repeated Blocks → Header → NIFs
+cycles preserve the exact Loaded-NIF row count and model pointers, including
+unsaved in-memory documents.
+
+Window-state version is now `0x074`. Existing `0x073` state is replayed once to
+retain unrelated manager docks and toolbars; the new column then saves its mode
+and both splitter states explicitly under `UI/LeftColumn`. A two-process,
+maximised second-monitor round trip verifies the migrated graph starts without
+the old delayed Qt layout crash and restores NIF mode correctly.
+
+The clean release build is green. `loaded_nifs.sh` is **52 checks, 0 failures**;
+the dock topology/folding harness is **13/13**; `collision_panel.sh` is **39/39**;
+and `window_state_roundtrip.sh` passes both launches. All three modes are also
+rendered to screenshots and visually checked. The pointer-seizing live drag
+script was not run.
+
 ## 2026-08-09b — Loaded-NIF controls and docks that fold again
 
 Clicking the eye or transparency disc in **Loaded NIFs** no longer selects the

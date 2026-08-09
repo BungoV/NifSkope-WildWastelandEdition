@@ -10,12 +10,27 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 branch `main`, `origin` is the fork — never push upstream.)
 
 Updated **2026-08-09**. Edition **0.3.1**. Build green, working tree clean,
-pushed through feature commit `8ac43c0`.
+pushed through feature commit `55248e5`.
 
 ### This session
 
-One UI pass, closed end to end: Loaded NIF controls are compact, searchable and
-safe to click, and dock columns can fold and unfold again.
+One structural UI pass, closed end to end: the left editor is now one permanent
+three-mode column instead of four tabified docks.
+
+- **Blocks** shows Block List above Block Details.
+- **NIFs** shows NIF Browser above Loaded NIFs.
+- **Header** gives the Header the full column.
+- The selector is the first row at the top. Switching it changes only a
+  `QStackedWidget` page: the views, models, selection, searches, splitter sizes
+  and unsaved Loaded NIFs stay alive in place.
+- The old four dock shells are consumed before `restoreUi()`, then deleted. The
+  new `LeftColumnDock` is the only core dock Qt ever restores, so no live widget
+  is reparented after it enters the saved dock graph.
+- Saved-window state is version `0x074`. Existing `0x073` layouts get one
+  compatibility replay for unrelated docks/toolbars; mode and both inner
+  splitters then persist explicitly under `UI/LeftColumn`.
+- The column still folds from **164 to 432 px** in the harness while preserving
+  the viewport's 50 px minimum.
 
 - **Eye and transparency clicks no longer select the row.** The Loaded-NIF view
   owns the full press/release gesture over those glyphs, so no orange/blue
@@ -32,13 +47,10 @@ safe to click, and dock columns can fold and unfold again.
   Rigging and Vertex Paint expose horizontal scrollbars when folded; UV no
   longer adds a redundant 340 px dock floor. Genuine content floors (UV render
   view and timeline graph/lane) remain.
-- **Loaded NIFs remains in the NIF Browser's lower splitter pane.** Moving the
-  live view into Block Details was prototyped three ways, but each cross-panel
-  reparent produced a reproducible delayed startup SIGSEGV in Qt layout/style
-  code. The proven splitter version survived repeated startup and is what ships.
-- **Verified:** release build green; `loaded_nifs.sh` **48/48**;
-  `WW_DOCKS_TEST` **9/9**; `collision_panel.sh` **38/38**; and
-  `window_state_roundtrip.sh` passed two maximised, second-monitor cycles.
+- **Verified:** clean release build green; `loaded_nifs.sh` **52/52**;
+  `WW_DOCKS_TEST` **13/13**; `collision_panel.sh` **39/39**; and
+  `window_state_roundtrip.sh` passed two maximised, second-monitor cycles while
+  saving/restoring NIF mode and both splitters.
 
 ### Open
 
@@ -47,9 +59,6 @@ safe to click, and dock columns can fold and unfold again.
 - The NIF Browser harness covers the real view gates, exact captured payloads,
   both save/load routes and rendered geometry, but no pointer-seizing live mouse
   script was run.
-- Moving Loaded NIFs into the Block Details tab space remains unshipped pending
-  a lifecycle-safe construction-time layout; do not reparent the live view after
-  either dock has entered Qt's restored layout.
 - The flat-list **hang** below is still open and still harness-only.
 - Everything else in this file's later sections is carried forward and untouched.
 
