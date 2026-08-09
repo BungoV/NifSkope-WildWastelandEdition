@@ -67,4 +67,14 @@ QLabel * wwHeading( const QString & text, QWidget * parent = nullptr );
  */
 QString wwBoxedButtonQss( const QString & padding );
 
+/*! A joined, equal-height mode selector with one shared border at each seam.
+ *
+ * Tool-button groups mark their outer buttons with the dynamic boolean
+ * properties `wwSegmentFirst` / `wwSegmentLast`. QTabBar already exposes
+ * `:first` / `:last`, so it has a companion sheet using the same geometry and
+ * palette. Only the two OUTER corners are rounded; adjoining edges stay square.
+ */
+QString wwSegmentedToolButtonQss();
+QString wwSegmentedTabBarQss();
+
 #endif // WWSKIN_H

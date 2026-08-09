@@ -485,6 +485,39 @@ QString wwBoxedButtonQss( const QString & padding )
 			  wwSkinColor( "textMuted" ) );
 }
 
+namespace
+{
+QString wwSegmentedQss( const QString & base, const QString & first,
+	const QString & last )
+{
+	return QStringLiteral(
+		"%1 { min-height: 18px; padding: 3px 10px; color: %4; background: %5;"
+		" border: 1px solid %6; border-left: 0; border-radius: 0; }"
+		"%2 { border-left: 1px solid %6; border-top-left-radius: 3px;"
+		" border-bottom-left-radius: 3px; }"
+		"%3 { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }"
+		"%1:hover { background: %7; }"
+		"%1:checked, %1:selected { border-color: %8; color: %9; background: %8; }" )
+		.arg( base, first, last, wwSkinColor( "text" ), wwSkinColor( "bgBtn" ),
+			wwSkinColor( "border" ), wwSkinColor( "bgBtnHover" ),
+			wwSkinColor( "selBgActive" ), wwSkinColor( "textBright" ) );
+}
+}
+
+QString wwSegmentedToolButtonQss()
+{
+	return wwSegmentedQss( QStringLiteral( "QToolButton" ),
+		QStringLiteral( "QToolButton[wwSegmentFirst=\"true\"]" ),
+		QStringLiteral( "QToolButton[wwSegmentLast=\"true\"]" ) );
+}
+
+QString wwSegmentedTabBarQss()
+{
+	return wwSegmentedQss( QStringLiteral( "QTabBar::tab" ),
+		QStringLiteral( "QTabBar::tab:first" ),
+		QStringLiteral( "QTabBar::tab:last" ) );
+}
+
 
 
 //! @file nifskope_ui.cpp UI logic for %NifSkope's main window.
@@ -7931,9 +7964,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * of asking the button about itself would notice.
 					 */
 					QToolButton * creationTab = nullptr;
+					QToolButton * simulationTab = nullptr;
 					for ( QToolButton * b : dock->findChildren<QToolButton *>() )
 						if ( b->text() == QStringLiteral( "Collision Creation" ) )
 							creationTab = b;
+						else if ( b->text() == QStringLiteral( "Collision Simulation" ) )
+							simulationTab = b;
 					if ( creationTab && creationTab->parentWidget() ) {
 						if ( !creationTab->isChecked() )
 							creationTab->click();
@@ -7954,6 +7990,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							qAbs( got.red() - want.red() ) <= 8
 								&& qAbs( got.green() - want.green() ) <= 8
 								&& qAbs( got.blue() - want.blue() ) <= 8 );
+						if ( simulationTab ) {
+							check( "the collision switch has one square internal seam",
+								creationTab->property( "wwSegmentFirst" ).toBool()
+									&& simulationTab->property( "wwSegmentLast" ).toBool()
+									&& simulationTab->geometry().left() == r.right() + 1 );
+							const QColor seam = img.pixelColor(
+								int( ( r.right() - 1 ) * dpr ), int( ( r.top() + 3 ) * dpr ) );
+							check( "the selected fill reaches the square internal corner",
+								qAbs( seam.red() - want.red() ) <= 8
+									&& qAbs( seam.green() - want.green() ) <= 8
+									&& qAbs( seam.blue() - want.blue() ) <= 8 );
+						}
 					}
 
 					/* --- two buttons, in the order the blocks nest -----------
@@ -8866,6 +8914,31 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& skope->leftColumnSelector->tabData( 1 ).toInt() == NifSkope::LeftHeader
 							&& skope->leftColumnSelector->tabText( 2 ) == QStringLiteral( "NIFs" )
 							&& skope->leftColumnSelector->tabData( 2 ).toInt() == NifSkope::LeftNifs );
+					if ( skope->leftColumnSelector ) {
+						skope->leftColumnSelector->setCurrentIndex( 0 );
+						QApplication::processEvents();
+						const QRect firstTab = skope->leftColumnSelector->tabRect( 0 );
+						const QRect middleTab = skope->leftColumnSelector->tabRect( 1 );
+						const QRect lastTab = skope->leftColumnSelector->tabRect( 2 );
+						check( "the three editor modes are equal-width joined segments",
+							skope->leftColumnSelector->expanding()
+								&& qAbs( firstTab.width() - middleTab.width() ) <= 1
+								&& qAbs( middleTab.width() - lastTab.width() ) <= 1
+								&& firstTab.left() == 0
+								&& middleTab.left() == firstTab.right() + 1
+								&& lastTab.left() == middleTab.right() + 1 );
+						const QPixmap selectorShot = skope->leftColumnSelector->grab();
+						const QImage selectorImage = selectorShot.toImage();
+						const qreal selectorDpr = selectorShot.devicePixelRatio();
+						const QColor selectorGot = selectorImage.pixelColor(
+							int( ( firstTab.left() + 6 ) * selectorDpr ),
+							int( firstTab.center().y() * selectorDpr ) );
+						const QColor selectorWant = QColor::fromString( wwSkinColor( "selBgActive" ) );
+						check( "the active editor segment uses selection blue",
+							qAbs( selectorGot.red() - selectorWant.red() ) <= 8
+								&& qAbs( selectorGot.green() - selectorWant.green() ) <= 8
+								&& qAbs( selectorGot.blue() - selectorWant.blue() ) <= 8 );
+					}
 					bool selectorRoutesToStableModes = true;
 					for ( int tab = 0; tab < skope->leftColumnSelector->count(); tab++ ) {
 						skope->leftColumnSelector->setCurrentIndex( tab );
@@ -18022,8 +18095,9 @@ void NifSkope::initDockWidgets()
 	leftColumnSelector->setObjectName( QStringLiteral( "LeftColumnModeSelector" ) );
 	leftColumnSelector->setDocumentMode( true );
 	leftColumnSelector->setDrawBase( false );
-	leftColumnSelector->setExpanding( false );
+	leftColumnSelector->setExpanding( true );
 	leftColumnSelector->setUsesScrollButtons( false );
+	leftColumnSelector->setStyleSheet( wwSegmentedTabBarQss() );
 	leftColumnSelector->addTab( tr( "Blocks" ) );
 	leftColumnSelector->setTabData( 0, int( LeftBlocks ) );
 	leftColumnSelector->setTabToolTip( 0, tr( "Block List and Block Details" ) );

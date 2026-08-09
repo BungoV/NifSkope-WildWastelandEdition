@@ -28,6 +28,13 @@ only snapshot without proving the import succeeded.
 One structural UI pass, closed end to end: the left editor is now one permanent
 three-mode column instead of four tabified docks.
 
+The top **Blocks · Header · NIFs** selector is now a full-width, equal-third
+segmented control in selection blue. It shares its skin-backed geometry with
+Collision Creation / Simulation: only the two outside ends are rounded, and
+each square internal join has one border rather than two beveled corners.
+Verified in the release build with `loaded_nifs.sh` **93/93** and
+`collision_panel.sh` **41/41**; both generated captures were inspected.
+
 - **Blocks** shows Block List above Block Details.
 - **Header** gives the Header the full column.
 - **NIFs** shows NIF Browser above Loaded NIFs.

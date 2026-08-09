@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09m — Seamless full-width editor mode selector
+
+The left editor’s **Blocks · Header · NIFs** selector now uses the same
+selection-blue segmented treatment as Collision Creation / Simulation. Its
+three modes divide the full dock width equally; no shortcuts or mode behavior
+changed. Both controls now share one skin-backed style whose adjoining edges
+are square and carry only one border, while rounding is reserved for the two
+outside ends. This removes the paired bevels and visible notch at the internal
+seam.
+
+The release build is green. `loaded_nifs.sh` passes **93 checks, 0 failures**,
+including equal segment geometry and active-fill pixels. `collision_panel.sh`
+passes **41 checks, 0 failures**, including adjoining geometry and a pixel at
+the selected segment’s formerly rounded internal corner. Both rendered captures
+were visually inspected.
+
 ## 2026-08-09l — Window-state harness cleanup cannot silently lose settings
 
 `tests/spells/window_state_roundtrip.sh` no longer hides `reg.exe` failures

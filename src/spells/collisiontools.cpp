@@ -4286,6 +4286,7 @@ private:
 		bottomGroup->setExclusive( true );
 		for ( int i = 0; i < 2; i++ ) {
 			auto * b = new QToolButton( bottomSwitch );
+			b->setProperty( i == 0 ? "wwSegmentFirst" : "wwSegmentLast", true );
 			b->setText( i == 0 ? tr( "Collision Creation" ) : tr( "Collision Simulation" ) );
 			b->setToolTip( i == 0
 				? tr( "Build collision for the selected mesh" )
@@ -4310,12 +4311,7 @@ private:
 		 * it means is "you are on this tab". Blue is what selection looks like
 		 * everywhere else here, and in Blender.
 		 */
-		bottomSwitch->setStyleSheet( QStringLiteral(
-			"QToolButton { border: 1px solid %1; border-radius: 3px; padding: 3px; background: %2; }"
-			"QToolButton:hover { background: %3; }"
-			"QToolButton:checked { border-color: %4; color: %5; background: %4; }" )
-			.arg( wwSkinColor( "border" ), wwSkinColor( "bgBtn" ), wwSkinColor( "bgBtnHover" ),
-				  wwSkinColor( "selBgActive" ), wwSkinColor( "textBright" ) ) );
+		bottomSwitch->setStyleSheet( wwSegmentedToolButtonQss() );
 		root->addWidget( bottomSwitch );
 		root->addWidget( createGroup );
 
