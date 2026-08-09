@@ -17565,6 +17565,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				skope->ogl->updateScene();
 				skope->ogl->frameAll();
 			}
+			skope->captureStarterDropBaseline();
 			// WW_STARTER_SHOT=<png>: prove the document startup builds actually
 			// renders, then quit. The startup path cannot be checked any other way
 			// without leaving a window up.
@@ -17741,6 +17742,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "the native viewport container accepts drops",
 							skope->graphicsView && skope->graphicsView->acceptDrops() );
 						check( "the untouched starter is safe to replace",
+							skope->canReplaceStarterFromDrop() );
+						NifModel * starter = skope->getNifModel();
+						const QModelIndex starterRoot = starter
+							? starter->getBlockIndex( 0 ) : QModelIndex();
+						const QString starterName = starterRoot.isValid()
+							? starter->get<QString>( starterRoot, QStringLiteral( "Name" ) )
+							: QString();
+						if ( starterRoot.isValid() )
+							starter->set<QString>( starterRoot, QStringLiteral( "Name" ),
+								starterName + QStringLiteral( "_edited" ) );
+						check( "any edit makes the starter ineligible for replacement",
+							starterRoot.isValid() && !skope->canReplaceStarterFromDrop() );
+						// Re-entering the old string is not a byte restore: the string table
+						// retains the edited entry. Exercise the real Reload route, which
+						// rebuilds the starter and records a fresh exact baseline.
+						skope->reload();
+						settle( 500 );
+						check( "the restored clean starter is eligible again",
 							skope->canReplaceStarterFromDrop() );
 
 						QMimeData mime;

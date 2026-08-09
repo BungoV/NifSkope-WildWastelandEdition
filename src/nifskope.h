@@ -542,6 +542,8 @@ private:
 	QString documentDisplayName() const;
 
 	void loadFile( const QString & );
+	//! Record the exact disposable starter bytes used by external-drop policy.
+	void captureStarterDropBaseline();
 	bool saveFile( const QString & );
 	void checkFile( QFileInfo fInfo, QByteArray filehash );
 
@@ -763,6 +765,9 @@ private:
 	BA2File * currentArchive = nullptr;
 
 	QByteArray filehash;
+	//! Exact serialized starter scene. A drop may replace the primary only while
+	//! the live untitled model still matches these bytes.
+	QByteArray starterDropBaseline;
 
 	//! Stores the NIF file in memory.
 	NifModel * nif;

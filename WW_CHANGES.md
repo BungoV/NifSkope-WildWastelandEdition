@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09r — Simpler external-drop menu, explicit edit guard
+
+The Explorer `.nif` drop menu now starts directly with its actions: the unused
+top section/separator and the file icon are gone. The disposable-starter action
+is simply **Open Here**; its tooltip still explains the adaptive behavior.
+
+Replacement remains limited to an untitled sole starter whose window and undo
+stack are both clean **and whose serialized bytes still exactly match the scene
+created at startup**. This closes the direct-model mutation case that can change
+data without creating an undo command. The harness now performs that exact real
+model edit and proves the cube immediately becomes ineligible before restoring
+the fixture. The release build is green; `external_nif_drop.sh` passes **17
+checks, 0 failures**.
+
 ## 2026-08-09q — Operating-system NIF drops are workspace-aware
 
 Dragging `.nif` files from Explorer into any part of a NifSkope window now

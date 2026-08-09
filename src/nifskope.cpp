@@ -8656,11 +8656,27 @@ static QStringList validExternalNifPaths( const QStringList & files )
 	return valid;
 }
 
+void NifSkope::captureStarterDropBaseline()
+{
+	starterDropBaseline.clear();
+	if ( !nif || !currentFile.isEmpty() )
+		return;
+	QBuffer buffer( &starterDropBaseline );
+	if ( !buffer.open( QIODevice::WriteOnly ) || !nif->save( buffer ) )
+		starterDropBaseline.clear();
+}
+
 bool NifSkope::canReplaceStarterFromDrop() const
 {
 	if ( !currentFile.isEmpty() || isWindowModified()
 		|| !nif || !nif->undoStack || !nif->undoStack->isClean()
+		|| starterDropBaseline.isEmpty()
 		|| !workspaceBackgroundDocuments().isEmpty() )
+		return false;
+	QByteArray liveBytes;
+	QBuffer buffer( &liveBytes );
+	if ( !buffer.open( QIODevice::WriteOnly ) || !nif->save( buffer )
+		|| liveBytes != starterDropBaseline )
 		return false;
 	// A promoted/parked member can be hidden yet still own the only copy of work.
 	// "Only the starter cube" means exactly one model in this workspace group,
@@ -8754,20 +8770,15 @@ void NifSkope::showExternalNifDropMenu( const QStringList & files, const QPoint 
 	}
 
 	QMenu menu( this );
-	const QString firstName = QFileInfo( valid.first() ).fileName();
-	menu.addSection( valid.size() == 1
-		? tr( "Dropped %1" ).arg( firstName )
-		: tr( "Dropped %1 and %2 more NIF(s)" ).arg( firstName ).arg( valid.size() - 1 ) );
 	const bool replaceStarter = canReplaceStarterFromDrop();
 	QString adaptiveText;
 	if ( replaceStarter && valid.size() > 1 )
 		adaptiveText = tr( "Open First Here; Add Rest to Loaded NIFs" );
 	else if ( replaceStarter )
-		adaptiveText = tr( "Open Here (replace starter cube)" );
+		adaptiveText = tr( "Open Here" );
 	else
 		adaptiveText = tr( "Add to Loaded NIFs" );
-	QAction * adaptive = menu.addAction(
-		style()->standardIcon( QStyle::SP_DialogOpenButton ), adaptiveText );
+	QAction * adaptive = menu.addAction( adaptiveText );
 	adaptive->setToolTip( replaceStarter
 		? tr( "The current document is the clean starter. Open the first NIF here; "
 			"additional NIFs stay in Loaded NIFs." )
@@ -8942,6 +8953,10 @@ void NifSkope::load()
 			ogl->updateScene();
 			ogl->frameAll();
 		}
+		if ( built && cube )
+			captureStarterDropBaseline();
+		else
+			starterDropBaseline.clear();
 		return;
 	}
 
