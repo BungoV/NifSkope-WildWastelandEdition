@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09j — Searchable standalone Header inspector
+
+Header mode now identifies the live document before presenting its technical
+tree: a compact two-line strip shows the source basename and the NIF, User and
+Bethesda versions, with the full source and metadata in its tooltip. Unsaved
+documents receive a marker, untitled/archive-only documents are distinguished,
+and the presentation refreshes across loads and undo-stack clean-state changes.
+
+One full-width **Search header…** row filters field names, displayed values and
+types recursively. Matching children keep their ancestor path visible, matching
+compounds retain their subtree, and a no-result query names itself in the empty
+viewport without replacing the model or Header root. A 100 ms debounce keeps
+large Strings tables from being walked once per keystroke. The single overflow
+menu copies either a concise Header summary or the source path when a disk path
+exists; the useful Type column stays visible and no selector shortcut was added.
+
+Saved Header widths remain intact, but the obsolete section floor is discarded
+after restoration so this page folds with the unified left column. The clean
+release build is green; `loaded_nifs.sh` is **83 checks, 0 failures** and the dock
+harness is **13 checks, 0 failures**, including a measured **164 → 432 px** core
+dock range and rendered overview/no-result states.
+
 ## 2026-08-09i — Compact Block Details with explicit empty states
 
 Block Details now uses one full-width **Search fields…** row with only two

@@ -73,6 +73,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QButtonGroup>
 #include <QByteArray>
 #include <QCloseEvent>
+#include <QClipboard>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QCheckBox>
@@ -1644,6 +1645,80 @@ NifSkope::NifSkope( bool background )
 	header->header()->resizeSection( NifModel::ValueCol, 250 );
 	header->setColumnHidden( NifModel::WwRefCol, true );
 	header->setColumnHidden( NifModel::WwSummaryCol, true );
+	header->header()->setMinimumSectionSize( 44 );
+	header->setMinimumWidth( 1 );
+
+	// Standalone Header mode is a file inspector: identify the document first,
+	// then provide one narrow-safe search row before the technical tree.
+	auto * headerInspector = new QWidget( ui->dockWidgetContents_5 );
+	headerInspector->setObjectName( QStringLiteral( "HeaderIdentityStrip" ) );
+	auto * headerInspectorLayout = new QVBoxLayout( headerInspector );
+	headerInspectorLayout->setContentsMargins( 5, 3, 4, 2 );
+	headerInspectorLayout->setSpacing( 0 );
+	headerIdentity = new QLabel( headerInspector );
+	headerIdentity->setObjectName( QStringLiteral( "HeaderIdentity" ) );
+	headerIdentity->setMinimumWidth( 1 );
+	headerIdentity->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
+	QFont identityFont = headerIdentity->font();
+	identityFont.setBold( true );
+	headerIdentity->setFont( identityFont );
+	headerMeta = new QLabel( headerInspector );
+	headerMeta->setObjectName( QStringLiteral( "HeaderMetadata" ) );
+	headerMeta->setMinimumWidth( 1 );
+	headerMeta->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
+	headerMeta->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
+	headerInspectorLayout->addWidget( headerIdentity );
+	headerInspectorLayout->addWidget( headerMeta );
+	ui->verticalLayout_3->insertWidget( 0, headerInspector );
+
+	auto * headerToolbar = new QWidget( ui->dockWidgetContents_5 );
+	headerToolbar->setObjectName( QStringLiteral( "HeaderToolbar" ) );
+	auto * headerToolbarLayout = new QHBoxLayout( headerToolbar );
+	headerToolbarLayout->setContentsMargins( 4, 1, 2, 2 );
+	headerToolbarLayout->setSpacing( 2 );
+	headerSearch = new QLineEdit( headerToolbar );
+	headerSearch->setObjectName( QStringLiteral( "HeaderSearch" ) );
+	headerSearch->setClearButtonEnabled( true );
+	headerSearch->setMinimumWidth( 48 );
+	headerSearch->setPlaceholderText( tr( "Search header…" ) );
+	headerSearch->setToolTip( tr( "Search header field names, values and types" ) );
+	headerToolbarLayout->addWidget( headerSearch, 1 );
+	headerOptions = new QToolButton( headerToolbar );
+	headerOptions->setObjectName( QStringLiteral( "HeaderOptions" ) );
+	headerOptions->setText( QStringLiteral( "⋯" ) );
+	headerOptions->setAutoRaise( true );
+	headerOptions->setPopupMode( QToolButton::InstantPopup );
+	headerOptions->setToolTip( tr( "More Header actions" ) );
+	headerOptions->setAccessibleName( tr( "More Header actions" ) );
+	headerOptions->setFixedSize( 22, 22 );
+	auto * headerMenu = new QMenu( headerOptions );
+	QAction * copySummary = headerMenu->addAction( tr( "Copy Header Summary" ) );
+	copySummary->setObjectName( QStringLiteral( "HeaderCopySummary" ) );
+	headerCopySourcePath = headerMenu->addAction( tr( "Copy Source Path" ) );
+	headerCopySourcePath->setObjectName( QStringLiteral( "HeaderCopySourcePath" ) );
+	headerOptions->setMenu( headerMenu );
+	headerToolbarLayout->addWidget( headerOptions );
+	ui->verticalLayout_3->insertWidget( 1, headerToolbar );
+
+	headerSearchDebounce = new QTimer( this );
+	headerSearchDebounce->setSingleShot( true );
+	headerSearchDebounce->setInterval( 100 );
+	connect( headerSearch, &QLineEdit::textChanged, this, [this]() {
+		headerSearchDebounce->start();
+	} );
+	connect( headerSearchDebounce, &QTimer::timeout, this, &NifSkope::applyHeaderFilter );
+	connect( copySummary, &QAction::triggered, this, [this]() {
+		const QString source = currentFile.isEmpty()
+			? tr( "Untitled NIF" ) : QFileInfo( currentFile ).fileName();
+		QApplication::clipboard()->setText( tr( "%1\nNIF %2 · User %3 · Bethesda %4" )
+			.arg( source, nif->getVersion() )
+			.arg( nif->getUserVersion() ).arg( nif->getBSVersion() ) );
+	} );
+	connect( headerCopySourcePath, &QAction::triggered, this, [this]() {
+		if ( QFileInfo( currentFile ).isAbsolute() )
+			QApplication::clipboard()->setText( QDir::toNativeSeparators( currentFile ) );
+	} );
+	updateHeaderPresentation();
 
 	// KFM
 	kfmtree = ui->kfmtree;
@@ -2233,7 +2308,10 @@ NifSkope::NifSkope( bool background )
 	sessionDocumentWindows.append( this );
 	initDocumentSession();
 	connect( nif->undoStack, &QUndoStack::cleanChanged, this,
-		[]( bool ) { NifSkope::refreshAllDocumentSessions(); } );
+		[this]( bool ) {
+			NifSkope::refreshAllDocumentSessions();
+			updateHeaderPresentation();
+		} );
 	refreshAllDocumentSessions();
 }
 
@@ -4192,6 +4270,99 @@ void NifSkope::applyBlockDetailsFilter()
 	} else {
 		tree->setEmptyMessage( QString() );
 	}
+}
+
+void NifSkope::updateHeaderPresentation()
+{
+	if ( !headerIdentity || !headerMeta || !nif ) return;
+
+	const bool hasSource = !currentFile.isEmpty();
+	const QString displayName = hasSource
+		? QFileInfo( currentFile ).fileName() : tr( "Untitled NIF" );
+	headerIdentity->setText( displayName + ( isWindowModified() ? QStringLiteral( " *" ) : QString() ) );
+	headerMeta->setText( tr( "NIF %1 · User %2 · Bethesda %3" )
+		.arg( nif->getVersion() ).arg( nif->getUserVersion() ).arg( nif->getBSVersion() ) );
+	const QString source = hasSource ? QDir::toNativeSeparators( currentFile ) : tr( "Not saved yet" );
+	const QString tip = tr( "%1\nNIF version %2\nUser version %3\nBethesda version %4" )
+		.arg( source, nif->getVersion() )
+		.arg( nif->getUserVersion() ).arg( nif->getBSVersion() );
+	headerIdentity->setToolTip( tip );
+	headerMeta->setToolTip( tip );
+	if ( headerCopySourcePath ) {
+		headerCopySourcePath->setEnabled( QFileInfo( currentFile ).isAbsolute() );
+		headerCopySourcePath->setToolTip( headerCopySourcePath->isEnabled()
+			? tr( "Copy the full path of this NIF" )
+			: tr( "This NIF does not have a disk path" ) );
+	}
+}
+
+void NifSkope::applyHeaderFilter()
+{
+	if ( !header || !headerSearch || !nif || header->model() != nif ) return;
+	const QModelIndex root = header->rootIndex();
+	if ( !root.isValid() ) {
+		header->setEmptyMessage( tr( "Open a NIF to inspect its header." ) );
+		return;
+	}
+
+	const QStringList terms = headerSearch->text().simplified().split(
+		QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+	if ( terms.isEmpty() ) {
+		if ( headerFilterWasActive ) {
+			headerFilterWasActive = false;
+			header->setDetailsFilter( false, {} );
+			header->refreshRowHiding();
+		}
+		header->setEmptyMessage( QString() );
+		return;
+	}
+	headerFilterWasActive = true;
+
+	QSet<const void *> keep;
+	std::function<void( const NifItem * )> keepSubtree = [&]( const NifItem * item ) {
+		if ( !item || keep.contains( item ) ) return;
+		keep.insert( item );
+		for ( const NifItem * child : item->children() ) keepSubtree( child );
+	};
+	std::function<bool( const QModelIndex & )> walk = [&]( const QModelIndex & parent ) {
+		bool branchMatches = false;
+		for ( int row = 0; row < nif->rowCount( parent ); row++ ) {
+			QModelIndex nameIndex = nif->index( row, NifModel::NameCol, parent );
+			const NifItem * item = nif->getItem( nameIndex );
+			if ( !item ) continue;
+			QString searchable = nameIndex.data( Qt::DisplayRole ).toString();
+			for ( int column : { int( NifModel::ValueCol ), int( NifModel::TypeCol ) } ) {
+				QModelIndex value = nif->index( row, column, parent );
+				if ( value.isValid() ) searchable += QLatin1Char( ' ' )
+					+ value.data( Qt::DisplayRole ).toString();
+			}
+			bool rowMatches = true;
+			for ( const QString & term : terms ) {
+				if ( !searchable.contains( term, Qt::CaseInsensitive ) ) {
+					rowMatches = false;
+					break;
+				}
+			}
+			if ( rowMatches ) {
+				keepSubtree( item );
+				branchMatches = true;
+				continue;
+			}
+			if ( walk( nameIndex ) ) {
+				keep.insert( item );
+				header->expand( nameIndex );
+				branchMatches = true;
+			}
+		}
+		return branchMatches;
+	};
+	walk( root );
+	const bool noMatches = keep.isEmpty();
+	header->setDetailsFilter( true, std::move( keep ) );
+	header->refreshRowHiding();
+	header->setEmptyMessage( noMatches
+		? tr( "No header fields match “%1”." ).arg( headerSearch->text().simplified() )
+		: QString() );
 }
 
 // ---- Block Details sticky view state (WW) ---------------------------------
@@ -6948,6 +7119,7 @@ void NifSkope::setCurrentFile( const QString & filename )
 
 	updateAllRecentFileActions();
 	refreshAllDocumentSessions();
+	updateHeaderPresentation();
 }
 
 void NifSkope::setCurrentArchiveFile( const QString & filepath )

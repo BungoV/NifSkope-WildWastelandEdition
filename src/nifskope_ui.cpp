@@ -9079,6 +9079,74 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& skope->tree->model() == detailsModelBefore
 							&& skope->tree->rootIndex() == detailsRootBefore );
 
+					/* HEADER INSPECTOR. This page keeps the technical tree, but now
+					 * identifies the file and searches Name/Value/Type without replacing
+					 * the live model or its Header root. */
+					skope->setLeftColumnMode( NifSkope::LeftHeader );
+					QApplication::processEvents();
+					auto waitForHeaderSearch = [&]() {
+						QElapsedTimer wait;
+						wait.start();
+						while ( skope->headerSearchDebounce->isActive() && wait.elapsed() < 500 )
+							QApplication::processEvents( QEventLoop::AllEvents, 25 );
+						QApplication::processEvents();
+					};
+					const QModelIndex headerRootBefore = skope->header->rootIndex();
+					QAbstractItemModel * headerModelBefore = skope->header->model();
+					check( "Header mode identifies the source and its three version values",
+						skope->headerIdentity && skope->headerMeta
+							&& skope->headerIdentity->text().startsWith( QFileInfo( fname ).fileName() )
+							&& skope->headerMeta->text().contains( skope->nif->getVersion() )
+							&& skope->headerMeta->text().contains(
+								QString::number( skope->nif->getUserVersion() ) )
+							&& skope->headerMeta->text().contains(
+								QString::number( skope->nif->getBSVersion() ) ) );
+					check( "Header mode uses one compact searchable action strip",
+						skope->headerSearch && skope->headerOptions
+							&& skope->headerSearch->placeholderText()
+								== QStringLiteral( "Search header…" )
+							&& skope->headerOptions->menu()
+							&& skope->headerOptions->menu()->actions().size() == 2 );
+					check( "Header columns retain user widths but can fold narrow",
+						skope->header->minimumWidth() <= 1
+							&& skope->header->header()->minimumSectionSize() <= 44
+							&& !skope->header->isColumnHidden( NifModel::TypeCol ) );
+					check( "the Header inspector overview renders",
+						skope->dLeft->grab().save( QApplication::applicationDirPath()
+								+ QStringLiteral( "/ww_header_overview.png" ) ) );
+
+					skope->headerSearch->setText( QStringLiteral( "BS Header" ) );
+					waitForHeaderSearch();
+					bool knownHeaderMatchVisible = false;
+					for ( int r = 0; r < skope->nif->rowCount( skope->header->rootIndex() ); r++ )
+						knownHeaderMatchVisible |= !skope->header->visualRect(
+							skope->nif->index( r, 0, skope->header->rootIndex() ) ).isEmpty();
+					check( "Header search finds nested technical fields and keeps their path",
+						knownHeaderMatchVisible && skope->header->emptyMessageText().isEmpty() );
+
+					skope->headerSearch->setText( QStringLiteral( "no-such-header-field-ww-probe" ) );
+					waitForHeaderSearch();
+					check( "an empty Header search explains itself without replacing the file",
+						!skope->header->emptyMessageText().isEmpty()
+							&& skope->header->model() == headerModelBefore
+							&& skope->header->rootIndex() == headerRootBefore );
+					check( "the no-match Header state renders",
+						skope->dLeft->grab().save( QApplication::applicationDirPath()
+								+ QStringLiteral( "/ww_header_empty.png" ) ) );
+					skope->headerSearch->clear();
+					waitForHeaderSearch();
+					check( "clearing Header search restores the live Header rows",
+						skope->header->emptyMessageText().isEmpty()
+							&& skope->header->model() == headerModelBefore
+							&& skope->header->rootIndex() == headerRootBefore );
+					if ( QAction * copyHeader = skope->findChild<QAction *>(
+						QStringLiteral( "HeaderCopySummary" ) ) ) copyHeader->trigger();
+					check( "Copy Header Summary includes identity and NIF version",
+						QApplication::clipboard()->text().contains( QFileInfo( fname ).fileName() )
+							&& QApplication::clipboard()->text().contains( skope->nif->getVersion() ) );
+					skope->setLeftColumnMode( NifSkope::LeftBlocks );
+					QApplication::processEvents();
+
 					bool blockSearchMenuShot = false;
 					if ( skope->blockListFilterButton && skope->blockListFilterMenu ) {
 						const QRect available = skope->blockListFilterButton->screen()
@@ -22181,6 +22249,7 @@ void NifSkope::onLoadBegin()
 {
 	// Disconnect the models from the views
 	swapModels();
+	if ( header ) header->setEmptyMessage( tr( "Loading header…" ) );
 
 	ogl->setDisabled( true );
 	setEnabled( false );
@@ -22223,6 +22292,8 @@ void NifSkope::onLoadComplete( bool success, QString & fname )
 		header->setRootIndex( nif->getHeaderIndex() );
 		// Refresh the header rows
 		header->updateConditions( nif->getIndex( nif->getHeaderIndex(), 0 ), nif->getIndex( nif->getHeaderIndex(), 20 ) );
+		updateHeaderPresentation();
+		applyHeaderFilter();
 
 		enableUi();
 
@@ -22242,12 +22313,15 @@ void NifSkope::onLoadComplete( bool success, QString & fname )
 		currentFile.clear();
 		setWindowFilePath( "" );
 		progress->reset();
+		updateHeaderPresentation();
+		header->setEmptyMessage( tr( "Open a NIF to inspect its header." ) );
 	}
 
 	// Mark window as unmodified
 	setWindowModified( false );
 	nif->undoStack->clear();
 	indexStack->clear();
+	updateHeaderPresentation();
 
 	// A new tab gets a useful initial framing. Reloading/replacing a document in
 	// an existing tab preserves that tab's live camera for the current session.
@@ -22599,6 +22673,10 @@ void NifSkope::restoreUi()
 	tree->setColumnHidden( NifModel::TypeCol,
 		!settings.value( QStringLiteral( "BlockDetails/Show Type Column" ), false ).toBool() );
 	header->header()->restoreState( settings.value( "Header Header"_uip ).toByteArray() );
+	// As with Block Details, keep saved widths but discard the old hard section
+	// floor so the unified left column can fold around Header mode too.
+	header->header()->setMinimumSectionSize( 44 );
+	header->setMinimumWidth( 1 );
 	kfmtree->header()->restoreState( settings.value( "Kfmtree Header"_uip ).toByteArray() );
 
 	// header restoreState from a pre-Reference-column layout leaves the new

@@ -563,6 +563,10 @@ private:
 	void applyBlockListFilter();
 	//! Reapply the recursive Block Details field-name/value filter.
 	void applyBlockDetailsFilter();
+	//! Reapply the recursive Header field-name/value/type filter.
+	void applyHeaderFilter();
+	//! Refresh the standalone Header page's file identity and version summary.
+	void updateHeaderPresentation();
 
 	// ---- Block Details sticky view state (WW): expansion + scroll survive
 	// switching between blocks of the same type ----
@@ -768,6 +772,13 @@ private:
 	//! Inline Block List search field.
 	QLineEdit * blockListSearch = nullptr;
 	QLineEdit * blockDetailsSearch = nullptr;
+	QLineEdit * headerSearch = nullptr;
+	QLabel * headerIdentity = nullptr;
+	QLabel * headerMeta = nullptr;
+	QToolButton * headerOptions = nullptr;
+	QAction * headerCopySourcePath = nullptr;
+	QTimer * headerSearchDebounce = nullptr;
+	bool headerFilterWasActive = false;
 	//! "Pinned only" toggle beside the Block Details filter.
 	QToolButton * blockDetailsPinFilter = nullptr;
 	//! A Block Details filter is (or just was) active; lets the empty-filter
