@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09q — Operating-system NIF drops are workspace-aware
+
+Dragging `.nif` files from Explorer into any part of a NifSkope window now
+reaches that window, including the native OpenGL container and specialist tree
+views that previously swallowed the external URL before the old GL handler
+could see it. Internal Block List and NIF Browser MIME drags remain on their
+existing routes.
+
+Every external drop presents one explicit choice. **Open Here / Add to Loaded
+NIFs** replaces only the untouched, untitled starter document; for a multi-file
+drop it opens the first file there and enrolls the rest in Loaded NIFs. If the
+primary is real, edited, or shares its workspace with anything else, the same
+choice preserves it and enrolls every dropped file instead. **Open in New
+Window** creates independent windows, and **Cancel** changes nothing. The menu
+is queued until Windows releases the native drag loop, so opening it cannot nest
+a second modal loop inside the drop gesture.
+
+The release build is green. `external_nif_drop.sh` passes **15 checks, 0
+failures** across the native receiver gates, exact file routing, adaptive
+starter/multi-file behavior, Loaded-NIF preservation, independent windows and
+Cancel. The full `loaded_nifs.sh` regression remains **95 checks, 0 failures**.
+
 ## 2026-08-09p — Skeleton-aware merges without requiring a skeleton
 
 Loaded-NIF merging now treats the skull marker as optional intent, not a

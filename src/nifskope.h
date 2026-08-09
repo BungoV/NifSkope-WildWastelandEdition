@@ -248,6 +248,22 @@ public:
 	bool batchProcessFiles( const QStringList & fileList,
 							bool (*processFunc)( NifModel *, void * ), void * processFuncData = nullptr );
 
+	//! What an operating-system .nif drop should do. Kept numeric so the exact
+	//! menu routes can be driven by a harness without manufacturing native drag UI.
+	enum ExternalNifDropChoice {
+		ExternalDropCancel = 0,
+		ExternalDropAdaptive = 1,
+		ExternalDropNewWindows = 2
+	};
+	//! Show the choice menu after the native drag loop has released the pointer.
+	void showExternalNifDropMenu( const QStringList & files, const QPoint & globalPos );
+	//! Execute one choice. Returns how many valid dropped paths were opened,
+	//! enrolled, or already present; Cancel returns zero and changes nothing.
+	int performExternalNifDrop( const QStringList & files, int choice );
+	//! True only for the disposable initial document: untitled, clean, and the
+	//! sole member of its workspace group.
+	bool canReplaceStarterFromDrop() const;
+
 signals:
 	void beginLoading();
 	void completeLoading( bool, QString & );

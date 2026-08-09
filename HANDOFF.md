@@ -28,6 +28,16 @@ only snapshot without proving the import succeeded.
 One structural UI pass, closed end to end: the left editor is now one permanent
 three-mode column instead of four tabified docks.
 
+**Explorer-to-NifSkope `.nif` drops now work across the whole window.** The
+application-level route recognizes the native OpenGL container as well as the
+specialist tree views, then offers an explicit adaptive workspace action, new
+window(s), or Cancel. Adaptive replaces only the clean, untitled, sole starter;
+otherwise it preserves the primary and adds every file to Loaded NIFs. A
+multi-file starter drop opens the first file and enrolls the rest. The choice
+menu opens only after the native drag loop has released the pointer. The release
+build is green; `external_nif_drop.sh` is **15/15** and `loaded_nifs.sh` remains
+**95/95**. No physical pointer-driving test was run.
+
 **The skull marker is optional for Loaded-NIF merges.** Clothing and props still
 merge normally with no skeleton selected, using the clicked row as target; a
 marked skeleton elsewhere in Loaded NIFs does not interfere. If the marked model

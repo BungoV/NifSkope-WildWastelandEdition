@@ -95,9 +95,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QClipboard>
 #include <QComboBox>
 #include <QCursor>
+#include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QUrl>
 #include <QShortcut>
 #include <QDebug>
 #include <QElapsedTimer>
@@ -537,7 +539,8 @@ bool NifSkope::startupCubeWanted()
 	// WW_STARTER_SHOT is the harness FOR this path, so it is the one WW_ variable
 	// that must not switch it off.
 	if ( !qEnvironmentVariableIsSet( "WW_STARTER_SHOT" )
-		&& !qEnvironmentVariableIsSet( "WW_UI_SHOT" ) ) {
+		&& !qEnvironmentVariableIsSet( "WW_UI_SHOT" )
+		&& !qEnvironmentVariableIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
 		const QStringList envKeys = QProcessEnvironment::systemEnvironment().keys();
 		for ( const QString & key : envKeys ) {
 			if ( key.startsWith( QLatin1String( "WW_" ) ) )
@@ -17699,6 +17702,117 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					QTimer::singleShot( 0, qApp, &QApplication::quit );
 				} );
 			}
+
+			/* TEST HARNESS (WW_EXTERNAL_DROP_TEST=a.nif;b.nif;c.nif): external
+			 * file URLs cross the native createWindowContainer boundary, then obey
+			 * the three-choice policy without replacing real work.
+			 *
+			 * A synthetic event cannot enter Qt's native drag manager. Calling the
+			 * application filter directly begins immediately below that boundary;
+			 * acceptDrops on the main/container widgets is checked separately.
+			 */
+			if ( qEnvironmentVariableIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
+				QTimer::singleShot( 300, skope, [skope]() {
+					QFile logf( QApplication::applicationDirPath()
+						+ QStringLiteral( "/ww_external_drop_test.log" ) );
+					if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+						return;
+					QTextStream log( &logf );
+					int checks = 0, fails = 0;
+					auto check = [&]( const QString & what, bool pass ) {
+						checks++;
+						if ( !pass ) fails++;
+						log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+						log.flush();
+					};
+					auto settle = []( int ms ) {
+						QEventLoop loop;
+						QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+						loop.exec();
+						QApplication::processEvents();
+					};
+					const QStringList files = qEnvironmentVariable( "WW_EXTERNAL_DROP_TEST" )
+						.split( QLatin1Char( ';' ), Qt::SkipEmptyParts );
+					log << "paths: " << files.join( QStringLiteral( " | " ) ) << "\n";
+					log.flush();
+					check( "the fixture supplies three NIFs", files.size() >= 3 );
+					if ( files.size() >= 3 ) {
+						check( "the main window accepts operating-system drops", skope->acceptDrops() );
+						check( "the native viewport container accepts drops",
+							skope->graphicsView && skope->graphicsView->acceptDrops() );
+						check( "the untouched starter is safe to replace",
+							skope->canReplaceStarterFromDrop() );
+
+						QMimeData mime;
+						mime.setUrls( { QUrl::fromLocalFile( files.at( 0 ) ),
+							QUrl::fromLocalFile( files.at( 1 ) ) } );
+						QDragEnterEvent enterViewport( QPoint( 12, 12 ), Qt::CopyAction,
+							&mime, Qt::LeftButton, Qt::NoModifier );
+						const bool entered = skope->eventFilter( skope->graphicsView, &enterViewport );
+						check( "the native viewport-container DragEnter reaches this window",
+							entered && enterViewport.isAccepted() );
+						QDragEnterEvent enterList( QPoint( 12, 12 ), Qt::CopyAction,
+							&mime, Qt::LeftButton, Qt::NoModifier );
+						check( "the same external drop is accepted over a specialist tree",
+							skope->eventFilter( skope->list, &enterList ) && enterList.isAccepted() );
+
+						QDropEvent drop( QPointF( 12, 12 ), Qt::CopyAction, &mime,
+							Qt::LeftButton, Qt::NoModifier );
+						const bool dropped = skope->eventFilter( skope->graphicsView, &drop );
+						check( "the viewport-container Drop reaches the choice route",
+							dropped && drop.isAccepted() );
+						settle( 900 );
+						check( "adaptive drop opens the first NIF over the starter",
+							QFileInfo( skope->getCurrentFile() ).absoluteFilePath().compare(
+								QFileInfo( files.at( 0 ) ).absoluteFilePath(), Qt::CaseInsensitive ) == 0 );
+						check( "the second dropped NIF stays in Loaded NIFs",
+							skope->workspaceDocumentCount() == 1
+							&& skope->workspaceDocumentName( 0 ) == QFileInfo( files.at( 1 ) ).fileName() );
+						check( "a real primary can no longer be mistaken for the starter",
+							!skope->canReplaceStarterFromDrop() );
+
+						const QString primaryWas = skope->getCurrentFile();
+						check( "adaptive drop preserves the primary and adds another Loaded NIF",
+							skope->performExternalNifDrop( { files.at( 2 ) },
+								NifSkope::ExternalDropAdaptive ) == 1
+							&& skope->getCurrentFile() == primaryWas
+							&& skope->workspaceDocumentCount() == 2 );
+
+						const int documentsBefore = NifSkope::openDocuments().size();
+						const int loadedBefore = skope->workspaceDocumentCount();
+						check( "Cancel changes neither windows nor Loaded NIFs",
+							skope->performExternalNifDrop( { files.at( 2 ) },
+								NifSkope::ExternalDropCancel ) == 0
+							&& NifSkope::openDocuments().size() == documentsBefore
+							&& skope->workspaceDocumentCount() == loadedBefore );
+						check( "Open in New Window creates an independent document",
+							skope->performExternalNifDrop( { files.at( 2 ) },
+								NifSkope::ExternalDropNewWindows ) == 1 );
+						settle( 900 );
+						NifSkope * opened = nullptr;
+						for ( NifSkope * document : NifSkope::openDocuments() )
+							if ( document != skope && QFileInfo( document->getCurrentFile() )
+									.absoluteFilePath().compare( QFileInfo( files.at( 2 ) )
+									.absoluteFilePath(), Qt::CaseInsensitive ) == 0 ) {
+								opened = document;
+								break;
+							}
+						check( "the new window owns the exact dropped NIF", opened != nullptr );
+						check( "new-window choice leaves the original workspace untouched",
+							skope->getCurrentFile() == primaryWas
+							&& skope->workspaceDocumentCount() == loadedBefore );
+						if ( opened ) opened->close();
+					}
+					log << checks << " checks, " << fails << " failures\n";
+					log << ( fails == 0 ? "PASS\n" : "CHECK: failures above\n" );
+					log << "done\n";
+					logf.close();
+					if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+						n->undoStack->setClean();
+					skope->setWindowModified( false );
+					QTimer::singleShot( 0, qApp, &QApplication::quit );
+				} );
+			}
 		} else if ( !error.isEmpty() ) {
 			qWarning() << "starter scene:" << error;
 		}
@@ -23336,6 +23450,48 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 	//if ( e->type() == QEvent::Polish ) {
 	//	QTimer::singleShot( 0, this, SLOT( overrideViewFont() ) );
 	//}
+
+	/* Operating-system .nif drops belong to the WINDOW, not to whichever child
+	 * happened to be under the pointer.
+	 *
+	 * The viewport is a QWindow embedded in a native createWindowContainer. The
+	 * old filter listened only for `o == ogl`, while Windows delivered the drop to
+	 * that container QWidget; the GL handler was correct but never entered. Tree
+	 * views add the inverse problem: they accept internal block/browser drags and
+	 * therefore stop an external URL before it can bubble to QMainWindow.
+	 *
+	 * The application filter sees both boundaries. Restrict this interception to
+	 * real local .nif URLs owned by THIS window, leaving every internal MIME drag
+	 * with its specialist view. The choice menu is queued until after Drop returns
+	 * so the native drag loop releases the pointer before a modal menu opens.
+	 */
+	if ( e->type() == QEvent::DragEnter || e->type() == QEvent::DragMove
+		|| e->type() == QEvent::Drop ) {
+		auto * drop = static_cast<QDropEvent *>( e );
+		QStringList nifFiles;
+		if ( drop->mimeData() && drop->mimeData()->hasUrls() ) {
+			for ( const QUrl & url : drop->mimeData()->urls() ) {
+				if ( !url.isLocalFile() ) continue;
+				QFileInfo info( url.toLocalFile() );
+				if ( info.exists() && info.isFile()
+					&& info.suffix().compare( QStringLiteral( "nif" ), Qt::CaseInsensitive ) == 0 )
+					nifFiles.append( info.absoluteFilePath() );
+			}
+		}
+		QWidget * eventWidget = qobject_cast<QWidget *>( o );
+		const bool belongsHere = o == this || o == ogl || o == graphicsView
+			|| ( eventWidget && isAncestorOf( eventWidget ) );
+		if ( belongsHere && !nifFiles.isEmpty() ) {
+			drop->setDropAction( Qt::CopyAction );
+			drop->accept();
+			if ( e->type() == QEvent::Drop ) {
+				const QPoint at = QCursor::pos();
+				QTimer::singleShot( 0, this,
+					[this, nifFiles, at]() { showExternalNifDropMenu( nifFiles, at ); } );
+			}
+			return true;
+		}
+	}
 
 	switch ( e->type() ) {
 	case QEvent::Enter:

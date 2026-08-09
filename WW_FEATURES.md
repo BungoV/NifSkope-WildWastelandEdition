@@ -8,12 +8,12 @@ listed here; they are inherited and still present.
 
 |  |  |
 |---|---|
-| Commits since the fork point | **382** |
+| Commits since the fork point | **383** |
 | `src/` | **145 files changed, +112,219 / −7,902 lines** |
 | New source files under `src/` | **57** |
 | Spells (menu operations) | **158 → 204** (+46) |
 | Rebindable shortcut actions | **53** |
-| Headless regression harnesses | **60** |
+| Headless regression harnesses | **61** |
 
 Everything here was built and tested against Fallout 4 files. Where a number is
 quoted below, it came out of a harness or a corpus run — the dated entry in
@@ -167,6 +167,10 @@ predecessor:
 - Two-way NIF Browser drag: available file → Loaded NIFs; loaded live model →
   Save As, with the row retained. Available `.nif` files can be starred and
   filtered; favorites live under the configurable NifSkope Library.
+- Explorer `.nif` drops work over the native viewport and every editor panel.
+  One menu can adaptively replace only the disposable starter (then enroll any
+  remaining files), preserve a real primary by adding to Loaded NIFs, open
+  independent windows, or cancel without changing the workspace.
 - A **data-only background document layer**: enrolled files are parsed
   `NifModel`s with no window, dock or GL context. Promotion to primary is lazy.
 - Workspace-root isolation and Save/Discard/Cancel protection for generated or

@@ -1119,6 +1119,10 @@ NifSkope::NifSkope( bool background )
 	backgroundWorkspaceDocument = background;
 	// Init UI
 	ui->setupUi( this );
+	// The native GL container and the specialist tree views accept their own
+	// drops, but blank chrome/toolbar areas otherwise have no accepting ancestor.
+	// The application event filter resolves an external .nif back to this window.
+	setAcceptDrops( true );
 
 	for ( const auto & s : QStyleFactory::keys() ) {
 		ui->mTheme->addAction( s )->setCheckable( true );
@@ -8631,6 +8635,159 @@ void NifSkope::openFiles( QStringList & files )
 	for ( const QString & file : files ) {
 		NifSkope::createWindow( file );
 	}
+}
+
+static QStringList validExternalNifPaths( const QStringList & files )
+{
+	QStringList valid;
+	QSet<QString> seen;
+	for ( const QString & path : files ) {
+		QFileInfo info( path );
+		if ( !info.exists() || !info.isFile()
+			|| info.suffix().compare( QStringLiteral( "nif" ), Qt::CaseInsensitive ) != 0 )
+			continue;
+		const QString absolute = info.absoluteFilePath();
+		const QString identity = QDir::cleanPath( absolute ).toLower();
+		if ( seen.contains( identity ) )
+			continue;
+		seen.insert( identity );
+		valid.append( absolute );
+	}
+	return valid;
+}
+
+bool NifSkope::canReplaceStarterFromDrop() const
+{
+	if ( !currentFile.isEmpty() || isWindowModified()
+		|| !nif || !nif->undoStack || !nif->undoStack->isClean()
+		|| !workspaceBackgroundDocuments().isEmpty() )
+		return false;
+	// A promoted/parked member can be hidden yet still own the only copy of work.
+	// "Only the starter cube" means exactly one model in this workspace group,
+	// not merely one visible window.
+	for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
+		if ( document && document != this && sharesWorkspaceGroup( document ) )
+			return false;
+	return true;
+}
+
+int NifSkope::performExternalNifDrop( const QStringList & files, int choice )
+{
+	QStringList valid = validExternalNifPaths( files );
+	if ( valid.isEmpty() || choice == ExternalDropCancel )
+		return 0;
+	if ( choice != ExternalDropAdaptive && choice != ExternalDropNewWindows )
+		return 0;
+
+	if ( choice == ExternalDropNewWindows ) {
+		for ( const QString & file : std::as_const( valid ) )
+			NifSkope::createWindow( file );
+		return valid.size();
+	}
+
+	int handled = 0;
+	if ( canReplaceStarterFromDrop() ) {
+		QString first = valid.takeFirst();
+		// This is provably the clean disposable starter, so saveConfirm cannot
+		// replace unsaved work. Keep openFile as the one normal load path.
+		if ( !openFile( first ) )
+			return 0;
+		handled++;
+	}
+
+	auto sameLoosePath = []( const QString & a, const QString & b ) {
+		if ( a.isEmpty() || b.isEmpty() ) return false;
+		return QFileInfo( a ).absoluteFilePath().compare(
+			QFileInfo( b ).absoluteFilePath(), Qt::CaseInsensitive ) == 0;
+	};
+	for ( const QString & file : std::as_const( valid ) ) {
+		bool alreadyPresent = false;
+		for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
+			if ( !document || !sharesWorkspaceGroup( document )
+				|| !sameLoosePath( document->currentFile, file ) )
+				continue;
+			alreadyPresent = true;
+			if ( document != this ) {
+				document->sessionCollectionMember = true;
+				document->sessionPreviewUnloaded = false;
+				document->sessionPreviewVisible = true;
+			}
+			break;
+		}
+		if ( !alreadyPresent ) {
+			for ( BackgroundNifDocument * document : workspaceBackgroundDocuments() ) {
+				if ( !document || !sameLoosePath( document->currentFile, file ) )
+					continue;
+				document->sessionPreviewUnloaded = false;
+				document->sessionPreviewVisible = true;
+				alreadyPresent = true;
+				break;
+			}
+		}
+		if ( alreadyPresent || addWorkspaceDocumentFromFile( file ) )
+			handled++;
+	}
+	if ( handled ) {
+		refreshAllDocumentSessions();
+		if ( ui && ui->statusbar )
+			ui->statusbar->showMessage(
+				tr( "%1 dropped NIF(s) ready in this workspace." ).arg( handled ), 5000 );
+	}
+	return handled;
+}
+
+void NifSkope::showExternalNifDropMenu( const QStringList & files, const QPoint & globalPos )
+{
+	const QStringList valid = validExternalNifPaths( files );
+	if ( valid.isEmpty() )
+		return;
+
+	// A harness enters below Qt's native drag manager. Bypass only the modal
+	// choice while retaining this exact method and all of its file policy.
+	if ( qEnvironmentVariableIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
+		bool ok = false;
+		const int choice = qEnvironmentVariableIntValue( "WW_EXTERNAL_DROP_CHOICE", &ok );
+		if ( ok ) {
+			performExternalNifDrop( valid, choice );
+			return;
+		}
+	}
+
+	QMenu menu( this );
+	const QString firstName = QFileInfo( valid.first() ).fileName();
+	menu.addSection( valid.size() == 1
+		? tr( "Dropped %1" ).arg( firstName )
+		: tr( "Dropped %1 and %2 more NIF(s)" ).arg( firstName ).arg( valid.size() - 1 ) );
+	const bool replaceStarter = canReplaceStarterFromDrop();
+	QString adaptiveText;
+	if ( replaceStarter && valid.size() > 1 )
+		adaptiveText = tr( "Open First Here; Add Rest to Loaded NIFs" );
+	else if ( replaceStarter )
+		adaptiveText = tr( "Open Here (replace starter cube)" );
+	else
+		adaptiveText = tr( "Add to Loaded NIFs" );
+	QAction * adaptive = menu.addAction(
+		style()->standardIcon( QStyle::SP_DialogOpenButton ), adaptiveText );
+	adaptive->setToolTip( replaceStarter
+		? tr( "The current document is the clean starter. Open the first NIF here; "
+			"additional NIFs stay in Loaded NIFs." )
+		: tr( "Keep the current document and all unsaved work; add every dropped NIF "
+			"to this workspace." ) );
+	QAction * newWindows = menu.addAction(
+		style()->standardIcon( QStyle::SP_TitleBarNormalButton ),
+		valid.size() == 1 ? tr( "Open in New Window" ) : tr( "Open Each in a New Window" ) );
+	newWindows->setToolTip( tr( "Open independent NifSkope window(s); this workspace is unchanged." ) );
+	menu.addSeparator();
+	QAction * cancel = menu.addAction( tr( "Cancel" ) );
+	menu.setToolTipsVisible( true );
+
+	QAction * chosen = menu.exec( globalPos );
+	if ( chosen == adaptive )
+		performExternalNifDrop( valid, ExternalDropAdaptive );
+	else if ( chosen == newWindows )
+		performExternalNifDrop( valid, ExternalDropNewWindows );
+	else if ( chosen == cancel )
+		return;
 }
 
 bool NifSkope::saveFile( const QString & filename )

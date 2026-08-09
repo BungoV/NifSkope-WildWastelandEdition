@@ -63,6 +63,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCursor>
 #include <QDebug>
 #include <QHash>
 #include <QSet>
@@ -20718,13 +20719,15 @@ void GLView::contextMenuEvent( QContextMenuEvent * e )
 void GLView::dragEnterEvent( QDragEnterEvent * e )
 {
 	// Intercept NIF files
+	draggedNifs.clear();
 	if ( e->mimeData()->hasUrls() ) {
 		QList<QUrl> urls = e->mimeData()->urls();
 		for ( auto url : urls ) {
 			if ( url.scheme() == "file" ) {
 				QString fn = url.toLocalFile();
 				QFileInfo finfo( fn );
-				if ( finfo.exists() && NifSkope::fileExtensions().contains( finfo.suffix(), Qt::CaseInsensitive ) ) {
+				if ( finfo.exists() && finfo.isFile()
+					&& finfo.suffix().compare( QStringLiteral( "nif" ), Qt::CaseInsensitive ) == 0 ) {
 					draggedNifs << finfo.absoluteFilePath();
 				}
 			}
@@ -20816,8 +20819,14 @@ void GLView::dropEvent( QDropEvent * e )
 {
 	if ( !draggedNifs.isEmpty() ) {
 		auto ns = qobject_cast<NifSkope *>( graphicsView->parent() );
-		if ( ns )
-			ns->openFiles( draggedNifs );
+		if ( ns ) {
+			const QStringList files = draggedNifs;
+			const QPoint at = QCursor::pos();
+			// Never enter a second modal loop while Qt is still unwinding the
+			// platform drag. The application-level route follows the same rule.
+			QTimer::singleShot( 0, ns,
+				[ns, files, at]() { ns->showExternalNifDropMenu( files, at ); } );
+		}
 
 		draggedNifs.clear();
 		e->accept();
