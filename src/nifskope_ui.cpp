@@ -6379,22 +6379,32 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 			skope->showNormal();
 			skope->resize( 1280, 900 );
 			skope->dLeft->show();
+			auto onlyLeftPageVisible = [skope]( int active ) {
+				if ( !skope->leftColumnStack ) return false;
+				for ( int page = 0; page < skope->leftColumnStack->count(); page++ )
+					if ( skope->leftColumnStack->widget( page )->isVisible() != ( page == active ) )
+						return false;
+				return true;
+			};
 			skope->setLeftColumnMode( NifSkope::LeftNifs );
 			QApplication::processEvents();
 			check( "NIF mode pairs browser above Loaded NIFs",
 				skope->leftColumnStack->currentWidget() == skope->nifWorkspaceSplitter
+					&& onlyLeftPageVisible( NifSkope::LeftNifs )
 					&& skope->nifWorkspaceSplitter->widget( 0 )->isAncestorOf( skope->bsaView )
 					&& skope->nifWorkspaceSplitter->widget( 1 )->isAncestorOf( skope->loadedNifsView ) );
 			skope->setLeftColumnMode( NifSkope::LeftBlocks );
 			QApplication::processEvents();
 			check( "Blocks mode pairs Block List above Block Details",
 				skope->leftColumnStack->currentWidget() == skope->blockWorkspaceSplitter
+					&& onlyLeftPageVisible( NifSkope::LeftBlocks )
 					&& skope->blockWorkspaceSplitter->widget( 0 )->isAncestorOf( skope->list )
 					&& skope->blockWorkspaceSplitter->widget( 1 )->isAncestorOf( skope->tree ) );
 			skope->setLeftColumnMode( NifSkope::LeftHeader );
 			QApplication::processEvents();
 			check( "Header mode uses the full left page",
-				skope->leftColumnStack->currentWidget()->isAncestorOf( skope->header ) );
+				skope->leftColumnStack->currentWidget()->isAncestorOf( skope->header )
+					&& onlyLeftPageVisible( NifSkope::LeftHeader ) );
 			skope->setLeftColumnMode( NifSkope::LeftNifs );
 			skope->resizeDocks( { skope->dLeft }, { 150 }, Qt::Horizontal );
 			QApplication::processEvents();
@@ -8859,15 +8869,21 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& skope->nifWorkspaceSplitter->widget( 1 )->isAncestorOf(
 								skope->loadedNifsView ) );
 					bool modeShots = true;
+					bool modePagesExclusive = true;
 					for ( int mode = NifSkope::LeftBlocks; mode <= NifSkope::LeftHeader; mode++ ) {
 						skope->setLeftColumnMode( NifSkope::LeftColumnMode( mode ) );
 						QApplication::processEvents();
+						for ( int page = 0; page < skope->leftColumnStack->count(); page++ )
+							modePagesExclusive &= skope->leftColumnStack->widget( page )->isVisible()
+								== ( page == mode );
 						modeShots &= skope->dLeft->grab().save( QApplication::applicationDirPath()
 							+ QStringLiteral( "/ww_left_mode_%1.png" ).arg( mode ) );
 					}
 					skope->setLeftColumnMode( NifSkope::LeftNifs );
 					QApplication::processEvents();
 					check( "all three left-editor modes render", modeShots );
+					check( "inactive left-editor pages cannot paint through",
+						modePagesExclusive );
 					check( "Loaded NIFs has its own search field",
 						skope->loadedNifsFilter
 							&& !skope->loadedNifsFilter->placeholderText().isEmpty() );
@@ -17610,6 +17626,13 @@ void NifSkope::initDockWidgets()
 	QWidget * treeContents = takeContents( legacyTree );
 	QWidget * headerContents = takeContents( legacyHeader );
 	QWidget * browserContents = takeContents( legacyBrowser );
+	// QDockWidget::setWidget(nullptr) leaves its former contents explicitly
+	// hidden. Clear that legacy state BEFORE the widgets enter their permanent
+	// splitters/stack. Showing a page after QStackedWidget owns it overrides the
+	// stack's hidden state and lets that inactive page paint through at an edge.
+	for ( QWidget * pageContents : { listContents, treeContents, browserContents,
+		headerContents, loadedNifsPane } )
+		pageContents->show();
 
 	for ( QDockWidget * old : { legacyList, legacyTree, legacyHeader, legacyBrowser } ) {
 		removeDockWidget( old );
@@ -17671,12 +17694,6 @@ void NifSkope::initDockWidgets()
 	leftColumnStack->addWidget( blockWorkspaceSplitter );
 	leftColumnStack->addWidget( nifWorkspaceSplitter );
 	leftColumnStack->addWidget( headerContents );
-	// QDockWidget::setWidget(nullptr) leaves its former contents explicitly
-	// hidden. Clear that legacy state now; QStackedWidget, not those obsolete
-	// docks, owns which complete page is visible from here on.
-	for ( QWidget * pageContents : { listContents, treeContents, browserContents,
-		headerContents, loadedNifsPane } )
-		pageContents->show();
 	hostLayout->addWidget( leftColumnStack, 1 );
 	dLeft->setWidget( host );
 	addDockWidget( Qt::LeftDockWidgetArea, dLeft );
