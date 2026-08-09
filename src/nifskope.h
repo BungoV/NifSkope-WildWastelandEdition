@@ -798,6 +798,15 @@ private:
 	QSet<int> blockListPins;
 	int blockListHistoryPosition = -1;
 	int blockListQuickFilter = 0;
+	enum BlockListSearchField {
+		SearchBlockNumber = 0x1,
+		SearchBlockType = 0x2,
+		SearchBlockName = 0x4,
+		SearchDisplayedValues = 0x8
+	};
+	int blockListSearchFields = SearchBlockNumber | SearchBlockType
+		| SearchBlockName | SearchDisplayedValues;
+	bool blockListSearchMatchAllTerms = true;
 	//! a quick-filter chip switched the list to flat mode; All switches back
 	bool blockListFilterRestoreHierarchy = false;
 	bool navigatingBlockListHistory = false;

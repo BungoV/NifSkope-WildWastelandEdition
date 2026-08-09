@@ -8897,6 +8897,101 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "all three left-editor modes render", modeShots );
 					check( "inactive left-editor pages cannot paint through",
 						modePagesExclusive );
+
+					/* ADVANCED BLOCK SEARCH. The menu is deliberately one compact
+					 * container, but its controls must alter the real row matcher rather
+					 * than merely mirror UI state. Exercise known blocks in the starter
+					 * document through the actual search box and QAction signals. */
+					skope->setLeftColumnMode( NifSkope::LeftBlocks );
+					QApplication::processEvents();
+					QList<QAction *> searchScopes;
+					QList<QAction *> blockCategories;
+					for ( QAction * action : skope->blockListFilterMenu->actions() ) {
+						if ( action->property( "blockSearchScope" ).toBool() )
+							searchScopes.append( action );
+						if ( action->property( "blockCategory" ).toBool() )
+							blockCategories.append( action );
+					}
+					QAction * matchAllTerms = skope->blockListFilterMenu->findChild<QAction *>(
+						QStringLiteral( "BlockListMatchAllTerms" ) );
+					QAction * matchAnyTerm = skope->blockListFilterMenu->findChild<QAction *>(
+						QStringLiteral( "BlockListMatchAnyTerm" ) );
+					QAction * resetSearchFilters = skope->blockListFilterMenu->findChild<QAction *>(
+						QStringLiteral( "BlockListResetSearchFilters" ) );
+					check( "advanced Block List search groups every filter in one menu",
+						skope->blockListFilterMenu
+							&& searchScopes.size() == 4 && blockCategories.size() == 8
+							&& matchAllTerms && matchAnyTerm && resetSearchFilters );
+
+					auto blockVisible = [&]( int wanted ) {
+						bool found = false;
+						auto visit = [&]( auto && self, const QModelIndex & parent ) -> void {
+							for ( int r = 0; r < skope->list->model()->rowCount( parent ); r++ ) {
+								QModelIndex viewIndex = skope->list->model()->index( r, 0, parent );
+								QModelIndex source = viewIndex.model() == skope->proxy
+									? skope->proxy->mapTo( viewIndex ) : viewIndex;
+								if ( skope->nif->getBlockNumber( source ) == wanted )
+									found = !skope->list->QTreeView::isRowHidden( r, parent );
+								self( self, viewIndex );
+							}
+						};
+						visit( visit, QModelIndex() );
+						return found;
+					};
+
+					if ( matchAllTerms && matchAnyTerm ) {
+						skope->blockListSearch->setText( QStringLiteral( "NiNode Cube" ) );
+						QApplication::processEvents();
+						check( "Match all terms excludes blocks whose terms are split across rows",
+							!blockVisible( 0 ) && !blockVisible( 1 ) );
+						matchAnyTerm->trigger();
+						QApplication::processEvents();
+						check( "Match any term includes each row containing either term",
+							blockVisible( 0 ) && blockVisible( 1 ) );
+						matchAllTerms->trigger();
+					}
+
+					QAction * typeScope = nullptr;
+					for ( QAction * action : std::as_const( searchScopes ) )
+						if ( action->data().toInt() == NifSkope::SearchBlockType )
+							typeScope = action;
+					if ( typeScope ) {
+						skope->blockListSearch->setText( QStringLiteral( "BSTriShape" ) );
+						QApplication::processEvents();
+						const bool foundByType = blockVisible( 1 );
+						typeScope->setChecked( false );
+						QApplication::processEvents();
+						check( "Search In scopes narrow the actual fields inspected",
+							foundByType && !blockVisible( 1 ) );
+					}
+					if ( resetSearchFilters ) resetSearchFilters->trigger();
+					QApplication::processEvents();
+					bool scopesReset = true;
+					for ( QAction * action : std::as_const( searchScopes ) )
+						scopesReset &= action->isChecked();
+					check( "Reset Search and Filters restores the complete default search",
+						scopesReset && matchAllTerms && matchAllTerms->isChecked()
+							&& skope->blockListSearch->text().isEmpty()
+							&& skope->blockListQuickFilter == 0 );
+
+					bool blockSearchMenuShot = false;
+					if ( skope->blockListFilterButton && skope->blockListFilterMenu ) {
+						const QRect available = skope->blockListFilterButton->screen()
+							? skope->blockListFilterButton->screen()->availableGeometry() : QRect();
+						const QPoint safeMenuPosition = available.isValid()
+							? available.topLeft() + QPoint( 20, 20 )
+							: skope->blockListFilterButton->mapToGlobal(
+								QPoint( 0, skope->blockListFilterButton->height() ) );
+						skope->blockListFilterMenu->popup( safeMenuPosition );
+						QApplication::processEvents();
+						blockSearchMenuShot = skope->blockListFilterMenu->grab().save(
+							QApplication::applicationDirPath()
+								+ QStringLiteral( "/ww_block_search_filters.png" ) );
+						skope->blockListFilterMenu->hide();
+					}
+					check( "advanced Block List search menu renders", blockSearchMenuShot );
+					skope->setLeftColumnMode( NifSkope::LeftNifs );
+					QApplication::processEvents();
 					check( "Loaded NIFs has its own search field",
 						skope->loadedNifsFilter
 							&& !skope->loadedNifsFilter->placeholderText().isEmpty() );

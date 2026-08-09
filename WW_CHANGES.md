@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09g — Compact Block List tools and real advanced search
+
+The Block List's three rows of competing controls are one compact toolbar now.
+Back/forward, search, advanced filters, pinned blocks, reference counts and an
+overflow menu remain visible; **Go to Block**, **Expand All** and **Collapse All**
+move into that overflow instead of consuming permanent width. Every icon-only
+control has a tooltip and accessible name, and the row still folds with the left
+column rather than imposing a new width floor.
+
+The **Filters** dropdown is a real advanced search container. It selects the
+fields searched (block number, type, name, and displayed value/summary columns),
+chooses all-term or any-term matching, retains the existing eight block-category
+filters, and resets the complete search state in one action. The rendered menu
+uses visible group headings; none of its options are decorative.
+
+The integration harness proves that all-term and any-term searches produce
+different results across the starter document, disabling the Type scope removes
+a type-only match, Reset restores every default, and the complete menu renders.
+`loaded_nifs.sh` is **60 checks, 0 failures**.
+
+## 2026-08-09f — Flat, explicit left-mode selector
+
+The **Blocks · Header · NIFs** selector is visually part of the editor column
+instead of looking like another dock-tab group: its background is flat, hover is
+subtle, and the active mode is identified by the skin's orange underline. Each
+mode has a tooltip, but deliberately no keyboard shortcut—the selector does not
+claim application-wide key combinations from editing tools.
+
 ## 2026-08-09e — Left selector order: Blocks, Header, NIFs
 
 The three buttons now read **Blocks · Header · NIFs**. Their visual positions

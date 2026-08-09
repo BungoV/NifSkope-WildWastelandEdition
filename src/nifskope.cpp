@@ -1187,6 +1187,7 @@ NifSkope::NifSkope( bool background )
 	// Parents stay visible when any descendant matches; search is deliberately
 	// view-only and never changes the NIF or object selection.
 	QWidget * blockNavigation = new QWidget( ui->dockWidgetContents_4 );
+	blockNavigation->setObjectName( QStringLiteral( "BlockListToolbar" ) );
 	QHBoxLayout * blockNavigationLayout = new QHBoxLayout( blockNavigation );
 	blockNavigationLayout->setContentsMargins( 0, 0, 0, 0 );
 	blockNavigationLayout->setSpacing( 2 );
@@ -1197,40 +1198,39 @@ NifSkope::NifSkope( bool background )
 	blockListBack->setAutoRaise( true );
 	blockListBack->setIcon( tlMakeIcon( QStringLiteral( "chevron_left" ), navIconColor ) );
 	blockListBack->setToolTip( tr( "Previous selected block" ) );
+	blockListBack->setAccessibleName( tr( "Previous selected block" ) );
 	blockListForward = new QToolButton( blockNavigation );
 	blockListForward->setAutoRaise( true );
 	blockListForward->setIcon( tlMakeIcon( QStringLiteral( "chevron_right" ), navIconColor ) );
 	blockListForward->setToolTip( tr( "Next selected block" ) );
+	blockListForward->setAccessibleName( tr( "Next selected block" ) );
 	blockNavigationLayout->addWidget( blockListBack );
 	blockNavigationLayout->addWidget( blockListForward );
 	blockListSearch = new QLineEdit( blockNavigation );
 	blockListSearch->setObjectName( QStringLiteral( "BlockListSearch" ) );
 	blockListSearch->setClearButtonEnabled( true );
-	blockListSearch->setPlaceholderText( tr( "Search blocks by type, name, value, or #..." ) );
+	blockListSearch->setPlaceholderText( tr( "Search blocks…" ) );
 	blockListSearch->setToolTip( tr( "Space-separated terms must all match. Ctrl+F focuses this field; Esc clears it." ) );
 	blockNavigationLayout->addWidget( blockListSearch, 1 );
-	QToolButton * goToBlockButton = new QToolButton( blockNavigation );
-	goToBlockButton->setAutoRaise( true );
-	goToBlockButton->setText( QStringLiteral( "#" ) );
-	goToBlockButton->setToolTip( tr( "Go to block (Ctrl+G)" ) );
-	blockNavigationLayout->addWidget( goToBlockButton );
 	blockListPin = new QToolButton( blockNavigation );
+	blockListPin->setObjectName( QStringLiteral( "BlockListPin" ) );
 	blockListPin->setAutoRaise( true );
 	blockListPin->setCheckable( true );
 	blockListPin->setText( QString::fromUtf8( "\xE2\x98\x85" ) );
 	blockListPin->setToolTip( tr( "Pin this block; use the arrow to revisit pinned blocks" ) );
+	blockListPin->setAccessibleName( tr( "Pinned blocks" ) );
 	blockListPin->setPopupMode( QToolButton::MenuButtonPopup );
 	blockListPin->setMenu( new QMenu( blockListPin ) );
-	blockNavigationLayout->addWidget( blockListPin );
 	blockListRelations = new QToolButton( blockNavigation );
+	blockListRelations->setObjectName( QStringLiteral( "BlockListRelations" ) );
 	blockListRelations->setAutoRaise( true );
-	blockListRelations->setText( tr( "0/0" ) );
-	blockListRelations->setToolTip( tr( "Links: outgoing links / blocks that reference the selection" ) );
+	blockListRelations->setText( tr( "0→ 0←" ) );
+	blockListRelations->setToolTip( tr( "References for the selected block: 0 outgoing, 0 incoming" ) );
+	blockListRelations->setAccessibleName( tr( "Block references" ) );
 	blockListRelations->setPopupMode( QToolButton::InstantPopup );
 	blockListRelations->setMenu( new QMenu( blockListRelations ) );
-	blockNavigationLayout->addWidget( blockListRelations );
 	ui->verticalLayout_2->removeWidget( ui->listButtonFrame );
-	blockNavigationLayout->addWidget( ui->listButtonFrame );
+	ui->listButtonFrame->hide();
 	ui->verticalLayout_2->insertWidget( 0, blockNavigation );
 	// The Block List dock must fold down to a sliver when the user wants the
 	// viewport: none of the header rows may impose a minimum width. The search
@@ -1239,13 +1239,12 @@ NifSkope::NifSkope( bool background )
 	blockListSearch->setMinimumWidth( 48 );
 	blockNavigation->setMinimumWidth( 1 );
 
-	/* One dropdown in the search row, not eight chips in a row of their own.
+	/* One advanced-search dropdown attached to the search field, not eight chips
+	 * and four scope toggles spread across the row.
 	 *
-	 * The chips were already mutually exclusive, which is exactly what a menu
-	 * expresses, and the row they occupied was the third strip of chrome above the
-	 * list - search, chips, breadcrumb - before a single block was visible. The
-	 * button wears the active category's icon, so the current filter stays
-	 * readable at a glance without spending a row on it.
+	 * Search scope, term matching and the mutually-exclusive block category all
+	 * live here. Every item changes the real matcher below; there are no decorative
+	 * options that claim precision the filter does not actually have.
 	 */
 	struct BlockFilterDef { int id; QString name; QString icon; };
 	const QList<BlockFilterDef> blockFilterDefs = {
@@ -1261,10 +1260,72 @@ NifSkope::NifSkope( bool background )
 		{ 7, tr( "Extra data" ), QStringLiteral( ":/btn/blockExtraData" ) }
 	};
 	blockListFilterButton = new QToolButton( blockNavigation );
+	blockListFilterButton->setObjectName( QStringLiteral( "BlockListTypeFilter" ) );
 	blockListFilterButton->setPopupMode( QToolButton::InstantPopup );
 	blockListFilterButton->setAutoRaise( true );
+	blockListFilterButton->setAccessibleName( tr( "Advanced block search filters" ) );
 	blockListFilterMenu = new QMenu( blockListFilterButton );
+	blockListFilterMenu->setObjectName( QStringLiteral( "BlockListAdvancedSearchMenu" ) );
 	blockListFilterButton->setMenu( blockListFilterMenu );
+	auto addSearchHeading = [&]( const QString & text ) {
+		if ( !blockListFilterMenu->actions().isEmpty() )
+			blockListFilterMenu->addSeparator();
+		QAction * heading = blockListFilterMenu->addAction( text );
+		heading->setEnabled( false );
+		QFont font = heading->font();
+		font.setBold( true );
+		heading->setFont( font );
+	};
+	addSearchHeading( tr( "Search In" ) );
+	QList<QAction *> searchScopeActions;
+	auto addSearchScope = [&]( const QString & label, int field ) {
+		QAction * a = blockListFilterMenu->addAction( label );
+		a->setCheckable( true );
+		a->setChecked( true );
+		a->setData( field );
+		a->setProperty( "blockSearchScope", true );
+		searchScopeActions.append( a );
+	};
+	addSearchScope( tr( "Block number" ), SearchBlockNumber );
+	addSearchScope( tr( "Block type" ), SearchBlockType );
+	addSearchScope( tr( "Block name" ), SearchBlockName );
+	addSearchScope( tr( "Value and summary columns" ), SearchDisplayedValues );
+	for ( QAction * scopeAction : std::as_const( searchScopeActions ) ) {
+		connect( scopeAction, &QAction::toggled, this,
+			[this, scopeAction, searchScopeActions]( bool ) {
+				int fields = 0;
+				for ( QAction * a : searchScopeActions )
+					if ( a->isChecked() ) fields |= a->data().toInt();
+				// An empty scope would make every non-empty query match nothing with
+				// no visible explanation. Keep the last field instead.
+				if ( fields == 0 ) {
+					QSignalBlocker blocker( scopeAction );
+					scopeAction->setChecked( true );
+					fields = scopeAction->data().toInt();
+				}
+				blockListSearchFields = fields;
+				applyBlockListFilter();
+			} );
+	}
+	addSearchHeading( tr( "Terms" ) );
+	QActionGroup * termMatchActions = new QActionGroup( blockListFilterMenu );
+	termMatchActions->setExclusive( true );
+	QAction * matchAllTerms = blockListFilterMenu->addAction( tr( "Match all terms" ) );
+	matchAllTerms->setObjectName( QStringLiteral( "BlockListMatchAllTerms" ) );
+	matchAllTerms->setCheckable( true );
+	matchAllTerms->setChecked( true );
+	matchAllTerms->setData( true );
+	termMatchActions->addAction( matchAllTerms );
+	QAction * matchAnyTerm = blockListFilterMenu->addAction( tr( "Match any term" ) );
+	matchAnyTerm->setObjectName( QStringLiteral( "BlockListMatchAnyTerm" ) );
+	matchAnyTerm->setCheckable( true );
+	matchAnyTerm->setData( false );
+	termMatchActions->addAction( matchAnyTerm );
+	connect( termMatchActions, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		blockListSearchMatchAllTerms = a->data().toBool();
+		applyBlockListFilter();
+	} );
+	addSearchHeading( tr( "Block Category" ) );
 	QActionGroup * blockFilterActions = new QActionGroup( blockListFilterMenu );
 	blockFilterActions->setExclusive( true );
 	for ( const BlockFilterDef & def : blockFilterDefs ) {
@@ -1272,13 +1333,50 @@ NifSkope::NifSkope( bool background )
 		a->setCheckable( true );
 		a->setChecked( def.id == 0 );
 		a->setData( def.id );
+		a->setProperty( "blockCategory", true );
 		if ( def.id == 2 ) a->setIcon( wwNodeCategoryIcon() );
 		else if ( !def.icon.isEmpty() ) a->setIcon( QIcon( def.icon ) );
 		blockFilterActions->addAction( a );
 	}
 	connect( blockFilterActions, &QActionGroup::triggered, this,
 		[this]( QAction * a ) { setBlockListQuickFilter( a->data().toInt() ); } );
+	blockListFilterMenu->addSeparator();
+	QAction * resetSearchFilters = blockListFilterMenu->addAction( tr( "Reset Search and Filters" ) );
+	resetSearchFilters->setObjectName( QStringLiteral( "BlockListResetSearchFilters" ) );
+	connect( resetSearchFilters, &QAction::triggered, this,
+		[this, searchScopeActions, matchAllTerms]() {
+			blockListSearchFields = SearchBlockNumber | SearchBlockType
+				| SearchBlockName | SearchDisplayedValues;
+			for ( QAction * a : searchScopeActions ) {
+				QSignalBlocker blocker( a );
+				a->setChecked( true );
+			}
+			blockListSearchMatchAllTerms = true;
+			matchAllTerms->setChecked( true );
+			blockListSearch->clear();
+			setBlockListQuickFilter( 0 );
+		} );
 	blockNavigationLayout->addWidget( blockListFilterButton );
+	blockNavigationLayout->addWidget( blockListPin );
+	blockNavigationLayout->addWidget( blockListRelations );
+	QToolButton * blockListOptions = new QToolButton( blockNavigation );
+	blockListOptions->setObjectName( QStringLiteral( "BlockListOptions" ) );
+	blockListOptions->setAutoRaise( true );
+	blockListOptions->setText( QString( QChar( 0x22EF ) ) );
+	blockListOptions->setFixedWidth( 22 );
+	blockListOptions->setToolTip( tr( "More Block List actions" ) );
+	blockListOptions->setAccessibleName( tr( "More Block List actions" ) );
+	blockListOptions->setPopupMode( QToolButton::InstantPopup );
+	QMenu * blockListOptionsMenu = new QMenu( blockListOptions );
+	QAction * goToBlockAction = blockListOptionsMenu->addAction( tr( "Go to Block…" ) );
+	connect( goToBlockAction, &QAction::triggered, this, &NifSkope::goToBlock );
+	blockListOptionsMenu->addSeparator();
+	QAction * expandAllAction = blockListOptionsMenu->addAction( tr( "Expand All" ) );
+	connect( expandAllAction, &QAction::triggered, ui->bExpandAllList, &QPushButton::click );
+	QAction * collapseAllAction = blockListOptionsMenu->addAction( tr( "Collapse All" ) );
+	connect( collapseAllAction, &QAction::triggered, ui->bCollapseAllList, &QPushButton::click );
+	blockListOptions->setMenu( blockListOptionsMenu );
+	blockNavigationLayout->addWidget( blockListOptions );
 	setBlockListQuickFilter( 0 );
 	// the labels can be arbitrarily long — allow them to clip so the dock folds
 	blockListBreadcrumb = new QLabel( ui->dockWidgetContents_4 );
@@ -1294,7 +1392,6 @@ NifSkope::NifSkope( bool background )
 	connect( blockListSearch, &QLineEdit::textChanged, this, [this]() { applyBlockListFilter(); } );
 	connect( blockListBack, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( -1 ); } );
 	connect( blockListForward, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( 1 ); } );
-	connect( goToBlockButton, &QToolButton::clicked, this, &NifSkope::goToBlock );
 	connect( blockListPin, &QToolButton::clicked, this, [this]( bool checked ) {
 		int block = nif ? nif->getBlockNumber( currentNifIndex() ) : -1;
 		if ( block < 0 ) return;
@@ -3813,15 +3910,15 @@ void NifSkope::setBlockListQuickFilter( int id )
 	if ( !blockListFilterButton || !blockListFilterMenu )
 		return;
 	for ( QAction * a : blockListFilterMenu->actions() ) {
-		if ( a->data().toInt() != id )
+		if ( !a->property( "blockCategory" ).toBool() || a->data().toInt() != id )
 			continue;
 		a->setChecked( true );
-		const bool isAll = a->icon().isNull();
+		const bool isAll = id == 0;
 		blockListFilterButton->setIcon( a->icon() );
-		blockListFilterButton->setText( isAll ? tr( "All" ) : QString() );
+		blockListFilterButton->setText( tr( "Filters" ) );
 		blockListFilterButton->setToolButtonStyle(
-			isAll ? Qt::ToolButtonTextOnly : Qt::ToolButtonIconOnly );
-		blockListFilterButton->setToolTip( tr( "Filter: %1" ).arg( a->text() ) );
+			isAll ? Qt::ToolButtonTextOnly : Qt::ToolButtonTextBesideIcon );
+		blockListFilterButton->setToolTip( tr( "Advanced search — category: %1" ).arg( a->text() ) );
 	}
 }
 
@@ -3843,16 +3940,30 @@ void NifSkope::applyBlockListFilter()
 		int block = nif->getBlockNumber( source );
 		if ( block < 0 || !blockMatchesQuickFilter( block ) ) return false;
 		QModelIndex blockIndex = nif->getBlockIndex( block );
-		QString searchable = QStringLiteral( "%1 #%1 %2 %3" ).arg( block )
-			.arg( nif->itemName( blockIndex ), nif->get<QString>( blockIndex, "Name" ) );
-		if ( viewIndex.isValid() ) {
-			searchable += QLatin1Char( ' ' ) + viewIndex.data( Qt::DisplayRole ).toString();
-			if ( viewIndex.sibling( viewIndex.row(), 1 ).isValid() )
-				searchable += QLatin1Char( ' ' ) + viewIndex.sibling( viewIndex.row(), 1 ).data( Qt::DisplayRole ).toString();
+		QStringList searchableFields;
+		if ( blockListSearchFields & SearchBlockNumber )
+			searchableFields << QStringLiteral( "%1 #%1" ).arg( block );
+		if ( blockListSearchFields & SearchBlockType )
+			searchableFields << nif->itemName( blockIndex );
+		if ( blockListSearchFields & SearchBlockName )
+			searchableFields << nif->get<QString>( blockIndex, "Name" );
+		if ( ( blockListSearchFields & SearchDisplayedValues ) && viewIndex.isValid() ) {
+			for ( int column = 1; column < viewIndex.model()->columnCount( viewIndex.parent() ); column++ ) {
+				QModelIndex displayed = viewIndex.sibling( viewIndex.row(), column );
+				if ( displayed.isValid() )
+					searchableFields << displayed.data( Qt::DisplayRole ).toString();
+			}
+		}
+		const QString searchable = searchableFields.join( QLatin1Char( ' ' ) );
+		if ( terms.isEmpty() ) return true;
+		if ( blockListSearchMatchAllTerms ) {
+			for ( const QString & term : terms )
+				if ( !searchable.contains( term, Qt::CaseInsensitive ) ) return false;
+			return true;
 		}
 		for ( const QString & term : terms )
-			if ( !searchable.contains( term, Qt::CaseInsensitive ) ) return false;
-		return true;
+			if ( searchable.contains( term, Qt::CaseInsensitive ) ) return true;
+		return false;
 	};
 
 	if ( list->model() == nif ) {
@@ -4726,7 +4837,9 @@ void NifSkope::updateBlockListNavigation( const QModelIndex & selection )
 		blockListRelations->setEnabled( block >= 0 && !( outgoing.isEmpty() && incoming.isEmpty() ) );
 		// compact "out/in" counts only — the word "Links" cost ~35px of the
 		// dock's minimum width (the tooltip carries the meaning)
-		blockListRelations->setText( tr( "%1/%2" ).arg( outgoing.size() ).arg( incoming.size() ) );
+		blockListRelations->setText( tr( "%1→ %2←" ).arg( outgoing.size() ).arg( incoming.size() ) );
+		blockListRelations->setToolTip( tr( "References for the selected block: %1 outgoing, %2 incoming" )
+			.arg( outgoing.size() ).arg( incoming.size() ) );
 		auto addLinks = [this, menu, &blockLabel]( const QString & title, const QList<int> & links ) {
 			menu->addSection( title );
 			if ( links.isEmpty() ) menu->addAction( tr( "None" ) )->setEnabled( false );
