@@ -489,25 +489,23 @@ public:
 	QVector<WorkspaceTarget> selectedWorkspaceTargets( const QModelIndex & clicked = QModelIndex() );
 	int removeSelectedWorkspaceDocuments( const QModelIndex & clicked = QModelIndex() );
 
-	//! Mark a workspace document as the skeleton the rest snap to; -1 unmarks.
+	//! Mark a workspace document as the optional rig-merge skeleton; -1 unmarks.
 	bool setWorkspaceSkeletonDocument( int backgroundIndex );
 	//! Block count of a workspace document, so a merge into it can be measured.
 	int workspaceBlockCount( int backgroundIndex ) const;
 	//! The model behind a workspace document, so a test can pose it.
 	NifModel * workspaceDocumentModel( int backgroundIndex ) const;
-	//! Splice workspace documents into another one in place (the "Merge Into" menu
-	//! item, addressed by position so it can be scripted).
+	//! Splice workspace documents together in place. A valid marked skeleton in
+	//! this selection becomes the target; otherwise targetIndex remains the target.
 	bool mergeWorkspaceDocumentsInto( int targetIndex, const QList<int> & donorIndices );
 	//! Render the Loaded NIFs list offscreen to a PNG — the row buttons can only
 	//! be checked by looking at them.
 	bool grabLoadedNifsView( const QString & path ) const;
 private:
-	//! Loaded NIFs, 2+ rows selected: offer to merge them into a new file. The
-	//! FIRST row is the target, so the skeleton goes first and dictates position
-	//! for everything spliced in after it. Nothing loaded is modified.
 	//! Multi-row menu: bulk display settings for the selection, then the merges.
 	void showSelectionMenu( const QModelIndex & clicked, const QPoint & globalPos );
-	//! Merge menu. `clicked` names the target the others are spliced into.
+	//! Merge menu. A selected skull-marked skeleton wins; otherwise `clicked`
+	//! names the target the others are spliced into.
 	void mergeLoadedDocumentsMenu( const QPoint & globalPos,
 	                               const QModelIndex & clicked = QModelIndex() );
 	void mergeIntoLoadedDocument( const QList<QPair<QString, class NifModel *>> & picked );

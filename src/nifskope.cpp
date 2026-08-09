@@ -2876,18 +2876,72 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	}
 }
 
-/*! Merge the documents selected in Loaded NIFs into one new file.
+/*! Does this model contain an actual node hierarchy below its file root?
  *
- * The FIRST selected row is the target and every other is spliced into a copy
- * of it — so on a rig the skeleton goes first and dictates position for
- * everything: a bone that exists in both is the skeleton's, and the armour
- * piece's flat copy of it de-duplicates away. Effects land on the node their
- * AttachT names.
- *
- * Nothing loaded is touched. The merge runs on a fresh model built from the
- * target's bytes, so a merge that turns out wrong costs a file on disk and not
- * the documents in the workspace.
+ * A skinned armour piece can contain dozens of flat NiNodes because its skin
+ * lists the bones it references. Those are all direct children of Scene Root;
+ * they are not a skeleton and cannot supply parent transforms for posing. A
+ * real skeleton has NiNode -> NiNode links below that root.
  */
+static bool hasWorkspaceBoneHierarchy( const NifModel * model )
+{
+	if ( !model )
+		return false;
+	const QList<int> roots = model->getRootLinks();
+	for ( int block = 0; block < model->getBlockCount(); block++ ) {
+		const QModelIndex child = model->getBlockIndex( block );
+		if ( !child.isValid() || !model->isNiBlock( child, "NiNode" ) )
+			continue;
+		const int parentBlock = model->getParent( block );
+		if ( parentBlock < 0 || roots.contains( parentBlock ) )
+			continue;
+		const QModelIndex parent = model->getBlockIndex( parentBlock );
+		if ( parent.isValid() && model->isNiBlock( parent, "NiNode" ) )
+			return true;
+	}
+	return false;
+}
+
+/*! Apply the optional skull marker to one merge selection.
+ *
+ * No selected marker means an ordinary clothes/prop merge: the caller's first
+ * row remains the target. If the marked model is selected, it is an explicit
+ * rig merge and becomes the target regardless of which row opened the menu.
+ */
+static QString prepareWorkspaceMergeSelection(
+	QList<QPair<QString, NifModel *>> & picked, NifModel * markedSkeleton,
+	bool * usesMarkedSkeleton = nullptr )
+{
+	if ( usesMarkedSkeleton )
+		*usesMarkedSkeleton = false;
+	if ( !markedSkeleton )
+		return QString();
+
+	int markedIndex = -1;
+	for ( int i = 0; i < picked.size(); i++ )
+		if ( picked.at( i ).second == markedSkeleton ) {
+			markedIndex = i;
+			break;
+		}
+	// A marker elsewhere in Loaded NIFs must not turn an unrelated clothes merge
+	// into a rig merge.
+	if ( markedIndex < 0 )
+		return QString();
+	if ( !hasWorkspaceBoneHierarchy( markedSkeleton ) )
+		return QObject::tr(
+			"%1 is marked as the skeleton, but it has no bone-to-bone hierarchy. "
+			"A frame or clothing NIF only carries flat skin references; marking it "
+			"does not turn it into a skeleton.\n\nLoad and mark the game's "
+			"CharacterAssets/skeleton.nif, or unmark %1 to make an ordinary merge." )
+			.arg( picked.at( markedIndex ).first );
+
+	if ( markedIndex > 0 )
+		picked.move( markedIndex, 0 );
+	if ( usesMarkedSkeleton )
+		*usesMarkedSkeleton = true;
+	return QString();
+}
+
 /*! Splice the rest of the selection into the first one, in the live model.
  *
  * The difference from "merge into a new NIF" is that this changes a document you
@@ -3028,19 +3082,28 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelI
 	if ( picked.size() < 2 )
 		return;
 
-	/* The row you right-clicked is the target.
+	bool usesMarkedSkeleton = false;
+	const QString skeletonError = prepareWorkspaceMergeSelection( picked,
+		ogl ? ogl->workspaceSkeleton() : nullptr, &usesMarkedSkeleton );
+	if ( !skeletonError.isEmpty() ) {
+		QMessageBox::warning( this, tr( "Merge Skeleton" ), skeletonError );
+		return;
+	}
+
+	/* For an ordinary merge, the row you right-clicked is the target.
 	 *
 	 * It used to be whichever selected row happened to come first, mentioned only
 	 * in a tooltip — so which file absorbed the others depended on selection order
 	 * you cannot see. Clicking one of several selected rows is an unambiguous way to
-	 * say which, so the clicked row is moved to the front.
+	 * say which, so the clicked row is moved to the front. A selected, valid skull
+	 * marker is more explicit still and has already been moved to the front above.
 	 */
 	NifModel * clickedNif = nullptr;
 	if ( NifSkope * doc = documentFromBrowserIndex( clicked ) )
 		clickedNif = doc->nif;
 	else if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( clicked ) )
 		clickedNif = bg->nif;
-	if ( clickedNif ) {
+	if ( clickedNif && !usesMarkedSkeleton ) {
 		for ( int i = 1; i < picked.size(); i++ )
 			if ( picked.at( i ).second == clickedNif ) {
 				picked.move( i, 0 );
@@ -3050,7 +3113,12 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelI
 	const QString targetName = picked.first().first;
 
 	QMenu menu( this );
-	menu.addSection( tr( "%1 documents selected" ).arg( picked.size() ) );
+	if ( usesMarkedSkeleton )
+		menu.addSection( skeletonMarkIcon(),
+			tr( "%1 selected · Skeleton target: %2" ).arg( picked.size() ).arg( targetName ) );
+	else
+		menu.addSection( tr( "%1 documents selected · Target: %2" )
+			.arg( picked.size() ).arg( targetName ) );
 	// In place first: it is the one that needs no save dialog and leaves the result
 	// loaded, which is what "combine these" usually means in a workspace.
 	QAction * doInPlace = menu.addAction( tr( "Merge %1 Selected Into \"%2\"" )
@@ -8138,6 +8206,11 @@ bool NifSkope::mergeWorkspaceDocumentsInto( int targetIndex, const QList<int> & 
 		picked.append( { donor->displayName(), donor->nif } );
 	}
 	if ( picked.size() < 2 )
+		return false;
+	// Exercise the same target policy as the menu: a selected, valid skull marker
+	// wins; no selected marker leaves this as an ordinary target-first merge.
+	if ( !prepareWorkspaceMergeSelection( picked,
+			ogl ? ogl->workspaceSkeleton() : nullptr ).isEmpty() )
 		return false;
 	mergeIntoLoadedDocument( picked );
 	return true;

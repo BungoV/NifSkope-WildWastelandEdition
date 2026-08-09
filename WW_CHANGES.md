@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09p — Skeleton-aware merges without requiring a skeleton
+
+Loaded-NIF merging now treats the skull marker as optional intent, not a
+universal prerequisite. With no marked skeleton in the merge selection,
+clothing, props and other ordinary selections merge exactly as before: the row
+that opened the menu is the target. A skeleton marked elsewhere in Loaded NIFs
+does not interfere with that unrelated merge.
+
+When the skull-marked model is itself selected, it is now an explicit rig merge:
+the marked skeleton becomes the target regardless of which clothing row opened
+the menu. Before anything changes, NifSkope verifies that it contains a real
+NiNode-to-NiNode hierarchy below the file root. A frame or skinned clothing NIF
+whose bone references are all flat root children is refused with an explanation
+and the choice to load the game's `CharacterAssets/skeleton.nif` or unmark it for
+an ordinary merge. This prevents a Power Armor frame from silently becoming the
+target merely because its skull icon was lit.
+
+The supplied `AegisTest.nif` was structurally valid — all 38 shapes, skin counts,
+bone-index ranges and segments verified — but its first selected X-01 arm had
+become the merge target while the marked PA frame was ignored. The new policy
+addresses that exact route without breaking skeleton-free clothing merges.
+
+The release build is green. The new real-corpus
+`workspace_skeleton_target.sh` harness passes **34 checks, 0 failures** using two
+X-01 arm meshes and the Fallout 4 Power Armor skeleton; it proves the no-marker,
+marker-outside-selection, flat-marker refusal and hierarchical-skeleton target
+paths. The full `loaded_nifs.sh` regression remains **95 checks, 0 failures**.
+
 ## 2026-08-09o — Make Primary reloads the scene, not NifSkope
 
 **Loaded NIFs → Make Primary / Edit** no longer constructs a second complete

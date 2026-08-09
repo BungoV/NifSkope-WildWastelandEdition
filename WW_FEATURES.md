@@ -172,7 +172,9 @@ predecessor:
 - Workspace-root isolation and Save/Discard/Cancel protection for generated or
   edited in-memory rows, including Reload, Remove, Revert and workspace close.
 - **Merge Into** — merge NIFs into one poseable file, honouring `AttachT` so
-  ArtObjects land on the right limb. Verified to carry everything.
+  ArtObjects land on the right limb. The skull marker is optional for ordinary
+  clothing/prop merges; when its model is selected it is hierarchy-validated
+  and becomes the rig target automatically. Verified to carry everything.
 - Combined preview and donor selection across the whole workspace group.
 
 ## 9. Materials and rendering

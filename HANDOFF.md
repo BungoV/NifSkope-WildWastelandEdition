@@ -10,7 +10,7 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 branch `main`, `origin` is the fork — never push upstream.)
 
 Updated **2026-08-09**. Edition **0.3.1**. Build green; latest closed change is
-the in-place Loaded-NIF primary swap described below.
+the optional skeleton-aware Loaded-NIF merge described below.
 
 ### Window-state diagnostic cleanup safety
 
@@ -27,6 +27,16 @@ only snapshot without proving the import succeeded.
 
 One structural UI pass, closed end to end: the left editor is now one permanent
 three-mode column instead of four tabified docks.
+
+**The skull marker is optional for Loaded-NIF merges.** Clothing and props still
+merge normally with no skeleton selected, using the clicked row as target; a
+marked skeleton elsewhere in Loaded NIFs does not interfere. If the marked model
+is included in the selection, it is intentional rig-merge input and becomes the
+target automatically. NifSkope first requires a real NiNode hierarchy below the
+file root, so flat bone-reference nodes in a frame or clothing NIF are refused
+with a useful explanation rather than mistaken for a skeleton. The real-corpus
+`workspace_skeleton_target.sh` passes **34/34** across all four cases, and
+`loaded_nifs.sh` remains **95/95**.
 
 **Loaded NIFs → Make Primary / Edit no longer reloads the application window.**
 The old route created a second hidden `NifSkope`, restored its complete UI, then

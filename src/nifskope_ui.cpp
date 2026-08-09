@@ -3963,8 +3963,6 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * means the real code path runs, dialog included.
 					 */
 					if ( added >= 2 && qEnvironmentVariableIsSet( "WW_WORKSPACE_MERGE" ) ) {
-						const int targetBefore = skope->workspaceBlockCount( 0 );
-						const int donorBefore = skope->workspaceBlockCount( 1 );
 						auto * dismiss = new QTimer( skope );
 						QObject::connect( dismiss, &QTimer::timeout, skope, []() {
 							if ( auto * mb = qobject_cast<QMessageBox *>(
@@ -3973,20 +3971,93 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									mb->buttons().first()->click();
 							}
 						} );
-						dismiss->start( 100 );
-						const bool merged = skope->mergeWorkspaceDocumentsInto( 0, { 1 } );
-						dismiss->stop();
-						settle( 400 );
-						const int targetAfter = skope->workspaceBlockCount( 0 );
-						const int donorAfter = skope->workspaceBlockCount( 1 );
-						log << "merge into: target " << targetBefore << " -> " << targetAfter
-							<< ", donor " << donorBefore << " -> " << donorAfter << "\n";
-						check( "the in-place merge reported success", merged );
-						check( "the target absorbed the donor", targetAfter > targetBefore );
-						check( "the donor was left alone", donorAfter == donorBefore );
-						// Dedupe means the sum is an upper bound, never a target.
-						check( "the target did not exceed target + donor",
-							targetAfter <= targetBefore + donorBefore );
+						auto merge = [&]( int target, const QList<int> & donors ) {
+							dismiss->start( 100 );
+							const bool result = skope->mergeWorkspaceDocumentsInto( target, donors );
+							dismiss->stop();
+							settle( 400 );
+							return result;
+						};
+						auto undoMerge = [&]( int row, int expectedBlocks ) {
+							NifModel * model = skope->workspaceDocumentModel( row );
+							if ( model && model->undoStack && model->undoStack->canUndo() )
+								model->undoStack->undo();
+							settle( 250 );
+							const bool restored = skope->workspaceBlockCount( row ) == expectedBlocks;
+							if ( model && model->undoStack )
+								model->undoStack->setClean();
+							return restored;
+						};
+
+						if ( qEnvironmentVariableIsSet( "WW_WORKSPACE_SKELETON_CONTRACT" ) ) {
+							check( "the skeleton contract fixture has two clothes and one skeleton",
+								added >= 3 );
+							if ( added >= 3 ) {
+								const int clothesBefore = skope->workspaceBlockCount( 0 );
+								const int donorBefore = skope->workspaceBlockCount( 1 );
+								const int skeletonBefore = skope->workspaceBlockCount( 2 );
+
+								check( "ordinary clothes merge needs no skeleton marker",
+									skope->setWorkspaceSkeletonDocument( -1 ) && merge( 0, { 1 } ) );
+								check( "ordinary clothes merge keeps the clicked target",
+									skope->workspaceBlockCount( 0 ) > clothesBefore );
+								check( "ordinary clothes merge leaves its donor alone",
+									skope->workspaceBlockCount( 1 ) == donorBefore );
+								check( "ordinary clothes merge never touches an unselected skeleton",
+									skope->workspaceBlockCount( 2 ) == skeletonBefore );
+								check( "ordinary clothes merge undoes back to its exact target",
+									undoMerge( 0, clothesBefore ) );
+
+								check( "the real skeleton can stay marked outside an ordinary merge",
+									skope->setWorkspaceSkeletonDocument( 2 ) && merge( 0, { 1 } ) );
+								check( "an unselected skeleton marker does not steal the target",
+									skope->workspaceBlockCount( 0 ) > clothesBefore
+									&& skope->workspaceBlockCount( 2 ) == skeletonBefore );
+								check( "the marker-outside-selection merge also undoes cleanly",
+									undoMerge( 0, clothesBefore ) );
+
+								check( "a flat clothing model can be marked for validation",
+									skope->setWorkspaceSkeletonDocument( 0 ) );
+								check( "a selected flat marker is refused as a rig skeleton",
+									!merge( 0, { 1 } ) );
+								check( "refusing the flat marker changes no document",
+									skope->workspaceBlockCount( 0 ) == clothesBefore
+									&& skope->workspaceBlockCount( 1 ) == donorBefore
+									&& skope->workspaceBlockCount( 2 ) == skeletonBefore );
+
+								check( "the hierarchical skeleton can be marked",
+									skope->setWorkspaceSkeletonDocument( 2 ) );
+								check( "a selected real skeleton starts the rig merge",
+									merge( 0, { 1, 2 } ) );
+								check( "the marked skeleton overrides the requested clothes target",
+									skope->workspaceBlockCount( 2 ) > skeletonBefore );
+								check( "both clothing documents remain untouched in the rig merge",
+									skope->workspaceBlockCount( 0 ) == clothesBefore
+									&& skope->workspaceBlockCount( 1 ) == donorBefore );
+								if ( NifModel * model = skope->workspaceDocumentModel( 2 );
+										model && model->undoStack )
+									model->undoStack->setClean();
+								check( "the skeleton marker can be cleared",
+									skope->setWorkspaceSkeletonDocument( -1 ) );
+							}
+						} else {
+							const int targetBefore = skope->workspaceBlockCount( 0 );
+							const int donorBefore = skope->workspaceBlockCount( 1 );
+							const bool merged = merge( 0, { 1 } );
+							const int targetAfter = skope->workspaceBlockCount( 0 );
+							const int donorAfter = skope->workspaceBlockCount( 1 );
+							log << "merge into: target " << targetBefore << " -> " << targetAfter
+								<< ", donor " << donorBefore << " -> " << donorAfter << "\n";
+							check( "the in-place merge reported success", merged );
+							check( "the target absorbed the donor", targetAfter > targetBefore );
+							check( "the donor was left alone", donorAfter == donorBefore );
+							// Dedupe means the sum is an upper bound, never a target.
+							check( "the target did not exceed target + donor",
+								targetAfter <= targetBefore + donorBefore );
+							if ( NifModel * model = skope->workspaceDocumentModel( 0 );
+									model && model->undoStack )
+								model->undoStack->setClean();
+						}
 						check( "merging into a document that is not there fails",
 							!skope->mergeWorkspaceDocumentsInto( 0, { 99 } ) );
 						check( "merging a document into itself fails",
