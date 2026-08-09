@@ -133,6 +133,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QScrollArea>
 #include <QSlider>
 #include <QSplitter>
+#include <QStackedWidget>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QUndoStack>
 #include <QVBoxLayout>
@@ -6364,25 +6366,42 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					d->hide();
 			QApplication::processEvents();
 
-			/* DOCKS MUST FOLD AND UNFOLD. ListDock and TreeDock used to impose a
-			 * 400x240 floor on their whole tab groups, including NIF Browser while
-			 * those two docks were not even the active tabs. */
-			check( "core document docks have no hard 400-pixel width floor",
-				skope->dList->minimumWidth() < 400 && skope->dTree->minimumWidth() < 400
-					&& skope->dBrowser->minimumWidth() < 400 );
+			/* THE LEFT COLUMN IS ONE DOCK. Its three modes own persistent pages;
+			 * there is no tabified legacy dock graph for restoreState to recreate. */
+			check( "the core editor is one permanent left dock",
+				skope->dLeft && skope->dLeft->objectName() == QStringLiteral( "LeftColumnDock" )
+					&& !skope->findChild<QDockWidget *>( QStringLiteral( "ListDock" ) )
+					&& !skope->findChild<QDockWidget *>( QStringLiteral( "TreeDock" ) )
+					&& !skope->findChild<QDockWidget *>( QStringLiteral( "HeaderDock" ) )
+					&& !skope->findChild<QDockWidget *>( QStringLiteral( "BrowserDock" ) ) );
+			check( "the left dock has no hard 400-pixel width floor",
+				skope->dLeft && skope->dLeft->minimumWidth() < 400 );
 			skope->showNormal();
 			skope->resize( 1280, 900 );
-			skope->dBrowser->show();
-			skope->dBrowser->raise();
-			skope->dTree->show();
-			skope->dTree->raise();
+			skope->dLeft->show();
+			skope->setLeftColumnMode( NifSkope::LeftNifs );
 			QApplication::processEvents();
-			skope->resizeDocks( { skope->dBrowser }, { 150 }, Qt::Horizontal );
+			check( "NIF mode pairs browser above Loaded NIFs",
+				skope->leftColumnStack->currentWidget() == skope->nifWorkspaceSplitter
+					&& skope->nifWorkspaceSplitter->widget( 0 )->isAncestorOf( skope->bsaView )
+					&& skope->nifWorkspaceSplitter->widget( 1 )->isAncestorOf( skope->loadedNifsView ) );
+			skope->setLeftColumnMode( NifSkope::LeftBlocks );
 			QApplication::processEvents();
-			const int folded = skope->dBrowser->width();
-			skope->resizeDocks( { skope->dBrowser }, { 560 }, Qt::Horizontal );
+			check( "Blocks mode pairs Block List above Block Details",
+				skope->leftColumnStack->currentWidget() == skope->blockWorkspaceSplitter
+					&& skope->blockWorkspaceSplitter->widget( 0 )->isAncestorOf( skope->list )
+					&& skope->blockWorkspaceSplitter->widget( 1 )->isAncestorOf( skope->tree ) );
+			skope->setLeftColumnMode( NifSkope::LeftHeader );
 			QApplication::processEvents();
-			const int unfolded = skope->dBrowser->width();
+			check( "Header mode uses the full left page",
+				skope->leftColumnStack->currentWidget()->isAncestorOf( skope->header ) );
+			skope->setLeftColumnMode( NifSkope::LeftNifs );
+			skope->resizeDocks( { skope->dLeft }, { 150 }, Qt::Horizontal );
+			QApplication::processEvents();
+			const int folded = skope->dLeft->width();
+			skope->resizeDocks( { skope->dLeft }, { 560 }, Qt::Horizontal );
+			QApplication::processEvents();
+			const int unfolded = skope->dLeft->width();
 			log << "core dock horizontal range: " << folded << " -> " << unfolded << "\n";
 			check( "the left panel can fold and unfold across a useful range",
 				folded <= 180 && unfolded >= folded + 250 );
@@ -7864,6 +7883,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					else librarySettings.remove( libraryKey );
 					QDir( collisionLibrary ).removeRecursively();
 					NifModel * nif = skope->getNifModel();
+					// This harness creates collision from the selected Block List row.
+					// Left-column mode is persisted now, so do not inherit NIF/Header
+					// mode and then wait forever on the legitimate no-selection modal.
+					skope->setLeftColumnMode( NifSkope::LeftBlocks );
 					// Picking a shape from the menu CREATES one, so the harness has
 					// to be pointing at something it can be created from -- with
 					// nothing selected the spell says so on a modal and the run stops
@@ -8200,9 +8223,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( propRow >= 0 )
 						layerField->setCurrentIndex( propRow );
 					QApplication::processEvents();
+					log << "before Create: left mode " << int( skope->leftColumnMode )
+						<< ", current block "
+						<< nif->getBlockNumber( skope->currentNifIndex() ) << "\n";
+					bool unexpectedCreateModal = false;
+					QString unexpectedCreateText;
+					QTimer::singleShot( 800, skope, [&]() {
+						if ( auto * box = qobject_cast<QMessageBox *>(
+							QApplication::activeModalWidget() ) ) {
+							unexpectedCreateModal = true;
+							unexpectedCreateText = box->text();
+							box->reject();
+						}
+					} );
 					for ( QPushButton * b : popup->findChildren<QPushButton *>() )
 						if ( b->text() == QLatin1String( "Create" ) ) { b->click(); break; }
 					QApplication::processEvents();
+					if ( unexpectedCreateModal )
+						log << "unexpected Create modal: " << unexpectedCreateText << "\n";
+					check( "creating a body does not stop on an unexpected modal",
+						!unexpectedCreateModal );
 
 					float bodyMass = -1.0f;
 					quint32 bodyLayer = 0;
@@ -8763,6 +8803,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& skope->workspaceDocumentCount() == was + 1 );
 					if ( skope->workspaceDocumentCount() != was + 1 ) break;
 					const int row = skope->workspaceDocumentCount() - 1;
+					skope->dLeft->show();
+					skope->setLeftColumnMode( NifSkope::LeftNifs );
 					QApplication::processEvents();
 
 					/* THE COMPACT HEADER AND BOTH NATIVE-DRAG GATES.
@@ -8793,7 +8835,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const QString browserShot = QApplication::applicationDirPath()
 						+ QStringLiteral( "/ww_nifbrowser_test.png" );
 					check( "the compact NIF Browser renders",
-						skope->ui->BrowserDock->grab().save( browserShot ) );
+						skope->dLeft->grab().save( browserShot ) );
 					check( "both panes expose the two-way copy-drag contract",
 						skope->bsaView->dragEnabled() && skope->bsaView->acceptDrops()
 							&& skope->bsaView->dragDropMode() == QAbstractItemView::DragDrop
@@ -8806,18 +8848,53 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								skope->loadedNifsModel->rowCount() - 1, 0 ).flags()
 								& Qt::ItemIsDragEnabled ) );
 
-					check( "Loaded NIFs remains in its stable independent browser pane",
-						skope->findChild<QSplitter *>( QStringLiteral( "NifBrowserSplitter" ) ) );
+					check( "the top selector exposes Blocks, NIFs and Header modes",
+						skope->leftColumnSelector && skope->leftColumnSelector->count() == 3
+							&& skope->leftColumnSelector->tabText( 0 ) == QStringLiteral( "Blocks" )
+							&& skope->leftColumnSelector->tabText( 1 ) == QStringLiteral( "NIFs" )
+							&& skope->leftColumnSelector->tabText( 2 ) == QStringLiteral( "Header" ) );
+					check( "NIF Browser is above Loaded NIFs in its own mode",
+						skope->leftColumnStack->currentWidget() == skope->nifWorkspaceSplitter
+							&& skope->nifWorkspaceSplitter->widget( 0 )->isAncestorOf( skope->bsaView )
+							&& skope->nifWorkspaceSplitter->widget( 1 )->isAncestorOf(
+								skope->loadedNifsView ) );
+					bool modeShots = true;
+					for ( int mode = NifSkope::LeftBlocks; mode <= NifSkope::LeftHeader; mode++ ) {
+						skope->setLeftColumnMode( NifSkope::LeftColumnMode( mode ) );
+						QApplication::processEvents();
+						modeShots &= skope->dLeft->grab().save( QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_left_mode_%1.png" ).arg( mode ) );
+					}
+					skope->setLeftColumnMode( NifSkope::LeftNifs );
+					QApplication::processEvents();
+					check( "all three left-editor modes render", modeShots );
 					check( "Loaded NIFs has its own search field",
 						skope->loadedNifsFilter
 							&& !skope->loadedNifsFilter->placeholderText().isEmpty() );
 					check( "Loaded NIFs exposes an as-needed vertical scrollbar",
 						skope->loadedNifsView->verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded );
-					if ( skope->loadedNifsFilter ) {
-						skope->dBrowser->show();
-						skope->dBrowser->raise();
-						QApplication::processEvents();
+					if ( skope->loadedNifsFilter ) QApplication::processEvents();
+
+					/* MODE SWITCHING IS PRESENTATION ONLY. Exercise every page repeatedly
+					 * and prove the live Loaded model/document did not get recreated. */
+					QAbstractItemModel * loadedModelIdentity = skope->loadedNifsView->model();
+					NifModel * loadedDocumentIdentity = skope->workspaceDocumentModel( row );
+					const int loadedCountBeforeModes = skope->workspaceDocumentCount();
+					for ( int i = 0; i < 10; i++ ) {
+						skope->setLeftColumnMode( NifSkope::LeftBlocks );
+						skope->setLeftColumnMode( NifSkope::LeftHeader );
+						skope->setLeftColumnMode( NifSkope::LeftNifs );
 					}
+					QApplication::processEvents();
+					check( "switching modes preserves every Loaded NIF and its live model",
+						skope->workspaceDocumentCount() == loadedCountBeforeModes
+							&& skope->loadedNifsView->model() == loadedModelIdentity
+							&& skope->workspaceDocumentModel( row ) == loadedDocumentIdentity );
+					check( "Blocks and Header remain accessible after returning from NIF mode",
+						skope->blockWorkspaceSplitter->widget( 0 )->isAncestorOf( skope->list )
+							&& skope->blockWorkspaceSplitter->widget( 1 )->isAncestorOf( skope->tree )
+							&& skope->leftColumnStack->widget( NifSkope::LeftHeader )
+								->isAncestorOf( skope->header ) );
 
 					/* SEARCH HIDES ROWS, NEVER RE-MAPS THEM. Direct row hiding is
 					 * deliberate: drag payload and workspace actions retain exact model
@@ -9952,10 +10029,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * the layout has to satisfy is not negotiable.
 						 */
 						skope->resize( qMax( skope->width(), 1280 ), qMax( skope->height(), 900 ) );
-						if ( skope->dList ) {
-							skope->dList->setMinimumHeight( 420 );
-							skope->dList->show();
-						}
+						skope->setLeftColumnMode( NifSkope::LeftBlocks );
+						if ( skope->dLeft ) skope->dLeft->show();
+						if ( skope->ui->dockWidgetContents_4 )
+							skope->ui->dockWidgetContents_4->setMinimumHeight( 420 );
 						QApplication::processEvents();
 					}
 					log << "block list viewport: " << list->viewport()->width() << "x"
@@ -10022,12 +10099,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * inside the viewport — so a row laid out below a short dock
 						 * produced a perfectly plausible rect at y=149 that resolved
 						 * to no index at all. Scrolling it to the top is what makes
-						 * the two agree regardless of how tall the dock is.
+						 * the two agree regardless of how tall the dock is. A deliberately
+						 * folded dock may clip the row horizontally, so aim at the centre of
+						 * the visible intersection rather than requiring its full width.
 						 */
 						list->scrollTo( idx, QAbstractItemView::PositionAtTop );
 						QApplication::processEvents();
 						const QRect r = list->visualRect( idx );
-						if ( !r.isValid() || r.isEmpty() || !list->viewport()->rect().contains( r.center() ) ) {
+						const QRect visible = r.intersected( list->viewport()->rect() );
+						if ( !r.isValid() || r.isEmpty() || visible.isEmpty() ) {
 							log << "    [row] block " << block << " row " << idx.row()
 								<< " is not inside the viewport (rect " << r.x() << "," << r.y()
 								<< " " << r.width() << "x" << r.height() << ", viewport "
@@ -10035,11 +10115,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							log.flush();
 							return QPoint( -1, -1 );
 						}
+						const int x = visible.center().x();
 						if ( edge == 0 )
-							return r.center();
+							return QPoint( x, r.center().y() );
 						// 1px inside the edge, which is inside the reorder band
 						// (qBound(2, h/4, 6) px) for any sane row height
-						return QPoint( r.center().x(), edge < 0 ? r.top() + 1 : r.bottom() - 1 );
+						return QPoint( x, edge < 0 ? r.top() + 1 : r.bottom() - 1 );
 					};
 					auto rowPos = [&]( qint32 block ) { return rowPoint( block, 0 ); };
 
@@ -11095,6 +11176,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					{
 						NifSkope * second = NifSkope::createWindow();
+						// The active left-editor mode is now persisted per window. This
+						// scenario measures TWO block lists, so make that precondition
+						// explicit instead of inheriting NIF/Header mode from settings.
+						skope->setLeftColumnMode( NifSkope::LeftBlocks );
+						if ( second ) second->setLeftColumnMode( NifSkope::LeftBlocks );
 						QApplication::processEvents();
 						if ( !second || !second->list ) {
 							log << "could not open a second document\n"; fails++; checks++; break;
@@ -16541,7 +16627,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
 			};
 			do {
-				if ( skope->dBrowser ) { skope->dBrowser->show(); skope->dBrowser->raise(); }
+				if ( skope->dLeft ) skope->dLeft->show();
+				skope->setLeftColumnMode( NifSkope::LeftNifs );
 				QApplication::processEvents();
 
 				log << "browsing: " << browseTarget << "\n";
@@ -16611,10 +16698,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				QFile logf( QApplication::applicationDirPath() + "/ww_browser_test.log" );
 				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
 				QTextStream log( &logf );
-				// The browser dock starts tabified behind the Header dock, so the
-				// load-time populate is deferred by the visibility gate. Show the
-				// dock and populate directly to build the tree under test.
-				if ( skope->dBrowser ) { skope->dBrowser->show(); skope->dBrowser->raise(); }
+				// The configured scan is deferred outside NIF mode. Select that mode
+				// explicitly so this harness measures a populated visible browser.
+				if ( skope->dLeft ) skope->dLeft->show();
+				skope->setLeftColumnMode( NifSkope::LeftNifs );
 				skope->populateConfiguredNifBrowser();
 				QTreeView * view = skope->bsaView;
 				QAbstractItemModel * m = view ? view->model() : nullptr;
@@ -17002,8 +17089,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								<< ", filter '"
 								<< ( skope->blockDetailsSearch ? skope->blockDetailsSearch->text()
 									: QString() )
-								<< "', block list dock visible "
-								<< int( skope->dList && skope->dList->isVisible() ) << "\n";
+								<< "', Blocks mode active "
+								<< int( skope->leftColumnIs( NifSkope::LeftBlocks ) ) << "\n";
 
 							/* AND THE SEARCH BOX STILL FILTERS.
 							 *
@@ -17474,20 +17561,134 @@ void NifSkope::initActions()
 	connect( tree, &NifTreeView::sigCurrentIndexChanged, inspect, &InspectView::updateSelection );
 }
 
+void NifSkope::setLeftColumnMode( LeftColumnMode mode )
+{
+	if ( mode < LeftBlocks || mode > LeftHeader )
+		mode = LeftBlocks;
+	leftColumnMode = mode;
+	if ( leftColumnStack )
+		leftColumnStack->setCurrentIndex( int( mode ) );
+	if ( leftColumnSelector && leftColumnSelector->currentIndex() != int( mode ) ) {
+		QSignalBlocker blocker( leftColumnSelector );
+		leftColumnSelector->setCurrentIndex( int( mode ) );
+	}
+	if ( mode == LeftNifs && nifBrowserPopulatePending )
+		QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
+}
+
 void NifSkope::initDockWidgets()
 {
 	dRefr = ui->RefrDock;
-	dList = ui->ListDock;
-	dTree = ui->TreeDock;
-	dHeader = ui->HeaderDock;
 	dInsp = ui->InspectDock;
 	dKfm = ui->KfmDock;
-	dBrowser = ui->BrowserDock;
 
-	// A populate requested while the NIF Browser was hidden (closed dock or a
-	// background tab) was deferred; replay it when the dock actually shows.
-	connect( dBrowser, &QDockWidget::visibilityChanged, this, [this]( bool visible ) {
-		if ( visible && nifBrowserPopulatePending )
+	/* ONE PERMANENT LEFT EDITOR, THREE MODES.
+	 *
+	 * setupUi() still constructs the four upstream docks so their mature panel
+	 * contents do not have to be duplicated. Before restoreUi() can put any of
+	 * them into QMainWindow's saved dock graph, take those plain content widgets,
+	 * delete the empty legacy docks, and place the contents in one stable host:
+	 *
+	 *   Blocks      Block List / Block Details
+	 *   NIFs        NIF Browser / Loaded NIFs
+	 *   Header      Header alone
+	 *
+	 * From this point onward switching is only QStackedWidget::setCurrentIndex.
+	 * No live view, model or unsaved document is ever reparented again.
+	 */
+	QDockWidget * legacyList = ui->ListDock;
+	QDockWidget * legacyTree = ui->TreeDock;
+	QDockWidget * legacyHeader = ui->HeaderDock;
+	QDockWidget * legacyBrowser = ui->BrowserDock;
+	auto takeContents = []( QDockWidget * dock ) -> QWidget * {
+		QWidget * contents = dock ? dock->widget() : nullptr;
+		if ( dock ) dock->setWidget( nullptr );
+		if ( contents ) contents->setParent( nullptr );
+		return contents;
+	};
+	QWidget * listContents = takeContents( legacyList );
+	QWidget * treeContents = takeContents( legacyTree );
+	QWidget * headerContents = takeContents( legacyHeader );
+	QWidget * browserContents = takeContents( legacyBrowser );
+
+	for ( QDockWidget * old : { legacyList, legacyTree, legacyHeader, legacyBrowser } ) {
+		removeDockWidget( old );
+		delete old;
+	}
+	// setupUi() owns only pointer aliases here; clear those aliases now that the
+	// empty legacy dock shells are gone, so no later code can accidentally use a
+	// dangling QDockWidget while their content widgets live on in the new host.
+	ui->ListDock = nullptr;
+	ui->TreeDock = nullptr;
+	ui->HeaderDock = nullptr;
+	ui->BrowserDock = nullptr;
+	dLeft = new QDockWidget( tr( "Left Editor" ), this );
+	dLeft->setObjectName( QStringLiteral( "LeftColumnDock" ) );
+	dLeft->setAllowedAreas( Qt::LeftDockWidgetArea );
+	dLeft->setFeatures( QDockWidget::NoDockWidgetFeatures );
+	auto * hiddenTitle = new QWidget( dLeft );
+	hiddenTitle->setFixedHeight( 0 );
+	dLeft->setTitleBarWidget( hiddenTitle );
+
+	auto * host = new QWidget( dLeft );
+	host->setObjectName( QStringLiteral( "LeftColumnHost" ) );
+	auto * hostLayout = new QVBoxLayout( host );
+	hostLayout->setContentsMargins( 0, 0, 0, 0 );
+	hostLayout->setSpacing( 0 );
+	leftColumnSelector = new QTabBar( host );
+	leftColumnSelector->setObjectName( QStringLiteral( "LeftColumnModeSelector" ) );
+	leftColumnSelector->setDocumentMode( true );
+	leftColumnSelector->setDrawBase( false );
+	leftColumnSelector->setExpanding( false );
+	leftColumnSelector->setUsesScrollButtons( false );
+	leftColumnSelector->addTab( tr( "Blocks" ) );
+	leftColumnSelector->addTab( tr( "NIFs" ) );
+	leftColumnSelector->addTab( tr( "Header" ) );
+	leftColumnSelector->setAccessibleName( tr( "Left editor mode" ) );
+	hostLayout->addWidget( leftColumnSelector, 0 );
+
+	leftColumnStack = new QStackedWidget( host );
+	leftColumnStack->setObjectName( QStringLiteral( "LeftColumnStack" ) );
+	blockWorkspaceSplitter = new QSplitter( Qt::Vertical, leftColumnStack );
+	blockWorkspaceSplitter->setObjectName( QStringLiteral( "BlockWorkspaceSplitter" ) );
+	blockWorkspaceSplitter->setChildrenCollapsible( false );
+	blockWorkspaceSplitter->addWidget( listContents );
+	blockWorkspaceSplitter->addWidget( treeContents );
+	blockWorkspaceSplitter->setStretchFactor( 0, 3 );
+	blockWorkspaceSplitter->setStretchFactor( 1, 2 );
+	blockWorkspaceSplitter->setSizes( { 430, 300 } );
+
+	nifWorkspaceSplitter = new QSplitter( Qt::Vertical, leftColumnStack );
+	nifWorkspaceSplitter->setObjectName( QStringLiteral( "NifBrowserSplitter" ) );
+	nifWorkspaceSplitter->setChildrenCollapsible( false );
+	nifWorkspaceSplitter->addWidget( browserContents );
+	nifWorkspaceSplitter->addWidget( loadedNifsPane );
+	nifWorkspaceSplitter->setStretchFactor( 0, 5 );
+	nifWorkspaceSplitter->setStretchFactor( 1, 2 );
+	nifWorkspaceSplitter->setSizes( { 500, 180 } );
+
+	headerContents->setObjectName( QStringLiteral( "LeftHeaderPage" ) );
+	leftColumnStack->addWidget( blockWorkspaceSplitter );
+	leftColumnStack->addWidget( nifWorkspaceSplitter );
+	leftColumnStack->addWidget( headerContents );
+	// QDockWidget::setWidget(nullptr) leaves its former contents explicitly
+	// hidden. Clear that legacy state now; QStackedWidget, not those obsolete
+	// docks, owns which complete page is visible from here on.
+	for ( QWidget * pageContents : { listContents, treeContents, browserContents,
+		headerContents, loadedNifsPane } )
+		pageContents->show();
+	hostLayout->addWidget( leftColumnStack, 1 );
+	dLeft->setWidget( host );
+	addDockWidget( Qt::LeftDockWidgetArea, dLeft );
+	setLeftColumnMode( LeftBlocks );
+	connect( leftColumnSelector, &QTabBar::currentChanged, this, [this]( int mode ) {
+		setLeftColumnMode( LeftColumnMode( mode ) );
+	} );
+
+	// A populate requested while the left editor was hidden or in another mode
+	// is deferred; replay it when NIF mode can actually display the result.
+	connect( dLeft, &QDockWidget::visibilityChanged, this, [this]( bool visible ) {
+		if ( visible && leftColumnIs( LeftNifs ) && nifBrowserPopulatePending )
 			QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
 	} );
 
@@ -18358,13 +18559,6 @@ void NifSkope::initDockWidgets()
 	connect( aSetOrigin, &QAction::triggered, [this]() {
 		ogl->showSetOriginMenu();
 	} );
-
-	// Tabify List and Header
-	tabifyDockWidget( dList, dHeader );
-	tabifyDockWidget( dHeader, dBrowser );
-
-	// Raise the useful startup face of the upper-left tab group.
-	dList->raise();
 
 	// Hide certain docks by default
 	dRefr->toggleViewAction()->setChecked( false );
@@ -20526,7 +20720,7 @@ void NifSkope::initDockWidgets()
 		 */
 		QMenu * m = ui->mRender;
 		m->addSeparator();
-		for ( QDockWidget * dw : { dList, dTree, dHeader, dBrowser, dInsp, dKfm, dRefr } ) {
+		for ( QDockWidget * dw : { dLeft, dInsp, dKfm, dRefr } ) {
 			m->addAction( dw->toggleViewAction() );
 			ui->tView->removeAction( dw->toggleViewAction() );
 		}
@@ -20791,8 +20985,6 @@ void NifSkope::initDockWidgets()
 
 	// Set Inspect widget
 	dInsp->setWidget( inspect );
-
-	connect( dList->toggleViewAction(), &QAction::triggered, tree, &NifTreeView::clearRootIndex );
 
 }
 
@@ -21923,9 +22115,18 @@ void NifSkope::saveUi() const
 	}
 
 	QSettings settings;
-	// TODO: saveState takes a version number which can be incremented between releases if necessary
-	settings.setValue( "Window State"_uip, saveState( 0x073 ) );
+	// 0x074 replaces four tabified core docks with one permanent three-mode
+	// left editor. The schema key lets restoreUi migrate one old 0x073 layout.
+	settings.setValue( "Window State"_uip, saveState( 0x074 ) );
 	settings.setValue( "Window Geometry"_uip, saveGeometry() );
+	settings.setValue( "LeftColumn/LayoutSchema"_uip, 1 );
+	settings.setValue( "LeftColumn/Mode"_uip, int( leftColumnMode ) );
+	if ( blockWorkspaceSplitter )
+		settings.setValue( "LeftColumn/BlockSplitter"_uip,
+			blockWorkspaceSplitter->saveState() );
+	if ( nifWorkspaceSplitter )
+		settings.setValue( "LeftColumn/NifSplitter"_uip,
+			nifWorkspaceSplitter->saveState() );
 
 	settings.setValue( "Theme", theme );
 
@@ -22010,8 +22211,39 @@ void NifSkope::restoreUi()
 	 *
 	 * Covered by tests/spells/window_state_roundtrip.sh.
 	 */
-	restoreState( settings.value( "Window State"_uip ).toByteArray(), 0x073 );
+	const bool leftColumnSchema = settings.value(
+		"LeftColumn/LayoutSchema"_uip, 0 ).toInt() >= 1;
+	const QByteArray windowState = settings.value( "Window State"_uip ).toByteArray();
+	// Existing users get one 0x073 replay so all unrelated manager docks and
+	// toolbars retain their positions. The four obsolete core docks no longer
+	// exist, so their entries are ignored; LeftColumnDock stays at its designed
+	// left position. The next normal close writes a clean 0x074 graph.
+	restoreState( windowState, leftColumnSchema ? 0x074 : 0x073 );
+	if ( !leftColumnSchema && dLeft ) {
+		if ( dockWidgetArea( dLeft ) == Qt::NoDockWidgetArea )
+			addDockWidget( Qt::LeftDockWidgetArea, dLeft );
+		dLeft->show();
+		// The new dock is absent from a 0x073 blob, so QMainWindow otherwise
+		// assigns its minimum (~164 px). Start migrated/fresh windows at the old
+		// useful working width; it remains freely foldable afterwards.
+		resizeDocks( { dLeft }, { 400 }, Qt::Horizontal );
+	}
 	restoreGeometry( settings.value( "Window Geometry"_uip ).toByteArray() );
+	const QByteArray blockSplitState = settings.value(
+		"LeftColumn/BlockSplitter"_uip ).toByteArray();
+	const QByteArray nifSplitState = settings.value(
+		"LeftColumn/NifSplitter"_uip ).toByteArray();
+	// restoreState(empty) does not mean "keep the constructor defaults" to a
+	// QSplitter: it can collapse the first child to zero. A migrated profile has
+	// no values yet, so only replay a real state blob.
+	if ( blockWorkspaceSplitter && !blockSplitState.isEmpty() )
+		blockWorkspaceSplitter->restoreState( blockSplitState );
+	if ( nifWorkspaceSplitter && !nifSplitState.isEmpty() )
+		nifWorkspaceSplitter->restoreState( nifSplitState );
+	setLeftColumnMode( leftColumnSchema
+		? LeftColumnMode( settings.value( "LeftColumn/Mode"_uip,
+			int( LeftBlocks ) ).toInt() )
+		: LeftBlocks );
 
 	/* Re-assert the header order AFTER restoreState.
 	 *

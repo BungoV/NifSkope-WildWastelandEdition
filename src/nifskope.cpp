@@ -1326,7 +1326,7 @@ NifSkope::NifSkope( bool background )
 		[this]( const QModelIndex &, const QModelIndex &, const QList<int> & ) {
 			if ( blockListSearch && !blockListSearch->text().isEmpty() ) applyBlockListFilter();
 		} );
-	auto * findBlocks = new QShortcut( QKeySequence::Find, ui->ListDock );
+	auto * findBlocks = new QShortcut( QKeySequence::Find, ui->dockWidgetContents_4 );
 	findBlocks->setContext( Qt::WidgetWithChildrenShortcut );
 	connect( findBlocks, &QShortcut::activated, blockListSearch, [this]() {
 		blockListSearch->setFocus( Qt::ShortcutFocusReason );
@@ -1335,7 +1335,8 @@ NifSkope::NifSkope( bool background )
 	auto * clearBlockSearch = new QShortcut( QKeySequence( Qt::Key_Escape ), blockListSearch );
 	clearBlockSearch->setContext( Qt::WidgetShortcut );
 	connect( clearBlockSearch, &QShortcut::activated, blockListSearch, &QLineEdit::clear );
-	auto * goToBlockShortcut = new QShortcut( QKeySequence( QStringLiteral( "Ctrl+G" ) ), ui->ListDock );
+	auto * goToBlockShortcut = new QShortcut( QKeySequence( QStringLiteral( "Ctrl+G" ) ),
+		ui->dockWidgetContents_4 );
 	goToBlockShortcut->setContext( Qt::WidgetWithChildrenShortcut );
 	connect( goToBlockShortcut, &QShortcut::activated, this, &NifSkope::goToBlock );
 	auto * renameBlock = new QShortcut( QKeySequence( Qt::Key_F2 ), list );
@@ -1462,7 +1463,8 @@ NifSkope::NifSkope( bool background )
 	}
 	ui->verticalLayout->insertWidget( 0, wwDiffBanner );
 	wwDiffBanner->hide();
-	auto * findBlockFields = new QShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+F" ) ), ui->TreeDock );
+	auto * findBlockFields = new QShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+F" ) ),
+		ui->dockWidgetContents_2 );
 	findBlockFields->setContext( Qt::WidgetWithChildrenShortcut );
 	connect( findBlockFields, &QShortcut::activated, blockDetailsSearch, [this]() {
 		blockDetailsSearch->setFocus( Qt::ShortcutFocusReason );
@@ -1594,7 +1596,12 @@ NifSkope::NifSkope( bool background )
 		bsaProxyModel, &BSAProxyModel::setFavouritesOnly );
 	loadedNifsModel = new QStandardItemModel( this );
 	loadedNifsModel->setHorizontalHeaderLabels( { tr( "Loaded NIFs" ) } );
-	auto * loadedWorkspaceView = new LoadedNifsTreeView( ui->dockWidgetContents_7 );
+	loadedNifsPane = new QWidget( this );
+	loadedNifsPane->setObjectName( QStringLiteral( "LoadedNifsPane" ) );
+	auto * loadedLayout = new QVBoxLayout( loadedNifsPane );
+	loadedLayout->setContentsMargins( 5, 4, 5, 0 );
+	loadedLayout->setSpacing( 3 );
+	auto * loadedWorkspaceView = new LoadedNifsTreeView( loadedNifsPane );
 	loadedNifsView = loadedWorkspaceView;
 	loadedNifsView->setObjectName( QStringLiteral( "LoadedNifsView" ) );
 	loadedNifsView->setModel( loadedNifsModel );
@@ -1701,29 +1708,16 @@ NifSkope::NifSkope( bool background )
 	};
 	wireLoadedNifsSelection();
 
-	// The search belongs to the Loaded NIFs pane and moves with it.
-	auto * loadedPane = new QWidget( ui->dockWidgetContents_7 );
-	loadedPane->setObjectName( QStringLiteral( "LoadedNifsPane" ) );
-	auto * loadedLayout = new QVBoxLayout( loadedPane );
-	loadedLayout->setContentsMargins( 5, 4, 5, 0 );
-	loadedLayout->setSpacing( 3 );
-	loadedNifsFilter = new QLineEdit( loadedPane );
+	// This pane is constructed independently of BrowserDock. initDockWidgets()
+	// places it in the permanent NIF-workspace splitter before restoreUi(), so a
+	// mode switch never reparents the live model/view or risks dropping a row.
+	loadedNifsFilter = new QLineEdit( loadedNifsPane );
 	loadedNifsFilter->setObjectName( QStringLiteral( "LoadedNifsFilter" ) );
 	loadedNifsFilter->setPlaceholderText( tr( "Search loaded NIFs…" ) );
 	loadedNifsFilter->setClearButtonEnabled( true );
 	loadedNifsFilter->setMinimumWidth( 48 );
 	loadedLayout->addWidget( loadedNifsFilter );
 	loadedLayout->addWidget( loadedNifsView, 1 );
-	ui->verticalLayout_5->removeWidget( bsaView );
-	auto * browserSplitter = new QSplitter( Qt::Vertical, ui->dockWidgetContents_7 );
-	browserSplitter->setObjectName( QStringLiteral( "NifBrowserSplitter" ) );
-	browserSplitter->setChildrenCollapsible( false );
-	browserSplitter->addWidget( bsaView );
-	browserSplitter->addWidget( loadedPane );
-	browserSplitter->setStretchFactor( 0, 5 );
-	browserSplitter->setStretchFactor( 1, 1 );
-	browserSplitter->setSizes( { 420, 140 } );
-	ui->verticalLayout_5->addWidget( browserSplitter );
 	connect( loadedNifsFilter, &QLineEdit::textChanged,
 		this, &NifSkope::applyLoadedNifsFilter );
 	bsaModel->init();
@@ -6340,16 +6334,8 @@ void NifSkope::select( const QModelIndex & index )
 		}
 	}
 
-	if ( sender() == ogl ) {
-		if ( dList->isVisible() )
-			dList->raise();
-	}
-
-	// Switch to Block Details tab if not selecting inside Header tab
-	if ( sender() != header ) {
-		if ( dTree->isVisible() )
-			dTree->raise();
-	}
+	// The left editor mode is a user choice. Selection keeps the hidden pages in
+	// sync, but never yanks the user out of NIF Browser or Header mode.
 
 	if ( sender() != list ) {
 		if ( list->model() == proxy ) {
@@ -6453,7 +6439,7 @@ void NifSkope::select( const QModelIndex & index )
 			tree->setDetailsFilter( false, QSet<const void *>() );
 			applyBlockDetailsFilter();
 		}
-		if ( dList->isVisible() ) {
+		if ( leftColumnIs( LeftBlocks ) ) {
 			QModelIndex root = nif->getTopIndex( idx );
 
 			const bool rootChanged = ( tree->rootIndex() != root );
@@ -6787,18 +6773,14 @@ void NifSkope::updateRecentArchiveFileActions()
 QModelIndex NifSkope::currentNifIndex() const
 {
 	QModelIndex index;
-	if ( dList->isVisible() ) {
+	if ( leftColumnIs( LeftBlocks ) ) {
 		if ( list->model() == proxy ) {
 			index = proxy->mapTo(list->currentIndex());
 		} else if ( list->model() == nif ) {
 			index = list->currentIndex();
 		}
-	} else if ( dTree->isVisible() ) {
-		if ( tree->model() == proxy ) {
-			index = proxy->mapTo(tree->currentIndex());
-		} else if ( tree->model() == nif ) {
-			index = tree->currentIndex();
-		}
+	} else if ( leftColumnIs( LeftHeader ) && header->model() == nif ) {
+		index = header->currentIndex();
 	}
 	return index;
 }
@@ -6852,10 +6834,9 @@ void NifSkope::populateConfiguredNifBrowser()
 	if ( !bsaModel || !bsaProxyModel || !bsaView || !nif ) return;
 
 	// Indexing every configured archive and rebuilding the tree is by far the
-	// most expensive completeLoading reaction. While the browser dock is hidden
-	// (closed or a background tab) defer the whole rebuild; the dock's
-	// visibilityChanged hook replays it when it next shows.
-	if ( dBrowser && !dBrowser->isVisible() ) {
+	// most expensive completeLoading reaction. While the left editor is hidden
+	// or showing another mode, defer the rebuild until NIF mode is selected.
+	if ( dLeft && ( !dLeft->isVisible() || !leftColumnIs( LeftNifs ) ) ) {
 		nifBrowserPopulatePending = true;
 		return;
 	}
@@ -7269,8 +7250,8 @@ void NifSkope::openArchive( const QString & archive )
 		ui->bsaFilter->setEnabled( true );
 		ui->bsaFilenameOnly->setEnabled( true );
 
-		// Bring tab to front
-		dBrowser->raise();
+		// An explicit browse request is also a request to see the NIF workspace.
+		setLeftColumnMode( LeftNifs );
 
 		// Reapply the existing search to the newly populated source.
 		ui->bsaFilter->textChanged( ui->bsaFilter->text() );

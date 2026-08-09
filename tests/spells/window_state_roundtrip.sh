@@ -127,12 +127,25 @@ try {
   if (-not $ws) { Fail "cycle 1 wrote no Window State - saveUi() did not run (a WW_* var set?)" }
   Write-Output "  cycle 1: saved $($ws.Length) bytes while maximised"
 
+  # The new left editor is outside QMainWindow's opaque dock graph: its active
+  # page and both inner splitters have explicit state. Prove a normal close wrote
+  # all four values, then select NIF mode for the restore cycle below.
+  $LK = "$K\LeftColumn"
+  $ls = Get-ItemProperty $LK -EA SilentlyContinue
+  if (-not $ls -or $ls.LayoutSchema -ne 1) { Fail "cycle 1 wrote no LeftColumn schema" }
+  if (-not $ls.BlockSplitter -or -not $ls.NifSplitter) { Fail "cycle 1 wrote no splitter states" }
+  Set-ItemProperty -Path $LK -Name Mode -Value 1 -Type DWord
+  Write-Output "  cycle 1: left-column schema and both splitter states saved"
+
   # --- cycle 2: THE ASSERTION. This is what faulted on the old ordering. ---
   $p = Start-Process -FilePath $EXE -PassThru
   if ($p.WaitForExit(30000)) { Fail ("cycle 2 crashed 0x{0:X8} restoring the layout cycle 1 saved" -f $p.ExitCode) }
   Write-Output "  cycle 2: restored the maximised layout without crashing"
   $p.CloseMainWindow() | Out-Null
   if (-not $p.WaitForExit(30000)) { $p.Kill() }
+  $restoredMode = (Get-ItemProperty $LK).Mode
+  if ($restoredMode -ne 1) { Fail "cycle 2 did not restore NIF mode (saved $restoredMode)" }
+  Write-Output "  cycle 2: restored and re-saved NIF mode"
   Write-Output "PASS: 2 cycles, maximised save -> restore"
 }
 finally {
@@ -141,6 +154,11 @@ finally {
   # So the restore "failed" on success, the script exited non-zero, and the suite
   # reported FAILED directly under its own "PASS: 2 cycles" line. cmd swallows it
   # without PowerShell ever seeing a stream to mangle.
+  # Import MERGES; it does not remove keys created during the test. The new
+  # LeftColumn schema therefore leaked into the real profile on the first run
+  # of this expanded suite. Delete exactly the backed-up product key first,
+  # then import the complete snapshot so absent-before stays absent-after.
+  cmd /c "reg delete ""HKCU\Software\NifTools\NifSkope 2.0"" /f >nul 2>&1"
   cmd /c "reg import ""$bk"" >nul 2>&1"
   Remove-Item $bk -EA SilentlyContinue
 }

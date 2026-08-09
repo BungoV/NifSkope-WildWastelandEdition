@@ -90,6 +90,8 @@ class QLabel;
 class QMenu;
 class QProgressBar;
 class QPushButton;
+class QSplitter;
+class QStackedWidget;
 class QTimer;
 class QToolButton;
 class QToolBar;
@@ -422,6 +424,9 @@ protected:
 private:
 	void initActions();
 	void initDockWidgets();
+	enum LeftColumnMode { LeftBlocks = 0, LeftNifs = 1, LeftHeader = 2 };
+	void setLeftColumnMode( LeftColumnMode mode );
+	bool leftColumnIs( LeftColumnMode mode ) const { return leftColumnMode == mode; }
 	void initToolBars();
 	void initMenu();
 	void initConnections();
@@ -906,13 +911,18 @@ private:
 
 	QProgressBar * progress = nullptr;
 
-	QDockWidget * dList;
-	QDockWidget * dTree;
-	QDockWidget * dHeader;
 	QDockWidget * dKfm;
 	QDockWidget * dRefr;
 	QDockWidget * dInsp;
-	QDockWidget * dBrowser;
+	//! The four legacy core docks are consumed before restoreUi; this one stable
+	//! host owns the three editor modes for the lifetime of the window.
+	QDockWidget * dLeft = nullptr;
+	QTabBar * leftColumnSelector = nullptr;
+	QStackedWidget * leftColumnStack = nullptr;
+	QSplitter * blockWorkspaceSplitter = nullptr;
+	QSplitter * nifWorkspaceSplitter = nullptr;
+	QWidget * loadedNifsPane = nullptr;
+	LeftColumnMode leftColumnMode = LeftBlocks;
 	//! dialog). Not nifSnapshotOp: some spells snapshot themselves, and a run
 	//! that changes nothing must not dirty the document. See the definition.
 
