@@ -8922,6 +8922,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->blockListFilterMenu
 							&& searchScopes.size() == 4 && blockCategories.size() == 8
 							&& matchAllTerms && matchAnyTerm && resetSearchFilters );
+					check( "Block List columns are labelled for what this view displays",
+						skope->list->header()->property( "wwBlockListLabels" ).toStringList()
+							== QStringList{ QStringLiteral( "Block" ), QStringLiteral( "Name" ),
+								QStringLiteral( "Summary" ) } );
+					check( "Block List columns can fold and leave remaining width to Summary",
+						skope->list->minimumWidth() <= 1
+							&& skope->list->header()->minimumSectionSize() <= 44
+							&& skope->list->header()->stretchLastSection() );
 
 					auto blockVisible = [&]( int wanted ) {
 						bool found = false;
@@ -8973,6 +8981,40 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						scopesReset && matchAllTerms && matchAllTerms->isChecked()
 							&& skope->blockListSearch->text().isEmpty()
 							&& skope->blockListQuickFilter == 0 );
+
+					skope->select( skope->nif->getBlockIndex( 1 ) );
+					QApplication::processEvents();
+					const bool childPathHasParentLink = skope->blockListBreadcrumb
+						&& skope->blockListBreadcrumb->text().contains(
+							QStringLiteral( "href=\"0\"" ) );
+					if ( skope->blockListBreadcrumb )
+						QMetaObject::invokeMethod( skope->blockListBreadcrumb, "linkActivated",
+							Qt::DirectConnection, Q_ARG( QString, QStringLiteral( "0" ) ) );
+					QApplication::processEvents();
+					check( "breadcrumb ancestors are live navigation targets",
+						childPathHasParentLink
+							&& skope->nif->getBlockNumber( skope->currentNifIndex() ) == 0 );
+					skope->select( skope->nif->getBlockIndex( 1 ) );
+					QApplication::processEvents();
+					check( "the selected Block List body renders with its live breadcrumb",
+						skope->dLeft->grab().save( QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_block_list_body.png" ) ) );
+
+					skope->blockListSearch->setText( QStringLiteral( "no-such-block-ww-probe" ) );
+					QApplication::processEvents();
+					const bool emptyBlockShot = skope->dLeft->grab().save(
+						QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_block_list_empty.png" ) );
+					check( "an empty search explains the blank Block List and reports zero shown",
+						!skope->list->emptyMessageText().isEmpty()
+							&& skope->blockListFooter->text().startsWith( QStringLiteral( "0/" ) )
+							&& emptyBlockShot );
+					skope->blockListSearch->clear();
+					QApplication::processEvents();
+					check( "clearing search removes the empty explanation and fixes count grammar",
+						skope->list->emptyMessageText().isEmpty()
+							&& skope->blockListFooter->text().contains( QStringLiteral( "1 shape" ) )
+							&& !skope->blockListFooter->text().contains( QStringLiteral( "1 shapes" ) ) );
 
 					bool blockSearchMenuShot = false;
 					if ( skope->blockListFilterButton && skope->blockListFilterMenu ) {
@@ -22477,6 +22519,11 @@ void NifSkope::restoreUi()
 	 */
 	list->header()->restoreState( settings.value( gListMode->checkedAction() == aList
 		? "List Header/list"_uip : "List Header/hierarchy"_uip ).toByteArray() );
+	// Old header blobs remember the former 100px section floor and whether the
+	// last section stretched. Keep the user's widths, but not those obsolete
+	// layout constraints: the Block List now folds with the rest of the column.
+	list->header()->setMinimumSectionSize( 44 );
+	list->header()->setStretchLastSection( true );
 	// and what the blob does not know: this mode's columns, whatever it restored
 	wwApplyBlockListColumns();
 	tree->header()->restoreState( settings.value( "Tree Header"_uip ).toByteArray() );

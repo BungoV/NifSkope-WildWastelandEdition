@@ -118,12 +118,14 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QListView>
 #include <QLineEdit>
+#include <QHeaderView>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QStyle>
 #include <QStyleFactory>
+#include <QStyleOptionHeader>
 #include <QSplitter>
 #include <QTabBar>
 #include <QToolBar>
@@ -171,6 +173,44 @@ constexpr int NifBrowserConfiguredResource = 2;
 constexpr int NifBrowserGameRole = Qt::UserRole + 40;
 constexpr int NifBrowserFolderPathRole = Qt::UserRole + 41;
 constexpr int NifBrowserFavouriteRole = Qt::UserRole + 42;
+
+/*! Block List-only header labels.
+ *
+ *  The shared NifModel calls column 0 "Name" and column 1 "Value", which is
+ *  correct in Block Details. In the Block List those same cells contain the
+ *  block number/type and the block's resolved scene name. Painting the honest
+ *  labels here keeps the shared model untouched in both hierarchy and flat mode.
+ */
+class BlockListHeader final : public QHeaderView
+{
+public:
+	explicit BlockListHeader( QWidget * parent = nullptr )
+		: QHeaderView( Qt::Horizontal, parent )
+	{
+		setObjectName( QStringLiteral( "BlockListHeader" ) );
+		setProperty( "wwBlockListLabels",
+			QStringList{ tr( "Block" ), tr( "Name" ), tr( "Summary" ) } );
+	}
+
+protected:
+	void paintSection( QPainter * painter, const QRect & rect, int logicalIndex ) const override
+	{
+		QStyleOptionHeader option;
+		initStyleOptionForIndex( &option, logicalIndex );
+		option.rect = rect;
+		const bool hierarchy = model() && model()->columnCount() == 3;
+		if ( ( hierarchy && logicalIndex == 0 )
+			|| ( !hierarchy && logicalIndex == NifModel::NameCol ) )
+			option.text = tr( "Block" );
+		else if ( ( hierarchy && logicalIndex == 1 )
+			|| ( !hierarchy && logicalIndex == NifModel::ValueCol ) )
+			option.text = tr( "Name" );
+		else if ( ( hierarchy && logicalIndex == 2 )
+			|| ( !hierarchy && logicalIndex == NifModel::WwSummaryCol ) )
+			option.text = tr( "Summary" );
+		style()->drawControl( QStyle::CE_Header, &option, painter, this );
+	}
+};
 
 QString nifBrowserFavoritesPath( bool createFolder = false )
 {
@@ -1118,6 +1158,7 @@ NifSkope::NifSkope( bool background )
 
 	// Block List
 	list = ui->list;
+	list->setHeader( new BlockListHeader( list ) );
 	list->setModel( proxy );
 	list->setSortingEnabled( false );
 	/* A block row's Value cell resolves through buddy() to that block's Name, a
@@ -1137,7 +1178,11 @@ NifSkope::NifSkope( bool background )
 	 */
 	list->setEditTriggers( QAbstractItemView::NoEditTriggers );
 	list->installEventFilter( this );
-	list->header()->resizeSection( NifModel::NameCol, 250 );
+	list->header()->setMinimumSectionSize( 44 );
+	list->header()->setStretchLastSection( true );
+	list->header()->resizeSection( NifModel::NameCol, 220 );
+	list->header()->resizeSection( NifModel::ValueCol, 110 );
+	list->setMinimumWidth( 1 );
 
 	// Block-list multi-selection (Blender-style): Shift/Ctrl-click several blocks.
 	// Row colours come from NifModel BackgroundRole (active #FFA040 / secondary
@@ -1380,15 +1425,25 @@ NifSkope::NifSkope( bool background )
 	setBlockListQuickFilter( 0 );
 	// the labels can be arbitrarily long — allow them to clip so the dock folds
 	blockListBreadcrumb = new QLabel( ui->dockWidgetContents_4 );
-	blockListBreadcrumb->setTextInteractionFlags( Qt::TextSelectableByMouse );
-	blockListBreadcrumb->setStyleSheet( QStringLiteral( "color: %1; padding: 1px 2px;" ).arg( wwSkinColor( "textMuted" ) ) );
-	blockListBreadcrumb->setToolTip( tr( "Scene-parent path for the selected block" ) );
+	blockListBreadcrumb->setObjectName( QStringLiteral( "BlockListBreadcrumb" ) );
+	blockListBreadcrumb->setTextFormat( Qt::RichText );
+	blockListBreadcrumb->setTextInteractionFlags(
+		Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse );
+	blockListBreadcrumb->setOpenExternalLinks( false );
+	blockListBreadcrumb->setToolTip( tr( "Scene-parent path; click an ancestor to select it" ) );
+	blockListBreadcrumb->setAccessibleName( tr( "Selected block path" ) );
 	blockListBreadcrumb->setMinimumWidth( 1 );
 	ui->verticalLayout_2->insertWidget( 2, blockListBreadcrumb );
 	blockListFooter = new QLabel( ui->dockWidgetContents_4 );
-	blockListFooter->setStyleSheet( QStringLiteral( "color: %1; padding: 2px;" ).arg( wwSkinColor( "textMuted" ) ) );
+	blockListFooter->setObjectName( QStringLiteral( "BlockListFooter" ) );
 	blockListFooter->setMinimumWidth( 1 );
 	ui->verticalLayout_2->addWidget( blockListFooter );
+	connect( blockListBreadcrumb, &QLabel::linkActivated, this, [this]( const QString & target ) {
+		bool ok = false;
+		const int block = target.toInt( &ok );
+		if ( ok && nif && nif->getBlockIndex( block ).isValid() )
+			select( nif->getBlockIndex( block ) );
+	} );
 	connect( blockListSearch, &QLineEdit::textChanged, this, [this]() { applyBlockListFilter(); } );
 	connect( blockListBack, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( -1 ); } );
 	connect( blockListForward, &QToolButton::clicked, this, [this]() { navigateBlockListHistory( 1 ); } );
@@ -1404,6 +1459,7 @@ NifSkope::NifSkope( bool background )
 	// filter walk once per signal, immediately.
 	auto blockFilterPending = std::make_shared<bool>( false );
 	auto scheduleBlockFilter = [this, blockFilterPending]() {
+		blockListStatsDirty = true;
 		if ( *blockFilterPending )
 			return;
 		*blockFilterPending = true;
@@ -1420,8 +1476,8 @@ NifSkope::NifSkope( bool background )
 	connect( proxy, &QAbstractItemModel::rowsRemoved, this,
 		[scheduleBlockFilter]( const QModelIndex &, int, int ) { scheduleBlockFilter(); } );
 	connect( proxy, &QAbstractItemModel::dataChanged, this,
-		[this]( const QModelIndex &, const QModelIndex &, const QList<int> & ) {
-			if ( blockListSearch && !blockListSearch->text().isEmpty() ) applyBlockListFilter();
+		[scheduleBlockFilter]( const QModelIndex &, const QModelIndex &, const QList<int> & ) {
+			scheduleBlockFilter();
 		} );
 	auto * findBlocks = new QShortcut( QKeySequence::Find, ui->dockWidgetContents_4 );
 	findBlocks->setContext( Qt::WidgetWithChildrenShortcut );
@@ -1995,6 +2051,8 @@ NifSkope::NifSkope( bool background )
 		blockListHistory.clear();
 		blockListPins.clear();
 		blockListHistoryPosition = -1;
+		blockListVisibleBlockCount = -1;
+		blockListStatsDirty = true;
 		navigatingBlockListHistory = false;
 		if ( blockListBack ) blockListBack->setEnabled( false );
 		if ( blockListForward ) blockListForward->setEnabled( false );
@@ -3935,6 +3993,7 @@ void NifSkope::applyBlockListFilter()
 	if ( !filterActive && !blockListFilterWasActive )
 		return;
 	blockListFilterWasActive = filterActive;
+	QSet<int> visibleBlocks;
 	auto directMatch = [this, &terms]( const QModelIndex & viewIndex ) {
 		QModelIndex source = ( viewIndex.model() == proxy ? proxy->mapTo( viewIndex ) : viewIndex );
 		int block = nif->getBlockNumber( source );
@@ -3973,10 +4032,17 @@ void NifSkope::applyBlockListFilter()
 			const bool isBlock = block >= 0;
 			const bool keep = !isBlock || directMatch( index );
 			list->setRowHidden( row, QModelIndex(), !keep );
+			if ( isBlock && keep ) visibleBlocks.insert( block );
 		}
+		blockListVisibleBlockCount = filterActive ? visibleBlocks.size() : -1;
+		updateBlockListFooter();
 		return;
 	}
-	if ( list->model() != proxy ) return;
+	if ( list->model() != proxy ) {
+		blockListVisibleBlockCount = -1;
+		updateBlockListFooter();
+		return;
+	}
 	auto filterBranch = [&]( auto && self, const QModelIndex & parent ) -> bool {
 		bool branchMatches = false;
 		for ( int row = 0; row < proxy->rowCount( parent ); row++ ) {
@@ -3985,12 +4051,18 @@ void NifSkope::applyBlockListFilter()
 			const bool rowMatches = directMatch( index );
 			const bool keep = rowMatches || childMatches;
 			list->setRowHidden( row, parent, !keep );
+			if ( keep ) {
+				const int visibleBlock = nif->getBlockNumber( proxy->mapTo( index ) );
+				if ( visibleBlock >= 0 ) visibleBlocks.insert( visibleBlock );
+			}
 			if ( !terms.isEmpty() && childMatches ) list->expand( index );
 			branchMatches = branchMatches || rowMatches || childMatches;
 		}
 		return branchMatches;
 	};
 	filterBranch( filterBranch, QModelIndex() );
+	blockListVisibleBlockCount = filterActive ? visibleBlocks.size() : -1;
+	updateBlockListFooter();
 }
 
 void NifSkope::applyBlockDetailsFilter()
@@ -4799,16 +4871,38 @@ void NifSkope::updateBlockListNavigation( const QModelIndex & selection )
 			: tr( "#%1 %2" ).arg( b ).arg( name );
 	};
 	if ( blockListBreadcrumb ) {
-		QStringList path;
+		QList<int> pathBlocks;
 		QSet<int> visited;
 		int parent = block;
 		while ( parent >= 0 && !visited.contains( parent ) ) {
 			visited.insert( parent );
-			path.prepend( blockLabel( parent ) );
+			pathBlocks.prepend( parent );
 			parent = nif->getParent( parent );
 		}
-		blockListBreadcrumb->setText( path.isEmpty() ? tr( "No block selected" ) : path.join( QStringLiteral( "  >  " ) ) );
-		blockListBreadcrumb->setToolTip( blockListBreadcrumb->text() );
+		QStringList plainPath;
+		QStringList richPath;
+		for ( int pathBlock : std::as_const( pathBlocks ) ) {
+			const QString label = blockLabel( pathBlock );
+			plainPath.append( label );
+			if ( pathBlock == block ) {
+				richPath.append( QStringLiteral( "<span style=\"color:%1;\">%2</span>" )
+					.arg( wwSkinColor( "accent" ), label.toHtmlEscaped() ) );
+			} else {
+				richPath.append( QStringLiteral(
+					"<a href=\"%1\" style=\"color:%2;text-decoration:none;\">%3</a>" )
+					.arg( pathBlock ).arg( wwSkinColor( "text" ), label.toHtmlEscaped() ) );
+			}
+		}
+		if ( richPath.isEmpty() ) {
+			blockListBreadcrumb->setText( tr( "Select a block to inspect it" ) );
+			blockListBreadcrumb->setToolTip( tr( "Scene-parent path; click an ancestor to select it" ) );
+			blockListBreadcrumb->setAccessibleName( tr( "No block selected" ) );
+		} else {
+			blockListBreadcrumb->setText( richPath.join( QStringLiteral( "  ›  " ) ) );
+			const QString plain = plainPath.join( QStringLiteral( "  ›  " ) );
+			blockListBreadcrumb->setToolTip( plain );
+			blockListBreadcrumb->setAccessibleName( plain );
+		}
 	}
 	if ( blockListPin ) {
 		QSignalBlocker blocker( blockListPin );
@@ -4852,27 +4946,61 @@ void NifSkope::updateBlockListNavigation( const QModelIndex & selection )
 		addLinks( tr( "Links to" ), outgoing );
 		addLinks( tr( "Referenced by" ), incoming );
 	}
-	if ( blockListFooter ) {
-		qint64 vertices = 0;
-		qint64 triangles = 0;
-		int shapes = 0;
-		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+	updateBlockListFooter();
+}
+
+void NifSkope::updateBlockListFooter()
+{
+	if ( !nif || !list ) return;
+	if ( blockListStatsDirty ) {
+		blockListStatsBlocks = nif->getBlockCount();
+		blockListStatsShapes = 0;
+		blockListStatsVertices = 0;
+		blockListStatsTriangles = 0;
+		for ( int b = 0; b < blockListStatsBlocks; b++ ) {
 			QModelIndex shape = nif->getBlockIndex( b );
 			if ( !( nif->blockInherits( shape, "NiGeometry" )
-				|| nif->itemName( shape ).contains( QStringLiteral( "TriShape" ), Qt::CaseInsensitive ) ) ) continue;
-			shapes++;
+				|| nif->itemName( shape ).contains(
+					QStringLiteral( "TriShape" ), Qt::CaseInsensitive ) ) ) continue;
+			blockListStatsShapes++;
 			QModelIndex counts = shape;
 			if ( !nif->getIndex( counts, "Num Vertices" ).isValid() ) {
-				int data = nif->getLink( shape, "Data" );
+				const int data = nif->getLink( shape, "Data" );
 				if ( data >= 0 ) counts = nif->getBlockIndex( data );
 			}
-			if ( nif->getIndex( counts, "Num Vertices" ).isValid() ) vertices += nif->get<int>( counts, "Num Vertices" );
-			if ( nif->getIndex( counts, "Num Triangles" ).isValid() ) triangles += nif->get<int>( counts, "Num Triangles" );
+			if ( nif->getIndex( counts, "Num Vertices" ).isValid() )
+				blockListStatsVertices += nif->get<int>( counts, "Num Vertices" );
+			if ( nif->getIndex( counts, "Num Triangles" ).isValid() )
+				blockListStatsTriangles += nif->get<int>( counts, "Num Triangles" );
 		}
-		blockListFooter->setText( tr( "%1 blocks  ·  %2 shapes  ·  %3 verts  ·  %4 tris" )
-			.arg( nif->getBlockCount() ).arg( shapes ).arg( vertices ).arg( triangles ) );
-		blockListFooter->setToolTip( tr( "NIF %1 · Bethesda version %2" ).arg( nif->getVersion() ).arg( nif->getBSVersion() ) );
+		blockListStatsDirty = false;
 	}
+
+	auto quantity = [this]( qint64 count, const QString & singular, const QString & plural ) {
+		return tr( "%1 %2" ).arg( count ).arg( count == 1 ? singular : plural );
+	};
+	QString blockText = quantity( blockListStatsBlocks, tr( "block" ), tr( "blocks" ) );
+	if ( blockListVisibleBlockCount >= 0 )
+		blockText = tr( "%1/%2 %3 shown" ).arg( blockListVisibleBlockCount )
+			.arg( blockListStatsBlocks )
+			.arg( blockListStatsBlocks == 1 ? tr( "block" ) : tr( "blocks" ) );
+	if ( blockListFooter ) {
+		blockListFooter->setText( QStringList{
+			blockText,
+			quantity( blockListStatsShapes, tr( "shape" ), tr( "shapes" ) ),
+			quantity( blockListStatsVertices, tr( "vert" ), tr( "verts" ) ),
+			quantity( blockListStatsTriangles, tr( "tri" ), tr( "tris" ) )
+		}.join( QStringLiteral( "  ·  " ) ) );
+		blockListFooter->setToolTip( tr( "NIF %1 · Bethesda version %2" )
+			.arg( nif->getVersion() ).arg( nif->getBSVersion() ) );
+	}
+
+	if ( blockListStatsBlocks == 0 )
+		list->setEmptyMessage( tr( "No blocks in this NIF" ) );
+	else if ( blockListVisibleBlockCount == 0 )
+		list->setEmptyMessage( tr( "No blocks match this search or filter.\nUse Filters → Reset Search and Filters." ) );
+	else
+		list->setEmptyMessage( QString() );
 }
 
 void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUnavailable )

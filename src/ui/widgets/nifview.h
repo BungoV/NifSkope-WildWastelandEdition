@@ -63,6 +63,14 @@ public:
 	bool evalConditions() const { return doRowHiding; }
 	//! Is a row hidden?
 	bool isRowHidden( int row, const QModelIndex & parent ) const;
+	//! Centered explanation painted when the owning panel has no rows to show.
+	void setEmptyMessage( const QString & message )
+	{
+		if ( emptyMessage == message ) return;
+		emptyMessage = message;
+		viewport()->update();
+	}
+	QString emptyMessageText() const { return emptyMessage; }
 
 	//! Block Details text filter (WW): while active, rows outside the keep
 	//! set hide IN ADDITION to condition/version hiding. The filter must live
@@ -79,6 +87,7 @@ protected:
 
 	bool detailsFilterActive = false;
 	QSet<const void *> detailsFilterKeep;
+	QString emptyMessage;
 
 public:
 	/*! Block-list drag-and-drop (WW): begin the drag instead of QTreeView.

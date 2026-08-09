@@ -607,6 +607,8 @@ private:
 	void wwTakeAllReferenceValues();
 	//! Rebuild breadcrumb, history, pin, relationship and footer state.
 	void updateBlockListNavigation( const QModelIndex & index = QModelIndex() );
+	//! Rebuild document totals and the filtered/empty result state.
+	void updateBlockListFooter();
 	//! Move through the recently selected block history.
 	void navigateBlockListHistory( int delta );
 	//! Ctrl+G block-number/name jump.
@@ -807,6 +809,14 @@ private:
 	int blockListSearchFields = SearchBlockNumber | SearchBlockType
 		| SearchBlockName | SearchDisplayedValues;
 	bool blockListSearchMatchAllTerms = true;
+	//! Unique block rows currently visible through search/category filtering; -1 means unfiltered.
+	int blockListVisibleBlockCount = -1;
+	//! Geometry totals are document state, not selection state; recompute only after model changes.
+	bool blockListStatsDirty = true;
+	int blockListStatsBlocks = 0;
+	int blockListStatsShapes = 0;
+	qint64 blockListStatsVertices = 0;
+	qint64 blockListStatsTriangles = 0;
 	//! a quick-filter chip switched the list to flat mode; All switches back
 	bool blockListFilterRestoreHierarchy = false;
 	bool navigatingBlockListHistory = false;

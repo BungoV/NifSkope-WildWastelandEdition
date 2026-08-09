@@ -424,6 +424,13 @@ void NifTreeView::paintEvent( QPaintEvent * e )
 {
 	QTreeView::paintEvent( e );
 
+	if ( !emptyMessage.isEmpty() ) {
+		QPainter emptyPainter( viewport() );
+		emptyPainter.setPen( QColor::fromString( wwSkinColor( "textMuted" ) ) );
+		emptyPainter.drawText( viewport()->rect().adjusted( 24, 24, -24, -24 ),
+			Qt::AlignCenter | Qt::TextWordWrap, emptyMessage );
+	}
+
 	if ( wwDropLineY < 0 )
 		return;
 

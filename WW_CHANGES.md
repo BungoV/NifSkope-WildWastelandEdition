@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09h — Readable Block List body and navigable context
+
+The Block List now labels its three columns for what that view actually shows:
+**Block**, **Name**, and **Summary**. The shared NIF model remains unchanged, so
+Block Details still correctly uses Name/Value terminology. A view-only header
+paints the Block List labels in both hierarchy and flat modes, Summary stretches
+into spare width, and the obsolete 100 px saved section floor is discarded after
+old column widths restore so the panel can still fold narrow.
+
+The selection path is live navigation now. Ancestors are clickable, the current
+block uses the skin accent, and the full plain path remains available to tooltip
+and accessibility readers. The totals footer uses correct singular grammar and
+reports filtered state as, for example, **0/4 blocks shown**. Geometry totals are
+cached across selection changes and invalidated by model changes instead of
+rescanning the entire NIF on every click.
+
+A search or category with no results no longer leaves a silent blank panel. The
+view explains that no blocks match and points directly to **Filters → Reset Search
+and Filters**, without inserting proxy rows or changing drag/selection identity.
+The clean release build is green; `loaded_nifs.sh` is **66 checks, 0 failures**,
+including rendered selected and no-result states.
+
 ## 2026-08-09g — Compact Block List tools and real advanced search
 
 The Block List's three rows of competing controls are one compact toolbar now.

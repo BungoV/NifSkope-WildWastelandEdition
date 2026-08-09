@@ -89,6 +89,16 @@ QHeaderView::section {
 }
 QHeaderView::section:hover { color: ${text}; }
 
+QLabel#BlockListBreadcrumb {
+    color: ${textMuted};
+    border-top: 1px solid ${borderDim};
+    padding: 3px 4px 1px 4px;
+}
+QLabel#BlockListFooter {
+    color: ${textMuted};
+    padding: 1px 4px 3px 4px;
+}
+
 /* Fix display of Settings category list */
 QListWidget#categoryList { padding: 10px; }
 QListWidget#categoryList::item { height: 20px; padding: 10px; }
