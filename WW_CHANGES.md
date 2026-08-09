@@ -1,5 +1,13 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09l — Window-state harness cleanup cannot silently lose settings
+
+`tests/spells/window_state_roundtrip.sh` no longer hides `reg.exe` failures
+behind `cmd /c` and then deletes the only settings backup. Cleanup now waits
+for direct `reg.exe` processes, checks both exit codes, and retains/reports the
+`.reg` snapshot on any failure. This closes the path that left the startup cube
+disabled and save confirmations suppressed after a failed diagnostic.
+
 ## 2026-08-09k — Loaded-NIF workspace status and identity-safe filtering
 
 The lower NIF workspace now reports what it actually contains. Its existing

@@ -63,7 +63,19 @@ public class RT {
 
 function Fail($m) { Write-Output "FAIL: $m"; exit 1 }
 
-reg export "HKCU\Software\NifTools\NifSkope 2.0" $bk /y | Out-Null
+# Run native registry operations as real child processes. PowerShell 5 turns
+# some harmless native STDERR into ErrorRecords, while the former cmd wrapper
+# hid the exit status completely; Process.ExitCode is the unambiguous result.
+function RunReg([string]$arguments) {
+  $rp = Start-Process -FilePath "$env:SystemRoot\System32\reg.exe" `
+    -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
+  return $rp.ExitCode
+}
+
+$exportRc = RunReg ('export "HKCU\Software\NifTools\NifSkope 2.0" "' + $bk + '" /y')
+if ($exportRc -ne 0 -or -not (Test-Path $bk)) {
+  Fail "could not snapshot NifSkope settings; refusing to run"
+}
 try {
   # --- seed a maximised-on-second-monitor geometry -------------------------
   # QSettings stores the QByteArray as the UTF-16 string "@ByteArray(<raw>)",
@@ -149,18 +161,28 @@ try {
   Write-Output "PASS: 2 cycles, maximised save -> restore"
 }
 finally {
-  # reg writes its success line to STDERR, and in Windows PowerShell "2>&1" on a
-  # native command wraps every stderr line in an ErrorRecord and leaves $? false.
-  # So the restore "failed" on success, the script exited non-zero, and the suite
-  # reported FAILED directly under its own "PASS: 2 cycles" line. cmd swallows it
-  # without PowerShell ever seeing a stream to mangle.
+  # Do not let native-command stream handling decide whether the user's settings
+  # were restored.  The old cmd /c wrapper swallowed both output AND the exit
+  # code; a failed import therefore looked successful and the only backup was
+  # deleted.  That left test-only values such as New Document Cube=0 and
+  # Suppress Save Confirmation=1 in the real profile.
+  #
+  # Keep the backup on ANY failure and print its path so recovery remains
+  # possible.
   # Import MERGES; it does not remove keys created during the test. The new
   # LeftColumn schema therefore leaked into the real profile on the first run
   # of this expanded suite. Delete exactly the backed-up product key first,
   # then import the complete snapshot so absent-before stays absent-after.
-  cmd /c "reg delete ""HKCU\Software\NifTools\NifSkope 2.0"" /f >nul 2>&1"
-  cmd /c "reg import ""$bk"" >nul 2>&1"
-  Remove-Item $bk -EA SilentlyContinue
+  $deleteRc = RunReg 'delete "HKCU\Software\NifTools\NifSkope 2.0" /f'
+  $importRc = if ($deleteRc -eq 0) { RunReg ('import "' + $bk + '"') } else { -1 }
+  if ($deleteRc -ne 0 -or $importRc -ne 0) {
+    $restoreError = "could not restore the NifSkope settings snapshot (delete=$deleteRc import=$importRc)"
+    Write-Output "FATAL: $restoreError"
+    Write-Output "FATAL: backup retained at $bk"
+    throw $restoreError
+  } else {
+    Remove-Item $bk -EA SilentlyContinue
+  }
 }
 PSEOF
 

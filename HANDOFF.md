@@ -12,6 +12,17 @@ branch `main`, `origin` is the fork — never push upstream.)
 Updated **2026-08-09**. Edition **0.3.1**. Build green, working tree clean,
 pushed through left-panel polish `5df0c36`.
 
+### Window-state diagnostic cleanup safety
+
+`window_state_roundtrip.sh` had an unsafe failure path: its `cmd /c` cleanup
+discarded the exit status from deleting/importing the NifSkope registry tree and
+then removed the backup unconditionally. A failed run left the real profile with
+the test-only values `New Document Cube=0` and `Suppress Save Confirmation=1`.
+Both user values were restored to their safe defaults (`1` and `0`), and the
+harness now checks direct `reg.exe` process exit codes and retains/reports the
+backup on any restore failure. Do not reintroduce cleanup that can erase the
+only snapshot without proving the import succeeded.
+
 ### This session
 
 One structural UI pass, closed end to end: the left editor is now one permanent
