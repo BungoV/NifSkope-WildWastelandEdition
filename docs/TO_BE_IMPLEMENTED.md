@@ -489,7 +489,7 @@ too, so that output is an artifact and cannot be read as evidence.
 To resume: flip the constant and re-enable the two greyed menu entries. Full
 findings in `WW_CHANGES.md 2026-07-27e`.
 
-### Refraction guard — FIXED 07-27g, one bounded follow-up left
+### Refraction guard — FIXED 07-27g and 08-09s
 
 The "fixture guards nothing" symptom turned out to be a **real renderer bug**:
 `hasRefraction` was only ever assigned in `updateParams`'s no-material branch, so
@@ -500,12 +500,13 @@ account, including why the material is OR'd with the NIF flag rather than
 replacing it (0 of 6899 vanilla FO4 materials set `bRefraction`), in
 `RENDERER_MATCH_PLAN.md §0`.
 
-**Still open, small:** the fixture proves refraction *engages*, not that it
-*distorts* — a refracting shape over a featureless background is invisible rather
-than warped, so "refracting" and "shape culled" look identical. Needs geometry
-placed behind the refracting shape. A plain `merge` is not enough (the pieces
-land at unrelated scales and never overlap); it needs deliberate transform
-placement.
+The bounded distortion follow-up is now closed against the real
+`X01_Torso_VFX.nif`: its `autoLoop` sequence was captured at the authored 1.0
+peak with refraction forced on and off. The normal-map sheet becomes a clean,
+local framebuffer warp when enabled instead of the visible green/orange map,
+and its displacement is capped at eight screen pixels at every resolution.
+Loaded-NIF scenes now contribute their opaque geometry before the shared
+refraction pass as well.
 
 ---
 

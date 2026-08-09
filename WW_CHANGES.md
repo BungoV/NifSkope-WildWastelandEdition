@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09s — Refraction follows the normal map locally again
+
+The X-01 torso VFX exposed two refraction defects. Its stock controller ramps
+Refraction Strength to 1.0, while the preview interpreted that as 12% of the
+whole viewport. The supplied BC5 smoke normal therefore displaced the source by
+roughly 194 pixels at its 95th percentile on a 1920-wide view, sampling remote
+empty background and producing the reported giant dark silhouette. Refraction
+now remains normal-map driven but is capped at eight screen pixels, independent
+of resolution. The map bends the framebuffer; it is deliberately not drawn as
+colour, which would restore the old green/orange distortion-map artifact.
+
+Loaded NIFs also now share one geometry pass: every document draws opaque
+geometry before a single globally sorted transparent/refraction pass. A
+refracting primary can therefore capture solid geometry belonging to a Loaded
+NIF instead of copying the framebuffer before that document exists. Particles
+remain last, procedural lightning remains owned and drained by its Scene, and
+the single-document path is unchanged.
+
+The release build is green. At X01_Torso_VFX's authored peak (`autoLoop`, 2.5
+s), paired on/off captures prove the normal map is the distortion source and
+the dark silhouette is gone. All six non-refraction deterministic render cases
+are byte-identical to their pre-fix captures; only `refraction_fixed` changes.
+The real workspace skeleton/merge suite remains **34/34**.
+
 ## 2026-08-09r — Simpler external-drop menu, explicit edit guard
 
 The Explorer `.nif` drop menu now starts directly with its actions: the unused

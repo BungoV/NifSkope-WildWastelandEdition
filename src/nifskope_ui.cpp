@@ -17102,7 +17102,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// regression set silently guards nothing. A harness must
 					// exercise the code path, not the user's preferences.
 					if ( Scene * sc = skope->ogl->getScene() ) {
-						sc->showRefraction = true;
+						// Refraction defaults ON so the established regression cases
+						// cannot inherit a disabled user preference. An explicit 0 is
+						// available for paired distortion-on/off captures.
+						sc->showRefraction = !qEnvironmentVariableIsSet( "WW_RENDER_REFRACTION" )
+							|| qEnvironmentVariableIntValue( "WW_RENDER_REFRACTION" ) != 0;
 						sc->showParticles = true;
 					}
 

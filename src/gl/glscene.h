@@ -108,6 +108,15 @@ public:
 
 	void draw();
 	void drawShapes();
+	//! Workspace-only split pass: draw opaque nodes now and append transparent,
+	//! particle and refractive nodes to one frame-local list shared by all scenes.
+	void collectShapes( NodeList & secondPass );
+	//! Globally sort the shared transparent list; additive particles remain last.
+	static void drawDeferredShapes( NodeList & secondPass );
+	//! Draw and clear this scene's procedural lightning queued during collection.
+	void drawShapeEffects();
+	//! Draw nodes, collision, furniture and selection after geometry.
+	void drawOverlays();
 	void drawGrid();
 	void drawNodes();
 	void drawHavok();

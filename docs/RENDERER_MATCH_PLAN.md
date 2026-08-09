@@ -11,7 +11,7 @@ the new material format last.
 
 ---
 
-## 0. Regression guard — BUILT, one case not yet real
+## 0. Regression guard — BUILT; real distortion case verified 2026-08-09
 
 `WW_RENDER_SHOT=<out.png>` (nifskope_ui.cpp) renders one NIF and quits, saving
 `ogl->grabFramebuffer()`. Driver: `tools/render_regression/capture.ps1`
@@ -93,13 +93,14 @@ looking like `glass_visor`, and the difference is attributable to exactly one
 flag on one block. That is a real guard, and strictly better than the old
 fixture which was byte-identical to its own control.
 
-**It cannot distinguish "refracting correctly" from "shape culled entirely"** —
-both give a background-coloured frame. Closing that needs non-uniform geometry
-*behind* the refracting shape. A `merge` of the visor onto donor.nif was tried
-and is not enough on its own: the two land at unrelated scales and positions and
-never overlap, so it needs deliberate transform placement. Small, bounded, and
-worth doing before trusting this case to prove distortion rather than mere
-engagement.
+The original visor fixture still only proves engagement, but the missing real
+distortion case was closed with `X01_Torso_VFX.nif`. Its `autoLoop` sequence
+drives Refraction Strength to 1.0 at 2.5 seconds and its own opaque fan/grid give
+the normal map non-uniform pixels to bend. `WW_RENDER_REFRACTION=0/1` provides a
+paired deterministic control. That pair exposed the old arbitrary `0.12`
+viewport-relative offset as 100–200-pixel jumps into remote background; the
+preview now caps the same authored normals at eight screen pixels regardless of
+resolution.
 
 ---
 

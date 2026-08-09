@@ -388,7 +388,14 @@ void main()
 		// background. (Per-texel alpha blending garbled the render because the
 		// base texture is not opacity, so it is deliberately not applied here.)
 		vec2	suv = ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw );
-		vec2	roffs = normal.xy * clamp( refractionStrength, 0.0, 1.0 ) * 0.12;
+		// Refraction Strength is animated all the way to 1.0 by stock effects
+		// such as X01_Torso_VFX. Treating it as a fraction of the viewport made
+		// those normals jump hundreds of pixels into unrelated empty background,
+		// producing a large dark silhouette. Keep the preview a local heat-haze
+		// distortion, with the same maximum displacement at every resolution.
+		const float refractionMaxPixels = 8.0;
+		vec2	roffs = normal.xy * clamp( refractionStrength, 0.0, 1.0 )
+			* ( vec2( refractionMaxPixels ) / vec2( viewportDimensions.zw ) );
 		vec3	bg = texture( RefractionSrc, clamp( suv + roffs, vec2( 0.001 ), vec2( 0.999 ) ) ).rgb;
 		color.rgb = bg;
 		color.a = 1.0;

@@ -951,6 +951,8 @@ Scene * GLView::workspaceSceneFor( NifModel * model )
 	ws->options = scene->options;
 	ws->visMode = scene->visMode;
 	ws->selecting = 0;
+	ws->showRefraction = scene->showRefraction;
+	ws->showParticles = scene->showParticles;
 	return ws;
 }
 
@@ -2836,10 +2838,6 @@ void GLView::paintGL()
 	// it flicker back on after A-select-all / deselect-all)
 	scene->objSelActive = !editMode;
 
-	// Draw the model
-	glDisable( GL_BLEND );
-	scene->draw();
-
 	/* Workspace documents rendered for real — their own materials, textures and
 	 * shaders, not the flat soup the preview used to be. One Scene each, built
 	 * the first frame the document appears and kept until it leaves the list,
@@ -2854,6 +2852,7 @@ void GLView::paintGL()
 	 * mapping, scene options — is already in place for these too. All a secondary
 	 * needs is the same viewTrans and time.
 	 */
+	QVector<Scene *> workspaceDrawScenes;
 	if ( !workspaceRenderOrder.isEmpty() && !scene->selecting ) {
 		for ( NifModel * wm : std::as_const( workspaceRenderOrder ) ) {
 			Scene * ws = workspaceSceneFor( wm );
@@ -2861,8 +2860,42 @@ void GLView::paintGL()
 				continue;
 			ws->transformDirty = true;
 			ws->transform( viewTrans, time );
-			ws->draw();
+			workspaceDrawScenes.append( ws );
 		}
+	}
+
+	// Draw the model(s). A single Scene owns both passes internally, but doing
+	// that scene-by-scene made a refractive primary copy the framebuffer before
+	// Loaded NIFs behind it had been drawn. In a workspace, collect every opaque
+	// node first and use one globally sorted transparent/refraction pass.
+	glDisable( GL_BLEND );
+	const bool collisionOnly = Scene::collisionOnlySetting
+		&& scene->hasOption( Scene::ShowCollision );
+	if ( workspaceDrawScenes.isEmpty() || collisionOnly ) {
+		scene->draw();
+		for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
+			ws->draw();
+	} else {
+		NodeList secondPass;
+		scene->collectShapes( secondPass );
+		for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
+			ws->collectShapes( secondPass );
+
+		// The primary owns the one viewport grid. Background NIF models have no
+		// GLView parent, but making this explicit prevents future repeated grids.
+		scene->drawGrid();
+		if ( !secondPass.list().isEmpty() )
+			scene->drawSelection();
+		Scene::drawDeferredShapes( secondPass );
+
+		// Collection queued effects on their owning Scene; drain each queue once.
+		scene->drawShapeEffects();
+		for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
+			ws->drawShapeEffects();
+
+		scene->drawOverlays();
+		for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
+			ws->drawOverlays();
 		glDisable( GL_BLEND );
 	}
 

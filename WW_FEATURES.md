@@ -193,6 +193,9 @@ predecessor:
 - `.pbrm` material reading and PBR rendering path (currently parked behind a
   greyed-out toggle — see [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md)).
 - Fixed: **refraction was dead for every BGSM-backed Fallout 4 mesh**.
+- Refraction uses the authored normal map as a resolution-independent local
+  distortion, and Loaded NIFs share the opaque source it refracts; animated VFX
+  no longer expand into a dark viewport-sized silhouette.
 - Fixed: geometry rendering dark after an edit-mode transform.
 - Fixed: selected geometry, edges and vertices showing through solid geometry
   with x-ray off.

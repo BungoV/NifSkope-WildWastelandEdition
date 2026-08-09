@@ -28,6 +28,16 @@ only snapshot without proving the import succeeded.
 One structural UI pass, closed end to end: the left editor is now one permanent
 three-mode column instead of four tabified docks.
 
+**X-01 refraction no longer becomes a giant dark silhouette.** The stock VFX
+animates strength to 1.0; the preview's old 0.12 viewport-relative multiplier
+turned its normal map into roughly 200-pixel jumps. Distortion is still driven
+by that normal map, now capped at eight screen pixels at every resolution.
+Multiple Loaded NIFs also collect all opaque geometry before one shared
+transparent/refraction pass, so a refractive document can copy geometry behind
+it from another Loaded NIF. Single-NIF render captures are unchanged except for
+the intended refraction case; the X-01 `autoLoop` peak was captured on/off, the
+release build is green, and `workspace_skeleton_target.sh` remains **34/34**.
+
 **Explorer-to-NifSkope `.nif` drops now work across the whole window.** The
 application-level route recognizes the native OpenGL container as well as the
 specialist tree views, then offers an explicit adaptive workspace action, new

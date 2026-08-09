@@ -436,7 +436,11 @@ void Scene::draw()
 		drawGrid();
 	else
 		drawShapes();
+	drawOverlays();
+}
 
+void Scene::drawOverlays()
+{
 	glDisable( GL_CULL_FACE );
 	glDisable( GL_STENCIL_TEST );
 	glDisable( GL_FRAMEBUFFER_SRGB );
@@ -502,42 +506,51 @@ bool Scene::grabRefractionSource()
 
 void Scene::drawShapes()
 {
+	NodeList secondPass;
+	collectShapes( secondPass );
+	drawGrid();
+
+	if ( !secondPass.list().isEmpty() )
+		drawSelection(); // preserve the legacy highlight beneath transparency
+
+	drawDeferredShapes( secondPass );
+	drawShapeEffects();
+}
+
+void Scene::collectShapes( NodeList & secondPass )
+{
 	pendingBolts.clear();
 
 	if ( hasOption(DoBlending) ) {
-		NodeList secondPass;
-
 		for ( Node * node : roots.list() ) {
 			node->drawShapes( &secondPass );
 		}
-
-		drawGrid();
-
-		if ( secondPass.list().count() > 0 )
-			drawSelection(); // for transparency pass
-
-		secondPass.alphaSort();
-
-		// particle systems are additive VFX: draw them after the other
-		// transparent shapes, so standard alpha blending cannot darken
-		// rectangular patches over the already-drawn sprites
-		QVector<Node *> deferredParticles;
-		for ( Node * node : secondPass.list() ) {
-			if ( dynamic_cast<Particles *>( node ) )
-				deferredParticles.append( node );
-			else
-				node->drawShapes();
-		}
-		for ( Node * node : deferredParticles )
-			node->drawShapes();
 	} else {
 		for ( Node * node : roots.list() ) {
 			node->drawShapes();
 		}
-
-		drawGrid();
 	}
+}
 
+void Scene::drawDeferredShapes( NodeList & secondPass )
+{
+	secondPass.alphaSort();
+
+	// Particle systems are additive VFX: draw them after every other transparent
+	// shape, including transparent shapes from other workspace documents.
+	QVector<Node *> deferredParticles;
+	for ( Node * node : secondPass.list() ) {
+		if ( dynamic_cast<Particles *>( node ) )
+			deferredParticles.append( node );
+		else
+			node->drawShapes();
+	}
+	for ( Node * node : deferredParticles )
+		node->drawShapes();
+}
+
+void Scene::drawShapeEffects()
+{
 	// additive procedural lightning goes last, over the transparent geometry
 	for ( ProcLightningController * pl : pendingBolts )
 		pl->drawPreview();
