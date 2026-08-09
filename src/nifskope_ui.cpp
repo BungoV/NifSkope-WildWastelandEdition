@@ -9786,6 +9786,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 */
 					const QString incoming = skope->workspaceDocumentName( row );
 					const int before = skope->workspaceDocumentCount();
+					const int windowsBefore = NifSkope::openDocuments().size();
+					NifSkope * const windowIdentity = skope;
+					NifModel * const primaryModelIdentity = skope->nif;
+					GLView * const viewIdentity = skope->ogl;
+					QDockWidget * const leftDockIdentity = skope->dLeft;
+					QStackedWidget * const leftStackIdentity = skope->leftColumnStack;
+					QAbstractItemModel * const swapLoadedModelIdentity = skope->loadedNifsView->model();
+					const NifSkope::LeftColumnMode leftModeBefore = skope->leftColumnMode;
+					const QList<int> nifSplitBefore = skope->nifWorkspaceSplitter->sizes();
+					// These pointers used to die with the data-only row during promotion.
+					const bool rolesMarked = skope->markWorkspaceFaceDonorRow( row )
+						&& skope->setWorkspaceSkeletonDocument( row );
 					const bool opened = skope->openWorkspaceDocumentHere( row );
 					QApplication::processEvents();
 					QStringList after;
@@ -9795,10 +9807,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						<< after.size() << " [" << after.join( QStringLiteral( ", " ) ) << "]\n";
 					check( "opening a row in this window is a swap, not a loss",
 						opened && after.size() == before );
+					check( "Make Primary reloads only the scene, never the NifSkope window or its UI",
+						opened
+							&& skope == windowIdentity
+							&& NifSkope::openDocuments().size() == windowsBefore
+							&& skope->nif == primaryModelIdentity
+							&& skope->ogl == viewIdentity
+							&& skope->dLeft == leftDockIdentity
+							&& skope->leftColumnStack == leftStackIdentity
+							&& skope->loadedNifsView->model() == swapLoadedModelIdentity
+							&& skope->leftColumnMode == leftModeBefore
+							&& skope->nifWorkspaceSplitter->sizes() == nifSplitBefore );
+					check( "...and skeleton/face-donor roles follow the promoted mesh",
+						rolesMarked && skope->ogl->workspaceSkeleton() == primaryModelIdentity
+							&& NifSkope::workspaceFaceDonor() == primaryModelIdentity );
 					check( "...the row that was opened has left the list",
 						!after.contains( incoming ) );
 					check( "...and the document it displaced is in the list",
 						after.contains( openedHere ) );
+					NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
+					skope->setWorkspaceSkeletonDocument( -1 );
 
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";

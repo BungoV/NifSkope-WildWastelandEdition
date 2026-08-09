@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09o — Make Primary reloads the scene, not NifSkope
+
+**Loaded NIFs → Make Primary / Edit** no longer constructs a second complete
+`NifSkope` main window, restores its docks and toolbars, shows it, and hides the
+window the user was working in. Data-only rows now use the same in-place swap as
+the direct edit gesture: their live bytes are parsed into the existing primary
+model, so only that model and its viewport Scene are rebuilt. The window,
+viewport, left dock, mode stack, searches, Loaded-NIF model and splitter geometry
+remain the same objects with the same state.
+
+The outgoing primary still takes the promoted row's place in Loaded NIFs, and
+unsaved in-memory bytes still move without touching disk. Skeleton and face-donor
+marks now follow the document across the swap rather than disappearing with the
+deleted background storage object or silently attaching to the wrong mesh.
+
+The release build is green. `loaded_nifs.sh` passes **95 checks, 0 failures** and
+now drives the exact Make Primary implementation while asserting that no main
+window is created, the primary `NifModel` and every relevant UI object retain
+identity, geometry remains stable, and both rigging roles follow the promoted
+mesh.
+
 ## 2026-08-09n — Restore a useful left-panel width once
 
 The unified left editor no longer inherits the accidental ~260 px width that

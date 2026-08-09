@@ -2103,9 +2103,8 @@ NifSkope::NifSkope( bool background )
 			/* A ROW THAT ALREADY HAS A WINDOW IS SWITCHED TO, NEVER RE-OPENED.
 			 *
 			 * Only the data-only rows — the ones loaded into the panel rather than
-			 * opened as documents — become a window on double-click, because for
-			 * them there is no window yet and making one IS the edit gesture. For
-			 * anything already open, double-click activates the document that
+			 * opened as documents — are swapped into this window on double-click.
+			 * For anything already open, double-click activates the document that
 			 * exists: opening a second window onto the same file is never what the
 			 * gesture meant, and that is what it looked like it was doing.
 			 */
@@ -2128,7 +2127,7 @@ NifSkope::NifSkope( bool background )
 					return;
 				}
 			}
-			openBackgroundDocumentHere( background );
+			promoteBackgroundDocument( background );
 		} );
 
 	// Empty Model for swapping out before model fill
@@ -3558,12 +3557,7 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 
 /*! Show a loaded NIF in THIS window, rather than opening another one.
  *
- *  "Make Primary / Edit" builds a fresh NifSkope window for the document and
- *  activates it. That window restores its own UI on the way up, so what you see
- *  is the whole application appearing again — which is what double-clicking a row
- *  looked like it was doing, because it was.
- *
- *  Double-click means "show me this one", so it happens HERE: the model is
+ *  Every data-only primary/edit gesture comes through here. The model is
  *  carried into this window in memory, and the row it came from goes, since the
  *  document it named is now the one on screen. Nothing is re-read from disk, so
  *  unsaved work in the row survives the move — including a generated faceBones
@@ -3576,6 +3570,13 @@ bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
 {
 	if ( !document || !document->nif )
 		return false;
+	NifModel * incomingModel = document->nif;
+	const QString incomingName = document->displayName();
+	const bool incomingWasSkeleton = ogl && ogl->workspaceSkeleton() == incomingModel;
+	const bool outgoingWasSkeleton = ogl && ogl->workspaceSkeleton() == nif;
+	const bool incomingWasFaceDonor = NifSkope::workspaceFaceDonor() == incomingModel;
+	const bool outgoingWasFaceDonor = NifSkope::workspaceFaceDonor() == nif;
+	const QString outgoingName = documentDisplayName();
 	// this window may be holding edits of its own; it is about to stop showing
 	// them, so the usual question applies before anything moves
 	if ( !saveConfirm() )
@@ -3611,12 +3612,13 @@ bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
 	 * would ask to be saved on the way out. It has no path because it is not a
 	 * file; that is the test.
 	 */
+	BackgroundNifDocument * parked = nullptr;
 	if ( nif && nif->getBlockCount() > 0 && !currentFile.isEmpty() ) {
 		QByteArray outgoing;
 		QBuffer buf( &outgoing );
 		if ( buf.open( QIODevice::WriteOnly ) && nif->save( buf ) ) {
 			buf.close();
-			auto * parked = new BackgroundNifDocument;
+			parked = new BackgroundNifDocument;
 			parked->workspaceRoot = workspaceGroupRoot();
 			QBuffer in( &outgoing );
 			if ( in.open( QIODevice::ReadOnly ) && parked->nif->load( in ) ) {
@@ -3630,6 +3632,7 @@ bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
 				sessionBackgroundDocuments.append( parked );
 			} else {
 				delete parked;
+				parked = nullptr;
 			}
 		}
 	}
@@ -3651,6 +3654,23 @@ bool NifSkope::openBackgroundDocumentHere( BackgroundNifDocument * document )
 		 * the close prompt honest about it.
 		 */
 		setWindowModified( wasUnsaved );
+
+		/* ROLE POINTERS FOLLOW THE DOCUMENT, NOT THE STORAGE OBJECT.
+		 *
+		 * The incoming BackgroundNifDocument is deleted below, while the outgoing
+		 * primary keeps living in `parked`. Leaving either pointer untouched made a
+		 * marked face donor vanish and could leave the skeleton pointing at the
+		 * wrong file after an otherwise successful in-place swap.
+		 */
+		if ( incomingWasSkeleton && ogl )
+			ogl->setWorkspaceSkeleton( nif );
+		else if ( outgoingWasSkeleton && ogl )
+			ogl->setWorkspaceSkeleton( parked ? parked->nif : nullptr );
+		if ( incomingWasFaceDonor )
+			NifSkope::setWorkspaceFaceDonor( nif, incomingName );
+		else if ( outgoingWasFaceDonor )
+			NifSkope::setWorkspaceFaceDonor( parked ? parked->nif : nullptr,
+				parked ? outgoingName : QString() );
 	}
 	emit completeLoading( loaded, path );
 	if ( !loaded ) {
@@ -3852,88 +3872,15 @@ bool NifSkope::saveDraggedLoadedNifAs( const QModelIndex & row,
 	return !path.isEmpty() && document->saveFile( path );
 }
 
-void NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
+bool NifSkope::promoteBackgroundDocument( BackgroundNifDocument * document )
 {
-	if ( !document ) return;
-	// The window starts as a hidden background window so it cannot flash before
-	// its model is ready; activateDocumentTab() performs the visible switch.
-	NifSkope * window = NifSkope::createWindow( QString(), true );
-	window->workspaceRoot = document->workspaceRoot
-		? document->workspaceRoot : workspaceGroupRoot();
-	window->sessionCollectionMember = true;
-	window->sessionPreviewVisible = false;
-	window->sessionPreviewUnloaded = false;
-	QString sourceLabel = document->displayName();
-	/* ALWAYS HANDED OVER IN MEMORY, INCLUDING CONFIGURED RESOURCES.
-	 *
-	 * The configured branch used to reload the archive while loose/generated rows
-	 * carried their live model. That made Make Primary / Edit discard poses,
-	 * freezes and other unsaved edits only for archive rows — and it could fail
-	 * outright after explicit browsing replaced the shared archive handle. The
-	 * model already in the row is the source of truth for every route.
+	/* Make Primary used to manufacture another complete NifSkope main window,
+	 * restore its docks and toolbars, show it, then hide this one. Apart from the
+	 * visible "application reload", that replaced every piece of transient UI
+	 * state. The already-proven swap path keeps this NifSkope, its views, models,
+	 * searches and splitters alive and reloads only the primary model/Scene.
 	 */
-	const bool wasUnsaved = document->isModified();
-	QString fname = document->currentFile;
-	emit window->beginLoading();
-	QByteArray carried;
-	bool loaded = false;
-	{
-		QBuffer buf( &carried );
-		if ( buf.open( QIODevice::WriteOnly ) )
-			loaded = document->nif && document->nif->save( buf );
-	}
-	if ( loaded ) {
-		QBuffer buf( &carried );
-		if ( buf.open( QIODevice::ReadOnly ) )
-			loaded = window->nif->load( buf );
-		else
-			loaded = false;
-	}
-	if ( loaded ) {
-		window->configuredResourceGame = document->configuredResourceGame;
-		window->configuredResourcePath = document->configuredResourcePath;
-		window->setCurrentFile( fname );
-		window->setWindowModified( wasUnsaved );
-	}
-	emit window->completeLoading( loaded, fname );
-	if ( !loaded ) {
-		/* THE FAILED WINDOW GOES, AND NOTHING ELSE DOES.
-		 *
-		 * Closing a window that is still a workspace member runs the group close
-		 * path, which closes EVERY other member with it — so one promote that
-		 * could not load took the whole Loaded NIFs list down. The flag is cleared
-		 * first, which is what makes this window an ordinary one, and
-		 * closingWorkspaceGroup is held false so nothing downstream reads the
-		 * close as "the user is shutting the workspace".
-		 *
-		 * deleteLater rather than close(): the window never became visible, and a
-		 * close() on a hidden window still travels the whole close path looking
-		 * for something to confirm.
-		 */
-		window->sessionCollectionMember = false;
-		window->closingWorkspaceGroup = false;
-		window->backgroundWorkspaceDocument = false;
-		window->hide();
-		window->deleteLater();
-		statusBar()->showMessage(
-			tr( "Could not open %1 for editing; the other loaded NIFs are untouched." )
-				.arg( sourceLabel ), 5000 );
-		refreshAllDocumentSessions();
-		return;
-	}
-	delete document;
-	// The new window replaces the data-only entry; rebuild this window's tab
-	// bookkeeping so the promoted document can be activated by index.
-	refreshAllDocumentSessions();
-	// The window was built as a background one, so it skipped restoreUi() -
-	// including the viewport-header toolbar move. Do it now that it is about to
-	// become a real, visible document window.
-	if ( !window->uiRestored )
-		window->restoreUi();
-	window->backgroundWorkspaceDocument = false;
-	const int index = documentTabWindows.indexOf( window );
-	if ( index >= 0 )
-		activateDocumentTab( index );
+	return openBackgroundDocumentHere( document );
 }
 
 bool NifSkope::confirmBackgroundDocumentRemoval( BackgroundNifDocument * document )
@@ -8035,7 +7982,8 @@ int NifSkope::workspaceDocumentSceneBuilds( int backgroundIndex )
 
 bool NifSkope::openWorkspaceDocumentHere( int backgroundIndex )
 {
-	return openBackgroundDocumentHere( workspaceBackgroundDocuments().value( backgroundIndex ) );
+	// Exercise the exact Make Primary / Edit route, not a parallel test-only path.
+	return promoteBackgroundDocument( workspaceBackgroundDocuments().value( backgroundIndex ) );
 }
 
 /*! How a workspace document draws: 0 hidden, 1 solid, 2 semi-transparent. The

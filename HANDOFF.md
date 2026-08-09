@@ -9,8 +9,8 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-09**. Edition **0.3.1**. Build green, working tree clean,
-pushed through left-panel polish `5df0c36`.
+Updated **2026-08-09**. Edition **0.3.1**. Build green; latest closed change is
+the in-place Loaded-NIF primary swap described below.
 
 ### Window-state diagnostic cleanup safety
 
@@ -27,6 +27,17 @@ only snapshot without proving the import succeeded.
 
 One structural UI pass, closed end to end: the left editor is now one permanent
 three-mode column instead of four tabified docks.
+
+**Loaded NIFs → Make Primary / Edit no longer reloads the application window.**
+The old route created a second hidden `NifSkope`, restored its complete UI, then
+showed it and hid the current window. It now shares the established in-place
+swap route with the direct edit gesture: the live row bytes replace the content
+of the existing primary `NifModel`, rebuilding only the scene. The same main
+window, viewport, dock, page stack, Loaded model, active mode and splitter sizes
+survive. Skeleton and face-donor marks follow the promoted mesh. The release
+build is green and `loaded_nifs.sh` is **95/95**, including exact object-identity,
+window-count, geometry and role-remapping assertions over the real Make Primary
+entry point.
 
 The compressed-width migration gap is closed. Schema 1 had already saved
 `LeftColumnDock` at Qt’s incidental ~260 px content hint, so the old “new dock”

@@ -515,9 +515,9 @@ private:
 	//! each limb can be frozen at its own moment before anything is merged.
 	//! Returns true when the model was changed.
 	bool freezeDocumentDialog( NifModel * nif, const QString & displayName );
-	//! Attach a real window to a data-only background document: carry its live
-	//! in-memory model into a hidden window, then run the normal primary switch.
-	void promoteBackgroundDocument( BackgroundNifDocument * document );
+	//! Make a data-only row primary in this exact window. Only the model/scene is
+	//! swapped; the main window and all of its UI remain alive.
+	bool promoteBackgroundDocument( BackgroundNifDocument * document );
 	bool removeBackgroundDocument( BackgroundNifDocument * document );
 	//! Locate a configured-resource NIF in the primary's combined archive and
 	//! return its raw bytes plus the "[Game]/path" display path.
