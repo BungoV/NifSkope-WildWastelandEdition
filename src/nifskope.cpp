@@ -295,6 +295,15 @@ protected:
 	}
 };
 
+static void paintTreeEmptyMessage( QTreeView * view, const QString & message )
+{
+	if ( !view || message.isEmpty() ) return;
+	QPainter painter( view->viewport() );
+	painter.setPen( QColor::fromString( wwSkinColor( "textMuted" ) ) );
+	painter.drawText( view->viewport()->rect().adjusted( 24, 24, -24, -24 ),
+		Qt::AlignCenter | Qt::TextWordWrap, message );
+}
+
 static constexpr int LoadedNifGlyphWidth = 20;
 static constexpr int LoadedNifGlyphCount = 3;
 
@@ -310,6 +319,13 @@ class LoadedNifsTreeView final : public QTreeView
 {
 public:
 	explicit LoadedNifsTreeView( QWidget * parent = nullptr ) : QTreeView( parent ) {}
+	void setEmptyMessage( const QString & message )
+	{
+		if ( emptyMessage == message ) return;
+		emptyMessage = message;
+		setProperty( "wwEmptyMessage", message );
+		viewport()->update();
+	}
 	NifBrowserTreeView * sourceView = nullptr;
 	QPersistentModelIndex draggedRow;
 	std::function<void( const QList<QPersistentModelIndex> & )> addBrowserRows;
@@ -317,6 +333,12 @@ public:
 	std::function<void( const QModelIndex &, int )> toggleButton;
 
 protected:
+	void paintEvent( QPaintEvent * event ) override
+	{
+		QTreeView::paintEvent( event );
+		paintTreeEmptyMessage( this, emptyMessage );
+	}
+
 	void mousePressEvent( QMouseEvent * event ) override
 	{
 		pressedToggleRow = QPersistentModelIndex();
@@ -399,6 +421,7 @@ protected:
 	}
 
 private:
+	QString emptyMessage;
 	QPersistentModelIndex pressedToggleRow;
 	int pressedToggleSlot = -1;
 };
@@ -1828,7 +1851,7 @@ NifSkope::NifSkope( bool background )
 	connect( nifBrowserFavouritesOnly, &QToolButton::toggled,
 		bsaProxyModel, &BSAProxyModel::setFavouritesOnly );
 	loadedNifsModel = new QStandardItemModel( this );
-	loadedNifsModel->setHorizontalHeaderLabels( { tr( "Loaded NIFs" ) } );
+	loadedNifsModel->setHorizontalHeaderLabels( { tr( "Loaded NIFs · 0" ) } );
 	loadedNifsPane = new QWidget( this );
 	loadedNifsPane->setObjectName( QStringLiteral( "LoadedNifsPane" ) );
 	auto * loadedLayout = new QVBoxLayout( loadedNifsPane );
@@ -1931,6 +1954,9 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView->installEventFilter( this );
 	loadedNifsView->setVerticalScrollMode( QAbstractItemView::ScrollPerPixel );
 	loadedNifsView->header()->setStretchLastSection( true );
+	loadedNifsView->header()->setToolTip( tr(
+		"Row key: arrow = primary · skull = skeleton · face = face donor · "
+		"eye = visible · half-disc = semi-transparent · red name = unsaved" ) );
 	loadedWorkspaceView->sourceView = browserWorkspaceView;
 	loadedWorkspaceView->addBrowserRows = [this]( const QList<QPersistentModelIndex> & rows ) {
 		addNifBrowserRowsToLoaded( rows );
@@ -1953,6 +1979,7 @@ NifSkope::NifSkope( bool background )
 	loadedLayout->addWidget( loadedNifsView, 1 );
 	connect( loadedNifsFilter, &QLineEdit::textChanged,
 		this, &NifSkope::applyLoadedNifsFilter );
+	updateLoadedNifsPresentation();
 	bsaModel->init();
 	bsaProxyModel->setSourceModel( bsaModel );
 	bsaView->setModel( bsaProxyModel );
@@ -2567,10 +2594,18 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		// it were selected, which left no way to see what actually was.
 		if ( primary )
 			name->setIcon( style()->standardIcon( QStyle::SP_ArrowRight ) );
-		name->setToolTip( primary ? tr( "Primary editable document" )
+		QStringList tooltip;
+		tooltip << ( primary ? tr( "Primary editable document" )
 			: ( visible
 				? tr( "Visible in the workspace and available to workspace tools" )
 				: tr( "Hidden — click the eye to show it" ) ) );
+		if ( document->isWindowModified()
+			|| ( document->nif && document->nif->undoStack
+				&& !document->nif->undoStack->isClean() ) )
+			tooltip << tr( "Unsaved changes" );
+		if ( !document->currentFile.isEmpty() )
+			tooltip << QDir::toNativeSeparators( document->currentFile );
+		name->setToolTip( tooltip.join( QLatin1Char( '\n' ) ) );
 		loadedNifsModel->appendRow( name );
 	}
 	// Data-only background documents share the secondary palette; they can never
@@ -2584,9 +2619,15 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		name->setDropEnabled( false );
 		name->setData( qulonglong( reinterpret_cast<quintptr>( document ) ),
 			NifBrowserBackgroundDocumentRole );
-		name->setToolTip( visible
+		QStringList tooltip;
+		tooltip << ( visible
 			? tr( "Visible in the workspace and available to workspace tools" )
 			: tr( "Hidden — click the eye to show it" ) );
+		if ( document->isModified() )
+			tooltip << tr( "Unsaved changes — use Save As from the row menu" );
+		if ( !document->currentFile.isEmpty() )
+			tooltip << QDir::toNativeSeparators( document->currentFile );
+		name->setToolTip( tooltip.join( QLatin1Char( '\n' ) ) );
 		loadedNifsModel->appendRow( name );
 	}
 	if ( loadedNifsView ) {
@@ -2598,6 +2639,8 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 	// do anyway. A real active query is reapplied after rebuild as intended.
 	if ( loadedNifsFilter && !loadedNifsFilter->text().trimmed().isEmpty() )
 		applyLoadedNifsFilter();
+	else
+		updateLoadedNifsPresentation();
 	syncingLoadedNifsSelection = false;
 }
 
@@ -2611,6 +2654,35 @@ void NifSkope::applyLoadedNifsFilter()
 		loadedNifsView->setRowHidden( row, QModelIndex(),
 			!needle.isEmpty() && !name.contains( needle, Qt::CaseInsensitive ) );
 	}
+	updateLoadedNifsPresentation();
+}
+
+void NifSkope::updateLoadedNifsPresentation()
+{
+	if ( !loadedNifsView || !loadedNifsModel ) return;
+	const int total = loadedNifsModel->rowCount();
+	int shown = 0;
+	for ( int row = 0; row < total; row++ )
+		if ( !loadedNifsView->QTreeView::isRowHidden( row, QModelIndex() ) ) shown++;
+	const bool filtering = loadedNifsFilter
+		&& !loadedNifsFilter->text().trimmed().isEmpty();
+	QString title;
+	if ( filtering )
+		title = tr( "Loaded NIFs · %1 of %2" ).arg( shown ).arg( total );
+	else if ( total == 1 )
+		title = tr( "Loaded NIF · 1" );
+	else
+		title = tr( "Loaded NIFs · %1" ).arg( total );
+	loadedNifsModel->setHeaderData( 0, Qt::Horizontal, title, Qt::DisplayRole );
+
+	auto * view = static_cast<LoadedNifsTreeView *>( loadedNifsView );
+	if ( total == 0 )
+		view->setEmptyMessage( tr( "Drag a NIF here, or right-click to add files." ) );
+	else if ( filtering && shown == 0 )
+		view->setEmptyMessage( tr( "No loaded NIFs match “%1”." )
+			.arg( loadedNifsFilter->text().trimmed() ) );
+	else
+		view->setEmptyMessage( QString() );
 }
 
 /* Selection and visibility are SEPARATE, and used not to be.

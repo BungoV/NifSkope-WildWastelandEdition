@@ -434,6 +434,8 @@ private:
 	void rebuildDocumentTabs();
 	void rebuildLoadedNifsBrowserGroup();
 	void applyLoadedNifsFilter();
+	//! Refresh Loaded NIFs count, legend and passive empty/filter-empty message.
+	void updateLoadedNifsPresentation();
 	void wireLoadedNifsSelection();
 	void addNifBrowserIndexToLoaded( const QModelIndex & index );
 	void queueNifBrowserIndexToLoaded( const QModelIndex & index );

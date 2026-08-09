@@ -9170,6 +9170,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& !skope->loadedNifsFilter->placeholderText().isEmpty() );
 					check( "Loaded NIFs exposes an as-needed vertical scrollbar",
 						skope->loadedNifsView->verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded );
+					check( "Loaded NIFs reports total workspace membership and explains its glyphs",
+						skope->loadedNifsModel->headerData( 0, Qt::Horizontal ).toString()
+							== QStringLiteral( "Loaded NIFs · 2" )
+							&& !skope->loadedNifsView->header()->toolTip().isEmpty() );
+					const QList<int> nifSplitterBefore = skope->nifWorkspaceSplitter->sizes();
+					skope->nifWorkspaceSplitter->setSizes( { 200, 160 } );
+					QApplication::processEvents();
+					check( "the NIF workspace splitter cannot collapse either pane",
+						!skope->nifWorkspaceSplitter->childrenCollapsible() );
+					check( "the NIF workspace splitter has a grabbable explained handle",
+						skope->nifWorkspaceSplitter->handleWidth() >= 4
+							&& !skope->nifWorkspaceSplitter->handle( 1 )->toolTip().isEmpty() );
+					check( "resizing the NIF workspace keeps both viewports reachable",
+						skope->bsaView->viewport()->height() > 0
+							&& skope->loadedNifsView->viewport()->height() > 0 );
+					skope->nifWorkspaceSplitter->setSizes( nifSplitterBefore );
+					QApplication::processEvents();
+					check( "the populated NIF workspace renders",
+						skope->dLeft->grab().save( QApplication::applicationDirPath()
+								+ QStringLiteral( "/ww_nifs_workspace.png" ) ) );
 					if ( skope->loadedNifsFilter ) QApplication::processEvents();
 
 					/* MODE SWITCHING IS PRESENTATION ONLY. Exercise every page repeatedly
@@ -9193,23 +9213,73 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& skope->leftColumnStack->widget( NifSkope::LeftHeader )
 								->isAncestorOf( skope->header ) );
 
+					/* REFRESHING THE BROWSER MUST NOT REFRESH THE WORKSPACE. Keep exact
+					 * model/name identity across the real toolbar action; this is the
+					 * regression boundary for the reported "browser reset emptied Loaded
+					 * NIFs" failure. */
+					QStringList loadedNamesBeforeRefresh;
+					QList<NifModel *> loadedModelsBeforeRefresh;
+					for ( int i = 0; i < skope->workspaceDocumentCount(); i++ ) {
+						loadedNamesBeforeRefresh << skope->workspaceDocumentName( i );
+						loadedModelsBeforeRefresh << skope->workspaceDocumentModel( i );
+					}
+					if ( QToolButton * refresh = skope->findChild<QToolButton *>(
+						QStringLiteral( "NifBrowserRefresh" ) ) ) refresh->click();
+					QElapsedTimer refreshWait;
+					refreshWait.start();
+					while ( skope->nifBrowserPopulatePending && refreshWait.elapsed() < 2000 )
+						QApplication::processEvents( QEventLoop::AllEvents, 25 );
+					QStringList loadedNamesAfterRefresh;
+					QList<NifModel *> loadedModelsAfterRefresh;
+					for ( int i = 0; i < skope->workspaceDocumentCount(); i++ ) {
+						loadedNamesAfterRefresh << skope->workspaceDocumentName( i );
+						loadedModelsAfterRefresh << skope->workspaceDocumentModel( i );
+					}
+					check( "refreshing available NIFs preserves every exact Loaded document",
+						skope->loadedNifsView->model() == loadedModelIdentity
+							&& loadedNamesAfterRefresh == loadedNamesBeforeRefresh
+							&& loadedModelsAfterRefresh == loadedModelsBeforeRefresh );
+
 					/* SEARCH HIDES ROWS, NEVER RE-MAPS THEM. Direct row hiding is
 					 * deliberate: drag payload and workspace actions retain exact model
 					 * identity while the query changes. */
 					if ( skope->loadedNifsFilter && skope->loadedNifsModel->rowCount() > 1 ) {
+						const QPersistentModelIndex stableLoadedRow(
+							skope->loadedNifsModel->index( skope->loadedNifsModel->rowCount() - 1, 0 ) );
+						BackgroundNifDocument * stableLoadedDocument =
+							skope->backgroundDocumentFromBrowserIndex( stableLoadedRow );
 						const QString query = QFileInfo( add ).fileName();
 						skope->loadedNifsFilter->setText( query );
 						QApplication::processEvents();
 						int shown = 0;
 						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ )
 							if ( !skope->loadedNifsView->isRowHidden( r, QModelIndex() ) ) shown++;
-						check( "Loaded NIF search finds the named row and hides the rest", shown == 1 );
+						check( "Loaded NIF search finds the named row and reports shown/total",
+							shown == 1 && skope->loadedNifsModel->headerData(
+								0, Qt::Horizontal ).toString() == QStringLiteral( "Loaded NIFs · 1 of 2" ) );
+						skope->loadedNifsFilter->setText(
+							QStringLiteral( "no-such-loaded-nif-ww-probe" ) );
+						QApplication::processEvents();
+						check( "an empty Loaded search explains itself without remapping its row",
+							!skope->loadedNifsView->property( "wwEmptyMessage" ).toString().isEmpty()
+								&& stableLoadedRow.isValid()
+								&& skope->backgroundDocumentFromBrowserIndex( stableLoadedRow )
+									== stableLoadedDocument
+								&& skope->loadedNifsView->model() == loadedModelIdentity );
+						check( "the no-match Loaded workspace renders",
+							skope->dLeft->grab().save( QApplication::applicationDirPath()
+									+ QStringLiteral( "/ww_nifs_no_match.png" ) ) );
 						skope->loadedNifsFilter->clear();
 						QApplication::processEvents();
 						int hidden = 0;
 						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ )
 							if ( skope->loadedNifsView->isRowHidden( r, QModelIndex() ) ) hidden++;
-						check( "clearing Loaded NIF search restores every row", hidden == 0 );
+						check( "clearing Loaded NIF search restores every row and its identity",
+							hidden == 0
+								&& skope->loadedNifsView->property( "wwEmptyMessage" ).toString().isEmpty()
+								&& stableLoadedRow.isValid()
+								&& skope->backgroundDocumentFromBrowserIndex( stableLoadedRow )
+									== stableLoadedDocument );
 					}
 
 					/* PROVE THE SCROLLBAR WITH ENOUGH ROWS, then remove the probes before
@@ -17980,11 +18050,18 @@ void NifSkope::initDockWidgets()
 	nifWorkspaceSplitter = new QSplitter( Qt::Vertical, leftColumnStack );
 	nifWorkspaceSplitter->setObjectName( QStringLiteral( "NifBrowserSplitter" ) );
 	nifWorkspaceSplitter->setChildrenCollapsible( false );
+	nifWorkspaceSplitter->setHandleWidth( 4 );
+	nifWorkspaceSplitter->setToolTip( tr( "Drag to resize NIF Browser and Loaded NIFs" ) );
+	nifWorkspaceSplitter->setAccessibleName( tr( "NIF Browser and Loaded NIFs splitter" ) );
 	nifWorkspaceSplitter->addWidget( browserContents );
 	nifWorkspaceSplitter->addWidget( loadedNifsPane );
 	nifWorkspaceSplitter->setStretchFactor( 0, 5 );
 	nifWorkspaceSplitter->setStretchFactor( 1, 2 );
 	nifWorkspaceSplitter->setSizes( { 500, 180 } );
+	if ( QSplitterHandle * handle = nifWorkspaceSplitter->handle( 1 ) ) {
+		handle->setToolTip( tr( "Drag to resize NIF Browser and Loaded NIFs" ) );
+		handle->setAccessibleName( tr( "Resize NIF Browser and Loaded NIFs" ) );
+	}
 
 	headerContents->setObjectName( QStringLiteral( "LeftHeaderPage" ) );
 	leftColumnStack->addWidget( blockWorkspaceSplitter );
@@ -22560,6 +22637,15 @@ void NifSkope::restoreUi()
 		blockWorkspaceSplitter->restoreState( blockSplitState );
 	if ( nifWorkspaceSplitter && !nifSplitState.isEmpty() )
 		nifWorkspaceSplitter->restoreState( nifSplitState );
+	// Some styles recreate splitter handles while replaying saved state. Restore
+	// the interaction hint after that replay so the real live divider owns it.
+	if ( nifWorkspaceSplitter ) {
+		nifWorkspaceSplitter->setHandleWidth( 4 );
+		if ( QSplitterHandle * handle = nifWorkspaceSplitter->handle( 1 ) ) {
+			handle->setToolTip( tr( "Drag to resize NIF Browser and Loaded NIFs" ) );
+			handle->setAccessibleName( tr( "Resize NIF Browser and Loaded NIFs" ) );
+		}
+	}
 	setLeftColumnMode( leftColumnSchema
 		? LeftColumnMode( settings.value( "LeftColumn/Mode"_uip,
 			int( LeftBlocks ) ).toInt() )

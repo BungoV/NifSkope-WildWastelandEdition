@@ -1,5 +1,31 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09k — Loaded-NIF workspace status and identity-safe filtering
+
+The lower NIF workspace now reports what it actually contains. Its existing
+header reads **Loaded NIF · 1**, **Loaded NIFs · 2**, or, while searching,
+**Loaded NIFs · 1 of 2**. The header tooltip is a compact key for the primary,
+skeleton, face-donor, visibility, transparency and unsaved markers already
+painted on each row. Row tooltips now add the source path and explicitly call
+out unsaved in-memory work without adding another column or widening the pane.
+
+An empty workspace explains that NIFs can be dragged in or added from the
+right-click menu. A search with no result names its query in the viewport rather
+than leaving an unexplained blank table. Both messages are presentation-only
+paint: filtering still uses direct row hiding, so persistent indexes, drag
+payloads, selection and exact document/model identity never remap. The visible
+splitter handle is 4 px, non-collapsible, described to tooltip/accessibility
+readers, and its hint is reapplied after saved-state restoration because Qt can
+recreate the live handle during that replay.
+
+The integration harness now proves browser Refresh preserves every exact Loaded
+document name/model pointer, a filtered row remains the same persistent row and
+background document through match/no-match/clear, shown/total counts are live,
+both splitter panes remain reachable, and the populated/no-result states render.
+The staged release build is green: `loaded_nifs.sh` is **91 checks, 0 failures**,
+the dock harness is **13 checks, 0 failures** with the core **164 → 432 px** range,
+and `archive_browse_survives_load.sh` is **4 checks, 0 failures**.
+
 ## 2026-08-09j — Searchable standalone Header inspector
 
 Header mode now identifies the live document before presenting its technical
