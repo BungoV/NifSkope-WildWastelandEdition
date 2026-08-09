@@ -141,6 +141,31 @@ QTabBar::tab { background: ${bgWin}; color: ${textMuted}; border: 1px solid ${bo
 QTabBar::tab:selected { background: ${bgInput}; color: ${textBright}; border-bottom-color: ${bgInput}; }
 QTabBar::tab:hover:!selected { background: ${bgBtnHover}; color: ${text}; }
 
+/* The left editor selector is a mode switch, not a document tab strip. Keep it
+ * flat and compact, with one unmistakable accent line for the active mode. */
+QTabBar#LeftColumnModeSelector {
+	background: ${bgPanel};
+	border: none;
+	border-bottom: 1px solid ${borderDim};
+}
+QTabBar#LeftColumnModeSelector::tab {
+	background: transparent;
+	color: ${textMuted};
+	border: none;
+	border-bottom: 2px solid transparent;
+	padding: 6px 11px 5px 11px;
+	margin: 0;
+}
+QTabBar#LeftColumnModeSelector::tab:hover:!selected {
+	background: ${bgBtnHover};
+	color: ${text};
+}
+QTabBar#LeftColumnModeSelector::tab:selected {
+	background: ${bgPanel};
+	color: ${textBright};
+	border-bottom: 2px solid ${accent};
+}
+
 QProgressBar { background: ${bgPanel}; border: 1px solid ${border}; border-radius: 2px; text-align: center; }
 QProgressBar::chunk { background: rgba(${rgb}, 255); }
 

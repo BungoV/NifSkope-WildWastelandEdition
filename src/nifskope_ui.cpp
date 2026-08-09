@@ -17688,10 +17688,13 @@ void NifSkope::initDockWidgets()
 	leftColumnSelector->setUsesScrollButtons( false );
 	leftColumnSelector->addTab( tr( "Blocks" ) );
 	leftColumnSelector->setTabData( 0, int( LeftBlocks ) );
+	leftColumnSelector->setTabToolTip( 0, tr( "Block List and Block Details" ) );
 	leftColumnSelector->addTab( tr( "Header" ) );
 	leftColumnSelector->setTabData( 1, int( LeftHeader ) );
+	leftColumnSelector->setTabToolTip( 1, tr( "NIF Header" ) );
 	leftColumnSelector->addTab( tr( "NIFs" ) );
 	leftColumnSelector->setTabData( 2, int( LeftNifs ) );
+	leftColumnSelector->setTabToolTip( 2, tr( "NIF Browser and Loaded NIFs" ) );
 	leftColumnSelector->setAccessibleName( tr( "Left editor mode" ) );
 	hostLayout->addWidget( leftColumnSelector, 0 );
 
