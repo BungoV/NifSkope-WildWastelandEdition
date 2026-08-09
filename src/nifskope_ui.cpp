@@ -8858,11 +8858,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								skope->loadedNifsModel->rowCount() - 1, 0 ).flags()
 								& Qt::ItemIsDragEnabled ) );
 
-					check( "the top selector exposes Blocks, NIFs and Header modes",
+					check( "the top selector orders Blocks, Header and NIFs without remapping modes",
 						skope->leftColumnSelector && skope->leftColumnSelector->count() == 3
 							&& skope->leftColumnSelector->tabText( 0 ) == QStringLiteral( "Blocks" )
-							&& skope->leftColumnSelector->tabText( 1 ) == QStringLiteral( "NIFs" )
-							&& skope->leftColumnSelector->tabText( 2 ) == QStringLiteral( "Header" ) );
+							&& skope->leftColumnSelector->tabData( 0 ).toInt() == NifSkope::LeftBlocks
+							&& skope->leftColumnSelector->tabText( 1 ) == QStringLiteral( "Header" )
+							&& skope->leftColumnSelector->tabData( 1 ).toInt() == NifSkope::LeftHeader
+							&& skope->leftColumnSelector->tabText( 2 ) == QStringLiteral( "NIFs" )
+							&& skope->leftColumnSelector->tabData( 2 ).toInt() == NifSkope::LeftNifs );
+					bool selectorRoutesToStableModes = true;
+					for ( int tab = 0; tab < skope->leftColumnSelector->count(); tab++ ) {
+						skope->leftColumnSelector->setCurrentIndex( tab );
+						QApplication::processEvents();
+						const int stableMode = skope->leftColumnSelector->tabData( tab ).toInt();
+						selectorRoutesToStableModes &= int( skope->leftColumnMode ) == stableMode
+							&& skope->leftColumnStack->currentIndex() == stableMode;
+					}
+					check( "each reordered selector button opens its named stable mode",
+						selectorRoutesToStableModes );
 					check( "NIF Browser is above Loaded NIFs in its own mode",
 						skope->leftColumnStack->currentWidget() == skope->nifWorkspaceSplitter
 							&& skope->nifWorkspaceSplitter->widget( 0 )->isAncestorOf( skope->bsaView )
@@ -17584,9 +17597,18 @@ void NifSkope::setLeftColumnMode( LeftColumnMode mode )
 	leftColumnMode = mode;
 	if ( leftColumnStack )
 		leftColumnStack->setCurrentIndex( int( mode ) );
-	if ( leftColumnSelector && leftColumnSelector->currentIndex() != int( mode ) ) {
-		QSignalBlocker blocker( leftColumnSelector );
-		leftColumnSelector->setCurrentIndex( int( mode ) );
+	if ( leftColumnSelector ) {
+		int selectorIndex = -1;
+		for ( int tab = 0; tab < leftColumnSelector->count(); tab++ ) {
+			if ( leftColumnSelector->tabData( tab ).toInt() == int( mode ) ) {
+				selectorIndex = tab;
+				break;
+			}
+		}
+		if ( selectorIndex >= 0 && leftColumnSelector->currentIndex() != selectorIndex ) {
+			QSignalBlocker blocker( leftColumnSelector );
+			leftColumnSelector->setCurrentIndex( selectorIndex );
+		}
 	}
 	if ( mode == LeftNifs && nifBrowserPopulatePending )
 		QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
@@ -17665,8 +17687,11 @@ void NifSkope::initDockWidgets()
 	leftColumnSelector->setExpanding( false );
 	leftColumnSelector->setUsesScrollButtons( false );
 	leftColumnSelector->addTab( tr( "Blocks" ) );
-	leftColumnSelector->addTab( tr( "NIFs" ) );
+	leftColumnSelector->setTabData( 0, int( LeftBlocks ) );
 	leftColumnSelector->addTab( tr( "Header" ) );
+	leftColumnSelector->setTabData( 1, int( LeftHeader ) );
+	leftColumnSelector->addTab( tr( "NIFs" ) );
+	leftColumnSelector->setTabData( 2, int( LeftNifs ) );
 	leftColumnSelector->setAccessibleName( tr( "Left editor mode" ) );
 	hostLayout->addWidget( leftColumnSelector, 0 );
 
@@ -17698,8 +17723,9 @@ void NifSkope::initDockWidgets()
 	dLeft->setWidget( host );
 	addDockWidget( Qt::LeftDockWidgetArea, dLeft );
 	setLeftColumnMode( LeftBlocks );
-	connect( leftColumnSelector, &QTabBar::currentChanged, this, [this]( int mode ) {
-		setLeftColumnMode( LeftColumnMode( mode ) );
+	connect( leftColumnSelector, &QTabBar::currentChanged, this, [this]( int tab ) {
+		if ( tab >= 0 )
+			setLeftColumnMode( LeftColumnMode( leftColumnSelector->tabData( tab ).toInt() ) );
 	} );
 
 	// A populate requested while the left editor was hidden or in another mode
