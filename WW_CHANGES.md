@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-09e — Left selector order: Blocks, Header, NIFs
+
+The three buttons now read **Blocks · Header · NIFs**. Their visual positions
+are deliberately separate from the persisted mode values: each tab carries its
+stable mode ID, `setLeftColumnMode` resolves that ID back to the current visual
+position, and a click resolves the tab data back to the stable stack page. An
+existing saved NIF mode therefore still reopens NIFs after its button moves from
+second to third.
+
+The integration harness clicks all three reordered buttons and checks the named
+page and stable mode after every click. It is **54 checks, 0 failures**, and the
+rendered screenshot visibly confirms the requested order.
+
 ## 2026-08-09d — Inactive Header page stays invisible
 
 The Blocks screenshot contained a thin vertical string of characters along the

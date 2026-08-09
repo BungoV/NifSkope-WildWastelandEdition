@@ -10,7 +10,7 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 branch `main`, `origin` is the fork — never push upstream.)
 
 Updated **2026-08-09**. Edition **0.3.1**. Build green, working tree clean,
-pushed through paint-through fix `d0a8aad`.
+pushed through selector reorder `24337e4`.
 
 ### This session
 
@@ -18,8 +18,11 @@ One structural UI pass, closed end to end: the left editor is now one permanent
 three-mode column instead of four tabified docks.
 
 - **Blocks** shows Block List above Block Details.
-- **NIFs** shows NIF Browser above Loaded NIFs.
 - **Header** gives the Header the full column.
+- **NIFs** shows NIF Browser above Loaded NIFs.
+- The buttons are ordered **Blocks · Header · NIFs**. Tab positions carry an
+  explicit stable-mode ID, so moving NIFs from the second to the third button
+  does not reinterpret an existing saved NIF mode as Header.
 - The selector is the first row at the top. Switching it changes only a
   `QStackedWidget` page: the views, models, selection, searches, splitter sizes
   and unsaved Loaded NIFs stay alive in place.
@@ -52,7 +55,7 @@ three-mode column instead of four tabified docks.
   Rigging and Vertex Paint expose horizontal scrollbars when folded; UV no
   longer adds a redundant 340 px dock floor. Genuine content floors (UV render
   view and timeline graph/lane) remain.
-- **Verified:** release build green; `loaded_nifs.sh` **53/53**;
+- **Verified:** release build green; `loaded_nifs.sh` **54/54**;
   `WW_DOCKS_TEST` **13/13**; `collision_panel.sh` **39/39**; and
   `window_state_roundtrip.sh` passed two maximised, second-monitor cycles while
   saving/restoring NIF mode and both splitters.
