@@ -203,10 +203,13 @@ predecessor:
   skeleton, load the pieces beside it, pose the skeleton once and the pieces move
   with it. Measured on the PA frame: its bone travelled 76.17 units and the vertex
   sitting on that bone travelled 76.27, holding its grip to six decimals.
-- Every Loaded NIFs row carries **four one-click toggles** — weapon part, pose
-  follow, visible, see-through — drawn dim or lit on every row, with the row menus
-  as the alternate path. The panel owns the whole press-move-release gesture, so a
-  click on a glyph never selects the row and never starts a drag.
+- Every Loaded NIFs row carries **five one-click toggles**, drawn dim or lit and
+  split by a thin rule into what the file IS — skeleton (skull), weapon part
+  (pistol), pose follow (bone) — and how it DRAWS — visible, see-through. The
+  skeleton mark is single-active: marking a row moves it, one click, no dialog,
+  and it is the same state the row menus, the merge target policy and the
+  pose-follow resolution read. The panel owns the whole press-move-release
+  gesture, so a click on a glyph never selects the row and never starts a drag.
 - **Flatten Workspace to One NIF** — the end of the pipeline: everything loaded
   becomes a single file by its marks, pose followers merged onto the skeleton and
   weapon parts onto their connect points, so the file is what the viewport was

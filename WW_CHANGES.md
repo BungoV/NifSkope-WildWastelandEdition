@@ -1,5 +1,67 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10k — The row strip reads: three marks, a rule, two display toggles
+
+**The glyphs were wrong and the user said so.** The pistol was "terrible" and the
+pose-follow arrow "very abstract", which they were — the first drew a bar, a wedge
+and a stub and read as a bracket, the second described the mechanism rather than
+the subject.
+
+- **The pistol is one closed polygon now**, the way Blender's icons survive 16 px:
+  slide across the top with a *stepped muzzle* cut out of its front, and the grip
+  hanging off the REAR corner with a rearward rake. Two rejected attempts are
+  worth recording because the 8x sheet is what caught them — grip too narrow read
+  as a digit **7**, grip centred with a trigger stub beside it read as a capital
+  **T**. The trigger nub that seemed necessary is exactly what broke it: at this
+  size the gap between grip and muzzle *is* the trigger guard.
+- **Pose-follow is a BONE** — two lobes at one end, one at the other, on a
+  diagonal shaft, which is what Blender draws for bone data. It pairs with the
+  skull three slots to its left: that one **is** the skeleton, this one **follows**
+  it.
+
+**The skeleton is a toggle now, and single-active.** Marking a row moves the mark;
+marking the row that holds it clears it. One click, no dialog. That was already
+true *by construction* — `GLView` keeps one pointer, so writing a new one is what
+unmarks the old — and the point of the new control is that it drives **that same
+pointer**. The strip, both row menus, the merge's target policy and the
+pose-follow skeleton resolution all read one piece of state, so none of them can
+disagree; the harness asserts the merge target and the live retarget both follow
+the mark to its new row.
+
+**The strip, reconciled.** Six slots: the face-donor marker, then the three ROLE
+marks, then a thin rule, then the two DISPLAY toggles.
+
+```
+face | skull  pistol  bone │ eye  disc
+     └─ what the file IS ─┘ └ how it draws ┘
+```
+
+The skull **left** the marker slot for one of its own, because it is the one mark
+a row can gain or lose with a click and it has to be visible and clickable on
+every row rather than drawn only on the row that already has it. The face donor
+keeps that slot: the rigging steps set it, it is one file per workspace, and it is
+not a toggle. The rule is `wwSkinColor("border")`, dead to the mouse like the
+marker slot, and everything left of it shifts by its width —
+`loadedNifGlyphRect()` owns that arithmetic so the gesture assertions cannot drift
+from what is drawn.
+
+**The primary's row keeps its policy**: marker-only, no clickable toggles, as it
+has never had them and is always drawn. A mark it carries is still shown. With no
+row marked the primary remains the *de facto* skeleton — that is what the
+pose-follow resolution falls back to — so marking it explicitly would be
+redundant rather than useful.
+
+**For approval: `release/ww_icon_sheet.png`.** Every mark at 1x as the row draws
+it and at 8x nearest-neighbour with no smoothing, lit and dim, plus the display
+toggles and the rule for context, drawn through the delegate's own geometry so the
+sheet cannot disagree with the strip.
+
+Suites: `loaded_nifs.sh` **118/118** (was 112 — the gesture contract now covers
+five toggles), `weapon_mark.sh` **85/85** (was 77), `flatten.sh` 28/28,
+`workspace_skeleton_target.sh` 34/34, `sam_pose_import.sh` PASS,
+`artobject_attach.sh` 14/14, `carries_everything.sh` 24/24, `live_effects.sh`
+15/15.
+
 ## 2026-08-10j — The composed workspace becomes one NIF, pose baked or not
 
 **The end of the pipeline the marks build.** A skeleton, meshes marked to follow

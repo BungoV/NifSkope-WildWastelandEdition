@@ -840,6 +840,14 @@ bool NifSkope::workspaceDocumentFollows( int backgroundIndex ) const
 	return ogl && ogl->isWorkspaceFollower( workspaceDocumentModel( backgroundIndex ) );
 }
 
+//! Is this row THE skeleton? Single-active by construction — GLView holds one
+//! pointer, so this can be true of at most one row at a time.
+bool NifSkope::workspaceDocumentIsSkeleton( int backgroundIndex ) const
+{
+	NifModel * model = workspaceDocumentModel( backgroundIndex );
+	return ogl && model && ogl->workspaceSkeleton() == model;
+}
+
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
 	NifSkope * primary = nullptr;
@@ -10727,6 +10735,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->setWorkspaceDisplayMode( row, 1 );
 						skope->markWorkspaceWeaponRow( row, false );
 						skope->markWorkspaceFollowerRow( row, false );
+						skope->setWorkspaceSkeletonDocument( -1 );
 						QApplication::processEvents();
 
 						auto clearSelection = [skope]() {
@@ -10760,6 +10769,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						};
 						// state readers, one per toggle, so each check names the thing
 						// it actually moved
+						auto skeletonState = [skope, row]() { return skope->workspaceDocumentIsSkeleton( row ); };
 						auto weaponState = [skope, row]() { return skope->workspaceDocumentIsWeapon( row ); };
 						auto followState = [skope, row]() { return skope->workspaceDocumentFollows( row ); };
 						auto visibleState = [skope, row]() { return skope->workspaceDisplayMode( row ) != 0; };
@@ -10767,10 +10777,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 						struct Probe { int slot; const char * name; std::function<bool()> state; };
 						const QVector<Probe> probes = {
-							{ 1, "the weapon mark", weaponState },
-							{ 2, "the pose-follow mark", followState },
-							{ 3, "the eye", visibleState },
-							{ 4, "the see-through disc", ghostState },
+							{ 1, "the skeleton mark", skeletonState },
+							{ 2, "the weapon mark", weaponState },
+							{ 3, "the pose-follow mark", followState },
+							{ 4, "the eye", visibleState },
+							{ 5, "the see-through disc", ghostState },
 						};
 						for ( const Probe & probe : probes ) {
 							clearSelection();
@@ -10799,9 +10810,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->markWorkspaceWeaponRow( row, true );
 						skope->markWorkspaceFollowerRow( row, true );
 						QApplication::processEvents();
-						check( "the row strip renders with both marks lit",
+						skope->setWorkspaceSkeletonDocument( row );
+						QApplication::processEvents();
+						check( "the row strip renders with every mark lit",
 							skope->grabLoadedNifsView( stripShot ) );
 						log << "  " << stripShot << "\n";
+						/* THE ICON SHEET, which is what the glyphs get approved from: every
+						 * mark at 1x as the row draws it and at 8x with no smoothing, lit and
+						 * dim, plus the two display toggles and the rule for context. */
+						const QString sheet =
+							QApplication::applicationDirPath() + "/ww_icon_sheet.png";
+						check( "the mark icon sheet renders", skope->renderMarkIconSheet( sheet ) );
+						log << "  " << sheet << "\n";
+						skope->setWorkspaceSkeletonDocument( -1 );
 						skope->markWorkspaceWeaponRow( row, false );
 						skope->markWorkspaceFollowerRow( row, false );
 					}
@@ -12035,6 +12056,67 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& !plainSummary.contains( QStringLiteral( "WEAPON PARTS:" ) )
 							&& !plainSummary.contains( QStringLiteral( "attached to WEAPON" ) ) );
 
+					/* ---- 10b. THE SKELETON MARK IS SINGLE-ACTIVE ----------------
+					 *
+					 * One skeleton at a time, and moving it is one click: marking a row
+					 * unmarks whatever held it. That was already true by construction —
+					 * GLView keeps ONE pointer, so writing a new one is what clears the
+					 * old — and the toggle drives that same pointer rather than a second
+					 * copy of the state. Which is the point of asserting it here: there
+					 * is nothing else for the strip, the row menus, the merge target
+					 * policy and the pose-follow resolution to disagree about.
+					 */
+					check( "no skeleton is marked to begin with",
+						skope->setWorkspaceSkeletonDocument( -1 )
+							&& !skope->workspaceDocumentIsSkeleton( RigTarget )
+							&& !skope->workspaceDocumentIsSkeleton( RifleTarget ) );
+					check( "a row can take the skeleton mark",
+						skope->setWorkspaceSkeletonDocument( RigTarget )
+							&& skope->workspaceDocumentIsSkeleton( RigTarget ) );
+					check( "marking a SECOND row moves it — exactly one row holds it",
+						skope->setWorkspaceSkeletonDocument( RifleTarget )
+							&& skope->workspaceDocumentIsSkeleton( RifleTarget )
+							&& !skope->workspaceDocumentIsSkeleton( RigTarget ) );
+					{
+						int held = 0;
+						for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+							if ( skope->workspaceDocumentIsSkeleton( i ) )
+								held++;
+						log << "rows holding the skeleton mark: " << held << "\n";
+						check( "...counted across every row, not just the two touched", held == 1 );
+					}
+					
+					/* AND THE MERGE TARGET POLICY READS THE ROW THAT HOLDS IT NOW.
+					 * The mark is on the rifle rig; a merge is asked for with the minigun
+					 * as target and the rifle rig as the donor. A valid marked skeleton
+					 * in the selection overrides the requested target, so the RIFLE rig
+					 * must be what grew. Had the policy still been reading the rig the
+					 * mark left, the minigun would have absorbed it instead. */
+					{
+						auto * dismiss = new QTimer( skope );
+						QObject::connect( dismiss, &QTimer::timeout, skope, []() {
+							if ( auto * mb = qobject_cast<QMessageBox *>(
+								QApplication::activeModalWidget() ) )
+							if ( !mb->buttons().isEmpty() )
+								mb->buttons().first()->click();
+						} );
+						const int rifleBefore = skope->workspaceBlockCount( RifleTarget );
+						const int gunBefore = skope->workspaceBlockCount( OtherGun );
+						dismiss->start( 100 );
+						const bool merged = skope->mergeWorkspaceDocumentsInto( OtherGun, { RifleTarget } );
+						dismiss->stop();
+						settle( 400 );
+						log << "merge with the mark on the rifle rig: rifle " << rifleBefore << " -> "
+							<< skope->workspaceBlockCount( RifleTarget ) << ", minigun " << gunBefore
+							<< " -> " << skope->workspaceBlockCount( OtherGun ) << "\n";
+						check( "the merge target policy follows the mark to its new row",
+							merged && skope->workspaceBlockCount( RifleTarget ) > rifleBefore
+								&& skope->workspaceBlockCount( OtherGun ) == gunBefore );
+					}
+					check( "the mark can be cleared, leaving none",
+						skope->setWorkspaceSkeletonDocument( -1 )
+							&& !skope->workspaceDocumentIsSkeleton( RifleTarget ) );
+					
 					/* ---- 11. THE POSE-FOLLOW MARK -------------------------------
 					 *
 					 * "It follows the loaded skeleton, if it's been loaded, then the
@@ -12243,6 +12325,36 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							check( "the follower's FILE is byte-identical — nothing was written into it",
 								!fileBefore.isEmpty() && fileAfter == fileBefore );
 
+							/* THE FOLLOWER TRACKS WHICHEVER ROW HOLDS THE MARK.
+							 *
+							 * Until now the skeleton has been the primary by default. Marking a
+							 * DIFFERENT row — the kit rig, which is a copy of the same skeleton
+							 * still in its bind pose — has to move the follower onto that one, so
+							 * the geometry snaps back to rest without the pose being touched. Then
+							 * clearing the mark hands it back to the primary and the pose returns.
+							 * Two states, one click apart, measured through the scene.
+							 */
+							skope->setWorkspaceSkeletonDocument( KitTarget );
+							repaint();
+							fs = followerShape();
+							const QVector<Vector3> retargeted = evaluated( fs );
+							float worstRetarget = 0;
+							for ( int v = 0; v < retargeted.size() && v < before.size(); v++ )
+								worstRetarget = qMax( worstRetarget, ( retargeted.at( v ) - before.at( v ) ).length() );
+							log << "with the mark moved to a bind-pose rig, the worst vertex is "
+								<< worstRetarget << " from rest\n";
+							check( "moving the skeleton mark RETARGETS the follower onto that row",
+								retargeted.size() == before.size() && worstRetarget < 0.5f );
+							skope->setWorkspaceSkeletonDocument( -1 );
+							repaint();
+							fs = followerShape();
+							const QVector<Vector3> handedBack = evaluated( fs );
+							const float backOnPose = ( probe.vertex >= 0 && probe.vertex < handedBack.size() )
+								? ( handedBack.at( probe.vertex ) - before.at( probe.vertex ) ).length() : -1;
+							log << "with the mark cleared the primary is the skeleton again; the probe vertex is " << backOnPose << " from rest\n";
+							check( "...and clearing it hands the follower back to the posed primary",
+								backOnPose > 5.0f );
+							
 							/* UNMARKING PUTS IT BACK, at once and without a reload. */
 							check( "the follower can be unmarked",
 								skope->markWorkspaceFollowerRow( PlainDonor, false )

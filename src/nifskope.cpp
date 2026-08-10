@@ -305,22 +305,42 @@ static void paintTreeEmptyMessage( QTreeView * view, const QString & message )
 }
 
 static constexpr int LoadedNifGlyphWidth = 20;
-/* Five: the marker, then four toggles.
+/* Six: the face-donor marker, three ROLE toggles, then the two DISPLAY toggles.
  *
- * The weapon and pose-follow marks used to live in the marker slot and be
- * settable only from the row menu, which made them the two facts about a row you
- * could not see without right-clicking it — and the eye beside them had been
- * one-click since the day it shipped. They are toggles now, drawn on EVERY row
- * dimmed and lit like the eye is, and the menu entries are the alternate path
- * rather than the only one. */
-static constexpr int LoadedNifGlyphCount = 5;
+ * The marks used to share one marker slot and be settable only from the row menu,
+ * which made the most useful facts about a row the ones you had to right-click to
+ * find — while the eye beside them had been one-click since the day it shipped.
+ * Skeleton, weapon and pose-follow are toggles now, drawn on every row dimmed or
+ * lit, with the menu entries as the alternate path rather than the only one.
+ *
+ * The face donor keeps the old marker slot: it is not a toggle (the rigging steps
+ * set it, and it is one file per workspace), so it is drawn only when it is set.
+ */
+static constexpr int LoadedNifGlyphCount = 6;
+/*! A thin rule between the three ROLE marks and the two DISPLAY toggles.
+ *
+ *  Six glyphs in a row read as one undifferentiated strip, and the two halves are
+ *  different kinds of thing: the left says what the document IS to the workspace,
+ *  the right says how it is drawn. The divider is dead to the mouse, like the
+ *  marker slot, and everything left of it shifts by its width. */
+static constexpr int LoadedNifDividerSlot = 4;			//!< the rule sits before this slot
+static constexpr int LoadedNifDividerWidth = 7;
 
 static QRect loadedNifGlyphRect( const QRect & row, int slot )
 {
 	const int size = std::min( LoadedNifGlyphWidth, row.height() - 2 );
 	const int top = row.top() + ( row.height() - size ) / 2;
+	const int shift = ( slot < LoadedNifDividerSlot ) ? LoadedNifDividerWidth : 0;
 	return QRect( row.right() - ( LoadedNifGlyphCount - slot )
-		* ( LoadedNifGlyphWidth + 2 ) - 2, top, size, size );
+		* ( LoadedNifGlyphWidth + 2 ) - 2 - shift, top, size, size );
+}
+
+//! The rule itself: full row height, centred in the gap it opened.
+static QRect loadedNifDividerRect( const QRect & row )
+{
+	const QRect after = loadedNifGlyphRect( row, LoadedNifDividerSlot );
+	const int x = after.left() - ( LoadedNifDividerWidth + 1 ) / 2;
+	return QRect( x, row.top() + 3, 1, qMax( 4, row.height() - 6 ) );
 }
 
 class LoadedNifsTreeView final : public QTreeView
@@ -355,10 +375,10 @@ protected:
 			const QModelIndex index = indexAt( event->pos() );
 			if ( index.isValid() && hasToggleButtons( index ) ) {
 				const QRect row = visualRect( index );
-				// slot 0 is the skull/face marker and stays dead to the mouse; 1..4
-				// are the real toggles, and the press is claimed here so a click on
-				// one neither selects the row nor starts a drag
-				for ( int slot = 1; slot <= 4; slot++ ) {
+				// slot 0 is the face-donor marker and stays dead to the mouse, as
+				// does the rule; 1..5 are the real toggles, and the press is claimed
+				// here so a click on one neither selects the row nor starts a drag
+				for ( int slot = 1; slot <= 5; slot++ ) {
 					if ( !loadedNifGlyphRect( row, slot ).contains( event->pos() ) )
 						continue;
 					pressedToggleRow = QPersistentModelIndex( index );
@@ -457,6 +477,7 @@ private:
 static QIcon skeletonMarkIcon();
 static QIcon faceDonorMarkIcon();
 //! Toggle glyphs take their ink, because the row draws them dim as well as lit.
+static QPixmap skeletonMarkPixmap( const QColor & ink );
 static QPixmap weaponMarkPixmap( const QColor & ink );
 static QPixmap poseFollowPixmap( const QColor & ink );
 static QIcon weaponMarkIcon();
@@ -504,9 +525,14 @@ public:
 	 *  snapping to. Its slot is reserved even when nothing is marked, so the two
 	 *  real toggles stay aligned down the list instead of shifting sideways when a
 	 *  skeleton is picked. The weapon mark shares that one slot; see paint(). */
-	enum Slot { SlotSkeleton = 0, SlotWeapon = 1, SlotFollow = 2,
-	            SlotVisible = 3, SlotGhost = 4 };
-	static constexpr int SlotCount = 5;
+	/*! Left to right: the face-donor marker, the three ROLE toggles, the rule,
+	 *  then the two DISPLAY toggles. The skull left the marker slot when it became
+	 *  a toggle of its own — it is the one mark a row can gain or lose with a
+	 *  click, and single-active, so it has to be visible and clickable on every
+	 *  row rather than drawn only on the one that already has it. */
+	enum Slot { SlotFaceDonor = 0, SlotSkeleton = 1, SlotWeapon = 2, SlotFollow = 3,
+	            SlotVisible = 4, SlotGhost = 5 };
+	static constexpr int SlotCount = 6;
 
 	//! Bit 0 = visible, bit 1 = ghost, bit 2 = skeleton, bit 4 = face donor,
 	//! bit 5 = unsaved, bit 6 = weapon part, bit 7 = pose follower.
@@ -526,9 +552,10 @@ public:
 		QStyleOptionViewItem opt( option );
 		initStyleOption( &opt, index );
 		const int flags = displayFlags ? displayFlags( index ) : -1;
-		if ( flags >= 0 )		// keep the text clear of the buttons
+		if ( flags >= 0 )		// keep the text clear of the buttons AND the rule
 			opt.rect.setRight( opt.rect.right()
-				- LoadedNifGlyphCount * ( LoadedNifGlyphWidth + 2 ) - 4 );
+				- LoadedNifGlyphCount * ( LoadedNifGlyphWidth + 2 )
+				- LoadedNifDividerWidth - 4 );
 
 		/* Colour follows SELECTION, exactly as the Block List does.
 		 *
@@ -584,37 +611,39 @@ public:
 		painter->save();
 		painter->setRenderHint( QPainter::Antialiasing, true );
 
-		/* --- the skeleton, face-donor or weapon marker, ahead of the toggles --
+		/* --- the face-donor marker, alone in the slot the skull used to share ---
 		 *
-		 * One slot, because a file is one of the three in every workflow this
-		 * serves: the skeleton is what everything else poses against, the face
-		 * donor is where sculpt bones are read from, a weapon part is something
-		 * that goes in a hand, and those are different files. If a file were
-		 * somehow marked as more than one, the skull wins and the gun loses —
-		 * losing track of the skeleton is the most confusing of the three, and
-		 * the weapon mark is the one you can see in the merge summary anyway.
-		 *
-		 * The weapon mark is a SET, unlike the other two: a Fallout 4 gun is a
-		 * base NIF plus its part files, so several rows carry the gun at once.
+		 * Not a toggle: the rigging steps read it, it is one file per workspace,
+		 * and nothing about it is worth a control on every row. So it is drawn
+		 * when it is set and the slot is simply empty otherwise, which is what it
+		 * has always done.
 		 */
-		if ( isSkeleton || isFaceDonor ) {
-			const QRect r = glyphRect( option.rect, SlotSkeleton ).adjusted( 2, 2, -2, -2 );
-			( isSkeleton ? skeletonMarkIcon() : faceDonorMarkIcon() ).paint( painter, r );
-		}
+		if ( isFaceDonor )
+			faceDonorMarkIcon().paint( painter,
+				glyphRect( option.rect, SlotFaceDonor ).adjusted( 2, 2, -2, -2 ) );
 
-		/* --- the two row toggles that are marks, not display settings ---------
+		/* --- the three ROLE toggles ------------------------------------------
 		 *
 		 * Always drawn, dim for off and accent for on, exactly as the eye is, so
-		 * "is this a weapon part" and "does this follow the skeleton" are answers
-		 * you can read down the list instead of facts you have to go looking for
-		 * in a menu. Both are painted for the primary's row too when it carries
-		 * them, which is the markerOnly case above.
+		 * what a document IS to the workspace is something you read down the list
+		 * instead of a fact you go looking for in a menu. The primary's row keeps
+		 * its marker-only treatment — it has never had clickable toggles, it is
+		 * always drawn, and it is the skeleton by default anyway — but a mark it
+		 * does carry is still shown.
 		 */
+		painter->drawPixmap( glyphRect( option.rect, SlotSkeleton ).adjusted( 2, 2, -2, -2 ),
+			skeletonMarkPixmap( isSkeleton ? lit : dim ) );
 		if ( !markerOnly ) {
 			painter->drawPixmap( glyphRect( option.rect, SlotWeapon ).adjusted( 2, 2, -2, -2 ),
 				weaponMarkPixmap( isWeapon ? lit : dim ) );
 			painter->drawPixmap( glyphRect( option.rect, SlotFollow ).adjusted( 2, 2, -2, -2 ),
 				poseFollowPixmap( isFollower ? lit : dim ) );
+
+			// the rule between what the document IS and how it is DRAWN
+			painter->setPen( QPen( QColor( wwSkinColor( "border" ) ), 1 ) );
+			painter->setBrush( Qt::NoBrush );
+			const QRect rule = loadedNifDividerRect( option.rect );
+			painter->drawLine( rule.topLeft(), rule.bottomLeft() );
 		}
 
 		// --- the eye ---------------------------------------------------------
@@ -721,14 +750,13 @@ static QIcon faceDonorMarkIcon()
 	return QIcon( pm );
 }
 
-static QIcon skeletonMarkIcon()
+static QPixmap skeletonMarkPixmap( const QColor & ink )
 {
 	const int s = 16;
 	QPixmap pm( s, s );
 	pm.fill( Qt::transparent );
 	QPainter p( &pm );
 	p.setRenderHint( QPainter::Antialiasing, true );
-	const QColor ink( wwSkinColor( "accent" ) );
 	p.setPen( Qt::NoPen );
 	p.setBrush( ink );
 
@@ -745,7 +773,12 @@ static QIcon skeletonMarkIcon()
 	p.drawEllipse( QRectF( 8.4, 4.2, 3.6, 3.8 ) );
 	p.drawRect( QRectF( 7.6, 10.8, 0.9, 3.2 ) );
 	p.end();
-	return QIcon( pm );
+	return pm;
+}
+
+static QIcon skeletonMarkIcon()
+{
+	return QIcon( skeletonMarkPixmap( QColor( wwSkinColor( "accent" ) ) ) );
 }
 
 /*! A small handgun, for a row marked as a weapon part.
@@ -767,33 +800,51 @@ static QPixmap weaponMarkPixmap( const QColor & ink )
 	p.setPen( Qt::NoPen );
 	p.setBrush( ink );
 
-	// slide and receiver: one bar across the top, muzzle to the left
-	p.drawRoundedRect( QRectF( 0.8, 3.0, 14.4, 4.2 ), 1.0, 1.0 );
-	/* The grip, raked back, and WIDE. The first version drew it three pixels
-	 * across and the glyph read as a digit 7 in the capture — a handle has to
-	 * look like something a hand goes round even at this size. */
-	QPolygonF grip;
-	grip << QPointF( 10.4, 6.8 ) << QPointF( 15.2, 6.8 )
-	     << QPointF( 13.9, 15.0 ) << QPointF( 9.4, 15.0 );
-	p.drawPolygon( grip );
-	// the trigger, a stub under the receiver
-	p.drawRoundedRect( QRectF( 7.4, 7.0, 1.9, 3.2 ), 0.6, 0.6 );
+	/* ONE SILHOUETTE, not a pile of primitives.
+	 *
+	 * The first version stacked a bar, a wedge and a stub, and at 16 px it read as
+	 * a bracket — the user's word was "terrible". Blender's icons survive this
+	 * size because each is a single closed shape with generous negative space, so
+	 * this is one polygon: the slide across the top with the muzzle to the left,
+	 * and the grip dropping away from the rear at a rake you can actually see. The
+	 * two CUTS afterwards are what stop it being a capital L — the barrel steps
+	 * down out of the slide, and a notch under the receiver opens the gap between
+	 * trigger and grip that the eye reads as a trigger guard.
+	 */
+	/* THE GRIP GOES AT THE BACK, flush with the rear edge.
+	 *
+	 * Centred under the slide with a trigger stub beside it, the silhouette read
+	 * as a capital T at 8x — two legs under a bar. A pistol is a long slide with
+	 * ONE mass hanging off its rear corner and a raked front edge to that mass,
+	 * and the trigger nub that seemed necessary is what broke it: at 16 px the gap
+	 * between grip and muzzle is the trigger guard, and negative space carries it.
+	 */
+	QPolygonF gun;
+	gun << QPointF( 0.8, 3.6 ) << QPointF( 14.5, 3.6 ) << QPointF( 14.5, 14.6 )
+	    << QPointF( 10.8, 14.6 ) << QPointF( 9.4, 7.9 ) << QPointF( 0.8, 7.9 );
+	p.drawPolygon( gun );
 
-	/* The barrel is stepped down out of the slide, punched rather than drawn, as
-	 * the skull's sockets are. Without it the front half is a plain bar. */
+	/* The muzzle end is cut down to a barrel — without it the front half is a
+	 * plain slab and the whole thing is a bracket. Cut, not drawn, so the glyph
+	 * still reads on any row background, exactly as the skull's sockets are. */
 	p.setCompositionMode( QPainter::CompositionMode_Clear );
 	p.setBrush( Qt::black );
-	p.drawRect( QRectF( 0.0, 2.8, 4.2, 1.7 ) );
+	p.drawRect( QRectF( -1.0, 3.0, 4.8, 2.2 ) );
 	p.end();
 	return pm;
 }
 
-/*! A row that FOLLOWS the marked skeleton's pose: an arrow snapping onto a bar.
+/*! A row that FOLLOWS the skeleton's pose: a BONE.
  *
- *  Blender's equivalent, for the same idea, is the snap magnet; a magnet at 16 px
- *  is two blobs. An arrow flying into a post says "this lands on that" with three
- *  strokes and stays legible dimmed, which is how it spends most of its life —
- *  every row draws it, lit only when the row is following.
+ *  The first version was an arrow flying into a post — "very abstract", and it
+ *  was: it described the mechanism rather than the subject. A bone is the
+ *  subject, it is what Blender draws for bone data, and it PAIRS with the skull
+ *  two slots to its left, which already means "this file is the skeleton". Skull
+ *  and bone, side by side: that one IS the skeleton, this one follows it.
+ *
+ *  Two lobes at one end and one at the other, on a diagonal shaft — the classic
+ *  bone read, and the asymmetry is what keeps it from looking like a dumbbell at
+ *  this size.
  */
 static QPixmap poseFollowPixmap( const QColor & ink )
 {
@@ -805,14 +856,14 @@ static QPixmap poseFollowPixmap( const QColor & ink )
 	p.setPen( Qt::NoPen );
 	p.setBrush( ink );
 
-	// the post it snaps to, on the right
-	p.drawRoundedRect( QRectF( 12.2, 2.4, 2.2, 11.2 ), 1.0, 1.0 );
-	// the shaft
-	p.drawRoundedRect( QRectF( 1.2, 7.1, 8.0, 1.8 ), 0.8, 0.8 );
-	// the head
-	QPolygonF head;
-	head << QPointF( 7.6, 4.2 ) << QPointF( 11.8, 8.0 ) << QPointF( 7.6, 11.8 );
-	p.drawPolygon( head );
+	// the shaft, corner to corner so it fills the square
+	p.setPen( QPen( ink, 3.1, Qt::SolidLine, Qt::RoundCap ) );
+	p.drawLine( QPointF( 4.8, 11.2 ), QPointF( 11.2, 4.8 ) );
+	p.setPen( Qt::NoPen );
+	// two lobes at the lower end, one at the upper: a bone, not a dumbbell
+	p.drawEllipse( QPointF( 3.3, 10.4 ), 2.5, 2.5 );
+	p.drawEllipse( QPointF( 5.6, 12.7 ), 2.5, 2.5 );
+	p.drawEllipse( QPointF( 11.9, 4.1 ), 2.9, 2.9 );
 	p.end();
 	return pm;
 }
@@ -2092,6 +2143,17 @@ NifSkope::NifSkope( bool background )
 		 * and everything about what the row means, so they get the same one-click
 		 * gesture the eye has rather than a menu of their own. The row menu still
 		 * offers both, reading and writing this same state. */
+		/* SINGLE-ACTIVE, and it always was: the skeleton is one raw pointer on
+		 * GLView, so writing a new one is what unmarks the old. The toggle drives
+		 * that same state — the row menus, the merge's target policy and the
+		 * pose-follow resolution all read it, and none of them can disagree with
+		 * the strip because there is nothing else to read. */
+		if ( slot == LoadedNifsDelegate::SlotSkeleton ) {
+			if ( ogl )
+				ogl->setWorkspaceSkeleton( ogl->workspaceSkeleton() == model ? nullptr : model );
+			refreshAllDocumentSessions();
+			return;
+		}
 		if ( slot == LoadedNifsDelegate::SlotWeapon ) {
 			nifSetWeaponMark( model, !nifIsWeaponMarked( model ) );
 			refreshAllDocumentSessions();
@@ -2140,10 +2202,11 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView->setVerticalScrollMode( QAbstractItemView::ScrollPerPixel );
 	loadedNifsView->header()->setStretchLastSection( true );
 	loadedNifsView->header()->setToolTip( tr(
-		"Row key: arrow = primary · skull = skeleton · face = face donor · "
-		"gun = weapon part · arrow-to-post = follows the skeleton's pose · "
-		"eye = visible · half-disc = semi-transparent · red name = unsaved. "
-		"Every glyph but the skull and face is a one-click toggle." ) );
+		"Row key: arrow = primary · face = face donor · skull = skeleton (only one "
+		"at a time) · pistol = weapon part · bone = follows the skeleton's pose · "
+		"then the rule, then eye = visible · half-disc = semi-transparent. "
+		"A red name is unsaved. Everything right of the face donor is a one-click "
+		"toggle." ) );
 	loadedWorkspaceView->sourceView = browserWorkspaceView;
 	loadedWorkspaceView->addBrowserRows = [this]( const QList<QPersistentModelIndex> & rows ) {
 		addNifBrowserRowsToLoaded( rows );
@@ -8495,6 +8558,118 @@ int NifSkope::workspaceDisplayMode( int backgroundIndex ) const
 int NifSkope::workspaceDocumentCount() const
 {
 	return int( workspaceBackgroundDocuments().size() );
+}
+
+/*! Every mark glyph on one page, for approving them.
+ *
+ *  Icons get judged at the size they are used and fixed at the size they are
+ *  drawn, so both are here: 1x as the row shows it, and 8x nearest-neighbour so
+ *  the pixels that decide whether a 16 px pistol reads as a pistol are visible.
+ *  Lit and dim, because dim is how a toggle spends most of its life, and the two
+ *  display toggles for context with the rule that separates them.
+ */
+bool NifSkope::renderMarkIconSheet( const QString & path ) const
+{
+	struct Entry { const char * label; QPixmap ( *draw )( const QColor & ); };
+	const QVector<Entry> roles = {
+		{ "skeleton (skull)", &skeletonMarkPixmap },
+		{ "weapon part (pistol)", &weaponMarkPixmap },
+		{ "pose follow (bone)", &poseFollowPixmap },
+	};
+
+	const QColor lit( wwSkinColor( "accent" ) );
+	const QColor dim( wwSkinColor( "textMuted" ) );
+	const QColor ink( wwSkinColor( "text" ) );
+	const QColor back( wwSkinColor( "bg" ) );
+	const int rowH = 156, top = 112, left = 24, cellW = 300;
+
+	QPixmap sheet( left + cellW * 2 + 40, top + rowH * ( roles.size() + 1 ) + 30 );
+	sheet.fill( back );
+	QPainter p( &sheet );
+	p.setRenderHint( QPainter::Antialiasing, true );
+	QFont title = p.font();
+	title.setBold( true );
+	title.setPointSize( title.pointSize() + 3 );
+	p.setFont( title );
+	p.setPen( ink );
+	p.drawText( left, 34, tr( "Loaded NIFs row marks — 1x as drawn, 8x as inspected" ) );
+	p.setFont( QFont() );
+	p.setPen( dim );
+	p.drawText( left, 56, tr( "left column LIT (marked) · right column DIM (not marked)" ) );
+
+	auto cell = [&]( int x, int y, const QPixmap & pm, const QString & caption ) {
+		p.setPen( ink );
+		p.drawPixmap( x, y, pm );
+		// 8x, nearest neighbour: no smoothing, so what is on screen is what is
+		// in the pixmap
+		p.drawPixmap( QRect( x + 34, y - 24, 128, 128 ),
+			pm.scaled( 128, 128, Qt::IgnoreAspectRatio, Qt::FastTransformation ) );
+		p.setPen( dim );
+		p.drawText( x, y + 40, caption );
+	};
+
+	int y = top;
+	for ( const Entry & e : roles ) {
+		p.setPen( ink );
+		p.drawText( left, y - 34, QString::fromLatin1( e.label ) );
+		cell( left, y, e.draw( lit ), tr( "1x" ) );
+		cell( left + cellW, y, e.draw( dim ), tr( "1x" ) );
+		y += rowH;
+	}
+
+	/* THE CONTEXT ROW: the two display toggles and the rule between them and the
+	 * marks above, drawn through the delegate's own geometry so the sheet cannot
+	 * disagree with the strip about where anything sits. */
+	p.setPen( ink );
+	p.drawText( left, y - 34, tr( "for context — the row strip, marks | display" ) );
+	if ( loadedNifsView && loadedNifsModel && loadedNifsModel->rowCount() > 0 ) {
+		const QModelIndex row = loadedNifsModel->index( loadedNifsModel->rowCount() - 1, 0 );
+		const QRect vr = loadedNifsView->visualRect( row );
+		if ( vr.isValid() )
+			p.drawPixmap( left, y, loadedNifsView->viewport()->grab( vr ) );
+	}
+	const QRect strip( left, y + 56, cellW * 2, 26 );
+	p.fillRect( strip, back );
+	for ( int slot = 0; slot < LoadedNifGlyphCount; slot++ ) {
+		const QRect g = loadedNifGlyphRect( strip, slot );
+		if ( slot == LoadedNifsDelegate::SlotFaceDonor )
+			faceDonorMarkIcon().paint( &p, g.adjusted( 2, 2, -2, -2 ) );
+		else if ( slot == LoadedNifsDelegate::SlotSkeleton )
+			p.drawPixmap( g.adjusted( 2, 2, -2, -2 ), skeletonMarkPixmap( lit ) );
+		else if ( slot == LoadedNifsDelegate::SlotWeapon )
+			p.drawPixmap( g.adjusted( 2, 2, -2, -2 ), weaponMarkPixmap( lit ) );
+		else if ( slot == LoadedNifsDelegate::SlotFollow )
+			p.drawPixmap( g.adjusted( 2, 2, -2, -2 ), poseFollowPixmap( dim ) );
+		else {
+			// the eye and the disc, as the delegate draws them
+			LoadedNifsDelegate probe;
+			Q_UNUSED( probe );
+			p.setPen( QPen( slot == LoadedNifsDelegate::SlotVisible ? lit : dim, 1.3 ) );
+			p.setBrush( Qt::NoBrush );
+			const QRectF f = QRectF( g ).adjusted( 3, 3, -3, -3 );
+			if ( slot == LoadedNifsDelegate::SlotVisible ) {
+				QPainterPath eye;
+				const qreal cx = f.center().x(), cy = f.center().y();
+				const qreal hw = f.width() * 0.5, hh = f.height() * 0.32;
+				eye.moveTo( cx - hw, cy );
+				eye.quadTo( cx, cy - hh * 2.1, cx + hw, cy );
+				eye.quadTo( cx, cy + hh * 2.1, cx - hw, cy );
+				p.drawPath( eye );
+				p.setPen( Qt::NoPen );
+				p.setBrush( lit );
+				p.drawEllipse( QPointF( cx, cy ), hh * 0.78, hh * 0.78 );
+			} else {
+				p.drawEllipse( f );
+			}
+		}
+	}
+	p.setPen( QPen( QColor( wwSkinColor( "border" ) ), 1 ) );
+	const QRect rule = loadedNifDividerRect( strip );
+	p.drawLine( rule.topLeft(), rule.bottomLeft() );
+	p.setPen( dim );
+	p.drawText( left, y + 104, tr( "face donor · skeleton · weapon · pose follow  |  visible · see-through" ) );
+	p.end();
+	return sheet.save( path );
 }
 
 /*! The viewport rect of one row's glyph.
