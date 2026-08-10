@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QByteArray>
 #include <QHash>
 #include <QPersistentModelIndex>
+#include <QPointer>
 #include <QSet>
 #include <chrono>
 #include <functional>
@@ -414,6 +415,32 @@ public:
 	void setWorkspaceSkeleton( NifModel * model );
 	NifModel * workspaceSkeleton() const { return workspaceSkeletonModel; }
 
+	//! Mark one loaded document as FOLLOWING the skeleton, per document.
+	/*! The skull says which file is the skeleton; this says who moves with it. A
+	 *  marked document re-anchors its skinned geometry to that skeleton's bones by
+	 *  name, live, every time the pose changes and without a merge — nothing is
+	 *  written into the follower, and unmarking puts it back on its own flat bone
+	 *  copies immediately.
+	 *
+	 *  The skeleton it follows is the skull-marked document if there is one, and
+	 *  otherwise the PRIMARY when the primary has a real bone hierarchy. A follower
+	 *  with neither available renders exactly as it did before it was marked.
+	 *
+	 *  While no document is marked, not one transform is computed differently from
+	 *  before this existed: the skull's own all-documents behaviour is left alone
+	 *  and only takes over when the follower set is empty. */
+	void setWorkspaceFollower( NifModel * model, bool follow );
+	bool isWorkspaceFollower( const NifModel * model ) const;
+	//! Live follower marks, pruning any whose document has gone.
+	int workspaceFollowerCount();
+	/*! The live Scene a loaded document draws through, or null.
+	 *
+	 *  getScene() answers this for the primary; this answers it for a workspace
+	 *  row. Anything that has to measure what a document actually RENDERS — a
+	 *  follower's evaluated skin, rather than the file it was loaded from — needs
+	 *  the Scene, because the file is exactly what does not change. */
+	Scene * workspaceSceneOf( NifModel * model );
+
 	//! Turn animation on or off programmatically.
 	/*! updateAnimationState is a QAction slot: it reads sender()->data() and does
 	 *  nothing at all when called directly. Anything that needs the controllers
@@ -642,6 +669,14 @@ private:
 	NifModel * workspaceSkeletonModel = nullptr;
 	//! NaN forces the next push; see applyWorkspaceSkeleton.
 	double workspaceSkeletonFingerprint = 0.0;
+	//! Give the pose to the documents that asked for it. True when it took charge.
+	bool applyPoseFollowers( const Transform & viewTrans );
+	/*! Documents marked as pose followers. Weak, exactly like the face-donor mark:
+	 *  a closed document must take its mark with it, and this is compared against
+	 *  live models on the render path. */
+	QList<QPointer<NifModel>> workspaceFollowerModels;
+	//! NaN forces the next push; covers the pose AND which documents follow it.
+	double workspaceFollowFingerprint = 0.0;
 	//! Drop every workspace Scene (on close, or when the list empties).
 	void clearWorkspaceScenes();
 	QVector<Vector3> riggingDonorPreviewSoup;

@@ -305,7 +305,15 @@ static void paintTreeEmptyMessage( QTreeView * view, const QString & message )
 }
 
 static constexpr int LoadedNifGlyphWidth = 20;
-static constexpr int LoadedNifGlyphCount = 3;
+/* Five: the marker, then four toggles.
+ *
+ * The weapon and pose-follow marks used to live in the marker slot and be
+ * settable only from the row menu, which made them the two facts about a row you
+ * could not see without right-clicking it — and the eye beside them had been
+ * one-click since the day it shipped. They are toggles now, drawn on EVERY row
+ * dimmed and lit like the eye is, and the menu entries are the alternate path
+ * rather than the only one. */
+static constexpr int LoadedNifGlyphCount = 5;
 
 static QRect loadedNifGlyphRect( const QRect & row, int slot )
 {
@@ -347,7 +355,10 @@ protected:
 			const QModelIndex index = indexAt( event->pos() );
 			if ( index.isValid() && hasToggleButtons( index ) ) {
 				const QRect row = visualRect( index );
-				for ( int slot = 1; slot <= 2; slot++ ) {
+				// slot 0 is the skull/face marker and stays dead to the mouse; 1..4
+				// are the real toggles, and the press is claimed here so a click on
+				// one neither selects the row nor starts a drag
+				for ( int slot = 1; slot <= 4; slot++ ) {
 					if ( !loadedNifGlyphRect( row, slot ).contains( event->pos() ) )
 						continue;
 					pressedToggleRow = QPersistentModelIndex( index );
@@ -358,6 +369,22 @@ protected:
 			}
 		}
 		QTreeView::mousePressEvent( event );
+	}
+
+	void mouseMoveEvent( QMouseEvent * event ) override
+	{
+		/* While a toggle press is in flight the panel owns the WHOLE gesture.
+		 *
+		 * Claiming the press was not enough, and the four-toggle gesture suite is
+		 * what found it: QTreeView selects on the MOVE as well, so pressing a glyph
+		 * and sliding off it left the row selected — and, with a longer slide,
+		 * started a drag out of the panel. Both from a press the view had already
+		 * said it was handling itself. */
+		if ( pressedToggleSlot >= 0 ) {
+			event->accept();
+			return;
+		}
+		QTreeView::mouseMoveEvent( event );
 	}
 
 	void mouseReleaseEvent( QMouseEvent * event ) override
@@ -429,7 +456,11 @@ private:
 //! Defined below; the row delegate draws it in the strip.
 static QIcon skeletonMarkIcon();
 static QIcon faceDonorMarkIcon();
+//! Toggle glyphs take their ink, because the row draws them dim as well as lit.
+static QPixmap weaponMarkPixmap( const QColor & ink );
+static QPixmap poseFollowPixmap( const QColor & ink );
 static QIcon weaponMarkIcon();
+static QIcon poseFollowMarkIcon();
 
 static QIcon nifBrowserStarIcon()
 {
@@ -473,10 +504,12 @@ public:
 	 *  snapping to. Its slot is reserved even when nothing is marked, so the two
 	 *  real toggles stay aligned down the list instead of shifting sideways when a
 	 *  skeleton is picked. The weapon mark shares that one slot; see paint(). */
-	enum Slot { SlotSkeleton = 0, SlotVisible = 1, SlotGhost = 2 };
-	static constexpr int SlotCount = 3;
+	enum Slot { SlotSkeleton = 0, SlotWeapon = 1, SlotFollow = 2,
+	            SlotVisible = 3, SlotGhost = 4 };
+	static constexpr int SlotCount = 5;
 
-	//! Bit 0 = visible, bit 1 = ghost, bit 2 = skeleton, bit 6 = weapon part.
+	//! Bit 0 = visible, bit 1 = ghost, bit 2 = skeleton, bit 4 = face donor,
+	//! bit 5 = unsaved, bit 6 = weapon part, bit 7 = pose follower.
 	//! -1 = no toggles.
 	std::function<int( const QModelIndex & )> displayFlags;
 	//! Flip one flag; the caller decides what that means for the document.
@@ -544,6 +577,7 @@ public:
 		const bool markerOnly = ( flags & 0x8 );
 		const bool isFaceDonor = ( flags & 0x10 );
 		const bool isWeapon = ( flags & 0x40 );
+		const bool isFollower = ( flags & 0x80 );
 		const QColor lit( wwSkinColor( "accent" ) );
 		const QColor dim( wwSkinColor( "textMuted" ) );
 
@@ -563,10 +597,24 @@ public:
 		 * The weapon mark is a SET, unlike the other two: a Fallout 4 gun is a
 		 * base NIF plus its part files, so several rows carry the gun at once.
 		 */
-		if ( isSkeleton || isFaceDonor || isWeapon ) {
+		if ( isSkeleton || isFaceDonor ) {
 			const QRect r = glyphRect( option.rect, SlotSkeleton ).adjusted( 2, 2, -2, -2 );
-			( isSkeleton ? skeletonMarkIcon()
-				: isFaceDonor ? faceDonorMarkIcon() : weaponMarkIcon() ).paint( painter, r );
+			( isSkeleton ? skeletonMarkIcon() : faceDonorMarkIcon() ).paint( painter, r );
+		}
+
+		/* --- the two row toggles that are marks, not display settings ---------
+		 *
+		 * Always drawn, dim for off and accent for on, exactly as the eye is, so
+		 * "is this a weapon part" and "does this follow the skeleton" are answers
+		 * you can read down the list instead of facts you have to go looking for
+		 * in a menu. Both are painted for the primary's row too when it carries
+		 * them, which is the markerOnly case above.
+		 */
+		if ( !markerOnly ) {
+			painter->drawPixmap( glyphRect( option.rect, SlotWeapon ).adjusted( 2, 2, -2, -2 ),
+				weaponMarkPixmap( isWeapon ? lit : dim ) );
+			painter->drawPixmap( glyphRect( option.rect, SlotFollow ).adjusted( 2, 2, -2, -2 ),
+				poseFollowPixmap( isFollower ? lit : dim ) );
 		}
 
 		// --- the eye ---------------------------------------------------------
@@ -709,14 +757,13 @@ static QIcon skeletonMarkIcon()
  *  are both round, so the straight lines here also keep the three apart at a
  *  glance.
  */
-static QIcon weaponMarkIcon()
+static QPixmap weaponMarkPixmap( const QColor & ink )
 {
 	const int s = 16;
 	QPixmap pm( s, s );
 	pm.fill( Qt::transparent );
 	QPainter p( &pm );
 	p.setRenderHint( QPainter::Antialiasing, true );
-	const QColor ink( wwSkinColor( "accent" ) );
 	p.setPen( Qt::NoPen );
 	p.setBrush( ink );
 
@@ -738,7 +785,55 @@ static QIcon weaponMarkIcon()
 	p.setBrush( Qt::black );
 	p.drawRect( QRectF( 0.0, 2.8, 4.2, 1.7 ) );
 	p.end();
-	return QIcon( pm );
+	return pm;
+}
+
+/*! A row that FOLLOWS the marked skeleton's pose: an arrow snapping onto a bar.
+ *
+ *  Blender's equivalent, for the same idea, is the snap magnet; a magnet at 16 px
+ *  is two blobs. An arrow flying into a post says "this lands on that" with three
+ *  strokes and stays legible dimmed, which is how it spends most of its life —
+ *  every row draws it, lit only when the row is following.
+ */
+static QPixmap poseFollowPixmap( const QColor & ink )
+{
+	const int s = 16;
+	QPixmap pm( s, s );
+	pm.fill( Qt::transparent );
+	QPainter p( &pm );
+	p.setRenderHint( QPainter::Antialiasing, true );
+	p.setPen( Qt::NoPen );
+	p.setBrush( ink );
+
+	// the post it snaps to, on the right
+	p.drawRoundedRect( QRectF( 12.2, 2.4, 2.2, 11.2 ), 1.0, 1.0 );
+	// the shaft
+	p.drawRoundedRect( QRectF( 1.2, 7.1, 8.0, 1.8 ), 0.8, 0.8 );
+	// the head
+	QPolygonF head;
+	head << QPointF( 7.6, 4.2 ) << QPointF( 11.8, 8.0 ) << QPointF( 7.6, 11.8 );
+	p.drawPolygon( head );
+	p.end();
+	return pm;
+}
+
+static QIcon weaponMarkIcon()
+{
+	return QIcon( weaponMarkPixmap( QColor( wwSkinColor( "accent" ) ) ) );
+}
+
+static QIcon poseFollowMarkIcon()
+{
+	return QIcon( poseFollowPixmap( QColor( wwSkinColor( "accent" ) ) ) );
+}
+
+//! One wording for the pose-follow mark, shared by both row menus.
+static QString poseFollowTip()
+{
+	return QObject::tr( "Re-anchor this file's skinned geometry to the skeleton's bones by "
+		"NAME, live, so it moves when the skeleton is posed. Nothing is merged and nothing is "
+		"written into this file; unmark to put it back on its own bones. The skeleton is the "
+		"skull-marked file, or the primary when the primary has a bone hierarchy." );
 }
 
 //! One wording for the weapon mark, so both row menus say the same thing.
@@ -1936,10 +2031,14 @@ NifSkope::NifSkope( bool background )
 			// 0x10: the faceBones donor, drawn in the same slot as the skull
 			if ( nif && NifSkope::workspaceFaceDonor() == nif )
 				flags |= 0x10;
-			// 0x40: a weapon part, same slot again. Held in nifmerge, because the
-			// merge is the only thing that acts on it.
+			// 0x40: a weapon part. Held in nifmerge, because the merge is the only
+			// thing that acts on it.
 			if ( nif && nifIsWeaponMarked( nif ) )
 				flags |= 0x40;
+			// 0x80: a pose follower. Held in GLView, because the RENDERER is the
+			// only thing that acts on it.
+			if ( ogl && nif && ogl->isWorkspaceFollower( nif ) )
+				flags |= 0x80;
 		};
 		if ( NifSkope * doc = documentFromBrowserIndex( idx ) ) {
 			// The primary is always drawn, so it has no visibility to toggle — but it
@@ -1949,7 +2048,7 @@ NifSkope::NifSkope( bool background )
 			// to offer — but it can still BE a marked skeleton, face donor or weapon
 			// part, and that has to show.
 			if ( doc == this )
-				return ( flags & 0x54 ) ? ( flags | 0x8 ) : -1;
+				return ( flags & 0xD4 ) ? ( flags | 0x8 ) : -1;
 			if ( doc->sessionPreviewVisible && !doc->sessionPreviewUnloaded )
 				flags |= 0x1;
 			if ( doc->sessionPreviewGhost )
@@ -1975,15 +2074,33 @@ NifSkope::NifSkope( bool background )
 		bool * visible = nullptr;
 		bool * ghost = nullptr;
 		bool * unloaded = nullptr;
+		NifModel * model = nullptr;
 		if ( NifSkope * doc = documentFromBrowserIndex( idx ); doc && doc != this ) {
 			visible = &doc->sessionPreviewVisible;
 			ghost = &doc->sessionPreviewGhost;
 			unloaded = &doc->sessionPreviewUnloaded;
+			model = doc->nif;
 		} else if ( BackgroundNifDocument * bg = backgroundDocumentFromBrowserIndex( idx ) ) {
 			visible = &bg->sessionPreviewVisible;
 			ghost = &bg->sessionPreviewGhost;
 			unloaded = &bg->sessionPreviewUnloaded;
+			model = bg->nif;
 		} else {
+			return;
+		}
+		/* The two MARKS. They change nothing about how the row draws in the list
+		 * and everything about what the row means, so they get the same one-click
+		 * gesture the eye has rather than a menu of their own. The row menu still
+		 * offers both, reading and writing this same state. */
+		if ( slot == LoadedNifsDelegate::SlotWeapon ) {
+			nifSetWeaponMark( model, !nifIsWeaponMarked( model ) );
+			refreshAllDocumentSessions();
+			return;
+		}
+		if ( slot == LoadedNifsDelegate::SlotFollow ) {
+			if ( ogl )
+				ogl->setWorkspaceFollower( model, !ogl->isWorkspaceFollower( model ) );
+			refreshAllDocumentSessions();
 			return;
 		}
 		if ( slot == LoadedNifsDelegate::SlotVisible ) {
@@ -2024,8 +2141,9 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView->header()->setStretchLastSection( true );
 	loadedNifsView->header()->setToolTip( tr(
 		"Row key: arrow = primary · skull = skeleton · face = face donor · "
-		"gun = weapon part · eye = visible · half-disc = semi-transparent · "
-		"red name = unsaved" ) );
+		"gun = weapon part · arrow-to-post = follows the skeleton's pose · "
+		"eye = visible · half-disc = semi-transparent · red name = unsaved. "
+		"Every glyph but the skull and face is a one-click toggle." ) );
 	loadedWorkspaceView->sourceView = browserWorkspaceView;
 	loadedWorkspaceView->addBrowserRows = [this]( const QList<QPersistentModelIndex> & rows ) {
 		addNifBrowserRowsToLoaded( rows );
@@ -2869,6 +2987,11 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	asWeapon->setCheckable( true );
 	asWeapon->setChecked( document->nif && nifIsWeaponMarked( document->nif ) );
 	asWeapon->setToolTip( weaponMarkTip() );
+	QAction * asFollower = menu.addAction( tr( "Follow the Skeleton's Pose" ) );
+	asFollower->setIcon( poseFollowMarkIcon() );
+	asFollower->setCheckable( true );
+	asFollower->setChecked( ogl && document->nif && ogl->isWorkspaceFollower( document->nif ) );
+	asFollower->setToolTip( poseFollowTip() );
 	menu.addSeparator();
 	QAction * visible = menu.addAction( tr( "Visible in Workspace" ) );
 	visible->setCheckable( true );
@@ -2906,6 +3029,11 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	}
 	else if ( chosen == asWeapon ) {
 		nifSetWeaponMark( document->nif, asWeapon->isChecked() );
+		refreshAllDocumentSessions();
+	}
+	else if ( chosen == asFollower ) {
+		if ( ogl )
+			ogl->setWorkspaceFollower( document->nif, asFollower->isChecked() );
 		refreshAllDocumentSessions();
 	}
 	else if ( chosen == freeze ) {
@@ -3618,6 +3746,11 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	asWeapon->setCheckable( true );
 	asWeapon->setChecked( document->nif && nifIsWeaponMarked( document->nif ) );
 	asWeapon->setToolTip( weaponMarkTip() );
+	QAction * asFollower = menu.addAction( tr( "Follow the Skeleton's Pose" ) );
+	asFollower->setIcon( poseFollowMarkIcon() );
+	asFollower->setCheckable( true );
+	asFollower->setChecked( ogl && document->nif && ogl->isWorkspaceFollower( document->nif ) );
+	asFollower->setToolTip( poseFollowTip() );
 	// mark the donor once, then right-click the head: the whole workflow without
 	// opening either of them as a document
 	QAction * makeFaceBones = menu.addAction( tr( "Generate faceBones NIF from this" ) );
@@ -3691,6 +3824,11 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	}
 	else if ( chosen == asWeapon ) {
 		nifSetWeaponMark( document->nif, asWeapon->isChecked() );
+		refreshAllDocumentSessions();
+	}
+	else if ( chosen == asFollower ) {
+		if ( ogl )
+			ogl->setWorkspaceFollower( document->nif, asFollower->isChecked() );
 		refreshAllDocumentSessions();
 	}
 	else if ( chosen == makeFaceBones ) {
@@ -8344,6 +8482,21 @@ int NifSkope::workspaceDisplayMode( int backgroundIndex ) const
 int NifSkope::workspaceDocumentCount() const
 {
 	return int( workspaceBackgroundDocuments().size() );
+}
+
+/*! The viewport rect of one row's glyph.
+ *
+ *  Exists so a harness can click exactly what the delegate drew. The gesture
+ *  checks used to aim at hand-counted pixel offsets from the row's right edge,
+ *  which was fine while there were two toggles and quietly aimed at the wrong one
+ *  the moment a third was added — the sort of drift that leaves a green suite
+ *  testing nothing.
+ */
+QRect NifSkope::loadedNifsGlyphRect( const QModelIndex & row, int slot ) const
+{
+	if ( !loadedNifsView || !row.isValid() )
+		return QRect();
+	return loadedNifGlyphRect( loadedNifsView->visualRect( row ), slot );
 }
 
 bool NifSkope::grabLoadedNifsView( const QString & path ) const

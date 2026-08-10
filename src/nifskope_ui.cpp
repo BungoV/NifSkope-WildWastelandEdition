@@ -584,6 +584,21 @@ bool NifSkope::workspaceDocumentIsWeapon( int backgroundIndex ) const
 	return nifIsWeaponMarked( workspaceDocumentModel( backgroundIndex ) );
 }
 
+bool NifSkope::markWorkspaceFollowerRow( int backgroundIndex, bool marked )
+{
+	NifModel * model = workspaceDocumentModel( backgroundIndex );
+	if ( !model || !ogl )
+		return false;
+	ogl->setWorkspaceFollower( model, marked );
+	refreshAllDocumentSessions();
+	return true;
+}
+
+bool NifSkope::workspaceDocumentFollows( int backgroundIndex ) const
+{
+	return ogl && ogl->isWorkspaceFollower( workspaceDocumentModel( backgroundIndex ) );
+}
+
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
 	NifSkope * primary = nullptr;
@@ -10446,43 +10461,108 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->loadedNifsModel->removeRows( realRows, 40 );
 					}
 
-					/* ICON-ONLY CLICKS MUST PRESERVE SELECTION. The view consumes the press
-					 * and release itself; otherwise QTreeView selects on press before the
-					 * delegate sees its release, producing the orange/blue row in the bug. */
+					/* EVERY ROW TOGGLE ANSWERS THE SAME GESTURE.
+					 *
+					 * The eye and the see-through disc have been one-click since they
+					 * shipped; the weapon and pose-follow marks were menu-only until
+					 * they became toggles, so they are held to the same three rules
+					 * rather than merely to "the state changed":
+					 *
+					 *   press does not select   — the view claims the press, so
+					 *                             QTreeView never gets to highlight
+					 *                             the row (the orange/blue flash);
+					 *   release toggles         — and toggles THAT control, which is
+					 *                             why every click is aimed through
+					 *                             loadedNifsGlyphRect rather than at
+					 *                             a counted offset;
+					 *   moving away cancels     — press, drag off the glyph, release
+					 *                             elsewhere: nothing toggles and no
+					 *                             drag begins.
+					 */
 					if ( skope->loadedNifsModel->rowCount() > 0 ) {
 						const QModelIndex iconRow = skope->loadedNifsModel->index(
 							skope->loadedNifsModel->rowCount() - 1, 0 );
 						skope->loadedNifsView->scrollTo( iconRow );
-						skope->loadedNifsView->selectionModel()->clear();
-						skope->loadedNifsView->setCurrentIndex( QModelIndex() );
 						skope->setWorkspaceDisplayMode( row, 1 );
+						skope->markWorkspaceWeaponRow( row, false );
+						skope->markWorkspaceFollowerRow( row, false );
 						QApplication::processEvents();
-						const QRect vr = skope->loadedNifsView->visualRect( iconRow );
-						auto clickAt = [&]( const QPoint & p ) {
-							QMouseEvent press( QEvent::MouseButtonPress, QPointF( p ),
+
+						auto clearSelection = [skope]() {
+							skope->loadedNifsView->selectionModel()->clear();
+							skope->loadedNifsView->setCurrentIndex( QModelIndex() );
+						};
+						auto unselected = [skope]() {
+							return skope->loadedNifsView->selectionModel()->selectedRows().isEmpty()
+								&& !skope->loadedNifsView->currentIndex().isValid();
+						};
+						auto send = [skope]( QEvent::Type type, const QPoint & p, Qt::MouseButton b,
+								Qt::MouseButtons held ) {
+							QMouseEvent e( type, QPointF( p ),
 								QPointF( skope->loadedNifsView->viewport()->mapToGlobal( p ) ),
-								Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
-							QMouseEvent release( QEvent::MouseButtonRelease, QPointF( p ),
-								QPointF( skope->loadedNifsView->viewport()->mapToGlobal( p ) ),
-								Qt::LeftButton, Qt::NoButton, Qt::NoModifier );
-							QApplication::sendEvent( skope->loadedNifsView->viewport(), &press );
-							QApplication::sendEvent( skope->loadedNifsView->viewport(), &release );
+								b, held, Qt::NoModifier );
+							QApplication::sendEvent( skope->loadedNifsView->viewport(), &e );
 							QApplication::processEvents();
 						};
-						clickAt( QPoint( vr.right() - 36, vr.center().y() ) );
-						check( "clicking the eye toggles visibility",
-							skope->workspaceDisplayMode( row ) == 0 );
-						check( "clicking the eye does not select or highlight its row",
-							skope->loadedNifsView->selectionModel()->selectedRows().isEmpty()
-								&& !skope->loadedNifsView->currentIndex().isValid() );
-						clickAt( QPoint( vr.right() - 36, vr.center().y() ) );
-						clickAt( QPoint( vr.right() - 14, vr.center().y() ) );
-						check( "clicking the opacity disc toggles transparency",
-							skope->workspaceDisplayMode( row ) == 2 );
-						check( "clicking the opacity disc also preserves selection",
-							skope->loadedNifsView->selectionModel()->selectedRows().isEmpty()
-								&& !skope->loadedNifsView->currentIndex().isValid() );
+						auto clickSlot = [&]( int slot ) {
+							const QPoint at = skope->loadedNifsGlyphRect( iconRow, slot ).center();
+							send( QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton );
+							send( QEvent::MouseButtonRelease, at, Qt::LeftButton, Qt::NoButton );
+						};
+						auto dragOffSlot = [&]( int slot ) {
+							const QRect r = skope->loadedNifsGlyphRect( iconRow, slot );
+							const QPoint at = r.center();
+							const QPoint away( r.left() - 60, at.y() );
+							send( QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton );
+							send( QEvent::MouseMove, away, Qt::NoButton, Qt::LeftButton );
+							send( QEvent::MouseButtonRelease, away, Qt::LeftButton, Qt::NoButton );
+						};
+						// state readers, one per toggle, so each check names the thing
+						// it actually moved
+						auto weaponState = [skope, row]() { return skope->workspaceDocumentIsWeapon( row ); };
+						auto followState = [skope, row]() { return skope->workspaceDocumentFollows( row ); };
+						auto visibleState = [skope, row]() { return skope->workspaceDisplayMode( row ) != 0; };
+						auto ghostState = [skope, row]() { return skope->workspaceDisplayMode( row ) == 2; };
+
+						struct Probe { int slot; const char * name; std::function<bool()> state; };
+						const QVector<Probe> probes = {
+							{ 1, "the weapon mark", weaponState },
+							{ 2, "the pose-follow mark", followState },
+							{ 3, "the eye", visibleState },
+							{ 4, "the see-through disc", ghostState },
+						};
+						for ( const Probe & probe : probes ) {
+							clearSelection();
+							const bool was = probe.state();
+							clickSlot( probe.slot );
+							check( QStringLiteral( "clicking %1 toggles it" ).arg( probe.name ),
+								probe.state() != was );
+							check( QStringLiteral( "...and clicking %1 never selects its row" )
+								.arg( probe.name ), unselected() );
+							clickSlot( probe.slot );
+							check( QStringLiteral( "...and clicking %1 again puts it back" )
+								.arg( probe.name ), probe.state() == was );
+							clearSelection();
+							dragOffSlot( probe.slot );
+							check( QStringLiteral( "...and dragging off %1 toggles nothing" )
+								.arg( probe.name ), probe.state() == was );
+							check( QStringLiteral( "...and dragging off %1 selects nothing either" )
+								.arg( probe.name ), unselected() );
+						}
+						// the eye must still be usable after all that
 						skope->setWorkspaceDisplayMode( row, 1 );
+						skope->markWorkspaceWeaponRow( row, false );
+						skope->markWorkspaceFollowerRow( row, false );
+						const QString stripShot =
+							QApplication::applicationDirPath() + "/ww_loadednifs_toggles.png";
+						skope->markWorkspaceWeaponRow( row, true );
+						skope->markWorkspaceFollowerRow( row, true );
+						QApplication::processEvents();
+						check( "the row strip renders with both marks lit",
+							skope->grabLoadedNifsView( stripShot ) );
+						log << "  " << stripShot << "\n";
+						skope->markWorkspaceWeaponRow( row, false );
+						skope->markWorkspaceFollowerRow( row, false );
 					}
 
 					/* OPEN THE REAL ROW MENU long enough to inspect and render it. */
@@ -10970,6 +11050,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *      weapon path and every controller, interpolator, float track and shader
 	 *      block is counted into the target one for one, with exactly ONE node
 	 *      added that the donor did not bring.
+	 *  10. THE POSE-FOLLOW MARK (no merge at all). skeleton.nif is the primary,
+	 *      Frame.nif is a separate row, the row is marked, and a real SAM pose goes
+	 *      onto the skeleton. What is asserted is not that the picture changed —
+	 *      a crumple changes the picture — but that a follower vertex chosen for
+	 *      SITTING ON a bone before the pose is still sitting on it after, while
+	 *      that bone travelled 76 units; that the follower's FILE is byte-identical
+	 *      throughout; and that unmarking puts every vertex back within 0.5. All of
+	 *      it read through the follower's own Scene, which is the route to the
+	 *      screen and the one thing the file cannot answer. An unmarked effect
+	 *      document is captured either side of the whole pose and must differ by
+	 *      ZERO pixels.
 	 *
 	 * WW_WEAPONMARK_FILES is a SEMICOLON-separated list in a fixed order, built
 	 * by tests/spells/weapon_mark.sh out of the game corpus:
@@ -11691,6 +11782,256 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						rig->getBlockCount() > rigBefore
 							&& !plainSummary.contains( QStringLiteral( "WEAPON PARTS:" ) )
 							&& !plainSummary.contains( QStringLiteral( "attached to WEAPON" ) ) );
+
+					/* ---- 11. THE POSE-FOLLOW MARK -------------------------------
+					 *
+					 * "It follows the loaded skeleton, if it's been loaded, then the
+					 * skeleton follows the pose." NO MERGE happens here: the frame
+					 * mesh stays its own document, keeps its own flat copies of the
+					 * bone names, and is re-anchored to the skeleton's bones BY NAME
+					 * at render time. The primary IS the skeleton in this fixture,
+					 * which is the shape the workflow takes — open the skeleton,
+					 * load the pieces beside it, pose once.
+					 *
+					 * WHAT PROVES IT, and what would pass without proving anything:
+					 *
+					 *   - "the pixels changed" would pass on a crumple, so the
+					 *     measurement is the EVALUATED SKIN, read out of the
+					 *     follower's Scene through Shape::skinVertex — the same
+					 *     route the renderer takes to the screen, and one the file
+					 *     cannot answer;
+					 *   - "the geometry moved" would pass on a heap, so what is
+					 *     asserted is that it moved WITH ITS BONE: the distance from
+					 *     the vertices bound to one bone to that bone's own posed
+					 *     position is the SAME before and after, while the bone
+					 *     itself travelled a long way;
+					 *   - and the follower's file must be untouched, byte for byte,
+					 *     because "non-destructive" is a claim about the document
+					 *     and not about the picture.
+					 */
+					NifModel * primary = skope->getNifModel();
+					NifModel * follower = skope->workspaceDocumentModel( PlainDonor );
+					const QString posePath = qEnvironmentVariable( "WW_WEAPONMARK_POSE" );
+					if ( primary && follower && !posePath.isEmpty() && QFile::exists( posePath ) ) {
+						// nothing else may be snapping while this is measured
+						skope->setWorkspaceSkeletonDocument( -1 );
+						for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+							skope->setWorkspaceDisplayMode( i, i == PlainDonor ? 1 : 0 );
+						QApplication::processEvents();
+
+						QByteArray fileBefore;
+						{
+							QBuffer buf( &fileBefore );
+							check( "the follower's file can be captured before anything happens",
+								buf.open( QIODevice::WriteOnly ) && follower->save( buf ) );
+						}
+
+						auto repaint = [skope, &settle]() {
+							skope->ogl->update();
+							qApp->processEvents();
+							skope->ogl->grabFramebuffer();
+							settle( 150 );
+						};
+						// the follower's biggest skinned shape, through its SCENE
+						auto followerShape = [skope, follower]() -> Shape * {
+							Scene * sc = skope->ogl->workspaceSceneOf( follower );
+							Shape * best = nullptr;
+							if ( !sc )
+								return nullptr;
+							for ( Shape * s : sc->shapes )
+								if ( s && s->boneCount() > 0
+									 && ( !best || s->verts.size() > best->verts.size() ) )
+									best = s;
+							return best;
+						};
+						//! Every vertex as the RENDERER evaluates it, not as the file stores it.
+						auto evaluated = []( Shape * s ) {
+							QVector<Vector3> out;
+							if ( !s )
+								return out;
+							s->updateBoneTransforms();
+							for ( int v = 0; v < s->verts.size(); v++ )
+								out.append( s->skinVertex( v, s->verts.at( v ) ) );
+							return out;
+						};
+						auto boneWorld = [skope]( const QString & name ) {
+							Scene * ps = skope->ogl->getScene();
+							if ( ps )
+								for ( Node * n : ps->getNodes() )
+									if ( n && n->getName() == name )
+										return n->worldTrans().translation;
+							return Vector3( -9999, -9999, -9999 );
+						};
+
+						/* THE HARD REGRESSION GATE, first half.
+						 *
+						 * An effect document that is NOT following anything must render
+						 * EXACTLY as it did, while a sibling document is re-anchored to a
+						 * posed skeleton. The two captures bracket the entire pose, and
+						 * animation is forced off for them: a particle system left running
+						 * differs from itself frame to frame and would make this a coin
+						 * toss rather than a gate.
+						 */
+						skope->ogl->setAnimationEnabled( false );
+						QApplication::processEvents();
+						auto showOnly = [skope]( int keep ) {
+							for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+								skope->setWorkspaceDisplayMode( i, i == keep ? 1 : 0 );
+							QApplication::processEvents();
+						};
+						showOnly( EffectDonor );
+						repaint();
+						const QImage effectRest = skope->ogl->grabFramebuffer();
+						showOnly( PlainDonor );
+						repaint();
+						Shape * fs = followerShape();
+						check( "the follower has a skinned shape in its own scene",
+							fs != nullptr && fs->boneCount() > 0 );
+						if ( fs && fs->boneCount() > 0 ) {
+							check( "the follower can be marked as a pose follower",
+								skope->markWorkspaceFollowerRow( PlainDonor, true )
+									&& skope->workspaceDocumentFollows( PlainDonor ) );
+							repaint();
+
+							/* PICK A VERTEX THAT IS SITTING ON A BONE.
+							 *
+							 * A vertex evaluated to within a whisker of a bone is,
+							 * by construction, driven by that bone — no weight table
+							 * needed, and no guessing which name matters. Candidates
+							 * are chosen BEFORE the pose, and the one whose bone the
+							 * pose then moves furthest is the one measured, so the
+							 * assertion is never made about a bone that stood still.
+							 */
+							const QVector<Vector3> before = evaluated( fs );
+							check( "the follower's skin can be evaluated through its scene",
+								before.size() > 0 );
+							struct Grip { QString bone; int vertex; float distance; Vector3 at; };
+							QVector<Grip> grips;
+							for ( int i = 0; i < fs->boneCount(); i++ ) {
+								const QString bn = fs->boneNameAt( i );
+								if ( bn.isEmpty() )
+									continue;
+								const Vector3 bw = boneWorld( bn );
+								if ( bw[0] < -9000 )
+									continue;
+								Grip g{ bn, -1, 1e9f, bw };
+								for ( int v = 0; v < before.size(); v++ ) {
+									const float d = ( before.at( v ) - bw ).length();
+									if ( d < g.distance ) { g.distance = d; g.vertex = v; }
+								}
+								if ( g.vertex >= 0 && g.distance < 2.0f )
+									grips.append( g );
+							}
+							log << grips.size() << " bone(s) of the follower have a vertex sitting on them\n";
+							check( "the follower has geometry gripping the skeleton's bones by name",
+								grips.size() >= 5 );
+
+							QString err;
+							int missing = 0;
+							const QImage shotBefore = skope->ogl->grabFramebuffer();
+							const int posed = skope->ogl->poseImportSam( posePath, 1.0f, &err, &missing );
+							qApp->processEvents();
+							log << "posed the skeleton: " << posed << " bone(s), " << missing
+								<< " not in it\n";
+							check( "the SKELETON took the pose", posed > 0 );
+							repaint();
+
+							fs = followerShape();				// the scene may have rebuilt
+							const QVector<Vector3> after = evaluated( fs );
+							check( "the follower still evaluates the same vertices",
+								after.size() == before.size() );
+
+							Grip probe{ QString(), -1, 0, Vector3() };
+							float probeMoved = -1;
+							for ( const Grip & g : grips ) {
+								const float moved = ( boneWorld( g.bone ) - g.at ).length();
+								if ( moved > probeMoved ) { probeMoved = moved; probe = g; }
+							}
+							if ( probe.vertex >= 0 && after.size() == before.size() ) {
+								const Vector3 boneNow = boneWorld( probe.bone );
+								const float skinMoved =
+									( after.at( probe.vertex ) - before.at( probe.vertex ) ).length();
+								const float gripNow = ( after.at( probe.vertex ) - boneNow ).length();
+								log << "probe bone " << probe.bone << " moved " << probeMoved
+									<< "; the follower vertex on it moved " << skinMoved
+									<< "; its grip was " << probe.distance << " and is now "
+									<< gripNow << "\n";
+								check( "the pose moved the probe bone a long way",
+									probeMoved > 5.0f );
+								check( "the FOLLOWER's evaluated geometry moved with it",
+									skinMoved > 5.0f );
+								check( "...and it stayed ON that bone — it tracked, it did not merely move",
+									std::fabs( gripNow - probe.distance ) < 1.0f );
+							} else {
+								check( "a probe bone could be measured", false );
+							}
+
+							const QImage shotAfter = skope->ogl->grabFramebuffer();
+							int delta = 0;
+							if ( !shotBefore.isNull() && shotBefore.size() == shotAfter.size() )
+								for ( int y = 0; y < shotAfter.height(); y += 2 )
+									for ( int x = 0; x < shotAfter.width(); x += 2 )
+										if ( shotBefore.pixel( x, y ) != shotAfter.pixel( x, y ) )
+											delta++;
+							log << "framebuffer pixels changed on the follower: " << delta << "\n";
+							check( "and it changed the picture", delta > 0 );
+							const QString followShot =
+								QApplication::applicationDirPath() + "/ww_weaponmark_follow.png";
+							shotAfter.save( followShot );
+							log << "  " << followShot << "\n";
+
+							/* NON-DESTRUCTIVE, asserted against the bytes rather than
+							 * against the word. */
+							QByteArray fileAfter;
+							{
+								QBuffer buf( &fileAfter );
+								buf.open( QIODevice::WriteOnly );
+								follower->save( buf );
+							}
+							check( "the follower's FILE is byte-identical — nothing was written into it",
+								!fileBefore.isEmpty() && fileAfter == fileBefore );
+
+							/* UNMARKING PUTS IT BACK, at once and without a reload. */
+							check( "the follower can be unmarked",
+								skope->markWorkspaceFollowerRow( PlainDonor, false )
+									&& !skope->workspaceDocumentFollows( PlainDonor ) );
+							repaint();
+							fs = followerShape();
+							const QVector<Vector3> rest = evaluated( fs );
+							float worst = 0;
+							for ( int v = 0; v < rest.size() && v < before.size(); v++ )
+								worst = qMax( worst, ( rest.at( v ) - before.at( v ) ).length() );
+							log << "after unmarking, the worst vertex is " << worst
+								<< " from where it started\n";
+							check( "unmarking renders it at rest again, at once",
+								rest.size() == before.size() && worst < 0.5f );
+
+							/* THE HARD REGRESSION GATE, second half: the effect document,
+							 * alone on screen again, with the skeleton still posed and a
+							 * sibling still marked as following it. Not "roughly the same"
+							 * picture — the same picture, pixel for pixel. */
+							skope->markWorkspaceFollowerRow( PlainDonor, true );
+							showOnly( EffectDonor );
+							repaint();
+							const QImage effectNow = skope->ogl->grabFramebuffer();
+							int effectDelta = -1;
+							if ( !effectRest.isNull() && effectRest.size() == effectNow.size() ) {
+								effectDelta = 0;
+								for ( int y = 0; y < effectNow.height(); y++ )
+									for ( int x = 0; x < effectNow.width(); x++ )
+										if ( effectRest.pixel( x, y ) != effectNow.pixel( x, y ) )
+											effectDelta++;
+							}
+							log << "an UNMARKED effect document, drawn while a sibling follows a "
+								   "posed skeleton: " << effectDelta << " pixel(s) differ\n";
+							check( "an unmarked effect document renders identically throughout",
+								effectDelta == 0 );
+							skope->markWorkspaceFollowerRow( PlainDonor, false );
+							skope->ogl->setAnimationEnabled( true );
+						}
+					} else {
+						check( "the pose-follow fixture is present", false );
+					}
 
 				} while ( false );
 				nifClearWeaponMarks();

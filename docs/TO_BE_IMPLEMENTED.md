@@ -1531,6 +1531,14 @@ Verified 2026-07-21 against `src/spells/riggingtools.cpp`.
 - **In-game FaceGen validation** — a manual production check, not code.
 - *Persistent skeleton reference* and *zero-weight bone pruning* — see #1; they
   belong to the Skeleton Manager.
+- **Pose-follow, the parts not done** — NEW 2026-08-10i. A marked row follows the
+  skull-marked document, or the primary when the primary has a bone hierarchy;
+  following a specific loaded row that is NOT the skull mark is not expressible.
+  The skull's own all-documents snap is still there and still wins when no row is
+  marked, which means two ways to say a related thing — worth unifying once the
+  per-row mark has been lived with. Followers also track only the SKELETON's node
+  transforms, so a follower skinned to bones the skeleton does not have keeps its
+  own for those (by design, and reported nowhere).
 - ~~**Weapon slot placement**~~ — SHIPPED 2026-08-10h. Marked parts are placed on
   the connect points the meshes publish, rotation composed, chains resolved to any
   depth (`nifMergeWeaponPart`, src/nifmerge.cpp). What is deliberately NOT done:

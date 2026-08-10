@@ -1062,9 +1062,124 @@ void GLView::setWorkspaceSkeleton( NifModel * model )
 	update();
 }
 
+void GLView::setWorkspaceFollower( NifModel * model, bool follow )
+{
+	if ( !model )
+		return;
+	const bool already = isWorkspaceFollower( model );
+	if ( already == follow )
+		return;
+	if ( follow ) {
+		workspaceFollowerModels.append( QPointer<NifModel>( model ) );
+	} else {
+		for ( int i = workspaceFollowerModels.size() - 1; i >= 0; i-- )
+			if ( workspaceFollowerModels.at( i ).data() == model )
+				workspaceFollowerModels.removeAt( i );
+	}
+	/* Both fingerprints, because the follower set is what decides WHICH path
+	 * runs. Unmarking the last one has to fall back through the skull's own
+	 * clear-once branch, and that branch is the thing that puts the document back
+	 * on its own bones. */
+	workspaceFollowFingerprint = std::numeric_limits<double>::quiet_NaN();
+	workspaceSkeletonFingerprint = std::numeric_limits<double>::quiet_NaN();
+	update();
+}
+
+Scene * GLView::workspaceSceneOf( NifModel * model )
+{
+	if ( !model || ( scene && scene->nifModel == model ) )
+		return scene;
+	return workspaceScenes.value( model, nullptr );
+}
+
+bool GLView::isWorkspaceFollower( const NifModel * model ) const
+{
+	if ( !model )
+		return false;
+	for ( const QPointer<NifModel> & p : workspaceFollowerModels )
+		if ( p.data() == model )
+			return true;
+	return false;
+}
+
+int GLView::workspaceFollowerCount()
+{
+	for ( int i = workspaceFollowerModels.size() - 1; i >= 0; i-- )
+		if ( !workspaceFollowerModels.at( i ) )
+			workspaceFollowerModels.removeAt( i );
+	return int( workspaceFollowerModels.size() );
+}
+
+/*! The per-document half of the snap: only the documents that asked for it move.
+ *
+ *  Returns false when nothing is marked, and the caller then runs exactly the code
+ *  it always ran. That is the whole compatibility story — the skull's
+ *  everything-snaps behaviour is not modified, it is simply not reached while a
+ *  follower set exists.
+ *
+ *  WHICH SKELETON. The skull-marked document when there is one; otherwise the
+ *  PRIMARY, and only if the primary has a real bone-to-bone hierarchy. A flat
+ *  armour file is not a skeleton — the same test the rig merge refuses on — and
+ *  taking a pose from one would hand followers a heap of world transforms.
+ */
+bool GLView::applyPoseFollowers( const Transform & viewTrans )
+{
+	if ( workspaceFollowerCount() == 0 )
+		return false;
+
+	Scene * src = nullptr;
+	if ( workspaceSkeletonModel ) {
+		src = ( scene->nifModel == workspaceSkeletonModel )
+			? scene : workspaceSceneFor( workspaceSkeletonModel );
+	} else if ( scene->nifModel && AnimSetup::hasBoneHierarchy( scene->nifModel ) ) {
+		src = scene;
+	}
+
+	QHash<QString, Transform> pose;
+	if ( src ) {
+		// the skeleton is never a follower of itself, and it has to be posed
+		// before it can be read
+		src->skeletonOverride.clear();
+		src->transformDirty = true;
+		src->transform( viewTrans, time );
+		pose = skeletonPoseOf( src );
+	}
+
+	/* The signature covers the pose AND the follower set, because either can move
+	 * without the other: dragging a bone changes the pose, ticking a row changes
+	 * who gets it. Summed the same way skeletonPoseFingerprint is, so hash order
+	 * cannot enter into it. */
+	double signature = skeletonPoseFingerprint( pose );
+	for ( const QPointer<NifModel> & p : workspaceFollowerModels )
+		signature += double( quintptr( p.data() ) % 1000003u ) * 23.0;
+	if ( !std::isnan( workspaceFollowFingerprint ) && signature == workspaceFollowFingerprint )
+		return true;
+	workspaceFollowFingerprint = signature;
+
+	auto give = [&]( Scene * sc ) {
+		if ( !sc || sc == src )
+			return;
+		const QHash<QString, Transform> & want =
+			isWorkspaceFollower( sc->nifModel ) ? pose : QHash<QString, Transform>();
+		sc->skeletonOverride = want;
+		sc->transformDirty = true;
+	};
+	give( scene );
+	for ( auto it = workspaceScenes.begin(); it != workspaceScenes.end(); ++it )
+		give( it.value() );
+	// The skull path must re-push from scratch if it ever takes over again.
+	workspaceSkeletonFingerprint = std::numeric_limits<double>::quiet_NaN();
+	return true;
+}
+
 void GLView::applyWorkspaceSkeleton( const Transform & viewTrans )
 {
 	if ( !scene )
+		return;
+
+	// Per-document followers take precedence over the skull's all-documents
+	// behaviour, and exist only while something is marked.
+	if ( applyPoseFollowers( viewTrans ) )
 		return;
 
 	auto pushToEveryOtherScene = [&]( Scene * skip, const QHash<QString, Transform> & pose ) {

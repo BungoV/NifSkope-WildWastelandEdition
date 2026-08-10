@@ -90,7 +90,19 @@
 #          corpus -- the only ones unpacked are the Minigun's, the Broadsider's and
 #          the JunkJet's -- so that one is deliberately a cross-weapon build, which
 #          the mark allows on purpose.
-#   9. WHAT THE WEAPON PATH MUST NOT TOUCH. Only a marked donor takes it; every
+#   9. THE POSE-FOLLOW MARK, which involves no merge whatsoever: skeleton.nif is
+#      the primary, Frame.nif is a separate loaded row, the row is marked as a
+#      follower and a real SAM pose is imported into the SKELETON. The proof is a
+#      follower vertex picked BEFORE the pose for sitting within 2 units of a
+#      skeleton bone: after the pose that bone had travelled 76.17 units, the
+#      vertex 76.27, and its grip on the bone held at 0.5468. "The picture
+#      changed" would pass on a crumple; holding the grip would not. The
+#      follower's FILE is asserted byte-identical either side, and unmarking puts
+#      every vertex back within 0.5 with no reload. An UNMARKED effect document,
+#      drawn while that sibling follows the posed skeleton, must differ by ZERO
+#      pixels -- captured with animation forced off, because a running particle
+#      system differs from itself.
+#  10. WHAT THE WEAPON PATH MUST NOT TOUCH. Only a marked donor takes it; every
 #      other merge -- clothing, skeletons, ArtObjects, loading screens, the CLI
 #      merge verb, the workspace rig merge -- takes the byte-identical
 #      nifMergeData call it always did. The weapon path adds ONE NiNode and
@@ -211,8 +223,15 @@ for f in "${FIXTURE[@]}"; do
 done
 echo "fixture: ${#FIXTURE[@]} files from the Fallout 4 corpus"
 
-rm -f "$LOG" "$ROOT/release/ww_weaponmark_list.png"
-WW_WEAPONMARK_TEST=1 WW_WEAPONMARK_FILES="$FILES" \
+# The pose the FOLLOW phase puts on the skeleton. Same committed Screen Archer
+# Menu save tests/spells/sam_pose_import.sh uses, so the two suites are posing the
+# same rig with the same numbers.
+POSE="${POSE:-$ROOT/tests/fixtures/sam_pa_pose1.json}"
+POSEARG=""
+[ -f "$POSE" ] && POSEARG="$(winpath "$POSE")"
+
+rm -f "$LOG" "$ROOT/release/ww_weaponmark_list.png" "$ROOT/release/ww_weaponmark_follow.png"
+WW_WEAPONMARK_TEST=1 WW_WEAPONMARK_FILES="$FILES" WW_WEAPONMARK_POSE="$POSEARG" \
 	"$EXE" --port "$PORT" "$(winpath "${FIXTURE[0]}")" >/dev/null 2>&1 &
 pid=$!
 for _ in $(seq 1 90); do

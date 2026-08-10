@@ -182,6 +182,13 @@ public:
 	 *  nifmerge (nifIsWeaponMarked), since the merge is what acts on it. */
 	bool markWorkspaceWeaponRow( int backgroundIndex, bool marked );
 	bool workspaceDocumentIsWeapon( int backgroundIndex ) const;
+	//! Mark or unmark a Loaded NIFs row as following the skeleton's pose. The
+	//! state lives in GLView, because the renderer is what acts on it.
+	bool markWorkspaceFollowerRow( int backgroundIndex, bool marked );
+	bool workspaceDocumentFollows( int backgroundIndex ) const;
+	//! Where one row's glyph is on screen, so a harness clicks the real control.
+	//! Slots: 0 skull/face marker, 1 weapon, 2 pose follow, 3 eye, 4 see-through.
+	QRect loadedNifsGlyphRect( const QModelIndex & row, int slot ) const;
 	bool markWorkspaceDocumentUnsaved( int backgroundIndex );
 	//! Load NIFs from anywhere on disk into Loaded NIFs; returns how many.
 	int addWorkspaceDocumentsFromDialog();

@@ -1,5 +1,66 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10i — Row marks are one-click, and a loaded mesh can follow the skeleton
+
+**The marks were invisible.** The weapon mark and the skeleton/face markers shared
+one glyph slot and were settable only from the row menu, so the two facts about a
+row you most wanted at a glance were the two you had to right-click to find —
+while the eye beside them had been one-click since the day it shipped. The strip
+is five slots now: the skull/face marker, then **four toggles** — weapon, pose
+follow, visible, see-through — each drawn on every row, dim for off and accent for
+on (`wwSkinColor` only, no literals), each answering a single click. The row menus
+still offer both marks and read and write the same state, as the alternate path.
+
+**A gesture bug fell out of testing it.** The four-toggle gesture suite asserts
+three things per control — press does not select, release toggles, moving away
+cancels — and the third failed on **all four**, including the eye and the disc
+that had shipped that way for weeks. Claiming the press was never enough:
+`QTreeView` selects on the MOVE as well, so pressing a glyph and sliding off it
+left the row selected and, with a longer slide, started a drag out of the panel.
+The panel now owns `mouseMoveEvent` while a toggle press is in flight.
+
+**And the new mark: FOLLOW THE SKELETON'S POSE.** A marked Loaded NIF re-anchors
+its skinned geometry to the skeleton's bones **by name, at render time**. No
+merge, nothing written into the follower — its bytes are asserted identical before
+and after — and unmarking puts it back on its own flat bone copies immediately.
+The skeleton is the skull-marked document if there is one, otherwise the primary
+when the primary has a real bone hierarchy; a follower with neither renders exactly
+as it did unmarked.
+
+The machinery was already there and half-exposed: `Scene::skeletonOverride` is
+consumed per bone by name in `Shape::updateBoneTransforms`, and the skull mark
+pushed it to EVERY other scene. That behaviour is untouched — `applyPoseFollowers`
+takes precedence only while at least one row is marked, so with an empty follower
+set not one transform is computed differently from before this existed.
+
+**What proves it is not the pixels.** The harness loads `skeleton.nif` as the
+primary and `Frame.nif` as a separate row, marks the frame, and imports a real SAM
+pose into the skeleton. It then picks — BEFORE the pose — the follower vertices
+that sit within 2 units of a skeleton bone, and after the pose measures the one
+whose bone travelled furthest:
+
+| | measured |
+|---|---|
+| probe bone `LArm_Finger33` moved | **76.166** |
+| the follower vertex sitting on it moved | **76.274** |
+| its grip on that bone was / is now | **0.54678 / 0.546777** |
+| the follower's file, before vs after | **byte-identical** |
+| after unmarking, worst vertex from rest | **0.0023** |
+
+Geometry that merely moved would pass "the picture changed" and fail the grip.
+Everything is read through the follower's own `Scene` (`Shape::skinVertex`), which
+is the route to the screen and the one question the file cannot answer.
+
+**The hard gate, because this touches the scene graph.** An effect document that
+is NOT marked must render *identically* while a sibling follows a posed skeleton —
+captured either side of the whole pose with animation forced off, and compared
+pixel for pixel: **0 differ**. Plus `artobject_attach.sh` 14/14,
+`carries_everything.sh` 24/24, `live_effects.sh` 15/15.
+
+Suites: `loaded_nifs.sh` **112/112** (was 95), `weapon_mark.sh` **77/77** (was 62),
+`sam_pose_import.sh` PASS, `workspace_skeleton_target.sh` 34/34. Captures:
+`release/ww_loadednifs_toggles.png`, `release/ww_weaponmark_follow.png`.
+
 ## 2026-08-10h — Weapon parts assemble themselves, on the points the meshes ship
 
 **What the mark could not do yet.** Yesterday's mark parented every weapon-marked

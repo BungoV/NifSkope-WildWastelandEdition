@@ -197,6 +197,16 @@ predecessor:
   whose shape names the target already carries, or one asking for a point nothing
   in the assembly publishes — and a target with no `WEAPON` bone is a root merge,
   said out loud rather than left to the picture.
+- **Follow the Skeleton's Pose** — a per-row mark that re-anchors a loaded mesh's
+  skinned geometry to the skeleton's bones **by name at render time**. No merge,
+  nothing written into the file, and unmarking puts it back at once: load the
+  skeleton, load the pieces beside it, pose the skeleton once and the pieces move
+  with it. Measured on the PA frame: its bone travelled 76.17 units and the vertex
+  sitting on that bone travelled 76.27, holding its grip to six decimals.
+- Every Loaded NIFs row carries **four one-click toggles** — weapon part, pose
+  follow, visible, see-through — drawn dim or lit on every row, with the row menus
+  as the alternate path. The panel owns the whole press-move-release gesture, so a
+  click on a glyph never selects the row and never starts a drag.
 - Combined preview and donor selection across the whole workspace group.
 
 ## 9. Materials and rendering
