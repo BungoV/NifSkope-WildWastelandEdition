@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10e — The attached pistol renders life-size
+
+The 1.75× defended in the previous entry was wrong on screen — a pistol at
+forearm length, caught by the user on sight, twice. The pose file's WEAPON
+scale is the pose author's scene value, not a rendering law. The import still
+writes the bone faithfully, but the harness weapon step now measures the
+inherited scale against its own parse of the JSON (1.75001 vs 1.750013,
+asserted), then RESETS the WEAPON bone to unit scale and asserts the
+accumulated world scale comes back as 1.0 exactly, so the gun renders at its
+authored size. Farthest part pivot fell 27.68 → 15.81 units, matching the
+removed factor. The capture was inspected against the question "does this
+look like a pistol in an oversized fist", not "did pixels move".
+
 ## 2026-08-10d — The posed hand holds an assembled gun, and every surprise in
 the picture is now a number in the log
 

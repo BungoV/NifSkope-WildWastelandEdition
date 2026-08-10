@@ -3589,16 +3589,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									const Transform handT = worldActual( weaponBlock );
 									const Vector3 hand = handT.translation;
 
-									/* THE GUN IS 1.75x LIFE SIZE, AND THAT IS THE POSE'S DOING.
-									 * sam_pa_pose1.json gives WEAPON scale 1.750013 — Screen
-									 * Archer Menu recorded the game's live power-armour
-									 * weapon-bone scale, so a faithful import reproduces it and
-									 * the attached gun comes out oversized. That is correct
-									 * behaviour and a surprise only if it is left to the
-									 * picture, so it is measured: the world scale ACCUMULATED
-									 * down the parent chain must equal what the harness's own
-									 * parse of the JSON says (every ancestor is unit scale, so
-									 * the product is the WEAPON entry itself). */
+									/* THE POSE SCALES THE WEAPON BONE, AND A RENDER MUST NOT.
+									 * sam_pa_pose1.json gives WEAPON scale 1.750013 — a value the
+									 * pose's author left on the bone, and at 1.75x a pistol
+									 * renders at forearm length (shipped that way once; the user
+									 * caught it on sight). The import stays faithful — the bone
+									 * carries what the pose says — but the WEAPON step here
+									 * measures that inherited scale against the harness's own
+									 * parse of the JSON, then RESETS the bone to unit scale so
+									 * the attached gun renders at its authored size. */
 									const float poseScale = want.contains( QStringLiteral( "WEAPON" ) )
 										? want.value( QStringLiteral( "WEAPON" ) ).scale : -1.0f;
 									log << "WEAPON accumulated world scale: " << handT.scale
@@ -3608,6 +3607,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									else if ( std::fabs( handT.scale - poseScale ) > 1e-4f )
 										fails << QStringLiteral( "the WEAPON world scale is %1, the pose asks for %2" )
 											.arg( handT.scale ).arg( poseScale );
+
+									nif->set<float>( iWeapon, "Scale", 1.0f );
+									skope->ogl->getScene()->transformDirty = true;
+									skope->ogl->update(); qApp->processEvents();
+									skope->ogl->update(); qApp->processEvents();
+									const Transform handT1 = worldActual( weaponBlock );
+									log << "WEAPON scale reset for the render: accumulated now "
+										<< handT1.scale << "\n";
+									if ( std::fabs( handT1.scale - 1.0f ) > 1e-4f )
+										fails << QStringLiteral( "resetting the WEAPON bone did not reach unit "
+											"world scale (%1)" ).arg( handT1.scale );
 
 									float best = -1, worst = -1, nearestOrigin = -1;
 									QString bestName, worstName, nearestOriginName;
