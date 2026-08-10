@@ -792,31 +792,33 @@ static QIcon skeletonMarkIcon()
  */
 static QPixmap weaponMarkPixmap( const QColor & ink )
 {
-	const int s = 16;
-	QPixmap pm( s, s );
-	pm.fill( Qt::transparent );
-	QPainter p( &pm );
-	p.setRenderHint( QPainter::Antialiasing, true );
-	p.setPen( Qt::NoPen );
-	p.setBrush( ink );
-
-	/* Muzzle left, grip raked off the rear, and a VISIBLE trigger guard: a
-	 * filled knuckle under the receiver with a hole punched through it. The
-	 * guard ring is what the two rejected drawings lacked â without that
-	 * negative space inside a positive loop, the silhouette collapses into a
-	 * bracket ("terrible") or a buttstock. */
-	p.drawRect( QRectF( 0.8, 3.8, 14.2, 3.4 ) );          // slide
-	p.drawEllipse( QPointF( 10.3, 9.1 ), 2.6, 2.6 );      // guard knuckle
-	QPolygonF grip;
-	grip << QPointF( 11.0, 7.0 ) << QPointF( 14.9, 7.0 )
-	     << QPointF( 15.4, 14.2 ) << QPointF( 12.4, 14.2 );
-	p.drawPolygon( grip );
-
-	p.setCompositionMode( QPainter::CompositionMode_Clear );
-	p.setBrush( Qt::black );
-	p.drawEllipse( QPointF( 9.7, 9.4 ), 1.5, 1.5 );       // the guard hole
-	p.end();
-	return pm;
+	/* Hand-drawn by the user (2026-08-11, Downloads/Gun.png) and embedded
+	 * verbatim as a 16x16 alpha mask: the art is his pixels â including the
+	 * antialiased edges â and only the ink is the skin's, so lit and dim come
+	 * from one drawing and no redraw ever reinterprets the shape. */
+	static const unsigned char mask[16][16] = {
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
+		{   0,   0,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50,  40,  10 },
+		{  10,  40, 205, 205, 205, 205, 205, 205, 205, 205, 205, 205, 205, 205, 164,  40 },
+		{  40, 164, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 205,  50 },
+		{  10,  40, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 205,  50 },
+		{   0,   0, 205, 205, 205, 205, 215, 174,  91,  91, 215, 255, 255, 245, 174,  40 },
+		{   0,   0,  50,  50,  50,  50,  91, 134,  81,  91, 215, 255, 255, 215,  81,  10 },
+		{   0,   0,   0,   0,   0,   0,  10,  61, 134, 164, 205, 245, 255, 215,  81,  10 },
+		{   0,   0,   0,   0,   0,   0,   0,  10,  40,  50,  91, 215, 255, 245, 174,  40 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  50, 205, 255, 255, 205,  50 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  40, 174, 245, 255, 205,  50 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  10,  71, 174, 205, 164,  40 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  10,  40,  50,  40,  10 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
+	};
+	QImage img( 16, 16, QImage::Format_ARGB32 );
+	for ( int y = 0; y < 16; y++ )
+		for ( int x = 0; x < 16; x++ )
+			img.setPixel( x, y, qRgba( ink.red(), ink.green(), ink.blue(), mask[y][x] ) );
+	return QPixmap::fromImage( img );
 }
 
 /*! A row that FOLLOWS the skeleton's pose: a BONE, paired with the skull two
