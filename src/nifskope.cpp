@@ -792,10 +792,10 @@ static QIcon skeletonMarkIcon()
  */
 static QPixmap weaponMarkPixmap( const QColor & ink )
 {
-	/* Hand-drawn by the user (2026-08-11, Downloads/Gun.png) and embedded
-	 * verbatim as a 16x16 alpha mask: the art is his pixels â including the
-	 * antialiased edges â and only the ink is the skin's, so lit and dim come
-	 * from one drawing and no redraw ever reinterprets the shape. */
+	/* Hand-drawn by the user (2026-08-11, Downloads/Gun.png, revision 2) and
+	 * embedded verbatim as a 16x16 alpha mask: the art is his pixels â
+	 * including the antialiased edges â and only the ink is the skin's, so
+	 * lit and dim come from one drawing and no redraw reinterprets the shape. */
 	static const unsigned char mask[16][16] = {
 		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
 		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
@@ -805,13 +805,13 @@ static QPixmap weaponMarkPixmap( const QColor & ink )
 		{  40, 164, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 205,  50 },
 		{  10,  40, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 205,  50 },
 		{   0,   0, 205, 205, 205, 205, 215, 174,  91,  91, 215, 255, 255, 245, 174,  40 },
-		{   0,   0,  50,  50,  50,  50,  91, 134,  81,  91, 215, 255, 255, 215,  81,  10 },
-		{   0,   0,   0,   0,   0,   0,  10,  61, 134, 164, 205, 245, 255, 215,  81,  10 },
+		{   0,   0,  50,  50,  50,  50,  91, 134,  81,  91, 215, 255, 255, 245,  81,  10 },
+		{   0,   0,   0,   0,   0,   0,  10,  61, 134, 164, 205, 245, 255, 245,  81,  10 },
 		{   0,   0,   0,   0,   0,   0,   0,  10,  40,  50,  91, 215, 255, 245, 174,  40 },
 		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  50, 205, 255, 255, 205,  50 },
-		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  40, 174, 245, 255, 205,  50 },
-		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  10,  71, 174, 205, 164,  40 },
-		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  10,  40,  50,  40,  10 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  40, 205, 245, 255, 205,  50 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  40, 174, 205, 205, 164,  40 },
+		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  10,  40,  50,  50,  40,  10 },
 		{   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
 	};
 	QImage img( 16, 16, QImage::Format_ARGB32 );
