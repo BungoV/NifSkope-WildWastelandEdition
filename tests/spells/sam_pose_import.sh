@@ -69,13 +69,26 @@
 # WEAPON-under-WEAPON nesting, because the merge splices a donor root's CHILDREN
 # and drops the root block as a per-file wrapper.
 #
-# The proof is again not the pixels but two distances, and it needs both: the
-# nearest weapon shape's world translation must land within 40 units of the
-# WEAPON bone's world translation (the pistol is ~30 long) AND more than 40 units
-# from the document origin. Near-the-bone alone would also hold for a rig
-# collapsed at the origin; far-from-the-origin alone holds for a gun flung
-# anywhere. A branch that ignored --attach and landed on the root fails the
-# second. The capture is release/ww_sampose_weapon.png.
+# WW_SAMPOSE_WEAPON is a SEMICOLON-separated list, merged in order, because the
+# base NIF is not a whole gun: it is the receiver group, and the grip, magazine
+# and sights are separate OMOD part files (see WEAPON10MM below). The default
+# list assembles 6 + 1 + 1 = 8 shapes, and each part's contribution is asserted.
+#
+# The proof is again not the pixels but three distances, and it needs them all:
+# the nearest AND farthest weapon shape's world translation must land within 40
+# units of the WEAPON bone's world translation (the pistol is ~30 long), and the
+# closest of them to the document origin must be MORE than 40 away. Near-the-bone
+# alone would also hold for a rig collapsed at the origin; far-from-the-origin
+# alone holds for a gun flung anywhere; and the nearest alone is free, because
+# the receiver, grip and magazine all have identity locals and sit on the grip by
+# construction. A branch that ignored --attach and landed on the root fails the
+# origin check.
+#
+# The gun renders 1.75x life size, and that is FAITHFUL: sam_pa_pose1.json gives
+# WEAPON scale 1.750013, which is the game's live power-armour weapon-bone scale
+# as Screen Archer Menu recorded it. Because that is a surprise if it is left to
+# the picture, the accumulated world scale at WEAPON is logged and asserted equal
+# to the pose's own figure. The capture is release/ww_sampose_weapon.png.
 #
 # FIXTURE
 #
@@ -113,14 +126,35 @@ FRAME="${FRAME:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/Ch
 # Phase 2b's prop: a real weapon hung on the posed WEAPON bone, through the same
 # nifMergeFile attach path the CLI's `merge --attach` uses. The pistol's OWN root
 # node is also called WEAPON, which is harmless — the merge splices a donor
-# root's CHILDREN and never the root block itself. Skipped silently like FRAME
-# when the corpus is absent.
-WEAPON10MM="${WEAPON10MM:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/weapons/10mmPistol/10MMPistol.nif}"
+# root's CHILDREN and never the root block itself.
+#
+# THREE files, because a Fallout 4 weapon is not one file. 10MMPistol.nif is the
+# RECEIVER GROUP alone — bolt, hammer, trigger, both releases and the receiver,
+# with the stock barrel and iron sights baked into the receiver mesh. Its
+# WeaponMagazine / WeaponOptics / grip nodes are EMPTY attach points, and the
+# default furniture lives in separate OMOD part NIFs beside it; without them the
+# picture is a gun with no handle and no magazine. All three are authored in the
+# same gun frame with identity roots (measured), so they self-assemble under
+# WEAPON with no transform work. Semicolon-separated, merged in order; each entry
+# is skipped silently when absent, like FRAME.
+W10DIR="${W10DIR:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/weapons/10mmPistol}"
+WEAPON10MM="${WEAPON10MM:-$W10DIR/10MMPistol.nif;$W10DIR/10mmGrip.nif;$W10DIR/10mmMag01.nif}"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
+# Pure bash, deliberately no sed: when this script is launched from a Git-Bash
+# parent, the MSYS2 shell inherits Git's sed, and BRE groups passed across the
+# two runtimes silently stop matching — winpath then no-ops. Single argv/env
+# paths still get rescued by MSYS2's automatic conversion, but a
+# semicolon-joined LIST (WW_SAMPOSE_WEAPON) is not, so the weapon step quietly
+# skips. Parameter expansion cannot be PATH-poisoned.
+winpath() {
+	case "$1" in
+		/[a-zA-Z]/*) local d="${1:1:1}"; printf '%s' "${d}:${1:2}" ;;
+		*) printf '%s' "$1" ;;
+	esac
+}
 
 REALPOSE=""
 [ -f "$SAMPOSE" ] && REALPOSE="$(winpath "$SAMPOSE")"
@@ -154,13 +188,22 @@ if [ -n "$REALPOSE" ] && [ -f "$FRAME" ]; then
 	one_run "$FRAME" WW_SAMPOSE_MODE=refuse || exit 1
 
 	# Phase 2b: skeleton primary + frame merged onto it, then the pose, then —
-	# when the corpus has it — a 10mm pistol attached to the posed WEAPON bone.
+	# when the corpus has them — the 10mm pistol's parts attached to the posed
+	# WEAPON bone.
 	# The old captures go first so a phase that dies before grabbing cannot leave
 	# last run's pictures behind looking like this run's.
 	rm -f "$ROOT/release/ww_sampose_before.png" "$ROOT/release/ww_sampose_after.png" \
 		"$ROOT/release/ww_sampose_weapon.png"
+	# each part that the corpus actually has, converted to a Windows path and
+	# re-joined with the semicolons the harness splits on
 	GUN=""
-	[ -f "$WEAPON10MM" ] && GUN="$(winpath "$WEAPON10MM")"
+	OLDIFS="$IFS"; IFS=';'
+	for part in $WEAPON10MM; do
+		[ -f "$part" ] || continue
+		[ -n "$GUN" ] && GUN="$GUN;"
+		GUN="$GUN$(winpath "$part")"
+	done
+	IFS="$OLDIFS"
 	one_run "$SRC" WW_SAMPOSE_MODE=merge WW_SAMPOSE_FRAME="$(winpath "$FRAME")" \
 		WW_SAMPOSE_WEAPON="$GUN" || exit 1
 	echo "captures: release/ww_sampose_before.png release/ww_sampose_after.png"

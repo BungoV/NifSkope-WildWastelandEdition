@@ -3444,47 +3444,60 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 						/* WEAPON ATTACHMENT (WW_SAMPOSE_WEAPON): a gun in the posed hand.
 						 *
-						 * The pose moves WEAPON — a leaf under RArm_Hand — like any
-						 * other bone, but an empty bone shows nothing, so the one thing
-						 * a viewer actually wants from a posed rig (the prop it is
-						 * holding) has never been under test. This step merges a real
-						 * weapon NIF onto that node through nifMergeFile, the SAME
-						 * entry point the CLI's `merge --attach NODE --add FILE` uses,
-						 * and then measures where the gun landed.
+						 * The pose moves WEAPON — a leaf under RArm_Hand — like any other
+						 * bone, but an empty bone shows nothing, so the one thing a viewer
+						 * actually wants from a posed rig (the prop it is holding) had never
+						 * been under test. This step merges real weapon NIFs onto that node
+						 * through nifMergeFile, the SAME entry point the CLI's
+						 * `merge --attach NODE --add FILE` uses, and then measures where the
+						 * gun landed.
 						 *
-						 * ON THE DONOR'S ROOT. A Fallout 4 weapon's root node is itself
-						 * named "WEAPON", which looks like it must produce WEAPON under
-						 * WEAPON. It does not: mergeDonor's donorTops are the donor
-						 * root's CHILDREN and the root block is never imported (it is a
-						 * per-file wrapper), so the pistol's own hierarchy becomes the
-						 * skeleton WEAPON node's children, carrying the local
-						 * transforms the weapon file authored relative to its own root
-						 * — which is the grip frame. Nothing to rename, and no identity
-						 * transform to invent: the pose supplies the grip placement.
+						 * WW_SAMPOSE_WEAPON is a SEMICOLON-separated list, merged in order,
+						 * because a Fallout 4 weapon is not one file. 10MMPistol.nif is the
+						 * RECEIVER GROUP alone — bolt, hammer, trigger, bolt release, mag
+						 * release and the receiver itself, with the stock barrel and iron
+						 * sights baked into the receiver mesh. Its WeaponMagazine,
+						 * WeaponOptics and grip nodes are EMPTY attach points; the grip,
+						 * magazine and sights live in separate OMOD part NIFs beside it, and
+						 * without them the picture is a gun missing its handle and mag.
 						 *
-						 * WHAT IS MEASURED. Two distances, and it takes BOTH. "A weapon
-						 * shape is near the WEAPON bone" would also hold if the whole
-						 * document sat at the origin and the gun with it — the classic
-						 * mis-attach, where --attach is ignored and the branch lands on
-						 * the root, puts the gun at (0,0,0) next to a WEAPON node that
-						 * a broken rig could also leave there. "A weapon shape is far
-						 * from the origin" alone passes for a gun flung anywhere. Only
-						 * both together say it is in the hand.
+						 * ON THE TWO "WEAPON"s. A Fallout 4 weapon's root node is itself named
+						 * "WEAPON", which looks like it must produce WEAPON under WEAPON. It
+						 * does not: mergeDonor's donorTops are the donor root's CHILDREN and
+						 * the root block is never imported (it is a per-file wrapper), so the
+						 * pistol's hierarchy becomes the skeleton WEAPON node's children,
+						 * carrying the local transforms the weapon file authored against its
+						 * own root — the grip frame. The part files are authored in that same
+						 * frame with identity roots (measured: 10mmGrip.nif and 10mmMag01.nif
+						 * both put their shape at (0,0,0)), so they SELF-ASSEMBLE under WEAPON
+						 * with no transform work here. Nothing to rename, nothing to offset.
+						 *
+						 * WHAT IS MEASURED. Not the pixels. Distances and a scale, all read
+						 * off world transforms walked up the Parent links.
 						 */
-						const QString weapon = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_WEAPON" ) );
-						if ( weapon.isEmpty() ) {
-							log << "weapon step skipped (WW_SAMPOSE_WEAPON unset)\n";
-						} else if ( !QFile::exists( weapon ) ) {
-							log << "weapon step skipped (no file at " << weapon << ")\n";
+						const QString weaponList = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_WEAPON" ) );
+						QStringList parts;
+						for ( const QString & p : weaponList.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) ) {
+							const QString t = p.trimmed();
+							if ( t.isEmpty() )
+								continue;
+							if ( !QFile::exists( t ) ) {
+								log << "weapon part skipped (no file at " << t << ")\n";
+								continue;
+							}
+							parts << t;
+						}
+						if ( parts.isEmpty() ) {
+							log << "weapon step skipped (WW_SAMPOSE_WEAPON names no existing .nif)\n";
 						} else {
 							auto isShape = [nif]( const QModelIndex & i ) {
 								return nif->blockInherits( i, "BSTriShape" )
 									|| nif->blockInherits( i, "NiTriBasedGeom" );
 							};
-							/* Weapon-sourced shapes are told apart by NAME, not by
-							 * "block number >= the count before". The merge runs inside
-							 * nifSnapshotOp, and this harness already knows block
-							 * numbers move under a snapshot (see blockFor). */
+							/* Weapon-sourced shapes are told apart by NAME, not by "block
+							 * number >= the count before". The merge runs inside nifSnapshotOp,
+							 * and this harness already knows block numbers move under a
+							 * snapshot (see blockFor). */
 							QStringList shapesBefore;
 							for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 								const QModelIndex i = nif->getBlockIndex( b );
@@ -3492,21 +3505,53 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									shapesBefore << nif->resolveString( i, "Name" );
 							}
 
-							NifMergeResult wr;
-							if ( !nifMergeFile( nif, weapon, true, wr, QStringLiteral( "WEAPON" ) ) ) {
-								fails << ( "the weapon merge failed: " + wr.error );
-							} else {
+							/* What each corpus file is expected to bring, counted out of the
+							 * files themselves (`NifSkope -no-gui list`). The base NIF's SIX are
+							 * the receiver group described above — not a whole gun — and each
+							 * furniture part carries exactly one shape, so the default list
+							 * assembles to 6 + 1 + 1 = 8. An override the harness has no count
+							 * for is merged and measured but not counted against. */
+							auto expectedShapes = []( const QString & file ) -> int {
+								const QString b = QFileInfo( file ).fileName().toLower();
+								if ( b == QLatin1String( "10mmpistol.nif" ) )  return 6;
+								if ( b == QLatin1String( "10mmgrip.nif" ) )    return 1;
+								if ( b == QLatin1String( "10mmmag01.nif" ) )   return 1;
+								return -1;
+							};
+
+							int expectedTotal = 0, addedTotal = 0;
+							bool allKnown = true, mergedAll = true;
+							for ( const QString & part : parts ) {
+								const int expect = expectedShapes( part );
+								if ( expect < 0 )
+									allKnown = false;
+								else
+									expectedTotal += expect;
+								NifMergeResult wr;
+								if ( !nifMergeFile( nif, part, true, wr, QStringLiteral( "WEAPON" ) ) ) {
+									fails << ( "the weapon merge failed on " + QFileInfo( part ).fileName()
+										+ ": " + wr.error );
+									mergedAll = false;
+									break;
+								}
 								qApp->processEvents();
+								addedTotal += wr.shapesAdded;
+								log << "weapon part " << QFileInfo( part ).fileName() << ": +"
+									<< wr.blocksAdded << " block(s), +" << wr.shapesAdded << " shape(s), "
+									<< wr.nodesAdded << " node(s) added, " << wr.nodesReused
+									<< " reused by name, " << wr.rebased << " rebased, attached to \""
+									<< wr.attachedTo << "\"\n";
+								if ( wr.attachedTo != QLatin1String( "WEAPON" ) )
+									fails << QStringLiteral( "%1 did not attach to WEAPON but to \"%2\"" )
+										.arg( QFileInfo( part ).fileName(), wr.attachedTo );
+								if ( expect >= 0 && wr.shapesAdded != expect )
+									fails << QStringLiteral( "%1 brought %2 shape(s), expected %3" )
+										.arg( QFileInfo( part ).fileName() ).arg( wr.shapesAdded ).arg( expect );
+							}
+
+							if ( mergedAll ) {
 								pump();
 								settle( 400 );
-								log << "weapon merge (" << QFileInfo( weapon ).fileName() << "): +"
-									<< wr.blocksAdded << " block(s), " << wr.shapesAdded
-									<< " shape(s), " << wr.nodesAdded << " node(s) added, "
-									<< wr.nodesReused << " reused by name, " << wr.rebased
-									<< " rebased, attached to \"" << wr.attachedTo << "\"\n";
-								if ( wr.attachedTo != QLatin1String( "WEAPON" ) )
-									fails << ( "the weapon did not attach to WEAPON but to \""
-										+ wr.attachedTo + "\"" );
 
 								QVector<int> newShapes;
 								int shapesNow = 0;
@@ -3518,24 +3563,52 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									if ( !shapesBefore.contains( nif->resolveString( i, "Name" ) ) )
 										newShapes.append( b );
 								}
-								log << "shapes: " << shapesBefore.size() << " -> " << shapesNow
-									<< ", " << newShapes.size() << " under a name the document did "
-									"not have\n";
+								log << "shapes: " << shapesBefore.size() << " -> " << shapesNow << ", "
+									<< newShapes.size() << " under a name the document did not have, "
+									<< addedTotal << " reported by the merges";
+								if ( allKnown )
+									log << ", " << expectedTotal << " expected";
+								log << "\n";
 								if ( shapesNow <= shapesBefore.size() )
 									fails << QStringLiteral( "the weapon merge added no geometry "
 										"(%1 shape(s) before and after)" ).arg( shapesNow );
-								if ( newShapes.isEmpty() )
-									fails << "no weapon-sourced shape to measure";
+								if ( newShapes.size() != addedTotal )
+									fails << QStringLiteral( "%1 shape(s) arrived under a new name but the merges "
+										"reported %2" ).arg( newShapes.size() ).arg( addedTotal );
+								if ( allKnown && newShapes.size() != expectedTotal )
+									fails << QStringLiteral( "the assembled gun has %1 shape(s), expected %2" )
+										.arg( newShapes.size() ).arg( expectedTotal );
 
 								const QModelIndex iWeapon = blockFor( QStringLiteral( "WEAPON" ) );
-								const int weaponBlock = iWeapon.isValid()
-									? nif->getBlockNumber( iWeapon ) : -1;
+								const int weaponBlock = iWeapon.isValid() ? nif->getBlockNumber( iWeapon ) : -1;
 								if ( weaponBlock < 0 ) {
 									fails << "the merged document has no WEAPON node to measure against";
 								} else if ( !newShapes.isEmpty() ) {
-									// the WEAPON bone's world transform, walked up the
-									// Parent links exactly as the pose checks above do
-									const Vector3 hand = worldActual( weaponBlock ).translation;
+									// the WEAPON bone's world transform, walked up the Parent
+									// links exactly as the pose checks above do
+									const Transform handT = worldActual( weaponBlock );
+									const Vector3 hand = handT.translation;
+
+									/* THE GUN IS 1.75x LIFE SIZE, AND THAT IS THE POSE'S DOING.
+									 * sam_pa_pose1.json gives WEAPON scale 1.750013 — Screen
+									 * Archer Menu recorded the game's live power-armour
+									 * weapon-bone scale, so a faithful import reproduces it and
+									 * the attached gun comes out oversized. That is correct
+									 * behaviour and a surprise only if it is left to the
+									 * picture, so it is measured: the world scale ACCUMULATED
+									 * down the parent chain must equal what the harness's own
+									 * parse of the JSON says (every ancestor is unit scale, so
+									 * the product is the WEAPON entry itself). */
+									const float poseScale = want.contains( QStringLiteral( "WEAPON" ) )
+										? want.value( QStringLiteral( "WEAPON" ) ).scale : -1.0f;
+									log << "WEAPON accumulated world scale: " << handT.scale
+										<< " (the pose asks for " << poseScale << ")\n";
+									if ( poseScale < 0 )
+										fails << "the pose does not name WEAPON — the scale check would be vacuous";
+									else if ( std::fabs( handT.scale - poseScale ) > 1e-4f )
+										fails << QStringLiteral( "the WEAPON world scale is %1, the pose asks for %2" )
+											.arg( handT.scale ).arg( poseScale );
+
 									float best = -1, worst = -1, nearestOrigin = -1;
 									QString bestName, worstName, nearestOriginName;
 									for ( int b : newShapes ) {
@@ -3552,16 +3625,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									log << "WEAPON world at (" << hand[0] << ", " << hand[1] << ", "
 										<< hand[2] << "), " << hand.length() << " from the origin\n";
 									log << "weapon shapes vs the WEAPON node: nearest " << bestName
-										<< " at " << best << ", farthest " << worstName << " at "
-										<< worst << "\n";
+										<< " at " << best << ", farthest " << worstName << " at " << worst << "\n";
 									log << "closest weapon shape to the document origin: "
 										<< nearestOriginName << " at " << nearestOrigin << "\n";
-									/* 40 units: the pistol is roughly 30 long, so no part of
-									 * it is further than this from the grip. The FARTHEST is
-									 * checked as well as the nearest, because the nearest is
-									 * nearly free — the receiver's local transform is
-									 * identity, so it sits ON the grip by construction and
-									 * would score ~0 even if the rest of the gun flew off. */
+									/* 40 units. The pistol is roughly 30 long and the pose blows
+									 * it up by 1.75, but these are SHAPE PIVOTS, not mesh
+									 * extents, and the parts pivot on the gun frame's origin:
+									 * measured, the farthest is Pistol10mmRelease:0 at 27.7
+									 * WITH the 1.75 already in the chain, so 40 still holds with
+									 * room. The FARTHEST is checked as well as the nearest,
+									 * because the nearest is nearly free — the receiver, grip
+									 * and magazine all have identity locals and sit ON the grip
+									 * by construction, scoring ~0 even if the rest flew off. */
 									if ( best > 40.0f )
 										fails << QStringLiteral( "the nearest weapon shape is %1 unit(s) "
 											"from the WEAPON node — not in the hand" ).arg( best );
@@ -3569,8 +3644,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										fails << QStringLiteral( "weapon shape %1 is %2 unit(s) from the "
 											"WEAPON node — the gun is not in one piece in the hand" )
 											.arg( worstName ).arg( worst );
-									// and the hand is nowhere near the origin, so a branch
-									// that ignored the attach and landed on the root fails
+									// and the hand is nowhere near the origin, so a branch that
+									// ignored the attach and landed on the root fails
 									if ( nearestOrigin <= 40.0f )
 										fails << QStringLiteral( "weapon shape %1 sits %2 unit(s) from the "
 											"document origin — a root-level mis-attach" )
