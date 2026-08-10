@@ -1,5 +1,17 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11 — Mark glyph iteration, user-drawn pistol
+
+The pistol and bone glyphs were redrawn after direct review (the 2+1-lobe
+bone and both code-drawn pistols failed on sight); the bone is a symmetric
+dog-bone now, and the pistol is the user's own 16×16 (Downloads/Gun.png,
+two revisions), embedded VERBATIM as an alpha mask in weaponMarkPixmap —
+his pixels including antialiasing, only the ink from the skin, so lit/dim
+tint one drawing and no future redraw reinterprets the shape. The icon
+sheet (release/ww_icon_sheet.png, from renderMarkIconSheet via the
+loaded-NIFs harness) is the approval artifact for any future glyph work.
+Pixel-only changes need only the sheet-producing run, not the full suites.
+
 ## 2026-08-10k — The row strip reads: three marks, a rule, two display toggles
 
 **The glyphs were wrong and the user said so.** The pistol was "terrible" and the
