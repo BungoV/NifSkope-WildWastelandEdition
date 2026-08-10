@@ -10940,14 +10940,49 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *   5. AN UNMARKED DONOR IS UNTOUCHED by any of it — one guard assertion, not
 	 *      a second copy of tests/merge/workspace_skeleton_target.sh.
 	 *
+	 *   6. PLACEMENT, which is what the mark actually does now. A part declares
+	 *      the connect point it plugs into ("C-Muzzle" in
+	 *      BSConnectPoint::Children) and a placed part publishes the matching
+	 *      "P-Muzzle" with the node it rides and a full local transform; the
+	 *      merge composes it. Three things are asserted, all in the GUN'S OWN
+	 *      FRAME (through the WEAPON bone's inverse) against figures taken from
+	 *      the connect-point research rather than from this build:
+	 *        - a suppressor resolved over TWO hops (receiver P-Barrel -> long
+	 *          barrel P-Muzzle) lands on the bore, y 23.6..43.2 and z 4.85 +- 1,
+	 *          somewhere the unplaced control measured in step 3 is not;
+	 *        - every reflex-sight shape grips the slide top, z 7.5..10.5;
+	 *        - the magazine carries P-Mag's 26.52 degree cant. Only 17 of 386
+	 *          vanilla connect points are rotated at all, so a translation-only
+	 *          implementation passes everything else here and fails this by
+	 *          exactly 26.5 degrees.
+	 *   7. THE MUZZLE IS NOT ALWAYS THE BARREL'S. On the hunting rifle the STOCK
+	 *      publishes P-Muzzle and no barrel does, so a silencer must resolve
+	 *      across to it — at the stock's own y 30.543.
+	 *   8. A MUZZLE FLASH GOES AT THE END OF THE BARREL. A flash mesh declares no
+	 *      connect points at all, so there is nothing to match on and the fallback
+	 *      would leave the fireball on the WEAPON bone. It is placed one rung past
+	 *      everything else on the barrel line instead, and both shapes that line
+	 *      takes are asserted: on a bare minigun (no muzzle point, three flash
+	 *      points for three barrel lengths) it takes the farthest, P-FlashFar; on
+	 *      a kitted 10mm it takes the SUPPRESSOR's projectile node, past the
+	 *      receiver's and the barrel's.
+	 *   9. WHAT THIS MUST NOT TOUCH. A real animated effect goes through the
+	 *      weapon path and every controller, interpolator, float track and shader
+	 *      block is counted into the target one for one, with exactly ONE node
+	 *      added that the donor did not bring.
+	 *
 	 * WW_WEAPONMARK_FILES is a SEMICOLON-separated list in a fixed order, built
 	 * by tests/spells/weapon_mark.sh out of the game corpus:
-	 *   0 rig target (a skeleton with a WEAPON bone)   5 a gun whose own root is WEAPON
-	 *   1 weapon base                                  6 a part for it
-	 *   2 grip            3 magazine                   7 a second one of that part
-	 *   4 a slot-relative part (suppressor)            8 an ordinary unmarked donor
-	 *                                                  9 a target with no WEAPON bone
-	 * Log: release/ww_weaponmark_test.log, picture: release/ww_weaponmark_list.png.
+	 *    0 rig target (a skeleton with a WEAPON bone)  10 a barrel that publishes a muzzle
+	 *    1 weapon base                                 11 a scope
+	 *    2 grip             3 magazine                 12 a clean rig for the kitted gun
+	 *    4 a part whose slot nothing publishes yet     13 rifle receiver  14 rifle stock
+	 *    5 a gun whose own root is WEAPON              15 rifle barrel    16 rifle silencer
+	 *    6 a part for it    7 a second one of it       17 a clean rig for the rifle
+	 *    8 an ordinary unmarked donor                  18 a muzzle flash
+	 *    9 a target with no WEAPON bone                19 a bare gun with flash points
+	 * Log: release/ww_weaponmark_test.log; pictures: release/ww_weaponmark_list.png
+	 * (the marked rows) and release/ww_weaponmark_kit.png (the assembled gun).
 	 */
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WEAPONMARK_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
@@ -10988,7 +11023,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				// row order is the fixture's contract; see the block comment
 				enum { RigTarget = 0, GunBase = 1, Grip = 2, Mag = 3, SlotPart = 4,
 					   OtherGun = 5, Barrel = 6, SecondBarrel = 7, PlainDonor = 8,
-					   NoWeaponTarget = 9, FixtureCount = 10 };
+					   NoWeaponTarget = 9,
+					   LongBarrel = 10, ReflexSight = 11, KitTarget = 12,
+					   RifleReceiver = 13, RifleStock = 14, RifleBarrel = 15,
+					   RifleSilencer = 16, RifleTarget = 17, EffectDonor = 18,
+					   FlashTarget = 19, FixtureCount = 20 };
 
 				do {
 					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
@@ -11001,7 +11040,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					for ( int i = 0; i < files.size(); i++ )
 						log << "  fixture " << i << ": " << QFileInfo( files.at( i ) ).fileName() << "\n";
 					if ( files.size() != int( FixtureCount ) ) {
-						check( "the fixture names ten files in the documented order", false );
+						check( "the fixture names every file, in the documented order", false );
 						break;
 					}
 					int enrolled = 0;
@@ -11140,6 +11179,42 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							w = Transform( n, n->getBlockIndex( p ) ) * w;
 						return w;
 					};
+					/* GUN FRAME, not world. Every number the connect-point research
+					 * quotes is in the weapon's own space — the 10mm is about 22.6
+					 * units long, Y forward, Z up — and the rig puts that space
+					 * wherever the WEAPON bone happens to be (83 units up, turned).
+					 * Measuring through the bone's inverse is what lets the harness
+					 * assert the research's figures directly instead of restating
+					 * them for one pose. */
+					auto gunFrame = [&worldOf]( NifModel * n, int weapon, int block ) {
+						return worldOf( n, weapon ).inverted() * worldOf( n, block );
+					};
+					//! Angle between two rotations, in degrees: acos((tr(A^T B)-1)/2).
+					auto angleBetween = []( const Matrix & a, const Matrix & b ) {
+						float t = 0;
+						for ( int r = 0; r < 3; r++ )
+							for ( int c = 0; c < 3; c++ )
+								t += a( r, c ) * b( r, c );		// == trace(A^T B)
+						const float cosang = qBound( -1.0f, ( t - 1.0f ) * 0.5f, 1.0f );
+						return float( std::acos( cosang ) * 180.0 / 3.14159265358979 );
+					};
+					auto shapeNamed = []( NifModel * n, const QString & nm ) {
+						for ( int b = 0; b < n->getBlockCount(); b++ ) {
+							const QModelIndex i = n->getBlockIndex( b );
+							if ( ( n->blockInherits( i, "BSTriShape" )
+								   || n->blockInherits( i, "NiTriBasedGeom" ) )
+								 && n->resolveString( i, "Name" ) == nm )
+								return b;
+						}
+						return -1;
+					};
+					auto typeTally = []( NifModel * n, const QString & type ) {
+						int count = 0;
+						for ( int b = 0; b < n->getBlockCount(); b++ )
+							if ( n->itemName( n->getBlockIndex( b ) ) == type )
+								count++;
+						return count;
+					};
 
 					QStringList namesBefore;
 					for ( int b : shapeBlocks( rig ) )
@@ -11191,8 +11266,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					const QString assembly = nifLastMergeSummary();
 					log << "--- assembly summary ---\n" << assembly << "\n--- end ---\n";
-					check( "the summary says all three parts attached to WEAPON",
-						assembly.count( QStringLiteral( "attached to WEAPON" ) ) == 3 );
+					/* The base lands ON the bone; the furniture lands on the base.
+					 *
+					 * This assertion used to read "all three attached to WEAPON",
+					 * which was the whole truth while the mark could only parent.
+					 * It is now the wrong question: only the part that declares no
+					 * publisher of its own goes on the bone, and a grip that still
+					 * did would be the bug. */
+					check( "the base part goes on the WEAPON bone",
+						assembly.count( QStringLiteral( "attached to WEAPON" ) ) == 1 );
+					check( "...and the grip and magazine go on the base's own connect points",
+						assembly.contains( QStringLiteral( "placed on P-Grip" ) )
+							&& assembly.contains( QStringLiteral( "placed on P-Mag" ) ) );
 					// THE COUNTER-CHECK for both notices below: a gun that assembles
 					// correctly must draw neither of them.
 					check( "a correctly assembling gun draws no weapon-part notes",
@@ -11208,14 +11293,39 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "the slot-relative part merges", merge( RigTarget, { SlotPart } ) );
 					const QString slotSummary = nifLastMergeSummary();
 					log << "--- slot summary ---\n" << slotSummary << "\n--- end ---\n";
-					check( "...and the summary says it needs a slot node placement does not provide yet",
+					check( "...and the summary names the point nothing in the assembly publishes",
 						slotSummary.contains( QStringLiteral( "WEAPON PARTS:" ) )
-							&& slotSummary.contains( QStringLiteral( "Muzzle" ) )
-							&& slotSummary.contains(
-								QStringLiteral( "automatic placement does not provide" ) )
+							&& slotSummary.contains( QStringLiteral( "publishes P-Muzzle" ) )
 							&& slotSummary.contains( skope->workspaceDocumentName( SlotPart ) ) );
 					check( "...as a note and not a refusal — the part is in the file all the same",
 						shapeBlocks( rig ).size() > beforeSlot );
+
+					/* THE CONTROL for the placement bands below.
+					 *
+					 * This is the same suppressor, on the same kind of rig, with no
+					 * barrel in front of it — so it is exactly what the previous
+					 * increment produced for every part: hung on the bone, sitting
+					 * at the weapon's origin. Its gun-frame position is measured
+					 * here and asserted to be OUTSIDE the band the placed one has to
+					 * land in, which is what stops that band from being a number
+					 * that was always true.
+					 */
+					float controlY = 0, controlZ = 0;
+					{
+						const int weaponBone = blockNamed( rig, QStringLiteral( "WEAPON" ) );
+						const int shape = shapeNamed( rig, QStringLiteral( "10mmSuppressor:0" ) );
+						if ( weaponBone >= 0 && shape >= 0 ) {
+							const Vector3 at = gunFrame( rig, weaponBone, shape ).translation;
+							controlY = at[1];
+							controlZ = at[2];
+						}
+						log << "CONTROL — suppressor with no barrel to hang on: gun-frame y "
+							<< controlY << ", z " << controlZ << "\n";
+						check( "the unplaced suppressor sits at the weapon's origin, outside the bore band",
+							weaponBone >= 0 && shape >= 0
+								&& ( controlY < 23.6f || controlY > 43.2f )
+								&& std::fabs( controlZ - 4.85f ) > 1.0f );
+					}
 					skope->markWorkspaceWeaponRow( SlotPart, false );
 
 					/* ---- 3b. THE REDUNDANCY NOTICE ------------------------------ */
@@ -11252,6 +11362,324 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "...and the merge happened all the same",
 						plain && plain->getBlockCount() > plainBefore );
 					skope->markWorkspaceWeaponRow( GunBase, false );
+
+					/* ---- 6. A KITTED GUN, AND THE TWO-HOP CHAIN ----------------
+					 *
+					 * Six parts in row order onto a clean rig. The last one is the
+					 * point of the phase: the suppressor asks for P-Muzzle, which
+					 * the RECEIVER does not publish — the long barrel does, and the
+					 * barrel is itself only where it is because the receiver's
+					 * P-Barrel put it there. Two hops, both resolved against the
+					 * assembly as it stood when each part arrived.
+					 *
+					 * Every figure below is quoted from the connect-point research
+					 * and measured HERE in the gun's own frame, so the assertions
+					 * are the research's numbers rather than a restatement of
+					 * whatever this build happens to produce.
+					 */
+					NifModel * kit = skope->workspaceDocumentModel( KitTarget );
+					if ( !kit ) { check( "the kit rig has a model", false ); break; }
+					for ( int row : { GunBase, Grip, Mag, LongBarrel, ReflexSight, SlotPart } )
+						skope->markWorkspaceWeaponRow( row, true );
+					check( "six parts of one gun can be marked at once", nifWeaponMarkCount() == 6 );
+					check( "the kitted 10mm merges onto a clean rig in row order",
+						merge( KitTarget, { GunBase, Grip, Mag, LongBarrel, ReflexSight, SlotPart } ) );
+					const QString kitSummary = nifLastMergeSummary();
+					log << "--- kitted 10mm summary ---\n" << kitSummary << "\n--- end ---\n";
+					for ( int row : { GunBase, Grip, Mag, LongBarrel, ReflexSight, SlotPart } )
+						skope->markWorkspaceWeaponRow( row, false );
+
+					const int kitWeapon = blockNamed( kit, QStringLiteral( "WEAPON" ) );
+					check( "the kit rig has a WEAPON bone to measure the gun frame from",
+						kitWeapon >= 0 );
+					if ( kitWeapon >= 0 ) {
+						/* THE SUPPRESSOR, TWO HOPS OUT.
+						 * Research: the receiver's P-Barrel at y 18.515 places the
+						 * long barrel, whose own P-Muzzle at y 5.594 puts the
+						 * suppressor's root on the bore at y 24.108, z 4.850, and
+						 * its body runs y 23.59..43.21. */
+						const int sup = shapeNamed( kit, QStringLiteral( "10mmSuppressor:0" ) );
+						check( "the suppressor is in the kitted gun", sup >= 0 );
+						if ( sup >= 0 ) {
+							const Vector3 at = gunFrame( kit, kitWeapon, sup ).translation;
+							log << "suppressor gun-frame (" << at[0] << ", " << at[1] << ", "
+								<< at[2] << ") — control was y " << controlY << ", z "
+								<< controlZ << "\n";
+							check( "the suppressor lands in the bore band, 23.6 to 43.2 along the gun",
+								at[1] >= 23.6f && at[1] <= 43.2f );
+							check( "...and on the bore axis, z 4.85 +- 1",
+								std::fabs( at[2] - 4.85f ) <= 1.0f );
+							check( "...which is somewhere the unplaced control was not",
+								std::fabs( at[1] - controlY ) > 1.0f
+									&& std::fabs( at[2] - controlZ ) > 1.0f );
+						}
+						check( "the summary credits the barrel, not the receiver, for the muzzle point",
+							kitSummary.contains( QStringLiteral( "placed on P-Muzzle from 10mmLongBarrel" ) ) );
+
+						/* THE REFLEX SIGHT, gripping the slide.
+						 * Research: P-Scope sits at z 7.797 on the receiver and the
+						 * placed sight occupies z 7.52..10.49 — the receiver's slide
+						 * top is 8.52, so its foot grips and the glass stands proud.
+						 * Every one of its shapes is checked, by the donor's own
+						 * list of them rather than by names typed in here. */
+						NifModel * sight = skope->workspaceDocumentModel( ReflexSight );
+						int sightShapes = 0;
+						float lowZ = 1e9f, highZ = -1e9f;
+						QString lowName;
+						if ( sight ) {
+							for ( int b : shapeBlocks( sight ) ) {
+								const QString nm = sight->resolveString( sight->getBlockIndex( b ), "Name" );
+								const int here = shapeNamed( kit, nm );
+								if ( here < 0 )
+									continue;
+								sightShapes++;
+								const float z = gunFrame( kit, kitWeapon, here ).translation[2];
+								if ( z < lowZ ) { lowZ = z; lowName = nm; }
+								if ( z > highZ ) highZ = z;
+							}
+						}
+						log << "reflex sight: " << sightShapes << " shape(s), gun-frame z "
+							<< lowZ << " (" << lowName << ") to " << highZ << "\n";
+						check( "every reflex-sight shape sits on the slide top, gun-frame z 7.5 to 10.5",
+							sightShapes >= 5 && lowZ >= 7.5f && highZ <= 10.5f );
+
+						/* ---- 7. THE ROTATION IS COMPOSED, NOT DROPPED -----------
+						 *
+						 * The 10mm's P-Mag is canted 26.52 degrees — pistol
+						 * magazines are — and it is one of only 17 rotated connect
+						 * points in 386. An assembler that applies the translation
+						 * and quietly ignores the quaternion is right everywhere
+						 * else and wrong here, so this is the assertion that tells
+						 * the two implementations apart: the placed magazine's
+						 * rotation must differ from the node the point rides by
+						 * exactly that angle. Translation-only scores 0.
+						 */
+						NifModel * magSrc = skope->workspaceDocumentModel( Mag );
+						const QVector<int> magShapes = magSrc ? shapeBlocks( magSrc ) : QVector<int>();
+						const int magHere = magShapes.isEmpty() ? -1
+							: shapeNamed( kit, magSrc->resolveString(
+								magSrc->getBlockIndex( magShapes.first() ), "Name" ) );
+						const int magNode = blockNamed( kit, QStringLiteral( "WeaponMagazine" ) );
+						check( "the magazine and the node its connect point rides are both in the gun",
+							magHere >= 0 && magNode >= 0 );
+						if ( magHere >= 0 && magNode >= 0 ) {
+							const Matrix placed = worldOf( kit, magHere ).rotation;
+							const Matrix rides = worldOf( kit, magNode ).rotation;
+							const float turned = angleBetween( rides, placed );
+							log << "magazine turned " << turned
+								<< " degrees off the node it hangs from (P-Mag says 26.52)\n";
+							check( "the magazine carries the connect point's 26.5 degree cant",
+								std::fabs( turned - 26.52f ) <= 0.5f );
+						}
+					}
+
+					/* THE PICTURE, taken here rather than at the end of the list.
+					 *
+					 * Step 9's effect donor is a muzzle FLASH, and merging it into
+					 * this same rig fills the frame with a billboard fireball that
+					 * hides the gun the shot exists to show — measured, on the first
+					 * run. So the capture is taken while the assembly is still the
+					 * six parts, with every other row hidden and the camera put on
+					 * the WEAPON bone rather than on the workspace origin, which is
+					 * 83 units away and renders the gun four pixels wide.
+					 */
+					{
+						for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+							skope->setWorkspaceDisplayMode( i, i == KitTarget ? 1 : 0 );
+						if ( kitWeapon >= 0 ) {
+							skope->ogl->setPosition( -worldOf( kit, kitWeapon ).translation );
+							skope->ogl->setDistance( 55.0f );
+						}
+						settle( 400 );
+						skope->ogl->update(); qApp->processEvents();
+						skope->ogl->update(); qApp->processEvents();
+						settle( 300 );
+						const QString kitShot =
+							QApplication::applicationDirPath() + "/ww_weaponmark_kit.png";
+						check( "the kitted gun renders", skope->ogl->grabFramebuffer().save( kitShot ) );
+						log << "  " << kitShot << "\n";
+					}
+
+					/* ---- 8. THE MUZZLE COMES FROM WHEREVER PUBLISHES IT ---------
+					 *
+					 * On the 10mm the barrel publishes P-Muzzle. On the hunting
+					 * rifle it is the STOCK — the mesh is the whole furniture and
+					 * forend, publishing P-Barrel AND P-Muzzle, and none of the four
+					 * barrels publishes a muzzle point at all. Anything that
+					 * hard-coded "the muzzle comes from the barrel" assembles the
+					 * 10mm perfectly and puts this silencer nowhere. Research: the
+					 * short stock's P-Muzzle is at y 30.543.
+					 */
+					NifModel * rifle = skope->workspaceDocumentModel( RifleTarget );
+					if ( rifle ) {
+						for ( int row : { RifleReceiver, RifleStock, RifleBarrel, RifleSilencer } )
+							skope->markWorkspaceWeaponRow( row, true );
+						check( "the hunting rifle merges receiver, stock, barrel, silencer",
+							merge( RifleTarget, { RifleReceiver, RifleStock, RifleBarrel, RifleSilencer } ) );
+						const QString rifleSummary = nifLastMergeSummary();
+						log << "--- hunting rifle summary ---\n" << rifleSummary << "\n--- end ---\n";
+						for ( int row : { RifleReceiver, RifleStock, RifleBarrel, RifleSilencer } )
+							skope->markWorkspaceWeaponRow( row, false );
+
+						const int rifleWeapon = blockNamed( rifle, QStringLiteral( "WEAPON" ) );
+						const int silencer = blockNamed( rifle, QStringLiteral( "HuntingRifleSilencer" ) );
+						float silencerY = -1;
+						if ( rifleWeapon >= 0 && silencer >= 0 )
+							silencerY = gunFrame( rifle, rifleWeapon, silencer ).translation[1];
+						log << "silencer root at gun-frame y " << silencerY
+							<< " (the short stock publishes P-Muzzle at 30.543)\n";
+						check( "the silencer resolves its muzzle from the STOCK, at the stock's own y",
+							rifleWeapon >= 0 && silencer >= 0
+								&& std::fabs( silencerY - 30.543f ) <= 1.0f
+								&& rifleSummary.contains( QStringLiteral(
+									"placed on P-Muzzle from HuntingRifleStockShort" ) ) );
+					} else {
+						check( "the hunting rifle rig has a model", false );
+					}
+
+					/* ---- 9. THE MUZZLE FLASH GOES AT THE END OF THE BARREL ------
+					 *
+					 * A flash mesh declares NO connect points — neither ::Children
+					 * nor ::Parents, measured on MiniGunMuzzeFlash.nif — so there is
+					 * no name for the ordinary match to work with, and the fallback
+					 * would hang the fireball on the WEAPON bone, at the shooter's
+					 * fist. It belongs one node past everything else on the barrel
+					 * line, and the two cases below are the two shapes that line
+					 * takes in the corpus.
+					 *
+					 * (a) A BARE MINIGUN publishes no muzzle point at all: its
+					 * ladder rung is the P-Flash family, one point per barrel
+					 * length, and the flash takes the farthest — P-FlashFar.
+					 */
+					NifModel * flashRig = skope->workspaceDocumentModel( FlashTarget );
+					NifModel * flashSrc = skope->workspaceDocumentModel( EffectDonor );
+					QStringList flashShapeNames;
+					if ( flashSrc )
+						for ( int b : shapeBlocks( flashSrc ) )
+							flashShapeNames << flashSrc->resolveString( flashSrc->getBlockIndex( b ), "Name" );
+					if ( flashRig && !flashShapeNames.isEmpty() ) {
+						const int flashWeapon = blockNamed( flashRig, QStringLiteral( "WEAPON" ) );
+						// how far the gun's own geometry reaches before the flash arrives
+						float ownReach = 0;
+						if ( flashWeapon >= 0 )
+							for ( int b : shapeBlocks( flashRig ) )
+								ownReach = qMax( ownReach,
+									gunFrame( flashRig, flashWeapon, b ).translation[1] );
+						skope->markWorkspaceWeaponRow( EffectDonor, true );
+						check( "the muzzle flash merges onto a bare minigun",
+							merge( FlashTarget, { EffectDonor } ) );
+						skope->markWorkspaceWeaponRow( EffectDonor, false );
+						const QString flashSummary = nifLastMergeSummary();
+						log << "--- muzzle flash on a bare minigun ---\n" << flashSummary
+							<< "\n--- end ---\n";
+						const int flashShape = shapeNamed( flashRig, flashShapeNames.first() );
+						float flashY = -1, flashReach = -1;
+						if ( flashWeapon >= 0 && flashShape >= 0 ) {
+							const Vector3 at = gunFrame( flashRig, flashWeapon, flashShape ).translation;
+							flashY = at[1];
+							flashReach = at.length();
+						}
+						log << "minigun geometry reaches y " << ownReach << "; the flash sits at y "
+							<< flashY << ", " << flashReach << " from the bone\n";
+						check( "the flash takes the FARTHEST of the minigun's three flash points",
+							flashSummary.contains( QStringLiteral(
+								"placed at the end of the barrel chain on P-FlashFar from Minigun001" ) ) );
+						check( "...so it sits past the end of the gun's own geometry",
+							flashShape >= 0 && flashY > ownReach + 20.0f );
+						check( "...and nowhere near the bone the gun hangs from",
+							flashReach > 40.0f );
+					} else {
+						check( "the flash fixture and its rig are both loaded", false );
+					}
+
+					/* ---- 10. WHAT THE WEAPON PATH MUST NOT TOUCH ----------------
+					 *
+					 * The placement code adds exactly ONE NiNode to the target and
+					 * changes nothing else. That is easy to say and easy to break:
+					 * the merge it calls is the same one every ArtObject, loading
+					 * screen and rig merge goes through, and it folds controller
+					 * managers, renames effect nodes and prunes dead animation
+					 * links on its way past.
+					 *
+					 * So a real animated effect goes through the WEAPON path, and
+					 * every controller, interpolator, float track and shader block
+					 * it carries is counted into the target one for one. A wrapper
+					 * node is the only thing that may appear that the donor did not
+					 * bring. BSXFlags is excluded from the tally on purpose: the
+					 * merge has always dropped a second one, and that is a rule
+					 * older than this feature.
+					 *
+					 * (b) OF THE FLASH STORY: the same donor onto the KITTED gun,
+					 * whose chain ends in a suppressor. The suppressor publishes a
+					 * P-ProjectileNode, so that is the rung the ladder stops on, and
+					 * the flash must land BEYOND the suppressor rather than on the
+					 * receiver's own projectile node or on the bone. There is no
+					 * 10mm flash mesh in the corpus — the only weapon flashes
+					 * unpacked are the Minigun's, the Broadsider's and the
+					 * JunkJet's — so this is deliberately a cross-weapon build,
+					 * which the mark allows on purpose.
+					 */
+					NifModel * fx = skope->workspaceDocumentModel( EffectDonor );
+					if ( fx && kit ) {
+						const QStringList watched = {
+							QStringLiteral( "BSEffectShaderPropertyFloatController" ),
+							QStringLiteral( "NiFloatInterpolator" ),
+							QStringLiteral( "NiFloatData" ),
+							QStringLiteral( "BSEffectShaderProperty" ),
+							QStringLiteral( "NiAlphaProperty" ),
+							QStringLiteral( "BSValueNode" ),
+							QStringLiteral( "BSTriShape" ) };
+						QList<int> before, brings;
+						for ( const QString & type : watched ) {
+							before << typeTally( kit, type );
+							brings << typeTally( fx, type );
+						}
+						const int nodesBefore = typeTally( kit, QStringLiteral( "NiNode" ) );
+						skope->markWorkspaceWeaponRow( EffectDonor, true );
+						check( "an animated effect merges through the weapon path",
+							merge( KitTarget, { EffectDonor } ) );
+						skope->markWorkspaceWeaponRow( EffectDonor, false );
+						bool intact = true;
+						for ( int t = 0; t < watched.size(); t++ ) {
+							const int now = typeTally( kit, watched.at( t ) );
+							log << "  " << watched.at( t ) << ": " << before.at( t ) << " + "
+								<< brings.at( t ) << " -> " << now << "\n";
+							if ( now != before.at( t ) + brings.at( t ) )
+								intact = false;
+						}
+						const int nodesNow = typeTally( kit, QStringLiteral( "NiNode" ) );
+						log << "  NiNode: " << nodesBefore << " -> " << nodesNow
+							<< " (one wrapper, the donor's root dropped as always)\n";
+						check( "every controller, interpolator and float track arrives untouched",
+							intact );
+						check( "...and the weapon path added exactly one node of its own",
+							nodesNow == nodesBefore + 1 );
+
+						/* ...and it was PLACED while it did that. Before the flash
+						 * rule this donor hung on the WEAPON bone, so this used to
+						 * be a merge that happened to be harmless; now it has to be
+						 * harmless AND correct. */
+						const QString fxSummary = nifLastMergeSummary();
+						log << "--- muzzle flash on the kitted 10mm ---\n" << fxSummary
+							<< "\n--- end ---\n";
+						const int fxWeapon = blockNamed( kit, QStringLiteral( "WEAPON" ) );
+						const int fxShape = shapeNamed( kit, flashShapeNames.value( 0 ) );
+						const int supNow = shapeNamed( kit, QStringLiteral( "10mmSuppressor:0" ) );
+						float fxY = -1, supY = -1;
+						if ( fxWeapon >= 0 && fxShape >= 0 )
+							fxY = gunFrame( kit, fxWeapon, fxShape ).translation[1];
+						if ( fxWeapon >= 0 && supNow >= 0 )
+							supY = gunFrame( kit, fxWeapon, supNow ).translation[1];
+						log << "flash at gun-frame y " << fxY << ", the suppressor it must clear at "
+							<< supY << "\n";
+						check( "the flash stops on the SUPPRESSOR's projectile node, the deepest rung",
+							fxSummary.contains( QStringLiteral( "placed at the end of the barrel "
+								"chain on P-ProjectileNode from 10mmSuppressor" ) ) );
+						check( "...so it sits beyond the suppressor, not back at the receiver",
+							fxShape >= 0 && supNow >= 0 && fxY > supY + 10.0f );
+					} else {
+						check( "the effect donor has a model", false );
+					}
 
 					/* ---- 5. THE GUARD ------------------------------------------- */
 					check( "no weapon marks are left", nifWeaponMarkCount() == 0 );

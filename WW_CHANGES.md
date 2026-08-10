@@ -1,5 +1,114 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10h — Weapon parts assemble themselves, on the points the meshes ship
+
+**What the mark could not do yet.** Yesterday's mark parented every weapon-marked
+row on the `WEAPON` bone. That is right for the part that IS the gun and wrong for
+everything that bolts onto it: a suppressor parented at the bone sits inside the
+grip, and the summary could only say so. The entry below called the slot table "a
+separate effort". It is not separate any more — it was never a table.
+
+**FO4 ships the assembly graph in the meshes.** Every weapon NIF carries two
+`NiExtraData` blocks: `BSConnectPoint::Children` lists the point the mesh plugs
+into (`C-Muzzle`), and `BSConnectPoint::Parents` lists the points it offers
+(`P-Muzzle`), each with a **node name inside that mesh** and a full local
+transform — quaternion w-first, translation, scale. Placement is one line:
+
+```
+world(part root) = world(provider node) ∘ (translation, rotation, scale)
+```
+
+`nifMergeWeaponPart` applies it, resolving each marked donor against the target
+**as it stands**, so parts land on each other in row order.
+
+**The rotation is not optional.** It is identity on 369 of 386 vanilla connect
+points, which is exactly why a translation-only assembler looks correct until it
+meets a magazine: the 10mm's `P-Mag` is canted **26.52°** (pistol mags are), three
+muzzle points are turned a full 180°, and most receivers rotate `P-Casing` 39–100°.
+The harness measures the placed magazine at **26.5163°** off the node its point
+rides — an implementation that dropped the quaternion scores 0 and fails there
+alone.
+
+**Each placed part gets a node of its own, and that is the load-bearing detail.**
+A connect point whose `Parent` is EMPTY is expressed in its own mesh's ROOT frame
+— `10mmLongBarrel.nif` writes `P-Muzzle` that way — and the merge has always
+dropped donor roots as per-file wrappers. With the root gone that frame is not a
+node, and a chain cannot be walked past one hop. So the merge now creates one
+`NiNode` per placed part, carrying the connect-point transform, and hangs the
+part's branches off it. The part's own extra data rides that node, so an
+empty-`Parent` point resolves to it. Two hops then work with no special case:
+receiver `P-Barrel` (y 18.515) places the long barrel, whose `P-Muzzle` (y 5.594)
+places the suppressor at **y 24.108, z 4.850** — dead on the research's figure,
+and on the bore.
+
+**The muzzle does not always come from the barrel.** On the hunting rifle none of
+the four barrels publishes `P-Muzzle`; the STOCK does, because that mesh is the
+whole furniture and forend. Its silencer resolves across to the stock at
+**y 30.5426** (research: 30.543). Anything that hard-coded "muzzles come from
+barrels" assembles the 10mm perfectly and puts this one nowhere, so it is asserted.
+
+**Still no policing.** Any part may go on any gun; the only requirement is that
+something already placed publishes the point asked for. Slot names are matched
+case-insensitively (vanilla ships `P-MeleeMod` and `p-MeleeMod`), a mesh's list of
+required points means ANY of them (`CombatRifle.nif` declares `C-Receiver` *and*
+the misspelled `C-Reciever`), and where two placed parts publish the same point the
+last one wins. Nothing resolves → the part still goes on the `WEAPON` bone and the
+summary names the point nothing publishes. Two cases stay silent because nothing
+is missing: a mesh that declares no point at all is an assembly root, and a
+receiver arriving at a target with no connect points has landed on a **rig**.
+
+**A muzzle flash goes at the very end of the barrel.** Flash meshes are the one
+part the name match cannot serve: `MiniGunMuzzeFlash.nif` declares **no connect
+points at all** — neither `::Children` nor `::Parents` — so there is nothing to
+resolve and the fallback would leave the fireball on the `WEAPON` bone, at the
+shooter's fist. A marked donor that asks for nothing is instead placed on the
+farthest-forward point the assembly ALREADY publishes, down a ladder that is the
+barrel chain read backwards: `P-ProjectileNode` (what a muzzle device, a barrel,
+or a bare receiver's baked-in barrel publishes — several is normal, farthest from
+the gun's origin wins), else `P-Muzzle`, else the `P-Flash*` family, else
+`P-Barrel`. Nothing is invented: with nothing published it still lands on the bone
+and says so. Distance from the gun's origin rather than a Y coordinate, because
+the target may be a posed rig pointing anywhere.
+
+Measured, both shapes the chain takes in the corpus:
+
+| assembly | rung taken | flash lands at (gun frame) |
+|---|---|---|
+| bare Minigun — no muzzle point, three flash points for three barrel lengths | **`P-FlashFar` from `Minigun001`** | y **135.33**, past the gun's own geometry at 18.56 |
+| 10mm receiver + long barrel + suppressor | **`P-ProjectileNode` from `10mmSuppressor`** | y **71.91**, past the suppressor at 24.11 |
+
+The second is a deliberate cross-weapon build — no 10mm flash mesh exists in this
+unpack, only the Minigun's, the Broadsider's and the JunkJet's — and it works
+because the mark polices nothing.
+
+**What this cannot reach.** Only a marked donor takes the weapon branch; clothing,
+skeletons, ArtObjects, loading screens, the CLI `merge` verb and the workspace rig
+merge take the byte-identical `nifMergeData` call they always did. The weapon path
+adds **one `NiNode`** and nothing else — no controller, particle, effect or shader
+block is created, removed, renamed or re-linked by it. That is asserted rather
+than claimed: a real animated effect (`MiniGunMuzzeFlash.nif`, 3 shader
+controllers + 3 interpolators + 3 float tracks) is merged through the weapon path
+and every one of those blocks is counted into the target one for one, with
+`NiNode` moving 167 → 168.
+
+**Harness.** `weapon_mark.sh` / `WW_WEAPONMARK_TEST` grew from 37 to **62 checks,
+0 failures**, on 20 corpus files and three separate rigs (the 10mm and the hunting
+rifle both carry a `WeaponMagazine`; one skeleton for both would hang the rifle's
+magazine off the pistol's node). Every placement figure is asserted in the **gun's
+own frame**, through the `WEAPON` bone's inverse, so the numbers are the research's
+and not this build's. The suppressor band has a **control**: the same file merged
+with no barrel in front of it, measured at gun-frame y 0, z 0 — outside the band it
+must land in, which is what stops that band from being a number that was always
+true. Two assertions from 08-10g were rewritten rather than kept, because they
+encoded the behaviour this entry replaces: "all three parts attached to WEAPON" is
+now "the base goes on the bone and the furniture goes on the base's own points",
+and the missing-slot note no longer says placement is unavailable — it names the
+point nothing publishes.
+
+Regression: `sam_pose_import.sh` PASS, `workspace_skeleton_target.sh` 34/34,
+`loaded_nifs.sh` 95/95, `artobject_attach.sh` 14/14, `carries_everything.sh` 24/24,
+`live_effects.sh` 15/15. Capture: `release/ww_weaponmark_kit.png`.
+
 ## 2026-08-10g — Weapons are a row mark, not a programmer's operation
 
 **What was missing.** The workspace could already put a gun in a posed hand —

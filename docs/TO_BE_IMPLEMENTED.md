@@ -1531,16 +1531,16 @@ Verified 2026-07-21 against `src/spells/riggingtools.cpp`.
 - **In-game FaceGen validation** — a manual production check, not code.
 - *Persistent skeleton reference* and *zero-weight bone pruning* — see #1; they
   belong to the Skeleton Manager.
-- **Weapon slot placement** — NEW 2026-08-10g. The weapon mark merges a marked
-  row onto the target's `WEAPON` bone, which is the whole of the job for
-  gun-frame-absolute parts (receiver, grip, magazine). Parts authored around
-  their OWN origin — optics, sights, muzzle devices — need the transform of the
-  connect point they declare (`C-Muzzle` in `BSConnectPoint::Children` against
-  the target's `P-Muzzle`), and that is not applied: the merge only NAMES the
-  missing slot in its summary. Placing them is a separate job waiting on the
-  OMOD slot mapping. Note the two-tier split is not visible in geometry —
-  `10mmGrip.nif` and `10mmSuppressor.nif` both sit at their own origin — so the
-  connect points are the only signal, and any placement work starts there.
+- ~~**Weapon slot placement**~~ — SHIPPED 2026-08-10h. Marked parts are placed on
+  the connect points the meshes publish, rotation composed, chains resolved to any
+  depth (`nifMergeWeaponPart`, src/nifmerge.cpp). What is deliberately NOT done:
+  no ESP/OMOD reading, so the row list is whatever the user marks rather than a
+  workbench-style menu of a weapon's legal parts; no live re-resolution when a
+  part is swapped (the merge is one-way — undo and re-merge); and the null
+  forwarder meshes (`HandMadeMuzzleParentObject.nif`, no geometry, existing only
+  to republish a point) work but show as an empty row. The connect-point research
+  behind it, including the 144 DLC meshes missing from the local unpack, is in the
+  session scratchpad's `weapon_combos.md`.
 
 ## 10. UV editor — cross-mesh operators
 

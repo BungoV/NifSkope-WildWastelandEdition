@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 
 #include <QBuffer>
 #include <QDataStream>
+#include <QFileInfo>
 #include <QHash>
 #include <QMap>
 #include <QObject>
@@ -525,12 +526,40 @@ QStringList duplicateNodeNames( const NifModel * nif )
 
 } // namespace
 
+namespace
+{
+
+/*! Where a weapon part is going, worked out before the splice.
+ *
+ *  Internal — the public entry point is nifMergeWeaponPart. Two things the plain
+ *  attach path cannot express:
+ *
+ *   - the destination is a BLOCK, not a name. The node a connect point rides can
+ *     share its name with something else once parts from two different weapons
+ *     are in one file, and the resolver has already picked the exact one.
+ *   - the part gets a WRAPPER node carrying `xform`, and its branches hang off
+ *     that instead of off the destination directly. That node is the part's own
+ *     root, and it is what makes chains work: a connect point with an empty
+ *     `Parent` is expressed in its mesh's ROOT frame, so unless that frame is a
+ *     real node in the assembly, the next part along (a suppressor asking the
+ *     barrel for P-Muzzle) has nothing to measure from.
+ */
+struct WeaponAttach
+{
+	int attachBlock = -1;     //!< target block the wrapper hangs under
+	Transform xform;          //!< the connect point transform, the wrapper's local
+	QString wrapperName;      //!< what to call the wrapper
+};
+
+} // namespace
+
 //! Merge an already-loaded \a donor model into \a target. Both nifMergeFile and
 //! nifMergeData funnel here so the file and in-memory (archive) paths share one
 //! splice; \a donorLabel names the source in messages and the undo step.
 static bool mergeDonor( NifModel * target, NifModel & donor, const QString & donorLabel,
                         bool dedupeByName, NifMergeResult & result,
-                        const QString & attachOverride = QString() )
+                        const QString & attachOverride = QString(),
+                        const WeaponAttach * weapon = nullptr )
 {
 	auto fail = [&result]( const QString & msg ) {
 		result.error = msg;
@@ -585,7 +614,12 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	int attachBlock = targetRoot;
 	const QString declared = attachNodeName( donor, &result.isEffect, &byName );
 	result.attachRequested = attachOverride.isEmpty() ? declared : attachOverride;
-	if ( !result.attachRequested.isEmpty() ) {
+	if ( weapon && weapon->attachBlock >= 0 ) {
+		// by block, not by name — see WeaponAttach
+		attachBlock = weapon->attachBlock;
+		result.attachRequested.clear();
+		result.attachedTo = target->get<QString>( target->getBlockIndex( attachBlock ), "Name" );
+	} else if ( !result.attachRequested.isEmpty() ) {
 		auto it = byName.constFind( result.attachRequested );
 		if ( it == byName.constEnd() )
 			return fail( QStringLiteral( "%1 attaches to \"%2\", which this file has no node for" )
@@ -688,9 +722,16 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	}
 	result.privateNames.removeDuplicates();
 
+	/* The wrapper node goes in FIRST, so its number is the current block count and
+	 * the imported blocks start one later. Both numbers are known here, before a
+	 * single byte is written, which is what lets every link be remapped in one
+	 * pass — and it is why the wrapper is created inside the snapshot below rather
+	 * than here, where it would be outside the undo step. */
+	const int wrapperBlock = weapon ? target->getBlockCount() : -1;
+
 	// Imported blocks land at the end, in order, so their numbers are known
 	// before the write and every link can be remapped in one pass.
-	const int base = target->getBlockCount();
+	const int base = target->getBlockCount() + ( wrapperBlock >= 0 ? 1 : 0 );
 	for ( int i = 0; i < toImport.size(); i++ )
 		map.insert( toImport.at( i ), base + i );
 
@@ -721,6 +762,12 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 	QHash<qint32, qint32> namedAttachParent;   // donor top -> target node it named
 	for ( qint32 b : toImport ) {
 		if ( donorTops.contains( b ) ) {
+			if ( wrapperBlock >= 0 ) {
+				// A weapon part's branches belong to its own root node, and a part
+				// file carries no AttachT / NamedAttach convention to consult.
+				attachTo.insert( b, wrapperBlock );
+				continue;
+			}
 			const int named = namedAttachNode( donor, b, byName, targetRoot );
 			attachTo.insert( b, named >= 0 ? named : attachBlock );
 			/* Rebase ONLY when the file's own AttachT named nothing. That is the
@@ -782,6 +829,19 @@ static bool mergeDonor( NifModel * target, NifModel & donor, const QString & don
 
 	QString innerError;
 	nifSnapshotOp( target, QStringLiteral( "Merge %1" ).arg( donorLabel ), [&]() {
+		/* The part's own root, carrying the connect point's transform. Created
+		 * before anything is loaded so it takes the block number reserved for it
+		 * above, and inside the snapshot so one undo takes it away with the rest. */
+		if ( wrapperBlock >= 0 ) {
+			QModelIndex iWrap = target->insertNiBlock( QStringLiteral( "NiNode" ) );
+			if ( !iWrap.isValid() || target->getBlockNumber( iWrap ) != wrapperBlock ) {
+				innerError = QStringLiteral( "could not create a node for %1" ).arg( donorLabel );
+				return;
+			}
+			target->set<QString>( iWrap, "Name", weapon->wrapperName );
+			weapon->xform.writeBack( target, iWrap );
+			blockLink( target, target->getBlockIndex( attachBlock ), iWrap );
+		}
 		// A merge is a bulk load into a live model. loadIndex/loadAndMapLinks do
 		// NOT suppress signals for you, and holdUpdates does not stop per-leaf
 		// dataChanged — only the model state does. Without this a 38k-vertex
@@ -1121,16 +1181,31 @@ bool offersConnectPoints( const NifModel * nif )
 	return false;
 }
 
-//! How far the "P-<slot>" point \a target offers sits from \a attachBlock; -1 if
-//! the target offers no such point.
-float offeredSlotDistance( const NifModel * target, int attachBlock, const QString & slot )
+//! One connect point the assembly currently publishes.
+struct OfferedPoint
 {
-	const QString wanted = QStringLiteral( "P-" ) + slot;
-	const QHash<int, QList<int>> parents = parentMap( target );
-	const QHash<int, Transform> world = worldTransforms( target, parents );
+	QString name;			//!< "P-Muzzle", as the file spells it
+	QString slot;			//!< "Muzzle"
+	int frameBlock = -1;	//!< the node the point rides
+	Transform xform;		//!< the point's own transform, in that node's frame
+};
+
+/*! Every connect point in \a target, in block order.
+ *
+ *  `Parent` names a node inside the mesh that published the point. When it is
+ *  EMPTY the point is expressed in that mesh's ROOT frame, and the block that
+ *  OWNS the BSConnectPoint::Parents extra data is exactly that root — which is
+ *  the whole reason a placed part is given a wrapper node of its own. Without
+ *  one, an empty-Parent point has no frame in the assembly and a two-hop chain
+ *  (receiver publishes P-Barrel, the barrel publishes P-Muzzle, the suppressor
+ *  asks for it) cannot be walked at all. Measured: 10mmLongBarrel.nif writes
+ *  P-Muzzle with an empty Parent.
+ */
+QList<OfferedPoint> offeredPoints( const NifModel * target )
+{
+	QList<OfferedPoint> points;
 	const QHash<QString, int> byName = namedNodes( target );
-	const Vector3 anchor = world.value( attachBlock ).translation;
-	float best = -1;
+	const QHash<int, QList<int>> parents = parentMap( target );
 	for ( int b = 0; b < target->getBlockCount(); b++ ) {
 		const QModelIndex i = target->getBlockIndex( b );
 		if ( !target->isNiBlock( i, "BSConnectPoint::Parents" ) )
@@ -1138,97 +1213,288 @@ float offeredSlotDistance( const NifModel * target, int attachBlock, const QStri
 		const QModelIndex iPoints = target->getIndex( i, "Connect Points" );
 		if ( !iPoints.isValid() )
 			continue;
+		// extra data is a child link, so the owning node is just this block's parent
+		const int owner = parentOf( parents, b );
 		for ( int r = 0; r < target->rowCount( iPoints ); r++ ) {
 			const QModelIndex iPoint = target->getIndex( iPoints, r );
-			if ( target->get<QString>( iPoint, "Name" ).compare( wanted, Qt::CaseInsensitive ) != 0 )
+			OfferedPoint p;
+			p.name = target->get<QString>( iPoint, "Name" );
+			if ( p.name.size() <= 2
+				 || !p.name.startsWith( QLatin1String( "P-" ), Qt::CaseInsensitive ) )
 				continue;
-			// the point rides a node BY NAME, exactly as the merge's own
-			// de-duplication binds bones
-			Transform offset;
-			offset.translation = target->get<Vector3>( iPoint, "Translation" );
-			const int on = byName.value( target->get<QString>( iPoint, "Parent" ), -1 );
-			const Transform at = ( on >= 0 ? world.value( on ) : Transform() ) * offset;
-			const float d = ( at.translation - anchor ).length();
-			if ( best < 0 || d < best )
-				best = d;
+			p.slot = p.name.mid( 2 );
+			const QString rides = target->get<QString>( iPoint, "Parent" );
+			p.frameBlock = rides.isEmpty() ? owner : byName.value( rides, owner );
+			p.xform.translation = target->get<Vector3>( iPoint, "Translation" );
+			/* THE ROTATION IS NOT OPTIONAL. It is identity on 96% of vanilla
+			 * connect points, which is exactly why a translation-only assembler
+			 * looks right until it meets a magazine: the 10mm's P-Mag is canted
+			 * 26.5 degrees, and three muzzle points are turned a full 180. */
+			p.xform.rotation.fromQuat( target->get<Quat>( iPoint, "Rotation" ) );
+			const float s = target->get<float>( iPoint, "Scale" );
+			p.xform.scale = ( s > 0.0f ) ? s : 1.0f;
+			points.append( p );
 		}
 	}
-	return best;
+	return points;
+}
+
+//! The point \a donor should be placed on, if the assembly publishes one.
+/*! A mesh may declare several required points — vanilla's CombatRifle.nif asks
+ *  for both `C-Receiver` and the misspelled `C-Reciever` — and the list means ANY
+ *  of these, not all. Where two placed parts publish the same point the LAST one
+ *  wins, which is the deepest in the chain and what the engine ends up showing. */
+bool resolveWeaponPoint( const NifModel * target, const NifModel * donor,
+                         OfferedPoint & out, QStringList & declaredOut )
+{
+	declaredOut = declaredSlots( donor );
+	const QList<OfferedPoint> offered = offeredPoints( target );
+	for ( const QString & slot : std::as_const( declaredOut ) ) {
+		int found = -1;
+		for ( int i = 0; i < offered.size(); i++ )
+			if ( offered.at( i ).slot.compare( slot, Qt::CaseInsensitive ) == 0 )
+				found = i;
+		if ( found >= 0 ) {
+			out = offered.at( found );
+			return true;
+		}
+	}
+	return false;
+}
+
+//! A node name neither \a target nor the part \a donor is about to bring is using.
+/*! The donor side matters as much as the target side. HuntingRifleReceiver.nif is
+ *  the case: the file is called that AND carries an inner node of the same name,
+ *  which its own P-Grip point rides. Naming the wrapper after the file would put
+ *  two nodes of that name in the assembly and leave the point's Parent lookup
+ *  picking whichever came first — right by luck here, wrong the moment the two
+ *  frames differ. The donor's ROOT name is not counted, because the root is a
+ *  per-file wrapper the merge drops. */
+QString freeNodeName( const NifModel * target, const NifModel * donor, const QString & wanted )
+{
+	QSet<QString> taken;
+	const QHash<QString, int> byName = namedNodes( target );
+	for ( auto it = byName.constBegin(); it != byName.constEnd(); ++it )
+		taken.insert( it.key() );
+	if ( donor ) {
+		const QList<int> roots = donor->getRootLinks();
+		for ( int b = 0; b < donor->getBlockCount(); b++ ) {
+			if ( roots.contains( b ) )
+				continue;
+			const QModelIndex i = donor->getBlockIndex( b );
+			if ( donor->isNiBlock( i, "NiNode" ) )
+				taken.insert( donor->get<QString>( i, "Name" ) );
+		}
+	}
+	const QString base = wanted.isEmpty() ? QStringLiteral( "WeaponPart" ) : wanted;
+	if ( !taken.contains( base ) )
+		return base;
+	for ( int n = 1; n < 1000; n++ ) {
+		const QString candidate = QStringLiteral( "%1_%2" ).arg( base ).arg( n, 2, 10, QLatin1Char( '0' ) );
+		if ( !taken.contains( candidate ) )
+			return candidate;
+	}
+	return base;
+}
+
+/*! The point at the very END of the assembled barrel chain, for a part that
+ *  declares no connect point of its own.
+ *
+ *  A muzzle flash is the case this exists for. MiniGunMuzzeFlash.nif carries no
+ *  BSConnectPoint::Children AND no ::Parents — measured — so there is nothing for
+ *  the ordinary C-/P- match to work with, and hanging it on the WEAPON bone puts
+ *  the fireball at the shooter's fist. Where it belongs is one node past
+ *  everything else on the barrel: receiver > barrel > muzzle device > flash, and
+ *  with no muzzle device, receiver > barrel > flash.
+ *
+ *  The ladder is the chain read backwards, and every rung is a point some placed
+ *  mesh actually published — nothing is invented, and when nothing is published
+ *  the caller falls back to the bone and says so:
+ *
+ *    1. P-ProjectileNode — where the round leaves. A muzzle device publishes one
+ *       (10mmSuppressor.nif and HuntingRifleSilencer.nif both do), a barrel
+ *       publishes one, and a bare receiver publishes one for its baked-in barrel.
+ *       That is exactly "as deep as the chain currently goes", so several
+ *       candidates are normal and the FARTHEST from the gun's own origin wins.
+ *    2. P-Muzzle, for a chain whose end publishes no projectile node.
+ *    3. The P-Flash family. The Minigun ships P-FlashShort / P-FlashMid /
+ *       P-FlashFar for its barrel lengths and no muzzle point at all; farthest
+ *       along the bore wins there too.
+ *    4. P-Barrel — the last thing that is still on the barrel line.
+ *
+ *  Distance from the gun's origin rather than a Y coordinate, because the target
+ *  may be a posed rig where the gun points anywhere. On a weapon the grip is the
+ *  origin and the barrel is the far end, so "farthest" IS "furthest forward".
+ */
+bool resolveChainEnd( const NifModel * target, OfferedPoint & out )
+{
+	const QList<OfferedPoint> offered = offeredPoints( target );
+	if ( offered.isEmpty() )
+		return false;
+	const QHash<int, QList<int>> parents = parentMap( target );
+	const QHash<int, Transform> world = worldTransforms( target, parents );
+
+	// the gun's own origin: its WEAPON bone if the assembly has one, else the root
+	Vector3 anchor;
+	const QHash<QString, int> byName = namedNodes( target );
+	if ( int bone = byName.value( QStringLiteral( "WEAPON" ), -1 ); bone >= 0 )
+		anchor = world.value( bone ).translation;
+	else if ( const QList<int> roots = target->getRootLinks(); !roots.isEmpty() )
+		anchor = world.value( roots.first() ).translation;
+
+	auto tierOf = []( const QString & slot ) {
+		if ( slot.compare( QLatin1String( "ProjectileNode" ), Qt::CaseInsensitive ) == 0 )
+			return 0;
+		if ( slot.compare( QLatin1String( "Muzzle" ), Qt::CaseInsensitive ) == 0 )
+			return 1;
+		if ( slot.startsWith( QLatin1String( "Flash" ), Qt::CaseInsensitive ) )
+			return 2;
+		if ( slot.compare( QLatin1String( "Barrel" ), Qt::CaseInsensitive ) == 0 )
+			return 3;
+		return 99;
+	};
+
+	int bestTier = 99;
+	float bestReach = -1;
+	bool found = false;
+	for ( const OfferedPoint & point : offered ) {
+		const int tier = tierOf( point.slot );
+		if ( tier == 99 )
+			continue;
+		const Transform at = world.value( point.frameBlock ) * point.xform;
+		const float reach = ( at.translation - anchor ).length();
+		if ( tier > bestTier || ( tier == bestTier && reach <= bestReach ) )
+			continue;
+		bestTier = tier;
+		bestReach = reach;
+		out = point;
+		found = true;
+	}
+	return found;
+}
+
+//! Is this one of the slots that means "I am the gun", misspelling included?
+/*! Vanilla ships `C-Reciever` alongside `C-Receiver` in several files. Both are
+ *  matched here, and neither is a whitelist of parts: it is one slot NAME. */
+bool isReceiverSlot( const QString & slot )
+{
+	return slot.compare( QLatin1String( "Receiver" ), Qt::CaseInsensitive ) == 0
+		|| slot.compare( QLatin1String( "Reciever" ), Qt::CaseInsensitive ) == 0;
 }
 
 } // namespace
 
-QStringList nifWeaponPartNotes( const NifModel * target, const NifModel * donor,
-                                const QString & label, const QString & attachNode )
+bool nifMergeWeaponPart( NifModel * target, const QByteArray & data, const QString & label,
+                         NifMergeResult & result, NifWeaponPlacement & placement )
 {
-	QStringList notes;
-	if ( !target || !donor )
-		return notes;
+	if ( !target ) {
+		result.error = QStringLiteral( "no target model" );
+		return false;
+	}
+	NifModel donor;
+	QByteArray bytes = data;					// load() consumes a QIODevice
+	QBuffer device( &bytes );
+	if ( !device.open( QIODevice::ReadOnly ) || !donor.load( device ) ) {
+		result.error = QStringLiteral( "could not parse %1" )
+			.arg( label.isEmpty() ? QStringLiteral( "the NIF" ) : label );
+		return false;
+	}
+	const QString name = label.isEmpty() ? QStringLiteral( "NIF" ) : label;
 
-	/* --- redundancy ---------------------------------------------------------
+	/* --- redundancy -----------------------------------------------------------
 	 * The merge shares NiNodes by name but imports shapes whatever they are
-	 * called, so a name already present means the geometry is arriving twice.
-	 * That is the honest signal for "this part is already on the gun", and it is
-	 * reported rather than refused: two of something is a thing people do
-	 * deliberately, and the parts may come from any weapon at all.
+	 * called, so a shape name already present means that geometry is arriving
+	 * twice. Reported, never refused: two of something is a thing people do on
+	 * purpose, and parts may come from any weapon at all.
 	 */
-	const QStringList bring = shapeNames( donor );
-	// one named list, NOT two calls: begin() of one temporary and end() of
-	// another is a segfault, and it was one here
+	const QStringList bring = shapeNames( &donor );
 	const QStringList already = shapeNames( target );
 	const QSet<QString> have( already.cbegin(), already.cend() );
 	QStringList collided;
-	for ( const QString & name : bring )
-		if ( have.contains( name ) && !collided.contains( name ) )
-			collided << name;
+	for ( const QString & shape : bring )
+		if ( have.contains( shape ) && !collided.contains( shape ) )
+			collided << shape;
 	if ( !collided.isEmpty() )
-		notes << QObject::tr( "%1: %2 of its %3 shape name(s) are already in the target (%4). "
-			"It may be redundant, or a second one of a part the weapon already has. Merged anyway." )
-			.arg( label ).arg( collided.size() ).arg( bring.size() )
+		placement.notes << QObject::tr( "%1: %2 of its %3 shape name(s) are already in the target "
+			"(%4). It may be redundant, or a second one of a part the weapon already has. "
+			"Merged anyway." )
+			.arg( name ).arg( collided.size() ).arg( bring.size() )
 			.arg( collided.mid( 0, 6 ).join( QStringLiteral( ", " ) ) );
 
-	/* --- the slot it asks for -----------------------------------------------
-	 * Fallout 4 weapon parts come in two kinds and they look identical from the
-	 * outside: both are a root at the origin with geometry hanging off it, and
-	 * measuring pivots or bounding centres cannot tell them apart (10mmGrip and
-	 * 10mmSuppressor both sit at their own origin). What DOES separate them is
-	 * the connect point each one declares and where the target offers it.
-	 *
-	 * 5 units of slack, measured off the corpus: the 10mm's P-Grip is 2.4 from
-	 * WEAPON and its P-Mag 1.6, and those parts land correctly by mere parenting
-	 * — proven on screen. Its P-Scope is 10.4 out and the minigun's P-Barrel
-	 * 36.5, and a part parented at the node instead of at those points sits at
-	 * the grip. Placing it is NOT attempted here.
+	/* --- where it goes --------------------------------------------------------
+	 * One rule: a part asking for C-X is placed on whatever already-placed part
+	 * publishes P-X, at that point's own transform. No table of weapons, no legal
+	 * combinations — if the names line up across two different guns, it assembles.
 	 */
-	if ( attachNode.isEmpty() )
-		return notes;
-	const int attachBlock = namedNodes( target ).value( attachNode, -1 );
-	if ( attachBlock < 0 )
-		return notes;
-	/* A target with no connect points of its own is a RIG, not a half-built gun:
-	 * the part arriving is the first thing on that node and defines the frame
-	 * everything after it lands in. Measured the hard way — the harness caught
-	 * this file announcing that 10MMPistol.nif "needs a Receiver node" while it
-	 * sat in the hand exactly as intended. */
-	if ( !offersConnectPoints( target ) )
-		return notes;
-	const float slack = 5.0f;
-	for ( const QString & slot : declaredSlots( donor ) ) {
-		const float d = offeredSlotDistance( target, attachBlock, slot );
-		if ( d >= 0 && d <= slack )
-			continue;
-		if ( d < 0 )
-			notes << QObject::tr( "%1 asks to attach at a %2 slot, which nothing in the target "
-				"offers. It needs a %2 node that automatic placement does not provide yet, so it "
-				"has been parented at %3 and will sit at the weapon's origin." )
-				.arg( label ).arg( slot ).arg( attachNode );
-		else
-			notes << QObject::tr( "%1 asks to attach at a %2 slot, and the target's P-%2 point is "
-				"%3 unit(s) from %4. It needs a %2 node that automatic placement does not provide "
-				"yet, so it has been parented at %4 and will sit that far from where it belongs." )
-				.arg( label ).arg( slot ).arg( d, 0, 'f', 1 ).arg( attachNode );
+	OfferedPoint point;
+	bool resolved = resolveWeaponPoint( target, &donor, point, placement.declared );
+	/* A PART THAT ASKS FOR NOTHING GOES AT THE END OF THE BARREL.
+	 *
+	 * Declaring no connect point is the muzzle-flash signature — the flash meshes
+	 * carry neither ::Children nor ::Parents, so there is no name to match on —
+	 * and a flash belongs one node past everything else on the barrel line rather
+	 * than on the bone the gun hangs from. See resolveChainEnd for the ladder.
+	 *
+	 * It also catches a whole SECOND gun merged onto an assembled one, which has
+	 * no connect point to ask for either. That is a strange thing to do and the
+	 * summary says exactly where it went; on a rig — which publishes nothing —
+	 * both cases fall through to the WEAPON bone as before.
+	 */
+	if ( !resolved && placement.declared.isEmpty() && resolveChainEnd( target, point ) ) {
+		resolved = true;
+		placement.chainEnd = true;
 	}
-	return notes;
+
+	WeaponAttach attach;
+	attach.wrapperName = freeNodeName( target, &donor, QFileInfo( name ).completeBaseName() );
+
+	if ( resolved && point.frameBlock >= 0 ) {
+		attach.attachBlock = point.frameBlock;
+		attach.xform = point.xform;
+		placement.placed = true;
+		placement.slot = point.slot;
+		placement.point = point.name;
+		placement.provider = target->get<QString>(
+			target->getBlockIndex( point.frameBlock ), "Name" );
+	} else {
+		/* Nothing publishes what it asks for. Do NOT invent a placement — hang it
+		 * on the weapon bone, which is where a gun goes, and say what is missing.
+		 *
+		 * Two cases are silent because nothing IS missing: a part that declares no
+		 * connect point at all is an assembly root (Minigun.nif), and a receiver
+		 * arriving at a target that publishes no points at all has landed on a RIG
+		 * rather than on a half-built gun — it is the thing that defines the frame
+		 * everything else lands in.
+		 */
+		const QString bone = nifWeaponAttachNode( target );
+		const QHash<QString, int> byName = namedNodes( target );
+		const QList<int> roots = target->getRootLinks();
+		attach.attachBlock = bone.isEmpty() ? ( roots.isEmpty() ? -1 : roots.first() )
+		                                    : byName.value( bone, -1 );
+		if ( attach.attachBlock < 0 ) {
+			result.error = QStringLiteral( "target has no root block" );
+			return false;
+		}
+		const bool rig = !offersConnectPoints( target );
+		bool receiverOnRig = false;
+		for ( const QString & slot : std::as_const( placement.declared ) )
+			if ( rig && isReceiverSlot( slot ) )
+				receiverOnRig = true;
+		if ( bone.isEmpty() )
+			placement.notes << QObject::tr( "%1 is marked as a weapon part, but the target has no "
+				"WEAPON bone — merged at root." ).arg( name );
+		else if ( !placement.declared.isEmpty() && !receiverOnRig )
+			placement.notes << QObject::tr( "%1 asks to attach at a %2 connect point, and nothing "
+				"in the assembly publishes P-%2. Merge the part that provides it first — for a "
+				"muzzle device that is usually the barrel — and this one after it. For now it "
+				"hangs on %3 at the weapon's origin." )
+				.arg( name ).arg( placement.declared.first() ).arg( bone );
+	}
+
+	const bool merged = mergeDonor( target, donor, name, true, result, QString(), &attach );
+	placement.attachedTo = result.attachedTo;
+	placement.wrapper = attach.wrapperName;
+	return merged;
 }
 
 static QString wwLastMergeSummary;

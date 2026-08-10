@@ -128,8 +128,10 @@ bool nifMergeData( NifModel * target, const QByteArray & data, const QString & l
  *  A Loaded NIFs row can be marked as a WEAPON PART, the third row mark beside
  *  the skeleton skull and the face donor. Unlike those two the mark is a SET —
  *  a Fallout 4 gun is a base NIF plus separate OMOD part files, and all of them
- *  are weapon parts at once — and the workspace merge reads it to hang each
- *  marked donor off the target's "WEAPON" bone instead of its root.
+ *  are weapon parts at once — and the workspace merge reads it to ASSEMBLE them:
+ *  each marked donor is placed on the connect point it declares, resolved against
+ *  everything merged before it, and falls back to the target's "WEAPON" bone when
+ *  nothing publishes what it asks for.
  *
  *  The registry lives here rather than in the window, because the merge is the
  *  only thing that acts on it and this file has no GUI to drag along. The models
@@ -154,28 +156,49 @@ void nifClearWeaponMarks();
  *  weapon bone at all, and the caller falls back to an ordinary root merge. */
 QString nifWeaponAttachNode( const NifModel * target );
 
-//! What a weapon part's own contents say about merging it onto \a attachNode.
-/*! Zero, one or two informational lines, computed BEFORE the splice (they read
- *  the target as it stands). Never refuses anything.
+/*! Where a weapon part ended up, and anything worth saying about it.
  *
- *   - REDUNDANCY: shape names the donor brings that \a target already carries.
- *     The merge de-duplicates NiNodes by name but not shapes, so a part whose
- *     geometry names are already present is either the same part twice or a
- *     second one of something the gun already has (two barrels).
- *   - SLOT: Fallout 4 parts declare where they belong in
- *     BSConnectPoint::Children as "C-<Slot>", and the file they attach to offers
- *     the matching "P-<Slot>" in BSConnectPoint::Parents. When that point sits
- *     ON the attach node (grips, magazines) the part self-assembles by mere
- *     parenting; when it sits out along the gun (scopes, muzzle devices) or is
- *     not offered at all, parenting leaves the part at the grip. This says so —
- *     unless the target offers no connect points whatsoever, which means it is a
- *     rig rather than a half-built gun and the part arriving is the first thing
- *     on the node.
- *     It does NOT place the part: the slot table is a separate effort, and the
- *     job here is to not lie about the parts that cannot be placed yet.
+ *  Fallout 4 weapon meshes carry the assembly graph outright: a part declares
+ *  the point it plugs into as "C-<Slot>" in BSConnectPoint::Children, and a part
+ *  that can hold it publishes "P-<Slot>" in BSConnectPoint::Parents, naming the
+ *  node that point rides and carrying its full local transform. Placement is one
+ *  line —
+ *
+ *      world(part root) = world(provider node) * (translation, rotation, scale)
+ *
+ *  — and nifMergeWeaponPart applies it, giving the part a node of its own to
+ *  carry that transform so the next part along has a frame to resolve against.
+ *
+ *  The rotation matters: it is identity on 96% of vanilla connect points, which
+ *  is why a translation-only assembler looks correct right up until it places a
+ *  magazine (the 10mm's P-Mag is canted 26.5 degrees).
  */
-QStringList nifWeaponPartNotes( const NifModel * target, const NifModel * donor,
-                                const QString & label, const QString & attachNode );
+struct NifWeaponPlacement
+{
+	QStringList declared;	//!< the bare slot names the donor asks for, in file order
+	QString slot;			//!< the one that resolved; empty when none did
+	QString point;			//!< the connect point matched, e.g. "P-Muzzle"
+	QString provider;		//!< the target node that point rides
+	QString attachedTo;		//!< the node the part was hung under
+	QString wrapper;		//!< the node created to carry the part's own frame
+	bool placed = false;	//!< a connect point supplied the transform
+	/*! Placed at the far end of the barrel chain rather than on a point it asked
+	 *  for by name — what a muzzle flash gets, since the flash meshes declare no
+	 *  connect points at all. */
+	bool chainEnd = false;
+	/*! Informational, never refusals. A part whose shape names the target already
+	 *  carries is reported as possibly redundant; a part asking for a point
+	 *  nothing publishes is reported as needing whatever provides it. Neither
+	 *  stops the merge, and no combination of parts is ever rejected. */
+	QStringList notes;
+};
+
+//! Merge a weapon part, placing it on the connect point it declares.
+/*! Falls back to the target's WEAPON bone (or its root) when nothing publishes
+ *  the point asked for, with a note saying so. Same return contract as
+ *  nifMergeData. */
+bool nifMergeWeaponPart( NifModel * target, const QByteArray & data, const QString & label,
+                         NifMergeResult & result, NifWeaponPlacement & placement );
 
 //! The summary text of the last workspace merge, for scripting and the harness.
 /*! The merge ends in a modal box, which a driver has to dismiss to let the run

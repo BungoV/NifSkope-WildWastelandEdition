@@ -3041,38 +3041,44 @@ void NifSkope::mergeIntoLoadedDocument( const QList<QPair<QString, NifModel *>> 
 				tr( "Could not read %1." ).arg( picked.at( i ).first ) );
 			break;
 		}
-		/* A WEAPON-MARKED DONOR GOES ON THE WEAPON BONE.
+		/* A WEAPON-MARKED DONOR IS ASSEMBLED, NOT MERELY PARENTED.
 		 *
-		 * Fallout 4 weapon parts are authored in one shared gun frame with
-		 * identity roots, so parenting them under the target's WEAPON node is the
-		 * whole of "assembling the gun" — the parts land on each other with no
-		 * transform work. A target with no such bone is not an error: it is an
-		 * ordinary merge, said out loud in the summary rather than left to be
-		 * discovered on screen. Unmarked donors are untouched by any of this.
+		 * Fallout 4 weapon meshes ship the assembly graph: a part names the connect
+		 * point it plugs into, and whatever is already in the target says where
+		 * that point sits and how it is turned. nifMergeWeaponPart resolves that
+		 * against the target AS IT STANDS, so parts land on each other in row order
+		 * and a suppressor finds the barrel that arrived before it.
 		 *
-		 * The notes are read BEFORE the splice, off the target as it stands, so a
-		 * part is measured against everything merged ahead of it in this same run.
+		 * WHAT THIS CANNOT REACH. Only a donor the user has marked takes this
+		 * branch; every other merge — clothing, skeletons, ArtObjects, loading
+		 * screens, the CLI's merge verb, the rig merge in the workspace — takes the
+		 * byte-identical nifMergeData call below and cannot tell the difference.
+		 * The weapon path adds one NiNode to the target and nothing else: no
+		 * controller, particle, effect or shader block is created, removed,
+		 * renamed or re-linked by it.
 		 */
-		QString weaponAttach;
-		if ( nifIsWeaponMarked( picked.at( i ).second ) ) {
-			weaponAttach = nifWeaponAttachNode( target );
-			if ( weaponAttach.isEmpty() )
-				weaponNotes << tr( "%1 is marked as a weapon part, but %2 has no WEAPON bone — "
-					"merged at root." ).arg( picked.at( i ).first, picked.first().first );
-			else
-				weaponNotes << nifWeaponPartNotes( target, picked.at( i ).second,
-					picked.at( i ).first, weaponAttach );
-		}
 		NifMergeResult r;
-		if ( !nifMergeData( target, bytes, picked.at( i ).first, true, r, weaponAttach ) ) {
+		NifWeaponPlacement placement;
+		const bool spliced = nifIsWeaponMarked( picked.at( i ).second )
+			? nifMergeWeaponPart( target, bytes, picked.at( i ).first, r, placement )
+			: nifMergeData( target, bytes, picked.at( i ).first, true, r );
+		if ( !spliced ) {
 			QMessageBox::warning( this, tr( "Merge" ), r.error );
 			break;
 		}
+		weaponNotes << placement.notes;
 		done++;
 		shapes += r.shapesAdded;
 		dupes << r.duplicateNames;
 		QString where;
-		if ( !r.namedAttachments.isEmpty() )
+		// A placed part says which point carried it and which part published that
+		// point — the two facts that make a wrong assembly readable.
+		if ( placement.placed && placement.chainEnd )
+			where = tr( ", placed at the end of the barrel chain on %1 from %2" )
+				.arg( placement.point, placement.provider );
+		else if ( placement.placed )
+			where = tr( ", placed on %1 from %2" ).arg( placement.point, placement.provider );
+		else if ( !r.namedAttachments.isEmpty() )
 			where = tr( ", branches attached by name to %1" )
 				.arg( r.namedAttachments.join( QStringLiteral( ", " ) ) );
 		else if ( !r.attachedTo.isEmpty() )

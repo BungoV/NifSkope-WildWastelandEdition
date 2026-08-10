@@ -185,13 +185,18 @@ predecessor:
   and becomes the rig target automatically. Verified to carry everything.
 - **Weapon parts** — a third row mark beside the skeleton skull and the face
   donor, and the only one that is a set: mark the base weapon NIF and every part
-  you want on it, and Merge Into hangs them all off the target's `WEAPON` bone in
-  row order, so a gun lands in a posed hand. Any combination is allowed,
-  cross-weapon included; the summary reports what it noticed — a part whose
-  shape names the target already carries, or one whose declared connect-point
-  slot the target does not offer at that bone — and refuses nothing. No `WEAPON`
-  bone in the target is a root merge, said out loud rather than left to the
-  picture.
+  you want on it, and Merge Into **assembles the gun** in row order and lands it
+  in a posed hand. Placement is read out of the meshes themselves — a part
+  declares the connect point it plugs into (`C-Muzzle`), a placed part publishes
+  the matching `P-Muzzle` with the node it rides and a full transform, rotation
+  included — so chains resolve: a receiver places a barrel, and that barrel's own
+  muzzle point places the suppressor. A muzzle flash — which declares no connect
+  points at all — goes at the very end of that chain, on the farthest-forward
+  point the assembly actually publishes. Any combination is allowed, cross-weapon
+  included; nothing is ever refused. The summary reports what it noticed — a part
+  whose shape names the target already carries, or one asking for a point nothing
+  in the assembly publishes — and a target with no `WEAPON` bone is a root merge,
+  said out loud rather than left to the picture.
 - Combined preview and donor selection across the whole workspace group.
 
 ## 9. Materials and rendering

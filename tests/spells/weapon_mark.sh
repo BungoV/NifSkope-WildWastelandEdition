@@ -48,6 +48,57 @@
 #   5. AN UNMARKED DONOR is untouched -- the PA frame still rig-merges onto the
 #      skeleton with no weapon handling in sight. One guard assertion; the merge
 #      policy itself is tests/merge/workspace_skeleton_target.sh's job.
+#   6. PLACEMENT (2026-08-10h), which is what the mark does now. Parts are placed
+#      on the connect points the meshes publish: a part declares "C-<Slot>" in
+#      BSConnectPoint::Children, a placed part publishes "P-<Slot>" in
+#      BSConnectPoint::Parents with the node it rides and a full local transform,
+#      and the merge composes it. Six parts of a 10mm go onto a clean rig in row
+#      order and three figures are asserted, all in the GUN'S OWN FRAME (through
+#      the WEAPON bone's inverse) against the connect-point research rather than
+#      against whatever this build produces:
+#        - the suppressor is resolved over TWO hops -- the receiver's P-Barrel
+#          places the long barrel, and that barrel's own P-Muzzle places the
+#          suppressor -- landing on the bore at y 23.6..43.2, z 4.85 +- 1;
+#        - every reflex-sight shape grips the slide top, z 7.5..10.5;
+#        - the magazine carries P-Mag's 26.52 degree cant. Only 17 of 386 vanilla
+#          connect points are rotated at all, so an implementation that applies
+#          the translation and drops the quaternion passes everything else in this
+#          file and fails that one by exactly 26.5 degrees.
+#      The suppressor band has a CONTROL: the same file merged earlier with no
+#      barrel in front of it, measured at gun-frame y 0, z 0 -- outside the band,
+#      which is what stops the band from being a number that was always true.
+#   7. THE MUZZLE IS NOT ALWAYS THE BARREL'S. On the hunting rifle no barrel
+#      publishes P-Muzzle; the STOCK does, because that mesh is the whole
+#      furniture and forend. Its silencer must resolve across to the stock, at the
+#      stock's own y 30.543. Hard-coding "muzzles come from barrels" assembles the
+#      10mm perfectly and fails here.
+#   8. THE MUZZLE FLASH GOES AT THE VERY END OF THE BARREL: receiver > barrel >
+#      muzzle device > flash, and with no muzzle device, receiver > barrel >
+#      flash. A flash mesh declares NO connect points at all (measured on
+#      MiniGunMuzzeFlash.nif: neither ::Children nor ::Parents), so the ordinary
+#      name match has nothing to work with and the fallback would leave the
+#      fireball on the WEAPON bone, at the shooter's fist. It is placed on the
+#      farthest-forward point the assembly actually publishes instead -- nothing
+#      is invented, and when nothing is published it still falls back to the bone
+#      and says so. Both shapes that line takes in the corpus are asserted:
+#        - a BARE MINIGUN publishes no muzzle point, only P-FlashShort / P-FlashMid
+#          / P-FlashFar for its three barrel lengths; the flash takes the farthest
+#          and lands at gun-frame y 135.3, well past the gun's own geometry (18.6);
+#        - a KITTED 10mm ends in a suppressor, which publishes a projectile node,
+#          so the flash stops there at y 71.9 rather than on the receiver's own
+#          projectile node or the barrel's. There is no 10mm flash mesh in the
+#          corpus -- the only ones unpacked are the Minigun's, the Broadsider's and
+#          the JunkJet's -- so that one is deliberately a cross-weapon build, which
+#          the mark allows on purpose.
+#   9. WHAT THE WEAPON PATH MUST NOT TOUCH. Only a marked donor takes it; every
+#      other merge -- clothing, skeletons, ArtObjects, loading screens, the CLI
+#      merge verb, the workspace rig merge -- takes the byte-identical
+#      nifMergeData call it always did. The weapon path adds ONE NiNode and
+#      nothing else: no controller, particle, effect or shader block is created,
+#      removed, renamed or re-linked by it. Asserted, not claimed -- a real
+#      animated effect (MiniGunMuzzeFlash.nif: 3 shader controllers, 3
+#      interpolators, 3 float tracks) goes through the weapon path and every one
+#      of those blocks is counted into the target one for one.
 #
 # ON THE PIVOT TEST THAT IS NOT HERE. "Slot-relative parts hug their own origin"
 # is not a usable signal: 10mmGrip.nif and 10mmMag01.nif hug theirs too (both
@@ -86,6 +137,7 @@ LOG="$ROOT/release/ww_weaponmark_test.log"
 PA="${PA:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/CharacterAssets}"
 W10="${W10:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/weapons/10mmPistol}"
 WMG="${WMG:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/weapons/Minigun}"
+WHR="${WHR:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/Weapons/HuntingRifle}"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 
@@ -112,9 +164,19 @@ rm -f "$PLAIN"
 trap 'rm -f "$PLAIN"' EXIT
 
 # The order is the harness's contract; see the WW_WEAPONMARK_TEST comment.
-#   0 rig target   1 weapon base   2 grip   3 magazine   4 slot-relative part
+#   0 rig target   1 weapon base   2 grip   3 magazine   4 a part nothing hosts yet
 #   5 a gun whose own root is WEAPON   6 a part for it   7 a second one of it
 #   8 an ordinary unmarked donor      9 a target with no WEAPON bone
+#  10 a barrel that publishes a muzzle  11 a scope   12 a clean rig for the kit
+#  13 rifle receiver  14 rifle stock  15 rifle barrel  16 rifle silencer
+#  17 a clean rig for the rifle        18 a muzzle flash (an animated effect NIF)
+#  19 a bare gun with flash points but no muzzle point
+#
+# THREE SKELETONS, not one. Each gun gets its own rig because the merge shares
+# NiNodes by name: the 10mm and the hunting rifle both carry a `WeaponMagazine`,
+# and assembling both onto one skeleton would hang the rifle's magazine off the
+# pistol's node. That is a property of the merge, not of the weapon mark, and
+# keeping the fixtures apart is how the placement figures stay meaningful.
 FIXTURE=(
 	"$PA/skeleton.nif"
 	"$W10/10MMPistol.nif"
@@ -126,6 +188,16 @@ FIXTURE=(
 	"$WMG/MinigunBarrelShort.nif"
 	"$PA/Frame.nif"
 	"$PLAIN"
+	"$W10/10mmLongBarrel.nif"
+	"$W10/10mmReflexSight.nif"
+	"$PA/skeleton.nif"
+	"$WHR/HuntingRifleReceiver.nif"
+	"$WHR/HuntingRifleStockShort.nif"
+	"$WHR/HuntingRifleBarrel.nif"
+	"$WHR/HuntingRifleSilencer.nif"
+	"$PA/skeleton.nif"
+	"$WMG/MiniGunMuzzeFlash.nif"
+	"$WMG/Minigun.nif"
 )
 
 FILES=""
