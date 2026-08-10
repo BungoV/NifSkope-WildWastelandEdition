@@ -9,8 +9,43 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-10**. Edition **0.3.1**. Build green; latest closed change is
-Screen Archer Menu pose import (below).
+Updated **2026-08-10 (late)**. Edition **0.3.1**. Build green; latest closed
+work is the **scene-composition pipeline** (below) on top of the SAM pose
+import from earlier the same day.
+
+### The scene-composition pipeline (2026-08-10, commits f6b0285…8aed8d8)
+
+One user-specified workflow, shipped in four verified increments:
+**load → mark → snap → pose → flatten.**
+
+- **Weapon mark + pose-follow mark** on Loaded-NIF rows: always-visible
+  one-click toggles (five-slot glyph strip; the gesture suite caught a shipped
+  slide-off select/drag bug on the eye/disc and fixed it for all four).
+- **Weapon parts snap by BSConnectPoint data** (`nifmerge.cpp`): donor
+  `C-<slot>` (any-of, case-insensitive incl. vanilla's `C-Reciever`) vs the
+  assembly's published `P-<slot>` points, full transform composed via a
+  per-part wrapper NiNode (10mm P-Mag cant 26.52° asserted). Muzzle flashes
+  declare NO connect points and take the END of the barrel chain
+  (P-ProjectileNode > P-Muzzle > P-Flash* > P-Barrel > bone+note). No
+  whitelists anywhere — validation is purely node require/provide, per the
+  user's explicit design. Reference DB from the OMOD/connect-point research is
+  archived in the session scratchpad (`weapon_combos.json` + `.md`).
+- **Pose-follow** renders a marked document against the loaded skeleton's
+  bones by name via `Scene::skeletonOverride`, gated per document —
+  non-destructive (follower file asserted byte-identical while its rendered
+  vertex tracks the posed bone at constant grip distance).
+- **Flatten** (`flattenWorkspaceToDocument(bakePose)`): live scene → one NIF,
+  pose baked (exact, disk-round-tripped) or Pose-Manager-captured rest; no
+  false choice when no rest exists. Flatten results are excluded as future
+  flatten sources (self-feeding bug caught by the suite).
+- Suites: `flatten.sh` 28/28, `weapon_mark.sh` 77/77, `loaded_nifs.sh`
+  112/112, plus the art-object/particle gate the user mandated
+  (`artobject_attach` 14/14, `carries_everything` 24/24, `live_effects`
+  15/15) — effect NIFs merge 1:1 and render pixel-identical when unmarked.
+- Open cosmetic: a gun merged after Frame.nif reports "nothing publishes
+  P-Receiver" (true, harmless) — `offersConnectPoints` is the knob. Bare
+  minigun flash takes P-FlashFar (farthest-wins reading); a C-less second
+  gun would chain-end. All three stated in merge summaries when they occur.
 
 ### This session (2026-08-10)
 
