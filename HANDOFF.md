@@ -9,8 +9,30 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-09**. Edition **0.3.1**. Build green; latest closed change is
-the optional skeleton-aware Loaded-NIF merge described below.
+Updated **2026-08-10**. Edition **0.3.1**. Build green; latest closed change is
+Screen Archer Menu pose import (below).
+
+### This session (2026-08-10)
+
+**The Pose Manager imports Screen Archer Menu poses (`4e36bbb`).** SAM `.json`
+poses (a Discord request, 80 real PA pose files as corpus) are **absolute**
+local transforms — not rest-relative deltas like OS poses — with rotation
+`Rx(yaw)·Ry(pitch)·Rz(roll)` in degrees, which is element-for-element
+`Matrix::fromEuler`. The convention was proven against the PA skeleton rest
+pose (576 candidates eliminated, median matrix error 7.7e-08) and cross-checked
+against SAM's own source (`SAF/conversions.cpp` — beware its
+`MatrixFromDegree`/`…Transposed` path, which is the skeleton-adjust route and
+yields the inverse rotation). `AnimSetup::applySamPose` parses everything
+before touching the model, applies in one `nifSnapshotOp`, blends from the
+CURRENT transform toward the pose (slerp), and uses `Transform::writeBack` so
+quat-rotation nodes and Scale (which SAM carries, `0.0` = hide trick) work.
+Merge re-apply dispatches `.json`/`.xml` on the active pose. Values are JSON
+strings; missing bones are non-fatal (5 of 80 real files omit 17 armour-piece
+bones). `sam_pose_import.sh` is green incl. a hand-coded expected matrix
+(5.96e-08) and a real-corpus check (89/89 bones, Back_Armor rot diff 8.7e-08).
+No SAM *export* — if added, write 6-decimal angles (SAM's own `%.02f` costs
+~0.005°). Format research archived at the session scratchpad's
+`sam_convention.md`.
 
 ### Window-state diagnostic cleanup safety
 
@@ -147,6 +169,11 @@ Verified in the release build with `loaded_nifs.sh` **93/93** and
 
 ### Open
 
+- **`WW_POSELIB_TEST` fails at its final Delete step, and it is PRE-EXISTING.**
+  `findPose()` returns null after the Apply click's refresh
+  (`nifskope_ui.cpp` ~3410). Verified unrelated to the SAM import: the log is
+  byte-identical with all of that commit's `src/` changes stashed. Diagnose
+  the dock refresh vs. the harness lookup before trusting this harness again.
 - **`block_drag_live.ps1` has not been run since the multi-parent payload
   change.** It seizes the mouse; ask first, every time.
 - The NIF Browser harness covers the real view gates, exact captured payloads,
