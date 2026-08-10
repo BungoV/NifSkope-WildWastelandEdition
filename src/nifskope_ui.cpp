@@ -55,8 +55,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 
 #include <QProcessEnvironment>
+#include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QScopeGuard>
 #include "version.h"
 #include "gl/controllers.h"
@@ -3001,17 +3004,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 * values known from the format study; skipped when absent.
 	 * Pose mode is deliberately NOT entered: SAM needs no rest base, and the
 	 * import must work on a plain skeleton.nif with no skinned shape.
+	 *
+	 * WW_SAMPOSE_MODE selects one run per process:
+	 *   (unset)  the convention checks above, on the bones-only skeleton;
+	 *   refuse   a flat bone-reference NIF (Frame.nif) must be REFUSED;
+	 *   merge    the supported path — skeleton.nif primary, WW_SAMPOSE_FRAME
+	 *            merged onto it, then the pose, checked by WORLD transform
+	 *            against an independent accumulation and photographed.
 	 * Log: release/ww_sampose_test.log.
 	 */
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SAMPOSE_TEST" ) ) {
-		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
-			QTimer::singleShot( 1000, skope, [skope, ok]() {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
+			QTimer::singleShot( 1000, skope, [skope, ok, fname]() {
 				QFile logf( QApplication::applicationDirPath() + "/ww_sampose_test.log" );
 				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 					return;
 				QTextStream log( &logf );
 				NifModel * nif = skope->getNifModel();
 				QStringList fails;
+				const QString mode = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_MODE" ) );
+				log << "mode: " << ( mode.isEmpty() ? QStringLiteral( "convention" ) : mode ) << "\n";
 				do {
 					if ( !ok || !nif ) { fails << "load failed"; break; }
 
@@ -3027,6 +3039,410 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 						return QModelIndex();
 					};
+
+					auto matMax = []( const Matrix & a, const Matrix & b2 ) {
+						float d = 0;
+						for ( int r = 0; r < 3; r++ )
+							for ( int c = 0; c < 3; c++ )
+								d = qMax( d, std::fabs( a( r, c ) - b2( r, c ) ) );
+						return d;
+					};
+					auto matMaxRaw = []( const Matrix & a, const float b2[3][3] ) {
+						float d = 0;
+						for ( int r = 0; r < 3; r++ )
+							for ( int c = 0; c < 3; c++ )
+								d = qMax( d, std::fabs( a( r, c ) - b2[r][c] ) );
+						return d;
+					};
+					auto settle = []( int ms ) {
+						QEventLoop loop;
+						QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+						loop.exec();
+						QApplication::processEvents();
+					};
+					// how many NiNode parents stand above this block
+					auto depthOf = [nif]( int block ) {
+						int d = 0;
+						for ( int p = nif->getParent( block ); p >= 0 && d < 64; p = nif->getParent( p ) )
+							d++;
+						return d;
+					};
+					// bone nodes with a NON-ROOT NiNode parent: the flat-vs-real test
+					auto parentedNodes = [nif]( int * total ) {
+						const QList<int> roots = nif->getRootLinks();
+						int nodes = 0, parented = 0;
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							const QModelIndex i = nif->getBlockIndex( b );
+							if ( !nif->isNiBlock( i, "NiNode" ) )
+								continue;
+							nodes++;
+							const int p = nif->getParent( b );
+							if ( p >= 0 && !roots.contains( p )
+								 && nif->isNiBlock( nif->getBlockIndex( p ), "NiNode" ) )
+								parented++;
+						}
+						if ( total ) *total = nodes;
+						return parented;
+					};
+
+					/* PHASE 2a (WW_SAMPOSE_MODE=refuse): a flat bone-reference NIF
+					 * must be REFUSED, not posed.
+					 *
+					 * This is the check the shipped harness did not have. Frame.nif
+					 * carries dozens of NiNodes named after skeleton bones, every
+					 * one of them hanging off the file root, so SAM's absolute
+					 * PARENT-space values land in world space and the mesh crumples.
+					 * The shipped phase 2 photographed exactly that and called it a
+					 * pass, because a pixel delta cannot tell a pose from a crumple.
+					 */
+					if ( mode == QLatin1String( "refuse" ) ) {
+						const QString real = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_FILE" ) );
+						if ( real.isEmpty() || !QFile::exists( real ) ) {
+							fails << "the refusal phase needs a real pose in WW_SAMPOSE_FILE";
+							break;
+						}
+						// the fixture must really BE flat or the check is vacuous
+						int total = 0;
+						const int parented = parentedNodes( &total );
+						log << "flat fixture: " << total << " NiNode(s), " << parented
+							<< " with a non-root NiNode parent\n";
+						if ( parented != 0 )
+							fails << QStringLiteral( "this fixture is not flat (%1 parented) — "
+								"the refusal check would be vacuous" ).arg( parented );
+
+						QVector<QPair<int, Transform>> before;
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							const QModelIndex i = nif->getBlockIndex( b );
+							if ( nif->blockInherits( i, "NiAVObject" ) )
+								before << qMakePair( b, Transform( nif, i ) );
+						}
+						const int stackBefore = nif->undoStack ? nif->undoStack->count() : -1;
+
+						QString err;
+						int missing = 0;
+						const int n = skope->ogl->poseImportSam( real, 1.0f, &err, &missing );
+						qApp->processEvents();
+						log << "flat target: applied " << n << " bone(s)\n";
+						log << "refusal message: " << err.simplified() << "\n";
+						if ( n != 0 )
+							fails << QStringLiteral( "a flat bone-reference NIF accepted a SAM pose (%1 bone(s))" ).arg( n );
+						// the message has to be USEFUL, not just non-empty: it must
+						// name the missing hierarchy and point at the merge workflow
+						if ( !err.contains( QStringLiteral( "hierarchy" ), Qt::CaseInsensitive ) )
+							fails << ( "the refusal does not explain the missing hierarchy: " + err.simplified() );
+						if ( !err.contains( QStringLiteral( "skeleton.nif" ) )
+							 || !err.contains( QStringLiteral( "Loaded NIFs" ) ) )
+							fails << ( "the refusal does not point at the supported workflow: " + err.simplified() );
+
+						int moved = 0;
+						for ( const auto & p : before ) {
+							const Transform now( nif, nif->getBlockIndex( p.first ) );
+							if ( ( now.translation - p.second.translation ).length() > 1e-6f
+								 || std::fabs( now.scale - p.second.scale ) > 1e-6f
+								 || matMax( now.rotation, p.second.rotation ) > 1e-6f )
+								moved++;
+						}
+						log << "nodes moved by the refused import: " << moved
+							<< " of " << before.size() << " (must be 0)\n";
+						if ( moved != 0 )
+							fails << QStringLiteral( "the refused import still wrote %1 transform(s)" ).arg( moved );
+						if ( nif->undoStack && nif->undoStack->count() != stackBefore )
+							fails << "the refused import pushed an undo command";
+						break;
+					}
+
+					/* PHASE 2b (WW_SAMPOSE_MODE=merge): the SUPPORTED path, and the
+					 * one the pictures come from.
+					 *
+					 * skeleton.nif is the primary — a real parent hierarchy —
+					 * WW_SAMPOSE_FRAME joins Loaded NIFs and is spliced onto it
+					 * through mergeIntoLoadedDocument, the same call
+					 * NifSkope::mergeWorkspaceDocumentsInto makes once its skull
+					 * policy has picked a target (that policy is what
+					 * tests/merge/workspace_skeleton_target.sh drives; here the
+					 * skeleton IS the requested target, so what is reused is the
+					 * splice). Only then is the pose imported.
+					 *
+					 * WHAT PROVES IT IS A POSE AND NOT A CRUMPLE
+					 *
+					 * Not the pixels. The WORLD transform. For bones at three
+					 * different depths the transform composed by walking the NIF's
+					 * Parent links AFTER the import is compared against one the
+					 * harness accumulates down the same chain from the JSON, with
+					 * its own Rx(yaw)*Ry(pitch)*Rz(roll) built here from degrees and
+					 * doubles — never Matrix::fromEuler, never the importer's own
+					 * arithmetic. Same file, two independent routes. A pose applied
+					 * to the wrong node, composed as a delta, or landed on a flat
+					 * node list misses this by whole limb lengths.
+					 */
+					if ( mode == QLatin1String( "merge" ) ) {
+						const QString real = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_FILE" ) );
+						const QString frame = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_FRAME" ) );
+						if ( real.isEmpty() || !QFile::exists( real ) ) {
+							fails << "the merge phase needs a real pose in WW_SAMPOSE_FILE";
+							break;
+						}
+						if ( frame.isEmpty() || !QFile::exists( frame ) ) {
+							fails << "the merge phase needs a geometry donor in WW_SAMPOSE_FRAME";
+							break;
+						}
+
+						int total = 0;
+						const int parented = parentedNodes( &total );
+						log << "primary: " << total << " NiNode(s), " << parented
+							<< " with a non-root NiNode parent\n";
+						if ( parented < 10 )
+							fails << "the primary is not a real skeleton — this phase would prove nothing";
+
+						if ( !skope->addWorkspaceDocumentFromFile( frame ) ) {
+							fails << ( "the donor did not join Loaded NIFs: " + frame );
+							break;
+						}
+						NifModel * donor = skope->workspaceDocumentModel( 0 );
+						if ( !donor ) { fails << "the enrolled donor has no model"; break; }
+
+						// the merge ends in a modal summary; the real path runs, so
+						// a driver dismisses it the way the workspace harness does
+						auto * dismiss = new QTimer( skope );
+						QObject::connect( dismiss, &QTimer::timeout, skope, []() {
+							if ( auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) )
+								if ( !mb->buttons().isEmpty() )
+									mb->buttons().first()->click();
+						} );
+						const int blocksBefore = nif->getBlockCount();
+						QList<QPair<QString, NifModel *>> picked;
+						picked.append( { QFileInfo( fname ).fileName(), nif } );
+						picked.append( { QFileInfo( frame ).fileName(), donor } );
+						dismiss->start( 100 );
+						skope->mergeIntoLoadedDocument( picked );
+						settle( 1200 );
+						dismiss->stop();
+						log << "rig merge: blocks " << blocksBefore << " -> "
+							<< nif->getBlockCount() << "\n";
+						if ( nif->getBlockCount() <= blocksBefore ) {
+							fails << "the rig merge added nothing to the skeleton";
+							break;
+						}
+						int shapes = 0;
+						for ( int b = 0; b < nif->getBlockCount(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" )
+								 || nif->blockInherits( nif->getBlockIndex( b ), "NiTriBasedGeom" ) )
+								shapes++;
+						log << "geometry in the merged document: " << shapes << " shape(s)\n";
+						if ( shapes <= 0 ) {
+							fails << "the merged document carries no geometry to photograph";
+							break;
+						}
+						// the donor row would otherwise draw a SECOND, unposed frame
+						// on top of the merged one
+						skope->setWorkspaceDisplayMode( 0, 0 );
+						settle( 400 );
+
+						/* Every local transform as it stands BEFORE the import.
+						 * Ancestors the pose does not name keep these, so the
+						 * harness's own chain never has to read a value the
+						 * importer wrote. */
+						QHash<int, Transform> preLocal;
+						QHash<QString, int> blockOfName;
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							const QModelIndex i = nif->getBlockIndex( b );
+							if ( !nif->blockInherits( i, "NiAVObject" ) )
+								continue;
+							preLocal.insert( b, Transform( nif, i ) );
+							const QString nm = nif->resolveString( i, "Name" );
+							if ( !nm.isEmpty() && !blockOfName.contains( nm ) )
+								blockOfName.insert( nm, b );
+						}
+
+						/* The harness's OWN reading of the pose file. Doubles, hand
+						 * written Rx*Ry*Rz, no shared code with the importer. */
+						QHash<QString, Transform> want;
+						{
+							QFile jf( real );
+							if ( !jf.open( QIODevice::ReadOnly ) ) {
+								fails << ( "the harness cannot read the pose: " + real );
+								break;
+							}
+							const QJsonObject tr = QJsonDocument::fromJson( jf.readAll() ).object()
+								.value( QStringLiteral( "transforms" ) ).toObject();
+							jf.close();
+							for ( auto it = tr.constBegin(); it != tr.constEnd(); ++it ) {
+								const QJsonObject o = it.value().toObject();
+								auto num = [&o]( const char * k, double dflt ) {
+									const QJsonValue v = o.value( QLatin1String( k ) );
+									if ( v.isString() ) return v.toString().trimmed().toDouble();
+									if ( v.isDouble() ) return v.toDouble();
+									return dflt;
+								};
+								const double rad = 3.14159265358979 / 180.0;
+								const double cx = std::cos( num( "yaw", 0 ) * rad );
+								const double sx = std::sin( num( "yaw", 0 ) * rad );
+								const double cy = std::cos( num( "pitch", 0 ) * rad );
+								const double sy = std::sin( num( "pitch", 0 ) * rad );
+								const double cz = std::cos( num( "roll", 0 ) * rad );
+								const double sz = std::sin( num( "roll", 0 ) * rad );
+								Transform t;
+								// Rx(yaw)*Ry(pitch)*Rz(roll), multiplied out by hand
+								t.rotation( 0, 0 ) = float( cy * cz );
+								t.rotation( 0, 1 ) = float( -cy * sz );
+								t.rotation( 0, 2 ) = float( sy );
+								t.rotation( 1, 0 ) = float( cx * sz + sx * sy * cz );
+								t.rotation( 1, 1 ) = float( cx * cz - sx * sy * sz );
+								t.rotation( 1, 2 ) = float( -sx * cy );
+								t.rotation( 2, 0 ) = float( sx * sz - cx * sy * cz );
+								t.rotation( 2, 1 ) = float( sx * cz + cx * sy * sz );
+								t.rotation( 2, 2 ) = float( cx * cy );
+								t.translation = Vector3( float( num( "x", 0 ) ), float( num( "y", 0 ) ),
+									float( num( "z", 0 ) ) );
+								t.scale = float( num( "scale", 1 ) );
+								want.insert( it.key(), t );
+							}
+						}
+						log << "harness parsed " << want.size() << " bone(s) from "
+							<< QFileInfo( real ).fileName() << "\n";
+
+						auto pump = [skope]() {
+							skope->ogl->update(); qApp->processEvents();
+							skope->ogl->update(); qApp->processEvents();
+						};
+						pump();
+						settle( 300 );
+						const QImage shotBefore = skope->ogl->grabFramebuffer();
+						shotBefore.save( QApplication::applicationDirPath() + "/ww_sampose_before.png" );
+
+						QString err;
+						int missing = 0;
+						const int nr = skope->ogl->poseImportSam( real, 1.0f, &err, &missing );
+						qApp->processEvents();
+						log << "merged document posed: " << nr << " bone(s), " << missing
+							<< " not in this skeleton\n";
+						if ( nr <= 0 ) {
+							fails << ( "the merged document refused the pose: " + err );
+							break;
+						}
+
+						// (i) every posed bone's LOCAL transform, against the
+						// harness's own composition — broad, ~90 bones
+						float worstLocal = 0;
+						QString worstLocalName;
+						int checkedLocal = 0;
+						for ( auto it = want.constBegin(); it != want.constEnd(); ++it ) {
+							auto b = blockOfName.constFind( it.key() );
+							if ( b == blockOfName.constEnd() )
+								continue;
+							const Transform got( nif, nif->getBlockIndex( *b ) );
+							const float d = qMax( matMax( got.rotation, it.value().rotation ),
+								( got.translation - it.value().translation ).length() );
+							if ( d > worstLocal ) { worstLocal = d; worstLocalName = it.key(); }
+							checkedLocal++;
+						}
+						log << "local transforms vs the harness's own composition: "
+							<< checkedLocal << " bone(s), worst = " << worstLocal
+							<< " at " << worstLocalName << "\n";
+						if ( worstLocal > 1e-3f )
+							fails << QStringLiteral( "local transform disagrees by %1 at %2" )
+								.arg( worstLocal ).arg( worstLocalName );
+
+						/* (ii) the WORLD invariant. expectedLocal is the harness's
+						 * value for a posed bone and the PRE-import value for
+						 * anything else, so the expected chain never reads a byte
+						 * the importer wrote. */
+						auto expectedLocal = [&]( int block ) {
+							const QString nm = nif->resolveString( nif->getBlockIndex( block ), "Name" );
+							auto w = want.constFind( nm );
+							if ( w != want.constEnd() && blockOfName.value( nm, -1 ) == block )
+								return w.value();
+							return preLocal.value( block, Transform() );
+						};
+						auto worldExpected = [&]( int block ) {
+							Transform w = expectedLocal( block );
+							for ( int p = nif->getParent( block ); p >= 0; p = nif->getParent( p ) )
+								w = expectedLocal( p ) * w;
+							return w;
+						};
+						auto worldActual = [&]( int block ) {
+							Transform w( nif, nif->getBlockIndex( block ) );
+							for ( int p = nif->getParent( block ); p >= 0; p = nif->getParent( p ) )
+								w = Transform( nif, nif->getBlockIndex( p ) ) * w;
+							return w;
+						};
+
+						// probes: the shallowest, a middle and the deepest posed
+						// bone, so the chain length itself is under test
+						QVector<QPair<int, QString>> byDepth;
+						for ( auto it = want.constBegin(); it != want.constEnd(); ++it ) {
+							auto b = blockOfName.constFind( it.key() );
+							if ( b != blockOfName.constEnd() )
+								byDepth.append( { depthOf( *b ), it.key() } );
+						}
+						std::sort( byDepth.begin(), byDepth.end() );
+						if ( byDepth.size() < 3 ) {
+							fails << "fewer than three posed bones in the merged document";
+							break;
+						}
+						QVector<QPair<int, QString>> probes;
+						probes << byDepth.first() << byDepth.at( byDepth.size() / 2 ) << byDepth.last();
+						if ( probes[0].first == probes[2].first )
+							fails << "every posed bone sits at the same depth — this is a flat node list";
+						if ( probes[2].first < 3 )
+							fails << QStringLiteral( "the deepest posed bone is only %1 level(s) down" )
+								.arg( probes[2].first );
+
+						float deepestLift = 0;
+						for ( const auto & probe : probes ) {
+							const int block = blockOfName.value( probe.second, -1 );
+							if ( block < 0 ) { fails << ( "probe vanished: " + probe.second ); continue; }
+							const Transform got = worldActual( block );
+							const Transform exp = worldExpected( block );
+							const float dr = matMax( got.rotation, exp.rotation );
+							const float dt = ( got.translation - exp.translation ).length();
+							/* How far the parent chain actually CARRIED this bone.
+							 * Agreement between two routes proves nothing if both
+							 * routes are trivial — a bone whose ancestors are all
+							 * identity agrees with itself even when the chain is
+							 * ignored entirely (measured: the shallow probe scores 0
+							 * either way). The deepest probe has to have moved. */
+							const float lift = ( got.translation
+								- Transform( nif, nif->getBlockIndex( block ) ).translation ).length();
+							deepestLift = lift;
+							log << "world " << probe.second << " (depth " << probe.first
+								<< "): rot diff " << dr << ", trans diff " << dt
+								<< ", carried " << lift
+								<< ", at (" << got.translation[0] << ", " << got.translation[1]
+								<< ", " << got.translation[2] << ")\n";
+							// 1e-3: the corpus quantizes angles to two decimals and
+							// both routes read the same quantized strings, so what is
+							// left is float-vs-double accumulation down the chain
+							if ( dr > 1e-3f )
+								fails << QStringLiteral( "world rotation wrong at %1 (%2)" )
+									.arg( probe.second ).arg( dr );
+							if ( dt > 1e-3f )
+								fails << QStringLiteral( "world translation wrong at %1 (%2)" )
+									.arg( probe.second ).arg( dt );
+						}
+						if ( deepestLift < 1.0f )
+							fails << QStringLiteral( "the deepest probe's parent chain carried it only %1 "
+								"unit(s) — the world check would agree with itself" ).arg( deepestLift );
+
+						// secondary: the pose has to be VISIBLE on the geometry
+						pump();
+						settle( 300 );
+						const QImage shotAfter = skope->ogl->grabFramebuffer();
+						shotAfter.save( QApplication::applicationDirPath() + "/ww_sampose_after.png" );
+						int shotDelta = -1;
+						if ( !shotBefore.isNull() && shotBefore.size() == shotAfter.size() ) {
+							shotDelta = 0;
+							for ( int y = 0; y < shotAfter.height(); y += 2 )
+								for ( int x = 0; x < shotAfter.width(); x += 2 )
+									if ( shotBefore.pixel( x, y ) != shotAfter.pixel( x, y ) )
+										shotDelta++;
+						}
+						log << "framebuffer pixels changed by the pose: " << shotDelta << "\n";
+						if ( shotDelta <= 0 )
+							fails << "the pose changed no pixels on the merged geometry";
+						log << "captures: ww_sampose_before.png ww_sampose_after.png\n";
+						break;
+					}
 
 					// three real node names out of whatever file was loaded
 					QStringList names;
@@ -3087,21 +3503,6 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						pre << p;
 					}
 					if ( pre.size() != 3 ) break;
-
-					auto matMax = []( const Matrix & a, const Matrix & b2 ) {
-						float d = 0;
-						for ( int r = 0; r < 3; r++ )
-							for ( int c = 0; c < 3; c++ )
-								d = qMax( d, std::fabs( a( r, c ) - b2( r, c ) ) );
-						return d;
-					};
-					auto matMaxRaw = []( const Matrix & a, const float b2[3][3] ) {
-						float d = 0;
-						for ( int r = 0; r < 3; r++ )
-							for ( int c = 0; c < 3; c++ )
-								d = qMax( d, std::fabs( a( r, c ) - b2[r][c] ) );
-						return d;
-					};
 
 					QString err;
 					int missing = -1;

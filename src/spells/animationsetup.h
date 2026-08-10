@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 
 #include <QHash>
 #include <QModelIndex>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -168,6 +169,21 @@ bool writeOutfitStudioPose( NifModel * nif, const QString & path, const QString 
  *         this skeleton, malformed entries, scale-0 "hidden" bones). */
 bool applySamPose( NifModel * nif, const QString & path, float blend,
                    int * applied, int * missing, QString * error );
+
+//! Do these nodes form a real NiNode parent hierarchy, or a flat bone list?
+/*! A skinned armour piece or a Power Armor frame carries dozens of named
+ *  NiNodes because its skin lists the bones it references, but every one of them
+ *  hangs directly off Scene Root. Those cannot supply parent transforms, so any
+ *  operation that writes PARENT-SPACE values onto them produces nonsense.
+ *
+ *  This is the one test the fork uses for that question — the Loaded NIFs rig
+ *  merge refuses a flat "skeleton" marker with it, and the SAM pose import
+ *  refuses a flat target with it.
+ *
+ *  \param onlyBlocks when non-null, restricts the question to those block
+ *         numbers (the bones an operation is about to touch) instead of asking
+ *         it of the whole file. */
+bool hasBoneHierarchy( const NifModel * nif, const QSet<int> * onlyBlocks = nullptr );
 
 } // namespace AnimSetup
 

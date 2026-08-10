@@ -797,6 +797,35 @@ QHash<QString, int> namedAVObjects( const NifModel * nif )
 
 } // namespace
 
+/*! Does this file carry a real bone hierarchy? (See the header for why.)
+ *
+ * Moved here from nifskope.cpp's hasWorkspaceBoneHierarchy, which the Loaded
+ * NIFs rig merge has used since the skeleton-target work to refuse a flat
+ * "skeleton" marker. It is the same rule, unchanged: a NiNode whose parent is a
+ * NiNode that is not the file root. The only addition is onlyBlocks, so a caller
+ * can ask about the bones it is about to write rather than about the file.
+ */
+bool hasBoneHierarchy( const NifModel * nif, const QSet<int> * onlyBlocks )
+{
+	if ( !nif )
+		return false;
+	const QList<int> roots = nif->getRootLinks();
+	for ( int block = 0; block < nif->getBlockCount(); block++ ) {
+		if ( onlyBlocks && !onlyBlocks->contains( block ) )
+			continue;
+		const QModelIndex child = nif->getBlockIndex( block );
+		if ( !child.isValid() || !nif->isNiBlock( child, "NiNode" ) )
+			continue;
+		const int parentBlock = nif->getParent( block );
+		if ( parentBlock < 0 || roots.contains( parentBlock ) )
+			continue;
+		const QModelIndex parent = nif->getBlockIndex( parentBlock );
+		if ( parent.isValid() && nif->isNiBlock( parent, "NiNode" ) )
+			return true;
+	}
+	return false;
+}
+
 bool applyOutfitStudioPose( NifModel * nif, const QString & path,
                             const QHash<QString, Transform> & restByName,
                             float blend, int * appliedOut, int * missingOut, QString * error )
@@ -1051,20 +1080,57 @@ bool applySamPose( NifModel * nif, const QString & path, float blend,
 	const QHash<QString, int> nodes = namedAVObjects( nif );
 	int applied = 0, missing = 0, hidden = 0;
 
+	/* Resolve the target bones BEFORE writing anything, because the answer
+	 * decides whether this file may be posed at all.
+	 *
+	 * A SAM entry is an ABSOLUTE PARENT-SPACE transform. That is only meaningful
+	 * where the bones are actually parented to each other. A skinned mesh — a
+	 * Power Armor Frame.nif, a piece of clothing — carries a copy of the bone
+	 * NAMES as a flat list of NiNodes hanging off Scene Root, so every one of
+	 * these transforms lands in world space instead of in its parent's, and the
+	 * mesh crumples. That looked like a working import for exactly as long as
+	 * nobody put geometry in front of it: the bones moved, the pixels changed,
+	 * and the result was garbage.
+	 */
+	QSet<int> targetBlocks;
+	QHash<QString, int> matched;
+	for ( auto it = poseByName.constBegin(); it != poseByName.constEnd(); ++it ) {
+		auto node = nodes.constFind( it.key() );
+		// 5 of 80 real poses omit the 17 armour-piece bones; the mirror case
+		// (a pose naming bones this file lacks) is just as normal.
+		if ( node == nodes.constEnd() || !nif->getBlockIndex( *node ).isValid() ) {
+			missing++;
+			continue;
+		}
+		matched.insert( it.key(), *node );
+		targetBlocks.insert( *node );
+	}
+	if ( missingOut ) *missingOut = missing;
+	if ( matched.isEmpty() )
+		return fail( QStringLiteral( "no bone names in the pose matched this skeleton (%1 not found)" )
+			.arg( missing ) );
+	if ( !hasBoneHierarchy( nif, &targetBlocks ) )
+		return fail( Spell::tr(
+			"%1 has no bone hierarchy: its %2 matching node(s) are flat bone "
+			"references hanging off the file root, not parented to each other.\n\n"
+			"A SAM pose stores each bone as an absolute PARENT-SPACE transform, so "
+			"applying it here would place every bone in world space and crumple the "
+			"mesh. A skinned mesh (a Power Armor frame, an armour piece, clothing) "
+			"only lists the bones its skin references; it is not a skeleton.\n\n"
+			"Load the game's CharacterAssets/skeleton.nif, add this file under "
+			"Loaded NIFs, mark the skeleton and merge onto it, then import the pose "
+			"into the merged document." )
+			.arg( nif->getFilename().isEmpty()
+				? QStringLiteral( "This file" )
+				: QFileInfo( nif->getFilename() ).fileName() )
+			.arg( matched.size() ) );
+
 	nifSnapshotOp( nif, Spell::tr( "Import SAM pose" ), [&]() {
 		for ( auto it = poseByName.constBegin(); it != poseByName.constEnd(); ++it ) {
-			auto node = nodes.constFind( it.key() );
-			if ( node == nodes.constEnd() ) {
-				// 5 of 80 real poses omit the 17 armour-piece bones; the mirror
-				// case (a pose naming bones this file lacks) is just as normal.
-				missing++;
+			auto node = matched.constFind( it.key() );
+			if ( node == matched.constEnd() )
 				continue;
-			}
 			QModelIndex iNode = nif->getBlockIndex( *node );
-			if ( !iNode.isValid() ) {
-				missing++;
-				continue;
-			}
 
 			Transform target = it.value();
 			// Blend, matching the dock's strength slider: SAM is absolute, so

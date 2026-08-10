@@ -2886,24 +2886,15 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
  * lists the bones it references. Those are all direct children of Scene Root;
  * they are not a skeleton and cannot supply parent transforms for posing. A
  * real skeleton has NiNode -> NiNode links below that root.
+ *
+ * The rule itself now lives in AnimSetup, because the SAM pose import needs the
+ * same answer about the bones it is about to write — a flat file crumples under
+ * an absolute parent-space pose exactly as it fails as a rig-merge target. One
+ * test, two refusals.
  */
 static bool hasWorkspaceBoneHierarchy( const NifModel * model )
 {
-	if ( !model )
-		return false;
-	const QList<int> roots = model->getRootLinks();
-	for ( int block = 0; block < model->getBlockCount(); block++ ) {
-		const QModelIndex child = model->getBlockIndex( block );
-		if ( !child.isValid() || !model->isNiBlock( child, "NiNode" ) )
-			continue;
-		const int parentBlock = model->getParent( block );
-		if ( parentBlock < 0 || roots.contains( parentBlock ) )
-			continue;
-		const QModelIndex parent = model->getBlockIndex( parentBlock );
-		if ( parent.isValid() && model->isNiBlock( parent, "NiNode" ) )
-			return true;
-	}
-	return false;
+	return AnimSetup::hasBoneHierarchy( model );
 }
 
 /*! Apply the optional skull marker to one merge selection.

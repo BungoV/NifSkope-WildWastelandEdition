@@ -34,6 +34,32 @@
 #   8. (if the corpus is present) a real PA pose puts Back_Armor on the
 #      orientation and translation recorded in the format study
 #
+# PHASE 2a — THE REFUSAL (WW_SAMPOSE_MODE=refuse, on Frame.nif)
+#
+# A SAM value is an ABSOLUTE PARENT-SPACE transform, so it only means anything
+# where the bones are parented to each other. Frame.nif — like any skinned mesh —
+# carries a FLAT copy of the bone names hanging off its root, so applying a pose
+# there puts every bone in world space and crumples the mesh. The importer now
+# refuses that, and this phase asserts the refusal: no bones applied, a message
+# that names the missing hierarchy and the merge workflow, not one transform
+# written, and nothing pushed onto the undo stack.
+#
+# THE SHIPPED PHASE 2 WAS WRONG. It photographed this exact crumple on Frame.nif
+# and passed it, because its only check was "the pose moved pixels" — and a
+# crumple moves pixels beautifully. That is why the phase below exists.
+#
+# PHASE 2b — THE SUPPORTED PATH (WW_SAMPOSE_MODE=merge), which is what gets
+# photographed
+#
+# skeleton.nif is the primary, Frame.nif joins Loaded NIFs and is merged onto it
+# through the same splice the workspace rig merge uses, and the pose goes onto
+# the merged document. The proof is not the pixels: for the shallowest, a middle
+# and the deepest posed bone, the WORLD transform composed by walking the NIF's
+# Parent links is compared against one the harness accumulates down the same
+# chain from the JSON with its own Rx*Ry*Rz — same file, two independent routes,
+# tolerance 1e-3. Every posed bone's local transform is checked the same way. The
+# pixel delta stays, as a secondary.
+#
 # FIXTURE
 #
 # The FO4 power-armour skeleton, because it is nothing but named NiNodes and is
@@ -62,8 +88,9 @@ LOG="$ROOT/release/ww_sampose_test.log"
 # committed fixture is a real Screen Archer Menu save (zZovek's PA set, pose 1).
 SAMPOSE="${SAMPOSE:-$ROOT/tests/fixtures/sam_pa_pose1.json}"
 
-# Phase 2 photographs the pose on real geometry: the PA frame mesh, which
-# carries its own copy of the skeleton nodes. Skipped if the corpus is absent.
+# Phase 2's geometry: the PA frame mesh. It carries a FLAT copy of the skeleton
+# node names, which is what phase 2a refuses and what phase 2b merges onto the
+# real skeleton. Skipped if the corpus is absent.
 FRAME="${FRAME:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/CharacterAssets/Frame.nif}"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
@@ -98,11 +125,15 @@ one_run() {
 # Phase 1: convention checks on the bones-only skeleton.
 one_run "$SRC" || exit 1
 
-# Phase 2: the same pose on the PA frame mesh, before/after captures, and the
-# pixel delta is ENFORCED (WW_SAMPOSE_SHOT) — a pose that moves no pixels on
-# real geometry fails. Back_Armor value checks self-skip if the frame lacks it.
 if [ -n "$REALPOSE" ] && [ -f "$FRAME" ]; then
-	one_run "$FRAME" WW_SAMPOSE_SHOT=1 || exit 1
+	# Phase 2a: the flat frame mesh must REFUSE the pose.
+	one_run "$FRAME" WW_SAMPOSE_MODE=refuse || exit 1
+
+	# Phase 2b: skeleton primary + frame merged onto it, then the pose. The old
+	# captures go first so a phase that dies before grabbing cannot leave last
+	# run's pictures behind looking like this run's.
+	rm -f "$ROOT/release/ww_sampose_before.png" "$ROOT/release/ww_sampose_after.png"
+	one_run "$SRC" WW_SAMPOSE_MODE=merge WW_SAMPOSE_FRAME="$(winpath "$FRAME")" || exit 1
 	echo "captures: release/ww_sampose_before.png release/ww_sampose_after.png"
 else
 	echo "phase 2 skipped (no real pose or no Frame.nif)"

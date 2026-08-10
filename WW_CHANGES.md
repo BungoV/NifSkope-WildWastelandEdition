@@ -1,5 +1,68 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10c — The SAM harness was photographing a crumple
+
+**The defect, plainly.** Yesterday's phase 2 applied a SAM pose to **Frame.nif**
+and passed it. Frame.nif is not a skeleton. It is a skinned mesh that carries a
+**flat** copy of the bone names — 55 NiNodes, **0** of them with a non-root
+NiNode parent — and a SAM entry is an *absolute parent-space* transform. Applied
+there, every bone lands in world space and the frame crumples. The harness's only
+check on that phase was "the pose moved pixels", and a crumple moves pixels
+beautifully; 25,505 of them, which got written up as a pass. The screenshots said
+so at a glance and nobody in the loop was looking at them.
+
+**The refusal.** `AnimSetup::applySamPose` now resolves its target bones before
+writing anything and refuses a file whose matching nodes have no parent
+hierarchy. The rule is not a new heuristic: `hasWorkspaceBoneHierarchy` — the
+test the Loaded NIFs rig merge has used since the skeleton-target work to reject
+a flat "skeleton" marker — moved to `AnimSetup::hasBoneHierarchy`, gained an
+optional block-set filter so a caller can ask about *the bones it is about to
+touch*, and nifskope.cpp's copy is now a one-line forward to it. One test, two
+refusals. The message names the problem and the supported workflow (load
+`CharacterAssets/skeleton.nif`, add the mesh under Loaded NIFs, mark and merge,
+pose the merged document); the dock already surfaces it in a warning box.
+Measured on Frame.nif: 54 pose bones matched, **0 applied**, **0 of 58**
+transforms written, nothing pushed onto the undo stack.
+
+**Phase 2 rebuilt around an invariant that can fail.** `sam_pose_import.sh` now
+runs three processes. Phase 1 (the convention checks on skeleton.nif) is
+unchanged. Phase 2a asserts the refusal above. Phase 2b runs the **supported**
+path and is what the pictures come from: skeleton.nif primary (147 NiNodes, 144
+parented), Frame.nif enrolled through `addWorkspaceDocumentFromFile` and spliced
+on with `mergeIntoLoadedDocument` — the same call `mergeWorkspaceDocumentsInto`
+makes once its skull policy has chosen a target — taking the document from 177 to
+**193 blocks with 3 shapes**, and only then the pose.
+
+What proves it is a pose is the **world transform**, not the pixels. For the
+shallowest, a middle and the deepest posed bone, the transform composed by
+walking the NIF's Parent links after the import is compared against one the
+harness accumulates down the same chain from the JSON, using its own
+`Rx(yaw)·Ry(pitch)·Rz(roll)` in doubles — never `Matrix::fromEuler`, never the
+importer's arithmetic. Same file, two independent routes, tolerance **1e-3**
+(corpus quantization). Measured on `sam_pa_pose1.json`:
+
+| probe | depth | world rot diff | world trans diff | carried by its chain |
+|---|---|---|---|---|
+| AnimObjectA | 2 | 0 | 0 | 0 |
+| PipboyBone | 9 | 1.5e-7 | 8.7e-6 | 113.711 |
+| RArm_Finger53 | 12 | 1.8e-7 | 9.8e-6 | 115.247 |
+
+plus all **89** posed bones checked locally the same way (worst 1.2e-7), and the
+pixel delta kept as a secondary (**48,941**).
+
+**The invariant was proved to fail.** A negative-control build in which the
+expected side ignores the parent chain — the shape of the original defect — was
+run against the same fixture: PipboyBone missed by **113.711** units and 1.60 of
+rotation, RArm_Finger53 by **115.247** and 1.96, against a 1e-3 tolerance. Five
+orders of margin. That control also exposed a weak probe: AnimObjectA scores
+zero *either way*, because its ancestors are identity, so a "two routes agree"
+check over it proves nothing. The harness now also measures how far each chain
+actually **carried** its bone and fails if the deepest probe moved less than one
+unit — agreement over a trivial chain is no longer allowed to count.
+
+`tests/merge/workspace_skeleton_target.sh` re-run over the shared hierarchy test:
+34/34.
+
 ## 2026-08-10b — SAM import photographed on real geometry
 
 The SAM harness now has a second phase that renders the pose instead of only
