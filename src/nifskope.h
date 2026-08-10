@@ -176,6 +176,12 @@ public:
 	//! Build a faceBones NIF from a row using the marked donor; "" on success.
 	QString generateFaceBonesFromRow( int backgroundIndex );
 	bool markWorkspaceFaceDonorRow( int backgroundIndex );
+	/*! Mark or unmark a Loaded NIFs row as a weapon part — the third row mark,
+	 *  and the only one that is a SET rather than a single file, because a
+	 *  Fallout 4 gun is a base NIF plus its part files. The state itself lives in
+	 *  nifmerge (nifIsWeaponMarked), since the merge is what acts on it. */
+	bool markWorkspaceWeaponRow( int backgroundIndex, bool marked );
+	bool workspaceDocumentIsWeapon( int backgroundIndex ) const;
 	bool markWorkspaceDocumentUnsaved( int backgroundIndex );
 	//! Load NIFs from anywhere on disk into Loaded NIFs; returns how many.
 	int addWorkspaceDocumentsFromDialog();

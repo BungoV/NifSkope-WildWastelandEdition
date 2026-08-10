@@ -1,5 +1,86 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10g — Weapons are a row mark, not a programmer's operation
+
+**What was missing.** The workspace could already put a gun in a posed hand —
+`WW_SAMPOSE_TEST` does it — but only from code, by calling `nifMergeFile` with
+an `attachTo` override. Nothing in the panel said "this row is part of a gun",
+so the one thing a viewer actually wants out of a posed rig was unreachable.
+
+**The mark.** A third Loaded NIFs row mark beside the skeleton skull and the
+face donor: a small handgun drawn in code from `wwSkinColor("accent")` like the
+other two, sharing their one reserved marker slot (skull wins, then face, then
+gun), offered as **Use as Weapon Part** in both row menus. Unlike the other two
+it is a **SET** — a Fallout 4 gun is a base NIF plus separate OMOD part files,
+so several rows carry the gun at once — and it lives in `nifmerge` on the
+`NifModel`, held by `QPointer`, because the merge is the only thing that reads
+it and a closed document must take its mark with it.
+
+**The merge.** In `mergeIntoLoadedDocument`, a marked donor is spliced with
+`attachTo = "WEAPON"` when the target has a `NiNode` of that name at any depth,
+resolved through the merge's *own* `namedNodes()` index so it cannot answer
+"yes" where the splice would then find nothing. Multiple marked rows go on in
+row order; unmarked donors are untouched. A target with no `WEAPON` bone is a
+fallback, not a failure — merged at the root, and **said so in the summary**.
+
+**"Connect automatically if the combination is right" = say what you notice.**
+Any parts may be combined, cross-weapon included; there is no whitelist, no
+notion of a legal combination, and nothing here refuses anything. Two notices,
+both structural, both read off the files before the splice:
+
+- **Redundancy** — shape names the donor brings that the target already carries.
+  Measured fixture: two barrels on one minigun collide on `BaseRefractionMesh:0`
+  (1 of the second barrel's 2 shapes).
+- **Slot** — a part declares where it belongs in `BSConnectPoint::Children` as
+  `C-<Slot>`, and a file that can hold it offers `P-<Slot>` in
+  `BSConnectPoint::Parents`. When that point sits *on* the attach node the part
+  self-assembles by mere parenting; when it sits out along the gun or is not
+  offered, parenting leaves it at the grip, and the summary says it needs a slot
+  node automatic placement does not provide yet. **It is not placed** — the slot
+  mapping is a separate job (docs/TO_BE_IMPLEMENTED.md #9).
+
+**Two rules that had to be measured, not assumed.**
+
+1. *"Slot-relative parts hug their own origin"* is **not** a usable signal.
+   `10mmGrip.nif` and `10mmSuppressor.nif` both put their shape at (0,0,0) with
+   bounding centres inside 0.5 units, and the grip is exactly the part that must
+   merge silently. Pivots and bounding centres cannot separate the two kinds;
+   the declared connect point can.
+2. *"An unoffered slot means the part is misplaced"* warns about the **base
+   weapon**, which declares `C-Receiver` like every other part does. The harness
+   caught the shipped-looking version announcing that `10MMPistol.nif` "needs a
+   Receiver node" while it sat in the hand exactly as intended. A target with no
+   connect points at all is a **rig**, not a half-built gun, and the first part
+   onto its bone defines the frame — the notice starts only once the target
+   carries connect points of its own.
+
+Measured slot offsets from the attach node, which is where the 5-unit slack
+comes from: 10mm `P-Grip` 2.4, `P-Mag` ~1.6 (silent, correct); 10mm `P-Scope`
+10.4, minigun `P-Barrel` 36.5 (warned, correct).
+
+**Correction to 08-10f.** That entry reads as though `MinigunBarrel.nif`
+collides with the minigun base. It does not: measured, the base's five shape
+names and the barrel's two are disjoint, and the barrel's four *blocks* arriving
+is not a name collision. The real collision is between **two barrels**, on
+`BaseRefractionMesh:0`, which is the fixture this harness uses.
+
+**Harness.** New `tests/spells/weapon_mark.sh` + `WW_WEAPONMARK_TEST`, **37
+checks, 0 failures**, on ten corpus files. It asserts the mark as *state* on the
+model the merge keys on (not a repaint), the set behaviour, independence from
+the skull and face marks in both directions, and the row menu item ticked with
+its glyph; then merges base+grip+magazine onto a real PA skeleton and measures
+all eight arrivals by **world transform walked up the Parent links** — nearest
+0.0 and farthest 15.8 from `WEAPON`, closest to the document origin 81.4, against
+`WW_SAMPOSE_TEST`'s own 40/80/40 thresholds. Both notices are asserted by their
+text, the clean assembly is asserted to draw **neither**, the no-`WEAPON`-bone
+fallback is asserted to say so, and one guard assertion holds that an unmarked
+donor merges exactly as before. The summary is read back through
+`nifLastMergeSummary()` because the box it appears in is modal and a driver has
+to dismiss it to let the run continue.
+
+Regression: `sam_pose_import.sh` PASS (all five pose+weapon pairs),
+`workspace_skeleton_target.sh` 34/34, `loaded_nifs.sh` 95/95.
+
 ## 2026-08-10f — The weapon step generalises past the pistol
 
 Five pose+weapon pairs from the corpus now run through the merge phase:

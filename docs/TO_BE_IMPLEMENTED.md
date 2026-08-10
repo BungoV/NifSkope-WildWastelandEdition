@@ -1531,6 +1531,16 @@ Verified 2026-07-21 against `src/spells/riggingtools.cpp`.
 - **In-game FaceGen validation** — a manual production check, not code.
 - *Persistent skeleton reference* and *zero-weight bone pruning* — see #1; they
   belong to the Skeleton Manager.
+- **Weapon slot placement** — NEW 2026-08-10g. The weapon mark merges a marked
+  row onto the target's `WEAPON` bone, which is the whole of the job for
+  gun-frame-absolute parts (receiver, grip, magazine). Parts authored around
+  their OWN origin — optics, sights, muzzle devices — need the transform of the
+  connect point they declare (`C-Muzzle` in `BSConnectPoint::Children` against
+  the target's `P-Muzzle`), and that is not applied: the merge only NAMES the
+  missing slot in its summary. Placing them is a separate job waiting on the
+  OMOD slot mapping. Note the two-tier split is not visible in geometry —
+  `10mmGrip.nif` and `10mmSuppressor.nif` both sit at their own origin — so the
+  connect points are the only signal, and any placement work starts there.
 
 ## 10. UV editor — cross-mesh operators
 

@@ -429,6 +429,7 @@ private:
 //! Defined below; the row delegate draws it in the strip.
 static QIcon skeletonMarkIcon();
 static QIcon faceDonorMarkIcon();
+static QIcon weaponMarkIcon();
 
 static QIcon nifBrowserStarIcon()
 {
@@ -471,11 +472,12 @@ public:
 	/*! The skull is a MARKER, not a toggle — it says which file the others are
 	 *  snapping to. Its slot is reserved even when nothing is marked, so the two
 	 *  real toggles stay aligned down the list instead of shifting sideways when a
-	 *  skeleton is picked. */
+	 *  skeleton is picked. The weapon mark shares that one slot; see paint(). */
 	enum Slot { SlotSkeleton = 0, SlotVisible = 1, SlotGhost = 2 };
 	static constexpr int SlotCount = 3;
 
-	//! Bit 0 = visible, bit 1 = ghost, bit 2 = marked skeleton. -1 = no toggles.
+	//! Bit 0 = visible, bit 1 = ghost, bit 2 = skeleton, bit 6 = weapon part.
+	//! -1 = no toggles.
 	std::function<int( const QModelIndex & )> displayFlags;
 	//! Flip one flag; the caller decides what that means for the document.
 	std::function<void( const QModelIndex &, int slot )> toggleFlag;
@@ -541,23 +543,30 @@ public:
 		const bool isSkeleton = ( flags & 0x4 );
 		const bool markerOnly = ( flags & 0x8 );
 		const bool isFaceDonor = ( flags & 0x10 );
+		const bool isWeapon = ( flags & 0x40 );
 		const QColor lit( wwSkinColor( "accent" ) );
 		const QColor dim( wwSkinColor( "textMuted" ) );
 
 		painter->save();
 		painter->setRenderHint( QPainter::Antialiasing, true );
 
-		/* --- the skeleton or face-donor marker, ahead of the toggles ---------
+		/* --- the skeleton, face-donor or weapon marker, ahead of the toggles --
 		 *
-		 * One slot, because a file is one or the other in every workflow this
+		 * One slot, because a file is one of the three in every workflow this
 		 * serves: the skeleton is what everything else poses against, the face
-		 * donor is where sculpt bones are read from, and those are different
-		 * files. If a file were somehow marked as both, the skull wins — losing
-		 * track of the skeleton is the more confusing of the two.
+		 * donor is where sculpt bones are read from, a weapon part is something
+		 * that goes in a hand, and those are different files. If a file were
+		 * somehow marked as more than one, the skull wins and the gun loses —
+		 * losing track of the skeleton is the most confusing of the three, and
+		 * the weapon mark is the one you can see in the merge summary anyway.
+		 *
+		 * The weapon mark is a SET, unlike the other two: a Fallout 4 gun is a
+		 * base NIF plus its part files, so several rows carry the gun at once.
 		 */
-		if ( isSkeleton || isFaceDonor ) {
+		if ( isSkeleton || isFaceDonor || isWeapon ) {
 			const QRect r = glyphRect( option.rect, SlotSkeleton ).adjusted( 2, 2, -2, -2 );
-			( isSkeleton ? skeletonMarkIcon() : faceDonorMarkIcon() ).paint( painter, r );
+			( isSkeleton ? skeletonMarkIcon()
+				: isFaceDonor ? faceDonorMarkIcon() : weaponMarkIcon() ).paint( painter, r );
 		}
 
 		// --- the eye ---------------------------------------------------------
@@ -689,6 +698,57 @@ static QIcon skeletonMarkIcon()
 	p.drawRect( QRectF( 7.6, 10.8, 0.9, 3.2 ) );
 	p.end();
 	return QIcon( pm );
+}
+
+/*! A small handgun, for a row marked as a weapon part.
+ *
+ *  Third of the row marks and drawn to the same rules as the other two — the
+ *  skin's accent colour, no literals, legible at 16 px, features punched out so
+ *  it reads on any row background. A raked grip under a flat slide is what makes
+ *  a 16 px silhouette read as a gun rather than as a bracket; a skull and a face
+ *  are both round, so the straight lines here also keep the three apart at a
+ *  glance.
+ */
+static QIcon weaponMarkIcon()
+{
+	const int s = 16;
+	QPixmap pm( s, s );
+	pm.fill( Qt::transparent );
+	QPainter p( &pm );
+	p.setRenderHint( QPainter::Antialiasing, true );
+	const QColor ink( wwSkinColor( "accent" ) );
+	p.setPen( Qt::NoPen );
+	p.setBrush( ink );
+
+	// slide and receiver: one bar across the top, muzzle to the left
+	p.drawRoundedRect( QRectF( 0.8, 3.0, 14.4, 4.2 ), 1.0, 1.0 );
+	/* The grip, raked back, and WIDE. The first version drew it three pixels
+	 * across and the glyph read as a digit 7 in the capture — a handle has to
+	 * look like something a hand goes round even at this size. */
+	QPolygonF grip;
+	grip << QPointF( 10.4, 6.8 ) << QPointF( 15.2, 6.8 )
+	     << QPointF( 13.9, 15.0 ) << QPointF( 9.4, 15.0 );
+	p.drawPolygon( grip );
+	// the trigger, a stub under the receiver
+	p.drawRoundedRect( QRectF( 7.4, 7.0, 1.9, 3.2 ), 0.6, 0.6 );
+
+	/* The barrel is stepped down out of the slide, punched rather than drawn, as
+	 * the skull's sockets are. Without it the front half is a plain bar. */
+	p.setCompositionMode( QPainter::CompositionMode_Clear );
+	p.setBrush( Qt::black );
+	p.drawRect( QRectF( 0.0, 2.8, 4.2, 1.7 ) );
+	p.end();
+	return QIcon( pm );
+}
+
+//! One wording for the weapon mark, so both row menus say the same thing.
+static QString weaponMarkTip()
+{
+	return QObject::tr( "Merging this file into a document that has a WEAPON bone hangs it off "
+		"that bone instead of the root, so it lands in the hand. Mark the base weapon NIF and "
+		"every part you want on it — several rows at once — and merge them onto the rig in row "
+		"order. Any parts may be combined; the merge reports what it notices and refuses "
+		"nothing." );
 }
 
 static int sessionSceneParent( const NifModel * nif, int block )
@@ -1876,16 +1936,20 @@ NifSkope::NifSkope( bool background )
 			// 0x10: the faceBones donor, drawn in the same slot as the skull
 			if ( nif && NifSkope::workspaceFaceDonor() == nif )
 				flags |= 0x10;
+			// 0x40: a weapon part, same slot again. Held in nifmerge, because the
+			// merge is the only thing that acts on it.
+			if ( nif && nifIsWeaponMarked( nif ) )
+				flags |= 0x40;
 		};
 		if ( NifSkope * doc = documentFromBrowserIndex( idx ) ) {
 			// The primary is always drawn, so it has no visibility to toggle — but it
 			// can still be the marked skeleton, and that has to show.
 			markSkeleton( doc->nif );
 			// 0x8: marker only. The primary is always drawn, so it has no visibility
-			// to offer — but it can still BE a marked skeleton or face donor, and
-			// that has to show.
+			// to offer — but it can still BE a marked skeleton, face donor or weapon
+			// part, and that has to show.
 			if ( doc == this )
-				return ( flags & 0x14 ) ? ( flags | 0x8 ) : -1;
+				return ( flags & 0x54 ) ? ( flags | 0x8 ) : -1;
 			if ( doc->sessionPreviewVisible && !doc->sessionPreviewUnloaded )
 				flags |= 0x1;
 			if ( doc->sessionPreviewGhost )
@@ -1960,7 +2024,8 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView->header()->setStretchLastSection( true );
 	loadedNifsView->header()->setToolTip( tr(
 		"Row key: arrow = primary · skull = skeleton · face = face donor · "
-		"eye = visible · half-disc = semi-transparent · red name = unsaved" ) );
+		"gun = weapon part · eye = visible · half-disc = semi-transparent · "
+		"red name = unsaved" ) );
 	loadedWorkspaceView->sourceView = browserWorkspaceView;
 	loadedWorkspaceView->addBrowserRows = [this]( const QList<QPersistentModelIndex> & rows ) {
 		addNifBrowserRowsToLoaded( rows );
@@ -2799,6 +2864,11 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	asFaceDonor->setToolTip( tr( "The rigging steps take their sculpt bones from this file "
 		"without asking each time. Mark the vanilla head's _faceBones.nif; it is read, never "
 		"written to." ) );
+	QAction * asWeapon = menu.addAction( tr( "Use as Weapon Part" ) );
+	asWeapon->setIcon( weaponMarkIcon() );
+	asWeapon->setCheckable( true );
+	asWeapon->setChecked( document->nif && nifIsWeaponMarked( document->nif ) );
+	asWeapon->setToolTip( weaponMarkTip() );
 	menu.addSeparator();
 	QAction * visible = menu.addAction( tr( "Visible in Workspace" ) );
 	visible->setCheckable( true );
@@ -2832,6 +2902,10 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	else if ( chosen == asFaceDonor ) {
 		NifSkope::setWorkspaceFaceDonor( asFaceDonor->isChecked() ? document->nif : nullptr,
 			QFileInfo( document->currentFile ).fileName() );
+		refreshAllDocumentSessions();
+	}
+	else if ( chosen == asWeapon ) {
+		nifSetWeaponMark( document->nif, asWeapon->isChecked() );
 		refreshAllDocumentSessions();
 	}
 	else if ( chosen == freeze ) {
@@ -2956,7 +3030,7 @@ void NifSkope::mergeIntoLoadedDocument( const QList<QPair<QString, NifModel *>> 
 		return buf.open( QIODevice::WriteOnly ) && src->save( buf );
 	};
 
-	QStringList report, dupes;
+	QStringList report, dupes, weaponNotes;
 	int shapes = 0, done = 0;
 	for ( int i = 1; i < picked.size(); i++ ) {
 		if ( !picked.at( i ).second )
@@ -2967,8 +3041,30 @@ void NifSkope::mergeIntoLoadedDocument( const QList<QPair<QString, NifModel *>> 
 				tr( "Could not read %1." ).arg( picked.at( i ).first ) );
 			break;
 		}
+		/* A WEAPON-MARKED DONOR GOES ON THE WEAPON BONE.
+		 *
+		 * Fallout 4 weapon parts are authored in one shared gun frame with
+		 * identity roots, so parenting them under the target's WEAPON node is the
+		 * whole of "assembling the gun" — the parts land on each other with no
+		 * transform work. A target with no such bone is not an error: it is an
+		 * ordinary merge, said out loud in the summary rather than left to be
+		 * discovered on screen. Unmarked donors are untouched by any of this.
+		 *
+		 * The notes are read BEFORE the splice, off the target as it stands, so a
+		 * part is measured against everything merged ahead of it in this same run.
+		 */
+		QString weaponAttach;
+		if ( nifIsWeaponMarked( picked.at( i ).second ) ) {
+			weaponAttach = nifWeaponAttachNode( target );
+			if ( weaponAttach.isEmpty() )
+				weaponNotes << tr( "%1 is marked as a weapon part, but %2 has no WEAPON bone — "
+					"merged at root." ).arg( picked.at( i ).first, picked.first().first );
+			else
+				weaponNotes << nifWeaponPartNotes( target, picked.at( i ).second,
+					picked.at( i ).first, weaponAttach );
+		}
 		NifMergeResult r;
-		if ( !nifMergeData( target, bytes, picked.at( i ).first, true, r ) ) {
+		if ( !nifMergeData( target, bytes, picked.at( i ).first, true, r, weaponAttach ) ) {
 			QMessageBox::warning( this, tr( "Merge" ), r.error );
 			break;
 		}
@@ -2998,6 +3094,13 @@ void NifSkope::mergeIntoLoadedDocument( const QList<QPair<QString, NifModel *>> 
 		text += tr( "\n\nWARNING: %1 bone name(s) now appear on more than one node "
 			"(%2). Posing will address only one of each." )
 			.arg( dupes.size() ).arg( dupes.mid( 0, 8 ).join( QStringLiteral( ", " ) ) );
+	// Everything the weapon marks noticed, verbatim and last: none of it stopped
+	// the merge, so it belongs after the result rather than in place of it.
+	if ( !weaponNotes.isEmpty() )
+		text += tr( "\n\nWEAPON PARTS:\n• %1" )
+			.arg( weaponNotes.join( QStringLiteral( "\n• " ) ) );
+	// The box is modal, so a script that has to dismiss it cannot read it.
+	nifSetLastMergeSummary( text );
 	QMessageBox::information( this, tr( "Merge" ), text );
 }
 
@@ -3504,6 +3607,11 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	asFaceDonor->setToolTip( tr( "The rigging steps take their sculpt bones from this file "
 		"without asking each time. Mark the vanilla head's _faceBones.nif; it is read, never "
 		"written to." ) );
+	QAction * asWeapon = menu.addAction( tr( "Use as Weapon Part" ) );
+	asWeapon->setIcon( weaponMarkIcon() );
+	asWeapon->setCheckable( true );
+	asWeapon->setChecked( document->nif && nifIsWeaponMarked( document->nif ) );
+	asWeapon->setToolTip( weaponMarkTip() );
 	// mark the donor once, then right-click the head: the whole workflow without
 	// opening either of them as a document
 	QAction * makeFaceBones = menu.addAction( tr( "Generate faceBones NIF from this" ) );
@@ -3573,6 +3681,10 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	else if ( chosen == asFaceDonor ) {
 		NifSkope::setWorkspaceFaceDonor( asFaceDonor->isChecked() ? document->nif : nullptr,
 			document->displayName() );
+		refreshAllDocumentSessions();
+	}
+	else if ( chosen == asWeapon ) {
+		nifSetWeaponMark( document->nif, asWeapon->isChecked() );
 		refreshAllDocumentSessions();
 	}
 	else if ( chosen == makeFaceBones ) {

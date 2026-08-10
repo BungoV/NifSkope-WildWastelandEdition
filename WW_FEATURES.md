@@ -183,6 +183,15 @@ predecessor:
   ArtObjects land on the right limb. The skull marker is optional for ordinary
   clothing/prop merges; when its model is selected it is hierarchy-validated
   and becomes the rig target automatically. Verified to carry everything.
+- **Weapon parts** — a third row mark beside the skeleton skull and the face
+  donor, and the only one that is a set: mark the base weapon NIF and every part
+  you want on it, and Merge Into hangs them all off the target's `WEAPON` bone in
+  row order, so a gun lands in a posed hand. Any combination is allowed,
+  cross-weapon included; the summary reports what it noticed — a part whose
+  shape names the target already carries, or one whose declared connect-point
+  slot the target does not offer at that bone — and refuses nothing. No `WEAPON`
+  bone in the target is a root merge, said out loud rather than left to the
+  picture.
 - Combined preview and donor selection across the whole workspace group.
 
 ## 9. Materials and rendering

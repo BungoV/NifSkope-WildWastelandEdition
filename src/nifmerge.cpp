@@ -15,6 +15,8 @@ BSD License - see nifskope.h
 #include <QDataStream>
 #include <QHash>
 #include <QMap>
+#include <QObject>
+#include <QPointer>
 #include <QSet>
 
 /*
@@ -984,4 +986,259 @@ bool nifMergeData( NifModel * target, const QByteArray & data, const QString & l
 	}
 	return mergeDonor( target, donor, label.isEmpty() ? QStringLiteral( "NIF" ) : label,
 	                   dedupeByName, result, attachTo );
+}
+
+
+/* ============================================================ WEAPON PARTS ===
+ *
+ * The Loaded NIFs weapon mark and the two things the merge can honestly say
+ * about a part before it splices it in. See nifmerge.h for the contract; the one
+ * rule worth repeating here is that none of this decides whether a combination
+ * is ALLOWED. Any part may be merged onto any target. What is computed is what
+ * the two files contain, and the answers are notes, never refusals.
+ */
+
+//! The marked models. QPointer, so a closed document unmarks itself: the merge
+//! compares raw pointers against live documents and must never match a freed one.
+static QList<QPointer<NifModel>> wwWeaponParts;
+
+static void pruneWeaponMarks()
+{
+	for ( int i = wwWeaponParts.size() - 1; i >= 0; i-- )
+		if ( !wwWeaponParts.at( i ) )
+			wwWeaponParts.removeAt( i );
+}
+
+void nifSetWeaponMark( NifModel * model, bool marked )
+{
+	pruneWeaponMarks();
+	if ( !model )
+		return;
+	const bool already = nifIsWeaponMarked( model );
+	if ( marked == already )
+		return;
+	if ( marked ) {
+		wwWeaponParts.append( QPointer<NifModel>( model ) );
+		return;
+	}
+	for ( int i = wwWeaponParts.size() - 1; i >= 0; i-- )
+		if ( wwWeaponParts.at( i ).data() == model )
+			wwWeaponParts.removeAt( i );
+}
+
+bool nifIsWeaponMarked( const NifModel * model )
+{
+	if ( !model )
+		return false;
+	for ( const QPointer<NifModel> & p : std::as_const( wwWeaponParts ) )
+		if ( p.data() == model )
+			return true;
+	return false;
+}
+
+int nifWeaponMarkCount()
+{
+	pruneWeaponMarks();
+	return int( wwWeaponParts.size() );
+}
+
+void nifClearWeaponMarks()
+{
+	wwWeaponParts.clear();
+}
+
+QString nifWeaponAttachNode( const NifModel * target )
+{
+	if ( !target )
+		return QString();
+	/* namedNodes() is the merge's OWN any-depth name index — the same lookup
+	 * mergeDonor resolves an attach request through. Asking it here is what stops
+	 * this from answering "yes, WEAPON" where the splice would then find nothing
+	 * and silently drop the part at the root. */
+	return namedNodes( target ).contains( QStringLiteral( "WEAPON" ) )
+		? QStringLiteral( "WEAPON" ) : QString();
+}
+
+namespace
+{
+
+//! Every renderable shape's name, in block order, duplicates included.
+QStringList shapeNames( const NifModel * nif )
+{
+	QStringList names;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( i, "BSTriShape" ) && !nif->blockInherits( i, "NiTriBasedGeom" ) )
+			continue;
+		const QString name = nif->get<QString>( i, "Name" );
+		if ( !name.isEmpty() )
+			names << name;
+	}
+	return names;
+}
+
+//! Slots a file asks to be attached at: a "C-Muzzle" point name yields "Muzzle".
+/*! BSConnectPoint::Children is the part's own statement of where it belongs. It
+ *  is read, never written, and never checked against a list of parts. */
+QStringList declaredSlots( const NifModel * nif )
+{
+	QStringList asked;			// not "slots": Qt takes that word
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->isNiBlock( i, "BSConnectPoint::Children" ) )
+			continue;
+		const QModelIndex iNames = nif->getIndex( i, "Point Name" );
+		// an invalid index is the model ROOT, whose row count is the block count
+		if ( !iNames.isValid() )
+			continue;
+		for ( int r = 0; r < nif->rowCount( iNames ); r++ ) {
+			const QString point = nif->get<QString>( nif->getIndex( iNames, r ) );
+			if ( point.size() > 2 && point.startsWith( QLatin1String( "C-" ), Qt::CaseInsensitive )
+				 && !asked.contains( point.mid( 2 ) ) )
+				asked << point.mid( 2 );
+		}
+	}
+	return asked;
+}
+
+//! Does the file offer ANY connect points at all?
+/*! The question that separates "this part is the first thing on the node" from
+ *  "this part is missing the piece that would hold it". A rig has no connect
+ *  points; a weapon merged onto one brings its own along, and from then on an
+ *  unmatched slot means something is genuinely absent. Without this, the BASE
+ *  weapon NIF — which declares C-Receiver like every other part does — is warned
+ *  about for landing exactly where it belongs. */
+bool offersConnectPoints( const NifModel * nif )
+{
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->isNiBlock( i, "BSConnectPoint::Parents" ) )
+			continue;
+		const QModelIndex iPoints = nif->getIndex( i, "Connect Points" );
+		if ( iPoints.isValid() && nif->rowCount( iPoints ) > 0 )
+			return true;
+	}
+	return false;
+}
+
+//! How far the "P-<slot>" point \a target offers sits from \a attachBlock; -1 if
+//! the target offers no such point.
+float offeredSlotDistance( const NifModel * target, int attachBlock, const QString & slot )
+{
+	const QString wanted = QStringLiteral( "P-" ) + slot;
+	const QHash<int, QList<int>> parents = parentMap( target );
+	const QHash<int, Transform> world = worldTransforms( target, parents );
+	const QHash<QString, int> byName = namedNodes( target );
+	const Vector3 anchor = world.value( attachBlock ).translation;
+	float best = -1;
+	for ( int b = 0; b < target->getBlockCount(); b++ ) {
+		const QModelIndex i = target->getBlockIndex( b );
+		if ( !target->isNiBlock( i, "BSConnectPoint::Parents" ) )
+			continue;
+		const QModelIndex iPoints = target->getIndex( i, "Connect Points" );
+		if ( !iPoints.isValid() )
+			continue;
+		for ( int r = 0; r < target->rowCount( iPoints ); r++ ) {
+			const QModelIndex iPoint = target->getIndex( iPoints, r );
+			if ( target->get<QString>( iPoint, "Name" ).compare( wanted, Qt::CaseInsensitive ) != 0 )
+				continue;
+			// the point rides a node BY NAME, exactly as the merge's own
+			// de-duplication binds bones
+			Transform offset;
+			offset.translation = target->get<Vector3>( iPoint, "Translation" );
+			const int on = byName.value( target->get<QString>( iPoint, "Parent" ), -1 );
+			const Transform at = ( on >= 0 ? world.value( on ) : Transform() ) * offset;
+			const float d = ( at.translation - anchor ).length();
+			if ( best < 0 || d < best )
+				best = d;
+		}
+	}
+	return best;
+}
+
+} // namespace
+
+QStringList nifWeaponPartNotes( const NifModel * target, const NifModel * donor,
+                                const QString & label, const QString & attachNode )
+{
+	QStringList notes;
+	if ( !target || !donor )
+		return notes;
+
+	/* --- redundancy ---------------------------------------------------------
+	 * The merge shares NiNodes by name but imports shapes whatever they are
+	 * called, so a name already present means the geometry is arriving twice.
+	 * That is the honest signal for "this part is already on the gun", and it is
+	 * reported rather than refused: two of something is a thing people do
+	 * deliberately, and the parts may come from any weapon at all.
+	 */
+	const QStringList bring = shapeNames( donor );
+	// one named list, NOT two calls: begin() of one temporary and end() of
+	// another is a segfault, and it was one here
+	const QStringList already = shapeNames( target );
+	const QSet<QString> have( already.cbegin(), already.cend() );
+	QStringList collided;
+	for ( const QString & name : bring )
+		if ( have.contains( name ) && !collided.contains( name ) )
+			collided << name;
+	if ( !collided.isEmpty() )
+		notes << QObject::tr( "%1: %2 of its %3 shape name(s) are already in the target (%4). "
+			"It may be redundant, or a second one of a part the weapon already has. Merged anyway." )
+			.arg( label ).arg( collided.size() ).arg( bring.size() )
+			.arg( collided.mid( 0, 6 ).join( QStringLiteral( ", " ) ) );
+
+	/* --- the slot it asks for -----------------------------------------------
+	 * Fallout 4 weapon parts come in two kinds and they look identical from the
+	 * outside: both are a root at the origin with geometry hanging off it, and
+	 * measuring pivots or bounding centres cannot tell them apart (10mmGrip and
+	 * 10mmSuppressor both sit at their own origin). What DOES separate them is
+	 * the connect point each one declares and where the target offers it.
+	 *
+	 * 5 units of slack, measured off the corpus: the 10mm's P-Grip is 2.4 from
+	 * WEAPON and its P-Mag 1.6, and those parts land correctly by mere parenting
+	 * — proven on screen. Its P-Scope is 10.4 out and the minigun's P-Barrel
+	 * 36.5, and a part parented at the node instead of at those points sits at
+	 * the grip. Placing it is NOT attempted here.
+	 */
+	if ( attachNode.isEmpty() )
+		return notes;
+	const int attachBlock = namedNodes( target ).value( attachNode, -1 );
+	if ( attachBlock < 0 )
+		return notes;
+	/* A target with no connect points of its own is a RIG, not a half-built gun:
+	 * the part arriving is the first thing on that node and defines the frame
+	 * everything after it lands in. Measured the hard way — the harness caught
+	 * this file announcing that 10MMPistol.nif "needs a Receiver node" while it
+	 * sat in the hand exactly as intended. */
+	if ( !offersConnectPoints( target ) )
+		return notes;
+	const float slack = 5.0f;
+	for ( const QString & slot : declaredSlots( donor ) ) {
+		const float d = offeredSlotDistance( target, attachBlock, slot );
+		if ( d >= 0 && d <= slack )
+			continue;
+		if ( d < 0 )
+			notes << QObject::tr( "%1 asks to attach at a %2 slot, which nothing in the target "
+				"offers. It needs a %2 node that automatic placement does not provide yet, so it "
+				"has been parented at %3 and will sit at the weapon's origin." )
+				.arg( label ).arg( slot ).arg( attachNode );
+		else
+			notes << QObject::tr( "%1 asks to attach at a %2 slot, and the target's P-%2 point is "
+				"%3 unit(s) from %4. It needs a %2 node that automatic placement does not provide "
+				"yet, so it has been parented at %4 and will sit that far from where it belongs." )
+				.arg( label ).arg( slot ).arg( d, 0, 'f', 1 ).arg( attachNode );
+	}
+	return notes;
+}
+
+static QString wwLastMergeSummary;
+
+void nifSetLastMergeSummary( const QString & text )
+{
+	wwLastMergeSummary = text;
+}
+
+QString nifLastMergeSummary()
+{
+	return wwLastMergeSummary;
 }

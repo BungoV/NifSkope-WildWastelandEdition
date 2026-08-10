@@ -123,4 +123,66 @@ bool nifMergeData( NifModel * target, const QByteArray & data, const QString & l
                    bool dedupeByName, NifMergeResult & result,
                    const QString & attachTo = QString() );
 
+/*! @name Weapon parts
+ *
+ *  A Loaded NIFs row can be marked as a WEAPON PART, the third row mark beside
+ *  the skeleton skull and the face donor. Unlike those two the mark is a SET —
+ *  a Fallout 4 gun is a base NIF plus separate OMOD part files, and all of them
+ *  are weapon parts at once — and the workspace merge reads it to hang each
+ *  marked donor off the target's "WEAPON" bone instead of its root.
+ *
+ *  The registry lives here rather than in the window, because the merge is the
+ *  only thing that acts on it and this file has no GUI to drag along. The models
+ *  are held weakly; a document that goes away takes its mark with it.
+ *
+ *  NOTHING HERE KNOWS WHAT A "VALID" GUN IS. Parts may be combined in any
+ *  combination, cross-weapon included; the checks below are STRUCTURAL and
+ *  purely informational — what the two files carry, never whether the pairing is
+ *  one Bethesda shipped. There is deliberately no table of families or legal
+ *  combinations, and no API here should grow into one.
+ */
+///@{
+//! Mark or unmark \a model as a weapon part.
+void nifSetWeaponMark( NifModel * model, bool marked );
+bool nifIsWeaponMarked( const NifModel * model );
+//! Marks still held by a live model; prunes the dead ones as it counts.
+int nifWeaponMarkCount();
+void nifClearWeaponMarks();
+
+//! "WEAPON" when \a target carries a NiNode of that name at ANY depth, else "".
+/*! The name a weapon part attaches to. Empty is the answer for a target with no
+ *  weapon bone at all, and the caller falls back to an ordinary root merge. */
+QString nifWeaponAttachNode( const NifModel * target );
+
+//! What a weapon part's own contents say about merging it onto \a attachNode.
+/*! Zero, one or two informational lines, computed BEFORE the splice (they read
+ *  the target as it stands). Never refuses anything.
+ *
+ *   - REDUNDANCY: shape names the donor brings that \a target already carries.
+ *     The merge de-duplicates NiNodes by name but not shapes, so a part whose
+ *     geometry names are already present is either the same part twice or a
+ *     second one of something the gun already has (two barrels).
+ *   - SLOT: Fallout 4 parts declare where they belong in
+ *     BSConnectPoint::Children as "C-<Slot>", and the file they attach to offers
+ *     the matching "P-<Slot>" in BSConnectPoint::Parents. When that point sits
+ *     ON the attach node (grips, magazines) the part self-assembles by mere
+ *     parenting; when it sits out along the gun (scopes, muzzle devices) or is
+ *     not offered at all, parenting leaves the part at the grip. This says so —
+ *     unless the target offers no connect points whatsoever, which means it is a
+ *     rig rather than a half-built gun and the part arriving is the first thing
+ *     on the node.
+ *     It does NOT place the part: the slot table is a separate effort, and the
+ *     job here is to not lie about the parts that cannot be placed yet.
+ */
+QStringList nifWeaponPartNotes( const NifModel * target, const NifModel * donor,
+                                const QString & label, const QString & attachNode );
+
+//! The summary text of the last workspace merge, for scripting and the harness.
+/*! The merge ends in a modal box, which a driver has to dismiss to let the run
+ *  continue and therefore cannot read. The text is kept here so an assertion can
+ *  be made about what the merge SAID, not only about what it did. */
+void nifSetLastMergeSummary( const QString & text );
+QString nifLastMergeSummary();
+///@}
+
 #endif // NIFMERGE_H

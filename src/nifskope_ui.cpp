@@ -555,6 +555,35 @@ bool NifSkope::startupCubeWanted()
 						   true ).toBool();
 }
 
+/*! The weapon mark on a Loaded NIFs row, addressed by position.
+ *
+ *  Defined here rather than beside the other row helpers in nifskope.cpp for one
+ *  practical reason: that file is a mixed-line-ending source and every edit to it
+ *  is a hand splice, so anything that does not HAVE to live there does not.
+ *
+ *  The mark itself is not stored on the row at all — it is a set of models held
+ *  in nifmerge, because the merge is the only thing that reads it and a document
+ *  can be a weapon part whether it has a row, a window, or both. These two just
+ *  translate a row index into the model the registry keys on.
+ */
+bool NifSkope::markWorkspaceWeaponRow( int backgroundIndex, bool marked )
+{
+	// workspaceDocumentModel(), not the document object: BackgroundNifDocument is
+	// declared in nifskope.cpp with no header, so this translation unit has only
+	// the pointer type and cannot reach through it.
+	NifModel * model = workspaceDocumentModel( backgroundIndex );
+	if ( !model )
+		return false;
+	nifSetWeaponMark( model, marked );
+	refreshAllDocumentSessions();
+	return true;
+}
+
+bool NifSkope::workspaceDocumentIsWeapon( int backgroundIndex ) const
+{
+	return nifIsWeaponMarked( workspaceDocumentModel( backgroundIndex ) );
+}
+
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
 	NifSkope * primary = nullptr;
@@ -10870,6 +10899,384 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
 					n->undoStack->setClean();
 				skope->setWindowModified( false );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		}, Qt::SingleShotConnection );
+	}
+
+	/* TEST HARNESS (WW_WEAPONMARK_TEST=1): the Loaded NIFs WEAPON MARK.
+	 *
+	 * The third row mark, beside the skeleton skull and the face donor: a row
+	 * marked as a weapon part is merged onto the target's WEAPON bone instead of
+	 * its root, so a gun lands in a posed hand instead of at the actor's feet.
+	 * Unlike the other two the mark is a SET — a Fallout 4 gun is a base NIF plus
+	 * separate OMOD part files, and all of them are parts at once.
+	 *
+	 * WHAT IS MEASURED
+	 *
+	 *   1. THE MARK ITSELF, as state and not as a repaint: it lands on the MODEL
+	 *      the merge keys on, several rows hold it at once, unmarking one leaves
+	 *      the others, and it is independent of the skull and the face donor in
+	 *      both directions. The row menu is opened and its item read, because a
+	 *      mark with no way to set it is not a feature.
+	 *   2. THE ASSEMBLY. Base + grip + magazine, all three marked, merged onto a
+	 *      real skeleton. Eight shapes arrive, and — the part that cannot be
+	 *      faked — every one of them lands NEAR THE WEAPON BONE and FAR FROM THE
+	 *      DOCUMENT ORIGIN, measured off world transforms walked up the Parent
+	 *      links. Near-the-bone alone also holds for a rig collapsed at the
+	 *      origin; far-from-the-origin alone holds for a gun flung anywhere. The
+	 *      thresholds are WW_SAMPOSE_TEST's, for the same reasons.
+	 *   3. THE TWO NOTICES, which are what "connect automatically if the
+	 *      combination is right" actually amounts to. Neither refuses anything:
+	 *        - a part whose shape names the target already carries is reported as
+	 *          possibly redundant, by file and by name (two minigun barrels);
+	 *        - a part that declares a connect-point slot the target does not
+	 *          offer at the attach node is reported as needing a slot node that
+	 *          automatic placement does not provide yet (a suppressor, which is
+	 *          authored around its own origin and otherwise sits at the grip).
+	 *      And the counter-check: a correctly assembling gun draws NEITHER.
+	 *   4. NO WEAPON BONE IN THE TARGET is a fallback, not a failure: the merge
+	 *      happens at the root and the summary says so.
+	 *   5. AN UNMARKED DONOR IS UNTOUCHED by any of it — one guard assertion, not
+	 *      a second copy of tests/merge/workspace_skeleton_target.sh.
+	 *
+	 * WW_WEAPONMARK_FILES is a SEMICOLON-separated list in a fixed order, built
+	 * by tests/spells/weapon_mark.sh out of the game corpus:
+	 *   0 rig target (a skeleton with a WEAPON bone)   5 a gun whose own root is WEAPON
+	 *   1 weapon base                                  6 a part for it
+	 *   2 grip            3 magazine                   7 a second one of that part
+	 *   4 a slot-relative part (suppressor)            8 an ordinary unmarked donor
+	 *                                                  9 a target with no WEAPON bone
+	 * Log: release/ww_weaponmark_test.log, picture: release/ww_weaponmark_list.png.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_WEAPONMARK_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_weaponmark_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
+				};
+				auto settle = []( int ms ) {
+					QEventLoop loop;
+					QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+					loop.exec();
+				};
+				/* Every merge ends in a modal summary. The REAL path runs, dialog
+				 * included, and a driver dismisses it — which is also why the
+				 * summary text is read back through nifLastMergeSummary() rather
+				 * than off the box nobody can see. */
+				auto * dismiss = new QTimer( skope );
+				QObject::connect( dismiss, &QTimer::timeout, skope, []() {
+					if ( auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) )
+						if ( !mb->buttons().isEmpty() )
+							mb->buttons().first()->click();
+				} );
+				auto merge = [&]( int target, const QList<int> & donors ) {
+					dismiss->start( 100 );
+					const bool merged = skope->mergeWorkspaceDocumentsInto( target, donors );
+					dismiss->stop();
+					settle( 400 );
+					return merged;
+				};
+
+				// row order is the fixture's contract; see the block comment
+				enum { RigTarget = 0, GunBase = 1, Grip = 2, Mag = 3, SlotPart = 4,
+					   OtherGun = 5, Barrel = 6, SecondBarrel = 7, PlainDonor = 8,
+					   NoWeaponTarget = 9, FixtureCount = 10 };
+
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					QStringList files;
+					for ( const QString & part : qEnvironmentVariable( "WW_WEAPONMARK_FILES" )
+							.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) )
+						if ( !part.trimmed().isEmpty() )
+							files << part.trimmed();
+					log << "primary: " << QFileInfo( fname ).fileName() << "\n";
+					for ( int i = 0; i < files.size(); i++ )
+						log << "  fixture " << i << ": " << QFileInfo( files.at( i ) ).fileName() << "\n";
+					if ( files.size() != int( FixtureCount ) ) {
+						check( "the fixture names ten files in the documented order", false );
+						break;
+					}
+					int enrolled = 0;
+					for ( const QString & f : std::as_const( files ) ) {
+						if ( skope->addWorkspaceDocumentFromFile( f ) ) {
+							enrolled++;
+							continue;
+						}
+						// name it: a fixture arriving as a path Windows cannot open
+						// is the likeliest way this list goes wrong
+						log << "  DID NOT LOAD: " << f << "\n";
+					}
+					settle( 600 );
+					skope->dLeft->show();
+					skope->setLeftColumnMode( NifSkope::LeftNifs );
+					QApplication::processEvents();
+					check( "every fixture file joined Loaded NIFs",
+						enrolled == int( FixtureCount )
+							&& skope->workspaceDocumentCount() == int( FixtureCount ) );
+					if ( skope->workspaceDocumentCount() != int( FixtureCount ) )
+						break;
+
+					/* ---- 1. THE MARK -------------------------------------------
+					 * State, asserted through the registry the MERGE reads, so a
+					 * mark that only repainted a row would fail here.
+					 */
+					check( "a fresh row is not a weapon part",
+						!skope->workspaceDocumentIsWeapon( GunBase ) && nifWeaponMarkCount() == 0 );
+					check( "a row can be marked as a weapon part",
+						skope->markWorkspaceWeaponRow( GunBase, true )
+							&& skope->workspaceDocumentIsWeapon( GunBase )
+							&& nifWeaponMarkCount() == 1 );
+					check( "...and the mark is on the MODEL, which is what the merge keys on",
+						nifIsWeaponMarked( skope->workspaceDocumentModel( GunBase ) ) );
+					check( "unmarking takes it off again",
+						skope->markWorkspaceWeaponRow( GunBase, false )
+							&& !skope->workspaceDocumentIsWeapon( GunBase )
+							&& nifWeaponMarkCount() == 0 );
+					// A GUN IS SEVERAL FILES. The skull and the face donor are one
+					// file each; this mark is a set, and that is the difference.
+					check( "several rows can be weapon parts at once",
+						skope->markWorkspaceWeaponRow( GunBase, true )
+							&& skope->markWorkspaceWeaponRow( Grip, true )
+							&& skope->markWorkspaceWeaponRow( Mag, true )
+							&& nifWeaponMarkCount() == 3 );
+					check( "...and unmarking one leaves the others alone",
+						skope->markWorkspaceWeaponRow( Grip, false )
+							&& nifWeaponMarkCount() == 2
+							&& skope->workspaceDocumentIsWeapon( GunBase )
+							&& !skope->workspaceDocumentIsWeapon( Grip )
+							&& skope->workspaceDocumentIsWeapon( Mag ) );
+					skope->markWorkspaceWeaponRow( Grip, true );
+					check( "a row that is not there cannot be marked",
+						!skope->markWorkspaceWeaponRow( 99, true ) && nifWeaponMarkCount() == 3 );
+					{
+						// independence from the other two marks, in both directions
+						const bool alsoSkull = skope->setWorkspaceSkeletonDocument( GunBase );
+						const bool alsoFace = skope->markWorkspaceFaceDonorRow( GunBase );
+						check( "the weapon mark survives the skull and the face donor landing on the same row",
+							alsoSkull && alsoFace && skope->workspaceDocumentIsWeapon( GunBase ) );
+						skope->markWorkspaceWeaponRow( GunBase, false );
+						check( "...and dropping the weapon mark leaves those two in place",
+							skope->ogl->workspaceSkeleton() == skope->workspaceDocumentModel( GunBase )
+								&& NifSkope::workspaceFaceDonor() == skope->workspaceDocumentModel( GunBase ) );
+						// both would change what the merge below does; off they go
+						skope->setWorkspaceSkeletonDocument( -1 );
+						NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
+						skope->markWorkspaceWeaponRow( GunBase, true );
+					}
+
+					/* THE ROW MENU. The list draws the primary first and the loaded
+					 * rows after it in enrolment order, which is asserted rather
+					 * than assumed — the menu check below addresses a row by that
+					 * arithmetic and would otherwise silently open the wrong one. */
+					const QModelIndex primaryRow = skope->loadedNifsModel->index( 0, 0 );
+					const QModelIndex gunRow = skope->loadedNifsModel->index( 1 + GunBase, 0 );
+					check( "the panel lists the primary first and the loaded rows after it, in order",
+						skope->loadedNifsModel->rowCount() == int( FixtureCount ) + 1
+							&& !skope->backgroundDocumentFromBrowserIndex( primaryRow )
+							&& skope->backgroundDocumentFromBrowserIndex( gunRow ) );
+					{
+						QStringList menuTexts;
+						bool weaponItemLive = false;
+						QTimer::singleShot( 150, skope, [&]() {
+							if ( auto * menu = qobject_cast<QMenu *>( QApplication::activePopupWidget() ) ) {
+								for ( QAction * action : menu->actions() ) {
+									menuTexts << action->text();
+									if ( action->text().contains( QStringLiteral( "Weapon Part" ) ) )
+										weaponItemLive = action->isCheckable() && action->isChecked()
+											&& !action->icon().isNull();
+								}
+								menu->close();
+							}
+						} );
+						if ( BackgroundNifDocument * rowDocument =
+								skope->backgroundDocumentFromBrowserIndex( gunRow ) )
+							skope->showBackgroundDocumentMenu( rowDocument, QPoint( 200, 200 ) );
+						settle( 400 );
+						log << "row menu: " << menuTexts.join( QStringLiteral( " | " ) ) << "\n";
+						check( "the row menu offers the weapon mark, with its glyph, ticked for a marked row",
+							menuTexts.filter( QStringLiteral( "Weapon Part" ) ).size() == 1
+								&& weaponItemLive );
+					}
+					const QString listShot =
+						QApplication::applicationDirPath() + "/ww_weaponmark_list.png";
+					check( "the marked list renders", skope->grabLoadedNifsView( listShot ) );
+					log << "  " << listShot << "\n";
+
+					/* ---- 2. THE ASSEMBLY ---------------------------------------- */
+					NifModel * rig = skope->workspaceDocumentModel( RigTarget );
+					if ( !rig ) { check( "the rig target has a model", false ); break; }
+					auto shapeBlocks = []( NifModel * n ) {
+						QVector<int> out;
+						for ( int b = 0; b < n->getBlockCount(); b++ ) {
+							const QModelIndex i = n->getBlockIndex( b );
+							if ( n->blockInherits( i, "BSTriShape" )
+								 || n->blockInherits( i, "NiTriBasedGeom" ) )
+								out << b;
+						}
+						return out;
+					};
+					auto blockNamed = []( NifModel * n, const QString & nm ) {
+						for ( int b = 0; b < n->getBlockCount(); b++ ) {
+							const QModelIndex i = n->getBlockIndex( b );
+							if ( n->blockInherits( i, "NiAVObject" )
+								 && n->resolveString( i, "Name" ) == nm )
+								return b;
+						}
+						return -1;
+					};
+					// world transform by walking the Parent links, the same route
+					// WW_SAMPOSE_TEST proves its poses with
+					auto worldOf = []( NifModel * n, int block ) {
+						Transform w( n, n->getBlockIndex( block ) );
+						for ( int p = n->getParent( block ); p >= 0; p = n->getParent( p ) )
+							w = Transform( n, n->getBlockIndex( p ) ) * w;
+						return w;
+					};
+
+					QStringList namesBefore;
+					for ( int b : shapeBlocks( rig ) )
+						namesBefore << rig->resolveString( rig->getBlockIndex( b ), "Name" );
+					const int shapesBefore = namesBefore.size();
+					check( "the rig target carries a WEAPON bone to snap to",
+						blockNamed( rig, QStringLiteral( "WEAPON" ) ) >= 0 );
+					check( "the three marked parts merge onto the rig in row order",
+						merge( RigTarget, { GunBase, Grip, Mag } ) );
+					const QVector<int> assembled = shapeBlocks( rig );
+					log << "shapes in the rig: " << shapesBefore << " -> " << assembled.size() << "\n";
+					check( "all eight shapes of the assembled 10mm arrived",
+						assembled.size() - shapesBefore == 8 );
+
+					const int weaponBlock = blockNamed( rig, QStringLiteral( "WEAPON" ) );
+					if ( weaponBlock >= 0 && assembled.size() > shapesBefore ) {
+						const Vector3 hand = worldOf( rig, weaponBlock ).translation;
+						float best = -1, worst = -1, nearestOrigin = -1;
+						QString bestName, worstName, originName;
+						int counted = 0;
+						for ( int b : assembled ) {
+							const QString nm = rig->resolveString( rig->getBlockIndex( b ), "Name" );
+							if ( namesBefore.contains( nm ) )
+								continue;
+							counted++;
+							const Vector3 w = worldOf( rig, b ).translation;
+							const float d = ( w - hand ).length();
+							if ( best < 0 || d < best ) { best = d; bestName = nm; }
+							if ( d > worst ) { worst = d; worstName = nm; }
+							if ( nearestOrigin < 0 || w.length() < nearestOrigin ) {
+								nearestOrigin = w.length();
+								originName = nm;
+							}
+						}
+						log << "WEAPON world at (" << hand[0] << ", " << hand[1] << ", " << hand[2]
+							<< "), " << hand.length() << " from the origin\n";
+						log << "gun shapes measured: " << counted << "; nearest " << bestName
+							<< " at " << best << ", farthest " << worstName << " at " << worst
+							<< ", closest to the origin " << originName << " at " << nearestOrigin << "\n";
+						check( "the nearest gun shape is at the WEAPON bone (<= 40)",
+							counted > 0 && best >= 0 && best <= 40.0f );
+						check( "the farthest gun shape is still on the gun (<= 80 from WEAPON)",
+							counted > 0 && worst <= 80.0f );
+						check( "no gun shape landed at the document origin (> 40 away)",
+							counted > 0 && nearestOrigin > 40.0f );
+					} else {
+						check( "the assembled gun could be measured against the WEAPON bone", false );
+					}
+
+					const QString assembly = nifLastMergeSummary();
+					log << "--- assembly summary ---\n" << assembly << "\n--- end ---\n";
+					check( "the summary says all three parts attached to WEAPON",
+						assembly.count( QStringLiteral( "attached to WEAPON" ) ) == 3 );
+					// THE COUNTER-CHECK for both notices below: a gun that assembles
+					// correctly must draw neither of them.
+					check( "a correctly assembling gun draws no weapon-part notes",
+						!assembly.contains( QStringLiteral( "WEAPON PARTS:" ) ) );
+
+					/* ---- 3a. THE SLOT NOTICE ------------------------------------ */
+					skope->markWorkspaceWeaponRow( GunBase, false );
+					skope->markWorkspaceWeaponRow( Grip, false );
+					skope->markWorkspaceWeaponRow( Mag, false );
+					check( "the slot-relative part can be marked",
+						skope->markWorkspaceWeaponRow( SlotPart, true ) && nifWeaponMarkCount() == 1 );
+					const int beforeSlot = shapeBlocks( rig ).size();
+					check( "the slot-relative part merges", merge( RigTarget, { SlotPart } ) );
+					const QString slotSummary = nifLastMergeSummary();
+					log << "--- slot summary ---\n" << slotSummary << "\n--- end ---\n";
+					check( "...and the summary says it needs a slot node placement does not provide yet",
+						slotSummary.contains( QStringLiteral( "WEAPON PARTS:" ) )
+							&& slotSummary.contains( QStringLiteral( "Muzzle" ) )
+							&& slotSummary.contains(
+								QStringLiteral( "automatic placement does not provide" ) )
+							&& slotSummary.contains( skope->workspaceDocumentName( SlotPart ) ) );
+					check( "...as a note and not a refusal — the part is in the file all the same",
+						shapeBlocks( rig ).size() > beforeSlot );
+					skope->markWorkspaceWeaponRow( SlotPart, false );
+
+					/* ---- 3b. THE REDUNDANCY NOTICE ------------------------------ */
+					NifModel * otherGun = skope->workspaceDocumentModel( OtherGun );
+					check( "the second gun's own root is a WEAPON node",
+						otherGun && blockNamed( otherGun, QStringLiteral( "WEAPON" ) ) >= 0 );
+					check( "two of the same part can be marked at once",
+						skope->markWorkspaceWeaponRow( Barrel, true )
+							&& skope->markWorkspaceWeaponRow( SecondBarrel, true ) );
+					check( "both merge onto the gun", merge( OtherGun, { Barrel, SecondBarrel } ) );
+					const QString dupeSummary = nifLastMergeSummary();
+					log << "--- redundancy summary ---\n" << dupeSummary << "\n--- end ---\n";
+					check( "the second one is reported as possibly redundant, by file and by shape name",
+						dupeSummary.contains( QStringLiteral( "shape name(s) are already in the target" ) )
+							&& dupeSummary.contains( QStringLiteral( "BaseRefractionMesh:0" ) )
+							&& dupeSummary.contains( skope->workspaceDocumentName( SecondBarrel ) ) );
+					check( "...and it was merged anyway",
+						dupeSummary.contains( QStringLiteral( "Merged anyway" ) ) );
+					skope->markWorkspaceWeaponRow( Barrel, false );
+					skope->markWorkspaceWeaponRow( SecondBarrel, false );
+
+					/* ---- 4. NO WEAPON BONE IN THE TARGET ------------------------ */
+					NifModel * plain = skope->workspaceDocumentModel( NoWeaponTarget );
+					check( "the fallback target has no WEAPON bone",
+						plain && blockNamed( plain, QStringLiteral( "WEAPON" ) ) < 0 );
+					const int plainBefore = plain ? plain->getBlockCount() : -1;
+					skope->markWorkspaceWeaponRow( GunBase, true );
+					check( "a weapon part still merges into a target with no WEAPON bone",
+						merge( NoWeaponTarget, { GunBase } ) );
+					const QString fallback = nifLastMergeSummary();
+					log << "--- fallback summary ---\n" << fallback << "\n--- end ---\n";
+					check( "...and the summary says so rather than pretending it snapped",
+						fallback.contains( QStringLiteral( "has no WEAPON bone" ) ) );
+					check( "...and the merge happened all the same",
+						plain && plain->getBlockCount() > plainBefore );
+					skope->markWorkspaceWeaponRow( GunBase, false );
+
+					/* ---- 5. THE GUARD ------------------------------------------- */
+					check( "no weapon marks are left", nifWeaponMarkCount() == 0 );
+					const int rigBefore = rig->getBlockCount();
+					check( "an UNMARKED donor still merges the way it always did",
+						merge( RigTarget, { PlainDonor } ) );
+					const QString plainSummary = nifLastMergeSummary();
+					check( "...with no weapon handling anywhere near it",
+						rig->getBlockCount() > rigBefore
+							&& !plainSummary.contains( QStringLiteral( "WEAPON PARTS:" ) )
+							&& !plainSummary.contains( QStringLiteral( "attached to WEAPON" ) ) );
+
+				} while ( false );
+				nifClearWeaponMarks();
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+					if ( NifModel * m = skope->workspaceDocumentModel( i ); m && m->undoStack )
+						m->undoStack->setClean();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
+				// insurance: anything modal on the way out gets clicked through
+				dismiss->start( 100 );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
 		}, Qt::SingleShotConnection );
