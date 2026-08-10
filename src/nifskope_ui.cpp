@@ -3572,9 +3572,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								if ( shapesNow <= shapesBefore.size() )
 									fails << QStringLiteral( "the weapon merge added no geometry "
 										"(%1 shape(s) before and after)" ).arg( shapesNow );
-								if ( newShapes.size() != addedTotal )
-									fails << QStringLiteral( "%1 shape(s) arrived under a new name but the merges "
-										"reported %2" ).arg( newShapes.size() ).arg( addedTotal );
+								// count arrivals by the shape-count delta, not unique names:
+								// a barrel NIF can legitimately reuse a shape name its base
+								// weapon also carries (the minigun does), and those arrivals
+								// are invisible to the new-name set
+								if ( shapesNow - shapesBefore.size() != addedTotal )
+									fails << QStringLiteral( "%1 shape(s) arrived but the merges "
+										"reported %2" ).arg( shapesNow - shapesBefore.size() ).arg( addedTotal );
 								if ( allKnown && newShapes.size() != expectedTotal )
 									fails << QStringLiteral( "the assembled gun has %1 shape(s), expected %2" )
 										.arg( newShapes.size() ).arg( expectedTotal );
@@ -3638,19 +3642,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										<< " at " << best << ", farthest " << worstName << " at " << worst << "\n";
 									log << "closest weapon shape to the document origin: "
 										<< nearestOriginName << " at " << nearestOrigin << "\n";
-									/* 40 units. The pistol is roughly 30 long and the pose blows
-									 * it up by 1.75, but these are SHAPE PIVOTS, not mesh
-									 * extents, and the parts pivot on the gun frame's origin:
-									 * measured, the farthest is Pistol10mmRelease:0 at 27.7
-									 * WITH the 1.75 already in the chain, so 40 still holds with
-									 * room. The FARTHEST is checked as well as the nearest,
-									 * because the nearest is nearly free — the receiver, grip
-									 * and magazine all have identity locals and sit ON the grip
-									 * by construction, scoring ~0 even if the rest flew off. */
+									/* These are SHAPE PIVOTS, not mesh extents, and the parts
+									 * pivot on the gun frame's origin. 40 units held the pistol
+									 * (farthest pivot 15.8 at unit scale) but a minigun is a
+									 * two-handed gun ~50 units long whose muzzle helpers pivot
+									 * at 47 — so the piece bound is 80, still a fraction of the
+									 * 114+ a root-level mis-attach measures. The FARTHEST is
+									 * checked as well as the nearest, because the nearest is
+									 * nearly free — receiver/grip/mag have identity locals and
+									 * sit ON the grip by construction, scoring ~0 even if the
+									 * rest flew off. */
 									if ( best > 40.0f )
 										fails << QStringLiteral( "the nearest weapon shape is %1 unit(s) "
 											"from the WEAPON node — not in the hand" ).arg( best );
-									if ( worst > 40.0f )
+									if ( worst > 80.0f )
 										fails << QStringLiteral( "weapon shape %1 is %2 unit(s) from the "
 											"WEAPON node — the gun is not in one piece in the hand" )
 											.arg( worstName ).arg( worst );

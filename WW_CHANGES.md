@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10f — The weapon step generalises past the pistol
+
+Five pose+weapon pairs from the corpus now run through the merge phase:
+PA PISTOL3 + 10mm, MINIGUN POSE WOW1 + minigun, SWORD NEW1 + Chinese officer
+sword, PLASMA RIFLE POSE1 + plasma rifle, 50CAL1 + hunting rifle — all PASS,
+all captures inspected. Two pistol-sized assumptions fell: arrivals are now
+counted by shape-count delta (a part NIF may legitimately reuse a shape name
+its base also carries), and the one-piece pivot bound is 80 units (a minigun's
+muzzle helpers pivot at 47; a root mis-attach still measures 114+). The
+stricter accounting earned its keep immediately: it flagged MinigunBarrel.nif
+as redundant — the minigun base NIF is already a complete gun, and its parts
+REPLACE pieces rather than fill empty slots the way the 10mm's furniture does.
+
 ## 2026-08-10e — The attached pistol renders life-size
 
 The 1.75× defended in the previous entry was wrong on screen — a pistol at
