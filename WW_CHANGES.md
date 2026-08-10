@@ -1,5 +1,27 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10b — SAM import photographed on real geometry
+
+The SAM harness now has a second phase that renders the pose instead of only
+measuring it. `sam_pose_import.sh` re-runs against the PA **Frame.nif** (a
+skinned mesh carrying its own skeleton nodes), captures the framebuffer before
+and after the real pose, saves `release/ww_sampose_before.png` /
+`_after.png`, and — only in this phase (`WW_SAMPOSE_SHOT`) — **fails if the
+pose moves no pixels**. Measured: pose 1 moves **25,505** sampled pixels and
+reads as the prone "ARIES BOS PA1"; "POWER ARMOR HERO POSE3" moves 26,473 and
+reads as a superhero landing. The captures were inspected.
+
+Two harness fixes fell out of running on real geometry. The synthetic-fixture
+bone picker now skips names needing JSON escaping — Frame.nif's root is a
+backslashed path, which mangled the hand-written fixture and miscounted the
+missing bones. And the real-pose `Back_Armor` tolerance is **2e-3**, not 1e-4:
+half the corpus stores angles at two decimals (`%.02f`), worth ~1e-3 of matrix
+error at `Back_Armor`'s pitch-90 gimbal point — measured 8.7e-4 on pose 70,
+exactly the quantization the format study predicted. A wrong convention misses
+by order 1, so the check still bites. The corpus pose used by the value checks
+is now a committed fixture (`tests/fixtures/sam_pa_pose1.json`, a real SAM
+save from zZovek's set) rather than a path into a temp scratchpad.
+
 ## 2026-08-10 — Screen Archer Menu poses import
 
 The Pose Manager now loads a Screen Archer Menu pose (`.json`) as well as the

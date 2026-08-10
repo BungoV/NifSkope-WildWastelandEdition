@@ -58,9 +58,13 @@ SRC="${SRC:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/Charac
 PORT="${PORT:-45897}"
 LOG="$ROOT/release/ww_sampose_test.log"
 
-# A real SAM pose, if one is lying around: enables the corpus check. Absent is
-# fine — the harness logs that it skipped it.
-SAMPOSE="${SAMPOSE:-/c/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/a8bf28df-c14c-4d25-82a0-0b99988a9411/scratchpad/pa_poses/PA Poses/POWER ARMOR POSE (1).json}"
+# A real SAM pose: enables the corpus check and the phase-2 render. The
+# committed fixture is a real Screen Archer Menu save (zZovek's PA set, pose 1).
+SAMPOSE="${SAMPOSE:-$ROOT/tests/fixtures/sam_pa_pose1.json}"
+
+# Phase 2 photographs the pose on real geometry: the PA frame mesh, which
+# carries its own copy of the skeleton nodes. Skipped if the corpus is absent.
+FRAME="${FRAME:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/CharacterAssets/Frame.nif}"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
@@ -70,22 +74,37 @@ winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 REALPOSE=""
 [ -f "$SAMPOSE" ] && REALPOSE="$(winpath "$SAMPOSE")"
 
-rm -f "$LOG"
-WW_SAMPOSE_TEST=1 WW_SAMPOSE_FILE="$REALPOSE" \
-	"$EXE" --port "$PORT" "$(winpath "$SRC")" >/dev/null 2>&1 &
-pid=$!
-for _ in $(seq 1 60); do
-	[ -f "$LOG" ] && grep -q '^done$' "$LOG" 2>/dev/null && break
-	sleep 1
-done
-kill "$pid" 2>/dev/null
-wait "$pid" 2>/dev/null
+# one_run <src.nif> [extra env assignments...] — launch, wait for done, cat log
+one_run() {
+	local src="$1"; shift
+	rm -f "$LOG"
+	env WW_SAMPOSE_TEST=1 WW_SAMPOSE_FILE="$REALPOSE" "$@" \
+		"$EXE" --port "$PORT" "$(winpath "$src")" >/dev/null 2>&1 &
+	local pid=$!
+	for _ in $(seq 1 60); do
+		[ -f "$LOG" ] && grep -q '^done$' "$LOG" 2>/dev/null && break
+		sleep 1
+	done
+	kill "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	if [ ! -f "$LOG" ]; then
+		echo "FAIL: harness produced no log (did NifSkope start?)"
+		return 1
+	fi
+	cat "$LOG"
+	grep -q '^PASS$' "$LOG"
+}
 
-if [ ! -f "$LOG" ]; then
-	echo "FAIL: harness produced no log (did NifSkope start?)"
-	exit 1
+# Phase 1: convention checks on the bones-only skeleton.
+one_run "$SRC" || exit 1
+
+# Phase 2: the same pose on the PA frame mesh, before/after captures, and the
+# pixel delta is ENFORCED (WW_SAMPOSE_SHOT) — a pose that moves no pixels on
+# real geometry fails. Back_Armor value checks self-skip if the frame lacks it.
+if [ -n "$REALPOSE" ] && [ -f "$FRAME" ]; then
+	one_run "$FRAME" WW_SAMPOSE_SHOT=1 || exit 1
+	echo "captures: release/ww_sampose_before.png release/ww_sampose_after.png"
+else
+	echo "phase 2 skipped (no real pose or no Frame.nif)"
 fi
-
-cat "$LOG"
-grep -q '^PASS$' "$LOG" && exit 0
-exit 1
+exit 0
