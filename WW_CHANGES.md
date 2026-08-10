@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10d — The posed hand can hold a gun, and the harness proves it
+
+**What was missing.** Yesterday's phase 2b proves a SAM pose lands correctly on a
+merged rig, bone by bone, world transform by world transform. It proves nothing
+about the thing anyone actually poses a rig *for*: the prop in the hand. The
+`WEAPON` bone is posed like every other bone and is a bare leaf under
+`RArm_Hand`, so the check that mattered — does a real weapon file land in the
+grip when attached to it — had never been run, in the harness or anywhere else.
+
+**The step.** With `WW_SAMPOSE_WEAPON` naming a weapon NIF, phase 2b now merges
+it onto the `WEAPON` node after the pose, through `nifMergeFile(..., attachTo)`
+— the *same* entry point the CLI's `merge --attach NODE --add FILE` uses, so the
+harness covers the shipped path rather than a private one. The wrapper defaults
+to the corpus 10mm pistol and skips silently when the corpus is absent, exactly
+as it already does for `Frame.nif`.
+
+**On the two WEAPONs.** A Fallout 4 weapon's own root node is *also* named
+`WEAPON`, which looks like it must produce `WEAPON` nested under `WEAPON`. It
+does not. `mergeDonor` builds its `donorTops` from the donor root's **children**
+and never imports the root block, which it treats as a per-file wrapper. So the
+pistol's hierarchy simply becomes the skeleton `WEAPON` node's children, wearing
+the local transforms the weapon file authored against its own root — the grip
+frame — and the pose supplies the placement. Nothing needed renaming and no
+identity transform had to be invented. (One donor name, `ProjectileNode`, is
+shared with the skeleton and de-duplicates onto it, rebased so its world
+transform does not move: 14 nodes added, 1 reused.)
+
+**What is measured, and why it takes three numbers.** Not the pixels. Distances,
+all of them world transforms walked up the `Parent` links:
+
+* the **nearest** weapon shape to the `WEAPON` bone — `Pistol10mmReceiver:0` at
+  **1.4e-05** units;
+* the **farthest** — `Pistol10mmRelease:0` at **27.7** units, inside the 40 the
+  ~30-unit pistol allows. The nearest alone is nearly free: the receiver's local
+  transform is identity, so it sits on the grip by construction and would score
+  ~0 even if the rest of the gun flew off;
+* the weapon shape **closest to the document origin** — `Pistol10mmHammer:0` at
+  **114.7** units, which has to exceed 40. This is the one that catches the
+  classic failure: a branch that ignored the attach node and landed on the root
+  sits at (0,0,0), and "near the WEAPON bone" would still hold for it if the rig
+  were collapsed there too. Near-the-bone and far-from-the-origin only hold
+  together for a gun in a raised hand.
+
+The `WEAPON` bone itself lands at (16.40, 32.43, 111.58), 117.35 from the origin,
+and the merge reports `attached to "WEAPON"`, which is asserted too. Geometry
+count 3 → 9. The capture is `release/ww_sampose_weapon.png`; `ww_sampose_before`
+and `ww_sampose_after` are untouched, so the pose's own pixel delta still means
+what it meant.
+
 ## 2026-08-10c — The SAM harness was photographing a crumple
 
 **The defect, plainly.** Yesterday's phase 2 applied a SAM pose to **Frame.nif**

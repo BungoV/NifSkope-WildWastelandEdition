@@ -60,6 +60,23 @@
 # tolerance 1e-3. Every posed bone's local transform is checked the same way. The
 # pixel delta stays, as a secondary.
 #
+# PHASE 2b'S LAST STEP — THE GUN IN THE HAND (WW_SAMPOSE_WEAPON)
+#
+# A posed rig holding nothing is only half the workflow, so once the pose is on,
+# a real 10mm pistol is merged onto the WEAPON bone through nifMergeFile with an
+# attach override — the same call the CLI's `merge --attach NODE --add FILE`
+# makes. The weapon file's own root node is ALSO named WEAPON; that produces no
+# WEAPON-under-WEAPON nesting, because the merge splices a donor root's CHILDREN
+# and drops the root block as a per-file wrapper.
+#
+# The proof is again not the pixels but two distances, and it needs both: the
+# nearest weapon shape's world translation must land within 40 units of the
+# WEAPON bone's world translation (the pistol is ~30 long) AND more than 40 units
+# from the document origin. Near-the-bone alone would also hold for a rig
+# collapsed at the origin; far-from-the-origin alone holds for a gun flung
+# anywhere. A branch that ignored --attach and landed on the root fails the
+# second. The capture is release/ww_sampose_weapon.png.
+#
 # FIXTURE
 #
 # The FO4 power-armour skeleton, because it is nothing but named NiNodes and is
@@ -92,6 +109,13 @@ SAMPOSE="${SAMPOSE:-$ROOT/tests/fixtures/sam_pa_pose1.json}"
 # node names, which is what phase 2a refuses and what phase 2b merges onto the
 # real skeleton. Skipped if the corpus is absent.
 FRAME="${FRAME:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerarmor/CharacterAssets/Frame.nif}"
+
+# Phase 2b's prop: a real weapon hung on the posed WEAPON bone, through the same
+# nifMergeFile attach path the CLI's `merge --attach` uses. The pistol's OWN root
+# node is also called WEAPON, which is harmless — the merge splices a donor
+# root's CHILDREN and never the root block itself. Skipped silently like FRAME
+# when the corpus is absent.
+WEAPON10MM="${WEAPON10MM:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/weapons/10mmPistol/10MMPistol.nif}"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
@@ -129,12 +153,18 @@ if [ -n "$REALPOSE" ] && [ -f "$FRAME" ]; then
 	# Phase 2a: the flat frame mesh must REFUSE the pose.
 	one_run "$FRAME" WW_SAMPOSE_MODE=refuse || exit 1
 
-	# Phase 2b: skeleton primary + frame merged onto it, then the pose. The old
-	# captures go first so a phase that dies before grabbing cannot leave last
-	# run's pictures behind looking like this run's.
-	rm -f "$ROOT/release/ww_sampose_before.png" "$ROOT/release/ww_sampose_after.png"
-	one_run "$SRC" WW_SAMPOSE_MODE=merge WW_SAMPOSE_FRAME="$(winpath "$FRAME")" || exit 1
+	# Phase 2b: skeleton primary + frame merged onto it, then the pose, then —
+	# when the corpus has it — a 10mm pistol attached to the posed WEAPON bone.
+	# The old captures go first so a phase that dies before grabbing cannot leave
+	# last run's pictures behind looking like this run's.
+	rm -f "$ROOT/release/ww_sampose_before.png" "$ROOT/release/ww_sampose_after.png" \
+		"$ROOT/release/ww_sampose_weapon.png"
+	GUN=""
+	[ -f "$WEAPON10MM" ] && GUN="$(winpath "$WEAPON10MM")"
+	one_run "$SRC" WW_SAMPOSE_MODE=merge WW_SAMPOSE_FRAME="$(winpath "$FRAME")" \
+		WW_SAMPOSE_WEAPON="$GUN" || exit 1
 	echo "captures: release/ww_sampose_before.png release/ww_sampose_after.png"
+	[ -n "$GUN" ] && echo "weapon capture: release/ww_sampose_weapon.png"
 else
 	echo "phase 2 skipped (no real pose or no Frame.nif)"
 fi

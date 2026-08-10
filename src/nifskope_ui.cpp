@@ -3441,6 +3441,160 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						if ( shotDelta <= 0 )
 							fails << "the pose changed no pixels on the merged geometry";
 						log << "captures: ww_sampose_before.png ww_sampose_after.png\n";
+
+						/* WEAPON ATTACHMENT (WW_SAMPOSE_WEAPON): a gun in the posed hand.
+						 *
+						 * The pose moves WEAPON — a leaf under RArm_Hand — like any
+						 * other bone, but an empty bone shows nothing, so the one thing
+						 * a viewer actually wants from a posed rig (the prop it is
+						 * holding) has never been under test. This step merges a real
+						 * weapon NIF onto that node through nifMergeFile, the SAME
+						 * entry point the CLI's `merge --attach NODE --add FILE` uses,
+						 * and then measures where the gun landed.
+						 *
+						 * ON THE DONOR'S ROOT. A Fallout 4 weapon's root node is itself
+						 * named "WEAPON", which looks like it must produce WEAPON under
+						 * WEAPON. It does not: mergeDonor's donorTops are the donor
+						 * root's CHILDREN and the root block is never imported (it is a
+						 * per-file wrapper), so the pistol's own hierarchy becomes the
+						 * skeleton WEAPON node's children, carrying the local
+						 * transforms the weapon file authored relative to its own root
+						 * — which is the grip frame. Nothing to rename, and no identity
+						 * transform to invent: the pose supplies the grip placement.
+						 *
+						 * WHAT IS MEASURED. Two distances, and it takes BOTH. "A weapon
+						 * shape is near the WEAPON bone" would also hold if the whole
+						 * document sat at the origin and the gun with it — the classic
+						 * mis-attach, where --attach is ignored and the branch lands on
+						 * the root, puts the gun at (0,0,0) next to a WEAPON node that
+						 * a broken rig could also leave there. "A weapon shape is far
+						 * from the origin" alone passes for a gun flung anywhere. Only
+						 * both together say it is in the hand.
+						 */
+						const QString weapon = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_WEAPON" ) );
+						if ( weapon.isEmpty() ) {
+							log << "weapon step skipped (WW_SAMPOSE_WEAPON unset)\n";
+						} else if ( !QFile::exists( weapon ) ) {
+							log << "weapon step skipped (no file at " << weapon << ")\n";
+						} else {
+							auto isShape = [nif]( const QModelIndex & i ) {
+								return nif->blockInherits( i, "BSTriShape" )
+									|| nif->blockInherits( i, "NiTriBasedGeom" );
+							};
+							/* Weapon-sourced shapes are told apart by NAME, not by
+							 * "block number >= the count before". The merge runs inside
+							 * nifSnapshotOp, and this harness already knows block
+							 * numbers move under a snapshot (see blockFor). */
+							QStringList shapesBefore;
+							for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+								const QModelIndex i = nif->getBlockIndex( b );
+								if ( isShape( i ) )
+									shapesBefore << nif->resolveString( i, "Name" );
+							}
+
+							NifMergeResult wr;
+							if ( !nifMergeFile( nif, weapon, true, wr, QStringLiteral( "WEAPON" ) ) ) {
+								fails << ( "the weapon merge failed: " + wr.error );
+							} else {
+								qApp->processEvents();
+								pump();
+								settle( 400 );
+								log << "weapon merge (" << QFileInfo( weapon ).fileName() << "): +"
+									<< wr.blocksAdded << " block(s), " << wr.shapesAdded
+									<< " shape(s), " << wr.nodesAdded << " node(s) added, "
+									<< wr.nodesReused << " reused by name, " << wr.rebased
+									<< " rebased, attached to \"" << wr.attachedTo << "\"\n";
+								if ( wr.attachedTo != QLatin1String( "WEAPON" ) )
+									fails << ( "the weapon did not attach to WEAPON but to \""
+										+ wr.attachedTo + "\"" );
+
+								QVector<int> newShapes;
+								int shapesNow = 0;
+								for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+									const QModelIndex i = nif->getBlockIndex( b );
+									if ( !isShape( i ) )
+										continue;
+									shapesNow++;
+									if ( !shapesBefore.contains( nif->resolveString( i, "Name" ) ) )
+										newShapes.append( b );
+								}
+								log << "shapes: " << shapesBefore.size() << " -> " << shapesNow
+									<< ", " << newShapes.size() << " under a name the document did "
+									"not have\n";
+								if ( shapesNow <= shapesBefore.size() )
+									fails << QStringLiteral( "the weapon merge added no geometry "
+										"(%1 shape(s) before and after)" ).arg( shapesNow );
+								if ( newShapes.isEmpty() )
+									fails << "no weapon-sourced shape to measure";
+
+								const QModelIndex iWeapon = blockFor( QStringLiteral( "WEAPON" ) );
+								const int weaponBlock = iWeapon.isValid()
+									? nif->getBlockNumber( iWeapon ) : -1;
+								if ( weaponBlock < 0 ) {
+									fails << "the merged document has no WEAPON node to measure against";
+								} else if ( !newShapes.isEmpty() ) {
+									// the WEAPON bone's world transform, walked up the
+									// Parent links exactly as the pose checks above do
+									const Vector3 hand = worldActual( weaponBlock ).translation;
+									float best = -1, worst = -1, nearestOrigin = -1;
+									QString bestName, worstName, nearestOriginName;
+									for ( int b : newShapes ) {
+										const Vector3 w = worldActual( b ).translation;
+										const float d = ( w - hand ).length();
+										const QString nm = nif->resolveString( nif->getBlockIndex( b ), "Name" );
+										if ( best < 0 || d < best ) { best = d; bestName = nm; }
+										if ( d > worst ) { worst = d; worstName = nm; }
+										if ( nearestOrigin < 0 || w.length() < nearestOrigin ) {
+											nearestOrigin = w.length();
+											nearestOriginName = nm;
+										}
+									}
+									log << "WEAPON world at (" << hand[0] << ", " << hand[1] << ", "
+										<< hand[2] << "), " << hand.length() << " from the origin\n";
+									log << "weapon shapes vs the WEAPON node: nearest " << bestName
+										<< " at " << best << ", farthest " << worstName << " at "
+										<< worst << "\n";
+									log << "closest weapon shape to the document origin: "
+										<< nearestOriginName << " at " << nearestOrigin << "\n";
+									/* 40 units: the pistol is roughly 30 long, so no part of
+									 * it is further than this from the grip. The FARTHEST is
+									 * checked as well as the nearest, because the nearest is
+									 * nearly free — the receiver's local transform is
+									 * identity, so it sits ON the grip by construction and
+									 * would score ~0 even if the rest of the gun flew off. */
+									if ( best > 40.0f )
+										fails << QStringLiteral( "the nearest weapon shape is %1 unit(s) "
+											"from the WEAPON node — not in the hand" ).arg( best );
+									if ( worst > 40.0f )
+										fails << QStringLiteral( "weapon shape %1 is %2 unit(s) from the "
+											"WEAPON node — the gun is not in one piece in the hand" )
+											.arg( worstName ).arg( worst );
+									// and the hand is nowhere near the origin, so a branch
+									// that ignored the attach and landed on the root fails
+									if ( nearestOrigin <= 40.0f )
+										fails << QStringLiteral( "weapon shape %1 sits %2 unit(s) from the "
+											"document origin — a root-level mis-attach" )
+											.arg( nearestOriginName ).arg( nearestOrigin );
+								}
+
+								pump();
+								settle( 300 );
+								const QImage shotWeapon = skope->ogl->grabFramebuffer();
+								shotWeapon.save( QApplication::applicationDirPath() + "/ww_sampose_weapon.png" );
+								int weaponDelta = -1;
+								if ( !shotAfter.isNull() && shotAfter.size() == shotWeapon.size() ) {
+									weaponDelta = 0;
+									for ( int y = 0; y < shotWeapon.height(); y += 2 )
+										for ( int x = 0; x < shotWeapon.width(); x += 2 )
+											if ( shotAfter.pixel( x, y ) != shotWeapon.pixel( x, y ) )
+												weaponDelta++;
+								}
+								log << "framebuffer pixels changed by the weapon: " << weaponDelta << "\n";
+								if ( weaponDelta <= 0 )
+									fails << "the attached weapon changed no pixels";
+								log << "capture: ww_sampose_weapon.png\n";
+							}
+						}
 						break;
 					}
 
