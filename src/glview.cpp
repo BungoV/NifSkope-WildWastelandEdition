@@ -1565,6 +1565,25 @@ int GLView::poseImportOutfitStudio( const QString & path, float blend, QString *
 	return applied;
 }
 
+int GLView::poseImportSam( const QString & path, float blend, QString * error, int * missingOut )
+{
+	int applied = 0, missing = 0;
+	if ( !AnimSetup::applySamPose( model, path, blend, &applied, &missing, error ) ) {
+		if ( missingOut )
+			*missingOut = missing;
+		return 0;
+	}
+	if ( missingOut )
+		*missingOut = missing;
+	if ( scene )
+		scene->transformDirty = true;
+	refreshPoseBones();
+	update();
+	emit gizmoStatus( tr( "Imported SAM pose: %1 bone(s) posed, %2 not in this skeleton" )
+		.arg( applied ).arg( missing ) );
+	return applied;
+}
+
 bool GLView::poseExportOutfitStudio( const QString & path, const QString & name, QString * error )
 {
 	// export diffs the current pose against the block-keyed rest captured on

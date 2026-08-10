@@ -2977,6 +2977,290 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* TEST HARNESS (WW_SAMPOSE_TEST=1): Screen Archer Menu pose JSON import.
+	 *
+	 * SAM poses are ABSOLUTE local transforms, so unlike the OS pose there is no
+	 * export to round-trip against — a round-trip would only prove the importer
+	 * agrees with itself. What is measured instead is the convention itself:
+	 *
+	 *   1. a bone given yaw=90 / pitch=30 / roll=-45 lands on a rotation matrix
+	 *      hard-coded NUMERICALLY here (computed by hand from Rx(yaw)·Ry(pitch)·
+	 *      Rz(roll)). A wrong axis mapping or composition order fails this even
+	 *      though Matrix::fromEuler would happily agree with itself;
+	 *   2. ...and separately equals Matrix::fromEuler(yaw,pitch,roll), which is
+	 *      what pins the claim "SAM's MatrixFromEulerYPR == fromEuler";
+	 *   3. translation and scale arrive verbatim, and the values actually CHANGED
+	 *      from what the bones held before the import (a no-op importer fails);
+	 *   4. all seven channels parse from JSON STRINGS, which is how SAM writes;
+	 *   5. a bone name the file does not have is counted missing, not fatal;
+	 *   6. ONE undo step restores every touched bone;
+	 *   7. blend 0.5 lands exactly halfway between the bone's current translation
+	 *      and the pose's.
+	 *
+	 * Optionally applies a real SAM pose named by WW_SAMPOSE_FILE and checks two
+	 * values known from the format study; skipped when absent.
+	 * Pose mode is deliberately NOT entered: SAM needs no rest base, and the
+	 * import must work on a plain skeleton.nif with no skinned shape.
+	 * Log: release/ww_sampose_test.log.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SAMPOSE_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 1000, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_sampose_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				NifModel * nif = skope->getNifModel();
+				QStringList fails;
+				do {
+					if ( !ok || !nif ) { fails << "load failed"; break; }
+
+					// block numbers move under a snapshot undo, so every lookup
+					// re-resolves by NAME (the key SAM poses use anyway)
+					auto blockFor = [nif]( const QString & nm ) -> QModelIndex {
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							QModelIndex i = nif->getBlockIndex( b );
+							if ( !nif->blockInherits( i, "NiAVObject" ) )
+								continue;
+							if ( nif->resolveString( i, "Name" ) == nm )
+								return i;
+						}
+						return QModelIndex();
+					};
+
+					// three real node names out of whatever file was loaded
+					QStringList names;
+					for ( int b = 0; b < nif->getBlockCount() && names.size() < 3; b++ ) {
+						QModelIndex i = nif->getBlockIndex( b );
+						if ( !nif->blockInherits( i, "NiNode" ) )
+							continue;
+						const QString n = nif->resolveString( i, "Name" );
+						if ( !n.isEmpty() && !n.contains( QLatin1Char( '"' ) ) && !names.contains( n ) )
+							names << n;
+					}
+					if ( names.size() < 3 ) { fails << "fixture has fewer than 3 named NiNodes"; break; }
+					log << "target bones: " << names.join( QStringLiteral( ", " ) ) << "\n";
+
+					// fixture: a rotated bone, a translated bone, a scaled bone,
+					// and one name that is not in the file. All values STRINGS.
+					const QString jsonPath = QApplication::applicationDirPath() + "/ww_sampose_fixture.json";
+					{
+						QFile jf( jsonPath );
+						if ( !jf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+							fails << "cannot write the fixture JSON";
+							break;
+						}
+						QTextStream js( &jf );
+						js << "{\n  \"name\": \"WW Harness\",\n  \"skeleton\": \"Power Armor\",\n"
+						   << "  \"version\": 2,\n  \"transforms\": {\n"
+						   << "    \"" << names[0] << "\": {\"yaw\": \"90.000000\", \"pitch\": \"30.000000\", "
+						      "\"roll\": \"-45.000000\", \"x\": \"1.500000\", \"y\": \"-2.250000\", "
+						      "\"z\": \"3.000000\", \"scale\": \"1.000000\"},\n"
+						   << "    \"" << names[1] << "\": {\"yaw\": \"0.000000\", \"pitch\": \"0.000000\", "
+						      "\"roll\": \"0.000000\", \"x\": \"10.000000\", \"y\": \"20.000000\", "
+						      "\"z\": \"30.000000\", \"scale\": \"1.000000\"},\n"
+						   << "    \"" << names[2] << "\": {\"yaw\": \"0.000000\", \"pitch\": \"0.000000\", "
+						      "\"roll\": \"0.000000\", \"x\": \"0.000000\", \"y\": \"0.000000\", "
+						      "\"z\": \"0.000000\", \"scale\": \"2.500000\"},\n"
+						   << "    \"WW_NoSuchBone_ZZZ\": {\"yaw\": \"12.000000\", \"pitch\": \"0.000000\", "
+						      "\"roll\": \"0.000000\", \"x\": \"0.000000\", \"y\": \"0.000000\", "
+						      "\"z\": \"0.000000\", \"scale\": \"1.000000\"}\n"
+						   << "  }\n}\n";
+						js.flush();
+						jf.close();
+					}
+
+					// pre-import state, so "did anything move" and "did undo put
+					// it back" are both answerable
+					struct Pre { Vector3 t; Matrix r; float s; };
+					QVector<Pre> pre;
+					for ( const QString & nm : names ) {
+						QModelIndex i = blockFor( nm );
+						if ( !i.isValid() ) { fails << ( "lost node " + nm ); break; }
+						Pre p;
+						p.t = nif->get<Vector3>( i, "Translation" );
+						p.r = nif->get<Matrix>( i, "Rotation" );
+						p.s = nif->get<float>( i, "Scale" );
+						pre << p;
+					}
+					if ( pre.size() != 3 ) break;
+
+					auto matMax = []( const Matrix & a, const Matrix & b2 ) {
+						float d = 0;
+						for ( int r = 0; r < 3; r++ )
+							for ( int c = 0; c < 3; c++ )
+								d = qMax( d, std::fabs( a( r, c ) - b2( r, c ) ) );
+						return d;
+					};
+					auto matMaxRaw = []( const Matrix & a, const float b2[3][3] ) {
+						float d = 0;
+						for ( int r = 0; r < 3; r++ )
+							for ( int c = 0; c < 3; c++ )
+								d = qMax( d, std::fabs( a( r, c ) - b2[r][c] ) );
+						return d;
+					};
+
+					QString err;
+					int missing = -1;
+					const int n = skope->ogl->poseImportSam( jsonPath, 1.0f, &err, &missing );
+					qApp->processEvents();
+					log << "blend 1.0: applied " << n << " bone(s), " << missing
+						<< " missing (note: " << err << ")\n";
+					if ( n != 3 )
+						fails << QStringLiteral( "expected 3 bones applied, got %1 (%2)" ).arg( n ).arg( err );
+					if ( missing != 1 )
+						fails << QStringLiteral( "expected the unknown bone counted missing once, got %1" ).arg( missing );
+					if ( n != 3 )
+						break;
+
+					/* yaw=90, pitch=30, roll=-45 degrees, worked out by hand from
+					 * Rx(yaw)·Ry(pitch)·Rz(roll) in NIF row order:
+					 *   sx=1 cx=0   sy=.5 cy=cos30   sz=-sin45 cz=cos45
+					 * Hard-coded so a broken fromEuler cannot agree with itself.
+					 */
+					static const float expectRot[3][3] = {
+						{  0.61237244f,  0.61237244f,  0.50000000f },
+						{  0.35355339f,  0.35355339f, -0.86602540f },
+						{ -0.70710678f,  0.70710678f,  0.00000000f }
+					};
+					const QModelIndex i0 = blockFor( names[0] );
+					const Matrix got0 = nif->get<Matrix>( i0, "Rotation" );
+					const float dHard = matMaxRaw( got0, expectRot );
+					log << "rotation vs hand-computed matrix: max element diff = " << dHard << "\n";
+					if ( dHard > 1e-4f )
+						fails << QStringLiteral( "SAM rotation does not match the hand-computed matrix (%1)" ).arg( dHard );
+
+					const float toRad = 3.14159265358979f / 180.0f;
+					Matrix fe;
+					fe.fromEuler( 90.0f * toRad, 30.0f * toRad, -45.0f * toRad );
+					const float dFe = matMax( got0, fe );
+					const float dFeHard = matMaxRaw( fe, expectRot );
+					log << "rotation vs Matrix::fromEuler = " << dFe
+						<< "; fromEuler vs hand-computed = " << dFeHard << "\n";
+					if ( dFe > 1e-5f )
+						fails << QStringLiteral( "SAM rotation does not match Matrix::fromEuler(yaw,pitch,roll) (%1)" ).arg( dFe );
+					if ( dFeHard > 1e-4f )
+						fails << QStringLiteral( "Matrix::fromEuler disagrees with the hand-computed matrix (%1)" ).arg( dFeHard );
+
+					const Vector3 t0 = nif->get<Vector3>( i0, "Translation" );
+					const Vector3 want0( 1.5f, -2.25f, 3.0f );
+					if ( ( t0 - want0 ).length() > 1e-5f )
+						fails << QStringLiteral( "translation not verbatim: got (%1,%2,%3)" )
+							.arg( t0[0] ).arg( t0[1] ).arg( t0[2] );
+
+					const QModelIndex i1 = blockFor( names[1] );
+					const Vector3 t1 = nif->get<Vector3>( i1, "Translation" );
+					const Vector3 want1( 10.0f, 20.0f, 30.0f );
+					if ( ( t1 - want1 ).length() > 1e-5f )
+						fails << QStringLiteral( "translated bone wrong: got (%1,%2,%3)" )
+							.arg( t1[0] ).arg( t1[1] ).arg( t1[2] );
+
+					const float s2 = nif->get<float>( blockFor( names[2] ), "Scale" );
+					if ( std::fabs( s2 - 2.5f ) > 1e-5f )
+						fails << QStringLiteral( "scale not verbatim: got %1" ).arg( s2 );
+
+					// prove the control moves: an importer that wrote nothing
+					// would satisfy nothing above only by luck, so say so outright
+					log << "changed from pre-import: rotation " << matMax( pre[0].r, got0 )
+						<< ", translation " << ( pre[1].t - t1 ).length()
+						<< ", scale " << std::fabs( pre[2].s - s2 ) << " (all must be non-zero)\n";
+					if ( matMax( pre[0].r, got0 ) < 1e-3f )
+						fails << "bone 0 rotation did not change from its pre-import value";
+					if ( ( pre[1].t - t1 ).length() < 1e-3f )
+						fails << "bone 1 translation did not change from its pre-import value";
+					if ( std::fabs( pre[2].s - s2 ) < 1e-3f )
+						fails << "bone 2 scale did not change from its pre-import value";
+
+					// ONE undo restores every touched bone
+					if ( !nif->undoStack ) { fails << "no undo stack"; break; }
+					nif->undoStack->undo();
+					qApp->processEvents();
+					for ( int k = 0; k < 3; k++ ) {
+						QModelIndex i = blockFor( names[k] );
+						if ( !i.isValid() ) { fails << ( "node gone after undo: " + names[k] ); continue; }
+						const float dr = matMax( pre[k].r, nif->get<Matrix>( i, "Rotation" ) );
+						const float dt = ( pre[k].t - nif->get<Vector3>( i, "Translation" ) ).length();
+						const float ds = std::fabs( pre[k].s - nif->get<float>( i, "Scale" ) );
+						if ( dr > 1e-5f || dt > 1e-5f || ds > 1e-5f )
+							fails << QStringLiteral( "undo did not restore %1 (rot %2, trans %3, scale %4)" )
+								.arg( names[k] ).arg( dr ).arg( dt ).arg( ds );
+					}
+					log << "undo restored all three bones\n";
+
+					// blend 0.5 = halfway from where the bone is NOW to the pose
+					int missing2 = 0;
+					const int nb = skope->ogl->poseImportSam( jsonPath, 0.5f, &err, &missing2 );
+					qApp->processEvents();
+					if ( nb != 3 ) {
+						fails << QStringLiteral( "blend import applied %1 bones" ).arg( nb );
+						break;
+					}
+					const Vector3 half = pre[1].t * 0.5f + want1 * 0.5f;
+					const Vector3 gotHalf = nif->get<Vector3>( blockFor( names[1] ), "Translation" );
+					const float dHalf = ( half - gotHalf ).length();
+					log << "blend 0.5 translation error = " << dHalf << "\n";
+					if ( dHalf > 1e-4f )
+						fails << QStringLiteral( "blend 0.5 did not land halfway (err %1)" ).arg( dHalf );
+					nif->undoStack->undo();
+					qApp->processEvents();
+
+					// optional: a real SAM pose from the corpus
+					const QString real = QString::fromLocal8Bit( qgetenv( "WW_SAMPOSE_FILE" ) );
+					if ( real.isEmpty() || !QFile::exists( real ) ) {
+						log << "no real SAM pose (WW_SAMPOSE_FILE) — skipped\n";
+						break;
+					}
+					int missing3 = 0;
+					const int nr = skope->ogl->poseImportSam( real, 1.0f, &err, &missing3 );
+					qApp->processEvents();
+					log << "real pose '" << QFileInfo( real ).fileName() << "': " << nr
+						<< " bone(s) posed, " << missing3 << " not in this skeleton\n";
+					if ( nr <= 0 ) {
+						fails << ( "real SAM pose applied no bones: " + err );
+						break;
+					}
+					const QModelIndex iBA = blockFor( QStringLiteral( "Back_Armor" ) );
+					if ( !iBA.isValid() ) {
+						log << "Back_Armor not in this fixture — value check skipped\n";
+						break;
+					}
+					// Back_Armor reads yaw=180, pitch=90, roll=0 in every PA pose;
+					// that triple is Rx(180)*Ry(90) = [[0,0,1],[0,-1,0],[1,0,0]]
+					static const float expectBA[3][3] = {
+						{ 0.0f,  0.0f, 1.0f },
+						{ 0.0f, -1.0f, 0.0f },
+						{ 1.0f,  0.0f, 0.0f }
+					};
+					const float dBA = matMaxRaw( nif->get<Matrix>( iBA, "Rotation" ), expectBA );
+					const Vector3 tBA = nif->get<Vector3>( iBA, "Translation" );
+					const Vector3 wantBA( 25.413561f, 0.004556f, 0.199359f );
+					const float dtBA = ( tBA - wantBA ).length();
+					log << "real pose Back_Armor: rot diff " << dBA << ", trans diff " << dtBA << "\n";
+					if ( dBA > 1e-4f )
+						fails << QStringLiteral( "real pose Back_Armor rotation wrong (%1)" ).arg( dBA );
+					if ( dtBA > 1e-4f )
+						fails << QStringLiteral( "real pose Back_Armor translation wrong (%1)" ).arg( dtBA );
+				} while ( false );
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty() ? "PASS\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
+				QTimer * qd = new QTimer( qApp );
+				QObject::connect( qd, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb ) return;
+					QAbstractButton * bn = mb->button( QMessageBox::Discard );
+					if ( !bn ) bn = mb->button( QMessageBox::No );
+					if ( !bn && !mb->buttons().isEmpty() ) bn = mb->buttons().first();
+					if ( bn ) bn->click();
+				} );
+				qd->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
 	// TEST HARNESS (WW_POSELIB_TEST=1): the folder-based pose library, driven
 	// through the actual dock. Points the library at a throwaway folder using
 	// the same QSettings key poseLibraryFolder() reads (proving the override

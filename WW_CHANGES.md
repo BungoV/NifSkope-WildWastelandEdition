@@ -1,5 +1,58 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10 — Screen Archer Menu poses import
+
+The Pose Manager now loads a Screen Archer Menu pose (`.json`) as well as the
+Outfit Studio `.xml` it already read. **Import SAM pose...** sits under the
+existing import/export row and honours the same Blend strength.
+
+The format was measured, not guessed. Each bone entry is `{yaw, pitch, roll, x,
+y, z, scale}` with every value a JSON **string** and the angles in **degrees**,
+and — unlike an OS pose — the values **replace** the NiNode's local transform
+rather than offsetting it from rest. Across 80 real power-armour poses, 5504
+(file, bone) pairs carry the skeleton's rest translation verbatim against 6 that
+carry zero, which is what settles absolute-vs-delta. The rotation is
+`Rx(yaw)·Ry(pitch)·Rz(roll)` — yaw turns about X, pitch about Y, roll about Z,
+which is counter-intuitive and is exactly what a plausible guess gets wrong.
+That candidate beat 575 others (6 axis assignments × 6 composition orders × 8
+sign combinations × transpose) by 25 bones and 2.5 orders of magnitude, median
+reconstruction error 7.7e-08, and it is element-for-element SAM's own
+`MatrixFromEulerYPR` — and element-for-element NifSkope's `Matrix::fromEuler`,
+so the importer converts nothing.
+
+`AnimSetup::applySamPose` parses the whole file before touching the model, so a
+malformed pose cannot leave a rig half-posed, and writes every matched bone
+inside one `nifSnapshotOp` — one undo step for the whole pose. Bones the file
+does not have are counted and skipped: 5 of the 80 sample poses omit the 17
+armour-piece bones outright, so a partial match is normal rather than an error.
+Blend below 100% interpolates from where each bone is **now** toward the pose
+(translation and scale linearly, rotation by slerp), because an absolute pose
+has no rest base to blend from. Scale-0 bones — SAM's "hide the weapon" trick —
+are reported, so a vanished node is not a mystery.
+
+**Import only.** Writing a SAM pose back out is not built; the dock's export
+button is still Outfit Studio XML.
+
+**Verified**: `tests/spells/sam_pose_import.sh` (`WW_SAMPOSE_TEST`) **PASSes,
+0 failures**. It writes its own fixture pose and compares the resulting NiNode
+against a rotation matrix worked out **by hand** and hard-coded in the test, so
+a wrong axis mapping cannot quietly self-agree through `fromEuler` — max element
+diff **5.96e-08**, and `fromEuler` matches that same hand-computed matrix to the
+same figure. Translation and scale arrive verbatim out of the JSON strings, and
+the test records that they **changed** from their pre-import values (rotation
+1.0, translation 37.4, scale 1.5), so a do-nothing importer fails rather than
+passes. One undo restores all three touched bones; a bone name the NIF does not
+have is counted missing instead of being fatal; blend 0.5 lands on the midpoint
+to **0.0**. Against the real corpus, `POWER ARMOR POSE (1).json` applies
+**89/89 bones, 0 missing** to `powerarmor/CharacterAssets/skeleton.nif` and puts
+`Back_Armor` on the orientation and translation recorded in the format study
+(rotation diff **8.74e-08**, translation diff **0**).
+
+The release build is green and `WW_OSPOSE_TEST` still passes (round-trip
+rotation-matrix diff 2.68e-07). `WW_POSELIB_TEST` fails its final Delete step on
+the Bloatfly fixture — **verified pre-existing**: a build with every change here
+stashed produces a byte-identical log.
+
 ## 2026-08-09s — Refraction follows the normal map locally again
 
 The X-01 torso VFX exposed two refraction defects. Its stock controller ramps

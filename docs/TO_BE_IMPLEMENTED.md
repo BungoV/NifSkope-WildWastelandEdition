@@ -567,7 +567,9 @@ Much more shipped after 07-22d than this section used to admit: 07-22e..l added
 bone-by-bone posing, viewport skeleton + click-to-pose, Outfit Studio pose XML,
 load-skeleton-from-archive, a folder-based pose library, and the 07-22i batch
 (weights overlay, hover name, multi-select, pin, non-destructive posing,
-proportional editing, mirror axis).
+proportional editing, mirror axis). **Screen Archer Menu pose JSON** import
+joined them on 08-10 (`AnimSetup::applySamPose`, `PoseImportSamButton`,
+`WW_SAMPOSE_TEST`) — import only; writing a SAM pose back out is not built.
 
 **Still open — one feature:**
 - **Prop staging** (attach an external NIF under a bone) — 0 hits in

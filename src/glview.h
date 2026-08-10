@@ -168,6 +168,11 @@ public:
 	//! failure, message in *error); export returns success.
 	int poseImportOutfitStudio( const QString & path, float blend, QString * error );
 	bool poseExportOutfitStudio( const QString & path, const QString & name, QString * error );
+	//! Import a Screen Archer Menu pose (.json). SAM transforms are ABSOLUTE, so
+	//! no rest base is used and blend interpolates from the bone's current
+	//! transform. Returns bones applied (0 = failure, message in *error); on
+	//! success *error may still carry a non-fatal note. Import only — no export.
+	int poseImportSam( const QString & path, float blend, QString * error, int * missing = nullptr );
 	//! Test hooks (WW_POSEDRAW_TEST): bone count, and does poseBoneAt resolve a
 	//! bone at its own drawn screen position.
 	int poseBoneCountForTest() const { return poseBones.size(); }

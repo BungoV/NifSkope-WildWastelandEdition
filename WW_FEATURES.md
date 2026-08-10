@@ -156,6 +156,10 @@ predecessor:
 - A **pose library** that is just a folder of files, configurable in Settings.
 - **Outfit Studio pose XML** import (its rotation is a vector, not Euler — read
   out of the Outfit Studio source, not assumed).
+- **Screen Archer Menu pose JSON** import (absolute transforms, not deltas, and
+  its yaw/pitch/roll turn about X/Y/Z in that order — measured over 80 real
+  poses against the power-armour skeleton, then confirmed in SAM's own source).
+  Import only; NifSkope does not write SAM poses.
 - **Skeleton Manager** with Blender-style armature rendering.
 - Load a skeleton **from a game archive**, reusing the NIF Browser.
 - Mark one loaded NIF as the skeleton and have the rest snap to it.

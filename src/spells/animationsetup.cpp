@@ -30,6 +30,9 @@ BSD License - see nifskope.h
 #include <QFileInfo>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 
 #include <bit>
 
@@ -943,6 +946,164 @@ bool writeOutfitStudioPose( NifModel * nif, const QString & path, const QString 
 	xml.writeEndElement();   // Pose
 	xml.writeEndElement();   // PoseData
 	xml.writeEndDocument();
+	return true;
+}
+
+// ---- Screen Archer Menu pose JSON ---------------------------------------
+
+bool applySamPose( NifModel * nif, const QString & path, float blend,
+                   int * appliedOut, int * missingOut, QString * error )
+{
+	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return false; };
+	if ( appliedOut ) *appliedOut = 0;
+	if ( missingOut ) *missingOut = 0;
+	if ( !nif )
+		return fail( QStringLiteral( "no model" ) );
+
+	QFile f( path );
+	if ( !f.open( QIODevice::ReadOnly ) )
+		return fail( QStringLiteral( "cannot open %1" ).arg( path ) );
+
+	QJsonParseError perr {};
+	const QJsonDocument doc = QJsonDocument::fromJson( f.readAll(), &perr );
+	f.close();
+	if ( perr.error != QJsonParseError::NoError )
+		return fail( QStringLiteral( "JSON parse error in %1 at offset %2: %3" )
+			.arg( QFileInfo( path ).fileName() ).arg( perr.offset ).arg( perr.errorString() ) );
+	if ( !doc.isObject() )
+		return fail( QStringLiteral( "%1 is not a SAM pose (top level is not an object)" )
+			.arg( QFileInfo( path ).fileName() ) );
+
+	const QJsonObject root = doc.object();
+	const QJsonValue tv = root.value( QStringLiteral( "transforms" ) );
+	if ( !tv.isObject() )
+		return fail( QStringLiteral( "%1 has no \"transforms\" object — not a SAM pose file" )
+			.arg( QFileInfo( path ).fileName() ) );
+	const QJsonObject transforms = tv.toObject();
+	if ( transforms.isEmpty() )
+		return fail( QStringLiteral( "%1 has an empty \"transforms\" object" )
+			.arg( QFileInfo( path ).fileName() ) );
+
+	/* SAM writes every channel as a JSON STRING ("90.000000"), never a number —
+	 * see SAF/io.cpp's WriteJsonFloat. A bare number is accepted anyway; nothing
+	 * in the format forbids one and a hand-edited pose is the likely source. */
+	auto chan = []( const QJsonObject & o, const char * key, float dflt, bool & ok ) -> float {
+		const QJsonValue v = o.value( QLatin1String( key ) );
+		if ( v.isUndefined() || v.isNull() )
+			return dflt;                    // absent channel keeps its default
+		if ( v.isDouble() )
+			return float( v.toDouble() );
+		if ( v.isString() ) {
+			bool good = false;
+			const float r = v.toString().trimmed().toFloat( &good );
+			if ( good )
+				return r;
+		}
+		ok = false;
+		return dflt;
+	};
+
+	/* Parse everything into absolute local transforms BEFORE touching the model,
+	 * so a malformed file cannot leave the rig half-posed.
+	 *
+	 * A SAM entry REPLACES the node's local transform — it is not a delta from
+	 * rest the way an Outfit Studio pose is (proven over 80 pose files: 5504
+	 * (file,bone) pairs carry the skeleton's rest translation verbatim, 6 carry
+	 * zero). So there is no rest map here and nothing to compose.
+	 *
+	 * Rotation is Rx(yaw)·Ry(pitch)·Rz(roll) with the angles in DEGREES and the
+	 * counter-intuitive mapping yaw->X, pitch->Y, roll->Z. That product, written
+	 * in NIF row order, is element-for-element what Matrix::fromEuler(x,y,z)
+	 * produces (niftypes.cpp:215) and what SAM's own MatrixFromEulerYPR writes,
+	 * so the call below is a direct translation of the format, not a conversion.
+	 */
+	QHash<QString, Transform> poseByName;
+	int malformed = 0;
+	const float toRad = float( PI / 180.0 );
+	for ( auto it = transforms.constBegin(); it != transforms.constEnd(); ++it ) {
+		if ( it.key().isEmpty() || !it.value().isObject() ) {
+			malformed++;
+			continue;
+		}
+		const QJsonObject o = it.value().toObject();
+		bool ok = true;
+		const float yaw   = chan( o, "yaw",   0.0f, ok );
+		const float pitch = chan( o, "pitch", 0.0f, ok );
+		const float roll  = chan( o, "roll",  0.0f, ok );
+		const float x     = chan( o, "x",     0.0f, ok );
+		const float y     = chan( o, "y",     0.0f, ok );
+		const float z     = chan( o, "z",     0.0f, ok );
+		const float scale = chan( o, "scale", 1.0f, ok );
+		if ( !ok ) {
+			malformed++;
+			continue;
+		}
+		Transform t;
+		t.translation = Vector3( x, y, z );
+		t.scale = scale;
+		t.rotation.fromEuler( yaw * toRad, pitch * toRad, roll * toRad );
+		poseByName.insert( it.key(), t );
+	}
+	if ( poseByName.isEmpty() )
+		return fail( QStringLiteral( "%1 has no usable bone entries (%2 malformed)" )
+			.arg( QFileInfo( path ).fileName() ).arg( malformed ) );
+
+	const QHash<QString, int> nodes = namedAVObjects( nif );
+	int applied = 0, missing = 0, hidden = 0;
+
+	nifSnapshotOp( nif, Spell::tr( "Import SAM pose" ), [&]() {
+		for ( auto it = poseByName.constBegin(); it != poseByName.constEnd(); ++it ) {
+			auto node = nodes.constFind( it.key() );
+			if ( node == nodes.constEnd() ) {
+				// 5 of 80 real poses omit the 17 armour-piece bones; the mirror
+				// case (a pose naming bones this file lacks) is just as normal.
+				missing++;
+				continue;
+			}
+			QModelIndex iNode = nif->getBlockIndex( *node );
+			if ( !iNode.isValid() ) {
+				missing++;
+				continue;
+			}
+
+			Transform target = it.value();
+			// Blend, matching the dock's strength slider: SAM is absolute, so
+			// the interpolation runs from where the bone is NOW toward the pose.
+			if ( std::fabs( blend - 1.0f ) > 1e-6f ) {
+				Transform cur( nif, iNode );
+				target.translation = cur.translation * ( 1.0f - blend ) + target.translation * blend;
+				target.scale = cur.scale * ( 1.0f - blend ) + target.scale * blend;
+				Quat q = Quat::slerp( blend, cur.rotation.toQuat(), target.rotation.toQuat() );
+				target.rotation.fromQuat( q );
+			}
+
+			// writeBack rather than three set<>() calls: it writes the quaternion
+			// form for node types that store one, and it writes Scale, which SAM
+			// carries and an OS pose does not.
+			target.writeBack( nif, iNode );
+			if ( std::fabs( target.scale ) < 1e-6f )
+				hidden++;
+			applied++;
+		}
+	} );
+
+	if ( appliedOut ) *appliedOut = applied;
+	if ( missingOut ) *missingOut = missing;
+	if ( applied == 0 )
+		return fail( QStringLiteral( "no bone names in the pose matched this skeleton (%1 not found)" )
+			.arg( missing ) );
+
+	// non-fatal notes, appended to the dock's status line the way the OS import does
+	if ( error ) {
+		QStringList notes;
+		if ( missing > 0 )
+			notes << Spell::tr( "%1 bone(s) not in this skeleton." ).arg( missing );
+		if ( malformed > 0 )
+			notes << Spell::tr( "%1 entr(y/ies) skipped as malformed." ).arg( malformed );
+		if ( hidden > 0 )
+			notes << Spell::tr( "%1 bone(s) have scale 0 and will not draw." ).arg( hidden );
+		*error = notes.join( QStringLiteral( " " ) );
+	}
 	return true;
 }
 

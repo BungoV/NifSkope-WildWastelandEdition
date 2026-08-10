@@ -145,6 +145,30 @@ bool applyOutfitStudioPose( NifModel * nif, const QString & path,
 bool writeOutfitStudioPose( NifModel * nif, const QString & path, const QString & poseName,
                             const QHash<int, Transform> & restByBlock, QString * error );
 
+// ---- Screen Archer Menu pose JSON ---------------------------------------
+/*!
+ * SAM (Screen Archer Menu) stores a pose as
+ * `{"name","skeleton","version":2,"transforms":{ boneName:{yaw,pitch,roll,x,y,z,scale} }}`
+ * with every value a JSON STRING and the angles in DEGREES.
+ *
+ * Unlike an Outfit Studio pose these are ABSOLUTE local transforms that REPLACE
+ * the NiNode's own — no rest map is needed and nothing is composed. Rotation is
+ * `Rx(yaw)·Ry(pitch)·Rz(roll)` (yaw about X, pitch about Y, roll about Z), which
+ * in NIF row order is exactly `Matrix::fromEuler( yaw, pitch, roll )` in radians.
+ *
+ * Bone keys are exact, case-sensitive NiNode names; a pose routinely names bones
+ * a given file does not have (armour pieces saved while unequipped), so missing
+ * names are counted and skipped, never fatal.
+ */
+//! Apply a SAM pose JSON onto the file's bones (absolute local transforms).
+/*! \param blend 1.0 replaces each bone's transform with the pose; less
+ *         interpolates from where the bone is NOW toward the pose.
+ *  \param applied/missing counts (optional).
+ *  \param error failure message; on success, any non-fatal note (bones not in
+ *         this skeleton, malformed entries, scale-0 "hidden" bones). */
+bool applySamPose( NifModel * nif, const QString & path, float blend,
+                   int * applied, int * missing, QString * error );
+
 } // namespace AnimSetup
 
 #endif // SPELLS_ANIMATIONSETUP_H

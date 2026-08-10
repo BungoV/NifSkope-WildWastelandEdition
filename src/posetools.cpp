@@ -287,6 +287,17 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 	osRow->addWidget( exportOsBtn );
 	libLayout->addLayout( osRow );
 
+	// Screen Archer Menu pose JSON. Its own row, and no export partner: SAM
+	// poses are absolute per-bone transforms, so importing one is a straight
+	// replacement — writing one back out is a separate feature that isn't built.
+	auto * samRow = new QHBoxLayout;
+	auto * importSamBtn = new QPushButton( QObject::tr( "Import SAM pose..." ), libGroup );
+	importSamBtn->setObjectName( QStringLiteral( "PoseImportSamButton" ) );
+	importSamBtn->setToolTip( QObject::tr( "Load a Screen Archer Menu pose (.json) and apply it (uses the Blend strength)" ) );
+	samRow->addWidget( importSamBtn );
+	samRow->addStretch( 1 );
+	libLayout->addLayout( samRow );
+
 	layout->addWidget( libGroup );
 
 	// ---- behaviour --------------------------------------------------------
@@ -478,7 +489,10 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 		 */
 		if ( ogl && !activePose->isEmpty() ) {
 			QString poseError;
-			const int n = ogl->poseImportOutfitStudio( *activePose, *activeBlend, &poseError );
+			// the active pose may be either flavour of file; dispatch on suffix
+			const int n = activePose->endsWith( QStringLiteral( ".json" ), Qt::CaseInsensitive )
+				? ogl->poseImportSam( *activePose, *activeBlend, &poseError )
+				: ogl->poseImportOutfitStudio( *activePose, *activeBlend, &poseError );
 			if ( n > 0 )
 				status->setText( status->text() + QObject::tr( " Re-applied pose '%1' over %2 bone(s)." )
 					.arg( QFileInfo( *activePose ).completeBaseName() ).arg( n ) );
@@ -696,6 +710,28 @@ QDockWidget * tlCreatePoseManagerDock( NifModel * nif, QMainWindow * mw, GLView 
 		const int n = ogl->poseImportOutfitStudio( path, blend->value() / 100.0f, &error );
 		if ( n <= 0 )
 			QMessageBox::warning( panel, QObject::tr( "Import pose" ), error );
+		else {
+			// an imported pose is the active one too, so it survives later merges
+			*activePose = path;
+			*activeBlend = blend->value() / 100.0f;
+			status->setText( QObject::tr( "Imported %1: %2 bone(s) posed." )
+				.arg( QFileInfo( path ).fileName() ).arg( n ) );
+			if ( !error.isEmpty() )   // partial: some bones not in this skeleton
+				status->setText( status->text() + QStringLiteral( " " ) + error );
+			refresh();
+		}
+	} );
+	// Screen Archer Menu pose JSON import (uses the blend slider too)
+	QObject::connect( importSamBtn, &QPushButton::clicked, panel, [=]() {
+		if ( !ogl ) return;
+		const QString path = QFileDialog::getOpenFileName( panel,
+			QObject::tr( "Import SAM pose" ), poseLibraryFolder(),
+			QObject::tr( "SAM Pose JSON (*.json)" ) );
+		if ( path.isEmpty() ) return;
+		QString error;
+		const int n = ogl->poseImportSam( path, blend->value() / 100.0f, &error );
+		if ( n <= 0 )
+			QMessageBox::warning( panel, QObject::tr( "Import SAM pose" ), error );
 		else {
 			// an imported pose is the active one too, so it survives later merges
 			*activePose = path;
