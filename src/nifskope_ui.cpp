@@ -60,6 +60,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QPointer>
 #include <QScopeGuard>
 #include "version.h"
 #include "gl/controllers.h"
@@ -582,6 +583,246 @@ bool NifSkope::markWorkspaceWeaponRow( int backgroundIndex, bool marked )
 bool NifSkope::workspaceDocumentIsWeapon( int backgroundIndex ) const
 {
 	return nifIsWeaponMarked( workspaceDocumentModel( backgroundIndex ) );
+}
+
+/*! Flatten the whole composed workspace into ONE new document.
+ *
+ *  The last step of the pipeline the row marks build up: the panel composes a
+ *  scene out of several live documents — a skeleton, meshes following its pose,
+ *  weapon parts snapped onto its connect points — and this turns what the
+ *  viewport is showing into a single NIF, by the same rules that made the
+ *  viewport show it:
+ *
+ *    pose followers   merge with de-duplication by name, which is the
+ *                     skeleton-aware path: they stop being live and become
+ *                     skinned content of the output, bound to the output's bones;
+ *    weapon parts     merge through nifMergeWeaponPart, so they land on the
+ *                     connect points rather than at the root;
+ *    everything else  merges exactly as it always did — the pre-existing
+ *                     whole-selection merge is untouched and still reachable, for
+ *                     anyone not using marks at all.
+ *
+ *  THE ONE NEW DECISION IS THE POSE, and it is the caller's. \a bakePose true
+ *  writes the skeleton's CURRENT bone transforms, which is what the merge has
+ *  always produced; false writes its captured REST transforms so the output ships
+ *  a rig at rest with the geometry bound to it. Rest comes from the Pose
+ *  Manager's own capture (GLView::poseRestPose, taken on entering pose mode and
+ *  on baking) and from nowhere else — with no capture there is no honest rest to
+ *  write, the flag makes no difference, and \a note says so rather than guessing
+ *  one out of the undo history.
+ *
+ *  Dialog-free on purpose: flattenWorkspaceDialog is a shell over this, and a
+ *  harness drives this directly.
+ *
+ *  \return the Loaded NIFs row the result landed on, or -1.
+ */
+/*! Documents this session produced BY flattening.
+ *
+ *  A RESULT IS NOT A SOURCE. Without this the second flatten composes the first
+ *  one's output back in — measured, and it is not subtle: the shape count went
+ *  from 22 to 88 and the two "no rest capture" runs, which must be byte
+ *  identical, came out 3.2 MB and 6.4 MB. Weak, like every other mark here, so a
+ *  closed result stops being remembered. */
+static QList<QPointer<NifModel>> wwFlattenOutputs;
+
+int NifSkope::flattenWorkspaceToDocument( bool bakePose, QString * note )
+{
+	QStringList lines;
+	for ( int i = wwFlattenOutputs.size() - 1; i >= 0; i-- )
+		if ( !wwFlattenOutputs.at( i ) )
+			wwFlattenOutputs.removeAt( i );
+	auto isFlattenResult = []( const NifModel * m ) {
+		for ( const QPointer<NifModel> & p : std::as_const( wwFlattenOutputs ) )
+			if ( p.data() == m )
+				return true;
+		return false;
+	};
+	auto fail = [&note, &lines]( const QString & why ) {
+		if ( note )
+			*note = why;
+		return -1;
+	};
+
+	/* THE BASE IS THE SKELETON, because everything else is described relative to
+	 * it: the followers' bones are matched into it by name and the weapon parts'
+	 * connect points are resolved against what it already carries. The skull mark
+	 * names it; failing that the primary, and only when the primary really is a
+	 * skeleton rather than a flat pile of bone references. */
+	NifModel * base = ogl ? ogl->workspaceSkeleton() : nullptr;
+	QString baseName;
+	if ( base ) {
+		baseName = QStringLiteral( "the marked skeleton" );
+	} else if ( nif && AnimSetup::hasBoneHierarchy( nif ) ) {
+		base = nif;
+		baseName = QFileInfo( currentFile ).fileName();
+	}
+
+	// Every document in the composition, in the order the list shows them.
+	struct Piece { NifModel * model; QString name; };
+	QVector<Piece> pieces;
+	if ( nif && nif != base )
+		pieces.append( { nif, QFileInfo( currentFile ).fileName() } );
+	// by index, not by document: BackgroundNifDocument is declared in nifskope.cpp
+	// with no header, so this translation unit only has the pointer type
+	for ( int i = 0; i < workspaceDocumentCount(); i++ )
+		if ( NifModel * m = workspaceDocumentModel( i );
+				m && m != base && !isFlattenResult( m ) )
+			pieces.append( { m, workspaceDocumentName( i ) } );
+
+	if ( !base ) {
+		// No skeleton anywhere: flatten is still meaningful, the first document
+		// simply becomes the thing everything else lands in.
+		if ( pieces.isEmpty() )
+			return fail( tr( "There is nothing loaded to flatten." ) );
+		base = pieces.first().model;
+		baseName = pieces.first().name;
+		pieces.removeFirst();
+		lines << tr( "No skeleton is marked and the primary is not one, so %1 is the base." )
+			.arg( baseName );
+	}
+
+	auto snapshot = []( NifModel * src, QByteArray & bytes ) {
+		QBuffer buf( &bytes );
+		return buf.open( QIODevice::WriteOnly ) && src->save( buf );
+	};
+
+	QByteArray baseBytes;
+	NifModel out;
+	out.setMessageMode( BaseModel::MSG_TEST );
+	{
+		QBuffer buf( &baseBytes );
+		if ( !snapshot( base, baseBytes ) || !buf.open( QIODevice::ReadOnly ) || !out.load( buf ) )
+			return fail( tr( "Could not copy %1 to flatten into." ).arg( baseName ) );
+	}
+
+	/* THE POSE DECISION, applied to the copy BEFORE anything merges into it.
+	 *
+	 * The bones the followers bind to are the ones in this copy, so writing rest
+	 * here is what makes the output a rig at rest with its geometry attached —
+	 * doing it afterwards would fight the merge's own rebasing of adopted nodes.
+	 */
+	const QHash<QString, Transform> rest =
+		( ogl && base == nif ) ? ogl->poseRestByName() : QHash<QString, Transform>();
+	int restored = 0;
+	if ( !bakePose && !rest.isEmpty() ) {
+		for ( int b = 0; b < out.getBlockCount(); b++ ) {
+			const QModelIndex idx = out.getBlockIndex( b );
+			if ( !out.blockInherits( idx, "NiAVObject" ) )
+				continue;
+			auto it = rest.constFind( out.resolveString( idx, "Name" ) );
+			if ( it == rest.constEnd() )
+				continue;
+			it.value().writeBack( &out, idx );
+			restored++;
+		}
+		lines << tr( "The pose was NOT baked: %1 bone(s) were put back to the rest "
+			"transforms the Pose Manager captured." ).arg( restored );
+	} else if ( !bakePose ) {
+		lines << tr( "No rest pose has been captured, so there is nothing to restore to — "
+			"the bones' current transforms are what the file carries." );
+	} else {
+		lines << tr( "The pose was baked: the bones carry the transforms they have now." );
+	}
+
+	int followers = 0, weapons = 0, plain = 0, shapes = 0;
+	QStringList trouble, weaponNotes;
+	for ( const Piece & piece : pieces ) {
+		QByteArray bytes;
+		if ( !snapshot( piece.model, bytes ) ) {
+			trouble << tr( "%1 could not be read" ).arg( piece.name );
+			continue;
+		}
+		NifMergeResult result;
+		bool spliced = false;
+		if ( nifIsWeaponMarked( piece.model ) ) {
+			NifWeaponPlacement placement;
+			spliced = nifMergeWeaponPart( &out, bytes, piece.name, result, placement );
+			weaponNotes << placement.notes;
+			if ( spliced )
+				weapons++;
+		} else {
+			/* Followers and plain documents take the SAME call, and that is the
+			 * point rather than an oversight: de-duplicating NiNodes by name is
+			 * exactly what binds a follower's skin to the base's bones, and it is
+			 * also what an ordinary merge has always done. The mark decides how the
+			 * document is DRAWN; here it only decides which line of the summary it
+			 * is counted on. */
+			spliced = nifMergeData( &out, bytes, piece.name, true, result );
+			if ( spliced ) {
+				if ( ogl && ogl->isWorkspaceFollower( piece.model ) )
+					followers++;
+				else
+					plain++;
+			}
+		}
+		if ( !spliced ) {
+			trouble << tr( "%1: %2" ).arg( piece.name, result.error );
+			continue;
+		}
+		shapes += result.shapesAdded;
+	}
+
+	QByteArray outBytes;
+	if ( !snapshot( &out, outBytes ) )
+		return fail( tr( "The flattened result could not be written." ) );
+	const QString outName = QFileInfo( baseName ).completeBaseName() + QStringLiteral( "_flat.nif" );
+	if ( !addWorkspaceDocumentFromMemory( outBytes, outName ) )
+		return fail( tr( "The flattened result could not be parsed back." ) );
+	if ( NifModel * landed = workspaceDocumentModel( workspaceDocumentCount() - 1 ) )
+		wwFlattenOutputs.append( QPointer<NifModel>( landed ) );
+
+	lines.prepend( tr( "Flattened into %1 — %2 pose follower(s), %3 weapon part(s) and "
+		"%4 other document(s) merged in, %5 shape(s) added." )
+		.arg( outName ).arg( followers ).arg( weapons ).arg( plain ).arg( shapes ) );
+	if ( !weaponNotes.isEmpty() )
+		lines << tr( "Weapon parts:\n• %1" ).arg( weaponNotes.join( QStringLiteral( "\n• " ) ) );
+	if ( !trouble.isEmpty() )
+		lines << tr( "Left out:\n• %1" ).arg( trouble.join( QStringLiteral( "\n• " ) ) );
+	lines << tr( "It is unsaved; save it wherever you want it." );
+	if ( note )
+		*note = lines.join( QStringLiteral( "\n\n" ) );
+	return workspaceDocumentCount() - 1;
+}
+
+/*! The dialog over flattenWorkspaceToDocument.
+ *
+ *  Asks the one question the flatten has to ask and asks it ONLY when it means
+ *  something: with no captured rest pose the two answers produce the same bytes,
+ *  so offering a choice between them would be theatre. Everything else the
+ *  operation decides, it decides from the marks.
+ */
+bool NifSkope::flattenWorkspaceDialog()
+{
+	const bool haveRest = ogl && !ogl->poseRestByName().isEmpty();
+	bool bakePose = true;
+	if ( haveRest ) {
+		QMessageBox ask( this );
+		ask.setWindowTitle( tr( "Flatten Workspace" ) );
+		ask.setText( tr( "Flatten every loaded document into one NIF." ) );
+		ask.setInformativeText( tr( "Pose followers are merged onto the skeleton and weapon "
+			"parts onto their connect points, exactly as the viewport shows them.\n\n"
+			"Should the current pose be baked into the result's bones?" ) );
+		QPushButton * baked = ask.addButton( tr( "Bake the Pose" ), QMessageBox::AcceptRole );
+		QPushButton * atRest = ask.addButton( tr( "Write Bones at Rest" ), QMessageBox::AcceptRole );
+		ask.addButton( QMessageBox::Cancel );
+		ask.exec();
+		if ( ask.clickedButton() != baked && ask.clickedButton() != atRest )
+			return false;
+		bakePose = ( ask.clickedButton() == baked );
+	} else if ( QMessageBox::question( this, tr( "Flatten Workspace" ),
+			tr( "Flatten every loaded document into one NIF?\n\n"
+				"Pose followers are merged onto the skeleton and weapon parts onto their "
+				"connect points, exactly as the viewport shows them.\n\n"
+				"No rest pose has been captured, so the bones will carry the transforms they "
+				"have now." ),
+			QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Ok ) != QMessageBox::Ok ) {
+		return false;
+	}
+
+	QString note;
+	const int landed = flattenWorkspaceToDocument( bakePose, &note );
+	QMessageBox::information( this, tr( "Flatten Workspace" ), note );
+	return landed >= 0;
 }
 
 bool NifSkope::markWorkspaceFollowerRow( int backgroundIndex, bool marked )
@@ -11215,21 +11456,32 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					{
 						QStringList menuTexts;
 						bool weaponItemLive = false;
-						QTimer::singleShot( 150, skope, [&]() {
-							if ( auto * menu = qobject_cast<QMenu *>( QApplication::activePopupWidget() ) ) {
-								for ( QAction * action : menu->actions() ) {
-									menuTexts << action->text();
-									if ( action->text().contains( QStringLiteral( "Weapon Part" ) ) )
-										weaponItemLive = action->isCheckable() && action->isChecked()
-											&& !action->icon().isNull();
-								}
-								menu->close();
+						/* POLL for the popup rather than aiming one timer at it.
+						 *
+						 * menu.exec() blocks, so the reader has to run from the event
+						 * loop while it does — and a single shot at 150 ms is a race
+						 * this suite lost once, reporting an EMPTY menu and failing an
+						 * assertion about code that was fine. A repeating tick costs
+						 * nothing and cannot miss. */
+						auto * readMenu = new QTimer( skope );
+						QObject::connect( readMenu, &QTimer::timeout, skope, [&]() {
+							auto * menu = qobject_cast<QMenu *>( QApplication::activePopupWidget() );
+							if ( !menu || menuTexts.size() > 0 )
+								return;
+							for ( QAction * action : menu->actions() ) {
+								menuTexts << action->text();
+								if ( action->text().contains( QStringLiteral( "Weapon Part" ) ) )
+									weaponItemLive = action->isCheckable() && action->isChecked()
+										&& !action->icon().isNull();
 							}
+							menu->close();
 						} );
+						readMenu->start( 60 );
 						if ( BackgroundNifDocument * rowDocument =
 								skope->backgroundDocumentFromBrowserIndex( gunRow ) )
 							skope->showBackgroundDocumentMenu( rowDocument, QPoint( 200, 200 ) );
-						settle( 400 );
+						settle( 600 );
+						readMenu->stop();
 						log << "row menu: " << menuTexts.join( QStringLiteral( " | " ) ) << "\n";
 						check( "the row menu offers the weapon mark, with its glyph, ticked for a marked row",
 							menuTexts.filter( QStringLiteral( "Weapon Part" ) ).size() == 1
@@ -12046,6 +12298,379 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				skope->setWindowModified( false );
 				// insurance: anything modal on the way out gets clicked through
 				dismiss->start( 100 );
+				QTimer::singleShot( 0, qApp, &QApplication::quit );
+			} );
+		}, Qt::SingleShotConnection );
+	}
+
+	/* TEST HARNESS (WW_FLATTEN_TEST=1): the composed workspace becomes ONE NIF.
+	 *
+	 * The last step of the pipeline the row marks build: a skeleton, a mesh
+	 * following its pose, and a gun assembled on its connect points are three live
+	 * documents until this turns them into a file. What has to be true is that the
+	 * file equals the picture — and the one decision that is the user's, whether
+	 * the pose goes into the bones, has to be a real decision rather than a
+	 * dialog.
+	 *
+	 * WHAT IS MEASURED
+	 *
+	 *   1. BAKED. Three bones of the output — WEAPON and the two the pose moves
+	 *      furthest — carry the transforms the posed skeleton has, to 1e-4. The
+	 *      follower's geometry is in the file, the gun is on the WEAPON bone, and
+	 *      the block accounting adds up.
+	 *   2. THROUGH THE BYTES. The same three bones and the same geometry, after
+	 *      the result has been written to disk and parsed back. A live model that
+	 *      agrees with itself proves nothing about the file.
+	 *   3. AT REST. Flattened again with bakePose false, the same three bones
+	 *      carry the REST transforms the Pose Manager captured — and the geometry
+	 *      is otherwise identical, shape for shape, so the flag moves the rig and
+	 *      nothing else.
+	 *   4. THE CHOICE DEGENERATES when it is meaningless. With no rest capture
+	 *      there is no honest rest to write, and the two answers must produce the
+	 *      same BYTES — which is why the dialog does not offer the choice at all
+	 *      in that state.
+	 *   5. THE OLD WAY STILL WORKS: an ordinary two-document merge with no marks
+	 *      anywhere behaves as it always did.
+	 *
+	 * WW_FLATTEN_FILES is a SEMICOLON-separated list: 0 the pose follower,
+	 * 1 the weapon base, 2 and 3 its furniture. The primary is the skeleton.
+	 * WW_FLATTEN_POSE names a SAM pose. Log: release/ww_flatten_test.log;
+	 * pictures: release/ww_flatten_baked.png and release/ww_flatten_rest.png.
+	 */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_FLATTEN_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, ok, fname]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_flatten_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) ) { qApp->quit(); return; }
+				QTextStream log( &logf );
+				int checks = 0, fails = 0;
+				auto check = [&]( const QString & what, bool pass ) {
+					checks++;
+					if ( !pass ) fails++;
+					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
+				};
+				auto settle = []( int ms ) {
+					QEventLoop loop;
+					QTimer::singleShot( ms, &loop, &QEventLoop::quit );
+					loop.exec();
+				};
+				enum { Follower = 0, GunBase = 1, Grip = 2, Mag = 3, FixtureCount = 4 };
+
+				do {
+					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
+					NifModel * skeleton = skope->getNifModel();
+					if ( !skeleton ) { check( "the primary is a model", false ); break; }
+
+					QStringList files;
+					for ( const QString & part : qEnvironmentVariable( "WW_FLATTEN_FILES" )
+							.split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) )
+						if ( !part.trimmed().isEmpty() )
+							files << part.trimmed();
+					const QString posePath = qEnvironmentVariable( "WW_FLATTEN_POSE" );
+					log << "primary: " << QFileInfo( fname ).fileName() << "\n";
+					for ( const QString & f : std::as_const( files ) )
+						log << "  fixture: " << QFileInfo( f ).fileName() << "\n";
+					if ( files.size() != int( FixtureCount ) || posePath.isEmpty()
+						 || !QFile::exists( posePath ) ) {
+						check( "the fixture names four files and a pose", false );
+						break;
+					}
+					int enrolled = 0;
+					for ( const QString & f : std::as_const( files ) )
+						if ( skope->addWorkspaceDocumentFromFile( f ) )
+							enrolled++;
+					settle( 500 );
+					check( "the composition loaded", enrolled == int( FixtureCount )
+						&& skope->workspaceDocumentCount() == int( FixtureCount ) );
+					if ( skope->workspaceDocumentCount() != int( FixtureCount ) )
+						break;
+
+					check( "the frame follows the skeleton's pose",
+						skope->markWorkspaceFollowerRow( Follower, true ) );
+					for ( int r : { GunBase, Grip, Mag } )
+						skope->markWorkspaceWeaponRow( r, true );
+					check( "the gun's three parts are weapon-marked", nifWeaponMarkCount() == 3 );
+
+					auto localOf = []( NifModel * m, const QString & name ) {
+						for ( int b = 0; b < m->getBlockCount(); b++ ) {
+							const QModelIndex i = m->getBlockIndex( b );
+							if ( m->blockInherits( i, "NiAVObject" )
+								 && m->resolveString( i, "Name" ) == name )
+								return Transform( m, i );
+						}
+						return Transform();
+					};
+					auto sameTransform = []( const Transform & a, const Transform & b ) {
+						float worst = std::fabs( a.scale - b.scale );
+						worst = qMax( worst, ( a.translation - b.translation ).length() );
+						for ( int r = 0; r < 3; r++ )
+							for ( int c = 0; c < 3; c++ )
+								worst = qMax( worst, std::fabs( a.rotation( r, c ) - b.rotation( r, c ) ) );
+						return worst;
+					};
+					auto shapeNamesOf = []( NifModel * m ) {
+						QStringList out;
+						for ( int b = 0; b < m->getBlockCount(); b++ ) {
+							const QModelIndex i = m->getBlockIndex( b );
+							if ( m->blockInherits( i, "BSTriShape" )
+								 || m->blockInherits( i, "NiTriBasedGeom" ) )
+								out << m->resolveString( i, "Name" );
+						}
+						out.sort();
+						return out;
+					};
+
+					/* THE REST CAPTURE, taken the way the Pose Manager takes it —
+					 * entering pose mode IS the capture. Skeleton view first, because
+					 * refreshPoseBones builds its bone list out of skinned shapes and
+					 * a skeleton.nif has none: it is nothing but bones. */
+					skope->ogl->setSkeletonView( true );
+					skope->ogl->setPoseMode( true );
+					settle( 300 );
+					const QHash<QString, Transform> rest = skope->ogl->poseRestByName();
+					log << "rest capture holds " << rest.size() << " bone(s)\n";
+					check( "entering pose mode captured a rest pose", rest.size() > 20 );
+
+					QString err;
+					int missing = 0;
+					const int posed = skope->ogl->poseImportSam( posePath, 1.0f, &err, &missing );
+					qApp->processEvents();
+					settle( 200 );
+					log << "posed the skeleton: " << posed << " bone(s)\n";
+					check( "the skeleton took the pose", posed > 0 );
+
+					/* THE THREE PROBES: the weapon bone, plus the two the pose moved
+					 * furthest from their rest — chosen from the data rather than
+					 * typed in, so the check cannot quietly land on a bone that did
+					 * not move. */
+					QStringList probes{ QStringLiteral( "WEAPON" ) };
+					{
+						QVector<QPair<float, QString>> moved;
+						for ( auto it = rest.constBegin(); it != rest.constEnd(); ++it ) {
+							if ( it.key() == QLatin1String( "WEAPON" ) )
+								continue;
+							const Transform now = localOf( skeleton, it.key() );
+							moved.append( { ( now.translation - it.value().translation ).length()
+								+ sameTransform( now, it.value() ), it.key() } );
+						}
+						std::sort( moved.begin(), moved.end() );
+						for ( int i = 0; i < 2 && i < moved.size(); i++ )
+							probes << moved.at( moved.size() - 1 - i ).second;
+					}
+					log << "probe bones: " << probes.join( QStringLiteral( ", " ) ) << "\n";
+					check( "three probe bones were found", probes.size() == 3 );
+
+					QHash<QString, Transform> posedNow, restWant;
+					for ( const QString & p : std::as_const( probes ) ) {
+						posedNow.insert( p, localOf( skeleton, p ) );
+						restWant.insert( p, rest.value( p ) );
+					}
+
+					/* ---- 1. BAKED ------------------------------------------- */
+					QString note;
+					const int bakedRow = skope->flattenWorkspaceToDocument( true, &note );
+					settle( 400 );
+					log << "--- flatten (baked) ---\n" << note << "\n--- end ---\n";
+					check( "the baked flatten produced one new document",
+						bakedRow == int( FixtureCount )
+							&& skope->workspaceDocumentCount() == int( FixtureCount ) + 1 );
+					NifModel * baked = skope->workspaceDocumentModel( bakedRow );
+					check( "and it has a model", baked != nullptr );
+					if ( !baked )
+						break;
+
+					float worstBaked = 0;
+					for ( const QString & p : std::as_const( probes ) )
+						worstBaked = qMax( worstBaked,
+							sameTransform( localOf( baked, p ), posedNow.value( p ) ) );
+					log << "baked output vs the posed skeleton, worst of the three probes: "
+						<< worstBaked << "\n";
+					check( "BAKED: the output's bones carry the posed transforms",
+						worstBaked < 1e-4f );
+
+					const QStringList followerShapes = shapeNamesOf(
+						skope->workspaceDocumentModel( Follower ) );
+					const QStringList bakedShapes = shapeNamesOf( baked );
+					int followerIn = 0;
+					for ( const QString & s : followerShapes )
+						if ( bakedShapes.contains( s ) )
+							followerIn++;
+					log << "the follower brought " << followerIn << " of "
+						<< followerShapes.size() << " shape(s) into the file\n";
+					check( "the follower's geometry is IN the flattened file",
+						followerIn == followerShapes.size() && followerIn > 0 );
+					check( "the flattened file has more blocks than the skeleton it started from",
+						baked->getBlockCount() > skeleton->getBlockCount() );
+
+					// the gun is on the bone, measured in the output's own gun frame
+					auto blockNamed = []( NifModel * m, const QString & nm ) {
+						for ( int b = 0; b < m->getBlockCount(); b++ ) {
+							const QModelIndex i = m->getBlockIndex( b );
+							if ( m->blockInherits( i, "NiAVObject" )
+								 && m->resolveString( i, "Name" ) == nm )
+								return b;
+						}
+						return -1;
+					};
+					auto worldOf = []( NifModel * m, int block ) {
+						Transform w( m, m->getBlockIndex( block ) );
+						for ( int p = m->getParent( block ); p >= 0; p = m->getParent( p ) )
+							w = Transform( m, m->getBlockIndex( p ) ) * w;
+						return w;
+					};
+					auto gunReach = [&]( NifModel * m ) {
+						const int weapon = blockNamed( m, QStringLiteral( "WEAPON" ) );
+						float worst = -1;
+						if ( weapon < 0 )
+							return worst;
+						const Vector3 hand = worldOf( m, weapon ).translation;
+						for ( const QString & s : { QStringLiteral( "Pistol10mmReceiver:0" ),
+								QStringLiteral( "10mmGrip:0" ), QStringLiteral( "Magazine:0" ) } ) {
+							const int b = blockNamed( m, s );
+							if ( b < 0 )
+								return -2.0f;
+							worst = qMax( worst, ( worldOf( m, b ).translation - hand ).length() );
+						}
+						return worst;
+					};
+					const float bakedGun = gunReach( baked );
+					log << "farthest gun shape from the flattened WEAPON bone: " << bakedGun << "\n";
+					check( "the gun is in the hand of the flattened file",
+						bakedGun >= 0 && bakedGun < 40.0f );
+
+					/* ---- 2. THROUGH THE BYTES ------------------------------- */
+					const QString outPath = QApplication::applicationDirPath()
+						+ "/ww_flatten_baked.nif";
+					QFile::remove( outPath );
+					check( "the flattened document writes to a file",
+						skope->saveWorkspaceDocumentTo( bakedRow, outPath )
+							&& QFileInfo( outPath ).size() > 0 );
+					{
+						NifModel reloaded;
+						reloaded.setMessageMode( BaseModel::MSG_TEST );
+						check( "...and parses back from those bytes",
+							reloaded.loadFromFile( outPath ) );
+						float worstFile = 0;
+						for ( const QString & p : std::as_const( probes ) )
+							worstFile = qMax( worstFile,
+								sameTransform( localOf( &reloaded, p ), posedNow.value( p ) ) );
+						log << "reloaded file vs the posed skeleton, worst probe: "
+							<< worstFile << "\n";
+						check( "ROUND TRIP: the written file's bones still carry the pose",
+							worstFile < 1e-4f );
+						check( "...and the geometry survived the round trip",
+							shapeNamesOf( &reloaded ) == bakedShapes );
+						check( "...and the gun is still in its hand",
+							std::fabs( gunReach( &reloaded ) - bakedGun ) < 1e-3f );
+					}
+
+					/* Skeleton view goes off for the pictures. It was only ever on so
+					 * refreshPoseBones could find the bones of a file that is nothing
+					 * BUT bones, and its node labels bury the thing the capture
+					 * exists to show. Pose mode stays on — leaving it restores the
+					 * bones, which is the opposite of what is being photographed. */
+					skope->ogl->setSkeletonView( false );
+					for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+						skope->setWorkspaceDisplayMode( i, i == bakedRow ? 1 : 0 );
+					settle( 400 );
+					skope->ogl->update(); qApp->processEvents();
+					skope->ogl->update(); qApp->processEvents();
+					check( "the baked result renders", skope->ogl->grabFramebuffer().save(
+						QApplication::applicationDirPath() + "/ww_flatten_baked.png" ) );
+
+					/* ---- 3. AT REST ----------------------------------------- */
+					const int restRow = skope->flattenWorkspaceToDocument( false, &note );
+					settle( 400 );
+					log << "--- flatten (rest) ---\n" << note << "\n--- end ---\n";
+					check( "the rest flatten produced another document", restRow == bakedRow + 1 );
+					NifModel * atRest = skope->workspaceDocumentModel( restRow );
+					check( "and it has a model", atRest != nullptr );
+					if ( atRest ) {
+						float worstRest = 0, farthestFromPosed = 0;
+						for ( const QString & p : std::as_const( probes ) ) {
+							worstRest = qMax( worstRest,
+								sameTransform( localOf( atRest, p ), restWant.value( p ) ) );
+							farthestFromPosed = qMax( farthestFromPosed,
+								sameTransform( localOf( atRest, p ), posedNow.value( p ) ) );
+						}
+						log << "rest output vs the captured rest: " << worstRest
+							<< "; vs the posed values: " << farthestFromPosed << "\n";
+						check( "NOT BAKED: the output's bones carry the REST transforms",
+							worstRest < 1e-4f );
+						check( "...which are not the posed ones — the flag did something",
+							farthestFromPosed > 0.01f );
+						check( "...and the geometry is identical either way",
+							shapeNamesOf( atRest ) == bakedShapes );
+						for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+							skope->setWorkspaceDisplayMode( i, i == restRow ? 1 : 0 );
+						settle( 400 );
+						skope->ogl->update(); qApp->processEvents();
+						skope->ogl->update(); qApp->processEvents();
+						check( "the rest result renders", skope->ogl->grabFramebuffer().save(
+							QApplication::applicationDirPath() + "/ww_flatten_rest.png" ) );
+					}
+
+					/* ---- 4. THE CHOICE DEGENERATES -------------------------- */
+					skope->ogl->poseRestPose.clear();
+					const int a = skope->flattenWorkspaceToDocument( true, &note );
+					const int b = skope->flattenWorkspaceToDocument( false, &note );
+					settle( 300 );
+					log << "--- flatten with no rest capture ---\n" << note << "\n--- end ---\n";
+					check( "the note says there is no rest to restore to",
+						note.contains( QStringLiteral( "No rest pose has been captured" ) ) );
+					QByteArray bytesA, bytesB;
+					if ( a >= 0 && b >= 0 ) {
+						const QString pa = QApplication::applicationDirPath() + "/ww_flatten_a.nif";
+						const QString pb = QApplication::applicationDirPath() + "/ww_flatten_b.nif";
+						QFile::remove( pa ); QFile::remove( pb );
+						skope->saveWorkspaceDocumentTo( a, pa );
+						skope->saveWorkspaceDocumentTo( b, pb );
+						QFile fa( pa ), fb( pb );
+						if ( fa.open( QIODevice::ReadOnly ) ) bytesA = fa.readAll();
+						if ( fb.open( QIODevice::ReadOnly ) ) bytesB = fb.readAll();
+						QFile::remove( pa ); QFile::remove( pb );
+					}
+					log << "with no rest capture the two answers wrote " << bytesA.size()
+						<< " and " << bytesB.size() << " byte(s)\n";
+					check( "with no rest capture, baked and not-baked are the SAME BYTES",
+						!bytesA.isEmpty() && bytesA == bytesB );
+
+					/* ---- 5. THE OLD WAY ------------------------------------- */
+					nifClearWeaponMarks();
+					skope->markWorkspaceFollowerRow( Follower, false );
+					check( "no marks are left anywhere", nifWeaponMarkCount() == 0
+						&& !skope->workspaceDocumentFollows( Follower ) );
+					{
+						auto * dismiss = new QTimer( skope );
+						QObject::connect( dismiss, &QTimer::timeout, skope, []() {
+							if ( auto * mb = qobject_cast<QMessageBox *>(
+									QApplication::activeModalWidget() ) )
+								if ( !mb->buttons().isEmpty() )
+									mb->buttons().first()->click();
+						} );
+						const int before = skope->workspaceBlockCount( Follower );
+						dismiss->start( 100 );
+						const bool merged = skope->mergeWorkspaceDocumentsInto( Follower, { GunBase } );
+						dismiss->stop();
+						settle( 400 );
+						log << "the plain merge took " << before << " block(s) to "
+							<< skope->workspaceBlockCount( Follower ) << "\n";
+						check( "an ordinary unmarked merge still behaves as it always did",
+							merged && skope->workspaceBlockCount( Follower ) > before );
+					}
+
+				} while ( false );
+				nifClearWeaponMarks();
+				log << checks << " checks, " << fails << " failures\n";
+				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";
+				logf.close();
+				for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+					if ( NifModel * m = skope->workspaceDocumentModel( i ); m && m->undoStack )
+						m->undoStack->setClean();
+				if ( NifModel * n = skope->getNifModel(); n && n->undoStack )
+					n->undoStack->setClean();
+				skope->setWindowModified( false );
 				QTimer::singleShot( 0, qApp, &QApplication::quit );
 			} );
 		}, Qt::SingleShotConnection );

@@ -3360,6 +3360,15 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelI
 	QAction * doMerge = menu.addAction( tr( "Merge into a new NIF…" ) );
 	doMerge->setToolTip( tr( "%1 is the target; the rest are spliced into a copy of it, "
 		"leaving every loaded document untouched" ).arg( targetName ) );
+	/* The flatten sits beside the merges because it IS one — the difference is
+	 * that it reads the row marks instead of the selection, so it turns what the
+	 * viewport is composing into a file rather than turning what you highlighted
+	 * into one. The plain merges above are untouched and still the right answer
+	 * for anyone not using marks. */
+	QAction * doFlatten = menu.addAction( tr( "Flatten Workspace to One NIF…" ) );
+	doFlatten->setToolTip( tr( "Every loaded document, by its marks: pose followers merged "
+		"onto the skeleton, weapon parts onto their connect points, the rest as an ordinary "
+		"merge. Ignores this selection, and asks whether to bake the pose." ) );
 	// The last step of the loading-screen pipeline: merge, then bake the result
 	// flat. Offered here because it is the same selection and the same target.
 	QAction * doScreen = menu.addAction( tr( "Merge and Convert to Loading Screen…" ) );
@@ -3376,6 +3385,10 @@ void NifSkope::mergeLoadedDocumentsMenu( const QPoint & globalPos, const QModelI
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == doInPlace ) {
 		mergeIntoLoadedDocument( picked );
+		return;
+	}
+	if ( chosen == doFlatten ) {
+		flattenWorkspaceDialog();
 		return;
 	}
 	if ( chosen != doMerge && chosen != doScreen && chosen != doLiveScreen )

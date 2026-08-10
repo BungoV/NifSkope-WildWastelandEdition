@@ -1,5 +1,68 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-10j — The composed workspace becomes one NIF, pose baked or not
+
+**The end of the pipeline the marks build.** A skeleton, meshes marked to follow
+its pose, weapon parts marked to snap onto its connect points: three live
+documents drawn as one picture, with nothing written anywhere. **Flatten Workspace
+to One NIF…** turns the picture into a file, by the same rules that made the
+picture — followers merge with de-duplication by name (which is what binds their
+skin to the output's bones), weapon parts through the connect-point placement,
+everything else exactly as it always merged. The pre-existing selection merges sit
+untouched in the same menu, which is the answer for anyone not using marks at all.
+
+**The one decision is the user's: is the pose baked in?**
+
+- **Baked** — the output's bones carry the transforms the skeleton has now. This
+  is what the merge has always produced; it is now verified rather than assumed,
+  to 1e-4 on three bones.
+- **At rest** — the bones carry the transforms the **Pose Manager captured**
+  (`GLView::poseRestPose`, taken on entering pose mode and on baking) so the file
+  ships a rig at rest with the geometry bound to it. Rest is written onto the copy
+  *before* anything merges into it, because the bones followers bind to are the
+  ones in that copy.
+- **And when the question is meaningless, it is not asked.** With no rest capture
+  there is no honest rest to write — the undo history is not one — so the dialog
+  drops to a single confirmation that says the bones will carry what they have
+  now. The two answers then produce **byte-identical files**, which is asserted
+  rather than assumed.
+
+`flattenWorkspaceToDocument( bool bakePose, QString * note )` is the whole
+operation and takes no dialog; `flattenWorkspaceDialog()` is a shell over it. The
+result lands in Loaded NIFs unsaved, so it can be looked at before it is written.
+
+**A result is not a source.** The first version added its output as a row and the
+*next* flatten composed that output back in: shapes went 22 → 88 and the two runs
+that must be byte-identical came out 3.2 MB and 6.4 MB. Flatten outputs are now
+remembered (weakly, like every other mark here) and skipped as sources.
+
+**Measured**, on a PA skeleton with `Frame.nif` following it and a three-part 10mm
+on its WEAPON bone, probe bones chosen from the data rather than typed in —
+`WEAPON` plus the two the pose moved furthest, `COM` and `LArm_ForeArm1`:
+
+| | measured |
+|---|---|
+| baked output vs the posed skeleton, worst of three bones | **0** (exact) |
+| the same, after saving and re-parsing the file | **0** |
+| rest output vs the captured rest | **0** |
+| rest output vs the posed values | **4.300** — the flag did something |
+| shape list, baked vs rest | identical |
+| follower shapes that reached the file | **3 of 3** |
+| farthest gun shape from the flattened WEAPON bone | **4.29** |
+| no rest capture: the two answers | **816145 bytes each, identical** |
+
+**Harness:** new `tests/spells/flatten.sh` + `WW_FLATTEN_TEST`, **28 checks, 0
+failures**, including the round trip through the bytes — a live model that agrees
+with itself proves nothing about a file. One flake was fixed while it was caught
+rather than left: the row-menu reader in `weapon_mark.sh` aimed a single 150 ms
+timer at a blocking `exec()`, lost the race once, and reported an empty menu as a
+failure of working code. It polls now. Regression: `weapon_mark.sh` 77/77 three
+runs running, `loaded_nifs.sh` 112/112, `sam_pose_import.sh` PASS,
+`workspace_skeleton_target.sh` 34/34, `artobject_attach.sh` 14/14,
+`carries_everything.sh` 24/24, `live_effects.sh` 15/15. Captures:
+`release/ww_flatten_baked.png` and `release/ww_flatten_rest.png` — the same
+assembly posed and at rest, one document each.
+
 ## 2026-08-10i — Row marks are one-click, and a loaded mesh can follow the skeleton
 
 **The marks were invisible.** The weapon mark and the skeleton/face markers shared

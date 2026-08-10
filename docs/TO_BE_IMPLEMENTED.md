@@ -1531,6 +1531,14 @@ Verified 2026-07-21 against `src/spells/riggingtools.cpp`.
 - **In-game FaceGen validation** — a manual production check, not code.
 - *Persistent skeleton reference* and *zero-weight bone pruning* — see #1; they
   belong to the Skeleton Manager.
+- **Flatten, the parts not done** — NEW 2026-08-10j. Rest is taken only from the
+  Pose Manager's capture, and only when the flatten base is the PRIMARY, because
+  that is the model the capture is keyed to; a skull-marked skeleton in a
+  workspace row cannot be flattened at rest. Nothing detects "posed without ever
+  capturing a rest", so that state gets the same honest wording as "never posed" —
+  there is no reliable signal for it and inventing one out of the undo history was
+  ruled out. The flatten also has no output-path dialog: the result lands unsaved
+  in Loaded NIFs and Save As is a second step.
 - **Pose-follow, the parts not done** — NEW 2026-08-10i. A marked row follows the
   skull-marked document, or the primary when the primary has a bone hierarchy;
   following a specific loaded row that is NOT the skull mark is not expressible.

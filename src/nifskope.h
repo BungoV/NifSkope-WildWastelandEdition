@@ -186,6 +186,12 @@ public:
 	//! state lives in GLView, because the renderer is what acts on it.
 	bool markWorkspaceFollowerRow( int backgroundIndex, bool marked );
 	bool workspaceDocumentFollows( int backgroundIndex ) const;
+	/*! Flatten the composed workspace into one new document, by the marks' own
+	 *  rules. Dialog-free so a harness can drive it; flattenWorkspaceDialog is the
+	 *  shell that asks the one question it has to ask. Returns the Loaded NIFs row
+	 *  the result landed on, or -1. */
+	int flattenWorkspaceToDocument( bool bakePose, QString * note = nullptr );
+	bool flattenWorkspaceDialog();
 	//! Where one row's glyph is on screen, so a harness clicks the real control.
 	//! Slots: 0 skull/face marker, 1 weapon, 2 pose follow, 3 eye, 4 see-through.
 	QRect loadedNifsGlyphRect( const QModelIndex & row, int slot ) const;

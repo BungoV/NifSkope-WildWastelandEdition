@@ -207,6 +207,13 @@ predecessor:
   follow, visible, see-through — drawn dim or lit on every row, with the row menus
   as the alternate path. The panel owns the whole press-move-release gesture, so a
   click on a glyph never selects the row and never starts a drag.
+- **Flatten Workspace to One NIF** — the end of the pipeline: everything loaded
+  becomes a single file by its marks, pose followers merged onto the skeleton and
+  weapon parts onto their connect points, so the file is what the viewport was
+  showing. The one question it asks is whether to bake the pose into the bones;
+  at rest it writes the Pose Manager's captured rest instead, and when nothing has
+  been captured it says so rather than guessing (the two answers are then
+  byte-identical). The result lands unsaved, to be looked at before it is written.
 - Combined preview and donor selection across the whole workspace group.
 
 ## 9. Materials and rendering
