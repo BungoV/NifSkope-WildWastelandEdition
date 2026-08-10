@@ -34,6 +34,22 @@ No SAM *export* — if added, write 6-decimal angles (SAM's own `%.02f` costs
 ~0.005°). Format research archived at the session scratchpad's
 `sam_convention.md`.
 
+**The first visual pass shipped a crumple and called it a pose (`a4e848a`
+fixed it).** Frame.nif — like every skinned mesh — carries a FLAT copy of the
+bone names off its root; SAM values are parent-space, so posing it directly is
+garbage, and the phase-2 pixel-delta check passed it because a crumple moves
+pixels beautifully. The importer now refuses flat targets (0 of 55 parented)
+with an explanation naming the skeleton-merge workflow, sharing the rig
+merge's `hasWorkspaceBoneHierarchy` test (now `AnimSetup::hasBoneHierarchy`).
+The photographed path is the supported one: skeleton primary + frame
+rig-merged, then posed — verified by composing WORLD transforms down the
+parent chain independently in the harness (depths 2/9/12, worst 9.8e-6; a
+chain-ignoring control misses by 113+ units). `sam_pose_import.sh` PASS ×3,
+`workspace_skeleton_target.sh` 34/34. Lesson recorded twice this session:
+**a pixel delta proves motion, never correctness** — and the Edit tool
+flattens MIXED-ending files (`nifskope.cpp`, `WW_CHANGES.md`); binary splice
+is the only safe route there.
+
 ### Window-state diagnostic cleanup safety
 
 `window_state_roundtrip.sh` had an unsafe failure path: its `cmd /c` cleanup
