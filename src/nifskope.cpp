@@ -800,52 +800,33 @@ static QPixmap weaponMarkPixmap( const QColor & ink )
 	p.setPen( Qt::NoPen );
 	p.setBrush( ink );
 
-	/* ONE SILHOUETTE, not a pile of primitives.
-	 *
-	 * The first version stacked a bar, a wedge and a stub, and at 16 px it read as
-	 * a bracket — the user's word was "terrible". Blender's icons survive this
-	 * size because each is a single closed shape with generous negative space, so
-	 * this is one polygon: the slide across the top with the muzzle to the left,
-	 * and the grip dropping away from the rear at a rake you can actually see. The
-	 * two CUTS afterwards are what stop it being a capital L — the barrel steps
-	 * down out of the slide, and a notch under the receiver opens the gap between
-	 * trigger and grip that the eye reads as a trigger guard.
-	 */
-	/* THE GRIP GOES AT THE BACK, flush with the rear edge.
-	 *
-	 * Centred under the slide with a trigger stub beside it, the silhouette read
-	 * as a capital T at 8x — two legs under a bar. A pistol is a long slide with
-	 * ONE mass hanging off its rear corner and a raked front edge to that mass,
-	 * and the trigger nub that seemed necessary is what broke it: at 16 px the gap
-	 * between grip and muzzle is the trigger guard, and negative space carries it.
-	 */
-	QPolygonF gun;
-	gun << QPointF( 0.8, 3.6 ) << QPointF( 14.5, 3.6 ) << QPointF( 14.5, 14.6 )
-	    << QPointF( 10.8, 14.6 ) << QPointF( 9.4, 7.9 ) << QPointF( 0.8, 7.9 );
-	p.drawPolygon( gun );
+	/* Muzzle left, grip raked off the rear, and a VISIBLE trigger guard: a
+	 * filled knuckle under the receiver with a hole punched through it. The
+	 * guard ring is what the two rejected drawings lacked â without that
+	 * negative space inside a positive loop, the silhouette collapses into a
+	 * bracket ("terrible") or a buttstock. */
+	p.drawRect( QRectF( 0.8, 3.8, 14.2, 3.4 ) );          // slide
+	p.drawEllipse( QPointF( 10.3, 9.1 ), 2.6, 2.6 );      // guard knuckle
+	QPolygonF grip;
+	grip << QPointF( 11.0, 7.0 ) << QPointF( 14.9, 7.0 )
+	     << QPointF( 15.4, 14.2 ) << QPointF( 12.4, 14.2 );
+	p.drawPolygon( grip );
 
-	/* The muzzle end is cut down to a barrel — without it the front half is a
-	 * plain slab and the whole thing is a bracket. Cut, not drawn, so the glyph
-	 * still reads on any row background, exactly as the skull's sockets are. */
 	p.setCompositionMode( QPainter::CompositionMode_Clear );
 	p.setBrush( Qt::black );
-	p.drawRect( QRectF( -1.0, 3.0, 4.8, 2.2 ) );
+	p.drawEllipse( QPointF( 9.7, 9.4 ), 1.5, 1.5 );       // the guard hole
 	p.end();
 	return pm;
 }
 
-/*! A row that FOLLOWS the skeleton's pose: a BONE.
+/*! A row that FOLLOWS the skeleton's pose: a BONE, paired with the skull two
+ *  slots left â that one IS the skeleton, this one follows it.
  *
- *  The first version was an arrow flying into a post — "very abstract", and it
- *  was: it described the mechanism rather than the subject. A bone is the
- *  subject, it is what Blender draws for bone data, and it PAIRS with the skull
- *  two slots to its left, which already means "this file is the skeleton". Skull
- *  and bone, side by side: that one IS the skeleton, this one follows it.
- *
- *  Two lobes at one end and one at the other, on a diagonal shaft — the classic
- *  bone read, and the asymmetry is what keeps it from looking like a dumbbell at
- *  this size.
- */
+ *  Symmetric dog-bone: two knobs at EACH end of a waisted shaft. The first
+ *  bone put two lobes at one end and one at the other, and the asymmetry read
+ *  as anatomy nobody asked for; end-to-end symmetry is the fix, and the waist
+ *  staying visibly narrower than the knob pairs is what keeps it a bone
+ *  rather than a capsule. */
 static QPixmap poseFollowPixmap( const QColor & ink )
 {
 	const int s = 16;
@@ -853,17 +834,15 @@ static QPixmap poseFollowPixmap( const QColor & ink )
 	pm.fill( Qt::transparent );
 	QPainter p( &pm );
 	p.setRenderHint( QPainter::Antialiasing, true );
+
+	p.setPen( QPen( ink, 2.6, Qt::SolidLine, Qt::RoundCap ) );
+	p.drawLine( QPointF( 5.0, 11.0 ), QPointF( 11.0, 5.0 ) );
 	p.setPen( Qt::NoPen );
 	p.setBrush( ink );
-
-	// the shaft, corner to corner so it fills the square
-	p.setPen( QPen( ink, 3.1, Qt::SolidLine, Qt::RoundCap ) );
-	p.drawLine( QPointF( 4.8, 11.2 ), QPointF( 11.2, 4.8 ) );
-	p.setPen( Qt::NoPen );
-	// two lobes at the lower end, one at the upper: a bone, not a dumbbell
-	p.drawEllipse( QPointF( 3.3, 10.4 ), 2.5, 2.5 );
-	p.drawEllipse( QPointF( 5.6, 12.7 ), 2.5, 2.5 );
-	p.drawEllipse( QPointF( 11.9, 4.1 ), 2.9, 2.9 );
+	p.drawEllipse( QPointF( 3.4, 9.6 ), 2.0, 2.0 );
+	p.drawEllipse( QPointF( 6.4, 12.6 ), 2.0, 2.0 );
+	p.drawEllipse( QPointF( 9.6, 3.4 ), 2.0, 2.0 );
+	p.drawEllipse( QPointF( 12.6, 6.4 ), 2.0, 2.0 );
 	p.end();
 	return pm;
 }
