@@ -4319,10 +4319,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// re-find the list item on demand: every model edit fires a
 					// queued refresh() that CLEARS and rebuilds the list, so any
 					// cached QListWidgetItem* is dangling after processEvents.
+					//
+					// MATCH ON THE PATH IN Qt::UserRole, NOT ON THE ROW TEXT. The path
+					// is what Apply and Delete themselves read; the text is not the same
+					// string twice. refresh() draws the ACTIVE pose as a bullet plus the
+					// base name, so the instant Apply makes this pose active the row
+					// reads "* HarnessPose" and a text match returns null. That was the
+					// whole of the old "Delete precondition missing" failure: the dock
+					// was right and the harness was measuring the decoration. Proven by
+					// suppressing the cleanup -- the pose file was still on disk after
+					// the run, and refresh() lists every *.xml in the folder
+					// unconditionally, so the row had been there the whole time.
 					auto findPose = [&]() -> QListWidgetItem * {
-						for ( int r = 0; r < poseList->count(); r++ )
-							if ( poseList->item( r )->text() == "HarnessPose" )
+						const QString want = QFileInfo( saved ).absoluteFilePath();
+						for ( int r = 0; r < poseList->count(); r++ ) {
+							const QString p = poseList->item( r )->data( Qt::UserRole ).toString();
+							if ( !p.isEmpty() && QFileInfo( p ).absoluteFilePath() == want )
 								return poseList->item( r );
+						}
 						return nullptr;
 					};
 					if ( !findPose() ) { fails << "saved pose not listed in the library"; break; }

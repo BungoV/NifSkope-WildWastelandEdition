@@ -815,9 +815,71 @@ void NifTreeView::scrollExpand( const QModelIndex & index )
 {
 	blockMouseSelection = true;
 
-	// this is a compromise between scrolling to the top, and scrolling the last child to the bottom
-	if ( !autoExpanded )
-		scrollTo( index, PositionAtCenter );
+	if ( autoExpanded )
+		return;
+
+	/* THE SCROLL IS POSTED, and that is not polish -- it is the only thing
+	 * standing between expandAll() and a corrupted heap.
+	 *
+	 * QTreeView emits expanded() from INSIDE QTreeViewPrivate::layout(),
+	 * because that is how recursive expanding announces each row it opens.
+	 * QTreeView::scrollTo() begins with executePostedLayout(), which runs
+	 * doItemsLayout() -- viewItems.clear() and a fresh layout(-1) -- so the
+	 * OUTER layout() frame comes back to an emptied, reallocated viewItems
+	 * and writes through the position it worked out before. That is a write
+	 * past the end of the buffer.
+	 *
+	 * It is what BOTH "the flat list takes the process down" and "the flat
+	 * list HANGS" were reports of: one heap overflow, whose crash surfaces
+	 * wherever the next allocation happens to land -- which is why the death
+	 * point wandered, and why it read as a hang (the script waits out its own
+	 * deadline on a process that has already gone; the pid is not there when
+	 * you go to attach to it).
+	 *
+	 * Caught by running the harness UNDER gdb, where the debug heap makes it
+	 * 4 runs in 4 instead of one in two: "Heap block ... modified ... past
+	 * requested size of 1000", with expandAll -> layout -> [expanded] ->
+	 * scrollTo -> doItemsLayout -> layout on the stack.
+	 *
+	 * A queued call runs once control is back in the event loop, so the view
+	 * is never re-entered from inside its own layout. blockMouseSelection
+	 * stays synchronous above: it answers the click being handled now.
+	 *
+	 * ONE call per burst, and an explicit scrollTo() CANCELS it. Posting is not
+	 * free of consequence: expandAll() emits this 163 times on a flat list, and
+	 * a naive post-each left 163 scrolls sitting behind whatever the caller did
+	 * next -- which is a real regression, caught by block_dragdrop.sh, where
+	 * `expandAll(); scrollTo(PositionAtTop); processEvents();` came back with
+	 * the row at y=-220. Coalescing to the last row keeps the end state the
+	 * synchronous version had, and letting scrollTo() clear the pending one
+	 * keeps the ordering: the newest scroll wins, whoever asked for it.
+	 *
+	 * The compromise the old comment described is unchanged: PositionAtCenter,
+	 * between scrolling to the top and scrolling the last child to the bottom.
+	 */
+	pendingExpandScroll = index;
+	if ( expandScrollPosted )
+		return;
+	expandScrollPosted = true;
+	QMetaObject::invokeMethod( this, [this]() {
+		expandScrollPosted = false;
+		const QPersistentModelIndex target = pendingExpandScroll;
+		pendingExpandScroll = QPersistentModelIndex();
+		if ( target.isValid() )
+			scrollTo( QModelIndex( target ), PositionAtCenter );
+	}, Qt::QueuedConnection );
+}
+
+/*! Anyone scrolling on purpose outranks the expansion that asked to be shown.
+ *
+ *  scrollExpand() posts its scroll (it must -- see there), so without this an
+ *  expansion's scroll would land AFTER the deliberate one that followed it and
+ *  quietly undo it.
+ */
+void NifTreeView::scrollTo( const QModelIndex & index, ScrollHint hint )
+{
+	pendingExpandScroll = QPersistentModelIndex();
+	QTreeView::scrollTo( index, hint );
 }
 
 void NifTreeView::onItemCollapsed( const QModelIndex & index )

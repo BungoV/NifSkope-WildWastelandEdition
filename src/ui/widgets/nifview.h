@@ -233,6 +233,10 @@ public slots:
 	//! never "un-hide" behind our back.
 	void doItemsLayout() override;
 
+	//! An explicit scroll SUPERSEDES the one an expansion asked for, because
+	//! that one is posted rather than run inside the signal — see scrollExpand().
+	void scrollTo( const QModelIndex & index, ScrollHint hint = EnsureVisible ) override;
+
 	//! Updates version conditions (connect to dataChanged)
 	void updateConditions( const QModelIndex & topLeft, const QModelIndex & bottomRight );
 protected slots:
@@ -278,6 +282,13 @@ protected:
 	//! re-entry guard for the doItemsLayout hiding refresh
 	bool inLayoutHidingRefresh = false;
 	bool autoExpanded = false;
+	//! The row an expansion wants brought into view, and whether a call to do
+	//! it is already in the queue. One posted call per burst, always to the
+	//! LAST row asked for, and cancelled outright by any explicit scrollTo().
+	//! The whole apparatus exists because scrolling from inside expanded()
+	//! corrupts the heap — the why is on scrollExpand().
+	QPersistentModelIndex pendingExpandScroll;
+	bool expandScrollPosted = false;
 public:
 	// Do "smart auto-expand" of items when the view changes NiBlock.
 	bool doAutoExpanding = false;

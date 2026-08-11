@@ -129,25 +129,34 @@ restore() {
 }
 trap 'restore; rm -rf "$TMP"' EXIT
 
-# HIERARCHY ONLY by default, and the list half is written and passes 24 of 24 on
-# the runs that finish. It is out of the gate because in list mode this script
-# HANGS 7 runs in 10 -- and a check that fails intermittently teaches you to
-# re-run rather than to look.
+# BOTH MODES, and the list half is back in the gate as of 2026-08-11 because the
+# thing that kept it out is fixed.
 #
-# It was briefly back IN the gate on 2026-08-07p, on a claim that the failure did
-# not reproduce in 36 runs. Those runs did pass, and the claim was still wrong:
-# the measurement was "did the log end with done", which cannot tell a crash from
-# a hang. Ruled out since, each with its own run of ten: a stale incremental
-# build, the IPC port, contention with other work, and the inherited
-# GLView/Enable Animations setting (forced off below regardless -- a harness must
-# force the state it measures). The trail is in the backlog under
-# "block_rename.sh in list mode HANGS".
+# It was out because "in list mode this script HANGS" -- 4 to 7 runs in 10, no
+# crash, no fault, a passing run 4 seconds against a failing one's 63. It was
+# never a hang. The process was already GONE while the script sat waiting out its
+# own deadline: taking the pid at the 20-second mark and asking Windows for it
+# comes back empty, and the Application log has the APPCRASH (0xc0000005 at fault
+# offset 0, then 0xc000041d) that three sessions recorded as absent.
 #
-#   MODES="hierarchy list" bash tests/spells/block_rename.sh
+# Run the same launch UNDER gdb and the debug heap turns the ~50% into 4 in 4:
+#   Heap block at ... modified at ...+0x1010 past requested size of 1000
+# with expandAll -> QTreeViewPrivate::layout -> [expanded] -> QTreeView::scrollTo
+# -> doItemsLayout -> layout on the stack. NifTreeView connected expanded() to
+# scrollExpand(), which called scrollTo() -- and scrollTo() starts by executing
+# the posted layout, so it cleared and rebuilt viewItems while the OUTER layout()
+# was still holding the position it was about to write to. The scroll is posted
+# now (src/ui/widgets/nifview.cpp); this mode is the gate on that.
 #
-# runs it anyway, which is how the list half is checked while that is open.
+# Measured: 5 deaths in 8 on a CLEAN build of the code before the fix (which also
+# retires "stale incremental build" as the explanation, for good), and 14 of 14
+# green after it, 27 checks each.
+#
+#   MODES=list bash tests/spells/block_rename.sh
+#
+# still runs one mode on its own when that is what you want.
 fails=0
-for mode in ${MODES:-hierarchy}; do
+for mode in ${MODES:-hierarchy list}; do
 	echo "--- $mode mode"
 	seed "$mode"
 	[ "$(ps "(Get-ItemProperty -Path '$KEY' -Name 'List Mode').'List Mode'")" = "$mode" ] \

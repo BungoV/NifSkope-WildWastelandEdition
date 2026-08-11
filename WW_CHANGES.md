@@ -1,5 +1,34 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11e — The flat-list "hang" was a heap overflow, and the lore was wrong
+
+QTreeView::expandAll() emits expanded() from INSIDE QTreeViewPrivate::
+layout(). NifTreeView::scrollExpand answered synchronously with scrollTo(),
+whose executePostedLayout -> doItemsLayout cleared viewItems and re-laid the
+tree; the OUTER layout then wrote through its stale position, past the end
+of the reallocated buffer. The process was already DEAD while the script
+waited out its deadline — which is why three sessions filed it as a hang,
+and why HANDOFF's "no APPCRASH" was wrong: the Application log carries
+0xc0000005 then 0xc000041d, and gdb's debug heap turns ~50% into 4-in-4
+("Heap block modified past requested size"). The scroll is now posted
+(QueuedConnection, QPersistentModelIndex), coalesced to one per burst, and
+cancelled by any explicit scrollTo() — naive per-expansion posting left 163
+scrolls queued, which block_dragdrop.sh caught as a row at y=-220.
+blockMouseSelection stays synchronous. Before: 5 deaths in 8 on a CLEAN
+build (retiring "stale incremental" as the suspect for good). After: 12/12
+green with list mode back in block_rename.sh's gate (648 checks, re-scored
+strictly from saved logs). collision_drop.sh never had a stall of its own —
+the rename crash was taking the process down mid-run; 10/10 consecutive
+passes now.
+
+WW_POSELIB_TEST was measuring the decoration, not the invariant: refresh()
+titles the active pose "● " + name, so the instant Apply worked, the
+harness's text()==name lookup failed and convicted a working dock.
+findPose() now matches the file path in Qt::UserRole — what Apply and
+Delete themselves read. New runner tests/spells/poselib.sh, fixtured on
+Frame.nif (skeleton.nif has no skinned shape, so refreshPoseBones() is empty
+and the old setup measured nothing).
+
 ## 2026-08-11d — Refraction: the strength the shader received was always zero
 
 A NiControllerSequence may name a NiBlend*Interpolator instead of a real one
