@@ -54,8 +54,6 @@ LOG="$ROOT/release/ww_collpanel_test.log"
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 rm -f "$LOG"
 WW_COLLPANEL_TEST=1 "$EXE" --port "$PORT" "$(winpath "$SRC")" >/dev/null 2>&1 &
 pid=$!

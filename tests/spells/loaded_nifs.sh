@@ -118,8 +118,6 @@ trap 'rm -rf "$TMP"' EXIT
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # THIS SUITE'S BLOCK-LIST CHECKS ARE WRITTEN FOR HIERARCHY MODE, so it has to
 # START in hierarchy mode: the mode is read while the window is being built,
 # which is why the three sibling suites seed the registry rather than switching

@@ -57,8 +57,6 @@ trap 'rm -rf "$TMP"' EXIT
 
 fails=0
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # --- build the broken fixture ----------------------------------------------
 # The first BSEffectShaderProperty in the file, whatever number it happens to be,
 # so this does not rot if the asset is replaced.

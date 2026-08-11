@@ -62,8 +62,6 @@ trap 'rm -rf "$TMP"' EXIT
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # Work on a copy: the harness creates collision, and the fixture is a game file.
 cp "$SRC" "$TMP/fixture.nif" || { echo "FAIL: could not copy the fixture"; exit 1; }
 echo "fixture: $(basename "$SRC")"

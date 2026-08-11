@@ -27,3 +27,16 @@
 # empty value is the way to get the old behaviour deliberately.
 
 export WW_WINDOW_AT="${WW_WINDOW_AT:-1960,40}"
+
+# Pure bash, deliberately no sed: when this script is launched from a Git-Bash
+# parent, the MSYS2 shell inherits Git's sed, and BRE groups passed across the
+# two runtimes silently stop matching — winpath then no-ops. Single argv/env
+# paths still get rescued by MSYS2's automatic conversion, but a
+# semicolon-joined LIST (WW_SAMPOSE_WEAPON) is not, so the weapon step quietly
+# skips. Parameter expansion cannot be PATH-poisoned.
+winpath() {
+	case "$1" in
+		/[a-zA-Z]/*) local d="${1:1:1}"; printf '%s' "${d}:${1:2}" ;;
+		*) printf '%s' "$1" ;;
+	esac
+}

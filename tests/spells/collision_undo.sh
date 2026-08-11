@@ -76,8 +76,6 @@ trap 'rm -rf "$TMP"' EXIT
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture source at $SRC"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # --- build the editable fixture ---------------------------------------------
 # the collision object is whichever block is a bhkNPCollisionObject
 coll="$("$EXE" -no-gui list "$(winpath "$SRC")" 2>/dev/null \

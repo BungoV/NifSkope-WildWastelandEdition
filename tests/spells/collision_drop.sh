@@ -74,8 +74,6 @@ TMP="$(mktemp -d)"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # The shape type is a persisted setting the panel reads while it is being built,
 # so it goes in before launch and comes back out on exit: it is the user's own
 # choice and a harness that leaves it changed is one people stop running.

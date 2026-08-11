@@ -62,8 +62,6 @@ trap 'rm -rf "$TMP"' EXIT
 [ -f "$SRC" ] || { echo "no source head at $SRC"; exit 2; }
 [ -f "$DONOR" ] || { echo "no faceBones donor at $DONOR"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # Work on a copy: the harness saves the generated row next to it, and the corpus
 # is read-only by intent.
 cp "$SRC" "$TMP/head.nif"

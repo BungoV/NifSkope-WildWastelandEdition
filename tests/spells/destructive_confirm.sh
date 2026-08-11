@@ -60,8 +60,6 @@ trap 'rm -rf "$TMP"' EXIT
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # a copy, because check 7 lets the crop through and the model is modified
 cp "$SRC" "$TMP/subject.nif"
 

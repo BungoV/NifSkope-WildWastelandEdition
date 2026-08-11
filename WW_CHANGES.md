@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11f — One winpath, owned by the harness
+
+26 harness wrappers carried their own sed-based winpath, and sed BRE groups
+silently stop matching when the MSYS2 shell inherits Git-Bash's sed — the
+conversion no-ops and suites die at fixture build. The proven pure-bash
+replacement (parameter expansion, PATH-poison-proof) now lives ONCE in
+tests/spells/_harness.sh; 18 sourcing scripts lost their local copies, 8
+non-sourcing scripts got it inlined. Two tests/anim scripts are CRLF on
+disk (pre-dating this change; their git blobs are LF) and were spliced in
+binary. Verified green from BOTH launchers — the Git-Bash-parent case that
+used to fail, and the PowerShell control. Flagged, not fixed: eight scripts
+open GUI windows without _harness.sh/WW_WINDOW_AT (pre-existing).
+
 ## 2026-08-11e — The flat-list "hang" was a heap overflow, and the lore was wrong
 
 QTreeView::expandAll() emits expanded() from INSIDE QTreeViewPrivate::

@@ -66,8 +66,6 @@ SHOT="$ROOT/release/ww_starter_shot.png"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 rm -f "$LOG" "$SHOT"
 # no file argument: this is the startup path, which is what is being tested
 WW_STARTER_SHOT="$(winpath "$SHOT")" "$EXE" --port "$PORT" >/dev/null 2>&1 &

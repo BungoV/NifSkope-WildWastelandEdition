@@ -104,8 +104,6 @@ trap 'rm -rf "$TMP"' EXIT	# replaced below, once the settings backup exists
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 "$EXE" -no-gui new --cube -o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1
 [ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not write the cube fixture"; exit 1; }
 echo "fixture: cube fixture ($(stat -c%s "$TMP/fixture.nif") bytes)"

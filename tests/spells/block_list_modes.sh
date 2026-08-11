@@ -75,8 +75,6 @@ TMP="$(mktemp -d)"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # The list mode is read while the window is being built, so it has to be in the
 # registry BEFORE launch -- and it is the user's own setting, so it goes back.
 # PowerShell, not reg.exe: MSYS2 mangles a "HKCU\..." argument.

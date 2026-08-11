@@ -64,8 +64,6 @@ trap 'rm -rf "$TMP"' EXIT
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$SRC" ] || { echo "no fixture at $SRC"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # a copy, because the harness edits the file in memory and a stray save must
 # not touch the game data
 cp "$SRC" "$TMP/fixture.nif"

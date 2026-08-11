@@ -130,8 +130,6 @@ trap 'rm -rf "$TMP"' EXIT
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 # The cube fixture: a Fallout 4 scene with one cube under one root NiNode. The
 # program's own new document is empty, so the cube comes from --cube.
 "$EXE" -no-gui new --cube -o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1

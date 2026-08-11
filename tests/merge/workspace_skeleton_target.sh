@@ -25,8 +25,6 @@ SKELETON="${SKELETON:-/e/Tools/Fallout 4/DataUnpacked/Data/meshes/actors/powerar
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
-
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 [ -f "$LEFT" ] || { echo "no left-arm fixture at $LEFT"; exit 2; }
 [ -f "$RIGHT" ] || { echo "no right-arm fixture at $RIGHT"; exit 2; }
