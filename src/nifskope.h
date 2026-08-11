@@ -196,8 +196,11 @@ public:
 	//! Every mark glyph at 1x and 8x, lit and dim, for approving the artwork.
 	bool renderMarkIconSheet( const QString & path ) const;
 	//! Where one row's glyph is on screen, so a harness clicks the real control.
-	//! Slots: 0 skull/face marker, 1 weapon, 2 pose follow, 3 eye, 4 see-through.
+	//! Slots: 0 face donor, 1 skeleton, 2 weapon, 3 pose follow, 4 eye,
+	//! 5 see-through. (The old comment here still listed the five-slot strip.)
 	QRect loadedNifsGlyphRect( const QModelIndex & row, int slot ) const;
+	//! Where the style put that row's arrow, so a harness samples its real pixels.
+	QRect loadedNifsArrowRect( const QModelIndex & row ) const;
 	bool markWorkspaceDocumentUnsaved( int backgroundIndex );
 	//! Load NIFs from anywhere on disk into Loaded NIFs; returns how many.
 	int addWorkspaceDocumentsFromDialog();

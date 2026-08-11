@@ -349,6 +349,23 @@ static QRect loadedNifDividerRect( const QRect & row )
 	return QRect( x, row.top() + 3, 1, qMax( 4, row.height() - 6 ) );
 }
 
+/*! The row arrow — every loaded document has one, in the left gutter.
+ *
+ *  It used to be QStyle::SP_ArrowRight, set as an icon on the primary row's item
+ *  alone: the platform's own black triangle, and the single mark in this panel
+ *  that did not come from the skin. It is drawn now, in the accent on the
+ *  primary and in the inert grey on every other loaded document, so the arrow
+ *  column says which row is being edited rather than which row happens to carry
+ *  an icon at all.
+ *
+ *  It is NOT a branch indicator, and the block list's drawBranches gutter rule
+ *  does not apply here: this view sets rootIsDecorated(false) and its model is
+ *  flat, so nothing in it expands and drawBranches never draws. The arrow goes
+ *  to the style as the item's DECORATION, which is also what keeps every row's
+ *  name starting at the same x.
+ */
+static constexpr int LoadedNifArrowWidth = 16;
+
 class LoadedNifsTreeView final : public QTreeView
 {
 public:
@@ -365,6 +382,13 @@ public:
 	std::function<void( const QList<QPersistentModelIndex> & )> addBrowserRows;
 	std::function<bool( const QModelIndex & )> hasToggleButtons;
 	std::function<void( const QModelIndex &, int )> toggleButton;
+	/*! ...and whether this row's strip is INERT: drawn, pressed, and dead.
+	 *
+	 *  The primary's toggles are drawn so the strip is the same shape on every
+	 *  row, and cannot be operated. The press is still CLAIMED — a control that
+	 *  is disabled is not a hole through which the row underneath gets selected
+	 *  or dragged — and the release simply never calls toggleButton. */
+	std::function<bool( const QModelIndex & )> toggleButtonsInert;
 
 protected:
 	void paintEvent( QPaintEvent * event ) override
@@ -383,7 +407,10 @@ protected:
 				const QRect row = visualRect( index );
 				// slot 0 is the face-donor marker and stays dead to the mouse, as
 				// does the rule; 1..5 are the real toggles, and the press is claimed
-				// here so a click on one neither selects the row nor starts a drag
+				// here so a click on one neither selects the row nor starts a drag.
+				// An INERT strip claims the press the same way and then does nothing
+				// with it, so the primary's disabled glyphs give no gesture at all
+				// rather than quietly falling through to select the row
 				for ( int slot = 1; slot <= 5; slot++ ) {
 					if ( !loadedNifGlyphRect( row, slot ).contains( event->pos() ) )
 						continue;
@@ -422,6 +449,7 @@ protected:
 			pressedToggleSlot = -1;
 			if ( event->button() == Qt::LeftButton && pressed.isValid()
 				&& indexAt( event->pos() ) == pressed
+				&& !( toggleButtonsInert && toggleButtonsInert( pressed ) )
 				&& loadedNifGlyphRect( visualRect( pressed ), slot ).contains( event->pos() ) )
 				toggleButton( pressed, slot );
 			event->accept();
@@ -486,6 +514,8 @@ static QIcon faceDonorMarkIcon();
 static QPixmap skeletonMarkPixmap( const QColor & ink );
 static QPixmap weaponMarkPixmap( const QColor & ink );
 static QPixmap poseFollowPixmap( const QColor & ink );
+//! The primary/other arrow, likewise, because it is drawn in two inks.
+static QPixmap loadedNifArrowPixmap( const QColor & ink );
 static QIcon weaponMarkIcon();
 static QIcon poseFollowMarkIcon();
 
@@ -552,16 +582,63 @@ public:
 		return loadedNifGlyphRect( row, slot );
 	}
 
+	/*! Hand the style the row arrow as this item's decoration.
+	 *
+	 *  Shared by paint() and arrowRect() so a harness samples the rect the style
+	 *  really used, rather than a second guess at where it put it. */
+	static void applyArrow( QStyleOptionViewItem * opt, bool primary )
+	{
+		opt->icon = QIcon( loadedNifArrowPixmap( QColor( wwSkinColor(
+			primary ? "accent" : "textDisabled" ) ) ) );
+		opt->decorationSize = QSize( LoadedNifArrowWidth, LoadedNifArrowWidth );
+		opt->decorationAlignment = Qt::AlignLeft | Qt::AlignVCenter;
+		opt->features |= QStyleOptionViewItem::HasDecoration;
+	}
+
+	//! Where the style put the arrow, in the row's own coordinates.
+	QRect arrowRect( const QModelIndex & index, const QRect & row, const QWidget * widget ) const
+	{
+		const int flags = displayFlags ? displayFlags( index ) : -1;
+		if ( flags < 0 || !row.isValid() )
+			return QRect();
+		QStyleOptionViewItem opt;
+		if ( widget )
+			opt.initFrom( widget );
+		opt.widget = widget;
+		initStyleOption( &opt, index );
+		applyArrow( &opt, flags & 0x8 );
+		opt.rect = row;
+		QStyle * style = widget ? widget->style() : QApplication::style();
+		return style->subElementRect( QStyle::SE_ItemViewItemDecoration, &opt, widget );
+	}
+
+	/*! Never let the arrow or the strip be clipped by a short row. The glyphs
+	 *  shrink with the row height by design; the arrow is a fixed decoration, so
+	 *  the row has to be tall enough to hold it. */
+	QSize sizeHint( const QStyleOptionViewItem & option, const QModelIndex & index ) const override
+	{
+		QSize hint = QStyledItemDelegate::sizeHint( option, index );
+		hint.setHeight( qMax( hint.height(), LoadedNifArrowWidth + 4 ) );
+		return hint;
+	}
+
 	void paint( QPainter * painter, const QStyleOptionViewItem & option,
 		const QModelIndex & index ) const override
 	{
 		QStyleOptionViewItem opt( option );
 		initStyleOption( &opt, index );
 		const int flags = displayFlags ? displayFlags( index ) : -1;
-		if ( flags >= 0 )		// keep the text clear of the buttons AND the rule
+		if ( flags >= 0 ) {
+			// keep the text clear of the buttons AND the rule
 			opt.rect.setRight( opt.rect.right()
 				- LoadedNifGlyphCount * ( LoadedNifGlyphWidth + 2 )
 				- LoadedNifDividerWidth - 4 );
+			// ...and give it the arrow, which every loaded document carries: accent
+			// on the primary, inert grey on the rest. Setting it here rather than on
+			// the model item is what lets one row's arrow differ from another's
+			// without the model knowing which document is primary.
+			applyArrow( &opt, flags & 0x8 );
+		}
 
 		/* Colour follows SELECTION, exactly as the Block List does.
 		 *
@@ -607,12 +684,22 @@ public:
 		const bool visible = ( flags & 0x1 );
 		const bool ghost = ( flags & 0x2 );
 		const bool isSkeleton = ( flags & 0x4 );
-		const bool markerOnly = ( flags & 0x8 );
+		const bool inert = ( flags & 0x8 );
 		const bool isFaceDonor = ( flags & 0x10 );
 		const bool isWeapon = ( flags & 0x40 );
 		const bool isFollower = ( flags & 0x80 );
-		const QColor lit( wwSkinColor( "accent" ) );
-		const QColor dim( wwSkinColor( "textMuted" ) );
+		/* TWO INK REGISTERS, and the difference between them is the whole point.
+		 *
+		 * `accent` over `textMuted` means ON over OFF: both are controls, and the
+		 * dim one is inviting a click. The primary's strip is drawn and cannot be
+		 * operated, so reusing "off" for it would have said the opposite of the
+		 * truth at full strength — the glyphs would have read as five things
+		 * waiting to be switched on. The inert register is dimmer than muted, and
+		 * its amber is desaturated to about the same distance from the row, so a
+		 * mark the primary DOES carry stays legible without looking live.
+		 */
+		const QColor lit( wwSkinColor( inert ? "accentDisabled" : "accent" ) );
+		const QColor dim( wwSkinColor( inert ? "textDisabled" : "textMuted" ) );
 
 		painter->save();
 		painter->setRenderHint( QPainter::Antialiasing, true );
@@ -632,39 +719,39 @@ public:
 		 *
 		 * Always drawn, dim for off and accent for on, exactly as the eye is, so
 		 * what a document IS to the workspace is something you read down the list
-		 * instead of a fact you go looking for in a menu. The primary's row keeps
-		 * its marker-only treatment — it has never had clickable toggles, it is
-		 * always drawn, and it is the skeleton by default anyway — but a mark it
-		 * does carry is still shown.
+		 * instead of a fact you go looking for in a menu.
+		 *
+		 * The primary's row draws the SAME six slots, in the inert register. It
+		 * used to draw the skull and nothing else, which made it the one row whose
+		 * strip was a different shape — the eye and the disc read as lost rather
+		 * than withheld, and the marks that were shown sat where a reader had to
+		 * count to place them. Withheld is a state; missing is a bug, and it looked
+		 * like one.
 		 */
 		painter->drawPixmap( glyphRect( option.rect, SlotSkeleton ).adjusted( 2, 2, -2, -2 ),
 			skeletonMarkPixmap( isSkeleton ? lit : dim ) );
-		if ( !markerOnly ) {
-			painter->drawPixmap( glyphRect( option.rect, SlotWeapon ).adjusted( 2, 2, -2, -2 ),
-				weaponMarkPixmap( isWeapon ? lit : dim ) );
-			painter->drawPixmap( glyphRect( option.rect, SlotFollow ).adjusted( 2, 2, -2, -2 ),
-				poseFollowPixmap( isFollower ? lit : dim ) );
+		painter->drawPixmap( glyphRect( option.rect, SlotWeapon ).adjusted( 2, 2, -2, -2 ),
+			weaponMarkPixmap( isWeapon ? lit : dim ) );
+		painter->drawPixmap( glyphRect( option.rect, SlotFollow ).adjusted( 2, 2, -2, -2 ),
+			poseFollowPixmap( isFollower ? lit : dim ) );
 
-			// the rule between what the document IS and how it is DRAWN
-			painter->setPen( QPen( QColor( wwSkinColor( "border" ) ), 1 ) );
-			painter->setBrush( Qt::NoBrush );
-			const QRect rule = loadedNifDividerRect( option.rect );
-			painter->drawLine( rule.topLeft(), rule.bottomLeft() );
-		}
+		// the rule between what the document IS and how it is DRAWN
+		painter->setPen( QPen( QColor( wwSkinColor( inert ? "borderDim" : "border" ) ), 1 ) );
+		painter->setBrush( Qt::NoBrush );
+		const QRect rule = loadedNifDividerRect( option.rect );
+		painter->drawLine( rule.topLeft(), rule.bottomLeft() );
 
 		/* --- the eye, and the see-through disc ------------------------------
 		 *
 		 * Both are drawn by WwGlyphs (src/ui/wwglyphs.h) now, because the Block
 		 * List's visibility column carries the same pair over the same scene
 		 * state. One drawing, two surfaces. */
-		if ( !markerOnly ) {
-			WwGlyphs::drawEye( painter,
-				QRectF( glyphRect( option.rect, SlotVisible ) ).adjusted( 2, 2, -2, -2 ),
-				visible, lit, dim );
-			WwGlyphs::drawSeeThrough( painter,
-				QRectF( glyphRect( option.rect, SlotGhost ) ).adjusted( 3, 3, -3, -3 ),
-				ghost, visible, lit, dim );
-		}
+		WwGlyphs::drawEye( painter,
+			QRectF( glyphRect( option.rect, SlotVisible ) ).adjusted( 2, 2, -2, -2 ),
+			visible, lit, dim );
+		WwGlyphs::drawSeeThrough( painter,
+			QRectF( glyphRect( option.rect, SlotGhost ) ).adjusted( 3, 3, -3, -3 ),
+			ghost, visible, lit, dim );
 
 		painter->restore();
 	}
@@ -672,8 +759,12 @@ public:
 	bool editorEvent( QEvent * event, QAbstractItemModel *, const QStyleOptionViewItem & option,
 		const QModelIndex & index ) override
 	{
+		// 0x8 is an INERT strip. The view claims its presses, so nothing reaches
+		// here today — but the delegate has to refuse it on its own, or the next
+		// surface that routes a click through the delegate toggles the primary.
 		if ( event->type() != QEvent::MouseButtonRelease || !toggleFlag
-			|| !displayFlags || displayFlags( index ) < 0 )
+			|| !displayFlags || displayFlags( index ) < 0
+			|| ( displayFlags( index ) & 0x8 ) )
 			return false;
 		auto * me = static_cast<QMouseEvent *>( event );
 		if ( me->button() != Qt::LeftButton )
@@ -823,6 +914,27 @@ static QPixmap poseFollowPixmap( const QColor & ink )
 	p.drawEllipse( QPointF( 6.4, 12.6 ), 2.0, 2.0 );
 	p.drawEllipse( QPointF( 9.6, 3.4 ), 2.0, 2.0 );
 	p.drawEllipse( QPointF( 12.6, 6.4 ), 2.0, 2.0 );
+	p.end();
+	return pm;
+}
+
+/*! The row arrow: a plain right-pointing triangle, drawn rather than taken from
+ *  the platform style so it follows the skin like every other glyph in the strip.
+ *  Takes its ink because it is painted twice over — accent for the primary,
+ *  inert grey for every other loaded document. */
+static QPixmap loadedNifArrowPixmap( const QColor & ink )
+{
+	const int s = LoadedNifArrowWidth;
+	QPixmap pm( s, s );
+	pm.fill( Qt::transparent );
+	QPainter p( &pm );
+	p.setRenderHint( QPainter::Antialiasing, true );
+	p.setPen( Qt::NoPen );
+	p.setBrush( ink );
+	QPolygonF tip;
+	tip << QPointF( s * 0.32, s * 0.16 ) << QPointF( s * 0.80, s * 0.50 )
+	    << QPointF( s * 0.32, s * 0.84 );
+	p.drawPolygon( tip );
 	p.end();
 	return pm;
 }
@@ -2062,11 +2174,20 @@ NifSkope::NifSkope( bool background )
 			// The primary is always drawn, so it has no visibility to toggle — but it
 			// can still be the marked skeleton, and that has to show.
 			markSkeleton( doc->nif );
-			// 0x8: marker only. The primary is always drawn, so it has no visibility
-			// to offer — but it can still BE a marked skeleton, face donor or weapon
-			// part, and that has to show.
+			/* 0x8: the strip is INERT — drawn in full, and not operable.
+			 *
+			 * The primary used to return -1 unless it carried a mark, so its row
+			 * had no strip at all: the one row in the list whose right edge was a
+			 * different shape, with the eye and the disc reading as lost rather
+			 * than withheld. It draws all six slots now, in the inert register.
+			 *
+			 * 0x1 goes on with it because the primary IS always drawn — an eye
+			 * painted shut on the one document that can never be hidden would be a
+			 * disabled control telling a lie. It is never see-through, so 0x2 does
+			 * not, and any mark it does carry still shows.
+			 */
 			if ( doc == this )
-				return ( flags & 0xD4 ) ? ( flags | 0x8 ) : -1;
+				return flags | 0x8 | 0x1;
 			if ( doc->sessionPreviewVisible && !doc->sessionPreviewUnloaded )
 				flags |= 0x1;
 			if ( doc->sessionPreviewGhost )
@@ -2089,6 +2210,15 @@ NifSkope::NifSkope( bool background )
 		return -1;
 	};
 	loadedDelegate->toggleFlag = [this]( const QModelIndex & idx, int slot ) {
+		/* THE PRIMARY'S STRIP IS INERT, and this is the lock that says so.
+		 *
+		 * The view swallows the press before it gets here, and every branch below
+		 * would fall through to the final return for the primary anyway — which
+		 * is exactly the kind of accident that stops being true when someone adds
+		 * a branch. A disabled control that is only disabled by coincidence is a
+		 * bug waiting for its second author. */
+		if ( documentFromBrowserIndex( idx ) == this )
+			return;
 		bool * visible = nullptr;
 		bool * ghost = nullptr;
 		bool * unloaded = nullptr;
@@ -2145,9 +2275,15 @@ NifSkope::NifSkope( bool background )
 		}
 		refreshAllDocumentSessions();
 	};
+	/* Which rows have a STRIP (so the press is claimed), and which of those are
+	 * inert (so the release does nothing). The primary is now both. */
 	loadedWorkspaceView->hasToggleButtons = [loadedDelegate]( const QModelIndex & idx ) {
 		const int flags = loadedDelegate->displayFlags ? loadedDelegate->displayFlags( idx ) : -1;
-		return flags >= 0 && !( flags & 0x8 );
+		return flags >= 0;
+	};
+	loadedWorkspaceView->toggleButtonsInert = [loadedDelegate]( const QModelIndex & idx ) {
+		const int flags = loadedDelegate->displayFlags ? loadedDelegate->displayFlags( idx ) : -1;
+		return flags >= 0 && ( flags & 0x8 ) != 0;
 	};
 	loadedWorkspaceView->toggleButton = loadedDelegate->toggleFlag;
 	loadedNifsView->setItemDelegate( loadedDelegate );
@@ -2169,11 +2305,13 @@ NifSkope::NifSkope( bool background )
 	loadedNifsView->setVerticalScrollMode( QAbstractItemView::ScrollPerPixel );
 	loadedNifsView->header()->setStretchLastSection( true );
 	loadedNifsView->header()->setToolTip( tr(
-		"Row key: arrow = primary · face = face donor · skull = skeleton (only one "
-		"at a time) · pistol = weapon part · bone = follows the skeleton's pose · "
-		"then the rule, then eye = visible · half-disc = semi-transparent. "
-		"A red name is unsaved. Everything right of the face donor is a one-click "
-		"toggle." ) );
+		"Row key: arrow = a loaded document, orange on the primary · face = face "
+		"donor · skull = skeleton (only one at a time) · pistol = weapon part · "
+		"bone = follows the skeleton's pose · then the rule, then eye = visible · "
+		"half-disc = semi-transparent. A red name is unsaved. Everything right of "
+		"the face donor is a one-click toggle, except on the primary row, where "
+		"the strip is shown faded because none of it applies to the document you "
+		"are editing." ) );
 	loadedWorkspaceView->sourceView = browserWorkspaceView;
 	loadedWorkspaceView->addBrowserRows = [this]( const QList<QPersistentModelIndex> & rows ) {
 		addNifBrowserRowsToLoaded( rows );
@@ -2805,11 +2943,15 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		name->setDragEnabled( true );
 		name->setDropEnabled( false );
 		name->setData( qulonglong( pointer ), NifBrowserDocumentRole );
-		// The arrow marks the primary; the skull moved into the toggle strip. Row
-		// COLOUR is selection only now — a visible row used to be painted as though
-		// it were selected, which left no way to see what actually was.
-		if ( primary )
-			name->setIcon( style()->standardIcon( QStyle::SP_ArrowRight ) );
+		/* NO ICON ON THE ITEM. The arrow that marks the primary used to be
+		 * QStyle::SP_ArrowRight set here, which is the platform's black triangle
+		 * and takes no notice of the skin. The delegate draws it for every row
+		 * now — accent on the primary, inert grey on the rest — so the model no
+		 * longer has to know which document is primary at all.
+		 *
+		 * Row COLOUR is selection only, as before: a visible row used to be
+		 * painted as though it were selected, which left no way to see what
+		 * actually was. */
 		QStringList tooltip;
 		tooltip << ( primary ? tr( "Primary editable document" )
 			: ( visible
@@ -8612,7 +8754,7 @@ bool NifSkope::renderMarkIconSheet( const QString & path ) const
 	const QColor back( wwSkinColor( "bg" ) );
 	const int rowH = 156, top = 112, left = 24, cellW = 300;
 
-	QPixmap sheet( left + cellW * 2 + 40, top + rowH * ( roles.size() + 1 ) + 30 );
+	QPixmap sheet( left + cellW * 2 + 40, top + rowH * ( roles.size() + 2 ) + 30 );
 	sheet.fill( back );
 	QPainter p( &sheet );
 	p.setRenderHint( QPainter::Antialiasing, true );
@@ -8645,6 +8787,17 @@ bool NifSkope::renderMarkIconSheet( const QString & path ) const
 		cell( left + cellW, y, e.draw( dim ), tr( "1x" ) );
 		y += rowH;
 	}
+
+	/* THE ROW ARROW, which is not a mark: every loaded document carries one, and
+	 * its two states are "this is the primary" and "this is not". Its dim column
+	 * is `textDisabled` rather than `textMuted`, because a non-primary arrow is
+	 * not a toggle that happens to be off — it is not a control at all. */
+	const QColor inertInk( wwSkinColor( "textDisabled" ) );
+	p.setPen( ink );
+	p.drawText( left, y - 34, tr( "row arrow — primary (accent) | every other loaded NIF (inert)" ) );
+	cell( left, y, loadedNifArrowPixmap( lit ), tr( "1x" ) );
+	cell( left + cellW, y, loadedNifArrowPixmap( inertInk ), tr( "1x" ) );
+	y += rowH;
 
 	/* THE CONTEXT ROW: the two display toggles and the rule between them and the
 	 * marks above, drawn through the delegate's own geometry so the sheet cannot
@@ -8703,6 +8856,25 @@ QRect NifSkope::loadedNifsGlyphRect( const QModelIndex & row, int slot ) const
 	if ( !loadedNifsView || !row.isValid() )
 		return QRect();
 	return loadedNifGlyphRect( loadedNifsView->visualRect( row ), slot );
+}
+
+/*! The viewport rect of one row's ARROW — the decoration, as the style placed it.
+ *
+ *  Asked of the delegate rather than recomputed, for the reason the glyph rect
+ *  exists: a check that samples pixels at a hand-derived offset is a check that
+ *  quietly stops looking at the control the day the layout moves.
+ */
+QRect NifSkope::loadedNifsArrowRect( const QModelIndex & row ) const
+{
+	if ( !loadedNifsView || !row.isValid() )
+		return QRect();
+	// static_cast, not qobject_cast: the delegate has no Q_OBJECT (it needs no
+	// signals), and this window set it itself a few hundred lines above.
+	auto * delegate = static_cast<LoadedNifsDelegate *>( loadedNifsView->itemDelegate() );
+	if ( !delegate )
+		return QRect();
+	return delegate->arrowRect( row, loadedNifsView->visualRect( row ),
+		loadedNifsView->viewport() );
 }
 
 bool NifSkope::grabLoadedNifsView( const QString & path ) const

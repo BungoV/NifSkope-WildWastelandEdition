@@ -14,8 +14,12 @@
  * "bgCard", "bgInput", "bgBtn", "bgBtnHover", "bgBtnDown", "bgHeader",
  * "border", "borderDim", "borderStrong", "focus", "scroll", "scrollHover",
  * "text", "textMuted", "textBright", "accent", "accentText", "accentBg",
- * "danger", "viewport", "selBgActive", "selBgInactive", "selTextActive",
- * "selTextInactive".
+ * "textDisabled", "accentDisabled", "danger", "viewport", "selBgActive",
+ * "selBgInactive", "selTextActive", "selTextInactive".
+ *
+ * "textDisabled"/"accentDisabled" are the INERT register: `textMuted` and
+ * `accent` mean "off" and "on" for a control you can click, and a control you
+ * cannot click has to be visibly a different thing from one that is merely off.
  *
  * An unknown name returns an empty string and warns, which shows up as an
  * ignored CSS declaration rather than a wrong colour.

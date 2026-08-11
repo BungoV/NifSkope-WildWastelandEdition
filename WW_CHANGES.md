@@ -1,5 +1,77 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11d — the Loaded-NIFs row arrow, and the primary's strip is drawn but dead
+
+**Every loaded document has an arrow now, and the primary's is orange.** It was
+`QStyle::SP_ArrowRight` set as an icon on the primary row's item — the platform's
+own black triangle, on one row, and the single mark in this panel that took no
+notice of the skin. It is a drawn glyph in `loadedNifArrowPixmap` now, handed to
+the style as the item's DECORATION by the delegate: `accent` on the primary,
+`textDisabled` on every other loaded document. The model no longer has to know
+which document is primary, and the column of arrows says what is being edited
+rather than which row happens to carry an icon.
+
+It is worth being explicit that this was **not** the tree's expand indicator, and
+that the block list's `drawBranches` gutter rule does not apply here: the view
+sets `rootIsDecorated(false)` and its model is flat, so nothing in it expands and
+`drawBranches` never draws. There was no expander behaviour to reconcile with
+"an arrow on every row".
+
+**The primary row shows its toggles instead of withholding them.** It used to
+return -1 from `displayFlags` unless it carried a mark, so the one row in the
+list you always have was the one row whose right edge was a different shape: the
+eye and the disc read as lost rather than as inapplicable. All six slots are
+painted now, in an INERT register, and `0x1` goes on with `0x8` because the
+primary really is always drawn — an eye painted shut on the one document that
+cannot be hidden would be a disabled control telling a lie.
+
+**Disabled is not off, and the skin says so in two new tokens.** `accent` over
+`textMuted` means ON over OFF, and both of those are controls: the dim one is
+inviting a click. Reusing "off" for glyphs that cannot be clicked would have said
+the opposite of the truth at full strength. `textDisabled` (#6b7076 dark) is
+dimmer than muted, and `accentDisabled` (#8a6a3f) is desaturated to about the
+same distance from the row, so a mark the primary DOES carry stays legible
+without looking live. Measured off the real capture: primary skull/pistol/bone
+`#6b7076` against the live row's `#aeb3ba`, primary eye `#8a6a3f` against
+`#f0a54a`, primary arrow `#f0a54a` against the others' `#6b7076`.
+
+**Inert claims the press and then does nothing with it.** A disabled control is
+not a hole through which the row underneath gets selected or dragged, so the
+view's press-claim loop takes the primary's glyph rects as before and the RELEASE
+consults a new `toggleButtonsInert` predicate instead of calling `toggleButton`.
+`toggleFlag` refuses the primary in its own right and `editorEvent` refuses an
+0x8 strip in its own right — every branch below already fell through for the
+primary, which is exactly the sort of accident that stops being true when someone
+adds a branch. There is no hover cursor over the strip and none was added.
+
+**A harness wrote its scratch NIFs into the machine's temp, and the machine's
+temp is C:\Windows.** Launched from a shell with no TMP, Qt resolves
+`QDir::tempPath()` to `C:\Windows` here — the same broken-TMP fallback that sends
+g++ hunting there for its intermediates. The write is refused, the refusal is a
+BLOCKING message box, and a run left "Could not write
+C:/Windows/ww_browser_dragged.nif" sitting on the user's screen until the
+shell's own deadline killed the process. Both scratch NIFs and the collision
+suite's throwaway Library root now live beside the binary in `release/`, which
+already holds every `ww_*` log and capture and is gitignored; the location is
+asserted, not assumed, because "the file has bytes" is happy with the file being
+anywhere. As belt to those braces the Loaded-NIFs block installs a standing
+answerer that dismisses any modal still up 1.5 seconds unclaimed — Discard and No
+first, so a close-a-modified-document prompt is never answered with Save, and Ok
+for an error box, which has to be clicked rather than waited out. The delay is
+what keeps it away from the checks that raise a modal deliberately and answer it
+from their own `singleShot(0)`.
+
+That is also why `loaded_nifs.sh` had been reporting five failures and a hang: it
+was the same write, failing in two places. It is **133/133** now, up from 131
+checks with 5 failures, with fourteen new ones covering the arrow's colour on
+every row, all five of the primary's glyphs being painted, the disabled ink being
+neither the enabled-off ink nor within tolerance of it, five presses moving no
+state and repainting the row not one pixel differently, and — as the control that
+makes the last of those mean anything — the same synthetic press still toggling a
+live row's eye. `weapon_mark.sh` **85/85**. `release/ww_loadednifs_primary_row.png`
+is the capture; `release/ww_icon_sheet.png` gains the arrow at 1x and 8x in both
+inks.
+
 ## 2026-08-11c — H works in the Block List, and Summary became the visibility toggles
 
 **H and Alt+H now do in the Block List exactly what they do in the viewport**,

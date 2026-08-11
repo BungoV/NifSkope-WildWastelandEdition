@@ -301,6 +301,19 @@ static const struct WwSkinVar { const char * name; const char * dark; const char
 	{ "accent",       "#f0a54a", "#c07000" },  // selection accent, active toggles
 	{ "accentText",   "#ffb54a", "#a05a00" },  // text on an accented toggle
 	{ "accentBg",     "#40331f", "#f6e6c8" },  // amber toggle plate
+	/* DISABLED is not the same register as OFF, and the Loaded-NIFs strip is where
+	 * that stopped being a matter of taste.
+	 *
+	 * A glyph drawn in `textMuted` means "off — click me"; the primary row's
+	 * glyphs are drawn but cannot be clicked at all, and reusing `textMuted` for
+	 * them would have said the opposite of the truth at full strength. So there is
+	 * a second, dimmer grey for ink that is inert, and an amber to match it for a
+	 * mark an inert row does carry — desaturated to roughly the same distance from
+	 * the background as `textDisabled`, so the pair reads as one faded register
+	 * rather than one faded glyph beside one lit one.
+	 */
+	{ "textDisabled", "#6b7076", "#a2a6ab" },  // inert glyph / label ink
+	{ "accentDisabled", "#8a6a3f", "#d6ab6e" },  // a set mark on an inert control
 	{ "danger",       "#ff8484", "#c0392b" },  // invalid / error text
 	{ "viewport",     "#2b2d31", "#c8ccd0" },  // GL clear colour (Render settings default)
 	/* Tree/list selection, shared by every view that highlights rows.
@@ -9220,8 +9233,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const QString libraryKey = QStringLiteral( "Settings/Library/Library Folder" );
 					const bool hadLibrary = librarySettings.contains( libraryKey );
 					const QVariant oldLibrary = librarySettings.value( libraryKey );
-					const QString collisionLibrary = QDir::temp().filePath(
-						QStringLiteral( "ww-collision-library-%1" )
+					/* Beside the binary, not in QDir::temp(): on this machine a harness
+					 * launched from a shell without TMP resolves Qt's temp to C:\Windows,
+					 * where every write is refused. The Loaded-NIFs suite learned that
+					 * the loud way (a blocking "could not write" box); this one would
+					 * simply have failed two checks for a reason nowhere near them. The
+					 * directory is removed at both ends and release/ is gitignored. */
+					const QString collisionLibrary = QDir( QApplication::applicationDirPath() )
+						.filePath( QStringLiteral( "ww-collision-library-%1" )
 							.arg( QCoreApplication::applicationPid() ) );
 					QDir( collisionLibrary ).removeRecursively();
 					librarySettings.setValue( libraryKey, collisionLibrary );
@@ -10174,6 +10193,45 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
 					log.flush();
 				};
+
+				/* A STANDING ANSWERER FOR MODALS NOBODY CLAIMED.
+				 *
+				 * A blocking dialog inside a harness does not fail the run — it stops
+				 * it, on the user's screen, until the shell's deadline kills the
+				 * process. That happened: a scratch NIF written to the machine's temp
+				 * resolved to C:\Windows, the refused write raised "Could not write
+				 * ...", and the box sat there with an OK button and nobody to press it.
+				 *
+				 * The write is fixed at its source (scratch NIFs live beside the binary
+				 * now — see draggedSave below), and this is the belt to that pair of
+				 * braces: nothing this suite does may strand a modal on a real screen.
+				 *
+				 * It waits ~1.5 seconds of the SAME dialog before acting, because every
+				 * check that deliberately raises a modal answers it from its own
+				 * singleShot(0) the instant it appears. Only a dialog nobody claimed
+				 * survives long enough to be seen here. Discard and No come first, so a
+				 * close-a-modified-document prompt is never answered with Save; an error
+				 * box carries nothing but Ok, which has to be CLICKED, not waited out.
+				 */
+				auto * strayModals = new QTimer( qApp );
+				QObject::connect( strayModals, &QTimer::timeout, qApp, []() {
+					static QWidget * watched = nullptr;
+					static int held = 0;
+					QWidget * modal = QApplication::activeModalWidget();
+					if ( modal != watched ) { watched = modal; held = 0; return; }
+					if ( !modal || ++held < 15 ) return;
+					held = 0;
+					if ( auto * mb = qobject_cast<QMessageBox *>( modal ) ) {
+						QAbstractButton * button = mb->button( QMessageBox::Discard );
+						if ( !button ) button = mb->button( QMessageBox::No );
+						if ( !button ) button = mb->button( QMessageBox::Cancel );
+						if ( !button ) button = mb->button( QMessageBox::Ok );
+						if ( !button && !mb->buttons().isEmpty() ) button = mb->buttons().last();
+						if ( button ) { button->click(); return; }
+					}
+					modal->close();		// a file dialog, or anything else stuck open
+				} );
+				strayModals->start( 100 );
 				do {
 					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
 					const QString add = qEnvironmentVariable( "WW_LOADEDNIFS_TEST" );
@@ -10815,6 +10873,228 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->markWorkspaceFollowerRow( row, false );
 					}
 
+					/* THE PRIMARY ROW: a full strip, drawn and DEAD — and the arrow
+					 * every loaded document now carries.
+					 *
+					 * Two changes shipped together here and they fail in opposite
+					 * directions, so nothing below measures them jointly.
+					 *
+					 * The ARROW was QStyle::SP_ArrowRight set on the primary item —
+					 * the platform's black triangle, on one row, ignoring the skin.
+					 * "It is drawn" is therefore not the check: the old one was drawn
+					 * perfectly, in the wrong ink, which is the entire bug. What is
+					 * asserted is the COLOUR of its pixels, on every row.
+					 *
+					 * The primary's TOGGLES are drawn and inert. "They are drawn"
+					 * would also pass on a strip that worked; "they do nothing" would
+					 * also pass on the old code, which drew nothing at all. Neither
+					 * check is worth anything without the other, and the pair only
+					 * means something beside a live row proving the same synthetic
+					 * press still toggles when it is allowed to.
+					 */
+					if ( skope->loadedNifsModel->rowCount() >= 2 ) {
+						QModelIndex primaryRow;
+						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
+							const QModelIndex idx = skope->loadedNifsModel->index( r, 0 );
+							if ( skope->documentFromBrowserIndex( idx ) == skope )
+								primaryRow = idx;
+						}
+						const QModelIndex otherRow = skope->loadedNifsModel->index(
+							skope->loadedNifsModel->rowCount() - 1, 0 );
+						check( "the list holds the primary row and a second document",
+							primaryRow.isValid() && otherRow.isValid()
+								&& otherRow != primaryRow
+								&& skope->documentFromBrowserIndex( otherRow ) != skope );
+
+						// A known unmarked starting state on BOTH rows, so every ink
+						// sampled below is an "off" one rather than a leftover mark.
+						skope->setWorkspaceSkeletonDocument( -1 );
+						skope->markWorkspaceWeaponRow( row, false );
+						skope->markWorkspaceFollowerRow( row, false );
+						skope->setWorkspaceDisplayMode( row, 1 );
+						skope->loadedNifsView->selectionModel()->clear();
+						skope->loadedNifsView->setCurrentIndex( QModelIndex() );
+						skope->loadedNifsView->viewport()->update();
+						QApplication::processEvents();
+
+						auto sendTo = [skope]( QEvent::Type type, const QPoint & p,
+								Qt::MouseButton b, Qt::MouseButtons held ) {
+							QMouseEvent e( type, QPointF( p ),
+								QPointF( skope->loadedNifsView->viewport()->mapToGlobal( p ) ),
+								b, held, Qt::NoModifier );
+							QApplication::sendEvent( skope->loadedNifsView->viewport(), &e );
+							QApplication::processEvents();
+						};
+						auto pressRelease = [&sendTo]( const QPoint & at ) {
+							sendTo( QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton );
+							sendTo( QEvent::MouseButtonRelease, at, Qt::LeftButton, Qt::NoButton );
+						};
+						auto noSelection = [skope]() {
+							return skope->loadedNifsView->selectionModel()->selectedRows().isEmpty()
+								&& !skope->loadedNifsView->currentIndex().isValid();
+						};
+
+						/* The row BACKDROP is the modal colour of the row, not a fixed
+						 * sample point: a fixed point lands on the text, or on a glyph,
+						 * the first time anything about the layout moves. */
+						auto backdrop = []( const QImage & img, const QRect & r, qreal dpr ) {
+							QHash<QRgb, int> seen;
+							for ( int y = int( r.top() * dpr ); y < int( r.bottom() * dpr ); y++ )
+								for ( int x = int( r.left() * dpr ); x < int( r.right() * dpr ); x++ )
+									if ( img.valid( x, y ) ) seen[img.pixel( x, y )]++;
+							QRgb best = 0;
+							int bestN = -1;
+							for ( auto it = seen.constBegin(); it != seen.constEnd(); ++it )
+								if ( it.value() > bestN ) { bestN = it.value(); best = it.key(); }
+							return QColor( best );
+						};
+						/* A glyph's INK is the pixel FURTHEST from that backdrop, plus
+						 * how many pixels are ink at all.
+						 *
+						 * Furthest, never averaged: an averaged glyph is mostly its own
+						 * antialiasing blended back toward the row, which drags every
+						 * measurement toward the background and would happily let an
+						 * accent arrow and a grey one land within tolerance of each
+						 * other. The count is the separate question of whether anything
+						 * was painted in the box at all. */
+						auto glyphInk = []( const QImage & img, const QRect & r, qreal dpr,
+								const QColor & bg, int * painted ) {
+							QColor best = bg;
+							int bestD = 0, lit = 0;
+							for ( int y = int( r.top() * dpr ); y < int( r.bottom() * dpr ); y++ )
+								for ( int x = int( r.left() * dpr ); x < int( r.right() * dpr ); x++ ) {
+									if ( !img.valid( x, y ) ) continue;
+									const QColor c = img.pixelColor( x, y );
+									const int d = qAbs( c.red() - bg.red() )
+										+ qAbs( c.green() - bg.green() )
+										+ qAbs( c.blue() - bg.blue() );
+									if ( d > 30 ) lit++;
+									if ( d > bestD ) { bestD = d; best = c; }
+								}
+							if ( painted ) *painted = lit;
+							return best;
+						};
+						auto sameInk = []( const QColor & got, const QColor & want, int tol ) {
+							return qAbs( got.red() - want.red() ) <= tol
+								&& qAbs( got.green() - want.green() ) <= tol
+								&& qAbs( got.blue() - want.blue() ) <= tol;
+						};
+
+						const QPixmap listShot = skope->loadedNifsView->viewport()->grab();
+						const QImage list = listShot.toImage();
+						const qreal listDpr = listShot.devicePixelRatio();
+						const QColor accentInk = QColor::fromString( wwSkinColor( "accent" ) );
+						const QColor inertInk = QColor::fromString( wwSkinColor( "textDisabled" ) );
+						const QColor mutedInk = QColor::fromString( wwSkinColor( "textMuted" ) );
+
+						/* 1. EVERY row carries an arrow, and none of them is black. */
+						int arrowedRows = 0, blackArrows = 0;
+						bool everyArrowInRegister = true;
+						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
+							const QModelIndex idx = skope->loadedNifsModel->index( r, 0 );
+							const QRect box = skope->loadedNifsArrowRect( idx );
+							if ( !box.isValid() ) { everyArrowInRegister = false; continue; }
+							const QColor bg = backdrop( list,
+								skope->loadedNifsView->visualRect( idx ), listDpr );
+							int painted = 0;
+							const QColor got = glyphInk( list, box, listDpr, bg, &painted );
+							if ( painted >= 16 ) arrowedRows++;
+							else everyArrowInRegister = false;
+							const bool primary = skope->documentFromBrowserIndex( idx ) == skope;
+							if ( !sameInk( got, primary ? accentInk : inertInk, 26 ) )
+								everyArrowInRegister = false;
+							if ( got.red() + got.green() + got.blue() < 120 )
+								blackArrows++;
+						}
+						check( "every Loaded NIF row paints an arrow in its gutter",
+							arrowedRows == skope->loadedNifsModel->rowCount() );
+						check( "...the primary's in the skin accent, every other in the inert grey",
+							everyArrowInRegister );
+						check( "...and none of them is the platform's black triangle",
+							blackArrows == 0 );
+
+						/* 2. The primary's five toggles are PAINTED, in the inert ink.
+						 *
+						 * Slot 1 is the skull, unmarked on both rows here, so the two
+						 * samples differ only in which register drew them: inert on the
+						 * primary, plain muted on the live row. That is the distinction
+						 * the change exists to make, so it is asserted in both
+						 * directions rather than as "the primary is dimmer". */
+						int primarySlotsPainted = 0;
+						QColor primaryOffInk, liveOffInk;
+						const QColor primaryBg = backdrop( list,
+							skope->loadedNifsView->visualRect( primaryRow ), listDpr );
+						for ( int slot = 1; slot <= 5; slot++ ) {
+							int painted = 0;
+							glyphInk( list, skope->loadedNifsGlyphRect( primaryRow, slot ),
+								listDpr, primaryBg, &painted );
+							if ( painted >= 4 ) primarySlotsPainted++;
+						}
+						primaryOffInk = glyphInk( list,
+							skope->loadedNifsGlyphRect( primaryRow, 1 ), listDpr, primaryBg, nullptr );
+						liveOffInk = glyphInk( list, skope->loadedNifsGlyphRect( otherRow, 1 ), listDpr,
+							backdrop( list, skope->loadedNifsView->visualRect( otherRow ), listDpr ),
+							nullptr );
+						check( "the primary row paints all five toggle glyphs",
+							primarySlotsPainted == 5 );
+						check( "...in the DISABLED ink, which is not the enabled OFF ink",
+							sameInk( primaryOffInk, inertInk, 26 )
+								&& sameInk( liveOffInk, mutedInk, 26 )
+								&& !sameInk( primaryOffInk, mutedInk, 26 ) );
+
+						/* 3. ...and every one of them is dead to the press. */
+						NifModel * skeletonWas = skope->ogl ? skope->ogl->workspaceSkeleton() : nullptr;
+						const bool weaponWas = nifIsWeaponMarked( skope->nif );
+						const bool followWas = skope->ogl
+							&& skope->ogl->isWorkspaceFollower( skope->nif );
+						const bool visibleWas = skope->sessionPreviewVisible;
+						const bool ghostWas = skope->sessionPreviewGhost;
+						const QImage rowBefore = skope->loadedNifsView->viewport()->grab(
+							skope->loadedNifsView->visualRect( primaryRow ) ).toImage();
+						bool primaryPressNeverSelects = true;
+						for ( int slot = 1; slot <= 5; slot++ ) {
+							pressRelease( skope->loadedNifsGlyphRect( primaryRow, slot ).center() );
+							primaryPressNeverSelects &= noSelection();
+						}
+						const QImage rowAfter = skope->loadedNifsView->viewport()->grab(
+							skope->loadedNifsView->visualRect( primaryRow ) ).toImage();
+						check( "pressing the primary's toggles moves no workspace state",
+							( skope->ogl ? skope->ogl->workspaceSkeleton() : nullptr ) == skeletonWas
+								&& nifIsWeaponMarked( skope->nif ) == weaponWas
+								&& ( skope->ogl
+									&& skope->ogl->isWorkspaceFollower( skope->nif ) ) == followWas
+								&& skope->sessionPreviewVisible == visibleWas
+								&& skope->sessionPreviewGhost == ghostWas );
+						check( "...and repaints the row not one pixel differently",
+							rowBefore == rowAfter );
+						check( "...and never selects the row it refused to toggle",
+							primaryPressNeverSelects );
+						// no cursor that promises a control: the strip is not a link,
+						// and a hand over a dead glyph would be the lie
+						sendTo( QEvent::MouseMove,
+							skope->loadedNifsGlyphRect( primaryRow, 4 ).center(),
+							Qt::NoButton, Qt::NoButton );
+						check( "...and offers no cursor feedback over the dead glyphs",
+							skope->loadedNifsView->viewport()->cursor().shape() == Qt::ArrowCursor );
+
+						/* 4. THE CONTROL. The same synthetic press on a live row still
+						 * works, so check 3 is measuring "inert" and not "the harness
+						 * stopped reaching the strip". */
+						const bool liveWas = skope->workspaceDisplayMode( row ) != 0;
+						pressRelease( skope->loadedNifsGlyphRect( otherRow, 4 ).center() );
+						check( "the same press on a non-primary row still toggles its eye",
+							( skope->workspaceDisplayMode( row ) != 0 ) != liveWas );
+						pressRelease( skope->loadedNifsGlyphRect( otherRow, 4 ).center() );
+						check( "...and puts it back",
+							( skope->workspaceDisplayMode( row ) != 0 ) == liveWas );
+
+						const QString primaryShot = QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_loadednifs_primary_row.png" );
+						check( "the primary row and its inert strip render",
+							skope->grabLoadedNifsView( primaryShot ) );
+						log << "  " << primaryShot << "\n";
+					}
+
 					/* OPEN THE REAL ROW MENU long enough to inspect and render it. */
 					if ( skope->loadedNifsModel->rowCount() > 0 ) {
 						const QModelIndex menuRow = skope->loadedNifsModel->index(
@@ -11004,7 +11284,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							break;
 						}
 					}
-					const QString draggedSave = QDir::tempPath()
+					/* SCRATCH NIFS GO BESIDE THE BINARY, NEVER IN THE MACHINE'S TEMP.
+					 *
+					 * This was QDir::tempPath(), and on this machine Qt resolves that to
+					 * C:\Windows whenever the launching shell has no TMP — the same
+					 * broken-TMP fallback that sends g++ hunting there for its
+					 * intermediates. The write is refused, and the refusal is a BLOCKING
+					 * message box, so a harness run left "Could not write
+					 * C:/Windows/ww_browser_dragged.nif" sitting on the user's screen
+					 * until its own deadline killed the process. No check may depend on
+					 * the machine's temp being sane: release/ already holds every ww_*
+					 * log and capture, is beside the binary by construction, and is
+					 * gitignored.
+					 */
+					const QString draggedSave = QApplication::applicationDirPath()
 						+ QStringLiteral( "/ww_browser_dragged.nif" );
 					QFile::remove( draggedSave );
 					skope->markWorkspaceDocumentUnsaved( draggedBackground );
@@ -11013,6 +11306,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						draggedLoadedRow, draggedSave );
 					check( "Loaded NIFs -> browser writes the dragged in-memory NIF",
 						draggedSaved && QFileInfo( draggedSave ).size() > 0 );
+					/* ...INTO release/, and this is asserted rather than assumed.
+					 *
+					 * The check above is happy with a byte-count anywhere on the disk, and
+					 * "anywhere" was the machine's temp, which is C:\Windows here. The
+					 * write failed, the failure was a modal, and the run stopped dead with
+					 * the box on the user's screen. So the location is now part of the
+					 * contract, not an implementation detail of the path expression. */
+					check( "...beside the binary, never in the machine's temp",
+						QFileInfo( draggedSave ).exists()
+							&& QDir( QFileInfo( draggedSave ).absolutePath() )
+								== QDir( QApplication::applicationDirPath() ) );
 					check( "Save As retains the row and clears its unsaved state",
 						skope->workspaceDocumentCount() == beforeDraggedSave
 							&& !skope->workspaceDocumentModified( draggedBackground )
@@ -11133,7 +11437,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * before the save as well, and proves nothing.
 					 */
 					{
-						const QString to = QDir::tempPath()
+						// beside the binary, not in the machine's temp — see the note on
+						// draggedSave above: a failed temp write is a blocking modal
+						const QString to = QApplication::applicationDirPath()
 							+ QStringLiteral( "/ww_loadednifs_saved.nif" );
 						QFile::remove( to );
 						skope->markWorkspaceDocumentUnsaved( row );
@@ -11143,6 +11449,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						const qint64 size = QFileInfo( to ).size();
 						log << "saved row to " << to << ": " << size << " bytes\n";
 						check( "Save As writes the file", wrote && size > 0 );
+						// ...and beside the binary, for the reason draggedSave states
+						check( "...into release/, not the machine's temp",
+							QFileInfo( to ).exists()
+								&& QDir( QFileInfo( to ).absolutePath() )
+									== QDir( QApplication::applicationDirPath() ) );
 						check( "...and the row stops being unsaved",
 							!skope->workspaceDocumentModified( row ) );
 						check( "...and it now knows where it lives",

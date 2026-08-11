@@ -31,6 +31,30 @@
 #   6. ...the row that was opened has left the list
 #   7. ...and the document it displaced is in the list, by name
 #
+# AND THE ROW STRIP, which this suite owns the gesture contract for:
+#
+#   8. EVERY row paints an arrow in its gutter, and the check is its COLOUR --
+#      accent on the primary, the inert grey on every other loaded document.
+#      The arrow it replaced was QStyle::SP_ArrowRight: drawn perfectly, in the
+#      platform's black, on one row. "It is drawn" would have passed on that
+#      too, so the assertion samples pixels and refuses anything near black
+#   9. the primary row paints ALL FIVE toggle glyphs (it used to paint none, so
+#      it was the one row whose strip was a different shape) ...
+#  10. ...in the DISABLED ink, asserted in both directions: the primary's off
+#      glyph is the inert grey AND a live row's off glyph is the plain muted
+#      one AND the two are not within tolerance of each other
+#  11. ...and pressing any of them moves no workspace state, repaints the row
+#      not one pixel differently, never selects it, and offers no cursor
+#      feedback -- with the SAME synthetic press on a live row still toggling
+#      its eye, so 11 is measuring "inert" and not "the harness stopped
+#      reaching the strip"
+#  12. every scratch NIF this suite writes lands beside the binary. It used to
+#      write into QDir::tempPath(), which resolves to C:\Windows on this
+#      machine when the launching shell has no TMP; the refused write raised a
+#      BLOCKING message box and the run died on its deadline with the box on
+#      the user's screen. A standing answerer now dismisses any modal that has
+#      been up 1.5s unclaimed, but the location is the actual fix
+#
 # FIXTURE: three cube fixtures (`new --cube`) under a loose Data/meshes
 # tree. No game corpus.
 #
