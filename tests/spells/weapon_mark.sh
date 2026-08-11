@@ -77,13 +77,24 @@
 #      flash. A flash mesh declares NO connect points at all (measured on
 #      MiniGunMuzzeFlash.nif: neither ::Children nor ::Parents), so the ordinary
 #      name match has nothing to work with and the fallback would leave the
-#      fireball on the WEAPON bone, at the shooter's fist. It is placed on the
-#      farthest-forward point the assembly actually publishes instead -- nothing
-#      is invented, and when nothing is published it still falls back to the bone
-#      and says so. Both shapes that line takes in the corpus are asserted:
-#        - a BARE MINIGUN publishes no muzzle point, only P-FlashShort / P-FlashMid
-#          / P-FlashFar for its three barrel lengths; the flash takes the farthest
-#          and lands at gun-frame y 135.3, well past the gun's own geometry (18.6);
+#      fireball on the WEAPON bone, at the shooter's fist. It is placed on a
+#      point the assembly actually publishes instead -- nothing is invented, and
+#      when nothing is published it still falls back to the bone and says so.
+#      Three shapes that line takes in the corpus are asserted:
+#        - a BARE MINIGUN publishes no muzzle point, only P-FlashShort /
+#          P-FlashMid / P-FlashFar -- and those are not one point, they are one
+#          station PER BARREL LENGTH. Farthest-wins lit the fireball at
+#          P-FlashFar, 106.8 along the bore, on a gun whose own geometry stops at
+#          50.1: a fireball hanging in mid-air 56 units in front of the barrel.
+#          The rule is the first station BEYOND the assembly's geometry, measured
+#          on the meshes' BOUNDS and not their pivots (a pivot sweep says 18.6),
+#          so the bare gun takes P-FlashShort at 70.1;
+#        - the SAME GUN with a long barrel merged on first goes FURTHER, not
+#          nearer: every minigun barrel in the corpus publishes P-Muzzle, a
+#          higher rung than the flash family, so the flash resolves onto the
+#          barrel's own muzzle. That is the check that the extent rule caps
+#          nothing -- it can only ever pull the flash in toward a gun that has
+#          not been extended;
 #        - a KITTED 10mm ends in a suppressor, which publishes a projectile node,
 #          so the flash stops there at y 71.9 rather than on the receiver's own
 #          projectile node or the barrel's. There is no 10mm flash mesh in the
@@ -183,6 +194,7 @@ trap 'rm -f "$PLAIN"' EXIT
 #  13 rifle receiver  14 rifle stock  15 rifle barrel  16 rifle silencer
 #  17 a clean rig for the rifle        18 a muzzle flash (an animated effect NIF)
 #  19 a bare gun with flash points but no muzzle point
+#  20 a second one of it, to take a barrel BEFORE the flash
 #
 # THREE SKELETONS, not one. Each gun gets its own rig because the merge shares
 # NiNodes by name: the 10mm and the hunting rifle both carry a `WeaponMagazine`,
@@ -209,6 +221,7 @@ FIXTURE=(
 	"$WHR/HuntingRifleSilencer.nif"
 	"$PA/skeleton.nif"
 	"$WMG/MiniGunMuzzeFlash.nif"
+	"$WMG/Minigun.nif"
 	"$WMG/Minigun.nif"
 )
 
@@ -246,4 +259,21 @@ wait "$pid" 2>/dev/null
 cat "$LOG"
 echo "list capture: release/ww_weaponmark_list.png"
 grep -q '^PASS$' "$LOG" || exit 1
+
+# THE TWO FLASH ANSWERS, OUT HERE AS WELL.
+#
+# Every distance band in the log is satisfied by more than one of the minigun's
+# three flash stations -- they are all "well in front of the gun" -- so the point
+# NAME is the only thing that separates a right answer from a wrong one, and it
+# is worth failing on where anyone reading this file can see it.
+grep -q 'the end of the barrel chain on P-FlashShort from Minigun001' "$LOG" || {
+	echo "FAIL: the bare minigun's flash is not on P-FlashShort, the first station"
+	echo "      past the gun's own geometry"
+	exit 1
+}
+grep -q 'the end of the barrel chain on P-Muzzle from Minigun_Barrel' "$LOG" || {
+	echo "FAIL: with a long barrel fitted the flash did not move up to the barrel's"
+	echo "      own P-Muzzle"
+	exit 1
+}
 exit 0

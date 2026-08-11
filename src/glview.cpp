@@ -1732,6 +1732,18 @@ bool GLView::poseExportOutfitStudio( const QString & path, const QString & name,
 	return AnimSetup::writeOutfitStudioPose( model, path, name, poseRestPose, error );
 }
 
+/*! The SAM export has no rest base and no pose-mode requirement.
+ *
+ * An Outfit Studio pose is a DELTA from the rest captured on entering pose mode,
+ * so its export is only meaningful inside that mode. A SAM entry replaces the
+ * node's local transform outright, so the file's current bone transforms ARE the
+ * pose and this writes them wherever it is called from.
+ */
+bool GLView::poseExportSam( const QString & path, const QString & name, int * written, QString * error )
+{
+	return AnimSetup::writeSamPose( model, path, name, written, error );
+}
+
 int GLView::poseMirrorBone( int block )
 {
 	if ( !model || block < 0 )

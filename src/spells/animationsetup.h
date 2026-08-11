@@ -170,6 +170,56 @@ bool writeOutfitStudioPose( NifModel * nif, const QString & path, const QString 
 bool applySamPose( NifModel * nif, const QString & path, float blend,
                    int * applied, int * missing, QString * error );
 
+//! The nodes a SAM export writes, as block numbers in block order.
+/*! THE RULE, and it is structural — there is no list of bone names anywhere.
+ *  A node is exported when
+ *
+ *    - it is a named NiAVObject (an unnamed node cannot be a JSON key), and
+ *    - it hangs below a file root at DEPTH >= 2, which drops the root itself
+ *      (the file's identity, never a bone) and the root's own children — on
+ *      every Fallout 4 skeleton those are `Root`, the actor's world placement
+ *      node, and `CharacterBumper`, neither of which any pose names, and
+ *    - its name does not end in `_skin` (case-insensitively: the PA skeleton
+ *      spells one of them `Chest_Rear_Skin`). Those are the skinning proxies
+ *      the body meshes weight against, not bones anything poses.
+ *
+ *  Measured against the corpus: on the FO4 power-armour skeleton this writes 96
+ *  keys and the 80-pose SAM corpus writes 89 — a strict subset. The 7 extra are
+ *  OpenArmor, ProjectileNode and Wheel, all three of which SAM's OWN node map
+ *  (`SAF/NodeMaps/Power Armor.txt`, 140 entries) lists, plus the four camera-rig
+ *  nodes (Camera, "Camera Control", CamTarget, CamTargetParent) it does not.
+ *  Exporting a few nodes a given pose omits is how SAM itself behaves — a pose
+ *  routinely names bones a file lacks and vice versa, and both sides skip what
+ *  they do not recognise. */
+QVector<int> samPoseBones( const NifModel * nif );
+
+//! The value the SAM export puts in its informational "skeleton" field.
+/*! SAM writes the name of the node map it posed through ("Vanilla" by default).
+ *  Nothing reads it back — this fork's importer ignores the field entirely — so
+ *  it is derived from the bones present rather than asked for: "Power Armor"
+ *  when Pauldron_Armor AND Tank_Armor exist, "Human" when a RibHelper does
+ *  (each set is exclusive to its skeleton across SAF's own two node maps), else
+ *  the file root's name, else SAM's own "Vanilla". */
+QString samSkeletonName( const NifModel * nif );
+
+//! Write the file's CURRENT bone transforms as a Screen Archer Menu pose (.json).
+/*! The exact inverse of applySamPose: each node's own local transform, absolute,
+ *  with the rotation taken back through `Matrix::toEuler` — which is SAM's
+ *  `MatrixToEulerYPR` element for element, both gimbal branches included, once
+ *  its transposed storage is accounted for — and converted to degrees.
+ *
+ *  Every channel is written as a JSON STRING, as SAM writes them, at SIX
+ *  decimals INCLUDING the angles. SAM's own writer uses "%.02f" for yaw/pitch/
+ *  roll, which costs up to ~0.005 degrees; nothing in the format requires that
+ *  and its own reader is a plain float parse, so this writes the precision it
+ *  has. `version` stays a NUMBER (2), as in SAM's files.
+ *
+ *  \param poseName the "name" field; the file's base name when empty.
+ *  \param written  bones written (optional).
+ *  \param error    failure message; on success, any non-fatal note. */
+bool writeSamPose( const NifModel * nif, const QString & path, const QString & poseName,
+                   int * written, QString * error );
+
 //! Do these nodes form a real NiNode parent hierarchy, or a flat bone list?
 /*! A skinned armour piece or a Power Armor frame carries dozens of named
  *  NiNodes because its skin lists the bones it references, but every one of them

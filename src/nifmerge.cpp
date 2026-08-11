@@ -1297,6 +1297,40 @@ QString freeNodeName( const NifModel * target, const NifModel * donor, const QSt
 	return base;
 }
 
+/*! How far the assembly's GEOMETRY reaches along \a bore from \a anchor.
+ *
+ *  BOUNDING, NOT PIVOTS. A weapon's shapes are almost all authored at the gun's
+ *  own origin — 10mmGrip.nif and 10mmMag01.nif both sit at (0,0,0) — so a pivot
+ *  sweep reports a minigun as 18.6 units long when its barrel ends past 50. The
+ *  bound each BSTriShape carries is the mesh's own statement of its size, so
+ *  that is what is read; a file that carries none (an old NiTriShape) simply
+ *  does not contribute, and \a measured comes back false when none of them did.
+ */
+float geometryReach( const NifModel * target, const QHash<int, Transform> & world,
+                     const Vector3 & anchor, const Vector3 & bore, bool * measured )
+{
+	float reach = 0;
+	bool any = false;
+	for ( int b = 0; b < target->getBlockCount(); b++ ) {
+		const QModelIndex i = target->getBlockIndex( b );
+		if ( !target->blockInherits( i, "BSTriShape" ) && !target->blockInherits( i, "NiTriBasedGeom" ) )
+			continue;
+		const QModelIndex iBound = target->getIndex( i, "Bounding Sphere" );
+		if ( !iBound.isValid() )
+			continue;
+		const float radius = target->get<float>( iBound, "Radius" );
+		if ( !( radius > 0.0f ) )
+			continue;
+		const Transform at = world.value( b );
+		const Vector3 centre = at * target->get<Vector3>( iBound, "Center" );
+		const float tip = Vector3::dotproduct( centre - anchor, bore ) + radius * at.scale;
+		reach = any ? qMax( reach, tip ) : tip;
+		any = true;
+	}
+	if ( measured ) *measured = any;
+	return reach;
+}
+
 /*! The point at the very END of the assembled barrel chain, for a part that
  *  declares no connect point of its own.
  *
@@ -1317,14 +1351,25 @@ QString freeNodeName( const NifModel * target, const NifModel * donor, const QSt
  *       That is exactly "as deep as the chain currently goes", so several
  *       candidates are normal and the FARTHEST from the gun's own origin wins.
  *    2. P-Muzzle, for a chain whose end publishes no projectile node.
- *    3. The P-Flash family. The Minigun ships P-FlashShort / P-FlashMid /
- *       P-FlashFar for its barrel lengths and no muzzle point at all; farthest
- *       along the bore wins there too.
+ *    3. The P-Flash family — the one rung where farthest-wins is WRONG. The
+ *       Minigun ships P-FlashShort / P-FlashMid / P-FlashFar, one per barrel
+ *       LENGTH, and no muzzle point at all: they are three stations along the
+ *       same bore, and which one is right depends on what is mounted. On the
+ *       bare gun the geometry stops at 50.1 units and P-FlashFar sits at 106.8,
+ *       so blind-farthest lit the fireball 56 units out in front of a gun that
+ *       had already ended. The rule is now "the nearest station BEYOND the
+ *       assembly's own geometry", measured against the meshes' bounds rather
+ *       than their pivots (geometryReach): bare, that is P-FlashShort at 70.1.
+ *       When the geometry overshoots every station — a heat-haze mesh drawn past
+ *       the muzzle does exactly that — nothing is beyond it and the farthest is
+ *       kept, which is the old answer, so this can only ever pull the flash IN.
  *    4. P-Barrel — the last thing that is still on the barrel line.
  *
  *  Distance from the gun's origin rather than a Y coordinate, because the target
  *  may be a posed rig where the gun points anywhere. On a weapon the grip is the
- *  origin and the barrel is the far end, so "farthest" IS "furthest forward".
+ *  origin and the barrel is the far end, so "farthest" IS "furthest forward" —
+ *  and the bore direction the flash rung measures along is that same line, taken
+ *  from the farthest station rather than assumed to be any particular axis.
  */
 bool resolveChainEnd( const NifModel * target, OfferedPoint & out )
 {
@@ -1370,7 +1415,45 @@ bool resolveChainEnd( const NifModel * target, OfferedPoint & out )
 		out = point;
 		found = true;
 	}
-	return found;
+	if ( !found )
+		return false;
+
+	/* THE FLASH RUNG, RE-READ AGAINST THE GEOMETRY.
+	 *
+	 * Everything above picked the farthest, which is right for a projectile node,
+	 * a muzzle or a barrel point — there is one of each and it is the end of the
+	 * chain. The P-Flash family is different: its members are alternative
+	 * stations for alternative barrels, so the farthest is only right when the
+	 * longest barrel is actually fitted. What decides that is where the assembly's
+	 * geometry stops, so the flash takes the first station past it.
+	 */
+	if ( bestTier != 2 )
+		return true;
+	const Vector3 farthest = ( world.value( out.frameBlock ) * out.xform ).translation;
+	Vector3 bore = farthest - anchor;
+	if ( bore.length() < 1e-4f )
+		return true;					// degenerate: no line to measure along
+	bore.normalize();
+	bool measured = false;
+	const float reach = geometryReach( target, world, anchor, bore, &measured );
+	if ( !measured )
+		return true;					// nothing bounded to compare with
+	float bestAlong = -1;
+	bool picked = false;
+	for ( const OfferedPoint & point : offered ) {
+		if ( tierOf( point.slot ) != 2 )
+			continue;
+		const Transform at = world.value( point.frameBlock ) * point.xform;
+		const float along = Vector3::dotproduct( at.translation - anchor, bore );
+		if ( along < reach )
+			continue;					// inside the gun: it would fire from the body
+		if ( picked && along >= bestAlong )
+			continue;
+		bestAlong = along;
+		picked = true;
+		out = point;
+	}
+	return true;						// nothing beyond the geometry keeps the farthest
 }
 
 //! Is this one of the slots that means "I am the gun", misspelling included?
@@ -1435,14 +1518,25 @@ bool nifMergeWeaponPart( NifModel * target, const QByteArray & data, const QStri
 	 * and a flash belongs one node past everything else on the barrel line rather
 	 * than on the bone the gun hangs from. See resolveChainEnd for the ladder.
 	 *
-	 * It also catches a whole SECOND gun merged onto an assembled one, which has
-	 * no connect point to ask for either. That is a strange thing to do and the
-	 * summary says exactly where it went; on a rig — which publishes nothing —
-	 * both cases fall through to the WEAPON bone as before.
+	 * A WHOLE SECOND GUN IS NOT A FLASH, though it asks for nothing either. The
+	 * two are told apart by what the DONOR publishes: a flash mesh carries no
+	 * connect points in either direction, while any gun — Minigun.nif is the
+	 * case — publishes its own P- points for the parts that hang off it. Putting
+	 * a second gun on the end of the first one's barrel is nonsense, so a
+	 * publisher goes to the WEAPON bone with the fallback's note instead.
 	 */
-	if ( !resolved && placement.declared.isEmpty() && resolveChainEnd( target, point ) ) {
-		resolved = true;
-		placement.chainEnd = true;
+	const bool donorPublishes = offersConnectPoints( &donor );
+	bool declinedChainEnd = false;
+	if ( !resolved && placement.declared.isEmpty() ) {
+		// resolveChainEnd is asked either way, so the note below fires only when
+		// there really WAS a barrel end this part has just been kept off
+		const bool chain = resolveChainEnd( target, point );
+		if ( chain && !donorPublishes ) {
+			resolved = true;
+			placement.chainEnd = true;
+		} else if ( chain ) {
+			declinedChainEnd = true;
+		}
 	}
 
 	WeaponAttach attach;
@@ -1475,15 +1569,29 @@ bool nifMergeWeaponPart( NifModel * target, const QByteArray & data, const QStri
 			result.error = QStringLiteral( "target has no root block" );
 			return false;
 		}
-		const bool rig = !offersConnectPoints( target );
-		bool receiverOnRig = false;
+		/* A RECEIVER ON THE WEAPON BONE IS THE DESIGNED CASE, NOT A COMPLAINT.
+		 *
+		 * Every part declares a slot, the base weapon included — 10MMPistol.nif
+		 * says C-Receiver — and nothing publishes P-Receiver, ever: it is what the
+		 * gun asks of the ACTOR, and the actor's answer is the WEAPON bone. The
+		 * note used to be suppressed only when the target published no points at
+		 * all, so merging a second gun after a first one, or a receiver onto an
+		 * assembly, produced a true but useless "nothing publishes P-Receiver".
+		 * Landing on the bone IS the answer to C-Receiver, so say nothing.
+		 */
+		bool baseOnBone = false;
 		for ( const QString & slot : std::as_const( placement.declared ) )
-			if ( rig && isReceiverSlot( slot ) )
-				receiverOnRig = true;
+			if ( isReceiverSlot( slot ) )
+				baseOnBone = true;
 		if ( bone.isEmpty() )
 			placement.notes << QObject::tr( "%1 is marked as a weapon part, but the target has no "
 				"WEAPON bone — merged at root." ).arg( name );
-		else if ( !placement.declared.isEmpty() && !receiverOnRig )
+		else if ( declinedChainEnd )
+			// the second-gun case: it asked for nothing and is not a flash
+			placement.notes << QObject::tr( "%1 declares no connect point but publishes its own, so "
+				"it is a weapon in its own right rather than a muzzle flash: hung on %2 at the "
+				"weapon's origin, not on the end of what is already there." ).arg( name ).arg( bone );
+		else if ( !placement.declared.isEmpty() && !baseOnBone )
 			placement.notes << QObject::tr( "%1 asks to attach at a %2 connect point, and nothing "
 				"in the assembly publishes P-%2. Merge the part that provides it first — for a "
 				"muzzle device that is usually the barrel — and this one after it. For now it "

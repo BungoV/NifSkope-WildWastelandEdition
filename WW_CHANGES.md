@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11c — SAM poses go back out again, and the muzzle flash stops overshooting
+
+The Pose Manager can now WRITE a Screen Archer Menu pose. `AnimSetup::
+writeSamPose` is the exact inverse of the import: absolute local transforms,
+rotation through `Matrix::toEuler` — SAM's `MatrixToEulerYPR` element for
+element, both gimbal branches, once its transposed storage is mapped onto NIF
+row order — every channel a JSON string, `version` the number 2, and six
+decimals for everything including angles (SAM's own `%.02f` throws away
+~0.005°). The bone set is a rule, not a list: named NiAVObjects at depth >= 2
+below a file root, minus `_skin` proxies — 96 keys on the PA skeleton,
+covering all 89 the 80-pose corpus uses. The `skeleton` field derives from
+the bones present (PA armour nodes -> "Power Armor", RibHelper -> "Human").
+
+`sam_pose_import.sh` grew a third phase where the round trip is one check of
+five: rest exports verbatim (4.98e-07), exported angles rebuild each rotation
+through the harness's own hand-written Rx·Ry·Rz (7.90e-06), values match the
+committed fixture's own (8e-06°), 96 locals survive export->import->export
+(6.04e-07), and Back_Armor's pitch-90 gimbal branch is asserted by name.
+
+Merge-summary polish: a receiver landing on the WEAPON bone is the ANSWER to
+C-Receiver, not a missing part — that note is gone for exactly that case. A
+C-less donor that publishes its own connect points is a gun, not a flash —
+bone with a note, never the end of another gun's barrel. And the flash rule
+was wrong on a bare minigun: P-FlashShort/Mid/Far are stations per barrel
+length, and farthest-wins lit the fireball at 106.8 along the bore of a gun
+whose geometry (bounds, not pivots — pivots say 18.6) stops at 50.1. The
+flash now takes the first station past the assembly's own reach: bare gun ->
+P-FlashShort at 70.1; long barrel fitted -> up a rung to the barrel's own
+P-Muzzle. Asserted by point NAME, since every distance band is satisfied by
+all three stations. weapon_mark 89/89, flatten 28/28,
+workspace_skeleton_target 34/34, sam_pose_import 4/4 phases.
+
 ## 2026-08-11f — every glyph in both panels says what it does
 
 **Hovering a glyph now explains that glyph.** The Loaded-NIFs row strip and the

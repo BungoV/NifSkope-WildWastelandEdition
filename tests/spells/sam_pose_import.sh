@@ -1,13 +1,16 @@
 #!/bin/bash
 #
 # Import a Screen Archer Menu pose (.json) — does it decode SAM's convention?
+# ...and, since 2026-08-11, export one back out again (phase 3).
 #
-# WHY THIS IS NOT A ROUND-TRIP TEST
+# WHY THE ROUND TRIP IS THE LAST THING HERE, NOT THE FIRST
 #
-# The Outfit Studio harness proves export and import are inverses. There is no
-# SAM export (import only), and a round-trip would prove nothing anyway: the
-# thing that can be wrong here is the CONVENTION, and a convention agrees with
-# itself no matter how wrong it is.
+# A round trip proves the two directions agree; it cannot tell you they agree
+# with SAM. The thing that can be wrong is the CONVENTION, and a convention
+# agrees with itself no matter how wrong it is. So phases 1-2 measure the import
+# against numbers worked out by hand, and phase 3 measures the export against
+# the NODES it came from and against the FIXTURE'S OWN values — with the round
+# trip as one check among five rather than the whole test.
 #
 # SAM writes each bone as yaw/pitch/roll/x/y/z/scale, all of them JSON STRINGS,
 # angles in DEGREES, and — unlike an OS pose — the values REPLACE the node's
@@ -84,11 +87,15 @@
 # construction. A branch that ignored --attach and landed on the root fails the
 # origin check.
 #
-# The gun renders 1.75x life size, and that is FAITHFUL: sam_pa_pose1.json gives
-# WEAPON scale 1.750013, which is the game's live power-armour weapon-bone scale
-# as Screen Archer Menu recorded it. Because that is a surprise if it is left to
-# the picture, the accumulated world scale at WEAPON is logged and asserted equal
-# to the pose's own figure. The capture is release/ww_sampose_weapon.png.
+# THE WEAPON BONE'S SCALE IS INHERITED, THEN PUT BACK FOR THE PICTURE.
+# sam_pa_pose1.json gives WEAPON scale 1.750013 — the game's live power-armour
+# weapon-bone scale as Screen Archer Menu recorded it — and a gun parented there
+# inherits it, which is faithful and also renders a pistol 1.75x life size. So
+# the harness does both: it logs the accumulated world scale at WEAPON and
+# asserts it equals the pose's own figure (that is the check that the pose really
+# reached the bone), and only THEN resets the bone to unit scale for the capture,
+# logging that it did. The photograph is a life-size gun in a posed hand;
+# the number above it is the proof. The capture is release/ww_sampose_weapon.png.
 #
 # FIXTURE
 #
@@ -210,5 +217,65 @@ if [ -n "$REALPOSE" ] && [ -f "$FRAME" ]; then
 	[ -n "$GUN" ] && echo "weapon capture: release/ww_sampose_weapon.png"
 else
 	echo "phase 2 skipped (no real pose or no Frame.nif)"
+fi
+
+# PHASE 3 — THE EXPORT (WW_SAMEXPORT_TEST, src/posetools.cpp)
+#
+# Its own process and its own log, because it must run against a skeleton NOTHING
+# has posed: the first thing it measures is that an untouched file exports its
+# rest values verbatim, which a process that has already imported a pose cannot
+# say. Five things, in order:
+#
+#   1. THE BONE SET, as a rule and not a list. Every key resolves to a named
+#      NiAVObject, none is a `_skin` proxy, and neither the file root nor its own
+#      children (`Root`, `CharacterBumper`) appear — and every one of the 89
+#      bones the committed corpus pose names IS present. Coverage is the bar;
+#      extra keys are not a failure, since SAM's own node map for this skeleton
+#      lists 140 and any pose is a subset of it.
+#   2. REST VALUES VERBATIM: each exported x/y/z/scale parses back to the node's
+#      own value, and the angles rebuilt through the harness's OWN hand-written
+#      Rx(yaw)*Ry(pitch)*Rz(roll) — doubles, sharing no code with Matrix::toEuler
+#      — reproduce the node's rotation matrix. An exporter that agreed only with
+#      itself passes a round trip and fails this.
+#   3. THE SHAPE OF THE FILE: `version` is the NUMBER 2, name/skeleton are
+#      strings, and all seven channels are STRINGS, as SAM writes them. Angles at
+#      six decimals rather than SAM's own "%.02f", which throws away ~0.005 deg.
+#   4. THE ROUND TRIP: import the corpus pose, export, import that, and every
+#      bone's local transform must return within 1e-5 — plus the exported values
+#      against the FIXTURE'S OWN, which is what makes the export the import's
+#      inverse rather than merely repeatable.
+#   5. THE GIMBAL BRANCH, the half of toEuler an ordinary bone never reaches:
+#      the fixture's Back_Armor is at pitch 90 exactly (its m02 saturates at 1),
+#      and it has to round-trip through the degenerate branch too.
+#
+# It writes release/ww_samexport_{rest,posed,again}.json; the third is only used
+# to report whether a second export is byte-identical.
+if [ -n "$REALPOSE" ]; then
+	EXPLOG="$ROOT/release/ww_samexport_test.log"
+	rm -f "$EXPLOG"
+	env WW_SAMEXPORT_TEST=1 WW_SAMEXPORT_POSE="$REALPOSE" \
+		"$EXE" --port "$PORT" "$(winpath "$SRC")" >/dev/null 2>&1 &
+	exppid=$!
+	for _ in $(seq 1 60); do
+		[ -f "$EXPLOG" ] && grep -q '^done$' "$EXPLOG" 2>/dev/null && break
+		sleep 1
+	done
+	kill "$exppid" 2>/dev/null
+	wait "$exppid" 2>/dev/null
+	if [ ! -f "$EXPLOG" ]; then
+		echo "FAIL: the export harness produced no log (did NifSkope start?)"
+		exit 1
+	fi
+	cat "$EXPLOG"
+	grep -q '^PASS$' "$EXPLOG" || exit 1
+	# two facts worth failing on out here too, because they are the two the rule
+	# is stated in and a quietly-changed rule would still pass in there
+	grep -q "corpus pose: 89 bone(s); export covers all but 0" "$EXPLOG" || {
+		echo "FAIL: the export no longer covers the 89-bone corpus set"; exit 1; }
+	grep -q "skeleton field: 'Power Armor'" "$EXPLOG" || {
+		echo "FAIL: the PA skeleton did not export as 'Power Armor'"; exit 1; }
+	echo "export files: release/ww_samexport_rest.json release/ww_samexport_posed.json"
+else
+	echo "phase 3 skipped (no real pose)"
 fi
 exit 0

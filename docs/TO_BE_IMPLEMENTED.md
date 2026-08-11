@@ -1540,22 +1540,27 @@ Verified 2026-07-21 against `src/spells/riggingtools.cpp`.
   there is no reliable signal for it and inventing one out of the undo history was
   ruled out. The flatten also has no output-path dialog: the result lands unsaved
   in Loaded NIFs and Save As is a second step.
-- **Pose-follow, the parts not done** — NEW 2026-08-10i. A marked row follows the
-  skull-marked document, or the primary when the primary has a bone hierarchy;
-  following a specific loaded row that is NOT the skull mark is not expressible.
-  The skull's own all-documents snap is still there and still wins when no row is
-  marked, which means two ways to say a related thing — worth unifying once the
-  per-row mark has been lived with. Followers also track only the SKELETON's node
-  transforms, so a follower skinned to bones the skeleton does not have keeps its
-  own for those (by design, and reported nowhere).
+- **Pose-follow, the parts not done** — NEW 2026-08-10i, trimmed 2026-08-11.
+  A marked row follows the skull-marked document, or the primary when the primary
+  has a bone hierarchy.
+  - ~~*following a specific loaded row that is not the skull mark*~~ — **RESOLVED
+    BY DESIGN** (user, 2026-08-11). There is exactly ONE active skeleton and that
+    is the law of this workspace: the skull is single-active, and merge targeting,
+    pose-follow resolution and the all-documents snap all read that one pointer.
+    Followers track THE skeleton. A second way to name a follow target would be a
+    second source of truth, so it is not wanted — do not re-file it.
+  - Followers track only the SKELETON's node transforms, so a follower skinned to
+    bones the skeleton does not have keeps its own for those (by design, and
+    reported nowhere). Still open, as a report.
 - ~~**Weapon slot placement**~~ — SHIPPED 2026-08-10h. Marked parts are placed on
   the connect points the meshes publish, rotation composed, chains resolved to any
   depth (`nifMergeWeaponPart`, src/nifmerge.cpp). What is deliberately NOT done:
-  no ESP/OMOD reading, so the row list is whatever the user marks rather than a
-  workbench-style menu of a weapon's legal parts; no live re-resolution when a
-  part is swapped (the merge is one-way — undo and re-merge); and the null
-  forwarder meshes (`HandMadeMuzzleParentObject.nif`, no geometry, existing only
-  to republish a point) work but show as an empty row. The connect-point research
+  no live re-resolution when a part is swapped (the merge is one-way — undo and
+  re-merge), and the null forwarder meshes (`HandMadeMuzzleParentObject.nif`, no
+  geometry, existing only to republish a point) work but show as an empty row.
+  An OMOD/ESP-driven assembler — a workbench-style menu of a weapon's legal
+  parts — was considered and is **not wanted** (user, 2026-08-11): the row list
+  is whatever is marked, and that is the design. The connect-point research
   behind it, including the 144 DLC meshes missing from the local unpack, is in the
   session scratchpad's `weapon_combos.md`.
 
