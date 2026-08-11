@@ -202,11 +202,44 @@ void Controller::setSequence( const QString & seqname )
 
 void Controller::setInterpolator( const QModelIndex & index )
 {
-	iInterpolator = index;
-
 	auto nif = NifModel::fromIndex( index );
+
+	QModelIndex iNewData;
 	if ( nif )
-		iData = nif->getBlockIndex( nif->getLink( iInterpolator, "Data" ) );
+		iNewData = nif->getBlockIndex( nif->getLink( index, "Data" ) );
+
+	/* A NiControllerSequence may name a NiBlend*Interpolator instead of a real
+	 * one. That is the engine's RUNTIME blend node: NiControllerSequence::
+	 * StoreTargets installs it on a controller that more than one sequence can
+	 * drive, and fills its item array at run time from the sequences' own
+	 * interpolators. Nothing of that array is serialized — the block on disk
+	 * carries only Flags, Array Size, Weight Threshold and a Value that is
+	 * -FLT_MAX — so it has no "Data" link and no keys to read.
+	 *
+	 * Binding it verbatim left iData INVALID, which made interpolate() fail
+	 * every frame and FROZE the controlled value at whatever the pre-sequence
+	 * pass at time 0 had written. X01_Torso_VFX is exactly that case: autoLoop's
+	 * Controlled Block for the refraction controller names the blend
+	 * interpolator, so Refraction Strength stuck at its key-0 value of 0.0 and
+	 * the fan's distortion was mathematically zero at every time — the reported
+	 * "refraction does not appear".
+	 *
+	 * With one sequence playing, the blend's output IS the controller's own
+	 * authored interpolator, so that is what is bound. A blend interpolator that
+	 * does carry data (Fallout 76 writes some) still binds normally.
+	 */
+	if ( nif && !iNewData.isValid() && nif->blockInherits( index, "NiBlendInterpolator" ) ) {
+		const QModelIndex iOwn = nif->getBlockIndex( nif->getLink( iBlock, "Interpolator" ) );
+		const QModelIndex iOwnData = nif->getBlockIndex( nif->getLink( iOwn, "Data" ) );
+		if ( iOwnData.isValid() ) {
+			iInterpolator = iOwn;
+			iData = iOwnData;
+			return;
+		}
+	}
+
+	iInterpolator = index;
+	iData = iNewData;
 }
 
 bool Controller::update( const NifModel * nif, const QModelIndex & index )

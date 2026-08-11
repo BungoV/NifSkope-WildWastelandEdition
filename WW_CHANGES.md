@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11d — Refraction: the strength the shader received was always zero
+
+A NiControllerSequence may name a NiBlend*Interpolator instead of a real one
+— the engine's runtime blend node, whose item array is never serialized, so
+the block on disk has no Data link and no keys. Controller::setInterpolator
+bound it verbatim, iData stayed invalid, interpolate() failed every frame,
+and the controlled value froze at whatever time 0 wrote — on
+X01_Torso_VFX.nif that was key 0 = 0.0, so the Tesla fan's distortion was
+mathematically zero for the life of the document (V-Offset in the same
+sequence had a real interpolator, which is why parts of the file moved and
+refraction did not). A data-less blend interpolator now resolves to the
+controller's own authored interpolator — what the blend outputs when one
+sequence plays; general to every property float/colour controller.
+
+The displacement was also unseeable: the old 8-screen-pixel cap meant
+something different on every monitor. Now 5% of viewport HEIGHT,
+aspect-corrected — local, isotropic, resolution-independent — and vertex
+alpha modulates it (alpha-0 regions distort nothing: measured 0 px).
+Screen-space distortion only, per the user's spec: one background fetch
+offset by normal.xy × strength × vertex alpha; no IOR, no physics.
+
+New gate tests/spells/refraction.sh (21 checks): the controller's own ramp
+walked in five steps against closed-form strength values (changed pixels
+rise 0 → 23801 → 28033 → 29224 → 28943, total delta strictly rising),
+strength/normal-map/vertex-alpha/camera/resolution each varied alone,
+billboard parent intact, and a 7-case A/B corpus where six files render
+byte-identical against the old shader. live_effects 15/15,
+carries_everything 24/24. Known: tools/render_regression baselines are
+stale (1280x695 vs the 741-tall viewport) — pre-existing, needs a
+re-baseline.
+
 ## 2026-08-11c — SAM poses go back out again, and the muzzle flash stops overshooting
 
 The Pose Manager can now WRITE a Screen Archer Menu pose. `AnimSetup::

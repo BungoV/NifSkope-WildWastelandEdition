@@ -388,14 +388,40 @@ void main()
 		// background. (Per-texel alpha blending garbled the render because the
 		// base texture is not opacity, so it is deliberately not applied here.)
 		vec2	suv = ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw );
-		// Refraction Strength is animated all the way to 1.0 by stock effects
-		// such as X01_Torso_VFX. Treating it as a fraction of the viewport made
-		// those normals jump hundreds of pixels into unrelated empty background,
-		// producing a large dark silhouette. Keep the preview a local heat-haze
-		// distortion, with the same maximum displacement at every resolution.
-		const float refractionMaxPixels = 8.0;
-		vec2	roffs = normal.xy * clamp( refractionStrength, 0.0, 1.0 )
-			* ( vec2( refractionMaxPixels ) / vec2( viewportDimensions.zw ) );
+
+		/* Every route that scales the effect, multiplied together:
+		 *
+		 *  - normal.xy is the eye-space shading normal, so the NORMAL MAP is
+		 *    what decides where each texel of the background is fetched from;
+		 *    a flat-normal region samples straight through and shows the scene
+		 *    unchanged.
+		 *  - refractionStrength is the property's Refraction Strength, static
+		 *    or driven per frame by a BSLightingShaderPropertyFloatController
+		 *    on Controlled Variable 0.
+		 *  - C.a is the effective per-vertex alpha (1.0 when the mesh has no
+		 *    vertex colours, because vertexColorOverride replaces it), so an
+		 *    authored alpha-0 region distorts nothing and alpha-1 distorts
+		 *    fully.
+		 */
+		float	rStrength = clamp( refractionStrength, 0.0, 1.0 ) * clamp( C.a, 0.0, 1.0 );
+
+		/* Maximum displacement is a fraction of the viewport HEIGHT.
+		 *
+		 * Reading Refraction Strength as a fraction of the whole viewport threw
+		 * the source hundreds of pixels into unrelated empty background and drew
+		 * a giant dark silhouette; capping it at 8 screen pixels fixed that and
+		 * then left nothing to see, because 8 px of a mostly flat backdrop is
+		 * invisible and 8 px means something different on every monitor. A
+		 * fraction of the height keeps the distortion LOCAL, and keeps it
+		 * looking the SAME at every resolution — which is what
+		 * resolution-independent has to mean for a screen-space effect.
+		 *
+		 * The x term converts that height fraction into u, so the displacement
+		 * is isotropic instead of being stretched by the aspect ratio.
+		 */
+		const float refractionMaxScreenFraction = 0.05;
+		vec2	roffs = normal.xy * rStrength * refractionMaxScreenFraction
+			* vec2( float( viewportDimensions.w ) / float( max( viewportDimensions.z, 1 ) ), 1.0 );
 		vec3	bg = texture( RefractionSrc, clamp( suv + roffs, vec2( 0.001 ), vec2( 0.999 ) ) ).rgb;
 		color.rgb = bg;
 		color.a = 1.0;

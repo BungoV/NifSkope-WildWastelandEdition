@@ -25,6 +25,23 @@ $repo  = Split-Path (Split-Path $root -Parent) -Parent
 $exe   = Join-Path $repo 'release\NifSkope.exe'
 $fo4   = 'E:\Tools\Fallout 4\DataUnpacked\Data'
 
+# WW_RENDER_SHOT still puts a REAL window on screen for a couple of seconds per
+# capture, and this walks a seven-file corpus, so without this a run takes over
+# whatever is on the primary display. tests/spells/_harness.sh is where the
+# coordinates live for every bash harness; this is the PowerShell runner and has
+# to set them itself, so the value is READ from there rather than written twice
+# and left to drift.
+if (-not $env:WW_WINDOW_AT) {
+    $at = '1960,40'
+    $hp = Join-Path $repo 'tests\spells\_harness.sh'
+    if (Test-Path $hp) {
+        $m = Select-String -Path $hp -Pattern 'WW_WINDOW_AT="\$\{WW_WINDOW_AT:-([^}"]+)\}"'
+        if ($m) { $at = $m.Matches[0].Groups[1].Value }
+    }
+    $env:WW_WINDOW_AT = $at
+}
+Write-Host "windows at $env:WW_WINDOW_AT"
+
 # Corpus: each entry must exercise a distinct renderer path. Keep the reasons
 # written down — a case whose purpose is unclear gets dropped the first time it
 # is inconvenient, and that is exactly how the particle sim loses its cover.
