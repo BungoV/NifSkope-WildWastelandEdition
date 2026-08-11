@@ -3065,11 +3065,22 @@ void LightingFloatController::updateTime( float time )
 	if ( !(target && active) )
 		return;
 
-	float val;
+	float val = 0.0f;
 
-	int lIdx;
+	int lIdx = 0;
 
-	if ( interpolate( val, iData, "Data", ctrlTime( time ), lIdx ) ) {
+	bool wwOk = interpolate( val, iData, "Data", ctrlTime( time ), lIdx );
+	if ( qEnvironmentVariableIsSet( "WW_REFR_DEBUG" ) ) {
+		QFile wwf( QApplication::applicationDirPath() + "/ww_refr_debug.log" );
+		if ( wwf.open( QIODevice::Append | QIODevice::Text ) )
+			QTextStream( &wwf ) << "LightingFloatController var=" << int(variable)
+				<< " time=" << time << " ctrlTime=" << ctrlTime( time )
+				<< " active=" << int(active) << " iDataValid=" << int(iData.isValid())
+				<< " start=" << start << " stop=" << stop << " freq=" << frequency
+				<< " cst=" << int(computeScaledTime) << " ok=" << int(wwOk)
+				<< " val=" << val << Qt::endl;
+	}
+	if ( wwOk ) {
 		switch ( variable ) {
 		case LightingFloat::Refraction_Strength:
 			// The property carries this and the renderer uses it (glproperty.cpp

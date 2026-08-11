@@ -35,6 +35,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glscene.h"
 #include "model/nifmodel.h"
 
+#include <QApplication>
+#include <QFile>
+#include <QTextStream>
+
 //! @file glcontroller.cpp Controllable management, Interpolation management
 
 /*
@@ -146,6 +150,13 @@ void IControllable::transform()
 		for ( Controller * controller : controllers ) {
 			controller->updateTime( scene->time );
 		}
+	}
+	// WWTEMP diagnostic
+	if ( !controllers.isEmpty() && qEnvironmentVariableIsSet( "WW_REFR_DEBUG" ) ) {
+		QFile f( QApplication::applicationDirPath() + "/ww_refr_debug.log" );
+		if ( f.open( QIODevice::Append | QIODevice::Text ) )
+			QTextStream( &f ) << "IControllable::transform animate=" << int(scene->animate)
+				<< " time=" << scene->time << " nctrl=" << controllers.size() << "\n";
 	}
 }
 

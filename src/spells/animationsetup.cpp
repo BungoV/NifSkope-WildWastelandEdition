@@ -1173,6 +1173,134 @@ bool applySamPose( NifModel * nif, const QString & path, float blend,
 	return true;
 }
 
+QVector<int> samPoseBones( const NifModel * nif )
+{
+	QVector<int> bones;
+	if ( !nif )
+		return bones;
+	const QList<int> roots = nif->getRootLinks();
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( i, "NiAVObject" ) )
+			continue;
+		const QString name = nif->resolveString( i, "Name" );
+		if ( name.isEmpty() )
+			continue;
+		// the skinning proxies, spelled both ways on the PA skeleton
+		if ( name.endsWith( QLatin1String( "_skin" ), Qt::CaseInsensitive ) )
+			continue;
+		// depth below the nearest file root; a node not reachable from one at all
+		// has no parent space to be expressed in and is skipped
+		int depth = 0, at = b;
+		while ( at >= 0 && !roots.contains( at ) && depth < 256 ) {
+			at = nif->getParent( at );
+			depth++;
+		}
+		if ( at < 0 || depth < 2 )
+			continue;
+		bones << b;
+	}
+	return bones;
+}
+
+QString samSkeletonName( const NifModel * nif )
+{
+	if ( !nif )
+		return QStringLiteral( "Vanilla" );
+	const QHash<QString, int> nodes = namedAVObjects( nif );
+	if ( nodes.contains( QStringLiteral( "Pauldron_Armor" ) )
+		 && nodes.contains( QStringLiteral( "Tank_Armor" ) ) )
+		return QStringLiteral( "Power Armor" );
+	if ( nodes.contains( QStringLiteral( "L_RibHelper" ) )
+		 || nodes.contains( QStringLiteral( "R_RibHelper" ) ) )
+		return QStringLiteral( "Human" );
+	const QList<int> roots = nif->getRootLinks();
+	if ( !roots.isEmpty() ) {
+		const QString rootName = nif->resolveString( nif->getBlockIndex( roots.first() ), "Name" );
+		if ( !rootName.isEmpty() )
+			return rootName;
+	}
+	return QStringLiteral( "Vanilla" );		// SAM's own default
+}
+
+bool writeSamPose( const NifModel * nif, const QString & path, const QString & poseName,
+                   int * writtenOut, QString * error )
+{
+	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return false; };
+	if ( writtenOut ) *writtenOut = 0;
+	if ( !nif )
+		return fail( QStringLiteral( "no model" ) );
+
+	const QVector<int> bones = samPoseBones( nif );
+	if ( bones.isEmpty() )
+		return fail( Spell::tr( "this file has no posable bone nodes — a SAM pose is a set of "
+			"named NiNodes hanging inside a skeleton's hierarchy, and there are none here" ) );
+
+	/* Six decimals for EVERYTHING, angles included. SAM's writer prints yaw/pitch/
+	 * roll with "%.02f" (SAF/io.cpp, WriteTransformJson) and x/y/z/scale with
+	 * "%.06f"; its reader is a plain float parse either way, so the two-decimal
+	 * angles are a writer's habit rather than part of the format. Keeping them
+	 * would throw away up to ~0.005 degrees per channel for nothing. */
+	auto num = []( float v ) { return QString::number( double( v ), 'f', 6 ); };
+	const float toDeg = float( 180.0 / PI );
+
+	QJsonObject transforms;
+	QStringList repeated;
+	for ( int b : bones ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		const QString name = nif->resolveString( i, "Name" );
+		const Transform t( nif, i );
+		float yaw = 0, pitch = 0, roll = 0;
+		/* Matrix::toEuler IS SAM's MatrixToEulerYPR, element for element and in
+		 * both gimbal branches, once SAM's transposed NiMatrix43 storage is mapped
+		 * onto NifSkope's row order — so this is the import read backwards, not a
+		 * second convention that happens to agree. */
+		t.rotation.toEuler( yaw, pitch, roll );
+		QJsonObject o;
+		o.insert( QStringLiteral( "yaw" ), num( yaw * toDeg ) );
+		o.insert( QStringLiteral( "pitch" ), num( pitch * toDeg ) );
+		o.insert( QStringLiteral( "roll" ), num( roll * toDeg ) );
+		o.insert( QStringLiteral( "x" ), num( t.translation[0] ) );
+		o.insert( QStringLiteral( "y" ), num( t.translation[1] ) );
+		o.insert( QStringLiteral( "z" ), num( t.translation[2] ) );
+		o.insert( QStringLiteral( "scale" ), num( t.scale ) );
+		// a rig binds by name, so two nodes of one name would silently collapse
+		// into one key here exactly as they collapse on import; say so
+		if ( transforms.contains( name ) && !repeated.contains( name ) )
+			repeated << name;
+		transforms.insert( name, o );
+	}
+
+	QString pn = poseName.trimmed();
+	if ( pn.isEmpty() )
+		pn = QFileInfo( path ).completeBaseName();
+
+	QJsonObject root;
+	root.insert( QStringLiteral( "name" ), pn );
+	root.insert( QStringLiteral( "skeleton" ), samSkeletonName( nif ) );
+	root.insert( QStringLiteral( "transforms" ), transforms );
+	root.insert( QStringLiteral( "version" ), 2 );		// a NUMBER, as SAM writes it
+
+	QFile f( path );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+		return fail( QStringLiteral( "cannot write %1" ).arg( path ) );
+	const QByteArray bytes = QJsonDocument( root ).toJson( QJsonDocument::Indented );
+	if ( f.write( bytes ) != bytes.size() ) {
+		f.close();
+		return fail( QStringLiteral( "could not write all of %1" ).arg( path ) );
+	}
+	f.close();
+
+	if ( writtenOut ) *writtenOut = int( transforms.size() );
+	if ( error ) {
+		*error = repeated.isEmpty() ? QString()
+			: Spell::tr( "%1 bone name(s) appear on more than one node and were written once "
+				"(%2)." ).arg( repeated.size() )
+				.arg( repeated.mid( 0, 8 ).join( QStringLiteral( ", " ) ) );
+	}
+	return true;
+}
+
 bool applyPose( NifModel * nif, const QString & name, float blend, QString * error )
 {
 	auto fail = [error]( const QString & m ) { if ( error ) *error = m; return false; };

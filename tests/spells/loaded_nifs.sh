@@ -99,6 +99,37 @@ trap 'rm -rf "$TMP"' EXIT
 
 winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 
+# THIS SUITE'S BLOCK-LIST CHECKS ARE WRITTEN FOR HIERARCHY MODE, so it has to
+# START in hierarchy mode: the mode is read while the window is being built,
+# which is why the three sibling suites seed the registry rather than switching
+# after launch.
+#
+# This one did not, and inherited whatever was there. Four checks -- two about
+# search scopes, two about the Header -- went red with no source change, on a
+# profile some earlier run or session had left in `list`; a clean rebuild, a
+# bisect and three builds went into proving the source was innocent. The rule it
+# breaks is written down: a harness must FORCE the state it measures, never
+# inherit persisted QSettings. The cost of breaking it is that the failure looks
+# exactly like a regression in whatever you changed last.
+#
+# It is the user's own setting, so it goes back on exit -- restored, or removed
+# if there was none.
+MODEKEY="HKCU:\\Software\\NifTools\\NifSkope 2.0\\UI"
+psq() { powershell.exe -NoProfile -NonInteractive -Command "$1" 2>/dev/null | tr -d '\r'; }
+SAVED_MODE="$(psq "(Get-ItemProperty -Path '$MODEKEY' -Name 'List Mode' -EA SilentlyContinue).'List Mode'")"
+restore_mode() {
+	if [ -n "$SAVED_MODE" ]; then
+		psq "Set-ItemProperty -Path '$MODEKEY' -Name 'List Mode' -Value '$SAVED_MODE' -Type String"
+	else
+		psq "Remove-ItemProperty -Path '$MODEKEY' -Name 'List Mode' -EA SilentlyContinue"
+	fi
+}
+trap 'restore_mode; rm -rf "$TMP"' EXIT
+psq "Set-ItemProperty -Path '$MODEKEY' -Name 'List Mode' -Value 'hierarchy' -Type String"
+[ "$(psq "(Get-ItemProperty -Path '$MODEKEY' -Name 'List Mode').'List Mode'")" = "hierarchy" ] \
+	|| { echo "FAIL: could not seed the list mode"; exit 2; }
+echo "seeded: the Block List starts in hierarchy mode (was '${SAVED_MODE:-unset}')"
+
 # Different names, because the swap and exact-drag checks must distinguish the
 # document that moved from whichever row happens to be selected later.
 #

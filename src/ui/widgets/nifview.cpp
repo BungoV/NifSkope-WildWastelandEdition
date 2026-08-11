@@ -42,10 +42,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMimeData>
 #include <QClipboard>
 #include <QFile>
+#include <QHelpEvent>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QTextStream>
 #include <QTimer>
+#include <QToolTip>
 
 #include <vector>
 
@@ -632,6 +634,34 @@ void NifTreeView::keyPressEvent( QKeyEvent * e )
 	}
 
 	QTreeView::keyPressEvent( e );
+}
+
+/*! A glyph explains ITSELF on hover; anywhere else the row still explains itself.
+ *
+ *  QAbstractItemView answers a ToolTip event with the item's Qt::ToolTipRole, and
+ *  for a block row that is the per-type summary — the thing an entire column used
+ *  to be. A glyph tooltip that answered anywhere in the row would have thrown
+ *  that away and replaced it with a sentence about an eye. So an empty text from
+ *  the hook means "not over a glyph", and the base class gets the event untouched.
+ *
+ *  The point is resolved through the same geometry the press uses, so a tooltip
+ *  cannot end up describing a glyph the click would miss.
+ */
+bool NifTreeView::viewportEvent( QEvent * event )
+{
+	if ( event->type() == QEvent::ToolTip && wwVisTooltip ) {
+		auto * help = static_cast<QHelpEvent *>( event );
+		const QModelIndex index = indexAt( help->pos() );
+		if ( index.isValid() ) {
+			const QString text = wwVisTooltip( index, help->pos() );
+			if ( !text.isEmpty() ) {
+				wwVisTooltipsShown++;
+				QToolTip::showText( help->globalPos(), text, this );
+				return true;
+			}
+		}
+	}
+	return QTreeView::viewportEvent( event );
 }
 
 void NifTreeView::mousePressEvent( QMouseEvent * event )

@@ -404,6 +404,15 @@ public:
 	static constexpr int ArrowSlot = 6;
 	std::function<QRect( const QModelIndex & )> arrowRectFor;
 	std::function<void( const QModelIndex & )> activateArrow;
+	/*! What the glyph under a point says on hover, or empty for "not a glyph".
+	 *
+	 *  Empty is the half that matters: the row's own tooltip carries the source
+	 *  path and the unsaved state, and a glyph sentence that answered anywhere in
+	 *  the row would have replaced it. */
+	std::function<QString( const QModelIndex &, const QPoint & )> glyphTooltip;
+	//! How many glyph tooltips have been shown. The harness reads it to tell
+	//! "the hover explained nothing" from "the hover never reached the view".
+	int glyphTooltipsShown = 0;
 
 protected:
 	//! Where a press target is: the strip's boxes by slot, or the gutter arrow.
@@ -412,6 +421,33 @@ protected:
 		if ( slot == ArrowSlot )
 			return arrowRectFor ? arrowRectFor( index ) : QRect();
 		return loadedNifGlyphRect( visualRect( index ), slot );
+	}
+
+	/*! A glyph explains ITSELF; everywhere else the row still explains itself.
+	 *
+	 *  QAbstractItemView answers a ToolTip event with the item's Qt::ToolTipRole,
+	 *  which here is the row's source path and unsaved state. So an empty text
+	 *  from the hook means "not over a glyph" and the base class gets the event
+	 *  untouched — the glyph tooltips are added to that, never in place of it.
+	 *
+	 *  Painted glyphs are not widgets, so the "a disabled widget shows no tooltip"
+	 *  rule does not reach them: the INERT glyphs get their explanation like the
+	 *  rest, which is the case where a reader most needs one. */
+	bool viewportEvent( QEvent * event ) override
+	{
+		if ( event->type() == QEvent::ToolTip && glyphTooltip ) {
+			auto * help = static_cast<QHelpEvent *>( event );
+			const QModelIndex index = indexAt( help->pos() );
+			if ( index.isValid() ) {
+				const QString text = glyphTooltip( index, help->pos() );
+				if ( !text.isEmpty() ) {
+					glyphTooltipsShown++;
+					QToolTip::showText( help->globalPos(), text, this );
+					return true;
+				}
+			}
+		}
+		return QTreeView::viewportEvent( event );
 	}
 
 	void paintEvent( QPaintEvent * event ) override
@@ -869,6 +905,62 @@ static QIcon faceDonorMarkIcon()
 	p.drawRoundedRect( QRectF( 5.4, 10.2, 5.2, 1.6 ), 0.8, 0.8 );
 	p.end();
 	return QIcon( pm );
+}
+
+/*! ---- What the ROW STRIP's glyphs say on hover ------------------------------
+ *
+ *  One short sentence per (glyph, state), in the vocabulary of the row menu that
+ *  offers the same marks — "Use as Skeleton for Loaded NIFs" and this are two
+ *  ways to reach one flag, and a reader should not have to notice they are.
+ *
+ *  The INERT wordings matter most and are the reason this is state-aware rather
+ *  than one string per glyph. A glyph drawn faded and dead to the mouse raises
+ *  exactly one question, and the tooltip is the only place that answers it: the
+ *  primary already IS what these marks nominate, so there is nothing to set.
+ *
+ *  The eye and the disc are NOT here. They are shared with the Block List's
+ *  visibility column and live in WwGlyphs with their drawings.
+ */
+static QString loadedNifArrowTip( bool primary )
+{
+	return primary
+		? QObject::tr( "The primary document — the one being edited" )
+		: QObject::tr( "Make this the primary document" );
+}
+
+static QString loadedNifSkeletonTip( bool marked, bool inert )
+{
+	if ( inert )
+		return marked
+			? QObject::tr( "The marked skeleton; unmark it from the row menu" )
+			: QObject::tr( "The primary is the skeleton unless another row is marked" );
+	return marked
+		? QObject::tr( "The skeleton for Loaded NIFs — click to unmark it" )
+		: QObject::tr( "Use as the skeleton for Loaded NIFs — only one at a time" );
+}
+
+static QString loadedNifWeaponTip( bool marked, bool inert )
+{
+	if ( inert )
+		return QObject::tr( "Weapon parts merge onto a target, so this does not apply here" );
+	return marked
+		? QObject::tr( "A weapon part — click to unmark it" )
+		: QObject::tr( "Use as a weapon part, to merge onto a target's WEAPON bone" );
+}
+
+static QString loadedNifFollowTip( bool marked, bool inert )
+{
+	if ( inert )
+		return QObject::tr( "The primary is what the others follow, so this does not apply here" );
+	return marked
+		? QObject::tr( "Following the skeleton's pose — click to stop" )
+		: QObject::tr( "Follow the skeleton's pose" );
+}
+
+//! The one slot that is drawn only when it is set, so it only ever says this.
+static QString loadedNifFaceDonorTip()
+{
+	return QObject::tr( "The faceBones donor the rigging steps read" );
 }
 
 static QPixmap skeletonMarkPixmap( const QColor & ink )
@@ -2354,6 +2446,9 @@ NifSkope::NifSkope( bool background )
 	};
 	loadedWorkspaceView->arrowRectFor = [this]( const QModelIndex & idx ) {
 		return loadedNifsArrowRect( idx );
+	};
+	loadedWorkspaceView->glyphTooltip = [this]( const QModelIndex & idx, const QPoint & pos ) {
+		return loadedNifsGlyphTooltip( idx, pos );
 	};
 	loadedWorkspaceView->activateArrow = [this]( const QModelIndex & idx ) {
 		makeLoadedRowPrimary( idx );
@@ -4712,6 +4807,37 @@ void NifSkope::wireBlockListVisibility()
 			ogl->setBlockHidden( b, !ogl->isBlockHidden( b ) );
 		else
 			ogl->setBlockGhosted( b, !ogl->isBlockGhosted( b ) );
+	};
+
+	/* ...and the same two rects explain themselves on hover.
+	 *
+	 * Resolved from wwVisSlotAt, so a tooltip cannot describe a glyph the click
+	 * would miss — that is the whole reason it is not a second rect calculation.
+	 * Empty outside the glyphs, because the row tooltip there is the per-type
+	 * summary this column REPLACED, and answering over the whole row would have
+	 * quietly deleted it.
+	 *
+	 * The wordings come from WwGlyphs, shared with the Loaded-NIFs strip: two
+	 * surfaces over one piece of scene state, one vocabulary.
+	 */
+	list->wwVisTooltip = [this]( const QModelIndex & idx, const QPoint & pos ) -> QString {
+		if ( !list->wwVisSlotAt )
+			return QString();
+		const int slot = list->wwVisSlotAt( idx, pos );
+		if ( slot < 0 )
+			return QString();
+		const int col = NifModel::wwVisColumn( list->model() );
+		const int flags = idx.sibling( idx.row(), col ).data( WwVisFlagsRole ).toInt();
+		if ( flags < 0 )
+			return QString();
+		const bool visible = ( flags & 0x1 );
+		const bool ghost = ( flags & 0x2 );
+		// 0x4 / 0x8: the state comes from an ANCESTOR, and clicking here cannot
+		// change it. The sentence has to send the reader to the parent rather
+		// than invite a click that will do nothing.
+		if ( slot == WwGlyphs::SlotVisible )
+			return WwGlyphs::visibleTip( visible, ( flags & 0x4 ) );
+		return WwGlyphs::seeThroughTip( ghost, visible, ( flags & 0x8 ) );
 	};
 }
 
@@ -8982,6 +9108,75 @@ QRect NifSkope::loadedNifsArrowRect( const QModelIndex & row ) const
 		return QRect();
 	return delegate->arrowRect( row, loadedNifsView->visualRect( row ),
 		loadedNifsView->viewport() );
+}
+
+/*! What the Loaded-NIFs glyph under a point says, or empty for "not a glyph".
+ *
+ *  The whole tooltip contract, as a function of (row, point), so it can be
+ *  asserted without a dialog: what the hover shows IS what this returns, because
+ *  the view's ToolTip handler has nothing else to consult.
+ *
+ *  It reads the same displayFlags the delegate paints from and the same rects the
+ *  press claims, which is the point of routing it here rather than letting the
+ *  view do its own arithmetic: a tooltip describing a glyph the click would miss
+ *  is the exact failure this shape rules out.
+ */
+QString NifSkope::loadedNifsGlyphTooltip( const QModelIndex & row, const QPoint & pos ) const
+{
+	if ( !loadedNifsView || !row.isValid() )
+		return QString();
+	auto * delegate = static_cast<LoadedNifsDelegate *>( loadedNifsView->itemDelegate() );
+	if ( !delegate || !delegate->displayFlags )
+		return QString();
+	const int flags = delegate->displayFlags( row );
+	if ( flags < 0 )
+		return QString();		// not a document row: the scroll probes, and nothing else
+	const bool inert = ( flags & 0x8 );
+	if ( loadedNifsArrowRect( row ).contains( pos ) )
+		return loadedNifArrowTip( inert );
+	const QRect r = loadedNifsView->visualRect( row );
+	for ( int slot = 0; slot < LoadedNifsDelegate::SlotCount; slot++ ) {
+		if ( !loadedNifGlyphRect( r, slot ).contains( pos ) )
+			continue;
+		switch ( slot ) {
+		case LoadedNifsDelegate::SlotFaceDonor:
+			// drawn only when it is set, and an empty slot has nothing to explain
+			return ( flags & 0x10 ) ? loadedNifFaceDonorTip() : QString();
+		case LoadedNifsDelegate::SlotSkeleton:
+			return loadedNifSkeletonTip( flags & 0x4, inert );
+		case LoadedNifsDelegate::SlotWeapon:
+			return loadedNifWeaponTip( flags & 0x40, inert );
+		case LoadedNifsDelegate::SlotFollow:
+			return loadedNifFollowTip( flags & 0x80, inert );
+		case LoadedNifsDelegate::SlotVisible:
+			// shared with the Block List's column, which draws the same eye
+			return WwGlyphs::visibleTip( flags & 0x1 );
+		case LoadedNifsDelegate::SlotGhost:
+			return WwGlyphs::seeThroughTip( flags & 0x2, flags & 0x1 );
+		}
+	}
+	// the rule, the name, the margin: dead zones stay dead, and the row's own
+	// tooltip (source, unsaved state, path) answers there instead
+	return QString();
+}
+
+/*! How many glyph tooltips the strip has actually SHOWN.
+ *
+ *  The text mapping above is the contract, but a mapping nothing consults is
+ *  a mapping that never reaches a user. This counts the times the view's own
+ *  ToolTip handler consulted it and showed the result, so a harness can tell
+ *  "the hover explained nothing" from "the hover never reached the view". */
+int NifSkope::loadedNifsTooltipsShown() const
+{
+	if ( !loadedNifsView )
+		return -1;
+	return static_cast<LoadedNifsTreeView *>( loadedNifsView )->glyphTooltipsShown;
+}
+
+//! The Block List's half of the same contract, for the same reason.
+QString NifSkope::blockListVisTooltip( const QModelIndex & index, const QPoint & pos ) const
+{
+	return ( list && list->wwVisTooltip ) ? list->wwVisTooltip( index, pos ) : QString();
 }
 
 bool NifSkope::grabLoadedNifsView( const QString & path ) const

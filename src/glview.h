@@ -184,8 +184,14 @@ public:
 	//! Import a Screen Archer Menu pose (.json). SAM transforms are ABSOLUTE, so
 	//! no rest base is used and blend interpolates from the bone's current
 	//! transform. Returns bones applied (0 = failure, message in *error); on
-	//! success *error may still carry a non-fatal note. Import only — no export.
+	//! success *error may still carry a non-fatal note.
 	int poseImportSam( const QString & path, float blend, QString * error, int * missing = nullptr );
+	//! Export the current bone transforms as a Screen Archer Menu pose (.json).
+	/*! SAM transforms are ABSOLUTE, so unlike the Outfit Studio export there is no
+	 *  rest base and no delta: what is written is what the bones hold now, which
+	 *  means it works outside pose mode too. Returns success; \a written takes the
+	 *  bone count. */
+	bool poseExportSam( const QString & path, const QString & name, int * written, QString * error );
 	//! Test hooks (WW_POSEDRAW_TEST): bone count, and does poseBoneAt resolve a
 	//! bone at its own drawn screen position.
 	int poseBoneCountForTest() const { return poseBones.size(); }

@@ -154,9 +154,20 @@ public:
 	std::function<int( const QModelIndex &, const QPoint & )> wwVisSlotAt;
 	//! Flip one toggle. Called on RELEASE, and only over the pressed glyph.
 	std::function<void( const QModelIndex &, int slot )> wwVisToggle;
+	/*! What the glyph under a point says on hover, or empty for "not a glyph".
+	 *
+	 *  Empty is the important half. The block row's own tooltip carries the
+	 *  per-type summary that used to be an entire column, and a glyph tooltip
+	 *  answering anywhere in the row would have replaced it with a sentence
+	 *  about an eye. Resolved from the same rects `wwVisSlotAt` uses, so what a
+	 *  point explains and what it toggles cannot drift apart. */
+	std::function<QString( const QModelIndex &, const QPoint & )> wwVisTooltip;
 	//! How many toggles the gesture above has completed. The harness reads it to
 	//! tell "the click did nothing" from "the click never arrived".
 	int wwVisTogglesDone = 0;
+	//! ...and how many glyph tooltips were shown, for the same reason: it tells
+	//! "the hover explained nothing" from "the hover never reached the view".
+	int wwVisTooltipsShown = 0;
 
 	//! How many drag events the overrides above have been handed. The harness
 	//! reads it to prove the override ran, rather than measuring a hook it
@@ -246,6 +257,8 @@ protected slots:
 	void onItemCollapsed( const QModelIndex & index );
 
 protected:
+	//! ToolTip events: a visibility glyph answers for itself, the row for the rest.
+	bool viewportEvent( QEvent * event ) override final;
 	void drawBranches( QPainter * painter, const QRect & rect, const QModelIndex & index ) const override final;
 	void paintEvent( QPaintEvent * e ) override final;
 	void startDrag( Qt::DropActions supportedActions ) override final;

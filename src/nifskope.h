@@ -201,6 +201,21 @@ public:
 	QRect loadedNifsGlyphRect( const QModelIndex & row, int slot ) const;
 	//! Where the style put that row's arrow, so a harness samples its real pixels.
 	QRect loadedNifsArrowRect( const QModelIndex & row ) const;
+	/*! What the glyph under a point in a Loaded-NIFs row SAYS on hover, or empty
+	 *  where there is no glyph.
+	 *
+	 *  The whole tooltip contract as a function of (row, point). The view's
+	 *  ToolTip handler consults nothing else, so what this returns is what the
+	 *  hover shows, and it can be asserted without driving a dialog. State-aware:
+	 *  an inert glyph explains WHY it is inert, which is the case a reader most
+	 *  needs explained. */
+	QString loadedNifsGlyphTooltip( const QModelIndex & row, const QPoint & pos ) const;
+	//! The Block List visibility column's half of the same contract. Its eye and
+	//! disc share their wordings with the strip's, through WwGlyphs.
+	QString blockListVisTooltip( const QModelIndex & index, const QPoint & pos ) const;
+	//! How many glyph tooltips the strip has SHOWN — a mapping nothing consults
+	//! never reaches a user. -1 when there is no view.
+	int loadedNifsTooltipsShown() const;
 	/*! Make one Loaded NIFs row the primary document.
 	 *
 	 *  The row's arrow, the row menu's Make Primary / Edit and a double-click are
