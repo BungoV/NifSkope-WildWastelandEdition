@@ -1,5 +1,60 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11f — every glyph in both panels says what it does
+
+**Hovering a glyph now explains that glyph.** The Loaded-NIFs row strip and the
+Block List's visibility column both answer per-GLYPH rather than per-row: one
+short sentence, state-aware, in the vocabulary of the row menu that offers the
+same marks. The arrow says "The primary document — the one being edited" on the
+row that is, and "Make this the primary document" on every row that could be. The
+eye says "Visible — click to hide" or "Hidden — click to show". The disc admits
+when a see-through setting is waiting rather than applied, which is a real rule
+of that control that nothing had ever said out loud.
+
+**The inert glyphs get tooltips, and they are the point.** A glyph drawn faded
+and dead to the mouse raises exactly one question, and until now nothing answered
+it. The primary's skull says "The primary is the skeleton unless another row is
+marked"; its pistol and bone say the mark does not apply to the document other
+files are merged onto and posed against. Painted glyphs are not widgets, so the
+"a disabled widget shows no tooltip" landmine does not reach them — which is
+exactly why the case worth explaining is the one that can be explained.
+
+**One vocabulary, one geometry.** The eye and the disc are drawn by `WwGlyphs`
+for both surfaces, and their wordings live there now too: two panels driving one
+piece of scene state must not describe it in two languages. Both surfaces resolve
+the point through the same rects their PRESS uses — `loadedNifGlyphRect` and
+`wwVisSlotAt` — so a tooltip cannot end up describing a glyph the click would
+miss. Dead zones stay dead: the rule, the empty marker slot and the name return
+empty, and the base class then answers with the row's own tooltip, which in the
+Block List is the per-type summary an entire column used to be.
+
+**The contract is a function, not a popup.** `loadedNifsGlyphTooltip(row, point)`
+and `blockListVisTooltip(index, point)` are what the ToolTip handlers consult and
+what the harness asserts, so the sentences are checked without driving a dialog.
+All fourteen are pinned literally, because the failure worth catching is not "no
+tooltip" — it is one sentence copy-pasted across four glyphs, or a state-blind
+string that says "click to hide" over an eye that is already shut. Both read as
+working. State is moved between samples so a string that ignored it cannot pass,
+a counter on each view proves the hover actually reached the mapping, and the two
+surfaces are compared against each other rather than against a literal, because
+what is in question there is whether they still agree. The table of sentences is
+written into `release/ww_loadednifs_test.log` so the wording can be read and
+approved without a build.
+
+**A harness that inherited its mode cost three builds and a bisect.**
+`loaded_nifs.sh` never seeded `UI/List Mode`, and the Block List reads it while
+the window is being built. On a profile some earlier run had left in `list`, four
+checks about search scopes and the Header went red with no source change — and
+they went red in the same commit as a UI change, which is the worst possible
+place for an environmental failure to appear. A clean rebuild reproduced it, a
+bisect cleared the new code, and the registry had the answer. It seeds
+`hierarchy` before launch now and restores the user's value on exit, exactly as
+`block_visibility.sh`, `block_rename.sh` and `block_list_modes.sh` already did.
+The rule was already written down: **a harness must force the state it measures,
+never inherit persisted QSettings.**
+
+`loaded_nifs.sh` **166/166**, `block_visibility.sh` **82/82** across both modes.
+
 ## 2026-08-11e — the primary really hides and ghosts, and the row arrow is a button
 
 Three corrections to the entry below, all from watching it: the primary's eye and

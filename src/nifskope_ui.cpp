@@ -125,6 +125,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QGroupBox>
 #include <QLabel>
 #include <QHeaderView>
+#include <QHelpEvent>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMenuBar>
@@ -151,6 +152,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QToolTip>
 #include <QTreeWidget>
 #include <QWidgetAction>
 
@@ -11268,6 +11270,181 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							}
 						}
 
+						/* 7. EVERY GLYPH EXPLAINS ITSELF ON HOVER, and the assertion is the
+						 * exact sentence, per glyph and per state.
+						 *
+						 * The mapping is the contract, not the popup: the view's ToolTip
+						 * handler consults loadedNifsGlyphTooltip and nothing else, so this
+						 * drives the same function the hover does and is not a parallel path.
+						 *
+						 * Pinned literally, all fourteen of them, because the failure this
+						 * catches is not "no tooltip" — it is one sentence copy-pasted across
+						 * four glyphs, or a state-blind string that says "click to hide" over
+						 * an eye that is already shut. Both read as working.
+						 *
+						 * The INERT wordings are the ones that had to exist: a glyph drawn
+						 * faded and dead to the mouse raises exactly one question, and these
+						 * are the only place it is answered.
+						 */
+						{
+							auto tipAt = [skope]( const QModelIndex & r, int slot ) {
+								return skope->loadedNifsGlyphTooltip( r,
+									skope->loadedNifsGlyphRect( r, slot ).center() );
+							};
+							auto arrowTipAt = [skope]( const QModelIndex & r ) {
+								return skope->loadedNifsGlyphTooltip( r,
+									skope->loadedNifsArrowRect( r ).center() );
+							};
+
+							// a known state on both rows: nothing marked, visible, solid
+							skope->setWorkspaceSkeletonDocument( -1 );
+							skope->markWorkspaceWeaponRow( row, false );
+							skope->markWorkspaceFollowerRow( row, false );
+							skope->setWorkspaceDisplayMode( row, 1 );
+							skope->sessionPreviewVisible = true;
+							skope->sessionPreviewGhost = false;
+							skope->refreshSessionPreview();
+							QApplication::processEvents();
+
+							const QString eyeOnTip = QStringLiteral( "Visible — click to hide" );
+							const QString discOffTip =
+								QStringLiteral( "Solid — click to draw it see-through (X-ray)" );
+
+							check( "a live row's arrow offers to make it primary",
+								arrowTipAt( otherRow )
+									== QStringLiteral( "Make this the primary document" ) );
+							check( "...its skull, pistol and bone say what marking them would do",
+								tipAt( otherRow, 1 ) == QStringLiteral(
+										"Use as the skeleton for Loaded NIFs — only one at a time" )
+									&& tipAt( otherRow, 2 ) == QStringLiteral(
+										"Use as a weapon part, to merge onto a target's WEAPON bone" )
+									&& tipAt( otherRow, 3 ) == QStringLiteral( "Follow the skeleton's pose" ) );
+							check( "...and its eye and disc report the state they are in",
+								tipAt( otherRow, 4 ) == eyeOnTip && tipAt( otherRow, 5 ) == discOffTip );
+
+							check( "the primary's arrow says it is the primary, not that it can become one",
+								arrowTipAt( primaryRow )
+									== QStringLiteral( "The primary document — the one being edited" ) );
+							check( "...its INERT marks explain why they are inert, one sentence each",
+								tipAt( primaryRow, 1 ) == QStringLiteral(
+										"The primary is the skeleton unless another row is marked" )
+									&& tipAt( primaryRow, 2 ) == QStringLiteral(
+										"Weapon parts merge onto a target, so this does not apply here" )
+									&& tipAt( primaryRow, 3 ) == QStringLiteral(
+										"The primary is what the others follow, so this does not apply here" ) );
+							check( "...and its LIVE eye and disc say exactly what a live row's say",
+								tipAt( primaryRow, 4 ) == eyeOnTip
+									&& tipAt( primaryRow, 5 ) == discOffTip );
+
+							/* STATE AWARENESS, proven by moving the state. A string that ignored
+							 * it would have passed every check above. */
+							skope->sessionPreviewVisible = false;
+							skope->refreshSessionPreview();
+							QApplication::processEvents();
+							const QString eyeOffTip = tipAt( primaryRow, 4 );
+							const QString discWhileHidden = tipAt( primaryRow, 5 );
+							skope->sessionPreviewVisible = true;
+							skope->refreshSessionPreview();
+							QApplication::processEvents();
+							check( "hiding the primary changes what its eye says",
+								eyeOffTip == QStringLiteral( "Hidden — click to show" )
+									&& eyeOffTip != eyeOnTip );
+							check( "...and its disc admits the setting is waiting rather than applied",
+								discWhileHidden == QStringLiteral(
+									"Solid — click to make it see-through when it is shown again" ) );
+							skope->setWorkspaceSkeletonDocument( row );
+							QApplication::processEvents();
+							const QString markedSkull = tipAt( otherRow, 1 );
+							skope->setWorkspaceSkeletonDocument( -1 );
+							QApplication::processEvents();
+							check( "marking the skeleton changes what its skull says",
+								markedSkull == QStringLiteral(
+									"The skeleton for Loaded NIFs — click to unmark it" ) );
+
+							/* DEAD ZONES STAY DEAD. The rule, the empty marker slot and the name
+							 * have nothing to explain, and answering there would have replaced
+							 * the row's own tooltip — its source path and unsaved state. */
+							const QRect nameArea = skope->loadedNifsView->visualRect( otherRow );
+							check( "the rule, the empty marker slot and the name explain nothing",
+								tipAt( otherRow, 0 ).isEmpty()
+									&& skope->loadedNifsGlyphTooltip( otherRow,
+										QPoint( nameArea.left() + 60, nameArea.center().y() ) ).isEmpty() );
+
+							/* ...AND THE HOVER ACTUALLY REACHES IT. A mapping nothing consults
+							 * is a mapping no user ever sees, which is the same failure class as
+							 * the drag that shipped with 26 green checks and no startDrag(). */
+							const int shownBefore = skope->loadedNifsTooltipsShown();
+							{
+								const QPoint at = skope->loadedNifsGlyphRect( otherRow, 4 ).center();
+								QHelpEvent help( QEvent::ToolTip, at,
+									skope->loadedNifsView->viewport()->mapToGlobal( at ) );
+								QApplication::sendEvent( skope->loadedNifsView->viewport(), &help );
+								QApplication::processEvents();
+							}
+							const int shownAfterGlyph = skope->loadedNifsTooltipsShown();
+							{
+								const QPoint at( nameArea.left() + 60, nameArea.center().y() );
+								QHelpEvent help( QEvent::ToolTip, at,
+									skope->loadedNifsView->viewport()->mapToGlobal( at ) );
+								QApplication::sendEvent( skope->loadedNifsView->viewport(), &help );
+								QApplication::processEvents();
+							}
+							QToolTip::hideText();
+							check( "a hover over a glyph shows one, and a hover over the name does not",
+								shownBefore >= 0 && shownAfterGlyph == shownBefore + 1
+									&& skope->loadedNifsTooltipsShown() == shownAfterGlyph );
+
+							/* ONE VOCABULARY ACROSS TWO PANELS. The Block List's column draws
+							 * the same eye over the same kind of state; if either surface ever
+							 * grows a private wording, these stop matching. Compared rather than
+							 * asserted against a literal, because the literal is above and what
+							 * is in question here is whether the two AGREE. */
+							skope->setLeftColumnMode( NifSkope::LeftBlocks );
+							QApplication::processEvents();
+							QString blockEyeTip, blockDiscTip;
+							if ( skope->nif ) {
+								const int visCol = NifModel::wwVisColumn( skope->list->model() );
+								for ( int b = 0; b < skope->nif->getBlockCount() && blockEyeTip.isEmpty(); b++ ) {
+									QModelIndex src = skope->nif->getBlockIndex( b );
+									if ( !skope->nif->blockInherits( src, QStringLiteral( "NiAVObject" ) ) )
+										continue;
+									QModelIndex idx = ( skope->list->model() == skope->proxy )
+										? skope->proxy->mapFrom( src, QModelIndex() ) : src;
+									if ( !idx.isValid() || visCol < 0 )
+										continue;
+									skope->list->scrollTo( idx );
+									QApplication::processEvents();
+									const QRect cell = skope->list->visualRect( idx.sibling( idx.row(), visCol ) );
+									if ( cell.isEmpty() )
+										continue;
+									blockEyeTip = skope->blockListVisTooltip( idx,
+										WwGlyphs::visSlotRect( cell, WwGlyphs::SlotVisible ).center() );
+									blockDiscTip = skope->blockListVisTooltip( idx,
+										WwGlyphs::visSlotRect( cell, WwGlyphs::SlotGhost ).center() );
+								}
+							}
+							skope->setLeftColumnMode( NifSkope::LeftNifs );
+							QApplication::processEvents();
+							check( "the Block List's eye and disc say exactly what the strip's do",
+								!blockEyeTip.isEmpty() && blockEyeTip == eyeOnTip
+									&& blockDiscTip == discOffTip );
+
+							/* THE TABLE ITSELF, into the log. The checks above prove
+							 * the sentences are what they should be; this is so they
+							 * can be READ and approved without a build, the way the
+							 * icon sheet exists for the glyphs they explain. */
+							static const char * const slotNames[] = {
+								"face  ", "skull ", "pistol", "bone  ", "eye   ", "disc  " };
+							log << "  tooltips — primary row | live row\n";
+							log << "    arrow : " << arrowTipAt( primaryRow )
+								<< " | " << arrowTipAt( otherRow ) << "\n";
+							for ( int slot = 0; slot < 6; slot++ )
+								log << "    " << slotNames[slot] << ": "
+									<< tipAt( primaryRow, slot )
+									<< " | " << tipAt( otherRow, slot ) << "\n";
+							log.flush();
+						}
+
 						const QString primaryShot = QApplication::applicationDirPath()
 							+ QStringLiteral( "/ww_loadednifs_primary_row.png" );
 						check( "the primary row renders", skope->grabLoadedNifsView( primaryShot ) );
@@ -11881,11 +12058,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *   8. A MUZZLE FLASH GOES AT THE END OF THE BARREL. A flash mesh declares no
 	 *      connect points at all, so there is nothing to match on and the fallback
 	 *      would leave the fireball on the WEAPON bone. It is placed one rung past
-	 *      everything else on the barrel line instead, and both shapes that line
-	 *      takes are asserted: on a bare minigun (no muzzle point, three flash
-	 *      points for three barrel lengths) it takes the farthest, P-FlashFar; on
-	 *      a kitted 10mm it takes the SUPPRESSOR's projectile node, past the
-	 *      receiver's and the barrel's.
+	 *      everything else on the barrel line instead, and three shapes that line
+	 *      takes are asserted: on a BARE minigun (no muzzle point, three P-Flash
+	 *      stations for three barrel lengths) it takes the first station PAST the
+	 *      gun's own geometry — P-FlashShort, because the bare gun's meshes stop
+	 *      at 50.1 along the bore, FlashShort is at 70.1 and FlashFar at 106.8;
+	 *      with a LONG BARREL merged on first it goes further still, onto that
+	 *      barrel's own P-Muzzle; and on a kitted 10mm it takes the SUPPRESSOR's
+	 *      projectile node, past the receiver's and the barrel's.
 	 *   9. WHAT THIS MUST NOT TOUCH. A real animated effect goes through the
 	 *      weapon path and every controller, interpolator, float track and shader
 	 *      block is counted into the target one for one, with exactly ONE node
@@ -11912,6 +12092,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	 *    6 a part for it    7 a second one of it       17 a clean rig for the rifle
 	 *    8 an ordinary unmarked donor                  18 a muzzle flash
 	 *    9 a target with no WEAPON bone                19 a bare gun with flash points
+	 *                                                  20 a second one of it, for the
+	 *                                                     barrel-then-flash case
 	 * Log: release/ww_weaponmark_test.log; pictures: release/ww_weaponmark_list.png
 	 * (the marked rows) and release/ww_weaponmark_kit.png (the assembled gun).
 	 */
@@ -11958,7 +12140,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					   LongBarrel = 10, ReflexSight = 11, KitTarget = 12,
 					   RifleReceiver = 13, RifleStock = 14, RifleBarrel = 15,
 					   RifleSilencer = 16, RifleTarget = 17, EffectDonor = 18,
-					   FlashTarget = 19, FixtureCount = 20 };
+					   FlashTarget = 19, BarrelFlashTarget = 20, FixtureCount = 21 };
 
 				do {
 					if ( !ok ) { log << "load failed\n"; fails++; checks++; break; }
@@ -12486,12 +12668,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * no name for the ordinary match to work with, and the fallback
 					 * would hang the fireball on the WEAPON bone, at the shooter's
 					 * fist. It belongs one node past everything else on the barrel
-					 * line, and the two cases below are the two shapes that line
+					 * line, and the three cases below are the shapes that line
 					 * takes in the corpus.
 					 *
 					 * (a) A BARE MINIGUN publishes no muzzle point at all: its
-					 * ladder rung is the P-Flash family, one point per barrel
-					 * length, and the flash takes the farthest — P-FlashFar.
+					 * ladder rung is the P-Flash family — and those are not one
+					 * point, they are one station PER BARREL LENGTH. Farthest-wins
+					 * put the fireball on P-FlashFar, 106.8 along the bore, on a
+					 * gun whose own geometry stops at 50.1. The flash takes the
+					 * first station BEYOND the assembly's geometry instead,
+					 * measured on the meshes' bounds rather than their pivots (a
+					 * pivot sweep says 18.6) — P-FlashShort, at 70.1.
 					 */
 					NifModel * flashRig = skope->workspaceDocumentModel( FlashTarget );
 					NifModel * flashSrc = skope->workspaceDocumentModel( EffectDonor );
@@ -12523,13 +12710,49 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 						log << "minigun geometry reaches y " << ownReach << "; the flash sits at y "
 							<< flashY << ", " << flashReach << " from the bone\n";
-						check( "the flash takes the FARTHEST of the minigun's three flash points",
+						check( "the flash takes the FIRST of the minigun's three flash stations "
+							"past the gun's own geometry",
 							flashSummary.contains( QStringLiteral(
-								"placed at the end of the barrel chain on P-FlashFar from Minigun001" ) ) );
+								"placed at the end of the barrel chain on P-FlashShort from Minigun001" ) ) );
 						check( "...so it sits past the end of the gun's own geometry",
 							flashShape >= 0 && flashY > ownReach + 20.0f );
 						check( "...and nowhere near the bone the gun hangs from",
 							flashReach > 40.0f );
+						/* ...AND IT IS NOT A CAP. The extent rule can only pull the
+						 * flash IN toward a gun that has not been extended: put a
+						 * long barrel on first and the flash goes FURTHER, because
+						 * every minigun barrel in the corpus publishes P-Muzzle,
+						 * which is a higher rung than the flash family entirely.
+						 * A rule that clamped the flash to the gun's own geometry
+						 * would fail this while passing everything above. */
+						NifModel * barrelRig = skope->workspaceDocumentModel( BarrelFlashTarget );
+						if ( barrelRig ) {
+							skope->markWorkspaceWeaponRow( Barrel, true );
+							check( "a long barrel merges onto a second bare minigun",
+								merge( BarrelFlashTarget, { Barrel } ) );
+							skope->markWorkspaceWeaponRow( Barrel, false );
+							skope->markWorkspaceWeaponRow( EffectDonor, true );
+							check( "...and the flash merges after it",
+								merge( BarrelFlashTarget, { EffectDonor } ) );
+							skope->markWorkspaceWeaponRow( EffectDonor, false );
+							const QString barrelSummary = nifLastMergeSummary();
+							log << "--- muzzle flash on a barrelled minigun ---\n" << barrelSummary
+								<< "\n--- end ---\n";
+							const int barrelWeapon = blockNamed( barrelRig, QStringLiteral( "WEAPON" ) );
+							const int barrelFlash = shapeNamed( barrelRig, flashShapeNames.first() );
+							float barrelY = -1;
+							if ( barrelWeapon >= 0 && barrelFlash >= 0 )
+								barrelY = gunFrame( barrelRig, barrelWeapon, barrelFlash ).translation[1];
+							log << "with the long barrel on, the flash sits at gun-frame y "
+								<< barrelY << " (bare: " << flashY << ")\n";
+							check( "with a barrel fitted the flash moves UP to the barrel's own muzzle",
+								barrelSummary.contains( QStringLiteral(
+									"placed at the end of the barrel chain on P-Muzzle from Minigun_Barrel" ) ) );
+							check( "...which is FURTHER out than the bare gun's answer, not nearer",
+								barrelFlash >= 0 && flashShape >= 0 && barrelY > flashY + 5.0f );
+						} else {
+							check( "the barrel-then-flash rig has a model", false );
+						}
 					} else {
 						check( "the flash fixture and its rig are both loaded", false );
 					}
@@ -18535,6 +18758,64 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					clickGlyph( shape, WwGlyphs::SlotVisible );
 					check( mode + ": clicking it again reveals",
 						ogl->getScene()->hiddenNodes.isEmpty() && ( visFlags( shape ) & 0x1 ) );
+
+					/* THE GLYPHS EXPLAIN THEMSELVES, in the strip's own words.
+					 *
+					 * The eye and the disc are one drawing shared with the Loaded-NIFs
+					 * row strip, and now one vocabulary too. Asserted against the
+					 * shared function rather than against a literal, because what is
+					 * in question is not the sentence — it is whether the two surfaces
+					 * still agree; a private wording inlined into either one is exactly
+					 * what this catches, and a literal here would pass through it.
+					 *
+					 * The state is moved between samples, because a tooltip that
+					 * ignored state would read correctly in whichever state you
+					 * happened to look at first.
+					 */
+					{
+						const QRect cell = rowRectOnScreen( visCell( shape ) );
+						auto tipAt = [&]( int slot ) {
+							return skope->blockListVisTooltip( rowFor( shape ),
+								WwGlyphs::visSlotRect( cell, slot ).center() );
+						};
+						const bool shown = ( visFlags( shape ) & 0x1 );
+						const bool ghosted = ( visFlags( shape ) & 0x2 );
+						check( mode + ": the eye and the disc say what the strip's say",
+							!cell.isNull()
+								&& tipAt( WwGlyphs::SlotVisible ) == WwGlyphs::visibleTip( shown )
+								&& tipAt( WwGlyphs::SlotGhost )
+									== WwGlyphs::seeThroughTip( ghosted, shown ) );
+						const QString eyeWhenShown = tipAt( WwGlyphs::SlotVisible );
+						clickGlyph( shape, WwGlyphs::SlotVisible );
+						const QString eyeWhenHidden = tipAt( WwGlyphs::SlotVisible );
+						const QString discWhenHidden = tipAt( WwGlyphs::SlotGhost );
+						clickGlyph( shape, WwGlyphs::SlotVisible );
+						check( mode + ": ...and both follow the state rather than describing one",
+							eyeWhenShown == WwGlyphs::visibleTip( true )
+								&& eyeWhenHidden == WwGlyphs::visibleTip( false )
+								&& eyeWhenHidden != eyeWhenShown
+								&& discWhenHidden == WwGlyphs::seeThroughTip( false, false ) );
+						/* Outside the glyphs the ROW still answers. The block row's
+						 * tooltip is the per-type summary this column replaced, and a
+						 * glyph sentence that covered the whole row would have deleted
+						 * it without anyone noticing. */
+						check( mode + ": the rest of the row explains nothing about glyphs",
+							skope->blockListVisTooltip( rowFor( shape ),
+								QPoint( cell.left() - 40, cell.center().y() ) ).isEmpty()
+								&& skope->blockListVisTooltip( rowFor( shape ),
+									QPoint( cell.left() + 2, cell.center().y() ) ).isEmpty() );
+						// ...and the hover really reaches it, not just the mapping
+						const int tipsWas = list->wwVisTooltipsShown;
+						{
+							const QPoint at = WwGlyphs::visSlotRect( cell, WwGlyphs::SlotVisible ).center();
+							QHelpEvent help( QEvent::ToolTip, at, list->viewport()->mapToGlobal( at ) );
+							QApplication::sendEvent( list->viewport(), &help );
+							QApplication::processEvents();
+						}
+						QToolTip::hideText();
+						check( mode + ": hovering a glyph actually shows one",
+							list->wwVisTooltipsShown == tipsWas + 1 );
+					}
 
 					{
 						// SLIDE-OFF CANCELS. Press the glyph, move away past the
