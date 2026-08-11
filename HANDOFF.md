@@ -9,9 +9,46 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-10 (late)**. Edition **0.3.1**. Build green; latest closed
-work is the **scene-composition pipeline** (below) on top of the SAM pose
-import from earlier the same day.
+Updated **2026-08-11**. Edition **0.3.1**. Build green; latest closed work is
+the **overnight cleanup wave** (below), on top of the scene-composition
+pipeline and SAM import from 2026-08-10.
+
+### The overnight wave (2026-08-11, commits 21b04c2…7b37226)
+
+Run under an overseer-verifier model with parallel agents; every item
+user-directed:
+
+- **Per-glyph tooltips** on the Loaded-NIFs strip + Block List Vis column,
+  state-aware, same rects as the clicks (`21b04c2`).
+- **SAM pose EXPORT** (`0caf20b`): exact inverse of the import (toEuler ==
+  SAM's MatrixToEulerYPR incl. both gimbal branches), six decimals, structural
+  bone-set rule (96 keys covering the corpus's 89); round trip is one check of
+  five in sam_pose_import.sh phase 3.
+- **Merge polish** (`0caf20b`): flash placement is extent-aware (bounds, not
+  pivots — bare minigun lights at P-FlashShort, not 56 units of air); a C-less
+  donor that publishes points is a gun, not a flash; base-on-bone Receiver
+  note silenced. OMOD assembler DROPPED per user; follow-specific-row resolved
+  by design (single active skeleton).
+- **Refraction actually works** (`b9dfcb0`): sequences bind data-less
+  NiBlend*Interpolators (never serialized) — strength was frozen at 0.0
+  forever; data-less blends now resolve to the controller's authored
+  interpolator. Shader: normal.xy × strength × vertex alpha, 5% viewport
+  height cap. refraction.sh (21 checks) walks the controller's own ramp
+  against closed-form values; 6-of-7 A/B corpus byte-identical.
+  render_regression baselines remain stale (pre-existing) — re-baseline
+  pending.
+- **The flat-list heap overflow** fixed (`2b0635d`, see the corrected section
+  below) and **poselib** measuring the real invariant.
+- **winpath consolidated** into _harness.sh, pure bash (`7b37226`); eight
+  scripts flagged (pre-existing) for placing GUI windows without
+  WW_WINDOW_AT.
+- **Process rules now standing**: one NifSkope instance at a time
+  (.harness.lock mkdir-mutex around every launch), all harness windows on the
+  second monitor, never `git stash` in a shared tree (an agent's stash swept
+  three others' work mid-run; recovered, stash preserved then retired), and
+  suites whose fixtures build under /tmp cannot be verified from a sandboxed
+  Git-Bash tool shell — the native exe cannot write C:\msys64\tmp there; use
+  a PowerShell-launched login shell.
 
 ### The scene-composition pipeline (2026-08-10, commits f6b0285…8aed8d8)
 
@@ -296,17 +333,23 @@ Two headlines:
   it could be clicked, dropped on or right-clicked, not just newly inserted ones
   — and the cause was `QHeaderView`'s cached total going negative, not anything
   about the model. Hierarchy mode was never affected.
-- **The thing filed as "the flat list takes the process down" is a HANG, still
-  open.** `block_rename.sh` in list mode stops 4 runs in 8: no crash, no fault
-  under gdb, no APPCRASH event — a passing run is 4 seconds and a failing one is
-  63, the script's deadline. Ruled out: stale build, the IPC port, the inherited
-  animation setting, contention — and, as of this session, a repaint storm
-  (frames are counted now: one or two) and any nested event loop or modal (a
-  watchdog timer logs nothing across a 60-second hang, and timers *do* run inside
-  a nested loop). It is **one event handler that never returns**, after
-  `setCurrentIndex`. Next step is a stack, and `scratchpad/stack_hang.sh` takes
-  one — it just needs more than four attempts to catch a 50% event. Harness-only:
-  no user path reaches it.
+- **CLOSED 2026-08-11 (`2b0635d`): the "flat-list hang" was never a hang — it
+  was a heap overflow, and this section's lore was wrong on both counts.**
+  `QTreeView::expandAll()` emits `expanded()` from inside
+  `QTreeViewPrivate::layout()`; `NifTreeView::scrollExpand` answered it
+  synchronously with `scrollTo()`, whose `doItemsLayout()` cleared and re-laid
+  `viewItems` under the outer layout's feet — which then wrote past the
+  reallocated buffer. The process was already DEAD while the script waited out
+  its 63-second deadline (that is why it read as a hang), and the Application
+  log DOES carry APPCRASH records (`0xc0000005` then `0xc000041d`) — the "no
+  APPCRASH" claim above was simply wrong. Under gdb's debug heap the ~50%
+  becomes 4-in-4 with "Heap block modified past requested size". The scroll is
+  now posted (QueuedConnection, QPersistentModelIndex), coalesced per burst,
+  cancelled by explicit `scrollTo()`. 12/12 green with list mode back in
+  `block_rename.sh`'s gate; `collision_drop.sh`'s "stall" was this same crash
+  taking the process down mid-suite (10/10 now). Lesson for the next
+  mystery: **a "hang" whose process cannot be attached to may be a corpse —
+  check the process is alive before reaching for deadlock theories.**
 
 ### The Block List, as it now behaves
 
