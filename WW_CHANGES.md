@@ -1,5 +1,75 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11b — The starter cube is gone; a new document is an empty FO4 NIF
+
+**NifSkope no longer opens on a cube.** A window with no file is a Fallout 4
+header — 20.2.0.7, user 12, BS 130 — and one empty root NiNode named
+"Scene Root". Nothing else. Requested directly: we do not really need it.
+
+**The root node stays, and that is a decision, not a leftover.** Everything that
+edits a document reaches for a parent to put work under, and one thing measures
+block 0 by name: the external-drop guard identifies a clean starter by editing
+it and watching the document stop being eligible for replacement
+(`canReplaceStarterFromDrop`). On a truly empty model there is no block 0, that
+index is invalid, and two of `external_nif_drop.sh`'s seventeen checks collapse
+into vacuous passes. One node costs 192 bytes and keeps every one of them
+honest.
+
+- **`Settings/Nif/Startup Defaults/New Document Cube` is deleted**, along with
+  `NifSkope::startupCubeWanted()`, its only reader. A preference for a thing
+  that no longer exists is a trap for whoever reads the code next.
+- **The WW_* environment gate went with it.** That function also switched the
+  cube off for every harness run, because a cube renumbers blocks underneath
+  tests written against an empty document. An empty root node perturbs nothing,
+  so users and harnesses now start on the same document — one less place where
+  what is measured differs from what ships.
+- **Reload still gives it back.** An untitled document has no file behind it, so
+  `reload()` rebuilds the starter rather than looking for a file named ""; that
+  path now always captures a fresh drop baseline, where before it cleared the
+  baseline whenever the cube was off.
+
+**The cube survives as a test fixture, reachable only through the CLI.**
+`NifSkope -no-gui new` writes the empty document the GUI opens with;
+`-no-gui new --cube [--size N]` writes the old four-block scene. That is not
+tidiness — `block_dragdrop.sh` (143 checks), `block_rename.sh` (27),
+`block_list_modes.sh` (8/mode), `collision_drop.sh`, `loaded_nifs.sh` (118),
+`weapon_mark.sh` and `workspace_skeleton_target.sh` all build their fixture from
+this command precisely so they need no game corpus, and **Add Primitive cannot
+replace it**: that spell clones an existing BSTriShape for its vertex layout and
+material, so it refuses to make the FIRST shape in a document. The fixture files
+`new --cube` writes are **byte-identical** to what `new` wrote before this
+change (verified with `cmp`), which is why none of those suites needed an
+assertion touched — only the command line that builds them.
+
+**`starter_reload.sh` was rewritten for a one-block document** (15 checks): the
+starter is exactly one block, it is an NiNode, no BSTriShape / shader property /
+texture set came back with it, the header is Fallout 4's, an untouched window is
+clean, it renders, Block Details fills and filters, and Reload restores the
+count after an edit.
+
+**A harness was measuring nothing and passing.** Block Details is only rooted at
+the selected block when the left column is in **Blocks** mode; in the other two
+`select()` hands the view an invalid root, which a QTreeView reads as "show the
+whole model", and `refreshRowHiding()` returns early on an invalid root so the
+search box does not filter at all. That mode is persisted in QSettings, so
+**whichever mode the profile happened to be left in decided the result**. Caught
+here because the empty document made the number small enough to recognise: the
+panel reported 4 rows — header, two blocks, footer — and "4 of 4 matching",
+which is the whole file and no filter wearing a pass. The starter-shot harness
+now forces Blocks mode before it measures, and reports 11 rows narrowing to 1.
+This is the settings-isolation rule again: a harness must force the state it
+measures.
+
+Suites: `starter_reload.sh` **15/15**, `external_nif_drop.sh` **17/17**,
+`block_dragdrop.sh` **143/143**, `block_rename.sh` **27/27**,
+`block_list_modes.sh` **8/8 x2 modes**, `loaded_nifs.sh` **118/118**.
+`collision_drop.sh` stalls after 6 checks in the first collision create —
+**pre-existing**, reproduced identically on a rebuilt pre-change binary with a
+byte-identical fixture. `window_state_roundtrip.sh` is unstable in this
+environment (three different failure modes in three consecutive runs, and red on
+the pre-change build too); the plain-launch open/close it guards was verified
+directly instead — window up, WM_CLOSE, process gone in under a second.
+
 ## 2026-08-11 — Mark glyph iteration, user-drawn pistol
 
 The pistol and bone glyphs were redrawn after direct review (the 2+1-lobe

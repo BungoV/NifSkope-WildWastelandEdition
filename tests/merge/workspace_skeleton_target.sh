@@ -3,7 +3,7 @@
 # Loaded NIFs merge targeting: the skull is optional, but decisive when selected.
 #
 # This uses two real Power Armor pieces and the game's real skeleton because a
-# starter cube cannot distinguish a flat skin-reference node list from a genuine
+# bare cube fixture cannot distinguish a flat skin-reference node list from a genuine
 # parent/child bone hierarchy. It covers all three contracts:
 #   - clothes merge normally with no skeleton;
 #   - a marked skeleton outside the selection does not interfere;
@@ -32,7 +32,7 @@ winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 [ -f "$RIGHT" ] || { echo "no right-arm fixture at $RIGHT"; exit 2; }
 [ -f "$SKELETON" ] || { echo "no skeleton fixture at $SKELETON"; exit 2; }
 
-"$EXE" -no-gui new -o "$(winpath "$TMP/primary.nif")" >/dev/null 2>&1
+"$EXE" -no-gui new --cube -o "$(winpath "$TMP/primary.nif")" >/dev/null 2>&1
 [ -s "$TMP/primary.nif" ] || { echo "FAIL: could not build the primary fixture"; exit 1; }
 
 rm -f "$LOG"

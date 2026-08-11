@@ -1693,12 +1693,21 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
  *
  * Same builder as the GUI startup path, so this is how that document gets
  * checked without a window.
+ *
+ * `--cube` puts one cube shape in it instead. That is a FIXTURE, not the
+ * program's new document: the harnesses for the block list, renaming, merging
+ * and collision need a small Fallout 4 scene with real geometry and must not
+ * need a game corpus to get one, and Add Primitive cannot make the first shape
+ * in a document because it clones an existing one.
  */
-int cmdNew( const QString & outFile, float size )
+int cmdNew( const QString & outFile, bool cube, float size )
 {
 	NifModel nif;
 	QString error;
-	if ( !nifCreateStarterScene( &nif, size > 0.0f ? size : STARTER_CUBE_SIZE, &error ) ) {
+	const bool built = cube
+		? nifCreateCubeScene( &nif, size > 0.0f ? size : STARTER_CUBE_SIZE, &error )
+		: nifCreateStarterScene( &nif, &error );
+	if ( !built ) {
 		err() << "error: " << error << Qt::endl;
 		return 1;
 	}
@@ -2698,8 +2707,12 @@ int usage()
 	out() << "NifSkope headless batch mode\n\n"
 		  << "  NifSkope -no-gui <command> [options]\n\n"
 		  << "Commands:\n"
-		  << "  new -o OUT [--size N]                   write the starter document: a\n"
-		  << "                                          Fallout 4 scene with one cube\n"
+		  << "  new -o OUT [--cube [--size N]]          write the starter document: an\n"
+		  << "                                          empty Fallout 4 scene, header plus\n"
+		  << "                                          one root NiNode, the same document\n"
+		  << "                                          the GUI opens with. --cube adds a\n"
+		  << "                                          cube shape, for test fixtures that\n"
+		  << "                                          need geometry and no game corpus\n"
 		  << "                                          (N defaults to 2 m in FO4 units)\n"
 		  << "  spells [pattern]                        list spells addressable by name\n"
 		  << "  info <file>                             version, block count, per-type tally\n"
@@ -2827,6 +2840,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool noLimits = false;
 	bool verboseSim = false;
 	float cubeSize = STARTER_CUBE_SIZE;
+	bool wantCube = false;
 	bool noDedupe = false;
 	int block = -1, depth = 2, maxRows = 40;
 	int effectVar = -1, intVar = -1;
@@ -2893,6 +2907,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--no-limits" ) ) noLimits = true;
 		else if ( t == QLatin1String( "--trace" ) ) verboseSim = true;
 		else if ( t == QLatin1String( "--size" ) ) cubeSize = next().toFloat();
+		// `new --cube`: the fixture scene, not the program's new document
+		else if ( t == QLatin1String( "--cube" ) ) wantCube = true;
 		else if ( t == QLatin1String( "--import-os" ) ) importOs = QDir::current().filePath( next() );
 		else if ( t == QLatin1String( "--export-os" ) ) exportOs = QDir::current().filePath( next() );
 		else if ( t.startsWith( QLatin1Char( '-' ) ) ) {
@@ -2908,7 +2924,7 @@ int nifskopeCliMain( const QStringList & args )
 
 	if ( cmd == QLatin1String( "new" ) ) {
 		if ( !initModelLayer() ) { err().flush(); return 1; }
-		const int rc = cmdNew( outFile, cubeSize );
+		const int rc = cmdNew( outFile, wantCube, cubeSize );
 		out().flush();
 		err().flush();
 		return rc;

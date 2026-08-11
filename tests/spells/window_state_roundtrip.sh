@@ -165,7 +165,10 @@ finally {
   # were restored.  The old cmd /c wrapper swallowed both output AND the exit
   # code; a failed import therefore looked successful and the only backup was
   # deleted.  That left test-only values such as New Document Cube=0 and
-  # Suppress Save Confirmation=1 in the real profile.
+  # Suppress Save Confirmation=1 in the real profile.  New Document Cube no
+  # longer exists -- the starter cube was removed and the preference with it --
+  # but the incident stays written down here, because the restore logic below is
+  # what it bought.
   #
   # Keep the backup on ANY failure and print its path so recovery remains
   # possible.

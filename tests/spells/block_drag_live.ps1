@@ -116,7 +116,7 @@ Remove-Item $log -ErrorAction SilentlyContinue
 
 # The fixture, built by the program itself so this script depends on nothing that
 # has to survive between sessions.
-& $exe -no-gui new -o $seed | Out-Null
+& $exe -no-gui new --cube -o $seed | Out-Null
 $env:WW_DRAGFIXTURE = $fix
 $env:WW_WINDOW_AT = '1960,40'
 $b = Start-Process -FilePath $exe -ArgumentList '--port', '45913', $seed -PassThru -Wait

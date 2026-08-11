@@ -44,7 +44,7 @@
 #      Plus the counter-check that makes both mean something: the correctly
 #      assembling gun in step 2 draws NEITHER notice.
 #   4. NO WEAPON BONE is a fallback, not a failure: merged at the root, said out
-#      loud in the summary. Fixture: a CLI-generated starter NIF.
+#      loud in the summary. Fixture: a CLI-generated cube NIF.
 #   5. AN UNMARKED DONOR is untouched -- the PA frame still rig-merges onto the
 #      skeleton with no weapon handling in sight. One guard assertion; the merge
 #      policy itself is tests/merge/workspace_skeleton_target.sh's job.
@@ -164,15 +164,15 @@ winpath() {
 	esac
 }
 
-# The no-WEAPON-bone target: a starter document, which is a cube and nothing else.
+# The no-WEAPON-bone target: the CLI's cube fixture, a cube and nothing else.
 # Built under release/ rather than in mktemp's directory ON PURPOSE. The fixture
 # reaches the harness as ONE semicolon-joined variable, which MSYS2's automatic
 # path conversion does not touch, so every entry has to be a real drive-letter
 # path already -- and /tmp is not one.
 PLAIN="$ROOT/release/ww_weaponmark_plain.nif"
 rm -f "$PLAIN"
-"$EXE" -no-gui new -o "$(winpath "$PLAIN")" >/dev/null 2>&1
-[ -s "$PLAIN" ] || { echo "FAIL: could not build the starter fixture"; exit 1; }
+"$EXE" -no-gui new --cube -o "$(winpath "$PLAIN")" >/dev/null 2>&1
+[ -s "$PLAIN" ] || { echo "FAIL: could not build the cube fixture"; exit 1; }
 trap 'rm -f "$PLAIN"' EXIT
 
 # The order is the harness's contract; see the WW_WEAPONMARK_TEST comment.

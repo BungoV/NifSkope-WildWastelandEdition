@@ -23,7 +23,7 @@ winpath() { cygpath -w "$1"; }
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 for name in first second third; do
-	"$EXE" -no-gui new -o "$(winpath "$TMP/$name.nif")" >/dev/null 2>&1
+	"$EXE" -no-gui new --cube -o "$(winpath "$TMP/$name.nif")" >/dev/null 2>&1
 	[ -s "$TMP/$name.nif" ] || { echo "FAIL: could not build $name.nif"; exit 1; }
 done
 

@@ -70,7 +70,7 @@ void starterCube( float size, QVector<StarterVert> & verts, QVector<Triangle> & 
 
 } // namespace
 
-bool nifCreateStarterScene( NifModel * nif, float size, QString * error )
+bool nifCreateStarterScene( NifModel * nif, QString * error )
 {
 	auto fail = [error]( const QString & message ) {
 		if ( error )
@@ -79,8 +79,6 @@ bool nifCreateStarterScene( NifModel * nif, float size, QString * error )
 	};
 	if ( !nif )
 		return fail( QStringLiteral( "no model" ) );
-	if ( !( size > 0.0f ) )
-		return fail( QStringLiteral( "cube size must be positive" ) );
 
 	/* Fallout 4 is file version 20.2.0.7, user version 12, BS version 130. The
 	 * startup defaults in Settings would give BS 100 (Skyrim SE), and BS version
@@ -90,19 +88,42 @@ bool nifCreateStarterScene( NifModel * nif, float size, QString * error )
 	if ( !nif->createNew( 0x14020007, 12, 130 ) )
 		return fail( QStringLiteral( "could not create a Fallout 4 document" ) );
 
+	nif->holdUpdates( true );
+	QModelIndex iRoot = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+	nif->set<QString>( iRoot, "Name", QStringLiteral( "Scene Root" ) );
+	nif->set<quint32>( iRoot, "Flags", 14 );
+	nif->set<float>( iRoot, "Scale", 1.0f );
+	nif->holdUpdates( false );
+	nif->updateModel();
+
+	if ( !iRoot.isValid() )
+		return fail( QStringLiteral( "could not create the root node" ) );
+	if ( error )
+		error->clear();
+	return true;
+}
+
+bool nifCreateCubeScene( NifModel * nif, float size, QString * error )
+{
+	auto fail = [error]( const QString & message ) {
+		if ( error )
+			*error = message;
+		return false;
+	};
+	if ( !( size > 0.0f ) )
+		return fail( QStringLiteral( "cube size must be positive" ) );
+	// the same document the GUI opens with, then a shape put into it - so the
+	// fixture and the product cannot drift apart in header or root
+	if ( !nifCreateStarterScene( nif, error ) )
+		return false;
+
 	QVector<StarterVert> verts;
 	QVector<Triangle> tris;
 	starterCube( size, verts, tris );
 
-	QModelIndex iRoot, iShape;
 	nif->holdUpdates( true );
-
-	iRoot = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
-	nif->set<QString>( iRoot, "Name", QStringLiteral( "Scene Root" ) );
-	nif->set<quint32>( iRoot, "Flags", 14 );
-	nif->set<float>( iRoot, "Scale", 1.0f );
-
-	iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
+	QModelIndex iRoot = nif->getBlockIndex( 0 );
+	QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
 	nif->set<QString>( iShape, "Name", QStringLiteral( "Cube" ) );
 	nif->set<quint32>( iShape, "Flags", 14 );
 	nif->set<float>( iShape, "Scale", 1.0f );

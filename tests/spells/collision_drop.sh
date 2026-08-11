@@ -47,7 +47,7 @@
 # Convex and Mesh open their preview on a drop exactly as they do on the button,
 # so the expensive two keep their confirmation step.
 #
-# FIXTURE: the starter document with its cube duplicated, built by the CLI. No
+# FIXTURE: the CLI's cube fixture (`new --cube`) with its cube duplicated. No
 # game corpus.
 #
 # THE PREDICATE IS THE FILE, NOT THE SCENE, and finding that out is what this
@@ -92,19 +92,19 @@ restore() {
 trap 'restore; rm -rf "$TMP"' EXIT
 ps "Set-ItemProperty -Path '$KEY' -Name 'CollisionManager/Create/Shape' -Value 0 -Type DWord"
 
-# FOUR meshes under one root: the starter document with its cube duplicated three
+# FOUR meshes under one root: the CLI's cube fixture with its cube duplicated three
 # times. Four because creating collision CONSUMES the source mesh unless the
 # keep-mesh toggle says otherwise — the single drop eats one, the pair drop needs
 # two still standing behind it, and the fourth is what gets dropped ON a body,
 # which needs both a mesh to drop and somewhere already there to aim it.
-"$EXE" -no-gui new -o "$(winpath "$TMP/0.nif")" >/dev/null 2>&1
+"$EXE" -no-gui new --cube -o "$(winpath "$TMP/0.nif")" >/dev/null 2>&1
 for n in 1 2 3; do
 	"$EXE" -no-gui cast "$(winpath "$TMP/$((n-1)).nif")" -s "Block/Duplicate Branch" -b 1 \
 		-o "$(winpath "$TMP/$n.nif")" >/dev/null 2>&1
 done
 cp "$TMP/3.nif" "$TMP/fixture.nif" 2>/dev/null
 [ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not build the fixture"; exit 1; }
-echo "fixture: starter document, cube duplicated three times ($(stat -c%s "$TMP/fixture.nif") bytes)"
+echo "fixture: cube fixture, cube duplicated three times ($(stat -c%s "$TMP/fixture.nif") bytes)"
 
 rm -f "$LOG"
 WW_COLLDROP_TEST=1 "$EXE" --port "$PORT" "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1 &

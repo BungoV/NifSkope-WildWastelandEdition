@@ -103,7 +103,9 @@ the test-only values `New Document Cube=0` and `Suppress Save Confirmation=1`.
 Both user values were restored to their safe defaults (`1` and `0`), and the
 harness now checks direct `reg.exe` process exit codes and retains/reports the
 backup on any restore failure. Do not reintroduce cleanup that can erase the
-only snapshot without proving the import succeeded.
+only snapshot without proving the import succeeded. (`New Document Cube` no
+longer exists — the starter cube was removed 2026-08-11b and the preference with
+it. The incident stays written down because the restore logic is what it bought.)
 
 ### This session
 
@@ -128,9 +130,12 @@ otherwise it preserves the primary and adds every file to Loaded NIFs. A
 multi-file starter drop opens the first file and enrolls the rest. The choice
 menu opens only after the native drag loop has released the pointer. Its compact
 form has no heading separator or file icon and labels the starter action simply
-**Open Here**. A real cube-model edit is now part of the replacement guard
-harness. The release build is green; `external_nif_drop.sh` is **17/17** and
-`loaded_nifs.sh` remains **95/95**. No physical pointer-driving test was run.
+**Open Here**. A real edit of the starter is part of the replacement guard
+harness — it renames block 0 and requires the document to stop being eligible,
+which is one of the reasons the starter still has a root node now that the cube
+is gone (2026-08-11b). The release build is green; `external_nif_drop.sh` is
+**17/17** and `loaded_nifs.sh` remains **95/95**. No physical pointer-driving
+test was run.
 
 **The skull marker is optional for Loaded-NIF merges.** Clothing and props still
 merge normally with no skeleton selected, using the clicked row as target; a
@@ -571,8 +576,14 @@ And the block-list session added three:
 | `block_list_modes.sh` | 8 per mode: that the header's total matches the sections it totals, that every row resolves back to itself through `indexAt`, that a block inserted now is addressable, and that all of it survives switching modes |
 | `block_drag_live.ps1` | **the only thing above the native-drag boundary** — drives the physical mouse across 7 drags: into a shut node, into a row its own auto-unfold revealed, into a second root, a root made a child, out to blank space, a mesh row's all-gap reorder, and a refused cycle. See the warning below. |
 
-All three build their fixture from the starter document (`-no-gui new`), so they
-need no game corpus at all. `block_rename.sh` and `block_list_modes.sh` seed
+All three build their fixture from the CLI cube fixture (`-no-gui new --cube`),
+so they need no game corpus at all. **`--cube` is not optional here**: as of
+2026-08-11b the program's new document is empty (header plus one root NiNode),
+and `new` on its own writes that. `new --cube` writes the old four-block cube
+scene, byte-identical to what `new` produced before, which is why none of these
+suites needed an assertion changed. Add Primitive cannot stand in for it — it
+clones an existing BSTriShape, so it refuses to make the first shape in a
+document. `block_rename.sh` and `block_list_modes.sh` seed
 `List Mode` into the registry before launch and put it back on exit, because the
 mode is read during window construction — the app has to *start* in the mode
 under test, and both of them assert that it did rather than assuming.

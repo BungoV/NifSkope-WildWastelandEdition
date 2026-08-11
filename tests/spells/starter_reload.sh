@@ -1,12 +1,14 @@
 #!/bin/bash
 #
-# The starter cube: it builds, it renders, and Reload gives it back.
+# The starter document: it builds empty, it renders, and Reload gives it back.
 #
 # WHY THIS EXISTS
 #
-# NifSkope opens on a cube for the same reason Blender does -- an empty document
-# gives you nowhere to click, and Add Primitive itself refuses without an
-# existing BSTriShape to clone a vertex layout from.
+# NifSkope used to open on a cube, on Blender's reasoning that an empty document
+# gives you nowhere to click. It no longer does: a new window is a Fallout 4
+# header and one empty root NiNode, and nothing else. The root node stays because
+# everything that edits a document needs a parent to put work under -- including
+# the drop-replacement guard, which identifies a clean starter by editing block 0.
 #
 # That document has no file behind it, and Reload assumed there always is one.
 # QFileInfo("") resolves to the working directory, loadFromFile fails on it, and
@@ -15,23 +17,28 @@
 #
 # WHAT IS MEASURED
 #
-#   1. the starter document is built at all
-#   2. it is the scene it is supposed to be (NiNode / BSTriShape / shader
-#      property / texture set), not just some blocks
-#   3. an untouched window is CLEAN, so closing it does not ask about saving
-#   4. it renders -- the framebuffer grab is not empty
-#   5. selecting a block PAINTS ROWS in Block Details  <- the second defect
-#   6. ...the search box narrows them
-#   7. ...and keeps narrowing them across a block switch
-#   8. ...and clearing it gives them all back
-#   9. reload puts the block count back after an edit
-#  10. ...to the cube, not to an empty document        <- the first defect
-#  11. ...and clean again, as a freshly opened window is
+#   1. the starter document is built at all, and is exactly one block
+#   2. that block is an NiNode -- and NO cube came back with it
+#   3. it is a Fallout 4 file (20.2.0.7 / user 12 / BS 130)
+#   4. an untouched window is CLEAN, so closing it does not ask about saving
+#   5. it renders -- the framebuffer grab is not empty
+#   6. selecting a block PAINTS ROWS in Block Details  <- the second defect
+#   7. ...the search box narrows them
+#   8. ...and keeps narrowing them across a block switch
+#   9. ...and clearing it gives them all back
+#  10. reload puts the block count back after an edit
+#  11. ...to the starter, not to a blank document       <- the first defect
+#  12. ...and clean again, as a freshly opened window is
 #
-# Check 9 edits the document first. A reload that did nothing whatsoever would
-# pass a bare "the cube is still there", which is exactly the state this
+# Check 10 edits the document first. A reload that did nothing whatsoever would
+# pass a bare "the document is still there", which is exactly the state this
 # replaced -- the blank window came from the load FAILING, so "did the count
 # change" has to be asked against a count that was deliberately made wrong.
+#
+# The in-process side adds a scratch NiNode for the Block Details checks (the
+# filter has to survive switching to another block and back, and one root node is
+# not two blocks) and takes it away again before the reload checks, so those
+# still start from the untouched starter count.
 #
 # BLOCK DETAILS is counted by what the view LAYS OUT -- a hidden row has an empty
 # visualRect -- not by asking NifTreeView::isRowHidden( r, parent ), which ignores
@@ -39,14 +46,10 @@
 # itself hidden" once per row; it agreed with this defect by luck, which is how a
 # proxy metric earns trust it has not got.
 #
-# Checks 6-8 exist because blanking the panel and searching it are the SAME
+# Checks 7-9 exist because blanking the panel and searching it are the SAME
 # filter on the same view with different owners: lifting the blank one on
 # selection must not lift the search box's, and the keep set is per block, so it
 # has to survive switching away and back.
-#
-# NOTE ON WW_ VARIABLES: startupCubeWanted() is off for any WW_* environment, so
-# every other harness keeps the empty document it was written against.
-# WW_STARTER_SHOT is the exception, because it is the harness FOR this path.
 #
 # USAGE
 #   bash tests/spells/starter_reload.sh
@@ -86,14 +89,19 @@ check() {
 }
 
 blocks=$(sed -n 's/^blocks \([0-9]*\).*/\1/p' "$LOG" | head -1)
-check "$([ "${blocks:-0}" -ge 4 ] && echo 1 || echo 0)" \
-	"the starter document is built ($blocks blocks)"
-for want in NiNode BSTriShape BSLightingShaderProperty BSShaderTextureSet; do
-	check "$(grep -q "\] $want" "$LOG" && echo 1 || echo 0)" "...and holds a $want"
-done
+check "$([ "${blocks:-0}" = "1" ] && echo 1 || echo 0)" \
+	"the starter document is one block ($blocks)"
+check "$(grep -q '\[0\] NiNode' "$LOG" && echo 1 || echo 0)" \
+	"...and it is the root NiNode"
+# the point of the change: no geometry, no shader property, no texture set
+check "$(grep -qE '\] (BSTriShape|BSLightingShaderProperty|BSShaderTextureSet)' "$LOG" \
+	&& echo 0 || echo 1)" "...with no cube, shader property or texture set"
+vline=$(grep -m1 '^blocks ' "$LOG")
+check "$(printf '%s' "$vline" | grep -q 'version 20.2.0.7  user 12  bs 130' && echo 1 || echo 0)" \
+	"it is a Fallout 4 document ($(printf '%s' "$vline" | sed 's/^blocks [0-9]*  //'))"
 check "$(grep -q '^clean 1' "$LOG" && echo 1 || echo 0)" \
 	"an untouched starter window is clean, so closing it will not ask"
-# a black cube on a dark viewport still differs from an unwritten file
+# nothing is in the scene now, but the grid and the GL path still have to run
 if [ -s "$SHOT" ]; then
 	check 1 "it renders ($(stat -c%s "$SHOT") bytes of framebuffer)"
 else
@@ -120,12 +128,14 @@ line=$(grep '^reload: ' "$LOG")
 base=$(printf '%s' "$line" | sed -n 's/^reload: \([0-9]*\) blocks.*/\1/p')
 edit=$(printf '%s' "$line" | sed -n 's/.*edited to \([0-9]*\).*/\1/p')
 after=$(printf '%s' "$line" | sed -n 's/.*after reload \([0-9]*\).*/\1/p')
+check "$([ "${base:-0}" = "1" ] && echo 1 || echo 0)" \
+	"the Block Details scratch node was taken back off before reload ($base)"
 check "$([ "${edit:-0}" -gt "${base:-0}" ] && echo 1 || echo 0)" \
 	"the document was actually edited before reloading ($base -> $edit)"
 check "$([ "${after:-0}" = "${base:-x}" ] && echo 1 || echo 0)" \
-	"reload puts it back to $base blocks (got ${after:-none})"
-check "$([ "${after:-0}" -ge 4 ] && echo 1 || echo 0)" \
-	"...to the cube, not to an empty document"
+	"reload puts it back to $base block (got ${after:-none})"
+check "$(sed -n '/^reload clean/,$p' "$LOG" | grep -q '\[0\] NiNode' && echo 1 || echo 0)" \
+	"...to the starter root node, not to a blank document"
 check "$(grep -q '^reload clean 1' "$LOG" && echo 1 || echo 0)" \
 	"...and clean, like a freshly opened window"
 

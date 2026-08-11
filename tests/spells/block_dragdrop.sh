@@ -104,7 +104,7 @@
 # that happens not to have an offset would turn this into a green test of
 # nothing, which is the failure mode this suite has been bitten by before.
 #
-# FIXTURE: the program's own starter document, written here by the CLI, with two
+# FIXTURE: the CLI's cube fixture (`new --cube`), with two
 # NiNodes inserted by the harness. Stock FO4 statics are nearly all one root
 # NiNode with shape children -- there is no second node to drop onto -- so this
 # test deliberately depends on no game corpus at all.
@@ -132,10 +132,11 @@ trap 'rm -rf "$TMP"' EXIT
 
 winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 
-# The starter document: a Fallout 4 scene with one cube under one root NiNode.
-"$EXE" -no-gui new -o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1
-[ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not write the starter document"; exit 1; }
-echo "fixture: starter document ($(stat -c%s "$TMP/fixture.nif") bytes)"
+# The cube fixture: a Fallout 4 scene with one cube under one root NiNode. The
+# program's own new document is empty, so the cube comes from --cube.
+"$EXE" -no-gui new --cube -o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1
+[ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not write the cube fixture"; exit 1; }
+echo "fixture: cube fixture ($(stat -c%s "$TMP/fixture.nif") bytes)"
 
 rm -f "$LOG"
 WW_BLOCKDND_TEST=1 "$EXE" --port "$PORT" "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1 &

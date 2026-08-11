@@ -80,7 +80,7 @@
 # it is neither rename's doing nor drag-and-drop's. Check 4 is what stops a seed
 # that did not take from letting both runs measure the same mode.
 #
-# FIXTURE: the program's own starter document, written here by the CLI. The
+# FIXTURE: the CLI's cube fixture (`new --cube`). The
 # palette is inserted by the harness, so this needs no game corpus.
 #
 # NOTE ON PORTS: NifSkope exits silently if it cannot bind its IPC port, and on
@@ -106,9 +106,9 @@ trap 'rm -rf "$TMP"' EXIT	# replaced below, once the settings backup exists
 
 winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 
-"$EXE" -no-gui new -o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1
-[ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not write the starter document"; exit 1; }
-echo "fixture: starter document ($(stat -c%s "$TMP/fixture.nif") bytes)"
+"$EXE" -no-gui new --cube -o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1
+[ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not write the cube fixture"; exit 1; }
+echo "fixture: cube fixture ($(stat -c%s "$TMP/fixture.nif") bytes)"
 
 # The list mode is a QSettings value read during window construction, so it has
 # to be in the registry BEFORE launch. Saved and put back on exit: this is the

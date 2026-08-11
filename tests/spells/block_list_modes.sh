@@ -55,7 +55,7 @@
 # hour the same night to heap corruption that turned out to be a stale
 # incremental build. Not proven either way; not reproducible today.
 #
-# FIXTURE: the program's own starter document, written here by the CLI. No game
+# FIXTURE: the CLI's cube fixture (`new --cube`). No game
 # corpus.
 #
 # USAGE
@@ -93,9 +93,9 @@ restore() {
 }
 trap 'restore; rm -rf "$TMP"' EXIT
 
-"$EXE" -no-gui new -o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1
-[ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not write the starter document"; exit 1; }
-echo "fixture: starter document ($(stat -c%s "$TMP/fixture.nif") bytes)"
+"$EXE" -no-gui new --cube -o "$(winpath "$TMP/fixture.nif")" >/dev/null 2>&1
+[ -s "$TMP/fixture.nif" ] || { echo "FAIL: could not write the cube fixture"; exit 1; }
+echo "fixture: cube fixture ($(stat -c%s "$TMP/fixture.nif") bytes)"
 
 fails=0
 for mode in ${MODES:-hierarchy list}; do

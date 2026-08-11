@@ -31,7 +31,7 @@
 #   6. ...the row that was opened has left the list
 #   7. ...and the document it displaced is in the list, by name
 #
-# FIXTURE: three starter documents built by the CLI under a loose Data/meshes
+# FIXTURE: three cube fixtures (`new --cube`) under a loose Data/meshes
 # tree. No game corpus.
 #
 # USAGE
@@ -55,9 +55,9 @@ winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 # Different names, because the swap and exact-drag checks must distinguish the
 # document that moved from whichever row happens to be selected later.
 mkdir -p "$TMP/Data/meshes"
-"$EXE" -no-gui new -o "$(winpath "$TMP/Data/meshes/primary.nif")" >/dev/null 2>&1
-"$EXE" -no-gui new -o "$(winpath "$TMP/Data/meshes/secondary.nif")" >/dev/null 2>&1
-"$EXE" -no-gui new -o "$(winpath "$TMP/Data/meshes/browser.nif")" >/dev/null 2>&1
+"$EXE" -no-gui new --cube -o "$(winpath "$TMP/Data/meshes/primary.nif")" >/dev/null 2>&1
+"$EXE" -no-gui new --cube -o "$(winpath "$TMP/Data/meshes/secondary.nif")" >/dev/null 2>&1
+"$EXE" -no-gui new --cube -o "$(winpath "$TMP/Data/meshes/browser.nif")" >/dev/null 2>&1
 [ -s "$TMP/Data/meshes/primary.nif" ] \
 	&& [ -s "$TMP/Data/meshes/secondary.nif" ] \
 	&& [ -s "$TMP/Data/meshes/browser.nif" ] \

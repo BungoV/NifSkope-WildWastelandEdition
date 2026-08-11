@@ -293,7 +293,8 @@ condition row-hiding the GUI does, so a healthy mesh does not read as corrupt.
 - The viewport header rebuilt on Blender's: mode selector, shading, overlays,
   and LOD / Animation / Collision as dropdown buttons that stay visible and grey
   out when they do not apply.
-- Starter scene — opens on a cube on the grid, like Blender, instead of nothing.
+- Starter scene — a new window is an empty Fallout 4 document ready to build
+  into: the right header (20.2.0.7 / user 12 / BS 130) and one root node.
 - Performance: three tiers of work; secondary refresh went **54 ms → 7 ms per
   edit**.
 

@@ -528,33 +528,14 @@ QString wwSegmentedTabBarQss()
 
 //! @file nifskope_ui.cpp UI logic for %NifSkope's main window.
 
-/*! Should a window with no file open on the starter cube?
- *
- * Off for any harness run: every WW_* test expects the empty document it always
- * got, and a cube would change block numbers under all of them. Same guard
- * saveUi() uses, for the same reason.
- *
- * A member rather than a file static because Reload asks it too — an untitled
- * document IS this scene, so reloading one rebuilds it, and the two paths have
- * to agree about whether it exists at all.
+/* The starter document used to be a cube behind a preference
+ * (Settings/Nif/Startup Defaults/New Document Cube) and an environment gate that
+ * switched it off under every WW_* harness, because a cube renumbers blocks
+ * beneath tests written against an empty document. Both are gone with it: the
+ * starter is now a Fallout 4 header and one empty root NiNode, which perturbs
+ * nothing, so every window — a user's and a harness's — starts on the same
+ * document. See starterscene.h.
  */
-bool NifSkope::startupCubeWanted()
-{
-	// WW_STARTER_SHOT is the harness FOR this path, so it is the one WW_ variable
-	// that must not switch it off.
-	if ( !qEnvironmentVariableIsSet( "WW_STARTER_SHOT" )
-		&& !qEnvironmentVariableIsSet( "WW_UI_SHOT" )
-		&& !qEnvironmentVariableIsSet( "WW_EXTERNAL_DROP_TEST" ) ) {
-		const QStringList envKeys = QProcessEnvironment::systemEnvironment().keys();
-		for ( const QString & key : envKeys ) {
-			if ( key.startsWith( QLatin1String( "WW_" ) ) )
-				return false;
-		}
-	}
-	QSettings settings;
-	return settings.value( QStringLiteral( "Settings/Nif/Startup Defaults/New Document Cube" ),
-						   true ).toBool();
-}
 
 /*! The weapon mark on a Loaded NIFs row, addressed by position.
  *
@@ -9775,8 +9756,10 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					/* --- LAST: the document that provoked all of this ---------
 					 * The material list was Oblivion's on the program's own new
 					 * file, so the check has to reach that file and not only the
-					 * stock mesh this harness opens. Build the starter cube into
-					 * this model and ask the same combo again.
+					 * stock mesh this harness opens. Build the starter document
+					 * into this model and ask the same combo again — the list is
+					 * decided by the header's game, so an empty scene asks it just
+					 * as well as a cube did.
 					 *
 					 * At the END, and that is not tidiness: this REPLACES the
 					 * model. Run in the middle it took the loaded mesh out from
@@ -9785,12 +9768,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * the product and were the harness eating its own fixture.
 					 */
 					QString starterError;
-					if ( !nifCreateStarterScene( nif, 32.0f, &starterError ) ) {
+					if ( !nifCreateStarterScene( nif, &starterError ) ) {
 						log << "starter scene failed: " << starterError << "\n";
 						fails++; checks++; break;
 					}
 					QApplication::processEvents();
-					log << "starter cube: BS version " << nif->getBSVersion()
+					log << "starter document: BS version " << nif->getBSVersion()
 						<< ", material rows " << mat->count() << "\n";
 					check( "the new document is a Fallout 4 file", nif->getBSVersion() == 130 );
 					int fo4OnStarter = 0;
@@ -20409,11 +20392,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 	if ( !fname.isEmpty() ) {
 		skope->loadFile( fname );
-	} else if ( !background && startupCubeWanted() ) {
-		// Blender opens on a cube rather than on nothing, and this editor has the
-		// same problem an empty document has: nowhere to click. Add Primitive
-		// itself refuses without an existing BSTriShape, since it clones one for
-		// its vertex layout and material.
+	} else if ( !background ) {
+		// A window with no file still gets a DOCUMENT: the Fallout 4 header and a
+		// root NiNode to hang work off. Unconditional — there is no preference and
+		// no harness exception, because an empty root node changes nothing anyone
+		// was measuring.
 		NifModel * nif = skope->getNifModel();
 		QString error;
 		/* Bracket the build in beginLoading/completeLoading, exactly as loadFile()
@@ -20430,7 +20413,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		 */
 		QString noFile;
 		emit skope->beginLoading();
-		const bool built = nif && nifCreateStarterScene( nif, STARTER_CUBE_SIZE, &error );
+		const bool built = nif && nifCreateStarterScene( nif, &error );
 		if ( built && nif->undoStack ) {
 			// the starting state, not an edit: an untouched window must not ask
 			// about saving on close
@@ -20476,16 +20459,37 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					/* AND SELECTING A BLOCK FILLS BLOCK DETAILS.
 					 *
-					 * Reported empty on this exact document: the cube selected in
+					 * Reported empty on this exact document: the block selected in
 					 * the Block List, the panel showing its two column headers and
 					 * nothing under them. Everything the panel needs is decided in
 					 * NifSkope::select — which model the tree is on, which block is
 					 * its root, and whether a filter is hiding what is there — so
 					 * all four are logged rather than just the row count, because
 					 * "empty" has four different causes and they need telling apart.
+					 *
+					 * The starter is ONE root node now, and the filter checks below
+					 * need a second block to switch away to. A scratch node is added
+					 * for exactly that and removed again before the reload check, so
+					 * that one still starts from the untouched starter count.
+					 *
+					 * THE LEFT COLUMN IS FORCED INTO BLOCKS MODE FIRST, and that
+					 * is not tidiness. select() roots Block Details at the
+					 * selected block only in that mode; in the other two it hands
+					 * the view an invalid root, which a QTreeView reads as "show
+					 * the whole model" — and refreshRowHiding() returns early on
+					 * an invalid root, so the search box appears not to filter at
+					 * all. The mode is persisted in QSettings, so whichever one
+					 * the profile happened to be left in decided the result of
+					 * this measurement. Measured with the column elsewhere: the
+					 * panel reported 4 rows — header, two blocks, footer — and 4
+					 * of 4 "matching", which is the whole file and no filter,
+					 * dressed up as a number.
 					 */
 					{
-						const QModelIndex shape = nif->getBlockIndex( 1 );
+						skope->setLeftColumnMode( NifSkope::LeftBlocks );
+						QApplication::processEvents();
+						nif->insertNiBlock( QStringLiteral( "NiNode" ), -1 );
+						const QModelIndex shape = nif->getBlockIndex( 0 );
 						skope->select( shape );
 						qApp->processEvents();
 						NifTreeView * t = skope->tree;
@@ -20536,24 +20540,28 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							 * with it. Measured on both sides of a block switch,
 							 * because the keep set is built per block.
 							 */
-							skope->blockDetailsSearch->setText( QStringLiteral( "Vertex" ) );
+							skope->blockDetailsSearch->setText( QStringLiteral( "Rotation" ) );
 							qApp->processEvents();
 							const int filtered = painted();
-							skope->select( nif->getBlockIndex( 0 ) );
+							skope->select( nif->getBlockIndex( 1 ) );
 							skope->select( shape );
 							qApp->processEvents();
 							const int afterSwitch = painted();
 							skope->blockDetailsSearch->clear();
 							qApp->processEvents();
 							log << "details filter: " << shown << " rows, " << filtered
-								<< " matching 'Vertex', " << afterSwitch
+								<< " matching 'Rotation', " << afterSwitch
 								<< " after switching away and back, " << painted()
 								<< " once cleared\n";
 							df.close();
 						}
+						// hand the document back exactly as the starter built it
+						skope->select( nif->getBlockIndex( 0 ) );
+						nif->removeNiBlock( 1 );
+						qApp->processEvents();
 					}
 
-					/* AND RELOAD GIVES THE CUBE BACK.
+					/* AND RELOAD GIVES THE STARTER BACK.
 					 *
 					 * An untitled document has no file behind it, so Reload used to
 					 * go looking for one named "" and leave a blank window — the one

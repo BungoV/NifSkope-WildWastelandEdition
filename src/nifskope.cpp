@@ -9347,31 +9347,27 @@ void NifSkope::load()
 		ogl->setEditMode( false );
 	}
 
-	/* NOTHING ON DISK TO RELOAD: rebuild the starter scene.
+	/* NOTHING ON DISK TO RELOAD: rebuild the starter document.
 	 *
-	 * An untitled window IS the starter cube — that is what NifSkope opens on —
-	 * and reloading one went looking for a file whose name is the empty string.
-	 * QFileInfo("") makes that the working directory, loadFromFile fails on it,
-	 * and you were left with a blank document and no cube: Reload was the one
-	 * command that could destroy the starter scene without touching a file.
+	 * An untitled window IS the starter document — that is what NifSkope opens
+	 * on — and reloading one went looking for a file whose name is the empty
+	 * string. QFileInfo("") makes that the working directory, loadFromFile fails
+	 * on it, and you were left with a blank window: Reload was the one command
+	 * that could destroy the starter scene without touching a file.
 	 *
 	 * Reload means "throw away my edits and give me the document again", and for
-	 * a document that was never saved, the document again is the cube. Same
-	 * build, same undo-stack reset and same reframe as startup, so a reloaded
-	 * starter is indistinguishable from a freshly opened window — including not
-	 * asking about unsaved changes on close.
-	 *
-	 * When the cube is switched off (the preference, or any WW_* harness run) an
-	 * untitled document is genuinely empty, and reloading gives back an empty
-	 * document rather than a failed load of the working directory.
+	 * a document that was never saved, the document again is the Fallout 4 header
+	 * and its one empty root NiNode. Same build, same undo-stack reset and same
+	 * reframe as startup, so a reloaded starter is indistinguishable from a
+	 * freshly opened window — including not asking about unsaved changes on
+	 * close.
 	 */
 	if ( currentFile.isEmpty() ) {
 		QString error, noFile;
-		const bool cube = startupCubeWanted();
 		bool built = false;
 		if ( nif ) {
 			nif->clear();
-			built = !cube || nifCreateStarterScene( nif, STARTER_CUBE_SIZE, &error );
+			built = nifCreateStarterScene( nif, &error );
 			if ( nif->undoStack ) {
 				nif->undoStack->clear();
 				nif->undoStack->setClean();
@@ -9384,7 +9380,7 @@ void NifSkope::load()
 			ogl->updateScene();
 			ogl->frameAll();
 		}
-		if ( built && cube )
+		if ( built )
 			captureStarterDropBaseline();
 		else
 			starterDropBaseline.clear();
