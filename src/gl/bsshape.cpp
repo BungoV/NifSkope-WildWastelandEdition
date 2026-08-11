@@ -309,8 +309,10 @@ void BSShape::drawShapes( NodeList * secondPass )
 	}
 
 	// Blender-style X-ray: constant-alpha blend over whatever is behind,
-	// without writing depth, so everything shows through everything
-	bool xRayDraw = ( scene->xRay && !scene->selecting );
+	// without writing depth, so everything shows through everything.
+	// The Block List's per-block see-through disc is the same blend, asked for
+	// one subtree instead of the whole scene (Scene::ghostNodes).
+	bool xRayDraw = ( ( scene->xRay || isGhosted() ) && !scene->selecting );
 	if ( xRayDraw ) {
 		glEnable( GL_BLEND );
 		context->fn->glBlendColor( 1.0f, 1.0f, 1.0f, 0.45f );

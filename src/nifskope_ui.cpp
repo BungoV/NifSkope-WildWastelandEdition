@@ -38,6 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "bakegeom.h"
 #include "bsamodel.h"
 #include "glview.h"
+#include "ui/wwglyphs.h"
 #include "nifmerge.h"
 #include "gl/gltools.h"
 #include "message.h"
@@ -10323,10 +10324,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					check( "Block List columns are labelled for what this view displays",
 						skope->list->header()->property( "wwBlockListLabels" ).toStringList()
 							== QStringList{ QStringLiteral( "Block" ), QStringLiteral( "Name" ),
-								QStringLiteral( "Summary" ) } );
-					check( "Block List columns can fold and leave remaining width to Summary",
+								QStringLiteral( "Vis" ) } );
+					// The floor is the glyph strip's width now, not 44: the third
+					// column stopped being text (Summary) and became the two
+					// visibility toggles, which have a size below which they clip.
+					check( "Block List columns can fold, with a floor the glyph strip fits in",
 						skope->list->minimumWidth() <= 1
-							&& skope->list->header()->minimumSectionSize() <= 44
+							&& skope->list->header()->minimumSectionSize()
+								<= WwGlyphs::stripWidth( WwGlyphs::VisSlotCount )
 							&& skope->list->header()->stretchLastSection() );
 
 					auto blockVisible = [&]( int wanted ) {
@@ -17586,179 +17591,552 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
-	/* TEST HARNESS (WW_SUMMARY_TEST=1): the Block List's Summary column.
+	/* TEST HARNESS (WW_BLOCKVIS_TEST=hierarchy|list): the Block List's
+	 * visibility — H / Alt+H, and the eye / see-through column that replaced
+	 * Summary.
 	 *
-	 * Read back through data() on the real columns, and through the hierarchy
-	 * proxy as well, because the proxy translates its own column numbers into the
-	 * model's and a summary that only works in one of the two list modes is a
-	 * summary that is broken half the time.
+	 * WHAT IT HAS TO PROVE, and why each piece is separate.
 	 *
-	 * The status markers are checked in both directions: a texture path is
-	 * mangled so its OWNING block must go red, then restored so it must go back.
-	 * "unreferenced" is checked as an invariant over the whole file — a vanilla
-	 * NIF has no orphan blocks, so any hit means the root-link exclusion is wrong,
-	 * which is the one way this marker can be spectacularly noisy.
-	 * Log: release/ww_summary_test.log.
+	 * 1. ONE STATE. The key and the glyph must be two doors into the same room.
+	 *    Both are measured by what lands in Scene::hiddenNodes, and the glyph
+	 *    path is compared against the set the KEY produced rather than against a
+	 *    hard-coded expectation, so "they agree" is the assertion.
+	 *
+	 * 2. IT ACTUALLY RENDERS. hiddenNodes is a set; a set changing proves
+	 *    bookkeeping, not drawing. Every visibility claim is backed by a
+	 *    framebuffer delta, and see-through is checked against BOTH the solid
+	 *    frame and the hidden one — a translucent shape is neither, and a
+	 *    one-sided check would pass on a disc that simply hid the shape.
+	 *
+	 * 3. THE GESTURE. A press on a glyph must not select the row and must not
+	 *    start a re-parent drag, and sliding off before releasing must cancel.
+	 *    Real QMouseEvents at real glyph coordinates, because the whole point of
+	 *    the gesture lives in the view's press/move/release, not in the toggle.
+	 *
+	 * 4. APPLICABILITY. A row the scene cannot resolve to a drawable — a shader
+	 *    property, a texture set, the Header row — must expose NOTHING. Checked
+	 *    by asking the model AND by clicking where the glyph would have been.
+	 *
+	 * 5. THE COLUMN SHAPE. Summary is gone and the visibility column is in its
+	 *    slot, in both list modes, with QHeaderView's total still honest and
+	 *    every row still resolving through indexAt — the negative-length landmine
+	 *    block_list_modes.sh exists for. Column 11 was REUSED rather than added
+	 *    for exactly that reason, and this asserts the reuse.
+	 *
+	 * 6. F2 STILL TYPES AN 'h'. A bare letter as a view shortcut is one rename
+	 *    away from being unusable.
+	 *
+	 * FIXTURE: the CLI cube (`new --cube`) — NiNode 'Scene Root', BSTriShape
+	 * 'Cube', a shader property and a texture set. No game corpus.
+	 * Log: release/ww_blockvis_test.log.
 	 */
-	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_SUMMARY_TEST" ) ) {
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_BLOCKVIS_TEST" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
-			QTimer::singleShot( 800, skope, [skope, ok]() {
-				QFile logf( QApplication::applicationDirPath() + "/ww_summary_test.log" );
+			QTimer::singleShot( 900, skope, [skope, ok]() {
+				QFile logf( QApplication::applicationDirPath() + "/ww_blockvis_test.log" );
 				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 					return;
 				QTextStream log( &logf );
 				NifModel * nif = skope->getNifModel();
+				NifTreeView * list = skope->list;
+				GLView * ogl = skope->ogl;
 				int checks = 0, fails = 0, skips = 0;
 				auto check = [&]( const QString & what, bool pass ) {
 					checks++;
 					if ( !pass )
 						fails++;
 					log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
+					log.flush();
 				};
 				auto skip = [&]( const QString & what, const QString & why ) {
 					skips++;
 					log << "  skip " << what << " — " << why << "\n";
 				};
-				auto summaryOf = [nif]( int b ) {
-					return nif->data( nif->getBlockIndex( b ).sibling(
-						nif->getBlockIndex( b ).row(), NifModel::WwSummaryCol ), Qt::DisplayRole ).toString();
-				};
-				auto isRed = [nif]( int b ) {
-					const QVariant fg = nif->data( nif->getBlockIndex( b ).sibling(
-						nif->getBlockIndex( b ).row(), NifModel::WwSummaryCol ), Qt::ForegroundRole );
-					return fg.canConvert<QColor>() && fg.value<QColor>().red() > 200
-						&& fg.value<QColor>().green() < 160;
-				};
 				do {
-					if ( !ok || !nif ) { log << "load failed\n"; break; }
+					if ( !ok || !nif || !list || !ogl ) { log << "load failed\n"; break; }
 
-					// ---- the column is where it should be ----
-					const bool listIsProxy = ( skope->list->model() != nif );
-					log << "  tree: " << skope->tree->header()->count() << " sections, summary hidden "
-						<< skope->tree->isColumnHidden( NifModel::WwSummaryCol ) << "\n";
-					log << "  list: " << ( listIsProxy ? "proxy" : "nif" ) << ", "
-						<< skope->list->header()->count() << " sections, summary hidden "
-						<< skope->list->isColumnHidden( listIsProxy ? 2 : int( NifModel::WwSummaryCol ) ) << "\n";
-					check( "Block Details hides the Summary column",
-						skope->tree->isColumnHidden( NifModel::WwSummaryCol ) );
-					check( "the Block List shows it",
-						!skope->list->isColumnHidden( listIsProxy ? 2 : int( NifModel::WwSummaryCol ) ) );
-					check( "the header reads Summary",
-						nif->headerData( NifModel::WwSummaryCol, Qt::Horizontal,
-							Qt::DisplayRole ).toString() == QStringLiteral( "Summary" ) );
+					const bool wantHierarchy =
+						qEnvironmentVariable( "WW_BLOCKVIS_TEST" ) != QLatin1String( "list" );
+					const bool isHierarchy = ( list->model() == skope->proxy );
+					const QString mode = isHierarchy ? QStringLiteral( "hierarchy" )
+					                                 : QStringLiteral( "list" );
+					log << "-- " << mode << " mode\n";
+					check( "the app started in the mode under test", isHierarchy == wantHierarchy );
+					if ( isHierarchy != wantHierarchy ) break;
 
-					// ---- fields have no summary; blocks do ----
+					// A harness forces the state it measures: an inherited
+					// "animations on" moves pixels by itself and every delta
+					// below would then pass for the wrong reason.
+					if ( skope->ui->aAnimate->isChecked() )
+						skope->ui->aAnimate->trigger();
+					QApplication::processEvents();
+					check( mode + ": animations are off", !skope->ui->aAnimate->isChecked() );
+
+					// ---- the view row for a block, in whichever mode ----------
+					auto rowFor = [&]( int block ) -> QModelIndex {
+						const QModelIndex src = nif->getBlockIndex( block );
+						if ( !src.isValid() )
+							return QModelIndex();
+						return isHierarchy ? skope->proxy->mapFrom( src, QModelIndex() )
+						                   : src.sibling( src.row(), 0 );
+					};
+					const int visCol = NifModel::wwVisColumn( list->model() );
+					auto visCell = [&]( int block ) -> QModelIndex {
+						const QModelIndex r = rowFor( block );
+						return r.isValid() ? r.sibling( r.row(), visCol ) : QModelIndex();
+					};
+					auto visFlags = [&]( int block ) -> int {
+						const QModelIndex c = visCell( block );
+						return c.isValid() ? c.data( WwVisFlagsRole ).toInt() : -99;
+					};
+
+					/* EXPAND IN HIERARCHY, COLLAPSE IN FLAT — they are not the
+					 * same tree. In hierarchy mode the children ARE blocks and
+					 * have to be open to be clicked; in flat mode every block
+					 * carries its whole field tree, so expandAll opened ~2000 px
+					 * of vertex arrays and pushed every block row off the top of
+					 * the viewport. That is how the row-click check first failed:
+					 * it was clicking on nothing. */
+					if ( isHierarchy )
+						list->expandAll();
+					else
+						list->collapseAll();
+					list->scrollToTop();
+					QApplication::processEvents();
+
+					// ---- 5. the column shape ---------------------------------
+					log << "  visibility column: " << visCol << ", list sections "
+						<< list->header()->count() << "\n";
+					check( mode + ": the Block List shows the visibility column",
+						visCol >= 0 && !list->isColumnHidden( visCol ) );
+					check( mode + ": Block Details hides it",
+						skope->tree->isColumnHidden( NifModel::WwVisCol ) );
+					check( mode + ": the column header reads Vis, not Summary",
+						nif->headerData( NifModel::WwVisCol, Qt::Horizontal, Qt::DisplayRole )
+							.toString() == QStringLiteral( "Vis" ) );
 					{
-						QModelIndex root = nif->getBlockIndex( 0 );
-						QModelIndex field = nif->getIndex( root, 0 );
-						check( "a FIELD row has no summary",
-							!field.isValid() || nif->data( field.sibling( field.row(),
-								NifModel::WwSummaryCol ), Qt::DisplayRole ).toString().isEmpty() );
+						QStringList labels;
+						for ( int c = 0; c < list->model()->columnCount(); c++ )
+							labels << list->model()->headerData( c, Qt::Horizontal,
+								Qt::DisplayRole ).toString();
+						log << "  headers: " << labels.join( QStringLiteral( " | " ) ) << "\n";
+						check( mode + ": no column anywhere still says Summary",
+							!labels.contains( QStringLiteral( "Summary" ) ) );
+					}
+					if ( isHierarchy ) {
+						const QModelIndex p2 = skope->proxy->index( 0, 2, QModelIndex() );
+						check( mode + ": the proxy's third column maps to WwVisCol",
+							p2.isValid()
+								&& skope->proxy->mapTo( p2 ).column() == NifModel::WwVisCol );
+					} else {
+						skip( "the proxy's third column maps to WwVisCol", "flat list mode" );
+					}
+					{
+						// THE NEGATIVE-LENGTH LANDMINE. QHeaderView keeps its
+						// total by deltas; changing the model hands hidden
+						// sections their widths back without adding them, and
+						// past `length` visualIndexAt answers -1, so indexAt
+						// finds no column and no row in the view can be clicked.
+						QHeaderView * h = list->header();
+						int total = 0;
+						for ( int s = 0; s < h->count(); s++ )
+							if ( !h->isSectionHidden( s ) )
+								total += h->sectionSize( s );
+						log << "  header length " << h->length() << " vs sections "
+							<< total << "\n";
+						check( mode + ": the header's total matches its sections",
+							h->length() == total && h->length() > 0 );
+						int rows = 0, resolved = 0;
+						for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+							const QModelIndex r = rowFor( b );
+							if ( !r.isValid() )
+								continue;
+							const QRect vr = list->visualRect( r );
+							// ON SCREEN, not merely laid out: visualRect answers
+							// for a scrolled-away row with a negative y, and a
+							// point nothing can be clicked at resolves to nothing
+							// for reasons that have nothing to do with the header.
+							if ( vr.isEmpty() || !list->viewport()->rect().contains( vr.center() ) )
+								continue;
+							rows++;
+							if ( list->indexAt( vr.center() ) == r )
+								resolved++;
+						}
+						log << "  rows " << rows << ", resolving through indexAt "
+							<< resolved << "\n";
+						check( mode + ": every visible row resolves through indexAt",
+							rows > 0 && resolved == rows );
 					}
 
-					// ---- per-type content ----
-					int shape = -1, texSet = -1, ctrl = -1;
+					// ---- 4. applicability ------------------------------------
+					int shape = -1, root = -1, prop = -1;
 					for ( int b = 0; b < nif->getBlockCount(); b++ ) {
-						QModelIndex ib = nif->getBlockIndex( b );
+						const QModelIndex ib = nif->getBlockIndex( b );
 						if ( shape < 0 && nif->blockInherits( ib, "BSTriShape" ) )
 							shape = b;
-						if ( texSet < 0 && nif->isNiBlock( ib, "BSShaderTextureSet" ) )
-							texSet = b;
-						if ( ctrl < 0 && nif->blockInherits( ib, "NiTimeController" ) )
-							ctrl = b;
+						if ( root < 0 && nif->isNiBlock( ib, "NiNode" ) )
+							root = b;
+						if ( prop < 0 && !nif->blockInherits( ib, "NiAVObject" ) )
+							prop = b;
 					}
-					if ( shape < 0 ) {
-						skip( "a shape summarises its counts", "no BSTriShape" );
-					} else {
-						const QString s = summaryOf( shape );
-						log << "  shape #" << shape << ": " << s << "\n";
-						check( "a shape summarises its counts",
-							s.contains( QStringLiteral( "tris" ) ) && s.contains( QStringLiteral( "verts" ) ) );
+					log << "  shape=" << shape << " root=" << root << " prop=" << prop << "\n";
+					if ( shape < 0 || root < 0 || prop < 0 ) {
+						log << "the fixture is not the cube scene\n"; fails++; checks++; break;
 					}
-					if ( ctrl < 0 ) {
-						skip( "a controller names its target", "no NiTimeController" );
-					} else {
-						const QString s = summaryOf( ctrl );
-						log << "  controller #" << ctrl << ": " << s << "\n";
-						check( "a controller names its target", s.contains( QStringLiteral( "→" ) ) );
+					check( mode + ": an NiAVObject row offers the toggles",
+						visFlags( shape ) >= 0 && visFlags( root ) >= 0 );
+					check( mode + ": a non-NiAVObject row offers none",
+						visFlags( prop ) == -1 );
+					{
+						// a FIELD row, which only the flat list shows at all
+						const QModelIndex block = nif->getBlockIndex( shape );
+						const QModelIndex field = nif->getIndex( block, 0 );
+						if ( !isHierarchy && field.isValid() ) {
+							check( mode + ": a field row offers none",
+								field.sibling( field.row(), NifModel::WwVisCol )
+									.data( WwVisFlagsRole ).toInt() == -1 );
+						} else {
+							skip( "a field row offers none", "hierarchy mode shows only blocks" );
+						}
 					}
 
-					// ---- status markers, both directions ----
-					if ( texSet < 0 ) {
-						skip( "a mangled path marks its block", "no BSShaderTextureSet" );
-					} else {
-						QModelIndex iTex = nif->getIndex( nif->getBlockIndex( texSet ), "Textures" );
+					// ---- framebuffer helpers ---------------------------------
+					ogl->frameAll();
+					auto freshGrab = [&]() {
+						ogl->update();
+						QCoreApplication::processEvents( QEventLoop::AllEvents, 250 );
+						QCoreApplication::processEvents( QEventLoop::AllEvents, 250 );
+						return ogl->grabFramebuffer();
+					};
+					auto pixDiff = []( const QImage & a, const QImage & b ) {
+						if ( a.isNull() || b.isNull() || a.size() != b.size() )
+							return -1;
+						int d = 0;
+						for ( int y = 0; y < a.height(); y += 2 )
+							for ( int x = 0; x < a.width(); x += 2 )
+								if ( a.pixel( x, y ) != b.pixel( x, y ) )
+									d++;
+						return d;
+					};
+					auto selectBlocks = [&]( const QList<int> & blocks ) {
+						QItemSelection sel;
+						for ( int b : blocks ) {
+							const QModelIndex r = rowFor( b );
+							if ( r.isValid() )
+								sel.select( r, r );
+						}
+						list->selectionModel()->select( sel,
+							QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows );
+						if ( !blocks.isEmpty() && rowFor( blocks.first() ).isValid() )
+							list->selectionModel()->setCurrentIndex( rowFor( blocks.first() ),
+								QItemSelectionModel::NoUpdate );
+						QApplication::processEvents();
+					};
+					auto key = [&]( int k, Qt::KeyboardModifiers mods ) {
+						QKeyEvent e( QEvent::KeyPress, k, mods );
+						QApplication::sendEvent( list, &e );
+						QApplication::processEvents();
+					};
+
+					ogl->restoreAllVisibility();
+					ogl->getScene()->ghostNodes.clear();
+					ogl->updateDimmedBlocks();
+
+					// ---- 1 + 2. H hides, and it renders ----------------------
+					// The baseline is taken AFTER selecting, not before: object mode
+					// draws an outline round the selection, so a baseline with
+					// nothing selected differs from the revealed frame by that
+					// outline and the round trip reads as a leak. Measured at 1334
+					// pixels, and the check was working correctly when it said so.
+					selectBlocks( { shape } );
+					const QImage solid = freshGrab();
+					key( Qt::Key_H, Qt::NoModifier );
+					const QSet<int> hiddenByKey = ogl->getScene()->hiddenNodes;
+					log << "  hiddenNodes after H: " << hiddenByKey.size() << "\n";
+					check( mode + ": H over the Block List hides the selected object",
+						hiddenByKey.contains( shape ) );
+					const QImage hidden = freshGrab();
+					const int dHide = pixDiff( solid, hidden );
+					log << "  pixels changed solid->hidden: " << dHide << "\n";
+					check( mode + ": ...and the viewport stops drawing it", dHide > 0 );
+
+					key( Qt::Key_H, Qt::AltModifier );
+					log << "  hiddenNodes after Alt+H: "
+						<< ogl->getScene()->hiddenNodes.size() << "\n";
+					check( mode + ": Alt+H reveals everything",
+						ogl->getScene()->hiddenNodes.isEmpty() );
+					const int dBack = pixDiff( solid, freshGrab() );
+					log << "  pixels changed solid->revealed: " << dBack << "\n";
+					check( mode + ": ...and the frame comes back to what it was", dBack == 0 );
+
+					// ---- multi-selection -------------------------------------
+					selectBlocks( { root, shape } );
+					key( Qt::Key_H, Qt::NoModifier );
+					log << "  hiddenNodes after multi-select H: "
+						<< ogl->getScene()->hiddenNodes.size() << "\n";
+					check( mode + ": H hides EVERY selected object, not just the current one",
+						ogl->getScene()->hiddenNodes.contains( root )
+							&& ogl->getScene()->hiddenNodes.contains( shape ) );
+					// the subtree rule, which is where the eye's inherited state
+					// comes from: hiding the root dims the shape under it
+					check( mode + ": hiding a NiNode takes its subtree with it",
+						nif->dimmedBlocks.contains( shape ) );
+					ogl->unhideAll();
+					selectBlocks( { root } );
+					key( Qt::Key_H, Qt::NoModifier );
+					check( mode + ": a child inherits its parent's hiddenness",
+						( visFlags( shape ) & 0x4 ) && !( visFlags( shape ) & 0x1 ) );
+					ogl->unhideAll();
+					QApplication::processEvents();
+
+					// ---- 3. the glyph, and its gesture -----------------------
+					/* SCROLL TO IT FIRST, AND PROVE THE POINT IS ON SCREEN.
+					 *
+					 * visualRect answers for a row that is scrolled out of view
+					 * as happily as for one that is not — it just returns a
+					 * negative y. In flat list mode, where expandAll opens every
+					 * block's whole field tree, the shape row sat 2000 px above
+					 * the viewport and a "click" was landing on nothing. That is
+					 * exactly the shape of a check that measures nothing and
+					 * passes, so the rect is asserted before it is used. */
+					auto rowRectOnScreen = [&]( const QModelIndex & idx ) -> QRect {
+						if ( !idx.isValid() )
+							return QRect();
+						list->scrollTo( idx, QAbstractItemView::PositionAtCenter );
+						QApplication::processEvents();
+						const QRect r = list->visualRect( idx );
+						return list->viewport()->rect().contains( r.center() ) ? r : QRect();
+					};
+					auto glyphPoint = [&]( int block, int slot ) -> QPoint {
+						const QModelIndex c = visCell( block );
+						const QRect r = rowRectOnScreen( c );
+						if ( r.isNull() )
+							return QPoint( -1, -1 );
+						return WwGlyphs::visSlotRect( r, slot ).center();
+					};
+					auto mouse = [&]( QEvent::Type type, const QPoint & at,
+						Qt::MouseButton button, Qt::MouseButtons buttons ) {
+						QMouseEvent ev( type, QPointF( at ),
+							QPointF( list->viewport()->mapToGlobal( at ) ),
+							button, buttons, Qt::NoModifier );
+						QApplication::sendEvent( list->viewport(), &ev );
+						QApplication::processEvents();
+					};
+					auto clickGlyph = [&]( int block, int slot ) {
+						const QPoint p = glyphPoint( block, slot );
+						mouse( QEvent::MouseButtonPress, p, Qt::LeftButton, Qt::LeftButton );
+						mouse( QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton );
+					};
+
+					list->selectionModel()->clearSelection();
+					ogl->setObjectSelection( QSet<int>(), -1 );
+					QApplication::processEvents();
+					const int togglesWas = list->wwVisTogglesDone;
+					clickGlyph( shape, WwGlyphs::SlotVisible );
+					log << "  hiddenNodes after clicking the eye: "
+						<< ogl->getScene()->hiddenNodes.size()
+						<< ", toggles " << ( list->wwVisTogglesDone - togglesWas ) << "\n";
+					check( mode + ": clicking the eye reaches the same state the key does",
+						ogl->getScene()->hiddenNodes == hiddenByKey );
+					check( mode + ": ...and it did not select the row",
+						list->selectionModel()->selectedIndexes().isEmpty() );
+					check( mode + ": ...and the eye now reads shut",
+						!( visFlags( shape ) & 0x1 ) );
+					clickGlyph( shape, WwGlyphs::SlotVisible );
+					check( mode + ": clicking it again reveals",
+						ogl->getScene()->hiddenNodes.isEmpty() && ( visFlags( shape ) & 0x1 ) );
+
+					{
+						// SLIDE-OFF CANCELS. Press the glyph, move away past the
+						// drag distance, release elsewhere: nothing toggles, and
+						// nothing selects or drags either.
+						const int before = list->wwVisTogglesDone;
+						const QPoint p = glyphPoint( shape, WwGlyphs::SlotVisible );
+						const QPoint away = p - QPoint( 120, 0 );
+						mouse( QEvent::MouseButtonPress, p, Qt::LeftButton, Qt::LeftButton );
+						mouse( QEvent::MouseMove, away, Qt::NoButton, Qt::LeftButton );
+						mouse( QEvent::MouseButtonRelease, away, Qt::LeftButton, Qt::NoButton );
+						check( mode + ": sliding off a glyph before releasing cancels it",
+							list->wwVisTogglesDone == before
+								&& ogl->getScene()->hiddenNodes.isEmpty() );
+						check( mode + ": ...and it did not select the row on the way",
+							list->selectionModel()->selectedIndexes().isEmpty() );
+					}
+					{
+						// and the row still behaves like a row everywhere else
+						const QModelIndex r = rowFor( shape );
+						const QRect rr = rowRectOnScreen( r );
+						const QPoint p = rr.center();
+						check( mode + ": the row under test is actually on screen", !rr.isNull() );
+						mouse( QEvent::MouseButtonPress, p, Qt::LeftButton, Qt::LeftButton );
+						mouse( QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton );
+						log << "  row click at " << p.x() << "," << p.y()
+							<< "; indexAt is the row " << ( list->indexAt( p ) == r )
+							<< "; selected " << list->selectionModel()->selectedIndexes().size()
+							<< "\n";
+						check( mode + ": a click anywhere else in the row still selects it",
+							!list->selectionModel()->selectedIndexes().isEmpty() );
+					}
+					{
+						// a row with no toggles has no clickable glyph either
+						const int before = list->wwVisTogglesDone;
+						const QModelIndex c = visCell( prop );
+						const QRect cr = rowRectOnScreen( c );
+						if ( !cr.isNull() ) {
+							const QPoint p = WwGlyphs::visSlotRect( cr,
+								WwGlyphs::SlotVisible ).center();
+							check( mode + ": a non-drawable row exposes no toggle to hit-test",
+								!list->wwVisSlotAt || list->wwVisSlotAt( c, p ) == -1 );
+							mouse( QEvent::MouseButtonPress, p, Qt::LeftButton, Qt::LeftButton );
+							mouse( QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton );
+							check( mode + ": ...and clicking where the glyph would be toggles nothing",
+								list->wwVisTogglesDone == before );
+						} else {
+							skip( "a non-drawable row exposes no toggle", "row not visible" );
+						}
+					}
+
+					// ---- 2. see-through, against BOTH ends -------------------
+					list->selectionModel()->clearSelection();
+					ogl->restoreAllVisibility();
+					ogl->getScene()->ghostNodes.clear();
+					ogl->updateDimmedBlocks();
+					QApplication::processEvents();
+					const QImage solid2 = freshGrab();
+					clickGlyph( shape, WwGlyphs::SlotGhost );
+					check( mode + ": clicking the disc marks the block see-through",
+						ogl->getScene()->ghostNodes.contains( shape )
+							&& ( visFlags( shape ) & 0x2 ) );
+					const QImage ghosted = freshGrab();
+					ogl->getScene()->ghostNodes.clear();
+					ogl->setBlockHidden( shape, true );
+					const QImage gone = freshGrab();
+					ogl->restoreAllVisibility();
+					const int dGhostVsSolid = pixDiff( solid2, ghosted );
+					const int dGhostVsGone = pixDiff( ghosted, gone );
+					const int dSolidVsGone = pixDiff( solid2, gone );
+					log << "  pixels: solid->ghost " << dGhostVsSolid
+						<< ", ghost->hidden " << dGhostVsGone
+						<< ", solid->hidden " << dSolidVsGone << "\n";
+					check( mode + ": see-through is not the same as solid", dGhostVsSolid > 0 );
+					check( mode + ": see-through is not the same as hidden — it still draws",
+						dGhostVsGone > 0 );
+					check( mode + ": the two ends it sits between really do differ",
+						dSolidVsGone > 0 );
+					ghosted.save( QApplication::applicationDirPath() + "/ww_blockvis_ghost.png" );
+					solid2.save( QApplication::applicationDirPath() + "/ww_blockvis_solid.png" );
+					gone.save( QApplication::applicationDirPath() + "/ww_blockvis_hidden.png" );
+
+					// ---- 6. F2 still types an 'h' ----------------------------
+					{
+						ogl->restoreAllVisibility();
+						list->setCurrentIndex( rowFor( shape ) );
+						skope->renameBlockListIndex( rowFor( shape ), true );
+						QApplication::processEvents();
+						QLineEdit * editor = list->viewport()->findChild<QLineEdit *>(
+							QStringLiteral( "BlockListRenameEdit" ) );
+						if ( !editor ) {
+							skip( "H while renaming types an h", "no rename editor opened" );
+						} else {
+							const QString was = editor->text();
+							QKeyEvent press( QEvent::KeyPress, Qt::Key_H, Qt::NoModifier,
+								QStringLiteral( "h" ) );
+							QApplication::sendEvent( editor, &press );
+							QApplication::processEvents();
+							log << "  rename editor text: '" << editor->text() << "'\n";
+							check( mode + ": H while renaming types an h and hides nothing",
+								editor->text() != was
+									&& editor->text().contains( QLatin1Char( 'h' ) )
+									&& ogl->getScene()->hiddenNodes.isEmpty() );
+							QKeyEvent esc( QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier );
+							QApplication::sendEvent( editor, &esc );
+							QApplication::processEvents();
+						}
+					}
+
+					/* ---- the summary did not vanish, it moved ---------------
+					 *
+					 * Two halves, and they landed in different places, so both
+					 * are asked for through the VIEW'S OWN model — the tooltip a
+					 * user gets, not the one the source model would have given.
+					 * Hierarchy mode serves its own richer per-block tooltip
+					 * (NifProxyModel::blockListSummary) and would otherwise never
+					 * show the defect marker at all.
+					 */
+					{
+						const QModelIndex r = nif->getBlockIndex( shape );
+						const QString tip = nif->data( r.sibling( r.row(), NifModel::NameCol ),
+							Qt::ToolTipRole ).toString();
+						log << "  shape tooltip: " << tip.left( 200 ) << "\n";
+						check( mode + ": the per-type summary is on the block row's tooltip now",
+							tip.contains( QStringLiteral( "tris" ) )
+								&& tip.contains( QStringLiteral( "verts" ) ) );
+					}
+					{
+						// the DEFECT marker, which was the red text in the column
+						int texSet = -1;
+						for ( int b = 0; b < nif->getBlockCount() && texSet < 0; b++ )
+							if ( nif->isNiBlock( nif->getBlockIndex( b ), "BSShaderTextureSet" ) )
+								texSet = b;
+						QModelIndex iTex = texSet >= 0
+							? nif->getIndex( nif->getBlockIndex( texSet ), "Textures" ) : QModelIndex();
 						int slot = -1;
 						for ( int s = 0; s < nif->rowCount( iTex ) && slot < 0; s++ )
 							if ( !nif->get<QString>( nif->getIndex( iTex, s ) ).trimmed().isEmpty() )
 								slot = s;
-						const QString before = summaryOf( texSet );
-						const bool redBefore = isRed( texSet );
-						log << "  texture set #" << texSet << ": " << before
-							<< ( redBefore ? "   [red]" : "" ) << "\n";
 						if ( slot < 0 ) {
-							skip( "a mangled path marks its block", "every slot is empty" );
+							skip( "a mangled texture path still marks its block",
+								"the fixture has no filled texture slot" );
 						} else {
-							// both separators, because NIFs mix them and the summary
-							// strips whichever one the file happens to use
-							check( "a texture set names its diffuse",
-								before.contains( nif->get<QString>( nif->getIndex( iTex, slot ) )
-									.section( QLatin1Char( '\\' ), -1 ).section( QLatin1Char( '/' ), -1 ) ) );
+							const QModelIndex viewRow = rowFor( texSet );
+							const QString clean = list->model()->data( viewRow,
+								Qt::ToolTipRole ).toString();
 							const QString orig = nif->get<QString>( nif->getIndex( iTex, slot ) );
 							nif->set<QString>( nif->getIndex( iTex, slot ),
 								QStringLiteral( "textures\\ww_no_such_texture_9f3a.dds" ) );
-							check( "a mangled path marks its block red", isRed( texSet ) );
-							check( "...and says which fault it is",
-								summaryOf( texSet ).contains( QStringLiteral( "missing texture" ) ) );
+							const QString broken = list->model()->data( rowFor( texSet ),
+								Qt::ToolTipRole ).toString();
+							log << "  texture-set tooltip when broken: "
+								<< broken.right( 120 ) << "\n";
+							check( mode + ": a mangled texture path still marks its block",
+								broken.contains( QStringLiteral( "missing texture" ) )
+									&& !clean.contains( QStringLiteral( "missing texture" ) ) );
 							nif->set<QString>( nif->getIndex( iTex, slot ), orig );
-							check( "restoring it clears the marker", isRed( texSet ) == redBefore );
-							check( "...and the summary", summaryOf( texSet ) == before );
+							check( mode + ": ...and restoring it clears the marker",
+								!list->model()->data( rowFor( texSet ),
+									Qt::ToolTipRole ).toString()
+									.contains( QStringLiteral( "missing texture" ) ) );
 						}
 					}
 
-					// ---- unreferenced must be silent on a well-formed file ----
-					{
-						QStringList orphans;
-						for ( int b = 0; b < nif->getBlockCount(); b++ )
-							if ( summaryOf( b ).contains( QStringLiteral( "unreferenced" ) ) )
-								orphans << QString::number( b );
-						if ( !orphans.isEmpty() )
-							log << "  orphans: " << orphans.join( QStringLiteral( ", " ) ) << "\n";
-						check( "no block in a vanilla file reads as unreferenced", orphans.isEmpty() );
-					}
-
-					// ---- the hierarchy proxy maps its third column ----
-					if ( !skope->proxy ) {
-						skip( "the hierarchy view maps column 2", "no proxy model" );
-					} else {
-						check( "the proxy offers three columns",
-							skope->proxy->columnCount( QModelIndex() ) == 3 );
-						check( "...and its third header is Summary",
-							skope->proxy->headerData( 2, Qt::Horizontal, Qt::DisplayRole )
-								.toString() == QStringLiteral( "Summary" ) );
-						QModelIndex proot = skope->proxy->index( 0, 2, QModelIndex() );
-						check( "...and its third column is the model's summary",
-							proot.isValid()
-							&& skope->proxy->mapTo( proot ).column() == NifModel::WwSummaryCol );
-					}
-
-					// A column that reads correctly through data() can still be two
-					// pixels wide, or off the right edge, on screen. grab() renders
-					// the widget offscreen, so the picture costs nothing and steals
-					// no focus. The sections are squeezed to fit the dock's real
-					// width first — a screenshot of the columns you cannot see is
-					// not evidence about the one you are checking.
-					skope->list->expandAll();
-					skope->list->scrollToTop();
-					{
-						QHeaderView * h = skope->list->header();
-						const int w = skope->list->viewport()->width();
-						h->resizeSection( 0, int( w * 0.34 ) );
-						h->resizeSection( 1, int( w * 0.22 ) );
-						h->resizeSection( 2, w - int( w * 0.34 ) - int( w * 0.22 ) - 4 );
-					}
-					const QString shot = QApplication::applicationDirPath() + "/ww_summary_test.png";
-					check( "the block list renders", skope->list->grab().save( shot ) );
+					/* THE PICTURE, at a width the column is legible at.
+					 *
+					 * The first version grabbed the list as the harness window
+					 * happened to lay it out — 90 px wide, three pixels of
+					 * content, a screenshot that proves nothing and reads as
+					 * proof. The dock is widened first and the grab is asserted
+					 * to be big enough to contain the glyph strip.
+					 */
+					// A harness forces the state it measures: the left column's
+					// mode is persisted, and on a profile left on Header or NIFs
+					// the Block List is a hidden QStackedWidget page 90 px wide.
+					skope->setLeftColumnMode( NifSkope::LeftBlocks );
+					skope->resizeDocks( { skope->dLeft }, { 460 }, Qt::Horizontal );
+					list->collapseAll();
+					if ( isHierarchy )
+						list->expandAll();
+					list->scrollToTop();
+					QApplication::processEvents();
+					// per mode, so the second run does not overwrite the first's
+					// evidence and leave one mode unphotographed
+					const QString shot = QApplication::applicationDirPath()
+						+ "/ww_blockvis_" + mode + ".png";
+					const QPixmap picture = list->grab();
+					log << "  block list grabbed at " << picture.width() << "x"
+						<< picture.height() << "\n";
+					check( mode + ": the block list renders, wide enough to read",
+						picture.width() > WwGlyphs::stripWidth( WwGlyphs::VisSlotCount ) * 2
+							&& picture.height() > 40 && picture.save( shot ) );
 					log << "  screenshot: " << shot << "\n";
 				} while ( false );
 				log << checks << " checks, " << fails << " failures, " << skips << " skips\n";
@@ -25963,7 +26341,9 @@ void NifSkope::restoreUi()
 	// Old header blobs remember the former 100px section floor and whether the
 	// last section stretched. Keep the user's widths, but not those obsolete
 	// layout constraints: the Block List now folds with the rest of the column.
-	list->header()->setMinimumSectionSize( 44 );
+	// 48: the visibility column is the last section and must keep both glyphs
+	// whole at the narrowest fold (same value the constructor sets).
+	list->header()->setMinimumSectionSize( WwGlyphs::stripWidth( WwGlyphs::VisSlotCount ) );
 	list->header()->setStretchLastSection( true );
 	// and what the blob does not know: this mode's columns, whatever it restored
 	wwApplyBlockListColumns();
@@ -25993,12 +26373,12 @@ void NifSkope::restoreUi()
 	// say, and hidden in the Block List, where it is the entire point. Set after
 	// restoreState (and after setListMode above) because restoreState carries its
 	// own visibility and wins over anything set before it.
-	tree->setColumnHidden( NifModel::WwSummaryCol, true );
-	header->setColumnHidden( NifModel::WwSummaryCol, true );
-	kfmtree->setColumnHidden( NifModel::WwSummaryCol, true );
+	tree->setColumnHidden( NifModel::WwVisCol, true );
+	header->setColumnHidden( NifModel::WwVisCol, true );
+	kfmtree->setColumnHidden( NifModel::WwVisCol, true );
 	// list mode drives the NifModel directly; hierarchy mode goes through the
 	// 3-column proxy, where the summary is column 2
-	list->setColumnHidden( list->model() == nif ? int( NifModel::WwSummaryCol ) : 2, false );
+	list->setColumnHidden( list->model() == nif ? int( NifModel::WwVisCol ) : 2, false );
 
 	auto hideSections = []( NifTreeView * tree, bool hidden ) {
 		tree->header()->setSectionHidden( NifModel::ArgCol, hidden );
@@ -27263,12 +27643,13 @@ void NifSkope::buildBlockListSelectAndView( SpellBook & contextBook, const QMode
 	QAction * aFrame = view->addAction( tr( "Frame in Viewport\tNum ." ) );
 	connect( aFrame, &QAction::triggered, this, [this]() { ogl->frameSelected(); } );
 
-	/* Hide walks up from the CURRENT block to the nearest NiAVObject and hides
-	 * that one node — it does not read objSelection, whatever its name suggests.
-	 * So the label says "This", rather than promising the menu will act on a
-	 * multi-selection it will ignore.
+	/* Hide reads objSelection now — the Block List publishes its rows into it,
+	 * promoted to the nearest NiAVObject, so the menu, the H key over either
+	 * surface and the row's own eye glyph all act on the same set. It used to
+	 * hide the current block alone and the label said "This" to be honest about
+	 * that; Blender's H hides everything selected, and so does this.
 	 */
-	QAction * aHide = view->addAction( tr( "Hide This\tH" ) );
+	QAction * aHide = view->addAction( tr( "Hide Selected\tH" ) );
 	connect( aHide, &QAction::triggered, this, [this]() { ogl->hideSelected(); } );
 
 	QAction * aIsolate = view->addAction( tr( "Isolate Selected\t/" ) );

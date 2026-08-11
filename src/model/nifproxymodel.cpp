@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "message.h"
 #include "model/nifmodel.h"
+#include "wwblocksummary.h"
 
 #include <QVector>
 #include <QDebug>
@@ -155,6 +156,19 @@ static QString blockListSummary( const NifModel * nif, const QModelIndex & sourc
 	}
 	lines << QObject::tr( "%1 outgoing link(s) · %2 reference(s)" )
 		.arg( nif->getChildLinks( blockNumber ).size() ).arg( nif->getParentLinks( blockNumber ).size() );
+	/* THE DEFECT MARKER, which used to be the red text in the Summary column.
+	 *
+	 * That column carries the visibility toggles now, and the descriptive half of
+	 * the summary moved to the block row's tooltip in the model — but hierarchy
+	 * mode's tooltip is THIS function, not the model's, so without this the one
+	 * thing the summary said that nothing else says ("missing texture",
+	 * "unreferenced") would be invisible in the mode the program starts in. Only
+	 * the STATUS is borrowed; the description above is this view's own.
+	 */
+	QString status;
+	wwBlockSummary( nif, blockNumber, status );
+	if ( !status.isEmpty() )
+		lines << status;
 	return lines.join( QLatin1Char( '\n' ) );
 }
 
@@ -537,7 +551,7 @@ QModelIndex NifProxyModel::mapTo( const QModelIndex & idx ) const
 		if ( idx.column() == 1 )
 			col = NifModel::ValueCol;
 		else if ( idx.column() >= 2 )
-			col = NifModel::WwSummaryCol;
+			col = NifModel::WwVisCol;
 		nifidx = nifidx.sibling( nifidx.row(), col );
 	}
 
@@ -718,7 +732,7 @@ QVariant NifProxyModel::headerData( int section, Qt::Orientation orient, int rol
 	if ( !nif || section < 0 || section > 2 )
 		return QVariant();
 
-	static const int cols[3] = { NifModel::NameCol, NifModel::ValueCol, NifModel::WwSummaryCol };
+	static const int cols[3] = { NifModel::NameCol, NifModel::ValueCol, NifModel::WwVisCol };
 	return nif->headerData( cols[section], orient, role );
 }
 

@@ -50,6 +50,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //! Grey inline suffix appended to a flag field's Value cell by the delegate
 //! (e.g. "Hidden, Shadow"). Empty/invalid for non-flag rows.
 #define WwFlagSummaryRole (Qt::UserRole + 43)
+/*! Block List visibility column: -1 when the row has no scene object to toggle,
+ *  otherwise bit 0 = drawn, bit 1 = see-through, bit 2 = hiddenness is inherited
+ *  from an ancestor rather than this row's own, bit 3 = the same for
+ *  see-through. The delegate paints from it and the view hit-tests on it, so
+ *  there is one answer to "does this row have toggles" in both. */
+#define WwVisFlagsRole (Qt::UserRole + 44)
 
 
 // Used for Block Name hashing
@@ -218,10 +224,18 @@ public:
 		//! Diff-vs-reference (WW): the reference block's value. Hidden
 		//! everywhere except Block Details while a diff reference is set.
 		WwRefCol   = 10,
-		//! Per-type one-line summary (WW): what a block IS rather than what it
-		//! is called. Block List only — Block Details is a data editor and every
-		//! other view here shows fields, not blocks.
-		WwSummaryCol = 11,
+		/*! Per-block VISIBILITY (WW): the eye and the see-through disc, the same
+		 *  pair the Loaded-NIFs row strip carries, over the same scene state.
+		 *
+		 *  This slot used to be a one-line per-type Summary. The summary text is
+		 *  not gone — it moved to the block row's tooltip (NifModel::data,
+		 *  ToolTipRole on NameCol) — but the COLUMN is these two controls now.
+		 *  Reusing column 11 rather than adding a thirteenth is deliberate:
+		 *  QHeaderView keeps its total by deltas, and changing which of the
+		 *  twelve sections the Block List hides is the documented way to send
+		 *  that total negative. Block List only; every other view here shows
+		 *  fields, not blocks, and hides it. */
+		WwVisCol = 11,
 		NumColumns = 12,
 	};
 

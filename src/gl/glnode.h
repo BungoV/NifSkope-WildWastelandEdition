@@ -133,6 +133,8 @@ public:
 	Transform restWorldTrans() const;
 
 	virtual bool isHidden() const;
+	//! Drawn see-through (Scene::ghostNodes, with the subtree)
+	bool isGhosted() const;
 	virtual QString textStats() const;
 
 	bool isVisible() const { return !isHidden(); }

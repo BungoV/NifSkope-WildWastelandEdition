@@ -503,6 +503,12 @@ QVariant BaseModel::headerData( int section, Qt::Orientation orientation, int ro
 {
 	Q_UNUSED( orientation );
 
+	// The visibility column's legend. Two glyphs and a three-letter label say
+	// what they are but not what they do, and there is nowhere else to put it.
+	if ( role == Qt::ToolTipRole && section == WwVisCol )
+		return tr( "Eye: draw this object and its children, or hide them (H, Alt+H to reveal all).\n"
+			"Disc: draw them see-through.\nBoth are viewport-only and are not saved into the NIF." );
+
 	if ( role != Qt::DisplayRole )
 		return QVariant();
 
@@ -532,8 +538,8 @@ QVariant BaseModel::headerData( int section, Qt::Orientation orientation, int ro
 			return tr( "Version Condition" );
 		case WwRefCol:
 			return tr( "Reference" );
-		case WwSummaryCol:
-			return tr( "Summary" );
+		case WwVisCol:
+			return tr( "Vis" );
 		default:
 			return QVariant();
 		}

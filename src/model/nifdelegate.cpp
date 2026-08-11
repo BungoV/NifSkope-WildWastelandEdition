@@ -38,6 +38,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/valueedit.h"
 #include "ui/widgets/nifcheckboxlist.h"
 #include "qt5compat.hpp"
+#include "ui/wwglyphs.h"
+#include "wwskin.h"
 
 #include <QItemDelegate> // Inherited
 #include <QAbstractItemView>
@@ -172,6 +174,12 @@ public:
 	 *  measured without the other.
 	 */
 	bool plainStringValues = false;
+
+	/*! Paint column WwVisCol as the eye + see-through toggles (WW).
+	 *
+	 *  Block List only. The two views get their own delegate instance, and
+	 *  Block Details hides that column anyway, so this is off there. */
+	bool wwVisibilityColumn = false;
 
 	NifDelegate( QObject * p, SpellBookPtr sb = 0, bool hideInstantIcons = false,
 		bool plainStrings = false )
@@ -464,6 +472,58 @@ public:
 
 	virtual void paint( QPainter * painter, const QStyleOptionViewItem & option, const QModelIndex & index ) const override final
 	{
+		/* THE BLOCK LIST'S VISIBILITY COLUMN, which replaced Summary.
+		 *
+		 * The same eye and see-through disc the Loaded-NIFs row strip carries,
+		 * from the same drawing (WwGlyphs), over the same scene state — hidden
+		 * here is Scene::hiddenNodes, exactly what H writes.
+		 *
+		 * Rows with nothing to draw get NOTHING: the model answers -1 for a
+		 * field row, for the Header/Footer rows, and for any block that is not
+		 * an NiAVObject, and a dead glyph is worse than an empty cell.
+		 *
+		 * Glyphs are right-aligned in the cell rather than left, because the
+		 * column is the last section and stretches — left-aligned they would
+		 * drift away from the scrollbar as the panel widened, and the strip they
+		 * are copied from sits hard against the right edge of its row.
+		 */
+		if ( wwVisibilityColumn && index.isValid()
+			&& index.column() == NifModel::wwVisColumn( index.model() ) ) {
+			const int vis = index.data( WwVisFlagsRole ).toInt();
+			// the row background still belongs to the row: selection colour,
+			// drop target, greyed-out — all served through the model as usual
+			QVariant bg = index.data( Qt::BackgroundRole );
+			if ( bg.canConvert<QColor>() )
+				painter->fillRect( option.rect, bg.value<QColor>() );
+			else if ( option.state & QStyle::State_Selected )
+				painter->fillRect( option.rect, option.palette.brush(
+					( option.state & QStyle::State_Enabled ) ? QPalette::Normal : QPalette::Disabled,
+					QPalette::Highlight ) );
+			if ( vis < 0 )
+				return;
+			const bool visible = ( vis & 0x1 );
+			const bool ghost = ( vis & 0x2 );
+			// Inherited off an ancestor: the glyph reports the state but is
+			// drawn muted, because clicking it here cannot change it — the
+			// ancestor owns it, the same way Blender's outliner behaves.
+			const bool inheritedVis = ( vis & 0x4 );
+			const bool inheritedGhost = ( vis & 0x8 );
+			const QColor lit( wwSkinColor( "accent" ) );
+			const QColor dim( wwSkinColor( "textMuted" ) );
+			painter->save();
+			painter->setRenderHint( QPainter::Antialiasing, true );
+			painter->setOpacity( inheritedVis ? 0.45 : 1.0 );
+			WwGlyphs::drawEye( painter,
+				QRectF( WwGlyphs::visSlotRect( option.rect, WwGlyphs::SlotVisible ) )
+					.adjusted( 2, 2, -2, -2 ), visible, lit, dim );
+			painter->setOpacity( inheritedGhost ? 0.45 : 1.0 );
+			WwGlyphs::drawSeeThrough( painter,
+				QRectF( WwGlyphs::visSlotRect( option.rect, WwGlyphs::SlotGhost ) )
+					.adjusted( 3, 3, -3, -3 ), ghost, visible, lit, dim );
+			painter->restore();
+			return;
+		}
+
 		int namerole = (index.isValid() && index.column() == 0) ? Qt::DisplayRole : NifSkopeDisplayRole;
 
 		QString text = index.data( namerole ).toString();
@@ -784,13 +844,15 @@ public:
 };
 
 QAbstractItemDelegate * NifModel::createDelegate( QObject * parent, SpellBookPtr book,
-	bool hideInstantIcons, bool plainStringValues )
+	bool hideInstantIcons, bool plainStringValues, bool visibilityColumn )
 {
 	auto * delegate = new NifDelegate( parent, book, hideInstantIcons, plainStringValues );
+	delegate->wwVisibilityColumn = visibilityColumn;
 	// readable from outside without exporting the class: which view got which
 	// behaviour is the whole claim, and a harness can check it
 	delegate->setProperty( "wwNoInstantIcons", hideInstantIcons );
 	delegate->setProperty( "wwPlainStringValues", plainStringValues );
+	delegate->setProperty( "wwVisibilityColumn", visibilityColumn );
 	return delegate;
 }
 

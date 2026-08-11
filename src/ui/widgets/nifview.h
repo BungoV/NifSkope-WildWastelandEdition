@@ -130,6 +130,34 @@ public:
 	 */
 	std::function<void()> wwBlankClicked;
 
+	/*! Keys the Block List answers before anything else does (WW).
+	 *
+	 *  H / Alt+H, Blender's hide and reveal-all — which already worked in the
+	 *  viewport and did nothing here, over a panel that is a scene outliner in
+	 *  every other respect. Return true to consume the key.
+	 *
+	 *  It has to run FIRST, ahead of keyPressEvent's own body: that body returns
+	 *  early (swallowing the key) whenever the NifModel is driving the view and
+	 *  nothing is selected, then hands what is left to the spell book, then to
+	 *  QTreeView, whose keyboardSearch would treat a bare 'h' as type-to-find.
+	 *  Unset for the field views. */
+	std::function<bool( QKeyEvent * )> wwKeyHook;
+
+	/*! The Block List's per-row visibility toggles (WW): which glyph is under a
+	 *  point in this row, or -1.
+	 *
+	 *  Two hooks rather than one bool, for the reason the Loaded-NIFs strip is
+	 *  built the same way: the VIEW has to own the whole press-move-release
+	 *  gesture so that a click on a glyph neither selects the row nor starts a
+	 *  drag, while the WINDOW is the only thing that knows what a row means as a
+	 *  block number and what a toggle means to the scene. */
+	std::function<int( const QModelIndex &, const QPoint & )> wwVisSlotAt;
+	//! Flip one toggle. Called on RELEASE, and only over the pressed glyph.
+	std::function<void( const QModelIndex &, int slot )> wwVisToggle;
+	//! How many toggles the gesture above has completed. The harness reads it to
+	//! tell "the click did nothing" from "the click never arrived".
+	int wwVisTogglesDone = 0;
+
 	//! How many drag events the overrides above have been handed. The harness
 	//! reads it to prove the override ran, rather than measuring a hook it
 	//! called itself.
@@ -248,6 +276,11 @@ protected:
 	//     then, when you release the mouse button (or move the cursor), you may accidently select several items in the view
 	//     because QTreeView treats this as if you'd click on the expanded/collapsed item and drag the cursor to another item.
 	bool blockMouseSelection = false;
+
+	//! In-flight visibility-glyph press: the row and which glyph. While a slot
+	//! is claimed the view owns the gesture outright — see mouseMoveEvent.
+	QPersistentModelIndex pressedVisRow;
+	int pressedVisSlot = -1;
 
 	class BaseModel * nif = nullptr;
 

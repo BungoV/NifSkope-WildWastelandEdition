@@ -56,7 +56,41 @@ One user-specified workflow, shipped in four verified increments:
   minigun flash takes P-FlashFar (farthest-wins reading); a C-less second
   gun would chain-end. All three stated in merge summaries when they occur.
 
-### This session (2026-08-10)
+### This session (2026-08-11c) — Block List visibility
+
+**H / Alt+H work in the Block List, and the Summary column is now the eye and
+the see-through disc.** Details in [WW_CHANGES.md](WW_CHANGES.md); what a future
+session needs to know:
+
+- **There is ONE hidden set and it is `Scene::hiddenNodes`** (block numbers,
+  session-only, never written to the NIF, subtree by `Node::isHidden`'s
+  parent-chain walk). The viewport's H, the Block List's H, both context menus
+  and the row's eye all reach it through `GLView::hideSelected` /
+  `setBlockHidden`. Do not add a second one.
+- **`hideSelected()` reads `objSelection` now**, so it is multi-selection aware
+  on both surfaces. The old "Hide This" label described the old behaviour
+  honestly and is gone.
+- **Per-block see-through is `Scene::ghostNodes` + `Node::isGhosted()`, rendered
+  by the X-ray blend in `BSShape::drawShape`.** The Loaded-NIFs per-document
+  see-through cannot be reused: a ghosted document there is a flat triangle
+  soup, not a Scene. Like the global X-ray this covers `BSShape` only, which is
+  every shape in a Fallout 4 file.
+- **The column REUSED slot 11** (`WwSummaryCol` → `WwVisCol`) rather than adding
+  a thirteenth. That is deliberate and load-bearing: which columns the Block List
+  hides is exactly what sends `QHeaderView`'s running total negative. If you ever
+  do need to change the set, it goes through
+  `wwReleaseBlockListColumns`/`wwApplyBlockListColumns` and each mode's own blob.
+- **The eye and the disc are drawn once**, in `src/ui/wwglyphs.h`. Three callers:
+  the Loaded-NIFs row strip, the Block List column, and `renderMarkIconSheet`.
+  The sheet used to redraw them by hand and had already drifted — do not put a
+  fourth copy anywhere.
+- **A row gets toggles iff the scene can resolve it to a drawable of its own**:
+  top item, real block number, inherits `NiAVObject`. It does not apply the
+  key's promote-to-owning-shape rule, or one object's eye would appear on two
+  rows.
+- `block_visibility.sh` **74/74** across both modes. It replaced `WW_SUMMARY_TEST`.
+
+### The session before (2026-08-10)
 
 **The Pose Manager imports Screen Archer Menu poses (`4e36bbb`).** SAM `.json`
 poses (a Discord request, 80 real PA pose files as corpus) are **absolute**
@@ -199,7 +233,7 @@ Verified in the release build with `loaded_nifs.sh` **93/93** and
 - **The selector and both Block panels were compacted and clarified.** Blocks,
   Header and NIFs use a flat orange-underlined selector with no shortcuts. Block
   List has one toolbar plus an advanced Filters dropdown, accurate
-  Block/Name/Summary columns, navigable breadcrumbs, cached totals and a clear
+  Block/Name/Vis columns, navigable breadcrumbs, cached totals and a clear
   no-results state. Block Details has one search/pin/overflow row and explicit
   no-selection, no-match and no-pins states.
 - **Header is now a standalone file inspector.** It shows source identity and
@@ -575,6 +609,7 @@ And the block-list session added three:
 | `collision_drop.sh` | 7 checks: a mesh dragged onto the Collision Manager gets collision, at the shape type the panel is showing, one body per mesh — and check 2 asks whether the dock accepts drops at all, which is the only thing the harness steps over |
 | `block_list_modes.sh` | 8 per mode: that the header's total matches the sections it totals, that every row resolves back to itself through `indexAt`, that a block inserted now is addressable, and that all of it survives switching modes |
 | `block_drag_live.ps1` | **the only thing above the native-drag boundary** — drives the physical mouse across 7 drags: into a shut node, into a row its own auto-unfold revealed, into a second root, a root made a child, out to blank space, a mesh row's all-gap reorder, and a refused cycle. See the warning below. |
+| `block_visibility.sh` | 37 per mode: H / Alt+H over the list with a framebuffer delta either way, multi-select H, the subtree and inherited-from-an-ancestor rules, the eye and disc clicks asserted to land on **the same state the key produced**, the press/slide-off/release contract, non-drawable rows exposing nothing, see-through against BOTH the solid and the hidden frame, the column shape in both modes, and that F2 rename still types an 'h'. Seeds `List Mode` like the two above |
 
 All three build their fixture from the CLI cube fixture (`-no-gui new --cube`),
 so they need no game corpus at all. **`--cube` is not optional here**: as of

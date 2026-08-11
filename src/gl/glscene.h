@@ -323,6 +323,18 @@ public:
 	//! Block numbers temporarily hidden in the viewport (H / Alt+H)
 	QSet<int> hiddenNodes;
 
+	/*! Block numbers drawn SEE-THROUGH, with their subtrees (Block List disc).
+	 *
+	 *  The per-DOCUMENT see-through in Loaded NIFs cannot serve this: a ghosted
+	 *  document is not a Scene there at all, it is a flat triangle soup
+	 *  (`GLView::sessionDocumentGhostSoup`), which has no notion of one block
+	 *  inside the primary file. Per-block ghosting therefore reuses the OTHER
+	 *  see-through this program already has — the Blender-style X-ray blend in
+	 *  `BSShape::drawShape` — scoped to a subtree instead of the whole scene.
+	 *  Like `hiddenNodes` it is a viewport overlay: session-only, never written
+	 *  to the NIF, and cleared with the scene. */
+	QSet<int> ghostNodes;
+
 	//! Edit mode: suppress the built-in block selection highlight (GLView draws its own)
 	bool editMode = false;
 	//! Edit mode: render this block's geometry in its rest pose (no animation)

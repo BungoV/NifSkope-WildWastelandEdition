@@ -19844,20 +19844,104 @@ bool GLView::selectionRedo()
 	return true;
 }
 
-void GLView::hideSelected()
+/*! The nearest NiAVObject of a block, or -1. The one promotion rule the whole
+ *  hide mechanism shares: a property, a texture set or a shader has no node of
+ *  its own, so hiding one means hiding the shape that owns it. */
+int GLView::hideTargetBlock( int b ) const
 {
-	if ( !model || !scene->currentBlock.isValid() )
-		return;
-	// hide the nearest NiAVObject of the current selection
-	int b = model->getBlockNumber( QModelIndex( scene->currentBlock ) );
+	if ( !model )
+		return -1;
 	while ( b >= 0 && !model->blockInherits( model->getBlockIndex( b ), "NiAVObject" ) )
 		b = model->getParent( b );
-	if ( b < 0 )
+	return b;
+}
+
+/*! Hide, Blender-style (H). ONE implementation, and the Block List's H, the
+ *  Block List's eye glyph, the viewport's H and both context menus all reach the
+ *  scene through it.
+ *
+ *  It used to hide only the current block and say so ("Hide This"), while
+ *  Blender's H hides everything selected. The Block List publishes its row
+ *  selection into objSelection already (wireBlockListSelection, promoted to
+ *  NiAVObject by the same rule as hideTargetBlock), so reading that set is what
+ *  makes both surfaces multi-selection aware without either of them owning a
+ *  second copy of the state. The current block is the fallback for the case
+ *  objSelection cannot describe: a click that never reached the object mirror.
+ */
+void GLView::hideSelected()
+{
+	if ( !model )
 		return;
-	scene->hiddenNodes.insert( b );
+	QList<int> targets;
+	for ( int b : objSelection ) {
+		const int t = hideTargetBlock( b );
+		if ( t >= 0 && !targets.contains( t ) )
+			targets.append( t );
+	}
+	if ( targets.isEmpty() && scene->currentBlock.isValid() ) {
+		const int t = hideTargetBlock( model->getBlockNumber( QModelIndex( scene->currentBlock ) ) );
+		if ( t >= 0 )
+			targets.append( t );
+	}
+	if ( targets.isEmpty() )
+		return;
+	for ( int t : targets )
+		scene->hiddenNodes.insert( t );
 	updateDimmedBlocks();
-	emit gizmoStatus( tr( "Hid node %1 (Alt+H to reveal all)" ).arg( b ) );
+	if ( targets.size() == 1 )
+		emit gizmoStatus( tr( "Hid node %1 (Alt+H to reveal all)" ).arg( targets.first() ) );
+	else
+		emit gizmoStatus( tr( "Hid %1 nodes (Alt+H to reveal all)" ).arg( targets.size() ) );
 	update();
+}
+
+//! Hide or reveal one block's subtree. The eye glyph's whole implementation.
+void GLView::setBlockHidden( int block, bool hidden )
+{
+	const int t = hideTargetBlock( block );
+	if ( t < 0 )
+		return;
+	if ( hidden == scene->hiddenNodes.contains( t ) )
+		return;
+	if ( hidden )
+		scene->hiddenNodes.insert( t );
+	else
+		scene->hiddenNodes.remove( t );
+	updateDimmedBlocks();
+	emit gizmoStatus( hidden ? tr( "Hid node %1 (Alt+H to reveal all)" ).arg( t )
+	                         : tr( "Revealed node %1" ).arg( t ) );
+	update();
+}
+
+//! Draw one block's subtree see-through, or stop. The disc glyph's whole
+//! implementation; see Scene::ghostNodes for why it is the X-ray blend.
+void GLView::setBlockGhosted( int block, bool ghost )
+{
+	const int t = hideTargetBlock( block );
+	if ( t < 0 )
+		return;
+	if ( ghost == scene->ghostNodes.contains( t ) )
+		return;
+	if ( ghost )
+		scene->ghostNodes.insert( t );
+	else
+		scene->ghostNodes.remove( t );
+	updateDimmedBlocks();
+	emit gizmoStatus( ghost ? tr( "Node %1 draws see-through" ).arg( t )
+	                        : tr( "Node %1 draws solid again" ).arg( t ) );
+	update();
+}
+
+bool GLView::isBlockHidden( int block ) const
+{
+	const int t = hideTargetBlock( block );
+	return t >= 0 && scene->hiddenNodes.contains( t );
+}
+
+bool GLView::isBlockGhosted( int block ) const
+{
+	const int t = hideTargetBlock( block );
+	return t >= 0 && scene->ghostNodes.contains( t );
 }
 
 void GLView::unhideAll()
@@ -19874,19 +19958,24 @@ void GLView::updateDimmedBlocks()
 {
 	if ( !model )
 		return;
-	QSet<qint32> dim;
-	if ( !scene->hiddenNodes.isEmpty() ) {
-		// a block is dimmed if it, or any ancestor, is a hidden node
+	QSet<qint32> dim, ghostDim;
+	// a block is dimmed if it, or any ancestor, is a hidden node; the same walk
+	// answers the see-through set, so the Block List's two glyphs read the same
+	// inheritance the renderer does (Node::isHidden / Node::isGhosted)
+	if ( !scene->hiddenNodes.isEmpty() || !scene->ghostNodes.isEmpty() ) {
 		for ( int b = 0; b < model->getBlockCount(); b++ ) {
 			for ( int p = b; p >= 0; p = model->getParent( p ) ) {
-				if ( scene->hiddenNodes.contains( p ) ) {
+				if ( scene->hiddenNodes.contains( p ) )
 					dim.insert( b );
-					break;
-				}
+				if ( scene->ghostNodes.contains( p ) )
+					ghostDim.insert( b );
 			}
 		}
 	}
 	model->dimmedBlocks = dim;
+	model->dimmedGhostBlocks = ghostDim;
+	model->hiddenBlocks = QSet<qint32>( scene->hiddenNodes.begin(), scene->hiddenNodes.end() );
+	model->ghostBlocks = QSet<qint32>( scene->ghostNodes.begin(), scene->ghostNodes.end() );
 	// Scene::bounds() only counts visible nodes but is invalidated solely by
 	// Scene::transform(), which early-outs while the camera is idle - so
 	// without this every hide/unhide kept the pre-hide extent.

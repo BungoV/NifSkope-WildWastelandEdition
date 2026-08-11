@@ -260,6 +260,7 @@ HEADERS += \
 	src/qt5compat.hpp \
 	src/spellbook.h \
 	src/wwflagsummary.h \
+	src/ui/wwglyphs.h \
 	src/wwcollisionlibrary.h \
 	src/wwlibrary.h \
 	src/wwskin.h \

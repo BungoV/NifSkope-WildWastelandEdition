@@ -69,7 +69,7 @@ public:
 
 	Qt::ItemFlags flags( const QModelIndex & index ) const override final;
 
-	//! Name, Value, Summary — mapTo() is where a proxy column becomes a source
+	//! Name, Value, Vis — mapTo() is where a proxy column becomes a source
 	//! model column, so the two must be changed together.
 	int columnCount( const QModelIndex & index ) const override final { Q_UNUSED( index ); return 3; }
 	int rowCount( const QModelIndex & index ) const override final;

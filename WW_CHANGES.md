@@ -1,5 +1,131 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11c — H works in the Block List, and Summary became the visibility toggles
+
+**H and Alt+H now do in the Block List exactly what they do in the viewport**,
+and the Block List's third column is no longer a line of grey prose — it is the
+same eye and see-through disc the Loaded-NIFs rows carry, one per block, over the
+same scene state.
+
+**One hide, four doors into it.** `Scene::hiddenNodes` was already the viewport's
+H; the key over the Block List, the row's eye glyph, the block-list context menu
+and the viewport all reach it through `GLView::hideSelected` /
+`GLView::setBlockHidden` now, and nothing owns a second copy. The harness asserts
+that as an identity rather than as two expectations: after clicking the eye it
+requires `hiddenNodes` to equal *the set the key produced*, so a glyph that
+happened to arrive at the right answer by another route would still pass — and a
+glyph wired to its own state could not.
+
+- **`hideSelected()` reads `objSelection`.** It used to hide the current block
+  alone, and the menu entry said "Hide This" to be honest about it. The Block
+  List already publishes its rows into the object selection, promoted to the
+  nearest `NiAVObject` by the same rule, so reading that set is what makes both
+  surfaces multi-selection aware without either of them gaining state. Blender's
+  H hides everything selected; so does this, and the menu says **Hide Selected**.
+  The current block remains the fallback for a selection the object mirror never
+  saw.
+- **The key hook runs before everything else in `NifTreeView::keyPressEvent`.**
+  Everything below that line can swallow a bare letter: the NifModel branch
+  returns outright when nothing is selected, the spell book matches key
+  sequences, and `QTreeView::keyboardSearch` reads 'h' as type-to-find. It is
+  installed on the Block List only, and F2 rename still types an 'h' — checked,
+  because a bare-letter view shortcut is one rename away from being unusable.
+- **Alt+H is `unhideAll`, not `restoreAllVisibility`**, mirroring the viewport's
+  object mode exactly. The context menu's "Restore All Hidden" keeps the wider
+  one, which also drops solo and hidden triangles.
+
+**The Summary column became the visibility column, in slot 11.** Reusing
+`WwSummaryCol`'s index rather than adding a thirteenth column is the whole
+mitigation for the landmine this fork already has written down: `QHeaderView`
+keeps its total by deltas, and changing *which* of the twelve sections the Block
+List hides is how that total went negative and left every row in the flat list
+unclickable. Nothing about which columns are hidden changed, so
+`block_list_modes.sh` is untouched at 8/8 per mode and the new harness asserts
+the total against its own sections in both modes as well.
+
+- **Applicability is decided by what the scene can resolve to a drawable**: a top
+  item, with a real block number, that inherits `NiAVObject` — precisely what
+  `Scene::hiddenNodes` holds and `Node::isHidden` walks. Field rows, `NiHeader`,
+  `NiFooter`, shader properties and texture sets get **nothing drawn and nothing
+  to hit-test**, rather than two glyphs that would do nothing when clicked. It
+  deliberately does *not* apply the promotion the key does: hiding a shader
+  property means hiding the shape that owns it, which is right for a key over a
+  selection and wrong for a per-row control, where it would put one object's eye
+  on two rows.
+- **A block hidden by an ancestor shows the state and is drawn muted**, because
+  clicking it there cannot change it. Blender's outliner behaves the same way.
+- **The gesture is the Loaded-NIFs contract**, and it had to be: the Block List's
+  rows are draggable, so a press that leaked would have re-parented something.
+  The press is claimed, the move is swallowed whole, the release toggles only
+  over the same row and the same glyph, and sliding off cancels.
+
+**See-through is per block now, and it is the X-ray blend.** The Loaded-NIFs
+disc could not be borrowed: a ghosted document there is not a Scene at all, it is
+a flat triangle soup, which has no notion of one block inside the primary file.
+`Scene::ghostNodes` is the same shape as `hiddenNodes` — block numbers, subtree
+by parent-chain walk (`Node::isGhosted`), session-only, cleared with the scene —
+and `BSShape::drawShape` takes it through the constant-alpha path the global
+X-ray already used. Like the global X-ray it therefore covers `BSShape`, which
+is every shape in a Fallout 4 file.
+
+Translucency is checked against **both** ends. A one-sided pixel delta would pass
+on a disc that simply hid the shape, so the ghosted frame is required to differ
+from the solid one *and* from the hidden one, with a third check proving those
+two are themselves distinguishable in the fixture — otherwise noise satisfies
+both. Measured on the cube: 65,200 sampled pixels change solid→ghost, 66,114
+ghost→hidden. `release/ww_blockvis_ghost.png` shows the grid through the cube.
+
+**The summary text did not vanish, it moved to the row's tooltip** — and to two
+tooltips, because the two list modes serve different ones. Flat list mode gets it
+from `NifModel`'s NameCol tooltip, appended to the type description; hierarchy
+mode already had its own richer per-block tooltip in `NifProxyModel`, which now
+carries the **defect status** as well. Without that second half, "missing
+texture" and "unreferenced" — the one thing the summary said that nothing else
+says — would have been invisible in the mode the program starts in. Both are
+covered by mangling a real texture path and reading the tooltip back through the
+view's own model.
+
+**The icon sheet was drawing the glyphs by hand, and had already drifted.**
+`renderMarkIconSheet` carried a third copy of the eye (a wider almond, 0.5/0.32
+against the row's 0.46/0.30) and a disc with no half-fill at all — an approval
+artifact that did not show what shipped. The eye and the disc now live once, in
+`src/ui/wwglyphs.h`, and the row strip, the Block List column and the sheet all
+call it. `release/ww_icon_sheet.png` is regenerated and differs by exactly that.
+
+**New harness `block_visibility.sh`, 37 checks per mode, 74/74 across both**
+(`WW_BLOCKVIS_TEST=hierarchy|list`, cube fixture, no game corpus). It replaces
+`WW_SUMMARY_TEST`, which measured a column that no longer exists; the two checks
+of that suite worth keeping — the defect marker in both directions — are in it.
+
+Three things it caught that reading would not have:
+
+- **A frame that "leaked" 1334 pixels on the H → Alt+H round trip.** The
+  baseline had been grabbed with nothing selected and the revealed frame had the
+  object-mode outline round the cube. The check was right and the measurement was
+  wrong.
+- **Clicks landing on nothing, and passing.** `visualRect` answers for a row
+  scrolled out of view with a negative y as happily as for one on screen. In flat
+  list mode `expandAll` opens every block's whole field tree, which put the shape
+  row 2000 px above the viewport. The harness now scrolls to a row and asserts
+  the point is inside the viewport before clicking it, and expands only in
+  hierarchy mode, where the children are blocks.
+- **A screenshot 90 px wide.** The left column's mode is persisted, so on a
+  profile left on Header or NIFs the Block List is a hidden stacked-widget page.
+  The harness forces the mode and the dock width, and asserts the grab is wide
+  enough to contain the glyph strip.
+
+Also fixed in the wrapper: `grep -c` prints `0` **and** exits 1 when it matches
+nothing, so `|| echo 0` appended a second line and the arithmetic that followed
+died — fatally, in a non-interactive shell, which silently cost the script its
+second mode.
+
+Suites: `block_visibility.sh` **74/74**, `block_list_modes.sh` **8/8 per mode**,
+`block_rename.sh` **27/27**, `block_dragdrop.sh` **143/143**, `loaded_nifs.sh`
+**98/98** (two of its checks were asserting the old column label and the old
+44 px section floor and were updated), `starter_reload.sh` **15/15**. Release
+build green; the ghost/solid/hidden captures and both modes' block-list
+screenshots were inspected.
+
 ## 2026-08-11b — The starter cube is gone; a new document is an empty FO4 NIF
 
 **NifSkope no longer opens on a cube.** A window with no file is a Fallout 4

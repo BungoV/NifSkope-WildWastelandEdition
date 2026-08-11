@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/wwnumberfield.h"
 #include "freezeanim.h"
 #include "glview.h"
+#include "shortcutregistry.h"
 #include "loadingscreen.h"
 #include "message.h"
 #include "nifmerge.h"
@@ -61,6 +62,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/widgets/refrbrowser.h"
 #include "ui/widgets/inspect.h"
 #include "ui/widgets/timeline.h"
+#include "ui/wwglyphs.h"
 #include "ui/about_dialog.h"
 #include "ui/settingsdialog.h"
 #include "qt5compat.hpp"
@@ -190,7 +192,7 @@ public:
 	{
 		setObjectName( QStringLiteral( "BlockListHeader" ) );
 		setProperty( "wwBlockListLabels",
-			QStringList{ tr( "Block" ), tr( "Name" ), tr( "Summary" ) } );
+			QStringList{ tr( "Block" ), tr( "Name" ), tr( "Vis" ) } );
 	}
 
 protected:
@@ -207,8 +209,12 @@ protected:
 			|| ( !hierarchy && logicalIndex == NifModel::ValueCol ) )
 			option.text = tr( "Name" );
 		else if ( ( hierarchy && logicalIndex == 2 )
-			|| ( !hierarchy && logicalIndex == NifModel::WwSummaryCol ) )
-			option.text = tr( "Summary" );
+			|| ( !hierarchy && logicalIndex == NifModel::WwVisCol ) ) {
+			// The two visibility toggles. Named short because the column is only
+			// as wide as two glyphs; what they do is on the section tooltip.
+			option.text = tr( "Vis" );
+			option.textAlignment = Qt::AlignRight | Qt::AlignVCenter;
+		}
 		style()->drawControl( QStyle::CE_Header, &option, painter, this );
 	}
 };
@@ -646,46 +652,18 @@ public:
 			painter->drawLine( rule.topLeft(), rule.bottomLeft() );
 		}
 
-		// --- the eye ---------------------------------------------------------
+		/* --- the eye, and the see-through disc ------------------------------
+		 *
+		 * Both are drawn by WwGlyphs (src/ui/wwglyphs.h) now, because the Block
+		 * List's visibility column carries the same pair over the same scene
+		 * state. One drawing, two surfaces. */
 		if ( !markerOnly ) {
-			const QRectF f = QRectF( glyphRect( option.rect, SlotVisible ) ).adjusted( 2, 2, -2, -2 );
-			const qreal cx = f.center().x(), cy = f.center().y();
-			const qreal hw = f.width() * 0.46, hh = f.height() * 0.30;
-			painter->setPen( QPen( visible ? lit : dim, 1.3 ) );
-			painter->setBrush( Qt::NoBrush );
-			QPainterPath p;
-			if ( visible ) {
-				// almond: two arcs meeting at the corners, with a pupil
-				p.moveTo( cx - hw, cy );
-				p.quadTo( cx, cy - hh * 2.1, cx + hw, cy );
-				p.quadTo( cx, cy + hh * 2.1, cx - hw, cy );
-				painter->drawPath( p );
-				painter->setPen( Qt::NoPen );
-				painter->setBrush( lit );
-				painter->drawEllipse( QPointF( cx, cy ), hh * 0.78, hh * 0.78 );
-			} else {
-				// a shut lid: the lower arc alone, which is unmistakably not an eye
-				p.moveTo( cx - hw, cy - hh * 0.5 );
-				p.quadTo( cx, cy + hh * 1.7, cx + hw, cy - hh * 0.5 );
-				painter->drawPath( p );
-			}
-		}
-
-		// --- see-through -----------------------------------------------------
-		if ( !markerOnly ) {
-			const QRectF f = QRectF( glyphRect( option.rect, SlotGhost ) ).adjusted( 3, 3, -3, -3 );
-			// Hidden rows cannot be see-through: show the control as inert rather
-			// than lit-but-doing-nothing.
-			const QColor ink = ( ghost && visible ) ? lit : dim;
-			painter->setOpacity( visible ? 1.0 : 0.45 );
-			painter->setPen( QPen( ink, 1.1 ) );
-			painter->setBrush( Qt::NoBrush );
-			painter->drawEllipse( f );
-			if ( ghost ) {
-				painter->setPen( Qt::NoPen );
-				painter->setBrush( ink );
-				painter->drawChord( f, 90 * 16, 180 * 16 );	// left half filled
-			}
+			WwGlyphs::drawEye( painter,
+				QRectF( glyphRect( option.rect, SlotVisible ) ).adjusted( 2, 2, -2, -2 ),
+				visible, lit, dim );
+			WwGlyphs::drawSeeThrough( painter,
+				QRectF( glyphRect( option.rect, SlotGhost ) ).adjusted( 3, 3, -3, -3 ),
+				ghost, visible, lit, dim );
 		}
 
 		painter->restore();
@@ -1383,7 +1361,10 @@ NifSkope::NifSkope( bool background )
 	 * different blocks sharing a name therefore all showed [1], which reads as an
 	 * id that never updates. Both off here; Block Details keeps both.
 	 */
-	list->setItemDelegate( nif->createDelegate( this, book, true, true ) );
+	/* The third argument after those two is the VISIBILITY COLUMN: the Block
+	 * List paints WwVisCol as the eye and the see-through disc. Block Details
+	 * gets its own delegate instance without it, and hides that column too. */
+	list->setItemDelegate( nif->createDelegate( this, book, true, true, true ) );
 	/* NO EDIT TRIGGERS. Qt's default DoubleClicked|SelectedClicked opened the
 	 * delegate's editor on the same double-click that starts the inline rename —
 	 * two editors on one cell, and the delegate's is an integer spin over the raw
@@ -1393,7 +1374,10 @@ NifSkope::NifSkope( bool background )
 	 */
 	list->setEditTriggers( QAbstractItemView::NoEditTriggers );
 	list->installEventFilter( this );
-	list->header()->setMinimumSectionSize( 44 );
+	// 48, not the 44 the field views use: the visibility column is the last
+	// section, and both glyphs have to stay whole when the panel is folded
+	// right down.
+	list->header()->setMinimumSectionSize( WwGlyphs::stripWidth( WwGlyphs::VisSlotCount ) );
 	list->header()->setStretchLastSection( true );
 	list->header()->resizeSection( NifModel::NameCol, 220 );
 	list->header()->resizeSection( NifModel::ValueCol, 110 );
@@ -1405,6 +1389,7 @@ NifSkope::NifSkope( bool background )
 	list->setSelectionMode( QAbstractItemView::ExtendedSelection );
 	list->setSelectionBehavior( QAbstractItemView::SelectRows );
 	wireBlockListSelection();
+	wireBlockListVisibility();
 
 	/* Drag rows onto a NiNode to re-parent (Blender's Outliner). Both halves hang
 	 * off NifTreeView hooks, NOT an event filter: a drag event sent to the
@@ -1728,8 +1713,9 @@ NifSkope::NifSkope( bool background )
 	tree->setMinimumWidth( 1 );
 	// the Reference column only appears while a diff reference is set
 	tree->setColumnHidden( NifModel::WwRefCol, true );
-	// Summary is a Block LIST column; Block Details shows fields, not blocks
-	tree->setColumnHidden( NifModel::WwSummaryCol, true );
+	// The visibility toggles are a Block LIST column; Block Details shows
+	// fields, not blocks, and a field has no scene object to hide
+	tree->setColumnHidden( NifModel::WwVisCol, true );
 	/* Type is off by default, and toggled from the header's context menu.
 	 *
 	 * It is a permanent ~90px of width showing things like Ref<NiTimeController>,
@@ -1858,7 +1844,7 @@ NifSkope::NifSkope( bool background )
 	header->header()->resizeSection( NifModel::NameCol, 135 );
 	header->header()->resizeSection( NifModel::ValueCol, 250 );
 	header->setColumnHidden( NifModel::WwRefCol, true );
-	header->setColumnHidden( NifModel::WwSummaryCol, true );
+	header->setColumnHidden( NifModel::WwVisCol, true );
 	header->header()->setMinimumSectionSize( 44 );
 	header->setMinimumWidth( 1 );
 
@@ -1940,7 +1926,7 @@ NifSkope::NifSkope( bool background )
 	kfmtree->setItemDelegate( kfm->createDelegate( this ) );
 	kfmtree->installEventFilter( this );
 	kfmtree->setColumnHidden( NifModel::WwRefCol, true );
-	kfmtree->setColumnHidden( NifModel::WwSummaryCol, true );
+	kfmtree->setColumnHidden( NifModel::WwVisCol, true );
 
 	// Help Browser
 	refrbrwsr = ui->refrBrowser;
@@ -4418,6 +4404,68 @@ void NifSkope::wireBlockListSelection()
 		ogl->setObjectSelection( sel, toAV( list->selectionModel()->currentIndex() ) );
 		updatingObjFromList = false;
 	} );
+}
+
+/*! The Block List's visibility column, and its H / Alt+H.
+ *
+ * ONE piece of state under all of it. The eye writes Scene::hiddenNodes through
+ * GLView, which is the set the viewport's H writes, which is the set
+ * Node::isHidden() reads — so a block hidden by the key is a block whose eye is
+ * shut, in either list mode, without either surface owning a copy. Ditto the
+ * disc and Scene::ghostNodes.
+ *
+ * Neither the key hook nor the click hook lives in the view: the view knows
+ * nothing about the proxy, about block numbers, or about the scene. It owns the
+ * GESTURE (a press on a glyph must not select or drag the row) and hands the
+ * meaning here.
+ */
+void NifSkope::wireBlockListVisibility()
+{
+	list->wwKeyHook = [this]( QKeyEvent * e ) -> bool {
+		if ( !ogl || !nif )
+			return false;
+		const auto & keys = ShortcutRegistry::get();
+		// Alt+H first: H is a prefix of it and matching order decides which wins
+		if ( keys.matches( QStringLiteral( "viewport.unhide_all" ), e->key(), e->modifiers() ) ) {
+			ogl->unhideAll();
+			return true;
+		}
+		if ( keys.matches( QStringLiteral( "viewport.hide" ), e->key(), e->modifiers() ) ) {
+			ogl->hideSelected();
+			return true;
+		}
+		return false;
+	};
+
+	//! Which glyph is under a viewport point, or -1. The delegate paints from
+	//! the same rects and the same role, so the drawn and the clickable glyph
+	//! cannot end up in different places.
+	list->wwVisSlotAt = [this]( const QModelIndex & idx, const QPoint & pos ) -> int {
+		const int col = NifModel::wwVisColumn( list->model() );
+		if ( col < 0 || !idx.isValid() )
+			return -1;
+		const QModelIndex cell = idx.sibling( idx.row(), col );
+		if ( !cell.isValid() || cell.data( WwVisFlagsRole ).toInt() < 0 )
+			return -1;
+		const QRect r = list->visualRect( cell );
+		for ( int s = 0; s < WwGlyphs::VisSlotCount; s++ )
+			if ( WwGlyphs::visSlotRect( r, s ).contains( pos ) )
+				return s;
+		return -1;
+	};
+
+	list->wwVisToggle = [this]( const QModelIndex & idx, int slot ) {
+		if ( !ogl || !nif || !idx.isValid() )
+			return;
+		const QModelIndex src = ( idx.model() == proxy ) ? proxy->mapTo( idx ) : idx;
+		const int b = nif->getBlockNumber( src );
+		if ( b < 0 )
+			return;
+		if ( slot == WwGlyphs::SlotVisible )
+			ogl->setBlockHidden( b, !ogl->isBlockHidden( b ) );
+		else
+			ogl->setBlockGhosted( b, !ogl->isBlockGhosted( b ) );
+	};
 }
 
 void NifSkope::setBlockListQuickFilter( int id )
@@ -8621,27 +8669,16 @@ bool NifSkope::renderMarkIconSheet( const QString & path ) const
 			p.drawPixmap( g.adjusted( 2, 2, -2, -2 ), weaponMarkPixmap( lit ) );
 		else if ( slot == LoadedNifsDelegate::SlotFollow )
 			p.drawPixmap( g.adjusted( 2, 2, -2, -2 ), poseFollowPixmap( dim ) );
-		else {
-			// the eye and the disc, as the delegate draws them
-			LoadedNifsDelegate probe;
-			Q_UNUSED( probe );
-			p.setPen( QPen( slot == LoadedNifsDelegate::SlotVisible ? lit : dim, 1.3 ) );
-			p.setBrush( Qt::NoBrush );
-			const QRectF f = QRectF( g ).adjusted( 3, 3, -3, -3 );
-			if ( slot == LoadedNifsDelegate::SlotVisible ) {
-				QPainterPath eye;
-				const qreal cx = f.center().x(), cy = f.center().y();
-				const qreal hw = f.width() * 0.5, hh = f.height() * 0.32;
-				eye.moveTo( cx - hw, cy );
-				eye.quadTo( cx, cy - hh * 2.1, cx + hw, cy );
-				eye.quadTo( cx, cy + hh * 2.1, cx - hw, cy );
-				p.drawPath( eye );
-				p.setPen( Qt::NoPen );
-				p.setBrush( lit );
-				p.drawEllipse( QPointF( cx, cy ), hh * 0.78, hh * 0.78 );
-			} else {
-				p.drawEllipse( f );
-			}
+		else if ( slot == LoadedNifsDelegate::SlotVisible ) {
+			// The eye and the disc THROUGH THE SAME FUNCTIONS THE ROW USES.
+			// This sheet used to redraw them by hand, and had already drifted:
+			// a wider almond (0.5/0.32 against the row's 0.46/0.30) and a disc
+			// with no half-fill at all. An approval artifact that does not show
+			// what ships is worse than none.
+			WwGlyphs::drawEye( &p, QRectF( g ).adjusted( 2, 2, -2, -2 ), true, lit, dim );
+		} else {
+			WwGlyphs::drawSeeThrough( &p, QRectF( g ).adjusted( 3, 3, -3, -3 ),
+				true, true, lit, dim );
 		}
 	}
 	p.setPen( QPen( QColor( wwSkinColor( "border" ) ), 1 ) );

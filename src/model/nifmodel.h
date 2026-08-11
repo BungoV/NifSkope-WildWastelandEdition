@@ -225,7 +225,28 @@ public:
 	 *  field itself, asks for neither.
 	 */
 	static QAbstractItemDelegate * createDelegate( QObject * parent, SpellBookPtr book,
-		bool hideInstantIcons = false, bool plainStringValues = false );
+		bool hideInstantIcons = false, bool plainStringValues = false,
+		bool visibilityColumn = false );
+
+	/*! Which VIEW column carries the Block List's visibility toggles for a given
+	 *  model, or -1 (WW).
+	 *
+	 *  The Block List drives the NifModel directly in flat mode and a 3-column
+	 *  proxy in hierarchy mode, so the answer is WwVisCol or 2 depending on
+	 *  which. Deriving it from the model means neither the delegate that paints
+	 *  the glyphs nor the view that hit-tests them has to be told when the mode
+	 *  changes — and, more to the point, they cannot disagree, which is how a
+	 *  clickable rect ends up somewhere other than the drawn one. */
+	static int wwVisColumn( const QAbstractItemModel * m )
+	{
+		if ( !m )
+			return -1;
+		if ( m->inherits( "NifProxyModel" ) )
+			return 2;
+		if ( m->inherits( "NifModel" ) )
+			return int( WwVisCol );
+		return -1;
+	}
 
 	/*! Block rows can be DRAGGED (the Block List re-parents by dropping them).
 	 *
@@ -253,6 +274,17 @@ public:
 	qint32 selHighlightActive = -1;
 	//! Block numbers to grey out in the block list (viewport-hidden nodes)
 	QSet<qint32> dimmedBlocks;
+	/*! The viewport's hide / see-through state, mirrored for the Block List's
+	 *  visibility column (WwVisCol, which replaced Summary).
+	 *
+	 *  Four sets rather than two, because the column has to distinguish a block
+	 *  that was hidden from one merely INHERITING hiddenness off an ancestor —
+	 *  Blender's outliner does the same, and only the owning row's glyph is
+	 *  clickable. All four are written by GLView::updateDimmedBlocks and by
+	 *  nothing else: the model serves this state, it does not own it. */
+	QSet<qint32> hiddenBlocks;		//!< own node hidden (H / the eye)
+	QSet<qint32> ghostBlocks;		//!< own node see-through (the disc)
+	QSet<qint32> dimmedGhostBlocks;	//!< see-through: self or any ancestor
 	//! The row a block-list drag is currently over and could legally be dropped
 	//! on, or -1. Served the same window-owned way as selHighlight, so the
 	//! highlight follows the row through the proxy and through a mode switch

@@ -592,6 +592,11 @@ private:
 	//! (Re)connect the block-list multi-selection handler. Must be re-run
 	//! whenever list->setModel() replaces the view's selection model.
 	void wireBlockListSelection();
+	//! Install the Block List's visibility hooks: H / Alt+H, and the eye /
+	//! see-through glyph gesture on the WwVisCol column. Unlike the selection
+	//! wiring these hang off the VIEW, not its selection model, so they survive
+	//! setModel() and are installed once.
+	void wireBlockListVisibility();
 	//! Reapply the recursive Block List text filter.
 	//! Apply a Block List category filter by id, and show it on the filter button.
 	void setBlockListQuickFilter( int id );

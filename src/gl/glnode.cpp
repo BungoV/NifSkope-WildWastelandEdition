@@ -467,6 +467,23 @@ bool Node::isHidden() const
 	return false; /*!Options::cullExpression().pattern().isEmpty() && name.contains( Options::cullExpression() );*/
 }
 
+/*! See-through, per block (the Block List's disc). Deliberately the SAME
+ *  parent-chain walk as isHidden(): hiding a NiNode hides its subtree, so
+ *  ghosting one has to ghost the same set, or the two controls sitting in one
+ *  column would mean different things by "this object". */
+bool Node::isGhosted() const
+{
+	if ( scene->ghostNodes.isEmpty() )
+		return false;
+	const Node * n = this;
+	while ( n ) {
+		if ( scene->ghostNodes.contains( n->nodeId ) )
+			return true;
+		n = n->parent;
+	}
+	return false;
+}
+
 void Node::transform()
 {
 	IControllable::transform();

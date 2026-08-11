@@ -183,6 +183,7 @@ void Scene::clear( [[maybe_unused]] bool flushTextures )
 	// this the previous document's hide / solo / rest-pose set is re-applied to
 	// whatever blocks happen to carry those numbers in the file just loaded.
 	hiddenNodes.clear();
+	ghostNodes.clear();
 	hiddenTris.clear();
 	soloNode = -1;
 	restPoseBlock = -1;

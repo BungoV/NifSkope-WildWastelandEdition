@@ -1351,38 +1351,44 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 		}
 	}
 
-	/* Block List summary column: what the block IS, and a red marker when it is
-	 * broken. Only top items answer — every other row here is a FIELD, and a
-	 * field has no per-type summary to give.
+	/* THE BLOCK LIST'S VISIBILITY COLUMN — the eye and the see-through disc.
+	 *
+	 * It answers ONE role, and the applicability rule is the whole of it: a row
+	 * gets toggles exactly when the scene can resolve it to a drawable of its
+	 * own. That means a top item (a block, not a field), with a real block
+	 * number (so the Header and Footer rows are out), that inherits NiAVObject
+	 * — which is precisely what Scene::hiddenNodes holds and what Node::isHidden
+	 * walks. Anything else answers -1 and the delegate draws nothing, rather
+	 * than a pair of glyphs that would do nothing when clicked.
+	 *
+	 * Note it does NOT apply the promotion GLView::hideTargetBlock does. Hiding
+	 * a shader property means hiding the shape that owns it, which is right for
+	 * a key pressed over a selection, and wrong for a per-row control: two rows
+	 * would then carry the same eye and one of them would light up when you
+	 * clicked the other.
+	 *
+	 * No text and no summary. The per-type summary this column used to show is
+	 * still computed and still red on a defect — it is on the block row's
+	 * tooltip now (NameCol, below).
 	 */
-	if ( column == WwSummaryCol ) {
+	if ( column == WwVisCol ) {
+		if ( role != WwVisFlagsRole )
+			return QVariant();
 		if ( !isTopItem( item ) )
-			return QVariant();
+			return -1;
 		const int bn = getBlockNumber( item );
-		if ( bn < 0 )
-			return QVariant();
-		switch ( role ) {
-		case Qt::DisplayRole:
-		case Qt::ToolTipRole:
-			{
-				QString status;
-				QString text = wwBlockSummary( this, bn, status );
-				if ( status.isEmpty() )
-					return text;
-				return text.isEmpty() ? status : ( text + QStringLiteral( "  ·  " ) + status );
-			}
-		case Qt::ForegroundRole:
-			{
-				QString status;
-				wwBlockSummary( this, bn, status );
-				// red for a defect, quiet grey otherwise: the column is context,
-				// not content, and must not compete with the name beside it
-				return status.isEmpty() ? QColor::fromRgb( 154, 154, 154 )
-					: QColor::fromRgb( 233, 110, 110 );
-			}
-		default:
-			return QVariant();
-		}
+		if ( bn < 0 || !blockInherits( getBlockIndex( bn ), QStringLiteral( "NiAVObject" ) ) )
+			return -1;
+		int flags = 0;
+		if ( !dimmedBlocks.contains( bn ) )
+			flags |= 0x1;						// drawn
+		if ( dimmedGhostBlocks.contains( bn ) )
+			flags |= 0x2;						// see-through
+		if ( dimmedBlocks.contains( bn ) && !hiddenBlocks.contains( bn ) )
+			flags |= 0x4;						// hidden by an ancestor
+		if ( dimmedGhostBlocks.contains( bn ) && !ghostBlocks.contains( bn ) )
+			flags |= 0x8;						// see-through by an ancestor
+		return flags;
 	}
 
 	switch ( role ) {
@@ -1608,6 +1614,22 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 						QString tip = QString( "<p><b>%1</b></p><p>%2</p>" )
 						              .arg( item->name() )
 						              .arg( QString( item->text() ).replace( "<", "&lt;" ).replace( "\n", "<br/>" ) );
+
+						/* THE PER-TYPE SUMMARY, which used to be a column of its
+						 * own until the Block List's third column became the
+						 * visibility toggles. It is context rather than content
+						 * — what the block IS, plus a defect marker — so a
+						 * tooltip is where it belongs; a defect still shows in
+						 * the palette's `danger`, not a literal red. */
+						if ( int bn = -1; isTopItem( item ) && ( bn = getBlockNumber( item ) ) >= 0 ) {
+							QString status;
+							const QString summary = wwBlockSummary( this, bn, status );
+							if ( !summary.isEmpty() )
+								tip += QStringLiteral( "<p>%1</p>" ).arg( summary.toHtmlEscaped() );
+							if ( !status.isEmpty() )
+								tip += QStringLiteral( "<p style='color:%1'>%2</p>" )
+									.arg( wwSkinColor( "danger" ), status.toHtmlEscaped() );
+						}
 
 						if ( NifBlockPtr blk = blocks.value( item->name() ) ) {
 							tip += "<p>Ancestors:<ul>";

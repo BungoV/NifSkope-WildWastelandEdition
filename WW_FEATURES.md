@@ -243,9 +243,13 @@ predecessor:
 ## 10. Block List and Block Details
 
 - Block List: search and filter chips, category icons and a per-type dot,
-  inline Blender-style renaming, multi-selection, foldable groups, a block
-  **summary** row that says what a block *is*, and a rebuilt context menu with a
-  real taxonomy (`Spell::group()`).
+  inline Blender-style renaming, multi-selection, foldable groups, a per-block
+  **summary** on the row's tooltip saying what a block *is* (and when it is
+  broken), and a rebuilt context menu with a real taxonomy (`Spell::group()`).
+- Block List **visibility column**: per-row eye and see-through disc, the same
+  glyphs the Loaded-NIFs rows use, driving the same viewport hide state as
+  **H / Alt+H** — which work over the Block List now, on the whole selection,
+  Blender-style. See-through is per block and takes the subtree with it.
 - Block Details: link jump and pick, decoded flags in place, paste a field to
   many rows, **pinned fields**, sticky expansion state, and **diff against a
   reference file** in its own column.

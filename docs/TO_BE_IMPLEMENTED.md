@@ -1500,11 +1500,12 @@ flattened storage (#3), so the two are worth sequencing together.
 Shipped already: search, type chips, category icons, breadcrumb/footer,
 Links-to/Referenced-by peek, foldable header.
 
-**Summary column** (`WwSummaryCol`, `wwBlockSummary` in `spells/blocks.cpp`):
-per-type one-liners — counts for geometry, target for a controller, diffuse name
-for a texture set, bones for a skin, blob size for a packfile. Shown in both list
-modes (`NifProxyModel` went to three columns); hidden in Block Details and the
-header/kfm trees.
+**Summary** (`wwBlockSummary` in `spells/blocks.cpp`): per-type one-liners —
+counts for geometry, target for a controller, diffuse name for a texture set,
+bones for a skin, blob size for a packfile. It had a COLUMN of its own until
+2026-08-11c, when column 11 became the Block List’s visibility toggles
+(`WwVisCol`); the text moved to the block row’s tooltip in flat list mode, and
+its defect status to `NifProxyModel`’s own per-block tooltip in hierarchy mode.
 
 **Status badges** are coloured text in that column, not chips, per the house
 style: `missing texture` (reuses `texturePathInfo`) and `no geometry`.

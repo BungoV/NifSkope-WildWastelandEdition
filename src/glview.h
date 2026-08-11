@@ -1543,10 +1543,28 @@ public:
 	//! flatOnly limits growth to faces within maxAngleDeg of each other
 	//! (Shift+Ctrl+Alt+F uses ~1 deg; "by angle" prompts for a larger value).
 	void selectLinked( bool flatOnly, float maxAngleDeg = 1.5f );
-	//! Hide the selected node in the viewport (H); Alt+H via unhideAll
+	/*! Hide the selected objects in the viewport (H); Alt+H via unhideAll.
+	 *
+	 *  THE one hide entry point. The viewport's H, the Block List's H, both
+	 *  context menus and the Block List's eye glyph all end up in here or in
+	 *  setBlockHidden, so there is a single hidden set (Scene::hiddenNodes) and
+	 *  no surface can drift from another. Reads objSelection — which the Block
+	 *  List publishes on every selection change — and falls back to the current
+	 *  block. */
 	void hideSelected();
 	//! Reveal everything hidden with H
 	void unhideAll();
+	//! The nearest NiAVObject at or above a block, or -1: the promotion rule
+	//! every hide/see-through path shares
+	int hideTargetBlock( int b ) const;
+	//! Hide or reveal one block's subtree (the Block List's eye)
+	void setBlockHidden( int block, bool hidden );
+	//! Draw one block's subtree see-through, or stop (the Block List's disc)
+	void setBlockGhosted( int block, bool ghost );
+	//! Is this block's own node in the hidden set (not merely inheriting it)?
+	bool isBlockHidden( int block ) const;
+	//! Is this block's own node in the see-through set?
+	bool isBlockGhosted( int block ) const;
 	//! Recompute model->dimmedBlocks (hidden nodes + descendants) + repaint list
 	void updateDimmedBlocks();
 	//! The rendered Shape for a block number, or nullptr

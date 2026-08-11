@@ -512,6 +512,19 @@ void NifTreeView::dropEvent( QDropEvent * e )
 
 void NifTreeView::keyPressEvent( QKeyEvent * e )
 {
+	/* THE BLOCK LIST'S OWN KEYS COME FIRST — H and Alt+H.
+	 *
+	 * Everything below this line can swallow them: the NifModel branch returns
+	 * outright when nothing is selected, the spell book matches on key
+	 * sequences, and QTreeView::keyboardSearch reads a bare letter as
+	 * type-to-find. The hook is installed on the Block List only, and it is
+	 * skipped while a cell editor is open, so an F2 rename still types an 'h'.
+	 */
+	if ( wwKeyHook && state() != QAbstractItemView::EditingState && wwKeyHook( e ) ) {
+		e->accept();
+		return;
+	}
+
 	NifModel * nif = nullptr;
 	NifProxyModel * proxy = nullptr;
 
@@ -624,6 +637,24 @@ void NifTreeView::keyPressEvent( QKeyEvent * e )
 void NifTreeView::mousePressEvent( QMouseEvent * event )
 {
 	blockMouseSelection = false;
+	pressedVisRow = QPersistentModelIndex();
+	pressedVisSlot = -1;
+
+	/* A VISIBILITY GLYPH IS NOT THE ROW. Claim the press here so a click on the
+	 * eye or the disc neither selects the row nor begins a re-parent drag —
+	 * exactly the contract the Loaded-NIFs strip settled on, and for the same
+	 * reason: those toggles sit inside a view whose rows are draggable.
+	 */
+	if ( event->button() == Qt::LeftButton && wwVisSlotAt && wwVisToggle ) {
+		const QModelIndex index = indexAt( event->pos() );
+		const int slot = index.isValid() ? wwVisSlotAt( index, event->pos() ) : -1;
+		if ( slot >= 0 ) {
+			pressedVisRow = QPersistentModelIndex( index );
+			pressedVisSlot = slot;
+			event->accept();
+			return;
+		}
+	}
 
 	/* BLANK SPACE DESELECTS. QTreeView leaves the previous row selected when you
 	 * click past the end of the list, so there was no way to have no primary
@@ -644,12 +675,42 @@ void NifTreeView::mousePressEvent( QMouseEvent * event )
 
 void NifTreeView::mouseReleaseEvent( QMouseEvent * event )
 {
+	// Release over the SAME row and the SAME glyph, or nothing happens: sliding
+	// off a toggle cancels it, which is what makes a mis-aimed press recoverable.
+	if ( pressedVisSlot >= 0 ) {
+		const QPersistentModelIndex pressed = pressedVisRow;
+		const int slot = pressedVisSlot;
+		pressedVisRow = QPersistentModelIndex();
+		pressedVisSlot = -1;
+		if ( event->button() == Qt::LeftButton && pressed.isValid()
+			&& indexAt( event->pos() ) == QModelIndex( pressed )
+			&& wwVisSlotAt && wwVisSlotAt( pressed, event->pos() ) == slot ) {
+			wwVisTogglesDone++;
+			wwVisToggle( pressed, slot );
+		}
+		event->accept();
+		return;
+	}
+
 	if ( !blockMouseSelection )
 		QTreeView::mouseReleaseEvent( event );
 }
 
 void NifTreeView::mouseMoveEvent( QMouseEvent * event )
 {
+	/* While a toggle press is in flight the view owns the WHOLE gesture.
+	 *
+	 * Claiming the press is not enough — QTreeView selects on the MOVE as well,
+	 * and past the drag distance it starts a drag. The Loaded-NIFs gesture suite
+	 * caught exactly that on the eye/disc there; the Block List's rows are
+	 * draggable too, so it would have been a re-parent rather than a stray
+	 * selection.
+	 */
+	if ( pressedVisSlot >= 0 ) {
+		event->accept();
+		return;
+	}
+
 	if ( !blockMouseSelection )
 		QTreeView::mouseMoveEvent( event );
 }
