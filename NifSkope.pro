@@ -593,6 +593,13 @@ build_pass|!debug_and_release {
 		QMAKE_PRE_LINK += $${SED} -e s/@VERSION@/$${VER}/ -e s/@WWVERSION@/$${WW_VER}/ $${PWD}/build/README.md.in > $${PWD}/README.md $$nt
 	}
 
+	# The title-bar build rev is written at LINK time, not qmake time. The
+	# NIFSKOPE_REVISION define is baked when qmake runs, so after incremental
+	# builds the title named a commit the binary was not - which had the user
+	# judging a fixed feature through what the stale stamp said was a newer
+	# build. main.cpp prefers this file and falls back to the define.
+	QMAKE_PRE_LINK += git -C $${PWD} rev-parse --short HEAD > $${DESTDIR}/build_rev.txt $$nt
+
 
 ###############################
 ## QMAKE_POST_LINK

@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11g — The title bar stops lying about the build
+
+NIFSKOPE_REVISION is baked when qmake runs, so after incremental builds the
+title named a commit the binary was not — tonight that had the user judging
+the fixed refraction through a window whose stamp claimed a build it never
+was, twice. QMAKE_PRE_LINK now writes release/build_rev.txt at every link
+(same mechanism as the generated README) and main.cpp prefers that file,
+falling back to the define. Verified live: the window title reads the true
+HEAD immediately after an incremental relink.
+
 ## 2026-08-11f — One winpath, owned by the harness
 
 26 harness wrappers carried their own sed-based winpath, and sed BRE groups

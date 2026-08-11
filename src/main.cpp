@@ -104,11 +104,26 @@ int main( int argc, char * argv[] )
 		 * renaming it would strand every existing user's settings under a path
 		 * nothing reads any more. WW_EDITION_VERSION comes from NifSkope.pro.
 		 */
+		/* The build rev must be TRUE, not merely present: the compiled-in
+		 * NIFSKOPE_REVISION is baked when qmake runs, and after incremental
+		 * builds it named a commit this binary was not - the user judged a
+		 * fixed feature through a title that said he was on a newer build.
+		 * QMAKE_PRE_LINK writes build_rev.txt beside the exe at every link;
+		 * prefer it, fall back to the define. */
+		QString buildRev;
+		{
+			QFile revFile( QCoreApplication::applicationDirPath() + QStringLiteral( "/build_rev.txt" ) );
+			if ( revFile.open( QIODevice::ReadOnly | QIODevice::Text ) )
+				buildRev = QString::fromLatin1( revFile.readLine() ).trimmed();
+		}
 #ifdef NIFSKOPE_REVISION
-		a->setApplicationDisplayName( QStringLiteral( "NifSkope - Wild Wasteland Edition " WW_EDITION_VERSION " (build " ) + NIFSKOPE_REVISION + ", " + __DATE__ + ")" );
-#else
-		a->setApplicationDisplayName( QStringLiteral( "NifSkope - Wild Wasteland Edition " WW_EDITION_VERSION " (" ) + __DATE__ + ")" );
+		if ( buildRev.isEmpty() )
+			buildRev = QStringLiteral( NIFSKOPE_REVISION );
 #endif
+		if ( !buildRev.isEmpty() )
+			a->setApplicationDisplayName( QStringLiteral( "NifSkope - Wild Wasteland Edition " WW_EDITION_VERSION " (build " ) + buildRev + ", " + __DATE__ + ")" );
+		else
+			a->setApplicationDisplayName( QStringLiteral( "NifSkope - Wild Wasteland Edition " WW_EDITION_VERSION " (" ) + __DATE__ + ")" );
 
 		// Must set current directory or this causes issues with several features
 		QDir::setCurrent( qApp->applicationDirPath() );
