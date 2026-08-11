@@ -1057,9 +1057,45 @@ void NifSkopeOpenGLContext::setGlobalUniforms()
 	 * getViewport() above already carries this fallback; the upload path simply
 	 * never got it. Read-only, so it cannot move the viewport the way forcing
 	 * setViewport() per frame did — that attempt shifted every render-regression
-	 * baseline and was reverted. Only fires when the value was never set.
+	 * baseline and was reverted.
+	 *
+	 * CORRECTION (2026-08-11): "only when it was never set" was too narrow, and
+	 * the missing half is a second, worse defect — a STALE nonzero viewport,
+	 * which no fallback gated on zero can ever repair.
+	 *
+	 * Measured on X01_Torso_Tesla_VFX.nif, first frames after open:
+	 *     resizeGL 1485x925 valid=0            <- the ONLY resize for the final
+	 *                                             size, and isValid() is false,
+	 *                                             so setViewport() never runs
+	 *     paint 4  uniVP=1434x730  liveVP=1485x925
+	 *     paint 5..7 identical
+	 *     paint 9  uniVP=1280x741  liveVP=1280x741   (after a later resize)
+	 * Qt sizes the default framebuffer and its viewport itself; GLView::resizeGL
+	 * is the only thing that would have told the uniform, and it returned early
+	 * before the context was valid. The zero-fallback then latched whatever
+	 * transient viewport frame 1 happened to have (1434x730) and, being nonzero,
+	 * never fired again. The value stayed wrong until a resize or a click ran
+	 * indexAt() -> setViewport().
+	 *
+	 * fo4_default.frag reads the same uniform for screen-space refraction:
+	 *     suv = (gl_FragCoord.xy - viewportDimensions.xy) / viewportDimensions.zw
+	 * so a 1434x730 uniform over a 1485x925 framebuffer fetches the background
+	 * at up to 1.04x in u and 1.27x in v. The refracting shape then draws a
+	 * rescaled, displaced copy of the scene behind it — heavy visible warping
+	 * that has nothing to do with Refraction Strength — and it healed the moment
+	 * the user clicked in the viewport. That is bungo's report verbatim: "at the
+	 * beginning it starts broken ... I have to click somewhere in the nif file
+	 * for it to stabilize".
+	 *
+	 * So the value is reconciled with the live viewport on EVERY upload, not
+	 * just while it is zero. This is still read-only — it cannot move the
+	 * viewport, and it cannot disagree with the framebuffer being drawn, because
+	 * the live viewport IS what this frame rasterises with. setViewport() writes
+	 * both sides at once, so every call that goes through it reconciles to
+	 * itself and nothing changes: the settled render is bit-identical (measured,
+	 * paints 9-12 above already agreed).
 	 */
-	if ( globalUniforms->viewportDimensions[2] <= 0 ) [[unlikely]] {
+	{
 		GLint	viewportDims[4] = { 0, 0, 0, 0 };
 		fn->glGetIntegerv( GL_VIEWPORT, viewportDims );
 		if ( viewportDims[2] > 0 && viewportDims[3] > 0 ) {

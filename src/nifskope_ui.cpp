@@ -21272,6 +21272,70 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* FIRST-FRAME GATE (WW_FIRSTFRAME_TEST=1, with WW_FRAME_SHOTS=<prefix>):
+	 * does the first frame the user is shown match the frame he gets after
+	 * interacting with the viewport?
+	 *
+	 * WW_RENDER_SHOT above cannot ask this. Before it grabs, it waits 2.5 s,
+	 * resizes the window, hides every dock, runs a pick render and pumps two
+	 * updates — and both a resize and a pick render repair exactly the startup
+	 * state a first-frame defect lives in. That is why the refraction viewport
+	 * bug (WW_CHANGES 2026-08-11) rendered perfectly in all seven regression
+	 * cases while being plainly wrong on screen every time a file was opened.
+	 *
+	 * So this run changes NOTHING that could heal it. No resize, no dock
+	 * layout, no camera, no scene time. It only:
+	 *   frames 1..n   whatever the document's own first paints produce
+	 *   pump          two ordinary repaints  -> "settled, never touched"
+	 *   indexAt()     one pick render, i.e. bungo's click in the viewport
+	 *   pump          two more               -> "settled after the click"
+	 * GLView writes every one of those frames through the same readback, so
+	 * comparing frame 1 with the last frame compares like with like and the
+	 * only variable left is first-frame state.
+	 *
+	 * showRefraction is forced here rather than inside the timer because the
+	 * timer fires long after frame 1: a persisted "Viewport Effects off" would
+	 * otherwise make frame 1 and the settled frame agree by both being empty of
+	 * the effect under test.
+	 */
+	if ( qEnvironmentVariableIsSet( "WW_FIRSTFRAME_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
+			if ( skope->ogl ) {
+				if ( Scene * sc = skope->ogl->getScene() ) {
+					// Same override as WW_RENDER_SHOT, and for the same reason:
+					// ON unless explicitly asked for 0, so a persisted user
+					// preference cannot silently empty the gate. The explicit 0
+					// is what lets a driver render the paired
+					// refraction-on/refraction-off FIRST frames and prove the
+					// effect was in frame 1 at all.
+					sc->showRefraction = !qEnvironmentVariableIsSet( "WW_RENDER_REFRACTION" )
+						|| qEnvironmentVariableIntValue( "WW_RENDER_REFRACTION" ) != 0;
+					sc->showParticles = true;
+				}
+			}
+			QTimer::singleShot( 2500, skope, [skope]() {
+				if ( skope->ogl ) {
+					for ( int i = 0; i < 2; i++ ) {
+						skope->ogl->update();
+						qApp->processEvents();
+					}
+					// The click. indexAt() is a query — it returns an index and
+					// does not change the selection — so what it contributes is
+					// precisely the side effect a real click has on render
+					// state, and nothing else.
+					skope->ogl->indexAt( QPointF( skope->ogl->width() * 0.5,
+												  skope->ogl->height() * 0.5 ) );
+					qApp->processEvents();
+					for ( int i = 0; i < 2; i++ ) {
+						skope->ogl->update();
+						qApp->processEvents();
+					}
+				}
+				qApp->quit();
+			} );
+		} );
+	}
+
 	/* TEST HARNESS (WW_ARCHIVEBROWSE_TEST=<folder>): does loading a nif destroy a
 	 * browsed archive tree?
 	 *

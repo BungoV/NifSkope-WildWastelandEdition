@@ -1674,6 +1674,9 @@ private:
 	//! invisibly and the failing draw self-heals, so without these the user
 	//! sits on a gridless stale frame until the next input-driven repaint
 	unsigned char postCompileRepaints = 0;
+	//! WW_FRAME_SHOTS numbering starts at the frame that first presents a
+	//! freshly compiled document, not at the first paint of the process
+	bool wwFrameShotsArmed = false;
 
 	QTimer * lightVisTimer;
 	int lightVisTimeout;

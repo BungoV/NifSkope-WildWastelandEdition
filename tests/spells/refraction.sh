@@ -311,6 +311,63 @@ d "$F_PEAK" "$OFF"
 check "$( [ "$(dpx)" -ge 2000 ] && echo 1 || echo 0 )" "refraction off changes the shape" "$(dpx) px"
 
 echo
+echo "6. the FIRST frame the user is shown is already the settled frame"
+#
+# Everything above renders through WW_RENDER_SHOT, which before it grabs waits
+# 2.5 s, resizes the window, hides every dock, runs a pick render and pumps two
+# more updates. Each of those repairs startup state, so a defect that lives only
+# until the first interaction cannot be seen by any of them. That is not
+# hypothetical: for the whole life of the screen-space refraction preview,
+# opening a refracting NIF drew a visibly warped background until you clicked in
+# the viewport, and all 21 checks above were green throughout.
+#
+#     resizeGL 1485x925 valid=0        <- the only resize for the final size, and
+#                                         the context is not valid yet, so
+#                                         GLView::resizeGL returns before
+#                                         setViewport()
+#     paint 4  uniVP=1434x730  liveVP=1485x925
+#     paint 10 uniVP=1485x925  liveVP=1485x925   <- after indexAt(), i.e. a click
+#
+# fo4_default.frag divides gl_FragCoord by that uniform to find its background
+# sample, so a stale one fetches the wrong texels and the shape shows a rescaled
+# copy of the scene behind it. Frame 1 differed from the settled frame by 41507
+# px (max channel delta 108); it is 8 px (max 1) now.
+#
+# WW_FIRSTFRAME_TEST changes NOTHING that could heal it - no resize, no docks, no
+# camera, no scene time. It renders the document's own first frames, pumps two
+# repaints, runs one indexAt() (the click), pumps two more, and GLView writes
+# every one of them through the same readback. So frame 1 and the last frame are
+# comparable by construction and the only variable left is first-frame state.
+FF="$WORK/firstframe"
+ff_run() { # outdir refractionOn
+	rm -rf "$1"; mkdir -p "$1"
+	WW_FRAME_SHOTS="$(winpath "$1/f")" WW_FRAME_SHOTS_MAX=16 WW_FIRSTFRAME_TEST=1 \
+		WW_RENDER_REFRACTION="$2" timeout 120 "$EXE" "$SRC" >/dev/null 2>&1
+}
+ff_run "$FF/on"  1
+ff_run "$FF/off" 0
+FF_N=$(ls "$FF/on" 2>/dev/null | wc -l)
+FF_FIRST="$FF/on/f001.png"
+FF_LAST=$(ls "$FF/on"/*.png 2>/dev/null | tail -1)
+check "$( [ "$FF_N" -ge 4 ] && [ -s "$FF_FIRST" ] && echo 1 || echo 0 )" \
+	"the run captured its own frames" "$FF_N frames, last $(basename "${FF_LAST:-none}")"
+# ANTI-VACUITY. If the refraction path did not run in frame 1 - shape missing,
+# effect toggled off, file not loaded - frame 1 would trivially equal the settled
+# frame and this section would pass while measuring nothing. So the same first
+# frame is rendered with the effect off and must differ.
+d "$FF_FIRST" "$FF/off/f001.png"; FF_EFFECT=$(dpx)
+check "$( [ "$FF_EFFECT" -ge 2000 ] && echo 1 || echo 0 )" \
+	"the effect is in frame 1 at all" "$FF_EFFECT px vs the same frame with refraction off"
+# THE INVARIANT. Tolerance is small and deliberately two-sided: a handful of
+# 1-level pixels is the run-to-run noise of the particle/lightning geometry
+# between repaints (measured 6-8 px, max channel delta 1), while the defect this
+# guards was five orders of magnitude larger in count and 108 levels deep.
+d "$FF_FIRST" "$FF_LAST"; FF_PX=$(dpx); FF_MAX=$(f 2); FF_MEAN=$(dmean)
+check "$( [ "$FF_PX" -le 200 ] && [ "$FF_MAX" -le 4 ] && echo 1 || echo 0 )" \
+	"frame 1 already equals the settled frame" \
+	"$FF_PX px, max channel delta $FF_MAX, mean |d| $FF_MEAN (gate: <= 200 px and <= 4)"
+
+echo
 SRC_HASH_AFTER=$(sha256sum "$SRC_IN" | cut -d' ' -f1)
 check "$( [ "$SRC_HASH_BEFORE" = "$SRC_HASH_AFTER" ] && echo 1 || echo 0 )" "source nif untouched" "${SRC_HASH_AFTER:0:16}"
 

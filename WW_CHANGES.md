@@ -1,5 +1,31 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11h — The first frame after opening a file is now the finished frame
+
+Opening a refracting NIF drew a warped, displaced background until the user
+clicked in the viewport. Strength was never involved: globalUniforms->
+viewportDimensions held a stale size for every frame between open and first
+click (measured: 1434x730 over a 1485x925 framebuffer), and the shader
+divides gl_FragCoord by it to find its background sample — so the refracting
+shape drew a rescaled copy of the scene, and lines.geom shifted the grid
+raster off the same uniform. The one resize carrying the final startup size
+arrives before the GL context is valid, so resizeGL() bailed before writing;
+the old zero-only fallback latched paint 1's transient viewport and never
+fired again; indexAt() — a click — was the only remaining writer, which is
+the user's report verbatim. setGlobalUniforms() now reconciles against the
+live GL viewport on EVERY upload (read-only — unlike the reverted 07-27
+per-frame setViewport it cannot move the viewport; the settled render is
+bit-identical). First frame vs settled: 41507 differing px -> 8.
+
+The suite could not see this class of defect: WW_RENDER_SHOT waits, resizes,
+hides docks and pumps — each of which repairs startup state — which is how
+21 green checks coexisted with a bug visible on every file-open.
+WW_FRAME_SHOTS now reads the framebuffer at the end of every paintGL before
+the swap; WW_FIRSTFRAME_TEST drives a run that resizes nothing and touches
+nothing; frame 1 must equal the settled frame (<=200 px), with a
+refraction-off pair against vacuity. Proven to bite: the unfixed binary
+fails it at 95838 px while the original 21 checks stay green.
+
 ## 2026-08-11g — The title bar stops lying about the build
 
 NIFSKOPE_REVISION is baked when qmake runs, so after incremental builds the

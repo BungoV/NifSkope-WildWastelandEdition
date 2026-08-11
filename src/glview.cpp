@@ -2856,6 +2856,12 @@ void GLView::paintGL()
 		// current block was tried here and reverted: it did not heal the
 		// grid in live use and framing the root broke setCenter()
 		postCompileRepaints = 2;
+		// THIS frame is the first one that presents the newly compiled document,
+		// so it is where the WW_FRAME_SHOTS numbering starts (see the capture
+		// block at the end of paintGL). Arming it here rather than counting
+		// paints from process start is what makes "frame 1" mean the same thing
+		// on every run, whatever the window spent its startup paints on.
+		wwFrameShotsArmed = true;
 	}
 
 	// Center the model
@@ -4765,6 +4771,58 @@ void GLView::paintGL()
 				if ( pf.open( QIODevice::Append | QIODevice::Text ) )
 					QTextStream( &pf ) << "== endFrame " << wwEndFrame
 						<< " redPx=" << qulonglong( red ) << " ==\n";
+			}
+		}
+	}
+
+	/* FIRST-FRAME CAPTURE (WW_FRAME_SHOTS=<prefix>): save the framebuffer of
+	 * every paintGL from the frame that first presents the document, numbered,
+	 * straight out of the frame that is about to be shown.
+	 *
+	 * WW_RENDER_SHOT cannot answer "what does the user see when the file opens".
+	 * It waits 2.5 s, resizes the window, hides the docks, runs a pick render and
+	 * pumps two more updates before it grabs - and a resize or a pick render
+	 * repairs first-frame state. A defect that only exists until the first
+	 * interaction is invisible to it by construction, which is why the refraction
+	 * viewport bug (WW_CHANGES 2026-08-11) shipped with all seven regression
+	 * cases green.
+	 *
+	 * So this reads the frame in place, at the end of paintGL, before the swap
+	 * and before anything else can touch the window. Compare frame 1 with a later
+	 * frame from the SAME run and the difference is first-frame state and nothing
+	 * else: no resize, no dock layout, no camera, no scene time in the way.
+	 *
+	 * WW_FRAME_SHOTS_MAX (default 16) caps how many are written.
+	 */
+	{
+		static const QString wwShotPrefix = qEnvironmentVariable( "WW_FRAME_SHOTS" );
+		static const int wwShotMax = ( qEnvironmentVariableIsSet( "WW_FRAME_SHOTS_MAX" )
+			? qEnvironmentVariableIntValue( "WW_FRAME_SHOTS_MAX" ) : 16 );
+		static int wwShotCount = 0;
+		if ( !wwShotPrefix.isEmpty() && wwFrameShotsArmed && wwShotCount < wwShotMax ) [[unlikely]] {
+			wwShotCount++;
+			GLint	vp[4] = { 0, 0, 0, 0 };
+			glGetIntegerv( GL_VIEWPORT, vp );
+			const int w = vp[2], h = vp[3];
+			if ( w > 0 && h > 0 ) {
+				// Read back the framebuffer this frame was DRAWN into, not
+				// whatever happens to be the read binding: a grab that silently
+				// read the wrong target would look like a black first frame,
+				// i.e. like a defect of its own.
+				GLint	prvRead = 0, drawFbo = 0;
+				glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prvRead );
+				glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo );
+				auto	fn = ( scene && scene->renderer ? scene->renderer->fn : nullptr );
+				if ( fn && prvRead != drawFbo )
+					fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( drawFbo ) );
+				QImage	img( w, h, QImage::Format_RGBA8888 );
+				glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+				glReadPixels( vp[0], vp[1], w, h, GL_RGBA, GL_UNSIGNED_BYTE, img.bits() );
+				if ( fn && prvRead != drawFbo )
+					fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prvRead ) );
+				img.mirror( false, true );	// GL's origin is bottom-left
+				img.save( QStringLiteral( "%1%2.png" ).arg( wwShotPrefix )
+					.arg( wwShotCount, 3, 10, QLatin1Char( '0' ) ) );
 			}
 		}
 	}
