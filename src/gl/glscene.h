@@ -335,6 +335,26 @@ public:
 	 *  to the NIF, and cleared with the scene. */
 	QSet<int> ghostNodes;
 
+	/*! The WHOLE scene hidden / drawn see-through: the PRIMARY document's own eye
+	 *  and see-through disc in the Loaded NIFs strip.
+	 *
+	 *  Every other row there is a loaded document, which the workspace hides by
+	 *  leaving it out of the render list and ghosts by drawing it as a translucent
+	 *  soup. Neither route reaches the primary — it is drawn by this Scene, from
+	 *  its own model, and it has to stay selectable and editable in the Block List
+	 *  while it is hidden. So the primary's pair asks the PER-BLOCK controls for
+	 *  the whole scene instead of one subtree: `hideAll` is read by
+	 *  `Node::isHidden` and `ghostAll` by `Node::isGhosted`, so the draw, the
+	 *  picking pass, the selection outline and the X-ray blend all follow with no
+	 *  second implementation and no new blend invented for it.
+	 *
+	 *  `GLView` owns the values (`primaryHidden` / `primaryGhosted`) and pushes
+	 *  them here every frame, so a Scene rebuilt for a new document cannot come
+	 *  back with them silently cleared. Viewport-only, session-only, never
+	 *  written to the NIF. */
+	bool hideAll = false;
+	bool ghostAll = false;
+
 	//! Edit mode: suppress the built-in block selection highlight (GLView draws its own)
 	bool editMode = false;
 	//! Edit mode: render this block's geometry in its rest pose (no animation)

@@ -10873,25 +10873,108 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->markWorkspaceFollowerRow( row, false );
 					}
 
-					/* THE PRIMARY ROW: a full strip, drawn and DEAD — and the arrow
-					 * every loaded document now carries.
+					/* THE PRIMARY ROW: half of it describes the document, half of it
+					 * drives the viewport, and the arrow is a control.
 					 *
-					 * Two changes shipped together here and they fail in opposite
-					 * directions, so nothing below measures them jointly.
+					 * The split is the whole design and each half fails differently.
 					 *
-					 * The ARROW was QStyle::SP_ArrowRight set on the primary item —
-					 * the platform's black triangle, on one row, ignoring the skin.
-					 * "It is drawn" is therefore not the check: the old one was drawn
-					 * perfectly, in the wrong ink, which is the entire bug. What is
-					 * asserted is the COLOUR of its pixels, on every row.
+					 * The ROLE marks and the arrow say what the document already IS to
+					 * this workspace. On the row that IS the primary there is nothing to
+					 * change, so they are drawn in the inert register and are dead to the
+					 * mouse. "They are drawn" would pass on a strip that also worked;
+					 * "they do nothing" would pass on the older code that drew nothing at
+					 * all. Neither is worth anything without the other.
 					 *
-					 * The primary's TOGGLES are drawn and inert. "They are drawn"
-					 * would also pass on a strip that worked; "they do nothing" would
-					 * also pass on the old code, which drew nothing at all. Neither
-					 * check is worth anything without the other, and the pair only
-					 * means something beside a live row proving the same synthetic
-					 * press still toggles when it is allowed to.
+					 * The DISPLAY pair is a real control on every row including this one,
+					 * and the only honest test of it is the FRAMEBUFFER. A check that the
+					 * flag flipped would pass on a version that changed nothing on screen
+					 * — which is exactly what shipped first, on the reasoning that a
+					 * primary could never be hidden.
+					 *
+					 * The ARROW promotes. Asserted through the same object identities the
+					 * Make Primary route is already held to, because the risk is not that
+					 * nothing happens, it is that a second window happens.
 					 */
+					/* THE PIXEL AND GESTURE HELPERS, hoisted so the arrow-promotion
+					 * checks at the END of this suite can use the same ones. They are
+					 * run last because promotion rewrites the workspace and the checks
+					 * in between read it. */
+					auto sendTo = [skope]( QEvent::Type type, const QPoint & p,
+							Qt::MouseButton b, Qt::MouseButtons held ) {
+						QMouseEvent e( type, QPointF( p ),
+							QPointF( skope->loadedNifsView->viewport()->mapToGlobal( p ) ),
+							b, held, Qt::NoModifier );
+						QApplication::sendEvent( skope->loadedNifsView->viewport(), &e );
+						QApplication::processEvents();
+					};
+					auto pressRelease = [&sendTo]( const QPoint & at ) {
+						sendTo( QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton );
+						sendTo( QEvent::MouseButtonRelease, at, Qt::LeftButton, Qt::NoButton );
+					};
+					auto slideOff = [&sendTo]( const QRect & box ) {
+						const QPoint at = box.center();
+						const QPoint away( box.left() - 60, at.y() );
+						sendTo( QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton );
+						sendTo( QEvent::MouseMove, away, Qt::NoButton, Qt::LeftButton );
+						sendTo( QEvent::MouseButtonRelease, away, Qt::LeftButton, Qt::NoButton );
+					};
+					auto noSelection = [skope]() {
+						return skope->loadedNifsView->selectionModel()->selectedRows().isEmpty()
+							&& !skope->loadedNifsView->currentIndex().isValid();
+					};
+
+					/* The row BACKDROP is the modal colour of the row, not a fixed sample
+					 * point: a fixed point lands on the text, or on a glyph, the first
+					 * time anything about the layout moves. */
+					auto backdrop = []( const QImage & img, const QRect & r, qreal dpr ) {
+						QHash<QRgb, int> seen;
+						for ( int y = int( r.top() * dpr ); y < int( r.bottom() * dpr ); y++ )
+							for ( int x = int( r.left() * dpr ); x < int( r.right() * dpr ); x++ )
+								if ( img.valid( x, y ) ) seen[img.pixel( x, y )]++;
+						QRgb best = 0;
+						int bestN = -1;
+						for ( auto it = seen.constBegin(); it != seen.constEnd(); ++it )
+							if ( it.value() > bestN ) { bestN = it.value(); best = it.key(); }
+						return QColor( best );
+					};
+					/* A glyph's INK is the pixel FURTHEST from that backdrop, plus how many
+					 * pixels are ink at all.
+					 *
+					 * Furthest, never averaged: an averaged glyph is mostly its own
+					 * antialiasing blended back toward the row, which drags every
+					 * measurement toward the background and would happily let an accent
+					 * arrow and a grey one land within tolerance of each other. */
+					auto glyphInk = []( const QImage & img, const QRect & r, qreal dpr,
+							const QColor & bg, int * painted ) {
+						QColor best = bg;
+						int bestD = 0, lit = 0;
+						for ( int y = int( r.top() * dpr ); y < int( r.bottom() * dpr ); y++ )
+							for ( int x = int( r.left() * dpr ); x < int( r.right() * dpr ); x++ ) {
+								if ( !img.valid( x, y ) ) continue;
+								const QColor c = img.pixelColor( x, y );
+								const int d = qAbs( c.red() - bg.red() )
+									+ qAbs( c.green() - bg.green() )
+									+ qAbs( c.blue() - bg.blue() );
+								if ( d > 30 ) lit++;
+								if ( d > bestD ) { bestD = d; best = c; }
+							}
+						if ( painted ) *painted = lit;
+						return best;
+					};
+					auto sameInk = []( const QColor & got, const QColor & want, int tol ) {
+						return qAbs( got.red() - want.red() ) <= tol
+							&& qAbs( got.green() - want.green() ) <= tol
+							&& qAbs( got.blue() - want.blue() ) <= tol;
+					};
+
+					const QColor accentInk = QColor::fromString( wwSkinColor( "accent" ) );
+					const QColor inertInk = QColor::fromString( wwSkinColor( "textDisabled" ) );
+					const QColor mutedInk = QColor::fromString( wwSkinColor( "textMuted" ) );
+					const QColor textInk = QColor::fromString( wwSkinColor( "text" ) );
+					auto listImage = [skope]() {
+						return skope->loadedNifsView->viewport()->grab();
+					};
+
 					if ( skope->loadedNifsModel->rowCount() >= 2 ) {
 						QModelIndex primaryRow;
 						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
@@ -10906,193 +10989,290 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								&& otherRow != primaryRow
 								&& skope->documentFromBrowserIndex( otherRow ) != skope );
 
-						// A known unmarked starting state on BOTH rows, so every ink
-						// sampled below is an "off" one rather than a leftover mark.
+						// A known unmarked starting state on BOTH rows, so every ink sampled
+						// below is an "off" one rather than a leftover mark.
 						skope->setWorkspaceSkeletonDocument( -1 );
 						skope->markWorkspaceWeaponRow( row, false );
 						skope->markWorkspaceFollowerRow( row, false );
 						skope->setWorkspaceDisplayMode( row, 1 );
+						skope->sessionPreviewVisible = true;
+						skope->sessionPreviewGhost = false;
+						skope->refreshSessionPreview();
 						skope->loadedNifsView->selectionModel()->clear();
 						skope->loadedNifsView->setCurrentIndex( QModelIndex() );
 						skope->loadedNifsView->viewport()->update();
 						QApplication::processEvents();
 
-						auto sendTo = [skope]( QEvent::Type type, const QPoint & p,
-								Qt::MouseButton b, Qt::MouseButtons held ) {
-							QMouseEvent e( type, QPointF( p ),
-								QPointF( skope->loadedNifsView->viewport()->mapToGlobal( p ) ),
-								b, held, Qt::NoModifier );
-							QApplication::sendEvent( skope->loadedNifsView->viewport(), &e );
+
+						/* 1. EVERY row carries an arrow, and none of them is black.
+						 *
+						 * The primary's is the accent, every other row's is the panel's
+						 * ordinary TEXT colour — not the disabled register, because those
+						 * arrows are live controls at rest: clicking one promotes that
+						 * document. Asserting the exact token is what separates "greyed out"
+						 * from "not current", which is the distinction the row is making. */
+						{
+							const QPixmap shot = listImage();
+							const QImage list = shot.toImage();
+							const qreal dpr = shot.devicePixelRatio();
+							int arrowedRows = 0, blackArrows = 0;
+							bool everyArrowInRegister = true;
+							for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
+								const QModelIndex idx = skope->loadedNifsModel->index( r, 0 );
+								const QRect box = skope->loadedNifsArrowRect( idx );
+								if ( !box.isValid() ) { everyArrowInRegister = false; continue; }
+								const QColor bg = backdrop( list,
+									skope->loadedNifsView->visualRect( idx ), dpr );
+								int painted = 0;
+								const QColor got = glyphInk( list, box, dpr, bg, &painted );
+								if ( painted >= 16 ) arrowedRows++;
+								else everyArrowInRegister = false;
+								const bool primary = skope->documentFromBrowserIndex( idx ) == skope;
+								if ( !sameInk( got, primary ? accentInk : textInk, 26 ) )
+									everyArrowInRegister = false;
+								if ( got.red() + got.green() + got.blue() < 120 )
+									blackArrows++;
+							}
+							check( "every Loaded NIF row paints an arrow in its gutter",
+								arrowedRows == skope->loadedNifsModel->rowCount() );
+							check( "...the primary's in the accent, every other in the panel's text ink",
+								everyArrowInRegister );
+							check( "...and none of them is the platform's black triangle",
+								blackArrows == 0 );
+						}
+
+						/* 2. On the primary the ROLE marks are inert and the DISPLAY pair is
+						 * not, and both halves are read off the same frame.
+						 *
+						 * Slot 1 is the skull, unmarked on both rows here, so the primary's
+						 * and the live row's samples differ only in which register drew them.
+						 * Slot 4 is the eye, ON for both, and there the primary must match the
+						 * live row exactly: it is the same control doing the same thing. */
+						{
+							const QPixmap shot = listImage();
+							const QImage list = shot.toImage();
+							const qreal dpr = shot.devicePixelRatio();
+							const QColor primaryBg = backdrop( list,
+								skope->loadedNifsView->visualRect( primaryRow ), dpr );
+							const QColor liveBg = backdrop( list,
+								skope->loadedNifsView->visualRect( otherRow ), dpr );
+							int primarySlotsPainted = 0;
+							for ( int slot = 1; slot <= 5; slot++ ) {
+								int painted = 0;
+								glyphInk( list, skope->loadedNifsGlyphRect( primaryRow, slot ),
+									dpr, primaryBg, &painted );
+								if ( painted >= 4 ) primarySlotsPainted++;
+							}
+							const QColor primaryRoleInk = glyphInk( list,
+								skope->loadedNifsGlyphRect( primaryRow, 1 ), dpr, primaryBg, nullptr );
+							const QColor liveRoleInk = glyphInk( list,
+								skope->loadedNifsGlyphRect( otherRow, 1 ), dpr, liveBg, nullptr );
+							const QColor primaryEyeInk = glyphInk( list,
+								skope->loadedNifsGlyphRect( primaryRow, 4 ), dpr, primaryBg, nullptr );
+							const QColor liveEyeInk = glyphInk( list,
+								skope->loadedNifsGlyphRect( otherRow, 4 ), dpr, liveBg, nullptr );
+							check( "the primary row paints all five toggle glyphs",
+								primarySlotsPainted == 5 );
+							check( "...its ROLE marks in the disabled ink, which is not the enabled OFF ink",
+								sameInk( primaryRoleInk, inertInk, 26 )
+									&& sameInk( liveRoleInk, mutedInk, 26 )
+									&& !sameInk( primaryRoleInk, mutedInk, 26 ) );
+							check( "...and its lit EYE in the same accent a live row's wears",
+								sameInk( primaryEyeInk, accentInk, 26 )
+									&& sameInk( liveEyeInk, accentInk, 26 ) );
+						}
+
+						/* 3. The role marks are dead to the press. */
+						{
+							NifModel * skeletonWas = skope->ogl ? skope->ogl->workspaceSkeleton() : nullptr;
+							const bool weaponWas = nifIsWeaponMarked( skope->nif );
+							const bool followWas = skope->ogl
+								&& skope->ogl->isWorkspaceFollower( skope->nif );
+							const QImage rowBefore = skope->loadedNifsView->viewport()->grab(
+								skope->loadedNifsView->visualRect( primaryRow ) ).toImage();
+							bool neverSelects = true;
+							for ( int slot = 1; slot <= 3; slot++ ) {
+								pressRelease( skope->loadedNifsGlyphRect( primaryRow, slot ).center() );
+								neverSelects &= noSelection();
+							}
+							pressRelease( skope->loadedNifsArrowRect( primaryRow ).center() );
+							neverSelects &= noSelection();
+							const QImage rowAfter = skope->loadedNifsView->viewport()->grab(
+								skope->loadedNifsView->visualRect( primaryRow ) ).toImage();
+							check( "pressing the primary's role marks and its own arrow moves no state",
+								( skope->ogl ? skope->ogl->workspaceSkeleton() : nullptr ) == skeletonWas
+									&& nifIsWeaponMarked( skope->nif ) == weaponWas
+									&& ( skope->ogl
+										&& skope->ogl->isWorkspaceFollower( skope->nif ) ) == followWas );
+							check( "...and repaints the row not one pixel differently",
+								rowBefore == rowAfter );
+							check( "...and never selects the row it refused to act on", neverSelects );
+							sendTo( QEvent::MouseMove,
+								skope->loadedNifsGlyphRect( primaryRow, 1 ).center(),
+								Qt::NoButton, Qt::NoButton );
+							check( "...and offers no cursor feedback over the dead glyphs",
+								skope->loadedNifsView->viewport()->cursor().shape() == Qt::ArrowCursor );
+						}
+
+						/* 4 and 5. THE PRIMARY'S EYE AND DISC, MEASURED ON THE FRAMEBUFFER.
+						 *
+						 * The flag flipping is not the feature. The first version of this pair
+						 * set two booleans nothing read, and every state assertion over it was
+						 * green — so what is asserted here is pixels, in four configurations,
+						 * and each one names the thing only it can prove:
+						 *
+						 *   BOTH    the primary and a loaded document drawn
+						 *   LOADED  primary hidden          -> its pixels are gone, and the
+						 *                                      loaded document's are not
+						 *   PRIMARY loaded hidden           -> the primary alone
+						 *   NEITHER both hidden             -> the primary really draws NOTHING,
+						 *                                      which "fewer pixels" cannot say
+						 *
+						 * The fixture makes the loaded cube smaller than the primary's, so it
+						 * sits inside the primary's silhouette: BOTH and PRIMARY are then the
+						 * same picture, and LOADED is a picture only the loaded document can
+						 * have produced. Two identical cubes would have made every one of
+						 * these frames identical and every check below vacuous.
+						 */
+						{
+							auto freshGrab = [skope]() {
+								skope->ogl->update();
+								QCoreApplication::processEvents( QEventLoop::AllEvents, 250 );
+								QCoreApplication::processEvents( QEventLoop::AllEvents, 250 );
+								return skope->ogl->grabFramebuffer();
+							};
+							// how much of the frame is not the viewport's flat background
+							/* The documents' pixels are the ones that DIFFER FROM THE EMPTY
+							 * FRAME, not the ones that differ from the modal colour.
+							 *
+							 * The first version counted the latter and measured the viewport
+							 * GRID: 12548 lit pixels with both documents hidden, against
+							 * 75157 with the primary drawn, and the threshold that was
+							 * supposed to say "nothing is drawn" failed on scenery. Diffing
+							 * against the both-hidden frame subtracts the grid, the gizmo and
+							 * anything else that is not a document, exactly. */
+							auto differingPixels = []( const QImage & a, const QImage & b ) {
+								if ( a.size() != b.size() ) return -1;
+								int d = 0;
+								for ( int y = 0; y < a.height(); y += 2 )
+									for ( int x = 0; x < a.width(); x += 2 )
+										if ( a.pixel( x, y ) != b.pixel( x, y ) ) d++;
+								return d;
+							};
+							auto setPrimaryDisplay = [skope]( bool visible, bool ghost ) {
+								skope->sessionPreviewVisible = visible;
+								skope->sessionPreviewUnloaded = false;
+								skope->sessionPreviewGhost = ghost;
+								skope->refreshSessionPreview();
+								QApplication::processEvents();
+							};
+
+							skope->setWorkspaceDisplayMode( row, 1 );
+							setPrimaryDisplay( true, false );
+							const QImage both = freshGrab();
+							setPrimaryDisplay( false, false );
+							const QImage loadedOnly = freshGrab();
+							skope->setWorkspaceDisplayMode( row, 0 );
+							const QImage neither = freshGrab();
+							setPrimaryDisplay( true, false );
+							const QImage primaryOnly = freshGrab();
+
+							// each document's contribution to the frame, grid excluded
+							const int primaryDrew = differingPixels( primaryOnly, neither );
+							const int loadedDrew = differingPixels( loadedOnly, neither );
+							const int bothDrew = differingPixels( both, neither );
+							log << "framebuffer vs the empty frame: primary " << primaryDrew
+								<< ", loaded " << loadedDrew << ", both " << bothDrew << "\n";
+							check( "the primary draws geometry, and its eye takes it back out",
+								primaryDrew > 0 && differingPixels( loadedOnly, both ) > 0
+									&& loadedDrew < primaryDrew );
+							check( "...while a loaded document goes on drawing without it",
+								loadedDrew > 0 && differingPixels( loadedOnly, primaryOnly ) > 0 );
+							check( "...and hiding both leaves a frame with no document in it",
+								differingPixels( neither, neither ) == 0
+									&& bothDrew > 0 && primaryDrew > 0 );
+
+							/* THE THREE-WAY. Solid, see-through and hidden must be three
+							 * different pictures, pairwise, and both toggles must come back —
+							 * a control that only works in one direction is the bug this
+							 * discipline exists for (block_visibility.sh, same rule). The
+							 * loaded document stays hidden throughout, so nothing but the
+							 * primary can account for a difference. */
+							setPrimaryDisplay( true, false );
+							const QImage solid = freshGrab();
+							setPrimaryDisplay( true, true );
+							const QImage ghosted = freshGrab();
+							setPrimaryDisplay( false, true );
+							const QImage hidden = freshGrab();
+							setPrimaryDisplay( true, true );
+							const QImage ghostedAgain = freshGrab();
+							setPrimaryDisplay( true, false );
+							const QImage solidAgain = freshGrab();
+							log << "three-way vs hidden: solid " << differingPixels( solid, hidden )
+								<< ", ghost " << differingPixels( ghosted, hidden )
+								<< ", solid vs ghost " << differingPixels( solid, ghosted ) << "\n";
+							check( "solid, see-through and hidden are three different pictures",
+								differingPixels( solid, ghosted ) > 0
+									&& differingPixels( ghosted, hidden ) > 0
+									&& differingPixels( solid, hidden ) > 0 );
+							check( "...the see-through one is the X-ray blend, not an empty frame",
+								differingPixels( ghosted, hidden ) * 2 > differingPixels( solid, hidden ) );
+							check( "...and both toggles come back the way they went",
+								differingPixels( ghostedAgain, ghosted ) == 0
+									&& differingPixels( solidAgain, solid ) == 0 );
+
+							/* HIDING THE PRIMARY IS A VIEWPORT OVERLAY, NOT AN EDIT.
+							 * The Block List goes on working on it: same model, same block
+							 * count, same selectable rows. A hidden document that could not be
+							 * edited would be a worse control than no control. */
+							setPrimaryDisplay( false, false );
+							const int blocksWhileHidden = skope->nif ? skope->nif->getBlockCount() : 0;
+							skope->list->setCurrentIndex( skope->nif->getBlockIndex( 0 ) );
 							QApplication::processEvents();
-						};
-						auto pressRelease = [&sendTo]( const QPoint & at ) {
-							sendTo( QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton );
-							sendTo( QEvent::MouseButtonRelease, at, Qt::LeftButton, Qt::NoButton );
-						};
-						auto noSelection = [skope]() {
-							return skope->loadedNifsView->selectionModel()->selectedRows().isEmpty()
-								&& !skope->loadedNifsView->currentIndex().isValid();
-						};
-
-						/* The row BACKDROP is the modal colour of the row, not a fixed
-						 * sample point: a fixed point lands on the text, or on a glyph,
-						 * the first time anything about the layout moves. */
-						auto backdrop = []( const QImage & img, const QRect & r, qreal dpr ) {
-							QHash<QRgb, int> seen;
-							for ( int y = int( r.top() * dpr ); y < int( r.bottom() * dpr ); y++ )
-								for ( int x = int( r.left() * dpr ); x < int( r.right() * dpr ); x++ )
-									if ( img.valid( x, y ) ) seen[img.pixel( x, y )]++;
-							QRgb best = 0;
-							int bestN = -1;
-							for ( auto it = seen.constBegin(); it != seen.constEnd(); ++it )
-								if ( it.value() > bestN ) { bestN = it.value(); best = it.key(); }
-							return QColor( best );
-						};
-						/* A glyph's INK is the pixel FURTHEST from that backdrop, plus
-						 * how many pixels are ink at all.
-						 *
-						 * Furthest, never averaged: an averaged glyph is mostly its own
-						 * antialiasing blended back toward the row, which drags every
-						 * measurement toward the background and would happily let an
-						 * accent arrow and a grey one land within tolerance of each
-						 * other. The count is the separate question of whether anything
-						 * was painted in the box at all. */
-						auto glyphInk = []( const QImage & img, const QRect & r, qreal dpr,
-								const QColor & bg, int * painted ) {
-							QColor best = bg;
-							int bestD = 0, lit = 0;
-							for ( int y = int( r.top() * dpr ); y < int( r.bottom() * dpr ); y++ )
-								for ( int x = int( r.left() * dpr ); x < int( r.right() * dpr ); x++ ) {
-									if ( !img.valid( x, y ) ) continue;
-									const QColor c = img.pixelColor( x, y );
-									const int d = qAbs( c.red() - bg.red() )
-										+ qAbs( c.green() - bg.green() )
-										+ qAbs( c.blue() - bg.blue() );
-									if ( d > 30 ) lit++;
-									if ( d > bestD ) { bestD = d; best = c; }
-								}
-							if ( painted ) *painted = lit;
-							return best;
-						};
-						auto sameInk = []( const QColor & got, const QColor & want, int tol ) {
-							return qAbs( got.red() - want.red() ) <= tol
-								&& qAbs( got.green() - want.green() ) <= tol
-								&& qAbs( got.blue() - want.blue() ) <= tol;
-						};
-
-						const QPixmap listShot = skope->loadedNifsView->viewport()->grab();
-						const QImage list = listShot.toImage();
-						const qreal listDpr = listShot.devicePixelRatio();
-						const QColor accentInk = QColor::fromString( wwSkinColor( "accent" ) );
-						const QColor inertInk = QColor::fromString( wwSkinColor( "textDisabled" ) );
-						const QColor mutedInk = QColor::fromString( wwSkinColor( "textMuted" ) );
-
-						/* 1. EVERY row carries an arrow, and none of them is black. */
-						int arrowedRows = 0, blackArrows = 0;
-						bool everyArrowInRegister = true;
-						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
-							const QModelIndex idx = skope->loadedNifsModel->index( r, 0 );
-							const QRect box = skope->loadedNifsArrowRect( idx );
-							if ( !box.isValid() ) { everyArrowInRegister = false; continue; }
-							const QColor bg = backdrop( list,
-								skope->loadedNifsView->visualRect( idx ), listDpr );
-							int painted = 0;
-							const QColor got = glyphInk( list, box, listDpr, bg, &painted );
-							if ( painted >= 16 ) arrowedRows++;
-							else everyArrowInRegister = false;
-							const bool primary = skope->documentFromBrowserIndex( idx ) == skope;
-							if ( !sameInk( got, primary ? accentInk : inertInk, 26 ) )
-								everyArrowInRegister = false;
-							if ( got.red() + got.green() + got.blue() < 120 )
-								blackArrows++;
+							check( "the Block List still works on a hidden primary",
+								blocksWhileHidden > 0
+									&& skope->list->currentIndex().isValid()
+									&& skope->nif->getBlockCount() == blocksWhileHidden );
+							setPrimaryDisplay( true, false );
+							skope->setWorkspaceDisplayMode( row, 1 );
+							QApplication::processEvents();
 						}
-						check( "every Loaded NIF row paints an arrow in its gutter",
-							arrowedRows == skope->loadedNifsModel->rowCount() );
-						check( "...the primary's in the skin accent, every other in the inert grey",
-							everyArrowInRegister );
-						check( "...and none of them is the platform's black triangle",
-							blackArrows == 0 );
 
-						/* 2. The primary's five toggles are PAINTED, in the inert ink.
-						 *
-						 * Slot 1 is the skull, unmarked on both rows here, so the two
-						 * samples differ only in which register drew them: inert on the
-						 * primary, plain muted on the live row. That is the distinction
-						 * the change exists to make, so it is asserted in both
-						 * directions rather than as "the primary is dimmer". */
-						int primarySlotsPainted = 0;
-						QColor primaryOffInk, liveOffInk;
-						const QColor primaryBg = backdrop( list,
-							skope->loadedNifsView->visualRect( primaryRow ), listDpr );
-						for ( int slot = 1; slot <= 5; slot++ ) {
-							int painted = 0;
-							glyphInk( list, skope->loadedNifsGlyphRect( primaryRow, slot ),
-								listDpr, primaryBg, &painted );
-							if ( painted >= 4 ) primarySlotsPainted++;
+						/* 6. The display pair answers the same gesture on the primary row that
+						 * it answers everywhere else, including the parts that are about NOT
+						 * acting: no selection, and a slide-off that cancels. */
+						{
+							for ( int slot = 4; slot <= 5; slot++ ) {
+								skope->loadedNifsView->selectionModel()->clear();
+								skope->loadedNifsView->setCurrentIndex( QModelIndex() );
+								const bool wasVisible = skope->sessionPreviewVisible;
+								const bool wasGhost = skope->sessionPreviewGhost;
+								const QPoint at = skope->loadedNifsGlyphRect( primaryRow, slot ).center();
+								pressRelease( at );
+								const bool moved = ( slot == 4 )
+									? skope->sessionPreviewVisible != wasVisible
+									: skope->sessionPreviewGhost != wasGhost;
+								check( QStringLiteral( "the primary's %1 toggles on a click" )
+									.arg( slot == 4 ? "eye" : "see-through disc" ), moved );
+								check( QStringLiteral( "...and clicking it never selects the primary row" ),
+									noSelection() );
+								pressRelease( at );
+								check( QStringLiteral( "...and clicking it again puts it back" ),
+									skope->sessionPreviewVisible == wasVisible
+										&& skope->sessionPreviewGhost == wasGhost );
+								slideOff( skope->loadedNifsGlyphRect( primaryRow, slot ) );
+								check( QStringLiteral( "...and sliding off it cancels, silently" ),
+									skope->sessionPreviewVisible == wasVisible
+										&& skope->sessionPreviewGhost == wasGhost
+										&& noSelection() );
+							}
 						}
-						primaryOffInk = glyphInk( list,
-							skope->loadedNifsGlyphRect( primaryRow, 1 ), listDpr, primaryBg, nullptr );
-						liveOffInk = glyphInk( list, skope->loadedNifsGlyphRect( otherRow, 1 ), listDpr,
-							backdrop( list, skope->loadedNifsView->visualRect( otherRow ), listDpr ),
-							nullptr );
-						check( "the primary row paints all five toggle glyphs",
-							primarySlotsPainted == 5 );
-						check( "...in the DISABLED ink, which is not the enabled OFF ink",
-							sameInk( primaryOffInk, inertInk, 26 )
-								&& sameInk( liveOffInk, mutedInk, 26 )
-								&& !sameInk( primaryOffInk, mutedInk, 26 ) );
-
-						/* 3. ...and every one of them is dead to the press. */
-						NifModel * skeletonWas = skope->ogl ? skope->ogl->workspaceSkeleton() : nullptr;
-						const bool weaponWas = nifIsWeaponMarked( skope->nif );
-						const bool followWas = skope->ogl
-							&& skope->ogl->isWorkspaceFollower( skope->nif );
-						const bool visibleWas = skope->sessionPreviewVisible;
-						const bool ghostWas = skope->sessionPreviewGhost;
-						const QImage rowBefore = skope->loadedNifsView->viewport()->grab(
-							skope->loadedNifsView->visualRect( primaryRow ) ).toImage();
-						bool primaryPressNeverSelects = true;
-						for ( int slot = 1; slot <= 5; slot++ ) {
-							pressRelease( skope->loadedNifsGlyphRect( primaryRow, slot ).center() );
-							primaryPressNeverSelects &= noSelection();
-						}
-						const QImage rowAfter = skope->loadedNifsView->viewport()->grab(
-							skope->loadedNifsView->visualRect( primaryRow ) ).toImage();
-						check( "pressing the primary's toggles moves no workspace state",
-							( skope->ogl ? skope->ogl->workspaceSkeleton() : nullptr ) == skeletonWas
-								&& nifIsWeaponMarked( skope->nif ) == weaponWas
-								&& ( skope->ogl
-									&& skope->ogl->isWorkspaceFollower( skope->nif ) ) == followWas
-								&& skope->sessionPreviewVisible == visibleWas
-								&& skope->sessionPreviewGhost == ghostWas );
-						check( "...and repaints the row not one pixel differently",
-							rowBefore == rowAfter );
-						check( "...and never selects the row it refused to toggle",
-							primaryPressNeverSelects );
-						// no cursor that promises a control: the strip is not a link,
-						// and a hand over a dead glyph would be the lie
-						sendTo( QEvent::MouseMove,
-							skope->loadedNifsGlyphRect( primaryRow, 4 ).center(),
-							Qt::NoButton, Qt::NoButton );
-						check( "...and offers no cursor feedback over the dead glyphs",
-							skope->loadedNifsView->viewport()->cursor().shape() == Qt::ArrowCursor );
-
-						/* 4. THE CONTROL. The same synthetic press on a live row still
-						 * works, so check 3 is measuring "inert" and not "the harness
-						 * stopped reaching the strip". */
-						const bool liveWas = skope->workspaceDisplayMode( row ) != 0;
-						pressRelease( skope->loadedNifsGlyphRect( otherRow, 4 ).center() );
-						check( "the same press on a non-primary row still toggles its eye",
-							( skope->workspaceDisplayMode( row ) != 0 ) != liveWas );
-						pressRelease( skope->loadedNifsGlyphRect( otherRow, 4 ).center() );
-						check( "...and puts it back",
-							( skope->workspaceDisplayMode( row ) != 0 ) == liveWas );
 
 						const QString primaryShot = QApplication::applicationDirPath()
 							+ QStringLiteral( "/ww_loadednifs_primary_row.png" );
-						check( "the primary row and its inert strip render",
-							skope->grabLoadedNifsView( primaryShot ) );
+						check( "the primary row renders", skope->grabLoadedNifsView( primaryShot ) );
 						log << "  " << primaryShot << "\n";
+
 					}
 
 					/* OPEN THE REAL ROW MENU long enough to inspect and render it. */
@@ -11533,6 +11713,105 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					NifSkope::setWorkspaceFaceDonor( nullptr, QString() );
 					skope->setWorkspaceSkeletonDocument( -1 );
 
+					/* THE ARROW PROMOTES — LAST, because it rewrites the workspace.
+					 *
+					 * It ran in the middle at first, and "a freshly opened NIF is not
+					 * marked modified" twenty checks later went red: that check reads the
+					 * LAST workspace index, and promotion had made it a different
+					 * document. The check was right and the placement was wrong. */
+					{
+						/* Its own row resolution: the block that used to hold these ran
+						 * two hundred lines above, and the model has been rebuilt several
+						 * times since. A stale QModelIndex would have made every check
+						 * below pass or fail for a reason unrelated to the arrow. */
+						QModelIndex primaryRow, otherRow;
+						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
+							const QModelIndex idx = skope->loadedNifsModel->index( r, 0 );
+							if ( skope->documentFromBrowserIndex( idx ) == skope ) primaryRow = idx;
+							else otherRow = idx;
+						}
+						check( "a promotable row and a primary row are both in the list",
+							primaryRow.isValid() && otherRow.isValid() );
+						if ( primaryRow.isValid() && otherRow.isValid() ) {
+						const QString primaryNameBefore = skope->documentDisplayName();
+						const QString promotedName = skope->loadedNifsModel->data(
+							otherRow, Qt::DisplayRole ).toString();
+						const int windowsBefore = NifSkope::openDocuments().size();
+						const int rowsBefore = skope->loadedNifsModel->rowCount();
+						NifSkope * const windowIdentity = skope;
+						NifModel * const modelIdentity = skope->nif;
+						GLView * const viewIdentity = skope->ogl;
+						skope->loadedNifsView->selectionModel()->clear();
+						skope->loadedNifsView->setCurrentIndex( QModelIndex() );
+						pressRelease( skope->loadedNifsArrowRect( otherRow ).center() );
+						QApplication::processEvents();
+						check( "clicking a row's arrow makes that document the primary",
+							skope->documentDisplayName() == promotedName
+								&& skope->documentDisplayName() != primaryNameBefore );
+						check( "...through the in-place swap: same window, model and viewport",
+							skope == windowIdentity && skope->nif == modelIdentity
+								&& skope->ogl == viewIdentity
+								&& NifSkope::openDocuments().size() == windowsBefore
+								&& skope->loadedNifsModel->rowCount() == rowsBefore );
+						// the inks have to swap with the roles, or the panel is now lying
+						QModelIndex newPrimaryRow, demotedRow;
+						for ( int r = 0; r < skope->loadedNifsModel->rowCount(); r++ ) {
+							const QModelIndex idx = skope->loadedNifsModel->index( r, 0 );
+							if ( skope->documentFromBrowserIndex( idx ) == skope ) newPrimaryRow = idx;
+							else if ( skope->loadedNifsModel->data( idx, Qt::DisplayRole ).toString()
+								== primaryNameBefore ) demotedRow = idx;
+						}
+						QColor newPrimaryArrow, demotedArrow;
+						if ( newPrimaryRow.isValid() && demotedRow.isValid() ) {
+							const QPixmap shot = listImage();
+							const QImage list = shot.toImage();
+							const qreal dpr = shot.devicePixelRatio();
+							newPrimaryArrow = glyphInk( list, skope->loadedNifsArrowRect( newPrimaryRow ),
+								dpr, backdrop( list, skope->loadedNifsView->visualRect( newPrimaryRow ), dpr ),
+								nullptr );
+							demotedArrow = glyphInk( list, skope->loadedNifsArrowRect( demotedRow ),
+								dpr, backdrop( list, skope->loadedNifsView->visualRect( demotedRow ), dpr ),
+								nullptr );
+						}
+						check( "...and the two arrows swap inks with the two rows",
+							newPrimaryRow.isValid() && demotedRow.isValid()
+								&& sameInk( newPrimaryArrow, accentInk, 26 )
+								&& sameInk( demotedArrow, textInk, 26 ) );
+						/* The outgoing primary is an ordinary row now, toggles and all
+						 * — driven through the public workspace index rather than the
+						 * document pointer, because BackgroundNifDocument is only
+						 * forward-declared in this file. */
+						bool demotedEyeWorks = false;
+						int demotedIndex = -1;
+						for ( int i = 0; i < skope->workspaceDocumentCount(); i++ )
+							if ( skope->workspaceDocumentName( i ) == primaryNameBefore )
+								demotedIndex = i;
+						if ( demotedRow.isValid() && demotedIndex >= 0 ) {
+							const int was = skope->workspaceDisplayMode( demotedIndex );
+							pressRelease( skope->loadedNifsGlyphRect( demotedRow, 4 ).center() );
+							demotedEyeWorks =
+								( skope->workspaceDisplayMode( demotedIndex ) != 0 ) != ( was != 0 );
+							pressRelease( skope->loadedNifsGlyphRect( demotedRow, 4 ).center() );
+							demotedEyeWorks = demotedEyeWorks
+								&& skope->workspaceDisplayMode( demotedIndex ) == was;
+						}
+						check( "...and the document it displaced is a live row with a working eye",
+							demotedEyeWorks );
+						const QString swapShot = QApplication::applicationDirPath()
+							+ QStringLiteral( "/ww_loadednifs_arrow_promoted.png" );
+						check( "the promoted list renders", skope->grabLoadedNifsView( swapShot ) );
+						log << "  " << swapShot << "\n";
+
+						// ...and back, so the rest of the suite gets the document it expects
+						if ( demotedRow.isValid() )
+							pressRelease( skope->loadedNifsArrowRect( demotedRow ).center() );
+						QApplication::processEvents();
+						check( "...and clicking the old primary's arrow swaps it back",
+							skope->documentDisplayName() == primaryNameBefore
+								&& NifSkope::openDocuments().size() == windowsBefore
+								&& skope->loadedNifsModel->rowCount() == rowsBefore );
+					}
+					}
 				} while ( false );
 				log << checks << " checks, " << fails << " failures\n";
 				log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";

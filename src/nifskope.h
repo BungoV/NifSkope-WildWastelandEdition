@@ -201,6 +201,13 @@ public:
 	QRect loadedNifsGlyphRect( const QModelIndex & row, int slot ) const;
 	//! Where the style put that row's arrow, so a harness samples its real pixels.
 	QRect loadedNifsArrowRect( const QModelIndex & row ) const;
+	/*! Make one Loaded NIFs row the primary document.
+	 *
+	 *  The row's arrow, the row menu's Make Primary / Edit and a double-click are
+	 *  all this one dispatch: rows that already have a window are switched to,
+	 *  data-only rows are swapped into this one. False when the row is already
+	 *  primary, which is why its own arrow is an indicator and not a button. */
+	bool makeLoadedRowPrimary( const QModelIndex & row );
 	bool markWorkspaceDocumentUnsaved( int backgroundIndex );
 	//! Load NIFs from anywhere on disk into Loaded NIFs; returns how many.
 	int addWorkspaceDocumentsFromDialog();

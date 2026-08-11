@@ -96,6 +96,18 @@ public:
 	//! because a translucent triangle must be drawn after what it shows through.
 	void setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
 		const QVector<Vector3> & ghostSoup = QVector<Vector3>() );
+	/*! The PRIMARY document's own eye and see-through disc.
+	 *
+	 *  Loaded documents are hidden by being left out of the render list and
+	 *  ghosted by being drawn as a soup; the primary is drawn by this view's own
+	 *  Scene and has to stay editable either way, so its pair goes through
+	 *  `Scene::hideAll` / `Scene::ghostAll` — the per-block hide and see-through
+	 *  asked for the whole scene. Held here rather than written straight onto the
+	 *  Scene because a Scene is rebuilt whenever the primary changes, and the
+	 *  document's display state must survive that. */
+	void setPrimaryDisplayMode( bool visible, bool ghost );
+	bool primaryIsHidden() const { return primaryHidden; }
+	bool primaryIsGhosted() const { return primaryGhosted; }
 	/*! Workspace SOLIDS: documents to render properly, with their own materials,
 	 *  textures and shaders. One Scene each, built on demand and kept until the
 	 *  model leaves the list; they share this view's TexCache, so a texture used
@@ -643,6 +655,10 @@ private:
 	//! Documents flagged translucent, drawn in a second blended pass.
 	QVector<Vector3> sessionDocumentGhostSoup;
 	QVector<FloatVector4> sessionDocumentGhostColors;
+	//! The primary's own row toggles; pushed onto the Scene every frame so a
+	//! rebuilt Scene cannot come back with the document's display state lost.
+	bool primaryHidden = false;
+	bool primaryGhosted = false;
 	//! Fully rendered workspace documents, one Scene per model. Keyed by model
 	//! so a rebuild is only paid when a document joins, not every frame.
 	QVector<NifModel *> workspaceRenderOrder;

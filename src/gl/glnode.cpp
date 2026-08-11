@@ -439,6 +439,16 @@ Node * Node::findChild( const QString & str ) const
 
 bool Node::isHidden() const
 {
+	/* The whole document hidden — the primary's own eye in Loaded NIFs.
+	 *
+	 * First, and deliberately above ShowHidden: that option means "show me the
+	 * blocks the FILE marks hidden", and this is not the file saying anything. It
+	 * is the workspace being told not to draw this document, the same answer the
+	 * other rows get by being left out of the render list.
+	 */
+	if ( scene->hideAll )
+		return true;
+
 	// Solo preview mode: only the solo node and its subtree are visible,
 	// regardless of hide flags, so obstructing geometry gets out of the way
 	if ( scene->soloNode >= 0 ) {
@@ -473,6 +483,10 @@ bool Node::isHidden() const
  *  column would mean different things by "this object". */
 bool Node::isGhosted() const
 {
+	// the whole document see-through: the primary's own disc in Loaded NIFs,
+	// which is this same blend asked for the scene rather than one subtree
+	if ( scene->ghostAll )
+		return true;
 	if ( scene->ghostNodes.isEmpty() )
 		return false;
 	const Node * n = this;

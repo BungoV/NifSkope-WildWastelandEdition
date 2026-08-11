@@ -1,5 +1,86 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-11e — the primary really hides and ghosts, and the row arrow is a button
+
+Three corrections to the entry below, all from watching it: the primary's eye and
+disc should not have been greyed out, its arrow should not have been either, and
+the arrows on the other rows should be white.
+
+**The primary document now hides and draws see-through for real.** The strip's
+right half — the eye and the see-through disc — is a live control on every row in
+the list, the primary's included, in the ordinary `accent`/`textMuted` inks and
+with the ordinary gesture. The other rows are loaded documents, which the
+workspace hides by leaving them out of the render list and ghosts by drawing them
+as a translucent soup; neither route reaches the primary, which is drawn by the
+viewport's own Scene from the model being edited and has to stay editable while
+it is hidden. So its pair asks the PER-BLOCK controls for the whole scene
+instead: `Scene::hideAll` is read by `Node::isHidden` and `Scene::ghostAll` by
+`Node::isGhosted`, which means the draw, the picking pass, the selection outline
+and the Blender-style X-ray blend all follow with no second hide, no second blend
+and nothing invented. `GLView` owns the two values and pushes them onto the Scene
+every frame, because Make Primary rebuilds the Scene in place and a rebuilt one
+would otherwise come back with the row's toggles silently cleared.
+
+**What a hidden primary does.** It is a viewport overlay, not an edit: the Block
+List still lists it, selects in it and edits it, and the file is untouched. It is
+not pickable in the viewport while hidden — the same answer H already gives for a
+hidden block, through the same `isHidden()` — and loaded documents are not
+pickable either, by an older deliberate rule ("a click must never land on a
+document that is not the one being edited"), so a click in the viewport with the
+primary hidden hits nothing at all. The row menu's Visible / Semi-Transparent
+entries are enabled for the primary now too; leaving them disabled would have had
+the menu contradicting the row.
+
+**Only the ROLE half is inert.** The skull, pistol and bone say what the document
+already IS to this workspace, and the row that is the primary cannot change that
+from itself, so those three keep the `textDisabled`/`accentDisabled` register and
+stay dead to the mouse. The rule between the halves is drawn at full strength on
+every row: on the primary it is the border between the half that is inert and the
+half that is not, which is the last thing that should be faded. The claim that
+"the primary can never be hidden" is deleted along with the `0x1` it justified.
+
+**The arrow is a control.** Clicking any non-primary row's arrow makes that
+document primary, through the established in-place swap and nothing new: rows
+that already have a window are switched to, data-only rows are swapped into this
+one. That dispatch was the double-click handler's body and is now
+`makeLoadedRowPrimary`, shared by the arrow, the double-click and the row menu —
+three gestures resolving the same row through three copies of it is three chances
+for them to come to mean different things. Promotion's side effects (marks
+following the promoted mesh, the skeleton pointer, the followers) belong to the
+swap route underneath and come along by construction. The primary's own arrow
+stays accent and is a dead rect: it is the indicator, not a button.
+
+**The other arrows are white, not grey.** `text`, the panel's ordinary
+full-strength ink, the same weight as the row's own name. `textDisabled` is
+reserved for things that genuinely cannot be operated, and an arrow you can click
+is not one of them; the accent means "this one is it", not "this one is enabled".
+
+**Inertness is per (row, SLOT) now**, not per row, because half a strip is live.
+The view still CLAIMS the press on the dead targets — a disabled control is not a
+hole through which the row underneath gets selected or dragged — and the release
+consults `toggleButtonsInert( row, slot )` instead of firing. The arrow rides the
+same press/release machinery under a slot number of its own, so it inherits the
+whole contract for nothing: press claims, no selection, no drag, slide-off
+cancels.
+
+**`loaded_nifs.sh` is 154/154**, up from 133, and the fixture changed to make the
+new checks mean something: `secondary.nif` is a 60-unit cube against the starter's
+~140, so it sits inside the primary's silhouette. Two identical cubes at one
+origin would have made every frame of the visibility measurement identical —
+"the primary is hidden" and "the loaded document is drawn" would have been the
+same picture and the checks would have passed over code that hid neither. The
+frames are counted as pixels DIFFERING FROM THE EMPTY FRAME rather than from the
+modal colour, which subtracts the viewport grid: counting the latter measured
+12548 grid pixels and failed a threshold that had nothing to do with the feature.
+Measured: the primary contributes 66109 pixels, the loaded cube 10644, and solid
+against see-through differs by 65200. The promotion checks run LAST, because
+promotion rewrites the workspace — placed in the middle they turned "a freshly
+opened NIF is not marked modified" red twenty checks later, which was the check
+being right and the placement being wrong. `weapon_mark.sh` **85/85**.
+`release/ww_loadednifs_primary_row.png` shows the two registers side by side and
+`release/ww_loadednifs_arrow_promoted.png` the swap; the icon sheet's arrow row
+now reads accent against text.
+
 ## 2026-08-11d — the Loaded-NIFs row arrow, and the primary's strip is drawn but dead
 
 **Every loaded document has an arrow now, and the primary's is orange.** It was

@@ -31,23 +31,46 @@
 #   6. ...the row that was opened has left the list
 #   7. ...and the document it displaced is in the list, by name
 #
-# AND THE ROW STRIP, which this suite owns the gesture contract for:
+# AND THE ROW STRIP, which this suite owns the gesture contract for. The
+# primary's row is deliberately HALF live, and the halves fail differently:
 #
 #   8. EVERY row paints an arrow in its gutter, and the check is its COLOUR --
-#      accent on the primary, the inert grey on every other loaded document.
-#      The arrow it replaced was QStyle::SP_ArrowRight: drawn perfectly, in the
-#      platform's black, on one row. "It is drawn" would have passed on that
-#      too, so the assertion samples pixels and refuses anything near black
+#      accent on the primary, the panel's ordinary text ink on every other
+#      loaded document. The arrow it replaced was QStyle::SP_ArrowRight: drawn
+#      perfectly, in the platform's black, on one row. "It is drawn" would have
+#      passed on that too, so the assertion samples pixels and refuses anything
+#      near black. The others are TEXT, not the disabled grey, because they are
+#      live controls at rest -- clicking one promotes that document
 #   9. the primary row paints ALL FIVE toggle glyphs (it used to paint none, so
 #      it was the one row whose strip was a different shape) ...
-#  10. ...in the DISABLED ink, asserted in both directions: the primary's off
-#      glyph is the inert grey AND a live row's off glyph is the plain muted
-#      one AND the two are not within tolerance of each other
-#  11. ...and pressing any of them moves no workspace state, repaints the row
-#      not one pixel differently, never selects it, and offers no cursor
-#      feedback -- with the SAME synthetic press on a live row still toggling
-#      its eye, so 11 is measuring "inert" and not "the harness stopped
-#      reaching the strip"
+#  10. ...its ROLE marks in the DISABLED ink, asserted in both directions: the
+#      primary's off glyph is the inert grey AND a live row's off glyph is the
+#      plain muted one AND the two are not within tolerance of each other --
+#      while its lit EYE is the same accent a live row's wears, because that
+#      half of the strip is not disabled at all
+#  11. ...and pressing a role mark, or the primary's own arrow, moves no
+#      workspace state, repaints the row not one pixel differently, never
+#      selects it, and offers no cursor feedback
+#  12. THE PRIMARY'S EYE AND DISC ARE MEASURED ON THE FRAMEBUFFER, because a
+#      flag flipping is not the feature: the first version set two booleans
+#      nothing read and every state assertion over it was green. Four frames --
+#      both drawn, primary hidden, loaded hidden, both hidden -- counted as
+#      pixels DIFFERING FROM THE EMPTY FRAME, which subtracts the viewport grid
+#      (counting "not the background colour" measured 12548 grid pixels and
+#      failed a threshold that had nothing to do with the feature)
+#  13. ...and solid / see-through / hidden are three different pictures,
+#      pairwise, with both toggles returning the frame they left -- the same
+#      discipline block_visibility.sh holds the per-block pair to
+#  14. ...while the Block List goes on working on a hidden primary: hiding is a
+#      viewport overlay, not an edit
+#  15. the display pair answers the whole gesture on the primary row too --
+#      toggles, does not select, and a slide-off cancels silently
+#  16. THE ARROW PROMOTES, through the established in-place swap: same window,
+#      same NifModel and GLView, same window count, same row count. The risk is
+#      not that nothing happens, it is that a SECOND WINDOW happens. Both
+#      arrows then swap inks with their rows, and the document that was
+#      displaced is a live row with a working eye. It runs LAST, because
+#      promotion rewrites the workspace and the checks above read it
 #  12. every scratch NIF this suite writes lands beside the binary. It used to
 #      write into QDir::tempPath(), which resolves to C:\Windows on this
 #      machine when the launching shell has no TMP; the refused write raised a
@@ -78,9 +101,17 @@ winpath() { printf '%s' "$1" | sed 's|^/\([a-zA-Z]\)/|\1:/|'; }
 
 # Different names, because the swap and exact-drag checks must distinguish the
 # document that moved from whichever row happens to be selected later.
+#
+# ...and secondary.nif is a SMALLER cube, which is not decoration. The primary's
+# eye is measured on the framebuffer, and two identical cubes at one origin make
+# every frame of that measurement identical: "the primary is hidden" and "the
+# loaded document is drawn" would be the same picture, and the checks would pass
+# over code that hid neither. At 60 against the starter's ~140 the loaded cube
+# sits inside the primary's silhouette, so hiding the primary leaves a frame only
+# the loaded document can account for.
 mkdir -p "$TMP/Data/meshes"
 "$EXE" -no-gui new --cube -o "$(winpath "$TMP/Data/meshes/primary.nif")" >/dev/null 2>&1
-"$EXE" -no-gui new --cube -o "$(winpath "$TMP/Data/meshes/secondary.nif")" >/dev/null 2>&1
+"$EXE" -no-gui new --cube --size 60 -o "$(winpath "$TMP/Data/meshes/secondary.nif")" >/dev/null 2>&1
 "$EXE" -no-gui new --cube -o "$(winpath "$TMP/Data/meshes/browser.nif")" >/dev/null 2>&1
 [ -s "$TMP/Data/meshes/primary.nif" ] \
 	&& [ -s "$TMP/Data/meshes/secondary.nif" ] \

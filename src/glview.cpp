@@ -791,6 +791,32 @@ void GLView::setSessionDocumentPreview( const QVector<Vector3> & triangleSoup,
 	update();
 }
 
+/*! The PRIMARY document's own eye and see-through disc.
+ *
+ *  The other rows in Loaded NIFs are hidden by being left out of the render list
+ *  and ghosted by being drawn as a translucent soup. The primary is drawn by this
+ *  view's own Scene and has to stay pickable-in-the-Block-List and editable while
+ *  it is hidden, so its pair goes through Scene::hideAll / Scene::ghostAll: the
+ *  per-block hide and see-through this program already has, asked for the whole
+ *  scene rather than one subtree. No second hide, no second blend.
+ *
+ *  Kept on the VIEW and pushed onto the Scene each frame (paintGL), because a
+ *  Scene is torn down and rebuilt whenever the primary document changes and the
+ *  row's toggles must survive that.
+ */
+void GLView::setPrimaryDisplayMode( bool visible, bool ghost )
+{
+	if ( primaryHidden == !visible && primaryGhosted == ghost )
+		return;
+	primaryHidden = !visible;
+	primaryGhosted = ghost;
+	if ( scene ) {
+		scene->hideAll = primaryHidden;
+		scene->ghostAll = primaryGhosted;
+	}
+	update();
+}
+
 /*! A name that says WHICH one, when a rig carries several of the same effect.
  *
  * An assembled X-01 has FOUR nodes called BoltGeo_01 and SIX called
@@ -2971,6 +2997,20 @@ void GLView::paintGL()
 	// mode (previously it depended on the tree selection matching, which made
 	// it flicker back on after A-select-all / deselect-all)
 	scene->objSelActive = !editMode;
+
+	/* The primary's own row toggles, re-applied every frame.
+	 *
+	 * Writing them once in setPrimaryDisplayMode is not enough: the Scene is
+	 * rebuilt whenever the primary document changes — Make Primary swaps the
+	 * model in place — and a rebuilt Scene comes back with its flags at their
+	 * defaults, which would silently turn a hidden document back on while its
+	 * row still showed a shut eye. The workspace Scenes deliberately do NOT
+	 * inherit these: workspaceSceneFor() mirrors options and visMode only, so a
+	 * loaded document keeps being hidden the way loaded documents are, by
+	 * leaving the render list.
+	 */
+	scene->hideAll = primaryHidden;
+	scene->ghostAll = primaryGhosted;
 
 	/* Workspace documents rendered for real — their own materials, textures and
 	 * shaders, not the flat soup the preview used to be. One Scene each, built
