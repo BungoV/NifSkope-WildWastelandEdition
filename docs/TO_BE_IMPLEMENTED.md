@@ -74,6 +74,15 @@ every tree walking every primitive exactly once. See WW_CHANGES 2026-08-17.
 
 Still open, none of it blocking:
 
+**0. Multi-material compile.** Measured by the 100-file A/B (WW_CHANGES
+2026-08-17b): 5 of 100 files lose material CRCs because Compile flattens a
+multi-shape body into one mesh carrying ONE material (the first leaf's). The
+format supports better: the CMSD material-run table at +0xa0 (4-byte records:
+material index, then what reads as first-primitive and count bytes) plus an
+N-entry hknpBSMaterialProperties. Pin the run byte-format with one two-material
+Elric fixture (fixtures.ps1 + a `set` on one sub-shape's Material), then carry
+a per-triangle material index through CollisionMesh and emit runs per section.
+
 **1. triangleIsInterior semantics.** Correlates with closed surfaces (767 of
 867 set bits sit on fully edge-shared triangles) but is not equal to that test
 (100 set bits on open fans, 3,795 shared triangles unflagged). Zero is safe —

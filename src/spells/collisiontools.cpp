@@ -388,6 +388,75 @@ void appendCapsuleMesh( CollisionMesh & out, Vector3 a, Vector3 b, float radius,
 	appendMesh( out, verts, tris, transform, scale );
 }
 
+/*! Triangulate a convex shape from its own stored face planes.
+ *
+ *  A decompiled bhkConvexVerticesShape carries the polytope's planes verbatim
+ *  in "Normals" (n.xyz, w = d; n·v + d = 0 on the face), so the faces need no
+ *  hull search: each plane's incident vertices, ordered around the face, fanned.
+ *  Deterministic, and immune to the two ways qhull failed here -- refusing
+ *  near-degenerate prop-scale hulls outright ("wide merge for pinched facet",
+ *  8%% of a 100-file A/B), and once looping without returning
+ *  (50sTargetPractice03).
+ *
+ *  Returns empty when the planes do not describe a closed surface over the
+ *  vertices (no normals, or fewer than four usable faces) -- the caller falls
+ *  back to qhull.
+ */
+QVector<Triangle> tlCollTriangulateConvexPlanes( const QVector<Vector3> & verts,
+	const QVector<Vector4> & planes )
+{
+	QVector<Triangle> tris;
+	if ( verts.size() < 4 || planes.size() < 4 )
+		return tris;
+	int faces = 0;
+	for ( const Vector4 & p : planes ) {
+		const Vector3 n( p[0], p[1], p[2] );
+		if ( n.length() < 0.5f )
+			continue;   // Elric's zero-normal padding planes
+		QVector<int> on;
+		for ( int i = 0; i < verts.size(); i++ ) {
+			if ( std::fabs( Vector3::dotproduct( n, verts.at( i ) ) + p[3] ) < 5.0e-4f )
+				on.append( i );
+		}
+		/* A plane with under three incident vertices has no face area to
+		 * contribute -- vanilla hulls carry sliver planes (50sTargetPractice03's
+		 * wedge stores 7 planes over 6 distinct vertices), and bailing out here
+		 * used to hand exactly those shapes to the qhull fallback, which spins
+		 * forever on their duplicate points. Skip the plane, keep the shape.
+		 */
+		if ( on.size() < 3 )
+			continue;
+		faces++;
+		// order the face's vertices by angle about its own centroid
+		Vector3 centre;
+		for ( int i : on ) centre += verts.at( i );
+		centre /= float( on.size() );
+		Vector3 u = verts.at( on.first() ) - centre;
+		u = ( u - n * Vector3::dotproduct( n, u ) );
+		if ( u.length() < 1.0e-9f )
+			return QVector<Triangle>();
+		u.normalize();
+		const Vector3 w = Vector3::crossproduct( n, u );
+		std::sort( on.begin(), on.end(), [&]( int a, int b ) {
+			const Vector3 da = verts.at( a ) - centre, db = verts.at( b ) - centre;
+			return std::atan2( Vector3::dotproduct( w, da ), Vector3::dotproduct( u, da ) )
+				 < std::atan2( Vector3::dotproduct( w, db ), Vector3::dotproduct( u, db ) );
+		} );
+		for ( int k = 1; k + 1 < on.size(); k++ ) {
+			// wind the fan so the triangle faces the plane normal
+			const Vector3 e1 = verts.at( on.at( k ) ) - verts.at( on.first() );
+			const Vector3 e2 = verts.at( on.at( k + 1 ) ) - verts.at( on.first() );
+			if ( Vector3::dotproduct( Vector3::crossproduct( e1, e2 ), n ) >= 0.0f )
+				tris.append( Triangle( on.first(), on.at( k ), on.at( k + 1 ) ) );
+			else
+				tris.append( Triangle( on.first(), on.at( k + 1 ), on.at( k ) ) );
+		}
+	}
+	if ( faces < 4 )
+		return QVector<Triangle>();
+	return tris;
+}
+
 void tlCollAppendEditableMesh( const NifModel * nif, int shapeBlock, CollisionMesh & out,
 	const Matrix4 & transform = Matrix4(), int depth = 0 )
 {
@@ -419,10 +488,33 @@ void tlCollAppendEditableMesh( const NifModel * nif, int shapeBlock, CollisionMe
 			nif->get<float>( shape, "Radius" ), transform, 69.99125f ); return;
 	}
 	if ( type == QLatin1String( "bhkConvexVerticesShape" ) ) {
+		/* Duplicate positions first. Vanilla hulls carry them (the target
+		 * practice wedge stores one corner three times), and they poison
+		 * everything downstream: the plane fans emit zero-area slivers over
+		 * them, and qhull's facet merge SPINS FOREVER on coincident points --
+		 * that was a compile that burned 15 CPU-minutes without returning.
+		 */
 		QVector<Vector4> vv = nif->getArray<Vector4>( shape, "Vertices" ); QVector<Vector3> v;
-		for ( const Vector4 & p : vv ) v.append( Vector3( p[0], p[1], p[2] ) );
-		QVector<Vector4> hullVerts, hullNorms; QVector<Triangle> tris = compute_convex_hull( v, hullVerts, hullNorms );
-		v.clear(); for ( const Vector4 & p : hullVerts ) v.append( Vector3( p[0], p[1], p[2] ) );
+		for ( const Vector4 & p : vv ) {
+			const Vector3 q( p[0], p[1], p[2] );
+			bool dup = false;
+			for ( const Vector3 & have : std::as_const( v ) )
+				dup = dup || ( have - q ).length() < 1.0e-6f;
+			if ( !dup )
+				v.append( q );
+		}
+		QVector<Triangle> tris = tlCollTriangulateConvexPlanes( v, nif->getArray<Vector4>( shape, "Normals" ) );
+		if ( tris.isEmpty() ) {
+			/* No usable planes: hull the cloud. compute_convex_hull's triangles
+			 * index the ORIGINAL point array (qh_pointid) -- its hullVerts output
+			 * is a per-facet duplicated list in facet order. This used to pass
+			 * hullVerts as the vertex array, so every triangle referenced the
+			 * wrong vertices: a 100-file A/B measured 4 degenerate triangles and
+			 * a garbage hull on EVERY box-shaped polytope that reached qhull.
+			 */
+			QVector<Vector4> hullVerts, hullNorms;
+			tris = compute_convex_hull( v, hullVerts, hullNorms );
+		}
 		appendMesh( out, v, tris, transform, 69.99125f ); return;
 	}
 	if ( type == QLatin1String( "bhkNiTriStripsShape" ) ) {
@@ -5388,6 +5480,34 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 		return QModelIndex();
 
 	CollisionMesh mesh; int rootShape = nif->getLink( body, "Shape" ); tlCollAppendEditableMesh( nif, rootShape, mesh );
+	/* Strip triangles the 11-bit quantization will flatten anyway. The sphere
+	 * and capsule tessellations close their poles with slivers whose float area
+	 * is tiny but nonzero -- a plain zero-area test passes them, and then the
+	 * packfile's grid collapses them into the degenerate triangles the vanilla
+	 * corpus never carries (a compiled basketball read back 16). A triangle
+	 * survives if its height clears one quantization step of the mesh's own
+	 * extent; anything thinner is a line after encoding and only costs budget.
+	 */
+	if ( !mesh.verts.isEmpty() ) {
+		Vector3 mn = mesh.verts.first(), mx = mn;
+		for ( const Vector3 & v : std::as_const( mesh.verts ) )
+			for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], v[a] ); mx[a] = std::max( mx[a], v[a] ); }
+		const Vector3 ext = mx - mn;
+		const float step = std::max( { ext[0], ext[1], ext[2] } ) / 2047.0f;
+		QVector<Triangle> kept; kept.reserve( mesh.tris.size() );
+		for ( const Triangle & t : std::as_const( mesh.tris ) ) {
+			if ( t[0] >= mesh.verts.size() || t[1] >= mesh.verts.size() || t[2] >= mesh.verts.size() )
+				continue;
+			const Vector3 e1 = mesh.verts.at( t[1] ) - mesh.verts.at( t[0] );
+			const Vector3 e2 = mesh.verts.at( t[2] ) - mesh.verts.at( t[0] );
+			const Vector3 e3 = mesh.verts.at( t[2] ) - mesh.verts.at( t[1] );
+			const float area2 = Vector3::crossproduct( e1, e2 ).length();
+			const float base = std::max( { e1.length(), e2.length(), e3.length() } );
+			if ( area2 >= 1.0e-12f && base > 0.0f && area2 / base >= step )
+				kept.append( t );
+		}
+		mesh.tris = kept;
+	}
 	HknpEncodeInput input; input.verts.reserve( mesh.verts.size() );
 	for ( const Vector3 & v : mesh.verts ) input.verts.append( v / 69.99125f );
 	input.tris = mesh.tris;

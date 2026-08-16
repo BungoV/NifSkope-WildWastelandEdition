@@ -1,5 +1,74 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-17b — a 100-file A/B against vanilla: every polytope compile was garbage geometry
+
+The user's campaign: 100 vanilla NIFs with collision — props, statics, anim
+objects, doors, interiors, weapons — each decompiled, recompiled, and the
+decoded result compared against the original (`ab100.py` in the session
+scratchpad). First pass: 50 clean, 36 with only the by-design note that
+primitives triangulate, and three real classes. After the fixes below, the
+same flagged set re-runs to **88 of 100 clean**, zero refusals, zero hangs,
+zero degenerate triangles, every output byte-stable.
+
+**Every bhkConvexVerticesShape that reached Compile produced a wrong hull.**
+`compute_convex_hull` returns triangles that index the ORIGINAL point array
+(`qh_pointid`), and its `hullVerts` output is a per-facet DUPLICATED vertex
+list in facet-visit order. `tlCollAppendEditableMesh` passed `hullVerts` as
+the vertex array — so every triangle referenced whatever vertices happened to
+sit at those indices in the duplicated list. On a box that read as 12
+triangles of which 4 were degenerate and the rest crossed the solid; on every
+polytope it was a hull-shaped accident. Measured on 24 files; 13 more failed
+outright when qhull refused prop-scale hulls ("wide merge for pinched facet");
+`50sTargetPractice03` hung qhull's facet merge on duplicate vertices and
+burned 15 CPU-minutes without returning; and `SmithingToolSaw01` showed the
+silent variant — qhull failed on 2 of a body's 4 hulls and Compile shipped
+the other two as if they were the whole shape (52 -> 24 triangles, no error).
+
+Three fixes, one path:
+
+- **`tlCollTriangulateConvexPlanes`** replaces qhull for decompiled shapes. A
+  bhkConvexVerticesShape carries the polytope's own face planes in "Normals"
+  (n·v + d = 0 on the face, written verbatim from the packfile), so the faces
+  reconstruct exactly: each plane's incident vertices, ordered around the face
+  centroid, fanned, wound to the plane normal. Planes with under three
+  incident vertices are slivers with no area and are skipped, not fatal —
+  vanilla hulls carry them (the target-practice wedge stores 7 planes over 6
+  distinct vertices). qhull remains only for a CVS with no usable planes, with
+  the index convention honoured.
+- **Duplicate vertices are removed first.** Vanilla hulls store them (the
+  wedge holds one corner three times) and they poison everything downstream —
+  they are what qhull spins on.
+- **Triangles the quantization would flatten are stripped before encoding.**
+  The sphere and capsule tessellations close their poles with slivers whose
+  float area is nonzero, so a zero-area test passes them and the packfile's
+  11-bit grid then collapses them into degenerate triangles vanilla never
+  carries (a compiled basketball read back 16 of 240). A triangle now has to
+  clear one quantization step of the mesh's own extent; anything thinner is a
+  line after encoding and only costs budget.
+
+**Not a defect, measured as one and withdrawn:** four files read as "dynamic
+bodies lost" (`SeeSaw01` 4 -> 1 the loudest). The vanilla packfile carries
+exactly ONE motion — Box005; the base and the anim-static seats are static
+bodies in a system the report labels dynamic as a whole, and the comparator
+multiplied that label by the body count. Verified against the packfile's
+motionIndex table: per-body motion survives the round trip exactly. What a
+multi-body system does lose is its CONSTRAINTS (the seesaw hinge) — the
+documented Decompile one-way — and its body grouping (one 4-body system
+becomes four 1-body systems).
+
+**Real limitation, filed:** 5 files lost material CRCs — Compile flattens a
+multi-shape body into one mesh with ONE material (first leaf). The CMSD
+material-run table and a multi-entry hknpBSMaterialProperties support
+per-primitive materials; the run byte-format needs one Elric fixture with two
+materials to pin down before writing it.
+
+The BGS export toolset at `C:\Program Files\Autodesk\3ds Max 2013\plugins`
+was checked along the way: `hctMaxSceneExport.dle` is Havok Content Tools
+**2014.1.1** — the same SDK generation as every FO4 packfile — with Havok's
+own `hkgpConvexHull` inside, which is the hull builder these vanilla shapes
+came through and the reason they contain things qhull refuses. NifMopp there
+is Skyrim-era (bhkMoppBvTreeShape) and not part of the FO4 hknp pipeline.
+
 ## 2026-08-17 — Elric as a reference-pair machine: both trees decoded, the 128-triangle cap lifted
 
 Elric runs hands-free: a copied `.esf` with absolute paths embedded
