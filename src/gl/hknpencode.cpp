@@ -216,32 +216,74 @@ QByteArray materialProperties( quint32 material )
 /*! hknpCompressedMeshShape, 0xc0 bytes.
  *
  * \param material    the shape's material CRC, at +0x18
- * \param numPrims    primitives in the mesh -- quadIsFlat has one bit each
+ * \param numKeys     maxKey + 1 -- the two hkBitFields are sized by KEY SPACE,
+ *                    quadIsFlat numKeys/2 bits and triangleIsInterior numKeys,
+ *                    which is what makes IndMachine's 1401/2802 come out (its
+ *                    792 primitives pad to 256 per section in the key space)
  * \param bitsPerKey  shape key width, which must equal the data object's
  *
  * Everything here beyond the material was zero until 2026-08-16, and the zeros
  * were not neutral. Measured constant across all 41 corpus shapes: +0x44 and
  * +0x54 are the "does not own its memory" flag on two empty hkArrays, and +0x58
- * is 0xffffffff. The two hkBitFields at +0x68 (quadIsFlat, numPrims bits) and
- * +0x80 (triangleIsInterior, 2 * numPrims bits) are present in EVERY vanilla
- * file; the caller supplies their payloads and the fixups that reach them.
+ * is 0xffffffff. The two hkBitFields at +0x68 / +0x80 are present in EVERY
+ * vanilla file; the caller supplies their payloads and the fixups.
  *
- * numShapeKeyBits at +0x12 was the literal 7 regardless of the mesh. It is
- * bit_length(2 * numPrims - 1) in all 41 -- the width of the largest shape key
- * the data object can hand back -- and the engine uses it to split a key
- * between this shape and its child, so a wrong value indexes the wrong
- * primitive.
+ * numShapeKeyBits at +0x12 was the literal 7 regardless of the mesh. The
+ * engine uses it to split a key between this shape and its child, so a wrong
+ * value indexes the wrong primitive.
  */
-QByteArray compressedMeshHeader( quint32 material, quint32 numPrims, quint32 bitsPerKey )
+QByteArray compressedMeshHeader( quint32 material, quint32 numKeys, quint32 bitsPerKey )
 {
 	QByteArray out( 0xc0, 0 ); out[0x10] = 4; out[0x11] = 2; out[0x12] = char( bitsPerKey ); out[0x13] = 2;
 	setU32( out, 0x18, material ); setU32( out, 0x30, 0xffffffffu );
 	setU32( out, 0x44, 0x80000000u ); setU32( out, 0x54, 0x80000000u ); setU32( out, 0x58, 0xffffffffu );
-	const quint32 flatWords = ( numPrims + 31 ) / 32, interiorWords = ( 2 * numPrims + 31 ) / 32;
-	setU32( out, 0x70, flatWords ); setU32( out, 0x74, 0x80000000u | flatWords ); setU32( out, 0x78, numPrims );
+	const quint32 flatWords = ( numKeys / 2 + 31 ) / 32, interiorWords = ( numKeys + 31 ) / 32;
+	setU32( out, 0x70, flatWords ); setU32( out, 0x74, 0x80000000u | flatWords ); setU32( out, 0x78, numKeys / 2 );
 	setU32( out, 0x88, interiorWords ); setU32( out, 0x8c, 0x80000000u | interiorWords );
-	setU32( out, 0x90, 2 * numPrims );
+	setU32( out, 0x90, numKeys );
 	return out;
+}
+
+/*! Both hkcd trees' compressed AABB nibbles, decoded 2026-08-17 from Elric
+ *  reference pairs (a decompiled vanilla mesh, perturbed one vertex at a time,
+ *  recompiled by Elric and diffed).
+ *
+ * A bound byte holds two 4-bit insets, (loInset << 4) | hiInset, one byte per
+ * axis in x,y,z order. The nibble is on a SQUARE-ROOT scale:
+ *
+ *   nibble    = floor( sqrt( inset / parentSpan ) * 15 )
+ *   dequant   = (nibble / 15)^2 * parentSpan
+ *
+ * and the fractions are measured in the PARENT's dequantized box, so the boxes
+ * requantize hierarchically. Floor makes the dequantized inset never exceed the
+ * true inset: every node's box CONTAINS its geometry by construction. Verified
+ * against vanilla: 82.7%% of 38,808 per-section nibbles byte-exact, the rest
+ * +-1 from Elric's float32 arithmetic; section-tree leaves 44/61 exact with the
+ * same +-1 fringe. (The zeros written here before were the nibble rule's "whole
+ * parent box" case applied everywhere -- conservative, never selective.)
+ */
+struct TreeBox { Vector3 lo, hi; };
+
+quint8 insetNibble( float inset, float span )
+{
+	if ( span <= 0.0f || inset <= 0.0f )
+		return 0;
+	float f = std::min( inset / span, 1.0f );
+	return quint8( std::clamp( int( std::sqrt( f ) * 15.0f + 1.0e-6f ), 0, 15 ) );
+}
+
+//! Compress `box` against `parent` into 3 axis bytes; `box` becomes the
+//! dequantized result so children requantize against what a reader will see.
+void encodeTreeBounds( quint8 * xyz, TreeBox & box, const TreeBox & parent )
+{
+	for ( int a = 0; a < 3; a++ ) {
+		const float span = parent.hi[a] - parent.lo[a];
+		const quint8 lo = insetNibble( box.lo[a] - parent.lo[a], span );
+		const quint8 hi = insetNibble( parent.hi[a] - box.hi[a], span );
+		xyz[a] = quint8( lo << 4 ) | hi;
+		box.lo[a] = parent.lo[a] + ( lo / 15.0f ) * ( lo / 15.0f ) * span;
+		box.hi[a] = parent.hi[a] - ( hi / 15.0f ) * ( hi / 15.0f ) * span;
+	}
 }
 
 /*! The 4-byte node tree each section carries at its +0x00, and the reason
@@ -258,45 +300,80 @@ QByteArray compressedMeshHeader( quint32 material, quint32 numPrims, quint32 bit
  *   byte 3, bit 0 clear-> leaf. The primitive index is byte3 >> 1, SECTION
  *                         relative, which is why a section holds at most 128
  *                         primitives: 127 is the largest index a byte can carry.
- *   bytes 0..2         -> per-axis bounds, two 4-bit insets each, measured
- *                         against the parent node's box.
- *
- * The bounds are written as zeros: zero inset means "the parent's box", which
- * the corpus shows directly (every root node is 00 00 00, as are interior nodes
- * whose subtree spans the whole box). That is conservative, never wrong -- the
- * engine descends more nodes than it needs to and then tests the real triangles
- * -- and with at most 128 primitives in a section the cost is not measurable.
- * Tightening them is an optimisation and is written up in TO_BE_IMPLEMENTED.
+ *   bytes 0..2         -> the compressed bounds above.
  */
-void appendMeshTree( QByteArray & out, const QVector<int> & prims,
-	const QVector<Vector3> & centroids, int first, int count )
+void appendMeshTree( QByteArray & out, QVector<int> & prims,
+	const QVector<TreeBox> & boxes, int first, int count, const TreeBox & parent )
 {
+	TreeBox own = boxes.at( prims.at( first ) );
+	for ( int i = first + 1; i < first + count; i++ ) {
+		const TreeBox & b = boxes.at( prims.at( i ) );
+		for ( int a = 0; a < 3; a++ ) { own.lo[a] = std::min( own.lo[a], b.lo[a] ); own.hi[a] = std::max( own.hi[a], b.hi[a] ); }
+	}
+	quint8 xyz[3];
+	encodeTreeBounds( xyz, own, parent );
+	out.append( char( xyz[0] ) ); out.append( char( xyz[1] ) ); out.append( char( xyz[2] ) );
 	if ( count == 1 ) {
-		out.append( char( 0 ) ); out.append( char( 0 ) ); out.append( char( 0 ) );
 		out.append( char( prims.at( first ) * 2 ) );
 		return;
 	}
-	/* Split on the widest axis of the centroids, at the median, so the two sides
-	 * hold as close to the same number of primitives as the split allows. The
-	 * SMALLER side goes left, which is what keeps the right-child offset inside a
-	 * byte: it is 2 * leftLeaves, and a left side of at most half of 128 leaves
-	 * cannot exceed 128.
+	/* Split on the widest axis of the true box, at the median, so the two sides
+	 * hold as close to the same number of primitives as the split allows. Left
+	 * takes the floor half, which keeps the right-child offset inside a byte:
+	 * it is 2 * leftLeaves, and half of 128 leaves is 64.
 	 */
-	Vector3 mn = centroids.at( prims.at( first ) ), mx = mn;
-	for ( int i = first; i < first + count; i++ ) {
-		const Vector3 & c = centroids.at( prims.at( i ) );
-		for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], c[a] ); mx[a] = std::max( mx[a], c[a] ); }
+	int axis = 0;
+	for ( int a = 1; a < 3; a++ ) if ( own.hi[a] - own.lo[a] > own.hi[axis] - own.lo[axis] ) axis = a;
+	auto mid = [&]( int p ) { return boxes.at( p ).lo[axis] + boxes.at( p ).hi[axis]; };
+	std::sort( prims.begin() + first, prims.begin() + first + count,
+		[&]( int a, int b ) { return mid( a ) < mid( b ); } );
+	const int left = count / 2;
+	out.append( char( ( left * 2 ) | 1 ) );
+	appendMeshTree( out, prims, boxes, first, left, own );
+	appendMeshTree( out, prims, boxes, first + left, count - left, own );
+}
+
+/*! The tree over SECTIONS at hknpCompressedMeshShapeData +0x10.
+ *
+ * FIVE bytes a node, not four -- the array's payload gap proves the stride
+ * (7 nodes occupy 48 bytes, 11 occupy 64, 21 occupy 112; all pad16(5n), none
+ * pad16(4n)) -- and Elric reproduces vanilla's trees byte-identically, so the
+ * codec below was read off reference pairs:
+ *
+ *   bytes 0..2          the same compressed bounds as the mesh tree
+ *   bytes 3..4 (u16 LE) data & 0x80 -> internal: left child next, right child
+ *                       at self + 2*(data >> 8) (the high byte is the left
+ *                       subtree's leaf count); else leaf, and the high byte is
+ *                       the SECTION INDEX -- leaves sit in spatial order and
+ *                       name their section, not the other way round.
+ *
+ * The high byte caps the left subtree at 255 leaves, so a balanced build is
+ * safe to 511 sections -- the writer refuses far earlier (65,535 verts).
+ */
+void appendSectionTree( QByteArray & out, QVector<int> & secs,
+	const QVector<TreeBox> & boxes, int first, int count, const TreeBox & parent )
+{
+	TreeBox own = boxes.at( secs.at( first ) );
+	for ( int i = first + 1; i < first + count; i++ ) {
+		const TreeBox & b = boxes.at( secs.at( i ) );
+		for ( int a = 0; a < 3; a++ ) { own.lo[a] = std::min( own.lo[a], b.lo[a] ); own.hi[a] = std::max( own.hi[a], b.hi[a] ); }
+	}
+	quint8 xyz[3];
+	encodeTreeBounds( xyz, own, parent );
+	out.append( char( xyz[0] ) ); out.append( char( xyz[1] ) ); out.append( char( xyz[2] ) );
+	if ( count == 1 ) {
+		out.append( char( 0 ) ); out.append( char( secs.at( first ) ) );
+		return;
 	}
 	int axis = 0;
-	for ( int a = 1; a < 3; a++ ) if ( mx[a] - mn[a] > mx[axis] - mn[axis] ) axis = a;
-	QVector<int> sorted = prims;
-	std::sort( sorted.begin() + first, sorted.begin() + first + count,
-		[&]( int a, int b ) { return centroids.at( a )[axis] < centroids.at( b )[axis]; } );
+	for ( int a = 1; a < 3; a++ ) if ( own.hi[a] - own.lo[a] > own.hi[axis] - own.lo[axis] ) axis = a;
+	auto mid = [&]( int s ) { return boxes.at( s ).lo[axis] + boxes.at( s ).hi[axis]; };
+	std::sort( secs.begin() + first, secs.begin() + first + count,
+		[&]( int a, int b ) { return mid( a ) < mid( b ); } );
 	const int left = count / 2;
-	out.append( char( 0 ) ); out.append( char( 0 ) ); out.append( char( 0 ) );
-	out.append( char( ( left * 2 ) | 1 ) );
-	appendMeshTree( out, sorted, centroids, first, left );
-	appendMeshTree( out, sorted, centroids, first + left, count - left );
+	out.append( char( 0x80 ) ); out.append( char( left ) );
+	appendSectionTree( out, secs, boxes, first, left, own );
+	appendSectionTree( out, secs, boxes, first + left, count - left, own );
 }
 
 /*! hknpCompressedMeshShapeData +0xb8: two 0x60-byte entries, ONE distinct
@@ -430,26 +507,14 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		}
 		flush();
 	}
-	/* One section only, until the section-level tree is decoded.
-	 *
-	 * hknpCompressedMeshShapeData +0x10 holds a tree over the SECTIONS, and its
-	 * node count is 2 * sections - 1 in all 41 corpus shapes -- but its 4-byte
-	 * nodes do not read as the per-section mesh tree's codec, and a guessed tree
-	 * is exactly the kind of thing that takes the game down. A single section
-	 * needs one node, and that node is four zero bytes in every single-section
-	 * file in the corpus, so this case is known rather than assumed.
-	 *
-	 * Multi-section output shipped for weeks and is what a large mesh got. It is
-	 * refused now instead: a refusal costs the user a Decimate, a wrong tree
-	 * costs them a crash they cannot diagnose.
+	/* The section tree's internal nodes store their left subtree's leaf count in
+	 * one byte, so a balanced build is safe to 511 sections -- 65k triangles,
+	 * beyond what the vertex refusal above admits anyway. (The one-section-only
+	 * refusal that lived here died 2026-08-17, when Elric reference pairs gave
+	 * up the section-tree codec -- see appendSectionTree.)
 	 */
-	if ( secs.size() > 1 )
-		return fail( QStringLiteral(
-			"This collision needs %1 hknp sections and only one can be written correctly yet — "
-			"the section-level tree Fallout 4 walks at load is not decoded, and writing a guess "
-			"is what crashes the game.\n\n"
-			"Decimate the mesh to at most 128 triangles (and 255 vertices) and compile again." )
-			.arg( secs.size() ) );
+	if ( secs.size() > 511 )
+		return fail( QStringLiteral( "Collision mesh needs more than 511 hknp sections. Use Decimate first." ) );
 
 	QHash<QString, quint32> names; QByteArray cn = classNames( names ); Fixups fx; QByteArray data;
 	auto write = [&data]( const QByteArray & bytes ) { quint32 at = quint32( data.size() ); data.append( bytes ); return at; };
@@ -462,26 +527,33 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	if ( in.dynamic ) { quint32 motion = write( dynamicMotion( in ) ); fx.local.append( { arr20, motion } ); quint32 inertia = write( dynamicInertia( in ) ); fx.local.append( { arr30, inertia } ); }
 	quint32 cinfo = write( bodyCInfo( in ) ); fx.local.append( { arr40, cinfo } );
 	quint32 shapeEntry = write( QByteArray( 16, 0 ) ); fx.local.append( { arr60, shapeEntry } );
-	/* Shape keys index primitives two per quad, so the widest key the data object
-	 * can return is 2 * primitives - 1 and its width is that value's bit length.
-	 * The shape and its data object must agree on it.
+	/* Shape keys: (section << primBits) | primKey, where a primKey indexes
+	 * triangles two per quad. primBits covers the BUSIEST section's key range,
+	 * the section field the section count, and maxKey is the last section's
+	 * last triangle. Measured on the corpus: IndMachine (11 sections, max 121
+	 * prims) carries bits 4+8=12 and numKeys 2802 = maxKey+1; the single-section
+	 * degenerate is the old 2*prims-1 rule exactly.
 	 */
 	const quint32 numPrims = quint32( in.tris.size() );
-	const quint32 maxKey = 2 * numPrims - 1;
-	quint32 bitsPerKey = 0;
-	for ( quint32 v = maxKey; v; v >>= 1 ) bitsPerKey++;
-	quint32 shape = write( compressedMeshHeader( in.materialCRC, numPrims, bitsPerKey ) );
+	quint32 maxSecPrims = 0;
+	for ( const MeshSec & sc : std::as_const( secs ) ) maxSecPrims = std::max( maxSecPrims, quint32( sc.tris.size() ) );
+	auto bitLen = []( quint32 v ) { quint32 n = 0; while ( v ) { n++; v >>= 1; } return n; };
+	const quint32 primBits = bitLen( 2 * maxSecPrims - 1 );
+	const quint32 secBits = bitLen( quint32( secs.size() ) - 1 );
+	const quint32 bitsPerKey = secBits + primBits;
+	const quint32 maxKey = ( quint32( secs.size() - 1 ) << primBits ) | ( 2 * quint32( secs.last().tris.size() ) - 1 );
+	quint32 shape = write( compressedMeshHeader( in.materialCRC, maxKey + 1, bitsPerKey ) );
 	fx.virtuals.append( { shape, 0, names.value( QStringLiteral( "hknpCompressedMeshShape" ) ) } );
 	fx.global.append( { cinfo, 2, shape } ); fx.global.append( { shapeEntry, 2, shape } );
 	/* The two hkBitFields' words. Vanilla keeps them in the shape object's own
 	 * tail when they fit; they are written straight after it here, which the
-	 * fixups make equivalent and which does not run out of room at 128
-	 * primitives. Both are all zeros: no quad is flagged flat (the compile path
-	 * writes triangles as degenerate quads, and vanilla leaves 208 of its 275
-	 * triangle primitives unflagged) and no triangle is flagged interior, which
-	 * is the conservative reading of both -- every edge stays collidable.
+	 * fixups make equivalent. Both are all zeros: no quad is flagged flat (the
+	 * compile path writes triangles as degenerate quads, and vanilla leaves 208
+	 * of its 275 triangle primitives unflagged) and no triangle is flagged
+	 * interior, which is the conservative reading of both -- every edge stays
+	 * collidable.
 	 */
-	quint32 flatWords = ( numPrims + 31 ) / 32, interiorWords = ( 2 * numPrims + 31 ) / 32;
+	quint32 flatWords = ( ( maxKey + 1 ) / 2 + 31 ) / 32, interiorWords = ( maxKey + 1 + 31 ) / 32;
 	quint32 flatAt = write( QByteArray( qsizetype( flatWords ) * 4, 0 ) );
 	quint32 interiorAt = write( QByteArray( qsizetype( interiorWords ) * 4, 0 ) );
 	fx.local.append( { shape + 0x68, flatAt } ); fx.local.append( { shape + 0x80, interiorAt } );
@@ -501,9 +573,9 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	// per-section emission: each section quantizes against its OWN domain
 	// (that is the point of sections — precision scales with density), quads
 	// hold section-relative u8 indices, packed verts concatenate per section
-	const bool legacySingle = ( secs.size() == 1 );
 	QByteArray quads, packed, sectionsBlob, treeBlob, materialRuns;
 	QVector<quint32> treeAt;              // each section's tree, relative to treeBlob
+	QVector<TreeBox> secBoxes;            // STORED-coordinate content box per section
 	quint32 firstPrim = 0, totalPacked = 0;
 	for ( const MeshSec & sc : std::as_const( secs ) ) {
 		Vector3 smn = in.verts.at( sc.verts.first() ), smx = smn;
@@ -517,25 +589,43 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 			const quint8 a = sc.vmap.value( t[0] ), b = sc.vmap.value( t[1] ), c = sc.vmap.value( t[2] );
 			quads.append( char( a ) ); quads.append( char( b ) ); quads.append( char( c ) ); quads.append( char( c ) );
 		}
-		for ( quint16 gv : sc.verts ) {
+		/* The tree bounds cover the STORED geometry, so the boxes are computed
+		 * from the quantized coordinates a reader will decode -- using the source
+		 * floats would clip by up to a quantization step.
+		 */
+		QVector<Vector3> stored( sc.verts.size() );
+		for ( qsizetype k = 0; k < sc.verts.size(); k++ ) {
 			auto quant = []( float value, float base, float scale, int maximum ) { return std::clamp( int( std::lround( ( value - base ) / scale ) ), 0, maximum ); };
-			const Vector3 & v = in.verts.at( gv );
+			const Vector3 & v = in.verts.at( sc.verts.at( k ) );
 			quint32 x = quint32( quant( v[0], smn[0], step[0], 2047 ) ), y = quint32( quant( v[1], smn[1], step[1], 2047 ) ), z = quint32( quant( v[2], smn[2], step[2], 1023 ) );
 			appendU32( packed, x | ( y << 11 ) | ( z << 22 ) );
+			stored[k] = Vector3( smn[0] + x * step[0], smn[1] + y * step[1], smn[2] + z * step[2] );
 		}
 		/* This section's mesh tree: one leaf per primitive, 2n-1 nodes, the
-		 * structure the engine walks to reach a triangle at all.
+		 * structure the engine walks to reach a triangle at all. The root's
+		 * parent is the section domain, which is why every corpus root reads
+		 * 00 00 00.
 		 */
-		QVector<Vector3> centroids( sc.tris.size() );
+		QVector<TreeBox> primBoxes( sc.tris.size() );
 		QVector<int> order( sc.tris.size() );
 		for ( int i = 0; i < sc.tris.size(); i++ ) {
 			const Triangle & t = in.tris.at( sc.tris.at( i ) );
-			centroids[i] = ( in.verts.at( t[0] ) + in.verts.at( t[1] ) + in.verts.at( t[2] ) ) / 3.0f;
+			TreeBox & b = primBoxes[i];
+			b.lo = b.hi = stored.at( sc.vmap.value( t[0] ) );
+			for ( int c = 1; c < 3; c++ ) {
+				const Vector3 & v = stored.at( sc.vmap.value( t[c] ) );
+				for ( int a = 0; a < 3; a++ ) { b.lo[a] = std::min( b.lo[a], v[a] ); b.hi[a] = std::max( b.hi[a], v[a] ); }
+			}
 			order[i] = i;
 		}
+		TreeBox domain{ smn, smx };
 		treeAt.append( quint32( treeBlob.size() ) );
-		appendMeshTree( treeBlob, order, centroids, 0, int( order.size() ) );
+		appendMeshTree( treeBlob, order, primBoxes, 0, int( order.size() ), domain );
 		const quint32 nodes = quint32( sc.tris.size() ) * 2 - 1;
+		TreeBox content = primBoxes.first();
+		for ( const TreeBox & b : std::as_const( primBoxes ) )
+			for ( int a = 0; a < 3; a++ ) { content.lo[a] = std::min( content.lo[a], b.lo[a] ); content.hi[a] = std::max( content.hi[a], b.hi[a] ); }
+		secBoxes.append( content );
 
 		QByteArray section( 0x60, 0 );
 		setU32( section, 0x08, nodes ); setU32( section, 0x0c, 0x80000000u | nodes );
@@ -545,11 +635,10 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		// from primitive 0, covering everything this section holds
 		materialRuns.append( char( 0 ) ); materialRuns.append( char( 0 ) );
 		materialRuns.append( char( 0 ) ); materialRuns.append( char( sc.tris.size() ) );
-		// the decoded field is firstSharedIndex << 8 | numSharedIndices; the
-		// in-game-validated single-section writer put the vert count here
-		// (harmless: >> 8 is 0 for counts <= 255) — keep it byte-exact, and
-		// write the semantically correct 0 for multi-section files
-		setU32( section, 0x4c, legacySingle ? quint32( sc.verts.size() ) : 0u );
+		// firstSharedIndex << 8 | low byte, and the low byte is numPacked in
+		// every vanilla section (measured on the billboard's 7 and the whole
+		// corpus); no shared vertices are written, so firstShared stays 0
+		setU32( section, 0x4c, quint32( sc.verts.size() ) );
 		setU32( section, 0x50, ( firstPrim << 8 ) | quint32( sc.tris.size() ) );
 		setU32( section, 0x54, 1 );   // 1 in every corpus section; 0 was written here
 		section[0x58] = char( sc.verts.size() );
@@ -567,8 +656,15 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	 */
 	const QByteArray tail = meshDataTailConstant();
 	const quint32 sectionTree = quint32( secs.size() ) * 2 - 1;
-	// the tree over the sections: one leaf, four zero bytes, for the one section
-	const QByteArray sectionTreeBlob( qsizetype( sectionTree ) * 4, 0 );
+	// the tree over the sections, 5 bytes a node; its root's parent is the
+	// global domain, so a single section is five zero bytes
+	QByteArray sectionTreeBlob;
+	{
+		TreeBox global{ mn, mx };
+		QVector<int> secOrder( secs.size() );
+		for ( int i = 0; i < secOrder.size(); i++ ) secOrder[i] = i;
+		appendSectionTree( sectionTreeBlob, secOrder, secBoxes, 0, int( secOrder.size() ), global );
+	}
 	/* Payload offsets, in the corpus's order. The sections and the constant tail
 	 * hold hkVector4s and are 16-aligned, as they are in every vanilla file.
 	 */
@@ -586,7 +682,7 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	// the domain corners carry w = 1; they were written with w = 0
 	for ( int a = 0; a < 3; a++ ) { setFloat( sd, 0x20 + a * 4, mn[a] ); setFloat( sd, 0x30 + a * 4, mx[a] ); }
 	setFloat( sd, 0x2c, 1.0f ); setFloat( sd, 0x3c, 1.0f );
-	setU32( sd, 0x40, 2 * numPrims ); setU32( sd, 0x44, bitsPerKey ); setU32( sd, 0x48, maxKey );
+	setU32( sd, 0x40, maxKey + 1 ); setU32( sd, 0x44, bitsPerKey ); setU32( sd, 0x48, maxKey );
 	setU32( sd, 0x58, quint32( secs.size() ) ); setU32( sd, 0x5c, 0x80000000u | quint32( secs.size() ) );
 	setU32( sd, 0x68, numPrims ); setU32( sd, 0x6c, 0x80000000u | numPrims );
 	setU32( sd, 0x7c, 0x80000000u ); setU32( sd, 0x88, totalPacked ); setU32( sd, 0x8c, 0x80000000u | totalPacked ); setU32( sd, 0x9c, 0x80000000u );

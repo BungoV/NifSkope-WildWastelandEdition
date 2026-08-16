@@ -1,5 +1,91 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-17 — Elric as a reference-pair machine: both trees decoded, the 128-triangle cap lifted
+
+Elric runs hands-free: a copied `.esf` with absolute paths embedded
+(`AutoStartConversion`, `CloseWhenFinished`, `ForceOverwrite`), fixtures under a
+`Meshes\` directory, one desktop launch per batch, zero clicks. Fixtures are
+DECOMPILED vanilla meshes perturbed headlessly with `nifskope-cli set` — so
+every input's exact geometry is known, and every output is a decodable pair.
+Elric is deterministic: recompiling the decompiled Institute chair reproduces
+vanilla's section tree byte for byte.
+
+What one vertex buys: moving one vertex of a 20-triangle duct inward changed
+THREE bytes — one quadIsFlat bit, one tree-node nibble, one packed vertex.
+Translating a whole mesh changed only the domain floats and codec offsets, and
+not one tree byte: both trees are domain-relative, proven in a single diff.
+
+**The section tree (CMSD +0x10) is decoded, and the cap is gone.** The stride
+is FIVE bytes, not four — the payload gaps prove it (7 nodes occupy 48 bytes,
+11 occupy 64, 21 occupy 112: all pad16(5n), none pad16(4n)) — and with the
+right framing the codec fell out:
+
+- bytes 0..2: compressed bounds, below
+- bytes 3..4, u16 LE: `data & 0x80` → internal, left child next, right child at
+  `self + 2*(data>>8)` (high byte = left subtree's leaf count); else leaf, and
+  the high byte is the SECTION INDEX. Leaves sit in spatial order and name
+  their sections.
+
+**Both trees' bounds are sqrt-encoded, hierarchically.** An axis byte is
+`(loInset << 4) | hiInset` with `nibble = floor(sqrt(inset/parentSpan) * 15)`,
+fractions measured in the parent's DEQUANTIZED box
+(`inset = (nib/15)^2 * span`), so error does not accumulate. Verified: 82.7% of
+38,808 per-section nibbles across the corpus byte-exact, the rest ±1 from
+Elric's float32; section-tree leaves 44/61 exact with the same fringe. Floor
+makes every box contain its geometry by construction — the "89% clipping"
+mystery from 08-16 was linear dequant misplacing every parent box.
+
+Key math, measured on vanilla (IndMachine: 11 sections, 792 prims, bits 12,
+numKeys 2802): `bitsPerKey = bitLen(nsec-1) + bitLen(2*maxSecPrims-1)`, keys are
+`(section << primBits) | primKey`, `maxKey` is the last section's last
+triangle, and the shape's two bitfields are sized by KEY SPACE — quadIsFlat
+`(maxKey+1)/2` bits, triangleIsInterior `maxKey+1` — not by primitive count.
+The 08-16 single-section rule was the degenerate case of all of this.
+
+The encoder writes both trees with real bounds now (they were conservative
+zeros), sections carry vert-count in +0x4c low byte per vanilla, and
+multi-section output is enabled to 511 sections. Verified: sec2/3/4 fixtures
+and a 60-mesh sweep — 46 compiled including 9 multi-section (up to 1,660
+triangles / 13 sections), 0 failures, 0 byte-instability, every tree walks
+every primitive exactly once, 100% of node boxes contain their geometry, and
+the multi-section leaf bounds come out byte-identical to the codec (31/31).
+The 7 refusals are qhull failing on degenerate vanilla convex hulls during
+DECOMPILE's mesh gather — pre-existing, clean, file untouched.
+
+**quadIsFlat means "this quad's four corners are coplanar."** Measured across
+2,965 quads: flat=1 median plane distance 1.5e-18 (max 0.00996, quantization
+scale), flat=0 median 0.032 (max 2.56). Elric measures the SOURCE geometry, so
+a bent source that quantizes flat stays unflagged — zero is conservative and
+correct for us. Elric merges adjacent triangle pairs into quads even when BENT
+(89% of corpus primitives are quads); pairing in our writer would double
+section capacity and is filed, not built.
+
+**triangleIsInterior is NOT simply "all edges shared"**: 767 of 867 set bits
+sit on fully edge-shared triangles, but 100 do not, and 3,795 fully-shared
+triangles are unflagged. Semantics open; zero keeps every edge collidable.
+
+**The dynamic-body layout is confirmed field-by-field.** One-field Elric
+variants of a bobblehead: friction moved exactly props+0x12/+0x14 (Elric
+ROUNDS the f16 truncation where we truncate — one bit, filed), gravity factor
+motion+0x08, mass inertia+0x04 (inverse) with density +0x08 and the inverse
+inertia diagonal +0x20, all at the strides the 08-16 writer uses. Static
+conversion drops the two arrays exactly as we do. One divergence: Elric
+compiles a CONVEX dynamic source as an hknpConvexPolytopeShape where we flatten
+to a compressed mesh. Vanilla ships dynamic compressed-mesh bodies too
+(SignWrightsInn02Dest), so ours has precedent; emitting polytopes for convex
+sources (the encoder exists) is filed as an improvement.
+
+**Elric is NOT a load oracle.** Fed a NIF whose collision is already compiled,
+it silently STRIPS the bhkPhysicsSystem — vanilla's included; all three probes
+came out byte-identical with no collision. It cannot validate compiled output,
+only produce reference pairs. No-game verification tops out at FileConvert's
+container layer; in-game remains the test that counts.
+
+Tooling in the session scratchpad: `fixtures.ps1` (decompile + perturb),
+`batch.esf`, `sectree_verify.py` (both trees, containment + byte-exactness),
+`flatbits.py`, `interior.py`, `pdiff.py`. Corpus packfiles in `corpus\`,
+Elric pairs in `pairs\`.
+
 ## 2026-08-16 — compiled collision crashed Fallout 4: half the format was missing
 
 Collision compiled by NifSkope and saved into a NIF took the game down. The

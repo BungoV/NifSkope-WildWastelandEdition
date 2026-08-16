@@ -61,41 +61,41 @@ Two cheap things worth doing first, whatever is decided about the feature: make
 `wwParentsOf` tell the truth for blocks held by a typed link, and say *"nothing
 can re-parent a %1 yet"* rather than claiming it is a root.
 
-## Compiled collision: what is still missing — OPEN, 2026-08-16
+## Compiled collision: what is still missing — UPDATED 2026-08-17
 
-The compile path writes a structurally complete single-section packfile now (see
-WW_CHANGES 2026-08-16). Three things are left, in the order they matter.
+~~The 128-triangle cap~~ and ~~the conservative zero bounds~~ both closed
+2026-08-17: Elric reference pairs (decompile a vanilla mesh, perturb one vertex
+with nifskope-cli set, recompile, diff) gave up the section-tree codec (5-byte
+nodes, leaf high byte = section index) and the bounds encoding for BOTH trees
+(sqrt-scale nibbles, hierarchical against the parent's dequantized box). The
+writer emits real bounds and multi-section packfiles to 511 sections; a
+60-mesh sweep including 13-section / 1,660-triangle output is byte-stable with
+every tree walking every primitive exactly once. See WW_CHANGES 2026-08-17.
 
-**1. The tree over sections, CMSD +0x10.** Multi-section compiles are refused
-until this is decoded, which caps Compile at 128 triangles. What is known: the
-node count is `2 * sections - 1` in all 41 corpus shapes, and a single section's
-node is four zero bytes. What is not: its 4-byte nodes do not read as the
-per-section codec — a two-section file carries `00 00 00 80`, `01 00 00 04`,
-`00 00 08 80`, and under the leaf/internal rule that is three leaves and no
-root. Decode it against files whose sections are far apart (the corpus has 2, 4,
-6 and 11-section examples with their section domains already printed by
-`tools/hkparse.py -d`).
+Still open, none of it blocking:
 
-**2. Node bounds are conservative zeros.** Zero inset means "the parent's box",
-so every query descends the whole tree and then tests real triangles: correct,
-just not selective. The hypothesis that the two nibbles are min-side and
-max-side insets in 15ths of the parent box fits an axis-aligned floor exactly
-and clips geometry on 4479 of 5035 corpus nodes, so the parent box being
-propagated is wrong, the nibble meaning is wrong, or both. Worth having: with
-128 primitives per section the cost is small, so this is performance, not
-correctness.
+**1. triangleIsInterior semantics.** Correlates with closed surfaces (767 of
+867 set bits sit on fully edge-shared triangles) but is not equal to that test
+(100 set bits on open fans, 3,795 shared triangles unflagged). Zero is safe —
+every edge stays collidable. A closed-box-vs-open-box Elric fixture would
+settle it.
 
-**3. quadIsFlat and triangleIsInterior are written as zeros.** Both bitfields
-are the right size and reachable; their contents are conservative. Vanilla
-varies both — 67 of its 275 triangle primitives are flagged flat and 208 are
-not, so the flag is not a function of the primitive being a triangle, and 13 of
-41 shapes mark some triangle interior. Neither can drop collision when zero
-(nothing is flat, no edge is welded away), so this is fidelity, not safety.
+**2. Quad pairing.** Elric merges adjacent triangle pairs into quads — bent
+ones included (89% of corpus primitives are quads; quadIsFlat = "the four
+corners are coplanar", measured clean at 2,965 quads). Pairing in the writer
+would double per-section capacity from 128 triangles to ~256 and halve
+packfile sizes. The decode convention for a quad (a,b,c,d) is (a,b,c)+(a,c,d).
 
-Tooling for all three lives in the session scratchpad as `shapescan.py`,
-`bitfields.py`, `treedecode.py`, `cmsdmap.py`, `constcheck.py` and `pdiff.py`:
-extract packfiles with `nifskope-cli collision <nif> --extract -b N -o f.bin`,
-then measure. Every rule above came out of those, not out of a guess.
+**3. Convex dynamic sources compile to polytopes in Elric**, compressed mesh in
+ours. Vanilla has dynamic compressed-mesh precedent (SignWrightsInn02Dest), so
+ours is legal; matching Elric means routing a convex-only editable source
+through hknpEncodeConvexPolytopeShape instead. The encoder already exists.
+
+**4. Friction f16: Elric rounds, we truncate.** One bit of friction per body.
+
+The Elric harness (batch.esf + fixtures.ps1, hands-free desktop run) and the
+verification suite (sectree_verify.py, flatbits.py, interior.py) live in the
+session scratchpad; the harness pattern is documented in WW_CHANGES 2026-08-17.
 
 ## Creating collision on a node that already has it REPLACES it — OPEN, 2026-08-07x
 

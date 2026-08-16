@@ -9,8 +9,9 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-16**. Edition **0.3.2**. Build green; latest closed work is
-**compiled collision**, below.
+Updated **2026-08-17**. Edition **0.3.2**. Build green; latest closed work is
+**compiled collision**, below — including the Elric campaign that decoded both
+hkcd trees and lifted the 128-triangle cap.
 
 ### Compiled collision no longer writes half the format (2026-08-16)
 
@@ -30,16 +31,33 @@ What a future session needs to know:
   The leaf index is a byte, which is why **a section holds at most 128
   primitives** — this partitioned at 255, so half of a full section was
   unreachable.
+- **The section tree at CMSD +0x10 is decoded too (2026-08-17, via Elric
+  reference pairs), so multi-section works to 511 sections** — no triangle cap
+  short of the 65,535-vertex refusal. FIVE bytes a node: 3 bound bytes + u16;
+  `data & 0x80` internal with the high byte the left subtree's leaf count,
+  else leaf with the high byte the SECTION INDEX. Both trees' bound nibbles
+  are `floor(sqrt(inset/parentSpan) * 15)`, hierarchical against the parent's
+  DEQUANTIZED box — sqrt, not linear, which is what the 08-16 "89% clipping"
+  measurement was actually seeing.
+- **The Elric harness**: copy `Settings\PCMeshes.esf`, embed absolute
+  ConvertTarget/OutputDirectory, set CloseWhenFinished, put fixtures under a
+  path containing `Meshes\`, launch `Elrich.exe <esf>` on the desktop
+  (unsandboxed) — runs and exits with zero clicks. Fixtures = decompiled
+  vanilla meshes perturbed with `nifskope-cli set`; Elric is deterministic, so
+  one changed vertex diffs to a handful of annotated bytes. It STRIPS
+  already-compiled collision (vanilla's too), so it is a pair machine, not a
+  load oracle.
 - **The guard that says the writer agrees with itself** is
   `nifskope-cli collision <nif> --roundtrip`: a fresh compile must come back
   `byte-exact 1 / 1`. It did not before this, and that is what found the
   class-name ordering and the fixup ordering.
-- **Multi-section is refused**, so Compile is capped at 128 triangles until the
-  tree over sections at CMSD +0x10 is decoded. That, the conservative node
-  bounds and the two zeroed bitfields are written up in
-  [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md).
-- **Not validated in game.** Every claim here is against vanilla files. Whether
-  Fallout 4 accepts the result is the test that counts and it is bungo's.
+- Open, none blocking (details in
+  [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md)): triangleIsInterior
+  semantics (zero is safe), quad pairing (would double section capacity),
+  convex dynamic sources as polytopes, friction f16 round-vs-truncate.
+- **Not validated in game.** Every claim here is against vanilla files and
+  Elric pairs. Whether Fallout 4 accepts the result is the test that counts
+  and it is bungo's.
 
 The work before this is the **overnight cleanup wave** (below), on top of the
 scene-composition pipeline and SAM import from 2026-08-10.
