@@ -9,9 +9,40 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-11**. Edition **0.3.1**. Build green; latest closed work is
-the **overnight cleanup wave** (below), on top of the scene-composition
-pipeline and SAM import from 2026-08-10.
+Updated **2026-08-16**. Edition **0.3.2**. Build green; latest closed work is
+**compiled collision**, below.
+
+### Compiled collision no longer writes half the format (2026-08-16)
+
+Collision compiled by NifSkope crashed Fallout 4. The compile path
+(`hknpEncodeCompressedMesh`, which is NOT the assembler that reproduces 810 of
+822 stock systems) was leaving out the traversal tree each section carries, both
+of the shape's hkBitFields, three CMSD members, and the material table's own
+pointer — and it wrote a 0x40-byte dynamic-inertia record where the stride is
+0x70. All of it is measured against a 41-shape vanilla corpus; the table of
+every field is in [WW_CHANGES.md](WW_CHANGES.md) under 2026-08-16.
+
+What a future session needs to know:
+
+- **The mesh tree's codec** (decoded here, confirmed on all 63 corpus sections):
+  byte 3 bit 0 set = internal, right child at `self + (byte3 & 0xfe)`, left child
+  next; clear = leaf, primitive `byte3 >> 1`, section-relative. `2n-1` nodes.
+  The leaf index is a byte, which is why **a section holds at most 128
+  primitives** — this partitioned at 255, so half of a full section was
+  unreachable.
+- **The guard that says the writer agrees with itself** is
+  `nifskope-cli collision <nif> --roundtrip`: a fresh compile must come back
+  `byte-exact 1 / 1`. It did not before this, and that is what found the
+  class-name ordering and the fixup ordering.
+- **Multi-section is refused**, so Compile is capped at 128 triangles until the
+  tree over sections at CMSD +0x10 is decoded. That, the conservative node
+  bounds and the two zeroed bitfields are written up in
+  [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md).
+- **Not validated in game.** Every claim here is against vanilla files. Whether
+  Fallout 4 accepts the result is the test that counts and it is bungo's.
+
+The work before this is the **overnight cleanup wave** (below), on top of the
+scene-composition pipeline and SAM import from 2026-08-10.
 
 ### The overnight wave (2026-08-11, commits 21b04c2…7b37226)
 

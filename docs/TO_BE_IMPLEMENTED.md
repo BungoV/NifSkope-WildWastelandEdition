@@ -61,6 +61,42 @@ Two cheap things worth doing first, whatever is decided about the feature: make
 `wwParentsOf` tell the truth for blocks held by a typed link, and say *"nothing
 can re-parent a %1 yet"* rather than claiming it is a root.
 
+## Compiled collision: what is still missing — OPEN, 2026-08-16
+
+The compile path writes a structurally complete single-section packfile now (see
+WW_CHANGES 2026-08-16). Three things are left, in the order they matter.
+
+**1. The tree over sections, CMSD +0x10.** Multi-section compiles are refused
+until this is decoded, which caps Compile at 128 triangles. What is known: the
+node count is `2 * sections - 1` in all 41 corpus shapes, and a single section's
+node is four zero bytes. What is not: its 4-byte nodes do not read as the
+per-section codec — a two-section file carries `00 00 00 80`, `01 00 00 04`,
+`00 00 08 80`, and under the leaf/internal rule that is three leaves and no
+root. Decode it against files whose sections are far apart (the corpus has 2, 4,
+6 and 11-section examples with their section domains already printed by
+`tools/hkparse.py -d`).
+
+**2. Node bounds are conservative zeros.** Zero inset means "the parent's box",
+so every query descends the whole tree and then tests real triangles: correct,
+just not selective. The hypothesis that the two nibbles are min-side and
+max-side insets in 15ths of the parent box fits an axis-aligned floor exactly
+and clips geometry on 4479 of 5035 corpus nodes, so the parent box being
+propagated is wrong, the nibble meaning is wrong, or both. Worth having: with
+128 primitives per section the cost is small, so this is performance, not
+correctness.
+
+**3. quadIsFlat and triangleIsInterior are written as zeros.** Both bitfields
+are the right size and reachable; their contents are conservative. Vanilla
+varies both — 67 of its 275 triangle primitives are flagged flat and 208 are
+not, so the flag is not a function of the primitive being a triangle, and 13 of
+41 shapes mark some triangle interior. Neither can drop collision when zero
+(nothing is flat, no edge is welded away), so this is fidelity, not safety.
+
+Tooling for all three lives in the session scratchpad as `shapescan.py`,
+`bitfields.py`, `treedecode.py`, `cmsdmap.py`, `constcheck.py` and `pdiff.py`:
+extract packfiles with `nifskope-cli collision <nif> --extract -b N -o f.bin`,
+then measure. Every rule above came out of those, not out of a guess.
+
 ## Creating collision on a node that already has it REPLACES it — OPEN, 2026-08-07x
 
 Found by the body-targeted drop check, which spent its first runs measuring this
@@ -718,7 +754,9 @@ order; each is independently verifiable against a vanilla file:
 
    **Bone names are NOT in the packfile** — every name pointer is null and unfixed.
    They must come from the NIF node list, as the body→node mapping already does.
-6. Only then the encoder. The array machinery in `hknpEncodeCompressedMesh` is
+6. ~~Only then the encoder.~~ **DONE 2026-07-29e**: all 37 vanilla ragdolls
+   rebuild byte for byte. The notes below stayed because nobody came back to them.
+   Original text: The array machinery in `hknpEncodeCompressedMesh` is
    directly reusable — the ragdoll root uses the same `hkArray` layout at the same
    offsets. Validate by round-trip on all 35 ragdolls.
 

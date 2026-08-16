@@ -129,14 +129,31 @@ QByteArray dynamicMotion( const HknpEncodeInput & in )
 	setFloat( out, 0x08, in.gravityFactor ); setFloat( out, 0x0c, 1.0f );
 	setFloat( out, 0x10, in.maxLinVelocity ); setFloat( out, 0x14, in.maxAngVelocity );
 	setFloat( out, 0x18, in.linDamping ); setFloat( out, 0x1c, in.angDamping );
-	setFloat( out, 0x20, 0.17f ); setFloat( out, 0x24, 0.4905f );
-	setFloat( out, 0x28, 0.0025f ); setFloat( out, 0x2c, 0.0025f ); setFloat( out, 0x30, 1.0f );
+	/* Corpus words, not float literals. 0.4905f and 0.0025f each land one ULP
+	 * off what every vanilla motion record carries, which is three bytes of
+	 * difference for nothing -- and the three words at +0x34 are the same on all
+	 * 857 corpus bodies and were being left zero.
+	 */
+	setU32( out, 0x20, 0x3e2e147bu ); setU32( out, 0x24, 0x3efb22d2u );
+	setU32( out, 0x28, 0x3b23d70bu ); setU32( out, 0x2c, 0x3b23d70bu ); setFloat( out, 0x30, 1.0f );
+	setU32( out, 0x34, 0x999b67ffu ); setU32( out, 0x38, 0x06757304u ); setU32( out, 0x3c, 0x00000073u );
 	return out;
 }
 
+/*! One dyn_inertia record: 0x70 bytes, NOT the 0x40 this wrote until 2026-08-16.
+ *
+ * The stride is measured twice over -- the decoder reads 0x70 (1568 bytes over
+ * 14 motions) and hknpEncodePhysicsSystemData writes 0x70 -- so a 0x40 record
+ * left the engine reading the last 48 bytes of every dynamic body's inertia
+ * from whatever followed the array. It stayed invisible because a static body
+ * has no inertia array at all, and static is what most compiles produce.
+ *
+ * The centre of mass at +0x30 and the identity orientation at +0x40 are what
+ * the assembler writes for a body whose motion frame is unrotated.
+ */
 QByteArray dynamicInertia( const HknpEncodeInput & in )
 {
-	QByteArray out( 0x40, 0 ); setU32( out, 0x00, 0x00010000u );
+	QByteArray out( 0x70, 0 ); setU32( out, 0x00, 0x00010000u );
 	float mass = std::max( in.mass, 0.001f );
 	Vector3 mn = in.verts.first(), mx = mn;
 	for ( const Vector3 & v : in.verts ) for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], v[a] ); mx[a] = std::max( mx[a], v[a] ); }
@@ -160,6 +177,9 @@ QByteArray dynamicInertia( const HknpEncodeInput & in )
 	float iz = in.inertia[2] > 0.0f ? in.inertia[2] : mass * ( d[0] * d[0] + d[1] * d[1] ) / 12.0f;
 	setFloat( out, 0x20, inv( ix ) ); setFloat( out, 0x24, inv( iy ) );
 	setFloat( out, 0x28, inv( iz ) ); setFloat( out, 0x2c, 1.0f );
+	// centre of mass, then the unrotated motion frame as a unit quaternion
+	for ( int a = 0; a < 3; a++ ) setFloat( out, 0x30 + a * 4, in.center[a] );
+	setFloat( out, 0x4c, 1.0f );
 	return out;
 }
 
@@ -175,16 +195,124 @@ QByteArray refCountedProperties( quint32 key = 0x0000f100u )
 	QByteArray out( 0x20, 0 ); setU32( out, 0x08, 1 ); setU32( out, 0x0c, 0x80000001u ); setU32( out, 0x18, key ); return out;
 }
 
+/*! hknpBSMaterialProperties: 0x40 bytes, ONE hkArray entry of 0x20.
+ *
+ * The array's payload pointer is at +0x10 and needs a local fixup to +0x20 --
+ * this wrote a count with no pointer until 2026-08-16, which is a null
+ * dereference the moment the engine reads the material table. The entry carries
+ * a 1 at +0x10 and the material CRC at +0x14 (object +0x30 / +0x34).
+ *
+ * Vanilla writes one entry per distinct material; the compile path assigns one
+ * material to the whole mesh, so it writes exactly one. Measured against 41
+ * corpus shapes: single-material files are 0x40 bytes with count 1, never the
+ * 0x50 bytes with count 2 this used to emit.
+ */
 QByteArray materialProperties( quint32 material )
 {
-	QByteArray out( 0x50, 0 ); setU32( out, 0x18, 2 ); setU32( out, 0x1c, 0x80000002u );
-	setU32( out, 0x30, 1 ); setU32( out, 0x34, material ); setU32( out, 0x48, 1 ); setU32( out, 0x4c, material ); return out;
+	QByteArray out( 0x40, 0 ); setU32( out, 0x18, 1 ); setU32( out, 0x1c, 0x80000001u );
+	setU32( out, 0x30, 1 ); setU32( out, 0x34, material ); return out;
 }
 
-QByteArray compressedMeshHeader( quint32 material )
+/*! hknpCompressedMeshShape, 0xc0 bytes.
+ *
+ * \param material    the shape's material CRC, at +0x18
+ * \param numPrims    primitives in the mesh -- quadIsFlat has one bit each
+ * \param bitsPerKey  shape key width, which must equal the data object's
+ *
+ * Everything here beyond the material was zero until 2026-08-16, and the zeros
+ * were not neutral. Measured constant across all 41 corpus shapes: +0x44 and
+ * +0x54 are the "does not own its memory" flag on two empty hkArrays, and +0x58
+ * is 0xffffffff. The two hkBitFields at +0x68 (quadIsFlat, numPrims bits) and
+ * +0x80 (triangleIsInterior, 2 * numPrims bits) are present in EVERY vanilla
+ * file; the caller supplies their payloads and the fixups that reach them.
+ *
+ * numShapeKeyBits at +0x12 was the literal 7 regardless of the mesh. It is
+ * bit_length(2 * numPrims - 1) in all 41 -- the width of the largest shape key
+ * the data object can hand back -- and the engine uses it to split a key
+ * between this shape and its child, so a wrong value indexes the wrong
+ * primitive.
+ */
+QByteArray compressedMeshHeader( quint32 material, quint32 numPrims, quint32 bitsPerKey )
 {
-	QByteArray out( 0xc0, 0 ); out[0x10] = 4; out[0x11] = 2; out[0x12] = 7; out[0x13] = 2;
-	setU32( out, 0x18, material ); setU32( out, 0x30, 0xffffffffu ); out[0x90] = 0x44; return out;
+	QByteArray out( 0xc0, 0 ); out[0x10] = 4; out[0x11] = 2; out[0x12] = char( bitsPerKey ); out[0x13] = 2;
+	setU32( out, 0x18, material ); setU32( out, 0x30, 0xffffffffu );
+	setU32( out, 0x44, 0x80000000u ); setU32( out, 0x54, 0x80000000u ); setU32( out, 0x58, 0xffffffffu );
+	const quint32 flatWords = ( numPrims + 31 ) / 32, interiorWords = ( 2 * numPrims + 31 ) / 32;
+	setU32( out, 0x70, flatWords ); setU32( out, 0x74, 0x80000000u | flatWords ); setU32( out, 0x78, numPrims );
+	setU32( out, 0x88, interiorWords ); setU32( out, 0x8c, 0x80000000u | interiorWords );
+	setU32( out, 0x90, 2 * numPrims );
+	return out;
+}
+
+/*! The 4-byte node tree each section carries at its +0x00, and the reason
+ *  compiled collision took the game down.
+ *
+ * The engine walks this tree to find candidate primitives; a section whose node
+ * array is empty (which is what the compile path wrote) is a null traversal
+ * inside Havok's mesh tree. Decoded from the corpus, confirmed on all 63
+ * sections in it -- every one enumerates each of its primitives exactly once:
+ *
+ *   byte 3, bit 0 set  -> internal node. The left child is the next node; the
+ *                         right child is this node + (byte3 & 0xfe), which is
+ *                         2 * (leaves in the left subtree).
+ *   byte 3, bit 0 clear-> leaf. The primitive index is byte3 >> 1, SECTION
+ *                         relative, which is why a section holds at most 128
+ *                         primitives: 127 is the largest index a byte can carry.
+ *   bytes 0..2         -> per-axis bounds, two 4-bit insets each, measured
+ *                         against the parent node's box.
+ *
+ * The bounds are written as zeros: zero inset means "the parent's box", which
+ * the corpus shows directly (every root node is 00 00 00, as are interior nodes
+ * whose subtree spans the whole box). That is conservative, never wrong -- the
+ * engine descends more nodes than it needs to and then tests the real triangles
+ * -- and with at most 128 primitives in a section the cost is not measurable.
+ * Tightening them is an optimisation and is written up in TO_BE_IMPLEMENTED.
+ */
+void appendMeshTree( QByteArray & out, const QVector<int> & prims,
+	const QVector<Vector3> & centroids, int first, int count )
+{
+	if ( count == 1 ) {
+		out.append( char( 0 ) ); out.append( char( 0 ) ); out.append( char( 0 ) );
+		out.append( char( prims.at( first ) * 2 ) );
+		return;
+	}
+	/* Split on the widest axis of the centroids, at the median, so the two sides
+	 * hold as close to the same number of primitives as the split allows. The
+	 * SMALLER side goes left, which is what keeps the right-child offset inside a
+	 * byte: it is 2 * leftLeaves, and a left side of at most half of 128 leaves
+	 * cannot exceed 128.
+	 */
+	Vector3 mn = centroids.at( prims.at( first ) ), mx = mn;
+	for ( int i = first; i < first + count; i++ ) {
+		const Vector3 & c = centroids.at( prims.at( i ) );
+		for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], c[a] ); mx[a] = std::max( mx[a], c[a] ); }
+	}
+	int axis = 0;
+	for ( int a = 1; a < 3; a++ ) if ( mx[a] - mn[a] > mx[axis] - mn[axis] ) axis = a;
+	QVector<int> sorted = prims;
+	std::sort( sorted.begin() + first, sorted.begin() + first + count,
+		[&]( int a, int b ) { return centroids.at( a )[axis] < centroids.at( b )[axis]; } );
+	const int left = count / 2;
+	out.append( char( 0 ) ); out.append( char( 0 ) ); out.append( char( 0 ) );
+	out.append( char( ( left * 2 ) | 1 ) );
+	appendMeshTree( out, sorted, centroids, first, left );
+	appendMeshTree( out, sorted, centroids, first + left, count - left );
+}
+
+/*! hknpCompressedMeshShapeData +0xb8: two 0x60-byte entries, ONE distinct
+ *  payload across all 41 corpus shapes, so it is emitted verbatim. The content
+ *  is pairs of +/-FLT_MAX vectors -- empty-AABB initialisers.
+ */
+QByteArray meshDataTailConstant()
+{
+	// twelve 16-byte rows: + is +FLT_MAX x4, - is -FLT_MAX x4, and row 6 is zero
+	static const char rows[] = "+-+-+-0+-+-+";
+	QByteArray out;
+	for ( const char row : QByteArray( rows ) ) {
+		const quint32 word = row == '+' ? 0x7f7fffeeu : row == '-' ? 0xff7fffeeu : 0u;
+		for ( int i = 0; i < 4; i++ ) appendU32( out, word );
+	}
+	return out;
 }
 
 struct ClassEntry { quint32 hash; const char * name; };
@@ -194,9 +322,12 @@ QByteArray classNames( QHash<QString, quint32> & offsets )
 	static const ClassEntry entries[] = {
 		{ 0x33d42383u, "hkClass" }, { 0xb0efa719u, "hkClassMember" },
 		{ 0x8a3609cfu, "hkClassEnum" }, { 0xce6f8a6cu, "hkClassEnumItem" },
+		// order of FIRST USE, which is what hknpBuildPackfile does and what all 41
+		// corpus files carry; the data object used to be listed before the two
+		// property classes, which no vanilla file does
 		{ 0xb857718bu, "hknpPhysicsSystemData" }, { 0x5f60d536u, "hknpCompressedMeshShape" },
-		{ 0xa2bdfc59u, "hknpCompressedMeshShapeData" }, { 0x7c574867u, "hkRefCountedProperties" },
-		{ 0xa3e47a9au, "hknpBSMaterialProperties" }
+		{ 0x7c574867u, "hkRefCountedProperties" }, { 0xa3e47a9au, "hknpBSMaterialProperties" },
+		{ 0xa2bdfc59u, "hknpCompressedMeshShapeData" }
 	};
 	QByteArray out;
 	for ( const ClassEntry & e : entries ) {
@@ -242,13 +373,20 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	for ( const Triangle & t : in.tris ) if ( t[0] >= in.verts.size() || t[1] >= in.verts.size() || t[2] >= in.verts.size() )
 		return fail( QStringLiteral( "Collision contains an invalid triangle index." ) );
 
-	// One hknp section holds at most 255 packed vertices and 255 primitives
-	// (u8 count fields — see hknpdecode's layout notes). Larger meshes are
-	// partitioned into sections: triangles are sorted into spatial slabs
-	// along the longest axis so consecutive tris share verts, then greedily
-	// packed until either budget would overflow. Verts shared between
-	// sections are simply duplicated (the shared-vertex table stays unused,
-	// like every Elric sample we decoded).
+	/* One hknp section holds at most 255 packed vertices and 128 primitives.
+	 *
+	 * The vertex bound is the u8 count field. The primitive bound is the mesh
+	 * tree's: a leaf node stores its primitive index doubled in one byte, so 127
+	 * is the highest index it can name. The corpus agrees -- the largest section
+	 * in it holds 113 primitives, and nothing exceeds 128 -- and this used to be
+	 * 255, which put half of a full section beyond anything the tree could reach.
+	 *
+	 * Larger meshes are partitioned into sections: triangles are sorted into
+	 * spatial slabs along the longest axis so consecutive tris share verts, then
+	 * greedily packed until either budget would overflow. Verts shared between
+	 * sections are simply duplicated (the shared-vertex table stays unused,
+	 * like every Elric sample we decoded).
+	 */
 	struct MeshSec { QVector<int> tris; QVector<quint16> verts; QHash<quint16, quint8> vmap; };
 	QVector<MeshSec> secs;
 	{
@@ -280,7 +418,7 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 			int newVerts = 0;
 			for ( int p = 0; p < nu; p++ )
 				if ( !cur.vmap.contains( uniq[p] ) ) newVerts++;
-			if ( cur.tris.size() >= 255 || cur.vmap.size() + newVerts > 255 )
+			if ( cur.tris.size() >= 128 || cur.vmap.size() + newVerts > 255 )
 				flush();
 			for ( int p = 0; p < nu; p++ ) {
 				if ( !cur.vmap.contains( uniq[p] ) ) {
@@ -292,25 +430,70 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		}
 		flush();
 	}
-	if ( secs.size() > 4096 )
-		return fail( QStringLiteral( "Collision mesh needs more than 4096 hknp sections. Use Decimate first." ) );
+	/* One section only, until the section-level tree is decoded.
+	 *
+	 * hknpCompressedMeshShapeData +0x10 holds a tree over the SECTIONS, and its
+	 * node count is 2 * sections - 1 in all 41 corpus shapes -- but its 4-byte
+	 * nodes do not read as the per-section mesh tree's codec, and a guessed tree
+	 * is exactly the kind of thing that takes the game down. A single section
+	 * needs one node, and that node is four zero bytes in every single-section
+	 * file in the corpus, so this case is known rather than assumed.
+	 *
+	 * Multi-section output shipped for weeks and is what a large mesh got. It is
+	 * refused now instead: a refusal costs the user a Decimate, a wrong tree
+	 * costs them a crash they cannot diagnose.
+	 */
+	if ( secs.size() > 1 )
+		return fail( QStringLiteral(
+			"This collision needs %1 hknp sections and only one can be written correctly yet — "
+			"the section-level tree Fallout 4 walks at load is not decoded, and writing a guess "
+			"is what crashes the game.\n\n"
+			"Decimate the mesh to at most 128 triangles (and 255 vertices) and compile again." )
+			.arg( secs.size() ) );
 
 	QHash<QString, quint32> names; QByteArray cn = classNames( names ); Fixups fx; QByteArray data;
 	auto write = [&data]( const QByteArray & bytes ) { quint32 at = quint32( data.size() ); data.append( bytes ); return at; };
 	quint32 psd = quint32( data.size() ); fx.virtuals.append( { psd, 0, names.value( QStringLiteral( "hknpPhysicsSystemData" ) ) } );
-	write( hkArray( 0 ) ); quint32 arr10 = write( hkArray( 1 ) ); quint32 arr20 = write( hkArray( in.dynamic ? 1 : 0 ) );
+	// the first array is empty AND has a zero capacity word in every corpus file,
+	// unlike the other empty ones, which carry the don't-deallocate flag
+	write( QByteArray( 16, 0 ) ); quint32 arr10 = write( hkArray( 1 ) ); quint32 arr20 = write( hkArray( in.dynamic ? 1 : 0 ) );
 	quint32 arr30 = write( hkArray( in.dynamic ? 1 : 0 ) ); quint32 arr40 = write( hkArray( 1 ) ); write( hkArray( 0 ) ); quint32 arr60 = write( hkArray( 1 ) ); write( QByteArray( 16, 0 ) );
 	quint32 props = write( bodyProperties( in ) ); fx.local.append( { arr10, props } );
 	if ( in.dynamic ) { quint32 motion = write( dynamicMotion( in ) ); fx.local.append( { arr20, motion } ); quint32 inertia = write( dynamicInertia( in ) ); fx.local.append( { arr30, inertia } ); }
 	quint32 cinfo = write( bodyCInfo( in ) ); fx.local.append( { arr40, cinfo } );
 	quint32 shapeEntry = write( QByteArray( 16, 0 ) ); fx.local.append( { arr60, shapeEntry } );
-	quint32 shape = write( compressedMeshHeader( in.materialCRC ) );
+	/* Shape keys index primitives two per quad, so the widest key the data object
+	 * can return is 2 * primitives - 1 and its width is that value's bit length.
+	 * The shape and its data object must agree on it.
+	 */
+	const quint32 numPrims = quint32( in.tris.size() );
+	const quint32 maxKey = 2 * numPrims - 1;
+	quint32 bitsPerKey = 0;
+	for ( quint32 v = maxKey; v; v >>= 1 ) bitsPerKey++;
+	quint32 shape = write( compressedMeshHeader( in.materialCRC, numPrims, bitsPerKey ) );
 	fx.virtuals.append( { shape, 0, names.value( QStringLiteral( "hknpCompressedMeshShape" ) ) } );
 	fx.global.append( { cinfo, 2, shape } ); fx.global.append( { shapeEntry, 2, shape } );
-	quint32 ref = write( refCountedProperties() ); fx.virtuals.append( { ref, 0, names.value( QStringLiteral( "hkRefCountedProperties" ) ) } );
+	/* The two hkBitFields' words. Vanilla keeps them in the shape object's own
+	 * tail when they fit; they are written straight after it here, which the
+	 * fixups make equivalent and which does not run out of room at 128
+	 * primitives. Both are all zeros: no quad is flagged flat (the compile path
+	 * writes triangles as degenerate quads, and vanilla leaves 208 of its 275
+	 * triangle primitives unflagged) and no triangle is flagged interior, which
+	 * is the conservative reading of both -- every edge stays collidable.
+	 */
+	quint32 flatWords = ( numPrims + 31 ) / 32, interiorWords = ( 2 * numPrims + 31 ) / 32;
+	quint32 flatAt = write( QByteArray( qsizetype( flatWords ) * 4, 0 ) );
+	quint32 interiorAt = write( QByteArray( qsizetype( interiorWords ) * 4, 0 ) );
+	fx.local.append( { shape + 0x68, flatAt } ); fx.local.append( { shape + 0x80, interiorAt } );
+	pad( data, 16 );
+	// 0xf601 is the key for a material table; 0xf100 names mass properties, and
+	// this pointed a mass-properties key at hknpBSMaterialProperties until 08-16
+	quint32 ref = write( refCountedProperties( 0x0000f601u ) ); fx.virtuals.append( { ref, 0, names.value( QStringLiteral( "hkRefCountedProperties" ) ) } );
 	fx.local.append( { ref, ref + 0x10 } ); fx.global.append( { shape + 0x20, 2, ref } ); pad( data, 16 );
 	quint32 mat = write( materialProperties( in.materialCRC ) ); fx.global.append( { ref + 0x10, 2, mat } );
-	fx.virtuals.append( { mat, 0, names.value( QStringLiteral( "hknpBSMaterialProperties" ) ) } ); pad( data, 16 );
+	fx.virtuals.append( { mat, 0, names.value( QStringLiteral( "hknpBSMaterialProperties" ) ) } );
+	fx.local.append( { mat + 0x10, mat + 0x20 } );   // the material array's own payload
+	pad( data, 16 );
 
 	Vector3 mn = in.verts.first(), mx = mn;
 	for ( const Vector3 & v : in.verts ) for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], v[a] ); mx[a] = std::max( mx[a], v[a] ); }
@@ -319,7 +502,8 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	// (that is the point of sections — precision scales with density), quads
 	// hold section-relative u8 indices, packed verts concatenate per section
 	const bool legacySingle = ( secs.size() == 1 );
-	QByteArray quads, packed, sectionsBlob;
+	QByteArray quads, packed, sectionsBlob, treeBlob, materialRuns;
+	QVector<quint32> treeAt;              // each section's tree, relative to treeBlob
 	quint32 firstPrim = 0, totalPacked = 0;
 	for ( const MeshSec & sc : std::as_const( secs ) ) {
 		Vector3 smn = in.verts.at( sc.verts.first() ), smx = smn;
@@ -339,34 +523,97 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 			quint32 x = quint32( quant( v[0], smn[0], step[0], 2047 ) ), y = quint32( quant( v[1], smn[1], step[1], 2047 ) ), z = quint32( quant( v[2], smn[2], step[2], 1023 ) );
 			appendU32( packed, x | ( y << 11 ) | ( z << 22 ) );
 		}
+		/* This section's mesh tree: one leaf per primitive, 2n-1 nodes, the
+		 * structure the engine walks to reach a triangle at all.
+		 */
+		QVector<Vector3> centroids( sc.tris.size() );
+		QVector<int> order( sc.tris.size() );
+		for ( int i = 0; i < sc.tris.size(); i++ ) {
+			const Triangle & t = in.tris.at( sc.tris.at( i ) );
+			centroids[i] = ( in.verts.at( t[0] ) + in.verts.at( t[1] ) + in.verts.at( t[2] ) ) / 3.0f;
+			order[i] = i;
+		}
+		treeAt.append( quint32( treeBlob.size() ) );
+		appendMeshTree( treeBlob, order, centroids, 0, int( order.size() ) );
+		const quint32 nodes = quint32( sc.tris.size() ) * 2 - 1;
+
 		QByteArray section( 0x60, 0 );
-		setU32( section, 0x0c, 0x80000000u );
+		setU32( section, 0x08, nodes ); setU32( section, 0x0c, 0x80000000u | nodes );
 		for ( int a = 0; a < 3; a++ ) { setFloat( section, 0x10 + a * 4, smn[a] ); setFloat( section, 0x20 + a * 4, smx[a] ); setFloat( section, 0x30 + a * 4, smn[a] ); setFloat( section, 0x3c + a * 4, step[a] ); }
 		setU32( section, 0x48, totalPacked );
+		// one material for the whole mesh, so one run per section: material 0
+		// from primitive 0, covering everything this section holds
+		materialRuns.append( char( 0 ) ); materialRuns.append( char( 0 ) );
+		materialRuns.append( char( 0 ) ); materialRuns.append( char( sc.tris.size() ) );
 		// the decoded field is firstSharedIndex << 8 | numSharedIndices; the
 		// in-game-validated single-section writer put the vert count here
 		// (harmless: >> 8 is 0 for counts <= 255) — keep it byte-exact, and
 		// write the semantically correct 0 for multi-section files
 		setU32( section, 0x4c, legacySingle ? quint32( sc.verts.size() ) : 0u );
 		setU32( section, 0x50, ( firstPrim << 8 ) | quint32( sc.tris.size() ) );
+		setU32( section, 0x54, 1 );   // 1 in every corpus section; 0 was written here
 		section[0x58] = char( sc.verts.size() );
 		sectionsBlob += section;
 		firstPrim += quint32( sc.tris.size() );
 		totalPacked += quint32( sc.verts.size() );
 	}
 
-	quint32 shapeData = quint32( data.size() ), sections = shapeData + 0xa0,
-		quadData = sections + quint32( sectionsBlob.size() ), vertData = quadData + quint32( quads.size() );
-	QByteArray sd( 0xa0, 0 ); setU32( sd, 0x0c, 0x80000000u ); setU32( sd, 0x1c, 0x80000000u );
+	/* hknpCompressedMeshShapeData. The header is 0xd0, not the 0xa0 written until
+	 * 2026-08-16 -- three members past +0xa0 were simply missing, and the payload
+	 * that used to start at +0xa0 was overlapping them.
+	 *
+	 * Payload order follows the corpus: section tree, sections, quads, packed
+	 * vertices, the material-run table, then the constant tail.
+	 */
+	const QByteArray tail = meshDataTailConstant();
+	const quint32 sectionTree = quint32( secs.size() ) * 2 - 1;
+	// the tree over the sections: one leaf, four zero bytes, for the one section
+	const QByteArray sectionTreeBlob( qsizetype( sectionTree ) * 4, 0 );
+	/* Payload offsets, in the corpus's order. The sections and the constant tail
+	 * hold hkVector4s and are 16-aligned, as they are in every vanilla file.
+	 */
+	auto align16 = []( quint32 at ) { return ( at + 15 ) & ~15u; };
+	quint32 shapeData = quint32( data.size() );
+	quint32 sectionTreeData = shapeData + 0xd0;
+	quint32 treeData = sectionTreeData + quint32( sectionTreeBlob.size() );
+	quint32 sections = align16( treeData + quint32( treeBlob.size() ) );
+	quint32 quadData = sections + quint32( sectionsBlob.size() );
+	quint32 vertData = quadData + quint32( quads.size() );
+	quint32 runData = vertData + quint32( packed.size() );
+	quint32 tailData = align16( runData + quint32( materialRuns.size() ) );
+	QByteArray sd( 0xd0, 0 );
+	setU32( sd, 0x18, sectionTree ); setU32( sd, 0x1c, 0x80000000u | sectionTree );
+	// the domain corners carry w = 1; they were written with w = 0
 	for ( int a = 0; a < 3; a++ ) { setFloat( sd, 0x20 + a * 4, mn[a] ); setFloat( sd, 0x30 + a * 4, mx[a] ); }
-	setU32( sd, 0x4c, 0x80000000u );
+	setFloat( sd, 0x2c, 1.0f ); setFloat( sd, 0x3c, 1.0f );
+	setU32( sd, 0x40, 2 * numPrims ); setU32( sd, 0x44, bitsPerKey ); setU32( sd, 0x48, maxKey );
 	setU32( sd, 0x58, quint32( secs.size() ) ); setU32( sd, 0x5c, 0x80000000u | quint32( secs.size() ) );
-	setU32( sd, 0x68, quint32( in.tris.size() ) ); setU32( sd, 0x6c, 0x80000000u | quint32( in.tris.size() ) );
+	setU32( sd, 0x68, numPrims ); setU32( sd, 0x6c, 0x80000000u | numPrims );
 	setU32( sd, 0x7c, 0x80000000u ); setU32( sd, 0x88, totalPacked ); setU32( sd, 0x8c, 0x80000000u | totalPacked ); setU32( sd, 0x9c, 0x80000000u );
+	setU32( sd, 0xa8, quint32( secs.size() ) ); setU32( sd, 0xac, 0x80000000u | quint32( secs.size() ) );
+	setU32( sd, 0xc0, 2 ); setU32( sd, 0xc4, 0x80000002u );
 	write( sd ); fx.virtuals.append( { shapeData, 0, names.value( QStringLiteral( "hknpCompressedMeshShapeData" ) ) } ); fx.global.append( { shape + 0x60, 2, shapeData } );
-	fx.local.append( { shapeData + 0x50, sections } ); fx.local.append( { shapeData + 0x60, quadData } ); fx.local.append( { shapeData + 0x80, vertData } );
-	write( sectionsBlob ); write( quads ); write( packed ); pad( data, 16 );
+	fx.local.append( { shapeData + 0x10, sectionTreeData } );
+	fx.local.append( { shapeData + 0x50, sections } ); fx.local.append( { shapeData + 0x60, quadData } );
+	fx.local.append( { shapeData + 0x80, vertData } ); fx.local.append( { shapeData + 0xa0, runData } );
+	fx.local.append( { shapeData + 0xb8, tailData } );
+	// each section points at its own mesh tree
+	for ( qsizetype s = 0; s < treeAt.size(); s++ )
+		fx.local.append( { sections + quint32( s ) * 0x60, treeData + treeAt.at( s ) } );
+	write( sectionTreeBlob ); write( treeBlob );
+	while ( quint32( data.size() ) < sections ) data.append( '\0' );
+	write( sectionsBlob ); write( quads ); write( packed ); write( materialRuns );
+	while ( quint32( data.size() ) < tailData ) data.append( '\0' );
+	write( tail ); pad( data, 16 );
 
+	/* Global fixups are grouped by the object they live in and, inside it, by
+	 * member offset -- the ordering hknpBuildPackfile reproduces on 810 vanilla
+	 * files. Sources here are absolute data offsets, so one sort by source says
+	 * both. Emitted in write order, the data object's pointer landed after the
+	 * material's and the file no longer matched what the assembler would write.
+	 */
+	std::stable_sort( fx.global.begin(), fx.global.end(),
+		[]( const GlobalFix & a, const GlobalFix & b ) { return a.source < b.source; } );
 	QByteArray local = fx.localTable(), global = fx.globalTable(), virtuals = fx.virtualTable();
 	quint32 cnStart = 0x100, cnEnd = cnStart + quint32( cn.size() ), dataStart = cnEnd;
 	quint32 localAbs = dataStart + quint32( data.size() ), globalAbs = localAbs + quint32( local.size() ), virtualAbs = globalAbs + quint32( global.size() );

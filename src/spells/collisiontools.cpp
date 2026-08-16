@@ -5345,9 +5345,22 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	const int nodeBlock = nif->isValidBlockNumber( nif->getLink( object, "Target" ) )
 		? nif->getLink( object, "Target" ) : nif->getParent( objectBlock );
 	QModelIndex body = tlCollBlockIndex( nif, bodyBlock ), node = tlCollBlockIndex( nif, nodeBlock );
-	if ( !body.isValid() || !node.isValid() ) {
-		QMessageBox::warning( parent, QObject::tr( "Compile Collision" ), QObject::tr( "The selected collision has a broken body or target node." ) ); return QModelIndex();
-	}
+	/* Every refusal below has to reach a headless caller as a message, not as a
+	 * dialog: -no-gui builds a QCoreApplication, where constructing a QMessageBox
+	 * aborts the process. The bone question already tested for this; the four
+	 * failure paths did not, so `nifskope-cli cast` died on any file they had an
+	 * opinion about -- which is most of what a compile sweep would test.
+	 */
+	const bool interactive = qobject_cast<QApplication *>( QCoreApplication::instance() ) != nullptr;
+	auto refuse = [&]( const QString & text ) {
+		if ( interactive )
+			QMessageBox::warning( parent, QObject::tr( "Compile Collision" ), text );
+		else
+			qWarning().noquote() << text;
+		return QModelIndex();
+	};
+	if ( !body.isValid() || !node.isValid() )
+		return refuse( QObject::tr( "The selected collision has a broken body or target node." ) );
 	// Compile writes ONE static body as a compressed mesh in a
 	// bhkPhysicsSystem. That is right for world collision and wrong for a
 	// bone: it triangulates the capsule and cannot restore a ragdoll (see the
@@ -5388,12 +5401,9 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	if ( nif->get<quint32>( body, "Body Flags" ) & 1u ) unsupported << QObject::tr( "Wind" );
 	if ( info.isValid() && nif->get<quint32>( info, "Deactivator Type" ) != 1u ) unsupported << QObject::tr( "Deactivator Type" );
 	if ( info.isValid() && std::fabs( nif->get<float>( info, "Penetration Depth" ) - 0.15f ) > 1.0e-5f ) unsupported << QObject::tr( "Allowed Penetration" );
-	if ( !unsupported.isEmpty() ) {
-		QMessageBox::warning( parent, QObject::tr( "Compile Collision" ),
-			QObject::tr( "These settings are valid on editable collision but their FO4 hknp byte layout is not validated yet, so Compile will not discard them:\n\n%1" )
-				.arg( unsupported.join( QStringLiteral( "\n" ) ) ) );
-		return QModelIndex();
-	}
+	if ( !unsupported.isEmpty() )
+		return refuse( QObject::tr( "These settings are valid on editable collision but their FO4 hknp byte layout is not validated yet, so Compile will not discard them:\n\n%1" )
+			.arg( unsupported.join( QStringLiteral( "\n" ) ) ) );
 	input.layer = filter.isValid() ? nif->get<quint32>( filter, "Layer" ) : 1u;
 	input.filterFlags = filter.isValid() ? quint8( nif->get<quint32>( filter, "Flags" ) ) : 0u;
 	input.filterGroup = filter.isValid() ? quint16( nif->get<quint32>( filter, "Group" ) ) : 0u;
@@ -5414,21 +5424,15 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	QModelIndex materialShape = tlCollBlockIndex( nif, tlCollFirstLeafShape( nif, rootShape ) );
 	input.materialCRC = materialShape.isValid() ? nif->get<quint32>( materialShape, "Material" ) : 0u;
 	QString error; QByteArray bytes = hknpEncodeCompressedMesh( input, &error );
-	if ( bytes.isEmpty() ) {
-		QMessageBox::warning( parent, QObject::tr( "Compile Collision" ), error ); return QModelIndex();
-	}
+	if ( bytes.isEmpty() )
+		return refuse( error );
 	HknpSystem roundTrip = hknpDecode( bytes );
-	if ( !roundTrip.valid || roundTrip.shapes.isEmpty() || roundTrip.shapes.first().tris.isEmpty() ) {
-		QMessageBox::critical( parent, QObject::tr( "Compile Collision" ), QObject::tr( "The generated packfile failed NifSkope's round-trip check: %1" ).arg( roundTrip.error ) ); return QModelIndex();
-	}
-	// multi-section files must decode to exactly the input triangles
-	// (section boundaries duplicate verts, so only the tri count is stable)
-	if ( roundTrip.shapes.first().tris.size() != input.tris.size() ) {
-		QMessageBox::critical( parent, QObject::tr( "Compile Collision" ),
-			QObject::tr( "Round-trip triangle count mismatch (%1 encoded, %2 decoded) — the packfile was not written." )
-				.arg( input.tris.size() ).arg( roundTrip.shapes.first().tris.size() ) );
-		return QModelIndex();
-	}
+	if ( !roundTrip.valid || roundTrip.shapes.isEmpty() || roundTrip.shapes.first().tris.isEmpty() )
+		return refuse( QObject::tr( "The generated packfile failed NifSkope's round-trip check: %1" ).arg( roundTrip.error ) );
+	// section boundaries duplicate verts, so only the tri count is stable
+	if ( roundTrip.shapes.first().tris.size() != input.tris.size() )
+		return refuse( QObject::tr( "Round-trip triangle count mismatch (%1 encoded, %2 decoded) — the packfile was not written." )
+			.arg( input.tris.size() ).arg( roundTrip.shapes.first().tris.size() ) );
 	QPersistentModelIndex oldObject = tlCollBlockIndex( nif, objectBlock ), target = node;
 	QPersistentModelIndex newObject, newSystem;
 	nifSnapshotOp( nif, QObject::tr( "Compile collision" ), [&]() {

@@ -1,5 +1,96 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-16 — compiled collision crashed Fallout 4: half the format was missing
+
+Collision compiled by NifSkope and saved into a NIF took the game down. The
+compile path writes its packfile through `hknpEncodeCompressedMesh`, which is a
+different writer from the assembler that reproduces 810 of 822 stock systems
+byte for byte — and it was emitting a skeleton of the format: enough for our own
+decoder, which reads sections and primitives directly, and not enough for an
+engine that walks the structures around them. Measured against a 41-shape
+vanilla corpus (`SetDressing`, `Architecture`, `Furniture`, `Props`, `Clutter`,
+`Weapons`), every field below was constant in all 41 and wrong or absent in ours.
+
+**The traversal structure was not there at all.** Each section carries a tree
+the engine walks to reach a triangle, and every section we wrote declared zero
+nodes with no pointer. The codec, decoded from the corpus and confirmed on all
+63 of its sections — each enumerates its primitives exactly once:
+
+- byte 3 bit 0 set: internal node, left child is the next node, right child is
+  `self + (byte3 & 0xfe)` = twice the leaf count on the left
+- byte 3 bit 0 clear: leaf, primitive index is `byte3 >> 1`, section-relative
+- bytes 0..2: per-axis bounds, two 4-bit insets each, against the parent's box
+
+Node count is `2 * primitives - 1`, exact on all 63. The leaf index is why a
+section holds at most **128** primitives, not the 255 this partitioned at: a
+byte cannot name primitive 128. The largest section in the corpus holds 113.
+
+Bounds are written as zeros, which means "the parent's box" — the corpus shows
+that reading directly, every root node being `00 00 00`. It is conservative,
+never wrong, and with at most 128 primitives per section the extra descent is
+not measurable. Tightening them is in the backlog, not a correctness item.
+
+**The rest of what was missing or wrong**, each one measured constant across the
+corpus before it was changed:
+
+| where | was | is |
+|---|---|---|
+| shape +0x12 numShapeKeyBits | literal 7 | `bit_length(2 * prims - 1)` |
+| shape +0x44, +0x54 | 0 | `0x80000000`, the don't-deallocate flag on two empty arrays |
+| shape +0x58 | 0 | `0xffffffff` |
+| shape +0x68 quadIsFlat | null pointer, count 0 | hkBitField, `prims` bits |
+| shape +0x80 triangleIsInterior | null pointer, count 0 | hkBitField, `2 * prims` bits |
+| shape +0x90 | literal 0x44 | `2 * prims` |
+| hkRefCountedProperties key | `0xf100`, which names mass properties | `0xf601`, which names a material table — and a material table is what it points at |
+| hknpBSMaterialProperties | count 2, no pointer patched | count 1, 0x40 bytes, its array pointed at its own payload |
+| CMSD header | 0xa0, so three members were missing and the payload overlapped them | 0xd0 |
+| CMSD +0x10 | absent | the tree over sections, `2 * sections - 1` nodes |
+| CMSD +0x40/+0x44/+0x48 | 0 | key count, key width, max key |
+| CMSD +0xa0 | absent | material runs: `(material, 0, firstPrim, count)`, one per section |
+| CMSD +0xb8 | absent | two 0x60-byte entries, one payload corpus-wide, emitted verbatim |
+| CMSD domain min/max w | 0 | 1.0 |
+| section +0x54 | 0 | 1 |
+| dyn_inertia record | **0x40 bytes** | 0x70, the stride both the decoder and the assembler use |
+| dyn_motion +0x34..+0x3c | 0 | the three words every corpus body carries |
+| dyn_motion +0x24, +0x28, +0x2c | `0.4905f`, `0.0025f` | the corpus words, each one ULP away from the literal |
+
+The short inertia record is its own bug and only bites dynamic collision: the
+engine strides 0x70 through an array of 0x40-byte entries, so everything after
+the first body's mass came out of whatever followed the array.
+
+**The proof that it now agrees with itself**: a freshly compiled packfile,
+decoded and re-encoded through the validated assembler, is byte-identical.
+It was not, and that was the first hard signal — 86 bytes differing before the
+first object, which turned out to be the class-name table in the wrong order
+(the assembler orders by first use; this had a fixed table with the data object
+ahead of the two property classes) and two global fixups emitted out of member
+order.
+
+**Multi-section meshes are refused.** The tree over sections at CMSD +0x10 has
+a node count that fits `2n-1` but 4-byte nodes that do not read as the
+per-section codec, and a guessed tree is exactly what crashes a game. One
+section needs one node, and that node is four zero bytes in every
+single-section file in the corpus, so that case is known rather than assumed.
+Above 128 triangles Compile now says so and points at Decimate. Multi-section
+output shipped for weeks; a refusal costs a Decimate, a wrong tree costs a
+crash nobody can diagnose.
+
+**Sweep** over 60 random `SetDressing` meshes, decompiled and recompiled: 38
+compiled, 14 refused (5 for the section limit, 9 for settings this path already
+refused), 0 failed, 0 that were not byte-stable. All 38 carry zero
+constant-field or null-pointer differences against the corpus, and all 38 trees
+enumerate every primitive exactly once. Three came back with a different
+triangle count, all three being primitives that Compile triangulates by design.
+
+Compile's four refusal paths built a `QMessageBox` unconditionally, which aborts
+under `-no-gui` — so `nifskope-cli cast` died on any file they had an opinion
+about, which is most of what a sweep tests. They report through `qWarning` when
+there is no `QApplication`.
+
+**Not validated in game.** Everything here is measured against vanilla files;
+whether Fallout 4 accepts the result is bungo's test, and it is the one that
+counts.
+
 ## 2026-08-11h — The first frame after opening a file is now the finished frame
 
 Opening a refracting NIF drew a warped, displaced background until the user
