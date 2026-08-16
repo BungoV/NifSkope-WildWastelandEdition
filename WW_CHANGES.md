@@ -1,5 +1,39 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-17c — no-game validation: Havok's own SDK reads every compiled blob back clean
+
+The question was whether compiled collision can be tested without launching
+Fallout 4. It can, further than expected: **FileConvert.exe** (Havok's debug
+tagfile converter, hk_2014 SDK — the July Rosetta stone) deserializes a
+packfile with the real Havok reader and prints every field as typed XML. It
+exits 3 on Bethesda's custom `hknpBSMaterialProperties` — a class-registry
+miss, not a parse failure — so `strip_bs.py` (session scratchpad) removes that
+one object surgically: drop its virtual-fixup entry and any global fixup
+touching its range, pad the tables with 0xff in place. Nothing else moves; the
+rest of the blob is pure Havok 2014 and converts fully.
+
+Result over the in-game test set (duct, floor, the two-section rubble) plus
+all four recompiled SeeSaw systems: **every blob converts, exit 0, zero
+warnings** — container, fixups, class layouts, hkArray sizing, the two
+hkBitFields, the section table, and the dynamic body's motionProperties record
+all walked by the SDK that shipped the format. Field-level diff against the
+vanilla blobs (`fc_diff.py`) shows differences in exactly two places, both the
+documented by-design gaps and both internally consistent in Havok's readback:
+
+- **Quad pairing.** Vanilla stores 10 primitives where we store 20 (each
+  triangle a degenerate quad); numPrimitiveKeys / maxKeyValue / bitsPerKey /
+  bitfield sizes all scale with our count exactly as the key math predicts.
+- **Section count follows pairing.** Vanilla's rubble fits ONE section
+  (113 paired primitives); ours needs two. Pairing is worth more than
+  capacity — it halves primitive counts before the 128 cap is even near.
+
+What this oracle does and does not prove: it exercises deserialization — the
+layer the original crash lived in — with Bethesda's actual SDK generation. It
+does not walk the trees at query time or simulate contact; the game remains
+the test for runtime behaviour. But a blob that Havok's own reader parses
+field-for-field, with key math it confirms internally consistent, has passed
+everything short of stepping on it.
+
 ## 2026-08-17b — a 100-file A/B against vanilla: every polytope compile was garbage geometry
 
 The user's campaign: 100 vanilla NIFs with collision — props, statics, anim
