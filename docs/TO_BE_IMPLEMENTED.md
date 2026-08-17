@@ -89,10 +89,10 @@ a per-triangle material index through CollisionMesh and emit runs per section.
 every edge stays collidable. A closed-box-vs-open-box Elric fixture would
 settle it.
 
-**2. Quad pairing.** Elric merges adjacent triangle pairs into quads — bent
+**2. ~~Quad pairing~~ DONE 2026-08-17d.** Elric merges adjacent triangle pairs into quads — bent
 ones included (89% of corpus primitives are quads; quadIsFlat = "the four
 corners are coplanar", measured clean at 2,965 quads). Pairing in the writer
-would double per-section capacity from 128 triangles to ~256 and halve
+doubled per-section capacity from 128 triangles to ~256 and halved
 packfile sizes. The decode convention for a quad (a,b,c,d) is (a,b,c)+(a,c,d).
 
 **3. Convex dynamic sources compile to polytopes in Elric**, compressed mesh in

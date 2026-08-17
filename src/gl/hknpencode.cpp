@@ -450,21 +450,96 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	for ( const Triangle & t : in.tris ) if ( t[0] >= in.verts.size() || t[1] >= in.verts.size() || t[2] >= in.verts.size() )
 		return fail( QStringLiteral( "Collision contains an invalid triangle index." ) );
 
+	/* Adjacent triangles pair into QUADS first, the way every Elric output
+	 * does (89%% of vanilla primitives are quads). A primitive (a,b,c,d)
+	 * decodes to (a,b,c) and (a,c,d) -- hknpdecode's own expansion -- so two
+	 * triangles sharing an edge in opposite directions merge exactly: rotate
+	 * the first so the shared edge is c->a, the second contributes d. Pairing
+	 * halves the primitive count before the 128-per-section cap is even near
+	 * (vanilla's 208-triangle rubble fits ONE section because of it), and the
+	 * greedy pass prefers the flattest partner, which is also what keeps
+	 * quadIsFlat meaningful. Triangles left over stay degenerate quads (d==c).
+	 */
+	struct MeshPrim { quint16 v[4]; bool flat; };
+	QVector<MeshPrim> prims;
+	{
+		auto normalOf = [&]( const Triangle & t ) {
+			return Vector3::crossproduct( in.verts[t[1]] - in.verts[t[0]],
+										  in.verts[t[2]] - in.verts[t[0]] );
+		};
+		// directed edge (u,v) -> triangles that traverse it, with the edge slot
+		QHash<quint64, QVector<QPair<int, int>>> byEdge;
+		auto ekey = []( quint16 u, quint16 v ) { return quint64( u ) << 16 | v; };
+		for ( int i = 0; i < in.tris.size(); i++ ) {
+			const Triangle & t = in.tris.at( i );
+			for ( int e = 0; e < 3; e++ )
+				byEdge[ekey( t[e], t[( e + 1 ) % 3] )].append( { i, e } );
+		}
+		QVector<bool> used( in.tris.size(), false );
+		for ( int i = 0; i < in.tris.size(); i++ ) {
+			if ( used.at( i ) )
+				continue;
+			const Triangle & t1 = in.tris.at( i );
+			const Vector3 n1 = normalOf( t1 );
+			int bestTri = -1, bestEdge = -1, bestSlot = -1;
+			float bestDot = -2.0f;
+			for ( int e = 0; e < 3; e++ ) {
+				const quint16 u = t1[e], w = t1[( e + 1 ) % 3];
+				for ( const auto & cand : byEdge.value( ekey( w, u ) ) ) {
+					if ( cand.first == i || used.at( cand.first ) )
+						continue;
+					const Triangle & t2 = in.tris.at( cand.first );
+					const quint16 d = t2[( cand.second + 2 ) % 3];
+					if ( d == t1[( e + 2 ) % 3] )
+						continue;   // the same triangle mirrored: a zero-volume quad
+					const Vector3 n2 = normalOf( t2 );
+					const float len = n1.length() * n2.length();
+					const float dot = len > 0.0f ? Vector3::dotproduct( n1, n2 ) / len : -1.0f;
+					if ( dot > bestDot ) {
+						bestDot = dot; bestTri = cand.first; bestEdge = e; bestSlot = cand.second;
+					}
+				}
+			}
+			MeshPrim p;
+			if ( bestTri >= 0 ) {
+				/* shared edge is t1's (u -> w); the quad reads (a,b,c,d) with
+				 * a = w, b = t1's third vert, c = u, d = t2's third vert, so the
+				 * decode (a,b,c)+(a,c,d) reproduces both triangles exactly. */
+				const quint16 u = t1[bestEdge], w = t1[( bestEdge + 1 ) % 3];
+				p.v[0] = w; p.v[1] = t1[( bestEdge + 2 ) % 3]; p.v[2] = u;
+				p.v[3] = in.tris.at( bestTri )[( bestSlot + 2 ) % 3];
+				used[bestTri] = true;
+				/* flat = the four corners are coplanar. Measured semantics
+				 * (WW_CHANGES 2026-08-17): flat=1 quads sit at plane distance
+				 * ~1e-18, bent ones at 0.03+. 1e-4 m keeps a bent quad from ever
+				 * being flagged as one plane, which is the failure that matters.
+				 */
+				const Vector3 n = normalOf( Triangle( p.v[0], p.v[1], p.v[2] ) );
+				const float nl = n.length();
+				p.flat = nl > 0.0f && std::fabs( Vector3::dotproduct( n, in.verts[p.v[3]] - in.verts[p.v[0]] ) ) / nl < 1.0e-4f;
+			} else {
+				p.v[0] = t1[0]; p.v[1] = t1[1]; p.v[2] = t1[2]; p.v[3] = t1[2];
+				p.flat = false;
+			}
+			used[i] = true;
+			prims.append( p );
+		}
+	}
+
 	/* One hknp section holds at most 255 packed vertices and 128 primitives.
 	 *
 	 * The vertex bound is the u8 count field. The primitive bound is the mesh
 	 * tree's: a leaf node stores its primitive index doubled in one byte, so 127
 	 * is the highest index it can name. The corpus agrees -- the largest section
-	 * in it holds 113 primitives, and nothing exceeds 128 -- and this used to be
-	 * 255, which put half of a full section beyond anything the tree could reach.
+	 * in it holds 113 primitives, and nothing exceeds 128.
 	 *
-	 * Larger meshes are partitioned into sections: triangles are sorted into
-	 * spatial slabs along the longest axis so consecutive tris share verts, then
+	 * Larger meshes are partitioned into sections: primitives are sorted into
+	 * spatial slabs along the longest axis so consecutive prims share verts, then
 	 * greedily packed until either budget would overflow. Verts shared between
 	 * sections are simply duplicated (the shared-vertex table stays unused,
 	 * like every Elric sample we decoded).
 	 */
-	struct MeshSec { QVector<int> tris; QVector<quint16> verts; QHash<quint16, quint8> vmap; };
+	struct MeshSec { QVector<int> prims; QVector<quint16> verts; QHash<quint16, quint8> vmap; };
 	QVector<MeshSec> secs;
 	{
 		Vector3 gmn = in.verts.first(), gmx = gmn;
@@ -474,36 +549,36 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		int axis = 0;
 		if ( ext[1] > ext[axis] ) axis = 1;
 		if ( ext[2] > ext[axis] ) axis = 2;
-		QVector<int> order( in.tris.size() );
+		QVector<int> order( prims.size() );
 		for ( int i = 0; i < order.size(); i++ ) order[i] = i;
 		std::sort( order.begin(), order.end(), [&]( int a, int b ) {
-			const Triangle & ta = in.tris.at( a ), & tb = in.tris.at( b );
-			const float ca = in.verts[ta[0]][axis] + in.verts[ta[1]][axis] + in.verts[ta[2]][axis];
-			const float cb = in.verts[tb[0]][axis] + in.verts[tb[1]][axis] + in.verts[tb[2]][axis];
+			const MeshPrim & pa = prims.at( a ), & pb = prims.at( b );
+			float ca = 0.0f, cb = 0.0f;
+			for ( int k = 0; k < 3; k++ ) { ca += in.verts[pa.v[k]][axis]; cb += in.verts[pb.v[k]][axis]; }
 			return ca < cb;
 		} );
 		MeshSec cur;
-		auto flush = [&]() { if ( !cur.tris.isEmpty() ) { secs.append( cur ); cur = MeshSec(); } };
-		for ( int ti : order ) {
-			const Triangle & t = in.tris.at( ti );
-			quint16 uniq[3]; int nu = 0;
-			for ( int c = 0; c < 3; c++ ) {
+		auto flush = [&]() { if ( !cur.prims.isEmpty() ) { secs.append( cur ); cur = MeshSec(); } };
+		for ( int pi : order ) {
+			const MeshPrim & p = prims.at( pi );
+			quint16 uniq[4]; int nu = 0;
+			for ( int c = 0; c < 4; c++ ) {
 				bool seen = false;
-				for ( int p = 0; p < nu; p++ ) seen = seen || uniq[p] == t[c];
-				if ( !seen ) uniq[nu++] = t[c];
+				for ( int k = 0; k < nu; k++ ) seen = seen || uniq[k] == p.v[c];
+				if ( !seen ) uniq[nu++] = p.v[c];
 			}
 			int newVerts = 0;
-			for ( int p = 0; p < nu; p++ )
-				if ( !cur.vmap.contains( uniq[p] ) ) newVerts++;
-			if ( cur.tris.size() >= 128 || cur.vmap.size() + newVerts > 255 )
+			for ( int k = 0; k < nu; k++ )
+				if ( !cur.vmap.contains( uniq[k] ) ) newVerts++;
+			if ( cur.prims.size() >= 128 || cur.vmap.size() + newVerts > 255 )
 				flush();
-			for ( int p = 0; p < nu; p++ ) {
-				if ( !cur.vmap.contains( uniq[p] ) ) {
-					cur.vmap.insert( uniq[p], quint8( cur.verts.size() ) );
-					cur.verts.append( uniq[p] );
+			for ( int k = 0; k < nu; k++ ) {
+				if ( !cur.vmap.contains( uniq[k] ) ) {
+					cur.vmap.insert( uniq[k], quint8( cur.verts.size() ) );
+					cur.verts.append( uniq[k] );
 				}
 			}
-			cur.tris.append( ti );
+			cur.prims.append( pi );
 		}
 		flush();
 	}
@@ -534,27 +609,35 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	 * prims) carries bits 4+8=12 and numKeys 2802 = maxKey+1; the single-section
 	 * degenerate is the old 2*prims-1 rule exactly.
 	 */
-	const quint32 numPrims = quint32( in.tris.size() );
+	const quint32 numPrims = quint32( prims.size() );
 	quint32 maxSecPrims = 0;
-	for ( const MeshSec & sc : std::as_const( secs ) ) maxSecPrims = std::max( maxSecPrims, quint32( sc.tris.size() ) );
+	for ( const MeshSec & sc : std::as_const( secs ) ) maxSecPrims = std::max( maxSecPrims, quint32( sc.prims.size() ) );
 	auto bitLen = []( quint32 v ) { quint32 n = 0; while ( v ) { n++; v >>= 1; } return n; };
 	const quint32 primBits = bitLen( 2 * maxSecPrims - 1 );
 	const quint32 secBits = bitLen( quint32( secs.size() ) - 1 );
 	const quint32 bitsPerKey = secBits + primBits;
-	const quint32 maxKey = ( quint32( secs.size() - 1 ) << primBits ) | ( 2 * quint32( secs.last().tris.size() ) - 1 );
+	const quint32 maxKey = ( quint32( secs.size() - 1 ) << primBits ) | ( 2 * quint32( secs.last().prims.size() ) - 1 );
 	quint32 shape = write( compressedMeshHeader( in.materialCRC, maxKey + 1, bitsPerKey ) );
 	fx.virtuals.append( { shape, 0, names.value( QStringLiteral( "hknpCompressedMeshShape" ) ) } );
 	fx.global.append( { cinfo, 2, shape } ); fx.global.append( { shapeEntry, 2, shape } );
-	/* The two hkBitFields' words. Vanilla keeps them in the shape object's own
-	 * tail when they fit; they are written straight after it here, which the
-	 * fixups make equivalent. Both are all zeros: no quad is flagged flat (the
-	 * compile path writes triangles as degenerate quads, and vanilla leaves 208
-	 * of its 275 triangle primitives unflagged) and no triangle is flagged
-	 * interior, which is the conservative reading of both -- every edge stays
+	/* The two hkBitFields. quadIsFlat carries the pairing pass's verdicts, one
+	 * bit per KEY-SPACE primitive slot: (section << (primBits-1)) | localPrim,
+	 * the indexing measured on 2,965 vanilla quads. triangleIsInterior stays
+	 * zero -- its semantics are still open, and zero keeps every edge
 	 * collidable.
 	 */
 	quint32 flatWords = ( ( maxKey + 1 ) / 2 + 31 ) / 32, interiorWords = ( maxKey + 1 + 31 ) / 32;
-	quint32 flatAt = write( QByteArray( qsizetype( flatWords ) * 4, 0 ) );
+	QByteArray flatBits( qsizetype( flatWords ) * 4, 0 );
+	for ( qsizetype s = 0; s < secs.size(); s++ ) {
+		const MeshSec & sc = secs.at( s );
+		for ( qsizetype k = 0; k < sc.prims.size(); k++ ) {
+			if ( !prims.at( sc.prims.at( k ) ).flat )
+				continue;
+			const quint32 bit = ( quint32( s ) << ( primBits - 1 ) ) | quint32( k );
+			flatBits[bit / 8] = char( quint8( flatBits.at( bit / 8 ) ) | ( 1u << ( bit % 8 ) ) );
+		}
+	}
+	quint32 flatAt = write( flatBits );
 	quint32 interiorAt = write( QByteArray( qsizetype( interiorWords ) * 4, 0 ) );
 	fx.local.append( { shape + 0x68, flatAt } ); fx.local.append( { shape + 0x80, interiorAt } );
 	pad( data, 16 );
@@ -584,10 +667,10 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		const Vector3 step( smx[0] > smn[0] ? ( smx[0] - smn[0] ) / 2047.0f : 1.0f,
 			smx[1] > smn[1] ? ( smx[1] - smn[1] ) / 2047.0f : 1.0f,
 			smx[2] > smn[2] ? ( smx[2] - smn[2] ) / 1023.0f : 1.0f );
-		for ( int ti : sc.tris ) {
-			const Triangle & t = in.tris.at( ti );
-			const quint8 a = sc.vmap.value( t[0] ), b = sc.vmap.value( t[1] ), c = sc.vmap.value( t[2] );
-			quads.append( char( a ) ); quads.append( char( b ) ); quads.append( char( c ) ); quads.append( char( c ) );
+		for ( int pi : sc.prims ) {
+			const MeshPrim & p = prims.at( pi );
+			for ( int c = 0; c < 4; c++ )
+				quads.append( char( sc.vmap.value( p.v[c] ) ) );
 		}
 		/* The tree bounds cover the STORED geometry, so the boxes are computed
 		 * from the quantized coordinates a reader will decode -- using the source
@@ -606,22 +689,27 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		 * parent is the section domain, which is why every corpus root reads
 		 * 00 00 00.
 		 */
-		QVector<TreeBox> primBoxes( sc.tris.size() );
-		QVector<int> order( sc.tris.size() );
-		for ( int i = 0; i < sc.tris.size(); i++ ) {
-			const Triangle & t = in.tris.at( sc.tris.at( i ) );
+		QVector<TreeBox> primBoxes( sc.prims.size() );
+		QVector<int> order( sc.prims.size() );
+		for ( int i = 0; i < sc.prims.size(); i++ ) {
+			const MeshPrim & p = prims.at( sc.prims.at( i ) );
 			TreeBox & b = primBoxes[i];
-			b.lo = b.hi = stored.at( sc.vmap.value( t[0] ) );
-			for ( int c = 1; c < 3; c++ ) {
-				const Vector3 & v = stored.at( sc.vmap.value( t[c] ) );
+			b.lo = b.hi = stored.at( sc.vmap.value( p.v[0] ) );
+			for ( int c = 1; c < 4; c++ ) {
+				const Vector3 & v = stored.at( sc.vmap.value( p.v[c] ) );
 				for ( int a = 0; a < 3; a++ ) { b.lo[a] = std::min( b.lo[a], v[a] ); b.hi[a] = std::max( b.hi[a], v[a] ); }
 			}
 			order[i] = i;
 		}
 		TreeBox domain{ smn, smx };
 		treeAt.append( quint32( treeBlob.size() ) );
+		/* The tree REORDERS the section's primitives spatially; the quad and
+		 * flat-bit tables were already emitted in sc.prims order, so the leaf
+		 * indices the tree hands back must stay THAT order. appendMeshTree
+		 * sorts `order` in place but its leaves store the original position.
+		 */
 		appendMeshTree( treeBlob, order, primBoxes, 0, int( order.size() ), domain );
-		const quint32 nodes = quint32( sc.tris.size() ) * 2 - 1;
+		const quint32 nodes = quint32( sc.prims.size() ) * 2 - 1;
 		TreeBox content = primBoxes.first();
 		for ( const TreeBox & b : std::as_const( primBoxes ) )
 			for ( int a = 0; a < 3; a++ ) { content.lo[a] = std::min( content.lo[a], b.lo[a] ); content.hi[a] = std::max( content.hi[a], b.hi[a] ); }
@@ -634,16 +722,16 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		// one material for the whole mesh, so one run per section: material 0
 		// from primitive 0, covering everything this section holds
 		materialRuns.append( char( 0 ) ); materialRuns.append( char( 0 ) );
-		materialRuns.append( char( 0 ) ); materialRuns.append( char( sc.tris.size() ) );
+		materialRuns.append( char( 0 ) ); materialRuns.append( char( sc.prims.size() ) );
 		// firstSharedIndex << 8 | low byte, and the low byte is numPacked in
 		// every vanilla section (measured on the billboard's 7 and the whole
 		// corpus); no shared vertices are written, so firstShared stays 0
 		setU32( section, 0x4c, quint32( sc.verts.size() ) );
-		setU32( section, 0x50, ( firstPrim << 8 ) | quint32( sc.tris.size() ) );
+		setU32( section, 0x50, ( firstPrim << 8 ) | quint32( sc.prims.size() ) );
 		setU32( section, 0x54, 1 );   // 1 in every corpus section; 0 was written here
 		section[0x58] = char( sc.verts.size() );
 		sectionsBlob += section;
-		firstPrim += quint32( sc.tris.size() );
+		firstPrim += quint32( sc.prims.size() );
 		totalPacked += quint32( sc.verts.size() );
 	}
 

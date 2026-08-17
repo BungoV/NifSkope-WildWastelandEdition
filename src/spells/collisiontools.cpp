@@ -5484,16 +5484,22 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	 * and capsule tessellations close their poles with slivers whose float area
 	 * is tiny but nonzero -- a plain zero-area test passes them, and then the
 	 * packfile's grid collapses them into the degenerate triangles the vanilla
-	 * corpus never carries (a compiled basketball read back 16). A triangle
-	 * survives if its height clears one quantization step of the mesh's own
-	 * extent; anything thinner is a line after encoding and only costs budget.
+	 * corpus never carries (a compiled basketball read back 16).
+	 *
+	 * The threshold is a QUARTER step of the whole mesh's extent, and the
+	 * quarter is measured, not chosen: sections quantize against their own
+	 * smaller domains, so a triangle thin at the global scale can carry real
+	 * area in its section -- TransitStation01 holds exactly four, at 0.55-0.88
+	 * global steps but 1.3-2.1 of their sections' steps, and a full-step filter
+	 * dropped them (a real hole, however thin). Nothing legitimate in the
+	 * corpus sits below half a global step; the pole slivers sit at ~0.
 	 */
 	if ( !mesh.verts.isEmpty() ) {
 		Vector3 mn = mesh.verts.first(), mx = mn;
 		for ( const Vector3 & v : std::as_const( mesh.verts ) )
 			for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], v[a] ); mx[a] = std::max( mx[a], v[a] ); }
 		const Vector3 ext = mx - mn;
-		const float step = std::max( { ext[0], ext[1], ext[2] } ) / 2047.0f;
+		const float step = std::max( { ext[0], ext[1], ext[2] } ) / 2047.0f * 0.25f;
 		QVector<Triangle> kept; kept.reserve( mesh.tris.size() );
 		for ( const Triangle & t : std::as_const( mesh.tris ) ) {
 			if ( t[0] >= mesh.verts.size() || t[1] >= mesh.verts.size() || t[2] >= mesh.verts.size() )

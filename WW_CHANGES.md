@@ -1,5 +1,56 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-17d — Compile pairs triangles into quads, the way every Elric output does
+
+A primitive (a,b,c,d) decodes to (a,b,c) and (a,c,d) — hknpdecode's own
+expansion — so two triangles sharing an edge in opposite directions merge into
+one primitive exactly: rotate the first so the shared edge runs c->a, the
+second contributes d. The compile path wrote every triangle as a degenerate
+quad (d==c) before this; 89%% of vanilla's primitives are real quads.
+
+The pairing pass is greedy over the shared-edge map and prefers the flattest
+partner (highest normal agreement), with two guards: a triangle never pairs
+with its own mirror (d would equal b — a zero-volume quad), and leftovers stay
+degenerate quads. Sections then pack PRIMITIVES — up to four vertices each —
+against the same 128-primitive / 255-vertex budgets, and the mesh tree's
+leaves, the key math, the material runs and both hkBitField sizes all follow
+the primitive count as before.
+
+**quadIsFlat now carries real verdicts**: one bit per key-space slot
+((section << (primBits-1)) | localPrim, the indexing measured on 2,965 vanilla
+quads), set when the quad's four corners are coplanar within 1e-4 m. On our
+output the split is exact — flat=1 quads sit at plane distance 0.0, flat=0 at
+9.5e-4 and up — so no bent quad is ever presented to the engine as one plane,
+which is the failure that would matter. triangleIsInterior stays zero
+(semantics still open; zero keeps every edge collidable).
+
+What it buys, measured: the duct compiles to 11 primitives where vanilla has
+10 (2032 bytes vs vanilla's 2064); the floor matches vanilla exactly at 6; and
+the 208-triangle rubble drops from two sections back to ONE — 111 primitives
+vs vanilla's 113, 3,696 bytes vs vanilla's 3,760, against 11,823 bytes the
+night before. Under Havok's FileConvert reader, bitsPerKey and numShapeKeyBits
+now equal vanilla's on both. (One corpus wrinkle surfaced: vanilla itself is
+inconsistent about CMSD +0x40 — ExtRubble stores the used-key count, Diamond
+rubble stores maxKey+1. Ours writes maxKey+1, which has vanilla precedent.)
+
+The 100-file A/B re-ran in full on the pairing build: 99 of 100 clean or
+known (the by-design triangulation notes, the five filed material-CRC files,
+and the four comparator-artifact dynamic lines), zero refusals, zero
+byte-instability, and SmithingToolSaw01 — the silent-partial-geometry case —
+now preserves all 52 triangles.
+
+One measured correction along the way: the quantization sliver filter from
+08-17b used a FULL global step as its threshold, and TransitStation01 proved
+that wrong — it holds four triangles at 0.55–0.88 global steps that carry
+1.3–2.1 steps of real area in their own smaller sections, and the filter
+dropped them (a real hole, however thin). The threshold is a quarter step
+now, which the measurements bracket cleanly: legitimate thin triangles sit at
+0.55+, the pole slivers at ~0. And the "2272 -> 2268" read that flagged it was
+itself half artifact — vanilla packs both of that station's bodies into one
+system, ours into two, and the comparator summed vanilla's combined triangle
+line against our first system only. Every triangle is present on the current
+build, both systems byte-exact.
+
 ## 2026-08-17c — no-game validation: Havok's own SDK reads every compiled blob back clean
 
 The question was whether compiled collision can be tested without launching
