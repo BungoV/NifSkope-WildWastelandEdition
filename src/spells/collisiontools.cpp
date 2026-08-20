@@ -309,10 +309,19 @@ struct CollisionMesh
 {
 	QVector<Vector3> verts;
 	QVector<Triangle> tris;
+	/*! Havok material CRC per triangle, parallel to `tris`.
+	 *
+	 * A body assembled from several shapes carries several materials, and
+	 * Compile took the first leaf's for the whole packfile until 2026-08-20.
+	 * The compiled format keeps a material per primitive, so the gatherer has
+	 * to record which leaf each triangle came from.
+	 */
+	QVector<quint32> triMaterial;
 };
 
 void appendMesh( CollisionMesh & out, const QVector<Vector3> & verts,
-	const QVector<Triangle> & tris, const Matrix4 & transform, float scale )
+	const QVector<Triangle> & tris, const Matrix4 & transform, float scale,
+	quint32 material = 0 )
 {
 	if ( verts.isEmpty() || tris.isEmpty() || out.verts.size() + verts.size() > 65535 ) return;
 	quint16 base = quint16( out.verts.size() );
@@ -320,6 +329,7 @@ void appendMesh( CollisionMesh & out, const QVector<Vector3> & verts,
 	for ( Triangle t : tris ) {
 		if ( t[0] >= verts.size() || t[1] >= verts.size() || t[2] >= verts.size() ) continue;
 		t[0] += base; t[1] += base; t[2] += base; out.tris.append( t );
+		out.triMaterial.append( material );
 	}
 }
 
@@ -333,7 +343,7 @@ QVector<Triangle> boxTriangles()
 }
 
 void appendSphereMesh( CollisionMesh & out, const Vector3 & center, float radius,
-	const Matrix4 & transform, float scale )
+	const Matrix4 & transform, float scale, quint32 material = 0 )
 {
 	constexpr int slices = 16, stacks = 8;
 	constexpr float pi = 3.14159265358979323846f;
@@ -352,16 +362,16 @@ void appendSphereMesh( CollisionMesh & out, const Vector3 & center, float radius
 		quint16 c = quint16( ( y + 1 ) * slices + x ), d = quint16( ( y + 1 ) * slices + ( x + 1 ) % slices );
 		tris.append( Triangle( a, b, c ) ); tris.append( Triangle( b, d, c ) );
 	}
-	appendMesh( out, verts, tris, transform, scale );
+	appendMesh( out, verts, tris, transform, scale, material );
 }
 
 void appendCapsuleMesh( CollisionMesh & out, Vector3 a, Vector3 b, float radius,
-	const Matrix4 & transform, float scale )
+	const Matrix4 & transform, float scale, quint32 material = 0 )
 {
 	constexpr int slices = 16, hemi = 4;
 	constexpr float pi = 3.14159265358979323846f;
 	Vector3 axis = b - a;
-	if ( axis.length() < 1.0e-6f ) { appendSphereMesh( out, a, radius, transform, scale ); return; }
+	if ( axis.length() < 1.0e-6f ) { appendSphereMesh( out, a, radius, transform, scale, material ); return; }
 	axis.normalize();
 	Vector3 u = Vector3::crossproduct( axis, std::fabs( axis[2] ) < 0.9f ? Vector3( 0, 0, 1 ) : Vector3( 0, 1, 0 ) );
 	u.normalize(); Vector3 v = Vector3::crossproduct( axis, u ); v.normalize();
@@ -385,7 +395,7 @@ void appendCapsuleMesh( CollisionMesh & out, Vector3 a, Vector3 b, float radius,
 		quint16 p2 = quint16( ( r + 1 ) * slices + s ), p3 = quint16( ( r + 1 ) * slices + ( s + 1 ) % slices );
 		tris.append( Triangle( p0, p1, p2 ) ); tris.append( Triangle( p1, p3, p2 ) );
 	}
-	appendMesh( out, verts, tris, transform, scale );
+	appendMesh( out, verts, tris, transform, scale, material );
 }
 
 /*! Triangulate a convex shape from its own stored face planes.
@@ -474,18 +484,24 @@ void tlCollAppendEditableMesh( const NifModel * nif, int shapeBlock, CollisionMe
 		Matrix4 next( transform ); next.multiply4x3( nif->get<Matrix4>( shape, "Transform" ) );
 		tlCollAppendEditableMesh( nif, nif->getLink( shape, "Shape" ), out, next, depth + 1 ); return;
 	}
+	/* Each LEAF's own Material, carried per triangle. The wrappers above (list,
+	 * MOPP, transform) hold a Material field too, but it is the leaves that the
+	 * compiled run table is built from -- and taking the first leaf's for all of
+	 * them is exactly the flattening this replaces.
+	 */
+	const quint32 material = nif->get<quint32>( shape, "Material" );
 	if ( type == QLatin1String( "bhkBoxShape" ) ) {
 		Vector3 d = nif->get<Vector3>( shape, "Dimensions" ); QVector<Vector3> v;
 		for ( int z = -1; z <= 1; z += 2 ) for ( int y = -1; y <= 1; y += 2 ) for ( int x = -1; x <= 1; x += 2 )
 			v.append( Vector3( d[0] * x, d[1] * y, d[2] * z ) );
-		appendMesh( out, v, boxTriangles(), transform, 69.99125f ); return;
+		appendMesh( out, v, boxTriangles(), transform, 69.99125f, material ); return;
 	}
 	if ( type == QLatin1String( "bhkSphereShape" ) ) {
-		appendSphereMesh( out, Vector3(), nif->get<float>( shape, "Radius" ), transform, 69.99125f ); return;
+		appendSphereMesh( out, Vector3(), nif->get<float>( shape, "Radius" ), transform, 69.99125f, material ); return;
 	}
 	if ( type == QLatin1String( "bhkCapsuleShape" ) ) {
 		appendCapsuleMesh( out, nif->get<Vector3>( shape, "First Point" ), nif->get<Vector3>( shape, "Second Point" ),
-			nif->get<float>( shape, "Radius" ), transform, 69.99125f ); return;
+			nif->get<float>( shape, "Radius" ), transform, 69.99125f, material ); return;
 	}
 	if ( type == QLatin1String( "bhkConvexVerticesShape" ) ) {
 		/* Duplicate positions first. Vanilla hulls carry them (the target
@@ -515,14 +531,14 @@ void tlCollAppendEditableMesh( const NifModel * nif, int shapeBlock, CollisionMe
 			QVector<Vector4> hullVerts, hullNorms;
 			tris = compute_convex_hull( v, hullVerts, hullNorms );
 		}
-		appendMesh( out, v, tris, transform, 69.99125f ); return;
+		appendMesh( out, v, tris, transform, 69.99125f, material ); return;
 	}
 	if ( type == QLatin1String( "bhkNiTriStripsShape" ) ) {
 		for ( qint32 dataBlock : nif->getLinkArray( shape, "Strips Data" ) ) {
 			QModelIndex data = tlCollBlockIndex( nif, dataBlock ); QVector<Vector3> v = nif->getArray<Vector3>( data, "Vertices" );
 			QVector<QVector<quint16>> strips; QModelIndex points = nif->getIndex( data, "Points" );
 			for ( int r = 0; r < nif->rowCount( points ); r++ ) strips.append( nif->getArray<quint16>( nif->getIndex( points, r ) ) );
-			appendMesh( out, v, triangulate( strips ), transform, 1.0f );
+			appendMesh( out, v, triangulate( strips ), transform, 1.0f, material );
 		}
 	}
 }
@@ -2433,7 +2449,7 @@ private:
 				const HknpShape & s = sys.shapes.at( i );
 				if ( selectedShape >= 0 ? i != selectedShape : ( s.bodyId >= 0 && quint32( s.bodyId ) != bodyId ) ) continue;
 				QVector<Vector3> v; for ( const Vector3 & p : s.verts ) v.append( s.transformed( p ) );
-				appendMesh( out, v, s.tris, Matrix4(), 69.99125f );
+				appendMesh( out, v, s.tris, Matrix4(), 69.99125f, s.materialCRC );
 			}
 		} else {
 			appendEditableMesh( item->data( 0, ShapeBlockRole ).toInt(), out );
@@ -5500,8 +5516,13 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 			for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], v[a] ); mx[a] = std::max( mx[a], v[a] ); }
 		const Vector3 ext = mx - mn;
 		const float step = std::max( { ext[0], ext[1], ext[2] } ) / 2047.0f * 0.25f;
+		// the material list is parallel to the triangles, so it is filtered with
+		// them -- dropping a sliver without dropping its material would slide
+		// every later triangle onto the wrong one
 		QVector<Triangle> kept; kept.reserve( mesh.tris.size() );
-		for ( const Triangle & t : std::as_const( mesh.tris ) ) {
+		QVector<quint32> keptMaterial; keptMaterial.reserve( mesh.triMaterial.size() );
+		for ( qsizetype i = 0; i < mesh.tris.size(); i++ ) {
+			const Triangle & t = mesh.tris.at( i );
 			if ( t[0] >= mesh.verts.size() || t[1] >= mesh.verts.size() || t[2] >= mesh.verts.size() )
 				continue;
 			const Vector3 e1 = mesh.verts.at( t[1] ) - mesh.verts.at( t[0] );
@@ -5509,14 +5530,20 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 			const Vector3 e3 = mesh.verts.at( t[2] ) - mesh.verts.at( t[1] );
 			const float area2 = Vector3::crossproduct( e1, e2 ).length();
 			const float base = std::max( { e1.length(), e2.length(), e3.length() } );
-			if ( area2 >= 1.0e-12f && base > 0.0f && area2 / base >= step )
+			if ( area2 >= 1.0e-12f && base > 0.0f && area2 / base >= step ) {
 				kept.append( t );
+				if ( i < mesh.triMaterial.size() )
+					keptMaterial.append( mesh.triMaterial.at( i ) );
+			}
 		}
-		mesh.tris = kept;
+		mesh.tris = kept; mesh.triMaterial = keptMaterial;
 	}
 	HknpEncodeInput input; input.verts.reserve( mesh.verts.size() );
 	for ( const Vector3 & v : mesh.verts ) input.verts.append( v / 69.99125f );
 	input.tris = mesh.tris;
+	// per-triangle materials, so a body made of parts keeps all of them; the
+	// writer folds them into the shape's material table and the CMSD run table
+	input.triMaterial = mesh.triMaterial;
 	QModelIndex info = nif->getIndex( body, "Rigid Body Info" ); QModelIndex filter = bhkGetHavokFilter( nif, info );
 	quint32 sourceMotion = info.isValid() ? nif->get<quint32>( info, "Motion System" ) : 5u;
 	QStringList unsupported;

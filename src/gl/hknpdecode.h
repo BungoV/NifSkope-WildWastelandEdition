@@ -185,6 +185,21 @@ struct HknpShape
 	 */
 	QByteArray materialRawData;
 	QVector<QPair<qsizetype, qsizetype>> materialLocal;
+	/*! Every CRC in that table, in stored order, decoded 2026-08-20.
+	 *
+	 * The entries are 0x18 apart from object +0x20, each carrying a 1 at +0x10
+	 * and the CRC at +0x14. `materialCRC` above is the ONE effective material a
+	 * convex shape resolves to; this is the list a compressed mesh's run table
+	 * indexes, and it is the only place a multi-material mesh's other CRCs exist.
+	 */
+	QVector<quint32> materialTable;
+	/*! Material CRC per decoded triangle, parallel to `tris`.
+	 *
+	 * Compressed meshes only, and only when the run table decodes -- the CMSD
+	 * carries one material per PRIMITIVE, so both triangles of a quad take the
+	 * same one. Empty means every triangle takes `materialCRC`.
+	 */
+	QVector<quint32> triMaterial;
 	/*! A compressed mesh's hknpCompressedMeshShapeData, carried whole.
 	 *
 	 * Its geometry decodes, but the quantization does not survive a round trip:

@@ -1684,6 +1684,26 @@ int cmdCollision( const QString & file, int extractBlock, const QString & outFil
 							.arg( shp.shapeMaterialCRC, 8, 16, QLatin1Char( '0' ) ).toUpper(), -12 )
 						.arg( geom )
 				  << Qt::endl;
+			/* A compressed mesh can hold MANY materials -- one per primitive,
+			 * through the CMSD run table -- and the column above shows only the
+			 * shape-level fallback, which on Toilet01 is zero while its three
+			 * real materials sit in the table. So print the table and how the
+			 * triangles divide over it whenever there is more than one.
+			 */
+			if ( shp.materialTable.size() > 1 ) {
+				QStringList parts;
+				for ( int m = 0; m < shp.materialTable.size(); m++ ) {
+					const quint32 crc = shp.materialTable.at( m );
+					int n = 0;
+					for ( quint32 t : shp.triMaterial ) if ( t == crc ) n++;
+					parts << QStringLiteral( "0x%1 (%2 t)" )
+						.arg( QStringLiteral( "%1" ).arg( crc, 8, 16, QLatin1Char( '0' ) ).toUpper() )
+						.arg( n );
+				}
+				out() << QString( "  %1 materials %2: %3" ).arg( "", -6 )
+							.arg( shp.materialTable.size() ).arg( parts.join( QStringLiteral( ", " ) ) )
+					  << Qt::endl;
+			}
 		}
 	}
 	return 0;

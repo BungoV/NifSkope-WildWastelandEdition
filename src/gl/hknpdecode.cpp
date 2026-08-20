@@ -644,6 +644,33 @@ static void decodeCompressedMesh( Reader & r, qsizetype B, const QHash<qsizetype
 	if ( secp < 0 || prim < 0 || pack < 0 || nsec > 4096 )
 		return;
 
+	/* The material table and the run table, decoded 2026-08-20.
+	 *
+	 * A mesh does not carry one material: the CMSD holds an array of 4-byte runs
+	 * at +0xa0 -- [u8 materialIndex][u8 0][u8 firstPrimitiveInSection][u8 count]
+	 * -- and each section names its slice of it at +0x54, packed
+	 * (firstRun << 8) | runCount the same way +0x50 packs its primitives. The
+	 * index is into hknpBSMaterialProperties, whose entries are 0x18 apart.
+	 *
+	 * Measured on 2,490 vanilla meshes: every section's runs start at primitive
+	 * 0 and sum to its primitive count, and byte 1 is zero on all 9,536 records.
+	 */
+	{
+		const quint8 * mat = reinterpret_cast<const quint8 *>( shape.materialRawData.constData() );
+		const qsizetype matSize = shape.materialRawData.size();
+		if ( matSize >= 0x38 ) {
+			quint32 count = 0;
+			std::memcpy( &count, mat + 0x18, 4 );
+			for ( quint32 i = 0; i < count && qsizetype( 0x20 + i * 0x18 + 0x18 ) <= matSize; i++ ) {
+				quint32 crc = 0;
+				std::memcpy( &crc, mat + 0x20 + i * 0x18 + 0x14, 4 );
+				shape.materialTable.append( crc );
+			}
+		}
+	}
+	const qsizetype runs = local.value( B + 0xa0, -1 );
+	const quint32 numRuns = r.u32( B + 0xa8 );
+
 	QHash<quint64, int> vertIndex;
 	auto addVert = [&]( quint64 key, const Vector3 & v ) -> int {
 		auto it = vertIndex.constFind( key );
@@ -677,6 +704,25 @@ static void decodeCompressedMesh( Reader & r, qsizetype B, const QHash<qsizetype
 		quint32 firstPrim = pf >> 8, numPrim = pf & 0xFF;
 		quint32 numPacked = r.u8( S + 0x58 );
 
+		/* This section's slice of the run table, expanded to one material per
+		 * primitive. A run's start is SECTION-relative, so the walk is local;
+		 * anything the runs do not name keeps the shape's own material, which is
+		 * what a single-material file leaves everywhere.
+		 */
+		QVector<quint32> primMaterial( qsizetype( numPrim ), shape.materialCRC );
+		if ( runs >= 0 && !shape.materialTable.isEmpty() ) {
+			const quint32 rf = r.u32( S + 0x54 );
+			const quint32 firstRun = rf >> 8, runCount = rf & 0xFF;
+			for ( quint32 k = 0; k < runCount && firstRun + k < numRuns; k++ ) {
+				const qsizetype R = runs + qsizetype( firstRun + k ) * 4;
+				const quint32 mi = r.u8( R ), start = r.u8( R + 2 ), n = r.u8( R + 3 );
+				const quint32 crc = mi < quint32( shape.materialTable.size() )
+					? shape.materialTable.at( qsizetype( mi ) ) : shape.materialCRC;
+				for ( quint32 p = start; p < start + n && p < numPrim; p++ )
+					primMaterial[qsizetype( p )] = crc;
+			}
+		}
+
 		auto vert = [&]( quint8 idx ) -> int {
 			if ( idx < numPacked ) {
 				quint32 v = r.u32( pack + qsizetype( firstPacked + idx ) * 4 );
@@ -709,10 +755,14 @@ static void decodeCompressedMesh( Reader & r, qsizetype B, const QHash<qsizetype
 			if ( a < 0 || b < 0 || c < 0 || shape.verts.size() > 65535 )
 				continue;
 			shape.tris.append( Triangle( quint16( a ), quint16( b ), quint16( c ) ) );
+			shape.triMaterial.append( primMaterial.at( qsizetype( t ) ) );
 			if ( dRaw != r.u8( P + 2 ) ) {	// quad: second triangle
 				int dd = vert( dRaw );
-				if ( dd >= 0 )
+				if ( dd >= 0 ) {
 					shape.tris.append( Triangle( quint16( a ), quint16( c ), quint16( dd ) ) );
+					// both halves of a quad are ONE primitive, so one material
+					shape.triMaterial.append( primMaterial.at( qsizetype( t ) ) );
+				}
 			}
 		}
 	}

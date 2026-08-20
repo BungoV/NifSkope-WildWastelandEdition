@@ -74,14 +74,30 @@ every tree walking every primitive exactly once. See WW_CHANGES 2026-08-17.
 
 Still open, none of it blocking:
 
-**0. Multi-material compile.** Measured by the 100-file A/B (WW_CHANGES
-2026-08-17b): 5 of 100 files lose material CRCs because Compile flattens a
-multi-shape body into one mesh carrying ONE material (the first leaf's). The
-format supports better: the CMSD material-run table at +0xa0 (4-byte records:
-material index, then what reads as first-primitive and count bytes) plus an
-N-entry hknpBSMaterialProperties. Pin the run byte-format with one two-material
-Elric fixture (fixtures.ps1 + a `set` on one sub-shape's Material), then carry
-a per-triangle material index through CollisionMesh and emit runs per section.
+**0. ~~Multi-material compile~~ DONE 2026-08-20.** The run byte-format was
+pinned against the vanilla corpus instead of an Elric fixture — 2,490 meshes,
+3,898 sections, 9,536 run records — and per-triangle materials now run all the
+way from each leaf shape's `Material`, through `CollisionMesh`, into the CMSD
+run table and an N-entry hknpBSMaterialProperties (stride 0x18, not 0x20). It
+also fixed a live bug in every multi-section packfile we had written: the
+literal `1` at section +0x54 pointed every section at run 0. Details in
+WW_CHANGES 2026-08-20; guard in `tests/spells/collision_materials.sh`;
+independent byte checker in `tools/hkmatrun.py`.
+
+**0b. Decompile flattens a multi-material MESH.** The other half of the same
+round trip, and now the bigger one. A compiled mesh that holds several materials
+decodes fine — `HknpShape::materialTable` and `::triMaterial` carry them since
+2026-08-20 — but `buildShape` writes ONE bhkNiTriStripsShape with one
+`Material`, so vanilla → decompile → compile still comes back single-material.
+CeilingFanOff01 goes in with six and comes out with one.
+
+Worth doing: **335 of 2,490 SetDressing compressed meshes (13.5%) use more than
+one material** — 293 use two, 27 three, and one uses seven. What it needs is for
+the mesh branch of `buildShape` (havok.cpp, the NiTriStripsData chain) to emit
+one strips shape per distinct material and wrap them in a `bhkListShape` when
+there is more than one, exactly as the multi-shape bodies already decompile.
+The triangles are already grouped for it. Note this CHANGES decompile output for
+13.5% of meshes, so it wants saying out loud rather than slipping in.
 
 **1. triangleIsInterior semantics.** Correlates with closed surfaces (767 of
 867 set bits sit on fully edge-shared triangles) but is not equal to that test

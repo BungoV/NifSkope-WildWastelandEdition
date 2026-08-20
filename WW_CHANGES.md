@@ -1,5 +1,100 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-20 — Compile keeps every material, not just the first leaf's
+
+A body assembled from parts carries a material per part, and Compile wrote one
+for the whole packfile — whichever the first leaf shape happened to hold. The
+format has always had room for the rest, and this decodes the two structures
+that hold it, against the vanilla corpus rather than a fixture.
+
+**hknpBSMaterialProperties' stride is 0x18, not 0x20.** A one-entry table is
+0x38 bytes that pad to 0x40, so a single-material file cannot tell the two
+apart, and the writer's 0x20 assumption was right by accident for as long as it
+only ever wrote one. Toilet01 holds three, and its CRCs sit at object +0x34,
++0x4c and +0x64 — 0x18 apart. An entry is otherwise zero but for a 1 at +0x10
+and the CRC at +0x14.
+
+**The CMSD's run table at +0xa0 names a material per primitive.** Each record is
+four bytes: `[u8 materialIndex][u8 0][u8 firstPrimitive][u8 count]`. The start is
+SECTION-RELATIVE — every section's runs begin at primitive 0 and cover exactly
+that section's primitive count. Measured over 2,490 vanilla meshes: 3,898 of
+3,898 sections cover exactly, and byte 1 is zero on all 9,536 records.
+
+**Section +0x54 is `(firstRunIndex << 8) | runCount`**, the same packing as
++0x50's `(firstPrimitive << 8) | primitiveCount`. The literal `1` the writer put
+there was the one-run-per-section case mistaken for a constant —
+Res01PlayerHouseInterior's ten sections read 0x0001, 0x0101, 0x0201, 0x0303,
+0x0601, 0x0701 … and its section 3, the only one holding two materials, is the
+0x0303.
+
+**Identical run blocks are shared between sections.** Replaying vanilla with
+first-use dedup reproduces 2,472 of 2,490 tables byte for byte; the remaining 18
+share harder still, overlapping sub-blocks, which is an optimisation and not a
+requirement. The writer dedups the same way.
+
+### What changed
+
+- `HknpEncodeInput::triMaterial` — a CRC per triangle, parallel to `tris`. Empty
+  keeps the old single-material behaviour, so nothing that does not supply it
+  changes. The writer builds the shape's table from the distinct values in
+  first-use order, refusing past 256 because a run names its material in a byte.
+- **Quad pairing respects materials**: two triangles that disagree cannot merge
+  into one primitive, since a primitive carries one material.
+- **The gatherer records provenance**: `CollisionMesh::triMaterial`, filled by
+  `appendMesh` from each LEAF shape's own `Material` — box, sphere, capsule,
+  convex hull and tri-strips alike. It is filtered alongside `tris` by the
+  quantization sliver pass, because dropping a triangle without dropping its
+  material would slide every later one onto the wrong entry.
+- **The decoder reads both structures back**: `HknpShape::materialTable` and
+  `HknpShape::triMaterial`. Nothing could see a mesh's other materials before —
+  `nifskope-cli collision` showed the shape-level fallback, which on Toilet01 is
+  zero while its three real materials sit in the table. It now prints
+  `materials 3: 0x0B237EAD (46 t), 0x1E151923 (10 t), 0x34C446FB (148 t)`.
+
+### The bug this turned up on the way
+
+The literal `1` at +0x54 was not just incomplete, it was **wrong on every
+multi-section mesh we ever compiled**: each section pointed at run 0, whose count
+belongs to section 0. It stayed invisible because every run named material 0, and
+because all but the last section pack full — so the counts agreed by accident.
+`tools/hkmatrun.py` catches it on the old build's own output:
+Res01PlayerHouseInterior, compiled by 7e54df4, has a section claiming 128
+primitives of 119.
+
+### Verification
+
+- `tests/spells/collision_materials.sh`, 11 checks. The fixture is
+  RefrigeratorBrokenDoor01 — a dynamic compound of two polytopes whose materials
+  differ — decompiled and recompiled. Both CRCs reach the table, primitives split
+  6/6, the byte invariants hold, and **swapping the two source materials swaps
+  the run order**, which is what says a material follows its shape rather than
+  its position. Both boxes triangulate to six quads, so the tallies alone cannot
+  say that; the order can.
+- `tools/hkmatrun.py` parses the packfile independently of NifSkope's own
+  decoder, so a writer bug our decoder would agree with still fails it. It
+  carries `--damage` for the harness to prove that: forcing every section's run
+  count back to 1 reproduces the pre-2026-08-20 layout and must be rejected.
+- Sweep, decompile then compile, run table checked on every result: **93 mixed
+  vanilla files, 92 compiled, 0 run-table failures** (one has no compiled
+  collision to start from), and **60 files picked because their packfile holds
+  shapes whose materials differ, 60 of 60 clean**. Thirteen of those 60 came out
+  with two materials; the other 47 keep their differing shapes in SEPARATE
+  BODIES (TreeSwing02's mesh is body 0, its polytope body 1), so each body
+  compiles with its own material and there was never anything to flatten.
+- `collision_compile.sh` 12/12 and `collision_undo.sh` 12/12 unchanged; the
+  `--roundtrip` guard stays byte-exact on Toilet01, Res01PlayerHouseInterior,
+  RefrigeratorBrokenDoor01 and BoatTug01.
+
+### What is still flattened
+
+A single compressed mesh that holds several materials decompiles into ONE
+editable shape with one `Material`, so the vanilla → decompile → compile trip
+still loses the rest — CeilingFanOff01 goes in with six and comes out with one.
+That is a decompile-side loss, not a compile-side one, and it is worth fixing:
+**335 of 2,490 SetDressing meshes (13.5%) use more than one material** (293 use
+two, one uses seven). The decoder now hands out the per-triangle materials that
+a split would need. Filed in docs/TO_BE_IMPLEMENTED.md.
+
 ## 2026-08-17d — Compile pairs triangles into quads, the way every Elric output does
 
 A primitive (a,b,c,d) decodes to (a,b,c) and (a,c,d) — hknpdecode's own

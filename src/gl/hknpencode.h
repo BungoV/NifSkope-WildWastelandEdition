@@ -14,6 +14,19 @@ struct HknpEncodeInput
 	QVector<Vector3> verts;       //!< Havok-space vertices
 	QVector<Triangle> tris;
 	quint32 materialCRC = 0;
+	/*! Per-triangle Havok material CRC, parallel to `tris`.
+	 *
+	 * Empty means the whole mesh takes `materialCRC`, which is what every
+	 * compile wrote before 2026-08-20. Filled, the writer builds the shape's
+	 * material table from the distinct values in first-use order and emits the
+	 * CMSD run table over it, so a body assembled from parts with different
+	 * materials keeps them instead of taking the first leaf's for everything.
+	 *
+	 * A run record names its material in ONE BYTE, so at most 256 distinct
+	 * values encode; beyond that the writer refuses rather than silently
+	 * folding them together.
+	 */
+	QVector<quint32> triMaterial;
 	quint32 layer = 1;
 	quint8 filterFlags = 0;
 	quint16 filterGroup = 0;

@@ -195,22 +195,30 @@ QByteArray refCountedProperties( quint32 key = 0x0000f100u )
 	QByteArray out( 0x20, 0 ); setU32( out, 0x08, 1 ); setU32( out, 0x0c, 0x80000001u ); setU32( out, 0x18, key ); return out;
 }
 
-/*! hknpBSMaterialProperties: 0x40 bytes, ONE hkArray entry of 0x20.
+/*! hknpBSMaterialProperties: 0x20 of header, then ONE 0x18 ENTRY PER MATERIAL.
  *
  * The array's payload pointer is at +0x10 and needs a local fixup to +0x20 --
  * this wrote a count with no pointer until 2026-08-16, which is a null
- * dereference the moment the engine reads the material table. The entry carries
- * a 1 at +0x10 and the material CRC at +0x14 (object +0x30 / +0x34).
+ * dereference the moment the engine reads the material table. An entry carries
+ * a 1 at +0x10 and the material CRC at +0x14.
  *
- * Vanilla writes one entry per distinct material; the compile path assigns one
- * material to the whole mesh, so it writes exactly one. Measured against 41
- * corpus shapes: single-material files are 0x40 bytes with count 1, never the
- * 0x50 bytes with count 2 this used to emit.
+ * The STRIDE is 0x18, measured 2026-08-20 against the vanilla tables that hold
+ * more than one entry: Toilet01's three CRCs sit at object +0x34, +0x4c and
+ * +0x64, which is 0x18 apart, not the 0x20 a single-entry file cannot tell it
+ * from. One entry is 0x38 bytes that pad to 0x40 -- which is why the
+ * single-material writer was right by accident, and why nothing caught this
+ * until a second entry had to go in.
  */
-QByteArray materialProperties( quint32 material )
+QByteArray materialProperties( const QVector<quint32> & materials )
 {
-	QByteArray out( 0x40, 0 ); setU32( out, 0x18, 1 ); setU32( out, 0x1c, 0x80000001u );
-	setU32( out, 0x30, 1 ); setU32( out, 0x34, material ); return out;
+	const qsizetype count = std::max<qsizetype>( materials.size(), 1 );
+	QByteArray out( 0x20 + count * 0x18, 0 );
+	setU32( out, 0x18, quint32( count ) ); setU32( out, 0x1c, 0x80000000u | quint32( count ) );
+	for ( qsizetype i = 0; i < count; i++ ) {
+		setU32( out, 0x20 + i * 0x18 + 0x10, 1 );
+		setU32( out, 0x20 + i * 0x18 + 0x14, i < materials.size() ? materials.at( i ) : 0u );
+	}
+	return out;
 }
 
 /*! hknpCompressedMeshShape, 0xc0 bytes.
@@ -449,6 +457,35 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		return fail( QStringLiteral( "Collision meshes support at most 65,535 vertices." ) );
 	for ( const Triangle & t : in.tris ) if ( t[0] >= in.verts.size() || t[1] >= in.verts.size() || t[2] >= in.verts.size() )
 		return fail( QStringLiteral( "Collision contains an invalid triangle index." ) );
+	if ( !in.triMaterial.isEmpty() && in.triMaterial.size() != in.tris.size() )
+		return fail( QStringLiteral( "Collision material list does not match the triangle count." ) );
+
+	/* The shape's material table: the distinct per-triangle CRCs in FIRST-USE
+	 * order, which is the order the vanilla tables run in. Without a per-triangle
+	 * list every triangle takes in.materialCRC and the table holds one entry,
+	 * which is what this wrote until 2026-08-20.
+	 *
+	 * A run record names its material in one byte, so 256 is the ceiling. Refuse
+	 * past it rather than fold two materials together silently.
+	 */
+	QVector<quint32> materials;
+	QVector<quint16> triMat( in.tris.size(), 0 );
+	{
+		const bool perTriangle = in.triMaterial.size() == in.tris.size();
+		QHash<quint32, quint16> index;
+		for ( qsizetype i = 0; i < in.tris.size(); i++ ) {
+			const quint32 crc = perTriangle ? in.triMaterial.at( i ) : in.materialCRC;
+			const auto have = index.constFind( crc );
+			if ( have != index.constEnd() ) {
+				triMat[i] = *have;
+				continue;
+			}
+			if ( materials.size() >= 256 )
+				return fail( QStringLiteral( "Collision uses more than 256 distinct Havok materials." ) );
+			const quint16 slot = quint16( materials.size() );
+			index.insert( crc, slot ); materials.append( crc ); triMat[i] = slot;
+		}
+	}
 
 	/* Adjacent triangles pair into QUADS first, the way every Elric output
 	 * does (89%% of vanilla primitives are quads). A primitive (a,b,c,d)
@@ -460,7 +497,7 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	 * greedy pass prefers the flattest partner, which is also what keeps
 	 * quadIsFlat meaningful. Triangles left over stay degenerate quads (d==c).
 	 */
-	struct MeshPrim { quint16 v[4]; bool flat; };
+	struct MeshPrim { quint16 v[4]; bool flat; quint16 mat; };
 	QVector<MeshPrim> prims;
 	{
 		auto normalOf = [&]( const Triangle & t ) {
@@ -487,6 +524,10 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 				const quint16 u = t1[e], w = t1[( e + 1 ) % 3];
 				for ( const auto & cand : byEdge.value( ekey( w, u ) ) ) {
 					if ( cand.first == i || used.at( cand.first ) )
+						continue;
+					// a quad carries ONE material, so two triangles that do not
+					// agree on theirs cannot merge into one primitive
+					if ( triMat.at( cand.first ) != triMat.at( i ) )
 						continue;
 					const Triangle & t2 = in.tris.at( cand.first );
 					const quint16 d = t2[( cand.second + 2 ) % 3];
@@ -522,6 +563,7 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 				p.flat = false;
 			}
 			used[i] = true;
+			p.mat = triMat.at( i );
 			prims.append( p );
 		}
 	}
@@ -645,7 +687,7 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	// this pointed a mass-properties key at hknpBSMaterialProperties until 08-16
 	quint32 ref = write( refCountedProperties( 0x0000f601u ) ); fx.virtuals.append( { ref, 0, names.value( QStringLiteral( "hkRefCountedProperties" ) ) } );
 	fx.local.append( { ref, ref + 0x10 } ); fx.global.append( { shape + 0x20, 2, ref } ); pad( data, 16 );
-	quint32 mat = write( materialProperties( in.materialCRC ) ); fx.global.append( { ref + 0x10, 2, mat } );
+	quint32 mat = write( materialProperties( materials ) ); fx.global.append( { ref + 0x10, 2, mat } );
 	fx.virtuals.append( { mat, 0, names.value( QStringLiteral( "hknpBSMaterialProperties" ) ) } );
 	fx.local.append( { mat + 0x10, mat + 0x20 } );   // the material array's own payload
 	pad( data, 16 );
@@ -657,6 +699,7 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	// (that is the point of sections — precision scales with density), quads
 	// hold section-relative u8 indices, packed verts concatenate per section
 	QByteArray quads, packed, sectionsBlob, treeBlob, materialRuns;
+	QHash<QByteArray, quint32> runIndex;   // a section's run block -> where it landed
 	QVector<quint32> treeAt;              // each section's tree, relative to treeBlob
 	QVector<TreeBox> secBoxes;            // STORED-coordinate content box per section
 	quint32 firstPrim = 0, totalPacked = 0;
@@ -719,16 +762,43 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 		setU32( section, 0x08, nodes ); setU32( section, 0x0c, 0x80000000u | nodes );
 		for ( int a = 0; a < 3; a++ ) { setFloat( section, 0x10 + a * 4, smn[a] ); setFloat( section, 0x20 + a * 4, smx[a] ); setFloat( section, 0x30 + a * 4, smn[a] ); setFloat( section, 0x3c + a * 4, step[a] ); }
 		setU32( section, 0x48, totalPacked );
-		// one material for the whole mesh, so one run per section: material 0
-		// from primitive 0, covering everything this section holds
-		materialRuns.append( char( 0 ) ); materialRuns.append( char( 0 ) );
-		materialRuns.append( char( 0 ) ); materialRuns.append( char( sc.prims.size() ) );
+		/* This section's material runs: consecutive primitives that agree on a
+		 * material, written as [u8 material][u8 0][u8 firstPrimitive][u8 count].
+		 * The start is SECTION-RELATIVE and the runs cover the section exactly --
+		 * measured 2026-08-20 on 3,898 vanilla sections, every one of which
+		 * starts at 0 and sums to its own primitive count. Byte 1 is zero on all
+		 * 9,536 of their run records.
+		 *
+		 * Identical blocks are SHARED rather than repeated: replaying vanilla
+		 * with first-use dedup reproduces 2,472 of 2,490 tables byte for byte
+		 * (the other 18 share harder still, overlapping sub-blocks).
+		 */
+		QByteArray block;
+		for ( qsizetype k = 0; k < sc.prims.size(); ) {
+			const quint16 m = prims.at( sc.prims.at( k ) ).mat;
+			qsizetype j = k;
+			while ( j < sc.prims.size() && prims.at( sc.prims.at( j ) ).mat == m ) j++;
+			block.append( char( quint8( m ) ) ); block.append( char( 0 ) );
+			block.append( char( quint8( k ) ) ); block.append( char( quint8( j - k ) ) );
+			k = j;
+		}
+		quint32 firstRun = runIndex.value( block, 0xffffffffu );
+		if ( firstRun == 0xffffffffu ) {
+			firstRun = quint32( materialRuns.size() / 4 );
+			runIndex.insert( block, firstRun ); materialRuns.append( block );
+		}
 		// firstSharedIndex << 8 | low byte, and the low byte is numPacked in
 		// every vanilla section (measured on the billboard's 7 and the whole
 		// corpus); no shared vertices are written, so firstShared stays 0
 		setU32( section, 0x4c, quint32( sc.verts.size() ) );
 		setU32( section, 0x50, ( firstPrim << 8 ) | quint32( sc.prims.size() ) );
-		setU32( section, 0x54, 1 );   // 1 in every corpus section; 0 was written here
+		/* +0x54 is (firstRunIndex << 8) | runCount -- the same packing as +0x50's
+		 * (firstPrimitive << 8) | primitiveCount, decoded 2026-08-20 off
+		 * Res01PlayerHouseInterior, whose ten sections read 0x0001, 0x0101,
+		 * 0x0201, 0x0303, 0x0601 ... The literal 1 written here was the
+		 * one-run-per-section case mistaken for a constant.
+		 */
+		setU32( section, 0x54, ( firstRun << 8 ) | quint32( block.size() / 4 ) );
 		section[0x58] = char( sc.verts.size() );
 		sectionsBlob += section;
 		firstPrim += quint32( sc.prims.size() );
@@ -774,7 +844,10 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	setU32( sd, 0x58, quint32( secs.size() ) ); setU32( sd, 0x5c, 0x80000000u | quint32( secs.size() ) );
 	setU32( sd, 0x68, numPrims ); setU32( sd, 0x6c, 0x80000000u | numPrims );
 	setU32( sd, 0x7c, 0x80000000u ); setU32( sd, 0x88, totalPacked ); setU32( sd, 0x8c, 0x80000000u | totalPacked ); setU32( sd, 0x9c, 0x80000000u );
-	setU32( sd, 0xa8, quint32( secs.size() ) ); setU32( sd, 0xac, 0x80000000u | quint32( secs.size() ) );
+	// the run array is sized in RUNS, not sections: with one material they are
+	// the same number, which is what hid this while only one was ever written
+	const quint32 runCount = quint32( materialRuns.size() / 4 );
+	setU32( sd, 0xa8, runCount ); setU32( sd, 0xac, 0x80000000u | runCount );
 	setU32( sd, 0xc0, 2 ); setU32( sd, 0xc4, 0x80000002u );
 	write( sd ); fx.virtuals.append( { shapeData, 0, names.value( QStringLiteral( "hknpCompressedMeshShapeData" ) ) } ); fx.global.append( { shape + 0x60, 2, shapeData } );
 	fx.local.append( { shapeData + 0x10, sectionTreeData } );

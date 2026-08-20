@@ -9,9 +9,47 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-17**. Edition **0.3.2**. Build green; latest closed work is
-**compiled collision**, below — including the Elric campaign that decoded both
-hkcd trees and lifted the 128-triangle cap.
+Updated **2026-08-20**. Edition **0.3.2**. Build green; latest closed work is
+**multi-material compile** — a body made of parts keeps every part's material
+now, and the CMSD run table that carries them is decoded. Under that sits the
+rest of **compiled collision**, below, including the Elric campaign that decoded
+both hkcd trees and lifted the 128-triangle cap.
+
+### Compile keeps every material (2026-08-20)
+
+Compile used to write ONE material per packfile — whichever the first leaf shape
+held — so a body assembled from parts came out uniform. Two structures carry the
+rest, and both are decoded now against the vanilla corpus (2,490 meshes, 3,898
+sections, 9,536 run records):
+
+- **hknpBSMaterialProperties' entry stride is 0x18**, not the 0x20 a
+  single-entry table cannot be distinguished from. Object = 0x20 header +
+  0x18 × n; each entry is a 1 at +0x10 and the CRC at +0x14.
+- **The CMSD run table at +0xa0** is 4-byte records
+  `[u8 material][u8 0][u8 firstPrimitive][u8 count]`, and the start is
+  SECTION-RELATIVE: every section's runs begin at primitive 0 and cover its own
+  primitive count exactly.
+- **Section +0x54 = `(firstRun << 8) | runCount`**, the same packing as +0x50's
+  primitives. The literal `1` that used to sit there pointed EVERY section at
+  run 0 — a real bug in every multi-section packfile we had written, not just an
+  omission.
+- Identical run blocks are shared between sections; first-use dedup reproduces
+  2,472 of 2,490 vanilla tables byte for byte.
+
+What a future session needs to know:
+
+- `tools/hkmatrun.py` checks those invariants by parsing the packfile itself, so
+  it fails on a writer bug NifSkope's own decoder would agree with. `--damage`
+  makes a copy with the old layout, which is how the harness proves the check
+  can fail.
+- `tests/spells/collision_materials.sh` is the guard (11 checks). The one that
+  matters is the SWAP: exchange the two source shapes' materials and the run
+  order has to exchange with them. Counting table entries cannot see a writer
+  that assigns materials by position.
+- **Still flattened, and it is the bigger half now**: a single compiled mesh
+  holding several materials decompiles to ONE editable shape, so vanilla →
+  decompile → compile still loses them. 13.5% of SetDressing meshes are
+  multi-material. See item 0b in docs/TO_BE_IMPLEMENTED.md.
 
 ### Compiled collision no longer writes half the format (2026-08-16)
 
@@ -567,11 +605,20 @@ without asking.
 Windows, MSYS2 UCRT64. Release:
 
 ```bash
-C:/msys64/usr/bin/bash.exe -c 'cd /e/Projects/NifskopeWildWastelandEdition && PATH=/ucrt64/bin:/usr/bin:$PATH make -f Makefile.Release -j2'
+C:/msys64/usr/bin/bash.exe -c 'export PATH=/ucrt64/bin:/usr/bin:/e/Tools/GIT/mingw64/bin:$PATH; cd /e/Projects/NifskopeWildWastelandEdition && make -f Makefile.Release -j2'
 ```
 
 Output is `release/NifSkope.exe`. That is always the correct binary; do not test
 against anything else.
+
+**`git` has to be on that PATH** — the link rule runs `git rev-parse --short HEAD`
+to bake the build rev into the title bar, and MSYS2 does not ship git. Without
+`/e/Tools/GIT/mingw64/bin` the whole build compiles and then dies at the last
+step with `git: command not found` / `Error 127`, leaving the OLD exe in place —
+which then quietly passes or fails harnesses as if it were the new one. Set the
+PATH with `export` before `cd`, too: a `PATH=... make ... | tail` pipeline puts
+the pipe stages outside the assignment, and `tail` is not on the default path
+either.
 
 **`-j2`, not `-j8`.** This machine has hard-shut-down under sustained all-core
 load — Kernel-Power 41 with no bugcheck, which reads as a power or thermal
