@@ -99,11 +99,26 @@ there is more than one, exactly as the multi-shape bodies already decompile.
 The triangles are already grouped for it. Note this CHANGES decompile output for
 13.5% of meshes, so it wants saying out loud rather than slipping in.
 
-**1. triangleIsInterior semantics.** Correlates with closed surfaces (767 of
-867 set bits sit on fully edge-shared triangles) but is not equal to that test
-(100 set bits on open fans, 3,795 shared triangles unflagged). Zero is safe —
-every edge stays collidable. A closed-box-vs-open-box Elric fixture would
-settle it.
+**1. triangleIsInterior semantics — SHARPENED 2026-08-20, still open.** The
+"767 of 867" above was an indexing artifact: the field is in KEY SPACE like
+quadIsFlat, at twice its resolution, `(section << primBits) | (2 * prim + half)`.
+Read that way the necessary condition is EXACT — **3,037 of 3,037 set bits over
+875 meshes sit on a triangle whose three edges are all shared, no exceptions.**
+
+Not sufficient, and not local geometry: 37,508 triangles qualify and only 3,037
+are flagged, and the best rule tried reaches F 0.42 (table in WW_CHANGES
+2026-08-20c, reprintable with `tools/hkinterior.py --rules`). Ruled out at zero
+or near-zero: second-half-of-a-quad, buried inside another connected component,
+inward-facing normal, coincident twin, junction vertex, and every
+convex/concave/dihedral cut. Every simple closed mesh in the corpus — the 12- and
+16-triangle boxes and ducts — carries NO interior bits, so it does not mean
+"closed surface" either.
+
+Zero stays, and it is the safe direction: a set bit is a strict subset of
+fully-shared triangles, so under-flagging can only add collision work, never skip
+a collidable edge. Settling it needs the controlled Elric diff — recompile one
+mesh with a face removed — and **Elric is no longer installed on this machine**,
+which is what this is waiting on.
 
 **2. ~~Quad pairing~~ DONE 2026-08-17d.** Elric merges adjacent triangle pairs into quads — bent
 ones included (89% of corpus primitives are quads; quadIsFlat = "the four

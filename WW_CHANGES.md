@@ -1,5 +1,62 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-20c — triangleIsInterior: the necessary condition, exactly
+
+The bit stays zero, but it is no longer zero for want of looking. What changed is
+that the field is now read with the right index, and under that index one
+statement about it is exact.
+
+**The indexing was wrong.** The field is in KEY SPACE, like quadIsFlat, at twice
+its resolution:
+
+    bit = (section << primBits) | (2 * localPrimitive + half)
+
+half 0 being (a,b,c) and half 1 being (a,c,d), with
+`primBits = shape+0x12 - bitlen(sections - 1)`. That is what makes the field
+numKeys bits where quadIsFlat is numKeys/2. Read in triangle order instead — which
+is what the 2026-08-16 pass did — the correlations smear, and "767 of 867 set bits
+sit on fully edge-shared triangles" was that smear.
+
+**Read properly it is 3,037 of 3,037.** Over 875 SetDressing meshes and 42,657
+triangles, every single set bit sits on a triangle whose three edges are each
+shared with another triangle. No exceptions. Fully-shared is NECESSARY.
+
+It is nowhere near sufficient — 37,508 triangles qualify and only 3,037 are
+flagged — and the extra condition is not local geometry. Measured and ruled out,
+each with its own numbers (`tools/hkinterior.py --rules` reprints the table):
+
+| candidate rule | recall | precision |
+|---|---|---|
+| all three edges shared | 100% | 8.1% |
+| + at least one concave edge | 64.3% | 15.9% |
+| + at least two concave edges | 32.3% | 32.0% |
+| + all three concave | 4.2% | 63.2% |
+| + all three convex | 9.4% | 8.0% |
+| + no edge under 1° | 51.8% | 23.5% |
+| + max dihedral < 60° | 60.8% | 31.9% |
+| + max dihedral < 89° | 73.0% | 24.8% |
+
+Also ruled out, at zero or near-zero: the second half of a quad, being buried
+inside another connected component (0 hits), an inward-facing normal (15 of 50 on
+Toilet01), a coincident twin triangle (24 hits, 0 of them flagged), and sitting on
+a junction vertex (6.7% precision).
+
+**And the simple closed meshes are all zero.** Every 12- and 16-triangle box and
+duct section in the corpus — the shapes with every edge shared, and the shapes our
+compiler mostly produces — carries no interior bits at all. So the bit does not
+mean "this surface is closed", and writing zero is not a placeholder standing in
+for something vanilla would have set.
+
+Zero therefore stays, and it stays in the SAFE direction: a set bit is a strict
+subset of fully-shared triangles, so under-flagging can only ask the engine to do
+more work, never to skip a collidable edge.
+
+What would settle it is the controlled experiment the 08-17 campaign used for the
+hkcd trees — recompile one mesh with a face removed and diff the bits — and
+**Elric is not on this machine any more**, so that is where this stops. The
+measurement lives in `tools/hkinterior.py` so the next attempt starts from the
+necessary condition rather than from scratch.
+
 ## 2026-08-20b — Friction and restitution round into their stored word
 
 A body's friction and restitution are kept as the top 16 bits of the float. The
