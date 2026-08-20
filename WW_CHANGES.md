@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-20b — Friction and restitution round into their stored word
+
+A body's friction and restitution are kept as the top 16 bits of the float. The
+writer truncated; the corpus says vanilla rounds, and this is settled by counting
+rather than by an Elric pair, because the two disagree on values the corpus is
+full of.
+
+Across 1,500 SetDressing files, every discriminating value stored is the ROUNDED
+word and none is the truncated one:
+
+| value | truncated | rounded | in the corpus |
+|---|---|---|---|
+| restitution 0.4 | 0x3ECC | 0x3ECD | 0x3ECD ×1,623, 0x3ECC ×0 |
+| friction 0.3 | 0x3E99 | 0x3E9A | 0x3E9A ×13, 0x3E99 ×0 |
+| 0.8 | 0x3F4C | 0x3F4D | 0x3F4D ×17, 0x3F4C ×0 |
+
+0.5, 0.75 and 1.0 — which is what most bodies carry — have nothing in the
+discarded half, so the two agree there and the difference stayed invisible. It
+was not invisible in the file: **0.4 is Fallout 4's default restitution**, so
+every body NifSkope compiled went out one ULP low on a field every one of them
+has.
+
+`roundFloat16` replaces `truncFloat16`, ties to even (nothing in the corpus lands
+on a tie, so that half is convention). The assembler that reproduces 810 of 822
+stock systems byte for byte is untouched by this: a value read back off a
+packfile has a zero low half, so rounding and truncation agree on it.
+
+Guarded in `collision_compile.sh` (now 14 checks): compile a body with friction
+0.3 and the compiled body has to read 0.301, the rounded word, not the 0.300 that
+truncation produces. Confirmed at the byte level too — a fresh compile stores
+0x3E9A / 0x3ECD.
+
 ## 2026-08-20 — Compile keeps every material, not just the first leaf's
 
 A body assembled from parts carries a material per part, and Compile wrote one

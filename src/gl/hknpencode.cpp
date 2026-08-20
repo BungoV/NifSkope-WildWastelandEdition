@@ -95,18 +95,41 @@ struct Fixups
 	}
 };
 
-quint16 truncFloat16( float value )
+/*! Friction and restitution are stored as the TOP 16 BITS of the float, ROUNDED.
+ *
+ * Rounded, not truncated, which is measured rather than assumed: across 1,500
+ * SetDressing files every discriminating value in the corpus is the rounded
+ * word and none is the truncated one — restitution 0.4 is 0x3ECD 1,623 times
+ * and 0x3ECC never, friction 0.3 is 0x3E9A 13 times and 0x3E99 never, 0.8 is
+ * 0x3F4D 17 times and 0x3F4C never. Truncating, which is what this did until
+ * 2026-08-20, wrote a word one ULP low on every body whose value has anything
+ * in the discarded half — including the 0.4 restitution that is the Fallout 4
+ * default.
+ *
+ * Ties go to even, the IEEE default. Nothing in the corpus lands on a tie, so
+ * that half is convention and not measurement.
+ *
+ * A value read back off an existing packfile has a zero low half, so rounding
+ * and truncation agree on it — which is why the assembler that reproduces 810
+ * of 822 stock systems byte for byte is unaffected by this.
+ */
+quint16 roundFloat16( float value )
 {
-	return quint16( std::bit_cast<quint32>( value ) >> 16 );
+	const quint32 bits = std::bit_cast<quint32>( value );
+	const quint32 low = bits & 0xffffu;
+	quint32 high = bits >> 16;
+	if ( low > 0x8000u || ( low == 0x8000u && ( high & 1u ) ) )
+		high++;
+	return quint16( high );
 }
 
 QByteArray bodyProperties( const HknpEncodeInput & in )
 {
 	QByteArray out( 0x50, 0 );
 	setU16( out, 0x10, 0xff00 );
-	setU16( out, 0x12, truncFloat16( in.friction ) );
-	setU16( out, 0x14, truncFloat16( in.friction ) );
-	setU16( out, 0x16, truncFloat16( in.restitution ) );
+	setU16( out, 0x12, roundFloat16( in.friction ) );
+	setU16( out, 0x14, roundFloat16( in.friction ) );
+	setU16( out, 0x16, roundFloat16( in.restitution ) );
 	out[0x18] = 1; out[0x19] = 2; setU16( out, 0x1a, 0x3d4c ); setU32( out, 0x1c, 0x7f7fffee );
 	setFloat( out, 0x20, 1.0f ); setFloat( out, 0x24, 1.0f ); setU16( out, 0x38, 0x40a0 );
 	return out;
@@ -1631,9 +1654,9 @@ QByteArray encodeSystemRoot( const HknpSystem & sys, HknpRagdollDataFixups * fix
 			setFloat( p, 0x20, 1.0f ); setFloat( p, 0x24, 1.0f );
 			setU32( p, 0x38, 0x000040a0u );
 		}
-		setU16( p, 0x12, truncFloat16( b.friction ) );
-		setU16( p, 0x14, truncFloat16( b.friction ) );
-		setU16( p, 0x16, truncFloat16( b.restitution ) );
+		setU16( p, 0x12, roundFloat16( b.friction ) );
+		setU16( p, 0x14, roundFloat16( b.friction ) );
+		setU16( p, 0x16, roundFloat16( b.restitution ) );
 		props.append( p );
 
 		QByteArray c( 0x60, 0 );

@@ -84,6 +84,23 @@ check "the editable collision blocks are gone" "$([ "$left" = "0" ] && echo 1 ||
 np=$("$NS" -no-gui list "$W/c.nif" 2>/dev/null | grep -c "bhkNPCollisionObject")
 check "exactly one compiled collision object replaced them" "$([ "$np" = "1" ] && echo 1 || echo 0)"
 
+# --- friction is ROUNDED into the stored word, not truncated -----------------
+#
+# Friction and restitution are the top 16 bits of the float. 0.3 is a value that
+# tells the two apart: rounding writes 0x3E9A, which reads back 0.301, and
+# truncation writes 0x3E99, which reads back 0.300. Across 1,500 SetDressing
+# files every discriminating value in the vanilla corpus is the ROUNDED word and
+# none is the truncated one (restitution 0.4 is 0x3ECD 1,623 times, 0x3ECC never)
+# — so truncating, which is what the writer did until 2026-08-20, was one ULP low
+# on every body carrying anything in the discarded half, the 0.4 default included.
+"$NS" -no-gui set "$W/f.nif" -b "$body" -f "Rigid Body Info/Friction" -v 0.3 -o "$W/fr.nif" >/dev/null 2>&1
+"$NS" -no-gui cast "$W/fr.nif" -s "Havok/Compile Collision" -b "$obj" -o "$W/cf.nif" >/dev/null 2>&1
+fr=$("$NS" -no-gui collision "$W/cf.nif" 2>/dev/null | awk '/body +node/{getline; print $5}')
+re=$("$NS" -no-gui collision "$W/cf.nif" 2>/dev/null | awk '/body +node/{getline; print $6}')
+echo "compiled friction $fr (rounded 0.301, truncated 0.300), restitution $re (rounded 0.400, truncated 0.399)"
+check "friction 0.3 stores the rounded word, the one vanilla writes" "$([ "$fr" = "0.301" ] && echo 1 || echo 0)"
+check "the 0.4 restitution default does too" "$([ "$re" = "0.400" ] && echo 1 || echo 0)"
+
 # --- the collision comes back the same SIZE ----------------------------------
 #
 # Decompile and Compile are inverses, so decompile -> compile -> decompile must

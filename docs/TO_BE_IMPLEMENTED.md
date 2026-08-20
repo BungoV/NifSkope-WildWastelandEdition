@@ -116,7 +116,12 @@ ours. Vanilla has dynamic compressed-mesh precedent (SignWrightsInn02Dest), so
 ours is legal; matching Elric means routing a convex-only editable source
 through hknpEncodeConvexPolytopeShape instead. The encoder already exists.
 
-**4. Friction f16: Elric rounds, we truncate.** One bit of friction per body.
+**4. ~~Friction f16: Elric rounds, we truncate~~ DONE 2026-08-20.** Settled by
+counting the corpus rather than by an Elric pair: across 1,500 SetDressing files
+every discriminating value is the ROUNDED word and none is the truncated one
+(restitution 0.4 is 0x3ECD 1,623 times and 0x3ECC never). Since 0.4 is the
+Fallout 4 default, every body we compiled was one ULP low. `roundFloat16`,
+guarded in collision_compile.sh.
 
 The Elric harness (batch.esf + fixtures.ps1, hands-free desktop run) and the
 verification suite (sectree_verify.py, flatbits.py, interior.py) live in the
