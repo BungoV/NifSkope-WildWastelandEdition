@@ -562,6 +562,466 @@ QString tlMergeBodyShapesRefusal( const NifModel * nif, qint32 body )
 	return QString();
 }
 
+/*! Is every leaf under \a shapeBlock a convex primitive?
+ *
+ *  Elric picks the compiled shape class off the SOURCE, not off the motion type.
+ *  Measured over 1,500 SetDressing files: 228 static systems are polytope-only
+ *  and 733 are compressed-mesh-only, so a convex source stays convex whether or
+ *  not the body simulates. Wrappers — list, MOPP, transform — are transparent,
+ *  and one triangle source anywhere makes the whole body a mesh.
+ */
+bool tlCollConvexOnly( const NifModel * nif, int shapeBlock, int depth = 0 )
+{
+	if ( !nif || !nif->isValidBlockNumber( shapeBlock ) || depth > 20 )
+		return false;
+	const QModelIndex shape = tlCollBlockIndex( nif, shapeBlock );
+	const QString type = nif->itemName( shape );
+	if ( type.endsWith( QLatin1String( "ListShape" ) ) ) {
+		const QVector<qint32> subs = nif->getLinkArray( shape, "Sub Shapes" );
+		if ( subs.isEmpty() )
+			return false;
+		for ( qint32 child : subs ) {
+			if ( !tlCollConvexOnly( nif, child, depth + 1 ) )
+				return false;
+		}
+		return true;
+	}
+	if ( type == QLatin1String( "bhkMoppBvTreeShape" ) || type == QLatin1String( "bhkTransformShape" )
+		 || type == QLatin1String( "bhkConvexTransformShape" ) )
+		return tlCollConvexOnly( nif, nif->getLink( shape, "Shape" ), depth + 1 );
+	return type == QLatin1String( "bhkBoxShape" ) || type == QLatin1String( "bhkSphereShape" )
+		|| type == QLatin1String( "bhkCapsuleShape" ) || type == QLatin1String( "bhkConvexVerticesShape" );
+}
+
+/*! Face LOOPS of a convex hull, from the shape's own stored planes.
+ *
+ *  The same walk as tlCollTriangulateConvexPlanes — each plane's incident
+ *  vertices ordered around the face — but kept as loops, which is the form an
+ *  hknpConvexPolytopeShape stores. \a keptPlanes comes back parallel to the
+ *  loops, with Elric's zero-normal padding planes and the sliver planes (under
+ *  three incident vertices) dropped, since a polytope face needs three.
+ *
+ *  False when the planes do not describe a closed surface, which is the caller's
+ *  cue to fall back to the mesh path rather than write a broken hull.
+ */
+bool tlCollHullLoops( const QVector<Vector3> & verts, const QVector<Vector4> & planes,
+	QVector<QVector<int>> & loops, QVector<Vector4> & keptPlanes )
+{
+	loops.clear(); keptPlanes.clear();
+	if ( verts.size() < 4 || planes.size() < 4 )
+		return false;
+	for ( const Vector4 & p : planes ) {
+		const Vector3 n( p[0], p[1], p[2] );
+		if ( n.length() < 0.5f )
+			continue;
+		QVector<int> on;
+		for ( int i = 0; i < verts.size(); i++ ) {
+			if ( std::fabs( Vector3::dotproduct( n, verts.at( i ) ) + p[3] ) < 5.0e-4f )
+				on.append( i );
+		}
+		if ( on.size() < 3 )
+			continue;
+		Vector3 centre;
+		for ( int i : on ) centre += verts.at( i );
+		centre /= float( on.size() );
+		Vector3 u = verts.at( on.first() ) - centre;
+		u = u - n * Vector3::dotproduct( n, u );
+		if ( u.length() < 1.0e-9f )
+			return false;
+		u.normalize();
+		const Vector3 w = Vector3::crossproduct( n, u );
+		std::sort( on.begin(), on.end(), [&]( int a, int b ) {
+			const Vector3 da = verts.at( a ) - centre, db = verts.at( b ) - centre;
+			return std::atan2( Vector3::dotproduct( w, da ), Vector3::dotproduct( u, da ) )
+				 < std::atan2( Vector3::dotproduct( w, db ), Vector3::dotproduct( u, db ) );
+		} );
+		// wind the loop so it turns the way the plane's own normal points
+		const Vector3 e1 = verts.at( on.at( 1 ) ) - verts.at( on.first() );
+		const Vector3 e2 = verts.at( on.at( 2 ) ) - verts.at( on.first() );
+		if ( Vector3::dotproduct( Vector3::crossproduct( e1, e2 ), n ) < 0.0f )
+			std::reverse( on.begin() + 1, on.end() );
+		loops.append( on ); keptPlanes.append( p );
+	}
+	return loops.size() >= 4;
+}
+
+/*! The mass properties an hknpConvexPolytopeShape carries, measured off vanilla.
+ *
+ *  The solid Havok describes is the hull GROWN by its convex radius, not the
+ *  hull, and all three numbers follow from that:
+ *
+ *  - **Volume** is the Minkowski sum with a ball of radius r:
+ *    `V + A·r + ½·Σ(edge length × exterior dihedral)·r² + 4/3·π·r³`. Within 2%
+ *    of the stored figure on 271 of 299 vanilla polytopes; for a box it reduces
+ *    to the expanded box, where 209 of 216 agree. The bare hull is nowhere near
+ *    — PlankHinge02 stores 0.295 against a hull of 0.021.
+ *  - **Mass** equals that volume. Every vanilla shape is density 1.
+ *  - **Inertia** is that solid's, approximated by scaling the hull about its
+ *    centre until its bounding box grows by r on every side. Exact for a box,
+ *    and within 15% of vanilla on 255 of 268 polytopes where the plain hull
+ *    manages 170. Stored at 1.5× the physical value (see HknpShape).
+ */
+void tlCollHullMassProperties( const QVector<Vector3> & verts, const QVector<QVector<int>> & loops,
+	float radius, float * volume, Vector3 * com, Vector3 * inertiaRaw )
+{
+	*volume = 0.0f; *com = Vector3(); *inertiaRaw = Vector3();
+	if ( loops.isEmpty() )
+		return;
+
+	QVector<Vector3> normals( loops.size() );
+	double area = 0.0, edgeTerm = 0.0, hullVolume = 0.0;
+	Vector3 inside;
+	int count = 0;
+	for ( const QVector<int> & loop : loops )
+		for ( int i : loop ) { inside += verts.at( i ); count++; }
+	if ( count )
+		inside /= float( count );
+
+	for ( qsizetype f = 0; f < loops.size(); f++ ) {
+		const QVector<int> & loop = loops.at( f );
+		Vector3 sum;
+		for ( int k = 1; k + 1 < loop.size(); k++ )
+			sum += Vector3::crossproduct( verts.at( loop.at( k ) ) - verts.at( loop.first() ),
+										  verts.at( loop.at( k + 1 ) ) - verts.at( loop.first() ) );
+		const float twice = sum.length();
+		if ( twice < 1.0e-12f ) { normals[f] = Vector3(); continue; }
+		normals[f] = sum / twice;
+		area += double( twice ) / 2.0;
+		hullVolume += double( twice ) / 2.0
+			* std::fabs( Vector3::dotproduct( normals[f], verts.at( loop.first() ) - inside ) ) / 3.0;
+	}
+	// the r² term wants each edge once, with the angle between the two faces on it
+	QHash<quint64, QPair<int, int>> edgeFaces;
+	for ( qsizetype f = 0; f < loops.size(); f++ ) {
+		const QVector<int> & loop = loops.at( f );
+		for ( int k = 0; k < loop.size(); k++ ) {
+			const int a = std::min( loop.at( k ), loop.at( ( k + 1 ) % loop.size() ) );
+			const int b = std::max( loop.at( k ), loop.at( ( k + 1 ) % loop.size() ) );
+			const quint64 key = ( quint64( quint32( a ) ) << 32 ) | quint32( b );
+			auto it = edgeFaces.find( key );
+			if ( it == edgeFaces.end() )
+				edgeFaces.insert( key, { int( f ), -1 } );
+			else if ( it->second < 0 )
+				it->second = int( f );
+		}
+	}
+	for ( auto it = edgeFaces.constBegin(); it != edgeFaces.constEnd(); ++it ) {
+		if ( it->second < 0 )
+			continue;
+		const int a = int( it.key() >> 32 ), b = int( it.key() & 0xffffffffu );
+		const float len = ( verts.at( a ) - verts.at( b ) ).length();
+		const float dot = std::clamp( Vector3::dotproduct( normals.at( it->first ), normals.at( it->second ) ), -1.0f, 1.0f );
+		edgeTerm += double( len ) * std::acos( dot );
+	}
+	const double r = radius;
+	*volume = float( hullVolume + area * r + 0.5 * edgeTerm * r * r + 4.0 / 3.0 * M_PI * r * r * r );
+
+	// the grown hull: scale about the box centre so every side gains r
+	QVector<int> used;
+	for ( const QVector<int> & loop : loops )
+		for ( int i : loop ) used.append( i );
+	Vector3 lo = verts.at( used.first() ), hi = lo;
+	for ( int i : used )
+		for ( int k = 0; k < 3; k++ ) { lo[k] = std::min( lo[k], verts.at( i )[k] ); hi[k] = std::max( hi[k], verts.at( i )[k] ); }
+	Vector3 centre = ( lo + hi ) / 2.0f, scale;
+	for ( int k = 0; k < 3; k++ ) {
+		const float half = ( hi[k] - lo[k] ) / 2.0f;
+		scale[k] = half > 1.0e-9f ? ( half + radius ) / half : 1.0f;
+	}
+	QVector<Vector3> grown( verts.size() );
+	for ( qsizetype i = 0; i < verts.size(); i++ )
+		for ( int k = 0; k < 3; k++ )
+			grown[i][k] = centre[k] + ( verts.at( i )[k] - centre[k] ) * scale[k];
+
+	/* Tetrahedra from an interior point, summed: the standard polyhedron inertia.
+	 * Density comes from the Minkowski volume above rather than the grown hull's
+	 * own, so the mass the tensor is built at is the mass actually stored.
+	 */
+	double tetVolume = 0.0;
+	Vector3 centroid;
+	struct Tet { double vol; Vector3 a, b, c; };
+	QVector<Tet> tets;
+	for ( const QVector<int> & loop : loops ) {
+		for ( int k = 1; k + 1 < loop.size(); k++ ) {
+			const Vector3 a = grown.at( loop.first() ) - inside;
+			const Vector3 b = grown.at( loop.at( k ) ) - inside;
+			const Vector3 c = grown.at( loop.at( k + 1 ) ) - inside;
+			const double d = std::fabs( Vector3::dotproduct( a, Vector3::crossproduct( b, c ) ) ) / 6.0;
+			tets.append( { d, a, b, c } );
+			tetVolume += d;
+			centroid += ( a + b + c ) * float( d / 4.0 );
+		}
+	}
+	if ( tetVolume < 1.0e-12 )
+		return;
+	centroid /= float( tetVolume );
+	const double density = double( *volume ) / tetVolume;
+	Vector3 diag;
+	for ( const Tet & t : std::as_const( tets ) ) {
+		const double m = t.vol * density;
+		for ( int axis = 0; axis < 3; axis++ ) {
+			const int u = ( axis + 1 ) % 3, v = ( axis + 2 ) % 3;
+			double s = 0.0;
+			const Vector3 q[3] = { t.a, t.b, t.c };
+			for ( int i = 0; i < 3; i++ )
+				s += double( q[i][u] ) * q[i][u] + double( q[i][v] ) * q[i][v];
+			for ( int i = 0; i < 3; i++ ) {
+				const Vector3 & q1 = q[i], & q2 = q[( i + 1 ) % 3];
+				s += double( q1[u] ) * q2[u] + double( q1[v] ) * q2[v];
+			}
+			diag[axis] += float( m * s / 10.0 );
+		}
+	}
+	const float mass = *volume;
+	diag[0] -= mass * ( centroid[1] * centroid[1] + centroid[2] * centroid[2] );
+	diag[1] -= mass * ( centroid[0] * centroid[0] + centroid[2] * centroid[2] );
+	diag[2] -= mass * ( centroid[0] * centroid[0] + centroid[1] * centroid[1] );
+	*com = inside + centroid;
+	*inertiaRaw = diag * 1.5f;   // Havok stores 1.5x the physical tensor
+}
+
+/*! The major-axis frame a synthesized shape carries.
+ *
+ *  Its packing is not decoded (HknpShape::massMajorAxis), so it cannot be
+ *  derived — but it does not have to be invented either: 1,002 of 1,304 vanilla
+ *  mass-property objects hold exactly this value (76.8%, and the next most
+ *  common appears seven times), so a shape we write takes the one vanilla writes
+ *  three times out of four.
+ */
+constexpr quint64 tlCollMajorAxisDefault = 0xf530800080008000ull;
+
+/*! Turn one editable convex leaf into the hknp shape Elric would have written.
+ *
+ *  \a transform is baked into the geometry rather than carried, because a
+ *  standalone hknp shape has nowhere to put one — vanilla's transforms live in a
+ *  compound's instances, and this is the single-shape path.
+ *
+ *  False if the block is not a convex leaf, or if its hull does not close.
+ */
+bool tlCollConvexLeafShape( const NifModel * nif, int shapeBlock, const Matrix4 & transform,
+	HknpShape & out )
+{
+	const QModelIndex shape = tlCollBlockIndex( nif, shapeBlock );
+	if ( !shape.isValid() )
+		return false;
+	const QString type = nif->itemName( shape );
+	const quint32 material = nif->get<quint32>( shape, "Material" );
+	out = HknpShape();
+	out.materialCRC = out.shapeMaterialCRC = material;
+
+	if ( type == QLatin1String( "bhkSphereShape" ) ) {
+		out.className = QStringLiteral( "hknpSphereShape" );
+		out.primType = 1;
+		out.primRadius = nif->get<float>( shape, "Radius" );
+		out.capA = out.capB = transform * Vector3();
+		out.convexRadius = out.primRadius;
+		out.isConvex = true;
+		return out.primRadius > 0.0f;
+	}
+	if ( type == QLatin1String( "bhkCapsuleShape" ) ) {
+		out.className = QStringLiteral( "hknpCapsuleShape" );
+		out.primType = 2;
+		out.primRadius = nif->get<float>( shape, "Radius" );
+		out.capA = transform * nif->get<Vector3>( shape, "First Point" );
+		out.capB = transform * nif->get<Vector3>( shape, "Second Point" );
+		out.convexRadius = out.primRadius;
+		out.isConvex = true;
+		return out.primRadius > 0.0f;
+	}
+
+	QVector<Vector3> verts;
+	QVector<Vector4> planes;
+	if ( type == QLatin1String( "bhkBoxShape" ) ) {
+		const Vector3 d = nif->get<Vector3>( shape, "Dimensions" );
+		if ( d[0] <= 0.0f || d[1] <= 0.0f || d[2] <= 0.0f )
+			return false;
+		for ( int z = -1; z <= 1; z += 2 ) for ( int y = -1; y <= 1; y += 2 ) for ( int x = -1; x <= 1; x += 2 )
+			verts.append( Vector3( d[0] * x, d[1] * y, d[2] * z ) );
+		for ( int axis = 0; axis < 3; axis++ ) for ( int sign = 1; sign >= -1; sign -= 2 ) {
+			Vector3 n; n[axis] = float( sign );
+			planes.append( Vector4( n[0], n[1], n[2], -d[axis] ) );
+		}
+		out.convexRadius = nif->get<float>( shape, "Radius" );
+	} else if ( type == QLatin1String( "bhkConvexVerticesShape" ) ) {
+		for ( const Vector4 & v : nif->getArray<Vector4>( shape, "Vertices" ) )
+			verts.append( Vector3( v[0], v[1], v[2] ) );
+		planes = nif->getArray<Vector4>( shape, "Normals" );
+		out.convexRadius = nif->get<float>( shape, "Radius" );
+	} else {
+		return false;
+	}
+
+	/* A face index is ONE BYTE in the polytope's index array, so a hull past 255
+	 * vertices cannot be written -- it would wrap silently into a hull made of
+	 * the wrong corners. Refuse and let the mesh path have it; nothing in the
+	 * vanilla corpus comes close, the largest polytope there holding a few dozen.
+	 */
+	if ( verts.size() > 255 )
+		return false;
+	QVector<QVector<int>> loops;
+	QVector<Vector4> kept;
+	if ( !tlCollHullLoops( verts, planes, loops, kept ) )
+		return false;
+
+	/* The planes and the loops are in the hull's own frame; transforming the
+	 * vertices means transforming the planes with them. Rotation only —
+	 * tlCollAppendConvexShapes refuses a scaled wrapper, because scaling a hull
+	 * moves its planes by a factor the normals cannot carry.
+	 */
+	Matrix4 rotation( transform );
+	Vector3 offset = transform * Vector3();
+	for ( Vector3 & v : verts )
+		v = transform * v;
+	for ( qsizetype i = 0; i < kept.size(); i++ ) {
+		const Vector3 n( kept.at( i )[0], kept.at( i )[1], kept.at( i )[2] );
+		Vector3 rotated = rotation * n - offset;
+		rotated.normalize();
+		// a point on the plane, moved with the geometry, fixes the new distance
+		const Vector3 on = verts.at( loops.at( i ).first() );
+		kept[i] = Vector4( rotated[0], rotated[1], rotated[2], -Vector3::dotproduct( rotated, on ) );
+	}
+
+	out.className = QStringLiteral( "hknpConvexPolytopeShape" );
+	out.isConvex = true;
+	out.verts = verts;
+	out.planes = kept;
+	out.faces = loops;
+	/* Havok's per-face minHalfAngle. Every vanilla box carries 127 or 128, which
+	 * is half of a 90° edge over the byte's 0..180° range, so the derivation is
+	 * `angle/2 scaled by 255/180` on the face's sharpest edge. The header warns it
+	 * only reproduces vanilla about two thirds of the time; it is advisory data
+	 * for the solver, not geometry.
+	 */
+	out.faceAngles.fill( 127, loops.size() );
+	for ( qsizetype f = 0; f < loops.size(); f++ ) {
+		float sharpest = float( M_PI );
+		const Vector3 nf( kept.at( f )[0], kept.at( f )[1], kept.at( f )[2] );
+		for ( qsizetype g = 0; g < loops.size(); g++ ) {
+			if ( g == f )
+				continue;
+			// faces that share an edge with this one
+			int shared = 0;
+			for ( int a : loops.at( f ) ) for ( int b : loops.at( g ) ) if ( a == b ) shared++;
+			if ( shared < 2 )
+				continue;
+			const Vector3 ng( kept.at( g )[0], kept.at( g )[1], kept.at( g )[2] );
+			sharpest = std::min( sharpest, std::acos( std::clamp( Vector3::dotproduct( nf, ng ), -1.0f, 1.0f ) ) );
+		}
+		const float halfDegrees = float( sharpest * 180.0 / M_PI ) / 2.0f;
+		out.faceAngles[f] = quint8( std::clamp( int( std::lround( halfDegrees * 255.0f / 90.0f ) ), 0, 255 ) );
+	}
+	out.shapeFlags = 0x01000143u;   // 74 of 76 vanilla polytopes
+	out.hasMassProps = true;
+	tlCollHullMassProperties( verts, loops, out.convexRadius, &out.massVolume, &out.massCom, &out.massInertiaRaw );
+	out.massMass = out.massVolume;
+	out.massMajorAxis = tlCollMajorAxisDefault;
+	return true;
+}
+
+/*! Every convex leaf under \a shapeBlock, as hknp shapes, transforms baked in.
+ *
+ *  False as soon as anything in the tree is not a convex leaf this can write, or
+ *  carries a scale a hull's planes cannot follow — the caller then compiles a
+ *  compressed mesh, which is what happened to every convex source before
+ *  2026-08-20.
+ */
+bool tlCollAppendConvexShapes( const NifModel * nif, int shapeBlock, const Matrix4 & transform,
+	QVector<HknpShape> & out, int depth = 0 )
+{
+	if ( !nif->isValidBlockNumber( shapeBlock ) || depth > 20 )
+		return false;
+	const QModelIndex shape = tlCollBlockIndex( nif, shapeBlock );
+	const QString type = nif->itemName( shape );
+	if ( type.endsWith( QLatin1String( "ListShape" ) ) ) {
+		const QVector<qint32> subs = nif->getLinkArray( shape, "Sub Shapes" );
+		if ( subs.isEmpty() )
+			return false;
+		for ( qint32 child : subs ) {
+			if ( !tlCollAppendConvexShapes( nif, child, transform, out, depth + 1 ) )
+				return false;
+		}
+		return true;
+	}
+	if ( type == QLatin1String( "bhkMoppBvTreeShape" ) )
+		return tlCollAppendConvexShapes( nif, nif->getLink( shape, "Shape" ), transform, out, depth + 1 );
+	if ( type == QLatin1String( "bhkTransformShape" ) || type == QLatin1String( "bhkConvexTransformShape" ) ) {
+		const Matrix4 own = nif->get<Matrix4>( shape, "Transform" );
+		Vector3 t, s; Matrix r;
+		own.decompose( t, r, s );
+		if ( std::fabs( s[0] - 1.0f ) > 1.0e-4f || std::fabs( s[1] - 1.0f ) > 1.0e-4f
+			 || std::fabs( s[2] - 1.0f ) > 1.0e-4f )
+			return false;   // a scaled hull needs its planes rescaled; mesh path instead
+		Matrix4 next( transform );
+		next.multiply4x3( own );
+		return tlCollAppendConvexShapes( nif, nif->getLink( shape, "Shape" ), next, out, depth + 1 );
+	}
+	HknpShape leaf;
+	if ( !tlCollConvexLeafShape( nif, shapeBlock, transform, leaf ) )
+		return false;
+	out.append( leaf );
+	return true;
+}
+
+/*! Compile a body whose shapes are all convex, the way Elric does.
+ *
+ *  Returns empty — not an error — when the source is not something this path can
+ *  write, so the caller falls through to the compressed mesh that every convex
+ *  source used to get.
+ *
+ *  The physics comes off \a in, which the caller has already read out of the
+ *  rigid body, so the two paths cannot disagree about layer, friction or mass.
+ *  Geometry does NOT: the leaf shapes are already in Havok units, where the mesh
+ *  path converts to game units and back.
+ */
+QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpEncodeInput & in,
+	QString * error )
+{
+	QVector<HknpShape> shapes;
+	if ( !tlCollConvexOnly( nif, rootShape ) )
+		return QByteArray();
+	if ( !tlCollAppendConvexShapes( nif, rootShape, Matrix4(), shapes ) || shapes.isEmpty() )
+		return QByteArray();
+	if ( shapes.size() > 1 )
+		return QByteArray();   // several convex shapes want a compound; see item 3b
+
+	HknpSystem sys;
+	HknpShape shape = shapes.first();
+	shape.bodyId = 0;
+	sys.shapes.append( shape );
+
+	HknpBodyPhys phys;
+	phys.layer = in.layer;
+	phys.packedFilter = ( in.layer & 0xffu ) | ( quint32( in.filterFlags ) << 8 )
+		| ( quint32( in.filterGroup ) << 16 );
+	phys.hasStoredFilter = true;
+	phys.filterFlags = in.filterFlags;
+	phys.filterGroup = in.filterGroup;
+	phys.materialCRC = in.materialCRC;
+	phys.friction = in.friction;
+	phys.restitution = in.restitution;
+	phys.position = in.center;
+	phys.hasMotion = in.dynamic;
+	phys.motionIndex = in.dynamic ? 0 : -1;
+	if ( in.dynamic ) {
+		phys.mass = std::max( in.mass, 0.001f );
+		phys.density = shape.massVolume > 1.0e-9f ? phys.mass / shape.massVolume : phys.mass;
+		auto inv = []( float v ) { return ( v > 1.0e-12f ) ? 1.0f / v : 0.0f; };
+		for ( int a = 0; a < 3; a++ )
+			phys.invInertia[a] = inv( in.inertia[a] );
+		phys.motionCom = in.center;
+		phys.gravityFactor = in.gravityFactor;
+		phys.maxLinVelocity = in.maxLinVelocity;
+		phys.maxAngVelocity = in.maxAngVelocity;
+		phys.linDamping = in.linDamping;
+		phys.angDamping = in.angDamping;
+	}
+	sys.bodyPhys.append( phys );
+	sys.dynamic = in.dynamic;
+	sys.shapeListOrder = { 0 };
+	sys.rootClassName = QStringLiteral( "hknpPhysicsSystemData" );
+	return hknpEncodeSystem( sys, error );
+}
+
 /*! Merge every shape in \a body into a single mesh collision shape.
  *
  *  A box, a sphere and a mesh in one body are three shapes the engine tests
@@ -4220,7 +4680,7 @@ private:
 			materialEdit->setCurrentIndex( row );
 		} );
 		auto * replace = new QCheckBox( tr( "Replace existing shape" ), createPopup );
-		replace->setChecked( createSettings.value( "CollisionManager/Create/Replace", true ).toBool() );
+		replace->setChecked( createSettings.value( "CollisionManager/Create/ReplaceShape", false ).toBool() );
 		replace->setToolTip( tr( "Off combines the new shape with what the body already has" ) );
 		/* KEEP THE SOURCE MESH. Off by default, which is the long-standing
 		 * behaviour: creating collision from a mesh consumes it. The advice was
@@ -4871,7 +5331,7 @@ private:
 			int materialRow = materialEdit->findText( materialValue, Qt::MatchFixedString );
 			if ( materialRow >= 0 ) materialValue = materialEdit->itemData( materialRow ).toString();
 			settings.setValue( "CollisionManager/Create/Material", materialValue );
-			settings.setValue( "CollisionManager/Create/Replace", replace->isChecked() );
+			settings.setValue( "CollisionManager/Create/ReplaceShape", replace->isChecked() );
 			settings.setValue( "CollisionManager/Create/KeepMesh", keepMesh->isChecked() );
 			// ConvexMethod is the preview's now; it writes it on Apply
 			settings.beginGroup( "Spells/Havok/Create Convex Shapes" );
@@ -5576,16 +6036,37 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	}
 	QModelIndex materialShape = tlCollBlockIndex( nif, tlCollFirstLeafShape( nif, rootShape ) );
 	input.materialCRC = materialShape.isValid() ? nif->get<quint32>( materialShape, "Material" ) : 0u;
-	QString error; QByteArray bytes = hknpEncodeCompressedMesh( input, &error );
+	/* A convex source compiles to convex shapes, the way Elric does — measured on
+	 * 1,500 SetDressing files, where the compiled class follows the SOURCE and not
+	 * the motion type. Empty means this path could not write it, and the mesh
+	 * below is what every convex source used to get.
+	 */
+	QString error; QByteArray bytes = tlCollCompileConvex( nif, rootShape, input, &error );
+	const bool convexPath = !bytes.isEmpty();
+	if ( bytes.isEmpty() )
+		bytes = hknpEncodeCompressedMesh( input, &error );
 	if ( bytes.isEmpty() )
 		return refuse( error );
 	HknpSystem roundTrip = hknpDecode( bytes );
-	if ( !roundTrip.valid || roundTrip.shapes.isEmpty() || roundTrip.shapes.first().tris.isEmpty() )
+	if ( !roundTrip.valid || roundTrip.shapes.isEmpty() )
 		return refuse( QObject::tr( "The generated packfile failed NifSkope's round-trip check: %1" ).arg( roundTrip.error ) );
-	// section boundaries duplicate verts, so only the tri count is stable
-	if ( roundTrip.shapes.first().tris.size() != input.tris.size() )
-		return refuse( QObject::tr( "Round-trip triangle count mismatch (%1 encoded, %2 decoded) — the packfile was not written." )
-			.arg( input.tris.size() ).arg( roundTrip.shapes.first().tris.size() ) );
+	if ( convexPath ) {
+		/* A convex shape has no triangle count to check against — the mesh path's
+		 * invariant — so the check is that the hull came back a hull: convex, with
+		 * the vertices and faces that were written.
+		 */
+		const HknpShape & got = roundTrip.shapes.first();
+		const bool primitive = got.primType == 1 || got.primType == 2;
+		if ( !got.isConvex || ( !primitive && ( got.verts.size() < 4 || got.faces.isEmpty() ) ) )
+			return refuse( QObject::tr( "The compiled convex shape did not read back as one — the packfile was not written." ) );
+	} else {
+		if ( roundTrip.shapes.first().tris.isEmpty() )
+			return refuse( QObject::tr( "The generated packfile failed NifSkope's round-trip check: %1" ).arg( roundTrip.error ) );
+		// section boundaries duplicate verts, so only the tri count is stable
+		if ( roundTrip.shapes.first().tris.size() != input.tris.size() )
+			return refuse( QObject::tr( "Round-trip triangle count mismatch (%1 encoded, %2 decoded) — the packfile was not written." )
+				.arg( input.tris.size() ).arg( roundTrip.shapes.first().tris.size() ) );
+	}
 	QPersistentModelIndex oldObject = tlCollBlockIndex( nif, objectBlock ), target = node;
 	QPersistentModelIndex newObject, newSystem;
 	nifSnapshotOp( nif, QObject::tr( "Compile collision" ), [&]() {

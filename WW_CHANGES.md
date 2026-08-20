@@ -1,5 +1,107 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-20e — Create Collision adds beside, rather than replacing
+
+Creating collision on a node that already had some deleted the old shape with
+`spRemoveBranch` — no question, nothing in the status bar, and no way to know
+except noticing the collision was gone. The dialog that offers "Add Beside It"
+had been added since that was filed, but `CollisionManager/Create/Replace` still
+defaulted to TRUE, so the destructive path was still the one on the default
+route.
+
+It adds beside now, and the SETTING IS RENAMED to `Create/ReplaceShape` to make
+that stick: anyone who has run this program already has `Create/Replace` stored
+as true, because that was the default and QSettings keeps what it was given, so
+flipping the default alone would have changed nothing for exactly the people it
+was meant to help. The new key starts at false, and a second Create wraps both
+shapes in a `bhkListShape` — which is what `tlMoveCollisionShape` and the
+drag-and-drop path already do, so the button agrees with the rest of the program.
+Replace is still one setting away, and when it is on the question is still put
+once per Create.
+
+One thing this did NOT fix, and it is filed rather than buried:
+`collision_drop.sh` stops after its fourth check, at the first drop that actually
+creates. It stops in the same place with Replace on and with Replace off, so it
+is not this change — the app stays alive and responding, which makes it a stall
+and not a fault. `collision_per_shape.sh` (8/8, and it creates collision too) and
+`collision_compiled_edit.sh` (7/7) both pass. See docs/TO_BE_IMPLEMENTED.md.
+
+The dialog also could not be shown headless — a `-no-gui` build is a
+QCoreApplication, where constructing a QMessageBox aborts the process. A headless
+caller with Replace turned on now takes the non-destructive answer instead of
+dying, the same guard the compile path got on 2026-08-16.
+
+## 2026-08-20d — A convex source compiles to a convex shape
+
+Compile had exactly one output, `hknpCompressedMeshShape`, so a box went in and a
+triangle soup came out. Elric does not do that, and the corpus says so plainly:
+over 1,500 SetDressing files **228 static systems are polytope-only** and 733 are
+compressed-mesh-only. The class follows the SOURCE, not the motion type — which
+also corrects the backlog, where this was filed as a dynamic-only concern.
+
+It matters beyond tidiness. A dynamic body made of triangles is poor Havok
+practice, the tessellation of a hull is permanent once compiled, and a box
+compiled to 12 triangles collides worse than the box it came from.
+
+**A body whose leaves are all convex now compiles to convex shapes** — box, hull,
+sphere and capsule, static or dynamic, with wrappers (list, MOPP, transform)
+walked through and their transforms baked into the geometry. Anything else, or
+anything this path cannot write, returns empty and falls through to the mesh, so
+the fallback still carries every triangle source in the game.
+
+### The three numbers a polytope carries, measured
+
+An `hknpConvexPolytopeShape` needs mass properties, and the solid they describe
+is the hull GROWN by its convex radius, not the hull:
+
+- **Volume** is the Minkowski sum with a ball of radius r:
+  `V + A·r + ½·Σ(edge length × exterior dihedral)·r² + 4/3·π·r³`. Within 2% of
+  the stored figure on 271 of 299 vanilla polytopes, and for a box it reduces to
+  the expanded box, where 209 of 216 agree. The bare hull is nowhere near —
+  PlankHinge02 stores 0.295 against a hull of 0.021, which is what made the old
+  "expanded box" reading look right on boxes and wrong on everything else.
+- **Mass** equals that volume. Every vanilla shape is density 1.
+- **Inertia** is that solid's, approximated by scaling the hull about its centre
+  until its bounding box grows by r on every side: exact for a box, within 15% of
+  vanilla on 255 of 268 polytopes where the plain hull manages 170. Stored at
+  1.5× the physical tensor, as HknpShape already recorded.
+
+The **major-axis frame** at massProperties+0x20 is still undecoded, and it did not
+have to be: 1,002 of 1,304 vanilla mass-property objects carry exactly
+`00 80 00 80 00 80 30 f5` — 76.8%, where the next most common value appears seven
+times — so a synthesized shape takes the one vanilla writes three times in four.
+
+### What it comes out like
+
+AmmoBox01, decompiled and recompiled: `hknpConvexPolytopeShape`, 8 vertices as
+vanilla has, volume 0.046949 against vanilla's 0.047048, and the centre of mass
+identical to four decimals. Where the old path gave a compressed mesh.
+
+Verified:
+
+- `tests/spells/collision_convex.sh`, 9 checks — the class, the vertex count, the
+  volume within 5%, the centre of mass, `--roundtrip` byte-exact, AND the two
+  that say it did not over-reach: a triangle source still compiles to a mesh, and
+  a two-shape convex body still compiles rather than refusing.
+- 40 of 40 single-polytope vanilla files come back polytopes, none falls through
+  to the mesh, none refuses, and every one of them re-encodes byte-exact.
+- `collision_compile.sh` 14/14, `collision_materials.sh` 11/11,
+  `collision_undo.sh` 12/12 unchanged.
+
+### What is not written yet: compounds
+
+Several convex shapes in one body still compile to a mesh, because a compound
+needs an `hknpDynamicCompoundShapeData` object and nothing has ever written one —
+`hknpEncodeSystem` refuses a compound whose `dataRawData` is empty, and that is a
+decode we have not done.
+
+It is not far off, though, and the shape of it is measured: a 0x60 header whose
++0x18 holds 2n+1, +0x20 holds 2n, +0x28 the instance count and +0x30 a 1, then
+**2n records of 32 bytes** from +0x60 — an AABB pair with a u16 pair in the last
+four bytes, which reads as a BVH over the instances. 224 bytes for two children,
+288 for three, 352 for four, 416 for five: exactly `0x60 + 2n × 32`. Filed as
+item 3b.
+
 ## 2026-08-20c — triangleIsInterior: the necessary condition, exactly
 
 The bit stays zero, but it is no longer zero for want of looking. What changed is

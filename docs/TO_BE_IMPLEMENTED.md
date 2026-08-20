@@ -126,10 +126,31 @@ corners are coplanar", measured clean at 2,965 quads). Pairing in the writer
 doubled per-section capacity from 128 triangles to ~256 and halved
 packfile sizes. The decode convention for a quad (a,b,c,d) is (a,b,c)+(a,c,d).
 
-**3. Convex dynamic sources compile to polytopes in Elric**, compressed mesh in
-ours. Vanilla has dynamic compressed-mesh precedent (SignWrightsInn02Dest), so
-ours is legal; matching Elric means routing a convex-only editable source
-through hknpEncodeConvexPolytopeShape instead. The encoder already exists.
+**3. ~~Convex sources compile to polytopes in Elric~~ SINGLE SHAPE DONE
+2026-08-20.** Filed as a dynamic-only concern; it is not. Measured over 1,500
+SetDressing files, 228 static systems are polytope-only and 733 are
+compressed-mesh-only, so the compiled class follows the SOURCE and not the motion
+type. A body whose leaves are all convex — box, hull, sphere, capsule, wrappers
+walked and transforms baked — now compiles to convex shapes either way, and
+anything else falls through to the mesh as before. Mass properties are derived
+from a measured model (Minkowski-grown volume, grown-hull inertia, vanilla's
+dominant major-axis word); see WW_CHANGES 2026-08-20d and
+tests/spells/collision_convex.sh.
+
+**3b. Compounds: several convex shapes in ONE body.** What is left of item 3, and
+it needs a decode, not a routing change. `hknpEncodeSystem` refuses a compound
+whose `dataRawData` is empty, and nothing has ever written an
+`hknpDynamicCompoundShapeData` from scratch — so a multi-shape convex body still
+compiles to a mesh.
+
+The structure is already measured and it is small: a 0x60 header with 2n+1 at
++0x18, 2n at +0x20, the instance count at +0x28 and a 1 at +0x30, then **2n
+records of 32 bytes** from +0x60 — an AABB pair whose last four bytes are two
+u16, which reads as a BVH over the instances. The sizes confirm it exactly:
+224 bytes for two children, 288 for three, 352 for four, 416 for five, 480 for
+six, i.e. `0x60 + 2n × 32`. What is not known is what the two u16 mean (child
+links, or a leaf index and an escape), which one Elric pair or a careful read of
+three vanilla compounds would settle.
 
 **4. ~~Friction f16: Elric rounds, we truncate~~ DONE 2026-08-20.** Settled by
 counting the corpus rather than by an Elric pair: across 1,500 SetDressing files
@@ -142,7 +163,23 @@ The Elric harness (batch.esf + fixtures.ps1, hands-free desktop run) and the
 verification suite (sectree_verify.py, flatbits.py, interior.py) live in the
 session scratchpad; the harness pattern is documented in WW_CHANGES 2026-08-17.
 
-## Creating collision on a node that already has it REPLACES it — OPEN, 2026-08-07x
+## ~~Creating collision on a node that already has it REPLACES it~~ — FIXED 2026-08-20
+
+**Create adds beside now.** `CollisionManager/Create/Replace` defaults to false,
+so a second Create on a node wraps both shapes in a `bhkListShape` — which is
+what `tlMoveCollisionShape` and the drag-and-drop path already did, so the button
+agrees with the rest of the program instead of quietly disagreeing with it.
+Replace is still one setting away, and when it is on the question is put once per
+Create, defaulting to keeping both.
+
+The dialog also could not be shown headless — a `-no-gui` build is a
+QCoreApplication, where constructing a QMessageBox aborts the process — so a
+headless caller with Replace turned on now takes the non-destructive answer
+instead of dying.
+
+What follows is the original entry, for the reasoning.
+
+## Creating collision on a node that already has it REPLACES it — was OPEN, 2026-08-07x
 
 Found by the body-targeted drop check, which spent its first runs measuring this
 instead of itself.
@@ -164,6 +201,29 @@ button has always done, so it is not a thing to slip in while fixing a test.
 
 Worked around in the harness by giving the fourth mesh a node of its own, which is
 also the realistic case — you do not usually stack collision on one node.
+
+## `collision_drop.sh` stops after check 4 — OPEN, 2026-08-20
+
+Found while re-running the collision harnesses for the Create change, and it is
+NOT that change: the harness stops at exactly the same place with Replace on and
+with Replace off, and those are the only two behaviours the setting selects.
+
+What is established:
+
+- The in-app log (`release/ww_colldrop_test.log`) ends after check 4 — the
+  refusal check — so it is check 5, the first drop that actually CREATES, that
+  never reports.
+- NifSkope does not crash. The process is still alive and `Responding` when the
+  harness's timeout kills it, so this is a stall rather than a fault, and a modal
+  dialog is one of the shapes it could take.
+- Everything before it passes: the panel accepts drops, the create hook is wired,
+  a mesh payload is taken and a non-mesh payload is refused by action.
+- The sibling GUI harnesses that touch the same code both pass —
+  `collision_per_shape.sh` 8/8 (which also creates collision) and
+  `collision_compiled_edit.sh` 7/7.
+
+Whether it predates 2026-08-20 is not established: there is no recorded run of
+this harness against the previous build, and the previous binary is gone.
 
 ## `block_rename.sh` in list mode HANGS, 7 runs in 10 — OPEN, 2026-08-07t
 

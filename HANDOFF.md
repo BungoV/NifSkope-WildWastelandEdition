@@ -9,11 +9,44 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-20**. Edition **0.3.2**. Build green; latest closed work is
-**multi-material compile** — a body made of parts keeps every part's material
-now, and the CMSD run table that carries them is decoded. Under that sits the
-rest of **compiled collision**, below, including the Elric campaign that decoded
-both hkcd trees and lifted the 128-triangle cap.
+Updated **2026-08-20**. Edition **0.3.2**. Build green. The current work is a
+sweep of the **compiled-collision backlog**, all of it measured against the
+vanilla corpus rather than against Elric, which is not on this machine any more:
+
+- **Multi-material compile** — a body made of parts keeps every part's material,
+  and the CMSD run table that carries them is decoded (below).
+- **Friction and restitution round** into their stored word instead of
+  truncating. 0.4 is the Fallout 4 default restitution, so every body we compiled
+  was one ULP low.
+- **triangleIsInterior** is measured, not guessed: fully-edge-shared is a
+  necessary condition, exactly, on 3,037 of 3,037 set bits. Still zero, and zero
+  is the safe direction.
+- **A convex source compiles to a convex shape** — box, hull, sphere, capsule —
+  instead of a triangle mesh. Compounds are the piece still missing.
+- **Create Collision adds beside** rather than deleting the shape that is there.
+
+Under that sits the rest of **compiled collision**, below, including the Elric
+campaign that decoded both hkcd trees and lifted the 128-triangle cap.
+
+### A convex source compiles to a convex shape (2026-08-20)
+
+Compile had one output, `hknpCompressedMeshShape`, so a box went in and a
+triangle soup came out. The class follows the SOURCE — 228 static systems in the
+corpus are polytope-only — so this is not the dynamic-only concern the backlog
+filed. What a future session needs:
+
+- A polytope's mass properties describe the hull GROWN by its convex radius.
+  Volume is the Minkowski sum (within 2% on 271 of 299), inertia is that solid's
+  approximated by growing the hull's bounding box by r (within 15% on 255 of
+  268), and the stored tensor is 1.5× the physical one.
+- The major-axis frame at massProperties+0x20 is still undecoded, and does not
+  need to be: 76.8% of vanilla carries `00 80 00 80 00 80 30 f5`, and a
+  synthesized shape takes that.
+- **Compounds are what is left** (item 3b): `hknpEncodeSystem` refuses a compound
+  with no `dataRawData`, and nothing has written an
+  `hknpDynamicCompoundShapeData` yet. Its shape is measured — `0x60 + 2n × 32`,
+  the records being AABB pairs with two u16 in the tail — so it is a short decode,
+  not a campaign.
 
 ### Compile keeps every material (2026-08-20)
 

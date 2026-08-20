@@ -237,7 +237,7 @@ public:
 		if ( quickCreate ) {
 			precision = previewSettings.value( "CollisionManager/Preview/Precision", 0.25f ).toFloat();
 			radius = previewSettings.value( "CollisionManager/Preview/Radius", 0.05f ).toFloat();
-			replaceShape = previewSettings.value( "CollisionManager/Create/Replace", true ).toBool();
+			replaceShape = previewSettings.value( "CollisionManager/Create/ReplaceShape", false ).toBool();
 			enableCoACD = previewSettings.value( "CollisionManager/Preview/Decomposition", false ).toBool();
 			coacd.threshold = previewSettings.value( "CollisionManager/Preview/Threshold", 0.05 ).toDouble();
 			coacd.maxConvexHull = previewSettings.value( "CollisionManager/Preview/MaxHulls", 16 ).toInt();
@@ -951,7 +951,7 @@ static QModelIndex attachCollisionShape( NifModel * nif, const QModelIndex & par
 	const QModelIndex & newShape, const QModelIndex & fallback )
 {
 	QSettings settings;
-	const bool replace = settings.value( "CollisionManager/Create/Replace", true ).toBool();
+	const bool replace = settings.value( "CollisionManager/Create/ReplaceShape", false ).toBool();
 	QModelIndex collisionLink = nif->getIndex( parentNode, "Collision Object" );
 	QModelIndex collisionObject = nif->getBlockIndex( nif->getLink( collisionLink ) );
 	if ( collisionObject.isValid() && !nif->blockInherits( collisionObject, "bhkCollisionObject" ) ) {
@@ -974,20 +974,34 @@ static QModelIndex attachCollisionShape( NifModel * nif, const QModelIndex & par
 	QModelIndex shapeLink = nif->getIndex( rigidBody, "Shape" );
 	QPersistentModelIndex oldShape = nif->getBlockIndex( nif->getLink( shapeLink ) );
 
-	/* REPLACING DESTROYS A SHAPE, SO IT IS ASKED FOR.
+	/* ADDING BESIDE IS THE DEFAULT, because replacing DESTROYS a shape.
 	 *
-	 * `Create/Replace` defaults to true, and true means the shape already on this
-	 * body is deleted with spRemoveBranch — no question, nothing in the status
-	 * bar, and no way to know it happened except noticing the old collision is
-	 * gone. Adding beside it has been available all along, one setting away, which
-	 * nobody finds while wondering where their collision went.
+	 * `Create/Replace` used to default to true, and true means the shape already
+	 * on this body is deleted with spRemoveBranch — no question, nothing in the
+	 * status bar, and no way to know it happened except noticing the old collision
+	 * is gone. Since 2026-08-20 a second Create on a node wraps both shapes in a
+	 * bhkListShape, which is what tlMoveCollisionShape and the drag-and-drop path
+	 * already do, so the button agrees with the rest of the program instead of
+	 * quietly disagreeing with it.
 	 *
-	 * Asked once per Create, defaulting to the answer that keeps both. The setting
-	 * still decides which button is preselected, so anyone who has deliberately
-	 * chosen Replace gets it under the cursor.
+	 * The SETTING IS RENAMED, `Create/ReplaceShape`, and that is deliberate rather
+	 * than tidying: anyone who has run this program already has `Create/Replace`
+	 * stored as true — it was the default, and QSettings keeps what it was given —
+	 * so flipping the default alone would have changed nothing for exactly the
+	 * people it was meant to help. The new key starts at false; turning Replace
+	 * back on writes the new one.
+	 *
+	 * Replace is still there for anyone who wants it, and when it is on the
+	 * question is put once per Create, defaulting to the answer that keeps both.
 	 */
 	bool addBeside = !replace;
 	if ( oldShape.isValid() && replace ) {
+		/* No QApplication means no QMessageBox — a -no-gui build is a
+		 * QCoreApplication, where constructing one aborts the process. A headless
+		 * caller gets the non-destructive answer rather than a dead process.
+		 */
+		if ( !qobject_cast<QApplication *>( QCoreApplication::instance() ) )
+			collisionReplaceChoice = 0;
 		if ( collisionReplaceChoice < 0 ) {
 			QMessageBox ask( QMessageBox::Warning, Spell::tr( "Create Collision" ),
 				Spell::tr( "%1 already has a collision shape.\n\nReplacing it DELETES the shape "
