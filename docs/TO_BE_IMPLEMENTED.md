@@ -112,9 +112,28 @@ convex/concave/dihedral cut. Every simple closed mesh in the corpus — the 12- 
 
 Zero stays, and it is the safe direction: a set bit is a strict subset of
 fully-shared triangles, so under-flagging can only add collision work, never skip
-a collidable edge. Settling it needs the controlled Elric diff — recompile one
-mesh with a face removed — and **Elric is no longer installed on this machine**,
-which is what this is waiting on.
+a collidable edge.
+
+**The Elric oracle now runs from one command** — `tools/elric_pair.sh`, against
+the install at `X:\Programs\Steam\steamapps\common\Fallout 4 1946160\Tools\Elric`
+— so this is narrowed rather than blocked. What that harness added on 2026-08-21:
+
+- The bit IS derivable from a NIF: a decompiled ACDuctSmEnd01 recompiled by Elric
+  comes back with three interior bits, the count vanilla ships, deterministically.
+- It is NOT a function of local geometry: on that same geometry Elric flags three
+  DIFFERENT triangles than vanilla, the symmetric partners of them. Candidates sit
+  in near-ties, which is why no predicate has ever fitted.
+- It is quad-ORDER dependent: over 400 meshes, half 0 carries the bit 553 times,
+  half 1 only 77, both halves 52. On the duct every flagged triangle is a half 0
+  whose partner is not flagged, prim9 included — and prim9's two halves have the
+  same edge signature.
+- Also ruled out: the sharper half of the quad (221 flagged halves are the
+  BLUNTER one against 157 sharper), anything keyed on quadIsFlat, and "one flat
+  edge plus two concave" (fits all six duct triangles, F 0.23 over the corpus).
+
+Next attempt starts by perturbing the duct one thing at a time and diffing — the
+lever that is missing is a way to edit mesh geometry headlessly, since
+`nifskope-cli set` takes scalars and not a Vector3.
 
 **2. ~~Quad pairing~~ DONE 2026-08-17d.** Elric merges adjacent triangle pairs into quads — bent
 ones included (89% of corpus primitives are quads; quadIsFlat = "the four

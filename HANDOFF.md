@@ -10,8 +10,10 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 branch `main`, `origin` is the fork — never push upstream.)
 
 Updated **2026-08-21**. Edition **0.3.2**. Build green. The current work is a
-sweep of the **compiled-collision backlog**, all of it measured against the
-vanilla corpus rather than against Elric, which is not on this machine any more:
+sweep of the **compiled-collision backlog**, most of it measured against the
+vanilla corpus. (Elric IS installed, at `X:\Programs\Steam\steamapps\common\Fallout 4 1946160\Tools\Elric`
+— an earlier note in these files said otherwise, from a search that covered only
+C: and E:.)
 
 - **Multi-material collision, both ways** — a body made of parts keeps every
   part's material through Compile, and Decompile splits a mesh back into one

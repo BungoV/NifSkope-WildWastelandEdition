@@ -1,5 +1,47 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-21b — The Elric harness lives in the repo now, and what it says about triangleIsInterior
+
+**Elric is installed.** At
+`X:\Programs\Steam\steamapps\common\Fallout 4 1946160\Tools\Elric`. Yesterday's
+notes said it was gone; that was a search that covered C: and E: and stopped.
+
+`tools/elric_pair.sh` is the harness, in the repo this time — the 08-17 one lived
+in a session scratchpad and went with it, which is how the claim above came to be
+written at all. One command: it stages the input under `Source\Meshes\`, points a
+copy of `Settings\PCMeshes.esf` at absolute paths, turns on `CloseWhenFinished`
+and `AutoStartConversion`, turns OFF the filter script (its stock path is
+relative, and that is what makes a run need a human), launches `Elrich.exe`, and
+prints where the output landed. A window opens for a second and closes itself.
+
+### What it establishes about the interior bit
+
+- **The bit is derivable from a NIF.** ACDuctSmEnd01, decompiled by NifSkope and
+  recompiled by Elric, comes back with three interior bits — the same count
+  vanilla ships. Nothing hidden in Max metadata, and the run is deterministic
+  across repeats.
+- **But not from local geometry alone.** On that same decompiled geometry, Elric
+  flags three DIFFERENT triangles than vanilla does — the symmetric partners of
+  vanilla's, rotated around the duct. So candidates sit in near-ties that
+  quantization or ordering breaks, which is exactly why no geometric predicate
+  has ever fitted.
+- **It is tied to the quad's own order.** Over 400 meshes: half 0 of a primitive
+  carries the bit **553 times, half 1 only 77**, and both halves 52. On the duct,
+  every flagged triangle is a half 0 whose partner is not flagged — including
+  prim9, whose two halves have the SAME edge signature to the degree printed.
+- Ruled out this round, with numbers: the sharper half of the quad (221 flagged
+  halves are the blunter one against 157 sharper), anything keyed on quadIsFlat
+  (the duct's three sit in FLAT quads; Toilet01's sit in both kinds), and "one
+  flat edge plus two concave" — which fits all six of the duct's flagged
+  triangles exactly and then generalises at F 0.23 over the corpus.
+- The necessary condition is untouched and still exact: 3,037 of 3,037 set bits
+  sit on a triangle whose three edges are all shared.
+
+So it stays zero, and it stays open — but it is no longer BLOCKED. The oracle
+runs from one command, the hunt is narrowed to something order-dependent inside
+the quad, and the next attempt starts from a working pair machine instead of
+from scratch.
+
 ## 2026-08-21 — Decompile splits a mesh by material, so the round trip keeps them
 
 Compile learned to carry several materials on 2026-08-20. This is the half that
