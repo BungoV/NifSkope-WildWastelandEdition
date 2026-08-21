@@ -174,6 +174,24 @@ type hash was never in our table. See WW_CHANGES 2026-08-21c and 2026-08-21g;
 after this shipped WITHOUT the pointer and crashed Fallout 4 in
 `hknpDynamicCompoundShape::updateAabb`.
 
+**3c. Compounds MIXING a triangle mesh with convex shapes.** A body whose leaves
+are all convex compiles to a compound of convex shapes; a body with one triangle
+mesh among them takes the mesh path WHOLE, and the convex parts arrive
+triangulated. Vanilla keeps the compound and puts a compressed mesh in it as one
+child among the polytopes — measured on `industrialfansmall01_dest` (1 mesh + 3
+polytopes), `terminalwall01` and `terminalonscrollingtext` (1 mesh + 1 polytope),
+3 of the Museum's 37 compounds.
+
+Nothing crashes and no geometry is lost; the tessellation error is permanent and
+the structure is not vanilla's. What it needs: `encodeShapeObject` can already
+write a compressed mesh and its data object, so the work is letting
+`tlCollCompileConvex` accept a mixed child list and letting the compound's child
+loop emit a mesh child with its own shape-data pointer. The per-child box for one
+is its vertex bound, which the boxes loop already computes.
+
+Guard when it lands: `tools/hkcompound_sweep.py` against a vanilla tree — those
+three files report "ours (none)" today and would report a matching AABB.
+
 **4. ~~Friction f16: Elric rounds, we truncate~~ DONE 2026-08-20.** Settled by
 counting the corpus rather than by an Elric pair: across 1,500 SetDressing files
 every discriminating value is the ROUNDED word and none is the truncated one
