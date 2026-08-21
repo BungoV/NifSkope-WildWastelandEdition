@@ -127,6 +127,25 @@ def check(path, expect=None, quiet=False):
     return 1 if bad else 0
 
 
+def aabb(path):
+    """Print each compound's own AABB, so one file's can be compared with another's.
+
+    Used to hold our output against VANILLA's rather than against itself: the
+    numbers are Bethesda's, and matching them is a check nothing of ours can
+    quietly redefine.
+    """
+    for bi, at, blob in nif_blobs(path):
+        try:
+            pk = Pack(blob)
+        except ValueError:
+            continue
+        for co in pk.of_class('hknpDynamicCompoundShape') + pk.of_class('hknpStaticCompoundShape'):
+            lo = struct.unpack_from('<3f', pk.data, co + 0x80)
+            hi = struct.unpack_from('<3f', pk.data, co + 0x90)
+            print('%s | %s' % (' '.join('%.6f' % v for v in lo), ' '.join('%.6f' % v for v in hi)))
+    return 0
+
+
 def damage(path, out):
     """Write a copy whose node-array pointer is misfiled, reproducing the crash.
 
@@ -164,6 +183,8 @@ if __name__ == '__main__':
             want = int(a.split('=', 1)[1])
         if a.startswith('--damage='):
             out = a.split('=', 1)[1]
+    if '--aabb' in sys.argv:
+        sys.exit(aabb(args[0]))
     if out:
         sys.exit(damage(args[0], out))
     sys.exit(check(args[0], want, '--quiet' in sys.argv))

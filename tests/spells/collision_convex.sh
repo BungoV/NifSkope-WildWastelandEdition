@@ -26,6 +26,9 @@
 #   9. a two-shape convex body compiles to two polytopes under a compound
 #  10. the compound follows its own node-array pointer, as the ENGINE must
 #  11. ...and that check rejects the layout that crashed Fallout 4
+#  12. a body of NOTHING BUT CAPSULES stays capsules, not a triangle mesh
+#  13. a compound holding a capsule bounds it
+#  14. ...to vanilla's own AABB, to six decimals
 #      (the compound BVH, decoded 2026-08-21)
 #
 # Checks 8 and 9 are the ones that say this did not over-reach. The convex path
@@ -49,6 +52,11 @@ SRC="${SRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Ammo/AmmoBox
 MESHSRC="${MESHSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Bathroom/Toilet01.nif}"
 # two convex shapes in one body: a compound, which this path leaves alone
 PAIRSRC="${PAIRSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Building/RefrigeratorBrokenDoor01.nif}"
+# a body whose leaves are ALL capsules, which have no vertex list at all
+CAPSRC="${CAPSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Standpipes/StandPipe03.nif}"
+# a compound MIXING a capsule with hulls: the case where a vert-only bound was
+# short by exactly the capsule
+AABBSRC="${AABBSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/Props/parking_meter_01.nif}"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
@@ -142,6 +150,39 @@ python "$ROOT/tools/hkcompound.py" "$W/pbroken.nif" --quiet >/dev/null 2>&1
 rejected=$?
 check "...and that check rejects the pointer-less layout that crashed the game" \
 	"$([ "$rejected" != "0" ] && echo 1 || echo 0)"
+
+# --- capsules are geometry too, and they have no vertex list --------------------
+#
+# The compound AABB used to be unioned from the children's VERTS, and a sphere or
+# a capsule has none - it is end points and a radius. So a capsule child fell out
+# of the bound (a parking meter shipped with an AABB that stopped below its own
+# head), and a body of nothing BUT capsules bounded nothing at all, was refused,
+# and fell through to the mesh path with 14 capsules triangulated. Both are
+# measured here against vanilla, which is the only source for the numbers.
+if recompile "$CAPSRC" "$W/k.nif"; then
+	kcap=$("$NS" -no-gui collision "$W/k.nif" 2>/dev/null | grep -c 'hknpCapsuleShape')
+	kmesh=$("$NS" -no-gui collision "$W/k.nif" 2>/dev/null | grep -c 'hknpCompressedMeshShape')
+else
+	kcap=0; kmesh=0
+fi
+echo "  all-capsule body compiled to: $kcap capsules, $kmesh compressed mesh(es)"
+check "a body of nothing but capsules stays capsules" \
+	"$([ "$kcap" -ge 2 ] && [ "$kmesh" = "0" ] && echo 1 || echo 0)"
+
+if recompile "$AABBSRC" "$W/b.nif"; then
+	python "$ROOT/tools/hkcompound.py" "$W/b.nif" --quiet >/dev/null 2>&1
+	bok=$?
+	ours=$(python "$ROOT/tools/hkcompound.py" "$W/b.nif" --aabb 2>/dev/null)
+	theirs=$(python "$ROOT/tools/hkcompound.py" "$AABBSRC" --aabb 2>/dev/null)
+else
+	bok=1; ours=""; theirs="x"
+fi
+echo "  compound-with-capsule AABB"
+echo "    ours    $ours"
+echo "    vanilla $theirs"
+check "a compound holding a capsule bounds it" "$([ "$bok" = "0" ] && echo 1 || echo 0)"
+check "...to VANILLA's own AABB, to six decimals" \
+	"$([ -n "$ours" ] && [ "$ours" = "$theirs" ] && echo 1 || echo 0)"
 
 echo "$checks checks, $fails failures"
 if [ "$fails" = "0" ]; then echo PASS; exit 0; else echo FAIL; exit 1; fi

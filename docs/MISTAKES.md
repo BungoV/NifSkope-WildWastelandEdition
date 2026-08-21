@@ -134,3 +134,39 @@ mode reproduces exactly what shipped so the check is proved able to fail.
 And validate in the real consumer sooner. 1,619 rebuilt meshes in a mod folder
 found this in minutes, after weeks of green harnesses. That test should have come
 before the tenth check, not after.
+
+## 2026-08-21 — Killed every NifSkope process without looking first
+
+**What:** a link failed with "cannot open output file release/NifSkope.exe:
+Permission denied", so the next command opened with
+`Get-Process NifSkope | Stop-Process -Force` — every instance, no check for which
+were headless CLI workers and which might be a window bungo had open. When the
+survivors were finally inspected they were all `-no-gui` workers, but that was
+luck, not care: he keeps NifSkope windows open for hours and the rule to close
+one with `CloseMainWindow` rather than `Kill` was already written down.
+
+**Why:** the lock had an obvious cause and killing everything was the one-line
+fix. Enumerating first costs one command.
+
+**Solution:** filter before killing. `Get-CimInstance Win32_Process -Filter
+"Name='NifSkope.exe'"` gives the command line, and `-no-gui` in it is proof the
+process is a worker; a `MainWindowHandle` of 0 says the same. Anything else gets
+`CloseMainWindow`, or gets left alone and reported.
+
+## 2026-08-21 — Two rebuild loops ran at once over one output directory
+
+**What:** the mod rebuild was started with `nohup ... &` inside a tool call. The
+call reported "completed, exit 0" a moment later, the mod folder held 14 files,
+and that was read as the loop having died with its wrapper. So a second loop was
+started. Both were alive an hour later, appending to the same manifest and
+writing the same mod folder.
+
+**Why:** the notification is about the WRAPPER, and `nohup ... &` deliberately
+outlives it. Its exit code says nothing about the work. Worse, `TaskStop` on the
+second run killed only the tracked shell — `rebuild.sh` kept going, and kept
+spawning the NifSkope processes that then held the exe locked.
+
+**Solution:** never `nohup ... &` inside a tool call — use the harness's own
+background mode, which tracks the real process. And when a background job needs
+to stop, verify it: `Get-CimInstance Win32_Process | Where-Object CommandLine
+-match '<script>'` returning nothing is the proof, not the stop call's message.

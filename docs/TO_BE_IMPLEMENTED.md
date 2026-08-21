@@ -1306,11 +1306,23 @@ assumed — an encoder must take them as optional inputs (see `HknpCapsuleInput`
   so any perpendicular is geometrically valid; only byte-exactness needs the
   original.
 
-**`primRadius` is a choice, not a measurement.** The solid's cross-section is a
-rounded square, half-width `R + padding` facing a face and `R + padding*sqrt(2)`
-facing a corner. The decoder takes the circumscribed value so it never under-states
-the solid. A/B on the settle corpus: inscribed 33/37 (Liberty Prime 34.2 m/s),
-circumscribed 34/37 (3.11), the old accidental `sqrt(3)` 34/37 (2.95).
+**`primRadius` was a choice until Elric was asked. It is a measurement now
+(2026-08-21).** Fed a NIF capsule of radius R, Elric stores
+`core = R * 0.99 * 0.99` and pads by `core/99`, exactly — three inputs, ratio
+1.020304 = `(1 + 1/99)^2` on all three. So the NIF-facing radius is `core/0.9801`,
+and the corpus hypothesis one paragraph up is confirmed with its missing link:
+the outer radius `Rout` of that split is `0.99 * R`, which is the solid's face
+half-width.
+
+The decoder read `core + padding*sqrt(2)` before — the circumscribed half-width,
+argued from geometry alone. It is 0.59% short, and it RATCHETED: each
+decompile-and-recompile cycle made a capsule 1.43% fatter. Elric's value
+round-trips vanilla's radius word bit-for-bit (`3e1d7c03`).
+
+The settle A/B that picked the circumscribed value stands, and does not decide
+this: inscribed 33/37 (Liberty Prime 34.2 m/s), circumscribed 34/37 (3.11), the
+old accidental `sqrt(3)` 34/37 (2.95) — and Elric's number is 0.59% above the
+circumscribed one, far inside the gap that separated those.
 
 **Trap for anyone measuring the padding:** every corner overhangs the segment
 axially, so a closest-point-on-*segment* helper returns `padding*sqrt(3)`, not the

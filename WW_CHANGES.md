@@ -1,5 +1,69 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-21h — Capsules: what a radius means, asked of the tool that decides
+
+The new compound checker was pointed at all 1,619 rebuilt meshes, which is the
+first thing that had ever read our output the way the engine reads it. Nine of
+the 115 compounds failed — not the pointer this time, the BOUND:
+
+    parking_meter_01   ours max z 0.825463   vanilla 1.318528
+
+The AABB stopped below the parking meter's own head. Every one of the nine holds
+a capsule or a sphere.
+
+**The bound was unioned from the children's VERTEX LISTS, and a capsule has none**
+— its geometry is two end points and a radius. So a capsule child contributed
+nothing and fell out of the bound. Worse, a body of nothing BUT capsules bounded
+nothing at all, was refused, and fell through to the mesh path: that is why
+standpipe03 arrived with 14 capsules triangulated, which this changelog had
+filed as a shape-structure curiosity rather than a bug.
+
+The AABB is now computed in the ENCODER, from the same per-child boxes the BVH
+is built from — so the compound's AABB and its root node cannot disagree, which
+is the invariant vanilla holds on 86 of 86.
+
+### Then the numbers still did not match, and Elric was asked
+
+With the capsule in the bound, the parking meter came out 0.6 mm too tall. Our
+capsule was FATTER than vanilla's: 0.155990 against 0.153793, and 0.155990 is
+exactly what our own decompile had written into the NIF.
+
+Elric, fed our decompiled NIF, answered in one run — and again on 1.0 and 0.5:
+
+    NIF R        -> stored core radius   ratio
+    1.000000        0.980100             1.020304
+    0.500000        0.490050             1.020304
+    0.155990        0.152886             1.020304        = (1 + 1/99)^2
+
+**A NIF capsule radius R is stored as core = R * 0.99 * 0.99, and the core box is
+padded by core/99 — so the solid's face half-width is exactly 0.99 R.** The
+compound bound grows by core * (1 + 1/99), which is vanilla's 0.155348 against
+its stored 0.153793 to six decimals.
+
+We read core + padding * sqrt(2) instead — the circumscribed half-width, argued
+from the geometry alone and defended in a comment as "the bound that never
+under-states the solid". It is 0.59% short of Elric's number, and the error
+RATCHETS: every decompile-and-recompile made a capsule 1.43% fatter than the one
+before. Inverted properly, vanilla's radius word comes back bit-identical:
+
+    VANILLA  capsule +0x14 = 0.15379338  (raw 3e1d7c03)
+    OURS     capsule +0x14 = 0.15379338  (raw 3e1d7c03)
+
+A sphere takes no such treatment — Elric stores its NIF radius verbatim, checked
+on smallsandbagpile01 — and the sphere path is unchanged.
+
+The geometry could not have answered this. Both readings are self-consistent, and
+the corpus agrees with either. Only the tool that wrote the files could say, and
+`tools/elric_pair.sh` is in the repo precisely so it can be asked in a minute.
+
+### What is guarded now
+
+`tests/spells/collision_convex.sh` is 14 checks. 12: a body of nothing but
+capsules stays capsules, not a triangle mesh. 13: a compound holding a capsule
+bounds it. 14: **to vanilla's own AABB, to six decimals** — an external number,
+not one of ours. `rebuild.sh` also gates on the compound check now, so a mesh
+whose compound does not read back cannot reach the mod folder.
+
 ## 2026-08-21g — The engine found what nothing else could: a BVH with no pointer to it
 
 First in-game test of compiled collision. Fallout 4 crashed within minutes, and

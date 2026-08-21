@@ -824,7 +824,15 @@ bool tlCollConvexLeafShape( const NifModel * nif, int shapeBlock, const Matrix4 
 		out.primRadius = nif->get<float>( shape, "Radius" );
 		out.capA = transform * nif->get<Vector3>( shape, "First Point" );
 		out.capB = transform * nif->get<Vector3>( shape, "Second Point" );
-		out.convexRadius = out.primRadius;
+		/* Elric's conversion, measured on the oracle: the stored core radius is
+		 * the NIF's radius shrunk by 1% twice, and the core box is then padded by
+		 * core/99, which puts the solid's face at exactly 0.99 * R. Writing R
+		 * straight into +0x14 -- as this did -- inflates every capsule by 1.43%
+		 * per decompile/recompile cycle. See hknpdecode.cpp, which inverts it.
+		 * A SPHERE takes no such treatment: Elric stores its NIF radius verbatim,
+		 * checked on smallsandbagpile01 and unchanged above.
+		 */
+		out.convexRadius = out.primRadius * 0.9801f;
 		out.isConvex = true;
 		return out.primRadius > 0.0f;
 	}
@@ -1004,29 +1012,21 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 		compound.materialCRC = in.materialCRC;
 		compound.bodyId = 0;
 		compound.shapeFlags = 0x01000001u;
-		bool first = true;
 		for ( qsizetype k = 0; k < shapes.size(); k++ ) {
 			compound.children.append( int( k ) );
 			compound.instances.append( HknpCompound::Instance() );
-			// the solid is the hull grown by its convex radius, and the bounds
-			// vanilla writes are of the SOLID -- see hknpEncodeCompoundShapeData
-			const float grow = shapes.at( k ).convexRadius;
-			for ( const Vector3 & v : shapes.at( k ).verts ) {
-				const Vector3 p = shapes.at( k ).transformed( v );
-				if ( first ) {
-					compound.aabbMin = p - Vector3( grow, grow, grow );
-					compound.aabbMax = p + Vector3( grow, grow, grow );
-					first = false;
-					continue;
-				}
-				for ( int a = 0; a < 3; a++ ) {
-					compound.aabbMin[a] = std::min( compound.aabbMin[a], p[a] - grow );
-					compound.aabbMax[a] = std::max( compound.aabbMax[a], p[a] + grow );
-				}
-			}
 		}
-		if ( first )
-			return QByteArray();   // nothing to bound: leave it to the mesh path
+		/* The AABB is NOT computed here. It has to equal the root of the BVH, and
+		 * only the encoder knows the boxes the tree was built from, so it fills
+		 * both from the same numbers.
+		 *
+		 * Computed here it was computed from the VERTEX LISTS, and a sphere or a
+		 * capsule has none -- its geometry is end points and a radius. So every
+		 * such child fell out of the bound: a parking meter shipped with an AABB
+		 * that stopped below its own head. Worse, a body of nothing BUT capsules
+		 * bounded nothing at all, was refused here, and fell through to the mesh
+		 * path -- which is why standpipe03 arrived with 14 capsules triangulated.
+		 */
 		sys.compounds.append( compound );
 	}
 

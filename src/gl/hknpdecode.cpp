@@ -453,16 +453,30 @@ static void decodeConvexLike( Reader & r, qsizetype B, const QString & className
 		shape.primType = 2;
 		shape.capA = a;
 		shape.capB = b;
-		/* The solid is not exactly a capsule, so a single radius has to choose.
+		/* The NIF-facing radius is ELRIC'S, measured off the oracle 2026-08-21.
 		 *
-		 * Its cross-section is the core box's square -- half-width padding in both
-		 * perpendicular directions -- rounded by convexRadius, so the half-width
-		 * runs from convexRadius + padding facing a face to convexRadius +
-		 * padding * sqrt(2) facing a corner. Only 0.42% apart, but a simulator
-		 * wants the bound that never UNDER-states the solid, so take the
-		 * circumscribed one and miss no contacts.
+		 * Fed a bhkCapsuleShape of radius R, Elric stores core = R * 0.99 * 0.99
+		 * at +0x14 and pads the core box by core/99 -- so the solid's face
+		 * half-width is exactly 0.99 * R. Three inputs, three exact hits:
+		 *
+		 *   R 1.0000 -> core 0.980100, pad/core 0.010101
+		 *   R 0.5000 -> core 0.490050, pad/core 0.010101
+		 *   R 0.155990 -> core 0.152886, ratio 1.020304 = (1 + 1/99)^2
+		 *
+		 * So the inverse is core / 0.9801, and that is what goes back into the NIF.
+		 * It also happens to be the conservative reading: the solid runs from
+		 * 0.99 R at a face to 0.99414 R at a corner, so R over-states it by 0.6%
+		 * and never under-states it.
+		 *
+		 * This read core + padding * sqrt(2) until now -- the circumscribed
+		 * half-width, argued from the geometry alone. It is 0.59% short of Elric's
+		 * number, which does not sound like much until it round-trips: decompile
+		 * and recompile ratcheted every capsule 1.43% FATTER each cycle, and the
+		 * parking meter shipped with a compound AABB 0.6 mm past vanilla's. The
+		 * geometry cannot answer this question. Only the tool that wrote the files
+		 * can, and it did.
 		 */
-		shape.primRadius = shape.convexRadius + padding * 1.4142136f;
+		shape.primRadius = shape.convexRadius / 0.9801f;
 		shape.coreVerts = raw;
 		shape.corePadding = padding;
 		// the solid also runs one padding past each stored end point

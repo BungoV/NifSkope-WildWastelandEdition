@@ -2194,12 +2194,39 @@ QByteArray hknpEncodeSystem( const HknpSystem & sys, QString * error )
 					 * at -0.8352, and the difference is its 0.01 radius exactly.
 					 * For a sphere or a capsule that radius IS the shape.
 					 */
-					const float grow = ( child.primType == 1 || child.primType == 2 )
-						? child.primRadius : child.convexRadius;
+					/* A capsule's solid is its CORE box padded by core/99, so the
+					 * box grows by core * (1 + 1/99) -- not by the NIF radius,
+					 * which is 1% larger again. Vanilla's parking meter bounds its
+					 * capsule at 0.155348 against a stored 0.153793, and that
+					 * ratio is 1.010101 to six decimals. A sphere has no core box
+					 * and grows by its radius.
+					 */
+					const float grow = ( child.primType == 2 )
+						? child.convexRadius * ( 1.0f + 1.0f / 99.0f )
+						: ( child.primType == 1 ? child.primRadius : child.convexRadius );
 					for ( int a = 0; a < 3; a++ ) {
 						lo[a] -= grow; hi[a] += grow;
 					}
 					boxes.append( { lo, hi } );
+				}
+				/* The compound's own AABB is the union of exactly these boxes,
+				 * which is the root node's box -- vanilla holds that on 86 of 86.
+				 * Filling both from one source is the only way they cannot drift.
+				 * Computed anywhere else it drifts at once: from the callers'
+				 * vertex lists it dropped every sphere and capsule child, which
+				 * have no verts, and a parking meter shipped with an AABB that
+				 * stopped below its own head. A compound that came off a decode
+				 * keeps vanilla's stored AABB and never reaches this.
+				 */
+				if ( !boxes.isEmpty() ) {
+					patched.aabbMin = boxes.first().first;
+					patched.aabbMax = boxes.first().second;
+					for ( const QPair<Vector3, Vector3> & b : std::as_const( boxes ) ) {
+						for ( int a = 0; a < 3; a++ ) {
+							patched.aabbMin[a] = std::min( patched.aabbMin[a], b.first[a] );
+							patched.aabbMax[a] = std::max( patched.aabbMax[a], b.second[a] );
+						}
+					}
 				}
 				QVector<int> leaves;
 				builtData = hknpEncodeCompoundShapeData( boxes, &leaves );
