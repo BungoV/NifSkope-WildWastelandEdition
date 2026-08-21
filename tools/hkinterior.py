@@ -1,6 +1,6 @@
 """What does the CMSD's triangleIsInterior bit mean? Measure, don't guess.
 
-    python tools/hkinterior.py <dir-or-nif> [--limit=N] [--rules]
+    python tools/hkinterior.py <dir-or-nif> [--limit=N] [--rules] [--flagged]
 
 Reads each compiled mesh the way the engine does -- sections, quantized
 vertices, quad primitives -- then reads the shape's triangleIsInterior hkBitField
@@ -253,6 +253,30 @@ def walk(target, limit=0):
                     return
 
 
+def flagged_corners(target, limit=0):
+    """Every flagged triangle, as its three corners, rounded so two runs compare."""
+    for path in walk(target, limit):
+        try:
+            blobs = nif_blobs(path)
+        except Exception:
+            continue
+        for blob in blobs:
+            try:
+                pk = Pack(blob)
+            except Exception:
+                continue
+            for sh, cm in shapes(pk):
+                tris = triangles(pk, sh, cm)
+                if not tris:
+                    continue
+                marked = [t for t in tris if t[4]]
+                print('%s: %d flagged of %d' % (os.path.basename(path), len(marked), len(tris)))
+                for s, prim, half, g, b in marked:
+                    print('   ' + ' '.join('(%.3f,%.3f,%.3f)' % v for v in
+                                           sorted(tuple(round(x, 3) for x in c) for c in g)))
+    return 0
+
+
 def main(target, limit=0, rules=False):
     meshes = tris_total = bits_total = with_bits = 0
     violations = []
@@ -314,4 +338,6 @@ if __name__ == '__main__':
     for a in sys.argv[1:]:
         if a.startswith('--limit='):
             lim = int(a.split('=', 1)[1])
+    if '--flagged' in sys.argv:
+        sys.exit(flagged_corners(args[0], lim))
     sys.exit(main(args[0], lim, '--rules' in sys.argv))

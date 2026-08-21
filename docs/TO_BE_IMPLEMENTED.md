@@ -95,45 +95,49 @@ single-material mesh is byte-identical to what it was: one group takes the whole
 vertex array in its original order and skips the remap. See WW_CHANGES
 2026-08-21 and `tests/spells/collision_material_roundtrip.sh`.
 
-**1. triangleIsInterior semantics — SHARPENED 2026-08-20, still open.** The
-"767 of 867" above was an indexing artifact: the field is in KEY SPACE like
-quadIsFlat, at twice its resolution, `(section << primBits) | (2 * prim + half)`.
-Read that way the necessary condition is EXACT — **3,037 of 3,037 set bits over
-875 meshes sit on a triangle whose three edges are all shared, no exceptions.**
+**1. triangleIsInterior semantics — NARROWED AGAIN 2026-08-21, still open.** Zero
+still goes out, and it is still the safe direction: a set bit is a strict subset
+of fully-shared triangles (3,037 of 3,037 over 875 meshes, exactly), so
+under-flagging can only add collision work, never skip a collidable edge.
 
-Not sufficient, and not local geometry: 37,508 triangles qualify and only 3,037
-are flagged, and the best rule tried reaches F 0.42 (table in WW_CHANGES
-2026-08-20c, reprintable with `tools/hkinterior.py --rules`). Ruled out at zero
-or near-zero: second-half-of-a-quad, buried inside another connected component,
-inward-facing normal, coincident twin, junction vertex, and every
-convex/concave/dihedral cut. Every simple closed mesh in the corpus — the 12- and
-16-triangle boxes and ducts — carries NO interior bits, so it does not mean
-"closed surface" either.
+The Elric oracle runs from one command — `tools/elric_pair.sh`, against the
+install at `X:\Programs\Steam\steamapps\common\Fallout 4 1946160\Tools\Elric` —
+and `nifskope-cli set` moves a vertex headlessly (COMMA-separated components:
+`-f Vertices/3 -v "1.0,2.0,3.0"`). So the perturbation loop is: edit, recompile,
+`tools/hkinterior.py <nif> --flagged`, diff the corner sets.
 
-Zero stays, and it is the safe direction: a set bit is a strict subset of
-fully-shared triangles, so under-flagging can only add collision work, never skip
-a collidable edge.
+**What perturbation established** (fixture: ACDuctSmEnd01 decompiled, 28
+triangles, 3 flagged):
 
-**The Elric oracle now runs from one command** — `tools/elric_pair.sh`, against
-the install at `X:\Programs\Steam\steamapps\common\Fallout 4 1946160\Tools\Elric`
-— so this is narrowed rather than blocked. What that harness added on 2026-08-21:
+- **Translation-invariant.** Moving the whole mesh +5 game units in X flags the
+  same three triangles, offset by exactly the translation.
+- **Scale-invariant.** Doubling every vertex flags the same three. Together these
+  say the rule is a property of the SHAPE alone — and they rule out anything
+  quantization-based, since the quantization grid moves with both.
+- **Sensitive to some vertices and not others.** Nudging each of the 16 vertices
+  in turn by 0.7 units: ten of them change nothing at all, while v0, v1, v6, v7,
+  v8 and v9 each remove or move flags — v8 removes two of the three. The
+  insensitive ten are the outer corners; the sensitive six are the inner rim,
+  which is where the mesh's concave crease is.
+- It is NOT simply "the triangle's own corners": v2, v3 and v15 are the corners
+  of a flagged triangle and moving them changes nothing, while v8, which is not a
+  corner of it, removes two other flags.
 
-- The bit IS derivable from a NIF: a decompiled ACDuctSmEnd01 recompiled by Elric
-  comes back with three interior bits, the count vanilla ships, deterministically.
-- It is NOT a function of local geometry: on that same geometry Elric flags three
-  DIFFERENT triangles than vanilla, the symmetric partners of them. Candidates sit
-  in near-ties, which is why no predicate has ever fitted.
-- It is quad-ORDER dependent: over 400 meshes, half 0 carries the bit 553 times,
-  half 1 only 77, both halves 52. On the duct every flagged triangle is a half 0
-  whose partner is not flagged, prim9 included — and prim9's two halves have the
-  same edge signature.
-- Also ruled out: the sharper half of the quad (221 flagged halves are the
-  BLUNTER one against 157 sharper), anything keyed on quadIsFlat, and "one flat
-  edge plus two concave" (fits all six duct triangles, F 0.23 over the corpus).
+Which reads as a rule about the CREASE rather than about the triangle — a
+non-local property, which would also explain why every local predicate tried has
+failed and why two compiles of the same shape can flag symmetric partners
+instead: the candidates sit in near-ties.
 
-Next attempt starts by perturbing the duct one thing at a time and diffing — the
-lever that is missing is a way to edit mesh geometry headlessly, since
-`nifskope-cli set` takes scalars and not a Vector3.
+Still ruled out, with numbers: the sharper half of a quad (221 flagged halves are
+the blunter one against 157 sharper), anything keyed on quadIsFlat, "one flat
+edge plus two concave" (fits all six duct triangles, F 0.23 over the corpus), and
+the whole convex/concave/dihedral battery (best F 0.42). Half 0 of a primitive
+carries the bit 553 times against half 1's 77, so it is quad-order dependent too.
+
+The next probe worth running is a crease sweep: rotate one face of the duct to
+open or close its crease angle by degrees at a time and watch where the flags
+appear and vanish, which would say whether it is a threshold on the crease or a
+comparison between creases.
 
 **2. ~~Quad pairing~~ DONE 2026-08-17d.** Elric merges adjacent triangle pairs into quads — bent
 ones included (89% of corpus primitives are quads; quadIsFlat = "the four

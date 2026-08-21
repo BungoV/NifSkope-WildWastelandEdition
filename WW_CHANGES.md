@@ -1,5 +1,49 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-21f — triangleIsInterior is a property of the shape, not of the grid
+
+The perturbation loop is open now: `tools/elric_pair.sh` recompiles, `nifskope-cli
+set` moves a vertex headlessly, and `tools/hkinterior.py --flagged` prints the
+flagged triangles as their CORNERS rather than their indices — which is what makes
+two compiles comparable, since an index moves when Elric reorders its primitives
+and a corner does not.
+
+(The CLI needed nothing for this. An earlier note here said moving a vertex
+headlessly wanted about ten lines of new code; it wanted comma-separated
+components — `-f Vertices/3 -v "1.0,2.0,3.0"` — and the error message says so.
+The first attempt sent stderr to /dev/null and read the missing output file as a
+missing feature.)
+
+On ACDuctSmEnd01 — 28 triangles, 3 flagged:
+
+- **Translation-invariant.** Move the whole mesh +5 game units in X and the same
+  three triangles come back flagged, offset by exactly the translation.
+- **Scale-invariant.** Double every vertex and the same three come back.
+
+Between them those two rule out the whole family of quantization explanations —
+the grid moves with the mesh under both — and say the bit is a property of the
+SHAPE alone. That is worth having: it means the rule can be attacked with
+geometry, and that no amount of care about section domains or step sizes will
+ever be part of the answer.
+
+- **It is sensitive to six of the sixteen vertices and indifferent to the other
+  ten.** Nudging each in turn by 0.7 units: v0, v1, v6, v7, v8 and v9 each remove
+  or move flags (v8 removes two of three), while the rest change nothing at all.
+  The indifferent ten are the outer corners; the six are the inner rim, where the
+  duct's concave crease is.
+- And it is **not** the triangle's own corners: v2, v3 and v15 are the corners of
+  a flagged triangle and moving them changes nothing, while v8 — not a corner of
+  it — removes two other flags.
+
+So it reads as a rule about the CREASE rather than about the triangle: non-local,
+which is also why every local predicate has failed and why two compiles of the
+same shape can flag symmetric partners instead of the same three. The next probe
+is a crease sweep — rotate one face by degrees and watch where flags appear and
+vanish, which separates a threshold on the crease from a comparison between
+creases.
+
+Still zero in the writer, still the safe direction.
+
 ## 2026-08-21e — The rename hang was fixed ten days ago; the entry was not
 
 `block_rename.sh` in list mode was carried as OPEN — "HANGS, 7 runs in 10" — with
