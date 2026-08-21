@@ -245,7 +245,30 @@ the complaint the two messages beside it already exist to answer.
 The harness runs **37 checks, 0 failures**. It documents ten; the rest were never
 reached before.
 
-## `block_rename.sh` in list mode HANGS, 7 runs in 10 — OPEN, 2026-08-07t
+## ~~`block_rename.sh` in list mode HANGS, 7 runs in 10~~ — FIXED 2026-08-11, ENTRY WAS STALE
+
+**This was fixed by `2b0635d` on 2026-08-11 and this entry was never updated.**
+Re-verified 2026-08-21: **20 consecutive list-mode runs, no hang**, plus the full
+gate (both modes) three times green. At the 4-in-10 rate recorded below, twenty
+clean runs is a 1-in-27,000 coincidence, so it is not luck.
+
+And the diagnosis below is **wrong in its first line**, which is worth keeping
+visible: it was a CRASH, not a hang. `expandAll` emitted `expanded()` from inside
+`layout()`, `scrollExpand`'s synchronous `scrollTo` re-entered `doItemsLayout`,
+and the outer layout wrote past the reallocated `viewItems` buffer — 0xc0000005
+in the Application log. The "no APPCRASH event" reading that anchors everything
+below it was the wrong query, not the absence of a crash. The scroll is posted
+now, coalesced per burst, and cancelled by an explicit `scrollTo`.
+
+`tests/spells/stack_hang.sh` survives as a general catcher — run a flaky GUI
+harness N times, attach gdb to whatever is still alive, dump every thread. It
+takes an attempt count and an output path now, places its windows on the second
+monitor, and gives each attempt its own port.
+
+What follows is the 2026-08-07 investigation, kept for the reasoning and for the
+record of which readings were wrong.
+
+## `block_rename.sh` in list mode HANGS, 7 runs in 10 — was OPEN, 2026-08-07t
 
 This is what "the flat list intermittently takes the process down" actually is,
 and it is **not** a crash and **not** heap corruption. What is established:

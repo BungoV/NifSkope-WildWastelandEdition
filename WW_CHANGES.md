@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-21e — The rename hang was fixed ten days ago; the entry was not
+
+`block_rename.sh` in list mode was carried as OPEN — "HANGS, 7 runs in 10" — with
+a page of investigation under it. It has been fixed since **2026-08-11**, by
+`2b0635d`, whose own message says so: five deaths in eight before, twelve of
+twelve after. Nobody closed the entry.
+
+Re-verified independently: **20 consecutive list-mode runs with no hang**, and
+the full gate (both modes) three times green. At the recorded 4-in-10 rate,
+twenty clean runs is a 1-in-27,000 coincidence.
+
+The old diagnosis is also wrong in its first line, which the closed entry now
+says out loud: it was a **crash**, not a hang. `expandAll` emitted `expanded()`
+from inside `layout()`, `scrollExpand`'s synchronous `scrollTo` re-entered
+`doItemsLayout`, and the outer layout wrote past the reallocated `viewItems`
+buffer. The "no APPCRASH event, therefore not a crash" reading that anchored
+everything after it was the wrong query rather than an absence.
+
+`tests/spells/stack_hang.sh` stays, generalised: it takes an attempt count and an
+output path, places its windows on the second monitor, and gives each attempt its
+own port. It is the tool for any flaky GUI harness — run it N times, attach gdb
+to whatever is still alive, dump every thread — and it is worth keeping precisely
+because taking a stack was the one thing the original investigation never did.
+
+The lesson is in docs/MISTAKES.md: check `git log` over the files an OPEN item
+names before working it. Thirty seconds against half an hour.
+
 ## 2026-08-21d — The drop harness: a modal nobody could answer, and a create aiming at nothing
 
 `collision_drop.sh` stopped after its fourth check, every run, and had done since

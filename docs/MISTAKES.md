@@ -3,6 +3,24 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-21 — Spent half an hour reproducing a bug that had been fixed for ten days
+
+**What:** picked `block_rename.sh` hangs 7-in-10 off the backlog, built a stack
+catcher, and ran it twenty times to reproduce. It never hung, because `2b0635d`
+fixed it on 2026-08-11 — and that commit says so in its own message ("5 deaths in
+8 on a CLEAN build before; 12/12 green after"). The backlog entry was simply
+never updated when the fix landed.
+
+**Why:** the backlog was treated as current because it is the single source of
+truth. It is only as current as the last person to close an item in it, and a fix
+that lands in WW_CHANGES does not walk itself over.
+
+**Solution:** before starting anything marked OPEN, `git log --oneline -- <the
+files it names>` and grep WW_CHANGES for the symptom. Thirty seconds against
+half an hour. The twenty runs were not wasted — they are the independent
+re-verification the entry now carries — but they were the second thing to do, not
+the first.
+
 ## 2026-08-21 — `sed -i` flattened WW_CHANGES.md, hours after writing the rule against it
 
 **What:** used `sed -i` for a one-line title change in WW_CHANGES.md. The file is
