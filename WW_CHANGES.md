@@ -1,5 +1,59 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-21 — Decompile splits a mesh by material, so the round trip keeps them
+
+Compile learned to carry several materials on 2026-08-20. This is the half that
+was still losing them: **Decompile** wrote one `bhkNiTriStripsShape` with one
+`Material`, so a compiled mesh holding six went into the NIF holding one — and it
+was gone for good, because a recompile can only write back what the NIF still
+has. 335 of 2,490 SetDressing meshes (13.5%) carry more than one material; 293
+carry two and one carries seven.
+
+The triangles are grouped by the material the run table gives them, each group
+gets its own strips shape, and the groups are gathered under a `bhkListShape`
+with the MOPP on top of that — the same chain the gatherer already walks, so
+Compile picks the materials straight back up off the leaves.
+
+**A single-material mesh is byte-identical to what it was.** One group takes the
+whole vertex array in its original order and skips the remap entirely; only a
+real split renumbers, and then it must, or every part would carry the thousands
+of points it never references.
+
+### The round trip, end to end
+
+Toilet01 has three materials over 204 triangles — 46, 10 and 148:
+
+    stock materials:      0x0B237EAD:46  0x1E151923:10  0x34C446FB:148
+    decompiled:           3 strips shapes under 1 list, 3 distinct materials
+    recompiled materials: 0x0B237EAD:46  0x1E151923:10  0x34C446FB:148
+
+CeilingFanOff01's six come back as six, with the same counts. Before this, both
+came back as one.
+
+Guarded by `tests/spells/collision_material_roundtrip.sh` (8 checks). The one
+that matters is the per-material TRIANGLE COUNT, not the material count: three
+materials reaching the file only says the count survived, while a split that put
+the wrong triangles in the wrong group would pass that and fail this, since
+nothing else divides 204 into 46, 10 and 148. Two more checks hold the other
+side — a single-material mesh still decompiles to one leaf with no list, and
+keeps vanilla's vertex count.
+
+`collision_compile.sh` 14/14, `collision_materials.sh` 11/11,
+`collision_convex.sh` 9/9 and `collision_undo.sh` 12/12 are unchanged by it.
+
+### At scale
+
+Forty vanilla multi-material files, decompiled and recompiled: **40 of 40 come
+back with the same material set**, and 36 of them with the same triangle count on
+every material. The four that differ are both known and neither is a lost
+material:
+
+- BoatTug01, BoatTug01Wrecked01 and ShipWrecked01 lose 3, 4 and 86 triangles off
+  their largest material (of 6,519, 6,363 and 18,822) — the quantization sliver
+  filter doing what it is for, unchanged by any of this.
+- Clothingrack_01's stock table holds several entries that are all the SAME CRC;
+  ours writes that CRC once. Nothing is lost, a duplicate is collapsed.
+
 ## 2026-08-20e — Create Collision adds beside, rather than replacing
 
 Creating collision on a node that already had some deleted the old shape with

@@ -84,20 +84,16 @@ literal `1` at section +0x54 pointed every section at run 0. Details in
 WW_CHANGES 2026-08-20; guard in `tests/spells/collision_materials.sh`;
 independent byte checker in `tools/hkmatrun.py`.
 
-**0b. Decompile flattens a multi-material MESH.** The other half of the same
-round trip, and now the bigger one. A compiled mesh that holds several materials
-decodes fine — `HknpShape::materialTable` and `::triMaterial` carry them since
-2026-08-20 — but `buildShape` writes ONE bhkNiTriStripsShape with one
-`Material`, so vanilla → decompile → compile still comes back single-material.
-CeilingFanOff01 goes in with six and comes out with one.
-
-Worth doing: **335 of 2,490 SetDressing compressed meshes (13.5%) use more than
-one material** — 293 use two, 27 three, and one uses seven. What it needs is for
-the mesh branch of `buildShape` (havok.cpp, the NiTriStripsData chain) to emit
-one strips shape per distinct material and wrap them in a `bhkListShape` when
-there is more than one, exactly as the multi-shape bodies already decompile.
-The triangles are already grouped for it. Note this CHANGES decompile output for
-13.5% of meshes, so it wants saying out loud rather than slipping in.
+**0b. ~~Decompile flattens a multi-material MESH~~ DONE 2026-08-21.** The other
+half of the same round trip, and it is closed: `buildShape` groups the triangles
+by the material the run table gives them, writes one `bhkNiTriStripsShape` per
+group and gathers the groups under a `bhkListShape`, with the MOPP on top — the
+chain the gatherer already walks, so Compile picks the materials straight back up
+off the leaves. Toilet01's three come back as three with vanilla's own 46 / 10 /
+148 triangles on them, and CeilingFanOff01's six come back as six. A
+single-material mesh is byte-identical to what it was: one group takes the whole
+vertex array in its original order and skips the remap. See WW_CHANGES
+2026-08-21 and `tests/spells/collision_material_roundtrip.sh`.
 
 **1. triangleIsInterior semantics — SHARPENED 2026-08-20, still open.** The
 "767 of 867" above was an indexing artifact: the field is in KEY SPACE like

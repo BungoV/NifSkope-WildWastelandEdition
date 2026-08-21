@@ -2175,62 +2175,152 @@ public:
 			return nif->getBlockNumber( iCVS );
 		}
 
-		// triangle mesh: NiTriStripsData (one strip per triangle) under
-		// bhkNiTriStripsShape + bhkMoppBvTreeShape - the same chain the 3ds Max
-		// exporter emits. The MOPP is left empty: run Update MOPP Code, or let
-		// Elric rebuild it when the file is processed again.
-		QModelIndex iData = nif->insertNiBlock( "NiTriStripsData" );
-		int nv = int( shp.verts.size() );
-		int nt = int( shp.tris.size() );
-		nif->set<int>( iData, "Num Vertices", nv );
-		nif->set<int>( iData, "Has Vertices", 1 );
-		nif->updateArraySize( iData, "Vertices" );
-		QVector<Vector3> verts( nv );
-		Vector3 center;
-		for ( int i = 0; i < nv; i++ ) {
-			verts[i] = shp.verts.at( i ) * sc;
-			center += verts[i];
-		}
-		if ( nv > 0 )
-			center /= float( nv );
-		float radius = 0.0f;
-		for ( const Vector3 & v : verts )
-			radius = std::max( radius, ( v - center ).length() );
-		nif->setArray<Vector3>( iData, "Vertices", verts );
-		QModelIndex iBound = nif->getIndex( iData, "Bounding Sphere" );
-		if ( iBound.isValid() ) {
-			nif->set<Vector3>( iBound, "Center", center );
-			nif->set<float>( iBound, "Radius", radius );
-		}
-		nif->set<int>( iData, "Num Triangles", nt );
-		nif->set<int>( iData, "Num Strips", nt );
-		nif->set<int>( iData, "Has Points", 1 );
-		QModelIndex iLengths = nif->getIndex( iData, "Strip Lengths" );
-		QModelIndex iPoints = nif->getIndex( iData, "Points" );
-		if ( iLengths.isValid() && iPoints.isValid() ) {
-			nif->updateArraySize( iLengths );
-			nif->updateArraySize( iPoints );
-			for ( int t = 0; t < nt; t++ ) {
-				nif->set<int>( nif->getIndex( iLengths, t ), 3 );
-				QModelIndex iStrip = nif->getIndex( iPoints, t );
-				nif->updateArraySize( iStrip );
-				const Triangle & tri = shp.tris.at( t );
-				nif->setArray<quint16>( iStrip, { tri[0], tri[1], tri[2] } );
+		/* triangle mesh: NiTriStripsData (one strip per triangle) under
+		 * bhkNiTriStripsShape + bhkMoppBvTreeShape - the same chain the 3ds Max
+		 * exporter emits. The MOPP is left empty: run Update MOPP Code, or let
+		 * Elric rebuild it when the file is processed again.
+		 *
+		 * ONE SHAPE PER MATERIAL. A compiled mesh carries a material per
+		 * primitive, and 13.5% of the SetDressing corpus uses more than one
+		 * (335 of 2,490 meshes; 293 use two, one uses seven). Writing them all
+		 * into a single bhkNiTriStripsShape with a single `Material` threw the
+		 * rest away, and it threw them away for good: a recompile could only
+		 * write back what the NIF still held. So the triangles are grouped by
+		 * their material and each group gets its own shape, gathered under a
+		 * bhkListShape when there is more than one.
+		 *
+		 * A single-material mesh takes exactly the path it always did - one
+		 * group, no list - so nothing changes for the 86.5%.
+		 */
+		QVector<quint32> materials;
+		QVector<QVector<int>> groups;      // triangle indices, one group per material
+		{
+			const bool perTriangle = shp.triMaterial.size() == shp.tris.size();
+			QHash<quint32, int> slot;
+			for ( int t = 0; t < shp.tris.size(); t++ ) {
+				const quint32 crc = perTriangle ? shp.triMaterial.at( t ) : shp.materialCRC;
+				auto have = slot.constFind( crc );
+				if ( have == slot.constEnd() ) {
+					slot.insert( crc, int( materials.size() ) );
+					materials.append( crc );
+					groups.append( QVector<int>() );
+					groups.last().append( t );
+				} else {
+					groups[*have].append( t );
+				}
+			}
+			if ( groups.isEmpty() ) {
+				materials.append( shp.materialCRC );
+				groups.append( QVector<int>() );
 			}
 		}
 
-		QModelIndex iStrips = nif->insertNiBlock( "bhkNiTriStripsShape" );
-		nif->set<float>( iStrips, "Radius", 0.1f );
-		nif->set<uint>( iStrips, "Num Strips Data", 1 );
-		nif->updateArraySize( iStrips, "Strips Data" );
-		nif->setLink( nif->getIndex( nif->getIndex( iStrips, "Strips Data" ), 0 ),
-						nif->getBlockNumber( iData ) );
-		nif->set<uint>( iStrips, "Num Filters", 1 );
-		nif->updateArraySize( iStrips, "Filters" );
-		setShapeMaterial( nif, iStrips, shp.materialCRC );
+		/*! One bhkNiTriStripsShape over the triangles in \a picked.
+		 *
+		 *  A group that is the WHOLE mesh keeps the vertex array exactly as it was
+		 *  decoded, order and all, so a single-material mesh - 86.5% of them -
+		 *  decompiles to the same bytes it always did. Only a real split remaps,
+		 *  and then it must: a part that took the whole array would leave every
+		 *  other part carrying the same thousands of points it never references.
+		 */
+		auto stripsShape = [&]( const QVector<int> & picked, quint32 material, bool whole ) -> qint32 {
+			QVector<Vector3> verts;
+			QVector<Triangle> tris;
+			if ( whole ) {
+				for ( const Vector3 & v : shp.verts )
+					verts.append( v * sc );
+				tris = shp.tris;
+			} else {
+				QVector<int> remap( shp.verts.size(), -1 );
+				for ( int t : picked ) {
+					const Triangle & src = shp.tris.at( t );
+					quint16 out[3];
+					for ( int k = 0; k < 3; k++ ) {
+						const int v = src[k];
+						if ( v < 0 || v >= remap.size() )
+							return -1;
+						if ( remap[v] < 0 ) {
+							remap[v] = int( verts.size() );
+							verts.append( shp.verts.at( v ) * sc );
+						}
+						out[k] = quint16( remap.at( v ) );
+					}
+					tris.append( Triangle( out[0], out[1], out[2] ) );
+				}
+			}
+
+			QModelIndex iData = nif->insertNiBlock( "NiTriStripsData" );
+			const int nv = int( verts.size() ), nt = int( tris.size() );
+			nif->set<int>( iData, "Num Vertices", nv );
+			nif->set<int>( iData, "Has Vertices", 1 );
+			nif->updateArraySize( iData, "Vertices" );
+			Vector3 center;
+			for ( const Vector3 & v : std::as_const( verts ) )
+				center += v;
+			if ( nv > 0 )
+				center /= float( nv );
+			float radius = 0.0f;
+			for ( const Vector3 & v : std::as_const( verts ) )
+				radius = std::max( radius, ( v - center ).length() );
+			nif->setArray<Vector3>( iData, "Vertices", verts );
+			QModelIndex iBound = nif->getIndex( iData, "Bounding Sphere" );
+			if ( iBound.isValid() ) {
+				nif->set<Vector3>( iBound, "Center", center );
+				nif->set<float>( iBound, "Radius", radius );
+			}
+			nif->set<int>( iData, "Num Triangles", nt );
+			nif->set<int>( iData, "Num Strips", nt );
+			nif->set<int>( iData, "Has Points", 1 );
+			QModelIndex iLengths = nif->getIndex( iData, "Strip Lengths" );
+			QModelIndex iPoints = nif->getIndex( iData, "Points" );
+			if ( iLengths.isValid() && iPoints.isValid() ) {
+				nif->updateArraySize( iLengths );
+				nif->updateArraySize( iPoints );
+				for ( int t = 0; t < nt; t++ ) {
+					nif->set<int>( nif->getIndex( iLengths, t ), 3 );
+					QModelIndex iStrip = nif->getIndex( iPoints, t );
+					nif->updateArraySize( iStrip );
+					const Triangle & tri = tris.at( t );
+					nif->setArray<quint16>( iStrip, { tri[0], tri[1], tri[2] } );
+				}
+			}
+
+			QModelIndex iStrips = nif->insertNiBlock( "bhkNiTriStripsShape" );
+			nif->set<float>( iStrips, "Radius", 0.1f );
+			nif->set<uint>( iStrips, "Num Strips Data", 1 );
+			nif->updateArraySize( iStrips, "Strips Data" );
+			nif->setLink( nif->getIndex( nif->getIndex( iStrips, "Strips Data" ), 0 ),
+							nif->getBlockNumber( iData ) );
+			nif->set<uint>( iStrips, "Num Filters", 1 );
+			nif->updateArraySize( iStrips, "Filters" );
+			setShapeMaterial( nif, iStrips, material );
+			return nif->getBlockNumber( iStrips );
+		};
+
+		QVector<qint32> parts;
+		for ( qsizetype g = 0; g < groups.size(); g++ ) {
+			const qint32 part = stripsShape( groups.at( g ), materials.at( g ), groups.size() == 1 );
+			if ( part < 0 )
+				return -1;
+			parts.append( part );
+		}
+
+		qint32 under = parts.first();
+		if ( parts.size() > 1 ) {
+			// the list carries the shape-level material of the whole mesh, which
+			// is what the compiled shape's own +0x18 held; the parts carry theirs
+			QModelIndex iList = nif->insertNiBlock( "bhkListShape" );
+			nif->set<uint>( iList, "Num Sub Shapes", uint( parts.size() ) );
+			nif->updateArraySize( iList, "Sub Shapes" );
+			nif->setLinkArray( iList, "Sub Shapes", parts );
+			nif->set<uint>( iList, "Num Filters", uint( parts.size() ) );
+			nif->updateArraySize( iList, "Filters" );
+			setShapeMaterial( nif, iList, shp.materialCRC );
+			under = nif->getBlockNumber( iList );
+		}
 
 		QModelIndex iMopp = nif->insertNiBlock( "bhkMoppBvTreeShape" );
-		nif->setLink( iMopp, "Shape", nif->getBlockNumber( iStrips ) );
+		nif->setLink( iMopp, "Shape", under );
 		return nif->getBlockNumber( iMopp );
 	}
 

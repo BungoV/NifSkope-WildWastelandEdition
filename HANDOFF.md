@@ -9,12 +9,14 @@ what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-20**. Edition **0.3.2**. Build green. The current work is a
+Updated **2026-08-21**. Edition **0.3.2**. Build green. The current work is a
 sweep of the **compiled-collision backlog**, all of it measured against the
 vanilla corpus rather than against Elric, which is not on this machine any more:
 
-- **Multi-material compile** — a body made of parts keeps every part's material,
-  and the CMSD run table that carries them is decoded (below).
+- **Multi-material collision, both ways** — a body made of parts keeps every
+  part's material through Compile, and Decompile splits a mesh back into one
+  shape per material instead of throwing the rest away, so the round trip is
+  closed. The CMSD run table that carries them is decoded (below).
 - **Friction and restitution round** into their stored word instead of
   truncating. 0.4 is the Fallout 4 default restitution, so every body we compiled
   was one ULP low.
