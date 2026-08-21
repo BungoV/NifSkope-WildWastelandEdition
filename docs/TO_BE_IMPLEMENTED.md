@@ -214,28 +214,39 @@ button has always done, so it is not a thing to slip in while fixing a test.
 Worked around in the harness by giving the fourth mesh a node of its own, which is
 also the realistic case — you do not usually stack collision on one node.
 
-## `collision_drop.sh` stops after check 4 — OPEN, 2026-08-20
+## `collision_drop.sh`: the hang is fixed, four checks still fail — OPEN, 2026-08-21
 
-Found while re-running the collision harnesses for the Create change, and it is
-NOT that change: the harness stops at exactly the same place with Replace on and
-with Replace off, and those are the only two behaviours the setting selects.
+**The hang is diagnosed and gone.** It was not a crash and not the Create change:
+the drop handler asks a question when the file has NO collision body at all
+("This file has no collision body... Create one now?") and then opens the create
+popup. The harness's fixture starts with zero bodies, so its first real drop put
+up a modal box with nobody at the keyboard and waited forever — process alive,
+responding, zero CPU, main window disabled behind a visible dialog titled
+"Create Collision Body". That prompt arrived after the harness was written.
 
-What is established:
+Under `WW_COLLDROP_TEST` the drop now takes the same FLOW with the question and
+the popup left out: it parks the shapes and runs the popup's own Create action
+(`createBodyNow`). The harness runs all ten checks now instead of stopping at
+four.
 
-- The in-app log (`release/ww_colldrop_test.log`) ends after check 4 — the
-  refusal check — so it is check 5, the first drop that actually CREATES, that
-  never reports.
-- NifSkope does not crash. The process is still alive and `Responding` when the
-  harness's timeout kills it, so this is a stall rather than a fault, and a modal
-  dialog is one of the shapes it could take.
-- Everything before it passes: the panel accepts drops, the create hook is wired,
-  a mesh payload is taken and a non-mesh payload is refused by action.
-- The sibling GUI harnesses that touch the same code both pass —
-  `collision_per_shape.sh` 8/8 (which also creates collision) and
-  `collision_compiled_edit.sh` 7/7.
+**What is still wrong, and it is a different thing.** Checks 5, 6, 7 and 9 fail:
+the drop reaches the create and no body comes out. Established so far:
 
-Whether it predates 2026-08-20 is not established: there is no recorded run of
-this harness against the previous build, and the previous binary is gone.
+- The viewport is NOT the problem. The create spells read their geometry from the
+  rendered node (`spCreateCVS::isApplicable` wants a Scene, a renderer and a node
+  with geometry), so the hook now waits for that node and logs how long it took.
+  It reports **0 ms** — the scene is ready before the first drop.
+- No modal appears, so nothing refused loudly: `runSpell` puts up "Select a
+  compatible block" when a spell is not applicable, and `createBody` puts up
+  "Select a node or a mesh to put the body on" when its target list is empty.
+  Neither fired, so the spell was applicable and the target list was not empty.
+- So the create runs and produces nothing, quietly. The next place to look is
+  inside `createBody`'s `nifSnapshotOp` — what `freshBodies` ends up as, and
+  whether `creatingBodyNow` suppresses something — and then
+  `createFittedCollision` itself.
+
+Whether this predates 2026-08-20 is still not established, and now can be: the
+harness completes, so it can be run against an older build.
 
 ## `block_rename.sh` in list mode HANGS, 7 runs in 10 — OPEN, 2026-08-07t
 

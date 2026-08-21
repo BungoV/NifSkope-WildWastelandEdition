@@ -1,5 +1,45 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-21d — The drop harness was waiting for a click nobody was going to make
+
+`collision_drop.sh` stopped after its fourth check, every run, and had done since
+before this stretch: no crash, no error, the log simply ending. What it was doing
+is now known, and the hang is gone.
+
+**It was a modal question.** The drop handler asks when the file has NO collision
+body at all — "This file has no collision body, and a shape has to live in one.
+Create a collision body now?" — and then opens the create popup so layer,
+material and physics can be set on purpose. The harness's fixture starts with
+zero bodies, so its first real drop put that box on screen and waited for a click
+that was never coming.
+
+Worth recording how it was found, because the symptoms all pointed the wrong way:
+the process was **alive, responding, and burning zero CPU**, which reads like a
+deadlock rather than a dialog; and enumerating its windows by pid showed the main
+window `vis=True en=False` — disabled — behind one visible child titled "Create
+Collision Body". A disabled main window with a live child IS a modal dialog, and
+that is the signature to look for next time. (Not a screenshot. See
+docs/MISTAKES.md.)
+
+Under `WW_COLLDROP_TEST` the drop now takes the same FLOW with the question and
+the popup left out: it parks the shapes and runs the popup's own Create action,
+which is exposed as `createBodyNow` for exactly this. Skipping the whole branch
+instead — the first thing tried — skipped the BODY with it and every count below
+read zero, which is its own small lesson about test-mode shortcuts.
+
+The hook also stopped guessing about the viewport. The create spells read their
+geometry from the RENDERED node, so a drop that runs before the viewport has
+built it is refused silently; that was a flat 1500 ms wait after loading, which
+is a guess about someone else's machine. It waits for the node now and logs how
+long it took — and the answer turned out to be **0 ms**, which is how that
+hypothesis was ruled out rather than argued about.
+
+**The harness runs all ten checks now, and four of them fail.** That is a
+different fault, one the hang was hiding: the drop reaches the create and no body
+comes out, with no dialog and no complaint. What is ruled out, what is left to
+look at, and the fact that it can now be run against an older build to date it,
+are in docs/TO_BE_IMPLEMENTED.md.
+
 ## 2026-08-21c — Compounds: the last convex source that compiled to a triangle soup
 
 A body with several convex shapes still became a compressed mesh, because

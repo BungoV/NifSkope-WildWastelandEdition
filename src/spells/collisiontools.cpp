@@ -1888,7 +1888,35 @@ protected:
 		for ( int b = 0; b < nif->getBlockCount() && !anyBody; b++ )
 			if ( nif->blockInherits( nif->getBlockIndex( b ), "bhkRigidBody" ) )
 				anyBody = true;
-		if ( !anyBody ) {
+		/* NOT UNDER THE DROP HARNESS, which has nobody at the keyboard.
+		 *
+		 * This question and the popup behind it arrived after collision_drop.sh was
+		 * written, and its fixture starts with no body at all — so its first real
+		 * drop opened a modal question and waited for a click that was never
+		 * coming. The harness ran four checks and hung, every run, and the log just
+		 * stopped: no crash, no error, the process alive and pumping. What it cost
+		 * to find is the reason for this comment.
+		 *
+		 * Under WW_COLLDROP_TEST it takes the SAME FLOW with the question and the
+		 * popup left out: the shapes are parked and the popup's own Create action
+		 * runs directly. Skipping the whole branch instead — the first thing tried —
+		 * skipped the body with it, and every count below read zero.
+		 *
+		 * So the prompt and the popup are not covered by that harness; they want a
+		 * driven-dialog test of their own. What is covered is everything after them.
+		 */
+		const bool harness = qEnvironmentVariableIsSet( "WW_COLLDROP_TEST" );
+		if ( !anyBody && harness && createBodyNow ) {
+			pendingDropShapes.clear();
+			for ( const qint32 block : sources ) {
+				const QModelIndex idx = nif->getBlockIndex( block );
+				if ( idx.isValid() )
+					pendingDropShapes.append( QPersistentModelIndex( idx ) );
+			}
+			createBodyNow();
+			return;
+		}
+		if ( !anyBody && !harness ) {
 			const QMessageBox::StandardButton answer = QMessageBox::warning( this,
 				tr( "No collision body" ),
 				tr( "This file has no collision body, and a shape has to live in one.\n\n"
@@ -2106,6 +2134,8 @@ private:
 
 	//! The shape popup's Create, so a drop and the button cannot drift apart.
 	std::function<void()> createShapeNow;
+	//! What the create popup's own Create button runs. See createShapeNow.
+	std::function<void()> createBodyNow;
 
 	/* A DROP PARKED UNTIL THERE IS A BODY TO PUT IT IN.
 	 *
@@ -5755,6 +5785,9 @@ private:
 		connect( createShapeButton, &QToolButton::clicked, this,
 			[this]() { openPopupUnder( shapePopup, createShapeButton ); } );
 		connect( popupCreate, &QPushButton::clicked, this, [createBody]() { createBody(); } );
+		// the same action, reachable without the popup: the drop harness has nobody
+		// to click Create, and skipping the popup entirely skipped the BODY with it
+		createBodyNow = createBody;
 		connect( shapeCreate, &QPushButton::clicked, this, [createCollision]() { createCollision(); } );
 		// and a mesh dropped on the panel runs exactly this, so the two cannot
 		// drift apart — see dropEvent

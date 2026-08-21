@@ -13628,6 +13628,40 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					dock->show();
 					QApplication::processEvents();
 
+					/* WAIT FOR THE SCENE, do not assume it.
+					 *
+					 * The create spells read their geometry from the RENDERED node,
+					 * not from the file — spCreateCVS::isApplicable wants a Scene, a
+					 * renderer and a node with geometry data — so a drop that runs
+					 * before the viewport has built that node is refused, silently,
+					 * and every count below it reads zero.
+					 *
+					 * This used to be a flat 1500 ms after completeLoading, which is
+					 * a guess about someone else's machine. Now it waits for the
+					 * thing it needs and says how long that took, so a future
+					 * failure here says whether the wait was the problem.
+					 */
+					{
+						QModelIndex firstMesh;
+						for ( int b = 0; b < nif->getBlockCount() && !firstMesh.isValid(); b++ )
+							if ( nif->blockInherits( nif->getBlockIndex( b ), "BSTriShape" ) )
+								firstMesh = nif->getBlockIndex( b );
+						QElapsedTimer waited; waited.start();
+						bool ready = false;
+						while ( firstMesh.isValid() && !ready && waited.elapsed() < 15000 ) {
+							if ( GLView * ogl = skope->getGLView(); ogl ) {
+								if ( Scene * scene = ogl->getScene(); scene && scene->renderer )
+									ready = scene->getNode( nif, firstMesh ) != nullptr;
+							}
+							if ( !ready )
+								QApplication::processEvents( QEventLoop::AllEvents, 50 );
+						}
+						log << "the viewport had geometry for the first mesh after "
+							<< waited.elapsed() << " ms" << ( ready ? "" : " (NEVER — the creates below will refuse)" )
+							<< "\n";
+						log.flush();
+					}
+
 					auto bodies = [&]() {
 						int n = 0;
 						for ( int b = 0; b < nif->getBlockCount(); b++ )
