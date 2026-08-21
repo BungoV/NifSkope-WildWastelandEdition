@@ -214,39 +214,36 @@ button has always done, so it is not a thing to slip in while fixing a test.
 Worked around in the harness by giving the fourth mesh a node of its own, which is
 also the realistic case — you do not usually stack collision on one node.
 
-## `collision_drop.sh`: the hang is fixed, four checks still fail — OPEN, 2026-08-21
+## ~~`collision_drop.sh` stops after check 4~~ — FIXED 2026-08-21, 37 of 37
 
-**The hang is diagnosed and gone.** It was not a crash and not the Create change:
-the drop handler asks a question when the file has NO collision body at all
-("This file has no collision body... Create one now?") and then opens the create
-popup. The harness's fixture starts with zero bodies, so its first real drop put
-up a modal box with nobody at the keyboard and waited forever — process alive,
-responding, zero CPU, main window disabled behind a visible dialog titled
-"Create Collision Body". That prompt arrived after the harness was written.
+Two faults, one hiding the other. The harness had never completed.
 
-Under `WW_COLLDROP_TEST` the drop now takes the same FLOW with the question and
-the popup left out: it parks the shapes and runs the popup's own Create action
-(`createBodyNow`). The harness runs all ten checks now instead of stopping at
-four.
+**The hang was a modal question.** The drop handler asks when the file has NO
+collision body at all and then opens the create popup; the fixture starts with
+zero bodies, so the first real drop waited for a click nobody was going to make.
+Under `WW_COLLDROP_TEST` the drop takes the same FLOW with the question and the
+popup left out — it parks the shapes and runs the popup's own Create action,
+exposed as `createBodyNow`.
 
-**What is still wrong, and it is a different thing.** Checks 5, 6, 7 and 9 fail:
-the drop reaches the create and no body comes out. Established so far:
+**Behind it was a real defect, and not only in the harness.** `currentSource()`
+asked the WINDOW for its current block. A drop sets the block-list selection and
+asks the window to follow, but the current row is not guaranteed to have caught
+up before the create runs — and when it has not, `currentSource()` came back
+invalid, `spellSelectionRoots` answered {-1}, the target list came out empty, and
+the create did nothing whatsoever. Silently, because the empty-target message
+sits behind a check a drop never reaches. It falls back to the selection the
+spells are about to read anyway, which is what the drop had already set.
 
-- The viewport is NOT the problem. The create spells read their geometry from the
-  rendered node (`spCreateCVS::isApplicable` wants a Scene, a renderer and a node
-  with geometry), so the hook now waits for that node and logs how long it took.
-  It reports **0 ms** — the scene is ready before the first drop.
-- No modal appears, so nothing refused loudly: `runSpell` puts up "Select a
-  compatible block" when a spell is not applicable, and `createBody` puts up
-  "Select a node or a mesh to put the body on" when its target list is empty.
-  Neither fired, so the spell was applicable and the target list was not empty.
-- So the create runs and produces nothing, quietly. The next place to look is
-  inside `createBody`'s `nifSnapshotOp` — what `freshBodies` ends up as, and
-  whether `creatingBodyNow` suppresses something — and then
-  `createFittedCollision` itself.
+A real drag hides this: it comes out of the Block List, so the current row IS one
+of the dragged blocks and the fallback is never needed. The synthesised drag is
+what exposed it, which is the whole argument for having one.
 
-Whether this predates 2026-08-20 is still not established, and now can be: the
-harness completes, so it can be run against an older build.
+Also: a stale target in `createBody`'s loop was `continue`d in silence. It is
+reported now — a silent skip is indistinguishable from a broken button, which is
+the complaint the two messages beside it already exist to answer.
+
+The harness runs **37 checks, 0 failures**. It documents ten; the rest were never
+reached before.
 
 ## `block_rename.sh` in list mode HANGS, 7 runs in 10 — OPEN, 2026-08-07t
 

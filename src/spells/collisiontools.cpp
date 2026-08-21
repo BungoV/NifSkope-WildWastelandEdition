@@ -3951,10 +3951,29 @@ private:
 		queueRebuild();
 	}
 
+	/*! What a Create acts on: the window's current block, or the selection.
+	 *
+	 *  The fallback is not belt and braces, it is the drop's only route. A drop
+	 *  sets the block-list selection (setBlockListSelection) and asks the window
+	 *  to follow, but the window's CURRENT ROW is not guaranteed to have caught
+	 *  up by the time the create runs — and when it has not, this returned an
+	 *  invalid index, spellSelectionRoots answered {-1}, the target list came out
+	 *  empty and the create did nothing at all. Silently: the empty-target message
+	 *  is behind a check that a drop never reaches.
+	 *
+	 *  Found by collision_drop.sh, whose synthesised drag has no real block-list
+	 *  row behind it, which is exactly the case a real drag hides.
+	 */
 	QModelIndex currentSource() const
 	{
-		if ( auto * w = dynamic_cast<NifSkope *>( mw ) )
-			return w->currentNifIndex();
+		if ( auto * w = dynamic_cast<NifSkope *>( mw ) ) {
+			const QModelIndex current = w->currentNifIndex();
+			if ( current.isValid() )
+				return current;
+		}
+		const QList<qint32> selected = blockListSelectionForSpells();
+		if ( !selected.isEmpty() && nif )
+			return nif->getBlockIndex( selected.first() );
 		return QModelIndex();
 	}
 
@@ -5598,8 +5617,13 @@ private:
 			int freshBodies = 0;
 			nifSnapshotOp( nif, tr( "Create collision body" ), [&]() {
 				for ( const QPersistentModelIndex & target : targets ) {
-					if ( !target.isValid() )
+					// a target that went stale is REPORTED, not skipped: a silent
+					// continue here is indistinguishable from a broken button, which
+					// is the complaint the two messages below already exist to answer
+					if ( !target.isValid() ) {
+						unusable << -1;
 						continue;
+					}
 					const QModelIndex node = tlCollisionAttachNode( nif, QModelIndex( target ), ownNode );
 					if ( !node.isValid() ) {
 						unusable << nif->getBlockNumber( QModelIndex( target ) );

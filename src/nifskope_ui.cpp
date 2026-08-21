@@ -13848,6 +13848,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// drop never reached the create at all
 					log << "the panel's own account of the first drop: \""
 						<< skope->statusBar()->currentMessage() << "\"\n";
+					/* DID ANYTHING HAPPEN AT ALL? The block count and the undo depth
+					 * separate "the create ran and made nothing" from "the create never
+					 * ran": every create here goes through nifSnapshotOp, which pushes
+					 * one undo command, so a depth that has not moved means no create
+					 * reached the model.
+					 */
+					log << "blocks " << nif->getBlockCount() << ", undo depth "
+						<< ( nif->undoStack ? nif->undoStack->count() : -1 )
+						<< ", collision objects " << shapesOfType( "bhkCollisionObject" )
+						<< ", rigid bodies " << bodies() << "\n";
+					log.flush();
 					log << "after dropping one mesh: " << bodies() << " bodies, "
 						<< shapesOfType( "bhkBoxShape" ) << " box shapes\n";
 					check( "dropping one mesh makes one body", bodies() == bodiesWas + 1 );

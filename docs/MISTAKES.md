@@ -3,6 +3,24 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-21 — `sed -i` flattened WW_CHANGES.md, hours after writing the rule against it
+
+**What:** used `sed -i` for a one-line title change in WW_CHANGES.md. The file is
+mixed CRLF/LF, and sed rewrote every line ending: `git diff --numstat` came back
+**17360 insertions, 17339 deletions** for a change to one line.
+
+**Why:** the whole reason the binary-splice helper exists is that ordinary text
+tools flatten these files, and the entry three below this one says exactly that.
+It was reached for anyway, because the edit was small — which is the same excuse
+every time.
+
+**Solution:** caught before committing, by the `git diff --numstat` habit that is
+in that same entry, and repaired by rebuilding the file from `git show HEAD:` and
+re-applying both edits as bytes. The rule stands and now has a second data point:
+**no text tool touches a mixed-ending file — not sed, not the editor, not Python
+text mode — regardless of how small the edit looks.** And numstat before every
+commit is what makes the rule survive being forgotten.
+
 ## 2026-08-21 — "Elric is not on this machine" was written into two documents
 
 **What:** searched `C:` and `E:` for `Elrich.exe`, found nothing, and recorded

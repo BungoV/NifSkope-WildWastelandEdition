@@ -1,6 +1,6 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
-## 2026-08-21d — The drop harness was waiting for a click nobody was going to make
+## 2026-08-21d — The drop harness: a modal nobody could answer, and a create aiming at nothing
 
 `collision_drop.sh` stopped after its fourth check, every run, and had done since
 before this stretch: no crash, no error, the log simply ending. What it was doing
@@ -34,11 +34,32 @@ is a guess about someone else's machine. It waits for the node now and logs how
 long it took — and the answer turned out to be **0 ms**, which is how that
 hypothesis was ruled out rather than argued about.
 
-**The harness runs all ten checks now, and four of them fail.** That is a
-different fault, one the hang was hiding: the drop reaches the create and no body
-comes out, with no dialog and no complaint. What is ruled out, what is left to
-look at, and the fact that it can now be run against an older build to date it,
-are in docs/TO_BE_IMPLEMENTED.md.
+### And behind the hang, a real defect
+
+With the harness running, four checks failed: the drop reached the create and no
+body came out, with no dialog and no complaint. The undo stack said a snapshot
+had run and changed nothing, which separates "the create made nothing" from "the
+create never ran" — and one logged line then named it. `createBody` was aiming
+at **source block -1, roots {-1}, targets 0**.
+
+`currentSource()` asked the WINDOW for its current block. A drop sets the
+block-list selection and asks the window to follow, but the current row is not
+guaranteed to have caught up before the create runs; when it has not, the target
+list came out empty and the create did nothing at all — silently, because the
+empty-target message sits behind a check a drop never reaches. It falls back to
+the selection the spells are about to read anyway, which is what the drop had
+already set.
+
+A real drag hides this, because it comes out of the Block List and the current
+row IS one of the dragged blocks. The synthesised one is what exposed it, which
+is the argument for having a synthesised one.
+
+And a stale target in that loop was `continue`d in silence; it is reported now.
+A silent skip is indistinguishable from a broken button, which is what the two
+messages beside it already exist to answer.
+
+**collision_drop.sh passes 37 of 37.** It documents ten checks; the rest had
+never been reached.
 
 ## 2026-08-21c — Compounds: the last convex source that compiled to a triangle soup
 
