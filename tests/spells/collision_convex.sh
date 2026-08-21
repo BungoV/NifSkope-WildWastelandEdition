@@ -31,6 +31,9 @@
 #  14. ...to vanilla's own AABB, to six decimals
 #  15. every shape header word (+0x10) matches vanilla's
 #  16. ...and the compound does NOT claim to be convex, which crashed the game
+#  17. a STATIC body keeps its own position - the door's hinge, which only an
+#      animated object can tell you about
+#  18. ...and vanilla's is a real offset, so 17 is not vacuous
 #      (the compound BVH, decoded 2026-08-21)
 #
 # Checks 8 and 9 are the ones that say this did not over-reach. The convex path
@@ -59,6 +62,9 @@ CAPSRC="${CAPSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Standp
 # a compound MIXING a capsule with hulls: the case where a vert-only bound was
 # short by exactly the capsule
 AABBSRC="${AABBSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/Props/parking_meter_01.nif}"
+# an ANIMATED body: a door, whose collision hangs off the hinge node and whose
+# collision object is ANIM_TARGETED
+DOORSRC="${DOORSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/interiors/building/woodp/doors/bldwoodpdoor01.nif}"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
@@ -206,6 +212,33 @@ check "every shape header word matches vanilla's" \
 convexbit=$(echo "$ourflags" | awk '/CompoundShape/ {print and(strtonum("0x" $2), 1)}' | head -1)
 check "...and the compound does NOT claim to be convex (bit 0 clear)" \
 	"$([ "$convexbit" = "0" ] && echo 1 || echo 0)"
+
+# --- the body's own position, which only an ANIMATED object can tell you about --
+#
+# A door's body sits at its HINGE (bldwoodpdoor01 carries 4.0,-48.0,0.0 in game
+# units) and its collision object carries bhkCOFlags 128, ANIM_TARGETED, so the
+# engine drives that body from the animated node. Decompile wrote the position
+# only for DYNAMIC bodies, so every static one came back at the origin -- which
+# places the collision identically while nothing moves it. In-game collision felt
+# right, and the volume/centre-of-mass sweep was clean. The doors just stopped
+# opening: same rotation, pivot at the origin instead of the hinge.
+if recompile "$DOORSRC" "$W/d2.nif"; then
+	ourpos=$(python "$ROOT/tools/hkbodypos.py" "$W/d2.nif" 2>/dev/null)
+	vanpos=$(python "$ROOT/tools/hkbodypos.py" "$DOORSRC" 2>/dev/null)
+else
+	ourpos=""; vanpos="x"
+fi
+echo "  door body position"
+echo "    ours    $ourpos"
+echo "    vanilla $vanpos"
+check "a static body keeps its own position (the door's hinge)" \
+	"$([ -n "$ourpos" ] && [ "$ourpos" = "$vanpos" ] && echo 1 || echo 0)"
+# vanilla's own number has to be a real offset, or check 17 passes on two empty
+# strings -- which is exactly what happened when the reader was broken: both
+# sides printed nothing and agreed perfectly.
+check "...and vanilla's is a real offset, so the check is not vacuous" \
+	"$(echo "$vanpos" | grep -qE '^-?[0-9]+\.[0-9],-?[0-9]+\.[0-9],-?[0-9]+\.[0-9]$' \
+	   && echo "$vanpos" | grep -qv '^0\.0,0\.0,0\.0$' && echo 1 || echo 0)"
 
 echo "$checks checks, $fails failures"
 if [ "$fails" = "0" ]; then echo PASS; exit 0; else echo FAIL; exit 1; fi

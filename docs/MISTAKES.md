@@ -190,3 +190,19 @@ field — a count, or a symbol, in the comment beside it. Grep the writer for ba
 hex with no measurement attached and treat each one as unverified. And when the
 DECODER has already recorded the observed values for a field, the encoder must
 not invent a different one; that mismatch is mechanically checkable.
+
+## 2026-08-22 — A check that passed because both sides were empty
+
+**What:** the new body-position check compared our file with vanilla's by running
+a reader over both. The reader crashed on a syntax error, printed nothing for
+each, and the check compared "" with "" and reported OK. The vacuity guard beside
+it passed too: it asked "is vanilla's value not 0.0,0.0,0.0", and an empty string
+is not that string.
+
+**Why:** equality between two runs of the SAME broken tool is not evidence, and
+the guard tested the wrong property — absence of a specific wrong value rather
+than presence of a right one.
+
+**Solution:** a vacuity guard must assert the reference value has the SHAPE it
+should (`grep -qE '^-?[0-9]+\.[0-9],...'`), not merely that it differs from one
+known-bad constant. And a tool that prints nothing must fail, not return empty.

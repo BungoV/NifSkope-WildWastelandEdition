@@ -2511,14 +2511,29 @@ public:
 						nif->set<float>( iInertia, nm, ( ii > 1.0e-12f ) ? 1.0f / ii : 0.0f );
 					}
 				}
-				if ( dyn ) {
-					// cinfo +0x30 is the body position; for a single-body prop
-					// whose shape is authored about the origin that is also
-					// where bhkRigidBody wants its Center. It is NOT a centre of
-					// mass offset -- on a ragdoll it is exactly the bone origin.
-					nif->set<Vector4>( iInfo, "Center",
-						Vector4( phys.position[0], phys.position[1], phys.position[2], 0.0f ) );
-				}
+				/* cinfo +0x30 is the body position; for a single-body prop whose
+				 * shape is authored about the origin that is also where
+				 * bhkRigidBody wants its Center. It is NOT a centre of mass
+				 * offset -- on a ragdoll it is exactly the bone origin.
+				 *
+				 * WRITTEN FOR STATIC BODIES TOO, and it used to be gated on `dyn`.
+				 * A door is static and its position is its HINGE: vanilla's
+				 * bldwoodpdoor01 carries 4.0,-48.0,0.0 and the double door's two
+				 * leaves carry +/-96.0. Dropping it wrote a body at the origin
+				 * with the offset baked into the hull instead, which places the
+				 * collision identically while nothing moves it -- so every static
+				 * comparison passed, in-game collision felt right, and the volume
+				 * and centre-of-mass sweep came back clean.
+				 *
+				 * Then the door would not open. Its collision object carries
+				 * bhkCOFlags 128, ANIM_TARGETED, so the engine drives that body
+				 * from the animated node; with the pivot at the origin instead of
+				 * the hinge the same rotation swings the hull into the frame. The
+				 * game registered the door as open (the prompt read CLOSE) and the
+				 * leaf could not move. Static placement was never the test.
+				 */
+				nif->set<Vector4>( iInfo, "Center",
+					Vector4( phys.position[0], phys.position[1], phys.position[2], 0.0f ) );
 			}
 
 			// the node whose collision object named this body; a body no

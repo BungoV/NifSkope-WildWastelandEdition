@@ -1,5 +1,53 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22b — The doors would not open, and no static check could have said why
+
+The Museum set stopped crashing, so bungo played it, and the doors did not open.
+Collision worked. The prompt read CLOSE, so the game had registered the door as
+open; the leaf simply never moved.
+
+Nothing in the file was wrong in any way we could see. Every block present, in
+the same order of names; BSXFlags identical; `NiControllerSequence` 'Open' and
+'Close' and their `NiTransformData` keys byte-identical; **all 128 references in
+the file resolved to identically-named targets**; collision bound to the right
+node; layer, friction, restitution, static-ness identical; shape volumes within
+0.2% with centres of mass equal to four decimals.
+
+The difference was one field:
+
+    bldwoodpdoor01                  vanilla   4.0,-48.0,0.0     ours  0,0,0
+    utilmetaldoor01                 vanilla -48.0,  4.0,84.5    ours  0,0,0
+    paintedwooddoordoubleload01     vanilla +/-96.0,-2.9,0.0    ours  0,0,0
+    coffeecup01  (control)          vanilla   0.0,  0.1, 3.5    ours  0.0,0.1,3.5
+
+**A door's body sits at its HINGE.** Decompile wrote cinfo +0x30 into
+`bhkRigidBody`'s Center only `if ( dyn )`, and a door is static, so every static
+body came back at the origin with its offset living in the hull vertices
+instead.
+
+That places the collision in exactly the same world position — which is why the
+collision felt right in game, why every corpus comparison passed, and why the
+volume and centre-of-mass sweep across all 114 meshes came back clean. **Static
+placement was never the test.** The door's collision object carries bhkCOFlags
+**128, ANIM_TARGETED**: the engine drives that body from the animated node. With
+the pivot at the origin instead of the hinge, the same rotation swings the hull
+into the frame.
+
+One `if`. The geometry needed no change at all — the recompiled hull's centre of
+mass already matched vanilla's to four decimals both before and after.
+
+### What this class of defect looks like
+
+It is the same shape as the compound header word: a field that is INERT while
+nothing moves, and load-bearing the moment the engine acts on it. A round trip
+cannot see it, a corpus histogram of stored values cannot see it, and neither can
+a comparison of where the collision SITS. Only an object that MOVES can.
+
+`collision_convex.sh` is 18 checks now. 17 holds a door's body position against
+vanilla's; 18 asserts vanilla's is a real offset, because the first version of
+the reader printed nothing for both files and check 17 passed on two empty
+strings. `tools/hkbodypos.py` prints the field in game units.
+
 ## 2026-08-22 — A compound that told the engine it was convex
 
 Second crash from the Museum test set, and the symbols named it outright:
