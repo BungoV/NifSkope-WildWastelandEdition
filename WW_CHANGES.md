@@ -1,5 +1,67 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-21g — The engine found what nothing else could: a BVH with no pointer to it
+
+First in-game test of compiled collision. Fallout 4 crashed within minutes, and
+the crash was ours:
+
+    EXCEPTION_ACCESS_VIOLATION reading 0x30
+    hknpDynamicCompoundShape::updateAabb
+      <- bhkThreadPool::processJobQueue
+      <- bhkPhysicsSystem::LoadBinary
+    loading ...\WW Concord Collision Test\Meshes\props\nukacolabottleempty.nif
+
+**A Havok packfile binds pointers through its fixup tables, not through the
+data.** A compound written from scratch had every byte of its BVH right and NO
+POINTER TO IT: the local fixup at `+0x10 -> +0x40` was never emitted, because the
+synthesized branch cleared the fixup list and only ever filled in bytes. The
+engine read null and walked it.
+
+One line. `cd.local = { { 0x10, 0x40 } }` when the data is built rather than
+carried.
+
+### What the crash also taught about the format
+
+The fixup lands at **+0x40**, and that corrects the layout recorded on
+2026-08-21c. The node array is **2n+1 records from +0x40**, not 2n from +0x60,
+and **index 0 is a NULL SENTINEL** — which is why the root is node 1 and why a
+child link of 0 reads as "none" rather than "node 0".
+
+Both readings give the same object size (`0x40 + (2n+1)*32 == 0x60 + 2n*32`),
+which is why the earlier one fitted 86 of 86 vanilla compounds without
+complaint: it was reading a window shifted by one record and finding a
+consistent tree inside it. The writer's BYTES were right by the same coincidence
+— its 0x20 of header padding at +0x40 is exactly the sentinel — so the only thing
+missing was the pointer. Our rebuilt NukaColaBottleEmpty compound data is now
+**byte-identical to vanilla's**.
+
+### Why every check we had passed it
+
+`--roundtrip` reported byte-exact. It would: our decoder cannot find the array
+either, so it carries the object through verbatim and re-encodes it unchanged.
+**A round trip cannot see a pointer that neither end needs.** Nor could the
+corpus comparisons, which read our bytes the same wrong way we wrote them.
+
+`tools/hkcompound.py` reads the object the way the ENGINE does — follow the
+pointer or fail — and checks the sentinel, the 2n+1 count, the parent tags
+against the links, the leaves as a permutation, and the compound AABB against the
+root box. `collision_convex.sh` is 11 checks now: one that the compound follows
+its own pointer, and one that the checker rejects the pointer-less layout, using
+a `--damage` mode that reproduces exactly what shipped.
+
+### And the triage that found it in two minutes
+
+`tools/fo4_crash_triage.sh` reads the newest Addictol log, prints the exception,
+the objects the logger could name, every Havok frame in the stack, and
+cross-references the mesh paths against a rebuilt-mesh manifest. Addictol ships
+Fallout4.pdb and msdia140.dll, so the stack names `hknpDynamicCompoundShape::updateAabb`
+outright and the log quotes `"__data__"` and `"k_2014.1.0-r1"` straight out of our
+own blob.
+
+Everything in this campaign was checked against vanilla files, against Havok's
+own SDK reader, and against Elric. None of it caught this. The engine did, on the
+first run, on a Nuka-Cola bottle.
+
 ## 2026-08-21f — triangleIsInterior is a property of the shape, not of the grid
 
 The perturbation loop is open now: `tools/elric_pair.sh` recompiles, `nifskope-cli

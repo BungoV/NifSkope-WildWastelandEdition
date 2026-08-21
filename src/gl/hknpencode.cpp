@@ -2235,7 +2235,24 @@ QByteArray hknpEncodeSystem( const HknpSystem & sys, QString * error )
 			 * own bytes through, so nothing that round-trips changes.
 			 */
 			cd.bytes = comp->dataRawData.isEmpty() ? builtData : comp->dataRawData;
-			cd.local = comp->dataRawData.isEmpty() ? QVector<QPair<qsizetype, qsizetype>>() : comp->dataLocal;
+			/* THE NODE ARRAY'S OWN POINTER, at +0x10 -> +0x40.
+			 *
+			 * A Havok packfile binds pointers through its fixup tables, not through
+			 * the data, so the array is unreachable without this even when every
+			 * byte of it is right. Written from scratch and left out, Fallout 4
+			 * dereferenced null inside hknpDynamicCompoundShape::updateAabb the
+			 * moment it loaded one -- an access violation reading 0x30, on a
+			 * NukaColaBottleEmpty, found by the first in-game test.
+			 *
+			 * The array holds 2n+1 records from +0x40 and index 0 is a NULL
+			 * SENTINEL, which is why the root is node 1 and why a child link of 0
+			 * means "none". This writer's header is 0x60 and its records start at
+			 * +0x60, so the 0x20 of header padding at +0x40 IS that sentinel and
+			 * the layout already agrees with vanilla byte for byte.
+			 */
+			cd.local = comp->dataRawData.isEmpty()
+				? QVector<QPair<qsizetype, qsizetype>>{ { 0x10, 0x40 } }
+				: comp->dataLocal;
 			objs.append( cd );
 			continue;
 		}

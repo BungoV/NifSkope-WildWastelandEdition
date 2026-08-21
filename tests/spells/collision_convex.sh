@@ -24,6 +24,8 @@
 #   7. the compiled packfile re-encodes byte-exact (--roundtrip)
 #   8. a TRIANGLE source still compiles to a compressed mesh
 #   9. a two-shape convex body compiles to two polytopes under a compound
+#  10. the compound follows its own node-array pointer, as the ENGINE must
+#  11. ...and that check rejects the layout that crashed Fallout 4
 #      (the compound BVH, decoded 2026-08-21)
 #
 # Checks 8 and 9 are the ones that say this did not over-reach. The convex path
@@ -122,6 +124,24 @@ fi
 echo "  two-shape convex body: $ppoly polytopes, $pcomp compound(s)"
 check "a two-shape convex body compiles to two polytopes under a compound" \
 	"$([ "$ppoly" = "2" ] && [ "$pcomp" = "1" ] && echo 1 || echo 0)"
+
+# --- and the compound is readable BY THE ENGINE, not just by us --------------
+#
+# This is the check that was missing when a compound shipped with its BVH intact
+# and no pointer to it: Fallout 4 dereferenced null in
+# hknpDynamicCompoundShape::updateAabb on the first mesh it loaded. Every check
+# here passed, --roundtrip included, because our own decoder carries an
+# unreadable array through verbatim and re-encodes it byte for byte. A round trip
+# cannot see a pointer neither end needs; hkcompound.py follows it or fails.
+python "$ROOT/tools/hkcompound.py" "$W/p.nif" --expect-compounds=1 --quiet >/dev/null 2>&1
+readable=$?
+check "the compound follows its own node-array pointer" "$([ "$readable" = "0" ] && echo 1 || echo 0)"
+
+python "$ROOT/tools/hkcompound.py" "$W/p.nif" --damage="$W/pbroken.nif" >/dev/null 2>&1
+python "$ROOT/tools/hkcompound.py" "$W/pbroken.nif" --quiet >/dev/null 2>&1
+rejected=$?
+check "...and that check rejects the pointer-less layout that crashed the game" \
+	"$([ "$rejected" != "0" ] && echo 1 || echo 0)"
 
 echo "$checks checks, $fails failures"
 if [ "$fails" = "0" ]; then echo PASS; exit 0; else echo FAIL; exit 1; fi

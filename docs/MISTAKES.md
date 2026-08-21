@@ -104,3 +104,33 @@ that came to hand rather than the narrowest one.
 use the app's own framebuffer harness — never the screen or a monitor. To find
 out whether a stalled Qt app is showing a dialog, enumerate its windows by pid
 and read the titles, which answers it without an image at all.
+
+## 2026-08-21 — Shipped a crash under a green suite, because the test could not fail
+
+**What:** the compound writer emitted every byte of a BVH and no pointer to it.
+Fallout 4 dereferenced null in `hknpDynamicCompoundShape::updateAabb` on the
+first mesh that used one. Every check passed, `--roundtrip` included, and the
+corpus comparison said 86 of 86.
+
+**Why:** the checks were reflexive. `--roundtrip` decodes with our decoder and
+re-encodes with our encoder, and our decoder never followed that pointer either —
+it carried the object through as opaque bytes, so the missing fixup round-tripped
+perfectly. **A round trip cannot see a pointer that neither end needs.** The
+corpus check had the same shape: it read our output the same wrong way we wrote
+it, and agreed with itself. Two mutually-confirming halves of one program are one
+measurement, not two.
+
+The layout error underneath is the same lesson. Reading the array from `+0x60` as
+`2n` records instead of `+0x40` as `2n+1` is a window shifted by one, and it fits
+every vanilla file — same object size, same self-consistent tree. Only an
+EXTERNAL consumer distinguished them, and the only true external consumer is the
+engine.
+
+**Solution:** for anything crossing a boundary — a file another program reads —
+at least one check must be written from the CONSUMER's rules, independently of
+our own I/O. `tools/hkcompound.py` follows the fixup or fails, and its `--damage`
+mode reproduces exactly what shipped so the check is proved able to fail.
+
+And validate in the real consumer sooner. 1,619 rebuilt meshes in a mod folder
+found this in minutes, after weeks of green harnesses. That test should have come
+before the tenth check, not after.

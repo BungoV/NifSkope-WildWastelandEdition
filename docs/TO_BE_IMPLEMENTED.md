@@ -157,16 +157,22 @@ dominant major-axis word); see WW_CHANGES 2026-08-20d and
 tests/spells/collision_convex.sh.
 
 **3b. ~~Compounds: several convex shapes in ONE body~~ DONE 2026-08-21.** The
-BVH is decoded and written: `0x60 + 2n * 32` bytes, 2n-1 depth-first nodes plus
-one zero record, each `float3 min | u32 0x3f000000|(parent+1) | float3 max |
-u16 leftChild+1 or 0 | u16 rightChild+1 or the instance index`. **86 of 86**
+BVH is decoded and written: `0x40 + (2n+1) * 32` bytes, reached through a LOCAL
+FIXUP at `+0x10 -> +0x40` — index 0 is a null sentinel, so the root is node 1 and
+a child link of 0 means "none" — then 2n-1 depth-first nodes and one zero record,
+each `float3 min | u32 0x3f000000|parent | float3 max | u16 left | u16 right or
+the instance index`. (Recorded first as `0x60 + 2n * 32` with +1 biases, which is
+the same window shifted by one record and the same object size; the pointer, not
+the corpus, settled it — see WW_CHANGES 2026-08-21g.) **86 of 86**
 vanilla compounds fit it, and Elric recompiling a decompiled two-box body
 reproduces vanilla's object byte for byte. Two corpus facts came with it: the
 compound's AABB equals the root node's box and both are grown by the child's
 convex radius, and `hknpStaticCompoundShape` is a class Elric never writes (71
 of 71 are dynamic, 45 of them in bodies that do not simulate) - which is why its
-type hash was never in our table. See WW_CHANGES 2026-08-21c;
-`tests/spells/collision_convex.sh` check 9 is the guard.
+type hash was never in our table. See WW_CHANGES 2026-08-21c and 2026-08-21g;
+`tests/spells/collision_convex.sh` checks 9-11 are the guard, the last two added
+after this shipped WITHOUT the pointer and crashed Fallout 4 in
+`hknpDynamicCompoundShape::updateAabb`.
 
 **4. ~~Friction f16: Elric rounds, we truncate~~ DONE 2026-08-20.** Settled by
 counting the corpus rather than by an Elric pair: across 1,500 SetDressing files
