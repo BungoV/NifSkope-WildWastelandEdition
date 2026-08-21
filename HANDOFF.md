@@ -11,11 +11,47 @@ happening again.
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-21**. Edition **0.3.2**. Build green. The current work is a
-sweep of the **compiled-collision backlog**, most of it measured against the
-vanilla corpus. (Elric IS installed, at `X:\Programs\Steam\steamapps\common\Fallout 4 1946160\Tools\Elric`
+Updated **2026-08-22**. Edition **0.3.2**. Build green. The current work is a
+sweep of the **compiled-collision backlog**, and as of 2026-08-21 it is being
+tested IN THE GAME, which changed what the work is.
+
+## The live test, and what it found (2026-08-22)
+
+`E:\Projects\Fallout 4 Mods\mods\WW Concord Collision Test` is 114 meshes — every
+reference in ConcordMuseum01 the game must open a NIF for — rebuilt by our own
+writer. It rebuilds in five minutes with three parallel workers
+(`rebuild.sh` + `MANIFEST=` per worker), which is the point: an earlier
+1,619-mesh build took an hour, and an hour is the wrong unit of work when one
+mistake repeats it.
+
+**Three crashes, three defects, none of which any check we owned could see:**
+
+1. A compound's BVH shipped with **no pointer to it** — the local fixup at
+   `+0x10 -> +0x40` was never emitted. `hknpDynamicCompoundShape::updateAabb`
+   read null.
+2. Compound AABBs were unioned from the children's **vertex lists**, and a
+   capsule has none. Bounds stopped short, and an all-capsule body bounded
+   nothing, was refused, and fell through to the triangle path.
+3. Every compound wrote the placeholder `0x01000001` at +0x10. **Bit 0 of that
+   word is the engine's "I am convex" flag**, so a compound was handed to
+   `hknpScaledConvexShapeBase::calcAabb` on the first scaled reference.
+
+**The rule those three teach:** our own reader and writer agreeing is ONE
+measurement, not two. `--roundtrip` was byte-exact through all three. Use the
+two external authorities — **Elric says what the tool WRITES**
+(`tools/elric_pair.sh`), **the PDB says what the engine READS**
+(`Fo4PDB` + `f4pdb.py` in the FO4CS repo; `asConvexShape` is four instructions
+and settles a question a corpus histogram cannot).
+
+Tools that now do this: `tools/hkcompound.py` (follows the pointer or fails;
+`--flags` decodes the header word; `--aabb` prints the bound; `--damage`
+reproduces the crash so the check is proved able to fail),
+`tools/hkcompound_sweep.py` (holds a whole rebuild against a vanilla tree), and
+`tools/fo4_crash_triage.sh` (reads the newest Addictol log and names the mesh).
+
+(Elric IS installed, at `X:\Programs\Steam\steamapps\common\Fallout 4 1946160\Tools\Elric`
 — an earlier note in these files said otherwise, from a search that covered only
-C: and E:.)
+C: and E:. `Fallout4.esm` is a DIFFERENT folder: `...\common\Fallout 4\Data`.)
 
 - **Multi-material collision, both ways** — a body made of parts keeps every
   part's material through Compile, and Decompile splits a mesh back into one
