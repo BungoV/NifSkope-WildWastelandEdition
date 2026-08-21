@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22 — A compound that told the engine it was convex
+
+Second crash from the Museum test set, and the symbols named it outright:
+
+    EXCEPTION_ACCESS_VIOLATION reading 0xFFFFFFFFFFFFFFFF
+    hknpScaledConvexShapeBase::calcAabb
+      <- hknpWorld::rebuildMotionMassProperties <- hknpWorld::createBody
+      <- bhkPhysicsSystem::CreateInstance
+    BSFadeNode "TrashcanMetalOffice01", a BGSMovableStatic
+
+A scaled CONVEX shape — on a mesh whose root shape is a compound. The engine
+wraps a shape in `hknpScaledConvexShape` when the reference carries a scale, and
+it decides what a shape IS from one word. Fallout 4's own symbols give that word
+in three instructions:
+
+    hknpShape::asConvexShape        test byte ptr [rcx+0x10], 1
+    hknpShape::getFlags             movzx eax, word ptr [rcx+0x10]
+    hknpShape::getNumShapeKeyBits   movzx eax, byte ptr [rcx+0x12]
+
+**+0x10 is u16 `m_flags`, +0x12 is u8 `m_numShapeKeyBits`, +0x13 is the dispatch
+type — and BIT 0 OF THE FLAGS MEANS CONVEX.**
+
+Compile wrote the literal `0x01000001` into every compound it built. Flags = 1,
+bit 0 set. So `asConvexShape` returned non-null for a compound, the engine
+wrapped it, and `calcAabb` walked a vertex array that was never there.
+
+The value was a placeholder that had never been measured. Over 1,500 SetDressing
+files, 155 compounds:
+
+    flags 0x0004 and dispatch 2 on every single one, and
+    m_numShapeKeyBits is the BIT LENGTH OF THE CHILD COUNT --
+    n=2,3 -> 2;  n=4..7 -> 3;  n=8..15 -> 4;  n=17..20 -> 5
+
+Not `ceil(log2 n)`: the key space holds n itself, not just 0..n-1. Our trashcan
+has 9 children and now writes `0x02040004`, which is vanilla's word exactly.
+
+### The corpus could not have found this, and neither could we
+
+Every check compared our files with our own reader, and our reader never
+dispatches on the word it wrote — it matches on the class name from
+`__classnames__`, which was right all along. `--roundtrip` was byte-exact. The
+compound checker passed. The AABB matched vanilla to six decimals. The shape was
+correct in every respect except the one byte that tells the engine what it is.
+
+Two authorities settle questions like this, and neither is our own code: **Elric
+says what the tool WRITES, the PDB says what the engine READS.** The capsule
+radius came from the first one yesterday; this came from the second one tonight.
+
+### What is guarded now
+
+`collision_convex.sh` is 16 checks: 15 holds every shape's header word against
+vanilla's, 16 asserts the compound does not claim to be convex.
+`hkcompound.py --flags` prints the word decoded into its three fields, and
+`hkcompound_sweep.py` compares them file by file across a whole rebuild.
+
+One honest note on the compressed meshes: 4 of 56 carry a different
+`m_numShapeKeyBits` from vanilla's, and that one is NOT a defect. The key width
+follows our own section layout, which quad pairing packs differently, and the
+shape header and its data object are written from the same number.
+
 ## 2026-08-21h — Capsules: what a radius means, asked of the tool that decides
 
 The new compound checker was pointed at all 1,619 rebuilt meshes, which is the

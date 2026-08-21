@@ -21,7 +21,14 @@ def aabbs(path):
                        capture_output=True, text=True)
     return [l.strip() for l in r.stdout.splitlines() if '|' in l]
 
-same = diff = none = 0
+
+def flags(path):
+    """Every shape's +0x10 header word: flags, key bits, dispatch type."""
+    r = subprocess.run([sys.executable, TOOL, path, '--flags'],
+                       capture_output=True, text=True)
+    return [l.strip() for l in r.stdout.splitlines() if 'dispatch' in l]
+
+same = diff = none = hdr = 0
 for line in open(sys.argv[1]):
     parts = line.rstrip('\n').split('\t')
     if len(parts) < 5 or parts[0] != 'ok':
@@ -30,6 +37,14 @@ for line in open(sys.argv[1]):
     a, b = MOD + rel, VAN + rel
     if not (os.path.exists(a) and os.path.exists(b)):
         continue
+    fa, fb = flags(a), flags(b)
+    if fa != fb:
+        hdr += 1
+        print('HEADER %s' % rel)
+        for o, t in zip(fa + [''] * len(fb), fb + [''] * len(fa)):
+            if o != t:
+                print('   ours    %s' % o)
+                print('   vanilla %s' % t)
     ours, theirs = aabbs(a), aabbs(b)
     if not theirs:
         none += 1
@@ -45,4 +60,5 @@ for line in open(sys.argv[1]):
                 print('   vanilla %s' % t)
 print('%d compounds match vanilla exactly, %d differ, %d files hold none'
       % (same, diff, none))
-sys.exit(1 if diff else 0)
+print('%d files whose shape HEADER words differ from vanilla' % hdr)
+sys.exit(1 if (diff or hdr) else 0)

@@ -29,6 +29,8 @@
 #  12. a body of NOTHING BUT CAPSULES stays capsules, not a triangle mesh
 #  13. a compound holding a capsule bounds it
 #  14. ...to vanilla's own AABB, to six decimals
+#  15. every shape header word (+0x10) matches vanilla's
+#  16. ...and the compound does NOT claim to be convex, which crashed the game
 #      (the compound BVH, decoded 2026-08-21)
 #
 # Checks 8 and 9 are the ones that say this did not over-reach. The convex path
@@ -183,6 +185,27 @@ echo "    vanilla $theirs"
 check "a compound holding a capsule bounds it" "$([ "$bok" = "0" ] && echo 1 || echo 0)"
 check "...to VANILLA's own AABB, to six decimals" \
 	"$([ -n "$ours" ] && [ "$ours" = "$theirs" ] && echo 1 || echo 0)"
+
+# --- the header word the ENGINE dispatches on ---------------------------------
+#
+# +0x10 is u16 m_flags, +0x12 is u8 m_numShapeKeyBits, +0x13 is the dispatch
+# type -- read straight off Fallout 4's own symbols, where asConvexShape is
+# `test byte ptr [rcx+0x10], 1`. A compound that sets bit 0 is handed to the
+# convex path and read as a vertex cloud: access violation inside
+# hknpScaledConvexShapeBase::calcAabb the first time a scaled reference loads
+# one. That shipped, and nothing in our own files could see it, because our
+# reader never dispatches on the word it wrote. Vanilla's word can.
+ourflags=$(python "$ROOT/tools/hkcompound.py" "$W/p.nif" --flags 2>/dev/null)
+theirflags=$(python "$ROOT/tools/hkcompound.py" "$PAIRSRC" --flags 2>/dev/null)
+echo "  shape headers"
+echo "    ours    $(echo "$ourflags" | head -1)"
+echo "    vanilla $(echo "$theirflags" | head -1)"
+check "every shape header word matches vanilla's" \
+	"$([ -n "$ourflags" ] && [ "$ourflags" = "$theirflags" ] && echo 1 || echo 0)"
+
+convexbit=$(echo "$ourflags" | awk '/CompoundShape/ {print and(strtonum("0x" $2), 1)}' | head -1)
+check "...and the compound does NOT claim to be convex (bit 0 clear)" \
+	"$([ "$convexbit" = "0" ] && echo 1 || echo 0)"
 
 echo "$checks checks, $fails failures"
 if [ "$fails" = "0" ]; then echo PASS; exit 0; else echo FAIL; exit 1; fi

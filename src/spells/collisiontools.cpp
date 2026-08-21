@@ -1011,7 +1011,33 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 		compound.dynamic = true;
 		compound.materialCRC = in.materialCRC;
 		compound.bodyId = 0;
-		compound.shapeFlags = 0x01000001u;
+		/* THE WORD AT +0x10 IS A STRUCT, AND BIT 0 MEANS "I AM CONVEX".
+		 *
+		 * Fallout 4's own symbols say so in four instructions:
+		 *
+		 *   hknpShape::asConvexShape        test byte ptr [rcx+0x10], 1
+		 *   hknpShape::getFlags             movzx eax, word ptr [rcx+0x10]
+		 *   hknpShape::getNumShapeKeyBits   movzx eax, byte ptr [rcx+0x12]
+		 *
+		 * so +0x10 is u16 m_flags, +0x12 is u8 m_numShapeKeyBits, +0x13 is the
+		 * dispatch type. This was the literal 0x01000001 -- flags 1, bit 0 SET --
+		 * which told the engine a COMPOUND was a convex shape. It called
+		 * asConvexShape, got a non-null answer, wrapped it in an
+		 * hknpScaledConvexShape because the reference was scaled, and
+		 * hknpScaledConvexShapeBase::calcAabb read a vertex array that was never
+		 * there: access violation at 0xFFFFFFFFFFFFFFFF on TrashcanMetalOffice01,
+		 * the second crash this mod found.
+		 *
+		 * Vanilla, measured over 155 compounds in 1,500 SetDressing files: flags
+		 * 0x0004 and dispatch 2 on every single one, and m_numShapeKeyBits is
+		 * exactly the BIT LENGTH OF THE CHILD COUNT -- n=2 and 3 give 2, n=4..7
+		 * give 3, n=8..15 give 4, n=17..20 give 5, no exceptions. (Not
+		 * ceil(log2 n): the key space holds n itself, not just 0..n-1.)
+		 */
+		quint32 keyBits = 0;
+		for ( qsizetype v = shapes.size(); v; v >>= 1 )
+			keyBits++;
+		compound.shapeFlags = 0x02000004u | ( keyBits << 16 );
 		for ( qsizetype k = 0; k < shapes.size(); k++ ) {
 			compound.children.append( int( k ) );
 			compound.instances.append( HknpCompound::Instance() );

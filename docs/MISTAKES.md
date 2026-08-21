@@ -170,3 +170,23 @@ spawning the NifSkope processes that then held the exe locked.
 background mode, which tracks the real process. And when a background job needs
 to stop, verify it: `Get-CimInstance Win32_Process | Where-Object CommandLine
 -match '<script>'` returning nothing is the proof, not the stop call's message.
+
+## 2026-08-22 — Shipped a placeholder constant into 59 files
+
+**What:** `tlCollCompileConvex` wrote the literal `0x01000001` as a compound's
+header word. Bit 0 of that word is the engine's "I am convex" flag, so every
+compound Compile built told Fallout 4 it was a vertex cloud. It crashed on the
+first scaled reference that loaded one.
+
+**Why:** the constant was never measured. Every other shape's word in the writer
+came off the corpus and was documented with a count — polytope `0x01000143`,
+"74 of 76 vanilla polytopes"; capsule `0x010001c3`, "51 of 51". The compound's
+was typed in to make the encoder produce something, and nothing ever went back
+for it. The decoder's own header even records the right values three lines from
+the field it fills: "+0x10; 02020004 / 02030004 / 02040004 seen".
+
+**Solution:** a constant in a writer needs the same provenance as a decoded
+field — a count, or a symbol, in the comment beside it. Grep the writer for bare
+hex with no measurement attached and treat each one as unverified. And when the
+DECODER has already recorded the observed values for a field, the encoder must
+not invent a different one; that mismatch is mechanically checkable.

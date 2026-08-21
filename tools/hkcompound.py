@@ -146,6 +146,33 @@ def aabb(path):
     return 0
 
 
+def flags(path):
+    """Print every shape's header word at +0x10, so ours can be held against theirs.
+
+    Fallout 4's symbols give the layout in three instructions:
+
+        hknpShape::asConvexShape        test byte ptr [rcx+0x10], 1
+        hknpShape::getFlags             movzx eax, word ptr [rcx+0x10]
+        hknpShape::getNumShapeKeyBits   movzx eax, byte ptr [rcx+0x12]
+
+    u16 m_flags, u8 m_numShapeKeyBits, u8 dispatch type -- and BIT 0 OF THE FLAGS
+    MEANS CONVEX. A compound that sets it is handed to the convex path and read
+    as a vertex cloud, which is an access violation on the first scaled
+    reference. Nothing in our own files can catch that; only vanilla's word can.
+    """
+    for bi, at, blob in nif_blobs(path):
+        try:
+            pk = Pack(blob)
+        except ValueError:
+            continue
+        for o, c in sorted(pk.objects):
+            if 'Shape' in c and 'Data' not in c and 'Properties' not in c:
+                w = struct.unpack_from('<I', pk.data, o + 0x10)[0]
+                print('%-28s %08x  flags %04x keyBits %d dispatch %d'
+                      % (c, w, w & 0xffff, (w >> 16) & 0xff, (w >> 24) & 0xff))
+    return 0
+
+
 def damage(path, out):
     """Write a copy whose node-array pointer is misfiled, reproducing the crash.
 
@@ -183,6 +210,8 @@ if __name__ == '__main__':
             want = int(a.split('=', 1)[1])
         if a.startswith('--damage='):
             out = a.split('=', 1)[1]
+    if '--flags' in sys.argv:
+        sys.exit(flags(args[0]))
     if '--aabb' in sys.argv:
         sys.exit(aabb(args[0]))
     if out:

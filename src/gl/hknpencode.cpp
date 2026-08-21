@@ -938,6 +938,7 @@ QByteArray hknpEncodeCapsuleShape( const HknpCapsuleInput & in )
 {
 	QByteArray out( 0x1b0, 0 );
 
+	// 51 of 51 vanilla capsules; flags 0x01c3, dispatch 1, bit 0 = convex
 	setU32( out, 0x10, 0x010001c3u );
 	setFloat( out, 0x14, in.radius );
 	setU32( out, 0x18, in.materialCRC );
@@ -1040,6 +1041,9 @@ QByteArray hknpEncodeSphereShape( const Vector3 & centre, float radius, quint32 
 {
 	QByteArray out( 0x80, 0 );
 
+	// 6 of 6 vanilla spheres; flags 0x0111, no shape-key bits, dispatch 1
+	// (convex). Bit 0 is the engine's "I am convex" test -- see the compound in
+	// tlCollCompileConvex, which shipped without it set and crashed the game.
 	setU32( out, 0x10, 0x01000111u );
 	setFloat( out, 0x14, radius );
 	setU32( out, 0x18, materialCRC );
