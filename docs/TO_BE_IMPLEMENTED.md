@@ -1033,7 +1033,40 @@ Full feature spec is preserved in the appendix at the bottom of this file;
 validated packfile offsets and test assets live in
 `COLLISION_MANAGER_HANDOFF.md`.
 
-### 4b. Cloth collision — DECODED 07-28e, not surfaced — NEW
+### 4b. Cloth collision — DECODED 07-28e, not surfaced — QUEUED NEXT (bungo, 2026-08-22)
+
+**Compile AND decompile, the same pair the compiled-collision track just took
+through three in-game crashes and a door that would not open.** Start where that
+track ended up starting: with the two external authorities, not with our own
+reader agreeing with our own writer.
+
+**The PDB has the whole path** (`E:\Projects\Fo4CommunityShaders\Fo4PDB`, queried
+with `fallout4-community-shaders/tools/exere/f4pdb.py`, and see
+[[feedback-debug-views-over-pdb]] — PDB FIRST for vanilla engine research):
+
+- **`BSClothExtraData::LoadBinary` and `::SaveBinary`** — the engine's own reader
+  and writer for the blob. Disassemble `LoadBinary` and the field order and sizes
+  fall out, instead of being inferred from a corpus. Also `LinkObject`,
+  `RegisterStreamables`, `CreateClone`, `IsEqual`.
+- The Havok Cloth types by name: `hclClothData` (`getClothState`, `getOperator`,
+  a `Platform` enum), `hclSimClothData`, `hclSimClothInstance`, `hclSimClothPose`,
+  `hclCollidable`.
+- **`BSClothUtils::BSTransformSet`** accessors, which name the runtime knobs:
+  `QBoneMap`, `QRootIdx`, `QSimulationOffset`, `QTargetLODLevel`,
+  `QSettleOnTransitionToSim`, `QAnimateStateIndex`, `QSimulateStateIndex`,
+  `QFirstFrame`, `QFirstStep`, `QTransitionToSimulateStage`.
+
+`QBoneMap` and `QRootIdx` are the pair worth reading first: cloth-to-skeleton
+binding is the part that cannot be guessed from bytes, and it is what a compiler
+has to get right.
+
+**What the collision track learned, which applies here unchanged:** a round trip
+cannot see a pointer neither end needs; our reader matching on class NAME means
+it never dispatches on the word it wrote; and a field can be INERT while nothing
+moves and load-bearing the moment the engine acts on it (the compound's convex
+bit, the door's hinge). Build the engine-side checker alongside the writer, give
+it a `--damage` mode so it is proved able to fail, and hold every number against
+vanilla's rather than against our own.
 
 Reverse-engineered but **no code written**: nothing in the app reads this yet. It
 would slot into the existing `collision` CLI, since `--extract` already pulls the
