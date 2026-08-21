@@ -981,13 +981,54 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 		return QByteArray();
 	if ( !tlCollAppendConvexShapes( nif, rootShape, Matrix4(), shapes ) || shapes.isEmpty() )
 		return QByteArray();
-	if ( shapes.size() > 1 )
-		return QByteArray();   // several convex shapes want a compound; see item 3b
-
 	HknpSystem sys;
-	HknpShape shape = shapes.first();
-	shape.bodyId = 0;
-	sys.shapes.append( shape );
+	for ( HknpShape & shape : shapes ) {
+		shape.bodyId = 0;
+		sys.shapes.append( shape );
+	}
+
+	/* Several convex shapes in one body are a COMPOUND, which is how vanilla
+	 * carries them and what Elric writes. The instances are all identity here:
+	 * tlCollAppendConvexShapes bakes each wrapper's transform into its hull, so
+	 * the instance has nothing left to say.
+	 */
+	if ( shapes.size() > 1 ) {
+		HknpCompound compound;
+		/* ALWAYS the dynamic class, whatever the body does. Counted over the
+		 * corpus: 71 of 71 compounds are hknpDynamicCompoundShape, and 45 of them
+		 * sit in bodies that do not simulate — so hknpStaticCompoundShape is a
+		 * class Elric knows and never writes, which is also why its type hash was
+		 * never sampled into our table.
+		 */
+		compound.dynamic = true;
+		compound.materialCRC = in.materialCRC;
+		compound.bodyId = 0;
+		compound.shapeFlags = 0x01000001u;
+		bool first = true;
+		for ( qsizetype k = 0; k < shapes.size(); k++ ) {
+			compound.children.append( int( k ) );
+			compound.instances.append( HknpCompound::Instance() );
+			// the solid is the hull grown by its convex radius, and the bounds
+			// vanilla writes are of the SOLID -- see hknpEncodeCompoundShapeData
+			const float grow = shapes.at( k ).convexRadius;
+			for ( const Vector3 & v : shapes.at( k ).verts ) {
+				const Vector3 p = shapes.at( k ).transformed( v );
+				if ( first ) {
+					compound.aabbMin = p - Vector3( grow, grow, grow );
+					compound.aabbMax = p + Vector3( grow, grow, grow );
+					first = false;
+					continue;
+				}
+				for ( int a = 0; a < 3; a++ ) {
+					compound.aabbMin[a] = std::min( compound.aabbMin[a], p[a] - grow );
+					compound.aabbMax[a] = std::max( compound.aabbMax[a], p[a] + grow );
+				}
+			}
+		}
+		if ( first )
+			return QByteArray();   // nothing to bound: leave it to the mesh path
+		sys.compounds.append( compound );
+	}
 
 	HknpBodyPhys phys;
 	phys.layer = in.layer;
@@ -1004,7 +1045,11 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	phys.motionIndex = in.dynamic ? 0 : -1;
 	if ( in.dynamic ) {
 		phys.mass = std::max( in.mass, 0.001f );
-		phys.density = shape.massVolume > 1.0e-9f ? phys.mass / shape.massVolume : phys.mass;
+		// density is the body's, so it is the mass over EVERY shape's volume
+		float volume = 0.0f;
+		for ( const HknpShape & s : std::as_const( shapes ) )
+			volume += s.massVolume;
+		phys.density = volume > 1.0e-9f ? phys.mass / volume : phys.mass;
 		auto inv = []( float v ) { return ( v > 1.0e-12f ) ? 1.0f / v : 0.0f; };
 		for ( int a = 0; a < 3; a++ )
 			phys.invInertia[a] = inv( in.inertia[a] );
@@ -6043,8 +6088,17 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	 */
 	QString error; QByteArray bytes = tlCollCompileConvex( nif, rootShape, input, &error );
 	const bool convexPath = !bytes.isEmpty();
-	if ( bytes.isEmpty() )
+	if ( bytes.isEmpty() ) {
+		/* Empty with an error set means the source WAS convex and the writer could
+		 * not finish it — a silent drop to the mesh would hide a real defect
+		 * behind a worse shape, so say it happened. Empty with no error is the
+		 * ordinary "not a convex source", which needs no comment.
+		 */
+		if ( !error.isEmpty() )
+			qWarning().noquote() << QObject::tr( "Convex compile declined, falling back to a mesh:" ) << error;
+		error.clear();
 		bytes = hknpEncodeCompressedMesh( input, &error );
+	}
 	if ( bytes.isEmpty() )
 		return refuse( error );
 	HknpSystem roundTrip = hknpDecode( bytes );

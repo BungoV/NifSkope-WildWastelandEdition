@@ -7,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <functional>
 
 namespace {
 
@@ -1232,6 +1233,9 @@ QByteArray hknpEncodeConvexPolytopeShape( const HknpPolytopeInput & in )
  * Nothing is written into the pointer slots: they hold raw zero in vanilla and the
  * fixup tables do the binding. See HknpCompoundFixups.
  */
+//! Defined below, next to the BVH writer it belongs with.
+QByteArray compoundHeaderTail( const Vector3 & aabbMin, const Vector3 & aabbMax );
+
 QByteArray hknpEncodeCompoundShape( const HknpCompound & compound, HknpCompoundFixups * fixups )
 {
 	const int count = int( compound.instances.size() );
@@ -1248,9 +1252,16 @@ QByteArray hknpEncodeCompoundShape( const HknpCompound & compound, HknpCompoundF
 	setU32( out, 0x68, quint32( count ) );
 	setU32( out, 0x6c, quint32( count ) | 0x80000000u );
 
-	// +0x70..+0xCF verbatim: bounds and whatever else lives there
+	/* +0x70..+0xCF verbatim when it was decoded, and written from the AABB when
+	 * it was not -- the fields in it are measured (see compoundHeaderTail), and a
+	 * compound built from scratch used to get 0x60 bytes of zero, which is an
+	 * empty bounding box around everything it owns.
+	 */
 	if ( compound.headerTail.size() == 0x60 )
 		std::memcpy( out.data() + 0x70, compound.headerTail.constData(), 0x60 );
+	else
+		std::memcpy( out.data() + 0x70,
+			compoundHeaderTail( compound.aabbMin, compound.aabbMax ).constData(), 0x60 );
 
 	for ( int i = 0; i < count; i++ ) {
 		const HknpCompound::Instance & one = compound.instances.at( i );
@@ -1276,6 +1287,145 @@ QByteArray hknpEncodeCompoundShape( const HknpCompound & compound, HknpCompoundF
 		for ( int i = 0; i < count; i++ )
 			fixups->childPointers.append( 0xD0 + qsizetype( i ) * 0x80 + 0x50 );
 	}
+	return out;
+}
+
+/*! Write one hknpCompoundShapeData: the BVH a compound's children hang off.
+ *
+ * Decoded 2026-08-21 and checked against every compound in the sample — 86 of 86
+ * fit it with no exceptions, and Elric recompiling a decompiled two-box body
+ * reproduces vanilla's object BYTE FOR BYTE, which is what says the reading is
+ * the writing.
+ *
+ * The object is 0x60 of header and then **2n records of 32 bytes**, so its size
+ * is exactly `0x60 + 2n * 32` — 224 bytes for two children, 288 for three, 352
+ * for four. The header carries 2n+1 at +0x18 (with the hkArray flag at +0x1c),
+ * 2n at +0x20, the instance count at +0x28 and a 1 at +0x30.
+ *
+ * A record is `float3 min | u32 tag | float3 max | u16 a | u16 b`:
+ *
+ *  - **tag** is `0x3f000000 | (parentIndex + 1)` — the 0.5 in an hkVector4's w
+ *    lane with the parent index folded into its low bits, the same trick a
+ *    polytope plays with its vertex indices. The root's is 0x3f000000.
+ *  - **a** is the LEFT child + 1 on an internal node and 0 on a leaf. It is
+ *    always `i + 2` on an internal node, because the nodes are emitted
+ *    depth-first and a node's left child is always the next record — so `a`
+ *    carries no information beyond "this is not a leaf", and only `b` is a real
+ *    link.
+ *  - **b** is the RIGHT child + 1 on an internal node, and the INSTANCE INDEX on
+ *    a leaf. The leaves are a permutation of 0..n-1.
+ *
+ * 2n-1 records are real (a full binary tree over n leaves) and the last one is
+ * zero, which is what makes the count 2n.
+ *
+ * The split here is the median of the child centroids along the widest axis,
+ * which is not necessarily Elric's — the tree only has to bound its children
+ * correctly, and a different split is a different valid tree over the same
+ * boxes, not a wrong one.
+ */
+QByteArray hknpEncodeCompoundShapeData( const QVector<QPair<Vector3, Vector3>> & childBoxes,
+	QVector<int> * instanceLeaf )
+{
+	const int n = int( childBoxes.size() );
+	if ( n < 1 || n > 4096 )
+		return QByteArray();
+
+	struct Node { Vector3 lo, hi; int parent; int right; int instance; };
+	QVector<Node> nodes;
+	QVector<int> order( n );
+	for ( int i = 0; i < n; i++ )
+		order[i] = i;
+
+	// depth first, left child next, so only the right link needs storing
+	std::function<int( int, int, int )> build = [&]( int first, int last, int parent ) -> int {
+		const int self = int( nodes.size() );
+		Node node; node.parent = parent; node.right = -1; node.instance = -1;
+		node.lo = childBoxes.at( order.at( first ) ).first;
+		node.hi = childBoxes.at( order.at( first ) ).second;
+		for ( int k = first + 1; k < last; k++ ) {
+			const auto & box = childBoxes.at( order.at( k ) );
+			for ( int a = 0; a < 3; a++ ) {
+				node.lo[a] = std::min( node.lo[a], box.first[a] );
+				node.hi[a] = std::max( node.hi[a], box.second[a] );
+			}
+		}
+		nodes.append( node );
+		if ( last - first == 1 ) {
+			nodes[self].instance = order.at( first );
+			return self;
+		}
+		// widest axis of the box, split at the median centroid
+		int axis = 0;
+		const Vector3 extent = nodes.at( self ).hi - nodes.at( self ).lo;
+		if ( extent[1] > extent[axis] ) axis = 1;
+		if ( extent[2] > extent[axis] ) axis = 2;
+		std::sort( order.begin() + first, order.begin() + last, [&]( int a, int b ) {
+			return childBoxes.at( a ).first[axis] + childBoxes.at( a ).second[axis]
+				 < childBoxes.at( b ).first[axis] + childBoxes.at( b ).second[axis];
+		} );
+		const int mid = first + ( last - first ) / 2;
+		build( first, mid, self );
+		nodes[self].right = build( mid, last, self );
+		return self;
+	};
+	build( 0, n, -1 );
+
+	QByteArray out( 0x60 + qsizetype( n ) * 2 * 32, 0 );
+	setU32( out, 0x18, quint32( 2 * n + 1 ) ); setU32( out, 0x1c, 0x80000000u | quint32( 2 * n + 1 ) );
+	setU32( out, 0x20, quint32( 2 * n ) );
+	setU32( out, 0x28, quint32( n ) );
+	setU32( out, 0x30, 1 );
+	for ( qsizetype i = 0; i < nodes.size(); i++ ) {
+		const Node & node = nodes.at( i );
+		const qsizetype at = 0x60 + i * 32;
+		for ( int a = 0; a < 3; a++ ) {
+			setFloat( out, at + a * 4, node.lo[a] );
+			setFloat( out, at + 16 + a * 4, node.hi[a] );
+		}
+		setU32( out, at + 12, 0x3f000000u | quint32( node.parent + 1 ) );
+		if ( node.instance >= 0 ) {
+			setU16( out, at + 28, 0 );
+			setU16( out, at + 30, quint16( node.instance ) );
+		} else {
+			setU16( out, at + 28, quint16( i + 2 ) );
+			setU16( out, at + 30, quint16( node.right + 1 ) );
+		}
+	}
+	/* Which leaf each instance ended up in. The compound's instance record carries
+	 * that back-pointer in the w lane of its last transform row, as `0.5` tagged
+	 * with the leaf index + 1 — exact on 422 of 422 vanilla instances.
+	 */
+	if ( instanceLeaf ) {
+		instanceLeaf->fill( -1, n );
+		for ( qsizetype i = 0; i < nodes.size(); i++ )
+			if ( nodes.at( i ).instance >= 0 )
+				( *instanceLeaf )[nodes.at( i ).instance] = int( i );
+	}
+	return out;
+}
+
+/*! The 0x60 bytes a compound carries at +0x70, when there is no decoded original.
+ *
+ * Measured on 71 vanilla compounds: 0xffffffff at +0x70, the AABB as two
+ * hkVector4s at +0x80 and +0x90, a 1 at +0xa0, and zero everywhere else. The
+ * AABB equals the root BVH node's box on all 71.
+ *
+ * The w lane of the minimum at +0x8c is `0.5` with a small number in its low
+ * bits — 1 to 5 across the corpus, growing slowly with the child count, which
+ * reads as a tree depth. It is not decoded, and writing the commonest value
+ * costs nothing: it is the padding lane of an AABB, not a field the traversal
+ * reads.
+ */
+QByteArray compoundHeaderTail( const Vector3 & aabbMin, const Vector3 & aabbMax )
+{
+	QByteArray out( 0x60, 0 );
+	setU32( out, 0x00, 0xffffffffu );
+	for ( int a = 0; a < 3; a++ ) {
+		setFloat( out, 0x10 + a * 4, aabbMin[a] );
+		setFloat( out, 0x20 + a * 4, aabbMax[a] );
+	}
+	setU32( out, 0x1c, 0x3f000001u );
+	setU32( out, 0x30, 1 );
 	return out;
 }
 
@@ -1826,18 +1976,28 @@ bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs )
 		objs[at].global.append( { 0x30, int( objs.size() ) } );
 		return encodeShapeObject( *shp.scaledChild, objs );
 	}
-	if ( shp.primType == 2 && shp.coreVerts.size() == 8 ) {
+	if ( shp.primType == 2 ) {
 		HknpCapsuleInput in;
 		in.capA = shp.capA; in.capB = shp.capB;
 		in.radius = shp.convexRadius; in.materialCRC = shp.shapeMaterialCRC;
 		in.padding = shp.corePadding;
-		// bit 1 of the vertex index selects the +u side, so the difference of the
-		// two 4-corner centroids recovers the roll the file was written with
-		Vector3 hi, lo;
-		for ( int v = 0; v < 8; v++ )
-			( ( v & 2 ) ? hi : lo ) += shp.coreVerts.at( v );
-		in.frameU = hi - lo;
-		in.hasFrame = in.frameU.length() > 1.0e-12f;
+		/* A capsule that came off a DECODE brings its core box, and the roll it was
+		 * written with is recovered from it: bit 1 of the vertex index selects the
+		 * +u side, so the difference of the two 4-corner centroids is u.
+		 *
+		 * A capsule that did not is a NEW one -- Compile writes these now -- and it
+		 * has no roll to recover. hknpEncodeCapsuleShape synthesizes a
+		 * deterministic frame and derives the padding, which is what its own
+		 * documentation says to do; requiring the core box here instead is what
+		 * made a body holding a capsule decline the convex path entirely.
+		 */
+		if ( shp.coreVerts.size() == 8 ) {
+			Vector3 hi, lo;
+			for ( int v = 0; v < 8; v++ )
+				( ( v & 2 ) ? hi : lo ) += shp.coreVerts.at( v );
+			in.frameU = hi - lo;
+			in.hasFrame = in.frameU.length() > 1.0e-12f;
+		}
 		so.className = QStringLiteral( "hknpCapsuleShape" );
 		so.bytes = hknpEncodeCapsuleShape( in );
 	} else if ( shp.primType == 1 ) {
@@ -1995,7 +2155,60 @@ QByteArray hknpEncodeSystem( const HknpSystem & sys, QString * error )
 			HknpPackObject co;
 			co.className = comp->dynamic ? QStringLiteral( "hknpDynamicCompoundShape" )
 										 : QStringLiteral( "hknpStaticCompoundShape" );
-			co.bytes = hknpEncodeCompoundShape( *comp, &cfx );
+			/* The BVH is built BEFORE the compound, even though it is written after
+			 * it, because each instance carries the index of its own leaf: the
+			 * compound cannot be finished until the tree has decided where its
+			 * children went. A compound that came off a decode brings both objects
+			 * with it and skips all of this.
+			 */
+			QByteArray builtData;
+			HknpCompound patched = *comp;
+			if ( comp->dataRawData.isEmpty() ) {
+				QVector<QPair<Vector3, Vector3>> boxes;
+				for ( int ci : comp->children ) {
+					if ( ci < 0 || ci >= sys.shapes.size() )
+						return fail( QStringLiteral( "Compound on body %1 names a child that is not there." ).arg( i ) );
+					const HknpShape & child = sys.shapes.at( ci );
+					/* A sphere and a capsule have no vertex list — their geometry
+					 * is the end points and the radius — so the box comes off those
+					 * instead. Asking for verts refused every body holding one.
+					 */
+					Vector3 lo, hi;
+					if ( child.primType == 1 || child.primType == 2 ) {
+						const Vector3 a0 = child.transformed( child.capA );
+						const Vector3 a1 = child.transformed( child.primType == 2 ? child.capB : child.capA );
+						for ( int a = 0; a < 3; a++ ) {
+							lo[a] = std::min( a0[a], a1[a] ); hi[a] = std::max( a0[a], a1[a] );
+						}
+					} else if ( !child.verts.isEmpty() ) {
+						lo = hi = child.transformed( child.verts.first() );
+						for ( const Vector3 & v : child.verts ) {
+							const Vector3 p = child.transformed( v );
+							for ( int a = 0; a < 3; a++ ) { lo[a] = std::min( lo[a], p[a] ); hi[a] = std::max( hi[a], p[a] ); }
+						}
+					} else {
+						return fail( QStringLiteral( "Compound child on body %1 has no geometry to bound." ).arg( i ) );
+					}
+					/* Grown by the convex radius, because the SOLID is: vanilla's
+					 * fridge bounds its two boxes at -0.8452 where their hulls stop
+					 * at -0.8352, and the difference is its 0.01 radius exactly.
+					 * For a sphere or a capsule that radius IS the shape.
+					 */
+					const float grow = ( child.primType == 1 || child.primType == 2 )
+						? child.primRadius : child.convexRadius;
+					for ( int a = 0; a < 3; a++ ) {
+						lo[a] -= grow; hi[a] += grow;
+					}
+					boxes.append( { lo, hi } );
+				}
+				QVector<int> leaves;
+				builtData = hknpEncodeCompoundShapeData( boxes, &leaves );
+				if ( builtData.isEmpty() )
+					return fail( QStringLiteral( "Could not write the compound shape data on body %1." ).arg( i ) );
+				for ( qsizetype k = 0; k < patched.instances.size() && k < leaves.size(); k++ )
+					patched.instances[k].wPayload[3] = 0x3f000000u | quint32( leaves.at( k ) + 1 );
+			}
+			co.bytes = hknpEncodeCompoundShape( patched, &cfx );
 			if ( co.bytes.isEmpty() || cfx.childPointers.size() != comp->children.size() )
 				return fail( QStringLiteral( "Could not write the compound on body %1." ).arg( i ) );
 			co.local.append( { cfx.instanceArrayPointer, cfx.instanceArray } );
@@ -2010,13 +2223,19 @@ QByteArray hknpEncodeSystem( const HknpSystem & sys, QString * error )
 					return fail( QStringLiteral( "No encoder for a compound child on body %1 (%2)." )
 						.arg( i ).arg( sys.shapes.at( ci ).className ) );
 			}
-			if ( comp->dataRawData.isEmpty() || comp->dataClassName.isEmpty() )
-				return fail( QStringLiteral( "The compound on body %1 has no shape data." ).arg( i ) );
 			objs[at].global.append( { cfx.shapeDataPointer, int( objs.size() ) } );
 			HknpPackObject cd;
-			cd.className = comp->dataClassName;
-			cd.bytes = comp->dataRawData;
-			cd.local = comp->dataLocal;
+			cd.className = comp->dataClassName.isEmpty()
+				? ( comp->dynamic ? QStringLiteral( "hknpDynamicCompoundShapeData" )
+								  : QStringLiteral( "hknpStaticCompoundShapeData" ) )
+				: comp->dataClassName;
+			/* A compound built from scratch has no stored shape data, and used to
+			 * be refused here. Its BVH is written now (see
+			 * hknpEncodeCompoundShapeData); a decoded compound still carries its
+			 * own bytes through, so nothing that round-trips changes.
+			 */
+			cd.bytes = comp->dataRawData.isEmpty() ? builtData : comp->dataRawData;
+			cd.local = comp->dataRawData.isEmpty() ? QVector<QPair<qsizetype, qsizetype>>() : comp->dataLocal;
 			objs.append( cd );
 			continue;
 		}

@@ -41,9 +41,13 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
-# a dynamic compound of two convex polytopes whose materials differ
-# (0xB26A84C5 and 0xF413D173) - the smallest vanilla case of the shape this fixes
-SRC="${SRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Building/RefrigeratorBrokenDoor01.nif}"
+# A compressed MESH holding two materials, 0xDF02F237 over 16 triangles and
+# 0x6A3830DF over 12. It has to be a mesh: the run table this harness measures is
+# a compressed mesh's structure, and since 2026-08-20 a body whose shapes are all
+# CONVEX compiles to a compound of polytopes instead, where each child carries
+# its own material and there is no run table at all. The fixture here was such a
+# body until then, which is what moved it.
+SRC="${SRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/BricksBlocks/CinderBlockStairs01.nif}"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
@@ -66,8 +70,8 @@ coll=$("$NS" -no-gui list "$SRC" 2>/dev/null | sed -n 's/^\[\([0-9]*\)\] bhkNPCo
 "$NS" -no-gui cast "$SRC" -s "Havok/Decompile Compiled Collision" -b "$coll" -o "$W/e.nif" >/dev/null 2>&1
 
 # the LEAF shapes, whatever Decompile chose to write them as: this fixture's two
-# convex polytopes come back as boxes wrapped in bhkConvexTransformShapes, and it
-# is the leaves that carry Material
+# materials come back as two bhkNiTriStripsShapes under a list, and it is the
+# leaves that carry Material
 leaves='bhkBoxShape|bhkSphereShape|bhkCapsuleShape|bhkConvexVerticesShape|bhkNiTriStripsShape'
 shapes=$("$NS" -no-gui list "$W/e.nif" 2>/dev/null | grep -E "\] ($leaves)" | sed -n 's/^\[\([0-9]*\)\].*/\1/p')
 listing=""
@@ -113,8 +117,19 @@ check "the run table's byte invariants hold" "$([ "$?" = "0" ] && echo 1 || echo
 # has to change when the source shapes swap materials.
 runorder() { python "$ROOT/tools/hkmatrun.py" "$1" --runs --quiet 2>/dev/null \
 	| sed -n 's/^run [0-9]* section [0-9]* \(0x[0-9A-F]*\).*/\1/p' | tr '\n' ' '; }
-first=$(echo "$shapes" | head -1); second=$(echo "$shapes" | tail -1)
-ma=$(material "$W/e.nif" "$first"); mb=$(material "$W/e.nif" "$second")
+# The two leaves must DISAGREE, and taking the first and the last does not
+# guarantee that: this fixture decompiles to three leaves over two bodies, where
+# the first and last happen to share a material. Swapping those two collapsed the
+# compiled table to one entry and the checks below read the collapse as a pass.
+first=$(echo "$shapes" | head -1)
+ma=$(material "$W/e.nif" "$first")
+second=""
+for s in $shapes; do
+	[ "$(material "$W/e.nif" "$s")" != "$ma" ] || continue
+	second="$s"; break
+done
+mb=$(material "$W/e.nif" "$second")
+echo "  swapping [$first]=$ma with [$second]=$mb"
 "$NS" -no-gui set "$W/e.nif" -b "$first" -f "Material" -v "$mb" -o "$W/s1.nif" >/dev/null 2>&1
 "$NS" -no-gui set "$W/s1.nif" -b "$second" -f "Material" -v "$ma" -o "$W/s.nif" >/dev/null 2>&1
 "$NS" -no-gui cast "$W/s.nif" -s "Havok/Compile Collision" -b "$obj" -o "$W/cs.nif" >/dev/null 2>&1
@@ -124,8 +139,14 @@ echo "  run order after swap:  $after"
 check "swapping the source materials swaps the run order" \
 	"$([ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ] && echo 1 || echo 0)"
 
-# and a material is never invented: one material in, one entry out
-"$NS" -no-gui set "$W/e.nif" -b "$second" -f "Material" -v "$ma" -o "$W/one.nif" >/dev/null 2>&1
+# and a material is never invented: one material in, one entry out. EVERY leaf
+# takes it, not just the two that were swapped -- a leaf left behind is another
+# entry in the table and the check would fail for a reason it is not about.
+cp -f "$W/e.nif" "$W/one.nif"
+for s in $shapes; do
+	"$NS" -no-gui set "$W/one.nif" -b "$s" -f "Material" -v "$ma" -o "$W/one2.nif" >/dev/null 2>&1
+	[ -f "$W/one2.nif" ] && mv -f "$W/one2.nif" "$W/one.nif"
+done
 "$NS" -no-gui cast "$W/one.nif" -s "Havok/Compile Collision" -b "$obj" -o "$W/co.nif" >/dev/null 2>&1
 python "$ROOT/tools/hkmatrun.py" "$W/co.nif" --expect-materials=1 --quiet >/dev/null 2>&1
 one=$?

@@ -1,5 +1,121 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-21c — Compounds: the last convex source that compiled to a triangle soup
+
+A body with several convex shapes still became a compressed mesh, because
+`hknpEncodeSystem` refused a compound with no `dataRawData` and nothing had ever
+written an `hknpDynamicCompoundShapeData`. It is written now, and the format
+came out of the Elric harness in an afternoon rather than a campaign.
+
+### The BVH, decoded
+
+The object is **`0x60 + 2n * 32` bytes** — 0x60 of header, then 2n records of
+32. The header carries 2n+1 at +0x18 (with its hkArray flag at +0x1c), 2n at
++0x20, the instance count at +0x28 and a 1 at +0x30.
+
+A record is `float3 min | u32 tag | float3 max | u16 a | u16 b`:
+
+- **tag** is `0x3f000000 | (parentIndex + 1)` — the 0.5 in an hkVector4's w lane
+  with the parent folded into its low bits, the same trick a polytope plays with
+  its vertex indices. The root's is 0x3f000000.
+- **a** is the left child + 1 on an internal node and 0 on a leaf. It is always
+  `i + 2`, because the nodes are emitted depth-first and a node's left child is
+  always the next record — so `a` says only "not a leaf", and `b` is the real
+  link.
+- **b** is the right child + 1 on an internal node, and the INSTANCE INDEX on a
+  leaf. The leaves are a permutation of 0..n-1.
+
+2n-1 records are real (a full binary tree over n leaves); the last is zero, which
+is what makes the count 2n. **86 of 86 vanilla compounds fit this with no
+exceptions**, and Elric recompiling a decompiled two-box body reproduces
+vanilla's object byte for byte — which is what says the reading is the writing.
+
+Two more things the corpus settled:
+
+- **The compound's own AABB at +0x80/+0x90 equals the root node's box** on all 71
+  compounds, and it is the box of the SOLID: the fridge bounds its two boxes at
+  -0.8452 where their hulls stop at -0.8352, and the difference is its 0.01
+  convex radius exactly.
+- **`hknpStaticCompoundShape` is a class Elric knows and never writes.** All 71
+  compounds are `hknpDynamicCompoundShape`, and 45 of them sit in bodies that do
+  not simulate — which is also why that class's type hash was never sampled into
+  our table, and why the first attempt at this failed with "No class hash known
+  for hknpStaticCompoundShape". The writer always writes the dynamic class.
+
+### What it produces
+
+RefrigeratorBrokenDoor01, decompiled and recompiled: an `hknpDynamicCompoundShape`
+over two convex polytopes, volumes 0.002474 and 0.285514 against vanilla's
+0.002523 and 0.285754, and a compound AABB identical to vanilla's to every
+printed decimal. `--roundtrip` comes back byte-exact on every object in it —
+compound, both polytopes, both mass-properties records.
+
+The tree this writes is not necessarily Elric's: the split is the median centroid
+along the widest axis, so a different valid tree over the same boxes. The
+structure, the sizes and the bounds are the same.
+
+### The instance points back at its leaf
+
+An instance's last transform row carries a w lane, and it is not padding: it is
+`0.5` tagged with **its own BVH leaf index + 1**, exact on 422 of 422 vanilla
+instances. So the tree has to be built BEFORE the compound that owns it, even
+though it is written after — which is why the compound branch of the assembler
+now computes the BVH first and patches the instances with what it decided.
+
+### Two things the fallback diagnostic found immediately
+
+Both were bodies declining the convex path and dropping silently to a mesh, and
+both surfaced in one run each because the decline now says why:
+
+- **A synthesized capsule had no encoder.** `encodeShapeObject` required
+  `coreVerts.size() == 8` — the core box that only a DECODED capsule brings — so
+  a body holding a capsule refused. A new capsule has no roll to recover;
+  `hknpEncodeCapsuleShape` synthesizes a deterministic frame and derives the
+  padding, which its own documentation says to do.
+- **A sphere and a capsule have no vertex list**, so bounding compound children
+  by their vertices refused every body holding one. They are bounded from their
+  end points and radius now.
+
+RadioMicrophoneFreestanding01 — two capsules and a polytope in one body — used to
+compile to a 540-triangle mesh. It comes back as two capsules and a polytope
+under a compound, same classes as vanilla, and re-encodes byte-exact.
+
+Over a 139-file sweep on the finished build: **19 compounds, 57 polytopes, 62
+meshes, one file with no collision to start from, and NOT ONE decline** — where
+before this the 19 were meshes. Every compiled packfile re-encodes byte-exact.
+
+**One thing that is NOT byte-exact, and was not made so:** four compound files in
+the sweep come back exact as packfiles but fail the harsher "shapes re-derived"
+line, always on a CAPSULE and always by float noise — 2.3e-10 m on the microphone
+stand, 3.3e-8 m on Speaker01. That is the capsule core box going through the
+exporter's arithmetic and back, which `HknpCapsuleInput` documents as scatter it
+cannot reproduce ("the padding is not a function of the stored radius"). It is
+not something the compound work introduced and not something a game can measure;
+it is recorded here so the next sweep does not read it as a regression.
+
+### Two harness corrections that came with it
+
+- **`collision_materials.sh` moved fixture.** Its old one was
+  RefrigeratorBrokenDoor01, whose body is all convex — so it now compiles to a
+  compound, where each child carries its own material and there is no run table
+  at all for the harness to measure. It uses CinderBlockStairs01 now, a
+  compressed mesh with two materials, which is the structure that check is about.
+- **Its swap check was passing for the wrong reason.** It swapped the FIRST and
+  LAST decompiled leaf, and this fixture has three leaves over two bodies whose
+  first and last share a material; the swap collapsed the compiled table to one
+  entry and "the run order changed" read that as a pass. It now swaps the first
+  two leaves that actually DISAGREE, and the run order mirrors properly:
+  `DF02F237 6A3830DF DF02F237 6A3830DF DF02F237` becomes
+  `6A3830DF DF02F237 6A3830DF DF02F237 6A3830DF`.
+
+### And a fallback that no longer hides
+
+The convex path returns empty for two different reasons: "this is not a convex
+source" and "it is, and I could not write it". The second used to drop silently
+to a mesh. It says so now — `Convex compile declined, falling back to a mesh: …`
+— which is how the missing class hash was found in one run instead of by
+bisection.
+
 ## 2026-08-21b — The Elric harness lives in the repo now, and what it says about triangleIsInterior
 
 **Elric is installed.** At

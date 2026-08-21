@@ -152,20 +152,17 @@ from a measured model (Minkowski-grown volume, grown-hull inertia, vanilla's
 dominant major-axis word); see WW_CHANGES 2026-08-20d and
 tests/spells/collision_convex.sh.
 
-**3b. Compounds: several convex shapes in ONE body.** What is left of item 3, and
-it needs a decode, not a routing change. `hknpEncodeSystem` refuses a compound
-whose `dataRawData` is empty, and nothing has ever written an
-`hknpDynamicCompoundShapeData` from scratch — so a multi-shape convex body still
-compiles to a mesh.
-
-The structure is already measured and it is small: a 0x60 header with 2n+1 at
-+0x18, 2n at +0x20, the instance count at +0x28 and a 1 at +0x30, then **2n
-records of 32 bytes** from +0x60 — an AABB pair whose last four bytes are two
-u16, which reads as a BVH over the instances. The sizes confirm it exactly:
-224 bytes for two children, 288 for three, 352 for four, 416 for five, 480 for
-six, i.e. `0x60 + 2n × 32`. What is not known is what the two u16 mean (child
-links, or a leaf index and an escape), which one Elric pair or a careful read of
-three vanilla compounds would settle.
+**3b. ~~Compounds: several convex shapes in ONE body~~ DONE 2026-08-21.** The
+BVH is decoded and written: `0x60 + 2n * 32` bytes, 2n-1 depth-first nodes plus
+one zero record, each `float3 min | u32 0x3f000000|(parent+1) | float3 max |
+u16 leftChild+1 or 0 | u16 rightChild+1 or the instance index`. **86 of 86**
+vanilla compounds fit it, and Elric recompiling a decompiled two-box body
+reproduces vanilla's object byte for byte. Two corpus facts came with it: the
+compound's AABB equals the root node's box and both are grown by the child's
+convex radius, and `hknpStaticCompoundShape` is a class Elric never writes (71
+of 71 are dynamic, 45 of them in bodies that do not simulate) - which is why its
+type hash was never in our table. See WW_CHANGES 2026-08-21c;
+`tests/spells/collision_convex.sh` check 9 is the guard.
 
 **4. ~~Friction f16: Elric rounds, we truncate~~ DONE 2026-08-20.** Settled by
 counting the corpus rather than by an Elric pair: across 1,500 SetDressing files

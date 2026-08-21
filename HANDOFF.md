@@ -2,8 +2,10 @@
 
 **Read this first.** It is the short document: where things are, how to build,
 what will bite you. [WW_CHANGES.md](WW_CHANGES.md) is the detailed history,
-[WW_FEATURES.md](WW_FEATURES.md) is what the fork adds, and
-[docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog.
+[WW_FEATURES.md](WW_FEATURES.md) is what the fork adds,
+[docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md) is the single backlog, and
+[docs/MISTAKES.md](docs/MISTAKES.md) is what went wrong and what stops it
+happening again.
 
 **Working directory:** `E:\Projects\NifskopeWildWastelandEdition`
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
@@ -26,7 +28,8 @@ C: and E:.)
   necessary condition, exactly, on 3,037 of 3,037 set bits. Still zero, and zero
   is the safe direction.
 - **A convex source compiles to a convex shape** — box, hull, sphere, capsule —
-  instead of a triangle mesh. Compounds are the piece still missing.
+  instead of a triangle mesh, and several of them in one body compile to a
+  COMPOUND, whose BVH is decoded (86 of 86 vanilla compounds fit it).
 - **Create Collision adds beside** rather than deleting the shape that is there.
 
 Under that sits the rest of **compiled collision**, below, including the Elric
@@ -46,11 +49,14 @@ filed. What a future session needs:
 - The major-axis frame at massProperties+0x20 is still undecoded, and does not
   need to be: 76.8% of vanilla carries `00 80 00 80 00 80 30 f5`, and a
   synthesized shape takes that.
-- **Compounds are what is left** (item 3b): `hknpEncodeSystem` refuses a compound
-  with no `dataRawData`, and nothing has written an
-  `hknpDynamicCompoundShapeData` yet. Its shape is measured — `0x60 + 2n × 32`,
-  the records being AABB pairs with two u16 in the tail — so it is a short decode,
-  not a campaign.
+- **Compounds are written too, since 2026-08-21.** `hknpDynamicCompoundShapeData`
+  is `0x60 + 2n × 32`: 2n-1 depth-first BVH nodes and one zero record, a node
+  being `float3 min | u32 0x3f000000|(parent+1) | float3 max | u16 leftChild+1 or
+  0 | u16 rightChild+1 or the instance index`. Left children are implicit (always
+  the next record), so only the right link carries information. 86 of 86 vanilla
+  compounds fit it. Note `hknpStaticCompoundShape` is a class Elric never writes —
+  all 71 corpus compounds are dynamic, 45 of them in bodies that do not simulate —
+  so its type hash is not in our table and does not need to be.
 
 ### Compile keeps every material (2026-08-20)
 

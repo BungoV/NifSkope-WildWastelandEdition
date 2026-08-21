@@ -23,8 +23,8 @@
 #   6. its centre of mass matches vanilla's to four decimals
 #   7. the compiled packfile re-encodes byte-exact (--roundtrip)
 #   8. a TRIANGLE source still compiles to a compressed mesh
-#   9. a two-shape convex body still compiles - to a mesh, since compounds are
-#      not written yet - rather than refusing
+#   9. a two-shape convex body compiles to two polytopes under a compound
+#      (the compound BVH, decoded 2026-08-21)
 #
 # Checks 8 and 9 are the ones that say this did not over-reach. The convex path
 # returns empty rather than an error when it cannot write something, so the mesh
@@ -41,7 +41,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
 # one hknpConvexPolytopeShape and nothing else, the case this path is for
 SRC="${SRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Ammo/AmmoBox01.nif}"
-# a compressed-mesh source, for the fallback
+# a compressed-mesh source, for the fallback (its body is three strips shapes
+# since Decompile started splitting by material, so it is also a multi-shape body
+# that is NOT convex, which is the case the convex path has to decline)
 MESHSRC="${MESHSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Bathroom/Toilet01.nif}"
 # two convex shapes in one body: a compound, which this path leaves alone
 PAIRSRC="${PAIRSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/SetDressing/Building/RefrigeratorBrokenDoor01.nif}"
@@ -112,12 +114,14 @@ check "a triangle source still compiles to a compressed mesh" \
 
 if recompile "$PAIRSRC" "$W/p.nif"; then
 	pclass=$(shaperow "$W/p.nif" | awk '{print $2}')
+	ppoly=$("$NS" -no-gui collision "$W/p.nif" 2>/dev/null | awk '$2 == "hknpConvexPolytopeShape"' | grep -c .)
+	pcomp=$("$NS" -no-gui collision "$W/p.nif" --roundtrip 2>/dev/null | grep -c '^compounds')
 else
-	pclass="(refused)"
+	pclass="(refused)"; ppoly=0; pcomp=0
 fi
-echo "  two-shape convex body compiled to: $pclass"
-check "a two-shape convex body still compiles, rather than refusing" \
-	"$([ "$pclass" = "hknpCompressedMeshShape" ] || [ "$pclass" = "hknpConvexPolytopeShape" ] && echo 1 || echo 0)"
+echo "  two-shape convex body: $ppoly polytopes, $pcomp compound(s)"
+check "a two-shape convex body compiles to two polytopes under a compound" \
+	"$([ "$ppoly" = "2" ] && [ "$pcomp" = "1" ] && echo 1 || echo 0)"
 
 echo "$checks checks, $fails failures"
 if [ "$fails" = "0" ]; then echo PASS; exit 0; else echo FAIL; exit 1; fi

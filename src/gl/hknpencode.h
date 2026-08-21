@@ -172,6 +172,22 @@ struct HknpCompoundFixups
 QByteArray hknpEncodeCompoundShape( const HknpCompound & compound,
 	HknpCompoundFixups * fixups = nullptr );
 
+/*! Write one hknpCompoundShapeData: the BVH a compound's children hang off.
+ *
+ * Decoded 2026-08-21; 86 of 86 vanilla compounds fit the model, and Elric
+ * recompiling a decompiled two-box body reproduces vanilla's object byte for
+ * byte. `0x60 + 2n * 32` bytes: a small header, then 2n-1 nodes depth first and
+ * one zero record. A node is `float3 min | u32 0x3f000000|(parent+1) | float3
+ * max | u16 leftChild+1 or 0 | u16 rightChild+1 or the instance index`.
+ *
+ * Pass each child's AABB in the COMPOUND's space, in instance order. The tree
+ * built here splits at the median centroid along the widest axis, which need not
+ * be the split Elric picked: a different tree over the same boxes is a different
+ * valid answer, not a wrong one.
+ */
+QByteArray hknpEncodeCompoundShapeData( const QVector<QPair<Vector3, Vector3>> & childBoxes,
+	QVector<int> * instanceLeaf = nullptr );
+
 /*! Write one hkpRagdollConstraintData: always 416 bytes.
  *
  * The object is a fixed atom chain -- SET_LOCAL_TRANSFORMS, SETUP_STABILIZATION,
