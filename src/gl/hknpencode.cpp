@@ -548,9 +548,30 @@ QByteArray fileHeader( quint32 physicsNameOffset )
 
 } // namespace
 
-QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error )
+/*! Build a compressed-mesh SHAPE from triangles, as self-contained pack objects.
+ *
+ * Emits four objects in file order -- `hknpCompressedMeshShape` with its two
+ * hkBitField payloads inline, `hkRefCountedProperties`, the
+ * `hknpBSMaterialProperties` table it points at, and
+ * `hknpCompressedMeshShapeData` with the section tree, sections, quads, packed
+ * vertices, run table and constant tail inline -- and returns the index of the
+ * shape in `objs`, or -1 with `error` set.
+ *
+ * WHY THIS IS SEPARATE FROM hknpEncodeCompressedMesh
+ *
+ * That function builds a whole single-body packfile, so a mesh could only ever
+ * be a file's entire collision. Everything that needs a mesh as one shape AMONG
+ * others -- a compound mixing a mesh with convex children, a NIF whose bodies
+ * share one physics system, a ragdoll, cloth -- had no way to ask for one, and
+ * `encodeShapeObject` could only copy a stored mesh back out of the file it came
+ * from. This is the shape half on its own, in the object form the assembler
+ * already uses for polytopes and capsules.
+ *
+ * All offsets in the returned objects are relative to each object's own start.
+ */
+int hknpEncodeMeshShapeObjects( const HknpMeshInput & in, QVector<HknpPackObject> & objs, QString * error )
 {
-	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
+	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return -1; };
 	if ( in.verts.isEmpty() || in.tris.isEmpty() ) return fail( QStringLiteral( "Collision has no mesh geometry." ) );
 	if ( in.verts.size() > 0xFFFF )
 		return fail( QStringLiteral( "Collision meshes support at most 65,535 vertices." ) );
@@ -732,24 +753,6 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	if ( secs.size() > 511 )
 		return fail( QStringLiteral( "Collision mesh needs more than 511 hknp sections. Use Decimate first." ) );
 
-	QHash<QString, quint32> names; QByteArray cn = classNames( names ); Fixups fx; QByteArray data;
-	auto write = [&data]( const QByteArray & bytes ) { quint32 at = quint32( data.size() ); data.append( bytes ); return at; };
-	quint32 psd = quint32( data.size() ); fx.virtuals.append( { psd, 0, names.value( QStringLiteral( "hknpPhysicsSystemData" ) ) } );
-	// the first array is empty AND has a zero capacity word in every corpus file,
-	// unlike the other empty ones, which carry the don't-deallocate flag
-	/* dyn_motion at +0x20 and dyn_inertia at +0x30, and a KEYFRAMED body takes
-	 * INERTIA WITHOUT MOTION -- 170 of 1,200 vanilla files, every one of them
-	 * something the game animates. Writing both counts from `dynamic` alone made
-	 * every door a true static.
-	 */
-	const bool hasInertia = in.dynamic || in.keyframed;
-	write( QByteArray( 16, 0 ) ); quint32 arr10 = write( hkArray( 1 ) ); quint32 arr20 = write( hkArray( in.dynamic ? 1 : 0 ) );
-	quint32 arr30 = write( hkArray( hasInertia ? 1 : 0 ) ); quint32 arr40 = write( hkArray( 1 ) ); write( hkArray( 0 ) ); quint32 arr60 = write( hkArray( 1 ) ); write( QByteArray( 16, 0 ) );
-	quint32 props = write( bodyProperties( in ) ); fx.local.append( { arr10, props } );
-	if ( in.dynamic ) { quint32 motion = write( dynamicMotion( in ) ); fx.local.append( { arr20, motion } ); }
-	if ( hasInertia ) { quint32 inertia = write( dynamicInertia( in ) ); fx.local.append( { arr30, inertia } ); }
-	quint32 cinfo = write( bodyCInfo( in ) ); fx.local.append( { arr40, cinfo } );
-	quint32 shapeEntry = write( QByteArray( 16, 0 ) ); fx.local.append( { arr60, shapeEntry } );
 	/* Shape keys: (section << primBits) | primKey, where a primKey indexes
 	 * triangles two per quad. primBits covers the BUSIEST section's key range,
 	 * the section field the section count, and maxKey is the last section's
@@ -765,38 +768,62 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	const quint32 secBits = bitLen( quint32( secs.size() ) - 1 );
 	const quint32 bitsPerKey = secBits + primBits;
 	const quint32 maxKey = ( quint32( secs.size() - 1 ) << primBits ) | ( 2 * quint32( secs.last().prims.size() ) - 1 );
-	quint32 shape = write( compressedMeshHeader( in.materialCRC, maxKey + 1, bitsPerKey ) );
-	fx.virtuals.append( { shape, 0, names.value( QStringLiteral( "hknpCompressedMeshShape" ) ) } );
-	fx.global.append( { cinfo, 2, shape } ); fx.global.append( { shapeEntry, 2, shape } );
-	/* The two hkBitFields. quadIsFlat carries the pairing pass's verdicts, one
-	 * bit per KEY-SPACE primitive slot: (section << (primBits-1)) | localPrim,
-	 * the indexing measured on 2,965 vanilla quads. triangleIsInterior stays
-	 * zero -- its semantics are still open, and zero keeps every edge
-	 * collidable.
+	/* THE SHAPE OBJECT, with both hkBitFields inside it.
+	 *
+	 * The flat writer appended them straight after the 0xc0 header and pointed at
+	 * them with local fixups, which is exactly what an object-relative local fixup
+	 * means -- so they travel with the shape instead of being loose in a buffer.
 	 */
-	quint32 flatWords = ( ( maxKey + 1 ) / 2 + 31 ) / 32, interiorWords = ( maxKey + 1 + 31 ) / 32;
-	QByteArray flatBits( qsizetype( flatWords ) * 4, 0 );
-	for ( qsizetype s = 0; s < secs.size(); s++ ) {
-		const MeshSec & sc = secs.at( s );
-		for ( qsizetype k = 0; k < sc.prims.size(); k++ ) {
-			if ( !prims.at( sc.prims.at( k ) ).flat )
-				continue;
-			const quint32 bit = ( quint32( s ) << ( primBits - 1 ) ) | quint32( k );
-			flatBits[bit / 8] = char( quint8( flatBits.at( bit / 8 ) ) | ( 1u << ( bit % 8 ) ) );
-		}
+	const int shapeIndex = int( objs.size() );
+	HknpPackObject shapeObj;
+	shapeObj.className = QStringLiteral( "hknpCompressedMeshShape" );
+	shapeObj.bytes = compressedMeshHeader( in.materialCRC, maxKey + 1, bitsPerKey );
+	/* The two hkBitFields. quadIsFlat carries the pairing pass's verdicts, one
+	 * bit per KEY-SPACE primitive slot: (section << (primBits-1)) | localPrim,
+	 * the indexing measured on 2,965 vanilla quads. triangleIsInterior stays
+	 * zero -- its semantics are still open, and zero keeps every edge
+	 * collidable.
+	 */
+	quint32 flatWords = ( ( maxKey + 1 ) / 2 + 31 ) / 32, interiorWords = ( maxKey + 1 + 31 ) / 32;
+	QByteArray flatBits( qsizetype( flatWords ) * 4, 0 );
+	for ( qsizetype s = 0; s < secs.size(); s++ ) {
+		const MeshSec & sc = secs.at( s );
+		for ( qsizetype k = 0; k < sc.prims.size(); k++ ) {
+			if ( !prims.at( sc.prims.at( k ) ).flat )
+				continue;
+			const quint32 bit = ( quint32( s ) << ( primBits - 1 ) ) | quint32( k );
+			flatBits[bit / 8] = char( quint8( flatBits.at( bit / 8 ) ) | ( 1u << ( bit % 8 ) ) );
+		}
 	}
-	quint32 flatAt = write( flatBits );
-	quint32 interiorAt = write( QByteArray( qsizetype( interiorWords ) * 4, 0 ) );
-	fx.local.append( { shape + 0x68, flatAt } ); fx.local.append( { shape + 0x80, interiorAt } );
-	pad( data, 16 );
+	const qsizetype flatAt = shapeObj.bytes.size();
+	shapeObj.bytes += flatBits;
+	const qsizetype interiorAt = shapeObj.bytes.size();
+	shapeObj.bytes += QByteArray( qsizetype( interiorWords ) * 4, 0 );
+	shapeObj.local.append( { 0x68, flatAt } );
+	shapeObj.local.append( { 0x80, interiorAt } );
+	/* Globals in MEMBER DECLARATION order, which hknpBuildPackfile preserves and
+	 * the flat writer got by sorting on absolute source. +0x20 is the properties
+	 * chain, +0x60 the shape data; the two objects are appended below in that
+	 * order, so their indices are known before they exist.
+	 */
+	shapeObj.global.append( { 0x20, shapeIndex + 1 } );
+	shapeObj.global.append( { 0x60, shapeIndex + 3 } );
+	objs.append( shapeObj );
+
 	// 0xf601 is the key for a material table; 0xf100 names mass properties, and
 	// this pointed a mass-properties key at hknpBSMaterialProperties until 08-16
-	quint32 ref = write( refCountedProperties( 0x0000f601u ) ); fx.virtuals.append( { ref, 0, names.value( QStringLiteral( "hkRefCountedProperties" ) ) } );
-	fx.local.append( { ref, ref + 0x10 } ); fx.global.append( { shape + 0x20, 2, ref } ); pad( data, 16 );
-	quint32 mat = write( materialProperties( materials ) ); fx.global.append( { ref + 0x10, 2, mat } );
-	fx.virtuals.append( { mat, 0, names.value( QStringLiteral( "hknpBSMaterialProperties" ) ) } );
-	fx.local.append( { mat + 0x10, mat + 0x20 } );   // the material array's own payload
-	pad( data, 16 );
+	HknpPackObject refObj;
+	refObj.className = QStringLiteral( "hkRefCountedProperties" );
+	refObj.bytes = refCountedProperties( 0x0000f601u );
+	refObj.local.append( { 0, 0x10 } );
+	refObj.global.append( { 0x10, shapeIndex + 2 } );
+	objs.append( refObj );
+
+	HknpPackObject matObj;
+	matObj.className = QStringLiteral( "hknpBSMaterialProperties" );
+	matObj.bytes = materialProperties( materials );
+	matObj.local.append( { 0x10, 0x20 } );   // the material array's own payload
+	objs.append( matObj );
 
 	Vector3 mn = in.verts.first(), mx = mn;
 	for ( const Vector3 & v : in.verts ) for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], v[a] ); mx[a] = std::max( mx[a], v[a] ); }
@@ -933,8 +960,11 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	 * hold hkVector4s and are 16-aligned, as they are in every vanilla file.
 	 */
 	auto align16 = []( quint32 at ) { return ( at + 15 ) & ~15u; };
-	quint32 shapeData = quint32( data.size() );
-	quint32 sectionTreeData = shapeData + 0xd0;
+	/* Object-relative now. Every one of these was computed against an absolute
+	 * base that was always 16-aligned, and hknpBuildPackfile pads objects to 16
+	 * too, so align16 lands on the same boundaries either way.
+	 */
+	const quint32 sectionTreeData = 0xd0;
 	quint32 treeData = sectionTreeData + quint32( sectionTreeBlob.size() );
 	quint32 sections = align16( treeData + quint32( treeBlob.size() ) );
 	quint32 quadData = sections + quint32( sectionsBlob.size() );
@@ -955,19 +985,86 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	const quint32 runCount = quint32( materialRuns.size() / 4 );
 	setU32( sd, 0xa8, runCount ); setU32( sd, 0xac, 0x80000000u | runCount );
 	setU32( sd, 0xc0, 2 ); setU32( sd, 0xc4, 0x80000002u );
-	write( sd ); fx.virtuals.append( { shapeData, 0, names.value( QStringLiteral( "hknpCompressedMeshShapeData" ) ) } ); fx.global.append( { shape + 0x60, 2, shapeData } );
-	fx.local.append( { shapeData + 0x10, sectionTreeData } );
-	fx.local.append( { shapeData + 0x50, sections } ); fx.local.append( { shapeData + 0x60, quadData } );
-	fx.local.append( { shapeData + 0x80, vertData } ); fx.local.append( { shapeData + 0xa0, runData } );
-	fx.local.append( { shapeData + 0xb8, tailData } );
+	HknpPackObject dataObj;
+	dataObj.className = QStringLiteral( "hknpCompressedMeshShapeData" );
+	dataObj.bytes = sd;
+	dataObj.bytes += sectionTreeBlob; dataObj.bytes += treeBlob;
+	while ( quint32( dataObj.bytes.size() ) < sections ) dataObj.bytes.append( '\0' );
+	dataObj.bytes += sectionsBlob; dataObj.bytes += quads; dataObj.bytes += packed; dataObj.bytes += materialRuns;
+	while ( quint32( dataObj.bytes.size() ) < tailData ) dataObj.bytes.append( '\0' );
+	dataObj.bytes += tail;
+	dataObj.local.append( { 0x10, sectionTreeData } );
+	dataObj.local.append( { 0x50, sections } ); dataObj.local.append( { 0x60, quadData } );
+	dataObj.local.append( { 0x80, vertData } ); dataObj.local.append( { 0xa0, runData } );
+	dataObj.local.append( { 0xb8, tailData } );
 	// each section points at its own mesh tree
 	for ( qsizetype s = 0; s < treeAt.size(); s++ )
-		fx.local.append( { sections + quint32( s ) * 0x60, treeData + treeAt.at( s ) } );
-	write( sectionTreeBlob ); write( treeBlob );
-	while ( quint32( data.size() ) < sections ) data.append( '\0' );
-	write( sectionsBlob ); write( quads ); write( packed ); write( materialRuns );
-	while ( quint32( data.size() ) < tailData ) data.append( '\0' );
-	write( tail ); pad( data, 16 );
+		dataObj.local.append( { sections + quint32( s ) * 0x60, treeData + treeAt.at( s ) } );
+	objs.append( dataObj );
+
+	if ( error ) error->clear();
+	return shapeIndex;
+}
+
+QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error )
+{
+	auto fail = [error]( const QString & message ) { if ( error ) *error = message; return QByteArray(); };
+	/* The shape is built first and on its own, because it does not depend on a
+	 * single thing in this function: a mesh shape is geometry and materials, and
+	 * the body, motion and system around it are a separate story. This function is
+	 * now that story plus a splice.
+	 */
+	HknpMeshInput mesh;
+	mesh.verts = in.verts; mesh.tris = in.tris;
+	mesh.triMaterial = in.triMaterial; mesh.materialCRC = in.materialCRC;
+	QVector<HknpPackObject> shapeObjs;
+	QString shapeError;
+	const int shapeIndex = hknpEncodeMeshShapeObjects( mesh, shapeObjs, &shapeError );
+	if ( shapeIndex < 0 ) return fail( shapeError );
+
+	QHash<QString, quint32> names; QByteArray cn = classNames( names ); Fixups fx; QByteArray data;
+	auto write = [&data]( const QByteArray & bytes ) { quint32 at = quint32( data.size() ); data.append( bytes ); return at; };
+	quint32 psd = quint32( data.size() ); fx.virtuals.append( { psd, 0, names.value( QStringLiteral( "hknpPhysicsSystemData" ) ) } );
+	// the first array is empty AND has a zero capacity word in every corpus file,
+	// unlike the other empty ones, which carry the don't-deallocate flag
+	/* dyn_motion at +0x20 and dyn_inertia at +0x30, and a KEYFRAMED body takes
+	 * INERTIA WITHOUT MOTION -- 170 of 1,200 vanilla files, every one of them
+	 * something the game animates. Writing both counts from `dynamic` alone made
+	 * every door a true static.
+	 */
+	const bool hasInertia = in.dynamic || in.keyframed;
+	write( QByteArray( 16, 0 ) ); quint32 arr10 = write( hkArray( 1 ) ); quint32 arr20 = write( hkArray( in.dynamic ? 1 : 0 ) );
+	quint32 arr30 = write( hkArray( hasInertia ? 1 : 0 ) ); quint32 arr40 = write( hkArray( 1 ) ); write( hkArray( 0 ) ); quint32 arr60 = write( hkArray( 1 ) ); write( QByteArray( 16, 0 ) );
+	quint32 props = write( bodyProperties( in ) ); fx.local.append( { arr10, props } );
+	if ( in.dynamic ) { quint32 motion = write( dynamicMotion( in ) ); fx.local.append( { arr20, motion } ); }
+	if ( hasInertia ) { quint32 inertia = write( dynamicInertia( in ) ); fx.local.append( { arr30, inertia } ); }
+	quint32 cinfo = write( bodyCInfo( in ) ); fx.local.append( { arr40, cinfo } );
+	quint32 shapeEntry = write( QByteArray( 16, 0 ) ); fx.local.append( { arr60, shapeEntry } );
+
+	/* Splice the shape's objects in behind the system data, each 16-aligned, and
+	 * rebase their fixups from object-relative to the absolute offsets this
+	 * writer's own tables carry. The bytes land where they always landed -- the
+	 * shape is simply addressable on its own now.
+	 */
+	QVector<quint32> objAt( shapeObjs.size() );
+	for ( qsizetype i = 0; i < shapeObjs.size(); i++ ) {
+		pad( data, 16 );
+		objAt[i] = quint32( data.size() );
+		data.append( shapeObjs.at( i ).bytes );
+		fx.virtuals.append( { objAt.at( i ), 0, names.value( shapeObjs.at( i ).className ) } );
+	}
+	pad( data, 16 );
+	const quint32 shape = objAt.at( shapeIndex );
+	// the system's own two pointers at the shape, before the shape's outgoing
+	// ones, which is the order sorting by absolute source produces anyway
+	fx.global.append( { cinfo, 2, shape } ); fx.global.append( { shapeEntry, 2, shape } );
+	for ( qsizetype i = 0; i < shapeObjs.size(); i++ ) {
+		const quint32 base = objAt.at( i );
+		for ( const auto & l : shapeObjs.at( i ).local )
+			fx.local.append( { base + quint32( l.first ), base + quint32( l.second ) } );
+		for ( const HknpPackObject::Ref & g : shapeObjs.at( i ).global )
+			fx.global.append( { base + quint32( g.source ), 2, objAt.at( g.object ) } );
+	}
 
 	/* Global fixups are grouped by the object they live in and, inside it, by
 	 * member offset -- the ordering hknpBuildPackfile reproduces on 810 vanilla
@@ -2126,12 +2223,29 @@ bool encodeShapeObject( const HknpShape & shp, QVector<HknpPackObject> & objs )
 		pin.materialCRC = shp.shapeMaterialCRC; pin.shapeFlags = shp.shapeFlags;
 		so.className = QStringLiteral( "hknpConvexPolytopeShape" );
 		so.bytes = hknpEncodeConvexPolytopeShape( pin );
+	} else if ( !shp.isConvex && !shp.tris.isEmpty() && shp.rawData.isEmpty() ) {
+		/* A mesh with NO STORED BYTES: authored from scratch, or decoded and then
+		 * edited. Build the whole four-object chain from its triangles.
+		 *
+		 * This is the branch that did not exist. A mesh could only be copied back
+		 * out of the file it came from, so a body was allowed to hold one only if
+		 * nothing had touched it -- which is why a compound mixing a mesh with
+		 * convex children fell back to the mesh path whole, and why Compile had to
+		 * build a mesh as a file's entire collision or not at all.
+		 *
+		 * It returns straight out because the builder emits the properties chain
+		 * and the data object itself, in the same member order the tail below
+		 * would: shape, hkRefCountedProperties, the material table, then the data.
+		 */
+		HknpMeshInput mi;
+		mi.verts = shp.verts; mi.tris = shp.tris;
+		mi.triMaterial = shp.triMaterial; mi.materialCRC = shp.shapeMaterialCRC;
+		return hknpEncodeMeshShapeObjects( mi, objs ) >= 0;
 	} else if ( !shp.dataRawData.isEmpty() && !shp.rawData.isEmpty() ) {
-		/* A compressed mesh. There is no derivation to attempt: each section
-		 * quantizes against its own domain and the section partitioning is Havok's,
-		 * so the shape and its data object both go back as they came. The authoring
-		 * writer (hknpEncodeCompressedMesh) builds a NEW one from triangles; that is
-		 * a different job from rewriting an existing file without disturbing it.
+		/* A compressed mesh that nobody touched. There is no derivation to
+		 * attempt: each section quantizes against its own domain and the section
+		 * partitioning is Havok's, so the shape and its data object both go back
+		 * as they came, which is what keeps 810 of 822 stock packfiles byte-exact.
 		 */
 		so.className = shp.className;
 		so.bytes = shp.rawData;

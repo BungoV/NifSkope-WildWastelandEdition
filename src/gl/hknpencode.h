@@ -8,6 +8,23 @@
 #include <QString>
 #include <QVector>
 
+/*! Just the geometry and materials a compressed-mesh SHAPE is made of.
+ *
+ * A mesh shape has nothing to do with mass, motion or collision filtering -- it
+ * is triangles and the material each one carries. Keeping that apart from
+ * HknpEncodeInput is what lets a mesh be one shape among others in a body
+ * instead of a file's entire collision. See hknpEncodeMeshShapeObjects.
+ */
+struct HknpMeshInput
+{
+	QVector<Vector3> verts;       //!< Havok-space vertices
+	QVector<Triangle> tris;
+	//! Per-triangle Havok material CRC, parallel to `tris`; empty means every
+	//! triangle takes `materialCRC`. See HknpEncodeInput::triMaterial.
+	QVector<quint32> triMaterial;
+	quint32 materialCRC = 0;
+};
+
 //! Physics and geometry accepted by the FO4 hknp compressed-mesh writer.
 struct HknpEncodeInput
 {
@@ -303,6 +320,22 @@ struct HknpPackObject
 	struct Ref { qsizetype source; int object; };
 	QVector<Ref> global;
 };
+
+/*! Build a compressed-mesh SHAPE from triangles, as self-contained pack objects.
+ *
+ * Appends four objects to `objs` in file order -- `hknpCompressedMeshShape` with
+ * its two hkBitField payloads inline, `hkRefCountedProperties`, the
+ * `hknpBSMaterialProperties` table it points at, and
+ * `hknpCompressedMeshShapeData` with the section tree, sections, quads, packed
+ * vertices, run table and constant tail inline. Returns the index of the shape
+ * object, or -1 with `error` set.
+ *
+ * Offsets in the returned objects are relative to each object's own start, so a
+ * caller can place them anywhere: hknpBuildPackfile takes them as they are, and
+ * hknpEncodeCompressedMesh rebases them into its own flat buffer.
+ */
+int hknpEncodeMeshShapeObjects( const HknpMeshInput & input, QVector<HknpPackObject> & objs,
+	QString * error = nullptr );
 
 /*! Assemble objects into an hk_2014.1.0-r1 packfile.
  *
