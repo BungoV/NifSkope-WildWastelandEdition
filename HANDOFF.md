@@ -24,11 +24,15 @@ writer. It rebuilds in five minutes with three parallel workers
 1,619-mesh build took an hour, and an hour is the wrong unit of work when one
 mistake repeats it.
 
-**STATE 2026-08-22, mid-track:** the Museum set loads clean and its solids are
-proven (110 of 114 identical to vanilla within 0.46 mm, `tools/collision_ab.py`).
-The DOORS were the last live failure: they would not open because Compile had no
-KEYFRAMED body state and wrote them as plain statics. Fixed and rebuilt; awaiting
-bungo's test. What is still open, in order:
+**STATE 2026-08-22: IT WORKS IN THE GAME.** bungo confirmed a door running our
+recompiled collision -- the blob differs from vanilla's, so it is genuinely ours
+-- loads, opens and closes. That is the whole round trip proven in the engine on
+an ANIMATED object: decompile, recompile, load, activate. The Museum set's solids
+are proven too (110 of 114 identical to vanilla within 0.46 mm,
+`tools/collision_ab.py`), every file has exactly one physics system, and all 22
+keyframed records carry the inertia sentinel.
+
+What is still open, in order:
 
   1. **3c, mixed compounds** -- a body mixing a triangle mesh with convex shapes
      takes the mesh path whole. 3 of 114 files, and now the ONLY geometry
