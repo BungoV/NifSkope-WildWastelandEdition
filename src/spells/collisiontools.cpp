@@ -1070,6 +1070,35 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	phys.orientation = in.orientation;
 	// a KEYFRAMED body names a motion index like a dynamic one; what it lacks is
 	// the dyn_motion record behind it. See HknpEncodeInput::keyframed.
+	/* dyn_inertia +0x30 is the body position PLUS the body's own centre of mass,
+	 * and a KEYFRAMED body carries one as surely as a dynamic one -- 16 of the 28
+	 * vanilla keyframed records hold a real value. Computed here, outside the
+	 * dynamic-only block, because leaving it inside put every door's centre of
+	 * mass at its body origin, 84 to 191 game units out.
+	 *
+	 * Measured: vault_chairfoldingclosed02 sits at 0.040,-0.203,36.438 game units
+	 * and stores 0.080,-0.406,72.875 -- the difference is the shape's own centre
+	 * of mass, 0.041,-0.203,36.437, to three decimals. Across 500 SetDressing
+	 * files, 99 bodies sit at the origin and every one still carries a NONZERO
+	 * value here, which is what says this is a centre of mass and not the
+	 * position again. Writing the position alone put the mass on the floor, so a
+	 * folding chair rotated to stand itself up and railings drove through it.
+	 */
+	{
+		Vector3 com;
+		float comVolume = 0.0f;
+		for ( const HknpShape & s : std::as_const( shapes ) ) {
+			comVolume += s.massVolume;
+			com += s.massCom * s.massVolume;
+		}
+		if ( comVolume > 1.0e-9f )
+			com /= comVolume;
+		// DYNAMIC bodies only. A keyframed body is not simulated and stores its
+		// POSITION here with no centre-of-mass term -- bldwoodpdoor01 sits at
+		// 4.00,-48.00,0.00 and stores exactly that, and so does the cabinet.
+		// Adding the term to those put every door 84 units out.
+		phys.motionCom = in.dynamic ? ( in.center + com ) : in.center;
+	}
 	phys.hasMotion = in.dynamic || in.keyframed;
 	phys.motionIndex = ( in.dynamic || in.keyframed ) ? 0 : -1;
 	if ( in.keyframed && !in.dynamic ) {
@@ -1093,7 +1122,20 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 		auto inv = []( float v ) { return ( v > 1.0e-12f ) ? 1.0f / v : 0.0f; };
 		for ( int a = 0; a < 3; a++ )
 			phys.invInertia[a] = inv( in.inertia[a] );
-		phys.motionCom = in.center;
+		/* dyn_inertia +0x30 is the body position PLUS the body's own centre of
+		 * mass, not the position alone.
+		 *
+		 * Measured: vault_chairfoldingclosed02 sits at 0.040,-0.203,36.438 game
+		 * units and stores 0.080,-0.406,72.875, and the difference -- to three
+		 * decimals -- is the shape's own centre of mass, 0.041,-0.203,36.437.
+		 * Across 500 SetDressing files, 99 bodies sit at the origin and every one
+		 * of them still carries a NONZERO value here, which is what says this is a
+		 * centre of mass and not a copy of the position.
+		 *
+		 * Writing the position alone put the centre of mass on the floor instead
+		 * of half way up the object, so a folding chair rotated to stand itself
+		 * up, and railings drove themselves through the floor.
+		 */
 		phys.gravityFactor = in.gravityFactor;
 		phys.maxLinVelocity = in.maxLinVelocity;
 		phys.maxAngVelocity = in.maxAngVelocity;

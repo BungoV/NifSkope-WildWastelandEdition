@@ -210,10 +210,36 @@ QByteArray dynamicInertia( const HknpEncodeInput & in )
 	 * Measured over 28 vanilla keyframed records, all agreeing: index 0xffff,
 	 * inverse mass 0 (infinite, it is not simulated), +0x08 = 1.0, +0x2c = 0.
 	 */
+	/* A keyframed body still carries a CENTRE OF MASS. Returning here without one
+	 * left every door's at the body origin, which put them 84 to 191 game units
+	 * out; vanilla's keyframed records carry a real value on 16 of 28.
+	 */
+	auto meshCom = [&]() {
+		Vector3 c;
+		double v6 = 0.0;
+		for ( const Triangle & t : in.tris ) {
+			const Vector3 & a = in.verts[t[0]];
+			const Vector3 & b = in.verts[t[1]];
+			const Vector3 & d = in.verts[t[2]];
+			const double s = double( Vector3::dotproduct( a, Vector3::crossproduct( b, d ) ) );
+			v6 += s;
+			c += ( a + b + d ) * float( s );
+		}
+		if ( std::fabs( v6 ) > 1.0e-12 )
+			c /= float( v6 * 4.0 );
+		else
+			c = Vector3();
+		return c;
+	};
 	if ( in.keyframed && !in.dynamic ) {
 		setU32( out, 0x00, 0x0001ffffu );
 		setFloat( out, 0x08, 1.0f );
 		setU32( out, 0x0c, 0x5f7ffff0u ); setU32( out, 0x10, 0x5f7ffff0u );
+		// the POSITION alone: a keyframed body is not simulated, so it carries no
+		// centre-of-mass offset. Measured on bldwoodpdoor01 and the office
+		// cabinet, whose stored values equal their positions exactly.
+		for ( int a = 0; a < 3; a++ )
+			setFloat( out, 0x30 + a * 4, in.center[a] );
 		setFloat( out, 0x4c, 1.0f );
 		return out;
 	}
@@ -241,8 +267,17 @@ QByteArray dynamicInertia( const HknpEncodeInput & in )
 	float iz = in.inertia[2] > 0.0f ? in.inertia[2] : mass * ( d[0] * d[0] + d[1] * d[1] ) / 12.0f;
 	setFloat( out, 0x20, inv( ix ) ); setFloat( out, 0x24, inv( iy ) );
 	setFloat( out, 0x28, inv( iz ) ); setFloat( out, 0x2c, 1.0f );
+	/* +0x30 is the body position PLUS the body's own centre of mass -- see the
+	 * measurement in tlCollCompileConvex. Writing the position alone puts the
+	 * centre of mass at the body origin, and an object then rotates to bring it
+	 * low: a folding chair stood itself up, railings drove through the floor.
+	 *
+	 * The centroid of a closed triangle mesh by the divergence theorem, which is
+	 * the same sum the volume above already walks.
+	 */
+	const Vector3 com = meshCom();
 	// centre of mass, then the unrotated motion frame as a unit quaternion
-	for ( int a = 0; a < 3; a++ ) setFloat( out, 0x30 + a * 4, in.center[a] );
+	for ( int a = 0; a < 3; a++ ) setFloat( out, 0x30 + a * 4, in.center[a] + com[a] );
 	setFloat( out, 0x4c, 1.0f );
 	return out;
 }
@@ -2307,10 +2342,35 @@ QByteArray hknpEncodeSystem( const HknpSystem & sys, QString * error )
 				const int ci = comp->children.at( k );
 				if ( ci < 0 || ci >= sys.shapes.size() )
 					return fail( QStringLiteral( "Compound on body %1 names no child %2." ).arg( i ).arg( k ) );
-				objs[at].global.append( { cfx.childPointers.at( k ), int( objs.size() ) } );
+				const int childObj = int( objs.size() );
+				objs[at].global.append( { cfx.childPointers.at( k ), childObj } );
 				if ( !encodeShapeObject( sys.shapes.at( ci ), objs ) )
 					return fail( QStringLiteral( "No encoder for a compound child on body %1 (%2)." )
 						.arg( i ).arg( sys.shapes.at( ci ).className ) );
+				/* THE INSTANCE'S W LANE AT +0x2c IS THE CHILD SHAPE'S SIZE IN BYTES.
+				 *
+				 * Measured across 500 SetDressing files: 400 against a 400-byte
+				 * polytope, 432 against a capsule, 128 against a sphere -- it
+				 * tracks the child object exactly. A synthesized compound wrote
+				 * the placeholder 0 there, so every child claimed to be zero
+				 * bytes long, and PaintedWoodDoorDoubleLoad01 -- seven such
+				 * children per leaf -- had no collision at all in game: you could
+				 * walk through the museum doors and could not activate them.
+				 *
+				 * Only for compounds built from scratch. One that came off a
+				 * decode carries vanilla's own lanes and must not be touched.
+				 *
+				 * The lane at +0x0c is NOT understood: it reads 64, 66 or 70
+				 * across the corpus, varies between children of one compound that
+				 * are otherwise identical, and correlates with neither class nor
+				 * size. Left at 0 until something explains it.
+				 */
+				if ( comp->dataRawData.isEmpty() ) {
+					const qsizetype lane = 0xD0 + qsizetype( k ) * 0x80 + 0x2c;
+					if ( lane + 4 <= objs.at( at ).bytes.size() )
+						setU32( objs[at].bytes, lane,
+							0x3f000000u | quint32( objs.at( childObj ).bytes.size() & 0xffffffu ) );
+				}
 			}
 			objs[at].global.append( { cfx.shapeDataPointer, int( objs.size() ) } );
 			HknpPackObject cd;

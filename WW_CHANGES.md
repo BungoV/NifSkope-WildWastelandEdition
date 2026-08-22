@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22h — Two more the engine found: a zero-length child, and a mass with no centre
+
+Playing the build turned up two defects no comparison of mine had flagged,
+because both fields were ones I had never looked at.
+
+### The museum doors had no collision at all
+
+`PaintedWoodDoorDoubleLoad01` -- you could walk through it and could not activate
+it, which is one symptom: with no collision there is no raycast hit, so no
+prompt. The file matched vanilla in everything measured: 42 blocks, identical
+inventory, **every reference resolving to the same name**, identical packfile
+object layout (47 objects, 22 fixups, 10,736 bytes), identical body states,
+identical compound AABBs and header words, geometry within 0.5 mm.
+
+The difference was in a **compound instance's w lanes**:
+
+    vanilla   [3f000042, 0, 3f000190, 3f000009]
+    ours      [3f000000, 0, 3f000000, 3f000005]
+
+**The lane at +0x2c is the CHILD SHAPE'S SIZE IN BYTES.** Measured over 500
+SetDressing files it tracks the child object exactly: 400 against a 400-byte
+polytope, 560 against a 560-byte one, 432 against a capsule, 128 against a
+sphere. A synthesized compound wrote the placeholder 0, so every child claimed to
+be zero bytes long -- and a door with seven such children per leaf had no
+collision in the world at all.
+
+The lane at +0x0c is NOT understood. It reads 64, 66 or 70, varies between
+children of one compound that are identical in class, size and material, and
+correlates with nothing measured. Left at 0 and written down rather than guessed.
+
+### Folding chairs stood themselves up
+
+`vault_chairfoldingclosed02` righted itself when pushed; sawhorses and railings
+misbehaved; railings fell through the floor and respawned. All one field:
+**dyn_inertia +0x30, the centre of mass**, which Compile filled with the body
+POSITION.
+
+The rule, measured rather than assumed, and it is not uniform:
+
+  * a **DYNAMIC** body stores `position + its own centre of mass`. The chair sits
+    at 0.040,-0.203,36.438 game units and stores 0.080,-0.406,72.875 -- the
+    difference is its shape's centre of mass, 0.041,-0.203,36.437, to three
+    decimals.
+  * a **KEYFRAMED** body stores the `position` alone. `bldwoodpdoor01` sits at
+    4.00,-48.00,0.00 and stores exactly that.
+
+That distinction cost a build: adding the centre-of-mass term to everything fixed
+the chairs and put every door 84 units out, which the sweep caught before it
+shipped. A body that is not simulated has no meaningful centre of mass, which is
+the reason behind the measurement.
+
+After the fix, against vanilla: the chair EXACT, `bldwoodpdoor01` EXACT, the
+six-body sawhorse within 0.06 game units, 59 of 92 files within 2 units. What
+remains is mostly body ORDER -- ours is a permutation of vanilla's, and each
+collision object names its own body by Body ID -- plus the destructible railings,
+whose shape composition genuinely differs because our compile merges some shapes
+into one mesh, so their centroid legitimately moves.
+
+Vanilla still round-trips byte-exact, ragdolls included.
+
 ## 2026-08-22g — The keyframed body needed a sentinel, and I had shipped the crash
 
 `OfficeFileCabinet01` crashed again after the merge, in the same place. So the
