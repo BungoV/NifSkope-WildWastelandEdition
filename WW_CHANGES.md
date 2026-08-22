@@ -1,5 +1,104 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23b — Mixed compounds: a body can hold a mesh AND hulls
+
+Backlog item 3c, and the last geometry difference in the Museum set.
+
+Compile asked one question of a body's leaves -- "is every one of them convex?"
+-- so one triangle source anywhere made the WHOLE body a mesh. TerminalWall01
+carries a compound holding a compressed mesh beside a convex polytope, and we
+shipped it as a single mesh with the polytope tessellated away.
+
+The gate is a CENSUS now rather than a verdict. `tlCollConvexOnly` became
+`tlCollLeafCensus`, counting convex leaves and mesh leaves separately, and the
+caller decides:
+
+  * mesh only -> the mesh path, unchanged. Vanilla writes one plain compressed
+    mesh per body for those, no compound over it, and the mesh path already
+    concatenates a body's leaves.
+  * convex only -> the convex path, unchanged.
+  * both -> a compound. That is the new case.
+
+Two details are measured rather than chosen, and both were wrong on the first
+attempt:
+
+  * **One mesh child, not one per leaf.** Every mixed compound in the corpus
+    holds exactly one compressed mesh. Emitting one per leaf gave ceilingfan01
+    seven meshes where vanilla has two and no compound at all -- because a
+    mesh-only body with several leaves is not a compound, it is one mesh.
+  * **The mesh child goes FIRST.** Vanilla reads MESH then hulls in all three of
+    ours. Appending left our child order a permutation of theirs for no reason,
+    which body order already taught once: match the order rather than argue it
+    cannot matter.
+
+The convex path's readback check needed fixing too. It took
+`roundTrip.shapes.first()` and required a hull, and in a mixed compound the mesh
+may be child zero -- so it refused every mixed body on the spot, including three
+that had been compiling fine as flattened meshes. It is per shape and per KIND
+now: a hull came back a hull, a mesh came back with triangles.
+
+### Measured, same 114-mesh set before and after
+
+    stored solids vs vanilla (collision_ab)   110/114 -> 113/114 in tolerance
+    compounds matching vanilla exactly         34     -> 36 of 37
+    files whose shape header words differ      22     -> 19
+    files whose body rest state differs        17     -> 17  (unchanged)
+    shape CLASSES identical to vanilla         111    -> 114 of 114
+
+Everything still differing is the known body-order permutation -- our body 0 is
+the dynamic compound where vanilla's is the static mesh -- and nothing here
+touches it. The three new outputs round-trip byte-exact through our own
+assembler and `hkcompound.py` reads all three the way the engine does. Harnesses:
+compile 14/14, convex 21/21, compiled_edit 7/7, materials 11/11,
+material_roundtrip 8/8, per_shape 8/8, drop 37/37.
+
+**Not yet in the game.** The Museum set has been rebuilt with it.
+
+## 2026-08-23a — The mesh SHAPE builder, extracted
+
+`hknpEncodeCompressedMesh` built a whole single-body packfile, so a compressed
+mesh could only ever be a file's ENTIRE collision. Anything that needs a mesh as
+one shape AMONG others -- a compound mixing a mesh with convex children, a NIF
+whose bodies share one physics system, a ragdoll, cloth -- had no way to ask for
+one, and `encodeShapeObject` could only copy a stored mesh back out of the file
+it came from.
+
+Split in two:
+
+    hknpEncodeMeshShapeObjects( HknpMeshInput, QVector<HknpPackObject>&, QString* )
+        the shape half. Four objects: hknpCompressedMeshShape with both
+        hkBitField payloads inline, hkRefCountedProperties,
+        hknpBSMaterialProperties, and hknpCompressedMeshShapeData with the
+        section tree, sections, quads, packed vertices, run table and constant
+        tail inline. Every offset relative to its own object -- the form
+        hknpBuildPackfile and encodeShapeObject already speak for polytopes and
+        capsules.
+
+    hknpEncodeCompressedMesh
+        the system half plus a splice: the hknpPhysicsSystemData scaffolding as
+        before, then the shape's objects laid in behind it 16-aligned with their
+        fixups rebased into its own absolute tables.
+
+**Byte-preserving by construction**, which is the whole reason it could be done
+in one step: every offset the flat writer computed was already relative to a
+16-aligned object start, the objects land in the order they were written in, and
+hknpBuildPackfile pads to 16 exactly where the flat writer did. Measured that way
+too -- the Museum set rebuilt after the extraction and again after wiring the
+assembler, 114 of 114 BYTE-IDENTICAL to the pre-refactor output both times.
+
+`encodeShapeObject` gains the branch that did not exist: a mesh with NO STORED
+BYTES -- authored from scratch, or decoded and then edited -- is built from its
+triangles instead of refused.
+
+Also added `tools/../roundtrip sweep` practice: the assembler regression is a
+400-file spread across SetDressing, interiors, Props, architecture, Furniture,
+Actors and Weapons, re-encoding every shape from its decoded model and requiring
+the packfile back byte for byte. 314 files with collision, 313 byte-exact. The
+one that is not, ACUnit01_Dest.nif, differs in three bytes of the
+hknpPhysicsSystemData ROOT object with every shape object byte-exact -- a
+pre-existing bucket this change cannot reach, since it only ever touches shape
+objects.
+
 ## 2026-08-22k — Compile writes the body flags, and the round trip keeps them
 
 Confirmed in game first: the two hand-patched railings make a wood impact sound.

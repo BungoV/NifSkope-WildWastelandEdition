@@ -32,25 +32,48 @@ are proven too (110 of 114 identical to vanilla within 0.46 mm,
 `tools/collision_ab.py`), every file has exactly one physics system, and all 22
 keyframed records carry the inertia sentinel.
 
-## NEXT SESSION STARTS HERE: the shared mesh-shape builder (2026-08-22)
+## NEXT SESSION STARTS HERE: load the rebuilt set once (2026-08-23)
 
-**The railings are CLOSED, both symptoms, confirmed in game.** They make a wood
-impact sound, and they hold when walked into and break when shot -- vanilla's
-behaviour. One cause for both: `hknpBodyCinfo::flags` at cinfo +0x18, which
-Compile wrote as zero. Bit 7 is `RAISE_CONTACT_IMPULSE_EVENTS` (no event, so the
-engine never asks what the body is made of, so no sound) and bit 16 is
-`USER_FLAG_0` = "enter the world KEYFRAMED, once" (so a destructible enters
-immovable instead of being shoved). Shipped in `36d23c3`, whole Museum set
-rebuilt 114/114 matching vanilla, gated in `tools/rebuild_collision.sh`. Full
-account in WW_CHANGES 2026-08-22k, engine derivation in 2026-08-22j.
+**One in-game test is owed, and it is the only thing blocking the next item.**
+The Museum test set has been rebuilt with two changes that have never been in the
+engine: mixed compounds, and every mesh shape now going through a new builder.
+Walk ConcordMuseum01. If it loads and the terminals and the small fan behave,
+both are proven and item 2 opens.
 
-**Next is the enabling change both remaining items need**, below: extract the
-compressed-mesh SHAPE builder out of `hknpEncodeCompressedMesh`, which today
-builds a whole single-body system, so `encodeShapeObject` can emit a mesh shape
-from NIF geometry the way it already emits polytopes and capsules. That one
-change unblocks mixed compounds (item 1), multi-body systems (item 2), ragdoll
-writing and the cloth track. Do it once, deliberately, rather than three times
-around the edges.
+  * `furniture/terminals/terminalwall01.nif`
+  * `furniture/terminals/terminalonscrollingtext.nif`
+  * `setdressing/fans/industrialfansmall01_dest.nif`
+
+are the three that changed shape -- they now carry a compound holding a mesh
+beside hulls, where they used to be one flattened mesh. The other 111 are
+byte-identical to what was in the game last night.
+
+**Done since the railings closed** (all offline-verified, none of it in the game):
+
+  * **The mesh SHAPE builder is out** (`c873b7b`, WW_CHANGES 2026-08-23a).
+    `hknpEncodeMeshShapeObjects` emits the four objects of a compressed mesh as
+    self-contained pack objects; `hknpEncodeCompressedMesh` is the system half
+    plus a splice. Byte-identical output on 114 of 114, twice.
+  * **`encodeShapeObject` can BUILD a mesh**, not only copy one back -- the
+    branch that unblocks everything below.
+  * **Mixed compounds, item 3c, closed** (`00dbc65`, WW_CHANGES 2026-08-23b).
+    Shape classes now match vanilla on 114 of 114; stored solids 110 -> 113.
+
+**What is still open, in order:**
+
+  1. **Multi-body systems.** Compile writes one system per body and
+     `Havok/Merge Physics Systems` stitches them afterwards; vanilla puts every
+     body of a NIF in ONE system to begin with -- 1,334 of 1,334 corpus files
+     have exactly one. The enabling change is done, so this is now reachable
+     directly: build every body's shapes into one `HknpSystem` and assemble once.
+     Ragdolls (41 bodies) and cloth need the same thing.
+  2. **Body ORDER.** Ours is a permutation of vanilla's -- our body 0 is the
+     dynamic compound where vanilla's is the static mesh -- and it is the ONLY
+     thing behind the last 19 header-word and 17 rest-state differences in the
+     set. Harmless as far as anything measured says, but it is noise in every
+     comparison and it hid the flags bug for a while by looking like the obvious
+     suspect. Worth closing with item 1, since that is where body order gets
+     decided.
 
 **What the engine reads to choose an impact sound** (1.10.155 RVAs; the full
 derivation is WW_CHANGES 2026-08-22j):
@@ -96,19 +119,10 @@ tables -- `<Class>Class_Members`, const arrays naming every field and its offset
 `hknpBodyCinfo`, `hknpBody`, `hknpMotionCinfo` and `hknpPhysicsSystemData` all
 came out in a single query. Read those before deriving a layout by hand.
 
-What is still open, in order:
-
-  1. **3c, mixed compounds** -- a body mixing a triangle mesh with convex shapes
-     takes the mesh path whole. 3 of 114 files, and now the ONLY geometry
-     difference left in the set.
-  2. **Multi-body systems.** Compile writes one system per body; vanilla puts
-     every body of a NIF in ONE system -- 1,334 of 1,334 corpus files have
-     exactly one. This is what splits 3 of the 13 doors, and it is the same fix
-     ragdolls (41 bodies) and cloth need. Both 1 and 2 need the same enabling
-     change: the compressed-mesh SHAPE builder extracted out of
-     `hknpEncodeCompressedMesh`, which currently builds a whole single-body
-     system, so that `encodeShapeObject` can emit a mesh shape from NIF geometry
-     the way it already emits polytopes and capsules.
+Both items that used to be here are accounted for above: mixed compounds CLOSED
+on 2026-08-23, and the enabling change they shared -- the compressed-mesh SHAPE
+builder pulled out of `hknpEncodeCompressedMesh` -- done with it. What is left is
+multi-body systems and body order, both listed at the top.
 
 **Four crashes and failures, none of which any check we owned could see:**
 
