@@ -36,6 +36,7 @@
 #  18. ...and vanilla's is a real offset, so 17 is not vacuous
 #  19. a KEYFRAMED body keeps its motion index, inertia record and orientation
 #  20. ...and vanilla's really is keyframed, so 19 is not vacuous
+#  21. a keyframed body on the MESH compile path keeps its state too
 #      (the compound BVH, decoded 2026-08-21)
 #
 # Checks 8 and 9 are the ones that say this did not over-reach. The convex path
@@ -67,6 +68,12 @@ AABBSRC="${AABBSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/Props/parking_me
 # an ANIMATED body: a door, whose collision hangs off the hinge node and whose
 # collision object is ANIM_TARGETED
 DOORSRC="${DOORSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/interiors/building/woodp/doors/bldwoodpdoor01.nif}"
+# the same thing on the OTHER compile path: this door's shape is a compressed
+# mesh, so it goes through hknpEncodeCompressedMesh while DOORSRC above is convex
+# and goes through the assembler. The keyframed state was broken on both, and
+# fixing one left the other writing a dyn_motion array vanilla does not have.
+# This is also the exact door bungo tested from the console (RefID 00077A83).
+MESHDOORSRC="${MESHDOORSRC:-E:/Tools/Fallout 4/DataUnpacked/Data/meshes/interiors/building/woodp/doors/bldwoodpdoorbroke01.nif}"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
@@ -251,6 +258,18 @@ check "a keyframed body keeps its motion index, inertia and orientation" \
 	"$([ -n "$ourstate" ] && [ "$ourstate" = "$vanstate" ] && echo 1 || echo 0)"
 check "...and vanilla's really is keyframed (inertia, no motion), not a static" \
 	"$(echo "$vanstate" | grep -q 'motion=0 inertia=[1-9]' && echo "$vanstate" | grep -qv 'idx=7fffffff' && echo 1 || echo 0)"
+
+if recompile "$MESHDOORSRC" "$W/d3.nif"; then
+	ourmesh=$(python "$ROOT/tools/hkbodypos.py" "$W/d3.nif" --state 2>/dev/null)
+	vanmesh=$(python "$ROOT/tools/hkbodypos.py" "$MESHDOORSRC" --state 2>/dev/null)
+else
+	ourmesh=""; vanmesh="x"
+fi
+echo "  mesh-path door body state"
+echo "    ours    $ourmesh"
+echo "    vanilla $vanmesh"
+check "a keyframed body on the MESH path keeps its state too" \
+	"$([ -n "$ourmesh" ] && [ "$ourmesh" = "$vanmesh" ] && echo 1 || echo 0)"
 
 check "a static body keeps its own position (the door's hinge)" \
 	"$([ -n "$ourpos" ] && [ "$ourpos" = "$vanpos" ] && echo 1 || echo 0)"
