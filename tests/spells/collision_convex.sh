@@ -34,6 +34,8 @@
 #  17. a STATIC body keeps its own position - the door's hinge, which only an
 #      animated object can tell you about
 #  18. ...and vanilla's is a real offset, so 17 is not vacuous
+#  19. a KEYFRAMED body keeps its motion index, inertia record and orientation
+#  20. ...and vanilla's really is keyframed, so 19 is not vacuous
 #      (the compound BVH, decoded 2026-08-21)
 #
 # Checks 8 and 9 are the ones that say this did not over-reach. The convex path
@@ -231,6 +233,25 @@ fi
 echo "  door body position"
 echo "    ours    $ourpos"
 echo "    vanilla $vanpos"
+# --- and the whole rest state, which is what an ANIMATED body actually needs ---
+#
+# A door is KEYFRAMED: inertia record, motion INDEX, no dyn_motion record. 170 of
+# 1,200 vanilla files are in that state and every one is something the game moves
+# -- Animated/CarPush01, DinerDoorSingle01, CraneBridge01, FenceChainlinkGate01.
+# Compile refused motion mode 6 outright and wrote a plain static instead, so the
+# engine had no motion to drive and the doors would not open however right their
+# collision, hinge, block order and animation data were. All four of those were
+# verified equal to vanilla while the doors stayed shut.
+ourstate=$(python "$ROOT/tools/hkbodypos.py" "$W/d2.nif" --state 2>/dev/null)
+vanstate=$(python "$ROOT/tools/hkbodypos.py" "$DOORSRC" --state 2>/dev/null)
+echo "  door body state"
+echo "    ours    $ourstate"
+echo "    vanilla $vanstate"
+check "a keyframed body keeps its motion index, inertia and orientation" \
+	"$([ -n "$ourstate" ] && [ "$ourstate" = "$vanstate" ] && echo 1 || echo 0)"
+check "...and vanilla's really is keyframed (inertia, no motion), not a static" \
+	"$(echo "$vanstate" | grep -q 'motion=0 inertia=[1-9]' && echo "$vanstate" | grep -qv 'idx=7fffffff' && echo 1 || echo 0)"
+
 check "a static body keeps its own position (the door's hinge)" \
 	"$([ -n "$ourpos" ] && [ "$ourpos" = "$vanpos" ] && echo 1 || echo 0)"
 # vanilla's own number has to be a real offset, or check 17 passes on two empty

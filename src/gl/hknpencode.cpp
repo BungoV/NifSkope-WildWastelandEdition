@@ -139,11 +139,22 @@ QByteArray bodyProperties( const HknpEncodeInput & in )
 QByteArray bodyCInfo( const HknpEncodeInput & in )
 {
 	QByteArray out( 0x60, 0 );
-	setU32( out, 0x08, 0x7fffffffu ); setU32( out, 0x0c, in.dynamic ? 0u : 0x7fffffffu );
+	/* +0x0c is the dyn_motion / dyn_inertia index, and 0x7fffffff means "this
+	 * body has neither". A KEYFRAMED body has an index like a dynamic one --
+	 * it just has no motion record behind it, only inertia -- so writing the
+	 * static sentinel here is what stopped the doors opening.
+	 */
+	setU32( out, 0x08, 0x7fffffffu );
+	setU32( out, 0x0c, ( in.dynamic || in.keyframed ) ? 0u : 0x7fffffffu );
 	setU32( out, 0x10, 0xffu );
 	setU32( out, 0x14, ( in.layer & 0xffu ) | ( quint32( in.filterFlags ) << 8 ) | ( quint32( in.filterGroup ) << 16 ) );
 	setFloat( out, 0x30, in.center[0] ); setFloat( out, 0x34, in.center[1] ); setFloat( out, 0x38, in.center[2] );
-	setU32( out, 0x4c, 0x3f7fffffu );
+	// +0x40 is the orientation, xyzw where Quat stores wxyz. Identity on every
+	// static and dynamic body measured; a door's is its hinge frame.
+	setFloat( out, 0x40, in.orientation[1] );
+	setFloat( out, 0x44, in.orientation[2] );
+	setFloat( out, 0x48, in.orientation[3] );
+	setFloat( out, 0x4c, in.orientation[0] );
 	return out;
 }
 
@@ -662,10 +673,17 @@ QByteArray hknpEncodeCompressedMesh( const HknpEncodeInput & in, QString * error
 	quint32 psd = quint32( data.size() ); fx.virtuals.append( { psd, 0, names.value( QStringLiteral( "hknpPhysicsSystemData" ) ) } );
 	// the first array is empty AND has a zero capacity word in every corpus file,
 	// unlike the other empty ones, which carry the don't-deallocate flag
+	/* dyn_motion at +0x20 and dyn_inertia at +0x30, and a KEYFRAMED body takes
+	 * INERTIA WITHOUT MOTION -- 170 of 1,200 vanilla files, every one of them
+	 * something the game animates. Writing both counts from `dynamic` alone made
+	 * every door a true static.
+	 */
+	const bool hasInertia = in.dynamic || in.keyframed;
 	write( QByteArray( 16, 0 ) ); quint32 arr10 = write( hkArray( 1 ) ); quint32 arr20 = write( hkArray( in.dynamic ? 1 : 0 ) );
-	quint32 arr30 = write( hkArray( in.dynamic ? 1 : 0 ) ); quint32 arr40 = write( hkArray( 1 ) ); write( hkArray( 0 ) ); quint32 arr60 = write( hkArray( 1 ) ); write( QByteArray( 16, 0 ) );
+	quint32 arr30 = write( hkArray( hasInertia ? 1 : 0 ) ); quint32 arr40 = write( hkArray( 1 ) ); write( hkArray( 0 ) ); quint32 arr60 = write( hkArray( 1 ) ); write( QByteArray( 16, 0 ) );
 	quint32 props = write( bodyProperties( in ) ); fx.local.append( { arr10, props } );
-	if ( in.dynamic ) { quint32 motion = write( dynamicMotion( in ) ); fx.local.append( { arr20, motion } ); quint32 inertia = write( dynamicInertia( in ) ); fx.local.append( { arr30, inertia } ); }
+	if ( in.dynamic ) { quint32 motion = write( dynamicMotion( in ) ); fx.local.append( { arr20, motion } ); }
+	if ( hasInertia ) { quint32 inertia = write( dynamicInertia( in ) ); fx.local.append( { arr30, inertia } ); }
 	quint32 cinfo = write( bodyCInfo( in ) ); fx.local.append( { arr40, cinfo } );
 	quint32 shapeEntry = write( QByteArray( 16, 0 ) ); fx.local.append( { arr60, shapeEntry } );
 	/* Shape keys: (section << primBits) | primKey, where a primKey indexes

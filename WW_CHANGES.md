@@ -1,5 +1,62 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22c — KEYFRAMED: the state between static and dynamic
+
+The hinge fix was real and the doors still would not open. So the door was
+identified properly this time, from the console: RefID `00077A83` →
+`BldWoodPDoorBroke01` → `interiors/building/woodp/doors/bldwoodpdoorbroke01.nif`,
+one of ours, and one whose NIF by then matched vanilla in **block order and in
+all 128 resolved references**. That left the compiled packfile as the only place
+a difference could be, by elimination rather than by guess.
+
+Three fields differed:
+
+    hknpPhysicsSystemData +0x38   dyn_inertia count   vanilla 1        ours 0
+    hknpBodyCinfo +0x0c           motion index        vanilla 0        ours 0x7fffffff
+    hknpBodyCinfo +0x40..0x4c     orientation         vanilla          ours identity
+                                                      (0,0,0.7513,0.66)
+
+**There is a third body state, and Compile did not have it.** Counted over 1,200
+vanilla files:
+
+    motion=0 inertia=0, index 0x7fffffff   727 files   a true static
+    motion=N inertia=N, index set          ~190        a dynamic prop
+    motion=0 inertia=N, index set          170         KEYFRAMED
+
+Every file in that third group is something the game MOVES without simulating:
+`Animated/CarPush01`, `DinerDoorSingle01`, `CraneBridge01`,
+`FenceChainlinkGate01`, and every door in Concord. A keyframed body takes an
+inertia record and a motion INDEX with no dyn_motion record behind it.
+
+Compile refused it outright — `sourceMotion != 3 && != 5` listed it as
+unsupported, in a guard that named the case it was rejecting: "Motion/Keyframed
+mode". So every door compiled to a plain static, and **a static body cannot be
+driven by an animation** however right its collision, its hinge, its block order
+and its keyframe data are. All four of those were verified equal to vanilla while
+the doors stayed shut.
+
+Motion System 6 (`MO_SYS_KEYFRAMED`) carries it through the NIF now. The
+orientation at cinfo +0x40 goes with it: identity on every static and dynamic
+body measured, and a 97-degree turn about Z on this door, which with the position
+is the hinge's rest frame.
+
+One trap on the way: the assembler already knew how to write inertia without
+motion — its own comment says "one vanilla physics system carries an inertia
+entry with no motion entry" — but it derives both counts from the motion index
+when the decode has not supplied them, so the convex path wrote a dyn_motion
+array vanilla does not have. `sys.motionCount` and `sys.inertiaCount` are set
+explicitly now.
+
+**10 of the 13 doors now match vanilla's body rest state exactly**, the screenshot
+door among them. The other 3 differ only by the multi-body split: vanilla keeps
+two leaves in one system (inertia=2, second body at index 1), ours writes two
+systems of one.
+
+`collision_convex.sh` is 20 checks; 19 holds a keyframed body's whole rest state
+against vanilla, 20 asserts vanilla's really is keyframed so 19 cannot pass on a
+static. `tools/hkbodypos.py --state` prints it, and `hkcompound_sweep.py`
+compares it across a whole rebuild.
+
 ## 2026-08-22b — The doors would not open, and no static check could have said why
 
 The Museum set stopped crashing, so bungo played it, and the doors did not open.

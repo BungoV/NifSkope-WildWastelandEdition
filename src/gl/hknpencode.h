@@ -41,6 +41,30 @@ struct HknpEncodeInput
 	float angDamping = 0.05f;
 	Vector3 center;
 	Vector3 inertia;
+	/*! KEYFRAMED: the body has a motion index and an inertia record, but NO
+	 * dyn_motion record. Measured over 1,200 vanilla files, the three states are
+	 * distinct and the counts say which:
+	 *
+	 *   motion=0 inertia=0, index 0x7fffffff   727 files   a true static
+	 *   motion=N inertia=N, index set          ~190        a dynamic prop
+	 *   motion=0 inertia=N, index set          170         KEYFRAMED
+	 *
+	 * and every file in that third group is something the game ANIMATES:
+	 * Animated/CarPush01, DinerDoorSingle01, CraneBridge01, FenceChainlinkGate01,
+	 * and every door in Concord. Compile collapsed it to a true static, so the
+	 * engine had no motion to drive and the door could not open however correct
+	 * its collision was.
+	 */
+	bool keyframed = false;
+	/*! cinfo +0x40, the body's own orientation, xyzw.
+	 *
+	 * Identity on every static and every dynamic prop measured, and NOT identity
+	 * on an animated one: BldWoodPDoorBroke01 carries (0, 0, 0.7513, 0.66), a 97
+	 * degree turn about Z, which with the position at +0x30 is the hinge's rest
+	 * frame. Written as identity before, which is the same class of loss as the
+	 * position: invisible while nothing moves it.
+	 */
+	Quat orientation = Quat( 1, 0, 0, 0 );
 };
 
 //! Encode one editable collision body as an hk_2014.1.0 hknp packfile.

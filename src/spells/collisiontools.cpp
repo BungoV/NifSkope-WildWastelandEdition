@@ -1067,8 +1067,11 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	phys.friction = in.friction;
 	phys.restitution = in.restitution;
 	phys.position = in.center;
-	phys.hasMotion = in.dynamic;
-	phys.motionIndex = in.dynamic ? 0 : -1;
+	phys.orientation = in.orientation;
+	// a KEYFRAMED body names a motion index like a dynamic one; what it lacks is
+	// the dyn_motion record behind it. See HknpEncodeInput::keyframed.
+	phys.hasMotion = in.dynamic || in.keyframed;
+	phys.motionIndex = ( in.dynamic || in.keyframed ) ? 0 : -1;
 	if ( in.dynamic ) {
 		phys.mass = std::max( in.mass, 0.001f );
 		// density is the body's, so it is the mass over EVERY shape's volume
@@ -1087,6 +1090,14 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 		phys.angDamping = in.angDamping;
 	}
 	sys.bodyPhys.append( phys );
+	/* The two arrays have their own counts and they do NOT have to agree. A
+	 * KEYFRAMED body -- a door, a gate -- carries an inertia record and a motion
+	 * INDEX with no dyn_motion behind it, which the assembler already knows how
+	 * to write; it just derives both counts from the motion index when the decode
+	 * did not supply them, and that wrote a motion array vanilla does not have.
+	 */
+	sys.motionCount = in.dynamic ? 1 : 0;
+	sys.inertiaCount = ( in.dynamic || in.keyframed ) ? 1 : 0;
 	sys.dynamic = in.dynamic;
 	sys.shapeListOrder = { 0 };
 	sys.rootClassName = QStringLiteral( "hknpPhysicsSystemData" );
@@ -6135,7 +6146,14 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	QModelIndex info = nif->getIndex( body, "Rigid Body Info" ); QModelIndex filter = bhkGetHavokFilter( nif, info );
 	quint32 sourceMotion = info.isValid() ? nif->get<quint32>( info, "Motion System" ) : 5u;
 	QStringList unsupported;
-	if ( sourceMotion != 3u && sourceMotion != 5u ) unsupported << QObject::tr( "Motion/Keyframed mode %1" ).arg( sourceMotion );
+	/* 6 is MO_SYS_KEYFRAMED and IS supported now: the body takes a motion index
+	 * and an inertia record with no dyn_motion behind it, which is how vanilla
+	 * writes every animated door, gate and pushable. This guard named the case it
+	 * was refusing, and refusing it is what made Compile turn every door into a
+	 * static that could not open.
+	 */
+	if ( sourceMotion != 3u && sourceMotion != 5u && sourceMotion != 6u )
+		unsupported << QObject::tr( "Motion/Keyframed mode %1" ).arg( sourceMotion );
 	quint32 expectedQuality = sourceMotion == 3u ? 4u : 0u, expectedSolver = sourceMotion == 3u ? 2u : 1u;
 	if ( info.isValid() && nif->get<quint32>( info, "Quality Type" ) != expectedQuality ) unsupported << QObject::tr( "Quality Type" );
 	if ( info.isValid() && nif->get<quint32>( info, "Solver Deactivation" ) != expectedSolver ) unsupported << QObject::tr( "Solver Deactivation" );
@@ -6150,6 +6168,12 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	input.filterGroup = filter.isValid() ? quint16( nif->get<quint32>( filter, "Group" ) ) : 0u;
 	input.mass = info.isValid() ? nif->get<float>( info, "Mass" ) : 0.0f;
 	input.dynamic = sourceMotion == 3u;
+	/* Motion System 6 is MO_SYS_KEYFRAMED: a body the game MOVES without
+	 * simulating it -- a door, a gate, a pushable car. It takes a motion index
+	 * and an inertia record but no dyn_motion, and Decompile marks it so, because
+	 * collapsing it to a static is what stopped every door in Concord opening.
+	 */
+	input.keyframed = sourceMotion == 6u;
 	input.friction = info.isValid() ? nif->get<float>( info, "Friction" ) : 0.5f;
 	input.restitution = info.isValid() ? nif->get<float>( info, "Restitution" ) : 0.4f;
 	input.gravityFactor = info.isValid() ? nif->get<float>( info, "Gravity Factor" ) : 1.0f;
@@ -6159,6 +6183,7 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	input.angDamping = info.isValid() ? nif->get<float>( info, "Angular Damping" ) : 0.05f;
 	if ( info.isValid() ) {
 		Vector4 center = nif->get<Vector4>( info, "Center" ); input.center = Vector3( center[0], center[1], center[2] );
+		input.orientation = nif->get<Quat>( info, "Rotation" );
 		QModelIndex inertia = nif->getIndex( info, "Inertia Tensor" );
 		input.inertia = Vector3( nif->get<float>( inertia, "m11" ), nif->get<float>( inertia, "m22" ), nif->get<float>( inertia, "m33" ) );
 	}

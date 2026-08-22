@@ -2493,12 +2493,31 @@ public:
 				nif->set<quint32>( iInfo, "Num Shape Keys in Contact Point", 3 );
 				nif->set<quint32>( iInfo, "Deactivator Type", 1 );
 				bool dyn = sys.dynamic && phys.hasMotion;
-				nif->set<quint32>( iInfo, "Motion System", dyn ? 3u : 5u );
+				/* KEYFRAMED: the body names a motion index and has an inertia
+				 * record, but the system carries NO dyn_motion. Measured over
+				 * 1,200 vanilla files the three states are distinct --
+				 * motion=0/inertia=0 with index 0x7fffffff on 727 statics,
+				 * motion=N/inertia=N on the dynamic props, and motion=0 with
+				 * inertia=N on 170 files that are all things the game ANIMATES:
+				 * Animated/CarPush01, DinerDoorSingle01, CraneBridge01,
+				 * FenceChainlinkGate01, and every door in Concord.
+				 *
+				 * This collapsed to a plain static, so Compile wrote a body with
+				 * no motion at all and the doors could not open however right
+				 * their collision was. Motion System 6 is MO_SYS_KEYFRAMED and is
+				 * the carrier back to the encoder.
+				 */
+				const bool keyframed = !dyn && phys.hasMotion;
+				nif->set<quint32>( iInfo, "Motion System", dyn ? 3u : ( keyframed ? 6u : 5u ) );
 				nif->set<quint32>( iInfo, "Solver Deactivation", dyn ? 2u : 1u );
 				nif->set<quint32>( iInfo, "Quality Type", dyn ? 4u : 0u );
 				nif->set<float>( iInfo, "Mass", dyn ? phys.mass : 0.0f );
+				// the body's own rest orientation, cinfo +0x40. Identity on every
+				// static and dynamic body measured; a door's is its hinge frame,
+				// and dropping it is the same loss as dropping the position.
+				nif->set<Quat>( iInfo, "Rotation", phys.orientation );
 				QModelIndex iInertia = nif->getIndex( iInfo, "Inertia Tensor" );
-				if ( dyn && iInertia.isValid() ) {
+				if ( ( dyn || keyframed ) && iInertia.isValid() ) {
 					/* The packfile stores INVERSE inertia; bhkRigidBody's Inertia
 					 * Tensor means the real thing. Convert, so the field a user
 					 * reads or edits is the quantity it claims to be.

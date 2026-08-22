@@ -22,13 +22,27 @@ def aabbs(path):
     return [l.strip() for l in r.stdout.splitlines() if '|' in l]
 
 
+def bodystate(path):
+    """Every body's rest state: array counts, motion index, orientation, position.
+
+    This is the field group that is INERT while nothing moves and load-bearing
+    the moment the engine drives the body. A door is KEYFRAMED -- inertia record,
+    motion index, no dyn_motion -- and writing it as a plain static left the
+    collision in exactly the right place while the door could not open.
+    """
+    r = subprocess.run([sys.executable,
+                        os.path.join(os.path.dirname(TOOL), 'hkbodypos.py'),
+                        path, '--state'], capture_output=True, text=True)
+    return [l.strip() for l in r.stdout.splitlines() if l.strip()]
+
+
 def flags(path):
     """Every shape's +0x10 header word: flags, key bits, dispatch type."""
     r = subprocess.run([sys.executable, TOOL, path, '--flags'],
                        capture_output=True, text=True)
     return [l.strip() for l in r.stdout.splitlines() if 'dispatch' in l]
 
-same = diff = none = hdr = 0
+same = diff = none = hdr = body = 0
 for line in open(sys.argv[1]):
     parts = line.rstrip('\n').split('\t')
     if len(parts) < 5 or parts[0] != 'ok':
@@ -37,6 +51,14 @@ for line in open(sys.argv[1]):
     a, b = MOD + rel, VAN + rel
     if not (os.path.exists(a) and os.path.exists(b)):
         continue
+    sa, sb = bodystate(a), bodystate(b)
+    if sa != sb:
+        body += 1
+        print('BODY %s' % rel)
+        for o, t in zip(sa + [''] * len(sb), sb + [''] * len(sa)):
+            if o != t:
+                print('   ours    %s' % o)
+                print('   vanilla %s' % t)
     fa, fb = flags(a), flags(b)
     if fa != fb:
         hdr += 1
@@ -61,4 +83,5 @@ for line in open(sys.argv[1]):
 print('%d compounds match vanilla exactly, %d differ, %d files hold none'
       % (same, diff, none))
 print('%d files whose shape HEADER words differ from vanilla' % hdr)
-sys.exit(1 if (diff or hdr) else 0)
+print('%d files whose BODY REST STATE differs from vanilla' % body)
+sys.exit(1 if (diff or hdr or body) else 0)
