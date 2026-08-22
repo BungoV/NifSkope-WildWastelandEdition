@@ -24,7 +24,25 @@ writer. It rebuilds in five minutes with three parallel workers
 1,619-mesh build took an hour, and an hour is the wrong unit of work when one
 mistake repeats it.
 
-**Three crashes, three defects, none of which any check we owned could see:**
+**STATE 2026-08-22, mid-track:** the Museum set loads clean and its solids are
+proven (110 of 114 identical to vanilla within 0.46 mm, `tools/collision_ab.py`).
+The DOORS were the last live failure: they would not open because Compile had no
+KEYFRAMED body state and wrote them as plain statics. Fixed and rebuilt; awaiting
+bungo's test. What is still open, in order:
+
+  1. **3c, mixed compounds** -- a body mixing a triangle mesh with convex shapes
+     takes the mesh path whole. 3 of 114 files, and now the ONLY geometry
+     difference left in the set.
+  2. **Multi-body systems.** Compile writes one system per body; vanilla puts
+     every body of a NIF in ONE system -- 1,334 of 1,334 corpus files have
+     exactly one. This is what splits 3 of the 13 doors, and it is the same fix
+     ragdolls (41 bodies) and cloth need. Both 1 and 2 need the same enabling
+     change: the compressed-mesh SHAPE builder extracted out of
+     `hknpEncodeCompressedMesh`, which currently builds a whole single-body
+     system, so that `encodeShapeObject` can emit a mesh shape from NIF geometry
+     the way it already emits polytopes and capsules.
+
+**Four crashes and failures, none of which any check we owned could see:**
 
 1. A compound's BVH shipped with **no pointer to it** — the local fixup at
    `+0x10 -> +0x40` was never emitted. `hknpDynamicCompoundShape::updateAabb`
@@ -35,6 +53,12 @@ mistake repeats it.
 3. Every compound wrote the placeholder `0x01000001` at +0x10. **Bit 0 of that
    word is the engine's "I am convex" flag**, so a compound was handed to
    `hknpScaledConvexShapeBase::calcAabb` on the first scaled reference.
+4. Doors would not open. There is a **KEYFRAMED** body state between static and
+   dynamic -- inertia record and a motion INDEX, no dyn_motion record, 170 of
+   1,200 vanilla files and every one of them something the game moves -- and
+   Compile refused it, in a guard that named the case. A static body cannot be
+   driven by an animation however right its collision is. The body's own
+   position (its hinge) and orientation were being dropped too.
 
 **The rule those three teach:** our own reader and writer agreeing is ONE
 measurement, not two. `--roundtrip` was byte-exact through all three. Use the

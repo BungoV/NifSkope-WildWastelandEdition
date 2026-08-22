@@ -206,3 +206,30 @@ than presence of a right one.
 **Solution:** a vacuity guard must assert the reference value has the SHAPE it
 should (`grep -qE '^-?[0-9]+\.[0-9],...'`), not merely that it differs from one
 known-bad constant. And a tool that prints nothing must fail, not return empty.
+
+## 2026-08-22 — Four checkers in a row that agreed with themselves
+
+**What:** the tool built to prove our solids match vanilla's reported, in turn: a
+mannequin hull 0.74 m out of place, railings 27% small, 91 of 114 files with
+wrong planes, and deviations of exactly 1.0 and 1.8e21. Every one was the
+checker. The writer was right the whole time; the real answer is 110 of 114
+identical to 0.46 mm.
+
+**Why:** each version compared a DERIVED number without asking what the number
+depended on.
+
+  * a centre of mass depends on the frame -- and vanilla puts a compound child's
+    offset in the instance where we bake it into the vertices
+  * a volume depends on the triangulation -- and our face tables decompose the
+    same 6 faces into 18 triangles where vanilla uses 12
+  * plane slots past the face count are uninitialised residue, and vanilla is not
+    even self-consistent there
+  * sorting tuples that contain tuples orders near-identical shapes differently
+    in two files, so zipping compares a hull against its neighbour
+
+**Solution:** compare the STORED DEFINITION, not a quantity computed from it, and
+before trusting a comparison ask what would have to be true for the two numbers
+to be comparable at all. When a checker says a corpus is broadly wrong, the
+checker is the first suspect -- a writer that passed byte-exact round trips does
+not suddenly get 91 of 114 files wrong. Each of these took one file dumped by
+hand to expose, which should have been the first move rather than the fourth.
