@@ -2366,10 +2366,32 @@ QByteArray hknpEncodeSystem( const HknpSystem & sys, QString * error )
 				 * size. Left at 0 until something explains it.
 				 */
 				if ( comp->dataRawData.isEmpty() ) {
-					const qsizetype lane = 0xD0 + qsizetype( k ) * 0x80 + 0x2c;
-					if ( lane + 4 <= objs.at( at ).bytes.size() )
-						setU32( objs[at].bytes, lane,
+					const qsizetype base = 0xD0 + qsizetype( k ) * 0x80;
+					if ( base + 0x30 <= objs.at( at ).bytes.size() ) {
+						setU32( objs[at].bytes, base + 0x2c,
 							0x3f000000u | quint32( objs.at( childObj ).bytes.size() & 0xffffffu ) );
+						/* +0x0c is hknpShapeInstance::m_flags, named by the engine:
+						 *
+						 *   getFlags      mov eax,[rcx+0x0c]; and eax,0xc0ffffff
+						 *   getScaleMode  mov eax,[rcx+0x0c]; shr eax,5; not eax; and eax,1
+						 *
+						 * so the low 24 bits are flag data and bit 5 selects the
+						 * scale mode. Every vanilla instance sets BIT 6: the corpus
+						 * holds 0x40, 0x42 and 0x46 and nothing else. We wrote 0,
+						 * and a compound whose instances carry no flags has no
+						 * collision in the world at all -- the museum doors could
+						 * be walked through and could not be activated, which is
+						 * one symptom, since no collision means no raycast hit and
+						 * so no prompt. Patching a door to vanilla's 0x42 by hand
+						 * restored it, which is what proved this field.
+						 *
+						 * 0x40 alone is what most vanilla compounds carry. Bits 1
+						 * and 2 vary between children that are identical in class,
+						 * size, material and radius, and nothing measured explains
+						 * them, so they are left clear rather than guessed.
+						 */
+						setU32( objs[at].bytes, base + 0x0c, 0x3f000000u | 0x40u );
+					}
 				}
 			}
 			objs[at].global.append( { cfx.shapeDataPointer, int( objs.size() ) } );

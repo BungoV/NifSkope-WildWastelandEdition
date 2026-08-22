@@ -1,5 +1,56 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22i — hknpShapeInstance::m_flags, named by the engine
+
+The museum doors had no collision, and after the compound child size went in they
+still had none. The remaining difference was one word per instance, which the
+engine named itself:
+
+    hknpShapeInstance::getFlags      mov eax, [rcx+0x0c];  and eax, 0xc0ffffff
+    hknpShapeInstance::getScaleMode  mov eax, [rcx+0x0c];  shr eax,5; not eax; and eax,1
+    hknpShapeInstance::getShape      mov rax, [rcx+0x50]
+    hknpShapeInstance::getShapeTag   movzx eax, word ptr [rcx+0x58]
+
+**+0x0c is `m_flags`**, and `getFlags` masks with `0xc0ffffff` -- exactly the bits
+the `0x3f000000` float pattern occupies -- so the low 24 bits are flag data, not
+padding. Bit 5 selects the scale mode.
+
+**Every vanilla instance sets bit 6.** Across 500 SetDressing files the field
+reads 0x40, 0x42 or 0x46 and nothing else. Compile wrote 0, so every compound it
+synthesized carried instances with no flags, and those compounds had NO COLLISION
+IN THE WORLD: you could walk through the museum doors and could not activate them
+-- one symptom, since with no collision there is no raycast hit and therefore no
+prompt.
+
+Proved before it was fixed: patching one shipped door's instances to vanilla's
+0x42 by hand, changing nothing else, restored the doors in game. 0x40 alone is
+what most vanilla compounds carry, so that is what is written now. Bits 1 and 2
+vary between children identical in class, size, material and radius; nothing
+measured explains them and they are left clear rather than guessed.
+
+The same disassembly confirmed the rest of the instance layout we already write:
+stride 0x80 (`getInstance` shifts by 7), the child pointer at +0x50, and
+`getInstanceAabb` reading the leaf index as a **u16 at +0x3c** then indexing the
+node array through the shape data's +0x10 pointer at 32 bytes a node -- which is
+the same +0x40 array whose missing pointer crashed the game on 2026-08-21.
+
+All 226 compound instances in the Museum set now carry the flag. Vanilla still
+round-trips byte-exact, ragdolls included; convex 21/21, compile 14/14.
+
+### Two lessons, both mine
+
+I called this lane "residue, like the padding planes" and left it at zero. The
+padding planes really are inconsistent in vanilla; this took exactly three values
+and never anything else, which is not what residue looks like. **A field with a
+small closed set of values is data.**
+
+And I compared everything EXCEPT this: block counts, references by name, object
+layout, fixups, body states, compound AABBs, header words, geometry. All
+identical, and the file still did not work, because none of those comparisons
+looked at the instance record. When a comparison says "identical" and the engine
+says otherwise, the comparison is incomplete -- that is the third time on this
+track, after the compound pointer and the convex bit.
+
 ## 2026-08-22h — Two more the engine found: a zero-length child, and a mass with no centre
 
 Playing the build turned up two defects no comparison of mine had flagged,
