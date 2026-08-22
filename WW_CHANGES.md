@@ -1,5 +1,50 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22d — Proving the solids are vanilla's, and four ways a checker lied
+
+"No crash" says the files parse. It says nothing about whether the solids are the
+ones Bethesda shipped, and that was the open question after the doors. The answer,
+over the 114-mesh Museum set:
+
+**110 of 114 files carry stored solids identical to vanilla's, worst deviation
+0.46 mm.** The other four:
+
+  * 3 are the known mixed-compound gap (backlog 3c): a body mixing a triangle
+    mesh with convex shapes takes the mesh path whole, so vanilla's 3 polytopes
+    become 1.
+  * 1 is `woodbasket`, whose 24-vertex hull decomposes into 15 faces where
+    vanilla uses 14 -- the same vertices, the same 16 plane slots, a different
+    decomposition of the same solid.
+
+Getting there took four corrections, and every one of them was the CHECKER being
+wrong rather than the writer. Worth recording, because each is a way a comparison
+can look authoritative and mean nothing:
+
+1. **Paired shapes by centre of mass** -> reported a mannequin hull 0.74 m out of
+   place. Vanilla stores that hull about its own origin and puts the offset in
+   the compound INSTANCE; Compile bakes the offset into the vertices and writes
+   an identity instance. Same solid, same world position, two conventions.
+2. **Compared the inventory's volume** -> reported railings 27% small. That
+   volume is derived by triangulating the stored FACE tables, and ours make 18
+   triangles of the same 6 faces where vanilla makes 12. Vertices, planes and
+   convex radius were identical on all ten shapes.
+3. **Compared plane slots beyond the face count** -> called 91 of 114 files
+   wrong. Those slots are RESIDUE: across 700 vanilla files they read (0,0,0,0)
+   596 times, (0,0,1,0) 490 times, and things like 0.12657 repeated four times.
+   Vanilla does not write them consistently, so neither can we be wrong about it.
+4. **Sorted nested tuples and zipped them** -> deviations of exactly 1.0 (a plane
+   normal against a different axis) and 1.8e21 (a padding lane), because sorting
+   ordered two nearly-identical hulls differently in the two files.
+
+The tool now applies each compound instance's full transform before comparing --
+rotation included, which is what the oxygen tank needed -- and compares the
+stored definition itself: vertex set, plane set (real planes only), convex
+radius, capsule end points, sphere centre, and the per-body filter word. Those
+cannot drift out of frame or depend on a triangulation.
+
+`tools/collision_ab.py`, and it is worth reading its header before trusting any
+number it prints.
+
 ## 2026-08-22c — KEYFRAMED: the state between static and dynamic
 
 The hinge fix was real and the doors still would not open. So the door was
