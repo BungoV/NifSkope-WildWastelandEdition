@@ -1,5 +1,40 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22e — 630 files, seven folder families, no new defect class
+
+The Museum set is 114 meshes of interior clutter. The doors were only found
+because they are doors, so the obvious question was what else the set does not
+cover. 630 files were rebuilt into a scratch tree -- 90 each from SetDressing,
+interiors, Props, architecture, Furniture, Actors and Weapons, chosen at random
+among those that carry compiled collision -- and held against vanilla.
+
+    630 rebuilt, 630 accepted, 0 refused
+    576 with every stored solid identical to vanilla, worst deviation 0.5 mm
+    0 shapes whose convex bit contradicts their class
+
+The 54 files that differ fall into three buckets, all already known:
+
+  * **33 mixed compounds** (backlog 3c): a body mixing a triangle mesh with
+    convex shapes takes the mesh path whole.
+  * **16 ragdolls**: `Actors/*/CharacterAssets/skeleton.nif`. Compile writes one
+    physics system per body, so a ragdoll's `hknpRagdollData` root becomes N
+    single-body `hknpPhysicsSystemData`. Both the filter words and the one
+    remaining geometry outlier (Alien, 1.29) are that. Ragdoll WRITING is not
+    implemented and this is what it looks like from the outside.
+  * **6 face decompositions**: the same hull with the same vertices and plane
+    slots split into one more or one fewer face.
+
+The header words are worth stating outright, because a wrong one crashed the game
+on 2026-08-21: across the whole rebuild, polytopes are `01000143` (1,072),
+capsules `010001c3` (407), spheres `01000111` (16), compounds `0202/0203/0204
+0004` (116) and compressed meshes `02NN0204` (248) -- and **not one shape sets the
+convex bit against its own class**.
+
+The 97 files whose header words differ from vanilla's are all compressed-mesh key
+widths, which follow OUR section layout because quad pairing packs primitives
+differently; the shape header and its data object are written from the same
+number, so they agree with each other, which is what the engine reads.
+
 ## 2026-08-22d — Proving the solids are vanilla's, and four ways a checker lied
 
 "No crash" says the files parse. It says nothing about whether the solids are the
