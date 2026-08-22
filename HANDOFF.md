@@ -32,6 +32,42 @@ are proven too (110 of 114 identical to vanilla within 0.46 mm,
 `tools/collision_ab.py`), every file has exactly one physics system, and all 22
 keyframed records carry the inertia sentinel.
 
+## NEXT SESSION STARTS HERE: the impact-sound PDB dig (2026-08-22, agreed with bungo)
+
+**Symptom, live:** the wood railings in ConcordMuseum01 make NO impact sound with
+our collision, where vanilla's do. Two references bungo tested:
+`bldwoodpsmrailstairstiny01rdest.nif` (0003034F) and `...01ldest.nif` (0003034E).
+
+**Everything material-carrying is IDENTICAL to vanilla** -- checked and ruled out:
+
+  * the material table entry, byte for byte (`1dd9c611`)
+  * the `hkRefCountedProperties` keys (`f601` materials, `f100` mass)
+  * the per-body material words (`000000ff` / `000100ff`; the high u16 is just
+    the body's own index)
+  * the per-triangle run table (1 run, 11 primitives)
+  * the shape header at +0x18 -- HYPOTHESIS TESTED AND REFUTED. Vanilla's mesh
+    disagrees with itself (header `fcb37ea0`, table `1dd9c611`) and we copy the
+    table over the header; patching one shipped railing's header back to
+    `fcb37ea0` by hand changed NOTHING in game. Those two files still carry that
+    hand-patch, which is not what the writer produces.
+
+The only remaining difference is that our BODY ORDER is a permutation of
+vanilla's (the body with filter `0x8004` is index 0 for us, index 1 for vanilla).
+Each body carries its own correct data and each node points at its own body, so
+it is not obvious how that silences an impact -- but it is the last thing left.
+
+**The dig:** find what the engine actually reads to choose an impact sound --
+`BGSImpactManager`, the material-type lookup off a collision hit, whatever
+consumes the Havok material after a contact -- and see which field it consults.
+That method (disassemble the LIVE 1.11.221 build at the address that matters,
+`f4re.py disasm --rva`, names from the 1.10.155 PDB via `f4pdb.py`) produced the
+convex bit, the keyframed inertia sentinel and `hknpShapeInstance::m_flags`, each
+in minutes, after static comparison had failed on all three.
+
+**Also still open on those railings:** they break off when walked into, where
+vanilla needs a shot (`...01rdest`). Separate cause -- impulse, so mass or
+inertia on the destructible body -- and untouched.
+
 What is still open, in order:
 
   1. **3c, mixed compounds** -- a body mixing a triangle mesh with convex shapes
