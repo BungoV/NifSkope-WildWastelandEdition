@@ -37,11 +37,21 @@ def state(path):
             cin = pk.local.get(psd + 0x40)
             if cin is None:
                 continue
+            di = pk.local.get(psd + 0x30)
+            ni = pk.u32(psd + 0x38)
             for k in range(pk.u32(psd + 0x48)):
                 o = cin + k * 0x60
-                out.append('motion=%d inertia=%d idx=%08x quat=%.4f,%.4f,%.4f,%.4f pos=%.1f,%.1f,%.1f'
-                           % (pk.u32(psd + 0x28), pk.u32(psd + 0x38),
-                              struct.unpack_from('<I', pk.data, o + 0x0c)[0],
+                idx = struct.unpack_from('<I', pk.data, o + 0x0c)[0]
+                # The inertia record's OWN index, at its +0x00 as the low u16.
+                # 0xffff means "no dyn_motion record behind me", and the engine
+                # tests exactly this before indexing the dyn_motion array --
+                # writing a real index without the array is a null deref, which
+                # is what crashed OfficeFileCabinet01 on 2026-08-22.
+                tag = 'none'
+                if di is not None and idx != 0x7fffffff and idx < ni:
+                    tag = '%04x' % struct.unpack_from('<H', pk.data, di + idx * 0x70)[0]
+                out.append('motion=%d inertia=%d idx=%08x itag=%s quat=%.4f,%.4f,%.4f,%.4f pos=%.1f,%.1f,%.1f'
+                           % (pk.u32(psd + 0x28), ni, idx, tag,
                               *struct.unpack_from('<4f', pk.data, o + 0x40),
                               *[v * SCALE for v in struct.unpack_from('<3f', pk.data, o + 0x30)]))
     print(' | '.join(out))

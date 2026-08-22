@@ -188,7 +188,36 @@ QByteArray dynamicMotion( const HknpEncodeInput & in )
  */
 QByteArray dynamicInertia( const HknpEncodeInput & in )
 {
-	QByteArray out( 0x70, 0 ); setU32( out, 0x00, 0x00010000u );
+	QByteArray out( 0x70, 0 );
+	/* +0x00 is TWO u16: the high one is 1 on every vanilla record, the low one is
+	 * THE BODY'S MOTION INDEX -- and 0xffff when there is no dyn_motion record
+	 * behind it.
+	 *
+	 * The engine reads exactly this. In 1.11.221 at +0x1385BF0 the caller does
+	 *
+	 *     cmp dx, r9w          ; the index against the sentinel
+	 *     je  skip
+	 *     movzx esi, dx
+	 *     shl  rsi, 6          ; index * 0x40, the dyn_motion stride
+	 *     add  rsi, [r8+0x20]  ; + the dyn_motion array
+	 *
+	 * and passes that pointer to the motion-properties lookup, which
+	 * dereferences it on entry. A KEYFRAMED body has no dyn_motion array, so
+	 * writing a real index here makes the engine index null and fault --
+	 * OfficeFileCabinet01, 2026-08-22, and it was my own keyframed change of the
+	 * day before that introduced it.
+	 *
+	 * Measured over 28 vanilla keyframed records, all agreeing: index 0xffff,
+	 * inverse mass 0 (infinite, it is not simulated), +0x08 = 1.0, +0x2c = 0.
+	 */
+	if ( in.keyframed && !in.dynamic ) {
+		setU32( out, 0x00, 0x0001ffffu );
+		setFloat( out, 0x08, 1.0f );
+		setU32( out, 0x0c, 0x5f7ffff0u ); setU32( out, 0x10, 0x5f7ffff0u );
+		setFloat( out, 0x4c, 1.0f );
+		return out;
+	}
+	setU32( out, 0x00, 0x00010000u );
 	float mass = std::max( in.mass, 0.001f );
 	Vector3 mn = in.verts.first(), mx = mn;
 	for ( const Vector3 & v : in.verts ) for ( int a = 0; a < 3; a++ ) { mn[a] = std::min( mn[a], v[a] ); mx[a] = std::max( mx[a], v[a] ); }
@@ -1870,7 +1899,18 @@ QByteArray encodeSystemRoot( const HknpSystem & sys, HknpRagdollDataFixups * fix
 		setU32( motions, m + 0x3c, 0x00000073u );
 
 		const qsizetype n = qsizetype( b.motionIndex ) * 0x70;
-		setU32( inertias, n + 0x00, b.inertiaTag );
+		/* +0x00 low u16 is THE RECORD'S OWN MOTION INDEX, and 0xffff when no
+		 * dyn_motion record stands behind it. Measured across 700 SetDressing
+		 * files: bodies with a motion record carry 0,1,2,3... matching their
+		 * index; the 28 keyframed ones all carry 0xffff. Derived rather than
+		 * carried, so a merged system numbers its records correctly -- writing a
+		 * flat 0 gave every body the first record's identity, and writing a real
+		 * index with no array behind it is the null deref that crashed
+		 * OfficeFileCabinet01.
+		 */
+		const quint32 itagLow = ( nMotionArr > 0 && b.motionIndex >= 0 )
+			? quint32( b.motionIndex ) : 0xffffu;
+		setU32( inertias, n + 0x00, ( b.inertiaTag & 0xffff0000u ) | itagLow );
 		/* The STORED inverse mass when mass has not been edited, because 1/(1/x)
 		 * is not x in float32 — three values in the corpus come back one ULP out,
 		 * which was six systems failing a byte-exact round trip for nothing.

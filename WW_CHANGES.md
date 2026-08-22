@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22g — The keyframed body needed a sentinel, and I had shipped the crash
+
+`OfficeFileCabinet01` crashed again after the merge, in the same place. So the
+two-systems-per-file theory was WRONG, and the merge -- correct as it is -- was
+not the fix.
+
+The file was by then identical to vanilla in every way measured: one system, two
+bodies, byte-identical cinfos, byte-identical system data, the same eight
+packfile objects in the same order with the same fixup counts. The difference was
+inside the **dyn_inertia record**:
+
+    +0x00  ours 0001|0000    vanilla 0001|ffff
+    +0x08  ours 0            vanilla 1.0
+    +0x2c  ours 1.0          vanilla 0
+
+**That low u16 is the record's own motion index, and the engine tests it.** The
+symbol in the crash log said `BShkNonTransformController::FindTarget`, which is
+wrong -- the PDB is 1.10.155 and the address is 1.11.221, so the name is the
+nearest preceding symbol and nothing more. Disassembling the LIVE build at the
+faulting RVA gives the real thing:
+
+    0x127c56c   cmp   dx, r9w          ; the index against the sentinel
+    0x127c570   je    skip
+    0x127c576   movzx esi, dx
+    0x127c579   shl   rsi, 6           ; index * 0x40, the dyn_motion stride
+    0x127c57d   add   rsi, [r8+0x20]   ; + the dyn_motion array pointer
+    0x127c5af   mov   r8, rsi
+    0x127c5bc   call  0x1385bf0        ; motion-properties lookup
+    0x1385bfa   cmp   dword ptr [r8], 0   ; <- dereferences it on entry
+
+A KEYFRAMED body has no dyn_motion array. Writing a real index into the inertia
+record makes the engine compute `null + index*0x40` and hand it to a function
+that dereferences it immediately.
+
+**This was mine.** The keyframed state landed on 2026-08-22c and gave those
+bodies a motion index for the first time; the matching sentinel in the inertia
+record was never written, so the fix for the doors was also a new crash. It had
+been shipped in every build since, on both doors and the cabinet, and the door
+test never reached one.
+
+Measured over 700 SetDressing files, and unambiguous on 28 keyframed records:
+index `0xffff`, inverse mass `0` (infinite -- it is not simulated), `+0x08` 1.0,
+`+0x2c` 0. Bodies that DO have a motion record carry their own index there,
+0,1,2,3..., which is now DERIVED rather than carried -- so a merged system
+numbers its records correctly instead of giving every body the first record's
+identity. Vanilla still round-trips byte-exact, ragdolls included, which is what
+proves the derivation is vanilla's own rule.
+
+`hkbodypos.py --state` carries the tag now, so `collision_convex.sh` checks 19
+and 21 compare it on both compile paths -- they would have failed on yesterday's
+build. 22 keyframed records ship in the Museum set and all 22 carry the sentinel.
+
+### What this cost, and the rule it earns
+
+Three test rounds went to a theory that was wrong, and the reason it looked right
+was that our file DID differ from vanilla in the way the theory named. Structural
+identity is not a diagnosis. The disassembly of the faulting address was the only
+thing that produced an answer, and it took ten minutes -- it should have come
+first, before the 46 files were pulled from the mod on a hypothesis.
+
 ## 2026-08-22f — One system per file, the way vanilla has always done it
 
 `OfficeFileCabinet01` crashed the game inside `bhkNPCollisionObject::CreateInstance`.

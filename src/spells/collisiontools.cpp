@@ -1072,6 +1072,17 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	// the dyn_motion record behind it. See HknpEncodeInput::keyframed.
 	phys.hasMotion = in.dynamic || in.keyframed;
 	phys.motionIndex = ( in.dynamic || in.keyframed ) ? 0 : -1;
+	if ( in.keyframed && !in.dynamic ) {
+		/* The inertia record's own index must say NO MOTION RECORD, or the engine
+		 * indexes a dyn_motion array that is not there -- see dynamicInertia,
+		 * which carries the disassembly. 28 of 28 vanilla keyframed records:
+		 * 0x0001ffff, inverse mass 0, density 1.0, scale word 0.
+		 */
+		phys.inertiaTag = 0x0001ffffu;
+		phys.inertiaScale = 0u;
+		phys.density = 1.0f;
+		phys.invMassStored = 0.0f;
+	}
 	if ( in.dynamic ) {
 		phys.mass = std::max( in.mass, 0.001f );
 		// density is the body's, so it is the mass over EVERY shape's volume

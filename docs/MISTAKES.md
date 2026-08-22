@@ -233,3 +233,31 @@ to be comparable at all. When a checker says a corpus is broadly wrong, the
 checker is the first suspect -- a writer that passed byte-exact round trips does
 not suddenly get 91 of 114 files wrong. Each of these took one file dumped by
 hand to expose, which should have been the first move rather than the fourth.
+
+## 2026-08-22 — Shipped a crash inside the fix for the previous one
+
+**What:** the KEYFRAMED body state fixed the doors and, in the same change, gave
+those bodies a motion index without the matching sentinel in their inertia
+record. The engine indexes `dyn_motion + index*0x40` whenever that index is not
+0xffff, and a keyframed body has no dyn_motion array, so it dereferenced null.
+Shipped in every build for a day, on the doors and the cabinet both.
+
+**Why:** the change was verified against the thing it was FIXING -- motion index,
+inertia count, orientation, position, all held against vanilla and all correct --
+and not against the records those fields point INTO. A field that selects another
+record is only half-checked until the record it selects is checked too.
+
+**Solution:** `hkbodypos.py --state` now carries the inertia record's own index,
+so the harness compares it on both compile paths. More generally: when a change
+introduces an INDEX, the check has to follow it. The compound pointer, the
+convex bit and this are the same defect three times -- a value that means
+something to the engine and nothing to our reader.
+
+**And the wrong turn it caused.** The crash was first blamed on our writing two
+physics systems per file, which vanilla never does -- a real difference, measured
+1,334 of 1,334, and worth fixing. It was not this crash. Three test rounds went
+to it, and 46 meshes were pulled from the mod on the strength of it. The
+disassembly of the faulting address took ten minutes and gave the answer outright;
+it should have come before the hypothesis, not after it. **Structural identity is
+not a diagnosis** -- "our file differs from vanilla here" does not make that
+difference the cause.
