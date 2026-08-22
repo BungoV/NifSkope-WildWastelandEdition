@@ -562,15 +562,24 @@ QString tlMergeBodyShapesRefusal( const NifModel * nif, qint32 body )
 	return QString();
 }
 
-/*! Is every leaf under \a shapeBlock a convex primitive?
+/*! Census of the leaves under \a shapeBlock: how many convex primitives, how
+ *  many triangle meshes. False if anything else is down there, which is the
+ *  caller's cue to fall back to flattening the whole body into one mesh.
  *
  *  Elric picks the compiled shape class off the SOURCE, not off the motion type.
  *  Measured over 1,500 SetDressing files: 228 static systems are polytope-only
  *  and 733 are compressed-mesh-only, so a convex source stays convex whether or
- *  not the body simulates. Wrappers — list, MOPP, transform — are transparent,
- *  and one triangle source anywhere makes the whole body a mesh.
+ *  not the body simulates. Wrappers — list, MOPP, transform — are transparent.
+ *
+ *  This used to be tlCollConvexOnly, which answered one bit: every leaf convex,
+ *  or not. One triangle source anywhere therefore made the WHOLE body a mesh,
+ *  and vanilla does not do that -- TerminalWall01 carries a compound holding a
+ *  compressed mesh AND a convex polytope, and we shipped it as a single mesh
+ *  with the polytope tessellated away. Counting instead of deciding is what lets
+ *  the caller tell a mesh-only body (which really is one mesh) from a mesh with
+ *  company (which is a compound).
  */
-bool tlCollConvexOnly( const NifModel * nif, int shapeBlock, int depth = 0 )
+bool tlCollLeafCensus( const NifModel * nif, int shapeBlock, int & convex, int & mesh, int depth = 0 )
 {
 	if ( !nif || !nif->isValidBlockNumber( shapeBlock ) || depth > 20 )
 		return false;
@@ -581,16 +590,24 @@ bool tlCollConvexOnly( const NifModel * nif, int shapeBlock, int depth = 0 )
 		if ( subs.isEmpty() )
 			return false;
 		for ( qint32 child : subs ) {
-			if ( !tlCollConvexOnly( nif, child, depth + 1 ) )
+			if ( !tlCollLeafCensus( nif, child, convex, mesh, depth + 1 ) )
 				return false;
 		}
 		return true;
 	}
 	if ( type == QLatin1String( "bhkMoppBvTreeShape" ) || type == QLatin1String( "bhkTransformShape" )
 		 || type == QLatin1String( "bhkConvexTransformShape" ) )
-		return tlCollConvexOnly( nif, nif->getLink( shape, "Shape" ), depth + 1 );
-	return type == QLatin1String( "bhkBoxShape" ) || type == QLatin1String( "bhkSphereShape" )
-		|| type == QLatin1String( "bhkCapsuleShape" ) || type == QLatin1String( "bhkConvexVerticesShape" );
+		return tlCollLeafCensus( nif, nif->getLink( shape, "Shape" ), convex, mesh, depth + 1 );
+	if ( type == QLatin1String( "bhkBoxShape" ) || type == QLatin1String( "bhkSphereShape" )
+		|| type == QLatin1String( "bhkCapsuleShape" ) || type == QLatin1String( "bhkConvexVerticesShape" ) ) {
+		convex++;
+		return true;
+	}
+	if ( type == QLatin1String( "bhkNiTriStripsShape" ) ) {
+		mesh++;
+		return true;
+	}
+	return false;
 }
 
 /*! Face LOOPS of a convex hull, from the shape's own stored planes.
@@ -934,7 +951,7 @@ bool tlCollConvexLeafShape( const NifModel * nif, int shapeBlock, const Matrix4 
  *  2026-08-20.
  */
 bool tlCollAppendConvexShapes( const NifModel * nif, int shapeBlock, const Matrix4 & transform,
-	QVector<HknpShape> & out, int depth = 0 )
+	QVector<HknpShape> & out, CollisionMesh & meshOut, int depth = 0 )
 {
 	if ( !nif->isValidBlockNumber( shapeBlock ) || depth > 20 )
 		return false;
@@ -945,13 +962,13 @@ bool tlCollAppendConvexShapes( const NifModel * nif, int shapeBlock, const Matri
 		if ( subs.isEmpty() )
 			return false;
 		for ( qint32 child : subs ) {
-			if ( !tlCollAppendConvexShapes( nif, child, transform, out, depth + 1 ) )
+			if ( !tlCollAppendConvexShapes( nif, child, transform, out, meshOut, depth + 1 ) )
 				return false;
 		}
 		return true;
 	}
 	if ( type == QLatin1String( "bhkMoppBvTreeShape" ) )
-		return tlCollAppendConvexShapes( nif, nif->getLink( shape, "Shape" ), transform, out, depth + 1 );
+		return tlCollAppendConvexShapes( nif, nif->getLink( shape, "Shape" ), transform, out, meshOut, depth + 1 );
 	if ( type == QLatin1String( "bhkTransformShape" ) || type == QLatin1String( "bhkConvexTransformShape" ) ) {
 		const Matrix4 own = nif->get<Matrix4>( shape, "Transform" );
 		Vector3 t, s; Matrix r;
@@ -961,7 +978,26 @@ bool tlCollAppendConvexShapes( const NifModel * nif, int shapeBlock, const Matri
 			return false;   // a scaled hull needs its planes rescaled; mesh path instead
 		Matrix4 next( transform );
 		next.multiply4x3( own );
-		return tlCollAppendConvexShapes( nif, nif->getLink( shape, "Shape" ), next, out, depth + 1 );
+		return tlCollAppendConvexShapes( nif, nif->getLink( shape, "Shape" ), next, out, meshOut, depth + 1 );
+	}
+	if ( type == QLatin1String( "bhkNiTriStripsShape" ) ) {
+		/* A TRIANGLE MESH as one child among convex ones.
+		 *
+		 * It carries no stored packfile bytes, which is exactly the state
+		 * encodeShapeObject now builds a mesh shape from -- so the compound gets
+		 * a real hknpCompressedMeshShape child instead of the whole body being
+		 * flattened to triangles around it.
+		 *
+		 * Gathered through tlCollAppendEditableMesh so the strips are
+		 * triangulated and the transform applied the same way the mesh path does
+		 * it, then converted to Havok units, which is what every other leaf here
+		 * is already in. Doing the division after the transform rather than
+		 * before is deliberate: it is what the mesh path does, so the geometry
+		 * cannot come out anywhere different from where it does today.
+		 */
+		const qsizetype before = meshOut.tris.size();
+		tlCollAppendEditableMesh( nif, shapeBlock, meshOut, transform );
+		return meshOut.tris.size() > before;
 	}
 	HknpShape leaf;
 	if ( !tlCollConvexLeafShape( nif, shapeBlock, transform, leaf ) )
@@ -985,9 +1021,50 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	QString * error )
 {
 	QVector<HknpShape> shapes;
-	if ( !tlCollConvexOnly( nif, rootShape ) )
+	int nConvex = 0, nMesh = 0;
+	if ( !tlCollLeafCensus( nif, rootShape, nConvex, nMesh ) || nConvex + nMesh < 1 )
 		return QByteArray();
-	if ( !tlCollAppendConvexShapes( nif, rootShape, Matrix4(), shapes ) || shapes.isEmpty() )
+	/* A body that is ONE triangle mesh stays on the mesh path. That is what
+	 * vanilla writes for it -- 733 of the SetDressing systems are a bare
+	 * compressed mesh with no compound over it -- and a compound of one child is
+	 * not something Elric emits. A mesh with COMPANY is the mixed case, and that
+	 * is a compound.
+	 */
+	if ( nMesh > 0 && nConvex < 1 )
+		return QByteArray();
+	CollisionMesh meshLeaves;
+	if ( !tlCollAppendConvexShapes( nif, rootShape, Matrix4(), shapes, meshLeaves ) )
+		return QByteArray();
+	/* Every mesh leaf becomes ONE child, not one each. Measured on the corpus:
+	 * a compound holding a compressed mesh holds exactly one of them, and the
+	 * mesh path has always concatenated a body's leaves the same way. Emitting
+	 * one child per leaf gave ceilingfan01 seven meshes where vanilla has one
+	 * per body and no compound at all.
+	 *
+	 * Havok units, converting AFTER the transform, which is what the mesh path
+	 * does -- so the geometry lands exactly where it lands today.
+	 */
+	if ( !meshLeaves.tris.isEmpty() ) {
+		HknpShape meshChild;
+		meshChild.className = QStringLiteral( "hknpCompressedMeshShape" );
+		meshChild.isConvex = false;
+		meshChild.materialCRC = meshChild.shapeMaterialCRC =
+			meshLeaves.triMaterial.isEmpty() ? in.materialCRC : meshLeaves.triMaterial.first();
+		meshChild.verts.reserve( meshLeaves.verts.size() );
+		for ( const Vector3 & v : std::as_const( meshLeaves.verts ) )
+			meshChild.verts.append( v / 69.99125f );
+		meshChild.tris = meshLeaves.tris;
+		meshChild.triMaterial = meshLeaves.triMaterial;
+		/* FIRST, not last. Vanilla puts the compressed mesh at child 0 in every
+		 * mixed compound measured -- TerminalWall01, TerminalOnScrollingText and
+		 * IndustrialFanSmall01_Dest all read MESH then the hulls -- and appending
+		 * it left our child order a permutation of theirs for no reason. Body
+		 * order taught this lesson once already: match the order rather than
+		 * argue it cannot matter.
+		 */
+		shapes.prepend( meshChild );
+	}
+	if ( shapes.isEmpty() )
 		return QByteArray();
 	HknpSystem sys;
 	for ( HknpShape & shape : shapes ) {
@@ -6287,11 +6364,20 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 		/* A convex shape has no triangle count to check against — the mesh path's
 		 * invariant — so the check is that the hull came back a hull: convex, with
 		 * the vertices and faces that were written.
+		 *
+		 * Per shape and per KIND, not "the first one is a hull". A mixed compound
+		 * holds a triangle mesh beside its hulls and the mesh may well be child
+		 * zero, which read as a convex shape that had come back wrong and refused
+		 * every mixed body on the spot.
 		 */
-		const HknpShape & got = roundTrip.shapes.first();
-		const bool primitive = got.primType == 1 || got.primType == 2;
-		if ( !got.isConvex || ( !primitive && ( got.verts.size() < 4 || got.faces.isEmpty() ) ) )
-			return refuse( QObject::tr( "The compiled convex shape did not read back as one — the packfile was not written." ) );
+		for ( const HknpShape & got : std::as_const( roundTrip.shapes ) ) {
+			const bool primitive = got.primType == 1 || got.primType == 2;
+			const bool hull = got.isConvex
+				&& ( primitive || ( got.verts.size() >= 4 && !got.faces.isEmpty() ) );
+			const bool mesh = !got.isConvex && !got.tris.isEmpty();
+			if ( !hull && !mesh )
+				return refuse( QObject::tr( "The compiled convex shape did not read back as one — the packfile was not written." ) );
+		}
 	} else {
 		if ( roundTrip.shapes.first().tris.isEmpty() )
 			return refuse( QObject::tr( "The generated packfile failed NifSkope's round-trip check: %1" ).arg( roundTrip.error ) );
