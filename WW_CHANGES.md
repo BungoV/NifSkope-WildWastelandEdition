@@ -1,5 +1,60 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22f — One system per file, the way vanilla has always done it
+
+`OfficeFileCabinet01` crashed the game inside `bhkNPCollisionObject::CreateInstance`.
+Everything about the file matched vanilla -- node names, collision-to-node
+bindings, ANIM_TARGETED flags, animation blocks byte-identical, both physics
+systems internally complete -- except that there were TWO of them.
+
+**Compile writes one bhkPhysicsSystem per body, because it compiles one body at a
+time. Vanilla never does that. Of 1,334 corpus files carrying collision, 1,334
+hold exactly one** `hknpPhysicsSystemData`, and the several
+bhkNPCollisionObjects that share it name their own body through Body ID. A NIF
+with two systems is a thing the engine has never been asked to load.
+
+`Havok/Merge Physics Systems` puts them back together, and it is index
+arithmetic rather than byte surgery: each system decodes, its shapes and
+compounds move into one list with their child indices rebased, its bodies join
+the body array, and the result re-encodes through `hknpEncodeSystem` -- the
+assembler that already reproduces vanilla's own multi-body systems byte for byte,
+because that is what a ragdoll is. No writer was touched.
+
+The enabling fact, checked before any of it was written: **a mesh we compiled,
+decoded and re-assembled comes back byte-identical.** That is what makes the
+merge free -- the mesh shapes are carried, not rebuilt, so the 441-line
+extraction of the mesh-shape builder was not needed after all.
+
+On the 114-mesh Museum set, after wiring the merge into the rebuild:
+
+    0 of 114 files hold more than one system   (was 46)
+    97 of 114 body rest states identical to vanilla   (was 71)
+    110 of 114 stored solids identical, worst 0.46 mm  (unchanged)
+
+The 17 that still differ are all the SAME BODY DATA IN A DIFFERENT ORDER -- the
+female mannequin's five body positions are a permutation of vanilla's, and the
+railings put their static body last where vanilla puts it first. Each collision
+object names its own body through Body ID, and those are rebased with the merge,
+so the node-to-body mapping is exact either way.
+
+### Two of my own bugs on the way, both caught by the assembler
+
+`shapeListOrder` is ONE ENTRY PER BODY and the entry is a BODY INDEX -- the
+assembler reads it as one and calls the variable `body`. I first rebuilt it one
+entry per SHAPE ("Shape list entry 4 names no body": five shapes, four bodies),
+then offset the entries by the SHAPE base instead of the body base. The assembler
+refused both, which is the difference between a validating writer and a trusting
+one.
+
+### And a silent failure worth more than the bug
+
+A rebuild reported `nocollision` for all 114 meshes and shipped nothing, because
+the script was run from a copy outside the repo and resolved `NifSkope.exe` to a
+path that did not exist. Every `list` returned nothing, so every mesh looked like
+it had no collision, and the manifest recorded 114 clean-looking answers to a
+question never asked. `rebuild_collision.sh` now refuses to start without its exe
+and its vanilla tree.
+
 ## 2026-08-22e — 630 files, seven folder families, no new defect class
 
 The Museum set is 114 meshes of interior clutter. The doors were only found

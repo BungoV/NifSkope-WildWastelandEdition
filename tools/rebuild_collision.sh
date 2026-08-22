@@ -31,6 +31,14 @@ MAN="${MANIFEST:-$MOD/collision_manifest.tsv}"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
+# A MISSING EXE MUST FAIL, NOT RECORD 114 EMPTY ANSWERS. Run from a copy of this
+# script outside the repo and $R resolves to the wrong place, so every `list`
+# returned nothing, every mesh looked like it had no collision, and the manifest
+# said "nocollision" 114 times in a row -- a clean-looking run that had done
+# nothing at all. Say so instead.
+[ -x "$NS" ] || { echo "no NifSkope.exe at $NS (set EXE= or NIFROOT=)" >&2; exit 2; }
+[ -d "$SRC" ] || { echo "no vanilla meshes at $SRC (set VAN=)" >&2; exit 2; }
+
 tr -d '\r' < "$LIST" | tr '\\' '/' > "$W/list.txt"
 
 mkdir -p "$MOD/Meshes"
@@ -65,7 +73,15 @@ while IFS=$'\t' read -r places rel; do
 		mv -f "$W/b.nif" "$W/a.nif"
 	done
 
-	/bin/true
+	# Compile writes ONE SYSTEM PER BODY because it compiles one body at a time,
+	# and vanilla never does that -- 1,334 of 1,334 corpus files with collision
+	# carry exactly one hknpPhysicsSystemData, with each bhkNPCollisionObject
+	# naming its own body through Body ID. OfficeFileCabinet01 shipped with two
+	# and crashed the game inside bhkNPCollisionObject::CreateInstance. Merge
+	# first, THEN reorder, because the merge appends its own blocks.
+	"$NS" -no-gui cast "$W/a.nif" -s "Havok/Merge Physics Systems" -o "$W/g.nif" >/dev/null 2>&1
+	[ -s "$W/g.nif" ] && mv -f "$W/g.nif" "$W/a.nif"
+
 	# Compile appends its blocks, so the collision lands at the END of the file
 	# where vanilla keeps it beside the node that owns it. Every reference is
 	# re-pointed correctly and the file is self-consistent either way -- but

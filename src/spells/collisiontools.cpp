@@ -6692,3 +6692,179 @@ public:
 };
 
 REGISTER_SPELL( spCompileCollision )
+
+/*! Merge every compiled bhkPhysicsSystem in the file into ONE.
+ *
+ * Compile writes one system per body because it compiles one body at a time.
+ * Vanilla never does that: of 1,334 corpus files carrying collision, **1,334
+ * hold exactly one** `hknpPhysicsSystemData`, and the several
+ * bhkNPCollisionObjects that share it name their own body through Body ID. A NIF
+ * with two systems is a thing the engine has never been asked to load, and
+ * OfficeFileCabinet01 -- two systems, an animated drawer -- crashed inside
+ * `bhkNPCollisionObject::CreateInstance` on 2026-08-22.
+ *
+ * This is index arithmetic, not byte surgery. Each system decodes; its shapes
+ * and compounds move into one list with their child indices rebased; its bodies
+ * join the body array; and the result re-encodes through `hknpEncodeSystem`,
+ * which already reproduces vanilla systems byte for byte -- including a
+ * multi-body one, which is what a ragdoll is. Nothing here touches a writer.
+ *
+ * The motion index is the part that is not a straight offset. `cinfo +0x0c`
+ * indexes BOTH dyn_motion and dyn_inertia, so bodies that have one are numbered
+ * in order across the merged system, and a body without stays 0x7fffffff. The
+ * two array COUNTS need not agree: a keyframed body takes an inertia slot and no
+ * motion record, which is exactly the cabinet -- one keyframed drawer and one
+ * static shell give inertia 1, motion 0, body 1 at 0x7fffffff, and that is
+ * vanilla's own layout for that file.
+ */
+bool tlCollMergePhysicsSystems( NifModel * nif, QString * error )
+{
+	auto fail = [&]( const QString & text ) { if ( error ) *error = text; return false; };
+	if ( !nif )
+		return fail( QObject::tr( "No file." ) );
+
+	// every compiled collision object, in block order, with the system it names
+	QVector<int> objects, named;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( i, "bhkNPCollisionObject" ) )
+			continue;
+		const int data = nif->getLink( i, "Data" );
+		if ( nif->isValidBlockNumber( data ) ) { objects.append( b ); named.append( data ); }
+	}
+	QVector<int> parts;
+	for ( int s : std::as_const( named ) )
+		if ( !parts.contains( s ) )
+			parts.append( s );
+	if ( parts.size() < 2 )
+		return true;    // already the shape vanilla ships
+
+	HknpSystem merged;
+	merged.rootClassName = QStringLiteral( "hknpPhysicsSystemData" );
+	QVector<int> bodyBase;        // where each part's bodies landed
+	int motionSlots = 0, motionArr = 0;
+	for ( int s : std::as_const( parts ) ) {
+		const HknpSystem part = hknpDecode( nif->get<QByteArray>( nif->getBlockIndex( s ), "Binary Data" ) );
+		if ( !part.valid || part.bodyPhys.isEmpty() )
+			return fail( QObject::tr( "Block %1 did not decode as a physics system: %2" ).arg( s ).arg( part.error ) );
+		const int shapeBase = int( merged.shapes.size() );
+		bodyBase.append( int( merged.bodyPhys.size() ) );
+		for ( HknpShape sh : part.shapes ) {
+			sh.bodyId = ( sh.bodyId < 0 ? 0 : sh.bodyId ) + bodyBase.last();
+			merged.shapes.append( sh );
+		}
+		for ( HknpCompound c : part.compounds ) {
+			c.bodyId = ( c.bodyId < 0 ? 0 : c.bodyId ) + bodyBase.last();
+			for ( int & ch : c.children )
+				ch += shapeBase;
+			merged.compounds.append( c );
+		}
+		for ( HknpBodyPhys ph : part.bodyPhys ) {
+			if ( ph.hasMotion ) {
+				ph.motionIndex = motionSlots++;
+				// a part that carried a real dyn_motion record needs the merged
+				// motion array to reach its slot; a keyframed one does not
+				if ( part.motionCount > 0 )
+					motionArr = motionSlots;
+			} else {
+				ph.motionIndex = -1;
+			}
+			merged.bodyPhys.append( ph );
+		}
+		/* The shape list at +0x60 holds ONE ENTRY PER BODY, and the entry is a
+		 * BODY INDEX -- the assembler reads it as one and calls the variable
+		 * `body`. Offsetting these by the SHAPE base is what made it refuse a
+		 * railing with "Shape list entry 4 names no body".
+		 */
+		if ( part.shapeListOrder.size() == part.bodyPhys.size() ) {
+			for ( int k : part.shapeListOrder )
+				merged.shapeListOrder.append( k + bodyBase.last() );
+		} else {
+			for ( qsizetype k = 0; k < part.bodyPhys.size(); k++ )
+				merged.shapeListOrder.append( int( bodyBase.last() + k ) );
+		}
+		merged.dynamic = merged.dynamic || part.dynamic;
+	}
+	merged.inertiaCount = motionSlots;
+	merged.motionCount = motionArr;
+	/* One entry per BODY. Rebuilding it one-per-SHAPE is what made the assembler
+	 * refuse a railing with "Shape list entry 4 names no body": five shapes, four
+	 * bodies, five entries.
+	 */
+	if ( merged.shapeListOrder.size() != merged.bodyPhys.size() )
+		return fail( QObject::tr( "Merged %1 shape-list entries for %2 bodies." )
+			.arg( merged.shapeListOrder.size() ).arg( merged.bodyPhys.size() ) );
+
+	QString err;
+	const QByteArray bytes = hknpEncodeSystem( merged, &err );
+	if ( bytes.isEmpty() )
+		return fail( QObject::tr( "The merged system would not encode: %1" ).arg( err ) );
+	const HknpSystem back = hknpDecode( bytes );
+	if ( !back.valid || back.bodyPhys.size() != merged.bodyPhys.size() )
+		return fail( QObject::tr( "The merged system did not read back (%1 bodies of %2): %3" )
+			.arg( back.bodyPhys.size() ).arg( merged.bodyPhys.size() ).arg( back.error ) );
+
+	const int keep = parts.first();
+	nifSnapshotOp( nif, QObject::tr( "Merge physics systems" ), [&]() {
+		nif->holdUpdates( true );
+		nif->set<QByteArray>( nif->getBlockIndex( keep ), "Binary Data", bytes );
+		for ( qsizetype j = 0; j < objects.size(); j++ ) {
+			const QModelIndex obj = nif->getBlockIndex( objects.at( j ) );
+			const int part = int( parts.indexOf( named.at( j ) ) );
+			const int was = int( nif->get<quint32>( obj, "Body ID" ) );
+			nif->setLink( obj, QStringLiteral( "Data" ), keep );
+			nif->set<quint32>( obj, "Body ID", quint32( bodyBase.at( part ) + was ) );
+		}
+		// drop what nothing names any more, highest first so the numbers below stay put
+		QVector<int> dead;
+		for ( int s : std::as_const( parts ) )
+			if ( s != keep )
+				dead.append( s );
+		std::sort( dead.begin(), dead.end(), std::greater<int>() );
+		for ( int s : std::as_const( dead ) )
+			nif->removeNiBlock( s );
+		nif->holdUpdates( false );
+	} );
+	return true;
+}
+
+/*! The same as a spell, so the rebuild pipeline and the Block List can both run it.
+ */
+class spMergePhysicsSystems final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Merge Physics Systems" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+	QString group() const override final { return Spell::tr( "Collision" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Put every compiled body in ONE bhkPhysicsSystem, the way vanilla "
+			"does -- 1,334 of 1,334 corpus files carry exactly one." );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		if ( !nif || index.isValid() )
+			return false;      // a file-wide operation, like Decompile All
+		int seen = 0;
+		QVector<int> parts;
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			const QModelIndex i = nif->getBlockIndex( b );
+			if ( !nif->blockInherits( i, "bhkNPCollisionObject" ) )
+				continue;
+			const int data = nif->getLink( i, "Data" );
+			if ( nif->isValidBlockNumber( data ) && !parts.contains( data ) ) { parts.append( data ); seen++; }
+		}
+		return seen > 1;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		QString error;
+		if ( !tlCollMergePhysicsSystems( nif, &error ) && !error.isEmpty() )
+			qWarning().noquote() << QObject::tr( "Merge Physics Systems:" ) << error;
+		return index;
+	}
+};
+
+REGISTER_SPELL( spMergePhysicsSystems )
