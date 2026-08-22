@@ -32,22 +32,25 @@ are proven too (110 of 114 identical to vanilla within 0.46 mm,
 `tools/collision_ab.py`), every file has exactly one physics system, and all 22
 keyframed records carry the inertia sentinel.
 
-## NEXT SESSION STARTS HERE: the railings' second symptom (2026-08-22)
+## NEXT SESSION STARTS HERE: the shared mesh-shape builder (2026-08-22)
 
-**Impact sound: DONE and confirmed in game.** bungo walked into the patched
-railings and they make a wood sound. Compile now writes `hknpBodyCinfo::flags`
-properly and the whole Museum set has been rebuilt with it -- 114 of 114, every
-body's flags byte-matching vanilla. Full account in WW_CHANGES 2026-08-22k.
+**The railings are CLOSED, both symptoms, confirmed in game.** They make a wood
+impact sound, and they hold when walked into and break when shot -- vanilla's
+behaviour. One cause for both: `hknpBodyCinfo::flags` at cinfo +0x18, which
+Compile wrote as zero. Bit 7 is `RAISE_CONTACT_IMPULSE_EVENTS` (no event, so the
+engine never asks what the body is made of, so no sound) and bit 16 is
+`USER_FLAG_0` = "enter the world KEYFRAMED, once" (so a destructible enters
+immovable instead of being shoved). Shipped in `36d23c3`, whole Museum set
+rebuilt 114/114 matching vanilla, gated in `tools/rebuild_collision.sh`. Full
+account in WW_CHANGES 2026-08-22k, engine derivation in 2026-08-22j.
 
-**What is left on those railings:** they still come apart when walked into, where
-vanilla needs a shot. There is now a strong candidate, found while fixing the
-sound and NOT yet tested: `USER_FLAG_0` means "enter the world KEYFRAMED, once"
-(`bhkNPCollisionObject::AccessBody` -> `test [body+0x40], 0x10000` ->
-`SetMotionType(obj, 2)` -> clear it; `SetMotionType` @0x1d7ebd0 with 2 runs
-`hknpMotionCinfo::initializeAsKeyFramed`). We were dropping it, so our
-destructibles entered the world DYNAMIC and simply got shoved. The rebuilt set
-carries it on all 80 bodies that should have it. **Walk into them again: if they
-now hold until shot, that symptom is closed too.**
+**Next is the enabling change both remaining items need**, below: extract the
+compressed-mesh SHAPE builder out of `hknpEncodeCompressedMesh`, which today
+builds a whole single-body system, so `encodeShapeObject` can emit a mesh shape
+from NIF geometry the way it already emits polytopes and capsules. That one
+change unblocks mixed compounds (item 1), multi-body systems (item 2), ragdoll
+writing and the cloth track. Do it once, deliberately, rather than three times
+around the edges.
 
 **What the engine reads to choose an impact sound** (1.10.155 RVAs; the full
 derivation is WW_CHANGES 2026-08-22j):

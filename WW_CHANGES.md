@@ -46,9 +46,16 @@ part of stays where it was put. That also fits the split the corpus shows: the
 ClothesHanger01 -- things that lie around and can be shoved -- and 287 of the 348
 WITH it are `*Dest.nif`.
 
-**So it is very likely the other open symptom on those railings**, that they come
-apart when walked into where vanilla needs a shot: ours entered the world dynamic
-and got pushed. Not proved, and it is bungo's to confirm.
+**CONFIRMED IN GAME the same evening.** That was the other open symptom on those
+railings -- they came apart when walked into where vanilla needs a shot, because
+ours entered the world dynamic and got pushed. With the flag carried they hold
+when walked into and break when shot, which is vanilla's behaviour. So both
+symptoms had ONE cause: a word Compile wrote as zero.
+
+The reading was derived from four instructions and a corpus split before any of
+it was tested, and the test agreed. Worth noting which order that happened in:
+the disassembly said what the bit DOES, the corpus said WHICH bodies carry it,
+and the two together made a prediction specific enough to be wrong. It was not.
 
 ### The lane
 
