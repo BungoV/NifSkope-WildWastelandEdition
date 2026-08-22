@@ -3,6 +3,35 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-23 — Widened a gate, and three files I was not aiming at changed
+
+**What:** Compile refused to compound a body whose leaves were not all convex.
+Relaxing that to "convex leaves AND mesh leaves are both allowed" fixed the three
+mixed files it was aimed at -- and silently rewrote three OTHERS. ceilingfan01,
+ceilingfan02 and cigarettemachine are mesh-only bodies with several mesh leaves;
+they had never been near the convex path, and the moment the gate stopped
+demanding "all convex" they qualified for it. They came out as seven mesh shapes
+under a compound where vanilla has two plain meshes and no compound at all.
+
+Then, having fixed that, the same change put the mesh child LAST in the compound
+where vanilla puts it first -- a permutation, for no reason, in a codebase that
+had already spent a week on a body-order permutation it could not explain.
+
+**Why:** the change was framed as "let this case through" and tested on that
+case. A gate does not let one case through; it moves a boundary, and everything
+on the near side of it moves with it. Nothing in the work asked which OTHER
+inputs newly satisfied the condition.
+
+**Solution:** both were caught in minutes by comparing shape classes across all
+114 files against vanilla rather than looking at the three that motivated the
+change -- the population, not the sample, which is the same lesson as the entry
+below and is becoming the house rule. So: **when a condition is widened, measure
+the whole corpus before and after and diff the two, because the interesting
+result is the file you were not thinking about.** The harness that came out of it
+(`tests/spells/collision_mixed_compound.sh`) checks the mesh-only case beside the
+mixed one for exactly this reason, and its check 8 is the one that failed on the
+intermediate build.
+
 ## 2026-08-22 — Read 25 rows off a list truncated at 25 and wrote down what they said
 
 **What:** a corpus scan printed "first 25 exceptions" and every one it printed was
