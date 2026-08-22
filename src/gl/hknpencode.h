@@ -56,6 +56,21 @@ struct HknpEncodeInput
 	 * its collision was.
 	 */
 	bool keyframed = false;
+	/*! HKNP_ADD_KEYFRAMED: a DYNAMIC body that enters the world immovable.
+	 *
+	 * Distinct from `keyframed`, which is a body that has no dynamics at all.
+	 * This one keeps its mass, inertia and motion record -- it is a destructible
+	 * waiting to be released -- and the engine converts it once, on add. Carried
+	 * on `bhkRigidBody`'s "Body Flags" bit 1, because nothing else can hold it:
+	 * a body is dynamic AND add-keyframed, and Motion System has room for only
+	 * one of those. Bit 0 of that word is already the Wind convention, and no
+	 * vanilla Fallout 4 mesh uses the field at all -- 0 of 19,881 carry an
+	 * editable bhkRigidBody, all of them compiled.
+	 */
+	bool addKeyframed = false;
+	//! HKNP_RAISE_TRIGGER_EVENTS, carried on "Body Flags" bit 2. Vanilla puts it
+	//! on 25 static bodies -- coin slots, gravestones -- and on nothing else.
+	bool raiseTriggerEvents = false;
 	/*! cinfo +0x40, the body's own orientation, xyzw.
 	 *
 	 * Identity on every static and every dynamic prop measured, and NOT identity

@@ -1,5 +1,86 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22k — Compile writes the body flags, and the round trip keeps them
+
+Confirmed in game first: the two hand-patched railings make a wood impact sound.
+So the mechanism from 08-22j holds, and this is the writer change behind it.
+
+### What Compile now writes
+
+`hknpBodyCinfo::flags` at cinfo +0x18, from three bits rather than a zero:
+
+  * **RAISE_CONTACT_IMPULSE_EVENTS is DERIVED** from `in.dynamic`, which is
+    already the predicate that decides whether a motionProperties record gets
+    written. Vanilla sets it on 1,408 of 1,408 bodies that have one and none of
+    the 12,456 that do not, so this needs no lane and no guess.
+  * **USER_FLAG_0 and RAISE_TRIGGER_EVENTS are CARRIED**, on `bhkRigidBody`'s
+    "Body Flags" bits 1 and 2. Neither is derivable from anything modelled.
+
+That is every value the corpus uses. Over 13,889 bodies in 11,820 files the word
+is one of exactly four things, and the rule above reproduces all four:
+
+    0x00000000  12,456   every static (11,305) and every keyframed (1,151)
+    0x00000080   1,060   dynamic
+    0x00010080     348   dynamic, plus USER_FLAG_0
+    0x00000010      25   static, plus RAISE_TRIGGER_EVENTS
+
+### What USER_FLAG_0 means, which decided how to handle it
+
+08-22j filed it as unknown and leaned towards dropping it. It is not droppable.
+The add-to-world path reads it (@0x1d73cfa):
+
+    call bhkNPCollisionObject::AccessBody
+    test dword ptr [rax + 0x40], 0x10000     ; USER_FLAG_0
+    je   skip
+    mov  edx, 2 ; call bhkNPCollisionObject::SetMotionType
+    and  dword ptr [rbx + 0x40], 0xfffeffff  ; and clear it
+
+and `SetMotionType` @0x1d7ebd0 with 2 bails if the body is already keyframed,
+then runs `hknpMotionCinfo::initializeAsKeyFramed`. So the flag is a one-shot:
+**enter the world KEYFRAMED, then forget you were asked.**
+
+Which is exactly how a destructible ships. The body carries real mass and inertia
+ready for the moment it breaks, but it enters immovable so the structure it is
+part of stays where it was put. That also fits the split the corpus shows: the
+1,060 dynamic bodies WITHOUT it are Kickball01, Shovel01, AlarmClock, Anchor,
+ClothesHanger01 -- things that lie around and can be shoved -- and 287 of the 348
+WITH it are `*Dest.nif`.
+
+**So it is very likely the other open symptom on those railings**, that they come
+apart when walked into where vanilla needs a shot: ours entered the world dynamic
+and got pushed. Not proved, and it is bungo's to confirm.
+
+### The lane
+
+"Body Flags" bits 1 and 2, because a body is DYNAMIC and ADD-KEYFRAMED at the
+same time and Motion System has room for only one of those. Safe: **0 of 19,881**
+vanilla Fallout 4 meshes carry an editable `bhkRigidBody` at all -- every one is
+compiled -- so the field has no vanilla meaning in FO4 to collide with. Bit 0 is
+the existing Wind convention, and the Collision Manager's save path already
+read-modify-writes it, so it does not clobber the new bits.
+
+### Measured
+
+  * decompile -> compile of a vanilla file of each class reproduces the flags
+    exactly: a railing (dynamic + USER_FLAG_0), a door (keyframed), Kickball01
+    (plain dynamic) and GraveStone01 (static + RAISE_TRIGGER_EVENTS).
+  * the whole Museum set rebuilt, 114 of 114, no skips, with the new gate live:
+    **every one now byte-matches vanilla's flags, body for body** -- 90 plain
+    dynamic, 80 dynamic + USER_FLAG_0, 22 keyframed, 63 static. Before this it
+    was 0 of 170 dynamic bodies.
+  * 0 rule violations over all 13,889 corpus bodies.
+  * harnesses: collision_compile 14/14, collision_convex 21/21,
+    collision_compiled_edit 7/7. Those three and no others -- they are the ones
+    whose code path this reaches.
+
+`tools/hkbodyflags.py` grew real exit codes and is now a gate in
+`tools/rebuild_collision.sh`, beside the run-table and compound checks. It
+required only the DERIVED bit and allows the carried ones, because requiring
+USER_FLAG_0 would fail every plain dynamic prop and requiring
+RAISE_TRIGGER_EVENTS would fail 11,305 of 11,330 statics -- demanding what cannot
+be derived is how a check starts lying. Proved able to fail: the pre-fix Museum
+output exits 1 on it.
+
 ## 2026-08-22j — RAISE_CONTACT_IMPULSE_EVENTS, the bit that plays the sound
 
 The wood railings in ConcordMuseum01 make no impact sound with our collision.
@@ -108,7 +189,7 @@ Over 13,889 bodies in 11,820 vanilla files under `Meshes\Interiors`,
     0x00000000  12,456   every static (11,305) and every keyframed (1,151)
     0x00000080   1,060   dynamic
     0x00010080     348   dynamic
-    0x00000010      25   the statics of PrydwenDestruction.nif
+    0x00000010      25   statics, across ~10 files (corrected below)
 
 `RAISE_CONTACT_IMPULSE_EVENTS` is set on 1,408 of 1,408 dynamic bodies and on
 none of the 12,456 that are not. It is derivable, exactly, from a state we

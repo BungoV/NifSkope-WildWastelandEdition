@@ -3,6 +3,28 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-22 — Read 25 rows off a list truncated at 25 and wrote down what they said
+
+**What:** a corpus scan printed "first 25 exceptions" and every one it printed was
+`PrydwenDestruction.nif`, so "0x00000010 on the 25 statics of
+PrydwenDestruction.nif" went into WW_CHANGES and a commit message. There are 25
+such bodies in total and they are spread over about ten files -- both arcade coin
+slots, seven gravestones, Prydwen. The cap and the count were the same number by
+coincidence, which is exactly the coincidence that makes a truncated list look
+complete.
+
+**Why:** the scan was written to show a sample and was read as if it were the
+population. Nothing in its output said "and 0 more", so there was nothing to
+notice.
+
+**Solution:** caught two hours later by a different check that printed the
+histogram instead of the exceptions -- which is the lesson. When a scan reports
+violations, print the GROUPED COUNTS, not the first N rows; a histogram cannot be
+truncated into a false pattern. And a "first N" cap must always print how many it
+withheld, even when that is zero. The mislabelled bit turned out to be
+RAISE_TRIGGER_EVENTS on trigger volumes, real data that now round-trips, so the
+correction was worth more than the tidy story it replaced.
+
 ## 2026-08-22 — Derived four Havok layouts by hand while the exe shipped their field names
 
 **What:** the `hknpBodyCinfo` layout in these notes was assembled from signature

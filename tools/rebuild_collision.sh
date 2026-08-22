@@ -114,6 +114,16 @@ while IFS=$'\t' read -r places rel; do
 		printf 'compound-fail\t%s\t%s\t%s\t%s\t-\n' "$places" "$was" "${shapes:-0}" "$rel" >> "$MAN"
 		skipped=$((skipped+1)); continue
 	fi
+	# and hknpBodyCinfo::flags. A dynamic body without RAISE_CONTACT_IMPULSE_EVENTS
+	# raises no contact event, so Fallout 4 never asks what it is made of and it
+	# makes NO IMPACT SOUND however right its materials are -- 170 of 170 bodies in
+	# the first Museum build were in that state, confirmed in game 2026-08-22.
+	# 2 means the file holds no bodies at all.
+	python "$R/tools/hkbodyflags.py" --quiet "$W/a.nif" >/dev/null 2>&1
+	if [ "$?" = "1" ]; then
+		printf 'bodyflags-fail\t%s\t%s\t%s\t%s\t-\n' "$places" "$was" "${shapes:-0}" "$rel" >> "$MAN"
+		skipped=$((skipped+1)); continue
+	fi
 	mkdir -p "$MOD/Meshes/$(dirname "$rel")"
 	cp -f "$W/a.nif" "$MOD/Meshes/$rel"
 	printf 'ok\t%s\t%s\t%s\t%s\t%s\n' "$places" "$was" "${shapes:-0}" "$rel" "$note" >> "$MAN"

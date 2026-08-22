@@ -254,6 +254,56 @@ struct HknpShape
 	}
 };
 
+/*! `hknpBodyCinfo::flags` bits this decoder and writer both name.
+ *
+ * The field is at cinfo +0x18 and `hknpBody::initialize` (1.10.155 @0x14daaf0)
+ * copies it into `hknpBody::m_flags` untouched apart from the low four bits,
+ * which the static/dynamic initialiser recomputes. `NVFlex::printHknpBodyInfo`
+ * @0x27afa4 is a debug printer that names every bit, which is where these two
+ * names come from rather than a guess.
+ */
+enum HknpBodyFlag : quint32
+{
+	/*! Without this the body raises no contact-impulse event, and Fallout 4
+	 * never asks what it is made of -- so it makes NO IMPACT SOUND, whatever its
+	 * materials say. `FOCollisionListener::OnContactImpulseEvent` @0x630c60 is
+	 * the handler; it calls `bhkUtilFunctions::GetMaterialForShape` once per body
+	 * and hands both materials to `BGSImpactManager::ProcessEvent` @0xd19e00,
+	 * which needs BOTH to resolve or neither surface makes a sound.
+	 *
+	 * Vanilla sets it on 1,408 of 1,408 dynamic bodies and on none of the 12,456
+	 * static or keyframed ones (13,889 bodies, 11,820 files under Interiors,
+	 * SetDressing and Furniture), so it is DERIVED here rather than carried.
+	 * Confirmed in game 2026-08-22: two Museum railings compiled without it were
+	 * silent, and sounded once it was patched in by hand.
+	 */
+	HKNP_RAISE_CONTACT_IMPULSE_EVENTS = 0x00000080u,
+	/*! USER_FLAG_0, which Fallout 4 reads as "add me to the world KEYFRAMED".
+	 *
+	 * `bhkNPCollisionObject::AccessBody` -> `test [body+0x40], 0x10000` ->
+	 * `SetMotionType(obj, 2)` -> `and [body+0x40], 0xfffeffff`, in the add-to-world
+	 * path at @0x1d73cfa; `SetMotionType` @0x1d7ebd0 with 2 runs
+	 * `hknpMotionCinfo::initializeAsKeyFramed`. So it is a one-shot: convert on
+	 * add, then clear.
+	 *
+	 * That is how a destructible ships. The body carries real mass and inertia
+	 * ready for the moment it breaks, but enters the world immovable so the
+	 * structure it is part of stays put. 348 of the 1,408 dynamic bodies carry
+	 * it and 287 of those are *Dest.nif -- but 56 non-Dest layer-4 bodies carry
+	 * it and 745 do not, so it is NOT derivable from anything modelled here and
+	 * has to be carried through the round trip.
+	 */
+	HKNP_ADD_KEYFRAMED = 0x00010000u,
+	/*! RAISE_TRIGGER_EVENTS: the body reports overlaps instead of only impacts.
+	 *
+	 * 25 of 13,889 vanilla bodies carry it and every one is STATIC -- both arcade
+	 * coin slots, seven gravestones' second body, and PrydwenDestruction. Nothing
+	 * modelled here predicts which, so like HKNP_ADD_KEYFRAMED it is carried
+	 * rather than derived, on "Body Flags" bit 2.
+	 */
+	HKNP_RAISE_TRIGGER_EVENTS = 0x00000010u,
+};
+
 //! Per-body physics decoded from the packfile (indexed by body id).
 //! Layouts validated against controlled Elric pairs + CK FileConvert XML
 //! (PropCollision mass 10 -> inverseMass 0.1, layer 10, motionType 2);

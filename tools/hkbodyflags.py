@@ -48,10 +48,27 @@ none of the 12,456 that are not -- derivable, exactly. USER_FLAG_0 is NOT:
 it leans towards destructibles (287 of its 348 are *Dest.nif) but 56 non-Dest
 layer-4 bodies carry it and 745 do not, so it has to be carried, not computed.
 
-`--set` writes 0x00010080 on every dynamic body (one with a motionProperties
-entry) and leaves statics and keyframed bodies alone. The word is patched in
-place inside the packfile's __data__ section, so no size and no fixup changes.
-Writes a .bak beside the file the first time.
+WHAT IS CHECKED
+
+  * a dynamic body (one with a motionProperties entry) has
+    RAISE_CONTACT_IMPULSE_EVENTS
+  * a static or keyframed body has flags 0, which is what all 12,456 vanilla
+    ones carry
+  * no body carries a bit outside {RAISE_CONTACT_IMPULSE_EVENTS, USER_FLAG_0,
+    RAISE_TRIGGER_EVENTS} -- the only three the 13,889-body corpus uses
+
+USER_FLAG_0 is ALLOWED but never REQUIRED: it is real data that has to be
+carried through a round trip, not something a checker can derive. Requiring it
+would fail every plain dynamic prop -- Kickball01, Shovel01, AlarmClock all
+carry 0x80 alone -- and demanding it is how a check starts lying.
+
+Exit 0 if every body holds up, 1 if any does not, 2 if the file has no bodies.
+
+`--set` repairs rather than stamps: a dynamic body gets
+RAISE_CONTACT_IMPULSE_EVENTS plus whatever USER_FLAG_0 it already had, and a
+static or keyframed one gets 0. The word is patched in place inside the
+packfile's __data__ section, so no size and no fixup change. Writes a .bak
+beside the file the first time.
 """
 import os
 import shutil
@@ -61,7 +78,24 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hkmatrun import nif_blobs, Pack
 
-DYNAMIC_FLAGS = 0x00010080
+RAISE_TRIGGER_EVENTS = 0x00000010
+RAISE_CONTACT_IMPULSE_EVENTS = 0x00000080
+USER_FLAG_0 = 0x00010000
+# carried through the round trip rather than derived from anything modelled
+CARRIED = USER_FLAG_0 | RAISE_TRIGGER_EVENTS
+KNOWN = RAISE_CONTACT_IMPULSE_EVENTS | CARRIED
+
+
+def wanted(kind, value):
+    """What this body's flags SHOULD be, given what it already carries.
+
+    Only RAISE_CONTACT_IMPULSE_EVENTS is derived. The carried bits are preserved
+    where they are found and never demanded where they are not -- requiring
+    USER_FLAG_0 would fail every plain dynamic prop, and requiring
+    RAISE_TRIGGER_EVENTS would fail 11,305 of 11,330 statics.
+    """
+    derived = RAISE_CONTACT_IMPULSE_EVENTS if kind == 'dynamic' else 0
+    return derived | (value & CARRIED)
 
 BITS = [
     (0x00000001, 'IS_STATIC'), (0x00000002, 'IS_DYNAMIC'),
@@ -114,10 +148,12 @@ def bodies(pk):
     return out
 
 
-def run(path, write):
+def run(path, write, quiet=False):
+    """(violations, bodies, patched) for one file."""
     raw = open(path, 'rb').read()
     edits = []
     lines = []
+    bad = 0
     for _, at, blob in nif_blobs(path):
         try:
             pk = Pack(blob)
@@ -125,17 +161,23 @@ def run(path, write):
             continue
         for k, off, kind in bodies(pk):
             value = pk.u32(off + 0x18)
-            want = DYNAMIC_FLAGS if kind == 'dynamic' else 0
-            mark = '' if value == want else '   <- want %#010x' % want
+            want = wanted(kind, value)
+            ok = (value == want) and not (value & ~KNOWN)
+            mark = '' if ok else '   <- want %#010x' % want
             lines.append('  body %d %-10s flags=%#010x [%s]%s'
                          % (k, kind, value, decode(value), mark))
+            if not ok:
+                bad += 1
             if write and value != want:
                 edits.append((at + pk.base + off + 0x18, want))
-    print(os.path.basename(path))
-    for line in lines:
-        print(line)
+    if not quiet or bad:
+        print(os.path.basename(path))
+        for line in lines:
+            print(line)
+    if not lines:
+        return 0, 0, 0
     if not edits:
-        return 0
+        return bad, len(lines), 0
     if not os.path.exists(path + '.bak'):
         shutil.copy2(path, path + '.bak')
     data = bytearray(raw)
@@ -144,20 +186,32 @@ def run(path, write):
     with open(path, 'wb') as fh:
         fh.write(bytes(data))
     print('  patched %d bodies' % len(edits))
-    return len(edits)
+    return 0, len(lines), len(edits)
 
 
 def main(argv):
     write = '--set' in argv
+    quiet = '--quiet' in argv
     paths = [a for a in argv if not a.startswith('--')]
     if not paths:
         print(__doc__)
         return 2
-    total = 0
+    bad = seen = patched = 0
     for p in paths:
-        total += run(p, write)
-    if write:
-        print('patched %d bodies in total' % total)
+        b, n, w = run(p, write, quiet)
+        bad += b
+        seen += n
+        patched += w
+    if write and not quiet:
+        print('patched %d bodies in total' % patched)
+    if not seen:
+        return 2
+    if bad:
+        if not quiet:
+            print('%d of %d bodies carry the wrong flags' % (bad, seen))
+        return 1
+    if not quiet:
+        print('%d bodies, all flags as vanilla writes them' % seen)
     return 0
 
 

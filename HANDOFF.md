@@ -32,16 +32,22 @@ are proven too (110 of 114 identical to vanilla within 0.46 mm,
 `tools/collision_ab.py`), every file has exactly one physics system, and all 22
 keyframed records carry the inertia sentinel.
 
-## NEXT SESSION STARTS HERE: walk into the two patched railings (2026-08-22)
+## NEXT SESSION STARTS HERE: the railings' second symptom (2026-08-22)
 
-The impact-sound dig is done. **One live test is waiting and it takes a minute.**
+**Impact sound: DONE and confirmed in game.** bungo walked into the patched
+railings and they make a wood sound. Compile now writes `hknpBodyCinfo::flags`
+properly and the whole Museum set has been rebuilt with it -- 114 of 114, every
+body's flags byte-matching vanilla. Full account in WW_CHANGES 2026-08-22k.
 
-`bldwoodpsmrailstairstiny01rdest.nif` and `...01ldest.nif` in the test mod are
-patched by hand (`.bak` beside each, written by `tools/hkbodyflags.py --set`) to
-carry the one field vanilla has and every body we compile does not. Walk into
-them. If they make a wood impact sound the cause is confirmed and the writer
-change is next; if they are still silent the field is ruled out -- see "if it is
-still silent" below.
+**What is left on those railings:** they still come apart when walked into, where
+vanilla needs a shot. There is now a strong candidate, found while fixing the
+sound and NOT yet tested: `USER_FLAG_0` means "enter the world KEYFRAMED, once"
+(`bhkNPCollisionObject::AccessBody` -> `test [body+0x40], 0x10000` ->
+`SetMotionType(obj, 2)` -> clear it; `SetMotionType` @0x1d7ebd0 with 2 runs
+`hknpMotionCinfo::initializeAsKeyFramed`). We were dropping it, so our
+destructibles entered the world DYNAMIC and simply got shoved. The rebuilt set
+carries it on all 80 bodies that should have it. **Walk into them again: if they
+now hold until shot, that symptom is closed too.**
 
 **What the engine reads to choose an impact sound** (1.10.155 RVAs; the full
 derivation is WW_CHANGES 2026-08-22j):
@@ -68,17 +74,12 @@ reads it; what is missing is the middle -- Decompile has no `bhkRigidBody` field
 to put it in, so Compile starts from a default-constructed `HknpBodyPhys`, whose
 `cinfoFlags` is 0.
 
-**If the test passes,** the fix is a lane on the editable body for the cinfo
-flags, plus a derived default for bodies Compile creates from scratch: a dynamic
-body (one with a motionProperties entry) gets `RAISE_CONTACT_IMPULSE_EVENTS`,
-everything else gets 0 -- exact on all 13,889. `USER_FLAG_0` (0x10000, on 348 of
-the 1,408) is NOT derivable and has to be carried.
-
-**If it is still silent,** the next suspect is the shape key.
-`GetMaterialForShape` takes the key from the contact manifold and indexes the
-leaf with it; the mesh shape's `numShapeKeyBits` at +0x12 is 5 on ours and on
-vanilla, so the question is what the narrowphase reports rather than what the
-file stores. Same method, starting at `hknpBSShapeCodec::decode` @0x1dd76d0.
+**How it is written now:** `RAISE_CONTACT_IMPULSE_EVENTS` is DERIVED from
+`in.dynamic`; `USER_FLAG_0` and `RAISE_TRIGGER_EVENTS` are CARRIED on
+`bhkRigidBody`'s "Body Flags" bits 1 and 2, because neither follows from anything
+we model. Those four values are all the corpus uses, and the rule reproduces all
+13,889. `tools/hkbodyflags.py` checks it and is a gate in
+`tools/rebuild_collision.sh`.
 
 **Ruled out for good, and why the earlier reading was wrong:** the shape header
 at +0x18 is only the FALLBACK for a composite shape, which is why hand-patching
@@ -91,11 +92,6 @@ so the permuted body order was never a difference there.
 tables -- `<Class>Class_Members`, const arrays naming every field and its offset.
 `hknpBodyCinfo`, `hknpBody`, `hknpMotionCinfo` and `hknpPhysicsSystemData` all
 came out in a single query. Read those before deriving a layout by hand.
-
-**Also still open on those railings:** they break off when walked into, where
-vanilla needs a shot (`...01rdest`). Possibly the same cause -- with no contact
-impulse event the game never runs its damage model on the hit and the body is
-merely shoved -- but that is a guess, and untouched either way.
 
 What is still open, in order:
 

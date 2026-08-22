@@ -1101,6 +1101,18 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	}
 	phys.hasMotion = in.dynamic || in.keyframed;
 	phys.motionIndex = ( in.dynamic || in.keyframed ) ? 0 : -1;
+	/* cinfo +0x18. Compile wrote 0 here on every body it built, which cost every
+	 * dynamic body its RAISE_CONTACT_IMPULSE_EVENTS bit -- and without that the
+	 * engine never raises the contact event, so it never asks what the body is
+	 * made of and it makes no impact sound at all. See HknpBodyFlag, which
+	 * carries the disassembly and the corpus counts. `in.dynamic` is exactly the
+	 * measured predicate: it is what decides whether a motionProperties record
+	 * gets written (sys.motionCount below), and vanilla sets the bit on every
+	 * body that has one and no body that does not.
+	 */
+	phys.cinfoFlags = ( in.dynamic ? quint32( HKNP_RAISE_CONTACT_IMPULSE_EVENTS ) : 0u )
+		| ( in.addKeyframed ? quint32( HKNP_ADD_KEYFRAMED ) : 0u )
+		| ( in.raiseTriggerEvents ? quint32( HKNP_RAISE_TRIGGER_EVENTS ) : 0u );
 	if ( in.keyframed && !in.dynamic ) {
 		/* The inertia record's own index must say NO MOTION RECORD, or the engine
 		 * indexes a dyn_motion array that is not there -- see dynamicInertia,
@@ -6227,6 +6239,12 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	 * collapsing it to a static is what stopped every door in Concord opening.
 	 */
 	input.keyframed = sourceMotion == 6u;
+	/* Body Flags bit 1 -- a DYNAMIC body that the engine converts to keyframed
+	 * once, as it enters the world. Decompile puts it there; see HknpBodyFlag.
+	 * Bit 0 is the Wind convention, refused above.
+	 */
+	input.addKeyframed = ( nif->get<quint32>( body, "Body Flags" ) & 2u ) != 0u;
+	input.raiseTriggerEvents = ( nif->get<quint32>( body, "Body Flags" ) & 4u ) != 0u;
 	input.friction = info.isValid() ? nif->get<float>( info, "Friction" ) : 0.5f;
 	input.restitution = info.isValid() ? nif->get<float>( info, "Restitution" ) : 0.4f;
 	input.gravityFactor = info.isValid() ? nif->get<float>( info, "Gravity Factor" ) : 1.0f;

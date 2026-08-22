@@ -2476,6 +2476,18 @@ public:
 					bhkSetFilterField( nif, iBody, QStringLiteral( "Flags" ), phys.filterFlags );
 					bhkSetFilterField( nif, iBody, QStringLiteral( "Group" ), phys.filterGroup );
 				}
+				/* Body Flags bit 1 carries HKNP_ADD_KEYFRAMED across the round
+				 * trip. It is the one bit of cinfo +0x18 that is not derivable
+				 * from anything else we model -- a dynamic destructible that
+				 * enters the world immovable looks exactly like a dynamic prop
+				 * until you read this. Bit 0 is the Wind convention; leave it.
+				 */
+				{
+					quint32 bodyFlags = nif->get<quint32>( iBody, "Body Flags" ) & ~6u;
+					if ( phys.cinfoFlags & HKNP_ADD_KEYFRAMED ) bodyFlags |= 2u;
+					if ( phys.cinfoFlags & HKNP_RAISE_TRIGGER_EVENTS ) bodyFlags |= 4u;
+					nif->set<quint32>( iBody, "Body Flags", bodyFlags );
+				}
 				nif->set<float>( iInfo, "Friction", phys.friction );
 				nif->set<float>( iInfo, "Restitution", phys.restitution );
 				// per-body, not per-system: a ragdoll's bones carry different
