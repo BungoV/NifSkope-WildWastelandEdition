@@ -32,41 +32,70 @@ are proven too (110 of 114 identical to vanilla within 0.46 mm,
 `tools/collision_ab.py`), every file has exactly one physics system, and all 22
 keyframed records carry the inertia sentinel.
 
-## NEXT SESSION STARTS HERE: the impact-sound PDB dig (2026-08-22, agreed with bungo)
+## NEXT SESSION STARTS HERE: walk into the two patched railings (2026-08-22)
 
-**Symptom, live:** the wood railings in ConcordMuseum01 make NO impact sound with
-our collision, where vanilla's do. Two references bungo tested:
-`bldwoodpsmrailstairstiny01rdest.nif` (0003034F) and `...01ldest.nif` (0003034E).
+The impact-sound dig is done. **One live test is waiting and it takes a minute.**
 
-**Everything material-carrying is IDENTICAL to vanilla** -- checked and ruled out:
+`bldwoodpsmrailstairstiny01rdest.nif` and `...01ldest.nif` in the test mod are
+patched by hand (`.bak` beside each, written by `tools/hkbodyflags.py --set`) to
+carry the one field vanilla has and every body we compile does not. Walk into
+them. If they make a wood impact sound the cause is confirmed and the writer
+change is next; if they are still silent the field is ruled out -- see "if it is
+still silent" below.
 
-  * the material table entry, byte for byte (`1dd9c611`)
-  * the `hkRefCountedProperties` keys (`f601` materials, `f100` mass)
-  * the per-body material words (`000000ff` / `000100ff`; the high u16 is just
-    the body's own index)
-  * the per-triangle run table (1 run, 11 primitives)
-  * the shape header at +0x18 -- HYPOTHESIS TESTED AND REFUTED. Vanilla's mesh
-    disagrees with itself (header `fcb37ea0`, table `1dd9c611`) and we copy the
-    table over the header; patching one shipped railing's header back to
-    `fcb37ea0` by hand changed NOTHING in game. Those two files still carry that
-    hand-patch, which is not what the writer produces.
+**What the engine reads to choose an impact sound** (1.10.155 RVAs; the full
+derivation is WW_CHANGES 2026-08-22j):
 
-The only remaining difference is that our BODY ORDER is a permutation of
-vanilla's (the body with filter `0x8004` is index 0 for us, index 1 for vanilla).
-Each body carries its own correct data and each node points at its own body, so
-it is not obvious how that silences an impact -- but it is the last thing left.
+    FOCollisionListener::OnContactImpulseEvent          @0x630c60
+        matA = bhkUtilFunctions::GetMaterialForShape(bodyA->m_shape, keyA)
+        matB = ... bodyB ...
+        BGSImpactManager::ProcessEvent({matA, matB, contactPos, velocity})
+    bhkUtilFunctions::GetMaterialForShape              @0x1d8c300
+        key == 0xffffffff -> shape+0x18; !(shape+0x10 & 4) -> 0; else the leaf
+    BGSImpactManager::ProcessEvent                     @0xd19e00
+        BOTH materials must resolve -- either null and BOTH surfaces go silent
 
-**The dig:** find what the engine actually reads to choose an impact sound --
-`BGSImpactManager`, the material-type lookup off a collision hit, whatever
-consumes the Havok material after a contact -- and see which field it consults.
-That method (disassemble the LIVE 1.11.221 build at the address that matters,
-`f4re.py disasm --rva`, names from the 1.10.155 PDB via `f4pdb.py`) produced the
-convex bit, the keyframed inertia sentinel and `hknpShapeInstance::m_flags`, each
-in minutes, after static comparison had failed on all three.
+**We never reach it.** The event is named after the flag that raises it.
+`hknpBody::m_flags` bit 7 is `RAISE_CONTACT_IMPULSE_EVENTS`, named by the
+engine's own debug printer `NVFlex::printHknpBodyInfo` @0x27afa4, and it arrives
+from `hknpBodyCinfo::flags` at cinfo +0x18: `hknpBody::initialize` @0x14daaf0
+copies that word through untouched apart from the low four bits.
+
+Vanilla sets it on **1,408 of 1,408 dynamic bodies** and on none of the 12,456
+static or keyframed ones (13,889 bodies, 11,820 files). Our Museum rebuild sets
+it on **0 of 170**. The writer already writes the field and the decoder already
+reads it; what is missing is the middle -- Decompile has no `bhkRigidBody` field
+to put it in, so Compile starts from a default-constructed `HknpBodyPhys`, whose
+`cinfoFlags` is 0.
+
+**If the test passes,** the fix is a lane on the editable body for the cinfo
+flags, plus a derived default for bodies Compile creates from scratch: a dynamic
+body (one with a motionProperties entry) gets `RAISE_CONTACT_IMPULSE_EVENTS`,
+everything else gets 0 -- exact on all 13,889. `USER_FLAG_0` (0x10000, on 348 of
+the 1,408) is NOT derivable and has to be carried.
+
+**If it is still silent,** the next suspect is the shape key.
+`GetMaterialForShape` takes the key from the contact manifold and indexes the
+leaf with it; the mesh shape's `numShapeKeyBits` at +0x12 is 5 on ours and on
+vanilla, so the question is what the narrowphase reports rather than what the
+file stores. Same method, starting at `hknpBSShapeCodec::decode` @0x1dd76d0.
+
+**Ruled out for good, and why the earlier reading was wrong:** the shape header
+at +0x18 is only the FALLBACK for a composite shape, which is why hand-patching
+it changed nothing. And the "per-body material words `000000ff` / `000100ff`,
+whose high u16 is just the body's own index" are two named fields, `qualityId`
+(u8 at +0x10) and `materialId` (u16 at +0x12); ours and vanilla's agree on both,
+so the permuted body order was never a difference there.
+
+**A method note worth keeping:** the exe carries Havok's own `hkClass` reflection
+tables -- `<Class>Class_Members`, const arrays naming every field and its offset.
+`hknpBodyCinfo`, `hknpBody`, `hknpMotionCinfo` and `hknpPhysicsSystemData` all
+came out in a single query. Read those before deriving a layout by hand.
 
 **Also still open on those railings:** they break off when walked into, where
-vanilla needs a shot (`...01rdest`). Separate cause -- impulse, so mass or
-inertia on the destructible body -- and untouched.
+vanilla needs a shot (`...01rdest`). Possibly the same cause -- with no contact
+impulse event the game never runs its damage model on the hit and the body is
+merely shoved -- but that is a guess, and untouched either way.
 
 What is still open, in order:
 

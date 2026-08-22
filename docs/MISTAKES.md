@@ -3,6 +3,39 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-22 — Derived four Havok layouts by hand while the exe shipped their field names
+
+**What:** the `hknpBodyCinfo` layout in these notes was assembled from signature
+scans and controlled Elric pairs, and one word of it was read wrong. Cinfo +0x10
+went into HANDOFF as "the per-body material word, whose high u16 is just the
+body's own index"; it is two fields, `qualityId` (u8 at +0x10) and `materialId`
+(u16 at +0x12). Fallout4.exe carries Havok's own `hkClass` reflection --
+`<Class>Class_Members`, a const array of `hkClassMember`, 0x28 bytes each, with a
+name pointer and an offset per field. One query named every field of
+`hknpBodyCinfo`, `hknpBody`, `hknpMotionCinfo` and `hknpPhysicsSystemData`,
+including `flags` at cinfo +0x18 -- the field whose absence the entire
+impact-sound dig turned out to be about. `hknpMotionCinfo +0x08`, filed here as
+"density", is `massFactor` by the same table.
+
+**Why:** "the PDB says what the engine READS" was already the rule, and it was
+taken to mean "disassemble the function that touches the field". Disassembly
+answers what a field DOES. Reflection answers what it IS, in one read, and the
+tables were never looked for because nothing had said they were there.
+
+**Solution:** before deriving any Havok struct layout by hand, dump its
+reflection. `<Class>Class_Members` for fields, `<Class><Name>EnumItems` for enum
+values (that is how `IS_STATIC / IS_DYNAMIC / IS_KEYFRAMED / IS_ACTIVE` were
+confirmed). The class objects themselves are runtime-initialised and read back
+empty from the on-disk image; the member and item arrays are const and readable.
+Note the reflection is the SERIALISED subset -- `hknpBody::FlagsEnum` reflects
+only four of its bits -- so for the rest, look for the engine's own debug
+printer, which in this case (`NVFlex::printHknpBodyInfo`) names all 29.
+
+**And a second data point for an older rule.** 2026-08-22i closed with "a field
+with a small closed set of values is data". `hknpBodyCinfo::flags` takes exactly
+four values over 13,889 vanilla bodies and Compile writes 0 for all of them. Same
+shape, eight entries apart, found the same way and not before.
+
 ## 2026-08-21 — Spent half an hour reproducing a bug that had been fixed for ten days
 
 **What:** picked `block_rename.sh` hangs 7-in-10 off the backlog, built a stack

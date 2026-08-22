@@ -1,5 +1,146 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-22j — RAISE_CONTACT_IMPULSE_EVENTS, the bit that plays the sound
+
+The wood railings in ConcordMuseum01 make no impact sound with our collision.
+Everything that carries a material had already been held against vanilla byte for
+byte and was identical -- the material table entry, the `hkRefCountedProperties`
+keys, the per-triangle run table, and the shape header at +0x18, which was tested
+by hand-patching a shipped railing back to vanilla's value and changed nothing.
+So the question stopped being "which material do we get wrong" and became "what
+does the engine read to choose an impact sound at all".
+
+Three functions, and the answer is in the name of the first one:
+
+    FOCollisionListener::OnContactImpulseEvent          1.10.155 @0x630c60
+        matA = bhkUtilFunctions::GetMaterialForShape(bodyA->m_shape, keyA)
+        matB = bhkUtilFunctions::GetMaterialForShape(bodyB->m_shape, keyB)
+        BGSImpactManager::ProcessEvent({matA, matB, contactPos, velocity})
+
+    bhkUtilFunctions::GetMaterialForShape              @0x1d8c300
+        shapeKey == 0xffffffff  -> shape->m_userData, the u32 at +0x18
+        !(shape->m_flags & 4)   -> 0, no material at all (bit 2 is COMPOSITE)
+        otherwise decode the leaf for that key, falling back to +0x18 if it is 0
+
+    BGSImpactManager::ProcessEvent                     @0xd19e00
+        GetMaterialFromID(matA); GetMaterialFromID(matB)
+        EITHER null and it returns -- silence for BOTH surfaces, not one
+        then PlayCollisionSound(A,B) and PlayCollisionSound(B,A)
+
+That also explains why patching the header changed nothing. For a composite shape
++0x18 is only the fallback, and the leaf resolves first; the hypothesis was right
+about the field and wrong about the field mattering.
+
+We never reach any of it, because the event is named after the flag that raises
+it, and we do not set the flag.
+
+### hkClass: the engine ships the field names
+
+The exe carries Havok's own reflection tables -- `<Class>Class_Members`, arrays
+of `hkClassMember` at 0x28 bytes each, each with a name pointer and an offset.
+They are const data, readable straight out of the 1.10.155 image, and they settle
+layouts we had been deriving by signature scan:
+
+    hknpBodyCinfo   +0x00 shape        +0x08 reservedBodyId  +0x0c motionId
+                    +0x10 qualityId    +0x12 materialId      +0x14 collisionFilterInfo
+                    +0x18 flags        +0x1c collisionLookAheadDistance
+                    +0x20 name         +0x28 userData        +0x30 position
+                    +0x40 orientation  +0x50 spuFlags        +0x58 localFrame
+
+    hknpBody        +0x40 flags        +0x44 collisionFilterInfo  +0x48 shape
+                    +0x50 aabb   +0x60 id   +0x68 motionId   +0x70 materialId
+                    +0x72 qualityId    +0x7e spuFlags
+
+    hknpMotionCinfo +0x00 motionPropertiesId  +0x04 inverseMass  +0x08 massFactor
+                    +0x20 inverseInertiaLocal +0x30 centerOfMassWorld
+
+    hknpPhysicsSystemData  +0x10 materials  +0x20 motionProperties
+                    +0x30 motionCinfos  +0x40 bodyCinfos  +0x50 constraintCinfos
+
+Two corrections fall out. The word at cinfo +0x10 that these notes called "the
+per-body material word, whose high u16 is just the body's own index" is two
+fields: `qualityId` (a u8, 0xff on everything, which the engine reads as "use the
+default") and `materialId` (a u16). It equals the body index because each body
+gets its own material slot, and ours and vanilla's agree on both railings -- so
+the permuted body order never was a difference in that word. And
+`hknpMotionCinfo +0x08`, filed here as "density", is `massFactor`.
+
+### The flag
+
+`hknpBody::initialize` @0x14daaf0 ends:
+
+    mov eax, [cinfo+0x14] ; mov [body+0x44], eax     collisionFilterInfo
+    mov eax, [cinfo+0x18] ; and eax, 0xfffffff0      cinfo.flags, low 4 bits dropped
+    or  eax, 0x400        ; mov [body+0x40], eax
+
+`initializeStaticBody` / `initializeDynamicBody` then OR in IS_STATIC or
+IS_DYNAMIC, which is why the low four bits are discarded. **Every other bit of
+`hknpBodyCinfo::flags` reaches the live body verbatim.**
+
+`NVFlex::printHknpBodyInfo` @0x27afa4 walks `hknpBody::m_flags` bit by bit with a
+string literal for each, so the engine names the whole word itself:
+
+    0x0001 IS_STATIC        0x0002 IS_DYNAMIC       0x0004 IS_KEYFRAMED
+    0x0008 IS_ACTIVE        0x0010 RAISE_TRIGGER_EVENTS
+    0x0020 RAISE_MANIFOLD_STATUS_EVENTS
+    0x0040 RAISE_MANIFOLD_PROCESSED_EVENTS
+    0x0080 RAISE_CONTACT_IMPULSE_EVENTS
+    0x0100 DONT_COLLIDE     0x0200 DONT_BUILD_CONTACT_JACOBIANS
+    0x0400 TEMP_REBUILD_COLLISION_CACHES   0x0800 TEMP_DROP_NEW_CVX_CVX_COLLISIONS
+    0x1000 TEMP_BODY_OR_AABB_IS_MODIFIED   0x2000 TEMP_REBUILD_CONTACT_CACHES
+    0x4000 IS_NON_RUNTIME   0x8000 IS_BREAKABLE
+    0x10000 USER_FLAG_0 .. 0x80000 USER_FLAG_3
+    0x100000 ENABLE_RESTITUTION      0x200000 ENABLE_TRIGGER_MODIFIER
+    0x400000 ENABLE_IMPULSE_CLIPPING 0x800000 ENABLE_MASS_CHANGER
+    0x1000000 ENABLE_SOFT_CONTACTS   0x2000000 ENABLE_SURFACE_VELOCITY
+    0x4000000 USER_FLAG_4 .. 0x10000000 USER_FLAG_6
+
+`hknpBody::isStaticOrKeyframed` @0xde6e0 is four instructions, `flags & 5`, and
+that is the same mask `OnContactImpulseEvent` applies before it will compute an
+impact velocity at all -- a static or keyframed body contributes nothing, and two
+of them together are silent by design. That part we already get right.
+
+### What vanilla stores, and what we store
+
+Over 13,889 bodies in 11,820 vanilla files under `Meshes\Interiors`,
+`SetDressing` and `Furniture`, `hknpBodyCinfo::flags` takes exactly four values:
+
+    0x00000000  12,456   every static (11,305) and every keyframed (1,151)
+    0x00000080   1,060   dynamic
+    0x00010080     348   dynamic
+    0x00000010      25   the statics of PrydwenDestruction.nif
+
+`RAISE_CONTACT_IMPULSE_EVENTS` is set on 1,408 of 1,408 dynamic bodies and on
+none of the 12,456 that are not. It is derivable, exactly, from a state we
+already model: a body with a motionProperties entry gets it, everything else does
+not. `USER_FLAG_0` is not derivable -- 287 of its 348 are `*Dest.nif`, but 56
+non-Dest layer-4 bodies carry it and 745 do not -- so that one has to be carried
+through the round trip rather than computed.
+
+The Museum rebuild, 114 files: **all 255 bodies carry 0**, including all 170
+dynamic ones. The 63 statics and 22 keyframed bodies are right by accident,
+because 0 is what they should be.
+
+The writer does not drop the field -- `hknpencode.cpp:1913` writes
+`b.cinfoFlags` and `hknpdecode.cpp:1115` reads it. It is lost between them:
+Decompile turns the packfile into editable `bhkRigidBody` blocks and no block
+field carries it, so Compile builds a fresh `HknpBodyPhys`, whose `cinfoFlags`
+default is 0.
+
+### Not proved yet
+
+None of this has been in the game. `tools/hkbodyflags.py` reports the field,
+decodes it by name, and `--set` writes vanilla's value on dynamic bodies in place
+-- same size, no fixups touched, `hkmatrun` and `hkcompound` still green after.
+Run against the two VANILLA railings it asks for no change, which is the control:
+the derived rule reproduces vanilla exactly on the files this is about. The two
+railings bungo tested are patched and waiting for him to walk into them. If they
+sound, the writer change follows. If they do not, the field is ruled out and the
+next suspect is the shape key the contact reports, which is what
+`GetMaterialForShape` indexes the leaf with.
+
+Tools added: `tools/hkbodyflags.py`.
+
 ## 2026-08-22i — hknpShapeInstance::m_flags, named by the engine
 
 The museum doors had no collision, and after the compound child size went in they

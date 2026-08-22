@@ -314,10 +314,25 @@ struct HknpBodyPhys
 	//! and one of 38 values on the rest, so it is residue rather than a field --
 	//! carried because a rewrite cannot invent it. See HknpConstraint::rawData.
 	quint32 positionW = 0;
-	/*! cinfo +0x18, a small bit field. NOT a constant, and not a function of
-	 * anything modelled here: it reads 0x00010080 on every ragdoll body, 0 on all
-	 * 66 static physics bodies, and splits 9 to 2 between 0x00000080 and 0 on the
-	 * dynamic ones. Recorded rather than derived.
+	/*! cinfo +0x18 -- `hknpBodyCinfo::flags`, named by Havok's own reflection
+	 * (hknpBodyCinfoClass_Members in Fallout4.exe 1.10.155 @0x383e9a0).
+	 *
+	 * `hknpBody::initialize` @0x14daaf0 does `body->m_flags = (cinfo->flags &
+	 * ~0xF) | 0x400`, then the static/dynamic initialiser ORs in IS_STATIC or
+	 * IS_DYNAMIC -- so the low four bits are recomputed and EVERY OTHER BIT
+	 * reaches the live body verbatim. `NVFlex::printHknpBodyInfo` @0x27afa4 names
+	 * them all; the one that matters here is bit 7, RAISE_CONTACT_IMPULSE_EVENTS,
+	 * which is what makes Fallout 4 fire FOCollisionListener::OnContactImpulseEvent
+	 * and therefore what makes a collision play an impact sound at all.
+	 *
+	 * Over 13,889 vanilla bodies in 11,820 files the word takes exactly four
+	 * values: 0 on every static (11,305) and every keyframed (1,151) body,
+	 * 0x00000080 on 1,060 dynamic ones, 0x00010080 on 348 more, and 0x00000010 on
+	 * the 25 statics of PrydwenDestruction.nif. So bit 7 IS derivable, exactly --
+	 * a body with a motionProperties entry has it and nothing else does -- while
+	 * USER_FLAG_0 (0x10000) is not: it leans towards destructibles, 287 of its 348
+	 * being *Dest.nif, but 56 non-Dest layer-4 bodies carry it and 745 do not.
+	 * Carry it; derive bit 7 only for a body Compile invents.
 	 */
 	quint32 cinfoFlags = 0;
 
@@ -337,7 +352,9 @@ struct HknpBodyPhys
 	 * read them without checking.
 	 */
 	float mass = 0.0f;                  //!< 1 / (dyn_inertia +0x04)
-	float density = 0.0f;               //!< dyn_inertia +0x08
+	//! dyn_inertia +0x08. Havok calls it `hknpMotionCinfo::massFactor`
+	//! (hknpMotionCinfoClass_Members @0x2dff9a0), not a density.
+	float density = 0.0f;
 	/*! dyn_inertia +0x20/24/28: the diagonal of the INVERSE inertia tensor.
 	 *
 	 * Not the inertia, despite the slot's name in every earlier revision of this
