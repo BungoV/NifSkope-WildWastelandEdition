@@ -42,21 +42,37 @@ more.
 
 **What is left, and it is one piece of work rather than two:**
 
-  1. **Constraints through the editable form, THEN multi-body.** Measured on the
-     Brahmin skeleton 2026-08-23 and the backlog had this backwards: the
-     assembler ALREADY writes a 39-body ragdoll byte for byte, constraints
-     included (`--roundtrip`: 2/2 packfiles, 30/30 ragdoll, 8/8 hinge, 41/41
-     capsules). What breaks is Decompile, which emits 41 bodies and **zero
-     constraints** -- and a ragdoll without its articulation is 41 loose
-     capsules. The decoder fills `HknpConstraint` completely and the encoder
-     writes it; only the editable middle is missing, exactly as it was for the
-     mesh shape builder and for `cinfoFlags`. nif.xml already defines
-     `bhkRagdollConstraint` and `bhkLimitedHingeConstraint` with the same
-     fields, so it is a mapping in both directions rather than a decode.
-     Multi-body compile matters because a constraint names TWO bodies and both
-     must sit in one system -- so either the merge carries constraints and
-     remaps them the way it already remaps bodies, or Compile builds the whole
-     file at once. See WW_CHANGES 2026-08-23f.
+  1. **Multi-body compile, which is now the only thing between here and a
+     ragdoll round trip.** The joints landed 2026-08-23 (WW_CHANGES 2026-08-23g):
+     Decompile writes `bhkRagdollConstraint` / `bhkLimitedHingeConstraint`
+     blocks, `tlCollReadConstraint` reads them back, and 1202 of 1202 corpus
+     joints go through that form byte-identically. What is left is the reason
+     Compile still cannot use them: **a joint names TWO bodies and both have to
+     be in the same system**, and Compile builds one `bhkPhysicsSystem` per body
+     because it compiles one body at a time.
+
+     Two shapes it could take, and the second is the honest one:
+
+       * the merge carries constraints and remaps their body indices the way it
+         already remaps bodies and shapes -- but by the time the merge runs, the
+         `bhkRigidBody` blocks are gone (Compile removes the branch) so the
+         Entity links dangle. Rebinding them to the owning NODE in between works
+         but leaves a `Ptr` to `bhkEntity` pointing at an NiNode, which the
+         viewport's own constraint drawing would not survive;
+       * **Compile builds the whole file at once**: enumerate every body, build
+         one `HknpSystem` with all of them, read the constraint blocks while the
+         bodies still exist, and write ONE system plus one
+         `bhkNPCollisionObject` per node. `tlCollCompileConvex` currently
+         returns encoded bytes for a single body, so this is a refactor of where
+         the system is assembled rather than new format work -- and
+         `hknpEncodeSystem` already writes multi-body systems byte for byte.
+
+     Then the last piece for ragdolls specifically is the `hkaSkeleton` copy,
+     which no NIF block carries. It may be derivable from the node hierarchy
+     (bone index equals body index, parents from node parents, reference pose
+     from node transforms) -- `HknpBone` is fully modelled and
+     `hknpEncodeSkeleton` writes it, so that is the same shape of gap the joints
+     just were. Measure before assuming.
   2. ~~Body ORDER~~ **CLOSED 2026-08-23** (`acdd63b`). Vanilla's body index
      follows the block index of the node that owns the body -- 46 of 46
      multi-body files, no exceptions -- and the merge now orders parts that way

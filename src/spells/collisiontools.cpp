@@ -6873,6 +6873,304 @@ public:
 
 REGISTER_SPELL( spCompileCollision )
 
+/*! ===== A joint's editable form ============================================
+ *
+ * A ragdoll is its capsules AND the joints that articulate them, and Decompile
+ * wrote only the capsules. The decoder fills `HknpConstraint` completely and
+ * `hknpEncodeRagdollConstraintData` writes it back byte for byte -- 30 of 30 on
+ * the Brahmin skeleton -- so the format was never what stopped a ragdoll. What
+ * was missing is the editable middle: no NIF block carried a joint, so Decompile
+ * dropped every one and Compile had nothing to read back.
+ *
+ * nif.xml already describes the destination. `bhkRagdollConstraint` and
+ * `bhkLimitedHingeConstraint` are Bethesda's own serialisation of the same two
+ * hkp constraint datas, field for field, so this is a MAPPING in both directions
+ * rather than a decode.
+ *
+ * THE FRAMES MAP POSITIONALLY, AND THAT IS MEASURED, NOT ASSUMED. Havok stores
+ * each side of a joint as an hkTransform -- four hkVector4s, three basis vectors
+ * then the pivot -- and the NIF spells the same four out as four named fields in
+ * that order; nif.xml says so itself against the hinge ("In reality Havok loads
+ * these as Transform A and Transform B using hkTransform"). The names are then
+ * pinned by a property only the right ordering has: the third vector is the cross
+ * product of the first two. NifSkope's own "Recompute B Frame from A" computes
+ * `Motor A` as `Twist A x Plane A`, and `collision --constraints` measures the
+ * same identity over every corpus joint.
+ *
+ * A IS THE CHILD SIDE, matching the packfile binding's own order (child at +0x08,
+ * parent at +0x0c) and the pivot measurement behind HknpConstraint: pivotA is the
+ * origin on 98.8% of corpus joints because a joint sits at the child bone's own
+ * origin. The block is listed in the CHILD body's Constraints array for the same
+ * reason.
+ *
+ * UNITS ARE THE FILE'S. Pivots are written exactly as the packfile stores them,
+ * in Havok units -- which is both what bhkRigidBody's own Center carries after a
+ * decompile and the NIF's convention for constraint pivots.
+ *
+ * WHAT DOES NOT ROUND TRIP: the motor's numbers. A file holds ONE
+ * hkpPositionConstraintMotor and every joint points at that one object, so the
+ * motor is a property of the file and not of the joint. The block shows the six
+ * values the encoder emits rather than zeros, but editing them there changes
+ * nothing; only WHETHER a joint has a motor is carried back.
+ */
+
+//! The four field names of each hkTransform, in the packfile's own order.
+struct TlCollFrameNames
+{
+	const char * a[4];
+	const char * b[4];
+};
+
+static TlCollFrameNames tlCollFrameNames( bool ragdoll )
+{
+	if ( ragdoll )
+		return { { "Twist A", "Plane A", "Motor A", "Pivot A" },
+			{ "Twist B", "Plane B", "Motor B", "Pivot B" } };
+	return { { "Axis A", "Perp Axis In A1", "Perp Axis In A2", "Pivot A" },
+		{ "Axis B", "Perp Axis In B1", "Perp Axis In B2", "Pivot B" } };
+}
+
+/*! The six numbers hknpEncodePositionConstraintMotor writes, in NIF field order.
+ *
+ * The motor object is shared and identical everywhere it appears, so showing its
+ * real values costs nothing and showing zeros would be a lie about the file.
+ */
+static const float tlCollMotorValues[6] = { -1000000.0f, 100.0f, 0.8f, 1.0f, 5.0f, 0.2f };
+
+static void tlCollWriteMotor( NifModel * nif, const QModelIndex & iDesc, const HknpConstraint & c )
+{
+	const QModelIndex iMotor = nif->getIndex( iDesc, "Motor" );
+	if ( !iMotor.isValid() )
+		return;
+	// motorPointers, not motorEnabled: the pointers are what says the object is
+	// there at all, and 3 corpus hinges carry none while every other one does
+	const bool has = !c.motorPointers.isEmpty();
+	nif->set<int>( iMotor, "Type", has ? 1 : 0 );	// MOTOR_POSITION / MOTOR_NONE
+	// AFTER the type: a conditional field does not exist until its condition holds
+	const QModelIndex iPos = nif->getIndex( iMotor, "Position Motor" );
+	if ( !has || !iPos.isValid() )
+		return;
+	static const char * const names[6] = { "Min Force", "Max Force", "Tau", "Damping",
+		"Proportional Recovery Velocity", "Constant Recovery Velocity" };
+	for ( int k = 0; k < 6; k++ )
+		nif->set<float>( iPos, QLatin1String( names[k] ), tlCollMotorValues[k] );
+	nif->set<int>( iPos, "Motor Enabled", c.motorEnabled ? 1 : 0 );
+}
+
+/*! Where a constraint block keeps its descriptor.
+ *
+ * NOT under a row called "Constraint". nifxml.cpp overrides `bhkConstraintCInfo`
+ * and both descriptor CInfos as MIXINS -- "compounds without nesting" -- so their
+ * fields are spliced into the block itself and the block IS the descriptor. The
+ * one exception is a WRAPPED constraint: inside `bhkWrappedConstraintData` the
+ * descriptor carries `cond="Type == 7"`, and a conditional row is never a mixin,
+ * so there it really is a row named "Ragdoll" or "Limited Hinge".
+ *
+ * This cost a build. Reaching for "Constraint" returned an invalid index, every
+ * write silently went nowhere, and all 38 joints reported as unwritable.
+ */
+QModelIndex tlCollDescriptor( const NifModel * nif, const QModelIndex & iCon, bool ragdoll )
+{
+	const QModelIndex iWrap = nif->getIndex( iCon, "Constraint Data" );
+	if ( iWrap.isValid() ) {
+		const QModelIndex iDesc = nif->getIndex( iWrap, ragdoll ? "Ragdoll" : "Limited Hinge" );
+		if ( iDesc.isValid() )
+			return iDesc;
+	}
+	// a nested form would put it here; the mixin form puts it on the block
+	const QModelIndex iNested = nif->getIndex( iCon, "Constraint" );
+	return iNested.isValid() ? iNested : iCon;
+}
+
+static void tlCollWriteDescriptor( NifModel * nif, const QModelIndex & iDesc,
+									const HknpConstraint & c, bool ragdoll )
+{
+	const TlCollFrameNames n = tlCollFrameNames( ragdoll );
+	for ( int k = 0; k < 3; k++ ) {
+		nif->set<Vector4>( iDesc, QLatin1String( n.a[k] ), Vector4( c.rotA[k] ) );
+		nif->set<Vector4>( iDesc, QLatin1String( n.b[k] ), Vector4( c.rotB[k] ) );
+	}
+	nif->set<Vector4>( iDesc, QLatin1String( n.a[3] ), Vector4( c.pivotA ) );
+	nif->set<Vector4>( iDesc, QLatin1String( n.b[3] ), Vector4( c.pivotB ) );
+
+	if ( ragdoll ) {
+		/* The cone carries only its upper bound. Its lower one is the -100
+		 * sentinel the template writes -- a bound a cone does not have -- and the
+		 * NIF does not store it either ("Cone Min Angle is not stored, but is
+		 * simply minus this angle"), so the two forms agree about what is absent.
+		 */
+		nif->set<float>( iDesc, "Cone Max Angle", c.cone.max );
+		nif->set<float>( iDesc, "Plane Min Angle", c.plane.min );
+		nif->set<float>( iDesc, "Plane Max Angle", c.plane.max );
+		nif->set<float>( iDesc, "Twist Min Angle", c.twist.min );
+		nif->set<float>( iDesc, "Twist Max Angle", c.twist.max );
+	} else {
+		nif->set<float>( iDesc, "Min Angle", c.hinge.min );
+		nif->set<float>( iDesc, "Max Angle", c.hinge.max );
+	}
+	nif->set<float>( iDesc, "Max Friction", c.friction );
+	tlCollWriteMotor( nif, iDesc, c );
+}
+
+//! Bind one constraint block's Entity A / Entity B, at whatever depth they sit.
+static void tlCollSetEntities( NifModel * nif, const QModelIndex & iInfo, int childBody, int parentBody )
+{
+	if ( !iInfo.isValid() )
+		return;
+	nif->set<int>( iInfo, "Num Entities", 2 );	// hardcoded 2 everywhere, but not defaulted
+	nif->setLink( iInfo, QStringLiteral( "Entity A" ), childBody );
+	nif->setLink( iInfo, QStringLiteral( "Entity B" ), parentBody );
+	nif->set<int>( iInfo, "Priority", 1 );	// PRIORITY_PSI
+}
+
+/*! Write one decoded joint as its own NIF block; returns the block number, or -1.
+ *
+ *  \a childBody and \a parentBody are bhkRigidBody block numbers. A kind with no
+ *  NIF form of its own -- hkpBallAndSocketConstraintData turns up in a few
+ *  physics systems -- returns -1 rather than being written as something else.
+ */
+int tlCollWriteConstraint( NifModel * nif, const HknpConstraint & c, int childBody, int parentBody )
+{
+	const bool ragdoll = c.kind == QLatin1String( "hkpRagdollConstraintData" );
+	const bool hinge = c.kind == QLatin1String( "hkpLimitedHingeConstraintData" );
+	if ( !nif || ( !ragdoll && !hinge ) )
+		return -1;
+
+	QModelIndex iCon, iDesc;
+	if ( c.breakable ) {
+		/* A breakable joint is a wrapper in the packfile and a wrapper here too:
+		 * bhkBreakableConstraint holds the real constraint inside
+		 * bhkWrappedConstraintData, chosen by its Type. Only 3 exist in the whole
+		 * corpus, which is exactly why they are carried rather than flattened --
+		 * a joint that quietly stops being breakable snaps at a different time,
+		 * and two of the three thresholds are 0 where the third is 0.01.
+		 */
+		iCon = nif->insertNiBlock( "bhkBreakableConstraint" );
+		nif->set<float>( iCon, "Threshold", c.breakThreshold );
+		nif->set<int>( iCon, "Remove When Broken", 0 );
+		const QModelIndex iWrap = nif->getIndex( iCon, "Constraint Data" );
+		if ( !iWrap.isValid() )
+			return -1;
+		nif->set<int>( iWrap, "Type", ragdoll ? 7 : 2 );
+		// the wrapped copy names the same two bodies as the wrapper does, and its
+		// own bhkConstraintCInfo is a mixin -- the fields are the wrapper's own
+		tlCollSetEntities( nif, iWrap, childBody, parentBody );
+	} else {
+		iCon = nif->insertNiBlock( ragdoll ? "bhkRagdollConstraint" : "bhkLimitedHingeConstraint" );
+	}
+	iDesc = tlCollDescriptor( nif, iCon, ragdoll );
+	if ( !iCon.isValid() || !iDesc.isValid() )
+		return -1;
+
+	tlCollSetEntities( nif, iCon, childBody, parentBody );
+	tlCollWriteDescriptor( nif, iDesc, c, ragdoll );
+	return nif->getBlockNumber( iCon );
+}
+
+//! Entity A / Entity B, at whatever depth the block's version puts them.
+extern QModelIndex bhkGetEntity( const NifModel * nif, const QModelIndex & index, const QString & name );
+
+/*! Read one NIF constraint block back into a decoded joint.
+ *
+ *  False for a block that is not a constraint kind this understands. \a childBody
+ *  and \a parentBody come back as bhkRigidBody BLOCK numbers, because only the
+ *  caller knows which system those bodies end up in and therefore what body
+ *  INDEX each becomes.
+ *
+ *  `rawData` is left empty on purpose: a joint that came through the NIF has no
+ *  original bytes behind it, so the encoders build it from their templates -- the
+ *  same path a newly authored joint takes, and the one `--constraints` measures.
+ */
+bool tlCollReadConstraint( const NifModel * nif, const QModelIndex & index,
+							HknpConstraint & c, int * childBody, int * parentBody )
+{
+	if ( !nif )
+		return false;
+	const QModelIndex iCon = nif->getBlockIndex( index );
+	if ( !iCon.isValid() )
+		return false;
+
+	const QString name = nif->itemName( iCon );
+	QModelIndex iDesc;
+	bool ragdoll = false;
+	if ( name == QLatin1String( "bhkBreakableConstraint" ) ) {
+		const QModelIndex iWrap = nif->getIndex( iCon, "Constraint Data" );
+		const int type = nif->get<int>( iWrap, "Type" );
+		if ( type != 7 && type != 2 )
+			return false;
+		ragdoll = ( type == 7 );
+		c.breakable = true;
+		c.breakThreshold = nif->get<float>( iCon, "Threshold" );
+	} else if ( name == QLatin1String( "bhkRagdollConstraint" )
+				|| name == QLatin1String( "bhkLimitedHingeConstraint" ) ) {
+		ragdoll = ( name == QLatin1String( "bhkRagdollConstraint" ) );
+	} else {
+		return false;
+	}
+	iDesc = tlCollDescriptor( nif, iCon, ragdoll );
+	if ( !iDesc.isValid() )
+		return false;
+
+	c.kind = ragdoll ? QStringLiteral( "hkpRagdollConstraintData" )
+					 : QStringLiteral( "hkpLimitedHingeConstraintData" );
+
+	if ( childBody )
+		*childBody = nif->getLink( bhkGetEntity( nif, iCon, QStringLiteral( "Entity A" ) ) );
+	if ( parentBody )
+		*parentBody = nif->getLink( bhkGetEntity( nif, iCon, QStringLiteral( "Entity B" ) ) );
+
+	const TlCollFrameNames n = tlCollFrameNames( ragdoll );
+	for ( int k = 0; k < 3; k++ ) {
+		c.rotA[k] = Vector3( nif->get<Vector4>( iDesc, QLatin1String( n.a[k] ) ) );
+		c.rotB[k] = Vector3( nif->get<Vector4>( iDesc, QLatin1String( n.b[k] ) ) );
+	}
+	c.pivotA = Vector3( nif->get<Vector4>( iDesc, QLatin1String( n.a[3] ) ) );
+	c.pivotB = Vector3( nif->get<Vector4>( iDesc, QLatin1String( n.b[3] ) ) );
+	c.hasFrames = true;
+
+	/* `tau` is the limit's stiffness and takes one value per kind everywhere in
+	 * the corpus -- 0.8 on a ragdoll's limits, 1.0 on a hinge's. The encoders
+	 * take it from their templates rather than from here, so this is recorded for
+	 * a reader's benefit and not as a carrier.
+	 */
+	const float tau = ragdoll ? 0.8f : 1.0f;
+	if ( ragdoll ) {
+		c.cone.present = true;
+		c.cone.max = nif->get<float>( iDesc, "Cone Max Angle" );
+		c.cone.min = -100.0f;	// the sentinel, as above: a cone has no lower bound
+		c.cone.tau = tau;
+		c.plane.present = true;
+		c.plane.min = nif->get<float>( iDesc, "Plane Min Angle" );
+		c.plane.max = nif->get<float>( iDesc, "Plane Max Angle" );
+		c.plane.tau = tau;
+		c.twist.present = true;
+		c.twist.min = nif->get<float>( iDesc, "Twist Min Angle" );
+		c.twist.max = nif->get<float>( iDesc, "Twist Max Angle" );
+		c.twist.tau = tau;
+	} else {
+		c.hinge.present = true;
+		c.hinge.min = nif->get<float>( iDesc, "Min Angle" );
+		c.hinge.max = nif->get<float>( iDesc, "Max Angle" );
+		c.hinge.tau = tau;
+	}
+	c.friction = nif->get<float>( iDesc, "Max Friction" );
+
+	const QModelIndex iMotor = nif->getIndex( iDesc, "Motor" );
+	const QModelIndex iPos = iMotor.isValid() ? nif->getIndex( iMotor, "Position Motor" ) : QModelIndex();
+	if ( iPos.isValid() ) {
+		/* Where a rewrite re-binds the shared motor. A ragdoll's RAGDOLL_MOTOR
+		 * atom holds three pointers -- twist, plane and cone -- at +0x100, +0x108
+		 * and +0x110, and a limited hinge's ANG_MOTOR one at +0xd0; 520 of 520 and
+		 * 244 of 246 corpus constraints respectively. See
+		 * HknpConstraint::motorPointers, which is why they are recorded at all.
+		 */
+		c.motorPointers = ragdoll ? QVector<qsizetype>{ 0x100, 0x108, 0x110 }
+								  : QVector<qsizetype>{ 0xd0 };
+		c.motorEnabled = nif->get<int>( iPos, "Motor Enabled" ) != 0;
+	}
+	return true;
+}
+
 /*! Merge every compiled bhkPhysicsSystem in the file into ONE.
  *
  * Compile writes one system per body because it compiles one body at a time.

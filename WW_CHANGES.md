@@ -1,5 +1,93 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23g — A joint now has an editable form
+
+Decompile wrote a ragdoll's capsules and dropped its joints. 41 loose capsules
+is not a ragdoll -- the articulation IS the ragdoll -- and this closes the half
+of that which was actually missing.
+
+Nothing here is a decode. The decoder already fills `HknpConstraint` completely
+and the encoders already write it back byte for byte (30 of 30 ragdoll joints
+and 8 of 8 hinges on the Brahmin skeleton), so both ends of the pipe were built.
+What did not exist was the middle: no NIF block carried a joint, so Decompile had
+nowhere to put one and Compile had nothing to read. `nif.xml` already describes
+`bhkRagdollConstraint` and `bhkLimitedHingeConstraint` with the same fields, so
+this is a MAPPING in both directions.
+
+### What was added
+
+  * `tlCollWriteConstraint` / `tlCollReadConstraint` in collisiontools.cpp, the
+    mapping both ways, including the `bhkBreakableConstraint` wrapper (11 in the
+    corpus -- a joint that quietly stops being breakable snaps at a different
+    time).
+  * Decompile emits one block per joint, listed on the CHILD body's Constraints
+    array, with Entity A the child and Entity B the parent -- the packfile
+    binding's own order, and the side frame A belongs to.
+  * `collision <file> --constraints`, which measures the carrier.
+  * `tests/spells/collision_constraints.sh`, 9 checks.
+
+### The frames map positionally, and that is measured
+
+Havok stores each side as an hkTransform -- four hkVector4s, three basis vectors
+then the pivot -- and the NIF spells the same four out as four named fields in
+that order. What pins the NAMES is a property only the right ordering has: the
+third vector is the cross product of the first two. NifSkope's own "Recompute B
+Frame from A" authors `Motor A` as `Twist A x Plane A`, and over the corpus the
+identity holds to 8.8e-07.
+
+### The first version of the test proved nothing
+
+`--constraints` originally compared the bytes a joint encodes to after a trip
+through its NIF block against the bytes it encodes to directly. 38 of 38 on the
+Brahmin skeleton. Then `Plane A` and `Motor A` were deliberately exchanged in the
+name table -- and it still passed 38 of 38, because writer and reader share that
+table and the swap cancels out. Self-consistency is not correctness.
+
+The check that discriminates reads the block back BY NIF FIELD NAME and requires
+the cross-product identity there. With the names swapped it reports 8 of 38,
+worst error 2.0. That is the version that shipped, and it is why the numbers
+below mean something.
+
+### Measured
+
+155 corpus files carry constraints (found by grepping the packfile class table).
+
+    joints                              1202  (11 breakable, 883 with a motor)
+    carried through the NIF form        1202 / 1202
+    field-name identity held            1202 / 1202   worst 8.8e-07
+    could not be written at all         0
+    kinds with no NIF block (skipped)   18
+    vs the file: exact 88, inert w lanes only 1101, of 1202
+
+The 18 skipped are `hkpBallAndSocketConstraintData`, which has a NIF form
+(`bhkBallAndSocketConstraint`) that nothing here maps yet; they are reported
+rather than written as something else.
+
+The last line is about the ENCODER TEMPLATE, not the carrier. 1189 of 1202 come
+back either byte-exact or differing only in the inert SIMD w lanes; the other 13
+are a pre-existing gap `--roundtrip` already reports per file as "template
+misses", and running it over the same 155 files locates them exactly:
+
+    ragdoll joints  742   template exact 43, inert-w only 693, neither 6
+    limited hinges  460   template exact 45, inert-w only 408, neither 7
+    offsets:  +0xb0 (SETUP_STABILIZATION, 4 files)
+              +0x190 (BALL_SOCKET, 4 files)
+              +0xc0 (the motor atom header, 1 file)
+
+-- three atom-header constants the templates hardcode and a handful of corpus
+joints disagree with. 742 + 460 is 1202, which is the same joint count
+`--constraints` reached by a different route. The carrier itself is exact on all
+1202: routing a joint through the NIF changes nothing the encoder would
+otherwise have written.
+
+### What this does NOT do yet
+
+Compile still cannot put a ragdoll back. A joint names TWO bodies, so both must
+be in one system before it can be written, and Compile builds one system per
+body. The ragdoll's own `hkaSkeleton` copy has no NIF block either. Decompile's
+warning now says exactly that instead of the old text, which claimed the joints
+were dropped.
+
 ## 2026-08-23f — What actually blocks ragdolls is constraints, not multi-body
 
 The backlog said multi-body systems were what ragdolls and cloth need. Measured

@@ -55,6 +55,13 @@ See the LICENSE.md file for the full license text.
  *  from the command line for free.
  */
 
+//! collisiontools.cpp owns the joint mapping; see "A joint's editable form" there.
+extern int tlCollWriteConstraint( NifModel * nif, const HknpConstraint & c,
+								int childBody, int parentBody );
+extern bool tlCollReadConstraint( const NifModel * nif, const QModelIndex & index,
+								HknpConstraint & c, int * childBody, int * parentBody );
+extern QModelIndex tlCollDescriptor( const NifModel * nif, const QModelIndex & iCon, bool ragdoll );
+
 namespace
 {
 
@@ -1447,6 +1454,188 @@ int cmdCollisionRoundTrip( const QString & file, const QString & rebuildTo )
 		|| packsExact + packsLeafOnly < packs ) ? 1 : 0;
 }
 
+/*! Does a joint survive the trip through its editable NIF form?
+ *
+ * `--roundtrip` already measures the two ends of the pipe: it encodes each joint
+ * from its stored bytes and again from the bare template, and reports both
+ * against the file. Neither run touches a NIF block, so neither says anything
+ * about the part that was actually missing.
+ *
+ * This does. Every joint is encoded twice from the SAME template path -- once
+ * straight from the decode, and once after being written into a
+ * bhkRagdollConstraint / bhkLimitedHingeConstraint block and read back out -- and
+ * the two must be byte-identical. The comparison is against the direct path
+ * rather than against vanilla on purpose: it isolates the carrier. Anything the
+ * mapping drops, mis-names or swaps changes those bytes, and nothing else does.
+ *
+ * It also measures the identity the frame NAMES rest on: the third basis vector
+ * of each side is the cross product of the first two ("Motor A" is
+ * "Twist A x Plane A", "Perp Axis In A2" is "Axis A x Perp Axis In A1"). If the
+ * four hkVector4s were named in any other order that would not hold.
+ */
+int cmdCollisionConstraints( const QString & file )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	int joints = 0, carried = 0, otherKinds = 0, unwritten = 0;
+	int vanillaExact = 0, vanillaInert = 0, vanillaSeen = 0;
+	int breakables = 0, motors = 0;
+	float worstCross = 0.0f, worstNamed = 0.0f;
+	int named = 0, namedBad = 0;
+	QMap<int, int> lostAt;      // offset -> how often the carried bytes differed there
+
+	auto cross = []( const Vector3 & u, const Vector3 & v ) {
+		return Vector3( u[1] * v[2] - u[2] * v[1],
+						u[2] * v[0] - u[0] * v[2],
+						u[0] * v[1] - u[1] * v[0] );
+	};
+
+	// blocks are appended, so the systems keep their numbers while this inserts
+	const int systemBlocks = nif.getBlockCount();
+	for ( int b = 0; b < systemBlocks; b++ ) {
+		const QModelIndex i = nif.getBlockIndex( b );
+		if ( !nif.blockInherits( i, "bhkPhysicsSystem" ) && !nif.blockInherits( i, "bhkRagdollSystem" ) )
+			continue;
+		const QByteArray bytes = nif.get<QByteArray>( i, "Binary Data" );
+		if ( bytes.isEmpty() )
+			continue;
+		const HknpSystem sys = hknpDecode( bytes );
+		if ( !sys.valid )
+			continue;
+
+		for ( const HknpConstraint & jc : sys.constraints ) {
+			const bool ragdoll = ( jc.kind == QLatin1String( "hkpRagdollConstraintData" ) );
+			const bool hinge = ( jc.kind == QLatin1String( "hkpLimitedHingeConstraintData" ) );
+			if ( !ragdoll && !hinge ) {
+				otherKinds++;
+				continue;
+			}
+			joints++;
+			if ( jc.breakable )
+				breakables++;
+			if ( !jc.motorPointers.isEmpty() )
+				motors++;
+			if ( jc.hasFrames ) {
+				worstCross = std::max( worstCross,
+					( jc.rotA[2] - cross( jc.rotA[0], jc.rotA[1] ) ).length() );
+				worstCross = std::max( worstCross,
+					( jc.rotB[2] - cross( jc.rotB[0], jc.rotB[1] ) ).length() );
+			}
+
+			auto encode = [ragdoll]( const HknpConstraint & c ) {
+				return ragdoll ? hknpEncodeRagdollConstraintData( c )
+							   : hknpEncodeLimitedHingeConstraintData( c );
+			};
+			// the template path, which is what a joint with no original bytes gets
+			HknpConstraint fresh = jc;
+			fresh.rawData.clear();
+			const QByteArray direct = encode( fresh );
+
+			const int blk = tlCollWriteConstraint( &nif, jc, -1, -1 );
+			HknpConstraint back;
+			if ( blk < 0 || !tlCollReadConstraint( &nif, nif.getBlockIndex( blk ), back, nullptr, nullptr ) ) {
+				unwritten++;
+				continue;
+			}
+			/* AND THE NAMES, which the check above cannot see.
+			 *
+			 * Writer and reader share one name table, so exchanging two of them
+			 * cancels out and the bytes still match -- swapping "Plane A" with
+			 * "Motor A" passed 38 of 38 before this existed. What separates a right
+			 * naming from a wrong one is a property of the FIELDS: the third basis
+			 * vector is the cross product of the first two, which is how NifSkope's
+			 * own "Recompute B Frame from A" authors Motor A. So read the block back
+			 * by NIF field name and require that identity to hold there.
+			 */
+			{
+				const QModelIndex iDesc = tlCollDescriptor( &nif, nif.getBlockIndex( blk ), ragdoll );
+				static const char * const rag[6] = { "Twist A", "Plane A", "Motor A",
+					"Twist B", "Plane B", "Motor B" };
+				static const char * const hng[6] = { "Axis A", "Perp Axis In A1", "Perp Axis In A2",
+					"Axis B", "Perp Axis In B1", "Perp Axis In B2" };
+				const char * const * f = ragdoll ? rag : hng;
+				float worst = 0.0f;
+				for ( int side = 0; side < 2; side++ ) {
+					const Vector3 v0( nif.get<Vector4>( iDesc, QLatin1String( f[side * 3] ) ) );
+					const Vector3 v1( nif.get<Vector4>( iDesc, QLatin1String( f[side * 3 + 1] ) ) );
+					const Vector3 v2( nif.get<Vector4>( iDesc, QLatin1String( f[side * 3 + 2] ) ) );
+					worst = std::max( worst, ( v2 - cross( v0, v1 ) ).length() );
+				}
+				named++;
+				worstNamed = std::max( worstNamed, worst );
+				if ( worst > 1.0e-3f )
+					namedBad++;
+			}
+
+			const QByteArray through = encode( back );
+			if ( through == direct ) {
+				carried++;
+			} else {
+				for ( int o = 0; o + 4 <= direct.size(); o += 4 ) {
+					if ( through.mid( o, 4 ) != direct.mid( o, 4 ) )
+						lostAt[o]++;
+				}
+			}
+
+			/* And against the file, with the same inert-w-lane tolerance
+			 * --roundtrip applies: the w lanes of a rotation basis are SIMD
+			 * residue Havok ignores, so a freshly authored joint cannot match
+			 * them and does not need to.
+			 */
+			if ( jc.rawOffset >= 0 && jc.rawData.size() == direct.size() ) {
+				vanillaSeen++;
+				const QByteArray was = bytes.mid( jc.rawOffset, direct.size() );
+				bool inert = true;
+				for ( int o = 0; o + 4 <= was.size(); o += 4 ) {
+					if ( through.mid( o, 4 ) == was.mid( o, 4 ) )
+						continue;
+					const bool wLane = ( o == 0x3c || o == 0x4c || o == 0x5c || o == 0x6c
+									  || o == 0x7c || o == 0x8c || o == 0x9c || o == 0xac );
+					if ( !wLane )
+						inert = false;
+				}
+				if ( through == was )
+					vanillaExact++;
+				else if ( inert )
+					vanillaInert++;
+			}
+		}
+	}
+
+	out() << "file        " << file << Qt::endl;
+	out() << "joints      " << joints;
+	if ( breakables )
+		out() << "  (" << breakables << " breakable)";
+	if ( motors )
+		out() << "  (" << motors << " with a motor)";
+	out() << Qt::endl;
+	if ( otherKinds )
+		out() << "  " << otherKinds << " of a kind with no NIF block, not carried" << Qt::endl;
+	if ( !joints ) {
+		out() << "  no joints to check" << Qt::endl;
+		return 0;
+	}
+	out() << "  through the NIF form, byte-identical  " << carried << " / " << joints << Qt::endl;
+	if ( unwritten )
+		out() << "  could not be written at all         " << unwritten << Qt::endl;
+	if ( !lostAt.isEmpty() ) {
+		out() << "  offsets the carrier changed:";
+		for ( auto it = lostAt.constBegin(); it != lostAt.constEnd(); ++it )
+			out() << " +0x" << QString::number( it.key(), 16 ) << "(" << it.value() << ")";
+		out() << Qt::endl;
+	}
+	out() << "  worst |row2 - row0 x row1|            " << worstCross << Qt::endl;
+	if ( named )
+		out() << "  same identity read back BY FIELD NAME  " << ( named - namedBad ) << " / "
+			  << named << ", worst " << worstNamed << Qt::endl;
+	if ( vanillaSeen )
+		out() << "  vs the file: exact " << vanillaExact << ", inert w lanes only "
+			  << vanillaInert << " of " << vanillaSeen << Qt::endl;
+	return ( carried < joints || namedBad ) ? 1 : 0;
+}
+
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
 {
 	NifModel nif;
@@ -2773,6 +2962,9 @@ int usage()
 		  << "                                          parameters, reassemble the whole packfile,\n"
 		  << "                                          diff both against the original, and with\n"
 		  << "                                          -o write the reassembled bytes out\n"
+		  << "  collision <file> --constraints          write every joint into its NIF block and\n"
+		  << "                                          read it back, proving the editable form\n"
+		  << "                                          loses nothing the encoder would keep\n"
 		  << "  merge <file> [--attach NODE] --add PIECE.nif [...] -o OUT\n"
 		  << "                                          splice pieces in, sharing bones by\n"
 		  << "                                          name; --attach applies to the next\n"
@@ -2869,6 +3061,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool selfTest = false;
 	bool extract = false;
 	bool roundTrip = false;
+	bool constraintsOnly = false;
 	for ( int i = 0; i < a.size(); i++ ) {
 		const QString & t = a.at( i );
 		auto next = [&]() -> QString { return ( i + 1 < a.size() ) ? a.at( ++i ) : QString(); };
@@ -2892,6 +3085,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--selftest" ) ) selfTest = true;
 		else if ( t == QLatin1String( "--extract" ) ) extract = true;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
+		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		// --attach applies to the NEXT --add and then clears, so a command line
 		// reads left to right: --attach L_Pauldron --add arm_fx.nif
 		else if ( t == QLatin1String( "--attach" ) ) pendingAttach = next();
@@ -3007,7 +3201,8 @@ int nifskopeCliMain( const QStringList & args )
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
 			dragBody, dragSpring, dragFirmness, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
-		rc = roundTrip ? cmdCollisionRoundTrip( file, outFile )
+		rc = constraintsOnly ? cmdCollisionConstraints( file )
+			 : roundTrip ? cmdCollisionRoundTrip( file, outFile )
 					   : cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
 		rc = selfTest ? cmdSkeletonSelfTest( file ) : cmdSkeleton( file, validateOnly );

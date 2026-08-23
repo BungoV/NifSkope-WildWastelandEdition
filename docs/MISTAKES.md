@@ -3,6 +3,36 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-23 — A round-trip test that shared one table with the code it tested
+
+**What:** the joint carrier shipped with a check that encoded every constraint
+twice -- once straight from the decode, once after a trip through its new NIF
+block -- and required the bytes to match. 38 of 38 on the Brahmin skeleton, 1202
+of 1202 over the corpus. Then I exchanged `Plane A` and `Motor A` in the field
+name table to see the check fail, and **it passed, 38 of 38, with the mapping
+deliberately wrong**.
+
+**Why:** the writer and the reader read the same `tlCollFrameNames` table.
+Swapping two entries swaps them on the way in and on the way out, so the round
+trip cancels and the bytes are identical. The check measured that the carrier is
+SELF-CONSISTENT, which it would be for any naming at all, including one that puts
+a ragdoll's plane axis in the field the engine reads as its motor axis.
+
+This is the same shape as the 18-unit terminal a day earlier: a check that cannot
+fail is not a check. The new form is sharper, though -- there the checks measured
+the wrong QUANTITY, here the check measured a quantity that a wrong answer
+satisfies by construction.
+
+**Solution:** the discriminating check reads the block back BY NIF FIELD NAME and
+requires an identity those names claim -- the third basis vector is the cross
+product of the first two, which is how NifSkope's own "Recompute B Frame from A"
+authors `Motor A`. With the names swapped it reports 8 of 38, worst error 2.0;
+with them right, 1202 of 1202 at 8.8e-07. **A round trip through a mapping tests
+the mapping only if the two directions cannot cancel: either the check reads the
+destination in the destination's own terms, or it is measuring nothing.** Ask, of
+any round-trip check: what wrong answer would still pass? Then go break the code
+and watch it fail before believing the green.
+
 ## 2026-08-23 — Shipped a harness that passed while the collision was 18 units out
 
 **What:** mixed compounds went out with a 9-check harness, a 114-file shape-class

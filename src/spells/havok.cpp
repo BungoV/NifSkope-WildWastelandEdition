@@ -1717,6 +1717,12 @@ public:
 REGISTER_SPELL( spCreateCollision )
 
 
+/*! collisiontools.cpp owns the joint mapping, because Compile needs the same
+ *  one in reverse. See "A joint's editable form" there.
+ */
+extern int tlCollWriteConstraint( NifModel * nif, const HknpConstraint & c,
+								int childBody, int parentBody );
+
 //! Transforms Havok constraints
 class spConstraintHelper final : public Spell
 {
@@ -2355,11 +2361,12 @@ public:
 					 * so nothing carries them across.
 					 */
 					tr( "This is a ragdoll (bhkRagdollSystem).\n\n"
-						"Its collision capsules decompile into editable per-bone bodies, but "
-						"NifSkope cannot compile a ragdoll back. The joint constraints, the "
-						"constraint motor and the ragdoll's own skeleton copy decode correctly, "
-						"and nothing writes them into NIF blocks — so Decompile drops them and "
-						"Compile has nothing to rebuild them from.\n\n"
+						"Its capsules and its joints both decompile into editable blocks, but "
+						"NifSkope cannot compile a ragdoll back yet. What is still missing is "
+						"the ragdoll's own skeleton copy, which no NIF block carries, and a "
+						"Compile that builds every body into ONE system — a joint names two "
+						"bodies, so both have to be in the same system before it can be "
+						"written.\n\n"
 						"To change a body's friction, restitution or collision filter, edit it "
 						"in place in the Collision Manager instead: that keeps the whole system "
 						"byte for byte.\n\n"
@@ -2444,6 +2451,9 @@ public:
 		// body's own node - the exact inverse of Elric's compile, so the node
 		// transform places the body just like the compiled form
 		QPersistentModelIndex iRoot;
+		// body index -> the bhkRigidBody block it became, so the joints below can
+		// name their two bodies
+		QVector<QPair<quint32, int>> bodyBlocks;
 		for ( const auto & bs : bodyShapes ) {
 			qint32 rootShape = bs.second.first();
 			if ( bs.second.size() > 1 ) {
@@ -2458,6 +2468,7 @@ public:
 
 			QModelIndex iBody = nif->insertNiBlock( "bhkRigidBody" );
 			nif->setLink( iBody, "Shape", rootShape );
+			bodyBlocks.append( { bs.first, nif->getBlockNumber( iBody ) } );
 
 			// physics decoded from the packfile (validated against controlled
 			// Elric pairs; enum values match what the 3ds Max exporter
@@ -2584,6 +2595,45 @@ public:
 				nif->setLink( nif->getIndex( iNode, "Collision Object" ), nif->getBlockNumber( iCO ) );
 			}
 		}
+
+		/* THE JOINTS, which used to be dropped on the floor.
+		 *
+		 * A ragdoll is its capsules and the joints that articulate them; writing
+		 * only the capsules gave back 41 loose bones. Every field of a joint
+		 * already decodes and re-encodes byte for byte -- 30 of 30 ragdoll joints
+		 * and 8 of 8 hinges on the Brahmin skeleton -- so all that was missing was
+		 * the NIF block to put them in.
+		 *
+		 * After every body exists, because a joint names two of them.
+		 */
+		int jointsWritten = 0, jointsSkipped = 0;
+		for ( const HknpConstraint & jc : std::as_const( sys.constraints ) ) {
+			auto blockFor = [&bodyBlocks]( int body ) {
+				for ( const auto & e : std::as_const( bodyBlocks ) )
+					if ( int( e.first ) == body )
+						return e.second;
+				return -1;
+			};
+			const int child = blockFor( jc.childBody ), parent = blockFor( jc.parentBody );
+			const int con = ( child >= 0 && parent >= 0 )
+				? tlCollWriteConstraint( nif, jc, child, parent ) : -1;
+			if ( con < 0 ) {
+				jointsSkipped++;
+				continue;
+			}
+			// listed on the CHILD body, which is the side frame A belongs to
+			const QModelIndex iChild = nif->getBlockIndex( child );
+			QVector<qint32> listed = nif->getLinkArray( iChild, "Constraints" );
+			listed.append( con );
+			nif->set<int>( iChild, "Num Constraints", int( listed.size() ) );
+			nif->updateArraySize( iChild, "Constraints" );
+			nif->setLinkArray( iChild, "Constraints", listed );
+			jointsWritten++;
+		}
+		if ( jointsSkipped )
+			qWarning().noquote() << tr( "Decompile: %1 of %2 joints were not written "
+				"(a kind with no NIF block, or a body that carries no shape)." )
+				.arg( jointsSkipped ).arg( jointsSkipped + jointsWritten );
 
 		// drop EVERY referencing bhkNPCollisionObject plus the system itself
 		// (each node now carries its own decoded collision object). Removing
