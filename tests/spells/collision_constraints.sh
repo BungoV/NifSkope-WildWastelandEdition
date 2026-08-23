@@ -32,6 +32,14 @@
 #  10. the joints' own limit numbers survive vanilla -> decompile -> compile ->
 #      decompile unchanged
 #  11. the per-body Compile still drops them, so 8..10 are not free
+#  12. a RAGDOLL comes back as a bhkRagdollSystem beside a bhkPhysicsSystem,
+#      the way vanilla ships one, with its bone count, its joints, and the
+#      same bone tree parent for parent -- the skeleton is BUILT from the
+#      bodies and the joints, not carried, and the parent array is what
+#      catches a bone ORDER that is merely a valid permutation
+#  13. a ragdoll with MORE BODIES THAN BONES still comes back -- the bones
+#      are a prefix of the bodies, and the body the tree never reaches has
+#      to sort last
 #
 # WHY 11 IS THERE: a joint names TWO bodies, and the per-body Compile writes one
 # system per body, so it cannot express one. Compile All is what captures the
@@ -236,6 +244,97 @@ if [ -s "$W/pb.nif" ]; then
 	echo "  per-body Compile + Merge leaves $pbj joints"
 	check "the per-body path still drops them, so the checks above are not free" \
 		"$([ "$pbj" = "0" ] && echo 1 || echo 0)"
+fi
+
+
+# ============================================================================
+# And the ragdoll itself: bodies, joints AND the skeleton, back into a
+# bhkRagdollSystem. The skeleton is BUILT, not carried -- see WW_CHANGES
+# 2026-08-23i for the measurement that says every field of it is either already
+# in the file or a rule with no exceptions.
+# ============================================================================
+
+echo "fixture: $RAG"
+systemtypes() { "$NS" -no-gui info "$1" 2>/dev/null | awk '/bhkRagdollSystem|bhkPhysicsSystem/{gsub("x","",$2); print $1"="$2}' | sort | tr '\n' ' '; }
+# the decoder's own reading of the skeleton: index, parent, rest pose, per bone
+bonetable() { "$NS" -no-gui collision "$1" 2>/dev/null | sed -n '/hkaSkeleton bones/,/^  shape/p' | grep -E '^  [0-9]+ +-?[0-9]+ '; }
+parents() { bonetable "$1" | awk '{printf "%s ", $2}'; }
+
+vantypes=$(systemtypes "$RAG")
+echo "  vanilla systems: $vantypes"
+check "the fixture is a bhkRagdollSystem beside a bhkPhysicsSystem" \
+	"$(case "$vantypes" in *bhkRagdollSystem=1*bhkPhysicsSystem=1*|*bhkPhysicsSystem=1*bhkRagdollSystem=1*) echo 1;; *) echo 0;; esac)"
+vanbones=$(bonetable "$RAG" | wc -l)
+vanparents=$(parents "$RAG")
+echo "  vanilla bones: $vanbones"
+check "and it really carries a skeleton, so the checks below are not vacuous" \
+	"$([ "$vanbones" -gt 0 ] && echo 1 || echo 0)"
+
+if compileall "$RAG" "$W/rag.nif"; then
+	gottypes=$(systemtypes "$W/rag.nif")
+	gotbones=$(bonetable "$W/rag.nif" | wc -l)
+	gotparents=$(parents "$W/rag.nif")
+	gotjoints=$(jointcount "$W/rag.nif"); gotjoints="${gotjoints:-0}"
+	vanjoints=$(jointcount "$RAG"); vanjoints="${vanjoints:-0}"
+	echo "  rebuilt systems: $gottypes"
+	echo "  rebuilt bones: $gotbones, joints: $gotjoints (vanilla $vanjoints)"
+	check "Compile All writes a bhkRagdollSystem beside a bhkPhysicsSystem, as vanilla does" \
+		"$([ "$gottypes" = "$vantypes" ] && echo 1 || echo 0)"
+	check "the ragdoll comes back with vanilla's bone count" \
+		"$([ "$gotbones" = "$vanbones" ] && echo 1 || echo 0)"
+	check "and with all of its joints" \
+		"$([ "$gotjoints" = "$vanjoints" ] && [ "$vanjoints" -gt 0 ] && echo 1 || echo 0)"
+	# The bone ORDER is the joint order and the parent array is the proof: built
+	# breadth-first instead it came out a permutation -- right generations, wrong
+	# siblings -- and this is the check that caught it.
+	check "the bone tree is vanilla's own, parent for parent" \
+		"$([ -n "$vanparents" ] && [ "$gotparents" = "$vanparents" ] && echo 1 || echo 0)"
+	[ "$gotparents" = "$vanparents" ] || { echo "    vanilla: $vanparents"; echo "    ours:    $gotparents"; }
+else
+	check "Compile All writes a bhkRagdollSystem beside a bhkPhysicsSystem, as vanilla does" 0
+	check "the ragdoll comes back with vanilla's bone count" 0
+	check "and with all of its joints" 0
+	check "the bone tree is vanilla's own, parent for parent" 0
+fi
+
+
+# --- a ragdoll with MORE BODIES THAN BONES -----------------------------------
+# TorsoProtectron is three bodies -- C-BotCore, Chest, CombatInhibitor -- and two
+# bones: the joint binds the first two and nothing reaches the third. The bones
+# are a PREFIX of the bodies, so the one the tree never reaches has to sort last.
+# Assuming bones == bodies refused nine corpus ragdolls outright, all robots.
+TORSO="${TORSO:-E:/Tools/Fallout 4/DataUnpacked/Data/Meshes/Actors/Robot/Parts/TorsoProtectron.nif}"
+if [ -f "$TORSO" ]; then
+	echo "fixture: $TORSO"
+	# body index -> node name, in body order: what has to be reproduced
+	bodyorder() { "$NS" -no-gui collision "$1" 2>/dev/null | sed -n '/^  body   node/,/^  hkaSkeleton/p' | awk '/^  [0-9]+ /{printf "%s=%s ", $1, $2}'; }
+	tbones=$(bonetable "$TORSO" | wc -l)
+	tbodies=$("$NS" -no-gui collision "$TORSO" 2>/dev/null | awk '/decoded/{for(i=1;i<=NF;i++) if($i ~ /^body\/bodies/) print $(i-1)}' | head -1)
+	tvanorder=$(bodyorder "$TORSO")
+	tvanparents=$(parents "$TORSO")
+	echo "  vanilla: ${tbodies:-?} bodies, $tbones bones"
+	check "the fixture really has more bodies than bones" \
+		"$([ -n "$tbodies" ] && [ "$tbodies" -gt "$tbones" ] && [ "$tbones" -gt 0 ] && echo 1 || echo 0)"
+	if compileall "$TORSO" "$W/torso.nif"; then
+		gbones=$(bonetable "$W/torso.nif" | wc -l)
+		gorder=$(bodyorder "$W/torso.nif")
+		gparents=$(parents "$W/torso.nif")
+		grag=$("$NS" -no-gui info "$W/torso.nif" 2>/dev/null | awk '/bhkRagdollSystem/{gsub("x","",$2); print $2}')
+		echo "  rebuilt: $gbones bones, ${grag:-0} ragdoll system(s)"
+		check "it still compiles back into a ragdoll" "$([ "${grag:-0}" = "1" ] && echo 1 || echo 0)"
+		check "with vanilla's bone count, not one per body" \
+			"$([ "$gbones" = "$tbones" ] && echo 1 || echo 0)"
+		check "the body the bone tree never reaches still sorts last" \
+			"$([ -n "$tvanorder" ] && [ "$gorder" = "$tvanorder" ] && echo 1 || echo 0)"
+		check "and its bone tree is vanilla's own" \
+			"$([ -n "$tvanparents" ] && [ "$gparents" = "$tvanparents" ] && echo 1 || echo 0)"
+		[ "$gorder" = "$tvanorder" ] || { echo "    vanilla: $tvanorder"; echo "    ours:    $gorder"; }
+	else
+		check "it still compiles back into a ragdoll" 0
+		check "with vanilla's bone count, not one per body" 0
+		check "the body the bone tree never reaches still sorts last" 0
+		check "and its bone tree is vanilla's own" 0
+	fi
 fi
 
 echo "$checks checks, $fails failures"

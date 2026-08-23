@@ -1663,6 +1663,7 @@ int cmdCollisionSkeleton( const QString & file )
 	int chainSame = 0, chainSeen = 0;
 	int transOk = 0, rotOk = 0, checked = 0;
 	int bTransOk = 0, bRotOk = 0, bChecked = 0;
+	int rootIsBody = 0, rootIsIdentity = 0, rootSeen = 0;
 	float worstBTrans = 0.0f, worstBRot = 0.0f;
 	int scaleUnit = 0, scaleNear = 0, scaleOther = 0;
 	int lockT = 0, lockRule = 0;
@@ -1727,6 +1728,28 @@ int cmdCollisionSkeleton( const QString & file )
 			resolved++;
 			if ( bone.parent < 0 ) {
 				roots++;
+				/* A root bone's pose is local to nothing, so it is either the root
+				 * BODY's own rest transform or the identity. The builder has to
+				 * write one of them and there is no way to tell by looking.
+				 */
+				if ( int( k ) < sys.bodyPhys.size() ) {
+					rootSeen++;
+					const HknpBodyPhys & rp = sys.bodyPhys.at( int( k ) );
+					const bool tBody = ( rp.position - bone.translation ).length() <= 1.0e-4f;
+					float rdot = 0.0f;
+					for ( int c = 0; c < 4; c++ )
+						rdot += rp.orientation[c] * bone.rotation[c];
+					bool rBody = true;
+					for ( int c = 0; c < 4; c++ )
+						rBody = rBody && std::fabs( ( rdot < 0.0f ? -rp.orientation[c] : rp.orientation[c] )
+							- bone.rotation[c] ) <= 1.0e-4f;
+					const bool ident = bone.translation.length() <= 1.0e-6f
+						&& std::fabs( std::fabs( bone.rotation[0] ) - 1.0f ) <= 1.0e-6f;
+					if ( ident )
+						rootIsIdentity++;
+					else if ( tBody && rBody )
+						rootIsBody++;
+				}
 				continue;
 			}
 			const int parentNode = nodeOfBody.value( bone.parent, -1 );
@@ -1844,6 +1867,9 @@ int cmdCollisionSkeleton( const QString & file )
 		out() << o << Qt::endl;
 	out() << "  reference scale: exactly 1  " << scaleUnit
 		  << ", within 1e-6  " << scaleNear << ", other " << scaleOther << Qt::endl;
+	out() << "  root pose: identity " << rootIsIdentity << ", its own body "
+		  << rootIsBody << ", neither " << ( rootSeen - rootIsIdentity - rootIsBody )
+		  << " of " << rootSeen << Qt::endl;
 	out() << "  lockTranslation set on               " << lockT << " / " << bones
 		  << "   follows \"every bone but the root\" " << lockRule << " / " << bones << Qt::endl;
 	auto hist = [&]( const char * label, const QMap<quint32, int> & m ) {

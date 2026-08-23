@@ -42,35 +42,34 @@ more.
 
 **What is left, and it is one piece of work rather than two:**
 
-  1. **The ragdoll's own skeleton, which is the last piece.** Multi-body compile
-     landed 2026-08-23 (WW_CHANGES 2026-08-23h): `Havok/Compile All Collision`
-     captures every joint, compiles every body and merges them into ONE
-     `bhkPhysicsSystem` with the joints rebound -- 155 of 155 corpus files, 1202
-     joints in and 1202 out, and the Brahmin skeleton comes back as 41 bodies and
-     38 joints with every capsule still a capsule.
+  1. **A rebuilt ragdoll has never been loaded by the engine.** The writer is
+     done -- `Havok/Compile All Collision` produces what vanilla ships for a
+     skeleton NIF, a `bhkRagdollSystem` beside a `bhkPhysicsSystem`, with the
+     `hkaSkeleton` BUILT from the bodies and the joints rather than carried (see
+     WW_CHANGES 2026-08-23i and 2026-08-23k). On the Brahmin the rebuild lands on
+     vanilla's own numbers: the same two blocks at the same two byte sizes, an
+     identical packfile object census with every object at the same offset, the
+     bone table identical parent for parent and pose for pose bar signed zeros
+     and eight negated quaternions, and an identical body-to-node mapping.
 
-     What is left for a ragdoll specifically:
+     None of that is a load. **Everything about ragdolls so far is offline**, and
+     this project's own history says that is the half that finds nothing: seven
+     defects in the collision writer were visible only in the game, and every
+     check we owned passed through all of them. A ragdoll is worse than a static
+     that way -- it is a thing the engine DRIVES, so the failure modes are
+     "collapses", "explodes", "goes rigid", none of which a byte comparison can
+     see.
 
-       * `hkaSkeleton`, and it needs NO carrier -- measured 2026-08-23, see
-         WW_CHANGES 2026-08-23i and `collision <file> --skeleton`. The reference
-         pose derives from the BODIES (their `cinfo +0x30` / `+0x40`, already
-         carried as `bhkRigidBody`'s Center and Rotation): **850 of 850 bones,
-         worst 3.1e-06 m**. NOT from the node transforms, which the handoff used
-         to guess -- those miss on 16 files and miss hard, every bone of the
-         standing turret and the Vertibird's wings by 2.03 m, because those NIFs
-         are authored in a display pose. The rest is rules, all measured with no
-         exceptions: bone tree = the joint graph (bones == joints + 1, 75/75),
-         `lockTranslation` = parent >= 0 (925/925), reference scale = 1.0 on the
-         root and 0.99999994 elsewhere (as BIT PATTERNS -- both print "1.0000"),
-         pose scale w = 1.0f on the root and 0 elsewhere. Only the pose
-         translation w lane is not derivable, and `--roundtrip` already treats it
-         as inert.
-       * the ROOT CLASS. Compile All writes `hknpPhysicsSystemData`; a ragdoll
-         needs `hknpRagdollData`, which the encoder already writes
-         (`hknpEncodeRagdoll`) and which needs the skeleton above.
-       * a skeleton NIF holds TWO packfiles -- the ragdoll and a character bumper
-         -- where Compile All writes one. Every other corpus file has exactly
-         one, so this is a ragdoll-only exception rather than a rule to relax.
+     What to load: a creature whose ragdoll has been decompiled and recompiled,
+     killed in front of the player. The Brahmin is the fixture everything here was
+     measured on and is easy to find.
+
+     Known and deliberate differences to expect before blaming them: capsules are
+     REBUILT rather than copied, so their geometry moves in the last mantissa bits
+     (the same Elric-style rebuild every compiled body has had since 2026-08-22);
+     eight of the Brahmin's bone quaternions come out negated, which is the same
+     rotation; and the pose translation w lane is written zero where vanilla has
+     SIMD residue, the lane `--roundtrip` already treats as inert.
 
 **The Museum set now stands at:** shape classes 114/114 vs vanilla, stored solids
 113/114 (one known face-decomposition difference), compounds 37/37, body rest

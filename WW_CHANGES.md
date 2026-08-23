@@ -1,5 +1,93 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23k — A ragdoll compiles back into a ragdoll
+
+The skeleton derives (2026-08-23i), so this writes it. `Havok/Compile All
+Collision` now produces what vanilla ships for a skeleton NIF: a
+`bhkRagdollSystem` beside a `bhkPhysicsSystem`, with `hknpRagdollData`, its
+`hkaSkeleton`, every body and every joint.
+
+The Brahmin, decompiled and compiled back:
+
+    vanilla   bhkRagdollSystem 53920 bytes, 39 bodies, 39 bones, 38 joints
+              bhkPhysicsSystem  1872 bytes,  2 bodies (the character bumper)
+    ours      the same two blocks, at the same two byte SIZES
+    packfile  identical object census -- 1 hkaSkeleton, 1 hknpRagdollData,
+              39 hknpCapsuleShape, 30 hkpRagdollConstraintData, 8 hinges,
+              1 motor -- with every object at the SAME OFFSET
+    skeleton  the bone table identical to vanilla's, parent for parent and pose
+              for pose, bar signed zeros and 8 quaternions written negated
+    bodies    an identical body-to-node mapping, in both systems
+    stable    a second decompile/recompile gives the same skeleton and the same
+              blob size, so nothing ratchets
+
+Three things had to be found on the way, and none of them is in the bones.
+
+### Nothing about a body says "ragdoll"
+
+Robot parts sit on BONES and carry JOINTS and are still plain physics systems, so
+neither the nodes nor the joints answer the question. The only thing that does is
+the original block type, and Decompile is the last place that knows it.
+
+So Decompile marks each body with `bhkRigidBody` "Body Flags" **bit 3** -- the
+same lane bits 1 and 2 already use for cinfo flags, safe because 0 of 19,881
+vanilla FO4 meshes carry an editable `bhkRigidBody` -- and Compile All captures
+the marked nodes before the bodies are removed, the way it already captures the
+joints. That mark also SPLITS the file: marked bodies become the ragdoll, the rest
+become the physics system, which is why the bumper is not merged into the
+skeleton.
+
+### The bone order is the JOINT order, and breadth-first was a near miss
+
+A ragdoll's body order is its bone order, and it is not the node-block order every
+other system uses. Measured first as "the parent array is non-decreasing, every
+parent below its child, root always at bone 0" -- 75 of 75 corpus ragdolls, no
+exceptions. That is breadth-first, so the first implementation walked the tree
+breadth-first.
+
+It produced a permutation. Right generations, wrong siblings: nothing about a
+tree says which of a bone's five children comes first.
+
+The real rule is simpler and exact: **bone k is the child of joint k-1**, root at
+bone 0. The Brahmin's constraint array runs Tail1, SPINE2, RLeg1, Sack, LLeg1,
+Tail2, Spine4 -- and its bones 1..7 are exactly those. The non-decreasing parent
+array is a CONSEQUENCE of that, which is why measuring it confirmed something true
+and not something sufficient. See docs/MISTAKES.md.
+
+It round-trips because the joints arrive in the order Decompile emitted them,
+which is the order the original packfile stored them.
+
+### The bones are a PREFIX of the bodies, not all of them
+
+`TorsoProtectron` is three bodies -- C-BotCore, Chest, CombatInhibitor -- and two
+bones: the joint binds the first two and nothing reaches the third. Measured, 9 of
+75 corpus ragdolls are like that, every one a robot; `bones == joints + 1` holds on
+all 75, `bones == bodies` on only 66.
+
+Building one bone per body refused all nine outright. The builder now stops at the
+bone count, and the part ordering puts the bodies the tree never reaches after the
+ones it does, because bone index == body index makes the bones a prefix.
+
+### Measured
+
+Over the 155 corpus files that carry constraints, decompiled and compiled back:
+
+    files                              155
+    joints in / out                    1202 / 1202
+    files preserving every joint       155
+    ragdoll system count == vanilla    155 / 155
+    more than one physics system       0
+    failed outright                    0
+
+`tests/spells/collision_constraints.sh` is 32 checks. Two of them exist because
+they caught these: the bone parent array compared against vanilla's, which is what
+sees a merely-valid order, and the body-to-node order on a ragdoll whose tree does
+not reach every body.
+
+### Still not validated in game
+
+Everything here is offline.
+
 ## 2026-08-23j — Left column tabs read Header, Blocks, NIFs
 
 Asked for, and a strip reorder only. The tab INDEX means nothing outside the

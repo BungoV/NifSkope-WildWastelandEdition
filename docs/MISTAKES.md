@@ -3,6 +3,59 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-23 — Confirmed a property every instance had, and built the wrong rule
+
+**What:** a ragdoll's bone order had to be reproduced. Measured across all 75
+corpus ragdolls, the parent array is non-decreasing, every parent index is below
+its child's, and the root is always bone 0 -- 75 of 75, no exceptions. That is a
+breadth-first walk, so the writer walked the tree breadth-first. It produced a
+permutation of vanilla's order: right generations, wrong siblings.
+
+**Why:** the measurement confirmed a property that the real rule IMPLIES, not the
+rule. Breadth-first is one of many orders satisfying "parents non-decreasing", and
+nothing about a tree says which of a bone's five children comes first -- so the
+measurement could not have distinguished the right answer from the wrong one, and
+75 of 75 made it feel as though it had.
+
+The actual rule was one command away and exact: bone k is the child of joint k-1.
+The Brahmin's constraint array runs Tail1, SPINE2, RLeg1, Sack, LLeg1 and its
+bones 1..5 are exactly those.
+
+**Solution:** what caught it was comparing the whole parent array against
+vanilla's rather than re-testing the property -- ours read
+`-1 0 0 0 0 0 1 2 4 5 ...` against vanilla's `-1 0 0 0 0 0 1 2 3 5 ...`, and the
+difference is visible at a glance where a summary statistic showed nothing.
+**A property that every instance satisfies is not necessarily the rule that
+generated them.** When a measurement is about to decide an implementation, ask
+what OTHER rule would produce the same data; if there is one, the measurement has
+not finished. And prefer comparing the whole artifact against the reference over
+testing a property of it.
+
+## 2026-08-23 — Generalised a count from the one fixture, past our own note
+
+**What:** the ragdoll writer built one bone per body. That is true of the Brahmin,
+which is the fixture everything was measured on. It is false on 9 of the 75 corpus
+ragdolls -- `TorsoProtectron` has three bodies and two bones -- and those nine
+refused to compile back as ragdolls at all, silently degrading to plain physics
+systems.
+
+**Why:** the rule that WAS measured is `bones == joints + 1`, 75 of 75. From that
+plus "bone index equals body index" it is an easy step to "bones == bodies", and
+the step is wrong: the bones are a PREFIX of the bodies and a ragdoll system may
+carry bodies its bone tree never reaches.
+
+The exception was already written down in this repository. `hknpEncodeSystem`'s
+bone-map comment says the map is the identity "on all 37, including the three
+parts kits where the counts differ" -- read earlier the same session, while
+looking at something else.
+
+**Solution:** the builder takes its bone count from the joints and the ordering
+puts unreached bodies last; the corpus sweep now reports ragdoll-system counts
+against vanilla's, which is what surfaced the nine. **A count that holds on the
+fixture is a count from a sample of one.** Before turning a measured relation into
+an assumption, grep the codebase for the field: this project writes its exceptions
+down, and the note was already there.
+
 ## 2026-08-23 — Measured the carrier, not the operation, and 30 files lost a joint
 
 **What:** the joint mapping shipped with a corpus measurement that read

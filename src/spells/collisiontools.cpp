@@ -7254,7 +7254,33 @@ QVector<TlCollJoint> tlCollCaptureConstraints( const NifModel * nif )
 	return out;
 }
 
-/*! Merge every compiled bhkPhysicsSystem in the file into ONE.
+/*! The nodes whose bodies came out of a bhkRagdollSystem.
+ *
+ *  Captured for the same reason the joints are: Compile removes the bodies, and
+ *  the node is what survives. The mark is `bhkRigidBody` "Body Flags" bit 3,
+ *  written by Decompile -- see the ragdoll split in tlCollMergePhysicsSystems for
+ *  why nothing about the bodies themselves can answer this question.
+ */
+QVector<QPersistentModelIndex> tlCollCaptureRagdollNodes( const NifModel * nif )
+{
+	QVector<QPersistentModelIndex> out;
+	if ( !nif )
+		return out;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( i, "bhkRigidBody" ) )
+			continue;
+		if ( !( nif->get<quint32>( i, "Body Flags" ) & 8u ) )
+			continue;
+		const int node = tlCollNodeOfBody( nif, b );
+		if ( node >= 0 )
+			out.append( nif->getBlockIndex( node ) );
+	}
+	return out;
+}
+
+/*! Merge every compiled bhkPhysicsSystem in the file into ONE, or into a
+ *  ragdoll and one other.
  *
  * Compile writes one system per body because it compiles one body at a time.
  * Vanilla never does that: of 1,334 corpus files carrying collision, **1,334
@@ -7278,8 +7304,119 @@ QVector<TlCollJoint> tlCollCaptureConstraints( const NifModel * nif )
  * static shell give inertia 1, motion 0, body 1 at 0x7fffffff, and that is
  * vanilla's own layout for that file.
  */
+/*! The ragdoll's own skeleton, BUILT rather than carried.
+ *
+ * `hknpRagdollData` holds an `hkaSkeleton` and no NIF block does. It does not
+ * need one: measured over all 75 corpus ragdolls (925 bones), every field of it
+ * is either already in the file or a rule with no exceptions. See
+ * `collision <file> --skeleton`, which is the instrument, and WW_CHANGES
+ * 2026-08-23i.
+ *
+ *   bone tree       the JOINT graph. bones == joints + 1 on 75 of 75 files, so
+ *                   every bone but the root is exactly one joint's child.
+ *   pose            the BODIES, not the nodes: a ragdoll body's `cinfo +0x30`
+ *                   IS the bone origin. 850 of 850 bones, worst 3.1e-06 m.
+ *                   Deriving from the node transforms instead misses on 16
+ *                   files and misses hard -- every bone of the standing turret,
+ *                   the Vertibird's wings by 2.03 m -- because those NIFs are
+ *                   authored in a display pose and a rest pose is not a pose.
+ *   lockTranslation parent >= 0.                              925 / 925
+ *   scale           1.0 on the root, 0.99999994 on the rest.  75 / 850
+ *   pose scale w    1.0f on the root, 0 on the rest.          75 / 850
+ *
+ * The pose translation w lane is SIMD residue, one distinct value per bone and
+ * derivable from nothing; it is written zero, which is the lane `--roundtrip`
+ * already treats as inert.
+ *
+ * PARENT BEFORE CHILD is required, not hoped for: a bone names its parent by
+ * index and vanilla's are topologically sorted. Body order here follows the
+ * owning node's block index and NIF nodes are stored parents-first, so it falls
+ * out -- but it is checked rather than assumed, and a tree that fails refuses to
+ * become a skeleton instead of becoming a broken one.
+ */
+static bool tlCollBuildBones( HknpSystem & sys, QString * why )
+{
+	auto no = [why]( const QString & m ) { if ( why ) *why = m; return false; };
+	const int n = int( sys.bodyPhys.size() );
+	/* THE BONES ARE A PREFIX OF THE BODIES, not all of them.
+	 *
+	 * A ragdoll system may carry bodies the bone tree does not reach:
+	 * TorsoProtectron has three bodies -- C-BotCore, Chest, CombatInhibitor --
+	 * and two bones, the joint binding only the first two. Assuming bones ==
+	 * bodies refused nine corpus ragdolls outright, every one of them a robot.
+	 *
+	 * bones == joints + 1 is the count (75 of 75 corpus ragdolls) and bone
+	 * index == body index is the mapping, so the bones are bodies 0..nb-1 and
+	 * anything past that is simply a body. The part ordering above puts the
+	 * non-bone bodies last for exactly this reason.
+	 */
+	const int nb = int( sys.constraints.size() ) + 1;
+	if ( n < 2 || nb < 2 )
+		return no( QObject::tr( "a ragdoll needs at least two bones" ) );
+	if ( nb > n )
+		return no( QObject::tr( "%1 joints want %2 bones but there are only %3 bodies" )
+			.arg( sys.constraints.size() ).arg( nb ).arg( n ) );
+
+	QVector<int> parent( nb, -2 );		// -2 = no joint has named this body as its child
+	for ( const HknpConstraint & c : std::as_const( sys.constraints ) ) {
+		if ( c.childBody < 0 || c.childBody >= nb )
+			return no( QObject::tr( "a joint names child body %1, outside the %2 bones" )
+				.arg( c.childBody ).arg( nb ) );
+		if ( parent.at( c.childBody ) != -2 )
+			return no( QObject::tr( "body %1 is the child of two joints" ).arg( c.childBody ) );
+		parent[c.childBody] = ( c.parentBody >= 0 && c.parentBody < nb ) ? c.parentBody : -1;
+	}
+	int roots = 0;
+	for ( int i = 0; i < nb; i++ ) {
+		if ( parent.at( i ) == -2 )
+			parent[i] = -1;
+		if ( parent.at( i ) < 0 )
+			roots++;
+		else if ( parent.at( i ) >= i )
+			return no( QObject::tr( "bone %1's parent is bone %2, which comes after it" )
+				.arg( i ).arg( parent.at( i ) ) );
+	}
+	if ( roots != 1 )
+		return no( QObject::tr( "%1 bones have no parent; a skeleton has exactly one root" ).arg( roots ) );
+
+	/* 0x3f7fffff, one ULP below 1.0: the value 850 of 850 non-root corpus bones
+	 * carry, against exactly 1.0 on all 75 roots. It was found as a BIT PATTERN
+	 * because both print as "1.0000" -- a probe formatting it as %.4f recorded
+	 * it as unity, which is the fourth field this format has hidden that way.
+	 */
+	const float nearlyOne = std::nextafter( 1.0f, 0.0f );
+	sys.bones.clear();
+	sys.bones.reserve( nb );
+	for ( int i = 0; i < nb; i++ ) {
+		HknpBone b;
+		b.parent = parent.at( i );
+		const bool root = ( b.parent < 0 );
+		b.lockTranslation = !root;
+		b.scale = root ? Vector3( 1.0f, 1.0f, 1.0f ) : Vector3( nearlyOne, nearlyOne, nearlyOne );
+		b.poseScaleW = root ? 0x3f800000u : 0u;
+		b.poseTransW = 0;
+
+		const HknpBodyPhys & child = sys.bodyPhys.at( i );
+		if ( root ) {
+			b.translation = child.position;
+			b.rotation = child.orientation;
+		} else {
+			const HknpBodyPhys & up = sys.bodyPhys.at( b.parent );
+			Matrix mc, mp;
+			mc.fromQuat( child.orientation );
+			mp.fromQuat( up.orientation );
+			const Matrix inv = mp.inverted();
+			b.translation = inv * ( child.position - up.position );
+			b.rotation = ( inv * mc ).toQuat();
+		}
+		sys.bones.append( b );
+	}
+	return true;
+}
+
 bool tlCollMergePhysicsSystems( NifModel * nif, QString * error,
-								const QVector<TlCollJoint> & joints )
+								const QVector<TlCollJoint> & joints,
+								const QVector<QPersistentModelIndex> & ragdollNodes )
 {
 	auto fail = [&]( const QString & text ) { if ( error ) *error = text; return false; };
 	if ( !nif )
@@ -7302,9 +7439,14 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error,
 	 * the only remaining cause of the set's last header-word and rest-state
 	 * differences, and it costs one sort to be rid of. Match the order rather
 	 * than argue it cannot matter.
+	 *
+	 * It is also what makes the SKELETON work: bone index equals body index and a
+	 * bone's parent must come before it, which holds because NIF nodes are stored
+	 * parents-first. tlCollBuildBones checks rather than trusts that.
 	 */
 	QVector<int> objects, named;        // every object, in block order, for the rebind below
 	QVector<QPair<int, int>> byOwner;   // (owning node block, system block), for the ORDER
+	QVector<int> ownerOf;               // the owning node of objects[i]
 	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 		const QModelIndex i = nif->getBlockIndex( b );
 		if ( !nif->blockInherits( i, "bhkNPCollisionObject" ) )
@@ -7317,7 +7459,9 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error,
 		// The collision object's own block is the fallback, so an object whose
 		// parent cannot be resolved still lands somewhere deterministic rather
 		// than at the front.
-		const int owner = nif->getParent( b );
+		const int target = nif->getLink( i, "Target" );
+		const int owner = nif->isValidBlockNumber( target ) ? target : nif->getParent( b );
+		ownerOf.append( owner );
 		byOwner.append( { owner >= 0 ? owner : b, data } );
 	}
 	std::stable_sort( byOwner.begin(), byOwner.end(),
@@ -7328,7 +7472,112 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error,
 	for ( const auto & entry : std::as_const( byOwner ) )
 		if ( !parts.contains( entry.second ) )
 			parts.append( entry.second );
-	/* One system and no joints is already the shape vanilla ships.
+
+	/* THE RAGDOLL SPLIT.
+	 *
+	 * A skeleton NIF holds TWO packfiles -- the Brahmin's are a 39-body ragdoll
+	 * and a 2-body static bumper -- and merging them into one would write a
+	 * system with more bodies than bones, which vanilla never ships and which
+	 * would break bone index == body index besides.
+	 *
+	 * What says which is which is not derivable from the bodies: robot parts sit
+	 * on bones AND carry joints and are still plain physics systems. It is the
+	 * ORIGINAL BLOCK TYPE, which Decompile knows and used to throw away. It now
+	 * marks each body with bhkRigidBody "Body Flags" bit 3 -- the same lane bits
+	 * 1 and 2 already use for cinfo flags, safe because 0 of 19,881 vanilla FO4
+	 * meshes carry an editable bhkRigidBody -- and Compile All captures the marked
+	 * nodes before the bodies are removed.
+	 */
+	QSet<int> ragNodes;
+	for ( const QPersistentModelIndex & n : ragdollNodes ) {
+		if ( n.isValid() )
+			ragNodes.insert( nif->getBlockNumber( QModelIndex( n ) ) );
+	}
+	QSet<int> ragParts;
+	for ( qsizetype j = 0; j < objects.size(); j++ ) {
+		if ( ragNodes.contains( ownerOf.at( j ) ) )
+			ragParts.insert( named.at( j ) );
+	}
+	QVector<int> ragGroup, plainGroup;
+	for ( int s : std::as_const( parts ) )
+		( ragParts.contains( s ) ? ragGroup : plainGroup ).append( s );
+
+	/* A RAGDOLL'S BODY ORDER IS ITS BONE ORDER, and vanilla's is the JOINT ORDER.
+	 *
+	 * Every other system here is ordered by the owning node's block index, which
+	 * is vanilla's rule for those -- 46 of 46 on the Museum set. A ragdoll is not
+	 * ordered that way, and the rule is exact rather than approximate: **bone k is
+	 * the child of joint k-1**, with the root at bone 0. Read straight off the
+	 * Brahmin, whose constraint array runs Tail1, SPINE2, RLeg1, Sack, LLeg1,
+	 * Tail2, Spine4... and whose bones 1..7 are exactly those.
+	 *
+	 * That the parent array comes out non-decreasing -- breadth-first, 75 of 75
+	 * corpus ragdolls, root always at 0 -- is a CONSEQUENCE of this, not the rule.
+	 * Ordering breadth-first instead got the generations right and the siblings
+	 * wrong, because nothing about the tree says which of a bone's five children
+	 * comes first; only the joint array does.
+	 *
+	 * It round-trips because the joints arrive in the order Decompile emitted
+	 * them, which is the order the original packfile stored them.
+	 *
+	 * The order is decided HERE, before any body is laid down, so bone index ==
+	 * body index falls out instead of needing a permutation afterwards.
+	 */
+	if ( !ragGroup.isEmpty() && !joints.isEmpty() ) {
+		QHash<int, int> partOfNode, nodeOfPart;
+		for ( qsizetype j = 0; j < objects.size(); j++ ) {
+			if ( !ragParts.contains( named.at( j ) ) || ownerOf.at( j ) < 0 )
+				continue;
+			partOfNode.insert( ownerOf.at( j ), named.at( j ) );
+			nodeOfPart.insert( named.at( j ), ownerOf.at( j ) );
+		}
+		auto nodeOf = []( const QPersistentModelIndex & p, const NifModel * n ) {
+			return p.isValid() ? n->getBlockNumber( QModelIndex( p ) ) : -1;
+		};
+		QSet<int> isChild, isParent;
+		for ( const TlCollJoint & j : joints ) {
+			const int c = nodeOf( j.childNode, nif );
+			if ( c >= 0 && partOfNode.contains( c ) )
+				isChild.insert( c );
+			const int p = nodeOf( j.parentNode, nif );
+			if ( p >= 0 && partOfNode.contains( p ) )
+				isParent.insert( p );
+		}
+		QVector<int> order;
+		QSet<int> placed;
+		/* bone 0 is the one a joint names as a PARENT and none names as a child.
+		 * "Not a child" alone is not enough: a body the bone tree never reaches
+		 * is not a child either, and taking it for a root put it among the bones
+		 * instead of after them.
+		 */
+		for ( int s : std::as_const( ragGroup ) ) {
+			const int nd = nodeOfPart.value( s, -1 );
+			if ( nd >= 0 && isParent.contains( nd ) && !isChild.contains( nd ) ) {
+				order.append( s );
+				placed.insert( s );
+			}
+		}
+		// then one per joint, in the joints' own order
+		for ( const TlCollJoint & j : joints ) {
+			const int part = partOfNode.value( nodeOf( j.childNode, nif ), -1 );
+			if ( part >= 0 && !placed.contains( part ) ) {
+				order.append( part );
+				placed.insert( part );
+			}
+		}
+		// and last, the bodies the bone tree never reaches -- a ragdoll system
+		// may hold some, and the bones have to be the PREFIX
+		for ( int s : std::as_const( ragGroup ) ) {
+			if ( !placed.contains( s ) ) {
+				order.append( s );
+				placed.insert( s );
+			}
+		}
+		if ( order.size() == ragGroup.size() )
+			ragGroup = order;
+	}
+
+	/* One system, no joints and no ragdoll is already the shape vanilla ships.
 	 *
 	 * WITH joints it is not: a robot part is ONE body carrying a joint whose
 	 * parent is in another file, and bailing here left that joint unwritten
@@ -7337,57 +7586,87 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error,
 	 * writes it back -- so the early-out is about avoiding needless work, not
 	 * about being unable to do it.
 	 */
-	if ( parts.size() < 2 && joints.isEmpty() )
+	if ( parts.size() < 2 && joints.isEmpty() && ragGroup.isEmpty() )
 		return true;
 
-	HknpSystem merged;
-	merged.rootClassName = QStringLiteral( "hknpPhysicsSystemData" );
-	QVector<int> bodyBase;        // where each part's bodies landed
-	int motionSlots = 0, motionArr = 0;
-	for ( int s : std::as_const( parts ) ) {
-		const HknpSystem part = hknpDecode( nif->get<QByteArray>( nif->getBlockIndex( s ), "Binary Data" ) );
-		if ( !part.valid || part.bodyPhys.isEmpty() )
-			return fail( QObject::tr( "Block %1 did not decode as a physics system: %2" ).arg( s ).arg( part.error ) );
-		const int shapeBase = int( merged.shapes.size() );
-		bodyBase.append( int( merged.bodyPhys.size() ) );
-		for ( HknpShape sh : part.shapes ) {
-			sh.bodyId = ( sh.bodyId < 0 ? 0 : sh.bodyId ) + bodyBase.last();
-			merged.shapes.append( sh );
-		}
-		for ( HknpCompound c : part.compounds ) {
-			c.bodyId = ( c.bodyId < 0 ? 0 : c.bodyId ) + bodyBase.last();
-			for ( int & ch : c.children )
-				ch += shapeBase;
-			merged.compounds.append( c );
-		}
-		for ( HknpBodyPhys ph : part.bodyPhys ) {
-			if ( ph.hasMotion ) {
-				ph.motionIndex = motionSlots++;
-				// a part that carried a real dyn_motion record needs the merged
-				// motion array to reach its slot; a keyframed one does not
-				if ( part.motionCount > 0 )
-					motionArr = motionSlots;
-			} else {
-				ph.motionIndex = -1;
-			}
-			merged.bodyPhys.append( ph );
-		}
-		/* The shape list at +0x60 holds ONE ENTRY PER BODY, and the entry is a
-		 * BODY INDEX -- the assembler reads it as one and calls the variable
-		 * `body`. Offsetting these by the SHAPE base is what made it refuse a
-		 * railing with "Shape list entry 4 names no body".
-		 */
-		if ( part.shapeListOrder.size() == part.bodyPhys.size() ) {
-			for ( int k : part.shapeListOrder )
-				merged.shapeListOrder.append( k + bodyBase.last() );
-		} else {
-			for ( qsizetype k = 0; k < part.bodyPhys.size(); k++ )
-				merged.shapeListOrder.append( int( bodyBase.last() + k ) );
-		}
-		merged.dynamic = merged.dynamic || part.dynamic;
+	/* One group of parts, assembled. Two of these at most: the ragdoll and
+	 * everything else. With no ragdoll there is exactly one and this behaves
+	 * exactly as the single-system merge always did.
+	 */
+	struct Group
+	{
+		QVector<int> parts;
+		QVector<int> bodyBase;    // where each of ITS parts' bodies landed
+		HknpSystem sys;
+		QByteArray bytes;
+		bool ragdoll = false;
+		int keep = -1;
+	};
+	QVector<Group> groups;
+	if ( !ragGroup.isEmpty() ) {
+		groups.append( Group{ ragGroup, {}, {}, {}, true, -1 } );
+		if ( !plainGroup.isEmpty() )
+			groups.append( Group{ plainGroup, {}, {}, {}, false, -1 } );
+	} else {
+		groups.append( Group{ parts, {}, {}, {}, false, -1 } );
 	}
-	merged.inertiaCount = motionSlots;
-	merged.motionCount = motionArr;
+
+	// which group a part landed in, so the joints and the rebind can find it
+	QHash<int, int> groupOfPart;
+	for ( qsizetype g = 0; g < groups.size(); g++ )
+		for ( int s : std::as_const( groups.at( g ).parts ) )
+			groupOfPart.insert( s, int( g ) );
+
+	for ( Group & group : groups ) {
+		HknpSystem & merged = group.sys;
+		merged.rootClassName = group.ragdoll ? QStringLiteral( "hknpRagdollData" )
+											 : QStringLiteral( "hknpPhysicsSystemData" );
+		int motionSlots = 0, motionArr = 0;
+		for ( int s : std::as_const( group.parts ) ) {
+			const HknpSystem part = hknpDecode( nif->get<QByteArray>( nif->getBlockIndex( s ), "Binary Data" ) );
+			if ( !part.valid || part.bodyPhys.isEmpty() )
+				return fail( QObject::tr( "Block %1 did not decode as a physics system: %2" ).arg( s ).arg( part.error ) );
+			const int shapeBase = int( merged.shapes.size() );
+			group.bodyBase.append( int( merged.bodyPhys.size() ) );
+			for ( HknpShape sh : part.shapes ) {
+				sh.bodyId = ( sh.bodyId < 0 ? 0 : sh.bodyId ) + group.bodyBase.last();
+				merged.shapes.append( sh );
+			}
+			for ( HknpCompound c : part.compounds ) {
+				c.bodyId = ( c.bodyId < 0 ? 0 : c.bodyId ) + group.bodyBase.last();
+				for ( int & ch : c.children )
+					ch += shapeBase;
+				merged.compounds.append( c );
+			}
+			for ( HknpBodyPhys ph : part.bodyPhys ) {
+				if ( ph.hasMotion ) {
+					ph.motionIndex = motionSlots++;
+					// a part that carried a real dyn_motion record needs the merged
+					// motion array to reach its slot; a keyframed one does not
+					if ( part.motionCount > 0 )
+						motionArr = motionSlots;
+				} else {
+					ph.motionIndex = -1;
+				}
+				merged.bodyPhys.append( ph );
+			}
+			/* The shape list at +0x60 holds ONE ENTRY PER BODY, and the entry is a
+			 * BODY INDEX -- the assembler reads it as one and calls the variable
+			 * `body`. Offsetting these by the SHAPE base is what made it refuse a
+			 * railing with "Shape list entry 4 names no body".
+			 */
+			if ( part.shapeListOrder.size() == part.bodyPhys.size() ) {
+				for ( int k : part.shapeListOrder )
+					merged.shapeListOrder.append( k + group.bodyBase.last() );
+			} else {
+				for ( qsizetype k = 0; k < part.bodyPhys.size(); k++ )
+					merged.shapeListOrder.append( int( group.bodyBase.last() + k ) );
+			}
+			merged.dynamic = merged.dynamic || part.dynamic;
+		}
+		merged.inertiaCount = motionSlots;
+		merged.motionCount = motionArr;
+	}
 
 	/* THE JOINTS, rebound to the bodies they landed on.
 	 *
@@ -7395,81 +7674,126 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error,
 	 * until now they were in two different systems. Their nodes are what
 	 * carried them here (see TlCollJoint) and every compiled collision object
 	 * names its own node, so the same walk that rebinds Body ID below gives
-	 * node -> merged body index.
+	 * node -> group and merged body index.
 	 */
 	if ( !joints.isEmpty() ) {
-		QHash<int, int> bodyOfNode;
+		QHash<int, QPair<int, int>> placeOfNode;   // node -> (group, body index)
 		for ( qsizetype j = 0; j < objects.size(); j++ ) {
 			const QModelIndex obj = nif->getBlockIndex( objects.at( j ) );
-			const int part = int( parts.indexOf( named.at( j ) ) );
-			const int target = nif->getLink( obj, "Target" );
-			const int owner = nif->isValidBlockNumber( target ) ? target
-							 : nif->getParent( objects.at( j ) );
-			if ( part >= 0 && part < bodyBase.size() && owner >= 0 )
-				bodyOfNode.insert( owner, bodyBase.at( part )
-					+ int( nif->get<quint32>( obj, "Body ID" ) ) );
+			const int g = groupOfPart.value( named.at( j ), -1 );
+			if ( g < 0 || ownerOf.at( j ) < 0 )
+				continue;
+			const int part = int( groups.at( g ).parts.indexOf( named.at( j ) ) );
+			if ( part < 0 || part >= groups.at( g ).bodyBase.size() )
+				continue;
+			placeOfNode.insert( ownerOf.at( j ),
+				{ g, groups.at( g ).bodyBase.at( part ) + int( nif->get<quint32>( obj, "Body ID" ) ) } );
 		}
 		// an Entity that was never bound is the NO BODY sentinel, not a failure
-		auto bodyFor = [&]( const QPersistentModelIndex & node ) {
+		auto placeFor = [&]( const QPersistentModelIndex & node ) {
 			return node.isValid()
-				? bodyOfNode.value( nif->getBlockNumber( QModelIndex( node ) ), -1 )
-				: TLCOLL_NO_BODY;
+				? placeOfNode.value( nif->getBlockNumber( QModelIndex( node ) ), { -1, -1 } )
+				: QPair<int, int>{ -2, TLCOLL_NO_BODY };
 		};
 		int dropped = 0;
 		for ( const TlCollJoint & j : joints ) {
-			const int child = bodyFor( j.childNode ), parent = bodyFor( j.parentNode );
-			if ( child < 0 || parent < 0 || ( child == parent && child != TLCOLL_NO_BODY ) ) {
+			const QPair<int, int> child = placeFor( j.childNode ), parent = placeFor( j.parentNode );
+			// -2 is the unbound side; a real group has to agree on both sides,
+			// because a joint cannot reach across two packfiles
+			const int g = ( child.first >= 0 ) ? child.first : parent.first;
+			const bool spans = child.first >= 0 && parent.first >= 0 && child.first != parent.first;
+			if ( g < 0 || spans || child.second < 0 || parent.second < 0
+				|| ( child.second == parent.second && child.second != TLCOLL_NO_BODY ) ) {
 				dropped++;
 				continue;
 			}
 			HknpConstraint c = j.joint;
-			c.childBody = child;
-			c.parentBody = parent;
-			merged.constraints.append( c );
+			c.childBody = child.second;
+			c.parentBody = parent.second;
+			groups[g].sys.constraints.append( c );
 		}
 		if ( dropped )
 			return fail( QObject::tr( "%1 of %2 joints named a body this merge could not "
 				"place; nothing was written rather than write a ragdoll missing a limb." )
 				.arg( dropped ).arg( joints.size() ) );
 	}
-	/* One entry per BODY. Rebuilding it one-per-SHAPE is what made the assembler
-	 * refuse a railing with "Shape list entry 4 names no body": five shapes, four
-	 * bodies, five entries.
-	 */
-	if ( merged.shapeListOrder.size() != merged.bodyPhys.size() )
-		return fail( QObject::tr( "Merged %1 shape-list entries for %2 bodies." )
-			.arg( merged.shapeListOrder.size() ).arg( merged.bodyPhys.size() ) );
 
-	QString err;
-	const QByteArray bytes = hknpEncodeSystem( merged, &err );
-	if ( bytes.isEmpty() )
-		return fail( QObject::tr( "The merged system would not encode: %1" ).arg( err ) );
-	const HknpSystem back = hknpDecode( bytes );
-	if ( !back.valid || back.bodyPhys.size() != merged.bodyPhys.size() )
-		return fail( QObject::tr( "The merged system did not read back (%1 bodies of %2): %3" )
-			.arg( back.bodyPhys.size() ).arg( merged.bodyPhys.size() ).arg( back.error ) );
-	// the joints have to survive the readback as well, or a system that quietly
-	// dropped them reads as a success
-	if ( back.constraints.size() != merged.constraints.size() )
-		return fail( QObject::tr( "The merged system read back %1 joints of %2." )
-			.arg( back.constraints.size() ).arg( merged.constraints.size() ) );
+	for ( Group & group : groups ) {
+		HknpSystem & merged = group.sys;
+		/* One entry per BODY. Rebuilding it one-per-SHAPE is what made the assembler
+		 * refuse a railing with "Shape list entry 4 names no body": five shapes, four
+		 * bodies, five entries.
+		 */
+		if ( merged.shapeListOrder.size() != merged.bodyPhys.size() )
+			return fail( QObject::tr( "Merged %1 shape-list entries for %2 bodies." )
+				.arg( merged.shapeListOrder.size() ).arg( merged.bodyPhys.size() ) );
 
-	const int keep = parts.first();
+		/* The skeleton, which is what makes this a ragdoll at all: the encoder
+		 * chooses the `hknpRagdollData` root purely from `!sys.bones.isEmpty()`.
+		 * A group marked as a ragdoll whose joints do not form one bone tree is
+		 * written as a plain physics system rather than as a broken skeleton --
+		 * loudly, because that is a file that will not behave as its author meant.
+		 */
+		if ( group.ragdoll ) {
+			QString why;
+			if ( !tlCollBuildBones( merged, &why ) ) {
+				group.ragdoll = false;
+				merged.rootClassName = QStringLiteral( "hknpPhysicsSystemData" );
+				qWarning().noquote() << QObject::tr( "Merge: these bodies are marked as a ragdoll "
+					"but do not form a bone tree (%1), so they were written as a plain physics "
+					"system." ).arg( why );
+			}
+		}
+
+		QString err;
+		group.bytes = hknpEncodeSystem( merged, &err );
+		if ( group.bytes.isEmpty() )
+			return fail( QObject::tr( "The merged system would not encode: %1" ).arg( err ) );
+		const HknpSystem back = hknpDecode( group.bytes );
+		if ( !back.valid || back.bodyPhys.size() != merged.bodyPhys.size() )
+			return fail( QObject::tr( "The merged system did not read back (%1 bodies of %2): %3" )
+				.arg( back.bodyPhys.size() ).arg( merged.bodyPhys.size() ).arg( back.error ) );
+		// the joints and the skeleton have to survive the readback as well, or a
+		// system that quietly dropped them reads as a success
+		if ( back.constraints.size() != merged.constraints.size() )
+			return fail( QObject::tr( "The merged system read back %1 joints of %2." )
+				.arg( back.constraints.size() ).arg( merged.constraints.size() ) );
+		if ( back.bones.size() != merged.bones.size() )
+			return fail( QObject::tr( "The merged system read back %1 bones of %2." )
+				.arg( back.bones.size() ).arg( merged.bones.size() ) );
+	}
+
 	nifSnapshotOp( nif, QObject::tr( "Merge physics systems" ), [&]() {
 		nif->holdUpdates( true );
-		nif->set<QByteArray>( nif->getBlockIndex( keep ), "Binary Data", bytes );
+		for ( Group & group : groups ) {
+			/* A ragdoll needs a bhkRagdollSystem block, and a block's type cannot
+			 * change in place -- so it gets a new one and the old parts all go.
+			 * Everything else keeps its first part, as before.
+			 */
+			if ( group.ragdoll ) {
+				const QModelIndex made = nif->insertNiBlock( "bhkRagdollSystem" );
+				group.keep = nif->getBlockNumber( made );
+			} else {
+				group.keep = group.parts.first();
+			}
+			nif->set<QByteArray>( nif->getBlockIndex( group.keep ), "Binary Data", group.bytes );
+		}
 		for ( qsizetype j = 0; j < objects.size(); j++ ) {
+			const int g = groupOfPart.value( named.at( j ), -1 );
+			if ( g < 0 )
+				continue;
 			const QModelIndex obj = nif->getBlockIndex( objects.at( j ) );
-			const int part = int( parts.indexOf( named.at( j ) ) );
+			const int part = int( groups.at( g ).parts.indexOf( named.at( j ) ) );
 			const int was = int( nif->get<quint32>( obj, "Body ID" ) );
-			nif->setLink( obj, QStringLiteral( "Data" ), keep );
-			nif->set<quint32>( obj, "Body ID", quint32( bodyBase.at( part ) + was ) );
+			nif->setLink( obj, QStringLiteral( "Data" ), groups.at( g ).keep );
+			nif->set<quint32>( obj, "Body ID", quint32( groups.at( g ).bodyBase.at( part ) + was ) );
 		}
 		// drop what nothing names any more, highest first so the numbers below stay put
 		QVector<int> dead;
-		for ( int s : std::as_const( parts ) )
-			if ( s != keep )
-				dead.append( s );
+		for ( const Group & group : std::as_const( groups ) )
+			for ( int s : std::as_const( group.parts ) )
+				if ( s != group.keep )
+					dead.append( s );
 		std::sort( dead.begin(), dead.end(), std::greater<int>() );
 		for ( int s : std::as_const( dead ) )
 			nif->removeNiBlock( s );
@@ -7513,7 +7837,7 @@ public:
 		QString error;
 		// nothing to carry: by the time a file has only compiled bodies, its joint
 		// blocks are gone. Compile All Collision is the path that keeps them.
-		if ( !tlCollMergePhysicsSystems( nif, &error, {} ) && !error.isEmpty() )
+		if ( !tlCollMergePhysicsSystems( nif, &error, {}, {} ) && !error.isEmpty() )
 			qWarning().noquote() << QObject::tr( "Merge Physics Systems:" ) << error;
 		return index;
 	}
@@ -7605,6 +7929,7 @@ public:
 
 		// BEFORE the compiles: they remove the bodies these name
 		const QVector<TlCollJoint> joints = tlCollCaptureConstraints( nif );
+		const QVector<QPersistentModelIndex> ragdollNodes = tlCollCaptureRagdollNodes( nif );
 
 		/* One body at a time, re-scanning each pass, because compiling removes
 		 * blocks and renumbers everything above them. The bound is the block
@@ -7631,10 +7956,10 @@ public:
 		}
 
 		QString error;
-		if ( !tlCollMergePhysicsSystems( nif, &error, joints ) && !error.isEmpty() )
+		if ( !tlCollMergePhysicsSystems( nif, &error, joints, ragdollNodes ) && !error.isEmpty() )
 			qWarning().noquote() << QObject::tr( "Compile All Collision:" ) << error;
-		qWarning().noquote() << QObject::tr( "Compile All Collision: %1 bodies, %2 joints." )
-			.arg( compiled ).arg( joints.size() );
+		qWarning().noquote() << QObject::tr( "Compile All Collision: %1 bodies, %2 joints, "
+			"%3 ragdoll bodies." ).arg( compiled ).arg( joints.size() ).arg( ragdollNodes.size() );
 		return index;
 	}
 };

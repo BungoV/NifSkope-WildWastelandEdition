@@ -2493,10 +2493,18 @@ public:
 				 * enters the world immovable looks exactly like a dynamic prop
 				 * until you read this. Bit 0 is the Wind convention; leave it.
 				 */
+				/* Bit 3 says THIS BODY CAME OUT OF A RAGDOLL, which is the one thing
+				 * about a ragdoll that nothing else can tell you afterwards. Robot
+				 * parts sit on bones and carry joints and are still plain physics
+				 * systems, so neither the nodes nor the joints answer it -- only the
+				 * block type does, and Decompile is the last place that knows it.
+				 * Compile All reads it back to decide what to write.
+				 */
 				{
-					quint32 bodyFlags = nif->get<quint32>( iBody, "Body Flags" ) & ~6u;
+					quint32 bodyFlags = nif->get<quint32>( iBody, "Body Flags" ) & ~14u;
 					if ( phys.cinfoFlags & HKNP_ADD_KEYFRAMED ) bodyFlags |= 2u;
 					if ( phys.cinfoFlags & HKNP_RAISE_TRIGGER_EVENTS ) bodyFlags |= 4u;
+					if ( nif->isNiBlock( iSys, "bhkRagdollSystem" ) ) bodyFlags |= 8u;
 					nif->set<quint32>( iBody, "Body Flags", bodyFlags );
 				}
 				nif->set<float>( iInfo, "Friction", phys.friction );
