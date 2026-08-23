@@ -42,44 +42,53 @@ more.
 
 **What is left, and it is one piece of work rather than two:**
 
-  1. **A rebuilt ragdoll HAS been loaded now, and it found two defects.** The writer is
-     done -- `Havok/Compile All Collision` produces what vanilla ships for a
-     skeleton NIF, a `bhkRagdollSystem` beside a `bhkPhysicsSystem`, with the
-     `hkaSkeleton` BUILT from the bodies and the joints rather than carried (see
-     WW_CHANGES 2026-08-23i and 2026-08-23k). On the Brahmin the rebuild lands on
-     vanilla's own numbers: the same two blocks at the same two byte sizes, an
-     identical packfile object census with every object at the same offset, the
-     bone table identical parent for parent and pose for pose bar signed zeros
-     and eight negated quaternions, and an identical body-to-node mapping.
+  1. **Two in-game tests, two real defects fixed, and the file is now equivalent
+     to vanilla by every measure I can build. The symptom may not be ours.**
 
-     bungo killed a raider with it 2026-08-23 and reported two things: the
-     ragdolls freak out on death, and the corpses weigh almost nothing. Both
-     were one root cause -- spheres and capsules never set their mass
-     properties, so every ragdoll body summed to volume zero and lost both its
-     density and its centre of mass. Fixed and re-measured against vanilla per
-     body (mass exact, density 9e-07 relative, com 1e-08 m); see WW_CHANGES
-     2026-08-23l. **The fixed build has NOT been loaded yet** -- the mod at
-     `E:\Projects\Fallout 4 Mods\mods\WW Ragdoll Test` carries both rebuilt
-     skeletons and is waiting on a second kill.
+     Loaded 2026-08-23. First test: ragdolls thrashed on death, corpses weighed
+     nothing. Cause -- spheres and capsules never set their mass properties, so
+     every ragdoll body summed to volume zero and lost its density AND its centre
+     of mass; the offset also needed the body's own rotation. Fixed, 6541dbd.
 
-     The first load is still the lesson. **Everything about ragdolls up to it was offline**, and
-     this project's own history says that is the half that finds nothing: seven
-     defects in the collision writer were visible only in the game, and every
-     check we owned passed through all of them. A ragdoll is worse than a static
-     that way -- it is a thing the engine DRIVES, so the failure modes are
-     "collapses", "explodes", "goes rigid", none of which a byte comparison can
-     see.
+     Second test, same symptoms. Cause found: `hknpMaterial` carries flags and a
+     trigger type that `HknpBodyPhys` never modelled, so Compile wrote a ZEROED
+     material and the character bumper stopped being a TRIGGER. Fixed, 8b1b312,
+     derived from RAISE_TRIGGER_EVENTS (1363/1363 corpus bodies, no exceptions).
 
-     What to load: a creature whose ragdoll has been decompiled and recompiled,
-     killed in front of the player. The Brahmin is the fixture everything here was
-     measured on and is easy to find.
+     **Then the PDB dig bungo asked for** -- see `docs/RE/ragdoll-engine-dig.md`,
+     f439d2b. It closed the remaining hypotheses rather than finding a third
+     defect: nothing validates our data on load (`checkConsistency` is `ret 0`);
+     mass reaches the engine exactly where we write it; the grab weight is a
+     scene-graph SUM and both files give **93.5000 kg** on the human; and the
+     engine deliberately LOOSENS a ragdoll's constraints on death and eases them
+     back, so a brief settle is vanilla behaviour.
 
-     Known and deliberate differences to expect before blaming them: capsules are
-     REBUILT rather than copied, so their geometry moves in the last mantissa bits
-     (the same Elric-style rebuild every compiled body has had since 2026-08-22);
-     eight of the Brahmin's bone quaternions come out negated, which is the same
-     rotation; and the pose translation w lane is written zero where vanilla has
-     SIMD residue, the lane `--roundtrip` already treats as inert.
+     And the file compares equal at four levels -- NIF blocks with links resolved
+     (0 of 166), packfile container (header, section table, local and virtual
+     fixups), every scalar Havok's own deserializer reads, and every pointer
+     (197 human / 449 brahmin, all resolving to the same object). The differences
+     that remain are four inert classes, each checked: indices into arrays of
+     identical entries, `hkVector4` padding lanes, capsule plane ORDER (equal as a
+     set), and complete quaternion negations (dot = -1.000000).
+
+     **So the next test is a control, not another fix.** Three mods are staged in
+     `E:\Projects\Fallout 4 Mods\mods`:
+
+       * `WW Ragdoll Placebo` -- bit-identical VANILLA files in the same mod
+         structure. Enable this ALONE first. If it misbehaves too, the file
+         content was never the cause and the whole packfile investigation was
+         aimed at the wrong thing.
+       * `WW Ragdoll Test` -- our rebuild, build 8b1b312.
+       * `WW Ragdoll Control` -- superseded, do not enable.
+
+     Ruled out along the way: no other mod, loose or in any of the 12 BA2s,
+     provides the human skeleton, so ours overrides nobody.
+
+     **The method lesson is in docs/MISTAKES.md and matters more than the fixes:**
+     PDB first for vanilla engine behaviour. A byte diff answers "is our file the
+     same"; it cannot answer "what does the engine do with it", and when the first
+     answer is yes and the game still disagrees, running the diff again is motion
+     rather than progress.
 
 **The Museum set now stands at:** shape classes 114/114 vs vanilla, stored solids
 113/114 (one known face-decomposition difference), compounds 37/37, body rest
