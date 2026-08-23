@@ -3,6 +3,35 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-23 — Shipped a harness that passed while the collision was 18 units out
+
+**What:** mixed compounds went out with a 9-check harness, a 114-file shape-class
+comparison, a stored-solid comparison, a compound structural check and a
+byte-exact round-trip. All green. bungo loaded the wall terminal and its
+collision was in the wrong place -- the mesh child sat 18 game units from where
+it belongs, because a Havok-unit translation was being applied to game-unit
+vertices and arrived at 1/70 size.
+
+**Why:** every check measured what the collision IS and none measured WHERE it
+is. Shape classes, shape counts, header words, child order, round-trip
+byte-exactness and "does the compound follow its own pointer" are all satisfied
+perfectly by a correctly-built shape in the wrong place. `collision_ab.py` could
+not have helped either: it compares stored convex solids, and a compressed mesh
+has none, so the one shape that moved was the one nothing was looking at.
+
+The AABB was sitting right there the whole time. `hkcompound.py --aabb` printed
+ours and vanilla's side by side in one command, they differed in the second
+decimal, and I had run that tool three times that night for other reasons.
+
+**Solution:** the harness now compares the compiled compound's AABB against
+vanilla's own, which fails on the pre-fix build. And the rule this is the second
+instance of -- **a check that cannot fail is not a check** -- gets a sharper
+form: when a change moves geometry, at least one check must measure a POSITION
+against an external reference. Structure, counts and self-consistency are all
+things a wrongly-placed object satisfies. Ask what the defect would look like,
+then ask which check would see it; if the honest answer is "none of them", that
+is the check to write before shipping, not after.
+
 ## 2026-08-23 — Widened a gate, and three files I was not aiming at changed
 
 **What:** Compile refused to compound a body whose leaves were not all convex.

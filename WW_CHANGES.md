@@ -1,5 +1,47 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23c — The mesh leaf was 18 game units out, and had been for a while
+
+bungo loaded the wall terminal: its collision is in the wrong place.
+
+`tlCollAppendEditableMesh` converts each leaf to game units as it gathers it --
+Havok geometry times 69.99125 -- but a `bhkNiTriStripsShape` already HOLDS game
+units, so it was passed a scale of 1.0. The accumulated `transform` is Havok
+either way, and a Havok translation applied to a game-unit vertex arrives at 1/70
+size, leaving the mesh 69/70 of that translation short. Rotation was never
+affected: rotation is scale-invariant, and only the translation carries units.
+
+Measured on TerminalWall01, whose mesh child sits under a compound instance
+translation of `(-0.00967, -0.25515, -0.21982)`:
+
+    ours minus vanilla   0.00950  0.25150  0.21670
+    t - t / 69.99125     0.00953  0.25150  0.21668
+
+Fixed by scaling the TRANSLATION rather than round-tripping the vertices through
+Havok units, so a mesh under no transform -- nearly all of them -- comes out bit
+for bit as before. The compound AABB is now identical to vanilla's, and compounds
+matching vanilla went 36 of 37 to **37 of 37**.
+
+**This is older than mixed compounds.** Every mesh leaf under a transform has
+been displaced since the mesh path was written. Flattening a whole body into one
+mesh hid it: the misplaced part was welded to correctly-placed parts and the
+result still looked like collision. Making the mesh its own child is what turned
+it into something you could walk through.
+
+### The check that should have existed
+
+Nine harness checks, a 114-file shape-class comparison, a stored-solid
+comparison, a compound structural check and a byte-exact round trip were all
+green while this shipped. Every one of them measures what the collision IS.
+Nothing measured WHERE it is -- and shape classes, counts, header words, child
+order and self-consistency are all satisfied perfectly by a correctly-built shape
+in the wrong place. `collision_ab.py` could not have helped either: it compares
+stored convex solids, and a compressed mesh has none, so the one shape that moved
+was the one nothing was looking at.
+
+`collision_mixed_compound.sh` check 6 now holds the compiled compound's AABB
+against vanilla's own, and fails on the pre-fix build. See MISTAKES.
+
 ## 2026-08-23b — Mixed compounds: a body can hold a mesh AND hulls
 
 Backlog item 3c, and the last geometry difference in the Museum set.
