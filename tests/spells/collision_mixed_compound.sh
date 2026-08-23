@@ -31,12 +31,14 @@
 #   3. Compile writes a COMPOUND, not one flattened mesh
 #   4. the compound holds vanilla's shape classes, in vanilla's counts
 #   5. the MESH child comes first, as vanilla's does
-#   6. the compound follows its own node-array pointer, the way the ENGINE reads
+#   6. the compound lands on vanilla's own AABB -- WHERE it is, not just what it
+#      is, which is the check every other one here failed to be
+#   7. the compound follows its own node-array pointer, the way the ENGINE reads
 #      it (tools/hkcompound.py, which is what caught the 2026-08-21 crash)
-#   7. the compiled packfile re-encodes byte-exact (--roundtrip)
-#   8. a MESH-ONLY body with several leaves still compiles to one mesh per body
+#   8. the compiled packfile re-encodes byte-exact (--roundtrip)
+#   9. a MESH-ONLY body with several leaves still compiles to one mesh per body
 #      and NO compound -- the over-reach above
-#   9. ...and vanilla's mesh-only fixture really has no compound, so 8 is not
+#  10. ...and vanilla's mesh-only fixture really has no compound, so 9 is not
 #      vacuous
 #
 # NOTE ON PORTS: not needed, this is headless - the CLI takes no port.
@@ -122,6 +124,19 @@ check "it holds vanilla's shape classes in vanilla's counts" \
 	"$([ "$gotmesh" = "$vanmesh" ] && [ "$gotpoly" = "$vanpoly" ] && echo 1 || echo 0)"
 check "the mesh child comes first, as vanilla's does" \
 	"$([ "$(echo "$gotmix" | head -1)" = "hknpCompressedMeshShape" ] && echo 1 || echo 0)"
+
+# --- 5b: WHERE it ended up, not just what it is ------------------------------
+# The checks above all passed while the terminal's collision sat 18 game units
+# from where it belongs: they compared shape CLASSES and COUNTS, which a
+# displaced mesh satisfies perfectly. collision_ab.py would not have caught it
+# either -- it compares stored convex solids and a compressed mesh has none. So
+# this is the one that measures POSITION, against vanilla's own bound.
+vanaabb=$(python "$ROOT/tools/hkcompound.py" "$MIXED" --aabb 2>/dev/null | head -1)
+gotaabb=$(python "$ROOT/tools/hkcompound.py" "$W/mix.nif" --aabb 2>/dev/null | head -1)
+echo "  compound AABB"
+echo "    ours    $gotaabb"
+echo "    vanilla $vanaabb"
+check "the compound lands on vanilla's own bounding box" 	"$([ -n "$vanaabb" ] && [ "$gotaabb" = "$vanaabb" ] && echo 1 || echo 0)"
 
 # --- 6: read the compound the way the engine does ----------------------------
 python "$ROOT/tools/hkcompound.py" "$W/mix.nif" --quiet >/dev/null 2>&1

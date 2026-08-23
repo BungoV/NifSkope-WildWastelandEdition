@@ -534,11 +534,34 @@ void tlCollAppendEditableMesh( const NifModel * nif, int shapeBlock, CollisionMe
 		appendMesh( out, v, tris, transform, 69.99125f, material ); return;
 	}
 	if ( type == QLatin1String( "bhkNiTriStripsShape" ) ) {
+		/* THE STRIPS ARE IN GAME UNITS AND THE TRANSFORM IS IN HAVOK UNITS.
+		 *
+		 * Every other leaf here stores Havok-unit geometry, so `transform` is
+		 * applied and the result scaled up by 69.99125. A strips shape already
+		 * holds game units, so it was passed a scale of 1.0 -- which quietly
+		 * applied a HAVOK translation to a GAME-unit vertex and left the mesh
+		 * 69/70 of that translation short of where it belongs. The rotation was
+		 * always fine; rotation is scale-invariant, and only the translation
+		 * carries units.
+		 *
+		 * Measured on TerminalWall01, whose mesh sits under an instance
+		 * translation of (-0.00967, -0.25515, -0.21982): the compiled collision
+		 * landed (0.0095, 0.2515, 0.2167) from vanilla's, which is t - t/69.99125
+		 * to five decimals. In game that is about 18 game units of wall terminal
+		 * you cannot touch, and 18 units of thin air that you can.
+		 *
+		 * Fixed by scaling the TRANSLATION rather than round-tripping the
+		 * vertices through Havok units, so a mesh under no transform -- which is
+		 * nearly all of them -- comes out bit for bit as before.
+		 */
+		Matrix4 gameTfm( transform );
+		for ( int a = 0; a < 3; a++ )
+			gameTfm( 3, a ) = gameTfm( 3, a ) * 69.99125f;
 		for ( qint32 dataBlock : nif->getLinkArray( shape, "Strips Data" ) ) {
 			QModelIndex data = tlCollBlockIndex( nif, dataBlock ); QVector<Vector3> v = nif->getArray<Vector3>( data, "Vertices" );
 			QVector<QVector<quint16>> strips; QModelIndex points = nif->getIndex( data, "Points" );
 			for ( int r = 0; r < nif->rowCount( points ); r++ ) strips.append( nif->getArray<quint16>( nif->getIndex( points, r ) ) );
-			appendMesh( out, v, triangulate( strips ), transform, 1.0f, material );
+			appendMesh( out, v, triangulate( strips ), gameTfm, 1.0f, material );
 		}
 	}
 }
