@@ -1,5 +1,64 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23f — What actually blocks ragdolls is constraints, not multi-body
+
+The backlog said multi-body systems were what ragdolls and cloth need. Measured
+on the Brahmin skeleton (39 bodies, 2 compiled systems), that is not what stops
+them.
+
+**The assembler already writes a 39-body ragdoll byte for byte.**
+`nifskope-cli collision Skeleton.nif --roundtrip`:
+
+    packfile   2  byte-exact 2 / 2
+    hkaSkeleton 1  byte-exact 1
+    hingecon   8  byte-exact 8 / 8
+    ragdollcon 30  byte-exact 30 / 30
+    capsules   41  structure byte-exact 41 / 41
+
+So multi-body WRITING is not blocked and never was. What breaks is the round
+trip through the editable form. `Havok/Decompile All Compiled Collision` on that
+skeleton produces:
+
+    41 NiNode-owned bhkRigidBody + 41 bhkCollisionObject + 41 bhkCapsuleShape
+    0 constraints
+
+The 30 ragdoll constraints and 8 hinges are simply gone. A ragdoll without its
+constraints is 41 loose capsules -- the articulation IS the ragdoll, so this is
+not a detail lost at the edges.
+
+### Both ends of the pipe already exist
+
+This is the same shape as the mesh SHAPE builder and as `cinfoFlags`: the two
+ends are built and the editable middle is missing.
+
+  * The DECODER fills `HknpConstraint` completely -- child/parent body, kind,
+    breakable + threshold, both frames (rotA/rotB basis rows and pivots), the
+    twist / cone / plane / hinge limits, friction, motor.
+  * The ENCODER writes them: `hknpEncodeRagdollConstraintData`,
+    `hknpEncodeLimitedHingeConstraintData`, the breakable wrapper and the
+    position motor -- 30 of 30 and 8 of 8 byte-exact above.
+  * DECOMPILE emits no constraint block at all. The only constraint code in
+    havok.cpp is `spConstraintHelper`, an unrelated editing spell that recomputes
+    a B frame from an A frame.
+  * COMPILE therefore has nothing to read back.
+
+nif.xml already defines `bhkRagdollConstraint` and `bhkLimitedHingeConstraint`
+with exactly these fields, so the missing work is a MAPPING in both directions,
+not a format decode.
+
+### And this is where multi-body genuinely does come in
+
+A constraint names two bodies, so both have to live in the SAME system before it
+can be written. Compile emits one system per body, so a constraint could not be
+expressed until after the merge. Either the merge learns to carry constraints
+and remap their body indices the way it already remaps bodies and shapes, or
+Compile builds the whole file into one system in the first place.
+
+So the order is: **constraints through the editable form FIRST**, because
+nothing else can be tested without them, and multi-body compile as the thing
+that lets them be placed. The backlog had it the other way round, which would
+have spent a session building the half that already works.
+
 ## 2026-08-23c — The mesh leaf was 18 game units out, and had been for a while
 
 bungo loaded the wall terminal: its collision is in the wrong place.

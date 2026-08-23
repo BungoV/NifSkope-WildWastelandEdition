@@ -42,12 +42,21 @@ more.
 
 **What is left, and it is one piece of work rather than two:**
 
-  1. **Multi-body systems.** Compile writes one `bhkPhysicsSystem` per body and
-     `Havok/Merge Physics Systems` stitches them afterwards; vanilla puts every
-     body of a NIF in ONE system to begin with -- 1,334 of 1,334 corpus files
-     have exactly one. The enabling change is done, so this is reachable
-     directly now: build every body's shapes into one `HknpSystem` and assemble
-     once. Ragdolls (41 bodies) and cloth need the same thing.
+  1. **Constraints through the editable form, THEN multi-body.** Measured on the
+     Brahmin skeleton 2026-08-23 and the backlog had this backwards: the
+     assembler ALREADY writes a 39-body ragdoll byte for byte, constraints
+     included (`--roundtrip`: 2/2 packfiles, 30/30 ragdoll, 8/8 hinge, 41/41
+     capsules). What breaks is Decompile, which emits 41 bodies and **zero
+     constraints** -- and a ragdoll without its articulation is 41 loose
+     capsules. The decoder fills `HknpConstraint` completely and the encoder
+     writes it; only the editable middle is missing, exactly as it was for the
+     mesh shape builder and for `cinfoFlags`. nif.xml already defines
+     `bhkRagdollConstraint` and `bhkLimitedHingeConstraint` with the same
+     fields, so it is a mapping in both directions rather than a decode.
+     Multi-body compile matters because a constraint names TWO bodies and both
+     must sit in one system -- so either the merge carries constraints and
+     remaps them the way it already remaps bodies, or Compile builds the whole
+     file at once. See WW_CHANGES 2026-08-23f.
   2. ~~Body ORDER~~ **CLOSED 2026-08-23** (`acdd63b`). Vanilla's body index
      follows the block index of the node that owns the body -- 46 of 46
      multi-body files, no exceptions -- and the merge now orders parts that way
