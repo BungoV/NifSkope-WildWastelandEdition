@@ -42,6 +42,13 @@ was the one nothing was looking at.
 `collision_mixed_compound.sh` check 6 now holds the compiled compound's AABB
 against vanilla's own, and fails on the pre-fix build. See MISTAKES.
 
+**CONFIRMED IN GAME 2026-08-23:** bungo re-tested the wall terminal and its
+collision is where it belongs. That closes three commits at once -- the unit fix
+above, mixed compounds (`00dbc65`), and the mesh SHAPE builder they both stand on
+(`c873b7b`) -- and with them **backlog item 3c**. The displacement was older than
+the mixed-compound work and affected every mesh leaf under a transform; it only
+became visible when the mesh stopped being welded into a flattened body.
+
 ## 2026-08-23b — Mixed compounds: a body can hold a mesh AND hulls
 
 Backlog item 3c, and the last geometry difference in the Museum set.

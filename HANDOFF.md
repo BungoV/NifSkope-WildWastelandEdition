@@ -32,23 +32,30 @@ are proven too (110 of 114 identical to vanilla within 0.46 mm,
 `tools/collision_ab.py`), every file has exactly one physics system, and all 22
 keyframed records carry the inertia sentinel.
 
-## NEXT SESSION STARTS HERE: load the rebuilt set once (2026-08-23)
+## NEXT SESSION STARTS HERE: multi-body systems, and body order with it (2026-08-23)
 
-**One in-game test is owed, and it is the only thing blocking the next item.**
-The Museum test set has been rebuilt with two changes that have never been in the
-engine: mixed compounds, and every mesh shape now going through a new builder.
-Walk ConcordMuseum01. If it loads and the terminals and the small fan behave,
-both are proven and item 2 opens.
+**Item 3c is CLOSED IN GAME.** bungo re-tested the wall terminal after the unit
+fix and its collision is where it belongs, which validates three commits at once:
+the mesh SHAPE builder (`c873b7b`), mixed compounds (`00dbc65`), and the
+Havok-translation fix (`e5ab899`). Nothing in the Museum set is unverified any
+more.
 
-  * `furniture/terminals/terminalwall01.nif`
-  * `furniture/terminals/terminalonscrollingtext.nif`
-  * `setdressing/fans/industrialfansmall01_dest.nif`
+**What is left, and it is one piece of work rather than two:**
 
-are the three that changed shape -- they now carry a compound holding a mesh
-beside hulls, where they used to be one flattened mesh. The other 111 are
-byte-identical to what was in the game last night.
+  1. **Multi-body systems.** Compile writes one `bhkPhysicsSystem` per body and
+     `Havok/Merge Physics Systems` stitches them afterwards; vanilla puts every
+     body of a NIF in ONE system to begin with -- 1,334 of 1,334 corpus files
+     have exactly one. The enabling change is done, so this is reachable
+     directly now: build every body's shapes into one `HknpSystem` and assemble
+     once. Ragdolls (41 bodies) and cloth need the same thing.
+  2. **Body ORDER.** Ours is a permutation of vanilla's -- our body 0 is the
+     dynamic compound where vanilla's is the static mesh -- and it is the ONLY
+     thing behind the last 19 header-word and 17 rest-state differences in the
+     set. Harmless as far as anything measured says, but it is noise in every
+     comparison and it hid the flags bug for a while by looking like the obvious
+     suspect. It is decided wherever bodies get built, which is item 1.
 
-**Done since the railings closed** (all offline-verified, none of it in the game):
+**Done and CONFIRMED IN GAME since the railings closed:**
 
   * **The mesh SHAPE builder is out** (`c873b7b`, WW_CHANGES 2026-08-23a).
     `hknpEncodeMeshShapeObjects` emits the four objects of a compressed mesh as
@@ -57,23 +64,12 @@ byte-identical to what was in the game last night.
   * **`encodeShapeObject` can BUILD a mesh**, not only copy one back -- the
     branch that unblocks everything below.
   * **Mixed compounds, item 3c, closed** (`00dbc65`, WW_CHANGES 2026-08-23b).
-    Shape classes now match vanilla on 114 of 114; stored solids 110 -> 113.
-
-**What is still open, in order:**
-
-  1. **Multi-body systems.** Compile writes one system per body and
-     `Havok/Merge Physics Systems` stitches them afterwards; vanilla puts every
-     body of a NIF in ONE system to begin with -- 1,334 of 1,334 corpus files
-     have exactly one. The enabling change is done, so this is now reachable
-     directly: build every body's shapes into one `HknpSystem` and assemble once.
-     Ragdolls (41 bodies) and cloth need the same thing.
-  2. **Body ORDER.** Ours is a permutation of vanilla's -- our body 0 is the
-     dynamic compound where vanilla's is the static mesh -- and it is the ONLY
-     thing behind the last 19 header-word and 17 rest-state differences in the
-     set. Harmless as far as anything measured says, but it is noise in every
-     comparison and it hid the flags bug for a while by looking like the obvious
-     suspect. Worth closing with item 1, since that is where body order gets
-     decided.
+    Shape classes match vanilla on 114 of 114; stored solids 110 -> 113;
+    compounds 34 -> 37 of 37.
+  * **A mesh leaf under a transform was 18 game units out** (`e5ab899`,
+    WW_CHANGES 2026-08-23c). Older than mixed compounds and true of every such
+    mesh; flattening hid it. Ten green checks passed while it was wrong, because
+    all of them measured what the collision IS and none measured WHERE.
 
 **What the engine reads to choose an impact sound** (1.10.155 RVAs; the full
 derivation is WW_CHANGES 2026-08-22j):
