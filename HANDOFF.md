@@ -42,48 +42,30 @@ more.
 
 **What is left, and it is one piece of work rather than two:**
 
-  1. **Multi-body compile, which is now the only thing between here and a
-     ragdoll round trip.** The joints landed 2026-08-23 (WW_CHANGES 2026-08-23g):
-     Decompile writes `bhkRagdollConstraint` / `bhkLimitedHingeConstraint`
-     blocks, `tlCollReadConstraint` reads them back, and 1202 of 1202 corpus
-     joints go through that form byte-identically. What is left is the reason
-     Compile still cannot use them: **a joint names TWO bodies and both have to
-     be in the same system**, and Compile builds one `bhkPhysicsSystem` per body
-     because it compiles one body at a time.
+  1. **The ragdoll's own skeleton, which is the last piece.** Multi-body compile
+     landed 2026-08-23 (WW_CHANGES 2026-08-23h): `Havok/Compile All Collision`
+     captures every joint, compiles every body and merges them into ONE
+     `bhkPhysicsSystem` with the joints rebound -- 155 of 155 corpus files, 1202
+     joints in and 1202 out, and the Brahmin skeleton comes back as 41 bodies and
+     38 joints with every capsule still a capsule.
 
-     Two shapes it could take, and the second is the honest one:
+     What is left for a ragdoll specifically:
 
-       * the merge carries constraints and remaps their body indices the way it
-         already remaps bodies and shapes -- but by the time the merge runs, the
-         `bhkRigidBody` blocks are gone (Compile removes the branch) so the
-         Entity links dangle. Rebinding them to the owning NODE in between works
-         but leaves a `Ptr` to `bhkEntity` pointing at an NiNode, which the
-         viewport's own constraint drawing would not survive;
-       * **Compile builds the whole file at once**: enumerate every body, build
-         one `HknpSystem` with all of them, read the constraint blocks while the
-         bodies still exist, and write ONE system plus one
-         `bhkNPCollisionObject` per node. `tlCollCompileConvex` currently
-         returns encoded bytes for a single body, so this is a refactor of where
-         the system is assembled rather than new format work -- and
-         `hknpEncodeSystem` already writes multi-body systems byte for byte.
-
-     Then the last piece for ragdolls specifically is the `hkaSkeleton` copy,
-     which no NIF block carries. It may be derivable from the node hierarchy
-     (bone index equals body index, parents from node parents, reference pose
-     from node transforms) -- `HknpBone` is fully modelled and
-     `hknpEncodeSkeleton` writes it, so that is the same shape of gap the joints
-     just were. Measure before assuming.
-  2. ~~Body ORDER~~ **CLOSED 2026-08-23** (`acdd63b`). Vanilla's body index
-     follows the block index of the node that owns the body -- 46 of 46
-     multi-body files, no exceptions -- and the merge now orders parts that way
-     instead of by collision-object block order, which had recorded the sequence
-     bodies were COMPILED in. Rest-state differences 17 -> 0, header-word 19 -> 3.
-  3. ~~Shape-key bit width~~ **CLOSED 2026-08-23** (`96cb1f3`). `primBits` is
-     `bitLen(2*maxSectionPrims)`, not `2*n-1`: the two differ only on
-     power-of-two prim counts and that is exactly where vanilla takes the extra
-     bit (791 of 795 corpus meshes, against 564 for the old form). Header-word
-     differences 3 -> 1, and the last one is a quad-PARTITIONING difference
-     already documented as by-design, not a formula error.
+       * `hkaSkeleton`. `hknpRagdollData` carries a copy of the ragdoll's own
+         skeleton and no NIF block holds it. `HknpBone` is fully modelled and
+         `hknpEncodeSkeleton` writes it byte for byte (75 of 75 over the mesh
+         tree), so this is exactly the shape the joints were: both ends built, no
+         editable middle. It may not even need a new block -- bone index equals
+         body index, parents come from node parents, and the reference pose is a
+         node transform. **Measure that before assuming it**: the reference pose
+         is local to the parent and 767 of 804 corpus bones carry a scale of
+         0.99999994, which is not what a node would give.
+       * the ROOT CLASS. Compile All writes `hknpPhysicsSystemData`; a ragdoll
+         needs `hknpRagdollData`, which the encoder already writes
+         (`hknpEncodeRagdoll`) and which needs the skeleton above.
+       * a skeleton NIF holds TWO packfiles -- the ragdoll and a character bumper
+         -- where Compile All writes one. Every other corpus file has exactly
+         one, so this is a ragdoll-only exception rather than a rule to relax.
 
 **The Museum set now stands at:** shape classes 114/114 vs vanilla, stored solids
 113/114 (one known face-decomposition difference), compounds 37/37, body rest

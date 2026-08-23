@@ -2614,15 +2614,25 @@ public:
 						return e.second;
 				return -1;
 			};
+			/* ONE SIDE MAY BE MISSING, AND THAT IS NOT AN ERROR.
+			 *
+			 * A robot PART carries a joint whose parent body is 0x7fffffff: it
+			 * attaches to whatever assembles the part, which is not in this file.
+			 * Requiring both sides to resolve dropped that joint outright, and
+			 * with it the attachment -- 30 of 102 corpus files measured, every
+			 * one of them under Actors/Robot/Parts. So bind what there is and
+			 * leave the other Entity null; the sentinel goes back on at compile.
+			 */
 			const int child = blockFor( jc.childBody ), parent = blockFor( jc.parentBody );
-			const int con = ( child >= 0 && parent >= 0 )
+			const int con = ( child >= 0 || parent >= 0 )
 				? tlCollWriteConstraint( nif, jc, child, parent ) : -1;
 			if ( con < 0 ) {
 				jointsSkipped++;
 				continue;
 			}
-			// listed on the CHILD body, which is the side frame A belongs to
-			const QModelIndex iChild = nif->getBlockIndex( child );
+			// listed on the CHILD body, which is the side frame A belongs to --
+			// or on the parent, when the child is the side that is not here
+			const QModelIndex iChild = nif->getBlockIndex( child >= 0 ? child : parent );
 			QVector<qint32> listed = nif->getLinkArray( iChild, "Constraints" );
 			listed.append( con );
 			nif->set<int>( iChild, "Num Constraints", int( listed.size() ) );

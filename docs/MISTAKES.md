@@ -3,6 +3,34 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-23 — Measured the carrier, not the operation, and 30 files lost a joint
+
+**What:** the joint mapping shipped with a corpus measurement that read
+1202 / 1202 -- every joint in the corpus, written into its NIF block and read back
+byte-identically. An hour later the compile half went in, and the first sweep of
+the whole operation showed 1172 of 1202: **30 files had silently lost a joint**,
+every one of them under `Actors/Robot/Parts`.
+
+**Why:** `--constraints` hands a decoded joint to the writer and asks whether it
+survives. It never asks the question the OPERATION answers -- does Decompile hand
+it every joint the file has? It did not. Decompile required both of a joint's
+bodies to resolve to a block, and a robot part's joint names 0x7fffffff as its
+parent because the part attaches to whatever assembles it. Both halves were right
+about what they measured. Nothing measured the seam.
+
+The unit measurement was not wrong, and it was not useless -- it caught the field
+naming. It was just answering a smaller question than its number implied, and I
+read the number as if it covered the feature.
+
+**Solution:** the sweep now runs the whole operation end to end -- vanilla,
+decompile, compile, count -- and compares joints IN against joints OUT per file,
+which is the number a user would notice. It reports 155 / 155 and 1202 / 1202
+after the fix and would have reported 125 / 155 before it. **A component
+measurement is not a feature measurement.** When a number is quoted as evidence
+that a feature works, check what it actually iterates over: if it starts from
+data the component was handed rather than from the file the user opens, there is
+a seam between them and the seam is where the loss lives.
+
 ## 2026-08-23 — A round-trip test that shared one table with the code it tested
 
 **What:** the joint carrier shipped with a check that encoded every constraint

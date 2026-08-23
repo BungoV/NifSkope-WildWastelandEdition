@@ -6251,11 +6251,14 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 			// constraints and skeleton DO decode and re-encode byte for byte.
 			// What is missing is any NIF representation to carry them across.
 			QObject::tr( "%1 is a bone (%2).\n\n"
-				"Compile writes a single static body as a triangle mesh in a "
-				"bhkPhysicsSystem. It cannot write bone collision, and it cannot rebuild "
-				"a ragdoll - nothing carries the joint constraints or the ragdoll skeleton "
-				"into NIF blocks, so a ragdoll this came from stays lost.\n\n"
-				"Compile anyway?" ).arg( tlCollNodeName( nif, nodeBlock ), role ),
+				"This compiles ONE body on its own, into its own bhkPhysicsSystem, and "
+				"a joint names two bodies - so the joints on this one are dropped. "
+				"Havok/Compile All Collision keeps them; it compiles every body and "
+				"merges them into one system, which is the only place a joint can be "
+				"written.\n\n"
+				"Either way the result is not a ragdoll: that also needs its own "
+				"hkaSkeleton copy, which no NIF block holds yet.\n\n"
+				"Compile this one anyway?" ).arg( tlCollNodeName( nif, nodeBlock ), role ),
 			QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) != QMessageBox::Yes )
 		return QModelIndex();
 
@@ -7171,6 +7174,86 @@ bool tlCollReadConstraint( const NifModel * nif, const QModelIndex & index,
 	return true;
 }
 
+/*! A joint, captured before Compile destroys the bodies it names.
+ *
+ * Compile removes the whole editable branch -- collision object, body, shapes
+ * and the joints listed on it -- and replaces it with a compiled system. So by
+ * the time the merge runs, the two `bhkRigidBody` blocks a joint names are gone
+ * and its Entity links have been nulled. The joint has to be read out first.
+ *
+ * What survives Compile is the NODE. A body is reached through a collision
+ * object whose Target names its node, and the compiled object that replaces it
+ * names the same one -- that binding is what Decompile inverts and what the
+ * merge already uses to order bodies. So a captured joint remembers its two
+ * nodes and the merge turns those back into body indices.
+ *
+ * The nodes are held as PERSISTENT indices because Compile removes blocks and
+ * every block number above a removal shifts down. Decompile holds its own root
+ * the same way, for the same reason.
+ */
+struct TlCollJoint
+{
+	HknpConstraint joint;
+	QPersistentModelIndex childNode, parentNode;
+};
+
+/*! The body index that means NO BODY.
+ *
+ * A robot part's joint names this as its parent: the part attaches to whatever
+ * assembles it, and that body is in another file. It survives the round trip as
+ * a null Entity in the NIF and comes back here.
+ */
+static constexpr int TLCOLL_NO_BODY = 0x7fffffff;
+
+//! The node a body belongs to: its collision object's Target, else that object's parent.
+static int tlCollNodeOfBody( const NifModel * nif, int bodyBlock )
+{
+	if ( !nif || !nif->isValidBlockNumber( bodyBlock ) )
+		return -1;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		if ( !nif->blockInherits( i, "bhkCollisionObject" ) || nif->getLink( i, "Body" ) != bodyBlock )
+			continue;
+		const int target = nif->getLink( i, "Target" );
+		if ( nif->isValidBlockNumber( target ) )
+			return target;
+		return nif->getParent( b );
+	}
+	return -1;
+}
+
+/*! Every joint in the file, read out of its NIF block and bound to two nodes.
+ *
+ *  Call this while the editable bodies still exist. A joint whose two bodies
+ *  cannot be resolved to nodes is dropped here rather than carried as a
+ *  half-bound thing the merge would have to second-guess.
+ */
+QVector<TlCollJoint> tlCollCaptureConstraints( const NifModel * nif )
+{
+	QVector<TlCollJoint> out;
+	if ( !nif )
+		return out;
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex i = nif->getBlockIndex( b );
+		TlCollJoint j;
+		int childBody = -1, parentBody = -1;
+		if ( !tlCollReadConstraint( nif, i, j.joint, &childBody, &parentBody ) )
+			continue;
+		const int childNode = tlCollNodeOfBody( nif, childBody );
+		const int parentNode = tlCollNodeOfBody( nif, parentBody );
+		// one side may legitimately be absent -- see TLCOLL_NO_BODY. Neither is
+		// a joint bound to nothing, which there is no way to place.
+		if ( childNode < 0 && parentNode < 0 )
+			continue;
+		if ( childNode >= 0 )
+			j.childNode = nif->getBlockIndex( childNode );
+		if ( parentNode >= 0 )
+			j.parentNode = nif->getBlockIndex( parentNode );
+		out.append( j );
+	}
+	return out;
+}
+
 /*! Merge every compiled bhkPhysicsSystem in the file into ONE.
  *
  * Compile writes one system per body because it compiles one body at a time.
@@ -7195,7 +7278,8 @@ bool tlCollReadConstraint( const NifModel * nif, const QModelIndex & index,
  * static shell give inertia 1, motion 0, body 1 at 0x7fffffff, and that is
  * vanilla's own layout for that file.
  */
-bool tlCollMergePhysicsSystems( NifModel * nif, QString * error )
+bool tlCollMergePhysicsSystems( NifModel * nif, QString * error,
+								const QVector<TlCollJoint> & joints )
 {
 	auto fail = [&]( const QString & text ) { if ( error ) *error = text; return false; };
 	if ( !nif )
@@ -7244,8 +7328,17 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error )
 	for ( const auto & entry : std::as_const( byOwner ) )
 		if ( !parts.contains( entry.second ) )
 			parts.append( entry.second );
-	if ( parts.size() < 2 )
-		return true;    // already the shape vanilla ships
+	/* One system and no joints is already the shape vanilla ships.
+	 *
+	 * WITH joints it is not: a robot part is ONE body carrying a joint whose
+	 * parent is in another file, and bailing here left that joint unwritten
+	 * however faithfully Decompile had carried it. The rest of this function
+	 * handles a single part perfectly well -- it decodes it, rebuilds it and
+	 * writes it back -- so the early-out is about avoiding needless work, not
+	 * about being unable to do it.
+	 */
+	if ( parts.size() < 2 && joints.isEmpty() )
+		return true;
 
 	HknpSystem merged;
 	merged.rootClassName = QStringLiteral( "hknpPhysicsSystemData" );
@@ -7295,6 +7388,50 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error )
 	}
 	merged.inertiaCount = motionSlots;
 	merged.motionCount = motionArr;
+
+	/* THE JOINTS, rebound to the bodies they landed on.
+	 *
+	 * This is the only place a joint CAN be written: it names two bodies, and
+	 * until now they were in two different systems. Their nodes are what
+	 * carried them here (see TlCollJoint) and every compiled collision object
+	 * names its own node, so the same walk that rebinds Body ID below gives
+	 * node -> merged body index.
+	 */
+	if ( !joints.isEmpty() ) {
+		QHash<int, int> bodyOfNode;
+		for ( qsizetype j = 0; j < objects.size(); j++ ) {
+			const QModelIndex obj = nif->getBlockIndex( objects.at( j ) );
+			const int part = int( parts.indexOf( named.at( j ) ) );
+			const int target = nif->getLink( obj, "Target" );
+			const int owner = nif->isValidBlockNumber( target ) ? target
+							 : nif->getParent( objects.at( j ) );
+			if ( part >= 0 && part < bodyBase.size() && owner >= 0 )
+				bodyOfNode.insert( owner, bodyBase.at( part )
+					+ int( nif->get<quint32>( obj, "Body ID" ) ) );
+		}
+		// an Entity that was never bound is the NO BODY sentinel, not a failure
+		auto bodyFor = [&]( const QPersistentModelIndex & node ) {
+			return node.isValid()
+				? bodyOfNode.value( nif->getBlockNumber( QModelIndex( node ) ), -1 )
+				: TLCOLL_NO_BODY;
+		};
+		int dropped = 0;
+		for ( const TlCollJoint & j : joints ) {
+			const int child = bodyFor( j.childNode ), parent = bodyFor( j.parentNode );
+			if ( child < 0 || parent < 0 || ( child == parent && child != TLCOLL_NO_BODY ) ) {
+				dropped++;
+				continue;
+			}
+			HknpConstraint c = j.joint;
+			c.childBody = child;
+			c.parentBody = parent;
+			merged.constraints.append( c );
+		}
+		if ( dropped )
+			return fail( QObject::tr( "%1 of %2 joints named a body this merge could not "
+				"place; nothing was written rather than write a ragdoll missing a limb." )
+				.arg( dropped ).arg( joints.size() ) );
+	}
 	/* One entry per BODY. Rebuilding it one-per-SHAPE is what made the assembler
 	 * refuse a railing with "Shape list entry 4 names no body": five shapes, four
 	 * bodies, five entries.
@@ -7311,6 +7448,11 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error )
 	if ( !back.valid || back.bodyPhys.size() != merged.bodyPhys.size() )
 		return fail( QObject::tr( "The merged system did not read back (%1 bodies of %2): %3" )
 			.arg( back.bodyPhys.size() ).arg( merged.bodyPhys.size() ).arg( back.error ) );
+	// the joints have to survive the readback as well, or a system that quietly
+	// dropped them reads as a success
+	if ( back.constraints.size() != merged.constraints.size() )
+		return fail( QObject::tr( "The merged system read back %1 joints of %2." )
+			.arg( back.constraints.size() ).arg( merged.constraints.size() ) );
 
 	const int keep = parts.first();
 	nifSnapshotOp( nif, QObject::tr( "Merge physics systems" ), [&]() {
@@ -7369,10 +7511,133 @@ public:
 	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
 	{
 		QString error;
-		if ( !tlCollMergePhysicsSystems( nif, &error ) && !error.isEmpty() )
+		// nothing to carry: by the time a file has only compiled bodies, its joint
+		// blocks are gone. Compile All Collision is the path that keeps them.
+		if ( !tlCollMergePhysicsSystems( nif, &error, {} ) && !error.isEmpty() )
 			qWarning().noquote() << QObject::tr( "Merge Physics Systems:" ) << error;
 		return index;
 	}
 };
 
 REGISTER_SPELL( spMergePhysicsSystems )
+
+/*! Compile every editable collision in the file, joints included.
+ *
+ *  The per-body Compile is unchanged and so is the merge; what this adds is the
+ *  ORDER and the one thing neither could do alone. A joint names TWO bodies, so
+ *  it cannot be written until both are in the same system -- which is the merge
+ *  -- and it cannot be READ once Compile has removed the bodies it names. So:
+ *  capture the joints, compile every body, merge, and hand the captured joints
+ *  to the merge to rebind.
+ *
+ *  This is also the operation the harnesses were doing by hand in a loop, and
+ *  the one a file wants: vanilla puts every body of a NIF in ONE system, 1,334
+ *  of 1,334.
+ *
+ *  NOT a ragdoll, yet. A ragdoll's root is `hknpRagdollData` and carries an
+ *  `hkaSkeleton` copy that no NIF block holds, so this writes the physics system
+ *  a ragdoll's bodies and joints describe and not the ragdoll itself.
+ */
+class spCompileAllCollision final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Compile All Collision" ); }
+	QString page() const override final { return Spell::tr( "Havok" ); }
+	QString group() const override final { return Spell::tr( "Collision" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Compile every editable body into ONE bhkPhysicsSystem, carrying "
+			"the joints across -- which the per-body Compile cannot do, because a joint "
+			"names two bodies." );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		if ( !nif || index.isValid() )
+			return false;      // a file-wide operation, like Decompile All
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			const QModelIndex i = nif->getBlockIndex( b );
+			if ( nif->blockInherits( i, "bhkCollisionObject" )
+				&& !nif->blockInherits( i, "bhkNPCollisionObject" )
+				&& nif->isValidBlockNumber( nif->getLink( i, "Body" ) ) )
+				return true;
+		}
+		return false;
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		/* The bone gate, asked ONCE for the file.
+		 *
+		 * The per-body Compile asks this because compiling a bone is a one-way
+		 * trip, and it skips the question when a caller says it already asked.
+		 * Passing that blindly from here would have made the whole gate
+		 * disappear on the operation most likely to hit it -- a decompiled
+		 * ragdoll is nothing BUT bone collision. So ask here, for all of them,
+		 * and default to Cancel. (-no-gui has nobody to ask, as before.)
+		 */
+		if ( qobject_cast<QApplication *>( QCoreApplication::instance() ) ) {
+			const QHash<int, QString> roles = tlCollBoneRoles( nif );
+			QStringList bones;
+			for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+				const QModelIndex i = nif->getBlockIndex( b );
+				if ( !nif->blockInherits( i, "bhkCollisionObject" )
+					|| nif->blockInherits( i, "bhkNPCollisionObject" ) )
+					continue;
+				const int target = nif->getLink( i, "Target" );
+				const int node = nif->isValidBlockNumber( target ) ? target : nif->getParent( b );
+				if ( !tlCollBoneRole( nif, roles, node, -1 ).isEmpty() )
+					bones << tlCollNodeName( nif, node );
+			}
+			if ( !bones.isEmpty()
+				&& QMessageBox::warning( nullptr, name(),
+					QObject::tr( "%1 of the bodies in this file sit on BONES (%2%3).\n\n"
+						"Their joints will be carried across, but the result is a "
+						"bhkPhysicsSystem and not a ragdoll: a ragdoll also needs its own "
+						"hkaSkeleton copy, which no NIF block holds, so what comes out will "
+						"not load as the ragdoll this came from.\n\n"
+						"Compile anyway? Keep an unmodified copy of the file." )
+						.arg( bones.size() ).arg( QStringList( bones.mid( 0, 3 ) ).join( QStringLiteral( ", " ) ),
+							bones.size() > 3 ? QObject::tr( ", ..." ) : QString() ),
+					QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel ) != QMessageBox::Yes )
+				return index;
+		}
+
+		// BEFORE the compiles: they remove the bodies these name
+		const QVector<TlCollJoint> joints = tlCollCaptureConstraints( nif );
+
+		/* One body at a time, re-scanning each pass, because compiling removes
+		 * blocks and renumbers everything above them. The bound is the block
+		 * count, so a body that refuses to compile stops the sweep instead of
+		 * spinning on it.
+		 */
+		int compiled = 0;
+		for ( int guard = nif->getBlockCount(); guard > 0; guard-- ) {
+			int object = -1;
+			for ( int b = 0; b < nif->getBlockCount() && object < 0; b++ ) {
+				const QModelIndex i = nif->getBlockIndex( b );
+				if ( nif->blockInherits( i, "bhkCollisionObject" )
+					&& !nif->blockInherits( i, "bhkNPCollisionObject" )
+					&& nif->isValidBlockNumber( nif->getLink( i, "Body" ) ) )
+					object = b;
+			}
+			if ( object < 0 )
+				break;
+			// confirmed: the caller answered for the file, not once per body
+			if ( !tlCompileCollision( nif, nullptr, nif->getBlockIndex( object ),
+					true ).isValid() )
+				break;
+			compiled++;
+		}
+
+		QString error;
+		if ( !tlCollMergePhysicsSystems( nif, &error, joints ) && !error.isEmpty() )
+			qWarning().noquote() << QObject::tr( "Compile All Collision:" ) << error;
+		qWarning().noquote() << QObject::tr( "Compile All Collision: %1 bodies, %2 joints." )
+			.arg( compiled ).arg( joints.size() );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spCompileAllCollision )
+

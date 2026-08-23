@@ -1,5 +1,83 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23h — Compile All Collision, so a joint has a way back
+
+Half a pipe is not a pipe. Decompile learned to write joints an hour ago
+(2026-08-23g) and Compile still deleted them, because Compile builds ONE system
+per body and a joint names TWO bodies -- it cannot be expressed until both are in
+the same system. The merge is where that happens, and by the time the merge runs
+the `bhkRigidBody` blocks are gone.
+
+So the new spell is an ORDER, not new format work:
+
+  1. capture every joint out of its NIF block, while the bodies still exist
+     (`tlCollCaptureConstraints`), remembering each side by its NODE -- the one
+     thing that survives Compile, because the compiled collision object names the
+     same node the editable one did;
+  2. compile every body, unchanged;
+  3. merge, unchanged, plus one step: turn each joint's two nodes back into
+     merged body indices and put it in the system.
+
+The nodes are held as PERSISTENT indices because Compile removes blocks and every
+block number above a removal shifts down. Decompile holds its own root that way
+for the same reason.
+
+### Measured, and it caught a real loss
+
+Over the 155 corpus files that carry constraints, decompiled and then compiled
+back with the new spell:
+
+                          before      after
+    files                    155        155
+    joints in               1202       1202
+    NIF blocks written      1172       1202
+    joints out              1172       1202
+    files losing a joint      30          0
+    not one system             0          0
+    failing outright           0          0
+
+The 30 were every file under `Actors/Robot/Parts` and nowhere else, which is what
+identified them. **A robot part is one body carrying a joint whose parent body is
+0x7fffffff**: the part attaches to whatever assembles it, and that body is in
+another file. Decompile required both sides to resolve to a block and dropped the
+joint when one could not -- silently taking the attachment with it, which is the
+same class of loss as the door that would not open.
+
+Now the unbound side is written as a null Entity and the sentinel goes back on at
+compile. `FrontArmorProtectron` reads identically before and after:
+`Chest -> body 2147483647, Ragdoll, pivot 0.419, twist +-5.0, cone <5.0,
+plane +-30.0`.
+
+The merge also had to stop bailing at `parts.size() < 2`. One body and one system
+is already the shape vanilla ships -- but not when there is a joint to add, and
+the rest of that function handles a single part perfectly well.
+
+### The bone gate, which nearly disappeared
+
+`tlCompileCollision` asks before compiling a body that sits on a bone, because
+that is a one-way trip, and it skips the question when the caller says it already
+asked. Compile All passes exactly that flag for every body -- so as first written
+it turned the gate off completely, on the operation most likely to meet it: a
+decompiled ragdoll is nothing BUT bone collision. It now asks once, for the file,
+naming the bones and defaulting to Cancel.
+
+The per-body warning's text was also half wrong after 2026-08-23g -- it said the
+joints are dropped, full stop. They are dropped BY THAT PATH, and it now says so
+and names the one that keeps them.
+
+### What a ragdoll gets
+
+The Brahmin skeleton, 39 bones, decompiled and compiled back: **41 bodies and 38
+joints in one bhkPhysicsSystem**, all 41 shapes still `hknpCapsuleShape` and all
+38 joints byte-identical through the NIF form. So the multi-body path works at
+full scale.
+
+It is still not a ragdoll. `hknpRagdollData` carries an `hkaSkeleton` copy that no
+NIF block holds, and a skeleton NIF carries two packfiles (the ragdoll and a
+character bumper) where this writes one. `HknpBone` is fully modelled and
+`hknpEncodeSkeleton` writes it byte for byte, so this is the same shape of gap the
+joints were a day ago: both ends built, no editable middle.
+
 ## 2026-08-23g — A joint now has an editable form
 
 Decompile wrote a ragdoll's capsules and dropped its joints. 41 loose capsules
