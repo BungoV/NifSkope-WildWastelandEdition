@@ -1,5 +1,65 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23i — The ragdoll's skeleton needs no carrier: it derives from the bodies
+
+The handoff said the last piece for a ragdoll was the `hkaSkeleton` copy, and
+guessed it might come from the NIF node hierarchy — bone index equals body index,
+every body names its node, and a node already has a transform. It said to measure
+that before assuming it. Measured, the guess is wrong, and the right answer is
+better: **the reference pose comes from the BODIES**, which Decompile already
+carries.
+
+`collision <file> --skeleton` compares every bone's stored pose against two
+derivations — one from the node transforms, one from the bodies' own rest
+transforms (`cinfo +0x30` and `+0x40`, carried as `bhkRigidBody`'s Center and
+Rotation). Over all 75 corpus ragdolls, 925 bones:
+
+    from the NODE:  translation 796 / 850,  rotation 841 / 850
+    from the BODY:  translation 850 / 850,  rotation 850 / 850
+                    worst 3.1e-06 m and 5.4e-07
+
+The node derivation fails on 16 files and fails *hard*: every one of the standing
+turret's seven bones is wrong, the Vertibird's by up to 2.03 m. Those are exactly
+the things whose NIF is authored in a display pose while the ragdoll's rest pose
+is something else — a turret's barrel, a Vertibird's wings. Blender models the
+same distinction, and for the same reason: a rest pose is not the current pose.
+Deriving from the nodes would have silently re-posed those ragdolls.
+
+The bodies do not have that problem because a ragdoll body's `cinfo +0x30` **is**
+the bone origin, which is already documented against `HknpBodyPhys::position`.
+
+### The rest of the skeleton is a rule, and every rule is measured
+
+    bone tree            = the JOINT graph. bones == joints + 1 on 75 of 75 files,
+                           so every bone but the root is some joint's child.
+    lockTranslation      = parent >= 0.                  925 / 925
+    reference scale      = 1.0 exactly on the root,
+                           0.99999994 on every other bone. 75 root / 850 non-root,
+                           checked as BIT PATTERNS -- both print as "1.0000".
+    pose scale w lane    = 1.0f on the root, 0 elsewhere. 75 / 850
+    pose translation w   = SIMD residue, one distinct value per bone, NOT
+                           derivable -- and already classified inert by the
+                           existing --roundtrip check, which ignores exactly the
+                           two hkQsTransform w lanes at +12 and +44.
+
+So **no new NIF block is needed at all.** Everything the skeleton holds is either
+already in the file or is a rule with no exceptions in the corpus. That removes
+the whole design question the handoff was carrying — whether to invent a carrier
+block, hang the pose off the bodies, or emit a rest-pose node tree.
+
+### What this leaves for the ragdoll writer
+
+  * build `HknpSystem::bones` from the joint graph and the body transforms;
+  * the encoder needs nothing else: `hknpEncodeSystem` picks the ragdoll root
+    purely from `!sys.bones.isEmpty()`, and writes `hknpRagdollData` plus the
+    `hkaSkeleton` object;
+  * write the block as `bhkRagdollSystem` rather than `bhkPhysicsSystem`;
+  * and **do not merge the ragdoll with everything else.** A skeleton NIF holds
+    TWO packfiles -- the Brahmin's are a 39-body ragdoll and a 2-body static
+    bumper -- and Compile All currently merges every body into one system. The
+    split is derivable: the bodies connected by joints are the ragdoll, the rest
+    are a plain physics system.
+
 ## 2026-08-23h — Compile All Collision, so a joint has a way back
 
 Half a pipe is not a pipe. Decompile learned to write joints an hour ago

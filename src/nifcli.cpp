@@ -1636,6 +1636,229 @@ int cmdCollisionConstraints( const QString & file )
 	return ( carried < joints || namedBad ) ? 1 : 0;
 }
 
+/*! Is a ragdoll's reference pose derivable from the NIF's own node hierarchy?
+ *
+ * `hknpRagdollData` carries an `hkaSkeleton` -- the ragdoll's private copy of the
+ * bone tree -- and no NIF block holds one. Two ways to get it back: carry it in a
+ * new block, or DERIVE it, since bone index equals body index, every body names
+ * its node, and a node already has a transform.
+ *
+ * Deriving is much the better answer if it is true, and it is exactly the kind of
+ * claim that is comfortable to assume and cheap to check. So check it: for every
+ * bone, take its node's world transform and its PARENT BONE's node's world
+ * transform, express one in the other, and compare against the stored pose.
+ *
+ * The parent chain is compared too. The pose is local to the parent BONE, and a
+ * NIF node's transform is local to its parent NODE -- those are only the same
+ * thing if the two hierarchies agree, which is itself worth measuring rather than
+ * assuming.
+ */
+int cmdCollisionSkeleton( const QString & file )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	int skeletons = 0, bones = 0, resolved = 0, roots = 0;
+	int chainSame = 0, chainSeen = 0;
+	int transOk = 0, rotOk = 0, checked = 0;
+	int bTransOk = 0, bRotOk = 0, bChecked = 0;
+	float worstBTrans = 0.0f, worstBRot = 0.0f;
+	int scaleUnit = 0, scaleNear = 0, scaleOther = 0;
+	int lockT = 0, lockRule = 0;
+	// the three fields the node hierarchy cannot supply: do they follow a rule?
+	QMap<quint32, int> transW, scaleW;
+	QMap<quint32, int> scaleBitsRoot, scaleBitsChild;
+	float worstTrans = 0.0f, worstRot = 0.0f;
+	QString worstWhere;
+	QStringList offenders;
+
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex i = nif.getBlockIndex( b );
+		if ( !nif.blockInherits( i, "bhkPhysicsSystem" ) && !nif.blockInherits( i, "bhkRagdollSystem" ) )
+			continue;
+		const QByteArray bytes = nif.get<QByteArray>( i, "Binary Data" );
+		if ( bytes.isEmpty() )
+			continue;
+		const HknpSystem sys = hknpDecode( bytes );
+		if ( !sys.valid || sys.bones.isEmpty() )
+			continue;
+		skeletons++;
+
+		// body index -> the node its collision object names, which is the only
+		// binding between a packfile body and anything in the NIF
+		QHash<int, int> nodeOfBody;
+		const int sysNum = b;
+		for ( int o = 0; o < nif.getBlockCount(); o++ ) {
+			const QModelIndex io = nif.getBlockIndex( o );
+			if ( !nif.blockInherits( io, "bhkNPCollisionObject" ) || nif.getLink( io, "Data" ) != sysNum )
+				continue;
+			const int target = nif.getLink( io, "Target" );
+			nodeOfBody.insert( int( nif.get<quint32>( io, "Body ID" ) ),
+				nif.isValidBlockNumber( target ) ? target : nif.getParent( o ) );
+		}
+
+		for ( qsizetype k = 0; k < sys.bones.size(); k++ ) {
+			const HknpBone & bone = sys.bones.at( k );
+			bones++;
+			if ( bone.lockTranslation )
+				lockT++;
+			// the candidate rule: set on every bone except the root
+			if ( bone.lockTranslation == ( bone.parent >= 0 ) )
+				lockRule++;
+			transW[bone.poseTransW]++;
+			scaleW[bone.poseScaleW]++;
+			{
+				quint32 bits = 0;
+				std::memcpy( &bits, &bone.scale[0], 4 );
+				( bone.parent < 0 ? scaleBitsRoot : scaleBitsChild )[bits]++;
+			}
+			// the scale question, asked as a bit pattern: 0.99999994 prints as 1.0000
+			if ( bone.scale[0] == 1.0f && bone.scale[1] == 1.0f && bone.scale[2] == 1.0f )
+				scaleUnit++;
+			else if ( std::fabs( bone.scale[0] - 1.0f ) < 1.0e-6f )
+				scaleNear++;
+			else
+				scaleOther++;
+
+			const int node = nodeOfBody.value( int( k ), -1 );
+			if ( node < 0 )
+				continue;
+			resolved++;
+			if ( bone.parent < 0 ) {
+				roots++;
+				continue;
+			}
+			const int parentNode = nodeOfBody.value( bone.parent, -1 );
+			if ( parentNode < 0 )
+				continue;
+
+			// does the NODE tree agree with the BONE tree about who the parent is?
+			chainSeen++;
+			{
+				int walk = nif.getParent( node );
+				while ( walk >= 0 && walk != parentNode )
+					walk = nif.getParent( walk );
+				if ( walk == parentNode )
+					chainSame++;
+			}
+
+			const Transform wc = skeletonWorldTransform( &nif, node );
+			const Transform wp = skeletonWorldTransform( &nif, parentNode );
+			const Matrix rInv = wp.rotation.inverted();
+			const float ps = ( wp.scale != 0.0f ) ? wp.scale : 1.0f;
+			const Vector3 relT = rInv * ( wc.translation - wp.translation ) / ps;
+			const Matrix relR = rInv * wc.rotation;
+
+			// the pose is in Havok units, the node in game units
+			const Vector3 derived = relT / 69.99125f;
+			const float dt = ( derived - bone.translation ).length();
+			const Quat rq = relR.toQuat();
+			// a quaternion and its negation are the same rotation
+			float dot = 0.0f;
+			for ( int c = 0; c < 4; c++ )
+				dot += rq[c] * bone.rotation[c];
+			float dr = 0.0f;
+			for ( int c = 0; c < 4; c++ ) {
+				const float d = ( dot < 0.0f ? -rq[c] : rq[c] ) - bone.rotation[c];
+				dr = std::max( dr, std::fabs( d ) );
+			}
+			/* The second derivation: from the BODIES.
+			 *
+			 * cinfo +0x30 is the body's own rest position, and on a ragdoll that is
+			 * the bone origin -- Decompile already carries it as bhkRigidBody's
+			 * Center, with +0x40 as its Rotation. If the pose comes from these
+			 * rather than from the node transforms, nothing new has to be carried
+			 * at all.
+			 */
+			if ( int( k ) < sys.bodyPhys.size() && bone.parent < sys.bodyPhys.size() ) {
+				const HknpBodyPhys & pc = sys.bodyPhys.at( int( k ) );
+				const HknpBodyPhys & pp = sys.bodyPhys.at( bone.parent );
+				Matrix mc, mp;
+				mc.fromQuat( pc.orientation );
+				mp.fromQuat( pp.orientation );
+				const Matrix mpInv = mp.inverted();
+				const Vector3 bt = mpInv * ( pc.position - pp.position );
+				const Matrix br = mpInv * mc;
+				const float bdt = ( bt - bone.translation ).length();
+				const Quat bq = br.toQuat();
+				float bdot = 0.0f;
+				for ( int c = 0; c < 4; c++ )
+					bdot += bq[c] * bone.rotation[c];
+				float bdr = 0.0f;
+				for ( int c = 0; c < 4; c++ )
+					bdr = std::max( bdr, std::fabs( ( bdot < 0.0f ? -bq[c] : bq[c] ) - bone.rotation[c] ) );
+				bChecked++;
+				if ( bdt <= 1.0e-4f )
+					bTransOk++;
+				if ( bdr <= 1.0e-4f )
+					bRotOk++;
+				worstBTrans = std::max( worstBTrans, bdt );
+				worstBRot = std::max( worstBRot, bdr );
+			}
+			checked++;
+			if ( dt <= 1.0e-4f )
+				transOk++;
+			if ( dr <= 1.0e-4f )
+				rotOk++;
+			if ( ( dt > 1.0e-4f || dr > 1.0e-4f ) && offenders.size() < 8 ) {
+				auto v3 = []( const Vector3 & v ) {
+					return QStringLiteral( "%1 %2 %3" ).arg( v[0], 0, 'f', 4 )
+						.arg( v[1], 0, 'f', 4 ).arg( v[2], 0, 'f', 4 );
+				};
+				offenders << QStringLiteral( "    %1 (parent %2): stored T %3 | from node %4 | dT %5 dR %6" )
+					.arg( nif.get<QString>( nif.getBlockIndex( node ), "Name" ) )
+					.arg( nif.get<QString>( nif.getBlockIndex( parentNode ), "Name" ) )
+					.arg( v3( bone.translation ), v3( derived ) )
+					.arg( dt, 0, 'g', 3 ).arg( dr, 0, 'g', 3 );
+			}
+			if ( dt > worstTrans ) {
+				worstTrans = dt;
+				worstWhere = nif.get<QString>( nif.getBlockIndex( node ), "Name" );
+			}
+			worstRot = std::max( worstRot, dr );
+		}
+	}
+
+	out() << "file        " << file << Qt::endl;
+	if ( !skeletons ) {
+		out() << "  no hkaSkeleton in this file" << Qt::endl;
+		return 0;
+	}
+	out() << "skeletons   " << skeletons << "   bones " << bones << Qt::endl;
+	out() << "  bone -> node resolved                " << resolved << " / " << bones
+		  << "  (" << roots << " root)" << Qt::endl;
+	out() << "  node tree agrees about the parent    " << chainSame << " / " << chainSeen << Qt::endl;
+	out() << "  translation derivable from the node  " << transOk << " / " << checked
+		  << "   worst " << worstTrans << " m";
+	if ( !worstWhere.isEmpty() )
+		out() << " at " << worstWhere;
+	out() << Qt::endl;
+	out() << "  rotation    derivable from the node  " << rotOk << " / " << checked
+		  << "   worst " << worstRot << Qt::endl;
+	out() << "  translation derivable from the BODY  " << bTransOk << " / " << bChecked
+		  << "   worst " << worstBTrans << " m" << Qt::endl;
+	out() << "  rotation    derivable from the BODY  " << bRotOk << " / " << bChecked
+		  << "   worst " << worstBRot << Qt::endl;
+	for ( const QString & o : std::as_const( offenders ) )
+		out() << o << Qt::endl;
+	out() << "  reference scale: exactly 1  " << scaleUnit
+		  << ", within 1e-6  " << scaleNear << ", other " << scaleOther << Qt::endl;
+	out() << "  lockTranslation set on               " << lockT << " / " << bones
+		  << "   follows \"every bone but the root\" " << lockRule << " / " << bones << Qt::endl;
+	auto hist = [&]( const char * label, const QMap<quint32, int> & m ) {
+		out() << "  " << label;
+		for ( auto it = m.constBegin(); it != m.constEnd(); ++it )
+			out() << " 0x" << QString::number( it.key(), 16 ) << "=" << it.value();
+		out() << Qt::endl;
+	};
+	hist( "pose translation w lane ", transW );
+	hist( "pose scale w lane       ", scaleW );
+	hist( "scale.x bits, ROOT      ", scaleBitsRoot );
+	hist( "scale.x bits, non-root  ", scaleBitsChild );
+	return 0;
+}
+
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
 {
 	NifModel nif;
@@ -2965,6 +3188,9 @@ int usage()
 		  << "  collision <file> --constraints          write every joint into its NIF block and\n"
 		  << "                                          read it back, proving the editable form\n"
 		  << "                                          loses nothing the encoder would keep\n"
+		  << "  collision <file> --skeleton             is a ragdoll's reference pose derivable\n"
+		  << "                                          from the NIF node hierarchy? compares\n"
+		  << "                                          every bone against its node's transform\n"
 		  << "  merge <file> [--attach NODE] --add PIECE.nif [...] -o OUT\n"
 		  << "                                          splice pieces in, sharing bones by\n"
 		  << "                                          name; --attach applies to the next\n"
@@ -3062,6 +3288,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool extract = false;
 	bool roundTrip = false;
 	bool constraintsOnly = false;
+	bool skeletonOnly = false;
 	for ( int i = 0; i < a.size(); i++ ) {
 		const QString & t = a.at( i );
 		auto next = [&]() -> QString { return ( i + 1 < a.size() ) ? a.at( ++i ) : QString(); };
@@ -3086,6 +3313,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--extract" ) ) extract = true;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
+		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
 		// --attach applies to the NEXT --add and then clears, so a command line
 		// reads left to right: --attach L_Pauldron --add arm_fx.nif
 		else if ( t == QLatin1String( "--attach" ) ) pendingAttach = next();
@@ -3201,7 +3429,8 @@ int nifskopeCliMain( const QStringList & args )
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
 			dragBody, dragSpring, dragFirmness, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
-		rc = constraintsOnly ? cmdCollisionConstraints( file )
+		rc = skeletonOnly ? cmdCollisionSkeleton( file )
+			 : constraintsOnly ? cmdCollisionConstraints( file )
 			 : roundTrip ? cmdCollisionRoundTrip( file, outFile )
 					   : cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )

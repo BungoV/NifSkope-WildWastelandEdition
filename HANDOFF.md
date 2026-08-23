@@ -51,15 +51,20 @@ more.
 
      What is left for a ragdoll specifically:
 
-       * `hkaSkeleton`. `hknpRagdollData` carries a copy of the ragdoll's own
-         skeleton and no NIF block holds it. `HknpBone` is fully modelled and
-         `hknpEncodeSkeleton` writes it byte for byte (75 of 75 over the mesh
-         tree), so this is exactly the shape the joints were: both ends built, no
-         editable middle. It may not even need a new block -- bone index equals
-         body index, parents come from node parents, and the reference pose is a
-         node transform. **Measure that before assuming it**: the reference pose
-         is local to the parent and 767 of 804 corpus bones carry a scale of
-         0.99999994, which is not what a node would give.
+       * `hkaSkeleton`, and it needs NO carrier -- measured 2026-08-23, see
+         WW_CHANGES 2026-08-23i and `collision <file> --skeleton`. The reference
+         pose derives from the BODIES (their `cinfo +0x30` / `+0x40`, already
+         carried as `bhkRigidBody`'s Center and Rotation): **850 of 850 bones,
+         worst 3.1e-06 m**. NOT from the node transforms, which the handoff used
+         to guess -- those miss on 16 files and miss hard, every bone of the
+         standing turret and the Vertibird's wings by 2.03 m, because those NIFs
+         are authored in a display pose. The rest is rules, all measured with no
+         exceptions: bone tree = the joint graph (bones == joints + 1, 75/75),
+         `lockTranslation` = parent >= 0 (925/925), reference scale = 1.0 on the
+         root and 0.99999994 elsewhere (as BIT PATTERNS -- both print "1.0000"),
+         pose scale w = 1.0f on the root and 0 elsewhere. Only the pose
+         translation w lane is not derivable, and `--roundtrip` already treats it
+         as inert.
        * the ROOT CLASS. Compile All writes `hknpPhysicsSystemData`; a ragdoll
          needs `hknpRagdollData`, which the encoder already writes
          (`hknpEncodeRagdoll`) and which needs the skeleton above.
