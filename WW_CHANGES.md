@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23j — Left column tabs read Header, Blocks, NIFs
+
+Asked for, and a strip reorder only. The tab INDEX means nothing outside the
+widget: every caller asks for a `LeftColumnMode` and the selector maps between
+tab and mode through `tabData`, in both directions. So this is one line each and
+no renumbering anywhere else, which is the property the harness check was written
+to hold on to -- it asserts the order AND that each button still opens its own
+named mode. `loaded_nifs.sh`: 166 checks, 0 failures.
+
 ## 2026-08-23i — The ragdoll's skeleton needs no carrier: it derives from the bodies
 
 The handoff said the last piece for a ragdoll was the `hkaSkeleton` copy, and

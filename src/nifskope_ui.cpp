@@ -10306,12 +10306,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								skope->loadedNifsModel->rowCount() - 1, 0 ).flags()
 								& Qt::ItemIsDragEnabled ) );
 
-					check( "the top selector orders Blocks, Header and NIFs without remapping modes",
+					check( "the top selector orders Header, Blocks and NIFs without remapping modes",
 						skope->leftColumnSelector && skope->leftColumnSelector->count() == 3
-							&& skope->leftColumnSelector->tabText( 0 ) == QStringLiteral( "Blocks" )
-							&& skope->leftColumnSelector->tabData( 0 ).toInt() == NifSkope::LeftBlocks
-							&& skope->leftColumnSelector->tabText( 1 ) == QStringLiteral( "Header" )
-							&& skope->leftColumnSelector->tabData( 1 ).toInt() == NifSkope::LeftHeader
+							&& skope->leftColumnSelector->tabText( 0 ) == QStringLiteral( "Header" )
+							&& skope->leftColumnSelector->tabData( 0 ).toInt() == NifSkope::LeftHeader
+							&& skope->leftColumnSelector->tabText( 1 ) == QStringLiteral( "Blocks" )
+							&& skope->leftColumnSelector->tabData( 1 ).toInt() == NifSkope::LeftBlocks
 							&& skope->leftColumnSelector->tabText( 2 ) == QStringLiteral( "NIFs" )
 							&& skope->leftColumnSelector->tabData( 2 ).toInt() == NifSkope::LeftNifs );
 					if ( skope->leftColumnSelector ) {
@@ -22602,12 +22602,20 @@ void NifSkope::initDockWidgets()
 	leftColumnSelector->setExpanding( true );
 	leftColumnSelector->setUsesScrollButtons( false );
 	leftColumnSelector->setStyleSheet( wwSegmentedTabBarQss() );
-	leftColumnSelector->addTab( tr( "Blocks" ) );
-	leftColumnSelector->setTabData( 0, int( LeftBlocks ) );
-	leftColumnSelector->setTabToolTip( 0, tr( "Block List and Block Details" ) );
+	/* Header, Blocks, NIFs -- the strip order only.
+	 *
+	 * The tab INDEX means nothing outside this widget: every caller asks for a
+	 * LeftColumnMode and the selector maps between the two through tabData, in
+	 * both directions. That is what makes reordering the strip a one-line-each
+	 * change rather than a renumbering, and the harness check below is what
+	 * keeps it that way.
+	 */
 	leftColumnSelector->addTab( tr( "Header" ) );
-	leftColumnSelector->setTabData( 1, int( LeftHeader ) );
-	leftColumnSelector->setTabToolTip( 1, tr( "NIF Header" ) );
+	leftColumnSelector->setTabData( 0, int( LeftHeader ) );
+	leftColumnSelector->setTabToolTip( 0, tr( "NIF Header" ) );
+	leftColumnSelector->addTab( tr( "Blocks" ) );
+	leftColumnSelector->setTabData( 1, int( LeftBlocks ) );
+	leftColumnSelector->setTabToolTip( 1, tr( "Block List and Block Details" ) );
 	leftColumnSelector->addTab( tr( "NIFs" ) );
 	leftColumnSelector->setTabData( 2, int( LeftNifs ) );
 	leftColumnSelector->setTabToolTip( 2, tr( "NIF Browser and Loaded NIFs" ) );
