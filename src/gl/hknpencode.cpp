@@ -764,7 +764,22 @@ int hknpEncodeMeshShapeObjects( const HknpMeshInput & in, QVector<HknpPackObject
 	quint32 maxSecPrims = 0;
 	for ( const MeshSec & sc : std::as_const( secs ) ) maxSecPrims = std::max( maxSecPrims, quint32( sc.prims.size() ) );
 	auto bitLen = []( quint32 v ) { quint32 n = 0; while ( v ) { n++; v >>= 1; } return n; };
-	const quint32 primBits = bitLen( 2 * maxSecPrims - 1 );
+	/* 2*n, not 2*n-1. The two differ only when the busiest section's
+	 * primitive count is a POWER OF TWO, and that is exactly where vanilla
+	 * takes the extra bit: measured over 795 corpus meshes,
+	 * bitLen(nsec-1) + bitLen(2*maxSectionPrims) reproduces the stored
+	 * bitsPerKey on 791, where the old 2*n-1 form managed 564. The 4 that
+	 * still miss are all single-section power-of-two meshes carrying the
+	 * tighter value, so vanilla is not self-consistent there either.
+	 *
+	 * This was never a correctness bug: bitsPerKey is stored in the file and
+	 * the engine splits keys with it, so a tighter packing is self-consistent
+	 * and the three Museum meshes that carried one worked in game. It is
+	 * changed because matching removes the last shape-header difference in
+	 * the set, and because the safe direction for a key space is more room
+	 * rather than less.
+	 */
+	const quint32 primBits = bitLen( 2 * maxSecPrims );
 	const quint32 secBits = bitLen( quint32( secs.size() ) - 1 );
 	const quint32 bitsPerKey = secBits + primBits;
 	const quint32 maxKey = ( quint32( secs.size() - 1 ) << primBits ) | ( 2 * quint32( secs.last().prims.size() ) - 1 );
