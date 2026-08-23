@@ -1931,6 +1931,9 @@ int cmdCollisionBodies( const QString & file )
 				  << " fric " << f( p.friction )
 				  << " rest " << f( p.restitution )
 				  << " flags 0x" << QString::number( p.cinfoFlags, 16 )
+				  << " matFlags 0x" << QString::number( p.materialFlags, 16 )
+				  << " trigger " << p.triggerType
+				  << " layer " << p.layer
 				  << " com " << f( p.motionCom[0] ) << "," << f( p.motionCom[1] )
 				  << "," << f( p.motionCom[2] )
 				  << Qt::endl;

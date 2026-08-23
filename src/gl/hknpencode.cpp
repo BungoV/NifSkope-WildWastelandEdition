@@ -2005,6 +2005,12 @@ QByteArray encodeSystemRoot( const HknpSystem & sys, HknpRagdollDataFixups * fix
 		setU16( p, 0x12, roundFloat16( b.friction ) );
 		setU16( p, 0x14, roundFloat16( b.friction ) );
 		setU16( p, 0x16, roundFloat16( b.restitution ) );
+		/* The material's own flags and trigger type. A body REBUILT by Compile
+		 * has no stored record, and writing zero here turned the character
+		 * bumper from a trigger into solid collision.
+		 */
+		setU32( p, 0x0c, b.materialFlags );
+		p[0x10] = char( b.triggerType );
 		props.append( p );
 
 		QByteArray c( 0x60, 0 );

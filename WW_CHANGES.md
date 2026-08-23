@@ -1,5 +1,47 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23m — A trigger that turned solid, and a note on method
+
+`hknpMaterial` carries its own flags word and trigger type, and `HknpBodyPhys`
+never modelled either. They survive only when a body's stored 0x50 record is
+copied through untouched — which a decompile/recompile never does — so **Compile
+wrote a zeroed material for every body it rebuilt**.
+
+The human skeleton's character bumper is a TRIGGER: vanilla gives it material
+flags 0x200000 and trigger type 2. Ours came back 0 and 0, which is ordinary
+solid collision. A trigger that turns solid is a body the world starts colliding
+with, wrapped around a corpse.
+
+Derived rather than carried, because the predicate was already in the file. Over
+1,363 sampled corpus bodies:
+
+    RAISE_TRIGGER_EVENTS clear  ->  flags 0x0,      triggerType 0   (1324)
+    RAISE_TRIGGER_EVENTS set    ->  flags 0x200000, triggerType 2   (39)
+
+No exceptions either way, and that bit is already carried on `bhkRigidBody`
+"Body Flags" bit 2. Both skeletons now match vanilla per system, the packfile
+round trip stays byte-exact 2/2, and the test is 40 checks.
+
+### How this was found, which is the part worth keeping
+
+Not by the byte diff. That said the file matched: 4,529 field values through
+Havok's own deserializer, 137 differing, and every one of them provably inert —
+padding lanes, an index permutation into arrays of 18 identical entries, and the
+roll of a capsule's core box about its own axis. All true, and all beside the
+point, because **the comparison covered the ragdoll packfile and I had dismissed
+the second one in the same file at "66 bytes differ" without looking.** Two of
+those 66 bytes were this.
+
+The wider miss is the ORDER. This project's rule is PDB first for vanilla engine
+behaviour — `Fo4PDB` plus `tools/exere/f4pdb.py` — and every in-game collision
+defect before this one was found by disassembling the engine, not by diffing
+bytes. Byte diffs answer "is our file the same"; they cannot answer "what does
+the engine do with it". Asked properly, the PDB gave straight answers in minutes:
+`hknpRagdollData::checkConsistency` is `ret 0`, so nothing validates our data,
+and `hkbnpRagdollInterface::getOriginalMassOfBody` reads mass through
+cinfo +0x0c → dyn_inertia stride 0x70, +0x04 — exactly where we write it, so that
+path was never the problem.
+
 ## 2026-08-23l — A ragdoll has to WEIGH something, and ours weighed nothing
 
 First in-game test of a rebuilt ragdoll, and it found two defects on the first

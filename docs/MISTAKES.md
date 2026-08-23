@@ -3,6 +3,36 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-23 — Diffed bytes for hours without opening the PDB
+
+**What:** a rebuilt human ragdoll misbehaved in game. I spent the next stretch
+comparing our packfile against vanilla's — object censuses, offsets, a
+field-level diff through Havok's own deserializer, node transforms, block
+censuses — and concluded the file matched. It did. The defect was in the second
+packfile of the same file, which I had dismissed at "66 bytes differ" without
+looking, and it was two bytes: a trigger material zeroed.
+
+**Why:** two failures, and the second is the one that matters.
+
+The small one: I decided "66 bytes, probably the capsule roll" and moved on
+without checking. It was 64 bytes of capsule roll and 2 bytes of defect.
+
+The real one: **wrong instrument, wrong order.** The rule here is already
+written down — PDB first for vanilla engine behaviour, and our reader agreeing
+with our writer is ONE measurement. Every previous in-game collision defect in
+this project was found by disassembling the engine. A byte diff can only answer
+"is our file the same as vanilla's"; when the answer is yes and the game still
+disagrees, the diff has nothing left to say, and continuing to run it is motion
+rather than progress. bungo asked "have you consulted the .pdb" after I had
+already reported "everything matches" twice.
+
+**Solution:** when a defect is visible in the GAME and not in our checks, the
+first move is the PDB, not another comparison. Ask what the engine READS and
+under what conditions it behaves differently — `checkConsistency` being `ret 0`
+and `getOriginalMassOfBody`'s exact field path took minutes and closed off two
+whole hypotheses. And when a diff is dismissed as "probably X", either check that
+it is all X or say out loud that it was not checked.
+
 ## 2026-08-23 — Checked what the collision IS and WHERE it is, never what it WEIGHS
 
 **What:** a rebuilt human ragdoll shipped for its first in-game test with every

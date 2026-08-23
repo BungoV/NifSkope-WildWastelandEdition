@@ -1263,6 +1263,20 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 	phys.cinfoFlags = ( in.dynamic ? quint32( HKNP_RAISE_CONTACT_IMPULSE_EVENTS ) : 0u )
 		| ( in.addKeyframed ? quint32( HKNP_ADD_KEYFRAMED ) : 0u )
 		| ( in.raiseTriggerEvents ? quint32( HKNP_RAISE_TRIGGER_EVENTS ) : 0u );
+	/* A TRIGGER'S MATERIAL SAYS SO TOO, and Compile wrote a zeroed material.
+	 *
+	 * hknpMaterial carries its own flags word and trigger type, and a body
+	 * Compile REBUILDS has no stored record to copy them from -- so a
+	 * character bumper came back as ordinary solid collision instead of a
+	 * trigger, which is a body the world starts colliding with.
+	 *
+	 * Derived rather than carried, because the predicate is already here and
+	 * the corpus is unanimous: over 1,363 sampled bodies, RAISE_TRIGGER_EVENTS
+	 * set means material flags 0x200000 with trigger type 2, and clear means
+	 * both zero. No exceptions either way.
+	 */
+	phys.materialFlags = in.raiseTriggerEvents ? 0x00200000u : 0u;
+	phys.triggerType = in.raiseTriggerEvents ? quint8( 2 ) : quint8( 0 );
 	if ( in.keyframed && !in.dynamic ) {
 		/* The inertia record's own index must say NO MOTION RECORD, or the engine
 		 * indexes a dyn_motion array that is not there -- see dynamicInertia,

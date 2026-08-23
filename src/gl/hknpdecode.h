@@ -331,6 +331,17 @@ struct HknpBodyPhys
 	quint32 materialCRC = 0;    //!< body material ID resolved through hknpBSMaterialProperties
 	bool hasMotion = false;     //!< cinfo +0x0C != 0x7fffffff (dynamic body)
 	float friction = 0.5f;      //!< body_props +0x12 (truncated float16)
+	/*! hknpMaterial's own flags word and trigger type, body_props +0x0c and
+	 *  +0x10 (low byte).
+	 *
+	 *  Not modelled until 2026-08-23, and their absence is why a rebuilt
+	 *  character bumper stopped being a TRIGGER: Compile writes a zeroed
+	 *  material for any body it builds, and vanilla's bumper carries flags
+	 *  0x200000 with triggerType 2. A trigger that turns solid is a body the
+	 *  world starts colliding with.
+	 */
+	quint32 materialFlags = 0;
+	quint8 triggerType = 0;
 	float restitution = 0.4f;   //!< body_props +0x16 (truncated float16)
 	/*! The body_props record as stored, all 0x50 bytes.
 	 *

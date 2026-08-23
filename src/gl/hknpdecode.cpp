@@ -1177,6 +1177,8 @@ HknpSystem hknpDecode( const QByteArray & data )
 				qsizetype bp = bprops + qsizetype( i ) * 0x50;
 				phys.friction = truncF16( bp + 0x12 );
 				phys.restitution = truncF16( bp + 0x16 );
+				phys.materialFlags = r.u32( bp + 0x0c );
+				phys.triggerType = r.u8( bp + 0x10 );
 				if ( bp + 0x50 <= data.size() )
 					phys.propsRawData = data.mid( bp, 0x50 );
 			}

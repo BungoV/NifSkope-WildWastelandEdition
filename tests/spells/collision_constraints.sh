@@ -43,6 +43,8 @@
 #  14. a rebuilt ragdoll WEIGHS what vanilla's does -- per-body mass, density
 #      and centre of mass -- which is the pair of defects the game found and
 #      no check of shapes, bones or joints could
+#  15. a TRIGGER material survives Compile -- the character bumper's, which
+#      came back as ordinary solid collision because Compile zeroed it
 #
 # WHY 11 IS THERE: a joint names TWO bodies, and the per-body Compile writes one
 # system per body, so it cannot express one. Compile All is what captures the
@@ -393,6 +395,30 @@ if [ -f "$HUMAN" ]; then
 		check "...and vanilla's centre of mass, in the right frame" 0
 	fi
 fi
+
+
+# --- a TRIGGER stays a trigger ----------------------------------------------
+# hknpMaterial carries its own flags word and trigger type, and Compile wrote a
+# ZEROED material for every body it rebuilt -- so the character bumper came back
+# as ordinary solid collision. A trigger that turns solid is a body the world
+# starts colliding with. Derived rather than carried: over 1,363 sampled corpus
+# bodies, RAISE_TRIGGER_EVENTS set means flags 0x200000 and trigger type 2, clear
+# means both zero, no exceptions.
+matsig() { "$NS" -no-gui collision "$1" --bodies 2>/dev/null 	| awk '/^system/{s=$2} /^  body /{for(i=1;i<=NF;i++){if($i=="matFlags")m=$(i+1); if($i=="trigger")t=$(i+1)} print s":"m":"t}' 	| sort | uniq -c | tr -s " " | tr "
+" " "; }
+for fx in "$HUMAN" "$RAG"; do
+	[ -f "$fx" ] || continue
+	vsig=$(matsig "$fx")
+	# not vacuous: the fixture must actually contain a trigger material
+	check "$(basename "$fx") really carries a trigger material" 		"$(case "$vsig" in *0x200000:2*) echo 1;; *) echo 0;; esac)"
+	if compileall "$fx" "$W/mat.nif"; then
+		gsig=$(matsig "$W/mat.nif")
+		check "...and it is still a trigger after Compile All" 			"$([ "$gsig" = "$vsig" ] && echo 1 || echo 0)"
+		[ "$gsig" = "$vsig" ] || { echo "    vanilla: $vsig"; echo "    ours:    $gsig"; }
+	else
+		check "...and it is still a trigger after Compile All" 0
+	fi
+done
 
 echo "$checks checks, $fails failures"
 [ "$fails" = "0" ] && echo PASS || echo FAIL
