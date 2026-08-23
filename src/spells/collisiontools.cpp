@@ -856,6 +856,34 @@ bool tlCollConvexLeafShape( const NifModel * nif, int shapeBlock, const Matrix4 
 		out.capA = out.capB = transform * Vector3();
 		out.convexRadius = out.primRadius;
 		out.isConvex = true;
+	/* MASS PROPERTIES FOR THE PRIMITIVES, which used to be left at zero.
+	 *
+	 * A body's DENSITY is its mass over the volume of its shapes and its CENTRE
+	 * OF MASS is their volume-weighted centroid, both computed by the caller from
+	 * `massVolume` and `massCom`. A hull fills them in; a sphere and a capsule
+	 * returned before ever touching them, so a body made only of primitives --
+	 * which is every ragdoll bone -- summed to volume ZERO. Density then fell back
+	 * to the mass itself (18 where vanilla has 788) and the centre of mass
+	 * collapsed onto the body origin.
+	 *
+	 * In game that is a human ragdoll that thrashes on death and weighs almost
+	 * nothing to pick up, which is exactly how it was found: every offline check
+	 * of that file was green, because none of them weighed anything.
+	 *
+	 * THE RADIUS IS THE CORE RADIUS, not the NIF's. Measured against vanilla's own
+	 * stored density on all 17 bodies of the human skeleton, mass / (pi r_c^2 L +
+	 * 4/3 pi r_c^3) reproduces it to a worst relative error of 8.8e-06 with
+	 * r_c = 0.9801 R -- the same shrink Elric applies and `convexRadius` already
+	 * holds. With the NIF radius it is 5% out.
+	 *
+	 * `hasMassProps` stays FALSE on purpose: vanilla's capsules carry no
+	 * mass-properties object of their own, and the rebuilt Brahmin's object census
+	 * matches vanilla's exactly. These two numbers feed the BODY, not a new object.
+	 */
+		out.massCom = out.capA;
+		out.massVolume = 4.0f / 3.0f * float( M_PI ) * out.convexRadius
+			* out.convexRadius * out.convexRadius;
+		out.massMass = out.massVolume;
 		return out.primRadius > 0.0f;
 	}
 	if ( type == QLatin1String( "bhkCapsuleShape" ) ) {
@@ -874,6 +902,16 @@ bool tlCollConvexLeafShape( const NifModel * nif, int shapeBlock, const Matrix4 
 		 */
 		out.convexRadius = out.primRadius * 0.9801f;
 		out.isConvex = true;
+		// a cylinder between the two end points plus the two hemispherical caps,
+		// all at the CORE radius -- see the sphere above for the measurement
+		{
+			const float rc = out.convexRadius;
+			const float len = ( out.capB - out.capA ).length();
+			out.massCom = ( out.capA + out.capB ) / 2.0f;
+			out.massVolume = float( M_PI ) * rc * rc * len
+				+ 4.0f / 3.0f * float( M_PI ) * rc * rc * rc;
+			out.massMass = out.massVolume;
+		}
 		return out.primRadius > 0.0f;
 	}
 
@@ -1197,7 +1235,19 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 		// POSITION here with no centre-of-mass term -- bldwoodpdoor01 sits at
 		// 4.00,-48.00,0.00 and stores exactly that, and so does the cabinet.
 		// Adding the term to those put every door 84 units out.
-		phys.motionCom = in.dynamic ? ( in.center + com ) : in.center;
+		/* THE OFFSET IS IN THE BODY'S OWN FRAME, so it has to be rotated by the
+		 * body's orientation before it is added to the body's position.
+		 *
+		 * The shapes are built in body space -- a capsule's end points come
+		 * through the node transform stack -- while cinfo +0x30 and this record
+		 * are in the space that PLACES the body. Adding the two directly put the
+		 * centre of mass somewhere else entirely on every rotated bone: the
+		 * human pelvis came out with its offset's x and z exchanged, which is
+		 * its own quarter turn about Y read as if it were not there.
+		 */
+		Matrix rot;
+		rot.fromQuat( in.orientation );
+		phys.motionCom = in.dynamic ? ( in.center + rot * com ) : in.center;
 	}
 	phys.hasMotion = in.dynamic || in.keyframed;
 	phys.motionIndex = ( in.dynamic || in.keyframed ) ? 0 : -1;

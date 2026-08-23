@@ -1885,6 +1885,60 @@ int cmdCollisionSkeleton( const QString & file )
 	return 0;
 }
 
+/*! Per-body physics, so a rebuilt file can be diffed against vanilla's.
+ *
+ * The collision inventory prints what a body IS -- layer, shapes, material -- and
+ * nothing about what it WEIGHS. Mass, inertia and the motion properties are
+ * exactly the fields a ragdoll's behaviour comes from, and the fields no
+ * comparison of shapes or bones can see, so they need their own dump.
+ *
+ * Written because a rebuilt human ragdoll came back light and unstable in game
+ * while every offline check of it was green.
+ */
+int cmdCollisionBodies( const QString & file )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	auto f = []( float v ) { return QString::number( v, 'g', 7 ); };
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		const QModelIndex i = nif.getBlockIndex( b );
+		if ( !nif.blockInherits( i, "bhkPhysicsSystem" ) && !nif.blockInherits( i, "bhkRagdollSystem" ) )
+			continue;
+		const QByteArray bytes = nif.get<QByteArray>( i, "Binary Data" );
+		if ( bytes.isEmpty() )
+			continue;
+		const HknpSystem sys = hknpDecode( bytes );
+		if ( !sys.valid )
+			continue;
+		out() << "system " << nif.itemName( i ) << "  bodies " << sys.bodyPhys.size()
+			  << "  motion " << sys.motionCount << "  inertia " << sys.inertiaCount << Qt::endl;
+		for ( qsizetype k = 0; k < sys.bodyPhys.size(); k++ ) {
+			const HknpBodyPhys & p = sys.bodyPhys.at( k );
+			out() << "  body " << k
+				  << " mass " << f( p.mass )
+				  << " density " << f( p.density )
+				  << " invMass " << f( p.invMassStored )
+				  << " invInertia " << f( p.invInertia[0] ) << "," << f( p.invInertia[1] )
+				  << "," << f( p.invInertia[2] )
+				  << " motionIdx " << p.motionIndex
+				  << " grav " << f( p.gravityFactor )
+				  << " linDamp " << f( p.linDamping )
+				  << " angDamp " << f( p.angDamping )
+				  << " maxLin " << f( p.maxLinVelocity )
+				  << " maxAng " << f( p.maxAngVelocity )
+				  << " fric " << f( p.friction )
+				  << " rest " << f( p.restitution )
+				  << " flags 0x" << QString::number( p.cinfoFlags, 16 )
+				  << " com " << f( p.motionCom[0] ) << "," << f( p.motionCom[1] )
+				  << "," << f( p.motionCom[2] )
+				  << Qt::endl;
+		}
+	}
+	return 0;
+}
+
 int cmdCollision( const QString & file, int extractBlock, const QString & outFile )
 {
 	NifModel nif;
@@ -3217,6 +3271,9 @@ int usage()
 		  << "  collision <file> --skeleton             is a ragdoll's reference pose derivable\n"
 		  << "                                          from the NIF node hierarchy? compares\n"
 		  << "                                          every bone against its node's transform\n"
+		  << "  collision <file> --bodies               per-body mass, inertia and motion\n"
+		  << "                                          properties, for diffing a rebuild\n"
+		  << "                                          against vanilla\n"
 		  << "  merge <file> [--attach NODE] --add PIECE.nif [...] -o OUT\n"
 		  << "                                          splice pieces in, sharing bones by\n"
 		  << "                                          name; --attach applies to the next\n"
@@ -3315,6 +3372,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool roundTrip = false;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
+	bool bodiesOnly = false;
 	for ( int i = 0; i < a.size(); i++ ) {
 		const QString & t = a.at( i );
 		auto next = [&]() -> QString { return ( i + 1 < a.size() ) ? a.at( ++i ) : QString(); };
@@ -3340,6 +3398,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
+		else if ( t == QLatin1String( "--bodies" ) ) bodiesOnly = true;
 		// --attach applies to the NEXT --add and then clears, so a command line
 		// reads left to right: --attach L_Pauldron --add arm_fx.nif
 		else if ( t == QLatin1String( "--attach" ) ) pendingAttach = next();
@@ -3455,7 +3514,8 @@ int nifskopeCliMain( const QStringList & args )
 			iterations, noLimits, onlyLimit, useGround, noSelf, drop, jointedOnly,
 			dragBody, dragSpring, dragFirmness, selfTest, verboseSim );
 	else if ( cmd == QLatin1String( "collision" ) )
-		rc = skeletonOnly ? cmdCollisionSkeleton( file )
+		rc = bodiesOnly ? cmdCollisionBodies( file )
+			 : skeletonOnly ? cmdCollisionSkeleton( file )
 			 : constraintsOnly ? cmdCollisionConstraints( file )
 			 : roundTrip ? cmdCollisionRoundTrip( file, outFile )
 					   : cmdCollision( file, extract ? block : -1, outFile );

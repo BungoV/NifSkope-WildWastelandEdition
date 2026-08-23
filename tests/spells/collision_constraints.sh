@@ -40,6 +40,9 @@
 #  13. a ragdoll with MORE BODIES THAN BONES still comes back -- the bones
 #      are a prefix of the bodies, and the body the tree never reaches has
 #      to sort last
+#  14. a rebuilt ragdoll WEIGHS what vanilla's does -- per-body mass, density
+#      and centre of mass -- which is the pair of defects the game found and
+#      no check of shapes, bones or joints could
 #
 # WHY 11 IS THERE: a joint names TWO bodies, and the per-body Compile writes one
 # system per body, so it cannot express one. Compile All is what captures the
@@ -334,6 +337,60 @@ if [ -f "$TORSO" ]; then
 		check "with vanilla's bone count, not one per body" 0
 		check "the body the bone tree never reaches still sorts last" 0
 		check "and its bone tree is vanilla's own" 0
+	fi
+fi
+
+
+# --- what a rebuilt ragdoll WEIGHS -------------------------------------------
+# Found in game, not here: human ragdolls thrashed on death and weighed almost
+# nothing to pick up, while every offline check of that file was green. Spheres
+# and capsules never set their mass properties, so a body made of them summed to
+# volume ZERO -- which collapsed its DENSITY onto its mass (18 where vanilla has
+# 788) and its CENTRE OF MASS onto its own origin. The centre of mass then needed
+# the body's own rotation applied, which the pelvis exposed by coming back with
+# its offset's x and z exchanged.
+#
+# Nothing about shapes, bones or joints can see either one, which is why this
+# compares the numbers a body is SIMULATED from.
+HUMAN="${HUMAN:-E:/Tools/Fallout 4/DataUnpacked/Data/Meshes/Actors/Character/CharacterAssets/skeleton.nif}"
+if [ -f "$HUMAN" ]; then
+	echo "fixture: $HUMAN"
+	# per ragdoll body: index, mass, density, centre of mass
+	ragbodies() { "$NS" -no-gui collision "$1" --bodies 2>/dev/null \
+		| awk '/^system/{on=($2=="bhkRagdollSystem")} on&&/^  body /{print $2, $4, $6, $NF}'; }
+	vanb=$(ragbodies "$HUMAN")
+	echo "  vanilla ragdoll bodies: $(echo "$vanb" | grep -c .)"
+	# not vacuous: vanilla's density must be far from its mass, which is what the
+	# broken build produced
+	spread=$(echo "$vanb" | awk '{ if ($3 > $2 * 10) n++ } END { print n+0 }')
+	check "vanilla's densities are nothing like its masses, so this can fail" \
+		"$([ "${spread:-0}" -gt 0 ] && echo 1 || echo 0)"
+	if compileall "$HUMAN" "$W/hum.nif"; then
+		echo "$vanb" > "$W/van.bod"
+		ragbodies "$W/hum.nif" > "$W/our.bod"
+		# worst mass difference, worst relative density error, worst com error
+		read -r wm wd wc <<-EOF
+		$(join "$W/van.bod" "$W/our.bod" | awk '
+			function abs(x) { return x < 0 ? -x : x }
+			{
+				split($4, a, ","); split($7, b, ",");
+				dm = abs($2 - $5); if (dm > wm) wm = dm;
+				dd = abs($3 - $6) / ($3 > 0 ? $3 : 1); if (dd > wd) wd = dd;
+				for (i = 1; i <= 3; i++) { dc = abs(a[i] - b[i]); if (dc > wc) wc = dc }
+			}
+			END { printf "%g %g %g", wm+0, wd+0, wc+0 }')
+		EOF
+		echo "  worst mass diff $wm kg, density rel $wd, centre of mass $wc m"
+		check "every body comes back with vanilla's mass" \
+			"$(awk -v v="$wm" 'BEGIN{print (v < 1e-4) ? 1 : 0}')"
+		check "...and vanilla's density, so it is not weightless in game" \
+			"$(awk -v v="$wd" 'BEGIN{print (v < 1e-4) ? 1 : 0}')"
+		check "...and vanilla's centre of mass, in the right frame" \
+			"$(awk -v v="$wc" 'BEGIN{print (v < 1e-4) ? 1 : 0}')"
+	else
+		check "every body comes back with vanilla's mass" 0
+		check "...and vanilla's density, so it is not weightless in game" 0
+		check "...and vanilla's centre of mass, in the right frame" 0
 	fi
 fi
 

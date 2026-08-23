@@ -1,5 +1,63 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-23l — A ragdoll has to WEIGH something, and ours weighed nothing
+
+First in-game test of a rebuilt ragdoll, and it found two defects on the first
+kill. bungo's report: human ragdolls freak out when they die, and they have very
+low mass when you try to move the corpse.
+
+Both are one root cause. `tlCollConvexLeafShape` fills in `massVolume` and
+`massCom` for a HULL and returns early for a sphere and a capsule without ever
+touching them. A body's density is its mass over the summed volume of its shapes
+and its centre of mass is their volume-weighted centroid — so a body made only of
+primitives, which is every ragdoll bone, summed to volume ZERO:
+
+    density        fell back to the mass itself: 18 where vanilla has 788.36
+    centre of mass collapsed onto the body's own origin
+
+A limb whose mass acts at the wrong point is a limb that throws itself around, and
+a body whose density is 43x too small is a corpse you can shove like a paper bag.
+
+### The radius is the CORE radius
+
+Fixed by computing the primitives analytically, and the constant matters: Havok
+measures the capsule at the radius it STORES, which is Elric's 0.9801 R and not
+the NIF's R. Checked against vanilla's own density on all 17 capsule bodies of the
+human skeleton, `mass / (pi rc^2 L + 4/3 pi rc^3)` reproduces it to a worst
+relative error of **8.8e-06**. With the NIF radius it is 5% out.
+
+`hasMassProps` deliberately stays false: vanilla's capsules carry no
+mass-properties object of their own, and the rebuilt Brahmin's object census
+matches vanilla's exactly. These two numbers feed the BODY, not a new object.
+
+### And the offset is in the body's own frame
+
+With the volumes right the centre of mass was still wrong, and wrong in a way that
+named its own cause: the human pelvis came back with its offset's x and z
+exchanged. The shapes are built in body space — a capsule's end points come down
+the node transform stack — while `cinfo +0x30` and the motion record are in the
+space that PLACES the body, so the offset needs the body's own rotation before it
+is added to the body's position. The pelvis's quarter turn about Y was being read
+as if it were not there.
+
+### Measured, after
+
+Both skeletons, decompiled and compiled back, against vanilla per body:
+
+    human    18 bodies   mass exact   density 9.0e-07 rel   com 1e-08 m
+    brahmin  39 bodies   mass exact   density 4.0e-07 rel   com 1e-07 m
+
+`tests/spells/collision_constraints.sh` is 36 checks now. The three new ones
+compare per-body mass, density and centre of mass against vanilla, and they are
+not vacuous: the first asserts that vanilla's densities are nothing like its
+masses, which is exactly what the broken build produced.
+
+### This is what the game test was for
+
+Every offline check of that file was green — shape classes, bone tree, joint
+count, body-to-node mapping, byte sizes, object census, object offsets. None of
+them weighed anything. It took one raider.
+
 ## 2026-08-23k — A ragdoll compiles back into a ragdoll
 
 The skeleton derives (2026-08-23i), so this writes it. `Havok/Compile All

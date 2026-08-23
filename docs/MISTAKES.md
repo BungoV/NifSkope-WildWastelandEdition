@@ -3,6 +3,37 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-23 — Checked what the collision IS and WHERE it is, never what it WEIGHS
+
+**What:** a rebuilt human ragdoll shipped for its first in-game test with every
+offline check green: shape classes, bone tree parent for parent, joint counts,
+body-to-node mapping, vanilla's exact byte sizes, an identical packfile object
+census at identical offsets. The first raider killed with it thrashed on death and
+could be shoved around like a paper bag. Its bodies' DENSITY was 43x too small and
+their CENTRE OF MASS sat on the body origin, because spheres and capsules never
+set their mass properties and a body of primitives summed to volume zero.
+
+**Why:** this is the third instance of one family, and the family is now clear
+enough to name. The checks measure the quantities we already model, and a defect
+lives in whatever quantity nothing looked at:
+
+  * 2026-08-23, mixed compounds: every check measured what the shape IS, none
+    measured WHERE it is — 18 game units out;
+  * 2026-08-23, joints: every check measured the carrier, none measured the
+    OPERATION — 30 files silently lost one;
+  * here: every check measured structure and placement, none measured MASS.
+
+Adding a consumer of a value is what makes it a quantity, and both `density` and
+`motionCom` had been consumed by the compile path for months without anything
+comparing them to vanilla.
+
+**Solution:** three checks comparing per-body mass, density and centre of mass
+against vanilla, with a fourth asserting vanilla's densities are nothing like its
+masses so they cannot pass vacuously. And the rule, which is cheap: **when code
+starts computing a value, add the check that compares that value to the
+reference, in the same change.** The compile path computed density from a volume
+no test ever read. If a field is worth computing it is worth diffing.
+
 ## 2026-08-23 — Confirmed a property every instance had, and built the wrong rule
 
 **What:** a ragdoll's bone order had to be reproduced. Measured across all 75

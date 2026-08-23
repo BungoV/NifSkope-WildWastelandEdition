@@ -42,7 +42,7 @@ more.
 
 **What is left, and it is one piece of work rather than two:**
 
-  1. **A rebuilt ragdoll has never been loaded by the engine.** The writer is
+  1. **A rebuilt ragdoll HAS been loaded now, and it found two defects.** The writer is
      done -- `Havok/Compile All Collision` produces what vanilla ships for a
      skeleton NIF, a `bhkRagdollSystem` beside a `bhkPhysicsSystem`, with the
      `hkaSkeleton` BUILT from the bodies and the joints rather than carried (see
@@ -52,7 +52,17 @@ more.
      bone table identical parent for parent and pose for pose bar signed zeros
      and eight negated quaternions, and an identical body-to-node mapping.
 
-     None of that is a load. **Everything about ragdolls so far is offline**, and
+     bungo killed a raider with it 2026-08-23 and reported two things: the
+     ragdolls freak out on death, and the corpses weigh almost nothing. Both
+     were one root cause -- spheres and capsules never set their mass
+     properties, so every ragdoll body summed to volume zero and lost both its
+     density and its centre of mass. Fixed and re-measured against vanilla per
+     body (mass exact, density 9e-07 relative, com 1e-08 m); see WW_CHANGES
+     2026-08-23l. **The fixed build has NOT been loaded yet** -- the mod at
+     `E:\Projects\Fallout 4 Mods\mods\WW Ragdoll Test` carries both rebuilt
+     skeletons and is waiting on a second kill.
+
+     The first load is still the lesson. **Everything about ragdolls up to it was offline**, and
      this project's own history says that is the half that finds nothing: seven
      defects in the collision writer were visible only in the game, and every
      check we owned passed through all of them. A ragdoll is worse than a static
