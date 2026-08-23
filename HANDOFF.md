@@ -48,12 +48,22 @@ more.
      have exactly one. The enabling change is done, so this is reachable
      directly now: build every body's shapes into one `HknpSystem` and assemble
      once. Ragdolls (41 bodies) and cloth need the same thing.
-  2. **Body ORDER.** Ours is a permutation of vanilla's -- our body 0 is the
-     dynamic compound where vanilla's is the static mesh -- and it is the ONLY
-     thing behind the last 19 header-word and 17 rest-state differences in the
-     set. Harmless as far as anything measured says, but it is noise in every
-     comparison and it hid the flags bug for a while by looking like the obvious
-     suspect. It is decided wherever bodies get built, which is item 1.
+  2. ~~Body ORDER~~ **CLOSED 2026-08-23** (`acdd63b`). Vanilla's body index
+     follows the block index of the node that owns the body -- 46 of 46
+     multi-body files, no exceptions -- and the merge now orders parts that way
+     instead of by collision-object block order, which had recorded the sequence
+     bodies were COMPILED in. Rest-state differences 17 -> 0, header-word 19 -> 3.
+  3. ~~Shape-key bit width~~ **CLOSED 2026-08-23** (`96cb1f3`). `primBits` is
+     `bitLen(2*maxSectionPrims)`, not `2*n-1`: the two differ only on
+     power-of-two prim counts and that is exactly where vanilla takes the extra
+     bit (791 of 795 corpus meshes, against 564 for the old form). Header-word
+     differences 3 -> 1, and the last one is a quad-PARTITIONING difference
+     already documented as by-design, not a formula error.
+
+**The Museum set now stands at:** shape classes 114/114 vs vanilla, stored solids
+113/114 (one known face-decomposition difference), compounds 37/37, body rest
+state 0 differing, shape header words 1 differing, body order 46/46 on vanilla's
+own rule. Everything that remains is documented and deliberate.
 
 **Done and CONFIRMED IN GAME since the railings closed:**
 
