@@ -6903,19 +6903,49 @@ bool tlCollMergePhysicsSystems( NifModel * nif, QString * error )
 	if ( !nif )
 		return fail( QObject::tr( "No file." ) );
 
-	// every compiled collision object, in block order, with the system it names
-	QVector<int> objects, named;
+	/* Every compiled collision object, ordered by THE NODE THAT OWNS IT.
+	 *
+	 * The order the parts are merged in IS the body order, and vanilla's body
+	 * order follows the block index of the owning node: measured on the 46
+	 * multi-body files of the Museum set, 46 of 46, no exceptions. Merging in
+	 * block order of the COLLISION OBJECTS instead gave us a permutation of that
+	 * on 18 of those 46, because Compile appends its blocks as it goes and the
+	 * object order therefore records the order bodies were compiled rather than
+	 * where they sit in the scene. In every failing railing the root node's body
+	 * came out LAST where vanilla has it first.
+	 *
+	 * A body order that is merely a permutation is not obviously harmful -- each
+	 * body still carries its own data and each node still names its own body --
+	 * but it was the standing suspect for the impact-sound bug for a week, it is
+	 * the only remaining cause of the set's last header-word and rest-state
+	 * differences, and it costs one sort to be rid of. Match the order rather
+	 * than argue it cannot matter.
+	 */
+	QVector<int> objects, named;        // every object, in block order, for the rebind below
+	QVector<QPair<int, int>> byOwner;   // (owning node block, system block), for the ORDER
 	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
 		const QModelIndex i = nif->getBlockIndex( b );
 		if ( !nif->blockInherits( i, "bhkNPCollisionObject" ) )
 			continue;
 		const int data = nif->getLink( i, "Data" );
-		if ( nif->isValidBlockNumber( data ) ) { objects.append( b ); named.append( data ); }
+		if ( !nif->isValidBlockNumber( data ) )
+			continue;
+		objects.append( b );
+		named.append( data );
+		// The collision object's own block is the fallback, so an object whose
+		// parent cannot be resolved still lands somewhere deterministic rather
+		// than at the front.
+		const int owner = nif->getParent( b );
+		byOwner.append( { owner >= 0 ? owner : b, data } );
 	}
+	std::stable_sort( byOwner.begin(), byOwner.end(),
+		[]( const QPair<int, int> & a, const QPair<int, int> & b ) {
+			return a.first < b.first;
+		} );
 	QVector<int> parts;
-	for ( int s : std::as_const( named ) )
-		if ( !parts.contains( s ) )
-			parts.append( s );
+	for ( const auto & entry : std::as_const( byOwner ) )
+		if ( !parts.contains( entry.second ) )
+			parts.append( entry.second );
 	if ( parts.size() < 2 )
 		return true;    // already the shape vanilla ships
 
