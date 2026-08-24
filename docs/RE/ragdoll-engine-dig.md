@@ -247,3 +247,47 @@ from them are still sound -- both builds are the same FORMAT. But any claim of t
 shape "our output is byte-identical to vanilla" is byte-identical to *that* build,
 and any mod built from the corpus is built from *that* build's assets. For static
 collision that has been harmless. For ragdolls it was not.
+
+## Static analysis is saturated; the file compares equal and the game disagrees
+
+Rebuilt from the game's own archive, our output was compared against that archive's
+file at every level available:
+
+    NIF header             same version 20.2.0.7, user 12, bs 130; same census
+    NIF blocks             0 of 166 differ, links resolved to type + name
+    packfile container     header and section table identical; local and virtual
+                           fixups identical; global fixups differ only in the
+                           shape-list array's ORDER
+    Havok's deserializer   ragdoll 127 of 4529 scalars differ, ALL inert
+                           (22 array indices, 63 w lanes, 42 capsule plane order,
+                           and zero of anything else); bumper 0 of 124
+    pointers               197 of 197 resolve to the same object
+    materials/motionProps  all 18 entries byte-identical TO EACH OTHER, pointers
+                           included, so the index permutation cannot matter
+    our own ragdoll solver energy 6.77 vs 6.76, maxSpeed 0.836 vs 0.835, joint
+                           error 0.000178 vs 0.000175 over 120 steps
+
+bungo reports the rebuilt ragdolls still thrash on death where vanilla plays its
+animation, with MO2 confirming only `WW Ragdoll Test` enabled. So the conclusion
+"equivalent" is being asserted by every instrument here and contradicted by the
+only oracle that counts.
+
+**The instruments are saturated. The next move is empirical bisection, not more
+comparison.** Three mods are staged to split it in three loads:
+
+    WW Ragdoll Placebo   the game's own files, byte-identical, shipped loose.
+                         If these misbehave, the content is not the cause at all.
+    WW Ragdoll Hybrid    our wrapper, the game's blobs (tools/blobswap.py).
+                         Separates the packfiles from everything around them.
+    WW Ragdoll Test      the full rebuild.
+
+If the Hybrid behaves and the Test does not, the fault is one of the three
+differences called inert above, and they get bisected individually. If the Placebo
+misbehaves, none of this file analysis was ever relevant.
+
+**Standing lesson:** four separate times this investigation reached "the file is
+equivalent" and was wrong about what that implied -- once because the reference was
+a different build, once because a second packfile was dismissed unexamined, and
+twice because "inert" was an argument rather than a measurement. A comparison that
+cannot fail is not evidence, and neither is one whose scope is smaller than its
+conclusion.
