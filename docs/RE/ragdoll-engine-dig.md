@@ -187,3 +187,63 @@ Identical, so the grab path cannot produce a different result.
 ragdoll's constraints on death and eases them back over a duration. A ragdoll that
 looks loose for a moment after death and then firms up is vanilla behaviour, not a
 defect -- and its input is constraint data that matches vanilla in every scalar.
+
+## THE REFERENCE WAS WRONG: DataUnpacked is a different build of the game
+
+Found last, after everything above said the file was equivalent to vanilla. The
+one assumption nothing had tested was the meaning of "vanilla": every comparison
+in this session, and in this project's collision work generally, used
+`E:\Tools\Fallout 4\DataUnpacked`. That tree is **not what the installed game
+loads.**
+
+Measured by reading the installed archives directly (`ba2get.py`, GNRL format:
+'BTDX', version, type, numFiles, nameTableOffset; then 36-byte records
+nameHash/ext/dirHash/flags/offset/packed/unpacked/align; then a u16-length name
+table in record order):
+
+    NIFs sampled from Fallout4 - Meshes.ba2      600
+    identical to the unpacked tree                 0
+    different                                    600
+
+Most differ by exactly 44 bytes -- the NIF header's export path string -- but not
+all, and **collision blobs differ too**: 6 of 6 sampled, including plain statics.
+`CeilingFan01` is 3904 bytes in the archive against 3920 unpacked, 462 bytes
+differing, while decoding to the same 2 shapes and the same 54 preview triangles.
+So it is a re-export, not corruption. The installed archives are **BA2 version 8**,
+i.e. the next-gen update.
+
+### Why it matters for ragdolls specifically, and not much elsewhere
+
+The two builds order a ragdoll's BODIES differently:
+
+    bone   the game        DataUnpacked
+    0      COM             COM
+    1      LLeg_Thigh      LLeg_Thigh
+    2      RLeg_Thigh      SPINE1
+    3      SPINE1          RLeg_Thigh
+    5      RLeg_Calf       SPINE2
+    8      RLeg_Foot       Chest
+    10     LArm_UpperArm   RArm_UpperArm
+
+Each file is internally consistent -- every bone's rest pose matches its own body
+order, `boneToBodyMap` is the identity in both -- so both are valid ragdolls. The
+brahmin is reordered the same way (62041 bytes in the archive, 62085 unpacked).
+
+Our pipeline faithfully preserves whichever order it is given. Built from
+DataUnpacked it produces DataUnpacked's order, and that was then installed over a
+game whose animation and behaviour data -- which lives outside the NIF and which
+we never touch -- expects the other order.
+
+**Rebuilt from the game's own archive, our output reproduces the game's order
+exactly**: bone for bone, parent for parent, node for node, with identical
+body-to-node mapping, total mass (93.500 kg human, 121.000 kg brahmin), mean
+density and trigger-body counts.
+
+### What this means for the rest of the collision work
+
+Every "vanilla says X" figure in this project was measured against DataUnpacked.
+The corpus statistics are still self-consistent and the format conclusions drawn
+from them are still sound -- both builds are the same FORMAT. But any claim of the
+shape "our output is byte-identical to vanilla" is byte-identical to *that* build,
+and any mod built from the corpus is built from *that* build's assets. For static
+collision that has been harmless. For ragdolls it was not.

@@ -42,53 +42,56 @@ more.
 
 **What is left, and it is one piece of work rather than two:**
 
-  1. **Two in-game tests, two real defects fixed, and the file is now equivalent
-     to vanilla by every measure I can build. The symptom may not be ours.**
+  1. **The rebuilt ragdolls were built from the WRONG BUILD of the game. Fixed;
+     one A/B load will confirm it.**
 
-     Loaded 2026-08-23. First test: ragdolls thrashed on death, corpses weighed
-     nothing. Cause -- spheres and capsules never set their mass properties, so
-     every ragdoll body summed to volume zero and lost its density AND its centre
-     of mass; the offset also needed the body's own rotation. Fixed, 6541dbd.
+     `E:\Tools\Fallout 4\DataUnpacked` -- this project's corpus, and the
+     reference behind every "vanilla says X" figure in the collision work -- is a
+     DIFFERENT BUILD from the installed game. Measured 2026-08-24 by reading the
+     archives directly with `tools/ba2get.py`: **600 of 600 sampled NIFs differ**,
+     most by 44 header bytes but not all, and **collision blobs differ too** (6 of
+     6, including plain statics). The install is BA2 version 8 -- next-gen.
 
-     Second test, same symptoms. Cause found: `hknpMaterial` carries flags and a
-     trigger type that `HknpBodyPhys` never modelled, so Compile wrote a ZEROED
-     material and the character bumper stopped being a TRIGGER. Fixed, 8b1b312,
-     derived from RAISE_TRIGGER_EVENTS (1363/1363 corpus bodies, no exceptions).
+     For statics that is cosmetic. For ragdolls it is not: the two builds **order
+     a ragdoll's bodies differently** (the game's bone 2 is RLeg_Thigh, the
+     corpus's is SPINE1, and so on down). Both files are internally consistent, so
+     both are valid ragdolls -- but the animation and behaviour data that DRIVES a
+     ragdoll lives outside the NIF, was never touched, and expects the game's
+     order. Our pipeline preserves whatever order it is handed, faithfully.
 
-     **Then the PDB dig bungo asked for** -- see `docs/RE/ragdoll-engine-dig.md`,
-     f439d2b. It closed the remaining hypotheses rather than finding a third
-     defect: nothing validates our data on load (`checkConsistency` is `ret 0`);
-     mass reaches the engine exactly where we write it; the grab weight is a
-     scene-graph SUM and both files give **93.5000 kg** on the human; and the
-     engine deliberately LOOSENS a ragdoll's constraints on death and eases them
-     back, so a brief settle is vanilla behaviour.
+     So the two failed game tests were not testing the collision writer. They were
+     testing what happens when another build's skeleton is installed over yours.
 
-     And the file compares equal at four levels -- NIF blocks with links resolved
-     (0 of 166), packfile container (header, section table, local and virtual
-     fixups), every scalar Havok's own deserializer reads, and every pointer
-     (197 human / 449 brahmin, all resolving to the same object). The differences
-     that remain are four inert classes, each checked: indices into arrays of
-     identical entries, `hkVector4` padding lanes, capsule plane ORDER (equal as a
-     set), and complete quaternion negations (dot = -1.000000).
+     **Rebuilt from the game's own archive, our output reproduces the game's order
+     exactly** -- bone for bone, parent for parent, node for node, identical
+     body-to-node map, exact mass (93.500 kg human, 121.000 kg brahmin), exact
+     density and trigger-body counts.
 
-     **So the next test is a control, not another fix.** Three mods are staged in
-     `E:\Projects\Fallout 4 Mods\mods`:
-
-       * `WW Ragdoll Placebo` -- bit-identical VANILLA files in the same mod
-         structure. Enable this ALONE first. If it misbehaves too, the file
-         content was never the cause and the whole packfile investigation was
-         aimed at the wrong thing.
-       * `WW Ragdoll Test` -- our rebuild, build 8b1b312.
+     **The A/B, one session:**
+       * `WW Ragdoll Test` -- rebuilt from the game's archive. Should behave.
+       * `WW Ragdoll Placebo` -- the DataUnpacked files BIT-IDENTICAL, never
+         touched by NifSkope. Should reproduce the old thrashing. If it does, the
+         cause was the source assets and the writer is exonerated.
        * `WW Ragdoll Control` -- superseded, do not enable.
 
-     Ruled out along the way: no other mod, loose or in any of the 12 BA2s,
-     provides the human skeleton, so ours overrides nobody.
+     Two REAL defects were found and fixed by the failed tests and stand on their
+     own merits: primitive mass properties never set, so every ragdoll body summed
+     to volume zero and lost density and centre of mass (6541dbd); and
+     `hknpMaterial`'s flags and trigger type written as zeros, so the character
+     bumper stopped being a trigger (8b1b312). Both are regression-tested --
+     `collision_constraints.sh` is 40 checks -- and the corpus sweep is clean at
+     155/155 files, 1202 joints in and out.
 
-     **The method lesson is in docs/MISTAKES.md and matters more than the fixes:**
-     PDB first for vanilla engine behaviour. A byte diff answers "is our file the
-     same"; it cannot answer "what does the engine do with it", and when the first
-     answer is yes and the game still disagrees, running the diff again is motion
-     rather than progress.
+     Engine findings are in `docs/RE/ragdoll-engine-dig.md`: nothing validates our
+     data on load, the mass path reads where we write, the grab weight is a
+     scene-graph SUM that is identical for both files, and the engine deliberately
+     loosens ragdoll constraints on death and eases them back -- so a brief settle
+     is vanilla behaviour, not a defect.
+
+     **Two method lessons in docs/MISTAKES.md, and the second is the expensive
+     one:** PDB first for vanilla engine behaviour; and when a comparison against a
+     reference keeps saying "no difference" while reality disagrees, stop testing
+     the subject and test the REFERENCE.
 
 **The Museum set now stands at:** shape classes 114/114 vs vanilla, stored solids
 113/114 (one known face-decomposition difference), compounds 37/37, body rest

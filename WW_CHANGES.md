@@ -1,5 +1,57 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-24 — The reference was a different build of the game
+
+The rebuilt ragdolls misbehaved in game while every offline comparison said the
+file matched vanilla. Both statements were true. What was wrong was the word
+"vanilla".
+
+Every comparison in this project's collision work uses
+`E:\Tools\Fallout 4\DataUnpacked` as the corpus. Read the installed archives
+directly instead (`tools/ba2get.py`) and:
+
+    NIFs sampled from Fallout4 - Meshes.ba2      600
+    identical to the unpacked tree                 0
+    different                                    600
+
+Most differ by exactly 44 bytes -- the header's export path string -- but not all,
+and **collision blobs differ too**, 6 of 6 sampled including plain statics.
+`CeilingFan01` is 3904 bytes in the archive against 3920 unpacked, 462 differing,
+decoding to the same 2 shapes and 54 triangles. A re-export, not corruption. The
+installed archives are BA2 version 8: the next-gen update.
+
+### For ragdolls this is not cosmetic
+
+The two builds order a ragdoll's BODIES differently:
+
+    bone   the game        DataUnpacked
+    2      RLeg_Thigh      SPINE1
+    3      SPINE1          RLeg_Thigh
+    5      RLeg_Calf       SPINE2
+    8      RLeg_Foot       Chest
+    10     LArm_UpperArm   RArm_UpperArm
+
+Each file is internally consistent -- rest poses match their own body order,
+`boneToBodyMap` is the identity in both -- so both are valid ragdolls. Ours
+preserves whichever order it is given, faithfully. Built from DataUnpacked it
+produced DataUnpacked's order, and that was installed over a game whose animation
+and behaviour data expects the other one. That data lives outside the NIF and we
+never touch it.
+
+**Rebuilt from the game's own archive, our output reproduces the game's order
+exactly** -- bone for bone, parent for parent, node for node, identical
+body-to-node mapping, exact total mass (93.500 kg human, 121.000 kg brahmin),
+exact mean density and trigger-body counts.
+
+### What still stands
+
+The corpus statistics are self-consistent and the format conclusions drawn from
+them hold -- both builds are the same FORMAT, and every rule measured over 1,300+
+bodies or 75 ragdolls is a rule about the format. What needs the caveat is any
+claim of the shape "byte-identical to vanilla": it means that build. And anything
+BUILT from the corpus for use in the game must come from the game's own archives
+instead. `tools/ba2get.py` extracts one file from a GNRL BA2 for exactly that.
+
 ## 2026-08-23m — A trigger that turned solid, and a note on method
 
 `hknpMaterial` carries its own flags word and trigger type, and `HknpBodyPhys`

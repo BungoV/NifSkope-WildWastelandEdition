@@ -3,6 +3,34 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-24 — Never checked what "vanilla" meant
+
+**What:** two rebuilt ragdolls misbehaved in game. I compared our output against
+`DataUnpacked` at four levels -- NIF blocks with links resolved, the packfile
+container, every scalar through Havok's own deserializer, every pointer -- and
+reported "equivalent to vanilla" twice. Both times the comparison was sound and
+the conclusion was useless, because DataUnpacked is a DIFFERENT BUILD of Fallout 4
+from the installed game: 600 of 600 sampled NIFs differ, collision blobs included,
+and the two builds order a ragdoll's bodies differently.
+
+**Why:** "vanilla" was the one term in the whole investigation that never got
+checked. It had been the corpus for months of collision work, it was right for
+every format question ever asked of it, and that track record is exactly what made
+it invisible. I questioned the writer, the encoder, the container, the engine, the
+mod list -- and never the reference they were all measured against.
+
+There was a signal, too, and I walked past it: the very first size comparison
+showed 46367 bytes unpacked against 46327 in the archive. I saw a 40-byte header
+string, said "not collision data", and moved on without asking why a shipped asset
+had two sizes at all.
+
+**Solution:** `tools/ba2get.py` reads the installed archives directly, and the
+test mods are now built from those. **When a comparison against a reference keeps
+saying "no difference" and reality keeps disagreeing, stop testing the subject and
+test the reference.** A reference with a long history of being right is the last
+thing you doubt and often the thing that is wrong -- and the cost of checking it
+was one script and ten minutes, against hours spent diffing a file that was fine.
+
 ## 2026-08-23 — Diffed bytes for hours without opening the PDB
 
 **What:** a rebuilt human ragdoll misbehaved in game. I spent the next stretch
