@@ -49,6 +49,15 @@ for f in README.txt LICENSE.txt CHANGELOG.txt WW_FEATURES.txt CLI.txt \
 	[ -f "$REL/$f" ] && cp "$REL/$f" "$STAGE/"
 done
 
+# --- the build stamp -------------------------------------------------------
+#
+# main.cpp PREFERS this file to the compiled-in NIFSKOPE_REVISION, because the
+# define is baked when qmake runs and after an incremental build it names a
+# commit the binary is not. Leaving it out of the package is the same defect
+# wearing the packager's clothes: a download whose title bar cites whatever
+# commit qmake last saw. It is 8 bytes.
+[ -f "$REL/build_rev.txt" ] && cp "$REL/build_rev.txt" "$STAGE/"
+
 # --- prove nothing scratch rode along --------------------------------------
 STRAY=$(find "$STAGE" -maxdepth 1 \
 	\( -name 'ww_*' -o -name 'ls_*' -o -name '*.log' -o -name '*.bin*' \
