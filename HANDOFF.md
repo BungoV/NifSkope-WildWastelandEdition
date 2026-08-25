@@ -11,9 +11,42 @@ happening again.
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-22**. Edition **0.3.2**. Build green. The current work is a
-sweep of the **compiled-collision backlog**, and as of 2026-08-21 it is being
-tested IN THE GAME, which changed what the work is.
+Updated **2026-08-25**. Edition **0.3.3**, packaged and released. Build green.
+The current work is a sweep of the **compiled-collision backlog**, and since
+2026-08-21 it is being tested IN THE GAME, which changed what the work is.
+
+## NEXT SESSION STARTS HERE: one A/B closes the ragdoll (2026-08-25)
+
+**The inertia FRAME was the defect, and it is fixed.** `dyn_inertia +0x20` is an
+inverse inertia diagonal and `+0x40` is the frame it is expressed in; Compile
+wrote the diagonal and left the frame at the identity, which is a different
+tensor on every body. On a ragdoll that is every bone resisting rotation about
+the wrong axes -- corpses detonating on death. bungo proved the cause in game on
+2026-08-24 by splicing the stored quaternions back into a rebuilt file.
+
+Decompile now writes the whole tensor `R diag(I) R^T` into **Inertia Tensor**
+(an `hkMatrix3`, which always had room for it) and Compile diagonalises it back,
+resolving the frame's non-uniqueness towards the body's own orientation. Full
+reasoning in WW_CHANGES 2026-08-25.
+
+**Measured, `collision_constraints.sh` 48/48:** worst tensor error 4.4e-07 on the
+human skeleton's 18 bodies and 6.9e-07 on the brahmin's 39, quaternion agreement
+0.999996 and 1.000000, vanilla identity frames 0 of 57. Dropping the frame scores
+**89% relative error** on the same comparison, which is how a pass here is known
+not to be vacuous.
+
+**What is owed: the A/B, and it is now a THREE-way.** The two earlier game tests
+were run against the wrong build's assets AND with the frame bug in place, so
+neither told us anything about the writer.
+
+  * `WW Ragdoll Test` -- rebuilt from the GAME's own archive, by the build that
+    keeps the frame. Should behave.
+  * `WW Ragdoll Placebo` -- the DataUnpacked files bit-identical, never touched
+    by NifSkope. Should reproduce the old thrashing, which exonerates the writer.
+  * `WW Ragdoll Control` -- superseded, do not enable.
+
+Nothing else in the collision backlog is blocked on it.
+
 
 ## The live test, and what it found (2026-08-22)
 
@@ -32,7 +65,7 @@ are proven too (110 of 114 identical to vanilla within 0.46 mm,
 `tools/collision_ab.py`), every file has exactly one physics system, and all 22
 keyframed records carry the inertia sentinel.
 
-## NEXT SESSION STARTS HERE: multi-body systems, and body order with it (2026-08-23)
+## Where the ragdoll work stood on 2026-08-23
 
 **Item 3c is CLOSED IN GAME.** bungo re-tested the wall terminal after the unit
 fix and its collision is where it belongs, which validates three commits at once:

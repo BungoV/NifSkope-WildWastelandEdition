@@ -58,6 +58,9 @@ struct HknpEncodeInput
 	float angDamping = 0.05f;
 	Vector3 center;
 	Vector3 inertia;
+	//! the frame `inertia` is expressed in (dyn_inertia +0x40). Left at the
+	//! identity this describes a different tensor -- see tlCollDiagonaliseInertia.
+	Quat inertiaFrame = Quat( 1, 0, 0, 0 );
 	/*! KEYFRAMED: the body has a motion index and an inertia record, but NO
 	 * dyn_motion record. Measured over 1,200 vanilla files, the three states are
 	 * distinct and the counts say which:

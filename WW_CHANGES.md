@@ -1,5 +1,89 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-25 — A diagonal without its frame is a different tensor
+
+`dyn_inertia +0x20` is an INVERSE INERTIA DIAGONAL. `+0x40` is the frame that
+diagonal is expressed in. Compile read the first and left the second at the
+identity on every body it wrote, which does not describe the same tensor -- on a
+ragdoll it means every bone resisting rotation about the wrong axes. In game it
+looked like corpses detonating on death.
+
+bungo confirmed the cause on 2026-08-24 by splicing the stored quaternions back
+into a rebuilt file and watching the thrashing stop.
+
+### Nothing structural could see it
+
+This is the part worth keeping. Havok's own deserializer does not expose the
+`dyn_inertia` array; our ragdoll solver reproduced vanilla's joint drift either
+way; and five levels of block-by-block comparison -- NIF blocks with links
+resolved, the packfile container, every scalar through the SDK, every pointer,
+the body-to-node map -- all called the files equivalent. It took a raw byte
+census of the root object to find. A comparison that cannot see a field cannot
+clear it, and every one of those five was blind to this one.
+
+### The whole tensor, in both directions
+
+`bhkRigidBody`'s **Inertia Tensor** is an `hkMatrix3` and always had room for
+nine numbers; Decompile was writing three of them.
+
+  * **Decompile** now writes `R diag(I) R^T` -- the tensor the field claims to
+    hold, and the quantity that is actually simulated. Still reciprocated rather
+    than stored inverted, for the same reason as before: the field means the real
+    thing, not its inverse.
+  * **Compile** takes it apart again (`tlCollDiagonaliseInertia`, classic Jacobi
+    rotations, once per body at compile time) and writes both halves. A tensor
+    that really is diagonal comes back unchanged with an identity frame.
+
+### The frame is not unique, so choose vanilla's
+
+Permuting and negating eigenvectors gives 24 proper rotations that diagonalise
+the same tensor equally well, and a DEGENERATE pair -- a capsule's two equal
+cross-axis components -- leaves a whole continuous rotation free on top of that.
+Every one of them is the same physics IF the engine only ever rebuilds the tensor
+from the pair. But vanilla's `+0x40` tracks the body's own orientation closely --
+within 1e-4 on 11 of the human skeleton's 18 bodies -- which reads as a real
+frame rather than merely a diagonalising one, so the freedom is resolved towards
+the body: the closest of the 24, then slid analytically along the free axis
+(`q(t) = q0 * (cos(t/2) + sin(t/2) e)`, maximal at `t/2 = atan2(B, A)`).
+
+Without that slide the worst human body landed 43 degrees from vanilla's choice,
+which is what "within 45 degrees and no closer" looks like when only the 24 are
+available.
+
+### Measured
+
+`collision_constraints.sh` check 16, and the suite is **48 checks, 0 failures**:
+
+    fixture                 bodies  identity  worst-tensor-rel  worst-dot  frameless
+    skeleton.nif (human)        18         0         4.403e-07   0.999996     8.939e-01
+    Skeleton.nif (brahmin)      39         0         6.930e-07   1.000000     8.815e-01
+
+`identity 0` is what makes the check non-vacuous in the first place: vanilla's
+frames are never the identity, so a writer that emits one is always wrong. And
+`frameless` is the same tensor comparison with the frame dropped -- 89% relative
+error, which is what the old build was quietly scoring. A pass here cannot be
+confused with a pass by accident.
+
+The corpus sweep is unchanged at 155/155 files and 1202 joints in and out.
+
+**Not yet confirmed in game.** The mechanism is proven offline and the cause was
+proven in game by the splice; the writer's own output has not been loaded yet.
+That is one A/B away.
+
+### Also
+
+`tools/hkinertia.py` reads the frames out of a file's `bhkRagdollSystem` and, with
+`--compare`, reports the tensor agreement, the quaternion agreement, and what the
+tensor error WOULD have been with the frame dropped.
+
+**Edition 0.3.3**, released as `v0.3.3` -- the first packaged build since 0.3.2 on
+2026-08-11, and 61 commits of compiled collision behind it.
+
+**Build gotcha, new:** `release/NifSkope.exe`'s make rule runs `git rev-parse`
+BEFORE the link, so an MSYS2 shell without git on its PATH fails the target at
+error 127 and leaves the old exe in place looking untouched. Export
+`/e/Tools/GIT/mingw64/bin` onto `PATH` before `make`.
+
 ## 2026-08-24 — The reference was a different build of the game
 
 The rebuilt ragdolls misbehaved in game while every offline comparison said the

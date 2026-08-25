@@ -2549,16 +2549,43 @@ public:
 				nif->set<Quat>( iInfo, "Rotation", phys.orientation );
 				QModelIndex iInertia = nif->getIndex( iInfo, "Inertia Tensor" );
 				if ( ( dyn || keyframed ) && iInertia.isValid() ) {
-					/* The packfile stores INVERSE inertia; bhkRigidBody's Inertia
-					 * Tensor means the real thing. Convert, so the field a user
-					 * reads or edits is the quantity it claims to be.
-					 * hknpencode reciprocates on the way back out, leaving the
-					 * byte round trip untouched.
+					/* THE WHOLE TENSOR, because a diagonal without its frame is a
+					 * different tensor.
+					 *
+					 * The packfile stores an INVERSE inertia DIAGONAL at
+					 * dyn_inertia +0x20 and the frame it is expressed in as a
+					 * quaternion at +0x40. This used to write the reciprocal of the
+					 * diagonal into m11/m22/m33 and drop the frame on the floor --
+					 * so Compile rebuilt every body with an identity frame, and on a
+					 * ragdoll that means every bone resisting rotation about the
+					 * wrong axes. It looks like the corpse detonating on death;
+					 * bungo confirmed the cause in game on 2026-08-24 by splicing
+					 * the stored quaternions back into a rebuilt file.
+					 *
+					 * "Inertia Tensor" is an hkMatrix3 and always had room for this.
+					 * R diag(I) R^T is the tensor the field claims to hold, it is
+					 * what a user would expect to read, and tlCollDiagonaliseInertia
+					 * takes it apart again on the way back.
+					 *
+					 * Reciprocated here rather than stored inverted for the same
+					 * reason as before: the field means the real quantity.
 					 */
+					float diag[3];
 					for ( int k = 0; k < 3; k++ ) {
 						const float ii = phys.invInertia[k];
-						const char * nm = ( k == 0 ) ? "m11" : ( k == 1 ) ? "m22" : "m33";
-						nif->set<float>( iInertia, nm, ( ii > 1.0e-12f ) ? 1.0f / ii : 0.0f );
+						diag[k] = ( ii > 1.0e-12f ) ? 1.0f / ii : 0.0f;
+					}
+					Matrix frame;
+					frame.fromQuat( phys.motionOrientation );
+					static const char * const nm[3][3] = { { "m11", "m12", "m13" },
+						{ "m21", "m22", "m23" }, { "m31", "m32", "m33" } };
+					for ( int r = 0; r < 3; r++ ) {
+						for ( int c = 0; c < 3; c++ ) {
+							float sum = 0.0f;
+							for ( int k = 0; k < 3; k++ )
+								sum += frame( r, k ) * diag[k] * frame( c, k );
+							nif->set<float>( iInertia, QLatin1String( nm[r][c] ), sum );
+						}
 					}
 				}
 				/* cinfo +0x30 is the body position; for a single-body prop whose

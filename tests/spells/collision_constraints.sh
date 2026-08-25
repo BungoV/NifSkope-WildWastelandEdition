@@ -45,6 +45,10 @@
 #      no check of shapes, bones or joints could
 #  15. a TRIGGER material survives Compile -- the character bumper's, which
 #      came back as ordinary solid collision because Compile zeroed it
+#  16. a rebuilt body's inertia TENSOR is vanilla's, frame included -- the
+#      diagonal was kept and the frame it belongs to was dropped, which is a
+#      different tensor on every bone, and it is what made corpses detonate.
+#      Measured with the frame dropped as well, so a pass is not vacuous
 #
 # WHY 11 IS THERE: a joint names TWO bodies, and the per-body Compile writes one
 # system per body, so it cannot express one. Compile All is what captures the
@@ -419,6 +423,49 @@ for fx in "$HUMAN" "$RAG"; do
 		check "...and it is still a trigger after Compile All" 0
 	fi
 done
+
+# --- the frame a body's inertia is expressed in -------------------------------
+#
+# dyn_inertia +0x20 is an inverse inertia DIAGONAL and +0x40 is the frame that
+# diagonal is expressed in. Compile left the frame at the identity on every body
+# it wrote, which is a DIFFERENT TENSOR on every ragdoll bone -- in game, corpses
+# detonating on death. Confirmed 2026-08-24 by splicing the stored quaternions
+# back into a rebuilt file and watching the thrashing stop.
+#
+# Nothing structural could see it. Havok's own deserializer does not expose the
+# dyn_inertia array, our ragdoll solver reproduced vanilla's joint drift either
+# way, and five levels of block-by-block comparison called the files equivalent.
+# It took a raw byte census of the root object to find.
+#
+# So compare the TENSOR, R diag(I) R^T, because that is the quantity simulated.
+# The frameless number beside it is the same comparison with the frame dropped --
+# what the old build was scoring -- and it is how a passing run here is known not
+# to be vacuous.
+if command -v python >/dev/null; then
+	for fx in "$HUMAN" "$RAG"; do
+		[ -f "$fx" ] || continue
+		van=$(EXE="$NS" python "$ROOT/tools/hkinertia.py" "$fx" 2>/dev/null)
+		nid=$(echo "$van" | awk '/^identity /{print $2}')
+		nmo=$(echo "$van" | awk '/^motions /{print $2}')
+		check "$(basename "$fx"): vanilla's inertia frames are NOT the identity" 			"$([ "${nmo:-0}" -gt 0 ] && [ "${nid:-1}" = "0" ] && echo 1 || echo 0)"
+		if compileall "$fx" "$W/inert.nif"; then
+			cmp=$(EXE="$NS" python "$ROOT/tools/hkinertia.py" "$fx" 				--compare "$W/inert.nif" 2>/dev/null)
+			echo "$cmp" | sed 's/^/    /'
+			rel=$(echo "$cmp" | awk '/^worst-tensor-rel /{print $2}')
+			dot=$(echo "$cmp" | awk '/^worst-dot /{print $2}')
+			flat=$(echo "$cmp" | awk '/^frameless-tensor-rel /{print $2}')
+			check "...and a rebuild reproduces the inertia TENSOR" 				"$(awk -v v="${rel:-1}" 'BEGIN{print (v < 1e-5) ? 1 : 0}')"
+			check "...on vanilla's OWN frame, not merely an equivalent one" 				"$(awk -v v="${dot:-0}" 'BEGIN{print (v > 0.9999) ? 1 : 0}')"
+			check "...and dropping the frame would have failed that" 				"$(awk -v v="${flat:-0}" 'BEGIN{print (v > 0.01) ? 1 : 0}')"
+		else
+			check "...and a rebuild reproduces the inertia TENSOR" 0
+			check "...on vanilla's OWN frame, not merely an equivalent one" 0
+			check "...and dropping the frame would have failed that" 0
+		fi
+	done
+else
+	echo "  (no python, so the inertia frame checks are skipped)"
+fi
 
 echo "$checks checks, $fails failures"
 [ "$fails" = "0" ] && echo PASS || echo FAIL

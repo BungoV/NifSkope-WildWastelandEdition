@@ -1004,6 +1004,183 @@ bool tlCollConvexLeafShape( const NifModel * nif, int shapeBlock, const Matrix4 
 	return true;
 }
 
+/*! Quaternion product of  q with the pure quaternion of basis axis  k.
+ *
+ * Only ever used to slide a frame along a degenerate inertia axis, so it takes
+ * the axis as an index rather than a vector.
+ */
+static Quat tlCollQuatTimesAxis( const Quat & q, int k )
+{
+	float v[3] = { 0.0f, 0.0f, 0.0f };
+	v[k] = 1.0f;
+	const float w = q[0], x = q[1], y = q[2], z = q[3];
+	return Quat( -( x * v[0] + y * v[1] + z * v[2] ),
+				 w * v[0] + y * v[2] - z * v[1],
+				 w * v[1] + z * v[0] - x * v[2],
+				 w * v[2] + x * v[1] - y * v[0] );
+}
+
+/*! Diagonalise a symmetric 3x3 inertia tensor into a diagonal and its frame.
+ *
+ * Classic Jacobi rotations. A symmetric 3x3 needs only a handful of sweeps and
+ * this is not on any hot path -- it runs once per body at compile time.
+ *
+ * Why it exists: `dyn_inertia +0x40` is the frame the diagonal is expressed in,
+ * and Compile used to leave it at the identity, which describes a DIFFERENT
+ * tensor. On a ragdoll that means every bone resists rotation about the wrong
+ * axes; confirmed in game 2026-08-24 by splicing the stored quaternions back.
+ *
+ * The eigenvalue ORDER is whatever Jacobi lands on, which need not be vanilla's.
+ * That is fine and is the reason this is written as a diagonalisation rather than
+ * a byte carrier: any (diagonal, frame) pair describing the same tensor is the
+ * same physics. What must hold is that R diag R^T reproduces the input, and the
+ * caller checks exactly that.
+ */
+static void tlCollDiagonaliseInertia( const float in[3][3], Vector3 & diag, Quat & frame,
+										const Quat & prefer )
+{
+	double a[3][3], v[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+	for ( int r = 0; r < 3; r++ )
+		for ( int c = 0; c < 3; c++ )
+			a[r][c] = 0.5 * ( double( in[r][c] ) + double( in[c][r] ) );   // symmetrise
+
+	for ( int sweep = 0; sweep < 32; sweep++ ) {
+		double off = std::fabs( a[0][1] ) + std::fabs( a[0][2] ) + std::fabs( a[1][2] );
+		if ( off < 1.0e-14 )
+			break;
+		for ( int p = 0; p < 2; p++ ) {
+			for ( int q = p + 1; q < 3; q++ ) {
+				if ( std::fabs( a[p][q] ) < 1.0e-18 )
+					continue;
+				const double theta = ( a[q][q] - a[p][p] ) / ( 2.0 * a[p][q] );
+				const double t = ( theta >= 0.0 ? 1.0 : -1.0 )
+					/ ( std::fabs( theta ) + std::sqrt( theta * theta + 1.0 ) );
+				const double c = 1.0 / std::sqrt( t * t + 1.0 ), s = t * c;
+				for ( int k = 0; k < 3; k++ ) {
+					const double akp = a[k][p], akq = a[k][q];
+					a[k][p] = c * akp - s * akq;
+					a[k][q] = s * akp + c * akq;
+				}
+				for ( int k = 0; k < 3; k++ ) {
+					const double apk = a[p][k], aqk = a[q][k];
+					a[p][k] = c * apk - s * aqk;
+					a[q][k] = s * apk + c * aqk;
+				}
+				for ( int k = 0; k < 3; k++ ) {
+					const double vkp = v[k][p], vkq = v[k][q];
+					v[k][p] = c * vkp - s * vkq;
+					v[k][q] = s * vkp + c * vkq;
+				}
+			}
+		}
+	}
+	// a right-handed frame, so the quaternion means a rotation and not a reflection
+	double det = v[0][0] * ( v[1][1] * v[2][2] - v[1][2] * v[2][1] )
+			   - v[0][1] * ( v[1][0] * v[2][2] - v[1][2] * v[2][0] )
+			   + v[0][2] * ( v[1][0] * v[2][1] - v[1][1] * v[2][0] );
+	if ( det < 0.0 )
+		for ( int k = 0; k < 3; k++ )
+			v[k][0] = -v[k][0];
+
+	/* THE FRAME IS NOT UNIQUE, so choose the one vanilla would have chosen.
+	 *
+	 * A capsule has two equal inertia components, so any rotation about its axis
+	 * diagonalises the tensor just as well -- and permuting or negating the
+	 * eigenvectors gives 24 proper rotations that are all equally correct. The
+	 * TENSOR is the same for every one of them, so the physics is too if the
+	 * engine only ever rebuilds the tensor from this pair.
+	 *
+	 * But dyn_inertia +0x40 tracks the body's own orientation closely in vanilla
+	 * -- within 1e-4 on 11 of the human skeleton's 18 bodies -- which reads as the
+	 * motion carrying a real frame and not just a diagonalising one. If the engine
+	 * uses it as the motion's rotation, an equivalent-but-different frame is not
+	 * equivalent at all. So resolve the freedom towards the body: of the 24, take
+	 * the one closest to the orientation the caller passes in.
+	 */
+	static const int PERM[6][3] = { { 0, 1, 2 }, { 0, 2, 1 }, { 1, 0, 2 },
+									{ 1, 2, 0 }, { 2, 0, 1 }, { 2, 1, 0 } };
+	double best = -2.0;
+	Vector3 bestDiag;
+	Quat bestFrame( 1, 0, 0, 0 );
+	for ( int p = 0; p < 6; p++ ) {
+		for ( int sign = 0; sign < 4; sign++ ) {
+			const double sx = ( sign & 1 ) ? -1.0 : 1.0;
+			const double sy = ( sign & 2 ) ? -1.0 : 1.0;
+			double col[3][3];
+			for ( int k = 0; k < 3; k++ ) {
+				col[k][0] = v[k][PERM[p][0]] * sx;
+				col[k][1] = v[k][PERM[p][1]] * sy;
+			}
+			// third column fixed by the cross product, so the frame is a rotation
+			col[0][2] = col[1][0] * col[2][1] - col[2][0] * col[1][1];
+			col[1][2] = col[2][0] * col[0][1] - col[0][0] * col[2][1];
+			col[2][2] = col[0][0] * col[1][1] - col[1][0] * col[0][1];
+			Matrix m;
+			for ( int r = 0; r < 3; r++ )
+				for ( int c = 0; c < 3; c++ )
+					m( r, c ) = float( col[r][c] );
+			const Quat q = m.toQuat();
+			double dot = 0.0;
+			for ( int k = 0; k < 4; k++ )
+				dot += double( q[k] ) * double( prefer[k] );
+			dot = std::fabs( dot );
+			if ( dot > best ) {
+				best = dot;
+				bestFrame = q;
+				bestDiag = Vector3( float( a[PERM[p][0]][PERM[p][0]] ),
+									float( a[PERM[p][1]][PERM[p][1]] ),
+									float( a[PERM[p][2]][PERM[p][2]] ) );
+			}
+		}
+	}
+
+	/* A DEGENERATE PAIR leaves a CONTINUOUS rotation free, and no permutation
+	 * reaches it. A capsule's two cross-axis components are equal, so any spin
+	 * about its long axis diagonalises the tensor identically -- the 24 above are
+	 * all the same arbitrary angle offset by multiples of 90 degrees, which lands
+	 * within 45 degrees of vanilla's choice and no closer. Measured 43 degrees on
+	 * the human skeleton's worst body before this loop existed.
+	 *
+	 * So slide along the freedom analytically. With q0 the frame so far and e the
+	 * free axis, q(t) = q0 * (cos(t/2) + sin(t/2) e), and
+	 *
+	 *     dot( q(t), prefer ) = A cos(t/2) + B sin(t/2)
+	 *
+	 * with A = dot( q0, prefer ) and B = dot( q0 * e, prefer ), maximal at
+	 * t/2 = atan2( B, A ). The two equal components stay equal under it, so the
+	 * diagonal needs no adjustment.
+	 */
+	const float trace = std::fabs( bestDiag[0] ) + std::fabs( bestDiag[1] )
+		+ std::fabs( bestDiag[2] );
+	const float tol = 1.0e-4f * ( trace > 0.0f ? trace : 1.0f );
+	int equalPairs = 0, freeAxis = -1;
+	for ( int k = 0; k < 3; k++ ) {
+		if ( std::fabs( bestDiag[( k + 1 ) % 3] - bestDiag[( k + 2 ) % 3] ) <= tol ) {
+			equalPairs++;
+			if ( freeAxis < 0 )
+				freeAxis = k;
+		}
+	}
+	if ( equalPairs >= 2 ) {
+		// a sphere: every frame diagonalises it, so take the caller's outright
+		bestFrame = prefer;
+	} else if ( freeAxis >= 0 ) {
+		const Quat qa = tlCollQuatTimesAxis( bestFrame, freeAxis );
+		double A = 0.0, B = 0.0;
+		for ( int k = 0; k < 4; k++ ) {
+			A += double( bestFrame[k] ) * double( prefer[k] );
+			B += double( qa[k] ) * double( prefer[k] );
+		}
+		const double half = std::atan2( B, A );
+		const double c = std::cos( half ), s = std::sin( half );
+		for ( int k = 0; k < 4; k++ )
+			bestFrame[k] = float( c * double( bestFrame[k] ) + s * double( qa[k] ) );
+	}
+
+	diag = bestDiag;
+	frame = bestFrame;
+}
+
 /*! Every convex leaf under \a shapeBlock, as hknp shapes, transforms baked in.
  *
  *  False as soon as anything in the tree is not a convex leaf this can write, or
@@ -1312,6 +1489,9 @@ QByteArray tlCollCompileConvex( const NifModel * nif, int rootShape, const HknpE
 		 * of half way up the object, so a folding chair rotated to stand itself
 		 * up, and railings drove themselves through the floor.
 		 */
+		// the frame the diagonal above is expressed in; identity here described a
+		// different tensor on every body -- see tlCollDiagonaliseInertia
+		phys.motionOrientation = in.inertiaFrame;
 		phys.gravityFactor = in.gravityFactor;
 		phys.maxLinVelocity = in.maxLinVelocity;
 		phys.maxAngVelocity = in.maxAngVelocity;
@@ -6422,8 +6602,25 @@ QModelIndex tlCompileCollision( NifModel * nif, QWidget * parent,
 	if ( info.isValid() ) {
 		Vector4 center = nif->get<Vector4>( info, "Center" ); input.center = Vector3( center[0], center[1], center[2] );
 		input.orientation = nif->get<Quat>( info, "Rotation" );
+		/* THE WHOLE TENSOR, not just its diagonal.
+		 *
+		 * "Inertia Tensor" is an hkMatrix3 and this read three of its nine
+		 * numbers, which threw away the frame the diagonal belongs to. Decompile
+		 * now writes R diag(I) R^T here and this takes it apart again. A tensor
+		 * that really is diagonal comes back unchanged with an identity frame.
+		 */
 		QModelIndex inertia = nif->getIndex( info, "Inertia Tensor" );
-		input.inertia = Vector3( nif->get<float>( inertia, "m11" ), nif->get<float>( inertia, "m22" ), nif->get<float>( inertia, "m33" ) );
+		{
+			static const char * const nm[3][3] = { { "m11", "m12", "m13" },
+				{ "m21", "m22", "m23" }, { "m31", "m32", "m33" } };
+			float M[3][3];
+			for ( int r = 0; r < 3; r++ )
+				for ( int c = 0; c < 3; c++ )
+					M[r][c] = nif->get<float>( inertia, QLatin1String( nm[r][c] ) );
+			// the body's own rotation is the gauge: see tlCollDiagonaliseInertia
+			tlCollDiagonaliseInertia( M, input.inertia, input.inertiaFrame,
+				nif->get<Quat>( info, "Rotation" ) );
+		}
 	}
 	QModelIndex materialShape = tlCollBlockIndex( nif, tlCollFirstLeafShape( nif, rootShape ) );
 	input.materialCRC = materialShape.isValid() ? nif->get<quint32>( materialShape, "Material" ) : 0u;

@@ -3,6 +3,31 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-25 — Five comparisons agreed, and none of them could see the field
+
+**What:** the inertia FRAME at `dyn_inertia +0x40` was written as the identity on
+every body Compile produced, for as long as Compile has produced bodies. Five
+independent comparisons cleared those files: NIF blocks with links resolved, the
+packfile container, every scalar through Havok's own deserializer, every pointer,
+and the body-to-node map. All five were sound. All five were blind to this field
+-- the SDK's reader does not expose the `dyn_inertia` array at all -- so their
+agreement was not evidence of anything. It took a raw byte census of the root
+object to find, after the game had already said something was wrong twice.
+
+**Why:** stacking more comparisons feels like increasing coverage, and it is not.
+Four of the five read the same parsed representation, so they shared its blind
+spot; the fifth read pointers, which this field is not. Five green checks over one
+blind spot is one green check.
+
+**Instead:** before trusting a clean comparison, ask what it CANNOT see and say so
+out loud. A checker earns the right to clear a field only by being able to fail on
+it -- which is why `collision_constraints.sh` check 16 reports the frameless error
+(0.89) beside the real one (4.4e-07): the run proves it would have failed.
+
+Related, and the same shape in different clothes: 2026-08-24's "never checked what
+vanilla meant", and 2026-08-23c's ten green checks that all measured what the
+collision IS and none measured WHERE.
+
 ## 2026-08-24 — Never checked what "vanilla" meant
 
 **What:** two rebuilt ragdolls misbehaved in game. I compared our output against
