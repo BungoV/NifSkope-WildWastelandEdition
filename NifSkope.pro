@@ -123,7 +123,7 @@ DEFINES += NIFSKOPE_VERSION=\\\"$${VER}\\\"
 # it to decide which registry keys to carry forward, so it has to keep tracking
 # upstream rather than us. This is the number on the title bar and the About
 # box; bump it here and both follow.
-WW_VER = 0.3.2
+WW_VER = 0.3.3
 DEFINES += WW_EDITION_VERSION=\\\"$${WW_VER}\\\"
 
 
