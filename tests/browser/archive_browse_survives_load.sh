@@ -39,6 +39,14 @@
 # NOTE ON PORTS: NifSkope exits silently if it cannot bind its IPC port, and on
 # this machine UDP above ~49152 is refused. Keep --port below that.
 #
+# PHASE 2 (2026-08-31): the same hook against Fallout 76's GeneratedMeshes
+# archive, with WW_ARCHIVEBROWSE_EXPECT=bto — the tree the user SEES (through
+# the proxy) must contain .bto file rows. Added for the report "I cannot browse
+# those .bto meshes in the nif browser": the index, the tree build and the
+# proxy all accept .bto in code, so the check is against the assembled view,
+# where any of them failing would land. Skipped with a note if the FO76
+# install is absent.
+#
 # USAGE
 #   bash tests/browser/archive_browse_survives_load.sh
 #   TARGET=/path/to/Data bash tests/browser/archive_browse_survives_load.sh
@@ -48,15 +56,39 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="${EXE:-$ROOT/release/NifSkope.exe}"
 # a Data folder (loose meshes are fine) or a single .ba2
 TARGET="${TARGET:-E:/Tools/Fallout 4/DataUnpacked/Data}"
+TARGET76="${TARGET76:-X:/Programs/Steam/steamapps/common/Fallout76/Data/SeventySix - GeneratedMeshes01.ba2}"
 PORT="${PORT:-46221}"
 LOG="$ROOT/release/ww_archivebrowse_test.log"
 
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 
-rm -f "$LOG"
-WW_ARCHIVEBROWSE_TEST="$TARGET" "$EXE" --port "$PORT" > /dev/null 2>&1
+# The hook writes its verdict and then quits; give the app a whole minute and
+# then stop waiting for it — a launch that lingers after 'done' is not a
+# finding of this suite (the log already holds the verdict).
+run_case() {	# $1 target, $2 expected extensions ('' = none)
+	rm -f "$LOG"
+	WW_ARCHIVEBROWSE_EXPECT="$2" WW_ARCHIVEBROWSE_TEST="$1" \
+		"$EXE" --port "$PORT" > /dev/null 2>&1 &
+	local pid=$!
+	for _ in $(seq 1 60); do
+		[ -f "$LOG" ] && grep -q '^done$' "$LOG" 2>/dev/null && break
+		sleep 1
+	done
+	kill "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	[ -f "$LOG" ] || { echo "harness produced no log"; return 1; }
+	tr -d '\r' < "$LOG"
+	grep -q '^PASS' "$LOG"
+}
 
-[ -f "$LOG" ] || { echo "harness produced no log"; exit 1; }
-tr -d '\r' < "$LOG"
+rc=0
+run_case "$TARGET" "" || rc=1
 
-grep -q '^PASS' "$LOG"
+if [ -f "$TARGET76" ]; then
+	echo "--- FO76 GeneratedMeshes: .bto must be visible ---"
+	run_case "$TARGET76" "bto" || rc=1
+else
+	echo "SKIP: no FO76 archive at $TARGET76"
+fi
+
+exit "$rc"

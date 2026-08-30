@@ -1640,6 +1640,8 @@ private:
 public:
 	//! camera distance, so a test can show a gesture did not move the camera
 	float cameraDistance() const { return Dist; }
+	//! camera position, so a test can show free-camera flight actually travelled
+	Vector3 cameraPosition() const { return Pos; }
 private:
 	Vector3 Pos;
 	Vector3 Rot;

@@ -9194,6 +9194,39 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const float drift = std::fabs( view->orthographicHalfHeight() - settled );
 					log << "after release with the modifier let go first, drifted " << drift << "\n";
 					check( "letting go stops the camera, modifier released first", drift <= 0.01f );
+
+					/* --- 4. free camera: Shift is the SPEED modifier, held
+					 * while steering. Pressing it BEFORE a movement key used
+					 * to lock the camera out of every direction: the press
+					 * arrived as Shift+W, the exact match against the bare W
+					 * binding failed, and the movement bit never latched.
+					 * The control proves the observable first, so a broken
+					 * free camera cannot pass as "no movement expected".
+					 */
+					view->setFreeCamera( true );
+					pump( 100 );
+					const Vector3 wFrom = view->cameraPosition();
+					send( QEvent::KeyPress, Qt::Key_W, Qt::NoModifier, 250 );
+					const float wAlone = ( view->cameraPosition() - wFrom ).length();
+					send( QEvent::KeyRelease, Qt::Key_W, Qt::NoModifier, 60 );
+					log << "CONTROL: W alone flew " << wAlone << "\n";
+					check( "CONTROL: W alone flies the free camera", wAlone > 0.01f );
+
+					send( QEvent::KeyPress, Qt::Key_Shift, Qt::ShiftModifier, 30 );
+					const Vector3 sFrom = view->cameraPosition();
+					send( QEvent::KeyPress, Qt::Key_W, Qt::ShiftModifier, 250 );
+					const float shiftFirst = ( view->cameraPosition() - sFrom ).length();
+					send( QEvent::KeyRelease, Qt::Key_W, Qt::ShiftModifier, 30 );
+					send( QEvent::KeyRelease, Qt::Key_Shift, Qt::NoModifier, 60 );
+					log << "Shift held FIRST, then W: flew " << shiftFirst << "\n";
+					check( "Shift held first, W still flies", shiftFirst > 0.01f );
+
+					const Vector3 rest = view->cameraPosition();
+					pump( 250 );
+					const float flightDrift = ( view->cameraPosition() - rest ).length();
+					log << "after releasing both, drifted " << flightDrift << "\n";
+					check( "letting go stops the flight", flightDrift <= 0.01f );
+					view->setFreeCamera( false );
 				} while ( false );
 				keys.setSeq( QStringLiteral( "viewport.nav.zoom_in" ), hadZoom );
 				log << checks << " checks, " << fails << " failures\n";
@@ -21469,6 +21502,37 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				check( "the archive can still be opened from",
 					skope->currentArchiveNames.size() == namesBefore
 					&& !skope->currentArchiveNames.isEmpty() );
+
+				/* WW_ARCHIVEBROWSE_EXPECT=bto[,btr,...]: extensions that MUST
+				 * appear as file rows in the tree the user actually sees (the
+				 * proxy, so a filtering bug counts too). Added for the FO76
+				 * GeneratedMeshes report — 1,007 .bto indexed, none reportedly
+				 * shown — so that class of loss has a check that can fail.
+				 */
+				const QString expectList = qEnvironmentVariable( "WW_ARCHIVEBROWSE_EXPECT" );
+				if ( !expectList.isEmpty() ) {
+					for ( const QString & ext : expectList.split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) ) {
+						const QString suffix = QLatin1String( "." ) + ext.trimmed();
+						int found = 0;
+						std::function<void( const QModelIndex & )> countExt =
+							[&]( const QModelIndex & parent ) {
+							QAbstractItemModel * m = view->model();
+							for ( int r = 0; r < m->rowCount( parent ); ++r ) {
+								const QModelIndex i0 = m->index( r, 0, parent );
+								const QModelIndex i1 = m->index( r, 1, parent );
+								if ( i1.isValid() && i1.data( Qt::EditRole ).toString()
+										.endsWith( suffix, Qt::CaseInsensitive ) )
+									found++;
+								if ( m->rowCount( i0 ) > 0 )
+									countExt( i0 );
+							}
+						};
+						countExt( QModelIndex() );
+						log << "visible " << suffix << " rows: " << found << "\n";
+						check( QString( "the tree shows the archive's %1 files" ).arg( suffix ),
+							found > 0 );
+					}
+				}
 			} while ( false );
 			log << checks << " checks, " << fails << " failures\n";
 			log << ( fails == 0 ? "PASS" : "FAIL" ) << "\ndone\n";

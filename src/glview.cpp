@@ -21266,9 +21266,28 @@ int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers
 		{ "viewport.nav.zoom_in",      Key_ZoomIn },
 		{ "viewport.nav.zoom_out",     Key_ZoomOut },
 	};
-	for ( const auto & nav : navigation )
-		if ( bound( nav.id ) )
-			return nav.action;
+	/* Two passes per table: exact key+modifier first, then -- press only,
+	 * with Shift down -- the same table with the Shift bit stripped. Shift
+	 * is a HELD modifier over these latched keys (fly-speed boost, and
+	 * light-rotate on the arrows), so a key bound bare must still latch
+	 * when the press arrives with Shift already held: pressing Shift
+	 * before W used to lock the free camera out of every direction. Exact
+	 * matches win the first pass, so a key deliberately rebound WITH
+	 * Shift keeps its meaning.
+	 */
+	auto matchTable = [&]( const auto & table ) -> int {
+		for ( const auto & row : table )
+			if ( bound( row.id ) )
+				return row.action;
+		if ( !anyModifiers && ( mods & Qt::ShiftModifier ) ) {
+			for ( const auto & row : table )
+				if ( keys.matches( QLatin1String( row.id ), n, mods & ~Qt::ShiftModifier ) )
+					return row.action;
+		}
+		return -1;
+	};
+	if ( int action = matchTable( navigation ); action >= 0 )
+		return action;
 
 	/* Keyboard camera movement only in free camera / walk mode, so the letters
 	 * stay free for the Blender-style transform shortcuts everywhere else.
@@ -21282,9 +21301,8 @@ int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers
 			{ "viewport.nav.move_down",    Key_MoveDown },
 			{ "viewport.nav.move_up",      Key_MoveUp },
 		};
-		for ( const auto & fly : flying )
-			if ( bound( fly.id ) )
-				return fly.action;
+		if ( int action = matchTable( flying ); action >= 0 )
+			return action;
 	}
 
 	/* Not registered, and deliberately. These are the modal transform's own

@@ -17,6 +17,12 @@
 #   3. the key it was bound to no longer zooms after a rebind
 #   4. the key it was rebound to does
 #   5. letting go stops the camera — with the MODIFIER RELEASED FIRST
+#   6. free camera: W alone flies (control), Shift held FIRST then W still
+#      flies, and releasing both stops the flight. The middle one is the
+#      2026-08-31 report: Shift is the fly-SPEED modifier, held while
+#      steering, and the exact-match press never latched a movement key
+#      that arrived with Shift already down — the camera was locked out of
+#      every direction until WASD was pressed before Shift.
 #
 # CHECK 5 IS THE ONE THAT MATTERS. These bindings latch a bit in kbdState on key
 # press and clear it on release. Once a binding can be a COMBINATION, the
