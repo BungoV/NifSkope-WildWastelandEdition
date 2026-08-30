@@ -314,6 +314,18 @@ my machine".
 
 ---
 
+## Fallout 76 terrain (.btd)
+
+FO76 ships no .btr meshes — its terrain is one heightmap database per
+worldspace. File > Open on a `.btd` shows a region + detail picker and **builds
+the terrain as geometry** (whole map at LOD4 by default: 49 shapes, 2.6M
+vertices, ~15 s), seams closed, heights proven against the file's own
+uncompressed samples. `nifskope-cli btd` runs the same generator headless. The
+parser is fo76utils' own `btdfile.cpp`, vendored. Texture blending, ground
+cover and terrain colour are decoded but not yet displayed — see the backlog.
+
+---
+
 ## Not in this edition
 
 Stated plainly so nobody goes looking:
@@ -327,4 +339,5 @@ Stated plainly so nobody goes looking:
 - The full backlog is [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md).
 
 Formats for games other than Fallout 4 are inherited from upstream and were not
-removed, but no work here targets them and nothing here is tested against them.
+removed, but apart from the FO76 terrain support above no work here targets
+them and nothing else is tested against them.

@@ -1,5 +1,59 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-30 — NifSkope opens Fallout 76 terrain (.btd)
+
+Fallout 76 ships no .btr meshes. Its terrain is one database per worldspace —
+`Appalachia.btd`, 1.5 GB, cells [-100,-100]..[100,100] — holding per-cell
+heightmaps at five detail levels, land-texture blend layers, ground cover and
+terrain colour, which the ENGINE meshes at runtime. So "opening" one cannot be
+parsing: File > Open on a .btd now shows a region + detail picker (whole map at
+LOD4 by default) and BUILDS the terrain, and there is a `btd` CLI command
+(`--info`, `--region X0 Y0 X1 Y1`, `--lod 0..4`, `-o OUT.nif`) that runs the
+same generator headless. The whole map at LOD4 is 49 shapes / 2.6M vertices and
+builds in ~15 s; a `.btd` path in Recent Files re-prompts, and Reload rebuilds
+the region last chosen.
+
+### How it is built (src/btdterrain.cpp)
+
+  * The parser is **fo76utils' own `btdfile.cpp`, vendored verbatim** into
+    lib/libfo76utils/src — same author as the library already carried, and the
+    format spec is the comment block at the top of that file. One rename
+    (`FO76UtilsError` → this fork's `NifSkopeError`), zero other edits.
+  * One height grid per region, then **one BSTriShape per tile of cells** — as
+    many cells as keep a tile under the format's 65,535-vertex ceiling (1 cell
+    at LOD0, 31×31 at LOD4). The grid carries one extra row and column sampled
+    from the NEIGHBOUR cells, which is what closes every seam: between cells,
+    between tiles, and at the worldspace edge (clamped there).
+  * Heights are `min + raw · (max−min)/65535` game units; a cell is 4096 units,
+    so LOD0 is one sample every 32. Normals by central difference on the same
+    grid; the bitangent is written because a zero bitangent is a NaN in the
+    shader's basis and renders BLACK (the starter cube's own landmine). The
+    28-byte full-precision vertex layout and the inline-colour grey material
+    are the starter scene's.
+  * `save()` refuses to write a generated document over the source `.btd`
+    (routes to Save As): those bytes would destroy a game file.
+
+### Measured, and the authority is the file itself
+
+`tests/spells/btd_terrain.sh`, **13 checks**. The right-hand side of every
+height comparison comes from a python here-doc that decodes the uncompressed
+LOD4 table straight from the header spec — our C++ never touches it. Corner,
+interior and neighbour-rim vertices match the file's own samples to 0.5 units
+on a region whose heights spread 8,230 units; a one-row-shifted decode fails
+the same comparison, which is how the check is known able to fail. LOD0 and
+LOD4 agree at their shared corner (the mosaic stores one terrain), and the
+seam column between two shapes is equal to 0.01 units on both sampled rows.
+Two environment gotchas are written into the script: a Git-Bash-inherited sed
+under the MSYS2 login shell silently stops matching BRE groups (parse with
+bash expansion — the winpath lesson again), and Windows python emits CRLF,
+whose \r slides through awk's numeric compares and breaks the string ones.
+
+### Not in this round
+
+Land-texture blending, ground cover and terrain colour are all decoded by the
+vendored parser and all unused — filed in docs/TO_BE_IMPLEMENTED.md. The
+harness-bypass for the picker is `WW_BTD_REGION=x0,y0,x1,y1,lod`.
+
 ## 2026-08-25 — A diagonal without its frame is a different tensor
 
 `dyn_inertia +0x20` is an INVERSE INERTIA DIAGONAL. `+0x40` is the frame that

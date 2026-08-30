@@ -11,9 +11,23 @@ happening again.
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-25**. Edition **0.3.3**, packaged and released. Build green.
+Updated **2026-08-30**. Edition **0.3.3**, packaged and released. Build green.
 The current work is a sweep of the **compiled-collision backlog**, and since
 2026-08-21 it is being tested IN THE GAME, which changed what the work is.
+
+## New 2026-08-30: NifSkope opens Fallout 76 terrain (.btd)
+
+A `.btd` is the whole worldspace's heightmap database, not a NIF — FO76 has no
+.btr files. File > Open on one shows a region + detail picker and BUILDS the
+terrain (whole map at LOD4 by default, ~15 s); `nifskope-cli btd` is the same
+generator headless; `save()` refuses to overwrite the source `.btd`. Parser =
+fo76utils' `btdfile.cpp` vendored into lib/libfo76utils (format spec is its top
+comment). Generator + picker = `src/btdterrain.cpp`; harness =
+`tests/spells/btd_terrain.sh`, 13/13, whose height authority is a python decode
+of the file's own uncompressed LOD4 table. Textures/ground cover/colour are
+decoded but undisplayed — top of docs/TO_BE_IMPLEMENTED.md. Full entry in
+WW_CHANGES 2026-08-30. Picker bypass for harnesses:
+`WW_BTD_REGION=x0,y0,x1,y1,lod`.
 
 ## NEXT SESSION STARTS HERE: one A/B closes the ragdoll (2026-08-25)
 

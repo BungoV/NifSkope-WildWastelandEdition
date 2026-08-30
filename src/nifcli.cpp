@@ -20,6 +20,7 @@ See the LICENSE.md file for the full license text.
 #include "model/nifmodel.h"
 #include "skeletontools.h"
 #include "starterscene.h"
+#include "btdterrain.h"
 #include "gl/hknpdecode.h"
 #include "gl/hknpencode.h"
 #include "physics/ragdollsim.h"
@@ -2234,6 +2235,53 @@ int cmdNew( const QString & outFile, bool cube, float size )
 	return saveNif( nif, outFile ) ? 0 : 1;
 }
 
+//! `btd <file.btd>` — FO76 terrain database to terrain geometry. --info prints
+//! the header and stops; otherwise the region (default: the whole worldspace
+//! at LOD4) is built with the same generator the GUI's File > Open uses.
+int cmdBtd( const QString & file, bool infoOnly, bool haveRegion,
+	int rx0, int ry0, int rx1, int ry1, int lod, const QString & outFile )
+{
+	BtdWorldInfo info;
+	QString error;
+	if ( !btdReadWorldInfo( file, info, &error ) ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+	out() << "worldspace cells [" << info.cellMinX << "," << info.cellMinY
+		  << "]..[" << info.cellMaxX << "," << info.cellMaxY << "]"
+		  << "  heights " << info.heightMin << " to " << info.heightMax
+		  << "  land textures " << info.landTextureCount
+		  << "  ground covers " << info.groundCoverCount << Qt::endl;
+	if ( infoOnly )
+		return 0;
+
+	BtdRegionSpec spec = btdDefaultRegion( info );
+	if ( haveRegion ) {
+		spec.x0 = rx0;
+		spec.y0 = ry0;
+		spec.x1 = rx1;
+		spec.y1 = ry1;
+	}
+	if ( lod >= 0 )
+		spec.lod = lod;
+
+	qint64 shapes = 0, vertCount = 0;
+	if ( !btdEstimateRegion( info, spec, &shapes, &vertCount, &error ) ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+	out() << "region [" << spec.x0 << "," << spec.y0 << "]..[" << spec.x1
+		  << "," << spec.y1 << "] LOD" << spec.lod << ": " << shapes
+		  << " shape(s), " << vertCount << " vertices" << Qt::endl;
+
+	NifModel nif;
+	if ( !nifCreateBtdTerrainScene( &nif, file, spec, &error ) ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+	return saveNif( nif, outFile ) ? 0 : 1;
+}
+
 int cmdSkeleton( const QString & file, bool validateOnly )
 {
 	NifModel nif;
@@ -3302,6 +3350,14 @@ int usage()
 		  << "                                          the fields it drives and strip the\n"
 		  << "                                          controller graph (--keep-graph bakes\n"
 		  << "                                          the values but leaves it animating)\n"
+		  << "  btd <file.btd> --info                   FO76 terrain database header:\n"
+		  << "                                          worldspace extent, height range\n"
+		  << "  btd <file.btd> [--region X0 Y0 X1 Y1] [--lod 0..4] -o OUT.nif\n"
+		  << "                                          build the region's terrain as\n"
+		  << "                                          BSTriShape geometry (default: the\n"
+		  << "                                          whole worldspace at LOD4; lod 0 is\n"
+		  << "                                          one sample every 32 units, each\n"
+		  << "                                          level doubles that)\n"
 		  << "  loading-screen <file> [--no-zoom-target] [--keep-particles]\n"
 		  << "                       [--keep-effects] -o OUT\n"
 		  << "                                          bake the file AS IT IS POSED into\n"
@@ -3373,6 +3429,10 @@ int nifskopeCliMain( const QStringList & args )
 	bool selfTest = false;
 	bool extract = false;
 	bool roundTrip = false;
+	bool btdInfo = false;
+	bool btdHaveRegion = false;
+	int btdRegion[4] = { 0, 0, 0, 0 };
+	int btdLod = -1;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -3398,6 +3458,13 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--validate" ) ) validateOnly = true;
 		else if ( t == QLatin1String( "--selftest" ) ) selfTest = true;
 		else if ( t == QLatin1String( "--extract" ) ) extract = true;
+		else if ( t == QLatin1String( "--info" ) ) btdInfo = true;
+		else if ( t == QLatin1String( "--region" ) ) {
+			btdHaveRegion = true;
+			for ( int r = 0; r < 4; r++ )
+				btdRegion[r] = next().toInt();
+		}
+		else if ( t == QLatin1String( "--lod" ) ) btdLod = next().toInt();
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -3524,6 +3591,9 @@ int nifskopeCliMain( const QStringList & args )
 					   : cmdCollision( file, extract ? block : -1, outFile );
 	else if ( cmd == QLatin1String( "skeleton" ) )
 		rc = selfTest ? cmdSkeletonSelfTest( file ) : cmdSkeleton( file, validateOnly );
+	else if ( cmd == QLatin1String( "btd" ) )
+		rc = cmdBtd( file, btdInfo, btdHaveRegion,
+			btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod, outFile );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

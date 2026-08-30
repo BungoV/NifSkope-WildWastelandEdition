@@ -46,6 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QVector>
 
 #include <data/nifvalue.h>
+#include "btdterrain.h"
 
 #include <memory>
 
@@ -815,6 +816,12 @@ private:
 	//! Exact serialized starter scene. A drop may replace the primary only while
 	//! the live untitled model still matches these bytes.
 	QByteArray starterDropBaseline;
+
+	//! The region a .btd open builds. Set by openFile's picker dialog and kept
+	//! after the build so Reload regenerates the same region; invalid means the
+	//! no-dialog paths (command line, harness) fall back to the environment
+	//! override or the whole-worldspace default.
+	BtdRegionSpec btdPendingRegion;
 
 	//! Stores the NIF file in memory.
 	NifModel * nif;

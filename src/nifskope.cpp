@@ -155,6 +155,9 @@ SettingsDialog * NifSkope::options;
 const QList<QPair<QString, QString>> NifSkope::filetypes = {
 	// NIF types
 	{ "NIF", "nif" }, { "Bethesda Terrain", "btr" }, { "Bethesda Terrain Object", "bto" },
+	// not a NIF: the FO76 whole-worldspace terrain database, opened through a
+	// region picker and MESHED here (btdterrain.cpp), since it stores heightmaps
+	{ "Bethesda Terrain Database", "btd" },
 	// KF types
 	{ "Keyframe", "kf" }, { "Keyframe Animation", "kfa" }, { "Keyframe Motion", "kfm" },
 	// Miscellaneous NIF types
@@ -9534,6 +9537,23 @@ bool NifSkope::openFile( QString & file )
 	// a recent entry (or use the NIF browser context menu) for a new window.
 	if ( !saveConfirm() )
 		return false;
+
+	/* A .btd needs a region choice BEFORE the load begins: the picker runs
+	 * here, where a cancel simply leaves the current document alone, rather
+	 * than inside load(), whose failure path reports a broken file. */
+	if ( file.endsWith( QStringLiteral( ".btd" ), Qt::CaseInsensitive ) ) {
+		BtdWorldInfo info;
+		QString error;
+		if ( !btdReadWorldInfo( file, info, &error ) ) {
+			Message::warning( this, tr( "Could not read the terrain database." ), error );
+			return false;
+		}
+		BtdRegionSpec spec;
+		if ( !btdQueryRegion( this, file, info, spec ) )
+			return false;
+		btdPendingRegion = spec;
+	}
+
 	loadFile( file );
 	return true;
 }
@@ -9898,7 +9918,27 @@ void NifSkope::load()
 		return;
 	}
 
-	bool loaded = nif->loadFromFile( fname );
+	bool loaded = false;
+	if ( f.suffix().compare( QLatin1String( "btd" ), Qt::CaseInsensitive ) == 0 ) {
+		/* Terrain database: GENERATE the document instead of parsing one. The
+		 * region came from openFile's picker; the no-dialog routes (command
+		 * line, harness) take the environment override or the whole-map
+		 * default. The chosen region is kept so Reload rebuilds it. */
+		BtdWorldInfo binfo;
+		QString terr;
+		if ( btdReadWorldInfo( fname, binfo, &terr ) ) {
+			BtdRegionSpec spec = btdPendingRegion;
+			if ( !spec.valid && !btdRegionFromEnv( spec ) )
+				spec = btdDefaultRegion( binfo );
+			loaded = nifCreateBtdTerrainScene( nif, fname, spec, &terr );
+			if ( loaded )
+				btdPendingRegion = spec;
+		}
+		if ( !loaded && !terr.isEmpty() )
+			qWarning() << "btd terrain:" << terr;
+	} else {
+		loaded = nif->loadFromFile( fname );
+	}
 	perfMark( "loadFromFile (views detached)" );
 
 	emit completeLoading( loaded, fname );
@@ -9922,6 +9962,11 @@ bool NifSkope::save()
 	if ( !curFile.isAbsolute() ) {
 		return saveAsDlg();
 	}
+
+	// A document generated FROM a .btd is a NIF; writing it over the terrain
+	// database it came from would destroy a game file with foreign bytes.
+	if ( curFile.suffix().compare( QLatin1String( "btd" ), Qt::CaseInsensitive ) == 0 )
+		return saveAsDlg();
 
 	return saveFile( currentFile );
 }

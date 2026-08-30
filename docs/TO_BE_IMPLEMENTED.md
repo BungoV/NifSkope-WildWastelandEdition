@@ -1,5 +1,25 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## BTD terrain: textures, ground cover, colour — OPEN 2026-08-30
+
+Heights shipped 2026-08-30 (WW_CHANGES): a .btd opens through a region picker
+and meshes. The file also carries, and the vendored parser already decodes,
+three things the build ignores:
+
+  * **land-texture blend layers** (`getCellLandTexture` alphas +
+    `getCellTextureSet` → LTEX form IDs) — the real look of the ground. Needs a
+    material story: the renderer has no splat path, so the honest first step is
+    probably baking the dominant texture per tile, or per-vertex colour from
+    the blend of a small palette.
+  * **terrain colour** (`getCellTerrainColor`, 16-bit packed, LOD2+) — cheap to
+    wire as vertex colours and would kill the uniform grey immediately.
+  * **ground cover masks** (`getCellGroundCover`) — display only makes sense
+    once there is something to scatter.
+
+Also worth deciding when the round opens: a water plane (the file stores no
+water, the ESM does), and whether opening a .btd from inside a BA2 matters
+(the loose Terrain folder is where the game ships them).
+
 ## ~~Live decimation has no operator panel~~ — DONE 2026-08-08
 
 **Decimate** is an object-mode operator now: `Ctrl+Shift+D`, or the object menu

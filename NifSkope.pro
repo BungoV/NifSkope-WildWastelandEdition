@@ -255,6 +255,7 @@ HEADERS += \
 	src/shortcutregistry.h \
 	src/skeletontools.h \
 	src/starterscene.h \
+	src/btdterrain.h \
 	src/rdccapture.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
@@ -400,6 +401,7 @@ SOURCES += \
 	src/skeletontools.cpp \
 	src/unfucktools.cpp \
 	src/starterscene.cpp \
+	src/btdterrain.cpp \
 	src/rdccapture.cpp \
 	src/skeletonops.cpp \
 	src/uvtools.cpp \
@@ -458,6 +460,7 @@ libfo76utils {
     SOURCES += $$PWD/lib/libfo76utils/src/decompress-bptc.c
     SOURCES += $$PWD/lib/libfo76utils/src/decompress-bptc-float.c
     SOURCES += $$PWD/lib/libfo76utils/src/ba2file.cpp
+    SOURCES += $$PWD/lib/libfo76utils/src/btdfile.cpp
     SOURCES += $$PWD/lib/libfo76utils/src/bsmatcdb.cpp
     SOURCES += $$PWD/lib/libfo76utils/src/bsrefl.cpp
     SOURCES += $$PWD/lib/libfo76utils/src/common.cpp
