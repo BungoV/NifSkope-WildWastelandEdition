@@ -367,9 +367,12 @@ private:
 				progress->setFormat( tr( "packing the object atlas…" ) );
 				QCoreApplication::processEvents();
 				QString aerr;
+				// own name, never vanilla's: a loose "<ws>.Objects.DDS"
+				// shadows the archived sheet under every vanilla BTO still
+				// in play
 				if ( lodgenBuildAtlas( writtenBto, dataRootEdit->text(),
-					atlasDir + "/" + ws + QStringLiteral( ".Objects" ),
-					QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.Objects" )
+					atlasDir + "/" + ws + QStringLiteral( ".LodgenObjects" ),
+					QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenObjects" )
 						.arg( ws ), outEdit->text(), &aerr ) )
 					tail = tr( ", atlas written" );
 				else

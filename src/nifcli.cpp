@@ -2463,18 +2463,23 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					looseRoot = norm.left( norm.size() - suffix.size() );
 			}
 			QString aerr;
+			/* NOT vanilla's "<ws>.Objects" name: a loose file at that path
+			 * SHADOWS the archived vanilla sheet, and every vanilla BTO
+			 * still in play (unregenerated chunks, the legacy fallback set)
+			 * would sample OUR cell layout with THEIR UVs — bungo hit
+			 * exactly that. Vanilla's name is only safe when the ENTIRE
+			 * worldspace's BTOs are regenerated together. */
 			if ( !lodgenBuildAtlas( writtenBto,
 				dataRoot.isEmpty()
 					? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" )
 					: dataRoot,
-				atlasDir + "/" + ws + QStringLiteral( ".Objects" ),
-				// vanilla convention: data\Textures\Terrain\<ws>\Objects\<ws>.Objects.DDS
-				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.Objects" ).arg( ws ),
+				atlasDir + "/" + ws + QStringLiteral( ".LodgenObjects" ),
+				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenObjects" ).arg( ws ),
 				looseRoot, &aerr ) ) {
 				err() << "atlas: " << aerr << Qt::endl;
 				failed++;
 			} else {
-				out() << "atlas written: " << ws << ".Objects.DDS (+_n)" << Qt::endl;
+				out() << "atlas written: " << ws << ".LodgenObjects.DDS (+_n)" << Qt::endl;
 			}
 		}
 		out() << done << " chunk(s) written to " << outDir
