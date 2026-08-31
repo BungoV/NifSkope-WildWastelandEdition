@@ -256,6 +256,7 @@ HEADERS += \
 	src/skeletontools.h \
 	src/starterscene.h \
 	src/btdterrain.h \
+	src/esmdata.h \
 	src/rdccapture.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
@@ -402,6 +403,7 @@ SOURCES += \
 	src/unfucktools.cpp \
 	src/starterscene.cpp \
 	src/btdterrain.cpp \
+	src/esmdata.cpp \
 	src/rdccapture.cpp \
 	src/skeletonops.cpp \
 	src/uvtools.cpp \
@@ -467,7 +469,7 @@ libfo76utils {
     # SOURCES += $$PWD/lib/libfo76utils/src/courb24.cpp
     SOURCES += $$PWD/lib/libfo76utils/src/ddstxt16.cpp
     # SOURCES += $$PWD/lib/libfo76utils/src/downsamp.cpp
-    # SOURCES += $$PWD/lib/libfo76utils/src/esmfile.cpp
+    SOURCES += $$PWD/lib/libfo76utils/src/esmfile.cpp
     SOURCES += $$PWD/lib/libfo76utils/src/filebuf.cpp
     SOURCES += $$PWD/lib/libfo76utils/src/jsonread.cpp
     SOURCES += $$PWD/lib/libfo76utils/src/matcomps.cpp

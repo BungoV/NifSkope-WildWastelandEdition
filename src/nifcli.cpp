@@ -21,6 +21,7 @@ See the LICENSE.md file for the full license text.
 #include "skeletontools.h"
 #include "starterscene.h"
 #include "btdterrain.h"
+#include "esmdata.h"
 #include "gl/hknpdecode.h"
 #include "gl/hknpencode.h"
 #include "physics/ragdollsim.h"
@@ -2282,6 +2283,94 @@ int cmdBtd( const QString & file, bool infoOnly, bool haveRegion,
 	return saveNif( nif, outFile ) ? 0 : 1;
 }
 
+//! `lodgen <file.esm>` — the LOD generation campaign's ESM record layer
+//! (docs/LODGEN_PLAN.md rung 0). --list-worldspaces enumerates WRLD records;
+//! --worldspace/--cell inspect one cell: LAND corner heights, REFR counts,
+//! how many bases carry LOD models. The generation rungs build on this.
+int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
+	bool haveCell, int cellX, int cellY )
+{
+	if ( listWorldspaces || !worldspace ) {
+		QString error;
+		const auto worlds = EsmWorld::listWorldspaces( file, &error );
+		if ( !error.isEmpty() ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		out() << worlds.size() << " worldspace(s)" << Qt::endl;
+		for ( const auto & w : worlds )
+			out() << "  " << QString( "%1" ).arg( w.first, 8, 16, QChar( '0' ) )
+				  << "  " << w.second << Qt::endl;
+		if ( listWorldspaces )
+			return 0;
+		err() << "error: pass --worldspace <hex form id> to inspect one" << Qt::endl;
+		return 2;
+	}
+
+	EsmWorld world;
+	QString error;
+	if ( !world.load( file, worldspace, &error ) ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+	int minX, minY, maxX, maxY;
+	world.cellBounds( minX, minY, maxX, maxY );
+	out() << "worldspace " << QString( "%1" ).arg( world.worldspace(), 8, 16, QChar( '0' ) )
+		  << " '" << world.worldspaceEdid() << "'  cells " << world.cellCount()
+		  << "  grid [" << minX << "," << minY << "]..[" << maxX << "," << maxY << "]" << Qt::endl;
+	if ( !haveCell )
+		return 0;
+
+	if ( !world.hasCell( cellX, cellY ) ) {
+		err() << "error: no exterior cell (" << cellX << "," << cellY << ")" << Qt::endl;
+		return 1;
+	}
+	EsmLand land;
+	if ( world.land( cellX, cellY, land ) ) {
+		out() << "cell (" << cellX << "," << cellY << ") LAND corners"
+			  << "  SW " << land.heights[0][0] << "  SE " << land.heights[0][32]
+			  << "  NW " << land.heights[32][0] << "  NE " << land.heights[32][32]
+			  << "  center " << land.heights[16][16] << Qt::endl;
+	} else {
+		out() << "cell (" << cellX << "," << cellY << ") has no LAND" << Qt::endl;
+	}
+	const QVector<EsmRefr> refs = world.refrs( cellX, cellY );
+	int withLod = 0, disabled = 0;
+	for ( const EsmRefr & r : refs ) {
+		if ( r.initiallyDisabled || r.deleted )
+			disabled++;
+		else if ( r.base && world.lodBase( r.base ).hasLod )
+			withLod++;
+	}
+	const float cellMinX = float( cellX ) * 4096.0f, cellMinY = float( cellY ) * 4096.0f;
+	const auto persistent = world.persistentRefrsIn(
+		cellMinX, cellMinY, cellMinX + 4096.0f, cellMinY + 4096.0f );
+	int pWithLod = 0;
+	for ( const EsmRefr & r : persistent )
+		if ( !r.initiallyDisabled && !r.deleted && r.base && world.lodBase( r.base ).hasLod )
+			pWithLod++;
+	out() << "  refs " << refs.size() << " (" << withLod << " with LOD models, "
+		  << disabled << " disabled/deleted)"
+		  << "  + persistent in-bounds " << persistent.size()
+		  << " (" << pWithLod << " with LOD)" << Qt::endl;
+	// sample the first few LOD-bearing refs, generation-style
+	int shown = 0;
+	for ( const EsmRefr & r : refs ) {
+		if ( shown >= 5 )
+			break;
+		if ( r.initiallyDisabled || r.deleted || !r.base )
+			continue;
+		const EsmLodBase & b = world.lodBase( r.base );
+		if ( !b.hasLod )
+			continue;
+		out() << "    " << QString( "%1" ).arg( r.formID, 8, 16, QChar( '0' ) )
+			  << " at (" << r.pos[0] << ", " << r.pos[1] << ", " << r.pos[2] << ") scale " << r.scale
+			  << "  lod0 " << ( b.models[0].isEmpty() ? QStringLiteral( "-" ) : b.models[0] ) << Qt::endl;
+		shown++;
+	}
+	return 0;
+}
+
 int cmdSkeleton( const QString & file, bool validateOnly )
 {
 	NifModel nif;
@@ -3358,6 +3447,11 @@ int usage()
 		  << "                                          whole worldspace at LOD4; lod 0 is\n"
 		  << "                                          one sample every 32 units, each\n"
 		  << "                                          level doubles that)\n"
+		  << "  lodgen <file.esm> --list-worldspaces    LOD generation (rung 0): list\n"
+		  << "                                          worldspaces in an ESM\n"
+		  << "  lodgen <file.esm> --worldspace HEX [--cell X Y]\n"
+		  << "                                          inspect a worldspace / one cell:\n"
+		  << "                                          LAND heights, refs, LOD models\n"
 		  << "  loading-screen <file> [--no-zoom-target] [--keep-particles]\n"
 		  << "                       [--keep-effects] -o OUT\n"
 		  << "                                          bake the file AS IT IS POSED into\n"
@@ -3433,6 +3527,10 @@ int nifskopeCliMain( const QStringList & args )
 	bool btdHaveRegion = false;
 	int btdRegion[4] = { 0, 0, 0, 0 };
 	int btdLod = -1;
+	bool lgListWorldspaces = false;
+	quint32 lgWorldspace = 0;
+	bool lgHaveCell = false;
+	int lgCell[2] = { 0, 0 };
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -3465,6 +3563,13 @@ int nifskopeCliMain( const QStringList & args )
 				btdRegion[r] = next().toInt();
 		}
 		else if ( t == QLatin1String( "--lod" ) ) btdLod = next().toInt();
+		else if ( t == QLatin1String( "--list-worldspaces" ) ) lgListWorldspaces = true;
+		else if ( t == QLatin1String( "--worldspace" ) ) lgWorldspace = next().toUInt( nullptr, 16 );
+		else if ( t == QLatin1String( "--cell" ) ) {
+			lgHaveCell = true;
+			lgCell[0] = next().toInt();
+			lgCell[1] = next().toInt();
+		}
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -3594,6 +3699,9 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "btd" ) )
 		rc = cmdBtd( file, btdInfo, btdHaveRegion,
 			btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod, outFile );
+	else if ( cmd == QLatin1String( "lodgen" ) )
+		rc = cmdLodgen( file, lgListWorldspaces, lgWorldspace,
+			lgHaveCell, lgCell[0], lgCell[1] );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

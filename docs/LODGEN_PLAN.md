@@ -23,6 +23,25 @@ extended profile on UV2 (measured virgin: 0 of 119,701 vanilla shapes) and
 EyeData. Tiering rule: texture = surface-shared, vertex =
 placement-individual, manifest = object-constant.
 
+## Where it lives
+
+- Code: `src/lodgen.{h,cpp}` (generator) + `src/esmdata.{h,cpp}` (record
+  layer over the vendored esmfile), flat-src convention like btdterrain/
+  nifmerge. CLI: `nifskope-cli lodgen <info|terrain|objects>` — the
+  primary, harness-driven interface.
+- **The generator core emits per-chunk callbacks** (chunk done → NIF
+  bytes): the CLI writes files and progress lines; the GUI additionally
+  splices each finished chunk into a LIVE PREVIEW DOCUMENT — each chunk
+  under a wrapper node carrying its world translation + dim scale (the
+  FO76 water-node trick) — so generation is watchable tile by tile in the
+  viewport, with a progress bar (chunks done/total, rung, worldspace) and
+  cancel honoured between chunks (bungo-requested 2026-08-31). The
+  whole-map .btd build already proved the viewport at this scale.
+- GUI face (a later round): a compact **World LOD manager** in the left
+  column, Collision-Manager-style — worldspace pick, region, rung
+  toggles, the progress bar. Generated chunks are ordinary NIFs; the
+  normal viewer is the inspector.
+
 ## Rung 0 — foundations
 
 *The enabling work; no user-visible output.*
