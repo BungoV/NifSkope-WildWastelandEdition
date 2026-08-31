@@ -182,16 +182,22 @@ quint8 lodgenMaterialClass( const QString & diffusePath )
 
 /*! Per-sample terrain channels for the CS profile: dominant material class,
  * flow-accumulation wetness, and heightfield AO — all per PLACEMENT, the
- * things no shared tiling texture can carry. Grid is (dim*32+1)^2. */
+ * things no shared tiling texture can carry. Grid is (dim*32+1)^2.
+ * Extended profile (UV2): skyVis = the horizon measure before byte
+ * quantization (~11-bit half precision), matClass2 = the second-strongest
+ * material class for two-material blending at distance. */
 void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const std::vector<float> & grid,
 	std::vector<quint8> & matClass, std::vector<quint8> & wetness,
-	std::vector<quint8> & ao )
+	std::vector<quint8> & ao,
+	std::vector<float> & skyVis, std::vector<quint8> & matClass2 )
 {
 	const int n = dim * 32 + 1;
 	matClass.assign( size_t( n ) * n, 0 );
 	wetness.assign( size_t( n ) * n, 0 );
 	ao.assign( size_t( n ) * n, 255 );
+	skyVis.assign( size_t( n ) * n, 1.0f );
+	matClass2.assign( size_t( n ) * n, 0 );
 
 	// dominant material per sample: strongest layer (or base) at the sample
 	EsmLand land;
@@ -204,22 +210,30 @@ void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 					const int q = ( row >= 16 ? 2 : 0 ) + ( col >= 16 ? 1 : 0 );
 					const int qr = ( row >= 16 ? row - 16 : row );
 					const int qc = ( col >= 16 ? col - 16 : col );
-					quint32 ltex = land.baseTex[q];
-					float bestA = 0.35f;
+					quint32 ltex = land.baseTex[q], ltex2 = 0;
+					float bestA = 0.35f, secondA = 0.15f;
 					for ( const EsmLandLayer & layer : land.layers[q] ) {
 						const float a = layer.opacity[qr][qc];
 						if ( a > bestA ) {
+							secondA = bestA;
+							ltex2 = ltex;
 							bestA = a;
 							ltex = layer.ltex;
+						} else if ( a > secondA ) {
+							secondA = a;
+							ltex2 = layer.ltex;
 						}
 					}
-					quint8 cls = 0;
-					if ( ltex ) {
+					auto classOf = [&]( quint32 form ) -> quint8 {
+						if ( !form )
+							return 0;
 						QString d, nrm;
-						world.ltexTextures( ltex, d, nrm );
-						cls = lodgenMaterialClass( d );
-					}
-					matClass[size_t( cy * 32 + row ) * n + size_t( cx * 32 + col )] = cls;
+						world.ltexTextures( form, d, nrm );
+						return lodgenMaterialClass( d );
+					};
+					const size_t s = size_t( cy * 32 + row ) * n + size_t( cx * 32 + col );
+					matClass[s] = classOf( ltex );
+					matClass2[s] = ltex2 ? classOf( ltex2 ) : matClass[s];
 				}
 			}
 		}
@@ -285,8 +299,9 @@ void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 					}
 					occl += maxSlope / ( 1.0f + maxSlope );
 				}
-				ao[size_t( row ) * n + col] =
-					quint8( qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f, 1.0f ) * 255.0f + 0.5f );
+				const float vis = qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f, 1.0f );
+				skyVis[size_t( row ) * n + col] = vis;
+				ao[size_t( row ) * n + col] = quint8( vis * 255.0f + 0.5f );
 			}
 		}
 	}
@@ -471,17 +486,23 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		zMax = qMax( zMax, cpos[v + 2] );
 	}
 
-	std::vector<quint8> tMat, tWet, tAo;
+	std::vector<quint8> tMat, tWet, tAo, tMat2;
+	std::vector<float> tSky;
 	if ( opts.terrainIdentity )
-		lodgenTerrainChannels( world, chunkX, chunkY, dim, grid, tMat, tWet, tAo );
+		lodgenTerrainChannels( world, chunkX, chunkY, dim, grid,
+			tMat, tWet, tAo, tSky, tMat2 );
 
 	BSVertexDesc landDesc( LAND_VERTEX_DESC );
 	quint32 landStride = 12;
 	if ( !morph.empty() || opts.terrainIdentity ) {
 		if ( !morph.empty() )
 			landDesc.SetFlag( VertexFlags::VF_EYEDATA );
-		if ( opts.terrainIdentity )
+		if ( opts.terrainIdentity ) {
 			landDesc.SetFlag( VertexFlags::VF_COLORS );
+			// extended profile: UV2.x sky visibility (half precision),
+			// UV2.y second material class
+			landDesc.SetFlag( VertexFlags::VF_UV_2 );
+		}
 		landDesc.ResetAttributeOffsets( 130 );
 		landStride = landDesc.GetVertexSize();
 	}
@@ -512,6 +533,8 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 			nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4(
 				float( tMat[s] ) / 255.0f, float( tWet[s] ) / 255.0f,
 				float( tAo[s] ) / 255.0f, 1.0f ) ) );
+			nif->set<HalfVector2>( row, "UV 2", HalfVector2( Vector2(
+				tSky[s], float( tMat2[s] ) / 255.0f ) ) );
 		}
 	}
 	{
