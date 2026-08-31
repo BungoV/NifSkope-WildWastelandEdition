@@ -124,9 +124,9 @@ public:
 		pluginList->setToolTip( tr(
 			"Ordered master/plugin list; a later file's version of a record wins.\n"
 			"Drop .esm/.esp/.esl files here, drag rows to reorder.\n"
-			"KNOWN LIMIT: plugins whose form IDs index their own master list\n"
-			"(most mod ESPs) are not remapped yet - Bethesda's own masters and\n"
-			"correctly prefixed files merge correctly." ) );
+			"Form IDs are remapped through each plugin's master list, so mod\n"
+			"plugins merge correctly - a listed master must appear in this\n"
+			"list (above its dependents) to be resolvable." ) );
 		grid->addWidget( pluginList, row, 1, 1, 2 );
 		{
 			auto col = new QVBoxLayout();

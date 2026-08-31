@@ -60,8 +60,16 @@ const unsigned char * ESMFile::uncompressRecord(ESMRecord& r)
   return p;
 }
 
+// load-order form ID remapping: rewrite the top (plugin index) byte
+static inline unsigned int remapESMFormID(unsigned int id,
+                                          const std::uint32_t *m)
+{
+  return (m[(id >> 24) & 0xFFU] << 24) | (id & 0x00FFFFFFU);
+}
+
 unsigned int ESMFile::loadRecords(
-    size_t& groupCnt, FileBuffer& buf, size_t endPos, unsigned int parent)
+    size_t& groupCnt, FileBuffer& buf, size_t endPos, unsigned int parent,
+    const std::uint32_t *fidMap, unsigned int fileIdx)
 {
   ESMRecord *prv = nullptr;
   unsigned int  r = 0U;
@@ -74,13 +82,22 @@ unsigned int ESMFile::loadRecords(
     unsigned int  recordSize = buf.readUInt32Fast();
     unsigned int  flags = buf.readUInt32Fast();
     unsigned int  formID = buf.readUInt32Fast();
-    unsigned int  n = formID;
     // skip version control info
     buf.setPosition(buf.getPosition() + (recordHdrSize - 16));
+    unsigned int  n;
     if (FileBuffer::checkType(recordType, "GRUP"))
     {
       n = (unsigned int) groupCnt | 0x80000000U;
       groupCnt++;
+      // group labels of types 1 (world children), 6-10 (cell/topic
+      // children) are form IDs and must live in the mapped space too
+      if (formID == 1U || (formID >= 6U && formID <= 10U))
+        flags = remapESMFormID(flags, fidMap);
+    }
+    else
+    {
+      formID = remapESMFormID(formID, fidMap);
+      n = formID;
     }
     ESMRecord&  esmRecord = insertFormID(n);
     if (!esmRecord.fileData) [[likely]]
@@ -97,13 +114,15 @@ unsigned int ESMFile::loadRecords(
       esmRecord.type = recordType;
       esmRecord.flags = flags;
       esmRecord.formID = formID;
+      esmRecord.srcFile = fileIdx;
       esmRecord.fileData = p;
     }
     if (FileBuffer::checkType(recordType, "GRUP"))
     {
       esmRecord.children =
           loadRecords(groupCnt, buf,
-                      buf.getPosition() + recordSize - recordHdrSize, n);
+                      buf.getPosition() + recordSize - recordHdrSize, n,
+                      fidMap, fileIdx);
     }
     else if (recordSize > 0)
     {
@@ -113,6 +132,13 @@ unsigned int ESMFile::loadRecords(
     }
   }
   return r;
+}
+
+unsigned int ESMFile::mapFormID(const ESMRecord& r, unsigned int rawID) const
+{
+  if (r.srcFile < masterMaps.size()) [[likely]]
+    return remapESMFormID(rawID, masterMaps[r.srcFile].data());
+  return rawID;
 }
 
 ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
@@ -187,6 +213,68 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
       }
     }
 
+    /* Load-order form ID remapping: a plugin's stored top bytes index its
+     * own TES4 MAST list, not our input list. Build per-file byte maps
+     * (master basename -> position in the input list; identity when a
+     * master is absent, preserving the old raw-prefix behaviour). The
+     * file's own records use the byte after its last master. */
+    std::vector< std::string > baseNames(tmpFileNames.size());
+    for (size_t i = 0; i < tmpFileNames.size(); i++)
+    {
+      const std::string&  s = tmpFileNames[i];
+      size_t  o = s.find_last_of("/\\");
+      std::string b = (o == std::string::npos ? s : s.substr(o + 1));
+      for (size_t k = 0; k < b.length(); k++)
+        b[k] = char(std::tolower((unsigned char) b[k]));
+      baseNames[i] = b;
+    }
+    masterMaps.resize(esmFiles.size());
+    for (size_t i = 0; i < esmFiles.size(); i++)
+    {
+      std::vector< std::uint32_t >& m = masterMaps[i];
+      m.resize(256);
+      for (size_t k = 0; k < 256; k++)
+        m[k] = std::uint32_t(k);
+      FileBuffer& buf = *(esmFiles[i]);
+      buf.setPosition(4);
+      unsigned int  tes4Size = buf.readUInt32Fast();
+      buf.setPosition(recordHdrSize);
+      size_t  endPos = size_t(recordHdrSize) + tes4Size;
+      if (endPos > buf.size())
+        endPos = buf.size();
+      size_t  masterCnt = 0;
+      while ((buf.getPosition() + 6) <= endPos)
+      {
+        unsigned int  tag = buf.readUInt32Fast();
+        size_t  len = buf.readUInt16Fast();
+        size_t  dataPos = buf.getPosition();
+        if (dataPos + len > endPos)
+          break;
+        if (FileBuffer::checkType(tag, "MAST") && len > 0 && masterCnt < 255)
+        {
+          std::string name(reinterpret_cast< const char * >(buf.getReadPtr()),
+                           len);
+          while (!name.empty() &&
+                 (name.back() == '\0' || name.back() == ' '))
+            name.resize(name.length() - 1);
+          for (size_t k = 0; k < name.length(); k++)
+            name[k] = char(std::tolower((unsigned char) name[k]));
+          for (size_t k = 0; k < i; k++)
+          {
+            if (baseNames[k] == name)
+            {
+              m[masterCnt] = std::uint32_t(k);
+              break;
+            }
+          }
+          masterCnt++;
+        }
+        buf.setPosition(dataPos + len);
+      }
+      if (masterCnt < 256)
+        m[masterCnt] = std::uint32_t(i);
+    }
+
     size_t  compressedCnt = 0;
     size_t  recordCnt = 0;
     size_t  groupCnt = 0;
@@ -233,6 +321,9 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
           if (flags & 0x00040000)
             compressedCnt++;
           buf.setPosition(buf.getPosition() + recordSize);
+          // size pluginMap ranges in the same mapped ID space loadRecords
+          // will insert into
+          n = remapESMFormID(n, masterMaps[i].data());
         }
         std::uint32_t *p = pluginMap + (((n >> 24) & 0xFFU) * 3U);
         p[0] = std::min(p[0], n);
@@ -264,7 +355,8 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
     {
       FileBuffer& buf = *(esmFiles[i]);
       buf.setPosition(0);
-      unsigned int  n = loadRecords(groupCnt, buf, buf.size(), 0U);
+      unsigned int  n = loadRecords(groupCnt, buf, buf.size(), 0U,
+                                    masterMaps[i].data(), (unsigned int) i);
       ESMRecord *r = findRecord(0U);
       if (n != 0U && r && r->next != n)
       {

@@ -16,10 +16,11 @@ class ESMFile
     unsigned int  parent;       // form ID of parent group or record
     unsigned int  children;     // form ID of first child record or group
     unsigned int  next;         // form ID of next record in this group
+    unsigned int  srcFile;      // input file index of the winning version
     const unsigned char *fileData;      // pointer to record in file buffer
     ESMRecord()
       : type(0xFFFFFFFFU), flags(0), formID(0U), parent(0),
-        children(0), next(0), fileData(nullptr)
+        children(0), next(0), srcFile(0), fileData(nullptr)
     {
     }
     inline bool operator==(const char *s) const
@@ -98,14 +99,22 @@ class ESMFile
   size_t        recordBufSize;
   std::vector< std::vector< unsigned char > > zlibBuf;
   std::vector< FileBuffer * > esmFiles;
+  // per input file: top-byte -> load-order file index (from TES4 MAST);
+  // identity for files without masters, so Bethesda-style aligned lists
+  // load exactly as before
+  std::vector< std::vector< std::uint32_t > > masterMaps;
   inline ESMRecord& insertFormID(unsigned int formID);
   const unsigned char *uncompressRecord(ESMRecord& r);
   unsigned int loadRecords(size_t& groupCnt, FileBuffer& buf, size_t endPos,
-                           unsigned int parent);
+                           unsigned int parent, const std::uint32_t *fidMap,
+                           unsigned int fileIdx);
  public:
   // fileNames can be a single ESM file, or a comma separated list
   ESMFile(const char *fileNames, bool enableZLibCache = false);
   virtual ~ESMFile();
+  // translate a raw form ID read from record r's DATA into the load-order
+  // mapped ID space (identity when r's file lists no resolvable masters)
+  unsigned int mapFormID(const ESMRecord& r, unsigned int rawID) const;
   const ESMRecord& getRecord(unsigned int formID) const;
   // returns NULL if the record does not exist
   inline const ESMRecord *findRecord(unsigned int formID) const

@@ -216,12 +216,12 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 	int pendingQuadrant = -1;       // set by ATXT, consumed by the next VTXT
 	while ( f.next() ) {
 		if ( f == "BTXT" && f.size() >= 8 ) {
-			const quint32 ltex = f.readUInt32();
+			const quint32 ltex = esm->mapFormID( lr, f.readUInt32() );
 			const int quadrant = int( f.readUInt8() );
 			if ( quadrant >= 0 && quadrant < 4 )
 				out.baseTex[quadrant] = ltex;
 		} else if ( f == "ATXT" && f.size() >= 8 ) {
-			const quint32 ltex = f.readUInt32();
+			const quint32 ltex = esm->mapFormID( lr, f.readUInt32() );
 			const int quadrant = int( f.readUInt8() );
 			if ( quadrant >= 0 && quadrant < 4 ) {
 				EsmLandLayer layer;
@@ -284,7 +284,7 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 				ESMFile::ESMField f( *esm, *r );
 				while ( f.next() ) {
 					if ( f == "NAME" && f.size() >= 4 ) {
-						ref.base = f.readUInt32();
+						ref.base = esm->mapFormID( *r, f.readUInt32() );
 					} else if ( f == "DATA" && f.size() >= 24 ) {
 						for ( int i = 0; i < 3; i++ )
 							ref.pos[i] = f.readFloat();
@@ -414,7 +414,7 @@ void EsmWorld::ltexTextures( quint32 ltexForm, QString & diffuse, QString & norm
 			ESMFile::ESMField f( *esm, *lr );
 			while ( f.next() )
 				if ( f == "TNAM" && f.size() >= 4 )
-					txst = f.readUInt32();
+					txst = esm->mapFormID( *lr, f.readUInt32() );
 		}
 		const ESMFile::ESMRecord * tr = txst ? esm->findRecord( txst ) : nullptr;
 		if ( tr && *tr == "TXST" ) {
@@ -446,7 +446,7 @@ const QVector<EsmScolPart> & EsmWorld::scolParts( quint32 formID ) const
 		while ( f.next() ) {
 			if ( f == "ONAM" && f.size() >= 4 ) {
 				EsmScolPart p;
-				p.base = f.readUInt32();
+				p.base = esm->mapFormID( *r, f.readUInt32() );
 				parts.append( p );
 			} else if ( f == "DATA" && !parts.isEmpty() ) {
 				const size_t n = f.size() / 28;
