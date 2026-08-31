@@ -1165,6 +1165,24 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		xf.rotation = r.rot;
 		xf.scale = r.scale * invDim;
 
+		/* Repetition breaking for trees (charter: "mirror half the cards,
+		 * rotate card sets per tree"): a position-stable hash spins each
+		 * tree's card set and mirrors half of them in U, so distant forests
+		 * stop reading as copies. Rotation about the tree's own Z is safe —
+		 * crossed-card LOD models are radially symmetric by construction. */
+		const bool isTree = std::memcmp( &base.type, "TREE", 4 ) == 0
+			|| model.contains( QLatin1String( "tree" ), Qt::CaseInsensitive );
+		quint32 treeHash = 0;
+		if ( isTree ) {
+			treeHash = ( quint32( qRound( r.pos[0] ) ) * 2654435761U )
+				^ ( quint32( qRound( r.pos[1] ) ) * 40503U );
+			Matrix rz;
+			rz.fromEuler( 0.0f, 0.0f,
+				float( treeHash % 360U ) * 0.01745329f );
+			xf.rotation = xf.rotation * rz;
+		}
+		const bool mirrorU = isTree && ( ( treeHash >> 8 ) & 1 );
+
 		// cell attribution for the dim4 segment split
 		int cellIdx = 0;
 		if ( segs > 1 ) {
@@ -1200,6 +1218,18 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			const quint32 vBase = quint32( bucket.pos.size() );
 			if ( vBase + quint32( s.pos.size() ) > 65535 )
 				continue;   // bucket full; a second shape would need splitting
+			/* Mirror about the shape's own U midpoint, not 1-u: tree LOD
+			 * textures are often atlas cells, and a global flip would sample
+			 * the neighbouring tree's cell. */
+			float uMid = 0.0f;
+			if ( mirrorU && !s.uv.isEmpty() ) {
+				float uMin = s.uv[0][0], uMax = s.uv[0][0];
+				for ( const Vector2 & t : s.uv ) {
+					uMin = qMin( uMin, t[0] );
+					uMax = qMax( uMax, t[0] );
+				}
+				uMid = uMin + uMax;
+			}
 			for ( int v = 0; v < s.pos.size(); v++ ) {
 				bucket.pos.append( xf * s.pos[v] );
 				Vector3 wn = xf.rotation * s.nrm[v];
@@ -1208,7 +1238,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				Vector3 wt = xf.rotation * s.tan[v];
 				wt.normalize();
 				bucket.tan.append( wt );
-				bucket.uv.append( s.uv[v] );
+				bucket.uv.append( mirrorU
+					? Vector2( uMid - s.uv[v][0], s.uv[v][1] ) : s.uv[v] );
 				Color4 c = idColor;
 				if ( opts.identity )
 					c.setAlpha( s.col[v].alpha() );   // authored sway weight rides along
