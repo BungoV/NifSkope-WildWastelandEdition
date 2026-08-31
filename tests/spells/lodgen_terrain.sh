@@ -203,6 +203,32 @@ PYEOF2
 	check "the AO bake VARIES (not a constant channel)" "$([ "$aovals" -gt 8 ] && echo 1 || echo 0)"
 fi
 
+# --- rung 3: texture bakes -------------------------------------------
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -20 24 -19 25 --dim 4 	--out-dir "$W/tb" --tex-dir "$W/tb/tex" >/dev/null 2>&1
+DIF="$W/tb/tex/Commonwealth.4.-20.24.DDS"
+MSN="$W/tb/tex/Commonwealth.4.-20.24_msn.DDS"
+check "the texture bake writes diffuse + msn" 	"$([ -f "$DIF" ] && [ -f "$MSN" ] && echo 1 || echo 0)"
+if [ -f "$DIF" ]; then
+	fourcc=$(dd if="$DIF" bs=1 skip=84 count=4 2>/dev/null)
+	check "the bake is BC1 with mips" "$([ "$fourcc" = "DXT1" ] && echo 1 || echo 0)"
+	"$PY" - "$DIF" > "$W/tex.txt" <<'PYEOF3'
+import sys
+d = open(sys.argv[1], "rb").read()
+import struct
+mips = struct.unpack_from('<I', d, 4*7)[0]
+# variance proxy: distinct BC1 endpoint words across the top mip
+blocks = d[128:128 + (512//4)*(512//4)*8]
+ends = set()
+for i in range(0, len(blocks), 8):
+    ends.add(blocks[i:i+4])
+print(mips, len(ends))
+PYEOF3
+	read -r mipn endn < "$W/tex.txt"
+	echo "  bake: $mipn mips, $endn distinct block endpoints"
+	check "the bake has a mip chain" "$([ "$mipn" -gt 5 ] && echo 1 || echo 0)"
+	check "the bake is not a constant colour" "$([ "$endn" -gt 100 ] && echo 1 || echo 0)"
+fi
+
 echo "$checks checks, $fails failures"
 [ "$fails" = "0" ] && echo PASS || echo FAIL
 [ "$fails" = "0" ]

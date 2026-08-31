@@ -40,6 +40,11 @@ struct LodgenTerrainOptions
 	 * surface in Eye Data, enabling continuous (geomorphed) LOD transitions.
 	 * Widens the vertex stride -- gated on the stock-engine tolerance check. */
 	bool geomorph = false;
+	/*! CS terrain profile: add COLORS to the Land desc — R = LTEX material
+	 * class (0 dirt, 32 grass, 64 forest floor, 96 rock, 128 road/concrete,
+	 * 160 sand, 192 marsh/wet, 224 snow), G = flow-accumulation wetness,
+	 * B = heightfield AO, A = 255. The Physical Weathers tie-in. */
+	bool terrainIdentity = false;
 	//! texture path template; {ws}/{dim}/{x}/{y} are substituted
 	QString textureBase = QStringLiteral( "Data\\Textures\\Terrain\\%1\\%1.%2.%3.%4.DDS" );
 };

@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include <QMap>
 #include <QVector>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -145,6 +146,143 @@ float lodgenSurfaceHeight( const std::vector<float> & pos,
 		return w0 * a[2] + w1 * b[2] + w2 * c[2];
 	}
 	return std::numeric_limits<float>::quiet_NaN();
+}
+
+} // namespace
+
+
+namespace
+{
+
+//! Crude LTEX material class from the texture path, for the CS terrain
+//! profile's R channel. Buckets are contract values, not art opinions.
+quint8 lodgenMaterialClass( const QString & diffusePath )
+{
+	const QString p = diffusePath.toLower();
+	if ( p.contains( QLatin1String( "snow" ) ) ) return 224;
+	if ( p.contains( QLatin1String( "marsh" ) ) || p.contains( QLatin1String( "swamp" ) )
+		|| p.contains( QLatin1String( "mud" ) ) || p.contains( QLatin1String( "wet" ) ) ) return 192;
+	if ( p.contains( QLatin1String( "sand" ) ) || p.contains( QLatin1String( "beach" ) ) ) return 160;
+	if ( p.contains( QLatin1String( "road" ) ) || p.contains( QLatin1String( "concrete" ) )
+		|| p.contains( QLatin1String( "asphalt" ) ) || p.contains( QLatin1String( "pavement" ) ) ) return 128;
+	if ( p.contains( QLatin1String( "rock" ) ) || p.contains( QLatin1String( "cliff" ) )
+		|| p.contains( QLatin1String( "stone" ) ) || p.contains( QLatin1String( "gravel" ) ) ) return 96;
+	if ( p.contains( QLatin1String( "forest" ) ) || p.contains( QLatin1String( "leaves" ) )
+		|| p.contains( QLatin1String( "moss" ) ) ) return 64;
+	if ( p.contains( QLatin1String( "grass" ) ) ) return 32;
+	return 0;   // dirt / unknown
+}
+
+/*! Per-sample terrain channels for the CS profile: dominant material class,
+ * flow-accumulation wetness, and heightfield AO — all per PLACEMENT, the
+ * things no shared tiling texture can carry. Grid is (dim*32+1)^2. */
+void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
+	int dim, const std::vector<float> & grid,
+	std::vector<quint8> & matClass, std::vector<quint8> & wetness,
+	std::vector<quint8> & ao )
+{
+	const int n = dim * 32 + 1;
+	matClass.assign( size_t( n ) * n, 0 );
+	wetness.assign( size_t( n ) * n, 0 );
+	ao.assign( size_t( n ) * n, 255 );
+
+	// dominant material per sample: strongest layer (or base) at the sample
+	EsmLand land;
+	for ( int cy = 0; cy < dim; cy++ ) {
+		for ( int cx = 0; cx < dim; cx++ ) {
+			if ( !world.land( chunkX + cx, chunkY + cy, land ) )
+				continue;
+			for ( int row = 0; row < 33; row++ ) {
+				for ( int col = 0; col < 33; col++ ) {
+					const int q = ( row >= 16 ? 2 : 0 ) + ( col >= 16 ? 1 : 0 );
+					const int qr = ( row >= 16 ? row - 16 : row );
+					const int qc = ( col >= 16 ? col - 16 : col );
+					quint32 ltex = land.baseTex[q];
+					float bestA = 0.35f;
+					for ( const EsmLandLayer & layer : land.layers[q] ) {
+						const float a = layer.opacity[qr][qc];
+						if ( a > bestA ) {
+							bestA = a;
+							ltex = layer.ltex;
+						}
+					}
+					quint8 cls = 0;
+					if ( ltex ) {
+						QString d, nrm;
+						world.ltexTextures( ltex, d, nrm );
+						cls = lodgenMaterialClass( d );
+					}
+					matClass[size_t( cy * 32 + row ) * n + size_t( cx * 32 + col )] = cls;
+				}
+			}
+		}
+	}
+
+	/* Wetness by flow accumulation: rain lands one unit everywhere, flows
+	 * to the lowest 8-neighbour repeatedly. Cells passed by more flow are
+	 * wetter (hollows, gullies, drainage lines). Log-compressed. */
+	{
+		std::vector<int> order( size_t( n ) * n );
+		for ( size_t i = 0; i < order.size(); i++ )
+			order[i] = int( i );
+		std::sort( order.begin(), order.end(), [&]( int a, int b ) {
+			return grid[size_t( a )] > grid[size_t( b )];
+		} );
+		std::vector<float> flow( size_t( n ) * n, 1.0f );
+		for ( int i : order ) {
+			const int row = i / n, col = i % n;
+			float bestH = grid[size_t( i )];
+			int bestJ = -1;
+			for ( int dy = -1; dy <= 1; dy++ ) {
+				for ( int dx = -1; dx <= 1; dx++ ) {
+					const int r2 = row + dy, c2 = col + dx;
+					if ( r2 < 0 || c2 < 0 || r2 >= n || c2 >= n || ( !dx && !dy ) )
+						continue;
+					if ( grid[size_t( r2 ) * n + c2] < bestH ) {
+						bestH = grid[size_t( r2 ) * n + c2];
+						bestJ = r2 * n + c2;
+					}
+				}
+			}
+			if ( bestJ >= 0 )
+				flow[size_t( bestJ )] += flow[size_t( i )];
+		}
+		for ( size_t i = 0; i < flow.size(); i++ ) {
+			const float w = std::log2( flow[i] ) / 12.0f;   // ~4096 max
+			wetness[i] = quint8( qBound( 0.0f, w, 1.0f ) * 255.0f + 0.5f );
+		}
+	}
+
+	/* Heightfield AO: horizon sampling in 8 directions, how much sky the
+	 * sample sees over its neighbourhood. */
+	{
+		const float spacing = 128.0f;
+		static const int dirs[8][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+			{ 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } };
+		for ( int row = 0; row < n; row++ ) {
+			for ( int col = 0; col < n; col++ ) {
+				const float h0 = grid[size_t( row ) * n + col];
+				float occl = 0.0f;
+				for ( const auto & d : dirs ) {
+					float maxSlope = 0.0f;
+					for ( int step = 1; step <= 16; step += ( step < 4 ? 1 : 3 ) ) {
+						const int r2 = row + d[1] * step, c2 = col + d[0] * step;
+						if ( r2 < 0 || c2 < 0 || r2 >= n || c2 >= n )
+							break;
+						const float dh = grid[size_t( r2 ) * n + c2] - h0;
+						if ( dh > 0.0f ) {
+							const float dist = float( step ) * spacing
+								* ( ( d[0] && d[1] ) ? 1.41421f : 1.0f );
+							maxSlope = qMax( maxSlope, dh / dist );
+						}
+					}
+					occl += maxSlope / ( 1.0f + maxSlope );
+				}
+				ao[size_t( row ) * n + col] =
+					quint8( qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f, 1.0f ) * 255.0f + 0.5f );
+			}
+		}
+	}
 }
 
 } // namespace
@@ -325,10 +463,17 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		zMax = qMax( zMax, cpos[v + 2] );
 	}
 
+	std::vector<quint8> tMat, tWet, tAo;
+	if ( opts.terrainIdentity )
+		lodgenTerrainChannels( world, chunkX, chunkY, dim, grid, tMat, tWet, tAo );
+
 	BSVertexDesc landDesc( LAND_VERTEX_DESC );
 	quint32 landStride = 12;
-	if ( !morph.empty() ) {
-		landDesc.SetFlag( VertexFlags::VF_EYEDATA );
+	if ( !morph.empty() || opts.terrainIdentity ) {
+		if ( !morph.empty() )
+			landDesc.SetFlag( VertexFlags::VF_EYEDATA );
+		if ( opts.terrainIdentity )
+			landDesc.SetFlag( VertexFlags::VF_COLORS );
 		landDesc.ResetAttributeOffsets( 130 );
 		landStride = landDesc.GetVertexSize();
 	}
@@ -350,6 +495,16 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 			HalfVector2( Vector2( x / 4096.0f, 1.0f - y / 4096.0f ) ) );
 		if ( !morph.empty() )
 			nif->set<float>( row, "Eye Data", morph[v] );
+		if ( opts.terrainIdentity ) {
+			// vertex grid position recovers the sample index (skirt verts
+			// share their top's x,y and take the same channels)
+			const int col = qBound( 0, int( x / spacing + 0.5f ), n - 1 );
+			const int rowIdx = qBound( 0, int( y / spacing + 0.5f ), n - 1 );
+			const size_t s = size_t( rowIdx ) * n + col;
+			nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4(
+				float( tMat[s] ) / 255.0f, float( tWet[s] ) / 255.0f,
+				float( tAo[s] ) / 255.0f, 1.0f ) ) );
+		}
 	}
 	{
 		QVector<Triangle> tris;
@@ -1086,33 +1241,135 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 namespace
 {
 
-//! Uncompressed BGRA8 DDS writer — engine-loadable; BC compression is an
-//! optimization pass for later, not a requirement.
+//! BC1 (DXT1) DDS writer with a full box-filtered mip chain — the format
+//! vanilla's own terrain bakes use (theirs are BC3; BC1 suffices with no
+//! alpha and quarters the size).
+namespace
+{
+
+quint16 lodgenPack565( quint32 bgra )
+{
+	const quint32 r = ( bgra >> 16 ) & 0xFF, g = ( bgra >> 8 ) & 0xFF, b = bgra & 0xFF;
+	return quint16( ( ( r >> 3 ) << 11 ) | ( ( g >> 2 ) << 5 ) | ( b >> 3 ) );
+}
+
+void lodgenEncodeBC1Block( const quint32 * px, int stride, quint8 * out )
+{
+	// endpoints: the block's min/max-luminance colours
+	int bestLo = 0, bestHi = 0;
+	float loL = 1e9f, hiL = -1e9f;
+	quint32 c[16];
+	for ( int y = 0; y < 4; y++ )
+		for ( int x = 0; x < 4; x++ ) {
+			const quint32 p = px[y * stride + x];
+			c[y * 4 + x] = p;
+			const float l = 0.299f * ( ( p >> 16 ) & 0xFF )
+				+ 0.587f * ( ( p >> 8 ) & 0xFF ) + 0.114f * ( p & 0xFF );
+			if ( l < loL ) { loL = l; bestLo = y * 4 + x; }
+			if ( l > hiL ) { hiL = l; bestHi = y * 4 + x; }
+		}
+	quint16 c0 = lodgenPack565( c[bestHi] ), c1 = lodgenPack565( c[bestLo] );
+	if ( c0 == c1 ) {
+		out[0] = quint8( c0 ); out[1] = quint8( c0 >> 8 );
+		out[2] = quint8( c1 ); out[3] = quint8( c1 >> 8 );
+		out[4] = out[5] = out[6] = out[7] = 0;
+		return;
+	}
+	if ( c0 < c1 )
+		std::swap( c0, c1 );
+	// palette in RGB
+	auto unpack = []( quint16 v, float * rgb ) {
+		rgb[0] = float( ( v >> 11 ) & 31 ) * ( 255.0f / 31.0f );
+		rgb[1] = float( ( v >> 5 ) & 63 ) * ( 255.0f / 63.0f );
+		rgb[2] = float( v & 31 ) * ( 255.0f / 31.0f );
+	};
+	float pal[4][3];
+	unpack( c0, pal[0] );
+	unpack( c1, pal[1] );
+	for ( int k = 0; k < 3; k++ ) {
+		pal[2][k] = ( 2.0f * pal[0][k] + pal[1][k] ) / 3.0f;
+		pal[3][k] = ( pal[0][k] + 2.0f * pal[1][k] ) / 3.0f;
+	}
+	quint32 bits = 0;
+	for ( int i = 15; i >= 0; i-- ) {
+		const float r = float( ( c[i] >> 16 ) & 0xFF ), g = float( ( c[i] >> 8 ) & 0xFF ),
+			b = float( c[i] & 0xFF );
+		int best = 0;
+		float bestD = 1e18f;
+		for ( int k = 0; k < 4; k++ ) {
+			const float d = ( r - pal[k][0] ) * ( r - pal[k][0] )
+				+ ( g - pal[k][1] ) * ( g - pal[k][1] )
+				+ ( b - pal[k][2] ) * ( b - pal[k][2] );
+			if ( d < bestD ) { bestD = d; best = k; }
+		}
+		bits = ( bits << 2 ) | quint32( best );
+	}
+	out[0] = quint8( c0 ); out[1] = quint8( c0 >> 8 );
+	out[2] = quint8( c1 ); out[3] = quint8( c1 >> 8 );
+	out[4] = quint8( bits ); out[5] = quint8( bits >> 8 );
+	out[6] = quint8( bits >> 16 ); out[7] = quint8( bits >> 24 );
+}
+
+} // namespace
+
 bool lodgenWriteDds( const QString & path, int w, int h,
 	const std::vector<quint32> & bgra )
 {
 	QFile f( path );
 	if ( !f.open( QIODevice::WriteOnly ) )
 		return false;
+	// mip chain by box filter, down to 4x4 (BC1 block floor)
+	std::vector<std::vector<quint32>> mips;
+	mips.push_back( bgra );
+	int mw = w, mh = h;
+	while ( mw > 4 && mh > 4 ) {
+		const std::vector<quint32> & prev = mips.back();
+		const int nw = mw / 2, nh = mh / 2;
+		std::vector<quint32> next( size_t( nw ) * nh );
+		for ( int y = 0; y < nh; y++ )
+			for ( int x = 0; x < nw; x++ ) {
+				quint32 acc[3] = { 0, 0, 0 };
+				for ( int sy = 0; sy < 2; sy++ )
+					for ( int sx = 0; sx < 2; sx++ ) {
+						const quint32 p = prev[size_t( y * 2 + sy ) * mw + ( x * 2 + sx )];
+						acc[0] += ( p >> 16 ) & 0xFF;
+						acc[1] += ( p >> 8 ) & 0xFF;
+						acc[2] += p & 0xFF;
+					}
+				next[size_t( y ) * nw + x] = 0xFF000000U
+					| ( ( acc[0] / 4 ) << 16 ) | ( ( acc[1] / 4 ) << 8 ) | ( acc[2] / 4 );
+			}
+		mips.push_back( std::move( next ) );
+		mw = nw;
+		mh = nh;
+	}
+
 	quint32 hdr[32] = { 0 };
 	hdr[0] = 0x20534444;            // 'DDS '
 	hdr[1] = 124;
-	hdr[2] = 0x0000100F;            // caps|height|width|pitch|pixelformat
+	hdr[2] = 0x000A1007;            // caps|height|width|linearsize|pf|mipcount
 	hdr[3] = quint32( h );
 	hdr[4] = quint32( w );
-	hdr[5] = quint32( w * 4 );
-	hdr[7] = 1;                     // mip count
-	hdr[19] = 32;                   // pixel format size
-	hdr[20] = 0x41;                 // RGBA + alpha
-	hdr[22] = 32;                   // bit count
-	hdr[23] = 0x00FF0000;           // B G R A masks (BGRA in memory)
-	hdr[24] = 0x0000FF00;
-	hdr[25] = 0x000000FF;
-	hdr[26] = 0xFF000000;
-	hdr[27] = 0x1000;               // caps: texture
+	hdr[5] = quint32( ( ( w + 3 ) / 4 ) * ( ( h + 3 ) / 4 ) * 8 );
+	hdr[7] = quint32( mips.size() );
+	hdr[19] = 32;
+	hdr[20] = 0x4;                  // fourCC
+	hdr[21] = 0x31545844;           // 'DXT1'
+	hdr[27] = 0x401008;             // caps: complex|texture|mipmap
 	f.write( reinterpret_cast<const char *>( hdr ), 128 );
-	f.write( reinterpret_cast<const char *>( bgra.data() ),
-		qint64( bgra.size() * 4 ) );
+	mw = w;
+	mh = h;
+	for ( const std::vector<quint32> & mip : mips ) {
+		const int bw = ( mw + 3 ) / 4, bh = ( mh + 3 ) / 4;
+		std::vector<quint8> block( size_t( bw ) * bh * 8 );
+		for ( int by = 0; by < bh; by++ )
+			for ( int bx = 0; bx < bw; bx++ )
+				lodgenEncodeBC1Block( mip.data() + size_t( by * 4 ) * mw + bx * 4,
+					mw, block.data() + ( size_t( by ) * bw + bx ) * 8 );
+		f.write( reinterpret_cast<const char *>( block.data() ), qint64( block.size() ) );
+		mw = qMax( 4, mw / 2 );
+		mh = qMax( 4, mh / 2 );
+	}
 	return true;
 }
 
