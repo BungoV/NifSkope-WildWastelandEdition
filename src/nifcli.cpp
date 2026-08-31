@@ -22,6 +22,7 @@ See the LICENSE.md file for the full license text.
 #include "starterscene.h"
 #include "btdterrain.h"
 #include "esmdata.h"
+#include "lodgen.h"
 #include "gl/hknpdecode.h"
 #include "gl/hknpencode.h"
 #include "physics/ragdollsim.h"
@@ -2288,8 +2289,29 @@ int cmdBtd( const QString & file, bool infoOnly, bool haveRegion,
 //! --worldspace/--cell inspect one cell: LAND corner heights, REFR counts,
 //! how many bases carry LOD models. The generation rungs build on this.
 int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
-	bool haveCell, int cellX, int cellY )
+	bool haveCell, int cellX, int cellY,
+	bool haveTerrain, int chunkX, int chunkY, int dim, const QString & outFile )
 {
+	if ( haveTerrain ) {
+		EsmWorld world;
+		QString error;
+		if ( !world.load( file, worldspace ? worldspace : 0x3CU, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		LodgenTerrainOptions opts;
+		opts.dim = dim > 0 ? dim : 4;
+		NifModel nif;
+		if ( !lodgenBuildTerrainChunk( &nif, world, chunkX, chunkY, opts, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		out() << "terrain chunk (" << chunkX << "," << chunkY << ") dim " << opts.dim
+			  << ": " << nif.getBlockCount() << " blocks" << Qt::endl;
+		for ( int b = 0; b < nif.getBlockCount(); b++ )
+			out() << "  " << blockLabel( &nif, b ) << Qt::endl;
+		return saveNif( nif, outFile ) ? 0 : 1;
+	}
 	if ( listWorldspaces || !worldspace ) {
 		QString error;
 		const auto worlds = EsmWorld::listWorldspaces( file, &error );
@@ -3452,6 +3474,11 @@ int usage()
 		  << "  lodgen <file.esm> --worldspace HEX [--cell X Y]\n"
 		  << "                                          inspect a worldspace / one cell:\n"
 		  << "                                          LAND heights, refs, LOD models\n"
+		  << "  lodgen <file.esm> --worldspace HEX --terrain X Y [--dim 4] -o OUT.btr\n"
+		  << "                                          rung 1: generate one terrain chunk\n"
+		  << "                                          (X,Y = SW cell, dim-aligned) in the\n"
+		  << "                                          vanilla .btr anatomy, textures\n"
+		  << "                                          pointing at the game's own bakes\n"
 		  << "  loading-screen <file> [--no-zoom-target] [--keep-particles]\n"
 		  << "                       [--keep-effects] -o OUT\n"
 		  << "                                          bake the file AS IT IS POSED into\n"
@@ -3531,6 +3558,9 @@ int nifskopeCliMain( const QStringList & args )
 	quint32 lgWorldspace = 0;
 	bool lgHaveCell = false;
 	int lgCell[2] = { 0, 0 };
+	bool lgHaveTerrain = false;
+	int lgChunk[2] = { 0, 0 };
+	int lgDim = 4;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -3570,6 +3600,12 @@ int nifskopeCliMain( const QStringList & args )
 			lgCell[0] = next().toInt();
 			lgCell[1] = next().toInt();
 		}
+		else if ( t == QLatin1String( "--terrain" ) ) {
+			lgHaveTerrain = true;
+			lgChunk[0] = next().toInt();
+			lgChunk[1] = next().toInt();
+		}
+		else if ( t == QLatin1String( "--dim" ) ) lgDim = next().toInt();
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -3701,7 +3737,8 @@ int nifskopeCliMain( const QStringList & args )
 			btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod, outFile );
 	else if ( cmd == QLatin1String( "lodgen" ) )
 		rc = cmdLodgen( file, lgListWorldspaces, lgWorldspace,
-			lgHaveCell, lgCell[0], lgCell[1] );
+			lgHaveCell, lgCell[0], lgCell[1],
+			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

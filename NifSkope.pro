@@ -257,6 +257,7 @@ HEADERS += \
 	src/starterscene.h \
 	src/btdterrain.h \
 	src/esmdata.h \
+	src/lodgen.h \
 	src/rdccapture.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
@@ -404,6 +405,7 @@ SOURCES += \
 	src/starterscene.cpp \
 	src/btdterrain.cpp \
 	src/esmdata.cpp \
+	src/lodgen.cpp \
 	src/rdccapture.cpp \
 	src/skeletonops.cpp \
 	src/uvtools.cpp \

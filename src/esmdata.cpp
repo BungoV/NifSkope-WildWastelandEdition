@@ -54,9 +54,14 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 		}
 		{
 			ESMFile::ESMField f( *esm, w );
-			while ( f.next() )
-				if ( f == "EDID" )
+			while ( f.next() ) {
+				if ( f == "EDID" ) {
 					wsEdid = fieldString( f );
+				} else if ( f == "DNAM" && f.size() >= 8 ) {
+					defLandH = f.readFloat();
+					defWaterH = f.readFloat();
+				}
+			}
 		}
 		indexWorldspace();
 		if ( cellIndex.isEmpty() ) {
@@ -124,6 +129,34 @@ void EsmWorld::indexWorldspace()
 		}
 	};
 	walk( wg->children );
+}
+
+bool EsmWorld::cellWater( int cx, int cy, float & height ) const
+{
+	height = defWaterH;
+	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
+	if ( it == cellIndex.constEnd() )
+		return false;
+	const ESMFile::ESMRecord * cr = esm->findRecord( it->cellForm );
+	if ( !cr )
+		return false;
+	bool hasWater = false;
+	ESMFile::ESMField f( *esm, *cr );
+	while ( f.next() ) {
+		if ( f == "DATA" && f.size() >= 2 ) {
+			hasWater = ( f.readUInt16() & 0x0002 ) != 0;
+		} else if ( f == "XCLW" && f.size() >= 4 ) {
+			const quint32 raw = f.readUInt32();
+			// $FF7FFFFF (and the +inf pattern some tools write) mean
+			// "no local height": keep the worldspace default
+			if ( raw != 0xFF7FFFFFU && raw != 0x7F7FFFFFU && raw != 0x4F7FFFC9U ) {
+				float v;
+				std::memcpy( &v, &raw, 4 );
+				height = v;
+			}
+		}
+	}
+	return hasWater;
 }
 
 void EsmWorld::cellBounds( int & minX, int & minY, int & maxX, int & maxY ) const

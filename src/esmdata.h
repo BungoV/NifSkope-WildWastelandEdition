@@ -77,6 +77,14 @@ public:
 	quint32 worldspace() const { return wsForm; }
 	QString worldspaceEdid() const { return wsEdid; }
 
+	float defaultLandHeight() const { return defLandH; }
+	float defaultWaterHeight() const { return defWaterH; }
+
+	//! Cell water: true when the cell has water, with its height resolved
+	//! (XCLW when present and not the no-water sentinel, else the
+	//! worldspace default).
+	bool cellWater( int cx, int cy, float & height ) const;
+
 	//! Grid extent of indexed exterior cells (inclusive).
 	void cellBounds( int & minX, int & minY, int & maxX, int & maxY ) const;
 	int cellCount() const { return cellIndex.size(); }
@@ -100,6 +108,8 @@ private:
 	std::unique_ptr<ESMFile> esm;
 	quint32 wsForm = 0;
 	QString wsEdid;
+	float defLandH = 0.0f;
+	float defWaterH = 0.0f;
 	struct CellEntry
 	{
 		quint32 cellForm = 0;
