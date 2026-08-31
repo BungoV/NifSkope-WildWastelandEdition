@@ -75,6 +75,11 @@ struct LodgenObjectOptions
 	bool identity = true;       //!< vertex-colour identity + manifest (CS profile)
 	bool bakeAO = true;         //!< ray-cast per-placement AO into channel B
 	int lodLevel = -1;          //!< MNAM slot; -1 = pick by dim (4->0, 8->1, 16->2, 32->3)
+	/*! Substitute the nearest filled MNAM slot when the requested one is
+	 * empty. OFF matches vanilla, where an empty slot drops the object at
+	 * that ring (measured: vanilla dim16 chunks are ~3% of the
+	 * always-substitute vertex count). Impostor cards are the better fix. */
+	bool slotFallback = false;
 	/*! Impostor card library: a directory of <formid8hex>_front.png /
 	 * _side.png / <formid8hex>.txt baked by the WW_IMPOSTOR_BAKE hook
 	 * (tools/bake_impostor_cards.sh drives it). When the requested MNAM

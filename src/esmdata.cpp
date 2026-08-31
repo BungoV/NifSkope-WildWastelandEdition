@@ -136,9 +136,13 @@ bool EsmWorld::cellWater( int cx, int cy, float & height ) const
 	/* Only cells with an EXPLICIT water height make LOD water quads —
 	 * measured on Commonwealth.4.-20.24.BTR: the chunk's two water shapes
 	 * sit exactly at the explicit XCLW heights (7250, 10000), and its
-	 * has-water-at-default cells get NO quads (the worldspace's NAM4 LOD
-	 * water plane serves those). Treating sentinel XCLW as the default
-	 * height produced a third shape vanilla does not have. */
+	 * has-water-at-default cells get NO quads — but chunk 0,0 (the harbor,
+	 * all 16 cells sentinel-XCLW + hasWater, default water 450) DOES get
+	 * vanilla quads at exactly 450. The reconciling rule: hasWater with the
+	 * resolved height (explicit XCLW, else the worldspace default), and the
+	 * BUILDER emits a quad only where the water is exposed above the cell's
+	 * terrain minimum — Sanctuary's default-height cells sit under 3000+
+	 * terrain, the harbor's above the seabed. */
 	height = defWaterH;
 	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
 	if ( it == cellIndex.constEnd() )
@@ -147,7 +151,6 @@ bool EsmWorld::cellWater( int cx, int cy, float & height ) const
 	if ( !cr )
 		return false;
 	bool hasWater = false;
-	bool explicitHeight = false;
 	ESMFile::ESMField f( *esm, *cr );
 	while ( f.next() ) {
 		if ( f == "DATA" && f.size() >= 2 ) {
@@ -158,11 +161,10 @@ bool EsmWorld::cellWater( int cx, int cy, float & height ) const
 				float v;
 				std::memcpy( &v, &raw, 4 );
 				height = v;
-				explicitHeight = true;
 			}
 		}
 	}
-	return hasWater && explicitHeight;
+	return hasWater;
 }
 
 void EsmWorld::cellBounds( int & minX, int & minY, int & maxX, int & maxY ) const

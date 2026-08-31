@@ -2824,6 +2824,39 @@ int cmdSkeletonSelfTest( const QString & file )
 	return 1;
 }
 
+//! Dump every BSTriShape-family block's raw vertex positions, one "v x y z"
+//! line each, prefixed by "b <block> <type> '<name>'" — for external
+//! geometry comparison (the LODGEN parity audit diffs these against
+//! vanilla chunks, which share the same miniature-space conventions).
+int cmdVerts( const QString & file )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		QModelIndex iShape = nif.getBlockIndex( b );
+		if ( !nif.isNiBlock( iShape, "BSTriShape" )
+			&& !nif.isNiBlock( iShape, "BSSubIndexTriShape" )
+			&& !nif.isNiBlock( iShape, "BSMeshLODTriShape" ) )
+			continue;
+		QModelIndex iVerts = nif.getIndex( iShape, "Vertex Data" );
+		const int numVerts = int( nif.get<quint32>( iShape, "Num Vertices" ) );
+		if ( !iVerts.isValid() || numVerts <= 0 )
+			continue;
+		out() << "b " << b << " " << nif.itemName( iShape )
+			  << " '" << nif.get<QString>( iShape, "Name" ) << "'" << Qt::endl;
+		const BSVertexDesc desc( nif.get<BSVertexDesc>( iShape, "Vertex Desc" ) );
+		const bool full = ( desc.GetFlags() & VertexFlags::VF_FULLPREC );
+		for ( int v = 0; v < numVerts; v++ ) {
+			QModelIndex row = nif.index( v, 0, iVerts );
+			const Vector3 p = full ? nif.get<Vector3>( row, "Vertex" )
+				: Vector3( nif.get<HalfVector3>( row, "Vertex" ) );
+			out() << "v " << p[0] << " " << p[1] << " " << p[2] << Qt::endl;
+		}
+	}
+	return 0;
+}
+
 int cmdInfo( const QString & file )
 {
 	NifModel nif;
@@ -3921,6 +3954,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdPbrmResolve( file );
 	else if ( cmd == QLatin1String( "info" ) )
 		rc = cmdInfo( file );
+	else if ( cmd == QLatin1String( "verts" ) )
+		rc = cmdVerts( file );
 	else if ( cmd == QLatin1String( "list" ) )
 		rc = cmdList( file, type );
 	else if ( cmd == QLatin1String( "world" ) )

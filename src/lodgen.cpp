@@ -574,12 +574,22 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 	int wetCells = 0;
 	QModelIndex iWaterNode;
 	if ( opts.water ) {
-		// group wet cells by height; one 16(=dim*dim)-segment shape per height
+		/* Wet cells whose water is EXPOSED above the cell's terrain minimum.
+		 * Vanilla's rule, measured both ways: the harbor chunk 0,0 (all
+		 * cells sentinel-XCLW at the 450 default, seabed below) gets quads
+		 * at exactly 450, while Sanctuary's default-height cells (terrain
+		 * 3000+) get none — submerged water is culled at generation. */
 		QMap<float, QVector<QPair<int, int>>> byHeight;
 		for ( int cy = 0; cy < dim; cy++ ) {
 			for ( int cx = 0; cx < dim; cx++ ) {
 				float h = 0.0f;
-				if ( world.cellWater( chunkX + cx, chunkY + cy, h ) )
+				if ( !world.cellWater( chunkX + cx, chunkY + cy, h ) )
+					continue;
+				float cellMin = 3.4e38f;
+				for ( int row = cy * 32; row <= cy * 32 + 32; row++ )
+					for ( int col = cx * 32; col <= cx * 32 + 32; col++ )
+						cellMin = qMin( cellMin, grid[size_t( row ) * n + col] );
+				if ( h > cellMin )
 					byHeight[h].append( qMakePair( cx, cy ) );
 			}
 		}
@@ -587,6 +597,72 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 			iWaterNode = insertAvObject( nif, QStringLiteral( "BSMultiBoundNode" ),
 				QStringLiteral( "WATER" ), 1.0f );
 			nif->set<quint32>( iWaterNode, "Culling Mode", 1 );
+			if ( dim > 4 ) {
+				/* Far rings, vanilla type: ONE plain BSTriShape holding every
+				 * exposed cell quad at its own height — no segments (per-cell
+				 * hiding exists only at dim 4), no per-height split. */
+				int quads = 0;
+				for ( auto it = byHeight.constBegin(); it != byHeight.constEnd(); ++it )
+					quads += it.value().size();
+				QModelIndex iWater = insertAvObject( nif,
+					QStringLiteral( "BSTriShape" ), QString(), float( dim ) );
+				nif->set<BSVertexDesc>( iWater, "Vertex Desc", WATER_VERTEX_DESC );
+				nif->set<quint32>( iWater, "Num Vertices", quint32( quads * 4 ) );
+				nif->set<quint32>( iWater, "Num Triangles", quint32( quads * 2 ) );
+				nif->set<quint32>( iWater, "Data Size",
+					quint32( quads * 4 * 8 + quads * 2 * 6 ) );
+				nif->setState( BaseModel::Processing );
+				QModelIndex iWV = nif->getIndex( iWater, "Vertex Data" );
+				nif->updateArraySize( iWV );
+				QVector<Triangle> wtris;
+				const float cellSpan = 4096.0f * invDim;
+				float wMinX = 3.4e38f, wMinY = 3.4e38f, wMinZ = 3.4e38f;
+				float wMaxX = -3.4e38f, wMaxY = -3.4e38f, wMaxZ = -3.4e38f;
+				int vBase = 0;
+				for ( auto it = byHeight.constBegin(); it != byHeight.constEnd(); ++it ) {
+					const float hWorld = it.key();
+					const float h = hWorld * invDim;
+					waterZMin = qMin( waterZMin, hWorld );
+					waterZMax = qMax( waterZMax, hWorld );
+					wetCells += it.value().size();
+					for ( const auto & cell : it.value() ) {
+						const float x0 = float( cell.first ) * cellSpan;
+						const float y0 = float( cell.second ) * cellSpan;
+						const float corner[4][2] = {
+							{ x0, y0 }, { x0 + cellSpan, y0 },
+							{ x0 + cellSpan, y0 + cellSpan }, { x0, y0 + cellSpan } };
+						for ( int k = 0; k < 4; k++ ) {
+							QModelIndex v = nif->index( vBase + k, 0, iWV );
+							nif->set<HalfVector3>( v, "Vertex",
+								HalfVector3( Vector3( corner[k][0], corner[k][1], h ) ) );
+							nif->set<float>( v, "Bitangent X", 1.0f );
+							wMinX = qMin( wMinX, corner[k][0] ); wMaxX = qMax( wMaxX, corner[k][0] );
+							wMinY = qMin( wMinY, corner[k][1] ); wMaxY = qMax( wMaxY, corner[k][1] );
+						}
+						wMinZ = qMin( wMinZ, h ); wMaxZ = qMax( wMaxZ, h );
+						wtris.append( Triangle( quint16( vBase ), quint16( vBase + 1 ), quint16( vBase + 2 ) ) );
+						wtris.append( Triangle( quint16( vBase ), quint16( vBase + 2 ), quint16( vBase + 3 ) ) );
+						vBase += 4;
+					}
+				}
+				QModelIndex iWT = nif->getIndex( iWater, "Triangles" );
+				nif->updateArraySize( iWT );
+				nif->setArray<Triangle>( iWT, wtris );
+				setBound( nif, iWater, wMinX, wMinY, wMinZ, wMaxX, wMaxY, wMaxZ );
+				nif->restoreState();
+				QModelIndex iEffect = nif->insertNiBlock( QStringLiteral( "BSEffectShaderProperty" ) );
+				nif->set<quint32>( iEffect, "Shader Flags 1", WATER_EFFECT_FLAGS1 );
+				nif->set<quint32>( iEffect, "Shader Flags 2", WATER_EFFECT_FLAGS2 );
+				nif->set<int>( iEffect, "Lighting Influence", 255 );
+				nif->set<float>( iEffect, "Soft Falloff Depth", 100.0f );
+				nif->set<float>( iEffect, "Environment Map Scale", 1.0f );
+				nif->set<Color4>( iEffect, "Base Color", Color4( 1.0f, 1.0f, 1.0f, 1.0f ) );
+				nif->set<float>( iEffect, "Base Color Scale", 1.0f );
+				nif->setLink( iWater, "Shader Property", nif->getBlockNumber( iEffect ) );
+				addLink( nif, iWaterNode, QStringLiteral( "Children" ),
+					nif->getBlockNumber( iWater ) );
+				byHeight.clear();   // handled; skip the per-height path below
+			}
 			for ( auto it = byHeight.constBegin(); it != byHeight.constEnd(); ++it ) {
 				const float hWorld = it.key();
 				const float h = hWorld * invDim;
@@ -1143,10 +1219,17 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				cardShapes.append( lodgenCardShape( card ) );
 		}
 		if ( cardShapes.isEmpty() ) {
-			for ( int l = lodLevel; l >= 0 && model.isEmpty(); l-- )
-				model = base.models[l];
-			for ( int l = lodLevel; l < 4 && model.isEmpty(); l++ )
-				model = base.models[l];
+			/* Vanilla parity: an empty MNAM slot means the object DROPS OUT
+			 * at that ring — measured Commonwealth.16.-16.16.BTO holds 7k
+			 * verts where slot-substitution produced 244k. Substituting a
+			 * nearer (heavier) model is opt-in, and impostor cards above
+			 * are the sanctioned stand-in. */
+			if ( model.isEmpty() && opts.slotFallback ) {
+				for ( int l = lodLevel; l >= 0 && model.isEmpty(); l-- )
+					model = base.models[l];
+				for ( int l = lodLevel; l < 4 && model.isEmpty(); l++ )
+					model = base.models[l];
+			}
 			if ( model.isEmpty() ) {
 				skippedNoLod++;
 				continue;
