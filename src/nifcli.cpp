@@ -2293,8 +2293,43 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveTerrain, int chunkX, int chunkY, int dim, const QString & outFile,
 	bool haveRegion, const int * region, const QString & outDir,
 	bool haveObjects, const QString & dataRoot, bool identity,
-	const QString & texDir, bool geomorph, bool terrainIdentity )
+	const QString & texDir, bool geomorph, bool terrainIdentity,
+	const QString & impostors, bool listCandidates )
 {
+	if ( listCandidates && haveRegion ) {
+		EsmWorld world;
+		QString error;
+		if ( !world.load( file, worldspace ? worldspace : 0x3CU, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		// bases referenced in the region whose FAR MNAM slots are missing:
+		// these fall back to heavy near meshes at dim16/32 without a card
+		QSet<quint32> seen;
+		for ( int cy = region[1]; cy <= region[3]; cy++ ) {
+			for ( int cx = region[0]; cx <= region[2]; cx++ ) {
+				for ( const EsmRefr & r : world.refrs( cx, cy ) ) {
+					if ( r.initiallyDisabled || r.deleted || !r.base
+						|| seen.contains( r.base ) )
+						continue;
+					seen.insert( r.base );
+					const EsmLodBase & b = world.lodBase( r.base );
+					if ( !b.hasLod )
+						continue;
+					if ( !b.models[2].isEmpty() && !b.models[3].isEmpty() )
+						continue;
+					QString bakeSource;
+					for ( int l = 0; l < 4 && bakeSource.isEmpty(); l++ )
+						bakeSource = b.models[l];
+					if ( bakeSource.isEmpty() )
+						continue;
+					out() << QString( "%1" ).arg( r.base, 8, 16, QChar( '0' ) )
+						  << " " << bakeSource << Qt::endl;
+				}
+			}
+		}
+		return 0;
+	}
 	if ( haveObjects ) {
 		EsmWorld world;
 		QString error;
@@ -2305,6 +2340,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		LodgenObjectOptions opts;
 		opts.dim = dim > 0 ? dim : 4;
 		opts.identity = identity;
+		opts.impostorDir = impostors;
 		opts.dataRoot = dataRoot.isEmpty()
 			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
 		NifModel nif;
@@ -2385,6 +2421,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					LodgenObjectOptions oopts;
 					oopts.dim = d;
 					oopts.identity = identity;
+					oopts.impostorDir = impostors;
 					oopts.dataRoot = dataRoot.isEmpty()
 						? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
 					NifModel nif;
@@ -3703,6 +3740,8 @@ int nifskopeCliMain( const QStringList & args )
 	QString lgTexDir;
 	bool lgGeomorph = false;
 	bool lgTerrainIdentity = false;
+	QString lgImpostors;
+	bool lgListCandidates = false;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -3764,6 +3803,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--tex-dir" ) ) lgTexDir = next();
 		else if ( t == QLatin1String( "--geomorph" ) ) lgGeomorph = true;
 		else if ( t == QLatin1String( "--terrain-identity" ) ) lgTerrainIdentity = true;
+		else if ( t == QLatin1String( "--impostors" ) ) lgImpostors = next();
+		else if ( t == QLatin1String( "--list-impostor-candidates" ) ) lgListCandidates = true;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -3899,7 +3940,7 @@ int nifskopeCliMain( const QStringList & args )
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
 			lgHaveRegion, lgRegion, lgOutDir,
 			lgHaveObjects, lgDataRoot, lgIdentity, lgTexDir, lgGeomorph,
-			lgTerrainIdentity );
+			lgTerrainIdentity, lgImpostors, lgListCandidates );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

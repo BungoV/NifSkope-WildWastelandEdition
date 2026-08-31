@@ -926,6 +926,98 @@ struct LodgenAoScene
 
 } // namespace
 
+
+namespace
+{
+// defined with the texture-bake section below (same anonymous namespace)
+bool lodgenWriteDds( const QString & path, int w, int h,
+	const std::vector<quint32> & bgra );
+
+struct LodgenCard
+{
+	bool valid = false;
+	QString texPath;            // game path for the texture set
+	float halfW = 0, halfH = 0;
+	Vector3 center;             // model-space centre of the photographed bound
+};
+
+//! Look up (and lazily DDS-convert) an impostor card for a base form.
+const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
+	QHash<quint32, LodgenCard> & cache )
+{
+	auto it = cache.constFind( formID );
+	if ( it != cache.constEnd() )
+		return *it;
+	LodgenCard card;
+	const QString id = QString( "%1" ).arg( formID, 8, 16, QChar( '0' ) );
+	const QString metaPath = dir + "/" + id + QStringLiteral( ".txt" );
+	const QString frontPng = dir + "/" + id + QStringLiteral( "_front.png" );
+	QFile meta( metaPath );
+	if ( meta.open( QIODevice::ReadOnly | QIODevice::Text )
+		&& QFile::exists( frontPng ) ) {
+		const QStringList line = QString::fromLatin1( meta.readLine() )
+			.split( QChar( ' ' ), Qt::SkipEmptyParts );
+		if ( line.size() >= 6 ) {
+			card.halfW = line[1].toFloat();
+			card.halfH = line[2].toFloat();
+			card.center = Vector3( line[3].toFloat(), line[4].toFloat(),
+				line[5].toFloat() );
+			const QString dds = dir + "/" + id + QStringLiteral( ".DDS" );
+			if ( !QFile::exists( dds ) ) {
+				QImage img( frontPng );
+				img = img.convertToFormat( QImage::Format_ARGB32 );
+				std::vector<quint32> px( size_t( img.width() ) * img.height() );
+				for ( int y = 0; y < img.height(); y++ )
+					for ( int x = 0; x < img.width(); x++ )
+						px[size_t( y ) * img.width() + x] = img.pixel( x, y );
+				lodgenWriteDds( dds, img.width(), img.height(), px );
+			}
+			card.texPath = QStringLiteral( "Data\\Textures\\Lodgen\\Cards\\" )
+				+ id + QStringLiteral( ".DDS" );
+			card.valid = true;
+		}
+	}
+	return *cache.insert( formID, card );
+}
+
+//! The two crossed quads of an impostor, in model space, as a LodSrcShape.
+LodSrcShape lodgenCardShape( const LodgenCard & card )
+{
+	LodSrcShape s;
+	s.tex0 = card.texPath;
+	s.hasAlpha = true;
+	s.alphaFlags = 4844;
+	s.alphaThreshold = 128;
+	const float cx = card.center[0], cy = card.center[1];
+	const float z0 = card.center[2] - card.halfH, z1 = card.center[2] + card.halfH;
+	auto quad = [&s]( const Vector3 & a, const Vector3 & b,
+		const Vector3 & c, const Vector3 & d, const Vector3 & n ) {
+		const quint16 base = quint16( s.pos.size() );
+		const Vector3 pts[4] = { a, b, c, d };
+		const float us[4] = { 0, 1, 1, 0 };
+		const float vs[4] = { 1, 1, 0, 0 };
+		for ( int k = 0; k < 4; k++ ) {
+			s.pos.append( pts[k] );
+			s.nrm.append( n );
+			s.tan.append( Vector3( 0, 0, 1 ) );
+			s.uv.append( Vector2( us[k], vs[k] ) );
+			s.col.append( Color4( 1, 1, 1, 1 ) );
+		}
+		s.tris.append( Triangle( base, quint16( base + 1 ), quint16( base + 2 ) ) );
+		s.tris.append( Triangle( base, quint16( base + 2 ), quint16( base + 3 ) ) );
+	};
+	// front card (facing -Y) and side card (facing +X), crossed at centre
+	quad( Vector3( cx - card.halfW, cy, z0 ), Vector3( cx + card.halfW, cy, z0 ),
+		Vector3( cx + card.halfW, cy, z1 ), Vector3( cx - card.halfW, cy, z1 ),
+		Vector3( 0, -1, 0 ) );
+	quad( Vector3( cx, cy - card.halfW, z0 ), Vector3( cx, cy + card.halfW, z0 ),
+		Vector3( cx, cy + card.halfW, z1 ), Vector3( cx, cy - card.halfW, z1 ),
+		Vector3( 1, 0, 0 ) );
+	return s;
+}
+
+} // namespace
+
 bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	int chunkX, int chunkY, const LodgenObjectOptions & opts,
 	QString * manifestOut, QString * error )
@@ -958,6 +1050,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		cwX + float( dim ) * 4096.0f, cwY + float( dim ) * 4096.0f );
 
 	QHash<QString, QVector<LodSrcShape>> modelCache;
+	QHash<quint32, LodgenCard> cardCache;
 	QMap<QString, ObjBucket> buckets;   // key = tex0|tex1
 	QStringList manifest;
 	// instance grouping: base form -> (model, member object indices)
@@ -972,16 +1065,26 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		if ( !base.hasLod )
 			continue;
 		QString model = base.models[qMin( lodLevel, 3 )];
-		for ( int l = lodLevel; l >= 0 && model.isEmpty(); l-- )
-			model = base.models[l];
-		for ( int l = lodLevel; l < 4 && model.isEmpty(); l++ )
-			model = base.models[l];
-		if ( model.isEmpty() ) {
-			skippedNoLod++;
-			continue;
+		QVector<LodSrcShape> cardShapes;
+		if ( model.isEmpty() && !opts.impostorDir.isEmpty() ) {
+			// the requested far slot is missing: an impostor card beats
+			// falling back to a heavier near-slot mesh
+			const LodgenCard & card = lodgenCard( opts.impostorDir, r.base, cardCache );
+			if ( card.valid )
+				cardShapes.append( lodgenCardShape( card ) );
 		}
-		const QVector<LodSrcShape> & shapes =
-			lodgenLoadModel( opts.dataRoot, model, modelCache );
+		if ( cardShapes.isEmpty() ) {
+			for ( int l = lodLevel; l >= 0 && model.isEmpty(); l-- )
+				model = base.models[l];
+			for ( int l = lodLevel; l < 4 && model.isEmpty(); l++ )
+				model = base.models[l];
+			if ( model.isEmpty() ) {
+				skippedNoLod++;
+				continue;
+			}
+		}
+		const QVector<LodSrcShape> & shapes = !cardShapes.isEmpty() ? cardShapes
+			: lodgenLoadModel( opts.dataRoot, model, modelCache );
 		if ( shapes.isEmpty() ) {
 			skippedNoLod++;
 			continue;
@@ -1253,22 +1356,69 @@ quint16 lodgenPack565( quint32 bgra )
 	return quint16( ( ( r >> 3 ) << 11 ) | ( ( g >> 2 ) << 5 ) | ( b >> 3 ) );
 }
 
-void lodgenEncodeBC1Block( const quint32 * px, int stride, quint8 * out )
+void lodgenEncodeBC1Block( const quint32 * img, int w, int h, int bx, int by,
+	quint8 * out )
 {
-	// endpoints: the block's min/max-luminance colours
+	// endpoints: the block's min/max-luminance colours; blocks holding
+	// transparent pixels (alpha < 128) use BC1's punch-through mode.
+	// Edge blocks of non-multiple-of-4 mips CLAMP their reads — the
+	// unclamped version walked off the last row of a 558-wide mip.
 	int bestLo = 0, bestHi = 0;
 	float loL = 1e9f, hiL = -1e9f;
+	bool punch = false;
 	quint32 c[16];
 	for ( int y = 0; y < 4; y++ )
 		for ( int x = 0; x < 4; x++ ) {
-			const quint32 p = px[y * stride + x];
+			const int sx = qMin( bx * 4 + x, w - 1 );
+			const int sy = qMin( by * 4 + y, h - 1 );
+			const quint32 p = img[size_t( sy ) * w + sx];
 			c[y * 4 + x] = p;
+			if ( ( ( p >> 24 ) & 0xFF ) < 128 ) {
+				punch = true;
+				continue;
+			}
 			const float l = 0.299f * ( ( p >> 16 ) & 0xFF )
 				+ 0.587f * ( ( p >> 8 ) & 0xFF ) + 0.114f * ( p & 0xFF );
 			if ( l < loL ) { loL = l; bestLo = y * 4 + x; }
 			if ( l > hiL ) { hiL = l; bestHi = y * 4 + x; }
 		}
 	quint16 c0 = lodgenPack565( c[bestHi] ), c1 = lodgenPack565( c[bestLo] );
+	if ( punch ) {
+		// c0 <= c1 selects 3-colour + transparent mode
+		if ( c0 > c1 )
+			std::swap( c0, c1 );
+		float pal[3][3];
+		auto unpackP = []( quint16 v, float * rgb ) {
+			rgb[0] = float( ( v >> 11 ) & 31 ) * ( 255.0f / 31.0f );
+			rgb[1] = float( ( v >> 5 ) & 63 ) * ( 255.0f / 63.0f );
+			rgb[2] = float( v & 31 ) * ( 255.0f / 31.0f );
+		};
+		unpackP( c0, pal[0] );
+		unpackP( c1, pal[1] );
+		for ( int k = 0; k < 3; k++ )
+			pal[2][k] = ( pal[0][k] + pal[1][k] ) * 0.5f;
+		quint32 bits = 0;
+		for ( int i = 15; i >= 0; i-- ) {
+			int best = 3;   // transparent
+			if ( ( ( c[i] >> 24 ) & 0xFF ) >= 128 ) {
+				const float r = float( ( c[i] >> 16 ) & 0xFF ),
+					g = float( ( c[i] >> 8 ) & 0xFF ), b = float( c[i] & 0xFF );
+				float bestD = 1e18f;
+				for ( int k = 0; k < 3; k++ ) {
+					const float d = ( r - pal[k][0] ) * ( r - pal[k][0] )
+						+ ( g - pal[k][1] ) * ( g - pal[k][1] )
+						+ ( b - pal[k][2] ) * ( b - pal[k][2] );
+					if ( d < bestD ) { bestD = d; best = k; }
+				}
+			}
+			bits = ( bits << 2 ) | quint32( best );
+		}
+		out[0] = quint8( c0 ); out[1] = quint8( c0 >> 8 );
+		out[2] = quint8( c1 ); out[3] = quint8( c1 >> 8 );
+		out[4] = quint8( bits ); out[5] = quint8( bits >> 8 );
+		out[6] = quint8( bits >> 16 ); out[7] = quint8( bits >> 24 );
+		return;
+	}
 	if ( c0 == c1 ) {
 		out[0] = quint8( c0 ); out[1] = quint8( c0 >> 8 );
 		out[2] = quint8( c1 ); out[3] = quint8( c1 >> 8 );
@@ -1364,8 +1514,8 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 		std::vector<quint8> block( size_t( bw ) * bh * 8 );
 		for ( int by = 0; by < bh; by++ )
 			for ( int bx = 0; bx < bw; bx++ )
-				lodgenEncodeBC1Block( mip.data() + size_t( by * 4 ) * mw + bx * 4,
-					mw, block.data() + ( size_t( by ) * bw + bx ) * 8 );
+				lodgenEncodeBC1Block( mip.data(), mw, mh, bx, by,
+					block.data() + ( size_t( by ) * bw + bx ) * 8 );
 		f.write( reinterpret_cast<const char *>( block.data() ), qint64( block.size() ) );
 		mw = qMax( 4, mw / 2 );
 		mh = qMax( 4, mh / 2 );

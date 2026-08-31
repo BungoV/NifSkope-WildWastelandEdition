@@ -21350,6 +21350,99 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	/* IMPOSTOR CARD BAKER (WW_IMPOSTOR_BAKE=<outdir>): photograph the loaded
+	 * model into LOD impostor cards — orthographic front and side views with
+	 * a TWO-PASS MATTE (the scene rendered over black and over white; the
+	 * per-pixel difference of the two is exactly 1-alpha for anything
+	 * semi-transparent, and cancels for opaque pixels), so the cards carry a
+	 * real alpha channel without the renderer needing an alpha framebuffer.
+	 * A .txt sidecar records the ortho extents and the scene bound centre so
+	 * LODGEN can size and anchor the card quads exactly
+	 * (docs/LODGEN_PLAN.md rung 3). Grid and axes are forced off: the matte
+	 * cancels only CONSTANT background, and a grid line would bake into the
+	 * card as geometry. */
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_IMPOSTOR_BAKE" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope, fname]( bool ok, QString & ) {
+			QTimer::singleShot( 1200, skope, [skope, fname, ok]() {
+				const QString outDir = qEnvironmentVariable( "WW_IMPOSTOR_BAKE" );
+				do {
+					if ( !ok || outDir.isEmpty() || !skope->ogl )
+						break;
+					QDir().mkpath( outDir );
+					skope->showNormal();
+					skope->resize( 560, 560 );
+					for ( QDockWidget * dw : skope->findChildren<QDockWidget *>() )
+						dw->hide();
+					if ( skope->viewportHeader )
+						skope->viewportHeader->hide();
+					if ( Scene * sc = skope->ogl->getScene() )
+						sc->options = Scene::SceneOptions(
+							sc->options & ~( Scene::ShowAxes | Scene::ShowGrid ) );
+					skope->ogl->showCursor = false;
+					qApp->processEvents();
+
+					const QString base = QFileInfo( fname ).completeBaseName().toLower();
+					QFile meta( outDir + "/" + base + QStringLiteral( ".txt" ) );
+					meta.open( QIODevice::WriteOnly | QIODevice::Text );
+					QTextStream ms( &meta );
+
+					const struct { GLView::ViewState view; const char * name; } views[2] = {
+						{ GLView::ViewFront, "front" }, { GLView::ViewLeft, "side" } };
+					for ( const auto & v : views ) {
+						skope->ogl->setOrientation( v.view, true );
+						QImage pass[2];
+						const Color4 bgs[2] = { Color4( 0, 0, 0, 1 ), Color4( 1, 1, 1, 1 ) };
+						for ( int b = 0; b < 2; b++ ) {
+							skope->ogl->cfg.background = bgs[b];
+							skope->ogl->indexAt( QPointF( skope->ogl->width() * 0.5,
+								skope->ogl->height() * 0.5 ) );
+							qApp->processEvents();
+							for ( int i = 0; i < 2; i++ ) {
+								skope->ogl->update();
+								qApp->processEvents();
+							}
+							pass[b] = skope->ogl->grabFramebuffer()
+								.convertToFormat( QImage::Format_ARGB32 );
+						}
+						QImage card( pass[0].size(), QImage::Format_ARGB32 );
+						for ( int y = 0; y < card.height(); y++ ) {
+							for ( int x = 0; x < card.width(); x++ ) {
+								const QRgb pb = pass[0].pixel( x, y );
+								const QRgb pw = pass[1].pixel( x, y );
+								// white-minus-black difference = 1 - alpha
+								const int d = ( ( qRed( pw ) - qRed( pb ) )
+									+ ( qGreen( pw ) - qGreen( pb ) )
+									+ ( qBlue( pw ) - qBlue( pb ) ) ) / 3;
+								const int a = qBound( 0, 255 - d, 255 );
+								int r = qRed( pb ), g = qGreen( pb ), bl = qBlue( pb );
+								if ( a > 0 && a < 255 ) {
+									// un-premultiply against the black pass
+									r = qMin( 255, r * 255 / a );
+									g = qMin( 255, g * 255 / a );
+									bl = qMin( 255, bl * 255 / a );
+								}
+								card.setPixel( x, y, qRgba( r, g, bl, a ) );
+							}
+						}
+						card.save( outDir + "/" + base + "_" + v.name
+							+ QStringLiteral( ".png" ) );
+						const float halfH = skope->ogl->orthographicHalfHeight();
+						const float halfW = halfH * float( skope->ogl->width() )
+							/ float( skope->ogl->height() );
+						BoundSphere bs;
+						if ( Scene * sc = skope->ogl->getScene() )
+							bs = sc->bounds();
+						ms << v.name << " " << halfW << " " << halfH << " "
+						   << bs.center[0] << " " << bs.center[1] << " "
+						   << bs.center[2] << "\n";
+					}
+					meta.close();
+				} while ( false );
+				qApp->quit();
+			} );
+		} );
+	}
+
 	/* FIRST-FRAME GATE (WW_FIRSTFRAME_TEST=1, with WW_FRAME_SHOTS=<prefix>):
 	 * does the first frame the user is shown match the frame he gets after
 	 * interacting with the viewport?

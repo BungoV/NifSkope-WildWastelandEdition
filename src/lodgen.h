@@ -73,6 +73,14 @@ struct LodgenObjectOptions
 	bool identity = true;       //!< vertex-colour identity + manifest (CS profile)
 	bool bakeAO = true;         //!< ray-cast per-placement AO into channel B
 	int lodLevel = -1;          //!< MNAM slot; -1 = pick by dim (4->0, 8->1, 16->2, 32->3)
+	/*! Impostor card library: a directory of <formid8hex>_front.png /
+	 * _side.png / <formid8hex>.txt baked by the WW_IMPOSTOR_BAKE hook
+	 * (tools/bake_impostor_cards.sh drives it). When the requested MNAM
+	 * slot is EMPTY, two crossed card quads substitute instead of falling
+	 * back to a nearer (heavier) slot; the card DDS (BC1 punch-through
+	 * alpha) is written beside the PNGs and referenced as
+	 * Data\Textures\Lodgen\Cards\<id>.DDS — ship that directory there. */
+	QString impostorDir;
 };
 
 bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
