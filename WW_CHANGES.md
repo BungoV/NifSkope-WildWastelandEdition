@@ -80,6 +80,25 @@ Geomorph weights: --geomorph adds EYEDATA to the terrain desc, each
 vertex carrying its world delta to the parent ring's surface --
 continuous LOD transitions as file data. Harness 14/14 throughout.
 
+### End of the sitting: the system is complete
+
+The impostor pipeline closed the last subsystem: WW_IMPOSTOR_BAKE
+photographs any model into front+side ortho cards with TWO-PASS MATTE
+alpha (scene over black and over white; the difference IS 1-alpha),
+grid/axes/cursor forced off, extents+centre in a sidecar;
+tools/bake_impostor_cards.sh drives it per missing-far-slot base
+(--list-impostor-candidates); --impostors substitutes crossed card
+quads where far MNAM slots are empty, BC1 punch-through DDS written
+lazily. The BC1 encoder gained clamped edge blocks after the
+campaign's one segfault (a 558-wide mip walked off its last row --
+found by dimension arithmetic under a symbol-less backtrace). And the
+World LOD Manager shipped: Spells > Batch > World LOD Generator --
+region, rung toggles, progress bar, cancel between chunks, and a live
+preview that splices each finished chunk into Loaded NIFs at its world
+translation so the map assembles tile by tile in the viewport.
+Harness 18/18. What remains is refinement (splat calibration) and the
+two gates only bungo can run.
+
 ### Still chartered (next sessions)
 
 Terrain texture baking (needs a BC1 writer), the impostor card baker

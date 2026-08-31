@@ -7,16 +7,18 @@ the measured format groundwork is
 This document is the execution plan: rungs, deliverables, verification,
 risks. Each rung ships independently.
 
-**STATUS 2026-08-31 (one sitting, 149a120..0a69846):** rungs 0, 1, 2
-SHIPPED and harnessed (lodgen_terrain.sh 14/14); rung 3 items shipped:
-per-placement AO bake, terrain texture baking v1 (splat -> DDS;
-calibration vs vanilla's grading open), instance manifests, geomorph
-weights (--geomorph, gated). One sweep command emits BTR + BTO +
-manifests + texture bakes per chunk. REMAINING: the impostor card baker
-(needs an ortho capture hook -- the one subsystem requiring new render
-infrastructure), the GUI World LOD manager with live preview, LTEX-class/
-wetness terrain VERTEX bakes (CS terrain profile), BC compression for the
-bakes, splat calibration, and the two gates: bungo's in-game load and the
+**STATUS 2026-08-31, END OF THE SITTING: THE SYSTEM IS BUILT.** All
+rungs shipped and harnessed (lodgen_terrain.sh 18/18): rungs 0-2, the
+AO bake, terrain texture baking (BC1 + mip chains; splat calibration vs
+vanilla's grading stays an open refinement), the CS terrain profile
+(--terrain-identity: LTEX class / flow wetness / horizon AO), instance
+manifests, geomorph weights (--geomorph), the IMPOSTOR PIPELINE
+(WW_IMPOSTOR_BAKE ortho+matte capture hook, tools/bake_impostor_cards.sh
+driver, --impostors card substitution with BC1 punch-through alpha), and
+the GUI World LOD Manager (Spells > Batch > World LOD Generator: region,
+toggles, progress, cancel-between-chunks, live tile-by-tile workspace
+preview). REMAINING = refinements and the two gates only: splat
+calibration harness-driven tuning, and bungo's in-game load + the
 stock-engine tolerance checks (fat desc / alpha / EyeData without CS).
 
 ## What is being built

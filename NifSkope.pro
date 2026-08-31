@@ -405,7 +405,7 @@ SOURCES += \
 	src/starterscene.cpp \
 	src/btdterrain.cpp \
 	src/esmdata.cpp \
-	src/lodgen.cpp \
+	src/lodgen.cpp 	src/lodgenmanager.cpp \
 	src/rdccapture.cpp \
 	src/skeletonops.cpp \
 	src/uvtools.cpp \
