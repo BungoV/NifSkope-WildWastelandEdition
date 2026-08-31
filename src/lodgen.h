@@ -106,9 +106,15 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
  * move onto 256x256 atlas cells (diffuse + matching normal sheet, 2-texel
  * inset against mip bleed) and their texture sets are repointed at
  * atlasGameBase (+".DDS"/"_n.DDS"); tiling shapes keep their source
- * textures. Writes atlasFileBase(.DDS/_n.DDS) and rewrites the files. */
+ * textures. Writes atlasFileBase(.DDS/_n.DDS) and rewrites the files.
+ *
+ * REQUIRED for stock installs: the source LOD textures are CK-only
+ * resources, absent from every shipped BA2 (docs/LODGEN_PARITY.md). The
+ * textures tiling shapes keep referencing are therefore COPIED loose from
+ * dataRoot into looseRoot (a Data folder) under their game-relative paths,
+ * so the output is self-contained; pass an empty looseRoot to skip. */
 bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 	const QString & atlasFileBase, const QString & atlasGameBase,
-	QString * error );
+	const QString & looseRoot, QString * error );
 
 #endif // LODGEN_H

@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -335,6 +336,7 @@ private:
 				for ( int cx = floorTo( x0Spin->value(), d ); cx <= x1Spin->value(); cx += d )
 					queue.append( ChunkJob{ d, cx, cy } );
 		done = 0;
+		writtenBto.clear();
 		cancelled = false;
 		running = true;
 		startButton->setEnabled( false );
@@ -353,12 +355,33 @@ private:
 	void step()
 	{
 		if ( cancelled || done >= queue.size() ) {
+			QString tail;
+			if ( !cancelled && !writtenBto.isEmpty() ) {
+				/* Atlas pass, always: the source LOD textures the shapes
+				 * reference are CK-only resources — a stock game ships NONE
+				 * of them, so un-atlased output renders magenta outside this
+				 * machine (docs/LODGEN_PARITY.md). */
+				const QString ws = world->worldspaceEdid();
+				const QString atlasDir = texDir + QStringLiteral( "/Objects" );
+				QDir().mkpath( atlasDir );
+				progress->setFormat( tr( "packing the object atlas…" ) );
+				QCoreApplication::processEvents();
+				QString aerr;
+				if ( lodgenBuildAtlas( writtenBto, dataRootEdit->text(),
+					atlasDir + "/" + ws + QStringLiteral( ".Objects" ),
+					QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.Objects" )
+						.arg( ws ), outEdit->text(), &aerr ) )
+					tail = tr( ", atlas written" );
+				else
+					tail = tr( ", atlas: %1" ).arg( aerr );
+			}
 			progress->setFormat( cancelled
 				? tr( "cancelled after %1 chunk(s)" ).arg( done )
-				: tr( "done — %1 chunk(s)" ).arg( done ) );
+				: tr( "done — %1 chunk(s)%2" ).arg( done ).arg( tail ) );
 			running = false;
 			cancelled = false;
 			startButton->setEnabled( true );
+			writtenBto.clear();
 			world.reset();
 			return;
 		}
@@ -397,7 +420,8 @@ private:
 			QString manifest, cerr;
 			if ( lodgenBuildObjectChunk( &nif, *world, cx, cy, opts, &manifest, &cerr ) ) {
 				const QString path = meshDir + "/" + stem + QStringLiteral( ".BTO" );
-				nif.saveToFile( path );
+				if ( nif.saveToFile( path ) )
+					writtenBto.append( path );
 				if ( opts.identity ) {
 					QFile mf( path + QStringLiteral( ".manifest.txt" ) );
 					if ( mf.open( QIODevice::WriteOnly | QIODevice::Text ) )
@@ -442,6 +466,7 @@ private:
 	QPushButton * startButton, * cancelButton;
 	std::unique_ptr<EsmWorld> world;
 	QVector<ChunkJob> queue;
+	QStringList writtenBto;
 	QString meshDir, texDir;
 	int done = 0;
 	bool running = false;

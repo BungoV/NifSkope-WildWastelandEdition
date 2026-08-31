@@ -11,7 +11,9 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QMap>
 #include <QVector>
 
@@ -1949,7 +1951,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 
 bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 	const QString & atlasFileBase, const QString & atlasGameBase,
-	QString * error )
+	const QString & looseRoot, QString * error )
 {
 	auto fail = [error]( const QString & message ) {
 		if ( error )
@@ -1967,6 +1969,7 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 	 * cell. Atlasable = UVs inside [0,1] (tiling breaks under an atlas). */
 	QHash<QString, int> cellOf;         // lowercased tex0 -> cell index
 	QHash<QString, QPair<QString, QString>> cellTex;   // key -> (tex0, tex1)
+	QSet<QString> directTex;            // kept-direct references, to copy loose
 	int overflow = 0, tilingShapes = 0;
 
 	auto shapeInfo = [&]( NifModel & nif, const QModelIndex & iShape,
@@ -2014,6 +2017,9 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 				continue;
 			if ( !inRange ) {
 				tilingShapes++;
+				directTex.insert( tex0 );
+				if ( !tex1.isEmpty() )
+					directTex.insert( tex1 );
 				continue;
 			}
 			const QString key = tex0.toLower();
@@ -2021,6 +2027,9 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 				continue;
 			if ( cellOf.size() >= COLS * ROWS ) {
 				overflow++;
+				directTex.insert( tex0 );
+				if ( !tex1.isEmpty() )
+					directTex.insert( tex1 );
 				continue;
 			}
 			cellTex.insert( key, qMakePair( tex0, tex1 ) );
@@ -2125,9 +2134,38 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 		return fail( QStringLiteral( "could not write the atlas sheet" ) );
 	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( "_n.DDS" ), AW, AH, nrmSheet ) )
 		return fail( QStringLiteral( "could not write the atlas normal sheet" ) );
+
+	/* Textures still referenced directly (tiling shapes, cell overflow) are
+	 * CK-only files a stock game does not have — copy them loose into the
+	 * output Data tree so the result is self-contained. */
+	int copied = 0, uncopyable = 0;
+	if ( !looseRoot.isEmpty() ) {
+		for ( const QString & t : directTex ) {
+			QString rel = t;
+			rel.replace( QChar( '\\' ), QChar( '/' ) );
+			if ( !rel.startsWith( QStringLiteral( "textures/" ), Qt::CaseInsensitive ) )
+				rel.prepend( QStringLiteral( "textures/" ) );
+			const QString src = dataRoot + "/" + rel;
+			const QString dst = looseRoot + "/" + rel;
+			if ( QFile::exists( dst ) ) {
+				copied++;
+				continue;
+			}
+			if ( !QFile::exists( src ) ) {
+				uncopyable++;
+				continue;
+			}
+			QDir().mkpath( QFileInfo( dst ).absolutePath() );
+			if ( QFile::copy( src, dst ) )
+				copied++;
+			else
+				uncopyable++;
+		}
+	}
 	fprintf( stderr, "atlas: %d textures in cells, %d shapes moved, "
-		"%d tiling shapes kept direct, %d textures past capacity\n",
-		cellOf.size(), movedShapes, tilingShapes, overflow );
+		"%d tiling shapes kept direct (%d source textures copied loose, "
+		"%d unavailable), %d textures past capacity\n",
+		cellOf.size(), movedShapes, tilingShapes, copied, uncopyable, overflow );
 	if ( error )
 		error->clear();
 	return true;

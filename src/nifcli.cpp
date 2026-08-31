@@ -2452,6 +2452,16 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			const QString ws = world.worldspaceEdid();
 			const QString atlasDir = texDir.isEmpty() ? outDir : texDir;
 			QDir().mkpath( atlasDir );
+			/* Loose copies of textures the atlas cannot absorb go into the
+			 * output DATA tree: derived when outDir follows the vanilla
+			 * meshes/terrain/<ws> layout, else beside the chunks. */
+			QString looseRoot = outDir;
+			{
+				const QString norm = QDir( outDir ).absolutePath();
+				const QString suffix = QString( "/meshes/terrain/%1" ).arg( ws );
+				if ( norm.endsWith( suffix, Qt::CaseInsensitive ) )
+					looseRoot = norm.left( norm.size() - suffix.size() );
+			}
 			QString aerr;
 			if ( !lodgenBuildAtlas( writtenBto,
 				dataRoot.isEmpty()
@@ -2460,11 +2470,11 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				atlasDir + "/" + ws + QStringLiteral( ".Objects" ),
 				// vanilla convention: data\Textures\Terrain\<ws>\Objects\<ws>.Objects.DDS
 				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.Objects" ).arg( ws ),
-				&aerr ) ) {
+				looseRoot, &aerr ) ) {
 				err() << "atlas: " << aerr << Qt::endl;
 				failed++;
 			} else {
-				out() << "atlas written: " << ws << "Objects.DDS (+_n)" << Qt::endl;
+				out() << "atlas written: " << ws << ".Objects.DDS (+_n)" << Qt::endl;
 			}
 		}
 		out() << done << " chunk(s) written to " << outDir
@@ -3697,11 +3707,15 @@ int usage()
 		  << "                                          inspect a worldspace / one cell:\n"
 		  << "                                          LAND heights, refs, LOD models\n"
 		  << "  lodgen <file.esm> --worldspace HEX --terrain-region X0 Y0 X1 Y1\n"
-		  << "         [--dim 4] --out-dir DIR [--atlas] sweep: every chunk touching the\n"
-		  << "                                          cell region, vanilla file naming;\n"
-		  << "                                          --atlas packs the swept BTOs'\n"
-		  << "                                          non-tiling textures onto one\n"
-		  << "                                          4096x2048 <ws>Objects sheet (+_n)\n"
+		  << "         [--dim 4] --out-dir DIR [--no-atlas]\n"
+		  << "                                          sweep: every chunk touching the\n"
+		  << "                                          cell region, vanilla file naming.\n"
+		  << "                                          The swept BTOs' non-tiling textures\n"
+		  << "                                          are packed onto one 4096x2048\n"
+		  << "                                          <ws>.Objects sheet (+_n) by DEFAULT\n"
+		  << "                                          - the source LOD textures are\n"
+		  << "                                          CK-only, a stock game ships none of\n"
+		  << "                                          them. --no-atlas keeps direct refs\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
 		  << "         [--data-root DIR] [--no-identity] -o OUT.bto\n"
 		  << "                                          rung 2: stitch one object chunk\n"
@@ -3806,7 +3820,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgGeomorph = false;
 	bool lgTerrainIdentity = false;
 	QString lgImpostors;
-	bool lgAtlas = false;
+	bool lgAtlas = true;    // required for stock installs: source LOD textures are CK-only
 	bool lgListCandidates = false;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
@@ -3871,6 +3885,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--terrain-identity" ) ) lgTerrainIdentity = true;
 		else if ( t == QLatin1String( "--impostors" ) ) lgImpostors = next();
 		else if ( t == QLatin1String( "--atlas" ) ) lgAtlas = true;
+		else if ( t == QLatin1String( "--no-atlas" ) ) lgAtlas = false;
 		else if ( t == QLatin1String( "--list-impostor-candidates" ) ) lgListCandidates = true;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
