@@ -21293,6 +21293,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
 					}
 
+					/* Close-up framing: WW_RENDER_CENTER="x,y,z" points the
+					 * camera at a model-space position (overriding the
+					 * recenter), WW_RENDER_DIST=<units> sets the camera
+					 * distance. Together they photograph a detail (a single
+					 * tree, a wall) instead of the whole scene. */
+					{
+						const QString ctr = qEnvironmentVariable( "WW_RENDER_CENTER" );
+						if ( ctr.contains( QChar( ',' ) ) ) {
+							const QStringList parts = ctr.split( QChar( ',' ) );
+							if ( parts.size() == 3 )
+								skope->ogl->setPosition( -parts.at( 0 ).toFloat(),
+									-parts.at( 1 ).toFloat(), -parts.at( 2 ).toFloat() );
+						}
+						const QString dist = qEnvironmentVariable( "WW_RENDER_DIST" );
+						if ( !dist.isEmpty() )
+							skope->ogl->setDistance( dist.toFloat() );
+					}
+
 					// Force the two Viewport Effects toggles ON. They default to
 					// true in Scene but are overwritten from the persisted menu
 					// state at startup, so with them unchecked the refraction and
