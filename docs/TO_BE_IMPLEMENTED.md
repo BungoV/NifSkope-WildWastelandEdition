@@ -60,6 +60,19 @@ ADDITIONS over base-game parity (list open, bungo to extend):
     class (distant wet-rock-vs-grass response for Physical Weathers) and
     heightmap flow-accumulation wetness pooling.
 
+    VERTEX-SPACE CHANNEL INVENTORY (2026-08-31): colours are not the
+    ceiling. Engine-legal per-vertex fields the desc can declare:
+    RGBA colours (32 b) + a SECOND UV SET via VF_UV_2 (2 half-floats =
+    32 b at ~11-bit precision — better than colour bytes for continuous
+    data; FO4's own shaders never sample it) + EYE DATA via VF_EYEDATA
+    (one full float = 32 b; only the eye shader type reads it) ≈ **96
+    bits per placement**. Last-resort: steal the 3 stored bitangent
+    components and have CS reconstruct the basis (breaks vanilla and our
+    own renderer's basis assumptions — CS-exclusive variant only). NOT
+    usable: skinning fields (SKINNED without a skin instance is undefined
+    in-engine). Each extra field widens the stride → joins the same
+    stock-engine tolerance checklist.
+
     Generator rules: NEVER weld vertices across source objects (any ID
     encoding breaks under cross-object interpolation); every bake is a
     toggle (generator time). OWED: stock-engine tolerance for the fatter
