@@ -19,6 +19,7 @@ BSD License - see nifskope.h
 #include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
@@ -50,27 +51,82 @@ public:
 		layout->addLayout( grid );
 		int row = 0;
 
-		grid->addWidget( new QLabel( tr( "ESM" ), this ), row, 0 );
-		esmEdit = new QLineEdit(
-			QStringLiteral( "X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm" ), this );
-		grid->addWidget( esmEdit, row, 1, 1, 2 );
-		auto browseEsm = new QPushButton( QStringLiteral( "..." ), this );
-		grid->addWidget( browseEsm, row++, 3 );
-		connect( browseEsm, &QPushButton::clicked, this, [this]() {
-			const QString f = QFileDialog::getOpenFileName( this, tr( "Master file" ),
-				esmEdit->text(), QStringLiteral( "ESM (*.esm)" ) );
-			if ( !f.isEmpty() )
-				esmEdit->setText( f );
+		grid->addWidget( new QLabel( tr( "Plugins (load order, later wins)" ), this ), row, 0 );
+		pluginList = new QListWidget( this );
+		pluginList->setSelectionMode( QAbstractItemView::SingleSelection );
+		pluginList->setMaximumHeight( 96 );
+		pluginList->addItem( QStringLiteral(
+			"X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm" ) );
+		pluginList->setToolTip( tr(
+			"Ordered master/plugin list; a later file's version of a record wins.\n"
+			"KNOWN LIMIT: plugins whose form IDs index their own master list\n"
+			"(most mod ESPs) are not remapped yet - Bethesda's own masters and\n"
+			"correctly prefixed files merge correctly." ) );
+		grid->addWidget( pluginList, row, 1, 1, 2 );
+		{
+			auto col = new QVBoxLayout();
+			auto addBtn = new QPushButton( QStringLiteral( "+" ), this );
+			auto delBtn = new QPushButton( QStringLiteral( "-" ), this );
+			col->addWidget( addBtn );
+			col->addWidget( delBtn );
+			col->addStretch();
+			grid->addLayout( col, row, 3 );
+			connect( addBtn, &QPushButton::clicked, this, [this]() {
+				const QStringList files = QFileDialog::getOpenFileNames( this,
+					tr( "Add plugins" ), QString(),
+					QStringLiteral( "Plugins (*.esm *.esp *.esl)" ) );
+				for ( const QString & f : files )
+					pluginList->addItem( f );
+				refreshWorldspaces();
+			} );
+			connect( delBtn, &QPushButton::clicked, this, [this]() {
+				delete pluginList->currentItem();
+				refreshWorldspaces();
+			} );
+		}
+		row++;
+
+		grid->addWidget( new QLabel( tr( "Data root (mesh/texture sources)" ), this ), row, 0 );
+		dataRootEdit = new QLineEdit(
+			QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ), this );
+		grid->addWidget( dataRootEdit, row, 1, 1, 2 );
+		auto browseData = new QPushButton( QStringLiteral( "..." ), this );
+		grid->addWidget( browseData, row++, 3 );
+		connect( browseData, &QPushButton::clicked, this, [this]() {
+			const QString d = QFileDialog::getExistingDirectory( this,
+				tr( "Data folder holding the LOD mesh sources" ), dataRootEdit->text() );
+			if ( !d.isEmpty() )
+				dataRootEdit->setText( d );
 		} );
 
-		grid->addWidget( new QLabel( tr( "Worldspace (hex)" ), this ), row, 0 );
-		wsEdit = new QLineEdit( QStringLiteral( "3C" ), this );
-		grid->addWidget( wsEdit, row, 1 );
+		grid->addWidget( new QLabel( tr( "Impostor cards (optional)" ), this ), row, 0 );
+		impostorEdit = new QLineEdit( this );
+		impostorEdit->setPlaceholderText( tr( "directory from bake_impostor_cards.sh" ) );
+		grid->addWidget( impostorEdit, row, 1, 1, 2 );
+		auto browseImp = new QPushButton( QStringLiteral( "..." ), this );
+		grid->addWidget( browseImp, row++, 3 );
+		connect( browseImp, &QPushButton::clicked, this, [this]() {
+			const QString d = QFileDialog::getExistingDirectory( this,
+				tr( "Impostor card directory" ), impostorEdit->text() );
+			if ( !d.isEmpty() )
+				impostorEdit->setText( d );
+		} );
+
+		grid->addWidget( new QLabel( tr( "Worldspace" ), this ), row, 0 );
+		wsBox = new QComboBox( this );
+		grid->addWidget( wsBox, row, 1 );
 		grid->addWidget( new QLabel( tr( "Chunk dim" ), this ), row, 2 );
 		dimBox = new QComboBox( this );
+		dimBox->addItem( tr( "all rings (4+8+16+32)" ) );
 		for ( int d : { 4, 8, 16, 32 } )
 			dimBox->addItem( QString::number( d ) );
 		grid->addWidget( dimBox, row++, 3 );
+
+		grid->addWidget( new QLabel( tr( "Terrain tris/cell (0 = full grid)" ), this ), row, 0 );
+		trisSpin = new QSpinBox( this );
+		trisSpin->setRange( 0, 2048 );
+		trisSpin->setValue( 130 );
+		grid->addWidget( trisSpin, row++, 1 );
 
 		auto makeSpin = [this, grid]( int r, int c, const QString & label, int value ) {
 			grid->addWidget( new QLabel( label, this ), r, c );
@@ -105,8 +161,16 @@ public:
 		objectsCheck->setChecked( true );
 		texCheck = new QCheckBox( tr( "Bake terrain textures" ), this );
 		texCheck->setChecked( true );
-		identityCheck = new QCheckBox( tr( "FO4CS identity channels + manifests" ), this );
+		identityCheck = new QCheckBox( tr( "Object identity + manifests (FO4CS)" ), this );
 		identityCheck->setChecked( true );
+		terrainIdCheck = new QCheckBox( tr( "Terrain identity channels (FO4CS)" ), this );
+		terrainIdCheck->setChecked( true );
+		aoCheck = new QCheckBox( tr( "AO bake" ), this );
+		aoCheck->setChecked( true );
+		waterCheck = new QCheckBox( tr( "LOD water" ), this );
+		waterCheck->setChecked( true );
+		geomorphCheck = new QCheckBox( tr( "Geomorph weights (CS-only files)" ), this );
+		geomorphCheck->setChecked( false );
 		previewCheck = new QCheckBox( tr( "Live preview in the workspace" ), this );
 		previewCheck->setChecked( true );
 		auto toggles = new QGridLayout();
@@ -114,8 +178,12 @@ public:
 		toggles->addWidget( terrainCheck, 0, 0 );
 		toggles->addWidget( objectsCheck, 0, 1 );
 		toggles->addWidget( texCheck, 0, 2 );
-		toggles->addWidget( identityCheck, 1, 0, 1, 2 );
-		toggles->addWidget( previewCheck, 1, 2 );
+		toggles->addWidget( waterCheck, 0, 3 );
+		toggles->addWidget( identityCheck, 1, 0 );
+		toggles->addWidget( terrainIdCheck, 1, 1 );
+		toggles->addWidget( aoCheck, 1, 2 );
+		toggles->addWidget( geomorphCheck, 1, 3 );
+		toggles->addWidget( previewCheck, 2, 0, 1, 2 );
 
 		progress = new QProgressBar( this );
 		progress->setTextVisible( true );
@@ -133,9 +201,30 @@ public:
 			else
 				close();
 		} );
+		refreshWorldspaces();
 	}
 
 private:
+	QString pluginString() const
+	{
+		QStringList files;
+		for ( int i = 0; i < pluginList->count(); i++ )
+			files.append( pluginList->item( i )->text() );
+		return files.join( QChar( ',' ) );
+	}
+
+	void refreshWorldspaces()
+	{
+		wsBox->clear();
+		QString error;
+		const auto worlds = EsmWorld::listWorldspaces( pluginString(), &error );
+		for ( const auto & w : worlds )
+			wsBox->addItem( QString( "%1  (%2)" ).arg( w.second )
+				.arg( w.first, 8, 16, QChar( '0' ) ), w.first );
+		if ( wsBox->count() == 0 )
+			wsBox->addItem( tr( "no worldspaces found" ), 0U );
+	}
+
 	void start()
 	{
 		if ( running )
@@ -146,20 +235,25 @@ private:
 		}
 		QString error;
 		world = std::make_unique<EsmWorld>();
-		if ( !world->load( esmEdit->text(),
-			wsEdit->text().toUInt( nullptr, 16 ), &error ) ) {
+		if ( !world->load( pluginString(),
+			wsBox->currentData().toUInt(), &error ) ) {
 			progress->setFormat( tr( "ESM: %1" ).arg( error ) );
 			world.reset();
 			return;
 		}
-		dim = dimBox->currentText().toInt();
+		QVector<int> dims;
+		if ( dimBox->currentIndex() == 0 )
+			dims = { 4, 8, 16, 32 };
+		else
+			dims = { dimBox->currentText().toInt() };
 		auto floorTo = []( int v, int m ) {
 			return v >= 0 ? v - v % m : -( ( -v + m - 1 ) / m ) * m;
 		};
 		queue.clear();
-		for ( int cy = floorTo( y0Spin->value(), dim ); cy <= y1Spin->value(); cy += dim )
-			for ( int cx = floorTo( x0Spin->value(), dim ); cx <= x1Spin->value(); cx += dim )
-				queue.append( qMakePair( cx, cy ) );
+		for ( int d : dims )
+			for ( int cy = floorTo( y0Spin->value(), d ); cy <= y1Spin->value(); cy += d )
+				for ( int cx = floorTo( x0Spin->value(), d ); cx <= x1Spin->value(); cx += d )
+					queue.append( ChunkJob{ d, cx, cy } );
 		done = 0;
 		cancelled = false;
 		running = true;
@@ -188,8 +282,10 @@ private:
 			world.reset();
 			return;
 		}
-		const int cx = queue[done].first, cy = queue[done].second;
-		progress->setFormat( tr( "chunk (%1,%2) — %v of %m" ).arg( cx ).arg( cy ) );
+		const int dim = queue[done].dim;
+		const int cx = queue[done].cx, cy = queue[done].cy;
+		progress->setFormat( tr( "dim %1 chunk (%2,%3) — %v of %m" )
+			.arg( dim ).arg( cx ).arg( cy ) );
 
 		const QString stem = QString( "%1.%2.%3.%4" )
 			.arg( world->worldspaceEdid() ).arg( dim ).arg( cx ).arg( cy );
@@ -197,15 +293,17 @@ private:
 			NifModel nif;
 			LodgenTerrainOptions opts;
 			opts.dim = dim;
-			opts.terrainIdentity = identityCheck->isChecked();
+			opts.water = waterCheck->isChecked();
+			opts.targetTrisPerCell = trisSpin->value();
+			opts.terrainIdentity = terrainIdCheck->isChecked();
+			opts.geomorph = geomorphCheck->isChecked();
 			QString cerr;
 			if ( lodgenBuildTerrainChunk( &nif, *world, cx, cy, opts, &cerr ) ) {
 				nif.saveToFile( meshDir + "/" + stem + QStringLiteral( ".BTR" ) );
 				preview( nif, cx, cy, stem + QStringLiteral( "_btr" ) );
 				if ( texCheck->isChecked() )
 					lodgenBakeTerrainTextures( *world, cx, cy, dim,
-						QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ),
-						texDir, &cerr );
+						dataRootEdit->text(), texDir, &cerr );
 			}
 		}
 		if ( objectsCheck->isChecked() ) {
@@ -213,6 +311,9 @@ private:
 			LodgenObjectOptions opts;
 			opts.dim = dim;
 			opts.identity = identityCheck->isChecked();
+			opts.bakeAO = aoCheck->isChecked();
+			opts.dataRoot = dataRootEdit->text();
+			opts.impostorDir = impostorEdit->text();
 			QString manifest, cerr;
 			if ( lodgenBuildObjectChunk( &nif, *world, cx, cy, opts, &manifest, &cerr ) ) {
 				const QString path = meshDir + "/" + stem + QStringLiteral( ".BTO" );
@@ -247,17 +348,20 @@ private:
 		nif.set<Vector3>( root, "Translation", Vector3() );
 	}
 
+	struct ChunkJob { int dim, cx, cy; };
+
 	NifSkope * skope;
-	QLineEdit * esmEdit, * wsEdit, * outEdit;
-	QComboBox * dimBox;
-	QSpinBox * x0Spin, * y0Spin, * x1Spin, * y1Spin;
-	QCheckBox * terrainCheck, * objectsCheck, * texCheck, * identityCheck, * previewCheck;
+	QListWidget * pluginList;
+	QLineEdit * outEdit, * dataRootEdit, * impostorEdit;
+	QComboBox * wsBox, * dimBox;
+	QSpinBox * x0Spin, * y0Spin, * x1Spin, * y1Spin, * trisSpin;
+	QCheckBox * terrainCheck, * objectsCheck, * texCheck, * identityCheck,
+		* terrainIdCheck, * aoCheck, * waterCheck, * geomorphCheck, * previewCheck;
 	QProgressBar * progress;
 	QPushButton * startButton, * cancelButton;
 	std::unique_ptr<EsmWorld> world;
-	QVector<QPair<int, int>> queue;
+	QVector<ChunkJob> queue;
 	QString meshDir, texDir;
-	int dim = 4;
 	int done = 0;
 	bool running = false;
 	bool cancelled = false;

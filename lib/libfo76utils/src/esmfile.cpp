@@ -143,7 +143,9 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
         if (fileNames[i] == ',' && fileNames[i - 4] == '.' &&
             (fileNames[i - 3] == 'E' || fileNames[i - 3] == 'e') &&
             (fileNames[i - 2] == 'S' || fileNames[i - 2] == 's') &&
-            (fileNames[i - 1] == 'M' || fileNames[i - 1] == 'm'))
+            (fileNames[i - 1] == 'M' || fileNames[i - 1] == 'm' ||
+             fileNames[i - 1] == 'P' || fileNames[i - 1] == 'p' ||
+             fileNames[i - 1] == 'L' || fileNames[i - 1] == 'l'))
         {
           tmpFileNames.push_back(fileName);
           fileName.clear();

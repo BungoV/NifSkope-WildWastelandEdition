@@ -2,6 +2,27 @@
 
 ## 2026-08-31 — LODGEN: NifSkope generates Fallout 4's world LOD
 
+### World LOD Manager: load order, worldspace picker, full option set
+
+- The manager's single ESM field is now an ordered plugin list (+/- buttons,
+  `.esm`/`.esp`/`.esl` file picker); later files win, matching the merge the
+  ESM layer already did. The vendored loader's comma splitter only broke on
+  `.esm,` — extended to `.esp,`/`.esl,` so mod plugins can join the list on
+  both the GUI and the CLI comma form. KNOWN LIMIT (tooltip says so too):
+  form IDs are taken as stored, so plugins whose prefixes index their own
+  master list are not remapped into load-order space yet.
+- Worldspace is a real combo (`EDID (formid)`) populated from the selected
+  plugins via `EsmWorld::listWorldspaces`, refreshed whenever the list
+  changes — no more raw hex field.
+- Settings audit fallout: the manager never set the objects' data root, so
+  GUI object generation resolved `_LOD.nif` paths against an empty prefix
+  and silently produced nothing. Added Data-root + impostor-card rows with
+  browse buttons, a tris/cell spin, an "all rings (4+8+16+32)" dim mode
+  (per-ring chunk queue), and separate toggles for terrain identity, AO,
+  LOD water and geomorph weights — every `Lodgen*Options` knob is now
+  reachable from the dialog.
+
+
 One night, chartered to first light and beyond (commits 149a120..adbecad;
 plan docs/LODGEN_PLAN.md, design contract at the top of
 docs/TO_BE_IMPLEMENTED.md, layouts docs/LODGEN_ESM_LAYOUTS.md, format
