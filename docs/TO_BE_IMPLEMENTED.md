@@ -73,6 +73,33 @@ ADDITIONS over base-game parity (list open, bungo to extend):
     in-engine). Each extra field widens the stride → joins the same
     stock-engine tolerance checklist.
 
+    TREE-LOD REPETITION BREAKING (bungo 2026-08-31: "you can see they're
+    copies of each other, especially cards"). Identity makes every known
+    fix free. Shader-side via hash(index): per-tree hue/value jitter (FO76
+    AUTHORED this — treemaplepw01or/rd/gr/yw colour variants — a hash does
+    it procedurally), sway phase+amplitude jitter, lean/scale wobble about
+    the MANIFEST PIVOT (geometry variation with no geometry data), alpha-
+    threshold jitter for canopy density. Generator-side at stitch: mirror
+    half the cards (flip U by hash — the oldest silhouette breaker), rotate
+    card sets per tree. Rung-3 tier: tonal variants as array layers,
+    assigned per tree via manifest. Repetition is an IDENTITY problem —
+    the renderer cannot vary what it cannot distinguish.
+
+    FO4 TREE WIND PRECEDENT (measured on TreeMapleForest1.nif): vanilla
+    full-detail trees already encode per-vertex sway in COLOUR ALPHA
+    (trunk 0xFF rigid, leaf cards individually 0x00..0xFF — 255=rigid
+    convention, per-card flutter variety), enabled by Shader Flags 2 bit
+    29 Tree_Anim via the .bgsm, under a BSLeafAnimNode root; designer
+    knobs in ESM: TREE CNAM Trunk/Branch Flexibility + Leaf Amplitude/
+    Frequency (STAT DNAM carries the Leaf pair too). The LOD bake COPIES
+    the authored alpha instead of synthesizing; form knobs -> manifest.
+    Also MEASURED: VF_UV_2 unused by 0 of 119,701 corpus shapes — the
+    second UV set is virgin; channel packing = R+G 16-bit index (constant
+    per object, MSAA centroid-sample), B baked AO, A class param;
+    extended profile UV2.x sky visibility, UV2.y second class param,
+    EyeData float reserved (candidate: geomorph weight for continuous
+    LOD transitions).
+
     Generator rules: NEVER weld vertices across source objects (any ID
     encoding breaks under cross-object interpolation); every bake is a
     toggle (generator time). OWED: stock-engine tolerance for the fatter
